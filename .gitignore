@@ -111,6 +111,10 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
+!.env.example
+!.env.template
+!.env.sample
 .venv
 env/
 venv/
@@ -155,7 +159,6 @@ main/manager-web/node_modules
 .config.yaml
 .secrets.yaml
 .private_config.yaml
-.env.development
 
 # model files
 main/xiaozhi-server/models/SenseVoiceSmall/model.pt

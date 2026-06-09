@@ -1,0 +1,20 @@
+# 规范文档入口
+
+本目录保存本项目的强制规则。这里的文档不是建议，也不是经验总结；开发者和 AI 编程工具在修改项目代码、配置、部署流程或文档结构前，必须按任务读取并遵守。
+
+## 文档列表
+
+- [development-specification.md](./development-specification.md) - 项目开发总规范。规定仓库职责、远程命名、分支模型、提交流程、数据库版本管理、环境配置隔离、阿里云部署、生产发布、官方上游同步和禁止事项。该文档面向人和 AI，是项目二次开发的最高规则文档。
+- [ai-coding-agent-instructions.md](./ai-coding-agent-instructions.md) - AI 编程工具工作指令。规定 Codex、Cursor、Copilot、Claude Code 等工具在本项目中开工前必须读取哪些文件、可以自动执行哪些操作、哪些操作必须等待用户授权，以及不同任务类型对应的文档读取范围。
+
+## 使用规则
+
+所有任务必须先读取：
+
+```text
+README.md
+docs/standards/development-specification.md
+docs/standards/ai-coding-agent-instructions.md
+```
+
+如果任务涉及专项内容，再按 `docs/README.md` 的分类读取对应文档。禁止为了一个小修改一次性读取全部文档，也禁止未读取强制规范就修改代码。

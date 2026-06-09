@@ -1,5 +1,5 @@
 # 部署架构图
-![请参考-全模块安装架构图](../docs/images/deploy2.png)
+![请参考-全模块安装架构图](../images/deploy2.png)
 # 方式一：Docker运行全模块
 `0.8.2`版本开始，本项目发行的docker镜像只支持`x86架构`，如果需要在`arm64架构`的CPU上部署，可按照[这个教程](docker-build.md)在本机编译`arm64的镜像`。
 
@@ -66,7 +66,7 @@ xiaozhi-server
 
 ##### 1.2.3.1 下载 docker-compose_all.yaml
 
-用浏览器打开[这个链接](../main/xiaozhi-server/docker-compose_all.yml)。
+用浏览器打开[这个链接](../../main/xiaozhi-server/docker-compose_all.yml)。
 
 在页面的右侧找到名称为`RAW`按钮，在`RAW`按钮的旁边，找到下载的图标，点击下载按钮，下载`docker-compose_all.yml`文件。 把文件下载到你的
 `xiaozhi-server`中。
@@ -77,7 +77,7 @@ xiaozhi-server
 
 ##### 1.2.3.2 下载 config_from_api.yaml
 
-用浏览器打开[这个链接](../main/xiaozhi-server/config_from_api.yaml)。
+用浏览器打开[这个链接](../../main/xiaozhi-server/config_from_api.yaml)。
 
 在页面的右侧找到名称为`RAW`按钮，在`RAW`按钮的旁边，找到下载的图标，点击下载按钮，下载`config_from_api.yaml`文件。 把文件下载到你的
 `xiaozhi-server`下面的`data`文件夹中，然后把`config_from_api.yaml`文件重命名为`.config.yaml`。
@@ -222,9 +222,9 @@ ws://你宿主机的ip:8000/xiaozhi/v1/
 
 接下来，你就可以开始操作你的esp32设备了，你可以`自行编译esp32固件`也可以配置使用`虾哥编译好的1.6.1以上版本的固件`。两个任选一个
 
-1、 [编译自己的esp32固件](firmware-build.md)了。
+1、 [编译自己的esp32固件](../device/firmware-build.md)了。
 
-2、 [基于虾哥编译好的固件配置自定义服务器](firmware-setting.md)了。
+2、 [基于虾哥编译好的固件配置自定义服务器](../device/firmware-setting.md)了。
 
 
 # 方式二：本地源码运行全模块
@@ -337,11 +337,11 @@ npm run serve
 重要提示！windows 用户，可以通过安装`Anaconda`来管理环境。安装好`Anaconda`后，在`开始`那里搜索`anaconda`相关的关键词，
 找到`Anaconda Prpmpt`，使用管理员身份运行它。如下图。
 
-![conda_prompt](./images/conda_env_1.png)
+![conda_prompt](../images/conda_env_1.png)
 
 运行之后，如果你能看到命令行窗口前面有一个(base)字样，说明你成功进入了`conda`环境。那么你就可以执行以下命令了。
 
-![conda_env](./images/conda_env_2.png)
+![conda_env](../images/conda_env_2.png)
 
 ```
 conda remove -n xiaozhi-esp32-server --all -y
@@ -456,37 +456,37 @@ ws://你电脑局域网的ip:8000/xiaozhi/v1/
 
 接下来，你就可以开始操作你的esp32设备了，你可以`自行编译esp32固件`也可以配置使用`虾哥编译好的1.6.1以上版本的固件`。两个任选一个
 
-1、 [编译自己的esp32固件](firmware-build.md)了。
+1、 [编译自己的esp32固件](../device/firmware-build.md)了。
 
-2、 [基于虾哥编译好的固件配置自定义服务器](firmware-setting.md)了。
+2、 [基于虾哥编译好的固件配置自定义服务器](../device/firmware-setting.md)了。
 
 # 常见问题
 以下是一些常见问题，供参考：
 
-1、[为什么我说的话，小智识别出来很多韩文、日文、英文](./FAQ.md)<br/>
-2、[为什么会出现“TTS 任务出错 文件不存在”？](./FAQ.md)<br/>
-3、[TTS 经常失败，经常超时](./FAQ.md)<br/>
-4、[使用Wifi能连接自建服务器，但是4G模式却接不上](./FAQ.md)<br/>
-5、[如何提高小智对话响应速度？](./FAQ.md)<br/>
-6、[我说话很慢，停顿时小智老是抢话](./FAQ.md)<br/>
+1、[为什么我说的话，小智识别出来很多韩文、日文、英文](../reference/FAQ.md)<br/>
+2、[为什么会出现“TTS 任务出错 文件不存在”？](../reference/FAQ.md)<br/>
+3、[TTS 经常失败，经常超时](../reference/FAQ.md)<br/>
+4、[使用Wifi能连接自建服务器，但是4G模式却接不上](../reference/FAQ.md)<br/>
+5、[如何提高小智对话响应速度？](../reference/FAQ.md)<br/>
+6、[我说话很慢，停顿时小智老是抢话](../reference/FAQ.md)<br/>
 ## 部署相关教程
 1、[如何自动拉取本项目最新代码自动编译和启动](./dev-ops-integration.md)<br/>
-2、[如何部署MQTT网关开启MQTT+UDP协议](./mqtt-gateway-integration.md)<br/>
+2、[如何部署MQTT网关开启MQTT+UDP协议](../device/mqtt-gateway-integration.md)<br/>
 3、[如何与Nginx集成](https://github.com/xinnan-tech/xiaozhi-esp32-server/issues/791)<br/>
 ## 拓展相关教程
-1、[如何开启手机号码注册智控台](./ali-sms-integration.md)<br/>
-2、[如何集成HomeAssistant实现智能家居控制](./homeassistant-integration.md)<br/>
-3、[如何开启视觉模型实现拍照识物](./mcp-vision-integration.md)<br/>
-4、[如何部署MCP接入点](./mcp-endpoint-enable.md)<br/>
-5、[如何接入MCP接入点](./mcp-endpoint-integration.md)<br/>
-6、[如何开启声纹识别](./voiceprint-integration.md)<br/>
-7、[新闻插件源配置指南](./newsnow_plugin_config.md)<br/>
-8、[天气插件使用指南](./weather-integration.md)<br/>
+1、[如何开启手机号码注册智控台](../integrations/ali-sms-integration.md)<br/>
+2、[如何集成HomeAssistant实现智能家居控制](../integrations/homeassistant-integration.md)<br/>
+3、[如何开启视觉模型实现拍照识物](../mcp/mcp-vision-integration.md)<br/>
+4、[如何部署MCP接入点](../mcp/mcp-endpoint-enable.md)<br/>
+5、[如何接入MCP接入点](../mcp/mcp-endpoint-integration.md)<br/>
+6、[如何开启声纹识别](../models/voiceprint-integration.md)<br/>
+7、[新闻插件源配置指南](../integrations/newsnow_plugin_config.md)<br/>
+8、[天气插件使用指南](../integrations/weather-integration.md)<br/>
 ## 语音克隆、本地语音部署相关教程
-1、[如何在智控台克隆音色](./huoshan-streamTTS-voice-cloning.md)<br/>
-2、[如何部署集成index-tts本地语音](./index-stream-integration.md)<br/>
-3、[如何部署集成fish-speech本地语音](./fish-speech-integration.md)<br/>
+1、[如何在智控台克隆音色](../models/huoshan-streamTTS-voice-cloning.md)<br/>
+2、[如何部署集成index-tts本地语音](../models/index-stream-integration.md)<br/>
+3、[如何部署集成fish-speech本地语音](../models/fish-speech-integration.md)<br/>
 4、[如何部署集成PaddleSpeech本地语音](./paddlespeech-deploy.md)<br/>
 ## 性能测试教程
-1、[各组件速度测试指南](./performance_tester.md)<br/>
+1、[各组件速度测试指南](../models/performance_tester.md)<br/>
 2、[定期公开测试结果](https://github.com/xinnan-tech/xiaozhi-performance-research)<br/>

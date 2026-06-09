@@ -51,10 +51,10 @@ https://autodl.com/console/instance/list
 ```
 
 如下图点击你刚才机器的`自定义服务`按钮，开启端口转发服务
-![自定义服务](images/fishspeech/autodl-01.png)
+![自定义服务](../images/fishspeech/autodl-01.png)
 
 端口转发服务设置完成后，你本地电脑打开网址`http://localhost:6006/`，就可以访问fish-speech的接口了
-![服务预览](images/fishspeech/autodl-02.png)
+![服务预览](../images/fishspeech/autodl-02.png)
 
 
 如果你是单模块部署，核心配置如下

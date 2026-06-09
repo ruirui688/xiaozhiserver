@@ -35,14 +35,18 @@ docs/                项目文档
 8002  管理后台接口与页面
 ```
 
-## 文档入口
+## 开发规范
 
-部署与开发流程：
+本项目的本地开发、Git 管理、数据库变更、配置管理、阿里云部署和官方上游同步，必须遵守：
 
-- [本地开发到阿里云部署开发文档](./docs/local-development-to-aliyun-workflow.md)
-- [官方上游同步与本地二次开发技术规格](./docs/upstream-sync-technical-spec.md)
-- [官方 Docker 部署说明](./docs/Deployment.md)
-- [官方全模块部署说明](./docs/Deployment_all.md)
+- [小智服务器开发规范](./docs/standards/development-specification.md)
+- [AI 编程工具工作指令](./docs/standards/ai-coding-agent-instructions.md)
+- [文档分类索引](./docs/README.md)
+
+补充部署文档：
+
+- [官方 Docker 部署说明](./docs/deployment/Deployment.md)
+- [官方全模块部署说明](./docs/deployment/Deployment_all.md)
 
 模块开发说明：
 
@@ -61,19 +65,20 @@ docs/                项目文档
 - 数据库密码、Redis 密码、模型 API Key、短信密钥等敏感信息不应提交。
 - MySQL 数据、Redis 数据、上传文件、模型文件属于运行时数据，不应提交。
 
-## 开发与部署建议
+## 开发与部署规则
 
-推荐流程：
+标准流程：
 
 ```text
 本地开发
   -> Git 提交
-  -> 推送到自己的远程仓库
+  -> 推送到私有仓库 origin
   -> 测试环境验证
-  -> 阿里云服务器部署
+  -> 创建 release tag
+  -> 阿里云服务器部署 tag
 ```
 
-如果需要跟进官方仓库更新，请先在独立集成分支中合并官方代码，完成冲突处理和测试后，再合并到本地 `main` 分支。
+如果需要跟进官方仓库更新，必须先在 `sync/upstream-YYYYMMDD` 分支中合并 `upstream/main`，完成冲突处理和测试后，再合并到本地 `main` 分支。
 
 ## License
 
