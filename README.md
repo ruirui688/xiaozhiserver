@@ -72,11 +72,13 @@ docs/                项目文档
 ```text
 本地开发
   -> Git 提交
-  -> 推送到私有仓库 origin
+  -> 推送到私有仓库
   -> 测试环境验证
   -> 创建 release tag
   -> 阿里云服务器部署 tag
 ```
+
+私有仓库的标准远端名应为 `origin`。当前仓库如果还处于 `gitea = 私有仓库`、`origin = 官方 GitHub` 的过渡状态，推送时必须使用 `gitea`，禁止推送到官方 `origin`。
 
 如果需要跟进官方仓库更新，必须先在 `sync/upstream-YYYYMMDD` 分支中合并 `upstream/main`，完成冲突处理和测试后，再合并到本地 `main` 分支。
 

@@ -14,21 +14,21 @@
 官方上游仓库    只用于拉取官方更新，不能作为本地开发推送目标
 ```
 
-远程仓库必须使用行业通用命名：
+远程仓库的目标状态必须使用行业通用命名：
 
 ```text
 origin    私有远程仓库，允许 push，阿里云服务器也从这里拉取代码
 upstream  官方原始仓库，只允许 fetch，不允许 push
 ```
 
-必须遵守：
+目标状态必须遵守：
 
 - 本地开发代码必须推送到 `origin`。
 - 官方仓库 `upstream` 只允许用于查看和同步官方更新。
 - 禁止把本地二次开发代码推送到官方仓库。
 - 阿里云服务器必须从私有远程仓库拉取代码。
 
-当前仓库如果仍是 `gitea = 私有仓库`、`origin = 官方仓库`，必须调整为标准命名：
+当前仓库如果仍是 `gitea = 私有仓库`、`origin = 官方仓库`，属于过渡状态。远端标准化必须由用户明确授权后执行：
 
 ```bash
 git remote rename origin upstream
@@ -42,6 +42,14 @@ git remote -v
 origin    http://192.168.0.151:3001/gaoruirui688/xiaozhi-esp32-server.git
 upstream  https://github.com/xinnan-tech/xiaozhi-esp32-server.git
 ```
+
+过渡状态下必须遵守：
+
+- 私有远端是 `gitea`，允许在用户授权后 push。
+- 官方远端是 `origin`，只允许 fetch，不允许 push。
+- AI 不得假设 `origin` 一定是私有仓库，必须以 `git remote -v` 的实际结果判断。
+- AI 不得自动重命名远端；远端标准化属于仓库配置变更，必须先获得用户明确授权。
+- 推送时必须推送当前任务分支，不得固定推送 `main`。
 
 ## 2. 分支规则
 
@@ -83,6 +91,14 @@ git add <changed-files>
 git commit -m "feat: describe change"
 git push origin feature/your-feature
 ```
+
+如果仓库仍处于 `gitea = 私有仓库`、`origin = 官方仓库` 的过渡状态，最后一步必须改为：
+
+```bash
+git push -u gitea feature/your-feature
+```
+
+禁止把 `feature/xxx`、`sync/upstream-YYYYMMDD` 或本地 `main` 推送到官方远端。
 
 提交信息必须使用以下前缀之一：
 
@@ -611,6 +627,8 @@ git push origin main
 git revert -m 1 <merge-commit-id>
 git push origin main
 ```
+
+如果仓库仍处于远端过渡状态，回滚推送目标必须使用真实私有远端，例如 `gitea`。禁止把回滚提交推送到官方远端。
 
 数据库回滚必须遵守：
 

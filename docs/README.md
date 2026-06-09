@@ -48,8 +48,8 @@ main/manager-api/src/main/resources/application-dev.yml
 
 这些文档是规则，不是建议。任何开发、部署、同步官方上游、整理文档的任务都必须遵守。
 
-- [standards/development-specification.md](./standards/development-specification.md) - 项目开发总规范。规定本地仓库、私有远程仓库、官方上游仓库的职责边界；规定 `origin` / `upstream` 命名、分支规则、提交流程、数据库变更、配置隔离、阿里云部署、生产发布和官方更新同步规则。AI 修改代码前必须读取。
-- [standards/ai-coding-agent-instructions.md](./standards/ai-coding-agent-instructions.md) - AI 编程工具执行规范。规定 AI 在新开发功能、修改功能、修复问题、同步官方更新、整理文档时必须读取哪些文件、可以自动执行哪些操作、哪些操作必须先获得用户授权。所有 AI 编程任务必须读取。
+- [standards/development-specification.md](./standards/development-specification.md) - 项目开发总规范。规定本地仓库、私有远程仓库、官方上游仓库的职责边界；规定标准远端命名、当前 `gitea` 过渡状态、分支规则、提交流程、数据库变更、配置隔离、阿里云部署、生产发布和官方更新同步规则。AI 修改代码前必须读取。
+- [standards/ai-coding-agent-instructions.md](./standards/ai-coding-agent-instructions.md) - AI 编程工具执行规范。规定 AI 在新开发功能、修改功能、修复问题、同步官方更新、整理文档时必须读取哪些文件、如何识别真实私有远端、如何推送当前分支、可以自动执行哪些操作、哪些操作必须先获得用户授权。所有 AI 编程任务必须读取。
 - [standards/README.md](./standards/README.md) - 规范目录入口。用于快速确认 `standards/` 下每份规则文档的职责和使用顺序，适合开发者或 AI 在进入规范目录时先阅读。
 
 ## 3. 部署与运维
@@ -147,6 +147,7 @@ AI 禁止：
 - 未读强制规范就修改代码。
 - 修改官方文档位置导致旧链接失效。
 - 把生产数据库真实连接信息、密码、Token、AccessKey 写入 Git。
+- 未识别当前分支和真实私有远端就执行 push。
 
 ## 11. 文档移动规则
 
