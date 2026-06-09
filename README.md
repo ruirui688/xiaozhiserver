@@ -164,6 +164,9 @@ Spearheaded by Professor Siyuan Liu's Team (South China University of Technology
 
 ![Banners](docs/images/banner2.png)
 
+如果你需要把本地开发代码通过 Git 稳定同步到阿里云服务器，请先阅读：
+[本地开发到阿里云部署开发文档](./docs/local-development-to-aliyun-workflow.md)
+
 本项目提供两种部署方式，请根据您的具体需求选择：
 
 #### 🚀 部署方式选择
