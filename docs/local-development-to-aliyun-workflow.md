@@ -1389,3 +1389,18 @@ docker compose -f docker-compose_all.yml up -d
 ```text
 CI/CD + Docker 镜像仓库 + 自动部署 + 自动备份 + 监控告警
 ```
+
+## 22. 相关规范
+
+如果本项目同时需要跟进官方原始仓库的新版本，请阅读：
+
+```text
+docs/upstream-sync-technical-spec.md
+```
+
+推荐顺序：
+
+```text
+先按上游同步规范合并官方更新
+再按本文档完成本地测试、服务器部署和生产发布
+```
