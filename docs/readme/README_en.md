@@ -10,7 +10,7 @@ Support for MQTT+UDP protocol, Websocket protocol, MCP access point, voiceprint 
 </p>
 
 <p align="center">
-<a href="../FAQ.md">FAQ</a>
+<a href="../reference/FAQ.md">FAQ</a>
 · <a href="https://github.com/xinnan-tech/xiaozhi-esp32-server/issues">Report Issues</a>
 · <a href="../../README.md#%E9%83%A8%E7%BD%B2%E6%96%87%E6%A1%A3">Deployment Docs</a>
 · <a href="https://github.com/xinnan-tech/xiaozhi-esp32-server/releases">Release Notes</a>
@@ -165,12 +165,12 @@ Want to see the usage effects? Click the videos below 🎥
 This project provides two deployment methods. Please choose based on your specific needs:
 
 #### 🚀 Deployment Method Selection
-| Deployment Method | Features | Applicable Scenarios | Deployment Docs | Configuration Requirements | Video Tutorials | 
+| Deployment Method | Features | Applicable Scenarios | Deployment Docs | Configuration Requirements | Video Tutorials |
 |---------|------|---------|---------|---------|---------|
-| **Simplified Installation** | Intelligent dialogue, single agent management | Low-configuration environments, data stored in config files, no database required | [①Docker Version](../Deployment.md#%E6%96%B9%E5%BC%8F%E4%B8%80docker%E5%8F%AA%E8%BF%90%E8%A1%8Cserver) / [②Source Code Deployment](../Deployment.md#%E6%96%B9%E5%BC%8F%E4%BA%8C%E6%9C%AC%E5%9C%B0%E6%BA%90%E7%A0%81%E5%8F%AA%E8%BF%90%E8%A1%8Cserver)| 2 cores 4GB if using `FunASR`, 2 cores 2GB if all APIs | - | 
-| **Full Module Installation** | Intelligent dialogue, multi-user management, multi-agent management, intelligent console interface operation | Complete functionality experience, data stored in database |[①Docker Version](../Deployment_all.md#%E6%96%B9%E5%BC%8F%E4%B8%80docker%E8%BF%90%E8%A1%8C%E5%85%A8%E6%A8%A1%E5%9D%97) / [②Source Code Deployment](../Deployment_all.md#%E6%96%B9%E5%BC%8F%E4%BA%8C%E6%9C%AC%E5%9C%B0%E6%BA%90%E7%A0%81%E8%BF%90%E8%A1%8C%E5%85%A8%E6%A8%A1%E5%9D%97) / [③Source Code Deployment Auto-Update Tutorial](../dev-ops-integration.md) | 4 cores 8GB if using `FunASR`, 2 cores 4GB if all APIs| [Local Source Code Startup Video Tutorial](https://www.bilibili.com/video/BV1wBJhz4Ewe) |
+| **Simplified Installation** | Intelligent dialogue, single agent management | Low-configuration environments, data stored in config files, no database required | [①Docker Version](../deployment/Deployment.md#%E6%96%B9%E5%BC%8F%E4%B8%80docker%E5%8F%AA%E8%BF%90%E8%A1%8Cserver) / [②Source Code Deployment](../deployment/Deployment.md#%E6%96%B9%E5%BC%8F%E4%BA%8C%E6%9C%AC%E5%9C%B0%E6%BA%90%E7%A0%81%E5%8F%AA%E8%BF%90%E8%A1%8Cserver)| 2 cores 4GB if using `FunASR`, 2 cores 2GB if all APIs | - |
+| **Full Module Installation** | Intelligent dialogue, multi-user management, multi-agent management, intelligent console interface operation | Complete functionality experience, data stored in database |[①Docker Version](../deployment/Deployment_all.md#%E6%96%B9%E5%BC%8F%E4%B8%80docker%E8%BF%90%E8%A1%8C%E5%85%A8%E6%A8%A1%E5%9D%97) / [②Source Code Deployment](../deployment/Deployment_all.md#%E6%96%B9%E5%BC%8F%E4%BA%8C%E6%9C%AC%E5%9C%B0%E6%BA%90%E7%A0%81%E8%BF%90%E8%A1%8C%E5%85%A8%E6%A8%A1%E5%9D%97) / [③Source Code Deployment Auto-Update Tutorial](../deployment/dev-ops-integration.md) | 4 cores 8GB if using `FunASR`, 2 cores 4GB if all APIs| [Local Source Code Startup Video Tutorial](https://www.bilibili.com/video/BV1wBJhz4Ewe) |
 
-For frequently asked questions and related tutorials, please refer to [this link](../FAQ.md)
+For frequently asked questions and related tutorials, please refer to [this link](../reference/FAQ.md)
 
 > 💡 Note: Below is a test platform deployed with the latest code. You can burn and test if needed. Concurrent users: 6, data will be cleared daily.
 
@@ -186,11 +186,11 @@ Websocket Interface Address: wss://2662r3426b.vicp.fun/xiaozhi/v1/
 #### 🚩 Configuration Description and Recommendations
 > [!Note]
 > This project provides two configuration schemes:
-> 
+>
 > 1. `Entry Level Free Settings`: Suitable for personal and home use, all components use free solutions, no additional payment required.
-> 
+>
 > 2. `Streaming Configuration`: Suitable for demonstrations, training, scenarios with more than 2 concurrent users, etc. Uses streaming processing technology for faster response speed and better experience.
-> 
+>
 > Starting from version `0.5.2`, the project supports streaming configuration. Compared to earlier versions, response speed is improved by approximately `2.5 seconds`, significantly improving user experience.
 
 | Module Name | Entry Level Free Settings | Streaming Configuration |
@@ -237,9 +237,9 @@ This project provides the following testing tools to help you verify the system 
 
 ### Under Development 🚧
 
-To learn about specific development plan progress, [click here](https://github.com/users/xinnan-tech/projects/3). For frequently asked questions and related tutorials, please refer to [this link](../FAQ.md)
+To learn about specific development plan progress, [click here](https://github.com/users/xinnan-tech/projects/3). For frequently asked questions and related tutorials, please refer to [this link](../reference/FAQ.md)
 
-If you are a software developer, here is an [Open Letter to Developers](../contributor_open_letter.md). Welcome to join!
+If you are a software developer, here is an [Open Letter to Developers](../reference/contributor_open_letter.md). Welcome to join!
 
 ---
 
@@ -314,7 +314,7 @@ In fact, any VLLM that supports OpenAI interface calls can be integrated and use
 | Type | Platform Name | Usage Method | Pricing Model | Notes |
 |:------:|:---------------:|:----:|:---------:|:--:|
 | Memory | mem0ai | Interface calls | 1000 times/month quota | |
-| Memory | [powermem](../powermem-integration.md) | Local summarization | Depends on LLM and DB | OceanBase open source, supports intelligent retrieval |
+| Memory | [powermem](../models/powermem-integration.md) | Local summarization | Depends on LLM and DB | OceanBase open source, supports intelligent retrieval |
 | Memory | mem_local_short | Local summarization | Free | |
 | Memory | nomem | No memory mode | Free | |
 

@@ -315,7 +315,7 @@ pip install -r requirements.txt
 
 #### 6. 下载唤醒词模型
 
-模型文件不包含在项目中，需要单独下载配置，详见 [docs/digital-human-wakeword.md](digital-human-wakeword.md) 中的“模型下载”章节。
+模型文件不包含在项目中，需要单独下载配置，详见 [docs/../digital-human/digital-human-wakeword.md](../digital-human/digital-human-wakeword.md) 中的“模型下载”章节。
 
 #### 7. 修改 Openbox 自启动脚本
 

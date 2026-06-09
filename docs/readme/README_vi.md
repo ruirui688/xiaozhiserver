@@ -10,7 +10,7 @@ Hỗ trợ giao thức MQTT+UDP, giao thức Websocket, điểm truy cập MCP, 
 </p>
 
 <p align="center">
-<a href="../FAQ.md">Câu hỏi thường gặp</a>
+<a href="../reference/FAQ.md">Câu hỏi thường gặp</a>
 · <a href="https://github.com/xinnan-tech/xiaozhi-esp32-server/issues">Báo cáo vấn đề</a>
 · <a href="../../README.md#%E9%83%A8%E7%BD%B2%E6%96%87%E6%A1%A3">Tài liệu triển khai</a>
 · <a href="https://github.com/xinnan-tech/xiaozhi-esp32-server/releases">Nhật ký cập nhật</a>
@@ -168,10 +168,10 @@ Dự án này cung cấp hai phương pháp triển khai, vui lòng chọn theo 
 #### 🚀 Lựa chọn phương pháp triển khai
 | Phương pháp triển khai | Đặc điểm | Tình huống áp dụng | Tài liệu triển khai | Yêu cầu cấu hình | Video hướng dẫn |
 |---------|------|---------|---------|---------|---------|
-| **Cài đặt tối giản** | Đối thoại thông minh, quản lý đơn tác nhân | Môi trường cấu hình thấp, dữ liệu lưu trong tệp cấu hình, không cần cơ sở dữ liệu | [①Phiên bản Docker](../Deployment.md#%E6%96%B9%E5%BC%8F%E4%B8%80docker%E5%8F%AA%E8%BF%90%E8%A1%8Cserver) / [②Triển khai mã nguồn](../Deployment.md#%E6%96%B9%E5%BC%8F%E4%BA%8C%E6%9C%AC%E5%9C%B0%E6%BA%90%E7%A0%81%E5%8F%AA%E8%BF%90%E8%A1%8Cserver)| 2 nhân 4GB nếu dùng `FunASR`, 2 nhân 2GB nếu toàn API | - |
-| **Cài đặt toàn bộ module** | Đối thoại thông minh, quản lý đa người dùng, quản lý đa tác nhân, bảng điều khiển thông minh | Trải nghiệm đầy đủ tính năng, dữ liệu lưu trong cơ sở dữ liệu |[①Phiên bản Docker](../Deployment_all.md#%E6%96%B9%E5%BC%8F%E4%B8%80docker%E8%BF%90%E8%A1%8C%E5%85%A8%E6%A8%A1%E5%9D%97) / [②Triển khai mã nguồn](../Deployment_all.md#%E6%96%B9%E5%BC%8F%E4%BA%8C%E6%9C%AC%E5%9C%B0%E6%BA%90%E7%A0%81%E8%BF%90%E8%A1%8C%E5%85%A8%E6%A8%A1%E5%9D%97) / [③Hướng dẫn tự động cập nhật triển khai mã nguồn](../dev-ops-integration.md) | 4 nhân 8GB nếu dùng `FunASR`, 2 nhân 4GB nếu toàn API| [Video hướng dẫn khởi động mã nguồn cục bộ](https://www.bilibili.com/video/BV1wBJhz4Ewe) |
+| **Cài đặt tối giản** | Đối thoại thông minh, quản lý đơn tác nhân | Môi trường cấu hình thấp, dữ liệu lưu trong tệp cấu hình, không cần cơ sở dữ liệu | [①Phiên bản Docker](../deployment/Deployment.md#%E6%96%B9%E5%BC%8F%E4%B8%80docker%E5%8F%AA%E8%BF%90%E8%A1%8Cserver) / [②Triển khai mã nguồn](../deployment/Deployment.md#%E6%96%B9%E5%BC%8F%E4%BA%8C%E6%9C%AC%E5%9C%B0%E6%BA%90%E7%A0%81%E5%8F%AA%E8%BF%90%E8%A1%8Cserver)| 2 nhân 4GB nếu dùng `FunASR`, 2 nhân 2GB nếu toàn API | - |
+| **Cài đặt toàn bộ module** | Đối thoại thông minh, quản lý đa người dùng, quản lý đa tác nhân, bảng điều khiển thông minh | Trải nghiệm đầy đủ tính năng, dữ liệu lưu trong cơ sở dữ liệu |[①Phiên bản Docker](../deployment/Deployment_all.md#%E6%96%B9%E5%BC%8F%E4%B8%80docker%E8%BF%90%E8%A1%8C%E5%85%A8%E6%A8%A1%E5%9D%97) / [②Triển khai mã nguồn](../deployment/Deployment_all.md#%E6%96%B9%E5%BC%8F%E4%BA%8C%E6%9C%AC%E5%9C%B0%E6%BA%90%E7%A0%81%E8%BF%90%E8%A1%8C%E5%85%A8%E6%A8%A1%E5%9D%97) / [③Hướng dẫn tự động cập nhật triển khai mã nguồn](../deployment/dev-ops-integration.md) | 4 nhân 8GB nếu dùng `FunASR`, 2 nhân 4GB nếu toàn API| [Video hướng dẫn khởi động mã nguồn cục bộ](https://www.bilibili.com/video/BV1wBJhz4Ewe) |
 
-Câu hỏi thường gặp và hướng dẫn liên quan, vui lòng tham khảo [liên kết này](../FAQ.md)
+Câu hỏi thường gặp và hướng dẫn liên quan, vui lòng tham khảo [liên kết này](../reference/FAQ.md)
 
 > 💡 Gợi ý: Dưới đây là nền tảng thử nghiệm được triển khai theo mã mới nhất, có thể flash để thử nghiệm nếu cần, đồng thời là 6, dữ liệu sẽ được xóa mỗi ngày,
 
@@ -238,9 +238,9 @@ Dự án này cung cấp các công cụ kiểm tra sau để giúp bạn xác m
 
 ### Đang phát triển 🚧
 
-Muốn hiểu tiến độ kế hoạch phát triển cụ thể, [vui lòng nhấp vào đây](https://github.com/users/xinnan-tech/projects/3). Câu hỏi thường gặp và hướng dẫn liên quan, vui lòng tham khảo [liên kết này](../FAQ.md)
+Muốn hiểu tiến độ kế hoạch phát triển cụ thể, [vui lòng nhấp vào đây](https://github.com/users/xinnan-tech/projects/3). Câu hỏi thường gặp và hướng dẫn liên quan, vui lòng tham khảo [liên kết này](../reference/FAQ.md)
 
-Nếu bạn là một nhà phát triển phần mềm, đây có một [Lá thư mở gửi các nhà phát triển](../contributor_open_letter.md), chào mừng tham gia!
+Nếu bạn là một nhà phát triển phần mềm, đây có một [Lá thư mở gửi các nhà phát triển](../reference/contributor_open_letter.md), chào mừng tham gia!
 
 ---
 
@@ -315,7 +315,7 @@ Trên thực tế, bất kỳ VLLM nào hỗ trợ gọi giao diện openai đ�
 |   Loại   |      Tên nền tảng       | Phương pháp sử dụng |   Mô hình thu phí    | Ghi chú |
 |:------:|:---------------:|:----:|:---------:|:--:|
 | Memory |     mem0ai      | Gọi giao diện | Hạn mức 1000 lần/tháng |    |
-| Memory |     [powermem](../powermem-integration.md)    | Tóm tắt cục bộ | Phụ thuộc vào LLM và DB |  OceanBase mã nguồn mở, hỗ trợ tìm kiếm thông minh  |
+| Memory |     [powermem](../models/powermem-integration.md)    | Tóm tắt cục bộ | Phụ thuộc vào LLM và DB |  OceanBase mã nguồn mở, hỗ trợ tìm kiếm thông minh  |
 | Memory | mem_local_short | Tóm tắt cục bộ |    Miễn phí     |    |
 | Memory |     nomem       | Chế độ không có bộ nhớ |    Miễn phí     |    |
 

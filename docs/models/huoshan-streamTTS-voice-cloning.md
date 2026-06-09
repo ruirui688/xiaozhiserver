@@ -13,7 +13,7 @@
 ### 2.获取音色资源ID
 访问 https://console.volcengine.com/speech/service/9999 复制三项内容，分别是App Id，Access Token以及声音ID(S_xxxxx)。如图
 
-![获取音色资源](images/image-clone-integration-01.png)
+![获取音色资源](../images/image-clone-integration-01.png)
 
 ## 第二阶段：配置火山引擎服务
 
@@ -40,7 +40,7 @@
 如果登录后，点击顶部【音色克隆】》【音色克隆】，能看到对应的音色列表。请继续。
 
 在列表里会看到对应的音色列表。选择其中一个音色资源，点击【上传音频】按钮。上传后，可以试听一下声音或者截取某段声音。确认后点击【上传音频】按钮。
-![上传音频](images/image-clone-integration-02.png)
+![上传音频](../images/image-clone-integration-02.png)
 
 上传音频后，在列表里会看到对应的音色会变成“待复刻”状态。点击【立即复刻】按钮。等1~2秒会返回结果。
 
@@ -53,6 +53,6 @@
 点击顶部【智能体管理】，选择任意一个智能体，点击【配置角色】按钮。
 
 语音合成(TTS)选择“火山双流式语音合成”。在列表里，找到名字带有“克隆音色”的音色资源（如图），选择它，点击保存。
-![选择音色](images/image-clone-integration-03.png)
+![选择音色](../images/image-clone-integration-03.png)
 
 接下来，可以唤醒小智和它对话。

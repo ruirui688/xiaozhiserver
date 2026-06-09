@@ -31,7 +31,7 @@ http://192.168.4.7:8123
 >
 > 3. 滑到最底部`Home Assistant 网址(Home Assistant website)`区域，在`本地网络(local network)`中，点击`眼睛`按钮，可以看到当前使用的 IP 地址（如 `192.168.1.10`）和网络接口。点击`复制连接(copy link)`可以直接复制。
 >
->    ![image-20250504051716417](images/image-ha-integration-01.png)
+>    ![image-20250504051716417](../images/image-ha-integration-01.png)
 
 或，您已经设置了直接可以访问的Home Assistant的OAuth地址，您也可以在浏览器内直接访问
 
@@ -93,7 +93,7 @@ http://homeassistant.local:8123
 
 #### 2. 登录`智控台`
 
-![image-20250504051716417](images/image-ha-integration-06.png)
+![image-20250504051716417](../images/image-ha-integration-06.png)
 
 使用管理员账号，登录`智控台`。在`智能体管理`，找到你的智能体，再点击`配置角色`。
 
@@ -128,19 +128,19 @@ http://homeassistant.local:8123
 1. 进入Home Assistant页面内。左侧点击`开发者助手`。
 2. 在打开的`开发者助手`内，点击`动作`选项卡（如图示操作1），在页面内的选项栏`动作`中，找到或输入`conversation.process（对话-处理）`并选择`对话（conversation）: 处理`（如图示操作2）。
 
-![image-20250504043539343](images/image-ha-integration-02.png)
+![image-20250504043539343](../images/image-ha-integration-02.png)
 
 3. 在页面内勾选`代理(agent)`选项，在变成常亮的`对话代理(conversation agent)`内选择您步骤一配置好的语音助手名称，如图示，我这边配置好的是`ZhipuAi`并选择。
 
-![image-20250504043854760](images/image-ha-integration-03.png)
+![image-20250504043854760](../images/image-ha-integration-03.png)
 
 4. 选中后，点击表单左下方的`进入YAML模式`。
 
-![image-20250504043951126](images/image-ha-integration-04.png)
+![image-20250504043951126](../images/image-ha-integration-04.png)
 
 5. 复制其中的agent-id的值，例如图示中我的是`01JP2DYMBDF7F4ZA2DMCF2AGX2`(仅供参考)。
 
-![image-20250504044046466](images/image-ha-integration-05.png)
+![image-20250504044046466](../images/image-ha-integration-05.png)
 
 6. 切换到小智开源服务端`xiaozhi-esp32-server`的`config.yaml`文件内，在LLM配置中，找到Home Assistant，设置您的Home Assistant的网络地址，Api key和刚刚查询到的agent_id。
 7. 修改`config.yaml`文件内的`selected_module`属性的`LLM`为`HomeAssistant`，`Intent`为`nointent`。

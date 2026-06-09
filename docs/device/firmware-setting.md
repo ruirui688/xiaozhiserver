@@ -29,7 +29,7 @@ wss://2662r3426b.vicp.fun/xiaozhi/v1/
 
 ## 第3步 进入配网模式
 进入机器的配网模式，在页面顶部，点击“高级选项”，在里面输入你服务器的`ota`地址，点击保存。重启设备
-![请参考-OTA地址设置](../docs/images/firmware-setting-ota.png)
+![请参考-OTA地址设置](../images/firmware-setting-ota.png)
 
 ## 第4步 唤醒小智，查看日志输出
 
@@ -39,16 +39,16 @@ wss://2662r3426b.vicp.fun/xiaozhi/v1/
 ## 常见问题
 以下是一些常见问题，供参考：
 
-[1、为什么我说的话，小智识别出来很多韩文、日文、英文](./FAQ.md)
+[1、为什么我说的话，小智识别出来很多韩文、日文、英文](../reference/FAQ.md)
 
-[2、为什么会出现“TTS 任务出错 文件不存在”？](./FAQ.md)
+[2、为什么会出现“TTS 任务出错 文件不存在”？](../reference/FAQ.md)
 
-[3、TTS 经常失败，经常超时](./FAQ.md)
+[3、TTS 经常失败，经常超时](../reference/FAQ.md)
 
-[4、使用Wifi能连接自建服务器，但是4G模式却接不上](./FAQ.md)
+[4、使用Wifi能连接自建服务器，但是4G模式却接不上](../reference/FAQ.md)
 
-[5、如何提高小智对话响应速度？](./FAQ.md)
+[5、如何提高小智对话响应速度？](../reference/FAQ.md)
 
-[6、我说话很慢，停顿时小智老是抢话](./FAQ.md)
+[6、我说话很慢，停顿时小智老是抢话](../reference/FAQ.md)
 
-[7、我想通过小智控制电灯、空调、远程开关机等操作](./FAQ.md)
+[7、我想通过小智控制电灯、空调、远程开关机等操作](../reference/FAQ.md)

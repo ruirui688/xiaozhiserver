@@ -138,7 +138,7 @@ python start.py
 
 ## 配置文件说明
 
-配置文件位于 [main/digital-human/wakeword_runtime/config.json](../main/digital-human/wakeword_runtime/config.json)。
+配置文件位于 [main/digital-human/wakeword_runtime/config.json](../../main/digital-human/wakeword_runtime/config.json)。
 
 当前主要配置项：
 

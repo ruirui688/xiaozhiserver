@@ -10,7 +10,7 @@ Suporte ao protocolo MQTT+UDP, protocolo WebSocket, ponto de acesso MCP, reconhe
 </p>
 
 <p align="center">
-<a href="../FAQ.md">Perguntas Frequentes</a>
+<a href="../reference/FAQ.md">Perguntas Frequentes</a>
 · <a href="https://github.com/xinnan-tech/xiaozhi-esp32-server/issues">Reportar Problemas</a>
 · <a href="../../README.md#%E9%83%A8%E7%BD%B2%E6%96%87%E6%A1%A3">Documentação de Implantação</a>
 · <a href="https://github.com/xinnan-tech/xiaozhi-esp32-server/releases">Notas de Lançamento</a>
@@ -167,10 +167,10 @@ Este projeto oferece dois métodos de implantação. Por favor, escolha de acord
 #### 🚀 Seleção do Método de Implantação
 | Método de Implantação | Funcionalidades | Cenários Aplicáveis | Documentação de Implantação | Requisitos de Configuração | Tutoriais em Vídeo |
 |---------|------|---------|---------|---------|---------|
-| **Instalação Simplificada** | Diálogo inteligente, gerenciamento de agente único | Ambientes de baixa configuração, dados armazenados em arquivos de configuração, sem necessidade de banco de dados | [①Versão Docker](../Deployment.md#%E6%96%B9%E5%BC%8F%E4%B8%80docker%E5%8F%AA%E8%BF%90%E8%A1%8Cserver) / [②Implantação via Código-Fonte](../Deployment.md#%E6%96%B9%E5%BC%8F%E4%BA%8C%E6%9C%AC%E5%9C%B0%E6%BA%90%E7%A0%81%E5%8F%AA%E8%BF%90%E8%A1%8Cserver)| 2 núcleos 4GB se usar `FunASR`, 2 núcleos 2GB se todas APIs | - |
-| **Instalação de Módulo Completo** | Diálogo inteligente, gerenciamento multiusuário, gerenciamento de múltiplos agentes, operação de interface do console inteligente | Experiência com funcionalidade completa, dados armazenados em banco de dados |[①Versão Docker](../Deployment_all.md#%E6%96%B9%E5%BC%8F%E4%B8%80docker%E8%BF%90%E8%A1%8C%E5%85%A8%E6%A8%A1%E5%9D%97) / [②Implantação via Código-Fonte](../Deployment_all.md#%E6%96%B9%E5%BC%8F%E4%BA%8C%E6%9C%AC%E5%9C%B0%E6%BA%90%E7%A0%81%E8%BF%90%E8%A1%8C%E5%85%A8%E6%A8%A1%E5%9D%97) / [③Tutorial de Atualização Automática via Código-Fonte](../dev-ops-integration.md) | 4 núcleos 8GB se usar `FunASR`, 2 núcleos 4GB se todas APIs| [Tutorial em Vídeo de Inicialização via Código-Fonte Local](https://www.bilibili.com/video/BV1wBJhz4Ewe) |
+| **Instalação Simplificada** | Diálogo inteligente, gerenciamento de agente único | Ambientes de baixa configuração, dados armazenados em arquivos de configuração, sem necessidade de banco de dados | [①Versão Docker](../deployment/Deployment.md#%E6%96%B9%E5%BC%8F%E4%B8%80docker%E5%8F%AA%E8%BF%90%E8%A1%8Cserver) / [②Implantação via Código-Fonte](../deployment/Deployment.md#%E6%96%B9%E5%BC%8F%E4%BA%8C%E6%9C%AC%E5%9C%B0%E6%BA%90%E7%A0%81%E5%8F%AA%E8%BF%90%E8%A1%8Cserver)| 2 núcleos 4GB se usar `FunASR`, 2 núcleos 2GB se todas APIs | - |
+| **Instalação de Módulo Completo** | Diálogo inteligente, gerenciamento multiusuário, gerenciamento de múltiplos agentes, operação de interface do console inteligente | Experiência com funcionalidade completa, dados armazenados em banco de dados |[①Versão Docker](../deployment/Deployment_all.md#%E6%96%B9%E5%BC%8F%E4%B8%80docker%E8%BF%90%E8%A1%8C%E5%85%A8%E6%A8%A1%E5%9D%97) / [②Implantação via Código-Fonte](../deployment/Deployment_all.md#%E6%96%B9%E5%BC%8F%E4%BA%8C%E6%9C%AC%E5%9C%B0%E6%BA%90%E7%A0%81%E8%BF%90%E8%A1%8C%E5%85%A8%E6%A8%A1%E5%9D%97) / [③Tutorial de Atualização Automática via Código-Fonte](../deployment/dev-ops-integration.md) | 4 núcleos 8GB se usar `FunASR`, 2 núcleos 4GB se todas APIs| [Tutorial em Vídeo de Inicialização via Código-Fonte Local](https://www.bilibili.com/video/BV1wBJhz4Ewe) |
 
-Perguntas frequentes e tutoriais relacionados podem ser consultados [neste link](../FAQ.md)
+Perguntas frequentes e tutoriais relacionados podem ser consultados [neste link](../reference/FAQ.md)
 
 > 💡 Nota: Abaixo está uma plataforma de teste implantada com o código mais recente. Você pode gravar e testar se necessário. Usuários simultâneos: 6, os dados serão limpos diariamente.
 
@@ -237,9 +237,9 @@ Este projeto fornece as seguintes ferramentas de teste para ajudá-lo a verifica
 
 ### Em Desenvolvimento 🚧
 
-Para conhecer o progresso específico do plano de desenvolvimento, [clique aqui](https://github.com/users/xinnan-tech/projects/3). Perguntas frequentes e tutoriais relacionados podem ser consultados [neste link](../FAQ.md)
+Para conhecer o progresso específico do plano de desenvolvimento, [clique aqui](https://github.com/users/xinnan-tech/projects/3). Perguntas frequentes e tutoriais relacionados podem ser consultados [neste link](../reference/FAQ.md)
 
-Se você é um desenvolvedor de software, aqui está uma [Carta Aberta aos Desenvolvedores](../contributor_open_letter.md). Seja bem-vindo a participar!
+Se você é um desenvolvedor de software, aqui está uma [Carta Aberta aos Desenvolvedores](../reference/contributor_open_letter.md). Seja bem-vindo a participar!
 
 ---
 
@@ -314,7 +314,7 @@ Na verdade, qualquer VLLM que suporte chamadas via interface OpenAI pode ser int
 | Tipo | Nome da Plataforma | Método de Uso | Modelo de Preço | Observações |
 |:------:|:---------------:|:----:|:---------:|:--:|
 | Memória | mem0ai | Chamadas via interface | Cota de 1000 vezes/mês | |
-| Memória | [powermem](../powermem-integration.md) | Resumo local | Depende do LLM e BD | OceanBase de código aberto, suporta busca inteligente |
+| Memória | [powermem](../models/powermem-integration.md) | Resumo local | Depende do LLM e BD | OceanBase de código aberto, suporta busca inteligente |
 | Memória | mem_local_short | Resumo local | Gratuito | |
 | Memória | nomem | Modo sem memória | Gratuito | |
 
