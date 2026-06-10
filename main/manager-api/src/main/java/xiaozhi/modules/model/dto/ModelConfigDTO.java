@@ -2,6 +2,7 @@ package xiaozhi.modules.model.dto;
 
 import java.io.Serial;
 import java.io.Serializable;
+import java.util.Date;
 
 import cn.hutool.json.JSONObject;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -31,6 +32,15 @@ public class ModelConfigDTO implements Serializable {
 
     @Schema(description = "是否启用")
     private Integer isEnabled;
+
+    @Schema(description = "测试状态(0未测试 1通过 2失败)")
+    private Integer testStatus;
+
+    @Schema(description = "测试结果说明")
+    private String testMessage;
+
+    @Schema(description = "测试时间")
+    private Date testTime;
 
     @Schema(description = "模型配置(JSON格式)")
     private JSONObject configJson;

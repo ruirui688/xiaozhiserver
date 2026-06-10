@@ -548,7 +548,8 @@ export default {
       dynamicTags: [],
       inputVisible: false,
       inputValue: '',
-      checkedReplacementWordIds: []
+      checkedReplacementWordIds: [],
+      hasShownNoAvailableModelWarning: false
     };
   },
   methods: {
@@ -783,6 +784,12 @@ export default {
                   isHidden: false,
                 }))
               );
+              if (data.data.length === 0 && !this.hasShownNoAvailableModelWarning) {
+                this.hasShownNoAvailableModelWarning = true;
+                this.$message.warning(
+                  this.$t("roleConfig.noAvailableModels", { type: model.label })
+                );
+              }
 
               // 如果是意图识别选项，需要根据当前LLM类型更新可见性
               if (model.type === "Intent") {
@@ -805,6 +812,12 @@ export default {
                 this.llmModeTypeMap.set(item.id, item.type);
               });
               this.$set(this.modelOptions, model.type, LLMdata);
+              if (LLMdata.length === 0 && !this.hasShownNoAvailableModelWarning) {
+                this.hasShownNoAvailableModelWarning = true;
+                this.$message.warning(
+                  this.$t("roleConfig.noAvailableModels", { type: model.label })
+                );
+              }
             } else {
               this.$message.error(data.msg || "获取LLM模型列表失败");
             }

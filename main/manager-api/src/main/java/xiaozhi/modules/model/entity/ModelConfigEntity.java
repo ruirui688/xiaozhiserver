@@ -34,6 +34,15 @@ public class ModelConfigEntity {
     @Schema(description = "是否启用")
     private Integer isEnabled;
 
+    @Schema(description = "测试状态(0未测试 1通过 2失败)")
+    private Integer testStatus;
+
+    @Schema(description = "测试结果说明")
+    private String testMessage;
+
+    @Schema(description = "测试时间")
+    private Date testTime;
+
     @TableField(typeHandler = JacksonTypeHandler.class)
     @Schema(description = "模型配置(JSON格式)")
     private JSONObject configJson;

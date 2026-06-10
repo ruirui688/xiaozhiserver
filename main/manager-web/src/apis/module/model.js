@@ -158,6 +158,23 @@ export default {
         })
       }).send()
   },
+  // 测试模型配置
+  testModel(id, callback) {
+    RequestService.sendRequest()
+      .url(`${getServiceUrl()}/models/test/${id}`)
+      .method('POST')
+      .success((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .networkFail((err) => {
+        console.error('测试模型失败:', err)
+        this.$message.error(err.msg || '测试模型失败')
+        RequestService.reAjaxFun(() => {
+          this.testModel(id, callback)
+        })
+      }).send()
+  },
   // 启用/禁用模型状态
   updateModelStatus(id, status, callback) {
     RequestService.sendRequest()

@@ -28,6 +28,9 @@ public class ModelConfigBodyDTO {
     @Schema(description = "是否启用")
     private Integer isEnabled;
 
+    @Schema(description = "测试状态(0未测试 1通过 2失败)")
+    private Integer testStatus;
+
     @Schema(description = "模型配置(JSON格式)")
     private JSONObject configJson;
 

@@ -9,6 +9,7 @@ import xiaozhi.modules.model.dto.LlmModelBasicInfoDTO;
 import xiaozhi.modules.model.dto.ModelBasicInfoDTO;
 import xiaozhi.modules.model.dto.ModelConfigBodyDTO;
 import xiaozhi.modules.model.dto.ModelConfigDTO;
+import xiaozhi.modules.model.dto.ModelTestResultDTO;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 
 public interface ModelConfigService extends BaseService<ModelConfigEntity> {
@@ -24,6 +25,8 @@ public interface ModelConfigService extends BaseService<ModelConfigEntity> {
     ModelConfigDTO edit(String modelType, String provideCode, String id, ModelConfigBodyDTO modelConfigBodyDTO);
 
     void delete(String id);
+
+    ModelTestResultDTO testModel(String id);
 
     /**
      * 根据ID获取模型名称

@@ -1,13 +1,29 @@
 package xiaozhi.modules.model.service.impl;
 
 import java.io.Serializable;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Base64;
+import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Service;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.RestTemplate;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -17,7 +33,9 @@ import com.baomidou.mybatisplus.core.metadata.OrderItem;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 
 import cn.hutool.core.collection.CollectionUtil;
+import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
+import cn.hutool.json.JSONUtil;
 import lombok.AllArgsConstructor;
 import xiaozhi.common.constant.Constant;
 import xiaozhi.common.exception.ErrorCode;
@@ -36,6 +54,7 @@ import xiaozhi.modules.model.dto.ModelBasicInfoDTO;
 import xiaozhi.modules.model.dto.ModelConfigBodyDTO;
 import xiaozhi.modules.model.dto.ModelConfigDTO;
 import xiaozhi.modules.model.dto.ModelProviderDTO;
+import xiaozhi.modules.model.dto.ModelTestResultDTO;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
 import xiaozhi.modules.model.service.ModelProviderService;
@@ -51,6 +70,16 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     private final ModelProviderService modelProviderService;
     private final RedisUtils redisUtils;
     private final AgentDao agentDao;
+    private final RestTemplate restTemplate;
+
+    private static final int MODEL_TEST_UNTESTED = 0;
+    private static final int MODEL_TEST_PASSED = 1;
+    private static final int MODEL_TEST_FAILED = 2;
+    private static final Set<String> LOCAL_TESTABLE_TYPES = new HashSet<>(List.of(
+            "silero", "nomem", "mem_local_short",
+            "mem_report_only", "nointent", "function_call"));
+    private static final String TTS_TEST_TEXT = "你好，我是小智，语音合成测试成功。";
+    private static final String VLLM_TEST_QUESTION = "请用一句话描述这张图片。";
 
     @Override
     public List<ModelBasicInfoDTO> getModelCodeList(String modelType, String modelName) {
@@ -58,6 +87,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                 new QueryWrapper<ModelConfigEntity>()
                         .eq("model_type", modelType)
                         .eq("is_enabled", 1)
+                        .eq("test_status", MODEL_TEST_PASSED)
                         .like(StringUtils.isNotBlank(modelName), "model_name", modelName)
                         .select("id", "model_name")
                         .orderByAsc("sort"));
@@ -70,6 +100,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                 new QueryWrapper<ModelConfigEntity>()
                         .eq("model_type", "llm")
                         .eq("is_enabled", 1)
+                        .eq("test_status", MODEL_TEST_PASSED)
                         .like(StringUtils.isNotBlank(modelName), "model_name", modelName)
                         .select("id", "model_name", "config_json"));
 
@@ -162,6 +193,36 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         modelConfigDao.deleteById(id);
 
         clearModelCache(id);
+    }
+
+    @Override
+    public ModelTestResultDTO testModel(String id) {
+        if (StringUtils.isBlank(id)) {
+            throw new RenException(ErrorCode.IDENTIFIER_NOT_NULL);
+        }
+
+        ModelConfigEntity modelConfig = modelConfigDao.selectById(id);
+        if (modelConfig == null) {
+            throw new RenException(ErrorCode.RESOURCE_NOT_FOUND);
+        }
+
+        ModelTestResultDTO result = doTestModel(modelConfig);
+        Date testTime = new Date();
+        result.setTestTime(testTime);
+        result.setTestStatus(Boolean.TRUE.equals(result.getSuccess()) ? MODEL_TEST_PASSED : MODEL_TEST_FAILED);
+
+        ModelConfigEntity updateEntity = new ModelConfigEntity();
+        updateEntity.setId(id);
+        updateEntity.setConfigJson(null);
+        updateEntity.setTestStatus(result.getTestStatus());
+        updateEntity.setTestMessage(result.getMessage());
+        updateEntity.setTestTime(testTime);
+        if (!Boolean.TRUE.equals(result.getSuccess())) {
+            updateEntity.setIsEnabled(0);
+        }
+        modelConfigDao.updateById(updateEntity);
+        clearModelCache(id);
+        return result;
     }
 
     @Override
@@ -347,8 +408,11 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         // 2. 只更新非敏感字段
         modelConfigEntity.setModelName(modelConfigBodyDTO.getModelName());
         modelConfigEntity.setSort(modelConfigBodyDTO.getSort());
-        modelConfigEntity.setIsEnabled(modelConfigBodyDTO.getIsEnabled());
+        modelConfigEntity.setIsEnabled(0);
         modelConfigEntity.setRemark(modelConfigBodyDTO.getRemark());
+        modelConfigEntity.setTestStatus(MODEL_TEST_UNTESTED);
+        modelConfigEntity.setTestMessage(null);
+        modelConfigEntity.setTestTime(null);
         // 3. 处理配置JSON，仅更新非敏感字段和明确修改的敏感字段
         if (modelConfigBodyDTO.getConfigJson() != null && originalEntity.getConfigJson() != null) {
             JSONObject originalJson = originalEntity.getConfigJson();
@@ -450,6 +514,10 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         ModelConfigEntity modelConfigEntity = ConvertUtils.sourceToTarget(modelConfigBodyDTO, ModelConfigEntity.class);
         modelConfigEntity.setModelType(modelType);
         modelConfigEntity.setIsDefault(0);
+        modelConfigEntity.setIsEnabled(0);
+        modelConfigEntity.setTestStatus(MODEL_TEST_UNTESTED);
+        modelConfigEntity.setTestMessage(null);
+        modelConfigEntity.setTestTime(null);
         return modelConfigEntity;
     }
 
@@ -555,8 +623,358 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                 new QueryWrapper<ModelConfigEntity>()
                         .eq("model_type", modelType)
                         .eq("is_enabled", 1)
+                        .eq("test_status", MODEL_TEST_PASSED)
                         .orderByAsc("sort"));
 
         return entities;
+    }
+
+    private ModelTestResultDTO doTestModel(ModelConfigEntity modelConfig) {
+        ModelTestResultDTO result = new ModelTestResultDTO();
+        if (modelConfig.getConfigJson() == null) {
+            result.setSuccess(false);
+            result.setMessage("模型配置为空");
+            return result;
+        }
+
+        JSONObject configJson = modelConfig.getConfigJson();
+        String type = StringUtils.lowerCase(configJson.getStr("type"));
+        if (StringUtils.isBlank(type)) {
+            result.setSuccess(false);
+            result.setMessage("模型配置缺少 type");
+            return result;
+        }
+
+        String modelType = StringUtils.defaultString(modelConfig.getModelType()).toUpperCase();
+        try {
+            if ("LLM".equals(modelType)) {
+                return testLanguageModel(configJson, type);
+            }
+            if ("VLLM".equals(modelType)) {
+                return testVisionModel(configJson, type);
+            }
+            if ("ASR".equals(modelType)) {
+                return testAsrModel(configJson, type);
+            }
+            if ("TTS".equals(modelType)) {
+                return testTtsModel(configJson, type);
+            }
+            if ("INTENT".equals(modelType) && "intent_llm".equals(type)) {
+                return testIntentModel(configJson);
+            }
+            if (LOCAL_TESTABLE_TYPES.contains(type)) {
+                result.setSuccess(true);
+                result.setMessage("本地规则校验通过");
+                return result;
+            }
+            result.setSuccess(false);
+            result.setMessage("当前供应器暂未支持自动连通性测试，请补充测试器后再用于角色配置");
+            return result;
+        } catch (Exception e) {
+            log.warn("模型测试失败，modelId: {}", modelConfig.getId(), e);
+            result.setSuccess(false);
+            result.setMessage("模型测试失败：" + StringUtils.defaultIfBlank(e.getMessage(), e.getClass().getSimpleName()));
+            return result;
+        }
+    }
+
+    private ModelTestResultDTO testIntentModel(JSONObject configJson) {
+        ModelTestResultDTO result = new ModelTestResultDTO();
+        String llmModelId = configJson.getStr("llm");
+        if (StringUtils.isBlank(llmModelId)) {
+            result.setSuccess(false);
+            result.setMessage("意图识别配置缺少关联 LLM");
+            return result;
+        }
+        ModelConfigEntity llm = modelConfigDao.selectById(llmModelId);
+        if (llm == null || llm.getTestStatus() == null || llm.getTestStatus() != MODEL_TEST_PASSED) {
+            result.setSuccess(false);
+            result.setMessage("关联 LLM 尚未测试通过");
+            return result;
+        }
+        result.setSuccess(true);
+        result.setMessage("关联 LLM 已测试通过");
+        return result;
+    }
+
+    private ModelTestResultDTO testAsrModel(JSONObject configJson, String type) {
+        if ("openai".equals(type)) {
+            return testOpenAiAsrModel(configJson);
+        }
+        ModelTestResultDTO result = new ModelTestResultDTO();
+        result.setSuccess(false);
+        result.setMessage("当前 ASR 供应器暂未实现真实音频自动测试；测试样本来源为 main/xiaozhi-server/config/assets/*.wav");
+        return result;
+    }
+
+    private ModelTestResultDTO testTtsModel(JSONObject configJson, String type) {
+        if ("openai".equals(type)) {
+            return testOpenAiTtsModel(configJson);
+        }
+        ModelTestResultDTO result = new ModelTestResultDTO();
+        result.setSuccess(false);
+        result.setMessage("当前 TTS 供应器暂未实现真实语音合成自动测试；测试文本为：" + TTS_TEST_TEXT);
+        return result;
+    }
+
+    private ModelTestResultDTO testLanguageModel(JSONObject configJson, String type) {
+        if ("openai".equals(type)) {
+            return testOpenAiCompatibleModel(configJson);
+        }
+        if ("ollama".equals(type)) {
+            return testOllamaModel(configJson);
+        }
+        ModelTestResultDTO result = new ModelTestResultDTO();
+        result.setSuccess(false);
+        result.setMessage("当前仅支持 openai/ollama 类型的语言模型自动测试");
+        return result;
+    }
+
+    private ModelTestResultDTO testVisionModel(JSONObject configJson, String type) {
+        if ("openai".equals(type)) {
+            return testOpenAiVisionModel(configJson);
+        }
+        ModelTestResultDTO result = new ModelTestResultDTO();
+        result.setSuccess(false);
+        result.setMessage("当前视觉模型仅支持 openai 兼容接口自动测试；测试图片来源为 docs/images/demo1.png");
+        return result;
+    }
+
+    private ModelTestResultDTO testOpenAiCompatibleModel(JSONObject configJson) {
+        ModelTestResultDTO result = new ModelTestResultDTO();
+        String baseUrl = configJson.getStr("base_url");
+        String model = configJson.getStr("model_name");
+        String apiKey = StringUtils.defaultIfBlank(configJson.getStr("api_key"), configJson.getStr("api_password"));
+        if (StringUtils.isAnyBlank(baseUrl, model, apiKey) || isPlaceholderSecret(apiKey)) {
+            result.setSuccess(false);
+            result.setMessage("OpenAI 兼容模型缺少 base_url、model_name 或有效密钥");
+            return result;
+        }
+
+        String apiUrl = buildChatCompletionsUrl(baseUrl);
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("model", model);
+        requestBody.put("messages", List.of(Map.of("role", "user", "content", "请只回复 OK")));
+        requestBody.put("temperature", 0);
+        requestBody.put("max_tokens", 8);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("Authorization", "Bearer " + apiKey);
+        ResponseEntity<String> response = restTemplate.exchange(
+                apiUrl, HttpMethod.POST, new HttpEntity<>(requestBody, headers), String.class);
+        if (!response.getStatusCode().is2xxSuccessful()) {
+            result.setSuccess(false);
+            result.setMessage("模型接口返回非成功状态：" + response.getStatusCode());
+            return result;
+        }
+        JSONObject responseJson = JSONUtil.parseObj(response.getBody());
+        JSONArray choices = responseJson.getJSONArray("choices");
+        result.setSuccess(choices != null && !choices.isEmpty());
+        result.setMessage(Boolean.TRUE.equals(result.getSuccess()) ? "模型连通性测试通过" : "模型接口响应缺少 choices");
+        return result;
+    }
+
+    private ModelTestResultDTO testOpenAiAsrModel(JSONObject configJson) {
+        ModelTestResultDTO result = new ModelTestResultDTO();
+        String apiUrl = StringUtils.defaultIfBlank(configJson.getStr("base_url"), configJson.getStr("api_url"));
+        String model = configJson.getStr("model_name");
+        String apiKey = configJson.getStr("api_key");
+        if (StringUtils.isAnyBlank(apiUrl, model, apiKey) || isPlaceholderSecret(apiKey)) {
+            result.setSuccess(false);
+            result.setMessage("OpenAI ASR 缺少 base_url/api_url、model_name 或有效密钥");
+            return result;
+        }
+
+        try {
+            Path audioPath = findFirstExistingPath(List.of(
+                    "../xiaozhi-server/config/assets/wakeup_words.wav",
+                    "../xiaozhi-server/config/assets/bind_code.wav",
+                    "main/xiaozhi-server/config/assets/wakeup_words.wav",
+                    "main/xiaozhi-server/config/assets/bind_code.wav"));
+            if (audioPath == null) {
+                result.setSuccess(false);
+                result.setMessage("未找到 ASR 测试音频，期望来源：main/xiaozhi-server/config/assets/*.wav");
+                return result;
+            }
+
+            byte[] audioBytes = Files.readAllBytes(audioPath);
+            ByteArrayResource audioResource = new ByteArrayResource(audioBytes) {
+                @Override
+                public String getFilename() {
+                    return audioPath.getFileName().toString();
+                }
+            };
+            MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+            body.add("model", model);
+            body.add("file", audioResource);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+            headers.set("Authorization", "Bearer " + apiKey);
+            ResponseEntity<String> response = restTemplate.exchange(
+                    apiUrl, HttpMethod.POST, new HttpEntity<>(body, headers), String.class);
+            if (!response.getStatusCode().is2xxSuccessful()) {
+                result.setSuccess(false);
+                result.setMessage("ASR 接口返回非成功状态：" + response.getStatusCode());
+                return result;
+            }
+            JSONObject responseJson = JSONUtil.parseObj(response.getBody());
+            String text = responseJson.getStr("text");
+            result.setSuccess(StringUtils.isNotBlank(text));
+            result.setMessage(Boolean.TRUE.equals(result.getSuccess())
+                    ? "ASR 真实音频测试通过，样本：" + audioPath.toString()
+                    : "ASR 接口响应缺少 text，样本：" + audioPath.toString());
+            return result;
+        } catch (Exception e) {
+            result.setSuccess(false);
+            result.setMessage("ASR 真实音频测试失败：" + StringUtils.defaultIfBlank(e.getMessage(), e.getClass().getSimpleName()));
+            return result;
+        }
+    }
+
+    private ModelTestResultDTO testOpenAiTtsModel(JSONObject configJson) {
+        ModelTestResultDTO result = new ModelTestResultDTO();
+        String apiUrl = StringUtils.defaultIfBlank(configJson.getStr("api_url"), configJson.getStr("base_url"));
+        String model = configJson.getStr("model");
+        String voice = configJson.getStr("voice");
+        String apiKey = configJson.getStr("api_key");
+        if (StringUtils.isAnyBlank(apiUrl, model, voice, apiKey) || isPlaceholderSecret(apiKey)) {
+            result.setSuccess(false);
+            result.setMessage("OpenAI TTS 缺少 api_url、model、voice 或有效密钥");
+            return result;
+        }
+
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("model", model);
+        requestBody.put("input", TTS_TEST_TEXT);
+        requestBody.put("voice", voice);
+        requestBody.put("response_format", StringUtils.defaultIfBlank(configJson.getStr("format"), "wav"));
+        if (configJson.containsKey("speed")) {
+            requestBody.put("speed", configJson.get("speed"));
+        }
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("Authorization", "Bearer " + apiKey);
+        ResponseEntity<byte[]> response = restTemplate.exchange(
+                apiUrl, HttpMethod.POST, new HttpEntity<>(requestBody, headers), byte[].class);
+        byte[] audioBytes = response.getBody();
+        result.setSuccess(response.getStatusCode().is2xxSuccessful() && audioBytes != null && audioBytes.length > 1024);
+        result.setMessage(Boolean.TRUE.equals(result.getSuccess())
+                ? "TTS 真实合成测试通过，测试文本：" + TTS_TEST_TEXT
+                : "TTS 响应音频为空或过小，测试文本：" + TTS_TEST_TEXT);
+        return result;
+    }
+
+    private ModelTestResultDTO testOpenAiVisionModel(JSONObject configJson) {
+        ModelTestResultDTO result = new ModelTestResultDTO();
+        String baseUrl = StringUtils.defaultIfBlank(configJson.getStr("base_url"), configJson.getStr("url"));
+        String model = configJson.getStr("model_name");
+        String apiKey = configJson.getStr("api_key");
+        if (StringUtils.isAnyBlank(baseUrl, model, apiKey) || isPlaceholderSecret(apiKey)) {
+            result.setSuccess(false);
+            result.setMessage("视觉模型缺少 base_url/url、model_name 或有效密钥");
+            return result;
+        }
+
+        try {
+            Path imagePath = findFirstExistingPath(List.of(
+                    "../../docs/images/demo1.png",
+                    "docs/images/demo1.png",
+                    "../docs/images/demo1.png"));
+            if (imagePath == null) {
+                result.setSuccess(false);
+                result.setMessage("未找到视觉测试图片，期望来源：docs/images/demo1.png");
+                return result;
+            }
+
+            String imageBase64 = Base64.getEncoder().encodeToString(Files.readAllBytes(imagePath));
+            Map<String, Object> imageUrl = Map.of("url", "data:image/png;base64," + imageBase64);
+            Map<String, Object> textContent = Map.of("type", "text", "text", VLLM_TEST_QUESTION);
+            Map<String, Object> imageContent = Map.of("type", "image_url", "image_url", imageUrl);
+            Map<String, Object> message = Map.of("role", "user", "content", List.of(textContent, imageContent));
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("model", model);
+            requestBody.put("messages", List.of(message));
+            requestBody.put("stream", false);
+            requestBody.put("max_tokens", 120);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("Authorization", "Bearer " + apiKey);
+            ResponseEntity<String> response = restTemplate.exchange(
+                    buildChatCompletionsUrl(baseUrl), HttpMethod.POST, new HttpEntity<>(requestBody, headers),
+                    String.class);
+            if (!response.getStatusCode().is2xxSuccessful()) {
+                result.setSuccess(false);
+                result.setMessage("视觉模型接口返回非成功状态：" + response.getStatusCode());
+                return result;
+            }
+            JSONObject responseJson = JSONUtil.parseObj(response.getBody());
+            JSONArray choices = responseJson.getJSONArray("choices");
+            result.setSuccess(choices != null && !choices.isEmpty());
+            result.setMessage(Boolean.TRUE.equals(result.getSuccess())
+                    ? "视觉模型真实图片测试通过，样本：" + imagePath.toString()
+                    : "视觉模型响应缺少 choices，样本：" + imagePath.toString());
+            return result;
+        } catch (Exception e) {
+            result.setSuccess(false);
+            result.setMessage("视觉模型真实图片测试失败：" + StringUtils.defaultIfBlank(e.getMessage(), e.getClass().getSimpleName()));
+            return result;
+        }
+    }
+
+    private ModelTestResultDTO testOllamaModel(JSONObject configJson) {
+        ModelTestResultDTO result = new ModelTestResultDTO();
+        String baseUrl = configJson.getStr("base_url");
+        String model = configJson.getStr("model_name");
+        if (StringUtils.isAnyBlank(baseUrl, model)) {
+            result.setSuccess(false);
+            result.setMessage("Ollama 模型缺少 base_url 或 model_name");
+            return result;
+        }
+
+        String apiUrl = baseUrl.endsWith("/") ? baseUrl + "api/chat" : baseUrl + "/api/chat";
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("model", model);
+        requestBody.put("messages", List.of(Map.of("role", "user", "content", "请只回复 OK")));
+        requestBody.put("stream", false);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        ResponseEntity<String> response = restTemplate.exchange(
+                apiUrl, HttpMethod.POST, new HttpEntity<>(requestBody, headers), String.class);
+        if (!response.getStatusCode().is2xxSuccessful()) {
+            result.setSuccess(false);
+            result.setMessage("Ollama 接口返回非成功状态：" + response.getStatusCode());
+            return result;
+        }
+        JSONObject responseJson = JSONUtil.parseObj(response.getBody());
+        result.setSuccess(responseJson.containsKey("message") || responseJson.containsKey("response"));
+        result.setMessage(Boolean.TRUE.equals(result.getSuccess()) ? "Ollama 连通性测试通过" : "Ollama 响应格式不符合预期");
+        return result;
+    }
+
+    private String buildChatCompletionsUrl(String baseUrl) {
+        if (baseUrl.endsWith("/chat/completions")) {
+            return baseUrl;
+        }
+        return baseUrl.endsWith("/") ? baseUrl + "chat/completions" : baseUrl + "/chat/completions";
+    }
+
+    private boolean isPlaceholderSecret(String value) {
+        String lowerValue = StringUtils.defaultString(value).toLowerCase();
+        return lowerValue.contains("你的") || lowerValue.contains("placeholder") || lowerValue.contains("sk-xxx");
+    }
+
+    private Path findFirstExistingPath(List<String> candidates) {
+        for (String candidate : candidates) {
+            Path path = Paths.get(candidate).toAbsolutePath().normalize();
+            if (Files.exists(path) && Files.isRegularFile(path)) {
+                return path;
+            }
+        }
+        return null;
     }
 }
