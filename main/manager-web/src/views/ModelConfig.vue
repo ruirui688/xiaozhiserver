@@ -637,7 +637,10 @@ export default {
       Api.model.getModelList(params, ({ data }) => {
         this.loading = false; // 结束加载
         if (data.code === 0) {
-          this.modelList = data.data.list;
+          this.modelList = data.data.list.map((model) => ({
+            ...model,
+            isEnabled: model.testStatus === 1 ? model.isEnabled : 0,
+          }));
           this.total = data.data.total;
         } else {
           this.$message.error(data.msg || this.$t("modelConfig.fetchModelsFailed"));
