@@ -167,11 +167,18 @@ export default {
         RequestService.clearRequestTime()
         callback(res)
       })
+      .fail((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
       .networkFail((err) => {
         console.error('测试模型失败:', err)
-        this.$message.error(err.msg || '测试模型失败')
-        RequestService.reAjaxFun(() => {
-          this.testModel(id, callback)
+        RequestService.clearRequestTime()
+        callback({
+          data: {
+            code: -1,
+            msg: err?.msg || '测试模型失败，请检查后台服务或网络连接'
+          }
         })
       }).send()
   },

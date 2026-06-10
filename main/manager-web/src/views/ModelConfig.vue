@@ -318,7 +318,6 @@ export default {
       loading: false,
       selectedModelConfig: {},
       testingModelId: "",
-      testingModelTimer: null,
     };
   },
 
@@ -487,19 +486,12 @@ export default {
     },
     clearTestingModelState() {
       this.testingModelId = "";
-      if (this.testingModelTimer) {
-        clearTimeout(this.testingModelTimer);
-        this.testingModelTimer = null;
-      }
     },
     testModel(model) {
       if (this.testingModelId) {
         return;
       }
       this.testingModelId = model.id;
-      this.testingModelTimer = setTimeout(() => {
-        this.clearTestingModelState();
-      }, 35000);
       Api.model.testModel(model.id, ({ data }) => {
         this.clearTestingModelState();
         if (data.code === 0) {
@@ -581,10 +573,6 @@ export default {
         }
 
         this.testingModelId = id;
-        this.testingModelTimer = setTimeout(() => {
-          this.clearTestingModelState();
-          done && done();
-        }, 35000);
         Api.model.testModel(id, ({ data }) => {
           this.clearTestingModelState();
           if (data.code === 0) {
