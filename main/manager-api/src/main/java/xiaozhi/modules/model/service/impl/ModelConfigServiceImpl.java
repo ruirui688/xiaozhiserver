@@ -673,13 +673,9 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                 return testIntentModel(configJson);
             }
             if (LOCAL_TESTABLE_TYPES.contains(type)) {
-                result.setSuccess(true);
-                result.setMessage("本地规则校验通过");
-                return result;
+                return validateBasicModelConfig(configJson, type, modelType);
             }
-            result.setSuccess(false);
-            result.setMessage("当前供应器暂未支持自动连通性测试，请补充测试器后再用于角色配置");
-            return result;
+            return validateBasicModelConfig(configJson, type, modelType);
         } catch (Exception e) {
             log.warn("模型测试失败，modelId: {}", modelConfig.getId(), e);
             result.setSuccess(false);
@@ -715,9 +711,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             return testDoubaoStreamAsrModel(configJson);
         }
         ModelTestResultDTO result = new ModelTestResultDTO();
-        result.setSuccess(false);
-        result.setMessage("当前 ASR 供应器暂未实现真实音频自动测试；测试样本来源为 main/xiaozhi-server/config/assets/*.wav");
-        return result;
+        return validateBasicModelConfig(configJson, type, "ASR");
     }
 
     private ModelTestResultDTO testTtsModel(JSONObject configJson, String type) {
@@ -725,9 +719,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             return testOpenAiTtsModel(configJson);
         }
         ModelTestResultDTO result = new ModelTestResultDTO();
-        result.setSuccess(false);
-        result.setMessage("当前 TTS 供应器暂未实现真实语音合成自动测试；测试文本为：" + TTS_TEST_TEXT);
-        return result;
+        return validateBasicModelConfig(configJson, type, "TTS");
     }
 
     private ModelTestResultDTO testLanguageModel(JSONObject configJson, String type) {
@@ -738,9 +730,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             return testOllamaModel(configJson);
         }
         ModelTestResultDTO result = new ModelTestResultDTO();
-        result.setSuccess(false);
-        result.setMessage("当前仅支持 openai/ollama 类型的语言模型自动测试");
-        return result;
+        return validateBasicModelConfig(configJson, type, "LLM");
     }
 
     private ModelTestResultDTO testVisionModel(JSONObject configJson, String type) {
@@ -748,9 +738,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             return testOpenAiVisionModel(configJson);
         }
         ModelTestResultDTO result = new ModelTestResultDTO();
-        result.setSuccess(false);
-        result.setMessage("当前视觉模型仅支持 openai 兼容接口自动测试；测试图片来源为 docs/images/demo1.png");
-        return result;
+        return validateBasicModelConfig(configJson, type, "VLLM");
     }
 
     private ModelTestResultDTO testOpenAiCompatibleModel(JSONObject configJson) {
@@ -1039,6 +1027,143 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         return baseUrl.endsWith("/") ? baseUrl + "chat/completions" : baseUrl + "/chat/completions";
     }
 
+    private ModelTestResultDTO validateBasicModelConfig(JSONObject configJson, String type, String modelType) {
+        ModelTestResultDTO result = new ModelTestResultDTO();
+        List<String> missingFields = getRequiredFields(modelType, type).stream()
+                .filter(field -> !hasUsableConfigValue(configJson, field))
+                .collect(Collectors.toList());
+
+        for (List<String> group : getRequiredAnyFieldGroups(modelType, type)) {
+            boolean hasAny = group.stream().anyMatch(field -> hasUsableConfigValue(configJson, field));
+            if (!hasAny) {
+                missingFields.add(String.join("/", group));
+            }
+        }
+
+        if (CollectionUtil.isNotEmpty(missingFields)) {
+            result.setSuccess(false);
+            result.setMessage("模型配置缺少有效字段：" + String.join("、", missingFields));
+            return result;
+        }
+
+        String localPathField = getLocalPathField(modelType, type);
+        if (StringUtils.isNotBlank(localPathField)) {
+            String configuredPath = configJson.getStr(localPathField);
+            if (findFirstExistingPath(List.of(
+                    configuredPath,
+                    "../xiaozhi-server/" + configuredPath,
+                    "main/xiaozhi-server/" + configuredPath)) == null) {
+                result.setSuccess(false);
+                result.setMessage("本地模型路径不存在：" + configuredPath);
+                return result;
+            }
+        }
+
+        result.setSuccess(true);
+        result.setMessage("模型配置完整性测试通过");
+        return result;
+    }
+
+    private List<String> getRequiredFields(String modelType, String type) {
+        String normalizedModelType = StringUtils.defaultString(modelType).toUpperCase();
+        String normalizedType = StringUtils.defaultString(type);
+        if ("ASR".equals(normalizedModelType)) {
+            return switch (normalizedType) {
+                case "fun_local", "sherpa_onnx_local" -> List.of("model_dir");
+                case "vosk" -> List.of("model_path");
+                case "fun_server" -> List.of("host", "port");
+                case "doubao" -> List.of("appid", "access_token", "cluster");
+                case "tencent" -> List.of("appid", "secret_id", "secret_key");
+                case "aliyun", "aliyun_stream" -> List.of("appkey", "access_key_id", "access_key_secret");
+                case "baidu" -> List.of("app_id", "api_key", "secret_key");
+                case "qwen3_asr_flash" -> List.of("api_key", "base_url", "model_name");
+                case "aliyunbl_stream" -> List.of("api_key", "model");
+                case "xunfei_stream" -> List.of("app_id", "api_key", "api_secret");
+                default -> List.of();
+            };
+        }
+        if ("TTS".equals(normalizedModelType)) {
+            return switch (normalizedType) {
+                case "edge" -> List.of("voice");
+                case "doubao" -> List.of("api_url", "voice");
+                case "siliconflow" -> List.of("access_token", "model", "voice");
+                case "cozecn" -> List.of("access_token", "voice");
+                case "fishspeech" -> List.of("api_url");
+                case "tencent" -> List.of("appid", "secret_id", "secret_key", "voice");
+                case "gpt_sovits_v2", "gpt_sovits_v3", "custom", "paddle_speech" -> List.of("url");
+                case "aliyun", "aliyun_stream" -> List.of("appkey", "access_key_id", "access_key_secret", "voice");
+                case "huoshan_double_stream" -> List.of("appid", "access_token", "resource_id", "speaker");
+                case "index_stream" -> List.of("api_url", "voice");
+                case "minimax_httpstream" -> List.of("api_key", "group_id", "voice_id", "model");
+                case "alibl_stream" -> List.of("appkey", "voice", "model");
+                case "xunfei_stream" -> List.of("app_id", "api_key", "api_secret", "voice");
+                default -> List.of();
+            };
+        }
+        if ("LLM".equals(normalizedModelType)) {
+            return switch (normalizedType) {
+                case "AliBL" -> List.of("base_url", "app_id", "api_key");
+                case "dify", "fastgpt" -> List.of("base_url", "api_key");
+                case "gemini" -> List.of("api_key", "model_name");
+                case "coze" -> List.of("bot_id", "personal_access_token");
+                case "xinference" -> List.of("base_url", "model_name");
+                default -> List.of();
+            };
+        }
+        if ("VLLM".equals(normalizedModelType)) {
+            return List.of("base_url", "model_name", "api_key");
+        }
+        if ("MEMORY".equals(normalizedModelType)) {
+            return switch (normalizedType) {
+                case "mem0ai" -> List.of("api_key");
+                case "mem_local_short" -> List.of("llm");
+                case "powermem" -> List.of("llm_model", "llm_api_key", "embedding_model", "embedding_api_key");
+                default -> List.of();
+            };
+        }
+        if ("VAD".equals(normalizedModelType)) {
+            return "silero".equals(normalizedType) ? List.of("model_dir") : List.of();
+        }
+        if ("RAG".equals(normalizedModelType)) {
+            return "ragflow".equals(normalizedType) ? List.of("base_url", "api_key") : List.of();
+        }
+        return List.of();
+    }
+
+    private List<List<String>> getRequiredAnyFieldGroups(String modelType, String type) {
+        String normalizedModelType = StringUtils.defaultString(modelType).toUpperCase();
+        String normalizedType = StringUtils.defaultString(type);
+        if ("TTS".equals(normalizedModelType) && "doubao".equals(normalizedType)) {
+            return List.of(List.of("access_token", "authorization"));
+        }
+        return List.of();
+    }
+
+    private String getLocalPathField(String modelType, String type) {
+        String normalizedModelType = StringUtils.defaultString(modelType).toUpperCase();
+        String normalizedType = StringUtils.defaultString(type);
+        if ("VAD".equals(normalizedModelType) && "silero".equals(normalizedType)) {
+            return "model_dir";
+        }
+        if ("ASR".equals(normalizedModelType)) {
+            return switch (normalizedType) {
+                case "fun_local", "sherpa_onnx_local" -> "model_dir";
+                case "vosk" -> "model_path";
+                default -> null;
+            };
+        }
+        return null;
+    }
+
+    private boolean hasUsableConfigValue(JSONObject configJson, String field) {
+        Object value = configJson.get(field);
+        if (value == null) {
+            return false;
+        }
+        String stringValue = StringUtils.trim(String.valueOf(value));
+        return StringUtils.isNotBlank(stringValue) && !"null".equalsIgnoreCase(stringValue) && !isPlaceholderSecret(stringValue);
+    }
+
     private byte[] buildDoubaoStreamAsrInitRequest(JSONObject configJson, String appid, String accessToken,
             boolean enableMultilingual) throws IOException {
         JSONObject request = new JSONObject();
@@ -1146,7 +1271,14 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
 
     private boolean isPlaceholderSecret(String value) {
         String lowerValue = StringUtils.defaultString(value).toLowerCase();
-        return lowerValue.contains("你的") || lowerValue.contains("placeholder") || lowerValue.contains("sk-xxx");
+        return lowerValue.contains("你的")
+                || lowerValue.contains("请输入")
+                || lowerValue.contains("placeholder")
+                || lowerValue.contains("your ")
+                || lowerValue.contains("your_")
+                || lowerValue.contains("sk-xxx")
+                || lowerValue.contains("xxxx")
+                || lowerValue.contains("***");
     }
 
     private Path findFirstExistingPath(List<String> candidates) {
