@@ -318,6 +318,7 @@ export default {
       loading: false,
       selectedModelConfig: {},
       testingModelId: "",
+      testingModelTimer: null,
     };
   },
 
@@ -484,13 +485,23 @@ export default {
     canToggleEnabled(model) {
       return model.isEnabled === 1 || model.testStatus === 1;
     },
+    clearTestingModelState() {
+      this.testingModelId = "";
+      if (this.testingModelTimer) {
+        clearTimeout(this.testingModelTimer);
+        this.testingModelTimer = null;
+      }
+    },
     testModel(model) {
       if (this.testingModelId) {
         return;
       }
       this.testingModelId = model.id;
+      this.testingModelTimer = setTimeout(() => {
+        this.clearTestingModelState();
+      }, 35000);
       Api.model.testModel(model.id, ({ data }) => {
-        this.testingModelId = "";
+        this.clearTestingModelState();
         if (data.code === 0) {
           this.$message.success(data.data?.message || this.$t("modelConfig.testSuccess"));
         } else {
@@ -563,12 +574,19 @@ export default {
       const modelType = this.activeTab;
       const testSavedModel = (id) => {
         if (!id) {
+          this.clearTestingModelState();
           this.$message.error(this.$t("modelConfig.saveFailed"));
           done && done();
           return;
         }
 
+        this.testingModelId = id;
+        this.testingModelTimer = setTimeout(() => {
+          this.clearTestingModelState();
+          done && done();
+        }, 35000);
         Api.model.testModel(id, ({ data }) => {
+          this.clearTestingModelState();
           if (data.code === 0) {
             this.$message.success(data.data?.message || this.$t("modelConfig.testSuccess"));
             this.loadData();
