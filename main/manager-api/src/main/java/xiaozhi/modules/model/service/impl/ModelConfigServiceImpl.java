@@ -217,9 +217,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         updateEntity.setTestStatus(result.getTestStatus());
         updateEntity.setTestMessage(result.getMessage());
         updateEntity.setTestTime(testTime);
-        if (!Boolean.TRUE.equals(result.getSuccess())) {
-            updateEntity.setIsEnabled(0);
-        }
+        updateEntity.setIsEnabled(Boolean.TRUE.equals(result.getSuccess()) ? 1 : 0);
         modelConfigDao.updateById(updateEntity);
         clearModelCache(id);
         return result;
