@@ -990,6 +990,7 @@ export default {
   'modelConfigDialog.callInfo': 'Call Information',
   'modelConfigDialog.enterJsonExample': 'Please enter JSON format variables (example:{"key":"value"})',
   'modelConfigDialog.save': 'Save',
+  'modelConfigDialog.saveAndTest': 'Save and Test',
 
   // TTS Model Configuration Text
   'ttsModel.select': 'Select',

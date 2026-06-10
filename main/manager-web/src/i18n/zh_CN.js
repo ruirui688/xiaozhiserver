@@ -990,6 +990,7 @@ export default {
   'modelConfigDialog.callInfo': '调用信息',
   'modelConfigDialog.enterJsonExample': '请输入JSON格式变量(示例:{"key":"value"})',
   'modelConfigDialog.save': '保存',
+  'modelConfigDialog.saveAndTest': '保存并测试',
 
   // TTS模型配置文本
   'ttsModel.select': '选择',

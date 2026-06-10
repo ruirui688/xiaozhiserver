@@ -271,6 +271,7 @@
         :visible.sync="editDialogVisible"
         :modelData="editModelData"
         @save="handleModelSave"
+        @test="handleModelSaveAndTest"
       />
       <TtsModel
         :visible.sync="ttsDialogVisible"
@@ -557,6 +558,50 @@ export default {
           done && done(); // 调用done回调关闭加载状态
         });
       }
+    },
+    handleModelSaveAndTest({ provideCode, formData, done }) {
+      const modelType = this.activeTab;
+      const testSavedModel = (id) => {
+        if (!id) {
+          this.$message.error(this.$t("modelConfig.saveFailed"));
+          done && done();
+          return;
+        }
+
+        Api.model.testModel(id, ({ data }) => {
+          if (data.code === 0) {
+            this.$message.success(data.data?.message || this.$t("modelConfig.testSuccess"));
+            this.loadData();
+            this.editDialogVisible = false;
+          } else {
+            this.$message.error(data.msg || this.$t("modelConfig.testFailedMessage"));
+            this.loadData();
+          }
+          done && done();
+        });
+      };
+
+      if (this.editModelData.duplicateMode) {
+        formData.id = "";
+        Api.model.addModel({ modelType, provideCode, formData }, ({ data }) => {
+          if (data.code === 0) {
+            testSavedModel(data.data?.id);
+          } else {
+            this.$message.error(data.msg || this.$t("modelConfig.duplicateFailed"));
+            done && done();
+          }
+        });
+        return;
+      }
+
+      Api.model.updateModel({ modelType, provideCode, id: formData.id, formData }, ({ data }) => {
+        if (data.code === 0) {
+          testSavedModel(formData.id);
+        } else {
+          this.$message.error(data.msg || this.$t("modelConfig.saveFailed"));
+          done && done();
+        }
+      });
     },
     selectAll() {
       if (this.isAllSelected) {
