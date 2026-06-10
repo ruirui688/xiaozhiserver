@@ -134,7 +134,7 @@ public class ModelController {
     }
 
     @PutMapping("/enable/{id}/{status}")
-    @Operation(summary = "启用/关闭模型配置")
+    @Operation(summary = "启用/设为非启用模型配置")
     @RequiresPermissions("sys:role:superAdmin")
     public Result<Void> enableModelConfig(@PathVariable String id, @PathVariable Integer status) {
         ModelConfigEntity entity = modelConfigService.selectById(id);

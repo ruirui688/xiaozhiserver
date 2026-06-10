@@ -647,7 +647,7 @@ export default {
         }
       });
     },
-    // 处理启用/禁用状态变更
+    // 处理启用/非启用状态变更
     handleStatusChange(model, newStatus) {
       const normalizedStatus = newStatus ? 1 : 0;
       const originalStatus = normalizedStatus === 1 ? 0 : 1;
