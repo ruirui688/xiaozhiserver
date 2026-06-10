@@ -1,6 +1,13 @@
 package xiaozhi.modules.model.service.impl;
 
 import java.io.Serializable;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.WebSocket;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -11,6 +18,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.TimeUnit;
+import java.util.zip.GZIPOutputStream;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
@@ -699,6 +711,9 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         if ("openai".equals(type)) {
             return testOpenAiAsrModel(configJson);
         }
+        if ("doubao_stream".equals(type)) {
+            return testDoubaoStreamAsrModel(configJson);
+        }
         ModelTestResultDTO result = new ModelTestResultDTO();
         result.setSuccess(false);
         result.setMessage("当前 ASR 供应器暂未实现真实音频自动测试；测试样本来源为 main/xiaozhi-server/config/assets/*.wav");
@@ -827,6 +842,69 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         } catch (Exception e) {
             result.setSuccess(false);
             result.setMessage("ASR 真实音频测试失败：" + StringUtils.defaultIfBlank(e.getMessage(), e.getClass().getSimpleName()));
+            return result;
+        }
+    }
+
+    private ModelTestResultDTO testDoubaoStreamAsrModel(JSONObject configJson) {
+        ModelTestResultDTO result = new ModelTestResultDTO();
+        String appid = configJson.getStr("appid");
+        String accessToken = configJson.getStr("access_token");
+        String resourceId = configJson.getStr("resource_id");
+        if (StringUtils.isAnyBlank(appid, accessToken, resourceId)
+                || isPlaceholderSecret(appid)
+                || isPlaceholderSecret(accessToken)) {
+            result.setSuccess(false);
+            result.setMessage("豆包流式 ASR 缺少有效 appid、access_token 或 resource_id");
+            return result;
+        }
+
+        boolean enableMultilingual = Boolean.parseBoolean(StringUtils.defaultString(configJson.getStr("enable_multilingual"), "false"));
+        String wsUrl = enableMultilingual
+                ? "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream"
+                : "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async";
+
+        try {
+            CompletableFuture<byte[]> responseFuture = new CompletableFuture<>();
+            WebSocket webSocket = HttpClient.newHttpClient()
+                    .newWebSocketBuilder()
+                    .header("X-Api-App-Key", appid)
+                    .header("X-Api-Access-Key", accessToken)
+                    .header("X-Api-Resource-Id", resourceId)
+                    .header("X-Api-Connect-Id", UUID.randomUUID().toString())
+                    .buildAsync(URI.create(wsUrl), new BinaryResponseListener(responseFuture))
+                    .get(10, TimeUnit.SECONDS);
+
+            byte[] request = buildDoubaoStreamAsrInitRequest(configJson, appid, accessToken, enableMultilingual);
+            webSocket.sendBinary(ByteBuffer.wrap(request), true).get(10, TimeUnit.SECONDS);
+            byte[] response = responseFuture.get(10, TimeUnit.SECONDS);
+            JSONObject parsedResponse = parseDoubaoStreamAsrResponse(response);
+            webSocket.sendClose(WebSocket.NORMAL_CLOSURE, "test finished");
+
+            if (parsedResponse.containsKey("code") && parsedResponse.getInt("code") != 1000) {
+                result.setSuccess(false);
+                result.setMessage("豆包流式 ASR 初始化失败：" + extractDoubaoErrorMessage(parsedResponse));
+                return result;
+            }
+
+            JSONObject payload = parsedResponse.getJSONObject("payload_msg");
+            if (payload != null && payload.containsKey("code") && payload.getInt("code") != 1000 && payload.getInt("code") != 0) {
+                result.setSuccess(false);
+                result.setMessage("豆包流式 ASR 初始化失败：" + extractDoubaoErrorMessage(parsedResponse));
+                return result;
+            }
+            if (payload != null && payload.containsKey("error")) {
+                result.setSuccess(false);
+                result.setMessage("豆包流式 ASR 初始化失败：" + payload.getStr("error"));
+                return result;
+            }
+
+            result.setSuccess(true);
+            result.setMessage("豆包流式 ASR 配置连通性测试通过，resource_id：" + resourceId);
+            return result;
+        } catch (Exception e) {
+            result.setSuccess(false);
+            result.setMessage("豆包流式 ASR 配置连通性测试失败：" + StringUtils.defaultIfBlank(e.getMessage(), e.getClass().getSimpleName()));
             return result;
         }
     }
@@ -961,6 +1039,111 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         return baseUrl.endsWith("/") ? baseUrl + "chat/completions" : baseUrl + "/chat/completions";
     }
 
+    private byte[] buildDoubaoStreamAsrInitRequest(JSONObject configJson, String appid, String accessToken,
+            boolean enableMultilingual) throws IOException {
+        JSONObject request = new JSONObject();
+        request.set("app", new JSONObject()
+                .set("appid", appid)
+                .set("token", accessToken));
+        request.set("user", new JSONObject()
+                .set("uid", StringUtils.defaultIfBlank(configJson.getStr("uid"), "streaming_asr_service")));
+
+        JSONObject corpus = new JSONObject()
+                .set("boosting_table_name", StringUtils.defaultString(configJson.getStr("boosting_table_name")))
+                .set("correct_table_name", StringUtils.defaultString(configJson.getStr("correct_table_name")));
+        JSONObject requestBody = new JSONObject()
+                .set("reqid", UUID.randomUUID().toString())
+                .set("workflow", StringUtils.defaultIfBlank(
+                        configJson.getStr("workflow"),
+                        "audio_in,resample,partition,vad,fe,decode,itn,nlu_punctuate"))
+                .set("show_utterances", true)
+                .set("result_type", StringUtils.defaultIfBlank(configJson.getStr("result_type"), "single"))
+                .set("sequence", 1)
+                .set("end_window_size", configJson.getInt("end_window_size", 200))
+                .set("corpus", corpus);
+        request.set("request", requestBody);
+
+        JSONObject audio = new JSONObject()
+                .set("format", StringUtils.defaultIfBlank(configJson.getStr("format"), "pcm"))
+                .set("codec", StringUtils.defaultIfBlank(configJson.getStr("codec"), "pcm"))
+                .set("rate", configJson.getInt("sample_rate", 16000))
+                .set("bits", configJson.getInt("bits", 16))
+                .set("channel", configJson.getInt("channel", 1))
+                .set("sample_rate", configJson.getInt("sample_rate", 16000));
+        if (enableMultilingual && StringUtils.isNotBlank(configJson.getStr("language"))) {
+            audio.set("language", configJson.getStr("language"));
+        }
+        request.set("audio", audio);
+
+        byte[] payload = gzipCompress(request.toString().getBytes(StandardCharsets.UTF_8));
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        output.write(generateDoubaoHeader(0x01, 0x01, 0x00, 0x01, 0x01));
+        output.write(ByteBuffer.allocate(4).putInt(payload.length).array());
+        output.write(payload);
+        return output.toByteArray();
+    }
+
+    private byte[] generateDoubaoHeader(int version, int messageType, int messageTypeSpecificFlags,
+            int serialMethod, int compressionType) {
+        return new byte[] {
+                (byte) ((version << 4) | 0x01),
+                (byte) ((messageType << 4) | messageTypeSpecificFlags),
+                (byte) ((serialMethod << 4) | compressionType),
+                0x00
+        };
+    }
+
+    private byte[] gzipCompress(byte[] bytes) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (GZIPOutputStream gzipOutputStream = new GZIPOutputStream(output)) {
+            gzipOutputStream.write(bytes);
+        }
+        return output.toByteArray();
+    }
+
+    private JSONObject parseDoubaoStreamAsrResponse(byte[] response) {
+        if (response.length < 4) {
+            throw new IllegalArgumentException("响应数据长度不足：" + response.length);
+        }
+
+        int messageType = (response[1] & 0xFF) >> 4;
+        if (messageType == 0x0F) {
+            int code = ByteBuffer.wrap(response, 4, 4).getInt();
+            String errorText = response.length > 12
+                    ? new String(response, 12, response.length - 12, StandardCharsets.UTF_8)
+                    : "";
+            JSONObject parsed = new JSONObject();
+            parsed.set("code", code);
+            parsed.set("payload_msg", JSONUtil.isTypeJSON(errorText) ? JSONUtil.parseObj(errorText)
+                    : new JSONObject().set("error", errorText));
+            return parsed;
+        }
+
+        String payloadText;
+        if (response.length >= 12) {
+            int length = ByteBuffer.wrap(response, 8, 4).getInt();
+            if (length > 0 && length <= response.length - 12) {
+                payloadText = new String(response, 12, length, StandardCharsets.UTF_8);
+            } else {
+                payloadText = new String(response, 8, response.length - 8, StandardCharsets.UTF_8);
+            }
+        } else {
+            payloadText = new String(response, 4, response.length - 4, StandardCharsets.UTF_8);
+        }
+
+        JSONObject parsed = new JSONObject();
+        parsed.set("payload_msg", JSONUtil.parseObj(payloadText));
+        return parsed;
+    }
+
+    private String extractDoubaoErrorMessage(JSONObject parsedResponse) {
+        JSONObject payload = parsedResponse.getJSONObject("payload_msg");
+        if (payload == null) {
+            return parsedResponse.toString();
+        }
+        return StringUtils.defaultIfBlank(payload.getStr("error"), payload.toString());
+    }
+
     private boolean isPlaceholderSecret(String value) {
         String lowerValue = StringUtils.defaultString(value).toLowerCase();
         return lowerValue.contains("你的") || lowerValue.contains("placeholder") || lowerValue.contains("sk-xxx");
@@ -974,5 +1157,33 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             }
         }
         return null;
+    }
+
+    private static class BinaryResponseListener implements WebSocket.Listener {
+        private final CompletableFuture<byte[]> responseFuture;
+        private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+
+        private BinaryResponseListener(CompletableFuture<byte[]> responseFuture) {
+            this.responseFuture = responseFuture;
+        }
+
+        @Override
+        public CompletionStage<?> onBinary(WebSocket webSocket, ByteBuffer data, boolean last) {
+            byte[] bytes = new byte[data.remaining()];
+            data.get(bytes);
+            synchronized (buffer) {
+                buffer.write(bytes, 0, bytes.length);
+                if (last && !responseFuture.isDone()) {
+                    responseFuture.complete(buffer.toByteArray());
+                }
+            }
+            webSocket.request(1);
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public void onError(WebSocket webSocket, Throwable error) {
+            responseFuture.completeExceptionally(error);
+        }
     }
 }
