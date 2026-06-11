@@ -24,6 +24,13 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
+import org.springframework.web.client.RestTemplate;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -55,6 +62,11 @@ import xiaozhi.modules.knowledge.rag.KnowledgeBaseAdapter;
 public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private static final String ADAPTER_TYPE = "local_knowledge";
     private static final int DEFAULT_MAX_CHUNK_CHARS = 1200;
+    private static final String DEFAULT_LLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+    private static final String DEFAULT_LLM_MODEL = "qwen-plus";
+    private static final int DEFAULT_LLM_TIMEOUT_SECONDS = 90;
+    private static final int DEFAULT_LLM_MAX_INPUT_CHARS = 3000;
+    private static final int DEFAULT_LLM_MAX_TOKENS = 1200;
 
     private Map<String, Object> config = new HashMap<>();
     private ObjectMapper objectMapper;
@@ -62,6 +74,14 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private DocumentDao documentDao;
     private KnowledgeBaseDao knowledgeBaseDao;
     private int maxChunkChars = DEFAULT_MAX_CHUNK_CHARS;
+    private boolean llmEnabled;
+    private String llmBaseUrl = DEFAULT_LLM_BASE_URL;
+    private String llmApiKey;
+    private String llmModel = DEFAULT_LLM_MODEL;
+    private int llmTimeoutSeconds = DEFAULT_LLM_TIMEOUT_SECONDS;
+    private int llmMaxInputChars = DEFAULT_LLM_MAX_INPUT_CHARS;
+    private int llmMaxTokens = DEFAULT_LLM_MAX_TOKENS;
+    private RestTemplate llmRestTemplate;
 
     @Override
     public String getAdapterType() {
@@ -75,14 +95,17 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         this.chunkDao = SpringContextUtils.getBean(KnowledgeChunkDao.class);
         this.documentDao = SpringContextUtils.getBean(DocumentDao.class);
         this.knowledgeBaseDao = SpringContextUtils.getBean(KnowledgeBaseDao.class);
-        Object configuredMax = this.config.get("max_chunk_chars");
-        if (configuredMax != null) {
-            try {
-                maxChunkChars = Math.max(200, Integer.parseInt(configuredMax.toString()));
-            } catch (NumberFormatException e) {
-                log.warn("本地知识库 max_chunk_chars 配置无效，使用默认值 {}", DEFAULT_MAX_CHUNK_CHARS);
-            }
-        }
+        maxChunkChars = getIntConfig("max_chunk_chars", DEFAULT_MAX_CHUNK_CHARS, 200, 20000);
+        llmEnabled = getBooleanConfig("llm_enabled", false);
+        llmBaseUrl = getStringConfig("llm_base_url", DEFAULT_LLM_BASE_URL);
+        llmApiKey = getStringConfig("llm_api_key", "");
+        llmModel = getStringConfig("llm_model", DEFAULT_LLM_MODEL);
+        llmTimeoutSeconds = getIntConfig("llm_timeout_seconds", DEFAULT_LLM_TIMEOUT_SECONDS, 10, 600);
+        llmMaxInputChars = getIntConfig("llm_max_input_chars", DEFAULT_LLM_MAX_INPUT_CHARS, 500, 20000);
+        llmMaxTokens = getIntConfig("llm_max_tokens", DEFAULT_LLM_MAX_TOKENS, 200, 8000);
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory();
+        factory.setReadTimeout(java.time.Duration.ofSeconds(llmTimeoutSeconds));
+        this.llmRestTemplate = new RestTemplate(factory);
     }
 
     @Override
@@ -263,12 +286,28 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
 
     @Override
     public Map<String, Object> getSupportedConfig() {
-        return Map.of("max_chunk_chars", "单个切片的最大字符数");
+        return Map.of(
+                "max_chunk_chars", "单个切片的最大字符数",
+                "llm_enabled", "是否启用大模型切片精修",
+                "llm_base_url", "OpenAI兼容接口地址",
+                "llm_api_key", "OpenAI兼容接口密钥",
+                "llm_model", "切片精修模型",
+                "llm_timeout_seconds", "单次模型请求超时时间",
+                "llm_max_input_chars", "单次送入模型的最大字符数",
+                "llm_max_tokens", "模型输出最大Token数");
     }
 
     @Override
     public Map<String, Object> getDefaultConfig() {
-        return Map.of("max_chunk_chars", DEFAULT_MAX_CHUNK_CHARS);
+        return Map.of(
+                "max_chunk_chars", DEFAULT_MAX_CHUNK_CHARS,
+                "llm_enabled", false,
+                "llm_base_url", DEFAULT_LLM_BASE_URL,
+                "llm_api_key", "",
+                "llm_model", DEFAULT_LLM_MODEL,
+                "llm_timeout_seconds", DEFAULT_LLM_TIMEOUT_SECONDS,
+                "llm_max_input_chars", DEFAULT_LLM_MAX_INPUT_CHARS,
+                "llm_max_tokens", DEFAULT_LLM_MAX_TOKENS);
     }
 
     @Override
@@ -394,20 +433,25 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
 
     private List<LocalChunk> parseFile(String filename, InputStream inputStream) throws Exception {
         String extension = getExtension(filename);
+        List<LocalChunk> chunks;
         if ("xlsx".equals(extension) || "xls".equals(extension)) {
-            return parseExcel(inputStream);
+            chunks = parseExcel(inputStream);
+            return refineChunksWithLlm(chunks);
         }
         String text = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))
                 .lines()
                 .collect(Collectors.joining("\n"));
         if ("csv".equals(extension)) {
-            return parseCsv(text);
+            chunks = parseCsv(text);
+            return refineChunksWithLlm(chunks);
         }
         if ("json".equals(extension) || "jsonl".equals(extension)) {
-            return parseJsonQa(text, "jsonl".equals(extension));
+            chunks = parseJsonQa(text, "jsonl".equals(extension));
+            return refineChunksWithLlm(chunks);
         }
         List<LocalChunk> qaChunks = parsePlainQa(text);
-        return qaChunks.isEmpty() ? splitText(text) : qaChunks;
+        chunks = qaChunks.isEmpty() ? splitText(text) : qaChunks;
+        return refineChunksWithLlm(chunks);
     }
 
     private List<LocalChunk> parseExcel(InputStream inputStream) throws Exception {
@@ -448,8 +492,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         int questionIndex = findHeader(header, "question", "q", "问题", "问");
         int answerIndex = findHeader(header, "answer", "a", "答案", "答", "回复");
         List<LocalChunk> chunks = new ArrayList<>();
-        int start = questionIndex >= 0 && answerIndex >= 0 ? 1 : 0;
-        for (int i = start; i < rows.size(); i++) {
+        for (int i = 1; i < rows.size(); i++) {
             List<String> row = rows.get(i);
             if (questionIndex >= 0 && answerIndex >= 0) {
                 String question = getCell(row, questionIndex);
@@ -475,6 +518,124 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             }
         }
         return chunks;
+    }
+
+    private List<LocalChunk> refineChunksWithLlm(List<LocalChunk> chunks) {
+        if (!llmEnabled || StringUtils.isAnyBlank(llmBaseUrl, llmApiKey, llmModel)
+                || isPlaceholderSecret(llmApiKey) || chunks.isEmpty()) {
+            return chunks;
+        }
+        List<LocalChunk> refined = new ArrayList<>();
+        for (int i = 0; i < chunks.size(); i++) {
+            LocalChunk original = chunks.get(i);
+            try {
+                refined.add(refineChunkWithLlm(original));
+            } catch (Exception e) {
+                log.warn("本地知识库第 {} 个切片大模型精修失败，已回退规则切片: {}", i + 1, e.getMessage());
+                refined.add(original);
+            }
+        }
+        return refined;
+    }
+
+    private LocalChunk refineChunkWithLlm(LocalChunk chunk) throws Exception {
+        Map<String, Object> requestBody = new LinkedHashMap<>();
+        requestBody.put("model", llmModel);
+        requestBody.put("temperature", 0.1);
+        requestBody.put("max_tokens", llmMaxTokens);
+        requestBody.put("messages", List.of(
+                Map.of("role", "system", "content", getLlmSystemPrompt()),
+                Map.of("role", "user", "content", buildLlmUserPrompt(chunk))));
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setBearerAuth(llmApiKey);
+        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
+        ResponseEntity<String> response = llmRestTemplate.exchange(
+                buildChatCompletionsUrl(llmBaseUrl), HttpMethod.POST, entity, String.class);
+        if (!response.getStatusCode().is2xxSuccessful()) {
+            throw new RenException("模型接口返回状态码: " + response.getStatusCode());
+        }
+        String content = extractMessageContent(response.getBody());
+        if (StringUtils.isBlank(content)) {
+            throw new RenException("模型接口返回内容为空");
+        }
+        LocalChunk refined = parseRefinedChunk(content, chunk);
+        return StringUtils.isBlank(refined.getContent()) ? chunk : refined;
+    }
+
+    private String getLlmSystemPrompt() {
+        return "你是知识库切片清洗助手。你的任务是把输入切片整理成适合RAG检索的高精度知识片段。"
+                + "必须保留原始事实、数值、名称和约束，不得编造、扩写不存在的信息。"
+                + "如果输入是问答，保留明确的问题和答案；如果输入是表格行，把字段组织成自然、完整、可检索的内容。"
+                + "只输出JSON对象，不要Markdown，不要解释。JSON字段固定为question、answer、content。"
+                + "没有明确问题或答案时，对应字段输出空字符串。";
+    }
+
+    private String buildLlmUserPrompt(LocalChunk chunk) throws Exception {
+        Map<String, String> payload = new LinkedHashMap<>();
+        payload.put("question", StringUtils.defaultString(chunk.getQuestion()));
+        payload.put("answer", StringUtils.defaultString(chunk.getAnswer()));
+        payload.put("content", abbreviate(StringUtils.defaultString(chunk.getContent()), llmMaxInputChars));
+        return "请清洗下面这个知识库候选切片，并按指定JSON格式返回：\n"
+                + objectMapper.writeValueAsString(payload);
+    }
+
+    private String extractMessageContent(String responseBody) throws Exception {
+        JsonNode root = objectMapper.readTree(responseBody);
+        JsonNode choices = root.path("choices");
+        if (choices.isArray() && choices.size() > 0) {
+            return choices.get(0).path("message").path("content").asText();
+        }
+        return null;
+    }
+
+    private LocalChunk parseRefinedChunk(String modelContent, LocalChunk fallback) throws Exception {
+        String json = stripJson(modelContent);
+        JsonNode node = objectMapper.readTree(json);
+        String question = StringUtils.trimToEmpty(node.path("question").asText());
+        String answer = StringUtils.trimToEmpty(node.path("answer").asText());
+        String content = StringUtils.trimToEmpty(node.path("content").asText());
+        if (StringUtils.isBlank(content) && StringUtils.isNoneBlank(question, answer)) {
+            content = "问题：" + question + "\n答案：" + answer;
+        }
+        if (StringUtils.isBlank(content)) {
+            content = fallback.getContent();
+        }
+        return new LocalChunk(
+                StringUtils.isBlank(question) ? fallback.getQuestion() : question,
+                StringUtils.isBlank(answer) ? fallback.getAnswer() : answer,
+                content);
+    }
+
+    private String stripJson(String text) {
+        String trimmed = StringUtils.trimToEmpty(text);
+        if (trimmed.startsWith("```")) {
+            trimmed = trimmed.replaceFirst("^```(?:json)?\\s*", "");
+            trimmed = trimmed.replaceFirst("\\s*```$", "");
+        }
+        int start = trimmed.indexOf('{');
+        int end = trimmed.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+            return trimmed.substring(start, end + 1);
+        }
+        return trimmed;
+    }
+
+    private String buildChatCompletionsUrl(String baseUrl) {
+        String url = StringUtils.trimToEmpty(baseUrl);
+        if (url.endsWith("/chat/completions")) {
+            return url;
+        }
+        return StringUtils.removeEnd(url, "/") + "/chat/completions";
+    }
+
+    private String abbreviate(String text, int maxChars) {
+        String value = StringUtils.defaultString(text);
+        if (value.length() <= maxChars) {
+            return value;
+        }
+        return value.substring(0, maxChars) + "\n...[内容已截断，保持原文事实清洗]";
     }
 
     private List<LocalChunk> parseJsonQa(String text, boolean jsonLines) throws Exception {
@@ -628,6 +789,49 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
 
     private String getCell(List<String> row, int index) {
         return index >= 0 && index < row.size() ? row.get(index) : "";
+    }
+
+    private String getStringConfig(String key, String defaultValue) {
+        Object value = config.get(key);
+        return StringUtils.defaultIfBlank(value == null ? null : value.toString(), defaultValue);
+    }
+
+    private boolean getBooleanConfig(String key, boolean defaultValue) {
+        Object value = config.get(key);
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        String text = value.toString().trim();
+        if (StringUtils.equalsAnyIgnoreCase(text, "true", "1", "yes", "y", "on")) {
+            return true;
+        }
+        if (StringUtils.equalsAnyIgnoreCase(text, "false", "0", "no", "n", "off")) {
+            return false;
+        }
+        return defaultValue;
+    }
+
+    private int getIntConfig(String key, int defaultValue, int min, int max) {
+        Object value = config.get(key);
+        if (value == null) {
+            return defaultValue;
+        }
+        try {
+            int parsed = Integer.parseInt(value.toString());
+            return Math.max(min, Math.min(max, parsed));
+        } catch (NumberFormatException e) {
+            log.warn("本地知识库 {} 配置无效，使用默认值 {}", key, defaultValue);
+            return defaultValue;
+        }
+    }
+
+    private boolean isPlaceholderSecret(String value) {
+        String text = StringUtils.trimToEmpty(value);
+        return StringUtils.equalsAnyIgnoreCase(text, "your_api_key", "your_key", "api_key", "none")
+                || text.contains("你的");
     }
 
     private <T> List<T> paginate(List<T> items, int page, int pageSize) {
