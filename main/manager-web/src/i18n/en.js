@@ -21,6 +21,7 @@ export default {
   'header.searchHistory': 'Search History',
   'header.clearHistory': 'Clear History',
   'header.providerManagement': 'Provider Management',
+  'header.functionPluginManagement': 'Agent Function Library',
   'header.serverSideManagement': 'Server Management',
   'header.replacementWordManagement': 'Replacement Word Management',
   'header.featureManagement': 'System Feature Management',

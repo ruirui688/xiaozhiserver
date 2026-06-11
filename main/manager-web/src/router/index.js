@@ -168,6 +168,21 @@ const routes = [
       return import('../views/ProviderManagement.vue')
     }
   },
+  {
+    path: '/custom-plugin-management',
+    redirect: '/function-plugin-management'
+  },
+  {
+    path: '/function-plugin-management',
+    name: 'FunctionPluginManagement',
+    component: function () {
+      return import('../views/FunctionPluginManagement.vue')
+    },
+    meta: {
+      requiresAuth: true,
+      title: '智能体功能库'
+    }
+  },
   // 添加默认角色管理路由
   {
     path: '/agent-template-management',
@@ -241,7 +256,7 @@ VueRouter.prototype.push = function push(location) {
 }
 
 // 需要登录才能访问的路由
-const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'ModelConfig', 'KnowledgeBaseManagement', 'KnowledgeFileUpload', 'AddressBookManagement']
+const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'ModelConfig', 'KnowledgeBaseManagement', 'KnowledgeFileUpload', 'AddressBookManagement', 'FunctionPluginManagement']
 
 // 路由守卫
 router.beforeEach((to, from, next) => {

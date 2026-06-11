@@ -25,6 +25,7 @@
               <div class="func-tag" @click="handleFunctionClick(func)">
                 <div class="color-dot"></div>
                 <span>{{ func.name }}</span>
+                <span v-if="isDeclarativeInteractionPlugin(func)" class="declarative-plugin-tag">玩法</span>
               </div>
             </div>
           </div>
@@ -50,6 +51,7 @@
               <div class="func-tag" @click="handleFunctionClick(func)">
                 <div class="color-dot"></div>
                 <span>{{ func.name }}</span>
+                <span v-if="isDeclarativeInteractionPlugin(func)" class="declarative-plugin-tag">玩法</span>
               </div>
             </div>
           </div>
@@ -71,7 +73,7 @@
               <el-empty :description="currentFunction.name + $t('functionDialog.noNeedToConfig')" />
             </div>
             <el-form-item v-for="field in currentFunction.fieldsMeta" :key="field.key" :label="field.label"
-              class="param-item" :class="{ 'textarea-field': field.type === 'array' || field.type === 'json' }">
+              class="param-item" :class="{ 'textarea-field': field.type === 'array' || field.type === 'json' || field.type === 'textarea' }">
               <template #label>
                 <span style="font-size: 16px; margin-right: 6px;">{{ field.label }}</span>
                 <el-tooltip effect="dark" :content="fieldRemark(field)" placement="top">
@@ -80,6 +82,11 @@
               </template>
               <!-- ARRAY -->
               <el-input v-if="field.type === 'array'" type="textarea" v-model="currentFunction.params[field.key]"
+                @change="val => handleParamChange(currentFunction, field.key, val)" />
+
+              <!-- TEXTAREA -->
+              <el-input v-else-if="field.type === 'textarea'" type="textarea" :rows="5"
+                v-model="currentFunction.params[field.key]"
                 @change="val => handleParamChange(currentFunction, field.key, val)" />
 
               <!-- JSON -->
@@ -439,6 +446,8 @@ export default {
         return {
           id: f.id,
           name: f.name,
+          providerCode: f.providerCode,
+          fieldsMeta: f.fieldsMeta,
           params: modified
             ? { ...modified.params }
             : { ...f.params }
@@ -461,6 +470,17 @@ export default {
         description += `（${this.$t('functionDialog.defaultValue')}：${field.default}）`;
       }
       return description;
+    },
+    isDeclarativeInteractionPlugin(func) {
+      const fields = Array.isArray(func && func.fieldsMeta) ? func.fieldsMeta : [];
+      const customField = fields.find(field => field.key === 'custom_plugin');
+      if (!customField) {
+        return false;
+      }
+      if (typeof customField.default === 'boolean') {
+        return customField.default;
+      }
+      return String(customField.default).toLowerCase() === 'true';
     },
   }
 }
@@ -579,6 +599,24 @@ export default {
   cursor: pointer;
   flex-grow: 1;
   margin-left: 8px;
+  min-width: 0;
+}
+
+.func-tag span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.declarative-plugin-tag {
+  flex-shrink: 0;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #ecf5ff;
+  color: #409eff;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .color-dot {

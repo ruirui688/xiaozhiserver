@@ -111,7 +111,7 @@ main/manager-api/src/main/resources/application-dev.yml
 - [integrations/ali-sms-integration.md](./integrations/ali-sms-integration.md) - 阿里云短信集成指南。用于添加短信签名、短信模板、创建短信账号、开通权限并配置短信发送能力。
 - [integrations/homeassistant-integration.md](./integrations/homeassistant-integration.md) - Home Assistant 集成指南。用于把小智 ESP32 开源服务端接入 Home Assistant，实现智能家居设备控制。
 - [integrations/newsnow_plugin_config.md](./integrations/newsnow_plugin_config.md) - NewsNow 新闻源插件配置指南。用于配置新闻源、通过 Web 管理界面维护新闻插件、调整新闻查询来源。
-- [integrations/custom-interactive-plugin.md](./integrations/custom-interactive-plugin.md) - 自定义互动插件预留接口。用于在后台手动新增热梗、成语接龙、你说我猜等轻量互动插件，理解 `custom_plugin` 参数约定和运行边界。
+- [integrations/function-plugin-architecture.md](./integrations/function-plugin-architecture.md) - 功能插件架构。用于理解智能体功能库如何统一管理天气、新闻、音乐播放、HomeAssistant、讲段子、热梗、成语接龙、你说我猜等能力，区分系统能力、互动玩法和系统能力二级分类。
 
 ## 9. 数字人与唤醒词
 

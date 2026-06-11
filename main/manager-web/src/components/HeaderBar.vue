@@ -97,6 +97,7 @@
             $route.path === '/dict-management' ||
             $route.path === '/params-management' ||
             $route.path === '/provider-management' ||
+            $route.path === '/function-plugin-management' ||
             $route.path === '/server-side-management' ||
             $route.path === '/agent-template-management' ||
             $route.path === '/ota-management' ||
@@ -106,9 +107,10 @@
           <span class="el-dropdown-link">
             <img loading="lazy" alt="" src="@/assets/header/param_management.png" :style="{
               filter:
-                $route.path === '/dict-management' ||
+                  $route.path === '/dict-management' ||
                   $route.path === '/params-management' ||
                   $route.path === '/provider-management' ||
+                  $route.path === '/function-plugin-management' ||
                   $route.path === '/server-side-management' ||
                   $route.path === '/agent-template-management' ||
                   $route.path === '/ota-management' ||
@@ -135,6 +137,9 @@
             </el-dropdown-item>
             <el-dropdown-item @click.native="handleRouter('providerManagement')">
               {{ $t("header.providerManagement") }}
+            </el-dropdown-item>
+            <el-dropdown-item @click.native="handleRouter('functionPluginManagement')">
+              {{ $t("header.functionPluginManagement") }}
             </el-dropdown-item>
             <el-dropdown-item @click.native="handleRouter('agentTemplate')">
               {{ $t("header.agentTemplate") }}
@@ -246,6 +251,7 @@ export default {
         otaManagement: "/ota-management",
         dictManagement: "/dict-management",
         providerManagement: "/provider-management",
+        functionPluginManagement: "/function-plugin-management",
         agentTemplate: "/agent-template-management",
         replacementWordManagement: "/replacement-word-management",
         serverSideManagement: "/server-side-management",

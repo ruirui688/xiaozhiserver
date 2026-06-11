@@ -755,6 +755,7 @@ export default {
               return {
                 id: mapping.pluginId,
                 name: meta.name,
+                providerCode: meta.providerCode,
                 // 后端如果还有 paramInfo 字段就用 mapping.paramInfo，否则用 meta.params 默认值
                 params: mapping.paramInfo || { ...meta.params },
                 fieldsMeta: meta.fieldsMeta, // 保留以便对话框渲染 tooltip
