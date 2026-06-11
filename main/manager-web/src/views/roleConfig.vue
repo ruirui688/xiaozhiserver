@@ -549,7 +549,8 @@ export default {
       inputVisible: false,
       inputValue: '',
       checkedReplacementWordIds: [],
-      hasShownNoAvailableModelWarning: false
+      noAvailableModelTypes: [],
+      noAvailableModelWarningTimer: null,
     };
   },
   methods: {
@@ -772,24 +773,23 @@ export default {
     },
     fetchModelOptions() {
       this.models.forEach((model) => {
+        if (model.type === "SLM") {
+          return;
+        }
         if (model.type != "LLM") {
           Api.model.getModelNames(model.type, "", ({ data }) => {
             if (data.code === 0) {
+              const options = data.data.map((item) => ({
+                value: item.id,
+                label: item.modelName,
+                isHidden: false,
+              }));
               this.$set(
                 this.modelOptions,
                 model.type,
-                data.data.map((item) => ({
-                  value: item.id,
-                  label: item.modelName,
-                  isHidden: false,
-                }))
+                options
               );
-              if (data.data.length === 0 && !this.hasShownNoAvailableModelWarning) {
-                this.hasShownNoAvailableModelWarning = true;
-                this.$message.warning(
-                  this.$t("roleConfig.noAvailableModels", { type: model.label })
-                );
-              }
+              this.queueNoAvailableModelWarning(model, options);
 
               // 如果是意图识别选项，需要根据当前LLM类型更新可见性
               if (model.type === "Intent") {
@@ -808,22 +808,54 @@ export default {
                   value: item.id,
                   label: item.modelName,
                   isHidden: false,
-                });
-                this.llmModeTypeMap.set(item.id, item.type);
               });
+              this.llmModeTypeMap.set(item.id, item.type);
+            });
               this.$set(this.modelOptions, model.type, LLMdata);
-              if (LLMdata.length === 0 && !this.hasShownNoAvailableModelWarning) {
-                this.hasShownNoAvailableModelWarning = true;
-                this.$message.warning(
-                  this.$t("roleConfig.noAvailableModels", { type: model.label })
-                );
-              }
+              this.queueNoAvailableModelWarning(model, LLMdata);
             } else {
               this.$message.error(data.msg || "获取LLM模型列表失败");
             }
           });
         }
       });
+    },
+    shouldWarnNoAvailableModel(model, options) {
+      if (options.length > 0) {
+        return false;
+      }
+      if (model.type === "SLM" || model.type === "Intent") {
+        return false;
+      }
+      const selectedValue = this.form.model[model.key];
+      return !selectedValue;
+    },
+    queueNoAvailableModelWarning(model, options) {
+      if (!this.shouldWarnNoAvailableModel(model, options)) {
+        return;
+      }
+
+      if (!this.noAvailableModelTypes.includes(model.type)) {
+        this.noAvailableModelTypes.push(model.type);
+      }
+
+      if (this.noAvailableModelWarningTimer) {
+        clearTimeout(this.noAvailableModelWarningTimer);
+      }
+
+      this.noAvailableModelWarningTimer = setTimeout(() => {
+        const labels = this.models
+          .filter((item) => this.noAvailableModelTypes.includes(item.type))
+          .map((item) => item.label);
+
+        if (labels.length > 0) {
+          this.$message.warning(
+            this.$t("roleConfig.noAvailableModels", {
+              type: labels.join("、"),
+            })
+          );
+        }
+      }, 100);
     },
     fetchVoiceOptions(modelId) {
       if (!modelId) {
