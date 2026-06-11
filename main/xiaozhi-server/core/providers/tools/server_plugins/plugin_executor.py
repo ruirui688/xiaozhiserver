@@ -83,6 +83,7 @@ class ServerPluginExecutor(ToolExecutor):
                 necessary_functions
                 + config_functions
                 + list(GameSessionManager.GUESS_MY_WORD_TOOLS)
+                + list(GameSessionManager.IDIOM_CHAIN_TOOLS)
             )
         )
 
@@ -115,7 +116,10 @@ class ServerPluginExecutor(ToolExecutor):
                 continue
 
             if self._is_stateful_game_plugin(func_name):
-                tools[func_name] = self._build_guess_my_word_tool(func_name)
+                if func_name in GameSessionManager.IDIOM_CHAIN_TOOLS:
+                    tools[func_name] = self._build_idiom_chain_tool(func_name)
+                else:
+                    tools[func_name] = self._build_guess_my_word_tool(func_name)
                 continue
 
             declarative_tool = self._build_declarative_interaction_tool(func_name)
@@ -170,9 +174,15 @@ class ServerPluginExecutor(ToolExecutor):
 
     def _is_stateful_game_plugin(self, func_name):
         manager = getattr(self.conn, "game_session_manager", None)
-        if manager and manager.is_guess_my_word_tool(func_name):
+        if manager and (
+            manager.is_guess_my_word_tool(func_name)
+            or manager.is_idiom_chain_tool(func_name)
+        ):
             return True
-        return func_name in GameSessionManager.GUESS_MY_WORD_TOOLS
+        return (
+            func_name in GameSessionManager.GUESS_MY_WORD_TOOLS
+            or func_name in GameSessionManager.IDIOM_CHAIN_TOOLS
+        )
 
     def _build_declarative_interaction_tool(self, func_name):
         """把声明式互动插件转换成 OpenAI function tool 描述。"""
@@ -181,6 +191,8 @@ class ServerPluginExecutor(ToolExecutor):
             return None
 
         if self._is_stateful_game_plugin(func_name):
+            if func_name in GameSessionManager.IDIOM_CHAIN_TOOLS:
+                return self._build_idiom_chain_tool(func_name)
             return self._build_guess_my_word_tool(func_name)
 
         description = plugin_config.get("description") or plugin_config.get(
@@ -236,6 +248,29 @@ class ServerPluginExecutor(ToolExecutor):
             tool_type=ToolType.SERVER_PLUGIN,
         )
 
+    def _build_idiom_chain_tool(self, func_name):
+        parameters = self._normalize_declarative_parameters_schema(
+            self._get_plugin_config(func_name).get("parameters_schema")
+        )
+        tool_desc = {
+            "type": "function",
+            "function": {
+                "name": func_name,
+                "description": (
+                    "成语接龙状态机游戏。当用户说玩成语接龙，或游戏已开始后"
+                    "用户给出成语、说想不出来、要提示、再来、不玩了、结束时调用。"
+                    "调用时把用户当前原话填入 user_message。服务端会保存当前要接的字、"
+                    "已用成语和接对数量，并直接返回下一句主持话术。"
+                ),
+                "parameters": parameters,
+            },
+        }
+        return ToolDefinition(
+            name=func_name,
+            description=tool_desc,
+            tool_type=ToolType.SERVER_PLUGIN,
+        )
+
     def _execute_stateful_game_plugin(self, tool_name, arguments):
         if not self._is_stateful_game_plugin(tool_name):
             return None
@@ -245,7 +280,10 @@ class ServerPluginExecutor(ToolExecutor):
         user_message = ""
         if isinstance(arguments, dict):
             user_message = arguments.get("user_message") or arguments.get("query") or ""
-        response = manager.handle_guess_my_word(tool_name, user_message)
+        if manager.is_idiom_chain_tool(tool_name):
+            response = manager.handle_idiom_chain(tool_name, user_message)
+        else:
+            response = manager.handle_guess_my_word(tool_name, user_message)
         return ActionResponse(action=Action.RESPONSE, response=response)
 
     @staticmethod

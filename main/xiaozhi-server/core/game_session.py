@@ -17,6 +17,68 @@ class GameSessionManager:
         "guess_xiaozhi_word",
         "i_think_you_guess",
     }
+    IDIOM_CHAIN_TOOLS = {"idiom_chain"}
+
+    _IDIOM_CHAIN_STARTS = [
+        "一心一意",
+        "水到渠成",
+        "心想事成",
+    ]
+
+    _IDIOM_NEXT = {
+        "意": ["意气风发", "意味深长", "意犹未尽"],
+        "发": ["发扬光大", "发奋图强", "发人深省"],
+        "大": ["大显身手", "大公无私", "大器晚成"],
+        "手": ["手到擒来", "手舞足蹈"],
+        "来": ["来日方长", "来之不易"],
+        "长": ["长年累月", "长驱直入"],
+        "月": ["月明星稀", "月下老人"],
+        "稀": ["稀世之宝"],
+        "宝": ["宝刀未老"],
+        "老": ["老当益壮", "老马识途"],
+        "壮": ["壮志凌云"],
+        "云": ["云开见日", "云淡风轻"],
+        "日": ["日新月异", "日久天长"],
+        "异": ["异想天开"],
+        "开": ["开门见山", "开卷有益"],
+        "山": ["山清水秀", "山高水长"],
+        "秀": ["秀外慧中"],
+        "中": ["中流砥柱"],
+        "柱": ["柱石之臣"],
+        "成": ["成人之美", "成竹在胸"],
+        "胸": ["胸有成竹"],
+        "竹": ["竹报平安"],
+        "安": ["安居乐业", "安然无恙"],
+        "业": ["业精于勤"],
+        "勤": ["勤能补拙"],
+        "美": ["美中不足"],
+        "足": ["足智多谋"],
+        "谋": ["谋事在人"],
+        "人": ["人山人海", "人才济济"],
+        "海": ["海阔天空", "海纳百川"],
+        "空": ["空前绝后"],
+        "后": ["后来居上"],
+        "上": ["上善若水"],
+        "水": ["水到渠成", "水落石出"],
+        "出": ["出类拔萃", "出口成章"],
+        "华": ["华而不实"],
+        "实": ["实事求是"],
+        "是": ["是非分明"],
+        "明": ["明察秋毫", "明辨是非"],
+        "非": ["非同小可"],
+        "可": ["可歌可泣"],
+        "泣": ["泣不成声"],
+        "声": ["声东击西", "声势浩大"],
+        "西": ["西装革履"],
+        "强": ["强词夺理", "强身健体"],
+        "理": ["理直气壮", "理所当然"],
+        "省": ["省吃俭用"],
+        "用": ["用心良苦"],
+        "尽": ["尽善尽美"],
+    }
+    _IDIOM_SET = set(_IDIOM_CHAIN_STARTS)
+    for _items in _IDIOM_NEXT.values():
+        _IDIOM_SET.update(_items)
 
     _WORD_BANK = [
         {
@@ -68,6 +130,9 @@ class GameSessionManager:
     def is_guess_my_word_tool(self, tool_name):
         return tool_name in self.GUESS_MY_WORD_TOOLS
 
+    def is_idiom_chain_tool(self, tool_name):
+        return tool_name in self.IDIOM_CHAIN_TOOLS
+
     def get_active_tool(self):
         for tool_name, state in self.sessions.items():
             if state.get("active"):
@@ -115,6 +180,101 @@ class GameSessionManager:
         if hint:
             return f"不是{guess}。再给你一个提示：{hint}。继续猜。"
         return f"不是{guess}。提示已经给完了，你再想想。"
+
+    def handle_idiom_chain(self, tool_name, user_message):
+        normalized = self._normalize(user_message)
+        state = self.sessions.get(tool_name)
+        if self._is_end_message(normalized):
+            count = state.get("user_correct", 0) if state else 0
+            self.sessions.pop(tool_name, None)
+            return f"成语接龙先到这。你刚才接对了{count}个。"
+
+        if not state or not state.get("active") or self._is_restart_message(normalized):
+            state = self._start_idiom_chain(tool_name)
+            idiom = state["last_idiom"]
+            return f"成语接龙开始。我先出：{idiom}。你接“{idiom[-1]}”字。"
+
+        expected = state["expected_char"]
+        if self._is_give_up_message(normalized) or self._is_unknown_message(normalized):
+            hint = self._peek_idiom(expected)
+            state["hints_given"] += 1
+            if hint:
+                return f"可以接“{hint}”。你也可以换一个“{expected}”字开头的成语。"
+            idiom = self._restart_idiom_chain_with_common_start(tool_name)
+            return f"这个字不好接。我换一个常见的：{idiom}。你接“{idiom[-1]}”字。"
+
+        user_idiom = self._extract_idiom_answer(user_message)
+        if not self._is_known_idiom(user_idiom):
+            hint = self._peek_idiom(expected)
+            if hint:
+                return f"这句不算常见四字成语。请接“{expected}”字，比如“{hint}”。"
+            return f"这句不算常见四字成语。还是接“{expected}”字。"
+
+        if not user_idiom.startswith(expected):
+            return f"这个成语没接上。要以“{expected}”字开头，再试一个。"
+
+        state["user_correct"] += 1
+        state["used"].add(user_idiom)
+        state["last_idiom"] = user_idiom
+        state["expected_char"] = user_idiom[-1]
+        next_idiom = self._server_next_idiom(state)
+        if not next_idiom:
+            return f"接得上。你这个“{user_idiom[-1]}”字有点难，我认输一回。要不要重新开一局？"
+        return f"接得上。{next_idiom}。你接“{next_idiom[-1]}”字。"
+
+    def _start_idiom_chain(self, tool_name):
+        candidates = [item for item in self._IDIOM_CHAIN_STARTS if item not in self.last_words[-3:]]
+        idiom = random.choice(candidates or self._IDIOM_CHAIN_STARTS)
+        state = {
+            "active": True,
+            "game_type": "idiom_chain",
+            "last_idiom": idiom,
+            "expected_char": idiom[-1],
+            "used": {idiom},
+            "user_correct": 0,
+            "hints_given": 0,
+            "started_at": time.time(),
+        }
+        self.sessions[tool_name] = state
+        self.last_words.append(idiom)
+        self.last_words = self.last_words[-8:]
+        return state
+
+    def _server_next_idiom(self, state):
+        expected = state["expected_char"]
+        candidates = self._IDIOM_NEXT.get(expected, [])
+        next_idiom = ""
+        for idiom in candidates:
+            if idiom not in state["used"]:
+                next_idiom = idiom
+                break
+        if not next_idiom:
+            return ""
+        state["used"].add(next_idiom)
+        state["last_idiom"] = next_idiom
+        state["expected_char"] = next_idiom[-1]
+        return next_idiom
+
+    def _restart_idiom_chain_with_common_start(self, tool_name):
+        state = self._start_idiom_chain(tool_name)
+        return state["last_idiom"]
+
+    def _peek_idiom(self, expected):
+        return next((idiom for idiom in self._IDIOM_NEXT.get(expected, [])), "")
+
+    @classmethod
+    def _is_known_idiom(cls, idiom):
+        return len(idiom) == 4 and idiom in cls._IDIOM_SET
+
+    @classmethod
+    def _extract_idiom_answer(cls, text):
+        normalized = cls._normalize(text)
+        prefixes = ("我接", "接", "我想是", "我觉得是", "应该是", "答案是")
+        for prefix in prefixes:
+            if normalized.startswith(prefix):
+                normalized = normalized[len(prefix):]
+                break
+        return normalized[:4]
 
     def _start_guess_my_word(self, tool_name):
         candidates = [
@@ -225,7 +385,9 @@ class GameSessionManager:
             for phrase in (
                 "猜不到",
                 "想不到",
+                "想不出来",
                 "不会",
+                "接不上",
                 "放弃",
                 "揭晓答案",
                 "公布答案",
