@@ -25,8 +25,10 @@ import xiaozhi.common.utils.ConvertUtils;
 import xiaozhi.modules.knowledge.dao.KnowledgeBaseDao;
 import xiaozhi.modules.knowledge.entity.KnowledgeBaseEntity;
 import xiaozhi.modules.model.dao.ModelProviderDao;
+import xiaozhi.modules.model.dao.ModelConfigDao;
 import xiaozhi.modules.model.dto.ModelProviderDTO;
 import xiaozhi.modules.model.entity.ModelProviderEntity;
+import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelProviderService;
 import xiaozhi.modules.security.user.SecurityUser;
 
@@ -37,6 +39,7 @@ public class ModelProviderServiceImpl extends BaseServiceImpl<ModelProviderDao, 
 
     private final ModelProviderDao modelProviderDao;
     private final KnowledgeBaseDao knowledgeBaseDao;
+    private final ModelConfigDao modelConfigDao;
 
     @Override
     public List<ModelProviderDTO> getPluginList() {
@@ -58,10 +61,11 @@ public class ModelProviderServiceImpl extends BaseServiceImpl<ModelProviderDao, 
             // 将知识库转换为ModelProviderDTO格式并添加到结果列表
             for (KnowledgeBaseEntity kb : knowledgeBases) {
                 ModelProviderDTO dto = new ModelProviderDTO();
+                ModelConfigEntity ragModel = modelConfigDao.selectById(kb.getRagModelId());
                 dto.setId(kb.getId());
                 dto.setModelType("Rag");
                 dto.setName("[知识库]" + kb.getName());
-                dto.setProviderCode("ragflow"); // 假设所有RAG都使用ragflow
+                dto.setProviderCode(ragModel == null ? "knowledge_base" : ragModel.getModelCode());
                 dto.setFields("[]");
                 dto.setSort(0);
                 dto.setCreateDate(kb.getCreatedAt());

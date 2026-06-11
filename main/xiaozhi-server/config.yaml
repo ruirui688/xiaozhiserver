@@ -171,6 +171,10 @@ plugins:
     api_key: "ragflow-xxx"
     # ragflow知识库id
     dataset_ids: ["123456789"]
+  search_from_local_knowledge:
+    # 本地知识库通过 manager-api 查询，不需要 RAGFlow 服务
+    description: "当用户询问本地知识库涵盖的内容时，调用本方法查询本地文件、Excel或问答对知识库"
+    dataset_ids: ["123456789"]
   # 联网搜索插件配置
   # 支持秘塔(metaso)和Tavily两个搜索源
   # 秘塔API Key申请：https://metaso.cn/search-api/api-keys
@@ -281,6 +285,7 @@ Intent:
       - web_search                  # 联网搜索
       - get_weather
       # - search_from_ragflow
+      # - search_from_local_knowledge
       # - get_news_from_chinanews
       - get_news_from_newsnow
       # play_music是服务器自带的音乐播放，hass_play_music是通过home assistant控制的独立外部程序音乐播放

@@ -1,0 +1,90 @@
+import json
+import requests
+from typing import TYPE_CHECKING
+
+from config.logger import setup_logging
+from plugins_func.register import register_function, ToolType, ActionResponse, Action
+
+if TYPE_CHECKING:
+    from core.connection import ConnectionHandler
+
+TAG = __name__
+logger = setup_logging()
+
+SEARCH_FROM_LOCAL_KNOWLEDGE_FUNCTION_DESC = {
+    "type": "function",
+    "function": {
+        "name": "search_from_local_knowledge",
+        "description": "从本地知识库中查询信息",
+        "parameters": {
+            "type": "object",
+            "properties": {"question": {"type": "string", "description": "查询的问题"}},
+            "required": ["question"],
+        },
+    },
+}
+
+
+@register_function(
+    "search_from_local_knowledge",
+    SEARCH_FROM_LOCAL_KNOWLEDGE_FUNCTION_DESC,
+    ToolType.SYSTEM_CTL,
+)
+def search_from_local_knowledge(conn: "ConnectionHandler", question=None):
+    question = str(question) if question is not None else ""
+    knowledge_config = conn.config.get("plugins", {}).get("search_from_local_knowledge", {})
+    dataset_ids = knowledge_config.get("dataset_ids", [])
+    api_config = conn.config.get("manager-api", {})
+    api_url = api_config.get("url")
+    api_secret = api_config.get("secret")
+
+    if not api_url or not api_secret:
+        logger.bind(tag=TAG).error("manager-api配置缺失，无法查询本地知识库")
+        return ActionResponse(Action.RESPONSE, None, "本地知识库配置错误，请稍后再试")
+    if not dataset_ids:
+        return ActionResponse(Action.RESPONSE, None, "未配置本地知识库数据集")
+
+    headers = {"Authorization": f"Bearer {api_secret}", "Content-Type": "application/json"}
+    payload = {"question": question, "dataset_ids": dataset_ids}
+
+    try:
+        response = requests.post(
+            f"{api_url}/config/knowledge/retrieval",
+            json=payload,
+            headers=headers,
+            timeout=8,
+        )
+        response.encoding = "utf-8"
+        response.raise_for_status()
+        result = response.json()
+
+        if result.get("code") != 0:
+            return ActionResponse(Action.RESPONSE, None, result.get("msg", "本地知识库查询失败"))
+
+        chunks = result.get("data", {}).get("chunks", [])
+        contents = []
+        for chunk in chunks:
+            content = chunk.get("content", "")
+            document_name = chunk.get("document_name")
+            if content:
+                if document_name:
+                    contents.append(f"来源：{document_name}\n{content}")
+                else:
+                    contents.append(str(content))
+
+        if contents:
+            context_text = f"# 关于问题【{question}】查到本地知识库如下\n"
+            context_text += "\n\n---\n\n".join(contents[:5])
+        else:
+            context_text = "根据本地知识库查询结果，没有相关信息。"
+        return ActionResponse(Action.REQLLM, context_text, None)
+
+    except requests.exceptions.RequestException as e:
+        logger.bind(tag=TAG).error(f"本地知识库请求失败：{str(e)}")
+        return ActionResponse(Action.RESPONSE, None, "本地知识库接口请求失败，请稍后再试")
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.bind(tag=TAG).error(f"本地知识库响应解析失败：{str(e)}")
+        return ActionResponse(Action.RESPONSE, None, "本地知识库响应解析失败")
+    except Exception as e:
+        logger.bind(tag=TAG).error(f"本地知识库处理异常：{str(e)}")
+        return ActionResponse(Action.RESPONSE, None, f"本地知识库处理异常：{str(e)}")
