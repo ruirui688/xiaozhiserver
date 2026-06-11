@@ -21,26 +21,26 @@ class GameSessionManager:
     IDIOM_CHAIN_TOOLS = {"idiom_chain"}
 
     _HISTORICAL_PEOPLE = [
-        {"name": "秦始皇", "region": "china", "period": "ancient", "era": "秦汉", "ruler": True, "military": True, "culture": False, "founder": True, "reformer": True},
-        {"name": "刘邦", "region": "china", "period": "ancient", "era": "秦汉", "ruler": True, "military": True, "culture": False, "founder": True, "reformer": False},
-        {"name": "汉武帝", "region": "china", "period": "ancient", "era": "秦汉", "ruler": True, "military": True, "culture": False, "founder": False, "reformer": True},
-        {"name": "曹操", "region": "china", "period": "ancient", "era": "三国", "ruler": False, "military": True, "culture": True, "founder": False, "reformer": False},
-        {"name": "诸葛亮", "region": "china", "period": "ancient", "era": "三国", "ruler": False, "military": True, "culture": True, "founder": False, "reformer": False},
-        {"name": "唐太宗", "region": "china", "period": "ancient", "era": "隋唐", "ruler": True, "military": True, "culture": False, "founder": False, "reformer": True},
-        {"name": "武则天", "region": "china", "period": "ancient", "era": "隋唐", "ruler": True, "military": False, "culture": False, "founder": True, "reformer": True},
-        {"name": "李白", "region": "china", "period": "ancient", "era": "隋唐", "ruler": False, "military": False, "culture": True, "founder": False, "reformer": False},
-        {"name": "岳飞", "region": "china", "period": "ancient", "era": "宋元", "ruler": False, "military": True, "culture": False, "founder": False, "reformer": False},
-        {"name": "朱元璋", "region": "china", "period": "ancient", "era": "明清", "ruler": True, "military": True, "culture": False, "founder": True, "reformer": False},
-        {"name": "康熙", "region": "china", "period": "ancient", "era": "明清", "ruler": True, "military": True, "culture": False, "founder": False, "reformer": True},
-        {"name": "林则徐", "region": "china", "period": "modern", "era": "近现代", "ruler": False, "military": False, "culture": False, "founder": False, "reformer": True},
-        {"name": "孙中山", "region": "china", "period": "modern", "era": "近现代", "ruler": False, "military": False, "culture": False, "founder": True, "reformer": True},
-        {"name": "毛泽东", "region": "china", "period": "modern", "era": "近现代", "ruler": False, "military": True, "culture": False, "founder": True, "reformer": True},
-        {"name": "邓小平", "region": "china", "period": "modern", "era": "近现代", "ruler": False, "military": False, "culture": False, "founder": False, "reformer": True},
-        {"name": "孔子", "region": "china", "period": "ancient", "era": "先秦", "ruler": False, "military": False, "culture": True, "founder": False, "reformer": False},
-        {"name": "拿破仑", "region": "foreign", "period": "modern", "era": "欧洲近代", "ruler": True, "military": True, "culture": False, "founder": True, "reformer": True},
-        {"name": "华盛顿", "region": "foreign", "period": "modern", "era": "欧美近现代", "ruler": False, "military": True, "culture": False, "founder": True, "reformer": False},
-        {"name": "林肯", "region": "foreign", "period": "modern", "era": "欧美近现代", "ruler": False, "military": False, "culture": False, "founder": False, "reformer": True},
-        {"name": "丘吉尔", "region": "foreign", "period": "modern", "era": "欧美近现代", "ruler": False, "military": False, "culture": False, "founder": False, "reformer": False},
+        {"name": "秦始皇", "region": "china", "period": "ancient", "era": "秦汉", "ruler": True, "military": True, "culture": False, "poet": False, "founder": True, "reformer": True},
+        {"name": "刘邦", "region": "china", "period": "ancient", "era": "秦汉", "ruler": True, "military": True, "culture": False, "poet": False, "founder": True, "reformer": False},
+        {"name": "汉武帝", "region": "china", "period": "ancient", "era": "秦汉", "ruler": True, "military": True, "culture": False, "poet": False, "founder": False, "reformer": True},
+        {"name": "曹操", "region": "china", "period": "ancient", "era": "三国", "ruler": False, "military": True, "culture": True, "poet": True, "founder": False, "reformer": False},
+        {"name": "诸葛亮", "region": "china", "period": "ancient", "era": "三国", "ruler": False, "military": True, "culture": True, "poet": False, "founder": False, "reformer": False},
+        {"name": "唐太宗", "region": "china", "period": "ancient", "era": "隋唐", "ruler": True, "military": True, "culture": False, "poet": False, "founder": False, "reformer": True},
+        {"name": "武则天", "region": "china", "period": "ancient", "era": "隋唐", "ruler": True, "military": False, "culture": False, "poet": False, "founder": True, "reformer": True},
+        {"name": "李白", "region": "china", "period": "ancient", "era": "隋唐", "ruler": False, "military": False, "culture": True, "poet": True, "founder": False, "reformer": False},
+        {"name": "岳飞", "region": "china", "period": "ancient", "era": "宋元", "ruler": False, "military": True, "culture": False, "poet": False, "founder": False, "reformer": False},
+        {"name": "朱元璋", "region": "china", "period": "ancient", "era": "明清", "ruler": True, "military": True, "culture": False, "poet": False, "founder": True, "reformer": False},
+        {"name": "康熙", "region": "china", "period": "ancient", "era": "明清", "ruler": True, "military": True, "culture": False, "poet": False, "founder": False, "reformer": True},
+        {"name": "林则徐", "region": "china", "period": "modern", "era": "近现代", "ruler": False, "military": False, "culture": False, "poet": False, "founder": False, "reformer": True},
+        {"name": "孙中山", "region": "china", "period": "modern", "era": "近现代", "ruler": False, "military": False, "culture": False, "poet": False, "founder": True, "reformer": True},
+        {"name": "毛泽东", "region": "china", "period": "modern", "era": "近现代", "ruler": False, "military": True, "culture": False, "poet": False, "founder": True, "reformer": True},
+        {"name": "邓小平", "region": "china", "period": "modern", "era": "近现代", "ruler": False, "military": False, "culture": False, "poet": False, "founder": False, "reformer": True},
+        {"name": "孔子", "region": "china", "period": "ancient", "era": "先秦", "ruler": False, "military": False, "culture": True, "poet": False, "founder": False, "reformer": False},
+        {"name": "拿破仑", "region": "foreign", "period": "modern", "era": "欧洲近代", "ruler": True, "military": True, "culture": False, "poet": False, "founder": True, "reformer": True},
+        {"name": "华盛顿", "region": "foreign", "period": "modern", "era": "欧美近现代", "ruler": False, "military": True, "culture": False, "poet": False, "founder": True, "reformer": False},
+        {"name": "林肯", "region": "foreign", "period": "modern", "era": "欧美近现代", "ruler": False, "military": False, "culture": False, "poet": False, "founder": False, "reformer": True},
+        {"name": "丘吉尔", "region": "foreign", "period": "modern", "era": "欧美近现代", "ruler": False, "military": False, "culture": False, "poet": False, "founder": False, "reformer": False},
     ]
 
     _HISTORICAL_QUESTIONS = [
@@ -49,6 +49,7 @@ class GameSessionManager:
         ("ruler", True, "从身份看，他本人是皇帝或君主吗？"),
         ("military", True, "从事迹看，他主要和战争、军事或建国过程有关吗？"),
         ("culture", True, "从领域看，他主要以思想、文化或文学出名吗？"),
+        ("poet", True, "更具体一点，他是诗人或文学创作者吗？"),
         ("founder", True, "他是否和建立政权、开国或创建重要制度有关？"),
         ("reformer", True, "他是否以改革、变法或推动社会转折出名？"),
     ]
@@ -341,7 +342,13 @@ class GameSessionManager:
         if self._contains_any(normalized, ("战争", "军事", "将军", "打仗", "建国")):
             facts["military"] = True
             state["target_type"] = "historical_person"
-        if self._contains_any(normalized, ("诗人", "文学", "思想", "文化", "教育")):
+        if self._contains_any(normalized, ("诗人", "文学家", "作家")):
+            facts["culture"] = True
+            facts["poet"] = True
+            facts["military"] = False
+            facts["ruler"] = False
+            state["target_type"] = "historical_person"
+        elif self._contains_any(normalized, ("文学", "思想", "文化", "教育")):
             facts["culture"] = True
             state["target_type"] = "historical_person"
         if self._contains_any(normalized, ("开国", "建立", "创建")):
@@ -371,13 +378,7 @@ class GameSessionManager:
         if candidates:
             return self._ask_candidate_guess(state, candidates[0])
 
-        state["facts"].pop("reformer", None)
-        state["facts"].pop("founder", None)
-        candidates = self._filter_historical_candidates(state)
-        if candidates:
-            return self._ask_candidate_guess(state, candidates[0])
-
-        return "我这边线索有点冲突。你再给我一个年代、国家或身份线索，我继续排除。"
+        return "按目前线索候选排完了。你再给我一个更具体线索，比如年代、国家、身份或代表事件。"
 
     def _filter_historical_candidates(self, state):
         facts = state.get("facts", {})
