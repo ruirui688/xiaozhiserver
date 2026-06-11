@@ -197,10 +197,10 @@ class UnifiedToolHandler:
         responses_text = []
 
         for response in responses:
-            if response.content:
-                contents.append(response.content)
+            if response.result:
+                contents.append(str(response.result))
             if response.response:
-                responses_text.append(response.response)
+                responses_text.append(str(response.response))
 
         # 确定最终的动作类型
         final_action = Action.RESPONSE

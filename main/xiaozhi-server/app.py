@@ -61,8 +61,10 @@ async def main():
     
     config["server"]["auth_key"] = auth_key
 
-    # 添加 stdin 监控任务
-    stdin_task = asyncio.create_task(monitor_stdin())
+    # 后台/nohup 启动时 stdin 不可交互，跳过 stdin 监听，避免服务立即退出
+    stdin_task = None
+    if sys.stdin.isatty():
+        stdin_task = asyncio.create_task(monitor_stdin())
 
     # 启动全局GC管理器（5分钟清理一次）
     gc_manager = get_gc_manager(interval_seconds=300)
@@ -131,14 +133,16 @@ async def main():
         await gc_manager.stop()
 
         # 取消所有任务（关键修复点）
-        stdin_task.cancel()
+        if stdin_task:
+            stdin_task.cancel()
         ws_task.cancel()
         if ota_task:
             ota_task.cancel()
 
         # 等待任务终止（必须加超时）
+        tasks = [task for task in [stdin_task, ws_task, ota_task] if task]
         await asyncio.wait(
-            [stdin_task, ws_task, ota_task] if ota_task else [stdin_task, ws_task],
+            tasks,
             timeout=3.0,
             return_when=asyncio.ALL_COMPLETED,
         )

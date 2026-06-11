@@ -43,6 +43,7 @@ from core.utils.prompt_manager import PromptManager
 from core.utils.voiceprint_provider import VoiceprintProvider
 from core.utils.util import get_system_error_response
 from core.utils import textUtils
+from core.game_session import GameSessionManager
 
 
 TAG = __name__
@@ -92,6 +93,7 @@ class ConnectionHandler:
         self.server = server  # 保存server实例的引用
 
         self.need_bind = False  # 是否需要绑定设备
+        self.initialization_failed = False  # 动态配置初始化是否失败
         self.bind_completed_event = asyncio.Event()
         self.bind_code = None  # 绑定设备的验证码
         self.last_bind_prompt_time = 0  # 上次播放绑定提示的时间戳(秒)
@@ -112,6 +114,7 @@ class ConnectionHandler:
 
         # 客户端状态相关
         self.client_abort = False
+        self.abort_generation = 0
         self.client_is_speaking = False
         self.client_listen_mode = "auto"
 
@@ -189,6 +192,7 @@ class ConnectionHandler:
 
         # 初始化提示词管理器
         self.prompt_manager = PromptManager(self.config, self.logger)
+        self.game_session_manager = GameSessionManager()
 
         # 初始化通话状态
         self.calling = False
@@ -348,6 +352,9 @@ class ConnectionHandler:
         if self.need_bind:
             # 需要绑定，丢弃消息
             await self._discard_message_with_bind_prompt()
+            return
+
+        if self.initialization_failed:
             return
 
         # 不需要绑定，继续处理消息
@@ -573,7 +580,7 @@ class ConnectionHandler:
             role="assistant",
             tool_calls=[{
                 "id": da_tc_id,
-                "function": {"arguments": '{"response": "好呀，你想听什么类型的呀？童话、冒险还是搞笑的？选一个我给你开讲~"}', "name": "direct_answer"},
+                "function": {"arguments": '{"response": "你想听什么类型的呀？童话、冒险还是搞笑的？选一个我给你开讲。"}', "name": "direct_answer"},
                 "type": "function", "index": 0,
             }],
             is_temporary=True,
@@ -667,7 +674,9 @@ class ConnectionHandler:
         """在后台初始化配置和组件（完全不阻塞主循环）"""
         try:
             # 异步获取差异化配置
-            await self._initialize_private_config_async()
+            should_initialize = await self._initialize_private_config_async()
+            if not should_initialize:
+                return
             # 在线程池中初始化组件
             self.executor.submit(self._initialize_components)
         except Exception as e:
@@ -678,7 +687,7 @@ class ConnectionHandler:
         if not self.read_config_from_api:
             self.need_bind = False
             self.bind_completed_event.set()
-            return
+            return True
         try:
             begin_time = time.time()
             private_config = await get_private_config_from_api(
@@ -694,15 +703,18 @@ class ConnectionHandler:
             self.bind_completed_event.set()
         except DeviceNotFoundException as e:
             self.need_bind = True
+            self.bind_completed_event.set()
             private_config = {}
         except DeviceBindException as e:
             self.need_bind = True
             self.bind_code = e.bind_code
+            self.bind_completed_event.set()
             private_config = {}
         except Exception as e:
-            self.need_bind = True
             self.logger.bind(tag=TAG).error(f"异步获取差异化配置失败: {e}")
-            private_config = {}
+            self.initialization_failed = True
+            self.bind_completed_event.set()
+            return False
 
         init_llm, init_tts, init_memory, init_intent = (
             False,
@@ -779,10 +791,12 @@ class ConnectionHandler:
 
         # 注入替换词到 TTS 模块配置
         if private_config.get("correct_words", None) is not None:
-            select_tts_module = self.config["selected_module"]["TTS"]
-            self.config["TTS"][select_tts_module]["correct_words"] = private_config[
-                "correct_words"
-            ]
+            select_tts_module = self.config.get("selected_module", {}).get("TTS")
+            tts_config = self.config.get("TTS", {})
+            if select_tts_module in tts_config:
+                tts_config[select_tts_module]["correct_words"] = private_config[
+                    "correct_words"
+                ]
 
         # 使用 run_in_executor 在线程池中执行 initialize_modules，避免阻塞主循环
         try:
@@ -813,6 +827,7 @@ class ConnectionHandler:
             self.intent = modules["intent"]
         if modules.get("memory", None) is not None:
             self.memory = modules["memory"]
+        return True
 
     def _initialize_memory(self):
         if self.memory is None:
@@ -910,7 +925,8 @@ class ConnectionHandler:
         # 更新系统prompt至上下文
         self.dialogue.update_system_message(self.prompt)
 
-    def chat(self, query, depth=0):
+    def chat(self, query, depth=0, allow_tools=True):
+        current_abort_generation = self.abort_generation
         # 保存当前任务的sentence_id到局部变量，避免被新任务覆盖
         current_sentence_id = None
 
@@ -957,6 +973,7 @@ class ConnectionHandler:
                 self.intent_type == "function_call"
                 and hasattr(self, "func_handler")
                 and not force_final_answer
+                and allow_tools
         ):
             functions = list(self.func_handler.get_functions())
             # 仅在第一层调用时注入 direct_answer 虚拟工具
@@ -1001,10 +1018,15 @@ class ConnectionHandler:
         # 支持多个并行工具调用 - 使用列表存储
         tool_calls_list = []  # 格式: [{"id": "", "name": "", "arguments": ""}]
         content_arguments = ""
+        assistant_text_started = False
+        assistant_opening_buffer = ""
         emotion_flag = True
         try:
             for response in llm_responses:
-                if self.client_abort:
+                if (
+                        self.client_abort
+                        or current_abort_generation != self.abort_generation
+                ):
                     break
                 if self.intent_type == "function_call" and functions is not None:
                     content, tools_call = response
@@ -1035,6 +1057,31 @@ class ConnectionHandler:
                                     new_part = da_text[sent_len:safe_end]
                                     # 清理 delta 中可能泄漏的 JSON 闭合垃圾
                                     new_part = self._clean_response_garbage(new_part)
+                                    if not tc.get("_da_text_started"):
+                                        opening_buffer = (
+                                            tc.get("_da_opening_buffer", "") + new_part
+                                        )
+                                        tc["_da_opening_buffer"] = opening_buffer
+                                        new_part = self._clean_assistant_output(
+                                            opening_buffer, at_start=True
+                                        )
+                                        if (
+                                            (
+                                                new_part == ""
+                                                or self._is_partial_blocked_opening(
+                                                    opening_buffer
+                                                )
+                                            )
+                                            and len(opening_buffer) < 24
+                                            and self._may_be_blocked_opening(
+                                                opening_buffer
+                                            )
+                                        ):
+                                            tc["_da_sent"] = safe_end
+                                            continue
+                                        tc["_da_text_started"] = True
+                                    else:
+                                        new_part = self._clean_assistant_output(new_part)
                                     if new_part:
                                         tc["_da_sent"] = safe_end
                                         self.tts.tts_text_queue.put(
@@ -1059,6 +1106,30 @@ class ConnectionHandler:
 
                 if content is not None and len(content) > 0:
                     if not tool_call_flag:
+                        if not assistant_text_started:
+                            assistant_opening_buffer += content
+                            cleaned_content = self._clean_assistant_output(
+                                assistant_opening_buffer, at_start=True
+                            )
+                            if (
+                                (
+                                    cleaned_content == ""
+                                    or self._is_partial_blocked_opening(
+                                        assistant_opening_buffer
+                                    )
+                                )
+                                and len(assistant_opening_buffer) < 24
+                                and self._may_be_blocked_opening(
+                                    assistant_opening_buffer
+                                )
+                            ):
+                                continue
+                            content = cleaned_content
+                            assistant_text_started = True
+                        else:
+                            content = self._clean_assistant_output(content)
+                        if not content:
+                            continue
                         response_message.append(content)
                         self.tts.tts_text_queue.put(
                             TTSMessageDTO(
@@ -1086,6 +1157,16 @@ class ConnectionHandler:
                         content_type=ContentType.ACTION,
                     )
                 )
+            return
+
+        if self.client_abort or current_abort_generation != self.abort_generation:
+            if len(response_message) > 0:
+                interrupted_text = "".join(response_message)
+                interrupted_text = self._clean_assistant_output(
+                    interrupted_text, at_start=True
+                )
+                if interrupted_text:
+                    self.dialogue.put(Message(role="assistant", content=interrupted_text))
             return
         # 处理function call
         if tool_call_flag:
@@ -1134,6 +1215,16 @@ class ConnectionHandler:
                             remaining = da_response[sent_len:]
                             if remaining:
                                 remaining = self._clean_response_garbage(remaining)
+                                if not tc.get("_da_text_started"):
+                                    opening_buffer = (
+                                        tc.get("_da_opening_buffer", "") + remaining
+                                    )
+                                    remaining = self._clean_assistant_output(
+                                        opening_buffer, at_start=True
+                                    )
+                                    tc["_da_text_started"] = True
+                                else:
+                                    remaining = self._clean_assistant_output(remaining)
                                 if remaining:
                                     self.tts.tts_text_queue.put(
                                         TTSMessageDTO(
@@ -1145,6 +1236,9 @@ class ConnectionHandler:
                                     )
                             # 写入对话历史
                             da_response = self._clean_response_garbage(da_response)
+                            da_response = self._clean_assistant_output(
+                                da_response, at_start=True
+                            )
                             self.tts.store_tts_text(current_sentence_id, da_response)
                             self.dialogue.put(Message(role="assistant", content=da_response))
 
@@ -1211,7 +1305,7 @@ class ConnectionHandler:
                         )
                         # 超时时返回错误响应，避免整个流程卡死
                         tool_results.append((
-                            ActionResponse(action=Action.ERROR, result="哎呀，网络遇到点问题，请稍后再试下！"),
+                            ActionResponse(action=Action.ERROR, result="网络遇到点问题，请稍后再试下。"),
                             tool_call_data
                         ))
                         # 上报工具调用错误
@@ -1219,11 +1313,18 @@ class ConnectionHandler:
 
                 # 统一处理工具调用结果
                 if tool_results:
-                    self._handle_function_result(tool_results, depth=depth, streamed_text=streamed_text)
+                    self._handle_function_result(
+                        tool_results,
+                        depth=depth,
+                        streamed_text=streamed_text,
+                        sentence_id=current_sentence_id,
+                        abort_generation=current_abort_generation,
+                    )
 
         # 存储对话内容
         if len(response_message) > 0:
             text_buff = "".join(response_message)
+            text_buff = self._clean_assistant_output(text_buff, at_start=True)
             self.tts.store_tts_text(current_sentence_id, text_buff)
             self.dialogue.put(Message(role="assistant", content=text_buff))
 
@@ -1244,24 +1345,47 @@ class ConnectionHandler:
 
         return True
 
-    def _handle_function_result(self, tool_results, depth, streamed_text=""):
+    def _handle_function_result(
+        self,
+        tool_results,
+        depth,
+        streamed_text="",
+        sentence_id=None,
+        abort_generation=None,
+    ):
+        if abort_generation is None:
+            abort_generation = self.abort_generation
+        if sentence_id is None:
+            sentence_id = self.sentence_id
+
+        def is_aborted():
+            return self.client_abort or abort_generation != self.abort_generation
+
         need_llm_tools = []
         record_tools = []
 
         for result, tool_call_data in tool_results:
+            if is_aborted():
+                return
             if result.action in [
                 Action.RESPONSE,
                 Action.NOTFOUND,
                 Action.ERROR,
             ]:
                 text = result.response if result.response else result.result
+                text = self._clean_assistant_output(text, at_start=True)
                 if streamed_text and text in streamed_text:
                     self.logger.bind(tag=TAG).debug(
                         f"Skipping duplicate TTS for tool {tool_call_data['name']}, already streamed"
                     )
                 else:
-                    self.tts.tts_one_sentence(self, ContentType.TEXT, content_detail=text)
-                    self.tts.store_tts_text(self.sentence_id, text)
+                    self.tts.tts_one_sentence(
+                        self,
+                        ContentType.TEXT,
+                        content_detail=text,
+                        sentence_id=sentence_id,
+                    )
+                    self.tts.store_tts_text(sentence_id, text)
                 self.dialogue.put(Message(role="assistant", content=text))
             elif result.action == Action.REQLLM:
                 need_llm_tools.append((result, tool_call_data))
@@ -1273,6 +1397,8 @@ class ConnectionHandler:
         # Action.RECORD：写入完整工具调用链（assistant(tool_calls) → tool(result) → assistant(response)）
         # 模型从历史中学到工具调用模式，不额外调用LLM
         if record_tools:
+            if is_aborted():
+                return
             # 构造 assistant 消息（含 tool_calls），记录"模型调用了哪些工具"
             all_tool_calls = [
                 {
@@ -1314,9 +1440,14 @@ class ConnectionHandler:
                 if resp:
                     response_parts.append(resp)
             if response_parts:
-                self.dialogue.put(Message(role="assistant", content="，".join(response_parts)))
+                response_text = self._clean_assistant_output(
+                    "，".join(response_parts), at_start=True
+                )
+                self.dialogue.put(Message(role="assistant", content=response_text))
 
         if need_llm_tools:
+            if is_aborted():
+                return
             all_tool_calls = [
                 {
                     "id": tool_call_data["id"],
@@ -1350,7 +1481,8 @@ class ConnectionHandler:
                         )
                     )
 
-            self.chat(None, depth=depth + 1)
+            if not is_aborted():
+                self.chat(None, depth=depth + 1, allow_tools=False)
 
     def _report_worker(self):
         """聊天记录上报工作线程"""
@@ -1631,6 +1763,102 @@ class ConnectionHandler:
         # 清理末尾残留的 JSON 闭合符号
         result = re.sub(r'["\'}\]]+$', '', result.rstrip()).rstrip()
         return result
+
+    @staticmethod
+    def _clean_assistant_output(text, at_start=False):
+        """清理会让语音助手显得迟钝的句首填充词。"""
+        if not text:
+            return text
+        if not at_start:
+            return text
+
+        result = text.lstrip()
+        blocked_openings = (
+            "哈哈",
+            "哈喽",
+            "不好意思",
+            "对不起",
+            "好的",
+            "好啦",
+            "好呀",
+            "好",
+            "哎呀",
+            "哎",
+            "抱歉",
+            "呃",
+            "嗯",
+        )
+        separators = " \t\r\n，,。.!！、~～…：:；;？?）)]}\"'"
+        changed = True
+        while changed:
+            changed = False
+            for opening in blocked_openings:
+                if result == opening:
+                    return ""
+                if (
+                    result.startswith(opening)
+                    and len(result) > len(opening)
+                    and result[len(opening)] in separators
+                ):
+                    result = result[len(opening):].lstrip(separators)
+                    changed = True
+                    break
+        return result
+
+    @staticmethod
+    def _may_be_blocked_opening(text):
+        if not text:
+            return False
+        stripped = text.lstrip()
+        blocked_openings = (
+            "哈哈",
+            "哈喽",
+            "不好意思",
+            "对不起",
+            "好的",
+            "好啦",
+            "好呀",
+            "好",
+            "哎呀",
+            "哎",
+            "抱歉",
+            "呃",
+            "嗯",
+        )
+        separators = " \t\r\n，,。.!！、~～…：:；;？?）)]}\"'"
+        for opening in blocked_openings:
+            if opening.startswith(stripped):
+                return True
+            if stripped == opening:
+                return True
+            if (
+                stripped.startswith(opening)
+                and len(stripped) > len(opening)
+                and stripped[len(opening)] in separators
+            ):
+                return True
+        return False
+
+    @staticmethod
+    def _is_partial_blocked_opening(text):
+        if not text:
+            return False
+        stripped = text.lstrip()
+        blocked_openings = (
+            "哈哈",
+            "哈喽",
+            "不好意思",
+            "对不起",
+            "好的",
+            "好啦",
+            "好呀",
+            "哎呀",
+            "抱歉",
+        )
+        return any(
+            opening.startswith(stripped) and stripped != opening
+            for opening in blocked_openings
+        )
 
     def _merge_tool_calls(self, tool_calls_list, tools_call):
         """合并工具调用列表

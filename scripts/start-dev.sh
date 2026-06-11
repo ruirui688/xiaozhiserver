@@ -120,7 +120,11 @@ start_process() {
   log "Starting $name"
   (
     cd "$workdir"
-    nohup "$@" >"$log_file" 2>&1 &
+    if command_exists setsid; then
+      setsid "$@" >"$log_file" 2>&1 < /dev/null &
+    else
+      nohup "$@" >"$log_file" 2>&1 < /dev/null &
+    fi
     echo $! >"$pid_file"
   )
   log "$name started, pid $(cat "$pid_file"), log $log_file"
@@ -152,7 +156,11 @@ start_manager_web() {
 
 start_xiaozhi_server() {
   local command_prefix=()
-  if command_exists conda; then
+  local python_cmd="python"
+  local conda_env_python="$HOME/miniconda3/envs/xiaozhi-esp32-server/bin/python"
+  if [[ -x "$conda_env_python" ]]; then
+    python_cmd="$conda_env_python"
+  elif command_exists conda; then
     command_prefix=(conda run -n xiaozhi-esp32-server)
   fi
 
@@ -160,7 +168,7 @@ start_xiaozhi_server() {
     "xiaozhi-server" \
     "8000" \
     "$ROOT_DIR/main/xiaozhi-server" \
-    "${command_prefix[@]}" python app.py
+    "${command_prefix[@]}" "$python_cmd" app.py
 }
 
 start_manager_mobile() {
