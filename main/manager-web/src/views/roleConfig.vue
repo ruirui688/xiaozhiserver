@@ -249,7 +249,7 @@
                           >
                             <el-option
                               v-for="(item, optionIndex) in modelOptions['LLM']"
-                              :key="`option-asr-${optionIndex}`"
+                              :key="`option-llm-${optionIndex}`"
                               :label="item.label"
                               :value="item.value"
                             />
@@ -270,8 +270,8 @@
                             class="form-select"
                           >
                             <el-option
-                              v-for="(item, optionIndex) in modelOptions['LLM']"
-                              :key="`option-asr-${optionIndex}`"
+                              v-for="(item, optionIndex) in modelOptions['SLM']"
+                              :key="`option-slm-${optionIndex}`"
                               :label="item.label"
                               :value="item.value"
                             />
@@ -698,7 +698,7 @@ export default {
           vadModelId: templateData.vadModelId || this.form.model.vadModelId,
           asrModelId: templateData.asrModelId || this.form.model.asrModelId,
           llmModelId: templateData.llmModelId || this.form.model.llmModelId,
-          slmModelId: templateData.llmModelId || this.form.model.slmModelId,
+          slmModelId: templateData.slmModelId || this.form.model.slmModelId,
           vllmModelId: templateData.vllmModelId || this.form.model.vllmModelId,
           memModelId: templateData.memModelId || this.form.model.memModelId,
           intentModelId: templateData.intentModelId || this.form.model.intentModelId,
@@ -773,9 +773,6 @@ export default {
     },
     fetchModelOptions() {
       this.models.forEach((model) => {
-        if (model.type === "SLM") {
-          return;
-        }
         if (model.type != "LLM") {
           Api.model.getModelNames(model.type, "", ({ data }) => {
             if (data.code === 0) {
@@ -824,7 +821,7 @@ export default {
       if (options.length > 0) {
         return false;
       }
-      if (model.type === "SLM" || model.type === "Intent") {
+      if (model.type === "Intent") {
         return false;
       }
       const selectedValue = this.form.model[model.key];

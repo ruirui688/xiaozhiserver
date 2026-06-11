@@ -657,7 +657,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
 
         String modelType = StringUtils.defaultString(modelConfig.getModelType()).toUpperCase();
         try {
-            if ("LLM".equals(modelType)) {
+            if ("LLM".equals(modelType) || "SLM".equals(modelType)) {
                 return testLanguageModel(configJson, type);
             }
             if ("VLLM".equals(modelType)) {

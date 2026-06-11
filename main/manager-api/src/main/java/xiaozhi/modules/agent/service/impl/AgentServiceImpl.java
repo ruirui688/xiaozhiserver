@@ -513,7 +513,7 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
         }
 
         if (entity.getSlmModelId() == null) {
-            String defaultSlmModelId = getDefaultLLMModelId();
+            String defaultSlmModelId = getDefaultSLMModelId();
             if (defaultSlmModelId != null) {
                 entity.setSlmModelId(defaultSlmModelId);
             }
@@ -558,19 +558,28 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
     }
 
     private String getDefaultLLMModelId() {
+        return getDefaultModelIdByType("LLM");
+    }
+
+    private String getDefaultSLMModelId() {
+        String slmModelId = getDefaultModelIdByType("SLM");
+        return slmModelId != null ? slmModelId : getDefaultLLMModelId();
+    }
+
+    private String getDefaultModelIdByType(String modelType) {
         try {
-            List<ModelConfigEntity> llmConfigs = modelConfigService.getEnabledModelsByType("LLM");
-            if (llmConfigs == null || llmConfigs.isEmpty()) {
+            List<ModelConfigEntity> modelConfigs = modelConfigService.getEnabledModelsByType(modelType);
+            if (modelConfigs == null || modelConfigs.isEmpty()) {
                 return null;
             }
 
-            for (ModelConfigEntity config : llmConfigs) {
+            for (ModelConfigEntity config : modelConfigs) {
                 if (config.getIsDefault() != null && config.getIsDefault() == 1) {
                     return config.getId();
                 }
             }
 
-            return llmConfigs.get(0).getId();
+            return modelConfigs.get(0).getId();
         } catch (Exception e) {
             return null;
         }
