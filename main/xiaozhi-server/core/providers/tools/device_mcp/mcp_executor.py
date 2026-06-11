@@ -12,6 +12,14 @@ from .mcp_handler import call_mcp_tool
 class DeviceMCPExecutor(ToolExecutor):
     """设备端MCP工具执行器"""
 
+    FAST_RESPONSE_CONTROL_TOOLS = {
+        "self_audio_speaker_set_volume": "音量设置指令已发送。",
+        "self_audio_speaker_volume_up": "音量调大指令已发送。",
+        "self_audio_speaker_volume_down": "音量调小指令已发送。",
+        "self_screen_set_brightness": "亮度设置指令已发送。",
+        "self_screen_set_theme": "主题设置指令已发送。",
+    }
+
     def __init__(self, conn):
         self.conn = conn
 
@@ -38,7 +46,13 @@ class DeviceMCPExecutor(ToolExecutor):
             args_str = json.dumps(arguments) if arguments else "{}"
 
             # 调用设备端MCP工具
-            result = await call_mcp_tool(conn, conn.mcp_client, tool_name, args_str)
+            result = await call_mcp_tool(
+                conn,
+                conn.mcp_client,
+                tool_name,
+                args_str,
+                timeout=self._get_tool_timeout(conn, tool_name),
+            )
 
             resultJson = None
             if isinstance(result, str):
@@ -58,12 +72,30 @@ class DeviceMCPExecutor(ToolExecutor):
                     response=resultJson.get("response", ""),
                 )
 
+            if tool_name in self.FAST_RESPONSE_CONTROL_TOOLS:
+                return ActionResponse(
+                    action=Action.RESPONSE,
+                    response=self.FAST_RESPONSE_CONTROL_TOOLS[tool_name],
+                )
+
             return ActionResponse(action=Action.REQLLM, result=str(result))
 
         except ValueError as e:
             return ActionResponse(action=Action.NOTFOUND, response=str(e))
+        except TimeoutError:
+            if tool_name in self.FAST_RESPONSE_CONTROL_TOOLS:
+                return ActionResponse(
+                    action=Action.RESPONSE,
+                    response=self.FAST_RESPONSE_CONTROL_TOOLS[tool_name],
+                )
+            return ActionResponse(action=Action.ERROR, response="设备端工具响应超时")
         except Exception as e:
             return ActionResponse(action=Action.ERROR, response=str(e))
+
+    def _get_tool_timeout(self, conn: "ConnectionHandler", tool_name: str) -> int:
+        if tool_name in self.FAST_RESPONSE_CONTROL_TOOLS:
+            return int(conn.config.get("device_mcp_control_timeout", 3))
+        return int(conn.config.get("device_mcp_tool_call_timeout", 10))
 
     def get_tools(self) -> Dict[str, ToolDefinition]:
         """获取所有设备端MCP工具"""

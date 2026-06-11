@@ -50,10 +50,12 @@
   - main/xiaozhi-server/core/handle/abortHandle.py
   - main/xiaozhi-server/core/handle/intentHandler.py
   - main/xiaozhi-server/core/providers/intent/intent_llm/intent_llm.py
+  - main/xiaozhi-server/core/providers/tools/device_mcp/mcp_executor.py
+  - main/xiaozhi-server/core/providers/tools/device_mcp/mcp_handler.py
   - main/xiaozhi-server/core/providers/tools/server_plugins/plugin_executor.py
   - main/xiaozhi-server/core/providers/tools/unified_tool_handler.py
   - main/manager-web/src/views/FunctionPluginManagement.vue
   - main/xiaozhi-server/config.yaml
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改聊天流式输出、function call、TTS 入队、打断处理、意图缓存或 Function Plugin 预设，必须保留以下约定：句首口头禅在进入 TTS 和历史前清理；工具结果绑定本轮 sentence_id 和 abort_generation；REQLLM 工具结果二次生成时禁用继续调工具；声明式互动插件必须强制 user_message 参数并传递 context；首轮信息不足时只索要线索，不允许问答案；“不是、再猜、它能吃”等短反馈不能跨上下文复用意图缓存；多工具合并必须读取 ActionResponse.result/response；`xiaozhi_thinks_you_guess` 必须走服务端 GameSessionManager，隐藏 target_word 只保存在服务端状态里，不能交给 LLM 维护。
+官方同步时的处理规则：如果官方修改聊天流式输出、function call、TTS 入队、打断处理、意图缓存、设备端 MCP 或 Function Plugin 预设，必须保留以下约定：句首口头禅在进入 TTS 和历史前清理；工具结果绑定本轮 sentence_id 和 abort_generation；REQLLM 工具结果二次生成时禁用继续调工具；声明式互动插件必须强制 user_message 参数并传递 context；首轮信息不足时只索要线索，不允许问答案；“不是、再猜、它能吃”等短反馈不能跨上下文复用意图缓存；多工具合并必须读取 ActionResponse.result/response；设备 MCP 发送失败必须立即返回，连接关闭时取消等待中的 MCP 调用，音量/亮度等控制类 MCP 使用短超时并直接回复；`xiaozhi_thinks_you_guess` 必须走服务端 GameSessionManager，隐藏 target_word 只保存在服务端状态里，不能交给 LLM 维护。
 ```
