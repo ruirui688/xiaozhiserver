@@ -14,6 +14,9 @@ jobs:
   release:
     name: Release Docker images
     runs-on: ubuntu-latest
+    env:
+      CONTAINER_REGISTRY: ${{ vars.CONTAINER_REGISTRY || 'ghcr.io' }}
+      IMAGE_REPOSITORY: ${{ vars.IMAGE_REPOSITORY || format('ghcr.io/{0}', github.repository) }}
     permissions:
       packages: write
       contents: write
@@ -39,12 +42,12 @@ jobs:
           driver-opts: |
             network=host
 
-      - name: Login to GitHub Container Registry
+      - name: Login to container registry
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.TOKEN }}
+          registry: ${{ env.CONTAINER_REGISTRY }}
+          username: ${{ secrets.CONTAINER_REGISTRY_USERNAME || github.actor }}
+          password: ${{ secrets.CONTAINER_REGISTRY_TOKEN || secrets.TOKEN }}
 
       - name: Extract version from tag
         id: get_version
@@ -57,6 +60,23 @@ jobs:
             echo "IS_VERSION=false" >> $GITHUB_ENV
           fi
 
+      - name: Prepare image tags
+        run: |
+          {
+            echo "SERVER_TAGS<<EOF"
+            echo "$IMAGE_REPOSITORY:server_latest"
+            if [ "$IS_VERSION" = "true" ]; then
+              echo "$IMAGE_REPOSITORY:server_$VERSION"
+            fi
+            echo "EOF"
+            echo "WEB_TAGS<<EOF"
+            echo "$IMAGE_REPOSITORY:web_latest"
+            if [ "$IS_VERSION" = "true" ]; then
+              echo "$IMAGE_REPOSITORY:web_$VERSION"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+
       # 构建 xiaozhi-server 镜像
       - name: Build and push xiaozhi-server
         uses: docker/build-push-action@v6
@@ -64,13 +84,13 @@ jobs:
           context: .
           file: Dockerfile-server
           push: true
-          tags: |
-            ${{ env.IS_VERSION == 'true' && format('ghcr.io/{0}:server_{1},ghcr.io/{0}:server_latest', github.repository, env.VERSION) || format('ghcr.io/{0}:server_latest', github.repository) }}
+          tags: ${{ env.SERVER_TAGS }}
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
             BUILDKIT_PROGRESS=plain
+            SERVER_BASE_IMAGE=${{ env.IMAGE_REPOSITORY }}:server-base
 
       # 构建 manager-api 镜像
       - name: Build and push manager-web
@@ -79,8 +99,7 @@ jobs:
           context: .
           file: Dockerfile-web
           push: true
-          tags: |
-            ${{ env.IS_VERSION == 'true' && format('ghcr.io/{0}:web_{1},ghcr.io/{0}:web_latest', github.repository, env.VERSION) || format('ghcr.io/{0}:web_latest', github.repository) }}
+          tags: ${{ env.WEB_TAGS }}
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max

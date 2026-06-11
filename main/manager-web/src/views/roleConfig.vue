@@ -249,7 +249,7 @@
                           >
                             <el-option
                               v-for="(item, optionIndex) in modelOptions['LLM']"
-                              :key="`option-asr-${optionIndex}`"
+                              :key="`option-llm-${optionIndex}`"
                               :label="item.label"
                               :value="item.value"
                             />
@@ -270,8 +270,8 @@
                             class="form-select"
                           >
                             <el-option
-                              v-for="(item, optionIndex) in modelOptions['LLM']"
-                              :key="`option-asr-${optionIndex}`"
+                              v-for="(item, optionIndex) in modelOptions['SLM']"
+                              :key="`option-slm-${optionIndex}`"
                               :label="item.label"
                               :value="item.value"
                             />
@@ -549,7 +549,8 @@ export default {
       inputVisible: false,
       inputValue: '',
       checkedReplacementWordIds: [],
-      hasShownNoAvailableModelWarning: false
+      noAvailableModelTypes: [],
+      noAvailableModelWarningTimer: null,
     };
   },
   methods: {
@@ -697,7 +698,7 @@ export default {
           vadModelId: templateData.vadModelId || this.form.model.vadModelId,
           asrModelId: templateData.asrModelId || this.form.model.asrModelId,
           llmModelId: templateData.llmModelId || this.form.model.llmModelId,
-          slmModelId: templateData.llmModelId || this.form.model.slmModelId,
+          slmModelId: templateData.slmModelId || this.form.model.slmModelId,
           vllmModelId: templateData.vllmModelId || this.form.model.vllmModelId,
           memModelId: templateData.memModelId || this.form.model.memModelId,
           intentModelId: templateData.intentModelId || this.form.model.intentModelId,
@@ -775,21 +776,17 @@ export default {
         if (model.type != "LLM") {
           Api.model.getModelNames(model.type, "", ({ data }) => {
             if (data.code === 0) {
+              const options = data.data.map((item) => ({
+                value: item.id,
+                label: item.modelName,
+                isHidden: false,
+              }));
               this.$set(
                 this.modelOptions,
                 model.type,
-                data.data.map((item) => ({
-                  value: item.id,
-                  label: item.modelName,
-                  isHidden: false,
-                }))
+                options
               );
-              if (data.data.length === 0 && !this.hasShownNoAvailableModelWarning) {
-                this.hasShownNoAvailableModelWarning = true;
-                this.$message.warning(
-                  this.$t("roleConfig.noAvailableModels", { type: model.label })
-                );
-              }
+              this.queueNoAvailableModelWarning(model, options);
 
               // 如果是意图识别选项，需要根据当前LLM类型更新可见性
               if (model.type === "Intent") {
@@ -808,22 +805,54 @@ export default {
                   value: item.id,
                   label: item.modelName,
                   isHidden: false,
-                });
-                this.llmModeTypeMap.set(item.id, item.type);
               });
+              this.llmModeTypeMap.set(item.id, item.type);
+            });
               this.$set(this.modelOptions, model.type, LLMdata);
-              if (LLMdata.length === 0 && !this.hasShownNoAvailableModelWarning) {
-                this.hasShownNoAvailableModelWarning = true;
-                this.$message.warning(
-                  this.$t("roleConfig.noAvailableModels", { type: model.label })
-                );
-              }
+              this.queueNoAvailableModelWarning(model, LLMdata);
             } else {
               this.$message.error(data.msg || "获取LLM模型列表失败");
             }
           });
         }
       });
+    },
+    shouldWarnNoAvailableModel(model, options) {
+      if (options.length > 0) {
+        return false;
+      }
+      if (model.type === "Intent") {
+        return false;
+      }
+      const selectedValue = this.form.model[model.key];
+      return !selectedValue;
+    },
+    queueNoAvailableModelWarning(model, options) {
+      if (!this.shouldWarnNoAvailableModel(model, options)) {
+        return;
+      }
+
+      if (!this.noAvailableModelTypes.includes(model.type)) {
+        this.noAvailableModelTypes.push(model.type);
+      }
+
+      if (this.noAvailableModelWarningTimer) {
+        clearTimeout(this.noAvailableModelWarningTimer);
+      }
+
+      this.noAvailableModelWarningTimer = setTimeout(() => {
+        const labels = this.models
+          .filter((item) => this.noAvailableModelTypes.includes(item.type))
+          .map((item) => item.label);
+
+        if (labels.length > 0) {
+          this.$message.warning(
+            this.$t("roleConfig.noAvailableModels", {
+              type: labels.join("、"),
+            })
+          );
+        }
+      }, 100);
     },
     fetchVoiceOptions(modelId) {
       if (!modelId) {
