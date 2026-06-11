@@ -91,6 +91,11 @@ class GameSessionManager:
                 f"第一个提示：{state['hints'][0]}。你来猜。"
             )
 
+        if self._is_give_up_message(normalized):
+            target_word = state["target_word"]
+            self.sessions.pop(tool_name, None)
+            return f"答案是{target_word}。这局先到这，要不要再来一局？"
+
         if self._is_hint_request(normalized) or self._is_unknown_message(normalized):
             return self._next_hint_response(state)
 
@@ -187,7 +192,10 @@ class GameSessionManager:
 
     @staticmethod
     def _is_end_message(normalized):
-        return normalized in {"不玩了", "结束", "退出", "停", "不猜了", "换游戏"}
+        return any(
+            phrase in normalized
+            for phrase in ("不玩了", "结束", "退出", "不猜了", "换游戏")
+        ) or normalized in {"停"}
 
     @staticmethod
     def _is_restart_message(normalized):
@@ -208,4 +216,20 @@ class GameSessionManager:
 
     @staticmethod
     def _is_unknown_message(normalized):
-        return normalized in {"猜不到", "不知道", "想不到", "不会"}
+        return normalized in {"不知道", "没思路", "没有思路"}
+
+    @staticmethod
+    def _is_give_up_message(normalized):
+        return any(
+            phrase in normalized
+            for phrase in (
+                "猜不到",
+                "想不到",
+                "不会",
+                "放弃",
+                "揭晓答案",
+                "公布答案",
+                "告诉我答案",
+                "答案是什么",
+            )
+        )

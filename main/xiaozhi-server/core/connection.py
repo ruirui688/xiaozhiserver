@@ -1765,8 +1765,25 @@ class ConnectionHandler:
         return result
 
     @staticmethod
+    def _clean_bad_game_turnover(text):
+        if not text:
+            return text
+        bad_patterns = (
+            r"[^。！？!?；;\n]*(轮到你了|该你了)[。！？!?；;\n]?\s*[^。！？!?；;\n]*(我来猜|心里想)[^。！？!?；;\n]*[。！？!?；;\n]?",
+            r"[^。！？!?；;\n]*(轮到你了|该你了)[^。！？!?；;\n]*(我来猜|心里想)[^。！？!?；;\n]*[。！？!?；;\n]?",
+            r"[^。！？!?；;\n]*(心里想什么|心里想的是什么)[^。！？!?；;\n]*[。！？!?；;\n]?",
+        )
+        result = text
+        for pattern in bad_patterns:
+            result = re.sub(pattern, "", result)
+        return result.strip()
+
+    @staticmethod
     def _clean_assistant_output(text, at_start=False):
         """清理会让语音助手显得迟钝的句首填充词。"""
+        if not text:
+            return text
+        text = ConnectionHandler._clean_bad_game_turnover(text)
         if not text:
             return text
         if not at_start:

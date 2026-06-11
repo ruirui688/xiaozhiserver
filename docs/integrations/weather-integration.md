@@ -32,6 +32,12 @@
 
 以上操作，会得到两个重要的配置信息:`API Key`和`API Host`
 
+## 排障说明
+
+- 如果日志出现 `Authentication failed`，通常是 `API Key` 填错、已失效或没有启用对应项目。
+- 如果日志出现 `Invalid Host` 或 `An invalid or unauthorized API Host`，通常是 `API Host` 和当前 `API Key` 不属于同一个和风天气项目。必须回到和风天气控制台复制该凭据对应的专属 `API Host`，不能沿用旧 key 的 host。
+- 当前服务端保留了 Open-Meteo 兜底查询：和风接口认证失败、Host 错误或页面抓取失败时，会先用兜底天气源返回天气，避免把接口错误误说成“城市不存在”。兜底不替代和风配置，后台仍应填写正确的 `API Key` 和 `API Host`。
+
 ## 配置方式(任选一种)
 
 ### 方式1. 如果你使用了智控台部署（推荐）
@@ -61,4 +67,3 @@ plugins:
     api_host: "你的和风天气API主机地址"
     default_location: "你的默认查询城市"
 ```
-

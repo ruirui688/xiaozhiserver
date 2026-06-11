@@ -57,5 +57,17 @@
   - main/manager-web/src/views/FunctionPluginManagement.vue
   - main/xiaozhi-server/config.yaml
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改聊天流式输出、function call、TTS 入队、打断处理、意图缓存、设备端 MCP 或 Function Plugin 预设，必须保留以下约定：句首口头禅在进入 TTS 和历史前清理；工具结果绑定本轮 sentence_id 和 abort_generation；REQLLM 工具结果二次生成时禁用继续调工具；声明式互动插件必须强制 user_message 参数并传递 context；首轮信息不足时只索要线索，不允许问答案；“不是、再猜、它能吃”等短反馈不能跨上下文复用意图缓存；多工具合并必须读取 ActionResponse.result/response；设备 MCP 发送失败必须立即返回，连接关闭时取消等待中的 MCP 调用，音量/亮度等控制类 MCP 使用短超时并直接回复；`xiaozhi_thinks_you_guess` 必须走服务端 GameSessionManager，隐藏 target_word 只保存在服务端状态里，不能交给 LLM 维护。
+官方同步时的处理规则：如果官方修改聊天流式输出、function call、TTS 入队、打断处理、意图缓存、设备端 MCP 或 Function Plugin 预设，必须保留以下约定：句首口头禅在进入 TTS 和历史前清理；工具结果绑定本轮 sentence_id 和 abort_generation；REQLLM 工具结果二次生成时禁用继续调工具；声明式互动插件必须强制 user_message 参数并传递 context；首轮信息不足时只索要线索，不允许问答案；“不是、再猜、它能吃”等短反馈不能跨上下文复用意图缓存；多工具合并必须读取 ActionResponse.result/response；设备 MCP 发送失败必须立即返回，连接关闭时取消等待中的 MCP 调用，音量/亮度等控制类 MCP 使用短超时并直接回复；`xiaozhi_thinks_you_guess` 必须走服务端 GameSessionManager，隐藏 target_word 只保存在服务端状态里，不能交给 LLM 维护；用户说“不玩了/退出/猜不到/想不到/不会/揭晓答案”时必须由状态机结束或揭晓本局，禁止切换成“轮到你了，我来猜你”。
+```
+
+## 5. 天气查询容错
+
+```text
+定制模块：xiaozhi-server 天气插件
+改动原因：和风天气 API Key 或 API Host 失效时，原实现会把 Authentication failed、Invalid Host 等接口错误交给 LLM 二次解释，导致回复“城市不存在”“南京玄武区不存在”“杭州也找不到”等错误结论。
+关键文件：
+  - main/xiaozhi-server/plugins_func/functions/get_weather.py
+  - main/xiaozhi-server/config.yaml
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改 get_weather 插件，必须保留以下约定：和风接口异常、认证失败、Host 无效、城市查询失败或页面抓取失败时，先使用 Open-Meteo 兜底查询；`南京市玄武区`、`南京市江宁区` 等区县输入需要规范化为城市候选；工具结果必须以 Action.RESPONSE 直接返回给用户，不能再交给 LLM 把接口错误改写成地点不存在。
 ```

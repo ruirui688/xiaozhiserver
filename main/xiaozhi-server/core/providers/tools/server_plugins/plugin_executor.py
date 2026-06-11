@@ -78,7 +78,13 @@ class ServerPluginExecutor(ToolExecutor):
                 config_functions = []
 
         # 合并所有需要的函数
-        all_required_functions = list(set(necessary_functions + config_functions))
+        all_required_functions = list(
+            set(
+                necessary_functions
+                + config_functions
+                + list(GameSessionManager.GUESS_MY_WORD_TOOLS)
+            )
+        )
 
         for func_name in all_required_functions:
             func_item = all_function_registry.get(func_name)
@@ -106,6 +112,10 @@ class ServerPluginExecutor(ToolExecutor):
                     description=func_item.description,
                     tool_type=ToolType.SERVER_PLUGIN,
                 )
+                continue
+
+            if self._is_stateful_game_plugin(func_name):
+                tools[func_name] = self._build_guess_my_word_tool(func_name)
                 continue
 
             declarative_tool = self._build_declarative_interaction_tool(func_name)
@@ -329,6 +339,7 @@ class ServerPluginExecutor(ToolExecutor):
             "不要自说自话替用户描述、回答或判定；优先利用上下文里的上一轮猜测、用户反馈和累计线索；"
             "如果用户刚开始游戏或信息不足，先要求用户描述线索或只问一个关键问题；关键问题只能询问类别、用途、颜色、大小、外观、动作、出现地点等线索维度，禁止问答案、词名或让用户直接揭晓；"
             "如果用户已给出线索，再猜测或判定；"
+            "用户说不玩了、结束、退出、猜不到或已经揭晓答案时，只结束当前玩法或询问是否再来一局，禁止切换成“轮到你了，我来猜你”的玩法；"
             "对于“你说我猜”，首轮必须让用户描述线索并提醒不要说答案，禁止问“你心里想的是什么”“答案是什么”“目标词是什么”。\n"
             "输出长度：1到2句，适合语音播报。\n"
             "</interaction_plugin>"
