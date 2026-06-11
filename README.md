@@ -47,6 +47,7 @@ docs/                项目文档
 
 - [官方 Docker 部署说明](./docs/deployment/Deployment.md)
 - [官方全模块部署说明](./docs/deployment/Deployment_all.md)
+- [私有 Docker 镜像发布与生产部署](./docs/deployment/private-docker-release.md)
 
 模块开发说明：
 

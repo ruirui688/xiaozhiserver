@@ -67,6 +67,7 @@ main/manager-api/src/main/resources/application-dev.yml
 - [deployment/Deployment_all.md](./deployment/Deployment_all.md) - 全模块 Docker 部署指南。用于同时部署 Server、管理后台、数据库、Redis 等完整服务栈的场景，包含懒人脚本和手动部署两种方式。
 - [deployment/dev-ops-integration.md](./deployment/dev-ops-integration.md) - 全模块源码部署自动升级方法。用于从源码目录进行部署、拉取更新、执行自动升级脚本和维护服务器运行目录的场景。
 - [deployment/docker-build.md](./deployment/docker-build.md) - 本地编译 Docker 镜像方法。用于官方镜像架构不匹配、需要自建 `server` 或 `web` 镜像、需要在本机或服务器构建镜像的场景。
+- [deployment/private-docker-release.md](./deployment/private-docker-release.md) - 私有 Docker 镜像发布与生产部署。用于把本仓库二次开发代码构建为私有镜像、推送到私有镜像仓库，并在生产服务器用 Docker Compose 拉取运行。
 - [deployment/all-in-one-digital-human-setup.md](./deployment/all-in-one-digital-human-setup.md) - 一体机数字人部署配置指南。用于数字人一体机环境初始化、网络配置、服务启动和数字人部署流程。
 - [deployment/paddlespeech-deploy.md](./deployment/paddlespeech-deploy.md) - PaddleSpeech TTS 部署与接入指南。用于安装 PaddleSpeech 服务、启动 TTS 服务并把它接入小智服务端的场景。
 
