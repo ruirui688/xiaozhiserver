@@ -98,39 +98,37 @@
               <el-table-column :label="$t('modelConfig.isEnabled')" align="center">
                 <template slot-scope="scope">
                   <el-tooltip
-                    v-if="scope.row.isDefault === 1 && scope.row.isEnabled === 1"
-                    :content="$t('modelConfig.defaultModelCannotDisable')"
+                    :disabled="canToggleEnabled(scope.row)"
+                    :content="$t('modelConfig.enableRequiresTestPassed')"
                     placement="top"
                     effect="light"
-                  > 
+                  >
                     <el-switch
                       v-model="scope.row.isEnabled"
                       class="custom-switch"
                       :active-value="1"
                       :inactive-value="0"
-                      disabled
-                      @change="handleStatusChange(scope.row)"
+                      :disabled="!canToggleEnabled(scope.row)"
+                      @change="handleStatusChange(scope.row, $event)"
                     />
                   </el-tooltip>
-                  <el-switch
-                    v-else
-                    v-model="scope.row.isEnabled"
-                    class="custom-switch"
-                    :active-value="1"
-                    :inactive-value="0"
-                    @change="handleStatusChange(scope.row)"
-                  />
                 </template>
               </el-table-column>
-              <el-table-column :label="$t('modelConfig.isDefault')" align="center">
+              <el-table-column :label="$t('modelConfig.testStatus')" align="center" width="120px">
                 <template slot-scope="scope">
-                  <el-switch
-                    v-model="scope.row.isDefault"
-                    class="custom-switch"
-                    :active-value="1"
-                    :inactive-value="0"
-                    @change="handleDefaultChange(scope.row)"
-                  />
+                  <el-tooltip
+                    :disabled="!scope.row.testMessage"
+                    :content="scope.row.testMessage"
+                    placement="top"
+                    effect="light"
+                  >
+                    <el-tag
+                      size="mini"
+                      :type="getTestStatusTagType(scope.row.testStatus)"
+                    >
+                      {{ getTestStatusText(scope.row.testStatus) }}
+                    </el-tag>
+                  </el-tooltip>
                 </template>
               </el-table-column>
               <el-table-column
@@ -152,9 +150,18 @@
               <el-table-column
                 :label="$t('modelConfig.action')"
                 align="center"
-                width="210px"
+                width="260px"
               >
                 <template slot-scope="scope">
+                  <el-button
+                    type="text"
+                    size="mini"
+                    :loading="testingModelId === scope.row.id"
+                    @click="testModel(scope.row)"
+                    class="edit-btn"
+                  >
+                    {{ $t("modelConfig.test") }}
+                  </el-button>
                   <el-button
                     type="text"
                     size="mini"
@@ -264,6 +271,7 @@
         :visible.sync="editDialogVisible"
         :modelData="editModelData"
         @save="handleModelSave"
+        @test="handleModelSaveAndTest"
       />
       <TtsModel
         :visible.sync="ttsDialogVisible"
@@ -309,6 +317,7 @@ export default {
       isAllSelected: false,
       loading: false,
       selectedModelConfig: {},
+      testingModelId: "",
     };
   },
 
@@ -454,6 +463,45 @@ export default {
       this.editModelData.duplicateMode = true;
       this.editDialogVisible = true;
     },
+    getTestStatusText(status) {
+      if (status === 1) {
+        return this.$t("modelConfig.testPassed");
+      }
+      if (status === 2) {
+        return this.$t("modelConfig.testFailed");
+      }
+      return this.$t("modelConfig.untested");
+    },
+    getTestStatusTagType(status) {
+      if (status === 1) {
+        return "success";
+      }
+      if (status === 2) {
+        return "danger";
+      }
+      return "info";
+    },
+    canToggleEnabled(model) {
+      return model.isEnabled === 1 || model.testStatus === 1;
+    },
+    clearTestingModelState() {
+      this.testingModelId = "";
+    },
+    testModel(model) {
+      if (this.testingModelId) {
+        return;
+      }
+      this.testingModelId = model.id;
+      Api.model.testModel(model.id, ({ data }) => {
+        this.clearTestingModelState();
+        if (data.code === 0) {
+          this.$message.success(data.data?.message || this.$t("modelConfig.testSuccess"));
+        } else {
+          this.$message.error(data.msg || this.$t("modelConfig.testFailedMessage"));
+        }
+        this.loadData();
+      });
+    },
     // 删除单个模型
     deleteModel(model) {
       this.$confirm(this.$t("modelConfig.confirmDelete"), this.$t("message.info"), {
@@ -513,6 +561,53 @@ export default {
           done && done(); // 调用done回调关闭加载状态
         });
       }
+    },
+    handleModelSaveAndTest({ provideCode, formData, done }) {
+      const modelType = this.activeTab;
+      const testSavedModel = (id) => {
+        if (!id) {
+          this.clearTestingModelState();
+          this.$message.error(this.$t("modelConfig.saveFailed"));
+          done && done();
+          return;
+        }
+
+        this.testingModelId = id;
+        Api.model.testModel(id, ({ data }) => {
+          this.clearTestingModelState();
+          if (data.code === 0) {
+            this.$message.success(data.data?.message || this.$t("modelConfig.testSuccess"));
+            this.loadData();
+            this.editDialogVisible = false;
+          } else {
+            this.$message.error(data.msg || this.$t("modelConfig.testFailedMessage"));
+            this.loadData();
+          }
+          done && done();
+        });
+      };
+
+      if (this.editModelData.duplicateMode) {
+        formData.id = "";
+        Api.model.addModel({ modelType, provideCode, formData }, ({ data }) => {
+          if (data.code === 0) {
+            testSavedModel(data.data?.id);
+          } else {
+            this.$message.error(data.msg || this.$t("modelConfig.duplicateFailed"));
+            done && done();
+          }
+        });
+        return;
+      }
+
+      Api.model.updateModel({ modelType, provideCode, id: formData.id, formData }, ({ data }) => {
+        if (data.code === 0) {
+          testSavedModel(formData.id);
+        } else {
+          this.$message.error(data.msg || this.$t("modelConfig.saveFailed"));
+          done && done();
+        }
+      });
     },
     selectAll() {
       if (this.isAllSelected) {
@@ -593,43 +688,39 @@ export default {
       Api.model.getModelList(params, ({ data }) => {
         this.loading = false; // 结束加载
         if (data.code === 0) {
-          this.modelList = data.data.list;
+          this.modelList = data.data.list.map((model) => ({
+            ...model,
+            isEnabled: model.testStatus === 1 ? model.isEnabled : 0,
+          }));
           this.total = data.data.total;
         } else {
           this.$message.error(data.msg || this.$t("modelConfig.fetchModelsFailed"));
         }
       });
     },
-    // 处理启用/禁用状态变更
-    handleStatusChange(model) {
-      const newStatus = model.isEnabled ? 1 : 0;
-      const originalStatus = model.isEnabled;
+    // 处理启用/非启用状态变更
+    handleStatusChange(model, newStatus) {
+      const normalizedStatus = newStatus ? 1 : 0;
+      const originalStatus = normalizedStatus === 1 ? 0 : 1;
 
-      model.isEnabled = !model.isEnabled;
+      if (normalizedStatus === 1 && model.testStatus !== 1) {
+        model.isEnabled = originalStatus;
+        this.$message.warning(this.$t("modelConfig.enableRequiresTestPassed"));
+        return;
+      }
 
-      Api.model.updateModelStatus(model.id, newStatus, ({ data }) => {
+      Api.model.updateModelStatus(model.id, normalizedStatus, ({ data }) => {
         if (data.code === 0) {
           this.$message.success(
-            newStatus === 1
+            normalizedStatus === 1
               ? this.$t("modelConfig.enableSuccess")
               : this.$t("modelConfig.disableSuccess")
           );
-          // 保持新状态
-          model.isEnabled = newStatus;
-          // 刷新表格数据
+          model.isEnabled = normalizedStatus;
           this.loadData();
         } else {
-          // 操作失败时恢复原状态
           model.isEnabled = originalStatus;
           this.$message.error(data.msg || this.$t("modelConfig.operationFailed"));
-        }
-      });
-    },
-    handleDefaultChange(model) {
-      Api.model.setDefaultModel(model.id, ({ data }) => {
-        if (data.code === 0) {
-          this.$message.success(this.$t("modelConfig.setDefaultSuccess"));
-          this.loadData();
         }
       });
     },

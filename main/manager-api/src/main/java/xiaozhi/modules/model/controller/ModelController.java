@@ -26,6 +26,7 @@ import xiaozhi.modules.model.dto.ModelBasicInfoDTO;
 import xiaozhi.modules.model.dto.ModelConfigBodyDTO;
 import xiaozhi.modules.model.dto.ModelConfigDTO;
 import xiaozhi.modules.model.dto.ModelProviderDTO;
+import xiaozhi.modules.model.dto.ModelTestResultDTO;
 import xiaozhi.modules.model.dto.VoiceDTO;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
@@ -112,6 +113,17 @@ public class ModelController {
         return new Result<>();
     }
 
+    @PostMapping("/test/{id}")
+    @Operation(summary = "测试模型配置")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<ModelTestResultDTO> testModelConfig(@PathVariable String id) {
+        ModelTestResultDTO testResult = modelConfigService.testModel(id);
+        if (Boolean.TRUE.equals(testResult.getSuccess())) {
+            return new Result<ModelTestResultDTO>().ok(testResult);
+        }
+        return new Result<ModelTestResultDTO>().error(testResult.getMessage());
+    }
+
     @GetMapping("/{id}")
     @Operation(summary = "获取模型配置")
     @RequiresPermissions("sys:role:superAdmin")
@@ -122,16 +134,15 @@ public class ModelController {
     }
 
     @PutMapping("/enable/{id}/{status}")
-    @Operation(summary = "启用/关闭模型配置")
+    @Operation(summary = "启用/设为非启用模型配置")
     @RequiresPermissions("sys:role:superAdmin")
     public Result<Void> enableModelConfig(@PathVariable String id, @PathVariable Integer status) {
         ModelConfigEntity entity = modelConfigService.selectById(id);
         if (entity == null) {
             return new Result<Void>().error("模型配置不存在");
         }
-        // 不能关闭默认模型
-        if (status == 0 && entity.getIsDefault() > 0) {
-            return new Result<Void>().error("默认模型配置不允许关闭");
+        if (status == 1 && (entity.getTestStatus() == null || entity.getTestStatus() != 1)) {
+            return new Result<Void>().error("模型未测试通过，不能启用");
         }
         // 不更新ConfigJson字段
         entity.setConfigJson(null);
@@ -147,6 +158,9 @@ public class ModelController {
         ModelConfigEntity entity = modelConfigService.selectById(id);
         if (entity == null) {
             return new Result<Void>().error("模型配置不存在");
+        }
+        if (entity.getTestStatus() == null || entity.getTestStatus() != 1) {
+            return new Result<Void>().error("模型未测试通过，不能设置为默认模型");
         }
         // 将其他模型设置为非默认
         modelConfigService.setDefaultModel(entity.getModelType(), 0);

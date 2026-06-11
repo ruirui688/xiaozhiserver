@@ -117,8 +117,17 @@
       </el-form>
     </div>
 
-    <div style="display: flex; justify-content: center">
-      <el-button type="primary" @click="handleSave" class="save-btn" :loading="saving" :disabled="saving">
+    <div class="dialog-actions">
+      <el-button
+        type="primary"
+        @click="handleSaveAndTest"
+        class="test-btn"
+        :loading="testing"
+        :disabled="saving || testing"
+      >
+        {{ $t("modelConfigDialog.saveAndTest") }}
+      </el-button>
+      <el-button type="primary" @click="handleSave" class="save-btn" :loading="saving" :disabled="saving || testing">
         {{ $t("modelConfigDialog.save") }}
       </el-button>
     </div>
@@ -145,6 +154,7 @@ export default {
       providers: [],
       providersLoaded: false,
       saving: false,
+      testing: false,
       allProvidersData: null,
       pendingProviderType: null,
       pendingModelData: null,
@@ -224,6 +234,8 @@ export default {
         configJson: {},
       };
       this.fieldJsonMap = {};
+      this.testing = false;
+      this.saving = false;
     },
     resetProviders() {
       this.providers = [];
@@ -266,25 +278,7 @@ export default {
     handleSave() {
       this.saving = true; // 开始保存加载
 
-      // 处理所有JSON字段
-      Object.keys(this.fieldJsonMap).forEach((key) => {
-        const parsed = this.validateJson(this.fieldJsonMap[key]);
-        if (parsed !== null) {
-          this.form.configJson[key] = parsed;
-        }
-      });
-
-      const formData = {
-        id: this.modelData.id,
-        modelCode: this.form.modelCode,
-        modelName: this.form.modelName,
-        isDefault: this.form.isDefault ? 1 : 0,
-        isEnabled: this.form.isEnabled ? 1 : 0,
-        docLink: this.form.docLink,
-        remark: this.form.remark,
-        sort: this.form.sort || 0,
-        configJson: { ...this.form.configJson },
-      };
+      const formData = this.buildFormData();
 
       this.$emit("save", {
         provideCode: this.form.configJson.type,
@@ -298,6 +292,42 @@ export default {
       setTimeout(() => {
         this.saving = false;
       }, 3000);
+    },
+    handleSaveAndTest() {
+      this.testing = true;
+      const formData = this.buildFormData();
+
+      this.$emit("test", {
+        provideCode: this.form.configJson.type,
+        formData,
+        done: () => {
+          this.testing = false;
+        },
+      });
+
+      setTimeout(() => {
+        this.testing = false;
+      }, 30000);
+    },
+    buildFormData() {
+      Object.keys(this.fieldJsonMap).forEach((key) => {
+        const parsed = this.validateJson(this.fieldJsonMap[key]);
+        if (parsed !== null) {
+          this.form.configJson[key] = parsed;
+        }
+      });
+
+      return {
+        id: this.modelData.id,
+        modelCode: this.form.modelCode,
+        modelName: this.form.modelName,
+        isDefault: this.form.isDefault ? 1 : 0,
+        isEnabled: this.form.isEnabled ? 1 : 0,
+        docLink: this.form.docLink,
+        remark: this.form.remark,
+        sort: this.form.sort || 0,
+        configJson: { ...this.form.configJson },
+      };
     },
     loadProviders() {
       if (this.providersLoaded) return;
@@ -591,7 +621,24 @@ export default {
   transition: all 0.3s ease;
 }
 
-.save-btn:hover {
+.dialog-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+
+.test-btn {
+  background: #edf7ef;
+  color: #16833a;
+  border: 1px solid #b9dfc4;
+  width: 150px;
+  height: 40px;
+  font-size: 16px;
+  transition: all 0.3s ease;
+}
+
+.save-btn:hover,
+.test-btn:hover {
   background: linear-gradient(to right, #237ff4, #9c40d5);
   color: white;
   border: none;

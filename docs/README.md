@@ -48,11 +48,18 @@ main/manager-api/src/main/resources/application-dev.yml
 
 这些文档是规则，不是建议。任何开发、部署、同步官方上游、整理文档的任务都必须遵守。
 
-- [standards/development-specification.md](./standards/development-specification.md) - 项目开发总规范。规定本地仓库、私有远程仓库、官方上游仓库的职责边界；规定标准远端命名、当前 `gitea` 过渡状态、分支规则、提交流程、数据库变更、配置隔离、阿里云部署、生产发布和官方更新同步规则。AI 修改代码前必须读取。
+- [standards/development-specification.md](./standards/development-specification.md) - 项目开发总规范。规定本地仓库、私有远程仓库、官方上游仓库的职责边界；规定标准远端命名、分支规则、提交流程、数据库变更、配置隔离、阿里云部署、生产发布和官方更新同步规则。AI 修改代码前必须读取。
 - [standards/ai-coding-agent-instructions.md](./standards/ai-coding-agent-instructions.md) - AI 编程工具执行规范。规定 AI 在新开发功能、修改功能、修复问题、同步官方更新、整理文档时必须读取哪些文件、如何识别真实私有远端、如何推送当前分支、可以自动执行哪些操作、哪些操作必须先获得用户授权。所有 AI 编程任务必须读取。
 - [standards/README.md](./standards/README.md) - 规范目录入口。用于快速确认 `standards/` 下每份规则文档的职责和使用顺序，适合开发者或 AI 在进入规范目录时先阅读。
+- [local-customizations.md](./local-customizations.md) - 本地定制记录。用于记录相对官方仓库的长期本地改动，官方同步、冲突处理、重构插件或整理本地扩展时必须读取。
 
-## 3. 部署与运维
+## 3. 本地开发环境
+
+用于开发机初始化、源码编译环境准备、IDE 调试前的依赖安装和本地服务启动顺序。AI 只有在修改本地开发环境、源码编译说明、开发机依赖或环境排查文档时，才需要读取本分类文档。
+
+- [development/ubuntu-source-development-environment.md](./development/ubuntu-source-development-environment.md) - Ubuntu 源码开发环境安装说明。用于在 Ubuntu 22.04/24.04 本地开发机上安装 JDK 21、Maven、Node.js、pnpm、Conda、MySQL、Redis、FFmpeg 和项目依赖，并说明本地配置、模型目录、启动顺序和验证命令。
+
+## 4. 部署与运维
 
 用于服务器安装、Docker 构建、全模块部署、自动更新、生产运行和部署端口配置。AI 只有在修改部署、Docker、服务器脚本、端口、Nginx、生产发布流程时，才需要读取本分类文档。
 
@@ -63,7 +70,7 @@ main/manager-api/src/main/resources/application-dev.yml
 - [deployment/all-in-one-digital-human-setup.md](./deployment/all-in-one-digital-human-setup.md) - 一体机数字人部署配置指南。用于数字人一体机环境初始化、网络配置、服务启动和数字人部署流程。
 - [deployment/paddlespeech-deploy.md](./deployment/paddlespeech-deploy.md) - PaddleSpeech TTS 部署与接入指南。用于安装 PaddleSpeech 服务、启动 TTS 服务并把它接入小智服务端的场景。
 
-## 4. 设备与固件
+## 5. 设备与固件
 
 用于 ESP32 固件、设备配置、OTA、MQTT 网关和设备互呼。AI 只有在修改设备协议、OTA、MQTT、设备呼叫或固件相关逻辑时，才需要读取本分类文档。
 
@@ -73,7 +80,7 @@ main/manager-api/src/main/resources/application-dev.yml
 - [device/device-call-guide.md](./device/device-call-guide.md) - 设备间相互呼叫插件使用指南。用于配置设备互呼能力、理解启用前提、插件配置和调用流程。
 - [device/mqtt-gateway-integration.md](./device/mqtt-gateway-integration.md) - MQTT 网关部署教程。用于部署 MQTT 网关、连接设备消息通道、配置网关与小智服务端之间的通信。
 
-## 5. MCP 与工具调用
+## 6. MCP 与工具调用
 
 用于 MCP 接入点、MCP 工具、设备信息获取、视觉能力和上下文注入。AI 只有在修改 MCP、工具调用、视觉接口、上下文注入相关功能时，才需要读取本分类文档。
 
@@ -83,7 +90,7 @@ main/manager-api/src/main/resources/application-dev.yml
 - [mcp/mcp-vision-integration.md](./mcp/mcp-vision-integration.md) - 视觉模型使用指南。用于开启服务端视觉模型、选择视觉模型供应商、配置视觉接口并排查网络可用性。
 - [mcp/context-provider-integration.md](./mcp/context-provider-integration.md) - 上下文源使用教程。用于为智能体注入外部上下文、理解上下文源接口规范、配置服务端调用上下文提供方。
 
-## 6. 模型、语音与记忆
+## 7. 模型、语音与记忆
 
 用于 ASR、TTS、声纹、记忆、知识库、RAG 和模型性能测试。AI 只有在修改 ASR、TTS、声纹、记忆、RAG、性能测试相关功能时，才需要读取本分类文档。
 
@@ -95,7 +102,7 @@ main/manager-api/src/main/resources/application-dev.yml
 - [models/ragflow-integration.md](./models/ragflow-integration.md) - RAGFlow 集成指南。用于部署 RAGFlow、检查 MySQL/Redis、配置知识库问答和服务端 RAG 调用。
 - [models/performance_tester.md](./models/performance_tester.md) - 模型性能测试工具使用指南。用于测试 ASR、大语言模型、非流式 TTS、流式 TTS、视觉模型的延迟和稳定性。
 
-## 7. 插件与第三方集成
+## 8. 插件与第三方集成
 
 用于天气、短信、Home Assistant、新闻源等外部服务能力。AI 只有在修改对应插件、第三方 API 或配置项时，才需要读取本分类文档。
 
@@ -103,15 +110,16 @@ main/manager-api/src/main/resources/application-dev.yml
 - [integrations/ali-sms-integration.md](./integrations/ali-sms-integration.md) - 阿里云短信集成指南。用于添加短信签名、短信模板、创建短信账号、开通权限并配置短信发送能力。
 - [integrations/homeassistant-integration.md](./integrations/homeassistant-integration.md) - Home Assistant 集成指南。用于把小智 ESP32 开源服务端接入 Home Assistant，实现智能家居设备控制。
 - [integrations/newsnow_plugin_config.md](./integrations/newsnow_plugin_config.md) - NewsNow 新闻源插件配置指南。用于配置新闻源、通过 Web 管理界面维护新闻插件、调整新闻查询来源。
+- [integrations/custom-interactive-plugin.md](./integrations/custom-interactive-plugin.md) - 自定义互动插件预留接口。用于在后台手动新增热梗、成语接龙、你说我猜等轻量互动插件，理解 `custom_plugin` 参数约定和运行边界。
 
-## 8. 数字人与唤醒词
+## 9. 数字人与唤醒词
 
 用于数字人启动、唤醒词模型和相关体验配置。AI 只有在修改数字人、唤醒词、展示端体验相关逻辑时，才需要读取本分类文档。
 
 - [digital-human/digital-human-wakeword.md](./digital-human/digital-human-wakeword.md) - 数字人启动与唤醒词配置说明。用于下载唤醒词模型、配置数字人启动方式、处理数字人与语音唤醒之间的联动。
 - [deployment/all-in-one-digital-human-setup.md](./deployment/all-in-one-digital-human-setup.md) - 一体机数字人部署配置指南。用于数字人一体机的系统初始化、网络配置、服务安装和部署流程。
 
-## 9. 通用参考
+## 10. 通用参考
 
 用于问题排查、贡献说明、多语言 README 和图片资源。AI 只有在整理文档、排查问题或更新 README 时，才需要读取本分类文档。
 
@@ -123,7 +131,7 @@ main/manager-api/src/main/resources/application-dev.yml
 - [readme/README_vi.md](./readme/README_vi.md) - 官方越南语 README 归档。用于维护越南语项目说明或比对多语言 README 内容时读取。
 - [images/](./images/) - 文档图片资源目录。用于部署架构图、截图和说明图片；修改引用图片或移动文档时必须检查图片路径。
 
-## 10. AI 读取规则
+## 11. AI 读取规则
 
 AI 必须按任务读取文档：
 
@@ -132,6 +140,7 @@ AI 必须按任务读取文档：
 模块任务：对应模块 README
 数据库任务：manager-api db/changelog
 配置任务：config.yaml / config_from_api.yaml / application*.yml
+开发环境任务：docs/development/*
 部署任务：docs/deployment/*
 设备任务：docs/device/*
 MCP 任务：docs/mcp/*
@@ -149,7 +158,7 @@ AI 禁止：
 - 把生产数据库真实连接信息、密码、Token、AccessKey 写入 Git。
 - 未识别当前分支和真实私有远端就执行 push。
 
-## 11. 文档移动规则
+## 12. 文档移动规则
 
 官方原有文档已按主题移动到分类目录。移动后必须维护相对链接，避免破坏图片路径和文档互链。
 

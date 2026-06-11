@@ -118,8 +118,8 @@ export default {
         sort: 1,
         docLink: '',
         remark: '',
-        isEnabled: true,
-        isDefault: true,
+        isEnabled: false,
+        isDefault: false,
         configJson: {}
       }
     }
@@ -221,8 +221,8 @@ export default {
         sort: this.formData.sort || 1,
         docLink: this.formData.docLink || '',
         remark: this.formData.remark || '',
-        isEnabled: this.formData.isEnabled ? 1 : 0,
-        isDefault: this.formData.isDefault ? 1 : 0,
+        isEnabled: 0,
+        isDefault: 0,
         provideCode: this.formData.supplier,
         configJson: {
           ...this.formData.configJson,
@@ -250,8 +250,8 @@ export default {
         sort: 1,
         docLink: '',
         remark: '',
-        isEnabled: true,
-        isDefault: true,
+        isEnabled: false,
+        isDefault: false,
         configJson: {}
       };
       // 重置加载状态

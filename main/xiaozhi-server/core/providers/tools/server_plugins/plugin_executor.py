@@ -21,6 +21,9 @@ class ServerPluginExecutor(ToolExecutor):
         """执行服务端插件工具"""
         func_item = all_function_registry.get(tool_name)
         if not func_item:
+            custom_response = self._execute_custom_plugin(tool_name, arguments)
+            if custom_response:
+                return custom_response
             return ActionResponse(
                 action=Action.NOTFOUND, response=f"插件函数 {tool_name} 不存在"
             )
@@ -97,12 +100,17 @@ class ServerPluginExecutor(ToolExecutor):
                     description=func_item.description,
                     tool_type=ToolType.SERVER_PLUGIN,
                 )
+                continue
+
+            custom_tool = self._build_custom_plugin_tool(func_name)
+            if custom_tool:
+                tools[func_name] = custom_tool
 
         return tools
 
     def has_tool(self, tool_name: str) -> bool:
         """检查是否有指定的服务端插件工具"""
-        return tool_name in all_function_registry
+        return tool_name in all_function_registry or self._is_custom_plugin(tool_name)
 
     def _init_news_source_description(self, func_item, func_name):
         """根据连接配置初始化新闻工具的参数描述"""
@@ -120,3 +128,84 @@ class ServerPluginExecutor(ToolExecutor):
             ] = f"新闻源的标准中文名称，例如{sources_str}等。可选参数，如果不提供则使用默认新闻源"
         except (KeyError, TypeError):
             pass
+
+    def _get_plugin_config(self, func_name):
+        """获取单个插件配置，兼容异常配置格式。"""
+        plugin_config = self.config.get("plugins", {}).get(func_name, {})
+        return plugin_config if isinstance(plugin_config, dict) else {}
+
+    def _is_custom_plugin(self, func_name):
+        """判断是否为后台手动配置的自定义互动插件。"""
+        plugin_config = self._get_plugin_config(func_name)
+        custom_flag = plugin_config.get("custom_plugin")
+        if isinstance(custom_flag, bool):
+            return custom_flag
+        if isinstance(custom_flag, str):
+            return custom_flag.lower() == "true"
+        return False
+
+    def _build_custom_plugin_tool(self, func_name):
+        """把后台配置的自定义插件转换成 OpenAI function tool 描述。"""
+        plugin_config = self._get_plugin_config(func_name)
+        if not self._is_custom_plugin(func_name):
+            return None
+
+        description = plugin_config.get("description") or plugin_config.get(
+            "instructions"
+        )
+        if not description:
+            description = f"自定义互动插件：{func_name}"
+
+        parameters = plugin_config.get("parameters_schema")
+        if not isinstance(parameters, dict):
+            parameters = {
+                "type": "object",
+                "properties": {
+                    "user_message": {
+                        "type": "string",
+                        "description": "用户当前触发这个互动插件时说的话",
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": "可选的对话上下文或额外提示",
+                    },
+                },
+                "required": ["user_message"],
+            }
+
+        tool_desc = {
+            "type": "function",
+            "function": {
+                "name": func_name,
+                "description": description,
+                "parameters": parameters,
+            },
+        }
+        return ToolDefinition(
+            name=func_name,
+            description=tool_desc,
+            tool_type=ToolType.SERVER_PLUGIN,
+        )
+
+    def _execute_custom_plugin(self, tool_name, arguments):
+        """执行自定义互动插件。
+
+        自定义插件不运行用户上传代码，只把后台配置的玩法说明交给 LLM 继续生成回复。
+        """
+        if not self._is_custom_plugin(tool_name):
+            return None
+
+        plugin_config = self._get_plugin_config(tool_name)
+        instructions = plugin_config.get("instructions") or plugin_config.get(
+            "description", ""
+        )
+        opening_message = plugin_config.get("opening_message", "")
+
+        result = (
+            f"自定义插件 {tool_name} 已触发。\n"
+            f"玩法说明：{instructions}\n"
+            f"开场白：{opening_message}\n"
+            f"工具参数：{arguments}\n"
+            "请根据玩法说明和当前对话上下文，用自然口语继续和用户互动。"
+        )
+        return ActionResponse(action=Action.REQLLM, result=result)

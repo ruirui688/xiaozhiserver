@@ -158,6 +158,30 @@ export default {
         })
       }).send()
   },
+  // 测试模型配置
+  testModel(id, callback) {
+    RequestService.sendRequest()
+      .url(`${getServiceUrl()}/models/test/${id}`)
+      .method('POST')
+      .success((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .fail((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .networkFail((err) => {
+        console.error('测试模型失败:', err)
+        RequestService.clearRequestTime()
+        callback({
+          data: {
+            code: -1,
+            msg: err?.msg || '测试模型失败，请检查后台服务或网络连接'
+          }
+        })
+      }).send()
+  },
   // 启用/禁用模型状态
   updateModelStatus(id, status, callback) {
     RequestService.sendRequest()

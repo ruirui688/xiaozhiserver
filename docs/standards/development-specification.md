@@ -21,34 +21,21 @@ origin    私有远程仓库，允许 push，阿里云服务器也从这里拉�
 upstream  官方原始仓库，只允许 fetch，不允许 push
 ```
 
+当前项目标准远端：
+
+```text
+origin    ssh://git@10.144.92.32:222/gaoruirui688/xiaozhi-esp32-server.git
+upstream  https://github.com/xinnan-tech/xiaozhi-esp32-server.git
+```
+
 目标状态必须遵守：
 
 - 本地开发代码必须推送到 `origin`。
 - 官方仓库 `upstream` 只允许用于查看和同步官方更新。
 - 禁止把本地二次开发代码推送到官方仓库。
 - 阿里云服务器必须从私有远程仓库拉取代码。
-
-当前仓库如果仍是 `gitea = 私有仓库`、`origin = 官方仓库`，属于过渡状态。远端标准化必须由用户明确授权后执行：
-
-```bash
-git remote rename origin upstream
-git remote rename gitea origin
-git remote -v
-```
-
-调整后必须满足：
-
-```text
-origin    http://192.168.0.151:3001/gaoruirui688/xiaozhi-esp32-server.git
-upstream  https://github.com/xinnan-tech/xiaozhi-esp32-server.git
-```
-
-过渡状态下必须遵守：
-
-- 私有远端是 `gitea`，允许在用户授权后 push。
-- 官方远端是 `origin`，只允许 fetch，不允许 push。
-- AI 不得假设 `origin` 一定是私有仓库，必须以 `git remote -v` 的实际结果判断。
-- AI 不得自动重命名远端；远端标准化属于仓库配置变更，必须先获得用户明确授权。
+- AI 不得仅凭远端名称判断推送目标，执行 push 前必须以 `git remote -v` 的实际结果确认 `origin` 指向私有仓库。
+- 如果发现远端命名不符合上述标准，必须先向用户说明差异并获得明确授权后再修改远端配置。
 - 推送时必须推送当前任务分支，不得固定推送 `main`。
 
 ## 2. 分支规则
@@ -90,12 +77,6 @@ git diff
 git add <changed-files>
 git commit -m "feat: describe change"
 git push origin feature/your-feature
-```
-
-如果仓库仍处于 `gitea = 私有仓库`、`origin = 官方仓库` 的过渡状态，最后一步必须改为：
-
-```bash
-git push -u gitea feature/your-feature
 ```
 
 禁止把 `feature/xxx`、`sync/upstream-YYYYMMDD` 或本地 `main` 推送到官方远端。
@@ -156,6 +137,14 @@ local       本地开发环境
 test        测试环境
 production 生产环境
 ```
+
+本地 Ubuntu 源码开发环境必须优先参考：
+
+```text
+docs/development/ubuntu-source-development-environment.md
+```
+
+该文档只用于开发机初始化和源码编译调试，不替代 `docs/deployment/` 下的服务器部署文档。开发机可以安装 JDK、Maven、Node.js、Conda、MySQL、Redis 等工具；阿里云生产服务器仍必须按部署规则从 `origin` 拉取代码并使用发布 tag 部署，禁止直接作为功能开发环境。
 
 四类内容必须分开管理：
 
@@ -628,7 +617,7 @@ git revert -m 1 <merge-commit-id>
 git push origin main
 ```
 
-如果仓库仍处于远端过渡状态，回滚推送目标必须使用真实私有远端，例如 `gitea`。禁止把回滚提交推送到官方远端。
+回滚推送目标必须是私有远端 `origin`，执行前必须用 `git remote -v` 确认 `origin` 指向私有仓库。禁止把回滚提交推送到官方远端。
 
 数据库回滚必须遵守：
 
