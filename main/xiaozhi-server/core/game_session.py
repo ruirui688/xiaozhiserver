@@ -17,7 +17,41 @@ class GameSessionManager:
         "guess_xiaozhi_word",
         "i_think_you_guess",
     }
+    USER_DESCRIBES_TOOLS = {"guess_what_i_say"}
     IDIOM_CHAIN_TOOLS = {"idiom_chain"}
+
+    _HISTORICAL_PEOPLE = [
+        {"name": "秦始皇", "region": "china", "period": "ancient", "era": "秦汉", "ruler": True, "military": True, "culture": False, "founder": True, "reformer": True},
+        {"name": "刘邦", "region": "china", "period": "ancient", "era": "秦汉", "ruler": True, "military": True, "culture": False, "founder": True, "reformer": False},
+        {"name": "汉武帝", "region": "china", "period": "ancient", "era": "秦汉", "ruler": True, "military": True, "culture": False, "founder": False, "reformer": True},
+        {"name": "曹操", "region": "china", "period": "ancient", "era": "三国", "ruler": False, "military": True, "culture": True, "founder": False, "reformer": False},
+        {"name": "诸葛亮", "region": "china", "period": "ancient", "era": "三国", "ruler": False, "military": True, "culture": True, "founder": False, "reformer": False},
+        {"name": "唐太宗", "region": "china", "period": "ancient", "era": "隋唐", "ruler": True, "military": True, "culture": False, "founder": False, "reformer": True},
+        {"name": "武则天", "region": "china", "period": "ancient", "era": "隋唐", "ruler": True, "military": False, "culture": False, "founder": True, "reformer": True},
+        {"name": "李白", "region": "china", "period": "ancient", "era": "隋唐", "ruler": False, "military": False, "culture": True, "founder": False, "reformer": False},
+        {"name": "岳飞", "region": "china", "period": "ancient", "era": "宋元", "ruler": False, "military": True, "culture": False, "founder": False, "reformer": False},
+        {"name": "朱元璋", "region": "china", "period": "ancient", "era": "明清", "ruler": True, "military": True, "culture": False, "founder": True, "reformer": False},
+        {"name": "康熙", "region": "china", "period": "ancient", "era": "明清", "ruler": True, "military": True, "culture": False, "founder": False, "reformer": True},
+        {"name": "林则徐", "region": "china", "period": "modern", "era": "近现代", "ruler": False, "military": False, "culture": False, "founder": False, "reformer": True},
+        {"name": "孙中山", "region": "china", "period": "modern", "era": "近现代", "ruler": False, "military": False, "culture": False, "founder": True, "reformer": True},
+        {"name": "毛泽东", "region": "china", "period": "modern", "era": "近现代", "ruler": False, "military": True, "culture": False, "founder": True, "reformer": True},
+        {"name": "邓小平", "region": "china", "period": "modern", "era": "近现代", "ruler": False, "military": False, "culture": False, "founder": False, "reformer": True},
+        {"name": "孔子", "region": "china", "period": "ancient", "era": "先秦", "ruler": False, "military": False, "culture": True, "founder": False, "reformer": False},
+        {"name": "拿破仑", "region": "foreign", "period": "modern", "era": "欧洲近代", "ruler": True, "military": True, "culture": False, "founder": True, "reformer": True},
+        {"name": "华盛顿", "region": "foreign", "period": "modern", "era": "欧美近现代", "ruler": False, "military": True, "culture": False, "founder": True, "reformer": False},
+        {"name": "林肯", "region": "foreign", "period": "modern", "era": "欧美近现代", "ruler": False, "military": False, "culture": False, "founder": False, "reformer": True},
+        {"name": "丘吉尔", "region": "foreign", "period": "modern", "era": "欧美近现代", "ruler": False, "military": False, "culture": False, "founder": False, "reformer": False},
+    ]
+
+    _HISTORICAL_QUESTIONS = [
+        ("region", "china", "先确定范围：他主要属于中国历史吗？"),
+        ("period", "modern", "从年代看，他主要活跃在近现代吗？比如1840年以后。"),
+        ("ruler", True, "从身份看，他本人是皇帝或君主吗？"),
+        ("military", True, "从事迹看，他主要和战争、军事或建国过程有关吗？"),
+        ("culture", True, "从领域看，他主要以思想、文化或文学出名吗？"),
+        ("founder", True, "他是否和建立政权、开国或创建重要制度有关？"),
+        ("reformer", True, "他是否以改革、变法或推动社会转折出名？"),
+    ]
 
     _IDIOM_CHAIN_STARTS = [
         "一心一意",
@@ -130,6 +164,9 @@ class GameSessionManager:
     def is_guess_my_word_tool(self, tool_name):
         return tool_name in self.GUESS_MY_WORD_TOOLS
 
+    def is_user_describes_tool(self, tool_name):
+        return tool_name in self.USER_DESCRIBES_TOOLS
+
     def is_idiom_chain_tool(self, tool_name):
         return tool_name in self.IDIOM_CHAIN_TOOLS
 
@@ -221,6 +258,192 @@ class GameSessionManager:
         if not next_idiom:
             return f"接得上。你这个“{user_idiom[-1]}”字有点难，我认输一回。要不要重新开一局？"
         return f"接得上。{next_idiom}。你接“{next_idiom[-1]}”字。"
+
+    def handle_user_describes_guess(self, tool_name, user_message):
+        normalized = self._normalize(user_message)
+        if self._is_end_message(normalized):
+            self.sessions.pop(tool_name, None)
+            return "这局先到这。下次你再描述，我继续猜。"
+
+        state = self.sessions.get(tool_name)
+        if not state or not state.get("active") or self._is_restart_message(normalized):
+            state = self._start_user_describes_guess(tool_name)
+            return "我们玩你说我猜。你描述特点、身份或年代，我来猜；先别直接说答案。"
+
+        self._update_user_describes_state(state, user_message)
+        if state.get("target_type") == "historical_person":
+            return self._next_historical_person_response(state)
+
+        if self._contains_any(normalized, ("历史人物", "古代人", "皇帝", "将军", "诗人")):
+            state["target_type"] = "historical_person"
+            return self._next_historical_person_response(state)
+
+        return "我先缩小范围：它是人物、物品、地点，还是动物？"
+
+    def _start_user_describes_guess(self, tool_name):
+        state = {
+            "active": True,
+            "game_type": "user_describes_assistant_guesses",
+            "tool_name": tool_name,
+            "target_type": "",
+            "facts": {},
+            "asked": [],
+            "excluded_names": set(),
+            "last_question": None,
+            "turn_count": 0,
+            "started_at": time.time(),
+        }
+        self.sessions[tool_name] = state
+        return state
+
+    def _update_user_describes_state(self, state, user_message):
+        normalized = self._normalize(user_message)
+        state["turn_count"] += 1
+
+        if self._contains_any(normalized, ("历史人物", "古代人", "皇帝", "将军", "诗人")):
+            state["target_type"] = "historical_person"
+        if self._contains_any(normalized, ("人物", "人名")) and not state.get("target_type"):
+            state["target_type"] = "person"
+
+        last_question = state.get("last_question")
+        answer = self._classify_yes_no(normalized)
+        if last_question and answer:
+            if last_question.get("type") == "guess":
+                if answer == "yes":
+                    state["solved"] = True
+                    state["solved_name"] = last_question["name"]
+                else:
+                    state["excluded_names"].add(last_question["name"])
+            elif last_question.get("type") == "fact":
+                key = last_question["key"]
+                yes_value = last_question["yes_value"]
+                state["facts"][key] = yes_value if answer == "yes" else self._opposite_value(yes_value)
+            state["last_question"] = None
+
+        facts = state["facts"]
+        if self._contains_any(normalized, ("中国", "国内", "我国", "中华")):
+            facts["region"] = "china"
+            state["target_type"] = "historical_person"
+        if self._contains_any(normalized, ("外国", "国外", "欧洲", "美国", "西方")):
+            facts["region"] = "foreign"
+            state["target_type"] = "historical_person"
+        if self._contains_any(normalized, ("近代", "现代", "近现代", "新中国", "民国")):
+            facts["period"] = "modern"
+            state["target_type"] = "historical_person"
+        if self._contains_any(normalized, ("古代", "秦朝", "汉朝", "唐朝", "宋朝", "明朝", "清朝", "三国")):
+            facts["period"] = "ancient"
+            state["target_type"] = "historical_person"
+        if self._contains_any(normalized, ("不是皇帝", "不是君主")):
+            facts["ruler"] = False
+        elif self._contains_any(normalized, ("皇帝", "君主", "帝王")):
+            facts["ruler"] = True
+            state["target_type"] = "historical_person"
+        if self._contains_any(normalized, ("战争", "军事", "将军", "打仗", "建国")):
+            facts["military"] = True
+            state["target_type"] = "historical_person"
+        if self._contains_any(normalized, ("诗人", "文学", "思想", "文化", "教育")):
+            facts["culture"] = True
+            state["target_type"] = "historical_person"
+        if self._contains_any(normalized, ("开国", "建立", "创建")):
+            facts["founder"] = True
+            state["target_type"] = "historical_person"
+        if self._contains_any(normalized, ("改革", "变法", "转折")):
+            facts["reformer"] = True
+            state["target_type"] = "historical_person"
+
+    def _next_historical_person_response(self, state):
+        if state.get("solved"):
+            name = state.get("solved_name")
+            self.sessions.pop(state.get("tool_name"), None)
+            return f"猜对了，是{name}。这题线索给得挺清楚。"
+
+        candidates = self._filter_historical_candidates(state)
+        if len(candidates) == 1:
+            return self._ask_candidate_guess(state, candidates[0])
+
+        question = self._choose_historical_question(state, candidates)
+        if question:
+            key, yes_value, prompt = question
+            state["asked"].append(key)
+            state["last_question"] = {"type": "fact", "key": key, "yes_value": yes_value}
+            return prompt
+
+        if candidates:
+            return self._ask_candidate_guess(state, candidates[0])
+
+        state["facts"].pop("reformer", None)
+        state["facts"].pop("founder", None)
+        candidates = self._filter_historical_candidates(state)
+        if candidates:
+            return self._ask_candidate_guess(state, candidates[0])
+
+        return "我这边线索有点冲突。你再给我一个年代、国家或身份线索，我继续排除。"
+
+    def _filter_historical_candidates(self, state):
+        facts = state.get("facts", {})
+        excluded = state.get("excluded_names", set())
+        candidates = []
+        for person in self._HISTORICAL_PEOPLE:
+            if person["name"] in excluded:
+                continue
+            matched = True
+            for key, value in facts.items():
+                if person.get(key) != value:
+                    matched = False
+                    break
+            if matched:
+                candidates.append(person)
+        return candidates
+
+    def _choose_historical_question(self, state, candidates):
+        if not candidates:
+            return None
+        facts = state.get("facts", {})
+        asked = set(state.get("asked", []))
+        for key, yes_value, prompt in self._HISTORICAL_QUESTIONS:
+            if key in facts or key in asked:
+                continue
+            yes_count = sum(1 for person in candidates if person.get(key) == yes_value)
+            no_count = len(candidates) - yes_count
+            if yes_count == 0 or no_count == 0:
+                continue
+            return key, yes_value, prompt
+        return None
+
+    def _ask_candidate_guess(self, state, person):
+        name = person["name"]
+        state["last_question"] = {"type": "guess", "name": name}
+        return f"按这些线索排下来，我猜是{name}。对吗？"
+
+    @staticmethod
+    def _contains_any(text, phrases):
+        return any(phrase in text for phrase in phrases)
+
+    @staticmethod
+    def _classify_yes_no(normalized):
+        yes_words = {"是", "是的", "对", "对的", "嗯", "没错", "正确", "差不多", "算是"}
+        no_words = {"不是", "不对", "错了", "没有", "不算", "否", "不正确"}
+        if normalized in yes_words:
+            return "yes"
+        if normalized in no_words:
+            return "no"
+        if any(word in normalized for word in no_words):
+            return "no"
+        if any(word in normalized for word in yes_words):
+            return "yes"
+        return ""
+
+    @staticmethod
+    def _opposite_value(value):
+        if isinstance(value, bool):
+            return not value
+        opposites = {
+            "china": "foreign",
+            "foreign": "china",
+            "modern": "ancient",
+            "ancient": "modern",
+        }
+        return opposites.get(value)
 
     def _start_idiom_chain(self, tool_name):
         candidates = [item for item in self._IDIOM_CHAIN_STARTS if item not in self.last_words[-3:]]
