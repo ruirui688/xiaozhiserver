@@ -108,19 +108,18 @@ git remote -v
 远端判断必须以 `git remote -v` 的实际结果为准：
 
 ```text
-标准状态：origin = 私有仓库，upstream = 官方仓库
-过渡状态：gitea = 私有仓库，origin = 官方仓库
+origin    ssh://git@10.144.92.32:222/gaoruirui688/xiaozhi-esp32-server.git
+upstream  https://github.com/xinnan-tech/xiaozhi-esp32-server.git
 ```
 
-如果发现处于过渡状态，AI 必须在输出中明确说明：
+标准状态必须是：
 
 ```text
-当前私有远端是 gitea。
-当前 origin 是官方仓库，禁止 push。
-如需标准化远端命名，必须由用户明确授权后再执行 remote rename。
+origin = 私有仓库，允许 push
+upstream = 官方仓库，只允许 fetch
 ```
 
-AI 不得为了符合文档而自动重命名远端，也不得在没有确认真实私有远端前执行 push。
+如果发现远端命名或 URL 不符合标准，AI 必须在输出中明确说明差异，并在获得用户明确授权后才能执行 remote rename 或 set-url。AI 不得在没有确认真实私有远端前执行 push。
 
 如果当前位于 `main`，且任务需要修改文件，AI 可以自动创建本地 `feature/xxx` 分支，但必须先说明分支名称。
 

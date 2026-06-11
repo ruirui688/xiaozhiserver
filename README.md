@@ -78,7 +78,14 @@ docs/                项目文档
   -> 阿里云服务器部署 tag
 ```
 
-私有仓库的标准远端名应为 `origin`。当前仓库如果还处于 `gitea = 私有仓库`、`origin = 官方 GitHub` 的过渡状态，推送时必须使用 `gitea`，禁止推送到官方 `origin`。
+私有仓库的标准远端名为 `origin`，官方上游仓库的标准远端名为 `upstream`。本项目当前约定：
+
+```text
+origin    ssh://git@10.144.92.32:222/gaoruirui688/xiaozhi-esp32-server.git
+upstream  https://github.com/xinnan-tech/xiaozhi-esp32-server.git
+```
+
+本地二次开发代码必须推送到 `origin`，禁止推送到官方 `upstream`。
 
 如果需要跟进官方仓库更新，必须先在 `sync/upstream-YYYYMMDD` 分支中合并 `upstream/main`，完成冲突处理和测试后，再合并到本地 `main` 分支。
 
