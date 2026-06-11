@@ -1,0 +1,304 @@
+# 功能插件架构
+
+## 顶层模型
+
+功能插件是小智服务端对外暴露“可被智能体选择、配置、调用”的统一能力模型。
+
+所有进入角色配置 `功能管理` 弹窗的能力，都必须先被视为同一种顶层对象：
+
+```text
+Function Plugin
+```
+
+功能插件不按“天气一类、小游戏一类、音乐一类”分散设计，而是统一进入同一条链路：
+
+```text
+插件定义 -> 角色启用 -> 运行时下发 -> 工具注册 -> 工具调用 -> 回复生成
+```
+
+## 分层职责
+
+```text
+管理后台 Web
+  维护功能插件定义
+  在角色配置中选择功能插件
+  编辑该角色下的插件参数
+
+管理后台 API
+  读取 ai_model_provider 中 model_type = Plugin 的插件定义
+  保存 ai_agent_plugin_mapping 中的角色插件启用关系和参数
+  下发智能体运行配置给 xiaozhi-server
+
+xiaozhi-server
+  读取智能体已启用插件
+  将插件注册为 function call 工具
+  根据插件实现模式执行工具
+  把结果交给 LLM 或直接返回给用户
+```
+
+## 数据模型
+
+插件定义表：
+
+```text
+ai_model_provider
+  model_type = Plugin
+  provider_code = function call 函数名
+  name = 功能显示名
+  fields = 参数字段定义
+  sort = 功能排序
+```
+
+角色启用关系：
+
+```text
+ai_agent_plugin_mapping
+  agent_id = 智能体 ID
+  plugin_id = ai_model_provider.id
+  param_info = 当前智能体对该插件的参数覆盖
+```
+
+这两个表是功能插件的唯一管理模型。新增讲段子、热梗、成语接龙、你说我猜，不新增一套游戏表，也不新增单独的启用关系。
+
+## 实现模式
+
+功能插件按运行时执行方式分为不同模式。模式是插件属性，不是新的顶层模块。
+
+### 内置执行型
+
+适用于已有 Python 函数实现的插件，例如：
+
+- 天气查询
+- 新闻聚合
+- 服务器音乐播放
+- HomeAssistant 控制
+
+运行方式：
+
+```text
+provider_code 命中 all_function_registry
+  -> xiaozhi-server 执行对应 Python 函数
+  -> 返回 ActionResponse
+```
+
+### 声明式互动型
+
+适用于不需要服务端代码执行、主要靠 LLM 维持规则的轻量互动玩法，例如：
+
+- 讲段子
+- 热梗解释
+- 成语接龙
+- 你说我猜
+- 猜谜
+
+它仍然是一条 `model_type = Plugin` 记录，但 `fields` 中包含兼容标记：
+
+```json
+{
+  "key": "custom_plugin",
+  "type": "boolean",
+  "label": "声明式互动",
+  "default": true
+}
+```
+
+`custom_plugin` 是历史兼容字段名。架构含义不是“另一个自定义插件系统”，而是：
+
+```text
+该插件没有 Python 执行函数，由后台声明玩法规则，运行时交给 LLM 继续生成回复。
+```
+
+声明式互动型推荐字段：
+
+```json
+[
+  {
+    "key": "custom_plugin",
+    "type": "boolean",
+    "label": "声明式互动",
+    "default": true
+  },
+  {
+    "key": "description",
+    "type": "textarea",
+    "label": "工具描述",
+    "default": "当用户想玩成语接龙时调用。"
+  },
+  {
+    "key": "instructions",
+    "type": "textarea",
+    "label": "玩法说明",
+    "default": "你是成语接龙主持人，要负责出题、判定、提示和控节奏。用户回答必须是常见四字成语，并用上一个成语最后一个字开头；同音字可酌情接受但要说明；用户接不上时先给一个提示，再给可接答案；连续答对可提高难度，连续出错要换成更常见的字。每轮只给必要判断和下一个成语，保持适合语音互动的短句。"
+  },
+  {
+    "key": "opening_message",
+    "type": "textarea",
+    "label": "开场白",
+    "default": "来玩成语接龙，我先出题。"
+  },
+  {
+    "key": "parameters_schema",
+    "type": "json",
+    "label": "函数参数 Schema",
+    "default": {
+      "type": "object",
+      "properties": {
+        "user_message": {
+          "type": "string",
+          "description": "用户当前触发这个互动插件时说的话"
+        },
+        "context": {
+          "type": "string",
+          "description": "可选的对话上下文或额外提示"
+        }
+      },
+      "required": ["user_message"]
+    }
+  }
+]
+```
+
+运行方式：
+
+```text
+provider_code 未命中 all_function_registry
+  -> 插件参数 custom_plugin = true
+  -> xiaozhi-server 动态生成 function call 工具描述
+  -> LLM 调用该工具
+  -> xiaozhi-server 返回玩法说明和工具参数
+  -> LLM 继续生成自然回复
+```
+
+声明式互动型不运行用户上传代码，不访问任意外部接口，不负责严格计分或跨会话状态。
+
+### 后续扩展型
+
+如果未来需要接入更复杂的插件，应继续挂在 `Function Plugin` 顶层模型下，再新增实现模式，例如：
+
+- 外部 HTTP 工具型
+- MCP 桥接型
+- 状态机游戏型
+
+新增模式前必须先定义：
+
+- 插件定义字段
+- 运行时执行器
+- 权限和安全边界
+- 角色参数如何保存
+- 失败时的 ActionResponse 行为
+
+## 后台入口
+
+正式入口：
+
+```text
+参数字典 -> 智能体功能库
+```
+
+正式路由：
+
+```text
+/function-plugin-management
+```
+
+旧路由仅用于兼容跳转：
+
+```text
+/custom-plugin-management -> /function-plugin-management
+```
+
+智能体功能库页面负责维护所有 `Plugin` 定义，但页面表达必须面向用户任务，不直接暴露 `Function Plugin`、`custom_plugin`、`parameters_schema` 等实现概念。
+
+一级筛选：
+
+```text
+全部功能
+系统能力
+互动玩法
+```
+
+系统能力必须继续按使用场景二级分类，避免天气、新闻、音乐、设备控制和搜索堆在一起：
+
+```text
+全部系统能力
+生活服务    天气等生活查询能力
+内容资讯    新闻、热榜、联网搜索等信息获取能力
+音乐音频    服务器音乐、HomeAssistant 音乐播放等音频能力
+设备控制    HomeAssistant 状态查询/修改、设备呼叫等控制能力
+工具能力    其他暂未归类的工具
+```
+
+互动玩法不再进入系统能力二级分类，统一归入：
+
+```text
+聊天玩法
+```
+
+智能体功能库页面行为：
+
+- 展示全部功能，但默认用“系统能力 / 互动玩法”解释来源。
+- 系统能力只允许查看说明，不在页面内编辑或删除。
+- 系统能力的新增和实现仍以代码、数据库迁移或专用集成流程为准。
+- 互动玩法允许新建、编辑、复制和删除。
+- 新建互动玩法时可选择讲段子、热梗、成语接龙、你说我猜等预设规则，也可以从空白玩法开始。
+- 玩法规则应包含触发场景、玩法流程、判断标准、主持技巧、异常处理和安全边界，不能只写一句简单描述。
+
+## 角色启用入口
+
+角色配置页中的 `功能管理` 弹窗是唯一启用入口。
+
+天气、新闻、音乐播放、HomeAssistant、讲段子、热梗、成语接龙、你说我猜都在同一个列表中选择和配置。
+
+保存角色时，只保存统一结构：
+
+```json
+{
+  "functions": [
+    {
+      "pluginId": "插件定义 ID",
+      "paramInfo": {
+        "description": "工具描述",
+        "instructions": "玩法说明"
+      }
+    }
+  ]
+}
+```
+
+## 开发分支和提交规则
+
+本次功能在独立分支开发：
+
+```text
+feature/custom-interactive-plugin-management
+```
+
+分支虽然沿用最初命名，但架构上已经收敛为功能插件平台。后续继续开发时建议使用更准确的分支名，例如：
+
+```text
+feature/function-plugin-platform
+```
+
+开发约定：
+
+- 不直接在 `main` 上开发。
+- 未经明确要求，不推送任何远端分支。
+- 如果需要推送，只推送当前功能分支到 `origin`。
+- 不推送到 `upstream` 官方仓库。
+- 工作区里已有的无关改动不回滚、不混入本次提交。
+
+## 适用边界
+
+声明式互动型适合：
+
+- 讲段子、热梗解释、热梗接话。
+- 成语接龙、你说我猜、猜谜等轻量小游戏。
+- 主要靠 LLM 理解规则和维持短对话的互动能力。
+
+不适合：
+
+- 需要严格计分、回合状态、排行榜、跨会话存档的游戏。
+- 需要访问外部系统、执行文件、调用私有接口的插件。
+- 需要服务端强校验规则的复杂玩法。
+
+这些能力应新增专用执行器或 Python 插件，再作为同一个 `Function Plugin` 接入功能管理。

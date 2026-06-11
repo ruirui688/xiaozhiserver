@@ -21,9 +21,11 @@ class ServerPluginExecutor(ToolExecutor):
         """执行服务端插件工具"""
         func_item = all_function_registry.get(tool_name)
         if not func_item:
-            custom_response = self._execute_custom_plugin(tool_name, arguments)
-            if custom_response:
-                return custom_response
+            declarative_response = self._execute_declarative_interaction_plugin(
+                tool_name, arguments
+            )
+            if declarative_response:
+                return declarative_response
             return ActionResponse(
                 action=Action.NOTFOUND, response=f"插件函数 {tool_name} 不存在"
             )
@@ -102,15 +104,18 @@ class ServerPluginExecutor(ToolExecutor):
                 )
                 continue
 
-            custom_tool = self._build_custom_plugin_tool(func_name)
-            if custom_tool:
-                tools[func_name] = custom_tool
+            declarative_tool = self._build_declarative_interaction_tool(func_name)
+            if declarative_tool:
+                tools[func_name] = declarative_tool
 
         return tools
 
     def has_tool(self, tool_name: str) -> bool:
         """检查是否有指定的服务端插件工具"""
-        return tool_name in all_function_registry or self._is_custom_plugin(tool_name)
+        return (
+            tool_name in all_function_registry
+            or self._is_declarative_interaction_plugin(tool_name)
+        )
 
     def _init_news_source_description(self, func_item, func_name):
         """根据连接配置初始化新闻工具的参数描述"""
@@ -134,8 +139,12 @@ class ServerPluginExecutor(ToolExecutor):
         plugin_config = self.config.get("plugins", {}).get(func_name, {})
         return plugin_config if isinstance(plugin_config, dict) else {}
 
-    def _is_custom_plugin(self, func_name):
-        """判断是否为后台手动配置的自定义互动插件。"""
+    def _is_declarative_interaction_plugin(self, func_name):
+        """判断是否为后台声明式互动插件。
+
+        custom_plugin 是历史字段名，只表示该插件没有 Python 执行函数，
+        由后台声明玩法规则，再交给 LLM 继续生成回复。
+        """
         plugin_config = self._get_plugin_config(func_name)
         custom_flag = plugin_config.get("custom_plugin")
         if isinstance(custom_flag, bool):
@@ -144,17 +153,17 @@ class ServerPluginExecutor(ToolExecutor):
             return custom_flag.lower() == "true"
         return False
 
-    def _build_custom_plugin_tool(self, func_name):
-        """把后台配置的自定义插件转换成 OpenAI function tool 描述。"""
+    def _build_declarative_interaction_tool(self, func_name):
+        """把声明式互动插件转换成 OpenAI function tool 描述。"""
         plugin_config = self._get_plugin_config(func_name)
-        if not self._is_custom_plugin(func_name):
+        if not self._is_declarative_interaction_plugin(func_name):
             return None
 
         description = plugin_config.get("description") or plugin_config.get(
             "instructions"
         )
         if not description:
-            description = f"自定义互动插件：{func_name}"
+            description = f"声明式互动功能插件：{func_name}"
 
         parameters = plugin_config.get("parameters_schema")
         if not isinstance(parameters, dict):
@@ -163,7 +172,7 @@ class ServerPluginExecutor(ToolExecutor):
                 "properties": {
                     "user_message": {
                         "type": "string",
-                        "description": "用户当前触发这个互动插件时说的话",
+                        "description": "用户当前触发这个功能插件时说的话",
                     },
                     "context": {
                         "type": "string",
@@ -187,12 +196,12 @@ class ServerPluginExecutor(ToolExecutor):
             tool_type=ToolType.SERVER_PLUGIN,
         )
 
-    def _execute_custom_plugin(self, tool_name, arguments):
-        """执行自定义互动插件。
+    def _execute_declarative_interaction_plugin(self, tool_name, arguments):
+        """执行声明式互动插件。
 
-        自定义插件不运行用户上传代码，只把后台配置的玩法说明交给 LLM 继续生成回复。
+        声明式互动插件不运行用户上传代码，只把后台配置的玩法说明交给 LLM 继续生成回复。
         """
-        if not self._is_custom_plugin(tool_name):
+        if not self._is_declarative_interaction_plugin(tool_name):
             return None
 
         plugin_config = self._get_plugin_config(tool_name)
@@ -202,7 +211,7 @@ class ServerPluginExecutor(ToolExecutor):
         opening_message = plugin_config.get("opening_message", "")
 
         result = (
-            f"自定义插件 {tool_name} 已触发。\n"
+            f"声明式互动功能插件 {tool_name} 已触发。\n"
             f"玩法说明：{instructions}\n"
             f"开场白：{opening_message}\n"
             f"工具参数：{arguments}\n"

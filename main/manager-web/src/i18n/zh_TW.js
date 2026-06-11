@@ -21,6 +21,7 @@ export default {
   'header.searchHistory': '搜索歷史',
   'header.clearHistory': '清空歷史',
   'header.providerManagement': '字段管理',
+  'header.functionPluginManagement': '智能體功能庫',
   'header.serverSideManagement': '服務端管理',
   'header.replacementWordManagement': '替換詞管理',
   'header.featureManagement': '系統功能配置',

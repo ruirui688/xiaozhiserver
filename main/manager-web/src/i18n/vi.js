@@ -21,6 +21,7 @@ export default {
   'header.searchHistory': 'Lịch sử tìm kiếm',
   'header.clearHistory': 'Xóa lịch sử',
   'header.providerManagement': 'Quản lý nhà cung cấp',
+  'header.functionPluginManagement': 'Thư viện chức năng tác tử',
   'header.serverSideManagement': 'Quản lý máy chủ',
   'header.replacementWordManagement': 'Quản lý từ thay thế',
   'header.featureManagement': 'Cấu hình chức năng hệ thống',
