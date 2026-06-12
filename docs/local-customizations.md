@@ -9,10 +9,11 @@
 改动原因：把天气、新闻、音乐播放、HomeAssistant 和讲段子、热梗、成语接龙、你说我猜等能力统一为 Function Plugin 顶层模型；声明式互动玩法不需要为每个玩法新增 Python 插件文件。
 关键文件：
   - main/xiaozhi-server/core/providers/tools/server_plugins/plugin_executor.py
+  - docs/architecture/cloud-runtime-architecture.md
   - docs/integrations/function-plugin-architecture.md
   - docs/integrations/prompt-injection-engineering.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方也修改插件注册、工具描述生成、提示词注入或 ServerPluginExecutor 执行流程，必须人工合并，保留 Function Plugin 顶层模型、声明式互动模式、状态机游戏模式、custom_plugin 兼容字段、parameters_schema、opening_message、instructions 等配置约定，并同步更新提示词注入工程文档。
+官方同步时的处理规则：如果官方也修改插件注册、工具描述生成、提示词注入、配置下发、MCP 工具发现或 ServerPluginExecutor 执行流程，必须人工合并，保留 Function Plugin 顶层模型、声明式互动模式、状态机游戏模式、custom_plugin 兼容字段、parameters_schema、opening_message、instructions 等配置约定，并同步更新云端运行架构和提示词注入工程文档。
 ```
 
 ## 2. Ubuntu 源码开发环境文档
@@ -61,7 +62,20 @@
 官方同步时的处理规则：如果官方修改聊天流式输出、function call、TTS 入队、打断处理、意图缓存、设备端 MCP 或 Function Plugin 预设，必须保留以下约定：句首口头禅在进入 TTS 和历史前清理；工具结果绑定本轮 sentence_id 和 abort_generation；REQLLM 工具结果二次生成时禁用继续调工具；声明式互动插件必须强制 user_message 参数并传递 context；首轮信息不足时只索要线索，不允许问答案；“不是、再猜、它能吃”等短反馈不能跨上下文复用意图缓存；多工具合并必须读取 ActionResponse.result/response；设备 MCP 发送失败必须立即返回，连接关闭时取消等待中的 MCP 调用，音量/亮度等控制类 MCP 使用短超时并直接回复；`xiaozhi_thinks_you_guess` 必须走服务端 GameSessionManager，隐藏 target_word 只保存在服务端状态里，不能交给 LLM 维护；用户说“不玩了/退出/猜不到/想不到/不会/揭晓答案”时必须由状态机结束或揭晓本局，禁止切换成“轮到你了，我来猜你”；`idiom_chain` 必须走服务端 GameSessionManager，保存当前要接的字、已用成语和接对数量，并直接返回 Action.RESPONSE，禁止用 REQLLM 二次生成造成游戏延迟；`guess_what_i_say` 必须走服务端 GameSessionManager，保存上一问、已知线索和排除条件，历史人物类题目按地域、年代、身份、事迹领域顺序排查，禁止连续随机猜朝代或皇帝。
 ```
 
-## 5. 天气查询容错
+## 5. 云端运行架构与提示词注入文档
+
+```text
+定制模块：项目工程文档
+改动原因：把“小智云端服务器分析报告.docx”的调研结论整理为仓库内长期文档，补齐后台配置下发、Python 实时链路、提示词注入、工具 schema 注入、MCP 三类链路和状态机游戏规则的工程说明。
+关键文件：
+  - docs/architecture/cloud-runtime-architecture.md
+  - docs/integrations/prompt-injection-engineering.md
+  - docs/README.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：官方文档同步时不得删除这两份文档；如果官方修改连接初始化、PromptManager、Dialogue、UnifiedToolHandler、MCP executor、Intent provider、ConfigServiceImpl 或插件执行器，必须同步校正文档中的真实代码路径和运行链路。
+```
+
+## 6. 天气查询容错
 
 ```text
 定制模块：xiaozhi-server 天气插件

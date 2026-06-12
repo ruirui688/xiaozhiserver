@@ -1,23 +1,87 @@
 # 提示词注入工程
 
-本文档说明 xiaozhi-server 中“大模型看到的提示词和工具描述”从哪里来、在哪里注入、如何进入模型请求，以及本地状态机游戏为什么不再依赖大段玩法提示词。
+本文档说明 xiaozhi-server 中“大模型能看到什么提示词、工具描述和上下文”，以及这些内容从后台配置到 Python 运行时再到模型请求的完整链路。
 
-## 1. 注入对象
+先读整体架构：[云端运行架构与配置链路](../architecture/cloud-runtime-architecture.md)。
 
-运行时进入大模型的内容分为四类：
+## 1. 总体模型
+
+运行时进入模型的内容不是一段单独的 prompt，而是多类对象组合：
 
 ```text
-系统提示词            角色人设、动态上下文、时间天气等
-对话历史              user / assistant / tool 历史消息
-工具描述              OpenAI tools / function call 描述
-工具执行结果          ActionResponse.result 或 response
+系统提示词
+  角色人设、全局语音交互规则、动态上下文、天气、时间、上下文源
+
+对话历史
+  user / assistant / tool 历史消息
+
+记忆和说话人信息
+  summaryMemory、Memory 查询结果、voiceprint speakers
+
+工具描述
+  OpenAI tools / function call schema，或非原生模型的文本工具提示
+
+工具执行结果
+  ActionResponse.result / response，可能直接播报，也可能再次交给 LLM
+
+服务端状态
+  游戏隐藏答案、上一问、候选集、已排除条件、已用成语
 ```
 
-不是所有“规则”都会以自然语言 prompt 形式进入大模型。对需要稳定记忆和低延迟的游戏，规则已经下沉到服务端状态机，模型只看到“该调用哪个工具”的工具描述。
+不是所有“规则”都应该写进自然语言 prompt。高频、多轮、必须稳定记忆的玩法已经下沉到服务端状态机，模型只负责触发工具调用。
 
-## 2. 系统提示词注入
+## 2. 从后台到 Python 的配置来源
 
-主入口在：
+后台保存的智能体配置由 `manager-api` 下发给 `xiaozhi-server`。
+
+关键位置：
+
+```text
+main/manager-api/src/main/java/xiaozhi/modules/config/service/impl/ConfigServiceImpl.java
+```
+
+核心下发字段：
+
+| 字段 | 进入 Python 后的作用 |
+| --- | --- |
+| `prompt` | 智能体角色提示词，进入 system prompt |
+| `summaryMemory` | 记忆摘要，进入 `<memory>` 或记忆上下文 |
+| `selected_module` | 指定当前 ASR、LLM、TTS、Memory、Intent 等模型 |
+| `LLM` / `TTS` / `ASR` / `VAD` / `Memory` / `Intent` | 各模块运行配置 |
+| `plugins` | 当前智能体启用的插件参数、工具描述覆盖、声明式插件规则 |
+| `mcp_endpoint` | 外部 MCP Endpoint 地址 |
+| `context_providers` | 动态上下文源 |
+| `voiceprint` | 声纹说话人信息 |
+
+Python 会在连接初始化时把这些配置放进当前 `ConnectionHandler.config`。
+
+相关位置：
+
+```text
+main/xiaozhi-server/core/connection.py
+  ConnectionHandler
+```
+
+## 3. 注入对象清单
+
+| 类型 | 模型是否可见 | 注入形式 | 主要来源 |
+| --- | --- | --- | --- |
+| 智能体角色提示词 | 可见 | system message | Java 下发的 `prompt` |
+| 全局基础模板 | 可见 | system message | `agent-base-prompt.txt` |
+| 动态上下文 | 可见 | system message 上下文段 | 时间、日期、农历、位置、天气、上下文源 |
+| 记忆 | 可见 | messages 中的记忆段 | `summaryMemory` / Python Memory |
+| 声纹说话人 | 可见 | messages 中的 speakers 段 | `voiceprint.speakers` |
+| 服务端插件工具描述 | 可见 | `tools` schema 或 intent prompt | `plugins_func` 注册表、后台插件配置 |
+| 声明式插件玩法说明 | 部分可见 | 工具结果二次交给 LLM | 后台 `instructions` / `opening_message` |
+| MCP 工具描述 | 可见 | `tools` schema 或 intent prompt | MCP `tools/list` |
+| 设备 IoT 工具描述 | 可见 | `tools` schema 或 intent prompt | 设备 descriptors |
+| 状态机游戏状态 | 不直接可见 | 服务端内存状态 | `GameSessionManager` |
+| TTS 参考文本 prompt | 不给主 LLM | TTS provider 参数 | TTS 配置 |
+| Java 总结/标题 prompt | 不给主 LLM | 后台 LLM 请求 | `OpenAIStyleLLMServiceImpl` |
+
+## 4. 主系统提示词注入
+
+入口：
 
 ```text
 main/xiaozhi-server/core/connection.py
@@ -27,10 +91,10 @@ main/xiaozhi-server/core/connection.py
 链路：
 
 ```text
-config["prompt"]
+ConnectionHandler.config["prompt"]
   -> PromptManager.build_enhanced_prompt(...)
   -> ConnectionHandler.change_system_prompt(...)
-  -> dialogue 中的 system 消息
+  -> Dialogue.update_system_message(...)
   -> LLM 请求 messages
 ```
 
@@ -39,14 +103,56 @@ config["prompt"]
 ```text
 main/xiaozhi-server/agent-base-prompt.txt
 main/xiaozhi-server/core/utils/prompt_manager.py
+main/xiaozhi-server/core/utils/dialogue.py
 main/xiaozhi-server/core/connection.py
 ```
 
-这条链路负责角色人设、动态上下文、天气上下文、设备上下文等全局行为，不负责每个插件的具体玩法状态。
+`PromptManager.build_enhanced_prompt()` 会把 `agent-base-prompt.txt` 作为 Jinja 模板渲染，并注入：
 
-## 3. 工具描述注入
+```text
+base_prompt        Java 下发的角色提示词
+today_date         当前日期
+today_weekday      当前星期
+lunar_date         农历
+local_address      根据 client_ip 推断的位置
+weather_info       本地天气缓存
+dynamic_context    上下文源返回内容
+language           TTS 语言
+device_id
+client_ip
+emojiList
+```
 
-工具描述的统一出口是：
+`change_system_prompt()` 最终把增强后的 prompt 写入 `dialogue` 的 system message。
+
+## 5. 对话历史、记忆和声纹注入
+
+主 LLM 请求前会从 `Dialogue` 取对话历史：
+
+```text
+main/xiaozhi-server/core/connection.py
+  chat()
+    -> self.dialogue.get_llm_dialogue_with_memory(memory_str, voiceprint_config)
+```
+
+记忆来源：
+
+```text
+if self.memory is not None and query:
+  self.memory.query_memory(query)
+```
+
+声纹来源：
+
+```text
+self.config.get("voiceprint", {})
+```
+
+`Dialogue.get_llm_dialogue_with_memory()` 会把记忆和说话人信息插入给 LLM 使用。它不是后台角色 prompt 的一部分，但属于模型实际可见上下文。
+
+## 6. 工具描述统一出口
+
+所有工具描述的统一出口：
 
 ```text
 main/xiaozhi-server/core/providers/tools/unified_tool_handler.py
@@ -63,44 +169,55 @@ UnifiedToolHandler.get_functions()
   -> ToolDefinition.description
 ```
 
-服务端插件工具由这里生成：
+执行器分层：
+
+| 执行器 | 来源 |
+| --- | --- |
+| `ServerPluginExecutor` | 服务端插件、声明式插件、状态机游戏 |
+| `ServerMCPExecutor` | 服务器侧 MCP |
+| `MCPEndpointExecutor` | 外部 MCP Endpoint |
+| `DeviceIoTExecutor` | 设备 IoT descriptors |
+| `DeviceMCPExecutor` | 设备端 MCP tools/list |
+
+所以，后台看不到某些“大段提示词”并不代表没有注入。很多能力以工具 description、parameters、inputSchema 的形式进入模型。
+
+## 7. 服务端插件工具描述
+
+服务端插件由这里生成工具描述：
 
 ```text
 main/xiaozhi-server/core/providers/tools/server_plugins/plugin_executor.py
   ServerPluginExecutor.get_tools()
 ```
 
-`get_tools()` 会合并：
+工具来源：
 
 ```text
-必要内置函数：handle_exit_intent、get_lunar
-后台配置函数：config["Intent"][selected]["functions"]
-本地强制状态机工具：guess_what_i_say、idiom_chain、xiaozhi_thinks_you_guess 等
+必要内置函数
+  handle_exit_intent
+  get_lunar
+
+后台 Intent 配置 functions
+  config["Intent"][selected]["functions"]
+
+本地强制状态机工具
+  guess_what_i_say
+  idiom_chain
+  xiaozhi_thinks_you_guess
+  guess_xiaozhi_word
+  i_think_you_guess
+
+后台声明式互动插件
+  config["plugins"][provider_code]
 ```
 
-最终每个工具会变成 OpenAI function 格式：
+内置插件如果命中 `all_function_registry`，优先使用插件 Python 函数注册的 description。后台 `plugins[func_name].description` 可以覆盖工具描述。
 
-```json
-{
-  "type": "function",
-  "function": {
-    "name": "guess_what_i_say",
-    "description": "你说我猜状态机游戏...",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "user_message": {"type": "string"},
-        "context": {"type": "string"}
-      },
-      "required": ["user_message"]
-    }
-  }
-}
-```
+状态机游戏即使后台看不到完整玩法 prompt，也会由 `ServerPluginExecutor` 构造短工具描述，告诉模型何时调用。
 
-## 4. 主聊天模型注入
+## 8. 主聊天 function_call 注入
 
-当 `Intent` 选择 `function_call` 模式时，主聊天模型直接接收工具描述。
+当 `Intent` 类型是 `function_call` 时，主聊天模型直接接收工具 schema。
 
 入口：
 
@@ -112,12 +229,18 @@ main/xiaozhi-server/core/connection.py
 关键链路：
 
 ```text
-functions = list(conn.func_handler.get_functions())
-functions.append(DIRECT_ANSWER_TOOL)  # 仅第一层调用
-llm.response_with_functions(session_id, messages, functions=functions)
+functions = list(self.func_handler.get_functions())
+if depth == 0:
+  functions.append(DIRECT_ANSWER_TOOL)
+
+self.llm.response_with_functions(
+  session_id,
+  self.dialogue.get_llm_dialogue_with_memory(...),
+  functions=functions
+)
 ```
 
-OpenAI 兼容请求在：
+OpenAI 兼容 provider：
 
 ```text
 main/xiaozhi-server/core/providers/llm/openai/openai.py
@@ -135,11 +258,11 @@ request_params = {
 }
 ```
 
-所以主聊天模型看到的插件提示词不是拼在 system prompt 里，而是作为 `tools` 字段进入模型请求。
+结论：主聊天模型看到的插件提示词通常不拼在 system prompt 里，而是作为 `tools` 字段进入模型请求。
 
-## 5. 意图模型注入
+## 9. intent_llm 注入
 
-当使用 `intent_llm` 或需要外挂意图识别时，工具描述会被拼进意图识别系统提示词。
+当使用 `intent_llm` 时，工具描述会被拼进意图识别系统提示词。
 
 入口：
 
@@ -152,72 +275,111 @@ main/xiaozhi-server/core/providers/intent/intent_llm/intent_llm.py
 
 ```text
 functions = conn.func_handler.get_functions()
+if conn.mcp_client:
+  functions.extend(conn.mcp_client.get_available_tools())
+
 prompt = get_intent_system_prompt(functions)
+prompt += <musicNames>...</musicNames>
+prompt += HomeAssistant devices
+
 llm.response_no_stream(system_prompt=prompt, user_prompt=current_dialogue)
 ```
 
-`get_intent_system_prompt()` 会把每个函数的：
+`get_intent_system_prompt()` 会把每个函数的以下字段展开成中文说明：
 
 ```text
 name
 description
-parameters
+parameters.properties
 ```
 
-展开成中文提示词，要求意图模型只输出 JSON：
+要求意图模型只返回 JSON，例如：
 
 ```json
 {"function_call": {"name": "idiom_chain", "arguments": {"user_message": "成语接龙"}}}
 ```
 
-注意：活跃游戏中，`handle_user_intent()` 会优先检查 `GameSessionManager.get_active_tool()`，如果已有活动游戏，会绕过意图模型，直接构造该工具调用。这是为了避免“对的”“不是”被缓存或误判。
-
-位置：
+活跃游戏会绕过意图缓存和普通意图判断：
 
 ```text
 main/xiaozhi-server/core/handle/intentHandler.py
   handle_user_intent()
+
+GameSessionManager.get_active_tool()
+  -> 直接构造当前游戏工具调用
 ```
 
-## 6. 声明式互动插件
+这是为了避免“对的”“不是”“猜不到”被误判为普通聊天，或被旧意图缓存污染。
 
-声明式插件来自后台配置：
+## 10. 非原生 function call 模型
+
+部分 provider 不支持原生 OpenAI `tools` 字段，会把工具 schema 改写进文本提示词。
+
+位置：
+
+```text
+main/xiaozhi-server/core/providers/llm/system_prompt.py
+  get_system_prompt_for_function()
+
+main/xiaozhi-server/core/providers/llm/dify/dify.py
+main/xiaozhi-server/core/providers/llm/coze/coze.py
+```
+
+这类模型看到的是文本形式的工具调用协议，例如要求输出 `<tool_call>`。排查时不能只看 OpenAI `tools` 字段。
+
+## 11. 声明式互动插件注入
+
+声明式互动插件来自后台配置：
 
 ```text
 ai_model_provider.model_type = Plugin
 ai_agent_plugin_mapping.param_info
 ```
 
-运行时配置进入：
+运行时进入：
 
 ```text
 conn.config["plugins"][provider_code]
 ```
 
-`ServerPluginExecutor._build_declarative_interaction_tool()` 会把后台的 `description`、`instructions`、`parameters_schema` 变成工具描述。
+工具描述构造：
 
-执行时：
+```text
+ServerPluginExecutor._build_declarative_interaction_tool()
+```
+
+它会把后台字段变成工具 schema：
+
+```text
+description
+instructions
+opening_message
+parameters_schema
+custom_plugin
+```
+
+执行链路：
 
 ```text
 LLM 调用工具
   -> _execute_declarative_interaction_plugin()
   -> 返回 Action.REQLLM
-  -> 把 <interaction_plugin>...</interaction_plugin> 写入 tool 结果
+  -> 把 <interaction_plugin>...</interaction_plugin> 写入工具结果
   -> 再调用一次 LLM 生成自然回复
 ```
 
-因此声明式插件有两处提示：
+声明式插件有两处提示词：
 
-```text
-工具描述：用于让模型决定是否调用工具
-interaction_plugin：用于工具调用后让模型继续生成回复
-```
+| 阶段 | 内容 | 作用 |
+| --- | --- | --- |
+| 工具描述 | description + parameters_schema | 让模型决定是否调用工具 |
+| 二次提示 | `<interaction_plugin>` 中的玩法说明 | 工具调用后让模型生成主持话术 |
 
-这类模式灵活，但延迟较高，也容易丢状态。
+这类模式灵活，但延迟高，也容易丢状态。它不适合成语接龙、你说我猜、小智想词用户猜这类高频状态游戏。
 
-## 7. 状态机游戏插件
+## 12. 状态机游戏注入
 
-以下插件已经不再靠声明式 prompt 维持玩法：
+以下游戏已经不再靠大段 prompt 维持玩法：
 
 ```text
 guess_what_i_say          用户描述，小智猜
@@ -227,58 +389,66 @@ guess_xiaozhi_word
 i_think_you_guess
 ```
 
-入口：
+状态入口：
 
 ```text
 main/xiaozhi-server/core/game_session.py
   GameSessionManager
 ```
 
-工具描述仍然会注入给模型，用于触发工具调用；但玩法规则、隐藏答案、候选集、上一问、已排除条件等状态保存在服务端。
-
-执行链路：
+工具执行：
 
 ```text
-LLM 或活跃游戏直达路由调用工具
-  -> ServerPluginExecutor._execute_stateful_game_plugin()
-  -> GameSessionManager.handle_...
-  -> 返回 Action.RESPONSE
-  -> 直接进入 TTS
+ServerPluginExecutor._execute_stateful_game_plugin()
+  -> GameSessionManager.handle_idiom_chain(...)
+  -> GameSessionManager.handle_user_describes_guess(...)
+  -> GameSessionManager.handle_guess_my_word(...)
+  -> Action.RESPONSE
 ```
 
-状态机插件不会返回 `Action.REQLLM`，因此不会二次调用大模型。
+状态机游戏的规则：
 
-这解释了为什么你在后台插件配置里看不到完整“玩法提示词”：关键玩法已经在代码状态机里，不再交给大模型临场发挥。
+```text
+模型只看到“什么时候调用工具”的短 description。
+隐藏答案、候选集、上一问、已排除条件、已用成语、当前要接的字保存在服务端。
+工具执行后直接返回 Action.RESPONSE。
+不返回 Action.REQLLM。
+不二次请求 LLM。
+```
 
-## 8. 当前本地状态机提示词职责
+这解释了为什么后台插件配置里看不到完整玩法提示词：关键玩法已经变成 Python 状态机，不再交给大模型临场发挥。
+
+## 13. 三个游戏的状态职责
 
 ### `guess_what_i_say`
 
-工具描述职责：
+模型可见：
 
 ```text
-告诉模型：用户要玩你说我猜或游戏中继续给线索时调用 guess_what_i_say，并原样传 user_message。
+用户要玩你说我猜，或游戏中继续给线索/反馈时调用 guess_what_i_say。
+调用时把用户当前原话填入 user_message。
 ```
 
-状态机职责：
+服务端状态：
 
 ```text
 保存上一问
-保存 yes/no 对应的事实
-保存排除的人名
+保存 yes/no 对应事实
+保存已知线索
+保存排除的人名、朝代、身份、领域
 历史人物按地域 -> 年代 -> 身份 -> 事迹 -> 领域排查
 候选耗尽时要求用户补充线索，不违背已确认条件乱猜
 ```
 
 ### `idiom_chain`
 
-工具描述职责：
+模型可见：
 
 ```text
-告诉模型：用户要玩成语接龙或游戏中继续回答时调用 idiom_chain。
+用户要玩成语接龙，或游戏中继续回答、要提示、说不会、不玩时调用 idiom_chain。
 ```
 
-状态机职责：
+服务端状态：
 
 ```text
 保存当前要接的字
@@ -290,52 +460,86 @@ LLM 或活跃游戏直达路由调用工具
 
 ### `xiaozhi_thinks_you_guess`
 
-工具描述职责：
+模型可见：
 
 ```text
-告诉模型：小智心里想一个词让用户猜时调用对应工具。
+小智心里想一个词让用户猜时调用对应工具。
 ```
 
-状态机职责：
+服务端状态：
 
 ```text
-服务端保存隐藏 target_word
+保存隐藏 target_word
 保存已给提示
-处理猜不到、揭晓答案、不玩了
+处理用户猜测
+处理猜不到、揭晓答案、不玩了、再来一局
 禁止把隐藏答案交给 LLM 维护
 ```
 
-## 9. 排查方法
+## 14. MCP 工具提示词注入
 
-查看当前连接支持哪些工具：
-
-```bash
-tail -f .run/xiaozhi-server.log
-```
-
-搜索日志：
+MCP 工具的“提示词”不是统一写在 system prompt 里的 `mcp_prompt`，而是 MCP 工具本身的：
 
 ```text
-当前支持的函数列表
-执行工具: guess_what_i_say
-执行工具: idiom_chain
+name
+description
+inputSchema
 ```
 
-在代码中查看工具描述：
+三类 MCP：
 
-```bash
-rg -n "_build_.*tool|_execute_stateful_game_plugin|_execute_declarative_interaction_plugin" \
-  main/xiaozhi-server/core/providers/tools/server_plugins/plugin_executor.py
-```
+| 类型 | 注入来源 | 进入模型方式 |
+| --- | --- | --- |
+| 外部 MCP Endpoint | Endpoint 返回的 `tools/list` | `MCPEndpointExecutor.get_tools()` -> tools schema |
+| 服务器侧 MCP | 本地 MCP server 返回的 `tools/list` | `ServerMCPExecutor.get_tools()` -> tools schema |
+| 设备端 MCP | 设备返回的 `tools/list` | `DeviceMCPExecutor.get_tools()` -> tools schema |
 
-查看工具是否二次调用 LLM：
+设备端 MCP 工具名通常会从点号格式转换成模型侧函数名，例如：
 
 ```text
-Action.RESPONSE  -> 直接回复，低延迟
-Action.REQLLM    -> 工具结果再交给 LLM 生成，高延迟
+self.get_device_status        -> self_get_device_status
+self.screen.set_brightness    -> self_screen_set_brightness
+self.audio_speaker.set_volume -> self_audio_speaker_set_volume
 ```
 
-相关处理位置：
+只有模型选择对应工具时，Python 才会调用 MCP。MCP 暴露工具不等于自动执行。
+
+## 15. 天气提示词与工具调用边界
+
+天气能力有两条来源：
+
+```text
+动态上下文天气
+  -> PromptManager 注入 weather_info
+  -> 适合回答设备所在地、本地未来天气
+
+get_weather 插件
+  -> 服务端插件工具
+  -> 适合查询用户明确指定的城市或区县
+```
+
+如果基础提示词强调“本地天气已在上下文”，模型可能不会调用 `get_weather`。如果用户说“南京天气”“杭州温度”，工具描述和基础提示词必须让模型调用天气工具，而不是把本地上下文当成外地天气。
+
+天气接口异常时，工具本身应该返回可靠的直接回复，避免把 `Authentication failed`、`Invalid Host` 等错误交给 LLM 改写成“城市不存在”。
+
+## 16. 工具结果进入 LLM 或 TTS
+
+工具执行返回 `ActionResponse` 后，分两类：
+
+```text
+Action.RESPONSE
+  -> 直接作为回复进入 TTS
+  -> 低延迟
+  -> 适合天气结果、状态机游戏、设备控制确认
+
+Action.REQLLM
+  -> 工具结果写入上下文
+  -> 再请求 LLM 生成自然语言
+  -> 延迟更高
+  -> 适合搜索结果总结、声明式互动插件、复杂工具结果解释
+```
+
+处理位置：
 
 ```text
 main/xiaozhi-server/core/connection.py
@@ -345,15 +549,65 @@ main/xiaozhi-server/core/handle/intentHandler.py
   process_intent_result()
 ```
 
-## 10. 修改规则
+状态机游戏必须优先使用 `Action.RESPONSE`，否则会出现游戏延迟大、上下文漂移、模型自作主张换玩法等问题。
 
-修改插件提示词或状态机时遵守：
+## 17. 排查方法
 
-```text
-只影响是否调用工具的内容，写在工具 description。
-必须严格保存状态、答案、候选集、计分的内容，写在 GameSessionManager。
-需要灵活生成自然语言但不要求严格状态的插件，可以继续用声明式 REQLLM。
-语音实时互动、高频游戏、容易丢上下文的玩法，必须优先用 Action.RESPONSE 状态机。
+查看当前连接支持哪些工具：
+
+```bash
+tail -f .run/xiaozhi-server.log
 ```
 
-不要把 API Key、生产配置、真实用户数据写入提示词或文档。
+搜索关键日志：
+
+```text
+当前支持的函数列表
+执行工具: guess_what_i_say
+执行工具: idiom_chain
+llm 识别到意图
+```
+
+查看工具描述生成：
+
+```bash
+rg -n "get_tools|_build_.*tool|_execute_stateful_game_plugin|_execute_declarative_interaction_plugin" \
+  main/xiaozhi-server/core/providers/tools
+```
+
+查看主 system prompt：
+
+```bash
+rg -n "build_enhanced_prompt|change_system_prompt|update_system_message" \
+  main/xiaozhi-server/core
+```
+
+查看是否二次请求 LLM：
+
+```text
+Action.RESPONSE  -> 直接回复
+Action.REQLLM    -> 工具结果再交给 LLM
+```
+
+## 18. 修改规则
+
+修改提示词或插件时遵守：
+
+```text
+角色、人设、语音交互总规则写入 agent-base-prompt.txt 或后台 prompt。
+影响“是否调用工具”的内容写入工具 description。
+工具参数规则写入 parameters_schema / inputSchema。
+严格状态、隐藏答案、计分、候选集写入 GameSessionManager。
+需要自然语言总结但不要求严格状态的插件可使用 Action.REQLLM。
+语音实时互动、高频游戏、容易丢上下文的玩法优先使用 Action.RESPONSE 状态机。
+```
+
+禁止：
+
+```text
+把 API Key、生产连接信息、真实用户数据写入提示词或文档。
+把隐藏答案交给 LLM 自己记。
+把状态机游戏退回声明式 REQLLM。
+只修改后台描述却以为能改变服务端状态逻辑。
+只查 agent-base-prompt.txt 就判断插件没有提示词。
+```

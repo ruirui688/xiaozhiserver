@@ -24,6 +24,7 @@ main/
   manager-api/       Java Spring Boot 管理后台 API
   manager-web/       Web 管理后台
   manager-mobile/    移动端管理后台
+  digital-human/     数字人和音频交互测试模块
 docs/                项目文档
 ```
 
@@ -42,6 +43,8 @@ docs/                项目文档
 - [小智服务器开发规范](./docs/standards/development-specification.md)
 - [AI 编程工具工作指令](./docs/standards/ai-coding-agent-instructions.md)
 - [文档分类索引](./docs/README.md)
+- [云端运行架构与配置链路](./docs/architecture/cloud-runtime-architecture.md)
+- [提示词注入工程](./docs/integrations/prompt-injection-engineering.md)
 
 补充部署文档：
 

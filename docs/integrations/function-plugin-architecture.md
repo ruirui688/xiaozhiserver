@@ -211,6 +211,7 @@ provider_code 命中 GameSessionManager 状态机工具集合
 完整链路见：
 
 ```text
+docs/architecture/cloud-runtime-architecture.md
 docs/integrations/prompt-injection-engineering.md
 ```
 
