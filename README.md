@@ -26,6 +26,10 @@ main/
   manager-mobile/    移动端管理后台
   digital-human/     数字人和音频交互测试模块
 docs/                项目文档
+scripts/dev          本地开发统一入口
+runtime/             本地运行产物目录，仅提交 .gitkeep
+config/examples/     脱敏配置示例
+deploy/              部署资产归档边界
 ```
 
 常用服务端口：
@@ -43,14 +47,29 @@ docs/                项目文档
 - [小智服务器开发规范](./docs/standards/development-specification.md)
 - [AI 编程工具工作指令](./docs/standards/ai-coding-agent-instructions.md)
 - [文档分类索引](./docs/README.md)
+- [项目完整架构与文档导航](./docs/architecture/project-architecture.md)
 - [云端运行架构与配置链路](./docs/architecture/cloud-runtime-architecture.md)
 - [提示词注入工程](./docs/integrations/prompt-injection-engineering.md)
+- [配置与运行产物治理策略](./docs/standards/config-runtime-policy.md)
 
 补充部署文档：
 
 - [官方 Docker 部署说明](./docs/deployment/Deployment.md)
 - [官方全模块部署说明](./docs/deployment/Deployment_all.md)
 - [私有 Docker 镜像发布与生产部署](./docs/deployment/private-docker-release.md)
+- [部署资产治理策略](./docs/deployment/deployment-asset-policy.md)
+
+本地开发统一入口：
+
+```bash
+scripts/dev doctor
+scripts/dev start all
+scripts/dev status
+scripts/dev logs server -f
+scripts/dev stop
+```
+
+详细说明见 [本地开发工作流](./docs/development/local-dev-workflow.md)。
 
 模块开发说明：
 
@@ -66,8 +85,10 @@ docs/                项目文档
 
 - `main/xiaozhi-server/config.yaml` 是默认配置。
 - `main/xiaozhi-server/data/.config.yaml` 是本地或服务器私有配置，不应提交。
+- `config/examples/` 保存脱敏示例配置，可以提交。
+- `runtime/config/` 保存本地或环境私有配置，不应提交。
 - 数据库密码、Redis 密码、模型 API Key、短信密钥等敏感信息不应提交。
-- MySQL 数据、Redis 数据、上传文件、模型文件属于运行时数据，不应提交。
+- `runtime/` 下的日志、PID、缓存、上传文件、临时文件属于运行时数据，不应提交。
 
 ## 开发与部署规则
 

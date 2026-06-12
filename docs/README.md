@@ -47,6 +47,7 @@ main/manager-api/src/main/resources/application-dev.yml
 如果任务涉及云端运行链路、后台配置下发、提示词注入、插件工具、MCP 或设备实时对话，还必须读取：
 
 ```text
+docs/architecture/project-architecture.md
 docs/architecture/cloud-runtime-architecture.md
 docs/integrations/prompt-injection-engineering.md
 ```
@@ -57,6 +58,8 @@ docs/integrations/prompt-injection-engineering.md
 
 - [standards/development-specification.md](./standards/development-specification.md) - 项目开发总规范。规定本地仓库、私有远程仓库、官方上游仓库的职责边界；规定标准远端命名、分支规则、提交流程、数据库变更、配置隔离、阿里云部署、生产发布和官方更新同步规则。AI 修改代码前必须读取。
 - [standards/ai-coding-agent-instructions.md](./standards/ai-coding-agent-instructions.md) - AI 编程工具执行规范。规定 AI 在新开发功能、修改功能、修复问题、同步官方更新、整理文档时必须读取哪些文件、如何识别真实私有远端、如何推送当前分支、可以自动执行哪些操作、哪些操作必须先获得用户授权。所有 AI 编程任务必须读取。
+- [standards/config-runtime-policy.md](./standards/config-runtime-policy.md) - 配置与运行产物治理策略。用于区分默认模板、示例配置、环境私有配置、运行时生成配置，规定 `config/examples/` 和 `runtime/` 的提交边界。
+- [standards/upstream-sync-policy.md](./standards/upstream-sync-policy.md) - 官方上游同步策略。用于同步官方 `upstream` 前确认官方源码、本地定制和私有运行边界，处理高风险冲突和同步后验证。
 - [standards/README.md](./standards/README.md) - 规范目录入口。用于快速确认 `standards/` 下每份规则文档的职责和使用顺序，适合开发者或 AI 在进入规范目录时先阅读。
 - [local-customizations.md](./local-customizations.md) - 本地定制记录。用于记录相对官方仓库的长期本地改动，官方同步、冲突处理、重构插件或整理本地扩展时必须读取。
 
@@ -64,6 +67,7 @@ docs/integrations/prompt-injection-engineering.md
 
 用于理解端云协同、后台配置下发、Python 实时服务、提示词注入、插件工具、MCP 和设备运行边界。AI 修改实时对话、插件、提示词、MCP、OTA 接入、设备连接、后台配置下发时必须读取。
 
+- [architecture/project-architecture.md](./architecture/project-architecture.md) - 项目完整架构与文档导航。用于理解模块边界、端云链路、配置下发、提示词/工具/MCP 注入、运行产物、部署边界和开发治理边界。
 - [architecture/cloud-runtime-architecture.md](./architecture/cloud-runtime-architecture.md) - 云端运行架构与配置链路。用于理解 `manager-web`、`manager-mobile`、`manager-api`、`xiaozhi-server`、`digital-human` 和设备端的边界，说明后台配置如何变成设备行为、实时语音链路如何运行、工具/MCP/天气/OTA 如何接入。
 
 ## 4. 本地开发环境
@@ -71,6 +75,7 @@ docs/integrations/prompt-injection-engineering.md
 用于开发机初始化、源码编译环境准备、IDE 调试前的依赖安装和本地服务启动顺序。AI 只有在修改本地开发环境、源码编译说明、开发机依赖或环境排查文档时，才需要读取本分类文档。
 
 - [development/ubuntu-source-development-environment.md](./development/ubuntu-source-development-environment.md) - Ubuntu 源码开发环境安装说明。用于在 Ubuntu 22.04/24.04 本地开发机上安装 JDK 21、Maven、Node.js、pnpm、Conda、MySQL、Redis、FFmpeg 和项目依赖，并说明本地配置、模型目录、启动顺序和验证命令。
+- [development/local-dev-workflow.md](./development/local-dev-workflow.md) - 本地开发工作流。用于使用 `scripts/dev` 统一启动、停止、查看状态、查看日志和执行环境体检，替代零散启动命令作为日常入口。
 
 ## 5. 部署与运维
 
@@ -81,6 +86,7 @@ docs/integrations/prompt-injection-engineering.md
 - [deployment/dev-ops-integration.md](./deployment/dev-ops-integration.md) - 全模块源码部署自动升级方法。用于从源码目录进行部署、拉取更新、执行自动升级脚本和维护服务器运行目录的场景。
 - [deployment/docker-build.md](./deployment/docker-build.md) - 本地编译 Docker 镜像方法。用于官方镜像架构不匹配、需要自建 `server` 或 `web` 镜像、需要在本机或服务器构建镜像的场景。
 - [deployment/private-docker-release.md](./deployment/private-docker-release.md) - 私有 Docker 镜像发布与生产部署。用于把本仓库二次开发代码构建为私有镜像、推送到私有镜像仓库，并在生产服务器用 Docker Compose 拉取运行。
+- [deployment/deployment-asset-policy.md](./deployment/deployment-asset-policy.md) - 部署资产治理策略。用于区分 `docs/deployment/`、`deploy/`、`scripts/` 的职责，规定 Docker、服务器安装升级和 release 发布资产的归档边界。
 - [deployment/all-in-one-digital-human-setup.md](./deployment/all-in-one-digital-human-setup.md) - 一体机数字人部署配置指南。用于数字人一体机环境初始化、网络配置、服务启动和数字人部署流程。
 - [deployment/paddlespeech-deploy.md](./deployment/paddlespeech-deploy.md) - PaddleSpeech TTS 部署与接入指南。用于安装 PaddleSpeech 服务、启动 TTS 服务并把它接入小智服务端的场景。
 
@@ -156,8 +162,10 @@ AI 必须按任务读取文档：
 数据库任务：manager-api db/changelog
 配置任务：config.yaml / config_from_api.yaml / application*.yml
 架构/提示词/插件/MCP任务：docs/architecture/* + docs/integrations/prompt-injection-engineering.md
+配置/运行产物治理任务：docs/standards/config-runtime-policy.md
 开发环境任务：docs/development/*
 部署任务：docs/deployment/*
+部署资产任务：docs/deployment/deployment-asset-policy.md + deploy/*
 设备任务：docs/device/*
 MCP 任务：docs/mcp/*
 模型任务：docs/models/*
@@ -182,6 +190,18 @@ AI 禁止：
 
 ```text
 docs/standards/
+```
+
+本地运行产物统一放在：
+
+```text
+runtime/
+```
+
+部署资产后续统一归档到：
+
+```text
+deploy/
 ```
 
 后续如果要移动官方文档，必须先统一检查并修复所有内部链接。

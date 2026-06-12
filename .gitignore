@@ -7,6 +7,34 @@ __pycache__/
 .claude
 AGENTS.md
 
+# Runtime files and private local configuration
+runtime/*
+!runtime/.gitkeep
+!runtime/config/
+runtime/config/*
+!runtime/config/.gitkeep
+!runtime/logs/
+runtime/logs/*
+!runtime/logs/.gitkeep
+!runtime/run/
+runtime/run/*
+!runtime/run/.gitkeep
+!runtime/tmp/
+runtime/tmp/*
+!runtime/tmp/.gitkeep
+!runtime/uploads/
+runtime/uploads/*
+!runtime/uploads/.gitkeep
+!runtime/cache/
+runtime/cache/*
+!runtime/cache/.gitkeep
+config/local/
+config/private/
+config/*.local.*
+config/*.private.*
+!config/examples/
+!config/examples/**
+
 # C extensions
 *.so
 
@@ -153,12 +181,19 @@ tmp
 .history
 .DS_Store
 main/xiaozhi-server/data
+main/xiaozhi-server/data/.config.yaml
 main/xiaozhi-server/.claude
 
 main/manager-web/node_modules
 .config.yaml
 .secrets.yaml
 .private_config.yaml
+*.local.env
+*.private.env
+*.local.yaml
+*.local.yml
+*.private.yaml
+*.private.yml
 
 # model files
 main/xiaozhi-server/models/SenseVoiceSmall/model.pt
@@ -195,3 +230,14 @@ uploadfile
 main/digital-human/wakeword_runtime/models
 main/digital-human/wakeword_runtime/sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01
 sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01.tar.bz2
+
+# Keep runtime directory contracts committable even when older broad ignore
+# patterns such as "tmp" match a subdirectory name.
+!runtime/.gitkeep
+!runtime/config/
+!runtime/logs/
+!runtime/run/
+!runtime/tmp/
+!runtime/uploads/
+!runtime/cache/
+!runtime/*/.gitkeep

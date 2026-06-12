@@ -1,0 +1,722 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LOG_DIR="${DEV_LOG_DIR:-$ROOT_DIR/runtime/logs/dev}"
+RUN_DIR="${DEV_RUN_DIR:-$ROOT_DIR/runtime/run}"
+LEGACY_LOG_DIR="$ROOT_DIR/logs/dev"
+LEGACY_RUN_DIR="$ROOT_DIR/.run"
+LOG_LINES="${DEV_LOG_LINES:-80}"
+
+SERVICES=(api web server mobile)
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  scripts/dev start [server|api|web|mobile|all]
+  scripts/dev stop [server|api|web|mobile|all]
+  scripts/dev status [server|api|web|mobile|all]
+  scripts/dev logs [server|api|web|mobile|all] [-f|--follow]
+  scripts/dev doctor
+  scripts/dev help
+
+Targets:
+  server  main/xiaozhi-server, websocket 8000, HTTP/OTA 8003
+  api     main/manager-api, HTTP 8002
+  web     main/manager-web, HTTP 8001
+  mobile  main/manager-mobile, H5 dev server 9000
+  all     api, web, server, mobile
+
+Environment:
+  DEV_SKIP_INFRA=1    Do not try to start MySQL/Redis before api/all.
+  DEV_LOG_LINES=120   Change lines shown by logs.
+  DEV_LOG_DIR=...     Override runtime/logs/dev.
+  DEV_RUN_DIR=...     Override runtime/run.
+USAGE
+}
+
+log() {
+  printf '[%s] %s\n' "$(date '+%F %T')" "$*"
+}
+
+warn() {
+  printf '[%s] WARN: %s\n' "$(date '+%F %T')" "$*" >&2
+}
+
+die() {
+  printf 'ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+command_exists() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+require_command() {
+  command_exists "$1" || die "Missing required command: $1"
+}
+
+ensure_runtime_dirs() {
+  mkdir -p "$LOG_DIR" "$RUN_DIR"
+}
+
+service_name() {
+  case "$1" in
+    api) echo "manager-api" ;;
+    web) echo "manager-web" ;;
+    server) echo "xiaozhi-server" ;;
+    mobile) echo "manager-mobile" ;;
+    *) die "Unknown target: $1" ;;
+  esac
+}
+
+service_workdir() {
+  case "$1" in
+    api) echo "$ROOT_DIR/main/manager-api" ;;
+    web) echo "$ROOT_DIR/main/manager-web" ;;
+    server) echo "$ROOT_DIR/main/xiaozhi-server" ;;
+    mobile) echo "$ROOT_DIR/main/manager-mobile" ;;
+    *) die "Unknown target: $1" ;;
+  esac
+}
+
+service_ports() {
+  case "$1" in
+    api) echo "8002" ;;
+    web) echo "8001" ;;
+    server) echo "8000 8003" ;;
+    mobile) echo "9000" ;;
+    *) die "Unknown target: $1" ;;
+  esac
+}
+
+pid_file_for_name() {
+  echo "$RUN_DIR/$1.pid"
+}
+
+log_file_for_name() {
+  echo "$LOG_DIR/$1.log"
+}
+
+legacy_pid_file_for_name() {
+  echo "$LEGACY_RUN_DIR/$1.pid"
+}
+
+read_pid_file() {
+  local file="$1"
+  [[ -f "$file" ]] || return 1
+  tr -d '[:space:]' <"$file" 2>/dev/null || return 1
+}
+
+pid_is_running() {
+  local pid="$1"
+  [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" >/dev/null 2>&1
+}
+
+port_is_listening() {
+  local port="$1"
+
+  if command_exists ss; then
+    ss -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "[:.]${port}$"
+    return $?
+  fi
+
+  if command_exists lsof; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+    return $?
+  fi
+
+  if command_exists netstat; then
+    netstat -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "[:.]${port}$"
+    return $?
+  fi
+
+  return 1
+}
+
+port_detail() {
+  local port="$1"
+
+  if command_exists ss; then
+    ss -ltnp 2>/dev/null | awk -v p=":$port" '$4 ~ p "$" {print; found=1; exit} END {exit found ? 0 : 1}'
+    return $?
+  fi
+
+  if command_exists lsof; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | sed -n '2p'
+    return $?
+  fi
+
+  return 1
+}
+
+expand_target() {
+  local target="${1:-all}"
+  case "$target" in
+    all) printf '%s\n' "${SERVICES[@]}" ;;
+    api|web|server|mobile) printf '%s\n' "$target" ;;
+    *) die "Unknown target: $target" ;;
+  esac
+}
+
+start_system_service() {
+  local service="$1"
+  local unit="$service.service"
+
+  if command_exists systemctl && systemctl list-unit-files "$unit" >/dev/null 2>&1; then
+    if [[ "$(id -u)" -eq 0 ]]; then
+      systemctl start "$service" || warn "Failed to start $service with systemctl"
+    elif command_exists sudo && sudo -n true >/dev/null 2>&1; then
+      sudo systemctl start "$service" || warn "Failed to start $service with sudo systemctl"
+    else
+      warn "No non-interactive sudo available; skip starting $service"
+    fi
+    return
+  fi
+
+  if command_exists service; then
+    if [[ "$(id -u)" -eq 0 ]]; then
+      service "$service" start || warn "Failed to start $service with service"
+    elif command_exists sudo && sudo -n true >/dev/null 2>&1; then
+      sudo service "$service" start || warn "Failed to start $service with sudo service"
+    else
+      warn "No non-interactive sudo available; skip starting $service"
+    fi
+  fi
+}
+
+start_infra() {
+  if [[ "${DEV_SKIP_INFRA:-0}" == "1" || "${DEV_SKIP_INFRA:-}" == "true" ]]; then
+    log "Skipping MySQL/Redis startup because DEV_SKIP_INFRA is set"
+    return
+  fi
+
+  log "Checking infrastructure services"
+  start_system_service mysql
+  start_system_service redis-server
+
+  if port_is_listening 3306; then
+    log "MySQL is listening on 3306"
+  else
+    warn "MySQL is not listening on 3306"
+  fi
+
+  if port_is_listening 6379; then
+    log "Redis is listening on 6379"
+  else
+    warn "Redis is not listening on 6379"
+  fi
+}
+
+ensure_npm_deps() {
+  local dir="$1"
+  require_command npm
+
+  if [[ ! -d "$dir/node_modules" ]]; then
+    log "Installing dependencies in $dir with npm install"
+    (cd "$dir" && npm install)
+  fi
+}
+
+ensure_pnpm_deps() {
+  local dir="$1"
+  require_command pnpm
+
+  if [[ ! -d "$dir/node_modules" ]]; then
+    log "Installing dependencies in $dir with pnpm install"
+    (cd "$dir" && pnpm install)
+  fi
+}
+
+start_process() {
+  local name="$1"
+  local port="$2"
+  local workdir="$3"
+  shift 3
+
+  ensure_runtime_dirs
+
+  [[ -d "$workdir" ]] || die "Missing workdir: $workdir"
+
+  local pid_file
+  local log_file
+  pid_file="$(pid_file_for_name "$name")"
+  log_file="$(log_file_for_name "$name")"
+
+  if [[ -f "$pid_file" ]]; then
+    local old_pid
+    old_pid="$(read_pid_file "$pid_file" || true)"
+    if [[ -n "$old_pid" ]] && pid_is_running "$old_pid"; then
+      log "$name is already running with pid $old_pid"
+      return
+    fi
+    warn "Removing stale pid file $pid_file"
+    rm -f "$pid_file"
+  fi
+
+  if [[ -n "$port" ]] && port_is_listening "$port"; then
+    warn "$name port $port is already listening; skip starting a duplicate"
+    port_detail "$port" || true
+    return
+  fi
+
+  log "Starting $name"
+  (
+    cd "$workdir"
+    if command_exists setsid; then
+      setsid "$@" >"$log_file" 2>&1 < /dev/null &
+    else
+      nohup "$@" >"$log_file" 2>&1 < /dev/null &
+    fi
+    printf '%s\n' "$!" >"$pid_file"
+  )
+
+  sleep 1
+
+  local new_pid
+  new_pid="$(read_pid_file "$pid_file" || true)"
+  if [[ -n "$new_pid" ]] && pid_is_running "$new_pid"; then
+    log "$name started, pid $new_pid, log $log_file"
+  else
+    warn "$name exited soon after startup; see $log_file"
+    tail -n 40 "$log_file" 2>/dev/null || true
+    return 1
+  fi
+}
+
+start_api() {
+  require_command mvn
+  start_process \
+    "manager-api" \
+    "8002" \
+    "$(service_workdir api)" \
+    mvn spring-boot:run -Dspring-boot.run.profiles=dev
+}
+
+start_web() {
+  local dir
+  dir="$(service_workdir web)"
+  ensure_npm_deps "$dir"
+  start_process \
+    "manager-web" \
+    "8001" \
+    "$dir" \
+    npm run serve
+}
+
+start_server() {
+  local dir
+  dir="$(service_workdir server)"
+
+  local conda_env_python="$HOME/miniconda3/envs/xiaozhi-esp32-server/bin/python"
+  if [[ -x "$conda_env_python" ]]; then
+    start_process "xiaozhi-server" "8000" "$dir" "$conda_env_python" app.py
+  elif command_exists conda; then
+    start_process "xiaozhi-server" "8000" "$dir" conda run -n xiaozhi-esp32-server python app.py
+  elif command_exists python; then
+    start_process "xiaozhi-server" "8000" "$dir" python app.py
+  else
+    require_command python3
+    start_process "xiaozhi-server" "8000" "$dir" python3 app.py
+  fi
+}
+
+start_mobile() {
+  local dir
+  dir="$(service_workdir mobile)"
+  ensure_pnpm_deps "$dir"
+  start_process \
+    "manager-mobile" \
+    "9000" \
+    "$dir" \
+    pnpm dev:h5
+}
+
+start_target() {
+  local target="${1:-all}"
+
+  log "Project root: $ROOT_DIR"
+  if [[ "$target" == "api" || "$target" == "all" ]]; then
+    start_infra
+  fi
+
+  local service
+  while IFS= read -r service; do
+    case "$service" in
+      api) start_api ;;
+      web) start_web ;;
+      server) start_server ;;
+      mobile) start_mobile ;;
+    esac
+  done < <(expand_target "$target")
+
+  log "Startup commands submitted"
+  log "manager-web:    http://127.0.0.1:8001"
+  log "manager-api:    http://127.0.0.1:8002/xiaozhi/doc.html"
+  log "xiaozhi-server: ws://127.0.0.1:8000/xiaozhi/v1/"
+  log "xiaozhi OTA:    http://127.0.0.1:8003/xiaozhi/ota/"
+  log "manager-mobile: http://127.0.0.1:9000"
+}
+
+stop_process() {
+  local name="$1"
+  local pid_file
+  pid_file="$(pid_file_for_name "$name")"
+
+  if [[ ! -f "$pid_file" ]]; then
+    log "$name is not managed by scripts/dev"
+    return
+  fi
+
+  local pid
+  pid="$(read_pid_file "$pid_file" || true)"
+  if [[ -z "$pid" ]] || ! pid_is_running "$pid"; then
+    warn "$name pid file is stale; removing $pid_file"
+    rm -f "$pid_file"
+    return
+  fi
+
+  log "Stopping $name pid $pid"
+  kill -- "-$pid" >/dev/null 2>&1 || kill "$pid" >/dev/null 2>&1 || true
+
+  local waited=0
+  while pid_is_running "$pid" && [[ "$waited" -lt 20 ]]; do
+    sleep 0.5
+    waited=$((waited + 1))
+  done
+
+  if pid_is_running "$pid"; then
+    warn "$name did not exit; sending SIGKILL"
+    kill -KILL -- "-$pid" >/dev/null 2>&1 || kill -KILL "$pid" >/dev/null 2>&1 || true
+  fi
+
+  rm -f "$pid_file"
+  log "$name stopped"
+}
+
+stop_target() {
+  local target="${1:-all}"
+  local targets=()
+  local service
+
+  while IFS= read -r service; do
+    targets+=("$service")
+  done < <(expand_target "$target")
+
+  local idx
+  for ((idx=${#targets[@]}-1; idx>=0; idx--)); do
+    stop_process "$(service_name "${targets[$idx]}")"
+  done
+}
+
+status_service() {
+  local target="$1"
+  local name
+  local pid_file
+  local pid=""
+  local state="stopped"
+  name="$(service_name "$target")"
+  pid_file="$(pid_file_for_name "$name")"
+
+  if [[ -f "$pid_file" ]]; then
+    pid="$(read_pid_file "$pid_file" || true)"
+    if [[ -n "$pid" ]] && pid_is_running "$pid"; then
+      state="running pid=$pid"
+    else
+      state="stale pid_file=$pid_file"
+    fi
+  fi
+
+  printf '%-8s %-16s %-28s' "$target" "$name" "$state"
+
+  local port
+  for port in $(service_ports "$target"); do
+    if port_is_listening "$port"; then
+      printf ' port:%s=listening' "$port"
+    else
+      printf ' port:%s=closed' "$port"
+    fi
+  done
+
+  local legacy_pid_file
+  legacy_pid_file="$(legacy_pid_file_for_name "$name")"
+  if [[ -f "$legacy_pid_file" ]]; then
+    local legacy_pid
+    legacy_pid="$(read_pid_file "$legacy_pid_file" || true)"
+    if [[ -n "$legacy_pid" ]] && pid_is_running "$legacy_pid"; then
+      printf ' legacy:%s' "$legacy_pid"
+    else
+      printf ' legacy:stale'
+    fi
+  fi
+
+  printf '\n'
+}
+
+status_target() {
+  local target="${1:-all}"
+  printf 'Runtime logs: %s\n' "$LOG_DIR"
+  printf 'Runtime pids: %s\n' "$RUN_DIR"
+  if [[ -d "$LEGACY_RUN_DIR" || -d "$LEGACY_LOG_DIR" ]]; then
+    printf 'Legacy state is read-only: %s, %s\n' "$LEGACY_RUN_DIR" "$LEGACY_LOG_DIR"
+  fi
+
+  local service
+  while IFS= read -r service; do
+    status_service "$service"
+  done < <(expand_target "$target")
+}
+
+collect_log_files_for_service() {
+  local target="$1"
+  local name
+  name="$(service_name "$target")"
+
+  local candidates=(
+    "$LOG_DIR/$name.log"
+    "$LEGACY_LOG_DIR/$name.log"
+    "$LEGACY_RUN_DIR/$name.log"
+  )
+
+  local file
+  for file in "${candidates[@]}"; do
+    [[ -f "$file" ]] && printf '%s\n' "$file"
+  done
+}
+
+logs_target() {
+  local target="${1:-all}"
+  local follow="${2:-false}"
+  local files=()
+  local service
+  local file
+
+  while IFS= read -r service; do
+    while IFS= read -r file; do
+      files+=("$file")
+    done < <(collect_log_files_for_service "$service")
+  done < <(expand_target "$target")
+
+  if [[ "${#files[@]}" -eq 0 ]]; then
+    warn "No log files found for target: $target"
+    return 1
+  fi
+
+  if [[ "$follow" == "true" ]]; then
+    tail -n "$LOG_LINES" -F "${files[@]}"
+    return
+  fi
+
+  for file in "${files[@]}"; do
+    printf '\n==> %s <==\n' "$file"
+    tail -n "$LOG_LINES" "$file" || true
+  done
+}
+
+DOCTOR_FAILS=0
+
+doctor_ok() {
+  printf '[OK]   %s\n' "$*"
+}
+
+doctor_warn() {
+  printf '[WARN] %s\n' "$*"
+}
+
+doctor_fail() {
+  printf '[FAIL] %s\n' "$*"
+  DOCTOR_FAILS=$((DOCTOR_FAILS + 1))
+}
+
+doctor_command() {
+  local command_name="$1"
+  local description="$2"
+
+  if command_exists "$command_name"; then
+    doctor_ok "$description: $(command -v "$command_name")"
+  else
+    doctor_fail "$description: missing command '$command_name'"
+  fi
+}
+
+doctor_optional_command() {
+  local command_name="$1"
+  local description="$2"
+
+  if command_exists "$command_name"; then
+    doctor_ok "$description: $(command -v "$command_name")"
+  else
+    doctor_warn "$description: missing command '$command_name'"
+  fi
+}
+
+doctor_dir() {
+  local dir="$1"
+  local description="$2"
+
+  if [[ -d "$dir" ]]; then
+    doctor_ok "$description: $dir"
+  else
+    doctor_fail "$description missing: $dir"
+  fi
+}
+
+doctor_file() {
+  local file="$1"
+  local description="$2"
+  local required="${3:-required}"
+
+  if [[ -f "$file" ]]; then
+    doctor_ok "$description: $file"
+  elif [[ "$required" == "required" ]]; then
+    doctor_fail "$description missing: $file"
+  else
+    doctor_warn "$description missing: $file"
+  fi
+}
+
+doctor_port() {
+  local port="$1"
+  local description="$2"
+  local expected="${3:-service}"
+
+  if port_is_listening "$port"; then
+    if [[ "$expected" == "infra" ]]; then
+      doctor_ok "$description port $port is listening"
+    else
+      doctor_warn "$description port $port is already listening; check status before starting a duplicate"
+    fi
+    port_detail "$port" || true
+  else
+    if [[ "$expected" == "infra" ]]; then
+      doctor_warn "$description port $port is not listening"
+    else
+      doctor_ok "$description port $port is free"
+    fi
+  fi
+}
+
+doctor_python() {
+  local conda_env_python="$HOME/miniconda3/envs/xiaozhi-esp32-server/bin/python"
+  if [[ -x "$conda_env_python" ]]; then
+    doctor_ok "Python env for xiaozhi-server: $conda_env_python"
+  elif command_exists conda; then
+    doctor_ok "Conda available for xiaozhi-server: $(command -v conda)"
+  elif command_exists python; then
+    doctor_ok "Python available for xiaozhi-server: $(command -v python)"
+  elif command_exists python3; then
+    doctor_ok "Python available for xiaozhi-server: $(command -v python3)"
+  else
+    doctor_fail "Python for xiaozhi-server is missing"
+  fi
+}
+
+doctor() {
+  printf 'Project root: %s\n' "$ROOT_DIR"
+  printf 'Runtime logs: %s\n' "$LOG_DIR"
+  printf 'Runtime pids: %s\n\n' "$RUN_DIR"
+
+  printf 'Commands\n'
+  doctor_command bash "Bash"
+  doctor_command java "JDK for manager-api"
+  doctor_command mvn "Maven for manager-api"
+  doctor_command node "Node.js for frontends"
+  doctor_command npm "npm for manager-web"
+  doctor_command pnpm "pnpm for manager-mobile"
+  doctor_python
+  doctor_optional_command mysql "MySQL client"
+  doctor_optional_command redis-cli "Redis client"
+  doctor_optional_command ffmpeg "FFmpeg for audio processing"
+  if command_exists ss || command_exists lsof || command_exists netstat; then
+    doctor_ok "Port inspection command is available"
+  else
+    doctor_warn "No ss/lsof/netstat found; port checks will be limited"
+  fi
+
+  printf '\nDirectories\n'
+  doctor_dir "$ROOT_DIR/main/xiaozhi-server" "xiaozhi-server directory"
+  doctor_dir "$ROOT_DIR/main/manager-api" "manager-api directory"
+  doctor_dir "$ROOT_DIR/main/manager-web" "manager-web directory"
+  doctor_dir "$ROOT_DIR/main/manager-mobile" "manager-mobile directory"
+  if [[ -d "$ROOT_DIR/runtime" ]]; then
+    doctor_ok "runtime directory exists: $ROOT_DIR/runtime"
+  elif [[ -w "$ROOT_DIR" ]]; then
+    doctor_ok "runtime directory can be created under project root"
+  else
+    doctor_fail "project root is not writable for runtime directory"
+  fi
+
+  printf '\nConfiguration\n'
+  doctor_file "$ROOT_DIR/main/manager-api/src/main/resources/application-dev.yml" "manager-api dev config"
+  doctor_file "$ROOT_DIR/main/xiaozhi-server/data/.config.yaml" "xiaozhi-server private config" optional
+  doctor_file "$ROOT_DIR/main/xiaozhi-server/config_from_api.yaml" "xiaozhi-server API config template" optional
+  doctor_file "$ROOT_DIR/main/manager-mobile/env/.env.development" "manager-mobile dev env" optional
+
+  printf '\nPorts\n'
+  doctor_port 3306 "MySQL" infra
+  doctor_port 6379 "Redis" infra
+  doctor_port 8002 "manager-api"
+  doctor_port 8001 "manager-web"
+  doctor_port 8000 "xiaozhi-server websocket"
+  doctor_port 8003 "xiaozhi-server HTTP/OTA"
+  doctor_port 9000 "manager-mobile H5"
+
+  printf '\nLegacy state\n'
+  if [[ -d "$LEGACY_RUN_DIR" ]]; then
+    doctor_warn "legacy pid directory exists and is read-only for scripts/dev: $LEGACY_RUN_DIR"
+  else
+    doctor_ok "legacy pid directory not present"
+  fi
+  if [[ -d "$LEGACY_LOG_DIR" ]]; then
+    doctor_warn "legacy log directory exists and is read-only for scripts/dev: $LEGACY_LOG_DIR"
+  else
+    doctor_ok "legacy log directory not present"
+  fi
+
+  if [[ "$DOCTOR_FAILS" -gt 0 ]]; then
+    printf '\nDoctor found %s failure(s).\n' "$DOCTOR_FAILS"
+    return 1
+  fi
+
+  printf '\nDoctor finished without failures.\n'
+}
+
+main() {
+  local command="${1:-help}"
+  shift || true
+
+  case "$command" in
+    start)
+      start_target "${1:-all}"
+      ;;
+    stop)
+      stop_target "${1:-all}"
+      ;;
+    status)
+      status_target "${1:-all}"
+      ;;
+    logs)
+      local target="${1:-all}"
+      local follow="false"
+      if [[ "$target" == "-f" || "$target" == "--follow" ]]; then
+        target="${2:-all}"
+        follow="true"
+      elif [[ "${2:-}" == "-f" || "${2:-}" == "--follow" ]]; then
+        follow="true"
+      fi
+      logs_target "$target" "$follow"
+      ;;
+    doctor)
+      doctor
+      ;;
+    help|-h|--help)
+      usage
+      ;;
+    *)
+      usage >&2
+      die "Unknown command: $command"
+      ;;
+  esac
+}
+
+main "$@"

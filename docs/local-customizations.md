@@ -68,14 +68,34 @@
 定制模块：项目工程文档
 改动原因：把“小智云端服务器分析报告.docx”的调研结论整理为仓库内长期文档，补齐后台配置下发、Python 实时链路、提示词注入、工具 schema 注入、MCP 三类链路和状态机游戏规则的工程说明。
 关键文件：
+  - docs/architecture/project-architecture.md
   - docs/architecture/cloud-runtime-architecture.md
   - docs/integrations/prompt-injection-engineering.md
   - docs/README.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：官方文档同步时不得删除这两份文档；如果官方修改连接初始化、PromptManager、Dialogue、UnifiedToolHandler、MCP executor、Intent provider、ConfigServiceImpl 或插件执行器，必须同步校正文档中的真实代码路径和运行链路。
+官方同步时的处理规则：官方文档同步时不得删除这些架构和提示词工程文档；如果官方修改连接初始化、PromptManager、Dialogue、UnifiedToolHandler、MCP executor、Intent provider、ConfigServiceImpl 或插件执行器，必须同步校正文档中的真实代码路径和运行链路。
 ```
 
-## 6. 天气查询容错
+## 6. 工程治理入口、配置隔离与部署资产边界
+
+```text
+定制模块：仓库治理、开发脚本、配置示例、运行产物目录、部署资产归档
+改动原因：项目业务模块增多后，必须建立唯一开发入口、统一配置模型、运行产物隔离和部署资产归档规则，避免 Git status 噪音、私有配置误提交、Docker/源码/服务器部署互相干扰。
+关键文件：
+  - scripts/dev
+  - docs/development/local-dev-workflow.md
+  - docs/standards/config-runtime-policy.md
+  - docs/standards/upstream-sync-policy.md
+  - docs/deployment/deployment-asset-policy.md
+  - config/examples/
+  - runtime/
+  - deploy/
+  - .gitignore
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改启动脚本、配置目录、Docker/Compose、部署文档、.gitignore 或开发规范，必须保留以下约定：日常本地开发以 `scripts/dev` 为统一入口；私有配置和运行产物进入 `runtime/` 或旧兼容私有路径且不得提交；脱敏示例进入 `config/examples/`；部署资产后续归档到 `deploy/`；现有部署脚本迁移前必须保留兼容入口；官方同步前必须按 `upstream-sync-policy.md` 审查本地定制。
+```
+
+## 7. 天气查询容错
 
 ```text
 定制模块：xiaozhi-server 天气插件
