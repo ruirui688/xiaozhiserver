@@ -4,8 +4,6 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_DIR="${DEV_LOG_DIR:-$ROOT_DIR/runtime/logs/dev}"
 RUN_DIR="${DEV_RUN_DIR:-$ROOT_DIR/runtime/run}"
-LEGACY_LOG_DIR="$ROOT_DIR/logs/dev"
-LEGACY_RUN_DIR="$ROOT_DIR/.run"
 LOG_LINES="${DEV_LOG_LINES:-80}"
 
 SERVICES=(api web server mobile)
@@ -96,10 +94,6 @@ pid_file_for_name() {
 
 log_file_for_name() {
   echo "$LOG_DIR/$1.log"
-}
-
-legacy_pid_file_for_name() {
-  echo "$LEGACY_RUN_DIR/$1.pid"
 }
 
 read_pid_file() {
@@ -438,18 +432,6 @@ status_service() {
     fi
   done
 
-  local legacy_pid_file
-  legacy_pid_file="$(legacy_pid_file_for_name "$name")"
-  if [[ -f "$legacy_pid_file" ]]; then
-    local legacy_pid
-    legacy_pid="$(read_pid_file "$legacy_pid_file" || true)"
-    if [[ -n "$legacy_pid" ]] && pid_is_running "$legacy_pid"; then
-      printf ' legacy:%s' "$legacy_pid"
-    else
-      printf ' legacy:stale'
-    fi
-  fi
-
   printf '\n'
 }
 
@@ -457,9 +439,6 @@ status_target() {
   local target="${1:-all}"
   printf 'Runtime logs: %s\n' "$LOG_DIR"
   printf 'Runtime pids: %s\n' "$RUN_DIR"
-  if [[ -d "$LEGACY_RUN_DIR" || -d "$LEGACY_LOG_DIR" ]]; then
-    printf 'Legacy state is read-only: %s, %s\n' "$LEGACY_RUN_DIR" "$LEGACY_LOG_DIR"
-  fi
 
   local service
   while IFS= read -r service; do
@@ -474,8 +453,6 @@ collect_log_files_for_service() {
 
   local candidates=(
     "$LOG_DIR/$name.log"
-    "$LEGACY_LOG_DIR/$name.log"
-    "$LEGACY_RUN_DIR/$name.log"
   )
 
   local file
@@ -660,18 +637,6 @@ doctor() {
   doctor_port 8000 "xiaozhi-server websocket"
   doctor_port 8003 "xiaozhi-server HTTP/OTA"
   doctor_port 9000 "manager-mobile H5"
-
-  printf '\nLegacy state\n'
-  if [[ -d "$LEGACY_RUN_DIR" ]]; then
-    doctor_warn "legacy pid directory exists and is read-only for scripts/dev: $LEGACY_RUN_DIR"
-  else
-    doctor_ok "legacy pid directory not present"
-  fi
-  if [[ -d "$LEGACY_LOG_DIR" ]]; then
-    doctor_warn "legacy log directory exists and is read-only for scripts/dev: $LEGACY_LOG_DIR"
-  else
-    doctor_ok "legacy log directory not present"
-  fi
 
   if [[ "$DOCTOR_FAILS" -gt 0 ]]; then
     printf '\nDoctor found %s failure(s).\n' "$DOCTOR_FAILS"

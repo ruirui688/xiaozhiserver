@@ -1,6 +1,6 @@
 # 本地开发工作流
 
-`scripts/dev` 是本项目新的本地开发统一入口，用于启动、停止、查看状态、查看日志和做环境体检。旧的 `scripts/start-dev.sh` 暂时保留兼容已有习惯，但新文档和日常开发命令都以 `scripts/dev` 为准。
+`scripts/dev` 是本项目的本地开发统一入口，用于启动、停止、查看状态、查看日志和做环境体检。旧的 `scripts/start-dev.sh` 只作为兼容包装器保留，会把旧参数转发到 `scripts/dev`，不再维护独立的 `.run/` 和 `logs/dev/` 运行环境。
 
 ## 常用命令
 
@@ -65,7 +65,7 @@ scripts/dev logs web
 scripts/dev logs server -f
 ```
 
-旧入口 `scripts/start-dev.sh` 使用的 `.run/` 和 `logs/dev/` 只做只读兼容检查。`scripts/dev stop` 只停止它自己在 `runtime/run/` 记录的进程，不会清理或杀掉旧入口留下的 PID。
+旧入口 `scripts/start-dev.sh` 已经改为转发到 `scripts/dev`。如果本机还存在历史 `.run/` 或 `logs/dev/`，说明它们是旧版本脚本留下的运行产物，应在确认旧服务已停止后清理。
 
 ## doctor 检查内容
 
