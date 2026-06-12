@@ -10,8 +10,9 @@
 关键文件：
   - main/xiaozhi-server/core/providers/tools/server_plugins/plugin_executor.py
   - docs/integrations/function-plugin-architecture.md
+  - docs/integrations/prompt-injection-engineering.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方也修改插件注册、工具描述生成或 ServerPluginExecutor 执行流程，必须人工合并，保留 Function Plugin 顶层模型、声明式互动模式、custom_plugin 兼容字段、parameters_schema、opening_message、instructions 等配置约定。
+官方同步时的处理规则：如果官方也修改插件注册、工具描述生成、提示词注入或 ServerPluginExecutor 执行流程，必须人工合并，保留 Function Plugin 顶层模型、声明式互动模式、状态机游戏模式、custom_plugin 兼容字段、parameters_schema、opening_message、instructions 等配置约定，并同步更新提示词注入工程文档。
 ```
 
 ## 2. Ubuntu 源码开发环境文档

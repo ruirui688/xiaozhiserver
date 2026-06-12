@@ -87,9 +87,9 @@ provider_code 命中 all_function_registry
 
 - 讲段子
 - 热梗解释
-- 成语接龙
-- 你说我猜
 - 猜谜
+
+注意：成语接龙、你说我猜、小智想词用户猜已经从声明式互动型升级为状态机游戏型，因为它们需要稳定保存当前题目、上一问、候选集、排除条件或计分状态。
 
 它仍然是一条 `model_type = Plugin` 记录，但 `fields` 中包含兼容标记：
 
@@ -178,6 +178,41 @@ provider_code 未命中 all_function_registry
 - 外部 HTTP 工具型
 - MCP 桥接型
 - 状态机游戏型
+
+### 状态机游戏型
+
+适用于语音实时互动、高频多轮、必须稳定保存状态的玩法，例如：
+
+- 你说我猜
+- 成语接龙
+- 小智想词用户猜
+
+运行方式：
+
+```text
+provider_code 命中 GameSessionManager 状态机工具集合
+  -> xiaozhi-server 生成短工具描述，注入给模型用于触发 function call
+  -> 工具执行时进入 GameSessionManager
+  -> 服务端维护上一问、候选集、隐藏答案、计分等状态
+  -> 返回 Action.RESPONSE，直接播报，不再二次请求 LLM
+```
+
+## 提示词注入位置
+
+插件提示词并不全部写在 `agent-base-prompt.txt`。运行时有两类注入：
+
+```text
+工具描述注入：ServerPluginExecutor.get_tools() -> UnifiedToolHandler.get_functions() -> LLM tools 字段
+声明式插件二次提示：_execute_declarative_interaction_plugin() -> Action.REQLLM -> 再请求 LLM
+```
+
+成语接龙、你说我猜、小智想词用户猜等高频互动玩法已经改为状态机游戏型。它们只把“什么时候调用工具”的短描述注入给模型，具体玩法规则、候选集、隐藏答案和上一问状态保存在 `GameSessionManager`，工具执行后直接 `Action.RESPONSE` 返回。
+
+完整链路见：
+
+```text
+docs/integrations/prompt-injection-engineering.md
+```
 
 新增模式前必须先定义：
 
