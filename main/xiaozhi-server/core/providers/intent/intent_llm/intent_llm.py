@@ -147,11 +147,19 @@ class IntentProvider(IntentProviderBase):
         model_info = getattr(self.llm, "model_name", str(self.llm.__class__.__name__))
         logger.bind(tag=TAG).debug(f"使用意图识别模型: {model_info}")
 
+        bypass_cache = self._should_bypass_intent_cache(text) or (
+            hasattr(conn, "game_session_manager")
+            and conn.game_session_manager
+            and conn.game_session_manager.has_active_game()
+        )
+
         # 计算缓存键
-        cache_key = hashlib.md5((conn.device_id + text).encode()).hexdigest()
+        cache_key = hashlib.md5(((conn.device_id or "") + text).encode()).hexdigest()
 
         # 检查缓存
-        cached_intent = self.cache_manager.get(self.CacheType.INTENT, cache_key)
+        cached_intent = None
+        if not bypass_cache:
+            cached_intent = self.cache_manager.get(self.CacheType.INTENT, cache_key)
         if cached_intent is not None:
             cache_time = time.time() - total_start_time
             logger.bind(tag=TAG).debug(
@@ -272,7 +280,8 @@ class IntentProvider(IntentProviderBase):
                     logger.bind(tag=TAG).info(f"检测到函数调用意图: {function_name}")
 
             # 统一缓存处理和返回
-            self.cache_manager.set(self.CacheType.INTENT, cache_key, intent)
+            if not bypass_cache:
+                self.cache_manager.set(self.CacheType.INTENT, cache_key, intent)
             postprocess_time = time.time() - postprocess_start_time
             logger.bind(tag=TAG).debug(f"意图后处理耗时: {postprocess_time:.4f}秒")
             return intent
@@ -284,3 +293,29 @@ class IntentProvider(IntentProviderBase):
             )
             # 如果解析失败，默认返回继续聊天意图
             return '{"function_call": {"name": "continue_chat"}}'
+
+    @staticmethod
+    def _should_bypass_intent_cache(text: str) -> bool:
+        """短反馈依赖当前上下文，同一句话不能跨游戏轮次复用意图缓存。"""
+        normalized = (text or "").strip().lower()
+        if not normalized:
+            return False
+        short_feedback = {
+            "不是",
+            "不对",
+            "错了",
+            "再猜",
+            "继续",
+            "接着",
+            "换一个",
+            "对了",
+            "猜对了",
+            "没猜对",
+            "还不对",
+        }
+        if normalized in short_feedback:
+            return True
+        return len(normalized) <= 12 and any(
+            keyword in normalized
+            for keyword in ("它", "这个", "那个", "能吃", "能用", "不是", "不对", "再猜")
+        )

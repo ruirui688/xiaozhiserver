@@ -80,6 +80,7 @@ public class AgentPluginMappingServiceImpl extends ServiceImpl<AgentPluginMappin
 
                 Map<String, Object> paramInfo = new HashMap<>(4);
                 ModelConfigEntity modelConfigEntity = modelConfigMap.get(pluginCode);
+                paramInfo.put("type", modelConfigEntity.getConfigJson().getStr("type"));
                 paramInfo.put("base_url", modelConfigEntity.getConfigJson().getStr("base_url"));
                 paramInfo.put("api_key", modelConfigEntity.getConfigJson().getStr("api_key"));
                 paramInfo.put("dataset_ids",

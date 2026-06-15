@@ -28,6 +28,7 @@ public class KnowledgeBaseAdapterFactory {
     static {
         // 注册内置适配器类型
         registerAdapter("ragflow", xiaozhi.modules.knowledge.rag.impl.RAGFlowAdapter.class);
+        registerAdapter("local_knowledge", xiaozhi.modules.knowledge.rag.impl.LocalKnowledgeAdapter.class);
         // 可以在这里注册更多适配器类型
     }
 

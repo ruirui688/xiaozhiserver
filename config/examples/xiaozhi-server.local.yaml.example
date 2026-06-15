@@ -1,0 +1,51 @@
+# xiaozhi-server local override example.
+# Copy this file to an ignored private config path before editing.
+# Recommended governance path: runtime/config/xiaozhi-server.local.yaml
+# Current compatibility path: main/xiaozhi-server/data/.config.yaml
+#
+# Do not commit API keys, database passwords, production addresses, or data/.config.yaml.
+
+server:
+  ip: 0.0.0.0
+  port: 8000
+  http_port: 8003
+  # For local development, keep loopback or LAN addresses only.
+  websocket: ws://127.0.0.1:8000/xiaozhi/v1/
+  vision_explain: http://127.0.0.1:8003/mcp/vision/explain
+  auth:
+    enabled: false
+    allowed_devices: []
+  mqtt_gateway:
+  mqtt_signature_key:
+  udp_gateway:
+
+log:
+  log_level: INFO
+  log_dir: runtime/logs
+  log_file: xiaozhi-server.log
+  data_dir: runtime/cache/xiaozhi-server
+
+manager-api:
+  # Use a local or LAN address. Do not put production URLs in committed examples.
+  url: http://127.0.0.1:8002/xiaozhi
+  # Fill only in the ignored private copy.
+  secret:
+
+plugins:
+  get_weather:
+    api_host:
+    api_key:
+    default_location: 广州
+  home_assistant:
+    base_url:
+    api_key:
+  search_from_ragflow:
+    base_url:
+    api_key:
+    dataset_ids: []
+  web_search:
+    provider: metaso
+    api_key:
+
+mcp_endpoint:
+prompt_template: agent-base-prompt.txt

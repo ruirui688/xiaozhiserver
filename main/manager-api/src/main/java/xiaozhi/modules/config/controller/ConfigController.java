@@ -1,6 +1,7 @@
 package xiaozhi.modules.config.controller;
 
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -16,6 +17,8 @@ import xiaozhi.common.validator.ValidatorUtils;
 import xiaozhi.modules.config.dto.AgentModelsDTO;
 import xiaozhi.modules.config.dto.CorrectWordsDTO;
 import xiaozhi.modules.config.service.ConfigService;
+import xiaozhi.modules.knowledge.dto.document.RetrievalDTO;
+import xiaozhi.modules.knowledge.service.KnowledgeFilesService;
 
 /**
  * xiaozhi-server 配置获取
@@ -28,6 +31,7 @@ import xiaozhi.modules.config.service.ConfigService;
 @AllArgsConstructor
 public class ConfigController {
     private final ConfigService configService;
+    private final KnowledgeFilesService knowledgeFilesService;
 
     @PostMapping("server-base")
     @Operation(summary = "服务端获取配置接口")
@@ -51,5 +55,17 @@ public class ConfigController {
         ValidatorUtils.validateEntity(dto);
         List<String> list = configService.getCorrectWords(dto.getMacAddress());
         return new Result<Object>().ok(list);
+    }
+
+    @PostMapping("knowledge/retrieval")
+    @Operation(summary = "服务端知识库召回接口")
+    public Result<Object> retrieval(@RequestBody Map<String, Object> body) {
+        RetrievalDTO.TestReq req = RetrievalDTO.TestReq.builder()
+                .datasetIds((List<String>) body.get("dataset_ids"))
+                .question((String) body.get("question"))
+                .page(1)
+                .pageSize(10)
+                .build();
+        return new Result<Object>().ok(knowledgeFilesService.retrievalTest(req));
     }
 }

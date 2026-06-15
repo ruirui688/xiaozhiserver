@@ -37,6 +37,21 @@ async def handle_user_intent(conn: "ConnectionHandler", text):
     if await checkWakeupWords(conn, filtered_text):
         return True
 
+    active_game_tool = None
+    if hasattr(conn, "game_session_manager") and conn.game_session_manager:
+        active_game_tool = conn.game_session_manager.get_active_tool()
+    if active_game_tool and conn.func_handler and conn.func_handler.has_tool(active_game_tool):
+        intent_result = json.dumps(
+            {
+                "function_call": {
+                    "name": active_game_tool,
+                    "arguments": {"user_message": text},
+                }
+            },
+            ensure_ascii=False,
+        )
+        return await process_intent_result(conn, intent_result, text)
+
     if conn.intent_type == "function_call":
         # 使用支持function calling的聊天方法,不再进行意图分析
         return False

@@ -176,7 +176,9 @@ class PromptManager:
             # 调用get_weather函数
             result = get_weather(conn, location=location, lang="zh_CN")
             if isinstance(result, ActionResponse):
-                weather_report = result.result
+                weather_report = result.response or result.result
+                if not weather_report:
+                    return "天气信息获取失败"
                 self.cache_manager.set(self.CacheType.WEATHER, location, weather_report)
                 return weather_report
             return "天气信息获取失败"

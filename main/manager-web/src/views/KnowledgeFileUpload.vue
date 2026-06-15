@@ -113,7 +113,7 @@
     <!-- 上传文档对话框 -->
     <el-dialog :title="$t('knowledgeFileUpload.uploadDocument')" :visible.sync="uploadDialogVisible" width="800px">
       <el-upload class="document-uploader" drag :action="uploadUrl" :auto-upload="false" :on-change="handleFileChange"
-        :multiple="true" :show-file-list="false" accept=".doc,.docx,.pdf,.txt,.md,.mdx,.csv,.xls,.xlsx,.ppt,.pptx">
+        :multiple="true" :show-file-list="false" accept=".doc,.docx,.pdf,.txt,.md,.mdx,.csv,.xls,.xlsx,.ppt,.pptx,.json,.jsonl,.qa">
         <i class="el-icon-upload"></i>
         <div class="el-upload__text">{{ $t('knowledgeFileUpload.dragOrClick') }}</div>
         <div class="el-upload__tip">{{ $t('knowledgeFileUpload.uploadTip') }}</div>

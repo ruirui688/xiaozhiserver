@@ -1,4 +1,5 @@
 import requests
+import re
 from bs4 import BeautifulSoup
 from config.logger import setup_logging
 from plugins_func.register import register_function, ToolType, ActionResponse, Action
@@ -43,6 +44,54 @@ HEADERS = {
         "(KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36"
     )
 }
+
+OPEN_METEO_WEATHER_CODE_MAP = {
+    0: "晴",
+    1: "大部晴朗",
+    2: "局部多云",
+    3: "阴",
+    45: "有雾",
+    48: "雾凇",
+    51: "小毛毛雨",
+    53: "毛毛雨",
+    55: "较强毛毛雨",
+    61: "小雨",
+    63: "中雨",
+    65: "大雨",
+    71: "小雪",
+    73: "中雪",
+    75: "大雪",
+    80: "小阵雨",
+    81: "阵雨",
+    82: "强阵雨",
+    95: "雷阵雨",
+    96: "雷阵雨伴有小冰雹",
+    99: "雷阵雨伴有冰雹",
+}
+
+KNOWN_CITY_PREFIXES = (
+    "北京",
+    "上海",
+    "天津",
+    "重庆",
+    "南京",
+    "杭州",
+    "广州",
+    "深圳",
+    "苏州",
+    "成都",
+    "武汉",
+    "西安",
+    "郑州",
+    "长沙",
+    "合肥",
+    "宁波",
+    "无锡",
+    "青岛",
+    "济南",
+    "厦门",
+    "福州",
+)
 
 # 天气代码 https://dev.qweather.com/docs/resource/icons/#weather-icons
 WEATHER_CODE_MAP = {
@@ -113,7 +162,7 @@ WEATHER_CODE_MAP = {
 
 def fetch_city_info(location, api_key, api_host):
     url = f"https://{api_host}/geo/v2/city/lookup?key={api_key}&location={location}&lang=zh"
-    response = requests.get(url, headers=HEADERS).json()
+    response = requests.get(url, headers=HEADERS, timeout=10).json()
     if response.get("error") is not None:
         logger.bind(tag=TAG).error(
             f"获取天气失败，原因：{response.get('error', {}).get('detail')}"
@@ -123,7 +172,7 @@ def fetch_city_info(location, api_key, api_host):
 
 
 def fetch_weather_page(url):
-    response = requests.get(url, headers=HEADERS)
+    response = requests.get(url, headers=HEADERS, timeout=10)
     return BeautifulSoup(response.text, "html.parser") if response.ok else None
 
 
@@ -158,13 +207,128 @@ def parse_weather_info(soup):
     return city_name, current_abstract, current_basic, temps_list
 
 
+def normalize_location_candidates(location):
+    normalized = re.sub(r"\s+", "", location or "")
+    normalized = re.sub(r"(天气|温度|气温)$", "", normalized)
+    candidates = []
+
+    def add(value):
+        value = (value or "").strip()
+        if value and value not in candidates:
+            candidates.append(value)
+
+    add(normalized)
+    add(re.sub(r"(市|区|县)$", "", normalized))
+
+    city_match = re.search(r"(.+?市)", normalized)
+    if city_match:
+        city = city_match.group(1)
+        add(city)
+        add(city[:-1] if city.endswith("市") else city)
+
+    for city in KNOWN_CITY_PREFIXES:
+        if normalized.startswith(city) and normalized != city:
+            add(city)
+
+    return candidates
+
+
+def fetch_open_meteo_geo(location):
+    for candidate in normalize_location_candidates(location):
+        response = requests.get(
+            "https://geocoding-api.open-meteo.com/v1/search",
+            params={
+                "name": candidate,
+                "count": 5,
+                "language": "zh",
+                "format": "json",
+            },
+            timeout=10,
+        )
+        if not response.ok:
+            continue
+        results = response.json().get("results") or []
+        if results:
+            china_results = [item for item in results if item.get("country_code") == "CN"]
+            return (china_results or results)[0], candidate
+    return None, ""
+
+
+def build_open_meteo_weather_report(location):
+    geo, matched_query = fetch_open_meteo_geo(location)
+    if not geo:
+        return ""
+
+    response = requests.get(
+        "https://api.open-meteo.com/v1/forecast",
+        params={
+            "latitude": geo["latitude"],
+            "longitude": geo["longitude"],
+            "current": [
+                "temperature_2m",
+                "apparent_temperature",
+                "weather_code",
+                "relative_humidity_2m",
+            ],
+            "daily": ["weather_code", "temperature_2m_max", "temperature_2m_min"],
+            "timezone": "Asia/Shanghai",
+            "forecast_days": 3,
+        },
+        timeout=10,
+    )
+    if not response.ok:
+        return ""
+
+    data = response.json()
+    current = data.get("current", {})
+    daily = data.get("daily", {})
+    city_name = geo.get("name") or matched_query or location
+    admin1 = geo.get("admin1")
+    if admin1 and admin1 not in city_name:
+        city_name = f"{admin1}{city_name}"
+
+    weather = OPEN_METEO_WEATHER_CODE_MAP.get(current.get("weather_code"), "未知")
+    temp = current.get("temperature_2m")
+    apparent = current.get("apparent_temperature")
+    humidity = current.get("relative_humidity_2m")
+
+    report = f"{city_name}现在{weather}"
+    if temp is not None:
+        report += f"，气温{temp}度"
+    if apparent is not None:
+        report += f"，体感{apparent}度"
+    if humidity is not None:
+        report += f"，湿度{humidity}%"
+
+    times = daily.get("time") or []
+    highs = daily.get("temperature_2m_max") or []
+    lows = daily.get("temperature_2m_min") or []
+    codes = daily.get("weather_code") or []
+    if times and highs and lows:
+        forecast_parts = []
+        for index, day in enumerate(times[:3]):
+            day_weather = OPEN_METEO_WEATHER_CODE_MAP.get(
+                codes[index] if index < len(codes) else None, "未知"
+            )
+            forecast_parts.append(
+                f"{day}{day_weather}，{lows[index]}到{highs[index]}度"
+            )
+        report += "。未来三天：" + "；".join(forecast_parts) + "。"
+    else:
+        report += "。"
+
+    if matched_query and matched_query != location:
+        report += f"（按{matched_query}查询）"
+    return report
+
+
 @register_function("get_weather", GET_WEATHER_FUNCTION_DESC, ToolType.SYSTEM_CTL)
 def get_weather(conn: "ConnectionHandler", location: str = None, lang: str = "zh_CN"):
     from core.utils.cache.manager import cache_manager, CacheType
 
     weather_config = conn.config.get("plugins", {}).get("get_weather", {})
-    api_host = weather_config.get("api_host", "mj7p3y7naa.re.qweatherapi.com")
-    api_key = weather_config.get("api_key", "a861d0d5e7bf4ee1a83d9a9e4f96d4da")
+    api_host = weather_config.get("api_host", "")
+    api_key = weather_config.get("api_key", "")
     default_location = weather_config.get("default_location", "广州")
     client_ip = conn.client_ip
 
@@ -192,17 +356,30 @@ def get_weather(conn: "ConnectionHandler", location: str = None, lang: str = "zh
     weather_cache_key = f"full_weather_{location}_{lang}"
     cached_weather_report = cache_manager.get(CacheType.WEATHER, weather_cache_key)
     if cached_weather_report:
-        return ActionResponse(Action.REQLLM, cached_weather_report, None)
+        return ActionResponse(Action.RESPONSE, response=cached_weather_report)
 
     # 缓存未命中，获取实时天气数据
-    city_info = fetch_city_info(location, api_key, api_host)
+    city_info = None
+    if api_key and api_host:
+        try:
+            city_info = fetch_city_info(location, api_key, api_host)
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"和风天气接口异常，改用兜底天气源: {e}")
     if not city_info:
+        fallback_report = build_open_meteo_weather_report(location)
+        if fallback_report:
+            cache_manager.set(CacheType.WEATHER, weather_cache_key, fallback_report)
+            return ActionResponse(Action.RESPONSE, response=fallback_report)
         return ActionResponse(
-            Action.REQLLM, f"未找到相关的城市: {location}，请确认地点是否正确", None
+            Action.RESPONSE, response=f"暂时没查到{location}的天气。"
         )
     soup = fetch_weather_page(city_info["fxLink"])
     if not soup:
-        return ActionResponse(Action.REQLLM, None, "请求失败")
+        fallback_report = build_open_meteo_weather_report(location)
+        if fallback_report:
+            cache_manager.set(CacheType.WEATHER, weather_cache_key, fallback_report)
+            return ActionResponse(Action.RESPONSE, response=fallback_report)
+        return ActionResponse(Action.RESPONSE, response="天气请求失败，请稍后再试。")
     city_name, current_abstract, current_basic, temps_list = parse_weather_info(soup)
 
     weather_report = f"您查询的位置是：{city_name}\n\n当前天气: {current_abstract}\n"
@@ -225,4 +402,4 @@ def get_weather(conn: "ConnectionHandler", location: str = None, lang: str = "zh
     # 缓存完整的天气报告
     cache_manager.set(CacheType.WEATHER, weather_cache_key, weather_report)
 
-    return ActionResponse(Action.REQLLM, weather_report, None)
+    return ActionResponse(Action.RESPONSE, response=weather_report)

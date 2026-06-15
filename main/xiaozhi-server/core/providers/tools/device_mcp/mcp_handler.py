@@ -99,20 +99,30 @@ class MCPClient:
             if id in self.call_results:
                 self.call_results.pop(id)
 
+    async def reject_all_call_results(self, exception: Exception):
+        async with self.lock:
+            pending_results = list(self.call_results.values())
+            self.call_results.clear()
+        for future in pending_results:
+            if not future.done():
+                future.set_exception(exception)
+
 
 async def send_mcp_message(conn: "ConnectionHandler", payload: dict):
     """Helper to send MCP messages, encapsulating common logic."""
     if not conn.features.get("mcp"):
         logger.bind(tag=TAG).warning("客户端不支持MCP，无法发送MCP消息")
-        return
+        return False
 
     message = json.dumps({"type": "mcp", "payload": payload})
 
     try:
         await conn.websocket.send(message)
         logger.bind(tag=TAG).debug(f"成功发送MCP消息: {message}")
+        return True
     except Exception as e:
         logger.bind(tag=TAG).error(f"发送MCP消息失败: {e}")
+        return False
 
 
 async def handle_mcp_message(
@@ -372,7 +382,9 @@ async def call_mcp_tool(
     }
 
     logger.bind(tag=TAG).info(f"发送客户端mcp工具调用请求: {actual_name}，参数: {args}")
-    await send_mcp_message(conn, payload)
+    if not await send_mcp_message(conn, payload):
+        await mcp_client.cleanup_call_result(tool_call_id)
+        raise ConnectionError("发送MCP工具调用请求失败")
 
     try:
         # Wait for response or timeout

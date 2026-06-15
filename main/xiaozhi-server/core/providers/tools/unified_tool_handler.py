@@ -197,10 +197,10 @@ class UnifiedToolHandler:
         responses_text = []
 
         for response in responses:
-            if response.content:
-                contents.append(response.content)
+            if response.result:
+                contents.append(str(response.result))
             if response.response:
-                responses_text.append(response.response)
+                responses_text.append(str(response.response))
 
         # 确定最终的动作类型
         final_action = Action.RESPONSE
@@ -236,6 +236,11 @@ class UnifiedToolHandler:
                 and self.conn.mcp_endpoint_client
             ):
                 await self.conn.mcp_endpoint_client.close()
+
+            if hasattr(self.conn, "mcp_client") and self.conn.mcp_client:
+                await self.conn.mcp_client.reject_all_call_results(
+                    ConnectionError("连接已关闭，取消等待中的设备MCP调用")
+                )
 
             self.logger.info("工具处理器清理完成")
         except Exception as e:

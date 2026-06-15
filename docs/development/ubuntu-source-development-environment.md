@@ -334,6 +334,19 @@ cd main/xiaozhi-server
 python app.py
 ```
 
+如果希望一次性后台启动本地开发服务，推荐使用项目脚本：
+
+```bash
+scripts/start-dev.sh --with-xiaozhi
+```
+
+说明：
+
+- `python app.py` 适合前台调试，终端关闭时服务会退出。
+- `scripts/start-dev.sh --with-xiaozhi` 适合本地后台运行，会把 xiaozhi-server 日志写入 `logs/dev/xiaozhi-server.log`，PID 写入 `.run/xiaozhi-server.pid`。
+- xiaozhi-server 后台启动时必须将标准输入指向 `/dev/null`，并脱离调用者进程组；否则 `app.py` 的标准输入监听在非交互环境下可能导致服务启动后立即退出。
+- 本项目的 `app.py` 只在交互式终端中启用标准输入监听；开发脚本优先使用 Conda 环境中的真实 Python，并用 `setsid` 启动后台进程。
+
 启动 `manager-mobile` H5：
 
 ```bash

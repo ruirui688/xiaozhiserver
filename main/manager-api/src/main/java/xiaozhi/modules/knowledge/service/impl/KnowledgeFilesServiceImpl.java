@@ -411,6 +411,13 @@ public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, Docu
         // 2. 本地持久化 (通过 self 调用以激活 @Transactional 代理)
         log.info("2. 同步保存本地影子记录: documentId={}", result.getDocumentId());
         self.saveDocumentShadow(datasetId, result, fileName, chunkMethod, parserConfig);
+        if ("local_knowledge".equals(result.getSourceType())) {
+            long chunkDelta = result.getChunkCount() != null ? result.getChunkCount().longValue() : 0L;
+            long tokenDelta = result.getTokenCount() != null ? result.getTokenCount() : 0L;
+            if (chunkDelta > 0 || tokenDelta > 0) {
+                knowledgeBaseService.updateStatistics(datasetId, 0, chunkDelta, tokenDelta);
+            }
+        }
 
         log.info("=== 文档上传与影子记录保存成功 ===");
         return result;
