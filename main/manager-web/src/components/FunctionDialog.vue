@@ -136,6 +136,29 @@
               </el-button>
             </template>
           </el-input>
+
+          <div class="no-code-tools-panel">
+            <div class="no-code-tools-header">
+              <h4>本地 HTTP 工具</h4>
+              <el-button size="mini" type="primary" icon="el-icon-plus" @click="openMcpToolEditor()">新增工具</el-button>
+            </div>
+            <div v-if="noCodeTools.length > 0" class="no-code-tools-list">
+              <div v-for="(tool, index) in noCodeTools" :key="tool.name || index" class="no-code-tool-row">
+                <el-switch v-model="tool.enabled" size="mini" @change="markNoCodeToolsDirty" />
+                <div class="no-code-tool-main">
+                  <div class="no-code-tool-name">{{ tool.name || '未命名工具' }}</div>
+                  <div class="no-code-tool-desc">{{ tool.description || tool.url || '未填写描述' }}</div>
+                </div>
+                <el-button size="mini" icon="el-icon-edit" @click="openMcpToolEditor(index)"></el-button>
+                <el-button size="mini" icon="el-icon-delete" type="danger" plain @click="removeMcpTool(index)"></el-button>
+              </div>
+            </div>
+            <div v-else class="no-code-tools-empty">还没有本地 HTTP 工具</div>
+            <div class="no-code-tools-actions">
+              <el-button size="mini" :loading="savingNoCodeTools" @click="saveNoCodeTools">保存 HTTP 工具</el-button>
+              <el-button size="mini" @click="loadNoCodeTools">重新加载</el-button>
+            </div>
+          </div>
         </div>
 
         <!-- 右侧区域 -->
@@ -167,6 +190,69 @@
         </div>
       </div>
     </div>
+
+    <el-dialog
+      title="HTTP MCP 工具"
+      :visible.sync="mcpToolEditorVisible"
+      width="720px"
+      append-to-body
+      class="mcp-tool-editor-dialog">
+      <el-form :model="editingMcpTool" label-width="92px" size="small">
+        <el-form-item label="工具名称">
+          <el-input v-model="editingMcpTool.name" placeholder="例如 query_order，仅用英文、数字、下划线" />
+        </el-form-item>
+        <el-form-item label="描述">
+          <el-input v-model="editingMcpTool.description" type="textarea" :rows="2" placeholder="告诉大模型什么时候应该调用这个工具" />
+        </el-form-item>
+        <el-form-item label="请求方式">
+          <el-select v-model="editingMcpTool.method" class="method-select">
+            <el-option label="GET" value="GET" />
+            <el-option label="POST" value="POST" />
+            <el-option label="PUT" value="PUT" />
+            <el-option label="PATCH" value="PATCH" />
+            <el-option label="DELETE" value="DELETE" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="URL">
+          <el-input v-model="editingMcpTool.url" :placeholder="'https://example.com/api/{{id}}'" />
+        </el-form-item>
+        <el-form-item label="Headers">
+          <el-input v-model="editingHeadersText" type="textarea" :rows="4" placeholder='{"Authorization":"Bearer xxx"}' />
+        </el-form-item>
+        <el-form-item label="查询参数">
+          <el-input v-model="editingQueryText" type="textarea" :rows="3" :placeholder="'{\"q\":\"{{keyword}}\"}'" />
+        </el-form-item>
+        <el-form-item label="Body 模板">
+          <el-input v-model="editingMcpTool.bodyTemplate" type="textarea" :rows="5" :placeholder="'{\"orderId\":\"{{order_id}}\"}'" />
+        </el-form-item>
+        <el-form-item label="超时秒数">
+          <el-input-number v-model="editingMcpTool.timeoutSeconds" :min="1" :max="60" />
+        </el-form-item>
+        <el-form-item label="工具参数">
+          <div class="mcp-param-list">
+            <div v-for="(param, index) in editingMcpTool.parameters" :key="index" class="mcp-param-row">
+              <el-input v-model="param.name" placeholder="参数名" />
+              <el-select v-model="param.type" placeholder="类型">
+                <el-option label="string" value="string" />
+                <el-option label="number" value="number" />
+                <el-option label="integer" value="integer" />
+                <el-option label="boolean" value="boolean" />
+                <el-option label="object" value="object" />
+                <el-option label="array" value="array" />
+              </el-select>
+              <el-input v-model="param.description" placeholder="描述" />
+              <el-checkbox v-model="param.required">必填</el-checkbox>
+              <el-button icon="el-icon-delete" size="mini" @click="removeMcpParam(index)"></el-button>
+            </div>
+          </div>
+          <el-button size="mini" icon="el-icon-plus" @click="addMcpParam">新增参数</el-button>
+        </el-form-item>
+      </el-form>
+      <span slot="footer">
+        <el-button @click="mcpToolEditorVisible = false">取消</el-button>
+        <el-button type="primary" @click="confirmMcpToolEditor">确定</el-button>
+      </span>
+    </el-dialog>
 
     <div class="drawer-footer">
       <el-button @click="closeDialog">{{ $t('functionDialog.cancel') }}</el-button>
@@ -213,6 +299,25 @@ export default {
       mcpUrl: "",
       mcpStatus: "disconnected",
       mcpTools: [],
+      noCodeTools: [],
+      noCodeToolsDirty: false,
+      savingNoCodeTools: false,
+      mcpToolEditorVisible: false,
+      editingMcpToolIndex: -1,
+      editingMcpTool: {
+        name: '',
+        description: '',
+        enabled: true,
+        method: 'GET',
+        url: '',
+        headers: {},
+        queryParams: {},
+        bodyTemplate: '',
+        timeoutSeconds: 10,
+        parameters: []
+      },
+      editingHeadersText: "{}",
+      editingQueryText: "{}",
       
       // 功能状态
       featureStatus: {
@@ -288,6 +393,7 @@ export default {
         // 加载MCP数据
         this.loadMcpAddress();
         this.loadMcpTools();
+        this.loadNoCodeTools();
       }
     },
     dialogVisible(newVal) {
@@ -359,6 +465,132 @@ export default {
           this.mcpTools = [];
           this.mcpStatus = "disconnected";
           console.error('获取MCP工具列表失败:', res.data.msg);
+        }
+      });
+    },
+
+    createEmptyMcpTool() {
+      return {
+        name: '',
+        description: '',
+        enabled: true,
+        method: 'GET',
+        url: '',
+        headers: {},
+        queryParams: {},
+        bodyTemplate: '',
+        timeoutSeconds: 10,
+        parameters: []
+      };
+    },
+
+    loadNoCodeTools() {
+      Api.agent.getAgentMcpNoCodeTools(this.agentId, (res) => {
+        if (res.data.code === 0) {
+          this.noCodeTools = (res.data.data || []).map(tool => ({
+            ...this.createEmptyMcpTool(),
+            ...tool,
+            enabled: tool.enabled !== false,
+            headers: tool.headers || {},
+            queryParams: tool.queryParams || {},
+            parameters: tool.parameters || []
+          }));
+          this.noCodeToolsDirty = false;
+        } else {
+          this.$message.error(res.data.msg || '加载 HTTP 工具失败');
+        }
+      });
+    },
+
+    markNoCodeToolsDirty() {
+      this.noCodeToolsDirty = true;
+    },
+
+    openMcpToolEditor(index = -1) {
+      this.editingMcpToolIndex = index;
+      const tool = index >= 0 ? this.noCodeTools[index] : this.createEmptyMcpTool();
+      this.editingMcpTool = JSON.parse(JSON.stringify({
+        ...this.createEmptyMcpTool(),
+        ...tool,
+        headers: tool.headers || {},
+        queryParams: tool.queryParams || {},
+        parameters: tool.parameters || []
+      }));
+      this.editingHeadersText = JSON.stringify(this.editingMcpTool.headers || {}, null, 2);
+      this.editingQueryText = JSON.stringify(this.editingMcpTool.queryParams || {}, null, 2);
+      this.mcpToolEditorVisible = true;
+    },
+
+    confirmMcpToolEditor() {
+      const tool = JSON.parse(JSON.stringify(this.editingMcpTool));
+      tool.name = (tool.name || '').trim();
+      tool.description = (tool.description || '').trim();
+      tool.url = (tool.url || '').trim();
+      if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(tool.name)) {
+        this.$message.error('工具名称必须以英文字母开头，只能包含英文、数字、下划线和中划线');
+        return;
+      }
+      if (!tool.description) {
+        this.$message.error('请填写工具描述');
+        return;
+      }
+      if (!tool.url) {
+        this.$message.error('请填写 URL');
+        return;
+      }
+      try {
+        tool.headers = this.editingHeadersText.trim() ? JSON.parse(this.editingHeadersText) : {};
+        tool.queryParams = this.editingQueryText.trim() ? JSON.parse(this.editingQueryText) : {};
+      } catch (err) {
+        this.$message.error('Headers 或查询参数不是合法 JSON');
+        return;
+      }
+      tool.parameters = (tool.parameters || [])
+        .filter(param => param.name && param.name.trim())
+        .map(param => ({
+          ...param,
+          name: param.name.trim(),
+          type: param.type || 'string',
+          description: param.description || '',
+          required: !!param.required
+        }));
+      if (this.editingMcpToolIndex >= 0) {
+        this.$set(this.noCodeTools, this.editingMcpToolIndex, tool);
+      } else {
+        this.noCodeTools.push(tool);
+      }
+      this.markNoCodeToolsDirty();
+      this.mcpToolEditorVisible = false;
+    },
+
+    removeMcpTool(index) {
+      this.noCodeTools.splice(index, 1);
+      this.markNoCodeToolsDirty();
+    },
+
+    addMcpParam() {
+      this.editingMcpTool.parameters.push({
+        name: '',
+        type: 'string',
+        description: '',
+        required: false
+      });
+    },
+
+    removeMcpParam(index) {
+      this.editingMcpTool.parameters.splice(index, 1);
+    },
+
+    saveNoCodeTools() {
+      this.savingNoCodeTools = true;
+      Api.agent.saveAgentMcpNoCodeTools(this.agentId, this.noCodeTools, (res) => {
+        this.savingNoCodeTools = false;
+        if (res.data.code === 0) {
+          this.noCodeToolsDirty = false;
+          this.$message.success('HTTP 工具配置已保存');
+          this.refreshStatus();
+        } else {
+          this.$message.error(res.data.msg || '保存 HTTP 工具失败');
         }
       });
     },
@@ -931,5 +1163,102 @@ export default {
     font-size: 14px;
     padding: 10px 0;
   }
+}
+
+.no-code-tools-panel {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 4px;
+  background: #fafafa;
+}
+
+.no-code-tools-header,
+.no-code-tools-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.no-code-tools-header {
+  margin-bottom: 10px;
+
+  h4 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+  }
+}
+
+.no-code-tools-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.no-code-tool-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid #ebeef5;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.no-code-tool-main {
+  min-width: 0;
+}
+
+.no-code-tool-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #303133;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.no-code-tool-desc {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #909399;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.no-code-tools-empty {
+  padding: 14px 0;
+  color: #909399;
+  text-align: center;
+  font-size: 13px;
+}
+
+.no-code-tools-actions {
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.method-select {
+  width: 160px;
+}
+
+.mcp-param-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.mcp-param-row {
+  display: grid;
+  grid-template-columns: 120px 110px 1fr 72px 36px;
+  align-items: center;
+  gap: 8px;
 }
 </style>

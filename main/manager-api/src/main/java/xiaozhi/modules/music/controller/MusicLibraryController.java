@@ -70,6 +70,20 @@ public class MusicLibraryController {
         }
     }
 
+    @PutMapping("/files/description")
+    @Operation(summary = "更新服务器音乐提示词")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<MusicFileDTO> updateDescription(
+            @RequestParam("path") String path,
+            @RequestParam(required = false) String description) {
+        try {
+            return new Result<MusicFileDTO>().ok(musicLibraryService.updateDescription(path, description));
+        } catch (Exception e) {
+            log.error("更新服务器音乐提示词失败", e);
+            return new Result<MusicFileDTO>().error(e.getMessage());
+        }
+    }
+
     @DeleteMapping("/files")
     @Operation(summary = "删除服务器音乐文件")
     @RequiresPermissions("sys:role:superAdmin")

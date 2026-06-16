@@ -278,15 +278,15 @@ main/xiaozhi-server/tests/test_semantic_policy.py
 
 ```bash
 cd main/xiaozhi-server
-python3 -m compileall -q core/semantic core/handle/receiveAudioHandle.py core/connection.py core/providers/tools/unified_tool_handler.py
-python3 tests/test_semantic_router.py
-python3 tests/test_semantic_policy.py
+conda run -n xiaozhi-esp32-server python -m compileall -q core/semantic core/handle/receiveAudioHandle.py core/connection.py core/providers/tools/unified_tool_handler.py
+conda run -n xiaozhi-esp32-server python tests/test_semantic_router.py
+conda run -n xiaozhi-esp32-server python tests/test_semantic_policy.py
 ```
 
 完整测试仍建议使用：
 
 ```bash
-python3 -m pytest tests
+conda run -n xiaozhi-esp32-server pytest tests
 ```
 
 如果本地缺少 `pytest` 或项目依赖，需要先按开发环境文档安装依赖。

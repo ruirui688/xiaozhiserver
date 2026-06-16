@@ -3,6 +3,8 @@ package xiaozhi.modules.config.controller;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -14,6 +16,7 @@ import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
 import xiaozhi.common.utils.Result;
 import xiaozhi.common.validator.ValidatorUtils;
+import xiaozhi.modules.agent.service.AgentMcpNoCodeToolService;
 import xiaozhi.modules.config.dto.AgentModelsDTO;
 import xiaozhi.modules.config.dto.CorrectWordsDTO;
 import xiaozhi.modules.config.service.ConfigService;
@@ -32,6 +35,7 @@ import xiaozhi.modules.knowledge.service.KnowledgeFilesService;
 public class ConfigController {
     private final ConfigService configService;
     private final KnowledgeFilesService knowledgeFilesService;
+    private final AgentMcpNoCodeToolService agentMcpNoCodeToolService;
 
     @PostMapping("server-base")
     @Operation(summary = "服务端获取配置接口")
@@ -67,5 +71,11 @@ public class ConfigController {
                 .pageSize(10)
                 .build();
         return new Result<Object>().ok(knowledgeFilesService.retrievalTest(req));
+    }
+
+    @GetMapping("mcp/no-code-tools/{agentId}")
+    @Operation(summary = "服务端获取可视化MCP HTTP工具配置")
+    public Result<Object> getNoCodeMcpTools(@PathVariable String agentId) {
+        return new Result<Object>().ok(agentMcpNoCodeToolService.getToolsByAgentId(agentId));
     }
 }

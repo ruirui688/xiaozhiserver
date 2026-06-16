@@ -49,10 +49,13 @@
 改动原因：本项目的 xiaozhi-server 运行时依赖安装在 Conda 环境 `xiaozhi-esp32-server` 中。系统 Python 可能缺少 loguru、requests、pytest 等依赖，直接使用系统 `python` / `python3` / `pytest` 会产生误报，不能代表项目真实运行时。
 关键文件：
   - main/xiaozhi-server/requirements.txt
+  - scripts/dev
+  - AGENTS.md
   - docs/development/ubuntu-source-development-environment.md
+  - docs/development/local-dev-workflow.md
   - docs/standards/ai-coding-agent-instructions.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：涉及 `main/xiaozhi-server` 的 Python 验证、单测、导入检查、脚本执行，必须使用 `conda run -n xiaozhi-esp32-server ...`，或先确认 shell 已 `conda activate xiaozhi-esp32-server`。禁止退回系统 Python 冒充验证；如果目标 Conda 环境不可用，必须在验证结果中明确说明“未在项目 Conda 运行时验证”。
+官方同步时的处理规则：涉及 `main/xiaozhi-server` 的 Python 验证、单测、导入检查、脚本执行，必须使用 `conda run -n xiaozhi-esp32-server ...`，或先确认 shell 已 `conda activate xiaozhi-esp32-server`。`scripts/dev` 必须保留“缺少 Conda 环境时失败而不是退回系统 Python”的行为。禁止退回系统 Python 冒充验证；如果目标 Conda 环境不可用，必须在验证结果中明确说明“未在项目 Conda 运行时验证”。
 ```
 
 ## 5. 语音回复质量与互动游戏规则
@@ -199,4 +202,38 @@
   - docs/integrations/bar-drink-image-recommendation.md
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方修改 Function Plugin 注册、设备端 MCP 工具调用、vision 图片下载路由或配置下发，必须保留 `recommend_drink` 插件的推荐话术、图片 URL/生成缓存、设备 MCP 工具名适配和失败不阻断语音回复的约定。
+```
+
+## 14. 图片识别自然表达优化
+
+```text
+定制模块：xiaozhi-server OpenAI 兼容视觉模型、VLLM 模型配置、manager-api VLLM 供应器字段
+改动原因：设备拍照后的图片识别回复容易出现“以下是详细描述”“画面的主体是”等报告式表达，在聊天记录和语音播报中显得生硬。现在视觉模型默认增加自然口语化系统提示词，先给一句结论再补充少量关键细节，并让 max_tokens、temperature、top_p 真正传入 OpenAI 兼容接口；智控台 VLLM 配置可编辑 prompt 和生成参数。
+关键文件：
+  - main/xiaozhi-server/core/providers/vllm/openai.py
+  - main/xiaozhi-server/config.yaml
+  - main/xiaozhi-server/tests/test_vllm_openai_provider.py
+  - main/manager-api/src/main/resources/db/changelog/202606161805.sql
+  - main/manager-api/src/main/resources/db/changelog/db.changelog-master.yaml
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改 VLLM provider、视觉模型配置或模型供应器字段，必须保留默认自然表达提示词、可配置 prompt、生成参数透传和无配置时的默认兜底；视觉回复不得退回编号报告式模板。
+```
+
+## 15. 可视化 MCP HTTP 工具
+
+```text
+定制模块：manager-web 智能体功能弹窗、manager-api no-code MCP tool 配置、xiaozhi-server MCP HTTP 工具桥
+改动原因：需要让可信运营人员不写 Python 插件也能为智能体配置简单 HTTP 工具，并通过 MCP Endpoint 注册给运行时工具系统调用。
+关键文件：
+  - main/manager-web/src/components/FunctionDialog.vue
+  - main/manager-web/src/apis/module/agent.js
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/controller/AgentMcpAccessPointController.java
+  - main/manager-api/src/main/java/xiaozhi/modules/config/controller/ConfigController.java
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/dto/McpNoCodeToolDTO.java
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/entity/AgentMcpNoCodeToolEntity.java
+  - main/manager-api/src/main/resources/db/changelog/202606161720.sql
+  - main/xiaozhi-server/scripts/no_code_mcp_tools.py
+  - docs/mcp/no-code-http-tools.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改 MCP endpoint、智能体功能配置、ConfigController、AgentMcpAccessPointController 或工具 schema 下发链路，必须保留 no-code HTTP tool 的完整链路：Web 配置 JSON -> `ai_agent_mcp_no_code_tools` -> `/config/mcp/no-code-tools/{agentId}` -> `no_code_mcp_tools.py` -> MCP Endpoint tools/list/tools/call。该能力必须继续标注为高风险 HTTP 工具桥，生产环境应限制可信用户、保护 `MANAGER_API_SECRET`，并避免访问内网管理端口、云元数据地址和敏感服务。
 ```

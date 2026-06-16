@@ -47,6 +47,7 @@ deploy/              部署资产归档边界
 - [小智服务器开发规范](./docs/standards/development-specification.md)
 - [AI 编程工具工作指令](./docs/standards/ai-coding-agent-instructions.md)
 - [文档分类索引](./docs/README.md)
+- [当前代码地图与梳理报告](./docs/architecture/current-code-map.md)
 - [项目完整架构与文档导航](./docs/architecture/project-architecture.md)
 - [云端运行架构与配置链路](./docs/architecture/cloud-runtime-architecture.md)
 - [提示词注入工程](./docs/integrations/prompt-injection-engineering.md)
@@ -70,6 +71,14 @@ scripts/dev stop
 ```
 
 详细说明见 [本地开发工作流](./docs/development/local-dev-workflow.md)。
+
+AI 编程工具开工入口：
+
+```text
+AGENTS.md
+```
+
+`main/xiaozhi-server` 必须使用 Conda 环境 `xiaozhi-esp32-server` 启动和验证。禁止直接使用系统 `python`、`python3`、`pip` 或 `pytest` 排查该模块；`scripts/dev` 已经内置该限制。
 
 模块开发说明：
 

@@ -10,4 +10,5 @@ public class MusicFileDTO {
     private Long size;
     private Long updateTime;
     private String playUrl;
+    private String description;
 }

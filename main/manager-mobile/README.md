@@ -16,8 +16,8 @@
 
 ### 快速开始
 1) 配置环境变量
-   - 复制 `env/.env.example` 为 `env/.env.development`
-   - 根据实际情况修改配置项（特别是 `VITE_SERVER_BASEURL`、`VITE_UNI_APPID`、`VITE_WX_APPID`）
+   - 根据现有 `env/.env`、`env/.env.development`、`env/.env.production`、`env/.env.test` 修改配置项。
+   - 重点确认 `VITE_SERVER_BASEURL`、`VITE_UNI_APPID`、`VITE_WX_APPID`。
 
 2) 安装依赖
 

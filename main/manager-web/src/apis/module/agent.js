@@ -239,6 +239,37 @@ export default {
                 });
             }).send();
     },
+    // 获取智能体可视化 MCP HTTP 工具配置
+    getAgentMcpNoCodeTools(agentId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/mcp/no-code-tools/${agentId}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail(() => {
+                RequestService.reAjaxFun(() => {
+                    this.getAgentMcpNoCodeTools(agentId, callback);
+                });
+            }).send();
+    },
+    // 保存智能体可视化 MCP HTTP 工具配置
+    saveAgentMcpNoCodeTools(agentId, tools, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/mcp/no-code-tools/${agentId}`)
+            .method('PUT')
+            .data(tools)
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail(() => {
+                RequestService.reAjaxFun(() => {
+                    this.saveAgentMcpNoCodeTools(agentId, tools, callback);
+                });
+            }).send();
+    },
     // 添加智能体的声纹
     addAgentVoicePrint(voicePrintData, callback) {
         RequestService.sendRequest()

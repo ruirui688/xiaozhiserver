@@ -43,6 +43,7 @@ from core.utils.prompt_manager import PromptManager
 from core.utils.voiceprint_provider import VoiceprintProvider
 from core.utils.util import get_system_error_response
 from core.utils import textUtils
+from core.utils.correct_words import parse_correct_words
 from core.game_session import GameSessionManager
 from core.semantic.semantic_center import SemanticCenter
 from core.device_runtime_registry import register_connection, unregister_connection
@@ -107,6 +108,8 @@ class ConnectionHandler:
         self.headers = None
         self.device_id = None
         self.client_ip = None
+        self.correct_word_replacements = {}
+        self.last_tool_context = None
         self.prompt = None
         self.welcome_msg = None
         self.max_output_size = 0
@@ -830,6 +833,10 @@ class ConnectionHandler:
 
         # 注入替换词到 TTS 模块配置
         if private_config.get("correct_words", None) is not None:
+            self.config["correct_words"] = private_config["correct_words"]
+            self.correct_word_replacements = parse_correct_words(
+                private_config["correct_words"]
+            )
             select_tts_module = self.config.get("selected_module", {}).get("TTS")
             tts_config = self.config.get("TTS", {})
             if select_tts_module in tts_config:

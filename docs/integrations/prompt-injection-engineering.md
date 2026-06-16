@@ -501,7 +501,7 @@ main/xiaozhi-server/core/handle/intentHandler.py
 查看当前连接支持哪些工具：
 
 ```bash
-tail -f .run/xiaozhi-server.log
+scripts/dev logs server -f
 ```
 
 搜索关键日志：

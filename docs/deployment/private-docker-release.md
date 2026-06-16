@@ -1,6 +1,8 @@
 # 私有 Docker 镜像发布与生产部署
 
-本文档用于把本项目的二次开发代码发布为私有 Docker 镜像，并在生产服务器通过 Docker Compose 安装运行。源码编译调试仍按 `docs/development/ubuntu-source-development-environment.md` 和 `scripts/start-dev.sh` 执行。
+本文档用于把本项目的二次开发代码发布为私有 Docker 镜像，并在生产服务器通过 Docker Compose 安装运行。源码编译调试仍按 `docs/development/ubuntu-source-development-environment.md` 和 `scripts/dev` 执行。
+
+当前 `scripts/docker-build-private.sh` 和 `scripts/install-private-docker.sh` 是私有镜像构建与生产安装的兼容入口；后续如果迁入 `deploy/`，必须保留旧脚本转发入口。
 
 ## 1. 镜像命名
 

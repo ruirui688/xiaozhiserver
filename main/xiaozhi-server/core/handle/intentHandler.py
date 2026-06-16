@@ -1,6 +1,7 @@
 import json
 import uuid
 import asyncio
+import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -12,12 +13,15 @@ from plugins_func.register import Action, ActionResponse
 from core.handle.sendAudioHandle import send_stt_message
 from core.handle.reportHandle import enqueue_tool_report
 from core.utils.util import remove_punctuation_and_length
+from core.utils.correct_words import apply_correct_words
 from core.providers.tts.dto.dto import TTSMessageDTO, SentenceType
+from plugins_func.functions.play_music import list_available_music
 
 TAG = __name__
 
 
 async def handle_user_intent(conn: "ConnectionHandler", text):
+    text = apply_correct_words(conn, text)
     # 预处理输入文本，处理可能的JSON格式
     try:
         if text.strip().startswith("{") and text.strip().endswith("}"):
@@ -36,6 +40,10 @@ async def handle_user_intent(conn: "ConnectionHandler", text):
     # 检查是否是唤醒词
     if await checkWakeupWords(conn, filtered_text):
         return True
+
+    music_route = await route_music_intent(conn, text, filtered_text)
+    if music_route is not None:
+        return music_route
 
     active_game_tool = None
     requested_game_tool = None
@@ -112,6 +120,103 @@ async def analyze_intent_with_llm(conn: "ConnectionHandler", text):
         conn.logger.bind(tag=TAG).error(f"意图识别失败: {str(e)}")
 
     return None
+
+
+async def route_music_intent(conn: "ConnectionHandler", text, filtered_text):
+    if not conn.func_handler or not conn.func_handler.has_tool("play_music"):
+        return None
+
+    normalized = re.sub(r"[\s，。！？!?,.;；：“”\"'、~～…]+", "", filtered_text or text)
+    if not normalized:
+        return None
+
+    is_music_context = getattr(conn, "last_tool_context", None) == "music"
+    ask_library = any(
+        keyword in normalized
+        for keyword in (
+            "有什么歌",
+            "有哪些歌",
+            "有啥歌",
+            "歌单",
+            "曲库",
+            "音乐库",
+            "有哪些音乐",
+            "有什么音乐",
+        )
+    )
+    change_song = is_music_context and any(
+        keyword in normalized
+        for keyword in (
+            "换一首",
+            "换首",
+            "换个",
+            "换一个",
+            "换1",
+            "下一首",
+            "下首",
+            "重新播放",
+            "重播一首",
+        )
+    )
+    explicit_play = _is_explicit_music_play(normalized)
+
+    if ask_library:
+        await send_stt_message(conn, text)
+        names = list_available_music(conn, limit=20)
+        if names:
+            response = "我这里有：" + "、".join(names)
+        else:
+            response = "本地音乐库里暂时没有可播放的歌曲。"
+        conn.sentence_id = str(uuid.uuid4().hex)
+        conn.dialogue.put(Message(role="user", content=text))
+        speak_txt(conn, response)
+        conn.last_tool_context = "music"
+        return True
+
+    if not explicit_play and not change_song:
+        return None
+
+    song_name = "random"
+    if explicit_play and not change_song:
+        song_name = _extract_requested_song(normalized)
+    if not song_name:
+        song_name = "random"
+
+    intent_result = json.dumps(
+        {
+            "function_call": {
+                "name": "play_music",
+                "arguments": {"song_name": song_name},
+            }
+        },
+        ensure_ascii=False,
+    )
+    conn.sentence_id = str(uuid.uuid4().hex)
+    conn.last_tool_context = "music"
+    return await process_intent_result(conn, intent_result, text)
+
+
+def _is_explicit_music_play(normalized_text):
+    play_words = ("播放", "放一下", "放首", "放一首", "听一下", "听首", "听一首", "来一首")
+    music_words = ("歌", "歌曲", "音乐", "曲", "主题曲")
+    if any(word in normalized_text for word in play_words) and any(
+        word in normalized_text for word in music_words
+    ):
+        return True
+    return normalized_text in {"播放音乐", "放音乐", "听歌", "来首歌", "随机播放音乐"}
+
+
+def _extract_requested_song(normalized_text):
+    text = normalized_text
+    for keyword in ("重新播放", "播放", "放一下", "放首", "放一首", "放", "听一下", "听首", "听一首", "听", "来一首"):
+        if keyword in text:
+            text = text.split(keyword, 1)[1]
+            break
+    text = re.sub(r"^(一首|首|个|一个)", "", text)
+    text = re.sub(r"(这首歌|这首|这歌|歌曲|音乐)$", "", text)
+    if not text or text in {"歌", "歌曲", "音乐", "曲"}:
+        return "random"
+    return text
 
 
 async def process_intent_result(

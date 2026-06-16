@@ -49,6 +49,7 @@ import xiaozhi.modules.agent.service.AgentChatAudioService;
 import xiaozhi.modules.agent.service.AgentChatHistoryService;
 import xiaozhi.modules.agent.service.AgentChatSummaryService;
 import xiaozhi.modules.agent.service.AgentContextProviderService;
+import xiaozhi.modules.agent.service.AgentMcpNoCodeToolService;
 import xiaozhi.modules.agent.service.AgentPluginMappingService;
 import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.agent.service.AgentTemplateService;
@@ -71,6 +72,7 @@ public class AgentController {
     private final AgentChatAudioService agentChatAudioService;
     private final AgentPluginMappingService agentPluginMappingService;
     private final AgentContextProviderService agentContextProviderService;
+    private final AgentMcpNoCodeToolService agentMcpNoCodeToolService;
     private final AgentChatSummaryService agentChatSummaryService;
     private final RedisUtils redisUtils;
     private final AgentTagService agentTagService;
@@ -179,6 +181,8 @@ public class AgentController {
         agentPluginMappingService.deleteByAgentId(id);
         // 删除关联的上下文源配置
         agentContextProviderService.deleteByAgentId(id);
+        // 删除关联的可视化 MCP HTTP 工具配置
+        agentMcpNoCodeToolService.deleteByAgentId(id);
         // 删除关联的替换词文件关联记录
         correctWordFileService.deleteMappingsByAgentId(id);
         // 再删除智能体

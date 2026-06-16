@@ -8,10 +8,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.util.LinkedHashMap;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
@@ -21,9 +23,13 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import xiaozhi.modules.music.dto.MusicFileDTO;
 import xiaozhi.modules.music.dto.MusicLibraryDTO;
 import xiaozhi.modules.music.service.MusicLibraryService;
+import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -32,14 +38,18 @@ public class MusicLibraryServiceImpl implements MusicLibraryService {
     private static final Set<String> ALLOWED_EXTENSIONS = Set.of(".mp3", ".wav", ".p3");
     private static final Set<String> OPTIMIZABLE_EXTENSIONS = Set.of(".mp3", ".wav");
     private static final String CACHE_DIR_NAME = ".xiaozhi-music-cache";
+    private static final String METADATA_FILE_NAME = ".xiaozhi-music-metadata.json";
     private static final String OPTIMIZED_EXTENSION = ".p3";
     private static final long OPTIMIZE_TIMEOUT_MINUTES = 5;
+    private static final int MAX_DESCRIPTION_LENGTH = 500;
 
     private final Path musicRoot;
     private final Path musicCacheRoot;
+    private final Path metadataPath;
     private final boolean optimizeEnabled;
     private final int optimizedSampleRate;
     private final int optimizedBitrate;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public MusicLibraryServiceImpl(@Value("${xiaozhi.music.dir:}") String configuredMusicDir,
                                    @Value("${xiaozhi.music.optimize.enabled:true}") boolean optimizeEnabled,
@@ -47,6 +57,7 @@ public class MusicLibraryServiceImpl implements MusicLibraryService {
                                    @Value("${xiaozhi.music.optimize.bitrate:48000}") int optimizedBitrate) {
         this.musicRoot = resolveMusicRoot(configuredMusicDir);
         this.musicCacheRoot = this.musicRoot.resolve(CACHE_DIR_NAME).normalize();
+        this.metadataPath = this.musicRoot.resolve(METADATA_FILE_NAME).normalize();
         this.optimizeEnabled = optimizeEnabled;
         this.optimizedSampleRate = optimizedSampleRate;
         this.optimizedBitrate = optimizedBitrate;
@@ -64,7 +75,9 @@ public class MusicLibraryServiceImpl implements MusicLibraryService {
                     .map(this::toDTO)
                     .filter(item -> StringUtils.isBlank(normalizedKeyword)
                             || item.getName().toLowerCase(Locale.ROOT).contains(normalizedKeyword)
-                            || item.getPath().toLowerCase(Locale.ROOT).contains(normalizedKeyword))
+                            || item.getPath().toLowerCase(Locale.ROOT).contains(normalizedKeyword)
+                            || StringUtils.defaultString(item.getDescription()).toLowerCase(Locale.ROOT)
+                                    .contains(normalizedKeyword))
                     .sorted(Comparator.comparing(MusicFileDTO::getUpdateTime).reversed())
                     .forEach(files::add);
         } catch (IOException e) {
@@ -139,17 +152,39 @@ public class MusicLibraryServiceImpl implements MusicLibraryService {
             throw new IllegalArgumentException("同名音乐文件已存在");
         }
 
+        String oldRelativePath = normalizeRelativePath(source);
+        String newRelativePath = normalizeRelativePath(target);
         Path sourceOptimized = optimizedPathFor(source);
         Files.move(source, target);
         moveOptimizedAudio(sourceOptimized, optimizedPathFor(target));
+        moveMetadata(oldRelativePath, newRelativePath);
+        return toDTO(target);
+    }
+
+    @Override
+    public MusicFileDTO updateDescription(String path, String description) throws IOException {
+        Path target = resolveExistingFile(path);
+        String normalizedPath = normalizeRelativePath(target);
+        String cleanDescription = normalizeDescription(description);
+        Map<String, MusicMetadata> metadata = readMetadata();
+        if (StringUtils.isBlank(cleanDescription)) {
+            metadata.remove(normalizedPath);
+        } else {
+            MusicMetadata item = metadata.getOrDefault(normalizedPath, new MusicMetadata());
+            item.setDescription(cleanDescription);
+            metadata.put(normalizedPath, item);
+        }
+        writeMetadata(metadata);
         return toDTO(target);
     }
 
     @Override
     public void delete(String path) throws IOException {
         Path target = resolveExistingFile(path);
+        String normalizedPath = normalizeRelativePath(target);
         Files.delete(target);
         deleteOptimizedAudio(target);
+        deleteMetadata(normalizedPath);
     }
 
     @Override
@@ -186,8 +221,7 @@ public class MusicLibraryServiceImpl implements MusicLibraryService {
 
     private MusicFileDTO toDTO(Path file) {
         try {
-            Path relativePath = musicRoot.relativize(file);
-            String normalizedPath = relativePath.toString().replace('\\', '/');
+            String normalizedPath = normalizeRelativePath(file);
             MusicFileDTO dto = new MusicFileDTO();
             dto.setName(file.getFileName().toString());
             dto.setPath(normalizedPath);
@@ -195,9 +229,78 @@ public class MusicLibraryServiceImpl implements MusicLibraryService {
             dto.setSize(Files.size(file));
             dto.setUpdateTime(Files.getLastModifiedTime(file).toMillis());
             dto.setPlayUrl("/admin/music/play?path=" + URLEncoder.encode(normalizedPath, StandardCharsets.UTF_8));
+            dto.setDescription(getDescription(normalizedPath));
             return dto;
         } catch (IOException e) {
             throw new IllegalStateException("读取音乐文件信息失败：" + e.getMessage(), e);
+        }
+    }
+
+    private String normalizeRelativePath(Path file) {
+        Path relativePath = musicRoot.relativize(file.normalize());
+        return relativePath.toString().replace('\\', '/');
+    }
+
+    private String getDescription(String normalizedPath) {
+        MusicMetadata metadata = readMetadata().get(normalizedPath);
+        return metadata == null ? "" : StringUtils.defaultString(metadata.getDescription());
+    }
+
+    private String normalizeDescription(String description) {
+        String cleanDescription = StringUtils.defaultString(description)
+                .replaceAll("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]", "")
+                .trim();
+        if (cleanDescription.length() > MAX_DESCRIPTION_LENGTH) {
+            throw new IllegalArgumentException("音乐提示词最多 " + MAX_DESCRIPTION_LENGTH + " 个字符");
+        }
+        return cleanDescription;
+    }
+
+    private Map<String, MusicMetadata> readMetadata() {
+        if (!Files.isRegularFile(metadataPath)) {
+            return new LinkedHashMap<>();
+        }
+        try {
+            Map<String, MusicMetadata> metadata = objectMapper.readValue(
+                    metadataPath.toFile(),
+                    new TypeReference<LinkedHashMap<String, MusicMetadata>>() {});
+            return metadata == null ? new LinkedHashMap<>() : new LinkedHashMap<>(metadata);
+        } catch (Exception e) {
+            log.warn("读取音乐提示词元数据失败，将按空元数据处理：path={}, error={}", metadataPath, e.getMessage());
+            return new LinkedHashMap<>();
+        }
+    }
+
+    private void writeMetadata(Map<String, MusicMetadata> metadata) throws IOException {
+        ensureMusicRoot();
+        Map<String, MusicMetadata> cleanedMetadata = new LinkedHashMap<>();
+        for (Map.Entry<String, MusicMetadata> entry : metadata.entrySet()) {
+            String path = StringUtils.defaultString(entry.getKey()).replace('\\', '/').trim();
+            MusicMetadata value = entry.getValue();
+            String description = value == null ? "" : normalizeDescription(value.getDescription());
+            if (StringUtils.isNotBlank(path) && StringUtils.isNotBlank(description)) {
+                MusicMetadata item = new MusicMetadata();
+                item.setDescription(description);
+                cleanedMetadata.put(path, item);
+            }
+        }
+        objectMapper.writerWithDefaultPrettyPrinter().writeValue(metadataPath.toFile(), cleanedMetadata);
+    }
+
+    private void moveMetadata(String oldPath, String newPath) throws IOException {
+        Map<String, MusicMetadata> metadata = readMetadata();
+        MusicMetadata item = metadata.remove(oldPath);
+        if (item == null) {
+            return;
+        }
+        metadata.put(newPath, item);
+        writeMetadata(metadata);
+    }
+
+    private void deleteMetadata(String path) throws IOException {
+        Map<String, MusicMetadata> metadata = readMetadata();
+        if (metadata.remove(path) != null) {
+            writeMetadata(metadata);
         }
     }
 
@@ -408,5 +511,10 @@ public class MusicLibraryServiceImpl implements MusicLibraryService {
             return cwd.resolve("xiaozhi-server/music").normalize();
         }
         return cwd.resolve("music").normalize();
+    }
+
+    @Data
+    private static class MusicMetadata {
+        private String description;
     }
 }

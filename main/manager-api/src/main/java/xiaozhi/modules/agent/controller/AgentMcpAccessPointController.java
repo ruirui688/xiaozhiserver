@@ -5,6 +5,8 @@ import java.util.List;
 import org.apache.shiro.authz.annotation.RequiresPermissions;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -14,7 +16,9 @@ import lombok.RequiredArgsConstructor;
 import xiaozhi.common.exception.ErrorCode;
 import xiaozhi.common.user.UserDetail;
 import xiaozhi.common.utils.Result;
+import xiaozhi.modules.agent.dto.McpNoCodeToolDTO;
 import xiaozhi.modules.agent.service.AgentMcpAccessPointService;
+import xiaozhi.modules.agent.service.AgentMcpNoCodeToolService;
 import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.security.user.SecurityUser;
 
@@ -24,6 +28,7 @@ import xiaozhi.modules.security.user.SecurityUser;
 @RequestMapping("/agent/mcp")
 public class AgentMcpAccessPointController {
     private final AgentMcpAccessPointService agentMcpAccessPointService;
+    private final AgentMcpNoCodeToolService agentMcpNoCodeToolService;
     private final AgentService agentService;
 
     /**
@@ -63,5 +68,30 @@ public class AgentMcpAccessPointController {
         }
         List<String> agentMcpToolsList = agentMcpAccessPointService.getAgentMcpToolsList(agentId);
         return new Result<List<String>>().ok(agentMcpToolsList);
+    }
+
+    @Operation(summary = "获取智能体可视化MCP HTTP工具配置")
+    @GetMapping("/no-code-tools/{agentId}")
+    @RequiresPermissions("sys:role:normal")
+    public Result<List<McpNoCodeToolDTO>> getNoCodeTools(@PathVariable("agentId") String agentId) {
+        UserDetail user = SecurityUser.getUser();
+        if (!agentService.checkAgentPermission(agentId, user.getId())) {
+            return new Result<List<McpNoCodeToolDTO>>().error(ErrorCode.MCP_ACCESS_POINT_TOOLS_LIST_NO_PERMISSION);
+        }
+        return new Result<List<McpNoCodeToolDTO>>().ok(agentMcpNoCodeToolService.getToolsByAgentId(agentId));
+    }
+
+    @Operation(summary = "保存智能体可视化MCP HTTP工具配置")
+    @PutMapping("/no-code-tools/{agentId}")
+    @RequiresPermissions("sys:role:normal")
+    public Result<Void> saveNoCodeTools(
+            @PathVariable("agentId") String agentId,
+            @RequestBody List<McpNoCodeToolDTO> tools) {
+        UserDetail user = SecurityUser.getUser();
+        if (!agentService.checkAgentPermission(agentId, user.getId())) {
+            return new Result<Void>().error(ErrorCode.MCP_ACCESS_POINT_TOOLS_LIST_NO_PERMISSION);
+        }
+        agentMcpNoCodeToolService.saveToolsByAgentId(agentId, tools);
+        return new Result<Void>().ok(null);
     }
 }

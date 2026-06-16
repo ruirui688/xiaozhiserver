@@ -10,7 +10,7 @@
       <div class="right-operations">
         <el-input
           v-model="keyword"
-          placeholder="搜索歌曲名称"
+          placeholder="搜索歌曲名称/提示词"
           class="search-input"
           clearable
           @keyup.enter.native="handleSearch"
@@ -58,6 +58,11 @@
               element-loading-background="rgba(255, 255, 255, 0.7)"
             >
               <el-table-column label="歌曲文件" prop="name" min-width="220" />
+              <el-table-column label="提示词" min-width="240" show-overflow-tooltip>
+                <template slot-scope="scope">
+                  <span class="description-text">{{ scope.row.description || '-' }}</span>
+                </template>
+              </el-table-column>
               <el-table-column label="相对路径" prop="path" min-width="260" show-overflow-tooltip />
               <el-table-column label="格式" prop="extension" width="90" align="center" />
               <el-table-column label="大小" width="120" align="center">
@@ -66,10 +71,13 @@
               <el-table-column label="更新时间" width="180" align="center">
                 <template slot-scope="scope">{{ formatDateTime(scope.row.updateTime) }}</template>
               </el-table-column>
-              <el-table-column label="操作" width="220" align="center">
+              <el-table-column label="操作" width="270" align="center">
                 <template slot-scope="scope">
                   <el-button size="mini" type="text" @click="togglePlay(scope.row)">
                     {{ playingPath === scope.row.path ? '停止' : '试听' }}
+                  </el-button>
+                  <el-button size="mini" type="text" @click="editMusicDescription(scope.row)">
+                    提示词
                   </el-button>
                   <el-button size="mini" type="text" @click="renameMusic(scope.row)">
                     重命名
@@ -88,7 +96,7 @@
             <div v-if="!loading && musicList.length === 0" class="empty-state">
               <i class="el-icon-headset"></i>
               <div>还没有上传音乐</div>
-              <span>上传 MP3 后，给智能体启用“服务器音乐播放”，小智就能按歌名或随机播放。</span>
+              <span>上传 MP3 后，可为音乐添加提示词，小智能按歌名、提示词或随机播放。</span>
             </div>
           </el-card>
         </div>
@@ -242,6 +250,34 @@ export default {
         });
       }).catch(() => {});
     },
+    editMusicDescription(row) {
+      this.$prompt("请输入音乐提示词，例如：慧苑星光是慧苑的主题曲", "编辑提示词", {
+        confirmButtonText: "确定",
+        cancelButtonText: "取消",
+        inputType: "textarea",
+        inputValue: row.description || "",
+        inputValidator: (value) => {
+          const text = (value || "").trim();
+          if (text.length > 500) {
+            return "提示词最多 500 个字符";
+          }
+          return true;
+        }
+      }).then(({ value }) => {
+        const description = (value || "").trim();
+        if (description === (row.description || "")) {
+          return;
+        }
+        Api.music.updateMusicDescription(row.path, description, (res) => {
+          if (res.data.code === 0) {
+            this.$message.success("提示词已保存");
+            this.fetchMusicList();
+          }
+        }, (res) => {
+          this.$message.error(res?.data?.msg || "保存提示词失败");
+        });
+      }).catch(() => {});
+    },
     deleteMusic(row) {
       this.$confirm(`确认删除《${row.name}》吗？`, "提示", {
         confirmButtonText: "确定",
@@ -368,6 +404,10 @@ export default {
 
 .transparent-table {
   width: 100%;
+}
+
+.description-text {
+  color: #4a5568;
 }
 
 .delete-btn {

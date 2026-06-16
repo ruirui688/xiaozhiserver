@@ -9,7 +9,9 @@
 AI 编程工具在修改代码、配置、部署脚本或文档前，必须先读取：
 
 ```text
+AGENTS.md
 README.md
+docs/README.md
 docs/standards/development-specification.md
 docs/standards/ai-coding-agent-instructions.md
 ```
@@ -38,6 +40,7 @@ main/manager-api/src/main/resources/db/changelog/db.changelog-master.yaml
 如果任务涉及运行配置、端口、环境变量或本地/服务器差异，还必须检查：
 
 ```text
+scripts/dev
 main/xiaozhi-server/config.yaml
 main/xiaozhi-server/config_from_api.yaml
 main/manager-api/src/main/resources/application.yml
@@ -61,6 +64,7 @@ docs/integrations/prompt-injection-engineering.md
 - [standards/ai-coding-agent-instructions.md](./standards/ai-coding-agent-instructions.md) - AI 编程工具执行规范。规定 AI 在新开发功能、修改功能、修复问题、同步官方更新、整理文档时必须读取哪些文件、如何识别真实私有远端、如何推送当前分支、可以自动执行哪些操作、哪些操作必须先获得用户授权。所有 AI 编程任务必须读取。
 - [standards/config-runtime-policy.md](./standards/config-runtime-policy.md) - 配置与运行产物治理策略。用于区分默认模板、示例配置、环境私有配置、运行时生成配置，规定 `config/examples/` 和 `runtime/` 的提交边界。
 - [standards/upstream-sync-policy.md](./standards/upstream-sync-policy.md) - 官方上游同步策略。用于同步官方 `upstream` 前确认官方源码、本地定制和私有运行边界，处理高风险冲突和同步后验证。
+- [standards/documentation-policy.md](./standards/documentation-policy.md) - 文档治理策略。用于新增、移动、重命名、索引文档时确认分类、命名、链接检查和部署资产边界。
 - [standards/README.md](./standards/README.md) - 规范目录入口。用于快速确认 `standards/` 下每份规则文档的职责和使用顺序，适合开发者或 AI 在进入规范目录时先阅读。
 - [local-customizations.md](./local-customizations.md) - 本地定制记录。用于记录相对官方仓库的长期本地改动，官方同步、冲突处理、重构插件或整理本地扩展时必须读取。
 
@@ -71,6 +75,7 @@ docs/integrations/prompt-injection-engineering.md
 - [architecture/project-architecture.md](./architecture/project-architecture.md) - 项目完整架构与文档导航。用于理解模块边界、端云链路、配置下发、提示词/工具/MCP 注入、运行产物、部署边界和开发治理边界。
 - [architecture/cloud-runtime-architecture.md](./architecture/cloud-runtime-architecture.md) - 云端运行架构与配置链路。用于理解 `manager-web`、`manager-mobile`、`manager-api`、`xiaozhi-server`、`digital-human` 和设备端的边界，说明后台配置如何变成设备行为、实时语音链路如何运行、工具/MCP/天气/OTA 如何接入。
 - [architecture/semantic-control-center.md](./architecture/semantic-control-center.md) - 语义控制中枢架构。用于理解确定性语音控制、文本标准化、语义路由、状态管理、策略判断、拒识和旧 LLM/function-call 兜底之间的关系。
+- [architecture/current-code-map.md](./architecture/current-code-map.md) - 当前代码地图与梳理报告。用于快速了解当前仓库模块结构、运行链路、未提交能力、风险和验证矩阵，是后续开发前的代码导航。
 
 ## 4. 本地开发环境
 
@@ -78,6 +83,7 @@ docs/integrations/prompt-injection-engineering.md
 
 - [development/ubuntu-source-development-environment.md](./development/ubuntu-source-development-environment.md) - Ubuntu 源码开发环境安装说明。用于在 Ubuntu 22.04/24.04 本地开发机上安装 JDK 21、Maven、Node.js、pnpm、Conda、MySQL、Redis、FFmpeg 和项目依赖，并说明本地配置、模型目录、启动顺序和验证命令。
 - [development/local-dev-workflow.md](./development/local-dev-workflow.md) - 本地开发工作流。用于使用 `scripts/dev` 统一启动、停止、查看状态、查看日志和执行环境体检，替代零散启动命令作为日常入口。
+- [development/manual-startup.md](./development/manual-startup.md) - 手动开发启动说明。用于快速查看 `api`、`web`、`server` 的手动启动入口、访问地址、日志目录和 PID 目录。
 
 ## 5. 部署与运维
 
@@ -91,6 +97,15 @@ docs/integrations/prompt-injection-engineering.md
 - [deployment/deployment-asset-policy.md](./deployment/deployment-asset-policy.md) - 部署资产治理策略。用于区分 `docs/deployment/`、`deploy/`、`scripts/` 的职责，规定 Docker、服务器安装升级和 release 发布资产的归档边界。
 - [deployment/all-in-one-digital-human-setup.md](./deployment/all-in-one-digital-human-setup.md) - 一体机数字人部署配置指南。用于数字人一体机环境初始化、网络配置、服务启动和数字人部署流程。
 - [deployment/paddlespeech-deploy.md](./deployment/paddlespeech-deploy.md) - PaddleSpeech TTS 部署与接入指南。用于安装 PaddleSpeech 服务、启动 TTS 服务并把它接入小智服务端的场景。
+
+部署文档优先级：
+
+```text
+私有生产发布：deployment/private-docker-release.md
+部署资产边界：deployment/deployment-asset-policy.md
+官方兼容部署：deployment/Deployment.md / Deployment_all.md
+历史源码升级：deployment/dev-ops-integration.md
+```
 
 ## 6. 设备与固件
 
@@ -111,6 +126,7 @@ docs/integrations/prompt-injection-engineering.md
 - [mcp/mcp-get-device-info.md](./mcp/mcp-get-device-info.md) - MCP 方法获取设备信息说明。用于开发 MCP 工具时获取设备上下文、识别设备来源和处理设备相关参数。
 - [mcp/mcp-vision-integration.md](./mcp/mcp-vision-integration.md) - 视觉模型使用指南。用于开启服务端视觉模型、选择视觉模型供应商、配置视觉接口并排查网络可用性。
 - [mcp/context-provider-integration.md](./mcp/context-provider-integration.md) - 上下文源使用教程。用于为智能体注入外部上下文、理解上下文源接口规范、配置服务端调用上下文提供方。
+- [mcp/no-code-http-tools.md](./mcp/no-code-http-tools.md) - 可视化 MCP HTTP 工具。用于理解智控台配置 HTTP 工具、manager-api 保存配置、Python 桥接脚本注册 MCP tools 的完整链路和安全边界。
 
 ## 8. 模型、语音与记忆
 
@@ -133,6 +149,7 @@ docs/integrations/prompt-injection-engineering.md
 - [integrations/ali-sms-integration.md](./integrations/ali-sms-integration.md) - 阿里云短信集成指南。用于添加短信签名、短信模板、创建短信账号、开通权限并配置短信发送能力。
 - [integrations/homeassistant-integration.md](./integrations/homeassistant-integration.md) - Home Assistant 集成指南。用于把小智 ESP32 开源服务端接入 Home Assistant，实现智能家居设备控制。
 - [integrations/newsnow_plugin_config.md](./integrations/newsnow_plugin_config.md) - NewsNow 新闻源插件配置指南。用于配置新闻源、通过 Web 管理界面维护新闻插件、调整新闻查询来源。
+- [integrations/bar-drink-image-recommendation.md](./integrations/bar-drink-image-recommendation.md) - 酒类推荐图片展示集成。用于配置 `recommend_drink` 插件向硬件端 MCP 图片展示工具发送酒水外观图，包含图片来源、工具参数和缓存约定。
 - [integrations/function-plugin-architecture.md](./integrations/function-plugin-architecture.md) - 功能插件架构。用于理解智能体功能库如何统一管理天气、新闻、音乐播放、HomeAssistant、讲段子、热梗、成语接龙、你说我猜等能力，区分系统能力、互动玩法和系统能力二级分类。
 - [integrations/stateful-game-session.md](./integrations/stateful-game-session.md) - 状态机游戏会话逻辑。用于理解“你说我猜”“我想你猜”“成语接龙”的触发、状态保存、每轮判定、提示、退出和扩展规则。
 - [integrations/prompt-injection-engineering.md](./integrations/prompt-injection-engineering.md) - 提示词注入工程。用于理解系统提示词、工具描述、声明式插件提示词、状态机游戏规则如何进入大模型，以及为什么状态机玩法不再依赖后台大段 prompt。
@@ -157,12 +174,14 @@ docs/integrations/prompt-injection-engineering.md
 AI 必须按任务读取文档：
 
 ```text
-所有任务：README.md + docs/standards/*
+所有任务：AGENTS.md + README.md + docs/README.md + docs/standards/development-specification.md + docs/standards/ai-coding-agent-instructions.md
 模块任务：对应模块 README
 数据库任务：manager-api db/changelog
-配置任务：config.yaml / config_from_api.yaml / application*.yml
+配置任务：scripts/dev + config.yaml / config_from_api.yaml / application*.yml
 架构/提示词/插件/MCP/语义控制任务：docs/architecture/* + docs/integrations/prompt-injection-engineering.md
 配置/运行产物治理任务：docs/standards/config-runtime-policy.md
+文档治理任务：docs/standards/documentation-policy.md
+官方同步任务：docs/standards/upstream-sync-policy.md
 开发环境任务：docs/development/*
 部署任务：docs/deployment/*
 部署资产任务：docs/deployment/deployment-asset-policy.md + deploy/*
@@ -170,7 +189,7 @@ AI 必须按任务读取文档：
 MCP 任务：docs/mcp/*
 模型任务：docs/models/*
 集成任务：docs/integrations/*
-文档任务：docs/README.md + 对应分类文档
+文档任务：docs/README.md + docs/standards/documentation-policy.md + 对应分类文档
 ```
 
 AI 禁止：
@@ -178,6 +197,7 @@ AI 禁止：
 - 无任务目标时批量读取全部文档。
 - 为了完成小修改加载所有集成教程。
 - 未读强制规范就修改代码。
+- 直接使用系统 `python`、`python3`、`pip` 或 `pytest` 验证 `main/xiaozhi-server`。
 - 修改官方文档位置导致旧链接失效。
 - 把生产数据库真实连接信息、密码、Token、AccessKey 写入 Git。
 - 未识别当前分支和真实私有远端就执行 push。
@@ -190,6 +210,12 @@ AI 禁止：
 
 ```text
 docs/standards/
+```
+
+新增或移动文档时必须遵守：
+
+```text
+docs/standards/documentation-policy.md
 ```
 
 本地运行产物统一放在：

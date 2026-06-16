@@ -91,6 +91,27 @@ def test_guess_what_i_say_prompt_keeps_assistant_as_questioner():
     assert "不要说“继续问、接着问、再猜猜”" in prompt
 
 
+def test_guess_what_i_say_accepts_asr_missing_you_alias():
+    manager = GameSessionManager()
+    prompt = manager.build_freeform_game_prompt("我们来做个游戏，说我猜", {})
+
+    assert prompt is not None
+    assert "guess_what_i_say" in prompt
+    assert manager.freeform_game_state["role_mode"] == "user_thinks_assistant_guesses"
+    assert "小智负责主动提问" in prompt
+
+
+def test_guess_what_i_say_user_already_thought_object_starts_questions():
+    manager = GameSessionManager()
+    prompt = manager.build_freeform_game_prompt("我已经想了一个物品", {})
+
+    assert prompt is not None
+    assert "guess_what_i_say" in prompt
+    assert "下一句必须直接提问" in prompt
+    assert "禁止再说“开始描述，我来猜”" in prompt
+    assert "不能要求用户描述线索" in prompt
+
+
 def test_assistant_thinks_game_persists_hidden_answer_in_prompt():
     manager = GameSessionManager()
     prompt = manager.build_freeform_game_prompt("你想一个词我来猜", {})

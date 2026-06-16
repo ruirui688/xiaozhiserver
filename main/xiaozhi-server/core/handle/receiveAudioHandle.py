@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from core.connection import ConnectionHandler
 from core.utils.util import audio_to_data
+from core.utils.correct_words import apply_correct_words
 from core.handle.abortHandle import handleAbortMessage
 from core.handle.intentHandler import handle_user_intent
 from core.utils.output_counter import check_device_output_limit
@@ -57,6 +58,17 @@ async def startToChat(conn: "ConnectionHandler", text):
     except (json.JSONDecodeError, KeyError):
         # 如果解析失败，继续使用原始文本
         pass
+
+    corrected_text = apply_correct_words(conn, actual_text)
+    if corrected_text != actual_text:
+        actual_text = corrected_text
+        try:
+            if actual_text.strip().startswith("{") and actual_text.strip().endswith("}"):
+                data = json.loads(actual_text)
+                if "speaker" in data and "content" in data:
+                    speaker_name = data["speaker"]
+        except (json.JSONDecodeError, KeyError):
+            pass
 
     # 保存说话人信息到连接对象
     if speaker_name:

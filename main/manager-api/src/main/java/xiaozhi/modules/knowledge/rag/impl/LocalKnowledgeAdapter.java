@@ -452,6 +452,10 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             chunks = parseJsonQa(text, "jsonl".equals(extension));
             return refineChunksWithLlm(chunks);
         }
+        List<LocalChunk> markdownChunks = parsePreChunkedMarkdown(text);
+        if (!markdownChunks.isEmpty()) {
+            return markdownChunks;
+        }
         List<LocalChunk> llmChunks = chunkDocumentWithLlm(filename, text);
         if (!llmChunks.isEmpty()) {
             return llmChunks;
@@ -529,6 +533,54 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             }
         }
         return chunks;
+    }
+
+    private List<LocalChunk> parsePreChunkedMarkdown(String text) {
+        String normalized = StringUtils.defaultString(text).trim();
+        if (StringUtils.isBlank(normalized) || !normalized.contains("HY-KB-")) {
+            return List.of();
+        }
+
+        List<LocalChunk> chunks = new ArrayList<>();
+        for (String rawSection : normalized.split("(?m)^---\\s*$")) {
+            String section = rawSection.trim();
+            if (StringUtils.isBlank(section) || !section.matches("(?s).*^##\\s+HY-KB-\\d+.*")) {
+                continue;
+            }
+            chunks.add(new LocalChunk(
+                    extractMarkdownQuestions(section),
+                    extractMarkdownAnswer(section),
+                    section));
+        }
+        return chunks;
+    }
+
+    private String extractMarkdownQuestions(String section) {
+        int start = section.indexOf("**适用问题**");
+        if (start < 0) {
+            return null;
+        }
+        String questionBlock = section.substring(start);
+        List<String> questions = new ArrayList<>();
+        for (String line : questionBlock.split("\\R")) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("- ")) {
+                questions.add(trimmed.substring(2).trim());
+            }
+        }
+        return questions.isEmpty() ? null : String.join("；", questions);
+    }
+
+    private String extractMarkdownAnswer(String section) {
+        int bodyStart = section.indexOf("**正文**");
+        if (bodyStart < 0) {
+            return null;
+        }
+        String body = section.substring(bodyStart)
+                .replaceFirst("^\\*\\*正文\\*\\*[:：]?\\s*", "")
+                .replaceFirst("(?s)\\R\\s*\\*\\*适用问题\\*\\*[:：]?.*$", "")
+                .trim();
+        return StringUtils.isBlank(body) ? null : body;
     }
 
     private List<LocalChunk> refineChunksWithLlm(List<LocalChunk> chunks) {

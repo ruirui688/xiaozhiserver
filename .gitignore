@@ -5,7 +5,6 @@ __pycache__/
 *$py.class
 .vscode
 .claude
-AGENTS.md
 
 # Runtime files and private local configuration
 runtime/*

@@ -15,7 +15,11 @@ SEARCH_FROM_LOCAL_KNOWLEDGE_FUNCTION_DESC = {
     "type": "function",
     "function": {
         "name": "search_from_local_knowledge",
-        "description": "从本地知识库中查询信息",
+        "description": (
+            "从本地知识库中查询事实、资料、文档内容或业务知识。"
+            "不要用于播放音乐、换歌、查询歌单/音乐库、控制设备或执行系统动作；"
+            "用户要听歌、播放歌曲、换一首或问本地有哪些歌时，应使用音乐播放相关工具。"
+        ),
         "parameters": {
             "type": "object",
             "properties": {

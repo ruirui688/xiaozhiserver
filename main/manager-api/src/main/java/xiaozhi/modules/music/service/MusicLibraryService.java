@@ -16,6 +16,8 @@ public interface MusicLibraryService {
 
     MusicFileDTO rename(String path, String newName) throws IOException;
 
+    MusicFileDTO updateDescription(String path, String description) throws IOException;
+
     void delete(String path) throws IOException;
 
     Path resolveExistingFile(String path) throws IOException;
