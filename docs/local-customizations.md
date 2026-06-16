@@ -237,3 +237,14 @@
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方修改 MCP endpoint、智能体功能配置、ConfigController、AgentMcpAccessPointController 或工具 schema 下发链路，必须保留 no-code HTTP tool 的完整链路：Web 配置 JSON -> `ai_agent_mcp_no_code_tools` -> `/config/mcp/no-code-tools/{agentId}` -> `no_code_mcp_tools.py` -> MCP Endpoint tools/list/tools/call。该能力必须继续标注为高风险 HTTP 工具桥，生产环境应限制可信用户、保护 `MANAGER_API_SECRET`，并避免访问内网管理端口、云元数据地址和敏感服务。
 ```
+
+## 16. 服务器音乐播放状态与音频队列边界
+
+```text
+定制模块：xiaozhi-server 服务器音乐播放插件
+改动原因：`play_music` 在 function_call 模式下原先只异步提交音乐播放任务，同步工具结果只显示“指令已接收”；管理后台聊天记录看不到实际选中的歌曲，容易误判为卡住。默认 `announce_before_play=false` 时，插件会通过 `send_tts_message` 给设备屏幕发送“正在播放/即将播放具体歌曲”的文本状态，但这段文本不是普通 TTS 音频，原先也不会进入聊天记录。另一个问题是火山双流等 TTS provider 收到 `ContentType.FILE` 音乐文件后会先暂存到 `before_stop_play_files`，如果没有 `SentenceType.LAST` 播放边界就不会 flush 到 WebSocket，表现为后台显示已选中歌曲但设备不播放。
+关键文件：
+  - main/xiaozhi-server/plugins_func/functions/play_music.py
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改 `play_music`、TTS 队列、`Action.RECORD`、`ContentType.FILE` 或流式 TTS provider，必须保留以下约定：工具同步结果应使用用户可读的“正在为您播放音乐”，不要只返回“指令已接收”；默认跳过播放前 TTS 介绍语时，仍要把“此刻为您献上/正在播放 具体歌曲”这类选曲状态上报为 assistant 聊天记录；音乐文件入队必须按 `FIRST/ACTION -> MIDDLE/FILE -> LAST/ACTION` 发送播放边界，确保火山双流、阿里云流式、讯飞流式、Minimax 等 provider 能把暂存文件音频 flush 到设备。聊天记录中的 `play_music({...})` 和 `{"result": "正在为您播放音乐"}` 是工具调用审计记录，不应被当作播放失败错误。
+```

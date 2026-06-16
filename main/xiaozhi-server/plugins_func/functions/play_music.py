@@ -7,6 +7,7 @@ import json
 import traceback
 from pathlib import Path
 from core.handle.sendAudioHandle import send_tts_message
+from core.handle.reportHandle import enqueue_tts_report
 from plugins_func.register import register_function, ToolType, ActionResponse, Action
 from core.utils.dialogue import Message
 from core.providers.tts.dto.dto import TTSMessageDTO, SentenceType, ContentType
@@ -71,7 +72,7 @@ def play_music(conn: "ConnectionHandler", song_name: str):
         task.add_done_callback(handle_done)
 
         return ActionResponse(
-            action=Action.RECORD, result="指令已接收", response="正在为您播放音乐"
+            action=Action.RECORD, result="正在为您播放音乐", response="正在为您播放音乐"
         )
     except Exception as e:
         conn.logger.bind(tag=TAG).error(f"处理音乐意图错误: {e}")
@@ -353,6 +354,14 @@ async def _send_music_display_text(conn: "ConnectionHandler", text):
         conn.logger.bind(tag=TAG).warning(f"发送音乐文本状态失败: {e}")
 
 
+def _report_music_display_text(conn: "ConnectionHandler", text):
+    """Record the selected song prompt even when the music file itself is not TTS."""
+    try:
+        enqueue_tts_report(conn, text, [])
+    except Exception as e:
+        conn.logger.bind(tag=TAG).warning(f"上报音乐播放状态失败: {e}")
+
+
 def _enqueue_music_file(conn: "ConnectionHandler", playback_path):
     conn.tts.tts_text_queue.put(
         TTSMessageDTO(
@@ -360,6 +369,16 @@ def _enqueue_music_file(conn: "ConnectionHandler", playback_path):
             sentence_type=SentenceType.MIDDLE,
             content_type=ContentType.FILE,
             content_file=playback_path,
+        )
+    )
+
+
+def _enqueue_playback_boundary(conn: "ConnectionHandler", sentence_type: SentenceType):
+    conn.tts.tts_text_queue.put(
+        TTSMessageDTO(
+            sentence_id=conn.sentence_id,
+            sentence_type=sentence_type,
+            content_type=ContentType.ACTION,
         )
     )
 
@@ -394,14 +413,7 @@ async def play_local_music(conn: "ConnectionHandler", specific_file=None):
         text = _get_random_play_prompt(selected_music)
 
         announce_before_play = MUSIC_CACHE.get("announce_before_play", False)
-        if conn.intent_type == "intent_llm":
-            conn.tts.tts_text_queue.put(
-                TTSMessageDTO(
-                    sentence_id=conn.sentence_id,
-                    sentence_type=SentenceType.FIRST,
-                    content_type=ContentType.ACTION,
-                )
-            )
+        _enqueue_playback_boundary(conn, SentenceType.FIRST)
         if announce_before_play:
             conn.tts.store_tts_text(conn.sentence_id, text)
             conn.dialogue.put(Message(role="assistant", content=text))
@@ -416,17 +428,10 @@ async def play_local_music(conn: "ConnectionHandler", specific_file=None):
         else:
             conn.logger.bind(tag=TAG).info("跳过音乐播放前TTS介绍语，直接播放音乐")
             await _send_music_display_text(conn, text)
+            _report_music_display_text(conn, text)
 
         _enqueue_music_file(conn, playback_path)
-
-        if conn.intent_type == "intent_llm":
-            conn.tts.tts_text_queue.put(
-                TTSMessageDTO(
-                    sentence_id=conn.sentence_id,
-                    sentence_type=SentenceType.LAST,
-                    content_type=ContentType.ACTION,
-                )
-            )
+        _enqueue_playback_boundary(conn, SentenceType.LAST)
 
     except Exception as e:
         conn.logger.bind(tag=TAG).error(f"播放音乐失败: {str(e)}")
