@@ -46,6 +46,12 @@ plugins:
   web_search:
     provider: metaso
     api_key:
+  recommend_drink:
+    display_tool_name: self_screen_display_image
+    enable_image_display: true
+    image_provider: none
+    openai_api_key:
+    image_urls: {}
 
 mcp_endpoint:
 prompt_template: agent-base-prompt.txt

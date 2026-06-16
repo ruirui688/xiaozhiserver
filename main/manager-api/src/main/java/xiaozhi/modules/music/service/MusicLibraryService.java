@@ -14,6 +14,8 @@ public interface MusicLibraryService {
 
     List<MusicFileDTO> upload(MultipartFile[] files) throws IOException;
 
+    MusicFileDTO rename(String path, String newName) throws IOException;
+
     void delete(String path) throws IOException;
 
     Path resolveExistingFile(String path) throws IOException;

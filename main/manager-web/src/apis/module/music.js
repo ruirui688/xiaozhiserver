@@ -62,6 +62,27 @@ export default {
             }).send();
     },
 
+    renameMusic(path, newName, callback, failCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/music/files/name?path=${encodeURIComponent(path)}&newName=${encodeURIComponent(newName)}`)
+            .method('PUT')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .fail((res) => {
+                RequestService.clearRequestTime();
+                if (failCallback) {
+                    failCallback(res);
+                }
+            })
+            .networkFail(() => {
+                RequestService.reAjaxFun(() => {
+                    this.renameMusic(path, newName, callback, failCallback);
+                });
+            }).send();
+    },
+
     getPlayUrl(path) {
         return `${getServiceUrl()}/admin/music/play?path=${encodeURIComponent(path)}`;
     }

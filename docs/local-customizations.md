@@ -173,3 +173,17 @@
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方修改本地知识库、RAG 模型配置、知识库弹窗、文档解析或本地知识库工具，必须保留知识库级 parser_config 覆盖 RAG_LocalKnowledge 默认配置的约定；百炼/OpenAI 兼容切片模型应在知识库界面配置，不要求用户去后台模型配置手动改全局模型；文档解析优先走大模型切片，失败时才回退段落切分；旧文档必须重新解析才应用新切片；召回必须同时匹配 content/question/answer，并保留中文自然句 n-gram 检索增强。
 ```
+
+## 12. 酒吧机器人酒类推荐图片展示
+
+```text
+定制模块：xiaozhi-server 酒类推荐插件、设备端 MCP 图片展示约定、manager-api 功能插件定义
+改动原因：酒吧机器人在推荐酒类时，需要同时向硬件端展示酒水外观图片。当前先支持配置图片 URL 或调用 OpenAI 图片生成并缓存，后续硬件端提供 MCP 图片展示工具后由插件主动调用。
+关键文件：
+  - main/xiaozhi-server/plugins_func/functions/recommend_drink.py
+  - main/xiaozhi-server/config.yaml
+  - main/manager-api/src/main/resources/db/changelog/202606161130.sql
+  - docs/integrations/bar-drink-image-recommendation.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改 Function Plugin 注册、设备端 MCP 工具调用、vision 图片下载路由或配置下发，必须保留 `recommend_drink` 插件的推荐话术、图片 URL/生成缓存、设备 MCP 工具名适配和失败不阻断语音回复的约定。
+```

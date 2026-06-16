@@ -192,6 +192,23 @@ plugins:
     max_results: 5
     # 秘塔API Key（mk-前缀） / Tavily API Key（tvly-前缀）
     api_key: "mk-xxx"
+  recommend_drink:
+    # 酒吧机器人酒类推荐插件。硬件端后续提供图片展示 MCP 工具后，可把工具名填到 display_tool_name。
+    description: "当用户询问喝什么、想要酒类推荐、鸡尾酒推荐、某种口味或酒水外观时调用。"
+    enable_image_display: true
+    display_tool_name: "self_screen_display_image"
+    display_timeout: 8
+    # 可选：先使用你已经生成好的酒水图片 URL，key 使用插件内置酒水编码，如 gin_tonic、mojito、old_fashioned。
+    image_urls: {}
+    default_image_url: ""
+    # 可选：配置为 openai 后，插件会首次生成图片并缓存到 ./data/vision，再通过现有 /mcp/vision/images 路由给设备显示。
+    # 未配置 api key 时，只返回推荐文案，不发图片。
+    image_provider: "none"
+    openai_api_key: ""
+    openai_base_url: "https://api.openai.com/v1"
+    image_model: "gpt-image-1"
+    image_size: "1024x1024"
+    image_cache_dir: "./data/vision"
 # 声纹识别配置
 voiceprint:
   # 声纹接口地址
@@ -275,6 +292,7 @@ Intent:
     # 下面是加载查天气、角色切换、加载查新闻的插件示例
     functions:
       - web_search
+      - recommend_drink
       - get_weather
       - get_news_from_newsnow
       - play_music
@@ -287,6 +305,7 @@ Intent:
     functions:
       - change_role
       - web_search                  # 联网搜索
+      - recommend_drink             # 酒类推荐与图片展示
       - get_weather
       # - search_from_ragflow
       # - search_from_local_knowledge

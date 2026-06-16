@@ -54,6 +54,50 @@ class GameSessionManager:
         ("reformer", True, "他是否以改革、变法或推动社会转折出名？"),
     ]
 
+    _GENERAL_GUESS_CANDIDATES = [
+        {"name": "雨伞", "target_type": "object", "portable": True, "electric": False, "food": False, "rain": True, "school": False, "kitchen": False},
+        {"name": "冰箱", "target_type": "object", "portable": False, "electric": True, "food": False, "rain": False, "school": False, "kitchen": True},
+        {"name": "铅笔", "target_type": "object", "portable": True, "electric": False, "food": False, "rain": False, "school": True, "kitchen": False},
+        {"name": "书包", "target_type": "object", "portable": True, "electric": False, "food": False, "rain": False, "school": True, "kitchen": False},
+        {"name": "手机", "target_type": "object", "portable": True, "electric": True, "food": False, "rain": False, "school": False, "kitchen": False},
+        {"name": "西瓜", "target_type": "object", "portable": False, "electric": False, "food": True, "rain": False, "school": False, "kitchen": True},
+        {"name": "熊猫", "target_type": "animal", "pet": False, "water": False, "china": True, "black_white": True, "small": False},
+        {"name": "猫", "target_type": "animal", "pet": True, "water": False, "china": False, "black_white": False, "small": True},
+        {"name": "狗", "target_type": "animal", "pet": True, "water": False, "china": False, "black_white": False, "small": False},
+        {"name": "金鱼", "target_type": "animal", "pet": True, "water": True, "china": False, "black_white": False, "small": True},
+        {"name": "学校", "target_type": "place", "building": True, "outdoor": False, "education": True, "medical": False, "transport": False, "food": False},
+        {"name": "医院", "target_type": "place", "building": True, "outdoor": False, "education": False, "medical": True, "transport": False, "food": False},
+        {"name": "公园", "target_type": "place", "building": False, "outdoor": True, "education": False, "medical": False, "transport": False, "food": False},
+        {"name": "地铁站", "target_type": "place", "building": True, "outdoor": False, "education": False, "medical": False, "transport": True, "food": False},
+        {"name": "餐厅", "target_type": "place", "building": True, "outdoor": False, "education": False, "medical": False, "transport": False, "food": True},
+    ]
+
+    _GENERAL_QUESTIONS = {
+        "object": [
+            ("food", True, "它是能吃的东西吗？"),
+            ("electric", True, "它需要用电吗？"),
+            ("portable", True, "它通常能随身带着吗？"),
+            ("school", True, "它经常出现在学习或上学场景里吗？"),
+            ("kitchen", True, "它经常出现在厨房或餐桌附近吗？"),
+            ("rain", True, "它和下雨天有关吗？"),
+        ],
+        "animal": [
+            ("pet", True, "它通常会被人当作宠物吗？"),
+            ("water", True, "它主要生活在水里吗？"),
+            ("china", True, "它很有中国辨识度吗？"),
+            ("black_white", True, "它身上主要是黑白两色吗？"),
+            ("small", True, "它体型通常比较小吗？"),
+        ],
+        "place": [
+            ("outdoor", True, "它主要是户外场所吗？"),
+            ("education", True, "它和学习、上课有关吗？"),
+            ("medical", True, "它和看病、治疗有关吗？"),
+            ("transport", True, "它和交通出行有关吗？"),
+            ("food", True, "它和吃饭有关吗？"),
+            ("building", True, "它通常是在建筑里面吗？"),
+        ],
+    }
+
     _IDIOM_CHAIN_STARTS = [
         "一心一意",
         "水到渠成",
@@ -348,7 +392,9 @@ class GameSessionManager:
                     return self._next_historical_person_response(state)
                 if state.get("target_type") == "person":
                     return self._next_person_scope_response(state)
-            return "我们玩你说我猜。你描述一个历史人物的国家、年代、身份或事迹，我来猜；先别直接说答案。"
+                if self._is_general_target_type(state.get("target_type")):
+                    return self._next_general_guess_response(state)
+            return "我们玩你说我猜。你先选一个人物、物品、动物或地点，只描述线索，不要直接说答案。"
 
         self._update_user_describes_state(state, user_message)
         if state.get("unsupported_reason"):
@@ -358,12 +404,14 @@ class GameSessionManager:
             return self._next_historical_person_response(state)
         if state.get("target_type") == "person":
             return self._next_person_scope_response(state)
+        if self._is_general_target_type(state.get("target_type")):
+            return self._next_general_guess_response(state)
 
         if self._contains_any(normalized, ("历史人物", "古代人", "皇帝", "将军", "诗人")):
             state["target_type"] = "historical_person"
             return self._next_historical_person_response(state)
 
-        return "这个玩法当前先支持历史人物。请描述他的国家、年代、身份或代表事件；如果不是历史人物，这局先不适合继续猜。"
+        return "你先告诉我大类：人物、物品、动物还是地点。然后继续给一个线索，不要直接说答案。"
 
     def _start_user_describes_guess(self, tool_name):
         state = {
@@ -398,9 +446,7 @@ class GameSessionManager:
                 if answer == "yes":
                     state["target_type"] = last_question["target_type"]
                 else:
-                    state["unsupported_reason"] = last_question.get(
-                        "unsupported_reason", "unsupported_target_type"
-                    )
+                    state["target_type"] = ""
             elif last_question.get("type") == "fact":
                 key = last_question["key"]
                 yes_value = last_question["yes_value"]
@@ -414,9 +460,12 @@ class GameSessionManager:
             state["target_type"] = "historical_person"
         if self._contains_any(normalized, ("人物", "人名")) and not state.get("target_type"):
             state["target_type"] = "person"
-        if self._contains_any(normalized, ("物品", "东西", "物件", "地点", "地方", "动物")) and not state.get("target_type"):
-            state["unsupported_reason"] = "unsupported_target_type"
-            return
+        if self._contains_any(normalized, ("物品", "东西", "物件")) and not state.get("target_type"):
+            state["target_type"] = "object"
+        if self._contains_any(normalized, ("地点", "地方", "场所")) and not state.get("target_type"):
+            state["target_type"] = "place"
+        if self._contains_any(normalized, ("动物", "宠物")) and not state.get("target_type"):
+            state["target_type"] = "animal"
 
         facts = state["facts"]
         if self._contains_any(normalized, ("不是中国", "不属于中国", "不是国内", "不是我国")):
@@ -480,6 +529,7 @@ class GameSessionManager:
         elif self._contains_any(normalized, ("改革", "变法", "转折")):
             facts["reformer"] = True
             state["target_type"] = "historical_person"
+        self._update_general_guess_facts(state, normalized)
 
     def _next_historical_person_response(self, state):
         if state.get("solved"):
@@ -509,13 +559,128 @@ class GameSessionManager:
             "target_type": "historical_person",
             "unsupported_reason": "non_historical_person",
         }
-        return "人物范围很大。它是历史人物吗？如果是，你可以继续给国家、年代、身份或代表事件。"
+        return "人物范围很大。它是历史人物吗？如果是，你可以继续给国家、年代、身份或代表事件；如果不是，建议换成物品、动物或地点。"
 
     @staticmethod
     def _unsupported_user_describes_response(state):
         if state.get("unsupported_reason") == "non_historical_person":
-            return "这个玩法当前主要支持历史人物。不是历史人物的话，这局先不继续猜；你可以换一个历史人物重新开始。"
-        return "这个玩法当前主要支持历史人物，不支持按物品、地点或动物继续猜。你可以换一个历史人物重新开始。"
+            return "人物题当前主要支持历史人物。你可以换成历史人物，或改选物品、动物、地点继续玩。"
+        return "这类题当前还不稳定。你可以选人物、物品、动物或地点，并给一个更明确的线索。"
+
+    def _next_general_guess_response(self, state):
+        candidates = self._filter_general_candidates(state)
+        if len(candidates) == 1:
+            return self._ask_general_candidate_guess(state, candidates[0])
+
+        question = self._choose_general_question(state, candidates)
+        if question:
+            key, yes_value, prompt = question
+            state["asked"].append(key)
+            state["last_question"] = {"type": "fact", "key": key, "yes_value": yes_value}
+            return prompt
+
+        if candidates:
+            return self._ask_general_candidate_guess(state, candidates[0])
+
+        target_text = self._target_type_text(state.get("target_type"))
+        return f"按目前线索我还排不出来。你再给一个{target_text}的用途、外观、出现地点或特点。"
+
+    def _filter_general_candidates(self, state):
+        target_type = state.get("target_type")
+        facts = state.get("facts", {})
+        excluded = state.get("excluded_names", set())
+        candidates = []
+        for item in self._GENERAL_GUESS_CANDIDATES:
+            if item["target_type"] != target_type or item["name"] in excluded:
+                continue
+            matched = True
+            for key, value in facts.items():
+                if key in item and item.get(key) != value:
+                    matched = False
+                    break
+            if matched:
+                candidates.append(item)
+        return candidates
+
+    def _choose_general_question(self, state, candidates):
+        if not candidates:
+            return None
+        target_type = state.get("target_type")
+        facts = state.get("facts", {})
+        asked = set(state.get("asked", []))
+        for key, yes_value, prompt in self._GENERAL_QUESTIONS.get(target_type, []):
+            if key in facts or key in asked:
+                continue
+            yes_count = sum(1 for item in candidates if item.get(key) == yes_value)
+            no_count = len(candidates) - yes_count
+            if yes_count == 0 or no_count == 0:
+                continue
+            return key, yes_value, prompt
+        return None
+
+    def _ask_general_candidate_guess(self, state, item):
+        name = item["name"]
+        state["last_question"] = {"type": "guess", "name": name}
+        return f"按这些线索排下来，我猜是{name}。对吗？"
+
+    def _update_general_guess_facts(self, state, normalized):
+        if state.get("target_type") == "historical_person":
+            return
+        if self._contains_any(normalized, ("能吃", "吃的", "水果", "甜", "餐厅", "饭")):
+            if not state.get("target_type"):
+                state["target_type"] = "object"
+            state["facts"]["food"] = True
+        if self._contains_any(normalized, ("用电", "电器", "充电", "插电")):
+            state["target_type"] = state.get("target_type") or "object"
+            state["facts"]["electric"] = True
+        if self._contains_any(normalized, ("不用电", "不需要电")):
+            state["facts"]["electric"] = False
+        if self._contains_any(normalized, ("随身", "带着", "便携", "拿着", "背")):
+            state["target_type"] = state.get("target_type") or "object"
+            state["facts"]["portable"] = True
+        if self._contains_any(normalized, ("下雨", "雨天", "遮雨")):
+            state["target_type"] = state.get("target_type") or "object"
+            state["facts"]["rain"] = True
+        if self._contains_any(normalized, ("学校", "上学", "学习", "写字", "上课")):
+            if state.get("target_type") == "place":
+                state["facts"]["education"] = True
+            else:
+                state["target_type"] = state.get("target_type") or "object"
+                state["facts"]["school"] = True
+        if self._contains_any(normalized, ("厨房", "餐桌", "做饭")):
+            state["target_type"] = state.get("target_type") or "object"
+            state["facts"]["kitchen"] = True
+        if self._contains_any(normalized, ("宠物", "家养")):
+            state["target_type"] = "animal"
+            state["facts"]["pet"] = True
+        if self._contains_any(normalized, ("水里", "水中", "鱼缸")):
+            state["target_type"] = "animal"
+            state["facts"]["water"] = True
+        if self._contains_any(normalized, ("黑白", "竹子", "国宝")):
+            state["target_type"] = "animal"
+            state["facts"]["black_white"] = True
+            state["facts"]["china"] = True
+        if self._contains_any(normalized, ("户外", "外面", "散步", "游玩")):
+            state["target_type"] = "place"
+            state["facts"]["outdoor"] = True
+        if self._contains_any(normalized, ("看病", "治疗", "医生")):
+            state["target_type"] = "place"
+            state["facts"]["medical"] = True
+        if self._contains_any(normalized, ("交通", "坐车", "地铁", "出行")):
+            state["target_type"] = "place"
+            state["facts"]["transport"] = True
+
+    @staticmethod
+    def _is_general_target_type(target_type):
+        return target_type in {"object", "animal", "place"}
+
+    @staticmethod
+    def _target_type_text(target_type):
+        return {
+            "object": "物品",
+            "animal": "动物",
+            "place": "地点",
+        }.get(target_type, "答案")
 
     def _filter_historical_candidates(self, state):
         facts = state.get("facts", {})
@@ -578,6 +743,8 @@ class GameSessionManager:
         if last_question.get("type") == "guess":
             return cls._classify_short_feedback(normalized)
         if last_question.get("type") == "fact":
+            return cls._classify_fact_answer(normalized)
+        if last_question.get("type") == "target_type":
             return cls._classify_fact_answer(normalized)
         return ""
 
@@ -796,6 +963,29 @@ class GameSessionManager:
             "将军",
             "诗人",
             "人物",
+            "物品",
+            "东西",
+            "物件",
+            "地点",
+            "地方",
+            "场所",
+            "动物",
+            "宠物",
+            "能吃",
+            "水果",
+            "用电",
+            "电器",
+            "下雨",
+            "雨天",
+            "学校",
+            "上学",
+            "宠物",
+            "水里",
+            "黑白",
+            "竹子",
+            "户外",
+            "看病",
+            "交通",
             "中国",
             "外国",
             "近代",

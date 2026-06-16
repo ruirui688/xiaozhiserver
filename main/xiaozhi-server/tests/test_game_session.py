@@ -100,6 +100,40 @@ def test_user_describes_first_historical_clue_is_used():
     assert state["facts"]["poet"] is True
 
 
+def test_user_describes_opening_allows_common_categories():
+    manager = GameSessionManager()
+
+    response = manager.handle_user_describes_guess("guess_what_i_say", "你说我猜")
+
+    assert "人物、物品、动物或地点" in response
+    assert "历史人物的国家" not in response
+
+
+def test_user_describes_object_clue_continues_in_state_machine():
+    manager = GameSessionManager()
+
+    response = manager.handle_user_describes_guess("guess_what_i_say", "这是一个物品")
+    state = manager.sessions["guess_what_i_say"]
+
+    assert state["target_type"] == "object"
+    assert response in {
+        "它是能吃的东西吗？",
+        "它需要用电吗？",
+        "它通常能随身带着吗？",
+        "它经常出现在学习或上学场景里吗？",
+        "它经常出现在厨房或餐桌附近吗？",
+        "它和下雨天有关吗？",
+    }
+
+
+def test_user_describes_object_clue_can_filter_to_guess():
+    manager = GameSessionManager()
+
+    response = manager.handle_user_describes_guess("guess_what_i_say", "它是物品，下雨天用来遮雨")
+
+    assert response == "按这些线索排下来，我猜是雨伞。对吗？"
+
+
 def test_user_describes_clue_after_guess_is_not_treated_as_yes():
     manager = GameSessionManager()
     tool_name = _seed_user_describes(manager)
@@ -426,3 +460,26 @@ def test_stateful_game_tool_reports_are_skipped(monkeypatch):
     assert response.action is Action.RESPONSE
     assert response.response == "猜对了，就是冰箱。要不要再来一局？"
     assert reported == []
+
+
+def test_stateful_game_tool_display_message_is_skipped(monkeypatch):
+    _install_plugin_executor_stubs(monkeypatch)
+
+    send_audio_mod = types.ModuleType("core.handle.sendAudioHandle")
+    displayed = []
+
+    async def send_display_message(conn, text):
+        displayed.append(text)
+
+    send_audio_mod.send_display_message = send_display_message
+    monkeypatch.setitem(sys.modules, "core.handle.sendAudioHandle", send_audio_mod)
+    monkeypatch.delitem(
+        sys.modules,
+        "core.providers.tools.unified_tool_handler",
+        raising=False,
+    )
+
+    from core.providers.tools.unified_tool_handler import UnifiedToolHandler
+
+    assert UnifiedToolHandler._should_display_tool_call("guess_what_i_say") is False
+    assert UnifiedToolHandler._should_display_tool_call("get_weather") is True

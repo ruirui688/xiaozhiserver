@@ -66,10 +66,13 @@
               <el-table-column label="更新时间" width="180" align="center">
                 <template slot-scope="scope">{{ formatDateTime(scope.row.updateTime) }}</template>
               </el-table-column>
-              <el-table-column label="操作" width="170" align="center">
+              <el-table-column label="操作" width="220" align="center">
                 <template slot-scope="scope">
                   <el-button size="mini" type="text" @click="togglePlay(scope.row)">
                     {{ playingPath === scope.row.path ? '停止' : '试听' }}
+                  </el-button>
+                  <el-button size="mini" type="text" @click="renameMusic(scope.row)">
+                    重命名
                   </el-button>
                   <el-button size="mini" type="text" class="delete-btn" @click="deleteMusic(scope.row)">
                     删除
@@ -214,6 +217,31 @@ export default {
       this.audio = null;
       this.playingPath = "";
     },
+    renameMusic(row) {
+      this.$prompt("请输入新的音乐文件名", "重命名", {
+        confirmButtonText: "确定",
+        cancelButtonText: "取消",
+        inputValue: row.name,
+        inputPattern: /^(?!\.{1,2}$)[^\\/:*?"<>|\x00-\x1F]+$/,
+        inputErrorMessage: "文件名不能包含 / \\ : * ? \" < > | 等字符"
+      }).then(({ value }) => {
+        const newName = (value || "").trim();
+        if (!newName || newName === row.name) {
+          return;
+        }
+        if (this.playingPath === row.path) {
+          this.stopAudio();
+        }
+        Api.music.renameMusic(row.path, newName, (res) => {
+          if (res.data.code === 0) {
+            this.$message.success("重命名成功");
+            this.fetchMusicList();
+          }
+        }, (res) => {
+          this.$message.error(res?.data?.msg || "重命名失败");
+        });
+      }).catch(() => {});
+    },
     deleteMusic(row) {
       this.$confirm(`确认删除《${row.name}》吗？`, "提示", {
         confirmButtonText: "确定",
@@ -249,7 +277,11 @@ export default {
       if (!timestamp) {
         return "-";
       }
-      const date = new Date(timestamp);
+      const normalizedTimestamp = Number(timestamp);
+      if (!Number.isFinite(normalizedTimestamp)) {
+        return "-";
+      }
+      const date = new Date(normalizedTimestamp);
       const pad = (value) => String(value).padStart(2, "0");
       return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
     }

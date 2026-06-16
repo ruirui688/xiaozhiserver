@@ -92,6 +92,35 @@ public class MusicLibraryServiceImpl implements MusicLibraryService {
     }
 
     @Override
+    public MusicFileDTO rename(String path, String newName) throws IOException {
+        Path source = resolveExistingFile(path);
+        String cleanName = sanitizeFilename(newName);
+        String extension = getExtension(cleanName);
+        if (StringUtils.isBlank(extension)) {
+            extension = getExtension(source.getFileName().toString());
+            cleanName = cleanName + extension;
+        }
+        if (!ALLOWED_EXTENSIONS.contains(extension)) {
+            throw new IllegalArgumentException("只允许使用 mp3、wav、p3 格式的音频文件名");
+        }
+
+        Path parent = source.getParent();
+        Path target = parent.resolve(cleanName).normalize();
+        if (!target.startsWith(musicRoot)) {
+            throw new IllegalArgumentException("文件名不合法");
+        }
+        if (source.equals(target)) {
+            return toDTO(source);
+        }
+        if (Files.exists(target)) {
+            throw new IllegalArgumentException("同名音乐文件已存在");
+        }
+
+        Files.move(source, target);
+        return toDTO(target);
+    }
+
+    @Override
     public void delete(String path) throws IOException {
         Path target = resolveExistingFile(path);
         Files.delete(target);

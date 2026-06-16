@@ -10,6 +10,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -54,6 +55,18 @@ public class MusicLibraryController {
         } catch (Exception e) {
             log.error("上传服务器音乐文件失败", e);
             return new Result<List<MusicFileDTO>>().error(e.getMessage());
+        }
+    }
+
+    @PutMapping("/files/name")
+    @Operation(summary = "重命名服务器音乐文件")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<MusicFileDTO> rename(@RequestParam("path") String path, @RequestParam("newName") String newName) {
+        try {
+            return new Result<MusicFileDTO>().ok(musicLibraryService.rename(path, newName));
+        } catch (Exception e) {
+            log.error("重命名服务器音乐文件失败", e);
+            return new Result<MusicFileDTO>().error(e.getMessage());
         }
     }
 
