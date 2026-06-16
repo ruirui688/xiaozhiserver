@@ -6,7 +6,7 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from urllib.parse import urlsplit, urlunsplit
 
 from config.logger import setup_logging
@@ -28,71 +28,13 @@ DISPLAY_TOOL_CANDIDATES = (
     "render_image",
 )
 
-DRINK_CATALOG = {
-    "gin_tonic": {
-        "name": "金汤力",
-        "category": "鸡尾酒",
-        "strength": "medium",
-        "tags": ("清爽", "柑橘", "微苦", "气泡", "低糖"),
-        "reply": "我推荐金汤力。金酒的草本香气加上汤力水的微苦和气泡，适合想喝清爽、不太甜的人。",
-        "visual": "高球杯，透明酒液，冰块很多，杯壁有冷凝水，通常会放一片青柠或柠檬，整体看起来干净清爽。",
-        "prompt": "Photorealistic product shot of a gin and tonic in a tall highball glass, clear sparkling liquid, large ice cubes, lime wedge garnish, condensation on the glass, elegant bar counter, no logo, no text.",
-    },
-    "mojito": {
-        "name": "莫吉托",
-        "category": "鸡尾酒",
-        "strength": "low",
-        "tags": ("清爽", "薄荷", "青柠", "气泡", "微甜"),
-        "reply": "我推荐莫吉托。它有薄荷、青柠和苏打水的清凉感，酒精压力不高，适合刚开始喝或想要轻松一点的客人。",
-        "visual": "高杯里能看到薄荷叶、青柠角、碎冰和透明气泡，颜色偏浅绿，视觉上很有夏天感。",
-        "prompt": "Photorealistic cocktail photo of a mojito in a tall glass, mint leaves, lime wedges, crushed ice, sparkling soda bubbles, pale green tones, clean bar lighting, no logo, no text.",
-    },
-    "old_fashioned": {
-        "name": "古典鸡尾酒",
-        "category": "鸡尾酒",
-        "strength": "high",
-        "tags": ("威士忌", "醇厚", "微甜", "苦精", "经典"),
-        "reply": "我推荐古典鸡尾酒。它以威士忌为核心，带一点糖和苦精，口感醇厚，适合想喝经典、层次重一点的人。",
-        "visual": "矮杯，琥珀色酒液，一大块方冰或圆冰，常见橙皮装饰，整体很沉稳。",
-        "prompt": "Photorealistic product shot of an old fashioned cocktail in a rocks glass, amber whiskey color, one large clear ice cube, orange peel garnish, dark refined bar counter, no logo, no text.",
-    },
-    "aperol_spritz": {
-        "name": "阿佩罗橙光",
-        "category": "鸡尾酒",
-        "strength": "low",
-        "tags": ("橙味", "微苦", "气泡", "开胃", "低酒精"),
-        "reply": "我推荐阿佩罗橙光。它有明亮的橙香、轻微苦味和气泡感，很适合开胃或者边聊天边喝。",
-        "visual": "大酒杯或葡萄酒杯，橙红色酒液，冰块、橙片和气泡很明显，外观非常醒目。",
-        "prompt": "Photorealistic cocktail photo of an Aperol spritz in a large wine glass, vivid orange-red drink, ice cubes, orange slice garnish, sparkling bubbles, bright aperitif style, no logo, no text.",
-    },
-    "whiskey_sour": {
-        "name": "威士忌酸",
-        "category": "鸡尾酒",
-        "strength": "medium",
-        "tags": ("酸甜", "威士忌", "顺口", "柠檬", "绵密"),
-        "reply": "我推荐威士忌酸。它把威士忌、柠檬和甜感平衡在一起，入口酸甜顺滑，比纯饮威士忌更容易接受。",
-        "visual": "矮杯或鸡尾酒杯，酒体偏金黄，表面可能有细腻泡沫，常用樱桃或柠檬皮点缀。",
-        "prompt": "Photorealistic cocktail photo of a whiskey sour, golden drink, silky foam top, cherry and lemon peel garnish, elegant coupe or rocks glass, warm bar lighting, no logo, no text.",
-    },
-    "negroni": {
-        "name": "尼格罗尼",
-        "category": "鸡尾酒",
-        "strength": "high",
-        "tags": ("金酒", "苦甜", "草本", "浓郁", "经典"),
-        "reply": "我推荐尼格罗尼。它是金酒、金巴利和甜味美思的苦甜组合，风味成熟，适合能接受草本苦味的人。",
-        "visual": "矮杯，深红色酒液，一大块冰，橙皮或橙片装饰，颜色浓郁，很有辨识度。",
-        "prompt": "Photorealistic product shot of a negroni in a rocks glass, deep ruby red cocktail, large clear ice cube, orange peel garnish, sophisticated bar counter, no logo, no text.",
-    },
-}
-
-
 recommend_drink_function_desc = {
     "type": "function",
     "function": {
         "name": "recommend_drink",
         "description": (
-            "酒吧机器人推荐酒类时调用。用户询问喝什么、想要某种口味、场景、酒精强度、"
-            "外观或鸡尾酒推荐时，使用本工具给出一款具体推荐，并尽量向设备端发送酒水外观图片。"
+            "酒吧机器人推荐酒类时调用。只能基于本店已配置酒单或本地知识库酒单推荐，"
+            "禁止编造酒名、酒款、价格或外观。查不到本店酒单时必须明确告知无法确认。"
         ),
         "parameters": {
             "type": "object",
@@ -151,20 +93,273 @@ def _get_plugin_config(conn: "ConnectionHandler") -> Dict[str, Any]:
     return config if isinstance(config, dict) else {}
 
 
-def _pick_drink(preference: str, scene: str, strength: str) -> Dict[str, Any]:
+def _normalize_list(value: Any) -> List[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except json.JSONDecodeError:
+            return []
+    return []
+
+
+def _normalize_drink_item(item: Any) -> Optional[Dict[str, Any]]:
+    if isinstance(item, str):
+        name = item.strip()
+        if not name:
+            return None
+        return {
+            "key": _safe_filename(name),
+            "name": name,
+            "category": "",
+            "strength": "",
+            "tags": (),
+            "reply": f"我推荐本店有的{name}。",
+            "visual": "",
+            "prompt": "",
+            "source": "configured_menu",
+        }
+
+    if not isinstance(item, dict):
+        return None
+
+    name = str(item.get("name") or item.get("title") or "").strip()
+    if not name:
+        return None
+
+    tags = item.get("tags") or item.get("flavors") or item.get("keywords") or []
+    if isinstance(tags, str):
+        tags = [part.strip() for part in re.split(r"[,，;；、\s]+", tags) if part.strip()]
+    if not isinstance(tags, list):
+        tags = []
+
+    visual = str(item.get("visual") or item.get("appearance") or item.get("description") or "").strip()
+    reply = str(item.get("reply") or item.get("recommendation") or "").strip()
+    if not reply:
+        reason = str(item.get("reason") or item.get("description") or "").strip()
+        reply = f"我推荐本店有的{name}。" + (f"{reason}" if reason else "")
+
+    return {
+        "key": str(item.get("key") or _safe_filename(name)),
+        "name": name,
+        "category": str(item.get("category") or "").strip(),
+        "strength": str(item.get("strength") or "").strip().lower(),
+        "tags": tuple(str(tag).strip() for tag in tags if str(tag).strip()),
+        "reply": reply,
+        "visual": visual,
+        "prompt": str(item.get("prompt") or "").strip(),
+        "image_url": str(item.get("image_url") or item.get("imageUrl") or "").strip(),
+        "source": "configured_menu",
+    }
+
+
+def _load_configured_menu(plugin_config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    menu = plugin_config.get("drink_menu") or plugin_config.get("menu") or []
+    drinks = []
+    for item in _normalize_list(menu):
+        drink = _normalize_drink_item(item)
+        if drink:
+            drinks.append(drink)
+    return drinks
+
+
+def _query_local_knowledge_menu(
+    conn: "ConnectionHandler", plugin_config: Dict[str, Any], preference: str, scene: str, strength: str
+) -> List[Dict[str, Any]]:
+    dataset_ids = plugin_config.get("dataset_ids")
+    if not dataset_ids:
+        dataset_ids = conn.config.get("plugins", {}).get("search_from_local_knowledge", {}).get("dataset_ids", [])
+    if isinstance(dataset_ids, str):
+        dataset_ids = _normalize_list(dataset_ids)
+    if not dataset_ids:
+        return []
+
+    api_config = conn.config.get("manager-api", {})
+    api_url = api_config.get("url")
+    api_secret = api_config.get("secret")
+    if not api_url or not api_secret:
+        return []
+
+    question_parts = ["请只从本店酒单中查找可推荐的酒款"]
+    if preference:
+        question_parts.append(f"口味偏好：{preference}")
+    if scene:
+        question_parts.append(f"场景：{scene}")
+    if strength and strength != "any":
+        question_parts.append(f"酒精强度：{strength}")
+    question = "；".join(question_parts)
+
+    try:
+        import requests
+
+        response = requests.post(
+            f"{api_url}/config/knowledge/retrieval",
+            json={"question": question, "dataset_ids": dataset_ids},
+            headers={"Authorization": f"Bearer {api_secret}", "Content-Type": "application/json"},
+            timeout=_config_int(plugin_config.get("knowledge_timeout"), 8),
+        )
+        response.encoding = "utf-8"
+        response.raise_for_status()
+        result = response.json()
+    except Exception as e:
+        logger.bind(tag=TAG).warning(f"查询本店酒单知识库失败: {e}")
+        return []
+
+    if result.get("code") != 0:
+        return []
+
+    chunks = result.get("data", {}).get("chunks", [])
+    drinks = []
+    for index, chunk in enumerate(chunks[:5]):
+        content = str(chunk.get("content") or "").strip()
+        if not content:
+            continue
+        names = _extract_candidate_drink_names(content)
+        if not names:
+            logger.bind(tag=TAG).warning(f"忽略未包含明确酒名的酒单知识库片段: index={index}")
+            continue
+        for name in names:
+            drinks.append(
+                {
+                    "key": _safe_filename(name),
+                    "name": name,
+                    "category": "",
+                    "strength": _extract_strength(content),
+                    "tags": tuple(_extract_terms(content)),
+                    "reply": _build_reply_from_knowledge(name, content),
+                    "visual": _extract_visual(content),
+                    "prompt": "",
+                    "source": "local_knowledge",
+                    "content": content,
+                }
+            )
+    return drinks
+
+
+def _extract_candidate_drink_names(content: str) -> List[str]:
+    explicit_name = _extract_drink_name(content)
+    if explicit_name:
+        return [explicit_name]
+
+    lines = [line.strip() for line in content.splitlines() if line.strip()]
+    candidate_texts = []
+    consume_next_line = False
+    label_pattern = re.compile(r"(?:推荐候选方向|候选酒款|推荐候选|可推荐酒款|推荐酒款|候选)[:：]?\s*(.*)")
+    for line in lines:
+        if consume_next_line:
+            candidate_texts.append(line)
+            consume_next_line = False
+            continue
+        match = label_pattern.search(line)
+        if not match:
+            continue
+        text = match.group(1).strip()
+        if text:
+            candidate_texts.append(text)
+        else:
+            consume_next_line = True
+
+    names: List[str] = []
+    seen = set()
+    for text in candidate_texts:
+        for name in _split_candidate_names(text):
+            if name and name not in seen:
+                seen.add(name)
+                names.append(name)
+    return names
+
+
+def _split_candidate_names(text: str) -> List[str]:
+    normalized = re.sub(r"[。.!?？].*$", "", text.strip())
+    parts = re.split(r"[,，、;/；|]+", normalized)
+    names = []
+    blocked_markers = ("用户问题", "检索字段", "适配场景", "价格", "定位", "字段", "方向")
+    for part in parts:
+        name = part.strip(" \t\r\n'\"“”《》()（）[]【】")
+        name = re.sub(r"^(?:推荐|酒款|酒名|名称|品名)[:：]\s*", "", name).strip()
+        if not name or any(marker in name for marker in blocked_markers):
+            continue
+        if "=" in name or "：" in name or ":" in name:
+            continue
+        if 2 <= len(name) <= 60:
+            names.append(name)
+    return names
+
+
+def _extract_drink_name(content: str) -> str:
+    for pattern in (
+        r"(?:酒名|名称|品名|酒款|推荐酒名|推荐酒款)[:：]\s*([^\n，,。；;]{2,30})",
+        r"《([^》]{2,30})》",
+        r"“([^”]{2,30})”",
+    ):
+        match = re.search(pattern, content)
+        if match:
+            return match.group(1).strip()
+    return ""
+
+
+def _extract_terms(content: str) -> List[str]:
+    candidates = []
+    for term in (
+        "清爽", "酸甜", "微甜", "甜", "不甜", "果香", "花香", "威士忌", "金酒", "伏特加",
+        "低度", "高度", "拍照", "好看", "颜值", "商务", "宴请", "体面", "不浮夸", "高端", "中高端",
+    ):
+        if term in content:
+            candidates.append(term)
+    return candidates
+
+
+def _extract_strength(content: str) -> str:
+    if "低度" in content or "低酒精" in content:
+        return "low"
+    if "高度" in content or "烈" in content or "高酒精" in content:
+        return "high"
+    return ""
+
+
+def _extract_visual(content: str) -> str:
+    match = re.search(r"(?:外观|颜值|颜色|拍照|杯型)[:：]?\s*([^\n]{6,120})", content)
+    if match:
+        return match.group(1).strip()
+    return ""
+
+
+def _build_reply_from_knowledge(name: str, content: str) -> str:
+    reason_parts = []
+    for term in _extract_terms(content):
+        if term not in {"低度", "高度"}:
+            reason_parts.append(term)
+    if reason_parts:
+        reason = "、".join(reason_parts[:4])
+        return f"我推荐本店有的{name}，它更适合{reason}的需求。"
+    return f"我推荐本店有的{name}。"
+
+
+def _resolve_drink_candidates(
+    conn: "ConnectionHandler", plugin_config: Dict[str, Any], preference: str, scene: str, strength: str
+) -> List[Dict[str, Any]]:
+    configured_menu = _load_configured_menu(plugin_config)
+    if configured_menu:
+        return configured_menu
+    return _query_local_knowledge_menu(conn, plugin_config, preference, scene, strength)
+
+
+def _pick_drink_from_candidates(candidates: List[Dict[str, Any]], preference: str, scene: str, strength: str) -> Dict[str, Any]:
     query = f"{preference} {scene} {strength}".lower()
     requested_strength = strength if strength in {"low", "medium", "high"} else ""
-    best_key = "gin_tonic"
+    best_drink = candidates[0]
     best_score = -1
 
-    for key, drink in DRINK_CATALOG.items():
+    for drink in candidates:
         score = 0
         if requested_strength and drink["strength"] == requested_strength:
             score += 3
         for tag in drink["tags"]:
             if tag.lower() in query:
                 score += 2
-        if drink["name"].lower() in query or key.replace("_", " ") in query:
+        if drink["name"].lower() in query or drink["key"].replace("_", " ").lower() in query:
             score += 4
         if "不太甜" in query or "低糖" in query:
             score += 2 if "低糖" in drink["tags"] or "微苦" in drink["tags"] else -1
@@ -176,12 +371,10 @@ def _pick_drink(preference: str, scene: str, strength: str) -> Dict[str, Any]:
             score += 2 if "微苦" in drink["tags"] or "苦甜" in drink["tags"] else 0
 
         if score > best_score:
-            best_key = key
+            best_drink = drink
             best_score = score
 
-    selected = dict(DRINK_CATALOG[best_key])
-    selected["key"] = best_key
-    return selected
+    return dict(best_drink)
 
 
 def _build_image_url_from_filename(config: Dict[str, Any], filename: str) -> str:
@@ -202,6 +395,10 @@ def _safe_filename(value: str) -> str:
 def _get_configured_image_url(
     plugin_config: Dict[str, Any], drink: Dict[str, Any]
 ) -> Optional[str]:
+    drink_image_url = drink.get("image_url")
+    if isinstance(drink_image_url, str) and drink_image_url.strip():
+        return drink_image_url.strip()
+
     image_urls = plugin_config.get("image_urls")
     if isinstance(image_urls, str):
         try:
@@ -247,7 +444,7 @@ def _generate_openai_image_if_configured(
         )
         result = client.images.generate(
             model=plugin_config.get("image_model", "gpt-image-1"),
-            prompt=drink["prompt"],
+            prompt=drink.get("prompt") or _build_image_prompt(drink),
             size=plugin_config.get("image_size", "1024x1024"),
         )
         image_data = result.data[0]
@@ -296,9 +493,9 @@ def _build_display_arguments(
     default_args = {
         "image_url": image_url,
         "title": drink["name"],
-        "description": drink["visual"],
+        "description": drink.get("visual") or drink.get("reply") or drink["name"],
         "alt": f"{drink['name']}外观图",
-        "image_prompt": drink["prompt"],
+        "image_prompt": drink.get("prompt") or _build_image_prompt(drink),
     }
     tool_data = getattr(conn.mcp_client, "tools", {}).get(tool_name, {})
     schema = tool_data.get("inputSchema") if isinstance(tool_data, dict) else {}
@@ -315,9 +512,9 @@ def _build_display_arguments(
         elif lower_name in {"title", "name"}:
             args[name] = drink["name"]
         elif lower_name in {"description", "caption", "alt", "text"}:
-            args[name] = drink["visual"]
+            args[name] = drink.get("visual") or drink.get("reply") or drink["name"]
         elif lower_name in {"prompt", "image_prompt", "imageprompt"}:
-            args[name] = drink["prompt"]
+            args[name] = drink.get("prompt") or _build_image_prompt(drink)
 
     for name in required:
         if name not in args:
@@ -363,13 +560,63 @@ def recommend_drink(
     scene: str = "",
     strength: str = "any",
 ):
-    drink = _pick_drink(preference, scene, strength)
     plugin_config = _get_plugin_config(conn)
+    candidates = _resolve_drink_candidates(conn, plugin_config, preference, scene, strength)
+    if not candidates:
+        return ActionResponse(
+            action=Action.RESPONSE,
+            response="我现在查不到本店酒单，不能乱推荐。请先把酒单接入知识库，或在酒水推荐插件里配置 drink_menu。",
+            result="no_bar_menu",
+        )
+
+    drink = _pick_drink_from_candidates(candidates, preference, scene, strength)
 
     if getattr(conn, "loop", None) and conn.loop.is_running():
         conn.loop.create_task(_send_drink_image_to_device(conn, plugin_config, drink))
 
-    response = f"{drink['reply']} 外观上，{drink['visual']}"
+    response = drink.get("reply") or f"我推荐本店有的{drink['name']}。"
+    visual = drink.get("visual")
+    if visual and visual not in response:
+        response = f"{response} 外观上，{visual}"
     return ActionResponse(
         action=Action.RESPONSE, response=response, result=drink["name"]
     )
+
+
+def _build_image_prompt(drink: Dict[str, Any]) -> str:
+    visual = drink.get("visual") or drink.get("reply") or drink.get("name", "cocktail")
+    return (
+        "Photorealistic bar menu product shot, no logo, no text. "
+        f"Drink name: {drink.get('name', '')}. Appearance: {visual}"
+    )
+
+
+def _pick_drink(preference: str, scene: str, strength: str) -> Dict[str, Any]:
+    """Compatibility helper for older tests; runtime uses configured bar menu only."""
+    demo_menu = [
+        {
+            "key": "gin_tonic",
+            "name": "金汤力",
+            "strength": "medium",
+            "tags": ("清爽", "柑橘", "微苦", "气泡", "低糖"),
+            "reply": "我推荐本店有的金汤力。",
+            "visual": "高球杯，透明酒液，青柠装饰。",
+        },
+        {
+            "key": "mojito",
+            "name": "莫吉托",
+            "strength": "low",
+            "tags": ("清爽", "薄荷", "青柠", "气泡", "微甜"),
+            "reply": "我推荐本店有的莫吉托。",
+            "visual": "高杯里能看到薄荷叶、青柠角和碎冰。",
+        },
+        {
+            "key": "whiskey_sour",
+            "name": "威士忌酸",
+            "strength": "medium",
+            "tags": ("酸甜", "威士忌", "顺口", "柠檬"),
+            "reply": "我推荐本店有的威士忌酸。",
+            "visual": "酒体偏金黄，表面可能有细腻泡沫。",
+        },
+    ]
+    return _pick_drink_from_candidates(demo_menu, preference, scene, strength)

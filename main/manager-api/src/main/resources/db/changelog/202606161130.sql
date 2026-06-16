@@ -13,7 +13,25 @@ SELECT
       'key', 'description',
       'type', 'string',
       'label', '工具描述',
-      'default', '当用户询问喝什么、想要酒类推荐、鸡尾酒推荐、某种口味或酒水外观时调用。'
+      'default', '当用户询问喝什么、想要酒类推荐、鸡尾酒推荐、某种口味或酒水外观时调用。只能基于本店已配置酒单或本地知识库酒单推荐；禁止编造酒名、价格、外观或库存。'
+    ),
+    JSON_OBJECT(
+      'key', 'drink_menu',
+      'type', 'json',
+      'label', '本店酒单 JSON',
+      'default', JSON_ARRAY()
+    ),
+    JSON_OBJECT(
+      'key', 'dataset_ids',
+      'type', 'json',
+      'label', '酒单知识库 dataset_ids',
+      'default', JSON_ARRAY()
+    ),
+    JSON_OBJECT(
+      'key', 'knowledge_timeout',
+      'type', 'string',
+      'label', '知识库查询超时秒数',
+      'default', '8'
     ),
     JSON_OBJECT(
       'key', 'enable_image_display',
@@ -101,7 +119,25 @@ SET
       'key', 'description',
       'type', 'string',
       'label', '工具描述',
-      'default', '当用户询问喝什么、想要酒类推荐、鸡尾酒推荐、某种口味或酒水外观时调用。'
+      'default', '当用户询问喝什么、想要酒类推荐、鸡尾酒推荐、某种口味或酒水外观时调用。只能基于本店已配置酒单或本地知识库酒单推荐；禁止编造酒名、价格、外观或库存。'
+    ),
+    JSON_OBJECT(
+      'key', 'drink_menu',
+      'type', 'json',
+      'label', '本店酒单 JSON',
+      'default', JSON_ARRAY()
+    ),
+    JSON_OBJECT(
+      'key', 'dataset_ids',
+      'type', 'json',
+      'label', '酒单知识库 dataset_ids',
+      'default', JSON_ARRAY()
+    ),
+    JSON_OBJECT(
+      'key', 'knowledge_timeout',
+      'type', 'string',
+      'label', '知识库查询超时秒数',
+      'default', '8'
     ),
     JSON_OBJECT(
       'key', 'enable_image_display',

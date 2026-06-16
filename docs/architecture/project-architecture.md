@@ -139,7 +139,7 @@ tools
 
 | 模式 | 判断者 | 注入形式 | 适用边界 |
 | --- | --- | --- | --- |
-| 语义控制中枢 | Python Router / StateManager / PolicyEngine | 高置信度规则、连接状态、状态机游戏上下文 | 停止、退出游戏、继续等高频控制和拒识 |
+| 语义控制中枢 | Python Router / StateManager / PolicyEngine | 高置信度规则、连接状态 | 停止、拒识等高频控制 |
 | `function_call` | 主 LLM | OpenAI 兼容 `tools` 字段 | 主模型支持原生 function calling |
 | `intent_llm` | 独立意图 LLM | 函数名、描述和参数拼成意图提示词，要求返回 JSON | 主模型工具调用不稳定或希望小模型先判意图 |
 
@@ -151,7 +151,7 @@ MCP 必须区分三类：
 | 服务器侧 MCP | Python 本地 MCP server 配置返回 `tools/list` | Python 作为 MCP client 调用 |
 | 设备端 MCP | 设备声明 `features.mcp=true` 后返回 `tools/list` | Python 向设备发 `tools/call` |
 
-状态机游戏、隐藏答案、候选集、已用成语、上一问等严格状态不能依赖 LLM 自己记忆，应保存在 Python 服务端状态机中。需要排查提示词和工具时，优先沿 [提示词注入工程](../integrations/prompt-injection-engineering.md) 中的 `PromptManager`、`Dialogue`、`UnifiedToolHandler`、Intent、MCP executor 链路检查。
+纯语言游戏不再由 Python 服务端状态机接管，应交给主 LLM 根据对话上下文自然处理。需要排查提示词和工具时，优先沿 [提示词注入工程](../integrations/prompt-injection-engineering.md) 中的 `PromptManager`、`Dialogue`、`UnifiedToolHandler`、Intent、MCP executor 链路检查。
 
 ## 6. 运行产物边界
 

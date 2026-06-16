@@ -1,11 +1,6 @@
-import asyncio
-import json
 import sys
 import types
 from pathlib import Path
-from unittest.mock import patch
-
-import pytest
 
 
 SERVER_ROOT = Path(__file__).resolve().parents[1]
@@ -15,206 +10,143 @@ if str(SERVER_ROOT) not in sys.path:
 from core.game_session import GameSessionManager
 
 
-def _seed_guess_my_word(manager, tool_name="guess_xiaozhi_word"):
-    manager.sessions[tool_name] = {
-        "active": True,
-        "game_type": "guess_my_word",
-        "phase": "waiting_guess",
-        "target_word": "冰箱",
-        "category": "家用电器",
-        "hints": ["它通常在厨房或餐厅", "它能让东西保持低温", "水果、饮料和剩菜常放在里面"],
-        "hints_given": ["它通常在厨房或餐厅"],
-        "user_guesses": [],
-        "turn_count": 0,
-        "started_at": 0,
-    }
-    return tool_name
-
-
-def _seed_user_describes(manager, tool_name="guess_what_i_say"):
-    manager.sessions[tool_name] = {
-        "active": True,
-        "game_type": "user_describes_assistant_guesses",
-        "tool_name": tool_name,
-        "target_type": "",
-        "facts": {},
-        "asked": [],
-        "excluded_names": set(),
-        "last_question": None,
-        "turn_count": 0,
-        "started_at": 0,
-    }
-    return tool_name
-
-
-def test_guess_my_word_negative_mention_does_not_count_as_correct():
-    manager = GameSessionManager()
-    tool_name = _seed_guess_my_word(manager)
-
-    response = manager.handle_guess_my_word(tool_name, "不是冰箱吧")
-
-    assert "猜对了" not in response
-    assert tool_name in manager.sessions
-    assert manager.sessions[tool_name]["turn_count"] == 1
-
-
-def test_guess_my_word_positive_guess_still_counts_as_correct():
-    manager = GameSessionManager()
-    tool_name = _seed_guess_my_word(manager)
-
-    response = manager.handle_guess_my_word(tool_name, "是不是冰箱")
-
-    assert response == "猜对了，就是冰箱。要不要再来一局？"
-    assert tool_name not in manager.sessions
-
-
-def test_guess_my_word_hint_give_up_and_end_behaviors():
-    manager = GameSessionManager()
-    tool_name = _seed_guess_my_word(manager)
-
-    hint_response = manager.handle_guess_my_word(tool_name, "提示")
-    assert hint_response == "再给你一个提示：它能让东西保持低温。你猜是什么？"
-    assert tool_name in manager.sessions
-
-    give_up_response = manager.handle_guess_my_word(tool_name, "我放弃")
-    assert give_up_response == "答案是冰箱。这局先到这，要不要再来一局？"
-    assert tool_name not in manager.sessions
-
-    _seed_guess_my_word(manager, tool_name)
-    end_response = manager.handle_guess_my_word(tool_name, "结束")
-    assert end_response == "这局先到这。想再玩时直接说“你想一个词我来猜”。"
-    assert tool_name not in manager.sessions
-
-
-def test_user_describes_first_historical_clue_is_used():
-    manager = GameSessionManager()
-    tool_name = _seed_user_describes(manager)
-
-    response = manager.handle_user_describes_guess(tool_name, "他是中国古代诗人")
-    state = manager.sessions[tool_name]
-
-    assert "人物、物品、地点，还是动物" not in response
-    assert state["target_type"] == "historical_person"
-    assert state["facts"]["region"] == "china"
-    assert state["facts"]["period"] == "ancient"
-    assert state["facts"]["poet"] is True
-
-
-def test_user_describes_opening_allows_common_categories():
+def test_freeform_games_do_not_force_stateful_routing():
     manager = GameSessionManager()
 
-    response = manager.handle_user_describes_guess("guess_what_i_say", "你说我猜")
+    assert GameSessionManager.GUESS_MY_WORD_TOOLS == set()
+    assert GameSessionManager.USER_DESCRIBES_TOOLS == set()
+    assert GameSessionManager.IDIOM_CHAIN_TOOLS == set()
 
-    assert "人物、物品、动物或地点" in response
-    assert "历史人物的国家" not in response
+    for text in (
+        "玩个游戏",
+        "成语接龙",
+        "你想一个词我来猜",
+        "我已经想了一个词了，请你猜吧",
+        "你说我猜",
+    ):
+        assert manager.get_requested_game_tool(text) is None
 
 
-def test_user_describes_object_clue_continues_in_state_machine():
+def test_enabled_freeform_game_builds_editable_prompt():
+    manager = GameSessionManager()
+    prompt = manager.build_freeform_game_prompt(
+        "我们来玩你说我猜",
+        {
+            "guess_what_i_say": {
+                "custom_plugin": True,
+                "instructions": "用户想好答案后，小智每轮只问一个是/否问题，逐步缩小范围。",
+                "opening_message": "想好了就说一声，我来问。",
+            }
+        },
+    )
+
+    assert prompt is not None
+    assert "guess_what_i_say" in prompt
+    assert "每轮只问一个是/否问题" in prompt
+    assert "不要调用同名工具" in prompt
+
+
+def test_guess_what_i_say_legacy_description_rules_are_corrected_to_questions():
+    manager = GameSessionManager()
+    prompt = manager.build_freeform_game_prompt(
+        "猜物游戏开始",
+        {
+            "guess_what_i_say": {
+                "custom_plugin": True,
+                "instructions": "首轮请用户描述线索，并提醒不要直接说出答案。",
+                "opening_message": "你描述，我来猜。",
+            }
+        },
+    )
+
+    assert prompt is not None
+    assert "二十问/猜物模式" in prompt
+    assert "不要让用户描述第一条线索" in prompt
+    assert "每轮只问一个是/否问题" in prompt
+    assert "玩法规则：首轮请用户描述线索" not in prompt
+    assert "建议开场：你描述" not in prompt
+
+
+def test_explicit_freeform_game_uses_default_prompt_without_enabled_plugin():
+    manager = GameSessionManager()
+    prompt = manager.build_freeform_game_prompt("我们来猜人物t挑战", {})
+
+    assert prompt is not None
+    assert "guess_what_i_say" in prompt
+    assert "二十问/猜物模式" in prompt
+    assert "每轮只问一个是/否问题" in prompt
+    assert "禁止要求用户描述这个人的事迹" in prompt
+    assert "答案是什么" in prompt
+
+
+def test_guess_what_i_say_prompt_keeps_assistant_as_questioner():
+    manager = GameSessionManager()
+    prompt = manager.build_freeform_game_prompt("来你说我猜", {})
+
+    assert prompt is not None
+    assert "不是小智心里默想东西让用户来问" in prompt
+    assert "小智不能自选、暗藏或虚构目标答案" in prompt
+    assert "如果用户反过来问" in prompt
+    assert "不要回答这些问题" in prompt
+    assert "不要说“继续问、接着问、再猜猜”" in prompt
+
+
+def test_assistant_thinks_game_persists_hidden_answer_in_prompt():
+    manager = GameSessionManager()
+    prompt = manager.build_freeform_game_prompt("你想一个词我来猜", {})
+    state = manager.freeform_game_state
+
+    assert prompt is not None
+    assert state["role_mode"] == "assistant_thinks_user_guesses"
+    assert state["target_word"]
+    assert f"固定答案：{state['target_word']}" in prompt
+    assert "不要更换答案" in prompt
+
+    next_prompt = manager.build_freeform_game_prompt("是不是冰箱", {})
+
+    assert f"固定答案：{state['target_word']}" in next_prompt
+    assert manager.freeform_game_state["target_word"] == state["target_word"]
+
+
+def test_user_thinks_game_has_role_state_without_hidden_answer():
+    manager = GameSessionManager()
+    prompt = manager.build_freeform_game_prompt("来你说我猜", {})
+
+    assert prompt is not None
+    assert manager.freeform_game_state["role_mode"] == "user_thinks_assistant_guesses"
+    assert "固定答案：" not in prompt
+    assert "小智不知道答案" in prompt
+
+
+def test_freeform_game_end_clears_state():
+    manager = GameSessionManager()
+    assert manager.build_freeform_game_prompt("你想一个词我来猜", {}) is not None
+
+    assert manager.build_freeform_game_prompt("不玩了", {}) is None
+    assert manager.active_freeform_game is None
+    assert manager.freeform_game_state is None
+
+
+def test_disabled_freeform_game_config_removes_default_prompt():
     manager = GameSessionManager()
 
-    response = manager.handle_user_describes_guess("guess_what_i_say", "这是一个物品")
-    state = manager.sessions["guess_what_i_say"]
-
-    assert state["target_type"] == "object"
-    assert response in {
-        "它是能吃的东西吗？",
-        "它需要用电吗？",
-        "它通常能随身带着吗？",
-        "它经常出现在学习或上学场景里吗？",
-        "它经常出现在厨房或餐桌附近吗？",
-        "它和下雨天有关吗？",
-    }
-
-
-def test_user_describes_object_clue_can_filter_to_guess():
-    manager = GameSessionManager()
-
-    response = manager.handle_user_describes_guess("guess_what_i_say", "它是物品，下雨天用来遮雨")
-
-    assert response == "按这些线索排下来，我猜是雨伞。对吗？"
-
-
-def test_user_describes_clue_after_guess_is_not_treated_as_yes():
-    manager = GameSessionManager()
-    tool_name = _seed_user_describes(manager)
-    state = manager.sessions[tool_name]
-    state["target_type"] = "historical_person"
-    state["last_question"] = {"type": "guess", "name": "秦始皇"}
-
-    manager.handle_user_describes_guess(tool_name, "他是诗人")
-
-    assert not manager.sessions[tool_name].get("solved")
-    assert "秦始皇" not in manager.sessions[tool_name]["excluded_names"]
-    assert manager.sessions[tool_name]["facts"]["poet"] is True
-
-
-@pytest.mark.parametrize(
-    ("message", "key"),
-    [
-        ("不是诗人", "poet"),
-        ("不是皇帝", "ruler"),
-    ],
-)
-def test_user_describes_negative_clues_do_not_become_positive_facts(message, key):
-    manager = GameSessionManager()
-    tool_name = _seed_user_describes(manager)
-
-    manager.handle_user_describes_guess(tool_name, message)
-
-    assert manager.sessions[tool_name]["facts"][key] is False
-
-
-def test_idiom_chain_repeated_idiom_does_not_score_but_normal_chain_still_works():
-    manager = GameSessionManager()
-    tool_name = "idiom_chain"
-    manager.sessions[tool_name] = {
-        "active": True,
-        "game_type": "idiom_chain",
-        "last_idiom": "一心一意",
-        "expected_char": "意",
-        "used": {"一心一意", "意气风发"},
-        "user_correct": 0,
-        "hints_given": 0,
-        "started_at": 0,
-    }
-
-    repeated = manager.handle_idiom_chain(tool_name, "我接意气风发")
-    assert "用过" in repeated or "重复" in repeated or "已经" in repeated
-    assert manager.sessions[tool_name]["user_correct"] == 0
-
-    normal = manager.handle_idiom_chain(tool_name, "意味深长")
-    assert normal.startswith("接得上。")
-    assert manager.sessions[tool_name]["user_correct"] == 1
-
-    end = manager.handle_idiom_chain(tool_name, "结束")
-    assert end == "成语接龙先到这。你刚才接对了1个。"
-    assert tool_name not in manager.sessions
-
-
-def test_idiom_chain_start_is_not_fixed_to_one_opening():
-    manager = GameSessionManager()
-    manager.last_words = [
-        "一心一意",
-        "水到渠成",
-        "心想事成",
-        "万事如意",
-        "海阔天空",
-        "山清水秀",
-        "大显身手",
-        "开门见山",
-    ]
-
-    with patch("core.game_session.random.choice", side_effect=lambda seq: seq[0]):
-        state = manager._start_idiom_chain("idiom_chain")
-        opening = manager._format_idiom_chain_opening(state["last_idiom"])
-
-    assert state["last_idiom"] == "安居乐业"
-    assert opening.startswith(("来一局成语接龙", "这次从", "我先抛一个", "开局成语是"))
-    assert "安居乐业" in opening
+    assert (
+        manager.build_freeform_game_prompt(
+            "我们来玩你说我猜",
+            {
+                "guess_what_i_say": {
+                    "custom_plugin": False,
+                    "instructions": "disabled",
+                }
+            },
+        )
+        is None
+    )
 
 
 def _install_plugin_executor_stubs(monkeypatch):
     register_mod = types.ModuleType("plugins_func.register")
+    register_mod.all_function_registry = {}
 
     class Action:
         RESPONSE = object()
@@ -230,7 +162,6 @@ def _install_plugin_executor_stubs(monkeypatch):
 
     register_mod.Action = Action
     register_mod.ActionResponse = ActionResponse
-    register_mod.all_function_registry = {}
     monkeypatch.setitem(sys.modules, "plugins_func.register", register_mod)
 
     base_mod = types.ModuleType("core.providers.tools.base")
@@ -257,229 +188,29 @@ def _install_plugin_executor_stubs(monkeypatch):
         "core.providers.tools.server_plugins.plugin_executor",
         raising=False,
     )
-    return Action
 
 
-def _install_intent_handler_stubs(monkeypatch):
-    hello_mod = types.ModuleType("core.handle.helloHandle")
-
-    async def checkWakeupWords(conn, text):
-        return False
-
-    hello_mod.checkWakeupWords = checkWakeupWords
-    monkeypatch.setitem(sys.modules, "core.handle.helloHandle", hello_mod)
-
-    send_audio_mod = types.ModuleType("core.handle.sendAudioHandle")
-
-    async def send_stt_message(conn, text):
-        return None
-
-    send_audio_mod.send_stt_message = send_stt_message
-    monkeypatch.setitem(sys.modules, "core.handle.sendAudioHandle", send_audio_mod)
-
-    report_mod = types.ModuleType("core.handle.reportHandle")
-    report_mod.enqueue_tool_report = lambda *args, **kwargs: None
-    monkeypatch.setitem(sys.modules, "core.handle.reportHandle", report_mod)
-
-    util_mod = types.ModuleType("core.utils.util")
-    util_mod.remove_punctuation_and_length = lambda text: (None, text)
-    monkeypatch.setitem(sys.modules, "core.utils.util", util_mod)
-
-    dialogue_mod = types.ModuleType("core.utils.dialogue")
-
-    class Message:
-        def __init__(self, role=None, content=None):
-            self.role = role
-            self.content = content
-
-    dialogue_mod.Message = Message
-    monkeypatch.setitem(sys.modules, "core.utils.dialogue", dialogue_mod)
-
-    tts_mod = types.ModuleType("core.providers.tts.dto.dto")
-
-    class ContentType:
-        ACTION = object()
-        TEXT = object()
-
-    class SentenceType:
-        FIRST = object()
-        LAST = object()
-
-    class TTSMessageDTO:
-        def __init__(self, sentence_id=None, sentence_type=None, content_type=None):
-            self.sentence_id = sentence_id
-            self.sentence_type = sentence_type
-            self.content_type = content_type
-
-    tts_mod.ContentType = ContentType
-    tts_mod.SentenceType = SentenceType
-    tts_mod.TTSMessageDTO = TTSMessageDTO
-    monkeypatch.setitem(sys.modules, "core.providers.tts.dto.dto", tts_mod)
-
-    register_mod = types.ModuleType("plugins_func.register")
-    register_mod.Action = type("Action", (), {})
-    register_mod.ActionResponse = type("ActionResponse", (), {})
-    monkeypatch.setitem(sys.modules, "plugins_func.register", register_mod)
-
-    monkeypatch.delitem(sys.modules, "core.handle.intentHandler", raising=False)
-    return register_mod
-
-
-def test_stateful_game_executor_routes_active_game_tool(monkeypatch):
-    Action = _install_plugin_executor_stubs(monkeypatch)
-
-    from core.providers.tools.server_plugins.plugin_executor import ServerPluginExecutor
-
-    manager = GameSessionManager()
-    tool_name = _seed_guess_my_word(manager)
-    conn = types.SimpleNamespace(
-        config={},
-        game_session_manager=manager,
-    )
-    executor = ServerPluginExecutor(conn)
-
-    response = asyncio.run(
-        executor.execute(conn, tool_name, {"user_message": "是不是冰箱"})
-    )
-
-    assert response.action is Action.RESPONSE
-    assert response.response == "猜对了，就是冰箱。要不要再来一局？"
-
-
-def test_active_game_route_builds_function_call(monkeypatch):
-    _install_intent_handler_stubs(monkeypatch)
-
-    import core.handle.intentHandler as ih
-
-    recorded = {}
-
-    async def fake_process_intent_result(conn, intent_result, original_text):
-        recorded["intent_result"] = intent_result
-        recorded["original_text"] = original_text
-        return True
-
-    monkeypatch.setattr(ih, "process_intent_result", fake_process_intent_result)
-
-    manager = GameSessionManager()
-    tool_name = _seed_guess_my_word(manager)
-    conn = types.SimpleNamespace(
-        cmd_exit=["退出"],
-        game_session_manager=manager,
-        func_handler=types.SimpleNamespace(has_tool=lambda name: True),
-        intent_type="other",
-        intent=None,
-        logger=types.SimpleNamespace(bind=lambda **kwargs: types.SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None, error=lambda *a, **k: None, debug=lambda *a, **k: None)),
-    )
-
-    result = asyncio.run(ih.handle_user_intent(conn, "是不是冰箱"))
-
-    assert result is True
-    assert recorded["original_text"] == "是不是冰箱"
-    intent_data = json.loads(recorded["intent_result"])
-    assert intent_data["function_call"]["name"] == "guess_xiaozhi_word"
-    assert intent_data["function_call"]["arguments"]["user_message"] == "是不是冰箱"
-
-
-def test_generic_game_request_defaults_to_idiom_chain(monkeypatch):
-    _install_intent_handler_stubs(monkeypatch)
-
-    import core.handle.intentHandler as ih
-
-    recorded = {}
-
-    async def fake_process_intent_result(conn, intent_result, original_text):
-        recorded["intent_result"] = json.loads(intent_result)
-        recorded["original_text"] = original_text
-        return True
-
-    monkeypatch.setattr(ih, "process_intent_result", fake_process_intent_result)
-
-    manager = GameSessionManager()
-    conn = types.SimpleNamespace(
-        cmd_exit=["退出"],
-        game_session_manager=manager,
-        func_handler=types.SimpleNamespace(has_tool=lambda name: True),
-        intent_type="other",
-        intent=None,
-        logger=types.SimpleNamespace(bind=lambda **kwargs: types.SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None, error=lambda *a, **k: None, debug=lambda *a, **k: None)),
-    )
-
-    result = asyncio.run(ih.handle_user_intent(conn, "玩个游戏"))
-
-    assert result is True
-    assert recorded["original_text"] == "玩个游戏"
-    assert recorded["intent_result"]["function_call"]["name"] == "idiom_chain"
-    assert recorded["intent_result"]["function_call"]["arguments"]["user_message"] == "玩个游戏"
-
-
-def test_stateful_game_tool_reports_are_skipped(monkeypatch):
-    Action = _install_plugin_executor_stubs(monkeypatch)
-
-    from core.providers.tools.server_plugins.plugin_executor import ServerPluginExecutor
-
-    opus_mod = types.ModuleType("opuslib_next")
-
-    class Decoder:
-        def __init__(self, *args, **kwargs):
-            pass
-
-    opus_mod.Decoder = Decoder
-    opus_mod.OpusError = Exception
-    monkeypatch.setitem(sys.modules, "opuslib_next", opus_mod)
-
-    manage_api_mod = types.ModuleType("config.manage_api_client")
-    manage_api_mod.report = lambda **kwargs: None
-    monkeypatch.setitem(sys.modules, "config.manage_api_client", manage_api_mod)
-    monkeypatch.delitem(sys.modules, "core.handle.reportHandle", raising=False)
-
-    import core.handle.reportHandle as rh
-
-    reported = []
-    monkeypatch.setattr(
-        rh,
-        "manage_report",
-        lambda **kwargs: reported.append(kwargs),
-    )
-
-    manager = GameSessionManager()
-    tool_name = _seed_guess_my_word(manager)
-    conn = types.SimpleNamespace(
-        config={},
-        game_session_manager=manager,
-        read_config_from_api=True,
-        need_bind=False,
-        chat_history_conf=1,
-        report_queue=types.SimpleNamespace(put=lambda *args, **kwargs: reported.append(args)),
-    )
-    executor = ServerPluginExecutor(conn)
-
-    response = asyncio.run(
-        executor.execute(conn, tool_name, {"user_message": "是不是冰箱"})
-    )
-
-    assert response.action is Action.RESPONSE
-    assert response.response == "猜对了，就是冰箱。要不要再来一局？"
-    assert reported == []
-
-
-def test_stateful_game_tool_display_message_is_skipped(monkeypatch):
+def test_freeform_games_are_not_registered_as_tools(monkeypatch):
     _install_plugin_executor_stubs(monkeypatch)
 
-    send_audio_mod = types.ModuleType("core.handle.sendAudioHandle")
-    displayed = []
+    from core.providers.tools.server_plugins.plugin_executor import ServerPluginExecutor
 
-    async def send_display_message(conn, text):
-        displayed.append(text)
-
-    send_audio_mod.send_display_message = send_display_message
-    monkeypatch.setitem(sys.modules, "core.handle.sendAudioHandle", send_audio_mod)
-    monkeypatch.delitem(
-        sys.modules,
-        "core.providers.tools.unified_tool_handler",
-        raising=False,
+    freeform_games = sorted(GameSessionManager.FREEFORM_GAME_TOOLS)
+    conn = types.SimpleNamespace(
+        config={
+            "selected_module": {"Intent": "Intent_test"},
+            "Intent": {"Intent_test": {"functions": freeform_games}},
+            "plugins": {
+                name: {"custom_plugin": True, "description": "legacy game"}
+                for name in freeform_games
+            },
+        },
+        game_session_manager=GameSessionManager(),
     )
 
-    from core.providers.tools.unified_tool_handler import UnifiedToolHandler
+    executor = ServerPluginExecutor(conn)
+    tools = executor.get_tools()
 
-    assert UnifiedToolHandler._should_display_tool_call("guess_what_i_say") is False
-    assert UnifiedToolHandler._should_display_tool_call("get_weather") is True
+    for name in freeform_games:
+        assert name not in tools
+        assert executor.has_tool(name) is False

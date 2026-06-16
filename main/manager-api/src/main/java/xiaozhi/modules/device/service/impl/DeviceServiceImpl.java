@@ -166,12 +166,12 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
     @Override
     public String getDeviceOnlineData(String agentId) {
         // 从系统参数中获取MQTT网关地址
-        String mqttGatewayUrl = sysParamsService.getValue("server.mqtt_manager_api", true);
-        if (StringUtils.isBlank(mqttGatewayUrl) || "null".equals(mqttGatewayUrl)) {
+        String mqttGatewayUrl = getMqttManagerApiBase();
+        if (StringUtils.isBlank(mqttGatewayUrl)) {
             return "";
         }
         // 构建完整的URL
-        String url = StrUtil.format("http://{}/api/devices/status", mqttGatewayUrl);
+        String url = mqttGatewayUrl + "/api/devices/status";
 
         // 获取当前用户的设备列表
         UserDetail user = SecurityUser.getUser();
@@ -190,14 +190,17 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
                 .put("clientIds", deviceIds).build();
 
         if (ToolUtil.isNotEmpty(deviceIds)) {
-            // 发送请求
-            String resultMessage = HttpRequest.post(url)
-                    .header(Header.CONTENT_TYPE, ContentType.JSON.getValue())
-                    .header(Header.AUTHORIZATION, "Bearer " + generateBearerToken())
-                    .body(JSONUtil.toJsonStr(params))
-                    .timeout(10000) // 超时，毫秒
-                    .execute().body();
-            return resultMessage;
+            try {
+                return HttpRequest.post(url)
+                        .header(Header.CONTENT_TYPE, ContentType.JSON.getValue())
+                        .header(Header.AUTHORIZATION, "Bearer " + generateBearerToken())
+                        .body(JSONUtil.toJsonStr(params))
+                        .timeout(10000) // 超时，毫秒
+                        .execute().body();
+            } catch (Exception e) {
+                log.warn("MQTT网关设备在线状态查询失败: {}", url, e);
+                return "";
+            }
         }
         // 返回响应
         return "";
@@ -262,6 +265,8 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         }
 
         response.setWebsocket(websocket);
+        log.info("OTA下发WebSocket: deviceId={}, clientId={}, websocketUrl={}, authEnabled={}, tokenPresent={}",
+                macAddress, clientId, websocket.getUrl(), authEnabled, StringUtils.isNotBlank(websocket.getToken()));
 
         // 添加MQTT UDP配置
         // 从系统参数获取MQTT Gateway地址，仅在配置有效时使用
@@ -274,6 +279,8 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
                 if (mqtt != null) {
                     mqtt.setEndpoint(mqttUdpConfig);
                     response.setMqtt(mqtt);
+                    log.info("OTA下发MQTT: deviceId={}, endpoint={}, clientId={}", macAddress,
+                            mqtt.getEndpoint(), mqtt.getClient_id());
                 }
             } catch (Exception e) {
                 log.error("生成MQTT配置失败: {}", e.getMessage());
@@ -673,7 +680,17 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         if (device == null || !device.getUserId().equals(userId)) {
             throw new RenException(ErrorCode.DEVICE_NOT_EXIST);
         }
-        return getDeviceDebugStatusFromRuntime(device);
+        DeviceDebugStatusDTO runtimeStatus = getDeviceDebugStatusFromRuntime(device);
+        if (Boolean.TRUE.equals(runtimeStatus.getRuntimeConnected())) {
+            return runtimeStatus;
+        }
+
+        if (!hasMqttManagerApiConfigValue()) {
+            return runtimeStatus;
+        }
+
+        DeviceDebugStatusDTO mqttStatus = getDeviceDebugStatusFromMqttGateway(device);
+        return mqttStatus;
     }
 
     /**
@@ -687,7 +704,7 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
             throws Exception {
         // 从环境变量或系统参数获取签名密钥
         String signatureKey = sysParamsService.getValue("server.mqtt_signature_key", true);
-        if (StringUtils.isBlank(signatureKey)) {
+        if (StringUtils.isBlank(signatureKey) || "null".equalsIgnoreCase(signatureKey.trim())) {
             log.warn("缺少MQTT_SIGNATURE_KEY，跳过MQTT配置生成");
             return null;
         }
@@ -855,6 +872,62 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         return "Bearer " + secret;
     }
 
+    private String getMqttManagerApiBase() {
+        String mqttGatewayUrl = sysParamsService.getValue("server.mqtt_manager_api", true);
+        if (StringUtils.isBlank(mqttGatewayUrl) || "null".equalsIgnoreCase(mqttGatewayUrl.trim())) {
+            return null;
+        }
+
+        String trimmedUrl = mqttGatewayUrl.trim();
+        if (StringUtils.startsWithIgnoreCase(trimmedUrl, "ws://")
+                || StringUtils.startsWithIgnoreCase(trimmedUrl, "wss://")) {
+            return null;
+        }
+
+        if (trimmedUrl.contains("://")
+                && !StringUtils.startsWithIgnoreCase(trimmedUrl, "http://")
+                && !StringUtils.startsWithIgnoreCase(trimmedUrl, "https://")) {
+            return null;
+        }
+
+        String baseUrl = StringUtils.startsWithIgnoreCase(trimmedUrl, "http://")
+                || StringUtils.startsWithIgnoreCase(trimmedUrl, "https://")
+                        ? trimmedUrl
+                        : "http://" + trimmedUrl;
+        baseUrl = StringUtils.removeEnd(baseUrl, "/");
+
+        try {
+            URI uri = URI.create(baseUrl);
+            if (StringUtils.isBlank(uri.getScheme()) || StringUtils.isBlank(uri.getHost())) {
+                return null;
+            }
+            if (!"http".equalsIgnoreCase(uri.getScheme()) && !"https".equalsIgnoreCase(uri.getScheme())) {
+                return null;
+            }
+            return baseUrl;
+        } catch (Exception e) {
+            log.warn("解析server.mqtt_manager_api失败: {}", mqttGatewayUrl, e);
+            return null;
+        }
+    }
+
+    private boolean hasMqttManagerApiConfigValue() {
+        String mqttGatewayUrl = sysParamsService.getValue("server.mqtt_manager_api", true);
+        return StringUtils.isNotBlank(mqttGatewayUrl) && !"null".equalsIgnoreCase(mqttGatewayUrl.trim());
+    }
+
+    private String getMqttManagerApiConfigError() {
+        String mqttGatewayUrl = sysParamsService.getValue("server.mqtt_manager_api", true);
+        if (StringUtils.isBlank(mqttGatewayUrl) || "null".equalsIgnoreCase(mqttGatewayUrl.trim())) {
+            return "MQTT网关管理API未配置";
+        }
+        if (StringUtils.startsWithIgnoreCase(mqttGatewayUrl.trim(), "ws://")
+                || StringUtils.startsWithIgnoreCase(mqttGatewayUrl.trim(), "wss://")) {
+            return "server.mqtt_manager_api配置错误：不能填写WebSocket地址，应填写MQTT网关管理API地址，例如 10.19.1.209:8007";
+        }
+        return "server.mqtt_manager_api配置无效：应填写MQTT网关管理API地址，例如 10.19.1.209:8007";
+    }
+
     private List<String> getDeviceRuntimeIdentifiers(DeviceEntity device) {
         List<String> identifiers = new ArrayList<>();
         if (StringUtils.isNotBlank(device.getMacAddress())) {
@@ -905,6 +978,10 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
                         data.set("source", "runtime");
                         data.set("runtimeBase", runtimeBase);
                         data.set("queriedDeviceId", deviceIdentifier);
+                        log.info("运行时设备MCP工具查询命中: deviceId={}, queriedDeviceId={}, runtimeBase={}, status={}, mcpReady={}, toolsCount={}, message={}",
+                                device.getId(), deviceIdentifier, runtimeBase, data.getStr("status", ""),
+                                data.getBool("mcpReady", false), data.getInt("toolsCount", 0),
+                                data.getStr("message", ""));
                     }
                     return data;
                 } catch (Exception e) {
@@ -917,20 +994,8 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         if (StringUtils.isBlank(lastRuntimeMessage)) {
             lastRuntimeMessage = "运行时设备MCP工具查询未返回有效结果";
         }
-        if (StringUtils.isNotBlank(lastRuntimeMessage)) {
-            Map<String, Object> resultData = new HashMap<>();
-            resultData.put("deviceId", deviceIdentifiers.isEmpty() ? device.getId() : deviceIdentifiers.get(0));
-            resultData.put("ready", false);
-            resultData.put("status", resolveRuntimeToolStatus(lastRuntimeMessage));
-            resultData.put("mcpReady", false);
-            resultData.put("runtimeConnected", !"offline".equals(resolveRuntimeToolStatus(lastRuntimeMessage)));
-            resultData.put("toolsCount", 0);
-            resultData.put("source", "runtime");
-            resultData.put("message", lastRuntimeMessage);
-            resultData.put("tools", new ArrayList<>());
-            return resultData;
-        }
-
+        log.info("运行时设备MCP工具查询未命中: deviceId={}, identifiers={}, message={}",
+                device.getId(), deviceIdentifiers, lastRuntimeMessage);
         return null;
     }
 
@@ -986,6 +1051,10 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
                     status.setMessage(data.getStr("message", ""));
                     status.setToolsCount(data.getInt("toolsCount", 0));
                     status.setSource(data.getStr("source", "runtime"));
+                    log.info("运行时设备状态查询命中: deviceId={}, queriedDeviceId={}, runtimeBase={}, clientId={}, runtimeConnected={}, status={}, mcpReady={}, toolsCount={}, message={}",
+                            device.getId(), deviceIdentifier, runtimeBase, status.getClientId(),
+                            status.getRuntimeConnected(), status.getStatus(), status.getMcpReady(),
+                            status.getToolsCount(), status.getMessage());
                     return status;
                 } catch (Exception e) {
                     lastMessage = "运行时状态查询失败: " + e.getMessage();
@@ -997,6 +1066,8 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         if (StringUtils.isNotBlank(lastMessage)) {
             fallback.setMessage(lastMessage);
         }
+        log.info("运行时设备状态查询未命中: deviceId={}, identifiers={}, message={}",
+                device.getId(), getDeviceRuntimeIdentifiers(device), fallback.getMessage());
         return fallback;
     }
 
@@ -1104,13 +1175,23 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
             return runtimeTools;
         }
 
+        if (!hasMqttManagerApiConfigValue()) {
+            return buildRuntimeToolsUnavailableResult(device, "设备未连接到当前运行时");
+        }
+
+        return getDeviceToolsFromMqttGateway(device);
+    }
+
+    private Object getDeviceToolsFromMqttGateway(DeviceEntity device) {
         List<Object> allTools = new ArrayList<>();
-        Map<String, Object> resultData = new HashMap<>();
-        resultData.put("tools", allTools);
+        Map<String, Object> resultData = buildMqttGatewayToolsResult(device, allTools, "设备未通过MQTT网关返回工具列表");
 
         // 从系统参数中获取MQTT网关地址
-        String mqttGatewayUrl = sysParamsService.getValue("server.mqtt_manager_api", true);
-        if (StringUtils.isBlank(mqttGatewayUrl) || "null".equals(mqttGatewayUrl)) {
+        String mqttGatewayUrl = getMqttManagerApiBase();
+        if (StringUtils.isBlank(mqttGatewayUrl)) {
+            resultData.put("message", getMqttManagerApiConfigError());
+            resultData.put("runtimeConnected", false);
+            resultData.put("status", "offline");
             return resultData;
         }
 
@@ -1120,7 +1201,7 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         String clientId = StrUtil.format("{}@@@{}@@@{}", groupId, macAddress, macAddress);
 
         // 构建完整的URL
-        String url = StrUtil.format("http://{}/api/commands/{}", mqttGatewayUrl, clientId);
+        String url = StrUtil.format("{}/api/commands/{}", mqttGatewayUrl, clientId);
 
         String cursor = null;
 
@@ -1151,33 +1232,62 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
                     .build();
 
             // 发送请求
-            String resultMessage = HttpRequest.post(url)
-                    .header(Header.CONTENT_TYPE, ContentType.JSON.getValue())
-                    .header(Header.AUTHORIZATION, "Bearer " + generateBearerToken())
-                    .body(JSONUtil.toJsonStr(requestBody))
-                    .timeout(10000) // 超时，毫秒
-                    .execute().body();
-
-            // 解析响应
-            if (StringUtils.isBlank(resultMessage)) {
+            String resultMessage;
+            try {
+                resultMessage = HttpRequest.post(url)
+                        .header(Header.CONTENT_TYPE, ContentType.JSON.getValue())
+                        .header(Header.AUTHORIZATION, "Bearer " + generateBearerToken())
+                        .body(JSONUtil.toJsonStr(requestBody))
+                        .timeout(10000) // 超时，毫秒
+                        .execute().body();
+            } catch (Exception e) {
+                resultData.put("message", "MQTT网关工具查询失败: " + e.getMessage());
+                resultData.put("runtimeConnected", false);
+                resultData.put("status", "offline");
                 break;
             }
 
-            JSONObject jsonObject = JSONUtil.parseObj(resultMessage);
+            // 解析响应
+            if (StringUtils.isBlank(resultMessage)) {
+                resultData.put("message", "MQTT网关工具查询响应为空");
+                resultData.put("runtimeConnected", false);
+                resultData.put("status", "offline");
+                break;
+            }
+
+            JSONObject jsonObject;
+            try {
+                jsonObject = JSONUtil.parseObj(resultMessage);
+            } catch (Exception e) {
+                resultData.put("message", "MQTT网关工具查询响应格式错误: " + e.getMessage());
+                resultData.put("runtimeConnected", false);
+                resultData.put("status", "offline");
+                break;
+            }
             if (!jsonObject.getBool("success", false)) {
+                resultData.put("message", jsonObject.getStr("message", "MQTT网关工具查询未成功"));
+                resultData.put("runtimeConnected", false);
+                resultData.put("status", "offline");
                 break;
             }
 
             JSONObject data = jsonObject.getJSONObject("data");
             if (data == null) {
+                resultData.put("message", "MQTT网关工具查询缺少data");
+                resultData.put("runtimeConnected", false);
+                resultData.put("status", "offline");
                 break;
             }
+
+            resultData.put("runtimeConnected", true);
+            resultData.put("status", "mcp_initializing");
 
             // 获取当前页的工具列表
             JSONArray tools = data.getJSONArray("tools");
             if (tools != null && !tools.isEmpty()) {
                 allTools.addAll(tools);
             }
+            resultData.put("message", allTools.isEmpty() ? "设备MCP工具列表为空" : "设备MCP已就绪");
 
             // 获取下一页的cursor
             String nextCursor = data.getStr("nextCursor");
@@ -1188,6 +1298,75 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
             cursor = nextCursor;
         }
 
+        boolean connected = Boolean.TRUE.equals(resultData.get("runtimeConnected"));
+        resultData.put("toolsCount", allTools.size());
+        resultData.put("ready", connected && !allTools.isEmpty());
+        resultData.put("mcpReady", connected && !allTools.isEmpty());
+        if (connected) {
+            resultData.put("status", !allTools.isEmpty() ? "mcp_ready" : "mcp_initializing");
+        }
+        return resultData;
+    }
+
+    private DeviceDebugStatusDTO getDeviceDebugStatusFromMqttGateway(DeviceEntity device) {
+        DeviceDebugStatusDTO status = new DeviceDebugStatusDTO();
+        status.setDeviceId(device.getId());
+        status.setRuntimeConnected(false);
+        status.setDebugConnected(false);
+        status.setMcpReady(false);
+        status.setStatus("offline");
+        status.setMessage("MQTT网关未返回设备状态");
+        status.setToolsCount(0);
+        status.setSource("mqtt_gateway");
+
+        Object toolsResult = getDeviceToolsFromMqttGateway(device);
+        if (!(toolsResult instanceof Map)) {
+            return status;
+        }
+
+        Map<?, ?> data = (Map<?, ?>) toolsResult;
+        status.setRuntimeConnected(Boolean.TRUE.equals(data.get("runtimeConnected")));
+        status.setMcpReady(Boolean.TRUE.equals(data.get("mcpReady")));
+        status.setStatus(getMapString(data, "status", "offline"));
+        status.setMessage(getMapString(data, "message", ""));
+        Object toolsCount = data.get("toolsCount");
+        if (toolsCount instanceof Number) {
+            status.setToolsCount(((Number) toolsCount).intValue());
+        }
+        status.setSource(getMapString(data, "source", "mqtt_gateway"));
+        return status;
+    }
+
+    private String getMapString(Map<?, ?> data, String key, String defaultValue) {
+        Object value = data.get(key);
+        return value == null ? defaultValue : String.valueOf(value);
+    }
+
+    private Map<String, Object> buildMqttGatewayToolsResult(DeviceEntity device, List<Object> tools, String message) {
+        Map<String, Object> resultData = new HashMap<>();
+        resultData.put("deviceId", device.getId());
+        resultData.put("runtimeConnected", false);
+        resultData.put("mcpReady", false);
+        resultData.put("ready", false);
+        resultData.put("status", "offline");
+        resultData.put("toolsCount", 0);
+        resultData.put("source", "mqtt_gateway");
+        resultData.put("message", message);
+        resultData.put("tools", tools);
+        return resultData;
+    }
+
+    private Map<String, Object> buildRuntimeToolsUnavailableResult(DeviceEntity device, String message) {
+        Map<String, Object> resultData = new HashMap<>();
+        resultData.put("deviceId", device.getId());
+        resultData.put("runtimeConnected", false);
+        resultData.put("mcpReady", false);
+        resultData.put("ready", false);
+        resultData.put("status", "offline");
+        resultData.put("toolsCount", 0);
+        resultData.put("source", "runtime");
+        resultData.put("message", message);
+        resultData.put("tools", new ArrayList<>());
         return resultData;
     }
 
@@ -1211,8 +1390,8 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         }
 
         // 从系统参数中获取MQTT网关地址
-        String mqttGatewayUrl = sysParamsService.getValue("server.mqtt_manager_api", true);
-        if (StringUtils.isBlank(mqttGatewayUrl) || "null".equals(mqttGatewayUrl)) {
+        String mqttGatewayUrl = getMqttManagerApiBase();
+        if (StringUtils.isBlank(mqttGatewayUrl)) {
             return null;
         }
 
@@ -1222,7 +1401,7 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         String clientId = StrUtil.format("{}@@@{}@@@{}", groupId, macAddress, macAddress);
 
         // 构建完整的URL
-        String url = StrUtil.format("http://{}/api/commands/{}", mqttGatewayUrl, clientId);
+        String url = StrUtil.format("{}/api/commands/{}", mqttGatewayUrl, clientId);
 
         // 构建请求体
         Map<String, Object> params = MapUtil
@@ -1246,16 +1425,28 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
                 .build();
 
         // 发送请求
-        String resultMessage = HttpRequest.post(url)
-                .header(Header.CONTENT_TYPE, ContentType.JSON.getValue())
-                .header(Header.AUTHORIZATION, "Bearer " + generateBearerToken())
-                .body(JSONUtil.toJsonStr(requestBody))
-                .timeout(10000) // 超时，毫秒
-                .execute().body();
+        String resultMessage;
+        try {
+            resultMessage = HttpRequest.post(url)
+                    .header(Header.CONTENT_TYPE, ContentType.JSON.getValue())
+                    .header(Header.AUTHORIZATION, "Bearer " + generateBearerToken())
+                    .body(JSONUtil.toJsonStr(requestBody))
+                    .timeout(10000) // 超时，毫秒
+                    .execute().body();
+        } catch (Exception e) {
+            log.warn("MQTT网关设备MCP工具调用失败: {}", url, e);
+            return null;
+        }
 
         // 解析响应
         if (StringUtils.isNotBlank(resultMessage)) {
-            cn.hutool.json.JSONObject jsonObject = JSONUtil.parseObj(resultMessage);
+            cn.hutool.json.JSONObject jsonObject;
+            try {
+                jsonObject = JSONUtil.parseObj(resultMessage);
+            } catch (Exception e) {
+                log.warn("MQTT网关设备MCP工具调用响应格式错误: {}", StringUtils.abbreviate(resultMessage, 200), e);
+                return null;
+            }
             if (jsonObject.getBool("success", false)) {
                 cn.hutool.json.JSONObject data = jsonObject.getJSONObject("data");
                 if (data != null) {
@@ -1295,12 +1486,12 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         result.put("message", "网关配置缺失");
 
         // 从系统参数获取网关配置
-        String mqttGatewayUrl = sysParamsService.getValue("server.mqtt_manager_api", true);
+        String mqttGatewayUrl = getMqttManagerApiBase();
         String mqttSignatureKey = sysParamsService.getValue("server.mqtt_signature_key", true);
 
-        if (StringUtils.isBlank(mqttGatewayUrl) || "null".equals(mqttGatewayUrl)) {
+        if (StringUtils.isBlank(mqttGatewayUrl)) {
             log.error("MQTT网关地址未配置");
-            result.put("message", "MQTT网关地址未配置");
+            result.put("message", getMqttManagerApiConfigError());
             return result;
         }
         if (StringUtils.isBlank(mqttSignatureKey) || "null".equals(mqttSignatureKey)) {
@@ -1331,7 +1522,7 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
             body.put("caller_nickname", callerNickname);
 
             // 发送请求并获取响应
-            String url = "http://" + mqttGatewayUrl + "/api/call/request";
+            String url = mqttGatewayUrl + "/api/call/request";
             String response = cn.hutool.http.HttpRequest.post(url)
                     .header("Authorization", "Bearer " + token)
                     .header("Content-Type", "application/json")

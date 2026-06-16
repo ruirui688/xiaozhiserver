@@ -47,6 +47,8 @@ plugins:
     provider: metaso
     api_key:
   recommend_drink:
+    drink_menu: []
+    dataset_ids: []
     display_tool_name: self_screen_display_image
     enable_image_display: true
     image_provider: none

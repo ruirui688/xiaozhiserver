@@ -43,6 +43,7 @@ class TTSProviderBase(ABC):
         self.tts_audio_first_sentence = True
         self.before_stop_play_files = []
         self.report_on_last = False
+        self._suppress_report_audio = False
         # sentence_id 到文本的映射，用于流式TTS获取正确的字幕文本
         self._sentence_text_map = {}
         # 加载替换词，用于一次性正则替换
@@ -115,7 +116,13 @@ class TTSProviderBase(ABC):
 
     def handle_opus(self, opus_data: bytes):
         logger.bind(tag=TAG).debug(f"推送数据到队列里面帧数～～ {len(opus_data)}")
-        self.tts_audio_queue.put((SentenceType.MIDDLE, opus_data, None, getattr(self, 'current_sentence_id', None)))
+        self.tts_audio_queue.put((
+            SentenceType.MIDDLE,
+            opus_data,
+            None,
+            getattr(self, 'current_sentence_id', None),
+            self._suppress_report_audio,
+        ))
 
     def handle_audio_file(self, file_audio: bytes, text):
         self.before_stop_play_files.append((file_audio, text))
@@ -392,7 +399,7 @@ class TTSProviderBase(ABC):
                     tts_file = message.content_file
                     if tts_file and os.path.exists(tts_file):
                         self._process_audio_file_stream(
-                            tts_file, callback=self.handle_opus
+                            tts_file, callback=self.handle_opus, suppress_report=True
                         )
                 if message.sentence_type == SentenceType.LAST:
                     self._process_remaining_text_stream(opus_handler=self.handle_opus)
@@ -417,7 +424,10 @@ class TTSProviderBase(ABC):
             try:
                 try:
                     item = self.tts_audio_queue.get(timeout=0.1)
-                    if len(item) == 4:
+                    skip_report_audio = False
+                    if len(item) == 5:
+                        sentence_type, audio_datas, text, sentence_id, skip_report_audio = item
+                    elif len(item) == 4:
                         sentence_type, audio_datas, text, sentence_id = item
                     else:
                         sentence_type, audio_datas, text = item
@@ -451,7 +461,7 @@ class TTSProviderBase(ABC):
                         enqueue_text = text
 
                 # 收集上报音频数据
-                if isinstance(audio_datas, bytes):
+                if isinstance(audio_datas, bytes) and not skip_report_audio:
                     enqueue_audio.append(audio_datas)
 
                 # 发送音频
@@ -520,7 +530,7 @@ class TTSProviderBase(ABC):
             return None
 
     def _process_audio_file_stream(
-        self, tts_file, callback: Callable[[Any], Any]
+        self, tts_file, callback: Callable[[Any], Any], suppress_report: bool = False
     ) -> None:
         """处理音频文件并转换为指定格式
 
@@ -528,12 +538,17 @@ class TTSProviderBase(ABC):
             tts_file: 音频文件路径
             callback: 文件处理函数
         """
-        if tts_file.endswith(".p3"):
-            p3.decode_opus_from_file_stream(tts_file, callback=callback)
-        elif self.conn.audio_format == "pcm":
-            self.audio_to_pcm_data_stream(tts_file, callback=callback)
-        else:
-            self.audio_to_opus_data_stream(tts_file, callback=callback)
+        previous_suppress_report_audio = self._suppress_report_audio
+        self._suppress_report_audio = suppress_report
+        try:
+            if tts_file.endswith(".p3"):
+                p3.decode_opus_from_file_stream(tts_file, callback=callback)
+            elif self.conn.audio_format == "pcm":
+                self.audio_to_pcm_data_stream(tts_file, callback=callback)
+            else:
+                self.audio_to_opus_data_stream(tts_file, callback=callback)
+        finally:
+            self._suppress_report_audio = previous_suppress_report_audio
 
         if (
             self.delete_audio_file

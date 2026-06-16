@@ -20,6 +20,9 @@
               {{ $t('deviceDebug.mcpState') }}{{ mcpStatusText }}
             </el-tag>
           </div>
+          <div v-if="runtimeStatusDetail" class="status-detail">
+            {{ runtimeStatusDetail }}
+          </div>
         </div>
         <div class="side-actions">
           <el-button size="mini" type="primary" :loading="connecting" @click="connectDebug" :disabled="connected">
@@ -235,6 +238,20 @@ export default {
       };
       return statusTypeMap[this.deviceStatusCode] || 'info';
     },
+    runtimeStatusDetail() {
+      if (!this.deviceRuntimeStatus) return '';
+      const parts = [];
+      if (this.deviceRuntimeStatus.message) {
+        parts.push(this.deviceRuntimeStatus.message);
+      }
+      if (this.deviceRuntimeStatus.clientId) {
+        parts.push(`clientId: ${this.deviceRuntimeStatus.clientId}`);
+      }
+      if (this.deviceRuntimeStatus.source) {
+        parts.push(`source: ${this.deviceRuntimeStatus.source}`);
+      }
+      return parts.join(' / ');
+    },
     emptyChatText() {
       return this.connected ? this.$t('deviceDebug.empty') : this.$t('deviceDebug.debugConnectHint');
     },
@@ -327,7 +344,7 @@ export default {
           const tools = data && Array.isArray(data.tools) ? data.tools : [];
           this.mcpTools = tools;
           this.mcpToolsStatus = this.resolveToolsStatus(res, data, tools);
-          this.addEvent(`mcp tools/list -> ${tools.length}`);
+          this.addEvent(`device mcp tools/list -> ${tools.length}`);
           resolve(tools);
         });
       });
@@ -447,7 +464,7 @@ export default {
     handleMcpMessage(payload) {
       if (!payload || !payload.method) return;
       if (payload.method === 'initialize') {
-        this.addEvent('mcp initialize');
+        this.addEvent('debug mcp proxy initialize');
         this.sendJson({
           type: 'mcp',
           payload: {
@@ -461,11 +478,11 @@ export default {
           }
         });
       } else if (payload.method === 'tools/list') {
-        this.addEvent('mcp tools/list requested');
+        this.addEvent('debug mcp proxy tools/list requested');
         this.respondMcpToolsList(payload);
       } else if (payload.method === 'tools/call') {
         const params = payload.params || {};
-        this.addEvent(`mcp tools/call -> ${params.name || ''}`);
+        this.addEvent(`debug mcp proxy tools/call -> ${params.name || ''}`);
         this.forwardToolCall(payload);
       }
     },
@@ -996,6 +1013,14 @@ export default {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.status-detail {
+  margin-top: 8px;
+  color: #606266;
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-all;
 }
 
 .side-actions {

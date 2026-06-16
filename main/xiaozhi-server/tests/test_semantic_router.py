@@ -67,9 +67,15 @@ def test_active_game_exit_does_not_become_connection_exit():
     assert frame.slots["tool"] == "idiom_chain"
 
 
+def test_bar_drink_recommendation_routes_to_drink_tool():
+    frame = SemanticRouter().route(_asr("帮我推荐一杯拍照好看的酒"), _context())
+
+    assert frame.full_name == "bar.recommend_drink"
+    assert frame.slots["preference"] == "帮我推荐一杯拍照好看的酒"
+
+
 def test_unknown_text_falls_back_to_normal_chat():
     frame = SemanticRouter().route(_asr("今天天气怎么样"), _context())
 
     assert frame.full_name == "chat.normal"
     assert frame.source == "fallback"
-

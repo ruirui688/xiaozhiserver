@@ -311,6 +311,13 @@
           </div>
           <div class="test-result-block">
             <div class="test-result-label">{{ $t("modelConfig.testInput") }}</div>
+            <div v-if="currentTestResult.testImageDataUrl" class="test-result-image-wrap">
+              <img
+                class="test-result-image"
+                :src="currentTestResult.testImageDataUrl"
+                alt="test image"
+              />
+            </div>
             <pre>{{ currentTestResult.testInput || "-" }}</pre>
           </div>
           <div class="test-result-block">
@@ -1375,5 +1382,22 @@ export default {
   color: #303133;
   font-size: 13px;
   line-height: 1.6;
+}
+
+.test-result-image-wrap {
+  width: 100%;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  background: #f7f9fc;
+}
+
+.test-result-image {
+  display: block;
+  max-width: 100%;
+  max-height: 300px;
+  margin: 0 auto;
+  object-fit: contain;
 }
 </style>

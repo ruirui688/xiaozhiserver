@@ -2,7 +2,7 @@ import json
 from aiohttp import web
 
 from core.api.base_handler import BaseHandler
-from core.device_runtime_registry import get_connection
+from core.device_runtime_registry import get_connection, registered_keys
 from core.providers.tools.device_mcp.mcp_handler import call_mcp_tool
 from core.utils.util import sanitize_tool_name
 
@@ -48,8 +48,16 @@ class DeviceMcpHandler(BaseHandler):
         if not device_id:
             return self._json_response({"success": False, "message": "缺少deviceId"}, 400)
 
+        self.logger.bind(tag=TAG).info(
+            "查询设备MCP状态: deviceId={}, registeredKeys={}",
+            device_id,
+            sorted(registered_keys()),
+        )
         conn = get_connection(device_id)
         if not conn:
+            self.logger.bind(tag=TAG).info(
+                "设备MCP状态未命中运行时连接: deviceId={}", device_id
+            )
             return self._json_response(
                 {
                     "success": True,
@@ -67,6 +75,11 @@ class DeviceMcpHandler(BaseHandler):
 
         mcp_client = getattr(conn, "mcp_client", None)
         if not mcp_client:
+            self.logger.bind(tag=TAG).info(
+                "设备MCP状态命中连接但未启用MCP: deviceId={}, clientId={}",
+                device_id,
+                conn.headers.get("client-id") if conn.headers else "",
+            )
             return self._json_response(
                 {
                     "success": True,
@@ -89,6 +102,13 @@ class DeviceMcpHandler(BaseHandler):
 
         status = "mcp_ready" if ready else "mcp_initializing"
         message = "设备MCP已就绪" if ready else "设备MCP尚未准备就绪"
+        self.logger.bind(tag=TAG).info(
+            "设备MCP状态命中: deviceId={}, clientId={}, ready={}, toolsCount={}",
+            device_id,
+            conn.headers.get("client-id") if conn.headers else "",
+            ready,
+            tools_count,
+        )
         return self._json_response(
             {
                 "success": True,
@@ -113,11 +133,23 @@ class DeviceMcpHandler(BaseHandler):
         if not device_id:
             return self._json_response({"success": False, "message": "缺少deviceId"}, 400)
 
+        self.logger.bind(tag=TAG).info(
+            "查询设备MCP工具: deviceId={}, registeredKeys={}",
+            device_id,
+            sorted(registered_keys()),
+        )
         conn, mcp_client, error = self._get_ready_mcp_client(device_id)
         if error:
+            self.logger.bind(tag=TAG).info(
+                "查询设备MCP工具失败: deviceId={}, reason={}", device_id, error
+            )
             return self._json_response({"success": False, "message": error})
 
         if not await mcp_client.is_ready():
+            self.logger.bind(tag=TAG).info(
+                "查询设备MCP工具失败: deviceId={}, reason=设备MCP尚未准备就绪",
+                device_id,
+            )
             return self._json_response({"success": False, "message": "设备MCP尚未准备就绪"})
 
         tools = []
@@ -130,6 +162,12 @@ class DeviceMcpHandler(BaseHandler):
                 )
                 tools.append(tool)
 
+        self.logger.bind(tag=TAG).info(
+            "查询设备MCP工具成功: deviceId={}, clientId={}, toolsCount={}",
+            device_id,
+            conn.headers.get("client-id") if conn.headers else "",
+            len(tools),
+        )
         return self._json_response(
             {
                 "success": True,

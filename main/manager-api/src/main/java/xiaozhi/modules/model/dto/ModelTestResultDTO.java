@@ -26,6 +26,9 @@ public class ModelTestResultDTO implements Serializable {
     @Schema(description = "测试输出")
     private String testOutput;
 
+    @Schema(description = "测试图片预览 data URL")
+    private String testImageDataUrl;
+
     @Schema(description = "响应耗时(毫秒)")
     private Long responseTimeMs;
 

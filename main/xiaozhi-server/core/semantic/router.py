@@ -27,6 +27,26 @@ class SemanticRouter:
     CONTINUE = {"继续", "接着", "接着说", "继续说", "往下说", "下一段"}
     GAME_EXIT = {"退出游戏", "结束游戏", "不玩了", "游戏结束"}
     GAME_HINT = {"提示", "给个提示", "我不会", "不会", "换一个"}
+    DRINK_INTENT_TERMS = (
+        "酒",
+        "鸡尾酒",
+        "特调",
+        "微醺",
+        "喝什么",
+        "来一杯",
+    )
+    DRINK_RECOMMEND_TERMS = (
+        "推荐",
+        "介绍",
+        "适合",
+        "好喝",
+        "拍照",
+        "好看",
+        "颜值",
+        "招牌",
+        "特色",
+        "明星款",
+    )
 
     def __init__(self, normalizer: TextNormalizer | None = None):
         self.normalizer = normalizer or TextNormalizer()
@@ -37,6 +57,15 @@ class SemanticRouter:
 
         if key in self.STOP_ALL:
             return IntentFrame("interrupt", "stop_all", 0.99, source="rule")
+
+        if self._is_drink_recommendation(key):
+            return IntentFrame(
+                "bar",
+                "recommend_drink",
+                0.94,
+                {"preference": asr_result.normalized_text},
+                source="bar_rule",
+            )
 
         if context.active_game_tool and key in self.GAME_EXIT:
             return IntentFrame(
@@ -61,6 +90,11 @@ class SemanticRouter:
             return IntentFrame("context", "continue", 0.9, source="rule")
 
         return IntentFrame("chat", "normal", 0.5, {"text": asr_result.normalized_text}, source="fallback")
+
+    def _is_drink_recommendation(self, key: str) -> bool:
+        has_drink_term = any(term in key for term in self.DRINK_INTENT_TERMS)
+        has_recommend_term = any(term in key for term in self.DRINK_RECOMMEND_TERMS)
+        return has_drink_term and has_recommend_term
 
     def _strip_wake_name(self, key: str) -> str:
         for prefix in ("小智", "你好小智", "小智你好"):

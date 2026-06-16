@@ -170,6 +170,7 @@ dmypy.json
 
 # music directory
 /music/
+main/xiaozhi-server/music/.xiaozhi-music-cache/
 
 # pytype static type analyzer
 .pytype/

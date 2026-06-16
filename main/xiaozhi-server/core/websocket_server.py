@@ -109,7 +109,16 @@ class WebSocketServer:
         # 先认证，后建立连接
         try:
             await self._handle_auth(websocket)
-        except AuthenticationError:
+        except AuthenticationError as e:
+            auth_headers = dict(websocket.request.headers)
+            self.logger.bind(tag=TAG).warning(
+                "WebSocket认证失败: device-id={}, client-id={}, path={}, reason={}".format(
+                    auth_headers.get("device-id", ""),
+                    auth_headers.get("client-id", ""),
+                    getattr(websocket.request, "path", ""),
+                    str(e),
+                )
+            )
             await websocket.send("认证失败")
             await websocket.close()
             return
@@ -219,6 +228,9 @@ class WebSocketServer:
                     token = token[7:]  # 移除'Bearer '前缀
                 else:
                     raise AuthenticationError("Missing or invalid Authorization header")
+                self.logger.bind(tag=TAG).info(
+                    f"WebSocket认证校验: device-id={device_id}, client-id={client_id}, tokenPresent={bool(token)}"
+                )
                 # 进行认证
                 auth_success = self.auth.verify_token(
                     token, client_id=client_id, username=device_id

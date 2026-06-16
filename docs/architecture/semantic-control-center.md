@@ -164,14 +164,7 @@ SemanticCenter -> handleAbortMessage()
 
 ### 游戏上下文
 
-已有活跃状态机游戏时，后续用户输入优先回到当前游戏工具：
-
-```text
-active_game_tool = idiom_chain / guess_xiaozhi_word / guess_what_i_say
-用户任意输入
-  -> game.answer
-  -> executor = active_game_tool
-```
+成语接龙、你说我猜、小智想词用户猜等纯语言游戏不再进入语义控制中枢的状态机工具路径。用户输入应继续回到主 LLM 对话链路，由模型自然维护玩法上下文。
 
 用户说：
 

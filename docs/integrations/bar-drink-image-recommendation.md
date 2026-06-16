@@ -104,17 +104,17 @@ plugins:
 
 因此生产环境必须正确配置 `server.vision_explain`，确保硬件端能访问同一域名或局域网地址。
 
-## 当前推荐酒水
+## 当前推荐来源
 
-内置第一版酒水：
+运行时只从以下来源推荐：
 
 ```text
-gin_tonic
-mojito
-old_fashioned
-aperol_spritz
-whiskey_sour
-negroni
+1. recommend_drink.drink_menu 中配置的本店酒单
+2. recommend_drink.dataset_ids 指向的本店酒单知识库
 ```
 
-每个酒水包含推荐话术、外观描述和图片生成 prompt。后续如果要接酒单数据库或库存系统，可以把 `_pick_drink` 替换为查询酒单，并保留 MCP 展示链路。
+没有配置 `drink_menu` 且没有配置酒单专用 `dataset_ids` 时，插件默认复用 `search_from_local_knowledge.dataset_ids`。本项目约定该知识库是本店酒类知识库。
+
+知识库片段必须明确包含 `酒名`、`名称`、`品名`、`酒款` 字段，或 `推荐候选方向`、`候选酒款` 这类候选列表，才会被当作候选酒款。`用户问题`、`适配场景`、`检索字段` 这类说明性片段不会被当成酒名。
+
+如果要给酒类推荐使用单独数据集，可以配置 `recommend_drink.dataset_ids`；否则默认使用 `search_from_local_knowledge.dataset_ids`。

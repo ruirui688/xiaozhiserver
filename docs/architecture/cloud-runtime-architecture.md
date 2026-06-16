@@ -381,5 +381,5 @@ OTA 不只是固件升级，也是设备获取云端连接地址的入口。
 3. 查 UnifiedToolHandler.get_functions() 返回值。
 4. 查 OpenAI 请求的 tools 字段。
 5. 如果是 intent_llm，查 get_intent_system_prompt() 展开的函数说明。
-6. 如果是状态机游戏，查 GameSessionManager，而不是后台大段 prompt。
+6. 如果是成语接龙、你说我猜、小智想词用户猜等纯语言游戏，确认它们没有进入 tools 列表；这些玩法应由主 LLM 处理，并只从当前智能体已启用的功能插件读取可编辑软规则。
 ```

@@ -2,8 +2,8 @@ package xiaozhi.modules.music.service.impl;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.net.URLEncoder;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -13,6 +13,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 import org.apache.commons.lang3.StringUtils;
@@ -23,15 +24,32 @@ import org.springframework.web.multipart.MultipartFile;
 import xiaozhi.modules.music.dto.MusicFileDTO;
 import xiaozhi.modules.music.dto.MusicLibraryDTO;
 import xiaozhi.modules.music.service.MusicLibraryService;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Service
 public class MusicLibraryServiceImpl implements MusicLibraryService {
     private static final Set<String> ALLOWED_EXTENSIONS = Set.of(".mp3", ".wav", ".p3");
+    private static final Set<String> OPTIMIZABLE_EXTENSIONS = Set.of(".mp3", ".wav");
+    private static final String CACHE_DIR_NAME = ".xiaozhi-music-cache";
+    private static final String OPTIMIZED_EXTENSION = ".p3";
+    private static final long OPTIMIZE_TIMEOUT_MINUTES = 5;
 
     private final Path musicRoot;
+    private final Path musicCacheRoot;
+    private final boolean optimizeEnabled;
+    private final int optimizedSampleRate;
+    private final int optimizedBitrate;
 
-    public MusicLibraryServiceImpl(@Value("${xiaozhi.music.dir:}") String configuredMusicDir) {
+    public MusicLibraryServiceImpl(@Value("${xiaozhi.music.dir:}") String configuredMusicDir,
+                                   @Value("${xiaozhi.music.optimize.enabled:true}") boolean optimizeEnabled,
+                                   @Value("${xiaozhi.music.optimize.sample-rate:24000}") int optimizedSampleRate,
+                                   @Value("${xiaozhi.music.optimize.bitrate:48000}") int optimizedBitrate) {
         this.musicRoot = resolveMusicRoot(configuredMusicDir);
+        this.musicCacheRoot = this.musicRoot.resolve(CACHE_DIR_NAME).normalize();
+        this.optimizeEnabled = optimizeEnabled;
+        this.optimizedSampleRate = optimizedSampleRate;
+        this.optimizedBitrate = optimizedBitrate;
     }
 
     @Override
@@ -42,7 +60,7 @@ public class MusicLibraryServiceImpl implements MusicLibraryService {
         List<MusicFileDTO> files = new ArrayList<>();
         try (Stream<Path> paths = Files.walk(musicRoot)) {
             paths.filter(Files::isRegularFile)
-                    .filter(this::isAllowedAudioFile)
+                    .filter(this::isVisibleAudioFile)
                     .map(this::toDTO)
                     .filter(item -> StringUtils.isBlank(normalizedKeyword)
                             || item.getName().toLowerCase(Locale.ROOT).contains(normalizedKeyword)
@@ -82,6 +100,7 @@ public class MusicLibraryServiceImpl implements MusicLibraryService {
             try (InputStream inputStream = file.getInputStream()) {
                 Files.copy(inputStream, target, StandardCopyOption.REPLACE_EXISTING);
             }
+            prepareOptimizedAudio(target);
             savedFiles.add(toDTO(target));
         }
 
@@ -100,6 +119,10 @@ public class MusicLibraryServiceImpl implements MusicLibraryService {
             extension = getExtension(source.getFileName().toString());
             cleanName = cleanName + extension;
         }
+        String sourceExtension = getExtension(source.getFileName().toString());
+        if (!sourceExtension.equals(extension)) {
+            throw new IllegalArgumentException("重命名不能修改音频格式");
+        }
         if (!ALLOWED_EXTENSIONS.contains(extension)) {
             throw new IllegalArgumentException("只允许使用 mp3、wav、p3 格式的音频文件名");
         }
@@ -116,7 +139,9 @@ public class MusicLibraryServiceImpl implements MusicLibraryService {
             throw new IllegalArgumentException("同名音乐文件已存在");
         }
 
+        Path sourceOptimized = optimizedPathFor(source);
         Files.move(source, target);
+        moveOptimizedAudio(sourceOptimized, optimizedPathFor(target));
         return toDTO(target);
     }
 
@@ -124,6 +149,7 @@ public class MusicLibraryServiceImpl implements MusicLibraryService {
     public void delete(String path) throws IOException {
         Path target = resolveExistingFile(path);
         Files.delete(target);
+        deleteOptimizedAudio(target);
     }
 
     @Override
@@ -177,6 +203,150 @@ public class MusicLibraryServiceImpl implements MusicLibraryService {
 
     private boolean isAllowedAudioFile(Path path) {
         return ALLOWED_EXTENSIONS.contains(getExtension(path.getFileName().toString()));
+    }
+
+    private boolean isVisibleAudioFile(Path path) {
+        return isAllowedAudioFile(path) && !path.normalize().startsWith(musicCacheRoot);
+    }
+
+    private void prepareOptimizedAudio(Path source) {
+        if (!optimizeEnabled || !isOptimizableAudioFile(source)) {
+            return;
+        }
+
+        Path optimizedPath = optimizedPathFor(source);
+        try {
+            if (Files.exists(optimizedPath)
+                    && Files.getLastModifiedTime(optimizedPath).toMillis() >= Files.getLastModifiedTime(source).toMillis()) {
+                return;
+            }
+            Files.createDirectories(optimizedPath.getParent());
+            runOptimizeCommand(source, optimizedPath);
+        } catch (Exception e) {
+            log.warn("生成音乐低延时缓存失败，将播放原始音频：source={}, target={}, error={}",
+                    source, optimizedPath, e.getMessage());
+            try {
+                Files.deleteIfExists(optimizedPath);
+            } catch (IOException deleteError) {
+                log.warn("删除失败的音乐缓存失败：{}", optimizedPath, deleteError);
+            }
+        }
+    }
+
+    private void runOptimizeCommand(Path source, Path optimizedPath) throws IOException, InterruptedException {
+        Path script = resolveEncoderScript();
+        List<List<String>> pythonCommands = resolvePythonCommands();
+        IOException lastIoException = null;
+        InterruptedException lastInterruptedException = null;
+        String lastOutput = "";
+
+        for (List<String> pythonCommand : pythonCommands) {
+            List<String> command = new ArrayList<>(pythonCommand);
+            command.add(script.toString());
+            command.add(source.toString());
+            command.add(optimizedPath.toString());
+            command.add("--sample-rate");
+            command.add(String.valueOf(optimizedSampleRate));
+            command.add("--bitrate");
+            command.add(String.valueOf(optimizedBitrate));
+
+            ProcessBuilder builder = new ProcessBuilder(command);
+            builder.redirectErrorStream(true);
+            try {
+                Process process = builder.start();
+                boolean finished = process.waitFor(OPTIMIZE_TIMEOUT_MINUTES, TimeUnit.MINUTES);
+                String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+                if (!finished) {
+                    process.destroyForcibly();
+                    lastOutput = "转换超时";
+                    continue;
+                }
+                if (process.exitValue() == 0 && Files.isRegularFile(optimizedPath)) {
+                    log.info("音乐低延时缓存生成成功：{} -> {}", source, optimizedPath);
+                    return;
+                }
+                lastOutput = StringUtils.defaultIfBlank(output, "exit=" + process.exitValue());
+            } catch (IOException e) {
+                lastIoException = e;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                lastInterruptedException = e;
+                break;
+            }
+        }
+
+        if (lastInterruptedException != null) {
+            throw lastInterruptedException;
+        }
+        if (lastIoException != null && StringUtils.isBlank(lastOutput)) {
+            throw lastIoException;
+        }
+        throw new IOException("转换命令执行失败：" + lastOutput);
+    }
+
+    private List<List<String>> resolvePythonCommands() {
+        List<List<String>> commands = new ArrayList<>();
+
+        String configuredPython = StringUtils.firstNonBlank(
+                System.getProperty("xiaozhi.music.encoder.python"),
+                System.getenv("XIAOZHI_MUSIC_ENCODER_PYTHON"));
+        if (StringUtils.isNotBlank(configuredPython)) {
+            commands.add(List.of(configuredPython));
+        }
+
+        String condaPrefix = System.getenv("CONDA_PREFIX");
+        if (StringUtils.isNotBlank(condaPrefix)) {
+            commands.add(List.of(Paths.get(condaPrefix, "bin", "python").toString()));
+        }
+
+        String home = System.getProperty("user.home");
+        if (StringUtils.isNotBlank(home)) {
+            commands.add(List.of(Paths.get(home, "miniconda3", "envs", "xiaozhi-esp32-server", "bin", "python").toString()));
+        }
+
+        commands.add(List.of("conda", "run", "-n", "xiaozhi-esp32-server", "python"));
+        commands.add(List.of("python3"));
+        commands.add(List.of("python"));
+        return commands;
+    }
+
+    private Path resolveEncoderScript() {
+        Path cwd = Paths.get("").toAbsolutePath().normalize();
+        List<Path> candidates = List.of(
+                cwd.resolve("../xiaozhi-server/scripts/audio_to_p3.py").normalize(),
+                cwd.resolve("main/xiaozhi-server/scripts/audio_to_p3.py").normalize(),
+                cwd.resolve("xiaozhi-server/scripts/audio_to_p3.py").normalize(),
+                musicRoot.getParent() == null ? cwd.resolve("scripts/audio_to_p3.py").normalize()
+                        : musicRoot.getParent().resolve("scripts/audio_to_p3.py").normalize());
+        for (Path candidate : candidates) {
+            if (Files.isRegularFile(candidate)) {
+                return candidate;
+            }
+        }
+        throw new IllegalStateException("未找到音乐转换脚本 audio_to_p3.py");
+    }
+
+    private boolean isOptimizableAudioFile(Path path) {
+        return OPTIMIZABLE_EXTENSIONS.contains(getExtension(path.getFileName().toString()))
+                && !path.normalize().startsWith(musicCacheRoot);
+    }
+
+    private Path optimizedPathFor(Path source) {
+        Path relativePath = musicRoot.relativize(source.normalize());
+        return musicCacheRoot.resolve(relativePath.toString().replace('\\', '/') + OPTIMIZED_EXTENSION).normalize();
+    }
+
+    private void moveOptimizedAudio(Path sourceOptimized, Path targetOptimized) throws IOException {
+        if (sourceOptimized == null || targetOptimized == null || !Files.exists(sourceOptimized)) {
+            return;
+        }
+        Files.createDirectories(targetOptimized.getParent());
+        Files.move(sourceOptimized, targetOptimized);
+    }
+
+    private void deleteOptimizedAudio(Path source) throws IOException {
+        Path optimizedPath = optimizedPathFor(source);
+        Files.deleteIfExists(optimizedPath);
     }
 
     private Path uniqueTargetPath(String filename) {

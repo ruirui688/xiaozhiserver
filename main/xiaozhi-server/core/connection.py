@@ -355,6 +355,14 @@ class ConnectionHandler:
         """消息路由"""
         self.last_activity_time = time.time() * 1000
 
+        if (
+            isinstance(message, str)
+            and not self.bind_completed_event.is_set()
+            and self._should_handle_before_bind_check(message)
+        ):
+            await handleTextMessage(self, message)
+            return
+
         # 检查是否已经获取到真实的绑定状态
         if not self.bind_completed_event.is_set():
             # 还没有获取到真实状态，等待直到获取到真实状态或超时
@@ -423,6 +431,18 @@ class ConnectionHandler:
 
         # 处理失败，返回False表示需要继续处理
         return False
+
+    def _should_handle_before_bind_check(self, message: str) -> bool:
+        """连接协议消息不能被绑定状态初始化阻塞。"""
+        try:
+            msg_json = json.loads(message)
+        except json.JSONDecodeError:
+            return False
+
+        if not isinstance(msg_json, dict):
+            return False
+
+        return msg_json.get("type") in {"hello", "mcp", "ping"}
 
     def _process_websocket_audio(self, audio_data, timestamp):
         """处理WebSocket格式的音频包"""
@@ -948,6 +968,7 @@ class ConnectionHandler:
         current_abort_generation = self.abort_generation
         # 保存当前任务的sentence_id到局部变量，避免被新任务覆盖
         current_sentence_id = None
+        freeform_game_prompt = None
 
         if query is not None:
             self.logger.bind(tag=TAG).info(f"大模型收到用户消息: {query}")
@@ -957,6 +978,12 @@ class ConnectionHandler:
             current_sentence_id = str(uuid.uuid4().hex)
             self.sentence_id = current_sentence_id  # 更新共享属性
             self.dialogue.put(Message(role="user", content=query))
+            freeform_game_prompt = self.game_session_manager.build_freeform_game_prompt(
+                query,
+                self._get_enabled_plugin_configs(),
+            )
+            if freeform_game_prompt:
+                self.logger.bind(tag=TAG).info("已注入纯语言游戏提示词")
             self.tts.tts_text_queue.put(
                 TTSMessageDTO(
                     sentence_id=current_sentence_id,
@@ -1012,21 +1039,24 @@ class ConnectionHandler:
                 )
                 memory_str = future.result()
 
+            llm_dialogue = self.dialogue.get_llm_dialogue_with_memory(
+                memory_str, self.config.get("voiceprint", {})
+            )
+            llm_dialogue = self._with_freeform_game_prompt(
+                llm_dialogue, freeform_game_prompt
+            )
+
             if self.intent_type == "function_call" and functions is not None:
                 # 使用支持functions的streaming接口
                 llm_responses = self.llm.response_with_functions(
                     self.session_id,
-                    self.dialogue.get_llm_dialogue_with_memory(
-                        memory_str, self.config.get("voiceprint", {})
-                    ),
+                    llm_dialogue,
                     functions=functions,
                 )
             else:
                 llm_responses = self.llm.response(
                     self.session_id,
-                    self.dialogue.get_llm_dialogue_with_memory(
-                        memory_str, self.config.get("voiceprint", {})
-                    ),
+                    llm_dialogue,
                 )
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"LLM 处理出错 {query}: {e}")
@@ -1364,6 +1394,43 @@ class ConnectionHandler:
             )
 
         return True
+
+    @staticmethod
+    def _with_freeform_game_prompt(llm_dialogue, prompt):
+        if not prompt:
+            return llm_dialogue
+        messages = list(llm_dialogue)
+        insert_at = len(messages)
+        for index in range(len(messages) - 1, -1, -1):
+            if messages[index].get("role") == "user":
+                insert_at = index
+                break
+        messages.insert(insert_at, {"role": "system", "content": prompt})
+        return messages
+
+    def _get_enabled_plugin_configs(self):
+        plugins = self.config.get("plugins", {})
+        if not isinstance(plugins, dict):
+            return {}
+
+        intent_name = self.config.get("selected_module", {}).get("Intent")
+        intent_config = self.config.get("Intent", {}).get(intent_name, {})
+        function_names = intent_config.get("functions", [])
+        if isinstance(function_names, dict):
+            enabled_names = set(function_names.keys())
+        elif isinstance(function_names, str):
+            enabled_names = {name for name in function_names.split(";") if name}
+        else:
+            try:
+                enabled_names = set(function_names)
+            except TypeError:
+                enabled_names = set()
+
+        return {
+            name: plugin_config
+            for name, plugin_config in plugins.items()
+            if name in enabled_names
+        }
 
     def _handle_function_result(
         self,

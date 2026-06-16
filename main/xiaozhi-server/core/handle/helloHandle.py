@@ -53,10 +53,13 @@ async def handleHelloMessage(conn: "ConnectionHandler", msg_json):
         conn.welcome_msg["audio_params"] = audio_params
     features = msg_json.get("features")
     if features:
-        conn.logger.bind(tag=TAG).debug(f"客户端特性: {features}")
+        conn.logger.bind(tag=TAG).info(
+            f"收到hello特性: device-id={conn.headers.get('device-id') if conn.headers else ''}, "
+            f"client-id={conn.headers.get('client-id') if conn.headers else ''}, features={features}"
+        )
         conn.features = features
         if features.get("mcp"):
-            conn.logger.bind(tag=TAG).debug("客户端支持MCP")
+            conn.logger.bind(tag=TAG).info("客户端声明支持MCP，创建MCPClient并启动初始化")
             conn.mcp_client = MCPClient()
             # 发送初始化
             asyncio.create_task(send_mcp_initialize_message(conn))

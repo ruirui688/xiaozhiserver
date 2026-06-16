@@ -12,13 +12,131 @@ class GameSessionManager:
     an active voice game without persisting hidden answers beyond the session.
     """
 
-    GUESS_MY_WORD_TOOLS = {
+    FREEFORM_GAME_TOOLS = {
         "xiaozhi_thinks_you_guess",
         "guess_xiaozhi_word",
         "i_think_you_guess",
+        "guess_what_i_say",
+        "idiom_chain",
     }
-    USER_DESCRIBES_TOOLS = {"guess_what_i_say"}
-    IDIOM_CHAIN_TOOLS = {"idiom_chain"}
+    ASSISTANT_THINKS_GAMES = {
+        "xiaozhi_thinks_you_guess",
+        "guess_xiaozhi_word",
+    }
+    USER_THINKS_GAMES = {
+        "guess_what_i_say",
+        "i_think_you_guess",
+    }
+    FREEFORM_GAME_ALIASES = {
+        "idiom_chain": (
+            "成语接龙",
+            "成語接龍",
+        ),
+        "guess_what_i_say": (
+            "你说我猜",
+            "我说你猜",
+            "猜人物挑战",
+            "猜人物",
+            "人物挑战",
+            "猜人游戏",
+            "猜人",
+            "猜物游戏",
+            "猜物",
+            "我描述你猜",
+            "我描述你来猜",
+            "我想好了你猜",
+            "我想好了你来猜",
+            "我想好你猜",
+            "我已经想好了你猜",
+            "我已经想好了你来猜",
+            "猜词",
+            "猜个词",
+        ),
+        "xiaozhi_thinks_you_guess": (
+            "你想我猜",
+            "你想一个词我来猜",
+            "你出题我猜",
+            "我来猜你想的词",
+            "我猜你想的词",
+        ),
+        "guess_xiaozhi_word": (
+            "你想一个词我来猜",
+            "你出题我猜",
+            "我来猜你想的词",
+            "我猜你想的词",
+        ),
+        "i_think_you_guess": (
+            "我想你猜",
+            "我想一个词你来猜",
+            "我出题你猜",
+        ),
+    }
+    # 这些互动游戏交给主 LLM 自由对话，不再用服务端状态机接管。
+    GUESS_MY_WORD_TOOLS = set()
+    USER_DESCRIBES_TOOLS = set()
+    IDIOM_CHAIN_TOOLS = set()
+    GUESS_WHAT_I_SAY_QUESTIONS_RULES = (
+        "【你说我猜纠偏规则】这个玩法采用二十问/猜物模式：用户心里想一个答案，小智负责主动提问并最终猜出答案。"
+        "角色绝不能反：不是小智心里默想东西让用户来问；小智不能自选、暗藏或虚构目标答案。"
+        "用户说“想好了”“开始”“来”后，不要让用户描述第一条线索，不要问答案是什么；你要直接问第一个可用“对/不是/不确定”回答的区分性问题。"
+        "如果用户反过来问“是吃的吗、是人物吗、哪个朝代”等排查问题，不要回答这些问题；"
+        "要简短纠正“这局是我问你答”，然后立刻改由小智提出一个是/否问题。"
+        "每轮只问一个是/否问题，优先从大类、是否人造、是否用电、尺寸、使用场景、主要功能等维度缩小范围；"
+        "如果是猜人物，也只能问“是否真实人物、是否中国人、是否现代、是否主要从事政治/影视/体育/文化”等是/否问题，"
+        "禁止要求用户描述这个人的事迹、经历、特征或关键线索。"
+        "用户回答“对/不是/不确定”后，要先吸收这个事实，再继续问下一个问题。"
+        "线索足够时再明确猜一个答案；猜错后根据否定反馈继续缩小范围。"
+        "回答要短，通常只输出一个问题；不要说“继续问、接着问、再猜猜”这类让用户提问的话。"
+        "用户说不玩了、结束、退出时，简短结束，不要继续追问。"
+    )
+    DEFAULT_FREEFORM_GAME_CONFIGS = {
+        "guess_what_i_say": {
+            "custom_plugin": True,
+            "instructions": (
+                "你是二十问式猜词游戏玩家。用户心里想一个答案，小智主动通过连续提问缩小范围，最后猜出答案。"
+                "小智绝不能自己心里默想答案，也不能让用户来问小智。"
+                "用户刚开始游戏时，让用户先在心里想一个物品、人物、动物、地点、虚拟角色或常见概念，不要说出答案；"
+                "用户说“想好了”“开始”“来”或直接回答一个范围后，直接问第一个是/否问题。"
+                "每轮只问一个能用“对、不是、不确定”回答的问题；不要同时抛多个问题；"
+                "不要让用户描述第一句提示；禁止问“答案是什么”“你心里想的是什么”“目标词是什么”。"
+                "如果用户反过来问问题，不要替隐藏答案回答，只纠正玩法并继续由小智提问。"
+                "用户回答后要吸收事实再问下一个区分性问题；线索足够时再明确猜一个答案。"
+            ),
+            "opening_message": "你先在心里想一个答案，不用告诉我。想好了我来问问题猜。",
+        },
+        "idiom_chain": {
+            "custom_plugin": True,
+            "instructions": (
+                "你是成语接龙主持人。每轮只处理一个成语；用户成语的第一个字应接上上一轮成语的最后一个字；"
+                "答对后立刻给出你的下一个常见成语；用户接不上时只给一个提示。"
+            ),
+            "opening_message": "来玩成语接龙。我先出一个常见的，你接最后一个字。",
+        },
+        "xiaozhi_thinks_you_guess": {
+            "custom_plugin": True,
+            "instructions": (
+                "你先在心里选定一个常见词，用户根据提示来猜。每局围绕同一个答案推进；"
+                "用户猜错时给一个新提示，用户猜对后揭晓并询问是否再来一局。"
+            ),
+            "opening_message": "我想好了，是一个常见词。第一个提示来了，你来猜。",
+        },
+        "guess_xiaozhi_word": {
+            "custom_plugin": True,
+            "instructions": (
+                "你先在心里选定一个常见词，用户根据提示来猜。每局围绕同一个答案推进；"
+                "用户猜错时给一个新提示，用户猜对后揭晓并询问是否再来一局。"
+            ),
+            "opening_message": "我想好了，是一个常见词。第一个提示来了，你来猜。",
+        },
+        "i_think_you_guess": {
+            "custom_plugin": True,
+            "instructions": (
+                "用户先在心里选定一个答案，小智通过连续提问缩小范围，最后猜出答案。"
+                "每轮只问一个能用“对、不是、不确定”回答的问题；不要让用户直接描述线索或说出答案。"
+            ),
+            "opening_message": "你先在心里想一个答案，不用告诉我。想好了我来问问题猜。",
+        },
+    }
 
     _HISTORICAL_PEOPLE = [
         {"name": "秦始皇", "region": "china", "period": "ancient", "era": "秦汉", "ruler": True, "military": True, "culture": False, "poet": False, "founder": True, "reformer": True},
@@ -231,6 +349,8 @@ class GameSessionManager:
     def __init__(self):
         self.sessions = {}
         self.last_words = []
+        self.active_freeform_game = None
+        self.freeform_game_state = None
 
     def is_guess_my_word_tool(self, tool_name):
         return tool_name in self.GUESS_MY_WORD_TOOLS
@@ -252,41 +372,240 @@ class GameSessionManager:
 
     def clear_active_games(self):
         self.sessions.clear()
+        self.active_freeform_game = None
+        self.freeform_game_state = None
 
     def get_requested_game_tool(self, user_message):
-        normalized = self._normalize(user_message)
-        if not normalized:
-            return None
-        if self._contains_any(
-            normalized,
-            (
-                "玩个游戏",
-                "玩一个游戏",
-                "来个游戏",
-                "来一个游戏",
-                "小游戏",
-            ),
-        ):
-            return "idiom_chain"
-        if self._contains_any(normalized, ("成语接龙", "接成语")):
-            return "idiom_chain"
-        if self._contains_any(
-            normalized,
-            (
-                "你想一个词我猜",
-                "你想一个词我来猜",
-                "你出题我猜",
-                "我来猜你想的词",
-                "小智想词",
-            ),
-        ):
-            return "xiaozhi_thinks_you_guess"
-        if self._contains_any(
-            normalized,
-            ("你说我猜", "我描述你猜", "我描述你来猜", "猜个词", "猜词"),
-        ):
-            return "guess_what_i_say"
         return None
+
+    def build_freeform_game_prompt(self, user_message, enabled_plugins):
+        """Return editable soft rules for explicit language games."""
+        plugin_configs = self._merge_freeform_game_configs(enabled_plugins)
+        plugin_name = self._match_enabled_freeform_game(user_message, plugin_configs)
+        if not plugin_name:
+            return None
+
+        plugin_config = plugin_configs.get(plugin_name, {})
+        if not isinstance(plugin_config, dict):
+            return None
+        instructions = self._config_text(
+            plugin_config.get("instructions") or plugin_config.get("description")
+        )
+        opening_message = self._config_text(plugin_config.get("opening_message"))
+
+        if not instructions and not opening_message:
+            return None
+
+        parts = [
+            f"<freeform_game name=\"{plugin_name}\">",
+            "当前用户正在玩这个功能插件对应的纯语言游戏。你必须在主对话里自然主持游戏，不要调用同名工具，不要要求用户去点屏幕按钮。",
+        ]
+        legacy_guess_what_i_say = self._is_legacy_guess_what_i_say_mode(
+            plugin_name, instructions
+        )
+        mode_rules = self._freeform_game_mode_rules(
+            plugin_name, legacy_guess_what_i_say
+        )
+        if mode_rules:
+            parts.append(mode_rules)
+        if instructions and not legacy_guess_what_i_say:
+            parts.append(f"玩法规则：{instructions}")
+        elif legacy_guess_what_i_say:
+            parts.append(
+                "后台当前保存的是旧版“用户描述线索”规则，本轮已按二十问/猜物模式覆盖执行；"
+                "如需自定义，请在功能插件中把玩法规则改成二十问流程。"
+            )
+        if opening_message and not legacy_guess_what_i_say:
+            parts.append(f"建议开场：{opening_message}")
+        state_context = self._freeform_game_state_prompt(plugin_name)
+        if state_context:
+            parts.append(state_context)
+        parts.append("如果用户明确说不玩了、退出游戏、换个话题或换游戏，就自然结束当前游戏。")
+        parts.append("</freeform_game>")
+        return "\n".join(parts)
+
+    @classmethod
+    def _freeform_game_mode_rules(cls, plugin_name, legacy_guess_what_i_say=False):
+        if plugin_name == "guess_what_i_say":
+            return cls.GUESS_WHAT_I_SAY_QUESTIONS_RULES
+        return ""
+
+    @classmethod
+    def _is_legacy_guess_what_i_say_mode(cls, plugin_name, instructions):
+        if plugin_name != "guess_what_i_say":
+            return False
+        normalized = cls._normalize(instructions)
+        return (
+            "描述线索" in normalized
+            or "用户描述" in normalized
+            or "你描述" in normalized
+            or "第一条线索" in normalized
+        )
+
+    def _match_enabled_freeform_game(self, user_message, enabled_plugins):
+        if not isinstance(enabled_plugins, dict) or not enabled_plugins:
+            self.active_freeform_game = None
+            return None
+
+        enabled_games = {
+            name
+            for name in enabled_plugins
+            if name in self.FREEFORM_GAME_TOOLS and self._is_enabled_game_config(enabled_plugins.get(name))
+        }
+        if not enabled_games:
+            self.active_freeform_game = None
+            return None
+
+        normalized = self._normalize(user_message)
+        if self._is_end_message(normalized):
+            self.active_freeform_game = None
+            self.freeform_game_state = None
+            return None
+
+        for game_name in enabled_games:
+            aliases = self.FREEFORM_GAME_ALIASES.get(game_name, ())
+            if self._contains_freeform_game_alias(normalized, aliases):
+                self.active_freeform_game = game_name
+                self._ensure_freeform_game_state(game_name, normalized)
+                return game_name
+
+        if self.active_freeform_game in enabled_games:
+            self._ensure_freeform_game_state(self.active_freeform_game, normalized)
+            return self.active_freeform_game
+
+        return None
+
+    @classmethod
+    def _merge_freeform_game_configs(cls, enabled_plugins):
+        merged = dict(cls.DEFAULT_FREEFORM_GAME_CONFIGS)
+        if not isinstance(enabled_plugins, dict):
+            return merged
+        for name, plugin_config in enabled_plugins.items():
+            if name not in cls.FREEFORM_GAME_TOOLS:
+                continue
+            if not isinstance(plugin_config, dict):
+                continue
+            if isinstance(plugin_config, dict) and not cls._is_enabled_game_config(plugin_config):
+                merged.pop(name, None)
+                continue
+            merged[name] = plugin_config
+        return merged
+
+    @staticmethod
+    def _is_enabled_game_config(plugin_config):
+        if not isinstance(plugin_config, dict):
+            return False
+        custom_flag = plugin_config.get("custom_plugin", True)
+        if isinstance(custom_flag, bool):
+            return custom_flag
+        return str(custom_flag).lower() != "false"
+
+    @staticmethod
+    def _config_text(value):
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value.strip()
+        return str(value).strip()
+
+    def _ensure_freeform_game_state(self, plugin_name, normalized_message):
+        if (
+            self.freeform_game_state
+            and self.freeform_game_state.get("game") == plugin_name
+            and not self._is_restart_message(normalized_message)
+        ):
+            self.freeform_game_state["turn_count"] += 1
+            return self.freeform_game_state
+
+        if plugin_name in self.ASSISTANT_THINKS_GAMES:
+            target = self._select_freeform_target_word()
+            state = {
+                "game": plugin_name,
+                "role_mode": "assistant_thinks_user_guesses",
+                "target_word": target["word"],
+                "category": target["category"],
+                "hints": list(target["hints"]),
+                "given_hints": [target["hints"][0]] if target.get("hints") else [],
+                "turn_count": 0,
+                "started_at": time.time(),
+            }
+        else:
+            state = {
+                "game": plugin_name,
+                "role_mode": "user_thinks_assistant_guesses",
+                "target_word": "",
+                "category": "",
+                "hints": [],
+                "given_hints": [],
+                "turn_count": 0,
+                "started_at": time.time(),
+            }
+        self.freeform_game_state = state
+        return state
+
+    def _freeform_game_state_prompt(self, plugin_name):
+        state = self.freeform_game_state
+        if not state or state.get("game") != plugin_name:
+            return ""
+
+        if state.get("role_mode") == "assistant_thinks_user_guesses":
+            hints = state.get("hints") or []
+            first_hint = hints[0] if hints else ""
+            parts = [
+                "<game_state>",
+                "状态来源：服务端会话状态，优先级高于历史对话中的猜测。",
+                "玩法角色：小智心里有固定答案，用户来猜；小智必须围绕这个固定答案回应。",
+                f"固定答案：{state.get('target_word', '')}",
+                f"答案类别：{state.get('category', '')}",
+                f"第一条提示：{first_hint}",
+                f"当前轮次：{state.get('turn_count', 0)}",
+                "规则：不要更换答案，不要临时编造新答案；用户猜错时基于同一个答案给短提示；用户猜对或放弃时再揭晓答案。",
+                "输出要短，1到2句，适合语音播报。",
+                "</game_state>",
+            ]
+            return "\n".join(parts)
+
+        if state.get("role_mode") == "user_thinks_assistant_guesses":
+            return "\n".join(
+                [
+                    "<game_state>",
+                    "状态来源：服务端会话状态，优先级高于历史对话中的猜测。",
+                    "玩法角色：用户心里有固定答案，小智不知道答案；小智负责主动提问并最终猜出答案。",
+                    f"当前轮次：{state.get('turn_count', 0)}",
+                    "规则：小智不得自选或暗藏目标答案；不要替用户回答排查问题；每轮只问一个是/否/不确定问题。",
+                    "输出要短，通常只输出一个问题。",
+                    "</game_state>",
+                ]
+            )
+
+        return ""
+
+    def _select_freeform_target_word(self):
+        candidates = [
+            item for item in self._WORD_BANK if item["word"] not in self.last_words[-3:]
+        ] or self._WORD_BANK
+        item = random.choice(candidates)
+        self.last_words.append(item["word"])
+        self.last_words = self.last_words[-8:]
+        return item
+
+    @classmethod
+    def _contains_freeform_game_alias(cls, normalized_message, aliases):
+        chinese_message = cls._remove_ascii_noise(normalized_message)
+        for alias in aliases:
+            normalized_alias = cls._normalize(alias)
+            if normalized_alias in normalized_message:
+                return True
+            if (
+                normalized_alias
+                and cls._remove_ascii_noise(normalized_alias) in chinese_message
+            ):
+                return True
+        return False
+
+    @staticmethod
+    def _remove_ascii_noise(text):
+        return re.sub(r"[A-Za-z0-9_]+", "", text or "")
 
     def handle_guess_my_word(self, tool_name, user_message):
         normalized = self._normalize(user_message)
@@ -342,7 +661,11 @@ class GameSessionManager:
             return self._format_idiom_chain_opening(idiom)
 
         expected = state["expected_char"]
-        if self._is_give_up_message(normalized) or self._is_unknown_message(normalized):
+        if (
+            self._is_hint_request(normalized)
+            or self._is_give_up_message(normalized)
+            or self._is_unknown_message(normalized)
+        ):
             hint = self._peek_idiom(expected)
             state["hints_given"] += 1
             if hint:
@@ -394,7 +717,7 @@ class GameSessionManager:
                     return self._next_person_scope_response(state)
                 if self._is_general_target_type(state.get("target_type")):
                     return self._next_general_guess_response(state)
-            return "我们玩你说我猜。你先选一个人物、物品、动物或地点，只描述线索，不要直接说答案。"
+            return "可以，你先给我第一条线索，不要直接说答案。可以描述用途、外观、地点、年代或身份。"
 
         self._update_user_describes_state(state, user_message)
         if state.get("unsupported_reason"):
@@ -411,7 +734,7 @@ class GameSessionManager:
             state["target_type"] = "historical_person"
             return self._next_historical_person_response(state)
 
-        return "你先告诉我大类：人物、物品、动物还是地点。然后继续给一个线索，不要直接说答案。"
+        return "我还缺线索。你描述一个用途、外观、出现地点、年代或身份，不要直接说答案。"
 
     def _start_user_describes_guess(self, tool_name):
         state = {
@@ -955,6 +1278,15 @@ class GameSessionManager:
             "猜词",
             "我描述你猜",
             "我描述你来猜",
+            "我已经想了一个词",
+            "我想了一个词",
+            "我心里想了一个词",
+            "我想好了一个词",
+            "我想好一个词",
+            "我已经想好",
+            "请你猜吧",
+            "你来猜吧",
+            "让你猜",
         )
         clue_keywords = (
             "历史人物",
@@ -1017,7 +1349,7 @@ class GameSessionManager:
     def _is_end_message(normalized):
         return any(
             phrase in normalized
-            for phrase in ("不玩了", "结束", "退出", "不猜了", "换游戏")
+            for phrase in ("不玩了", "结束", "退出", "不猜了", "换游戏", "换个游戏")
         ) or normalized in {"停"}
 
     @staticmethod

@@ -47,6 +47,19 @@ class PolicyEngine:
                 reason="no_active_game",
             )
 
+        if intent.full_name == "bar.recommend_drink":
+            return Decision(
+                decision="execute",
+                priority=75,
+                executor="recommend_drink",
+                arguments={
+                    "preference": intent.slots.get("preference", ""),
+                    "scene": "",
+                    "strength": "any",
+                },
+                next_state="idle",
+            )
+
         if intent.full_name == "context.continue":
             if context.state == "idle":
                 return Decision(
@@ -63,4 +76,3 @@ class PolicyEngine:
             )
 
         return Decision(decision="fallback_chat", reason="normal_chat")
-

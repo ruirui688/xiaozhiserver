@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 TAG = __name__
 
 MUSIC_CACHE = {}
+MUSIC_CACHE_DIR_NAME = ".xiaozhi-music-cache"
 
 play_music_function_desc = {
     "type": "function",
@@ -105,6 +106,9 @@ def get_music_files(music_dir, music_ext):
     music_files = []
     music_file_names = []
     for file in music_dir.rglob("*"):
+        relative_parts = file.relative_to(music_dir).parts
+        if any(part.startswith(".") for part in relative_parts):
+            continue
         # 判断是否是文件
         if file.is_file():
             # 获取文件扩展名
@@ -137,6 +141,9 @@ def initialize_music_handler(conn: "ConnectionHandler"):
             MUSIC_CACHE["music_dir"] = os.path.abspath(
                 MUSIC_CACHE["music_config"].get("music_dir", "./music")  # 默认路径修改
             )
+            MUSIC_CACHE["music_cache_dir"] = os.path.join(
+                MUSIC_CACHE["music_dir"], MUSIC_CACHE_DIR_NAME
+            )
             MUSIC_CACHE["music_ext"] = MUSIC_CACHE["music_config"].get(
                 "music_ext", (".mp3", ".wav", ".p3")
             )
@@ -145,6 +152,9 @@ def initialize_music_handler(conn: "ConnectionHandler"):
             )
         else:
             MUSIC_CACHE["music_dir"] = os.path.abspath("./music")
+            MUSIC_CACHE["music_cache_dir"] = os.path.join(
+                MUSIC_CACHE["music_dir"], MUSIC_CACHE_DIR_NAME
+            )
             MUSIC_CACHE["music_ext"] = (".mp3", ".wav", ".p3")
             MUSIC_CACHE["refresh_time"] = 60
         # 获取音乐文件列表
@@ -187,16 +197,37 @@ def _get_random_play_prompt(song_name):
     # 移除文件扩展名
     clean_name = os.path.splitext(song_name)[0]
     prompts = [
-        f"正在为您播放，《{clean_name}》",
-        f"请欣赏歌曲，《{clean_name}》",
-        f"即将为您播放，《{clean_name}》",
-        f"现在为您带来，《{clean_name}》",
-        f"让我们一起聆听，《{clean_name}》",
-        f"接下来请欣赏，《{clean_name}》",
-        f"此刻为您献上，《{clean_name}》",
+        f"正在为您播放 {clean_name}",
+        f"请欣赏歌曲 {clean_name}",
+        f"即将为您播放 {clean_name}",
+        f"现在为您带来 {clean_name}",
+        f"让我们一起聆听 {clean_name}",
+        f"接下来请欣赏 {clean_name}",
+        f"此刻为您献上 {clean_name}",
     ]
     # 直接使用random.choice，不设置seed
     return random.choice(prompts)
+
+
+def _get_optimized_music_path(selected_music, music_path):
+    if os.path.splitext(selected_music)[1].lower() == ".p3":
+        return music_path
+
+    cache_dir = MUSIC_CACHE.get("music_cache_dir")
+    if not cache_dir:
+        return music_path
+
+    optimized_path = os.path.join(cache_dir, selected_music + ".p3")
+    if not os.path.exists(optimized_path):
+        return music_path
+
+    try:
+        if os.path.getmtime(optimized_path) < os.path.getmtime(music_path):
+            return music_path
+    except OSError:
+        return music_path
+
+    return optimized_path
 
 
 async def play_local_music(conn: "ConnectionHandler", specific_file=None):
@@ -223,6 +254,9 @@ async def play_local_music(conn: "ConnectionHandler", specific_file=None):
         if not os.path.exists(music_path):
             conn.logger.bind(tag=TAG).error(f"选定的音乐文件不存在: {music_path}")
             return
+        playback_path = _get_optimized_music_path(selected_music, music_path)
+        if playback_path != music_path:
+            conn.logger.bind(tag=TAG).info(f"使用低延时音乐缓存: {playback_path}")
         text = _get_random_play_prompt(selected_music)
         conn.tts.store_tts_text(conn.sentence_id, text)
         # conn.dialogue.put(Message(role="assistant", content=text))
@@ -248,7 +282,7 @@ async def play_local_music(conn: "ConnectionHandler", specific_file=None):
                 sentence_id=conn.sentence_id,
                 sentence_type=SentenceType.MIDDLE,
                 content_type=ContentType.FILE,
-                content_file=music_path,
+                content_file=playback_path,
             )
         )
         if conn.intent_type == "intent_llm":

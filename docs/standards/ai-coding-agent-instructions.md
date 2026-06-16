@@ -276,19 +276,26 @@ Python 核心服务：
 
 ```bash
 cd main/xiaozhi-server
-python -m compileall .
+conda run -n xiaozhi-esp32-server python -m compileall .
 ```
 
 如果项目存在可用测试，再执行：
 
 ```bash
-pytest
+conda run -n xiaozhi-esp32-server pytest
 ```
+
+强制约束：
+
+- `main/xiaozhi-server` 的运行时使用 Conda 环境 `xiaozhi-esp32-server`。
+- AI 执行 Python 验证、脚本、单测、导入检查时，必须使用 `conda run -n xiaozhi-esp32-server ...`，或先确认当前 shell 已 `conda activate xiaozhi-esp32-server`。
+- 禁止直接使用系统 `python`、`python3`、`pip`、`pytest` 验证 `main/xiaozhi-server`。系统 Python 缺少运行时依赖时得到的错误不代表项目运行时错误。
+- 如果当前机器没有 Conda 或目标环境不存在，必须如实说明“未在项目 Conda 运行时验证”，不得退回系统 Python 冒充验证。
 
 禁止默认直接执行长期运行命令：
 
 ```bash
-python app.py
+conda run -n xiaozhi-esp32-server python app.py
 ```
 
 Java 管理 API：

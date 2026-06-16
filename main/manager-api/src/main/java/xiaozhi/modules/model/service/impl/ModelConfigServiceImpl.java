@@ -1078,6 +1078,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             }
 
             String imageBase64 = Base64.getEncoder().encodeToString(Files.readAllBytes(imagePath));
+            result.setTestImageDataUrl("data:image/png;base64," + imageBase64);
             Map<String, Object> imageUrl = Map.of("url", "data:image/png;base64," + imageBase64);
             Map<String, Object> textContent = Map.of("type", "text", "text", VLLM_TEST_QUESTION);
             Map<String, Object> imageContent = Map.of("type", "image_url", "image_url", imageUrl);
