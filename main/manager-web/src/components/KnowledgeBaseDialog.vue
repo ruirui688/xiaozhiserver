@@ -1,5 +1,5 @@
 <template>
-  <el-dialog :title="title" :visible="dialogVisible" width="600px" class="knowledge-base-dialog" @close="handleClose">
+  <el-dialog :title="title" :visible="dialogVisible" width="720px" class="knowledge-base-dialog" @close="handleClose">
     <el-form ref="knowledgeBaseForm" :model="form" :rules="rules" label-width="100px" size="medium">
       <el-form-item :label="$t('knowledgeBaseDialog.name')" prop="name">
         <el-input v-model="form.name" :placeholder="$t('knowledgeBaseDialog.namePlaceholder')" clearable></el-input>
@@ -15,6 +15,35 @@
           </el-option>
         </el-select>
       </el-form-item>
+      <el-divider content-position="left">{{ $t('knowledgeBaseDialog.chunkModelConfig') }}</el-divider>
+      <el-form-item :label="$t('knowledgeBaseDialog.llmEnabled')">
+        <el-switch v-model="parserForm.llm_enabled"></el-switch>
+      </el-form-item>
+      <template v-if="parserForm.llm_enabled">
+        <el-form-item :label="$t('knowledgeBaseDialog.llmBaseUrl')">
+          <el-input v-model="parserForm.llm_base_url" clearable></el-input>
+        </el-form-item>
+        <el-form-item :label="$t('knowledgeBaseDialog.llmApiKey')">
+          <el-input v-model="parserForm.llm_api_key" type="password" show-password clearable></el-input>
+        </el-form-item>
+        <el-form-item :label="$t('knowledgeBaseDialog.llmModel')">
+          <el-input v-model="parserForm.llm_model" clearable></el-input>
+        </el-form-item>
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <el-form-item :label="$t('knowledgeBaseDialog.llmMaxInputChars')">
+              <el-input-number v-model="parserForm.llm_max_input_chars" :min="500" :max="20000" :step="500"
+                style="width: 100%"></el-input-number>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item :label="$t('knowledgeBaseDialog.llmMaxTokens')">
+              <el-input-number v-model="parserForm.llm_max_tokens" :min="200" :max="8000" :step="200"
+                style="width: 100%"></el-input-number>
+            </el-form-item>
+          </el-col>
+        </el-row>
+      </template>
     </el-form>
     <div slot="footer" class="dialog-footer">
       <el-button @click="handleClose">{{ $t('knowledgeBaseDialog.cancel') }}</el-button>
@@ -44,7 +73,8 @@ export default {
         datasetId: null,
         ragModelId: null,
         name: "",
-        description: ""
+        description: "",
+        parserConfig: ""
       })
     }
   },
@@ -52,6 +82,7 @@ export default {
     return {
       dialogVisible: this.visible,
       ragModels: [],
+      parserForm: this.defaultParserForm(),
       rules: {
         name: [
           {
@@ -108,6 +139,7 @@ export default {
         if (this.$refs.knowledgeBaseForm) {
           this.$refs.knowledgeBaseForm.clearValidate();
         }
+        this.syncParserFormFromValue();
       }
     },
     // 监听RAG模型列表变化，确保新增时能正确设置默认值
@@ -121,6 +153,46 @@ export default {
     }
   },
   methods: {
+    defaultParserForm() {
+      return {
+        llm_enabled: false,
+        llm_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        llm_api_key: "",
+        llm_model: "qwen-plus",
+        llm_max_input_chars: 12000,
+        llm_max_tokens: 4000
+      };
+    },
+    syncParserFormFromValue() {
+      const defaults = this.defaultParserForm();
+      if (!this.form || !this.form.parserConfig) {
+        this.parserForm = defaults;
+        return;
+      }
+      try {
+        const parsed = typeof this.form.parserConfig === "string"
+          ? JSON.parse(this.form.parserConfig)
+          : this.form.parserConfig;
+        this.parserForm = {
+          ...defaults,
+          ...(parsed || {})
+        };
+      } catch (e) {
+        console.warn("parserConfig解析失败，使用默认切片模型配置", e);
+        this.parserForm = defaults;
+      }
+    },
+    buildParserConfig() {
+      return JSON.stringify({
+        max_chunk_chars: 1200,
+        llm_enabled: !!this.parserForm.llm_enabled,
+        llm_base_url: this.parserForm.llm_base_url,
+        llm_api_key: this.parserForm.llm_api_key,
+        llm_model: this.parserForm.llm_model,
+        llm_max_input_chars: this.parserForm.llm_max_input_chars,
+        llm_max_tokens: this.parserForm.llm_max_tokens
+      });
+    },
     handleClose() {
       // 不重置表单字段，以便在编辑时能保留之前的选择
       // 只在对话框关闭时重置验证状态
@@ -137,7 +209,8 @@ export default {
         if (valid) {
           console.log('Emitting submit event with form:', this.form);
           this.$emit("submit", {
-            ...this.form
+            ...this.form,
+            parserConfig: this.buildParserConfig()
           });
         }
       });

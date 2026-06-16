@@ -40,6 +40,71 @@ class DeviceMcpHandler(BaseHandler):
 
         return conn, mcp_client, None
 
+    async def handle_status(self, request):
+        if not self._is_authorized(request):
+            return self._json_response({"success": False, "message": "未授权"}, 401)
+
+        device_id = request.query.get("deviceId") or request.query.get("device-id")
+        if not device_id:
+            return self._json_response({"success": False, "message": "缺少deviceId"}, 400)
+
+        conn = get_connection(device_id)
+        if not conn:
+            return self._json_response(
+                {
+                    "success": True,
+                    "data": {
+                        "deviceId": device_id,
+                        "runtimeConnected": False,
+                        "mcpReady": False,
+                        "status": "offline",
+                        "message": "设备未连接到当前运行时",
+                        "toolsCount": 0,
+                        "source": "runtime",
+                    },
+                }
+            )
+
+        mcp_client = getattr(conn, "mcp_client", None)
+        if not mcp_client:
+            return self._json_response(
+                {
+                    "success": True,
+                    "data": {
+                        "deviceId": device_id,
+                        "clientId": conn.headers.get("client-id") if conn.headers else "",
+                        "runtimeConnected": True,
+                        "mcpReady": False,
+                        "status": "online_no_mcp",
+                        "message": "设备已连接但未启用MCP",
+                        "toolsCount": 0,
+                        "source": "runtime",
+                    },
+                }
+            )
+
+        ready = await mcp_client.is_ready()
+        async with mcp_client.lock:
+            tools_count = len(mcp_client.tools)
+
+        status = "mcp_ready" if ready else "mcp_initializing"
+        message = "设备MCP已就绪" if ready else "设备MCP尚未准备就绪"
+        return self._json_response(
+            {
+                "success": True,
+                "data": {
+                    "deviceId": device_id,
+                    "clientId": conn.headers.get("client-id") if conn.headers else "",
+                    "runtimeConnected": True,
+                    "mcpReady": ready,
+                    "status": status,
+                    "message": message,
+                    "toolsCount": tools_count,
+                    "source": "runtime",
+                },
+            }
+        )
+
     async def handle_tools(self, request):
         if not self._is_authorized(request):
             return self._json_response({"success": False, "message": "未授权"}, 401)
@@ -50,10 +115,10 @@ class DeviceMcpHandler(BaseHandler):
 
         conn, mcp_client, error = self._get_ready_mcp_client(device_id)
         if error:
-            return self._json_response({"success": False, "message": error}, 404)
+            return self._json_response({"success": False, "message": error})
 
         if not await mcp_client.is_ready():
-            return self._json_response({"success": False, "message": "设备MCP尚未准备就绪"}, 409)
+            return self._json_response({"success": False, "message": "设备MCP尚未准备就绪"})
 
         tools = []
         async with mcp_client.lock:
@@ -71,6 +136,12 @@ class DeviceMcpHandler(BaseHandler):
                 "data": {
                     "deviceId": device_id,
                     "clientId": conn.headers.get("client-id") if conn.headers else "",
+                    "runtimeConnected": True,
+                    "mcpReady": True,
+                    "status": "mcp_ready",
+                    "message": "设备MCP已就绪",
+                    "toolsCount": len(tools),
+                    "source": "runtime",
                     "ready": True,
                     "tools": tools,
                 },
@@ -94,7 +165,7 @@ class DeviceMcpHandler(BaseHandler):
 
         conn, mcp_client, error = self._get_ready_mcp_client(device_id)
         if error:
-            return self._json_response({"success": False, "message": error}, 404)
+            return self._json_response({"success": False, "message": error})
 
         normalized_name = tool_name
         if not mcp_client.has_tool(normalized_name):

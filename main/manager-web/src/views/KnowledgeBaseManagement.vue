@@ -243,7 +243,8 @@ export default {
         datasetId: null,
         name: "",
         description: "",
-        status: 1
+        status: 1,
+        parserConfig: ""
       };
       this.dialogVisible = true;
       console.log('dialogVisible set to:', this.dialogVisible);
@@ -266,7 +267,8 @@ export default {
         name: row.name,
         description: row.description || "",
         status: row.status,
-        ragModelId: row.ragModelId || null
+        ragModelId: row.ragModelId || null,
+        parserConfig: row.parserConfig || ""
       };
       this.dialogVisible = true;
     },
@@ -299,7 +301,8 @@ export default {
           name: form.name,
           description: form.description,
           status: form.status,
-          ragModelId: form.ragModelId
+          ragModelId: form.ragModelId,
+          parserConfig: form.parserConfig
         };
         console.log('Creating knowledge base with data:', createData);
         Api.knowledgeBase.createKnowledgeBase(createData, (res) => {

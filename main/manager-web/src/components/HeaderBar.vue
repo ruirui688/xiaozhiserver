@@ -98,6 +98,7 @@
             $route.path === '/params-management' ||
             $route.path === '/provider-management' ||
             $route.path === '/function-plugin-management' ||
+            $route.path === '/music-management' ||
             $route.path === '/server-side-management' ||
             $route.path === '/agent-template-management' ||
             $route.path === '/ota-management' ||
@@ -111,6 +112,7 @@
                   $route.path === '/params-management' ||
                   $route.path === '/provider-management' ||
                   $route.path === '/function-plugin-management' ||
+                  $route.path === '/music-management' ||
                   $route.path === '/server-side-management' ||
                   $route.path === '/agent-template-management' ||
                   $route.path === '/ota-management' ||
@@ -140,6 +142,9 @@
             </el-dropdown-item>
             <el-dropdown-item @click.native="handleRouter('functionPluginManagement')">
               {{ $t("header.functionPluginManagement") }}
+            </el-dropdown-item>
+            <el-dropdown-item @click.native="handleRouter('musicManagement')">
+              {{ $t("header.musicManagement") }}
             </el-dropdown-item>
             <el-dropdown-item @click.native="handleRouter('agentTemplate')">
               {{ $t("header.agentTemplate") }}
@@ -251,6 +256,7 @@ export default {
         dictManagement: "/dict-management",
         providerManagement: "/provider-management",
         functionPluginManagement: "/function-plugin-management",
+        musicManagement: "/music-management",
         agentTemplate: "/agent-template-management",
         replacementWordManagement: "/replacement-word-management",
         serverSideManagement: "/server-side-management",

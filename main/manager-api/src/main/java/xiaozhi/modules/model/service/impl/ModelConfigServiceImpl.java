@@ -90,6 +90,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     private static final Set<String> LOCAL_TESTABLE_TYPES = new HashSet<>(List.of(
             "silero", "nomem", "mem_local_short",
             "mem_report_only", "nointent", "function_call"));
+    private static final String LLM_TEST_PROMPT = "请只回复 OK";
     private static final String TTS_TEST_TEXT = "你好，我是小智，语音合成测试成功。";
     private static final String VLLM_TEST_QUESTION = "请用一句话描述这张图片。";
 
@@ -218,7 +219,11 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             throw new RenException(ErrorCode.RESOURCE_NOT_FOUND);
         }
 
+        long startTime = System.currentTimeMillis();
         ModelTestResultDTO result = doTestModel(modelConfig);
+        if (result.getResponseTimeMs() == null) {
+            result.setResponseTimeMs(System.currentTimeMillis() - startTime);
+        }
         Date testTime = new Date();
         result.setTestTime(testTime);
         result.setTestStatus(Boolean.TRUE.equals(result.getSuccess()) ? MODEL_TEST_PASSED : MODEL_TEST_FAILED);
@@ -680,6 +685,8 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             log.warn("模型测试失败，modelId: {}", modelConfig.getId(), e);
             result.setSuccess(false);
             result.setMessage("模型测试失败：" + StringUtils.defaultIfBlank(e.getMessage(), e.getClass().getSimpleName()));
+            result.setTestInput("模型类型：" + modelType + "\n供应器类型：" + type);
+            result.setTestOutput(result.getMessage());
             return result;
         }
     }
@@ -690,16 +697,22 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         if (StringUtils.isBlank(llmModelId)) {
             result.setSuccess(false);
             result.setMessage("意图识别配置缺少关联 LLM");
+            result.setTestInput("关联 LLM：未配置");
+            result.setTestOutput(result.getMessage());
             return result;
         }
         ModelConfigEntity llm = modelConfigDao.selectById(llmModelId);
         if (llm == null || llm.getTestStatus() == null || llm.getTestStatus() != MODEL_TEST_PASSED) {
             result.setSuccess(false);
             result.setMessage("关联 LLM 尚未测试通过");
+            result.setTestInput("关联 LLM：" + llmModelId);
+            result.setTestOutput(result.getMessage());
             return result;
         }
         result.setSuccess(true);
         result.setMessage("关联 LLM 已测试通过");
+        result.setTestInput("关联 LLM：" + llmModelId);
+        result.setTestOutput("关联 LLM 已通过测试，可用于意图识别");
         return result;
     }
 
@@ -741,6 +754,61 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         return validateBasicModelConfig(configJson, type, "VLLM");
     }
 
+    private boolean isDeepSeek(String baseUrl) {
+        return StringUtils.containsIgnoreCase(baseUrl, "api.deepseek.com");
+    }
+
+    private String normalizeThinkingType(Object value) {
+        if (value == null) {
+            return null;
+        }
+        String thinkingType;
+        if (value instanceof JSONObject thinking) {
+            thinkingType = thinking.getStr("type");
+        } else if (value instanceof Map<?, ?> thinking) {
+            Object type = thinking.get("type");
+            thinkingType = type == null ? null : String.valueOf(type);
+        } else if (value instanceof Boolean enabled) {
+            thinkingType = enabled ? "enabled" : "disabled";
+        } else {
+            thinkingType = String.valueOf(value);
+        }
+
+        thinkingType = StringUtils.lowerCase(StringUtils.trimToEmpty(thinkingType));
+        thinkingType = switch (thinkingType) {
+            case "enable", "true", "on", "1" -> "enabled";
+            case "disable", "false", "off", "0" -> "disabled";
+            default -> thinkingType;
+        };
+        return "enabled".equals(thinkingType) || "disabled".equals(thinkingType) ? thinkingType : null;
+    }
+
+    private String normalizeReasoningEffort(String value) {
+        String effort = StringUtils.lowerCase(StringUtils.trimToEmpty(value));
+        effort = switch (effort) {
+            case "low", "medium" -> "high";
+            case "xhigh" -> "max";
+            default -> effort;
+        };
+        return "high".equals(effort) || "max".equals(effort) ? effort : null;
+    }
+
+    private void applyDeepSeekOptions(String baseUrl, JSONObject configJson, Map<String, Object> requestBody) {
+        if (!isDeepSeek(baseUrl)) {
+            return;
+        }
+
+        String thinkingType = normalizeThinkingType(configJson.get("thinking"));
+        if (thinkingType != null) {
+            requestBody.put("thinking", Map.of("type", thinkingType));
+        }
+
+        String reasoningEffort = normalizeReasoningEffort(configJson.getStr("reasoning_effort"));
+        if ("enabled".equals(thinkingType) && reasoningEffort != null) {
+            requestBody.put("reasoning_effort", reasoningEffort);
+        }
+    }
+
     private ModelTestResultDTO testOpenAiCompatibleModel(JSONObject configJson) {
         ModelTestResultDTO result = new ModelTestResultDTO();
         String baseUrl = configJson.getStr("base_url");
@@ -749,21 +817,31 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         if (StringUtils.isAnyBlank(baseUrl, model, apiKey) || isPlaceholderSecret(apiKey)) {
             result.setSuccess(false);
             result.setMessage("OpenAI 兼容模型缺少 base_url、model_name 或有效密钥");
+            result.setTestInput("模型：" + StringUtils.defaultString(model, "-")
+                    + "\n提示词：" + LLM_TEST_PROMPT);
+            result.setTestOutput(result.getMessage());
             return result;
         }
 
         String apiUrl = buildChatCompletionsUrl(baseUrl);
         Map<String, Object> requestBody = new HashMap<>();
         requestBody.put("model", model);
-        requestBody.put("messages", List.of(Map.of("role", "user", "content", "请只回复 OK")));
-        requestBody.put("temperature", 0);
+        requestBody.put("messages", List.of(Map.of("role", "user", "content", LLM_TEST_PROMPT)));
+        if (!isDeepSeek(baseUrl)) {
+            requestBody.put("temperature", 0);
+        }
         requestBody.put("max_tokens", 8);
+        applyDeepSeekOptions(baseUrl, configJson, requestBody);
+        result.setTestInput("接口：" + apiUrl + "\n模型：" + model + "\n提示词：" + LLM_TEST_PROMPT);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("Authorization", "Bearer " + apiKey);
+        long startTime = System.currentTimeMillis();
         ResponseEntity<String> response = restTemplate.exchange(
                 apiUrl, HttpMethod.POST, new HttpEntity<>(requestBody, headers), String.class);
+        result.setResponseTimeMs(System.currentTimeMillis() - startTime);
+        result.setTestOutput(StringUtils.defaultString(response.getBody()));
         if (!response.getStatusCode().is2xxSuccessful()) {
             result.setSuccess(false);
             result.setMessage("模型接口返回非成功状态：" + response.getStatusCode());
@@ -771,6 +849,10 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         }
         JSONObject responseJson = JSONUtil.parseObj(response.getBody());
         JSONArray choices = responseJson.getJSONArray("choices");
+        String answer = extractOpenAiChoiceText(choices);
+        if (StringUtils.isNotBlank(answer)) {
+            result.setTestOutput(answer);
+        }
         result.setSuccess(choices != null && !choices.isEmpty());
         result.setMessage(Boolean.TRUE.equals(result.getSuccess()) ? "模型连通性测试通过" : "模型接口响应缺少 choices");
         return result;
@@ -784,6 +866,10 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         if (StringUtils.isAnyBlank(apiUrl, model, apiKey) || isPlaceholderSecret(apiKey)) {
             result.setSuccess(false);
             result.setMessage("OpenAI ASR 缺少 base_url/api_url、model_name 或有效密钥");
+            result.setTestInput("接口：" + StringUtils.defaultString(apiUrl, "-")
+                    + "\n模型：" + StringUtils.defaultString(model, "-")
+                    + "\n测试音频：main/xiaozhi-server/config/assets/*.wav");
+            result.setTestOutput(result.getMessage());
             return result;
         }
 
@@ -796,8 +882,11 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             if (audioPath == null) {
                 result.setSuccess(false);
                 result.setMessage("未找到 ASR 测试音频，期望来源：main/xiaozhi-server/config/assets/*.wav");
+                result.setTestInput("测试音频：main/xiaozhi-server/config/assets/*.wav");
+                result.setTestOutput(result.getMessage());
                 return result;
             }
+            result.setTestInput("接口：" + apiUrl + "\n模型：" + model + "\n音频：" + audioPath);
 
             byte[] audioBytes = Files.readAllBytes(audioPath);
             ByteArrayResource audioResource = new ByteArrayResource(audioBytes) {
@@ -813,8 +902,11 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.MULTIPART_FORM_DATA);
             headers.set("Authorization", "Bearer " + apiKey);
+            long startTime = System.currentTimeMillis();
             ResponseEntity<String> response = restTemplate.exchange(
                     apiUrl, HttpMethod.POST, new HttpEntity<>(body, headers), String.class);
+            result.setResponseTimeMs(System.currentTimeMillis() - startTime);
+            result.setTestOutput(StringUtils.defaultString(response.getBody()));
             if (!response.getStatusCode().is2xxSuccessful()) {
                 result.setSuccess(false);
                 result.setMessage("ASR 接口返回非成功状态：" + response.getStatusCode());
@@ -822,6 +914,9 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             }
             JSONObject responseJson = JSONUtil.parseObj(response.getBody());
             String text = responseJson.getStr("text");
+            if (StringUtils.isNotBlank(text)) {
+                result.setTestOutput(text);
+            }
             result.setSuccess(StringUtils.isNotBlank(text));
             result.setMessage(Boolean.TRUE.equals(result.getSuccess())
                     ? "ASR 真实音频测试通过，样本：" + audioPath.toString()
@@ -830,6 +925,9 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         } catch (Exception e) {
             result.setSuccess(false);
             result.setMessage("ASR 真实音频测试失败：" + StringUtils.defaultIfBlank(e.getMessage(), e.getClass().getSimpleName()));
+            if (StringUtils.isBlank(result.getTestOutput())) {
+                result.setTestOutput(result.getMessage());
+            }
             return result;
         }
     }
@@ -844,6 +942,9 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                 || isPlaceholderSecret(accessToken)) {
             result.setSuccess(false);
             result.setMessage("豆包流式 ASR 缺少有效 appid、access_token 或 resource_id");
+            result.setTestInput("resource_id：" + StringUtils.defaultString(resourceId, "-")
+                    + "\n测试内容：初始化握手连通性");
+            result.setTestOutput(result.getMessage());
             return result;
         }
 
@@ -851,9 +952,12 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         String wsUrl = enableMultilingual
                 ? "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream"
                 : "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async";
+        result.setTestInput("WebSocket：" + wsUrl + "\nresource_id：" + resourceId
+                + "\n测试内容：初始化握手连通性");
 
         try {
             CompletableFuture<byte[]> responseFuture = new CompletableFuture<>();
+            long startTime = System.currentTimeMillis();
             WebSocket webSocket = HttpClient.newHttpClient()
                     .newWebSocketBuilder()
                     .header("X-Api-App-Key", appid)
@@ -866,7 +970,9 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             byte[] request = buildDoubaoStreamAsrInitRequest(configJson, appid, accessToken, enableMultilingual);
             webSocket.sendBinary(ByteBuffer.wrap(request), true).get(10, TimeUnit.SECONDS);
             byte[] response = responseFuture.get(10, TimeUnit.SECONDS);
+            result.setResponseTimeMs(System.currentTimeMillis() - startTime);
             JSONObject parsedResponse = parseDoubaoStreamAsrResponse(response);
+            result.setTestOutput(parsedResponse.toStringPretty());
             webSocket.sendClose(WebSocket.NORMAL_CLOSURE, "test finished");
 
             if (parsedResponse.containsKey("code") && parsedResponse.getInt("code") != 1000) {
@@ -893,6 +999,9 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         } catch (Exception e) {
             result.setSuccess(false);
             result.setMessage("豆包流式 ASR 配置连通性测试失败：" + StringUtils.defaultIfBlank(e.getMessage(), e.getClass().getSimpleName()));
+            if (StringUtils.isBlank(result.getTestOutput())) {
+                result.setTestOutput(result.getMessage());
+            }
             return result;
         }
     }
@@ -906,6 +1015,11 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         if (StringUtils.isAnyBlank(apiUrl, model, voice, apiKey) || isPlaceholderSecret(apiKey)) {
             result.setSuccess(false);
             result.setMessage("OpenAI TTS 缺少 api_url、model、voice 或有效密钥");
+            result.setTestInput("接口：" + StringUtils.defaultString(apiUrl, "-")
+                    + "\n模型：" + StringUtils.defaultString(model, "-")
+                    + "\n音色：" + StringUtils.defaultString(voice, "-")
+                    + "\n文本：" + TTS_TEST_TEXT);
+            result.setTestOutput(result.getMessage());
             return result;
         }
 
@@ -917,13 +1031,18 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         if (configJson.containsKey("speed")) {
             requestBody.put("speed", configJson.get("speed"));
         }
+        result.setTestInput("接口：" + apiUrl + "\n模型：" + model + "\n音色：" + voice + "\n文本：" + TTS_TEST_TEXT);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("Authorization", "Bearer " + apiKey);
+        long startTime = System.currentTimeMillis();
         ResponseEntity<byte[]> response = restTemplate.exchange(
                 apiUrl, HttpMethod.POST, new HttpEntity<>(requestBody, headers), byte[].class);
+        result.setResponseTimeMs(System.currentTimeMillis() - startTime);
         byte[] audioBytes = response.getBody();
+        result.setTestOutput("HTTP 状态：" + response.getStatusCode()
+                + "\n音频字节数：" + (audioBytes == null ? 0 : audioBytes.length));
         result.setSuccess(response.getStatusCode().is2xxSuccessful() && audioBytes != null && audioBytes.length > 1024);
         result.setMessage(Boolean.TRUE.equals(result.getSuccess())
                 ? "TTS 真实合成测试通过，测试文本：" + TTS_TEST_TEXT
@@ -939,6 +1058,9 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         if (StringUtils.isAnyBlank(baseUrl, model, apiKey) || isPlaceholderSecret(apiKey)) {
             result.setSuccess(false);
             result.setMessage("视觉模型缺少 base_url/url、model_name 或有效密钥");
+            result.setTestInput("模型：" + StringUtils.defaultString(model, "-")
+                    + "\n问题：" + VLLM_TEST_QUESTION);
+            result.setTestOutput(result.getMessage());
             return result;
         }
 
@@ -950,6 +1072,8 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             if (imagePath == null) {
                 result.setSuccess(false);
                 result.setMessage("未找到视觉测试图片，期望来源：docs/images/demo1.png");
+                result.setTestInput("图片：docs/images/demo1.png\n问题：" + VLLM_TEST_QUESTION);
+                result.setTestOutput(result.getMessage());
                 return result;
             }
 
@@ -993,6 +1117,9 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         } catch (Exception e) {
             result.setSuccess(false);
             result.setMessage("视觉模型真实图片测试失败：" + StringUtils.defaultIfBlank(e.getMessage(), e.getClass().getSimpleName()));
+            if (StringUtils.isBlank(result.getTestOutput())) {
+                result.setTestOutput(result.getMessage());
+            }
             return result;
         }
     }
@@ -1023,25 +1150,39 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         if (StringUtils.isAnyBlank(baseUrl, model)) {
             result.setSuccess(false);
             result.setMessage("Ollama 模型缺少 base_url 或 model_name");
+            result.setTestInput("接口：" + StringUtils.defaultString(baseUrl, "-")
+                    + "\n模型：" + StringUtils.defaultString(model, "-")
+                    + "\n提示词：" + LLM_TEST_PROMPT);
+            result.setTestOutput(result.getMessage());
             return result;
         }
 
         String apiUrl = baseUrl.endsWith("/") ? baseUrl + "api/chat" : baseUrl + "/api/chat";
         Map<String, Object> requestBody = new HashMap<>();
         requestBody.put("model", model);
-        requestBody.put("messages", List.of(Map.of("role", "user", "content", "请只回复 OK")));
+        requestBody.put("messages", List.of(Map.of("role", "user", "content", LLM_TEST_PROMPT)));
         requestBody.put("stream", false);
+        result.setTestInput("接口：" + apiUrl + "\n模型：" + model + "\n提示词：" + LLM_TEST_PROMPT);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
+        long startTime = System.currentTimeMillis();
         ResponseEntity<String> response = restTemplate.exchange(
                 apiUrl, HttpMethod.POST, new HttpEntity<>(requestBody, headers), String.class);
+        result.setResponseTimeMs(System.currentTimeMillis() - startTime);
+        result.setTestOutput(StringUtils.defaultString(response.getBody()));
         if (!response.getStatusCode().is2xxSuccessful()) {
             result.setSuccess(false);
             result.setMessage("Ollama 接口返回非成功状态：" + response.getStatusCode());
             return result;
         }
         JSONObject responseJson = JSONUtil.parseObj(response.getBody());
+        JSONObject message = responseJson.getJSONObject("message");
+        if (message != null && StringUtils.isNotBlank(message.getStr("content"))) {
+            result.setTestOutput(message.getStr("content"));
+        } else if (StringUtils.isNotBlank(responseJson.getStr("response"))) {
+            result.setTestOutput(responseJson.getStr("response"));
+        }
         result.setSuccess(responseJson.containsKey("message") || responseJson.containsKey("response"));
         result.setMessage(Boolean.TRUE.equals(result.getSuccess()) ? "Ollama 连通性测试通过" : "Ollama 响应格式不符合预期");
         return result;
@@ -1056,6 +1197,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
 
     private ModelTestResultDTO validateBasicModelConfig(JSONObject configJson, String type, String modelType) {
         ModelTestResultDTO result = new ModelTestResultDTO();
+        result.setTestInput("模型类型：" + modelType + "\n供应器类型：" + type + "\n测试内容：配置完整性校验");
         List<String> missingFields = getRequiredFields(modelType, type).stream()
                 .filter(field -> !hasUsableConfigValue(configJson, field))
                 .collect(Collectors.toList());
@@ -1070,6 +1212,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         if (CollectionUtil.isNotEmpty(missingFields)) {
             result.setSuccess(false);
             result.setMessage("模型配置缺少有效字段：" + String.join("、", missingFields));
+            result.setTestOutput(result.getMessage());
             return result;
         }
 
@@ -1082,12 +1225,14 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                     "main/xiaozhi-server/" + configuredPath)) == null) {
                 result.setSuccess(false);
                 result.setMessage("本地模型路径不存在：" + configuredPath);
+                result.setTestOutput(result.getMessage());
                 return result;
             }
         }
 
         result.setSuccess(true);
         result.setMessage("模型配置完整性测试通过");
+        result.setTestOutput("必填字段已配置，本地路径已校验");
         return result;
     }
 

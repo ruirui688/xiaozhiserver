@@ -656,9 +656,14 @@ LLM:
     # 定义LLM API类型
     type: openai
     # 可在这里找到你的api key https://platform.deepseek.com/
-    model_name: deepseek-chat
-    url: https://api.deepseek.com
+    # deepseek-chat/deepseek-reasoner 将于 2026-07-24 23:59 弃用，建议使用 deepseek-v4-flash
+    model_name: deepseek-v4-flash
+    base_url: https://api.deepseek.com
     api_key: 你的deepseek web key
+    # 思考模式: enabled / disabled；语音交互默认 disabled，响应更快
+    thinking: disabled
+    # 思考强度仅在 thinking: enabled 时生效: high / max
+    reasoning_effort: high
   ChatGLMLLM:
     # 定义LLM API类型
     type: openai

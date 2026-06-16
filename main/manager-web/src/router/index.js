@@ -183,6 +183,17 @@ const routes = [
       title: '智能体功能库'
     }
   },
+  {
+    path: '/music-management',
+    name: 'MusicManagement',
+    component: function () {
+      return import('../views/MusicManagement.vue')
+    },
+    meta: {
+      requiresAuth: true,
+      title: '音乐管理'
+    }
+  },
   // 添加默认角色管理路由
   {
     path: '/agent-template-management',
@@ -254,7 +265,7 @@ VueRouter.prototype.push = function push(location) {
 }
 
 // 需要登录才能访问的路由
-const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'ModelConfig', 'KnowledgeBaseManagement', 'KnowledgeFileUpload', 'AddressBookManagement', 'FunctionPluginManagement']
+const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'ModelConfig', 'KnowledgeBaseManagement', 'KnowledgeFileUpload', 'AddressBookManagement', 'FunctionPluginManagement', 'MusicManagement']
 
 // 路由守卫
 router.beforeEach((to, from, next) => {

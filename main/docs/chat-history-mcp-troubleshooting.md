@@ -185,3 +185,67 @@ self.camera.capture
 5. 新增 `tests/test_device_runtime_registry.py`，覆盖真实设备别名命中和调试连接跳过。
 
 如果页面仍显示空工具，应先重启 `xiaozhi-server` 和 `manager-api`，再确认真实设备已经重新连接并完成 MCP 初始化。调试窗左侧事件中出现 `mcp tools/list -> 0` 时，需要结合左侧状态文案判断是未命中运行时、MCP 未 ready，还是设备确实返回空工具列表。
+
+### 2026-06-16 追加排查记录
+
+重启后再次出现“已连接但设备 MCP 工具不可见”。日志确认：
+
+1. `xiaozhi-server` 只收到 `manager-debug-*` 调试窗口连接，没有收到真实 ESP32 设备连接。
+2. 调试窗口自身响应了 `tools/list -> []`，因此事件里会出现 `mcp tools/list -> 0`。
+3. 直接请求运行时 `/device/mcp/tools?deviceId=3c:dc:75:fe:26:c0` 返回 `设备未连接到当前运行时`。
+4. `manager-api` 原先会把 `server.ota` 推导出的 `8002` manager-api 地址也当成运行时查询，后续 HTML 404 会覆盖前面从 `8003` 拿到的有效原因，最终前端只看到空工具列表。
+
+修复：
+
+1. `DeviceServiceImpl.getRuntimeHttpBases()` 只从 `server.websocket` 推导 `xiaozhi-server` HTTP 运行时地址，不再把 `server.ota` 当成 MCP 运行时地址。
+2. 运行时返回 `success:false` 但没有 message 时，不覆盖前一次有效错误原因。
+3. `device_mcp_handler.py` 对“设备未连接 / MCP 未启用 / MCP 未 ready”返回 HTTP 200 + `success:false`，方便 manager-api 稳定解析业务状态。
+
+当前若页面显示 `设备未连接到当前运行时`，含义是：管理端和调试窗口已经连上，但真实硬件设备还没有连接到当前重启后的 `xiaozhi-server`。需要让硬件设备重新连接当前 WebSocket 地址，完成 hello + MCP 初始化后，工具列表才会出现。
+
+### 2026-06-16 UI 状态重构记录
+
+截图复核时发现调试弹窗左侧 UI 将三类状态混在一起展示，导致“调试连接已连接但设备未连接”“调试连接未连接但工具列表存在”等场景看起来互相矛盾：
+
+1. 调试会话连接：管理端网页作为 `manager-debug-*` 客户端连接到 `xiaozhi-server` 的 WebSocket。
+2. 真实设备运行时连接：ESP32 真实硬件是否连接到当前运行时。
+3. 设备 MCP 状态：真实设备的 MCP 是否未启用、初始化中或已就绪。
+
+本次前端重构将这三类状态拆成独立标签：
+
+```text
+调试会话：已连接 / 未连接
+真实设备：已连接 / 未连接 / 运行时状态不可用
+MCP：不可用 / 已连接，未启用 MCP / 初始化中 / 已就绪
+```
+
+同时收敛状态来源：
+
+1. `DeviceChatDebugDialog.vue` 中设备运行时和 MCP 状态只由 `/device/debug/status/{deviceId}` 更新。
+2. `/device/tools/list/{deviceId}` 只负责更新工具列表和工具列表错误说明，不再反向覆盖设备状态。
+3. “断开”按钮只断开调试 WebSocket，不再停止设备状态和工具轮询；关闭弹窗才完整停止轮询和释放音频资源。
+4. 输入框和空状态文案改为“连接调试会话后可发送文本或语音进行调试”，避免误导为真实设备连接。
+
+还补齐了 `deviceDebug.*` 简体中文文案：
+
+1. `zh_CN` 补齐新增状态文案。
+2. 修复页面直接显示 `deviceDebug.xxx资源不存在` 的问题。
+
+运行时工具接口也补充了成功响应字段，便于直接调用 `/device/mcp/tools` 时判断语义：
+
+```json
+{
+  "runtimeConnected": true,
+  "mcpReady": true,
+  "status": "mcp_ready",
+  "message": "设备MCP已就绪",
+  "toolsCount": 5,
+  "source": "runtime"
+}
+```
+
+验证结果：
+
+1. `npm run build` 通过，仅保留项目已有的大资源和 Browserslist 过期警告。
+2. `python3 -m py_compile main/xiaozhi-server/core/api/device_mcp_handler.py` 通过。
+3. 已检查 `DeviceChatDebugDialog.vue` 引用的 `deviceDebug.*` key 在现有所有语言文件中均存在。

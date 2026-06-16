@@ -121,6 +121,7 @@ docs/integrations/prompt-injection-engineering.md
 - [models/huoshan-streamTTS-voice-cloning.md](./models/huoshan-streamTTS-voice-cloning.md) - 火山引擎双流式 TTS 与音色克隆配置教程。用于开通火山服务、获取音色资源 ID、配置流式语音合成和音色克隆。
 - [models/index-stream-integration.md](./models/index-stream-integration.md) - IndexStreamTTS 使用指南。用于部署 IndexStreamTTS 环境、配置 Conda 环境、启动服务并接入流式 TTS。
 - [models/powermem-integration.md](./models/powermem-integration.md) - PowerMem 记忆组件集成指南。用于给智能体接入长期记忆能力，包含组件安装、功能特性和服务配置。
+- [models/local-knowledge-integration.md](./models/local-knowledge-integration.md) - 本地知识库与大模型切片指南。用于配置 `RAG_LocalKnowledge`、在知识库界面配置阿里云百炼/OpenAI 兼容切片模型、重新解析旧文档和排查本地知识库召回为空。
 - [models/ragflow-integration.md](./models/ragflow-integration.md) - RAGFlow 集成指南。用于部署 RAGFlow、检查 MySQL/Redis、配置知识库问答和服务端 RAG 调用。
 - [models/performance_tester.md](./models/performance_tester.md) - 模型性能测试工具使用指南。用于测试 ASR、大语言模型、非流式 TTS、流式 TTS、视觉模型的延迟和稳定性。
 
@@ -145,14 +146,10 @@ docs/integrations/prompt-injection-engineering.md
 
 ## 11. 通用参考
 
-用于问题排查、贡献说明、多语言 README 和图片资源。AI 只有在整理文档、排查问题或更新 README 时，才需要读取本分类文档。
+用于问题排查、贡献说明和图片资源。AI 只有在整理文档、排查问题或更新 README 时，才需要读取本分类文档。
 
 - [reference/FAQ.md](./reference/FAQ.md) - 常见问题排查文档。用于处理语音识别异常、TTS 错误、超时、服务启动失败、配置不生效等常见问题。
 - [reference/contributor_open_letter.md](./reference/contributor_open_letter.md) - 开发者公开信与贡献指南。用于理解官方项目目标、贡献方式、提交内容要求和社区协作方式。
-- [readme/README_en.md](./readme/README_en.md) - 官方英文 README 归档。用于需要参考官方英文介绍、对外英文说明或英文版本文案时读取。
-- [readme/README_de.md](./readme/README_de.md) - 官方德文 README 归档。用于维护德文项目说明或比对多语言 README 内容时读取。
-- [readme/README_pt_BR.md](./readme/README_pt_BR.md) - 官方巴西葡萄牙语 README 归档。用于维护葡语项目说明或比对多语言 README 内容时读取。
-- [readme/README_vi.md](./readme/README_vi.md) - 官方越南语 README 归档。用于维护越南语项目说明或比对多语言 README 内容时读取。
 - [images/](./images/) - 文档图片资源目录。用于部署架构图、截图和说明图片；修改引用图片或移动文档时必须检查图片路径。
 
 ## 12. AI 读取规则

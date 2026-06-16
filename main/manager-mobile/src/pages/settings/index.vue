@@ -9,10 +9,9 @@
 </route>
 
 <script lang="ts" setup>
-import type { Language } from '@/store/lang'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useToast } from 'wot-design-uni'
-import { changeLanguage, getCurrentLanguage, getSupportedLanguages, t } from '@/i18n'
+import { t } from '@/i18n'
 import { useConfigStore } from '@/store'
 import { clearServerBaseUrlOverride, getEnvBaseUrl, getServerBaseUrlOverride, setServerBaseUrlOverride } from '@/utils'
 import { isMp } from '@/utils/platform'
@@ -155,18 +154,6 @@ async function saveServerBaseUrl() {
       }
     },
   })
-}
-
-// 语言切换
-const supportedLanguages = getSupportedLanguages()
-const currentLanguage = ref<Language>(getCurrentLanguage())
-const showLanguageSheet = ref(false)
-
-function handleLanguageChange(lang: Language) {
-  changeLanguage(lang)
-  showLanguageSheet.value = false
-  currentLanguage.value = lang
-  toast.success(t('settings.languageChanged'))
 }
 
 // 重置为 env 默认
@@ -427,56 +414,6 @@ onMounted(async () => {
         </view>
       </view>
 
-      <!-- 语言设置 -->
-      <view class="mb-[32rpx]">
-        <view class="mb-[24rpx] flex items-center">
-          <text class="text-[32rpx] text-[#232338] font-bold">
-            {{ t('settings.languageSettings') }}
-          </text>
-        </view>
-
-        <view
-          class="border border-[#eeeeee] rounded-[24rpx] bg-[#fbfbfb] p-[32rpx]"
-          style="box-shadow: 0 4rpx 20rpx rgba(0, 0, 0, 0.06);"
-        >
-          <view
-            class="flex cursor-pointer items-center justify-between border border-[#eeeeee] rounded-[16rpx] bg-[#f5f7fb] p-[24rpx] transition-all active:bg-[#eef3ff]"
-            @click="showLanguageSheet = true"
-          >
-            <view>
-              <text class="text-[32rpx] text-[#232338] font-medium">
-                {{ t('settings.language') }}
-              </text>
-              <text class="mt-[4rpx] block text-[24rpx] text-[#9d9ea3]">
-                {{ t('settings.selectLanguage') }}
-              </text>
-            </view>
-            <view class="flex items-center">
-              <text class="mr-[16rpx] text-[32rpx] text-[#9d9ea3] font-semibold">
-                {{ supportedLanguages.find(lang => lang.code === currentLanguage)?.name }}
-              </text>
-              <wd-icon name="arrow-right" custom-class="text-[32rpx] text-[#9d9ea3]" />
-            </view>
-          </view>
-        </view>
-      </view>
-
-      <!-- 语言选择弹窗 -->
-      <wd-action-sheet v-model="showLanguageSheet" :title="t('settings.selectLanguage')" :close-on-click-modal="true">
-        <view class="language-sheet">
-          <scroll-view scroll-y class="language-list">
-            <view
-              v-for="lang in supportedLanguages" :key="lang.code" class="language-item"
-              @click="handleLanguageChange(lang.code)"
-            >
-              <text class="language-name">
-                {{ lang.name }}
-              </text>
-            </view>
-          </scroll-view>
-        </view>
-      </wd-action-sheet>
-
       <!-- 底部安全距离 -->
       <!-- 底部安全距离 -->
       <view style="height: env(safe-area-inset-bottom);" />
@@ -486,30 +423,4 @@ onMounted(async () => {
 
 <style lang="scss" scoped>
 // 保持与 edit.vue 一致的风格，样式主要通过类名控制
-
-// 语言选择弹窗样式
-.language-sheet {
-  .language-list {
-    max-height: 50vh;
-
-    .language-item {
-      padding: 30rpx 0;
-      text-align: center;
-      border-bottom: 1rpx solid #f0f0f0;
-
-      .language-name {
-        font-size: 28rpx;
-        color: #333;
-      }
-
-      &:last-child {
-        border-bottom: none;
-      }
-
-      &:active {
-        background-color: #f5f7fb;
-      }
-    }
-  }
-}
 </style>

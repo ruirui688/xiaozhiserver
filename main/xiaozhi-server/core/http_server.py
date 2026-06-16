@@ -88,6 +88,12 @@ class SimpleHttpServer:
                         web.options(
                             "/device/mcp/tools", self.device_mcp_handler.handle_options
                         ),
+                        web.get(
+                            "/device/mcp/status", self.device_mcp_handler.handle_status
+                        ),
+                        web.options(
+                            "/device/mcp/status", self.device_mcp_handler.handle_options
+                        ),
                         web.post(
                             "/device/mcp/call", self.device_mcp_handler.handle_call
                         ),

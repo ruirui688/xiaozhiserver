@@ -142,3 +142,34 @@
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方修改 startToChat、ConnectionHandler 初始化、handle_user_intent、GameSessionManager、UnifiedToolHandler、ToolManager、abortHandle、TTS 入队或 function-call 主链路，必须保留语义控制中枢在旧意图/LLM 之前的前置拦截位置；未命中高置信度规则时必须继续兜底到旧 handle_user_intent 和 conn.chat；停止类指令必须复用 handleAbortMessage 并允许配置动作停止工具；游戏态输入必须优先回到 active_game_tool；退出游戏不得关闭 websocket；语义模块顶层导入应尽量轻量，避免引入 opus/loguru 等运行依赖导致纯单元测试无法导入。
 ```
+
+## 10. 管理后台模型测试详情字段补全
+
+```text
+定制模块：manager-api 模型配置测试接口
+改动原因：manager-web 的模型测试详情弹窗已经展示 testInput、testOutput、responseTimeMs，但 manager-api 多数测试路径原先只返回 success/message，导致 LLM、ASR、TTS、Ollama 和基础配置校验即使测试通过，弹窗仍显示输入、输出和响应耗时为 “-”。现在模型测试入口提供统一兜底计时，并在真实调用和失败路径中返回测试输入、输出摘要和耗时，方便后台排查模型连通性、识别结果、TTS 音频大小和配置完整性问题。
+关键文件：
+  - main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelConfigServiceImpl.java
+  - main/manager-api/src/main/java/xiaozhi/modules/model/dto/ModelTestResultDTO.java
+  - main/manager-web/src/views/ModelConfig.vue
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改模型测试接口、ModelTestResultDTO 或 manager-web 测试详情弹窗，必须保留 testModel 返回 testInput、testOutput、responseTimeMs、testStatus、testTime 的约定；OpenAI 兼容 LLM、Ollama、OpenAI ASR/TTS、豆包流式 ASR、视觉模型、Intent 和基础配置校验都应返回可读的测试输入与输出摘要；真实接口调用要记录调用耗时，未显式计时的路径必须由 testModel 兜底补充耗时；输出摘要不得包含 api_key、access_token、secret_key 等敏感字段。
+```
+
+## 11. 本地知识库大模型切片与中文召回增强
+
+```text
+定制模块：manager-api 本地知识库适配器、manager-web 知识库配置弹窗、xiaozhi-server 本地知识库工具
+改动原因：本地知识库原先对 md/txt 文档主要按固定字符数硬切，容易把标题、适用问题、正文或一句话切开；召回也只按空格/标点切词，中文整句没有空格时容易查不到。现在知识库新增/编辑界面可以为每个知识库配置阿里云百炼/OpenAI 兼容切片模型，文档解析时优先由大模型按语义结构生成 JSON 切片；召回同时匹配 content/question/answer，并使用中文 n-gram 增强自然句检索。
+关键文件：
+  - main/manager-api/src/main/java/xiaozhi/modules/knowledge/rag/impl/LocalKnowledgeAdapter.java
+  - main/manager-api/src/main/java/xiaozhi/modules/knowledge/service/impl/KnowledgeBaseServiceImpl.java
+  - main/manager-api/src/main/resources/db/changelog/202606111650.sql
+  - main/manager-web/src/components/KnowledgeBaseDialog.vue
+  - main/manager-web/src/views/KnowledgeBaseManagement.vue
+  - main/manager-web/src/i18n/zh_CN.js
+  - main/xiaozhi-server/plugins_func/functions/search_from_local_knowledge.py
+  - docs/models/local-knowledge-integration.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改本地知识库、RAG 模型配置、知识库弹窗、文档解析或本地知识库工具，必须保留知识库级 parser_config 覆盖 RAG_LocalKnowledge 默认配置的约定；百炼/OpenAI 兼容切片模型应在知识库界面配置，不要求用户去后台模型配置手动改全局模型；文档解析优先走大模型切片，失败时才回退段落切分；旧文档必须重新解析才应用新切片；召回必须同时匹配 content/question/answer，并保留中文自然句 n-gram 检索增强。
+```

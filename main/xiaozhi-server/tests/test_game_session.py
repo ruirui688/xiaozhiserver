@@ -3,6 +3,7 @@ import json
 import sys
 import types
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -154,6 +155,28 @@ def test_idiom_chain_repeated_idiom_does_not_score_but_normal_chain_still_works(
     end = manager.handle_idiom_chain(tool_name, "结束")
     assert end == "成语接龙先到这。你刚才接对了1个。"
     assert tool_name not in manager.sessions
+
+
+def test_idiom_chain_start_is_not_fixed_to_one_opening():
+    manager = GameSessionManager()
+    manager.last_words = [
+        "一心一意",
+        "水到渠成",
+        "心想事成",
+        "万事如意",
+        "海阔天空",
+        "山清水秀",
+        "大显身手",
+        "开门见山",
+    ]
+
+    with patch("core.game_session.random.choice", side_effect=lambda seq: seq[0]):
+        state = manager._start_idiom_chain("idiom_chain")
+        opening = manager._format_idiom_chain_opening(state["last_idiom"])
+
+    assert state["last_idiom"] == "安居乐业"
+    assert opening.startswith(("来一局成语接龙", "这次从", "我先抛一个", "开局成语是"))
+    assert "安居乐业" in opening
 
 
 def _install_plugin_executor_stubs(monkeypatch):

@@ -41,6 +41,7 @@ import cn.hutool.crypto.digest.DigestUtil;
 import cn.hutool.http.ContentType;
 import cn.hutool.http.Header;
 import cn.hutool.http.HttpRequest;
+import cn.hutool.http.HttpResponse;
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
@@ -60,6 +61,7 @@ import xiaozhi.common.utils.DateUtils;
 import xiaozhi.common.utils.ToolUtil;
 import xiaozhi.modules.device.dao.DeviceDao;
 import xiaozhi.modules.device.dto.DeviceDebugInfoDTO;
+import xiaozhi.modules.device.dto.DeviceDebugStatusDTO;
 import xiaozhi.modules.device.dto.DeviceManualAddDTO;
 import xiaozhi.modules.device.dto.DevicePageUserDTO;
 import xiaozhi.modules.device.dto.DeviceReportReqDTO;
@@ -665,6 +667,15 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         return dto;
     }
 
+    @Override
+    public DeviceDebugStatusDTO getDeviceDebugStatus(Long userId, String deviceId) {
+        DeviceEntity device = baseDao.selectById(deviceId);
+        if (device == null || !device.getUserId().equals(userId)) {
+            throw new RenException(ErrorCode.DEVICE_NOT_EXIST);
+        }
+        return getDeviceDebugStatusFromRuntime(device);
+    }
+
     /**
      * 构建MQTT配置信息
      * 
@@ -833,12 +844,7 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
     }
 
     private List<String> getRuntimeHttpBases() {
-        List<String> runtimeBases = getRuntimeHttpBasesFromWebsocket();
-        String otaRuntimeBase = getRuntimeHttpBaseFromOta();
-        if (StringUtils.isNotBlank(otaRuntimeBase) && !runtimeBases.contains(otaRuntimeBase)) {
-            runtimeBases.add(otaRuntimeBase);
-        }
-        return runtimeBases;
+        return getRuntimeHttpBasesFromWebsocket();
     }
 
     private String getRuntimeAuthHeader() {
@@ -868,22 +874,29 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         }
 
         List<String> deviceIdentifiers = getDeviceRuntimeIdentifiers(device);
+        log.debug("查询运行时设备MCP工具: runtimeBases={}, deviceIdentifiers={}", runtimeBases, deviceIdentifiers);
         String lastRuntimeMessage = null;
         for (String runtimeBase : runtimeBases) {
             for (String deviceIdentifier : deviceIdentifiers) {
-                try {
-                    String url = runtimeBase + "/device/mcp/tools?deviceId="
-                            + URLEncoder.encode(deviceIdentifier, StandardCharsets.UTF_8);
-                    String resultMessage = HttpRequest.get(url)
-                            .header(Header.AUTHORIZATION, authHeader)
-                            .timeout(3000)
-                            .execute().body();
+                String url = runtimeBase + "/device/mcp/tools?deviceId="
+                        + URLEncoder.encode(deviceIdentifier, StandardCharsets.UTF_8);
+                try (HttpResponse response = HttpRequest.get(url)
+                        .header(Header.AUTHORIZATION, authHeader)
+                        .timeout(3000)
+                        .execute()) {
+                    String resultMessage = response.body();
+                    log.debug("运行时设备MCP工具查询响应: status={}, url={}, body={}", response.getStatus(), url,
+                            StringUtils.abbreviate(resultMessage, 200));
                     if (StringUtils.isBlank(resultMessage)) {
+                        lastRuntimeMessage = "运行时设备MCP工具查询响应为空";
                         continue;
                     }
                     JSONObject jsonObject = JSONUtil.parseObj(resultMessage);
                     if (!jsonObject.getBool("success", false)) {
-                        lastRuntimeMessage = jsonObject.getStr("message");
+                        String runtimeMessage = jsonObject.getStr("message");
+                        if (StringUtils.isNotBlank(runtimeMessage)) {
+                            lastRuntimeMessage = runtimeMessage;
+                        }
                         log.debug("运行时设备MCP工具查询未命中: {}", lastRuntimeMessage);
                         continue;
                     }
@@ -895,15 +908,23 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
                     }
                     return data;
                 } catch (Exception e) {
-                    log.debug("运行时设备MCP工具查询失败: {}", runtimeBase, e);
+                    lastRuntimeMessage = "运行时设备MCP工具查询失败: " + e.getMessage();
+                    log.warn("运行时设备MCP工具查询失败: {}", url, e);
                 }
             }
         }
 
+        if (StringUtils.isBlank(lastRuntimeMessage)) {
+            lastRuntimeMessage = "运行时设备MCP工具查询未返回有效结果";
+        }
         if (StringUtils.isNotBlank(lastRuntimeMessage)) {
             Map<String, Object> resultData = new HashMap<>();
             resultData.put("deviceId", deviceIdentifiers.isEmpty() ? device.getId() : deviceIdentifiers.get(0));
             resultData.put("ready", false);
+            resultData.put("status", resolveRuntimeToolStatus(lastRuntimeMessage));
+            resultData.put("mcpReady", false);
+            resultData.put("runtimeConnected", !"offline".equals(resolveRuntimeToolStatus(lastRuntimeMessage)));
+            resultData.put("toolsCount", 0);
             resultData.put("source", "runtime");
             resultData.put("message", lastRuntimeMessage);
             resultData.put("tools", new ArrayList<>());
@@ -911,6 +932,85 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         }
 
         return null;
+    }
+
+    private DeviceDebugStatusDTO getDeviceDebugStatusFromRuntime(DeviceEntity device) {
+        DeviceDebugStatusDTO fallback = new DeviceDebugStatusDTO();
+        fallback.setDeviceId(device.getId());
+        fallback.setRuntimeConnected(false);
+        fallback.setDebugConnected(false);
+        fallback.setMcpReady(false);
+        fallback.setStatus("runtime_unavailable");
+        fallback.setMessage("运行时状态接口不可用");
+        fallback.setToolsCount(0);
+        fallback.setSource("runtime");
+
+        List<String> runtimeBases = getRuntimeHttpBases();
+        String authHeader = getRuntimeAuthHeader();
+        if (runtimeBases.isEmpty() || StringUtils.isBlank(authHeader)) {
+            return fallback;
+        }
+
+        String lastMessage = null;
+        for (String runtimeBase : runtimeBases) {
+            for (String deviceIdentifier : getDeviceRuntimeIdentifiers(device)) {
+                String url = runtimeBase + "/device/mcp/status?deviceId="
+                        + URLEncoder.encode(deviceIdentifier, StandardCharsets.UTF_8);
+                try (HttpResponse response = HttpRequest.get(url)
+                        .header(Header.AUTHORIZATION, authHeader)
+                        .timeout(3000)
+                        .execute()) {
+                    String resultMessage = response.body();
+                    if (StringUtils.isBlank(resultMessage)) {
+                        lastMessage = "运行时状态查询响应为空";
+                        continue;
+                    }
+                    JSONObject jsonObject = JSONUtil.parseObj(resultMessage);
+                    if (!jsonObject.getBool("success", false)) {
+                        lastMessage = jsonObject.getStr("message", "运行时状态查询未成功");
+                        continue;
+                    }
+                    JSONObject data = jsonObject.getJSONObject("data");
+                    if (data == null) {
+                        lastMessage = "运行时状态查询缺少data";
+                        continue;
+                    }
+
+                    DeviceDebugStatusDTO status = new DeviceDebugStatusDTO();
+                    status.setDeviceId(device.getId());
+                    status.setClientId(data.getStr("clientId", ""));
+                    status.setRuntimeConnected(data.getBool("runtimeConnected", false));
+                    status.setDebugConnected(false);
+                    status.setMcpReady(data.getBool("mcpReady", false));
+                    status.setStatus(data.getStr("status", "runtime_unavailable"));
+                    status.setMessage(data.getStr("message", ""));
+                    status.setToolsCount(data.getInt("toolsCount", 0));
+                    status.setSource(data.getStr("source", "runtime"));
+                    return status;
+                } catch (Exception e) {
+                    lastMessage = "运行时状态查询失败: " + e.getMessage();
+                    log.warn("运行时状态查询失败: {}", url, e);
+                }
+            }
+        }
+
+        if (StringUtils.isNotBlank(lastMessage)) {
+            fallback.setMessage(lastMessage);
+        }
+        return fallback;
+    }
+
+    private String resolveRuntimeToolStatus(String message) {
+        if (StringUtils.contains(message, "未连接")) {
+            return "offline";
+        }
+        if (StringUtils.contains(message, "未启用MCP")) {
+            return "online_no_mcp";
+        }
+        if (StringUtils.contains(message, "尚未准备")) {
+            return "mcp_initializing";
+        }
+        return "runtime_unavailable";
     }
 
     private Object callDeviceToolFromRuntime(DeviceEntity device, String toolName, Map<String, Object> arguments) {

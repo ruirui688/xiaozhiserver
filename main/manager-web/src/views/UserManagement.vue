@@ -62,8 +62,7 @@
                   }}</el-button>
               </div>
               <div class="custom-pagination">
-                <el-select v-model="pageSize" @change="handlePageSizeChange"
-                  :class="['page-size-select', { 'page-size-select-en': $i18n.locale === 'en' }]">
+                <el-select v-model="pageSize" @change="handlePageSizeChange" class="page-size-select">
                   <el-option v-for="item in pageSizeOptions" :key="item"
                     :label="$t('modelConfig.itemsPerPage', { items: item })" :value="item">
                   </el-option>
@@ -677,16 +676,6 @@ export default {
     background: #dee7ff;
     color: #606266;
     font-size: 14px;
-  }
-
-  &.page-size-select-en {
-    width: 130px;
-
-    :deep(.el-input__inner) {
-      height: 36px;
-      line-height: 36px;
-      font-size: 15px;
-    }
   }
 
   :deep(.el-input__suffix) {

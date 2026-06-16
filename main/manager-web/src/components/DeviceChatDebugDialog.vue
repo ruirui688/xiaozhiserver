@@ -9,9 +9,17 @@
       <aside class="debug-side">
         <div class="status-block">
           <div class="status-title">{{ deviceLabel }}</div>
-          <el-tag :type="connected ? 'success' : 'info'" size="small">
-            {{ connected ? $t('deviceDebug.connected') : $t('deviceDebug.disconnected') }}
-          </el-tag>
+          <div class="status-tags">
+            <el-tag :type="connected ? 'success' : 'info'" size="small">
+              {{ $t('deviceDebug.debugSession') }}{{ connected ? $t('deviceDebug.connected') : $t('deviceDebug.disconnected') }}
+            </el-tag>
+            <el-tag :type="runtimeStatusTagType" size="small">
+              {{ $t('deviceDebug.runtimeConnection') }}{{ runtimeStatusText }}
+            </el-tag>
+            <el-tag :type="mcpStatusTagType" size="small">
+              {{ $t('deviceDebug.mcpState') }}{{ mcpStatusText }}
+            </el-tag>
+          </div>
         </div>
         <div class="side-actions">
           <el-button size="mini" type="primary" :loading="connecting" @click="connectDebug" :disabled="connected">
@@ -49,7 +57,7 @@
       <main class="debug-main">
         <div ref="messagePane" class="message-pane">
           <div v-if="messages.length === 0" class="empty-chat">
-            {{ $t('deviceDebug.empty') }}
+            {{ emptyChatText }}
           </div>
           <div v-for="message in messages" :key="message.id" class="chat-row" :class="message.role">
             <img class="chat-avatar" :src="message.role === 'assistant' ? botAvatar : userAvatar" />
@@ -81,7 +89,7 @@
         <div class="input-bar">
           <el-input
             v-model="inputText"
-            :placeholder="$t('deviceDebug.inputPlaceholder')"
+            :placeholder="inputPlaceholder"
             @keyup.enter.native="sendText"
             :disabled="!connected"
             clearable />
@@ -108,7 +116,8 @@ import { OpusDecoder } from 'opus-decoder';
 const INPUT_SAMPLE_RATE = 16000;
 const PCM_FRAME_SAMPLES = 960;
 const HEARTBEAT_INTERVAL_MS = 25000;
-const TOOL_REFRESH_INTERVAL_MS = 10000;
+const STATUS_REFRESH_INTERVAL_MS = 3000;
+const TOOL_REFRESH_INTERVAL_MS = 3000;
 const PENDING_CONFIRM_WINDOW_MS = 10000;
 
 export default {
@@ -135,8 +144,11 @@ export default {
       events: [],
       mcpTools: [],
       mcpToolsStatus: '',
+      deviceRuntimeStatus: null,
+      statusLoading: false,
       toolsLoading: false,
       heartbeatTimer: null,
+      statusRefreshTimer: null,
       toolRefreshTimer: null,
       opusDecoder: null,
       opusDecoderReady: null,
@@ -165,7 +177,69 @@ export default {
       return this.device.remark || this.device.macAddress || this.$t('deviceDebug.device');
     },
     mcpToolsStatusText() {
-      return this.mcpToolsStatus || this.$t('deviceDebug.noTools');
+      if (this.mcpToolsStatus) {
+        return this.mcpToolsStatus;
+      }
+      const statusMap = {
+        offline: this.$t('deviceDebug.toolsUnavailableOffline'),
+        online_no_mcp: this.$t('deviceDebug.statusOnlineNoMcp'),
+        mcp_initializing: this.$t('deviceDebug.statusMcpInitializing'),
+        runtime_unavailable: this.$t('deviceDebug.statusRuntimeUnavailable')
+      };
+      return statusMap[this.deviceStatusCode] || this.$t('deviceDebug.noTools');
+    },
+    deviceStatusCode() {
+      return (this.deviceRuntimeStatus && this.deviceRuntimeStatus.status) || 'unknown';
+    },
+    runtimeStatusText() {
+      if (this.statusLoading && !this.deviceRuntimeStatus) {
+        return this.$t('deviceDebug.statusChecking');
+      }
+      if (this.deviceStatusCode === 'runtime_unavailable') {
+        return this.$t('deviceDebug.statusRuntimeUnavailable');
+      }
+      if (this.deviceRuntimeStatus && this.deviceRuntimeStatus.runtimeConnected) {
+        return this.$t('deviceDebug.connected');
+      }
+      if (this.deviceStatusCode === 'unknown') {
+        return this.$t('deviceDebug.statusUnknown');
+      }
+      return this.$t('deviceDebug.disconnected');
+    },
+    runtimeStatusTagType() {
+      if (this.deviceStatusCode === 'runtime_unavailable') {
+        return 'danger';
+      }
+      return this.deviceRuntimeStatus && this.deviceRuntimeStatus.runtimeConnected ? 'success' : 'info';
+    },
+    mcpStatusText() {
+      if (this.statusLoading && !this.deviceRuntimeStatus) {
+        return this.$t('deviceDebug.statusChecking');
+      }
+      const statusMap = {
+        offline: this.$t('deviceDebug.statusUnavailable'),
+        online_no_mcp: this.$t('deviceDebug.statusOnlineNoMcp'),
+        mcp_initializing: this.$t('deviceDebug.statusMcpInitializing'),
+        mcp_ready: this.$t('deviceDebug.statusMcpReady'),
+        runtime_unavailable: this.$t('deviceDebug.statusRuntimeUnavailable')
+      };
+      return statusMap[this.deviceStatusCode] || this.$t('deviceDebug.statusUnknown');
+    },
+    mcpStatusTagType() {
+      const statusTypeMap = {
+        offline: 'info',
+        online_no_mcp: 'warning',
+        mcp_initializing: 'warning',
+        mcp_ready: 'success',
+        runtime_unavailable: 'danger'
+      };
+      return statusTypeMap[this.deviceStatusCode] || 'info';
+    },
+    emptyChatText() {
+      return this.connected ? this.$t('deviceDebug.empty') : this.$t('deviceDebug.debugConnectHint');
+    },
+    inputPlaceholder() {
+      return this.connected ? this.$t('deviceDebug.inputPlaceholder') : this.$t('deviceDebug.inputConnectPlaceholder');
     }
   },
   watch: {
@@ -175,7 +249,7 @@ export default {
         this.resetDialog();
         this.loadTools();
       } else {
-        this.disconnectDebug();
+        this.closeDebugSession(true);
       }
     },
     dialogVisible(val) {
@@ -191,6 +265,8 @@ export default {
       this.events = [];
       this.mcpTools = [];
       this.mcpToolsStatus = '';
+      this.deviceRuntimeStatus = null;
+      this.statusLoading = false;
       this.inputText = '';
       this.pcmRemainder = new Int16Array(0);
       this.activeAssistantMessageId = null;
@@ -198,18 +274,46 @@ export default {
       this.audioClips = {};
       this.playingAudioClipId = null;
       this.stopHeartbeat();
+      this.stopStatusRefresh();
       this.stopToolRefresh();
       this.releasePlayback();
     },
     handleClose() {
-      this.disconnectDebug();
+      this.closeDebugSession(true);
       this.dialogVisible = false;
     },
     loadTools() {
       if (!this.deviceId) return;
       this.toolsLoading = true;
+      this.fetchDeviceStatus();
       this.fetchDeviceTools().finally(() => {
         this.toolsLoading = false;
+      });
+      this.startStatusRefresh();
+      this.startToolRefresh();
+    },
+    fetchDeviceStatus() {
+      if (!this.deviceId || this.statusLoading) {
+        return Promise.resolve(null);
+      }
+      this.statusLoading = true;
+      return new Promise((resolve) => {
+        Api.device.getDeviceDebugStatus(this.deviceId, (res) => {
+          const data = res && res.data && res.data.data;
+          if (res && res.data && res.data.code === 0 && data) {
+            this.deviceRuntimeStatus = data;
+          } else {
+            this.deviceRuntimeStatus = {
+              status: 'runtime_unavailable',
+              runtimeConnected: false,
+              mcpReady: false,
+              toolsCount: 0,
+              message: (res && res.data && res.data.msg) || this.$t('deviceDebug.statusRuntimeUnavailable')
+            };
+          }
+          this.statusLoading = false;
+          resolve(this.deviceRuntimeStatus);
+        });
       });
     },
     fetchDeviceTools() {
@@ -260,7 +364,7 @@ export default {
         this.connecting = false;
         this.sendHello();
         this.startHeartbeat();
-        this.startToolRefresh();
+        this.fetchDeviceStatus();
         this.addEvent('websocket opened');
       };
       this.ws.onmessage = (event) => this.handleSocketMessage(event.data);
@@ -273,7 +377,6 @@ export default {
         this.connected = false;
         this.connecting = false;
         this.stopHeartbeat();
-        this.stopToolRefresh();
         this.finishActiveAudioClip();
         this.stopRecording();
         this.addEvent('websocket closed');
@@ -802,11 +905,25 @@ export default {
         this.heartbeatTimer = null;
       }
     },
+    startStatusRefresh() {
+      this.stopStatusRefresh();
+      this.statusRefreshTimer = setInterval(() => {
+        this.fetchDeviceStatus();
+      }, STATUS_REFRESH_INTERVAL_MS);
+    },
+    stopStatusRefresh() {
+      if (this.statusRefreshTimer) {
+        clearInterval(this.statusRefreshTimer);
+        this.statusRefreshTimer = null;
+      }
+    },
     startToolRefresh() {
       this.stopToolRefresh();
       this.fetchDeviceTools();
       this.toolRefreshTimer = setInterval(() => {
-        this.fetchDeviceTools();
+        if (this.deviceStatusCode !== 'mcp_ready') {
+          this.fetchDeviceTools();
+        }
       }, TOOL_REFRESH_INTERVAL_MS);
     },
     stopToolRefresh() {
@@ -816,9 +933,17 @@ export default {
       }
     },
     disconnectDebug() {
+      this.closeDebugSession(false);
+      this.fetchDeviceStatus();
+      this.fetchDeviceTools();
+    },
+    closeDebugSession(stopPolling) {
       this.stopRecording();
       this.stopHeartbeat();
-      this.stopToolRefresh();
+      if (stopPolling) {
+        this.stopStatusRefresh();
+        this.stopToolRefresh();
+      }
       this.finishActiveAudioClip();
       this.releasePlayback();
       if (this.ws) {
@@ -852,18 +977,25 @@ export default {
 
 .status-block {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
 }
 
 .status-title {
   font-size: 15px;
   font-weight: 600;
   color: #303133;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.status-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .side-actions {

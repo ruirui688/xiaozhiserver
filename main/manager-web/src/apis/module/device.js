@@ -101,6 +101,25 @@ export default {
                 });
             }).send();
     },
+    // 获取设备对话调试状态
+    getDeviceDebugStatus(deviceId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/device/debug/status/${deviceId}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .fail((res) => {
+                callback(res);
+            })
+            .networkFail((err) => {
+                console.error('获取设备调试状态失败:', err);
+                RequestService.reAjaxFun(() => {
+                    this.getDeviceDebugStatus(deviceId, callback);
+                });
+            }).send();
+    },
     // 获取设备MCP工具列表
     getDeviceTools(deviceId, callback) {
         RequestService.sendRequest()

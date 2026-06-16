@@ -132,7 +132,7 @@
       "layout": "default",
       "style": {
         "navigationStyle": "custom",
-        "navigationBarTitleText": "ForgotPassword"
+        "navigationBarTitleText": "找回密码"
       }
     },
     {
@@ -141,16 +141,7 @@
       "layout": "default",
       "style": {
         "navigationStyle": "custom",
-        "navigationBarTitleText": "Login"
-      }
-    },
-    {
-      "path": "pages/login/privacy-policy-en",
-      "type": "page",
-      "layout": "default",
-      "style": {
-        "navigationStyle": "custom",
-        "navigationBarTitleText": "Privacy Policy"
+        "navigationBarTitleText": "登录"
       }
     },
     {
@@ -160,15 +151,6 @@
       "style": {
         "navigationStyle": "custom",
         "navigationBarTitleText": "隐私政策"
-      }
-    },
-    {
-      "path": "pages/login/user-agreement-en",
-      "type": "page",
-      "layout": "default",
-      "style": {
-        "navigationStyle": "custom",
-        "navigationBarTitleText": "User Agreement"
       }
     },
     {

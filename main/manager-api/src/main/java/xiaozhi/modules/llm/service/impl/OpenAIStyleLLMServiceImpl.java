@@ -46,6 +46,62 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
 
     private final RestTemplate restTemplate = new RestTemplate();
 
+    private boolean isDeepSeek(String baseUrl) {
+        return StringUtils.containsIgnoreCase(baseUrl, "api.deepseek.com");
+    }
+
+    private String normalizeThinkingType(Object value) {
+        if (value == null) {
+            return null;
+        }
+        String thinkingType;
+        if (value instanceof JSONObject thinking) {
+            thinkingType = thinking.getStr("type");
+        } else if (value instanceof Map<?, ?> thinking) {
+            Object type = thinking.get("type");
+            thinkingType = type == null ? null : String.valueOf(type);
+        } else if (value instanceof Boolean enabled) {
+            thinkingType = enabled ? "enabled" : "disabled";
+        } else {
+            thinkingType = String.valueOf(value);
+        }
+
+        thinkingType = StringUtils.lowerCase(StringUtils.trimToEmpty(thinkingType));
+        thinkingType = switch (thinkingType) {
+            case "enable", "true", "on", "1" -> "enabled";
+            case "disable", "false", "off", "0" -> "disabled";
+            default -> thinkingType;
+        };
+        return "enabled".equals(thinkingType) || "disabled".equals(thinkingType) ? thinkingType : null;
+    }
+
+    private String normalizeReasoningEffort(String value) {
+        String effort = StringUtils.lowerCase(StringUtils.trimToEmpty(value));
+        effort = switch (effort) {
+            case "low", "medium" -> "high";
+            case "xhigh" -> "max";
+            default -> effort;
+        };
+        return "high".equals(effort) || "max".equals(effort) ? effort : null;
+    }
+
+    private void applyProviderOptions(String baseUrl, JSONObject configJson, Map<String, Object> requestBody) {
+        if (isDeepSeek(baseUrl)) {
+            String thinkingType = normalizeThinkingType(configJson.get("thinking"));
+            if (thinkingType != null) {
+                requestBody.put("thinking", Map.of("type", thinkingType));
+            }
+
+            String reasoningEffort = normalizeReasoningEffort(configJson.getStr("reasoning_effort"));
+            if ("enabled".equals(thinkingType) && reasoningEffort != null) {
+                requestBody.put("reasoning_effort", reasoningEffort);
+            }
+            return;
+        }
+
+        applyThinkingDisabled(baseUrl, requestBody);
+    }
+
     /**
      * 根据域名自动禁用思考模式
      */
@@ -123,11 +179,12 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
             messages[0] = message;
 
             requestBody.put("messages", messages);
-            requestBody.put("temperature", temperature != null ? temperature : 0.7);
+            if (!isDeepSeek(baseUrl)) {
+                requestBody.put("temperature", temperature != null ? temperature : 0.7);
+            }
             requestBody.put("max_tokens", maxTokens != null ? maxTokens : 2000);
 
-            // 禁用思考模式
-            applyThinkingDisabled(baseUrl, requestBody);
+            applyProviderOptions(baseUrl, configJson, requestBody);
 
             // 发送HTTP请求
             HttpHeaders headers = new HttpHeaders();
@@ -219,11 +276,12 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
             messages[0] = message;
 
             requestBody.put("messages", messages);
-            requestBody.put("temperature", 0.2);
+            if (!isDeepSeek(baseUrl)) {
+                requestBody.put("temperature", 0.2);
+            }
             requestBody.put("max_tokens", 2000);
 
-            // 禁用思考模式
-            applyThinkingDisabled(baseUrl, requestBody);
+            applyProviderOptions(baseUrl, configJson, requestBody);
 
             // 发送HTTP请求
             HttpHeaders headers = new HttpHeaders();
@@ -375,11 +433,12 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
             messages[0] = message;
 
             requestBody.put("messages", messages);
-            requestBody.put("temperature", 0.3);
+            if (!isDeepSeek(baseUrl)) {
+                requestBody.put("temperature", 0.3);
+            }
             requestBody.put("max_tokens", 50);
 
-            // 禁用思考模式
-            applyThinkingDisabled(baseUrl, requestBody);
+            applyProviderOptions(baseUrl, configJson, requestBody);
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);

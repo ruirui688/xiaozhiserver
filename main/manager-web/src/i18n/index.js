@@ -16,10 +16,3 @@ const i18n = new VueI18n({
 });
 
 export default i18n;
-
-export const changeLanguage = () => {
-  i18n.locale = DEFAULT_LANGUAGE;
-  localStorage.setItem('userLanguage', DEFAULT_LANGUAGE);
-  // 通知组件语言已更改
-  Vue.prototype.$eventBus.$emit('languageChanged', DEFAULT_LANGUAGE);
-};

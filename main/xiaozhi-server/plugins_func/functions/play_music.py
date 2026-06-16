@@ -119,6 +119,15 @@ def get_music_files(music_dir, music_ext):
     return music_files, music_file_names
 
 
+def _refresh_music_cache():
+    MUSIC_CACHE["music_files"], MUSIC_CACHE["music_file_names"] = get_music_files(
+        MUSIC_CACHE["music_dir"], MUSIC_CACHE["music_ext"]
+    )
+    MUSIC_CACHE["scan_time"] = time.time()
+    if os.path.exists(MUSIC_CACHE["music_dir"]):
+        MUSIC_CACHE["dir_mtime"] = os.path.getmtime(MUSIC_CACHE["music_dir"])
+
+
 def initialize_music_handler(conn: "ConnectionHandler"):
     global MUSIC_CACHE
     if MUSIC_CACHE == {}:
@@ -139,10 +148,7 @@ def initialize_music_handler(conn: "ConnectionHandler"):
             MUSIC_CACHE["music_ext"] = (".mp3", ".wav", ".p3")
             MUSIC_CACHE["refresh_time"] = 60
         # 获取音乐文件列表
-        MUSIC_CACHE["music_files"], MUSIC_CACHE["music_file_names"] = get_music_files(
-            MUSIC_CACHE["music_dir"], MUSIC_CACHE["music_ext"]
-        )
-        MUSIC_CACHE["scan_time"] = time.time()
+        _refresh_music_cache()
     return MUSIC_CACHE
 
 
@@ -156,12 +162,13 @@ async def handle_music_command(conn: "ConnectionHandler", text):
 
     # 尝试匹配具体歌名
     if os.path.exists(MUSIC_CACHE["music_dir"]):
-        if time.time() - MUSIC_CACHE["scan_time"] > MUSIC_CACHE["refresh_time"]:
+        dir_mtime = os.path.getmtime(MUSIC_CACHE["music_dir"])
+        if (
+            time.time() - MUSIC_CACHE["scan_time"] > MUSIC_CACHE["refresh_time"]
+            or dir_mtime != MUSIC_CACHE.get("dir_mtime")
+        ):
             # 刷新音乐文件列表
-            MUSIC_CACHE["music_files"], MUSIC_CACHE["music_file_names"] = (
-                get_music_files(MUSIC_CACHE["music_dir"], MUSIC_CACHE["music_ext"])
-            )
-            MUSIC_CACHE["scan_time"] = time.time()
+            _refresh_music_cache()
 
         potential_song = _extract_song_name(clean_text)
         if potential_song:

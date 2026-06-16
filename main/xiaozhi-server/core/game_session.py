@@ -58,6 +58,29 @@ class GameSessionManager:
         "一心一意",
         "水到渠成",
         "心想事成",
+        "万事如意",
+        "海阔天空",
+        "山清水秀",
+        "大显身手",
+        "开门见山",
+        "安居乐业",
+        "日新月异",
+        "人山人海",
+        "声东击西",
+        "足智多谋",
+        "胸有成竹",
+        "长年累月",
+        "云开见日",
+        "实事求是",
+        "理直气壮",
+        "可歌可泣",
+        "中流砥柱",
+    ]
+    _IDIOM_CHAIN_OPENINGS = [
+        "来一局成语接龙，我出“{idiom}”，你接“{char}”字。",
+        "这次从“{idiom}”开始，你接最后的“{char}”字。",
+        "我先抛一个：“{idiom}”。轮到你接“{char}”字。",
+        "开局成语是“{idiom}”，下一句请用“{char}”字开头。",
     ]
 
     _IDIOM_NEXT = {
@@ -86,6 +109,8 @@ class GameSessionManager:
         "安": ["安居乐业", "安然无恙"],
         "业": ["业精于勤"],
         "勤": ["勤能补拙"],
+        "拙": ["拙口钝腮"],
+        "钝": ["钝学累功"],
         "美": ["美中不足"],
         "足": ["足智多谋"],
         "谋": ["谋事在人"],
@@ -96,6 +121,7 @@ class GameSessionManager:
         "上": ["上善若水"],
         "水": ["水到渠成", "水落石出"],
         "出": ["出类拔萃", "出口成章"],
+        "萃": ["萃英拔萃"],
         "华": ["华而不实"],
         "实": ["实事求是"],
         "是": ["是非分明"],
@@ -269,7 +295,7 @@ class GameSessionManager:
         if not state or not state.get("active") or self._is_restart_message(normalized):
             state = self._start_idiom_chain(tool_name)
             idiom = state["last_idiom"]
-            return f"成语接龙开始。我先出：{idiom}。你接“{idiom[-1]}”字。"
+            return self._format_idiom_chain_opening(idiom)
 
         expected = state["expected_char"]
         if self._is_give_up_message(normalized) or self._is_unknown_message(normalized):
@@ -281,14 +307,16 @@ class GameSessionManager:
             return f"这个字不好接。我换一个常见的：{idiom}。你接“{idiom[-1]}”字。"
 
         user_idiom = self._extract_idiom_answer(user_message)
+        if not user_idiom.startswith(expected):
+            if len(user_idiom) == 4:
+                return f"这个成语没接上。现在要以“{expected}”字开头，再试一个。"
+            return f"这个成语没接上。要以“{expected}”字开头，再试一个。"
+
         if not self._is_known_idiom(user_idiom):
             hint = self._peek_idiom(expected)
             if hint:
-                return f"这句不算常见四字成语。请接“{expected}”字，比如“{hint}”。"
-            return f"这句不算常见四字成语。还是接“{expected}”字。"
-
-        if not user_idiom.startswith(expected):
-            return f"这个成语没接上。要以“{expected}”字开头，再试一个。"
+                return f"这句不在当前成语库里。请接“{expected}”字，比如“{hint}”。"
+            return f"这句不在当前成语库里。还是接“{expected}”字。"
 
         if user_idiom in state["used"]:
             return f"“{user_idiom}”刚才用过了。请换一个“{expected}”字开头的成语。"
@@ -313,19 +341,29 @@ class GameSessionManager:
             state = self._start_user_describes_guess(tool_name)
             if self._has_user_describes_clue(normalized):
                 self._update_user_describes_state(state, user_message)
+                if state.get("unsupported_reason"):
+                    self.sessions.pop(tool_name, None)
+                    return self._unsupported_user_describes_response(state)
                 if state.get("target_type") == "historical_person":
                     return self._next_historical_person_response(state)
-            return "我们玩你说我猜。你描述特点、身份或年代，我来猜；先别直接说答案。"
+                if state.get("target_type") == "person":
+                    return self._next_person_scope_response(state)
+            return "我们玩你说我猜。你描述一个历史人物的国家、年代、身份或事迹，我来猜；先别直接说答案。"
 
         self._update_user_describes_state(state, user_message)
+        if state.get("unsupported_reason"):
+            self.sessions.pop(tool_name, None)
+            return self._unsupported_user_describes_response(state)
         if state.get("target_type") == "historical_person":
             return self._next_historical_person_response(state)
+        if state.get("target_type") == "person":
+            return self._next_person_scope_response(state)
 
         if self._contains_any(normalized, ("历史人物", "古代人", "皇帝", "将军", "诗人")):
             state["target_type"] = "historical_person"
             return self._next_historical_person_response(state)
 
-        return "我先缩小范围：它是人物、物品、地点，还是动物？"
+        return "这个玩法当前先支持历史人物。请描述他的国家、年代、身份或代表事件；如果不是历史人物，这局先不适合继续猜。"
 
     def _start_user_describes_guess(self, tool_name):
         state = {
@@ -347,11 +385,6 @@ class GameSessionManager:
         normalized = self._normalize(user_message)
         state["turn_count"] += 1
 
-        if self._contains_any(normalized, ("历史人物", "古代人", "皇帝", "将军", "诗人")):
-            state["target_type"] = "historical_person"
-        if self._contains_any(normalized, ("人物", "人名")) and not state.get("target_type"):
-            state["target_type"] = "person"
-
         last_question = state.get("last_question")
         answer = self._classify_answer_to_last_question(normalized, last_question)
         if last_question and answer:
@@ -361,11 +394,29 @@ class GameSessionManager:
                     state["solved_name"] = last_question["name"]
                 else:
                     state["excluded_names"].add(last_question["name"])
+            elif last_question.get("type") == "target_type":
+                if answer == "yes":
+                    state["target_type"] = last_question["target_type"]
+                else:
+                    state["unsupported_reason"] = last_question.get(
+                        "unsupported_reason", "unsupported_target_type"
+                    )
             elif last_question.get("type") == "fact":
                 key = last_question["key"]
                 yes_value = last_question["yes_value"]
                 state["facts"][key] = yes_value if answer == "yes" else self._opposite_value(yes_value)
             state["last_question"] = None
+
+        if state.get("unsupported_reason"):
+            return
+
+        if self._contains_any(normalized, ("历史人物", "古代人", "皇帝", "将军", "诗人")):
+            state["target_type"] = "historical_person"
+        if self._contains_any(normalized, ("人物", "人名")) and not state.get("target_type"):
+            state["target_type"] = "person"
+        if self._contains_any(normalized, ("物品", "东西", "物件", "地点", "地方", "动物")) and not state.get("target_type"):
+            state["unsupported_reason"] = "unsupported_target_type"
+            return
 
         facts = state["facts"]
         if self._contains_any(normalized, ("不是中国", "不属于中国", "不是国内", "不是我国")):
@@ -451,6 +502,20 @@ class GameSessionManager:
             return self._ask_candidate_guess(state, candidates[0])
 
         return "按目前线索候选排完了。你再给我一个更具体线索，比如年代、国家、身份或代表事件。"
+
+    def _next_person_scope_response(self, state):
+        state["last_question"] = {
+            "type": "target_type",
+            "target_type": "historical_person",
+            "unsupported_reason": "non_historical_person",
+        }
+        return "人物范围很大。它是历史人物吗？如果是，你可以继续给国家、年代、身份或代表事件。"
+
+    @staticmethod
+    def _unsupported_user_describes_response(state):
+        if state.get("unsupported_reason") == "non_historical_person":
+            return "这个玩法当前主要支持历史人物。不是历史人物的话，这局先不继续猜；你可以换一个历史人物重新开始。"
+        return "这个玩法当前主要支持历史人物，不支持按物品、地点或动物继续猜。你可以换一个历史人物重新开始。"
 
     def _filter_historical_candidates(self, state):
         facts = state.get("facts", {})
@@ -553,7 +618,8 @@ class GameSessionManager:
         return opposites.get(value)
 
     def _start_idiom_chain(self, tool_name):
-        candidates = [item for item in self._IDIOM_CHAIN_STARTS if item not in self.last_words[-3:]]
+        recent_words = set(self.last_words[-8:])
+        candidates = [item for item in self._IDIOM_CHAIN_STARTS if item not in recent_words]
         idiom = random.choice(candidates or self._IDIOM_CHAIN_STARTS)
         state = {
             "active": True,
@@ -569,6 +635,10 @@ class GameSessionManager:
         self.last_words.append(idiom)
         self.last_words = self.last_words[-8:]
         return state
+
+    def _format_idiom_chain_opening(self, idiom):
+        template = random.choice(self._IDIOM_CHAIN_OPENINGS)
+        return template.format(idiom=idiom, char=idiom[-1])
 
     def _server_next_idiom(self, state):
         expected = state["expected_char"]
