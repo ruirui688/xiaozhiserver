@@ -47,4 +47,11 @@ public interface AiAgentChatHistoryDao extends BaseMapper<AgentChatHistoryEntity
      * @param audioIds 音频ID列表
      */
     void deleteAudioByIds(@Param("audioIds") List<String> audioIds);
+
+    /**
+     * 批量删除未被聊天记录引用的音频
+     *
+     * @param audioIds 音频ID列表
+     */
+    void deleteUnreferencedAudioByIds(@Param("audioIds") List<String> audioIds);
 }

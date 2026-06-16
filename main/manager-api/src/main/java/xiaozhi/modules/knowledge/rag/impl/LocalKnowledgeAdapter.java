@@ -33,6 +33,8 @@ import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -115,15 +117,17 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
 
     @Override
     public PageData<KnowledgeFilesDTO> getDocumentList(String datasetId, DocumentDTO.ListReq req) {
+        int page = req.getPage() == null || req.getPage() < 1 ? 1 : req.getPage();
+        int pageSize = req.getPageSize() == null || req.getPageSize() < 1 ? 10 : req.getPageSize();
         QueryWrapper<DocumentEntity> query = new QueryWrapper<>();
         query.eq("dataset_id", datasetId);
         if (StringUtils.isNotBlank(req.getId())) {
             query.eq("document_id", req.getId());
         }
         query.orderByDesc("created_at");
-        List<DocumentEntity> docs = documentDao.selectList(query);
-        List<KnowledgeFilesDTO> result = docs.stream().map(this::toFileDTO).collect(Collectors.toList());
-        return new PageData<>(result, result.size());
+        IPage<DocumentEntity> docs = documentDao.selectPage(new Page<>(page, pageSize), query);
+        List<KnowledgeFilesDTO> result = docs.getRecords().stream().map(this::toFileDTO).collect(Collectors.toList());
+        return new PageData<>(result, docs.getTotal());
     }
 
     @Override
@@ -206,13 +210,12 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             query.like("content", req.getKeywords());
         }
         query.orderByAsc("sort_order");
-        List<KnowledgeChunkEntity> all = chunkDao.selectList(query);
-        List<KnowledgeChunkEntity> pageItems = paginate(all, page, pageSize);
-        List<ChunkDTO.InfoVO> chunks = pageItems.stream().map(this::toChunkVO).collect(Collectors.toList());
+        IPage<KnowledgeChunkEntity> pageResult = chunkDao.selectPage(new Page<>(page, pageSize), query);
+        List<ChunkDTO.InfoVO> chunks = pageResult.getRecords().stream().map(this::toChunkVO).collect(Collectors.toList());
         return ChunkDTO.ListVO.builder()
                 .chunks(chunks)
                 .doc(getDocumentById(datasetId, documentId))
-                .total((long) all.size())
+                .total(pageResult.getTotal())
                 .build();
     }
 

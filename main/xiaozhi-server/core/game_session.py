@@ -180,6 +180,44 @@ class GameSessionManager:
     def has_active_game(self):
         return self.get_active_tool() is not None
 
+    def clear_active_games(self):
+        self.sessions.clear()
+
+    def get_requested_game_tool(self, user_message):
+        normalized = self._normalize(user_message)
+        if not normalized:
+            return None
+        if self._contains_any(
+            normalized,
+            (
+                "玩个游戏",
+                "玩一个游戏",
+                "来个游戏",
+                "来一个游戏",
+                "小游戏",
+            ),
+        ):
+            return "idiom_chain"
+        if self._contains_any(normalized, ("成语接龙", "接成语")):
+            return "idiom_chain"
+        if self._contains_any(
+            normalized,
+            (
+                "你想一个词我猜",
+                "你想一个词我来猜",
+                "你出题我猜",
+                "我来猜你想的词",
+                "小智想词",
+            ),
+        ):
+            return "xiaozhi_thinks_you_guess"
+        if self._contains_any(
+            normalized,
+            ("你说我猜", "我描述你猜", "我描述你来猜", "猜个词", "猜词"),
+        ):
+            return "guess_what_i_say"
+        return None
+
     def handle_guess_my_word(self, tool_name, user_message):
         normalized = self._normalize(user_message)
         if self._is_end_message(normalized):
@@ -214,10 +252,11 @@ class GameSessionManager:
 
         if guess not in state["user_guesses"]:
             state["user_guesses"].append(guess)
+        guess_display = self._guess_display(guess)
         hint = self._consume_next_hint(state)
         if hint:
-            return f"不是{guess}。再给你一个提示：{hint}。继续猜。"
-        return f"不是{guess}。提示已经给完了，你再想想。"
+            return f"不是{guess_display}。再给你一个提示：{hint}。继续猜。"
+        return f"不是{guess_display}。提示已经给完了，你再想想。"
 
     def handle_idiom_chain(self, tool_name, user_message):
         normalized = self._normalize(user_message)
@@ -251,6 +290,9 @@ class GameSessionManager:
         if not user_idiom.startswith(expected):
             return f"这个成语没接上。要以“{expected}”字开头，再试一个。"
 
+        if user_idiom in state["used"]:
+            return f"“{user_idiom}”刚才用过了。请换一个“{expected}”字开头的成语。"
+
         state["user_correct"] += 1
         state["used"].add(user_idiom)
         state["last_idiom"] = user_idiom
@@ -269,6 +311,10 @@ class GameSessionManager:
         state = self.sessions.get(tool_name)
         if not state or not state.get("active") or self._is_restart_message(normalized):
             state = self._start_user_describes_guess(tool_name)
+            if self._has_user_describes_clue(normalized):
+                self._update_user_describes_state(state, user_message)
+                if state.get("target_type") == "historical_person":
+                    return self._next_historical_person_response(state)
             return "我们玩你说我猜。你描述特点、身份或年代，我来猜；先别直接说答案。"
 
         self._update_user_describes_state(state, user_message)
@@ -307,7 +353,7 @@ class GameSessionManager:
             state["target_type"] = "person"
 
         last_question = state.get("last_question")
-        answer = self._classify_yes_no(normalized)
+        answer = self._classify_answer_to_last_question(normalized, last_question)
         if last_question and answer:
             if last_question.get("type") == "guess":
                 if answer == "yes":
@@ -322,16 +368,28 @@ class GameSessionManager:
             state["last_question"] = None
 
         facts = state["facts"]
-        if self._contains_any(normalized, ("中国", "国内", "我国", "中华")):
-            facts["region"] = "china"
-            state["target_type"] = "historical_person"
-        if self._contains_any(normalized, ("外国", "国外", "欧洲", "美国", "西方")):
+        if self._contains_any(normalized, ("不是中国", "不属于中国", "不是国内", "不是我国")):
             facts["region"] = "foreign"
             state["target_type"] = "historical_person"
-        if self._contains_any(normalized, ("近代", "现代", "近现代", "新中国", "民国")):
+        elif self._contains_any(normalized, ("中国", "国内", "我国", "中华")):
+            facts["region"] = "china"
+            state["target_type"] = "historical_person"
+        if self._contains_any(normalized, ("不是外国", "不是国外", "不是欧洲", "不是美国", "不是西方")):
+            facts["region"] = "china"
+            state["target_type"] = "historical_person"
+        elif self._contains_any(normalized, ("外国", "国外", "欧洲", "美国", "西方")):
+            facts["region"] = "foreign"
+            state["target_type"] = "historical_person"
+        if self._contains_any(normalized, ("不是近代", "不是现代", "不是近现代", "不是民国")):
+            facts["period"] = "ancient"
+            state["target_type"] = "historical_person"
+        elif self._contains_any(normalized, ("近代", "现代", "近现代", "新中国", "民国")):
             facts["period"] = "modern"
             state["target_type"] = "historical_person"
-        if self._contains_any(normalized, ("古代", "秦朝", "汉朝", "唐朝", "宋朝", "明朝", "清朝", "三国")):
+        if self._contains_any(normalized, ("不是古代", "不是秦朝", "不是汉朝", "不是唐朝", "不是宋朝", "不是明朝", "不是清朝", "不是三国")):
+            facts["period"] = "modern"
+            state["target_type"] = "historical_person"
+        elif self._contains_any(normalized, ("古代", "秦朝", "汉朝", "唐朝", "宋朝", "明朝", "清朝", "三国")):
             facts["period"] = "ancient"
             state["target_type"] = "historical_person"
         if self._contains_any(normalized, ("不是皇帝", "不是君主")):
@@ -339,10 +397,18 @@ class GameSessionManager:
         elif self._contains_any(normalized, ("皇帝", "君主", "帝王")):
             facts["ruler"] = True
             state["target_type"] = "historical_person"
-        if self._contains_any(normalized, ("战争", "军事", "将军", "打仗", "建国")):
+        if self._contains_any(normalized, ("不是战争", "不是军事", "不是将军", "不打仗", "不是建国")):
+            facts["military"] = False
+            state["target_type"] = "historical_person"
+        elif self._contains_any(normalized, ("战争", "军事", "将军", "打仗", "建国")):
             facts["military"] = True
             state["target_type"] = "historical_person"
-        if self._contains_any(normalized, ("诗人", "文学家", "作家")):
+        if self._contains_any(normalized, ("不是诗人", "不是文学家", "不是作家")):
+            facts["poet"] = False
+            if not self._contains_any(normalized, ("文学", "思想", "文化", "教育")):
+                facts["culture"] = False
+            state["target_type"] = "historical_person"
+        elif self._contains_any(normalized, ("诗人", "文学家", "作家")):
             facts["culture"] = True
             facts["poet"] = True
             facts["military"] = False
@@ -351,10 +417,16 @@ class GameSessionManager:
         elif self._contains_any(normalized, ("文学", "思想", "文化", "教育")):
             facts["culture"] = True
             state["target_type"] = "historical_person"
-        if self._contains_any(normalized, ("开国", "建立", "创建")):
+        if self._contains_any(normalized, ("不是开国", "没有建立", "没有创建")):
+            facts["founder"] = False
+            state["target_type"] = "historical_person"
+        elif self._contains_any(normalized, ("开国", "建立", "创建")):
             facts["founder"] = True
             state["target_type"] = "historical_person"
-        if self._contains_any(normalized, ("改革", "变法", "转折")):
+        if self._contains_any(normalized, ("不是改革", "不是变法", "不是转折")):
+            facts["reformer"] = False
+            state["target_type"] = "historical_person"
+        elif self._contains_any(normalized, ("改革", "变法", "转折")):
             facts["reformer"] = True
             state["target_type"] = "historical_person"
 
@@ -432,6 +504,40 @@ class GameSessionManager:
             return "no"
         if any(word in normalized for word in yes_words):
             return "yes"
+        return ""
+
+    @classmethod
+    def _classify_answer_to_last_question(cls, normalized, last_question):
+        if not last_question:
+            return ""
+        if last_question.get("type") == "guess":
+            return cls._classify_short_feedback(normalized)
+        if last_question.get("type") == "fact":
+            return cls._classify_fact_answer(normalized)
+        return ""
+
+    @staticmethod
+    def _classify_short_feedback(normalized):
+        yes_words = {"是", "是的", "对", "对的", "嗯", "没错", "正确", "猜对了", "差不多", "算是"}
+        no_words = {"不是", "不对", "错了", "没有", "不算", "否", "不正确", "没猜对", "还不对"}
+        if normalized in yes_words:
+            return "yes"
+        if normalized in no_words:
+            return "no"
+        if normalized.startswith(("不是", "不对", "错了", "没猜对", "还不对")) and len(normalized) <= 8:
+            return "no"
+        if normalized.startswith(("是的", "对的", "没错", "正确", "猜对了")) and len(normalized) <= 8:
+            return "yes"
+        return ""
+
+    @staticmethod
+    def _classify_fact_answer(normalized):
+        yes_words = {"是", "是的", "对", "对的", "嗯", "没错", "正确", "差不多", "算是"}
+        no_words = {"不是", "不是的", "不对", "错了", "没有", "不算", "否", "不正确"}
+        if normalized in yes_words:
+            return "yes"
+        if normalized in no_words:
+            return "no"
         return ""
 
     @staticmethod
@@ -572,7 +678,80 @@ class GameSessionManager:
     def _is_correct_guess(cls, guess, target_word):
         guess = cls._normalize(guess)
         target_word = cls._normalize(target_word)
+        if cls._is_negated_guess(guess, target_word):
+            return False
         return guess == target_word or target_word in guess
+
+    @classmethod
+    def _is_negated_guess(cls, guess, target_word):
+        if target_word not in guess:
+            return False
+        negation_markers = (
+            f"不是{target_word}",
+            f"肯定不是{target_word}",
+            f"应该不是{target_word}",
+            f"可能不是{target_word}",
+            f"不可能是{target_word}",
+            f"不会是{target_word}",
+            f"{target_word}不对",
+            f"{target_word}不是",
+        )
+        return any(marker in guess for marker in negation_markers)
+
+    @classmethod
+    def _guess_display(cls, guess):
+        normalized = cls._normalize(guess)
+        for prefix in ("肯定不是", "应该不是", "可能不是", "不可能是", "不会是", "不是"):
+            if normalized.startswith(prefix):
+                return normalized[len(prefix):] or normalized
+        for suffix in ("不对", "不是"):
+            if normalized.endswith(suffix):
+                return normalized[: -len(suffix)] or normalized
+        return normalized
+
+    @classmethod
+    def _has_user_describes_clue(cls, normalized):
+        start_phrases = (
+            "玩你说我猜",
+            "你说我猜",
+            "猜个词",
+            "猜词",
+            "我描述你猜",
+            "我描述你来猜",
+        )
+        clue_keywords = (
+            "历史人物",
+            "古代人",
+            "皇帝",
+            "将军",
+            "诗人",
+            "人物",
+            "中国",
+            "外国",
+            "近代",
+            "现代",
+            "古代",
+            "秦朝",
+            "汉朝",
+            "唐朝",
+            "宋朝",
+            "明朝",
+            "清朝",
+            "三国",
+            "战争",
+            "军事",
+            "文学",
+            "思想",
+            "文化",
+            "开国",
+            "改革",
+        )
+        if not cls._contains_any(normalized, start_phrases):
+            return bool(cls._contains_any(normalized, clue_keywords))
+        stripped = normalized
+        for phrase in start_phrases:
+            stripped = stripped.replace(phrase, "")
+        return bool(cls._contains_any(stripped, clue_keywords))
 
     @staticmethod
     def _is_end_message(normalized):

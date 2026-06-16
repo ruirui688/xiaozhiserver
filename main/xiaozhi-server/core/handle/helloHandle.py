@@ -43,9 +43,13 @@ async def handleHelloMessage(conn: "ConnectionHandler", msg_json):
     """处理hello消息"""
     audio_params = msg_json.get("audio_params")
     if audio_params:
-        format = audio_params.get("format")
-        conn.logger.bind(tag=TAG).debug(f"客户端音频格式: {format}")
-        conn.audio_format = format
+        audio_format = audio_params.get("format")
+        conn.logger.bind(tag=TAG).debug(f"客户端输入音频格式: {audio_format}")
+        if audio_format:
+            conn.audio_format = audio_format
+        # 回给设备的 audio_params 会影响设备端录音通道配置。
+        # ASR/VAD 当前按 16k 单声道 Opus 处理，因此这里保留客户端上报的输入参数，
+        # 避免把服务端 TTS 输出采样率误下发成设备录音采样率。
         conn.welcome_msg["audio_params"] = audio_params
     features = msg_json.get("features")
     if features:
@@ -57,6 +61,10 @@ async def handleHelloMessage(conn: "ConnectionHandler", msg_json):
             # 发送初始化
             asyncio.create_task(send_mcp_initialize_message(conn))
 
+    conn.logger.bind(tag=TAG).info(
+        f"发送hello消息，客户端输入音频参数: {conn.welcome_msg.get('audio_params')}, "
+        f"服务端输出音频采样率: {conn.sample_rate}"
+    )
     await conn.websocket.send(json.dumps(conn.welcome_msg))
 
 

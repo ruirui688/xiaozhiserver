@@ -17,6 +17,9 @@ class McpTextMessageHandler(TextMessageHandler):
 
     async def handle(self, conn: "ConnectionHandler", msg_json: Dict[str, Any]) -> None:
         if "payload" in msg_json:
+            if not getattr(conn, "mcp_client", None):
+                conn.logger.bind(tag=__name__).warning("收到MCP消息，但客户端MCP未初始化")
+                return
             asyncio.create_task(
                 handle_mcp_message(conn, conn.mcp_client, msg_json["payload"])
             )

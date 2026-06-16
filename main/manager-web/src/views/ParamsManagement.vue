@@ -5,6 +5,10 @@
         <div class="operation-bar">
             <h2 class="page-title">{{ $t('paramManagement.pageTitle') }}</h2>
             <div class="right-operations">
+                <el-button class="btn-restart" icon="el-icon-refresh-right" :loading="restarting"
+                    @click="confirmRestartServer">
+                    {{ $t('paramManagement.restartServer') }}
+                </el-button>
                 <el-input :placeholder="$t('paramManagement.searchPlaceholder')" v-model="searchCode"
                     class="search-input" @keyup.enter.native="handleSearch" clearable />
                 <el-button class="btn-search" @click="handleSearch">{{ $t('paramManagement.search') }}</el-button>
@@ -115,6 +119,7 @@ export default {
             paramsList: [],
             currentPage: 1,
             loading: false,
+            restarting: false,
             pageSize: 10,
             pageSizeOptions: [10, 20, 50, 100],
             total: 0,
@@ -231,6 +236,7 @@ export default {
                         message: this.$t('paramManagement.updateSuccess'),
                         showClose: true
                     });
+                    this.promptRestartAfterSave();
                 }, ({ data }) => {
                     this.$message.error({
                         message: data.msg || this.$t('paramManagement.updateFailed'),
@@ -263,6 +269,84 @@ export default {
                     }
                 });
             }
+        },
+        promptRestartAfterSave() {
+            this.$confirm(this.$t('paramManagement.restartAfterSaveMessage'), this.$t('paramManagement.restartAfterSaveTitle'), {
+                confirmButtonText: this.$t('paramManagement.restartNow'),
+                cancelButtonText: this.$t('paramManagement.restartLater'),
+                type: 'warning'
+            }).then(() => {
+                this.restartServer();
+            }).catch(() => {
+                this.$message({
+                    type: 'info',
+                    message: this.$t('paramManagement.restartLaterTip'),
+                    duration: 1500
+                });
+            });
+        },
+        confirmRestartServer() {
+            this.$confirm(this.$t('serverSideManager.confirmRestart'), this.$t('serverSideManager.restartServer'), {
+                confirmButtonText: this.$t('serverSideManager.restart'),
+                cancelButtonText: this.$t('button.cancel'),
+                type: 'warning'
+            }).then(() => {
+                this.restartServer();
+            }).catch(() => {});
+        },
+        restartServer() {
+            if (this.restarting) {
+                return;
+            }
+            this.restarting = true;
+            Api.admin.getWsServerList({}, ({ data }) => {
+                if (data.code !== 0) {
+                    this.restarting = false;
+                    this.$message.error({
+                        message: data.msg || this.$t('serverSideManager.getServerListFailed'),
+                        showClose: true
+                    });
+                    return;
+                }
+
+                const serverList = Array.isArray(data.data) ? data.data.filter(Boolean) : [];
+                if (serverList.length === 0) {
+                    this.restarting = false;
+                    this.$message.warning({
+                        message: this.$t('paramManagement.noServerToRestart'),
+                        showClose: true
+                    });
+                    return;
+                }
+
+                let completed = 0;
+                let failed = 0;
+                serverList.forEach(targetWs => {
+                    Api.admin.sendWsServerAction({
+                        targetWs,
+                        action: 'restart'
+                    }, ({ data: actionData }) => {
+                        completed += 1;
+                        if (actionData.code !== 0) {
+                            failed += 1;
+                        }
+                        if (completed === serverList.length) {
+                            this.restarting = false;
+                            if (failed > 0) {
+                                this.$message.error({
+                                    message: this.$t('paramManagement.restartPartialFailed', { failed, total: serverList.length }),
+                                    showClose: true
+                                });
+                                return;
+                            }
+                            this.$message.success({
+                                message: this.$t('serverSideManager.restartSuccess'),
+                                showClose: true
+                            });
+                        }
+                    });
+                });
+            });
         },
         deleteSelectedParams() {
             const selectedParams = this.paramsList.filter(row => row.selected);
@@ -418,6 +502,18 @@ export default {
     background: linear-gradient(135deg, #6b8cff, #a966ff);
     border: none;
     color: white;
+}
+
+.btn-restart {
+    background: #5f70f3;
+    border: none;
+    color: white;
+
+    &:hover,
+    &:focus {
+        background: #6d7cf5;
+        color: white;
+    }
 }
 
 .content-panel {

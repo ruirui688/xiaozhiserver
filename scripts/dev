@@ -27,6 +27,9 @@ Targets:
 
 Environment:
   DEV_SKIP_INFRA=1    Do not try to start MySQL/Redis before api/all.
+  DEV_API_MAVEN_RUN=1 Use mvn spring-boot:run for api instead of fast java start.
+  DEV_API_FORCE_COMPILE=1 Compile manager-api before fast java start.
+  XIAOZHI_LOG_LEVEL=DEBUG  Enable verbose manager-api application logs.
   DEV_LOG_LINES=120   Change lines shown by logs.
   DEV_LOG_DIR=...     Override runtime/logs/dev.
   DEV_RUN_DIR=...     Override runtime/run.
@@ -279,12 +282,51 @@ start_process() {
 }
 
 start_api() {
+  local dir
+  dir="$(service_workdir api)"
+
+  if [[ "${DEV_API_MAVEN_RUN:-0}" == "1" ]]; then
+    require_command mvn
+    start_process \
+      "manager-api" \
+      "8002" \
+      "$dir" \
+      mvn spring-boot:run -Dspring-boot.run.profiles=dev
+    return
+  fi
+
+  require_command java
   require_command mvn
+
+  if [[ "${DEV_API_FORCE_COMPILE:-0}" == "1" || ! -d "$dir/target/classes" ]]; then
+    log "Compiling manager-api before fast start"
+    (cd "$dir" && mvn -q -DskipTests compile)
+  fi
+
+  local classpath_file="$dir/target/classpath.dev"
+  if [[ ! -s "$classpath_file" || "$dir/pom.xml" -nt "$classpath_file" ]]; then
+    log "Refreshing manager-api dependency classpath"
+    (
+      cd "$dir"
+      mvn -q -DincludeScope=runtime -Dmdep.outputFile=target/classpath.dev dependency:build-classpath
+    )
+  fi
+
+  if [[ ! -s "$classpath_file" ]]; then
+    warn "Fast api classpath is unavailable; falling back to mvn spring-boot:run"
+    start_process \
+      "manager-api" \
+      "8002" \
+      "$dir" \
+      mvn spring-boot:run -Dspring-boot.run.profiles=dev
+    return
+  fi
+
   start_process \
     "manager-api" \
     "8002" \
-    "$(service_workdir api)" \
-    mvn spring-boot:run -Dspring-boot.run.profiles=dev
+    "$dir" \
+    java -XX:TieredStopAtLevel=1 -cp "target/classes:$(cat "$classpath_file")" xiaozhi.AdminApplication --spring.profiles.active=dev
 }
 
 start_web() {

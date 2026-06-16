@@ -49,7 +49,6 @@
 <script>
 import userApi from '@/apis/module/user';
 import { mapActions } from 'vuex';
-import { changeLanguage } from '@/i18n';
 
 export default {
   name: 'ChangePasswordDialog',

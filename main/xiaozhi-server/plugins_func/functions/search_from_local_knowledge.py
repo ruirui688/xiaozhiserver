@@ -18,7 +18,15 @@ SEARCH_FROM_LOCAL_KNOWLEDGE_FUNCTION_DESC = {
         "description": "从本地知识库中查询信息",
         "parameters": {
             "type": "object",
-            "properties": {"question": {"type": "string", "description": "查询的问题"}},
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": (
+                        "要查询知识库的问题。必须基于用户当前原话和对话中已经明确的上下文生成，"
+                        "不要擅自加入用户没有提到的对象、品类、场景或用途。"
+                    ),
+                }
+            },
             "required": ["question"],
         },
     },

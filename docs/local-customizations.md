@@ -61,7 +61,7 @@
   - main/manager-web/src/views/FunctionPluginManagement.vue
   - main/xiaozhi-server/config.yaml
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改聊天流式输出、function call、TTS 入队、打断处理、意图缓存、设备端 MCP 或 Function Plugin 预设，必须保留以下约定：句首口头禅在进入 TTS 和历史前清理；工具结果绑定本轮 sentence_id 和 abort_generation；REQLLM 工具结果二次生成时禁用继续调工具；声明式互动插件必须强制 user_message 参数并传递 context；首轮信息不足时只索要线索，不允许问答案；“不是、再猜、它能吃”等短反馈不能跨上下文复用意图缓存；多工具合并必须读取 ActionResponse.result/response；设备 MCP 发送失败必须立即返回，连接关闭时取消等待中的 MCP 调用，音量/亮度等控制类 MCP 使用短超时并直接回复；`xiaozhi_thinks_you_guess` 必须走服务端 GameSessionManager，隐藏 target_word 只保存在服务端状态里，不能交给 LLM 维护；用户说“不玩了/退出/猜不到/想不到/不会/揭晓答案”时必须由状态机结束或揭晓本局，禁止切换成“轮到你了，我来猜你”；`idiom_chain` 必须走服务端 GameSessionManager，保存当前要接的字、已用成语和接对数量，并直接返回 Action.RESPONSE，禁止用 REQLLM 二次生成造成游戏延迟；`guess_what_i_say` 必须走服务端 GameSessionManager，保存上一问、已知线索和排除条件，历史人物类题目按地域、年代、身份、事迹领域顺序排查，禁止连续随机猜朝代或皇帝。
+官方同步时的处理规则：如果官方修改聊天流式输出、function call、TTS 入队、打断处理、意图缓存、设备端 MCP 或 Function Plugin 预设，必须保留以下约定：句首口头禅在进入 TTS 和历史前清理；工具结果绑定本轮 sentence_id 和 abort_generation；REQLLM 工具结果二次生成时禁用继续调工具；声明式互动插件必须强制 user_message 参数并传递 context；首轮信息不足时只索要线索，不允许问答案；“不是、再猜、它能吃”等短反馈不能跨上下文复用意图缓存；存在活跃状态机游戏时，后续输入必须优先回到当前游戏工具；“玩个游戏/来个游戏/小游戏”默认进入 `idiom_chain` 状态机，不允许 LLM 自己编无状态游戏开场；“换游戏”只结束当前局，用户明确说“玩成语接龙”“你想一个词我来猜”“玩你说我猜”等新玩法时才切换工具；状态机游戏工具调用和工具结果不作为聊天气泡上报，只保留用户输入和最终播报文本；多工具合并必须读取 ActionResponse.result/response；设备 MCP 发送失败必须立即返回，连接关闭时取消等待中的 MCP 调用，音量/亮度等控制类 MCP 使用短超时并直接回复；`xiaozhi_thinks_you_guess` 必须走服务端 GameSessionManager，隐藏 target_word 只保存在服务端状态里，不能交给 LLM 维护，首轮必须带类别和第一条提示；用户说“不玩了/退出/猜不到/想不到/不会/揭晓答案”时必须由状态机结束或揭晓本局，禁止切换成“轮到你了，我来猜你”；`idiom_chain` 必须走服务端 GameSessionManager，保存当前要接的字、已用成语和接对数量，并直接返回 Action.RESPONSE，禁止用 REQLLM 二次生成造成游戏延迟；成语接龙只按内置成语库和字面首字判定，不承诺同音字接龙，已用成语不得重复计分；`guess_what_i_say` 必须走服务端 GameSessionManager，保存上一问、已知线索和排除条件，历史人物类题目按地域、年代、身份、事迹领域顺序排查，否定回答必须结合上一轮猜测或事实问题更新状态，禁止连续随机猜朝代或皇帝；前端预设不能承诺未实现的通用物品、地点或动物推理能力。
 ```
 
 ## 5. 云端运行架构与提示词注入文档
@@ -107,4 +107,38 @@
   - main/xiaozhi-server/config.yaml
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方修改 get_weather 插件，必须保留以下约定：和风接口异常、认证失败、Host 无效、城市查询失败或页面抓取失败时，先使用 Open-Meteo 兜底查询；`南京市玄武区`、`南京市江宁区` 等区县输入需要规范化为城市候选；工具结果必须以 Action.RESPONSE 直接返回给用户，不能再交给 LLM 把接口错误改写成地点不存在。
+```
+
+## 8. 视觉解释接口后台参数化
+
+```text
+定制模块：视觉模型配置下发、后台参数管理、Python 配置合并
+改动原因：WSL/端口转发部署时，Python 默认用 get_local_ip() 生成 172.28.*.* 这类 WSL 内网地址，ESP32 无法从局域网直接访问，导致 self_camera_take_photo 拍照成功后连接 explain URL 失败。需要把下发给设备的视觉解释接口地址纳入后台参数管理，由运维明确配置为设备可访问的 LAN IP、域名或反向代理地址。
+关键文件：
+  - main/manager-api/src/main/java/xiaozhi/common/constant/Constant.java
+  - main/manager-api/src/main/java/xiaozhi/modules/sys/controller/SysParamsController.java
+  - main/manager-api/src/main/resources/db/changelog/202606151745.sql
+  - main/manager-api/src/main/resources/db/changelog/db.changelog-master.yaml
+  - main/xiaozhi-server/config/config_loader.py
+  - main/xiaozhi-server/core/utils/util.py
+  - docs/mcp/mcp-vision-integration.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改 server 配置下发、SysParamsController、ConfigServiceImpl、config_loader.py 或视觉接口逻辑，必须保留 `server.vision_explain` 作为后台参数；Python 从 manager-api 读取配置时，监听地址 `server.ip/port/http_port/auth_key` 可继续以本地文件为准，但下发给设备的 `server.vision_explain` 默认必须使用后台值，只有本地文件配置了非空、非 `null`、非 `你的...` 的真实值时才允许覆盖。修改参数后需要刷新 Redis `server:config` 和 `sys:params` 缓存或通过后台保存参数触发配置重建，并重启/通知 xiaozhi-server 重新读取配置。
+```
+
+## 9. 语义控制中枢与语音操作系统架构
+
+```text
+定制模块：xiaozhi-server 语义前置控制链路
+改动原因：把小智从“ASR 后直接交给 LLM/function-call”的聊天机器人链路，演进为“TextNormalizer -> SemanticRouter -> StateManager -> PolicyEngine -> SemanticCenter”的语音控制中枢。停止、退出游戏、游戏续局、低置信度拒识等高频控制必须优先由服务端规则和状态处理，LLM 只作为复杂语义和普通聊天兜底。
+关键文件：
+  - main/xiaozhi-server/core/semantic/
+  - main/xiaozhi-server/core/connection.py
+  - main/xiaozhi-server/core/handle/receiveAudioHandle.py
+  - main/xiaozhi-server/core/providers/tools/unified_tool_handler.py
+  - main/xiaozhi-server/tests/test_semantic_router.py
+  - main/xiaozhi-server/tests/test_semantic_policy.py
+  - docs/architecture/semantic-control-center.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改 startToChat、ConnectionHandler 初始化、handle_user_intent、GameSessionManager、UnifiedToolHandler、ToolManager、abortHandle、TTS 入队或 function-call 主链路，必须保留语义控制中枢在旧意图/LLM 之前的前置拦截位置；未命中高置信度规则时必须继续兜底到旧 handle_user_intent 和 conn.chat；停止类指令必须复用 handleAbortMessage 并允许配置动作停止工具；游戏态输入必须优先回到 active_game_tool；退出游戏不得关闭 websocket；语义模块顶层导入应尽量轻量，避免引入 opus/loguru 等运行依赖导致纯单元测试无法导入。
 ```

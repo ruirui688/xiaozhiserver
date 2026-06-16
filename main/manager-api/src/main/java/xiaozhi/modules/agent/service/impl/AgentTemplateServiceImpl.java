@@ -1,5 +1,6 @@
 package xiaozhi.modules.agent.service.impl;
 
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -9,11 +10,15 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import xiaozhi.modules.agent.dao.AgentTemplateDao;
 import xiaozhi.modules.agent.entity.AgentTemplateEntity;
 import xiaozhi.modules.agent.service.AgentTemplateService;
+import xiaozhi.modules.model.entity.ModelConfigEntity;
+import xiaozhi.modules.model.service.ModelConfigService;
 
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+
+import lombok.AllArgsConstructor;
 
 /**
  * @author chenerlei
@@ -21,8 +26,11 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
  * @createDate 2025-03-22 11:48:18
  */
 @Service
+@AllArgsConstructor
 public class AgentTemplateServiceImpl extends ServiceImpl<AgentTemplateDao, AgentTemplateEntity>
         implements AgentTemplateService {
+
+    private final ModelConfigService modelConfigService;
 
     /**
      * 获取默认模板
@@ -51,35 +59,48 @@ public class AgentTemplateServiceImpl extends ServiceImpl<AgentTemplateDao, Agen
         }
 
         UpdateWrapper<AgentTemplateEntity> wrapper = new UpdateWrapper<>();
+        String resolvedModelId = resolveEnabledModelId(modelType, modelId);
         switch (modelType) {
             case "ASR":
-                wrapper.set("asr_model_id", modelId);
+                wrapper.set("asr_model_id", resolvedModelId);
                 break;
             case "VAD":
-                wrapper.set("vad_model_id", modelId);
+                wrapper.set("vad_model_id", resolvedModelId);
                 break;
             case "LLM":
-                wrapper.set("llm_model_id", modelId);
+                wrapper.set("llm_model_id", resolvedModelId);
                 break;
             case "SLM":
-                wrapper.set("slm_model_id", modelId);
+                wrapper.set("slm_model_id", resolvedModelId);
                 break;
             case "TTS":
-                wrapper.set("tts_model_id", modelId);
+                wrapper.set("tts_model_id", resolvedModelId);
                 wrapper.set("tts_voice_id", null);
                 break;
             case "VLLM":
-                wrapper.set("vllm_model_id", modelId);
+                wrapper.set("vllm_model_id", resolvedModelId);
                 break;
             case "MEMORY":
-                wrapper.set("mem_model_id", modelId);
+                wrapper.set("mem_model_id", resolvedModelId);
                 break;
             case "INTENT":
-                wrapper.set("intent_model_id", modelId);
+                wrapper.set("intent_model_id", resolvedModelId);
                 break;
         }
         wrapper.ge("sort", 0);
         update(wrapper);
+    }
+
+    @Override
+    public boolean save(AgentTemplateEntity entity) {
+        sanitizeTemplateModelIds(entity);
+        return super.save(entity);
+    }
+
+    @Override
+    public boolean updateById(AgentTemplateEntity entity) {
+        sanitizeTemplateModelIds(entity);
+        return super.updateById(entity);
     }
 
     @Override
@@ -124,5 +145,43 @@ public class AgentTemplateServiceImpl extends ServiceImpl<AgentTemplateDao, Agen
         
         // 如果没有空缺，返回最大序号+1
         return expectedSort;
+    }
+
+    private void sanitizeTemplateModelIds(AgentTemplateEntity entity) {
+        if (entity == null) {
+            return;
+        }
+        entity.setAsrModelId(resolveEnabledModelId("ASR", entity.getAsrModelId()));
+        entity.setVadModelId(resolveEnabledModelId("VAD", entity.getVadModelId()));
+        entity.setLlmModelId(resolveEnabledModelId("LLM", entity.getLlmModelId()));
+        entity.setVllmModelId(resolveEnabledModelId("VLLM", entity.getVllmModelId()));
+        entity.setTtsModelId(resolveEnabledModelId("TTS", entity.getTtsModelId()));
+        entity.setMemModelId(resolveEnabledModelId("Memory", entity.getMemModelId()));
+        entity.setIntentModelId(resolveEnabledModelId("Intent", entity.getIntentModelId()));
+    }
+
+    private String resolveEnabledModelId(String modelType, String candidateModelId) {
+        if (StringUtils.isNotBlank(candidateModelId)) {
+            ModelConfigEntity candidate = modelConfigService.getModelByIdFromCache(candidateModelId);
+            if (candidate != null
+                    && modelType.equalsIgnoreCase(candidate.getModelType())
+                    && candidate.getIsEnabled() != null
+                    && candidate.getIsEnabled() == 1
+                    && candidate.getTestStatus() != null
+                    && candidate.getTestStatus() == 1) {
+                return candidateModelId;
+            }
+        }
+
+        List<ModelConfigEntity> enabledModels = modelConfigService.getEnabledModelsByType(modelType);
+        if (enabledModels == null || enabledModels.isEmpty()) {
+            return null;
+        }
+        for (ModelConfigEntity enabledModel : enabledModels) {
+            if (enabledModel.getIsDefault() != null && enabledModel.getIsDefault() == 1) {
+                return enabledModel.getId();
+            }
+        }
+        return enabledModels.get(0).getId();
     }
 }

@@ -963,13 +963,17 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             requestBody.put("messages", List.of(message));
             requestBody.put("stream", false);
             requestBody.put("max_tokens", 120);
+            result.setTestInput("图片：" + imagePath.toString() + "\n问题：" + VLLM_TEST_QUESTION);
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.set("Authorization", "Bearer " + apiKey);
+            long startTime = System.currentTimeMillis();
             ResponseEntity<String> response = restTemplate.exchange(
                     buildChatCompletionsUrl(baseUrl), HttpMethod.POST, new HttpEntity<>(requestBody, headers),
                     String.class);
+            result.setResponseTimeMs(System.currentTimeMillis() - startTime);
+            result.setTestOutput(StringUtils.defaultString(response.getBody()));
             if (!response.getStatusCode().is2xxSuccessful()) {
                 result.setSuccess(false);
                 result.setMessage("视觉模型接口返回非成功状态：" + response.getStatusCode());
@@ -977,6 +981,10 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             }
             JSONObject responseJson = JSONUtil.parseObj(response.getBody());
             JSONArray choices = responseJson.getJSONArray("choices");
+            String answer = extractOpenAiChoiceText(choices);
+            if (StringUtils.isNotBlank(answer)) {
+                result.setTestOutput(answer);
+            }
             result.setSuccess(choices != null && !choices.isEmpty());
             result.setMessage(Boolean.TRUE.equals(result.getSuccess())
                     ? "视觉模型真实图片测试通过，样本：" + imagePath.toString()
@@ -987,6 +995,25 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             result.setMessage("视觉模型真实图片测试失败：" + StringUtils.defaultIfBlank(e.getMessage(), e.getClass().getSimpleName()));
             return result;
         }
+    }
+
+    private String extractOpenAiChoiceText(JSONArray choices) {
+        if (choices == null || choices.isEmpty()) {
+            return null;
+        }
+        JSONObject firstChoice = choices.getJSONObject(0);
+        if (firstChoice == null) {
+            return null;
+        }
+        JSONObject message = firstChoice.getJSONObject("message");
+        if (message == null) {
+            return null;
+        }
+        Object content = message.get("content");
+        if (content == null) {
+            return null;
+        }
+        return content.toString();
     }
 
     private ModelTestResultDTO testOllamaModel(JSONObject configJson) {

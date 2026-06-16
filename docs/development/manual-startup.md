@@ -3,7 +3,8 @@
 默认启动后台开发环境：
 
 ```bash
-scripts/start-dev.sh
+scripts/dev start api
+scripts/dev start web
 ```
 
 默认会启动：
@@ -16,7 +17,7 @@ scripts/start-dev.sh
 如果还要启动小智核心服务：
 
 ```bash
-scripts/start-dev.sh --with-xiaozhi
+scripts/dev start server
 ```
 
 访问地址：
@@ -30,11 +31,11 @@ xiaozhi-server: ws://127.0.0.1:8000/xiaozhi/v1/
 日志目录：
 
 ```text
-logs/dev/
+runtime/logs/dev/
 ```
 
 PID 文件目录：
 
 ```text
-.run/
+runtime/run/
 ```

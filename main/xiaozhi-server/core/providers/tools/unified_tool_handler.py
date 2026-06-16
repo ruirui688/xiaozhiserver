@@ -182,6 +182,18 @@ class UnifiedToolHandler:
             self.logger.error(f"处理function call错误: {e}")
             return ActionResponse(action=Action.ERROR, response=str(e))
 
+    async def invoke(
+        self, tool_name: str, arguments: Optional[Dict[str, Any]] = None, source: str = "direct"
+    ) -> ActionResponse:
+        """Direct tool invocation for router/policy controlled paths."""
+        arguments = arguments or {}
+        self.logger.debug(f"直接调用工具: {tool_name}, source={source}, 参数: {arguments}")
+        try:
+            await send_display_message(self.conn, f"% {tool_name}")
+        except Exception as e:
+            self.logger.warning(f"发送工具调用显示消息失败: {e}")
+        return await self.tool_manager.execute_tool(tool_name, arguments)
+
     def _combine_responses(self, responses: List[ActionResponse]) -> ActionResponse:
         """合并多个函数调用的响应"""
         if not responses:

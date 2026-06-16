@@ -18,6 +18,10 @@ def get_project_dir():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + "/"
 
 
+def _is_placeholder_config_value(value):
+    return value is None or value == "" or value == "null" or "你的" in str(value)
+
+
 def read_config(config_path):
     with open(config_path, "r", encoding="utf-8") as file:
         config = yaml.safe_load(file)
@@ -78,16 +82,18 @@ async def get_config_from_api_async(config):
         "secret": config["manager-api"].get("secret", ""),
     }
     auth_enabled = config_data.get("server", {}).get("auth", {}).get("enabled", False)
-    # server的配置以本地为准
+    server_config = config_data.setdefault("server", {})
+    local_server_config = config.get("server", {})
+    # 服务监听配置以本地为准；下发给设备的地址默认使用后台参数。
     if config.get("server"):
-        config_data["server"] = {
-            "ip": config["server"].get("ip", ""),
-            "port": config["server"].get("port", ""),
-            "http_port": config["server"].get("http_port", ""),
-            "vision_explain": config["server"].get("vision_explain", ""),
-            "auth_key": config["server"].get("auth_key", ""),
-        }
-    config_data["server"]["auth"] = {"enabled": auth_enabled}
+        for key in ("ip", "port", "http_port", "auth_key"):
+            server_config[key] = local_server_config.get(key, "")
+
+        local_vision_explain = local_server_config.get("vision_explain", "")
+        if not _is_placeholder_config_value(local_vision_explain):
+            server_config["vision_explain"] = local_vision_explain
+
+    server_config["auth"] = {"enabled": auth_enabled}
     # 如果服务器没有prompt_template，则从本地配置读取
     if not config_data.get("prompt_template"):
         config_data["prompt_template"] = config.get("prompt_template")

@@ -44,6 +44,8 @@ from core.utils.voiceprint_provider import VoiceprintProvider
 from core.utils.util import get_system_error_response
 from core.utils import textUtils
 from core.game_session import GameSessionManager
+from core.semantic.semantic_center import SemanticCenter
+from core.device_runtime_registry import register_connection, unregister_connection
 
 
 TAG = __name__
@@ -110,7 +112,7 @@ class ConnectionHandler:
         self.max_output_size = 0
         self.chat_history_conf = 0
         self.audio_format = "opus"
-        self.sample_rate = 24000  # 默认采样率，从客户端 hello 消息中动态更新
+        self.sample_rate = 24000  # 服务端输出音频采样率
 
         # 客户端状态相关
         self.client_abort = False
@@ -193,6 +195,7 @@ class ConnectionHandler:
         # 初始化提示词管理器
         self.prompt_manager = PromptManager(self.config, self.logger)
         self.game_session_manager = GameSessionManager()
+        self.semantic_center = SemanticCenter()
 
         # 初始化通话状态
         self.calling = False
@@ -216,6 +219,7 @@ class ConnectionHandler:
             )
 
             self.device_id = self.headers.get("device-id", None)
+            register_connection(self)
 
             # 认证通过,继续处理
             self.websocket = ws
@@ -233,8 +237,7 @@ class ConnectionHandler:
             # 启动超时检查任务
             self.timeout_task = asyncio.create_task(self._check_timeout())
 
-            self.welcome_msg = self.config["xiaozhi"]
-            self.welcome_msg["session_id"] = self.session_id
+            self.welcome_msg = self._build_welcome_msg()
 
             # 从配置中读取采样率
             self.sample_rate = self.welcome_msg["audio_params"]["sample_rate"]
@@ -257,6 +260,7 @@ class ConnectionHandler:
             self.logger.bind(tag=TAG).error(f"Connection error: {str(e)}-{stack_trace}")
             return
         finally:
+            unregister_connection(self)
             try:
                 await self._save_and_close(ws)
             except Exception as final_error:
@@ -268,6 +272,17 @@ class ConnectionHandler:
                     self.logger.bind(tag=TAG).error(
                         f"强制关闭连接时出错: {close_error}"
                     )
+
+    def _build_welcome_msg(self):
+        welcome_msg = copy.deepcopy(self.config["xiaozhi"])
+        welcome_msg["session_id"] = self.session_id
+        audio_params = welcome_msg.get("audio_params") or {}
+        audio_params["sample_rate"] = int(audio_params.get("sample_rate", self.sample_rate))
+        audio_params["format"] = audio_params.get("format", self.audio_format)
+        audio_params["channels"] = int(audio_params.get("channels", 1))
+        audio_params["frame_duration"] = int(audio_params.get("frame_duration", 60))
+        welcome_msg["audio_params"] = audio_params
+        return welcome_msg
 
     async def _save_and_close(self, ws):
         """保存记忆并关闭连接"""
@@ -338,6 +353,8 @@ class ConnectionHandler:
 
     async def _route_message(self, message):
         """消息路由"""
+        self.last_activity_time = time.time() * 1000
+
         # 检查是否已经获取到真实的绑定状态
         if not self.bind_completed_event.is_set():
             # 还没有获取到真实状态，等待直到获取到真实状态或超时
@@ -639,17 +656,19 @@ class ConnectionHandler:
 
     def _initialize_asr(self):
         """初始化ASR"""
+        selected_asr = self.config.get("selected_module", {}).get("ASR")
+        common_selected_asr = self.common_config.get("selected_module", {}).get("ASR")
         if (
                 self._asr is not None
                 and hasattr(self._asr, "interface_type")
                 and self._asr.interface_type == InterfaceType.LOCAL
+                and selected_asr == common_selected_asr
         ):
             # 如果公共ASR是本地服务，则直接返回
             # 因为本地一个实例ASR，可以被多个连接共享
             asr = self._asr
         else:
-            # 如果公共ASR是远程服务，则初始化一个新实例
-            # 因为远程ASR，涉及到websocket连接和接收线程，需要每个连接一个实例
+            # 远程ASR需要连接级实例；私有配置选择了不同ASR时也不能复用公共本地ASR。
             asr = initialize_asr(self.config)
 
         return asr
@@ -1297,7 +1316,8 @@ class ConnectionHandler:
                         result = future.result(timeout=tool_call_timeout)
                         tool_results.append((result, tool_call_data))
                         # 使用公共方法上报工具调用结果
-                        enqueue_tool_report(self, tool_call_data['name'], tool_input, str(result.result) if result.result else None, report_tool_call=False)
+                        report_result = result.result if result.result else result.response
+                        enqueue_tool_report(self, tool_call_data['name'], tool_input, str(report_result) if report_result else None, report_tool_call=False)
 
                     except Exception as e:
                         self.logger.bind(tag=TAG).error(

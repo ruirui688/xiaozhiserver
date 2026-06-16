@@ -102,7 +102,8 @@ TTS 私有音色、语速、音量、语言
 WebSocket / MQTT 收到音频
   -> VAD 判断语音段和结束点
   -> ASR 转文字
-  -> Intent 或 function_call 判断工具
+  -> 语义控制中枢处理高频控制、状态上下文和拒识
+  -> 未处理时进入 Intent 或 function_call 判断工具
   -> LLM 生成或工具执行
   -> TTS 合成
   -> 音频下发设备播放
@@ -173,12 +174,13 @@ Java 后台负责选择和保存这些模块，Python 在设备连接时按配�
 
 ## 7. 工具调用模式
 
-工具调用不是“Python 看到工具就自动调用”。Python 只负责准备工具 schema，是否调用由模型或意图模块决定。
+工具调用不是“Python 看到工具就自动调用”。旧主链路中 Python 负责准备工具 schema，是否调用由模型或意图模块决定。新增语义控制中枢后，少数高频控制类指令可以由 Python Router / Policy 直接调用工具或中断 TTS，不再等待 LLM 选择。
 
-当前主要有两种模式：
+当前主要有三种模式：
 
 | 模式 | 谁判断 | 模型看到什么 | 返回什么 | 适合场景 |
 | --- | --- | --- | --- | --- |
+| 语义控制中枢 | Python Router / StateManager / PolicyEngine | 不依赖模型工具提示 | `Decision`：执行、拒识、反问或旧流程兜底 | 停止、退出游戏、状态机续局、低置信度拒识 |
 | `function_call` | 主 LLM | 对话 `messages` + 完整 `tools` schema | 原生 `tool_calls` | 主模型支持 function calling，速度更直接 |
 | `intent_llm` | 独立意图 LLM | 函数名、描述、参数拼成的意图提示词 | JSON：`continue_chat` / `result_for_context` / `function_call` | 主模型工具调用不稳定，或希望先用小模型做意图 |
 

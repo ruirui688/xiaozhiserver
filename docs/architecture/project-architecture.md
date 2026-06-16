@@ -3,6 +3,7 @@
 本文是 `xiaozhi-esp32-server` 的项目级架构总览，用来回答“这个仓库由哪些边界组成、一次设备对话经过哪些链路、配置和提示词如何进入运行时、哪些文件属于源码或运行产物”。它不替代专项文档：
 
 - 云端实时链路、配置下发和 MCP 三类链路细节见 [云端运行架构与配置链路](./cloud-runtime-architecture.md)。
+- 确定性语音控制、状态管理、拒识和旧 LLM 兜底链路见 [语义控制中枢架构](./semantic-control-center.md)。
 - 提示词、工具 schema、MCP description、状态机游戏的注入细节见 [提示词注入工程](../integrations/prompt-injection-engineering.md)。
 - 本地二次开发长期保护点见 [本地定制记录](../local-customizations.md)。
 
@@ -49,6 +50,14 @@ xiaozhi-server 会话内组装的 system prompt、messages、tools 和状态机
 
 重要原则：前端页面保存成功，只代表配置进入后台；设备是否变化取决于 Python 何时重新读取私有配置、设备是否重连、缓存是否刷新，以及当前模型是否真的采用了对应提示词或工具。
 
+视觉链路补充：
+
+| 参数 | 归属 | 说明 |
+| --- | --- | --- |
+| `server.vision_explain` | `sys_params` 后台参数 | 设备拍照后真正访问的视觉解释接口地址。全模块部署时由 `manager-api` 下发给 `xiaozhi-server`。 |
+| `server.http_port` | `sys_params` 后台参数 | 视觉接口和 OTA 共享监听端口。 |
+| 本地 `data/.config.yaml` 中的 `server.vision_explain` | 本地覆盖值 | 仅在填写真实可达地址时覆盖后台值；占位符、`null` 或 `你的...` 会被忽略。 |
+
 ## 3. 端云链路
 
 设备启动后的主链路：
@@ -62,7 +71,8 @@ xiaozhi-server 会话内组装的 system prompt、messages、tools 和状态机
   -> 上传 Opus 音频帧
   -> VAD 切分语音段
   -> ASR 转文字
-  -> Intent 或主 LLM 判断是否调用工具
+  -> 语义控制中枢处理高频控制、状态机上下文和拒识
+  -> 未处理时由 Intent 或主 LLM 判断是否调用工具
   -> LLM 生成回复或工具执行
   -> TTS 合成音频
   -> 音频下发设备播放
@@ -129,6 +139,7 @@ tools
 
 | 模式 | 判断者 | 注入形式 | 适用边界 |
 | --- | --- | --- | --- |
+| 语义控制中枢 | Python Router / StateManager / PolicyEngine | 高置信度规则、连接状态、状态机游戏上下文 | 停止、退出游戏、继续等高频控制和拒识 |
 | `function_call` | 主 LLM | OpenAI 兼容 `tools` 字段 | 主模型支持原生 function calling |
 | `intent_llm` | 独立意图 LLM | 函数名、描述和参数拼成意图提示词，要求返回 JSON | 主模型工具调用不稳定或希望小模型先判意图 |
 

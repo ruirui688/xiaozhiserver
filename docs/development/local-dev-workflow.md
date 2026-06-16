@@ -22,7 +22,7 @@ scripts/dev stop
 
 目标说明：
 
-- `api`：启动 `main/manager-api`，执行 `mvn spring-boot:run -Dspring-boot.run.profiles=dev`。
+- `api`：启动 `main/manager-api`，默认使用已编译 classes 和缓存依赖 classpath 直接 `java` 快速启动；设置 `DEV_API_MAVEN_RUN=1` 时才执行 `mvn spring-boot:run -Dspring-boot.run.profiles=dev`。
 - `web`：启动 `main/manager-web`，执行 `npm run serve`。
 - `server`：启动 `main/xiaozhi-server`，优先使用 `~/miniconda3/envs/xiaozhi-esp32-server/bin/python app.py`，否则尝试 `conda run` 或系统 Python。
 - `mobile`：启动 `main/manager-mobile` H5 开发服务，执行 `pnpm dev:h5`。
@@ -32,6 +32,18 @@ scripts/dev stop
 
 ```bash
 DEV_SKIP_INFRA=1 scripts/dev start api
+```
+
+如果修改了 Java 代码但没有手动编译，可以使用：
+
+```bash
+DEV_API_FORCE_COMPILE=1 scripts/dev start api
+```
+
+如果需要调试 Maven/Spring Boot 插件启动行为，可以使用兼容慢路径：
+
+```bash
+DEV_API_MAVEN_RUN=1 scripts/dev start api
 ```
 
 ## 服务端口

@@ -20,6 +20,15 @@ public class ModelTestResultDTO implements Serializable {
     @Schema(description = "测试结果说明")
     private String message;
 
+    @Schema(description = "测试输入")
+    private String testInput;
+
+    @Schema(description = "测试输出")
+    private String testOutput;
+
+    @Schema(description = "响应耗时(毫秒)")
+    private Long responseTimeMs;
+
     @Schema(description = "测试状态(0未测试 1通过 2失败)")
     private Integer testStatus;
 

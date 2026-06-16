@@ -1,0 +1,75 @@
+import sys
+from pathlib import Path
+
+
+SERVER_ROOT = Path(__file__).resolve().parents[1]
+if str(SERVER_ROOT) not in sys.path:
+    sys.path.insert(0, str(SERVER_ROOT))
+
+from core.semantic.frames import ASRResult, RobotContext
+from core.semantic.normalizer import TextNormalizer
+from core.semantic.router import SemanticRouter
+
+
+def _asr(text):
+    normalizer = TextNormalizer()
+    return ASRResult(
+        session_id="s1",
+        device_id="d1",
+        raw_text=text,
+        normalized_text=normalizer.normalize(type("Conn", (), {"session_id": "s1", "device_id": "d1"})(), text).normalized_text,
+        display_text=text,
+    )
+
+
+def _context(state="idle", active_game_tool=None):
+    return RobotContext(
+        device_id="d1",
+        session_id="s1",
+        state=state,
+        active_game_tool=active_game_tool,
+    )
+
+
+def test_stop_phrases_route_to_interrupt_stop_all():
+    router = SemanticRouter()
+
+    for text in ["停", "别说了", "停止表演", "你先别演啦"]:
+        frame = router.route(_asr(text), _context(state="speaking"))
+        assert frame.full_name == "interrupt.stop_all"
+        assert frame.confidence >= 0.99
+
+
+def test_continue_in_idle_routes_to_context_continue():
+    frame = SemanticRouter().route(_asr("继续"), _context(state="idle"))
+
+    assert frame.full_name == "context.continue"
+
+
+def test_active_game_routes_user_message_to_game_answer():
+    frame = SemanticRouter().route(
+        _asr("是不是冰箱"),
+        _context(state="game", active_game_tool="guess_xiaozhi_word"),
+    )
+
+    assert frame.full_name == "game.answer"
+    assert frame.slots["tool"] == "guess_xiaozhi_word"
+    assert frame.slots["user_message"] == "是不是冰箱"
+
+
+def test_active_game_exit_does_not_become_connection_exit():
+    frame = SemanticRouter().route(
+        _asr("退出游戏"),
+        _context(state="game", active_game_tool="idiom_chain"),
+    )
+
+    assert frame.full_name == "game.exit"
+    assert frame.slots["tool"] == "idiom_chain"
+
+
+def test_unknown_text_falls_back_to_normal_chat():
+    frame = SemanticRouter().route(_asr("今天天气怎么样"), _context())
+
+    assert frame.full_name == "chat.normal"
+    assert frame.source == "fallback"
+

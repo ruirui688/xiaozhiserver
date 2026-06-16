@@ -286,6 +286,39 @@
         :visible.sync="addDialogVisible"
         @confirm="handleAddConfirm"
       />
+      <el-dialog
+        :title="$t('modelConfig.testDetailTitle')"
+        :visible.sync="testResultDialogVisible"
+        width="640px"
+        append-to-body
+        class="test-result-dialog"
+      >
+        <div v-if="currentTestResult" class="test-result-content">
+          <div class="test-result-row">
+            <span class="test-result-label">{{ $t("modelConfig.testResult") }}</span>
+            <el-tag size="mini" :type="currentTestResult.success ? 'success' : 'danger'">
+              {{
+                currentTestResult.success
+                  ? $t("modelConfig.testPassed")
+                  : $t("modelConfig.testFailed")
+              }}
+            </el-tag>
+            <span class="test-result-message">{{ currentTestResult.message || "-" }}</span>
+          </div>
+          <div class="test-result-row">
+            <span class="test-result-label">{{ $t("modelConfig.responseTime") }}</span>
+            <span>{{ formatResponseTime(currentTestResult.responseTimeMs) }}</span>
+          </div>
+          <div class="test-result-block">
+            <div class="test-result-label">{{ $t("modelConfig.testInput") }}</div>
+            <pre>{{ currentTestResult.testInput || "-" }}</pre>
+          </div>
+          <div class="test-result-block">
+            <div class="test-result-label">{{ $t("modelConfig.testOutput") }}</div>
+            <pre>{{ formatTestOutput(currentTestResult.testOutput) }}</pre>
+          </div>
+        </div>
+      </el-dialog>
     </div>
     <el-footer>
       <version-footer />
@@ -321,6 +354,8 @@ export default {
       loading: false,
       selectedModelConfig: {},
       testingModelId: "",
+      testResultDialogVisible: false,
+      currentTestResult: null,
     };
   },
 
@@ -490,6 +525,41 @@ export default {
     clearTestingModelState() {
       this.testingModelId = "";
     },
+    showTestResult(result) {
+      this.currentTestResult = result || null;
+      this.testResultDialogVisible = !!result;
+    },
+    formatResponseTime(responseTimeMs) {
+      if (responseTimeMs === null || responseTimeMs === undefined || responseTimeMs === "") {
+        return "-";
+      }
+      return `${responseTimeMs} ms`;
+    },
+    formatTestOutput(output) {
+      if (!output) {
+        return "-";
+      }
+      if (typeof output !== "string") {
+        return JSON.stringify(output, null, 2);
+      }
+      try {
+        return JSON.stringify(JSON.parse(output), null, 2);
+      } catch (e) {
+        return output;
+      }
+    },
+    handleTestModelResponse(data) {
+      const result = data.data || {
+        success: data.code === 0,
+        message: data.msg,
+      };
+      this.showTestResult(result);
+      if (result.success) {
+        this.$message.success(result.message || this.$t("modelConfig.testSuccess"));
+      } else {
+        this.$message.error(result.message || data.msg || this.$t("modelConfig.testFailedMessage"));
+      }
+    },
     testModel(model) {
       if (this.testingModelId) {
         return;
@@ -497,11 +567,7 @@ export default {
       this.testingModelId = model.id;
       Api.model.testModel(model.id, ({ data }) => {
         this.clearTestingModelState();
-        if (data.code === 0) {
-          this.$message.success(data.data?.message || this.$t("modelConfig.testSuccess"));
-        } else {
-          this.$message.error(data.msg || this.$t("modelConfig.testFailedMessage"));
-        }
+        this.handleTestModelResponse(data);
         this.loadData();
       });
     },
@@ -578,12 +644,11 @@ export default {
         this.testingModelId = id;
         Api.model.testModel(id, ({ data }) => {
           this.clearTestingModelState();
-          if (data.code === 0) {
-            this.$message.success(data.data?.message || this.$t("modelConfig.testSuccess"));
+          this.handleTestModelResponse(data);
+          if (data.data?.success) {
             this.loadData();
             this.editDialogVisible = false;
           } else {
-            this.$message.error(data.msg || this.$t("modelConfig.testFailedMessage"));
             this.loadData();
           }
           done && done();
@@ -1264,5 +1329,51 @@ export default {
   color: #6b8cff !important;
   font-size: 14px;
   margin-top: 8px;
+}
+
+.test-result-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  color: #303133;
+}
+
+.test-result-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+}
+
+.test-result-label {
+  min-width: 72px;
+  color: #606266;
+  font-weight: 600;
+}
+
+.test-result-message {
+  color: #606266;
+  line-height: 1.5;
+}
+
+.test-result-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.test-result-block pre {
+  max-height: 220px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  background: #f7f9fc;
+  color: #303133;
+  font-size: 13px;
+  line-height: 1.6;
 }
 </style>

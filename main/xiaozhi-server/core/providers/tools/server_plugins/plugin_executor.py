@@ -1,5 +1,6 @@
 """服务端插件工具执行器"""
 
+import copy
 from typing import Dict, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -91,6 +92,7 @@ class ServerPluginExecutor(ToolExecutor):
         for func_name in all_required_functions:
             func_item = all_function_registry.get(func_name)
             if func_item:
+                tool_description = copy.deepcopy(func_item.description)
                 # 从函数注册中获取描述
                 fun_description = (
                     self.config.get("plugins", {})
@@ -98,20 +100,18 @@ class ServerPluginExecutor(ToolExecutor):
                     .get("description", "")
                 )
                 if fun_description is not None and len(fun_description) > 0:
-                    if "function" in func_item.description and isinstance(
-                        func_item.description["function"], dict
+                    if "function" in tool_description and isinstance(
+                        tool_description["function"], dict
                     ):
-                        func_item.description["function"][
-                            "description"
-                        ] = fun_description
+                        tool_description["function"]["description"] = fun_description
 
                 # 新闻插件：根据配置更新新闻源参数描述
                 if func_name == "get_news_from_newsnow":
-                    self._init_news_source_description(func_item, func_name)
+                    self._init_news_source_description(tool_description, func_name)
 
                 tools[func_name] = ToolDefinition(
                     name=func_name,
-                    description=func_item.description,
+                    description=tool_description,
                     tool_type=ToolType.SERVER_PLUGIN,
                 )
                 continue
@@ -139,7 +139,7 @@ class ServerPluginExecutor(ToolExecutor):
             or self._is_stateful_game_plugin(tool_name)
         )
 
-    def _init_news_source_description(self, func_item, func_name):
+    def _init_news_source_description(self, tool_description, func_name):
         """根据连接配置初始化新闻工具的参数描述"""
         news_sources = (
             self.config.get("plugins", {})
@@ -150,7 +150,7 @@ class ServerPluginExecutor(ToolExecutor):
             news_sources = "澎湃新闻;百度热搜;财联社"
         sources_str = news_sources.replace(";", "、")
         try:
-            func_item.description["function"]["parameters"]["properties"]["source"][
+            tool_description["function"]["parameters"]["properties"]["source"][
                 "description"
             ] = f"新闻源的标准中文名称，例如{sources_str}等。可选参数，如果不提供则使用默认新闻源"
         except (KeyError, TypeError):

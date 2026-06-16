@@ -80,6 +80,12 @@ async def startToChat(conn: "ConnectionHandler", text):
     if conn.client_is_speaking and conn.client_listen_mode != "manual":
         await handleAbortMessage(conn)
 
+    # 语义控制中枢优先处理高置信度控制类指令，未处理再进入旧流程
+    if getattr(conn, "semantic_center", None):
+        semantic_handled = await conn.semantic_center.handle_user_text(conn, actual_text)
+        if semantic_handled:
+            return
+
     # 首先进行意图分析，使用实际文本内容
     intent_handled = await handle_user_intent(conn, actual_text)
 

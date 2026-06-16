@@ -181,16 +181,6 @@ public class ConfigServiceImpl implements ConfigService {
             chatHistoryConf = Constant.ChatHistoryConfEnum.RECORD_TEXT_AUDIO.getCode();
         }
         result.put("chat_history_conf", chatHistoryConf);
-        // 如果客户端已实例化模型，则不返回
-        String alreadySelectedVadModelId = selectedModule.get("VAD");
-        if (alreadySelectedVadModelId != null && alreadySelectedVadModelId.equals(agent.getVadModelId())) {
-            agent.setVadModelId(null);
-        }
-        String alreadySelectedAsrModelId = selectedModule.get("ASR");
-        if (alreadySelectedAsrModelId != null && alreadySelectedAsrModelId.equals(agent.getAsrModelId())) {
-            agent.setAsrModelId(null);
-        }
-
         // 添加函数调用参数信息
         if (!Objects.equals(agent.getIntentModelId(), "Intent_nointent")) {
             String agentId = agent.getId();
@@ -446,11 +436,7 @@ public class ConfigServiceImpl implements ConfigService {
         String memLocalShortLLMModelId = null;
 
         for (int i = 0; i < modelIds.length; i++) {
-            if (modelIds[i] == null) {
-                continue;
-            }
-            // 关键：第三个参数传false，确保获取原始密钥
-            ModelConfigEntity model = modelConfigService.getModelByIdFromCache(modelIds[i]);
+            ModelConfigEntity model = resolveUsableModel(modelTypes[i], modelIds[i]);
             if (model == null) {
                 continue;
             }
@@ -550,5 +536,37 @@ public class ConfigServiceImpl implements ConfigService {
         }
         result.put("prompt", prompt);
         result.put("summaryMemory", summaryMemory);
+    }
+
+    private ModelConfigEntity resolveUsableModel(String modelType, String modelId) {
+        if (StringUtils.isBlank(modelId)) {
+            return null;
+        }
+
+        ModelConfigEntity model = modelConfigService.getModelByIdFromCache(modelId);
+        if (isUsableModel(modelType, model)) {
+            return model;
+        }
+
+        List<ModelConfigEntity> enabledModels = modelConfigService.getEnabledModelsByType(modelType);
+        if (enabledModels == null || enabledModels.isEmpty()) {
+            return null;
+        }
+
+        for (ModelConfigEntity enabledModel : enabledModels) {
+            if (enabledModel.getIsDefault() != null && enabledModel.getIsDefault() == 1) {
+                return enabledModel;
+            }
+        }
+        return enabledModels.get(0);
+    }
+
+    private boolean isUsableModel(String modelType, ModelConfigEntity model) {
+        return model != null
+                && modelType.equalsIgnoreCase(model.getModelType())
+                && model.getIsEnabled() != null
+                && model.getIsEnabled() == 1
+                && model.getTestStatus() != null
+                && model.getTestStatus() == 1;
     }
 }

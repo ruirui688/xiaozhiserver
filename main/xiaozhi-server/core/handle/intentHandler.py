@@ -38,18 +38,37 @@ async def handle_user_intent(conn: "ConnectionHandler", text):
         return True
 
     active_game_tool = None
+    requested_game_tool = None
     if hasattr(conn, "game_session_manager") and conn.game_session_manager:
         active_game_tool = conn.game_session_manager.get_active_tool()
-    if active_game_tool and conn.func_handler and conn.func_handler.has_tool(active_game_tool):
+        requested_game_tool = conn.game_session_manager.get_requested_game_tool(text)
+    if requested_game_tool and conn.func_handler and conn.func_handler.has_tool(requested_game_tool):
+        if active_game_tool and requested_game_tool != active_game_tool:
+            conn.game_session_manager.clear_active_games()
         intent_result = json.dumps(
             {
                 "function_call": {
-                    "name": active_game_tool,
+                    "name": requested_game_tool,
                     "arguments": {"user_message": text},
                 }
             },
             ensure_ascii=False,
         )
+        conn.sentence_id = str(uuid.uuid4().hex)
+        return await process_intent_result(conn, intent_result, text)
+
+    if active_game_tool and conn.func_handler and conn.func_handler.has_tool(active_game_tool):
+        function_name = active_game_tool
+        intent_result = json.dumps(
+            {
+                "function_call": {
+                    "name": function_name,
+                    "arguments": {"user_message": text},
+                }
+            },
+            ensure_ascii=False,
+        )
+        conn.sentence_id = str(uuid.uuid4().hex)
         return await process_intent_result(conn, intent_result, text)
 
     if conn.intent_type == "function_call":
@@ -190,7 +209,8 @@ async def process_intent_result(
 
                 # 上报工具调用结果
                 if result:
-                    enqueue_tool_report(conn, function_name, tool_input, str(result.result) if result.result else None, report_tool_call=False)
+                    report_result = result.result if result.result else result.response
+                    enqueue_tool_report(conn, function_name, tool_input, str(report_result) if report_result else None, report_tool_call=False)
 
                     if result.action == Action.RESPONSE:  # 直接回复前端
                         text = result.response

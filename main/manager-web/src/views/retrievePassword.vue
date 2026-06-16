@@ -103,10 +103,6 @@ import Api from '@/apis/api';
 import VersionFooter from '@/components/VersionFooter.vue';
 import { getUUID, goToPage, showDanger, showSuccess, validateMobile, sm2Encrypt } from '@/utils';
 import { mapState } from 'vuex';
-import i18n from '@/i18n';
-
-// 导入语言切换功能
-import { changeLanguage } from '@/i18n';
 
 export default {
   name: 'retrieve',
@@ -119,29 +115,8 @@ export default {
       mobileAreaList: state => state.pubConfig.mobileAreaList,
       sm2PublicKey: state => state.pubConfig.sm2PublicKey
     }),
-    // 获取当前语言
-    currentLanguage() {
-      return i18n.locale || "zh_CN";
-    },
-    // 根据当前语言获取对应的xiaozhi-ai图标
     xiaozhiAiIcon() {
-      const currentLang = this.currentLanguage;
-      switch (currentLang) {
-        case "zh_CN":
-          return require("@/assets/xiaozhi-ai.png");
-        case "zh_TW":
-          return require("@/assets/xiaozhi-ai_zh_TW.png");
-        case "en":
-          return require("@/assets/xiaozhi-ai_en.png");
-        case "de":
-          return require("@/assets/xiaozhi-ai_de.png");
-        case "vi":
-          return require("@/assets/xiaozhi-ai_vi.png");
-        case "pt_BR":
-          return require("@/assets/xiaozhi-ai_en.png");
-        default:
-          return require("@/assets/xiaozhi-ai.png");
-      }
+      return require("@/assets/xiaozhi-ai.png");
     },
     canSendMobileCaptcha() {
       return this.countdown === 0 && validateMobile(this.form.mobile, this.form.areaCode);

@@ -315,9 +315,10 @@ mkdir -p main/xiaozhi-server/models/SenseVoiceSmall
 启动 `manager-api`：
 
 ```bash
-cd main/manager-api
-mvn spring-boot:run -Dspring-boot.run.profiles=dev
+scripts/dev start api
 ```
+
+默认会使用快速启动路径。需要强制重新编译时使用 `DEV_API_FORCE_COMPILE=1 scripts/dev start api`；需要走 Maven 插件兼容路径时使用 `DEV_API_MAVEN_RUN=1 scripts/dev start api`。
 
 启动 `manager-web`：
 

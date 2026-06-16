@@ -91,3 +91,11 @@ class MCPClient:
         async with self.lock:
             if id in self.call_results:
                 self.call_results.pop(id)
+
+    async def reject_all_call_results(self, exception: Exception):
+        async with self.lock:
+            pending_results = list(self.call_results.values())
+            self.call_results.clear()
+        for future in pending_results:
+            if not future.done():
+                future.set_exception(exception)

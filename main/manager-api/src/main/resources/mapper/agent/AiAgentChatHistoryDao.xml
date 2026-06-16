@@ -35,6 +35,19 @@
       #{id}
     </foreach>
   </delete>
+
+  <delete id="deleteUnreferencedAudioByIds">
+    DELETE FROM ai_agent_chat_audio
+    WHERE id IN
+    <foreach collection="audioIds" item="id" open="(" separator="," close=")">
+      #{id}
+    </foreach>
+    AND id NOT IN (
+      SELECT DISTINCT audio_id
+      FROM ai_agent_chat_history
+      WHERE audio_id IS NOT NULL
+    )
+  </delete>
   
   <update id="deleteAudioIdByAgentId">
     UPDATE ai_agent_chat_history

@@ -241,17 +241,15 @@ const router = new VueRouter({
   routes
 })
 
-// 全局处理重复导航，改为刷新页面
+// 全局处理重复导航
 const originalPush = VueRouter.prototype.push
 VueRouter.prototype.push = function push(location) {
   return originalPush.call(this, location).catch(err => {
     if (err.name === 'NavigationDuplicated') {
-      // 如果是重复导航，刷新页面
-      window.location.reload()
-    } else {
-      // 其他错误正常抛出
-      throw err
+      return this.currentRoute
     }
+    // 其他错误正常抛出
+    throw err
   })
 }
 
