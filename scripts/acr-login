@@ -2,7 +2,26 @@
 set -Eeuo pipefail
 
 ACR_REGISTRY="${ACR_REGISTRY:-crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com}"
+ACR_USERNAME="${ACR_USERNAME:-}"
+ACR_PASSWORD_FILE="${ACR_PASSWORD_FILE:-}"
+ACR_PASSWORD_STDIN="${ACR_PASSWORD_STDIN:-false}"
 
 echo "Logging in to Aliyun ACR:"
 echo "  $ACR_REGISTRY"
-docker login "$ACR_REGISTRY"
+
+LOGIN_ARGS=()
+if [[ -n "$ACR_USERNAME" ]]; then
+  LOGIN_ARGS+=(--username "$ACR_USERNAME")
+fi
+
+if [[ -n "$ACR_PASSWORD_FILE" ]]; then
+  if [[ ! -f "$ACR_PASSWORD_FILE" ]]; then
+    echo "ACR_PASSWORD_FILE does not exist: $ACR_PASSWORD_FILE" >&2
+    exit 1
+  fi
+  docker login "${LOGIN_ARGS[@]}" --password-stdin "$ACR_REGISTRY" <"$ACR_PASSWORD_FILE"
+elif [[ "$ACR_PASSWORD_STDIN" == "true" ]]; then
+  docker login "${LOGIN_ARGS[@]}" --password-stdin "$ACR_REGISTRY"
+else
+  docker login "${LOGIN_ARGS[@]}" "$ACR_REGISTRY"
+fi

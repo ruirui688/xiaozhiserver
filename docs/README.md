@@ -89,7 +89,7 @@ docs/integrations/prompt-injection-engineering.md
 
 用于服务器安装、Docker 构建、全模块部署、自动更新、生产运行和部署端口配置。AI 只有在修改部署、Docker、服务器脚本、端口、Nginx、生产发布流程时，才需要读取本分类文档。
 
-- [deployment/private-docker-release.md](./deployment/private-docker-release.md) - 本项目 Git-only Docker 生产部署主路径。用于生产服务器从私有 Git 仓库拉取代码，在服务器本机构建业务镜像，并用 Docker Compose 启动；生产用户使用 `~/work/xiaozhi-esp32-server`、`/opt/xiaozhi-data`、`scripts/deploy`、`scripts/upgrade` 完成首次部署和升级。安装阶段允许所有模型暂时为空，模型后续在智控台配置。
+- [deployment/private-docker-release.md](./deployment/private-docker-release.md) - 本项目 ACR 镜像生产部署主路径。用于本地或构建机先构建业务镜像并推送到阿里云 ACR，生产服务器只拉取已发布镜像并用 Docker Compose 启动；生产用户使用 `~/work/xiaozhi-esp32-server`、`/opt/xiaozhi-data`、`scripts/acr-deploy-pull`、`scripts/upgrade` 完成首次部署和升级。安装阶段允许所有模型暂时为空，模型后续在智控台配置。
 - [deployment/deployment-asset-policy.md](./deployment/deployment-asset-policy.md) - 部署资产治理策略。用于区分 `docs/deployment/`、`deploy/`、`scripts/` 的职责，规定 Docker、服务器安装升级和 release 发布资产的归档边界。
 - [deployment/Deployment.md](./deployment/Deployment.md) - 官方单 Server Docker 兼容说明。仅用于参考官方默认部署方式，不作为本项目私有生产部署主入口。
 - [deployment/Deployment_all.md](./deployment/Deployment_all.md) - 官方全模块 Docker 兼容说明。仅用于参考官方默认部署方式，不作为本项目私有生产部署主入口。
@@ -100,7 +100,7 @@ docs/integrations/prompt-injection-engineering.md
 部署文档优先级：
 
 ```text
-Git-only 生产部署：deployment/private-docker-release.md
+ACR 镜像生产部署：deployment/private-docker-release.md
 部署资产边界：deployment/deployment-asset-policy.md
 官方兼容参考：deployment/Deployment.md / Deployment_all.md
 历史源码升级：deployment/dev-ops-integration.md

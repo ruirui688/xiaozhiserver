@@ -1,15 +1,15 @@
-# Git-only Docker 生产部署
+# ACR 镜像生产部署
 
 本文档是生产服务器安装和升级入口。
 
 生产部署支持两种方式：
 
 ```text
-build 模式  生产服务器从 Git 拉源码并在本机构建业务镜像
 pull 模式   本地或构建机先构建业务镜像并推送到镜像仓库，生产服务器只拉镜像启动
+build 模式  生产服务器从 Git 拉源码并在本机构建业务镜像，仅作为历史兼容路径保留
 ```
 
-如果生产服务器无法稳定访问 Docker Hub，优先使用 pull 模式。生产服务器只需要访问私有 Git 仓库和你的镜像仓库，不再需要拉取 Python、Node、Maven 等构建基础镜像。
+本项目生产端标准路线是 pull 模式。生产服务器只需要访问私有 Git 仓库和你的镜像仓库，不再拉取 Python、Node、Maven 等构建基础镜像，也不在生产服务器编译业务镜像。
 
 本项目当前默认使用的阿里云 ACR 个人版仓库：
 
@@ -31,16 +31,7 @@ pull 模式   本地或构建机先构建业务镜像并推送到镜像仓库，
 
 ## 快速命令
 
-首次部署，本机 build 模式：
-
-```bash
-mkdir -p ~/work
-git clone ssh://git@10.144.92.32:222/gaoruirui688/xiaozhi-esp32-server.git ~/work/xiaozhi-esp32-server
-cd ~/work/xiaozhi-esp32-server
-sudo scripts/deploy
-```
-
-首次部署，推荐的镜像仓库 pull 模式：
+首次部署，镜像仓库 pull 模式：
 
 ```bash
 mkdir -p ~/work
@@ -150,6 +141,32 @@ sudo \
 
 注意：`docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com` 只表示你可以向阿里云 ACR 推送或拉取自己的镜像。它不会让 Docker 自动从阿里云获取 `python:3.10-slim`、`node:18` 等 Docker Hub 基础镜像。只要执行构建，构建机仍然需要能访问这些基础镜像，或者通过 `PYTHON_BASE_IMAGE` 等变量指定可访问的兼容基础镜像。
 
+如果 Docker daemon 里配置的镜像加速器不可用，buildx 可能在拉取基础镜像元数据时报 `403 Forbidden`。可以临时禁用 buildx 镜像加速器后重试：
+
+```bash
+BUILDKIT_REGISTRY_MIRROR=none scripts/acr-build-push
+```
+
+如果在 WSL 或代理环境中，buildx 容器无法访问 Docker Hub，但普通 `docker pull python:3.10-slim` 可以成功，可以改用单平台 Docker 构建发布：
+
+```bash
+BUILD_ENGINE=docker scripts/acr-build-push
+```
+
+server-base 构建默认使用阿里云 Debian 镜像源，避免生产镜像构建阶段访问 Debian 官方源过慢或被中间缓存污染。如需切换，可以覆盖：
+
+```bash
+DEBIAN_MIRROR=https://deb.debian.org/debian \
+DEBIAN_SECURITY_MIRROR=https://deb.debian.org/debian-security \
+scripts/acr-build-push
+```
+
+生产镜像默认使用 `main/xiaozhi-server/requirements-docker.txt`，不安装 `torch` / `torchaudio`，适合使用云端 ASR 和 ONNX Silero VAD 的部署方式。如果确实要在容器内启用本地 FunASR，可以显式改回完整依赖：
+
+```bash
+SERVER_REQUIREMENTS=main/xiaozhi-server/requirements.txt scripts/acr-build-push
+```
+
 ## 推送业务镜像到阿里云 ACR
 
 在可以访问 Docker Hub 的本地开发机或构建机上执行。
@@ -158,6 +175,26 @@ sudo \
 
 ```bash
 scripts/acr-login
+```
+
+如果需要非交互登录，不要把密码写进命令行或提交到 Git。可以使用只存在本机的密码文件：
+
+```bash
+ACR_USERNAME=你的阿里云ACR用户名 \
+ACR_PASSWORD_FILE=/path/to/acr-password.txt \
+scripts/acr-login
+```
+
+也可以从标准输入传入密码：
+
+```bash
+read -rsp 'ACR password: ' ACR_PASSWORD
+printf '\n'
+printf '%s' "$ACR_PASSWORD" | \
+  ACR_USERNAME=你的阿里云ACR用户名 \
+  ACR_PASSWORD_STDIN=true \
+  scripts/acr-login
+unset ACR_PASSWORD
 ```
 
 构建并推送业务镜像：
@@ -346,9 +383,18 @@ cd ~/work/xiaozhi-esp32-server
 REF=v版本号 scripts/upgrade
 ```
 
-升级脚本会先拉取代码，再重新构建本地业务镜像，并执行 `docker compose up -d`。
+升级脚本会先拉取代码，再按 `/opt/xiaozhi-data/.env` 中记录的 pull 模式拉取远程镜像，并执行 `docker compose up -d`。
 
 pull 模式升级时保留同样的环境变量：
+
+```bash
+cd ~/work/xiaozhi-esp32-server
+scripts/upgrade
+```
+
+首次使用 `scripts/acr-deploy-pull` 后，部署模式和镜像仓库会写入 `/opt/xiaozhi-data/.env`。后续 `scripts/upgrade` 会复用该配置，先拉取代码，再拉取远程镜像，并执行 `docker compose up -d`。
+
+如果需要临时切换镜像仓库，可以显式覆盖：
 
 ```bash
 cd ~/work/xiaozhi-esp32-server
@@ -356,8 +402,6 @@ DEPLOY_MODE=pull \
 IMAGE_REPOSITORY=crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi \
 scripts/upgrade
 ```
-
-脚本会先拉取代码，再拉取远程镜像，并执行 `docker compose up -d`。
 
 这些数据会继续保留：
 

@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEFAULT_IMAGE_REPOSITORY="crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi"
 if [[ -z "${INSTALL_DIR:-}" ]]; then
   if [[ -d /opt/xiaozhi-server && ! -d /opt/xiaozhi-data ]]; then
     INSTALL_DIR="/opt/xiaozhi-server"
@@ -9,10 +10,23 @@ if [[ -z "${INSTALL_DIR:-}" ]]; then
     INSTALL_DIR="/opt/xiaozhi-data"
   fi
 fi
-IMAGE_REPOSITORY="${IMAGE_REPOSITORY:-xiaozhi-esp32-server-local}"
-DEPLOY_MODE="${DEPLOY_MODE:-build}"
+
+read_existing_env() {
+  local key="$1"
+  local env_file="$INSTALL_DIR/.env"
+  [[ -f "$env_file" ]] || return 0
+  awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$env_file"
+}
+
+IMAGE_REPOSITORY="${IMAGE_REPOSITORY:-$(read_existing_env XIAOZHI_IMAGE_REPOSITORY)}"
+IMAGE_REPOSITORY="${IMAGE_REPOSITORY:-$DEFAULT_IMAGE_REPOSITORY}"
+DEPLOY_MODE="${DEPLOY_MODE:-$(read_existing_env XIAOZHI_DEPLOY_MODE)}"
+DEPLOY_MODE="${DEPLOY_MODE:-pull}"
+MYSQL_IMAGE="${MYSQL_IMAGE:-$(read_existing_env XIAOZHI_MYSQL_IMAGE)}"
 MYSQL_IMAGE="${MYSQL_IMAGE:-mysql:latest}"
+REDIS_IMAGE="${REDIS_IMAGE:-$(read_existing_env XIAOZHI_REDIS_IMAGE)}"
 REDIS_IMAGE="${REDIS_IMAGE:-redis:8.0}"
+MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-$(read_existing_env XIAOZHI_MYSQL_ROOT_PASSWORD)}"
 MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-123456}"
 case "$(uname -m)" in
   x86_64) DEFAULT_PLATFORM="linux/amd64" ;;
@@ -43,7 +57,12 @@ mkdir -p \
   "$INSTALL_DIR/uploadfile"
 
 if [[ "$DEPLOY_MODE" == "build" ]]; then
-  echo "Building local Docker images from $ROOT_DIR"
+  cat <<EOF
+Building local Docker images from $ROOT_DIR.
+
+DEPLOY_MODE=build is a compatibility path only. Production deployment should use
+prebuilt ACR images with DEPLOY_MODE=pull.
+EOF
   IMAGE_REPOSITORY="$IMAGE_REPOSITORY" \
     PUSH=false \
     PLATFORMS="$PLATFORMS" \
@@ -65,6 +84,7 @@ if [[ ! -f "$INSTALL_DIR/data/.config.yaml" ]]; then
 fi
 
 cat > "$INSTALL_DIR/.env" <<EOF
+XIAOZHI_DEPLOY_MODE=$DEPLOY_MODE
 XIAOZHI_IMAGE_REPOSITORY=$IMAGE_REPOSITORY
 XIAOZHI_MYSQL_IMAGE=$MYSQL_IMAGE
 XIAOZHI_REDIS_IMAGE=$REDIS_IMAGE
@@ -82,7 +102,7 @@ manager-web/api:  http://$LOCAL_IP:8002
 websocket:        ws://$LOCAL_IP:8000/xiaozhi/v1/
 vision API:       http://$LOCAL_IP:8003/mcp/vision/explain
 
-This Git-only install uses Docker images:
+This deployment uses Docker images:
 
   $IMAGE_REPOSITORY:server_latest
   $IMAGE_REPOSITORY:web_latest
