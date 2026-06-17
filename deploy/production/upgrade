@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)"; then
+  BRANCH="$(git -C "$REPO_ROOT" symbolic-ref --short HEAD 2>/dev/null || true)"
+  if [[ -n "$BRANCH" ]]; then
+    REMOTE="${REMOTE:-origin}"
+    echo "Updating deployment assets from $REMOTE/$BRANCH"
+    git -C "$REPO_ROOT" pull --ff-only "$REMOTE" "$BRANCH"
+  fi
+fi
+
+exec "$SCRIPT_DIR/install"

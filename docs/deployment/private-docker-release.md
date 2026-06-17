@@ -3,12 +3,15 @@
 本项目只有一种生产部署方式：
 
 ```text
-本地/构建机打包 Docker 镜像
+源码推送到私有 Git 仓库
+  -> 本地/构建机拉取完整源码并打包 Docker 镜像
   -> 推送到阿里云 ACR
-  -> 生产服务器只拉取已发布镜像并启动
+  -> 生产服务器只拉取最小部署资产和已发布镜像
 ```
 
-生产服务器不从源码构建业务镜像，不安装 Maven、Node.js、Conda 或 Python 依赖。
+源码仍然必须进入私有 Git 仓库。区别是：构建机使用完整源码，生产服务器不使用完整源码。
+
+生产服务器不从源码构建业务镜像，不保存完整项目源码，不安装 Maven、Node.js、Conda 或 Python 依赖。
 
 ## 镜像命名
 
@@ -40,8 +43,8 @@ xiaozhi-server-base:60c9ee96
 ## 目录约定
 
 ```text
-~/work/xiaozhi-esp32-server  生产服务器上的项目脚本目录
-/opt/xiaozhi-data            生产数据目录
+~/work/xiaozhi-deploy  生产服务器上的最小部署资产目录，只 sparse-checkout deploy/production
+/opt/xiaozhi-data      生产数据目录
 ```
 
 `/opt/xiaozhi-data` 保存数据库、私有配置和上传文件。升级镜像不会删除这个目录。
@@ -88,11 +91,18 @@ SERVER_REQUIREMENTS=main/xiaozhi-server/requirements.txt scripts/acr-build-push
 
 ```bash
 mkdir -p ~/work
-git clone ssh://git@10.144.92.32:222/gaoruirui688/xiaozhi-esp32-server.git ~/work/xiaozhi-esp32-server
-cd ~/work/xiaozhi-esp32-server
-sudo scripts/acr-login
-scripts/acr-deploy-pull
+git clone --filter=blob:none --no-checkout \
+  ssh://git@10.144.92.32:222/gaoruirui688/xiaozhi-esp32-server.git \
+  ~/work/xiaozhi-deploy
+cd ~/work/xiaozhi-deploy
+git sparse-checkout set deploy/production
+git checkout feature/configurable-docker-base-images
+cd deploy/production
+sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
+./install
 ```
+
+这仍然是从私有 Git 仓库取部署资产，但只取 `deploy/production` 目录，不会把 `main/`、`docs/`、完整源码和构建文件放到生产服务器。
 
 部署脚本会：
 
@@ -125,18 +135,18 @@ scripts/acr-build-push
 再到生产服务器执行：
 
 ```bash
-cd ~/work/xiaozhi-esp32-server
-scripts/upgrade
+cd ~/work/xiaozhi-deploy/deploy/production
+./upgrade
 ```
 
-`scripts/upgrade` 会更新当前 Git 分支，复用 `/opt/xiaozhi-data/.env` 中的镜像仓库配置，拉取最新镜像并重启容器。
+`./upgrade` 会更新 sparse-checkout 中的部署资产，复用 `/opt/xiaozhi-data/.env` 中的镜像仓库配置，拉取最新镜像并重启容器。
 
 ## 访问和配置
 
 查看服务：
 
 ```bash
-docker compose -f /opt/xiaozhi-data/docker-compose_all.yml \
+docker compose -f /opt/xiaozhi-data/docker-compose.yml \
   --env-file /opt/xiaozhi-data/.env ps
 ```
 
@@ -180,7 +190,7 @@ docker logs -f xiaozhi-esp32-server-web
 停止服务：
 
 ```bash
-docker compose -f /opt/xiaozhi-data/docker-compose_all.yml \
+docker compose -f /opt/xiaozhi-data/docker-compose.yml \
   --env-file /opt/xiaozhi-data/.env down
 ```
 
@@ -199,7 +209,7 @@ docker compose -f /opt/xiaozhi-data/docker-compose_all.yml \
 ```bash
 SERVER_IMAGE_REPOSITORY=你的仓库/xiaozhi-server \
 WEB_IMAGE_REPOSITORY=你的仓库/xiaozhi-web \
-scripts/acr-deploy-pull
+./install
 ```
 
 如果生产服务器无法访问 Docker Hub 的 MySQL 或 Redis 镜像，需要先把它们同步到 ACR，再覆盖：
@@ -207,5 +217,5 @@ scripts/acr-deploy-pull
 ```bash
 MYSQL_IMAGE=你的仓库/mysql:8.4 \
 REDIS_IMAGE=你的仓库/redis:8.0 \
-scripts/acr-deploy-pull
+./install
 ```
