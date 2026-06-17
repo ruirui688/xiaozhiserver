@@ -3,9 +3,15 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALL_DIR="${INSTALL_DIR:-/opt/xiaozhi-server}"
-IMAGE_REPOSITORY="${IMAGE_REPOSITORY:-10.144.92.32:3001/gaoruirui688/xiaozhi-esp32-server}"
+IMAGE_REPOSITORY="${IMAGE_REPOSITORY:-xiaozhi-esp32-server-local}"
 MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-123456}"
-DOWNLOAD_MODEL="${DOWNLOAD_MODEL:-true}"
+case "$(uname -m)" in
+  x86_64) DEFAULT_PLATFORM="linux/amd64" ;;
+  aarch64 | arm64) DEFAULT_PLATFORM="linux/arm64" ;;
+  *) DEFAULT_PLATFORM="linux/amd64" ;;
+esac
+PLATFORMS="${PLATFORMS:-$DEFAULT_PLATFORM}"
+BUILD_BASE="${BUILD_BASE:-true}"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "Docker is not installed. Install Docker first, then rerun this script." >&2
@@ -19,26 +25,27 @@ fi
 
 mkdir -p \
   "$INSTALL_DIR/data" \
-  "$INSTALL_DIR/models/SenseVoiceSmall" \
   "$INSTALL_DIR/mysql/data" \
   "$INSTALL_DIR/uploadfile"
+
+echo "Building local Docker images from $ROOT_DIR"
+IMAGE_REPOSITORY="$IMAGE_REPOSITORY" \
+  PUSH=false \
+  PLATFORMS="$PLATFORMS" \
+  BUILD_BASE="$BUILD_BASE" \
+  "$ROOT_DIR/scripts/docker-build-private.sh"
 
 cp "$ROOT_DIR/main/xiaozhi-server/docker-compose_all.yml" "$INSTALL_DIR/docker-compose_all.yml"
 
 if [[ ! -f "$INSTALL_DIR/data/.config.yaml" ]]; then
   cp "$ROOT_DIR/main/xiaozhi-server/config_from_api.yaml" "$INSTALL_DIR/data/.config.yaml"
+  sed -i 's#url: http://127.0.0.1:8002/xiaozhi#url: http://xiaozhi-esp32-server-web:8002/xiaozhi#' "$INSTALL_DIR/data/.config.yaml"
 fi
 
 cat > "$INSTALL_DIR/.env" <<EOF
 XIAOZHI_IMAGE_REPOSITORY=$IMAGE_REPOSITORY
 XIAOZHI_MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD
 EOF
-
-MODEL_PATH="$INSTALL_DIR/models/SenseVoiceSmall/model.pt"
-if [[ "$DOWNLOAD_MODEL" == "true" && ! -f "$MODEL_PATH" ]]; then
-  echo "Downloading SenseVoiceSmall model"
-  curl -fL https://modelscope.cn/models/iic/SenseVoiceSmall/resolve/master/model.pt -o "$MODEL_PATH"
-fi
 
 echo "Starting Docker services from $INSTALL_DIR"
 docker compose -f "$INSTALL_DIR/docker-compose_all.yml" --env-file "$INSTALL_DIR/.env" up -d
@@ -51,12 +58,17 @@ manager-web/api:  http://$LOCAL_IP:8002
 websocket:        ws://$LOCAL_IP:8000/xiaozhi/v1/
 vision API:       http://$LOCAL_IP:8003/mcp/vision/explain
 
+This Git-only install uses local Docker images:
+
+  $IMAGE_REPOSITORY:server_latest
+  $IMAGE_REPOSITORY:web_latest
+
 After the first administrator account is registered, open the console parameter page,
 copy server.secret, write it to:
 
   $INSTALL_DIR/data/.config.yaml
 
-Then restart the core service:
+Then configure the required models in the console and restart the core service:
 
   docker restart xiaozhi-esp32-server
 EOF

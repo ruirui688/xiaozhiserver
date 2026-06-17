@@ -161,27 +161,19 @@ public class AgentTemplateServiceImpl extends ServiceImpl<AgentTemplateDao, Agen
     }
 
     private String resolveEnabledModelId(String modelType, String candidateModelId) {
-        if (StringUtils.isNotBlank(candidateModelId)) {
-            ModelConfigEntity candidate = modelConfigService.getModelByIdFromCache(candidateModelId);
-            if (candidate != null
-                    && modelType.equalsIgnoreCase(candidate.getModelType())
-                    && candidate.getIsEnabled() != null
-                    && candidate.getIsEnabled() == 1
-                    && candidate.getTestStatus() != null
-                    && candidate.getTestStatus() == 1) {
-                return candidateModelId;
-            }
-        }
-
-        List<ModelConfigEntity> enabledModels = modelConfigService.getEnabledModelsByType(modelType);
-        if (enabledModels == null || enabledModels.isEmpty()) {
+        if (StringUtils.isBlank(candidateModelId)) {
             return null;
         }
-        for (ModelConfigEntity enabledModel : enabledModels) {
-            if (enabledModel.getIsDefault() != null && enabledModel.getIsDefault() == 1) {
-                return enabledModel.getId();
-            }
+
+        ModelConfigEntity candidate = modelConfigService.getModelByIdFromCache(candidateModelId);
+        if (candidate != null
+                && modelType.equalsIgnoreCase(candidate.getModelType())
+                && candidate.getIsEnabled() != null
+                && candidate.getIsEnabled() == 1
+                && candidate.getTestStatus() != null
+                && candidate.getTestStatus() == 1) {
+            return candidateModelId;
         }
-        return enabledModels.get(0).getId();
+        return null;
     }
 }

@@ -2,19 +2,26 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEFAULT_IMAGE_REPOSITORY="10.144.92.32:3001/gaoruirui688/xiaozhi-esp32-server"
+DEFAULT_IMAGE_REPOSITORY="xiaozhi-esp32-server-local"
 
 IMAGE_REPOSITORY="${IMAGE_REPOSITORY:-$DEFAULT_IMAGE_REPOSITORY}"
-PLATFORMS="${PLATFORMS:-linux/amd64}"
-PUSH="${PUSH:-true}"
+case "$(uname -m)" in
+  x86_64) DEFAULT_PLATFORM="linux/amd64" ;;
+  aarch64 | arm64) DEFAULT_PLATFORM="linux/arm64" ;;
+  *) DEFAULT_PLATFORM="linux/amd64" ;;
+esac
+PLATFORMS="${PLATFORMS:-$DEFAULT_PLATFORM}"
+PUSH="${PUSH:-false}"
 BUILD_BASE="${BUILD_BASE:-true}"
 BUILDER_NAME="${BUILDER_NAME:-xiaozhi-builder}"
 
 if [[ -z "${VERSION:-}" ]]; then
   if VERSION_TAG="$(git -C "$ROOT_DIR" describe --tags --exact-match 2>/dev/null)"; then
     VERSION="${VERSION_TAG#v}"
+  elif VERSION_SHA="$(git -C "$ROOT_DIR" rev-parse --short=8 HEAD 2>/dev/null)"; then
+    VERSION="$VERSION_SHA"
   else
-    VERSION="$(git -C "$ROOT_DIR" rev-parse --short=8 HEAD)"
+    VERSION="local"
   fi
 fi
 

@@ -562,9 +562,12 @@ class ConnectionHandler:
             # 初始化声纹识别
             self._initialize_voiceprint()
             # 打开语音识别通道
-            asyncio.run_coroutine_threadsafe(
-                self.asr.open_audio_channels(self), self.loop
-            )
+            if self.asr is not None:
+                asyncio.run_coroutine_threadsafe(
+                    self.asr.open_audio_channels(self), self.loop
+                )
+            else:
+                self.logger.bind(tag=TAG).warning("ASR未配置，语音识别暂不可用")
 
             """加载记忆"""
             self._initialize_memory()
@@ -681,6 +684,8 @@ class ConnectionHandler:
     def _initialize_asr(self):
         """初始化ASR"""
         selected_asr = self.config.get("selected_module", {}).get("ASR")
+        if not selected_asr or not self.config.get("ASR", {}).get(selected_asr):
+            return None
         common_selected_asr = self.common_config.get("selected_module", {}).get("ASR")
         if (
                 self._asr is not None
@@ -879,6 +884,9 @@ class ConnectionHandler:
     def _initialize_memory(self):
         if self.memory is None:
             return
+        selected_memory = self.config.get("selected_module", {}).get("Memory")
+        if not selected_memory or selected_memory not in self.config.get("Memory", {}):
+            return
         """初始化记忆模块"""
         self.memory.init_memory(
             role_id=self.device_id,
@@ -889,17 +897,13 @@ class ConnectionHandler:
 
         # 获取记忆总结配置
         memory_config = self.config["Memory"]
-        memory_type = self.config["Memory"][self.config["selected_module"]["Memory"]][
-            "type"
-        ]
+        memory_type = self.config["Memory"][selected_memory]["type"]
         # 如果使用 nomen 或 mem_report_only，直接返回
         if memory_type == "nomem" or memory_type == "mem_report_only":
             return
         # 使用 mem_local_short 模式
         elif memory_type == "mem_local_short":
-            memory_llm_name = memory_config[self.config["selected_module"]["Memory"]][
-                "llm"
-            ]
+            memory_llm_name = memory_config[selected_memory]["llm"]
             if memory_llm_name and memory_llm_name in self.config["LLM"]:
                 # 如果配置了专用LLM，则创建独立的LLM实例
                 from core.utils import llm as llm_utils
@@ -921,9 +925,10 @@ class ConnectionHandler:
     def _initialize_intent(self):
         if self.intent is None:
             return
-        self.configured_intent_type = self.config["Intent"][
-            self.config["selected_module"]["Intent"]
-        ]["type"]
+        selected_intent = self.config.get("selected_module", {}).get("Intent")
+        if not selected_intent or selected_intent not in self.config.get("Intent", {}):
+            return
+        self.configured_intent_type = self.config["Intent"][selected_intent]["type"]
         self.intent_type = self._resolve_runtime_intent_type(self.configured_intent_type)
         if self.configured_intent_type == "function_call" and self.intent_type == "intent_llm":
             self._switch_to_intent_llm_provider()

@@ -6,6 +6,13 @@ TAG = __name__
 logger = setup_logging()
 
 
+def has_selected_module(config: Dict[str, Any], module_type: str) -> bool:
+    selected_module = config.get("selected_module", {})
+    selected_name = selected_module.get(module_type)
+    module_config = config.get(module_type, {})
+    return bool(selected_name and module_config.get(selected_name))
+
+
 def initialize_modules(
     logger,
     config: Dict[str, Any],
@@ -28,13 +35,13 @@ def initialize_modules(
     modules = {}
 
     # 初始化TTS模块
-    if init_tts:
+    if init_tts and has_selected_module(config, "TTS"):
         select_tts_module = config["selected_module"]["TTS"]
         modules["tts"] = initialize_tts(config)
         logger.bind(tag=TAG).info(f"初始化组件: tts成功 {select_tts_module}")
 
     # 初始化LLM模块
-    if init_llm:
+    if init_llm and has_selected_module(config, "LLM"):
         select_llm_module = config["selected_module"]["LLM"]
         llm_type = (
             select_llm_module
@@ -48,7 +55,7 @@ def initialize_modules(
         logger.bind(tag=TAG).info(f"初始化组件: llm成功 {select_llm_module}")
 
     # 初始化Intent模块
-    if init_intent:
+    if init_intent and has_selected_module(config, "Intent"):
         select_intent_module = config["selected_module"]["Intent"]
         intent_type = (
             select_intent_module
@@ -62,7 +69,7 @@ def initialize_modules(
         logger.bind(tag=TAG).info(f"初始化组件: intent成功 {select_intent_module}")
 
     # 初始化Memory模块
-    if init_memory:
+    if init_memory and has_selected_module(config, "Memory"):
         select_memory_module = config["selected_module"]["Memory"]
         memory_type = (
             select_memory_module
@@ -77,7 +84,7 @@ def initialize_modules(
         logger.bind(tag=TAG).info(f"初始化组件: memory成功 {select_memory_module}")
 
     # 初始化VAD模块
-    if init_vad:
+    if init_vad and has_selected_module(config, "VAD"):
         select_vad_module = config["selected_module"]["VAD"]
         vad_type = (
             select_vad_module
@@ -91,7 +98,7 @@ def initialize_modules(
         logger.bind(tag=TAG).info(f"初始化组件: vad成功 {select_vad_module}")
 
     # 初始化ASR模块
-    if init_asr:
+    if init_asr and has_selected_module(config, "ASR"):
         select_asr_module = config["selected_module"]["ASR"]
         modules["asr"] = initialize_asr(config)
         logger.bind(tag=TAG).info(f"初始化组件: asr成功 {select_asr_module}")
@@ -99,6 +106,8 @@ def initialize_modules(
 
 
 def initialize_tts(config):
+    if not has_selected_module(config, "TTS"):
+        return None
     select_tts_module = config["selected_module"]["TTS"]
     tts_type = (
         select_tts_module
@@ -114,6 +123,8 @@ def initialize_tts(config):
 
 
 def initialize_asr(config):
+    if not has_selected_module(config, "ASR"):
+        return None
     select_asr_module = config["selected_module"]["ASR"]
     asr_type = (
         select_asr_module
@@ -148,4 +159,3 @@ def initialize_voiceprint(asr_instance, config):
     except Exception as e:
         logger.bind(tag=TAG).error(f"动态初始化声纹识别功能失败: {str(e)}")
         return False
-
