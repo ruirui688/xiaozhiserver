@@ -105,16 +105,17 @@ SERVER_REQUIREMENTS=main/xiaozhi-server/requirements.txt scripts/acr-build-push
 
 ```bash
 mkdir -p ~/work
-git clone --filter=blob:none --no-checkout \
+git clone --filter=blob:none --sparse --branch main \
   ssh://git@10.144.92.32:222/gaoruirui688/xiaozhi-esp32-server.git \
   ~/work/xiaozhi-deploy
 cd ~/work/xiaozhi-deploy
 git sparse-checkout set deploy/production
-git checkout feature/configurable-docker-base-images
 cd deploy/production
 sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
 ./install
 ```
+
+生产部署固定使用私有仓库的 `main` 分支。功能分支只用于开发和合并前验证，不写入生产安装命令。
 
 这仍然是从私有 Git 仓库取部署资产，但只取 `deploy/production` 目录，不会把 `main/`、`docs/`、完整源码和构建文件放到生产服务器。
 
@@ -155,7 +156,9 @@ cd ~/work/xiaozhi-deploy/deploy/production
 
 `./upgrade` 会更新 sparse-checkout 中的部署资产，复用 `/opt/xiaozhi-data/.env` 中的镜像仓库配置，拉取最新镜像并重启容器。
 
-## 访问和配置
+## 日常操作
+
+生产服务器统一使用 `/opt/xiaozhi-data/docker-compose.yml` 和 `/opt/xiaozhi-data/.env` 管理服务。
 
 查看服务：
 
@@ -163,6 +166,57 @@ cd ~/work/xiaozhi-deploy/deploy/production
 docker compose -f /opt/xiaozhi-data/docker-compose.yml \
   --env-file /opt/xiaozhi-data/.env ps
 ```
+
+启动项目：
+
+```bash
+docker compose -f /opt/xiaozhi-data/docker-compose.yml \
+  --env-file /opt/xiaozhi-data/.env up -d
+```
+
+重启全部服务：
+
+```bash
+docker compose -f /opt/xiaozhi-data/docker-compose.yml \
+  --env-file /opt/xiaozhi-data/.env restart
+```
+
+只重启核心服务：
+
+```bash
+docker restart xiaozhi-esp32-server
+```
+
+只重启智控台和 API：
+
+```bash
+docker restart xiaozhi-esp32-server-web
+```
+
+关闭项目但保留容器：
+
+```bash
+docker compose -f /opt/xiaozhi-data/docker-compose.yml \
+  --env-file /opt/xiaozhi-data/.env stop
+```
+
+停止并移除容器和网络，但保留数据库、配置和上传文件：
+
+```bash
+docker compose -f /opt/xiaozhi-data/docker-compose.yml \
+  --env-file /opt/xiaozhi-data/.env down
+```
+
+查看日志：
+
+```bash
+docker logs -f xiaozhi-esp32-server
+docker logs -f xiaozhi-esp32-server-web
+docker logs -f xiaozhi-esp32-server-db
+docker logs -f xiaozhi-esp32-server-redis
+```
+
+## 访问和配置
 
 访问智控台：
 
@@ -191,22 +245,6 @@ docker restart xiaozhi-esp32-server
 ```
 
 ASR、VAD、LLM、TTS、VLLM、Memory、Intent 等模型可以在安装后到智控台配置。安装阶段不需要下载或挂载本地语音模型。
-
-## 常用维护
-
-查看日志：
-
-```bash
-docker logs -f xiaozhi-esp32-server
-docker logs -f xiaozhi-esp32-server-web
-```
-
-停止服务：
-
-```bash
-docker compose -f /opt/xiaozhi-data/docker-compose.yml \
-  --env-file /opt/xiaozhi-data/.env down
-```
 
 不要删除：
 
