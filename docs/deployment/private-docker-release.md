@@ -67,10 +67,12 @@ yihuixiaozhi/xiaozhi-web
 yihuixiaozhi/xiaozhi-server-base
 ```
 
-如果 WSL 或代理环境下 buildx 容器访问 Docker Hub 失败，但普通 `docker pull` 可用，使用：
+`scripts/acr-build-push` 默认使用单平台 Docker 构建，避免 buildx 容器读取不可用的 Docker Hub 镜像加速器。
+
+如需多架构镜像，再显式启用 buildx：
 
 ```bash
-BUILD_ENGINE=docker scripts/acr-build-push
+BUILD_ENGINE=buildx PLATFORMS=linux/amd64,linux/arm64 scripts/acr-build-push
 ```
 
 生产 Docker 镜像默认使用：

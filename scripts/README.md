@@ -27,10 +27,10 @@ scripts/acr-login
 scripts/acr-build-push
 ```
 
-WSL 或代理环境中，如果 buildx 容器无法访问 Docker Hub，使用单平台 Docker 构建：
+默认发布命令使用单平台 Docker 构建并推送 `linux/amd64` 镜像，避免 buildx 容器走不可用的 Docker Hub 镜像加速器。需要多架构镜像时再显式启用 buildx：
 
 ```bash
-BUILD_ENGINE=docker scripts/acr-build-push
+BUILD_ENGINE=buildx PLATFORMS=linux/amd64,linux/arm64 scripts/acr-build-push
 ```
 
 生产服务器拉取镜像部署：
