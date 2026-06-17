@@ -1,177 +1,212 @@
-# 私有 Docker 镜像发布与生产部署
+# Git-only Docker 生产部署
 
-本文档用于把本项目的二次开发代码发布为私有 Docker 镜像，并在生产服务器通过 Docker Compose 安装运行。源码编译调试仍按 `docs/development/ubuntu-source-development-environment.md` 和 `scripts/dev` 执行。
+本文档是本项目生产安装主入口。
 
-当前 `scripts/docker-build-private.sh` 和 `scripts/install-private-docker.sh` 是私有镜像构建与生产安装的兼容入口；后续如果迁入 `deploy/`，必须保留旧脚本转发入口。
+生产服务器只需要能访问私有 Git 仓库，不需要访问私有 Docker 镜像仓库，也不需要执行 Docker 镜像仓库登录。
 
-## 1. 镜像命名
-
-默认私有镜像仓库：
+部署流程：
 
 ```text
-10.144.92.32:3001/gaoruirui688/xiaozhi-esp32-server
+git pull
+-> 本机 docker build
+-> docker compose up -d
 ```
 
-会发布以下标签：
+安装过程中不需要下载或放置任何语音模型文件。ASR、VAD、LLM、TTS、VLLM、Memory、Intent 都可以先为空，服务启动后再到智控台配置。
+
+## 快速命令
+
+首次部署：
+
+```bash
+sudo mkdir -p /opt/xiaozhi-esp32-server-src
+sudo chown -R "$USER":"$USER" /opt/xiaozhi-esp32-server-src
+git clone ssh://git@10.144.92.32:222/gaoruirui688/xiaozhi-esp32-server.git /opt/xiaozhi-esp32-server-src
+cd /opt/xiaozhi-esp32-server-src
+sudo scripts/install-private-docker.sh
+```
+
+后续升级当前分支：
+
+```bash
+cd /opt/xiaozhi-esp32-server-src
+scripts/upgrade-git-docker.sh
+```
+
+升级到指定 tag：
+
+```bash
+cd /opt/xiaozhi-esp32-server-src
+REF=v版本号 scripts/upgrade-git-docker.sh
+```
+
+## 服务器准备
+
+服务器需要：
 
 ```text
-server-base
-server_latest
-server_<version>
-web_latest
-web_<version>
+Docker
+Docker Compose 插件
+私有 Git 仓库访问权限
+能拉取公共 Docker 基础镜像
 ```
 
-其中 `server` 是 Python 核心服务，`web` 是管理后台前端和 `manager-api` 后端组合镜像。
+服务器不需要单独安装 Maven、Node.js、Conda、Python 依赖。它们会在 Docker 构建过程中使用容器完成。
 
-## 2. 构建并推送镜像
-
-先登录私有镜像仓库：
-
-```bash
-docker login 10.144.92.32:3001
-```
-
-在项目根目录执行：
-
-```bash
-IMAGE_REPOSITORY=10.144.92.32:3001/gaoruirui688/xiaozhi-esp32-server \
-VERSION=0.1.0-local \
-PLATFORMS=linux/amd64 \
-scripts/docker-build-private.sh
-```
-
-如果要在本机只构建不推送：
-
-```bash
-PUSH=false \
-PLATFORMS=linux/amd64 \
-scripts/docker-build-private.sh
-```
-
-多架构发布示例：
-
-```bash
-PLATFORMS=linux/amd64,linux/arm64 \
-scripts/docker-build-private.sh
-```
-
-多架构构建必须推送到镜像仓库，不能直接 `--load` 到本机 Docker。
-
-## 3. 生产服务器安装
-
-生产服务器只负责运行已经构建好的 Docker 镜像。服务器上需要准备：
+当前会用到的公共基础镜像：
 
 ```text
-必须安装：
-  Docker
-  Docker Compose 插件
-
-不需要安装：
-  Maven
-  Node.js
-  Conda
-  Java / Web / Python 源码编译环境
+python:3.10-slim
+node:18
+maven:3.9.4-eclipse-temurin-21
+bellsoft/liberica-runtime-container:jre-21-glibc
+mysql:latest
+redis:8.0
 ```
 
-### 3.1 推荐方式：让脚本自动准备运行目录
+## 首次部署
 
-如果服务器已经拉取了本仓库代码，并且服务器可以访问模型下载地址，直接执行：
+准备源码目录：
 
 ```bash
-sudo IMAGE_REPOSITORY=10.144.92.32:3001/gaoruirui688/xiaozhi-esp32-server \
-  scripts/install-private-docker.sh
+sudo mkdir -p /opt/xiaozhi-esp32-server-src
+sudo chown -R "$USER":"$USER" /opt/xiaozhi-esp32-server-src
+git clone ssh://git@10.144.92.32:222/gaoruirui688/xiaozhi-esp32-server.git /opt/xiaozhi-esp32-server-src
+cd /opt/xiaozhi-esp32-server-src
 ```
 
-脚本会完成这些事：
-
-```text
-1. 创建生产运行目录：
-   /opt/xiaozhi-server/
-
-2. 复制 Docker Compose 文件：
-   /opt/xiaozhi-server/docker-compose_all.yml
-
-3. 生成镜像仓库和数据库密码环境文件：
-   /opt/xiaozhi-server/.env
-
-4. 初始化 xiaozhi-server 私有运行配置：
-   /opt/xiaozhi-server/data/.config.yaml
-
-5. 准备数据库和上传文件目录：
-   /opt/xiaozhi-server/mysql/data
-   /opt/xiaozhi-server/uploadfile
-
-6. 如果模型文件不存在，自动下载语音识别模型：
-   /opt/xiaozhi-server/models/SenseVoiceSmall/model.pt
-
-7. 执行 docker compose up -d 启动服务。
-```
-
-这里的模型文件是 `SenseVoiceSmall/model.pt`，用于本地语音识别，也就是把设备上传的语音转成文字。它不是大语言模型，不是 Docker 镜像，也不是后台管理系统的模型配置。
-
-### 3.2 不能自动下载模型时怎么做
-
-如果生产服务器不能访问 ModelScope，或者内网服务器不允许安装脚本访问公网，需要先在其他机器下载模型文件，再上传到生产服务器。
-
-模型下载地址：
-
-```text
-https://modelscope.cn/models/iic/SenseVoiceSmall/resolve/master/model.pt
-```
-
-上传后必须放到这个固定位置：
-
-```text
-/opt/xiaozhi-server/models/SenseVoiceSmall/model.pt
-```
-
-例如先把 `model.pt` 上传到服务器的 `/tmp/model.pt`，再执行：
+切到要部署的分支或 tag：
 
 ```bash
-sudo mkdir -p /opt/xiaozhi-server/models/SenseVoiceSmall
-sudo cp /tmp/model.pt /opt/xiaozhi-server/models/SenseVoiceSmall/model.pt
+git checkout main
+git pull --ff-only origin main
 ```
 
-然后执行安装脚本，并明确跳过自动下载：
+如果部署的是发布 tag：
 
 ```bash
-sudo DOWNLOAD_MODEL=false \
-  IMAGE_REPOSITORY=10.144.92.32:3001/gaoruirui688/xiaozhi-esp32-server \
-  scripts/install-private-docker.sh
+git fetch --tags origin
+git checkout v版本号
 ```
 
-如果这个文件路径不对，核心服务启动后会找不到本地语音识别模型。
+一键安装并启动：
 
-## 4. 首次配置 server.secret
+```bash
+sudo scripts/install-private-docker.sh
+```
 
-首次启动后访问智控台：
+脚本会做这些事：
+
+```text
+构建本地镜像 xiaozhi-esp32-server-local:server-base
+构建本地镜像 xiaozhi-esp32-server-local:server_latest
+构建本地镜像 xiaozhi-esp32-server-local:web_latest
+创建 /opt/xiaozhi-server 运行目录
+生成 /opt/xiaozhi-server/.env
+启动 Docker Compose 服务
+```
+
+生产运行目录：
+
+```text
+/opt/xiaozhi-server/docker-compose_all.yml
+/opt/xiaozhi-server/.env
+/opt/xiaozhi-server/data/.config.yaml
+/opt/xiaozhi-server/mysql/data
+/opt/xiaozhi-server/uploadfile
+```
+
+这些是服务器私有配置和运行数据，不要提交到 Git。
+
+## 访问后台
+
+查看容器：
+
+```bash
+docker compose -f /opt/xiaozhi-server/docker-compose_all.yml \
+  --env-file /opt/xiaozhi-server/.env ps
+```
+
+浏览器打开：
 
 ```text
 http://服务器IP:8002
 ```
 
-注册第一个管理员账号后，在参数管理中找到 `server.secret`，写入：
+首次进入智控台后，注册管理员账号。
+
+## 配置 server.secret
+
+进入智控台参数管理，找到：
+
+```text
+server.secret
+```
+
+复制它的值，写入服务器文件：
 
 ```text
 /opt/xiaozhi-server/data/.config.yaml
 ```
 
-配置示例：
+示例：
 
 ```yaml
 manager-api:
   url: http://xiaozhi-esp32-server-web:8002/xiaozhi
-  secret: 复制出来的 server.secret
+  secret: 粘贴 server.secret
 ```
 
-然后重启核心服务：
+保存后重启核心服务：
 
 ```bash
 docker restart xiaozhi-esp32-server
 ```
 
-## 5. 常用维护命令
+## 配置模型
+
+安装阶段可以不配置模型。
+
+需要语音对话时，再到智控台按实际需要配置：
+
+```text
+ASR   语音识别
+VAD   语音活动检测
+LLM   大语言模型
+TTS   语音合成
+VLLM  视觉语言模型
+Memory / Intent 等可选能力
+```
+
+配置完成后，在智能体配置中选择对应模型，然后重启核心服务：
+
+```bash
+docker restart xiaozhi-esp32-server
+```
+
+## 一键升级
+
+进入代码目录：
+
+```bash
+cd /opt/xiaozhi-esp32-server-src
+```
+
+升级当前分支：
+
+```bash
+scripts/upgrade-git-docker.sh
+```
+
+升级到指定 tag：
+
+```bash
+REF=v版本号 scripts/upgrade-git-docker.sh
+```
+
+升级脚本会先拉取代码，再重新构建本地业务镜像并执行 `docker compose up -d`。数据库、配置和上传文件继续使用 `/opt/xiaozhi-server/` 下的持久化目录，不会因为重建镜像丢失。
+
+## 常用维护
 
 查看服务：
 
@@ -186,17 +221,18 @@ docker logs -f xiaozhi-esp32-server
 docker logs -f xiaozhi-esp32-server-web
 ```
 
-升级到最新镜像：
-
-```bash
-docker compose -f /opt/xiaozhi-server/docker-compose_all.yml --env-file /opt/xiaozhi-server/.env pull
-docker compose -f /opt/xiaozhi-server/docker-compose_all.yml --env-file /opt/xiaozhi-server/.env up -d
-```
-
 停止服务：
 
 ```bash
 docker compose -f /opt/xiaozhi-server/docker-compose_all.yml --env-file /opt/xiaozhi-server/.env down
 ```
 
-不要删除 `/opt/xiaozhi-server/mysql/data`、`/opt/xiaozhi-server/data`、`/opt/xiaozhi-server/uploadfile`，这些目录是生产运行数据。
+不要删除：
+
+```text
+/opt/xiaozhi-server/mysql/data
+/opt/xiaozhi-server/data
+/opt/xiaozhi-server/uploadfile
+```
+
+它们保存数据库、私有配置和上传文件。

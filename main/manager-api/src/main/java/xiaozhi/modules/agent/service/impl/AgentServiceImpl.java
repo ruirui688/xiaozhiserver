@@ -575,13 +575,19 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
     }
 
     private String resolveEnabledModelId(String modelType, String candidateModelId) {
+        if (StringUtils.isBlank(candidateModelId)) {
+            return null;
+        }
         if (isUsableModel(modelType, candidateModelId)) {
             return candidateModelId;
         }
-        return getDefaultModelIdByType(modelType);
+        return null;
     }
 
     private String resolveEnabledModelIdOrCurrent(String modelType, String candidateModelId, String currentModelId) {
+        if (candidateModelId != null && StringUtils.isBlank(candidateModelId)) {
+            return null;
+        }
         String resolvedModelId = resolveEnabledModelId(modelType, candidateModelId);
         if (StringUtils.isNotBlank(resolvedModelId)) {
             return resolvedModelId;

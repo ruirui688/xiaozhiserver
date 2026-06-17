@@ -37,6 +37,10 @@ class ListenTextMessageHandler(TextMessageHandler):
             conn.reset_audio_states()
         elif msg_json["state"] == "stop":
             conn.client_voice_stop = True
+            if conn.asr is None:
+                conn.logger.bind(tag=TAG).warning("ASR未配置，忽略本次语音识别")
+                conn.reset_audio_states()
+                return
             if conn.asr.interface_type == InterfaceType.STREAM:
                 # 流式模式下，发送结束请求
                 asyncio.create_task(conn.asr._send_stop_request())

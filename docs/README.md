@@ -89,21 +89,21 @@ docs/integrations/prompt-injection-engineering.md
 
 用于服务器安装、Docker 构建、全模块部署、自动更新、生产运行和部署端口配置。AI 只有在修改部署、Docker、服务器脚本、端口、Nginx、生产发布流程时，才需要读取本分类文档。
 
-- [deployment/Deployment.md](./deployment/Deployment.md) - 单 Server Docker 部署指南。用于只部署 `xiaozhi-server` 服务端的场景，包含服务器目录、配置文件、模型文件、Docker Compose、运行和重启步骤。
-- [deployment/Deployment_all.md](./deployment/Deployment_all.md) - 全模块 Docker 部署指南。用于同时部署 Server、管理后台、数据库、Redis 等完整服务栈的场景，包含懒人脚本和手动部署两种方式。
+- [deployment/private-docker-release.md](./deployment/private-docker-release.md) - 本项目 Git-only Docker 生产部署主路径。用于生产服务器从私有 Git 仓库拉取代码，在服务器本机构建业务镜像，并用 Docker Compose 启动；包含一键首次部署和一键升级命令。安装阶段允许所有模型暂时为空，模型后续在智控台配置。
+- [deployment/deployment-asset-policy.md](./deployment/deployment-asset-policy.md) - 部署资产治理策略。用于区分 `docs/deployment/`、`deploy/`、`scripts/` 的职责，规定 Docker、服务器安装升级和 release 发布资产的归档边界。
+- [deployment/Deployment.md](./deployment/Deployment.md) - 官方单 Server Docker 兼容说明。仅用于参考官方默认部署方式，不作为本项目私有生产部署主入口。
+- [deployment/Deployment_all.md](./deployment/Deployment_all.md) - 官方全模块 Docker 兼容说明。仅用于参考官方默认部署方式，不作为本项目私有生产部署主入口。
 - [deployment/dev-ops-integration.md](./deployment/dev-ops-integration.md) - 全模块源码部署自动升级方法。用于从源码目录进行部署、拉取更新、执行自动升级脚本和维护服务器运行目录的场景。
 - [deployment/docker-build.md](./deployment/docker-build.md) - 本地编译 Docker 镜像方法。用于官方镜像架构不匹配、需要自建 `server` 或 `web` 镜像、需要在本机或服务器构建镜像的场景。
-- [deployment/private-docker-release.md](./deployment/private-docker-release.md) - 私有 Docker 镜像发布与生产部署。用于把本仓库二次开发代码构建为私有镜像、推送到私有镜像仓库，并在生产服务器用 Docker Compose 拉取运行。
-- [deployment/deployment-asset-policy.md](./deployment/deployment-asset-policy.md) - 部署资产治理策略。用于区分 `docs/deployment/`、`deploy/`、`scripts/` 的职责，规定 Docker、服务器安装升级和 release 发布资产的归档边界。
 - [deployment/all-in-one-digital-human-setup.md](./deployment/all-in-one-digital-human-setup.md) - 一体机数字人部署配置指南。用于数字人一体机环境初始化、网络配置、服务启动和数字人部署流程。
 - [deployment/paddlespeech-deploy.md](./deployment/paddlespeech-deploy.md) - PaddleSpeech TTS 部署与接入指南。用于安装 PaddleSpeech 服务、启动 TTS 服务并把它接入小智服务端的场景。
 
 部署文档优先级：
 
 ```text
-私有生产发布：deployment/private-docker-release.md
+Git-only 生产部署：deployment/private-docker-release.md
 部署资产边界：deployment/deployment-asset-policy.md
-官方兼容部署：deployment/Deployment.md / Deployment_all.md
+官方兼容参考：deployment/Deployment.md / Deployment_all.md
 历史源码升级：deployment/dev-ops-integration.md
 ```
 

@@ -66,13 +66,13 @@ import VersionFooter from "@/components/VersionFooter.vue";
 
 // 默认模型配置常量
 const DEFAULT_MODEL_CONFIG = {
-  ttsModelId: "TTS_EdgeTTS",
-  vadModelId: "VAD_SileroVAD",
-  asrModelId: "ASR_FunASR",
-  llmModelId: "LLM_ChatGLMLLM",
-  vllmModelId: "VLLM_ChatGLMVLLM",
-  memModelId: "Memory_nomem",
-  intentModelId: "Intent_function_call"
+  ttsModelId: "",
+  vadModelId: "",
+  asrModelId: "",
+  llmModelId: "",
+  vllmModelId: "",
+  memModelId: "",
+  intentModelId: ""
 };
 
 export default {
@@ -202,15 +202,20 @@ export default {
         systemPrompt: templateData.systemPrompt || this.form.systemPrompt,
         sort: templateData.sort || this.form.sort,
         model: {
-          ttsModelId: templateData.ttsModelId || this.form.model.ttsModelId,
-          vadModelId: templateData.vadModelId || this.form.model.vadModelId,
-          asrModelId: templateData.asrModelId || this.form.model.asrModelId,
-          llmModelId: templateData.llmModelId || this.form.model.llmModelId,
-          vllmModelId: templateData.vllmModelId || this.form.model.vllmModelId,
-          memModelId: templateData.memModelId || this.form.model.memModelId,
-          intentModelId: templateData.intentModelId || this.form.model.intentModelId
+          ttsModelId: this.templateValue(templateData, "ttsModelId", this.form.model.ttsModelId),
+          vadModelId: this.templateValue(templateData, "vadModelId", this.form.model.vadModelId),
+          asrModelId: this.templateValue(templateData, "asrModelId", this.form.model.asrModelId),
+          llmModelId: this.templateValue(templateData, "llmModelId", this.form.model.llmModelId),
+          vllmModelId: this.templateValue(templateData, "vllmModelId", this.form.model.vllmModelId),
+          memModelId: this.templateValue(templateData, "memModelId", this.form.model.memModelId),
+          intentModelId: this.templateValue(templateData, "intentModelId", this.form.model.intentModelId)
         }
       };
+    },
+    templateValue(templateData, key, fallback) {
+      return Object.prototype.hasOwnProperty.call(templateData, key)
+        ? (templateData[key] || "")
+        : fallback;
     },
     
     // 设置默认模板值

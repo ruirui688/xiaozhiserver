@@ -16,6 +16,9 @@ TAG = __name__
 
 
 async def handleAudioMessage(conn: "ConnectionHandler", audio):
+    if conn.vad is None or conn.asr is None:
+        conn.logger.bind(tag=TAG).warning("VAD或ASR未配置，忽略音频消息")
+        return
     # 当前片段是否有人说话
     have_voice = conn.vad.is_vad(conn, audio)
     # 如果设备刚刚被唤醒，短暂忽略VAD检测
@@ -107,6 +110,9 @@ async def startToChat(conn: "ConnectionHandler", text):
 
     # 意图未被处理，继续常规聊天流程，使用实际文本内容
     await send_stt_message(conn, actual_text)
+    if conn.llm is None:
+        conn.logger.bind(tag=TAG).warning("LLM未配置，无法生成回复")
+        return
 
     # 准备开始新会话
     conn.client_abort = False

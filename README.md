@@ -53,12 +53,15 @@ deploy/              部署资产归档边界
 - [提示词注入工程](./docs/integrations/prompt-injection-engineering.md)
 - [配置与运行产物治理策略](./docs/standards/config-runtime-policy.md)
 
-补充部署文档：
+生产部署文档：
+
+- [Git-only Docker 生产部署](./docs/deployment/private-docker-release.md)
+- [部署资产治理策略](./docs/deployment/deployment-asset-policy.md)
+
+官方兼容参考：
 
 - [官方 Docker 部署说明](./docs/deployment/Deployment.md)
 - [官方全模块部署说明](./docs/deployment/Deployment_all.md)
-- [私有 Docker 镜像发布与生产部署](./docs/deployment/private-docker-release.md)
-- [部署资产治理策略](./docs/deployment/deployment-asset-policy.md)
 
 本地开发统一入口：
 

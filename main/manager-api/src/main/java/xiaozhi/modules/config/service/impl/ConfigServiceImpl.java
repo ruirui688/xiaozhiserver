@@ -547,18 +547,7 @@ public class ConfigServiceImpl implements ConfigService {
         if (isUsableModel(modelType, model)) {
             return model;
         }
-
-        List<ModelConfigEntity> enabledModels = modelConfigService.getEnabledModelsByType(modelType);
-        if (enabledModels == null || enabledModels.isEmpty()) {
-            return null;
-        }
-
-        for (ModelConfigEntity enabledModel : enabledModels) {
-            if (enabledModel.getIsDefault() != null && enabledModel.getIsDefault() == 1) {
-                return enabledModel;
-            }
-        }
-        return enabledModels.get(0);
+        return null;
     }
 
     private boolean isUsableModel(String modelType, ModelConfigEntity model) {
