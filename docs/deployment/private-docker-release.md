@@ -75,6 +75,12 @@ yihuixiaozhi/redis
 
 `scripts/acr-build-push` 默认使用单平台 Docker 构建，避免 buildx 容器读取不可用的 Docker Hub 镜像加速器。
 
+发布脚本默认隐藏 Docker 逐层构建和推送明细，只输出步骤摘要。完整日志会写入 `/tmp/xiaozhi-*` 临时目录。需要排查构建细节时使用：
+
+```bash
+VERBOSE=true scripts/acr-build-push
+```
+
 如需多架构镜像，再显式启用 buildx：
 
 ```bash

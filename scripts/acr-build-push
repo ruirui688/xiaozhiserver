@@ -17,6 +17,18 @@ PYTHON_BASE_IMAGE="${PYTHON_BASE_IMAGE:-python:3.10-slim-bookworm}"
 MIRROR_RUNTIME_IMAGES="${MIRROR_RUNTIME_IMAGES:-true}"
 MYSQL_SOURCE_IMAGE="${MYSQL_SOURCE_IMAGE:-mysql:8.4}"
 REDIS_SOURCE_IMAGE="${REDIS_SOURCE_IMAGE:-redis:8.0}"
+VERBOSE="${VERBOSE:-false}"
+XIAOZHI_DOCKER_QUIET="${XIAOZHI_DOCKER_QUIET:-true}"
+
+if [[ -z "${VERSION:-}" ]]; then
+  if VERSION_TAG="$(git -C "$ROOT_DIR" describe --tags --exact-match 2>/dev/null)"; then
+    VERSION="${VERSION_TAG#v}"
+  elif VERSION_SHA="$(git -C "$ROOT_DIR" rev-parse --short=8 HEAD 2>/dev/null)"; then
+    VERSION="$VERSION_SHA"
+  else
+    VERSION="local"
+  fi
+fi
 
 image_tag() {
   local image="$1"
@@ -34,6 +46,9 @@ REDIS_TARGET_TAG="$(image_tag "$REDIS_SOURCE_IMAGE")"
 cat <<EOF
 Building and pushing xiaozhi images to Aliyun ACR.
 
+Version:
+  $VERSION
+
 Image repositories:
   server:      $SERVER_IMAGE_REPOSITORY
   web:         $WEB_IMAGE_REPOSITORY
@@ -48,6 +63,9 @@ Runtime image sources:
 Default build engine:
   $BUILD_ENGINE
 
+Docker output:
+  quiet=$XIAOZHI_DOCKER_QUIET verbose=$VERBOSE
+
 This command still needs access to Docker build base images unless you override
 PYTHON_BASE_IMAGE, NODE_BASE_IMAGE, MAVEN_BASE_IMAGE, and WEB_RUNTIME_BASE_IMAGE.
 EOF
@@ -59,6 +77,8 @@ if [[ "$PUSH" == "true" && "$MIRROR_RUNTIME_IMAGES" == "true" ]]; then
     REDIS_SOURCE_IMAGE="$REDIS_SOURCE_IMAGE" \
     MYSQL_IMAGE_REPOSITORY="$MYSQL_IMAGE_REPOSITORY" \
     REDIS_IMAGE_REPOSITORY="$REDIS_IMAGE_REPOSITORY" \
+    VERBOSE="$VERBOSE" \
+    XIAOZHI_DOCKER_QUIET="$XIAOZHI_DOCKER_QUIET" \
     "$ROOT_DIR/scripts/acr-mirror-runtime-images"
 fi
 
@@ -69,4 +89,8 @@ SERVER_IMAGE_REPOSITORY="$SERVER_IMAGE_REPOSITORY" \
   PYTHON_BASE_IMAGE="$PYTHON_BASE_IMAGE" \
   PUSH="$PUSH" \
   PLATFORMS="$PLATFORMS" \
+  VERSION="$VERSION" \
+  VERBOSE="$VERBOSE" \
+  XIAOZHI_DOCKER_QUIET="$XIAOZHI_DOCKER_QUIET" \
+  PRINT_BUILD_CONFIG=false \
   "$ROOT_DIR/scripts/docker-build-private.sh"

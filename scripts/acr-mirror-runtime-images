@@ -7,6 +7,13 @@ MYSQL_SOURCE_IMAGE="${MYSQL_SOURCE_IMAGE:-mysql:8.4}"
 REDIS_SOURCE_IMAGE="${REDIS_SOURCE_IMAGE:-redis:8.0}"
 MYSQL_IMAGE_REPOSITORY="${MYSQL_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/mysql}"
 REDIS_IMAGE_REPOSITORY="${REDIS_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/redis}"
+VERBOSE="${VERBOSE:-false}"
+XIAOZHI_DOCKER_QUIET="${XIAOZHI_DOCKER_QUIET:-true}"
+LOG_DIR="${LOG_DIR:-$(mktemp -d -t xiaozhi-acr-mirror.XXXXXX)}"
+
+is_quiet() {
+  [[ "$VERBOSE" != "true" && "$XIAOZHI_DOCKER_QUIET" == "true" ]]
+}
 
 image_tag() {
   local image="$1"
@@ -18,16 +25,35 @@ image_tag() {
   echo "${tail##*:}"
 }
 
+run_docker_step() {
+  local label="$1"
+  shift
+
+  echo "$label"
+  if ! is_quiet; then
+    "$@"
+    return
+  fi
+
+  local log_file="$LOG_DIR/$(printf '%s' "$label" | tr -cs '[:alnum:]_.-' '_' | sed 's/^_*//; s/_*$//').log"
+  if "$@" >"$log_file" 2>&1; then
+    echo "  OK"
+  else
+    echo "  FAILED. Full log: $log_file" >&2
+    tail -n 80 "$log_file" >&2 || true
+    return 1
+  fi
+}
+
 mirror_image() {
   local source_image="$1"
   local target_repository="$2"
   local tag
   tag="$(image_tag "$source_image")"
 
-  echo "Mirroring $source_image -> $target_repository:$tag"
-  docker pull "$source_image"
+  run_docker_step "Pull $source_image" docker pull --quiet "$source_image"
   docker tag "$source_image" "$target_repository:$tag"
-  docker push "$target_repository:$tag"
+  run_docker_step "Push $target_repository:$tag" docker push --quiet "$target_repository:$tag"
 }
 
 cat <<EOF
@@ -37,6 +63,10 @@ Runtime image repositories:
   mysql: $MYSQL_IMAGE_REPOSITORY:$(image_tag "$MYSQL_SOURCE_IMAGE")
   redis: $REDIS_IMAGE_REPOSITORY:$(image_tag "$REDIS_SOURCE_IMAGE")
 EOF
+
+if is_quiet; then
+  echo "Docker detail logs: $LOG_DIR"
+fi
 
 mirror_image "$MYSQL_SOURCE_IMAGE" "$MYSQL_IMAGE_REPOSITORY"
 mirror_image "$REDIS_SOURCE_IMAGE" "$REDIS_IMAGE_REPOSITORY"

@@ -43,6 +43,12 @@ redis:8.0
 BUILD_ENGINE=buildx PLATFORMS=linux/amd64,linux/arm64 scripts/acr-build-push
 ```
 
+发布脚本默认使用安静输出，只显示每个构建/推送步骤的结果；Docker 原始日志会写入 `/tmp/xiaozhi-*` 临时目录。排查问题时可以打开完整输出：
+
+```bash
+VERBOSE=true scripts/acr-build-push
+```
+
 生产服务器拉取镜像部署：
 
 ```bash

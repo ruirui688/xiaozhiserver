@@ -30,6 +30,10 @@ BUILDKIT_REGISTRY_MIRROR="${BUILDKIT_REGISTRY_MIRROR:-}"
 BUILDKIT_HTTP_PROXY="${BUILDKIT_HTTP_PROXY:-${HTTP_PROXY:-${http_proxy:-}}}"
 BUILDKIT_HTTPS_PROXY="${BUILDKIT_HTTPS_PROXY:-${HTTPS_PROXY:-${https_proxy:-}}}"
 BUILDKIT_NO_PROXY="${BUILDKIT_NO_PROXY:-${NO_PROXY:-${no_proxy:-}}}"
+VERBOSE="${VERBOSE:-false}"
+XIAOZHI_DOCKER_QUIET="${XIAOZHI_DOCKER_QUIET:-true}"
+PRINT_BUILD_CONFIG="${PRINT_BUILD_CONFIG:-true}"
+LOG_DIR="${LOG_DIR:-$(mktemp -d -t xiaozhi-docker-build.XXXXXX)}"
 RECREATE_BUILDER=false
 
 if [[ "$BUILDKIT_REGISTRY_MIRROR" == "none" || "$BUILDKIT_REGISTRY_MIRROR" == "false" ]]; then
@@ -137,18 +141,43 @@ if [[ "$PUSH" == "false" ]]; then
   OUTPUT_FLAG=(--load)
 fi
 
-build_image() {
-  local dockerfile="$1"
+is_quiet() {
+  [[ "$VERBOSE" != "true" && "$XIAOZHI_DOCKER_QUIET" == "true" ]]
+}
+
+run_docker_step() {
+  local label="$1"
   shift
+
+  echo "$label"
+  if ! is_quiet; then
+    "$@"
+    return
+  fi
+
+  local log_file="$LOG_DIR/$(printf '%s' "$label" | tr -cs '[:alnum:]_.-' '_' | sed 's/^_*//; s/_*$//').log"
+  if "$@" >"$log_file" 2>&1; then
+    echo "  OK"
+  else
+    echo "  FAILED. Full log: $log_file" >&2
+    tail -n 120 "$log_file" >&2 || true
+    return 1
+  fi
+}
+
+build_image() {
+  local label="$1"
+  local dockerfile="$2"
+  shift 2
   if [[ "$BUILD_ENGINE" == "buildx" ]]; then
-    docker buildx build \
+    run_docker_step "$label" docker buildx build \
       --platform "$PLATFORMS" \
       --file "$ROOT_DIR/$dockerfile" \
       "${OUTPUT_FLAG[@]}" \
       "$@" \
       "$ROOT_DIR"
   else
-    docker build \
+    run_docker_step "$label" docker build \
       --platform "$PLATFORMS" \
       --file "$ROOT_DIR/$dockerfile" \
       "$@" \
@@ -158,42 +187,52 @@ build_image() {
 
 push_image() {
   [[ "$BUILD_ENGINE" == "docker" && "$PUSH" == "true" ]] || return 0
-  docker push "$1"
+  local image="$1"
+  if is_quiet; then
+    run_docker_step "Push $image" docker push --quiet "$image"
+  else
+    run_docker_step "Push $image" docker push "$image"
+  fi
 }
 
-echo "Image repositories:"
-echo "  server:      $SERVER_IMAGE_REPOSITORY"
-echo "  web:         $WEB_IMAGE_REPOSITORY"
-echo "  server-base: $SERVER_BASE_IMAGE_REPOSITORY"
-echo "Version: $VERSION"
-echo "Platforms: $PLATFORMS"
-echo "Push: $PUSH"
-echo "Build engine: $BUILD_ENGINE"
-echo "Python base image: $PYTHON_BASE_IMAGE"
-echo "Node base image: $NODE_BASE_IMAGE"
-echo "Maven base image: $MAVEN_BASE_IMAGE"
-echo "Web runtime base image: $WEB_RUNTIME_BASE_IMAGE"
-echo "Debian mirror: $DEBIAN_MIRROR"
-echo "Debian security mirror: $DEBIAN_SECURITY_MIRROR"
-echo "Server requirements: $SERVER_REQUIREMENTS"
-if [[ -n "$BUILDKIT_REGISTRY_MIRROR" ]]; then
-  echo "BuildKit registry mirror:"
-  while IFS= read -r mirror; do
-    [[ -n "$mirror" ]] || continue
-    echo "  $mirror"
-  done <<<"$BUILDKIT_REGISTRY_MIRROR"
-else
-  echo "BuildKit registry mirror: disabled"
+if [[ "$PRINT_BUILD_CONFIG" != "false" ]]; then
+  echo "Image repositories:"
+  echo "  server:      $SERVER_IMAGE_REPOSITORY"
+  echo "  web:         $WEB_IMAGE_REPOSITORY"
+  echo "  server-base: $SERVER_BASE_IMAGE_REPOSITORY"
+  echo "Version: $VERSION"
+  echo "Platforms: $PLATFORMS"
+  echo "Push: $PUSH"
+  echo "Build engine: $BUILD_ENGINE"
+  echo "Python base image: $PYTHON_BASE_IMAGE"
+  echo "Node base image: $NODE_BASE_IMAGE"
+  echo "Maven base image: $MAVEN_BASE_IMAGE"
+  echo "Web runtime base image: $WEB_RUNTIME_BASE_IMAGE"
+  echo "Debian mirror: $DEBIAN_MIRROR"
+  echo "Debian security mirror: $DEBIAN_SECURITY_MIRROR"
+  echo "Server requirements: $SERVER_REQUIREMENTS"
+  if [[ -n "$BUILDKIT_REGISTRY_MIRROR" ]]; then
+    echo "BuildKit registry mirror:"
+    while IFS= read -r mirror; do
+      [[ -n "$mirror" ]] || continue
+      echo "  $mirror"
+    done <<<"$BUILDKIT_REGISTRY_MIRROR"
+  else
+    echo "BuildKit registry mirror: disabled"
+  fi
+  if [[ -n "$BUILDKIT_HTTP_PROXY" || -n "$BUILDKIT_HTTPS_PROXY" ]]; then
+    echo "BuildKit proxy: enabled"
+  else
+    echo "BuildKit proxy: disabled"
+  fi
 fi
-if [[ -n "$BUILDKIT_HTTP_PROXY" || -n "$BUILDKIT_HTTPS_PROXY" ]]; then
-  echo "BuildKit proxy: enabled"
-else
-  echo "BuildKit proxy: disabled"
+if is_quiet; then
+  echo "Docker detail logs: $LOG_DIR"
+  echo "Set VERBOSE=true to show raw Docker build and push output."
 fi
 
 if [[ "$BUILD_BASE" == "true" ]]; then
-  echo "Building server base image"
-  build_image Dockerfile-server-base \
+  build_image "Build server base image" Dockerfile-server-base \
     --build-arg "PYTHON_BASE_IMAGE=$PYTHON_BASE_IMAGE" \
     --build-arg "DEBIAN_MIRROR=$DEBIAN_MIRROR" \
     --build-arg "DEBIAN_SECURITY_MIRROR=$DEBIAN_SECURITY_MIRROR" \
@@ -212,16 +251,14 @@ if [[ -z "${SERVER_BASE_IMAGE:-}" ]]; then
   fi
 fi
 
-echo "Building xiaozhi-server image"
-build_image Dockerfile-server \
+build_image "Build xiaozhi-server image" Dockerfile-server \
   --build-arg "SERVER_BASE_IMAGE=$SERVER_BASE_IMAGE" \
   --tag "$SERVER_IMAGE_REPOSITORY:latest" \
   --tag "$SERVER_IMAGE_REPOSITORY:$VERSION"
 push_image "$SERVER_IMAGE_REPOSITORY:latest"
 push_image "$SERVER_IMAGE_REPOSITORY:$VERSION"
 
-echo "Building manager web/api image"
-build_image Dockerfile-web \
+build_image "Build manager web/api image" Dockerfile-web \
   --build-arg "NODE_BASE_IMAGE=$NODE_BASE_IMAGE" \
   --build-arg "MAVEN_BASE_IMAGE=$MAVEN_BASE_IMAGE" \
   --build-arg "WEB_RUNTIME_BASE_IMAGE=$WEB_RUNTIME_BASE_IMAGE" \
