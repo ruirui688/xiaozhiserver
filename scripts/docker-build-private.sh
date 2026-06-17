@@ -14,6 +14,10 @@ PLATFORMS="${PLATFORMS:-$DEFAULT_PLATFORM}"
 PUSH="${PUSH:-false}"
 BUILD_BASE="${BUILD_BASE:-true}"
 BUILDER_NAME="${BUILDER_NAME:-xiaozhi-builder}"
+PYTHON_BASE_IMAGE="${PYTHON_BASE_IMAGE:-python:3.10-slim}"
+NODE_BASE_IMAGE="${NODE_BASE_IMAGE:-node:18}"
+MAVEN_BASE_IMAGE="${MAVEN_BASE_IMAGE:-maven:3.9.4-eclipse-temurin-21}"
+WEB_RUNTIME_BASE_IMAGE="${WEB_RUNTIME_BASE_IMAGE:-bellsoft/liberica-runtime-container:jre-21-glibc}"
 
 if [[ -z "${VERSION:-}" ]]; then
   if VERSION_TAG="$(git -C "$ROOT_DIR" describe --tags --exact-match 2>/dev/null)"; then
@@ -61,10 +65,15 @@ echo "Image repository: $IMAGE_REPOSITORY"
 echo "Version: $VERSION"
 echo "Platforms: $PLATFORMS"
 echo "Push: $PUSH"
+echo "Python base image: $PYTHON_BASE_IMAGE"
+echo "Node base image: $NODE_BASE_IMAGE"
+echo "Maven base image: $MAVEN_BASE_IMAGE"
+echo "Web runtime base image: $WEB_RUNTIME_BASE_IMAGE"
 
 if [[ "$BUILD_BASE" == "true" ]]; then
   echo "Building server base image"
   build_image Dockerfile-server-base \
+    --build-arg "PYTHON_BASE_IMAGE=$PYTHON_BASE_IMAGE" \
     --tag "$IMAGE_REPOSITORY:server-base"
 fi
 
@@ -76,6 +85,9 @@ build_image Dockerfile-server \
 
 echo "Building manager web/api image"
 build_image Dockerfile-web \
+  --build-arg "NODE_BASE_IMAGE=$NODE_BASE_IMAGE" \
+  --build-arg "MAVEN_BASE_IMAGE=$MAVEN_BASE_IMAGE" \
+  --build-arg "WEB_RUNTIME_BASE_IMAGE=$WEB_RUNTIME_BASE_IMAGE" \
   --tag "$IMAGE_REPOSITORY:web_latest" \
   --tag "$IMAGE_REPOSITORY:web_$VERSION"
 

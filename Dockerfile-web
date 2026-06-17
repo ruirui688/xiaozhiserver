@@ -1,5 +1,8 @@
 # 第一阶段：构建Vue前端
-FROM node:18 AS web-builder
+ARG NODE_BASE_IMAGE=node:18
+ARG MAVEN_BASE_IMAGE=maven:3.9.4-eclipse-temurin-21
+ARG WEB_RUNTIME_BASE_IMAGE=bellsoft/liberica-runtime-container:jre-21-glibc
+FROM ${NODE_BASE_IMAGE} AS web-builder
 WORKDIR /app
 COPY main/manager-web/package*.json ./
 RUN npm install
@@ -7,14 +10,14 @@ COPY main/manager-web .
 RUN npm run build
 
 # 第二阶段：构建Java后端
-FROM maven:3.9.4-eclipse-temurin-21 AS api-builder
+FROM ${MAVEN_BASE_IMAGE} AS api-builder
 WORKDIR /app
 COPY main/manager-api/pom.xml .
 COPY main/manager-api/src ./src
 RUN mvn clean package -Dmaven.test.skip=true
 
 # 第三阶段：构建最终镜像
-FROM bellsoft/liberica-runtime-container:jre-21-glibc
+FROM ${WEB_RUNTIME_BASE_IMAGE}
 
 # 安装Nginx和字体库
 RUN apk update && \

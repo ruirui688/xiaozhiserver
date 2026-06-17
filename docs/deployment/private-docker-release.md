@@ -68,6 +68,40 @@ Python 依赖
 
 这些构建依赖会在 Docker 构建过程中处理。
 
+如果服务器无法访问 Docker Hub，构建会在拉取基础镜像阶段失败，例如：
+
+```text
+failed to resolve source metadata for docker.io/library/python:3.10-slim
+Head "https://registry-1.docker.io/v2/library/python/manifests/3.10-slim": i/o timeout
+```
+
+这表示服务器没有拉到 Docker 基础镜像，还没有进入项目业务代码构建。处理方式二选一：
+
+1. 给 Docker 配置可用的 registry mirror，然后重新执行 `sudo scripts/deploy`。
+2. 使用当前网络可访问的兼容基础镜像覆盖默认值。
+
+可覆盖的基础镜像变量：
+
+```text
+PYTHON_BASE_IMAGE       默认 python:3.10-slim
+NODE_BASE_IMAGE         默认 node:18
+MAVEN_BASE_IMAGE        默认 maven:3.9.4-eclipse-temurin-21
+WEB_RUNTIME_BASE_IMAGE  默认 bellsoft/liberica-runtime-container:jre-21-glibc
+```
+
+示例：
+
+```bash
+sudo \
+  PYTHON_BASE_IMAGE=你的镜像仓库/library/python:3.10-slim \
+  NODE_BASE_IMAGE=你的镜像仓库/library/node:18 \
+  MAVEN_BASE_IMAGE=你的镜像仓库/library/maven:3.9.4-eclipse-temurin-21 \
+  WEB_RUNTIME_BASE_IMAGE=你的镜像仓库/bellsoft/liberica-runtime-container:jre-21-glibc \
+  scripts/deploy
+```
+
+替换镜像必须与默认镜像兼容。`PYTHON_BASE_IMAGE` 需要支持 `apt-get`，`WEB_RUNTIME_BASE_IMAGE` 需要支持当前 Dockerfile 中的 `apk` 安装步骤。
+
 ## 首次部署
 
 准备目录并拉取代码：
