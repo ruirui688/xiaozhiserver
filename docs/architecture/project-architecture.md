@@ -44,9 +44,10 @@ xiaozhi-server 会话内组装的 system prompt、messages、tools 和状态机
 | `main/manager-api` | Java Spring Boot 管理后台；保存用户、设备、智能体、模型、音色、知识库、插件、系统参数、OTA、MCP Endpoint | 是全模块部署下的配置事实来源；数据库变更必须走 changelog |
 | `main/manager-web` | Vue Web 智控台；提供管理界面 | 不直接参与实时语音；只通过 API 改变后台配置 |
 | `main/manager-mobile` | 移动端智控台 | 复用管理后台能力；不直接参与实时语音 |
-| `main/digital-human` | 数字人、音频交互和唤醒词联调辅助 | 不是 ESP32 生产实时链路判定依据 |
 | `docs/` | 架构、部署、开发、设备、集成、治理文档 | 文档应记录真实链路和长期约定，不保存密钥、生产地址或用户数据 |
 | `scripts/`、Dockerfile、Compose | 本地开发和部署自动化 | 属于运维边界，修改会影响启动、构建和生产发布流程 |
+
+浏览器测试模块已经从本地定制版本中移除。生产链路验证以真实 ESP32 设备、MQTT 网关或自建 WebSocket 测试客户端为准。
 
 重要原则：前端页面保存成功，只代表配置进入后台；设备是否变化取决于 Python 何时重新读取私有配置、设备是否重连、缓存是否刷新，以及当前模型是否真的采用了对应提示词或工具。
 

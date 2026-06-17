@@ -24,7 +24,6 @@ main/
   manager-api/       Java Spring Boot 管理后台 API
   manager-web/       Web 管理后台
   manager-mobile/    移动端管理后台
-  digital-human/     数字人和音频交互测试模块
 docs/                项目文档
 scripts/dev          本地开发统一入口
 runtime/             本地运行产物目录，仅提交 .gitkeep

@@ -201,7 +201,7 @@ docker logs -f xiaozhi-esp32-server
 ```
 25-02-23 12:01:09[core.websocket_server] - INFO - Websocket地址是      ws://xxx.xx.xx.xx:8000/xiaozhi/v1/
 25-02-23 12:01:09[core.websocket_server] - INFO - =======上面的地址是websocket协议地址，请勿用浏览器访问=======
-25-02-23 12:01:09[core.websocket_server] - INFO - 如想测试websocket请启动digital-human模块，打开浏览器交互测试
+25-02-23 12:01:09[core.websocket_server] - INFO - 如需测试WebSocket，请使用真实ESP32设备或WebSocket客户端
 25-02-23 12:01:09[core.websocket_server] - INFO - =======================================================
 ```
 
@@ -434,7 +434,7 @@ python app.py
 ```
 25-02-23 12:01:09[core.websocket_server] - INFO - Server is running at ws://xxx.xx.xx.xx:8000/xiaozhi/v1/
 25-02-23 12:01:09[core.websocket_server] - INFO - =======上面的地址是websocket协议地址，请勿用浏览器访问=======
-25-02-23 12:01:09[core.websocket_server] - INFO - 如想测试websocket请启动digital-human模块，打开浏览器交互测试
+25-02-23 12:01:09[core.websocket_server] - INFO - 如需测试WebSocket，请使用真实ESP32设备或WebSocket客户端
 25-02-23 12:01:09[core.websocket_server] - INFO - =======================================================
 ```
 

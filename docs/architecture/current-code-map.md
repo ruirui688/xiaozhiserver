@@ -11,7 +11,6 @@ main/xiaozhi-server/     Python 实时服务、配置、插件、测试、脚本
 main/manager-api/        Java 管理 API、数据库迁移、配置、Mapper
 main/manager-web/        Web 管理后台页面、组件、API 封装、路由
 main/manager-mobile/     移动端管理后台配置、页面结构、构建脚本
-main/digital-human/      数字人测试页面、唤醒词运行时、Live2D 资源
 docs/                    项目文档、规范、部署说明、专题集成文档
 scripts/                 本地开发、私有镜像构建、服务器安装脚本
 deploy/                  部署资产归档边界
@@ -19,14 +18,14 @@ config/examples/         脱敏配置示例
 Dockerfile*              Docker 构建入口
 ```
 
-排除 `.git`、`runtime/`、`logs/`、`tmp/`、`node_modules/`、`target/` 等运行或依赖产物后，仓库约有 2350 个文件；其中代码和文本类约 1138 个，图片、音频、模型和压缩前端库等资源类约 343 个。文本源码与文档按模块读取和搜索梳理；图片、音频、模型、Live2D 贴图等二进制资源按路径和用途盘点，不逐字读取。
+排除 `.git`、`runtime/`、`logs/`、`tmp/`、`node_modules/`、`target/` 等运行或依赖产物后，仓库包含 Python 服务、Java 管理 API、Web/移动管理端、脚本、文档、音乐和前端静态资源。文本源码与文档按模块读取和搜索梳理；图片、音频、模型和压缩前端库等二进制资源按路径和用途盘点，不逐字读取。
 
 ## 2. 总体架构
 
 项目是官方 `xiaozhi-esp32-server` 的本地定制版本，主要运行链路如下：
 
 ```text
-ESP32 / digital-human
+ESP32 设备 / WebSocket 客户端
   -> xiaozhi-server WebSocket 8000
   -> VAD / ASR / 替换词 / 语义控制中枢
   -> Intent / 工具系统 / LLM / Memory
@@ -223,31 +222,7 @@ env/                    Vite/uni-app 环境变量
 
 当前没有发现该模块未提交改动。
 
-## 7. digital-human
-
-`main/digital-human` 是独立数字人测试模块，包含浏览器测试页、Live2D 资源、音频录制/播放、WebSocket/OTA/MCP 前端桥接，以及 Python 唤醒词运行时。
-
-常用命令：
-
-```bash
-cd main/digital-human
-pip install -r wakeword_runtime/requirements.txt
-python start.py
-```
-
-访问地址：
-
-```text
-http://127.0.0.1:8006/index.html
-ws://127.0.0.1:8006/wakeword-ws
-http://127.0.0.1:8006/health
-```
-
-注意：数字人唤醒词依赖本机麦克风、`sherpa-onnx`、模型文件和系统音频环境。唤醒词服务失败时，测试页面仍可启动。
-
-当前没有发现该模块未提交改动。
-
-## 8. 文档、脚本与部署边界
+## 7. 文档、脚本与部署边界
 
 当前入口已经形成：
 
@@ -276,7 +251,7 @@ scripts/dev                       本地开发统一入口
 历史源码升级：docs/deployment/dev-ops-integration.md
 ```
 
-## 9. 当前未提交能力清单
+## 8. 当前未提交能力清单
 
 当前工作区未提交改动跨越文档、脚本、Java、Web、Python。主要能力包括：
 
