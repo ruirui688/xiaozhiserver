@@ -10,6 +10,9 @@ if [[ -z "${INSTALL_DIR:-}" ]]; then
   fi
 fi
 IMAGE_REPOSITORY="${IMAGE_REPOSITORY:-xiaozhi-esp32-server-local}"
+DEPLOY_MODE="${DEPLOY_MODE:-build}"
+MYSQL_IMAGE="${MYSQL_IMAGE:-mysql:latest}"
+REDIS_IMAGE="${REDIS_IMAGE:-redis:8.0}"
 MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-123456}"
 case "$(uname -m)" in
   x86_64) DEFAULT_PLATFORM="linux/amd64" ;;
@@ -18,6 +21,11 @@ case "$(uname -m)" in
 esac
 PLATFORMS="${PLATFORMS:-$DEFAULT_PLATFORM}"
 BUILD_BASE="${BUILD_BASE:-true}"
+
+if [[ "$DEPLOY_MODE" != "build" && "$DEPLOY_MODE" != "pull" ]]; then
+  echo "DEPLOY_MODE must be build or pull" >&2
+  exit 1
+fi
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "Docker is not installed. Install Docker first, then rerun this script." >&2
@@ -34,12 +42,20 @@ mkdir -p \
   "$INSTALL_DIR/mysql/data" \
   "$INSTALL_DIR/uploadfile"
 
-echo "Building local Docker images from $ROOT_DIR"
-IMAGE_REPOSITORY="$IMAGE_REPOSITORY" \
-  PUSH=false \
-  PLATFORMS="$PLATFORMS" \
-  BUILD_BASE="$BUILD_BASE" \
-  "$ROOT_DIR/scripts/docker-build-private.sh"
+if [[ "$DEPLOY_MODE" == "build" ]]; then
+  echo "Building local Docker images from $ROOT_DIR"
+  IMAGE_REPOSITORY="$IMAGE_REPOSITORY" \
+    PUSH=false \
+    PLATFORMS="$PLATFORMS" \
+    BUILD_BASE="$BUILD_BASE" \
+    "$ROOT_DIR/scripts/docker-build-private.sh"
+else
+  echo "Pulling Docker images from configured registries"
+  docker pull "$IMAGE_REPOSITORY:server_latest"
+  docker pull "$IMAGE_REPOSITORY:web_latest"
+  docker pull "$MYSQL_IMAGE"
+  docker pull "$REDIS_IMAGE"
+fi
 
 cp "$ROOT_DIR/main/xiaozhi-server/docker-compose_all.yml" "$INSTALL_DIR/docker-compose_all.yml"
 
@@ -50,6 +66,8 @@ fi
 
 cat > "$INSTALL_DIR/.env" <<EOF
 XIAOZHI_IMAGE_REPOSITORY=$IMAGE_REPOSITORY
+XIAOZHI_MYSQL_IMAGE=$MYSQL_IMAGE
+XIAOZHI_REDIS_IMAGE=$REDIS_IMAGE
 XIAOZHI_MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD
 EOF
 
@@ -64,10 +82,12 @@ manager-web/api:  http://$LOCAL_IP:8002
 websocket:        ws://$LOCAL_IP:8000/xiaozhi/v1/
 vision API:       http://$LOCAL_IP:8003/mcp/vision/explain
 
-This Git-only install uses local Docker images:
+This Git-only install uses Docker images:
 
   $IMAGE_REPOSITORY:server_latest
   $IMAGE_REPOSITORY:web_latest
+  $MYSQL_IMAGE
+  $REDIS_IMAGE
 
 After the first administrator account is registered, open the console parameter page,
 copy server.secret, write it to:

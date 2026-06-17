@@ -2,7 +2,14 @@
 
 本文档是生产服务器安装和升级入口。
 
-生产服务器只需要能访问私有 Git 仓库，不需要登录私有 Docker 镜像仓库。
+生产部署支持两种方式：
+
+```text
+build 模式  生产服务器从 Git 拉源码并在本机构建业务镜像
+pull 模式   本地或构建机先构建业务镜像并推送到镜像仓库，生产服务器只拉镜像启动
+```
+
+如果生产服务器无法稳定访问 Docker Hub，优先使用 pull 模式。生产服务器只需要访问私有 Git 仓库和你的镜像仓库，不再需要拉取 Python、Node、Maven 等构建基础镜像。
 
 目录约定：
 
@@ -17,13 +24,25 @@
 
 ## 快速命令
 
-首次部署：
+首次部署，本机 build 模式：
 
 ```bash
 mkdir -p ~/work
 git clone ssh://git@10.144.92.32:222/gaoruirui688/xiaozhi-esp32-server.git ~/work/xiaozhi-esp32-server
 cd ~/work/xiaozhi-esp32-server
 sudo scripts/deploy
+```
+
+首次部署，推荐的镜像仓库 pull 模式：
+
+```bash
+mkdir -p ~/work
+git clone ssh://git@10.144.92.32:222/gaoruirui688/xiaozhi-esp32-server.git ~/work/xiaozhi-esp32-server
+cd ~/work/xiaozhi-esp32-server
+sudo docker login registry.cn-hangzhou.aliyuncs.com
+sudo env DEPLOY_MODE=pull \
+  IMAGE_REPOSITORY=registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/xiaozhi \
+  scripts/deploy
 ```
 
 升级当前分支：
@@ -54,8 +73,12 @@ Git
 
 ```text
 私有 Git 仓库访问权限
-公共 Docker 基础镜像拉取能力
+Docker 镜像拉取能力
 ```
+
+build 模式需要生产服务器能拉取公共 Docker 基础镜像。
+
+pull 模式需要生产服务器能拉取你的业务镜像仓库，以及 MySQL、Redis 运行镜像。
 
 不需要单独安装：
 
@@ -102,6 +125,72 @@ sudo \
 
 替换镜像必须与默认镜像兼容。`PYTHON_BASE_IMAGE` 需要支持 `apt-get`，`WEB_RUNTIME_BASE_IMAGE` 需要支持当前 Dockerfile 中的 `apk` 安装步骤。
 
+## 推送业务镜像到阿里云 ACR
+
+在可以访问 Docker Hub 的本地开发机或构建机上执行。
+
+先登录阿里云 ACR：
+
+```bash
+docker login registry.cn-hangzhou.aliyuncs.com
+```
+
+构建并推送业务镜像：
+
+```bash
+IMAGE_REPOSITORY=registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/xiaozhi \
+PUSH=true \
+PLATFORMS=linux/amd64 \
+scripts/docker-build-private.sh
+```
+
+这会推送：
+
+```text
+registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/xiaozhi:server-base
+registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/xiaozhi:server_latest
+registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/xiaozhi:web_latest
+registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/xiaozhi:server_版本号
+registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/xiaozhi:web_版本号
+```
+
+`IMAGE_REPOSITORY` 必须替换为阿里云 ACR 仓库管理页给出的公网地址。
+
+## pull 模式部署
+
+生产服务器上先登录镜像仓库：
+
+```bash
+sudo docker login registry.cn-hangzhou.aliyuncs.com
+```
+
+然后部署：
+
+```bash
+sudo env DEPLOY_MODE=pull \
+  IMAGE_REPOSITORY=registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/xiaozhi \
+  scripts/deploy
+```
+
+pull 模式会拉取以下镜像并启动服务：
+
+```text
+registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/xiaozhi:server_latest
+registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/xiaozhi:web_latest
+mysql:latest
+redis:8.0
+```
+
+如果服务器也无法访问 Docker Hub 的 MySQL 或 Redis 镜像，需要把它们也同步到阿里云 ACR，然后指定：
+
+```bash
+sudo env DEPLOY_MODE=pull \
+  IMAGE_REPOSITORY=registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/xiaozhi \
+  MYSQL_IMAGE=registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/mysql:8.4 \
+  REDIS_IMAGE=registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/redis:8.0 \
+  scripts/deploy
+```
+
 ## 首次部署
 
 准备目录并拉取代码：
@@ -131,7 +220,7 @@ sudo scripts/deploy
 `scripts/deploy` 会完成：
 
 ```text
-构建本地业务镜像
+构建或拉取业务镜像
 创建 /opt/xiaozhi-data
 生成 /opt/xiaozhi-data/.env
 初始化 /opt/xiaozhi-data/data/.config.yaml
@@ -231,6 +320,16 @@ REF=v版本号 scripts/upgrade
 ```
 
 升级脚本会先拉取代码，再重新构建本地业务镜像，并执行 `docker compose up -d`。
+
+pull 模式升级时保留同样的环境变量：
+
+```bash
+cd ~/work/xiaozhi-esp32-server
+DEPLOY_MODE=pull IMAGE_REPOSITORY=registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/xiaozhi \
+scripts/upgrade
+```
+
+脚本会先拉取代码，再拉取远程镜像，并执行 `docker compose up -d`。
 
 这些数据会继续保留：
 
