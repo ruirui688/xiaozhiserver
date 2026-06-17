@@ -7,8 +7,8 @@
 目录约定：
 
 ```text
-/opt/xiaozhi       项目源码目录
-/opt/xiaozhi-data  生产数据目录
+~/work/xiaozhi-esp32-server  项目源码目录
+/opt/xiaozhi-data            生产数据目录
 ```
 
 `/opt/xiaozhi-data` 保存数据库、私有配置和上传文件。升级会重建业务镜像和重启容器，但不会删除这个目录。
@@ -20,24 +20,23 @@
 首次部署：
 
 ```bash
-sudo mkdir -p /opt/xiaozhi
-sudo chown -R "$USER":"$USER" /opt/xiaozhi
-git clone ssh://git@10.144.92.32:222/gaoruirui688/xiaozhi-esp32-server.git /opt/xiaozhi
-cd /opt/xiaozhi
+mkdir -p ~/work
+git clone ssh://git@10.144.92.32:222/gaoruirui688/xiaozhi-esp32-server.git ~/work/xiaozhi-esp32-server
+cd ~/work/xiaozhi-esp32-server
 sudo scripts/deploy
 ```
 
 升级当前分支：
 
 ```bash
-cd /opt/xiaozhi
+cd ~/work/xiaozhi-esp32-server
 scripts/upgrade
 ```
 
 升级到指定 tag：
 
 ```bash
-cd /opt/xiaozhi
+cd ~/work/xiaozhi-esp32-server
 REF=v版本号 scripts/upgrade
 ```
 
@@ -74,10 +73,9 @@ Python 依赖
 准备目录并拉取代码：
 
 ```bash
-sudo mkdir -p /opt/xiaozhi
-sudo chown -R "$USER":"$USER" /opt/xiaozhi
-git clone ssh://git@10.144.92.32:222/gaoruirui688/xiaozhi-esp32-server.git /opt/xiaozhi
-cd /opt/xiaozhi
+mkdir -p ~/work
+git clone ssh://git@10.144.92.32:222/gaoruirui688/xiaozhi-esp32-server.git ~/work/xiaozhi-esp32-server
+cd ~/work/xiaozhi-esp32-server
 ```
 
 部署 `main`：
@@ -187,14 +185,14 @@ docker restart xiaozhi-esp32-server
 升级当前分支：
 
 ```bash
-cd /opt/xiaozhi
+cd ~/work/xiaozhi-esp32-server
 scripts/upgrade
 ```
 
 升级到指定 tag：
 
 ```bash
-cd /opt/xiaozhi
+cd ~/work/xiaozhi-esp32-server
 REF=v版本号 scripts/upgrade
 ```
 

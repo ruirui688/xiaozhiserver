@@ -264,7 +264,7 @@
   - main/manager-web/src/views/roleConfig.vue
   - docs/deployment/private-docker-release.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改 Dockerfile、Docker Compose、安装脚本、默认模型配置、智能体模板初始化、模型配置下发或 WebSocket 初始化流程，必须保留“生产服务器从私有 Git 拉代码并本机构建业务镜像；生产安装不要求 docker login 私有镜像仓库；生产用户只需要记住 `/opt/xiaozhi` 源码目录、`/opt/xiaozhi-data` 数据目录、`scripts/deploy` 首次部署和 `scripts/upgrade` 后续升级；旧的 install-private-docker.sh、upgrade-git-docker.sh 仅作为兼容实现入口保留；生产安装不下载、不挂载、不要求 model.pt；FunASR/FunASRServer 不作为可用默认 ASR；所有模型字段允许为空；模型缺失时服务可启动但对应能力不可用并记录清晰提示”的约定。
+官方同步时的处理规则：如果官方修改 Dockerfile、Docker Compose、安装脚本、默认模型配置、智能体模板初始化、模型配置下发或 WebSocket 初始化流程，必须保留“生产服务器从私有 Git 拉代码并本机构建业务镜像；生产安装不要求 docker login 私有镜像仓库；生产用户只需要记住 `~/work/xiaozhi-esp32-server` 源码目录、`/opt/xiaozhi-data` 数据目录、`scripts/deploy` 首次部署和 `scripts/upgrade` 后续升级；旧的 install-private-docker.sh、upgrade-git-docker.sh 仅作为兼容实现入口保留；生产安装不下载、不挂载、不要求 model.pt；FunASR/FunASRServer 不作为可用默认 ASR；所有模型字段允许为空；模型缺失时服务可启动但对应能力不可用并记录清晰提示”的约定。
 ```
 
 ## 17. 模型配置密钥明文回显
