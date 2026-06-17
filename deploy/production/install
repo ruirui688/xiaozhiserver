@@ -10,6 +10,8 @@ fi
 
 DEFAULT_SERVER_IMAGE_REPOSITORY="crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-server"
 DEFAULT_WEB_IMAGE_REPOSITORY="crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-web"
+DEFAULT_MYSQL_IMAGE="crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/mysql:8.4"
+DEFAULT_REDIS_IMAGE="crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/redis:8.0"
 
 read_existing_env() {
   local key="$1"
@@ -25,9 +27,9 @@ SERVER_IMAGE_REPOSITORY="${SERVER_IMAGE_REPOSITORY:-$DEFAULT_SERVER_IMAGE_REPOSI
 WEB_IMAGE_REPOSITORY="${WEB_IMAGE_REPOSITORY:-$(read_existing_env XIAOZHI_WEB_IMAGE_REPOSITORY)}"
 WEB_IMAGE_REPOSITORY="${WEB_IMAGE_REPOSITORY:-$DEFAULT_WEB_IMAGE_REPOSITORY}"
 MYSQL_IMAGE="${MYSQL_IMAGE:-$(read_existing_env XIAOZHI_MYSQL_IMAGE)}"
-MYSQL_IMAGE="${MYSQL_IMAGE:-mysql:latest}"
+MYSQL_IMAGE="${MYSQL_IMAGE:-$DEFAULT_MYSQL_IMAGE}"
 REDIS_IMAGE="${REDIS_IMAGE:-$(read_existing_env XIAOZHI_REDIS_IMAGE)}"
-REDIS_IMAGE="${REDIS_IMAGE:-redis:8.0}"
+REDIS_IMAGE="${REDIS_IMAGE:-$DEFAULT_REDIS_IMAGE}"
 MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-$(read_existing_env XIAOZHI_MYSQL_ROOT_PASSWORD)}"
 MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-123456}"
 

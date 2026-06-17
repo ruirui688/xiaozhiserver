@@ -27,6 +27,16 @@ scripts/acr-login
 scripts/acr-build-push
 ```
 
+`scripts/acr-build-push` 会同时发布业务镜像和运行依赖镜像：
+
+```text
+xiaozhi-server:latest
+xiaozhi-web:latest
+xiaozhi-server-base:latest
+mysql:8.4
+redis:8.0
+```
+
 默认发布命令使用单平台 Docker 构建并推送 `linux/amd64` 镜像，避免 buildx 容器走不可用的 Docker Hub 镜像加速器。需要多架构镜像时再显式启用 buildx：
 
 ```bash
@@ -57,7 +67,7 @@ cd deploy/production
 ```text
 dev                  本地源码开发统一入口
 acr-login            登录阿里云 ACR
-acr-build-push       构建并推送 xiaozhi-server/xiaozhi-web 镜像
+acr-build-push       构建并推送业务镜像，并同步 MySQL/Redis 到 ACR
 acr-deploy-pull      兼容入口，转发到 deploy/production/install
 deploy               兼容入口，转发到 deploy/production/install
 upgrade              兼容入口，转发到 deploy/production/upgrade

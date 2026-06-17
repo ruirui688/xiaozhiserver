@@ -15,11 +15,13 @@
 
 ## 镜像命名
 
-生产只需要关心两个业务镜像：
+生产服务器只从 ACR 拉取这些运行镜像：
 
 ```text
 crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-server:latest
 crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-web:latest
+crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/mysql:8.4
+crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/redis:8.0
 ```
 
 构建流程内部还会维护一个基础镜像：
@@ -65,7 +67,11 @@ scripts/acr-build-push
 yihuixiaozhi/xiaozhi-server
 yihuixiaozhi/xiaozhi-web
 yihuixiaozhi/xiaozhi-server-base
+yihuixiaozhi/mysql
+yihuixiaozhi/redis
 ```
+
+`mysql:8.4` 和 `redis:8.0` 会被同步到 ACR，生产服务器不需要访问 Docker Hub。
 
 `scripts/acr-build-push` 默认使用单平台 Docker 构建，避免 buildx 容器读取不可用的 Docker Hub 镜像加速器。
 
@@ -111,7 +117,7 @@ sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
 ```text
 拉取 xiaozhi-server:latest
 拉取 xiaozhi-web:latest
-拉取 MySQL 和 Redis 镜像
+从 ACR 拉取 mysql:8.4 和 redis:8.0
 创建 /opt/xiaozhi-data
 生成 /opt/xiaozhi-data/.env
 初始化 /opt/xiaozhi-data/data/.config.yaml
@@ -214,7 +220,7 @@ WEB_IMAGE_REPOSITORY=你的仓库/xiaozhi-web \
 ./install
 ```
 
-如果生产服务器无法访问 Docker Hub 的 MySQL 或 Redis 镜像，需要先把它们同步到 ACR，再覆盖：
+如果需要使用其他数据库或 Redis 镜像，可以覆盖：
 
 ```bash
 MYSQL_IMAGE=你的仓库/mysql:8.4 \

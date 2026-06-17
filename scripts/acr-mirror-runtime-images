@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ACR_REGISTRY="${ACR_REGISTRY:-crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com}"
+ACR_NAMESPACE="${ACR_NAMESPACE:-yihuixiaozhi}"
+MYSQL_SOURCE_IMAGE="${MYSQL_SOURCE_IMAGE:-mysql:8.4}"
+REDIS_SOURCE_IMAGE="${REDIS_SOURCE_IMAGE:-redis:8.0}"
+MYSQL_IMAGE_REPOSITORY="${MYSQL_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/mysql}"
+REDIS_IMAGE_REPOSITORY="${REDIS_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/redis}"
+
+image_tag() {
+  local image="$1"
+  local tail="${image##*/}"
+  if [[ "$tail" != *:* ]]; then
+    echo "Source image must include an explicit tag: $image" >&2
+    exit 1
+  fi
+  echo "${tail##*:}"
+}
+
+mirror_image() {
+  local source_image="$1"
+  local target_repository="$2"
+  local tag
+  tag="$(image_tag "$source_image")"
+
+  echo "Mirroring $source_image -> $target_repository:$tag"
+  docker pull "$source_image"
+  docker tag "$source_image" "$target_repository:$tag"
+  docker push "$target_repository:$tag"
+}
+
+cat <<EOF
+Mirroring runtime dependency images to Aliyun ACR.
+
+Runtime image repositories:
+  mysql: $MYSQL_IMAGE_REPOSITORY:$(image_tag "$MYSQL_SOURCE_IMAGE")
+  redis: $REDIS_IMAGE_REPOSITORY:$(image_tag "$REDIS_SOURCE_IMAGE")
+EOF
+
+mirror_image "$MYSQL_SOURCE_IMAGE" "$MYSQL_IMAGE_REPOSITORY"
+mirror_image "$REDIS_SOURCE_IMAGE" "$REDIS_IMAGE_REPOSITORY"
+
+echo "Runtime images mirrored."
