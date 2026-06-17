@@ -1,133 +1,129 @@
 # Git-only Docker 生产部署
 
-本文档是本项目生产安装主入口。
+本文档是生产服务器安装和升级入口。
 
-生产服务器只需要能访问私有 Git 仓库，不需要访问私有 Docker 镜像仓库，也不需要执行 Docker 镜像仓库登录。
+生产服务器只需要能访问私有 Git 仓库，不需要登录私有 Docker 镜像仓库。
 
-部署流程：
+目录约定：
 
 ```text
-git pull
--> 本机 docker build
--> docker compose up -d
+~/work/xiaozhi-esp32-server  项目源码目录
+/opt/xiaozhi-data            生产数据目录
 ```
 
-安装过程中不需要下载或放置任何语音模型文件。ASR、VAD、LLM、TTS、VLLM、Memory、Intent 都可以先为空，服务启动后再到智控台配置。
+`/opt/xiaozhi-data` 保存数据库、私有配置和上传文件。升级会重建业务镜像和重启容器，但不会删除这个目录。
+
+安装阶段不需要下载或放置任何语音模型文件。ASR、VAD、LLM、TTS、VLLM、Memory、Intent 都可以先为空，服务启动后再到智控台配置。
 
 ## 快速命令
 
 首次部署：
 
 ```bash
-sudo mkdir -p /opt/xiaozhi-esp32-server-src
-sudo chown -R "$USER":"$USER" /opt/xiaozhi-esp32-server-src
-git clone ssh://git@10.144.92.32:222/gaoruirui688/xiaozhi-esp32-server.git /opt/xiaozhi-esp32-server-src
-cd /opt/xiaozhi-esp32-server-src
-sudo scripts/install-private-docker.sh
+mkdir -p ~/work
+git clone ssh://git@10.144.92.32:222/gaoruirui688/xiaozhi-esp32-server.git ~/work/xiaozhi-esp32-server
+cd ~/work/xiaozhi-esp32-server
+sudo scripts/deploy
 ```
 
-后续升级当前分支：
+升级当前分支：
 
 ```bash
-cd /opt/xiaozhi-esp32-server-src
-scripts/upgrade-git-docker.sh
+cd ~/work/xiaozhi-esp32-server
+scripts/upgrade
 ```
 
 升级到指定 tag：
 
 ```bash
-cd /opt/xiaozhi-esp32-server-src
-REF=v版本号 scripts/upgrade-git-docker.sh
+cd ~/work/xiaozhi-esp32-server
+REF=v版本号 scripts/upgrade
 ```
 
-## 服务器准备
+## 服务器要求
 
-服务器需要：
+需要安装：
 
 ```text
 Docker
 Docker Compose 插件
-私有 Git 仓库访问权限
-能拉取公共 Docker 基础镜像
+Git
 ```
 
-服务器不需要单独安装 Maven、Node.js、Conda、Python 依赖。它们会在 Docker 构建过程中使用容器完成。
-
-当前会用到的公共基础镜像：
+服务器还需要：
 
 ```text
-python:3.10-slim
-node:18
-maven:3.9.4-eclipse-temurin-21
-bellsoft/liberica-runtime-container:jre-21-glibc
-mysql:latest
-redis:8.0
+私有 Git 仓库访问权限
+公共 Docker 基础镜像拉取能力
 ```
+
+不需要单独安装：
+
+```text
+Maven
+Node.js
+Conda
+Python 依赖
+```
+
+这些构建依赖会在 Docker 构建过程中处理。
 
 ## 首次部署
 
-准备源码目录：
+准备目录并拉取代码：
 
 ```bash
-sudo mkdir -p /opt/xiaozhi-esp32-server-src
-sudo chown -R "$USER":"$USER" /opt/xiaozhi-esp32-server-src
-git clone ssh://git@10.144.92.32:222/gaoruirui688/xiaozhi-esp32-server.git /opt/xiaozhi-esp32-server-src
-cd /opt/xiaozhi-esp32-server-src
+mkdir -p ~/work
+git clone ssh://git@10.144.92.32:222/gaoruirui688/xiaozhi-esp32-server.git ~/work/xiaozhi-esp32-server
+cd ~/work/xiaozhi-esp32-server
 ```
 
-切到要部署的分支或 tag：
+部署 `main`：
 
 ```bash
 git checkout main
 git pull --ff-only origin main
+sudo scripts/deploy
 ```
 
-如果部署的是发布 tag：
+部署指定 tag：
 
 ```bash
 git fetch --tags origin
 git checkout v版本号
+sudo scripts/deploy
 ```
 
-一键安装并启动：
-
-```bash
-sudo scripts/install-private-docker.sh
-```
-
-脚本会做这些事：
+`scripts/deploy` 会完成：
 
 ```text
-构建本地镜像 xiaozhi-esp32-server-local:server-base
-构建本地镜像 xiaozhi-esp32-server-local:server_latest
-构建本地镜像 xiaozhi-esp32-server-local:web_latest
-创建 /opt/xiaozhi-server 运行目录
-生成 /opt/xiaozhi-server/.env
+构建本地业务镜像
+创建 /opt/xiaozhi-data
+生成 /opt/xiaozhi-data/.env
+初始化 /opt/xiaozhi-data/data/.config.yaml
 启动 Docker Compose 服务
 ```
 
-生产运行目录：
+运行目录：
 
 ```text
-/opt/xiaozhi-server/docker-compose_all.yml
-/opt/xiaozhi-server/.env
-/opt/xiaozhi-server/data/.config.yaml
-/opt/xiaozhi-server/mysql/data
-/opt/xiaozhi-server/uploadfile
+/opt/xiaozhi-data/docker-compose_all.yml
+/opt/xiaozhi-data/.env
+/opt/xiaozhi-data/data/.config.yaml
+/opt/xiaozhi-data/mysql/data
+/opt/xiaozhi-data/uploadfile
 ```
-
-这些是服务器私有配置和运行数据，不要提交到 Git。
 
 ## 访问后台
 
-查看容器：
+查看服务：
 
 ```bash
-docker compose -f /opt/xiaozhi-server/docker-compose_all.yml \
-  --env-file /opt/xiaozhi-server/.env ps
+docker compose -f /opt/xiaozhi-data/docker-compose_all.yml \
+  --env-file /opt/xiaozhi-data/.env ps
 ```
 
-浏览器打开：
+浏览器访问：
 
 ```text
 http://服务器IP:8002
@@ -143,10 +139,10 @@ http://服务器IP:8002
 server.secret
 ```
 
-复制它的值，写入服务器文件：
+复制它的值，写入：
 
 ```text
-/opt/xiaozhi-server/data/.config.yaml
+/opt/xiaozhi-data/data/.config.yaml
 ```
 
 示例：
@@ -186,32 +182,40 @@ docker restart xiaozhi-esp32-server
 
 ## 一键升级
 
-进入代码目录：
-
-```bash
-cd /opt/xiaozhi-esp32-server-src
-```
-
 升级当前分支：
 
 ```bash
-scripts/upgrade-git-docker.sh
+cd ~/work/xiaozhi-esp32-server
+scripts/upgrade
 ```
 
 升级到指定 tag：
 
 ```bash
-REF=v版本号 scripts/upgrade-git-docker.sh
+cd ~/work/xiaozhi-esp32-server
+REF=v版本号 scripts/upgrade
 ```
 
-升级脚本会先拉取代码，再重新构建本地业务镜像并执行 `docker compose up -d`。数据库、配置和上传文件继续使用 `/opt/xiaozhi-server/` 下的持久化目录，不会因为重建镜像丢失。
+升级脚本会先拉取代码，再重新构建本地业务镜像，并执行 `docker compose up -d`。
+
+这些数据会继续保留：
+
+```text
+管理员账号
+模型配置
+智能体配置
+设备记录
+server.secret
+上传文件
+MySQL 数据
+```
 
 ## 常用维护
 
 查看服务：
 
 ```bash
-docker compose -f /opt/xiaozhi-server/docker-compose_all.yml --env-file /opt/xiaozhi-server/.env ps
+docker compose -f /opt/xiaozhi-data/docker-compose_all.yml --env-file /opt/xiaozhi-data/.env ps
 ```
 
 查看日志：
@@ -224,15 +228,13 @@ docker logs -f xiaozhi-esp32-server-web
 停止服务：
 
 ```bash
-docker compose -f /opt/xiaozhi-server/docker-compose_all.yml --env-file /opt/xiaozhi-server/.env down
+docker compose -f /opt/xiaozhi-data/docker-compose_all.yml --env-file /opt/xiaozhi-data/.env down
 ```
 
 不要删除：
 
 ```text
-/opt/xiaozhi-server/mysql/data
-/opt/xiaozhi-server/data
-/opt/xiaozhi-server/uploadfile
+/opt/xiaozhi-data/mysql/data
+/opt/xiaozhi-data/data
+/opt/xiaozhi-data/uploadfile
 ```
-
-它们保存数据库、私有配置和上传文件。

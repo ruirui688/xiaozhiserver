@@ -2,7 +2,13 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-INSTALL_DIR="${INSTALL_DIR:-/opt/xiaozhi-server}"
+if [[ -z "${INSTALL_DIR:-}" ]]; then
+  if [[ -d /opt/xiaozhi-server && ! -d /opt/xiaozhi-data ]]; then
+    INSTALL_DIR="/opt/xiaozhi-server"
+  else
+    INSTALL_DIR="/opt/xiaozhi-data"
+  fi
+fi
 IMAGE_REPOSITORY="${IMAGE_REPOSITORY:-xiaozhi-esp32-server-local}"
 MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-123456}"
 case "$(uname -m)" in

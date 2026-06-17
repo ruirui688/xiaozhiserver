@@ -37,4 +37,4 @@ else
 fi
 
 echo "Rebuilding local Docker images and restarting services"
-sudo -E "$ROOT_DIR/scripts/install-private-docker.sh"
+sudo -E "$ROOT_DIR/scripts/deploy"
