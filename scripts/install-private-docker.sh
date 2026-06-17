@@ -2,7 +2,8 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEFAULT_IMAGE_REPOSITORY="crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi"
+DEFAULT_SERVER_IMAGE_REPOSITORY="crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-server"
+DEFAULT_WEB_IMAGE_REPOSITORY="crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-web"
 if [[ -z "${INSTALL_DIR:-}" ]]; then
   if [[ -d /opt/xiaozhi-server && ! -d /opt/xiaozhi-data ]]; then
     INSTALL_DIR="/opt/xiaozhi-server"
@@ -18,8 +19,10 @@ read_existing_env() {
   awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$env_file"
 }
 
-IMAGE_REPOSITORY="${IMAGE_REPOSITORY:-$(read_existing_env XIAOZHI_IMAGE_REPOSITORY)}"
-IMAGE_REPOSITORY="${IMAGE_REPOSITORY:-$DEFAULT_IMAGE_REPOSITORY}"
+SERVER_IMAGE_REPOSITORY="${SERVER_IMAGE_REPOSITORY:-$(read_existing_env XIAOZHI_SERVER_IMAGE_REPOSITORY)}"
+SERVER_IMAGE_REPOSITORY="${SERVER_IMAGE_REPOSITORY:-$DEFAULT_SERVER_IMAGE_REPOSITORY}"
+WEB_IMAGE_REPOSITORY="${WEB_IMAGE_REPOSITORY:-$(read_existing_env XIAOZHI_WEB_IMAGE_REPOSITORY)}"
+WEB_IMAGE_REPOSITORY="${WEB_IMAGE_REPOSITORY:-$DEFAULT_WEB_IMAGE_REPOSITORY}"
 DEPLOY_MODE="${DEPLOY_MODE:-$(read_existing_env XIAOZHI_DEPLOY_MODE)}"
 DEPLOY_MODE="${DEPLOY_MODE:-pull}"
 MYSQL_IMAGE="${MYSQL_IMAGE:-$(read_existing_env XIAOZHI_MYSQL_IMAGE)}"
@@ -28,16 +31,9 @@ REDIS_IMAGE="${REDIS_IMAGE:-$(read_existing_env XIAOZHI_REDIS_IMAGE)}"
 REDIS_IMAGE="${REDIS_IMAGE:-redis:8.0}"
 MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-$(read_existing_env XIAOZHI_MYSQL_ROOT_PASSWORD)}"
 MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-123456}"
-case "$(uname -m)" in
-  x86_64) DEFAULT_PLATFORM="linux/amd64" ;;
-  aarch64 | arm64) DEFAULT_PLATFORM="linux/arm64" ;;
-  *) DEFAULT_PLATFORM="linux/amd64" ;;
-esac
-PLATFORMS="${PLATFORMS:-$DEFAULT_PLATFORM}"
-BUILD_BASE="${BUILD_BASE:-true}"
 
-if [[ "$DEPLOY_MODE" != "build" && "$DEPLOY_MODE" != "pull" ]]; then
-  echo "DEPLOY_MODE must be build or pull" >&2
+if [[ "$DEPLOY_MODE" != "pull" ]]; then
+  echo "Only DEPLOY_MODE=pull is supported for production deployment." >&2
   exit 1
 fi
 
@@ -56,25 +52,11 @@ mkdir -p \
   "$INSTALL_DIR/mysql/data" \
   "$INSTALL_DIR/uploadfile"
 
-if [[ "$DEPLOY_MODE" == "build" ]]; then
-  cat <<EOF
-Building local Docker images from $ROOT_DIR.
-
-DEPLOY_MODE=build is a compatibility path only. Production deployment should use
-prebuilt ACR images with DEPLOY_MODE=pull.
-EOF
-  IMAGE_REPOSITORY="$IMAGE_REPOSITORY" \
-    PUSH=false \
-    PLATFORMS="$PLATFORMS" \
-    BUILD_BASE="$BUILD_BASE" \
-    "$ROOT_DIR/scripts/docker-build-private.sh"
-else
-  echo "Pulling Docker images from configured registries"
-  docker pull "$IMAGE_REPOSITORY:server_latest"
-  docker pull "$IMAGE_REPOSITORY:web_latest"
-  docker pull "$MYSQL_IMAGE"
-  docker pull "$REDIS_IMAGE"
-fi
+echo "Pulling Docker images from configured registries"
+docker pull "$SERVER_IMAGE_REPOSITORY:latest"
+docker pull "$WEB_IMAGE_REPOSITORY:latest"
+docker pull "$MYSQL_IMAGE"
+docker pull "$REDIS_IMAGE"
 
 cp "$ROOT_DIR/main/xiaozhi-server/docker-compose_all.yml" "$INSTALL_DIR/docker-compose_all.yml"
 
@@ -85,7 +67,8 @@ fi
 
 cat > "$INSTALL_DIR/.env" <<EOF
 XIAOZHI_DEPLOY_MODE=$DEPLOY_MODE
-XIAOZHI_IMAGE_REPOSITORY=$IMAGE_REPOSITORY
+XIAOZHI_SERVER_IMAGE_REPOSITORY=$SERVER_IMAGE_REPOSITORY
+XIAOZHI_WEB_IMAGE_REPOSITORY=$WEB_IMAGE_REPOSITORY
 XIAOZHI_MYSQL_IMAGE=$MYSQL_IMAGE
 XIAOZHI_REDIS_IMAGE=$REDIS_IMAGE
 XIAOZHI_MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD
@@ -104,8 +87,8 @@ vision API:       http://$LOCAL_IP:8003/mcp/vision/explain
 
 This deployment uses Docker images:
 
-  $IMAGE_REPOSITORY:server_latest
-  $IMAGE_REPOSITORY:web_latest
+  $SERVER_IMAGE_REPOSITORY:latest
+  $WEB_IMAGE_REPOSITORY:latest
   $MYSQL_IMAGE
   $REDIS_IMAGE
 

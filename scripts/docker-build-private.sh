@@ -2,9 +2,13 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEFAULT_IMAGE_REPOSITORY="xiaozhi-esp32-server-local"
+DEFAULT_SERVER_IMAGE_REPOSITORY="xiaozhi-server-local"
+DEFAULT_WEB_IMAGE_REPOSITORY="xiaozhi-web-local"
+DEFAULT_SERVER_BASE_IMAGE_REPOSITORY="xiaozhi-server-base-local"
 
-IMAGE_REPOSITORY="${IMAGE_REPOSITORY:-$DEFAULT_IMAGE_REPOSITORY}"
+SERVER_IMAGE_REPOSITORY="${SERVER_IMAGE_REPOSITORY:-$DEFAULT_SERVER_IMAGE_REPOSITORY}"
+WEB_IMAGE_REPOSITORY="${WEB_IMAGE_REPOSITORY:-$DEFAULT_WEB_IMAGE_REPOSITORY}"
+SERVER_BASE_IMAGE_REPOSITORY="${SERVER_BASE_IMAGE_REPOSITORY:-$DEFAULT_SERVER_BASE_IMAGE_REPOSITORY}"
 case "$(uname -m)" in
   x86_64) DEFAULT_PLATFORM="linux/amd64" ;;
   aarch64 | arm64) DEFAULT_PLATFORM="linux/arm64" ;;
@@ -157,7 +161,10 @@ push_image() {
   docker push "$1"
 }
 
-echo "Image repository: $IMAGE_REPOSITORY"
+echo "Image repositories:"
+echo "  server:      $SERVER_IMAGE_REPOSITORY"
+echo "  web:         $WEB_IMAGE_REPOSITORY"
+echo "  server-base: $SERVER_BASE_IMAGE_REPOSITORY"
 echo "Version: $VERSION"
 echo "Platforms: $PLATFORMS"
 echo "Push: $PUSH"
@@ -191,26 +198,36 @@ if [[ "$BUILD_BASE" == "true" ]]; then
     --build-arg "DEBIAN_MIRROR=$DEBIAN_MIRROR" \
     --build-arg "DEBIAN_SECURITY_MIRROR=$DEBIAN_SECURITY_MIRROR" \
     --build-arg "SERVER_REQUIREMENTS=$SERVER_REQUIREMENTS" \
-    --tag "$IMAGE_REPOSITORY:server-base"
-  push_image "$IMAGE_REPOSITORY:server-base"
+    --tag "$SERVER_BASE_IMAGE_REPOSITORY:latest" \
+    --tag "$SERVER_BASE_IMAGE_REPOSITORY:$VERSION"
+  push_image "$SERVER_BASE_IMAGE_REPOSITORY:latest"
+  push_image "$SERVER_BASE_IMAGE_REPOSITORY:$VERSION"
+fi
+
+if [[ -z "${SERVER_BASE_IMAGE:-}" ]]; then
+  if [[ "$BUILD_BASE" == "true" ]]; then
+    SERVER_BASE_IMAGE="$SERVER_BASE_IMAGE_REPOSITORY:$VERSION"
+  else
+    SERVER_BASE_IMAGE="$SERVER_BASE_IMAGE_REPOSITORY:latest"
+  fi
 fi
 
 echo "Building xiaozhi-server image"
 build_image Dockerfile-server \
-  --build-arg "SERVER_BASE_IMAGE=$IMAGE_REPOSITORY:server-base" \
-  --tag "$IMAGE_REPOSITORY:server_latest" \
-  --tag "$IMAGE_REPOSITORY:server_$VERSION"
-push_image "$IMAGE_REPOSITORY:server_latest"
-push_image "$IMAGE_REPOSITORY:server_$VERSION"
+  --build-arg "SERVER_BASE_IMAGE=$SERVER_BASE_IMAGE" \
+  --tag "$SERVER_IMAGE_REPOSITORY:latest" \
+  --tag "$SERVER_IMAGE_REPOSITORY:$VERSION"
+push_image "$SERVER_IMAGE_REPOSITORY:latest"
+push_image "$SERVER_IMAGE_REPOSITORY:$VERSION"
 
 echo "Building manager web/api image"
 build_image Dockerfile-web \
   --build-arg "NODE_BASE_IMAGE=$NODE_BASE_IMAGE" \
   --build-arg "MAVEN_BASE_IMAGE=$MAVEN_BASE_IMAGE" \
   --build-arg "WEB_RUNTIME_BASE_IMAGE=$WEB_RUNTIME_BASE_IMAGE" \
-  --tag "$IMAGE_REPOSITORY:web_latest" \
-  --tag "$IMAGE_REPOSITORY:web_$VERSION"
-push_image "$IMAGE_REPOSITORY:web_latest"
-push_image "$IMAGE_REPOSITORY:web_$VERSION"
+  --tag "$WEB_IMAGE_REPOSITORY:latest" \
+  --tag "$WEB_IMAGE_REPOSITORY:$VERSION"
+push_image "$WEB_IMAGE_REPOSITORY:latest"
+push_image "$WEB_IMAGE_REPOSITORY:$VERSION"
 
 echo "Done."

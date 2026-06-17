@@ -1,13 +1,13 @@
 # scripts 入口说明
 
-本目录保留开发、镜像发布和服务器部署入口。生产端标准路线已经收敛为：
+本目录保留开发、镜像发布和服务器部署入口。生产端只有一条路线：
 
 ```text
 本地/构建机 build + push 到阿里云 ACR
 生产服务器 docker pull 已发布镜像并启动
 ```
 
-生产服务器不再推荐从源码构建业务镜像。
+生产服务器不从源码构建业务镜像。
 
 ## 常用入口
 
@@ -46,7 +46,7 @@ scripts/acr-deploy-pull
 scripts/upgrade
 ```
 
-首次 pull 部署后，`/opt/xiaozhi-data/.env` 会记录 `XIAOZHI_DEPLOY_MODE=pull` 和镜像仓库。后续 `scripts/upgrade` 会复用该配置。
+首次部署后，`/opt/xiaozhi-data/.env` 会记录 `XIAOZHI_DEPLOY_MODE=pull`、`XIAOZHI_SERVER_IMAGE_REPOSITORY` 和 `XIAOZHI_WEB_IMAGE_REPOSITORY`。后续 `scripts/upgrade` 会复用该配置。
 
 ## 脚本分组
 
@@ -55,13 +55,13 @@ scripts/upgrade
 ```text
 dev                  本地源码开发统一入口
 acr-login            登录阿里云 ACR
-acr-build-push       构建并推送 server/web 镜像
+acr-build-push       构建并推送 xiaozhi-server/xiaozhi-web 镜像
 acr-deploy-pull      生产服务器拉取 ACR 镜像并部署
-deploy               服务器部署兼容入口，默认 pull 模式
-upgrade              服务器升级兼容入口，复用已部署模式
+deploy               服务器部署入口，只执行 pull 模式
+upgrade              服务器升级入口，复用已部署模式
 ```
 
-底层实现或兼容入口：
+内部实现入口：
 
 ```text
 docker-build-private.sh     镜像构建底层实现
@@ -73,7 +73,7 @@ start-dev.sh                旧开发入口，仅转发到 scripts/dev
 
 ## 生产约束
 
-- 不在生产服务器编译业务镜像，除非显式设置 `DEPLOY_MODE=build` 做临时兼容。
+- 不在生产服务器编译业务镜像，生产安装脚本只支持 pull 模式。
 - 不把 ACR 密码、数据库密码、Redis 密码或生产私有配置写入 Git。
 - 生产镜像默认使用 `main/xiaozhi-server/requirements-docker.txt`，不安装 `torch` / `torchaudio`。
 - 如果确实需要容器内本地 FunASR，构建时显式设置 `SERVER_REQUIREMENTS=main/xiaozhi-server/requirements.txt`。
