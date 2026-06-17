@@ -11,6 +11,13 @@ pull 模式   本地或构建机先构建业务镜像并推送到镜像仓库，
 
 如果生产服务器无法稳定访问 Docker Hub，优先使用 pull 模式。生产服务器只需要访问私有 Git 仓库和你的镜像仓库，不再需要拉取 Python、Node、Maven 等构建基础镜像。
 
+本项目当前默认使用的阿里云 ACR 个人版仓库：
+
+```text
+登录地址  crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
+镜像仓库  crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi
+```
+
 目录约定：
 
 ```text
@@ -39,10 +46,8 @@ sudo scripts/deploy
 mkdir -p ~/work
 git clone ssh://git@10.144.92.32:222/gaoruirui688/xiaozhi-esp32-server.git ~/work/xiaozhi-esp32-server
 cd ~/work/xiaozhi-esp32-server
-sudo docker login registry.cn-hangzhou.aliyuncs.com
-sudo env DEPLOY_MODE=pull \
-  IMAGE_REPOSITORY=registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/xiaozhi \
-  scripts/deploy
+sudo scripts/acr-login
+scripts/acr-deploy-pull
 ```
 
 升级当前分支：
@@ -125,6 +130,8 @@ sudo \
 
 替换镜像必须与默认镜像兼容。`PYTHON_BASE_IMAGE` 需要支持 `apt-get`，`WEB_RUNTIME_BASE_IMAGE` 需要支持当前 Dockerfile 中的 `apk` 安装步骤。
 
+注意：`docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com` 只表示你可以向阿里云 ACR 推送或拉取自己的镜像。它不会让 Docker 自动从阿里云获取 `python:3.10-slim`、`node:18` 等 Docker Hub 基础镜像。只要执行构建，构建机仍然需要能访问这些基础镜像，或者通过 `PYTHON_BASE_IMAGE` 等变量指定可访问的兼容基础镜像。
+
 ## 推送业务镜像到阿里云 ACR
 
 在可以访问 Docker Hub 的本地开发机或构建机上执行。
@@ -132,51 +139,53 @@ sudo \
 先登录阿里云 ACR：
 
 ```bash
-docker login registry.cn-hangzhou.aliyuncs.com
+scripts/acr-login
 ```
 
 构建并推送业务镜像：
 
 ```bash
-IMAGE_REPOSITORY=registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/xiaozhi \
-PUSH=true \
-PLATFORMS=linux/amd64 \
-scripts/docker-build-private.sh
+scripts/acr-build-push
 ```
 
 这会推送：
 
 ```text
-registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/xiaozhi:server-base
-registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/xiaozhi:server_latest
-registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/xiaozhi:web_latest
-registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/xiaozhi:server_版本号
-registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/xiaozhi:web_版本号
+crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi:server-base
+crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi:server_latest
+crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi:web_latest
+crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi:server_版本号
+crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi:web_版本号
 ```
 
-`IMAGE_REPOSITORY` 必须替换为阿里云 ACR 仓库管理页给出的公网地址。
+如果需要推送到其他仓库，可以覆盖：
+
+```bash
+ACR_REGISTRY=其他登录地址 \
+ACR_NAMESPACE=其他命名空间 \
+ACR_REPOSITORY_NAME=其他仓库名 \
+scripts/acr-build-push
+```
 
 ## pull 模式部署
 
 生产服务器上先登录镜像仓库：
 
 ```bash
-sudo docker login registry.cn-hangzhou.aliyuncs.com
+sudo scripts/acr-login
 ```
 
 然后部署：
 
 ```bash
-sudo env DEPLOY_MODE=pull \
-  IMAGE_REPOSITORY=registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/xiaozhi \
-  scripts/deploy
+scripts/acr-deploy-pull
 ```
 
 pull 模式会拉取以下镜像并启动服务：
 
 ```text
-registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/xiaozhi:server_latest
-registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/xiaozhi:web_latest
+crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi:server_latest
+crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi:web_latest
 mysql:latest
 redis:8.0
 ```
@@ -185,9 +194,9 @@ redis:8.0
 
 ```bash
 sudo env DEPLOY_MODE=pull \
-  IMAGE_REPOSITORY=registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/xiaozhi \
-  MYSQL_IMAGE=registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/mysql:8.4 \
-  REDIS_IMAGE=registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/redis:8.0 \
+  IMAGE_REPOSITORY=crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi \
+  MYSQL_IMAGE=crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/mysql:8.4 \
+  REDIS_IMAGE=crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/redis:8.0 \
   scripts/deploy
 ```
 
@@ -325,7 +334,8 @@ pull 模式升级时保留同样的环境变量：
 
 ```bash
 cd ~/work/xiaozhi-esp32-server
-DEPLOY_MODE=pull IMAGE_REPOSITORY=registry.cn-hangzhou.aliyuncs.com/yihuixiaozhi/xiaozhi \
+DEPLOY_MODE=pull \
+IMAGE_REPOSITORY=crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi \
 scripts/upgrade
 ```
 

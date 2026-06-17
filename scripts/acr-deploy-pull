@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+ACR_REGISTRY="${ACR_REGISTRY:-crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com}"
+ACR_NAMESPACE="${ACR_NAMESPACE:-yihuixiaozhi}"
+ACR_REPOSITORY_NAME="${ACR_REPOSITORY_NAME:-xiaozhi}"
+IMAGE_REPOSITORY="${IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/$ACR_REPOSITORY_NAME}"
+
+if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+  DEPLOY_CMD=("$ROOT_DIR/scripts/deploy")
+else
+  DEPLOY_CMD=(sudo -E "$ROOT_DIR/scripts/deploy")
+fi
+
+echo "Deploying xiaozhi from Aliyun ACR images:"
+echo "  $IMAGE_REPOSITORY:server_latest"
+echo "  $IMAGE_REPOSITORY:web_latest"
+
+DEPLOY_MODE=pull \
+  IMAGE_REPOSITORY="$IMAGE_REPOSITORY" \
+  "${DEPLOY_CMD[@]}"

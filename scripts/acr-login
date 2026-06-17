@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ACR_REGISTRY="${ACR_REGISTRY:-crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com}"
+
+echo "Logging in to Aliyun ACR:"
+echo "  $ACR_REGISTRY"
+docker login "$ACR_REGISTRY"

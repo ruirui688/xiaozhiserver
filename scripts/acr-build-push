@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+ACR_REGISTRY="${ACR_REGISTRY:-crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com}"
+ACR_NAMESPACE="${ACR_NAMESPACE:-yihuixiaozhi}"
+ACR_REPOSITORY_NAME="${ACR_REPOSITORY_NAME:-xiaozhi}"
+IMAGE_REPOSITORY="${IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/$ACR_REPOSITORY_NAME}"
+PLATFORMS="${PLATFORMS:-linux/amd64}"
+
+cat <<EOF
+Building and pushing xiaozhi images to Aliyun ACR.
+
+Image repository:
+  $IMAGE_REPOSITORY
+
+This command still needs access to Docker build base images unless you override
+PYTHON_BASE_IMAGE, NODE_BASE_IMAGE, MAVEN_BASE_IMAGE, and WEB_RUNTIME_BASE_IMAGE.
+EOF
+
+IMAGE_REPOSITORY="$IMAGE_REPOSITORY" \
+  PUSH=true \
+  PLATFORMS="$PLATFORMS" \
+  "$ROOT_DIR/scripts/docker-build-private.sh"
