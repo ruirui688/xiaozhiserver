@@ -1,5 +1,6 @@
 """服务端插件工具执行器"""
 
+import asyncio
 import copy
 from typing import Dict, Any, TYPE_CHECKING
 
@@ -36,20 +37,11 @@ class ServerPluginExecutor(ToolExecutor):
             )
 
         try:
-            # 根据工具类型决定如何调用
-            if hasattr(func_item, "type"):
-                func_type = func_item.type
-                if func_type.code in [4, 5]:  # SYSTEM_CTL, IOT_CTL (需要conn参数)
-                    result = func_item.func(conn, **arguments)
-                elif func_type.code == 2:  # WAIT
-                    result = func_item.func(**arguments)
-                elif func_type.code == 3:  # CHANGE_SYS_PROMPT
-                    result = func_item.func(conn, **arguments)
-                else:
-                    result = func_item.func(**arguments)
-            else:
-                # 默认不传conn参数
-                result = func_item.func(**arguments)
+            result = await asyncio.to_thread(
+                self._execute_registered_function, conn, func_item, arguments
+            )
+            if asyncio.iscoroutine(result):
+                result = await result
 
             return result
 
@@ -58,6 +50,24 @@ class ServerPluginExecutor(ToolExecutor):
                 action=Action.ERROR,
                 response=str(e),
             )
+
+    @staticmethod
+    def _execute_registered_function(
+        conn: "ConnectionHandler", func_item, arguments: Dict[str, Any]
+    ) -> ActionResponse:
+        # 根据工具类型决定如何调用。插件函数通常是同步 I/O，放到线程里避免阻塞事件循环。
+        if hasattr(func_item, "type"):
+            func_type = func_item.type
+            if func_type.code in [4, 5]:  # SYSTEM_CTL, IOT_CTL (需要conn参数)
+                return func_item.func(conn, **arguments)
+            if func_type.code == 2:  # WAIT
+                return func_item.func(**arguments)
+            if func_type.code == 3:  # CHANGE_SYS_PROMPT
+                return func_item.func(conn, **arguments)
+            return func_item.func(**arguments)
+
+        # 默认不传conn参数
+        return func_item.func(**arguments)
 
     def get_tools(self) -> Dict[str, ToolDefinition]:
         """获取所有注册的服务端插件工具"""

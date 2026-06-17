@@ -68,7 +68,7 @@ core/providers/                ASR/VAD/LLM/TTS/Memory/Intent/VLLM/工具 provide
 core/semantic/                 语义控制中枢
 core/utils/                    Prompt、对话、音频、缓存、纠错词等工具
 plugins_func/                  天气、新闻、音乐、知识库、HomeAssistant 等插件
-tests/                         语义、游戏、酒水推荐、VLLM 等单测
+tests/                         语义、游戏、VLLM 等单测
 scripts/                       辅助脚本与无代码 MCP 工具桥
 ```
 

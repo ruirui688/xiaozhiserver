@@ -67,6 +67,8 @@ def setup_proxy_env(http_proxy: str | None, https_proxy: str | None):
 
 
 class LLMProvider(LLMProviderBase):
+    supports_native_function_call = True
+
     def __init__(self, cfg: Dict[str, Any]):
         self.model_name = cfg.get("model_name", "gemini-2.0-flash")
         self.api_key = cfg["api_key"]

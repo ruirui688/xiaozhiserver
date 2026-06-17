@@ -20,6 +20,8 @@ THINKING_DISABLED_DOMAINS = {
 
 
 class LLMProvider(LLMProviderBase):
+    supports_native_function_call = True
+
     def __init__(self, config):
         self.model_name = config.get("model_name")
         self.api_key = config.get("api_key")

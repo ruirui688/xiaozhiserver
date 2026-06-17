@@ -1209,6 +1209,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                 missingFields.add(String.join("/", group));
             }
         }
+        missingFields.addAll(getMissingAlternativeRequirements(configJson, modelType, type));
 
         if (CollectionUtil.isNotEmpty(missingFields)) {
             result.setSuccess(false);
@@ -1247,7 +1248,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                 case "fun_server" -> List.of("host", "port");
                 case "doubao" -> List.of("appid", "access_token", "cluster");
                 case "tencent" -> List.of("appid", "secret_id", "secret_key");
-                case "aliyun", "aliyun_stream" -> List.of("appkey", "access_key_id", "access_key_secret");
+                case "aliyun", "aliyun_stream" -> List.of("appkey");
                 case "baidu" -> List.of("app_id", "api_key", "secret_key");
                 case "qwen3_asr_flash" -> List.of("api_key", "base_url", "model_name");
                 case "aliyunbl_stream" -> List.of("api_key", "model");
@@ -1264,7 +1265,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                 case "fishspeech" -> List.of("api_url");
                 case "tencent" -> List.of("appid", "secret_id", "secret_key", "voice");
                 case "gpt_sovits_v2", "gpt_sovits_v3", "custom", "paddle_speech" -> List.of("url");
-                case "aliyun", "aliyun_stream" -> List.of("appkey", "access_key_id", "access_key_secret", "voice");
+                case "aliyun", "aliyun_stream" -> List.of("appkey", "voice");
                 case "huoshan_double_stream" -> List.of("appid", "access_token", "resource_id", "speaker");
                 case "index_stream" -> List.of("api_url", "voice");
                 case "minimax_httpstream" -> List.of("api_key", "group_id", "voice_id", "model");
@@ -1310,6 +1311,26 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             return List.of(List.of("access_token", "authorization"));
         }
         return List.of();
+    }
+
+    private List<String> getMissingAlternativeRequirements(JSONObject configJson, String modelType, String type) {
+        if (!isAliyunNlsModel(modelType, type)) {
+            return List.of();
+        }
+        boolean hasToken = hasUsableConfigValue(configJson, "token");
+        boolean hasAccessKeyPair = hasUsableConfigValue(configJson, "access_key_id")
+                && hasUsableConfigValue(configJson, "access_key_secret");
+        if (hasToken || hasAccessKeyPair) {
+            return List.of();
+        }
+        return List.of("token 或 access_key_id+access_key_secret");
+    }
+
+    private boolean isAliyunNlsModel(String modelType, String type) {
+        String normalizedModelType = StringUtils.defaultString(modelType).toUpperCase();
+        String normalizedType = StringUtils.defaultString(type);
+        return ("ASR".equals(normalizedModelType) || "TTS".equals(normalizedModelType))
+                && ("aliyun".equals(normalizedType) || "aliyun_stream".equals(normalizedType));
     }
 
     private String getLocalPathField(String modelType, String type) {

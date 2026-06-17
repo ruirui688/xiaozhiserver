@@ -21,6 +21,13 @@ class PolicyEngine:
                 next_state="idle",
             )
 
+        if intent.full_name == "music.stop":
+            return Decision(
+                decision="execute",
+                priority=95,
+                next_state="idle",
+            )
+
         if intent.full_name == "game.exit":
             return Decision(
                 decision="execute",
@@ -45,19 +52,6 @@ class PolicyEngine:
                 reply="现在没有正在进行的游戏。",
                 next_state="idle",
                 reason="no_active_game",
-            )
-
-        if intent.full_name == "bar.recommend_drink":
-            return Decision(
-                decision="execute",
-                priority=75,
-                executor="recommend_drink",
-                arguments={
-                    "preference": intent.slots.get("preference", ""),
-                    "scene": "",
-                    "strength": "any",
-                },
-                next_state="idle",
             )
 
         if intent.full_name == "context.continue":

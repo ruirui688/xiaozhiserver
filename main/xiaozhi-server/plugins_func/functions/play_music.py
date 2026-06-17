@@ -107,6 +107,9 @@ def _find_best_match(potential_song, music_files):
         description = metadata.get("description", "")
         if description:
             match_texts.append(description)
+        aliases = metadata.get("aliases", [])
+        if isinstance(aliases, list):
+            match_texts.extend(str(alias) for alias in aliases if alias)
 
         ratio = 0
         for match_text in match_texts:
@@ -176,22 +179,36 @@ def _load_music_metadata(music_dir):
             continue
         normalized_path = path.replace("\\", "/").strip()
         description = ""
+        aliases = []
         if isinstance(item, dict):
             description = str(item.get("description") or "").strip()
+            raw_aliases = item.get("aliases") or []
+            if isinstance(raw_aliases, str):
+                aliases = [alias.strip() for alias in raw_aliases.split(";")]
+            elif isinstance(raw_aliases, list):
+                aliases = [str(alias).strip() for alias in raw_aliases]
         elif isinstance(item, str):
             description = item.strip()
-        if normalized_path and description:
-            metadata[normalized_path] = {"description": description}
+        aliases = [alias for alias in aliases if alias]
+        if normalized_path and (description or aliases):
+            metadata[normalized_path] = {
+                "description": description,
+                "aliases": aliases,
+            }
     return metadata
 
 
 def _build_music_prompt_name(relative_path, metadata):
     song_name = os.path.splitext(relative_path)[0]
     description = metadata.get(relative_path, {}).get("description", "")
-    if not description:
+    aliases = metadata.get(relative_path, {}).get("aliases", [])
+    alias_text = "、".join(aliases[:5]) if isinstance(aliases, list) else ""
+    if not description and not alias_text:
         return song_name
-    short_description = description[:MUSIC_PROMPT_DESCRIPTION_LIMIT]
-    if len(description) > MUSIC_PROMPT_DESCRIPTION_LIMIT:
+    prompt_parts = [part for part in (alias_text, description) if part]
+    prompt_text = "；".join(prompt_parts)
+    short_description = prompt_text[:MUSIC_PROMPT_DESCRIPTION_LIMIT]
+    if len(prompt_text) > MUSIC_PROMPT_DESCRIPTION_LIMIT:
         short_description += "..."
     return f"{song_name}：{short_description}"
 

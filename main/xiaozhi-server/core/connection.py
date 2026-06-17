@@ -182,6 +182,7 @@ class ConnectionHandler:
         # 是否在聊天结束后关闭连接
         self.close_after_chat = False
         self.load_function_plugin = False
+        self.configured_intent_type = "nointent"
         self.intent_type = "nointent"
 
         self.timeout_seconds = (
@@ -920,26 +921,24 @@ class ConnectionHandler:
     def _initialize_intent(self):
         if self.intent is None:
             return
-        self.intent_type = self.config["Intent"][
+        self.configured_intent_type = self.config["Intent"][
             self.config["selected_module"]["Intent"]
         ]["type"]
+        self.intent_type = self._resolve_runtime_intent_type(self.configured_intent_type)
+        if self.configured_intent_type == "function_call" and self.intent_type == "intent_llm":
+            self._switch_to_intent_llm_provider()
         if self.intent_type == "function_call" or self.intent_type == "intent_llm":
             self.load_function_plugin = True
         """初始化意图识别模块"""
         # 获取意图识别配置
         intent_config = self.config["Intent"]
-        intent_type = self.config["Intent"][self.config["selected_module"]["Intent"]][
-            "type"
-        ]
 
         # 如果使用 nointent，直接返回
-        if intent_type == "nointent":
+        if self.intent_type == "nointent":
             return
         # 使用 intent_llm 模式
-        elif intent_type == "intent_llm":
-            intent_llm_name = intent_config[self.config["selected_module"]["Intent"]][
-                "llm"
-            ]
+        elif self.intent_type == "intent_llm":
+            intent_llm_name = intent_config.get("intent_llm", {}).get("llm")
 
             if intent_llm_name and intent_llm_name in self.config["LLM"]:
                 # 如果配置了专用LLM，则创建独立的LLM实例
@@ -965,6 +964,38 @@ class ConnectionHandler:
         # 异步初始化工具处理器
         if hasattr(self, "loop") and self.loop:
             asyncio.run_coroutine_threadsafe(self.func_handler._initialize(), self.loop)
+
+    def _resolve_runtime_intent_type(self, configured_intent_type):
+        if configured_intent_type != "function_call":
+            return configured_intent_type
+        if self._llm_supports_native_function_call():
+            return "function_call"
+        self.logger.bind(tag=TAG).warning(
+            "当前主LLM不支持原生结构化 function_call，已自动降级为 intent_llm，避免工具协议文本进入语音和聊天记录"
+        )
+        return "intent_llm"
+
+    def _llm_supports_native_function_call(self):
+        return bool(getattr(self.llm, "supports_native_function_call", False))
+
+    def _switch_to_intent_llm_provider(self):
+        intent_config = self.config.get("Intent", {})
+        from core.utils import intent as intent_utils
+
+        intent_llm_config = intent_config.setdefault(
+            "intent_llm",
+            {"type": "intent_llm", "llm": "", "functions": []},
+        )
+        self.intent = intent_utils.create_instance("intent_llm", intent_llm_config)
+
+        selected_intent = self.config.get("selected_module", {}).get("Intent")
+        selected_functions = (
+            intent_config.get(selected_intent, {}).get("functions")
+            if selected_intent
+            else None
+        )
+        if selected_functions is not None:
+            intent_llm_config["functions"] = selected_functions
 
     def change_system_prompt(self, prompt):
         self.prompt = prompt

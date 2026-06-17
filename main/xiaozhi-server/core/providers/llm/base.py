@@ -5,6 +5,8 @@ TAG = __name__
 logger = setup_logging()
 
 class LLMProviderBase(ABC):
+    supports_native_function_call = False
+
     @abstractmethod
     def response(self, session_id, dialogue):
         """LLM response generator"""
@@ -31,4 +33,3 @@ class LLMProviderBase(ABC):
         # For providers that don't support functions, just return regular response
         for token in self.response(session_id, dialogue):
             yield token, None
-

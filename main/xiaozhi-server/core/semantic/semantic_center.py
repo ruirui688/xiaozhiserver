@@ -50,11 +50,14 @@ class SemanticCenter:
         if decision.decision != "execute":
             return False
 
-        if intent.full_name == "interrupt.stop_all":
+        if intent.full_name in {"interrupt.stop_all", "music.stop"}:
             from core.handle.abortHandle import handleAbortMessage
 
             await handleAbortMessage(conn)
-            await self._try_stop_motion(conn)
+            conn.last_tool_context = None
+            conn.last_music_song_name = None
+            if intent.full_name == "interrupt.stop_all":
+                await self._try_stop_motion(conn)
             if decision.reply:
                 await self._speak(conn, decision.reply)
             self.state_manager.transition(decision.next_state, None)

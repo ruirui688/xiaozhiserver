@@ -56,22 +56,6 @@ def test_continue_without_context_is_rejected_with_clarification():
     assert "继续" in decision.reply
 
 
-def test_bar_drink_recommendation_executes_recommend_drink_tool():
-    decision = PolicyEngine().decide(
-        IntentFrame(
-            "bar",
-            "recommend_drink",
-            0.94,
-            {"preference": "帮我推荐一杯拍照好看的酒"},
-        ),
-        _context(state="idle"),
-    )
-
-    assert decision.decision == "execute"
-    assert decision.executor == "recommend_drink"
-    assert decision.arguments["preference"] == "帮我推荐一杯拍照好看的酒"
-
-
 def test_low_confidence_falls_back_to_chat():
     decision = PolicyEngine().decide(
         IntentFrame("motion", "dance", 0.4),

@@ -43,7 +43,6 @@ docs/images/           文档图片资源
 ```text
 local-dev-workflow.md
 documentation-policy.md
-bar-drink-image-recommendation.md
 ```
 
 历史文档如果已经被外部或内部链接引用，可以暂缓重命名。重命名前必须统一检查并修复链接，必要时保留兼容说明。
