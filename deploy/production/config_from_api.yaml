@@ -2,8 +2,11 @@ server:
   ip: 0.0.0.0
   port: 8000
   http_port: 8003
+  # 下发给设备的视觉接口地址，必须使用设备可访问的公网IP、域名或反向代理地址。
+  # server.websocket 和 server.ota 不在这里配置；使用智控台“参数字典”配置。
   vision_explain: http://你的ip或者域名:端口号/mcp/vision/explain
 manager-api:
+  # 这是 xiaozhi-server 容器访问 manager-api 的 Docker 内网地址，不要改成公网IP。
   url: http://xiaozhi-esp32-server-web:8002/xiaozhi
   secret: 你的server.secret值
 prompt_template: agent-base-prompt.txt
