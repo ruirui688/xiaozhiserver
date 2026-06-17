@@ -91,7 +91,7 @@ TTS:
 ```py
 python app.py
 ```
-启动`main/digital-human`下的`python start.py`后，打开`http://127.0.0.1:8006/index.html`，测试连接和发送消息时paddlespeech端是否有输出日志
+启动 `xiaozhi-server` 后，使用真实 ESP32 设备或 WebSocket 客户端发送语音请求，确认 PaddleSpeech 端是否有输出日志。
 
 输出日志参考：
 ```

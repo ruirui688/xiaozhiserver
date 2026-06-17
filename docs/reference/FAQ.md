@@ -86,20 +86,16 @@ VAD:
 12、[如何配置天气插件查询天气](../integrations/weather-integration.md)<br/>
 13、[如何开启设备呼叫插件](../device/device-call-guide.md)<br/>
 
-### 10、数字人相关教程
-1、[数字人digital-human启动方法](../digital-human/digital-human-wakeword.md)<br/>
-2、[如何在N100迷你主机上部署数字人digital-human](../deployment/all-in-one-digital-human-setup.md)<br/>
-
-### 11、语音克隆、本地语音部署相关教程
+### 10、语音克隆、本地语音部署相关教程
 1、[如何在智控台克隆音色](../models/huoshan-streamTTS-voice-cloning.md)<br/>
 2、[如何部署集成index-tts本地语音](../models/index-stream-integration.md)<br/>
 3、[如何部署集成fish-speech本地语音](../models/fish-speech-integration.md)<br/>
 4、[如何部署集成PaddleSpeech本地语音](../deployment/paddlespeech-deploy.md)<br/>
 
-### 12、性能测试教程
+### 11、性能测试教程
 1、[各组件速度测试指南](../models/performance_tester.md)<br/>
 2、[定期公开测试结果](https://github.com/xinnan-tech/xiaozhi-performance-research)<br/>
 
-### 13、更多问题，可联系我们反馈 💬
+### 12、更多问题，可联系我们反馈
 
 可以在[issues](https://github.com/xinnan-tech/xiaozhi-esp32-server/issues)提交您的问题。

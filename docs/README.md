@@ -73,7 +73,7 @@ docs/integrations/prompt-injection-engineering.md
 用于理解端云协同、后台配置下发、Python 实时服务、提示词注入、插件工具、MCP 和设备运行边界。AI 修改实时对话、插件、提示词、MCP、OTA 接入、设备连接、后台配置下发时必须读取。
 
 - [architecture/project-architecture.md](./architecture/project-architecture.md) - 项目完整架构与文档导航。用于理解模块边界、端云链路、配置下发、提示词/工具/MCP 注入、运行产物、部署边界和开发治理边界。
-- [architecture/cloud-runtime-architecture.md](./architecture/cloud-runtime-architecture.md) - 云端运行架构与配置链路。用于理解 `manager-web`、`manager-mobile`、`manager-api`、`xiaozhi-server`、`digital-human` 和设备端的边界，说明后台配置如何变成设备行为、实时语音链路如何运行、工具/MCP/天气/OTA 如何接入。
+- [architecture/cloud-runtime-architecture.md](./architecture/cloud-runtime-architecture.md) - 云端运行架构与配置链路。用于理解 `manager-web`、`manager-mobile`、`manager-api`、`xiaozhi-server` 和设备端的边界，说明后台配置如何变成设备行为、实时语音链路如何运行、工具/MCP/天气/OTA 如何接入。
 - [architecture/semantic-control-center.md](./architecture/semantic-control-center.md) - 语义控制中枢架构。用于理解确定性语音控制、文本标准化、语义路由、状态管理、策略判断、拒识和旧 LLM/function-call 兜底之间的关系。
 - [architecture/current-code-map.md](./architecture/current-code-map.md) - 当前代码地图与梳理报告。用于快速了解当前仓库模块结构、运行链路、未提交能力、风险和验证矩阵，是后续开发前的代码导航。
 
@@ -95,7 +95,6 @@ docs/integrations/prompt-injection-engineering.md
 - [deployment/Deployment_all.md](./deployment/Deployment_all.md) - 官方全模块 Docker 兼容说明。仅用于参考官方默认部署方式，不作为本项目私有生产部署主入口。
 - [deployment/dev-ops-integration.md](./deployment/dev-ops-integration.md) - 全模块源码部署自动升级方法。用于从源码目录进行部署、拉取更新、执行自动升级脚本和维护服务器运行目录的场景。
 - [deployment/docker-build.md](./deployment/docker-build.md) - 本地编译 Docker 镜像方法。用于官方镜像架构不匹配、需要自建 `server` 或 `web` 镜像、需要在本机或服务器构建镜像的场景。
-- [deployment/all-in-one-digital-human-setup.md](./deployment/all-in-one-digital-human-setup.md) - 一体机数字人部署配置指南。用于数字人一体机环境初始化、网络配置、服务启动和数字人部署流程。
 - [deployment/paddlespeech-deploy.md](./deployment/paddlespeech-deploy.md) - PaddleSpeech TTS 部署与接入指南。用于安装 PaddleSpeech 服务、启动 TTS 服务并把它接入小智服务端的场景。
 
 部署文档优先级：
@@ -153,14 +152,7 @@ Git-only 生产部署：deployment/private-docker-release.md
 - [integrations/stateful-game-session.md](./integrations/stateful-game-session.md) - 状态机游戏会话逻辑。用于理解“你说我猜”“我想你猜”“成语接龙”的触发、状态保存、每轮判定、提示、退出和扩展规则。
 - [integrations/prompt-injection-engineering.md](./integrations/prompt-injection-engineering.md) - 提示词注入工程。用于理解系统提示词、工具描述、声明式插件提示词、状态机游戏规则如何进入大模型，以及为什么状态机玩法不再依赖后台大段 prompt。
 
-## 10. 数字人与唤醒词
-
-用于数字人启动、唤醒词模型和相关体验配置。AI 只有在修改数字人、唤醒词、展示端体验相关逻辑时，才需要读取本分类文档。
-
-- [digital-human/digital-human-wakeword.md](./digital-human/digital-human-wakeword.md) - 数字人启动与唤醒词配置说明。用于下载唤醒词模型、配置数字人启动方式、处理数字人与语音唤醒之间的联动。
-- [deployment/all-in-one-digital-human-setup.md](./deployment/all-in-one-digital-human-setup.md) - 一体机数字人部署配置指南。用于数字人一体机的系统初始化、网络配置、服务安装和部署流程。
-
-## 11. 通用参考
+## 10. 通用参考
 
 用于问题排查、贡献说明和图片资源。AI 只有在整理文档、排查问题或更新 README 时，才需要读取本分类文档。
 
@@ -168,7 +160,7 @@ Git-only 生产部署：deployment/private-docker-release.md
 - [reference/contributor_open_letter.md](./reference/contributor_open_letter.md) - 开发者公开信与贡献指南。用于理解官方项目目标、贡献方式、提交内容要求和社区协作方式。
 - [images/](./images/) - 文档图片资源目录。用于部署架构图、截图和说明图片；修改引用图片或移动文档时必须检查图片路径。
 
-## 12. AI 读取规则
+## 11. AI 读取规则
 
 AI 必须按任务读取文档：
 
@@ -201,7 +193,7 @@ AI 禁止：
 - 把生产数据库真实连接信息、密码、Token、AccessKey 写入 Git。
 - 未识别当前分支和真实私有远端就执行 push。
 
-## 13. 文档移动规则
+## 12. 文档移动规则
 
 官方原有文档已按主题移动到分类目录。移动后必须维护相对链接，避免破坏图片路径和文档互链。
 

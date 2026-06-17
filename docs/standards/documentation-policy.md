@@ -25,7 +25,6 @@ docs/architecture/     架构、运行链路、模块边界
 docs/development/      本地开发、调试、启动、工具链
 docs/deployment/       部署、运维、发布、服务器流程
 docs/device/           ESP32 固件、OTA、设备协议、MQTT
-docs/digital-human/    数字人、唤醒词、展示端体验
 docs/integrations/     第三方服务、插件、外部 API 集成
 docs/mcp/              MCP 接入点、MCP 工具、设备上下文
 docs/models/           ASR、TTS、LLM、声纹、记忆、RAG、性能测试
