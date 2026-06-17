@@ -13,6 +13,7 @@ import time
 import json
 import opuslib_next
 from typing import TYPE_CHECKING
+from core.game_session import GameSessionManager
 
 if TYPE_CHECKING:
     from core.connection import ConnectionHandler
@@ -147,6 +148,8 @@ def enqueue_tool_report(conn: "ConnectionHandler", tool_name: str, tool_input: d
         return
     if conn.chat_history_conf == 0:
         return
+    if _is_stateful_game_tool(tool_name):
+        return
 
     try:
         timestamp = int(time.time() * 1000)
@@ -165,11 +168,23 @@ def enqueue_tool_report(conn: "ConnectionHandler", tool_name: str, tool_input: d
 
         # 构建工具结果内容
         if tool_result:
-            result_display = f'{{"result":"{str(tool_result)}"}}'
+            try:
+                result_display_value = json.loads(tool_result) if isinstance(tool_result, str) else tool_result
+            except (TypeError, json.JSONDecodeError):
+                result_display_value = {"result": str(tool_result)}
+            result_display = json.dumps(result_display_value, ensure_ascii=False)
             result_content = json.dumps([{"type": "tool_result", "text": result_display}], ensure_ascii=False)
             conn.report_queue.put((3, result_content, None, timestamp + 1))
     except Exception as e:
         conn.logger.bind(tag=TAG).error(f"加入工具上报队列失败: {e}")
+
+
+def _is_stateful_game_tool(tool_name):
+    return (
+        tool_name in GameSessionManager.GUESS_MY_WORD_TOOLS
+        or tool_name in GameSessionManager.USER_DESCRIBES_TOOLS
+        or tool_name in GameSessionManager.IDIOM_CHAIN_TOOLS
+    )
 
 
 def enqueue_asr_report(conn: "ConnectionHandler", text, opus_data):

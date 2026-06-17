@@ -1,5 +1,6 @@
 import httpx
 import openai
+import json
 from openai.types import CompletionUsage
 from config.logger import setup_logging
 from core.utils.util import check_model_key
@@ -19,6 +20,8 @@ THINKING_DISABLED_DOMAINS = {
 
 
 class LLMProvider(LLMProviderBase):
+    supports_native_function_call = True
+
     def __init__(self, config):
         self.model_name = config.get("model_name")
         self.api_key = config.get("api_key")
@@ -42,6 +45,11 @@ class LLMProvider(LLMProviderBase):
         else:
             # 未配置或配置无效，使用默认值
             custom_timeout = httpx.Timeout(300)
+
+        self.thinking = self._normalize_thinking_config(config.get("thinking"))
+        self.reasoning_effort = self._normalize_reasoning_effort(
+            config.get("reasoning_effort")
+        )
 
         param_defaults = {
             "max_tokens": int,
@@ -78,6 +86,70 @@ class LLMProvider(LLMProviderBase):
                 msg["content"] = ""
         return dialogue
 
+    @staticmethod
+    def _normalize_thinking_config(value):
+        if value in (None, ""):
+            return None
+
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return None
+            if value.startswith("{"):
+                try:
+                    value = json.loads(value)
+                except json.JSONDecodeError:
+                    pass
+
+        if isinstance(value, dict):
+            thinking_type = str(value.get("type", "")).strip().lower()
+        elif isinstance(value, bool):
+            thinking_type = "enabled" if value else "disabled"
+        else:
+            thinking_type = str(value).strip().lower()
+
+        aliases = {
+            "enable": "enabled",
+            "true": "enabled",
+            "on": "enabled",
+            "1": "enabled",
+            "disable": "disabled",
+            "false": "disabled",
+            "off": "disabled",
+            "0": "disabled",
+        }
+        thinking_type = aliases.get(thinking_type, thinking_type)
+        if thinking_type not in ("enabled", "disabled"):
+            return None
+        return {"type": thinking_type}
+
+    @staticmethod
+    def _normalize_reasoning_effort(value):
+        if value in (None, ""):
+            return None
+        effort = str(value).strip().lower()
+        aliases = {"low": "high", "medium": "high", "xhigh": "max"}
+        effort = aliases.get(effort, effort)
+        return effort if effort in ("high", "max") else None
+
+    def _is_deepseek(self):
+        parsed_url = urlparse(self.base_url or "")
+        return "api.deepseek.com" in parsed_url.netloc
+
+    def _is_deepseek_thinking_enabled(self):
+        return self._is_deepseek() and (self.thinking or {}).get("type") == "enabled"
+
+    def _apply_provider_options(self, request_params: dict):
+        """按供应商补充非标准 OpenAI 参数。"""
+        if self._is_deepseek():
+            if self.thinking:
+                request_params.setdefault("extra_body", {})["thinking"] = self.thinking
+            if self._is_deepseek_thinking_enabled() and self.reasoning_effort:
+                request_params["reasoning_effort"] = self.reasoning_effort
+            return
+
+        self._apply_thinking_disabled(request_params)
+
     def _apply_thinking_disabled(self, request_params: dict):
         """根据域名自动禁用思考模式"""
         parsed_url = urlparse(self.base_url)
@@ -106,11 +178,16 @@ class LLMProvider(LLMProviderBase):
         }
 
         for key, value in optional_params.items():
+            if self._is_deepseek_thinking_enabled() and key in (
+                "temperature",
+                "top_p",
+                "frequency_penalty",
+            ):
+                continue
             if value is not None:
                 request_params[key] = value
 
-        # 禁用思考模式
-        self._apply_thinking_disabled(request_params)
+        self._apply_provider_options(request_params)
 
         responses = self.client.chat.completions.create(**request_params)
 
@@ -152,11 +229,16 @@ class LLMProvider(LLMProviderBase):
         }
 
         for key, value in optional_params.items():
+            if self._is_deepseek_thinking_enabled() and key in (
+                "temperature",
+                "top_p",
+                "frequency_penalty",
+            ):
+                continue
             if value is not None:
                 request_params[key] = value
 
-        # 禁用思考模式
-        self._apply_thinking_disabled(request_params)
+        self._apply_provider_options(request_params)
 
         stream = self.client.chat.completions.create(**request_params)
 

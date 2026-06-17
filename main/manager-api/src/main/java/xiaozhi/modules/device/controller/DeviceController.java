@@ -24,6 +24,8 @@ import xiaozhi.common.user.UserDetail;
 import xiaozhi.common.utils.Result;
 import xiaozhi.modules.device.dto.DeviceAddressBookAliasDTO;
 import xiaozhi.modules.device.dto.DeviceAddressBookPermissionDTO;
+import xiaozhi.modules.device.dto.DeviceDebugInfoDTO;
+import xiaozhi.modules.device.dto.DeviceDebugStatusDTO;
 import xiaozhi.modules.device.dto.DeviceManualAddDTO;
 import xiaozhi.modules.device.dto.DeviceRegisterDTO;
 import xiaozhi.modules.device.dto.DeviceToolsCallReqDTO;
@@ -126,6 +128,24 @@ public class DeviceController {
         BeanUtils.copyProperties(deviceUpdateDTO, entity);
         deviceService.updateById(entity);
         return new Result<Void>();
+    }
+
+    @GetMapping("/debug/{deviceId}")
+    @Operation(summary = "获取设备对话调试连接信息")
+    @RequiresPermissions("sys:role:normal")
+    public Result<DeviceDebugInfoDTO> getDeviceDebugInfo(@PathVariable String deviceId) {
+        UserDetail user = SecurityUser.getUser();
+        DeviceDebugInfoDTO debugInfo = deviceService.getDeviceDebugInfo(user.getId(), deviceId);
+        return new Result<DeviceDebugInfoDTO>().ok(debugInfo);
+    }
+
+    @GetMapping("/debug/status/{deviceId}")
+    @Operation(summary = "获取设备对话调试状态")
+    @RequiresPermissions("sys:role:normal")
+    public Result<DeviceDebugStatusDTO> getDeviceDebugStatus(@PathVariable String deviceId) {
+        UserDetail user = SecurityUser.getUser();
+        DeviceDebugStatusDTO debugStatus = deviceService.getDeviceDebugStatus(user.getId(), deviceId);
+        return new Result<DeviceDebugStatusDTO>().ok(debugStatus);
     }
 
     @PostMapping("/manual-add")

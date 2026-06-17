@@ -447,7 +447,9 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
         if (entity == null || StringUtils.isBlank(entity.getRagModelId())) {
             throw new RenException(ErrorCode.RAG_CONFIG_NOT_FOUND);
         }
-        return getRAGConfig(entity.getRagModelId());
+        Map<String, Object> config = getRAGConfig(entity.getRagModelId());
+        mergeDatasetParserConfig(config, entity.getParserConfig());
+        return config;
     }
 
     @Override
@@ -496,5 +498,33 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
             config.put("type", "ragflow");
         }
         return config;
+    }
+
+    private void mergeDatasetParserConfig(Map<String, Object> config, String parserConfig) {
+        if (StringUtils.isBlank(parserConfig)) {
+            return;
+        }
+        try {
+            Map<String, Object> datasetConfig = JsonUtils.parseObject(parserConfig, Map.class);
+            if (datasetConfig == null || datasetConfig.isEmpty()) {
+                return;
+            }
+            for (String key : List.of(
+                    "max_chunk_chars",
+                    "llm_enabled",
+                    "llm_base_url",
+                    "llm_api_key",
+                    "llm_model",
+                    "llm_timeout_seconds",
+                    "llm_max_input_chars",
+                    "llm_max_tokens")) {
+                Object value = datasetConfig.get(key);
+                if (value != null && StringUtils.isNotBlank(value.toString())) {
+                    config.put(key, value);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("解析知识库 parser_config 失败，使用RAG模型默认配置: {}", e.getMessage());
+        }
     }
 }

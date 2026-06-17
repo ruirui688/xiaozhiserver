@@ -16,7 +16,6 @@ generator/
 │   ├── charsets/        # 字符集文件
 │   │   ├── deepseek.txt
 │   │   ├── gb2312.txt
-│   │   ├── latin1.txt
 │   │   └── qwen18409.txt
 │   ├── fonts/           # 字体资源
 │   │   ├── font_noto_qwen_14_1.bin
@@ -32,9 +31,7 @@ generator/
 │   ├── multinet_model/  # 自定义唤醒词模型
 │   │   ├── fst/
 │   │   ├── mn6_cn/
-│   │   ├── mn6_en/
-│   │   ├── mn7_cn/
-│   │   └── mn7_en/
+│   │   └── mn7_cn/
 │   ├── twemoji32/       # 32x32 表情图片
 │   ├── twemoji64/       # 64x64 表情图片
 │   ├── wakenet_model/   # 预设唤醒词模型
@@ -52,7 +49,7 @@ generator/
 
 ### 2. 唤醒词配置
 - **预设唤醒词**：基于不同芯片支持的 WakeNet 模型
-- **自定义唤醒词**：支持中文和英文命令词，可配置阈值和超时时间
+- **自定义唤醒词**：支持中文命令词，可配置阈值和超时时间
 
 ### 3. 字体配置
 - 预设多种字体：阿里巴巴普惠体、Noto Qwen 等

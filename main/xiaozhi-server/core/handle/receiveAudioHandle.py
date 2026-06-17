@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from core.connection import ConnectionHandler
 from core.utils.util import audio_to_data
+from core.utils.correct_words import apply_correct_words
 from core.handle.abortHandle import handleAbortMessage
 from core.handle.intentHandler import handle_user_intent
 from core.utils.output_counter import check_device_output_limit
@@ -58,6 +59,17 @@ async def startToChat(conn: "ConnectionHandler", text):
         # 如果解析失败，继续使用原始文本
         pass
 
+    corrected_text = apply_correct_words(conn, actual_text)
+    if corrected_text != actual_text:
+        actual_text = corrected_text
+        try:
+            if actual_text.strip().startswith("{") and actual_text.strip().endswith("}"):
+                data = json.loads(actual_text)
+                if "speaker" in data and "content" in data:
+                    speaker_name = data["speaker"]
+        except (json.JSONDecodeError, KeyError):
+            pass
+
     # 保存说话人信息到连接对象
     if speaker_name:
         conn.current_speaker = speaker_name
@@ -79,6 +91,12 @@ async def startToChat(conn: "ConnectionHandler", text):
     # manual 模式下不打断正在播放的内容
     if conn.client_is_speaking and conn.client_listen_mode != "manual":
         await handleAbortMessage(conn)
+
+    # 语义控制中枢优先处理高置信度控制类指令，未处理再进入旧流程
+    if getattr(conn, "semantic_center", None):
+        semantic_handled = await conn.semantic_center.handle_user_text(conn, actual_text)
+        if semantic_handled:
+            return
 
     # 首先进行意图分析，使用实际文本内容
     intent_handled = await handle_user_intent(conn, actual_text)

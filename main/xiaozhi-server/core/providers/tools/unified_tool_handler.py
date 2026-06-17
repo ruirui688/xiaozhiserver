@@ -14,6 +14,7 @@ from .device_iot import DeviceIoTExecutor
 from .device_mcp import DeviceMCPExecutor
 from .mcp_endpoint import MCPEndpointExecutor
 from core.handle.sendAudioHandle import send_display_message
+from core.game_session import GameSessionManager
 
 
 class UnifiedToolHandler:
@@ -136,6 +137,14 @@ class UnifiedToolHandler:
         """检查是否有指定工具"""
         return self.tool_manager.has_tool(tool_name)
 
+    @staticmethod
+    def _should_display_tool_call(tool_name: str) -> bool:
+        return not (
+            tool_name in GameSessionManager.GUESS_MY_WORD_TOOLS
+            or tool_name in GameSessionManager.USER_DESCRIBES_TOOLS
+            or tool_name in GameSessionManager.IDIOM_CHAIN_TOOLS
+        )
+
     async def handle_llm_function_call(
         self, conn, function_call_data: Dict[str, Any]
     ) -> Optional[ActionResponse]:
@@ -169,10 +178,11 @@ class UnifiedToolHandler:
             self.logger.debug(f"调用函数: {function_name}, 参数: {arguments}")
 
             # 发送工具调用显示消息到设备
-            try:
-                await send_display_message(self.conn, f"% {function_name}")
-            except Exception as e:
-                self.logger.warning(f"发送工具调用显示消息失败: {e}")
+            if self._should_display_tool_call(function_name):
+                try:
+                    await send_display_message(self.conn, f"% {function_name}")
+                except Exception as e:
+                    self.logger.warning(f"发送工具调用显示消息失败: {e}")
 
             # 执行工具调用
             result = await self.tool_manager.execute_tool(function_name, arguments)
@@ -181,6 +191,19 @@ class UnifiedToolHandler:
         except Exception as e:
             self.logger.error(f"处理function call错误: {e}")
             return ActionResponse(action=Action.ERROR, response=str(e))
+
+    async def invoke(
+        self, tool_name: str, arguments: Optional[Dict[str, Any]] = None, source: str = "direct"
+    ) -> ActionResponse:
+        """Direct tool invocation for router/policy controlled paths."""
+        arguments = arguments or {}
+        self.logger.debug(f"直接调用工具: {tool_name}, source={source}, 参数: {arguments}")
+        if self._should_display_tool_call(tool_name):
+            try:
+                await send_display_message(self.conn, f"% {tool_name}")
+            except Exception as e:
+                self.logger.warning(f"发送工具调用显示消息失败: {e}")
+        return await self.tool_manager.execute_tool(tool_name, arguments)
 
     def _combine_responses(self, responses: List[ActionResponse]) -> ActionResponse:
         """合并多个函数调用的响应"""

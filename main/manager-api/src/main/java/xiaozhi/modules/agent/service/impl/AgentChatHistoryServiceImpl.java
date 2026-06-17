@@ -23,11 +23,12 @@ import xiaozhi.common.utils.JsonUtils;
 import xiaozhi.common.utils.ToolUtil;
 import xiaozhi.modules.agent.Enums.AgentChatHistoryType;
 import xiaozhi.modules.agent.dao.AiAgentChatHistoryDao;
+import xiaozhi.modules.agent.dao.AgentChatTitleDao;
 import xiaozhi.modules.agent.dto.AgentChatHistoryDTO;
 import xiaozhi.modules.agent.dto.AgentChatSessionDTO;
 import xiaozhi.modules.agent.entity.AgentChatHistoryEntity;
+import xiaozhi.modules.agent.entity.AgentChatTitleEntity;
 import xiaozhi.modules.agent.service.AgentChatHistoryService;
-import xiaozhi.modules.agent.service.AgentChatTitleService;
 import xiaozhi.modules.agent.vo.AgentChatHistoryUserVO;
 
 /**
@@ -42,7 +43,7 @@ import xiaozhi.modules.agent.vo.AgentChatHistoryUserVO;
 public class AgentChatHistoryServiceImpl extends ServiceImpl<AiAgentChatHistoryDao, AgentChatHistoryEntity>
         implements AgentChatHistoryService {
 
-    private final AgentChatTitleService agentChatTitleService;
+    private final AgentChatTitleDao agentChatTitleDao;
 
     @Override
     public PageData<AgentChatSessionDTO> getSessionListByAgentId(Map<String, Object> params) {
@@ -60,13 +61,27 @@ public class AgentChatHistoryServiceImpl extends ServiceImpl<AiAgentChatHistoryD
         // 执行分页查询
         Page<Map<String, Object>> pageParam = new Page<>(page, limit);
         IPage<Map<String, Object>> result = this.baseMapper.selectMapsPage(pageParam, wrapper);
+        List<String> sessionIds = result.getRecords().stream()
+                .map(map -> (String) map.get("session_id"))
+                .filter(ToolUtil::isNotEmpty)
+                .toList();
+        Map<String, String> titleMap = sessionIds.isEmpty()
+                ? Map.of()
+                : agentChatTitleDao.selectList(new LambdaQueryWrapper<AgentChatTitleEntity>()
+                        .select(AgentChatTitleEntity::getSessionId, AgentChatTitleEntity::getTitle)
+                        .in(AgentChatTitleEntity::getSessionId, sessionIds))
+                        .stream()
+                        .collect(Collectors.toMap(
+                                AgentChatTitleEntity::getSessionId,
+                                AgentChatTitleEntity::getTitle,
+                                (left, right) -> left));
 
         List<AgentChatSessionDTO> records = result.getRecords().stream().map(map -> {
             AgentChatSessionDTO dto = new AgentChatSessionDTO();
             dto.setSessionId((String) map.get("session_id"));
             dto.setCreatedAt((LocalDateTime) map.get("created_at"));
             dto.setChatCount(((Number) map.get("chat_count")).intValue());
-            dto.setTitle(agentChatTitleService.getTitleBySessionId(dto.getSessionId()));
+            dto.setTitle(titleMap.get(dto.getSessionId()));
             return dto;
         }).collect(Collectors.toList());
 
@@ -91,24 +106,95 @@ public class AgentChatHistoryServiceImpl extends ServiceImpl<AiAgentChatHistoryD
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deleteByAgentId(String agentId, Boolean deleteAudio, Boolean deleteText) {
-        if (deleteAudio) {
-            // 分批删除音频,避免超时
-            List<String> audioIds = baseMapper.getAudioIdsByAgentId(agentId);
-            if (ToolUtil.isNotEmpty(audioIds)) {
-                // 每批删除1000条
-                List<List<String>> batch = ListUtil.split(audioIds, 1000);
-                batch.forEach(dataList -> {
-                    baseMapper.deleteAudioByIds(dataList);
-                });
-            }
+        if (Boolean.TRUE.equals(deleteText)) {
+            deleteTextByAgentId(agentId);
+            return;
         }
-        if (deleteAudio && !deleteText) {
-            baseMapper.deleteAudioIdByAgentId(agentId);
+        if (Boolean.TRUE.equals(deleteAudio)) {
+            deleteAudioOnlyByAgentId(agentId);
         }
-        if (deleteText) {
-            baseMapper.deleteHistoryByAgentId(agentId);
-        }
+    }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteBySessionId(String agentId, String sessionId) {
+        if (ToolUtil.isEmpty(agentId) || ToolUtil.isEmpty(sessionId)) {
+            return;
+        }
+        List<AgentChatHistoryEntity> historyList = baseMapper.selectList(new LambdaQueryWrapper<AgentChatHistoryEntity>()
+                .select(AgentChatHistoryEntity::getId, AgentChatHistoryEntity::getAudioId)
+                .eq(AgentChatHistoryEntity::getAgentId, agentId)
+                .eq(AgentChatHistoryEntity::getSessionId, sessionId));
+        List<String> audioIds = getAudioIds(historyList);
+        baseMapper.delete(new LambdaQueryWrapper<AgentChatHistoryEntity>()
+                .eq(AgentChatHistoryEntity::getAgentId, agentId)
+                .eq(AgentChatHistoryEntity::getSessionId, sessionId));
+        deleteUnreferencedAudioByIds(audioIds);
+        agentChatTitleDao.delete(new LambdaQueryWrapper<AgentChatTitleEntity>()
+                .eq(AgentChatTitleEntity::getSessionId, sessionId));
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteByMessageId(String agentId, Long messageId) {
+        if (ToolUtil.isEmpty(agentId) || messageId == null) {
+            return;
+        }
+        AgentChatHistoryEntity history = baseMapper.selectOne(new LambdaQueryWrapper<AgentChatHistoryEntity>()
+                .select(AgentChatHistoryEntity::getId, AgentChatHistoryEntity::getAudioId)
+                .eq(AgentChatHistoryEntity::getAgentId, agentId)
+                .eq(AgentChatHistoryEntity::getId, messageId));
+        if (history == null) {
+            return;
+        }
+        baseMapper.deleteById(messageId);
+        deleteUnreferencedAudioByIds(getAudioIds(List.of(history)));
+    }
+
+    private void deleteAudioOnlyByAgentId(String agentId) {
+        List<String> audioIds = baseMapper.getAudioIdsByAgentId(agentId);
+        baseMapper.deleteAudioIdByAgentId(agentId);
+        deleteUnreferencedAudioByIds(audioIds);
+    }
+
+    private void deleteTextByAgentId(String agentId) {
+        List<String> sessionIds = baseMapper.selectObjs(new QueryWrapper<AgentChatHistoryEntity>()
+                .select("DISTINCT session_id")
+                .eq("agent_id", agentId))
+                .stream()
+                .filter(value -> value != null)
+                .map(Object::toString)
+                .collect(Collectors.toList());
+        List<String> audioIds = baseMapper.getAudioIdsByAgentId(agentId);
+        baseMapper.deleteHistoryByAgentId(agentId);
+        deleteUnreferencedAudioByIds(audioIds);
+        deleteTitlesBySessionIds(sessionIds);
+    }
+
+    private List<String> getAudioIds(List<AgentChatHistoryEntity> historyList) {
+        if (historyList == null || historyList.isEmpty()) {
+            return List.of();
+        }
+        return historyList.stream()
+                .map(AgentChatHistoryEntity::getAudioId)
+                .filter(audioId -> ToolUtil.isNotEmpty(audioId))
+                .distinct()
+                .toList();
+    }
+
+    private void deleteUnreferencedAudioByIds(List<String> audioIds) {
+        if (ToolUtil.isNotEmpty(audioIds)) {
+            List<List<String>> batch = ListUtil.split(audioIds, 1000);
+            batch.forEach(dataList -> baseMapper.deleteUnreferencedAudioByIds(dataList));
+        }
+    }
+
+    private void deleteTitlesBySessionIds(List<String> sessionIds) {
+        if (ToolUtil.isEmpty(sessionIds)) {
+            return;
+        }
+        agentChatTitleDao.delete(new LambdaQueryWrapper<AgentChatTitleEntity>()
+                .in(AgentChatTitleEntity::getSessionId, sessionIds));
     }
 
     @Override

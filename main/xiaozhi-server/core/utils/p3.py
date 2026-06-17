@@ -1,36 +1,50 @@
 import struct
 
+FRAME_DURATION_MS = 60
+
+
+def _read_next_frame(stream):
+    header = stream.read(4)
+    if not header:
+        return None
+    _, _, data_len = struct.unpack('>BBH', header)
+    opus_data = stream.read(data_len)
+    if len(opus_data) != data_len:
+        raise ValueError(f"Data length({len(opus_data)}) mismatch({data_len}) in the p3 stream.")
+    return opus_data
+
+
 def decode_opus_from_file(input_file):
     """
     从p3文件中解码 Opus 数据，并返回一个 Opus 数据包的列表以及总时长。
     """
     opus_datas = []
     total_frames = 0
-    sample_rate = 16000  # 文件采样率
-    frame_duration_ms = 60  # 帧时长
-    frame_size = int(sample_rate * frame_duration_ms / 1000)
 
     with open(input_file, 'rb') as f:
         while True:
-            # 读取头部（4字节）：[1字节类型，1字节保留，2字节长度]
-            header = f.read(4)
-            if not header:
+            opus_data = _read_next_frame(f)
+            if opus_data is None:
                 break
-
-            # 解包头部信息
-            _, _, data_len = struct.unpack('>BBH', header)
-
-            # 根据头部指定的长度读取 Opus 数据
-            opus_data = f.read(data_len)
-            if len(opus_data) != data_len:
-                raise ValueError(f"Data length({len(opus_data)}) mismatch({data_len}) in the file.")
-
             opus_datas.append(opus_data)
             total_frames += 1
 
     # 计算总时长
-    total_duration = (total_frames * frame_duration_ms) / 1000.0
+    total_duration = (total_frames * FRAME_DURATION_MS) / 1000.0
     return opus_datas, total_duration
+
+
+def decode_opus_from_file_stream(input_file, callback):
+    """
+    从p3文件中流式读取 Opus 数据包。
+    """
+    with open(input_file, 'rb') as f:
+        while True:
+            opus_data = _read_next_frame(f)
+            if opus_data is None:
+                break
+            callback(opus_data)
+
 
 def decode_opus_from_bytes(input_bytes):
     """
@@ -39,21 +53,28 @@ def decode_opus_from_bytes(input_bytes):
     import io
     opus_datas = []
     total_frames = 0
-    sample_rate = 16000  # 文件采样率
-    frame_duration_ms = 60  # 帧时长
-    frame_size = int(sample_rate * frame_duration_ms / 1000)
 
     f = io.BytesIO(input_bytes)
     while True:
-        header = f.read(4)
-        if not header:
+        opus_data = _read_next_frame(f)
+        if opus_data is None:
             break
-        _, _, data_len = struct.unpack('>BBH', header)
-        opus_data = f.read(data_len)
-        if len(opus_data) != data_len:
-            raise ValueError(f"Data length({len(opus_data)}) mismatch({data_len}) in the bytes.")
         opus_datas.append(opus_data)
         total_frames += 1
 
-    total_duration = (total_frames * frame_duration_ms) / 1000.0
+    total_duration = (total_frames * FRAME_DURATION_MS) / 1000.0
     return opus_datas, total_duration
+
+
+def decode_opus_from_bytes_stream(input_bytes, callback):
+    """
+    从p3二进制数据中流式读取 Opus 数据包。
+    """
+    import io
+
+    f = io.BytesIO(input_bytes)
+    while True:
+        opus_data = _read_next_frame(f)
+        if opus_data is None:
+            break
+        callback(opus_data)

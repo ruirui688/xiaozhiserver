@@ -1,5 +1,8 @@
 # 部署架构图
 ![请参考-最简化架构图](../images/deploy1.png)
+
+> 注意：本文是官方兼容部署说明，适合参考官方单 Server Docker 部署方式。本地二次开发项目的私有生产发布优先阅读 [private-docker-release.md](./private-docker-release.md) 和 [deployment-asset-policy.md](./deployment-asset-policy.md)。
+
 # 方式一：Docker只运行Server
 
 `0.8.2`版本开始，本项目发行的docker镜像只支持`x86架构`，如果需要在`arm64架构`的CPU上部署，可按照[这个教程](docker-build.md)在本机编译`arm64的镜像`。

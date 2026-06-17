@@ -530,7 +530,7 @@ def get_vision_url(config: dict) -> str:
     """
     server_config = config["server"]
     vision_explain = server_config.get("vision_explain", "")
-    if "你的" in vision_explain:
+    if not vision_explain or "你的" in vision_explain or "null" == vision_explain:
         local_ip = get_local_ip()
         port = int(server_config.get("http_port", 8003))
         vision_explain = f"http://{local_ip}:{port}/mcp/vision/explain"

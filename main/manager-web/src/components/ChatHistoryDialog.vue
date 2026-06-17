@@ -19,6 +19,8 @@
                         <div class="session-time">{{ session.title || formatTime(session.createdAt) }}</div>
                         <div class="message-count">{{ session.chatCount > 99 ? '99' : session.chatCount }}</div>
                     </div>
+                    <el-button class="session-delete" type="text" icon="el-icon-delete"
+                        @click.stop="deleteSession(session)"></el-button>
                 </div>
                 <div v-if="loading" class="loading">{{ $t('chatHistory.loading') }}</div>
                 <div v-if="!hasMore" class="no-more">{{ $t('chatHistory.noMoreRecords') }}</div>
@@ -33,13 +35,35 @@
                             <img :src="message.chatType === 1 ? getUserAvatar(currentSessionId) : require('@/assets/xiaozhi-logo.png')"
                                 class="avatar" />
                             <div class="message-content">
-                                <template v-if="Array.isArray(extractContentFromString(message.content))">
+                                <template v-if="Array.isArray(message.parsedContent)">
                                     <div class="content-wrapper">
-                                        <div v-for="(item, idx) in extractContentFromString(message.content)" :key="idx">
+                                        <div v-for="(item, idx) in message.parsedContent" :key="idx">
                                             <div v-if="item.type === 'text'" class="text-content">{{ item.text }}</div>
+                                            <div v-else-if="isImageContentItem(item)" class="image-content">
+                                                <el-image
+                                                    class="chat-image"
+                                                    :src="getImageSrc(item)"
+                                                    :preview-src-list="[getImageSrc(item)]"
+                                                    fit="cover">
+                                                    <div slot="error" class="image-error">
+                                                        {{ getImageAlt(item) }}
+                                                    </div>
+                                                </el-image>
+                                            </div>
                                             <div v-else-if="item.type === 'tool'" class="tool-call-text">{{ item.text }}</div>
                                             <div v-else-if="item.type === 'tool_result'" class="tool-call-text">
-                                                <div v-if="item.text && item.text.length > 80" class="tool-result-wrapper">
+                                                <div v-if="getToolResultImageSrc(item)" class="image-content">
+                                                    <el-image
+                                                        class="chat-image"
+                                                        :src="getToolResultImageSrc(item)"
+                                                        :preview-src-list="[getToolResultImageSrc(item)]"
+                                                        fit="cover">
+                                                        <div slot="error" class="image-error">
+                                                            {{ getToolResultImageSrc(item) }}
+                                                        </div>
+                                                    </el-image>
+                                                </div>
+                                                <div v-else-if="item.text && item.text.length > 80" class="tool-result-wrapper">
                                                     <div v-if="isToolResultCollapsed(index, idx)" class="tool-result-collapsed">
                                                         {{ getFirstLineText(item.text) }}
                                                     </div>
@@ -56,11 +80,26 @@
                                     </div>
                                 </template>
                                 <template v-else>
-                                    {{ extractContentFromString(message.content) }}
+                                    <template v-if="isImageText(message.parsedContent)">
+                                        <el-image
+                                            class="chat-image"
+                                            :src="message.parsedContent"
+                                            :preview-src-list="[message.parsedContent]"
+                                            fit="cover">
+                                            <div slot="error" class="image-error">
+                                                {{ message.parsedContent }}
+                                            </div>
+                                        </el-image>
+                                    </template>
+                                    <template v-else>
+                                        {{ message.parsedContent }}
+                                    </template>
                                 </template>
                                 <i v-if="message.audioId" :class="getAudioIconClass(message)"
                                     @click="playAudio(message)" class="audio-icon"></i>
                             </div>
+                            <el-button class="message-delete" type="text" icon="el-icon-delete"
+                                @click="deleteMessage(message)"></el-button>
                         </div>
                     </div>
                 </div>
@@ -75,6 +114,12 @@
             </el-button>
             <el-button type="primary" plain size="small" @click="downloadCurrentSession">
                 {{ $t('chatHistory.downloadCurrentSession') }}
+            </el-button>
+            <el-button type="danger" plain size="small" @click="deleteCurrentSession">
+                {{ $t('chatHistory.deleteCurrentSession') }}
+            </el-button>
+            <el-button type="danger" size="small" @click="deleteAllHistory">
+                {{ $t('chatHistory.deleteAllHistory') }}
             </el-button>
         </div>
     </el-dialog>
@@ -152,7 +197,7 @@ export default {
                 result.push({
                     type: 'time',
                     content: this.formatTime(this.messages[this.messages.length - 1].createdAt),
-                    id: `time-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+                    id: `time-first-${this.messages[0].id || this.messages[0].createdAt}`
                 });
             }
 
@@ -170,7 +215,7 @@ export default {
                         result.push({
                             type: 'time',
                             content: this.formatTime(this.messages[i + 1].createdAt),
-                            id: `time-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+                            id: `time-${currentMessage.id || currentMessage.createdAt}-${this.messages[i + 1].id || this.messages[i + 1].createdAt}`
                         });
                     }
                 }
@@ -212,6 +257,105 @@ export default {
 
             // 如果不是 JSON 格式或没有 content 字段，直接返回原内容
             return content;
+        },
+        normalizeMessage(message) {
+            return {
+                ...message,
+                parsedContent: this.extractContentFromString(message.content)
+            };
+        },
+        isImageContentItem(item) {
+            return !!this.getImageSrc(item);
+        },
+        getImageSrc(item) {
+            if (!item || typeof item !== 'object') {
+                return '';
+            }
+
+            if (item.type === 'image_url' && item.image_url) {
+                return typeof item.image_url === 'string' ? item.image_url : item.image_url.url;
+            }
+
+            if (item.type === 'image' || item.type === 'image_url') {
+                return item.url || item.src || item.imageUrl || item.image_url || item.data || '';
+            }
+
+            return item.imageUrl || item.image_url || item.url || item.src || '';
+        },
+        getImageAlt(item) {
+            return item.alt || item.text || '图片加载失败';
+        },
+        getToolResultImageSrc(item) {
+            if (!item || !item.text) {
+                return '';
+            }
+
+            const directImage = this.extractImageFromValue(item.text);
+            if (directImage) {
+                return directImage;
+            }
+
+            try {
+                return this.extractImageFromValue(JSON.parse(item.text));
+            } catch (e) {
+                return '';
+            }
+        },
+        extractImageFromValue(value) {
+            if (!value) {
+                return '';
+            }
+
+            if (typeof value === 'string') {
+                const trimmed = value.trim();
+                if (this.isImageText(trimmed)) {
+                    return trimmed;
+                }
+                try {
+                    return this.extractImageFromValue(JSON.parse(trimmed));
+                } catch (e) {
+                    return '';
+                }
+            }
+
+            if (Array.isArray(value)) {
+                for (const item of value) {
+                    const src = this.extractImageFromValue(item);
+                    if (src) return src;
+                }
+                return '';
+            }
+
+            if (typeof value === 'object') {
+                const src = this.getImageSrc(value);
+                if (src) {
+                    return src;
+                }
+
+                const candidateKeys = [
+                    'result',
+                    'data',
+                    'image',
+                    'images',
+                    'photo',
+                    'photos',
+                    'payload',
+                    'content',
+                    'url'
+                ];
+                for (const key of candidateKeys) {
+                    const srcFromValue = this.extractImageFromValue(value[key]);
+                    if (srcFromValue) return srcFromValue;
+                }
+            }
+
+            return '';
+        },
+        isImageText(text) {
+            if (!text || typeof text !== 'string') {
+                return false;
+            }
+            return /^(data:image\/[a-zA-Z+.-]+;base64,|blob:|https?:\/\/.+\.(png|jpe?g|gif|webp|bmp|svg)(\?.*)?$)/i.test(text.trim());
         },
         // 切换工具结果的展开/折叠状态
         toggleToolResult(messageIndex, itemIndex) {
@@ -275,7 +419,7 @@ export default {
             this.currentSessionId = session.sessionId;
             Api.agent.getAgentChatHistory(this.agentId, session.sessionId, (res) => {
                 if (res.data && res.data.data) {
-                    this.messages = res.data.data;
+                    this.messages = res.data.data.map(this.normalizeMessage);
                     if (this.messages.length > 0 && this.messages[0].macAddress) {
                         this.currentMacAddress = this.messages[0].macAddress;
                     }
@@ -287,6 +431,71 @@ export default {
                         return item;
                     })
                 }
+            });
+        },
+        refreshAfterDelete() {
+            this.resetData();
+            this.loadSessions();
+        },
+        deleteSession(session) {
+            this.$confirm(this.$t('chatHistory.confirmDeleteSession'), this.$t('message.warning'), {
+                confirmButtonText: this.$t('button.ok'),
+                cancelButtonText: this.$t('button.cancel'),
+                type: 'warning'
+            }).then(() => {
+                Api.agent.deleteAgentChatSession(this.agentId, session.sessionId, (res) => {
+                    if (res.data && res.data.code === 0) {
+                        this.$message.success(this.$t('chatHistory.sessionDeleted'));
+                        this.refreshAfterDelete();
+                    } else {
+                        this.$message.error((res.data && res.data.msg) || this.$t('chatHistory.deleteFailed'));
+                    }
+                });
+            });
+        },
+        deleteCurrentSession() {
+            const session = this.sessions.find(item => item.sessionId === this.currentSessionId);
+            if (session) {
+                this.deleteSession(session);
+            }
+        },
+        deleteMessage(message) {
+            this.$confirm(this.$t('chatHistory.confirmDeleteMessage'), this.$t('message.warning'), {
+                confirmButtonText: this.$t('button.ok'),
+                cancelButtonText: this.$t('button.cancel'),
+                type: 'warning'
+            }).then(() => {
+                Api.agent.deleteAgentChatMessage(this.agentId, message.id, (res) => {
+                    if (res.data && res.data.code === 0) {
+                        this.$message.success(this.$t('chatHistory.messageDeleted'));
+                        if (this.messages.length <= 1) {
+                            this.refreshAfterDelete();
+                            return;
+                        }
+                        const current = this.sessions.find(item => item.sessionId === this.currentSessionId);
+                        if (current) {
+                            this.selectSession(current);
+                        }
+                    } else {
+                        this.$message.error((res.data && res.data.msg) || this.$t('chatHistory.deleteFailed'));
+                    }
+                });
+            });
+        },
+        deleteAllHistory() {
+            this.$confirm(this.$t('chatHistory.confirmDeleteAll'), this.$t('message.warning'), {
+                confirmButtonText: this.$t('button.ok'),
+                cancelButtonText: this.$t('button.cancel'),
+                type: 'warning'
+            }).then(() => {
+                Api.agent.deleteAgentChatHistory(this.agentId, (res) => {
+                    if (res.data && res.data.code === 0) {
+                        this.$message.success(this.$t('chatHistory.historyDeleted'));
+                        this.refreshAfterDelete();
+                    } else {
+                        this.$message.error((res.data && res.data.msg) || this.$t('chatHistory.deleteFailed'));
+                    }
+                });
             });
         },
         handleScroll(e) {
@@ -448,6 +657,17 @@ export default {
     width: calc(100% - 50px);
 }
 
+.session-delete {
+    flex: 0 0 24px;
+    min-width: 24px;
+    padding: 0;
+    color: #c0c4cc;
+}
+
+.session-delete:hover {
+    color: #f56c6c;
+}
+
 .session-time {
     font-size: 14px;
     color: #272727;
@@ -483,6 +703,7 @@ export default {
 .message-item {
     display: flex;
     margin-bottom: 20px;
+    align-items: center;
 }
 
 .message-item.user-message {
@@ -500,6 +721,20 @@ export default {
     position: relative;
     display: flex;
     align-items: center;
+}
+
+.message-delete {
+    opacity: 0;
+    padding: 0 4px;
+    color: #c0c4cc;
+}
+
+.message-item:hover .message-delete {
+    opacity: 1;
+}
+
+.message-delete:hover {
+    color: #f56c6c;
 }
 
 .audio-icon {
@@ -526,6 +761,32 @@ export default {
 .text-content {
     display: block;
     margin-bottom: 4px;
+}
+
+.image-content {
+    margin: 4px 0;
+}
+
+.chat-image {
+    display: block;
+    width: 220px;
+    max-width: 100%;
+    height: 150px;
+    border-radius: 6px;
+    overflow: hidden;
+    cursor: zoom-in;
+    background-color: #f5f7fa;
+}
+
+.image-error {
+    width: 220px;
+    max-width: 100%;
+    min-height: 80px;
+    box-sizing: border-box;
+    padding: 12px;
+    color: #909399;
+    word-break: break-all;
+    background-color: #f5f7fa;
 }
 
 .tool-call-text {

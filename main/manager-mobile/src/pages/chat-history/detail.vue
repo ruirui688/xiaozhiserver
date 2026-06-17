@@ -11,7 +11,7 @@
 <script lang="ts" setup>
 import type { ChatMessage, UserMessageContent } from '@/api/chat-history/types'
 import { onLoad, onUnload } from '@dcloudio/uni-app'
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import { getAudioId, getChatHistory } from '@/api/chat-history/chat-history'
 import { t } from '@/i18n'
 import { debounce, getEnvBaseUrl } from '@/utils'
@@ -20,6 +20,16 @@ import { toast } from '@/utils/toast'
 defineOptions({
   name: 'ChatDetail',
 })
+
+interface ParsedContentItem {
+  type?: string
+  text?: string
+}
+
+type ParsedMessageContent = string | ParsedContentItem[]
+type ParsedChatMessage = ChatMessage & {
+  parsedContent: ParsedMessageContent
+}
 
 // 获取屏幕边界到安全区域距离
 let safeAreaInsets: any
@@ -46,47 +56,18 @@ safeAreaInsets = systemInfo.safeAreaInsets
 const sessionId = ref('')
 const agentId = ref('')
 
-// 智能体信息（简化）
-const currentAgent = computed(() => {
-  return {
-    id: agentId.value,
-    agentName: t('chatHistory.assistantName'),
-  }
-})
-
 // 聊天数据
-const messageList = ref<ChatMessage[]>([])
+const messageList = ref<ParsedChatMessage[]>([])
 const loading = ref(false)
 
 // 音频播放相关
 const audioContext = ref<UniApp.InnerAudioContext | null>(null)
 const playingAudioId = ref<string | null>(null)
-const expandedToolResults = ref({})
+const expandedToolResults = ref<Record<string, boolean>>({})
 
 // 返回上一页
 function goBack() {
   uni.navigateBack()
-}
-
-// 加载聊天记录
-async function loadChatHistory() {
-  if (!sessionId.value || !agentId.value) {
-    console.error('缺少必要参数')
-    return
-  }
-
-  try {
-    loading.value = true
-    const response = await getChatHistory(agentId.value, sessionId.value)
-    messageList.value = response
-  }
-  catch (error) {
-    console.error('获取聊天记录失败:', error)
-    toast.error(t('chatHistory.loadFailed'))
-  }
-  finally {
-    loading.value = false
-  }
 }
 
 // 解析用户消息内容
@@ -112,14 +93,24 @@ function getMessageContent(message: ChatMessage): string {
   }
 }
 
-// 获取说话人名称
-function getSpeakerName(message: ChatMessage): string {
-  if (message.chatType === 1) {
-    const parsed = parseUserMessage(message.content)
-    return parsed ? parsed.speaker : t('chatHistory.userName')
+// 加载聊天记录
+async function loadChatHistory() {
+  if (!sessionId.value || !agentId.value) {
+    console.error('缺少必要参数')
+    return
   }
-  else {
-    return currentAgent.value?.agentName || t('chatHistory.aiAssistantName')
+
+  try {
+    loading.value = true
+    const response = await getChatHistory(agentId.value, sessionId.value)
+    messageList.value = response.map(preprocessMessage)
+  }
+  catch (error) {
+    console.error('获取聊天记录失败:', error)
+    toast.error(t('chatHistory.loadFailed'))
+  }
+  finally {
+    loading.value = false
   }
 }
 
@@ -246,7 +237,7 @@ function extractContentFromString(content: string) {
 
     // 如果是数组格式（包含 text 和 tool）
     if (Array.isArray(jsonObj)) {
-      return jsonObj
+      return jsonObj as ParsedContentItem[]
     }
 
     // 如果是对象且有 content 字段
@@ -262,12 +253,21 @@ function extractContentFromString(content: string) {
   return content
 }
 
-function toggleToolResult(messageIndex, itemIndex) {
+function preprocessMessage(message: ChatMessage): ParsedChatMessage {
+  const content = extractContentFromString(message.content)
+
+  return {
+    ...message,
+    parsedContent: Array.isArray(content) ? content : getMessageContent(message),
+  }
+}
+
+function toggleToolResult(messageIndex: number, itemIndex: number) {
   const key = `${messageIndex}-${itemIndex}`
   expandedToolResults.value[key] = !expandedToolResults.value[key]
 }
 
-function isToolResultCollapsed(messageIndex, itemIndex) {
+function isToolResultCollapsed(messageIndex: number, itemIndex: number) {
   const key = `${messageIndex}-${itemIndex}`
   // 默认折叠（true表示折叠）
   return !expandedToolResults.value[key]
@@ -359,9 +359,9 @@ onUnload(() => {
                 'bg-white text-[#232338] border border-[#eeeeee]': [2, 3].includes(message.chatType),
               }"
             >
-              <template v-if="Array.isArray(extractContentFromString(message.content))">
+              <template v-if="Array.isArray(message.parsedContent)">
                 <div class="content-wrapper">
-                  <div v-for="(item, idx) in extractContentFromString(message.content)" :key="idx">
+                  <div v-for="(item, idx) in message.parsedContent" :key="idx">
                     <div v-if="item.type === 'text'" class="text-content">
                       {{ item.text }}
                     </div>
@@ -413,7 +413,7 @@ onUnload(() => {
                 <view class="min-w-0 flex-1">
                   <!-- 消息内容 -->
                   <text class="block text-[28rpx]">
-                    {{ getMessageContent(message) }}
+                    {{ message.parsedContent }}
                   </text>
                 </view>
               </view>

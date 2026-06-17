@@ -3,7 +3,7 @@
   "layout": "default",
   "style": {
     "navigationStyle": "custom",
-    "navigationBarTitleText": "ForgotPassword"
+    "navigationBarTitleText": "找回密码"
   }
 }
 </route>

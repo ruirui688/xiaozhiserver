@@ -43,7 +43,10 @@ from core.utils.prompt_manager import PromptManager
 from core.utils.voiceprint_provider import VoiceprintProvider
 from core.utils.util import get_system_error_response
 from core.utils import textUtils
+from core.utils.correct_words import parse_correct_words
 from core.game_session import GameSessionManager
+from core.semantic.semantic_center import SemanticCenter
+from core.device_runtime_registry import register_connection, unregister_connection
 
 
 TAG = __name__
@@ -105,12 +108,14 @@ class ConnectionHandler:
         self.headers = None
         self.device_id = None
         self.client_ip = None
+        self.correct_word_replacements = {}
+        self.last_tool_context = None
         self.prompt = None
         self.welcome_msg = None
         self.max_output_size = 0
         self.chat_history_conf = 0
         self.audio_format = "opus"
-        self.sample_rate = 24000  # 默认采样率，从客户端 hello 消息中动态更新
+        self.sample_rate = 24000  # 服务端输出音频采样率
 
         # 客户端状态相关
         self.client_abort = False
@@ -177,6 +182,7 @@ class ConnectionHandler:
         # 是否在聊天结束后关闭连接
         self.close_after_chat = False
         self.load_function_plugin = False
+        self.configured_intent_type = "nointent"
         self.intent_type = "nointent"
 
         self.timeout_seconds = (
@@ -193,6 +199,7 @@ class ConnectionHandler:
         # 初始化提示词管理器
         self.prompt_manager = PromptManager(self.config, self.logger)
         self.game_session_manager = GameSessionManager()
+        self.semantic_center = SemanticCenter()
 
         # 初始化通话状态
         self.calling = False
@@ -216,6 +223,7 @@ class ConnectionHandler:
             )
 
             self.device_id = self.headers.get("device-id", None)
+            register_connection(self)
 
             # 认证通过,继续处理
             self.websocket = ws
@@ -233,8 +241,7 @@ class ConnectionHandler:
             # 启动超时检查任务
             self.timeout_task = asyncio.create_task(self._check_timeout())
 
-            self.welcome_msg = self.config["xiaozhi"]
-            self.welcome_msg["session_id"] = self.session_id
+            self.welcome_msg = self._build_welcome_msg()
 
             # 从配置中读取采样率
             self.sample_rate = self.welcome_msg["audio_params"]["sample_rate"]
@@ -257,6 +264,7 @@ class ConnectionHandler:
             self.logger.bind(tag=TAG).error(f"Connection error: {str(e)}-{stack_trace}")
             return
         finally:
+            unregister_connection(self)
             try:
                 await self._save_and_close(ws)
             except Exception as final_error:
@@ -268,6 +276,17 @@ class ConnectionHandler:
                     self.logger.bind(tag=TAG).error(
                         f"强制关闭连接时出错: {close_error}"
                     )
+
+    def _build_welcome_msg(self):
+        welcome_msg = copy.deepcopy(self.config["xiaozhi"])
+        welcome_msg["session_id"] = self.session_id
+        audio_params = welcome_msg.get("audio_params") or {}
+        audio_params["sample_rate"] = int(audio_params.get("sample_rate", self.sample_rate))
+        audio_params["format"] = audio_params.get("format", self.audio_format)
+        audio_params["channels"] = int(audio_params.get("channels", 1))
+        audio_params["frame_duration"] = int(audio_params.get("frame_duration", 60))
+        welcome_msg["audio_params"] = audio_params
+        return welcome_msg
 
     async def _save_and_close(self, ws):
         """保存记忆并关闭连接"""
@@ -338,6 +357,16 @@ class ConnectionHandler:
 
     async def _route_message(self, message):
         """消息路由"""
+        self.last_activity_time = time.time() * 1000
+
+        if (
+            isinstance(message, str)
+            and not self.bind_completed_event.is_set()
+            and self._should_handle_before_bind_check(message)
+        ):
+            await handleTextMessage(self, message)
+            return
+
         # 检查是否已经获取到真实的绑定状态
         if not self.bind_completed_event.is_set():
             # 还没有获取到真实状态，等待直到获取到真实状态或超时
@@ -406,6 +435,18 @@ class ConnectionHandler:
 
         # 处理失败，返回False表示需要继续处理
         return False
+
+    def _should_handle_before_bind_check(self, message: str) -> bool:
+        """连接协议消息不能被绑定状态初始化阻塞。"""
+        try:
+            msg_json = json.loads(message)
+        except json.JSONDecodeError:
+            return False
+
+        if not isinstance(msg_json, dict):
+            return False
+
+        return msg_json.get("type") in {"hello", "mcp", "ping"}
 
     def _process_websocket_audio(self, audio_data, timestamp):
         """处理WebSocket格式的音频包"""
@@ -639,17 +680,19 @@ class ConnectionHandler:
 
     def _initialize_asr(self):
         """初始化ASR"""
+        selected_asr = self.config.get("selected_module", {}).get("ASR")
+        common_selected_asr = self.common_config.get("selected_module", {}).get("ASR")
         if (
                 self._asr is not None
                 and hasattr(self._asr, "interface_type")
                 and self._asr.interface_type == InterfaceType.LOCAL
+                and selected_asr == common_selected_asr
         ):
             # 如果公共ASR是本地服务，则直接返回
             # 因为本地一个实例ASR，可以被多个连接共享
             asr = self._asr
         else:
-            # 如果公共ASR是远程服务，则初始化一个新实例
-            # 因为远程ASR，涉及到websocket连接和接收线程，需要每个连接一个实例
+            # 远程ASR需要连接级实例；私有配置选择了不同ASR时也不能复用公共本地ASR。
             asr = initialize_asr(self.config)
 
         return asr
@@ -791,6 +834,10 @@ class ConnectionHandler:
 
         # 注入替换词到 TTS 模块配置
         if private_config.get("correct_words", None) is not None:
+            self.config["correct_words"] = private_config["correct_words"]
+            self.correct_word_replacements = parse_correct_words(
+                private_config["correct_words"]
+            )
             select_tts_module = self.config.get("selected_module", {}).get("TTS")
             tts_config = self.config.get("TTS", {})
             if select_tts_module in tts_config:
@@ -874,26 +921,24 @@ class ConnectionHandler:
     def _initialize_intent(self):
         if self.intent is None:
             return
-        self.intent_type = self.config["Intent"][
+        self.configured_intent_type = self.config["Intent"][
             self.config["selected_module"]["Intent"]
         ]["type"]
+        self.intent_type = self._resolve_runtime_intent_type(self.configured_intent_type)
+        if self.configured_intent_type == "function_call" and self.intent_type == "intent_llm":
+            self._switch_to_intent_llm_provider()
         if self.intent_type == "function_call" or self.intent_type == "intent_llm":
             self.load_function_plugin = True
         """初始化意图识别模块"""
         # 获取意图识别配置
         intent_config = self.config["Intent"]
-        intent_type = self.config["Intent"][self.config["selected_module"]["Intent"]][
-            "type"
-        ]
 
         # 如果使用 nointent，直接返回
-        if intent_type == "nointent":
+        if self.intent_type == "nointent":
             return
         # 使用 intent_llm 模式
-        elif intent_type == "intent_llm":
-            intent_llm_name = intent_config[self.config["selected_module"]["Intent"]][
-                "llm"
-            ]
+        elif self.intent_type == "intent_llm":
+            intent_llm_name = intent_config.get("intent_llm", {}).get("llm")
 
             if intent_llm_name and intent_llm_name in self.config["LLM"]:
                 # 如果配置了专用LLM，则创建独立的LLM实例
@@ -920,6 +965,38 @@ class ConnectionHandler:
         if hasattr(self, "loop") and self.loop:
             asyncio.run_coroutine_threadsafe(self.func_handler._initialize(), self.loop)
 
+    def _resolve_runtime_intent_type(self, configured_intent_type):
+        if configured_intent_type != "function_call":
+            return configured_intent_type
+        if self._llm_supports_native_function_call():
+            return "function_call"
+        self.logger.bind(tag=TAG).warning(
+            "当前主LLM不支持原生结构化 function_call，已自动降级为 intent_llm，避免工具协议文本进入语音和聊天记录"
+        )
+        return "intent_llm"
+
+    def _llm_supports_native_function_call(self):
+        return bool(getattr(self.llm, "supports_native_function_call", False))
+
+    def _switch_to_intent_llm_provider(self):
+        intent_config = self.config.get("Intent", {})
+        from core.utils import intent as intent_utils
+
+        intent_llm_config = intent_config.setdefault(
+            "intent_llm",
+            {"type": "intent_llm", "llm": "", "functions": []},
+        )
+        self.intent = intent_utils.create_instance("intent_llm", intent_llm_config)
+
+        selected_intent = self.config.get("selected_module", {}).get("Intent")
+        selected_functions = (
+            intent_config.get(selected_intent, {}).get("functions")
+            if selected_intent
+            else None
+        )
+        if selected_functions is not None:
+            intent_llm_config["functions"] = selected_functions
+
     def change_system_prompt(self, prompt):
         self.prompt = prompt
         # 更新系统prompt至上下文
@@ -929,6 +1006,7 @@ class ConnectionHandler:
         current_abort_generation = self.abort_generation
         # 保存当前任务的sentence_id到局部变量，避免被新任务覆盖
         current_sentence_id = None
+        freeform_game_prompt = None
 
         if query is not None:
             self.logger.bind(tag=TAG).info(f"大模型收到用户消息: {query}")
@@ -938,6 +1016,12 @@ class ConnectionHandler:
             current_sentence_id = str(uuid.uuid4().hex)
             self.sentence_id = current_sentence_id  # 更新共享属性
             self.dialogue.put(Message(role="user", content=query))
+            freeform_game_prompt = self.game_session_manager.build_freeform_game_prompt(
+                query,
+                self._get_enabled_plugin_configs(),
+            )
+            if freeform_game_prompt:
+                self.logger.bind(tag=TAG).info("已注入纯语言游戏提示词")
             self.tts.tts_text_queue.put(
                 TTSMessageDTO(
                     sentence_id=current_sentence_id,
@@ -993,21 +1077,24 @@ class ConnectionHandler:
                 )
                 memory_str = future.result()
 
+            llm_dialogue = self.dialogue.get_llm_dialogue_with_memory(
+                memory_str, self.config.get("voiceprint", {})
+            )
+            llm_dialogue = self._with_freeform_game_prompt(
+                llm_dialogue, freeform_game_prompt
+            )
+
             if self.intent_type == "function_call" and functions is not None:
                 # 使用支持functions的streaming接口
                 llm_responses = self.llm.response_with_functions(
                     self.session_id,
-                    self.dialogue.get_llm_dialogue_with_memory(
-                        memory_str, self.config.get("voiceprint", {})
-                    ),
+                    llm_dialogue,
                     functions=functions,
                 )
             else:
                 llm_responses = self.llm.response(
                     self.session_id,
-                    self.dialogue.get_llm_dialogue_with_memory(
-                        memory_str, self.config.get("voiceprint", {})
-                    ),
+                    llm_dialogue,
                 )
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"LLM 处理出错 {query}: {e}")
@@ -1297,7 +1384,8 @@ class ConnectionHandler:
                         result = future.result(timeout=tool_call_timeout)
                         tool_results.append((result, tool_call_data))
                         # 使用公共方法上报工具调用结果
-                        enqueue_tool_report(self, tool_call_data['name'], tool_input, str(result.result) if result.result else None, report_tool_call=False)
+                        report_result = result.result if result.result else result.response
+                        enqueue_tool_report(self, tool_call_data['name'], tool_input, str(report_result) if report_result else None, report_tool_call=False)
 
                     except Exception as e:
                         self.logger.bind(tag=TAG).error(
@@ -1344,6 +1432,43 @@ class ConnectionHandler:
             )
 
         return True
+
+    @staticmethod
+    def _with_freeform_game_prompt(llm_dialogue, prompt):
+        if not prompt:
+            return llm_dialogue
+        messages = list(llm_dialogue)
+        insert_at = len(messages)
+        for index in range(len(messages) - 1, -1, -1):
+            if messages[index].get("role") == "user":
+                insert_at = index
+                break
+        messages.insert(insert_at, {"role": "system", "content": prompt})
+        return messages
+
+    def _get_enabled_plugin_configs(self):
+        plugins = self.config.get("plugins", {})
+        if not isinstance(plugins, dict):
+            return {}
+
+        intent_name = self.config.get("selected_module", {}).get("Intent")
+        intent_config = self.config.get("Intent", {}).get(intent_name, {})
+        function_names = intent_config.get("functions", [])
+        if isinstance(function_names, dict):
+            enabled_names = set(function_names.keys())
+        elif isinstance(function_names, str):
+            enabled_names = {name for name in function_names.split(";") if name}
+        else:
+            try:
+                enabled_names = set(function_names)
+            except TypeError:
+                enabled_names = set()
+
+        return {
+            name: plugin_config
+            for name, plugin_config in plugins.items()
+            if name in enabled_names
+        }
 
     def _handle_function_result(
         self,

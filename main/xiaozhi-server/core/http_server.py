@@ -3,6 +3,7 @@ from aiohttp import web
 from config.logger import setup_logging
 from core.api.ota_handler import OTAHandler
 from core.api.vision_handler import VisionHandler
+from core.api.device_mcp_handler import DeviceMcpHandler
 
 TAG = __name__
 
@@ -13,6 +14,7 @@ class SimpleHttpServer:
         self.logger = setup_logging()
         self.ota_handler = OTAHandler(config)
         self.vision_handler = VisionHandler(config)
+        self.device_mcp_handler = DeviceMcpHandler(config)
 
     def _get_websocket_url(self, local_ip: str, port: int) -> str:
         """获取websocket地址
@@ -71,6 +73,32 @@ class SimpleHttpServer:
                         ),
                         web.options(
                             "/mcp/vision/explain", self.vision_handler.handle_options
+                        ),
+                        web.get(
+                            "/mcp/vision/images/{filename}",
+                            self.vision_handler.handle_image,
+                        ),
+                        web.options(
+                            "/mcp/vision/images/{filename}",
+                            self.vision_handler.handle_options,
+                        ),
+                        web.get(
+                            "/device/mcp/tools", self.device_mcp_handler.handle_tools
+                        ),
+                        web.options(
+                            "/device/mcp/tools", self.device_mcp_handler.handle_options
+                        ),
+                        web.get(
+                            "/device/mcp/status", self.device_mcp_handler.handle_status
+                        ),
+                        web.options(
+                            "/device/mcp/status", self.device_mcp_handler.handle_options
+                        ),
+                        web.post(
+                            "/device/mcp/call", self.device_mcp_handler.handle_call
+                        ),
+                        web.options(
+                            "/device/mcp/call", self.device_mcp_handler.handle_options
                         ),
                     ]
                 )

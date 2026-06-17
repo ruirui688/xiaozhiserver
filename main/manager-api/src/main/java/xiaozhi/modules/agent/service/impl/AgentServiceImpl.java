@@ -290,22 +290,28 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
             existingEntity.setAgentCode(dto.getAgentCode());
         }
         if (dto.getAsrModelId() != null) {
-            existingEntity.setAsrModelId(dto.getAsrModelId());
+            existingEntity.setAsrModelId(resolveEnabledModelIdOrCurrent("ASR", dto.getAsrModelId(),
+                    existingEntity.getAsrModelId()));
         }
         if (dto.getVadModelId() != null) {
-            existingEntity.setVadModelId(dto.getVadModelId());
+            existingEntity.setVadModelId(resolveEnabledModelIdOrCurrent("VAD", dto.getVadModelId(),
+                    existingEntity.getVadModelId()));
         }
         if (dto.getLlmModelId() != null) {
-            existingEntity.setLlmModelId(dto.getLlmModelId());
+            existingEntity.setLlmModelId(resolveEnabledModelIdOrCurrent("LLM", dto.getLlmModelId(),
+                    existingEntity.getLlmModelId()));
         }
         if (dto.getSlmModelId() != null) {
-            existingEntity.setSlmModelId(dto.getSlmModelId());
+            existingEntity.setSlmModelId(resolveEnabledModelIdOrCurrent("SLM", dto.getSlmModelId(),
+                    existingEntity.getSlmModelId()));
         }
         if (dto.getVllmModelId() != null) {
-            existingEntity.setVllmModelId(dto.getVllmModelId());
+            existingEntity.setVllmModelId(resolveEnabledModelIdOrCurrent("VLLM", dto.getVllmModelId(),
+                    existingEntity.getVllmModelId()));
         }
         if (dto.getTtsModelId() != null) {
-            existingEntity.setTtsModelId(dto.getTtsModelId());
+            existingEntity.setTtsModelId(resolveEnabledModelIdOrCurrent("TTS", dto.getTtsModelId(),
+                    existingEntity.getTtsModelId()));
         }
         if (dto.getTtsVoiceId() != null) {
             existingEntity.setTtsVoiceId(dto.getTtsVoiceId());
@@ -323,10 +329,12 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
             existingEntity.setTtsPitch(dto.getTtsPitch());
         }
         if (dto.getMemModelId() != null) {
-            existingEntity.setMemModelId(dto.getMemModelId());
+            existingEntity.setMemModelId(resolveEnabledModelIdOrCurrent("Memory", dto.getMemModelId(),
+                    existingEntity.getMemModelId()));
         }
         if (dto.getIntentModelId() != null) {
-            existingEntity.setIntentModelId(dto.getIntentModelId());
+            existingEntity.setIntentModelId(resolveEnabledModelIdOrCurrent("Intent", dto.getIntentModelId(),
+                    existingEntity.getIntentModelId()));
         }
         if (dto.getSystemPrompt() != null) {
             existingEntity.setSystemPrompt(dto.getSystemPrompt());
@@ -430,7 +438,7 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
             correctWordFileService.saveAgentCorrectWords(agentId, dto.getCorrectWordFileIds());
         }
 
-        boolean b = validateLLMIntentParams(dto.getLlmModelId(), dto.getIntentModelId());
+        boolean b = validateLLMIntentParams(existingEntity.getLlmModelId(), existingEntity.getIntentModelId());
         if (!b) {
             throw new RenException(ErrorCode.LLM_INTENT_PARAMS_MISMATCH);
         }
@@ -468,21 +476,21 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
         AgentTemplateEntity template = agentTemplateService.getDefaultTemplate();
         if (template != null) {
             // 设置模板中的默认值
-            entity.setAsrModelId(template.getAsrModelId());
-            entity.setVadModelId(template.getVadModelId());
-            entity.setLlmModelId(template.getLlmModelId());
-            entity.setVllmModelId(template.getVllmModelId());
-            entity.setTtsModelId(template.getTtsModelId());
+            entity.setAsrModelId(resolveEnabledModelId("ASR", template.getAsrModelId()));
+            entity.setVadModelId(resolveEnabledModelId("VAD", template.getVadModelId()));
+            entity.setLlmModelId(resolveEnabledModelId("LLM", template.getLlmModelId()));
+            entity.setVllmModelId(resolveEnabledModelId("VLLM", template.getVllmModelId()));
+            entity.setTtsModelId(resolveEnabledModelId("TTS", template.getTtsModelId()));
 
-            if (template.getTtsVoiceId() == null && template.getTtsModelId() != null) {
-                ModelConfigEntity ttsModel = modelConfigService.selectById(template.getTtsModelId());
+            if (template.getTtsVoiceId() == null && entity.getTtsModelId() != null) {
+                ModelConfigEntity ttsModel = modelConfigService.selectById(entity.getTtsModelId());
                 if (ttsModel != null && ttsModel.getConfigJson() != null) {
                     Map<String, Object> config = ttsModel.getConfigJson();
                     String voice = (String) config.get("voice");
                     if (StringUtils.isBlank(voice)) {
                         voice = (String) config.get("speaker");
                     }
-                    VoiceDTO timbre = timbreModelService.getByVoiceCode(template.getTtsModelId(), voice);
+                    VoiceDTO timbre = timbreModelService.getByVoiceCode(entity.getTtsModelId(), voice);
                     if (timbre != null) {
                         template.setTtsVoiceId(timbre.getId());
                     }
@@ -490,8 +498,8 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
             }
 
             entity.setTtsVoiceId(template.getTtsVoiceId());
-            entity.setMemModelId(template.getMemModelId());
-            entity.setIntentModelId(template.getIntentModelId());
+            entity.setMemModelId(resolveEnabledModelId("Memory", template.getMemModelId()));
+            entity.setIntentModelId(resolveEnabledModelId("Intent", template.getIntentModelId()));
             entity.setSystemPrompt(template.getSystemPrompt());
             entity.setSummaryMemory(template.getSummaryMemory());
 
@@ -564,6 +572,34 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
     private String getDefaultSLMModelId() {
         String slmModelId = getDefaultModelIdByType("SLM");
         return slmModelId != null ? slmModelId : getDefaultLLMModelId();
+    }
+
+    private String resolveEnabledModelId(String modelType, String candidateModelId) {
+        if (isUsableModel(modelType, candidateModelId)) {
+            return candidateModelId;
+        }
+        return getDefaultModelIdByType(modelType);
+    }
+
+    private String resolveEnabledModelIdOrCurrent(String modelType, String candidateModelId, String currentModelId) {
+        String resolvedModelId = resolveEnabledModelId(modelType, candidateModelId);
+        if (StringUtils.isNotBlank(resolvedModelId)) {
+            return resolvedModelId;
+        }
+        return currentModelId;
+    }
+
+    private boolean isUsableModel(String modelType, String modelId) {
+        if (StringUtils.isBlank(modelId)) {
+            return false;
+        }
+        ModelConfigEntity candidate = modelConfigService.getModelByIdFromCache(modelId);
+        return candidate != null
+                && modelType.equalsIgnoreCase(candidate.getModelType())
+                && candidate.getIsEnabled() != null
+                && candidate.getIsEnabled() == 1
+                && candidate.getTestStatus() != null
+                && candidate.getTestStatus() == 1;
     }
 
     private String getDefaultModelIdByType(String modelType) {

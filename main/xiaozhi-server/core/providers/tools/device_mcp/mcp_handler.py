@@ -149,7 +149,10 @@ async def handle_mcp_message(
             return
 
         if msg_id == 1:  # mcpInitializeID
-            logger.bind(tag=TAG).debug("收到MCP初始化响应")
+            logger.bind(tag=TAG).info(
+                f"收到MCP初始化响应: device-id={conn.headers.get('device-id') if conn.headers else ''}, "
+                f"client-id={conn.headers.get('client-id') if conn.headers else ''}"
+            )
             server_info = result.get("serverInfo")
             if isinstance(server_info, dict):
                 name = server_info.get("name")
@@ -159,7 +162,7 @@ async def handle_mcp_message(
                 )
 
             await asyncio.sleep(1)
-            logger.bind(tag=TAG).debug("初始化完成，开始请求MCP工具列表")
+            logger.bind(tag=TAG).info("MCP初始化完成，开始请求设备工具列表")
             await send_mcp_tools_list_request(conn)
 
             return
@@ -220,7 +223,9 @@ async def handle_mcp_message(
                     await send_mcp_tools_list_continue_request(conn, next_cursor)
                 else:
                     await mcp_client.set_ready(True)
-                    logger.bind(tag=TAG).debug("所有工具已获取，MCP客户端准备就绪")
+                    logger.bind(tag=TAG).info(
+                        f"设备MCP客户端准备就绪: tools={len(mcp_client.tools)}"
+                    )
 
                     # 刷新工具缓存，确保MCP工具被包含在函数列表中
                     if hasattr(conn, "func_handler") and conn.func_handler:
@@ -276,7 +281,10 @@ async def send_mcp_initialize_message(conn: "ConnectionHandler"):
             },
         },
     }
-    logger.bind(tag=TAG).debug("发送MCP初始化消息")
+    logger.bind(tag=TAG).info(
+        f"发送MCP初始化消息: device-id={conn.headers.get('device-id') if conn.headers else ''}, "
+        f"client-id={conn.headers.get('client-id') if conn.headers else ''}"
+    )
     await send_mcp_message(conn, payload)
 
 
@@ -287,7 +295,10 @@ async def send_mcp_tools_list_request(conn: "ConnectionHandler"):
         "id": 2,  # mcpToolsListID
         "method": "tools/list",
     }
-    logger.bind(tag=TAG).debug("发送MCP工具列表请求")
+    logger.bind(tag=TAG).info(
+        f"发送MCP工具列表请求: device-id={conn.headers.get('device-id') if conn.headers else ''}, "
+        f"client-id={conn.headers.get('client-id') if conn.headers else ''}"
+    )
     await send_mcp_message(conn, payload)
 
 

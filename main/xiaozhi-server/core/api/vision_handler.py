@@ -1,5 +1,9 @@
 import json
 import copy
+import os
+import re
+import uuid
+from urllib.parse import urlsplit, urlunsplit
 from aiohttp import web
 from config.logger import setup_logging
 from core.api.base_handler import BaseHandler
@@ -15,6 +19,14 @@ TAG = __name__
 
 # 设置最大文件大小为5MB
 MAX_FILE_SIZE = 5 * 1024 * 1024
+IMAGE_EXTENSIONS = {
+    b"\xff\xd8\xff": ".jpg",
+    b"\x89PNG\r\n\x1a\n": ".png",
+    b"GIF87a": ".gif",
+    b"GIF89a": ".gif",
+    b"BM": ".bmp",
+    b"RIFF": ".webp",
+}
 
 
 class VisionHandler(BaseHandler):
@@ -22,6 +34,7 @@ class VisionHandler(BaseHandler):
         super().__init__(config)
         # 初始化认证工具
         self.auth = AuthToken(config["server"]["auth_key"])
+        self.image_dir = os.path.join(os.getcwd(), "data", "vision")
 
     def _create_error_response(self, message: str) -> dict:
         """创建统一的错误响应格式"""
@@ -43,6 +56,38 @@ class VisionHandler(BaseHandler):
 
         token = auth_header[7:]  # 移除"Bearer "前缀
         return self.auth.verify_token(token)
+
+    def _get_image_extension(self, image_data: bytes) -> Optional[str]:
+        for signature, extension in IMAGE_EXTENSIONS.items():
+            if image_data.startswith(signature):
+                if signature == b"RIFF" and image_data[8:12] != b"WEBP":
+                    continue
+                return extension
+        return None
+
+    def _build_image_url(self, filename: str) -> str:
+        vision_url = get_vision_url(self.config)
+        parsed = urlsplit(vision_url)
+        marker = "/mcp/vision/explain"
+        path = parsed.path or ""
+        prefix = path.split(marker)[0] if marker in path else ""
+        image_path = f"{prefix}/mcp/vision/images/{filename}"
+        return urlunsplit((parsed.scheme, parsed.netloc, image_path, "", ""))
+
+    def _save_image(
+        self, device_id: str, image_data: bytes, image_extension: str
+    ) -> tuple[str, str]:
+        os.makedirs(self.image_dir, exist_ok=True)
+        safe_device_id = "".join(
+            c if c.isalnum() or c in ("-", "_") else "_" for c in device_id
+        ) or "unknown"
+        filename = f"{safe_device_id}_{uuid.uuid4().hex}{image_extension}"
+        file_path = os.path.join(self.image_dir, filename)
+        with open(file_path, "wb") as image_file:
+            image_file.write(image_data)
+
+        image_url = self._build_image_url(filename)
+        return filename, image_url
 
     async def handle_post(self, request):
         """处理 MCP Vision POST 请求"""
@@ -94,8 +139,11 @@ class VisionHandler(BaseHandler):
             # 检查文件格式
             if not is_valid_image_file(image_data):
                 raise ValueError(
-                    "不支持的文件格式，请上传有效的图片文件（支持JPEG、PNG、GIF、BMP、TIFF、WEBP格式）"
+                    "不支持的文件格式，请上传有效的图片文件（支持JPEG、PNG、GIF、BMP、WEBP格式）"
                 )
+            image_extension = self._get_image_extension(image_data)
+            if image_extension not in {".jpg", ".png", ".gif", ".bmp", ".webp"}:
+                raise ValueError("不支持的图片文件格式")
 
             # 将图片转换为base64编码
             image_base64 = base64.b64encode(image_data).decode("utf-8")
@@ -127,12 +175,17 @@ class VisionHandler(BaseHandler):
                 vllm_type, current_config["VLLM"][select_vllm_module]
             )
 
+            image_filename, image_url = self._save_image(
+                device_id, image_data, image_extension
+            )
             result = vllm.response(question, image_base64)
 
             return_json = {
                 "success": True,
                 "action": Action.RESPONSE.name,
                 "response": result,
+                "image_url": image_url,
+                "image_id": image_filename,
             }
 
             response = web.Response(
@@ -177,6 +230,32 @@ class VisionHandler(BaseHandler):
                 text=json.dumps(return_json, separators=(",", ":")),
                 content_type="application/json",
             )
+        finally:
+            self._add_cors_headers(response)
+            return response
+
+    async def handle_image(self, request):
+        """提供视觉分析图片下载。"""
+        try:
+            filename = request.match_info.get("filename", "")
+            filename = os.path.basename(filename)
+            if not re.match(r"^[A-Za-z0-9_\-]+\.(jpg|jpeg|png|gif|bmp|webp)$", filename, re.IGNORECASE):
+                raise web.HTTPBadRequest(text="invalid filename")
+
+            image_dir_real = os.path.realpath(self.image_dir)
+            image_path = os.path.realpath(os.path.join(self.image_dir, filename))
+            if not image_path.startswith(image_dir_real + os.sep):
+                raise web.HTTPForbidden(text="forbidden")
+            if not os.path.isfile(image_path):
+                raise web.HTTPNotFound(text="image not found")
+
+            response = web.FileResponse(path=image_path)
+            response.headers["Cache-Control"] = "private, max-age=86400"
+        except web.HTTPError as e:
+            response = e
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"MCP Vision 图片下载异常: {e}")
+            response = web.Response(text="image download error", status=500)
         finally:
             self._add_cors_headers(response)
             return response

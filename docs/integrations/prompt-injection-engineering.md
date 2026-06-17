@@ -200,12 +200,9 @@ main/xiaozhi-server/core/providers/tools/server_plugins/plugin_executor.py
 后台 Intent 配置 functions
   config["Intent"][selected]["functions"]
 
-本地强制状态机工具
-  guess_what_i_say
-  idiom_chain
-  xiaozhi_thinks_you_guess
-  guess_xiaozhi_word
-  i_think_you_guess
+自由对话游戏旧 code
+  guess_what_i_say / idiom_chain / xiaozhi_thinks_you_guess / guess_xiaozhi_word / i_think_you_guess
+  -> 当前由 ServerPluginExecutor 跳过，不注入为 tools
 
 后台声明式互动插件
   config["plugins"][provider_code]
@@ -213,7 +210,7 @@ main/xiaozhi-server/core/providers/tools/server_plugins/plugin_executor.py
 
 内置插件如果命中 `all_function_registry`，优先使用插件 Python 函数注册的 description。后台 `plugins[func_name].description` 可以覆盖工具描述。
 
-状态机游戏即使后台看不到完整玩法 prompt，也会由 `ServerPluginExecutor` 构造短工具描述，告诉模型何时调用。
+纯语言游戏不再由 `ServerPluginExecutor` 构造工具描述。用户发起成语接龙、你说我猜等玩法时，主 LLM 直接根据对话上下文处理。
 
 ## 8. 主聊天 function_call 注入
 
@@ -375,11 +372,11 @@ LLM 调用工具
 | 工具描述 | description + parameters_schema | 让模型决定是否调用工具 |
 | 二次提示 | `<interaction_plugin>` 中的玩法说明 | 工具调用后让模型生成主持话术 |
 
-这类模式灵活，但延迟高，也容易丢状态。它不适合成语接龙、你说我猜、小智想词用户猜这类高频状态游戏。
+这类模式灵活，但延迟高，也容易丢状态。当前纯语言游戏直接交给主 LLM 对话；如果当前智能体在功能插件里启用了对应游戏，会把该插件可编辑的 `instructions` / `opening_message` 作为本轮软提示词注入主 LLM，但不会注册为工具，也不会走二次 LLM 工具链。
 
-## 12. 状态机游戏注入
+## 12. 自由对话游戏边界
 
-以下游戏已经不再靠大段 prompt 维持玩法：
+以下旧游戏 code 不再强制注入为工具：
 
 ```text
 guess_what_i_say          用户描述，小智猜
@@ -389,92 +386,40 @@ guess_xiaozhi_word
 i_think_you_guess
 ```
 
-状态入口：
+当前实现：
 
 ```text
 main/xiaozhi-server/core/game_session.py
-  GameSessionManager
+  GameSessionManager.FREEFORM_GAME_TOOLS
+  GameSessionManager.build_freeform_game_prompt()
+  GameSessionManager.GUESS_MY_WORD_TOOLS = set()
+  GameSessionManager.USER_DESCRIBES_TOOLS = set()
+  GameSessionManager.IDIOM_CHAIN_TOOLS = set()
+  GameSessionManager.get_requested_game_tool() -> None
+
+main/xiaozhi-server/core/connection.py
+  ConnectionHandler._get_enabled_plugin_configs()
+  ConnectionHandler._with_freeform_game_prompt()
 ```
 
-工具执行：
+工具注册：
 
 ```text
-ServerPluginExecutor._execute_stateful_game_plugin()
-  -> GameSessionManager.handle_idiom_chain(...)
-  -> GameSessionManager.handle_user_describes_guess(...)
-  -> GameSessionManager.handle_guess_my_word(...)
-  -> Action.RESPONSE
+ServerPluginExecutor.get_tools()
+  -> 跳过 GameSessionManager.FREEFORM_GAME_TOOLS
 ```
 
-状态机游戏的规则：
+运行规则：
 
 ```text
-模型只看到“什么时候调用工具”的短 description。
-隐藏答案、候选集、上一问、已排除条件、已用成语、当前要接的字保存在服务端。
-工具执行后直接返回 Action.RESPONSE。
-不返回 Action.REQLLM。
-不二次请求 LLM。
+不提前路由为 function_call。
+不注入工具 description。
+不使用服务端候选库、关键词判定、固定问答或计分状态。
+如果当前智能体启用了对应功能插件，从插件配置读取 `instructions` / `opening_message`，作为临时 system 软提示注入本轮主 LLM 请求。
+由主 LLM 根据完整对话上下文和可编辑游戏规则自然主持。
 ```
 
-这解释了为什么后台插件配置里看不到完整玩法提示词：关键玩法已经变成 Python 状态机，不再交给大模型临场发挥。
-
-## 13. 三个游戏的状态职责
-
-### `guess_what_i_say`
-
-模型可见：
-
-```text
-用户要玩你说我猜，或游戏中继续给线索/反馈时调用 guess_what_i_say。
-调用时把用户当前原话填入 user_message。
-```
-
-服务端状态：
-
-```text
-保存上一问
-保存 yes/no 对应事实
-保存已知线索
-保存排除的人名、朝代、身份、领域
-历史人物按地域 -> 年代 -> 身份 -> 事迹 -> 领域排查
-候选耗尽时要求用户补充线索，不违背已确认条件乱猜
-```
-
-### `idiom_chain`
-
-模型可见：
-
-```text
-用户要玩成语接龙，或游戏中继续回答、要提示、说不会、不玩时调用 idiom_chain。
-```
-
-服务端状态：
-
-```text
-保存当前要接的字
-保存已用成语
-保存用户接对数量
-判断是否常见四字成语
-无效答案不改变当前要接的字
-```
-
-### `xiaozhi_thinks_you_guess`
-
-模型可见：
-
-```text
-小智心里想一个词让用户猜时调用对应工具。
-```
-
-服务端状态：
-
-```text
-保存隐藏 target_word
-保存已给提示
-处理用户猜测
-处理猜不到、揭晓答案、不玩了、再来一局
-禁止把隐藏答案交给 LLM 维护
-```
+这解释了为什么这些游戏现在不应该出现在“当前支持的函数列表”里：它们保留功能插件配置入口，但不再作为工具执行。
 
 ## 14. MCP 工具提示词注入
 
@@ -530,7 +475,7 @@ get_weather 插件
 Action.RESPONSE
   -> 直接作为回复进入 TTS
   -> 低延迟
-  -> 适合天气结果、状态机游戏、设备控制确认
+  -> 适合天气结果、设备控制确认
 
 Action.REQLLM
   -> 工具结果写入上下文
@@ -549,24 +494,25 @@ main/xiaozhi-server/core/handle/intentHandler.py
   process_intent_result()
 ```
 
-状态机游戏必须优先使用 `Action.RESPONSE`，否则会出现游戏延迟大、上下文漂移、模型自作主张换玩法等问题。
+纯语言游戏不应走 `Action.RESPONSE` 工具链；否则服务端硬规则会压过主模型能力。
 
 ## 17. 排查方法
 
 查看当前连接支持哪些工具：
 
 ```bash
-tail -f .run/xiaozhi-server.log
+scripts/dev logs server -f
 ```
 
 搜索关键日志：
 
 ```text
 当前支持的函数列表
-执行工具: guess_what_i_say
-执行工具: idiom_chain
+执行工具: <tool_name>
 llm 识别到意图
 ```
+
+如果看到 `guess_what_i_say`、`idiom_chain`、`xiaozhi_thinks_you_guess` 仍进入工具列表或执行工具日志，说明旧配置或代码路径绕过了 `FREEFORM_GAME_TOOLS` 跳过逻辑。
 
 查看工具描述生成：
 
@@ -597,17 +543,16 @@ Action.REQLLM    -> 工具结果再交给 LLM
 角色、人设、语音交互总规则写入 agent-base-prompt.txt 或后台 prompt。
 影响“是否调用工具”的内容写入工具 description。
 工具参数规则写入 parameters_schema / inputSchema。
-严格状态、隐藏答案、计分、候选集写入 GameSessionManager。
+必须访问服务端状态、设备或外部接口的能力才写入工具或服务端状态。
 需要自然语言总结但不要求严格状态的插件可使用 Action.REQLLM。
-语音实时互动、高频游戏、容易丢上下文的玩法优先使用 Action.RESPONSE 状态机。
+纯语言游戏优先交给主 LLM；只有当前智能体启用了对应功能插件时，才注入该插件可编辑的软规则。
 ```
 
 禁止：
 
 ```text
 把 API Key、生产连接信息、真实用户数据写入提示词或文档。
-把隐藏答案交给 LLM 自己记。
-把状态机游戏退回声明式 REQLLM。
+把纯语言游戏重新强制注入为 tools。
 只修改后台描述却以为能改变服务端状态逻辑。
 只查 agent-base-prompt.txt 就判断插件没有提示词。
 ```

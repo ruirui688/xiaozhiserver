@@ -89,7 +89,7 @@ provider_code 命中 all_function_registry
 - 热梗解释
 - 猜谜
 
-注意：成语接龙、你说我猜、小智想词用户猜已经从声明式互动型升级为状态机游戏型，因为它们需要稳定保存当前题目、上一问、候选集、排除条件或计分状态。
+注意：成语接龙、你说我猜、小智想词用户猜已回退为主 LLM 自由对话，不再作为状态机工具强制注入。旧 provider_code 只作为兼容标识保留。
 
 它仍然是一条 `model_type = Plugin` 记录，但 `fields` 中包含兼容标记：
 
@@ -122,19 +122,19 @@ provider_code 命中 all_function_registry
     "key": "description",
     "type": "textarea",
     "label": "工具描述",
-    "default": "当用户想玩成语接龙时调用。"
+    "default": "当用户想听一个短笑话时调用。"
   },
   {
     "key": "instructions",
     "type": "textarea",
     "label": "玩法说明",
-    "default": "你是成语接龙主持人，要负责出题、判定、提示和控节奏。用户回答必须是常见四字成语，并用上一个成语最后一个字开头；同音字可酌情接受但要说明；用户接不上时先给一个提示，再给可接答案；连续答对可提高难度，连续出错要换成更常见的字。每轮只给必要判断和下一个成语，保持适合语音互动的短句。"
+    "default": "你是语音段子主持人。每次只讲一个短段子，适合 TTS 播报；用户说再来、换个类型或不好笑时，根据反馈换一个方向，不要重复同一个段子。"
   },
   {
     "key": "opening_message",
     "type": "textarea",
     "label": "开场白",
-    "default": "来玩成语接龙，我先出题。"
+    "default": "给你来一个短一点、好懂一点的。"
   },
   {
     "key": "parameters_schema",
@@ -177,25 +177,38 @@ provider_code 未命中 all_function_registry
 
 - 外部 HTTP 工具型
 - MCP 桥接型
-- 状态机游戏型
+- 服务端状态型
 
-### 状态机游戏型
+### 服务端状态型
 
-适用于语音实时互动、高频多轮、必须稳定保存状态的玩法，例如：
+仅适用于必须访问服务端状态、外部接口或设备能力的能力。纯语言互动游戏不应放在这一层。
 
-- 你说我猜
-- 成语接龙
-- 小智想词用户猜
+不再强制注入的旧游戏 code：
+
+```text
+guess_what_i_say
+idiom_chain
+xiaozhi_thinks_you_guess
+guess_xiaozhi_word
+i_think_you_guess
+```
 
 运行方式：
 
 ```text
-provider_code 命中 GameSessionManager 状态机工具集合
-  -> xiaozhi-server 生成短工具描述，注入给模型用于触发 function call
-  -> 工具执行时进入 GameSessionManager
-  -> 服务端维护上一问、候选集、隐藏答案、计分等状态
-  -> 返回 Action.RESPONSE，直接播报，不再二次请求 LLM
+provider_code 命中真实服务端工具
+  -> xiaozhi-server 生成工具描述，注入给模型用于触发 function call
+  -> 工具执行器访问服务端状态、设备、MCP 或外部接口
+  -> 返回 Action.RESPONSE 或 Action.REQLLM
 ```
+
+互动游戏边界见：
+
+```text
+docs/integrations/stateful-game-session.md
+```
+
+当前原则：纯语言游戏交给主 LLM 自由对话，但规则来源仍是功能插件。智能体勾选某个游戏插件后，`instructions` / `opening_message` 会作为临时软提示词注入主 LLM；不要用小候选库、关键词规则或固定问答状态机压过模型能力。
 
 ## 提示词注入位置
 
@@ -206,7 +219,7 @@ provider_code 命中 GameSessionManager 状态机工具集合
 声明式插件二次提示：_execute_declarative_interaction_plugin() -> Action.REQLLM -> 再请求 LLM
 ```
 
-成语接龙、你说我猜、小智想词用户猜等高频互动玩法已经改为状态机游戏型。它们只把“什么时候调用工具”的短描述注入给模型，具体玩法规则、候选集、隐藏答案和上一问状态保存在 `GameSessionManager`，工具执行后直接 `Action.RESPONSE` 返回。
+成语接龙、你说我猜、小智想词用户猜等纯语言游戏不再注入为工具。它们由主 LLM 根据对话上下文和当前功能插件的可编辑规则自然处理。
 
 完整链路见：
 
@@ -328,7 +341,7 @@ feature/function-plugin-platform
 声明式互动型适合：
 
 - 讲段子、热梗解释、热梗接话。
-- 成语接龙、你说我猜、猜谜等轻量小游戏。
+- 猜谜等不要求服务端稳定保存隐藏答案、候选集或计分状态的轻量小游戏。
 - 主要靠 LLM 理解规则和维持短对话的互动能力。
 
 不适合：

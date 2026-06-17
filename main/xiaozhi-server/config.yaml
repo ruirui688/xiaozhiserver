@@ -656,9 +656,14 @@ LLM:
     # 定义LLM API类型
     type: openai
     # 可在这里找到你的api key https://platform.deepseek.com/
-    model_name: deepseek-chat
-    url: https://api.deepseek.com
+    # deepseek-chat/deepseek-reasoner 将于 2026-07-24 23:59 弃用，建议使用 deepseek-v4-flash
+    model_name: deepseek-v4-flash
+    base_url: https://api.deepseek.com
     api_key: 你的deepseek web key
+    # 思考模式: enabled / disabled；语音交互默认 disabled，响应更快
+    thinking: disabled
+    # 思考强度仅在 thinking: enabled 时生效: high / max
+    reasoning_effort: high
   ChatGLMLLM:
     # 定义LLM API类型
     type: openai
@@ -757,12 +762,24 @@ VLLM:
     model_name: glm-4v-flash  # 智谱AI的视觉模型
     url: https://open.bigmodel.cn/api/paas/v4/
     api_key: 你的api_key
+    max_tokens: 180
+    temperature: 0.4
+    top_p: 0.9
+    # 视觉识别回复风格。留空时使用程序内置的自然口语化默认提示词。
+    prompt: |
+      你是设备的视觉助手，用自然、口语化的中文回答用户关于图片的问题。
+      先给一句直接结论，再补充2到3个关键细节。
+      不要使用编号、标题、报告格式或“以下是”“画面的主体是”“占据了图像”等生硬表达。
+      如果画面不清楚，要直接说明不确定，只描述能看清的内容。
   QwenVLVLLM:
     type: openai
     model_name: qwen3.5-flash
     url: https://dashscope.aliyuncs.com/compatible-mode/v1
     # 可在这里找到你的api key https://bailian.console.aliyun.com/?apiKey=1#/api-key
     api_key: 你的api_key
+    max_tokens: 180
+    temperature: 0.4
+    top_p: 0.9
   XunfeiSparkLLM:
     # 定义LLM API类型
     type: openai
@@ -773,6 +790,9 @@ VLLM:
     base_url: https://ark.cn-beijing.volces.com/api/v3
     model_name: lite
     api_key: 你的api_password
+    max_tokens: 180
+    temperature: 0.4
+    top_p: 0.9
 TTS:
   # 当前支持的type为edge、doubao，可自行适配
   EdgeTTS:

@@ -46,6 +46,5 @@ plugins:
   web_search:
     provider: metaso
     api_key:
-
 mcp_endpoint:
 prompt_template: agent-base-prompt.txt

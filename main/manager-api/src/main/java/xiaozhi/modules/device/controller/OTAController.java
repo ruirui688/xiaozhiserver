@@ -45,6 +45,10 @@ public class OTAController {
             @RequestBody DeviceReportReqDTO deviceReportReqDTO,
             @Parameter(name = "Device-Id", description = "设备唯一标识", required = true, in = ParameterIn.HEADER) @RequestHeader("Device-Id") String deviceId,
             @Parameter(name = "Client-Id", description = "客户端标识", required = false, in = ParameterIn.HEADER) @RequestHeader(value = "Client-Id", required = false) String clientId) {
+        String appVersion = deviceReportReqDTO != null && deviceReportReqDTO.getApplication() != null
+                ? deviceReportReqDTO.getApplication().getVersion()
+                : "";
+        log.info("OTA请求: deviceId={}, clientId={}, appVersion={}", deviceId, clientId, appVersion);
         if (StringUtils.isBlank(deviceId)) {
             return createResponse(DeviceReportRespDTO.createError("Device ID is required"));
         }

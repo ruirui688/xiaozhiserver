@@ -33,6 +33,8 @@ import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -65,8 +67,8 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private static final String DEFAULT_LLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
     private static final String DEFAULT_LLM_MODEL = "qwen-plus";
     private static final int DEFAULT_LLM_TIMEOUT_SECONDS = 90;
-    private static final int DEFAULT_LLM_MAX_INPUT_CHARS = 3000;
-    private static final int DEFAULT_LLM_MAX_TOKENS = 1200;
+    private static final int DEFAULT_LLM_MAX_INPUT_CHARS = 12000;
+    private static final int DEFAULT_LLM_MAX_TOKENS = 4000;
 
     private Map<String, Object> config = new HashMap<>();
     private ObjectMapper objectMapper;
@@ -115,15 +117,17 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
 
     @Override
     public PageData<KnowledgeFilesDTO> getDocumentList(String datasetId, DocumentDTO.ListReq req) {
+        int page = req.getPage() == null || req.getPage() < 1 ? 1 : req.getPage();
+        int pageSize = req.getPageSize() == null || req.getPageSize() < 1 ? 10 : req.getPageSize();
         QueryWrapper<DocumentEntity> query = new QueryWrapper<>();
         query.eq("dataset_id", datasetId);
         if (StringUtils.isNotBlank(req.getId())) {
             query.eq("document_id", req.getId());
         }
         query.orderByDesc("created_at");
-        List<DocumentEntity> docs = documentDao.selectList(query);
-        List<KnowledgeFilesDTO> result = docs.stream().map(this::toFileDTO).collect(Collectors.toList());
-        return new PageData<>(result, result.size());
+        IPage<DocumentEntity> docs = documentDao.selectPage(new Page<>(page, pageSize), query);
+        List<KnowledgeFilesDTO> result = docs.getRecords().stream().map(this::toFileDTO).collect(Collectors.toList());
+        return new PageData<>(result, docs.getTotal());
     }
 
     @Override
@@ -206,13 +210,12 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             query.like("content", req.getKeywords());
         }
         query.orderByAsc("sort_order");
-        List<KnowledgeChunkEntity> all = chunkDao.selectList(query);
-        List<KnowledgeChunkEntity> pageItems = paginate(all, page, pageSize);
-        List<ChunkDTO.InfoVO> chunks = pageItems.stream().map(this::toChunkVO).collect(Collectors.toList());
+        IPage<KnowledgeChunkEntity> pageResult = chunkDao.selectPage(new Page<>(page, pageSize), query);
+        List<ChunkDTO.InfoVO> chunks = pageResult.getRecords().stream().map(this::toChunkVO).collect(Collectors.toList());
         return ChunkDTO.ListVO.builder()
                 .chunks(chunks)
                 .doc(getDocumentById(datasetId, documentId))
-                .total((long) all.size())
+                .total(pageResult.getTotal())
                 .build();
     }
 
@@ -449,8 +452,20 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             chunks = parseJsonQa(text, "jsonl".equals(extension));
             return refineChunksWithLlm(chunks);
         }
+        List<LocalChunk> markdownChunks = parsePreChunkedMarkdown(text);
+        if (!markdownChunks.isEmpty()) {
+            return markdownChunks;
+        }
+        List<LocalChunk> llmChunks = chunkDocumentWithLlm(filename, text);
+        if (!llmChunks.isEmpty()) {
+            return llmChunks;
+        }
         List<LocalChunk> qaChunks = parsePlainQa(text);
-        chunks = qaChunks.isEmpty() ? splitText(text) : qaChunks;
+        if (!qaChunks.isEmpty()) {
+            chunks = qaChunks;
+        } else {
+            chunks = splitText(text);
+        }
         return refineChunksWithLlm(chunks);
     }
 
@@ -520,6 +535,54 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         return chunks;
     }
 
+    private List<LocalChunk> parsePreChunkedMarkdown(String text) {
+        String normalized = StringUtils.defaultString(text).trim();
+        if (StringUtils.isBlank(normalized) || !normalized.contains("HY-KB-")) {
+            return List.of();
+        }
+
+        List<LocalChunk> chunks = new ArrayList<>();
+        for (String rawSection : normalized.split("(?m)^---\\s*$")) {
+            String section = rawSection.trim();
+            if (StringUtils.isBlank(section) || !section.matches("(?s).*^##\\s+HY-KB-\\d+.*")) {
+                continue;
+            }
+            chunks.add(new LocalChunk(
+                    extractMarkdownQuestions(section),
+                    extractMarkdownAnswer(section),
+                    section));
+        }
+        return chunks;
+    }
+
+    private String extractMarkdownQuestions(String section) {
+        int start = section.indexOf("**适用问题**");
+        if (start < 0) {
+            return null;
+        }
+        String questionBlock = section.substring(start);
+        List<String> questions = new ArrayList<>();
+        for (String line : questionBlock.split("\\R")) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("- ")) {
+                questions.add(trimmed.substring(2).trim());
+            }
+        }
+        return questions.isEmpty() ? null : String.join("；", questions);
+    }
+
+    private String extractMarkdownAnswer(String section) {
+        int bodyStart = section.indexOf("**正文**");
+        if (bodyStart < 0) {
+            return null;
+        }
+        String body = section.substring(bodyStart)
+                .replaceFirst("^\\*\\*正文\\*\\*[:：]?\\s*", "")
+                .replaceFirst("(?s)\\R\\s*\\*\\*适用问题\\*\\*[:：]?.*$", "")
+                .trim();
+        return StringUtils.isBlank(body) ? null : body;
+    }
+
     private List<LocalChunk> refineChunksWithLlm(List<LocalChunk> chunks) {
         if (!llmEnabled || StringUtils.isAnyBlank(llmBaseUrl, llmApiKey, llmModel)
                 || isPlaceholderSecret(llmApiKey) || chunks.isEmpty()) {
@@ -538,6 +601,94 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         return refined;
     }
 
+    private List<LocalChunk> chunkDocumentWithLlm(String filename, String text) {
+        if (!llmAvailable() || StringUtils.isBlank(text)) {
+            return List.of();
+        }
+        List<LocalChunk> chunks = new ArrayList<>();
+        List<String> sections = splitLlmInputSections(text);
+        for (int i = 0; i < sections.size(); i++) {
+            String section = sections.get(i);
+            try {
+                chunks.addAll(chunkSectionWithLlm(filename, section, i + 1, sections.size()));
+            } catch (Exception e) {
+                log.warn("本地知识库大模型切片失败，文件={}，分段={}/{}，已回退规则切片: {}",
+                        filename, i + 1, sections.size(), e.getMessage());
+                return List.of();
+            }
+        }
+        return chunks.stream()
+                .filter(chunk -> StringUtils.isNotBlank(chunk.getContent()))
+                .collect(Collectors.toList());
+    }
+
+    private boolean llmAvailable() {
+        return llmEnabled && StringUtils.isNoneBlank(llmBaseUrl, llmApiKey, llmModel)
+                && !isPlaceholderSecret(llmApiKey);
+    }
+
+    private List<String> splitLlmInputSections(String text) {
+        String normalized = StringUtils.defaultString(text).trim();
+        if (StringUtils.isBlank(normalized)) {
+            return List.of();
+        }
+        List<String> sections = new ArrayList<>();
+        int start = 0;
+        while (start < normalized.length()) {
+            int hardEnd = Math.min(start + llmMaxInputChars, normalized.length());
+            int end = findSplitEnd(normalized, start, hardEnd);
+            String section = normalized.substring(start, end).trim();
+            if (StringUtils.isNotBlank(section)) {
+                sections.add(section);
+            }
+            start = end;
+        }
+        return sections;
+    }
+
+    private List<LocalChunk> chunkSectionWithLlm(String filename, String section, int sectionIndex, int totalSections)
+            throws Exception {
+        Map<String, Object> requestBody = new LinkedHashMap<>();
+        requestBody.put("model", llmModel);
+        requestBody.put("temperature", 0.1);
+        requestBody.put("max_tokens", llmMaxTokens);
+        requestBody.put("messages", List.of(
+                Map.of("role", "system", "content", getChunkingSystemPrompt()),
+                Map.of("role", "user", "content",
+                        buildChunkingUserPrompt(filename, section, sectionIndex, totalSections))));
+
+        String content = requestLlmMessageContent(requestBody);
+        List<LocalChunk> chunks = parseChunkedDocument(content);
+        if (chunks.isEmpty()) {
+            throw new RenException("模型未返回有效切片");
+        }
+        return chunks;
+    }
+
+    private String getChunkingSystemPrompt() {
+        return "你是RAG知识库切片专家。你的任务是把用户提供的文档切成高质量、可检索的知识片段。"
+                + "必须保留原文事实、数值、名称、范围和限制，不得编造、改写事实或添加外部知识。"
+                + "切片必须按语义完整边界切分：优先保持一个编号条目、一个主题小节、一个问答组或一个业务事实完整；"
+                + "不要把一句话、一个标题与正文、问题列表与对应答案切到不同片段。"
+                + "每个切片建议300到1200个中文字符；内容很短时可以更短，内容过长时按小标题或自然段继续拆。"
+                + "如果原文包含适用问题、关键词、正文等结构，应把同一条知识的这些字段放在同一个切片内。"
+                + "只输出JSON数组，不要Markdown，不要解释。数组元素字段固定为question、answer、content。"
+                + "question用于填写该片段最适合回答的用户问题，可为空字符串；answer用于明确问答答案，可为空字符串；"
+                + "content必须是完整可检索知识片段。";
+    }
+
+    private String buildChunkingUserPrompt(String filename, String section, int sectionIndex, int totalSections)
+            throws Exception {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("filename", filename);
+        payload.put("section_index", sectionIndex);
+        payload.put("total_sections", totalSections);
+        payload.put("max_chunk_chars", maxChunkChars);
+        payload.put("document", section);
+        return "请对下面文档分段进行知识库切片，并返回JSON数组：\n"
+                + objectMapper.writeValueAsString(payload);
+    }
+
     private LocalChunk refineChunkWithLlm(LocalChunk chunk) throws Exception {
         Map<String, Object> requestBody = new LinkedHashMap<>();
         requestBody.put("model", llmModel);
@@ -547,6 +698,12 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
                 Map.of("role", "system", "content", getLlmSystemPrompt()),
                 Map.of("role", "user", "content", buildLlmUserPrompt(chunk))));
 
+        String content = requestLlmMessageContent(requestBody);
+        LocalChunk refined = parseRefinedChunk(content, chunk);
+        return StringUtils.isBlank(refined.getContent()) ? chunk : refined;
+    }
+
+    private String requestLlmMessageContent(Map<String, Object> requestBody) throws Exception {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.setBearerAuth(llmApiKey);
@@ -560,8 +717,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         if (StringUtils.isBlank(content)) {
             throw new RenException("模型接口返回内容为空");
         }
-        LocalChunk refined = parseRefinedChunk(content, chunk);
-        return StringUtils.isBlank(refined.getContent()) ? chunk : refined;
+        return content;
     }
 
     private String getLlmSystemPrompt() {
@@ -608,14 +764,47 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
                 content);
     }
 
+    private List<LocalChunk> parseChunkedDocument(String modelContent) throws Exception {
+        String json = stripJson(modelContent);
+        JsonNode node = objectMapper.readTree(json);
+        JsonNode chunksNode = node.isArray() ? node : node.path("chunks");
+        if (!chunksNode.isArray()) {
+            return List.of();
+        }
+        List<LocalChunk> chunks = new ArrayList<>();
+        for (JsonNode item : chunksNode) {
+            String question = StringUtils.trimToEmpty(item.path("question").asText());
+            String answer = StringUtils.trimToEmpty(item.path("answer").asText());
+            String content = StringUtils.trimToEmpty(item.path("content").asText());
+            if (StringUtils.isBlank(content) && StringUtils.isNoneBlank(question, answer)) {
+                content = "问题：" + question + "\n答案：" + answer;
+            }
+            if (StringUtils.isNotBlank(content)) {
+                chunks.add(new LocalChunk(
+                        StringUtils.isBlank(question) ? null : question,
+                        StringUtils.isBlank(answer) ? null : answer,
+                        content));
+            }
+        }
+        return chunks;
+    }
+
     private String stripJson(String text) {
         String trimmed = StringUtils.trimToEmpty(text);
         if (trimmed.startsWith("```")) {
             trimmed = trimmed.replaceFirst("^```(?:json)?\\s*", "");
             trimmed = trimmed.replaceFirst("\\s*```$", "");
         }
-        int start = trimmed.indexOf('{');
-        int end = trimmed.lastIndexOf('}');
+        int arrayStart = trimmed.indexOf('[');
+        int arrayEnd = trimmed.lastIndexOf(']');
+        int objectStart = trimmed.indexOf('{');
+        int objectEnd = trimmed.lastIndexOf('}');
+        if (arrayStart >= 0 && arrayEnd > arrayStart
+                && (objectStart < 0 || arrayStart < objectStart)) {
+            return trimmed.substring(arrayStart, arrayEnd + 1);
+        }
+        int start = objectStart;
+        int end = objectEnd;
         if (start >= 0 && end > start) {
             return trimmed.substring(start, end + 1);
         }
@@ -693,20 +882,77 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     }
 
     private List<LocalChunk> splitText(String text) {
+        return splitByParagraphs(StringUtils.defaultString(text).trim());
+    }
+
+    private List<LocalChunk> splitByParagraphs(String text) {
         List<LocalChunk> chunks = new ArrayList<>();
         String normalized = StringUtils.defaultString(text).trim();
-        for (int start = 0; start < normalized.length(); start += maxChunkChars) {
-            int end = Math.min(start + maxChunkChars, normalized.length());
-            String content = normalized.substring(start, end).trim();
-            if (StringUtils.isNotBlank(content)) {
-                chunks.add(new LocalChunk(null, null, content));
-            }
+        if (StringUtils.isBlank(normalized)) {
+            return chunks;
         }
+        StringBuilder current = new StringBuilder();
+        for (String paragraph : normalized.split("(\\R\\s*\\R)+")) {
+            String part = paragraph.trim();
+            if (StringUtils.isBlank(part)) {
+                continue;
+            }
+            if (part.length() > maxChunkChars) {
+                flushChunk(chunks, current);
+                splitLongParagraph(chunks, part);
+                continue;
+            }
+            int nextLength = current.length() == 0 ? part.length() : current.length() + 2 + part.length();
+            if (nextLength > maxChunkChars) {
+                flushChunk(chunks, current);
+            }
+            if (current.length() > 0) {
+                current.append("\n\n");
+            }
+            current.append(part);
+        }
+        flushChunk(chunks, current);
         return chunks;
     }
 
+    private void splitLongParagraph(List<LocalChunk> chunks, String text) {
+        int start = 0;
+        while (start < text.length()) {
+            int end = findSplitEnd(text, start, Math.min(start + maxChunkChars, text.length()));
+            String content = text.substring(start, end).trim();
+            if (StringUtils.isNotBlank(content)) {
+                chunks.add(new LocalChunk(null, null, content));
+            }
+            start = end;
+        }
+    }
+
+    private int findSplitEnd(String text, int start, int hardEnd) {
+        if (hardEnd >= text.length()) {
+            return text.length();
+        }
+        int best = -1;
+        for (String separator : List.of("\n", "。", "！", "？", "；", ";", ".", "!", "?")) {
+            int index = text.lastIndexOf(separator, hardEnd - 1);
+            if (index >= start + Math.min(80, maxChunkChars / 4)) {
+                best = Math.max(best, index + separator.length());
+            }
+        }
+        return best > start ? best : hardEnd;
+    }
+
+    private void flushChunk(List<LocalChunk> chunks, StringBuilder current) {
+        if (StringUtils.isNotBlank(current.toString())) {
+            chunks.add(new LocalChunk(null, null, current.toString().trim()));
+            current.setLength(0);
+        }
+    }
+
     private Float score(String question, KnowledgeChunkEntity chunk) {
-        String content = StringUtils.defaultString(chunk.getContent()).toLowerCase();
+        String content = String.join("\n",
+                StringUtils.defaultString(chunk.getContent()),
+                StringUtils.defaultString(chunk.getQuestion()),
+                StringUtils.defaultString(chunk.getAnswer())).toLowerCase();
         String q = StringUtils.defaultString(question).toLowerCase();
         if (StringUtils.isBlank(q)) {
             return 1F;
@@ -718,18 +964,93 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         if (terms.isEmpty()) {
             return 0F;
         }
-        long hit = terms.stream().filter(content::contains).count();
-        return (float) hit / terms.size();
+        float totalWeight = 0F;
+        float hitWeight = 0F;
+        int hitCount = 0;
+        boolean hasStrongHit = false;
+        for (String term : terms) {
+            float weight = termWeight(term);
+            totalWeight += weight;
+            if (content.contains(term)) {
+                hitWeight += weight;
+                hitCount++;
+                if (term.length() >= 3 || containsNonCjk(term)) {
+                    hasStrongHit = true;
+                }
+            }
+        }
+        if (hitCount == 0 || totalWeight <= 0F) {
+            return 0F;
+        }
+        float score = hitWeight / totalWeight;
+        if (hasStrongHit) {
+            score = Math.max(score, 0.35F);
+        } else if (hitCount < 2 || score < 0.18F) {
+            return 0F;
+        }
+        return Math.min(score, 0.99F);
     }
 
     private Set<String> tokenize(String text) {
         Set<String> terms = new HashSet<>();
-        for (String term : text.split("[\\s,，。！？；;:：、]+")) {
-            if (StringUtils.isNotBlank(term)) {
-                terms.add(term);
+        for (String rawTerm : text.split("[\\s,，。！？；;:：、]+")) {
+            String term = StringUtils.trimToEmpty(rawTerm);
+            if (StringUtils.isBlank(term)) {
+                continue;
+            }
+            terms.add(term);
+            if (containsCjk(term) && term.length() > 2) {
+                addCjkNgrams(terms, term, 4);
+                addCjkNgrams(terms, term, 3);
+                addCjkNgrams(terms, term, 2);
             }
         }
         return terms;
+    }
+
+    private void addCjkNgrams(Set<String> terms, String text, int size) {
+        if (text.length() < size) {
+            return;
+        }
+        for (int i = 0; i <= text.length() - size; i++) {
+            String gram = text.substring(i, i + size);
+            if (containsCjk(gram) && !isWeakCjkTerm(gram)) {
+                terms.add(gram);
+            }
+        }
+    }
+
+    private float termWeight(String term) {
+        int length = term.length();
+        if (length >= 4) {
+            return 4F;
+        }
+        if (length == 3) {
+            return 2F;
+        }
+        return 1F;
+    }
+
+    private boolean containsCjk(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            if (Character.UnicodeScript.of(text.charAt(i)) == Character.UnicodeScript.HAN) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean containsNonCjk(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            if (Character.UnicodeScript.of(text.charAt(i)) != Character.UnicodeScript.HAN) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isWeakCjkTerm(String term) {
+        return Set.of("什么", "适合", "推荐", "可以", "一个", "一下", "这个", "那个", "现在").contains(term);
     }
 
     private Map<String, DocumentEntity> loadDocs(List<KnowledgeChunkEntity> chunks) {

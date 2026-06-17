@@ -146,6 +146,51 @@ export default {
                 });
             }).send();
     },
+    // 清空智能体聊天记录
+    deleteAgentChatHistory(agentId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/chat-history/${agentId}`)
+            .method('DELETE')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail(() => {
+                RequestService.reAjaxFun(() => {
+                    this.deleteAgentChatHistory(agentId, callback);
+                });
+            }).send();
+    },
+    // 删除指定会话聊天记录
+    deleteAgentChatSession(agentId, sessionId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/chat-history/${agentId}/session/${sessionId}`)
+            .method('DELETE')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail(() => {
+                RequestService.reAjaxFun(() => {
+                    this.deleteAgentChatSession(agentId, sessionId, callback);
+                });
+            }).send();
+    },
+    // 删除单条聊天记录
+    deleteAgentChatMessage(agentId, messageId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/chat-history/${agentId}/message/${messageId}`)
+            .method('DELETE')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail(() => {
+                RequestService.reAjaxFun(() => {
+                    this.deleteAgentChatMessage(agentId, messageId, callback);
+                });
+            }).send();
+    },
     // 获取音频下载ID
     getAudioId(audioId, callback) {
         RequestService.sendRequest()
@@ -191,6 +236,37 @@ export default {
             .networkFail(() => {
                 RequestService.reAjaxFun(() => {
                     this.getAgentMcpToolsList(agentId, callback);
+                });
+            }).send();
+    },
+    // 获取智能体可视化 MCP HTTP 工具配置
+    getAgentMcpNoCodeTools(agentId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/mcp/no-code-tools/${agentId}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail(() => {
+                RequestService.reAjaxFun(() => {
+                    this.getAgentMcpNoCodeTools(agentId, callback);
+                });
+            }).send();
+    },
+    // 保存智能体可视化 MCP HTTP 工具配置
+    saveAgentMcpNoCodeTools(agentId, tools, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/mcp/no-code-tools/${agentId}`)
+            .method('PUT')
+            .data(tools)
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail(() => {
+                RequestService.reAjaxFun(() => {
+                    this.saveAgentMcpNoCodeTools(agentId, tools, callback);
                 });
             }).send();
     },

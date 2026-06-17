@@ -85,6 +85,81 @@ export default {
                 });
             }).send();
     },
+    // 获取设备对话调试连接信息
+    getDeviceDebugInfo(deviceId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/device/debug/${deviceId}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                console.error('获取设备调试连接信息失败:', err);
+                RequestService.reAjaxFun(() => {
+                    this.getDeviceDebugInfo(deviceId, callback);
+                });
+            }).send();
+    },
+    // 获取设备对话调试状态
+    getDeviceDebugStatus(deviceId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/device/debug/status/${deviceId}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .fail((res) => {
+                callback(res);
+            })
+            .networkFail((err) => {
+                console.error('获取设备调试状态失败:', err);
+                RequestService.reAjaxFun(() => {
+                    this.getDeviceDebugStatus(deviceId, callback);
+                });
+            }).send();
+    },
+    // 获取设备MCP工具列表
+    getDeviceTools(deviceId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/device/tools/list/${deviceId}`)
+            .method('POST')
+            .data({})
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .fail((res) => {
+                callback(res);
+            })
+            .networkFail((err) => {
+                console.error('获取设备工具列表失败:', err);
+                RequestService.reAjaxFun(() => {
+                    this.getDeviceTools(deviceId, callback);
+                });
+            }).send();
+    },
+    // 调用设备MCP工具
+    callDeviceTool(deviceId, params, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/device/tools/call/${deviceId}`)
+            .method('POST')
+            .data(params)
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .fail((res) => {
+                callback(res);
+            })
+            .networkFail((err) => {
+                console.error('调用设备工具失败:', err);
+                RequestService.reAjaxFun(() => {
+                    this.callDeviceTool(deviceId, params, callback);
+                });
+            }).send();
+    },
     // 获取设备状态
     getDeviceStatus(agentId, callback) {
         RequestService.sendRequest()

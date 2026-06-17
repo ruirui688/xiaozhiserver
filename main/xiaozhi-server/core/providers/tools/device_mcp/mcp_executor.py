@@ -67,8 +67,10 @@ class DeviceMCPExecutor(ToolExecutor):
                 and isinstance(resultJson, dict)
                 and "action" in resultJson
             ):
+                result_for_history = json.dumps(resultJson, ensure_ascii=False)
                 return ActionResponse(
                     action=Action[resultJson["action"]],
+                    result=result_for_history,
                     response=resultJson.get("response", ""),
                 )
 

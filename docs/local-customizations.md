@@ -42,11 +42,27 @@
 官方同步时的处理规则：如果官方修改 app.py 启动流程或本地开发脚本，必须保留“仅交互式终端启用 stdin 监听”和“后台启动时脱离调用者进程组并将 stdin 指向 /dev/null”的约定，确保 xiaozhi-server 可长期后台运行；同时必须保留 `scripts/dev` 作为唯一开发入口，旧 `scripts/start-dev.sh` 只能转发到 `scripts/dev`，不得重新写 `.run/` 或 `logs/dev/`。
 ```
 
-## 4. 语音回复质量与互动游戏规则
+## 4. xiaozhi-server Python 运行时必须使用 Conda
+
+```text
+定制模块：xiaozhi-server Python 运行时与验证命令
+改动原因：本项目的 xiaozhi-server 运行时依赖安装在 Conda 环境 `xiaozhi-esp32-server` 中。系统 Python 可能缺少 loguru、requests、pytest 等依赖，直接使用系统 `python` / `python3` / `pytest` 会产生误报，不能代表项目真实运行时。
+关键文件：
+  - main/xiaozhi-server/requirements.txt
+  - scripts/dev
+  - AGENTS.md
+  - docs/development/ubuntu-source-development-environment.md
+  - docs/development/local-dev-workflow.md
+  - docs/standards/ai-coding-agent-instructions.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：涉及 `main/xiaozhi-server` 的 Python 验证、单测、导入检查、脚本执行，必须使用 `conda run -n xiaozhi-esp32-server ...`，或先确认 shell 已 `conda activate xiaozhi-esp32-server`。`scripts/dev` 必须保留“缺少 Conda 环境时失败而不是退回系统 Python”的行为。禁止退回系统 Python 冒充验证；如果目标 Conda 环境不可用，必须在验证结果中明确说明“未在项目 Conda 运行时验证”。
+```
+
+## 5. 语音回复质量与互动游戏规则
 
 ```text
 定制模块：LLM 输出清洗、工具调用上下文、声明式互动插件提示词、互动插件预设、状态机游戏会话
-改动原因：语音场景下，模型容易把“哈哈”“哎呀”“好的”等口头禅单独切成 TTS 首句，听起来迟钝；声明式互动插件如果规则太软，会在“你说我猜”等游戏首轮直接问用户答案；用户打断播报后，旧工具结果可能继续写入下一轮上下文；“我想你猜”这类小智心里有答案的游戏必须由服务端保存隐藏答案，不能依赖 LLM 自己记。
+改动原因：语音场景下，模型容易把“哈哈”“哎呀”“好的”等口头禅单独切成 TTS 首句，听起来迟钝；声明式互动插件如果规则太软，会在“你说我猜”等游戏首轮直接问用户答案；用户打断播报后，旧工具结果可能继续写入下一轮上下文；成语接龙、你说我猜、小智想词用户猜等纯语言游戏需要功能插件里的可编辑规则约束范围，但不能再被服务端状态机或强制工具调用接管。
 关键文件：
   - main/xiaozhi-server/agent-base-prompt.txt
   - main/xiaozhi-server/core/connection.py
@@ -61,10 +77,10 @@
   - main/manager-web/src/views/FunctionPluginManagement.vue
   - main/xiaozhi-server/config.yaml
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改聊天流式输出、function call、TTS 入队、打断处理、意图缓存、设备端 MCP 或 Function Plugin 预设，必须保留以下约定：句首口头禅在进入 TTS 和历史前清理；工具结果绑定本轮 sentence_id 和 abort_generation；REQLLM 工具结果二次生成时禁用继续调工具；声明式互动插件必须强制 user_message 参数并传递 context；首轮信息不足时只索要线索，不允许问答案；“不是、再猜、它能吃”等短反馈不能跨上下文复用意图缓存；多工具合并必须读取 ActionResponse.result/response；设备 MCP 发送失败必须立即返回，连接关闭时取消等待中的 MCP 调用，音量/亮度等控制类 MCP 使用短超时并直接回复；`xiaozhi_thinks_you_guess` 必须走服务端 GameSessionManager，隐藏 target_word 只保存在服务端状态里，不能交给 LLM 维护；用户说“不玩了/退出/猜不到/想不到/不会/揭晓答案”时必须由状态机结束或揭晓本局，禁止切换成“轮到你了，我来猜你”；`idiom_chain` 必须走服务端 GameSessionManager，保存当前要接的字、已用成语和接对数量，并直接返回 Action.RESPONSE，禁止用 REQLLM 二次生成造成游戏延迟；`guess_what_i_say` 必须走服务端 GameSessionManager，保存上一问、已知线索和排除条件，历史人物类题目按地域、年代、身份、事迹领域顺序排查，禁止连续随机猜朝代或皇帝。
+官方同步时的处理规则：如果官方修改聊天流式输出、function call、TTS 入队、打断处理、意图缓存、设备端 MCP 或 Function Plugin 预设，必须保留以下约定：句首口头禅在进入 TTS 和历史前清理；工具结果绑定本轮 sentence_id 和 abort_generation；REQLLM 工具结果二次生成时禁用继续调工具；声明式互动插件必须强制 user_message 参数并传递 context；多工具合并必须读取 ActionResponse.result/response；设备 MCP 发送失败必须立即返回，连接关闭时取消等待中的 MCP 调用，音量/亮度等控制类 MCP 使用短超时并直接回复；成语接龙、你说我猜、小智想词用户猜等纯语言游戏不得再由服务端状态机强制路由或注入为 tools，旧 provider_code 必须保留在 `GameSessionManager.FREEFORM_GAME_TOOLS` 并由 `ServerPluginExecutor` 跳过；当前智能体勾选对应功能插件时，只允许把插件里的 `instructions` / `opening_message` 作为临时软提示词注入主 LLM。
 ```
 
-## 5. 云端运行架构与提示词注入文档
+## 6. 云端运行架构与提示词注入文档
 
 ```text
 定制模块：项目工程文档
@@ -78,7 +94,7 @@
 官方同步时的处理规则：官方文档同步时不得删除这些架构和提示词工程文档；如果官方修改连接初始化、PromptManager、Dialogue、UnifiedToolHandler、MCP executor、Intent provider、ConfigServiceImpl 或插件执行器，必须同步校正文档中的真实代码路径和运行链路。
 ```
 
-## 6. 工程治理入口、配置隔离与部署资产边界
+## 7. 工程治理入口、配置隔离与部署资产边界
 
 ```text
 定制模块：仓库治理、开发脚本、配置示例、运行产物目录、部署资产归档
@@ -97,7 +113,7 @@
 官方同步时的处理规则：如果官方修改启动脚本、配置目录、Docker/Compose、部署文档、.gitignore 或开发规范，必须保留以下约定：日常本地开发以 `scripts/dev` 为统一入口；私有配置和运行产物进入 `runtime/` 或旧兼容私有路径且不得提交；脱敏示例进入 `config/examples/`；部署资产后续归档到 `deploy/`；现有部署脚本迁移前必须保留兼容入口；官方同步前必须按 `upstream-sync-policy.md` 审查本地定制。
 ```
 
-## 7. 天气查询容错
+## 8. 天气查询容错
 
 ```text
 定制模块：xiaozhi-server 天气插件
@@ -107,4 +123,121 @@
   - main/xiaozhi-server/config.yaml
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方修改 get_weather 插件，必须保留以下约定：和风接口异常、认证失败、Host 无效、城市查询失败或页面抓取失败时，先使用 Open-Meteo 兜底查询；`南京市玄武区`、`南京市江宁区` 等区县输入需要规范化为城市候选；工具结果必须以 Action.RESPONSE 直接返回给用户，不能再交给 LLM 把接口错误改写成地点不存在。
+```
+
+## 9. 视觉解释接口后台参数化
+
+```text
+定制模块：视觉模型配置下发、后台参数管理、Python 配置合并
+改动原因：WSL/端口转发部署时，Python 默认用 get_local_ip() 生成 172.28.*.* 这类 WSL 内网地址，ESP32 无法从局域网直接访问，导致 self_camera_take_photo 拍照成功后连接 explain URL 失败。需要把下发给设备的视觉解释接口地址纳入后台参数管理，由运维明确配置为设备可访问的 LAN IP、域名或反向代理地址。
+关键文件：
+  - main/manager-api/src/main/java/xiaozhi/common/constant/Constant.java
+  - main/manager-api/src/main/java/xiaozhi/modules/sys/controller/SysParamsController.java
+  - main/manager-api/src/main/resources/db/changelog/202606151745.sql
+  - main/manager-api/src/main/resources/db/changelog/db.changelog-master.yaml
+  - main/xiaozhi-server/config/config_loader.py
+  - main/xiaozhi-server/core/utils/util.py
+  - docs/mcp/mcp-vision-integration.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改 server 配置下发、SysParamsController、ConfigServiceImpl、config_loader.py 或视觉接口逻辑，必须保留 `server.vision_explain` 作为后台参数；Python 从 manager-api 读取配置时，监听地址 `server.ip/port/http_port/auth_key` 可继续以本地文件为准，但下发给设备的 `server.vision_explain` 默认必须使用后台值，只有本地文件配置了非空、非 `null`、非 `你的...` 的真实值时才允许覆盖。修改参数后需要刷新 Redis `server:config` 和 `sys:params` 缓存或通过后台保存参数触发配置重建，并重启/通知 xiaozhi-server 重新读取配置。
+```
+
+## 10. 语义控制中枢与语音操作系统架构
+
+```text
+定制模块：xiaozhi-server 语义前置控制链路
+改动原因：把小智从“ASR 后直接交给 LLM/function-call”的聊天机器人链路，演进为“TextNormalizer -> SemanticRouter -> StateManager -> PolicyEngine -> SemanticCenter”的语音控制中枢。停止、退出游戏、游戏续局、低置信度拒识等高频控制必须优先由服务端规则和状态处理，LLM 只作为复杂语义和普通聊天兜底。
+关键文件：
+  - main/xiaozhi-server/core/semantic/
+  - main/xiaozhi-server/core/connection.py
+  - main/xiaozhi-server/core/handle/receiveAudioHandle.py
+  - main/xiaozhi-server/core/providers/tools/unified_tool_handler.py
+  - main/xiaozhi-server/tests/test_semantic_router.py
+  - main/xiaozhi-server/tests/test_semantic_policy.py
+  - docs/architecture/semantic-control-center.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改 startToChat、ConnectionHandler 初始化、handle_user_intent、GameSessionManager、UnifiedToolHandler、ToolManager、abortHandle、TTS 入队或 function-call 主链路，必须保留语义控制中枢在旧意图/LLM 之前的前置拦截位置；未命中高置信度规则时必须继续兜底到旧 handle_user_intent 和 conn.chat；停止类指令必须复用 handleAbortMessage 并允许配置动作停止工具；纯语言游戏不得优先回到 active_game_tool，应交给主 LLM 对话，并只从已启用功能插件读取可编辑软规则；退出游戏不得关闭 websocket；语义模块顶层导入应尽量轻量，避免引入 opus/loguru 等运行依赖导致纯单元测试无法导入。
+```
+
+## 11. 管理后台模型测试详情字段补全
+
+```text
+定制模块：manager-api 模型配置测试接口
+改动原因：manager-web 的模型测试详情弹窗已经展示 testInput、testOutput、responseTimeMs，但 manager-api 多数测试路径原先只返回 success/message，导致 LLM、ASR、TTS、Ollama 和基础配置校验即使测试通过，弹窗仍显示输入、输出和响应耗时为 “-”。视觉模型测试也只能看到服务端本地图片路径，浏览器无法直接预览图片。现在模型测试入口提供统一兜底计时，并在真实调用和失败路径中返回测试输入、输出摘要、耗时和视觉测试图片预览，方便后台排查模型连通性、识别结果、TTS 音频大小和配置完整性问题。
+关键文件：
+  - main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelConfigServiceImpl.java
+  - main/manager-api/src/main/java/xiaozhi/modules/model/dto/ModelTestResultDTO.java
+  - main/manager-web/src/views/ModelConfig.vue
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改模型测试接口、ModelTestResultDTO 或 manager-web 测试详情弹窗，必须保留 testModel 返回 testInput、testOutput、responseTimeMs、testStatus、testTime 的约定；视觉模型测试必须通过 testImageDataUrl 或等效可浏览器访问的预览字段展示真实测试图片，不能只显示服务端本地路径；OpenAI 兼容 LLM、Ollama、OpenAI ASR/TTS、豆包流式 ASR、视觉模型、Intent 和基础配置校验都应返回可读的测试输入与输出摘要；真实接口调用要记录调用耗时，未显式计时的路径必须由 testModel 兜底补充耗时；输出摘要不得包含 api_key、access_token、secret_key 等敏感字段。
+```
+
+## 12. 本地知识库大模型切片与中文召回增强
+
+```text
+定制模块：manager-api 本地知识库适配器、manager-web 知识库配置弹窗、xiaozhi-server 本地知识库工具
+改动原因：本地知识库原先对 md/txt 文档主要按固定字符数硬切，容易把标题、适用问题、正文或一句话切开；召回也只按空格/标点切词，中文整句没有空格时容易查不到。现在知识库新增/编辑界面可以为每个知识库配置阿里云百炼/OpenAI 兼容切片模型，文档解析时优先由大模型按语义结构生成 JSON 切片；召回同时匹配 content/question/answer，并使用中文 n-gram 增强自然句检索。
+关键文件：
+  - main/manager-api/src/main/java/xiaozhi/modules/knowledge/rag/impl/LocalKnowledgeAdapter.java
+  - main/manager-api/src/main/java/xiaozhi/modules/knowledge/service/impl/KnowledgeBaseServiceImpl.java
+  - main/manager-api/src/main/resources/db/changelog/202606111650.sql
+  - main/manager-web/src/components/KnowledgeBaseDialog.vue
+  - main/manager-web/src/views/KnowledgeBaseManagement.vue
+  - main/manager-web/src/i18n/zh_CN.js
+  - main/xiaozhi-server/plugins_func/functions/search_from_local_knowledge.py
+  - docs/models/local-knowledge-integration.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改本地知识库、RAG 模型配置、知识库弹窗、文档解析或本地知识库工具，必须保留知识库级 parser_config 覆盖 RAG_LocalKnowledge 默认配置的约定；百炼/OpenAI 兼容切片模型应在知识库界面配置，不要求用户去后台模型配置手动改全局模型；文档解析优先走大模型切片，失败时才回退段落切分；旧文档必须重新解析才应用新切片；召回必须同时匹配 content/question/answer，并保留中文自然句 n-gram 检索增强。
+```
+
+## 13. 图片识别自然表达优化
+
+```text
+定制模块：xiaozhi-server OpenAI 兼容视觉模型、VLLM 模型配置、manager-api VLLM 供应器字段
+改动原因：设备拍照后的图片识别回复容易出现“以下是详细描述”“画面的主体是”等报告式表达，在聊天记录和语音播报中显得生硬。现在视觉模型默认增加自然口语化系统提示词，先给一句结论再补充少量关键细节，并让 max_tokens、temperature、top_p 真正传入 OpenAI 兼容接口；智控台 VLLM 配置可编辑 prompt 和生成参数。
+关键文件：
+  - main/xiaozhi-server/core/providers/vllm/openai.py
+  - main/xiaozhi-server/config.yaml
+  - main/xiaozhi-server/tests/test_vllm_openai_provider.py
+  - main/manager-api/src/main/resources/db/changelog/202606161805.sql
+  - main/manager-api/src/main/resources/db/changelog/db.changelog-master.yaml
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改 VLLM provider、视觉模型配置或模型供应器字段，必须保留默认自然表达提示词、可配置 prompt、生成参数透传和无配置时的默认兜底；视觉回复不得退回编号报告式模板。
+```
+
+## 14. 可视化 MCP HTTP 工具
+
+```text
+定制模块：manager-web 智能体功能弹窗、manager-api no-code MCP tool 配置、xiaozhi-server MCP HTTP 工具桥
+改动原因：需要让可信运营人员不写 Python 插件也能为智能体配置简单 HTTP 工具，并通过 MCP Endpoint 注册给运行时工具系统调用。
+关键文件：
+  - main/manager-web/src/components/FunctionDialog.vue
+  - main/manager-web/src/apis/module/agent.js
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/controller/AgentMcpAccessPointController.java
+  - main/manager-api/src/main/java/xiaozhi/modules/config/controller/ConfigController.java
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/dto/McpNoCodeToolDTO.java
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/entity/AgentMcpNoCodeToolEntity.java
+  - main/manager-api/src/main/resources/db/changelog/202606161720.sql
+  - main/xiaozhi-server/scripts/no_code_mcp_tools.py
+  - docs/mcp/no-code-http-tools.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改 MCP endpoint、智能体功能配置、ConfigController、AgentMcpAccessPointController 或工具 schema 下发链路，必须保留 no-code HTTP tool 的完整链路：Web 配置 JSON -> `ai_agent_mcp_no_code_tools` -> `/config/mcp/no-code-tools/{agentId}` -> `no_code_mcp_tools.py` -> MCP Endpoint tools/list/tools/call。该能力必须继续标注为高风险 HTTP 工具桥，生产环境应限制可信用户、保护 `MANAGER_API_SECRET`，并避免访问内网管理端口、云元数据地址和敏感服务。
+```
+
+## 15. 服务器音乐播放状态与音频队列边界
+
+```text
+定制模块：xiaozhi-server 服务器音乐播放插件
+改动原因：`play_music` 在 function_call 模式下原先只异步提交音乐播放任务，同步工具结果只显示“指令已接收”；管理后台聊天记录看不到实际选中的歌曲，容易误判为卡住。默认 `announce_before_play=false` 时，插件会通过 `send_tts_message` 给设备屏幕发送“正在播放/即将播放具体歌曲”的文本状态，但这段文本不是普通 TTS 音频，原先也不会进入聊天记录。另一个问题是火山双流等 TTS provider 收到 `ContentType.FILE` 音乐文件后会先暂存到 `before_stop_play_files`，如果没有 `SentenceType.LAST` 播放边界就不会 flush 到 WebSocket，表现为后台显示已选中歌曲但设备不播放。后续又发现“唱一遍会员星光”“给我放一遍吧”会漏到主 LLM 自由回复，只生成 TTS 文案而不调用音乐工具，因此音乐请求必须在服务端先解析为结构化意图，再统一调用 `play_music`。再后续出现“我不听了”被解析成 `play_music({"song_name":"了"})`，根因是旧逻辑先匹配“听/放/唱”触发词再抽歌名，没有先判断停止/否定语义；现在音乐语义统一由 `core.semantic.music_intent.parse_music_intent` 先输出 `play` / `stop` / `library` 动作，语义控制中枢和旧意图入口都消费同一个解析结果，`stop` 动作直接复用 `handleAbortMessage` 清队列和清音乐上下文，不再进入播放工具或主 LLM。
+关键文件：
+  - main/xiaozhi-server/core/semantic/music_intent.py
+  - main/xiaozhi-server/core/semantic/router.py
+  - main/xiaozhi-server/core/semantic/policy_engine.py
+  - main/xiaozhi-server/core/semantic/semantic_center.py
+  - main/xiaozhi-server/core/handle/intentHandler.py
+  - main/xiaozhi-server/plugins_func/functions/play_music.py
+  - main/xiaozhi-server/music/.xiaozhi-music-metadata.json
+  - main/xiaozhi-server/tests/test_music_intent.py
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改 `handle_user_intent`、语义控制中枢、`play_music`、TTS 队列、`Action.RECORD`、`ContentType.FILE` 或流式 TTS provider，必须保留以下约定：音乐类请求先由 `parse_music_intent` 解析动作和否定极性，覆盖指定歌名播放、唱某首歌、再放一遍、换一首、曲库查询、音乐上下文续播和“我不听了/别放了/停止播放”等停止命令；`stop` 必须先于播放触发词处理，并直接走 `handleAbortMessage`，不得被抽成歌名或落到主 LLM；`play` 命中后不得落到主 LLM 自由编唱；工具同步结果应使用用户可读的“正在为您播放音乐”，不要只返回“指令已接收”；默认跳过播放前 TTS 介绍语时，仍要把“此刻为您献上/正在播放 具体歌曲”这类选曲状态上报为 assistant 聊天记录；音乐文件入队必须按 `FIRST/ACTION -> MIDDLE/FILE -> LAST/ACTION` 发送播放边界，确保火山双流、阿里云流式、讯飞流式、Minimax 等 provider 能把暂存文件音频 flush 到设备；曲库 `.xiaozhi-music-metadata.json` 支持 `aliases`，用于处理 ASR 近音、品牌曲别名和用户俗称。聊天记录中的 `play_music({...})` 和 `{"result": "正在为您播放音乐"}` 是工具调用审计记录，不应被当作播放失败错误。
 ```

@@ -1,5 +1,8 @@
 # 部署架构图
 ![请参考-全模块安装架构图](../images/deploy2.png)
+
+> 注意：本文是官方兼容全模块部署说明，包含官方镜像、官方脚本和默认示例配置。本地二次开发项目的私有生产发布优先阅读 [private-docker-release.md](./private-docker-release.md) 和 [deployment-asset-policy.md](./deployment-asset-policy.md)。
+
 # 方式一：Docker运行全模块
 `0.8.2`版本开始，本项目发行的docker镜像只支持`x86架构`，如果需要在`arm64架构`的CPU上部署，可按照[这个教程](docker-build.md)在本机编译`arm64的镜像`。
 

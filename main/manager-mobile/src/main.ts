@@ -9,7 +9,6 @@ import 'virtual:uno.css'
 
 // 导入国际化相关功能
 import { initI18n } from './i18n'
-import { useLangStore } from './store/lang'
 
 export function createApp() {
   const app = createSSRApp(App)

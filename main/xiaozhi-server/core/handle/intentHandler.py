@@ -1,6 +1,7 @@
 import json
 import uuid
 import asyncio
+import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -12,12 +13,16 @@ from plugins_func.register import Action, ActionResponse
 from core.handle.sendAudioHandle import send_stt_message
 from core.handle.reportHandle import enqueue_tool_report
 from core.utils.util import remove_punctuation_and_length
+from core.utils.correct_words import apply_correct_words
 from core.providers.tts.dto.dto import TTSMessageDTO, SentenceType
+from core.semantic.music_intent import parse_music_intent
+from plugins_func.functions.play_music import list_available_music
 
 TAG = __name__
 
 
 async def handle_user_intent(conn: "ConnectionHandler", text):
+    text = apply_correct_words(conn, text)
     # 预处理输入文本，处理可能的JSON格式
     try:
         if text.strip().startswith("{") and text.strip().endswith("}"):
@@ -37,19 +42,42 @@ async def handle_user_intent(conn: "ConnectionHandler", text):
     if await checkWakeupWords(conn, filtered_text):
         return True
 
+    music_route = await route_music_intent(conn, text, filtered_text)
+    if music_route is not None:
+        return music_route
+
     active_game_tool = None
+    requested_game_tool = None
     if hasattr(conn, "game_session_manager") and conn.game_session_manager:
         active_game_tool = conn.game_session_manager.get_active_tool()
-    if active_game_tool and conn.func_handler and conn.func_handler.has_tool(active_game_tool):
+        requested_game_tool = conn.game_session_manager.get_requested_game_tool(text)
+    if requested_game_tool and conn.func_handler and conn.func_handler.has_tool(requested_game_tool):
+        if active_game_tool and requested_game_tool != active_game_tool:
+            conn.game_session_manager.clear_active_games()
         intent_result = json.dumps(
             {
                 "function_call": {
-                    "name": active_game_tool,
+                    "name": requested_game_tool,
                     "arguments": {"user_message": text},
                 }
             },
             ensure_ascii=False,
         )
+        conn.sentence_id = str(uuid.uuid4().hex)
+        return await process_intent_result(conn, intent_result, text)
+
+    if active_game_tool and conn.func_handler and conn.func_handler.has_tool(active_game_tool):
+        function_name = active_game_tool
+        intent_result = json.dumps(
+            {
+                "function_call": {
+                    "name": function_name,
+                    "arguments": {"user_message": text},
+                }
+            },
+            ensure_ascii=False,
+        )
+        conn.sentence_id = str(uuid.uuid4().hex)
         return await process_intent_result(conn, intent_result, text)
 
     if conn.intent_type == "function_call":
@@ -93,6 +121,58 @@ async def analyze_intent_with_llm(conn: "ConnectionHandler", text):
         conn.logger.bind(tag=TAG).error(f"意图识别失败: {str(e)}")
 
     return None
+
+
+async def route_music_intent(conn: "ConnectionHandler", text, filtered_text):
+    if not conn.func_handler or not conn.func_handler.has_tool("play_music"):
+        return None
+
+    normalized = re.sub(r"[\s，。！？!?,.;；：“”\"'、~～…]+", "", filtered_text or text)
+    if not normalized:
+        return None
+
+    is_music_context = getattr(conn, "last_tool_context", None) == "music"
+    last_song_name = getattr(conn, "last_music_song_name", None)
+    music_intent = parse_music_intent(normalized, is_music_context, last_song_name)
+
+    if music_intent and music_intent.action == "library":
+        await send_stt_message(conn, text)
+        names = list_available_music(conn, limit=20)
+        if names:
+            response = "我这里有：" + "、".join(names)
+        else:
+            response = "本地音乐库里暂时没有可播放的歌曲。"
+        conn.sentence_id = str(uuid.uuid4().hex)
+        conn.dialogue.put(Message(role="user", content=text))
+        speak_txt(conn, response)
+        conn.last_tool_context = "music"
+        return True
+
+    if music_intent and music_intent.action == "stop":
+        from core.handle.abortHandle import handleAbortMessage
+
+        await send_stt_message(conn, text)
+        await handleAbortMessage(conn)
+        conn.last_tool_context = None
+        conn.last_music_song_name = None
+        return True
+
+    if not music_intent or music_intent.action != "play":
+        return None
+
+    intent_result = json.dumps(
+        {
+            "function_call": {
+                "name": "play_music",
+                "arguments": {"song_name": music_intent.song_name},
+            }
+        },
+        ensure_ascii=False,
+    )
+    conn.sentence_id = str(uuid.uuid4().hex)
+    conn.last_tool_context = "music"
+    conn.last_music_song_name = music_intent.song_name
+    return await process_intent_result(conn, intent_result, text)
 
 
 async def process_intent_result(
@@ -190,7 +270,8 @@ async def process_intent_result(
 
                 # 上报工具调用结果
                 if result:
-                    enqueue_tool_report(conn, function_name, tool_input, str(result.result) if result.result else None, report_tool_call=False)
+                    report_result = result.result if result.result else result.response
+                    enqueue_tool_report(conn, function_name, tool_input, str(report_result) if report_result else None, report_tool_call=False)
 
                     if result.action == Action.RESPONSE:  # 直接回复前端
                         text = result.response

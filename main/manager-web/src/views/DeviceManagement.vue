@@ -71,6 +71,9 @@
                   <el-button v-if="isGenerate(scope.row)" size="mini" type="text" @click="handleGenertor(scope.row)">
                     {{ $t('device.deviceThemeGeneration') }}
                   </el-button>
+                  <el-button size="mini" type="text" @click="handleDebug(scope.row)">
+                    {{ $t('device.dialogDebug') }}
+                  </el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -123,6 +126,7 @@
       @refresh="fetchBindDevices(currentAgentId)" />
     <ManualAddDeviceDialog :visible.sync="manualAddDeviceDialogVisible" :agent-id="currentAgentId"
       @refresh="fetchBindDevices(currentAgentId)" />
+    <DeviceChatDebugDialog :visible.sync="debugDialogVisible" :device="debugDevice" />
     <el-footer>
       <version-footer />
     </el-footer>
@@ -134,6 +138,7 @@ import Api from '@/apis/api';
 import AddDeviceDialog from "@/components/AddDeviceDialog.vue";
 import HeaderBar from "@/components/HeaderBar.vue";
 import ManualAddDeviceDialog from "@/components/ManualAddDeviceDialog.vue";
+import DeviceChatDebugDialog from "@/components/DeviceChatDebugDialog.vue";
 import VersionFooter from "@/components/VersionFooter.vue";
 import MacAddressMask from "@/components/MacAddressMask.vue";
 
@@ -142,6 +147,7 @@ export default {
     HeaderBar,
     AddDeviceDialog,
     ManualAddDeviceDialog,
+    DeviceChatDebugDialog,
     VersionFooter,
     MacAddressMask,
   },
@@ -149,6 +155,8 @@ export default {
     return {
       addDeviceDialogVisible: false,
       manualAddDeviceDialogVisible: false,
+      debugDialogVisible: false,
+      debugDevice: {},
       selectedDeviceId: '',
       searchKeyword: "",
       activeSearchKeyword: "",
@@ -288,6 +296,10 @@ export default {
     },
     handleManualAddDevice() {
       this.manualAddDeviceDialogVisible = true;
+    },
+    handleDebug(row) {
+      this.debugDevice = row;
+      this.debugDialogVisible = true;
     },
     submitRemark(row) {
       if (row._submitting) return;

@@ -1,16 +1,13 @@
 <script setup lang="ts">
 import { onHide, onLaunch, onShow } from '@dcloudio/uni-app'
-import { watch, onMounted } from 'vue'
 import { usePageAuth } from '@/hooks/usePageAuth'
 import { useConfigStore } from '@/store'
 import { t } from '@/i18n'
-import { useLangStore } from '@/store/lang'
 import 'abortcontroller-polyfill/dist/abortcontroller-polyfill-only'
 
 usePageAuth()
 
 const configStore = useConfigStore()
-const langStore = useLangStore()
 
 onLaunch(() => {
   console.log('App Launch')
@@ -63,16 +60,6 @@ function updateTabBarText() {
     console.log('更新tabBar文本时出错:', error)
   }
 }
-// 监听语言切换事件
-onMounted(() => {
-  // 监听语言变化，当语言改变时自动更新tabBar文本
-  watch(() => langStore.currentLang, () => {
-    console.log('语言已切换，更新tabBar文本')
-    // 语言切换后立即更新tabBar文本
-    updateTabBarText()
-  })
-})
-
 onHide(() => {
   console.log('App Hide')
 })

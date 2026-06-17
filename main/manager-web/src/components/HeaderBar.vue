@@ -98,6 +98,7 @@
             $route.path === '/params-management' ||
             $route.path === '/provider-management' ||
             $route.path === '/function-plugin-management' ||
+            $route.path === '/music-management' ||
             $route.path === '/server-side-management' ||
             $route.path === '/agent-template-management' ||
             $route.path === '/ota-management' ||
@@ -111,6 +112,7 @@
                   $route.path === '/params-management' ||
                   $route.path === '/provider-management' ||
                   $route.path === '/function-plugin-management' ||
+                  $route.path === '/music-management' ||
                   $route.path === '/server-side-management' ||
                   $route.path === '/agent-template-management' ||
                   $route.path === '/ota-management' ||
@@ -140,6 +142,9 @@
             </el-dropdown-item>
             <el-dropdown-item @click.native="handleRouter('functionPluginManagement')">
               {{ $t("header.functionPluginManagement") }}
+            </el-dropdown-item>
+            <el-dropdown-item @click.native="handleRouter('musicManagement')">
+              {{ $t("header.musicManagement") }}
             </el-dropdown-item>
             <el-dropdown-item @click.native="handleRouter('agentTemplate')">
               {{ $t("header.agentTemplate") }}
@@ -206,7 +211,6 @@
 </template>
 
 <script>
-import i18n, { changeLanguage } from "@/i18n";
 import featureManager from "@/utils/featureManager"; // 引入功能管理工具类
 import { mapActions, mapState } from "vuex";
 import ChangePasswordDialog from "./ChangePasswordDialog.vue"; // 引入修改密码弹窗组件
@@ -252,6 +256,7 @@ export default {
         dictManagement: "/dict-management",
         providerManagement: "/provider-management",
         functionPluginManagement: "/function-plugin-management",
+        musicManagement: "/music-management",
         agentTemplate: "/agent-template-management",
         replacementWordManagement: "/replacement-word-management",
         serverSideManagement: "/server-side-management",
@@ -268,83 +273,12 @@ export default {
       }),
       userInfo: (state) => state.userInfo,
     }),
-    // 获取当前语言
-    currentLanguage() {
-      return i18n.locale || "zh_CN";
-    },
-    // 获取当前语言显示文本
-    currentLanguageText() {
-      const currentLang = this.currentLanguage;
-      switch (currentLang) {
-        case "zh_CN":
-          return this.$t("language.zhCN");
-        case "zh_TW":
-          return this.$t("language.zhTW");
-        case "en":
-          return this.$t("language.en");
-        case "de":
-          return this.$t("language.de");
-        case "vi":
-          return this.$t("language.vi");
-        case "pt_BR":
-          return this.$t("language.ptBR");
-        default:
-          return this.$t("language.zhCN");
-      }
-    },
-    // 根据当前语言获取对应的xiaozhi-ai图标
     xiaozhiAiIcon() {
-      const currentLang = this.currentLanguage;
-      switch (currentLang) {
-        case "zh_CN":
-          return require("@/assets/xiaozhi-ai.png");
-        case "zh_TW":
-          return require("@/assets/xiaozhi-ai_zh_TW.png");
-        case "en":
-          return require("@/assets/xiaozhi-ai_en.png");
-        case "de":
-          return require("@/assets/xiaozhi-ai_de.png");
-        case "vi":
-          return require("@/assets/xiaozhi-ai_vi.png");
-        case "pt_BR":
-          return require("@/assets/xiaozhi-ai_en.png");
-        default:
-          return require("@/assets/xiaozhi-ai.png");
-      }
+      return require("@/assets/xiaozhi-ai.png");
     },
     // 用户菜单选项
     userMenuOptions() {
       return [
-        {
-          label: this.currentLanguageText,
-          value: "language",
-          children: [
-            {
-              label: this.$t("language.zhCN"),
-              value: "zh_CN",
-            },
-            {
-              label: this.$t("language.zhTW"),
-              value: "zh_TW",
-            },
-            {
-              label: this.$t("language.en"),
-              value: "en",
-            },
-            {
-              label: this.$t("language.de"),
-              value: "de",
-            },
-            {
-              label: this.$t("language.vi"),
-              value: "vi",
-            },
-            {
-              label: this.$t("language.ptBR"),
-              value: "pt_BR",
-            },
-          ],
-        },
         {
           label: this.$t("header.changePassword"),
           value: "changePassword",
@@ -516,36 +450,19 @@ export default {
 
       const action = value[value.length - 1];
 
-      // 处理语言切换
-      if (value.length === 2 && value[0] === "language") {
-        this.changeLanguage(action);
-      } else {
-        // 处理其他操作
-        switch (action) {
-          case "changePassword":
-            this.showChangePasswordDialog();
-            break;
-          case "logout":
-            this.handleLogout();
-            break;
-        }
+      switch (action) {
+        case "changePassword":
+          this.showChangePasswordDialog();
+          break;
+        case "logout":
+          this.handleLogout();
+          break;
       }
 
       // 操作完成后立即清空选择
       setTimeout(() => {
         this.completeResetCascader();
       }, 300);
-    },
-
-    // 切换语言
-    changeLanguage(lang) {
-      changeLanguage(lang);
-      this.$message.success({
-        message: this.$t("message.success"),
-        showClose: true,
-      });
-      // 添加：切换语言后重置用户菜单可见状态
-      this.userMenuVisible = false;
     },
 
     // 完全重置级联选择器

@@ -26,20 +26,8 @@ import ViteRestart from 'vite-plugin-restart'
 export default async ({ command, mode }) => {
   // @see https://unocss.dev/
   const UnoCSS = (await import('unocss/vite')).default
-  // console.log(mode === process.env.NODE_ENV) // true
-
-  // mode: 区分生产环境还是开发环境
-  console.log('command, mode -> ', command, mode)
-  // pnpm dev:h5 时得到 => serve development
-  // pnpm build:h5 时得到 => build production
-  // pnpm dev:mp-weixin 时得到 => build development (注意区别，command为build)
-  // pnpm build:mp-weixin 时得到 => build production
-  // pnpm dev:app 时得到 => build development (注意区别，command为build)
-  // pnpm build:app 时得到 => build production
-  // dev 和 build 命令可以分别使用 .env.development 和 .env.production 的环境变量
 
   const { UNI_PLATFORM } = process.env
-  console.log('UNI_PLATFORM -> ', UNI_PLATFORM) // 得到 mp-weixin, h5, app 等
 
   const env = loadEnv(mode, path.resolve(process.cwd(), 'env'))
   const {
@@ -51,7 +39,7 @@ export default async ({ command, mode }) => {
     VITE_APP_PROXY,
     VITE_APP_PROXY_PREFIX,
   } = env
-  console.log('环境变量 env -> ', env)
+  const enableAnalyze = env.VITE_BUILD_ANALYZE === 'true' || process.env.ANALYZE === 'true'
 
   return defineConfig({
     envDir: './env', // 自定义env目录
@@ -114,6 +102,7 @@ export default async ({ command, mode }) => {
       // 打包分析插件，h5 + 生产环境才弹出
       UNI_PLATFORM === 'h5'
       && mode === 'production'
+      && enableAnalyze
       && visualizer({
         filename: './node_modules/.cache/visualizer/stats.html',
         open: true,

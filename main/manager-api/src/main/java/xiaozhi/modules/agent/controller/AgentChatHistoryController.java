@@ -12,6 +12,7 @@ import java.util.UUID;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.shiro.authz.annotation.RequiresPermissions;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -78,12 +79,7 @@ public class AgentChatHistoryController {
     @PostMapping("/getDownloadUrl/{agentId}/{sessionId}")
     public Result<String> getDownloadUrl(@PathVariable("agentId") String agentId,
             @PathVariable("sessionId") String sessionId) {
-        // 获取当前用户
-        UserDetail user = SecurityUser.getUser();
-        // 检查权限
-        if (!agentService.checkAgentPermission(agentId, user.getId())) {
-            throw new RenException(ErrorCode.CHAT_HISTORY_NO_PERMISSION);
-        }
+        checkAgentPermission(agentId);
 
         // 生成UUID
         String uuid = UUID.randomUUID().toString();
@@ -91,6 +87,52 @@ public class AgentChatHistoryController {
         redisUtils.set(RedisKeys.getChatHistoryKey(uuid), agentId + ":" + sessionId);
 
         return new Result<String>().ok(uuid);
+    }
+
+    /**
+     * 清空智能体聊天记录
+     *
+     * @param agentId 智能体ID
+     */
+    @Operation(summary = "清空智能体聊天记录")
+    @RequiresPermissions("sys:role:normal")
+    @DeleteMapping("/{agentId}")
+    public Result<Void> deleteByAgentId(@PathVariable("agentId") String agentId) {
+        checkAgentPermission(agentId);
+        agentChatHistoryService.deleteByAgentId(agentId, true, true);
+        return new Result<Void>().ok(null);
+    }
+
+    /**
+     * 删除指定会话聊天记录
+     *
+     * @param agentId   智能体ID
+     * @param sessionId 会话ID
+     */
+    @Operation(summary = "删除指定会话聊天记录")
+    @RequiresPermissions("sys:role:normal")
+    @DeleteMapping("/{agentId}/session/{sessionId}")
+    public Result<Void> deleteBySessionId(@PathVariable("agentId") String agentId,
+            @PathVariable("sessionId") String sessionId) {
+        checkAgentPermission(agentId);
+        agentChatHistoryService.deleteBySessionId(agentId, sessionId);
+        return new Result<Void>().ok(null);
+    }
+
+    /**
+     * 删除单条聊天消息
+     *
+     * @param agentId   智能体ID
+     * @param messageId 消息ID
+     */
+    @Operation(summary = "删除单条聊天消息")
+    @RequiresPermissions("sys:role:normal")
+    @DeleteMapping("/{agentId}/message/{messageId}")
+    public Result<Void> deleteByMessageId(@PathVariable("agentId") String agentId,
+            @PathVariable("messageId") Long messageId) {
+        checkAgentPermission(agentId);
+        agentChatHistoryService.deleteByMessageId(agentId, messageId);
+        return new Result<Void>().ok(null);
     }
 
     /**
@@ -241,6 +283,16 @@ public class AgentChatHistoryController {
             }
         } catch (IOException e) {
             e.printStackTrace();
+        }
+    }
+
+    private void checkAgentPermission(String agentId) {
+        if (StringUtils.isBlank(agentId)) {
+            throw new RenException(ErrorCode.CHAT_HISTORY_AGENT_ID_NOT_NULL);
+        }
+        UserDetail user = SecurityUser.getUser();
+        if (!agentService.checkAgentPermission(agentId, user.getId())) {
+            throw new RenException(ErrorCode.CHAT_HISTORY_NO_PERMISSION);
         }
     }
 }

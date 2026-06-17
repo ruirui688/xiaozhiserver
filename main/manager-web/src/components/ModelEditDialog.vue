@@ -103,6 +103,12 @@
                     "></el-input>
               </template>
 
+              <el-select v-else-if="field.type === 'select'" v-model="form.configJson[field.prop]"
+                :placeholder="field.placeholder" class="custom-select custom-input-bg" style="width: 100%">
+                <el-option v-for="option in field.options" :key="option.value" :label="option.label"
+                  :value="option.value" />
+              </el-select>
+
               <el-input v-else v-model="form.configJson[field.prop]" :placeholder="field.placeholder" :type="field.type"
                 class="custom-input-bg" :show-password="field.type === 'password'" @focus="
                   isSensitiveField(field.prop)
@@ -317,6 +323,8 @@ export default {
         }
       });
 
+      const configJson = this.normalizeDeepSeekConfig({ ...this.form.configJson });
+
       return {
         id: this.modelData.id,
         modelCode: this.form.modelCode,
@@ -326,7 +334,7 @@ export default {
         docLink: this.form.docLink,
         remark: this.form.remark,
         sort: this.form.sort || 0,
-        configJson: { ...this.form.configJson },
+        configJson,
       };
     },
     loadProviders() {
@@ -351,15 +359,26 @@ export default {
           (p) => p.providerCode === providerCode
         );
         if (provider) {
-          this.dynamicCallInfoFields = JSON.parse(provider.fields || "[]").map((f) => ({
+          const sourceConfig =
+            (this.pendingModelData && this.pendingModelData.configJson) ||
+            this.form.configJson ||
+            {};
+          const providerFields = this.isDeepSeekModelConfig(sourceConfig)
+            ? this.getDeepSeekCallInfoFields()
+            : JSON.parse(provider.fields || "[]");
+
+          this.dynamicCallInfoFields = providerFields.map((f) => ({
             label: f.label,
             prop: f.key,
             type:
               f.type === "dict"
                 ? "json-textarea"
+                : f.type === "select"
+                  ? "select"
                 : f.type === "password"
                   ? "password"
                   : "text",
+            options: f.options || [],
             placeholder: `请输入${f.key}`,
           }));
 
@@ -372,7 +391,7 @@ export default {
       }
     },
     processModelData(model) {
-      let configJson = model.configJson || {};
+      let configJson = this.normalizeDeepSeekConfig(model.configJson || {});
       this.dynamicCallInfoFields.forEach((field) => {
         if (!configJson.hasOwnProperty(field.prop)) {
           configJson[field.prop] = "";
@@ -400,6 +419,75 @@ export default {
         sort: Number(model.sort) || 0,
         configJson: { ...configJson },
       };
+    },
+    isDeepSeekModelConfig(configJson = {}) {
+      const baseUrl = String(configJson.base_url || configJson.url || "").toLowerCase();
+      const modelName = String(configJson.model_name || "").toLowerCase();
+      const modelCode = String(this.form.modelCode || this.modelData.modelCode || "").toLowerCase();
+      return (
+        baseUrl.includes("api.deepseek.com") ||
+        modelName.includes("deepseek") ||
+        modelCode.includes("deepseek")
+      );
+    },
+    getDeepSeekCallInfoFields() {
+      return [
+        { key: "base_url", label: "基础URL", type: "string" },
+        { key: "model_name", label: "模型名称", type: "string" },
+        { key: "api_key", label: "API密钥", type: "password" },
+        {
+          key: "thinking",
+          label: "思考模式",
+          type: "select",
+          options: [
+            { label: "非思考模式", value: "disabled" },
+            { label: "思考模式", value: "enabled" },
+          ],
+        },
+        {
+          key: "reasoning_effort",
+          label: "思考强度",
+          type: "select",
+          options: [
+            { label: "高", value: "high" },
+            { label: "最高", value: "max" },
+          ],
+        },
+      ];
+    },
+    normalizeDeepSeekConfig(configJson) {
+      if (!this.isDeepSeekModelConfig(configJson)) {
+        return configJson;
+      }
+
+      const normalized = { ...configJson };
+      normalized.type = "openai";
+      normalized.base_url = normalized.base_url || normalized.url || "https://api.deepseek.com";
+      delete normalized.url;
+
+      const modelName = String(normalized.model_name || "").toLowerCase();
+      if (!modelName || ["deepseek-chat", "deepseek-reasoner"].includes(modelName)) {
+        normalized.model_name = "deepseek-v4-flash";
+      }
+
+      if (normalized.thinking && typeof normalized.thinking === "object") {
+        normalized.thinking = normalized.thinking.type;
+      }
+      normalized.thinking = normalized.thinking || "disabled";
+      normalized.reasoning_effort = normalized.reasoning_effort || "high";
+
+      [
+        "temperature",
+        "max_tokens",
+        "top_p",
+        "top_k",
+        "frequency_penalty",
+        "presence_penalty",
+      ].forEach((key) => {
+        delete normalized[key];
+      });
+
+      return normalized;
     },
     handleJsonChange(field, value) {
       const parsed = this.validateJson(value);

@@ -1,0 +1,110 @@
+"""Runtime registry for active device connections."""
+
+from typing import Dict, Optional, Set, TYPE_CHECKING
+
+from config.logger import setup_logging
+
+if TYPE_CHECKING:
+    from core.connection import ConnectionHandler
+
+
+TAG = __name__
+logger = setup_logging()
+_connections: Dict[str, "ConnectionHandler"] = {}
+
+
+def _normalize_key(value: str) -> str:
+    return value.strip().lower()
+
+
+def _alias_keys(value: str) -> Set[str]:
+    if not value:
+        return set()
+
+    normalized = _normalize_key(value)
+    keys = {normalized}
+    keys.add(normalized.replace(":", "_"))
+
+    if "@@@" in normalized:
+        keys.update(part for part in normalized.split("@@@") if part)
+
+    expanded_keys = set(keys)
+    for key in keys:
+        expanded_keys.add(key.replace("_", ":"))
+    return expanded_keys
+
+
+def _connection_keys(conn: "ConnectionHandler") -> Set[str]:
+    keys = set()
+    keys.update(_alias_keys(conn.device_id or ""))
+    if conn.headers:
+        keys.update(_alias_keys(conn.headers.get("device-id", "") or ""))
+        keys.update(_alias_keys(conn.headers.get("client-id", "") or ""))
+    return keys
+
+
+def is_debug_connection(conn: "ConnectionHandler") -> bool:
+    client_id = ""
+    if conn.headers:
+        client_id = conn.headers.get("client-id", "") or ""
+    return client_id.startswith("manager-debug-")
+
+
+def _client_id(conn: "ConnectionHandler") -> str:
+    if not conn.headers:
+        return ""
+    return conn.headers.get("client-id", "") or ""
+
+
+def register_connection(conn: "ConnectionHandler") -> None:
+    client_id = _client_id(conn)
+    conn._runtime_registry_keys = set()
+    if not conn.device_id:
+        logger.bind(tag=TAG).warning("跳过运行时设备注册: 缺少device-id, client-id={}", client_id)
+        return
+    if is_debug_connection(conn):
+        logger.bind(tag=TAG).info(
+            "跳过运行时设备注册: 调试连接不作为真实设备, device-id={}, client-id={}",
+            conn.device_id,
+            client_id,
+        )
+        return
+    keys = _connection_keys(conn)
+    for key in keys:
+        _connections[key] = conn
+    conn._runtime_registry_keys = keys
+    logger.bind(tag=TAG).info(
+        "运行时设备连接已注册: device-id={}, client-id={}, keys={}",
+        conn.device_id,
+        client_id,
+        sorted(keys),
+    )
+
+
+def unregister_connection(conn: "ConnectionHandler") -> None:
+    keys = getattr(conn, "_runtime_registry_keys", set())
+    if not keys:
+        return
+    for key in keys:
+        if _connections.get(key) is conn:
+            _connections.pop(key, None)
+    conn._runtime_registry_keys = set()
+    if keys:
+        logger.bind(tag=TAG).info(
+            "运行时设备连接已注销: device-id={}, client-id={}, keys={}",
+            conn.device_id,
+            _client_id(conn),
+            sorted(keys),
+        )
+
+
+def get_connection(device_id: str) -> Optional["ConnectionHandler"]:
+    for key in _alias_keys(device_id):
+        conn = _connections.get(key)
+        if conn:
+            return conn
+    return None
+
+
+def registered_keys() -> Set[str]:
+    return set(_connections.keys())

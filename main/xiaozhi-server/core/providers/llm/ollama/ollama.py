@@ -8,6 +8,8 @@ logger = setup_logging()
 
 
 class LLMProvider(LLMProviderBase):
+    supports_native_function_call = True
+
     def __init__(self, config):
         self.model_name = config.get("model_name")
         self.base_url = config.get("base_url", "http://localhost:11434")

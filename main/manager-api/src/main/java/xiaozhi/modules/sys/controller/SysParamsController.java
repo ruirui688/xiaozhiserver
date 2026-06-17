@@ -105,6 +105,9 @@ public class SysParamsController {
         // 验证OTA地址
         validateOtaUrl(dto.getParamCode(), dto.getParamValue());
 
+        // 验证视觉分析接口地址
+        validateVisionExplainUrl(dto.getParamCode(), dto.getParamValue());
+
         // 验证MCP地址
         validateMcpUrl(dto.getParamCode(), dto.getParamValue());
 
@@ -238,6 +241,27 @@ public class SysParamsController {
             }
         } catch (Exception e) {
             throw new RenException(ErrorCode.MCP_INTERFACE_VALIDATION_FAILED);
+        }
+    }
+
+    /**
+     * 验证视觉分析接口地址
+     */
+    private void validateVisionExplainUrl(String paramCode, String url) {
+        if (!paramCode.equals(Constant.SERVER_VISION_EXPLAIN)) {
+            return;
+        }
+        if (StringUtils.isBlank(url) || url.equals("null")) {
+            return;
+        }
+        if (url.contains("localhost") || url.contains("127.0.0.1")) {
+            throw new RenException(ErrorCode.OTA_URL_LOCALHOST);
+        }
+        if (!url.toLowerCase().startsWith("http")) {
+            throw new RenException(ErrorCode.OTA_URL_PROTOCOL_ERROR);
+        }
+        if (!url.endsWith("/mcp/vision/explain")) {
+            throw new RenException(ErrorCode.OTA_URL_FORMAT_ERROR);
         }
     }
 

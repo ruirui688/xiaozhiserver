@@ -112,6 +112,11 @@ public interface Constant {
     String SERVER_OTA = "server.ota";
 
     /**
+     * 视觉分析接口地址
+     */
+    String SERVER_VISION_EXPLAIN = "server.vision_explain";
+
+    /**
      * 是否允许用户注册
      */
     String SERVER_ALLOW_USER_REGISTER = "server.allow_user_register";

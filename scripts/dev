@@ -27,6 +27,11 @@ Targets:
 
 Environment:
   DEV_SKIP_INFRA=1    Do not try to start MySQL/Redis before api/all.
+  DEV_API_MAVEN_RUN=1 Use mvn spring-boot:run for api instead of fast java start.
+  DEV_API_FORCE_COMPILE=1 Compile manager-api before fast java start.
+  XIAOZHI_SERVER_PYTHON=/path/to/python
+                       Override the xiaozhi-server Python interpreter.
+  XIAOZHI_LOG_LEVEL=DEBUG  Enable verbose manager-api application logs.
   DEV_LOG_LINES=120   Change lines shown by logs.
   DEV_LOG_DIR=...     Override runtime/logs/dev.
   DEV_RUN_DIR=...     Override runtime/run.
@@ -48,6 +53,13 @@ die() {
 
 command_exists() {
   command -v "$1" >/dev/null 2>&1
+}
+
+conda_env_exists() {
+  local env_name="$1"
+
+  command_exists conda || return 1
+  conda env list 2>/dev/null | awk '{print $1}' | grep -Fxq "$env_name"
 }
 
 require_command() {
@@ -279,12 +291,51 @@ start_process() {
 }
 
 start_api() {
+  local dir
+  dir="$(service_workdir api)"
+
+  if [[ "${DEV_API_MAVEN_RUN:-0}" == "1" ]]; then
+    require_command mvn
+    start_process \
+      "manager-api" \
+      "8002" \
+      "$dir" \
+      mvn spring-boot:run -Dspring-boot.run.profiles=dev
+    return
+  fi
+
+  require_command java
   require_command mvn
+
+  if [[ "${DEV_API_FORCE_COMPILE:-0}" == "1" || ! -d "$dir/target/classes" ]]; then
+    log "Compiling manager-api before fast start"
+    (cd "$dir" && mvn -q -DskipTests compile)
+  fi
+
+  local classpath_file="$dir/target/classpath.dev"
+  if [[ ! -s "$classpath_file" || "$dir/pom.xml" -nt "$classpath_file" ]]; then
+    log "Refreshing manager-api dependency classpath"
+    (
+      cd "$dir"
+      mvn -q -DincludeScope=runtime -Dmdep.outputFile=target/classpath.dev dependency:build-classpath
+    )
+  fi
+
+  if [[ ! -s "$classpath_file" ]]; then
+    warn "Fast api classpath is unavailable; falling back to mvn spring-boot:run"
+    start_process \
+      "manager-api" \
+      "8002" \
+      "$dir" \
+      mvn spring-boot:run -Dspring-boot.run.profiles=dev
+    return
+  fi
+
   start_process \
     "manager-api" \
     "8002" \
-    "$(service_workdir api)" \
-    mvn spring-boot:run -Dspring-boot.run.profiles=dev
+    "$dir" \
+    java -XX:TieredStopAtLevel=1 -cp "target/classes:$(cat "$classpath_file")" xiaozhi.AdminApplication --spring.profiles.active=dev
 }
 
 start_web() {
@@ -302,16 +353,19 @@ start_server() {
   local dir
   dir="$(service_workdir server)"
 
+  if [[ -n "${XIAOZHI_SERVER_PYTHON:-}" ]]; then
+    [[ -x "$XIAOZHI_SERVER_PYTHON" ]] || die "XIAOZHI_SERVER_PYTHON is not executable: $XIAOZHI_SERVER_PYTHON"
+    start_process "xiaozhi-server" "8000" "$dir" "$XIAOZHI_SERVER_PYTHON" app.py
+    return
+  fi
+
   local conda_env_python="$HOME/miniconda3/envs/xiaozhi-esp32-server/bin/python"
   if [[ -x "$conda_env_python" ]]; then
     start_process "xiaozhi-server" "8000" "$dir" "$conda_env_python" app.py
-  elif command_exists conda; then
+  elif conda_env_exists "xiaozhi-esp32-server"; then
     start_process "xiaozhi-server" "8000" "$dir" conda run -n xiaozhi-esp32-server python app.py
-  elif command_exists python; then
-    start_process "xiaozhi-server" "8000" "$dir" python app.py
   else
-    require_command python3
-    start_process "xiaozhi-server" "8000" "$dir" python3 app.py
+    die "Missing Conda env 'xiaozhi-esp32-server'. Refusing to start xiaozhi-server with system Python. See docs/development/local-dev-workflow.md."
   fi
 }
 
@@ -574,17 +628,24 @@ doctor_port() {
 }
 
 doctor_python() {
+  if [[ -n "${XIAOZHI_SERVER_PYTHON:-}" ]]; then
+    if [[ -x "$XIAOZHI_SERVER_PYTHON" ]]; then
+      doctor_ok "Python env for xiaozhi-server from XIAOZHI_SERVER_PYTHON: $XIAOZHI_SERVER_PYTHON"
+    else
+      doctor_fail "XIAOZHI_SERVER_PYTHON is not executable: $XIAOZHI_SERVER_PYTHON"
+    fi
+    return
+  fi
+
   local conda_env_python="$HOME/miniconda3/envs/xiaozhi-esp32-server/bin/python"
   if [[ -x "$conda_env_python" ]]; then
     doctor_ok "Python env for xiaozhi-server: $conda_env_python"
+  elif conda_env_exists "xiaozhi-esp32-server"; then
+    doctor_ok "Conda env for xiaozhi-server is available: xiaozhi-esp32-server"
   elif command_exists conda; then
-    doctor_ok "Conda available for xiaozhi-server: $(command -v conda)"
-  elif command_exists python; then
-    doctor_ok "Python available for xiaozhi-server: $(command -v python)"
-  elif command_exists python3; then
-    doctor_ok "Python available for xiaozhi-server: $(command -v python3)"
+    doctor_fail "Conda is available, but env 'xiaozhi-esp32-server' is missing"
   else
-    doctor_fail "Python for xiaozhi-server is missing"
+    doctor_fail "Conda env 'xiaozhi-esp32-server' is missing; system Python is not accepted for xiaozhi-server"
   fi
 }
 

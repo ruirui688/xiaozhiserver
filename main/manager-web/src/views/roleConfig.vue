@@ -305,28 +305,6 @@
                             :value="item.value"
                           />
                         </el-select>
-                        <div v-if="showFunctionIcons(model.type)" class="function-icons">
-                          <el-tooltip
-                            v-for="func in currentFunctions"
-                            :key="func.name"
-                            effect="light"
-                            placement="top"
-                          >
-                            <div slot="content">
-                              <div><strong>功能名称:</strong> {{ func.name }}</div>
-                            </div>
-                            <div class="icon-dot">
-                              {{ getFunctionDisplayChar(func.name) }}
-                            </div>
-                          </el-tooltip>
-                          <el-button
-                            class="edit-function-btn"
-                            @click="openFunctionDialog"
-                            :class="{ 'active-btn': showFunctionDialog }"
-                          >
-                            {{ $t("roleConfig.editFunctions") }}
-                          </el-button>
-                        </div>
                         <div
                           v-if="
                             model.type === 'Memory' &&
@@ -345,6 +323,61 @@
                               $t("roleConfig.reportTextVoice")
                             }}</el-radio-button>
                           </el-radio-group>
+                        </div>
+                      </div>
+                      <div v-if="showFunctionIcons(model.type)" class="capability-config-panel">
+                        <div class="capability-row">
+                          <div class="capability-label">{{ $t("roleConfig.functionPlugins") }}</div>
+                          <div class="function-summary">
+                            <el-tooltip
+                              v-for="func in currentFunctions"
+                              :key="func.name"
+                              effect="light"
+                              placement="top"
+                            >
+                              <div slot="content">
+                                <div><strong>功能名称:</strong> {{ func.name }}</div>
+                              </div>
+                              <div class="icon-dot">
+                                {{ getFunctionDisplayChar(func.name) }}
+                              </div>
+                            </el-tooltip>
+                            <span v-if="currentFunctions.length === 0" class="capability-empty">
+                              {{ $t("roleConfig.noFunctionsSelected") }}
+                            </span>
+                          </div>
+                          <el-button
+                            class="edit-function-btn"
+                            @click="openFunctionDialog"
+                            :class="{ 'active-btn': showFunctionDialog }"
+                          >
+                            {{ $t("roleConfig.editFunctions") }}
+                          </el-button>
+                        </div>
+                        <div class="capability-row knowledge-row">
+                          <div class="capability-label">{{ $t("roleConfig.knowledgeBases") }}</div>
+                          <div class="knowledge-chip-list">
+                            <el-tag
+                              v-for="knowledge in currentKnowledgeBases"
+                              :key="knowledge.id"
+                              size="small"
+                              class="knowledge-chip"
+                              closable
+                              @close="removeKnowledgeBase(knowledge.id)"
+                            >
+                              {{ knowledge.name }}
+                            </el-tag>
+                            <span v-if="currentKnowledgeBases.length === 0" class="capability-empty">
+                              {{ $t("roleConfig.noKnowledgeBaseSelected") }}
+                            </span>
+                          </div>
+                          <el-button
+                            class="knowledge-add-btn"
+                            @click="openKnowledgeBaseDialog"
+                            :title="$t('roleConfig.editKnowledgeBases')"
+                          >
+                            +
+                          </el-button>
                         </div>
                       </div>
                     </el-form-item>
@@ -446,6 +479,11 @@
       @update-functions="handleUpdateFunctions"
       @dialog-closed="handleDialogClosed"
     />
+    <knowledge-base-selector-dialog
+      v-model="showKnowledgeBaseDialog"
+      :selected="currentKnowledgeBases"
+      @confirm="handleUpdateKnowledgeBases"
+    />
     <context-provider-dialog
       :visible.sync="showContextProviderDialog"
       :providers="currentContextProviders"
@@ -469,6 +507,7 @@ import { getServiceUrl } from "@/apis/api";
 import RequestService from "@/apis/httpRequest";
 import FunctionDialog from "@/components/FunctionDialog.vue";
 import ContextProviderDialog from "@/components/ContextProviderDialog.vue";
+import KnowledgeBaseSelectorDialog from "@/components/KnowledgeBaseSelectorDialog.vue";
 import TtsAdvancedSettings from "@/components/TtsAdvancedSettings.vue";
 import HeaderBar from "@/components/HeaderBar.vue";
 import i18n from "@/i18n";
@@ -477,10 +516,11 @@ import VersionFooter from "@/components/VersionFooter.vue";
 
 export default {
   name: "RoleConfigPage",
-  components: { HeaderBar, FunctionDialog, ContextProviderDialog, TtsAdvancedSettings, VersionFooter },
+  components: { HeaderBar, FunctionDialog, ContextProviderDialog, KnowledgeBaseSelectorDialog, TtsAdvancedSettings, VersionFooter },
   data() {
     return {
       showContextProviderDialog: false,
+      showKnowledgeBaseDialog: false,
       showTtsAdvancedDialog: false,
       ttsSettings: {
         volume: 0,
@@ -530,8 +570,10 @@ export default {
       voiceDetails: {}, // 保存完整的音色信息
       showFunctionDialog: false,
       currentFunctions: [],
+      currentKnowledgeBases: [],
       currentContextProviders: [],
       allFunctions: [],
+      allKnowledgeBases: [],
       originalFunctions: [],
       playingVoice: false,
       isPaused: false,
@@ -584,12 +626,7 @@ export default {
         langCode: this.form.langCode,
         language: this.form.language,
         sort: this.form.sort,
-        functions: this.currentFunctions.map((item) => {
-          return {
-            pluginId: item.id,
-            paramInfo: item.params,
-          };
-        }),
+        functions: this.buildFunctionMappings(),
         contextProviders: this.currentContextProviders,
         correctWordFileIds: this.checkedReplacementWordIds,
       };
@@ -649,6 +686,7 @@ export default {
           };
           this.dynamicTags = [];
           this.currentFunctions = [];
+          this.currentKnowledgeBases = [];
           this.$message.success({
             message: i18n.t("roleConfig.resetSuccess"),
             showClose: true,
@@ -739,28 +777,13 @@ export default {
           // 加载上下文配置
           this.currentContextProviders = data.data.contextProviders || [];
 
-          // 先保证 allFunctions 已经加载（如果没有，则先 fetchAllFunctions）
-          const ensureFuncs = this.allFunctions.length
-            ? Promise.resolve()
-            : this.fetchAllFunctions();
+          const ensureFuncs = Promise.all([
+            this.allFunctions.length ? Promise.resolve() : this.fetchAllFunctions(),
+            this.fetchAllKnowledgeBases()
+          ]);
 
           ensureFuncs.then(() => {
-            // 合并：按照 pluginId（id 字段）把全量元数据信息补齐
-            this.currentFunctions = savedMappings.map((mapping) => {
-              const meta = this.allFunctions.find((f) => f.id === mapping.pluginId);
-              if (!meta) {
-                // 插件定义没找到，退化处理
-                return { id: mapping.pluginId, name: mapping.pluginId, params: {} };
-              }
-              return {
-                id: mapping.pluginId,
-                name: meta.name,
-                providerCode: meta.providerCode,
-                // 后端如果还有 paramInfo 字段就用 mapping.paramInfo，否则用 meta.params 默认值
-                params: mapping.paramInfo || { ...meta.params },
-                fieldsMeta: meta.fieldsMeta, // 保留以便对话框渲染 tooltip
-              };
-            });
+            this.applyFunctionMappings(savedMappings);
             // 备份原始，以备取消时恢复
             this.originalFunctions = JSON.parse(JSON.stringify(this.currentFunctions));
 
@@ -1008,6 +1031,83 @@ export default {
         });
       });
     },
+    fetchAllKnowledgeBases() {
+      return new Promise((resolve) => {
+        Api.knowledgeBase.getKnowledgeBaseList(
+          {
+            page: 1,
+            page_size: 1000,
+            name: ""
+          },
+          (res) => {
+            if (res.data && res.data.code === 0) {
+              const pageData = res.data.data || {};
+              this.allKnowledgeBases = (pageData.list || []).filter((item) => item.status === 1);
+            } else {
+              this.allKnowledgeBases = [];
+            }
+            resolve();
+          },
+          () => {
+            this.allKnowledgeBases = [];
+            resolve();
+          }
+        );
+      });
+    },
+    applyFunctionMappings(savedMappings) {
+      const knowledgeMap = new Map(this.allKnowledgeBases.map((item) => [item.id, item]));
+      const functions = [];
+      const knowledgeBases = [];
+
+      savedMappings.forEach((mapping) => {
+        const knowledge = knowledgeMap.get(mapping.pluginId);
+        if (knowledge) {
+          knowledgeBases.push({
+            id: knowledge.id,
+            name: knowledge.name,
+            description: knowledge.description,
+            documentCount: knowledge.documentCount || 0,
+            selectionDescription: mapping.paramInfo?.description || "",
+            queryPolicy: mapping.paramInfo?.queryPolicy || this.defaultKnowledgeQueryPolicy(),
+          });
+          return;
+        }
+
+        const meta = this.allFunctions.find((f) => f.id === mapping.pluginId);
+        if (!meta) {
+          functions.push({ id: mapping.pluginId, name: mapping.pluginId, params: {} });
+          return;
+        }
+        functions.push({
+          id: mapping.pluginId,
+          name: meta.name,
+          providerCode: meta.providerCode,
+          params: mapping.paramInfo || { ...meta.params },
+          fieldsMeta: meta.fieldsMeta,
+        });
+      });
+
+      this.currentFunctions = functions;
+      this.currentKnowledgeBases = knowledgeBases;
+    },
+    buildFunctionMappings() {
+      const pluginMappings = this.currentFunctions.map((item) => ({
+        pluginId: item.id,
+        paramInfo: item.params,
+      }));
+      const knowledgeMappings = this.currentKnowledgeBases.map((item) => ({
+        pluginId: item.id,
+        paramInfo: {
+          description: item.selectionDescription || item.description || "",
+          queryPolicy: item.queryPolicy || this.defaultKnowledgeQueryPolicy(),
+        },
+      }));
+      return [...pluginMappings, ...knowledgeMappings];
+    },
+    defaultKnowledgeQueryPolicy() {
+      return "优先使用用户原话和对话中已经明确的酒类、产区、风味、价格、餐酒搭配等信息生成查询词；不要擅自扩写成酒杯、酒具、器皿或其他用户没有提到的对象。";
+    },
     openFunctionDialog() {
       // 显示编辑对话框时，确保 allFunctions 已经加载
       if (this.allFunctions.length === 0) {
@@ -1015,6 +1115,11 @@ export default {
       } else {
         this.showFunctionDialog = true;
       }
+    },
+    openKnowledgeBaseDialog() {
+      this.fetchAllKnowledgeBases().then(() => {
+        this.showKnowledgeBaseDialog = true;
+      });
     },
     openContextProviderDialog() {
       this.showContextProviderDialog = true;
@@ -1036,6 +1141,16 @@ export default {
     },
     handleUpdateFunctions(selected) {
       this.currentFunctions = selected;
+    },
+    handleUpdateKnowledgeBases(selected) {
+      this.currentKnowledgeBases = selected.map((item) => ({
+        ...item,
+        selectionDescription: item.selectionDescription || item.description || "",
+        queryPolicy: item.queryPolicy || this.defaultKnowledgeQueryPolicy(),
+      }));
+    },
+    removeKnowledgeBase(id) {
+      this.currentKnowledgeBases = this.currentKnowledgeBases.filter((item) => item.id !== id);
     },
     handleDialogClosed(saved) {
       if (!saved) {
@@ -1693,11 +1808,79 @@ export default {
   padding-bottom: 2px;
 }
 
-.function-icons {
+.capability-config-panel {
+  width: 100%;
+  margin-top: 10px;
+  padding: 6px 0 0;
+}
+
+.capability-row {
+  display: grid;
+  grid-template-columns: 64px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 4px 0;
+}
+
+.capability-row + .capability-row {
+  margin-top: 2px;
+}
+
+.capability-label {
+  color: #5f6680;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.function-summary,
+.knowledge-chip-list {
   display: flex;
   align-items: center;
-  margin-left: auto;
-  padding-left: 10px;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.capability-empty {
+  color: #a3a8b8;
+  font-size: 13px;
+}
+
+.knowledge-chip {
+  max-width: 180px;
+  background: #eceef2;
+  border-color: #eceef2;
+  color: #6f7482;
+  border-radius: 4px;
+}
+
+.knowledge-chip ::v-deep .el-tag__close {
+  color: #8a8f9e;
+}
+
+.knowledge-chip ::v-deep .el-tag__close:hover {
+  color: #fff;
+  background: #9aa0ad;
+}
+
+.knowledge-add-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px dashed #c7cbd6;
+  border-radius: 4px;
+  background: #f6f7fa;
+  color: #777d8c;
+  font-size: 22px;
+  line-height: 24px;
+  font-weight: 400;
+}
+
+.knowledge-add-btn:hover {
+  color: #5778ff;
+  background: #eef2ff;
+  border-color: #adbdff;
 }
 
 .icon-dot {

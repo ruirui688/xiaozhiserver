@@ -121,7 +121,9 @@ public class ModelController {
         if (Boolean.TRUE.equals(testResult.getSuccess())) {
             return new Result<ModelTestResultDTO>().ok(testResult);
         }
-        return new Result<ModelTestResultDTO>().error(testResult.getMessage());
+        Result<ModelTestResultDTO> result = new Result<ModelTestResultDTO>().error(testResult.getMessage());
+        result.setData(testResult);
+        return result;
     }
 
     @GetMapping("/{id}")
