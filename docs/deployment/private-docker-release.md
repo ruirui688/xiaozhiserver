@@ -108,6 +108,24 @@ Head "https://registry-1.docker.io/v2/library/python/manifests/3.10-slim": i/o t
 1. 给 Docker 配置可用的 registry mirror，然后重新执行 `sudo scripts/deploy`。
 2. 使用当前网络可访问的兼容基础镜像覆盖默认值。
 
+配置 Docker registry mirror：
+
+```bash
+sudo scripts/docker-config-mirror https://你的镜像加速器地址
+```
+
+阿里云个人账号通常可以在这里找到专属地址：
+
+```text
+阿里云控制台 -> 容器镜像服务 -> 镜像工具 -> 镜像加速器
+```
+
+脚本会备份现有 `/etc/docker/daemon.json`，更新 `registry-mirrors`，然后重启 Docker。配置后先验证基础镜像能否拉取：
+
+```bash
+docker pull python:3.10-slim
+```
+
 可覆盖的基础镜像变量：
 
 ```text
