@@ -1,145 +1,230 @@
-# Git-only Docker 生产部署
+# ACR 镜像生产部署
 
-本文档是生产服务器安装和升级入口。
-
-生产服务器只需要能访问私有 Git 仓库，不需要登录私有 Docker 镜像仓库。
-
-目录约定：
+本项目只有一种生产部署方式：
 
 ```text
-~/work/xiaozhi-esp32-server  项目源码目录
-/opt/xiaozhi-data            生产数据目录
+源码推送到私有 Git 仓库
+  -> 本地/构建机拉取完整源码并打包 Docker 镜像
+  -> 推送到阿里云 ACR
+  -> 生产服务器只拉取最小部署资产和已发布镜像
 ```
 
-`/opt/xiaozhi-data` 保存数据库、私有配置和上传文件。升级会重建业务镜像和重启容器，但不会删除这个目录。
+源码仍然必须进入私有 Git 仓库。区别是：构建机使用完整源码，生产服务器不使用完整源码。
 
-安装阶段不需要下载或放置任何语音模型文件。ASR、VAD、LLM、TTS、VLLM、Memory、Intent 都可以先为空，服务启动后再到智控台配置。
+生产服务器不从源码构建业务镜像，不保存完整项目源码，不安装 Maven、Node.js、Conda 或 Python 依赖。
 
-## 快速命令
+## 镜像命名
 
-首次部署：
+生产服务器只从 ACR 拉取这些运行镜像：
+
+```text
+crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-server:latest
+crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-web:latest
+crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/mysql:8.4
+crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/redis:8.0
+```
+
+构建流程内部还会维护一个基础镜像：
+
+```text
+crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-server-base:latest
+```
+
+`xiaozhi-server-base` 只用于加速构建，不在生产服务器直接运行。
+
+每次发布还会同时推送 Git 短哈希版本，例如：
+
+```text
+xiaozhi-server:60c9ee96
+xiaozhi-web:60c9ee96
+xiaozhi-server-base:60c9ee96
+```
+
+`latest` 用于常规升级，短哈希版本用于定位和回滚。
+
+## 目录约定
+
+```text
+~/work/xiaozhi-deploy  生产服务器上的最小部署资产目录，只 sparse-checkout deploy/production
+/opt/xiaozhi-data      生产数据目录
+```
+
+`/opt/xiaozhi-data` 保存数据库、私有配置和上传文件。升级镜像不会删除这个目录。
+
+## 构建并推送镜像
+
+在本地开发机或构建机执行：
 
 ```bash
-mkdir -p ~/work
-git clone ssh://git@10.144.92.32:222/gaoruirui688/xiaozhi-esp32-server.git ~/work/xiaozhi-esp32-server
 cd ~/work/xiaozhi-esp32-server
-sudo scripts/deploy
+scripts/acr-login
+scripts/acr-build-push
 ```
 
-升级当前分支：
+默认推送到：
+
+```text
+yihuixiaozhi/xiaozhi-server
+yihuixiaozhi/xiaozhi-web
+yihuixiaozhi/xiaozhi-server-base
+yihuixiaozhi/mysql
+yihuixiaozhi/redis
+```
+
+`mysql:8.4` 和 `redis:8.0` 会被同步到 ACR，生产服务器不需要访问 Docker Hub。
+
+`scripts/acr-build-push` 默认使用单平台 Docker 构建，避免 buildx 容器读取不可用的 Docker Hub 镜像加速器。
+
+发布脚本默认隐藏 Docker 逐层构建和推送明细，只输出步骤摘要。完整日志会写入 `/tmp/xiaozhi-*` 临时目录。需要排查构建细节时使用：
 
 ```bash
-cd ~/work/xiaozhi-esp32-server
-scripts/upgrade
+VERBOSE=true scripts/acr-build-push
 ```
 
-升级到指定 tag：
+如需多架构镜像，再显式启用 buildx：
 
 ```bash
-cd ~/work/xiaozhi-esp32-server
-REF=v版本号 scripts/upgrade
+BUILD_ENGINE=buildx PLATFORMS=linux/amd64,linux/arm64 scripts/acr-build-push
 ```
 
-## 服务器要求
-
-需要安装：
+生产 Docker 镜像默认使用：
 
 ```text
-Docker
-Docker Compose 插件
-Git
+main/xiaozhi-server/requirements-docker.txt
 ```
 
-服务器还需要：
+该依赖文件不安装 `torch` / `torchaudio`。当前生产路径使用云端 ASR 和 ONNX Silero VAD，不需要 Torch。如果以后确实要在容器内启用本地 FunASR，再显式改用完整依赖：
 
-```text
-私有 Git 仓库访问权限
-公共 Docker 基础镜像拉取能力
+```bash
+SERVER_REQUIREMENTS=main/xiaozhi-server/requirements.txt scripts/acr-build-push
 ```
-
-不需要单独安装：
-
-```text
-Maven
-Node.js
-Conda
-Python 依赖
-```
-
-这些构建依赖会在 Docker 构建过程中处理。
 
 ## 首次部署
 
-准备目录并拉取代码：
+在生产服务器执行：
 
 ```bash
 mkdir -p ~/work
-git clone ssh://git@10.144.92.32:222/gaoruirui688/xiaozhi-esp32-server.git ~/work/xiaozhi-esp32-server
-cd ~/work/xiaozhi-esp32-server
+git clone --filter=blob:none --sparse --branch main \
+  ssh://git@10.144.92.32:222/gaoruirui688/xiaozhi-esp32-server.git \
+  ~/work/xiaozhi-deploy
+cd ~/work/xiaozhi-deploy
+git sparse-checkout set deploy/production
+cd deploy/production
+sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
+./install
 ```
 
-部署 `main`：
+生产部署固定使用私有仓库的 `main` 分支。功能分支只用于开发和合并前验证，不写入生产安装命令。
 
-```bash
-git checkout main
-git pull --ff-only origin main
-sudo scripts/deploy
-```
+这仍然是从私有 Git 仓库取部署资产，但只取 `deploy/production` 目录，不会把 `main/`、`docs/`、完整源码和构建文件放到生产服务器。
 
-部署指定 tag：
-
-```bash
-git fetch --tags origin
-git checkout v版本号
-sudo scripts/deploy
-```
-
-`scripts/deploy` 会完成：
+部署脚本会：
 
 ```text
-构建本地业务镜像
+拉取 xiaozhi-server:latest
+拉取 xiaozhi-web:latest
+从 ACR 拉取 mysql:8.4 和 redis:8.0
 创建 /opt/xiaozhi-data
 生成 /opt/xiaozhi-data/.env
 初始化 /opt/xiaozhi-data/data/.config.yaml
 启动 Docker Compose 服务
 ```
 
-运行目录：
+首次部署后，`.env` 会记录：
 
 ```text
-/opt/xiaozhi-data/docker-compose_all.yml
-/opt/xiaozhi-data/.env
-/opt/xiaozhi-data/data/.config.yaml
-/opt/xiaozhi-data/mysql/data
-/opt/xiaozhi-data/uploadfile
+XIAOZHI_DEPLOY_MODE=pull
+XIAOZHI_SERVER_IMAGE_REPOSITORY=.../xiaozhi-server
+XIAOZHI_WEB_IMAGE_REPOSITORY=.../xiaozhi-web
 ```
 
-## 访问后台
+## 升级
+
+先在本地或构建机发布新镜像：
+
+```bash
+scripts/acr-build-push
+```
+
+再到生产服务器执行：
+
+```bash
+cd ~/work/xiaozhi-deploy/deploy/production
+./upgrade
+```
+
+`./upgrade` 会更新 sparse-checkout 中的部署资产，复用 `/opt/xiaozhi-data/.env` 中的镜像仓库配置，拉取最新镜像并重启容器。
+
+## 日常操作
+
+生产服务器统一使用 `/opt/xiaozhi-data/docker-compose.yml` 和 `/opt/xiaozhi-data/.env` 管理服务。
 
 查看服务：
 
 ```bash
-docker compose -f /opt/xiaozhi-data/docker-compose_all.yml \
+docker compose -f /opt/xiaozhi-data/docker-compose.yml \
   --env-file /opt/xiaozhi-data/.env ps
 ```
 
-浏览器访问：
+启动项目：
+
+```bash
+docker compose -f /opt/xiaozhi-data/docker-compose.yml \
+  --env-file /opt/xiaozhi-data/.env up -d
+```
+
+重启全部服务：
+
+```bash
+docker compose -f /opt/xiaozhi-data/docker-compose.yml \
+  --env-file /opt/xiaozhi-data/.env restart
+```
+
+只重启核心服务：
+
+```bash
+docker restart xiaozhi-esp32-server
+```
+
+只重启智控台和 API：
+
+```bash
+docker restart xiaozhi-esp32-server-web
+```
+
+关闭项目但保留容器：
+
+```bash
+docker compose -f /opt/xiaozhi-data/docker-compose.yml \
+  --env-file /opt/xiaozhi-data/.env stop
+```
+
+停止并移除容器和网络，但保留数据库、配置和上传文件：
+
+```bash
+docker compose -f /opt/xiaozhi-data/docker-compose.yml \
+  --env-file /opt/xiaozhi-data/.env down
+```
+
+查看日志：
+
+```bash
+docker logs -f xiaozhi-esp32-server
+docker logs -f xiaozhi-esp32-server-web
+docker logs -f xiaozhi-esp32-server-db
+docker logs -f xiaozhi-esp32-server-redis
+```
+
+## 访问和配置
+
+访问智控台：
 
 ```text
 http://服务器IP:8002
 ```
 
-首次进入智控台后，注册管理员账号。
-
-## 配置 server.secret
-
-进入智控台参数管理，找到：
-
-```text
-server.secret
-```
-
-复制它的值，写入：
+首次注册管理员后，在智控台参数管理中找到 `server.secret`，写入：
 
 ```text
 /opt/xiaozhi-data/data/.config.yaml
@@ -153,83 +238,13 @@ manager-api:
   secret: 粘贴 server.secret
 ```
 
-保存后重启核心服务：
+然后重启核心服务：
 
 ```bash
 docker restart xiaozhi-esp32-server
 ```
 
-## 配置模型
-
-安装阶段可以不配置模型。
-
-需要语音对话时，再到智控台按实际需要配置：
-
-```text
-ASR   语音识别
-VAD   语音活动检测
-LLM   大语言模型
-TTS   语音合成
-VLLM  视觉语言模型
-Memory / Intent 等可选能力
-```
-
-配置完成后，在智能体配置中选择对应模型，然后重启核心服务：
-
-```bash
-docker restart xiaozhi-esp32-server
-```
-
-## 一键升级
-
-升级当前分支：
-
-```bash
-cd ~/work/xiaozhi-esp32-server
-scripts/upgrade
-```
-
-升级到指定 tag：
-
-```bash
-cd ~/work/xiaozhi-esp32-server
-REF=v版本号 scripts/upgrade
-```
-
-升级脚本会先拉取代码，再重新构建本地业务镜像，并执行 `docker compose up -d`。
-
-这些数据会继续保留：
-
-```text
-管理员账号
-模型配置
-智能体配置
-设备记录
-server.secret
-上传文件
-MySQL 数据
-```
-
-## 常用维护
-
-查看服务：
-
-```bash
-docker compose -f /opt/xiaozhi-data/docker-compose_all.yml --env-file /opt/xiaozhi-data/.env ps
-```
-
-查看日志：
-
-```bash
-docker logs -f xiaozhi-esp32-server
-docker logs -f xiaozhi-esp32-server-web
-```
-
-停止服务：
-
-```bash
-docker compose -f /opt/xiaozhi-data/docker-compose_all.yml --env-file /opt/xiaozhi-data/.env down
-```
+ASR、VAD、LLM、TTS、VLLM、Memory、Intent 等模型可以在安装后到智控台配置。安装阶段不需要下载或挂载本地语音模型。
 
 不要删除：
 
@@ -237,4 +252,22 @@ docker compose -f /opt/xiaozhi-data/docker-compose_all.yml --env-file /opt/xiaoz
 /opt/xiaozhi-data/mysql/data
 /opt/xiaozhi-data/data
 /opt/xiaozhi-data/uploadfile
+```
+
+## 变量覆盖
+
+默认不需要覆盖任何镜像变量。确实需要换仓库时，只覆盖业务镜像：
+
+```bash
+SERVER_IMAGE_REPOSITORY=你的仓库/xiaozhi-server \
+WEB_IMAGE_REPOSITORY=你的仓库/xiaozhi-web \
+./install
+```
+
+如果需要使用其他数据库或 Redis 镜像，可以覆盖：
+
+```bash
+MYSQL_IMAGE=你的仓库/mysql:8.4 \
+REDIS_IMAGE=你的仓库/redis:8.0 \
+./install
 ```

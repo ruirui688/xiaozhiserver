@@ -242,20 +242,28 @@
 官方同步时的处理规则：如果官方修改 `handle_user_intent`、语义控制中枢、`play_music`、TTS 队列、`Action.RECORD`、`ContentType.FILE` 或流式 TTS provider，必须保留以下约定：音乐类请求先由 `parse_music_intent` 解析动作和否定极性，覆盖指定歌名播放、唱某首歌、再放一遍、换一首、曲库查询、音乐上下文续播和“我不听了/别放了/停止播放”等停止命令；`stop` 必须先于播放触发词处理，并直接走 `handleAbortMessage`，不得被抽成歌名或落到主 LLM；`play` 命中后不得落到主 LLM 自由编唱；工具同步结果应使用用户可读的“正在为您播放音乐”，不要只返回“指令已接收”；默认跳过播放前 TTS 介绍语时，仍要把“此刻为您献上/正在播放 具体歌曲”这类选曲状态上报为 assistant 聊天记录；音乐文件入队必须按 `FIRST/ACTION -> MIDDLE/FILE -> LAST/ACTION` 发送播放边界，确保火山双流、阿里云流式、讯飞流式、Minimax 等 provider 能把暂存文件音频 flush 到设备；曲库 `.xiaozhi-music-metadata.json` 支持 `aliases`，用于处理 ASR 近音、品牌曲别名和用户俗称。聊天记录中的 `play_music({...})` 和 `{"result": "正在为您播放音乐"}` 是工具调用审计记录，不应被当作播放失败错误。
 ```
 
-## 16. 生产部署模型可空与 FunASR 脱钩
+## 16. ACR 镜像生产部署、模型可空与 FunASR 脱钩
 
 ```text
-定制模块：Git-only Docker 生产部署、模型默认配置、后台智能体模板、Python 运行时模型初始化
-改动原因：生产服务器只依赖私有 Git 仓库拉取代码，并在服务器本机构建 Docker 业务镜像，不再依赖私有 Docker 镜像仓库登录和拉取；本地生产部署不再使用 FunASR / SenseVoiceSmall / model.pt 作为默认语音识别链路；生产安装阶段允许 ASR、VAD、LLM、TTS、VLLM、Memory、Intent 等模型全部暂时为空，管理员后续在智控台按实际需要配置模型。
+定制模块：ACR 镜像生产部署、模型默认配置、后台智能体模板、Python 运行时模型初始化
+改动原因：源码仍完整推送到私有 Git 仓库，但生产服务器不再拉取完整源码，也不从源码构建业务镜像。唯一生产路线改为本地或构建机先构建 `xiaozhi-server` / `xiaozhi-web` 并推送到阿里云 ACR，同时把 `mysql:8.4` 和 `redis:8.0` 同步到 ACR；生产端只 sparse-checkout `deploy/production` 最小部署资产，再从 ACR 拉取全部运行镜像并启动；`xiaozhi-server-base` 仅作为构建缓存镜像，不作为生产运行镜像；本地生产部署不再使用 FunASR / SenseVoiceSmall / model.pt 作为默认语音识别链路；生产 Docker 镜像默认使用 `requirements-docker.txt`，不安装 torch / torchaudio；生产安装阶段允许 ASR、VAD、LLM、TTS、VLLM、Memory、Intent 等模型全部暂时为空，管理员后续在智控台按实际需要配置模型。
 关键文件：
   - Dockerfile-server
+  - Dockerfile-server-base
   - scripts/deploy
   - scripts/upgrade
+  - scripts/acr-build-push
+  - scripts/acr-mirror-runtime-images
+  - scripts/acr-deploy-pull
+  - scripts/acr-login
   - scripts/docker-build-private.sh
   - scripts/install-private-docker.sh
   - scripts/upgrade-git-docker.sh
+  - scripts/README.md
+  - deploy/production/
   - main/xiaozhi-server/docker-compose_all.yml
   - main/xiaozhi-server/docker-compose.yml
+  - main/xiaozhi-server/requirements-docker.txt
   - main/xiaozhi-server/config.yaml
   - main/xiaozhi-server/core/websocket_server.py
   - main/xiaozhi-server/core/connection.py
@@ -264,7 +272,7 @@
   - main/manager-web/src/views/roleConfig.vue
   - docs/deployment/private-docker-release.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改 Dockerfile、Docker Compose、安装脚本、默认模型配置、智能体模板初始化、模型配置下发或 WebSocket 初始化流程，必须保留“生产服务器从私有 Git 拉代码并本机构建业务镜像；生产安装不要求 docker login 私有镜像仓库；生产用户只需要记住 `~/work/xiaozhi-esp32-server` 源码目录、`/opt/xiaozhi-data` 数据目录、`scripts/deploy` 首次部署和 `scripts/upgrade` 后续升级；旧的 install-private-docker.sh、upgrade-git-docker.sh 仅作为兼容实现入口保留；生产安装不下载、不挂载、不要求 model.pt；FunASR/FunASRServer 不作为可用默认 ASR；所有模型字段允许为空；模型缺失时服务可启动但对应能力不可用并记录清晰提示”的约定。
+官方同步时的处理规则：如果官方修改 Dockerfile、Docker Compose、安装脚本、默认模型配置、智能体模板初始化、模型配置下发或 WebSocket 初始化流程，必须保留“源码完整进入私有 Git 仓库，但生产服务器只 sparse-checkout `deploy/production` 最小部署资产；生产服务器只拉取阿里云 ACR 中已发布运行镜像，不在生产端源码构建，也不依赖 Docker Hub；生产运行镜像命名为 `xiaozhi-server:latest`、`xiaozhi-web:latest`、`mysql:8.4`、`redis:8.0`；`xiaozhi-server-base` 只服务于构建流程；生产用户只需要记住 `~/work/xiaozhi-deploy` 部署资产目录、`/opt/xiaozhi-data` 数据目录、`deploy/production/install` 首次部署和 `deploy/production/upgrade` 后续升级；生产安装不下载、不挂载、不要求 model.pt；生产镜像默认不安装 torch / torchaudio，除非显式使用完整 requirements 启用本地 FunASR；FunASR/FunASRServer 不作为可用默认 ASR；所有模型字段允许为空；模型缺失时服务可启动但对应能力不可用并记录清晰提示”的约定。
 ```
 
 ## 17. 模型配置密钥明文回显

@@ -36,5 +36,5 @@ else
   fi
 fi
 
-echo "Rebuilding local Docker images and restarting services"
+echo "Updating Docker images and restarting services"
 sudo -E "$ROOT_DIR/scripts/deploy"

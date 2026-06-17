@@ -52,15 +52,9 @@ deploy/              部署资产归档边界
 - [提示词注入工程](./docs/integrations/prompt-injection-engineering.md)
 - [配置与运行产物治理策略](./docs/standards/config-runtime-policy.md)
 
-生产部署文档：
+生产部署入口：
 
-- [Git-only Docker 生产部署](./docs/deployment/private-docker-release.md)
-- [部署资产治理策略](./docs/deployment/deployment-asset-policy.md)
-
-官方兼容参考：
-
-- [官方 Docker 部署说明](./docs/deployment/Deployment.md)
-- [官方全模块部署说明](./docs/deployment/Deployment_all.md)
+- [ACR 镜像生产部署](./docs/deployment/private-docker-release.md)
 
 本地开发统一入口：
 
@@ -101,17 +95,16 @@ AGENTS.md
 - 数据库密码、Redis 密码、模型 API Key、短信密钥等敏感信息不应提交。
 - `runtime/` 下的日志、PID、缓存、上传文件、临时文件属于运行时数据，不应提交。
 
-## 开发与部署规则
+## 开发与发布规则
 
-标准流程：
+标准开发发布流程：
 
 ```text
 本地开发
   -> Git 提交
   -> 推送到私有仓库
-  -> 测试环境验证
-  -> 创建 release tag
-  -> 阿里云服务器部署 tag
+  -> 本地/构建机打包并推送 ACR 镜像
+  -> 生产服务器拉取已发布镜像并启动
 ```
 
 私有仓库的标准远端名为 `origin`，官方上游仓库的标准远端名为 `upstream`。本项目当前约定：
