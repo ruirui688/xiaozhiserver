@@ -1078,7 +1078,6 @@ export default {
             name: knowledge.name,
             description: knowledge.description,
             documentCount: knowledge.documentCount || 0,
-            selectionDescription: mapping.paramInfo?.description || "",
             queryPolicy: mapping.paramInfo?.queryPolicy || this.defaultKnowledgeQueryPolicy(),
           });
           return;
@@ -1109,7 +1108,6 @@ export default {
       const knowledgeMappings = this.currentKnowledgeBases.map((item) => ({
         pluginId: item.id,
         paramInfo: {
-          description: item.selectionDescription || item.description || "",
           queryPolicy: item.queryPolicy || this.defaultKnowledgeQueryPolicy(),
         },
       }));
@@ -1155,7 +1153,6 @@ export default {
     handleUpdateKnowledgeBases(selected) {
       this.currentKnowledgeBases = selected.map((item) => ({
         ...item,
-        selectionDescription: item.selectionDescription || item.description || "",
         queryPolicy: item.queryPolicy || this.defaultKnowledgeQueryPolicy(),
       }));
     },

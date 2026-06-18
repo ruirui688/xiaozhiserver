@@ -1387,17 +1387,14 @@ export default {
   'knowledgeBaseManagement.view': '管理文件',
 
   // 智能体知识库选择文本
-  'knowledgeBaseSelector.title': '知识库配置',
+  'knowledgeBaseSelector.title': '选择知识库',
   'knowledgeBaseSelector.searchPlaceholder': '请输入知识库名称搜索',
   'knowledgeBaseSelector.search': '搜索',
   'knowledgeBaseSelector.name': '知识库名称',
   'knowledgeBaseSelector.description': '知识库描述',
   'knowledgeBaseSelector.documentCount': '文档数量',
-  'knowledgeBaseSelector.configTitle': '接入说明',
-  'knowledgeBaseSelector.configPlaceholder': '写给智能体看的说明：这个知识库用于回答什么、什么时候查询、查询词怎么生成、不要查询什么。',
-  'knowledgeBaseSelector.configTip': '这段说明会随当前智能体保存，并影响工具调用参数，适合约束模型不要把“酒”扩写成“酒杯”等无关对象。',
   'knowledgeBaseSelector.cancel': '取消',
-  'knowledgeBaseSelector.save': '保存配置',
+  'knowledgeBaseSelector.save': '保存选择',
   'knowledgeBaseSelector.fetchFailed': '获取知识库列表失败',
 
   // 上传文件页面文本
