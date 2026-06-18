@@ -429,8 +429,10 @@ def check_vad_update(before_config, new_config):
     ):
         return False
     update_vad = False
-    current_vad_module = before_config["selected_module"]["VAD"]
+    current_vad_module = before_config.get("selected_module", {}).get("VAD")
     new_vad_module = new_config["selected_module"]["VAD"]
+    if current_vad_module is None:
+        return True
     current_vad_type = (
         current_vad_module
         if "type" not in before_config["VAD"][current_vad_module]
@@ -452,8 +454,10 @@ def check_asr_update(before_config, new_config):
     ):
         return False
     update_asr = False
-    current_asr_module = before_config["selected_module"]["ASR"]
+    current_asr_module = before_config.get("selected_module", {}).get("ASR")
     new_asr_module = new_config["selected_module"]["ASR"]
+    if current_asr_module is None:
+        return True
 
     # 如果模块名称不同，就需要更新
     if current_asr_module != new_asr_module:

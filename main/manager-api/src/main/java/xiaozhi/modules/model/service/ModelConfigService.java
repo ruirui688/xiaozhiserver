@@ -24,6 +24,8 @@ public interface ModelConfigService extends BaseService<ModelConfigEntity> {
 
     ModelConfigDTO edit(String modelType, String provideCode, String id, ModelConfigBodyDTO modelConfigBodyDTO);
 
+    ModelConfigDTO getDTOById(String id);
+
     void delete(String id);
 
     ModelTestResultDTO testModel(String id);

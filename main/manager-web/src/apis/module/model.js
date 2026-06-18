@@ -182,6 +182,57 @@ export default {
         })
       }).send()
   },
+  // 批量性能测试
+  performanceTest(params, callback) {
+    RequestService.sendRequest()
+      .url(`${getServiceUrl()}/models/performance-test`)
+      .method('POST')
+      .data(params)
+      .timeout(180000)
+      .success((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .fail((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .networkFail((err) => {
+        console.error('模型性能测试失败:', err)
+        RequestService.clearRequestTime()
+        callback({
+          data: {
+            code: -1,
+            msg: err?.msg || '模型性能测试失败，请检查后台服务或网络连接'
+          }
+        })
+      }).send()
+  },
+  // 查询专业评测任务
+  benchmarkTask(taskId, callback) {
+    RequestService.sendRequest()
+      .url(`${getServiceUrl()}/models/benchmark/${taskId}`)
+      .method('GET')
+      .timeout(30000)
+      .success((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .fail((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .networkFail((err) => {
+        console.error('查询模型评测任务失败:', err)
+        RequestService.clearRequestTime()
+        callback({
+          data: {
+            code: -1,
+            msg: err?.msg || '查询模型评测任务失败'
+          }
+        })
+      }).send()
+  },
   // 启用/禁用模型状态
   updateModelStatus(id, status, callback) {
     RequestService.sendRequest()
@@ -343,6 +394,94 @@ export default {
         this.$message.error(err.msg || '删除模型供应器失败')
         RequestService.reAjaxFun(() => {
           this.deleteModelProviderByIds(ids, callback)
+        })
+      }).send()
+  },
+  // 获取 v2 模型目录
+  getModelCatalog(params, callback) {
+    const queryParams = new URLSearchParams();
+    if (params.modelType) queryParams.append('modelType', params.modelType);
+    if (params.keyword) queryParams.append('keyword', params.keyword);
+    if (params.provider) queryParams.append('providerCode', params.provider);
+    if (params.platform) queryParams.append('vendor', params.platform);
+    if (params.capability) queryParams.append('capability', params.capability);
+
+    RequestService.sendRequest()
+      .url(`${getServiceUrl()}/models/v2/catalog?${queryParams.toString()}`)
+      .method('GET')
+      .success((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .fail((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .networkFail((err) => {
+        console.error('获取 v2 模型目录失败:', err)
+        RequestService.clearRequestTime()
+        callback({
+          data: {
+            code: -1,
+            msg: err?.msg || '获取 v2 模型目录失败'
+          }
+        })
+      }).send()
+  },
+  // 获取 v2 模型模板
+  getModelTemplates(params, callback) {
+    const queryParams = new URLSearchParams();
+    if (params.modelType) queryParams.append('modelType', params.modelType);
+    if (params.catalogId) queryParams.append('catalogId', params.catalogId);
+    if (params.provider) queryParams.append('providerCode', params.provider);
+
+    RequestService.sendRequest()
+      .url(`${getServiceUrl()}/models/v2/templates?${queryParams.toString()}`)
+      .method('GET')
+      .success((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .fail((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .networkFail((err) => {
+        console.error('获取 v2 模型模板失败:', err)
+        RequestService.clearRequestTime()
+        callback({
+          data: {
+            code: -1,
+            msg: err?.msg || '获取 v2 模型模板失败'
+          }
+        })
+      }).send()
+  },
+  // 预览 v2 模型迁移
+  previewModelMigration(params, callback) {
+    const queryParams = new URLSearchParams();
+    if (params.modelType) queryParams.append('modelType', params.modelType);
+    RequestService.sendRequest()
+      .url(`${getServiceUrl()}/models/v2/migrate/preview?${queryParams.toString()}`)
+      .method('POST')
+      .data(params)
+      .timeout(60000)
+      .success((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .fail((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .networkFail((err) => {
+        console.error('获取模型迁移预览失败:', err)
+        RequestService.clearRequestTime()
+        callback({
+          data: {
+            code: -1,
+            msg: err?.msg || '获取模型迁移预览失败'
+          }
         })
       }).send()
   },

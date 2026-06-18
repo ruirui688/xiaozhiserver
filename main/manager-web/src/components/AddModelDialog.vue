@@ -159,7 +159,7 @@ export default {
 
       Api.model.getModelProviders(this.modelType, (data) => {
         this.providers = data.map(item => ({
-          label: item.name,
+          label: this.getProviderLabel(item),
           value: item.providerCode,
           fields: JSON.parse(item.fields || '[]').map(f => ({
             label: f.label,
@@ -170,6 +170,11 @@ export default {
         }))
         this.providersLoaded = true
       })
+    },
+    getProviderLabel(item) {
+      const name = item.name || item.providerCode;
+      const code = item.providerCode || '';
+      return code ? `${name}（${code}）` : name;
     },
     initConfigJson() {
       const defaultConfig = {};

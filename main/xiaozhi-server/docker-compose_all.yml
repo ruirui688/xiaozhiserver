@@ -4,7 +4,7 @@ version: '3'
 services:
   # Server模块
   xiaozhi-esp32-server:
-    image: ${XIAOZHI_IMAGE_REPOSITORY:-10.144.92.32:3001/gaoruirui688/xiaozhi-esp32-server}:server_latest
+    image: ${XIAOZHI_SERVER_IMAGE_REPOSITORY:-xiaozhi-server-local}:latest
     container_name: xiaozhi-esp32-server
     depends_on:
       - xiaozhi-esp32-server-db
@@ -24,12 +24,10 @@ services:
     volumes:
       # 配置文件目录
       - ./data:/opt/xiaozhi-esp32-server/data
-      # 模型文件挂接，很重要
-      - ./models/SenseVoiceSmall/model.pt:/opt/xiaozhi-esp32-server/models/SenseVoiceSmall/model.pt
 
   # manager-api和manager-web模块
   xiaozhi-esp32-server-web:
-    image: ${XIAOZHI_IMAGE_REPOSITORY:-10.144.92.32:3001/gaoruirui688/xiaozhi-esp32-server}:web_latest
+    image: ${XIAOZHI_WEB_IMAGE_REPOSITORY:-xiaozhi-web-local}:latest
     container_name: xiaozhi-esp32-server-web
     restart: always
     networks:
@@ -55,7 +53,7 @@ services:
       - ./uploadfile:/uploadfile
   # 数据库模块
   xiaozhi-esp32-server-db:
-    image: mysql:latest
+    image: ${XIAOZHI_MYSQL_IMAGE:-mysql:latest}
     container_name: xiaozhi-esp32-server-db
     healthcheck:
       test: [ "CMD", "mysqladmin" ,"ping", "-h", "localhost" ]
@@ -76,7 +74,7 @@ services:
       - MYSQL_INITDB_ARGS="--character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci"
   # redis模块
   xiaozhi-esp32-server-redis:
-    image: redis:8.0
+    image: ${XIAOZHI_REDIS_IMAGE:-redis:8.0}
     expose:
       - 6379
     container_name: xiaozhi-esp32-server-redis

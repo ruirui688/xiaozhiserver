@@ -33,7 +33,7 @@ Python 每轮对话组装出来的 messages、tools 和会话状态
 
 ## 2. 顶层模块边界
 
-`main/` 下五个模块职责如下：
+`main/` 下四个模块职责如下：
 
 | 模块 | 职责 | 是否参与实时对话 |
 | --- | --- | --- |
@@ -41,9 +41,8 @@ Python 每轮对话组装出来的 messages、tools 和会话状态
 | `main/manager-api` | Java Spring Boot 管理后台，保存配置、设备绑定、模型编排、OTA、MCP 接入点参数，并向 Python 下发运行配置 | 间接参与 |
 | `main/manager-web` | Vue Web 智控台，配置智能体、模型、音色、提示词、插件、知识库、OTA、MCP 入口显示 | 不直接参与 |
 | `main/manager-mobile` | 移动端智控台，复用 `manager-api` 能力，提供移动端设备、智能体、工具管理 | 不直接参与 |
-| `main/digital-human` | 数字人和音频交互测试模块，用于验证数字人、音频、唤醒词和页面联调 | 不参与 ESP32 生产实时链路 |
 
-`digital-human` 是辅助测试线，不能用它判断 ESP32 生产设备的 MCP、提示词或工具调用是否已经进入 Python 主链路。
+已移除的浏览器测试模块不参与 ESP32 生产实时链路。验证 MCP、提示词或工具调用时，以真实 ESP32 设备、MQTT 网关或自建 WebSocket 测试客户端为准。
 
 ## 3. 配置变成设备行为
 

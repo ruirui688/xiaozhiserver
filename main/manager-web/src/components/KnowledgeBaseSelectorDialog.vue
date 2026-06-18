@@ -55,22 +55,6 @@
           />
         </div>
       </div>
-
-      <div class="selector-side">
-        <div class="selector-side-title">{{ $t('knowledgeBaseSelector.configTitle') }}</div>
-        <el-input
-          v-model="selectionDescription"
-          type="textarea"
-          :rows="12"
-          resize="none"
-          :placeholder="$t('knowledgeBaseSelector.configPlaceholder')"
-          maxlength="1000"
-          show-word-limit
-        />
-        <div class="selector-side-tip">
-          {{ $t('knowledgeBaseSelector.configTip') }}
-        </div>
-      </div>
     </div>
 
     <span slot="footer" class="dialog-footer">
@@ -95,7 +79,6 @@ export default {
     return {
       dialogVisible: this.value,
       searchName: "",
-      selectionDescription: "",
       loading: false,
       knowledgeBases: [],
       selectedRows: [],
@@ -109,7 +92,6 @@ export default {
       this.dialogVisible = val;
       if (val) {
         this.selectedRows = JSON.parse(JSON.stringify(this.selected || []));
-        this.selectionDescription = this.buildSelectionDescription(this.selectedRows);
         this.currentPage = 1;
         this.fetchKnowledgeBases();
       }
@@ -165,7 +147,6 @@ export default {
         const previous = map.get(item.id) || this.selectedRows.find(row => row.id === item.id) || {};
         map.set(item.id, {
           ...item,
-          selectionDescription: previous.selectionDescription || item.selectionDescription || "",
           queryPolicy: previous.queryPolicy || item.queryPolicy || ""
         });
       });
@@ -181,44 +162,23 @@ export default {
         name: item.name,
         description: item.description,
         documentCount: item.documentCount || 0,
-        selectionDescription: this.selectionDescription
+        queryPolicy: item.queryPolicy || ""
       })));
       this.dialogVisible = false;
     },
     handleClosed() {
       this.selectedRows = JSON.parse(JSON.stringify(this.selected || []));
-      this.selectionDescription = this.buildSelectionDescription(this.selectedRows);
-    },
-    buildSelectionDescription(rows) {
-      if (!rows || rows.length === 0) {
-        return "";
-      }
-      const existingDescription = rows
-        .map(item => item.selectionDescription)
-        .find(description => description && description.trim());
-      if (existingDescription) {
-        return existingDescription;
-      }
-      const names = rows.map(item => item.name).filter(Boolean);
-      const descriptions = rows.map(item => item.description).filter(Boolean);
-      const nameLine = names.length ? `知识库范围：${names.join("、")}` : "";
-      const descLine = descriptions.length ? `知识库内容：${descriptions.join("；")}` : "";
-      return [nameLine, descLine].filter(Boolean).join("\n");
     }
   },
   mounted() {
     this.selectedRows = JSON.parse(JSON.stringify(this.selected || []));
-    this.selectionDescription = this.buildSelectionDescription(this.selectedRows);
   }
 };
 </script>
 
 <style lang="scss" scoped>
 .selector-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 280px;
-  gap: 16px;
-  align-items: start;
+  display: block;
 }
 
 .selector-toolbar {
@@ -241,23 +201,4 @@ export default {
   padding-top: 14px;
 }
 
-.selector-side {
-  padding: 12px;
-  background: #f7f8fc;
-  border: 1px solid #edf0f7;
-  border-radius: 8px;
-}
-
-.selector-side-title {
-  margin-bottom: 10px;
-  font-size: 13px;
-  color: #5f6680;
-}
-
-.selector-side-tip {
-  margin-top: 8px;
-  font-size: 12px;
-  color: #98a0b3;
-  line-height: 18px;
-}
 </style>

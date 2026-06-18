@@ -77,9 +77,11 @@ class ServerPluginExecutor(ToolExecutor):
         necessary_functions = ["handle_exit_intent", "get_lunar"]
 
         # 获取配置中的函数
-        config_functions = self.config["Intent"][
-            self.config["selected_module"]["Intent"]
-        ].get("functions", [])
+        selected_intent = self.config.get("selected_module", {}).get("Intent")
+        intent_config = self.config.get("Intent", {})
+        config_functions = []
+        if selected_intent and selected_intent in intent_config:
+            config_functions = intent_config[selected_intent].get("functions", [])
 
         # 转换为列表
         if not isinstance(config_functions, list):

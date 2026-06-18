@@ -1,6 +1,10 @@
 package xiaozhi.modules.model.service.impl;
 
-import java.io.Serializable;
+import java.awt.Color;
+import java.awt.Font;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
@@ -11,10 +15,12 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -24,6 +30,8 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPOutputStream;
 import java.util.stream.Collectors;
+
+import javax.imageio.ImageIO;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.http.HttpEntity;
@@ -57,17 +65,18 @@ import xiaozhi.common.redis.RedisKeys;
 import xiaozhi.common.redis.RedisUtils;
 import xiaozhi.common.service.impl.BaseServiceImpl;
 import xiaozhi.common.utils.ConvertUtils;
-import xiaozhi.common.utils.SensitiveDataUtils;
 import xiaozhi.modules.agent.dao.AgentDao;
 import xiaozhi.modules.agent.entity.AgentEntity;
 import xiaozhi.modules.model.dao.ModelConfigDao;
 import xiaozhi.modules.model.dto.LlmModelBasicInfoDTO;
 import xiaozhi.modules.model.dto.ModelBasicInfoDTO;
+import xiaozhi.modules.model.dto.ModelCatalogDTO;
 import xiaozhi.modules.model.dto.ModelConfigBodyDTO;
 import xiaozhi.modules.model.dto.ModelConfigDTO;
 import xiaozhi.modules.model.dto.ModelProviderDTO;
 import xiaozhi.modules.model.dto.ModelTestResultDTO;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
+import xiaozhi.modules.model.service.ModelCatalogService;
 import xiaozhi.modules.model.service.ModelConfigService;
 import xiaozhi.modules.model.service.ModelProviderService;
 import lombok.extern.slf4j.Slf4j;
@@ -80,6 +89,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
 
     private final ModelConfigDao modelConfigDao;
     private final ModelProviderService modelProviderService;
+    private final ModelCatalogService modelCatalogService;
     private final RedisUtils redisUtils;
     private final AgentDao agentDao;
     private final RestTemplate restTemplate;
@@ -93,6 +103,14 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     private static final String LLM_TEST_PROMPT = "请只回复 OK";
     private static final String TTS_TEST_TEXT = "你好，我是小智，语音合成测试成功。";
     private static final String VLLM_TEST_QUESTION = "请用一句话描述这张图片。";
+    private static final String TEST_LEVEL_REAL_INFERENCE = "REAL_INFERENCE";
+    private static final String TEST_LEVEL_CONNECTIVITY = "CONNECTIVITY";
+    private static final String TEST_LEVEL_CONFIG_ONLY = "CONFIG_ONLY";
+    private static final String TEST_LEVEL_UNSUPPORTED = "UNSUPPORTED";
+    private static final List<String> UPSTREAM_MODEL_FIELDS = List.of(
+            "model_name", "model", "resource_id", "model_dir", "llm_model", "llm");
+    private static final List<String> ENDPOINT_FIELDS = List.of(
+            "base_url", "api_url", "url", "server_url", "ws_url", "host");
 
     @Override
     public List<ModelBasicInfoDTO> getModelCodeList(String modelType, String modelName) {
@@ -146,7 +164,11 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                         .eq("model_type", modelType)
                         .like(StringUtils.isNotBlank(modelName), "model_name", modelName));
 
-        return getPageData(modelConfigEntityIPage, ModelConfigDTO.class);
+        Map<String, ModelProviderDTO> providerCache = new HashMap<>();
+        List<ModelConfigDTO> list = modelConfigEntityIPage.getRecords().stream()
+                .map(entity -> buildResponseDTO(entity, providerCache))
+                .toList();
+        return new PageData<>(list, modelConfigEntityIPage.getTotal());
     }
 
     @Override
@@ -157,13 +179,13 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         // 2. 验证模型提供者
         validateModelProvider(modelType, provideCode);
 
-        // 3. 获取原始配置（不经过敏感数据处理）
+        // 3. 获取原始配置
         ModelConfigEntity originalEntity = getOriginalConfigFromDb(id);
 
         // 4. 验证LLM配置
         validateLlmConfiguration(modelConfigBodyDTO);
 
-        // 5. 准备更新实体并处理敏感数据
+        // 5. 准备更新实体
         ModelConfigEntity modelConfigEntity = prepareUpdateEntity(modelConfigBodyDTO, originalEntity, modelType, id);
 
         // 6. 执行数据库更新
@@ -172,7 +194,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         // 7. 清除缓存
         clearModelCache(id);
 
-        // 8. 返回处理后的数据（包含敏感数据掩码）
+        // 8. 返回更新后的数据
         return buildResponseDTO(modelConfigEntity);
     }
 
@@ -187,6 +209,18 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         modelConfigDao.insert(modelConfigEntity);
 
         return buildResponseDTO(modelConfigEntity);
+    }
+
+    @Override
+    public ModelConfigDTO getDTOById(String id) {
+        if (StringUtils.isBlank(id)) {
+            throw new RenException(ErrorCode.IDENTIFIER_NOT_NULL);
+        }
+        ModelConfigEntity entity = modelConfigDao.selectById(id);
+        if (entity == null) {
+            throw new RenException(ErrorCode.RESOURCE_NOT_FOUND);
+        }
+        return buildResponseDTO(entity);
     }
 
     @Override
@@ -221,12 +255,14 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
 
         long startTime = System.currentTimeMillis();
         ModelTestResultDTO result = doTestModel(modelConfig);
-        if (result.getResponseTimeMs() == null) {
+        if (result.getResponseTimeMs() == null && shouldShowModelTestResponseTime(result)) {
             result.setResponseTimeMs(System.currentTimeMillis() - startTime);
         }
         Date testTime = new Date();
         result.setTestTime(testTime);
-        result.setTestStatus(Boolean.TRUE.equals(result.getSuccess()) ? MODEL_TEST_PASSED : MODEL_TEST_FAILED);
+        boolean verified = isVerifiedModelTest(result);
+        result.setVerified(verified);
+        result.setTestStatus(verified ? MODEL_TEST_PASSED : MODEL_TEST_FAILED);
 
         ModelConfigEntity updateEntity = new ModelConfigEntity();
         updateEntity.setId(id);
@@ -234,7 +270,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         updateEntity.setTestStatus(result.getTestStatus());
         updateEntity.setTestMessage(result.getMessage());
         updateEntity.setTestTime(testTime);
-        updateEntity.setIsEnabled(Boolean.TRUE.equals(result.getSuccess()) ? 1 : 0);
+        updateEntity.setIsEnabled(verified ? 1 : 0);
         modelConfigDao.updateById(updateEntity);
         clearModelCache(id);
         return result;
@@ -265,27 +301,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     }
 
     @Override
-    public ModelConfigEntity selectById(Serializable id) {
-        ModelConfigEntity entity = super.selectById(id);
-        if (entity != null && entity.getConfigJson() != null) {
-            entity.setConfigJson(maskSensitiveFields(entity.getConfigJson()));
-        }
-        return entity;
-    }
-
-    @Override
     protected <D> PageData<D> getPageData(IPage<?> page, Class<D> target) {
-        List<?> records = page.getRecords();
-        if (records != null && !records.isEmpty()) {
-            for (Object record : records) {
-                if (record instanceof ModelConfigEntity) {
-                    ModelConfigEntity entity = (ModelConfigEntity) record;
-                    if (entity.getConfigJson() != null) {
-                        entity.setConfigJson(maskSensitiveFields(entity.getConfigJson()));
-                    }
-                }
-            }
-        }
         return super.getPageData(page, target);
     }
 
@@ -369,7 +385,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     }
 
     /**
-     * 从数据库获取原始配置（不经过敏感数据处理）
+     * 从数据库获取原始配置
      */
     private ModelConfigEntity getOriginalConfigFromDb(String id) {
         ModelConfigEntity originalEntity = modelConfigDao.selectById(id);
@@ -409,18 +425,18 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     }
 
     /**
-     * 准备更新实体，处理敏感数据
+     * 准备更新实体
      */
     private ModelConfigEntity prepareUpdateEntity(ModelConfigBodyDTO modelConfigBodyDTO,
             ModelConfigEntity originalEntity,
             String modelType,
             String id) {
-        // 1. 复制原始实体，保留所有原始数据（包括敏感信息）
+        // 1. 复制原始实体，保留未在编辑表单中暴露的字段
         ModelConfigEntity modelConfigEntity = ConvertUtils.sourceToTarget(originalEntity, ModelConfigEntity.class);
         modelConfigEntity.setId(id);
         modelConfigEntity.setModelType(modelType);
 
-        // 2. 只更新非敏感字段
+        // 2. 更新基础字段
         modelConfigEntity.setModelName(modelConfigBodyDTO.getModelName());
         modelConfigEntity.setSort(modelConfigBodyDTO.getSort());
         modelConfigEntity.setIsEnabled(0);
@@ -428,98 +444,12 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         modelConfigEntity.setTestStatus(MODEL_TEST_UNTESTED);
         modelConfigEntity.setTestMessage(null);
         modelConfigEntity.setTestTime(null);
-        // 3. 处理配置JSON，仅更新非敏感字段和明确修改的敏感字段
-        if (modelConfigBodyDTO.getConfigJson() != null && originalEntity.getConfigJson() != null) {
-            JSONObject originalJson = originalEntity.getConfigJson();
-            JSONObject updatedJson = new JSONObject(originalJson); // 基于原始JSON进行修改
-
-            // 遍历更新的JSON，只更新非敏感字段或确实被修改的敏感字段
-            for (String key : modelConfigBodyDTO.getConfigJson().keySet()) {
-                Object value = modelConfigBodyDTO.getConfigJson().get(key);
-
-                // 如果是敏感字段，需要确认是否真的被修改（前端传入的可能是掩码后的值）
-                if (SensitiveDataUtils.isSensitiveField(key)) {
-
-                    if (value instanceof String && !SensitiveDataUtils.isMaskedValue((String) value)) {
-                        updatedJson.put(key, value);
-                    }
-                } else if (value instanceof JSONObject) {
-                    // 递归处理嵌套JSON
-                    mergeJson(updatedJson, key, (JSONObject) value);
-                } else {
-                    // 非敏感字段直接更新
-                    updatedJson.put(key, value);
-                }
-            }
-
-            // 删除在新JSON中不存在的非敏感字段
-            for (String oldKey : originalJson.keySet().toArray(new String[0])) {
-                if (!modelConfigBodyDTO.getConfigJson().containsKey(oldKey)
-                        && !SensitiveDataUtils.isSensitiveField(oldKey)) {
-                    updatedJson.remove(oldKey);
-                }
-            }
-
-            modelConfigEntity.setConfigJson(updatedJson);
+        // 3. 模型配置按表单原样保存，API Key 等字段不再使用掩码保留协议
+        if (modelConfigBodyDTO.getConfigJson() != null) {
+            modelConfigEntity.setConfigJson(modelConfigBodyDTO.getConfigJson());
         }
 
         return modelConfigEntity;
-    }
-
-    // 辅助方法：判断值是否是掩码格式
-    private boolean isMaskedValue(String value) {
-        if (value == null)
-            return false;
-        // 简单判断是否包含掩码的特征（***）
-        return value.contains("***");
-    }
-
-    // 辅助方法：递归合并 JSON，保留原始敏感字段
-    private void mergeJson(JSONObject original, String key, JSONObject updated) {
-        // 空值检查
-        if (original == null || updated == null) {
-            log.warn("mergeJson: original 或 updated 为 null");
-            return;
-        }
-
-        // 如果 original 中不存在 key，创建一个新的 JSON 对象
-        if (!original.containsKey(key)) {
-            original.put(key, new JSONObject());
-        }
-
-        // 获取 original 中的子对象
-        Object originalValue = original.get(key);
-        JSONObject originalChild;
-
-        // 检查 originalValue 是否是 JSONObject 类型
-        if (originalValue instanceof JSONObject) {
-            originalChild = (JSONObject) originalValue;
-        } else {
-            // 如果不是 JSONObject 类型，记录警告并创建新的 JSON 对象
-            log.warn("mergeJson: key '{}' 的值不是 JSONObject 类型 (实际类型：{})，将创建新对象",
-                    key, originalValue != null ? originalValue.getClass().getSimpleName() : "null");
-            originalChild = new JSONObject();
-            original.put(key, originalChild);
-        }
-
-        for (String childKey : updated.keySet()) {
-            Object childValue = updated.get(childKey);
-            if (childValue instanceof JSONObject) {
-                mergeJson(originalChild, childKey, (JSONObject) childValue);
-            } else {
-                if (!SensitiveDataUtils.isSensitiveField(childKey) ||
-                        (childValue instanceof String && !isMaskedValue((String) childValue))) {
-                    originalChild.put(childKey, childValue);
-                }
-            }
-        }
-
-        // 删除在新 JSON 中不存在的非敏感子字段
-        for (String oldChildKey : originalChild.keySet().toArray(new String[0])) {
-            if (!updated.containsKey(oldChildKey) && !SensitiveDataUtils.isSensitiveField(oldChildKey)) {
-                originalChild.remove(oldChildKey);
-            }
-        }
     }
 
     /**
@@ -537,21 +467,279 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     }
 
     /**
-     * 构建返回的DTO，处理敏感数据
+     * 构建返回的DTO
      */
     private ModelConfigDTO buildResponseDTO(ModelConfigEntity entity) {
+        return buildResponseDTO(entity, new HashMap<>());
+    }
+
+    private ModelConfigDTO buildResponseDTO(ModelConfigEntity entity, Map<String, ModelProviderDTO> providerCache) {
         ModelConfigDTO dto = ConvertUtils.sourceToTarget(entity, ModelConfigDTO.class);
-        if (dto.getConfigJson() != null) {
-            dto.setConfigJson(maskSensitiveFields(dto.getConfigJson()));
+        if (dto == null) {
+            return null;
         }
+        ModelDisplayInfo displayInfo = buildModelDisplayInfo(entity, providerCache);
+        dto.setProviderCode(displayInfo.providerCode);
+        dto.setProviderName(displayInfo.providerName);
+        dto.setAdapterLabel(displayInfo.adapterLabel);
+        dto.setUpstreamModelId(displayInfo.upstreamModelId);
+        dto.setPlatformName(displayInfo.platformName);
+        dto.setEndpointSummary(displayInfo.endpointSummary);
+        dto.setModelTags(displayInfo.modelTags);
+        enrichCatalogInfo(dto, entity, displayInfo);
         return dto;
     }
 
-    /**
-     * 处理敏感字段
-     */
-    private JSONObject maskSensitiveFields(JSONObject configJson) {
-        return SensitiveDataUtils.maskSensitiveFields(configJson);
+    private void enrichCatalogInfo(ModelConfigDTO dto, ModelConfigEntity entity, ModelDisplayInfo displayInfo) {
+        ModelCatalogDTO catalog = modelCatalogService.resolve(entity);
+        if (catalog == null) {
+            dto.setMigrationStatus("UNSUPPORTED");
+            return;
+        }
+        dto.setTemplateCode(catalog.getTemplateCode());
+        dto.setVendorName(catalog.getVendorName());
+        dto.setProductName(catalog.getProductName());
+        dto.setCapabilityLabel(catalog.getCapabilityLabel());
+        dto.setAccessModeLabel(catalog.getAccessModeLabel());
+        dto.setDeploymentLabel(catalog.getDeploymentLabel());
+        dto.setProtocolLabel(catalog.getProtocolLabel());
+        dto.setUpstreamResourceLabel(catalog.getUpstreamResourceLabel());
+        dto.setCredentialSummary(catalog.getCredentialFields());
+        dto.setRequiredFields(catalog.getRequiredFields());
+        dto.setSetupHints(catalog.getSetupHints());
+        dto.setKnownLimitations(catalog.getKnownLimitations());
+        dto.setMigrationStatus(hasMissingCatalogRequiredFields(entity.getConfigJson(), catalog) ? "NEEDS_REVIEW" : "AUTO");
+        if (StringUtils.isBlank(dto.getPlatformName())) {
+            dto.setPlatformName(catalog.getVendorName());
+        }
+        if (StringUtils.isBlank(dto.getAdapterLabel())) {
+            dto.setAdapterLabel(StringUtils.defaultIfBlank(catalog.getAdapterName(), displayInfo.providerCode));
+        }
+    }
+
+    private boolean hasMissingCatalogRequiredFields(JSONObject configJson, ModelCatalogDTO catalog) {
+        for (String field : catalog.getRequiredFields()) {
+            if (!hasUsableConfigValue(configJson, field)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private ModelDisplayInfo buildModelDisplayInfo(ModelConfigEntity entity,
+            Map<String, ModelProviderDTO> providerCache) {
+        ModelDisplayInfo displayInfo = new ModelDisplayInfo();
+        if (entity == null) {
+            return displayInfo;
+        }
+
+        JSONObject configJson = entity.getConfigJson();
+        displayInfo.providerCode = getConfigString(configJson, "type");
+        ModelProviderDTO provider = findProvider(entity.getModelType(), displayInfo.providerCode, providerCache);
+        if (provider != null) {
+            displayInfo.providerName = StringUtils.defaultString(provider.getName());
+        }
+        displayInfo.adapterLabel = StringUtils.defaultIfBlank(displayInfo.providerName, displayInfo.providerCode);
+        displayInfo.upstreamModelId = firstConfigString(configJson, UPSTREAM_MODEL_FIELDS);
+        displayInfo.endpointSummary = buildEndpointSummary(configJson);
+        displayInfo.platformName = inferPlatformName(configJson, provider, displayInfo.providerCode,
+                displayInfo.endpointSummary);
+        displayInfo.modelTags = buildModelTags(entity, configJson, displayInfo);
+        return displayInfo;
+    }
+
+    private ModelProviderDTO findProvider(String modelType, String providerCode,
+            Map<String, ModelProviderDTO> providerCache) {
+        if (StringUtils.isBlank(modelType) || StringUtils.isBlank(providerCode)) {
+            return null;
+        }
+        String cacheKey = modelType + ":" + providerCode;
+        if (providerCache.containsKey(cacheKey)) {
+            return providerCache.get(cacheKey);
+        }
+        List<ModelProviderDTO> providerList = modelProviderService.getList(modelType, providerCode);
+        ModelProviderDTO provider = CollectionUtil.isEmpty(providerList) ? null : providerList.get(0);
+        providerCache.put(cacheKey, provider);
+        return provider;
+    }
+
+    private String firstConfigString(JSONObject configJson, List<String> keys) {
+        if (configJson == null) {
+            return "";
+        }
+        for (String key : keys) {
+            String value = getConfigString(configJson, key);
+            if (StringUtils.isNotBlank(value)) {
+                return value;
+            }
+        }
+        return "";
+    }
+
+    private String getConfigString(JSONObject configJson, String key) {
+        if (configJson == null || StringUtils.isBlank(key) || !configJson.containsKey(key)) {
+            return "";
+        }
+        Object value = configJson.get(key);
+        if (value == null) {
+            return "";
+        }
+        String text = String.valueOf(value).trim();
+        return "null".equalsIgnoreCase(text) ? "" : text;
+    }
+
+    private String buildEndpointSummary(JSONObject configJson) {
+        if (configJson == null) {
+            return "";
+        }
+        String endpoint = firstConfigString(configJson, ENDPOINT_FIELDS);
+        String port = getConfigString(configJson, "port");
+        if (StringUtils.isNotBlank(port)
+                && StringUtils.isNotBlank(endpoint)
+                && !StringUtils.contains(endpoint, "://")
+                && !StringUtils.contains(endpoint, ":")) {
+            endpoint = endpoint + ":" + port;
+        }
+        return summarizeEndpoint(endpoint);
+    }
+
+    private String summarizeEndpoint(String endpoint) {
+        if (StringUtils.isBlank(endpoint)) {
+            return "";
+        }
+        String sanitized = StringUtils.substringBefore(StringUtils.substringBefore(endpoint.trim(), "?"), "#");
+        try {
+            URI uri = new URI(sanitized);
+            if (StringUtils.isBlank(uri.getScheme()) || StringUtils.isBlank(uri.getHost())) {
+                return sanitized;
+            }
+            StringBuilder summary = new StringBuilder();
+            summary.append(uri.getScheme()).append("://").append(uri.getHost());
+            if (uri.getPort() >= 0) {
+                summary.append(":").append(uri.getPort());
+            }
+            if (StringUtils.isNotBlank(uri.getPath())) {
+                summary.append(uri.getPath());
+            }
+            return summary.toString();
+        } catch (Exception e) {
+            return sanitized;
+        }
+    }
+
+    private String inferPlatformName(JSONObject configJson, ModelProviderDTO provider, String providerCode,
+            String endpointSummary) {
+        String explicitPlatform = firstConfigString(configJson, List.of("platform_name", "platform", "vendor"));
+        if (StringUtils.isNotBlank(explicitPlatform)) {
+            return explicitPlatform;
+        }
+        String endpoint = StringUtils.lowerCase(endpointSummary);
+        if (StringUtils.contains(endpoint, "dashscope.aliyuncs.com")) {
+            return "阿里云百炼";
+        }
+        if (StringUtils.contains(endpoint, "aliyuncs.com")) {
+            return "阿里云";
+        }
+        if (StringUtils.contains(endpoint, "ark.cn-")
+                || StringUtils.contains(endpoint, "volces.com")
+                || StringUtils.contains(endpoint, "volcengine")
+                || StringUtils.contains(endpoint, "bytedance.com")) {
+            return "火山引擎";
+        }
+        if (StringUtils.contains(endpoint, "deepseek.com")) {
+            return "DeepSeek";
+        }
+        if (StringUtils.contains(endpoint, "open.bigmodel.cn")) {
+            return "智谱AI";
+        }
+        if (StringUtils.contains(endpoint, "api.openai.com")) {
+            return "OpenAI";
+        }
+        if (StringUtils.contains(endpoint, "api.groq.com")) {
+            return "Groq";
+        }
+        if (isLocalEndpoint(endpoint)) {
+            return "本地服务";
+        }
+
+        String normalizedProvider = StringUtils.lowerCase(providerCode);
+        if (StringUtils.contains(normalizedProvider, "aliyun") || StringUtils.contains(normalizedProvider, "alibl")) {
+            return "阿里云";
+        }
+        if (StringUtils.contains(normalizedProvider, "doubao")) {
+            return "火山引擎";
+        }
+        if (StringUtils.contains(normalizedProvider, "gemini")) {
+            return "Google Gemini";
+        }
+        if (StringUtils.contains(normalizedProvider, "ollama")) {
+            return "Ollama";
+        }
+        if (StringUtils.contains(normalizedProvider, "xinference")) {
+            return "Xinference";
+        }
+        if (StringUtils.contains(normalizedProvider, "openai")) {
+            return "OpenAI兼容";
+        }
+        return provider == null ? "" : StringUtils.defaultString(provider.getName());
+    }
+
+    private List<String> buildModelTags(ModelConfigEntity entity, JSONObject configJson, ModelDisplayInfo displayInfo) {
+        Set<String> tags = new LinkedHashSet<>();
+        addTag(tags, entity.getModelType());
+        if (Integer.valueOf(1).equals(entity.getIsDefault())) {
+            addTag(tags, "默认");
+        }
+        if (Integer.valueOf(1).equals(entity.getIsEnabled())) {
+            addTag(tags, "启用");
+        } else {
+            addTag(tags, "停用");
+        }
+        if (Integer.valueOf(MODEL_TEST_PASSED).equals(entity.getTestStatus())) {
+            addTag(tags, "测试通过");
+        } else if (Integer.valueOf(MODEL_TEST_FAILED).equals(entity.getTestStatus())) {
+            addTag(tags, "测试失败");
+        } else {
+            addTag(tags, "未测试");
+        }
+        String providerCode = StringUtils.lowerCase(displayInfo.providerCode);
+        if (StringUtils.contains(providerCode, "openai")) {
+            addTag(tags, "OpenAI兼容");
+        }
+        if (StringUtils.contains(providerCode, "stream")
+                || Boolean.TRUE.equals(configJson == null ? null : configJson.getBool("streaming"))) {
+            addTag(tags, "流式");
+        }
+        if (StringUtils.isNotBlank(getConfigString(configJson, "model_dir"))
+                || isLocalEndpoint(StringUtils.lowerCase(displayInfo.endpointSummary))) {
+            addTag(tags, "本地");
+        } else if (StringUtils.isNotBlank(displayInfo.endpointSummary)) {
+            addTag(tags, "云端");
+        }
+        return new ArrayList<>(tags);
+    }
+
+    private void addTag(Set<String> tags, String tag) {
+        if (StringUtils.isNotBlank(tag)) {
+            tags.add(tag);
+        }
+    }
+
+    private boolean isLocalEndpoint(String endpoint) {
+        String value = StringUtils.lowerCase(endpoint);
+        return StringUtils.contains(value, "127.0.0.1")
+                || StringUtils.contains(value, "localhost")
+                || StringUtils.contains(value, "0.0.0.0");
+    }
+
+    private static class ModelDisplayInfo {
+        private String providerCode = "";
+        private String providerName = "";
+        private String adapterLabel = "";
+        private String upstreamModelId = "";
+        private String platformName = "";
+        private String endpointSummary = "";
+        private List<String> modelTags = List.of();
     }
 
     /**
@@ -649,6 +837,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         if (modelConfig.getConfigJson() == null) {
             result.setSuccess(false);
             result.setMessage("模型配置为空");
+            markModelTestLevel(result, TEST_LEVEL_UNSUPPORTED, false);
             return result;
         }
 
@@ -657,38 +846,134 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         if (StringUtils.isBlank(type)) {
             result.setSuccess(false);
             result.setMessage("模型配置缺少 type");
+            markModelTestLevel(result, TEST_LEVEL_UNSUPPORTED, false);
             return result;
         }
 
         String modelType = StringUtils.defaultString(modelConfig.getModelType()).toUpperCase();
         try {
+            String testLevel = getModelTestLevel(modelConfig);
             if ("LLM".equals(modelType) || "SLM".equals(modelType)) {
-                return testLanguageModel(configJson, type);
+                result = testLanguageModel(configJson, type);
+                return applyModelTestSemantics(result, testLevel);
             }
             if ("VLLM".equals(modelType)) {
-                return testVisionModel(configJson, type);
+                result = testVisionModel(configJson, type);
+                return applyModelTestSemantics(result, testLevel);
             }
             if ("ASR".equals(modelType)) {
-                return testAsrModel(configJson, type);
+                result = testAsrModel(configJson, type);
+                return applyModelTestSemantics(result, testLevel);
             }
             if ("TTS".equals(modelType)) {
-                return testTtsModel(configJson, type);
+                result = testTtsModel(configJson, type);
+                return applyModelTestSemantics(result, testLevel);
             }
             if ("INTENT".equals(modelType) && "intent_llm".equals(type)) {
-                return testIntentModel(configJson);
+                result = testIntentModel(configJson);
+                return applyModelTestSemantics(result, testLevel);
             }
             if (LOCAL_TESTABLE_TYPES.contains(type)) {
-                return validateBasicModelConfig(configJson, type, modelType);
+                result = validateBasicModelConfig(configJson, type, modelType);
+                return applyModelTestSemantics(result, testLevel);
             }
-            return validateBasicModelConfig(configJson, type, modelType);
+            result = validateBasicModelConfig(configJson, type, modelType);
+            return applyModelTestSemantics(result, testLevel);
         } catch (Exception e) {
             log.warn("模型测试失败，modelId: {}", modelConfig.getId(), e);
             result.setSuccess(false);
             result.setMessage("模型测试失败：" + StringUtils.defaultIfBlank(e.getMessage(), e.getClass().getSimpleName()));
             result.setTestInput("模型类型：" + modelType + "\n供应器类型：" + type);
             result.setTestOutput(result.getMessage());
+            markModelTestLevel(result, TEST_LEVEL_UNSUPPORTED, false);
             return result;
         }
+    }
+
+    private ModelTestResultDTO applyModelTestSemantics(ModelTestResultDTO result, String testLevel) {
+        if (result == null) {
+            result = new ModelTestResultDTO();
+            result.setSuccess(false);
+            result.setMessage("模型测试没有返回结果");
+            result.setTestOutput(result.getMessage());
+        }
+        boolean verified = Boolean.TRUE.equals(result.getSuccess())
+                && (TEST_LEVEL_REAL_INFERENCE.equals(testLevel) || TEST_LEVEL_CONNECTIVITY.equals(testLevel));
+        markModelTestLevel(result, testLevel, verified);
+        return result;
+    }
+
+    private boolean isVerifiedModelTest(ModelTestResultDTO result) {
+        return result != null && Boolean.TRUE.equals(result.getVerified());
+    }
+
+    private boolean shouldShowModelTestResponseTime(ModelTestResultDTO result) {
+        if (result == null) {
+            return false;
+        }
+        return TEST_LEVEL_REAL_INFERENCE.equals(result.getTestLevel())
+                || TEST_LEVEL_CONNECTIVITY.equals(result.getTestLevel());
+    }
+
+    private void markModelTestLevel(ModelTestResultDTO result, String testLevel, boolean verified) {
+        result.setTestLevel(testLevel);
+        result.setTestLevelText(getModelTestLevelText(testLevel));
+        result.setVerified(verified);
+        if (!TEST_LEVEL_REAL_INFERENCE.equals(testLevel) && !TEST_LEVEL_CONNECTIVITY.equals(testLevel)) {
+            result.setResponseTimeMs(null);
+        }
+    }
+
+    private String getModelTestLevel(ModelConfigEntity modelConfig) {
+        if (modelConfig == null || modelConfig.getConfigJson() == null) {
+            return TEST_LEVEL_UNSUPPORTED;
+        }
+        String modelType = StringUtils.defaultString(modelConfig.getModelType()).toUpperCase();
+        String type = StringUtils.lowerCase(modelConfig.getConfigJson().getStr("type"));
+        if (StringUtils.isBlank(type)) {
+            return TEST_LEVEL_UNSUPPORTED;
+        }
+        if (("LLM".equals(modelType) || "SLM".equals(modelType))
+                && ("openai".equals(type) || "ollama".equals(type))) {
+            return TEST_LEVEL_REAL_INFERENCE;
+        }
+        if ("VLLM".equals(modelType) && "openai".equals(type)) {
+            return TEST_LEVEL_REAL_INFERENCE;
+        }
+        if ("ASR".equals(modelType) && "openai".equals(type)) {
+            return TEST_LEVEL_REAL_INFERENCE;
+        }
+        if ("TTS".equals(modelType) && "openai".equals(type)) {
+            return TEST_LEVEL_REAL_INFERENCE;
+        }
+        if ("ASR".equals(modelType) && "doubao_stream".equals(type)) {
+            return TEST_LEVEL_CONNECTIVITY;
+        }
+        if ("INTENT".equals(modelType) && "intent_llm".equals(type)) {
+            return TEST_LEVEL_CONFIG_ONLY;
+        }
+        if (LOCAL_TESTABLE_TYPES.contains(type)) {
+            return TEST_LEVEL_CONFIG_ONLY;
+        }
+        if (CollectionUtil.isNotEmpty(getRequiredFields(modelType, type))
+                || CollectionUtil.isNotEmpty(getRequiredAnyFieldGroups(modelType, type))
+                || CollectionUtil.isNotEmpty(getMissingAlternativeRequirements(modelConfig.getConfigJson(), modelType, type))) {
+            return TEST_LEVEL_CONFIG_ONLY;
+        }
+        return TEST_LEVEL_UNSUPPORTED;
+    }
+
+    private String getModelTestLevelText(String testLevel) {
+        if (TEST_LEVEL_REAL_INFERENCE.equals(testLevel)) {
+            return "真实推理";
+        }
+        if (TEST_LEVEL_CONNECTIVITY.equals(testLevel)) {
+            return "连通性";
+        }
+        if (TEST_LEVEL_CONFIG_ONLY.equals(testLevel)) {
+            return "配置校验";
+        }
+        return "未实测";
     }
 
     private ModelTestResultDTO testIntentModel(JSONObject configJson) {
@@ -1069,15 +1354,9 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                     "../../docs/images/demo1.png",
                     "docs/images/demo1.png",
                     "../docs/images/demo1.png"));
-            if (imagePath == null) {
-                result.setSuccess(false);
-                result.setMessage("未找到视觉测试图片，期望来源：docs/images/demo1.png");
-                result.setTestInput("图片：docs/images/demo1.png\n问题：" + VLLM_TEST_QUESTION);
-                result.setTestOutput(result.getMessage());
-                return result;
-            }
-
-            String imageBase64 = Base64.getEncoder().encodeToString(Files.readAllBytes(imagePath));
+            String imageSource = imagePath == null ? "内置视觉测试图片" : imagePath.toString();
+            byte[] imageBytes = imagePath == null ? createEmbeddedVisionTestImage() : Files.readAllBytes(imagePath);
+            String imageBase64 = Base64.getEncoder().encodeToString(imageBytes);
             result.setTestImageDataUrl("data:image/png;base64," + imageBase64);
             Map<String, Object> imageUrl = Map.of("url", "data:image/png;base64," + imageBase64);
             Map<String, Object> textContent = Map.of("type", "text", "text", VLLM_TEST_QUESTION);
@@ -1088,7 +1367,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             requestBody.put("messages", List.of(message));
             requestBody.put("stream", false);
             requestBody.put("max_tokens", 120);
-            result.setTestInput("图片：" + imagePath.toString() + "\n问题：" + VLLM_TEST_QUESTION);
+            result.setTestInput("图片：" + imageSource + "\n问题：" + VLLM_TEST_QUESTION);
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
@@ -1112,8 +1391,8 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             }
             result.setSuccess(choices != null && !choices.isEmpty());
             result.setMessage(Boolean.TRUE.equals(result.getSuccess())
-                    ? "视觉模型真实图片测试通过，样本：" + imagePath.toString()
-                    : "视觉模型响应缺少 choices，样本：" + imagePath.toString());
+                    ? "视觉模型真实图片测试通过，样本：" + imageSource
+                    : "视觉模型响应缺少 choices，样本：" + imageSource);
             return result;
         } catch (Exception e) {
             result.setSuccess(false);
@@ -1123,6 +1402,32 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             }
             return result;
         }
+    }
+
+    private byte[] createEmbeddedVisionTestImage() throws IOException {
+        BufferedImage image = new BufferedImage(480, 320, BufferedImage.TYPE_INT_RGB);
+        Graphics2D graphics = image.createGraphics();
+        try {
+            graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            graphics.setColor(new Color(246, 248, 252));
+            graphics.fillRect(0, 0, 480, 320);
+            graphics.setColor(new Color(43, 92, 171));
+            graphics.fillRoundRect(54, 64, 160, 116, 18, 18);
+            graphics.setColor(new Color(239, 91, 91));
+            graphics.fillOval(276, 56, 128, 128);
+            graphics.setColor(new Color(49, 168, 126));
+            int[] xPoints = { 152, 244, 336 };
+            int[] yPoints = { 264, 128, 264 };
+            graphics.fillPolygon(xPoints, yPoints, 3);
+            graphics.setColor(new Color(28, 36, 52));
+            graphics.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 26));
+            graphics.drawString("XIAOZHI VISION TEST", 82, 292);
+        } finally {
+            graphics.dispose();
+        }
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ImageIO.write(image, "png", output);
+        return output.toByteArray();
     }
 
     private String extractOpenAiChoiceText(JSONArray choices) {
@@ -1218,29 +1523,15 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             return result;
         }
 
-        String localPathField = getLocalPathField(modelType, type);
-        if (StringUtils.isNotBlank(localPathField)) {
-            String configuredPath = configJson.getStr(localPathField);
-            if (findFirstExistingPath(List.of(
-                    configuredPath,
-                    "../xiaozhi-server/" + configuredPath,
-                    "main/xiaozhi-server/" + configuredPath)) == null) {
-                result.setSuccess(false);
-                result.setMessage("本地模型路径不存在：" + configuredPath);
-                result.setTestOutput(result.getMessage());
-                return result;
-            }
-        }
-
         result.setSuccess(true);
         result.setMessage("模型配置完整性测试通过");
-        result.setTestOutput("必填字段已配置，本地路径已校验");
+        result.setTestOutput(buildBasicConfigSuccessOutput(modelType, type));
         return result;
     }
 
     private List<String> getRequiredFields(String modelType, String type) {
         String normalizedModelType = StringUtils.defaultString(modelType).toUpperCase();
-        String normalizedType = StringUtils.defaultString(type);
+        String normalizedType = StringUtils.lowerCase(StringUtils.defaultString(type));
         if ("ASR".equals(normalizedModelType)) {
             return switch (normalizedType) {
                 case "fun_local", "sherpa_onnx_local" -> List.of("model_dir");
@@ -1276,7 +1567,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         }
         if ("LLM".equals(normalizedModelType)) {
             return switch (normalizedType) {
-                case "AliBL" -> List.of("base_url", "app_id", "api_key");
+                case "alibl" -> List.of("base_url", "app_id", "api_key");
                 case "dify", "fastgpt" -> List.of("base_url", "api_key");
                 case "gemini" -> List.of("api_key", "model_name");
                 case "coze" -> List.of("bot_id", "personal_access_token");
@@ -1296,7 +1587,8 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             };
         }
         if ("VAD".equals(normalizedModelType)) {
-            return "silero".equals(normalizedType) ? List.of("model_dir") : List.of();
+            return "silero".equals(normalizedType) ? List.of("model_dir", "threshold", "min_silence_duration_ms")
+                    : List.of();
         }
         if ("RAG".equals(normalizedModelType)) {
             return "ragflow".equals(normalizedType) ? List.of("base_url", "api_key") : List.of();
@@ -1306,7 +1598,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
 
     private List<List<String>> getRequiredAnyFieldGroups(String modelType, String type) {
         String normalizedModelType = StringUtils.defaultString(modelType).toUpperCase();
-        String normalizedType = StringUtils.defaultString(type);
+        String normalizedType = StringUtils.lowerCase(StringUtils.defaultString(type));
         if ("TTS".equals(normalizedModelType) && "doubao".equals(normalizedType)) {
             return List.of(List.of("access_token", "authorization"));
         }
@@ -1328,28 +1620,24 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
 
     private boolean isAliyunNlsModel(String modelType, String type) {
         String normalizedModelType = StringUtils.defaultString(modelType).toUpperCase();
-        String normalizedType = StringUtils.defaultString(type);
+        String normalizedType = StringUtils.lowerCase(StringUtils.defaultString(type));
         return ("ASR".equals(normalizedModelType) || "TTS".equals(normalizedModelType))
                 && ("aliyun".equals(normalizedType) || "aliyun_stream".equals(normalizedType));
     }
 
-    private String getLocalPathField(String modelType, String type) {
+    private String buildBasicConfigSuccessOutput(String modelType, String type) {
         String normalizedModelType = StringUtils.defaultString(modelType).toUpperCase();
-        String normalizedType = StringUtils.defaultString(type);
+        String normalizedType = StringUtils.lowerCase(StringUtils.defaultString(type));
         if ("VAD".equals(normalizedModelType) && "silero".equals(normalizedType)) {
-            return "model_dir";
+            return "必填字段已配置。Docker 部署下，SileroVAD 模型文件由 xiaozhi-server 容器在运行时校验。";
         }
-        if ("ASR".equals(normalizedModelType)) {
-            return switch (normalizedType) {
-                case "fun_local", "sherpa_onnx_local" -> "model_dir";
-                case "vosk" -> "model_path";
-                default -> null;
-            };
-        }
-        return null;
+        return "必填字段已配置";
     }
 
     private boolean hasUsableConfigValue(JSONObject configJson, String field) {
+        if (configJson == null) {
+            return false;
+        }
         Object value = configJson.get(field);
         if (value == null) {
             return false;

@@ -1,6 +1,6 @@
 # 部署资产治理策略
 
-本文定义部署资产的长期归档边界。当前阶段只固化规则，不移动既有 Dockerfile、Docker Compose 文件或脚本。
+本文定义部署资产的长期归档边界。生产服务器只需要 `deploy/production/` 最小部署资产；完整源码仍保存在私有 Git 仓库，并由本地或构建机用于构建镜像。
 
 ## 目录职责
 
@@ -15,18 +15,24 @@
 - `deploy/docker/`：Docker 构建和容器运行资产。
 - `deploy/server/`：本地服务器安装、升级、回滚和运行时目录初始化资产。
 - `deploy/release/`：镜像发布、版本打标、私有仓库推送和发布验证资产。
+- `deploy/production/`：生产服务器最小部署包。生产服务器可以通过 Git sparse-checkout 只拉取这个目录，不需要完整源码。
 
 新增资产应先判断属于哪个部署域，再放入对应目录。无法明确归类时，应先补充 README 中的边界说明，再新增文件。
 
 ## 当前兼容保留清单
 
-以下文件暂时保留在原位置：
+以下脚本暂时保留在原位置作为兼容入口，并转发到稳定部署资产：
 
 - `scripts/docker-build-private.sh`
 - `scripts/install-private-docker.sh`
+- `scripts/deploy`
+- `scripts/upgrade`
+
+以下历史文件仍可作为源码内参考或兼容模板，但不再作为生产服务器的直接入口：
+
 - `main/xiaozhi-server/docker-compose_all.yml`
 
-这些文件已经被现有部署流程引用。后续迁移必须满足：
+后续迁移必须满足：
 
 1. 原路径保留兼容入口。
 2. 新路径在 `deploy/` 对应域中有清晰归属。

@@ -17,18 +17,24 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.AllArgsConstructor;
 import xiaozhi.common.page.PageData;
-import xiaozhi.common.utils.ConvertUtils;
 import xiaozhi.common.utils.Result;
 import xiaozhi.modules.agent.service.AgentTemplateService;
 import xiaozhi.modules.config.service.ConfigService;
 import xiaozhi.modules.model.dto.LlmModelBasicInfoDTO;
+import xiaozhi.modules.model.dto.ModelBenchmarkCreateResponseDTO;
+import xiaozhi.modules.model.dto.ModelBenchmarkTaskDTO;
 import xiaozhi.modules.model.dto.ModelBasicInfoDTO;
+import xiaozhi.modules.model.dto.ModelCatalogDTO;
 import xiaozhi.modules.model.dto.ModelConfigBodyDTO;
 import xiaozhi.modules.model.dto.ModelConfigDTO;
+import xiaozhi.modules.model.dto.ModelMigrationPreviewDTO;
+import xiaozhi.modules.model.dto.ModelPerformanceTestRequestDTO;
 import xiaozhi.modules.model.dto.ModelProviderDTO;
 import xiaozhi.modules.model.dto.ModelTestResultDTO;
 import xiaozhi.modules.model.dto.VoiceDTO;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
+import xiaozhi.modules.model.service.ModelBenchmarkService;
+import xiaozhi.modules.model.service.ModelCatalogService;
 import xiaozhi.modules.model.service.ModelConfigService;
 import xiaozhi.modules.model.service.ModelProviderService;
 import xiaozhi.modules.timbre.service.TimbreService;
@@ -42,6 +48,8 @@ public class ModelController {
     private final ModelProviderService modelProviderService;
     private final TimbreService timbreService;
     private final ModelConfigService modelConfigService;
+    private final ModelBenchmarkService modelBenchmarkService;
+    private final ModelCatalogService modelCatalogService;
     private final ConfigService configService;
     private final AgentTemplateService agentTemplateService;
 
@@ -80,6 +88,44 @@ public class ModelController {
             @RequestParam(required = true, defaultValue = "10") String limit) {
         PageData<ModelConfigDTO> pageList = modelConfigService.getPageList(modelType, modelName, page, limit);
         return new Result<PageData<ModelConfigDTO>>().ok(pageList);
+    }
+
+    @GetMapping("/v2/catalog")
+    @Operation(summary = "获取模型配置 v2 全量目录")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<List<ModelCatalogDTO>> getModelCatalog(
+            @RequestParam(required = false) String modelType,
+            @RequestParam(required = false) String providerCode,
+            @RequestParam(required = false) String provider,
+            @RequestParam(required = false) String capability,
+            @RequestParam(required = false) String vendor,
+            @RequestParam(required = false) String platform,
+            @RequestParam(required = false) String keyword) {
+        return new Result<List<ModelCatalogDTO>>()
+                .ok(modelCatalogService.getCatalog(modelType,
+                        org.apache.commons.lang3.StringUtils.defaultIfBlank(providerCode, provider),
+                        capability,
+                        org.apache.commons.lang3.StringUtils.defaultIfBlank(vendor, platform)));
+    }
+
+    @GetMapping("/v2/templates")
+    @Operation(summary = "获取模型配置 v2 可用模板")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<List<ModelCatalogDTO>> getModelTemplates(
+            @RequestParam(required = false) String modelType,
+            @RequestParam(required = false) String providerCode,
+            @RequestParam(required = false) String provider,
+            @RequestParam(required = false) String catalogId) {
+        return new Result<List<ModelCatalogDTO>>().ok(modelCatalogService.getTemplates(modelType,
+                org.apache.commons.lang3.StringUtils.defaultIfBlank(providerCode, provider)));
+    }
+
+    @PostMapping("/v2/migrate/preview")
+    @Operation(summary = "预览旧模型配置迁移到 v2")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<List<ModelMigrationPreviewDTO>> previewModelMigration(
+            @RequestParam(required = false) String modelType) {
+        return new Result<List<ModelMigrationPreviewDTO>>().ok(modelCatalogService.previewMigration(modelType));
     }
 
     @PostMapping("/{modelType}/{provideCode}")
@@ -126,13 +172,26 @@ public class ModelController {
         return result;
     }
 
+    @PostMapping("/performance-test")
+    @Operation(summary = "创建模型专业评测任务")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<ModelBenchmarkCreateResponseDTO> performanceTest(
+            @RequestBody ModelPerformanceTestRequestDTO request) {
+        return new Result<ModelBenchmarkCreateResponseDTO>().ok(modelBenchmarkService.createBenchmarkTask(request));
+    }
+
+    @GetMapping("/benchmark/{taskId}")
+    @Operation(summary = "获取模型专业评测任务")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<ModelBenchmarkTaskDTO> benchmarkTask(@PathVariable String taskId) {
+        return new Result<ModelBenchmarkTaskDTO>().ok(modelBenchmarkService.getBenchmarkTask(taskId));
+    }
+
     @GetMapping("/{id}")
     @Operation(summary = "获取模型配置")
     @RequiresPermissions("sys:role:superAdmin")
     public Result<ModelConfigDTO> getModelConfig(@PathVariable String id) {
-        ModelConfigEntity item = modelConfigService.selectById(id);
-        ModelConfigDTO modelConfigDTO = ConvertUtils.sourceToTarget(item, ModelConfigDTO.class);
-        return new Result<ModelConfigDTO>().ok(modelConfigDTO);
+        return new Result<ModelConfigDTO>().ok(modelConfigService.getDTOById(id));
     }
 
     @PutMapping("/enable/{id}/{status}")

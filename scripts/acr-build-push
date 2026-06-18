@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+ACR_REGISTRY="${ACR_REGISTRY:-crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com}"
+ACR_NAMESPACE="${ACR_NAMESPACE:-yihuixiaozhi}"
+SERVER_IMAGE_REPOSITORY="${SERVER_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/xiaozhi-server}"
+WEB_IMAGE_REPOSITORY="${WEB_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/xiaozhi-web}"
+SERVER_BASE_IMAGE_REPOSITORY="${SERVER_BASE_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/xiaozhi-server-base}"
+MYSQL_IMAGE_REPOSITORY="${MYSQL_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/mysql}"
+REDIS_IMAGE_REPOSITORY="${REDIS_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/redis}"
+PLATFORMS="${PLATFORMS:-linux/amd64}"
+PUSH="${PUSH:-true}"
+BUILD_ENGINE="${BUILD_ENGINE:-docker}"
+PYTHON_BASE_IMAGE="${PYTHON_BASE_IMAGE:-python:3.10-slim-bookworm}"
+MIRROR_RUNTIME_IMAGES="${MIRROR_RUNTIME_IMAGES:-true}"
+MYSQL_SOURCE_IMAGE="${MYSQL_SOURCE_IMAGE:-mysql:8.4}"
+REDIS_SOURCE_IMAGE="${REDIS_SOURCE_IMAGE:-redis:8.0}"
+VERBOSE="${VERBOSE:-false}"
+XIAOZHI_DOCKER_QUIET="${XIAOZHI_DOCKER_QUIET:-true}"
+
+if [[ -z "${VERSION:-}" ]]; then
+  if VERSION_TAG="$(git -C "$ROOT_DIR" describe --tags --exact-match 2>/dev/null)"; then
+    VERSION="${VERSION_TAG#v}"
+  elif VERSION_SHA="$(git -C "$ROOT_DIR" rev-parse --short=8 HEAD 2>/dev/null)"; then
+    VERSION="$VERSION_SHA"
+  else
+    VERSION="local"
+  fi
+fi
+
+image_tag() {
+  local image="$1"
+  local tail="${image##*/}"
+  if [[ "$tail" != *:* ]]; then
+    echo "Source image must include an explicit tag: $image" >&2
+    exit 1
+  fi
+  echo "${tail##*:}"
+}
+
+MYSQL_TARGET_TAG="$(image_tag "$MYSQL_SOURCE_IMAGE")"
+REDIS_TARGET_TAG="$(image_tag "$REDIS_SOURCE_IMAGE")"
+
+cat <<EOF
+Building and pushing xiaozhi images to Aliyun ACR.
+
+Version:
+  $VERSION
+
+Image repositories:
+  server:      $SERVER_IMAGE_REPOSITORY
+  web:         $WEB_IMAGE_REPOSITORY
+  server-base: $SERVER_BASE_IMAGE_REPOSITORY
+  mysql:       $MYSQL_IMAGE_REPOSITORY:$MYSQL_TARGET_TAG
+  redis:       $REDIS_IMAGE_REPOSITORY:$REDIS_TARGET_TAG
+
+Runtime image sources:
+  mysql:       $MYSQL_SOURCE_IMAGE
+  redis:       $REDIS_SOURCE_IMAGE
+
+Default build engine:
+  $BUILD_ENGINE
+
+Docker output:
+  quiet=$XIAOZHI_DOCKER_QUIET verbose=$VERBOSE
+
+This command still needs access to Docker build base images unless you override
+PYTHON_BASE_IMAGE, NODE_BASE_IMAGE, MAVEN_BASE_IMAGE, and WEB_RUNTIME_BASE_IMAGE.
+EOF
+
+if [[ "$PUSH" == "true" && "$MIRROR_RUNTIME_IMAGES" == "true" ]]; then
+  ACR_REGISTRY="$ACR_REGISTRY" \
+    ACR_NAMESPACE="$ACR_NAMESPACE" \
+    MYSQL_SOURCE_IMAGE="$MYSQL_SOURCE_IMAGE" \
+    REDIS_SOURCE_IMAGE="$REDIS_SOURCE_IMAGE" \
+    MYSQL_IMAGE_REPOSITORY="$MYSQL_IMAGE_REPOSITORY" \
+    REDIS_IMAGE_REPOSITORY="$REDIS_IMAGE_REPOSITORY" \
+    VERBOSE="$VERBOSE" \
+    XIAOZHI_DOCKER_QUIET="$XIAOZHI_DOCKER_QUIET" \
+    "$ROOT_DIR/scripts/acr-mirror-runtime-images"
+fi
+
+SERVER_IMAGE_REPOSITORY="$SERVER_IMAGE_REPOSITORY" \
+  WEB_IMAGE_REPOSITORY="$WEB_IMAGE_REPOSITORY" \
+  SERVER_BASE_IMAGE_REPOSITORY="$SERVER_BASE_IMAGE_REPOSITORY" \
+  BUILD_ENGINE="$BUILD_ENGINE" \
+  PYTHON_BASE_IMAGE="$PYTHON_BASE_IMAGE" \
+  PUSH="$PUSH" \
+  PLATFORMS="$PLATFORMS" \
+  VERSION="$VERSION" \
+  VERBOSE="$VERBOSE" \
+  XIAOZHI_DOCKER_QUIET="$XIAOZHI_DOCKER_QUIET" \
+  PRINT_BUILD_CONFIG=false \
+  "$ROOT_DIR/scripts/docker-build-private.sh"

@@ -44,15 +44,16 @@ class WebSocketServer:
         self.config = config
         self.logger = setup_logging()
         self.config_lock = asyncio.Lock()
+        selected_module = self.config.get("selected_module", {})
         modules = initialize_modules(
             self.logger,
             self.config,
-            "VAD" in self.config["selected_module"],
-            "ASR" in self.config["selected_module"],
-            "LLM" in self.config["selected_module"],
+            "VAD" in selected_module,
+            "ASR" in selected_module,
+            "LLM" in selected_module,
             False,
-            "Memory" in self.config["selected_module"],
-            "Intent" in self.config["selected_module"],
+            "Memory" in selected_module,
+            "Intent" in selected_module,
         )
         self._vad = modules["vad"] if "vad" in modules else None
         self._asr = modules["asr"] if "asr" in modules else None
@@ -93,7 +94,7 @@ class WebSocketServer:
             parsed_url = urlparse(request_path)
             query_params = parse_qs(parsed_url.query)
             if "device-id" not in query_params:
-                await websocket.send("端口正常，如需测试连接，请启动digital-human测试")
+                await websocket.send("端口正常，如需测试连接，请使用ESP32设备或WebSocket客户端")
                 await websocket.close()
                 return
             else:
@@ -183,16 +184,17 @@ class WebSocketServer:
                 )
                 # 更新配置
                 self.config = new_config
+                selected_module = new_config.get("selected_module", {})
                 # 重新初始化组件
                 modules = initialize_modules(
                     self.logger,
                     new_config,
                     update_vad,
                     update_asr,
-                    "LLM" in new_config["selected_module"],
+                    "LLM" in selected_module,
                     False,
-                    "Memory" in new_config["selected_module"],
-                    "Intent" in new_config["selected_module"],
+                    "Memory" in selected_module,
+                    "Intent" in selected_module,
                 )
 
                 # 更新组件实例

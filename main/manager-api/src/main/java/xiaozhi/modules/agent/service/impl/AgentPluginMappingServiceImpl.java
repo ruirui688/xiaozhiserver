@@ -143,11 +143,6 @@ public class AgentPluginMappingServiceImpl extends ServiceImpl<AgentPluginMappin
             instructions.add("知识库内容范围：" + datasetDescription);
         }
 
-        Object customDescription = mappingParamInfo.get("description");
-        if (customDescription instanceof String && StringUtils.isNotBlank((String) customDescription)) {
-            instructions.add("当前智能体接入说明：" + StringUtils.trim((String) customDescription));
-        }
-
         Object queryPolicy = mappingParamInfo.get("queryPolicy");
         if (queryPolicy instanceof String && StringUtils.isNotBlank((String) queryPolicy)) {
             instructions.add("查询词生成规则：" + StringUtils.trim((String) queryPolicy));

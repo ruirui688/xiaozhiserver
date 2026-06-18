@@ -192,6 +192,7 @@
                           <el-select
                             v-model="form.model.vadModelId"
                             filterable
+                            clearable
                             :placeholder="$t('roleConfig.pleaseSelect')"
                             class="form-select"
                             @change="handleModelChange('VAD', $event)"
@@ -218,6 +219,7 @@
                           <el-select
                             v-model="form.model.asrModelId"
                             filterable
+                            clearable
                             :placeholder="$t('roleConfig.pleaseSelect')"
                             class="form-select"
                             @change="handleModelChange('ASR', $event)"
@@ -243,6 +245,7 @@
                           <el-select
                             v-model="form.model.llmModelId"
                             filterable
+                            clearable
                             :placeholder="$t('roleConfig.pleaseSelect')"
                             class="form-select"
                             @change="handleModelChange('LLM', $event)"
@@ -266,6 +269,7 @@
                           <el-select
                             v-model="form.model.slmModelId"
                             filterable
+                            clearable
                             :placeholder="$t('roleConfig.pleaseSelect')"
                             class="form-select"
                           >
@@ -293,6 +297,7 @@
                         <el-select
                           v-model="form.model[model.key]"
                           filterable
+                          clearable
                           :placeholder="$t('roleConfig.pleaseSelect')"
                           class="form-select"
                           @change="handleModelChange(model.type, $event)"
@@ -732,16 +737,21 @@ export default {
         summaryMemory: templateData.summaryMemory || this.form.summaryMemory,
         langCode: templateData.langCode || this.form.langCode,
         model: {
-          ttsModelId: templateData.ttsModelId || this.form.model.ttsModelId,
-          vadModelId: templateData.vadModelId || this.form.model.vadModelId,
-          asrModelId: templateData.asrModelId || this.form.model.asrModelId,
-          llmModelId: templateData.llmModelId || this.form.model.llmModelId,
-          slmModelId: templateData.slmModelId || this.form.model.slmModelId,
-          vllmModelId: templateData.vllmModelId || this.form.model.vllmModelId,
-          memModelId: templateData.memModelId || this.form.model.memModelId,
-          intentModelId: templateData.intentModelId || this.form.model.intentModelId,
+          ttsModelId: this.templateValue(templateData, "ttsModelId", this.form.model.ttsModelId),
+          vadModelId: this.templateValue(templateData, "vadModelId", this.form.model.vadModelId),
+          asrModelId: this.templateValue(templateData, "asrModelId", this.form.model.asrModelId),
+          llmModelId: this.templateValue(templateData, "llmModelId", this.form.model.llmModelId),
+          slmModelId: this.templateValue(templateData, "slmModelId", this.form.model.slmModelId),
+          vllmModelId: this.templateValue(templateData, "vllmModelId", this.form.model.vllmModelId),
+          memModelId: this.templateValue(templateData, "memModelId", this.form.model.memModelId),
+          intentModelId: this.templateValue(templateData, "intentModelId", this.form.model.intentModelId),
         },
       };
+    },
+    templateValue(templateData, key, fallback) {
+      return Object.prototype.hasOwnProperty.call(templateData, key)
+        ? (templateData[key] || "")
+        : fallback;
     },
     fetchAgentConfig(agentId) {
       Api.agent.getDeviceConfig(agentId, ({ data }) => {
@@ -751,14 +761,14 @@ export default {
             ...this.form,
             ...data.data,
             model: {
-              ttsModelId: data.data.ttsModelId,
-              vadModelId: data.data.vadModelId,
-              asrModelId: data.data.asrModelId,
-              llmModelId: data.data.llmModelId,
-              slmModelId: data.data.slmModelId,
-              vllmModelId: data.data.vllmModelId,
-              memModelId: data.data.memModelId,
-              intentModelId: data.data.intentModelId,
+              ttsModelId: data.data.ttsModelId || "",
+              vadModelId: data.data.vadModelId || "",
+              asrModelId: data.data.asrModelId || "",
+              llmModelId: data.data.llmModelId || "",
+              slmModelId: data.data.slmModelId || "",
+              vllmModelId: data.data.vllmModelId || "",
+              memModelId: data.data.memModelId || "",
+              intentModelId: data.data.intentModelId || "",
             },
           };
 
@@ -849,7 +859,7 @@ export default {
         return false;
       }
       const selectedValue = this.form.model[model.key];
-      return !selectedValue;
+      return Boolean(selectedValue);
     },
     queueNoAvailableModelWarning(model, options) {
       if (!this.shouldWarnNoAvailableModel(model, options)) {
@@ -1068,7 +1078,6 @@ export default {
             name: knowledge.name,
             description: knowledge.description,
             documentCount: knowledge.documentCount || 0,
-            selectionDescription: mapping.paramInfo?.description || "",
             queryPolicy: mapping.paramInfo?.queryPolicy || this.defaultKnowledgeQueryPolicy(),
           });
           return;
@@ -1099,7 +1108,6 @@ export default {
       const knowledgeMappings = this.currentKnowledgeBases.map((item) => ({
         pluginId: item.id,
         paramInfo: {
-          description: item.selectionDescription || item.description || "",
           queryPolicy: item.queryPolicy || this.defaultKnowledgeQueryPolicy(),
         },
       }));
@@ -1145,7 +1153,6 @@ export default {
     handleUpdateKnowledgeBases(selected) {
       this.currentKnowledgeBases = selected.map((item) => ({
         ...item,
-        selectionDescription: item.selectionDescription || item.description || "",
         queryPolicy: item.queryPolicy || this.defaultKnowledgeQueryPolicy(),
       }));
     },

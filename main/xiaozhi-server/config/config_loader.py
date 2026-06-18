@@ -11,6 +11,7 @@ from config.manage_api_client import (
     DeviceNotFoundException,
     DeviceBindException,
 )
+from core.utils.model_config_v2 import apply_legacy_runtime_view
 
 
 def get_project_dir():
@@ -58,6 +59,7 @@ def load_config():
     else:
         # 合并配置
         config = merge_configs(default_config, custom_config)
+    apply_legacy_runtime_view(config)
     # 初始化目录
     ensure_directories(config)
 
@@ -97,7 +99,7 @@ async def get_config_from_api_async(config):
     # 如果服务器没有prompt_template，则从本地配置读取
     if not config_data.get("prompt_template"):
         config_data["prompt_template"] = config.get("prompt_template")
-    return config_data
+    return apply_legacy_runtime_view(config_data)
 
 
 async def get_private_config_from_api(config, device_id, client_id):
@@ -119,7 +121,7 @@ async def get_private_config_from_api(config, device_id, client_id):
     private_config = agent_result if not isinstance(agent_result, Exception) else {}
     if correct_words:
         private_config["correct_words"] = correct_words
-    return private_config
+    return apply_legacy_runtime_view(private_config)
 
 
 def ensure_directories(config):
@@ -145,9 +147,7 @@ def ensure_directories(config):
         selected_provider = selected_modules.get(module_type)
         if not selected_provider:
             continue
-        if config.get(module) is None:
-            continue
-        if config.get(selected_provider) is None:
+        if config.get(module_type) is None:
             continue
         provider_config = config.get(module_type, {}).get(selected_provider, {})
         output_dir = provider_config.get("output_dir")

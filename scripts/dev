@@ -686,7 +686,7 @@ doctor() {
 
   printf '\nConfiguration\n'
   doctor_file "$ROOT_DIR/main/manager-api/src/main/resources/application-dev.yml" "manager-api dev config"
-  doctor_file "$ROOT_DIR/main/xiaozhi-server/data/.config.yaml" "xiaozhi-server private config" optional
+  doctor_file "$ROOT_DIR/main/xiaozhi-server/data/.config.yaml" "xiaozhi-server private config"
   doctor_file "$ROOT_DIR/main/xiaozhi-server/config_from_api.yaml" "xiaozhi-server API config template" optional
   doctor_file "$ROOT_DIR/main/manager-mobile/env/.env.development" "manager-mobile dev env" optional
 

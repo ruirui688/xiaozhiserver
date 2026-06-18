@@ -4,6 +4,7 @@ from config.logger import setup_logging
 from core.api.ota_handler import OTAHandler
 from core.api.vision_handler import VisionHandler
 from core.api.device_mcp_handler import DeviceMcpHandler
+from core.api.benchmark_handler import BenchmarkHandler
 
 TAG = __name__
 
@@ -15,6 +16,7 @@ class SimpleHttpServer:
         self.ota_handler = OTAHandler(config)
         self.vision_handler = VisionHandler(config)
         self.device_mcp_handler = DeviceMcpHandler(config)
+        self.benchmark_handler = BenchmarkHandler(config)
 
     def _get_websocket_url(self, local_ip: str, port: int) -> str:
         """获取websocket地址
@@ -99,6 +101,18 @@ class SimpleHttpServer:
                         ),
                         web.options(
                             "/device/mcp/call", self.device_mcp_handler.handle_options
+                        ),
+                        web.post(
+                            "/benchmark/models", self.benchmark_handler.handle_models
+                        ),
+                        web.options(
+                            "/benchmark/models", self.benchmark_handler.handle_options
+                        ),
+                        web.get(
+                            "/benchmark/health", self.benchmark_handler.handle_health
+                        ),
+                        web.options(
+                            "/benchmark/health", self.benchmark_handler.handle_options
                         ),
                     ]
                 )

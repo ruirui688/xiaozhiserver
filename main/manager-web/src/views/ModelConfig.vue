@@ -6,6 +6,19 @@
       <h2 class="page-title">{{ $t("modelConfig." + activeTab) }}</h2>
       <div class="action-group">
         <div class="search-group">
+          <el-radio-group
+            v-model="viewMode"
+            size="mini"
+            class="view-mode-switch"
+            @change="handleViewModeChange"
+          >
+            <el-radio-button label="config">
+              {{ $t("modelConfig.configView") }}
+            </el-radio-button>
+            <el-radio-button label="catalog">
+              {{ $t("modelConfig.catalogView") }}
+            </el-radio-button>
+          </el-radio-group>
           <el-input
             :placeholder="$t('modelConfig.searchPlaceholder')"
             v-model="search"
@@ -14,6 +27,67 @@
             @keyup.enter.native="handleSearch"
             style="width: 240px"
           />
+          <el-select
+            v-if="viewMode === 'config'"
+            v-model="testStatusFilter"
+            :placeholder="$t('modelConfig.testStatusFilter')"
+            class="filter-select"
+            clearable
+            @change="handleSearch"
+          >
+            <el-option
+              v-for="item in testStatusOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+          <el-select
+            v-model="adapterFilter"
+            :placeholder="$t('modelConfig.adapterFilter')"
+            class="filter-select"
+            filterable
+            clearable
+            @change="handleSearch"
+          >
+            <el-option
+              v-for="item in adapterOptions"
+              :key="item"
+              :label="item"
+              :value="item"
+            />
+          </el-select>
+          <el-select
+            v-model="platformFilter"
+            :placeholder="$t('modelConfig.platformFilter')"
+            class="filter-select"
+            filterable
+            clearable
+            @change="handleSearch"
+          >
+            <el-option
+              v-for="item in platformOptions"
+              :key="item"
+              :label="item"
+              :value="item"
+            />
+          </el-select>
+          <el-select
+            v-if="viewMode === 'catalog'"
+            v-model="capabilityFilter"
+            :placeholder="$t('modelConfig.capabilityFilter')"
+            class="filter-select"
+            filterable
+            clearable
+            @change="handleSearch"
+          >
+            <el-option
+              v-for="item in capabilityOptions"
+              :key="item"
+              :label="item"
+              :value="item"
+            />
+          </el-select>
           <el-button class="btn-search" @click="handleSearch">
             {{ $t("modelConfig.search") }}
           </el-button>
@@ -71,13 +145,14 @@
               element-loading-spinner="el-icon-loading"
               element-loading-background="rgba(255, 255, 255, 0.7)"
               :header-cell-style="{ background: 'transparent' }"
-              :data="modelList"
+              :data="activeTableData"
               class="transparent-table"
               header-row-class-name="table-header"
               :header-cell-class-name="headerCellClassName"
               @selection-change="handleSelectionChange"
             >
               <el-table-column
+                v-if="viewMode === 'config'"
                 type="selection"
                 width="55"
                 align="center"
@@ -85,22 +160,98 @@
               ></el-table-column>
               <el-table-column
                 :label="$t('modelConfig.modelId')"
-                prop="id"
                 align="center"
-              ></el-table-column>
+                width="150"
+                show-overflow-tooltip
+              >
+                <template slot-scope="scope">
+                  {{ viewMode === "catalog" ? getCatalogId(scope.row) : scope.row.id }}
+                </template>
+              </el-table-column>
               <el-table-column
                 :label="$t('modelConfig.modelName')"
-                prop="modelName"
                 align="center"
-              ></el-table-column>
-              <el-table-column :label="$t('modelConfig.provider')" align="center">
+                min-width="150"
+                show-overflow-tooltip
+              >
                 <template slot-scope="scope">
-                  {{ scope.row.configJson.type || $t("modelConfig.unknown") }}
+                  {{ viewMode === "catalog" ? getCatalogName(scope.row) : scope.row.modelName }}
+                </template>
+              </el-table-column>
+              <el-table-column
+                :label="$t('modelConfig.upstreamModel')"
+                align="center"
+                min-width="150"
+                show-overflow-tooltip
+              >
+                <template slot-scope="scope">
+                  {{ getUpstreamModel(scope.row) }}
+                </template>
+              </el-table-column>
+              <el-table-column
+                :label="$t('modelConfig.platformVendor')"
+                align="center"
+                min-width="130"
+                show-overflow-tooltip
+              >
+                <template slot-scope="scope">
+                  {{ getPlatformVendor(scope.row) }}
+                </template>
+              </el-table-column>
+              <el-table-column
+                :label="$t('modelConfig.productSeries')"
+                align="center"
+                min-width="130"
+                show-overflow-tooltip
+              >
+                <template slot-scope="scope">
+                  {{ getProductSeries(scope.row) }}
+                </template>
+              </el-table-column>
+              <el-table-column
+                :label="$t('modelConfig.provider')"
+                align="center"
+                min-width="130"
+                show-overflow-tooltip
+              >
+                <template slot-scope="scope">
+                  {{ getModelAdapter(scope.row) }}
+                </template>
+              </el-table-column>
+              <el-table-column
+                :label="$t('modelConfig.capabilities')"
+                align="center"
+                min-width="160"
+              >
+                <template slot-scope="scope">
+                  <div class="capability-tags">
+                    <el-tag
+                      v-for="tag in getCapabilityTags(scope.row)"
+                      :key="tag"
+                      size="mini"
+                      effect="plain"
+                    >
+                      {{ tag }}
+                    </el-tag>
+                    <span v-if="!getCapabilityTags(scope.row).length">-</span>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column
+                v-if="viewMode === 'catalog'"
+                :label="$t('modelConfig.templateCount')"
+                align="center"
+                width="110"
+              >
+                <template slot-scope="scope">
+                  {{ getCatalogTemplateCount(scope.row) }}
                 </template>
               </el-table-column>
               <el-table-column :label="$t('modelConfig.isEnabled')" align="center">
                 <template slot-scope="scope">
+                  <span v-if="viewMode === 'catalog'">-</span>
                   <el-tooltip
+                    v-else
                     :disabled="canToggleEnabled(scope.row)"
                     :content="$t('modelConfig.enableRequiresTestPassed')"
                     placement="top"
@@ -119,7 +270,9 @@
               </el-table-column>
               <el-table-column :label="$t('modelConfig.testStatus')" align="center" width="120px">
                 <template slot-scope="scope">
+                  <span v-if="viewMode === 'catalog'">-</span>
                   <el-tooltip
+                    v-else
                     :disabled="!scope.row.testMessage"
                     :content="scope.row.testMessage"
                     placement="top"
@@ -135,7 +288,7 @@
                 </template>
               </el-table-column>
               <el-table-column
-                v-if="activeTab === 'tts'"
+                v-if="viewMode === 'config' && activeTab === 'tts'"
                 :label="$t('modelConfig.voiceManagement')"
                 align="center"
               >
@@ -151,6 +304,7 @@
                 </template>
               </el-table-column>
               <el-table-column
+                v-if="viewMode === 'config'"
                 :label="$t('modelConfig.action')"
                 align="center"
                 width="260px"
@@ -191,10 +345,41 @@
                   </el-button>
                 </template>
               </el-table-column>
+              <el-table-column
+                v-if="viewMode === 'catalog'"
+                :label="$t('modelConfig.action')"
+                align="center"
+                width="120px"
+              >
+                <template slot-scope="scope">
+                  <el-button
+                    type="text"
+                    size="mini"
+                    :loading="templateLoading && selectedCatalogId === getCatalogId(scope.row)"
+                    @click="openTemplateDialog(scope.row)"
+                    class="edit-btn"
+                  >
+                    {{ $t("modelConfig.viewTemplates") }}
+                  </el-button>
+                </template>
+              </el-table-column>
             </el-table>
+            <el-alert
+              v-if="viewMode === 'catalog' && catalogError"
+              class="catalog-error"
+              type="warning"
+              :closable="false"
+              show-icon
+              :title="catalogError"
+            />
             <div class="table-footer">
               <div class="batch-actions">
-                <el-button size="mini" type="primary" @click="selectAll">
+                <el-button
+                  v-if="viewMode === 'config'"
+                  size="mini"
+                  type="primary"
+                  @click="selectAll"
+                >
                   {{
                     isAllSelected
                       ? $t("modelConfig.deselectAll")
@@ -205,12 +390,32 @@
                   {{ $t("modelConfig.add") }}
                 </el-button>
                 <el-button
+                  v-if="viewMode === 'config'"
                   size="mini"
                   type="danger"
                   icon="el-icon-delete"
                   @click="batchDelete"
                 >
                   {{ $t("modelConfig.delete") }}
+                </el-button>
+                <el-button
+                  v-if="viewMode === 'config'"
+                  size="mini"
+                  type="warning"
+                  icon="el-icon-data-analysis"
+                  :loading="performanceTesting"
+                  @click="runPerformanceTest"
+                >
+                  {{ $t("modelConfig.performanceTest") }}
+                </el-button>
+                <el-button
+                  size="mini"
+                  type="info"
+                  icon="el-icon-view"
+                  :loading="migrationPreviewLoading"
+                  @click="openMigrationPreview"
+                >
+                  {{ $t("modelConfig.migrationPreview") }}
                 </el-button>
               </div>
               <div class="custom-pagination">
@@ -261,7 +466,7 @@
                   {{ $t("modelConfig.nextPage") }}
                 </button>
                 <span class="total-text">{{
-                  $t("modelConfig.totalRecords", { total })
+                  $t("modelConfig.totalRecords", { total: displayTotal })
                 }}</span>
               </div>
             </div>
@@ -309,6 +514,10 @@
             <span class="test-result-label">{{ $t("modelConfig.responseTime") }}</span>
             <span>{{ formatResponseTime(currentTestResult.responseTimeMs) }}</span>
           </div>
+          <div class="test-result-row" v-if="currentTestResult.testLevelText">
+            <span class="test-result-label">{{ $t("modelConfig.testLevel") }}</span>
+            <span>{{ currentTestResult.testLevelText }}</span>
+          </div>
           <div class="test-result-block">
             <div class="test-result-label">{{ $t("modelConfig.testInput") }}</div>
             <div v-if="currentTestResult.testImageDataUrl" class="test-result-image-wrap">
@@ -325,6 +534,409 @@
             <pre>{{ formatTestOutput(currentTestResult.testOutput) }}</pre>
           </div>
         </div>
+      </el-dialog>
+      <el-dialog
+        :title="$t('modelConfig.performanceTestTitle')"
+        :visible.sync="performanceDialogVisible"
+        width="1060px"
+        append-to-body
+        class="performance-result-dialog"
+      >
+        <div class="performance-toolbar">
+          <span>{{ $t("modelConfig.performanceIterations") }}</span>
+          <el-input-number
+            v-model="performanceIterations"
+            :min="1"
+            :max="10"
+            size="mini"
+            controls-position="right"
+          />
+          <span>{{ $t("modelConfig.performanceConcurrency") }}</span>
+          <el-input-number
+            v-model="performanceConcurrency"
+            :min="1"
+            :max="8"
+            size="mini"
+            controls-position="right"
+          />
+          <span v-if="performanceReport" class="performance-summary">
+            {{
+              $t("modelConfig.performanceSummary", {
+                status: formatBenchmarkStatus(performanceReport.status),
+                total: getPerformanceTotal(performanceReport),
+                duration: formatResponseTime(performanceReport.durationMs),
+              })
+            }}
+          </span>
+        </div>
+        <div v-if="performanceReport" class="performance-layout">
+          <div class="performance-list">
+            <el-table
+              :data="performanceResults"
+              size="mini"
+              border
+              highlight-current-row
+              class="performance-table"
+              @row-click="selectPerformanceResult"
+            >
+              <el-table-column
+                prop="modelName"
+                :label="$t('modelConfig.modelName')"
+                min-width="150"
+              />
+              <el-table-column
+                prop="providerType"
+                :label="$t('modelConfig.provider')"
+                width="110"
+              />
+              <el-table-column
+                prop="testLevelText"
+                :label="$t('modelConfig.testLevel')"
+                width="110"
+              />
+              <el-table-column
+                :label="$t('modelConfig.successRate')"
+                width="90"
+              >
+                <template slot-scope="scope">
+                  {{ formatPercent(scope.row.successRate) }}
+                </template>
+              </el-table-column>
+              <el-table-column
+                :label="$t('modelConfig.avgLatency')"
+                width="110"
+              >
+                <template slot-scope="scope">
+                  {{ formatMeasuredLatency(scope.row, "avgLatencyMs") }}
+                </template>
+              </el-table-column>
+              <el-table-column
+                v-if="shouldShowPerformanceColumn('llm')"
+                :label="$t('modelConfig.ttft')"
+                width="95"
+              >
+                <template slot-scope="scope">
+                  {{ formatMetric(scope.row.ttftMs, " ms") }}
+                </template>
+              </el-table-column>
+              <el-table-column
+                v-if="shouldShowPerformanceColumn('llm')"
+                :label="$t('modelConfig.tokensPerSecond')"
+                width="105"
+              >
+                <template slot-scope="scope">
+                  {{ formatMetric(scope.row.tokensPerSecond, "") }}
+                </template>
+              </el-table-column>
+              <el-table-column
+                v-if="shouldShowPerformanceColumn('llm')"
+                :label="$t('modelConfig.qualityScore')"
+                width="90"
+              >
+                <template slot-scope="scope">
+                  {{ formatScore(scope.row.qualityScore) }}
+                </template>
+              </el-table-column>
+              <el-table-column
+                v-if="shouldShowPerformanceColumn('tts')"
+                :label="$t('modelConfig.firstAudio')"
+                width="100"
+              >
+                <template slot-scope="scope">
+                  {{ formatMetric(scope.row.firstAudioMs, " ms") }}
+                </template>
+              </el-table-column>
+              <el-table-column
+                v-if="shouldShowPerformanceColumn('tts')"
+                :label="$t('modelConfig.rtf')"
+                width="80"
+              >
+                <template slot-scope="scope">
+                  {{ formatMetric(scope.row.rtf, "") }}
+                </template>
+              </el-table-column>
+              <el-table-column
+                v-if="shouldShowPerformanceColumn('asr')"
+                :label="$t('modelConfig.cer')"
+                width="80"
+              >
+                <template slot-scope="scope">
+                  {{ formatPercent(scope.row.cer) }}
+                </template>
+              </el-table-column>
+              <el-table-column
+                v-if="shouldShowPerformanceColumn('asr')"
+                :label="$t('modelConfig.wer')"
+                width="80"
+              >
+                <template slot-scope="scope">
+                  {{ formatPercent(scope.row.wer) }}
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+          <div class="performance-detail">
+            <div class="performance-detail-title">
+              {{ selectedPerformanceResult ? selectedPerformanceResult.modelName : $t("modelConfig.performanceProcess") }}
+            </div>
+            <div v-if="selectedPerformanceResult" class="performance-detail-summary">
+              <div>
+                <span>{{ $t("modelConfig.successRate") }}</span>
+                <strong>{{ formatPercent(selectedPerformanceResult.successRate) }}</strong>
+              </div>
+              <div>
+                <span>{{ $t("modelConfig.avgLatency") }}</span>
+                <strong>{{ formatMeasuredLatency(selectedPerformanceResult, "avgLatencyMs") }}</strong>
+              </div>
+              <div>
+                <span>{{ $t("modelConfig.summary") }}</span>
+                <strong>{{ selectedPerformanceResult.summary || "-" }}</strong>
+              </div>
+            </div>
+            <el-empty
+              v-if="!performanceSamples.length"
+              :description="$t('modelConfig.noPerformanceSamples')"
+              :image-size="72"
+            />
+            <div v-else class="performance-chat">
+              <div class="performance-sample-picker">
+                <el-button
+                  v-for="sample in performanceSamples"
+                  :key="sample.iteration"
+                  size="mini"
+                  :type="getPerformanceSampleKey(sample) === selectedPerformanceSampleKey ? 'primary' : 'default'"
+                  plain
+                  class="performance-sample-chip"
+                  @click="selectPerformanceSample(sample)"
+                >
+                  {{ $t("modelConfig.performanceRound", { iteration: sample.iteration }) }}
+                  <span class="performance-chip-meta">{{ sample.success ? $t("modelConfig.testSuccess") : $t("modelConfig.testFailed") }}</span>
+                  <span class="performance-chip-meta">{{ formatResponseTime(sample.responseTimeMs) }}</span>
+                </el-button>
+              </div>
+              <div v-if="selectedPerformanceSample" class="performance-chat-turn">
+                <div class="performance-turn-meta">
+                  <span>{{ $t("modelConfig.performanceRound", { iteration: selectedPerformanceSample.iteration }) }}</span>
+                  <el-tag
+                    size="mini"
+                    :type="selectedPerformanceSample.success ? 'success' : 'danger'"
+                  >
+                    {{ selectedPerformanceSample.success ? $t("modelConfig.testSuccess") : $t("modelConfig.testFailed") }}
+                  </el-tag>
+                  <span>{{ formatResponseTime(selectedPerformanceSample.responseTimeMs) }}</span>
+                </div>
+                <div class="performance-bubble-row is-user">
+                  <div class="performance-bubble-label">{{ getSampleInputLabel(selectedPerformanceSample) }}</div>
+                  <div class="performance-bubble">
+                    {{ selectedPerformanceSample.inputSummary || "-" }}
+                  </div>
+                </div>
+                <div class="performance-bubble-row is-assistant">
+                  <div class="performance-bubble-label">{{ getSampleOutputLabel(selectedPerformanceSample) }}</div>
+                  <div class="performance-bubble">
+                    {{ selectedPerformanceSample.outputSummary || "-" }}
+                  </div>
+                </div>
+                <div
+                  v-if="selectedPerformanceSample.referenceOutput"
+                  class="performance-chat-reference"
+                >
+                  {{ $t("modelConfig.referenceOutput") }}：{{ selectedPerformanceSample.referenceOutput }}
+                </div>
+                <div class="performance-sample-metrics">
+                  <span v-if="isSampleType(selectedPerformanceSample, 'llm')">{{ $t("modelConfig.ttft") }} {{ formatMetric(selectedPerformanceSample.ttftMs, " ms") }}</span>
+                  <span v-if="isSampleType(selectedPerformanceSample, 'llm')">{{ $t("modelConfig.tokensPerSecond") }} {{ formatMetric(selectedPerformanceSample.tokensPerSecond, "") }}</span>
+                  <span v-if="isSampleType(selectedPerformanceSample, 'llm')">{{ $t("modelConfig.qualityScore") }} {{ formatScore(selectedPerformanceSample.qualityScore) }}</span>
+                  <span v-if="isSampleType(selectedPerformanceSample, 'tts')">{{ $t("modelConfig.firstAudio") }} {{ formatMetric(selectedPerformanceSample.firstAudioMs, " ms") }}</span>
+                  <span v-if="isSampleType(selectedPerformanceSample, 'tts')">{{ $t("modelConfig.rtf") }} {{ formatMetric(selectedPerformanceSample.rtf, "") }}</span>
+                  <span v-if="isSampleType(selectedPerformanceSample, 'asr')">{{ $t("modelConfig.cer") }} {{ formatPercent(selectedPerformanceSample.cer) }}</span>
+                  <span v-if="isSampleType(selectedPerformanceSample, 'asr')">{{ $t("modelConfig.wer") }} {{ formatPercent(selectedPerformanceSample.wer) }}</span>
+                </div>
+                <el-collapse
+                  v-if="hasSampleDetail(selectedPerformanceSample)"
+                  class="performance-json-detail"
+                >
+                  <el-collapse-item :title="$t('modelConfig.performanceRawDetail')" name="detail">
+                    <div class="performance-sample-grid">
+                      <div v-if="hasObjectValue(selectedPerformanceSample.inputDetail)">
+                        <div class="performance-field-label">{{ $t("modelConfig.testInput") }}</div>
+                        <pre>{{ formatJsonDetail(selectedPerformanceSample.inputDetail) }}</pre>
+                      </div>
+                      <div v-if="hasObjectValue(selectedPerformanceSample.outputDetail)">
+                        <div class="performance-field-label">{{ $t("modelConfig.testOutput") }}</div>
+                        <pre>{{ formatJsonDetail(selectedPerformanceSample.outputDetail) }}</pre>
+                      </div>
+                    </div>
+                  </el-collapse-item>
+                </el-collapse>
+                <div
+                  v-if="selectedPerformanceSample.message && selectedPerformanceSample.message !== 'OK'"
+                  class="performance-message"
+                >
+                  {{ selectedPerformanceSample.message }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div v-if="performanceReport" class="metric-notes">
+          <div
+            v-for="(note, index) in performanceReport.metricNotes || []"
+            :key="index"
+          >
+            {{ note }}
+          </div>
+        </div>
+        <span slot="footer" class="dialog-footer">
+          <el-button @click="performanceDialogVisible = false">
+            {{ $t("common.cancel") }}
+          </el-button>
+          <el-button
+            type="primary"
+            :loading="performanceTesting"
+            @click="submitPerformanceTest"
+          >
+            {{ $t("modelConfig.runPerformanceTest") }}
+          </el-button>
+        </span>
+      </el-dialog>
+      <el-dialog
+        :title="$t('modelConfig.migrationPreviewTitle')"
+        :visible.sync="migrationPreviewDialogVisible"
+        width="920px"
+        append-to-body
+        class="migration-preview-dialog"
+      >
+        <el-alert
+          v-if="migrationPreviewError"
+          type="warning"
+          :closable="false"
+          show-icon
+          :title="migrationPreviewError"
+          class="migration-preview-alert"
+        />
+        <div v-if="migrationPreviewData" class="migration-preview-content">
+          <div class="migration-summary">
+            <div>
+              <span>{{ $t("modelConfig.previewTotal") }}</span>
+              <strong>{{ getMigrationTotal(migrationPreviewData) }}</strong>
+            </div>
+            <div>
+              <span>{{ $t("modelConfig.previewMatched") }}</span>
+              <strong>{{ getMigrationMatched(migrationPreviewData) }}</strong>
+            </div>
+            <div>
+              <span>{{ $t("modelConfig.previewWarnings") }}</span>
+              <strong>{{ getMigrationWarnings(migrationPreviewData) }}</strong>
+            </div>
+          </div>
+          <el-table
+            :data="migrationPreviewRows"
+            size="mini"
+            border
+            class="migration-preview-table"
+          >
+            <el-table-column
+              prop="modelName"
+              :label="$t('modelConfig.modelName')"
+              min-width="150"
+              show-overflow-tooltip
+            />
+            <el-table-column
+              prop="provider"
+              :label="$t('modelConfig.provider')"
+              width="130"
+              show-overflow-tooltip
+            />
+            <el-table-column
+              prop="targetCatalog"
+              :label="$t('modelConfig.targetCatalog')"
+              min-width="160"
+              show-overflow-tooltip
+            />
+            <el-table-column
+              prop="targetTemplate"
+              :label="$t('modelConfig.targetTemplate')"
+              min-width="160"
+              show-overflow-tooltip
+            />
+            <el-table-column
+              prop="statusText"
+              :label="$t('modelConfig.previewStatus')"
+              width="110"
+            />
+            <el-table-column
+              prop="message"
+              :label="$t('modelConfig.summary')"
+              min-width="190"
+              show-overflow-tooltip
+            />
+          </el-table>
+          <div v-if="hasObjectValue(migrationPreviewData)" class="migration-raw">
+            <el-collapse>
+              <el-collapse-item :title="$t('modelConfig.performanceRawDetail')" name="raw">
+                <pre>{{ formatJsonDetail(migrationPreviewData) }}</pre>
+              </el-collapse-item>
+            </el-collapse>
+          </div>
+        </div>
+        <el-empty
+          v-else-if="!migrationPreviewLoading"
+          :description="$t('modelConfig.noMigrationPreview')"
+          :image-size="72"
+        />
+      </el-dialog>
+      <el-dialog
+        :title="$t('modelConfig.templateDialogTitle')"
+        :visible.sync="templateDialogVisible"
+        width="820px"
+        append-to-body
+        class="catalog-template-dialog"
+      >
+        <div class="template-dialog-header">
+          <span>{{ selectedCatalogName || "-" }}</span>
+          <el-tag size="mini" effect="plain">{{ selectedCatalogProvider || "-" }}</el-tag>
+        </div>
+        <el-alert
+          v-if="templateError"
+          type="warning"
+          :closable="false"
+          show-icon
+          :title="templateError"
+          class="migration-preview-alert"
+        />
+        <el-table
+          v-loading="templateLoading"
+          :data="normalizedTemplateList"
+          size="mini"
+          border
+          class="template-table"
+        >
+          <el-table-column
+            prop="_templateId"
+            :label="$t('modelConfigDialog.templateId')"
+            min-width="130"
+            show-overflow-tooltip
+          />
+          <el-table-column
+            prop="_templateName"
+            :label="$t('modelConfigDialog.templateName')"
+            min-width="150"
+            show-overflow-tooltip
+          />
+          <el-table-column
+            prop="_upstreamModel"
+            :label="$t('modelConfig.upstreamModel')"
+            min-width="150"
+            show-overflow-tooltip
+          />
+          <el-table-column
+            prop="_summary"
+            :label="$t('modelConfig.summary')"
+            min-width="190"
+            show-overflow-tooltip
+          />
+        </el-table>
       </el-dialog>
     </div>
     <el-footer>
@@ -346,6 +958,7 @@ export default {
     return {
       addDialogVisible: false,
       activeTab: "llm",
+      viewMode: "config",
       search: "",
       editDialogVisible: false,
       editModelData: {},
@@ -359,10 +972,37 @@ export default {
       selectedModels: [],
       isAllSelected: false,
       loading: false,
+      testStatusFilter: "",
+      adapterFilter: "",
+      platformFilter: "",
+      capabilityFilter: "",
+      catalogList: [],
+      catalogLoading: false,
+      catalogError: "",
       selectedModelConfig: {},
       testingModelId: "",
       testResultDialogVisible: false,
       currentTestResult: null,
+      performanceDialogVisible: false,
+      performanceTesting: false,
+      performanceIterations: 3,
+      performanceConcurrency: 3,
+      performanceReport: null,
+      performanceTaskId: "",
+      performancePollTimer: null,
+      selectedPerformanceResultId: "",
+      selectedPerformanceSampleKey: "",
+      migrationPreviewDialogVisible: false,
+      migrationPreviewLoading: false,
+      migrationPreviewData: null,
+      migrationPreviewError: "",
+      templateDialogVisible: false,
+      templateLoading: false,
+      templateError: "",
+      templateList: [],
+      selectedCatalogId: "",
+      selectedCatalogName: "",
+      selectedCatalogProvider: "",
     };
   },
 
@@ -382,6 +1022,10 @@ export default {
     this.updateSelectionHeaderText();
   },
 
+  beforeDestroy() {
+    this.stopPerformancePolling();
+  },
+
   computed: {
     modelTypeText() {
       return (
@@ -389,7 +1033,121 @@ export default {
       );
     },
     pageCount() {
-      return Math.ceil(this.total / this.pageSize);
+      return Math.max(1, Math.ceil(this.displayTotal / this.pageSize));
+    },
+    hasClientFilters() {
+      return !!(
+        String(this.search || "").trim() ||
+        (this.testStatusFilter !== "" &&
+          this.testStatusFilter !== null &&
+          this.testStatusFilter !== undefined) ||
+        this.adapterFilter ||
+        this.platformFilter
+      );
+    },
+    displayTotal() {
+      if (this.viewMode === "catalog") {
+        return this.filteredCatalogList.length;
+      }
+      return this.hasClientFilters ? this.filteredModelList.length : this.total;
+    },
+    activeTableData() {
+      return this.viewMode === "catalog" ? this.visibleCatalogList : this.visibleModelList;
+    },
+    testStatusOptions() {
+      return [
+        { label: this.$t("modelConfig.untested"), value: 0 },
+        { label: this.$t("modelConfig.testPassed"), value: 1 },
+        { label: this.$t("modelConfig.testFailed"), value: 2 },
+      ];
+    },
+    enrichedModelList() {
+      return this.modelList.map((model) => ({
+        ...model,
+        _adapter: this.getModelAdapter(model),
+        _platform: this.getPlatformVendor(model),
+        _upstreamModel: this.getUpstreamModel(model),
+        _capabilityTags: this.getCapabilityTags(model),
+      }));
+    },
+    filteredModelList() {
+      const keyword = String(this.search || "").trim().toLowerCase();
+      return this.enrichedModelList.filter((model) => {
+        const matchesKeyword =
+          !keyword ||
+          [
+            model.modelName,
+            model._upstreamModel,
+            model._platform,
+            model._adapter,
+            model.modelCode,
+            model.id,
+          ]
+            .filter(Boolean)
+            .some((value) => String(value).toLowerCase().includes(keyword));
+        const matchesStatus =
+          this.testStatusFilter === "" ||
+          this.testStatusFilter === null ||
+          this.testStatusFilter === undefined ||
+          model.testStatus === this.testStatusFilter;
+        const matchesAdapter = !this.adapterFilter || model._adapter === this.adapterFilter;
+        const matchesPlatform = !this.platformFilter || model._platform === this.platformFilter;
+        return matchesKeyword && matchesStatus && matchesAdapter && matchesPlatform;
+      });
+    },
+    normalizedCatalogList() {
+      return this.catalogList.map((item) => this.normalizeCatalogItem(item));
+    },
+    filteredCatalogList() {
+      const keyword = String(this.search || "").trim().toLowerCase();
+      return this.normalizedCatalogList.filter((item) => {
+        const matchesKeyword =
+          !keyword ||
+          [
+            item._catalogId,
+            item._catalogName,
+            item._upstreamModel,
+            item._platform,
+            item._adapter,
+            ...(item._capabilityTags || []),
+          ]
+            .filter(Boolean)
+            .some((value) => String(value).toLowerCase().includes(keyword));
+        const matchesAdapter = !this.adapterFilter || item._adapter === this.adapterFilter;
+        const matchesPlatform = !this.platformFilter || item._platform === this.platformFilter;
+        const matchesCapability =
+          !this.capabilityFilter || (item._capabilityTags || []).includes(this.capabilityFilter);
+        return matchesKeyword && matchesAdapter && matchesPlatform && matchesCapability;
+      });
+    },
+    visibleCatalogList() {
+      const start = (this.currentPage - 1) * this.pageSize;
+      return this.filteredCatalogList.slice(start, start + this.pageSize);
+    },
+    visibleModelList() {
+      if (!this.hasClientFilters) {
+        return this.filteredModelList;
+      }
+      const start = (this.currentPage - 1) * this.pageSize;
+      return this.filteredModelList.slice(start, start + this.pageSize);
+    },
+    adapterOptions() {
+      const source =
+        this.viewMode === "catalog" ? this.normalizedCatalogList : this.enrichedModelList;
+      return this.uniqueOptions(source.map((item) => item._adapter));
+    },
+    platformOptions() {
+      const source =
+        this.viewMode === "catalog" ? this.normalizedCatalogList : this.enrichedModelList;
+      return this.uniqueOptions(source.map((item) => item._platform));
+    },
+    capabilityOptions() {
+      return this.uniqueOptions(
+        this.normalizedCatalogList.reduce(
+          (result, item) => result.concat(item._capabilityTags || []),
+          []
+        )
+      );
     },
     visiblePages() {
       const pages = [];
@@ -405,6 +1163,102 @@ export default {
         pages.push(i);
       }
       return pages;
+    },
+    performanceResults() {
+      return (this.performanceReport && this.performanceReport.results) || [];
+    },
+    selectedPerformanceResult() {
+      const results = this.performanceResults;
+      if (!results.length) {
+        return null;
+      }
+      return (
+        results.find((item) => this.getPerformanceResultKey(item) === this.selectedPerformanceResultId) ||
+        results[0]
+      );
+    },
+    performanceSamples() {
+      return (this.selectedPerformanceResult && this.selectedPerformanceResult.samples) || [];
+    },
+    selectedPerformanceSample() {
+      const samples = this.performanceSamples;
+      if (!samples.length) {
+        return null;
+      }
+      return (
+        samples.find((item) => this.getPerformanceSampleKey(item) === this.selectedPerformanceSampleKey) ||
+        samples[0]
+      );
+    },
+    migrationPreviewRows() {
+      if (!this.migrationPreviewData) {
+        return [];
+      }
+      const rows = this.firstArrayValue(this.migrationPreviewData, [
+        "items",
+        "rows",
+        "list",
+        "plans",
+        "migrations",
+        "details",
+      ]);
+      const previewRows = Array.isArray(this.migrationPreviewData)
+        ? this.migrationPreviewData
+        : rows;
+      return previewRows.map((row) => ({
+        ...row,
+        modelName: this.firstValue(row, [
+          "modelName",
+          "sourceModelName",
+          "configName",
+          "name",
+        ]) || "-",
+        provider: this.firstValue(row, [
+          "provider",
+          "providerCode",
+          "adapter",
+          "sourceProvider",
+        ]) || "-",
+        targetCatalog: this.firstValue(row, [
+          "templateCode",
+          "targetCatalogName",
+          "catalogName",
+          "catalogId",
+          "targetCatalogId",
+        ]) || "-",
+        targetTemplate: this.firstValue(row, [
+          "templateName",
+          "templateCode",
+          "targetTemplateName",
+          "templateId",
+          "targetTemplateId",
+        ]) || "-",
+        statusText:
+          this.firstValue(row, ["statusText", "status", "action", "migrationStatus"]) || "-",
+        message: this.firstValue(row, ["message", "reason", "warning", "summary"]) || "-",
+      }));
+    },
+    normalizedTemplateList() {
+      return this.templateList.map((item) => ({
+        ...item,
+        _templateId: this.firstValue(item, ["templateCode", "id", "templateId", "code"]) || "-",
+        _templateName:
+          this.firstValue(item, ["name", "templateName", "displayName", "title"]) ||
+          [item.vendorName, item.productName, item.accessModeLabel].filter(Boolean).join(" / ") ||
+          "-",
+        _upstreamModel:
+          this.firstValue(item, [
+            "upstreamResourceLabel",
+            "upstreamModelField",
+            "upstreamModel",
+            "upstreamModelId",
+            "model",
+            "modelId",
+            "modelName",
+          ]) || "-",
+        _summary:
+          this.firstValue(item, ["summary", "description", "remark", "message"]) || "-",
+      }));
     },
   },
 
@@ -427,7 +1281,7 @@ export default {
       this.ttsDialogVisible = true;
     },
     headerCellClassName({ column, columnIndex }) {
-      if (columnIndex === 0) {
+      if (this.viewMode === "config" && columnIndex === 0) {
         return "custom-selection-header";
       }
       return "";
@@ -453,9 +1307,294 @@ export default {
       this.pageSize = 10; // 可选：重置每页条数
       this.loadData();
     },
+    handleViewModeChange() {
+      this.currentPage = 1;
+      this.selectedModels = [];
+      this.isAllSelected = false;
+      if (this.viewMode === "catalog") {
+        this.testStatusFilter = "";
+      }
+      this.loadData();
+    },
     handleSearch() {
       this.currentPage = 1;
       this.loadData();
+    },
+    uniqueOptions(values) {
+      return Array.from(new Set(values.filter((value) => value && value !== "-")));
+    },
+    parseConfigJson(row) {
+      const configJson = row && row.configJson;
+      if (!configJson) {
+        return {};
+      }
+      if (typeof configJson === "string") {
+        try {
+          return JSON.parse(configJson);
+        } catch (e) {
+          return {};
+        }
+      }
+      return configJson;
+    },
+    firstValue(source, keys) {
+      for (const key of keys) {
+        const value = source && source[key];
+        if (value !== undefined && value !== null && String(value).trim() !== "") {
+          return value;
+        }
+      }
+      return "";
+    },
+    getModelAdapter(row) {
+      if (row && row._isCatalogItem) {
+        return row._adapter || this.$t("modelConfig.unknown");
+      }
+      const configJson = this.parseConfigJson(row);
+      return (
+        this.firstValue(row, ["adapterLabel", "adapterName", "adapter", "providerName", "providerCode"]) ||
+        this.firstValue(configJson, ["type", "provider", "adapter", "provider_code"]) ||
+        this.$t("modelConfig.unknown")
+      );
+    },
+    getUpstreamModel(row) {
+      if (row && row._isCatalogItem) {
+        return row._upstreamModel || "-";
+      }
+      const configJson = this.parseConfigJson(row);
+      return (
+        this.firstValue(row, ["upstreamModelId", "upstreamModel", "upstreamModelName", "realModelName"]) ||
+        this.firstValue(configJson, [
+          "model_name",
+          "model",
+          "model_id",
+          "voice",
+          "speaker",
+          "resource_id",
+          "llm_model",
+          "llm",
+        ]) ||
+        "-"
+      );
+    },
+    getPlatformVendor(row) {
+      if (row && row._isCatalogItem) {
+        return row._platform || "-";
+      }
+      const configJson = this.parseConfigJson(row);
+      const explicitValue =
+        this.firstValue(row, ["platform", "vendor", "platformName", "vendorName"]) ||
+        this.firstValue(configJson, ["platform", "vendor", "provider_name", "company"]);
+      if (explicitValue) {
+        return explicitValue;
+      }
+      const adapter = String(this.getModelAdapter(row) || "").toLowerCase();
+      const baseUrl = String(
+        this.firstValue(configJson, ["base_url", "url", "host", "ws_url", "api_url"])
+      ).toLowerCase();
+      const modelName = String(this.getUpstreamModel(row) || "").toLowerCase();
+      const haystack = `${adapter} ${baseUrl} ${modelName}`;
+      const knownPlatforms = [
+        ["funasr", "本地/自部署"],
+        ["sherpa", "本地/自部署"],
+        ["sensevoice", "本地/自部署"],
+        ["vosk", "本地/自部署"],
+        ["ollama", "本地/自部署"],
+        ["xinference", "本地/自部署"],
+        ["lm-studio", "本地/自部署"],
+        ["localhost", "本地/自部署"],
+        ["127.0.0.1", "本地/自部署"],
+        ["0.0.0.0", "本地/自部署"],
+        ["dashscope", "阿里云"],
+        ["aliyun", "阿里云"],
+        ["qwen", "阿里云"],
+        ["doubao", "火山引擎"],
+        ["volc", "火山引擎"],
+        ["bytedance", "火山引擎"],
+        ["openai", "OpenAI"],
+        ["deepseek", "DeepSeek"],
+        ["minimax", "MiniMax"],
+        ["xfyun", "讯飞开放平台"],
+        ["iflytek", "讯飞开放平台"],
+        ["tencent", "腾讯云"],
+        ["baidu", "百度智能云"],
+        ["fishspeech", "Fish Speech"],
+        ["gpt_sovits", "GPT-SoVITS"],
+      ];
+      const matched = knownPlatforms.find(([keyword]) => haystack.includes(keyword));
+      return matched ? matched[1] : "-";
+    },
+    getProductSeries(row) {
+      if (row && row._isCatalogItem) {
+        return row._product || "-";
+      }
+      const configJson = this.parseConfigJson(row);
+      const explicitValue =
+        this.firstValue(row, ["productName", "product", "seriesName", "capabilityLabel"]) ||
+        this.firstValue(configJson, ["product", "series", "platform_product"]);
+      if (explicitValue) {
+        return explicitValue;
+      }
+      const adapter = String(this.getModelAdapter(row) || "").toLowerCase();
+      const baseUrl = String(
+        this.firstValue(configJson, ["base_url", "url", "host", "ws_url", "api_url"])
+      ).toLowerCase();
+      const modelName = String(this.getUpstreamModel(row) || "").toLowerCase();
+      const providerCode = String(row && row.providerCode || "").toLowerCase();
+      const haystack = `${adapter} ${baseUrl} ${modelName} ${providerCode}`;
+      const knownProducts = [
+        ["paraformer", "百炼 Paraformer"],
+        ["dashscope", "百炼"],
+        ["qwen", "通义千问"],
+        ["doubao", "豆包"],
+        ["seedasr", "Seed ASR"],
+        ["seed-tts", "Seed TTS"],
+        ["bigasr", "豆包大模型 ASR"],
+        ["bigtts", "豆包大模型 TTS"],
+        ["spark", "星火"],
+        ["xfyun", "讯飞语音"],
+        ["funasr", "FunASR"],
+        ["sherpa", "Sherpa-ONNX"],
+        ["sensevoice", "SenseVoice"],
+        ["vosk", "Vosk"],
+        ["ollama", "Ollama"],
+        ["xinference", "Xinference"],
+        ["fishspeech", "Fish Speech"],
+        ["gpt_sovits", "GPT-SoVITS"],
+      ];
+      const matched = knownProducts.find(([keyword]) => haystack.includes(keyword));
+      return matched ? matched[1] : "-";
+    },
+    getCapabilityTags(row) {
+      if (this.viewMode === "catalog" || (row && row._isCatalogItem)) {
+        return row._capabilityTags || this.normalizeCatalogItem(row)._capabilityTags || [];
+      }
+      const configJson = this.parseConfigJson(row);
+      const rawTags =
+        this.firstValue(row, ["modelTags", "tags", "capabilities", "labels"]) ||
+        this.firstValue(configJson, ["tags", "capabilities", "labels"]);
+      let tags = [];
+      if (Array.isArray(rawTags)) {
+        tags = rawTags;
+      } else if (typeof rawTags === "string" && rawTags.trim()) {
+        tags = rawTags.split(/[,，\s/]+/);
+      }
+
+      const generatedTags = [];
+      const adapter = String(this.getModelAdapter(row) || "").toLowerCase();
+      const modelType = String((row && row.modelType) || this.activeTab || "").toLowerCase();
+      const hasValue = (keys) => keys.some((key) => configJson[key] !== undefined && configJson[key] !== "");
+
+      if (modelType) {
+        generatedTags.push(modelType.toUpperCase());
+      }
+      if (hasValue(["base_url", "url", "host", "ws_url"])) {
+        generatedTags.push("API");
+      }
+      if (hasValue(["api_key", "access_token", "secret_key", "secret_id", "appid"])) {
+        generatedTags.push("凭据");
+      }
+      if (hasValue(["temperature", "top_p", "top_k", "max_tokens", "speed", "volume", "pitch"])) {
+        generatedTags.push("参数");
+      }
+      if (adapter.includes("stream") || hasValue(["enable_ws_reuse", "ws_url"])) {
+        generatedTags.push("流式");
+      }
+      if (hasValue(["voice", "speaker"])) {
+        generatedTags.push("音色");
+      }
+      if (hasValue(["prompt", "system_prompt"])) {
+        generatedTags.push("提示词");
+      }
+
+      return this.uniqueOptions([...tags, ...generatedTags].map((tag) => String(tag).trim())).slice(0, 4);
+    },
+    normalizeCatalogItem(item) {
+      const arrayTags = this.firstArrayValue(item, [
+        "capabilities",
+        "modelTags",
+        "tags",
+        "labels",
+        "features",
+      ]);
+      const rawTags =
+        arrayTags.length > 0
+          ? arrayTags
+          : String(this.firstValue(item, ["capabilityLabel", "capability", "accessModeLabel", "deploymentLabel", "tag", "label"]) || "")
+              .split(/[,，\s/]+/)
+              .filter(Boolean);
+      const templates = this.firstArrayValue(item, ["templates", "templateList", "modelTemplates"]);
+      return {
+        ...item,
+        _isCatalogItem: true,
+        _catalogId: this.firstValue(item, ["templateCode", "id", "catalogId", "code", "modelCode"]) || "-",
+        _catalogName:
+          this.firstValue(item, [
+            "name",
+            "catalogName",
+            "modelName",
+            "displayName",
+            "title",
+          ]) ||
+          [item.vendorName, item.productName, item.accessModeLabel].filter(Boolean).join(" / ") ||
+          "-",
+        _adapter:
+          this.firstValue(item, [
+            "provider",
+            "providerCode",
+            "adapter",
+            "adapterCode",
+            "providerName",
+            "adapterName",
+          ]) || this.$t("modelConfig.unknown"),
+        _platform:
+          this.firstValue(item, [
+            "platform",
+            "platformName",
+            "vendor",
+            "vendorName",
+            "company",
+          ]) || "-",
+        _product:
+          this.firstValue(item, [
+            "productName",
+            "product",
+            "seriesName",
+            "capabilityLabel",
+          ]) || "-",
+        _upstreamModel:
+          this.firstValue(item, [
+            "upstreamResourceLabel",
+            "upstreamModelField",
+            "upstreamModel",
+            "upstreamModelId",
+            "model",
+            "modelId",
+            "modelName",
+          ]) || "-",
+        _capabilityTags: this.uniqueOptions(rawTags.map((tag) => String(tag).trim())).slice(0, 6),
+        _templateCount:
+          this.firstValue(item, ["templateCount", "templatesCount"]) ||
+          (templates ? templates.length : "-"),
+      };
+    },
+    getCatalogId(row) {
+      return (row && row._catalogId) || this.normalizeCatalogItem(row)._catalogId;
+    },
+    getCatalogName(row) {
+      return (row && row._catalogName) || this.normalizeCatalogItem(row)._catalogName;
+    },
+    getCatalogTemplateCount(row) {
+      return (row && row._templateCount) || this.normalizeCatalogItem(row)._templateCount;
+    },
+    firstArrayValue(source, keys) {
+      for (const key of keys) {
+        const value = source && source[key];
+        if (Array.isArray(value)) {
+          return value;
+        }
+      }
+      return [];
     },
     // 批量删除
     batchDelete() {
@@ -542,6 +1681,162 @@ export default {
       }
       return `${responseTimeMs} ms`;
     },
+    formatPercent(value) {
+      if (value === null || value === undefined || value === "") {
+        return "-";
+      }
+      return `${Math.round(Number(value) * 10000) / 100}%`;
+    },
+    formatMeasuredLatency(row, field) {
+      if (!row || !row.measured) {
+        return this.$t("modelConfig.notMeasured");
+      }
+      const value = row[field];
+      if (value === null || value === undefined || value === "") {
+        return "-";
+      }
+      return `${value} ms`;
+    },
+    formatMetric(value, unit) {
+      if (value === null || value === undefined || value === "") {
+        return "-";
+      }
+      return `${value}${unit}`;
+    },
+    formatScore(value) {
+      if (value === null || value === undefined || value === "") {
+        return "-";
+      }
+      return `${Math.round(Number(value) * 100) / 100}`;
+    },
+    formatBenchmarkStatus(status) {
+      if (!status) {
+        return "-";
+      }
+      const key = `modelConfig.benchmarkStatus.${status}`;
+      const translated = this.$t(key);
+      return translated === key ? status : translated;
+    },
+    getPerformanceTotal(report) {
+      if (!report) {
+        return 0;
+      }
+      const modelIds = report.modelIds || [];
+      if (modelIds.length > 0) {
+        return modelIds.length;
+      }
+      return (report.results || []).length;
+    },
+    getPerformanceResultKey(row) {
+      if (!row) {
+        return "";
+      }
+      return row.modelId || `${row.modelName || ""}-${row.providerType || ""}`;
+    },
+    selectPerformanceResult(row) {
+      this.selectedPerformanceResultId = this.getPerformanceResultKey(row);
+      this.syncSelectedPerformanceSample(row);
+    },
+    syncSelectedPerformanceResult(report) {
+      const results = (report && report.results) || [];
+      if (!results.length) {
+        this.selectedPerformanceResultId = "";
+        this.selectedPerformanceSampleKey = "";
+        return;
+      }
+      const exists = results.some(
+        (item) => this.getPerformanceResultKey(item) === this.selectedPerformanceResultId
+      );
+      if (!exists) {
+        this.selectedPerformanceResultId = this.getPerformanceResultKey(results[0]);
+      }
+      this.syncSelectedPerformanceSample(this.selectedPerformanceResult);
+    },
+    getPerformanceSampleKey(sample) {
+      if (!sample) {
+        return "";
+      }
+      return String(sample.iteration || "");
+    },
+    selectPerformanceSample(sample) {
+      this.selectedPerformanceSampleKey = this.getPerformanceSampleKey(sample);
+    },
+    syncSelectedPerformanceSample(result) {
+      const samples = (result && result.samples) || [];
+      if (!samples.length) {
+        this.selectedPerformanceSampleKey = "";
+        return;
+      }
+      const exists = samples.some(
+        (item) => this.getPerformanceSampleKey(item) === this.selectedPerformanceSampleKey
+      );
+      if (!exists) {
+        this.selectedPerformanceSampleKey = this.getPerformanceSampleKey(samples[0]);
+      }
+    },
+    getBenchmarkModelType(row) {
+      return String((row && row.modelType) || this.activeTab || "").toLowerCase();
+    },
+    shouldShowPerformanceColumn(type) {
+      const results = this.performanceResults;
+      if (!results.length) {
+        return this.activeTab === type;
+      }
+      return results.some((row) => this.isModelType(row, type));
+    },
+    isModelType(row, type) {
+      const modelType = this.getBenchmarkModelType(row);
+      if (type === "llm") {
+        return modelType === "llm" || modelType === "slm";
+      }
+      return modelType === type;
+    },
+    isSampleType(sample, type) {
+      const sampleType = String((sample && (sample.sampleType || sample.testLevel)) || "").toLowerCase();
+      if (type === "llm") {
+        return sampleType.includes("llm") || this.isModelType(this.selectedPerformanceResult, "llm");
+      }
+      return sampleType.includes(type) || this.isModelType(this.selectedPerformanceResult, type);
+    },
+    getSampleInputLabel(sample) {
+      if (this.isSampleType(sample, "asr")) {
+        return this.$t("modelConfig.asrAudioInput");
+      }
+      if (this.isSampleType(sample, "tts")) {
+        return this.$t("modelConfig.ttsTextInput");
+      }
+      return this.$t("modelConfig.llmPrompt");
+    },
+    getSampleOutputLabel(sample) {
+      if (this.isSampleType(sample, "asr")) {
+        return this.$t("modelConfig.asrTextOutput");
+      }
+      if (this.isSampleType(sample, "tts")) {
+        return this.$t("modelConfig.ttsAudioOutput");
+      }
+      return this.$t("modelConfig.llmReply");
+    },
+    hasObjectValue(value) {
+      return !!value && typeof value === "object" && Object.keys(value).length > 0;
+    },
+    hasSampleDetail(sample) {
+      return this.hasObjectValue(sample && sample.inputDetail) || this.hasObjectValue(sample && sample.outputDetail);
+    },
+    formatJsonDetail(value) {
+      if (!value) {
+        return "-";
+      }
+      if (typeof value === "string") {
+        return value;
+      }
+      return JSON.stringify(value, null, 2);
+    },
+    formatProcessSteps(steps) {
+      if (!steps || !steps.length) {
+        return "-";
+      }
+      return steps.join(" / ");
+    },
     formatTestOutput(output) {
       if (!output) {
         return "-";
@@ -577,6 +1872,97 @@ export default {
         this.handleTestModelResponse(data);
         this.loadData();
       });
+    },
+    runPerformanceTest() {
+      if (this.selectedModels.length === 0) {
+        this.$message.warning(this.$t("modelConfig.selectModelsForPerformance"));
+        return;
+      }
+      this.performanceDialogVisible = true;
+      this.performanceReport = null;
+      this.selectedPerformanceResultId = "";
+      this.selectedPerformanceSampleKey = "";
+    },
+    submitPerformanceTest() {
+      if (this.performanceTesting) {
+        return;
+      }
+      const modelIds = this.selectedModels.map((model) => model.id);
+      if (modelIds.length === 0) {
+        this.$message.warning(this.$t("modelConfig.selectModelsForPerformance"));
+        return;
+      }
+      this.stopPerformancePolling();
+      this.performanceTesting = true;
+      this.performanceReport = {
+        status: "PENDING",
+        modelIds,
+        iterations: this.performanceIterations,
+        concurrency: this.performanceConcurrency,
+        results: [],
+      };
+      this.syncSelectedPerformanceResult(this.performanceReport);
+      Api.model.performanceTest(
+        {
+          modelType: this.activeTab,
+          modelIds,
+          iterations: this.performanceIterations,
+          concurrency: this.performanceConcurrency,
+        },
+        ({ data }) => {
+          if (data.code === 0) {
+            this.performanceTaskId = data.data.taskId;
+            this.performanceReport = {
+              ...this.performanceReport,
+              id: this.performanceTaskId,
+              status: data.data.status || "PENDING",
+            };
+            this.$message.success(this.$t("modelConfig.performanceTestStarted"));
+            this.pollPerformanceTask();
+          } else {
+            this.performanceTesting = false;
+            this.$message.error(data.msg || this.$t("modelConfig.performanceTestFailed"));
+          }
+        }
+      );
+    },
+    pollPerformanceTask() {
+      if (!this.performanceTaskId) {
+        return;
+      }
+      Api.model.benchmarkTask(this.performanceTaskId, ({ data }) => {
+        if (data.code !== 0) {
+          this.performanceTesting = false;
+          this.stopPerformancePolling();
+          this.$message.error(data.msg || this.$t("modelConfig.performanceTestFailed"));
+          return;
+        }
+        this.performanceReport = {
+          ...data.data,
+          modelIds: (data.data.modelIds || []).length
+            ? data.data.modelIds
+            : (this.performanceReport || {}).modelIds,
+        };
+        this.syncSelectedPerformanceResult(this.performanceReport);
+        const status = data.data.status;
+        if (status === "SUCCEEDED" || status === "FAILED" || status === "CANCELLED") {
+          this.performanceTesting = false;
+          this.stopPerformancePolling();
+          if (status === "SUCCEEDED") {
+            this.$message.success(this.$t("modelConfig.performanceTestFinished"));
+          } else {
+            this.$message.error(data.data.errorMessage || this.$t("modelConfig.performanceTestFailed"));
+          }
+          return;
+        }
+        this.performancePollTimer = window.setTimeout(() => this.pollPerformanceTask(), 2000);
+      });
+    },
+    stopPerformancePolling() {
+      if (this.performancePollTimer) {
+        window.clearTimeout(this.performancePollTimer);
+        this.performancePollTimer = null;
+      }
     },
     // 删除单个模型
     deleteModel(model) {
@@ -692,8 +2078,13 @@ export default {
       }
     },
     handleSelectionChange(val) {
+      if (this.viewMode !== "config") {
+        this.selectedModels = [];
+        this.isAllSelected = false;
+        return;
+      }
       this.selectedModels = val;
-      this.isAllSelected = val.length === this.modelList.length;
+      this.isAllSelected = val.length === this.visibleModelList.length;
       if (val.length === 0) {
         this.isAllSelected = false;
       }
@@ -752,12 +2143,16 @@ export default {
 
     // 获取模型配置列表
     loadData() {
+      if (this.viewMode === "catalog") {
+        this.loadCatalogData();
+        return;
+      }
       this.loading = true; // 开始加载
       const params = {
         modelType: this.activeTab,
-        modelName: this.search,
-        page: this.currentPage,
-        limit: this.pageSize,
+        modelName: this.hasClientFilters ? "" : this.search,
+        page: this.hasClientFilters ? 1 : this.currentPage,
+        limit: this.hasClientFilters ? 1000 : this.pageSize,
       };
 
       Api.model.getModelList(params, ({ data }) => {
@@ -772,6 +2167,110 @@ export default {
           this.$message.error(data.msg || this.$t("modelConfig.fetchModelsFailed"));
         }
       });
+    },
+    loadCatalogData() {
+      this.loading = true;
+      this.catalogLoading = true;
+      this.catalogError = "";
+      Api.model.getModelCatalog(
+        {
+          modelType: this.activeTab,
+          keyword: this.search,
+          provider: this.adapterFilter,
+          platform: this.platformFilter,
+          capability: this.capabilityFilter,
+        },
+        ({ data }) => {
+          this.loading = false;
+          this.catalogLoading = false;
+          if (data.code === 0 || data.code === "success" || data.code === undefined) {
+            const payload = data.data || [];
+            this.catalogList = Array.isArray(payload)
+              ? payload
+              : payload.list || payload.items || payload.catalogs || [];
+            this.catalogError = "";
+          } else {
+            this.catalogList = [];
+            this.catalogError = data.msg || this.$t("modelConfig.catalogUnavailable");
+          }
+        }
+      );
+    },
+    openMigrationPreview() {
+      if (this.migrationPreviewLoading) {
+        return;
+      }
+      this.migrationPreviewDialogVisible = true;
+      this.migrationPreviewLoading = true;
+      this.migrationPreviewError = "";
+      this.migrationPreviewData = null;
+      const selectedModelIds =
+        this.viewMode === "config" ? this.selectedModels.map((model) => model.id) : [];
+      Api.model.previewModelMigration(
+        {
+          modelType: this.activeTab,
+          modelIds: selectedModelIds,
+          keyword: this.search,
+        },
+        ({ data }) => {
+          this.migrationPreviewLoading = false;
+          if (data.code === 0 || data.code === "success" || data.code === undefined) {
+            this.migrationPreviewData = data.data || {};
+          } else {
+            this.migrationPreviewError =
+              data.msg || this.$t("modelConfig.migrationPreviewUnavailable");
+          }
+        }
+      );
+    },
+    openTemplateDialog(row) {
+      const catalog = this.normalizeCatalogItem(row);
+      this.templateDialogVisible = true;
+      this.templateLoading = true;
+      this.templateError = "";
+      this.templateList = [];
+      this.selectedCatalogId = catalog._catalogId;
+      this.selectedCatalogName = catalog._catalogName;
+      this.selectedCatalogProvider = catalog._adapter;
+      Api.model.getModelTemplates(
+        {
+          modelType: this.activeTab,
+          catalogId: catalog._catalogId === "-" ? "" : catalog._catalogId,
+          provider: catalog._adapter === this.$t("modelConfig.unknown") ? "" : catalog._adapter,
+        },
+        ({ data }) => {
+          this.templateLoading = false;
+          if (data.code === 0 || data.code === "success" || data.code === undefined) {
+            const payload = data.data || [];
+            this.templateList = Array.isArray(payload)
+              ? payload
+              : payload.list || payload.items || payload.templates || [];
+          } else {
+            this.templateError = data.msg || this.$t("modelConfig.templatesUnavailable");
+          }
+        }
+      );
+    },
+    getMigrationTotal(data) {
+      if (Array.isArray(data)) {
+        return data.length;
+      }
+      return (
+        this.firstValue(data, ["total", "totalCount", "modelCount"]) ||
+        this.migrationPreviewRows.length ||
+        0
+      );
+    },
+    getMigrationMatched(data) {
+      return this.firstValue(data, ["matched", "matchedCount", "matchCount"]) || 0;
+    },
+    getMigrationWarnings(data) {
+      const warnings = this.firstArrayValue(data, ["warnings", "warningList"]);
+      return (
+        this.firstValue(data, ["warningsCount", "warningCount", "unmatchedCount"]) ||
+        warnings.length ||
+        0
+      );
     },
     // 处理启用/非启用状态变更
     handleStatusChange(model, newStatus) {
@@ -935,10 +2434,20 @@ export default {
 .search-group {
   display: flex;
   gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .search-input {
   width: 240px;
+}
+
+.filter-select {
+  width: 132px;
+}
+
+.view-mode-switch {
+  flex-shrink: 0;
 }
 
 .btn-search {
@@ -1163,6 +2672,78 @@ export default {
   background: #8aa2e0;
   /* 悬停时颜色加深 */
   transform: scale(1.05);
+}
+
+.capability-tags {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  min-height: 24px;
+}
+
+.catalog-error {
+  margin: 10px 0;
+}
+
+.migration-preview-alert {
+  margin-bottom: 12px;
+}
+
+.migration-preview-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.migration-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.migration-summary > div {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border: 1px solid #edf0f5;
+  border-radius: 4px;
+  background: #f7f9fc;
+  color: #606266;
+}
+
+.migration-summary strong {
+  color: #303133;
+}
+
+.migration-preview-table {
+  width: 100%;
+}
+
+.template-dialog-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: #303133;
+  font-weight: 600;
+}
+
+.template-table {
+  width: 100%;
+}
+
+.migration-raw pre {
+  max-height: 260px;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #f7f9fc;
+  border-radius: 4px;
+  color: #303133;
+  line-height: 1.5;
 }
 
 ::v-deep .el-table .el-table-column--selection .cell {
@@ -1399,5 +2980,218 @@ export default {
   max-height: 300px;
   margin: 0 auto;
   object-fit: contain;
+}
+
+.performance-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.performance-summary {
+  color: #606266;
+  margin-left: auto;
+}
+
+.performance-layout {
+  display: grid;
+  grid-template-columns: minmax(560px, 1fr) 380px;
+  gap: 12px;
+  align-items: start;
+}
+
+.performance-table {
+  width: 100%;
+}
+
+.performance-detail {
+  border: 1px solid #edf0f5;
+  border-radius: 4px;
+  max-height: 500px;
+  overflow: auto;
+  padding: 12px;
+  background: #f7f9fc;
+}
+
+.performance-detail-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 8px;
+}
+
+.performance-detail-summary {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  color: #606266;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.performance-detail-summary > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.performance-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.performance-sample-picker {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.performance-sample-chip {
+  flex: 0 0 auto;
+}
+
+.performance-chip-meta {
+  margin-left: 4px;
+  color: #909399;
+}
+
+.performance-chat-turn {
+  padding-top: 2px;
+}
+
+.performance-turn-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: #606266;
+  font-size: 12px;
+}
+
+.performance-bubble-row {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 8px;
+}
+
+.performance-bubble-row.is-user {
+  align-items: flex-start;
+}
+
+.performance-bubble-row.is-assistant {
+  align-items: flex-end;
+}
+
+.performance-bubble-label {
+  margin-bottom: 3px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.performance-bubble {
+  max-width: 86%;
+  padding: 9px 11px;
+  border-radius: 6px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #303133;
+  font-size: 13px;
+}
+
+.performance-bubble-row.is-user .performance-bubble {
+  background: #fff;
+  border: 1px solid #e4e7ed;
+}
+
+.performance-bubble-row.is-assistant .performance-bubble {
+  background: #ecf5ff;
+  border: 1px solid #c6e2ff;
+}
+
+.performance-sample-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.performance-field-label {
+  color: #909399;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.performance-sample pre,
+.performance-reference pre {
+  margin: 0;
+  padding: 8px;
+  min-height: 54px;
+  max-height: 140px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #f5f7fa;
+  color: #303133;
+  border-radius: 4px;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+.performance-chat-reference {
+  margin-top: 8px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.performance-sample-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 8px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.performance-json-detail {
+  margin-top: 8px;
+}
+
+.performance-json-detail ::v-deep .el-collapse-item__header {
+  height: 32px;
+  line-height: 32px;
+  border: none;
+  color: #606266;
+  font-size: 12px;
+}
+
+.performance-json-detail ::v-deep .el-collapse-item__wrap {
+  border-bottom: none;
+}
+
+.performance-message {
+  margin-top: 8px;
+  color: #f56c6c;
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.metric-notes {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: #f5f7fa;
+  color: #606266;
+  line-height: 1.7;
+  font-size: 12px;
+  border-radius: 4px;
+}
+
+@media (max-width: 1100px) {
+  .performance-layout {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

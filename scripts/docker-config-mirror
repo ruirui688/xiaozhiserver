@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+MIRROR_URL="${1:-${DOCKER_REGISTRY_MIRROR:-}}"
+DAEMON_JSON="${DOCKER_DAEMON_JSON:-/etc/docker/daemon.json}"
+
+if [[ -z "$MIRROR_URL" ]]; then
+  cat >&2 <<'EOF'
+Usage:
+  sudo scripts/docker-config-mirror https://your-mirror.example.com
+
+You can find the Aliyun mirror URL in:
+  阿里云控制台 -> 容器镜像服务 -> 镜像工具 -> 镜像加速器
+EOF
+  exit 1
+fi
+
+if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+  echo "Run with sudo because this script writes $DAEMON_JSON and restarts Docker." >&2
+  exit 1
+fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 is required to update $DAEMON_JSON safely." >&2
+  exit 1
+fi
+
+mkdir -p "$(dirname "$DAEMON_JSON")"
+
+if [[ -f "$DAEMON_JSON" ]]; then
+  BACKUP="$DAEMON_JSON.bak.$(date +%Y%m%d%H%M%S)"
+  cp "$DAEMON_JSON" "$BACKUP"
+  echo "Backed up existing Docker daemon config to $BACKUP"
+fi
+
+MIRROR_URL="$MIRROR_URL" DAEMON_JSON="$DAEMON_JSON" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+path = Path(os.environ["DAEMON_JSON"])
+mirror = os.environ["MIRROR_URL"].rstrip("/")
+
+if path.exists() and path.read_text(encoding="utf-8").strip():
+    with path.open("r", encoding="utf-8") as f:
+        config = json.load(f)
+else:
+    config = {}
+
+mirrors = config.get("registry-mirrors", [])
+if not isinstance(mirrors, list):
+    mirrors = []
+
+mirrors = [m for m in mirrors if m != mirror]
+config["registry-mirrors"] = [mirror] + mirrors
+
+path.write_text(
+    json.dumps(config, indent=2, ensure_ascii=False) + "\n",
+    encoding="utf-8",
+)
+PY
+
+echo "Updated $DAEMON_JSON:"
+cat "$DAEMON_JSON"
+
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl daemon-reload || true
+  systemctl restart docker
+else
+  service docker restart
+fi
+
+echo "Docker restarted."
+echo "Verify with:"
+echo "  docker info | grep -A5 'Registry Mirrors'"
