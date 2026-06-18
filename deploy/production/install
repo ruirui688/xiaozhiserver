@@ -51,6 +51,7 @@ fi
 mkdir -p \
   "$DATA_DIR/data" \
   "$DATA_DIR/mysql/data" \
+  "$DATA_DIR/music" \
   "$DATA_DIR/uploadfile"
 
 echo "Pulling Docker images from configured registries"
