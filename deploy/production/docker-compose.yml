@@ -17,6 +17,7 @@ services:
       - TZ=Asia/Shanghai
     volumes:
       - ./data:/opt/xiaozhi-esp32-server/data
+      - ./music:/opt/xiaozhi-esp32-server/music
 
   xiaozhi-esp32-server-web:
     image: ${XIAOZHI_WEB_IMAGE_REPOSITORY:-crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-web}:latest
@@ -39,8 +40,10 @@ services:
       - SPRING_DATA_REDIS_HOST=xiaozhi-esp32-server-redis
       - SPRING_DATA_REDIS_PASSWORD=
       - SPRING_DATA_REDIS_PORT=6379
+      - XIAOZHI_MUSIC_DIR=/music
     volumes:
       - ./uploadfile:/uploadfile
+      - ./music:/music
 
   xiaozhi-esp32-server-db:
     image: ${XIAOZHI_MYSQL_IMAGE:-crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/mysql:8.4}

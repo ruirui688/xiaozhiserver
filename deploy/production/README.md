@@ -12,6 +12,15 @@ Runtime data is stored outside the Git checkout:
 /opt/xiaozhi-data
 ```
 
+Important persistent subdirectories:
+
+```text
+/opt/xiaozhi-data/data        xiaozhi-server private config
+/opt/xiaozhi-data/mysql/data  MySQL data
+/opt/xiaozhi-data/uploadfile  manager-api uploads
+/opt/xiaozhi-data/music       uploaded server music library
+```
+
 Standard production commands:
 
 ```bash

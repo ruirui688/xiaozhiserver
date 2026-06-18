@@ -283,7 +283,12 @@ ASR、VAD、LLM、TTS、VLLM、Memory、Intent 等模型可以在安装后到智
 /opt/xiaozhi-data/mysql/data
 /opt/xiaozhi-data/data
 /opt/xiaozhi-data/uploadfile
+/opt/xiaozhi-data/music
 ```
+
+网页“音乐管理”上传的音频会保存到 `/opt/xiaozhi-data/music`。该目录会同时挂载给
+`xiaozhi-esp32-server-web` 的 `/music` 和 `xiaozhi-esp32-server` 的
+`/opt/xiaozhi-esp32-server/music`，确保后台上传、列表展示和设备播放使用同一份持久数据。
 
 ## 变量覆盖
 
