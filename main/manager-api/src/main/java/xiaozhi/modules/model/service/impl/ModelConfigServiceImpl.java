@@ -1105,23 +1105,9 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             return result;
         }
 
-        String localPathField = getLocalPathField(modelType, type);
-        if (StringUtils.isNotBlank(localPathField)) {
-            String configuredPath = configJson.getStr(localPathField);
-            if (findFirstExistingPath(List.of(
-                    configuredPath,
-                    "../xiaozhi-server/" + configuredPath,
-                    "main/xiaozhi-server/" + configuredPath)) == null) {
-                result.setSuccess(false);
-                result.setMessage("本地模型路径不存在：" + configuredPath);
-                result.setTestOutput(result.getMessage());
-                return result;
-            }
-        }
-
         result.setSuccess(true);
         result.setMessage("模型配置完整性测试通过");
-        result.setTestOutput("必填字段已配置，本地路径已校验");
+        result.setTestOutput(buildBasicConfigSuccessOutput(modelType, type));
         return result;
     }
 
@@ -1183,7 +1169,8 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             };
         }
         if ("VAD".equals(normalizedModelType)) {
-            return "silero".equals(normalizedType) ? List.of("model_dir") : List.of();
+            return "silero".equals(normalizedType) ? List.of("model_dir", "threshold", "min_silence_duration_ms")
+                    : List.of();
         }
         if ("RAG".equals(normalizedModelType)) {
             return "ragflow".equals(normalizedType) ? List.of("base_url", "api_key") : List.of();
@@ -1220,20 +1207,13 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                 && ("aliyun".equals(normalizedType) || "aliyun_stream".equals(normalizedType));
     }
 
-    private String getLocalPathField(String modelType, String type) {
+    private String buildBasicConfigSuccessOutput(String modelType, String type) {
         String normalizedModelType = StringUtils.defaultString(modelType).toUpperCase();
         String normalizedType = StringUtils.defaultString(type);
         if ("VAD".equals(normalizedModelType) && "silero".equals(normalizedType)) {
-            return "model_dir";
+            return "必填字段已配置。Docker 部署下，SileroVAD 模型文件由 xiaozhi-server 容器在运行时校验。";
         }
-        if ("ASR".equals(normalizedModelType)) {
-            return switch (normalizedType) {
-                case "fun_local", "sherpa_onnx_local" -> "model_dir";
-                case "vosk" -> "model_path";
-                default -> null;
-            };
-        }
-        return null;
+        return "必填字段已配置";
     }
 
     private boolean hasUsableConfigValue(JSONObject configJson, String field) {

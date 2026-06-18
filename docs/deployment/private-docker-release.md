@@ -233,10 +233,41 @@ http://服务器IP:8002
 示例：
 
 ```yaml
+server:
+  ip: 0.0.0.0
+  port: 8000
+  http_port: 8003
+  vision_explain: http://服务器IP或域名:8003/mcp/vision/explain
 manager-api:
   url: http://xiaozhi-esp32-server-web:8002/xiaozhi
   secret: 粘贴 server.secret
 ```
+
+这里要区分三类地址：
+
+```text
+浏览器访问智控台： http://服务器IP或域名:8002
+容器内访问 API：  http://xiaozhi-esp32-server-web:8002/xiaozhi
+设备访问服务端：  必须使用服务器公网IP、域名或反向代理地址
+```
+
+`manager-api.url` 是 `xiaozhi-server` 容器访问 `manager-api` 的 Docker 内网地址，生产环境默认保持：
+
+```text
+http://xiaozhi-esp32-server-web:8002/xiaozhi
+```
+
+不要把 `manager-api.url` 改成公网 IP。公网 IP 是给浏览器和 ESP32 设备访问的，不是容器内部服务互访地址。
+
+首次上线还必须在智控台“参数字典”中确认这些设备可访问地址：
+
+```text
+server.websocket      ws://服务器IP或域名:8000/xiaozhi/v1/
+server.ota            http://服务器IP或域名:8003/xiaozhi/ota/
+server.vision_explain http://服务器IP或域名:8003/mcp/vision/explain
+```
+
+这些参数会下发给 ESP32 设备，必须从设备网络可达。不能写 Docker 内网服务名，例如不能写 `xiaozhi-esp32-server-web`。
 
 然后重启核心服务：
 
