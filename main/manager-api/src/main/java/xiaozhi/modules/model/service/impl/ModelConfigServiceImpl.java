@@ -1,6 +1,11 @@
 package xiaozhi.modules.model.service.impl;
 
 import java.io.Serializable;
+import java.awt.Color;
+import java.awt.Font;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
@@ -24,6 +29,8 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPOutputStream;
 import java.util.stream.Collectors;
+
+import javax.imageio.ImageIO;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.http.HttpEntity;
@@ -956,15 +963,9 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                     "../../docs/images/demo1.png",
                     "docs/images/demo1.png",
                     "../docs/images/demo1.png"));
-            if (imagePath == null) {
-                result.setSuccess(false);
-                result.setMessage("未找到视觉测试图片，期望来源：docs/images/demo1.png");
-                result.setTestInput("图片：docs/images/demo1.png\n问题：" + VLLM_TEST_QUESTION);
-                result.setTestOutput(result.getMessage());
-                return result;
-            }
-
-            String imageBase64 = Base64.getEncoder().encodeToString(Files.readAllBytes(imagePath));
+            String imageSource = imagePath == null ? "内置视觉测试图片" : imagePath.toString();
+            byte[] imageBytes = imagePath == null ? createEmbeddedVisionTestImage() : Files.readAllBytes(imagePath);
+            String imageBase64 = Base64.getEncoder().encodeToString(imageBytes);
             result.setTestImageDataUrl("data:image/png;base64," + imageBase64);
             Map<String, Object> imageUrl = Map.of("url", "data:image/png;base64," + imageBase64);
             Map<String, Object> textContent = Map.of("type", "text", "text", VLLM_TEST_QUESTION);
@@ -975,7 +976,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             requestBody.put("messages", List.of(message));
             requestBody.put("stream", false);
             requestBody.put("max_tokens", 120);
-            result.setTestInput("图片：" + imagePath.toString() + "\n问题：" + VLLM_TEST_QUESTION);
+            result.setTestInput("图片：" + imageSource + "\n问题：" + VLLM_TEST_QUESTION);
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
@@ -999,8 +1000,8 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             }
             result.setSuccess(choices != null && !choices.isEmpty());
             result.setMessage(Boolean.TRUE.equals(result.getSuccess())
-                    ? "视觉模型真实图片测试通过，样本：" + imagePath.toString()
-                    : "视觉模型响应缺少 choices，样本：" + imagePath.toString());
+                    ? "视觉模型真实图片测试通过，样本：" + imageSource
+                    : "视觉模型响应缺少 choices，样本：" + imageSource);
             return result;
         } catch (Exception e) {
             result.setSuccess(false);
@@ -1010,6 +1011,32 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             }
             return result;
         }
+    }
+
+    private byte[] createEmbeddedVisionTestImage() throws IOException {
+        BufferedImage image = new BufferedImage(480, 320, BufferedImage.TYPE_INT_RGB);
+        Graphics2D graphics = image.createGraphics();
+        try {
+            graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            graphics.setColor(new Color(246, 248, 252));
+            graphics.fillRect(0, 0, 480, 320);
+            graphics.setColor(new Color(43, 92, 171));
+            graphics.fillRoundRect(54, 64, 160, 116, 18, 18);
+            graphics.setColor(new Color(239, 91, 91));
+            graphics.fillOval(276, 56, 128, 128);
+            graphics.setColor(new Color(49, 168, 126));
+            int[] xPoints = { 152, 244, 336 };
+            int[] yPoints = { 264, 128, 264 };
+            graphics.fillPolygon(xPoints, yPoints, 3);
+            graphics.setColor(new Color(28, 36, 52));
+            graphics.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 26));
+            graphics.drawString("XIAOZHI VISION TEST", 82, 292);
+        } finally {
+            graphics.dispose();
+        }
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ImageIO.write(image, "png", output);
+        return output.toByteArray();
     }
 
     private String extractOpenAiChoiceText(JSONArray choices) {
