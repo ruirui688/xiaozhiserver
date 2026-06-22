@@ -51,27 +51,17 @@
             <el-input v-model="form.modelName" :placeholder="$t('modelConfigDialog.enterModelName')"
               class="custom-input-bg"></el-input>
           </el-form-item>
-          <el-form-item :label="$t('modelConfigDialog.modelCode')" prop="modelCode" style="flex: 1">
-            <el-input v-model="form.modelCode" :placeholder="$t('modelConfigDialog.enterModelCode')"
-              class="custom-input-bg"></el-input>
-          </el-form-item>
-        </div>
-
-        <div style="display: flex; gap: 20px; margin-bottom: 0">
-          <el-form-item :label="$t('modelConfigDialog.adapterCode')" prop="adapterCode" style="flex: 1">
-            <el-select v-model="form.adapterCode" :placeholder="$t('modelConfigDialog.selectSupplier')"
-              class="custom-select custom-input-bg" style="width: 100%" @focus="loadProviders" filterable>
-              <el-option v-for="item in providers" :key="item.value" :label="item.label" :value="item.value" />
+          <el-form-item :label="$t('modelConfigDialog.adapterCode')" prop="templateCode" style="flex: 1">
+            <el-select v-model="form.templateCode" :placeholder="$t('modelConfigDialog.selectSupplier')"
+              class="custom-select custom-input-bg" style="width: 100%" @focus="loadProviders" filterable
+              @change="handleTemplateChange">
+              <el-option v-for="item in providers" :key="item.templateCode" :label="item.label" :value="item.templateCode" />
             </el-select>
           </el-form-item>
-          <el-form-item :label="$t('modelConfigDialog.protocol')" prop="protocol" style="flex: 1">
-            <el-input v-model="form.protocol" :placeholder="$t('modelConfigDialog.enterProtocol')"
-              class="custom-input-bg"></el-input>
-          </el-form-item>
         </div>
 
         <div style="display: flex; gap: 20px; margin-bottom: 0">
-          <el-form-item :label="$t('modelConfigDialog.upstreamModel')" prop="upstreamModelId" style="flex: 1">
+          <el-form-item :label="currentUpstreamLabel" prop="upstreamModelId" style="flex: 1">
             <el-input v-model="form.upstreamModelId" :placeholder="$t('modelConfigDialog.enterUpstreamModel')"
               class="custom-input-bg"></el-input>
           </el-form-item>
@@ -81,21 +71,37 @@
           </el-form-item>
         </div>
 
-        <div style="display: flex; gap: 20px; margin-bottom: 0">
-          <el-form-item :label="$t('modelConfigDialog.sortOrder')" prop="sort" style="flex: 1">
-            <el-input v-model.number="form.sort" type="number" :placeholder="$t('modelConfigDialog.enterSortOrder')"
-              class="custom-input-bg"></el-input>
-          </el-form-item>
-          <el-form-item :label="$t('modelConfigDialog.docLink')" prop="docUrl" style="flex: 1">
-            <el-input v-model="form.docLink" :placeholder="$t('modelConfigDialog.enterDocLink')"
-              class="custom-input-bg"></el-input>
-          </el-form-item>
-        </div>
-
-        <el-form-item :label="$t('modelConfigDialog.remark')" prop="remark" class="prop-remark">
-          <el-input v-model="form.remark" type="textarea" :rows="3" :placeholder="$t('modelConfigDialog.enterRemark')"
-            :autosize="{ minRows: 3, maxRows: 5 }" class="custom-input-bg"></el-input>
-        </el-form-item>
+        <el-collapse class="advanced-collapse">
+          <el-collapse-item :title="$t('modelConfigDialog.advancedSettings')" name="advanced">
+            <div style="display: flex; gap: 20px; margin-bottom: 0">
+              <el-form-item :label="$t('modelConfigDialog.modelCode')" prop="modelCode" style="flex: 1">
+                <el-input v-model="form.modelCode" :placeholder="$t('modelConfigDialog.enterModelCode')"
+                  class="custom-input-bg"></el-input>
+              </el-form-item>
+              <el-form-item :label="$t('modelConfigDialog.protocol')" prop="protocol" style="flex: 1">
+                <el-input v-model="form.protocol" :placeholder="$t('modelConfigDialog.enterProtocol')"
+                  class="custom-input-bg"></el-input>
+              </el-form-item>
+            </div>
+            <div style="display: flex; gap: 20px; margin-bottom: 0">
+              <el-form-item :label="$t('modelConfig.vendorProduct')" style="flex: 1">
+                <el-input :value="getVendorProductText()" class="custom-input-bg" disabled></el-input>
+              </el-form-item>
+              <el-form-item :label="$t('modelConfigDialog.sortOrder')" prop="sort" style="flex: 1">
+                <el-input v-model.number="form.sort" type="number" :placeholder="$t('modelConfigDialog.enterSortOrder')"
+                  class="custom-input-bg"></el-input>
+              </el-form-item>
+            </div>
+            <el-form-item :label="$t('modelConfigDialog.docLink')" prop="docUrl">
+              <el-input v-model="form.docLink" :placeholder="$t('modelConfigDialog.enterDocLink')"
+                class="custom-input-bg"></el-input>
+            </el-form-item>
+            <el-form-item :label="$t('modelConfigDialog.remark')" prop="remark" class="prop-remark">
+              <el-input v-model="form.remark" type="textarea" :rows="3" :placeholder="$t('modelConfigDialog.enterRemark')"
+                :autosize="{ minRows: 3, maxRows: 5 }" class="custom-input-bg"></el-input>
+            </el-form-item>
+          </el-collapse-item>
+        </el-collapse>
       </el-form>
 
       <div style="font-size: 20px; font-weight: bold; color: #3d4566; margin-bottom: 15px">
@@ -106,7 +112,7 @@
       <el-form :model="form" ref="callInfoForm" label-width="auto" class="custom-form">
         <template v-for="(row, rowIndex) in chunkedCallInfoFields">
           <div :key="rowIndex" style="display: flex; gap: 20px; margin-bottom: 0">
-            <el-form-item v-for="field in row" :key="field.prop" :label="field.label" :prop="field.prop"
+            <el-form-item v-for="field in row" v-show="isFieldVisible(field)" :key="field.prop" :label="field.label" :prop="field.prop"
               style="flex: 1">
               <template v-if="field.type === 'json-textarea'">
                 <el-input v-model="fieldJsonMap[field.prop]" type="textarea" :rows="3"
@@ -120,8 +126,10 @@
                   :value="option.value" />
               </el-select>
 
+              <el-switch v-else-if="field.type === 'switch'" v-model="form[field.target][field.prop]"></el-switch>
+
               <el-input v-else v-model="form[field.target][field.prop]" :placeholder="field.placeholder"
-                :type="field.type === 'password' ? 'password' : 'text'" class="custom-input-bg" show-password></el-input>
+                :type="field.type === 'number' ? 'number' : field.type === 'password' ? 'password' : 'text'" class="custom-input-bg" show-password></el-input>
             </el-form-item>
           </div>
         </template>
@@ -202,6 +210,12 @@ export default {
       }
       return result;
     },
+    currentTemplate() {
+      return this.findTemplate(this.form.templateCode) || {};
+    },
+    currentUpstreamLabel() {
+      return this.currentTemplate.upstreamResourceLabel || this.$t("modelConfigDialog.upstreamModel");
+    },
   },
   watch: {
     modelType() {
@@ -222,7 +236,7 @@ export default {
         this.loadProviders();
       }
     },
-    "form.adapterCode"(newVal) {
+    "form.templateCode"(newVal) {
       if (newVal && this.providersLoaded) {
         this.loadProviderFields(newVal);
       }
@@ -271,7 +285,7 @@ export default {
                 this.modelData.modelCode + this.$t("modelConfigDialog.copySuffix");
 
             }
-            this.pendingProviderType = model.adapterCode || model.providerCode;
+            this.pendingProviderType = model.templateCode || model.adapterCode || model.providerCode;
             this.pendingModelData = model;
 
             if (this.providersLoaded) {
@@ -355,10 +369,13 @@ export default {
         return;
       }
 
-      Api.model.getModelProviders(this.modelType, (data) => {
+      Api.model.getModelTemplates({ modelType: this.modelType }, (res) => {
+        const data = res && res.data && res.data.code === 0 ? (res.data.data || []) : [];
         this.providers = data.map((item) => ({
-          label: item.name,
-          value: String(item.providerCode),
+          label: `${item.vendorName || ""} / ${item.productName || item.adapterName || item.providerCode}`,
+          templateCode: item.templateCode,
+          providerCode: String(item.providerCode || ""),
+          raw: item,
         }));
         this.providersLoaded = true;
         this.allProvidersData = data;
@@ -369,57 +386,130 @@ export default {
         done && done();
       });
     },
-    loadProviderFields(providerCode) {
+    handleTemplateChange(templateCode) {
+      const template = this.findTemplate(templateCode);
+      if (!template) {
+        return;
+      }
+      this.form.adapterCode = template.providerCode || "";
+      this.form.providerCode = template.providerCode || "";
+      this.form.vendorName = template.vendorName || "";
+      this.form.productName = template.productName || "";
+      this.form.protocol = template.protocolLabel || "";
+      this.form.docLink = template.docLink || this.form.docLink;
+      this.applyTemplateDefaults(template);
+      this.loadProviderFields(templateCode);
+    },
+    findTemplate(templateCode) {
+      return (this.allProvidersData || []).find((item) => item.templateCode === templateCode);
+    },
+    loadProviderFields(templateCode) {
       if (this.allProvidersData) {
-        const provider = this.allProvidersData.find(
-          (p) => p.providerCode === providerCode
+        const provider = this.findTemplate(templateCode) || (this.allProvidersData || []).find(
+          (p) => p.providerCode === templateCode
         );
         if (provider) {
-          const providerFields = JSON.parse(provider.fields || "[]");
+          this.dynamicCallInfoFields = (provider.fieldSchemas || [])
+            .filter((f) => !this.isMetadataField(f.key, provider))
+            .map((f) => ({
+              label: f.label || f.key,
+              prop: f.key,
+              target: this.getFieldTarget(f),
+              type: this.getInputType(f),
+              options: (f.options || []).map((option) => ({ label: option, value: option })),
+              placeholder: `请输入${f.key}`,
+              visibleWhen: f.visibleWhen || "",
+              advanced: !!f.advanced,
+            }));
 
-          this.dynamicCallInfoFields = providerFields.filter((f) => !this.isMetadataField(f.key)).map((f) => ({
-            label: f.label,
-            prop: f.key,
-            target: this.getFieldTarget(f),
-            type:
-              f.type === "dict"
-                ? "json-textarea"
-                : f.type === "select"
-                  ? "select"
-                : f.type === "password"
-                  ? "password"
-                  : "text",
-            options: f.options || [],
-            placeholder: `请输入${f.key}`,
-          }));
-
-          if (this.pendingModelData && this.pendingProviderType === providerCode) {
+          if (this.pendingModelData && (this.pendingProviderType === templateCode || this.pendingProviderType === provider.providerCode)) {
+            if (!this.pendingModelData.templateCode) {
+              this.pendingModelData.templateCode = provider.templateCode;
+              this.pendingModelData.adapterCode = provider.providerCode;
+              this.pendingModelData.providerCode = provider.providerCode;
+            }
             this.processModelData(this.pendingModelData);
             this.pendingModelData = null;
             this.pendingProviderType = null;
+          } else {
+            this.applyTemplateDefaults(provider);
           }
         }
       }
     },
+    getInputType(field) {
+      if (field.inputType === "textarea" || field.type === "json") {
+        return "json-textarea";
+      }
+      if (field.inputType === "switch" || field.type === "boolean") {
+        return "switch";
+      }
+      if (field.inputType === "select" || (field.options || []).length > 0) {
+        return "select";
+      }
+      if (field.inputType === "password" || field.type === "password" || field.secret) {
+        return "password";
+      }
+      return field.type === "number" ? "number" : "text";
+    },
     getFieldTarget(field) {
-      if (field.type === "password" || this.isSecretField(field.key)) {
+      if (field.secret || field.type === "password" || field.inputType === "password" || this.isSecretField(field.key)) {
         return "secrets";
       }
       return "params";
     },
-    isMetadataField(key) {
+    isMetadataField(key, template = {}) {
+      if (this.endpointKeys().includes(key)) {
+        return true;
+      }
+      if (key === (template.upstreamModelField || "") || ["model_name", "model", "resource_id"].includes(key)) {
+        return true;
+      }
       return [
         "type",
-        "base_url",
-        "api_url",
-        "url",
-        "host",
-        "model_name",
-        "model",
-        "resource_id",
-        "voice",
         "protocol",
       ].includes(key);
+    },
+    endpointKeys() {
+      return ["base_url", "api_url", "url", "ws_url", "server_url", "host", "endpoint_url"];
+    },
+    applyTemplateDefaults(template = {}) {
+      const upstreamKey = template.upstreamModelField || "";
+      (template.fieldSchemas || []).forEach((field) => {
+        const value = field.defaultValue;
+        if (value === undefined || value === null || value === "") {
+          return;
+        }
+        if (this.endpointKeys().includes(field.key)) {
+          if (!this.form.endpointUrl) this.form.endpointUrl = value;
+          return;
+        }
+        if (field.key === upstreamKey || ["model_name", "model", "resource_id"].includes(field.key)) {
+          if (!this.form.upstreamModelId) this.form.upstreamModelId = value;
+          return;
+        }
+        const target = this.getFieldTarget(field);
+        if (this.form[target][field.key] === undefined || this.form[target][field.key] === "") {
+          this.$set(this.form[target], field.key, value);
+        }
+      });
+    },
+    isFieldVisible(field) {
+      if (!field.visibleWhen) {
+        return true;
+      }
+      const match = String(field.visibleWhen).match(/^([a-zA-Z0-9_]+)=([^=]+)$/);
+      if (!match) {
+        return true;
+      }
+      const [, key, expected] = match;
+      const actual = this.form.params[key] !== undefined ? this.form.params[key] : this.form.secrets[key];
+      return String(actual) === String(expected);
+    },
+    getVendorProductText() {
+      const vendor = this.form.vendorName || "";
+      const product = this.form.productName || "";
+      return vendor && product ? `${vendor} / ${product}` : vendor || product || "";
     },
     isSecretField(key) {
       return [
@@ -488,10 +578,15 @@ export default {
       const providerCode =
         payload.adapterCode || payload.providerCode || draft.type || this.form.adapterCode || "";
       const apply = () => {
+        const template = this.findBestTemplate(providerCode, draft, payload.templateCode);
+        const templateCode = template ? template.templateCode : this.form.templateCode;
         const model = {
           ...this.form,
-          adapterCode: providerCode,
-          providerCode,
+          adapterCode: template ? template.providerCode : providerCode,
+          providerCode: template ? template.providerCode : providerCode,
+          templateCode,
+          vendorName: template ? template.vendorName : this.form.vendorName,
+          productName: template ? template.productName : this.form.productName,
           protocol: payload.protocol || draft.protocol || this.form.protocol,
           upstreamModelId:
             payload.upstreamModelId ||
@@ -518,11 +613,33 @@ export default {
             ...this.extractDraftSecrets(draft),
           },
         };
-        this.pendingProviderType = providerCode;
+        this.pendingProviderType = templateCode;
         this.pendingModelData = model;
-        this.loadProviderFields(providerCode);
+        this.loadProviderFields(templateCode);
       };
       this.loadProviders(apply);
+    },
+    findBestTemplate(providerCode, draft = {}, templateCode = "") {
+      const templates = this.allProvidersData || [];
+      if (templateCode) {
+        const byCode = templates.find((item) => item.templateCode === templateCode);
+        if (byCode) return byCode;
+      }
+      const haystack = [
+        draft.base_url,
+        draft.api_url,
+        draft.url,
+        draft.host,
+        draft.model_name,
+        draft.model,
+        draft.resource_id,
+        draft.voice,
+      ].filter(Boolean).join(" ").toLowerCase();
+      return templates.find((item) => {
+        if (item.providerCode !== providerCode) return false;
+        const text = `${item.templateCode || ""} ${item.vendorName || ""} ${item.productName || ""}`.toLowerCase();
+        return haystack && text && haystack.split(/[/:._\-\s]+/).some((part) => part.length > 2 && text.includes(part));
+      }) || templates.find((item) => item.providerCode === providerCode);
     },
     extractDraftParams(draft = {}) {
       const params = {};

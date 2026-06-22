@@ -12,7 +12,32 @@
 ai_model_provider
   model_type      能力分类，例如 ASR、TTS、LLM、RAG、Plugin
   provider_code   供应器或插件编码，通常对应 adapter_code 或函数名
-  fields          智控台表单字段定义
+  name            后台展示的适配器名称
+
+ai_model_template
+  template_code   模型模板编码，是智控台表单字段和运行时映射的事实来源
+  model_type      能力分类
+  adapter_code    运行时适配器编码，对应 Python provider type
+  vendor_name     厂商名称
+  product_name    产品/API名称
+  capability      能力编码
+  access_mode     接入方式
+  deployment      部署形态
+  protocol        协议说明
+  upstream_model_field 上游模型字段映射，例如 model_name / model / resource_id
+
+ai_model_template_field
+  template_id     模板编码
+  field_key       智控台配置字段
+  runtime_key     下发给 provider 的运行时字段名
+  field_group     connection / credentials / upstream / generation / audio / advanced
+  value_type      string / number / boolean / json
+  input_type      text / password / select / switch / textarea
+  required        是否必填
+  secret          是否密钥
+  default_value   默认值
+  options_json    可选值
+  visible_when    显示条件
 
 ai_model_config
   model_type      模型能力分类
@@ -66,6 +91,8 @@ sys_params / xiaozhi-server 配置
 
 标准模型配置的目标不是把所有配置塞进一张 JSON，而是明确每一类配置的归属，避免模型 ID、展示名、上游模型名、协议字段、密钥和运行参数互相混用。
 
+智控台编辑模型时以 `ai_model_template_field` 渲染表单。`ai_model_provider` 只表示适配器注册，不再决定模型配置字段。通用字段只保存模型实例的稳定元数据；每个模型专有字段由模板字段进入普通参数表或密钥表。
+
 ## 运行时契约
 
 `manager-api` 向 `xiaozhi-server` 下发模型时必须提供：
@@ -94,7 +121,8 @@ model_config:
 
 - `selected_module` 不再承载配置内容，只作为选择关系。
 - `typed_config` 是 Python provider 初始化的唯一配置来源。
-- `typed_config` 由 `ModelRuntimeAssembler` 从 `ai_model_config` 通用字段、`ai_model_config_param` 和 `ai_model_config_secret` 组装。
+- `typed_config` 由 `ModelRuntimeAssembler` 从模型模板、`ai_model_config` 通用字段、`ai_model_config_param` 和 `ai_model_config_secret` 组装。
+- `endpoint_url`、`upstream_model_id` 进入哪个 provider 字段由模板决定，例如 `base_url`、`api_url`、`model_name`、`model`、`resource_id`。
 - `model_config` 是 manager-api 到 xiaozhi-server 的唯一模型运行时契约。
 
 ## 2. 分类目录

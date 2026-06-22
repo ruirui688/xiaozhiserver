@@ -31,6 +31,15 @@ public class ModelTemplateFieldEntity {
     @Schema(description = "输入类型")
     private String inputType;
 
+    @Schema(description = "运行时字段名")
+    private String runtimeKey;
+
+    @Schema(description = "是否高级字段")
+    private Integer advanced;
+
+    @Schema(description = "显示条件表达式")
+    private String visibleWhen;
+
     @Schema(description = "是否必填")
     private Integer required;
 

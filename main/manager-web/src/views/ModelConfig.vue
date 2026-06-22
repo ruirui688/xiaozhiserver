@@ -84,15 +84,15 @@
                 :cell-class-name="selectionCellClassName"
               ></el-table-column>
               <el-table-column
-                :label="$t('modelConfig.modelId')"
-                prop="id"
-                align="center"
-              ></el-table-column>
-              <el-table-column
                 :label="$t('modelConfig.configName')"
-                prop="modelName"
-                align="center"
-              ></el-table-column>
+                align="left"
+                min-width="190"
+              >
+                <template slot-scope="scope">
+                  <div class="model-primary">{{ scope.row.modelName }}</div>
+                  <div class="model-secondary">{{ scope.row.modelCode || scope.row.id }}</div>
+                </template>
+              </el-table-column>
               <el-table-column :label="$t('modelConfig.upstreamModel')" align="center">
                 <template slot-scope="scope">
                   {{ getUpstreamModel(scope.row) }}
@@ -101,16 +101,6 @@
               <el-table-column :label="$t('modelConfig.adapter')" align="center">
                 <template slot-scope="scope">
                   {{ getAdapterName(scope.row) }}
-                </template>
-              </el-table-column>
-              <el-table-column :label="$t('modelConfig.protocol')" align="center">
-                <template slot-scope="scope">
-                  {{ displayValue(scope.row.protocol || scope.row.protocolLabel) }}
-                </template>
-              </el-table-column>
-              <el-table-column :label="$t('modelConfig.vendorProduct')" align="center">
-                <template slot-scope="scope">
-                  {{ getVendorProduct(scope.row) }}
                 </template>
               </el-table-column>
               <el-table-column :label="$t('modelConfig.isEnabled')" align="center">
@@ -1609,6 +1599,19 @@ export default {
   display: block;
   width: 100%;
   height: 36px;
+}
+
+.model-primary {
+  color: #303133;
+  font-weight: 600;
+  line-height: 22px;
+}
+
+.model-secondary {
+  color: #909399;
+  font-size: 12px;
+  line-height: 18px;
+  word-break: break-all;
 }
 
 </style>
