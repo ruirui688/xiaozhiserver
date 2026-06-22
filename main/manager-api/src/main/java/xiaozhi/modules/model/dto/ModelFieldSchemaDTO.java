@@ -8,7 +8,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
 @Data
-@Schema(description = "模型配置字段 v2 结构")
+@Schema(description = "标准模型配置字段结构")
 public class ModelFieldSchemaDTO implements Serializable {
 
     @Serial

@@ -18,10 +18,10 @@ import xiaozhi.modules.agent.entity.AgentEntity;
 import xiaozhi.modules.config.service.ConfigService;
 import xiaozhi.modules.device.dao.DeviceDao;
 import xiaozhi.modules.device.entity.DeviceEntity;
-import xiaozhi.modules.model.dao.ModelConfigDao;
 import xiaozhi.modules.model.dto.ModelPerformanceTestRequestDTO;
 import xiaozhi.modules.model.entity.ModelBenchmarkTaskEntity;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
+import xiaozhi.modules.model.service.ModelConfigService;
 
 @Component
 @AllArgsConstructor
@@ -29,7 +29,7 @@ public class BenchmarkContextBuilder {
 
     private static final String CUSTOM_BENCHMARK_CASES_KEY = "__benchmark_cases";
 
-    private final ModelConfigDao modelConfigDao;
+    private final ModelConfigService modelConfigService;
     private final AgentDao agentDao;
     private final DeviceDao deviceDao;
     private final ConfigService configService;
@@ -39,7 +39,7 @@ public class BenchmarkContextBuilder {
         if (StringUtils.isBlank(request.getJudgeModelId())) {
             return config;
         }
-        ModelConfigEntity judgeModel = modelConfigDao.selectById(request.getJudgeModelId().trim());
+        ModelConfigEntity judgeModel = modelConfigService.getModelByIdFromCache(request.getJudgeModelId().trim());
         if (judgeModel == null || judgeModel.getConfigJson() == null) {
             throw new RenException("评审模型配置不存在或配置为空，请在模型配置中选择一个可用的 LLM。");
         }
@@ -108,7 +108,7 @@ public class BenchmarkContextBuilder {
         List<JSONObject> models = new ArrayList<>();
         List<String> skippedModels = new ArrayList<>();
         for (String modelId : modelIds) {
-            ModelConfigEntity model = modelConfigDao.selectById(modelId);
+            ModelConfigEntity model = modelConfigService.getModelByIdFromCache(modelId);
             if (model == null || model.getConfigJson() == null) {
                 skippedModels.add(modelId);
                 continue;
@@ -116,7 +116,7 @@ public class BenchmarkContextBuilder {
             models.add(toModelPayloadItem(model));
         }
         if (models.isEmpty()) {
-            throw new RenException("没有可评测的模型配置。请确认已选择的模型仍存在，并且模型配置 JSON 不为空。已跳过模型ID："
+            throw new RenException("没有可评测的模型配置。请确认已选择的模型仍存在，并且标准运行时配置不为空。已跳过模型ID："
                     + String.join(",", skippedModels));
         }
         return models;

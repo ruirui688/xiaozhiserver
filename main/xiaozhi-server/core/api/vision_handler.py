@@ -9,7 +9,7 @@ from config.logger import setup_logging
 from core.api.base_handler import BaseHandler
 from core.utils.util import get_vision_url, is_valid_image_file
 from core.utils.vllm import create_instance
-from core.utils.model_config_v2 import get_runtime_config, get_runtime_type
+from core.utils.model_config import get_runtime_config, get_runtime_type
 from config.config_loader import get_private_config_from_api
 from core.utils.auth import AuthToken
 import base64

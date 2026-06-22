@@ -94,6 +94,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         implements ModelConfigService {
 
     private final ModelConfigDao modelConfigDao;
+    private final ModelRuntimeAssembler modelRuntimeAssembler;
     private final ModelProviderService modelProviderService;
     private final ModelCatalogService modelCatalogService;
     private final RedisUtils redisUtils;
@@ -144,13 +145,13 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                         .eq("is_enabled", 1)
                         .eq("test_status", MODEL_TEST_PASSED)
                         .like(StringUtils.isNotBlank(modelName), "model_name", modelName)
-                        .select("id", "model_name", "config_json"));
+                        .select("id", "model_name", "adapter_code", "upstream_model_id", "endpoint_url"));
 
-        return entities.stream().map(item -> {
+        return attachRuntimeConfigs(entities).stream().map(item -> {
             LlmModelBasicInfoDTO dto = new LlmModelBasicInfoDTO();
             dto.setId(item.getId());
             dto.setModelName(item.getModelName());
-            String type = item.getConfigJson().getOrDefault("type", "").toString();
+            String type = item.getConfigJson() == null ? "" : item.getConfigJson().getOrDefault("type", "").toString();
             dto.setType(type);
             return dto;
         }).toList();
@@ -176,7 +177,8 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                         .like(StringUtils.isNotBlank(modelName), "model_name", modelName));
 
         Map<String, ModelProviderDTO> providerCache = new HashMap<>();
-        List<ModelConfigDTO> list = modelConfigEntityIPage.getRecords().stream()
+        List<ModelConfigEntity> records = attachRuntimeConfigs(modelConfigEntityIPage.getRecords());
+        List<ModelConfigDTO> list = records.stream()
                 .map(entity -> buildResponseDTO(entity, providerCache))
                 .toList();
         return new PageData<>(list, modelConfigEntityIPage.getTotal());
@@ -193,14 +195,17 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         // 3. 获取原始配置
         ModelConfigEntity originalEntity = getOriginalConfigFromDb(id);
 
+        JSONObject runtimeConfig = buildStandardRuntimeConfig(modelConfigBodyDTO, provideCode);
+
         // 4. 验证LLM配置
-        validateLlmConfiguration(modelConfigBodyDTO);
+        validateLlmConfiguration(runtimeConfig);
 
         // 5. 准备更新实体
         ModelConfigEntity modelConfigEntity = prepareUpdateEntity(modelConfigBodyDTO, originalEntity, modelType, id);
 
         // 6. 执行数据库更新
         modelConfigDao.updateById(modelConfigEntity);
+        modelRuntimeAssembler.saveRuntimeConfig(modelConfigEntity, runtimeConfig);
 
         // 7. 清除缓存
         clearModelCache(id);
@@ -216,8 +221,10 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         validateModelProvider(modelType, provideCode);
 
         ModelConfigEntity modelConfigEntity = prepareAddEntity(modelConfigBodyDTO, modelType);
+        JSONObject runtimeConfig = buildStandardRuntimeConfig(modelConfigBodyDTO, provideCode);
 
         modelConfigDao.insert(modelConfigEntity);
+        modelRuntimeAssembler.saveRuntimeConfig(modelConfigEntity, runtimeConfig);
 
         return buildResponseDTO(modelConfigEntity);
     }
@@ -227,7 +234,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         if (StringUtils.isBlank(id)) {
             throw new RenException(ErrorCode.IDENTIFIER_NOT_NULL);
         }
-        ModelConfigEntity entity = modelConfigDao.selectById(id);
+        ModelConfigEntity entity = attachRuntimeConfig(modelConfigDao.selectById(id));
         if (entity == null) {
             throw new RenException(ErrorCode.RESOURCE_NOT_FOUND);
         }
@@ -240,7 +247,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             throw new RenException(ErrorCode.IDENTIFIER_NOT_NULL);
         }
 
-        ModelConfigEntity modelConfig = modelConfigDao.selectById(id);
+        ModelConfigEntity modelConfig = attachRuntimeConfig(modelConfigDao.selectById(id));
         if (modelConfig != null && modelConfig.getIsDefault() == 1) {
             throw new RenException(ErrorCode.DEFAULT_MODEL_DELETE_ERROR);
         }
@@ -249,6 +256,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         checkIntentConfigReference(id);
 
         modelConfigDao.deleteById(id);
+        modelRuntimeAssembler.deleteRuntimeConfig(id);
 
         clearModelCache(id);
     }
@@ -259,7 +267,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             throw new RenException(ErrorCode.IDENTIFIER_NOT_NULL);
         }
 
-        ModelConfigEntity modelConfig = modelConfigDao.selectById(id);
+        ModelConfigEntity modelConfig = attachRuntimeConfig(modelConfigDao.selectById(id));
         if (modelConfig == null) {
             throw new RenException(ErrorCode.RESOURCE_NOT_FOUND);
         }
@@ -324,7 +332,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         String cacheKey = RedisKeys.getModelConfigById(id);
         ModelConfigEntity entity = (ModelConfigEntity) redisUtils.get(cacheKey);
         if (entity == null) {
-            entity = modelConfigDao.selectById(id);
+            entity = attachRuntimeConfig(modelConfigDao.selectById(id));
             if (entity != null) {
                 redisUtils.set(cacheKey, entity);
             }
@@ -399,7 +407,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
      * 从数据库获取原始配置
      */
     private ModelConfigEntity getOriginalConfigFromDb(String id) {
-        ModelConfigEntity originalEntity = modelConfigDao.selectById(id);
+        ModelConfigEntity originalEntity = attachRuntimeConfig(modelConfigDao.selectById(id));
         if (originalEntity == null) {
             throw new RenException(ErrorCode.RESOURCE_NOT_FOUND);
         }
@@ -409,11 +417,12 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     /**
      * 验证LLM配置
      */
-    private void validateLlmConfiguration(ModelConfigBodyDTO modelConfigBodyDTO) {
-        if (modelConfigBodyDTO.getConfigJson() != null && modelConfigBodyDTO.getConfigJson().containsKey("llm")) {
-            String llm = modelConfigBodyDTO.getConfigJson().get("llm").toString();
-            ModelConfigEntity modelConfigEntity = modelConfigDao.selectOne(new LambdaQueryWrapper<ModelConfigEntity>()
-                    .eq(ModelConfigEntity::getId, llm));
+    private void validateLlmConfiguration(JSONObject runtimeConfig) {
+        if (runtimeConfig != null && runtimeConfig.containsKey("llm")) {
+            String llm = runtimeConfig.get("llm").toString();
+            ModelConfigEntity modelConfigEntity = attachRuntimeConfig(
+                    modelConfigDao.selectOne(new LambdaQueryWrapper<ModelConfigEntity>()
+                            .eq(ModelConfigEntity::getId, llm)));
 
             if (modelConfigEntity == null) {
                 throw new RenException(ErrorCode.LLM_NOT_EXIST);
@@ -450,6 +459,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         // 2. 更新基础字段
         modelConfigEntity.setModelCode(modelConfigBodyDTO.getModelCode());
         modelConfigEntity.setModelName(modelConfigBodyDTO.getModelName());
+        applyStandardModelFields(modelConfigEntity, modelConfigBodyDTO);
         modelConfigEntity.setSort(modelConfigBodyDTO.getSort());
         modelConfigEntity.setIsEnabled(0);
         modelConfigEntity.setDocLink(modelConfigBodyDTO.getDocLink());
@@ -457,10 +467,8 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         modelConfigEntity.setTestStatus(MODEL_TEST_UNTESTED);
         modelConfigEntity.setTestMessage(null);
         modelConfigEntity.setTestTime(null);
-        // 3. 模型配置按表单原样保存，API Key 等字段不再使用掩码保留协议
-        if (modelConfigBodyDTO.getConfigJson() != null) {
-            modelConfigEntity.setConfigJson(modelConfigBodyDTO.getConfigJson());
-        }
+        // 标准运行时配置写入模型标准字段、参数表和密钥表，不再依赖 ai_model_config.config_json。
+        modelConfigEntity.setConfigJson(null);
 
         return modelConfigEntity;
     }
@@ -471,11 +479,13 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     private ModelConfigEntity prepareAddEntity(ModelConfigBodyDTO modelConfigBodyDTO, String modelType) {
         ModelConfigEntity modelConfigEntity = ConvertUtils.sourceToTarget(modelConfigBodyDTO, ModelConfigEntity.class);
         modelConfigEntity.setModelType(modelType);
+        applyStandardModelFields(modelConfigEntity, modelConfigBodyDTO);
         modelConfigEntity.setIsDefault(0);
         modelConfigEntity.setIsEnabled(0);
         modelConfigEntity.setTestStatus(MODEL_TEST_UNTESTED);
         modelConfigEntity.setTestMessage(null);
         modelConfigEntity.setTestTime(null);
+        modelConfigEntity.setConfigJson(null);
         return modelConfigEntity;
     }
 
@@ -491,6 +501,8 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         if (dto == null) {
             return null;
         }
+        dto.setParams(modelRuntimeAssembler.buildPublicParams(entity));
+        dto.setSecrets(modelRuntimeAssembler.buildMaskedSecrets(entity));
         ModelDisplayInfo displayInfo = buildModelDisplayInfo(entity, providerCache);
         dto.setProviderCode(displayInfo.providerCode);
         dto.setProviderName(displayInfo.providerName);
@@ -501,6 +513,72 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         dto.setModelTags(displayInfo.modelTags);
         enrichCatalogInfo(dto, entity, displayInfo);
         return dto;
+    }
+
+    private void applyStandardModelFields(ModelConfigEntity entity, ModelConfigBodyDTO body) {
+        entity.setAdapterCode(firstNonBlank(
+                body.getAdapterCode(),
+                body.getProviderCode(),
+                entity.getAdapterCode()));
+        entity.setTemplateCode(StringUtils.defaultString(body.getTemplateCode(), entity.getTemplateCode()));
+        entity.setVendorName(StringUtils.defaultString(body.getVendorName(), entity.getVendorName()));
+        entity.setProductName(StringUtils.defaultString(body.getProductName(), entity.getProductName()));
+        entity.setProtocol(StringUtils.defaultString(body.getProtocol(), entity.getProtocol()));
+        entity.setUpstreamModelId(StringUtils.defaultString(body.getUpstreamModelId(), entity.getUpstreamModelId()));
+        entity.setEndpointUrl(StringUtils.defaultString(body.getEndpointUrl(), entity.getEndpointUrl()));
+    }
+
+    private JSONObject buildStandardRuntimeConfig(ModelConfigBodyDTO body, String provideCode) {
+        JSONObject config = new JSONObject();
+        if (body == null) {
+            return config;
+        }
+        setIfNotBlank(config, "type", firstNonBlank(body.getAdapterCode(), body.getProviderCode(), provideCode));
+        setIfNotBlank(config, "protocol", body.getProtocol());
+        setIfNotBlank(config, "base_url", body.getEndpointUrl());
+        setIfNotBlank(config, "api_url", body.getEndpointUrl());
+        setIfNotBlank(config, "url", body.getEndpointUrl());
+        setIfNotBlank(config, "ws_url", body.getEndpointUrl());
+        setIfNotBlank(config, "host", body.getEndpointUrl());
+        setIfNotBlank(config, "endpoint_url", body.getEndpointUrl());
+        setIfNotBlank(config, "model_name", body.getUpstreamModelId());
+        setIfNotBlank(config, "model", body.getUpstreamModelId());
+        setIfNotBlank(config, "resource_id", body.getUpstreamModelId());
+        mergeConfigMap(config, body.getParams());
+        mergeConfigMap(config, body.getSecrets());
+        return config;
+    }
+
+    private void mergeConfigMap(JSONObject config, Map<String, Object> values) {
+        if (values == null || values.isEmpty()) {
+            return;
+        }
+        values.forEach((key, value) -> {
+            if (StringUtils.isNotBlank(key) && value != null) {
+                config.set(key, value);
+            }
+        });
+    }
+
+    private void setIfNotBlank(JSONObject config, String key, String value) {
+        if (StringUtils.isNotBlank(value)) {
+            config.set(key, value);
+        }
+    }
+
+    private List<ModelConfigEntity> attachRuntimeConfigs(List<ModelConfigEntity> models) {
+        if (models == null || models.isEmpty()) {
+            return models;
+        }
+        return models.stream().map(this::attachRuntimeConfig).toList();
+    }
+
+    private ModelConfigEntity attachRuntimeConfig(ModelConfigEntity model) {
+        if (model == null) {
+            return null;
+        }
+        model.setConfigJson(modelRuntimeAssembler.buildTypedConfig(model));
+        return model;
     }
 
     private void enrichCatalogInfo(ModelConfigDTO dto, ModelConfigEntity entity, ModelDisplayInfo displayInfo) {
@@ -805,14 +883,10 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
      * 检查意图识别配置是否有引用
      */
     private void checkIntentConfigReference(String modelId) {
-        ModelConfigEntity modelConfig = modelConfigDao.selectById(modelId);
+        ModelConfigEntity modelConfig = attachRuntimeConfig(modelConfigDao.selectById(modelId));
         if (modelConfig != null
                 && "LLM".equals(modelConfig.getModelType() == null ? null : modelConfig.getModelType().toUpperCase())) {
-            List<ModelConfigEntity> intentConfigs = modelConfigDao.selectList(
-                    new QueryWrapper<ModelConfigEntity>()
-                            .eq("model_type", "Intent")
-                            .like("config_json", modelId));
-            if (!intentConfigs.isEmpty()) {
+            if (modelRuntimeAssembler.hasRuntimeReference("Intent", modelId)) {
                 throw new RenException(ErrorCode.LLM_REFERENCED_BY_INTENT);
             }
         }
@@ -842,7 +916,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                         .eq("test_status", MODEL_TEST_PASSED)
                         .orderByAsc("sort"));
 
-        return entities;
+        return attachRuntimeConfigs(entities);
     }
 
     private ModelTestResultDTO doTestModel(ModelConfigEntity modelConfig) {
@@ -1018,7 +1092,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             result.setTestOutput(result.getMessage());
             return result;
         }
-        ModelConfigEntity llm = modelConfigDao.selectById(llmModelId);
+        ModelConfigEntity llm = attachRuntimeConfig(modelConfigDao.selectById(llmModelId));
         if (llm == null || llm.getTestStatus() == null || llm.getTestStatus() != MODEL_TEST_PASSED) {
             result.setSuccess(false);
             result.setMessage("关联 LLM 尚未测试通过");
@@ -1512,6 +1586,15 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     private String firstNonBlank(JSONObject configJson, String... fields) {
         for (String field : fields) {
             String value = configJson.getStr(field);
+            if (StringUtils.isNotBlank(value)) {
+                return value;
+            }
+        }
+        return "";
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
             if (StringUtils.isNotBlank(value)) {
                 return value;
             }

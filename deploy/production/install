@@ -12,6 +12,7 @@ DEFAULT_SERVER_IMAGE_REPOSITORY="crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.a
 DEFAULT_WEB_IMAGE_REPOSITORY="crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-web"
 DEFAULT_MYSQL_IMAGE="crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/mysql:8.4"
 DEFAULT_REDIS_IMAGE="crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/redis:8.0"
+DEFAULT_SERVER_HTTP_BASE_URL="http://xiaozhi-esp32-server:8003"
 
 read_existing_env() {
   local key="$1"
@@ -32,6 +33,15 @@ REDIS_IMAGE="${REDIS_IMAGE:-$(read_existing_env XIAOZHI_REDIS_IMAGE)}"
 REDIS_IMAGE="${REDIS_IMAGE:-$DEFAULT_REDIS_IMAGE}"
 MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-$(read_existing_env XIAOZHI_MYSQL_ROOT_PASSWORD)}"
 MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-123456}"
+SERVER_HTTP_BASE_URL="${XIAOZHI_SERVER_HTTP_BASE_URL:-${SERVER_HTTP_BASE_URL:-}}"
+SERVER_HTTP_BASE_URL="${SERVER_HTTP_BASE_URL:-$(read_existing_env XIAOZHI_SERVER_HTTP_BASE_URL)}"
+SERVER_HTTP_BASE_URL="${SERVER_HTTP_BASE_URL:-$DEFAULT_SERVER_HTTP_BASE_URL}"
+case "$SERVER_HTTP_BASE_URL" in
+  http://127.0.0.1:*|https://127.0.0.1:*|http://localhost:*|https://localhost:*)
+    echo "Replacing loopback XIAOZHI_SERVER_HTTP_BASE_URL with Docker service URL: $DEFAULT_SERVER_HTTP_BASE_URL" >&2
+    SERVER_HTTP_BASE_URL="$DEFAULT_SERVER_HTTP_BASE_URL"
+    ;;
+esac
 
 if [[ "$DEPLOY_MODE" != "pull" ]]; then
   echo "Only DEPLOY_MODE=pull is supported for production deployment." >&2
@@ -73,6 +83,7 @@ XIAOZHI_WEB_IMAGE_REPOSITORY=$WEB_IMAGE_REPOSITORY
 XIAOZHI_MYSQL_IMAGE=$MYSQL_IMAGE
 XIAOZHI_REDIS_IMAGE=$REDIS_IMAGE
 XIAOZHI_MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD
+XIAOZHI_SERVER_HTTP_BASE_URL=$SERVER_HTTP_BASE_URL
 EOF
 
 echo "Starting Docker services from $DATA_DIR"
@@ -85,6 +96,7 @@ Docker services submitted.
 manager-web/api:  http://$LOCAL_IP:8002
 websocket:        ws://$LOCAL_IP:8000/xiaozhi/v1/
 vision API:       http://$LOCAL_IP:8003/mcp/vision/explain
+benchmark API:    $SERVER_HTTP_BASE_URL/benchmark/models
 
 This deployment uses Docker images:
 

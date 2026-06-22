@@ -72,7 +72,7 @@ manager-web / manager-mobile
 
 ```text
 selected_module
-VAD / ASR / LLM / TTS / Memory / Intent / VLLM / SLM / RAG 配置
+model_config
 prompt
 summaryMemory
 plugins
@@ -81,6 +81,27 @@ context_providers
 voiceprint
 TTS 私有音色、语速、音量、语言
 ```
+
+模型配置的标准链路是：
+
+```text
+manager-web 模型配置弹窗
+  -> manager-api ModelConfigBodyDTO
+  -> ai_model_config 通用字段
+  -> ai_model_config_param 普通参数
+  -> ai_model_config_secret 密钥参数
+  -> ConfigServiceImpl / ModelRuntimeAssembler
+  -> selected_module + model_config
+  -> xiaozhi-server normalize_runtime_config()
+  -> provider typed_config
+```
+
+规则：
+
+- `selected_module` 只保存每类能力当前选择的模型 ID。
+- `model_config` 是后台到 Python 的唯一模型运行时契约。
+- `model_config.<modelId>.typed_config` 是 provider 初始化的唯一配置来源。
+- 后台模型配置以通用字段、参数表和密钥表为事实来源。
 
 ## 4. 实时语音链路
 

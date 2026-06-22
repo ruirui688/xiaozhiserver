@@ -7,6 +7,13 @@
         <result column="model_type" property="modelType"/>
         <result column="model_code" property="modelCode"/>
         <result column="model_name" property="modelName"/>
+        <result column="adapter_code" property="adapterCode"/>
+        <result column="template_code" property="templateCode"/>
+        <result column="vendor_name" property="vendorName"/>
+        <result column="product_name" property="productName"/>
+        <result column="protocol" property="protocol"/>
+        <result column="upstream_model_id" property="upstreamModelId"/>
+        <result column="endpoint_url" property="endpointUrl"/>
         <result column="is_default" property="isDefault"/>
         <result column="is_enabled" property="isEnabled"/>
         <result column="config_json" property="configJson" typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
@@ -28,6 +35,6 @@
     <select id="getTtsPlatformList" resultType="map">
         select id, model_name as modelName from ai_model_config
         where model_type = 'TTS'
-        and JSON_EXTRACT(config_json, '$.type') = 'huoshan_double_stream'
+        and adapter_code = 'huoshan_double_stream'
     </select>
 </mapper>

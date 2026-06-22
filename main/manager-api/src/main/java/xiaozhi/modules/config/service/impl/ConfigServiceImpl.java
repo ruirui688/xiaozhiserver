@@ -39,9 +39,8 @@ import xiaozhi.modules.config.service.ConfigService;
 import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.device.service.DeviceService;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
-import xiaozhi.modules.model.dto.ModelCatalogDTO;
-import xiaozhi.modules.model.service.ModelCatalogService;
 import xiaozhi.modules.model.service.ModelConfigService;
+import xiaozhi.modules.model.service.impl.ModelRuntimeAssembler;
 import xiaozhi.modules.sys.dto.SysParamsDTO;
 import xiaozhi.modules.sys.service.SysParamsService;
 import xiaozhi.modules.timbre.service.TimbreService;
@@ -55,7 +54,7 @@ public class ConfigServiceImpl implements ConfigService {
     private final SysParamsService sysParamsService;
     private final DeviceService deviceService;
     private final ModelConfigService modelConfigService;
-    private final ModelCatalogService modelCatalogService;
+    private final ModelRuntimeAssembler modelRuntimeAssembler;
     private final AgentService agentService;
     private final AgentTemplateService agentTemplateService;
     private final RedisUtils redisUtils;
@@ -437,7 +436,7 @@ public class ConfigServiceImpl implements ConfigService {
             Map<String, Object> result,
             boolean isCache) {
         Map<String, String> selectedModule = new HashMap<>();
-        Map<String, Object> modelConfigV2 = new HashMap<>();
+        Map<String, Object> modelConfig = new HashMap<>();
 
         String[] modelTypes = { "VAD", "ASR", "TTS", "Memory", "Intent", "LLM", "VLLM", "SLM", "RAG" };
         String[] modelIds = { vadModelId, asrModelId, ttsModelId, memModelId, intentModelId, llmModelId, vllmModelId,
@@ -502,30 +501,30 @@ public class ConfigServiceImpl implements ConfigService {
                         }
                     }
                 }
-                modelConfigV2.put(model.getId(), buildModelConfigV2(model, runtimeConfig));
+                modelConfig.put(model.getId(), buildModelConfig(model, runtimeConfig));
                 // 如果是LLM类型，且intentLLMModelId不为空，则添加附加模型
                 if ("LLM".equals(modelTypes[i])) {
                     if (StringUtils.isNotBlank(intentLLMModelId)) {
-                        if (!modelConfigV2.containsKey(intentLLMModelId)) {
+                        if (!modelConfig.containsKey(intentLLMModelId)) {
                             // 修改这里：添加isMaskSensitive=false参数
                             ModelConfigEntity intentLLM = modelConfigService.getModelByIdFromCache(intentLLMModelId);
-                            modelConfigV2.put(intentLLM.getId(), buildModelConfigV2(intentLLM));
+                            modelConfig.put(intentLLM.getId(), buildModelConfig(intentLLM));
                         }
                     }
                     if (StringUtils.isNotBlank(memLocalShortLLMModelId)) {
-                        if (!modelConfigV2.containsKey(memLocalShortLLMModelId)) {
+                        if (!modelConfig.containsKey(memLocalShortLLMModelId)) {
                             // 修改这里：添加isMaskSensitive=false参数
                             ModelConfigEntity memLocalShortLLM = modelConfigService
                                     .getModelByIdFromCache(memLocalShortLLMModelId);
-                            modelConfigV2.put(memLocalShortLLM.getId(), buildModelConfigV2(memLocalShortLLM));
+                            modelConfig.put(memLocalShortLLM.getId(), buildModelConfig(memLocalShortLLM));
                         }
                     }
                     // LLM也返回所选的SLM，如果同名id则不重复显示
                     if (StringUtils.isNotBlank(slmModelId) && !slmModelId.equals(llmModelId)) {
-                        if (!modelConfigV2.containsKey(slmModelId)) {
+                        if (!modelConfig.containsKey(slmModelId)) {
                             ModelConfigEntity slmModel = modelConfigService.getModelByIdFromCache(slmModelId);
                             if (slmModel != null && slmModel.getConfigJson() != null) {
-                                modelConfigV2.put(slmModel.getId(), buildModelConfigV2(slmModel));
+                                modelConfig.put(slmModel.getId(), buildModelConfig(slmModel));
                             }
                         }
                     }
@@ -536,7 +535,7 @@ public class ConfigServiceImpl implements ConfigService {
         }
 
         result.put("selected_module", selectedModule);
-        result.put("model_config_v2", modelConfigV2);
+        result.put("model_config", modelConfig);
         if (StringUtils.isNotBlank(prompt)) {
             prompt = prompt.replace("{{assistant_name}}", StringUtils.isBlank(assistantName) ? "小智" : assistantName);
         }
@@ -544,36 +543,20 @@ public class ConfigServiceImpl implements ConfigService {
         result.put("summaryMemory", summaryMemory);
     }
 
-    private Map<String, Object> buildModelConfigV2(ModelConfigEntity model) {
-        return buildModelConfigV2(model,
+    private Map<String, Object> buildModelConfig(ModelConfigEntity model) {
+        return buildModelConfig(model,
                 model == null || model.getConfigJson() == null ? null : new HashMap<>(model.getConfigJson()));
     }
 
-    private Map<String, Object> buildModelConfigV2(ModelConfigEntity model, Map<String, Object> runtimeConfig) {
-        Map<String, Object> v2 = new HashMap<>();
+    private Map<String, Object> buildModelConfig(ModelConfigEntity model, Map<String, Object> runtimeConfig) {
+        Map<String, Object> config = modelRuntimeAssembler.buildRuntimeModel(model);
         if (model == null) {
-            return v2;
+            return config;
         }
-        ModelCatalogDTO catalog = modelCatalogService.resolve(model);
-        v2.put("id", model.getId());
-        v2.put("model_type", model.getModelType());
-        v2.put("model_code", model.getModelCode());
-        v2.put("model_name", model.getModelName());
-        v2.put("typed_config", runtimeConfig == null ? Map.of() : runtimeConfig);
-        if (catalog != null) {
-            v2.put("template_code", catalog.getTemplateCode());
-            v2.put("provider_code", catalog.getProviderCode());
-            v2.put("vendor_name", catalog.getVendorName());
-            v2.put("product_name", catalog.getProductName());
-            v2.put("capability", catalog.getCapability());
-            v2.put("access_mode", catalog.getAccessMode());
-            v2.put("deployment", catalog.getDeployment());
-            v2.put("protocol", catalog.getProtocolLabel());
-            v2.put("required_fields", catalog.getRequiredFields());
-            v2.put("credential_fields", catalog.getCredentialFields());
-            v2.put("known_limitations", catalog.getKnownLimitations());
+        if (runtimeConfig != null) {
+            config.put("typed_config", runtimeConfig);
         }
-        return v2;
+        return config;
     }
 
     private ModelConfigEntity resolveUsableModel(String modelType, String modelId) {

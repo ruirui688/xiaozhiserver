@@ -28,6 +28,27 @@ public class ModelConfigEntity {
     @Schema(description = "模型名称")
     private String modelName;
 
+    @Schema(description = "运行时适配器编码")
+    private String adapterCode;
+
+    @Schema(description = "模板编码")
+    private String templateCode;
+
+    @Schema(description = "厂商名称")
+    private String vendorName;
+
+    @Schema(description = "产品/API名称")
+    private String productName;
+
+    @Schema(description = "协议编码")
+    private String protocol;
+
+    @Schema(description = "上游真实模型或资源ID")
+    private String upstreamModelId;
+
+    @Schema(description = "接口端点地址")
+    private String endpointUrl;
+
     @Schema(description = "是否默认配置(0否 1是)")
     private Integer isDefault;
 

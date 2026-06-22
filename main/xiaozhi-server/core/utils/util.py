@@ -11,6 +11,11 @@ import numpy as np
 import opuslib_next
 from io import BytesIO
 from core.utils import p3
+from core.utils.model_config import (
+    get_typed_config,
+    normalize_module_type,
+    normalize_selected_module,
+)
 from pydub import AudioSegment
 from typing import Callable, Any
 
@@ -422,40 +427,45 @@ def opus_datas_to_wav_bytes(opus_datas, sample_rate=16000, channels=1):
                 pass
 
 
+def _get_selected_module_type(config, module_type):
+    selected_module = normalize_selected_module(config)
+    normalized_module_type = normalize_module_type(module_type)
+    module_id = selected_module.get(normalized_module_type)
+    if not module_id:
+        return None, None
+
+    typed_config = get_typed_config(config, normalized_module_type, module_id)
+    if isinstance(typed_config, dict):
+        return module_id, typed_config.get("type") or module_id
+
+    module_configs = config.get(normalized_module_type) or config.get(module_type) or {}
+    module_config = module_configs.get(module_id) if isinstance(module_configs, dict) else None
+    if isinstance(module_config, dict):
+        return module_id, module_config.get("type") or module_id
+    return module_id, module_id
+
+
 def check_vad_update(before_config, new_config):
-    if (
-        new_config.get("selected_module") is None
-        or new_config["selected_module"].get("VAD") is None
-    ):
+    new_vad_module, new_vad_type = _get_selected_module_type(new_config, "VAD")
+    if new_vad_module is None:
         return False
-    update_vad = False
-    current_vad_module = before_config.get("selected_module", {}).get("VAD")
-    new_vad_module = new_config["selected_module"]["VAD"]
+
+    current_vad_module, current_vad_type = _get_selected_module_type(
+        before_config, "VAD"
+    )
     if current_vad_module is None:
         return True
-    current_vad_type = (
-        current_vad_module
-        if "type" not in before_config["VAD"][current_vad_module]
-        else before_config["VAD"][current_vad_module]["type"]
-    )
-    new_vad_type = (
-        new_vad_module
-        if "type" not in new_config["VAD"][new_vad_module]
-        else new_config["VAD"][new_vad_module]["type"]
-    )
-    update_vad = current_vad_type != new_vad_type
-    return update_vad
+    return current_vad_type != new_vad_type
 
 
 def check_asr_update(before_config, new_config):
-    if (
-        new_config.get("selected_module") is None
-        or new_config["selected_module"].get("ASR") is None
-    ):
+    new_asr_module, new_asr_type = _get_selected_module_type(new_config, "ASR")
+    if new_asr_module is None:
         return False
-    update_asr = False
-    current_asr_module = before_config.get("selected_module", {}).get("ASR")
-    new_asr_module = new_config["selected_module"]["ASR"]
+
+    current_asr_module, current_asr_type = _get_selected_module_type(
+        before_config, "ASR"
+    )
     if current_asr_module is None:
         return True
 
@@ -464,18 +474,7 @@ def check_asr_update(before_config, new_config):
         return True
 
     # 如果模块名称相同，再比较类型
-    current_asr_type = (
-        current_asr_module
-        if "type" not in before_config["ASR"][current_asr_module]
-        else before_config["ASR"][current_asr_module]["type"]
-    )
-    new_asr_type = (
-        new_asr_module
-        if "type" not in new_config["ASR"][new_asr_module]
-        else new_config["ASR"][new_asr_module]["type"]
-    )
-    update_asr = current_asr_type != new_asr_type
-    return update_asr
+    return current_asr_type != new_asr_type
 
 
 def filter_sensitive_info(config: dict) -> dict:

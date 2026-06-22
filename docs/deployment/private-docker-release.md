@@ -137,7 +137,13 @@ sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
 XIAOZHI_DEPLOY_MODE=pull
 XIAOZHI_SERVER_IMAGE_REPOSITORY=.../xiaozhi-server
 XIAOZHI_WEB_IMAGE_REPOSITORY=.../xiaozhi-web
+XIAOZHI_SERVER_HTTP_BASE_URL=http://xiaozhi-esp32-server:8003
 ```
+
+`XIAOZHI_SERVER_HTTP_BASE_URL` 是 manager-api 容器访问 Python
+`xiaozhi-server` HTTP/OTA/评测接口的 Docker 内网地址。生产 Docker 部署中
+不要配置成 `http://127.0.0.1:8003`，否则模型专业评测会从 manager-api
+容器访问自身的 8003 端口，无法调用到 Python 的 `/benchmark/models`。
 
 ## 升级
 

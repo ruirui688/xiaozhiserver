@@ -1,7 +1,7 @@
 from typing import Dict, Any
 from config.logger import setup_logging
 from core.utils import tts, llm, intent, memory, vad, asr
-from core.utils.model_config_v2 import get_runtime_config, get_runtime_type, has_runtime_config
+from core.utils.model_config import get_runtime_config, get_runtime_type, has_runtime_config
 
 TAG = __name__
 logger = setup_logging()

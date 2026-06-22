@@ -12,7 +12,9 @@
         {{
           modelData.duplicateMode
             ? $t("modelConfigDialog.duplicateModel")
-            : $t("modelConfigDialog.editModel")
+            : modelData.id
+              ? $t("modelConfigDialog.editModel")
+              : $t("modelConfigDialog.addModel")
         }}
       </div>
 
@@ -45,33 +47,50 @@
 
       <el-form :model="form" ref="form" label-width="auto" label-position="left" class="custom-form">
         <div style="display: flex; gap: 20px; margin-bottom: 0">
-          <el-form-item :label="$t('modelConfigDialog.modelName')" prop="name" style="flex: 1">
+          <el-form-item :label="$t('modelConfigDialog.configName')" prop="modelName" style="flex: 1">
             <el-input v-model="form.modelName" :placeholder="$t('modelConfigDialog.enterModelName')"
               class="custom-input-bg"></el-input>
           </el-form-item>
-          <el-form-item :label="$t('modelConfigDialog.modelCode')" prop="code" style="flex: 1">
+          <el-form-item :label="$t('modelConfigDialog.modelCode')" prop="modelCode" style="flex: 1">
             <el-input v-model="form.modelCode" :placeholder="$t('modelConfigDialog.enterModelCode')"
               class="custom-input-bg"></el-input>
           </el-form-item>
         </div>
 
         <div style="display: flex; gap: 20px; margin-bottom: 0">
-          <el-form-item :label="$t('modelConfigDialog.supplier')" prop="supplier" style="flex: 1">
-            <el-select v-model="form.configJson.type" :placeholder="$t('modelConfigDialog.selectSupplier')"
+          <el-form-item :label="$t('modelConfigDialog.adapterCode')" prop="adapterCode" style="flex: 1">
+            <el-select v-model="form.adapterCode" :placeholder="$t('modelConfigDialog.selectSupplier')"
               class="custom-select custom-input-bg" style="width: 100%" @focus="loadProviders" filterable>
               <el-option v-for="item in providers" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
           </el-form-item>
-          <el-form-item :label="$t('modelConfigDialog.sortOrder')" prop="sort" style="flex: 1">
-            <el-input v-model.number="form.sort" type="number" :placeholder="$t('modelConfigDialog.enterSortOrder')"
+          <el-form-item :label="$t('modelConfigDialog.protocol')" prop="protocol" style="flex: 1">
+            <el-input v-model="form.protocol" :placeholder="$t('modelConfigDialog.enterProtocol')"
               class="custom-input-bg"></el-input>
           </el-form-item>
         </div>
 
-        <el-form-item :label="$t('modelConfigDialog.docLink')" prop="docUrl" style="margin-bottom: 27px">
-          <el-input v-model="form.docLink" :placeholder="$t('modelConfigDialog.enterDocLink')"
-            class="custom-input-bg"></el-input>
-        </el-form-item>
+        <div style="display: flex; gap: 20px; margin-bottom: 0">
+          <el-form-item :label="$t('modelConfigDialog.upstreamModel')" prop="upstreamModelId" style="flex: 1">
+            <el-input v-model="form.upstreamModelId" :placeholder="$t('modelConfigDialog.enterUpstreamModel')"
+              class="custom-input-bg"></el-input>
+          </el-form-item>
+          <el-form-item :label="$t('modelConfigDialog.endpointUrl')" prop="endpointUrl" style="flex: 1">
+            <el-input v-model="form.endpointUrl" :placeholder="$t('modelConfigDialog.enterEndpointUrl')"
+              class="custom-input-bg"></el-input>
+          </el-form-item>
+        </div>
+
+        <div style="display: flex; gap: 20px; margin-bottom: 0">
+          <el-form-item :label="$t('modelConfigDialog.sortOrder')" prop="sort" style="flex: 1">
+            <el-input v-model.number="form.sort" type="number" :placeholder="$t('modelConfigDialog.enterSortOrder')"
+              class="custom-input-bg"></el-input>
+          </el-form-item>
+          <el-form-item :label="$t('modelConfigDialog.docLink')" prop="docUrl" style="flex: 1">
+            <el-input v-model="form.docLink" :placeholder="$t('modelConfigDialog.enterDocLink')"
+              class="custom-input-bg"></el-input>
+          </el-form-item>
+        </div>
 
         <el-form-item :label="$t('modelConfigDialog.remark')" prop="remark" class="prop-remark">
           <el-input v-model="form.remark" type="textarea" :rows="3" :placeholder="$t('modelConfigDialog.enterRemark')"
@@ -84,7 +103,7 @@
       </div>
       <div style="height: 2px; background: #e9e9e9; margin-bottom: 22px"></div>
 
-      <el-form :model="form.configJson" ref="callInfoForm" label-width="auto" class="custom-form">
+      <el-form :model="form" ref="callInfoForm" label-width="auto" class="custom-form">
         <template v-for="(row, rowIndex) in chunkedCallInfoFields">
           <div :key="rowIndex" style="display: flex; gap: 20px; margin-bottom: 0">
             <el-form-item v-for="field in row" :key="field.prop" :label="field.label" :prop="field.prop"
@@ -92,17 +111,17 @@
               <template v-if="field.type === 'json-textarea'">
                 <el-input v-model="fieldJsonMap[field.prop]" type="textarea" :rows="3"
                   :placeholder="$t('modelConfigDialog.enterJsonExample')" class="custom-input-bg"
-                  @change="(val) => handleJsonChange(field.prop, val)"></el-input>
+                  @change="(val) => handleJsonChange(field, val)"></el-input>
               </template>
 
-              <el-select v-else-if="field.type === 'select'" v-model="form.configJson[field.prop]"
+              <el-select v-else-if="field.type === 'select'" v-model="form[field.target][field.prop]"
                 :placeholder="field.placeholder" class="custom-select custom-input-bg" style="width: 100%">
                 <el-option v-for="option in field.options" :key="option.value" :label="option.label"
                   :value="option.value" />
               </el-select>
 
-              <el-input v-else v-model="form.configJson[field.prop]" :placeholder="field.placeholder" type="text"
-                class="custom-input-bg"></el-input>
+              <el-input v-else v-model="form[field.target][field.prop]" :placeholder="field.placeholder"
+                :type="field.type === 'password' ? 'password' : 'text'" class="custom-input-bg" show-password></el-input>
             </el-form-item>
           </div>
         </template>
@@ -157,12 +176,20 @@ export default {
         modelType: "",
         modelCode: "",
         modelName: "",
+        adapterCode: "",
+        templateCode: "",
+        vendorName: "",
+        productName: "",
+        protocol: "",
+        upstreamModelId: "",
+        endpointUrl: "",
         isDefault: false,
         isEnabled: false,
         docLink: "",
         remark: "",
         sort: 0,
-        configJson: {},
+        params: {},
+        secrets: {},
       },
     };
   },
@@ -195,7 +222,7 @@ export default {
         this.loadProviders();
       }
     },
-    "form.configJson.type"(newVal) {
+    "form.adapterCode"(newVal) {
       if (newVal && this.providersLoaded) {
         this.loadProviderFields(newVal);
       }
@@ -208,12 +235,20 @@ export default {
         modelType: "",
         modelCode: "",
         modelName: "",
+        adapterCode: "",
+        templateCode: "",
+        vendorName: "",
+        productName: "",
+        protocol: "",
+        upstreamModelId: "",
+        endpointUrl: "",
         isDefault: false,
         isEnabled: false,
         docLink: "",
         remark: "",
         sort: 0,
-        configJson: {},
+        params: {},
+        secrets: {},
       };
       this.fieldJsonMap = {};
       this.testing = false;
@@ -236,11 +271,11 @@ export default {
                 this.modelData.modelCode + this.$t("modelConfigDialog.copySuffix");
 
             }
-            this.pendingProviderType = model.configJson.type;
+            this.pendingProviderType = model.adapterCode || model.providerCode;
             this.pendingModelData = model;
 
             if (this.providersLoaded) {
-              this.loadProviderFields(model.configJson.type);
+              this.loadProviderFields(this.pendingProviderType);
             } else {
               this.loadProviders();
             }
@@ -254,7 +289,7 @@ export default {
       const formData = this.buildFormData();
 
       this.$emit("save", {
-        provideCode: this.form.configJson.type,
+        provideCode: this.form.adapterCode,
         formData,
         done: () => {
           this.saving = false; // 保存完成后回调
@@ -271,7 +306,7 @@ export default {
       const formData = this.buildFormData();
 
       this.$emit("test", {
-        provideCode: this.form.configJson.type,
+        provideCode: this.form.adapterCode,
         formData,
         done: () => {
           this.testing = false;
@@ -286,22 +321,32 @@ export default {
       Object.keys(this.fieldJsonMap).forEach((key) => {
         const parsed = this.validateJson(this.fieldJsonMap[key]);
         if (parsed !== null) {
-          this.form.configJson[key] = parsed;
+          const field = this.dynamicCallInfoFields.find((item) => item.prop === key);
+          const target = field ? field.target : "params";
+          this.$set(this.form[target], key, parsed);
         }
       });
-
-      const configJson = this.normalizeDeepSeekConfig({ ...this.form.configJson });
 
       return {
         id: this.modelData.id,
         modelCode: this.form.modelCode,
         modelName: this.form.modelName,
+        displayName: this.form.modelName,
+        adapterCode: this.form.adapterCode,
+        providerCode: this.form.adapterCode,
+        templateCode: this.form.templateCode,
+        vendorName: this.form.vendorName,
+        productName: this.form.productName,
+        protocol: this.form.protocol,
+        upstreamModelId: this.form.upstreamModelId,
+        endpointUrl: this.form.endpointUrl,
+        params: { ...this.form.params },
+        secrets: { ...this.form.secrets },
         isDefault: this.form.isDefault ? 1 : 0,
         isEnabled: this.form.isEnabled ? 1 : 0,
         docLink: this.form.docLink,
         remark: this.form.remark,
         sort: this.form.sort || 0,
-        configJson,
       };
     },
     loadProviders(done) {
@@ -330,17 +375,12 @@ export default {
           (p) => p.providerCode === providerCode
         );
         if (provider) {
-          const sourceConfig =
-            (this.pendingModelData && this.pendingModelData.configJson) ||
-            this.form.configJson ||
-            {};
-          const providerFields = this.isDeepSeekModelConfig(sourceConfig)
-            ? this.getDeepSeekCallInfoFields()
-            : JSON.parse(provider.fields || "[]");
+          const providerFields = JSON.parse(provider.fields || "[]");
 
-          this.dynamicCallInfoFields = providerFields.map((f) => ({
+          this.dynamicCallInfoFields = providerFields.filter((f) => !this.isMetadataField(f.key)).map((f) => ({
             label: f.label,
             prop: f.key,
+            target: this.getFieldTarget(f),
             type:
               f.type === "dict"
                 ? "json-textarea"
@@ -361,20 +401,64 @@ export default {
         }
       }
     },
+    getFieldTarget(field) {
+      if (field.type === "password" || this.isSecretField(field.key)) {
+        return "secrets";
+      }
+      return "params";
+    },
+    isMetadataField(key) {
+      return [
+        "type",
+        "base_url",
+        "api_url",
+        "url",
+        "host",
+        "model_name",
+        "model",
+        "resource_id",
+        "voice",
+        "protocol",
+      ].includes(key);
+    },
+    isSecretField(key) {
+      return [
+        "api_key",
+        "api_password",
+        "access_token",
+        "token",
+        "secret_key",
+        "api_secret",
+        "access_key_secret",
+        "personal_access_token",
+      ].includes(key);
+    },
+    normalizeDynamicFieldValue(value, field) {
+      if (value === undefined || value === null) {
+        return field.type === "json-textarea" ? {} : "";
+      }
+      if (field.type === "json-textarea") {
+        return this.ensureObject(value);
+      }
+      if (typeof value !== "string") {
+        return String(value);
+      }
+      return value;
+    },
     processModelData(model) {
-      let configJson = this.normalizeDeepSeekConfig(model.configJson || {});
+      const params = { ...(model.params || {}) };
+      const secrets = { ...(model.secrets || {}) };
       this.dynamicCallInfoFields.forEach((field) => {
-        if (!configJson.hasOwnProperty(field.prop)) {
-          configJson[field.prop] = "";
-        } else if (field.type === "json-textarea") {
-          this.$set(
-            this.fieldJsonMap,
-            field.prop,
-            this.formatJson(configJson[field.prop])
-          );
-          configJson[field.prop] = this.ensureObject(configJson[field.prop]);
-        } else if (typeof configJson[field.prop] !== "string") {
-          configJson[field.prop] = String(configJson[field.prop]);
+        const target = field.target || "params";
+        const source = target === "secrets" ? secrets : params;
+        const value = this.normalizeDynamicFieldValue(source[field.prop], field);
+        if (field.type === "json-textarea") {
+          this.$set(this.fieldJsonMap, field.prop, this.formatJson(value));
+        }
+        if (target === "secrets") {
+          secrets[field.prop] = value;
+        } else {
+          params[field.prop] = value;
         }
       });
 
@@ -383,26 +467,55 @@ export default {
         modelType: model.modelType,
         modelCode: model.modelCode,
         modelName: model.modelName,
+        adapterCode: model.adapterCode || model.providerCode || "",
+        templateCode: model.templateCode || "",
+        vendorName: model.vendorName || "",
+        productName: model.productName || "",
+        protocol: model.protocol || "",
+        upstreamModelId: model.upstreamModelId || "",
+        endpointUrl: model.endpointUrl || "",
         isDefault: model.isDefault,
         isEnabled: model.isEnabled,
         docLink: model.docLink,
         remark: model.remark,
         sort: Number(model.sort) || 0,
-        configJson: { ...configJson },
+        params,
+        secrets,
       };
     },
     applyAssistantDraft(payload = {}) {
       const draft = payload.configJson || {};
-      const providerCode = payload.providerCode || draft.type || this.form.configJson.type || "";
+      const providerCode =
+        payload.adapterCode || payload.providerCode || draft.type || this.form.adapterCode || "";
       const apply = () => {
         const model = {
           ...this.form,
+          adapterCode: providerCode,
+          providerCode,
+          protocol: payload.protocol || draft.protocol || this.form.protocol,
+          upstreamModelId:
+            payload.upstreamModelId ||
+            draft.model_name ||
+            draft.model ||
+            draft.resource_id ||
+            draft.voice ||
+            this.form.upstreamModelId,
+          endpointUrl:
+            payload.endpointUrl ||
+            draft.base_url ||
+            draft.api_url ||
+            draft.url ||
+            draft.host ||
+            this.form.endpointUrl,
           docLink: payload.docLink || this.form.docLink,
           remark: payload.remark || this.form.remark,
-          configJson: {
-            ...this.form.configJson,
-            ...draft,
-            type: providerCode,
+          params: {
+            ...this.form.params,
+            ...this.extractDraftParams(draft),
+          },
+          secrets: {
+            ...this.form.secrets,
+            ...this.extractDraftSecrets(draft),
           },
         };
         this.pendingProviderType = providerCode;
@@ -411,79 +524,28 @@ export default {
       };
       this.loadProviders(apply);
     },
-    isDeepSeekModelConfig(configJson = {}) {
-      const baseUrl = String(configJson.base_url || configJson.url || "").toLowerCase();
-      const modelName = String(configJson.model_name || "").toLowerCase();
-      const modelCode = String(this.form.modelCode || this.modelData.modelCode || "").toLowerCase();
-      return (
-        baseUrl.includes("api.deepseek.com") ||
-        modelName.includes("deepseek") ||
-        modelCode.includes("deepseek")
-      );
-    },
-    getDeepSeekCallInfoFields() {
-      return [
-        { key: "base_url", label: "基础URL", type: "string" },
-        { key: "model_name", label: "模型名称", type: "string" },
-        { key: "api_key", label: "API密钥", type: "password" },
-        {
-          key: "thinking",
-          label: "思考模式",
-          type: "select",
-          options: [
-            { label: "非思考模式", value: "disabled" },
-            { label: "思考模式", value: "enabled" },
-          ],
-        },
-        {
-          key: "reasoning_effort",
-          label: "思考强度",
-          type: "select",
-          options: [
-            { label: "高", value: "high" },
-            { label: "最高", value: "max" },
-          ],
-        },
-      ];
-    },
-    normalizeDeepSeekConfig(configJson) {
-      if (!this.isDeepSeekModelConfig(configJson)) {
-        return configJson;
-      }
-
-      const normalized = { ...configJson };
-      normalized.type = "openai";
-      normalized.base_url = normalized.base_url || normalized.url || "https://api.deepseek.com";
-      delete normalized.url;
-
-      const modelName = String(normalized.model_name || "").toLowerCase();
-      if (!modelName || ["deepseek-chat", "deepseek-reasoner"].includes(modelName)) {
-        normalized.model_name = "deepseek-v4-flash";
-      }
-
-      if (normalized.thinking && typeof normalized.thinking === "object") {
-        normalized.thinking = normalized.thinking.type;
-      }
-      normalized.thinking = normalized.thinking || "disabled";
-      normalized.reasoning_effort = normalized.reasoning_effort || "high";
-
-      [
-        "temperature",
-        "max_tokens",
-        "top_p",
-        "top_k",
-        "frequency_penalty",
-        "presence_penalty",
-      ].forEach((key) => {
-        delete normalized[key];
+    extractDraftParams(draft = {}) {
+      const params = {};
+      Object.keys(draft).forEach((key) => {
+        if (!this.isMetadataField(key) && !this.isSecretField(key)) {
+          params[key] = draft[key];
+        }
       });
-
-      return normalized;
+      return params;
+    },
+    extractDraftSecrets(draft = {}) {
+      const secrets = {};
+      Object.keys(draft).forEach((key) => {
+        if (this.isSecretField(key)) {
+          secrets[key] = draft[key];
+        }
+      });
+      return secrets;
     },
     handleJsonChange(field, value) {
       const parsed = this.validateJson(value);
       if (parsed !== null) {
-        this.form.configJson[field] = parsed;
+        this.$set(this.form[field.target], field.prop, parsed);
       }
     },
     validateJson(value) {

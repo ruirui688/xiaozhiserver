@@ -11,7 +11,7 @@ from config.manage_api_client import (
     DeviceNotFoundException,
     DeviceBindException,
 )
-from core.utils.model_config_v2 import apply_legacy_runtime_view
+from core.utils.model_config import apply_legacy_runtime_view
 
 
 def get_project_dir():

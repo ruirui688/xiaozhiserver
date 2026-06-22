@@ -89,13 +89,28 @@
                 align="center"
               ></el-table-column>
               <el-table-column
-                :label="$t('modelConfig.modelName')"
+                :label="$t('modelConfig.configName')"
                 prop="modelName"
                 align="center"
               ></el-table-column>
-              <el-table-column :label="$t('modelConfig.provider')" align="center">
+              <el-table-column :label="$t('modelConfig.upstreamModel')" align="center">
                 <template slot-scope="scope">
-                  {{ scope.row.configJson.type || $t("modelConfig.unknown") }}
+                  {{ getUpstreamModel(scope.row) }}
+                </template>
+              </el-table-column>
+              <el-table-column :label="$t('modelConfig.adapter')" align="center">
+                <template slot-scope="scope">
+                  {{ getAdapterName(scope.row) }}
+                </template>
+              </el-table-column>
+              <el-table-column :label="$t('modelConfig.protocol')" align="center">
+                <template slot-scope="scope">
+                  {{ displayValue(scope.row.protocol || scope.row.protocolLabel) }}
+                </template>
+              </el-table-column>
+              <el-table-column :label="$t('modelConfig.vendorProduct')" align="center">
+                <template slot-scope="scope">
+                  {{ getVendorProduct(scope.row) }}
                 </template>
               </el-table-column>
               <el-table-column :label="$t('modelConfig.isEnabled')" align="center">
@@ -297,12 +312,6 @@
         :ttsModelId="selectedTtsModelId"
         :modelConfig="selectedModelConfig"
       />
-      <AddModelDialog
-        ref="addModelDialog"
-        :modelType="activeTab"
-        :visible.sync="addDialogVisible"
-        @confirm="handleAddConfirm"
-      />
       <el-dialog
         :title="$t('modelConfig.testDetailTitle')"
         :visible.sync="testResultDialogVisible"
@@ -362,7 +371,6 @@
 
 <script>
 import Api from "@/apis/api";
-import AddModelDialog from "@/components/AddModelDialog.vue";
 import HeaderBar from "@/components/HeaderBar.vue";
 import ModelBenchmarkDialog from "@/components/ModelBenchmarkDialog.vue";
 import ModelConfigAssistant from "@/components/ModelConfigAssistant.vue";
@@ -377,12 +385,10 @@ export default {
     ModelEditDialog,
     ModelConfigAssistant,
     TtsModel,
-    AddModelDialog,
     VersionFooter,
   },
   data() {
     return {
-      addDialogVisible: false,
       activeTab: "llm",
       search: "",
       editDialogVisible: false,
@@ -451,16 +457,34 @@ export default {
     },
     assistantContext() {
       const target = this.assistantTarget || {};
-      const configJson = target.configJson || {};
+      const params = target.params || {};
+      const secrets = target.secrets || {};
       return {
         modelType: this.activeTab.toUpperCase(),
         modelId: target.id || "",
         modelName: target.modelName || "",
-        providerCode: target.providerCode || target.providerType || configJson.type || "",
-        configJson,
+        providerCode:
+          target.adapterCode ||
+          target.providerCode ||
+          target.providerType ||
+          "",
+        adapterCode: target.adapterCode || target.providerCode || "",
+        protocol: target.protocol || "",
+        upstreamModelId: this.getUpstreamModel(target, ""),
+        endpointUrl: target.endpointUrl || target.endpointSummary || "",
+        params,
+        secrets,
+        configJson: {
+          ...params,
+          ...secrets,
+          type: target.adapterCode || target.providerCode || "",
+          protocol: target.protocol || "",
+          model_name: target.upstreamModelId || "",
+          base_url: target.endpointUrl || "",
+        },
         docLink: target.docLink || "",
         testMessage: target.testMessage || "",
-        pageContext: this.editDialogVisible ? "edit" : this.addDialogVisible ? "add" : "list",
+        pageContext: this.editDialogVisible ? "edit" : "list",
       };
     },
   },
@@ -556,9 +580,15 @@ export default {
     addModel() {
       this.assistantTarget = {
         modelType: this.activeTab.toUpperCase(),
-        configJson: {},
+        adapterCode: "",
+        protocol: "",
+        upstreamModelId: "",
+        endpointUrl: "",
+        params: {},
+        secrets: {},
       };
-      this.addDialogVisible = true;
+      this.editModelData = {};
+      this.editDialogVisible = true;
     },
     editModel(model) {
       this.assistantTarget = JSON.parse(JSON.stringify(model || {}));
@@ -622,6 +652,45 @@ export default {
       } catch (e) {
         return output;
       }
+    },
+    displayValue(value, fallback = this.$t("modelConfig.unknown")) {
+      if (value === null || value === undefined || value === "") {
+        return fallback;
+      }
+      return value;
+    },
+    getConfigValue(model, keys = []) {
+      const config = {
+        ...((model && model.params) || {}),
+        ...((model && model.secrets) || {}),
+      };
+      for (const key of keys) {
+        if (config[key] !== null && config[key] !== undefined && config[key] !== "") {
+          return config[key];
+        }
+      }
+      return "";
+    },
+    getUpstreamModel(model, fallback = this.$t("modelConfig.unknown")) {
+      return this.displayValue(
+        (model && model.upstreamModelId) ||
+          this.getConfigValue(model, ["model_name", "model", "resource_id", "voice", "speaker"]),
+        fallback
+      );
+    },
+    getAdapterName(model) {
+      return this.displayValue(
+        (model && (model.adapterLabel || model.adapterCode || model.providerCode)) ||
+          this.getConfigValue(model, ["type"])
+      );
+    },
+    getVendorProduct(model) {
+      const vendor = (model && (model.vendorName || model.platformName)) || "";
+      const product = (model && model.productName) || "";
+      if (vendor && product) {
+        return `${vendor} / ${product}`;
+      }
+      return this.displayValue(vendor || product);
     },
     handleTestModelResponse(data) {
       const result = data.data || {
@@ -693,21 +762,31 @@ export default {
     handleModelSave({ provideCode, formData, done }) {
       const modelType = this.activeTab;
       const id = formData.id;
+      const adapterCode = provideCode || formData.adapterCode || formData.providerCode;
 
-      if (this.editModelData.duplicateMode) {
+      if (this.editModelData.duplicateMode || !id) {
         formData.id = "";
-        Api.model.addModel({ modelType, provideCode, formData }, ({ data }) => {
+        Api.model.addModel({ modelType, provideCode: adapterCode, formData }, ({ data }) => {
           if (data.code === 0) {
-            this.$message.success(this.$t("modelConfig.duplicateSuccess"));
+            this.$message.success(
+              this.editModelData.duplicateMode
+                ? this.$t("modelConfig.duplicateSuccess")
+                : this.$t("modelConfig.addSuccess")
+            );
             this.loadData();
             this.editDialogVisible = false;
           } else {
-            this.$message.error(data.msg || this.$t("modelConfig.duplicateFailed"));
+            this.$message.error(
+              data.msg ||
+                (this.editModelData.duplicateMode
+                  ? this.$t("modelConfig.duplicateFailed")
+                  : this.$t("modelConfig.addFailed"))
+            );
           }
           done && done(); // 调用done回调关闭加载状态
         });
       } else {
-        Api.model.updateModel({ modelType, provideCode, id, formData }, ({ data }) => {
+        Api.model.updateModel({ modelType, provideCode: adapterCode, id, formData }, ({ data }) => {
           if (data.code === 0) {
             this.$message.success(this.$t("modelConfig.saveSuccess"));
             this.loadData();
@@ -721,6 +800,7 @@ export default {
     },
     handleModelSaveAndTest({ provideCode, formData, done }) {
       const modelType = this.activeTab;
+      const adapterCode = provideCode || formData.adapterCode || formData.providerCode;
       const testSavedModel = (id) => {
         if (!id) {
           this.clearTestingModelState();
@@ -743,20 +823,25 @@ export default {
         });
       };
 
-      if (this.editModelData.duplicateMode) {
+      if (this.editModelData.duplicateMode || !formData.id) {
         formData.id = "";
-        Api.model.addModel({ modelType, provideCode, formData }, ({ data }) => {
+        Api.model.addModel({ modelType, provideCode: adapterCode, formData }, ({ data }) => {
           if (data.code === 0) {
             testSavedModel(data.data?.id);
           } else {
-            this.$message.error(data.msg || this.$t("modelConfig.duplicateFailed"));
+            this.$message.error(
+              data.msg ||
+                (this.editModelData.duplicateMode
+                  ? this.$t("modelConfig.duplicateFailed")
+                  : this.$t("modelConfig.addFailed"))
+            );
             done && done();
           }
         });
         return;
       }
 
-      Api.model.updateModel({ modelType, provideCode, id: formData.id, formData }, ({ data }) => {
+      Api.model.updateModel({ modelType, provideCode: adapterCode, id: formData.id, formData }, ({ data }) => {
         if (data.code === 0) {
           testSavedModel(formData.id);
         } else {
@@ -780,34 +865,6 @@ export default {
       }
     },
 
-    // 新增模型配置
-    handleAddConfirm(newModel) {
-      const params = {
-        modelType: this.activeTab,
-        provideCode: newModel.provideCode,
-        formData: {
-          ...newModel,
-          isDefault: newModel.isDefault ? 1 : 0,
-          isEnabled: newModel.isEnabled ? 1 : 0,
-          configJson: newModel.configJson,
-        },
-      };
-
-      Api.model.addModel(params, ({ data }) => {
-        if (data.code === 0) {
-          this.$message.success({
-            message: this.$t("modelConfig.addSuccess"),
-            showClose: true,
-          });
-          this.loadData();
-        } else {
-          this.$message.error({
-            message: data.msg || this.$t("modelConfig.addFailed"),
-            showClose: true,
-          });
-        }
-      });
-    },
     toggleAssistant() {
       this.assistantVisible = !this.assistantVisible;
     },
@@ -818,10 +875,33 @@ export default {
         return;
       }
       const target = this.assistantTarget || {};
-      const providerCode = response.matchedAdapter || draft.type || target.providerCode || target.configJson?.type || "";
+      const providerCode =
+        response.matchedAdapter ||
+        draft.type ||
+        target.adapterCode ||
+        target.providerCode ||
+        "";
       const payload = {
         providerCode,
+        adapterCode: providerCode,
+        upstreamModelId:
+          draft.model_name ||
+          draft.model ||
+          draft.resource_id ||
+          draft.voice ||
+          target.upstreamModelId ||
+          "",
+        endpointUrl:
+          draft.base_url ||
+          draft.api_url ||
+          draft.url ||
+          draft.host ||
+          target.endpointUrl ||
+          "",
+        protocol: draft.protocol || target.protocol || "",
         configJson: { ...draft, type: providerCode || draft.type },
+        params: target.params || {},
+        secrets: target.secrets || {},
         docLink: target.docLink || "",
         remark: target.remark || "",
       };
@@ -832,13 +912,13 @@ export default {
         return;
       }
 
-      if (!this.addDialogVisible) {
+      if (!this.editDialogVisible) {
         this.addModel();
       }
       this.pendingAssistantDraft = payload;
       this.$nextTick(() => {
-        if (this.$refs.addModelDialog) {
-          this.$refs.addModelDialog.applyAssistantDraft(this.pendingAssistantDraft);
+        if (this.$refs.editModelDialog) {
+          this.$refs.editModelDialog.applyAssistantDraft(this.pendingAssistantDraft);
           this.pendingAssistantDraft = null;
           this.$message.success(this.$t("modelConfigAssistant.draftApplied"));
         }

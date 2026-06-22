@@ -1,6 +1,42 @@
 import { getServiceUrl } from '../api';
 import RequestService from '../httpRequest';
 
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && value !== '') {
+      return value;
+    }
+  }
+  return '';
+}
+
+function buildModelPayload(formData = {}, provideCode = '') {
+  const params = { ...(formData.params || {}) };
+  const secrets = { ...(formData.secrets || {}) };
+
+  return {
+    id: formData.id,
+    modelCode: formData.modelCode,
+    modelName: formData.modelName || formData.displayName,
+    displayName: formData.displayName || formData.modelName,
+    adapterCode: firstNonEmpty(formData.adapterCode, formData.providerCode, provideCode),
+    providerCode: firstNonEmpty(formData.providerCode, formData.adapterCode, provideCode),
+    templateCode: formData.templateCode,
+    vendorName: formData.vendorName,
+    productName: formData.productName,
+    protocol: firstNonEmpty(formData.protocol),
+    upstreamModelId: firstNonEmpty(formData.upstreamModelId),
+    endpointUrl: firstNonEmpty(formData.endpointUrl),
+    params,
+    secrets,
+    isDefault: formData.isDefault ? 1 : 0,
+    isEnabled: formData.isEnabled ? 1 : 0,
+    docLink: formData.docLink,
+    remark: formData.remark,
+    sort: formData.sort || 0
+  };
+}
+
 export default {
   // 获取模型配置列表
   getModelList(params, callback) {
@@ -46,20 +82,10 @@ export default {
   // 新增模型配置
   addModel(params, callback) {
     const { modelType, provideCode, formData } = params;
-    const postData = {
-      id: formData.id,
-      modelCode: formData.modelCode,
-      modelName: formData.modelName,
-      isDefault: formData.isDefault ? 1 : 0,
-      isEnabled: formData.isEnabled ? 1 : 0,
-      configJson: formData.configJson,
-      docLink: formData.docLink,
-      remark: formData.remark,
-      sort: formData.sort || 0
-    };
+    const postData = buildModelPayload(formData, provideCode);
 
     RequestService.sendRequest()
-      .url(`${getServiceUrl()}/models/${modelType}/${provideCode}`)
+      .url(`${getServiceUrl()}/models/${modelType}/${postData.adapterCode || provideCode}`)
       .method('POST')
       .data(postData)
       .success((res) => {
@@ -307,12 +333,9 @@ export default {
   // 更新模型配置
   updateModel(params, callback) {
     const { modelType, provideCode, id, formData } = params;
-    const payload = {
-      ...formData,
-      configJson: formData.configJson
-    };
+    const payload = buildModelPayload(formData, provideCode);
     RequestService.sendRequest()
-      .url(`${getServiceUrl()}/models/${modelType}/${provideCode}/${id}`)
+      .url(`${getServiceUrl()}/models/${modelType}/${payload.adapterCode || provideCode}/${id}`)
       .method('PUT')
       .data(payload)
       .success((res) => {
@@ -451,7 +474,7 @@ export default {
         })
       }).send()
   },
-  // 获取 v2 模型目录
+  // 获取标准模型目录
   getModelCatalog(params, callback) {
     const queryParams = new URLSearchParams();
     if (params.modelType) queryParams.append('modelType', params.modelType);
@@ -461,7 +484,7 @@ export default {
     if (params.capability) queryParams.append('capability', params.capability);
 
     RequestService.sendRequest()
-      .url(`${getServiceUrl()}/models/v2/catalog?${queryParams.toString()}`)
+      .url(`${getServiceUrl()}/models/catalog?${queryParams.toString()}`)
       .method('GET')
       .success((res) => {
         RequestService.clearRequestTime()
@@ -472,17 +495,17 @@ export default {
         callback(res)
       })
       .networkFail((err) => {
-        console.error('获取 v2 模型目录失败:', err)
+        console.error('获取标准模型目录失败:', err)
         RequestService.clearRequestTime()
         callback({
           data: {
             code: -1,
-            msg: err?.msg || '获取 v2 模型目录失败'
+            msg: err?.msg || '获取标准模型目录失败'
           }
         })
       }).send()
   },
-  // 获取 v2 模型模板
+  // 获取标准模型模板
   getModelTemplates(params, callback) {
     const queryParams = new URLSearchParams();
     if (params.modelType) queryParams.append('modelType', params.modelType);
@@ -490,7 +513,7 @@ export default {
     if (params.provider) queryParams.append('providerCode', params.provider);
 
     RequestService.sendRequest()
-      .url(`${getServiceUrl()}/models/v2/templates?${queryParams.toString()}`)
+      .url(`${getServiceUrl()}/models/templates?${queryParams.toString()}`)
       .method('GET')
       .success((res) => {
         RequestService.clearRequestTime()
@@ -501,22 +524,22 @@ export default {
         callback(res)
       })
       .networkFail((err) => {
-        console.error('获取 v2 模型模板失败:', err)
+        console.error('获取标准模型模板失败:', err)
         RequestService.clearRequestTime()
         callback({
           data: {
             code: -1,
-            msg: err?.msg || '获取 v2 模型模板失败'
+            msg: err?.msg || '获取标准模型模板失败'
           }
         })
       }).send()
   },
-  // 预览 v2 模型迁移
+  // 预览模型配置标准化结果
   previewModelMigration(params, callback) {
     const queryParams = new URLSearchParams();
     if (params.modelType) queryParams.append('modelType', params.modelType);
     RequestService.sendRequest()
-      .url(`${getServiceUrl()}/models/v2/migrate/preview?${queryParams.toString()}`)
+      .url(`${getServiceUrl()}/models/migration/preview?${queryParams.toString()}`)
       .method('POST')
       .data(params)
       .timeout(60000)

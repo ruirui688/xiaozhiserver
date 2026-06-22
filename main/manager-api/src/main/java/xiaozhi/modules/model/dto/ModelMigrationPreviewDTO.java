@@ -8,22 +8,22 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
 @Data
-@Schema(description = "模型配置 v2 迁移预览")
+@Schema(description = "模型配置标准化预览")
 public class ModelMigrationPreviewDTO implements Serializable {
 
     @Serial
     private static final long serialVersionUID = 1L;
 
-    @Schema(description = "旧配置ID")
+    @Schema(description = "配置ID")
     private String id;
 
-    @Schema(description = "旧配置名称")
+    @Schema(description = "配置名称")
     private String modelName;
 
     @Schema(description = "模型类型")
     private String modelType;
 
-    @Schema(description = "旧适配器编码")
+    @Schema(description = "适配器编码")
     private String providerCode;
 
     @Schema(description = "匹配到的模板编码")
