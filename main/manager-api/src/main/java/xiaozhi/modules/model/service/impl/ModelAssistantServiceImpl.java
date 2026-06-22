@@ -1,5 +1,11 @@
 package xiaozhi.modules.model.service.impl;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -22,6 +28,9 @@ import cn.hutool.json.JSONUtil;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import xiaozhi.common.exception.RenException;
+import xiaozhi.modules.model.dto.ModelAssistantApplyRequestDTO;
+import xiaozhi.modules.model.dto.ModelAssistantApplyResponseDTO;
+import xiaozhi.modules.model.dto.ModelAssistantApplyResponseDTO.ArtifactWriteResultDTO;
 import xiaozhi.modules.model.dto.ModelAssistantRequestDTO;
 import xiaozhi.modules.model.dto.ModelAssistantResponseDTO;
 import xiaozhi.modules.model.dto.ModelAssistantResponseDTO.IntegrationArtifactDTO;
@@ -52,6 +61,14 @@ public class ModelAssistantServiceImpl implements ModelAssistantService {
             "MissingFieldAgent",
             "ProtocolSpecAgent",
             "ValidationAgent");
+    private static final List<String> ARTIFACT_PATH_ALLOWLIST = List.of(
+            "main/xiaozhi-server/core/providers/",
+            "main/xiaozhi-server/tests/",
+            "main/manager-api/src/main/resources/db/changelog/",
+            "main/manager-api/src/test/",
+            "main/manager-web/src/",
+            "docs/models/",
+            "config/examples/");
 
     private final SysParamsService sysParamsService;
     private final ModelConfigService modelConfigService;
@@ -104,6 +121,26 @@ public class ModelAssistantServiceImpl implements ModelAssistantService {
         ModelAssistantResponseDTO response = parseResponse(content);
         response.setAgents(AGENT_NAMES);
         normalizeResponse(response, request);
+        return response;
+    }
+
+    @Override
+    public ModelAssistantApplyResponseDTO applyArtifacts(ModelAssistantApplyRequestDTO request) {
+        if (request == null || request.getArtifacts() == null || request.getArtifacts().isEmpty()) {
+            throw new RenException("没有可写入的自动化产物");
+        }
+
+        Path projectRoot = findProjectRoot();
+        boolean overwrite = Boolean.TRUE.equals(request.getOverwrite());
+        List<ArtifactWriteResultDTO> results = new ArrayList<>();
+        for (IntegrationArtifactDTO artifact : request.getArtifacts()) {
+            results.add(writeArtifact(projectRoot, artifact, overwrite));
+        }
+
+        ModelAssistantApplyResponseDTO response = new ModelAssistantApplyResponseDTO();
+        response.setResults(results);
+        response.setSuccess(results.stream().allMatch(item -> "written".equals(item.getStatus())
+                || "skipped".equals(item.getStatus())));
         return response;
     }
 
@@ -550,6 +587,77 @@ public class ModelAssistantServiceImpl implements ModelAssistantService {
         dto.setLanguage(language);
         dto.setContent(content.stripIndent().trim());
         return dto;
+    }
+
+    private ArtifactWriteResultDTO writeArtifact(Path projectRoot, IntegrationArtifactDTO artifact, boolean overwrite) {
+        ArtifactWriteResultDTO result = new ArtifactWriteResultDTO();
+        String rawPath = artifact == null ? "" : StringUtils.trimToEmpty(artifact.getPath());
+        result.setPath(rawPath);
+
+        if (artifact == null || StringUtils.isBlank(rawPath) || StringUtils.isBlank(artifact.getContent())) {
+            result.setStatus("failed");
+            result.setMessage("产物路径或内容为空");
+            return result;
+        }
+
+        String normalizedPath = rawPath.replace('\\', '/');
+        if (!isAllowedArtifactPath(normalizedPath)) {
+            result.setStatus("failed");
+            result.setMessage("路径不在模型接入白名单内");
+            return result;
+        }
+
+        try {
+            Path target = projectRoot.resolve(normalizedPath).normalize();
+            if (!target.startsWith(projectRoot)) {
+                result.setStatus("failed");
+                result.setMessage("路径越界，已拒绝写入");
+                return result;
+            }
+            if (Files.exists(target) && !overwrite) {
+                result.setStatus("skipped");
+                result.setMessage("文件已存在，未覆盖");
+                return result;
+            }
+            Path parent = target.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            Files.writeString(target, artifact.getContent() + System.lineSeparator(), StandardCharsets.UTF_8);
+            result.setStatus("written");
+            result.setMessage(overwrite ? "已写入工作区（允许覆盖）" : "已写入工作区");
+            return result;
+        } catch (InvalidPathException e) {
+            result.setStatus("failed");
+            result.setMessage("路径格式非法");
+            return result;
+        } catch (IOException e) {
+            log.warn("模型配置助手写入产物失败: {}", rawPath, e);
+            result.setStatus("failed");
+            result.setMessage("写入失败：" + e.getMessage());
+            return result;
+        }
+    }
+
+    private boolean isAllowedArtifactPath(String path) {
+        if (StringUtils.isBlank(path) || path.startsWith("/") || path.contains("../") || path.contains("..\\")) {
+            return false;
+        }
+        return ARTIFACT_PATH_ALLOWLIST.stream().anyMatch(path::startsWith);
+    }
+
+    private Path findProjectRoot() {
+        Path current = Paths.get("").toAbsolutePath().normalize();
+        Path cursor = current;
+        while (cursor != null) {
+            if (Files.exists(cursor.resolve("AGENTS.md"))
+                    && Files.isDirectory(cursor.resolve("main"))
+                    && Files.isDirectory(cursor.resolve("docs"))) {
+                return cursor;
+            }
+            cursor = cursor.getParent();
+        }
+        throw new RenException("无法定位项目根目录，不能写入自动化产物");
     }
 
     private JSONObject redactJson(JSONObject source) {

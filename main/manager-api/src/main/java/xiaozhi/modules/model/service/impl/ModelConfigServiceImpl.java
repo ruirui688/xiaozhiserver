@@ -115,6 +115,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     private static final int SINGLE_ASR_BENCHMARK_TIMEOUT_SECONDS = 120;
     private static final String TEST_LEVEL_REAL_INFERENCE = "REAL_INFERENCE";
     private static final String TEST_LEVEL_CONNECTIVITY = "CONNECTIVITY";
+    private static final String TEST_LEVEL_RUNTIME_CONFIG = "RUNTIME_CONFIG";
     private static final String TEST_LEVEL_CONFIG_ONLY = "CONFIG_ONLY";
     private static final String TEST_LEVEL_UNSUPPORTED = "UNSUPPORTED";
     private static final List<String> UPSTREAM_MODEL_FIELDS = List.of(
@@ -911,7 +912,8 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         }
         boolean rawSuccess = Boolean.TRUE.equals(result.getSuccess());
         boolean verified = rawSuccess
-                && (TEST_LEVEL_REAL_INFERENCE.equals(testLevel) || TEST_LEVEL_CONNECTIVITY.equals(testLevel));
+                && (TEST_LEVEL_REAL_INFERENCE.equals(testLevel) || TEST_LEVEL_CONNECTIVITY.equals(testLevel)
+                        || TEST_LEVEL_RUNTIME_CONFIG.equals(testLevel));
         markModelTestLevel(result, testLevel, verified);
         if (rawSuccess && !verified) {
             result.setSuccess(false);
@@ -976,6 +978,9 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         if ("INTENT".equals(modelType) && "intent_llm".equals(type)) {
             return TEST_LEVEL_CONFIG_ONLY;
         }
+        if ("VAD".equals(modelType) && "silero".equals(type)) {
+            return TEST_LEVEL_RUNTIME_CONFIG;
+        }
         if (LOCAL_TESTABLE_TYPES.contains(type)) {
             return TEST_LEVEL_CONFIG_ONLY;
         }
@@ -993,6 +998,9 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         }
         if (TEST_LEVEL_CONNECTIVITY.equals(testLevel)) {
             return "连通性";
+        }
+        if (TEST_LEVEL_RUNTIME_CONFIG.equals(testLevel)) {
+            return "运行时配置";
         }
         if (TEST_LEVEL_CONFIG_ONLY.equals(testLevel)) {
             return "配置校验";
@@ -1849,7 +1857,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         String normalizedModelType = StringUtils.defaultString(modelType).toUpperCase();
         String normalizedType = StringUtils.lowerCase(StringUtils.defaultString(type));
         if ("VAD".equals(normalizedModelType) && "silero".equals(normalizedType)) {
-            return "必填字段已配置。SileroVAD 模型文件由 xiaozhi-server 按当前运行方式在运行时校验；"
+            return "必填字段已配置，后台允许启用。SileroVAD 模型文件由 xiaozhi-server 按当前运行方式在运行时校验；"
                     + "Docker 部署需确保容器内路径可访问，源码运行需确保本机路径可访问。";
         }
         return "必填字段已配置";

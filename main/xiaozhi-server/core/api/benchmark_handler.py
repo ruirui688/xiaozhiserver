@@ -18,7 +18,7 @@ class BenchmarkHandler:
             from core.benchmark.runner import run_benchmark
 
             payload = await request.json()
-            result = await run_benchmark(payload)
+            result = await run_benchmark(payload, self.config)
             return web.json_response(result)
         except Exception as exc:
             return web.json_response({"error": str(exc)}, status=500)

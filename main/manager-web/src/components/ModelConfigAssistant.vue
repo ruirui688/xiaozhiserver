@@ -126,6 +126,37 @@
             class="result-block"
           >
             <strong>{{ $t("modelConfigAssistant.integrationArtifacts") }}</strong>
+            <div class="assistant-actions artifact-actions">
+              <el-button
+                size="mini"
+                type="primary"
+                icon="el-icon-folder-add"
+                :loading="applyingArtifacts"
+                @click="applyArtifacts(false)"
+              >
+                {{ $t("modelConfigAssistant.applyArtifacts") }}
+              </el-button>
+              <el-button
+                size="mini"
+                icon="el-icon-refresh"
+                :loading="applyingArtifacts"
+                @click="applyArtifacts(true)"
+              >
+                {{ $t("modelConfigAssistant.applyArtifactsOverwrite") }}
+              </el-button>
+            </div>
+            <div v-if="artifactResults.length" class="artifact-results">
+              <p v-for="item in artifactResults" :key="`${item.path}-${item.status}`">
+                <el-tag
+                  size="mini"
+                  :type="item.status === 'written' ? 'success' : item.status === 'skipped' ? 'info' : 'danger'"
+                >
+                  {{ item.status }}
+                </el-tag>
+                <code>{{ item.path }}</code>
+                <span>{{ item.message }}</span>
+              </p>
+            </div>
             <el-collapse class="artifact-collapse">
               <el-collapse-item
                 v-for="(artifact, artifactIndex) in lastResponse.integrationArtifacts"
@@ -238,6 +269,7 @@ export default {
     return {
       loading: false,
       settingsSaving: false,
+      applyingArtifacts: false,
       llmModels: [],
       selectedLlmModelId: "",
       savedLlmModelName: "",
@@ -248,6 +280,7 @@ export default {
       contextOpen: false,
       messages: [],
       lastResponse: null,
+      artifactResults: [],
     };
   },
   watch: {
@@ -319,6 +352,7 @@ export default {
       this.prompt = "";
       this.messages.push({ role: "user", content });
       this.lastResponse = null;
+      this.artifactResults = [];
       this.loading = true;
       this.scrollMessagesToBottom();
       Api.model.chatWithAssistant(
@@ -377,6 +411,28 @@ export default {
         navigator.clipboard.writeText(text);
         this.$message.success(this.$t("modelConfigAssistant.artifactCopied"));
       }
+    },
+    applyArtifacts(overwrite) {
+      const artifacts = (this.lastResponse && this.lastResponse.integrationArtifacts) || [];
+      if (!artifacts.length) {
+        this.$message.warning(this.$t("modelConfigAssistant.noArtifacts"));
+        return;
+      }
+      this.applyingArtifacts = true;
+      Api.model.applyAssistantArtifacts({ artifacts, overwrite }, ({ data }) => {
+        this.applyingArtifacts = false;
+        if (data.code === 0 && data.data) {
+          this.artifactResults = data.data.results || [];
+          const failed = this.artifactResults.some((item) => item.status === "failed");
+          this.$message[failed ? "warning" : "success"](
+            failed
+              ? this.$t("modelConfigAssistant.artifactsAppliedWithIssues")
+              : this.$t("modelConfigAssistant.artifactsApplied")
+          );
+        } else {
+          this.$message.error(data.msg || this.$t("modelConfigAssistant.artifactsApplyFailed"));
+        }
+      });
     },
     formatJson(value) {
       try {
@@ -724,6 +780,36 @@ export default {
   display: flex;
   gap: 8px;
   margin-top: 8px;
+}
+
+.artifact-actions {
+  flex-wrap: wrap;
+}
+
+.artifact-results {
+  margin-top: 8px;
+  border: 1px solid #edf2f7;
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: #fbfdff;
+}
+
+.artifact-results p {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 4px 0;
+  line-height: 1.45;
+}
+
+.artifact-results code {
+  max-width: 180px;
+  color: #2d3748;
+  word-break: break-all;
+}
+
+.artifact-results span {
+  color: #718096;
 }
 
 .assistant-composer {

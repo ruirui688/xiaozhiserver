@@ -31,4 +31,10 @@ public class ModelPerformanceTestRequestDTO implements Serializable {
 
     @Schema(description = "本次评测使用的智能体ID，不入库；用于注入真实人设、记忆、知识库、插件等上下文")
     private String agentId;
+
+    @Schema(description = "本次评测使用的真实设备ID，不入库；选中后按设备MAC加载运行时智能体上下文")
+    private String deviceId;
+
+    @Schema(description = "自定义业务测试问题；每项可包含多行，每行作为一次业务场景测试轮次，不入库")
+    private List<String> customQuestions;
 }

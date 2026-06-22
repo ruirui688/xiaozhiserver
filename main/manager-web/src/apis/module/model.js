@@ -614,6 +614,32 @@ export default {
         })
       }).send()
   },
+  // 写入模型配置助手生成的接入产物
+  applyAssistantArtifacts(params, callback) {
+    RequestService.sendRequest()
+      .url(`${getServiceUrl()}/models/assistant/apply-artifacts`)
+      .method('POST')
+      .data(params)
+      .timeout(60000)
+      .success((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .fail((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .networkFail((err) => {
+        console.error('写入模型配置助手产物失败:', err)
+        RequestService.clearRequestTime()
+        callback({
+          data: {
+            code: -1,
+            msg: err?.msg || '写入模型配置助手产物失败'
+          }
+        })
+      }).send()
+  },
   // 获取插件列表
   getPluginFunctionList(params, callback) {
     RequestService.sendRequest()

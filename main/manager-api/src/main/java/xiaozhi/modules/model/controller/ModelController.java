@@ -20,6 +20,8 @@ import xiaozhi.common.page.PageData;
 import xiaozhi.common.utils.Result;
 import xiaozhi.modules.agent.service.AgentTemplateService;
 import xiaozhi.modules.config.service.ConfigService;
+import xiaozhi.modules.model.dto.ModelAssistantApplyRequestDTO;
+import xiaozhi.modules.model.dto.ModelAssistantApplyResponseDTO;
 import xiaozhi.modules.model.dto.LlmModelBasicInfoDTO;
 import xiaozhi.modules.model.dto.ModelAssistantRequestDTO;
 import xiaozhi.modules.model.dto.ModelAssistantResponseDTO;
@@ -154,6 +156,14 @@ public class ModelController {
     public Result<ModelAssistantResponseDTO> chatWithAssistant(
             @RequestBody ModelAssistantRequestDTO request) {
         return new Result<ModelAssistantResponseDTO>().ok(modelAssistantService.chat(request));
+    }
+
+    @PostMapping("/assistant/apply-artifacts")
+    @Operation(summary = "模型配置助手写入接入产物")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<ModelAssistantApplyResponseDTO> applyAssistantArtifacts(
+            @RequestBody ModelAssistantApplyRequestDTO request) {
+        return new Result<ModelAssistantApplyResponseDTO>().ok(modelAssistantService.applyArtifacts(request));
     }
 
     @PostMapping("/{modelType}/{provideCode}")
