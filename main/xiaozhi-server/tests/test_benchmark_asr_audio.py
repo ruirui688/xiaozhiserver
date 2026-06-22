@@ -7,7 +7,7 @@ REPO_ROOT = SERVER_ROOT.parents[1]
 if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 
-from core.benchmark.asr_executor import STANDARD_ASR_TEST_AUDIO, _load_audio_files
+from core.benchmark.asr_executor import STANDARD_ASR_TEST_AUDIO, _build_audio_data_url, _load_audio_files
 
 
 def test_load_standard_asr_audio_from_repo_root(monkeypatch):
@@ -27,3 +27,12 @@ def test_load_asr_audio_falls_back_when_preferred_missing(monkeypatch):
 
     assert audio_files
     assert any(item["name"] == STANDARD_ASR_TEST_AUDIO for item in audio_files)
+
+
+def test_build_audio_preview_data_url(monkeypatch):
+    monkeypatch.chdir(REPO_ROOT)
+
+    audio = _load_audio_files(STANDARD_ASR_TEST_AUDIO)[0]
+    data_url = _build_audio_data_url(audio)
+
+    assert data_url.startswith("data:audio/wav;base64,")

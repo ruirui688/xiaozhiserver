@@ -1453,6 +1453,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             model.set("provider_type", providerType);
             model.set("config", configJson);
             model.set("test_audio_name", STANDARD_ASR_TEST_AUDIO);
+            model.set("include_audio_preview", true);
             JSONArray models = new JSONArray();
             models.add(model);
             payload.set("models", models);
@@ -1569,6 +1570,10 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
 
     private String buildRuntimeBenchmarkAsrAudioDataUrl(JSONObject sample) {
         JSONObject inputDetail = sample.getJSONObject("input_detail");
+        String runtimeAudioDataUrl = inputDetail == null ? "" : inputDetail.getStr("audio_data_url");
+        if (StringUtils.isNotBlank(runtimeAudioDataUrl)) {
+            return runtimeAudioDataUrl;
+        }
         String audioName = inputDetail == null ? sample.getStr("input_summary") : inputDetail.getStr("audio_name");
         if (StringUtils.isBlank(audioName)) {
             return "";
