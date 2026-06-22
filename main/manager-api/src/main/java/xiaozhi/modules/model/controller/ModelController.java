@@ -26,6 +26,8 @@ import xiaozhi.modules.model.dto.LlmModelBasicInfoDTO;
 import xiaozhi.modules.model.dto.ModelAssistantRequestDTO;
 import xiaozhi.modules.model.dto.ModelAssistantResponseDTO;
 import xiaozhi.modules.model.dto.ModelAssistantSettingsDTO;
+import xiaozhi.modules.model.dto.ModelBenchmarkCaseGenerateRequestDTO;
+import xiaozhi.modules.model.dto.ModelBenchmarkCaseGenerateResponseDTO;
 import xiaozhi.modules.model.dto.ModelBenchmarkCreateResponseDTO;
 import xiaozhi.modules.model.dto.ModelBenchmarkTaskDTO;
 import xiaozhi.modules.model.dto.ModelBasicInfoDTO;
@@ -216,6 +218,14 @@ public class ModelController {
     public Result<ModelBenchmarkCreateResponseDTO> performanceTest(
             @RequestBody ModelPerformanceTestRequestDTO request) {
         return new Result<ModelBenchmarkCreateResponseDTO>().ok(modelBenchmarkService.createBenchmarkTask(request));
+    }
+
+    @PostMapping("/benchmark/cases")
+    @Operation(summary = "生成模型专业评测候选用例")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<ModelBenchmarkCaseGenerateResponseDTO> benchmarkCases(
+            @RequestBody(required = false) ModelBenchmarkCaseGenerateRequestDTO request) {
+        return new Result<ModelBenchmarkCaseGenerateResponseDTO>().ok(modelBenchmarkService.generateBenchmarkCases(request));
     }
 
     @GetMapping("/benchmark/{taskId}")

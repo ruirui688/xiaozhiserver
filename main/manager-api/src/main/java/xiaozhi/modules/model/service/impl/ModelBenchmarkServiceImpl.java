@@ -28,12 +28,15 @@ import xiaozhi.modules.model.dao.ModelBenchmarkResultDao;
 import xiaozhi.modules.model.dao.ModelBenchmarkSampleDao;
 import xiaozhi.modules.model.dao.ModelBenchmarkTaskDao;
 import xiaozhi.modules.model.dto.ModelBenchmarkCreateResponseDTO;
+import xiaozhi.modules.model.dto.ModelBenchmarkCaseGenerateRequestDTO;
+import xiaozhi.modules.model.dto.ModelBenchmarkCaseGenerateResponseDTO;
 import xiaozhi.modules.model.dto.ModelBenchmarkTaskDTO;
 import xiaozhi.modules.model.dto.ModelPerformanceTestRequestDTO;
 import xiaozhi.modules.model.entity.ModelBenchmarkResultEntity;
 import xiaozhi.modules.model.entity.ModelBenchmarkSampleEntity;
 import xiaozhi.modules.model.entity.ModelBenchmarkTaskEntity;
 import xiaozhi.modules.model.service.ModelBenchmarkService;
+import xiaozhi.modules.model.service.impl.benchmark.BenchmarkCaseGenerator;
 import xiaozhi.modules.model.service.impl.benchmark.BenchmarkContextBuilder;
 import xiaozhi.modules.model.service.impl.benchmark.BenchmarkResultPersistence;
 import xiaozhi.modules.model.service.impl.benchmark.PythonBenchmarkClient;
@@ -67,6 +70,7 @@ public class ModelBenchmarkServiceImpl implements ModelBenchmarkService {
     private final BenchmarkContextBuilder contextBuilder;
     private final PythonBenchmarkClient pythonBenchmarkClient;
     private final BenchmarkResultPersistence resultPersistence;
+    private final BenchmarkCaseGenerator benchmarkCaseGenerator;
 
     @Override
     public ModelBenchmarkCreateResponseDTO createBenchmarkTask(ModelPerformanceTestRequestDTO request) {
@@ -110,6 +114,11 @@ public class ModelBenchmarkServiceImpl implements ModelBenchmarkService {
         response.setTaskId(task.getId());
         response.setStatus(task.getStatus());
         return response;
+    }
+
+    @Override
+    public ModelBenchmarkCaseGenerateResponseDTO generateBenchmarkCases(ModelBenchmarkCaseGenerateRequestDTO request) {
+        return benchmarkCaseGenerator.generate(request);
     }
 
     @Override

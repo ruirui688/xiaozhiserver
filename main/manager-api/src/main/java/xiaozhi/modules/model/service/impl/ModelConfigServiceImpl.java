@@ -2119,13 +2119,30 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     }
 
     private Path findAsrTestAudioPath() {
+        Path codeRootPath = Paths.get("").toAbsolutePath().normalize();
+        Path projectRootPath = locateProjectRoot(codeRootPath);
         return findFirstExistingPath(List.of(
+                projectRootPath.resolve("main/xiaozhi-server/config/assets/" + STANDARD_ASR_TEST_AUDIO).toString(),
+                projectRootPath.resolve("main/xiaozhi-server/config/assets/wakeup_words.wav").toString(),
+                projectRootPath.resolve("main/xiaozhi-server/config/assets/bind_code.wav").toString(),
+                codeRootPath.resolve("../xiaozhi-server/config/assets/" + STANDARD_ASR_TEST_AUDIO).toString(),
                 "../xiaozhi-server/config/assets/" + STANDARD_ASR_TEST_AUDIO,
                 "../xiaozhi-server/config/assets/wakeup_words.wav",
                 "../xiaozhi-server/config/assets/bind_code.wav",
                 "main/xiaozhi-server/config/assets/" + STANDARD_ASR_TEST_AUDIO,
                 "main/xiaozhi-server/config/assets/wakeup_words.wav",
                 "main/xiaozhi-server/config/assets/bind_code.wav"));
+    }
+
+    private Path locateProjectRoot(Path startPath) {
+        Path current = startPath;
+        while (current != null) {
+            if (Files.exists(current.resolve("main/xiaozhi-server/config/assets/" + STANDARD_ASR_TEST_AUDIO))) {
+                return current;
+            }
+            current = current.getParent();
+        }
+        return startPath;
     }
 
     private String buildAudioDataUrl(Path audioPath) {
