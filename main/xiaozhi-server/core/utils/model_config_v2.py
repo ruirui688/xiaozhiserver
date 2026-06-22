@@ -2,8 +2,27 @@ from copy import deepcopy
 from typing import Any, Dict, Optional
 
 
+MODULE_TYPE_ALIASES = {
+    "asr": "ASR",
+    "tts": "TTS",
+    "llm": "LLM",
+    "slm": "SLM",
+    "vllm": "VLLM",
+    "vad": "VAD",
+    "memory": "Memory",
+    "mem": "Memory",
+    "intent": "Intent",
+    "rag": "RAG",
+}
+
+
 class ModelConfigV2Error(RuntimeError):
     """Raised when manager-api did not provide the required v2 runtime contract."""
+
+
+def normalize_module_type(module_type: Any) -> str:
+    key = str(module_type or "").strip()
+    return MODULE_TYPE_ALIASES.get(key.lower(), key)
 
 
 def get_typed_config(config: Dict[str, Any], module_type: str, module_id: str) -> Optional[Dict[str, Any]]:
@@ -14,7 +33,7 @@ def get_typed_config(config: Dict[str, Any], module_type: str, module_id: str) -
     model_entry = v2_models.get(module_id)
     if not isinstance(model_entry, dict):
         return None
-    if module_type and str(model_entry.get("model_type", "")).lower() != module_type.lower():
+    if module_type and normalize_module_type(model_entry.get("model_type")) != normalize_module_type(module_type):
         return None
     typed_config = model_entry.get("typed_config")
     return typed_config if isinstance(typed_config, dict) else None
@@ -40,10 +59,21 @@ def get_runtime_type(config: Dict[str, Any], module_type: str, module_id: str) -
 
 
 def get_selected_runtime_config(config: Dict[str, Any], module_type: str) -> Dict[str, Any]:
-    module_id = (config.get("selected_module") or {}).get(module_type)
+    module_id = (normalize_selected_module(config).get(module_type))
     if not module_id:
         raise ModelConfigV2Error(f"未选择 {module_type} 模型")
     return get_runtime_config(config, module_type, module_id)
+
+
+def normalize_selected_module(config: Dict[str, Any]) -> Dict[str, Any]:
+    selected = config.get("selected_module")
+    if not isinstance(selected, dict):
+        selected = {}
+    normalized = {}
+    for module_type, module_id in selected.items():
+        normalized[normalize_module_type(module_type)] = module_id
+    config["selected_module"] = normalized
+    return normalized
 
 
 def build_legacy_runtime_view(config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -52,7 +82,7 @@ def build_legacy_runtime_view(config: Dict[str, Any]) -> Dict[str, Dict[str, Any
     for model_id, entry in (config.get("model_config_v2") or {}).items():
         if not isinstance(entry, dict):
             continue
-        module_type = entry.get("model_type")
+        module_type = normalize_module_type(entry.get("model_type"))
         typed_config = entry.get("typed_config")
         if not module_type or not isinstance(typed_config, dict):
             continue
@@ -62,6 +92,7 @@ def build_legacy_runtime_view(config: Dict[str, Any]) -> Dict[str, Dict[str, Any
 
 def apply_legacy_runtime_view(config: Dict[str, Any]) -> Dict[str, Any]:
     """Expose typed v2 configs under legacy module keys without requiring API legacy payloads."""
+    normalize_selected_module(config)
     if not isinstance(config.get("model_config_v2"), dict):
         config["model_config_v2"] = build_model_config_v2_from_legacy(config)
     for module_type, module_configs in build_legacy_runtime_view(config).items():
@@ -74,13 +105,14 @@ def build_model_config_v2_from_legacy(config: Dict[str, Any]) -> Dict[str, Dict[
     selected = config.get("selected_module") or {}
     model_config_v2: Dict[str, Dict[str, Any]] = {}
     for module_type, module_id in selected.items():
-        module_configs = config.get(module_type) or {}
+        normalized_module_type = normalize_module_type(module_type)
+        module_configs = config.get(normalized_module_type) or config.get(module_type) or {}
         typed_config = module_configs.get(module_id)
         if not isinstance(typed_config, dict):
             continue
         model_config_v2[str(module_id)] = {
             "id": str(module_id),
-            "model_type": str(module_type),
+            "model_type": str(normalized_module_type),
             "model_code": str(module_id),
             "model_name": str(module_id),
             "provider_code": str(typed_config.get("type") or module_id),
