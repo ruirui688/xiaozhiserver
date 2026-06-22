@@ -8,7 +8,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
 @Data
-@Schema(description = "模型目录 v2")
+@Schema(description = "标准模型目录")
 public class ModelCatalogDTO implements Serializable {
 
     @Serial

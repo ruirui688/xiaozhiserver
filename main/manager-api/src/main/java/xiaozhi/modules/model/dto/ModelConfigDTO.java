@@ -3,9 +3,10 @@ package xiaozhi.modules.model.dto;
 import java.io.Serial;
 import java.io.Serializable;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
-import cn.hutool.json.JSONObject;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
@@ -28,7 +29,28 @@ public class ModelConfigDTO implements Serializable {
     @Schema(description = "模型名称")
     private String modelName;
 
-    @Schema(description = "供应器/适配器编码，来源于configJson.type")
+    @Schema(description = "运行时适配器编码")
+    private String adapterCode = "";
+
+    @Schema(description = "模板编码")
+    private String templateCode = "";
+
+    @Schema(description = "厂商名称")
+    private String vendorName = "";
+
+    @Schema(description = "产品/API名称")
+    private String productName = "";
+
+    @Schema(description = "协议编码")
+    private String protocol = "";
+
+    @Schema(description = "上游真实模型或资源ID")
+    private String upstreamModelId = "";
+
+    @Schema(description = "接口端点地址")
+    private String endpointUrl = "";
+
+    @Schema(description = "供应器/适配器编码")
     private String providerCode = "";
 
     @Schema(description = "供应器/适配器名称，来源于ai_model_provider.name")
@@ -36,9 +58,6 @@ public class ModelConfigDTO implements Serializable {
 
     @Schema(description = "接口适配器展示名称")
     private String adapterLabel = "";
-
-    @Schema(description = "真实上游模型或资源ID")
-    private String upstreamModelId = "";
 
     @Schema(description = "厂商平台展示名称")
     private String platformName = "";
@@ -48,15 +67,6 @@ public class ModelConfigDTO implements Serializable {
 
     @Schema(description = "系统展示标签")
     private List<String> modelTags = List.of();
-
-    @Schema(description = "v2模板编码")
-    private String templateCode = "";
-
-    @Schema(description = "厂商名称")
-    private String vendorName = "";
-
-    @Schema(description = "产品/API名称")
-    private String productName = "";
 
     @Schema(description = "能力展示名称")
     private String capabilityLabel = "";
@@ -76,7 +86,7 @@ public class ModelConfigDTO implements Serializable {
     @Schema(description = "凭据摘要字段")
     private List<String> credentialSummary = List.of();
 
-    @Schema(description = "v2必填字段")
+    @Schema(description = "标准必填字段")
     private List<String> requiredFields = List.of();
 
     @Schema(description = "配置提示")
@@ -85,7 +95,7 @@ public class ModelConfigDTO implements Serializable {
     @Schema(description = "已知限制")
     private List<String> knownLimitations = List.of();
 
-    @Schema(description = "v2迁移状态")
+    @Schema(description = "标准化状态")
     private String migrationStatus = "";
 
     @Schema(description = "是否默认配置(0否 1是)")
@@ -103,8 +113,11 @@ public class ModelConfigDTO implements Serializable {
     @Schema(description = "测试时间")
     private Date testTime;
 
-    @Schema(description = "模型配置(JSON格式)")
-    private JSONObject configJson;
+    @Schema(description = "标准普通参数")
+    private Map<String, Object> params = new HashMap<>();
+
+    @Schema(description = "标准密钥参数，返回脱敏值")
+    private Map<String, Object> secrets = new HashMap<>();
 
     @Schema(description = "官方文档链接")
     private String docLink;

@@ -111,7 +111,7 @@ samples         每轮成功状态、失败原因、输出摘要和是否计入�
 XIAOZHI_SERVER_HTTP_BASE_URL=http://xiaozhi-esp32-server:8003
 ```
 
-LLMJudge 复用 `ai_model_config.config_json` 和已有 provider，不再要求单独配置服务端环境变量。评审模型的 API Key 按模型配置页原有规则维护，性能测试任务只引用模型配置 ID。
+LLMJudge 复用标准模型配置和已有 provider，不再要求单独配置服务端环境变量。评审模型的 API Key 保存在 `ai_model_config_secret`，普通调用参数保存在 `ai_model_config_param`，性能测试任务只引用模型配置 ID。
 
 ## 评测指标调研口径
 
@@ -152,7 +152,7 @@ VLLM:
 
 ASR:
 ```
-4.在main/xiaozhi-server目录下运行performance_tester.py: 
+4.在main/xiaozhi-server目录下运行performance_tester.py:
 ```
 conda run -n xiaozhi-esp32-server python performance_tester.py
 ```

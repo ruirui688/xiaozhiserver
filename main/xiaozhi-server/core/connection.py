@@ -39,6 +39,7 @@ from config.config_loader import get_private_config_from_api
 from core.providers.tts.dto.dto import ContentType, TTSMessageDTO, SentenceType
 from config.logger import setup_logging, build_module_string, create_connection_logger
 from config.manage_api_client import DeviceNotFoundException, DeviceBindException, generate_and_save_chat_title
+from core.utils.model_config import has_runtime_config, normalize_runtime_config
 from core.utils.prompt_manager import PromptManager
 from core.utils.voiceprint_provider import VoiceprintProvider
 from core.utils.util import get_system_error_response
@@ -744,6 +745,7 @@ class ConnectionHandler:
                 self.headers.get("client-id", self.headers.get("device-id")),
             )
             private_config["delete_audio"] = bool(self.config.get("delete_audio", True))
+            normalize_runtime_config(private_config)
             self.logger.bind(tag=TAG).info(
                 f"{time.time() - begin_time} 秒，异步获取差异化配置成功: {json.dumps(filter_sensitive_info(private_config), ensure_ascii=False)}"
             )
@@ -764,108 +766,11 @@ class ConnectionHandler:
             self.bind_completed_event.set()
             return False
 
-        init_llm, init_tts, init_memory, init_intent = (
-            False,
-            False,
-            False,
-            False,
-        )
-
         init_vad = check_vad_update(self.common_config, private_config)
         init_asr = check_asr_update(self.common_config, private_config)
-
-        if private_config.get("model_config_v2") is not None:
-            self.config["model_config_v2"] = private_config["model_config_v2"]
-
-        if init_vad:
-            self.config["VAD"] = private_config["VAD"]
-            self.config["selected_module"]["VAD"] = private_config["selected_module"][
-                "VAD"
-            ]
-        if init_asr:
-            self.config["ASR"] = private_config["ASR"]
-            self.config["selected_module"]["ASR"] = private_config["selected_module"][
-                "ASR"
-            ]
-        if private_config.get("TTS", None) is not None:
-            init_tts = True
-            self.config["TTS"] = private_config["TTS"]
-            self.config["selected_module"]["TTS"] = private_config["selected_module"][
-                "TTS"
-            ]
-        if private_config.get("LLM", None) is not None:
-            init_llm = True
-            self.config["LLM"] = private_config["LLM"]
-            self.config["selected_module"]["LLM"] = private_config["selected_module"][
-                "LLM"
-            ]
-        if private_config.get("VLLM", None) is not None:
-            self.config["VLLM"] = private_config["VLLM"]
-            self.config["selected_module"]["VLLM"] = private_config["selected_module"][
-                "VLLM"
-            ]
-        if private_config.get("Memory", None) is not None:
-            init_memory = True
-            self.config["Memory"] = private_config["Memory"]
-            self.config["selected_module"]["Memory"] = private_config[
-                "selected_module"
-            ]["Memory"]
-        if private_config.get("Intent", None) is not None:
-            init_intent = True
-            self.config["Intent"] = private_config["Intent"]
-            model_intent = private_config.get("selected_module", {}).get("Intent", {})
-            self.config["selected_module"]["Intent"] = model_intent
-            # 加载插件配置
-            if model_intent != "Intent_nointent":
-                plugin_from_server = private_config.get("plugins", {})
-                for plugin, config_str in plugin_from_server.items():
-                    plugin_from_server[plugin] = json.loads(config_str)
-                self.config["plugins"] = plugin_from_server
-                self.config["Intent"][self.config["selected_module"]["Intent"]][
-                    "functions"
-                ] = plugin_from_server.keys()
-        if private_config.get("prompt", None) is not None:
-            self.config["prompt"] = private_config["prompt"]
-        # 获取声纹信息
-        if private_config.get("voiceprint", None) is not None:
-            self.config["voiceprint"] = private_config["voiceprint"]
-        if private_config.get("summaryMemory", None) is not None:
-            self.config["summaryMemory"] = private_config["summaryMemory"]
-        if private_config.get("device_max_output_size", None) is not None:
-            self.max_output_size = int(private_config["device_max_output_size"])
-        if private_config.get("chat_history_conf", None) is not None:
-            self.chat_history_conf = int(private_config["chat_history_conf"])
-        if private_config.get("mcp_endpoint", None) is not None:
-            self.config["mcp_endpoint"] = private_config["mcp_endpoint"]
-        if private_config.get("context_providers", None) is not None:
-            self.config["context_providers"] = private_config["context_providers"]
-
-        # 注入替换词到 TTS 模块配置
-        if private_config.get("correct_words", None) is not None:
-            self.config["correct_words"] = private_config["correct_words"]
-            self.correct_word_replacements = parse_correct_words(
-                private_config["correct_words"]
-            )
-            select_tts_module = self.config.get("selected_module", {}).get("TTS")
-            tts_config = self.config.get("TTS", {})
-            if select_tts_module in tts_config:
-                tts_config[select_tts_module]["correct_words"] = private_config[
-                    "correct_words"
-                ]
-            tts_v2_config = (
-                self.config.get("model_config_v2", {})
-                .get(select_tts_module, {})
-                .get("typed_config")
-            )
-            if isinstance(tts_v2_config, dict):
-                tts_v2_config["correct_words"] = private_config["correct_words"]
-            private_tts_v2_config = (
-                private_config.get("model_config_v2", {})
-                .get(select_tts_module, {})
-                .get("typed_config")
-            )
-            if isinstance(private_tts_v2_config, dict):
-                private_tts_v2_config["correct_words"] = private_config["correct_words"]
+        init_llm, init_tts, init_memory, init_intent = (
+            self._apply_private_runtime_config(private_config)
+        )
 
         # 使用 run_in_executor 在线程池中执行 initialize_modules，避免阻塞主循环
         try:
@@ -897,6 +802,108 @@ class ConnectionHandler:
         if modules.get("memory", None) is not None:
             self.memory = modules["memory"]
         return True
+
+    def _apply_private_runtime_config(self, private_config):
+        normalize_runtime_config(private_config)
+        self.config.setdefault("selected_module", {})
+
+        private_model_config = private_config.get("model_config")
+        if isinstance(private_model_config, dict):
+            self.config.setdefault("model_config", {})
+            self.config["model_config"].update(copy.deepcopy(private_model_config))
+
+        selected_module = private_config.get("selected_module", {})
+        init_flags = {
+            "LLM": False,
+            "TTS": False,
+            "Memory": False,
+            "Intent": False,
+        }
+        for module_type in (
+            "VAD",
+            "ASR",
+            "TTS",
+            "LLM",
+            "VLLM",
+            "Memory",
+            "Intent",
+            "SLM",
+            "RAG",
+        ):
+            selected_name = selected_module.get(module_type)
+            if not selected_name or not has_runtime_config(
+                private_config, module_type, selected_name
+            ):
+                continue
+            self.config["selected_module"][module_type] = selected_name
+            if module_type in init_flags:
+                init_flags[module_type] = True
+
+        normalize_runtime_config(self.config)
+
+        for key in (
+            "prompt",
+            "voiceprint",
+            "summaryMemory",
+            "mcp_endpoint",
+            "context_providers",
+        ):
+            if private_config.get(key) is not None:
+                self.config[key] = copy.deepcopy(private_config[key])
+
+        if private_config.get("device_max_output_size") is not None:
+            self.max_output_size = int(private_config["device_max_output_size"])
+        if private_config.get("chat_history_conf") is not None:
+            self.chat_history_conf = int(private_config["chat_history_conf"])
+
+        self._apply_private_plugins(private_config)
+        if private_config.get("correct_words") is not None:
+            self._apply_correct_words(private_config["correct_words"])
+
+        return (
+            init_flags["LLM"],
+            init_flags["TTS"],
+            init_flags["Memory"],
+            init_flags["Intent"],
+        )
+
+    def _apply_private_plugins(self, private_config):
+        plugin_from_server = private_config.get("plugins")
+        if plugin_from_server is None:
+            return
+
+        selected_intent = self.config.get("selected_module", {}).get("Intent")
+        if not selected_intent or selected_intent == "Intent_nointent":
+            return
+
+        normalized_plugins = {}
+        for plugin, config_value in plugin_from_server.items():
+            if isinstance(config_value, str):
+                normalized_plugins[plugin] = json.loads(config_value)
+            else:
+                normalized_plugins[plugin] = copy.deepcopy(config_value)
+        self.config["plugins"] = normalized_plugins
+
+        intent_config = self.config.get("Intent", {}).get(selected_intent)
+        if isinstance(intent_config, dict):
+            intent_config["functions"] = normalized_plugins.keys()
+
+    def _apply_correct_words(self, correct_words):
+        self.config["correct_words"] = copy.deepcopy(correct_words)
+        self.correct_word_replacements = parse_correct_words(correct_words)
+        select_tts_module = self.config.get("selected_module", {}).get("TTS")
+        tts_config = self.config.get("TTS", {})
+        if select_tts_module in tts_config:
+            tts_config[select_tts_module]["correct_words"] = copy.deepcopy(
+                correct_words
+            )
+        tts_model_config = (
+            self.config.get("model_config", {})
+            .get(select_tts_module, {})
+            .get("typed_config")
+        )
+        if isinstance(tts_model_config, dict):
+            tts_model_config["correct_words"] = copy.deepcopy(correct_words)
 
     def _initialize_memory(self):
         if self.memory is None:

@@ -13,6 +13,7 @@ from core.handle.receiveAudioHandle import startToChat
 from core.providers.tts.dto.dto import ContentType, TTSMessageDTO, SentenceType
 from core.utils.correct_words import parse_correct_words
 from core.utils.llm import create_instance as create_llm_instance
+from core.utils.model_config import normalize_runtime_config
 
 
 TAG = __name__
@@ -94,16 +95,13 @@ class BenchmarkRuntimeAgent:
     def _override_candidate_llm(self):
         candidate_name = "BenchmarkCandidateLLM"
         config = self.conn.config
-        config.setdefault("LLM", {})
-        config["LLM"][candidate_name] = copy.deepcopy(self.model_config)
         config.setdefault("selected_module", {})["LLM"] = candidate_name
-        model_config_v2 = config.get("model_config_v2")
-        if isinstance(model_config_v2, dict):
-            model_config_v2[candidate_name] = {
-                "model_type": "LLM",
-                "provider_code": self.provider_type,
-                "typed_config": copy.deepcopy(self.model_config),
-            }
+        config.setdefault("model_config", {})[candidate_name] = {
+            "model_type": "LLM",
+            "provider_code": self.provider_type,
+            "typed_config": copy.deepcopy(self.model_config),
+        }
+        normalize_runtime_config(config)
 
     def _apply_agent_runtime_config(self):
         runtime_config = self.agent_context.get("runtime_config")
@@ -111,7 +109,7 @@ class BenchmarkRuntimeAgent:
             return
 
         config = self.conn.config
-        self._overlay_mapping(config, runtime_config, "model_config_v2")
+        self._overlay_mapping(config, runtime_config, "model_config")
         self._overlay_mapping(config, runtime_config, "selected_module")
         for module_type in ("VAD", "ASR", "TTS", "LLM", "VLLM", "Memory", "Intent"):
             self._overlay_mapping(config, runtime_config, module_type)
@@ -139,6 +137,7 @@ class BenchmarkRuntimeAgent:
 
         if runtime_config.get("correct_words") is not None:
             self._apply_correct_words(runtime_config.get("correct_words"))
+        normalize_runtime_config(config)
 
     def _overlay_mapping(self, target, source, key):
         if key not in source or source.get(key) is None:
@@ -187,13 +186,13 @@ class BenchmarkRuntimeAgent:
         if select_tts_module in tts_config and isinstance(tts_config[select_tts_module], dict):
             tts_config[select_tts_module]["correct_words"] = copy.deepcopy(correct_words)
 
-        tts_v2_config = (
-            config.get("model_config_v2", {})
+        tts_model_config = (
+            config.get("model_config", {})
             .get(select_tts_module, {})
             .get("typed_config")
         )
-        if isinstance(tts_v2_config, dict):
-            tts_v2_config["correct_words"] = copy.deepcopy(correct_words)
+        if isinstance(tts_model_config, dict):
+            tts_model_config["correct_words"] = copy.deepcopy(correct_words)
 
     async def _wait_tool_handler_ready(self):
         handler = getattr(self.conn, "func_handler", None)

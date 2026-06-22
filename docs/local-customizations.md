@@ -275,23 +275,30 @@
 官方同步时的处理规则：如果官方修改 Dockerfile、Docker Compose、安装脚本、默认模型配置、智能体模板初始化、模型配置下发或 WebSocket 初始化流程，必须保留“源码完整进入私有 Git 仓库，但生产服务器只 sparse-checkout `deploy/production` 最小部署资产；生产服务器只拉取阿里云 ACR 中已发布运行镜像，不在生产端源码构建，也不依赖 Docker Hub；生产运行镜像命名为 `xiaozhi-server:latest`、`xiaozhi-web:latest`、`mysql:8.4`、`redis:8.0`；`xiaozhi-server-base` 只服务于构建流程；生产用户只需要记住 `~/work/xiaozhi-deploy` 部署资产目录、`/opt/xiaozhi-data` 数据目录、`deploy/production/install` 首次部署和 `deploy/production/upgrade` 后续升级；生产安装不下载、不挂载、不要求 model.pt；生产镜像默认不安装 torch / torchaudio，除非显式使用完整 requirements 启用本地 FunASR；FunASR/FunASRServer 不作为可用默认 ASR；所有模型字段允许为空；模型缺失时服务可启动但对应能力不可用并记录清晰提示”的约定。
 ```
 
-## 17. 模型配置密钥明文回显
+## 17. 标准模型存储与运行时契约
 
 ```text
-定制模块：manager-api 模型配置接口、manager-web 模型配置弹窗
-改动原因：智控台模型配置需要用于实际维护，编辑模型时 API Key、token、secret 等字段必须回显数据库中保存的原始值，不再显示星号掩码，也不再用“你的API密钥”这类占位值替代。
+定制模块：manager-api 模型配置接口、manager-web 模型配置弹窗、xiaozhi-server 模型运行时初始化
+改动原因：模型管理统一为标准存储和标准运行时契约，清晰区分模型配置 ID、后台展示名、上游真实模型名、适配器编码、协议、普通参数和密钥参数。`ai_model_config` 保存通用字段，`ai_model_config_param` 保存普通 provider 参数，`ai_model_config_secret` 保存密钥参数；manager-api 下发 `selected_module + model_config`，xiaozhi-server 只把 `model_config.<modelId>.typed_config` 作为 provider 初始化来源。
 关键文件：
   - main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelConfigServiceImpl.java
+  - main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelRuntimeAssembler.java
+  - main/manager-api/src/main/java/xiaozhi/modules/model/dto/ModelConfigBodyDTO.java
+  - main/manager-api/src/main/java/xiaozhi/modules/model/dto/ModelConfigDTO.java
+  - main/manager-api/src/main/resources/db/changelog/202606221645.sql
+  - main/manager-api/src/main/java/xiaozhi/modules/config/service/impl/ConfigServiceImpl.java
   - main/manager-web/src/components/ModelEditDialog.vue
+  - main/manager-web/src/views/ModelConfig.vue
+  - docs/models/model-config-catalog.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改模型配置查询、编辑、列表 DTO 转换或模型配置弹窗，必须保留模型配置 configJson 原样返回和原样保存的约定；模型配置页可以直接看到已保存的 API Key。系统参数页是否脱敏按对应页面规则单独处理，不要把模型配置重新改回掩码协议。
+官方同步时的处理规则：如果官方修改模型配置查询、编辑、列表 DTO 转换、模型配置弹窗、配置下发或 Python 初始化流程，必须保留标准模型存储边界：新增/编辑接口提交 `adapterCode`、`protocol`、`upstreamModelId`、`endpointUrl`、`params`、`secrets`；后端保存到通用字段、参数表和密钥表；前端密钥只回显脱敏值，未修改的脱敏值保存时保留原密钥；运行时只下发 `selected_module + model_config`。
 ```
 
 ## 18. 管理后台模型批量性能测试
 
 ```text
 定制模块：manager-web 模型批量性能测试入口、manager-api 异步任务与结果入库、xiaozhi-server benchmark HTTP 接口和 runner
-改动原因：智控台需要在同一页面勾选多个模型并发起批量性能测试，用真实 provider 执行 LLM、ASR、TTS 等模型调用，记录成功率、延迟分位数、样本详情和未实测原因，避免只凭字段校验、WebSocket 握手成功或 0ms 结果误判模型可用性。LLM/SLM 测试需要按业务样本集选择主对话模型，每个 case 必须是真实多轮对话，候选模型逐轮回复并累积上下文，同一轮完整样本再打包给已有 LLM/SLM 模型配置作为 Judge 批量评分，减少逐条评审造成的割裂和慢请求；Judge 不单独维护 API Key 或环境变量，必须复用 `ai_model_config.config_json` 和已有 provider。ASR 测试必须覆盖所有语音识别供应器，不是豆包流式 ASR 的单点特例；所有 ASR 单模型测试和批量测试都必须上传或流式发送真实音频，并以非空识别文本作为通过依据。
+改动原因：智控台需要在同一页面勾选多个模型并发起批量性能测试，用真实 provider 执行 LLM、ASR、TTS 等模型调用，记录成功率、延迟分位数、样本详情和未实测原因，避免只凭字段校验、WebSocket 握手成功或 0ms 结果误判模型可用性。LLM/SLM 测试需要按业务样本集选择主对话模型，每个 case 必须是真实多轮对话，候选模型逐轮回复并累积上下文，同一轮完整样本再打包给已有 LLM/SLM 模型配置作为 Judge 批量评分，减少逐条评审造成的割裂和慢请求；Judge 不单独维护 API Key 或环境变量，必须复用标准模型配置和已有 provider。ASR 测试必须覆盖所有语音识别供应器，不是豆包流式 ASR 的单点特例；所有 ASR 单模型测试和批量测试都必须上传或流式发送真实音频，并以非空识别文本作为通过依据。
 关键文件：
   - main/xiaozhi-server/core/http_server.py
   - main/xiaozhi-server/core/api/benchmark_handler.py
@@ -320,5 +327,5 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/manager-web/src/components/ModelConfigAssistant.vue
   - main/manager-web/src/views/ModelConfig.vue
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改模型配置页、模型配置接口、LLM 配置表或 provider/catalog 结构，必须保留以下约定：助手设置只保存已配置 LLM 的 modelId；base_url、api_key、model_name 等凭据继续来自普通 LLM 模型配置；发送给助手的上下文必须脱敏；助手可以生成配置草案、协议接入草案、实现任务和自动化产物草案，并在用户点击后把产物写入工作区；写入必须限制在模型接入相关白名单路径，默认不覆盖已有文件，禁止绝对路径和路径越界；助手不得直接保存模型配置、启用模型、执行生产数据库变更或标记测试通过；协议不匹配时必须返回未适配，不能把同厂商的旧 adapter 当作新协议可用；真正接入新协议必须经过代码审核、数据库迁移审查和真实模型测试。
+官方同步时的处理规则：如果官方修改模型配置页、模型配置接口、LLM 配置表或 provider/catalog 结构，必须保留以下约定：助手设置只保存已配置 LLM 的 modelId；base_url、api_key、model_name 等凭据来自标准模型配置；发送给助手的上下文必须脱敏；助手可以生成配置草案、协议接入草案、实现任务和自动化产物草案，并在用户点击后把产物写入工作区；写入必须限制在模型接入相关白名单路径，默认不覆盖已有文件，禁止绝对路径和路径越界；助手不得直接保存模型配置、启用模型、执行生产数据库变更或标记测试通过；协议不匹配时必须返回未适配，不能把同厂商不同协议的 adapter 当作可用；真正接入新协议必须经过代码审核、数据库迁移审查和真实模型测试。
 ```

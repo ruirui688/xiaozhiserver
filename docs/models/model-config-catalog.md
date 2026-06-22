@@ -1,8 +1,8 @@
-# 模型配置 v2 全量目录
+# 标准模型配置目录
 
-本文档定义模型配置 v2 的分类目录、迁移原则和字段分层，用于收敛智控台模型配置、`xiaozhi-server` 运行配置、知识库 RAG、声纹和插件 RAG 的配置边界。
+本文档定义标准模型配置的分类目录、存储结构和字段分层，用于收敛智控台模型配置、`xiaozhi-server` 运行配置、知识库 RAG、声纹和插件 RAG 的配置边界。
 
-当前运行时下发以 `model_config_v2` 为模型配置源。`selected_module` 只表达每类能力选中的模型 ID；Python 入口会从 `model_config_v2` 生成只读兼容视图给旧调用点读取，不要求 `manager-api` 再下发 `ASR`、`TTS`、`LLM` 等 legacy 配置块。
+当前运行时下发以 `model_config` 为模型配置源。`selected_module` 只表达每类能力选中的模型 ID；Python 入口按 `model_config.<modelId>.typed_config` 初始化 provider。
 
 ## 1. 当前配置入口
 
@@ -11,14 +11,34 @@
 ```text
 ai_model_provider
   model_type      能力分类，例如 ASR、TTS、LLM、RAG、Plugin
-  provider_code   供应器或插件编码，通常对应 config_json.type 或函数名
+  provider_code   供应器或插件编码，通常对应 adapter_code 或函数名
   fields          智控台表单字段定义
 
 ai_model_config
   model_type      模型能力分类
   model_code      运行时模块名，例如 AliLLM、DoubaoTTS
-  model_name      后台展示名
-  config_json     供应器配置，当前作为 typed_config 的持久化来源
+  model_name      后台配置展示名
+  adapter_code    运行时适配器编码，对应 Python provider type
+  template_code   模板编码
+  vendor_name     厂商名称
+  product_name    产品/API名称
+  protocol        协议编码
+  upstream_model_id 上游真实模型、资源或服务 ID
+  endpoint_url    API / WebSocket / 本地服务端点
+
+ai_model_config_param
+  model_id        模型配置 ID
+  param_key       供应器普通字段
+  param_value     字段值
+  value_type      string / number / boolean / json
+  param_group     provider / generation / audio / advanced
+
+ai_model_config_secret
+  model_id        模型配置 ID
+  secret_key      密钥字段名
+  secret_value    密钥原文，仅服务端运行时使用
+  masked_value    前端回显脱敏值
+  value_type      secret
 
 ai_agent / ai_agent_template
   asr_model_id
@@ -41,10 +61,10 @@ sys_params / xiaozhi-server 配置
   server.voice_print / voiceprint
   server.voiceprint_similarity_threshold
   selected_module  每类能力当前选择的模型 ID
-  model_config_v2  运行时 typed_config 契约
+  model_config     运行时 typed_config 契约
 ```
 
-v2 的目标不是把所有配置塞进一张表，而是明确每一类配置的归属，避免模型、工具、知识库和运行参数互相混用。
+标准模型配置的目标不是把所有配置塞进一张 JSON，而是明确每一类配置的归属，避免模型 ID、展示名、上游模型名、协议字段、密钥和运行参数互相混用。
 
 ## 运行时契约
 
@@ -56,19 +76,16 @@ selected_module:
   TTS: TTS_xxx
   LLM: LLM_xxx
 
-model_config_v2:
+model_config:
   ASR_xxx:
     id
     model_type
+    display_name
     model_code
-    model_name
+    adapter_code
     template_code
-    provider_code
     vendor_name
     product_name
-    capability
-    access_mode
-    deployment
     protocol
     typed_config
 ```
@@ -77,9 +94,8 @@ model_config_v2:
 
 - `selected_module` 不再承载配置内容，只作为选择关系。
 - `typed_config` 是 Python provider 初始化的唯一配置来源。
-- 本地 `config.yaml` 旧格式会在 Python 启动入口归一化成 `model_config_v2`，用于本地开发兼容。
-- `ASR`、`TTS`、`LLM` 等 legacy map 只能作为 Python 内部兼容视图，不再作为 API 契约。
-- 后续数据库迁移应把 `template_code`、`provider_code`、`typed_config` 从 `config_json` 派生状态提升为一等字段。
+- `typed_config` 由 `ModelRuntimeAssembler` 从 `ai_model_config` 通用字段、`ai_model_config_param` 和 `ai_model_config_secret` 组装。
+- `model_config` 是 manager-api 到 xiaozhi-server 的唯一模型运行时契约。
 
 ## 2. 分类目录
 
@@ -113,12 +129,12 @@ qwen3_asr_flash
 xunfei_stream
 ```
 
-v2 归类原则：
+标准归类原则：
 
 - 非流式和流式 ASR 仍属于同一个 `ASR` 顶层能力，用字段标识 `streaming`、协议和断句能力，不新增 `StreamASR` 顶层分类。
 - 本地离线模型字段归入本地模型层，例如 `model_dir`、`model_path`、`model_type`、`output_dir`。
 - ASR 服务商自己的热词、多语种、ITN、VAD 断句等参数归入供应器扩展层。
-- 火山引擎豆包 ASR 必须区分旧版 HTTP、豆包大模型流式 ASR 和 Seed ASR 2.0；Resource ID 是上游服务资源，不是本地配置名。
+- 火山引擎豆包 ASR 必须区分 HTTP 接口、豆包大模型流式 ASR 和 Seed ASR 2.0；Resource ID 是上游服务资源，不是本地配置名。
 - 阿里云百炼 Paraformer 实时语音识别是 DashScope WebSocket 接入，官方文档固定服务端点为 `wss://dashscope.aliyuncs.com/api-ws/v1/inference`，鉴权通过 `Authorization: Bearer <api_key>` 请求头。
 - 讯飞语音听写是讯飞开放平台 WebSocket API，控制台获取 AppID、APIKey、APISecret，不能和星火大模型或普通 OpenAI 兼容字段混用。
 
@@ -160,12 +176,12 @@ index_stream
 xunfei_stream
 ```
 
-v2 归类原则：
+标准归类原则：
 
 - 非流式、HTTP 流式、WebSocket 双向流式都归入 `TTS`，通过 `streaming_mode`、`protocol`、`transport` 或供应器类型区分。
-- 音色是 TTS 的子资源，优先放入 `ai_tts_voice`；只有供应器运行必须携带的默认音色才保留在 `config_json.voice`、`speaker` 或 `voice_id`。
+- 音色是 TTS 的子资源，优先放入 `ai_tts_voice`；供应器运行必须携带的默认音色应作为 `voice`、`speaker` 或 `voice_id` 普通参数保存到 `ai_model_config_param`。
 - 语速、音量、音高、情感、混音、输出格式归入音频生成层；供应器原生复杂结构可保留在 `audio_params`、`additions`、`voice_setting` 等嵌套对象里。
-- 火山引擎豆包 TTS 必须区分旧版 HTTP、豆包大模型 WebSocket 双向流式和 Seed TTS 2.0；Seed TTS 2.0 的 `resource_id` 不应和旧版集群、音色或配置编码混用。
+- 火山引擎豆包 TTS 必须区分 HTTP 接口、豆包大模型 WebSocket 双向流式和 Seed TTS 2.0；Seed TTS 2.0 的 `resource_id` 不应和集群、音色或配置编码混用。
 - 百炼 CosyVoice、阿里云 NLS TTS、讯飞超拟人合成分别属于不同平台/产品线，后台展示必须拆分“服务商/部署方式”和“产品/系列”。
 
 ### LLM
@@ -194,7 +210,7 @@ fastgpt
 xinference
 ```
 
-v2 归类原则：
+标准归类原则：
 
 - OpenAI 兼容供应器使用统一字段：`base_url`、`model_name`、`api_key`、`temperature`、`max_tokens`、`top_p`、`frequency_penalty`。
 - Dify、Coze、FastGPT 这类应用型 LLM 仍归入 `LLM`，但字段应明确标注为应用接口，不强行套用纯模型字段。
@@ -221,7 +237,7 @@ qwen-vl
 讯飞星火视觉模型
 ```
 
-v2 归类原则：
+标准归类原则：
 
 - VLLM 是多模态理解能力，不并入 LLM。
 - `prompt`、`max_tokens`、`temperature`、`top_p` 属于视觉生成参数层。
@@ -248,7 +264,7 @@ ollama
 xinference
 ```
 
-v2 归类原则：
+标准归类原则：
 
 - SLM 不再混放到 `LLM` 下的 `XinferenceSmallLLM` 这类命名里；新增或迁移时优先使用 `model_type = SLM`。
 - SLM 用于意图、摘要、切片、轻量判断等辅助任务时，由上层配置引用 SLM 模型 ID，而不是复制一份接口参数。
@@ -276,7 +292,7 @@ mem0ai
 powermem
 ```
 
-v2 归类原则：
+标准归类原则：
 
 - `Memory` 是记忆系统，不是 LLM 或 RAG；它可以引用 LLM、SLM、Embedding、向量库，但不拥有这些模型的全量字段。
 - `mem_local_short.llm`、`powermem.llm` 等字段应逐步迁移为模型引用 ID，减少重复维护 API Key。
@@ -303,7 +319,7 @@ intent_llm
 function_call
 ```
 
-v2 归类原则：
+标准归类原则：
 
 - `Intent` 是路由策略，不是普通 LLM；它可以引用 LLM 或 SLM 作为思考模型。
 - `function_call` 是主 LLM 原生工具调用模式，要求主 LLM 支持结构化工具调用；不支持时运行时可降级为 `intent_llm`。
@@ -330,13 +346,13 @@ ragflow
 local_knowledge
 ```
 
-v2 归类原则：
+标准归类原则：
 
 - `RAG` 表示知识库后端，不表示“一个可直接对话的大模型”。
 - `ragflow` 这类外部 RAG 服务保留 `base_url`、`api_key`、超时等服务连接字段。
 - `local_knowledge` 这类本地知识库保留切片、召回和本地存储字段。
 - 知识库级 `parser_config` 可以覆盖 RAG 默认字段，但只能覆盖切片和解析相关字段，例如 `max_chunk_chars`、`llm_enabled`、`llm_base_url`、`llm_api_key`、`llm_model`、`llm_timeout_seconds`、`llm_max_input_chars`、`llm_max_tokens`。
-- 后续应把 `llm_*` 覆盖字段迁移为引用 `LLM` 或 `SLM` 模型 ID，只有临时兼容期才保留直填密钥。
+- `llm_*` 覆盖字段应表达为 `LLM` 或 `SLM` 模型 ID 引用，避免在知识库或记忆配置里直填密钥。
 
 ### VAD
 
@@ -357,7 +373,7 @@ config.yaml VAD.*
 silero
 ```
 
-v2 归类原则：
+标准归类原则：
 
 - VAD 是音频前处理模型，不并入 ASR。
 - `threshold`、`threshold_low`、`min_silence_duration_ms` 属于检测策略字段。
@@ -384,7 +400,7 @@ speakers
 similarity_threshold
 ```
 
-v2 归类原则：
+标准归类原则：
 
 - 声纹不是 ASR；它依赖音频输入，但输出说话人身份。
 - 声纹服务地址和阈值属于系统能力配置；说话人注册数据属于业务数据，不进入模型配置表。
@@ -411,7 +427,7 @@ Knowledge:
   ai_agent_knowledge_mapping / 插件映射关系
 ```
 
-v2 归类原则：
+标准归类原则：
 
 - `Plugin` 负责“什么时候触发工具”和“当前智能体是否启用工具”。
 - `RAG` 负责“用哪个知识库后端检索”和“如何连接、解析、召回”。
@@ -420,7 +436,7 @@ v2 归类原则：
 
 ## 3. 字段分层
 
-v2 字段按职责分层，新增字段时先判断落在哪一层。
+标准模型字段按职责分层，新增字段时先判断落在哪一层。
 
 ### 元数据层
 
@@ -431,6 +447,13 @@ id
 model_type
 model_code
 model_name
+adapter_code
+template_code
+vendor_name
+product_name
+protocol
+upstream_model_id
+endpoint_url
 is_default
 is_enabled
 sort
@@ -445,21 +468,24 @@ test_time
 
 - `model_type` 使用固定能力分类，大小写保持当前约定。
 - `model_code` 对应运行时模块名或配置名。
-- `provider_code` 来源于 `ai_model_provider.provider_code`，当前持久化兼容字段是 `config_json.type`，运行时契约中必须显式进入 `model_config_v2.provider_code`。
+- `model_name` 是后台配置展示名，不等于上游真实模型名。
+- `adapter_code` 来源于 `ai_model_provider.provider_code`，运行时进入 `typed_config.type`。
+- `upstream_model_id` 是发给上游 API 的真实模型、资源或服务 ID，运行时按 provider 需要映射为 `model_name`、`model` 或 `resource_id`。
+- `endpoint_url` 是 API、WebSocket 或本地服务端点，运行时按 provider 需要映射为 `base_url`、`api_url`、`url`、`ws_url` 或 `host`。
 
 ### 供应器层
 
 用于确定由哪个适配器处理。
 
 ```text
-config_json.type
+ai_model_config.adapter_code
 ai_model_provider.provider_code
 ai_model_provider.fields
 ```
 
 规则：
 
-- `config_json.type` 必须能映射到运行时 provider。
+- `adapter_code` 必须能映射到运行时 provider。
 - `fields` 只描述表单，不承担运行时默认值的唯一来源。
 - 供应器能力标签，例如是否流式、是否支持 function call、是否本地模型，应逐步从文案迁移为结构化能力字段。
 
@@ -486,6 +512,10 @@ authorization
 
 规则：
 
+- `endpoint_url` 放在 `ai_model_config` 主表。
+- `api_key`、`access_token`、`secret_key`、`api_secret`、`personal_access_token` 等密钥字段放在 `ai_model_config_secret`。
+- 非密钥连接参数，例如 `port`、`appid`、`app_id`、`secret_id`、`authorization` 等按是否敏感选择 `ai_model_config_param` 或 `ai_model_config_secret`。
+- 前端保存时提交 `params` 和 `secrets`；后端返回 `secrets` 时只返回 `masked_value`，未修改的脱敏值保存时保留原密钥。
 - 密钥字段必须按敏感信息处理，不写真实值进默认文档或 Git。
 - `base_url` 表示 API 根地址，`api_url` / `url` 表示具体接口地址，`ws_url` 表示 WebSocket 地址。
 - 服务下发地址，例如 `server.vision_explain`，属于系统参数，不放入模型供应器字段。
@@ -593,7 +623,7 @@ rag_model_id
 
 - Memory 的向量库和 RAG 的知识库是不同系统，不能共用一组字段名但语义不同。
 - RAG 的 `dataset_id` 是知识库实例 ID，不是模型 ID。
-- 知识库切片模型优先通过模型引用表达，兼容期内才允许 `llm_base_url`、`llm_api_key` 这类直填字段。
+- 知识库切片模型通过模型引用表达，不在知识库实例里直填 `llm_base_url`、`llm_api_key`。
 
 ### 工具与插件层
 
@@ -614,34 +644,34 @@ functions
 
 - `Plugin` 只保存工具定义和智能体参数覆盖，不保存 RAG 后端连接密钥。
 - `parameters_schema` 是工具调用参数 schema，不是模型配置 schema。
-- `custom_plugin` 是声明式互动兼容字段，不代表另一套插件系统。
+- `custom_plugin` 是声明式互动字段，不代表另一套插件系统。
 
-## 4. 迁移原则
+## 4. 标准化原则
 
-### 保持向后兼容
+### 标准字段作为事实来源
 
-迁移期间必须同时兼容：
+后台新增和编辑模型配置时，必须写入标准字段：
 
 ```text
-config.yaml / data/.config.yaml
-ai_model_config.config_json
-ai_model_provider.fields
-ai_agent / ai_agent_template 模型 ID 字段
-ai_rag_dataset.parser_config
-ai_agent_plugin_mapping.param_info
+ai_model_config.adapter_code
+ai_model_config.protocol
+ai_model_config.upstream_model_id
+ai_model_config.endpoint_url
+ai_model_config_param
+ai_model_config_secret
 ```
 
-禁止一次性删除旧字段。新增 v2 字段时，应先读新字段，缺失时回退旧字段；确认后台、运行时和部署文档都完成迁移后，再考虑清理旧字段。
+运行时、模型测试、模型评测和助手 LLM 调用都必须通过标准字段组装 typed config。
 
 ### 先分类，后抽象
 
-不要因为多个供应器都有 `api_key`、`model`、`url` 就强行抽一套单表结构。v2 优先统一：
+不要因为多个供应器都有 `api_key`、`model`、`url` 就把所有字段重新塞回一个 JSON。标准结构优先统一：
 
 ```text
 能力分类
 字段职责
 展示口径
-迁移边界
+存储边界
 ```
 
 只有当多个供应器的行为一致，且后台、测试、运行时都能复用时，才抽公共字段。
@@ -657,7 +687,7 @@ RAG 本地知识库切片引用 LLM/SLM
 插件需要调用模型时引用 LLM/SLM
 ```
 
-只有外部系统不支持模型 ID 或处于兼容期时，才在局部配置里复制 `base_url`、`api_key`、`model_name`。
+只有外部系统不支持模型 ID 时，才在局部配置里复制 `base_url`、`api_key`、`model_name`。
 
 ### 系统参数不混入模型配置
 
@@ -705,7 +735,7 @@ Redis 密码
 
 默认值只能使用空字符串、占位说明或脱敏示例。
 
-## 5. v2 推荐目录结构
+## 5. 标准推荐目录结构
 
 后续后台或配置服务可以按以下逻辑展示和维护：
 
@@ -775,9 +805,9 @@ No-code HTTP Tool
 2. 它是模型配置、系统参数、知识库实例、插件参数还是智能体覆盖。
 3. 它是否包含密钥、内网地址或真实业务数据。
 4. 它是否需要进入 `ai_model_provider.fields` 供后台编辑。
-5. 它是否需要进入 `ai_model_config.config_json` 供运行时读取。
+5. 它是否属于主表通用字段、`ai_model_config_param` 普通参数或 `ai_model_config_secret` 密钥参数。
 6. 它是否需要 per-agent 或 per-knowledge-base 覆盖。
 7. 它是否影响模型测试、性能测试或启用状态。
-8. 它是否需要从旧字段兼容读取。
+8. 它是否需要数据库迁移、测试接口或运行时组装同步更新。
 
 不满足以上检查时，不应直接新增散字段。

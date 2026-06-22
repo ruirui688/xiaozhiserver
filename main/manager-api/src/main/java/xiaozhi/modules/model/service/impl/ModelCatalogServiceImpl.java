@@ -144,7 +144,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         ModelCatalogDTO template = resolve(entity);
         if (template == null) {
             preview.setStatus("UNSUPPORTED");
-            preview.setNotes(List.of("未匹配到 v2 模板，需要先补充目录元数据或手动确认。"));
+            preview.setNotes(List.of("未匹配到标准模型模板，需要先补充目录元数据或手动确认。"));
             return preview;
         }
 
@@ -159,7 +159,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         List<String> notes = new ArrayList<>();
         if (missing.isEmpty()) {
             preview.setStatus("AUTO");
-            notes.add("可自动迁移到 v2 typed_config。");
+            notes.add("可自动整理为标准模型运行时配置。");
         } else {
             preview.setStatus("NEEDS_REVIEW");
             notes.add("缺少必填字段，迁移前需要补齐或确认。");
@@ -326,7 +326,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 List.of("secret_id", "secret_key"), List.of("secret_id", "secret_key"),
                 List.of("secret_id", "secret_key", "output_dir"),
                 List.of("当前运行时代码主要使用 SecretId/SecretKey，appid 仅作为旧模板字段保留。"),
-                List.of("旧 appid 字段会在 v2 中弱化。"), List.of("TencentASR"),
+                List.of("旧 appid 字段会在标准表单中弱化。"), List.of("TencentASR"),
                 "https://cloud.tencent.com/document/product/1093"));
         items.add(item("ASR_ALIYUN_NLS_HTTP", "ASR", "aliyun", "阿里云 NLS ASR",
                 "阿里云", "智能语音交互一句话识别", "asr", "语音识别", "http", "HTTP 非流式",
@@ -516,7 +516,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 "local", "自部署服务", "WebSocket", "服务地址", "url",
                 List.of(), List.of("url"), List.of("protocol", "spk_id", "speed", "volume"),
                 List.of("当前运行时代码只支持 websocket 分支。"),
-                List.of("protocol=http 不应在 v2 向导中作为可选项展示。"), List.of("PaddleSpeechTTS"),
+                List.of("protocol=http 不应在标准模型向导中作为可选项展示。"), List.of("PaddleSpeechTTS"),
                 "https://github.com/PaddlePaddle/PaddleSpeech"));
         items.add(item("TTS_INDEX_STREAM", "TTS", "index_stream", "IndexStreamTTS",
                 "IndexTTS", "Index-TTS-vLLM", "tts", "语音合成", "http-stream", "HTTP 流式",

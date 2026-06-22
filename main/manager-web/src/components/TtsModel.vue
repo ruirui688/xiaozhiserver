@@ -189,8 +189,8 @@ export default {
   methods: {
     // 更新是否显示参考列
     updateShowReferenceColumns() {
-      if (this.modelConfig && this.modelConfig.configJson) {
-        const providerType = this.modelConfig.configJson.type;
+      if (this.modelConfig) {
+        const providerType = this.modelConfig.adapterCode || this.modelConfig.providerCode;
         this.showReferenceColumns = ['fishspeech', 'gpt_sovits_v2', 'gpt_sovits_v3'].includes(providerType);
       } else {
         this.showReferenceColumns = false;

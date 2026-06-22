@@ -87,6 +87,7 @@ manager-web ModelConfig.vue
   -> 调用后台已有 LLM 配置的 chat completions 接口
   -> 解析结构化 JSON 响应
   -> 返回 supported、matchedAdapter、draftConfigJson、warnings、protocolSpecDraft、implementationTasks、integrationArtifacts
+  -> 前端把草案拆分为 adapterCode / endpointUrl / upstreamModelId / params / secrets 后保存
 ```
 
 产物写入链路：
@@ -122,7 +123,9 @@ manager-web 点击写入接入产物
 
 数据层 MySQL / Redis / sys_params
   - ai_model_benchmark_task/result/sample 保存评测历史
-  - ai_model_config 保存候选模型和 Judge/助手 LLM 配置
+  - ai_model_config 保存模型通用字段
+  - ai_model_config_param 保存 provider 普通参数
+  - ai_model_config_secret 保存 provider 密钥参数
   - sys_params 保存助手 LLM modelId 等系统参数
 ```
 
@@ -140,10 +143,10 @@ manager-web 点击写入接入产物
 
 ### 4.2 助手规则
 
-- 助手设置只保存已配置 LLM 的 `modelId`；`base_url`、`model_name`、`api_key` 等凭据继续来自普通 LLM 模型配置。
-- 发送给助手的 `configJson`、测试消息和文档上下文必须脱敏、截断，不能泄露 API Key、Secret、Token。
+- 助手设置只保存已配置 LLM 的 `modelId`；`base_url`、`model_name`、`api_key` 等凭据由标准模型字段、参数表和密钥表组装。
+- 发送给助手的标准模型字段、`params`、`secrets`、测试消息和文档上下文必须脱敏、截断，不能泄露 API Key、Secret、Token。
 - 是否支持某协议只能基于 `knownAdapters` 判断；厂商相同但协议不同必须返回未适配。
-- `draftConfigJson` 只能填表，不能绕过保存后的真实测试。
+- `draftConfigJson` 是助手草案响应字段名，不是模型配置保存契约；保存前必须拆分为标准字段、`params` 和 `secrets`，且不能绕过保存后的真实测试。
 - `integrationArtifacts` 是草案，不是已完成实现；提交前必须清理占位文件、补全真实实现和验证记录。
 - 产物写入必须限制在模型接入白名单路径，默认不覆盖已有文件，禁止绝对路径和 `..` 路径越界。
 

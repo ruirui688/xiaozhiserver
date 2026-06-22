@@ -97,8 +97,8 @@ public class ModelController {
         return new Result<PageData<ModelConfigDTO>>().ok(pageList);
     }
 
-    @GetMapping("/v2/catalog")
-    @Operation(summary = "获取模型配置 v2 全量目录")
+    @GetMapping("/catalog")
+    @Operation(summary = "获取标准模型配置目录")
     @RequiresPermissions("sys:role:superAdmin")
     public Result<List<ModelCatalogDTO>> getModelCatalog(
             @RequestParam(required = false) String modelType,
@@ -115,8 +115,8 @@ public class ModelController {
                         org.apache.commons.lang3.StringUtils.defaultIfBlank(vendor, platform)));
     }
 
-    @GetMapping("/v2/templates")
-    @Operation(summary = "获取模型配置 v2 可用模板")
+    @GetMapping("/templates")
+    @Operation(summary = "获取标准模型配置模板")
     @RequiresPermissions("sys:role:superAdmin")
     public Result<List<ModelCatalogDTO>> getModelTemplates(
             @RequestParam(required = false) String modelType,
@@ -127,8 +127,8 @@ public class ModelController {
                 org.apache.commons.lang3.StringUtils.defaultIfBlank(providerCode, provider)));
     }
 
-    @PostMapping("/v2/migrate/preview")
-    @Operation(summary = "预览旧模型配置迁移到 v2")
+    @PostMapping("/migration/preview")
+    @Operation(summary = "预览模型配置标准化结果")
     @RequiresPermissions("sys:role:superAdmin")
     public Result<List<ModelMigrationPreviewDTO>> previewModelMigration(
             @RequestParam(required = false) String modelType) {
