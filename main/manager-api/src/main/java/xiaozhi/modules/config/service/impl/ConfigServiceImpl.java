@@ -144,7 +144,34 @@ public class ConfigServiceImpl implements ConfigService {
         if (agent == null) {
             throw new RenException(ErrorCode.AGENT_NOT_FOUND);
         }
-        // 获取音色信息
+        return buildAgentRuntimeConfig(agent);
+    }
+
+    @Override
+    public Map<String, Object> getAgentRuntimeConfig(String agentId) {
+        if (StringUtils.isBlank(agentId)) {
+            throw new RenException(ErrorCode.AGENT_NOT_FOUND);
+        }
+        AgentEntity agent = agentService.getAgentById(agentId);
+        if (agent == null) {
+            throw new RenException(ErrorCode.AGENT_NOT_FOUND);
+        }
+        return buildAgentRuntimeConfig(agent);
+    }
+
+    @Override
+    public List<String> getCorrectWords(String macAddress) {
+        DeviceEntity device = deviceService.getDeviceByMacAddress(macAddress);
+        if (device == null) {
+            return Collections.emptyList();
+        }
+        List<CorrectWordSimpleVO> items = correctWordFileService.getAllItemsByAgentId(device.getAgentId());
+        return items.stream()
+                .map(item -> item.getSourceWord() + "|" + item.getTargetWord())
+                .collect(Collectors.toList());
+    }
+
+    private Map<String, Object> buildAgentRuntimeConfig(AgentEntity agent) {
         String voice = null;
         String referenceAudio = null;
         String referenceText = null;
@@ -154,27 +181,25 @@ public class ConfigServiceImpl implements ConfigService {
             voice = timbre.getTtsVoice();
             referenceAudio = timbre.getReferenceAudio();
             referenceText = timbre.getReferenceText();
-            // 优先使用用户选择的语言，如果没有则使用音色支持的第一个语言
             if (StringUtils.isNotBlank(agent.getTtsLanguage())) {
                 language = agent.getTtsLanguage();
             } else if (StringUtils.isNotBlank(timbre.getLanguages())) {
                 language = timbre.getLanguages().split("、")[0].trim();
             }
         } else {
-            VoiceCloneEntity voice_print = cloneVoiceService.selectById(agent.getTtsVoiceId());
-            if (voice_print != null) {
-                voice = voice_print.getVoiceId();
-                // 优先使用用户选择的语言，如果没有则使用默认值
+            VoiceCloneEntity voicePrint = cloneVoiceService.selectById(agent.getTtsVoiceId());
+            if (voicePrint != null) {
+                voice = voicePrint.getVoiceId();
                 language = StringUtils.isNotBlank(agent.getTtsLanguage()) ? agent.getTtsLanguage() : "普通话";
             }
         }
-        // 构建返回数据
+
         Map<String, Object> result = new HashMap<>();
-        // 获取单台设备每天最多输出字数
+        result.put("agent_id", agent.getId());
+        result.put("agent_name", agent.getAgentName());
         String deviceMaxOutputSize = sysParamsService.getValue("device_max_output_size", true);
         result.put("device_max_output_size", deviceMaxOutputSize);
 
-        // 获取聊天记录配置
         Integer chatHistoryConf = agent.getChatHistoryConf();
         if (agent.getMemModelId() != null && agent.getMemModelId().equals(Constant.MEMORY_NO_MEM)) {
             chatHistoryConf = Constant.ChatHistoryConfEnum.IGNORE.getCode();
@@ -184,10 +209,9 @@ public class ConfigServiceImpl implements ConfigService {
             chatHistoryConf = Constant.ChatHistoryConfEnum.RECORD_TEXT_AUDIO.getCode();
         }
         result.put("chat_history_conf", chatHistoryConf);
-        // 添加函数调用参数信息
+
         if (!Objects.equals(agent.getIntentModelId(), "Intent_nointent")) {
-            String agentId = agent.getId();
-            List<AgentPluginMapping> pluginMappings = agentPluginMappingService.agentPluginParamsByAgentId(agentId);
+            List<AgentPluginMapping> pluginMappings = agentPluginMappingService.agentPluginParamsByAgentId(agent.getId());
             if (pluginMappings != null && !pluginMappings.isEmpty()) {
                 Map<String, Object> pluginParams = new HashMap<>();
                 for (AgentPluginMapping pluginMapping : pluginMappings) {
@@ -196,24 +220,19 @@ public class ConfigServiceImpl implements ConfigService {
                 result.put("plugins", pluginParams);
             }
         }
-        // 获取mcp接入点地址
+
         String mcpEndpoint = agentMcpAccessPointService.getAgentMcpAccessAddress(agent.getId());
         if (StringUtils.isNotBlank(mcpEndpoint) && mcpEndpoint.startsWith("ws")) {
-            mcpEndpoint = mcpEndpoint.replace("/mcp/", "/call/");
-            result.put("mcp_endpoint", mcpEndpoint);
+            result.put("mcp_endpoint", mcpEndpoint.replace("/mcp/", "/call/"));
         }
 
-        // 获取上下文源配置
         AgentContextProviderEntity contextProviderEntity = agentContextProviderService.getByAgentId(agent.getId());
         if (contextProviderEntity != null && contextProviderEntity.getContextProviders() != null
                 && !contextProviderEntity.getContextProviders().isEmpty()) {
             result.put("context_providers", contextProviderEntity.getContextProviders());
         }
 
-        // 获取声纹信息
         buildVoiceprintConfig(agent.getId(), result);
-
-        // 构建模块配置
         buildModuleConfig(
                 agent.getAgentName(),
                 agent.getSystemPrompt(),
@@ -236,20 +255,7 @@ public class ConfigServiceImpl implements ConfigService {
                 null,
                 result,
                 true);
-
         return result;
-    }
-
-    @Override
-    public List<String> getCorrectWords(String macAddress) {
-        DeviceEntity device = deviceService.getDeviceByMacAddress(macAddress);
-        if (device == null) {
-            return Collections.emptyList();
-        }
-        List<CorrectWordSimpleVO> items = correctWordFileService.getAllItemsByAgentId(device.getAgentId());
-        return items.stream()
-                .map(item -> item.getSourceWord() + "|" + item.getTargetWord())
-                .collect(Collectors.toList());
     }
 
     /**

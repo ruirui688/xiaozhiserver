@@ -22,6 +22,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 
@@ -35,6 +36,9 @@ import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import xiaozhi.common.exception.ErrorCode;
 import xiaozhi.common.exception.RenException;
+import xiaozhi.modules.agent.dao.AgentDao;
+import xiaozhi.modules.agent.entity.AgentEntity;
+import xiaozhi.modules.config.service.ConfigService;
 import xiaozhi.modules.model.dao.ModelBenchmarkResultDao;
 import xiaozhi.modules.model.dao.ModelBenchmarkSampleDao;
 import xiaozhi.modules.model.dao.ModelBenchmarkTaskDao;
@@ -63,10 +67,11 @@ public class ModelBenchmarkServiceImpl implements ModelBenchmarkService {
     private static final int MAX_MODELS = 50;
     private static final Executor BENCHMARK_EXECUTOR = Executors.newFixedThreadPool(2);
     private static final Map<String, JSONObject> JUDGE_CONFIGS = new ConcurrentHashMap<>();
+    private static final Map<String, JSONObject> AGENT_CONTEXTS = new ConcurrentHashMap<>();
     private static final List<String> METRIC_NOTES = List.of(
             "专业评测由 xiaozhi-server 真实 provider 执行，不再用 Java 配置校验冒充模型请求。",
             "LLM/SLM 使用业务样本和 LLMJudge 六维评分，覆盖酒水推荐、情绪陪伴、安全边界、RAG事实、多轮记忆和闲聊。",
-            "LLMJudge 默认通过环境变量配置 DeepSeek v4 pro；不可用时自动降级为启发式评估，并在报告中标记评审模式。",
+            "LLMJudge 默认使用 DeepSeek/OpenAI Compatible 非推理评审模型；不可用时自动降级为启发式评估，并在报告中标记评审模式。",
             "ASR 关注真实音频识别延时、空识别率、CER/WER；缺少参考文本时不计算准确率。",
             "TTS 关注合成总耗时、首音频耗时、音频有效性和 RTF。",
             "未覆盖的指标显示为未实测，不计入失败，也不修改模型启用状态。");
@@ -75,6 +80,8 @@ public class ModelBenchmarkServiceImpl implements ModelBenchmarkService {
     private final ModelBenchmarkResultDao resultDao;
     private final ModelBenchmarkSampleDao sampleDao;
     private final ModelConfigDao modelConfigDao;
+    private final AgentDao agentDao;
+    private final ConfigService configService;
     private final SysParamsService sysParamsService;
     private final Environment environment;
 
@@ -110,6 +117,10 @@ public class ModelBenchmarkServiceImpl implements ModelBenchmarkService {
         if (!judgeConfig.isEmpty()) {
             JUDGE_CONFIGS.put(task.getId(), judgeConfig);
         }
+        JSONObject agentContext = buildAgentContext(request);
+        if (!agentContext.isEmpty()) {
+            AGENT_CONTEXTS.put(task.getId(), agentContext);
+        }
         CompletableFuture.runAsync(() -> runTask(task.getId()), BENCHMARK_EXECUTOR);
 
         ModelBenchmarkCreateResponseDTO response = new ModelBenchmarkCreateResponseDTO();
@@ -144,6 +155,27 @@ public class ModelBenchmarkServiceImpl implements ModelBenchmarkService {
                 .toList();
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteBenchmarkTask(String taskId) {
+        if (StringUtils.isBlank(taskId)) {
+            throw new RenException(ErrorCode.IDENTIFIER_NOT_NULL);
+        }
+        ModelBenchmarkTaskEntity task = taskDao.selectById(taskId);
+        if (task == null) {
+            throw new RenException(ErrorCode.RESOURCE_NOT_FOUND);
+        }
+        String status = StringUtils.defaultString(task.getStatus());
+        if (!List.of("SUCCEEDED", "FAILED", "CANCELLED").contains(status)) {
+            throw new RenException("评测任务仍在执行或等待中，请结束后再删除历史记录。");
+        }
+        sampleDao.delete(new QueryWrapper<ModelBenchmarkSampleEntity>().eq("task_id", taskId));
+        resultDao.delete(new QueryWrapper<ModelBenchmarkResultEntity>().eq("task_id", taskId));
+        taskDao.deleteById(taskId);
+        JUDGE_CONFIGS.remove(taskId);
+        AGENT_CONTEXTS.remove(taskId);
+    }
+
     private void runTask(String taskId) {
         ModelBenchmarkTaskEntity task = taskDao.selectById(taskId);
         if (task == null) {
@@ -162,24 +194,46 @@ public class ModelBenchmarkServiceImpl implements ModelBenchmarkService {
                     System.currentTimeMillis() - startedMs);
         } finally {
             JUDGE_CONFIGS.remove(taskId);
+            AGENT_CONTEXTS.remove(taskId);
         }
     }
 
     private JSONObject buildJudgeConfig(ModelPerformanceTestRequestDTO request) {
         JSONObject config = new JSONObject();
-        if (StringUtils.isNotBlank(request.getJudgeBaseUrl())) {
-            config.set("base_url", request.getJudgeBaseUrl().trim());
+        if (StringUtils.isBlank(request.getJudgeModelId())) {
+            return config;
         }
-        if (StringUtils.isNotBlank(request.getJudgeModel())) {
-            config.set("model", request.getJudgeModel().trim());
+        ModelConfigEntity judgeModel = modelConfigDao.selectById(request.getJudgeModelId().trim());
+        if (judgeModel == null || judgeModel.getConfigJson() == null) {
+            throw new RenException("评审模型配置不存在或配置为空，请在模型配置中选择一个可用的 LLM。");
         }
-        if (StringUtils.isNotBlank(request.getJudgeApiKey())) {
-            config.set("api_key", request.getJudgeApiKey().trim());
+        if (!"LLM".equalsIgnoreCase(StringUtils.defaultString(judgeModel.getModelType()))
+                && !"SLM".equalsIgnoreCase(StringUtils.defaultString(judgeModel.getModelType()))) {
+            throw new RenException("评审模型必须选择已有的 LLM/SLM 模型配置。");
         }
-        if (request.getJudgeTimeout() != null && request.getJudgeTimeout() > 0) {
-            config.set("timeout", request.getJudgeTimeout());
-        }
+        config.set("model_id", judgeModel.getId());
+        config.set("model_name", judgeModel.getModelName());
+        config.set("model_type", judgeModel.getModelType());
+        config.set("provider_type", judgeModel.getConfigJson().getStr("type"));
+        config.set("config", judgeModel.getConfigJson());
         return config;
+    }
+
+    private JSONObject buildAgentContext(ModelPerformanceTestRequestDTO request) {
+        JSONObject context = new JSONObject();
+        if (StringUtils.isBlank(request.getAgentId())) {
+            return context;
+        }
+        String agentId = request.getAgentId().trim();
+        AgentEntity agent = agentDao.selectById(agentId);
+        if (agent == null) {
+            throw new RenException("测试智能体不存在，请重新选择。");
+        }
+        Map<String, Object> runtimeConfig = configService.getAgentRuntimeConfig(agentId);
+        context.set("agent_id", agent.getId());
+        context.set("agent_name", agent.getAgentName());
+        context.set("runtime_config", runtimeConfig == null ? Map.of() : runtimeConfig);
+        return context;
     }
 
     private void runModelBenchmarks(ModelBenchmarkTaskEntity task, List<JSONObject> models) {
@@ -253,6 +307,11 @@ public class ModelBenchmarkServiceImpl implements ModelBenchmarkService {
         JSONObject judgeConfig = JUDGE_CONFIGS.get(task.getId());
         if (judgeConfig != null && !judgeConfig.isEmpty()) {
             payload.set("judge_config", judgeConfig);
+        }
+        JSONObject agentContext = AGENT_CONTEXTS.get(task.getId());
+        if (agentContext != null && !agentContext.isEmpty()
+                && ("LLM".equalsIgnoreCase(task.getModelType()) || "SLM".equalsIgnoreCase(task.getModelType()))) {
+            payload.set("agent_context", agentContext);
         }
         return payload;
     }

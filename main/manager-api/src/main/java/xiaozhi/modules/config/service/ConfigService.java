@@ -22,6 +22,14 @@ public interface ConfigService {
     Map<String, Object> getAgentModels(String macAddress, Map<String, String> selectedModule);
 
     /**
+     * 按智能体ID构建运行时配置，用于后台评测等无设备连接场景。
+     *
+     * @param agentId 智能体ID
+     * @return 智能体运行配置
+     */
+    Map<String, Object> getAgentRuntimeConfig(String agentId);
+
+    /**
      * 获取智能体替换词
      *
      * @param macAddress 设备MAC地址

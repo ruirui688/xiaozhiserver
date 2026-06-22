@@ -21,8 +21,9 @@ from core.benchmark.metrics import (
 )
 from core.benchmark.llm_cases import LLM_BENCHMARK_CASES
 from core.benchmark.llm_judge import (
-    build_case_dialogue,
-    evaluate_llm_case,
+    build_case_dialogue_with_history,
+    evaluate_llm_case_batch,
+    get_case_turns,
     summarize_llm_judge,
 )
 from core.providers.tts.dto.dto import InterfaceType
@@ -48,12 +49,13 @@ async def run_benchmark(payload):
     iterations = int(payload.get("iterations") or 3)
     concurrency = max(1, min(int(payload.get("concurrency") or 3), 8))
     judge_config = payload.get("judge_config") or {}
+    agent_context = payload.get("agent_context") or {}
     loop = asyncio.get_running_loop()
     with ThreadPoolExecutor(max_workers=concurrency) as executor:
         tasks = [
             loop.run_in_executor(
                 executor,
-                lambda item=model: asyncio.run(_run_model(item, iterations, judge_config)),
+                lambda item=model: asyncio.run(_run_model(item, iterations, judge_config, agent_context)),
             )
             for model in models
         ]
@@ -68,12 +70,12 @@ async def run_benchmark(payload):
     return {"task_id": payload.get("task_id"), "results": normalized_results}
 
 
-async def _run_model(model, iterations, judge_config=None):
+async def _run_model(model, iterations, judge_config=None, agent_context=None):
     model_type = str(model.get("model_type") or "").upper()
     provider_type = str(model.get("provider_type") or model.get("config", {}).get("type") or "")
     config = _prepare_runtime_config(model.get("config") or {})
     if model_type in ("LLM", "SLM"):
-        return await _run_llm(model, provider_type, config, iterations, judge_config or {})
+        return await _run_llm(model, provider_type, config, iterations, judge_config or {}, agent_context or {})
     if model_type == "ASR":
         return await _run_asr(model, provider_type, config, iterations)
     if model_type == "TTS":
@@ -81,46 +83,63 @@ async def _run_model(model, iterations, judge_config=None):
     return _unsupported_result(model, "当前专业评测暂未覆盖该模型类型")
 
 
-async def _run_llm(model, provider_type, config, iterations, judge_config=None):
+async def _run_llm(model, provider_type, config, iterations, judge_config=None, agent_context=None):
     llm = create_llm_instance(provider_type, config)
     samples = []
     case_iteration = 0
     for repeat in range(iterations):
+        batch_inputs = []
         for case in LLM_BENCHMARK_CASES:
             case_iteration += 1
-            started = time.perf_counter()
+            conversation = []
+            total_latency_ms = 0
             first_token_ms = None
-            output = ""
+            final_output = ""
             message = "OK"
+            token_count = 0
             try:
-                dialogue = build_case_dialogue(case)
-                token_count = 0
-                for chunk in llm.response("benchmark", dialogue):
-                    if chunk:
-                        if first_token_ms is None:
-                            first_token_ms = int((time.perf_counter() - started) * 1000)
-                        output += str(chunk)
-                        token_count += 1
-                latency_ms = int((time.perf_counter() - started) * 1000)
-                tokens_per_second = round_number(token_count / max(latency_ms / 1000, 0.001), 2)
-                if not output.strip():
-                    message = "模型返回为空"
+                turns = get_case_turns(case)
+                if not turns:
+                    raise RuntimeError("LLM评测样本缺少多轮用户输入")
+                for turn in turns:
+                    conversation.append({"role": "user", "content": turn})
+                    started = time.perf_counter()
+                    turn_output = ""
+                    dialogue = build_case_dialogue_with_history(case, conversation, agent_context)
+                    for chunk in llm.response("benchmark", dialogue):
+                        if chunk:
+                            if first_token_ms is None:
+                                first_token_ms = int((time.perf_counter() - started) * 1000)
+                            turn_output += str(chunk)
+                            token_count += 1
+                    turn_latency_ms = int((time.perf_counter() - started) * 1000)
+                    total_latency_ms += turn_latency_ms
+                    final_output = turn_output
+                    conversation.append({"role": "assistant", "content": turn_output})
+                    if not turn_output.strip():
+                        message = "模型返回为空"
+                        break
+                tokens_per_second = round_number(token_count / max(total_latency_ms / 1000, 0.001), 2)
             except Exception as exc:
-                latency_ms = int((time.perf_counter() - started) * 1000)
+                total_latency_ms = total_latency_ms or 0
                 tokens_per_second = None
                 message = str(exc)
-            sample = evaluate_llm_case(
-                case,
-                output,
-                latency_ms=latency_ms,
-                ttft_ms=first_token_ms,
-                tokens_per_second=tokens_per_second,
-                judge_config=judge_config or {},
-            )
-            sample["iteration"] = case_iteration
-            sample["sample_type"] = f"llm_judge:{case.get('scenario')}"
-            if message != "OK" and not output.strip():
-                sample["message"] = message
+            batch_inputs.append({
+                "case": case,
+                "output": final_output,
+                "conversation": conversation,
+                "latency_ms": total_latency_ms,
+                "ttft_ms": first_token_ms,
+                "tokens_per_second": tokens_per_second,
+                "iteration": case_iteration,
+                "message": message,
+            })
+        judged_samples = evaluate_llm_case_batch(batch_inputs, judge_config or {}, agent_context or {})
+        for item, sample in zip(batch_inputs, judged_samples):
+            sample["iteration"] = item.get("iteration")
+            sample["sample_type"] = f"llm_judge_batch:{item.get('case', {}).get('scenario')}"
+            if item.get("message") != "OK" and not str(item.get("output") or "").strip():
+                sample["message"] = item.get("message")
                 sample["error_type"] = "EMPTY_OR_ERROR"
             samples.append(sample)
     return _summarize(model, "REAL_INFERENCE", "真实推理", samples)

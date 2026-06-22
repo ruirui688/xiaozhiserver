@@ -21,6 +21,9 @@ import xiaozhi.common.utils.Result;
 import xiaozhi.modules.agent.service.AgentTemplateService;
 import xiaozhi.modules.config.service.ConfigService;
 import xiaozhi.modules.model.dto.LlmModelBasicInfoDTO;
+import xiaozhi.modules.model.dto.ModelAssistantRequestDTO;
+import xiaozhi.modules.model.dto.ModelAssistantResponseDTO;
+import xiaozhi.modules.model.dto.ModelAssistantSettingsDTO;
 import xiaozhi.modules.model.dto.ModelBenchmarkCreateResponseDTO;
 import xiaozhi.modules.model.dto.ModelBenchmarkTaskDTO;
 import xiaozhi.modules.model.dto.ModelBasicInfoDTO;
@@ -35,6 +38,7 @@ import xiaozhi.modules.model.dto.VoiceDTO;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelBenchmarkService;
 import xiaozhi.modules.model.service.ModelCatalogService;
+import xiaozhi.modules.model.service.ModelAssistantService;
 import xiaozhi.modules.model.service.ModelConfigService;
 import xiaozhi.modules.model.service.ModelProviderService;
 import xiaozhi.modules.timbre.service.TimbreService;
@@ -50,6 +54,7 @@ public class ModelController {
     private final ModelConfigService modelConfigService;
     private final ModelBenchmarkService modelBenchmarkService;
     private final ModelCatalogService modelCatalogService;
+    private final ModelAssistantService modelAssistantService;
     private final ConfigService configService;
     private final AgentTemplateService agentTemplateService;
 
@@ -128,6 +133,29 @@ public class ModelController {
         return new Result<List<ModelMigrationPreviewDTO>>().ok(modelCatalogService.previewMigration(modelType));
     }
 
+    @GetMapping("/assistant/settings")
+    @Operation(summary = "获取模型配置助手设置")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<ModelAssistantSettingsDTO> getAssistantSettings() {
+        return new Result<ModelAssistantSettingsDTO>().ok(modelAssistantService.getSettings());
+    }
+
+    @PutMapping("/assistant/settings")
+    @Operation(summary = "更新模型配置助手设置")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<ModelAssistantSettingsDTO> updateAssistantSettings(
+            @RequestBody ModelAssistantSettingsDTO settings) {
+        return new Result<ModelAssistantSettingsDTO>().ok(modelAssistantService.updateSettings(settings));
+    }
+
+    @PostMapping("/assistant/chat")
+    @Operation(summary = "模型配置智能助手")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<ModelAssistantResponseDTO> chatWithAssistant(
+            @RequestBody ModelAssistantRequestDTO request) {
+        return new Result<ModelAssistantResponseDTO>().ok(modelAssistantService.chat(request));
+    }
+
     @PostMapping("/{modelType}/{provideCode}")
     @Operation(summary = "新增模型配置")
     @RequiresPermissions("sys:role:superAdmin")
@@ -194,6 +222,14 @@ public class ModelController {
             @RequestParam(required = false) String modelType,
             @RequestParam(required = false, defaultValue = "20") Integer limit) {
         return new Result<List<ModelBenchmarkTaskDTO>>().ok(modelBenchmarkService.listBenchmarkTasks(modelType, limit));
+    }
+
+    @DeleteMapping("/benchmark/{taskId}")
+    @Operation(summary = "删除模型专业评测历史任务")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<Void> deleteBenchmarkTask(@PathVariable String taskId) {
+        modelBenchmarkService.deleteBenchmarkTask(taskId);
+        return new Result<>();
     }
 
     @GetMapping("/{id}")

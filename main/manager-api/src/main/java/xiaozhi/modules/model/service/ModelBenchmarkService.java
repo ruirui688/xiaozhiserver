@@ -13,4 +13,6 @@ public interface ModelBenchmarkService {
     ModelBenchmarkTaskDTO getBenchmarkTask(String taskId);
 
     List<ModelBenchmarkTaskDTO> listBenchmarkTasks(String modelType, Integer limit);
+
+    void deleteBenchmarkTask(String taskId);
 }

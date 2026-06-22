@@ -275,10 +275,17 @@
               </div>
             </div>
           </el-card>
+          <ModelConfigAssistant
+            :visible="assistantVisible"
+            :context="assistantContext"
+            @toggle="toggleAssistant"
+            @apply-draft="applyAssistantDraft"
+          />
         </div>
       </div>
 
       <ModelEditDialog
+        ref="editModelDialog"
         :modelType="activeTab"
         :visible.sync="editDialogVisible"
         :modelData="editModelData"
@@ -291,6 +298,7 @@
         :modelConfig="selectedModelConfig"
       />
       <AddModelDialog
+        ref="addModelDialog"
         :modelType="activeTab"
         :visible.sync="addDialogVisible"
         @confirm="handleAddConfirm"
@@ -384,46 +392,74 @@
         <div class="performance-judge-config">
           <div class="performance-judge-config-title">
             <span>{{ $t("modelConfig.judgeConfigTitle") }}</span>
-            <small>{{ $t("modelConfig.judgeConfigHint") }}</small>
-          </div>
-          <div class="performance-judge-config-grid">
-            <el-input
-              v-model="performanceJudgeBaseUrl"
-              size="mini"
-              :disabled="performanceTesting"
-              :placeholder="$t('modelConfig.judgeBaseUrl')"
-            >
-              <template slot="prepend">{{ $t("modelConfig.judgeBaseUrl") }}</template>
-            </el-input>
-            <el-input
-              v-model="performanceJudgeModel"
-              size="mini"
-              :disabled="performanceTesting"
-              :placeholder="$t('modelConfig.judgeModel')"
-            >
-              <template slot="prepend">{{ $t("modelConfig.judgeModel") }}</template>
-            </el-input>
-            <el-input
-              v-model="performanceJudgeApiKey"
-              size="mini"
-              show-password
-              clearable
-              :disabled="performanceTesting"
-              :placeholder="$t('modelConfig.judgeApiKeyPlaceholder')"
-            >
-              <template slot="prepend">{{ $t("modelConfig.judgeApiKey") }}</template>
-            </el-input>
-            <div class="performance-judge-timeout">
-              <span>{{ $t("modelConfig.judgeTimeout") }}</span>
-              <el-input-number
-                v-model="performanceJudgeTimeout"
-                :min="5"
-                :max="180"
+            <div class="performance-judge-config-actions">
+              <small>{{ $t("modelConfig.judgeConfigHint") }}</small>
+              <el-button
                 size="mini"
-                controls-position="right"
+                plain
+                icon="el-icon-refresh-left"
                 :disabled="performanceTesting"
-              />
+                @click="clearPerformanceJudgeConfig"
+              >
+                {{ $t("modelConfig.clearJudgeConfig") }}
+              </el-button>
             </div>
+          </div>
+          <div class="performance-judge-model-row">
+            <span class="performance-judge-label">{{ $t("modelConfig.judgeModel") }}</span>
+            <el-select
+              v-model="performanceJudgeModelId"
+              size="mini"
+              clearable
+              filterable
+              :disabled="performanceTesting"
+              :placeholder="$t('modelConfig.judgeModelPlaceholder')"
+            >
+              <el-option
+                v-for="item in performanceJudgeModels"
+                :key="item.id"
+                :label="formatJudgeModelOption(item)"
+                :value="item.id"
+              />
+            </el-select>
+            <el-button
+              size="mini"
+              plain
+              icon="el-icon-refresh"
+              :loading="performanceJudgeModelsLoading"
+              :disabled="performanceTesting"
+              @click="loadPerformanceJudgeModels"
+            >
+              {{ $t("modelConfig.refreshJudgeModels") }}
+            </el-button>
+          </div>
+          <div class="performance-judge-model-row performance-agent-row">
+            <span class="performance-judge-label">{{ $t("modelConfig.performanceAgent") }}</span>
+            <el-select
+              v-model="performanceAgentId"
+              size="mini"
+              clearable
+              filterable
+              :disabled="performanceTesting"
+              :placeholder="$t('modelConfig.performanceAgentPlaceholder')"
+            >
+              <el-option
+                v-for="item in performanceAgents"
+                :key="item.id"
+                :label="formatPerformanceAgentOption(item)"
+                :value="item.id"
+              />
+            </el-select>
+            <el-button
+              size="mini"
+              plain
+              icon="el-icon-refresh"
+              :loading="performanceAgentsLoading"
+              :disabled="performanceTesting"
+              @click="loadPerformanceAgents"
+            >
+              {{ $t("modelConfig.refreshAgents") }}
+            </el-button>
           </div>
         </div>
         <div v-if="performanceReport" class="performance-progress-panel">
@@ -691,7 +727,10 @@
                       {{ message.content || "-" }}
                     </div>
                   </div>
-                  <div class="performance-bubble-row is-assistant is-output">
+                  <div
+                    v-if="!hasFullSampleConversation(selectedPerformanceSample)"
+                    class="performance-bubble-row is-assistant is-output"
+                  >
                     <div class="performance-bubble-label">{{ getSampleOutputLabel(selectedPerformanceSample) }}</div>
                     <div class="performance-bubble">
                       {{ getSampleAssistantText(selectedPerformanceSample) }}
@@ -880,7 +919,7 @@
           />
           <el-table-column
             :label="$t('modelConfig.historyOperation')"
-            width="100"
+            width="145"
           >
             <template slot-scope="scope">
               <el-button
@@ -889,6 +928,14 @@
                 @click="viewPerformanceHistory(scope.row)"
               >
                 {{ $t("modelConfig.viewHistoryDetail") }}
+              </el-button>
+              <el-button
+                type="text"
+                size="mini"
+                class="history-delete-btn"
+                @click="deletePerformanceHistory(scope.row)"
+              >
+                {{ $t("common.delete") }}
               </el-button>
             </template>
           </el-table-column>
@@ -922,11 +969,18 @@
 import Api from "@/apis/api";
 import AddModelDialog from "@/components/AddModelDialog.vue";
 import HeaderBar from "@/components/HeaderBar.vue";
+import ModelConfigAssistant from "@/components/ModelConfigAssistant.vue";
 import ModelEditDialog from "@/components/ModelEditDialog.vue";
 import TtsModel from "@/components/TtsModel.vue";
 import VersionFooter from "@/components/VersionFooter.vue";
+
+const PERFORMANCE_JUDGE_CONFIG_STORAGE_KEY = "xiaozhi.performanceJudgeConfig";
+const DEFAULT_PERFORMANCE_JUDGE_CONFIG = {
+  modelId: "",
+  agentId: "",
+};
 export default {
-  components: { HeaderBar, ModelEditDialog, TtsModel, AddModelDialog, VersionFooter },
+  components: { HeaderBar, ModelEditDialog, ModelConfigAssistant, TtsModel, AddModelDialog, VersionFooter },
   data() {
     return {
       addDialogVisible: false,
@@ -952,10 +1006,12 @@ export default {
       performanceTesting: false,
       performanceIterations: 1,
       performanceConcurrency: 1,
-      performanceJudgeBaseUrl: "https://api.deepseek.com",
-      performanceJudgeModel: "deepseek-v4-pro",
-      performanceJudgeApiKey: "",
-      performanceJudgeTimeout: 60,
+      performanceJudgeModelId: DEFAULT_PERFORMANCE_JUDGE_CONFIG.modelId,
+      performanceJudgeModels: [],
+      performanceJudgeModelsLoading: false,
+      performanceAgentId: DEFAULT_PERFORMANCE_JUDGE_CONFIG.agentId,
+      performanceAgents: [],
+      performanceAgentsLoading: false,
       performanceReport: null,
       performanceTaskId: "",
       performancePollTimer: null,
@@ -964,10 +1020,16 @@ export default {
       performanceHistoryVisible: false,
       performanceHistoryLoading: false,
       performanceHistory: [],
+      assistantVisible: false,
+      assistantTarget: null,
+      pendingAssistantDraft: null,
     };
   },
 
   created() {
+    this.loadPerformanceJudgeConfig();
+    this.loadPerformanceJudgeModels();
+    this.loadPerformanceAgents();
     this.loadData();
   },
 
@@ -1036,6 +1098,20 @@ export default {
         samples.find((item) => this.getPerformanceSampleKey(item) === this.selectedPerformanceSampleKey) ||
         samples[0]
       );
+    },
+    assistantContext() {
+      const target = this.assistantTarget || {};
+      const configJson = target.configJson || {};
+      return {
+        modelType: this.activeTab.toUpperCase(),
+        modelId: target.id || "",
+        modelName: target.modelName || "",
+        providerCode: target.providerCode || target.providerType || configJson.type || "",
+        configJson,
+        docLink: target.docLink || "",
+        testMessage: target.testMessage || "",
+        pageContext: this.editDialogVisible ? "edit" : this.addDialogVisible ? "add" : "list",
+      };
     },
   },
 
@@ -1128,9 +1204,14 @@ export default {
         });
     },
     addModel() {
+      this.assistantTarget = {
+        modelType: this.activeTab.toUpperCase(),
+        configJson: {},
+      };
       this.addDialogVisible = true;
     },
     editModel(model) {
+      this.assistantTarget = JSON.parse(JSON.stringify(model || {}));
       this.editModelData = JSON.parse(JSON.stringify(model));
       this.editDialogVisible = true;
     },
@@ -1166,6 +1247,9 @@ export default {
     showTestResult(result) {
       this.currentTestResult = result || null;
       this.testResultDialogVisible = !!result;
+      if (result && this.assistantTarget) {
+        this.assistantTarget.testMessage = result.message || result.testOutput || "";
+      }
     },
     isModelTestVerified(result) {
       return !!result && (result.verified === true || result.testStatus === 1);
@@ -1245,6 +1329,13 @@ export default {
     },
     getSampleMessages(sample) {
       const inputDetail = this.getInputDetail(sample);
+      const outputDetail = this.getOutputDetail(sample);
+      const conversation = Array.isArray(outputDetail.conversation)
+        ? outputDetail.conversation
+        : [];
+      if (conversation.length) {
+        return conversation.filter((item) => item && item.role !== "system");
+      }
       const messages = Array.isArray(inputDetail.messages) ? inputDetail.messages : [];
       if (messages.length) {
         return messages.filter((item) => item && item.role !== "system");
@@ -1255,6 +1346,10 @@ export default {
           content: (sample && sample.inputSummary) || "-",
         },
       ];
+    },
+    hasFullSampleConversation(sample) {
+      const outputDetail = this.getOutputDetail(sample);
+      return Array.isArray(outputDetail.conversation) && outputDetail.conversation.length > 0;
     },
     getSampleAssistantText(sample) {
       const outputDetail = this.getOutputDetail(sample);
@@ -1535,6 +1630,116 @@ export default {
       this.selectedPerformanceResultId = "";
       this.selectedPerformanceSampleKey = "";
     },
+    loadPerformanceJudgeConfig() {
+      let stored = {};
+      try {
+        stored = JSON.parse(
+          window.localStorage.getItem(PERFORMANCE_JUDGE_CONFIG_STORAGE_KEY) || "{}"
+        );
+      } catch (error) {
+        stored = {};
+      }
+      const config = {
+        ...DEFAULT_PERFORMANCE_JUDGE_CONFIG,
+        ...stored,
+      };
+      this.performanceJudgeModelId = config.modelId || DEFAULT_PERFORMANCE_JUDGE_CONFIG.modelId;
+      this.performanceAgentId = config.agentId || DEFAULT_PERFORMANCE_JUDGE_CONFIG.agentId;
+    },
+    savePerformanceJudgeConfig(silent = false) {
+      const config = {
+        modelId: this.performanceJudgeModelId || "",
+        agentId: this.performanceAgentId || "",
+      };
+      window.localStorage.setItem(
+        PERFORMANCE_JUDGE_CONFIG_STORAGE_KEY,
+        JSON.stringify(config)
+      );
+      this.performanceJudgeModelId = config.modelId;
+      this.performanceAgentId = config.agentId;
+      if (!silent) {
+        this.$message.success(this.$t("modelConfig.saveJudgeConfigSuccess"));
+      }
+    },
+    clearPerformanceJudgeConfig() {
+      window.localStorage.removeItem(PERFORMANCE_JUDGE_CONFIG_STORAGE_KEY);
+      this.performanceJudgeModelId = DEFAULT_PERFORMANCE_JUDGE_CONFIG.modelId;
+      this.performanceAgentId = DEFAULT_PERFORMANCE_JUDGE_CONFIG.agentId;
+      this.$message.success(this.$t("modelConfig.clearJudgeConfigSuccess"));
+    },
+    loadPerformanceJudgeModels() {
+      if (this.performanceJudgeModelsLoading) {
+        return;
+      }
+      this.performanceJudgeModelsLoading = true;
+      const loadTypes = ["llm", "slm"];
+      Promise.all(loadTypes.map(
+        (modelType) =>
+          new Promise((resolve) => {
+            Api.model.getModelList(
+              {
+                modelType,
+                modelName: "",
+                page: 1,
+                limit: 100,
+              },
+              ({ data }) => {
+                resolve(data.code === 0 ? this.filterPerformanceJudgeModels(data.data.list || []) : []);
+              }
+            );
+          })
+      )).then((groups) => {
+        this.performanceJudgeModelsLoading = false;
+        this.performanceJudgeModels = groups.flat();
+        if (this.performanceJudgeModelId
+          && !this.performanceJudgeModels.some((item) => item.id === this.performanceJudgeModelId)) {
+          this.performanceJudgeModelId = DEFAULT_PERFORMANCE_JUDGE_CONFIG.modelId;
+          this.savePerformanceJudgeConfig(true);
+        }
+      });
+    },
+    filterPerformanceJudgeModels(models) {
+      return models.filter((item) => {
+        const modelType = String(item.modelType || "").toLowerCase();
+        return (modelType === "llm" || modelType === "slm")
+          && Number(item.isEnabled) === 1
+          && Number(item.testStatus) === 1
+          && item.id
+          && item.modelName;
+      });
+    },
+    formatJudgeModelOption(item) {
+      if (!item) {
+        return "-";
+      }
+      const configuredModelId = item.modelCode || item.id || "";
+      return configuredModelId ? `${item.modelName} / ${configuredModelId}` : item.modelName;
+    },
+    loadPerformanceAgents() {
+      if (this.performanceAgentsLoading) {
+        return;
+      }
+      this.performanceAgentsLoading = true;
+      Api.agent.getAgentList(({ data }) => {
+        this.performanceAgentsLoading = false;
+        if (data.code === 0) {
+          this.performanceAgents = data.data || [];
+          if (this.performanceAgentId
+            && !this.performanceAgents.some((item) => item.id === this.performanceAgentId)) {
+            this.performanceAgentId = DEFAULT_PERFORMANCE_JUDGE_CONFIG.agentId;
+            this.savePerformanceJudgeConfig(true);
+          }
+        } else {
+          this.$message.error(data.msg || this.$t("modelConfig.fetchAgentsFailed"));
+        }
+      });
+    },
+    formatPerformanceAgentOption(item) {
+      if (!item) {
+        return "-";
+      }
+      return item.agentName || item.agentCode || item.id || "-";
+    },
     openPerformanceHistory() {
       this.performanceHistoryVisible = true;
       this.loadPerformanceHistory();
@@ -1582,6 +1787,41 @@ export default {
         }
       });
     },
+    deletePerformanceHistory(row) {
+      if (!row || !row.id) {
+        return;
+      }
+      this.$confirm(
+        this.$t("modelConfig.confirmDeletePerformanceHistory"),
+        this.$t("message.info"),
+        {
+          confirmButtonText: this.$t("common.confirm"),
+          cancelButtonText: this.$t("common.cancel"),
+          type: "warning",
+        }
+      )
+        .then(() => {
+          Api.model.deleteBenchmarkTask(row.id, ({ data }) => {
+            if (data.code === 0) {
+              this.$message.success(this.$t("modelConfig.deletePerformanceHistorySuccess"));
+              if (this.performanceTaskId === row.id) {
+                this.stopPerformancePolling();
+                this.performanceTesting = false;
+                this.performanceTaskId = "";
+                this.performanceReport = null;
+                this.selectedPerformanceResultId = "";
+                this.selectedPerformanceSampleKey = "";
+              }
+              this.loadPerformanceHistory();
+            } else {
+              this.$message.error(data.msg || this.$t("modelConfig.deletePerformanceHistoryFailed"));
+            }
+          });
+        })
+        .catch(() => {
+          this.$message.info(this.$t("common.deleteCancelled"));
+        });
+    },
     submitPerformanceTest() {
       if (this.performanceTesting) {
         return;
@@ -1592,16 +1832,18 @@ export default {
         return;
       }
       this.stopPerformancePolling();
+      this.savePerformanceJudgeConfig(true);
       this.performanceTesting = true;
       this.performanceReport = {
         status: "SUBMITTING",
         progress: 1,
         summary: this.$t("modelConfig.performanceSubmittingHint"),
         modelIds,
-        iterations: this.performanceIterations,
-        concurrency: this.performanceConcurrency,
-        results: [],
-      };
+          iterations: this.performanceIterations,
+          concurrency: this.performanceConcurrency,
+          agentId: this.performanceAgentId,
+          results: [],
+        };
       this.syncSelectedPerformanceResult(this.performanceReport);
       Api.model.performanceTest(
         {
@@ -1609,10 +1851,8 @@ export default {
           modelIds,
           iterations: this.performanceIterations,
           concurrency: this.performanceConcurrency,
-          judgeBaseUrl: this.performanceJudgeBaseUrl,
-          judgeModel: this.performanceJudgeModel,
-          judgeApiKey: this.performanceJudgeApiKey,
-          judgeTimeout: this.performanceJudgeTimeout,
+          judgeModelId: this.performanceJudgeModelId,
+          agentId: this.performanceAgentId,
         },
         ({ data }) => {
           if (data.code === 0) {
@@ -1831,6 +2071,42 @@ export default {
             message: data.msg || this.$t("modelConfig.addFailed"),
             showClose: true,
           });
+        }
+      });
+    },
+    toggleAssistant() {
+      this.assistantVisible = !this.assistantVisible;
+    },
+    applyAssistantDraft(response) {
+      const draft = response && response.draftConfigJson;
+      if (!draft) {
+        this.$message.warning(this.$t("modelConfigAssistant.noDraft"));
+        return;
+      }
+      const target = this.assistantTarget || {};
+      const providerCode = response.matchedAdapter || draft.type || target.providerCode || target.configJson?.type || "";
+      const payload = {
+        providerCode,
+        configJson: { ...draft, type: providerCode || draft.type },
+        docLink: target.docLink || "",
+        remark: target.remark || "",
+      };
+
+      if (this.editDialogVisible && this.$refs.editModelDialog) {
+        this.$refs.editModelDialog.applyAssistantDraft(payload);
+        this.$message.success(this.$t("modelConfigAssistant.draftApplied"));
+        return;
+      }
+
+      if (!this.addDialogVisible) {
+        this.addModel();
+      }
+      this.pendingAssistantDraft = payload;
+      this.$nextTick(() => {
+        if (this.$refs.addModelDialog) {
+          this.$refs.addModelDialog.applyAssistantDraft(this.pendingAssistantDraft);
+          this.pendingAssistantDraft = null;
+          this.$message.success(this.$t("modelConfigAssistant.draftApplied"));
         }
       });
     },
@@ -2562,23 +2838,32 @@ export default {
   text-align: right;
 }
 
-.performance-judge-config-grid {
+.performance-judge-config-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.performance-judge-model-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 180px minmax(240px, 1fr) 150px;
+  grid-template-columns: 80px minmax(280px, 1fr) auto;
   gap: 8px;
   align-items: center;
 }
 
-.performance-judge-timeout {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.performance-agent-row {
+  margin-top: 8px;
+}
+
+.performance-judge-label {
   color: #606266;
   font-size: 12px;
 }
 
-.performance-judge-timeout ::v-deep .el-input-number {
-  width: 94px;
+.performance-judge-model-row ::v-deep .el-select {
+  width: 100%;
 }
 
 .performance-progress-panel {
@@ -2635,6 +2920,10 @@ export default {
 
 .performance-history-table {
   width: 100%;
+}
+
+.history-delete-btn {
+  color: #f56c6c;
 }
 
 .performance-history-dialog ::v-deep .el-dialog__body {

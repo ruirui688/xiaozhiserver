@@ -447,9 +447,11 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         modelConfigEntity.setModelType(modelType);
 
         // 2. 更新基础字段
+        modelConfigEntity.setModelCode(modelConfigBodyDTO.getModelCode());
         modelConfigEntity.setModelName(modelConfigBodyDTO.getModelName());
         modelConfigEntity.setSort(modelConfigBodyDTO.getSort());
         modelConfigEntity.setIsEnabled(0);
+        modelConfigEntity.setDocLink(modelConfigBodyDTO.getDocLink());
         modelConfigEntity.setRemark(modelConfigBodyDTO.getRemark());
         modelConfigEntity.setTestStatus(MODEL_TEST_UNTESTED);
         modelConfigEntity.setTestMessage(null);
@@ -1847,7 +1849,8 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         String normalizedModelType = StringUtils.defaultString(modelType).toUpperCase();
         String normalizedType = StringUtils.lowerCase(StringUtils.defaultString(type));
         if ("VAD".equals(normalizedModelType) && "silero".equals(normalizedType)) {
-            return "必填字段已配置。Docker 部署下，SileroVAD 模型文件由 xiaozhi-server 容器在运行时校验。";
+            return "必填字段已配置。SileroVAD 模型文件由 xiaozhi-server 按当前运行方式在运行时校验；"
+                    + "Docker 部署需确保容器内路径可访问，源码运行需确保本机路径可访问。";
         }
         return "必填字段已配置";
     }

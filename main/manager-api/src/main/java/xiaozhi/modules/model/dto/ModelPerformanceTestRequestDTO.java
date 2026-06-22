@@ -26,15 +26,9 @@ public class ModelPerformanceTestRequestDTO implements Serializable {
     @Schema(description = "并发模型数")
     private Integer concurrency;
 
-    @Schema(description = "本次评测使用的Judge API地址，不入库")
-    private String judgeBaseUrl;
+    @Schema(description = "本次评测使用的Judge LLM模型配置ID，不入库")
+    private String judgeModelId;
 
-    @Schema(description = "本次评测使用的Judge模型，不入库")
-    private String judgeModel;
-
-    @Schema(description = "本次评测使用的Judge API Key，不入库")
-    private String judgeApiKey;
-
-    @Schema(description = "本次评测使用的Judge超时时间，单位秒，不入库")
-    private Integer judgeTimeout;
+    @Schema(description = "本次评测使用的智能体ID，不入库；用于注入真实人设、记忆、知识库、插件等上下文")
+    private String agentId;
 }

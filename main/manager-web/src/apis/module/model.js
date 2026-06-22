@@ -262,6 +262,31 @@ export default {
         })
       }).send()
   },
+  // 删除专业评测历史
+  deleteBenchmarkTask(taskId, callback) {
+    RequestService.sendRequest()
+      .url(`${getServiceUrl()}/models/benchmark/${taskId}`)
+      .method('DELETE')
+      .timeout(30000)
+      .success((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .fail((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .networkFail((err) => {
+        console.error('删除模型评测历史失败:', err)
+        RequestService.clearRequestTime()
+        callback({
+          data: {
+            code: -1,
+            msg: err?.msg || '删除模型评测历史失败'
+          }
+        })
+      }).send()
+  },
   // 启用/禁用模型状态
   updateModelStatus(id, status, callback) {
     RequestService.sendRequest()
@@ -510,6 +535,81 @@ export default {
           data: {
             code: -1,
             msg: err?.msg || '获取模型迁移预览失败'
+          }
+        })
+      }).send()
+  },
+  // 获取模型配置助手设置
+  getAssistantSettings(callback) {
+    RequestService.sendRequest()
+      .url(`${getServiceUrl()}/models/assistant/settings`)
+      .method('GET')
+      .success((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .fail((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .networkFail((err) => {
+        console.error('获取模型配置助手设置失败:', err)
+        RequestService.clearRequestTime()
+        callback({
+          data: {
+            code: -1,
+            msg: err?.msg || '获取模型配置助手设置失败'
+          }
+        })
+      }).send()
+  },
+  // 更新模型配置助手设置
+  updateAssistantSettings(params, callback) {
+    RequestService.sendRequest()
+      .url(`${getServiceUrl()}/models/assistant/settings`)
+      .method('PUT')
+      .data(params)
+      .success((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .fail((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .networkFail((err) => {
+        console.error('更新模型配置助手设置失败:', err)
+        RequestService.clearRequestTime()
+        callback({
+          data: {
+            code: -1,
+            msg: err?.msg || '更新模型配置助手设置失败'
+          }
+        })
+      }).send()
+  },
+  // 调用模型配置助手
+  chatWithAssistant(params, callback) {
+    RequestService.sendRequest()
+      .url(`${getServiceUrl()}/models/assistant/chat`)
+      .method('POST')
+      .data(params)
+      .timeout(120000)
+      .success((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .fail((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .networkFail((err) => {
+        console.error('模型配置助手调用失败:', err)
+        RequestService.clearRequestTime()
+        callback({
+          data: {
+            code: -1,
+            msg: err?.msg || '模型配置助手调用失败'
           }
         })
       }).send()
