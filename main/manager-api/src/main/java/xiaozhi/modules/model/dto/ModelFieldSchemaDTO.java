@@ -23,8 +23,20 @@ public class ModelFieldSchemaDTO implements Serializable {
     @Schema(description = "字段类型")
     private String type;
 
+    @Schema(description = "输入控件类型")
+    private String inputType;
+
     @Schema(description = "字段分组")
     private String group;
+
+    @Schema(description = "运行时字段名")
+    private String runtimeKey;
+
+    @Schema(description = "是否高级字段")
+    private Boolean advanced;
+
+    @Schema(description = "显示条件表达式")
+    private String visibleWhen;
 
     @Schema(description = "是否必填")
     private Boolean required;

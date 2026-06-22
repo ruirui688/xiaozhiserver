@@ -20,9 +20,13 @@ import lombok.AllArgsConstructor;
 import xiaozhi.modules.model.dao.ModelConfigParamDao;
 import xiaozhi.modules.model.dao.ModelConfigSecretDao;
 import xiaozhi.modules.model.dao.ModelConfigDao;
+import xiaozhi.modules.model.dao.ModelTemplateDao;
+import xiaozhi.modules.model.dao.ModelTemplateFieldDao;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.entity.ModelConfigParamEntity;
 import xiaozhi.modules.model.entity.ModelConfigSecretEntity;
+import xiaozhi.modules.model.entity.ModelTemplateEntity;
+import xiaozhi.modules.model.entity.ModelTemplateFieldEntity;
 
 @Component
 @AllArgsConstructor
@@ -33,10 +37,16 @@ public class ModelRuntimeAssembler {
     private static final Set<String> METADATA_KEYS = new HashSet<>(List.of(
             "type", "base_url", "api_url", "url", "ws_url", "server_url", "host",
             "endpoint_url", "model_name", "model", "resource_id", "protocol"));
+    private static final Set<String> ENDPOINT_KEYS = new HashSet<>(List.of(
+            "base_url", "api_url", "url", "ws_url", "server_url", "host", "endpoint_url"));
+    private static final Set<String> UPSTREAM_KEYS = new HashSet<>(List.of(
+            "model_name", "model", "resource_id", "voice", "speaker", "model_dir", "model_path", "appkey", "cluster"));
 
     private final ModelConfigParamDao modelConfigParamDao;
     private final ModelConfigSecretDao modelConfigSecretDao;
     private final ModelConfigDao modelConfigDao;
+    private final ModelTemplateDao modelTemplateDao;
+    private final ModelTemplateFieldDao modelTemplateFieldDao;
 
     public Map<String, Object> buildRuntimeModel(ModelConfigEntity model) {
         Map<String, Object> runtime = new HashMap<>();
@@ -63,22 +73,34 @@ public class ModelRuntimeAssembler {
         }
 
         putIfPresent(config, "type", model.getAdapterCode());
-        putIfPresent(config, "base_url", model.getEndpointUrl());
-        putIfPresent(config, "api_url", model.getEndpointUrl());
-        putIfPresent(config, "url", model.getEndpointUrl());
-        putIfPresent(config, "ws_url", model.getEndpointUrl());
-        putIfPresent(config, "host", model.getEndpointUrl());
-        putIfPresent(config, "endpoint_url", model.getEndpointUrl());
-        putIfPresent(config, "model_name", model.getUpstreamModelId());
-        putIfPresent(config, "model", model.getUpstreamModelId());
-        putIfPresent(config, "resource_id", model.getUpstreamModelId());
+        ModelTemplateEntity template = loadTemplate(model.getTemplateCode());
+        List<ModelTemplateFieldEntity> templateFields = loadTemplateFields(model.getTemplateCode());
+        if (template == null || templateFields.isEmpty()) {
+            putIfPresent(config, "base_url", model.getEndpointUrl());
+            putIfPresent(config, "api_url", model.getEndpointUrl());
+            putIfPresent(config, "url", model.getEndpointUrl());
+            putIfPresent(config, "ws_url", model.getEndpointUrl());
+            putIfPresent(config, "host", model.getEndpointUrl());
+            putIfPresent(config, "endpoint_url", model.getEndpointUrl());
+            putIfPresent(config, "model_name", model.getUpstreamModelId());
+            putIfPresent(config, "model", model.getUpstreamModelId());
+            putIfPresent(config, "resource_id", model.getUpstreamModelId());
+        } else {
+            String endpointKey = firstRuntimeKey(templateFields, ENDPOINT_KEYS);
+            String upstreamKey = firstNonBlank(template.getUpstreamModelField(), firstRuntimeKey(templateFields, UPSTREAM_KEYS));
+            putIfPresent(config, endpointKey, model.getEndpointUrl());
+            putIfPresent(config, upstreamKey, model.getUpstreamModelId());
+        }
         putIfPresent(config, "protocol", model.getProtocol());
 
+        Map<String, String> runtimeKeys = runtimeKeyMap(templateFields);
         for (ModelConfigParamEntity param : loadParams(model.getId())) {
-            putTypedValue(config, param.getParamKey(), param.getParamValue(), param.getValueType());
+            putTypedValue(config, runtimeKeys.getOrDefault(param.getParamKey(), param.getParamKey()),
+                    param.getParamValue(), param.getValueType());
         }
         for (ModelConfigSecretEntity secret : loadSecrets(model.getId())) {
-            putIfPresent(config, secret.getSecretKey(), secret.getSecretValue());
+            putIfPresent(config, runtimeKeys.getOrDefault(secret.getSecretKey(), secret.getSecretKey()),
+                    secret.getSecretValue());
         }
 
         return config;
@@ -120,6 +142,49 @@ public class ModelRuntimeAssembler {
     private List<ModelConfigSecretEntity> loadSecrets(String modelId) {
         return modelConfigSecretDao.selectList(new LambdaQueryWrapper<ModelConfigSecretEntity>()
                 .eq(ModelConfigSecretEntity::getModelId, modelId));
+    }
+
+    private ModelTemplateEntity loadTemplate(String templateCode) {
+        if (StringUtils.isBlank(templateCode)) {
+            return null;
+        }
+        return modelTemplateDao.selectOne(new LambdaQueryWrapper<ModelTemplateEntity>()
+                .eq(ModelTemplateEntity::getTemplateCode, templateCode)
+                .last("limit 1"));
+    }
+
+    private List<ModelTemplateFieldEntity> loadTemplateFields(String templateCode) {
+        if (StringUtils.isBlank(templateCode)) {
+            return List.of();
+        }
+        return modelTemplateFieldDao.selectList(new LambdaQueryWrapper<ModelTemplateFieldEntity>()
+                .eq(ModelTemplateFieldEntity::getTemplateId, templateCode)
+                .orderByAsc(ModelTemplateFieldEntity::getSort));
+    }
+
+    private Map<String, String> runtimeKeyMap(List<ModelTemplateFieldEntity> fields) {
+        Map<String, String> result = new HashMap<>();
+        for (ModelTemplateFieldEntity field : fields) {
+            if (field == null || StringUtils.isBlank(field.getFieldKey())) {
+                continue;
+            }
+            result.put(field.getFieldKey(), StringUtils.defaultIfBlank(field.getRuntimeKey(), field.getFieldKey()));
+        }
+        return result;
+    }
+
+    private String firstRuntimeKey(List<ModelTemplateFieldEntity> fields, Set<String> keys) {
+        for (ModelTemplateFieldEntity field : fields) {
+            if (field == null) {
+                continue;
+            }
+            String fieldKey = StringUtils.defaultString(field.getFieldKey());
+            String runtimeKey = StringUtils.defaultIfBlank(field.getRuntimeKey(), fieldKey);
+            if (keys.contains(fieldKey) || keys.contains(runtimeKey)) {
+                return runtimeKey;
+            }
+        }
+        return "";
     }
 
     public void saveRuntimeConfig(ModelConfigEntity model, JSONObject config) {

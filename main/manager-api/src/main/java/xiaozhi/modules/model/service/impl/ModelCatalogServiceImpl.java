@@ -2,9 +2,11 @@ package xiaozhi.modules.model.service.impl;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
 
@@ -14,12 +16,17 @@ import org.springframework.stereotype.Service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 
 import cn.hutool.json.JSONObject;
+import cn.hutool.json.JSONUtil;
 import lombok.AllArgsConstructor;
 import xiaozhi.modules.model.dao.ModelConfigDao;
+import xiaozhi.modules.model.dao.ModelTemplateDao;
+import xiaozhi.modules.model.dao.ModelTemplateFieldDao;
 import xiaozhi.modules.model.dto.ModelCatalogDTO;
 import xiaozhi.modules.model.dto.ModelFieldSchemaDTO;
 import xiaozhi.modules.model.dto.ModelMigrationPreviewDTO;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
+import xiaozhi.modules.model.entity.ModelTemplateEntity;
+import xiaozhi.modules.model.entity.ModelTemplateFieldEntity;
 import xiaozhi.modules.model.service.ModelCatalogService;
 
 @Service
@@ -27,12 +34,15 @@ import xiaozhi.modules.model.service.ModelCatalogService;
 public class ModelCatalogServiceImpl implements ModelCatalogService {
 
     private final ModelConfigDao modelConfigDao;
+    private final ModelTemplateDao modelTemplateDao;
+    private final ModelTemplateFieldDao modelTemplateFieldDao;
 
     private static final List<ModelCatalogDTO> CATALOG = buildCatalog();
+    private volatile boolean catalogSeedChecked = false;
 
     @Override
     public List<ModelCatalogDTO> getCatalog(String modelType, String providerCode, String capability, String vendor) {
-        return CATALOG.stream()
+        return effectiveCatalog().stream()
                 .filter(item -> matches(item.getModelType(), modelType))
                 .filter(item -> matches(item.getProviderCode(), providerCode))
                 .filter(item -> matches(item.getCapability(), capability))
@@ -57,7 +67,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             return null;
         }
         JSONObject configJson = entity.getConfigJson();
-        String providerCode = configJson == null ? "" : StringUtils.defaultString(configJson.getStr("type"));
+        String providerCode = firstNonBlank(entity.getAdapterCode(), configJson == null ? "" : configJson.getStr("type"));
         return resolve(entity.getModelType(), providerCode, entity.getModelCode(), entity.getModelName(), configJson);
     }
 
@@ -66,7 +76,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             JSONObject configJson) {
         String type = normalize(modelType);
         String provider = normalize(providerCode);
-        List<ModelCatalogDTO> candidates = CATALOG.stream()
+        List<ModelCatalogDTO> candidates = effectiveCatalog().stream()
                 .filter(item -> normalize(item.getModelType()).equals(type))
                 .filter(item -> normalize(item.getProviderCode()).equals(provider))
                 .toList();
@@ -188,7 +198,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         return new ArrayList<>(fields);
     }
 
-    private static ModelCatalogDTO inferOpenAiCompatible(String modelType, String haystack) {
+    private ModelCatalogDTO inferOpenAiCompatible(String modelType, String haystack) {
         String type = "VLLM".equalsIgnoreCase(modelType) ? "VLLM" : "LLM";
         if (haystack.contains("dashscope") || haystack.contains("qwen")) {
             return "VLLM".equals(type) ? find("VLLM_QWEN_VL_OPENAI") : find("LLM_ALI_QWEN_OPENAI");
@@ -211,11 +221,232 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         return "VLLM".equals(type) ? find("VLLM_OPENAI_COMPATIBLE") : find("LLM_OPENAI_COMPATIBLE");
     }
 
-    private static ModelCatalogDTO find(String templateCode) {
-        return CATALOG.stream()
+    private ModelCatalogDTO find(String templateCode) {
+        return effectiveCatalog().stream()
                 .filter(item -> templateCode.equals(item.getTemplateCode()))
                 .findFirst()
                 .orElse(null);
+    }
+
+    private List<ModelCatalogDTO> effectiveCatalog() {
+        ensureCatalogSeeded();
+        List<ModelCatalogDTO> fromDb = loadCatalogFromDatabase();
+        return fromDb.isEmpty() ? CATALOG : fromDb;
+    }
+
+    private synchronized void ensureCatalogSeeded() {
+        if (catalogSeedChecked) {
+            return;
+        }
+        Long count = modelTemplateDao.selectCount(new QueryWrapper<>());
+        if (count == null || count == 0) {
+            seedCatalogTables();
+        }
+        catalogSeedChecked = true;
+    }
+
+    private void seedCatalogTables() {
+        for (ModelCatalogDTO template : CATALOG) {
+            ModelTemplateEntity entity = new ModelTemplateEntity();
+            entity.setId(template.getTemplateCode());
+            entity.setTemplateCode(template.getTemplateCode());
+            entity.setModelType(template.getModelType());
+            entity.setAdapterCode(template.getProviderCode());
+            entity.setVendorName(template.getVendorName());
+            entity.setProductName(template.getProductName());
+            entity.setCapability(template.getCapability());
+            entity.setAccessMode(template.getAccessMode());
+            entity.setDeployment(template.getDeployment());
+            entity.setProtocol(template.getProtocolLabel());
+            entity.setUpstreamModelField(template.getUpstreamModelField());
+            entity.setDocLink(template.getDocLink());
+            entity.setEnabled(Boolean.TRUE.equals(template.getHidden()) || Boolean.TRUE.equals(template.getDeprecated()) ? 0 : 1);
+            entity.setSort(template.getSort());
+            modelTemplateDao.insert(entity);
+
+            for (ModelFieldSchemaDTO schema : template.getFieldSchemas()) {
+                ModelTemplateFieldEntity field = new ModelTemplateFieldEntity();
+                field.setTemplateId(template.getTemplateCode());
+                field.setFieldKey(schema.getKey());
+                field.setFieldLabel(schema.getLabel());
+                field.setFieldGroup(StringUtils.defaultIfBlank(schema.getGroup(), "advanced"));
+                field.setValueType(valueTypeForSchema(schema));
+                field.setInputType(inputTypeForSchema(schema));
+                field.setRuntimeKey(StringUtils.defaultIfBlank(schema.getRuntimeKey(), schema.getKey()));
+                field.setAdvanced(Boolean.TRUE.equals(schema.getAdvanced()) ? 1 : 0);
+                field.setVisibleWhen(schema.getVisibleWhen());
+                field.setRequired(Boolean.TRUE.equals(schema.getRequired()) ? 1 : 0);
+                field.setSecret(Boolean.TRUE.equals(schema.getSecret()) ? 1 : 0);
+                field.setDefaultValue(serializeDefaultValue(schema.getDefaultValue()));
+                field.setOptionsJson(schema.getOptions() == null || schema.getOptions().isEmpty()
+                        ? null
+                        : JSONUtil.toJsonStr(schema.getOptions()));
+                field.setHelpText(schema.getHelpText());
+                field.setSort(schema.getOrder());
+                modelTemplateFieldDao.insert(field);
+            }
+        }
+    }
+
+    private List<ModelCatalogDTO> loadCatalogFromDatabase() {
+        List<ModelTemplateEntity> templates = modelTemplateDao.selectList(new QueryWrapper<ModelTemplateEntity>()
+                .orderByAsc("model_type", "sort", "template_code"));
+        if (templates == null || templates.isEmpty()) {
+            return List.of();
+        }
+        List<ModelTemplateFieldEntity> fields = modelTemplateFieldDao.selectList(new QueryWrapper<ModelTemplateFieldEntity>()
+                .orderByAsc("template_id", "sort", "field_key"));
+        Map<String, List<ModelTemplateFieldEntity>> fieldsByTemplate = new HashMap<>();
+        for (ModelTemplateFieldEntity field : fields) {
+            fieldsByTemplate.computeIfAbsent(field.getTemplateId(), key -> new ArrayList<>()).add(field);
+        }
+        return templates.stream()
+                .map(template -> toCatalogDTO(template, fieldsByTemplate.getOrDefault(template.getTemplateCode(), List.of())))
+                .toList();
+    }
+
+    private ModelCatalogDTO toCatalogDTO(ModelTemplateEntity entity, List<ModelTemplateFieldEntity> fields) {
+        ModelCatalogDTO dto = new ModelCatalogDTO();
+        ModelCatalogDTO staticMeta = CATALOG.stream()
+                .filter(item -> StringUtils.equals(item.getTemplateCode(), entity.getTemplateCode()))
+                .findFirst()
+                .orElse(null);
+
+        dto.setTemplateCode(entity.getTemplateCode());
+        dto.setModelType(entity.getModelType());
+        dto.setProviderCode(entity.getAdapterCode());
+        dto.setAdapterName(staticMeta == null ? entity.getProductName() : staticMeta.getAdapterName());
+        dto.setVendorName(entity.getVendorName());
+        dto.setProductName(entity.getProductName());
+        dto.setCapability(entity.getCapability());
+        dto.setCapabilityLabel(staticMeta == null ? entity.getCapability() : staticMeta.getCapabilityLabel());
+        dto.setAccessMode(entity.getAccessMode());
+        dto.setAccessModeLabel(staticMeta == null ? entity.getAccessMode() : staticMeta.getAccessModeLabel());
+        dto.setDeployment(entity.getDeployment());
+        dto.setDeploymentLabel(staticMeta == null ? entity.getDeployment() : staticMeta.getDeploymentLabel());
+        dto.setProtocolLabel(StringUtils.defaultIfBlank(entity.getProtocol(), staticMeta == null ? "" : staticMeta.getProtocolLabel()));
+        dto.setUpstreamResourceLabel(staticMeta == null ? entity.getUpstreamModelField() : staticMeta.getUpstreamResourceLabel());
+        dto.setUpstreamModelField(entity.getUpstreamModelField());
+        dto.setCredentialFields(fields.stream().filter(field -> intValue(field.getSecret()) == 1)
+                .map(ModelTemplateFieldEntity::getFieldKey).toList());
+        dto.setRequiredFields(fields.stream().filter(field -> intValue(field.getRequired()) == 1)
+                .map(ModelTemplateFieldEntity::getFieldKey).toList());
+        dto.setRecommendedFields(fields.stream()
+                .filter(field -> intValue(field.getRequired()) == 0 && intValue(field.getSecret()) == 0)
+                .map(ModelTemplateFieldEntity::getFieldKey).toList());
+        dto.setFieldSchemas(fields.stream().map(this::toFieldSchemaDTO).toList());
+        dto.setDocLink(StringUtils.defaultIfBlank(entity.getDocLink(), staticMeta == null ? "" : staticMeta.getDocLink()));
+        dto.setSetupHints(staticMeta == null ? List.of() : staticMeta.getSetupHints());
+        dto.setKnownLimitations(staticMeta == null ? List.of() : staticMeta.getKnownLimitations());
+        dto.setAliases(staticMeta == null ? List.of() : staticMeta.getAliases());
+        dto.setHidden(intValue(entity.getEnabled()) == 0);
+        dto.setDeprecated(staticMeta != null && Boolean.TRUE.equals(staticMeta.getDeprecated()));
+        dto.setSort(entity.getSort());
+        return dto;
+    }
+
+    private ModelFieldSchemaDTO toFieldSchemaDTO(ModelTemplateFieldEntity entity) {
+        ModelFieldSchemaDTO dto = new ModelFieldSchemaDTO();
+        dto.setKey(entity.getFieldKey());
+        dto.setLabel(StringUtils.defaultIfBlank(entity.getFieldLabel(), labelFor(entity.getFieldKey())));
+        dto.setType(StringUtils.defaultIfBlank(entity.getValueType(), "string"));
+        dto.setInputType(StringUtils.defaultIfBlank(entity.getInputType(), inputTypeForType(dto.getType())));
+        dto.setGroup(StringUtils.defaultIfBlank(entity.getFieldGroup(), groupFor(entity.getFieldKey(), intValue(entity.getSecret()) == 1)));
+        dto.setRuntimeKey(StringUtils.defaultIfBlank(entity.getRuntimeKey(), entity.getFieldKey()));
+        dto.setAdvanced(intValue(entity.getAdvanced()) == 1);
+        dto.setVisibleWhen(entity.getVisibleWhen());
+        dto.setRequired(intValue(entity.getRequired()) == 1);
+        dto.setSecret(intValue(entity.getSecret()) == 1);
+        dto.setDefaultValue(parseDefaultValue(entity.getDefaultValue(), dto.getType()));
+        dto.setOptions(parseOptions(entity.getOptionsJson()));
+        dto.setHelpText(entity.getHelpText());
+        dto.setOrder(entity.getSort());
+        return dto;
+    }
+
+    private String valueTypeForSchema(ModelFieldSchemaDTO schema) {
+        String type = StringUtils.defaultString(schema.getType(), "string");
+        if ("password".equalsIgnoreCase(type) || "select".equalsIgnoreCase(type)) {
+            return "string";
+        }
+        return type;
+    }
+
+    private String inputTypeForSchema(ModelFieldSchemaDTO schema) {
+        if (StringUtils.isNotBlank(schema.getInputType())) {
+            return schema.getInputType();
+        }
+        if (Boolean.TRUE.equals(schema.getSecret())) {
+            return "password";
+        }
+        if (schema.getOptions() != null && !schema.getOptions().isEmpty()) {
+            return "select";
+        }
+        return inputTypeForType(schema.getType());
+    }
+
+    private String inputTypeForType(String type) {
+        return switch (StringUtils.defaultString(type, "string")) {
+            case "number" -> "number";
+            case "boolean" -> "switch";
+            case "json" -> "textarea";
+            default -> "text";
+        };
+    }
+
+    private String serializeDefaultValue(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof JSONObject || value instanceof Map<?, ?> || value instanceof List<?>) {
+            return JSONUtil.toJsonStr(value);
+        }
+        return String.valueOf(value);
+    }
+
+    private Object parseDefaultValue(String value, String valueType) {
+        if (value == null) {
+            return "";
+        }
+        try {
+            return switch (StringUtils.defaultString(valueType, "string")) {
+                case "number" -> {
+                    double number = Double.parseDouble(value);
+                    yield number == (long) number ? (long) number : number;
+                }
+                case "boolean" -> Boolean.valueOf(value);
+                case "json" -> JSONUtil.parse(value);
+                default -> value;
+            };
+        } catch (Exception ignored) {
+            return value;
+        }
+    }
+
+    private List<String> parseOptions(String optionsJson) {
+        if (StringUtils.isBlank(optionsJson)) {
+            return List.of();
+        }
+        try {
+            return JSONUtil.parseArray(optionsJson).stream()
+                    .map(String::valueOf)
+                    .toList();
+        } catch (Exception ignored) {
+            return List.of();
+        }
+    }
+
+    private int intValue(Integer value) {
+        return value == null ? 0 : value;
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (StringUtils.isNotBlank(value)) {
+                return value;
+            }
+        }
+        return "";
     }
 
     private static boolean matches(String value, String filter) {
@@ -823,7 +1054,10 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         field.setKey(key);
         field.setLabel(labelFor(key));
         field.setType(typeFor(key));
+        field.setInputType(inputTypeForTypeStatic(field.getType(), credential || isSecretKey(key), optionsFor(key)));
         field.setGroup(groupFor(key, credential));
+        field.setRuntimeKey(key);
+        field.setAdvanced("advanced".equals(groupFor(key, credential)));
         field.setSecret(credential || isSecretKey(key));
         field.setRequired(required);
         field.setDefaultValue(defaultValueFor(key));
@@ -831,6 +1065,21 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         field.setHelpText(helpFor(key));
         field.setOptions(optionsFor(key));
         return field;
+    }
+
+    private static String inputTypeForTypeStatic(String type, boolean secret, List<String> options) {
+        if (secret) {
+            return "password";
+        }
+        if (options != null && !options.isEmpty()) {
+            return "select";
+        }
+        return switch (StringUtils.defaultString(type, "string")) {
+            case "number" -> "number";
+            case "boolean" -> "switch";
+            case "json" -> "textarea";
+            default -> "text";
+        };
     }
 
     private static Object defaultValueFor(String key) {

@@ -1224,6 +1224,7 @@ export default {
   'modelConfigDialog.remark': '备注',
   'modelConfigDialog.enterRemark': '请输入模型备注',
   'modelConfigDialog.callInfo': '调用信息',
+  'modelConfigDialog.advancedSettings': '高级设置',
   'modelConfigDialog.enterJsonExample': '请输入JSON格式变量(示例:{"key":"value"})',
   'modelConfigDialog.save': '保存',
   'modelConfigDialog.saveAndTest': '保存并测试',
