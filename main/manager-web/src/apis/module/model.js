@@ -234,6 +234,32 @@ export default {
         })
       }).send()
   },
+  // 生成专业评测用例草案，后端未接入时前端会回落到内置预设
+  generateBenchmarkCases(params, callback) {
+    RequestService.sendRequest()
+      .url(`${getServiceUrl()}/models/benchmark/cases`)
+      .method('POST')
+      .data(params)
+      .timeout(30000)
+      .success((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .fail((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .networkFail((err) => {
+        console.error('生成模型评测用例失败:', err)
+        RequestService.clearRequestTime()
+        callback({
+          data: {
+            code: -1,
+            msg: err?.msg || '生成模型评测用例失败，已保留当前用例'
+          }
+        })
+      }).send()
+  },
   // 查询专业评测任务
   benchmarkTask(taskId, callback) {
     RequestService.sendRequest()

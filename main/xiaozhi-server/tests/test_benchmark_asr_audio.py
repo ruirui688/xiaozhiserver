@@ -1,0 +1,29 @@
+import sys
+from pathlib import Path
+
+
+SERVER_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = SERVER_ROOT.parents[1]
+if str(SERVER_ROOT) not in sys.path:
+    sys.path.insert(0, str(SERVER_ROOT))
+
+from core.benchmark.asr_executor import STANDARD_ASR_TEST_AUDIO, _load_audio_files
+
+
+def test_load_standard_asr_audio_from_repo_root(monkeypatch):
+    monkeypatch.chdir(REPO_ROOT)
+
+    audio_files = _load_audio_files(STANDARD_ASR_TEST_AUDIO)
+
+    assert [item["name"] for item in audio_files] == [STANDARD_ASR_TEST_AUDIO]
+    assert audio_files[0]["data"].startswith(b"RIFF")
+    assert "main/xiaozhi-server/config/assets" in audio_files[0]["path"]
+
+
+def test_load_asr_audio_falls_back_when_preferred_missing(monkeypatch):
+    monkeypatch.chdir(REPO_ROOT)
+
+    audio_files = _load_audio_files("missing.wav")
+
+    assert audio_files
+    assert any(item["name"] == STANDARD_ASR_TEST_AUDIO for item in audio_files)

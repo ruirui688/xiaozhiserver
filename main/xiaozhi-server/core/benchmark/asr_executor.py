@@ -6,6 +6,7 @@ import os
 import time
 import uuid
 import wave
+from pathlib import Path
 
 import websockets
 
@@ -14,6 +15,8 @@ from core.utils.asr import create_instance as create_asr_instance
 
 
 STANDARD_ASR_TEST_AUDIO = "wakeup_words_short.wav"
+SERVER_ROOT = Path(__file__).resolve().parents[2]
+ASR_TEST_AUDIO_DIR = SERVER_ROOT / "config" / "assets"
 
 
 class AsrTestAudioNotFound(Exception):
@@ -270,25 +273,42 @@ async def _recognize_xunfei_stream(asr, pcm):
 
 
 def _load_audio_files(preferred_name=None):
-    root = os.path.join(os.getcwd(), "config", "assets")
+    root = _find_audio_root()
+    if not root:
+        return []
     references = _load_audio_references(root)
     files = []
-    if not os.path.exists(root):
-        return files
     names = sorted(os.listdir(root))
     if preferred_name and preferred_name in names:
         names = [preferred_name]
     for name in names:
         if not name.lower().endswith((".wav", ".pcm")):
             continue
-        path = os.path.join(root, name)
+        path = os.path.join(str(root), name)
         with open(path, "rb") as file:
             files.append({"name": name, "path": path, "data": file.read(), "reference": references.get(name)})
     return files
 
 
+def _find_audio_root():
+    candidates = [
+        ASR_TEST_AUDIO_DIR,
+        Path.cwd() / "config" / "assets",
+        Path.cwd() / "main" / "xiaozhi-server" / "config" / "assets",
+    ]
+    seen = set()
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if resolved.exists():
+            return resolved
+    return None
+
+
 def _load_audio_references(root):
-    path = os.path.join(root, "references.json")
+    path = os.path.join(str(root), "references.json")
     if not os.path.exists(path):
         return {}
     try:
