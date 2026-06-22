@@ -17,7 +17,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
-import lombok.AllArgsConstructor;
+import lombok.RequiredArgsConstructor;
 import xiaozhi.modules.model.dao.ModelConfigDao;
 import xiaozhi.modules.model.dao.ModelTemplateDao;
 import xiaozhi.modules.model.dao.ModelTemplateFieldDao;
@@ -30,7 +30,7 @@ import xiaozhi.modules.model.entity.ModelTemplateFieldEntity;
 import xiaozhi.modules.model.service.ModelCatalogService;
 
 @Service
-@AllArgsConstructor
+@RequiredArgsConstructor
 public class ModelCatalogServiceImpl implements ModelCatalogService {
 
     private final ModelConfigDao modelConfigDao;
