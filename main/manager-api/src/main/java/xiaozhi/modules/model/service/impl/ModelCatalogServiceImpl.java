@@ -739,11 +739,70 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         dto.setRequiredFields(requiredFields);
         dto.setRecommendedFields(recommendedFields);
         dto.setFieldSchemas(buildFieldSchemas(credentialFields, requiredFields, recommendedFields));
+        applyTemplateDefaults(dto);
         dto.setSetupHints(setupHints);
         dto.setKnownLimitations(knownLimitations);
         dto.setAliases(aliases);
         dto.setDocLink(docLink);
         return dto;
+    }
+
+    private static void applyTemplateDefaults(ModelCatalogDTO dto) {
+        switch (dto.getTemplateCode()) {
+            case "LLM_ALI_QWEN_OPENAI" -> {
+                setFieldDefault(dto, "base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1");
+                setFieldDefault(dto, "model_name", "qwen-flash");
+            }
+            case "LLM_DOUBAO_ARK_OPENAI" -> {
+                setFieldDefault(dto, "base_url", "https://ark.cn-beijing.volces.com/api/v3");
+                setFieldDefault(dto, "model_name", "doubao-1-5-pro");
+            }
+            case "LLM_DEEPSEEK_OPENAI" -> {
+                setFieldDefault(dto, "base_url", "https://api.deepseek.com");
+                setFieldDefault(dto, "model_name", "deepseek-v4-flash");
+                setFieldDefault(dto, "thinking", "disabled");
+                setFieldDefault(dto, "reasoning_effort", "high");
+            }
+            case "LLM_ZHIPU_GLM_OPENAI" -> {
+                setFieldDefault(dto, "base_url", "https://open.bigmodel.cn/api/paas/v4");
+                setFieldDefault(dto, "model_name", "glm-4-flash");
+            }
+            case "LLM_OLLAMA_LOCAL" -> {
+                setFieldDefault(dto, "base_url", "http://127.0.0.1:11434/v1");
+                setFieldDefault(dto, "model_name", "qwen2.5:7b");
+            }
+            case "LLM_LM_STUDIO_OPENAI" -> {
+                setFieldDefault(dto, "base_url", "http://127.0.0.1:1234/v1");
+                setFieldDefault(dto, "api_key", "lm-studio");
+            }
+            case "ASR_DOUBAO_BIGASR_STREAM" -> setFieldDefault(dto, "resource_id", "volc.bigasr.sauc.duration");
+            case "ASR_DOUBAO_SEED_ASR_2_STREAM" -> setFieldDefault(dto, "resource_id", "volc.seedasr.sauc.duration");
+            case "ASR_QWEN3_FLASH" -> {
+                setFieldDefault(dto, "base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1");
+                setFieldDefault(dto, "model_name", "qwen3-asr-flash");
+            }
+            case "ASR_ALIYUN_BAILIAN_PARAFORMER" -> setFieldDefault(dto, "model", "paraformer-realtime-v2");
+            case "TTS_DOUBAO_BIGTTS_STREAM" -> setFieldDefault(dto, "resource_id", "volc.service_type.10029");
+            case "TTS_DOUBAO_SEED_TTS_2_STREAM" -> setFieldDefault(dto, "resource_id", "seed-tts-2.0");
+            case "TTS_ALIYUN_BAILIAN_COSYVOICE" -> setFieldDefault(dto, "model", "cosyvoice-v2");
+            case "VLLM_ZHIPU_GLM_OPENAI" -> {
+                setFieldDefault(dto, "base_url", "https://open.bigmodel.cn/api/paas/v4");
+                setFieldDefault(dto, "model_name", "glm-4v-flash");
+            }
+            case "VLLM_QWEN_VL_OPENAI" -> {
+                setFieldDefault(dto, "base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1");
+                setFieldDefault(dto, "model_name", "qwen-vl-plus");
+            }
+            default -> {
+            }
+        }
+    }
+
+    private static void setFieldDefault(ModelCatalogDTO dto, String key, Object value) {
+        dto.getFieldSchemas().stream()
+                .filter(field -> key.equals(field.getKey()))
+                .findFirst()
+                .ifPresent(field -> field.setDefaultValue(value));
     }
 
     private static List<ModelFieldSchemaDTO> buildFieldSchemas(List<String> credentialFields,
@@ -767,10 +826,22 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         field.setGroup(groupFor(key, credential));
         field.setSecret(credential || isSecretKey(key));
         field.setRequired(required);
+        field.setDefaultValue(defaultValueFor(key));
         field.setOrder(order);
         field.setHelpText(helpFor(key));
         field.setOptions(optionsFor(key));
         return field;
+    }
+
+    private static Object defaultValueFor(String key) {
+        return switch (key) {
+            case "base_url" -> "";
+            case "api_url", "ws_url", "url", "host" -> "";
+            case "model_name", "model", "resource_id", "voice", "speaker", "appkey", "cluster" -> "";
+            case "temperature" -> "";
+            case "top_p", "top_k", "max_tokens" -> "";
+            default -> "";
+        };
     }
 
     private static String labelFor(String key) {

@@ -25,7 +25,7 @@
           margin-bottom: 10px;
         ">
         <div style="font-size: 20px; font-weight: bold; color: #3d4566">
-          {{ $t("modelConfigDialog.systemConfig") }}
+          {{ $t("modelConfigDialog.modelInfo") }}
         </div>
         <div style="display: flex; align-items: center; gap: 20px">
           <div style="display: flex; align-items: center">
@@ -56,15 +56,22 @@
         </div>
 
         <div style="display: flex; gap: 20px; margin-bottom: 0">
+          <el-form-item :label="$t('modelConfigDialog.supplier')" prop="supplier" style="flex: 1">
+            <el-select v-model="form.configJson.type" :placeholder="$t('modelConfigDialog.selectSupplier')"
+              class="custom-select custom-input-bg" style="width: 100%" @focus="loadProviders" filterable>
+              <el-option v-for="item in providers" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
           <el-form-item :label="$t('modelConfigDialog.sortOrder')" prop="sort" style="flex: 1">
             <el-input v-model.number="form.sort" type="number" :placeholder="$t('modelConfigDialog.enterSortOrder')"
               class="custom-input-bg"></el-input>
           </el-form-item>
-          <el-form-item :label="$t('modelConfigDialog.docLink')" prop="docUrl" style="flex: 1">
-            <el-input v-model="form.docLink" :placeholder="$t('modelConfigDialog.enterDocLink')"
-              class="custom-input-bg"></el-input>
-          </el-form-item>
         </div>
+
+        <el-form-item :label="$t('modelConfigDialog.docLink')" prop="docUrl" style="margin-bottom: 27px">
+          <el-input v-model="form.docLink" :placeholder="$t('modelConfigDialog.enterDocLink')"
+            class="custom-input-bg"></el-input>
+        </el-form-item>
 
         <el-form-item :label="$t('modelConfigDialog.remark')" prop="remark" class="prop-remark">
           <el-input v-model="form.remark" type="textarea" :rows="3" :placeholder="$t('modelConfigDialog.enterRemark')"
@@ -73,72 +80,13 @@
       </el-form>
 
       <div style="font-size: 20px; font-weight: bold; color: #3d4566; margin-bottom: 15px">
-        {{ $t("modelConfigDialog.interfaceCredentials") }}
-      </div>
-      <div style="height: 2px; background: #e9e9e9; margin-bottom: 22px"></div>
-
-      <el-form :model="form.configJson" ref="interfaceForm" label-width="auto" class="custom-form">
-        <div style="display: flex; gap: 20px; margin-bottom: 0">
-          <el-form-item :label="$t('modelConfigDialog.adapter')" prop="supplier" style="flex: 1">
-            <el-select v-model="form.configJson.type" :placeholder="$t('modelConfigDialog.selectSupplier')"
-              class="custom-select custom-input-bg" style="width: 100%" @focus="loadProviders" filterable>
-              <el-option v-for="item in providers" :key="item.value" :label="item.label" :value="item.value" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="" style="flex: 1">
-            <div></div>
-          </el-form-item>
-        </div>
-        <template v-for="(row, rowIndex) in chunkedInterfaceFields">
-          <div :key="`interface-${rowIndex}`" style="display: flex; gap: 20px; margin-bottom: 0">
-            <el-form-item v-for="field in row" :key="field.prop" :label="field.label" :prop="field.prop"
-              style="flex: 1">
-              <template v-if="field.type === 'json-textarea'">
-                <el-input v-model="fieldJsonMap[field.prop]" type="textarea" :rows="3"
-                  :placeholder="$t('modelConfigDialog.enterJsonExample')" class="custom-input-bg"
-                  @change="(val) => handleJsonChange(field.prop, val)"></el-input>
-              </template>
-
-              <el-select v-else-if="field.type === 'select'" v-model="form.configJson[field.prop]"
-                :placeholder="field.placeholder" class="custom-select custom-input-bg" style="width: 100%">
-                <el-option v-for="option in field.options" :key="option.value" :label="option.label"
-                  :value="option.value" />
-              </el-select>
-
-              <el-input v-else v-model="form.configJson[field.prop]" :placeholder="field.placeholder"
-                :type="field.type === 'password' ? 'password' : 'text'" :show-password="field.type === 'password'"
-                class="custom-input-bg"></el-input>
-            </el-form-item>
-          </div>
-        </template>
-      </el-form>
-
-      <template v-if="catalogMetadataFields.length">
-        <div style="font-size: 20px; font-weight: bold; color: #3d4566; margin-bottom: 15px">
-          {{ $t("modelConfigDialog.catalogMetadata") }}
-        </div>
-        <div style="height: 2px; background: #e9e9e9; margin-bottom: 22px"></div>
-
-        <el-form :model="form.configJson" label-width="auto" class="custom-form">
-          <template v-for="(row, rowIndex) in chunkedCatalogMetadataFields">
-            <div :key="`catalog-metadata-${rowIndex}`" style="display: flex; gap: 20px; margin-bottom: 0">
-              <el-form-item v-for="field in row" :key="field.prop" :label="field.label" :prop="field.prop"
-                style="flex: 1">
-                <el-input v-model="form.configJson[field.prop]" type="text" class="custom-input-bg" disabled></el-input>
-              </el-form-item>
-            </div>
-          </template>
-        </el-form>
-      </template>
-
-      <div style="font-size: 20px; font-weight: bold; color: #3d4566; margin-bottom: 15px">
-        {{ $t("modelConfigDialog.upstreamModelParams") }}
+        {{ $t("modelConfigDialog.callInfo") }}
       </div>
       <div style="height: 2px; background: #e9e9e9; margin-bottom: 22px"></div>
 
       <el-form :model="form.configJson" ref="callInfoForm" label-width="auto" class="custom-form">
-        <template v-for="(row, rowIndex) in chunkedModelParamFields">
-          <div :key="`model-param-${rowIndex}`" style="display: flex; gap: 20px; margin-bottom: 0">
+        <template v-for="(row, rowIndex) in chunkedCallInfoFields">
+          <div :key="rowIndex" style="display: flex; gap: 20px; margin-bottom: 0">
             <el-form-item v-for="field in row" :key="field.prop" :label="field.label" :prop="field.prop"
               style="flex: 1">
               <template v-if="field.type === 'json-textarea'">
@@ -153,8 +101,7 @@
                   :value="option.value" />
               </el-select>
 
-              <el-input v-else v-model="form.configJson[field.prop]" :placeholder="field.placeholder"
-                :type="field.type === 'password' ? 'password' : 'text'" :show-password="field.type === 'password'"
+              <el-input v-else v-model="form.configJson[field.prop]" :placeholder="field.placeholder" type="text"
                 class="custom-input-bg"></el-input>
             </el-form-item>
           </div>
@@ -220,32 +167,13 @@ export default {
     };
   },
   computed: {
-    interfaceFields() {
-      return this.dynamicCallInfoFields.filter((field) =>
-        this.isInterfaceField(field.prop)
-      );
-    },
-    modelParamFields() {
-      return this.dynamicCallInfoFields.filter(
-        (field) => !this.isInterfaceField(field.prop) && !this.isCatalogMetadataField(field.prop)
-      );
-    },
-    catalogMetadataFields() {
-      return this.dynamicCallInfoFields.filter((field) =>
-        this.isCatalogMetadataField(field.prop)
-      );
-    },
-    chunkedInterfaceFields() {
-      return this.chunkFields(this.interfaceFields);
-    },
-    chunkedCatalogMetadataFields() {
-      return this.chunkFields(this.catalogMetadataFields);
-    },
-    chunkedModelParamFields() {
-      return this.chunkFields(this.modelParamFields);
-    },
     chunkedCallInfoFields() {
-      return this.chunkFields(this.dynamicCallInfoFields);
+      const chunkSize = 2;
+      const result = [];
+      for (let i = 0; i < this.dynamicCallInfoFields.length; i += chunkSize) {
+        result.push(this.dynamicCallInfoFields.slice(i, i + chunkSize));
+      }
+      return result;
     },
   },
   watch: {
@@ -274,96 +202,6 @@ export default {
     },
   },
   methods: {
-    chunkFields(fields) {
-      const chunkSize = 2;
-      const result = [];
-      for (let i = 0; i < fields.length; i += chunkSize) {
-        result.push(fields.slice(i, i + chunkSize));
-      }
-      return result;
-    },
-    isInterfaceField(prop) {
-      const key = String(prop || "").toLowerCase();
-      const exactKeys = [
-        "type",
-        "base_url",
-        "url",
-        "host",
-        "port",
-        "ws_url",
-        "api_url",
-        "endpoint",
-        "api_key",
-        "access_token",
-        "token",
-        "secret_key",
-        "secret_id",
-        "appid",
-        "app_id",
-        "appkey",
-        "group_id",
-        "region",
-        "is_ssl",
-      ];
-      const credentialPatterns = [
-        "api_key",
-        "access_token",
-        "secret_key",
-        "secret_id",
-        "personal_access_token",
-        "authorization",
-      ];
-      return (
-        exactKeys.includes(key) ||
-        credentialPatterns.some((name) => key === name || key.endsWith(`_${name}`))
-      );
-    },
-    isCatalogMetadataField(prop) {
-      const key = String(prop || "").toLowerCase();
-      const exactKeys = [
-        "catalog_id",
-        "catalog_name",
-        "template_id",
-        "template_name",
-        "platform",
-        "platform_name",
-        "vendor",
-        "vendor_name",
-        "capabilities",
-        "model_tags",
-        "tags",
-        "labels",
-      ];
-      return (
-        exactKeys.includes(key) ||
-        key.endsWith("_catalog_id") ||
-        key.endsWith("_template_id") ||
-        key.includes("capabilit")
-      );
-    },
-    getFieldLabel(field) {
-      const key = String(field.key || field.prop || "").toLowerCase();
-      const labelMap = {
-        catalog_id: this.$t("modelConfigDialog.catalogId"),
-        catalog_name: this.$t("modelConfigDialog.catalogName"),
-        template_id: this.$t("modelConfigDialog.templateId"),
-        template_name: this.$t("modelConfigDialog.templateName"),
-        platform: this.$t("modelConfigDialog.platformVendor"),
-        platform_name: this.$t("modelConfigDialog.platformVendor"),
-        vendor: this.$t("modelConfigDialog.platformVendor"),
-        vendor_name: this.$t("modelConfigDialog.platformVendor"),
-        capabilities: this.$t("modelConfigDialog.capabilities"),
-        model_tags: this.$t("modelConfigDialog.capabilities"),
-        tags: this.$t("modelConfigDialog.capabilities"),
-        labels: this.$t("modelConfigDialog.capabilities"),
-      };
-      return labelMap[key] || field.label;
-    },
-    getProviderLabel(item) {
-      const name = item.name || item.providerCode;
-      const code = item.providerCode || "";
-      return code ? `${name}（${code}）` : name;
-    },
     resetForm() {
       this.form = {
         id: "",
@@ -471,7 +309,7 @@ export default {
 
       Api.model.getModelProviders(this.modelType, (data) => {
         this.providers = data.map((item) => ({
-          label: this.getProviderLabel(item),
+          label: item.name,
           value: String(item.providerCode),
         }));
         this.providersLoaded = true;
@@ -497,7 +335,7 @@ export default {
             : JSON.parse(provider.fields || "[]");
 
           this.dynamicCallInfoFields = providerFields.map((f) => ({
-            label: this.getFieldLabel(f),
+            label: f.label,
             prop: f.key,
             type:
               f.type === "dict"
