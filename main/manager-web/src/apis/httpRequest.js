@@ -26,6 +26,7 @@ function sendRequest() {
         _header: { 'content-type': 'application/json; charset=utf-8' },
         _url: '',
         _responseType: undefined, // 新增响应类型字段
+        _timeout: undefined,
         'send'() {
             this._header['Accept-Language'] = 'zh-CN';
             
@@ -37,7 +38,8 @@ function sendRequest() {
             fly.request(this._url, this._data, {
                 method: this._method,
                 headers: this._header,
-                responseType: this._responseType
+                responseType: this._responseType,
+                timeout: this._timeout
             }).then((res) => {
                 const error = httpHandlerError(res, this._failCallback, this._networkFailCallback);
                 if (error) {
@@ -95,6 +97,10 @@ function sendRequest() {
         // 新增类型设置方法
         'type'(responseType) {
             this._responseType = responseType;
+            return this;
+        },
+        'timeout'(timeout) {
+            this._timeout = timeout;
             return this;
         }
     }

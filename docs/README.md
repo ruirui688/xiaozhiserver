@@ -75,6 +75,7 @@ docs/integrations/prompt-injection-engineering.md
 - [architecture/project-architecture.md](./architecture/project-architecture.md) - 项目完整架构与文档导航。用于理解模块边界、端云链路、配置下发、提示词/工具/MCP 注入、运行产物、部署边界和开发治理边界。
 - [architecture/cloud-runtime-architecture.md](./architecture/cloud-runtime-architecture.md) - 云端运行架构与配置链路。用于理解 `manager-web`、`manager-mobile`、`manager-api`、`xiaozhi-server` 和设备端的边界，说明后台配置如何变成设备行为、实时语音链路如何运行、工具/MCP/天气/OTA 如何接入。
 - [architecture/semantic-control-center.md](./architecture/semantic-control-center.md) - 语义控制中枢架构。用于理解确定性语音控制、文本标准化、语义路由、状态管理、策略判断、拒识和旧 LLM/function-call 兜底之间的关系。
+- [architecture/model-benchmark-and-assistant.md](./architecture/model-benchmark-and-assistant.md) - 模型专业评测与配置智能助手架构。用于理解模型批量真实评测、LLMJudge、真实设备运行时评测、模型配置助手、接入草案写入、残留草案清理和提交治理边界。
 - [architecture/current-code-map.md](./architecture/current-code-map.md) - 当前代码地图与梳理报告。用于快速了解当前仓库模块结构、运行链路、未提交能力、风险和验证矩阵，是后续开发前的代码导航。
 
 ## 4. 本地开发环境
@@ -137,6 +138,7 @@ docs/integrations/prompt-injection-engineering.md
 - [models/index-stream-integration.md](./models/index-stream-integration.md) - IndexStreamTTS 使用指南。用于部署 IndexStreamTTS 环境、配置 Conda 环境、启动服务并接入流式 TTS。
 - [models/powermem-integration.md](./models/powermem-integration.md) - PowerMem 记忆组件集成指南。用于给智能体接入长期记忆能力，包含组件安装、功能特性和服务配置。
 - [models/local-knowledge-integration.md](./models/local-knowledge-integration.md) - 本地知识库与大模型切片指南。用于配置 `RAG_LocalKnowledge`、在知识库界面配置阿里云百炼/OpenAI 兼容切片模型、重新解析旧文档和排查本地知识库召回为空。
+- [models/model-config-v2-catalog.md](./models/model-config-v2-catalog.md) - 模型配置 v2 全量目录与迁移治理说明。用于梳理 ASR、TTS、LLM、VLLM、SLM、Memory、Intent、RAG、VAD、声纹和插件 RAG 的厂商、产品、能力、接入方式、运行时字段和迁移规则。
 - [models/ragflow-integration.md](./models/ragflow-integration.md) - RAGFlow 集成指南。用于部署 RAGFlow、检查 MySQL/Redis、配置知识库问答和服务端 RAG 调用。
 - [models/performance_tester.md](./models/performance_tester.md) - 模型性能测试工具使用指南。用于测试 ASR、大语言模型、非流式 TTS、流式 TTS、视觉模型的延迟和稳定性。
 

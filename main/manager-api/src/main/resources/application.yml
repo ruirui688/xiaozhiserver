@@ -43,6 +43,13 @@ renren:
     enabled: true
     exclude-urls:
 
+xiaozhi:
+  server:
+    # manager-api 调用 xiaozhi-server HTTP/OTA 服务的内部地址。
+    # 本机源码开发默认用 127.0.0.1；Docker/多机部署请用环境变量覆盖：
+    # XIAOZHI_SERVER_HTTP_BASE_URL=http://xiaozhi-esp32-server:8003
+    http-base-url: ${XIAOZHI_SERVER_HTTP_BASE_URL:http://127.0.0.1:8003}
+
 #mybatis
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml

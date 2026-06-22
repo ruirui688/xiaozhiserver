@@ -774,6 +774,9 @@ class ConnectionHandler:
         init_vad = check_vad_update(self.common_config, private_config)
         init_asr = check_asr_update(self.common_config, private_config)
 
+        if private_config.get("model_config_v2") is not None:
+            self.config["model_config_v2"] = private_config["model_config_v2"]
+
         if init_vad:
             self.config["VAD"] = private_config["VAD"]
             self.config["selected_module"]["VAD"] = private_config["selected_module"][
@@ -849,6 +852,20 @@ class ConnectionHandler:
                 tts_config[select_tts_module]["correct_words"] = private_config[
                     "correct_words"
                 ]
+            tts_v2_config = (
+                self.config.get("model_config_v2", {})
+                .get(select_tts_module, {})
+                .get("typed_config")
+            )
+            if isinstance(tts_v2_config, dict):
+                tts_v2_config["correct_words"] = private_config["correct_words"]
+            private_tts_v2_config = (
+                private_config.get("model_config_v2", {})
+                .get(select_tts_module, {})
+                .get("typed_config")
+            )
+            if isinstance(private_tts_v2_config, dict):
+                private_tts_v2_config["correct_words"] = private_config["correct_words"]
 
         # 使用 run_in_executor 在线程池中执行 initialize_modules，避免阻塞主循环
         try:
@@ -943,7 +960,7 @@ class ConnectionHandler:
             return
         # 使用 intent_llm 模式
         elif self.intent_type == "intent_llm":
-            intent_llm_name = intent_config.get("intent_llm", {}).get("llm")
+            intent_llm_name = intent_config.get(selected_intent, {}).get("llm")
 
             if intent_llm_name and intent_llm_name in self.config["LLM"]:
                 # 如果配置了专用LLM，则创建独立的LLM实例

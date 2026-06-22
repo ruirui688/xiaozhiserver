@@ -212,6 +212,15 @@
                 >
                   {{ $t("modelConfig.delete") }}
                 </el-button>
+                <el-button
+                  size="mini"
+                  type="warning"
+                  icon="el-icon-data-analysis"
+                  :loading="performanceTesting"
+                  @click="runPerformanceTest"
+                >
+                  {{ $t("modelConfig.performanceTest") }}
+                </el-button>
               </div>
               <div class="custom-pagination">
                 <el-select
@@ -266,10 +275,17 @@
               </div>
             </div>
           </el-card>
+          <ModelConfigAssistant
+            :visible="assistantVisible"
+            :context="assistantContext"
+            @toggle="toggleAssistant"
+            @apply-draft="applyAssistantDraft"
+          />
         </div>
       </div>
 
       <ModelEditDialog
+        ref="editModelDialog"
         :modelType="activeTab"
         :visible.sync="editDialogVisible"
         :modelData="editModelData"
@@ -282,6 +298,7 @@
         :modelConfig="selectedModelConfig"
       />
       <AddModelDialog
+        ref="addModelDialog"
         :modelType="activeTab"
         :visible.sync="addDialogVisible"
         @confirm="handleAddConfirm"
@@ -296,9 +313,9 @@
         <div v-if="currentTestResult" class="test-result-content">
           <div class="test-result-row">
             <span class="test-result-label">{{ $t("modelConfig.testResult") }}</span>
-            <el-tag size="mini" :type="currentTestResult.success ? 'success' : 'danger'">
+            <el-tag size="mini" :type="isModelTestVerified(currentTestResult) ? 'success' : 'danger'">
               {{
-                currentTestResult.success
+                isModelTestVerified(currentTestResult)
                   ? $t("modelConfig.testPassed")
                   : $t("modelConfig.testFailed")
               }}
@@ -318,6 +335,9 @@
                 alt="test image"
               />
             </div>
+            <div v-if="currentTestResult.testAudioDataUrl" class="test-result-audio-wrap">
+              <audio class="test-result-audio" :src="currentTestResult.testAudioDataUrl" controls />
+            </div>
             <pre>{{ currentTestResult.testInput || "-" }}</pre>
           </div>
           <div class="test-result-block">
@@ -326,6 +346,13 @@
           </div>
         </div>
       </el-dialog>
+      <ModelBenchmarkDialog
+        :visible.sync="benchmarkDialogVisible"
+        :model-type="activeTab"
+        :selected-models="selectedModels"
+        @testing-change="handleBenchmarkTestingChange"
+        @finished="handleBenchmarkFinished"
+      />
     </div>
     <el-footer>
       <version-footer />
@@ -337,11 +364,22 @@
 import Api from "@/apis/api";
 import AddModelDialog from "@/components/AddModelDialog.vue";
 import HeaderBar from "@/components/HeaderBar.vue";
+import ModelBenchmarkDialog from "@/components/ModelBenchmarkDialog.vue";
+import ModelConfigAssistant from "@/components/ModelConfigAssistant.vue";
 import ModelEditDialog from "@/components/ModelEditDialog.vue";
 import TtsModel from "@/components/TtsModel.vue";
 import VersionFooter from "@/components/VersionFooter.vue";
+
 export default {
-  components: { HeaderBar, ModelEditDialog, TtsModel, AddModelDialog, VersionFooter },
+  components: {
+    HeaderBar,
+    ModelBenchmarkDialog,
+    ModelEditDialog,
+    ModelConfigAssistant,
+    TtsModel,
+    AddModelDialog,
+    VersionFooter,
+  },
   data() {
     return {
       addDialogVisible: false,
@@ -363,6 +401,11 @@ export default {
       testingModelId: "",
       testResultDialogVisible: false,
       currentTestResult: null,
+      benchmarkDialogVisible: false,
+      performanceTesting: false,
+      assistantVisible: false,
+      assistantTarget: null,
+      pendingAssistantDraft: null,
     };
   },
 
@@ -405,6 +448,20 @@ export default {
         pages.push(i);
       }
       return pages;
+    },
+    assistantContext() {
+      const target = this.assistantTarget || {};
+      const configJson = target.configJson || {};
+      return {
+        modelType: this.activeTab.toUpperCase(),
+        modelId: target.id || "",
+        modelName: target.modelName || "",
+        providerCode: target.providerCode || target.providerType || configJson.type || "",
+        configJson,
+        docLink: target.docLink || "",
+        testMessage: target.testMessage || "",
+        pageContext: this.editDialogVisible ? "edit" : this.addDialogVisible ? "add" : "list",
+      };
     },
   },
 
@@ -497,9 +554,14 @@ export default {
         });
     },
     addModel() {
+      this.assistantTarget = {
+        modelType: this.activeTab.toUpperCase(),
+        configJson: {},
+      };
       this.addDialogVisible = true;
     },
     editModel(model) {
+      this.assistantTarget = JSON.parse(JSON.stringify(model || {}));
       this.editModelData = JSON.parse(JSON.stringify(model));
       this.editDialogVisible = true;
     },
@@ -535,6 +597,12 @@ export default {
     showTestResult(result) {
       this.currentTestResult = result || null;
       this.testResultDialogVisible = !!result;
+      if (result && this.assistantTarget) {
+        this.assistantTarget.testMessage = result.message || result.testOutput || "";
+      }
+    },
+    isModelTestVerified(result) {
+      return !!result && (result.verified === true || result.testStatus === 1);
     },
     formatResponseTime(responseTimeMs) {
       if (responseTimeMs === null || responseTimeMs === undefined || responseTimeMs === "") {
@@ -561,7 +629,7 @@ export default {
         message: data.msg,
       };
       this.showTestResult(result);
-      if (result.success) {
+      if (this.isModelTestVerified(result)) {
         this.$message.success(result.message || this.$t("modelConfig.testSuccess"));
       } else {
         this.$message.error(result.message || data.msg || this.$t("modelConfig.testFailedMessage"));
@@ -577,6 +645,19 @@ export default {
         this.handleTestModelResponse(data);
         this.loadData();
       });
+    },
+    runPerformanceTest() {
+      if (this.selectedModels.length === 0) {
+        this.$message.warning(this.$t("modelConfig.selectModelsForPerformance"));
+        return;
+      }
+      this.benchmarkDialogVisible = true;
+    },
+    handleBenchmarkTestingChange(testing) {
+      this.performanceTesting = testing;
+    },
+    handleBenchmarkFinished() {
+      this.loadData();
     },
     // 删除单个模型
     deleteModel(model) {
@@ -652,7 +733,7 @@ export default {
         Api.model.testModel(id, ({ data }) => {
           this.clearTestingModelState();
           this.handleTestModelResponse(data);
-          if (data.data?.success) {
+          if (this.isModelTestVerified(data.data)) {
             this.loadData();
             this.editDialogVisible = false;
           } else {
@@ -724,6 +805,42 @@ export default {
             message: data.msg || this.$t("modelConfig.addFailed"),
             showClose: true,
           });
+        }
+      });
+    },
+    toggleAssistant() {
+      this.assistantVisible = !this.assistantVisible;
+    },
+    applyAssistantDraft(response) {
+      const draft = response && response.draftConfigJson;
+      if (!draft) {
+        this.$message.warning(this.$t("modelConfigAssistant.noDraft"));
+        return;
+      }
+      const target = this.assistantTarget || {};
+      const providerCode = response.matchedAdapter || draft.type || target.providerCode || target.configJson?.type || "";
+      const payload = {
+        providerCode,
+        configJson: { ...draft, type: providerCode || draft.type },
+        docLink: target.docLink || "",
+        remark: target.remark || "",
+      };
+
+      if (this.editDialogVisible && this.$refs.editModelDialog) {
+        this.$refs.editModelDialog.applyAssistantDraft(payload);
+        this.$message.success(this.$t("modelConfigAssistant.draftApplied"));
+        return;
+      }
+
+      if (!this.addDialogVisible) {
+        this.addModel();
+      }
+      this.pendingAssistantDraft = payload;
+      this.$nextTick(() => {
+        if (this.$refs.addModelDialog) {
+          this.$refs.addModelDialog.applyAssistantDraft(this.pendingAssistantDraft);
+          this.pendingAssistantDraft = null;
+          this.$message.success(this.$t("modelConfigAssistant.draftApplied"));
         }
       });
     },
@@ -1400,4 +1517,18 @@ export default {
   margin: 0 auto;
   object-fit: contain;
 }
+
+.test-result-audio-wrap {
+  padding: 10px 12px;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  background: #f7f9fc;
+}
+
+.test-result-audio {
+  display: block;
+  width: 100%;
+  height: 36px;
+}
+
 </style>

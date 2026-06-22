@@ -286,3 +286,39 @@
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方修改模型配置查询、编辑、列表 DTO 转换或模型配置弹窗，必须保留模型配置 configJson 原样返回和原样保存的约定；模型配置页可以直接看到已保存的 API Key。系统参数页是否脱敏按对应页面规则单独处理，不要把模型配置重新改回掩码协议。
 ```
+
+## 18. 管理后台模型批量性能测试
+
+```text
+定制模块：manager-web 模型批量性能测试入口、manager-api 异步任务与结果入库、xiaozhi-server benchmark HTTP 接口和 runner
+改动原因：智控台需要在同一页面勾选多个模型并发起批量性能测试，用真实 provider 执行 LLM、ASR、TTS 等模型调用，记录成功率、延迟分位数、样本详情和未实测原因，避免只凭字段校验、WebSocket 握手成功或 0ms 结果误判模型可用性。LLM/SLM 测试需要按业务样本集选择主对话模型，每个 case 必须是真实多轮对话，候选模型逐轮回复并累积上下文，同一轮完整样本再打包给已有 LLM/SLM 模型配置作为 Judge 批量评分，减少逐条评审造成的割裂和慢请求；Judge 不单独维护 API Key 或环境变量，必须复用 `ai_model_config.config_json` 和已有 provider。ASR 测试必须覆盖所有语音识别供应器，不是豆包流式 ASR 的单点特例；所有 ASR 单模型测试和批量测试都必须上传或流式发送真实音频，并以非空识别文本作为通过依据。
+关键文件：
+  - main/xiaozhi-server/core/http_server.py
+  - main/xiaozhi-server/core/api/benchmark_handler.py
+  - main/xiaozhi-server/core/benchmark/
+  - main/manager-api/src/main/java/xiaozhi/modules/model/controller/ModelController.java
+  - main/manager-api/src/main/java/xiaozhi/modules/model/service/ModelBenchmarkService.java
+  - main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelBenchmarkServiceImpl.java
+  - main/manager-api/src/main/resources/db/changelog/202606171520.sql
+  - main/manager-web/src/views/ModelConfig.vue
+  - docs/models/performance_tester.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改 HTTP 服务路由、模型测试接口、模型配置页面、模型测试 DTO 或数据库迁移，必须保留 `xiaozhi-server` 的 `/benchmark/models` 和 `/benchmark/health` 路由、`core.benchmark.runner.run_benchmark` 真实 provider 执行链路、manager-api 异步任务轮询与结果入库、样本级 measured/latency/benchmark_level 口径、历史任务删除时级联清理结果和样本、Judge 复用已有 LLM/SLM 模型配置且不单独维护 API Key 的边界，以及 `scripts/dev doctor` 对 `main/xiaozhi-server/data/.config.yaml` 必需化检查。LLM/SLM 的 Judge 应按同一模型同一轮多轮样本集批量评分，并在明细中保留 case_id、完整 transcript、RAG/记忆上下文、assistant 输出、judge_mode 和安全 P0/P1 结果；`REAL_INFERENCE` 才能进入延时统计，`CONNECTIVITY`、`CONFIG_ONLY`、`UNSUPPORTED` 不能显示为 0ms；普通单模型测试也不能把单纯字段校验当成可启用的真实通过。官方同步时可以接受模型配置中的空 `selected_module` 和轻量 Docker/模型可空部署口径，但不能删除批量性能测试路由、runner、任务结果表和使用指南。
+ASR 专项规则：所有语音识别模型的“测试”都必须执行真实音频识别流程，包含 OpenAI/Groq/Qwen3 这类非流式上传模型、豆包/阿里云/讯飞这类流式模型，以及本地或自部署 ASR。测试详情必须能看到测试音频信息、识别文本和耗时；不能把初始化握手、接口连通、鉴权成功或必填字段完整显示为“已通过”。暂未实现真实音频测试的 ASR 供应器只能显示未通过或未实测，不能自动启用。ASR 单模型测试默认统一使用 `main/xiaozhi-server/config/assets/wakeup_words_short.wav`，不能因为 provider 实现路径或目录遍历顺序不同而使用不同音频；标准音频缺失时才允许降级到其他内置 wav。
+```
+
+## 19. 模型配置智能助手
+
+```text
+定制模块：manager-api 模型配置助手、manager-web 模型配置页右侧助手
+改动原因：模型配置流程中，用户需要让大模型理解厂商文档、归纳必填字段、判断当前适配器是否匹配，并生成可填入表单的配置草案。但大模型不能替代真实 provider 适配器，例如“讯飞流式语音识别”不等于“讯飞实时语音转写大模型”。助手必须复用后台已经配置并测试通过的 LLM 模型，不单独通过环境变量保存 DeepSeek 等密钥。没有匹配 adapter 时，助手不能只停留在口头说明，应返回接入级自动化草案，包括协议说明、实现任务清单、建议代码/数据库迁移/测试产物；在开发环境中允许用户把这些产物写入仓库工作区，形成可审查 diff，再由开发流程审核后真正接入。
+关键文件：
+  - main/manager-api/src/main/java/xiaozhi/modules/model/controller/ModelController.java
+  - main/manager-api/src/main/java/xiaozhi/modules/model/service/ModelAssistantService.java
+  - main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelAssistantServiceImpl.java
+  - main/manager-api/src/main/resources/db/changelog/202606221130.sql
+  - main/manager-web/src/components/ModelConfigAssistant.vue
+  - main/manager-web/src/views/ModelConfig.vue
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改模型配置页、模型配置接口、LLM 配置表或 provider/catalog 结构，必须保留以下约定：助手设置只保存已配置 LLM 的 modelId；base_url、api_key、model_name 等凭据继续来自普通 LLM 模型配置；发送给助手的上下文必须脱敏；助手可以生成配置草案、协议接入草案、实现任务和自动化产物草案，并在用户点击后把产物写入工作区；写入必须限制在模型接入相关白名单路径，默认不覆盖已有文件，禁止绝对路径和路径越界；助手不得直接保存模型配置、启用模型、执行生产数据库变更或标记测试通过；协议不匹配时必须返回未适配，不能把同厂商的旧 adapter 当作新协议可用；真正接入新协议必须经过代码审核、数据库迁移审查和真实模型测试。
+```

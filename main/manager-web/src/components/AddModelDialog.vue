@@ -153,9 +153,11 @@ export default {
     }
   },
   methods: {
-    loadProviders() {
-      if (this.providersLoaded)
+    loadProviders(done) {
+      if (this.providersLoaded) {
+        done && done();
         return
+      }
 
       Api.model.getModelProviders(this.modelType, (data) => {
         this.providers = data.map(item => ({
@@ -169,6 +171,7 @@ export default {
           }))
         }))
         this.providersLoaded = true
+        done && done();
       })
     },
     initConfigJson() {
@@ -196,6 +199,35 @@ export default {
         newConfig[field.prop] = this.formData.configJson[field.prop] || '';
       });
       this.formData.configJson = newConfig;
+    },
+    applyAssistantDraft(payload = {}) {
+      const draft = payload.configJson || {};
+      const providerCode = payload.providerCode || draft.type || '';
+      const apply = () => {
+        this.formData.supplier = providerCode;
+        this.currentProvider = this.providers.find(p => p.value === providerCode);
+        this.providerFields = this.currentProvider?.fields || [];
+
+        const nextConfig = {};
+        this.providerFields.forEach(field => {
+          nextConfig[field.prop] = draft[field.prop] || '';
+        });
+        Object.keys(draft).forEach(key => {
+          nextConfig[key] = draft[key];
+        });
+        if (providerCode) {
+          nextConfig.type = providerCode;
+        }
+        this.formData.configJson = nextConfig;
+        if (payload.docLink && !this.formData.docLink) {
+          this.formData.docLink = payload.docLink;
+        }
+        if (payload.remark && !this.formData.remark) {
+          this.formData.remark = payload.remark;
+        }
+      };
+
+      this.loadProviders(apply);
     },
     confirm() {
       this.saving = true;

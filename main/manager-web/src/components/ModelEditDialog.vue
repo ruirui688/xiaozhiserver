@@ -304,8 +304,11 @@ export default {
         configJson,
       };
     },
-    loadProviders() {
-      if (this.providersLoaded) return;
+    loadProviders(done) {
+      if (this.providersLoaded) {
+        done && done();
+        return;
+      }
 
       Api.model.getModelProviders(this.modelType, (data) => {
         this.providers = data.map((item) => ({
@@ -318,6 +321,7 @@ export default {
         if (this.pendingProviderType) {
           this.loadProviderFields(this.pendingProviderType);
         }
+        done && done();
       });
     },
     loadProviderFields(providerCode) {
@@ -386,6 +390,26 @@ export default {
         sort: Number(model.sort) || 0,
         configJson: { ...configJson },
       };
+    },
+    applyAssistantDraft(payload = {}) {
+      const draft = payload.configJson || {};
+      const providerCode = payload.providerCode || draft.type || this.form.configJson.type || "";
+      const apply = () => {
+        const model = {
+          ...this.form,
+          docLink: payload.docLink || this.form.docLink,
+          remark: payload.remark || this.form.remark,
+          configJson: {
+            ...this.form.configJson,
+            ...draft,
+            type: providerCode,
+          },
+        };
+        this.pendingProviderType = providerCode;
+        this.pendingModelData = model;
+        this.loadProviderFields(providerCode);
+      };
+      this.loadProviders(apply);
     },
     isDeepSeekModelConfig(configJson = {}) {
       const baseUrl = String(configJson.base_url || configJson.url || "").toLowerCase();

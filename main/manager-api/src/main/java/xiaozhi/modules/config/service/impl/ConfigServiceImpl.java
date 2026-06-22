@@ -39,6 +39,8 @@ import xiaozhi.modules.config.service.ConfigService;
 import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.device.service.DeviceService;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
+import xiaozhi.modules.model.dto.ModelCatalogDTO;
+import xiaozhi.modules.model.service.ModelCatalogService;
 import xiaozhi.modules.model.service.ModelConfigService;
 import xiaozhi.modules.sys.dto.SysParamsDTO;
 import xiaozhi.modules.sys.service.SysParamsService;
@@ -53,6 +55,7 @@ public class ConfigServiceImpl implements ConfigService {
     private final SysParamsService sysParamsService;
     private final DeviceService deviceService;
     private final ModelConfigService modelConfigService;
+    private final ModelCatalogService modelCatalogService;
     private final AgentService agentService;
     private final AgentTemplateService agentTemplateService;
     private final RedisUtils redisUtils;
@@ -141,7 +144,34 @@ public class ConfigServiceImpl implements ConfigService {
         if (agent == null) {
             throw new RenException(ErrorCode.AGENT_NOT_FOUND);
         }
-        // 获取音色信息
+        return buildAgentRuntimeConfig(agent);
+    }
+
+    @Override
+    public Map<String, Object> getAgentRuntimeConfig(String agentId) {
+        if (StringUtils.isBlank(agentId)) {
+            throw new RenException(ErrorCode.AGENT_NOT_FOUND);
+        }
+        AgentEntity agent = agentService.getAgentById(agentId);
+        if (agent == null) {
+            throw new RenException(ErrorCode.AGENT_NOT_FOUND);
+        }
+        return buildAgentRuntimeConfig(agent);
+    }
+
+    @Override
+    public List<String> getCorrectWords(String macAddress) {
+        DeviceEntity device = deviceService.getDeviceByMacAddress(macAddress);
+        if (device == null) {
+            return Collections.emptyList();
+        }
+        List<CorrectWordSimpleVO> items = correctWordFileService.getAllItemsByAgentId(device.getAgentId());
+        return items.stream()
+                .map(item -> item.getSourceWord() + "|" + item.getTargetWord())
+                .collect(Collectors.toList());
+    }
+
+    private Map<String, Object> buildAgentRuntimeConfig(AgentEntity agent) {
         String voice = null;
         String referenceAudio = null;
         String referenceText = null;
@@ -151,27 +181,25 @@ public class ConfigServiceImpl implements ConfigService {
             voice = timbre.getTtsVoice();
             referenceAudio = timbre.getReferenceAudio();
             referenceText = timbre.getReferenceText();
-            // 优先使用用户选择的语言，如果没有则使用音色支持的第一个语言
             if (StringUtils.isNotBlank(agent.getTtsLanguage())) {
                 language = agent.getTtsLanguage();
             } else if (StringUtils.isNotBlank(timbre.getLanguages())) {
                 language = timbre.getLanguages().split("、")[0].trim();
             }
         } else {
-            VoiceCloneEntity voice_print = cloneVoiceService.selectById(agent.getTtsVoiceId());
-            if (voice_print != null) {
-                voice = voice_print.getVoiceId();
-                // 优先使用用户选择的语言，如果没有则使用默认值
+            VoiceCloneEntity voicePrint = cloneVoiceService.selectById(agent.getTtsVoiceId());
+            if (voicePrint != null) {
+                voice = voicePrint.getVoiceId();
                 language = StringUtils.isNotBlank(agent.getTtsLanguage()) ? agent.getTtsLanguage() : "普通话";
             }
         }
-        // 构建返回数据
+
         Map<String, Object> result = new HashMap<>();
-        // 获取单台设备每天最多输出字数
+        result.put("agent_id", agent.getId());
+        result.put("agent_name", agent.getAgentName());
         String deviceMaxOutputSize = sysParamsService.getValue("device_max_output_size", true);
         result.put("device_max_output_size", deviceMaxOutputSize);
 
-        // 获取聊天记录配置
         Integer chatHistoryConf = agent.getChatHistoryConf();
         if (agent.getMemModelId() != null && agent.getMemModelId().equals(Constant.MEMORY_NO_MEM)) {
             chatHistoryConf = Constant.ChatHistoryConfEnum.IGNORE.getCode();
@@ -181,10 +209,9 @@ public class ConfigServiceImpl implements ConfigService {
             chatHistoryConf = Constant.ChatHistoryConfEnum.RECORD_TEXT_AUDIO.getCode();
         }
         result.put("chat_history_conf", chatHistoryConf);
-        // 添加函数调用参数信息
+
         if (!Objects.equals(agent.getIntentModelId(), "Intent_nointent")) {
-            String agentId = agent.getId();
-            List<AgentPluginMapping> pluginMappings = agentPluginMappingService.agentPluginParamsByAgentId(agentId);
+            List<AgentPluginMapping> pluginMappings = agentPluginMappingService.agentPluginParamsByAgentId(agent.getId());
             if (pluginMappings != null && !pluginMappings.isEmpty()) {
                 Map<String, Object> pluginParams = new HashMap<>();
                 for (AgentPluginMapping pluginMapping : pluginMappings) {
@@ -193,24 +220,19 @@ public class ConfigServiceImpl implements ConfigService {
                 result.put("plugins", pluginParams);
             }
         }
-        // 获取mcp接入点地址
+
         String mcpEndpoint = agentMcpAccessPointService.getAgentMcpAccessAddress(agent.getId());
         if (StringUtils.isNotBlank(mcpEndpoint) && mcpEndpoint.startsWith("ws")) {
-            mcpEndpoint = mcpEndpoint.replace("/mcp/", "/call/");
-            result.put("mcp_endpoint", mcpEndpoint);
+            result.put("mcp_endpoint", mcpEndpoint.replace("/mcp/", "/call/"));
         }
 
-        // 获取上下文源配置
         AgentContextProviderEntity contextProviderEntity = agentContextProviderService.getByAgentId(agent.getId());
         if (contextProviderEntity != null && contextProviderEntity.getContextProviders() != null
                 && !contextProviderEntity.getContextProviders().isEmpty()) {
             result.put("context_providers", contextProviderEntity.getContextProviders());
         }
 
-        // 获取声纹信息
         buildVoiceprintConfig(agent.getId(), result);
-
-        // 构建模块配置
         buildModuleConfig(
                 agent.getAgentName(),
                 agent.getSystemPrompt(),
@@ -233,20 +255,7 @@ public class ConfigServiceImpl implements ConfigService {
                 null,
                 result,
                 true);
-
         return result;
-    }
-
-    @Override
-    public List<String> getCorrectWords(String macAddress) {
-        DeviceEntity device = deviceService.getDeviceByMacAddress(macAddress);
-        if (device == null) {
-            return Collections.emptyList();
-        }
-        List<CorrectWordSimpleVO> items = correctWordFileService.getAllItemsByAgentId(device.getAgentId());
-        return items.stream()
-                .map(item -> item.getSourceWord() + "|" + item.getTargetWord())
-                .collect(Collectors.toList());
     }
 
     /**
@@ -428,6 +437,7 @@ public class ConfigServiceImpl implements ConfigService {
             Map<String, Object> result,
             boolean isCache) {
         Map<String, String> selectedModule = new HashMap<>();
+        Map<String, Object> modelConfigV2 = new HashMap<>();
 
         String[] modelTypes = { "VAD", "ASR", "TTS", "Memory", "Intent", "LLM", "VLLM", "SLM", "RAG" };
         String[] modelIds = { vadModelId, asrModelId, ttsModelId, memModelId, intentModelId, llmModelId, vllmModelId,
@@ -440,102 +450,130 @@ public class ConfigServiceImpl implements ConfigService {
             if (model == null) {
                 continue;
             }
-            Map<String, Object> typeConfig = new HashMap<>();
             if (model.getConfigJson() != null) {
-                typeConfig.put(model.getId(), model.getConfigJson());
+                Map<String, Object> runtimeConfig = new HashMap<>(model.getConfigJson());
                 // 如果是TTS类型，添加private_voice属性
                 if ("TTS".equals(modelTypes[i])) {
                     if (voice != null)
-                        ((Map<String, Object>) model.getConfigJson()).put("private_voice", voice);
+                        runtimeConfig.put("private_voice", voice);
                     if (referenceAudio != null)
-                        ((Map<String, Object>) model.getConfigJson()).put("ref_audio", referenceAudio);
+                        runtimeConfig.put("ref_audio", referenceAudio);
                     if (referenceText != null)
-                        ((Map<String, Object>) model.getConfigJson()).put("ref_text", referenceText);
+                        runtimeConfig.put("ref_text", referenceText);
                     if (language != null)
-                        ((Map<String, Object>) model.getConfigJson()).put("language", language);
+                        runtimeConfig.put("language", language);
                     if (ttsVolume != null)
-                        ((Map<String, Object>) model.getConfigJson()).put("ttsVolume", ttsVolume);
+                        runtimeConfig.put("ttsVolume", ttsVolume);
                     if (ttsRate != null)
-                        ((Map<String, Object>) model.getConfigJson()).put("ttsRate", ttsRate);
+                        runtimeConfig.put("ttsRate", ttsRate);
                     if (ttsPitch != null)
-                        ((Map<String, Object>) model.getConfigJson()).put("ttsPitch", ttsPitch);
+                        runtimeConfig.put("ttsPitch", ttsPitch);
 
                     // 火山引擎声音克隆需要替换resource_id
-                    Map<String, Object> map = (Map<String, Object>) model.getConfigJson();
-                    if (Constant.VOICE_CLONE_HUOSHAN_DOUBLE_STREAM.equals(map.get("type"))) {
+                    if (Constant.VOICE_CLONE_HUOSHAN_DOUBLE_STREAM.equals(runtimeConfig.get("type"))) {
                         // 如果voice是”S_”开头的，使用seed-icl-1.0
                         if (voice != null && voice.startsWith("S_")) {
-                            map.put("resource_id", "seed-icl-1.0");
+                            runtimeConfig.put("resource_id", "seed-icl-1.0");
                         }
                     }
                 }
                 // 如果是Intent类型，且type=intent_llm，则给他添加附加模型
                 if ("Intent".equals(modelTypes[i])) {
-                    Map<String, Object> map = (Map<String, Object>) model.getConfigJson();
-                    if ("intent_llm".equals(map.get("type"))) {
-                        intentLLMModelId = (String) map.get("llm");
+                    if ("intent_llm".equals(runtimeConfig.get("type"))) {
+                        intentLLMModelId = (String) runtimeConfig.get("llm");
                         if (StringUtils.isNotBlank(intentLLMModelId) && intentLLMModelId.equals(llmModelId)) {
                             intentLLMModelId = null;
                         }
                     }
-                    if (map.get("functions") != null) {
-                        String functionStr = (String) map.get("functions");
+                    if (runtimeConfig.get("functions") != null) {
+                        String functionStr = (String) runtimeConfig.get("functions");
                         if (StringUtils.isNotBlank(functionStr)) {
                             String[] functions = functionStr.split(";");
-                            map.put("functions", functions);
+                            runtimeConfig.put("functions", functions);
                         }
                     }
-                    System.out.println("map: " + map);
                 }
                 if ("Memory".equals(modelTypes[i])) {
-                    Map<String, Object> map = (Map<String, Object>) model.getConfigJson();
-                    if ("mem_local_short".equals(map.get("type"))) {
-                        memLocalShortLLMModelId = (String) map.get("llm");
+                    if ("mem_local_short".equals(runtimeConfig.get("type"))) {
+                        memLocalShortLLMModelId = (String) runtimeConfig.get("llm");
                         if (StringUtils.isNotBlank(memLocalShortLLMModelId)
                                 && memLocalShortLLMModelId.equals(llmModelId)) {
                             memLocalShortLLMModelId = null;
                         }
                     }
                 }
+                modelConfigV2.put(model.getId(), buildModelConfigV2(model, runtimeConfig));
                 // 如果是LLM类型，且intentLLMModelId不为空，则添加附加模型
                 if ("LLM".equals(modelTypes[i])) {
                     if (StringUtils.isNotBlank(intentLLMModelId)) {
-                        if (!typeConfig.containsKey(intentLLMModelId)) {
+                        if (!modelConfigV2.containsKey(intentLLMModelId)) {
                             // 修改这里：添加isMaskSensitive=false参数
                             ModelConfigEntity intentLLM = modelConfigService.getModelByIdFromCache(intentLLMModelId);
-                            typeConfig.put(intentLLM.getId(), intentLLM.getConfigJson());
+                            modelConfigV2.put(intentLLM.getId(), buildModelConfigV2(intentLLM));
                         }
                     }
                     if (StringUtils.isNotBlank(memLocalShortLLMModelId)) {
-                        if (!typeConfig.containsKey(memLocalShortLLMModelId)) {
+                        if (!modelConfigV2.containsKey(memLocalShortLLMModelId)) {
                             // 修改这里：添加isMaskSensitive=false参数
                             ModelConfigEntity memLocalShortLLM = modelConfigService
                                     .getModelByIdFromCache(memLocalShortLLMModelId);
-                            typeConfig.put(memLocalShortLLM.getId(), memLocalShortLLM.getConfigJson());
+                            modelConfigV2.put(memLocalShortLLM.getId(), buildModelConfigV2(memLocalShortLLM));
                         }
                     }
                     // LLM也返回所选的SLM，如果同名id则不重复显示
                     if (StringUtils.isNotBlank(slmModelId) && !slmModelId.equals(llmModelId)) {
-                        if (!typeConfig.containsKey(slmModelId)) {
+                        if (!modelConfigV2.containsKey(slmModelId)) {
                             ModelConfigEntity slmModel = modelConfigService.getModelByIdFromCache(slmModelId);
                             if (slmModel != null && slmModel.getConfigJson() != null) {
-                                typeConfig.put(slmModel.getId(), slmModel.getConfigJson());
+                                modelConfigV2.put(slmModel.getId(), buildModelConfigV2(slmModel));
                             }
                         }
                     }
                 }
             }
-            result.put(modelTypes[i], typeConfig);
 
             selectedModule.put(modelTypes[i], model.getId());
         }
 
         result.put("selected_module", selectedModule);
+        result.put("model_config_v2", modelConfigV2);
         if (StringUtils.isNotBlank(prompt)) {
             prompt = prompt.replace("{{assistant_name}}", StringUtils.isBlank(assistantName) ? "小智" : assistantName);
         }
         result.put("prompt", prompt);
         result.put("summaryMemory", summaryMemory);
+    }
+
+    private Map<String, Object> buildModelConfigV2(ModelConfigEntity model) {
+        return buildModelConfigV2(model,
+                model == null || model.getConfigJson() == null ? null : new HashMap<>(model.getConfigJson()));
+    }
+
+    private Map<String, Object> buildModelConfigV2(ModelConfigEntity model, Map<String, Object> runtimeConfig) {
+        Map<String, Object> v2 = new HashMap<>();
+        if (model == null) {
+            return v2;
+        }
+        ModelCatalogDTO catalog = modelCatalogService.resolve(model);
+        v2.put("id", model.getId());
+        v2.put("model_type", model.getModelType());
+        v2.put("model_code", model.getModelCode());
+        v2.put("model_name", model.getModelName());
+        v2.put("typed_config", runtimeConfig == null ? Map.of() : runtimeConfig);
+        if (catalog != null) {
+            v2.put("template_code", catalog.getTemplateCode());
+            v2.put("provider_code", catalog.getProviderCode());
+            v2.put("vendor_name", catalog.getVendorName());
+            v2.put("product_name", catalog.getProductName());
+            v2.put("capability", catalog.getCapability());
+            v2.put("access_mode", catalog.getAccessMode());
+            v2.put("deployment", catalog.getDeployment());
+            v2.put("protocol", catalog.getProtocolLabel());
+            v2.put("required_fields", catalog.getRequiredFields());
+            v2.put("credential_fields", catalog.getCredentialFields());
+            v2.put("known_limitations", catalog.getKnownLimitations());
+        }
+        return v2;
     }
 
     private ModelConfigEntity resolveUsableModel(String modelType, String modelId) {

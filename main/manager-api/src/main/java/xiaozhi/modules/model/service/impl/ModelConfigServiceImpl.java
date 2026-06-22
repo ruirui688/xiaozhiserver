@@ -1,6 +1,5 @@
 package xiaozhi.modules.model.service.impl;
 
-import java.io.Serializable;
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.Graphics2D;
@@ -8,6 +7,7 @@ import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.time.Duration;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
@@ -16,16 +16,20 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPOutputStream;
 import java.util.stream.Collectors;
@@ -33,15 +37,18 @@ import java.util.stream.Collectors;
 import javax.imageio.ImageIO;
 
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Service;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -69,11 +76,13 @@ import xiaozhi.modules.agent.entity.AgentEntity;
 import xiaozhi.modules.model.dao.ModelConfigDao;
 import xiaozhi.modules.model.dto.LlmModelBasicInfoDTO;
 import xiaozhi.modules.model.dto.ModelBasicInfoDTO;
+import xiaozhi.modules.model.dto.ModelCatalogDTO;
 import xiaozhi.modules.model.dto.ModelConfigBodyDTO;
 import xiaozhi.modules.model.dto.ModelConfigDTO;
 import xiaozhi.modules.model.dto.ModelProviderDTO;
 import xiaozhi.modules.model.dto.ModelTestResultDTO;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
+import xiaozhi.modules.model.service.ModelCatalogService;
 import xiaozhi.modules.model.service.ModelConfigService;
 import xiaozhi.modules.model.service.ModelProviderService;
 import lombok.extern.slf4j.Slf4j;
@@ -86,9 +95,11 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
 
     private final ModelConfigDao modelConfigDao;
     private final ModelProviderService modelProviderService;
+    private final ModelCatalogService modelCatalogService;
     private final RedisUtils redisUtils;
     private final AgentDao agentDao;
     private final RestTemplate restTemplate;
+    private final Environment environment;
 
     private static final int MODEL_TEST_UNTESTED = 0;
     private static final int MODEL_TEST_PASSED = 1;
@@ -99,6 +110,18 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     private static final String LLM_TEST_PROMPT = "请只回复 OK";
     private static final String TTS_TEST_TEXT = "你好，我是小智，语音合成测试成功。";
     private static final String VLLM_TEST_QUESTION = "请用一句话描述这张图片。";
+    private static final String STANDARD_ASR_TEST_AUDIO = "wakeup_words_short.wav";
+    private static final int DOUBAO_ASR_MAX_RESULT_MESSAGES = 20;
+    private static final int SINGLE_ASR_BENCHMARK_TIMEOUT_SECONDS = 120;
+    private static final String TEST_LEVEL_REAL_INFERENCE = "REAL_INFERENCE";
+    private static final String TEST_LEVEL_CONNECTIVITY = "CONNECTIVITY";
+    private static final String TEST_LEVEL_RUNTIME_CONFIG = "RUNTIME_CONFIG";
+    private static final String TEST_LEVEL_CONFIG_ONLY = "CONFIG_ONLY";
+    private static final String TEST_LEVEL_UNSUPPORTED = "UNSUPPORTED";
+    private static final List<String> UPSTREAM_MODEL_FIELDS = List.of(
+            "model_name", "model", "resource_id", "model_dir", "llm_model", "llm");
+    private static final List<String> ENDPOINT_FIELDS = List.of(
+            "base_url", "api_url", "url", "server_url", "ws_url", "host");
 
     @Override
     public List<ModelBasicInfoDTO> getModelCodeList(String modelType, String modelName) {
@@ -152,7 +175,11 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                         .eq("model_type", modelType)
                         .like(StringUtils.isNotBlank(modelName), "model_name", modelName));
 
-        return getPageData(modelConfigEntityIPage, ModelConfigDTO.class);
+        Map<String, ModelProviderDTO> providerCache = new HashMap<>();
+        List<ModelConfigDTO> list = modelConfigEntityIPage.getRecords().stream()
+                .map(entity -> buildResponseDTO(entity, providerCache))
+                .toList();
+        return new PageData<>(list, modelConfigEntityIPage.getTotal());
     }
 
     @Override
@@ -196,6 +223,18 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     }
 
     @Override
+    public ModelConfigDTO getDTOById(String id) {
+        if (StringUtils.isBlank(id)) {
+            throw new RenException(ErrorCode.IDENTIFIER_NOT_NULL);
+        }
+        ModelConfigEntity entity = modelConfigDao.selectById(id);
+        if (entity == null) {
+            throw new RenException(ErrorCode.RESOURCE_NOT_FOUND);
+        }
+        return buildResponseDTO(entity);
+    }
+
+    @Override
     public void delete(String id) {
         if (StringUtils.isBlank(id)) {
             throw new RenException(ErrorCode.IDENTIFIER_NOT_NULL);
@@ -227,12 +266,14 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
 
         long startTime = System.currentTimeMillis();
         ModelTestResultDTO result = doTestModel(modelConfig);
-        if (result.getResponseTimeMs() == null) {
+        if (result.getResponseTimeMs() == null && shouldShowModelTestResponseTime(result)) {
             result.setResponseTimeMs(System.currentTimeMillis() - startTime);
         }
         Date testTime = new Date();
         result.setTestTime(testTime);
-        result.setTestStatus(Boolean.TRUE.equals(result.getSuccess()) ? MODEL_TEST_PASSED : MODEL_TEST_FAILED);
+        boolean verified = isVerifiedModelTest(result);
+        result.setVerified(verified);
+        result.setTestStatus(verified ? MODEL_TEST_PASSED : MODEL_TEST_FAILED);
 
         ModelConfigEntity updateEntity = new ModelConfigEntity();
         updateEntity.setId(id);
@@ -240,7 +281,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         updateEntity.setTestStatus(result.getTestStatus());
         updateEntity.setTestMessage(result.getMessage());
         updateEntity.setTestTime(testTime);
-        updateEntity.setIsEnabled(Boolean.TRUE.equals(result.getSuccess()) ? 1 : 0);
+        updateEntity.setIsEnabled(verified ? 1 : 0);
         modelConfigDao.updateById(updateEntity);
         clearModelCache(id);
         return result;
@@ -268,11 +309,6 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         }
 
         return null;
-    }
-
-    @Override
-    public ModelConfigEntity selectById(Serializable id) {
-        return super.selectById(id);
     }
 
     @Override
@@ -412,9 +448,11 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         modelConfigEntity.setModelType(modelType);
 
         // 2. 更新基础字段
+        modelConfigEntity.setModelCode(modelConfigBodyDTO.getModelCode());
         modelConfigEntity.setModelName(modelConfigBodyDTO.getModelName());
         modelConfigEntity.setSort(modelConfigBodyDTO.getSort());
         modelConfigEntity.setIsEnabled(0);
+        modelConfigEntity.setDocLink(modelConfigBodyDTO.getDocLink());
         modelConfigEntity.setRemark(modelConfigBodyDTO.getRemark());
         modelConfigEntity.setTestStatus(MODEL_TEST_UNTESTED);
         modelConfigEntity.setTestMessage(null);
@@ -445,7 +483,276 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
      * 构建返回的DTO
      */
     private ModelConfigDTO buildResponseDTO(ModelConfigEntity entity) {
-        return ConvertUtils.sourceToTarget(entity, ModelConfigDTO.class);
+        return buildResponseDTO(entity, new HashMap<>());
+    }
+
+    private ModelConfigDTO buildResponseDTO(ModelConfigEntity entity, Map<String, ModelProviderDTO> providerCache) {
+        ModelConfigDTO dto = ConvertUtils.sourceToTarget(entity, ModelConfigDTO.class);
+        if (dto == null) {
+            return null;
+        }
+        ModelDisplayInfo displayInfo = buildModelDisplayInfo(entity, providerCache);
+        dto.setProviderCode(displayInfo.providerCode);
+        dto.setProviderName(displayInfo.providerName);
+        dto.setAdapterLabel(displayInfo.adapterLabel);
+        dto.setUpstreamModelId(displayInfo.upstreamModelId);
+        dto.setPlatformName(displayInfo.platformName);
+        dto.setEndpointSummary(displayInfo.endpointSummary);
+        dto.setModelTags(displayInfo.modelTags);
+        enrichCatalogInfo(dto, entity, displayInfo);
+        return dto;
+    }
+
+    private void enrichCatalogInfo(ModelConfigDTO dto, ModelConfigEntity entity, ModelDisplayInfo displayInfo) {
+        ModelCatalogDTO catalog = modelCatalogService.resolve(entity);
+        if (catalog == null) {
+            dto.setMigrationStatus("UNSUPPORTED");
+            return;
+        }
+        dto.setTemplateCode(catalog.getTemplateCode());
+        dto.setVendorName(catalog.getVendorName());
+        dto.setProductName(catalog.getProductName());
+        dto.setCapabilityLabel(catalog.getCapabilityLabel());
+        dto.setAccessModeLabel(catalog.getAccessModeLabel());
+        dto.setDeploymentLabel(catalog.getDeploymentLabel());
+        dto.setProtocolLabel(catalog.getProtocolLabel());
+        dto.setUpstreamResourceLabel(catalog.getUpstreamResourceLabel());
+        dto.setCredentialSummary(catalog.getCredentialFields());
+        dto.setRequiredFields(catalog.getRequiredFields());
+        dto.setSetupHints(catalog.getSetupHints());
+        dto.setKnownLimitations(catalog.getKnownLimitations());
+        dto.setMigrationStatus(hasMissingCatalogRequiredFields(entity.getConfigJson(), catalog) ? "NEEDS_REVIEW" : "AUTO");
+        if (StringUtils.isBlank(dto.getPlatformName())) {
+            dto.setPlatformName(catalog.getVendorName());
+        }
+        if (StringUtils.isBlank(dto.getAdapterLabel())) {
+            dto.setAdapterLabel(StringUtils.defaultIfBlank(catalog.getAdapterName(), displayInfo.providerCode));
+        }
+    }
+
+    private boolean hasMissingCatalogRequiredFields(JSONObject configJson, ModelCatalogDTO catalog) {
+        for (String field : catalog.getRequiredFields()) {
+            if (!hasUsableConfigValue(configJson, field)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private ModelDisplayInfo buildModelDisplayInfo(ModelConfigEntity entity,
+            Map<String, ModelProviderDTO> providerCache) {
+        ModelDisplayInfo displayInfo = new ModelDisplayInfo();
+        if (entity == null) {
+            return displayInfo;
+        }
+
+        JSONObject configJson = entity.getConfigJson();
+        displayInfo.providerCode = getConfigString(configJson, "type");
+        ModelProviderDTO provider = findProvider(entity.getModelType(), displayInfo.providerCode, providerCache);
+        if (provider != null) {
+            displayInfo.providerName = StringUtils.defaultString(provider.getName());
+        }
+        displayInfo.adapterLabel = StringUtils.defaultIfBlank(displayInfo.providerName, displayInfo.providerCode);
+        displayInfo.upstreamModelId = firstConfigString(configJson, UPSTREAM_MODEL_FIELDS);
+        displayInfo.endpointSummary = buildEndpointSummary(configJson);
+        displayInfo.platformName = inferPlatformName(configJson, provider, displayInfo.providerCode,
+                displayInfo.endpointSummary);
+        displayInfo.modelTags = buildModelTags(entity, configJson, displayInfo);
+        return displayInfo;
+    }
+
+    private ModelProviderDTO findProvider(String modelType, String providerCode,
+            Map<String, ModelProviderDTO> providerCache) {
+        if (StringUtils.isBlank(modelType) || StringUtils.isBlank(providerCode)) {
+            return null;
+        }
+        String cacheKey = modelType + ":" + providerCode;
+        if (providerCache.containsKey(cacheKey)) {
+            return providerCache.get(cacheKey);
+        }
+        List<ModelProviderDTO> providerList = modelProviderService.getList(modelType, providerCode);
+        ModelProviderDTO provider = CollectionUtil.isEmpty(providerList) ? null : providerList.get(0);
+        providerCache.put(cacheKey, provider);
+        return provider;
+    }
+
+    private String firstConfigString(JSONObject configJson, List<String> keys) {
+        if (configJson == null) {
+            return "";
+        }
+        for (String key : keys) {
+            String value = getConfigString(configJson, key);
+            if (StringUtils.isNotBlank(value)) {
+                return value;
+            }
+        }
+        return "";
+    }
+
+    private String getConfigString(JSONObject configJson, String key) {
+        if (configJson == null || StringUtils.isBlank(key) || !configJson.containsKey(key)) {
+            return "";
+        }
+        Object value = configJson.get(key);
+        if (value == null) {
+            return "";
+        }
+        String text = String.valueOf(value).trim();
+        return "null".equalsIgnoreCase(text) ? "" : text;
+    }
+
+    private String buildEndpointSummary(JSONObject configJson) {
+        if (configJson == null) {
+            return "";
+        }
+        String endpoint = firstConfigString(configJson, ENDPOINT_FIELDS);
+        String port = getConfigString(configJson, "port");
+        if (StringUtils.isNotBlank(port)
+                && StringUtils.isNotBlank(endpoint)
+                && !StringUtils.contains(endpoint, "://")
+                && !StringUtils.contains(endpoint, ":")) {
+            endpoint = endpoint + ":" + port;
+        }
+        return summarizeEndpoint(endpoint);
+    }
+
+    private String summarizeEndpoint(String endpoint) {
+        if (StringUtils.isBlank(endpoint)) {
+            return "";
+        }
+        String sanitized = StringUtils.substringBefore(StringUtils.substringBefore(endpoint.trim(), "?"), "#");
+        try {
+            URI uri = new URI(sanitized);
+            if (StringUtils.isBlank(uri.getScheme()) || StringUtils.isBlank(uri.getHost())) {
+                return sanitized;
+            }
+            StringBuilder summary = new StringBuilder();
+            summary.append(uri.getScheme()).append("://").append(uri.getHost());
+            if (uri.getPort() >= 0) {
+                summary.append(":").append(uri.getPort());
+            }
+            if (StringUtils.isNotBlank(uri.getPath())) {
+                summary.append(uri.getPath());
+            }
+            return summary.toString();
+        } catch (Exception e) {
+            return sanitized;
+        }
+    }
+
+    private String inferPlatformName(JSONObject configJson, ModelProviderDTO provider, String providerCode,
+            String endpointSummary) {
+        String explicitPlatform = firstConfigString(configJson, List.of("platform_name", "platform", "vendor"));
+        if (StringUtils.isNotBlank(explicitPlatform)) {
+            return explicitPlatform;
+        }
+        String endpoint = StringUtils.lowerCase(endpointSummary);
+        if (StringUtils.contains(endpoint, "dashscope.aliyuncs.com")) {
+            return "阿里云百炼";
+        }
+        if (StringUtils.contains(endpoint, "aliyuncs.com")) {
+            return "阿里云";
+        }
+        if (StringUtils.contains(endpoint, "ark.cn-")
+                || StringUtils.contains(endpoint, "volces.com")
+                || StringUtils.contains(endpoint, "volcengine")
+                || StringUtils.contains(endpoint, "bytedance.com")) {
+            return "火山引擎";
+        }
+        if (StringUtils.contains(endpoint, "deepseek.com")) {
+            return "DeepSeek";
+        }
+        if (StringUtils.contains(endpoint, "open.bigmodel.cn")) {
+            return "智谱AI";
+        }
+        if (StringUtils.contains(endpoint, "api.openai.com")) {
+            return "OpenAI";
+        }
+        if (StringUtils.contains(endpoint, "api.groq.com")) {
+            return "Groq";
+        }
+        if (isLocalEndpoint(endpoint)) {
+            return "本地服务";
+        }
+
+        String normalizedProvider = StringUtils.lowerCase(providerCode);
+        if (StringUtils.contains(normalizedProvider, "aliyun") || StringUtils.contains(normalizedProvider, "alibl")) {
+            return "阿里云";
+        }
+        if (StringUtils.contains(normalizedProvider, "doubao")) {
+            return "火山引擎";
+        }
+        if (StringUtils.contains(normalizedProvider, "gemini")) {
+            return "Google Gemini";
+        }
+        if (StringUtils.contains(normalizedProvider, "ollama")) {
+            return "Ollama";
+        }
+        if (StringUtils.contains(normalizedProvider, "xinference")) {
+            return "Xinference";
+        }
+        if (StringUtils.contains(normalizedProvider, "openai")) {
+            return "OpenAI兼容";
+        }
+        return provider == null ? "" : StringUtils.defaultString(provider.getName());
+    }
+
+    private List<String> buildModelTags(ModelConfigEntity entity, JSONObject configJson, ModelDisplayInfo displayInfo) {
+        Set<String> tags = new LinkedHashSet<>();
+        addTag(tags, entity.getModelType());
+        if (Integer.valueOf(1).equals(entity.getIsDefault())) {
+            addTag(tags, "默认");
+        }
+        if (Integer.valueOf(1).equals(entity.getIsEnabled())) {
+            addTag(tags, "启用");
+        } else {
+            addTag(tags, "停用");
+        }
+        if (Integer.valueOf(MODEL_TEST_PASSED).equals(entity.getTestStatus())) {
+            addTag(tags, "测试通过");
+        } else if (Integer.valueOf(MODEL_TEST_FAILED).equals(entity.getTestStatus())) {
+            addTag(tags, "测试失败");
+        } else {
+            addTag(tags, "未测试");
+        }
+        String providerCode = StringUtils.lowerCase(displayInfo.providerCode);
+        if (StringUtils.contains(providerCode, "openai")) {
+            addTag(tags, "OpenAI兼容");
+        }
+        if (StringUtils.contains(providerCode, "stream")
+                || Boolean.TRUE.equals(configJson == null ? null : configJson.getBool("streaming"))) {
+            addTag(tags, "流式");
+        }
+        if (StringUtils.isNotBlank(getConfigString(configJson, "model_dir"))
+                || isLocalEndpoint(StringUtils.lowerCase(displayInfo.endpointSummary))) {
+            addTag(tags, "本地");
+        } else if (StringUtils.isNotBlank(displayInfo.endpointSummary)) {
+            addTag(tags, "云端");
+        }
+        return new ArrayList<>(tags);
+    }
+
+    private void addTag(Set<String> tags, String tag) {
+        if (StringUtils.isNotBlank(tag)) {
+            tags.add(tag);
+        }
+    }
+
+    private boolean isLocalEndpoint(String endpoint) {
+        String value = StringUtils.lowerCase(endpoint);
+        return StringUtils.contains(value, "127.0.0.1")
+                || StringUtils.contains(value, "localhost")
+                || StringUtils.contains(value, "0.0.0.0");
+    }
+
+    private static class ModelDisplayInfo {
+        private String providerCode = "";
+        private String providerName = "";
+        private String adapterLabel = "";
+        private String upstreamModelId = "";
+        private String platformName = "";
+        private String endpointSummary = "";
+        private List<String> modelTags = List.of();
     }
 
     /**
@@ -543,6 +850,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         if (modelConfig.getConfigJson() == null) {
             result.setSuccess(false);
             result.setMessage("模型配置为空");
+            markModelTestLevel(result, TEST_LEVEL_UNSUPPORTED, false);
             return result;
         }
 
@@ -551,38 +859,153 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         if (StringUtils.isBlank(type)) {
             result.setSuccess(false);
             result.setMessage("模型配置缺少 type");
+            markModelTestLevel(result, TEST_LEVEL_UNSUPPORTED, false);
             return result;
         }
 
         String modelType = StringUtils.defaultString(modelConfig.getModelType()).toUpperCase();
         try {
+            String testLevel = getModelTestLevel(modelConfig);
             if ("LLM".equals(modelType) || "SLM".equals(modelType)) {
-                return testLanguageModel(configJson, type);
+                result = testLanguageModel(configJson, type);
+                return applyModelTestSemantics(result, testLevel);
             }
             if ("VLLM".equals(modelType)) {
-                return testVisionModel(configJson, type);
+                result = testVisionModel(configJson, type);
+                return applyModelTestSemantics(result, testLevel);
             }
             if ("ASR".equals(modelType)) {
-                return testAsrModel(configJson, type);
+                result = testAsrModel(configJson, type);
+                return applyModelTestSemantics(result, testLevel);
             }
             if ("TTS".equals(modelType)) {
-                return testTtsModel(configJson, type);
+                result = testTtsModel(configJson, type);
+                return applyModelTestSemantics(result, testLevel);
             }
             if ("INTENT".equals(modelType) && "intent_llm".equals(type)) {
-                return testIntentModel(configJson);
+                result = testIntentModel(configJson);
+                return applyModelTestSemantics(result, testLevel);
             }
             if (LOCAL_TESTABLE_TYPES.contains(type)) {
-                return validateBasicModelConfig(configJson, type, modelType);
+                result = validateBasicModelConfig(configJson, type, modelType);
+                return applyModelTestSemantics(result, testLevel);
             }
-            return validateBasicModelConfig(configJson, type, modelType);
+            result = validateBasicModelConfig(configJson, type, modelType);
+            return applyModelTestSemantics(result, testLevel);
         } catch (Exception e) {
             log.warn("模型测试失败，modelId: {}", modelConfig.getId(), e);
             result.setSuccess(false);
             result.setMessage("模型测试失败：" + StringUtils.defaultIfBlank(e.getMessage(), e.getClass().getSimpleName()));
             result.setTestInput("模型类型：" + modelType + "\n供应器类型：" + type);
             result.setTestOutput(result.getMessage());
+            markModelTestLevel(result, TEST_LEVEL_UNSUPPORTED, false);
             return result;
         }
+    }
+
+    private ModelTestResultDTO applyModelTestSemantics(ModelTestResultDTO result, String testLevel) {
+        if (result == null) {
+            result = new ModelTestResultDTO();
+            result.setSuccess(false);
+            result.setMessage("模型测试没有返回结果");
+            result.setTestOutput(result.getMessage());
+        }
+        boolean rawSuccess = Boolean.TRUE.equals(result.getSuccess());
+        boolean verified = rawSuccess
+                && (TEST_LEVEL_REAL_INFERENCE.equals(testLevel) || TEST_LEVEL_CONNECTIVITY.equals(testLevel)
+                        || TEST_LEVEL_RUNTIME_CONFIG.equals(testLevel));
+        markModelTestLevel(result, testLevel, verified);
+        if (rawSuccess && !verified) {
+            result.setSuccess(false);
+            result.setMessage("仅完成配置校验，未执行真实模型调用，不能标记为测试通过；"
+                    + StringUtils.defaultString(result.getMessage()));
+        }
+        return result;
+    }
+
+    private boolean isVerifiedModelTest(ModelTestResultDTO result) {
+        return result != null && Boolean.TRUE.equals(result.getVerified());
+    }
+
+    private boolean shouldShowModelTestResponseTime(ModelTestResultDTO result) {
+        if (result == null) {
+            return false;
+        }
+        return TEST_LEVEL_REAL_INFERENCE.equals(result.getTestLevel())
+                || TEST_LEVEL_CONNECTIVITY.equals(result.getTestLevel());
+    }
+
+    private void markModelTestLevel(ModelTestResultDTO result, String testLevel, boolean verified) {
+        result.setTestLevel(testLevel);
+        result.setTestLevelText(getModelTestLevelText(testLevel));
+        result.setVerified(verified);
+        if (!TEST_LEVEL_REAL_INFERENCE.equals(testLevel) && !TEST_LEVEL_CONNECTIVITY.equals(testLevel)) {
+            result.setResponseTimeMs(null);
+        }
+    }
+
+    private String getModelTestLevel(ModelConfigEntity modelConfig) {
+        if (modelConfig == null || modelConfig.getConfigJson() == null) {
+            return TEST_LEVEL_UNSUPPORTED;
+        }
+        String modelType = StringUtils.defaultString(modelConfig.getModelType()).toUpperCase();
+        String type = StringUtils.lowerCase(modelConfig.getConfigJson().getStr("type"));
+        if (StringUtils.isBlank(type)) {
+            return TEST_LEVEL_UNSUPPORTED;
+        }
+        if (("LLM".equals(modelType) || "SLM".equals(modelType))
+                && ("openai".equals(type) || "ollama".equals(type))) {
+            return TEST_LEVEL_REAL_INFERENCE;
+        }
+        if ("VLLM".equals(modelType) && "openai".equals(type)) {
+            return TEST_LEVEL_REAL_INFERENCE;
+        }
+        if ("ASR".equals(modelType) && "openai".equals(type)) {
+            return TEST_LEVEL_REAL_INFERENCE;
+        }
+        if ("TTS".equals(modelType) && "openai".equals(type)) {
+            return TEST_LEVEL_REAL_INFERENCE;
+        }
+        if ("ASR".equals(modelType) && "doubao_stream".equals(type)) {
+            return TEST_LEVEL_REAL_INFERENCE;
+        }
+        if ("ASR".equals(modelType)
+                && (CollectionUtil.isNotEmpty(getRequiredFields(modelType, type))
+                        || CollectionUtil.isNotEmpty(getRequiredAnyFieldGroups(modelType, type))
+                        || CollectionUtil.isNotEmpty(getMissingAlternativeRequirements(modelConfig.getConfigJson(), modelType, type)))) {
+            return TEST_LEVEL_REAL_INFERENCE;
+        }
+        if ("INTENT".equals(modelType) && "intent_llm".equals(type)) {
+            return TEST_LEVEL_CONFIG_ONLY;
+        }
+        if ("VAD".equals(modelType) && "silero".equals(type)) {
+            return TEST_LEVEL_RUNTIME_CONFIG;
+        }
+        if (LOCAL_TESTABLE_TYPES.contains(type)) {
+            return TEST_LEVEL_CONFIG_ONLY;
+        }
+        if (CollectionUtil.isNotEmpty(getRequiredFields(modelType, type))
+                || CollectionUtil.isNotEmpty(getRequiredAnyFieldGroups(modelType, type))
+                || CollectionUtil.isNotEmpty(getMissingAlternativeRequirements(modelConfig.getConfigJson(), modelType, type))) {
+            return TEST_LEVEL_CONFIG_ONLY;
+        }
+        return TEST_LEVEL_UNSUPPORTED;
+    }
+
+    private String getModelTestLevelText(String testLevel) {
+        if (TEST_LEVEL_REAL_INFERENCE.equals(testLevel)) {
+            return "真实推理";
+        }
+        if (TEST_LEVEL_CONNECTIVITY.equals(testLevel)) {
+            return "连通性";
+        }
+        if (TEST_LEVEL_RUNTIME_CONFIG.equals(testLevel)) {
+            return "运行时配置";
+        }
+        if (TEST_LEVEL_CONFIG_ONLY.equals(testLevel)) {
+            return "配置校验";
+        }
+        return "未实测";
     }
 
     private ModelTestResultDTO testIntentModel(JSONObject configJson) {
@@ -617,8 +1040,11 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         if ("doubao_stream".equals(type)) {
             return testDoubaoStreamAsrModel(configJson);
         }
-        ModelTestResultDTO result = new ModelTestResultDTO();
-        return validateBasicModelConfig(configJson, type, "ASR");
+        ModelTestResultDTO configCheck = validateBasicModelConfig(configJson, type, "ASR");
+        if (!Boolean.TRUE.equals(configCheck.getSuccess())) {
+            return configCheck;
+        }
+        return testAsrModelViaRuntimeBenchmark(configJson, type);
     }
 
     private ModelTestResultDTO testTtsModel(JSONObject configJson, String type) {
@@ -768,11 +1194,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         }
 
         try {
-            Path audioPath = findFirstExistingPath(List.of(
-                    "../xiaozhi-server/config/assets/wakeup_words.wav",
-                    "../xiaozhi-server/config/assets/bind_code.wav",
-                    "main/xiaozhi-server/config/assets/wakeup_words.wav",
-                    "main/xiaozhi-server/config/assets/bind_code.wav"));
+            Path audioPath = findAsrTestAudioPath();
             if (audioPath == null) {
                 result.setSuccess(false);
                 result.setMessage("未找到 ASR 测试音频，期望来源：main/xiaozhi-server/config/assets/*.wav");
@@ -781,6 +1203,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                 return result;
             }
             result.setTestInput("接口：" + apiUrl + "\n模型：" + model + "\n音频：" + audioPath);
+            result.setTestAudioDataUrl(buildAudioDataUrl(audioPath));
 
             byte[] audioBytes = Files.readAllBytes(audioPath);
             ByteArrayResource audioResource = new ByteArrayResource(audioBytes) {
@@ -837,7 +1260,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             result.setSuccess(false);
             result.setMessage("豆包流式 ASR 缺少有效 appid、access_token 或 resource_id");
             result.setTestInput("resource_id：" + StringUtils.defaultString(resourceId, "-")
-                    + "\n测试内容：初始化握手连通性");
+                    + "\n测试内容：真实音频流式识别");
             result.setTestOutput(result.getMessage());
             return result;
         }
@@ -846,11 +1269,24 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         String wsUrl = enableMultilingual
                 ? "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream"
                 : "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async";
+
+        Path audioPath = findAsrTestAudioPath();
+        if (audioPath == null) {
+            result.setSuccess(false);
+            result.setMessage("未找到 ASR 测试音频，期望来源：main/xiaozhi-server/config/assets/*.wav");
+            result.setTestInput("WebSocket：" + wsUrl + "\nresource_id：" + resourceId
+                    + "\n测试内容：真实音频流式识别");
+            result.setTestOutput(result.getMessage());
+            return result;
+        }
+
         result.setTestInput("WebSocket：" + wsUrl + "\nresource_id：" + resourceId
-                + "\n测试内容：初始化握手连通性");
+                + "\n音频：" + audioPath
+                + "\n测试内容：真实音频流式识别");
+        result.setTestAudioDataUrl(buildAudioDataUrl(audioPath));
 
         try {
-            CompletableFuture<byte[]> responseFuture = new CompletableFuture<>();
+            BinaryResponseQueueListener listener = new BinaryResponseQueueListener();
             long startTime = System.currentTimeMillis();
             WebSocket webSocket = HttpClient.newHttpClient()
                     .newWebSocketBuilder()
@@ -858,46 +1294,229 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                     .header("X-Api-Access-Key", accessToken)
                     .header("X-Api-Resource-Id", resourceId)
                     .header("X-Api-Connect-Id", UUID.randomUUID().toString())
-                    .buildAsync(URI.create(wsUrl), new BinaryResponseListener(responseFuture))
+                    .buildAsync(URI.create(wsUrl), listener)
                     .get(10, TimeUnit.SECONDS);
 
             byte[] request = buildDoubaoStreamAsrInitRequest(configJson, appid, accessToken, enableMultilingual);
             webSocket.sendBinary(ByteBuffer.wrap(request), true).get(10, TimeUnit.SECONDS);
-            byte[] response = responseFuture.get(10, TimeUnit.SECONDS);
-            result.setResponseTimeMs(System.currentTimeMillis() - startTime);
-            JSONObject parsedResponse = parseDoubaoStreamAsrResponse(response);
-            result.setTestOutput(parsedResponse.toStringPretty());
-            webSocket.sendClose(WebSocket.NORMAL_CLOSURE, "test finished");
+            JSONObject initResponse = parseDoubaoStreamAsrResponse(listener.poll(10, TimeUnit.SECONDS));
+            result.setTestOutput(initResponse.toStringPretty());
 
-            if (parsedResponse.containsKey("code") && parsedResponse.getInt("code") != 1000) {
+            if (initResponse.containsKey("code") && initResponse.getInt("code") != 1000) {
                 result.setSuccess(false);
-                result.setMessage("豆包流式 ASR 初始化失败：" + extractDoubaoErrorMessage(parsedResponse));
+                result.setMessage("豆包流式 ASR 初始化失败：" + extractDoubaoErrorMessage(initResponse));
+                webSocket.sendClose(WebSocket.NORMAL_CLOSURE, "test finished");
                 return result;
             }
 
-            JSONObject payload = parsedResponse.getJSONObject("payload_msg");
+            JSONObject payload = initResponse.getJSONObject("payload_msg");
             if (payload != null && payload.containsKey("code") && payload.getInt("code") != 1000 && payload.getInt("code") != 0) {
                 result.setSuccess(false);
-                result.setMessage("豆包流式 ASR 初始化失败：" + extractDoubaoErrorMessage(parsedResponse));
+                result.setMessage("豆包流式 ASR 初始化失败：" + extractDoubaoErrorMessage(initResponse));
+                webSocket.sendClose(WebSocket.NORMAL_CLOSURE, "test finished");
                 return result;
             }
             if (payload != null && payload.containsKey("error")) {
                 result.setSuccess(false);
                 result.setMessage("豆包流式 ASR 初始化失败：" + payload.getStr("error"));
+                webSocket.sendClose(WebSocket.NORMAL_CLOSURE, "test finished");
                 return result;
             }
 
-            result.setSuccess(true);
-            result.setMessage("豆包流式 ASR 配置连通性测试通过，resource_id：" + resourceId);
+            byte[] pcmBytes = readAsrTestPcmBytes(audioPath);
+            byte[] audioRequest = buildDoubaoStreamAsrAudioRequest(pcmBytes, true);
+            webSocket.sendBinary(ByteBuffer.wrap(audioRequest), true).get(10, TimeUnit.SECONDS);
+
+            List<String> responseSummaries = new ArrayList<>();
+            String recognizedText = "";
+            for (int i = 0; i < DOUBAO_ASR_MAX_RESULT_MESSAGES; i++) {
+                JSONObject asrResponse = parseDoubaoStreamAsrResponse(listener.poll(10, TimeUnit.SECONDS));
+                responseSummaries.add(asrResponse.toStringPretty());
+                recognizedText = extractDoubaoRecognizedText(asrResponse);
+                if (StringUtils.isNotBlank(recognizedText)) {
+                    break;
+                }
+            }
+            result.setResponseTimeMs(System.currentTimeMillis() - startTime);
+            webSocket.sendClose(WebSocket.NORMAL_CLOSURE, "test finished");
+
+            if (StringUtils.isNotBlank(recognizedText)) {
+                result.setSuccess(true);
+                result.setMessage("豆包流式 ASR 真实音频测试通过，样本：" + audioPath);
+                result.setTestOutput(recognizedText);
+                return result;
+            }
+
+            result.setSuccess(false);
+            result.setMessage("豆包流式 ASR 未返回识别文本，样本：" + audioPath);
+            result.setTestOutput(String.join("\n\n", responseSummaries));
             return result;
         } catch (Exception e) {
             result.setSuccess(false);
-            result.setMessage("豆包流式 ASR 配置连通性测试失败：" + StringUtils.defaultIfBlank(e.getMessage(), e.getClass().getSimpleName()));
+            result.setMessage("豆包流式 ASR 真实音频测试失败：" + StringUtils.defaultIfBlank(e.getMessage(), e.getClass().getSimpleName()));
             if (StringUtils.isBlank(result.getTestOutput())) {
                 result.setTestOutput(result.getMessage());
             }
             return result;
         }
+    }
+
+    private ModelTestResultDTO testAsrModelViaRuntimeBenchmark(JSONObject configJson, String type) {
+        ModelTestResultDTO result = new ModelTestResultDTO();
+        String providerType = StringUtils.defaultString(type);
+        String modelName = firstNonBlank(configJson, "model_name", "model", "resource_id", "host");
+        result.setTestInput("供应器类型：" + providerType
+                + "\n模型：" + StringUtils.defaultIfBlank(modelName, "-")
+                + "\n测试方式：调用 xiaozhi-server 运行时 provider，读取内置音频并执行 1 轮真实 ASR 识别");
+
+        try {
+            JSONObject payload = new JSONObject();
+            payload.set("task_id", "single-asr-test-" + UUID.randomUUID());
+            payload.set("model_type", "ASR");
+            payload.set("iterations", 1);
+            payload.set("concurrency", 1);
+
+            JSONObject model = new JSONObject();
+            model.set("id", "single-asr-test");
+            model.set("model_name", StringUtils.defaultIfBlank(modelName, providerType));
+            model.set("model_type", "ASR");
+            model.set("provider_type", providerType);
+            model.set("config", configJson);
+            model.set("test_audio_name", STANDARD_ASR_TEST_AUDIO);
+            JSONArray models = new JSONArray();
+            models.add(model);
+            payload.set("models", models);
+
+            long startTime = System.currentTimeMillis();
+            JSONObject response = callRuntimeBenchmark(payload);
+            result.setResponseTimeMs(System.currentTimeMillis() - startTime);
+
+            JSONObject benchmarkResult = firstJsonObject(response.getJSONArray("results"));
+            if (benchmarkResult == null) {
+                result.setSuccess(false);
+                result.setMessage("ASR 真实音频测试没有返回结果");
+                result.setTestOutput(response.toStringPretty());
+                return result;
+            }
+
+            JSONObject sample = firstJsonObject(benchmarkResult.getJSONArray("samples"));
+            if (sample == null) {
+                result.setSuccess(false);
+                result.setMessage(StringUtils.defaultIfBlank(
+                        benchmarkResult.getStr("error_summary"),
+                        "ASR 真实音频测试没有返回样本"));
+                result.setTestOutput(benchmarkResult.toStringPretty());
+                return result;
+            }
+
+            String recognizedText = extractRuntimeBenchmarkRecognizedText(sample);
+            Long latencyMs = sample.getLong("latency_ms");
+            if (latencyMs != null) {
+                result.setResponseTimeMs(latencyMs);
+            }
+            result.setTestInput(buildRuntimeBenchmarkAsrInput(sample, providerType));
+            result.setTestAudioDataUrl(buildRuntimeBenchmarkAsrAudioDataUrl(sample));
+            result.setTestOutput(StringUtils.defaultIfBlank(recognizedText, sample.toStringPretty()));
+            boolean success = Boolean.TRUE.equals(sample.getBool("success")) && StringUtils.isNotBlank(recognizedText);
+            result.setSuccess(success);
+            result.setMessage(success
+                    ? "ASR 真实音频测试通过"
+                    : StringUtils.defaultIfBlank(sample.getStr("message"), "ASR 真实音频测试未返回识别文本"));
+            return result;
+        } catch (Exception e) {
+            result.setSuccess(false);
+            result.setMessage("ASR 真实音频测试失败：" + StringUtils.defaultIfBlank(e.getMessage(), e.getClass().getSimpleName()));
+            result.setTestOutput(result.getMessage());
+            return result;
+        }
+    }
+
+    private JSONObject callRuntimeBenchmark(JSONObject payload) {
+        String baseUrl = resolveXiaozhiServerHttpBaseUrl();
+        String url = baseUrl + "/benchmark/models";
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory();
+        factory.setReadTimeout(Duration.ofSeconds(SINGLE_ASR_BENCHMARK_TIMEOUT_SECONDS));
+        RestTemplate benchmarkRestTemplate = new RestTemplate(factory);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        try {
+            ResponseEntity<String> response = benchmarkRestTemplate.exchange(
+                    url, HttpMethod.POST, new HttpEntity<>(payload.toString(), headers), String.class);
+            if (!response.getStatusCode().is2xxSuccessful()) {
+                throw new RenException("xiaozhi-server ASR 测试接口返回异常：" + response.getStatusCode());
+            }
+            return JSONUtil.parseObj(response.getBody());
+        } catch (ResourceAccessException e) {
+            throw new RenException("无法连接 xiaozhi-server ASR 真实测试接口：" + url
+                    + "。请先确认 xiaozhi-server 已启动且 HTTP 端口可访问；源码开发可执行 `scripts/dev status server`。原始错误："
+                    + e.getMessage(), e);
+        }
+    }
+
+    private String resolveXiaozhiServerHttpBaseUrl() {
+        String configured = environment.getProperty("xiaozhi.server.http-base-url");
+        if (StringUtils.isNotBlank(configured)) {
+            return StringUtils.removeEnd(configured.trim(), "/");
+        }
+        return "http://127.0.0.1:" + resolveXiaozhiServerHttpPort();
+    }
+
+    private int resolveXiaozhiServerHttpPort() {
+        String value = environment.getProperty("xiaozhi.server.http-port");
+        if (StringUtils.isNumeric(value)) {
+            return Integer.parseInt(value);
+        }
+        return 8003;
+    }
+
+    private JSONObject firstJsonObject(JSONArray array) {
+        if (array == null || array.isEmpty()) {
+            return null;
+        }
+        return JSONUtil.parseObj(array.get(0));
+    }
+
+    private String buildRuntimeBenchmarkAsrInput(JSONObject sample, String providerType) {
+        JSONObject inputDetail = sample.getJSONObject("input_detail");
+        String audioName = inputDetail == null ? sample.getStr("input_summary") : inputDetail.getStr("audio_name");
+        String reference = inputDetail == null ? null : inputDetail.getStr("reference_text");
+        String audioBytes = inputDetail == null ? null : StringUtils.defaultString(inputDetail.getStr("audio_bytes"));
+        return "供应器类型：" + providerType
+                + "\n音频：" + StringUtils.defaultIfBlank(audioName, "-")
+                + "\n音频格式：pcm"
+                + (StringUtils.isNotBlank(audioBytes) ? "\n音频大小：" + audioBytes + " bytes" : "")
+                + (StringUtils.isNotBlank(reference) ? "\n参考文本：" + reference : "")
+                + "\n测试方式：xiaozhi-server 运行时 provider 真实识别";
+    }
+
+    private String extractRuntimeBenchmarkRecognizedText(JSONObject sample) {
+        JSONObject outputDetail = sample.getJSONObject("output_detail");
+        if (outputDetail != null && StringUtils.isNotBlank(outputDetail.getStr("recognized_text"))) {
+            return outputDetail.getStr("recognized_text");
+        }
+        return StringUtils.defaultString(sample.getStr("output_summary"));
+    }
+
+    private String buildRuntimeBenchmarkAsrAudioDataUrl(JSONObject sample) {
+        JSONObject inputDetail = sample.getJSONObject("input_detail");
+        String audioName = inputDetail == null ? sample.getStr("input_summary") : inputDetail.getStr("audio_name");
+        if (StringUtils.isBlank(audioName)) {
+            return "";
+        }
+        Path audioPath = findFirstExistingPath(List.of(
+                "../xiaozhi-server/config/assets/" + audioName,
+                "main/xiaozhi-server/config/assets/" + audioName));
+        return buildAudioDataUrl(audioPath);
+    }
+
+    private String firstNonBlank(JSONObject configJson, String... fields) {
+        for (String field : fields) {
+            String value = configJson.getStr(field);
+            if (StringUtils.isNotBlank(value)) {
+                return value;
+            }
+        }
+        return "";
     }
 
     private ModelTestResultDTO testOpenAiTtsModel(JSONObject configJson) {
@@ -1140,7 +1759,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
 
     private List<String> getRequiredFields(String modelType, String type) {
         String normalizedModelType = StringUtils.defaultString(modelType).toUpperCase();
-        String normalizedType = StringUtils.defaultString(type);
+        String normalizedType = StringUtils.lowerCase(StringUtils.defaultString(type));
         if ("ASR".equals(normalizedModelType)) {
             return switch (normalizedType) {
                 case "fun_local", "sherpa_onnx_local" -> List.of("model_dir");
@@ -1176,7 +1795,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         }
         if ("LLM".equals(normalizedModelType)) {
             return switch (normalizedType) {
-                case "AliBL" -> List.of("base_url", "app_id", "api_key");
+                case "alibl" -> List.of("base_url", "app_id", "api_key");
                 case "dify", "fastgpt" -> List.of("base_url", "api_key");
                 case "gemini" -> List.of("api_key", "model_name");
                 case "coze" -> List.of("bot_id", "personal_access_token");
@@ -1207,7 +1826,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
 
     private List<List<String>> getRequiredAnyFieldGroups(String modelType, String type) {
         String normalizedModelType = StringUtils.defaultString(modelType).toUpperCase();
-        String normalizedType = StringUtils.defaultString(type);
+        String normalizedType = StringUtils.lowerCase(StringUtils.defaultString(type));
         if ("TTS".equals(normalizedModelType) && "doubao".equals(normalizedType)) {
             return List.of(List.of("access_token", "authorization"));
         }
@@ -1229,21 +1848,25 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
 
     private boolean isAliyunNlsModel(String modelType, String type) {
         String normalizedModelType = StringUtils.defaultString(modelType).toUpperCase();
-        String normalizedType = StringUtils.defaultString(type);
+        String normalizedType = StringUtils.lowerCase(StringUtils.defaultString(type));
         return ("ASR".equals(normalizedModelType) || "TTS".equals(normalizedModelType))
                 && ("aliyun".equals(normalizedType) || "aliyun_stream".equals(normalizedType));
     }
 
     private String buildBasicConfigSuccessOutput(String modelType, String type) {
         String normalizedModelType = StringUtils.defaultString(modelType).toUpperCase();
-        String normalizedType = StringUtils.defaultString(type);
+        String normalizedType = StringUtils.lowerCase(StringUtils.defaultString(type));
         if ("VAD".equals(normalizedModelType) && "silero".equals(normalizedType)) {
-            return "必填字段已配置。Docker 部署下，SileroVAD 模型文件由 xiaozhi-server 容器在运行时校验。";
+            return "必填字段已配置，后台允许启用。SileroVAD 模型文件由 xiaozhi-server 按当前运行方式在运行时校验；"
+                    + "Docker 部署需确保容器内路径可访问，源码运行需确保本机路径可访问。";
         }
         return "必填字段已配置";
     }
 
     private boolean hasUsableConfigValue(JSONObject configJson, String field) {
+        if (configJson == null) {
+            return false;
+        }
         Object value = configJson.get(field);
         if (value == null) {
             return false;
@@ -1291,6 +1914,15 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         byte[] payload = gzipCompress(request.toString().getBytes(StandardCharsets.UTF_8));
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         output.write(generateDoubaoHeader(0x01, 0x01, 0x00, 0x01, 0x01));
+        output.write(ByteBuffer.allocate(4).putInt(payload.length).array());
+        output.write(payload);
+        return output.toByteArray();
+    }
+
+    private byte[] buildDoubaoStreamAsrAudioRequest(byte[] pcmBytes, boolean last) throws IOException {
+        byte[] payload = gzipCompress(pcmBytes == null ? new byte[0] : pcmBytes);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        output.write(generateDoubaoHeader(0x01, 0x02, last ? 0x02 : 0x00, 0x01, 0x01));
         output.write(ByteBuffer.allocate(4).putInt(payload.length).array());
         output.write(payload);
         return output.toByteArray();
@@ -1357,6 +1989,30 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         return StringUtils.defaultIfBlank(payload.getStr("error"), payload.toString());
     }
 
+    private String extractDoubaoRecognizedText(JSONObject parsedResponse) {
+        JSONObject payload = parsedResponse.getJSONObject("payload_msg");
+        if (payload == null) {
+            return "";
+        }
+        JSONObject result = payload.getJSONObject("result");
+        if (result == null) {
+            return "";
+        }
+        JSONArray utterances = result.getJSONArray("utterances");
+        if (utterances != null && !utterances.isEmpty()) {
+            String text = utterances.stream()
+                    .map(JSONUtil::parseObj)
+                    .filter(item -> Boolean.TRUE.equals(item.getBool("definite")))
+                    .map(item -> StringUtils.defaultString(item.getStr("text")))
+                    .filter(StringUtils::isNotBlank)
+                    .collect(Collectors.joining());
+            if (StringUtils.isNotBlank(text)) {
+                return text;
+            }
+        }
+        return StringUtils.defaultString(result.getStr("text"));
+    }
+
     private boolean isPlaceholderSecret(String value) {
         String lowerValue = StringUtils.defaultString(value).toLowerCase();
         return lowerValue.contains("你的")
@@ -1377,6 +2033,80 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             }
         }
         return null;
+    }
+
+    private Path findAsrTestAudioPath() {
+        return findFirstExistingPath(List.of(
+                "../xiaozhi-server/config/assets/" + STANDARD_ASR_TEST_AUDIO,
+                "../xiaozhi-server/config/assets/wakeup_words.wav",
+                "../xiaozhi-server/config/assets/bind_code.wav",
+                "main/xiaozhi-server/config/assets/" + STANDARD_ASR_TEST_AUDIO,
+                "main/xiaozhi-server/config/assets/wakeup_words.wav",
+                "main/xiaozhi-server/config/assets/bind_code.wav"));
+    }
+
+    private String buildAudioDataUrl(Path audioPath) {
+        if (audioPath == null || !Files.exists(audioPath) || !Files.isRegularFile(audioPath)) {
+            return "";
+        }
+        try {
+            String filename = audioPath.getFileName().toString().toLowerCase();
+            String mediaType = filename.endsWith(".mp3") ? "audio/mpeg" : "audio/wav";
+            return "data:" + mediaType + ";base64," + Base64.getEncoder().encodeToString(Files.readAllBytes(audioPath));
+        } catch (IOException e) {
+            log.warn("生成测试音频预览失败，path: {}", audioPath, e);
+            return "";
+        }
+    }
+
+    private byte[] readAsrTestPcmBytes(Path audioPath) throws IOException {
+        byte[] bytes = Files.readAllBytes(audioPath);
+        if (bytes.length > 44 && bytes[0] == 'R' && bytes[1] == 'I' && bytes[2] == 'F' && bytes[3] == 'F') {
+            byte[] pcm = new byte[bytes.length - 44];
+            System.arraycopy(bytes, 44, pcm, 0, pcm.length);
+            return pcm;
+        }
+        return bytes;
+    }
+
+    private static class BinaryResponseQueueListener implements WebSocket.Listener {
+        private final BlockingQueue<byte[]> responses = new LinkedBlockingQueue<>();
+        private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        private volatile Throwable error;
+
+        private byte[] poll(long timeout, TimeUnit unit) throws Exception {
+            if (error != null) {
+                throw new IOException(error);
+            }
+            byte[] response = responses.poll(timeout, unit);
+            if (response == null) {
+                if (error != null) {
+                    throw new IOException(error);
+                }
+                throw new IOException("等待 ASR 响应超时");
+            }
+            return response;
+        }
+
+        @Override
+        public CompletionStage<?> onBinary(WebSocket webSocket, ByteBuffer data, boolean last) {
+            byte[] bytes = new byte[data.remaining()];
+            data.get(bytes);
+            synchronized (buffer) {
+                buffer.write(bytes, 0, bytes.length);
+                if (last) {
+                    responses.offer(buffer.toByteArray());
+                    buffer.reset();
+                }
+            }
+            webSocket.request(1);
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public void onError(WebSocket webSocket, Throwable error) {
+            this.error = error;
+        }
     }
 
     private static class BinaryResponseListener implements WebSocket.Listener {
