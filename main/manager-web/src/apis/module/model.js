@@ -188,7 +188,7 @@ export default {
       .url(`${getServiceUrl()}/models/performance-test`)
       .method('POST')
       .data(params)
-      .timeout(180000)
+      .timeout(30000)
       .success((res) => {
         RequestService.clearRequestTime()
         callback(res)
@@ -229,6 +229,35 @@ export default {
           data: {
             code: -1,
             msg: err?.msg || '查询模型评测任务失败'
+          }
+        })
+      }).send()
+  },
+  // 查询专业评测历史
+  benchmarkHistory(params, callback) {
+    const queryParams = new URLSearchParams({
+      modelType: params.modelType || '',
+      limit: params.limit || 20
+    }).toString();
+    RequestService.sendRequest()
+      .url(`${getServiceUrl()}/models/benchmark?${queryParams}`)
+      .method('GET')
+      .timeout(30000)
+      .success((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .fail((res) => {
+        RequestService.clearRequestTime()
+        callback(res)
+      })
+      .networkFail((err) => {
+        console.error('查询模型评测历史失败:', err)
+        RequestService.clearRequestTime()
+        callback({
+          data: {
+            code: -1,
+            msg: err?.msg || '查询模型评测历史失败'
           }
         })
       }).send()

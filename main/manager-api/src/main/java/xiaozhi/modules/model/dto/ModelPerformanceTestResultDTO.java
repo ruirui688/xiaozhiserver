@@ -3,6 +3,7 @@ package xiaozhi.modules.model.dto;
 import java.io.Serial;
 import java.io.Serializable;
 import java.util.List;
+import java.util.Map;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
@@ -91,6 +92,21 @@ public class ModelPerformanceTestResultDTO implements Serializable {
 
     @Schema(description = "上下文稳定性评分")
     private Double contextScore;
+
+    @Schema(description = "Judge模式: llm_judge/heuristic/混合")
+    private String judgeMode;
+
+    @Schema(description = "LLMJudge六维平均分")
+    private Map<String, Object> dimensionScores;
+
+    @Schema(description = "场景维度平均分")
+    private Map<String, Object> scenarioScores;
+
+    @Schema(description = "安全P0/P1失败数量")
+    private Integer p0p1FailureCount;
+
+    @Schema(description = "主对话模型推荐结论")
+    private String recommendation;
 
     @Schema(description = "单轮样本")
     private List<ModelPerformanceTestSampleDTO> samples;

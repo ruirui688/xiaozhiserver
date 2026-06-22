@@ -7,8 +7,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.core.env.Environment;
@@ -59,9 +62,11 @@ public class ModelBenchmarkServiceImpl implements ModelBenchmarkService {
     private static final int MAX_CONCURRENCY = 8;
     private static final int MAX_MODELS = 50;
     private static final Executor BENCHMARK_EXECUTOR = Executors.newFixedThreadPool(2);
+    private static final Map<String, JSONObject> JUDGE_CONFIGS = new ConcurrentHashMap<>();
     private static final List<String> METRIC_NOTES = List.of(
             "专业评测由 xiaozhi-server 真实 provider 执行，不再用 Java 配置校验冒充模型请求。",
-            "LLM 关注延时、首 token、tokens/s、空回复率、逻辑性和上下文稳定性。",
+            "LLM/SLM 使用业务样本和 LLMJudge 六维评分，覆盖酒水推荐、情绪陪伴、安全边界、RAG事实、多轮记忆和闲聊。",
+            "LLMJudge 默认通过环境变量配置 DeepSeek v4 pro；不可用时自动降级为启发式评估，并在报告中标记评审模式。",
             "ASR 关注真实音频识别延时、空识别率、CER/WER；缺少参考文本时不计算准确率。",
             "TTS 关注合成总耗时、首音频耗时、音频有效性和 RTF。",
             "未覆盖的指标显示为未实测，不计入失败，也不修改模型启用状态。");
@@ -101,6 +106,10 @@ public class ModelBenchmarkServiceImpl implements ModelBenchmarkService {
         task.setUpdateDate(now);
         taskDao.insert(task);
 
+        JSONObject judgeConfig = buildJudgeConfig(request);
+        if (!judgeConfig.isEmpty()) {
+            JUDGE_CONFIGS.put(task.getId(), judgeConfig);
+        }
         CompletableFuture.runAsync(() -> runTask(task.getId()), BENCHMARK_EXECUTOR);
 
         ModelBenchmarkCreateResponseDTO response = new ModelBenchmarkCreateResponseDTO();
@@ -118,7 +127,21 @@ public class ModelBenchmarkServiceImpl implements ModelBenchmarkService {
         if (task == null) {
             throw new RenException(ErrorCode.RESOURCE_NOT_FOUND);
         }
-        return toTaskDTO(task);
+        return toTaskDTO(task, true);
+    }
+
+    @Override
+    public List<ModelBenchmarkTaskDTO> listBenchmarkTasks(String modelType, Integer limit) {
+        int normalizedLimit = normalize(limit, 20, 100);
+        QueryWrapper<ModelBenchmarkTaskEntity> query = new QueryWrapper<ModelBenchmarkTaskEntity>()
+                .orderByDesc("create_date")
+                .last("LIMIT " + normalizedLimit);
+        if (StringUtils.isNotBlank(modelType)) {
+            query.eq("model_type", modelType);
+        }
+        return taskDao.selectList(query).stream()
+                .map(task -> toTaskDTO(task, false))
+                .toList();
     }
 
     private void runTask(String taskId) {
@@ -129,21 +152,71 @@ public class ModelBenchmarkServiceImpl implements ModelBenchmarkService {
         long startedMs = System.currentTimeMillis();
         updateTask(taskId, "RUNNING", 5, "专业评测任务已开始", null, new Date(), null, null);
         try {
-            JSONObject payload = buildPythonBenchmarkPayload(task);
-            JSONObject response = callPythonBenchmark(payload);
-            persistPythonBenchmarkResult(taskId, response);
+            List<JSONObject> models = buildPythonBenchmarkModels(task);
+            runModelBenchmarks(task, models);
             long durationMs = System.currentTimeMillis() - startedMs;
             updateTask(taskId, "SUCCEEDED", 100, buildTaskSummary(taskId), null, null, new Date(), durationMs);
         } catch (Exception e) {
             log.warn("模型专业评测任务失败，taskId: {}", taskId, e);
             updateTask(taskId, "FAILED", 100, "专业评测任务失败", e.getMessage(), null, new Date(),
                     System.currentTimeMillis() - startedMs);
+        } finally {
+            JUDGE_CONFIGS.remove(taskId);
         }
     }
 
-    private JSONObject buildPythonBenchmarkPayload(ModelBenchmarkTaskEntity task) {
+    private JSONObject buildJudgeConfig(ModelPerformanceTestRequestDTO request) {
+        JSONObject config = new JSONObject();
+        if (StringUtils.isNotBlank(request.getJudgeBaseUrl())) {
+            config.set("base_url", request.getJudgeBaseUrl().trim());
+        }
+        if (StringUtils.isNotBlank(request.getJudgeModel())) {
+            config.set("model", request.getJudgeModel().trim());
+        }
+        if (StringUtils.isNotBlank(request.getJudgeApiKey())) {
+            config.set("api_key", request.getJudgeApiKey().trim());
+        }
+        if (request.getJudgeTimeout() != null && request.getJudgeTimeout() > 0) {
+            config.set("timeout", request.getJudgeTimeout());
+        }
+        return config;
+    }
+
+    private void runModelBenchmarks(ModelBenchmarkTaskEntity task, List<JSONObject> models) {
+        int total = models.size();
+        int concurrency = Math.max(1, Math.min(task.getConcurrency() == null ? DEFAULT_CONCURRENCY : task.getConcurrency(),
+                Math.min(MAX_CONCURRENCY, total)));
+        AtomicInteger completed = new AtomicInteger(0);
+        AtomicInteger failed = new AtomicInteger(0);
+        ExecutorService modelExecutor = Executors.newFixedThreadPool(concurrency);
+        try {
+            List<CompletableFuture<Void>> futures = models.stream()
+                    .map(model -> CompletableFuture.runAsync(() -> {
+                        try {
+                            JSONObject payload = buildPythonBenchmarkPayload(task, List.of(model));
+                            JSONObject response = callPythonBenchmark(payload);
+                            persistPythonBenchmarkResult(task.getId(), response);
+                        } catch (Exception e) {
+                            failed.incrementAndGet();
+                            log.warn("模型专业评测单模型失败，taskId: {}, modelId: {}", task.getId(), model.getStr("id"), e);
+                            persistFailedModelResult(task.getId(), model, e.getMessage());
+                        } finally {
+                            int done = completed.incrementAndGet();
+                            int progress = 5 + (int) Math.round(done * 90.0 / total);
+                            String summary = String.format("专业评测执行中，已完成 %d/%d 个模型，失败 %d 个", done, total, failed.get());
+                            updateTask(task.getId(), "RUNNING", Math.min(progress, 95), summary, null, null, null, null);
+                        }
+                    }, modelExecutor))
+                    .toList();
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        } finally {
+            modelExecutor.shutdown();
+        }
+    }
+
+    private List<JSONObject> buildPythonBenchmarkModels(ModelBenchmarkTaskEntity task) {
         List<String> modelIds = parseStringList(task.getModelIds());
-        JSONArray models = new JSONArray();
+        List<JSONObject> models = new ArrayList<>();
         List<String> skippedModels = new ArrayList<>();
         for (String modelId : modelIds) {
             ModelConfigEntity model = modelConfigDao.selectById(modelId);
@@ -163,12 +236,24 @@ public class ModelBenchmarkServiceImpl implements ModelBenchmarkService {
             throw new RenException("没有可评测的模型配置。请确认已选择的模型仍存在，并且模型配置 JSON 不为空。已跳过模型ID："
                     + String.join(",", skippedModels));
         }
+        return models;
+    }
+
+    private JSONObject buildPythonBenchmarkPayload(ModelBenchmarkTaskEntity task, List<JSONObject> models) {
+        JSONArray modelArray = new JSONArray();
+        for (JSONObject model : models) {
+            modelArray.add(model);
+        }
         JSONObject payload = new JSONObject();
         payload.set("task_id", task.getId());
         payload.set("model_type", task.getModelType());
         payload.set("iterations", task.getIterations());
         payload.set("concurrency", task.getConcurrency());
-        payload.set("models", models);
+        payload.set("models", modelArray);
+        JSONObject judgeConfig = JUDGE_CONFIGS.get(task.getId());
+        if (judgeConfig != null && !judgeConfig.isEmpty()) {
+            payload.set("judge_config", judgeConfig);
+        }
         return payload;
     }
 
@@ -260,6 +345,25 @@ public class ModelBenchmarkServiceImpl implements ModelBenchmarkService {
         }
     }
 
+    private void persistFailedModelResult(String taskId, JSONObject model, String message) {
+        ModelBenchmarkResultEntity result = new ModelBenchmarkResultEntity();
+        result.setId(newId());
+        result.setTaskId(taskId);
+        result.setModelId(model.getStr("id"));
+        result.setModelName(model.getStr("model_name"));
+        result.setModelType(model.getStr("model_type"));
+        result.setProviderType(model.getStr("provider_type"));
+        result.setBenchmarkLevel("FAILED");
+        result.setBenchmarkLevelText("评测失败");
+        result.setSuccessCount(0);
+        result.setFailureCount(1);
+        result.setSuccessRate(0.0);
+        result.setSummary("模型评测失败");
+        result.setErrorSummary(StringUtils.abbreviate(message, 1000));
+        result.setCreateDate(new Date());
+        resultDao.insert(result);
+    }
+
     private void persistSample(String taskId, String resultId, String modelId, JSONObject sampleJson) {
         ModelBenchmarkSampleEntity sample = new ModelBenchmarkSampleEntity();
         sample.setId(newId());
@@ -288,7 +392,7 @@ public class ModelBenchmarkServiceImpl implements ModelBenchmarkService {
         sampleDao.insert(sample);
     }
 
-    private ModelBenchmarkTaskDTO toTaskDTO(ModelBenchmarkTaskEntity task) {
+    private ModelBenchmarkTaskDTO toTaskDTO(ModelBenchmarkTaskEntity task, boolean includeResults) {
         ModelBenchmarkTaskDTO dto = new ModelBenchmarkTaskDTO();
         dto.setId(task.getId());
         dto.setModelType(task.getModelType());
@@ -302,8 +406,12 @@ public class ModelBenchmarkServiceImpl implements ModelBenchmarkService {
         dto.setStartedAt(task.getStartedAt());
         dto.setFinishedAt(task.getFinishedAt());
         dto.setDurationMs(task.getDurationMs());
+        dto.setCreateDate(task.getCreateDate());
+        dto.setUpdateDate(task.getUpdateDate());
         dto.setMetricNotes(parseStringList(task.getMetricNotes()));
-        dto.setResults(loadResultDTOs(task.getId()));
+        if (includeResults) {
+            dto.setResults(loadResultDTOs(task.getId()));
+        }
         return dto;
     }
 
@@ -339,6 +447,7 @@ public class ModelBenchmarkServiceImpl implements ModelBenchmarkService {
             dto.setContextScore(entity.getContextScore());
             dto.setSummary(entity.getSummary());
             dto.setSamples(loadSampleDTOs(taskId, entity.getId()));
+            enrichJudgeSummary(dto);
             results.add(dto);
         }
         return results;
@@ -373,8 +482,91 @@ public class ModelBenchmarkServiceImpl implements ModelBenchmarkService {
             dto.setProcessSteps(rawMetrics.getBeanList("process_steps", String.class));
             dto.setInputDetail(rawMetrics.getJSONObject("input_detail"));
             dto.setOutputDetail(rawMetrics.getJSONObject("output_detail"));
+            JSONObject outputDetail = rawMetrics.getJSONObject("output_detail");
+            if (outputDetail != null) {
+                dto.setJudgeMode(outputDetail.getStr("judge_mode"));
+                dto.setP0p1(outputDetail.getBeanList("p0p1", String.class));
+                dto.setScenario(outputDetail.getStr("scenario"));
+                dto.setRiskLevel(outputDetail.getStr("risk_level"));
+            }
             return dto;
         }).toList();
+    }
+
+    private void enrichJudgeSummary(ModelPerformanceTestResultDTO dto) {
+        if (dto.getSamples() == null || dto.getSamples().isEmpty()) {
+            return;
+        }
+        JSONObject dimensionTotals = new JSONObject();
+        JSONObject dimensionCounts = new JSONObject();
+        JSONObject scenarioTotals = new JSONObject();
+        JSONObject scenarioCounts = new JSONObject();
+        List<String> judgeModes = new ArrayList<>();
+        int p0p1FailureCount = 0;
+        for (ModelPerformanceTestSampleDTO sample : dto.getSamples()) {
+            Map<String, Object> outputDetail = sample.getOutputDetail();
+            if (outputDetail == null) {
+                continue;
+            }
+            Object judgeMode = outputDetail.get("judge_mode");
+            if (judgeMode != null && !judgeModes.contains(String.valueOf(judgeMode))) {
+                judgeModes.add(String.valueOf(judgeMode));
+            }
+            Object p0p1 = outputDetail.get("p0p1");
+            if (p0p1 instanceof List<?> list && !list.isEmpty()) {
+                p0p1FailureCount += 1;
+            }
+            Object scores = outputDetail.get("scores");
+            if (scores instanceof Map<?, ?> scoreMap) {
+                for (Map.Entry<?, ?> entry : scoreMap.entrySet()) {
+                    String key = String.valueOf(entry.getKey());
+                    Double value = toDouble(entry.getValue());
+                    if (value == null) {
+                        continue;
+                    }
+                    dimensionTotals.set(key, dimensionTotals.getDouble(key, 0.0) + value);
+                    dimensionCounts.set(key, dimensionCounts.getInt(key, 0) + 1);
+                }
+            }
+            Object scenario = outputDetail.get("scenario");
+            if (scenario != null && sample.getQualityScore() != null) {
+                String key = String.valueOf(scenario);
+                scenarioTotals.set(key, scenarioTotals.getDouble(key, 0.0) + sample.getQualityScore());
+                scenarioCounts.set(key, scenarioCounts.getInt(key, 0) + 1);
+            }
+        }
+        if (!judgeModes.isEmpty()) {
+            dto.setJudgeMode(String.join(",", judgeModes));
+        }
+        dto.setP0p1FailureCount(p0p1FailureCount);
+        dto.setDimensionScores(averageMap(dimensionTotals, dimensionCounts));
+        dto.setScenarioScores(averageMap(scenarioTotals, scenarioCounts));
+        dto.setRecommendation(p0p1FailureCount > 0 ? "不推荐作为主对话模型" : "可进入候选对比");
+    }
+
+    private Map<String, Object> averageMap(JSONObject totals, JSONObject counts) {
+        JSONObject result = new JSONObject();
+        for (String key : totals.keySet()) {
+            int count = counts.getInt(key, 0);
+            if (count > 0) {
+                result.set(key, Math.round((totals.getDouble(key, 0.0) / count) * 100.0) / 100.0);
+            }
+        }
+        return result;
+    }
+
+    private Double toDouble(Object value) {
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Double.parseDouble(String.valueOf(value));
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private JSONObject parseRawMetrics(String rawMetrics) {

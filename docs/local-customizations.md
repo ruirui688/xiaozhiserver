@@ -291,7 +291,7 @@
 
 ```text
 定制模块：manager-web 模型批量性能测试入口、manager-api 异步任务与结果入库、xiaozhi-server benchmark HTTP 接口和 runner
-改动原因：智控台需要在同一页面勾选多个模型并发起批量性能测试，用真实 provider 执行 LLM、ASR、TTS 等模型调用，记录成功率、延迟分位数、样本详情和未实测原因，避免只凭字段校验或 0ms 结果误判模型可用性。
+改动原因：智控台需要在同一页面勾选多个模型并发起批量性能测试，用真实 provider 执行 LLM、ASR、TTS 等模型调用，记录成功率、延迟分位数、样本详情和未实测原因，避免只凭字段校验、WebSocket 握手成功或 0ms 结果误判模型可用性。ASR 测试必须覆盖所有语音识别供应器，不是豆包流式 ASR 的单点特例；所有 ASR 单模型测试和批量测试都必须上传或流式发送真实音频，并以非空识别文本作为通过依据。
 关键文件：
   - main/xiaozhi-server/core/http_server.py
   - main/xiaozhi-server/core/api/benchmark_handler.py
@@ -304,4 +304,5 @@
   - docs/models/performance_tester.md
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方修改 HTTP 服务路由、模型测试接口、模型配置页面、模型测试 DTO 或数据库迁移，必须保留 `xiaozhi-server` 的 `/benchmark/models` 和 `/benchmark/health` 路由、`core.benchmark.runner.run_benchmark` 真实 provider 执行链路、manager-api 异步任务轮询与结果入库、样本级 measured/latency/benchmark_level 口径，以及 `scripts/dev doctor` 对 `main/xiaozhi-server/data/.config.yaml` 必需化检查。`REAL_INFERENCE` 才能进入延时统计，`CONNECTIVITY`、`CONFIG_ONLY`、`UNSUPPORTED` 不能显示为 0ms；普通单模型测试也不能把单纯字段校验当成可启用的真实通过。官方同步时可以接受模型配置中的空 `selected_module` 和轻量 Docker/模型可空部署口径，但不能删除批量性能测试路由、runner、任务结果表和使用指南。
+ASR 专项规则：所有语音识别模型的“测试”都必须执行真实音频识别流程，包含 OpenAI/Groq/Qwen3 这类非流式上传模型、豆包/阿里云/讯飞这类流式模型，以及本地或自部署 ASR。测试详情必须能看到测试音频信息、识别文本和耗时；不能把初始化握手、接口连通、鉴权成功或必填字段完整显示为“已通过”。暂未实现真实音频测试的 ASR 供应器只能显示未通过或未实测，不能自动启用。ASR 单模型测试默认统一使用 `main/xiaozhi-server/config/assets/wakeup_words_short.wav`，不能因为 provider 实现路径或目录遍历顺序不同而使用不同音频；标准音频缺失时才允许降级到其他内置 wav。
 ```

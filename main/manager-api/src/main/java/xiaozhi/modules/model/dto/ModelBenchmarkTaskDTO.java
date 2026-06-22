@@ -39,6 +39,10 @@ public class ModelBenchmarkTaskDTO implements Serializable {
 
     private Long durationMs;
 
+    private Date createDate;
+
+    private Date updateDate;
+
     private List<String> metricNotes;
 
     private List<ModelPerformanceTestResultDTO> results;

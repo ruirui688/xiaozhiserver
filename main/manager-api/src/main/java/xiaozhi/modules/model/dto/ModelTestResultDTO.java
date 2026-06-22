@@ -29,6 +29,9 @@ public class ModelTestResultDTO implements Serializable {
     @Schema(description = "测试图片预览 data URL")
     private String testImageDataUrl;
 
+    @Schema(description = "测试音频预览 data URL")
+    private String testAudioDataUrl;
+
     @Schema(description = "测试级别: REAL_INFERENCE/CONNECTIVITY/CONFIG_ONLY/UNSUPPORTED")
     private String testLevel;
 

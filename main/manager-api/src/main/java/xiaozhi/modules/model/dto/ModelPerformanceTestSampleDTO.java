@@ -66,6 +66,18 @@ public class ModelPerformanceTestSampleDTO implements Serializable {
     @Schema(description = "质量评分")
     private Double qualityScore;
 
+    @Schema(description = "Judge模式")
+    private String judgeMode;
+
+    @Schema(description = "安全P0/P1命中列表")
+    private List<String> p0p1;
+
+    @Schema(description = "业务场景")
+    private String scenario;
+
+    @Schema(description = "风险级别")
+    private String riskLevel;
+
     @Schema(description = "错误类型")
     private String errorType;
 

@@ -17,8 +17,13 @@ from core.benchmark.metrics import (
     char_error_rate,
     percentile,
     round_number,
-    rule_quality_score,
     word_error_rate,
+)
+from core.benchmark.llm_cases import LLM_BENCHMARK_CASES
+from core.benchmark.llm_judge import (
+    build_case_dialogue,
+    evaluate_llm_case,
+    summarize_llm_judge,
 )
 from core.providers.tts.dto.dto import InterfaceType
 from core.utils.asr import create_instance as create_asr_instance
@@ -26,25 +31,6 @@ from core.utils.llm import create_instance as create_llm_instance
 from core.utils.tts import create_instance as create_tts_instance
 from core.utils.opus_encoder_utils import OpusEncoderUtils
 
-
-DEFAULT_LLM_SAMPLES = [
-    {
-        "prompt": "请用一句话安慰一个今天心情不好的人。",
-        "required_terms": [],
-        "checks": ["是否能生成自然、简短、可语音播报的安慰文本"],
-    },
-    {
-        "prompt": "用户刚说：我今天心情不好。现在请回答：用户刚才提到的情绪是什么？",
-        "required_terms": ["心情"],
-        "checks": ["是否能基于输入文本提取情绪线索"],
-    },
-    {
-        "prompt": "请只回复 OK，不要解释。",
-        "required_terms": ["OK"],
-        "forbidden_terms": ["解释", "好的", "可以"],
-        "checks": ["是否严格遵循只回复 OK 的格式要求"],
-    },
-]
 
 DEFAULT_TTS_SAMPLES = [
     "你好，我是小智。",
@@ -54,16 +40,21 @@ DEFAULT_TTS_SAMPLES = [
 
 BENCHMARK_RUNTIME_DIR = os.path.join(tempfile.gettempdir(), "xiaozhi-benchmark")
 AUDIO_VALID_BYTES = 256
+STANDARD_ASR_TEST_AUDIO = "wakeup_words_short.wav"
 
 
 async def run_benchmark(payload):
     models = payload.get("models") or []
     iterations = int(payload.get("iterations") or 3)
     concurrency = max(1, min(int(payload.get("concurrency") or 3), 8))
+    judge_config = payload.get("judge_config") or {}
     loop = asyncio.get_running_loop()
     with ThreadPoolExecutor(max_workers=concurrency) as executor:
         tasks = [
-            loop.run_in_executor(executor, lambda item=model: asyncio.run(_run_model(item, iterations)))
+            loop.run_in_executor(
+                executor,
+                lambda item=model: asyncio.run(_run_model(item, iterations, judge_config)),
+            )
             for model in models
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -77,12 +68,12 @@ async def run_benchmark(payload):
     return {"task_id": payload.get("task_id"), "results": normalized_results}
 
 
-async def _run_model(model, iterations):
+async def _run_model(model, iterations, judge_config=None):
     model_type = str(model.get("model_type") or "").upper()
     provider_type = str(model.get("provider_type") or model.get("config", {}).get("type") or "")
     config = _prepare_runtime_config(model.get("config") or {})
     if model_type in ("LLM", "SLM"):
-        return await _run_llm(model, provider_type, config, iterations)
+        return await _run_llm(model, provider_type, config, iterations, judge_config or {})
     if model_type == "ASR":
         return await _run_asr(model, provider_type, config, iterations)
     if model_type == "TTS":
@@ -90,77 +81,53 @@ async def _run_model(model, iterations):
     return _unsupported_result(model, "当前专业评测暂未覆盖该模型类型")
 
 
-async def _run_llm(model, provider_type, config, iterations):
+async def _run_llm(model, provider_type, config, iterations, judge_config=None):
     llm = create_llm_instance(provider_type, config)
     samples = []
-    for index in range(iterations):
-        fixture = DEFAULT_LLM_SAMPLES[index % len(DEFAULT_LLM_SAMPLES)]
-        started = time.perf_counter()
-        first_token_ms = None
-        output = ""
-        success = False
-        message = "OK"
-        try:
-            dialogue = [{"role": "user", "content": fixture["prompt"]}]
-            token_count = 0
-            for chunk in llm.response("benchmark", dialogue):
-                if chunk:
-                    if first_token_ms is None:
-                        first_token_ms = int((time.perf_counter() - started) * 1000)
-                    output += str(chunk)
-                    token_count += 1
-            latency_ms = int((time.perf_counter() - started) * 1000)
-            success = bool(output.strip())
-            quality = rule_quality_score(
+    case_iteration = 0
+    for repeat in range(iterations):
+        for case in LLM_BENCHMARK_CASES:
+            case_iteration += 1
+            started = time.perf_counter()
+            first_token_ms = None
+            output = ""
+            message = "OK"
+            try:
+                dialogue = build_case_dialogue(case)
+                token_count = 0
+                for chunk in llm.response("benchmark", dialogue):
+                    if chunk:
+                        if first_token_ms is None:
+                            first_token_ms = int((time.perf_counter() - started) * 1000)
+                        output += str(chunk)
+                        token_count += 1
+                latency_ms = int((time.perf_counter() - started) * 1000)
+                tokens_per_second = round_number(token_count / max(latency_ms / 1000, 0.001), 2)
+                if not output.strip():
+                    message = "模型返回为空"
+            except Exception as exc:
+                latency_ms = int((time.perf_counter() - started) * 1000)
+                tokens_per_second = None
+                message = str(exc)
+            sample = evaluate_llm_case(
+                case,
                 output,
-                fixture.get("required_terms"),
-                fixture.get("forbidden_terms"),
+                latency_ms=latency_ms,
+                ttft_ms=first_token_ms,
+                tokens_per_second=tokens_per_second,
+                judge_config=judge_config or {},
             )
-            tokens_per_second = round_number(token_count / max(latency_ms / 1000, 0.001), 2)
-            if not success:
-                message = "模型返回为空"
-        except Exception as exc:
-            latency_ms = int((time.perf_counter() - started) * 1000)
-            quality = 0.0
-            tokens_per_second = None
-            message = str(exc)
-        samples.append({
-            "iteration": index + 1,
-            "sample_type": "llm_dialogue",
-            "success": success,
-            "measured": success,
-            "latency_ms": latency_ms,
-            "ttft_ms": first_token_ms,
-            "tokens_per_second": tokens_per_second,
-            "quality_score": quality,
-            "input_summary": fixture["prompt"],
-            "output_summary": output[:500],
-            "reference_output": " / ".join(fixture.get("required_terms") or []) or None,
-            "process_steps": [
-                "构造单轮 user prompt",
-                "调用 LLM provider.response",
-                "记录首 token、总耗时、输出速度和规则评分",
-            ],
-            "input_detail": {
-                "role": "user",
-                "prompt": fixture["prompt"],
-                "required_terms": fixture.get("required_terms") or [],
-                "forbidden_terms": fixture.get("forbidden_terms") or [],
-                "checks": fixture.get("checks") or [],
-            },
-            "output_detail": {
-                "assistant_text": output[:2000],
-                "token_chunks": token_count if success else 0,
-                "quality_score": quality,
-            },
-            "message": message,
-            "error_type": None if success else "EMPTY_OR_ERROR",
-        })
+            sample["iteration"] = case_iteration
+            sample["sample_type"] = f"llm_judge:{case.get('scenario')}"
+            if message != "OK" and not output.strip():
+                sample["message"] = message
+                sample["error_type"] = "EMPTY_OR_ERROR"
+            samples.append(sample)
     return _summarize(model, "REAL_INFERENCE", "真实推理", samples)
 
 
 async def _run_asr(model, provider_type, config, iterations):
-    audio_files = _load_audio_files()
+    audio_files = _load_audio_files(model.get("test_audio_name") or STANDARD_ASR_TEST_AUDIO)
     if not audio_files:
         return _unsupported_result(model, "未找到 ASR 测试音频")
     asr = create_asr_instance(provider_type, config, delete_audio_file=True)
@@ -504,6 +471,24 @@ def _summarize(model, level, level_text, samples):
         result[field] = round_number(sum(values) / len(values), 4) if values else None
     result["logic_score"] = result.get("quality_score")
     result["context_score"] = result.get("quality_score")
+    if str(model.get("model_type") or "").upper() in ("LLM", "SLM"):
+        judge_summary = summarize_llm_judge(samples)
+        result["judge_mode"] = judge_summary.get("judge_mode")
+        result["overall_score"] = judge_summary.get("overall_score")
+        result["dimension_scores"] = judge_summary.get("dimension_scores")
+        result["scenario_scores"] = judge_summary.get("scenario_scores")
+        result["p0p1_failure_count"] = judge_summary.get("p0p1_failure_count")
+        result["recommendation"] = judge_summary.get("recommendation")
+        result["quality_score"] = judge_summary.get("overall_score")
+        dimension_scores = judge_summary.get("dimension_scores") or {}
+        result["logic_score"] = dimension_scores.get("task_completion")
+        result["context_score"] = dimension_scores.get("context")
+        result["summary"] = (
+            f"LLMJudge {judge_summary.get('judge_mode') or 'unknown'}，"
+            f"综合分 {judge_summary.get('overall_score') if judge_summary.get('overall_score') is not None else '-'}，"
+            f"P0/P1 {judge_summary.get('p0p1_failure_count') or 0} 个，"
+            f"{judge_summary.get('recommendation') or ''}"
+        )
     return result
 
 
@@ -633,13 +618,16 @@ def _unsupported_result(model, message, level="UNSUPPORTED", level_text="未实�
     }
 
 
-def _load_audio_files():
+def _load_audio_files(preferred_name=None):
     root = os.path.join(os.getcwd(), "config", "assets")
     references = _load_audio_references(root)
     files = []
     if not os.path.exists(root):
         return files
-    for name in os.listdir(root):
+    names = sorted(os.listdir(root))
+    if preferred_name and preferred_name in names:
+        names = [preferred_name]
+    for name in names:
         if not name.lower().endswith((".wav", ".pcm")):
             continue
         path = os.path.join(root, name)

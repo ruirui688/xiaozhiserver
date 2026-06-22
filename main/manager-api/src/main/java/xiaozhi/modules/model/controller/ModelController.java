@@ -187,6 +187,15 @@ public class ModelController {
         return new Result<ModelBenchmarkTaskDTO>().ok(modelBenchmarkService.getBenchmarkTask(taskId));
     }
 
+    @GetMapping("/benchmark")
+    @Operation(summary = "获取模型专业评测历史任务")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<List<ModelBenchmarkTaskDTO>> benchmarkTaskHistory(
+            @RequestParam(required = false) String modelType,
+            @RequestParam(required = false, defaultValue = "20") Integer limit) {
+        return new Result<List<ModelBenchmarkTaskDTO>>().ok(modelBenchmarkService.listBenchmarkTasks(modelType, limit));
+    }
+
     @GetMapping("/{id}")
     @Operation(summary = "获取模型配置")
     @RequiresPermissions("sys:role:superAdmin")
