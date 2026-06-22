@@ -115,28 +115,49 @@
               生成用例
             </el-button>
           </div>
-          <div v-if="parsePerformanceCustomQuestions().length" class="benchmark-question-preview">
+          <div v-if="performanceCustomQuestions.length" class="benchmark-question-preview">
             <div class="benchmark-question-head">
-              <strong>本次将使用 {{ parsePerformanceCustomQuestions().length }} 轮业务问题</strong>
-              <el-button
-                type="text"
-                size="mini"
-                :disabled="performanceTesting"
-                @click="benchmarkQuestionsExpanded = !benchmarkQuestionsExpanded"
-              >
-                {{ benchmarkQuestionsExpanded ? "收起微调" : "展开微调" }}
-              </el-button>
+              <strong>本次将使用 {{ performanceCustomQuestions.length }} 轮业务问题</strong>
+              <div>
+                <el-button
+                  v-if="hiddenBenchmarkQuestionCount > 0 || benchmarkQuestionsExpanded"
+                  type="text"
+                  size="mini"
+                  :disabled="performanceTesting"
+                  @click="benchmarkQuestionsExpanded = !benchmarkQuestionsExpanded"
+                >
+                  {{ benchmarkQuestionsExpanded ? "收起" : "展开全部" }}
+                </el-button>
+                <el-button
+                  type="text"
+                  size="mini"
+                  :disabled="performanceTesting"
+                  @click="benchmarkQuestionsEditing = !benchmarkQuestionsEditing"
+                >
+                  {{ benchmarkQuestionsEditing ? "关闭微调" : "微调" }}
+                </el-button>
+              </div>
             </div>
             <el-tag
-              v-for="(question, index) in parsePerformanceCustomQuestions()"
+              v-for="(question, index) in visibleBenchmarkQuestions"
               :key="`${index}-${question}`"
               size="mini"
               effect="plain"
+              class="benchmark-question-tag"
             >
               {{ question }}
             </el-tag>
+            <el-tag
+              v-if="hiddenBenchmarkQuestionCount > 0"
+              size="mini"
+              type="info"
+              effect="plain"
+              class="benchmark-question-more"
+            >
+              还有 {{ hiddenBenchmarkQuestionCount }} 条
+            </el-tag>
             <el-input
-              v-if="benchmarkQuestionsExpanded"
+              v-if="benchmarkQuestionsEditing"
               v-model="performanceCustomQuestionsText"
               type="textarea"
               :rows="4"
@@ -273,15 +294,37 @@
           {{ performanceReport.errorMessage }}
         </div>
       </div>
-      <div v-if="getReportCustomQuestions(performanceReport).length" class="performance-custom-question-panel">
-        <div class="performance-field-label">{{ $t("modelConfig.performanceSampleUsed") }}</div>
+      <div v-if="reportCustomQuestions.length" class="performance-custom-question-panel">
+        <div class="performance-question-panel-head">
+          <div class="performance-field-label">
+            {{ $t("modelConfig.performanceSampleUsed") }}：{{ reportCustomQuestions.length }} 条
+          </div>
+          <el-button
+            v-if="hiddenReportQuestionCount > 0 || reportQuestionsExpanded"
+            type="text"
+            size="mini"
+            @click="reportQuestionsExpanded = !reportQuestionsExpanded"
+          >
+            {{ reportQuestionsExpanded ? "收起" : "展开全部" }}
+          </el-button>
+        </div>
         <el-tag
-          v-for="(question, index) in getReportCustomQuestions(performanceReport)"
+          v-for="(question, index) in visibleReportQuestions"
           :key="`${index}-${question}`"
           size="mini"
           effect="plain"
+          class="benchmark-question-tag"
         >
           {{ question }}
+        </el-tag>
+        <el-tag
+          v-if="hiddenReportQuestionCount > 0"
+          size="mini"
+          type="info"
+          effect="plain"
+          class="benchmark-question-more"
+        >
+          还有 {{ hiddenReportQuestionCount }} 条
         </el-tag>
       </div>
       <div v-if="performanceReport" class="performance-layout">
@@ -355,7 +398,7 @@
             <div class="judge-summary-title">{{ $t("modelConfig.dimensionScores") }}</div>
             <div class="judge-chip-list">
               <el-tag
-                v-for="item in formatScoreMap(selectedPerformanceResult.dimensionScores)"
+                v-for="item in getTopScoreItems(selectedPerformanceResult.dimensionScores)"
                 :key="item.key"
                 size="mini"
                 effect="plain"
@@ -366,7 +409,7 @@
             <div class="judge-summary-title">{{ $t("modelConfig.scenarioScores") }}</div>
             <div class="judge-chip-list">
               <el-tag
-                v-for="item in formatScoreMap(selectedPerformanceResult.scenarioScores)"
+                v-for="item in getTopScoreItems(selectedPerformanceResult.scenarioScores)"
                 :key="item.key"
                 size="mini"
                 effect="plain"
@@ -408,20 +451,9 @@
                 <span>{{ formatResponseTime(selectedPerformanceSample.responseTimeMs) }}</span>
               </div>
 
-              <div v-if="getSampleContextItems(selectedPerformanceSample).length" class="performance-context-panel">
-                <div
-                  v-for="item in getSampleContextItems(selectedPerformanceSample)"
-                  :key="item.label"
-                  class="performance-context-item"
-                >
-                  <span>{{ item.label }}</span>
-                  <p>{{ item.value }}</p>
-                </div>
-              </div>
-
               <div class="performance-dialogue-flow">
                 <div
-                  v-for="(message, index) in getSampleMessages(selectedPerformanceSample)"
+                  v-for="(message, index) in getVisibleSampleMessages(selectedPerformanceSample)"
                   :key="`${message.role}-${index}`"
                   class="performance-bubble-row"
                   :class="message.role === 'assistant' ? 'is-assistant' : 'is-user'"
@@ -434,6 +466,12 @@
                   </div>
                 </div>
                 <div
+                  v-if="getHiddenSampleMessageCount(selectedPerformanceSample) > 0"
+                  class="performance-dialogue-more"
+                >
+                  还有 {{ getHiddenSampleMessageCount(selectedPerformanceSample) }} 条对话在更多详情中
+                </div>
+                <div
                   v-if="!hasFullSampleConversation(selectedPerformanceSample)"
                   class="performance-bubble-row is-assistant is-output"
                 >
@@ -442,11 +480,6 @@
                     {{ getSampleAssistantText(selectedPerformanceSample) }}
                   </div>
                 </div>
-              </div>
-
-              <div v-if="getSampleExpectedBehavior(selectedPerformanceSample)" class="performance-chat-reference">
-                <strong>{{ $t("modelConfig.expectedBehavior") }}</strong>
-                <p>{{ getSampleExpectedBehavior(selectedPerformanceSample) }}</p>
               </div>
 
               <div class="performance-sample-metrics">
@@ -496,7 +529,7 @@
                 <div class="judge-summary-title">{{ $t("modelConfig.dimensionScores") }}</div>
                 <div class="judge-chip-list">
                   <el-tag
-                    v-for="item in formatScoreMap(getOutputDetail(selectedPerformanceSample).scores)"
+                    v-for="item in getTopScoreItems(getOutputDetail(selectedPerformanceSample).scores)"
                     :key="item.key"
                     size="mini"
                     effect="plain"
@@ -506,15 +539,59 @@
                 </div>
               </div>
 
-              <div
-                v-if="isSampleType(selectedPerformanceSample, 'llm') && selectedPerformanceSample.outputDetail"
-                class="judge-reasons"
+              <el-collapse
+                v-if="hasSampleLongDetail(selectedPerformanceSample)"
+                class="performance-json-detail"
               >
-                <div class="performance-field-label">{{ $t("modelConfig.judgeReasons") }}</div>
-                <pre>{{ formatJudgeReasons(selectedPerformanceSample.outputDetail) }}</pre>
-              </div>
-              <el-collapse v-if="hasSampleDetail(selectedPerformanceSample)" class="performance-json-detail">
-                <el-collapse-item :title="$t('modelConfig.performanceRawDetail')" name="detail">
+                <el-collapse-item title="更多详情" name="detail">
+                  <div v-if="getHiddenSampleMessages(selectedPerformanceSample).length" class="performance-detail-block">
+                    <div class="performance-field-label">完整对话</div>
+                    <div class="performance-dialogue-flow is-compact">
+                      <div
+                        v-for="(message, index) in getSampleMessages(selectedPerformanceSample)"
+                        :key="`full-${message.role}-${index}`"
+                        class="performance-bubble-row"
+                        :class="message.role === 'assistant' ? 'is-assistant' : 'is-user'"
+                      >
+                        <div class="performance-bubble-label">
+                          {{ formatDialogueRole(message.role) }}
+                        </div>
+                        <div class="performance-bubble">
+                          {{ message.content || "-" }}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div
+                    v-if="getSampleContextItems(selectedPerformanceSample).length"
+                    class="performance-detail-block"
+                  >
+                    <div class="performance-field-label">上下文</div>
+                    <div class="performance-context-panel is-compact">
+                      <div
+                        v-for="item in getSampleContextItems(selectedPerformanceSample)"
+                        :key="item.label"
+                        class="performance-context-item"
+                      >
+                        <span>{{ item.label }}</span>
+                        <p>{{ item.value }}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div
+                    v-if="getSampleExpectedBehavior(selectedPerformanceSample)"
+                    class="performance-chat-reference"
+                  >
+                    <strong>{{ $t("modelConfig.expectedBehavior") }}</strong>
+                    <p>{{ getSampleExpectedBehavior(selectedPerformanceSample) }}</p>
+                  </div>
+                  <div
+                    v-if="isSampleType(selectedPerformanceSample, 'llm') && hasJudgeReasons(selectedPerformanceSample)"
+                    class="judge-reasons"
+                  >
+                    <div class="performance-field-label">{{ $t("modelConfig.judgeReasons") }}</div>
+                    <pre>{{ formatJudgeReasons(selectedPerformanceSample.outputDetail) }}</pre>
+                  </div>
                   <div class="performance-sample-grid">
                     <div v-if="hasObjectValue(selectedPerformanceSample.inputDetail)">
                       <div class="performance-field-label">{{ $t("modelConfig.testInput") }}</div>
@@ -627,6 +704,9 @@ const DEFAULT_PERFORMANCE_JUDGE_CONFIG = {
   agentId: "",
   deviceId: "",
 };
+const COMPACT_QUESTION_LIMIT = 6;
+const COMPACT_MESSAGE_LIMIT = 4;
+const COMPACT_SCORE_LIMIT = 6;
 
 const BENCHMARK_CASE_MODES = [
   {
@@ -723,6 +803,8 @@ export default {
       benchmarkCaseMode: "built_in",
       selectedBenchmarkPresetId: "",
       benchmarkQuestionsExpanded: false,
+      benchmarkQuestionsEditing: false,
+      reportQuestionsExpanded: false,
       benchmarkCasesGenerating: false,
       performanceCustomQuestionsText: "",
       performanceReport: null,
@@ -770,6 +852,24 @@ export default {
         samples[0]
       );
     },
+    performanceCustomQuestions() {
+      return this.parsePerformanceCustomQuestions();
+    },
+    visibleBenchmarkQuestions() {
+      return this.getCompactList(this.performanceCustomQuestions, this.benchmarkQuestionsExpanded);
+    },
+    hiddenBenchmarkQuestionCount() {
+      return this.getHiddenListCount(this.performanceCustomQuestions, this.benchmarkQuestionsExpanded);
+    },
+    reportCustomQuestions() {
+      return this.getReportCustomQuestions(this.performanceReport);
+    },
+    visibleReportQuestions() {
+      return this.getCompactList(this.reportCustomQuestions, this.reportQuestionsExpanded);
+    },
+    hiddenReportQuestionCount() {
+      return this.getHiddenListCount(this.reportCustomQuestions, this.reportQuestionsExpanded);
+    },
   },
   watch: {
     visible(value) {
@@ -796,6 +896,7 @@ export default {
       this.performanceConcurrency = Math.max(1, Math.min(this.selectedModels.length, 8));
       this.selectedPerformanceResultId = "";
       this.selectedPerformanceSampleKey = "";
+      this.reportQuestionsExpanded = false;
     },
     formatResponseTime(responseTimeMs) {
       if (responseTimeMs === null || responseTimeMs === undefined || responseTimeMs === "") {
@@ -840,6 +941,17 @@ export default {
         value: this.formatScore(value[key]),
       }));
     },
+    getTopScoreItems(value) {
+      return this.formatScoreMap(value).slice(0, COMPACT_SCORE_LIMIT);
+    },
+    getCompactList(items, expanded, limit = COMPACT_QUESTION_LIMIT) {
+      const list = Array.isArray(items) ? items : [];
+      return expanded ? list : list.slice(0, limit);
+    },
+    getHiddenListCount(items, expanded, limit = COMPACT_QUESTION_LIMIT) {
+      const list = Array.isArray(items) ? items : [];
+      return expanded ? 0 : Math.max(0, list.length - limit);
+    },
     formatJudgeMode(value) {
       if (!value) {
         return "-";
@@ -881,6 +993,7 @@ export default {
       this.selectedBenchmarkPresetId = "";
       this.benchmarkCaseMode = "built_in";
       this.benchmarkQuestionsExpanded = false;
+      this.benchmarkQuestionsEditing = false;
       if (showMessage) {
         this.$message.success("已切换为后端内置标准样本");
       }
@@ -893,6 +1006,7 @@ export default {
       this.selectedBenchmarkPresetId = preset.id;
       this.performanceCustomQuestionsText = preset.questions.join("\n");
       this.benchmarkQuestionsExpanded = false;
+      this.benchmarkQuestionsEditing = false;
     },
     getAgentGenerationTitle() {
       if (!this.performanceAgentId) {
@@ -953,6 +1067,7 @@ export default {
               this.performanceCustomQuestionsText = questions.join("\n");
               this.selectedBenchmarkPresetId = "";
               this.benchmarkQuestionsExpanded = false;
+              this.benchmarkQuestionsEditing = false;
               this.$message.success("已生成评测用例");
               return;
             }
@@ -1005,6 +1120,15 @@ export default {
           content: (sample && sample.inputSummary) || "-",
         },
       ];
+    },
+    getVisibleSampleMessages(sample) {
+      return this.getSampleMessages(sample).slice(0, COMPACT_MESSAGE_LIMIT);
+    },
+    getHiddenSampleMessages(sample) {
+      return this.getSampleMessages(sample).slice(COMPACT_MESSAGE_LIMIT);
+    },
+    getHiddenSampleMessageCount(sample) {
+      return this.getHiddenSampleMessages(sample).length;
     },
     hasFullSampleConversation(sample) {
       const outputDetail = this.getOutputDetail(sample);
@@ -1236,6 +1360,17 @@ export default {
     hasSampleDetail(sample) {
       return this.hasObjectValue(sample && sample.inputDetail) || this.hasObjectValue(sample && sample.outputDetail);
     },
+    hasJudgeReasons(sample) {
+      const outputDetail = this.getOutputDetail(sample);
+      return !!(outputDetail && outputDetail.reasons && typeof outputDetail.reasons === "object");
+    },
+    hasSampleLongDetail(sample) {
+      return this.getHiddenSampleMessageCount(sample) > 0
+        || this.getSampleContextItems(sample).length > 0
+        || !!this.getSampleExpectedBehavior(sample)
+        || this.hasJudgeReasons(sample)
+        || this.hasSampleDetail(sample);
+    },
     formatJsonDetail(value) {
       if (!value) {
         return "-";
@@ -1424,6 +1559,7 @@ export default {
       }
       this.stopPerformancePolling();
       this.performanceTesting = false;
+      this.reportQuestionsExpanded = false;
       this.performanceTaskId = row.id;
       Api.model.benchmarkTask(row.id, ({ data }) => {
         if (data.code !== 0) {
@@ -1489,6 +1625,7 @@ export default {
       this.stopPerformancePolling();
       this.savePerformanceJudgeConfig(true);
       this.performanceTesting = true;
+      this.reportQuestionsExpanded = false;
       this.performanceReport = {
         status: "SUBMITTING",
         progress: 1,
@@ -1593,6 +1730,10 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+.performance-result-dialog ::v-deep .el-dialog {
+  max-width: calc(100vw - 24px);
+}
+
 .performance-result-dialog ::v-deep .el-dialog__body {
   max-height: 72vh;
   overflow: auto;
@@ -1777,9 +1918,17 @@ export default {
   gap: 8px;
 }
 
+.benchmark-question-head > div {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
 .benchmark-question-head strong {
   color: #303133;
   font-size: 13px;
+  min-width: 0;
 }
 
 .benchmark-runtime-grid {
@@ -1941,7 +2090,27 @@ export default {
 }
 
 .performance-custom-question-panel .performance-field-label {
+  margin-bottom: 0;
+}
+
+.performance-question-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   flex-basis: 100%;
+  gap: 8px;
+}
+
+.benchmark-question-tag,
+.benchmark-question-more {
+  max-width: 100%;
+  height: auto;
+  min-height: 24px;
+  line-height: 18px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .performance-layout {
@@ -2060,14 +2229,20 @@ export default {
   display: flex;
   justify-content: space-between;
   gap: 8px;
+  min-width: 0;
+}
+
+.performance-detail-summary strong {
+  min-width: 0;
+  text-align: right;
+  word-break: break-word;
 }
 
 .judge-summary {
   margin-bottom: 10px;
-  padding: 10px;
-  border: 1px solid #edf0f5;
-  border-radius: 4px;
-  background: #fff;
+  padding: 8px 0;
+  border-top: 1px solid #edf0f5;
+  border-bottom: 1px solid #edf0f5;
 }
 
 .judge-summary-title {
@@ -2088,10 +2263,9 @@ export default {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px 10px;
-  padding: 8px;
-  border: 1px solid #edf0f5;
-  border-radius: 4px;
-  background: #fff;
+  padding: 8px 0;
+  border-top: 1px solid #edf0f5;
+  border-bottom: 1px solid #edf0f5;
   color: #606266;
   font-size: 12px;
 }
@@ -2100,6 +2274,13 @@ export default {
   display: flex;
   justify-content: space-between;
   gap: 8px;
+  min-width: 0;
+}
+
+.judge-sample-detail strong {
+  min-width: 0;
+  text-align: right;
+  word-break: break-word;
 }
 
 .judge-reasons pre {
@@ -2153,6 +2334,13 @@ export default {
   background: #fff;
 }
 
+.performance-context-panel.is-compact {
+  margin-bottom: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
 .performance-context-item span {
   display: block;
   margin-bottom: 3px;
@@ -2173,6 +2361,12 @@ export default {
   border: 1px solid #e4e7ed;
   border-radius: 4px;
   background: #fff;
+}
+
+.performance-dialogue-flow.is-compact {
+  padding: 0;
+  border: none;
+  background: transparent;
 }
 
 .performance-turn-meta {
@@ -2218,6 +2412,13 @@ export default {
   word-break: break-word;
   color: #303133;
   font-size: 13px;
+}
+
+.performance-dialogue-more {
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
 }
 
 .performance-bubble-row.is-user .performance-bubble {
@@ -2276,14 +2477,16 @@ export default {
 
 .judge-score-panel {
   margin-top: 8px;
-  padding: 10px;
-  border: 1px solid #e4e7ed;
-  border-radius: 4px;
-  background: #fff;
+  padding: 8px 0 0;
+  border-top: 1px solid #edf0f5;
 }
 
 .performance-json-detail {
   margin-top: 8px;
+}
+
+.performance-detail-block {
+  margin-bottom: 10px;
 }
 
 .performance-json-detail ::v-deep .el-collapse-item__header {
@@ -2327,6 +2530,38 @@ export default {
 
   .performance-layout {
     grid-template-columns: 1fr;
+  }
+
+  .performance-detail-summary > div,
+  .judge-sample-detail > div {
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr);
+  }
+
+  .performance-detail-summary strong,
+  .judge-sample-detail strong {
+    text-align: left;
+  }
+}
+
+@media (max-width: 640px) {
+  .benchmark-question-head,
+  .performance-question-panel-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .benchmark-question-head > div {
+    flex-wrap: wrap;
+  }
+
+  .judge-sample-detail,
+  .performance-sample-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .performance-bubble {
+    max-width: 100%;
   }
 }
 </style>

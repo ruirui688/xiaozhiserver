@@ -1108,16 +1108,12 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     }
 
     private ModelTestResultDTO testAsrModel(JSONObject configJson, String type) {
-        if ("openai".equals(type)) {
-            return testOpenAiAsrModel(configJson);
-        }
-        if ("doubao_stream".equals(type)) {
-            return testDoubaoStreamAsrModel(configJson);
-        }
         ModelTestResultDTO configCheck = validateBasicModelConfig(configJson, type, "ASR");
         if (!Boolean.TRUE.equals(configCheck.getSuccess())) {
             return configCheck;
         }
+        // ASR 单模型测试必须走 xiaozhi-server 运行时。manager-api Docker 镜像不携带
+        // xiaozhi-server/config/assets，不能在 Java 容器内直接读取测试音频。
         return testAsrModelViaRuntimeBenchmark(configJson, type);
     }
 
