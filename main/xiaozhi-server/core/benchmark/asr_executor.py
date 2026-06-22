@@ -28,6 +28,7 @@ async def run_asr_samples(model, provider_type, config, iterations):
     if not audio_files:
         raise AsrTestAudioNotFound("未找到 ASR 测试音频")
 
+    include_audio_preview = bool(model.get("include_audio_preview"))
     asr = create_asr_instance(provider_type, config, delete_audio_file=True)
     asr.audio_format = "pcm"
     samples = []
@@ -69,6 +70,7 @@ async def run_asr_samples(model, provider_type, config, iterations):
                 "audio_format": "pcm",
                 "reference_text": reference,
                 "audio_bytes": len(audio.get("data") or b""),
+                "audio_data_url": _build_audio_data_url(audio) if include_audio_preview else None,
             },
             "output_detail": {
                 "recognized_text": str(text or ""),
@@ -79,6 +81,15 @@ async def run_asr_samples(model, provider_type, config, iterations):
             "error_type": None if success else "EMPTY_OR_ERROR",
         })
     return samples
+
+
+def _build_audio_data_url(audio):
+    data = audio.get("data") or b""
+    if not data:
+        return ""
+    filename = str(audio.get("name") or "").lower()
+    media_type = "audio/mpeg" if filename.endswith(".mp3") else "audio/wav"
+    return f"data:{media_type};base64,{base64.b64encode(data).decode('ascii')}"
 
 
 async def _recognize_asr_sample(asr, provider_type, pcm):
