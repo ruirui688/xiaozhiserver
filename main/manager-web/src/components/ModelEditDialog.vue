@@ -46,7 +46,7 @@
             <el-input v-model="form.modelName" :placeholder="$t('modelConfigDialog.enterModelName')"
               class="custom-input-bg"></el-input>
           </el-form-item>
-          <el-form-item :label="$t('modelConfigDialog.adapterCode')" prop="templateCode" style="flex: 1">
+          <el-form-item :label="$t('modelConfigDialog.catalogItem')" prop="templateCode" style="flex: 1">
             <el-select v-model="form.templateCode" :placeholder="$t('modelConfigDialog.selectSupplier')"
               class="custom-select custom-input-bg" style="width: 100%" @focus="loadProviders" filterable
               @change="handleTemplateChange">
@@ -69,6 +69,34 @@
               </el-option>
             </el-select>
           </el-form-item>
+        </div>
+
+        <div v-if="form.templateCode" class="catalog-detail">
+          <div class="catalog-detail-main">
+            <span class="catalog-detail-title">{{ getVendorProductText() }}</span>
+            <el-tag size="mini" :type="providerStatusType(currentTemplate)">
+              {{ providerStatusText(currentTemplate) }}
+            </el-tag>
+            <span class="catalog-detail-meta">{{ catalogMetaText }}</span>
+          </div>
+          <div class="catalog-detail-grid">
+            <div v-if="currentTemplate.recommendedFor">
+              <span class="catalog-detail-label">{{ $t("modelConfigDialog.recommendedFor") }}</span>
+              {{ currentTemplate.recommendedFor }}
+            </div>
+            <div v-if="currentTemplate.avoidWhen">
+              <span class="catalog-detail-label">{{ $t("modelConfigDialog.avoidWhen") }}</span>
+              {{ currentTemplate.avoidWhen }}
+            </div>
+            <div v-if="currentTemplate.testContract">
+              <span class="catalog-detail-label">{{ $t("modelConfigDialog.testContract") }}</span>
+              {{ currentTemplate.testContract }}
+            </div>
+            <div v-if="currentTemplate.sourceCheckedAt">
+              <span class="catalog-detail-label">{{ $t("modelConfigDialog.sourceCheckedAt") }}</span>
+              {{ currentTemplate.sourceCheckedAt }}
+            </div>
+          </div>
         </div>
 
         <div style="display: flex; gap: 20px; margin-bottom: 0">
@@ -174,11 +202,11 @@
         @click="handleSaveAndTest"
         class="test-btn"
         :loading="testing"
-        :disabled="saving || testing"
+        :disabled="saving || testing || selectedTemplateBlocked"
       >
         {{ $t("modelConfigDialog.saveAndTest") }}
       </el-button>
-      <el-button type="primary" @click="handleSave" class="save-btn" :loading="saving" :disabled="saving || testing">
+      <el-button type="primary" @click="handleSave" class="save-btn" :loading="saving" :disabled="saving || testing || selectedTemplateBlocked">
         {{ $t("modelConfigDialog.save") }}
       </el-button>
     </div>
@@ -339,6 +367,17 @@ export default {
     currentTemplate() {
       return this.findTemplate(this.form.templateCode) || {};
     },
+    selectedTemplateBlocked() {
+      return this.isBlockedTemplateStatus(this.currentTemplate);
+    },
+    catalogMetaText() {
+      const template = this.currentTemplate || {};
+      return [
+        template.accessModeLabel || template.accessMode,
+        template.protocolLabel || template.protocol,
+        template.providerCode,
+      ].filter(Boolean).join(" · ");
+    },
     currentUpstreamLabel() {
       return this.currentTemplate.upstreamResourceLabel || this.$t("modelConfigDialog.upstreamModel");
     },
@@ -412,16 +451,23 @@ export default {
       this.providersLoaded = false;
     },
     providerStatusText(item) {
+      if (!item) return "";
       if (item.deprecated || item.supportedStatus === "DEPRECATED") return "旧版兼容";
+      if (item.supportedStatus === "NEEDS_REVIEW") return "需审核";
       if (item.supportedStatus === "PARTIAL") return "部分适配";
       if (item.supportedStatus === "NEEDS_ADAPTER") return "待接入";
       return "已适配";
     },
     providerStatusType(item) {
+      if (!item) return "info";
       if (item.deprecated || item.supportedStatus === "DEPRECATED") return "info";
-      if (item.supportedStatus === "PARTIAL") return "warning";
+      if (item.supportedStatus === "PARTIAL" || item.supportedStatus === "NEEDS_REVIEW") return "warning";
       if (item.supportedStatus === "NEEDS_ADAPTER") return "danger";
       return "success";
+    },
+    isBlockedTemplateStatus(item = {}) {
+      return item.selectable === false
+        || ["NEEDS_ADAPTER", "PARTIAL", "NEEDS_REVIEW"].includes(String(item.supportedStatus || "").toUpperCase());
     },
     providerSort(item) {
       const statusRank = {
@@ -459,6 +505,10 @@ export default {
       }
     },
     handleSave() {
+      if (this.selectedTemplateBlocked) {
+        this.$message.warning(this.$t("modelConfigDialog.catalogNotSelectable"));
+        return;
+      }
       this.saving = true; // 开始保存加载
 
       const formData = this.buildFormData();
@@ -477,6 +527,10 @@ export default {
       }, 3000);
     },
     handleSaveAndTest() {
+      if (this.selectedTemplateBlocked) {
+        this.$message.warning(this.$t("modelConfigDialog.catalogNotSelectable"));
+        return;
+      }
       this.testing = true;
       const formData = this.buildFormData();
 
@@ -545,7 +599,7 @@ export default {
               meta,
               templateCode: item.templateCode,
               providerCode: String(item.providerCode || ""),
-              disabled: item.selectable === false || item.supportedStatus === "NEEDS_ADAPTER",
+              disabled: this.isBlockedTemplateStatus(item),
               raw: item,
             };
           });
@@ -1037,6 +1091,51 @@ export default {
 
 .custom-form .el-form-item {
   margin-bottom: 20px;
+}
+
+.catalog-detail {
+  border: 1px solid #e7ebf3;
+  border-radius: 6px;
+  background: #f8faff;
+  padding: 10px 12px;
+  margin: -6px 0 18px;
+}
+
+.catalog-detail-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.catalog-detail-title {
+  color: #27324a;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.catalog-detail-meta {
+  color: #6e7890;
+  font-size: 12px;
+}
+
+.catalog-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 18px;
+  margin-top: 8px;
+  color: #596276;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.catalog-detail-label {
+  color: #3d4566;
+  font-weight: 600;
+  margin-right: 6px;
 }
 
 .custom-form .el-form-item__label {

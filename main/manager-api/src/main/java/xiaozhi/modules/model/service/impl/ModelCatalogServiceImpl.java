@@ -288,6 +288,17 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             entity.setDocLink(template.getDocLink());
             entity.setEnabled(Boolean.TRUE.equals(template.getHidden()) || Boolean.TRUE.equals(template.getDeprecated()) ? 0 : 1);
             entity.setSort(template.getSort());
+            entity.setSupportedStatus(StringUtils.defaultIfBlank(template.getSupportedStatus(), "SUPPORTED"));
+            entity.setSelectable(Boolean.TRUE.equals(template.getSelectable()) ? 1 : 0);
+            entity.setHidden(Boolean.TRUE.equals(template.getHidden()) ? 1 : 0);
+            entity.setDeprecated(Boolean.TRUE.equals(template.getDeprecated()) ? 1 : 0);
+            entity.setRecommendedFor(template.getRecommendedFor());
+            entity.setAvoidWhen(template.getAvoidWhen());
+            entity.setTestContract(template.getTestContract());
+            entity.setSourceCheckedAt(template.getSourceCheckedAt());
+            entity.setSetupHintsJson(serializeStringList(template.getSetupHints()));
+            entity.setKnownLimitationsJson(serializeStringList(template.getKnownLimitations()));
+            entity.setAliasesJson(serializeStringList(template.getAliases()));
             modelTemplateDao.insert(entity);
 
             for (ModelFieldSchemaDTO schema : template.getFieldSchemas()) {
@@ -369,17 +380,29 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             dto.setFieldSchemas(fields.stream().map(this::toFieldSchemaDTO).toList());
         }
         dto.setDocLink(StringUtils.defaultIfBlank(entity.getDocLink(), staticMeta == null ? "" : staticMeta.getDocLink()));
-        dto.setSetupHints(staticMeta == null ? List.of() : staticMeta.getSetupHints());
-        dto.setKnownLimitations(staticMeta == null ? List.of() : staticMeta.getKnownLimitations());
-        dto.setSupportedStatus(staticMeta == null ? "SUPPORTED" : staticMeta.getSupportedStatus());
-        dto.setSelectable(staticMeta == null ? true : staticMeta.getSelectable());
-        dto.setRecommendedFor(staticMeta == null ? null : staticMeta.getRecommendedFor());
-        dto.setAvoidWhen(staticMeta == null ? null : staticMeta.getAvoidWhen());
-        dto.setTestContract(staticMeta == null ? defaultTestContract(entity.getModelType()) : staticMeta.getTestContract());
-        dto.setSourceCheckedAt(staticMeta == null ? null : staticMeta.getSourceCheckedAt());
-        dto.setAliases(staticMeta == null ? List.of() : staticMeta.getAliases());
-        dto.setHidden(intValue(entity.getEnabled()) == 0);
-        dto.setDeprecated(staticMeta != null && Boolean.TRUE.equals(staticMeta.getDeprecated()));
+        dto.setSetupHints(firstNonEmptyList(parseStringList(entity.getSetupHintsJson()),
+                staticMeta == null ? List.of() : staticMeta.getSetupHints()));
+        dto.setKnownLimitations(firstNonEmptyList(parseStringList(entity.getKnownLimitationsJson()),
+                staticMeta == null ? List.of() : staticMeta.getKnownLimitations()));
+        dto.setSupportedStatus(StringUtils.defaultIfBlank(entity.getSupportedStatus(),
+                staticMeta == null ? "SUPPORTED" : staticMeta.getSupportedStatus()));
+        dto.setSelectable(entity.getSelectable() == null
+                ? staticMeta == null || Boolean.TRUE.equals(staticMeta.getSelectable())
+                : intValue(entity.getSelectable()) == 1);
+        dto.setRecommendedFor(StringUtils.defaultIfBlank(entity.getRecommendedFor(),
+                staticMeta == null ? null : staticMeta.getRecommendedFor()));
+        dto.setAvoidWhen(StringUtils.defaultIfBlank(entity.getAvoidWhen(),
+                staticMeta == null ? null : staticMeta.getAvoidWhen()));
+        dto.setTestContract(StringUtils.defaultIfBlank(entity.getTestContract(),
+                staticMeta == null ? defaultTestContract(entity.getModelType()) : staticMeta.getTestContract()));
+        dto.setSourceCheckedAt(StringUtils.defaultIfBlank(entity.getSourceCheckedAt(),
+                staticMeta == null ? null : staticMeta.getSourceCheckedAt()));
+        dto.setAliases(firstNonEmptyList(parseStringList(entity.getAliasesJson()),
+                staticMeta == null ? List.of() : staticMeta.getAliases()));
+        dto.setHidden(entity.getHidden() == null ? intValue(entity.getEnabled()) == 0 : intValue(entity.getHidden()) == 1);
+        dto.setDeprecated(entity.getDeprecated() == null
+                ? staticMeta != null && Boolean.TRUE.equals(staticMeta.getDeprecated())
+                : intValue(entity.getDeprecated()) == 1);
         dto.setSort(entity.getSort());
         return dto;
     }
@@ -465,6 +488,31 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         } catch (Exception ignored) {
             return value;
         }
+    }
+
+    private String serializeStringList(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return null;
+        }
+        return JSONUtil.toJsonStr(values);
+    }
+
+    private List<String> parseStringList(String valuesJson) {
+        if (StringUtils.isBlank(valuesJson)) {
+            return List.of();
+        }
+        try {
+            return JSONUtil.parseArray(valuesJson).stream()
+                    .map(String::valueOf)
+                    .filter(StringUtils::isNotBlank)
+                    .toList();
+        } catch (Exception ignored) {
+            return List.of();
+        }
+    }
+
+    private List<String> firstNonEmptyList(List<String> first, List<String> second) {
+        return first == null || first.isEmpty() ? second : first;
     }
 
     private List<String> parseOptions(String optionsJson) {
@@ -885,6 +933,12 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 List.of("is_no_prompt", "ali_memory_id"),
                 List.of("这是百炼应用调用，不是普通 OpenAI 兼容模型调用。"), List.of(), List.of("AliAppLLM"),
                 "https://help.aliyun.com/zh/model-studio"));
+        items.add(unavailable("LLM_ALI_QWEN_OMNI_REALTIME", "LLM", "阿里云百炼",
+                "Qwen Omni Realtime", "llm", "Realtime WebSocket 音频/文本多模态", "DashScope Realtime WebSocket",
+                "浏览器实时语音、多模态输入输出、Function Calling 探针验证场景。",
+                "当前项目没有独立 Realtime provider；不能套用普通 OpenAI Chat 或百炼 Application adapter。",
+                "https://help.aliyun.com/zh/model-studio",
+                List.of("qwen3.5-omni-plus-realtime", "qwen3.5-omni-flash-realtime", "qwen3-omni-flash-realtime")));
         items.add(openAiLlm("LLM_DOUBAO_ARK_OPENAI", "火山引擎", "豆包方舟", "OpenAI 兼容聊天", "doubao-1-5-pro",
                 "通过火山方舟 OpenAI 兼容接口接入豆包模型。", List.of("DoubaoLLM", "ark.cn")));
         items.add(openAiLlm("LLM_DOUBAO_SEED_OPENAI", "火山引擎", "豆包 Seed 系列", "OpenAI 兼容聊天",

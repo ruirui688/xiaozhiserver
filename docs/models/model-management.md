@@ -25,6 +25,19 @@ memory    -> Memory
 rag       -> RAG
 ```
 
+标准操作流程：
+
+```text
+选择能力分类
+  -> 选择模型目录项（厂商产品、协议、适配状态）
+  -> 按模板字段填写配置、上游模型/资源 ID、端点和凭据
+  -> 保存到标准字段、普通参数表和密钥表
+  -> 执行单模型真实测试或批量专业评测
+  -> 测试通过后才允许启用
+```
+
+模型目录项和可运行配置不是同一个概念。截图、CLI、官方网页或探针可以帮助识别厂商产品和协议，但只有目录项标记为 `SUPPORTED`、项目已有运行时 adapter，并通过真实测试后，才可以成为启用模型。
+
 列表数据来自：
 
 ```text
@@ -137,6 +150,17 @@ vendorName/productName: 火山引擎 / 豆包语音识别 Seed ASR 2.0
 | `upstream_model_field` | 上游模型字段名，例如 `model_name`、`model`、`resource_id` |
 | `doc_link` | 官方文档 |
 | `enabled` | 模板是否启用 |
+| `supported_status` | 目录适配状态：`SUPPORTED`、`PARTIAL`、`NEEDS_ADAPTER`、`DEPRECATED` |
+| `selectable` | 是否允许在编辑弹窗中选择并保存 |
+| `hidden` | 是否从普通配置入口隐藏 |
+| `deprecated` | 是否仅作为旧版兼容目录项 |
+| `recommended_for` | 推荐使用场景 |
+| `avoid_when` | 不适用场景 |
+| `test_contract` | 单模型测试必须证明的内容 |
+| `source_checked_at` | 厂商目录信息最后核验日期 |
+| `setup_hints_json` | 配置提示列表 |
+| `known_limitations_json` | 已知限制列表 |
+| `aliases_json` | 旧配置名、厂商别名或模型别名 |
 
 ### ai_model_template_field
 
