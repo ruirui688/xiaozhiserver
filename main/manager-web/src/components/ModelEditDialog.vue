@@ -45,6 +45,60 @@
 
       <div style="height: 2px; background: #e9e9e9; margin-bottom: 22px"></div>
 
+      <section class="catalog-guide">
+        <div class="catalog-guide-header">
+          <div>
+            <div class="catalog-guide-title">推荐模型目录</div>
+            <div class="catalog-guide-subtitle">
+              先按厂商产品和适配状态选择，再填写密钥；未适配项只展示接入边界。
+            </div>
+          </div>
+          <el-input
+            v-model="catalogKeyword"
+            size="mini"
+            clearable
+            prefix-icon="el-icon-search"
+            placeholder="搜索厂商、产品、协议"
+            class="catalog-search"
+          />
+        </div>
+        <div v-if="catalogLoading" class="catalog-loading">
+          <i class="el-icon-loading"></i>
+          正在加载模型目录...
+        </div>
+        <div v-else class="catalog-grid">
+          <button
+            v-for="item in filteredCatalogItems"
+            :key="item.templateCode"
+            type="button"
+            class="catalog-item"
+            :class="{
+              active: form.templateCode === item.templateCode,
+              disabled: !isCatalogSelectable(item),
+            }"
+            @click="selectCatalogItem(item)"
+          >
+            <div class="catalog-item-top">
+              <span class="catalog-vendor">{{ item.vendorName }}</span>
+              <el-tag size="mini" :type="catalogStatusType(item)">
+                {{ catalogStatusText(item) }}
+              </el-tag>
+            </div>
+            <div class="catalog-product">{{ item.productName }}</div>
+            <div class="catalog-meta">
+              {{ item.accessModeLabel || item.accessMode }} · {{ item.protocolLabel || "-" }}
+            </div>
+            <div class="catalog-recommend">{{ item.recommendedFor || firstHint(item) }}</div>
+            <div v-if="item.testContract" class="catalog-test">
+              测试：{{ item.testContract }}
+            </div>
+          </button>
+          <div v-if="!filteredCatalogItems.length" class="catalog-empty">
+            没有匹配的目录项
+          </div>
+        </div>
+      </section>
+
       <el-form :model="form" ref="form" label-width="auto" label-position="left" class="custom-form">
         <div style="display: flex; gap: 20px; margin-bottom: 0">
           <el-form-item :label="$t('modelConfigDialog.configName')" prop="modelName" style="flex: 1">
@@ -273,6 +327,9 @@ export default {
       dialogVisible: this.visible,
       providers: [],
       providersLoaded: false,
+      catalogItems: [],
+      catalogLoading: false,
+      catalogKeyword: "",
       saving: false,
       testing: false,
       allProvidersData: null,
@@ -325,6 +382,14 @@ export default {
         { key: "advanced", title: "高级参数", fields: advanced, collapsible: true },
       ];
     },
+    filteredCatalogItems() {
+      const keyword = String(this.catalogKeyword || "").trim().toLowerCase();
+      const items = this.catalogItems || [];
+      const filtered = keyword
+        ? items.filter((item) => this.catalogSearchText(item).includes(keyword))
+        : items;
+      return filtered.slice(0, 12);
+    },
     currentTemplate() {
       return this.findTemplate(this.form.templateCode) || {};
     },
@@ -349,6 +414,7 @@ export default {
     modelType() {
       this.resetProviders();
       this.loadProviders();
+      this.loadCatalog();
     },
     dialogVisible(val) {
       this.$emit("update:visible", val);
@@ -362,6 +428,7 @@ export default {
       this.dialogVisible = val;
       if (val) {
         this.loadProviders();
+        this.loadCatalog();
       }
     },
     "form.templateCode"(newVal) {
@@ -399,6 +466,85 @@ export default {
     resetProviders() {
       this.providers = [];
       this.providersLoaded = false;
+      this.catalogItems = [];
+      this.catalogKeyword = "";
+    },
+    loadCatalog() {
+      this.catalogLoading = true;
+      Api.model.getModelCatalog({ modelType: this.modelType }, (res) => {
+        const data = res && res.data && res.data.code === 0 ? (res.data.data || []) : [];
+        this.catalogItems = data
+          .filter((item) => !item.hidden)
+          .sort((a, b) => this.catalogRank(a) - this.catalogRank(b));
+        this.catalogLoading = false;
+      });
+    },
+    catalogRank(item) {
+      const statusRank = {
+        SUPPORTED: 0,
+        PARTIAL: 1,
+        NEEDS_ADAPTER: 2,
+        DEPRECATED: 3,
+      };
+      return (statusRank[item.supportedStatus] ?? 9) * 1000 + (item.sort || 999);
+    },
+    catalogSearchText(item) {
+      return [
+        item.templateCode,
+        item.vendorName,
+        item.productName,
+        item.adapterName,
+        item.providerCode,
+        item.accessModeLabel,
+        item.protocolLabel,
+        item.recommendedFor,
+        item.avoidWhen,
+        ...(item.aliases || []),
+        ...(item.setupHints || []),
+        ...(item.knownLimitations || []),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+    },
+    isCatalogSelectable(item) {
+      return item && item.selectable !== false && item.supportedStatus !== "NEEDS_ADAPTER";
+    },
+    catalogStatusText(item) {
+      if (item.deprecated || item.supportedStatus === "DEPRECATED") return "旧版兼容";
+      if (item.supportedStatus === "PARTIAL") return "部分适配";
+      if (item.supportedStatus === "NEEDS_ADAPTER") return "待接入";
+      return "已适配";
+    },
+    catalogStatusType(item) {
+      if (item.deprecated || item.supportedStatus === "DEPRECATED") return "info";
+      if (item.supportedStatus === "PARTIAL") return "warning";
+      if (item.supportedStatus === "NEEDS_ADAPTER") return "danger";
+      return "success";
+    },
+    firstHint(item) {
+      return (item.setupHints && item.setupHints[0]) || (item.knownLimitations && item.knownLimitations[0]) || "";
+    },
+    selectCatalogItem(item) {
+      if (!this.isCatalogSelectable(item)) {
+        this.$message.warning(item.avoidWhen || "该目录项当前还没有可用适配器，不能直接保存启用。");
+        return;
+      }
+      const apply = () => {
+        const template = this.findTemplate(item.templateCode) || item;
+        this.form.templateCode = item.templateCode;
+        this.handleTemplateChange(item.templateCode);
+        this.form.vendorName = template.vendorName || item.vendorName || "";
+        this.form.productName = template.productName || item.productName || "";
+        this.form.adapterCode = template.providerCode || item.providerCode || "";
+        this.form.providerCode = template.providerCode || item.providerCode || "";
+        this.form.protocol = template.protocolLabel || item.protocolLabel || "";
+        this.form.docLink = template.docLink || item.docLink || this.form.docLink;
+        if (!this.form.modelName) {
+          this.form.modelName = item.productName || item.adapterName || "";
+        }
+      };
+      this.loadProviders(apply);
     },
     loadModelData() {
       if (this.modelData.id) {
@@ -980,6 +1126,130 @@ export default {
 
 .field-section {
   margin-bottom: 10px;
+}
+
+.catalog-guide {
+  border: 1px solid #dfe5f2;
+  border-radius: 8px;
+  background: #f8fafd;
+  padding: 14px;
+  margin-bottom: 20px;
+}
+
+.catalog-guide-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.catalog-guide-title {
+  color: #30384f;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.catalog-guide-subtitle {
+  color: #6f7890;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 2px;
+}
+
+.catalog-search {
+  width: 220px;
+  flex: 0 0 auto;
+}
+
+.catalog-loading,
+.catalog-empty {
+  color: #7b8499;
+  font-size: 13px;
+  padding: 12px 0;
+}
+
+.catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.catalog-item {
+  min-height: 132px;
+  text-align: left;
+  border: 1px solid #dce4f1;
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+  cursor: pointer;
+  color: #30384f;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.catalog-item:hover {
+  border-color: #409eff;
+  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.12);
+}
+
+.catalog-item.active {
+  border-color: #237ff4;
+  box-shadow: inset 0 0 0 1px #237ff4;
+}
+
+.catalog-item.disabled {
+  cursor: not-allowed;
+  background: #f2f4f8;
+  color: #7b8499;
+}
+
+.catalog-item.disabled:hover {
+  border-color: #dce4f1;
+  box-shadow: none;
+}
+
+.catalog-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.catalog-vendor,
+.catalog-meta,
+.catalog-recommend,
+.catalog-test {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.catalog-vendor {
+  color: #687188;
+}
+
+.catalog-product {
+  color: #27324a;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  min-height: 20px;
+}
+
+.catalog-meta {
+  color: #5c6680;
+  margin-top: 5px;
+}
+
+.catalog-recommend {
+  color: #3f4c68;
+  margin-top: 7px;
+}
+
+.catalog-test {
+  color: #8a5b00;
+  margin-top: 6px;
 }
 
 .field-section-title {

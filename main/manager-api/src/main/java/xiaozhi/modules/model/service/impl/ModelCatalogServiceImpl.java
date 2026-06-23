@@ -41,12 +41,14 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
     private volatile boolean catalogSeedChecked = false;
 
     @Override
-    public List<ModelCatalogDTO> getCatalog(String modelType, String providerCode, String capability, String vendor) {
+    public List<ModelCatalogDTO> getCatalog(String modelType, String providerCode, String capability, String vendor,
+            String keyword) {
         return effectiveCatalog().stream()
                 .filter(item -> matches(item.getModelType(), modelType))
                 .filter(item -> matches(item.getProviderCode(), providerCode))
                 .filter(item -> matches(item.getCapability(), capability))
                 .filter(item -> containsIgnoreCase(item.getVendorName(), vendor))
+                .filter(item -> matchesKeyword(item, keyword))
                 .sorted(Comparator.comparing(ModelCatalogDTO::getModelType, String.CASE_INSENSITIVE_ORDER)
                         .thenComparing(item -> item.getSort() == null ? 9999 : item.getSort())
                         .thenComparing(ModelCatalogDTO::getTemplateCode, String.CASE_INSENSITIVE_ORDER))
@@ -55,9 +57,10 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
 
     @Override
     public List<ModelCatalogDTO> getTemplates(String modelType, String providerCode) {
-        return getCatalog(modelType, providerCode, null, null).stream()
+        return getCatalog(modelType, providerCode, null, null, null).stream()
                 .filter(item -> !Boolean.TRUE.equals(item.getHidden()))
                 .filter(item -> !Boolean.TRUE.equals(item.getDeprecated()))
+                .filter(item -> Boolean.TRUE.equals(item.getSelectable()))
                 .toList();
     }
 
@@ -204,6 +207,9 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             return "VLLM".equals(type) ? find("VLLM_QWEN_VL_OPENAI") : find("LLM_ALI_QWEN_OPENAI");
         }
         if (haystack.contains("ark.cn") || haystack.contains("doubao")) {
+            if (haystack.contains("seed")) {
+                return find("LLM_DOUBAO_SEED_OPENAI");
+            }
             return find("LLM_DOUBAO_ARK_OPENAI");
         }
         if (haystack.contains("deepseek")) {
@@ -231,7 +237,17 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
     private List<ModelCatalogDTO> effectiveCatalog() {
         ensureCatalogSeeded();
         List<ModelCatalogDTO> fromDb = loadCatalogFromDatabase();
-        return fromDb.isEmpty() ? CATALOG : fromDb;
+        if (fromDb.isEmpty()) {
+            return CATALOG;
+        }
+        Map<String, ModelCatalogDTO> merged = new HashMap<>();
+        for (ModelCatalogDTO item : fromDb) {
+            merged.put(item.getTemplateCode(), item);
+        }
+        for (ModelCatalogDTO item : CATALOG) {
+            merged.putIfAbsent(item.getTemplateCode(), item);
+        }
+        return new ArrayList<>(merged.values());
     }
 
     private synchronized void ensureCatalogSeeded() {
@@ -316,8 +332,8 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         dto.setModelType(entity.getModelType());
         dto.setProviderCode(entity.getAdapterCode());
         dto.setAdapterName(staticMeta == null ? entity.getProductName() : staticMeta.getAdapterName());
-        dto.setVendorName(entity.getVendorName());
-        dto.setProductName(entity.getProductName());
+        dto.setVendorName(staticMeta == null ? entity.getVendorName() : staticMeta.getVendorName());
+        dto.setProductName(staticMeta == null ? entity.getProductName() : staticMeta.getProductName());
         dto.setCapability(entity.getCapability());
         dto.setCapabilityLabel(staticMeta == null ? entity.getCapability() : staticMeta.getCapabilityLabel());
         dto.setAccessMode(entity.getAccessMode());
@@ -338,6 +354,12 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         dto.setDocLink(StringUtils.defaultIfBlank(entity.getDocLink(), staticMeta == null ? "" : staticMeta.getDocLink()));
         dto.setSetupHints(staticMeta == null ? List.of() : staticMeta.getSetupHints());
         dto.setKnownLimitations(staticMeta == null ? List.of() : staticMeta.getKnownLimitations());
+        dto.setSupportedStatus(staticMeta == null ? "SUPPORTED" : staticMeta.getSupportedStatus());
+        dto.setSelectable(staticMeta == null ? true : staticMeta.getSelectable());
+        dto.setRecommendedFor(staticMeta == null ? null : staticMeta.getRecommendedFor());
+        dto.setAvoidWhen(staticMeta == null ? null : staticMeta.getAvoidWhen());
+        dto.setTestContract(staticMeta == null ? defaultTestContract(entity.getModelType()) : staticMeta.getTestContract());
+        dto.setSourceCheckedAt(staticMeta == null ? null : staticMeta.getSourceCheckedAt());
         dto.setAliases(staticMeta == null ? List.of() : staticMeta.getAliases());
         dto.setHidden(intValue(entity.getEnabled()) == 0);
         dto.setDeprecated(staticMeta != null && Boolean.TRUE.equals(staticMeta.getDeprecated()));
@@ -456,6 +478,38 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
     private static boolean containsIgnoreCase(String value, String filter) {
         return StringUtils.isBlank(filter)
                 || StringUtils.containsIgnoreCase(StringUtils.defaultString(value), filter);
+    }
+
+    private static boolean matchesKeyword(ModelCatalogDTO item, String keyword) {
+        if (StringUtils.isBlank(keyword)) {
+            return true;
+        }
+        String haystack = String.join(" ",
+                StringUtils.defaultString(item.getTemplateCode()),
+                StringUtils.defaultString(item.getProviderCode()),
+                StringUtils.defaultString(item.getAdapterName()),
+                StringUtils.defaultString(item.getVendorName()),
+                StringUtils.defaultString(item.getProductName()),
+                StringUtils.defaultString(item.getCapabilityLabel()),
+                StringUtils.defaultString(item.getAccessModeLabel()),
+                StringUtils.defaultString(item.getProtocolLabel()),
+                StringUtils.defaultString(item.getUpstreamResourceLabel()),
+                StringUtils.defaultString(item.getRecommendedFor()),
+                StringUtils.defaultString(item.getAvoidWhen()),
+                String.join(" ", item.getAliases()),
+                String.join(" ", item.getSetupHints()),
+                String.join(" ", item.getKnownLimitations()));
+        return StringUtils.containsIgnoreCase(haystack, keyword);
+    }
+
+    private static String defaultTestContract(String modelType) {
+        return switch (StringUtils.defaultString(modelType).toUpperCase(Locale.ROOT)) {
+            case "ASR" -> "必须用标准音频真实识别并返回非空文本。";
+            case "TTS" -> "必须生成非空可播放音频并记录耗时。";
+            case "LLM", "SLM" -> "必须执行真实对话调用；主对话模型还应跑真实设备智能体评测。";
+            case "VLLM" -> "必须用真实图片调用并返回可读描述。";
+            default -> "必须执行真实 provider 测试，不能只做字段校验。";
+        };
     }
 
     private static String normalize(String value) {
@@ -609,14 +663,34 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 List.of("适合多模态基座 ASR，不是 Paraformer WebSocket 实时识别。"),
                 List.of(), List.of("Qwen3ASRFlash", "qwen3-asr-flash"),
                 "https://help.aliyun.com/zh/model-studio"));
-        items.add(item("ASR_XUNFEI_STREAM", "ASR", "xunfei_stream", "讯飞流式 ASR",
-                "讯飞开放平台", "语音听写流式 WebAPI", "asr", "语音识别", "websocket", "WebSocket 流式",
+        items.add(item("ASR_XUNFEI_STREAM", "ASR", "xunfei_stream", "讯飞中英识别大模型",
+                "讯飞开放平台", "中英识别大模型", "asr", "语音识别", "websocket", "WebSocket 流式",
                 "cloud", "云平台", "WebSocket", "领域", "domain",
                 List.of("app_id", "api_key", "api_secret"), List.of("app_id", "api_key", "api_secret"),
                 List.of("domain", "language", "accent"),
-                List.of("APPID、APIKey、APISecret 都来自讯飞开放平台应用。"),
-                List.of(), List.of("XunfeiStreamASR"),
-                "https://www.xfyun.cn/doc/asr/voicedictation/API.html"));
+                List.of("APPID、APIKey、APISecret 都来自讯飞开放平台应用。当前 provider 默认 domain=slm。"),
+                List.of("不是讯飞实时语音转写 rtasr，也不是录音文件转写。"), List.of("XunfeiStreamASR", "spark_zh_iat", "slm"),
+                "https://www.xfyun.cn/doc/spark/spark_zh_iat.html"));
+        items.add(unavailable("ASR_XUNFEI_VOICE_DICTATION_STANDARD", "ASR", "讯飞开放平台",
+                "语音听写流式版 WebAPI", "asr", "WebSocket 流式", "WebSocket",
+                "传统短语音听写场景；如果要使用传统 iat 协议，需要单独适配或确认地址/参数。",
+                "不要把它和当前中英识别大模型 provider 混用。",
+                "https://www.xfyun.cn/doc/asr/voicedictation/API.html", List.of("iat", "voicedictation")));
+        items.add(unavailable("ASR_XUNFEI_RTASR_STANDARD", "ASR", "讯飞开放平台",
+                "实时语音转写标准版", "asr", "WebSocket 长音频转写", "WebSocket rtasr",
+                "会议、直播、长音频实时转写。",
+                "不适合作为当前设备一句话 ASR 直接启用；协议和鉴权与 xunfei_stream 不同。",
+                "https://www.xfyun.cn/doc/asr/rtasr/API.html", List.of("rtasr")));
+        items.add(unavailable("ASR_XUNFEI_RTASR_LLM", "ASR", "讯飞开放平台",
+                "实时语音转写大模型", "asr", "WebSocket 长音频转写", "WebSocket rtasr llm",
+                "会议、直播、长音频实时转写的大模型版本。",
+                "需要新 adapter；不能由当前 xunfei_stream 短音频 provider 直接承接。",
+                "https://www.xfyun.cn/doc/spark/asr_llm/rtasr_llm.html", List.of("rtasr_llm")));
+        items.add(unavailable("ASR_XUNFEI_LFASR", "ASR", "讯飞开放平台",
+                "语音转写/录音文件转写", "asr", "HTTP 异步文件转写", "HTTP async",
+                "录音文件批量转写。",
+                "不是实时设备对话 ASR；需要异步任务和文件上传 adapter。",
+                "https://www.xfyun.cn/doc/asr/lfasr/API.html", List.of("lfasr")));
         items.add(item("ASR_ALIYUN_BAILIAN_PARAFORMER", "ASR", "aliyunbl_stream", "百炼 Paraformer",
                 "阿里云百炼", "Paraformer 实时语音识别", "asr", "语音识别", "websocket", "WebSocket 流式",
                 "cloud", "云平台", "DashScope WebSocket", "模型", "model",
@@ -764,6 +838,11 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 List.of("APPID、APIKey、APISecret 都来自讯飞开放平台应用。"), List.of(),
                 List.of("XunFeiTTS", "TTS_XunFeiStreamTTS"),
                 "https://www.xfyun.cn/doc/tts"));
+        items.add(unavailable("TTS_XUNFEI_ONLINE_STANDARD", "TTS", "讯飞开放平台",
+                "在线语音合成标准版", "tts", "HTTP/WebSocket 语音合成", "讯飞普通 TTS",
+                "普通语音合成、低接入成本场景。",
+                "当前 `xunfei_stream` TTS 面向超拟人合成，不应把普通 TTS 服务直接套进去。",
+                "https://www.xfyun.cn/doc/tts", List.of("online_tts", "standard_tts")));
         items.add(item("TTS_LINKERAI", "TTS", "linkerai", "Linkerai TTS",
                 "Linkerai", "语音合成", "tts", "语音合成", "http", "HTTP",
                 "cloud", "云平台", "HTTP", "音色", "voice",
@@ -786,6 +865,15 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 "https://help.aliyun.com/zh/model-studio"));
         items.add(openAiLlm("LLM_DOUBAO_ARK_OPENAI", "火山引擎", "豆包方舟", "OpenAI 兼容聊天", "doubao-1-5-pro",
                 "通过火山方舟 OpenAI 兼容接口接入豆包模型。", List.of("DoubaoLLM", "ark.cn")));
+        items.add(openAiLlm("LLM_DOUBAO_SEED_OPENAI", "火山引擎", "豆包 Seed 系列", "OpenAI 兼容聊天",
+                "doubao-seed-1-6 / doubao-seed-2-0",
+                "通过火山方舟 OpenAI 兼容接口接入豆包 Seed 系列；具体 model_name 以方舟控制台开通结果为准。",
+                List.of("doubao-seed", "doubao-seed-1-6", "doubao-seed-2-0")));
+        items.add(unavailable("LLM_DOUBAO_AUDIO_UNDERSTANDING", "LLM", "火山引擎",
+                "方舟音频理解", "llm", "Chat/Responses 音频理解", "OpenAI 兼容多模态",
+                "音频问答、语音内容理解。",
+                "它不是设备 ASR provider；不能替代 ASR 输出用户文本。",
+                "https://www.volcengine.com/docs/82379/2377589", List.of("audio understanding", "doubao-seed-2-0-lite")));
         items.add(openAiLlm("LLM_DEEPSEEK_OPENAI", "DeepSeek", "DeepSeek API", "OpenAI 兼容聊天", "deepseek-v4-flash",
                 "语音场景默认关闭思考更快；需要时再启用 thinking/reasoning_effort。", List.of("DeepSeekLLM")));
         items.add(openAiLlm("LLM_ZHIPU_GLM_OPENAI", "智谱AI", "GLM", "OpenAI 兼容聊天", "glm-4-flash",
@@ -865,6 +953,16 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 List.of("prompt", "max_tokens", "temperature", "top_p"),
                 List.of("讯飞星火可能使用 api_password 字段。"), List.of(), List.of("XunfeiSparkLLM"),
                 "https://www.xfyun.cn/doc/spark"));
+        items.add(unavailable("LLM_XUNFEI_SPARK_WEBSOCKET", "LLM", "讯飞开放平台",
+                "星火认知大模型 WebSocket 原生接口", "llm", "WebSocket 原生接口", "WebSocket",
+                "需要使用讯飞原生 WebSocket 的场景。",
+                "当前 LLM 通过 OpenAI 兼容 provider 接入；原生 WebSocket 需要新 adapter。",
+                "https://www.xfyun.cn/doc/spark/Web.html", List.of("spark websocket")));
+        items.add(unavailable("LLM_XUNFEI_CODING_PLAN", "LLM", "讯飞开放平台",
+                "星辰 MaaS Coding Plan", "llm", "代码模型 API", "HTTP",
+                "编码辅助或代码生成。",
+                "不应默认推荐为设备主对话模型；需要单独评测和模板字段。",
+                "https://www.xfyun.cn/doc/spark/CodingPlan.html", List.of("coding plan")));
     }
 
     private static void addMemoryIntentRagVad(List<ModelCatalogDTO> items) {
@@ -975,7 +1073,59 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         dto.setKnownLimitations(knownLimitations);
         dto.setAliases(aliases);
         dto.setDocLink(docLink);
+        dto.setSupportedStatus("SUPPORTED");
+        dto.setSelectable(true);
+        dto.setRecommendedFor(defaultRecommendedFor(modelType, accessMode));
+        dto.setTestContract(defaultTestContract(modelType));
+        dto.setSourceCheckedAt("2026-06-23");
         return dto;
+    }
+
+    private static ModelCatalogDTO unavailable(String templateCode, String modelType, String vendorName,
+            String productName, String capability, String accessModeLabel, String protocolLabel, String recommendedFor,
+            String avoidWhen, String docLink, List<String> aliases) {
+        ModelCatalogDTO dto = item(templateCode, modelType, "", "未适配", vendorName, productName, capability,
+                capabilityLabelFor(capability), "unsupported", accessModeLabel, "cloud", "云平台", protocolLabel,
+                "上游服务", "", List.of(), List.of(), List.of(), List.of("当前项目还没有对应运行时 adapter，不能直接启用。"),
+                List.of("需要先完成 provider、字段模板和真实模型测试。"), aliases, docLink);
+        dto.setSupportedStatus("NEEDS_ADAPTER");
+        dto.setSelectable(false);
+        dto.setRecommendedFor(recommendedFor);
+        dto.setAvoidWhen(avoidWhen);
+        dto.setTestContract(defaultTestContract(modelType));
+        dto.setSourceCheckedAt("2026-06-23");
+        return dto;
+    }
+
+    private static String capabilityLabelFor(String capability) {
+        return switch (StringUtils.defaultString(capability)) {
+            case "asr" -> "语音识别";
+            case "tts" -> "语音合成";
+            case "llm" -> "大语言模型";
+            case "vllm" -> "视觉理解";
+            default -> capability;
+        };
+    }
+
+    private static String defaultRecommendedFor(String modelType, String accessMode) {
+        String type = StringUtils.defaultString(modelType).toUpperCase(Locale.ROOT);
+        String mode = StringUtils.defaultString(accessMode).toLowerCase(Locale.ROOT);
+        if ("ASR".equals(type) && mode.contains("websocket")) {
+            return "实时设备对话、短句语音识别。";
+        }
+        if ("ASR".equals(type)) {
+            return "短音频识别或兼容旧配置。";
+        }
+        if ("TTS".equals(type) && (mode.contains("stream") || mode.contains("websocket"))) {
+            return "实时设备播报、低首包延迟语音合成。";
+        }
+        if ("LLM".equals(type) || "SLM".equals(type)) {
+            return "主对话、工具调用规划或辅助推理，需结合真实设备评测。";
+        }
+        if ("VLLM".equals(type)) {
+            return "设备拍照后的图片理解。";
+        }
+        return "按当前能力分类配置。";
     }
 
     private static void applyTemplateDefaults(ModelCatalogDTO dto) {
@@ -987,6 +1137,10 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             case "LLM_DOUBAO_ARK_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "https://ark.cn-beijing.volces.com/api/v3");
                 setFieldDefault(dto, "model_name", "doubao-1-5-pro");
+            }
+            case "LLM_DOUBAO_SEED_OPENAI" -> {
+                setFieldDefault(dto, "base_url", "https://ark.cn-beijing.volces.com/api/v3");
+                setFieldDefault(dto, "model_name", "doubao-seed-1-6");
             }
             case "LLM_DEEPSEEK_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "https://api.deepseek.com");
