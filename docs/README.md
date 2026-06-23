@@ -141,6 +141,7 @@ docs/integrations/prompt-injection-engineering.md
 - [models/index-stream-integration.md](./models/index-stream-integration.md) - IndexStreamTTS 使用指南。用于部署 IndexStreamTTS 环境、配置 Conda 环境、启动服务并接入流式 TTS。
 - [models/powermem-integration.md](./models/powermem-integration.md) - PowerMem 记忆组件集成指南。用于给智能体接入长期记忆能力，包含组件安装、功能特性和服务配置。
 - [models/local-knowledge-integration.md](./models/local-knowledge-integration.md) - 本地知识库与大模型切片指南。用于配置 `RAG_LocalKnowledge`、在知识库界面配置阿里云百炼/OpenAI 兼容切片模型、重新解析旧文档和排查本地知识库召回为空。
+- [models/model-management.md](./models/model-management.md) - 模型管理存储与保存架构。用于对照智控台模型配置页面，理解配置名称、模型编码、上游模型、厂商产品、普通参数、密钥参数、模板字段、保存接口、数据库表和运行时下发协议。
 - [models/model-config-catalog.md](./models/model-config-catalog.md) - 标准模型配置目录与治理说明。用于梳理 ASR、TTS、LLM、VLLM、SLM、Memory、Intent、RAG、VAD、声纹和插件 RAG 的厂商、产品、能力、接入方式、标准字段、参数/密钥分表和运行时 `model_config` 契约。
 - [models/ragflow-integration.md](./models/ragflow-integration.md) - RAGFlow 集成指南。用于部署 RAGFlow、检查 MySQL/Redis、配置知识库问答和服务端 RAG 调用。
 - [models/performance_tester.md](./models/performance_tester.md) - 模型性能测试工具使用指南。用于测试 ASR、大语言模型、非流式 TTS、流式 TTS、视觉模型的延迟和稳定性。
