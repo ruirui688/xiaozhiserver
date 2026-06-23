@@ -1,14 +1,16 @@
 <template>
-  <el-dialog :visible.sync="dialogVisible" :close-on-click-modal="false" width="57%" center custom-class="custom-dialog"
-    :show-close="false" class="center-dialog">
-    <div style="margin: 0 18px; text-align: left; padding: 10px; border-radius: 10px">
-      <div style="
-          font-size: 30px;
-          color: #3d4566;
-          margin-top: -10px;
-          margin-bottom: 10px;
-          text-align: center;
-        ">
+  <el-dialog
+    :visible.sync="dialogVisible"
+    :close-on-click-modal="false"
+    width="1120px"
+    top="4vh"
+    custom-class="custom-dialog"
+    :show-close="false"
+    class="model-edit-dialog"
+  >
+    <button class="custom-close-btn" @click="dialogVisible = false">×</button>
+    <div class="dialog-scroll-body">
+      <div class="dialog-title">
         {{
           modelData.duplicateMode
             ? $t("modelConfigDialog.duplicateModel")
@@ -18,14 +20,7 @@
         }}
       </div>
 
-      <button class="custom-close-btn" @click="dialogVisible = false">×</button>
-
-      <div style="
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 10px;
-        ">
+      <div class="dialog-section-head">
         <div style="font-size: 20px; font-weight: bold; color: #3d4566">
           {{ $t("modelConfigDialog.modelInfo") }}
         </div>
@@ -47,12 +42,7 @@
 
       <section class="catalog-guide">
         <div class="catalog-guide-header">
-          <div>
-            <div class="catalog-guide-title">推荐模型目录</div>
-            <div class="catalog-guide-subtitle">
-              先按厂商产品和适配状态选择，再填写密钥；未适配项只展示接入边界。
-            </div>
-          </div>
+          <div class="catalog-guide-title">推荐模型目录</div>
           <el-input
             v-model="catalogKeyword"
             size="mini"
@@ -78,20 +68,15 @@
             }"
             @click="selectCatalogItem(item)"
           >
-            <div class="catalog-item-top">
-              <span class="catalog-vendor">{{ item.vendorName }}</span>
-              <el-tag size="mini" :type="catalogStatusType(item)">
-                {{ catalogStatusText(item) }}
-              </el-tag>
+            <div class="catalog-item-main">
+              <div class="catalog-product">{{ item.productName }}</div>
+              <div class="catalog-meta">
+                {{ item.vendorName }} · {{ item.accessModeLabel || item.accessMode || "-" }}
+              </div>
             </div>
-            <div class="catalog-product">{{ item.productName }}</div>
-            <div class="catalog-meta">
-              {{ item.accessModeLabel || item.accessMode }} · {{ item.protocolLabel || "-" }}
-            </div>
-            <div class="catalog-recommend">{{ item.recommendedFor || firstHint(item) }}</div>
-            <div v-if="item.testContract" class="catalog-test">
-              测试：{{ item.testContract }}
-            </div>
+            <el-tag size="mini" :type="catalogStatusType(item)">
+              {{ catalogStatusText(item) }}
+            </el-tag>
           </button>
           <div v-if="!filteredCatalogItems.length" class="catalog-empty">
             没有匹配的目录项
@@ -388,7 +373,7 @@ export default {
       const filtered = keyword
         ? items.filter((item) => this.catalogSearchText(item).includes(keyword))
         : items;
-      return filtered.slice(0, 12);
+      return filtered.slice(0, 6);
     },
     currentTemplate() {
       return this.findTemplate(this.form.templateCode) || {};
@@ -1037,35 +1022,62 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-.custom-dialog {
+.model-edit-dialog ::v-deep .custom-dialog {
   position: relative;
-  border-radius: 20px;
+  width: min(1120px, 92vw) !important;
+  max-height: 92vh;
+  border-radius: 12px;
   overflow: hidden;
   background: white;
-  padding-bottom: 17px;
 }
 
-.custom-dialog .el-dialog__header {
+.model-edit-dialog ::v-deep .custom-dialog .el-dialog__header {
   padding: 0;
   border-bottom: none;
 }
 
-.center-dialog {
+.model-edit-dialog ::v-deep .el-dialog__body {
+  padding: 0;
   display: flex;
+  flex-direction: column;
+  max-height: 92vh;
+}
+
+.dialog-scroll-body {
+  margin: 0;
+  padding: 24px 34px 18px;
+  text-align: left;
+  overflow-y: auto;
+  max-height: calc(92vh - 76px);
+  box-sizing: border-box;
+}
+
+.dialog-title {
+  color: #3d4566;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 32px;
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.dialog-section-head {
+  display: flex;
+  justify-content: space-between;
   align-items: center;
-  justify-content: center;
+  margin-bottom: 10px;
 }
 
 .custom-close-btn {
   position: absolute;
-  top: 20px;
-  right: 20px;
-  width: 35px;
-  height: 35px;
+  top: 14px;
+  right: 16px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   border: 2px solid #cfcfcf;
   background: none;
-  font-size: 30px;
+  font-size: 26px;
   font-weight: lighter;
   color: #cfcfcf;
   cursor: pointer;
@@ -1132,34 +1144,27 @@ export default {
   border: 1px solid #dfe5f2;
   border-radius: 8px;
   background: #f8fafd;
-  padding: 14px;
-  margin-bottom: 20px;
+  padding: 12px;
+  margin-bottom: 18px;
 }
 
 .catalog-guide-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 12px;
+  gap: 12px;
+  margin-bottom: 10px;
 }
 
 .catalog-guide-title {
   color: #30384f;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   line-height: 1.4;
 }
 
-.catalog-guide-subtitle {
-  color: #6f7890;
-  font-size: 12px;
-  line-height: 1.5;
-  margin-top: 2px;
-}
-
 .catalog-search {
-  width: 220px;
+  width: 240px;
   flex: 0 0 auto;
 }
 
@@ -1172,19 +1177,23 @@ export default {
 
 .catalog-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .catalog-item {
-  min-height: 132px;
+  min-height: 58px;
   text-align: left;
   border: 1px solid #dce4f1;
-  border-radius: 8px;
+  border-radius: 6px;
   background: #fff;
-  padding: 10px;
+  padding: 9px 10px;
   cursor: pointer;
   color: #30384f;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
@@ -1209,47 +1218,27 @@ export default {
   box-shadow: none;
 }
 
-.catalog-item-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-
-.catalog-vendor,
-.catalog-meta,
-.catalog-recommend,
-.catalog-test {
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.catalog-vendor {
-  color: #687188;
+.catalog-item-main {
+  min-width: 0;
 }
 
 .catalog-product {
   color: #27324a;
   font-size: 14px;
   font-weight: 600;
-  line-height: 1.4;
-  min-height: 20px;
+  line-height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .catalog-meta {
+  font-size: 12px;
+  line-height: 17px;
   color: #5c6680;
-  margin-top: 5px;
-}
-
-.catalog-recommend {
-  color: #3f4c68;
-  margin-top: 7px;
-}
-
-.catalog-test {
-  color: #8a5b00;
-  margin-top: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .field-section-title {
@@ -1315,6 +1304,10 @@ export default {
   display: flex;
   justify-content: center;
   gap: 12px;
+  padding: 14px 0 18px;
+  border-top: 1px solid #eef1f6;
+  background: #fff;
+  flex-shrink: 0;
 }
 
 .test-btn {
