@@ -134,6 +134,20 @@ public class ModelRuntimeAssembler {
         return secrets;
     }
 
+    public Map<String, Object> buildPlainSecrets(ModelConfigEntity model) {
+        Map<String, Object> secrets = new LinkedHashMap<>();
+        if (model == null || StringUtils.isBlank(model.getId())) {
+            return secrets;
+        }
+        for (ModelConfigSecretEntity secret : loadSecrets(model.getId())) {
+            if (secret == null || StringUtils.isBlank(secret.getSecretKey())) {
+                continue;
+            }
+            secrets.put(secret.getSecretKey(), StringUtils.defaultString(secret.getSecretValue()));
+        }
+        return secrets;
+    }
+
     private List<ModelConfigParamEntity> loadParams(String modelId) {
         return modelConfigParamDao.selectList(new LambdaQueryWrapper<ModelConfigParamEntity>()
                 .eq(ModelConfigParamEntity::getModelId, modelId));

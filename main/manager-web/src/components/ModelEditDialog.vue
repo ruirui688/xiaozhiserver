@@ -110,27 +110,41 @@
       <div style="height: 2px; background: #e9e9e9; margin-bottom: 22px"></div>
 
       <el-form :model="form" ref="callInfoForm" label-width="auto" class="custom-form">
-        <template v-for="(row, rowIndex) in chunkedCallInfoFields">
-          <div :key="rowIndex" style="display: flex; gap: 20px; margin-bottom: 0">
-            <el-form-item v-for="field in row" v-show="isFieldVisible(field)" :key="field.prop" :label="field.label" :prop="field.prop"
-              style="flex: 1">
-              <template v-if="field.type === 'json-textarea'">
-                <el-input v-model="fieldJsonMap[field.prop]" type="textarea" :rows="3"
-                  :placeholder="$t('modelConfigDialog.enterJsonExample')" class="custom-input-bg"
-                  @change="(val) => handleJsonChange(field, val)"></el-input>
+        <template v-for="section in visibleFieldSections">
+          <div v-if="section.fields.length" :key="section.key" class="field-section">
+            <div v-if="!section.collapsible" class="field-section-title">{{ section.title }}</div>
+            <template v-if="section.collapsible">
+              <el-collapse class="advanced-collapse">
+                <el-collapse-item :title="section.title" :name="section.key">
+                  <template v-for="(row, rowIndex) in chunkFields(section.fields)">
+                    <div :key="`${section.key}-${rowIndex}`" class="field-row">
+                      <model-field-control
+                        v-for="field in row"
+                        :key="field.prop"
+                        :field="field"
+                        :form="form"
+                        :field-json-map="fieldJsonMap"
+                        @json-change="handleJsonChange"
+                      />
+                    </div>
+                  </template>
+                </el-collapse-item>
+              </el-collapse>
+            </template>
+            <template v-else>
+              <template v-for="(row, rowIndex) in chunkFields(section.fields)">
+                <div :key="`${section.key}-${rowIndex}`" class="field-row">
+                  <model-field-control
+                    v-for="field in row"
+                    :key="field.prop"
+                    :field="field"
+                    :form="form"
+                    :field-json-map="fieldJsonMap"
+                    @json-change="handleJsonChange"
+                  />
+                </div>
               </template>
-
-              <el-select v-else-if="field.type === 'select'" v-model="form[field.target][field.prop]"
-                :placeholder="field.placeholder" class="custom-select custom-input-bg" style="width: 100%">
-                <el-option v-for="option in field.options" :key="option.value" :label="option.label"
-                  :value="option.value" />
-              </el-select>
-
-              <el-switch v-else-if="field.type === 'switch'" v-model="form[field.target][field.prop]"></el-switch>
-
-              <el-input v-else v-model="form[field.target][field.prop]" :placeholder="field.placeholder"
-                :type="field.type === 'number' ? 'number' : field.type === 'password' ? 'password' : 'text'" class="custom-input-bg" show-password></el-input>
-            </el-form-item>
+            </template>
           </div>
         </template>
       </el-form>
@@ -158,6 +172,85 @@ import Api from "@/apis/api";
 
 export default {
   name: "ModelEditDialog",
+  components: {
+    ModelFieldControl: {
+      props: {
+        field: { type: Object, required: true },
+        form: { type: Object, required: true },
+        fieldJsonMap: { type: Object, required: true },
+      },
+      methods: {
+        updateValue(value) {
+          this.$set(this.form[this.field.target], this.field.prop, value);
+        },
+        updateJsonValue(value) {
+          this.$set(this.fieldJsonMap, this.field.prop, value);
+        },
+      },
+      render(h) {
+        const field = this.field;
+        const form = this.form;
+        const jsonMap = this.fieldJsonMap;
+        const scopedSlots = {
+          label: () => [
+            h("span", field.label),
+            field.helpText
+              ? h("el-tooltip", { props: { content: field.helpText, placement: "top" } }, [
+                  h("i", { class: "el-icon-question field-help-icon" }),
+                ])
+              : null,
+          ],
+        };
+        let control;
+        if (field.type === "json-textarea") {
+          control = h("el-input", {
+            class: "custom-input-bg",
+            props: {
+              value: jsonMap[field.prop],
+              type: "textarea",
+              rows: 3,
+              placeholder: field.placeholder,
+            },
+            on: {
+              input: this.updateJsonValue,
+              change: (val) => this.$emit("json-change", field, val),
+            },
+          });
+        } else if (field.type === "select") {
+          control = h("el-select", {
+            class: "custom-select custom-input-bg",
+            style: { width: "100%" },
+            props: { value: form[field.target][field.prop], placeholder: field.placeholder },
+            on: { input: this.updateValue },
+          }, (field.options || []).map((option) => h("el-option", {
+            key: option.value,
+            props: { label: option.label, value: option.value },
+          })));
+        } else if (field.type === "switch") {
+          control = h("el-switch", {
+            props: { value: form[field.target][field.prop] },
+            on: { input: this.updateValue },
+          });
+        } else {
+          control = h("el-input", {
+            class: "custom-input-bg",
+            props: {
+              value: form[field.target][field.prop],
+              placeholder: field.placeholder,
+              type: field.type === "number" ? "number" : "text",
+            },
+            on: { input: this.updateValue },
+          });
+        }
+        return h("el-form-item", {
+          class: "field-form-item",
+          style: { flex: "1" },
+          props: { prop: field.prop },
+          scopedSlots,
+        }, [control]);
+      },
+    },
+  },
   props: {
     visible: { type: Boolean, default: false },
     modelData: {
@@ -202,13 +295,27 @@ export default {
     };
   },
   computed: {
-    chunkedCallInfoFields() {
-      const chunkSize = 2;
-      const result = [];
-      for (let i = 0; i < this.dynamicCallInfoFields.length; i += chunkSize) {
-        result.push(this.dynamicCallInfoFields.slice(i, i + chunkSize));
-      }
-      return result;
+    visibleCallInfoFields() {
+      return this.dynamicCallInfoFields.filter((field) => this.isFieldVisible(field));
+    },
+    visibleFieldSections() {
+      const credential = [];
+      const common = [];
+      const advanced = [];
+      this.visibleCallInfoFields.forEach((field) => {
+        if (field.section === "credentials") {
+          credential.push(field);
+        } else if (field.section === "advanced") {
+          advanced.push(field);
+        } else {
+          common.push(field);
+        }
+      });
+      return [
+        { key: "credentials", title: "凭据信息", fields: credential, collapsible: false },
+        { key: "common", title: "常用参数", fields: common, collapsible: false },
+        { key: "advanced", title: "高级参数", fields: advanced, collapsible: true },
+      ];
     },
     currentTemplate() {
       return this.findTemplate(this.form.templateCode) || {};
@@ -418,6 +525,8 @@ export default {
               type: this.getInputType(f),
               options: (f.options || []).map((option) => ({ label: option, value: option })),
               placeholder: `请输入${f.key}`,
+              section: this.getFieldSection(f),
+              helpText: f.helpText || this.getFieldHelpText(f.key),
               visibleWhen: f.visibleWhen || "",
               advanced: !!f.advanced,
             }));
@@ -447,16 +556,23 @@ export default {
       if (field.inputType === "select" || (field.options || []).length > 0) {
         return "select";
       }
-      if (field.inputType === "password" || field.type === "password" || field.secret) {
-        return "password";
-      }
       return field.type === "number" ? "number" : "text";
     },
     getFieldTarget(field) {
-      if (field.secret || field.type === "password" || field.inputType === "password" || this.isSecretField(field.key)) {
+      if (this.isSecretField(field.key)) {
         return "secrets";
       }
       return "params";
+    },
+    getFieldSection(field) {
+      const group = String(field.group || "").toLowerCase();
+      if (this.isSecretField(field.key) || group === "credentials") {
+        return "credentials";
+      }
+      if (field.advanced || ["advanced", "generation", "audio"].includes(group)) {
+        return "advanced";
+      }
+      return "common";
     },
     isMetadataField(key, template = {}) {
       if (this.endpointKeys().includes(key)) {
@@ -522,6 +638,28 @@ export default {
         "access_key_secret",
         "personal_access_token",
       ].includes(key);
+    },
+    chunkFields(fields) {
+      const chunkSize = 2;
+      const result = [];
+      for (let i = 0; i < fields.length; i += chunkSize) {
+        result.push(fields.slice(i, i + chunkSize));
+      }
+      return result;
+    },
+    getFieldHelpText(key) {
+      return {
+        appid: "厂商控制台应用 ID，本身不是密钥。",
+        app_id: "厂商控制台应用 ID，本身不是密钥。",
+        appkey: "厂商控制台应用 AppKey，本身不是 API Key。",
+        access_token: "调用厂商接口的访问令牌。",
+        api_key: "调用厂商接口的 API Key。",
+        enable_multilingual: "豆包流式 ASR 多语种识别开关，普通中文识别保持关闭即可。",
+        end_window_size: "流式识别断句静音窗口，数值越大越不容易提前断句。",
+        language: "指定识别语言编码，例如 zh-CN。",
+        thinking: "是否开启模型思考模式，语音场景通常关闭以降低延迟。",
+        reasoning_effort: "思考强度，仅在 thinking 启用时生效。",
+      }[key] || "";
     },
     normalizeDynamicFieldValue(value, field) {
       if (value === undefined || value === null) {
@@ -785,6 +923,38 @@ export default {
   font-weight: normal;
   text-align: right;
   padding-right: 20px;
+}
+
+.field-section {
+  margin-bottom: 10px;
+}
+
+.field-section-title {
+  color: #3d4566;
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 12px;
+}
+
+.field-row {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 0;
+}
+
+.field-help-icon {
+  color: #8a94ad;
+  font-size: 14px;
+  margin-left: 5px;
+  cursor: help;
+}
+
+.field-form-item {
+  min-width: 0;
+}
+
+.field-section .advanced-collapse {
+  margin-top: 0;
 }
 
 .custom-form .el-form-item.prop-remark .el-form-item__label {
