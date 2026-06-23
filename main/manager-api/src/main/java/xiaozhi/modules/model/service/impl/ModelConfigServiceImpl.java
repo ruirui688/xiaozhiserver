@@ -607,6 +607,11 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         dto.setSetupHints(catalog.getSetupHints());
         dto.setKnownLimitations(catalog.getKnownLimitations());
         dto.setMigrationStatus(hasMissingCatalogRequiredFields(entity.getConfigJson(), catalog) ? "NEEDS_REVIEW" : "AUTO");
+        dto.setSupportedStatus(catalog.getSupportedStatus());
+        dto.setSelectable(catalog.getSelectable());
+        dto.setRecommendedFor(catalog.getRecommendedFor());
+        dto.setAvoidWhen(catalog.getAvoidWhen());
+        dto.setTestContract(catalog.getTestContract());
         if (StringUtils.isBlank(dto.getPlatformName())) {
             dto.setPlatformName(catalog.getVendorName());
         }

@@ -98,7 +98,34 @@
                   {{ getUpstreamModel(scope.row) }}
                 </template>
               </el-table-column>
-              <el-table-column :label="$t('modelConfig.adapter')" align="center">
+              <el-table-column
+                :label="$t('modelConfig.vendorProduct')"
+                align="left"
+                min-width="260"
+              >
+                <template slot-scope="scope">
+                  <div class="catalog-cell">
+                    <div class="catalog-main">
+                      {{ getVendorProduct(scope.row) }}
+                      <el-tag
+                        v-if="scope.row.supportedStatus"
+                        size="mini"
+                        :type="getCatalogStatusTagType(scope.row)"
+                        class="catalog-status-tag"
+                      >
+                        {{ getCatalogStatusText(scope.row) }}
+                      </el-tag>
+                    </div>
+                    <div class="catalog-sub">
+                      {{ getAccessSummary(scope.row) }}
+                    </div>
+                    <div v-if="scope.row.testContract" class="catalog-test-contract">
+                      {{ scope.row.testContract }}
+                    </div>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column :label="$t('modelConfig.provider')" align="center" min-width="150">
                 <template slot-scope="scope">
                   {{ getAdapterName(scope.row) }}
                 </template>
@@ -673,6 +700,45 @@ export default {
         (model && (model.adapterLabel || model.adapterCode || model.providerCode)) ||
           this.getConfigValue(model, ["type"])
       );
+    },
+    getAccessSummary(model) {
+      const access = (model && model.accessModeLabel) || "";
+      const protocol = (model && (model.protocolLabel || model.protocol)) || "";
+      const deployment = (model && model.deploymentLabel) || "";
+      return [access, protocol, deployment].filter(Boolean).join(" · ") || this.getAdapterName(model);
+    },
+    getCatalogStatusText(model) {
+      if (!model || !model.supportedStatus) {
+        return "";
+      }
+      if (model.supportedStatus === "NEEDS_ADAPTER") {
+        return "待接入";
+      }
+      if (model.supportedStatus === "PARTIAL") {
+        return "部分适配";
+      }
+      if (model.supportedStatus === "DEPRECATED" || model.deprecated) {
+        return "旧版兼容";
+      }
+      if (model.migrationStatus === "NEEDS_REVIEW") {
+        return "需补字段";
+      }
+      return "已适配";
+    },
+    getCatalogStatusTagType(model) {
+      if (!model || !model.supportedStatus) {
+        return "info";
+      }
+      if (model.supportedStatus === "NEEDS_ADAPTER") {
+        return "danger";
+      }
+      if (model.supportedStatus === "PARTIAL" || model.migrationStatus === "NEEDS_REVIEW") {
+        return "warning";
+      }
+      if (model.supportedStatus === "DEPRECATED" || model.deprecated) {
+        return "info";
+      }
+      return "success";
     },
     getVendorProduct(model) {
       const vendor = (model && (model.vendorName || model.platformName)) || "";
@@ -1612,6 +1678,39 @@ export default {
   font-size: 12px;
   line-height: 18px;
   word-break: break-all;
+}
+
+.catalog-cell {
+  min-width: 0;
+  text-align: left;
+}
+
+.catalog-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #252f45;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.catalog-status-tag {
+  flex: 0 0 auto;
+}
+
+.catalog-sub {
+  color: #5e687d;
+  font-size: 13px;
+  line-height: 18px;
+  margin-top: 4px;
+}
+
+.catalog-test-contract {
+  color: #8a5b00;
+  font-size: 12px;
+  line-height: 18px;
+  margin-top: 4px;
 }
 
 </style>

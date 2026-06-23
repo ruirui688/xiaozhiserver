@@ -9,7 +9,8 @@ import xiaozhi.modules.model.entity.ModelConfigEntity;
 
 public interface ModelCatalogService {
 
-    List<ModelCatalogDTO> getCatalog(String modelType, String providerCode, String capability, String vendor);
+    List<ModelCatalogDTO> getCatalog(String modelType, String providerCode, String capability, String vendor,
+            String keyword);
 
     List<ModelCatalogDTO> getTemplates(String modelType, String providerCode);
 

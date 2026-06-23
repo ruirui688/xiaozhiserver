@@ -114,7 +114,8 @@ public class ModelController {
                 .ok(modelCatalogService.getCatalog(modelType,
                         org.apache.commons.lang3.StringUtils.defaultIfBlank(providerCode, provider),
                         capability,
-                        org.apache.commons.lang3.StringUtils.defaultIfBlank(vendor, platform)));
+                        org.apache.commons.lang3.StringUtils.defaultIfBlank(vendor, platform),
+                        keyword));
     }
 
     @GetMapping("/templates")

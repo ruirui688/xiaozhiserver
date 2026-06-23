@@ -86,6 +86,24 @@ public class ModelCatalogDTO implements Serializable {
     @Schema(description = "是否废弃")
     private Boolean deprecated = false;
 
+    @Schema(description = "适配状态：SUPPORTED/PARTIAL/NEEDS_ADAPTER/DEPRECATED")
+    private String supportedStatus = "SUPPORTED";
+
+    @Schema(description = "是否可以在模型配置中直接选择")
+    private Boolean selectable = true;
+
+    @Schema(description = "推荐场景")
+    private String recommendedFor;
+
+    @Schema(description = "不适用场景")
+    private String avoidWhen;
+
+    @Schema(description = "真实测试契约")
+    private String testContract;
+
+    @Schema(description = "目录来源最后核验日期")
+    private String sourceCheckedAt;
+
     @Schema(description = "别名/旧配置名")
     private List<String> aliases = List.of();
 

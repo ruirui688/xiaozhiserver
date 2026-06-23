@@ -98,6 +98,21 @@ public class ModelConfigDTO implements Serializable {
     @Schema(description = "标准化状态")
     private String migrationStatus = "";
 
+    @Schema(description = "目录适配状态")
+    private String supportedStatus = "";
+
+    @Schema(description = "是否可直接选择启用")
+    private Boolean selectable = true;
+
+    @Schema(description = "推荐场景")
+    private String recommendedFor = "";
+
+    @Schema(description = "不适用场景")
+    private String avoidWhen = "";
+
+    @Schema(description = "真实测试契约")
+    private String testContract = "";
+
     @Schema(description = "是否默认配置(0否 1是)")
     private Integer isDefault;
 

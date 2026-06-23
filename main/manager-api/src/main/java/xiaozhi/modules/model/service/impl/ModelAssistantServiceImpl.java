@@ -223,7 +223,7 @@ public class ModelAssistantServiceImpl implements ModelAssistantService {
 
     private List<JSONObject> buildAdapterContext(String modelType) {
         List<ModelCatalogDTO> catalog = modelCatalogService.getCatalog(
-                normalizeModelType(modelType), null, null, null);
+                normalizeModelType(modelType), null, null, null, null);
         return catalog.stream()
                 .filter(item -> !Boolean.TRUE.equals(item.getHidden()))
                 .map(item -> {
@@ -237,6 +237,8 @@ public class ModelAssistantServiceImpl implements ModelAssistantService {
                     obj.set("protocolLabel", item.getProtocolLabel());
                     obj.set("requiredFields", item.getRequiredFields());
                     obj.set("credentialFields", item.getCredentialFields());
+                    obj.set("supportedStatus", item.getSupportedStatus());
+                    obj.set("selectable", item.getSelectable());
                     obj.set("aliases", item.getAliases());
                     obj.set("docLink", item.getDocLink());
                     obj.set("knownLimitations", item.getKnownLimitations());
