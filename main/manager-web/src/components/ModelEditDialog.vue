@@ -255,8 +255,8 @@ export default {
             props: {
               value: form[field.target][field.prop],
               placeholder: field.placeholder,
-              type: field.type === "number" ? "number" : field.type === "password" ? "password" : "text",
-              showPassword: field.type === "password",
+              type: field.type === "number" ? "number" : "text",
+              showPassword: false,
             },
             on: { input: this.updateValue },
           });
@@ -612,9 +612,6 @@ export default {
       }
     },
     getInputType(field) {
-      if (field.inputType === "password" || field.type === "password" || this.isSecretField(field.key)) {
-        return "password";
-      }
       if (field.inputType === "textarea" || field.type === "json") {
         return "json-textarea";
       }
