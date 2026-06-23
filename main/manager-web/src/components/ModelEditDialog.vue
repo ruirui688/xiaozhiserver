@@ -65,9 +65,16 @@
             <el-input v-model="form.upstreamModelId" :placeholder="$t('modelConfigDialog.enterUpstreamModel')"
               class="custom-input-bg"></el-input>
           </el-form-item>
-          <el-form-item :label="$t('modelConfigDialog.endpointUrl')" prop="endpointUrl" style="flex: 1">
-            <el-input v-model="form.endpointUrl" :placeholder="$t('modelConfigDialog.enterEndpointUrl')"
+          <el-form-item prop="endpointUrl" style="flex: 1">
+            <template slot="label">
+              <span>{{ $t('modelConfigDialog.endpointUrl') }}</span>
+              <el-tooltip :content="endpointHelpText" placement="top">
+                <i class="el-icon-question field-help-icon"></i>
+              </el-tooltip>
+            </template>
+            <el-input v-model="form.endpointUrl" :placeholder="endpointPlaceholder"
               class="custom-input-bg"></el-input>
+            <div class="field-tip">{{ endpointHelpText }}</div>
           </el-form-item>
         </div>
 
@@ -237,7 +244,8 @@ export default {
             props: {
               value: form[field.target][field.prop],
               placeholder: field.placeholder,
-              type: field.type === "number" ? "number" : "text",
+              type: field.type === "number" ? "number" : field.type === "password" ? "password" : "text",
+              showPassword: field.type === "password",
             },
             on: { input: this.updateValue },
           });
@@ -245,7 +253,7 @@ export default {
         return h("el-form-item", {
           class: "field-form-item",
           style: { flex: "1" },
-          props: { prop: field.prop },
+          props: { prop: field.prop, label: field.label },
           scopedSlots,
         }, [control]);
       },
@@ -322,6 +330,19 @@ export default {
     },
     currentUpstreamLabel() {
       return this.currentTemplate.upstreamResourceLabel || this.$t("modelConfigDialog.upstreamModel");
+    },
+    endpointPlaceholder() {
+      return this.endpointDefaultValue
+        || "云厂商默认地址可留空；自部署或兼容接口填写 https://... 或 wss://...";
+    },
+    endpointHelpText() {
+      return "接口端点是厂商或自部署服务的 API 地址。云厂商适配器已有默认地址时可留空；只有接入自定义网关、兼容接口或私有部署时才需要填写。";
+    },
+    endpointDefaultValue() {
+      const endpointField = (this.currentTemplate.fieldSchemas || []).find((field) =>
+        this.endpointKeys().includes(field.key)
+      );
+      return endpointField && endpointField.defaultValue ? String(endpointField.defaultValue) : "";
     },
   },
   watch: {
@@ -524,7 +545,7 @@ export default {
               target: this.getFieldTarget(f),
               type: this.getInputType(f),
               options: (f.options || []).map((option) => ({ label: option, value: option })),
-              placeholder: `请输入${f.key}`,
+              placeholder: this.getFieldPlaceholder(f),
               section: this.getFieldSection(f),
               helpText: f.helpText || this.getFieldHelpText(f.key),
               visibleWhen: f.visibleWhen || "",
@@ -547,6 +568,9 @@ export default {
       }
     },
     getInputType(field) {
+      if (field.inputType === "password" || field.type === "password" || this.isSecretField(field.key)) {
+        return "password";
+      }
       if (field.inputType === "textarea" || field.type === "json") {
         return "json-textarea";
       }
@@ -557,6 +581,29 @@ export default {
         return "select";
       }
       return field.type === "number" ? "number" : "text";
+    },
+    getFieldPlaceholder(field) {
+      const key = field.key || "";
+      const label = field.label || key;
+      const examples = {
+        appid: "从火山引擎控制台复制 App ID，例如 9062696951",
+        app_id: "从厂商控制台复制 App ID",
+        appkey: "填写阿里云 NLS 项目 AppKey",
+        access_token: "填写厂商控制台生成的 Access Token",
+        token: "填写厂商控制台生成的 Token",
+        api_key: "填写厂商控制台生成的 API Key",
+        api_secret: "填写 API Secret",
+        secret_key: "填写 Secret Key",
+        access_key_id: "填写 AccessKey ID",
+        access_key_secret: "填写 AccessKey Secret",
+        authorization: "填写鉴权头内容，例如 Bearer ...",
+        resource_id: "填写资源 ID，例如 volc.seedasr.sauc.duration",
+        model_name: "填写上游模型 ID，例如 qwen-flash",
+        model: "填写上游模型 ID",
+        voice: "填写音色 ID",
+        speaker: "填写音色或说话人 ID",
+      };
+      return examples[key] || `请输入${label}`;
     },
     getFieldTarget(field) {
       if (this.isSecretField(field.key)) {
@@ -654,6 +701,12 @@ export default {
         appkey: "厂商控制台应用 AppKey，本身不是 API Key。",
         access_token: "调用厂商接口的访问令牌。",
         api_key: "调用厂商接口的 API Key。",
+        authorization: "完整鉴权头或令牌，按厂商文档要求填写。",
+        access_key_id: "访问密钥 ID，本身不是密钥；需要与 AccessKey Secret 配套使用。",
+        access_key_secret: "访问密钥 Secret，请勿填写到备注或公开文档。",
+        secret_id: "访问密钥 ID，本身不是密钥；需要与 Secret Key 配套使用。",
+        secret_key: "访问密钥 Secret，请勿填写到备注或公开文档。",
+        resource_id: "云平台开通具体语音服务后得到的资源标识，不等同于配置名称。",
         enable_multilingual: "豆包流式 ASR 多语种识别开关，普通中文识别保持关闭即可。",
         end_window_size: "流式识别断句静音窗口，数值越大越不容易提前断句。",
         language: "指定识别语言编码，例如 zh-CN。",
@@ -947,6 +1000,13 @@ export default {
   font-size: 14px;
   margin-left: 5px;
   cursor: help;
+}
+
+.field-tip {
+  color: #7b8499;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 6px;
 }
 
 .field-form-item {
