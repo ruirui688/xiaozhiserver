@@ -238,7 +238,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         if (entity == null) {
             throw new RenException(ErrorCode.RESOURCE_NOT_FOUND);
         }
-        return buildResponseDTO(entity);
+        return buildResponseDTO(entity, new HashMap<>(), true);
     }
 
     @Override
@@ -493,16 +493,23 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
      * 构建返回的DTO
      */
     private ModelConfigDTO buildResponseDTO(ModelConfigEntity entity) {
-        return buildResponseDTO(entity, new HashMap<>());
+        return buildResponseDTO(entity, new HashMap<>(), false);
     }
 
     private ModelConfigDTO buildResponseDTO(ModelConfigEntity entity, Map<String, ModelProviderDTO> providerCache) {
+        return buildResponseDTO(entity, providerCache, false);
+    }
+
+    private ModelConfigDTO buildResponseDTO(ModelConfigEntity entity, Map<String, ModelProviderDTO> providerCache,
+            boolean includePlainSecrets) {
         ModelConfigDTO dto = ConvertUtils.sourceToTarget(entity, ModelConfigDTO.class);
         if (dto == null) {
             return null;
         }
         dto.setParams(modelRuntimeAssembler.buildPublicParams(entity));
-        dto.setSecrets(modelRuntimeAssembler.buildMaskedSecrets(entity));
+        dto.setSecrets(includePlainSecrets
+                ? modelRuntimeAssembler.buildPlainSecrets(entity)
+                : modelRuntimeAssembler.buildMaskedSecrets(entity));
         ModelDisplayInfo displayInfo = buildModelDisplayInfo(entity, providerCache);
         dto.setProviderCode(displayInfo.providerCode);
         dto.setProviderName(displayInfo.providerName);

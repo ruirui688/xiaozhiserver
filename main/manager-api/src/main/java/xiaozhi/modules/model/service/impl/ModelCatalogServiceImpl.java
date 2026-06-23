@@ -1051,14 +1051,15 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
 
     private static ModelFieldSchemaDTO field(String key, boolean credential, boolean required, int order) {
         ModelFieldSchemaDTO field = new ModelFieldSchemaDTO();
+        boolean secret = isSecretKey(key);
         field.setKey(key);
         field.setLabel(labelFor(key));
         field.setType(typeFor(key));
-        field.setInputType(inputTypeForTypeStatic(field.getType(), credential || isSecretKey(key), optionsFor(key)));
+        field.setInputType(inputTypeForTypeStatic(field.getType(), secret, optionsFor(key)));
         field.setGroup(groupFor(key, credential));
         field.setRuntimeKey(key);
         field.setAdvanced("advanced".equals(groupFor(key, credential)));
-        field.setSecret(credential || isSecretKey(key));
+        field.setSecret(secret);
         field.setRequired(required);
         field.setDefaultValue(defaultValueFor(key));
         field.setOrder(order);
@@ -1149,11 +1150,18 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
 
     private static String helpFor(String key) {
         return switch (key) {
+            case "appid", "app_id" -> "厂商控制台应用 ID，本身不是密钥。";
+            case "access_key_id" -> "访问密钥 ID，本身不是密钥；需要与 AccessKey Secret 配套使用。";
+            case "secret_id" -> "访问密钥 ID，本身不是密钥；需要与 Secret Key 配套使用。";
             case "resource_id" -> "云平台开通具体语音服务后得到的资源标识，不等同于配置名称。";
             case "model", "model_name" -> "上游平台实际调用的模型 ID。";
             case "voice", "speaker", "voice_id" -> "上游平台音色 ID。";
             case "base_url", "api_url", "ws_url" -> "接口地址，注意是否需要包含具体 path。";
             case "appkey" -> "阿里云 NLS 项目 AppKey，不是 API Key。";
+            case "enable_multilingual" -> "多语种识别开关，普通中文识别保持关闭即可。";
+            case "end_window_size", "max_sentence_silence" -> "流式识别断句静音窗口，数值越大越不容易提前断句。";
+            case "thinking" -> "是否开启模型思考模式，语音场景通常关闭以降低延迟。";
+            case "reasoning_effort" -> "思考强度，仅在 thinking 启用时生效。";
             default -> "";
         };
     }
@@ -1169,7 +1177,15 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
 
     private static boolean isSecretKey(String key) {
         String lower = key.toLowerCase(Locale.ROOT);
-        return lower.contains("key") || lower.contains("secret") || lower.contains("token")
-                || lower.contains("authorization") || lower.contains("password");
+        if (Set.of("appid", "app_id", "appkey", "secret_id", "access_key_id", "bot_id",
+                "agent_id", "resource_id").contains(lower)) {
+            return false;
+        }
+        return Set.of("api_key", "api_password", "access_token", "token", "secret_key",
+                "api_secret", "access_key_secret", "personal_access_token", "authorization").contains(lower)
+                || lower.endsWith("_api_key")
+                || lower.endsWith("_api_secret")
+                || lower.endsWith("_token")
+                || lower.endsWith("_password");
     }
 }
