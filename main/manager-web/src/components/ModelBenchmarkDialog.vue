@@ -279,6 +279,27 @@
       <div v-if="performanceReport" class="performance-progress-panel">
         <div class="performance-progress-head">
           <span>{{ getPerformanceStageText(performanceReport) }}</span>
+          <el-popover
+            v-if="getMetricNotes(performanceReport).length"
+            placement="bottom-start"
+            width="520"
+            trigger="hover"
+            popper-class="benchmark-metric-popover"
+          >
+            <div class="benchmark-metric-popover-content">
+              <div
+                v-for="(note, index) in getMetricNotes(performanceReport)"
+                :key="index"
+                class="benchmark-metric-note"
+              >
+                {{ note }}
+              </div>
+            </div>
+            <button slot="reference" type="button" class="benchmark-metric-help">
+              <i class="el-icon-info"></i>
+              <span>评测口径</span>
+            </button>
+          </el-popover>
           <strong>{{ getPerformanceProgress(performanceReport) }}%</strong>
         </div>
         <el-progress
@@ -614,11 +635,6 @@
           </div>
         </div>
       </div>
-      <div v-if="performanceReport" class="metric-notes">
-        <div v-for="(note, index) in performanceReport.metricNotes || []" :key="index">
-          {{ note }}
-        </div>
-      </div>
       <span slot="footer" class="dialog-footer">
         <el-button @click="localVisible = false">
           {{ $t("common.cancel") }}
@@ -943,6 +959,9 @@ export default {
     },
     getTopScoreItems(value) {
       return this.formatScoreMap(value).slice(0, COMPACT_SCORE_LIMIT);
+    },
+    getMetricNotes(report) {
+      return Array.isArray(report && report.metricNotes) ? report.metricNotes.filter(Boolean) : [];
     },
     getCompactList(items, expanded, limit = COMPACT_QUESTION_LIMIT) {
       const list = Array.isArray(items) ? items : [];
@@ -2047,13 +2066,35 @@ export default {
 
 .performance-progress-head {
   display: flex;
-  justify-content: space-between;
   align-items: center;
   gap: 12px;
   margin-bottom: 8px;
   color: #303133;
   font-size: 13px;
   font-weight: 600;
+}
+
+.performance-progress-head > strong {
+  margin-left: auto;
+}
+
+.benchmark-metric-help {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #909399;
+  font-size: 12px;
+  line-height: 1;
+  cursor: help;
+}
+
+.benchmark-metric-help:hover,
+.benchmark-metric-help:focus {
+  color: #409eff;
+  outline: none;
 }
 
 .performance-progress-meta {
@@ -2508,16 +2549,6 @@ export default {
   word-break: break-word;
 }
 
-.metric-notes {
-  margin-top: 12px;
-  padding: 10px 12px;
-  background: #f5f7fa;
-  color: #606266;
-  line-height: 1.7;
-  font-size: 12px;
-  border-radius: 4px;
-}
-
 @media (max-width: 1100px) {
   .benchmark-setup {
     grid-template-columns: 1fr;
@@ -2563,5 +2594,23 @@ export default {
   .performance-bubble {
     max-width: 100%;
   }
+}
+</style>
+
+<style lang="scss">
+.benchmark-metric-popover {
+  max-width: calc(100vw - 32px);
+}
+
+.benchmark-metric-popover-content {
+  display: grid;
+  gap: 6px;
+  color: #606266;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.benchmark-metric-note {
+  word-break: break-word;
 }
 </style>
