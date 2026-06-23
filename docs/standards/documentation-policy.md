@@ -12,6 +12,8 @@ AGENTS.md                         AI 编程工具的最短开工规则
 docs/README.md                    文档分类索引，说明每类文档解决什么问题
 docs/standards/README.md          规范目录入口，只解释 standards 下各规范职责
 docs/standards/*.md               强制规范，是具体规则来源
+main/README.md                    main 模块目录入口，只说明模块职责和文档去向
+main/<module>/README.md           模块开发入口，只说明该模块构建、启动、验证和本地约定
 ```
 
 避免在多个入口重复大段规则。规则变更应优先修改对应 `docs/standards/*.md`，入口文档只链接到规则来源。
@@ -31,6 +33,17 @@ docs/models/           ASR、TTS、LLM、声纹、记忆、RAG、性能测试
 docs/reference/        FAQ、贡献说明、通用参考
 docs/standards/        强制规范、治理策略
 docs/images/           文档图片资源
+```
+
+禁止在 `main/` 下新增通用 `doc/` 或 `docs/` 目录。`main/` 只保留业务模块和模块级 README；通用专题、排障记录、架构说明、部署教程、设备/MCP/模型/集成说明必须归入根目录 `docs/` 的对应分类。
+
+依赖目录、构建产物和缓存目录中的 README、报告或 txt 文件不纳入项目文档索引，例如：
+
+```text
+node_modules/
+target/
+.pytest_cache/
+dist/
 ```
 
 部署脚本、Nginx 配置、Compose 文件、安装脚本等可执行或可直接投产的资产，优先放在 `deploy/` 或 `scripts/`，不要新增到 `docs/`。

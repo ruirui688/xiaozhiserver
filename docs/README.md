@@ -117,6 +117,7 @@ docs/integrations/prompt-injection-engineering.md
 - [device/ota-upgrade-guide.md](./device/ota-upgrade-guide.md) - 单模块部署的固件 OTA 自动升级配置指南。用于准备固件文件、配置 OTA 服务、让设备通过服务端自动升级。
 - [device/device-call-guide.md](./device/device-call-guide.md) - 设备间相互呼叫插件使用指南。用于配置设备互呼能力、理解启用前提、插件配置和调用流程。
 - [device/mqtt-gateway-integration.md](./device/mqtt-gateway-integration.md) - MQTT 网关部署教程。用于部署 MQTT 网关、连接设备消息通道、配置网关与小智服务端之间的通信。
+- [device/websocket-mcp-boot-connection-change.md](./device/websocket-mcp-boot-connection-change.md) - 设备开机后常驻 WebSocket 与 MCP 可见性改动说明。用于理解设备端主动连接、重连、空闲常驻连接和 MCP 初始化时序。
 
 ## 7. MCP 与工具调用
 
@@ -128,6 +129,7 @@ docs/integrations/prompt-injection-engineering.md
 - [mcp/mcp-vision-integration.md](./mcp/mcp-vision-integration.md) - 视觉模型使用指南。用于开启服务端视觉模型、选择视觉模型供应商、配置视觉接口并排查网络可用性。
 - [mcp/context-provider-integration.md](./mcp/context-provider-integration.md) - 上下文源使用教程。用于为智能体注入外部上下文、理解上下文源接口规范、配置服务端调用上下文提供方。
 - [mcp/no-code-http-tools.md](./mcp/no-code-http-tools.md) - 可视化 MCP HTTP 工具。用于理解智控台配置 HTTP 工具、manager-api 保存配置、Python 桥接脚本注册 MCP tools 的完整链路和安全边界。
+- [mcp/chat-history-mcp-troubleshooting.md](./mcp/chat-history-mcp-troubleshooting.md) - 聊天记录图片与 MCP 工具显示问题排查。用于排查聊天历史图片缺失、设备 MCP 工具列表为空、调试连接和真实设备运行时状态混淆等问题。
 
 ## 8. 模型、语音与记忆
 
@@ -199,6 +201,17 @@ AI 禁止：
 ## 12. 文档移动规则
 
 官方原有文档已按主题移动到分类目录。移动后必须维护相对链接，避免破坏图片路径和文档互链。
+
+模块目录 README 可以留在模块根目录，作为该模块开发入口。例如：
+
+```text
+main/README.md
+main/manager-api/README.md
+main/manager-web/README.md
+main/manager-mobile/README.md
+```
+
+通用专题、架构、部署教程、排障记录、设备/MCP/模型/集成说明必须进入 `docs/` 对应分类。不要在 `main/` 下新增通用 `doc/` 或 `docs/` 目录。
 
 本地新增的强制规范统一放在：
 

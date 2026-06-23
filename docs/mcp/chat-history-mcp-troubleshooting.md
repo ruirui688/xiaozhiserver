@@ -511,4 +511,4 @@ conn.mcp_client.tools
 
 设备端配套改动说明已同步到本项目：
 
-- [websocket_mcp_boot_connection_change_zh.md](./websocket_mcp_boot_connection_change_zh.md)
+- [websocket-mcp-boot-connection-change.md](../device/websocket-mcp-boot-connection-change.md)
