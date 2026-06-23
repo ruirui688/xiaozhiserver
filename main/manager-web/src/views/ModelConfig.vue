@@ -81,6 +81,7 @@
                 type="selection"
                 width="46"
                 align="center"
+                :selectable="canSelectForPerformance"
                 :cell-class-name="selectionCellClassName"
               ></el-table-column>
               <el-table-column
@@ -136,7 +137,7 @@
                 <template slot-scope="scope">
                   <el-tooltip
                     :disabled="canToggleEnabled(scope.row)"
-                    :content="$t('modelConfig.enableRequiresTestPassed')"
+                    :content="getEnableDisabledReason(scope.row)"
                     placement="top"
                     effect="light"
                   >
@@ -192,11 +193,12 @@
               >
                 <template slot-scope="scope">
                   <div class="row-actions">
-                    <el-tooltip :content="$t('modelConfig.test')" placement="top">
+                    <el-tooltip :content="getTestActionTooltip(scope.row)" placement="top">
                       <el-button
                         type="text"
                         size="mini"
                         :loading="testingModelId === scope.row.id"
+                        :disabled="!canRunModelTest(scope.row)"
                         @click="testModel(scope.row)"
                         class="table-action-btn edit-btn"
                       >
@@ -213,10 +215,11 @@
                         <i class="el-icon-edit"></i>
                       </el-button>
                     </el-tooltip>
-                    <el-tooltip :content="$t('modelConfig.duplicate')" placement="top">
+                    <el-tooltip :content="getDuplicateActionTooltip(scope.row)" placement="top">
                       <el-button
                         type="text"
                         size="mini"
+                        :disabled="!canDuplicateModel(scope.row)"
                         @click="duplicateModel(scope.row)"
                         class="table-action-btn edit-btn"
                       >
@@ -439,6 +442,7 @@ export default {
       currentTestResult: null,
       benchmarkDialogVisible: false,
       performanceTesting: false,
+      catalogItems: [],
       assistantVisible: false,
       assistantTarget: null,
       pendingAssistantDraft: null,
@@ -446,6 +450,7 @@ export default {
   },
 
   created() {
+    this.loadCatalogItems();
     this.loadData();
   },
 
@@ -626,6 +631,10 @@ export default {
       this.editDialogVisible = true;
     },
     duplicateModel(model) {
+      if (!this.canDuplicateModel(model)) {
+        this.$message.warning(this.$t("modelConfig.unsupportedViewOnly"));
+        return;
+      }
       this.editModelData = JSON.parse(JSON.stringify(model));
       this.editModelData.duplicateMode = true;
       this.editDialogVisible = true;
@@ -649,7 +658,76 @@ export default {
       return "info";
     },
     canToggleEnabled(model) {
-      return model.isEnabled === 1 || model.testStatus === 1;
+      return model.isEnabled === 1 || (this.isModelSupportedForActions(model) && model.testStatus === 1);
+    },
+    getEnableDisabledReason(model) {
+      if (!this.isModelSupportedForActions(model)) {
+        return this.$t("modelConfig.unsupportedCannotEnable");
+      }
+      return this.$t("modelConfig.enableRequiresTestPassed");
+    },
+    canRunModelTest(model) {
+      return !this.testingModelId && this.isModelSupportedForActions(model);
+    },
+    canDuplicateModel(model) {
+      return this.isModelSupportedForActions(model);
+    },
+    canSelectForPerformance(model) {
+      return this.isModelSupportedForActions(model);
+    },
+    getTestActionTooltip(model) {
+      if (!this.isModelSupportedForActions(model)) {
+        return this.$t("modelConfig.unsupportedCannotTest");
+      }
+      return this.$t("modelConfig.test");
+    },
+    getDuplicateActionTooltip(model) {
+      if (!this.canDuplicateModel(model)) {
+        return this.$t("modelConfig.unsupportedViewOnly");
+      }
+      return this.$t("modelConfig.duplicate");
+    },
+    normalizeStatus(value) {
+      return String(value || "").toUpperCase();
+    },
+    isUnsupportedCatalogStatus(supportedStatus, migrationStatus) {
+      const status = this.normalizeStatus(supportedStatus);
+      const migration = this.normalizeStatus(migrationStatus);
+      return ["NEEDS_ADAPTER", "PARTIAL", "NEEDS_REVIEW"].includes(status) || migration === "NEEDS_REVIEW";
+    },
+    isModelSupportedForActions(model) {
+      if (!model) {
+        return false;
+      }
+      return !this.isUnsupportedCatalogStatus(model.supportedStatus, model.migrationStatus);
+    },
+    findCatalogItemForForm(formData = {}, provideCode = "") {
+      const templateCode = formData.templateCode || "";
+      const adapterCode = formData.adapterCode || formData.providerCode || provideCode || "";
+      const vendorName = formData.vendorName || "";
+      const productName = formData.productName || "";
+      return (this.catalogItems || []).find((item) => {
+        if (templateCode && item.templateCode === templateCode) {
+          return true;
+        }
+        if (!templateCode && adapterCode && item.providerCode === adapterCode) {
+          if (!vendorName && !productName) {
+            return true;
+          }
+          return (!vendorName || item.vendorName === vendorName) && (!productName || item.productName === productName);
+        }
+        return false;
+      });
+    },
+    isFormSupportedForSave(formData = {}, provideCode = "") {
+      if (this.editModelData && this.editModelData.id && !this.editModelData.duplicateMode) {
+        return this.isModelSupportedForActions(this.editModelData);
+      }
+      const item = this.findCatalogItemForForm(formData, provideCode);
+      if (!item) {
+        return true;
+      }
+      return !this.isUnsupportedCatalogStatus(item.supportedStatus, item.migrationStatus);
     },
     clearTestingModelState() {
       this.testingModelId = "";
@@ -732,18 +810,18 @@ export default {
         return "";
       }
       if (model.supportedStatus === "NEEDS_ADAPTER") {
-        return "待接入";
+        return "待适配/不可启用";
       }
-      if (model.supportedStatus === "PARTIAL") {
-        return "部分适配";
+      if (model.supportedStatus === "PARTIAL" || model.supportedStatus === "NEEDS_REVIEW") {
+        return "部分适配/需审核";
       }
       if (model.supportedStatus === "DEPRECATED" || model.deprecated) {
         return "旧版兼容";
       }
       if (model.migrationStatus === "NEEDS_REVIEW") {
-        return "需补字段";
+        return "部分适配/需审核";
       }
-      return "已适配";
+      return "已适配/可直接配置测试";
     },
     getCatalogStatusTagType(model) {
       if (!model || !model.supportedStatus) {
@@ -752,7 +830,7 @@ export default {
       if (model.supportedStatus === "NEEDS_ADAPTER") {
         return "danger";
       }
-      if (model.supportedStatus === "PARTIAL" || model.migrationStatus === "NEEDS_REVIEW") {
+      if (["PARTIAL", "NEEDS_REVIEW"].includes(model.supportedStatus) || model.migrationStatus === "NEEDS_REVIEW") {
         return "warning";
       }
       if (model.supportedStatus === "DEPRECATED" || model.deprecated) {
@@ -781,7 +859,10 @@ export default {
       }
     },
     testModel(model) {
-      if (this.testingModelId) {
+      if (!this.canRunModelTest(model)) {
+        if (!this.isModelSupportedForActions(model)) {
+          this.$message.warning(this.$t("modelConfig.unsupportedCannotTest"));
+        }
         return;
       }
       this.testingModelId = model.id;
@@ -794,6 +875,11 @@ export default {
     runPerformanceTest() {
       if (this.selectedModels.length === 0) {
         this.$message.warning(this.$t("modelConfig.selectModelsForPerformance"));
+        return;
+      }
+      const unsupportedModels = this.selectedModels.filter((model) => !this.canSelectForPerformance(model));
+      if (unsupportedModels.length > 0) {
+        this.$message.warning(this.$t("modelConfig.unsupportedCannotPerformance"));
         return;
       }
       this.benchmarkDialogVisible = true;
@@ -840,6 +926,12 @@ export default {
       const id = formData.id;
       const adapterCode = provideCode || formData.adapterCode || formData.providerCode;
 
+      if (!this.isFormSupportedForSave(formData, adapterCode)) {
+        this.$message.error(this.$t("modelConfig.unsupportedCannotSave"));
+        done && done();
+        return;
+      }
+
       if (this.editModelData.duplicateMode || !id) {
         formData.id = "";
         Api.model.addModel({ modelType, provideCode: adapterCode, formData }, ({ data }) => {
@@ -877,6 +969,13 @@ export default {
     handleModelSaveAndTest({ provideCode, formData, done }) {
       const modelType = this.activeTab;
       const adapterCode = provideCode || formData.adapterCode || formData.providerCode;
+
+      if (!this.isFormSupportedForSave(formData, adapterCode)) {
+        this.$message.error(this.$t("modelConfig.unsupportedCannotSave"));
+        done && done();
+        return;
+      }
+
       const testSavedModel = (id) => {
         if (!id) {
           this.clearTestingModelState();
@@ -934,8 +1033,17 @@ export default {
       }
     },
     handleSelectionChange(val) {
-      this.selectedModels = val;
-      this.isAllSelected = val.length === this.modelList.length;
+      const supportedSelection = val.filter((model) => this.canSelectForPerformance(model));
+      if (supportedSelection.length !== val.length) {
+        this.$nextTick(() => {
+          val
+            .filter((model) => !this.canSelectForPerformance(model))
+            .forEach((model) => this.$refs.modelTable.toggleRowSelection(model, false));
+        });
+      }
+      this.selectedModels = supportedSelection;
+      const selectableCount = this.modelList.filter((model) => this.canSelectForPerformance(model)).length;
+      this.isAllSelected = selectableCount > 0 && supportedSelection.length === selectableCount;
       if (val.length === 0) {
         this.isAllSelected = false;
       }
@@ -1038,18 +1146,31 @@ export default {
         if (data.code === 0) {
           this.modelList = data.data.list.map((model) => ({
             ...model,
-            isEnabled: model.testStatus === 1 ? model.isEnabled : 0,
+            isEnabled: model.testStatus === 1 && this.isModelSupportedForActions(model) ? model.isEnabled : 0,
           }));
           this.total = data.data.total;
+          this.loadCatalogItems();
         } else {
           this.$message.error(data.msg || this.$t("modelConfig.fetchModelsFailed"));
         }
+      });
+    },
+    loadCatalogItems() {
+      Api.model.getModelCatalog({ modelType: this.activeTab }, (res) => {
+        const data = res && res.data && res.data.code === 0 ? (res.data.data || []) : [];
+        this.catalogItems = data;
       });
     },
     // 处理启用/非启用状态变更
     handleStatusChange(model, newStatus) {
       const normalizedStatus = newStatus ? 1 : 0;
       const originalStatus = normalizedStatus === 1 ? 0 : 1;
+
+      if (normalizedStatus === 1 && !this.isModelSupportedForActions(model)) {
+        model.isEnabled = originalStatus;
+        this.$message.warning(this.$t("modelConfig.unsupportedCannotEnable"));
+        return;
+      }
 
       if (normalizedStatus === 1 && model.testStatus !== 1) {
         model.isEnabled = originalStatus;

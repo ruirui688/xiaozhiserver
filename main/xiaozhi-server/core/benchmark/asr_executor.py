@@ -238,47 +238,43 @@ async def _recognize_xunfei_stream(asr, pcm):
         close_timeout=10,
     ) as ws:
         frame_size = 1280
-        first = pcm[:frame_size]
-        await ws.send(json.dumps({
-            "common": {"app_id": asr.app_id},
-            "business": {
-                "domain": "iat",
-                "language": "zh_cn",
-                "accent": "mandarin",
-                "dwa": "wpgs",
-                "vad_eos": 5000,
-            },
-            "data": {
-                "status": 0,
-                "format": "audio/L16;rate=16000",
-                "encoding": "raw",
-                "audio": base64.b64encode(first).decode(),
-            },
-        }, ensure_ascii=False))
-
-        pos = frame_size
+        pos = 0
         while pos < len(pcm):
             chunk = pcm[pos:pos + frame_size]
-            status = 2 if pos + frame_size >= len(pcm) else 1
+            if pos == 0:
+                status = 0
+            elif pos + frame_size >= len(pcm):
+                status = 2
+            else:
+                status = 1
             await ws.send(json.dumps({
-                "data": {
-                    "status": status,
-                    "format": "audio/L16;rate=16000",
-                    "encoding": "raw",
-                    "audio": base64.b64encode(chunk).decode(),
-                }
+                "header": {"status": status, "app_id": asr.app_id},
+                "parameter": {"iat": asr.iat_params},
+                "payload": {
+                    "audio": {
+                        "audio": base64.b64encode(chunk).decode(),
+                        "sample_rate": 16000,
+                        "encoding": "raw",
+                    }
+                },
             }, ensure_ascii=False))
             pos += frame_size
             await asyncio.sleep(0.04)
 
         text_parts = []
         async for message in ws:
-            data = json.loads(message)
-            if data.get("code") != 0:
-                raise RuntimeError(data.get("message") or str(data))
-            ws_result = data.get("data", {}).get("result", {}).get("ws") or []
-            text_parts.extend(cw.get("w", "") for seg in ws_result for cw in seg.get("cw", []))
-            if data.get("data", {}).get("status") == 2:
+            result = json.loads(message)
+            header = result.get("header", {})
+            if header.get("code", 0) != 0:
+                raise RuntimeError(header.get("message") or str(result))
+            payload = result.get("payload", {})
+            text_data = ((payload.get("result") or {}).get("text") or "")
+            if text_data:
+                decoded = base64.b64decode(text_data).decode("utf-8")
+                text_json = json.loads(decoded)
+                ws_result = text_json.get("ws") or []
+                text_parts.extend(cw.get("w", "") for seg in ws_result for cw in seg.get("cw", []))
+            if header.get("status") == 2:
                 break
         return "".join(text_parts)
 

@@ -38,6 +38,16 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
     private final ModelTemplateFieldDao modelTemplateFieldDao;
 
     private static final List<ModelCatalogDTO> CATALOG = buildCatalog();
+    private static final Set<String> STATIC_FIELD_SCHEMA_TEMPLATE_CODES = Set.of(
+            "ASR_XUNFEI_STREAM",
+            "ASR_DOUBAO_BIGASR_STREAM",
+            "ASR_DOUBAO_SEED_ASR_2_STREAM",
+            "TTS_XUNFEI_STREAM",
+            "TTS_DOUBAO_BIGTTS_STREAM",
+            "TTS_DOUBAO_SEED_TTS_2_STREAM",
+            "LLM_DOUBAO_ARK_OPENAI",
+            "LLM_DOUBAO_SEED_OPENAI",
+            "LLM_DEEPSEEK_OPENAI");
     private volatile boolean catalogSeedChecked = false;
 
     @Override
@@ -343,14 +353,21 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         dto.setProtocolLabel(StringUtils.defaultIfBlank(entity.getProtocol(), staticMeta == null ? "" : staticMeta.getProtocolLabel()));
         dto.setUpstreamResourceLabel(staticMeta == null ? entity.getUpstreamModelField() : staticMeta.getUpstreamResourceLabel());
         dto.setUpstreamModelField(entity.getUpstreamModelField());
-        dto.setCredentialFields(fields.stream().filter(field -> intValue(field.getSecret()) == 1)
-                .map(ModelTemplateFieldEntity::getFieldKey).toList());
-        dto.setRequiredFields(fields.stream().filter(field -> intValue(field.getRequired()) == 1)
-                .map(ModelTemplateFieldEntity::getFieldKey).toList());
-        dto.setRecommendedFields(fields.stream()
-                .filter(field -> intValue(field.getRequired()) == 0 && intValue(field.getSecret()) == 0)
-                .map(ModelTemplateFieldEntity::getFieldKey).toList());
-        dto.setFieldSchemas(fields.stream().map(this::toFieldSchemaDTO).toList());
+        if (usesStaticFieldSchema(staticMeta)) {
+            dto.setCredentialFields(staticMeta.getCredentialFields());
+            dto.setRequiredFields(staticMeta.getRequiredFields());
+            dto.setRecommendedFields(staticMeta.getRecommendedFields());
+            dto.setFieldSchemas(staticMeta.getFieldSchemas());
+        } else {
+            dto.setCredentialFields(fields.stream().filter(field -> intValue(field.getSecret()) == 1)
+                    .map(ModelTemplateFieldEntity::getFieldKey).toList());
+            dto.setRequiredFields(fields.stream().filter(field -> intValue(field.getRequired()) == 1)
+                    .map(ModelTemplateFieldEntity::getFieldKey).toList());
+            dto.setRecommendedFields(fields.stream()
+                    .filter(field -> intValue(field.getRequired()) == 0 && intValue(field.getSecret()) == 0)
+                    .map(ModelTemplateFieldEntity::getFieldKey).toList());
+            dto.setFieldSchemas(fields.stream().map(this::toFieldSchemaDTO).toList());
+        }
         dto.setDocLink(StringUtils.defaultIfBlank(entity.getDocLink(), staticMeta == null ? "" : staticMeta.getDocLink()));
         dto.setSetupHints(staticMeta == null ? List.of() : staticMeta.getSetupHints());
         dto.setKnownLimitations(staticMeta == null ? List.of() : staticMeta.getKnownLimitations());
@@ -365,6 +382,11 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         dto.setDeprecated(staticMeta != null && Boolean.TRUE.equals(staticMeta.getDeprecated()));
         dto.setSort(entity.getSort());
         return dto;
+    }
+
+    private boolean usesStaticFieldSchema(ModelCatalogDTO staticMeta) {
+        return staticMeta != null
+                && STATIC_FIELD_SCHEMA_TEMPLATE_CODES.contains(staticMeta.getTemplateCode());
     }
 
     private ModelFieldSchemaDTO toFieldSchemaDTO(ModelTemplateFieldEntity entity) {
@@ -718,16 +740,16 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         items.add(item("TTS_DOUBAO_BIGTTS_STREAM", "TTS", "huoshan_double_stream", "豆包大模型 TTS",
                 "火山引擎", "豆包语音合成大模型", "tts", "语音合成", "websocket-bidirectional", "WebSocket 双向流式",
                 "cloud", "云平台", "WebSocket", "Resource ID", "resource_id",
-                List.of("appid", "access_token"), List.of("appid", "access_token", "resource_id", "speaker"),
-                List.of("resource_id", "speaker", "enable_ws_reuse", "audio_params", "additions"),
+                List.of("appid", "access_token"), List.of("ws_url", "appid", "access_token", "resource_id", "speaker"),
+                List.of("ws_url", "resource_id", "speaker", "enable_ws_reuse", "audio_params", "additions"),
                 List.of("TTS 1.0 大模型资源 ID 常见为 volc.service_type.10029。"),
                 List.of(), List.of("HuoshanDoubleStreamTTS", "volc.service_type.10029"),
                 "https://www.volcengine.com/docs/6561/1329505"));
         items.add(item("TTS_DOUBAO_SEED_TTS_2_STREAM", "TTS", "huoshan_double_stream", "Seed TTS 2.0",
                 "火山引擎", "豆包语音合成 Seed TTS 2.0", "tts", "语音合成", "websocket-bidirectional", "WebSocket 双向流式",
                 "cloud", "云平台", "WebSocket", "Resource ID", "resource_id",
-                List.of("appid", "access_token"), List.of("appid", "access_token", "resource_id", "speaker"),
-                List.of("resource_id", "speaker", "enable_ws_reuse", "audio_params"),
+                List.of("appid", "access_token"), List.of("ws_url", "appid", "access_token", "resource_id", "speaker"),
+                List.of("ws_url", "resource_id", "speaker", "enable_ws_reuse", "audio_params"),
                 List.of("Seed TTS 2.0 资源 ID 为 seed-tts-2.0。"),
                 List.of(), List.of("HuoshanDoubleStreamTTSV2", "seed-tts-2.0", "TTS_HSDSTTS_V2"),
                 "https://www.volcengine.com/docs/6561/1329505"));
@@ -874,8 +896,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 "音频问答、语音内容理解。",
                 "它不是设备 ASR provider；不能替代 ASR 输出用户文本。",
                 "https://www.volcengine.com/docs/82379/2377589", List.of("audio understanding", "doubao-seed-2-0-lite")));
-        items.add(openAiLlm("LLM_DEEPSEEK_OPENAI", "DeepSeek", "DeepSeek API", "OpenAI 兼容聊天", "deepseek-v4-flash",
-                "语音场景默认关闭思考更快；需要时再启用 thinking/reasoning_effort。", List.of("DeepSeekLLM")));
+        items.add(deepSeekLlm());
         items.add(openAiLlm("LLM_ZHIPU_GLM_OPENAI", "智谱AI", "GLM", "OpenAI 兼容聊天", "glm-4-flash",
                 "智谱使用 OpenAI 兼容接口。", List.of("ChatGLMLLM", "glm")));
         items.add(item("LLM_OLLAMA_LOCAL", "LLM", "ollama", "Ollama",
@@ -1042,6 +1063,17 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 "https://platform.openai.com/docs/api-reference/chat");
     }
 
+    private static ModelCatalogDTO deepSeekLlm() {
+        return item("LLM_DEEPSEEK_OPENAI", "LLM", "openai", "DeepSeek API", "DeepSeek", "DeepSeek API",
+                "llm", "大语言模型", "openai-compatible", "OpenAI 兼容聊天", "cloud", "云/兼容服务",
+                "OpenAI Chat", "模型", "model_name",
+                List.of("api_key"), List.of("base_url", "model_name", "api_key"),
+                List.of("max_tokens", "thinking", "reasoning_effort"),
+                List.of("语音场景默认关闭思考更快；需要时再启用 thinking/reasoning_effort。上游标识示例：deepseek-v4-flash。"),
+                List.of("DeepSeek API 不展示 temperature/top_p/top_k/frequency_penalty 等采样参数。"),
+                List.of("DeepSeekLLM", "deepseek"), "https://api-docs.deepseek.com/");
+    }
+
     private static ModelCatalogDTO item(String templateCode, String modelType, String providerCode,
             String adapterName, String vendorName, String productName, String capability, String capabilityLabel,
             String accessMode, String accessModeLabel, String deployment, String deploymentLabel, String protocolLabel,
@@ -1145,6 +1177,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             case "LLM_DEEPSEEK_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "https://api.deepseek.com");
                 setFieldDefault(dto, "model_name", "deepseek-v4-flash");
+                setFieldDefault(dto, "max_tokens", 500);
                 setFieldDefault(dto, "thinking", "disabled");
                 setFieldDefault(dto, "reasoning_effort", "high");
             }
@@ -1162,13 +1195,32 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             }
             case "ASR_DOUBAO_BIGASR_STREAM" -> setFieldDefault(dto, "resource_id", "volc.bigasr.sauc.duration");
             case "ASR_DOUBAO_SEED_ASR_2_STREAM" -> setFieldDefault(dto, "resource_id", "volc.seedasr.sauc.duration");
+            case "ASR_XUNFEI_STREAM" -> {
+                setFieldDefault(dto, "domain", "slm");
+                setFieldDefault(dto, "language", "zh_cn");
+                setFieldDefault(dto, "accent", "mandarin");
+            }
             case "ASR_QWEN3_FLASH" -> {
                 setFieldDefault(dto, "base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1");
                 setFieldDefault(dto, "model_name", "qwen3-asr-flash");
             }
             case "ASR_ALIYUN_BAILIAN_PARAFORMER" -> setFieldDefault(dto, "model", "paraformer-realtime-v2");
-            case "TTS_DOUBAO_BIGTTS_STREAM" -> setFieldDefault(dto, "resource_id", "volc.service_type.10029");
-            case "TTS_DOUBAO_SEED_TTS_2_STREAM" -> setFieldDefault(dto, "resource_id", "seed-tts-2.0");
+            case "TTS_DOUBAO_HTTP" -> setFieldDefault(dto, "api_url", "https://openspeech.bytedance.com/api/v1/tts");
+            case "TTS_DOUBAO_BIGTTS_STREAM" -> {
+                setFieldDefault(dto, "ws_url", "wss://openspeech.bytedance.com/api/v3/tts/bidirection");
+                setFieldDefault(dto, "resource_id", "volc.service_type.10029");
+            }
+            case "TTS_DOUBAO_SEED_TTS_2_STREAM" -> {
+                setFieldDefault(dto, "ws_url", "wss://openspeech.bytedance.com/api/v3/tts/bidirection");
+                setFieldDefault(dto, "resource_id", "seed-tts-2.0");
+            }
+            case "TTS_XUNFEI_STREAM" -> {
+                setFieldDefault(dto, "format", "audio/L16;rate=16000");
+                setFieldDefault(dto, "volume", 50);
+                setFieldDefault(dto, "speed", 50);
+                setFieldDefault(dto, "pitch", 50);
+                setFieldDefault(dto, "oral_level", "mid");
+            }
             case "TTS_ALIYUN_BAILIAN_COSYVOICE" -> setFieldDefault(dto, "model", "cosyvoice-v2");
             case "VLLM_ZHIPU_GLM_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "https://open.bigmodel.cn/api/paas/v4");
