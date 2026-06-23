@@ -79,58 +79,60 @@
             >
               <el-table-column
                 type="selection"
-                width="55"
+                width="46"
                 align="center"
                 :cell-class-name="selectionCellClassName"
               ></el-table-column>
               <el-table-column
                 :label="$t('modelConfig.configName')"
                 align="left"
-                min-width="190"
+                min-width="150"
               >
                 <template slot-scope="scope">
                   <div class="model-primary">{{ scope.row.modelName }}</div>
                   <div class="model-secondary">{{ scope.row.modelCode || scope.row.id }}</div>
                 </template>
               </el-table-column>
-              <el-table-column :label="$t('modelConfig.upstreamModel')" align="center">
+              <el-table-column
+                :label="$t('modelConfig.upstreamModel')"
+                align="center"
+                min-width="105"
+              >
                 <template slot-scope="scope">
-                  {{ getUpstreamModel(scope.row) }}
+                  <div class="upstream-cell">{{ getUpstreamModel(scope.row) }}</div>
                 </template>
               </el-table-column>
               <el-table-column
                 :label="$t('modelConfig.vendorProduct')"
                 align="left"
-                min-width="260"
+                min-width="250"
               >
                 <template slot-scope="scope">
-                  <div class="catalog-cell">
-                    <div class="catalog-main">
-                      {{ getVendorProduct(scope.row) }}
-                      <el-tag
-                        v-if="scope.row.supportedStatus"
-                        size="mini"
-                        :type="getCatalogStatusTagType(scope.row)"
-                        class="catalog-status-tag"
-                      >
-                        {{ getCatalogStatusText(scope.row) }}
-                      </el-tag>
+                  <el-tooltip
+                    :content="getCatalogTooltip(scope.row)"
+                    placement="top"
+                    effect="light"
+                  >
+                    <div class="catalog-cell">
+                      <div class="catalog-main">
+                        {{ getVendorProduct(scope.row) }}
+                        <el-tag
+                          v-if="scope.row.supportedStatus"
+                          size="mini"
+                          :type="getCatalogStatusTagType(scope.row)"
+                          class="catalog-status-tag"
+                        >
+                          {{ getCatalogStatusText(scope.row) }}
+                        </el-tag>
+                      </div>
+                      <div class="catalog-sub">
+                        {{ getAccessSummary(scope.row) }}
+                      </div>
                     </div>
-                    <div class="catalog-sub">
-                      {{ getAccessSummary(scope.row) }}
-                    </div>
-                    <div v-if="scope.row.testContract" class="catalog-test-contract">
-                      {{ scope.row.testContract }}
-                    </div>
-                  </div>
+                  </el-tooltip>
                 </template>
               </el-table-column>
-              <el-table-column :label="$t('modelConfig.provider')" align="center" min-width="150">
-                <template slot-scope="scope">
-                  {{ getAdapterName(scope.row) }}
-                </template>
-              </el-table-column>
-              <el-table-column :label="$t('modelConfig.isEnabled')" align="center">
+              <el-table-column :label="$t('modelConfig.isEnabled')" align="center" width="88">
                 <template slot-scope="scope">
                   <el-tooltip
                     :disabled="canToggleEnabled(scope.row)"
@@ -149,7 +151,7 @@
                   </el-tooltip>
                 </template>
               </el-table-column>
-              <el-table-column :label="$t('modelConfig.testStatus')" align="center" width="120px">
+              <el-table-column :label="$t('modelConfig.testStatus')" align="center" width="92">
                 <template slot-scope="scope">
                   <el-tooltip
                     :disabled="!scope.row.testMessage"
@@ -170,6 +172,7 @@
                 v-if="activeTab === 'tts'"
                 :label="$t('modelConfig.voiceManagement')"
                 align="center"
+                width="100"
               >
                 <template slot-scope="scope">
                   <el-button
@@ -185,42 +188,52 @@
               <el-table-column
                 :label="$t('modelConfig.action')"
                 align="center"
-                width="260px"
+                width="144"
               >
                 <template slot-scope="scope">
-                  <el-button
-                    type="text"
-                    size="mini"
-                    :loading="testingModelId === scope.row.id"
-                    @click="testModel(scope.row)"
-                    class="edit-btn"
-                  >
-                    {{ $t("modelConfig.test") }}
-                  </el-button>
-                  <el-button
-                    type="text"
-                    size="mini"
-                    @click="editModel(scope.row)"
-                    class="edit-btn"
-                  >
-                    {{ $t("modelConfig.edit") }}
-                  </el-button>
-                  <el-button
-                    type="text"
-                    size="mini"
-                    @click="duplicateModel(scope.row)"
-                    class="edit-btn"
-                  >
-                    {{ $t("modelConfig.duplicate") }}
-                  </el-button>
-                  <el-button
-                    type="text"
-                    size="mini"
-                    @click="deleteModel(scope.row)"
-                    class="delete-btn"
-                  >
-                    {{ $t("modelConfig.delete") }}
-                  </el-button>
+                  <div class="row-actions">
+                    <el-tooltip :content="$t('modelConfig.test')" placement="top">
+                      <el-button
+                        type="text"
+                        size="mini"
+                        :loading="testingModelId === scope.row.id"
+                        @click="testModel(scope.row)"
+                        class="table-action-btn edit-btn"
+                      >
+                        <i class="el-icon-video-play"></i>
+                      </el-button>
+                    </el-tooltip>
+                    <el-tooltip :content="$t('modelConfig.edit')" placement="top">
+                      <el-button
+                        type="text"
+                        size="mini"
+                        @click="editModel(scope.row)"
+                        class="table-action-btn edit-btn"
+                      >
+                        <i class="el-icon-edit"></i>
+                      </el-button>
+                    </el-tooltip>
+                    <el-tooltip :content="$t('modelConfig.duplicate')" placement="top">
+                      <el-button
+                        type="text"
+                        size="mini"
+                        @click="duplicateModel(scope.row)"
+                        class="table-action-btn edit-btn"
+                      >
+                        <i class="el-icon-document-copy"></i>
+                      </el-button>
+                    </el-tooltip>
+                    <el-tooltip :content="$t('modelConfig.delete')" placement="top">
+                      <el-button
+                        type="text"
+                        size="mini"
+                        @click="deleteModel(scope.row)"
+                        class="table-action-btn delete-btn"
+                      >
+                        <i class="el-icon-delete"></i>
+                      </el-button>
+                    </el-tooltip>
+                  </div>
                 </template>
               </el-table-column>
             </el-table>
@@ -704,8 +717,15 @@ export default {
     getAccessSummary(model) {
       const access = (model && model.accessModeLabel) || "";
       const protocol = (model && (model.protocolLabel || model.protocol)) || "";
-      const deployment = (model && model.deploymentLabel) || "";
-      return [access, protocol, deployment].filter(Boolean).join(" · ") || this.getAdapterName(model);
+      return [access, protocol, this.getAdapterName(model)].filter(Boolean).join(" · ");
+    },
+    getCatalogTooltip(model) {
+      return [
+        this.getVendorProduct(model),
+        this.getAccessSummary(model),
+        model && model.recommendedFor ? `推荐：${model.recommendedFor}` : "",
+        model && model.avoidWhen ? `限制：${model.avoidWhen}` : "",
+      ].filter(Boolean).join("\n");
     },
     getCatalogStatusText(model) {
       if (!model || !model.supportedStatus) {
@@ -1680,6 +1700,14 @@ export default {
   word-break: break-all;
 }
 
+.upstream-cell {
+  max-width: 150px;
+  margin: 0 auto;
+  color: #5e687d;
+  line-height: 20px;
+  word-break: break-word;
+}
+
 .catalog-cell {
   min-width: 0;
   text-align: left;
@@ -1693,6 +1721,7 @@ export default {
   font-size: 14px;
   font-weight: 600;
   line-height: 20px;
+  min-width: 0;
 }
 
 .catalog-status-tag {
@@ -1701,16 +1730,30 @@ export default {
 
 .catalog-sub {
   color: #5e687d;
-  font-size: 13px;
-  line-height: 18px;
+  font-size: 12px;
+  line-height: 17px;
   margin-top: 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-.catalog-test-contract {
-  color: #8a5b00;
-  font-size: 12px;
-  line-height: 18px;
-  margin-top: 4px;
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.table-action-btn {
+  width: 24px;
+  height: 24px;
+  padding: 0 !important;
+  margin: 0 !important;
+  font-size: 15px;
+  line-height: 24px;
 }
 
 </style>
