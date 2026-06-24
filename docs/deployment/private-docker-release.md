@@ -75,6 +75,28 @@ yihuixiaozhi/redis
 
 `scripts/acr-build-push` 默认使用单平台 Docker 构建，避免 buildx 容器读取不可用的 Docker Hub 镜像加速器。
 
+发布脚本默认并行执行互不依赖的步骤：
+
+```text
+运行时镜像同步  与  业务镜像构建      可并行
+xiaozhi-server  与  xiaozhi-web/api  可并行
+```
+
+`xiaozhi-server` 只有在 `BUILD_BASE=true` 时会等待 `xiaozhi-server-base` 先完成。需要降低本机负载或排查并发构建问题时，可以关闭并行：
+
+```bash
+PARALLEL_RELEASE_STEPS=false PARALLEL_IMAGE_BUILDS=false scripts/acr-build-push
+```
+
+只改 Java 管理 API 或 Web 管理后台，且没有改 `Dockerfile-server-base`、`main/xiaozhi-server/requirements-docker.txt` 或 Python 系统依赖时，可以复用已有 `xiaozhi-server-base:latest`，跳过最慢的 Python 依赖层：
+
+```bash
+BUILD_BASE=false \
+SERVER_BASE_IMAGE=crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-server-base:latest \
+MIRROR_RUNTIME_IMAGES=false \
+scripts/acr-build-push
+```
+
 发布脚本默认隐藏 Docker 逐层构建和推送明细，只输出步骤摘要。完整日志会写入 `/tmp/xiaozhi-*` 临时目录。需要排查构建细节时使用：
 
 ```bash
