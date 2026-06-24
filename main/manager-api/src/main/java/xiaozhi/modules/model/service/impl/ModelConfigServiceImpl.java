@@ -606,7 +606,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         dto.setRequiredFields(catalog.getRequiredFields());
         dto.setSetupHints(catalog.getSetupHints());
         dto.setKnownLimitations(catalog.getKnownLimitations());
-        dto.setMigrationStatus(hasMissingCatalogRequiredFields(entity.getConfigJson(), catalog) ? "NEEDS_REVIEW" : "AUTO");
+        dto.setMigrationStatus(hasMissingCatalogRequiredFields(entity, dto, catalog) ? "NEEDS_REVIEW" : "AUTO");
         dto.setSupportedStatus(catalog.getSupportedStatus());
         dto.setSelectable(catalog.getSelectable());
         dto.setRecommendedFor(catalog.getRecommendedFor());
@@ -620,13 +620,34 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         }
     }
 
-    private boolean hasMissingCatalogRequiredFields(JSONObject configJson, ModelCatalogDTO catalog) {
+    private boolean hasMissingCatalogRequiredFields(ModelConfigEntity entity, ModelConfigDTO dto, ModelCatalogDTO catalog) {
+        JSONObject configJson = entity == null ? null : entity.getConfigJson();
         for (String field : catalog.getRequiredFields()) {
-            if (!hasUsableConfigValue(configJson, field)) {
+            if (!hasUsableStandardField(entity, dto, field) && !hasUsableConfigValue(configJson, field)) {
                 return true;
             }
         }
         return false;
+    }
+
+    private boolean hasUsableStandardField(ModelConfigEntity entity, ModelConfigDTO dto, String field) {
+        if (entity == null || StringUtils.isBlank(field)) {
+            return false;
+        }
+        String value = switch (field) {
+            case "base_url", "api_url", "url", "ws_url", "host", "endpoint_url" -> entity.getEndpointUrl();
+            case "model_name", "model", "resource_id" -> entity.getUpstreamModelId();
+            default -> null;
+        };
+        if (StringUtils.isNotBlank(value) && hasUsableTextValue(value)) {
+            return true;
+        }
+        if (dto == null) {
+            return false;
+        }
+        Object paramValue = dto.getParams() == null ? null : dto.getParams().get(field);
+        Object secretValue = dto.getSecrets() == null ? null : dto.getSecrets().get(field);
+        return hasUsableObjectValue(paramValue) || hasUsableObjectValue(secretValue);
     }
 
     private ModelDisplayInfo buildModelDisplayInfo(ModelConfigEntity entity,
@@ -1964,10 +1985,18 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             return false;
         }
         Object value = configJson.get(field);
+        return hasUsableObjectValue(value);
+    }
+
+    private boolean hasUsableObjectValue(Object value) {
         if (value == null) {
             return false;
         }
         String stringValue = StringUtils.trim(String.valueOf(value));
+        return hasUsableTextValue(stringValue);
+    }
+
+    private boolean hasUsableTextValue(String stringValue) {
         return StringUtils.isNotBlank(stringValue) && !"null".equalsIgnoreCase(stringValue) && !isPlaceholderSecret(stringValue);
     }
 
