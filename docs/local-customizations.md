@@ -228,7 +228,7 @@
 
 ```text
 定制模块：xiaozhi-server 服务器音乐播放插件
-改动原因：`play_music` 在 function_call 模式下原先只异步提交音乐播放任务，同步工具结果只显示“指令已接收”；管理后台聊天记录看不到实际选中的歌曲，容易误判为卡住。默认 `announce_before_play=false` 时，插件会通过 `send_tts_message` 给设备屏幕发送“正在播放/即将播放具体歌曲”的文本状态，但这段文本不是普通 TTS 音频，原先也不会进入聊天记录。另一个问题是火山双流等 TTS provider 收到 `ContentType.FILE` 音乐文件后会先暂存到 `before_stop_play_files`，如果没有 `SentenceType.LAST` 播放边界就不会 flush 到 WebSocket，表现为后台显示已选中歌曲但设备不播放。后续又发现“唱一遍会员星光”“给我放一遍吧”会漏到主 LLM 自由回复，只生成 TTS 文案而不调用音乐工具，因此音乐请求必须在服务端先解析为结构化意图，再统一调用 `play_music`。再后续出现“我不听了”被解析成 `play_music({"song_name":"了"})`，根因是旧逻辑先匹配“听/放/唱”触发词再抽歌名，没有先判断停止/否定语义；现在音乐语义统一由 `core.semantic.music_intent.parse_music_intent` 先输出 `play` / `stop` / `library` 动作，语义控制中枢和旧意图入口都消费同一个解析结果，`stop` 动作直接复用 `handleAbortMessage` 清队列和清音乐上下文，不再进入播放工具或主 LLM。
+改动原因：`play_music` 在 function_call 模式下原先只异步提交音乐播放任务，同步工具结果只显示“指令已接收”；管理后台聊天记录看不到实际选中的歌曲，容易误判为卡住。选曲提示语（例如“即将为您播放 具体歌曲”）必须作为普通 TTS 文本真实播报，不能只通过 `send_tts_message` 做屏幕状态。另一个问题是火山双流等 TTS provider 收到 `ContentType.FILE` 音乐文件后会先暂存到 `before_stop_play_files`，如果没有 `SentenceType.LAST` 播放边界就不会 flush 到 WebSocket，表现为后台显示已选中歌曲但设备不播放。后续为避免客户歌曲语义被写死在服务端规则里，播放、唱某首歌、随机播放和曲库查询不再由旧意图入口直接派发，必须通过主 LLM 或 intent LLM 根据工具描述和曲库上下文决定是否调用 `play_music`；服务端仅保留音乐停止类确定性控制，先于播放触发词处理“我不听了/别放了/停止播放”等否定或停止语义，并直接复用 `handleAbortMessage` 清队列和清音乐上下文。
 关键文件：
   - main/xiaozhi-server/core/semantic/music_intent.py
   - main/xiaozhi-server/core/semantic/router.py
@@ -239,7 +239,7 @@
   - main/xiaozhi-server/music/.xiaozhi-music-metadata.json
   - main/xiaozhi-server/tests/test_music_intent.py
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改 `handle_user_intent`、语义控制中枢、`play_music`、TTS 队列、`Action.RECORD`、`ContentType.FILE` 或流式 TTS provider，必须保留以下约定：音乐类请求先由 `parse_music_intent` 解析动作和否定极性，覆盖指定歌名播放、唱某首歌、再放一遍、换一首、曲库查询、音乐上下文续播和“我不听了/别放了/停止播放”等停止命令；`stop` 必须先于播放触发词处理，并直接走 `handleAbortMessage`，不得被抽成歌名或落到主 LLM；`play` 命中后不得落到主 LLM 自由编唱；工具同步结果应使用用户可读的“正在为您播放音乐”，不要只返回“指令已接收”；默认跳过播放前 TTS 介绍语时，仍要把“此刻为您献上/正在播放 具体歌曲”这类选曲状态上报为 assistant 聊天记录；音乐文件入队必须按 `FIRST/ACTION -> MIDDLE/FILE -> LAST/ACTION` 发送播放边界，确保火山双流、阿里云流式、讯飞流式、Minimax 等 provider 能把暂存文件音频 flush 到设备；曲库 `.xiaozhi-music-metadata.json` 支持 `aliases`，用于处理 ASR 近音、品牌曲别名和用户俗称。聊天记录中的 `play_music({...})` 和 `{"result": "正在为您播放音乐"}` 是工具调用审计记录，不应被当作播放失败错误。
+官方同步时的处理规则：如果官方修改 `handle_user_intent`、语义控制中枢、`play_music`、TTS 队列、`Action.RECORD`、`ContentType.FILE` 或流式 TTS provider，必须保留以下约定：播放、唱某首歌、随机播放、换一首、曲库查询和音乐上下文续播应由大模型根据 `play_music` 工具描述、`<music_library>` 曲库上下文和用户表达调度，不得在旧意图入口里硬编码直接调用播放工具；“我不听了/别放了/停止播放”等停止命令可以由语义控制中枢确定性处理，且 `stop` 必须先于播放触发词处理，并直接走 `handleAbortMessage`，不得被抽成歌名；工具同步结果应使用用户可读的“正在为您播放音乐”，不要只返回“指令已接收”；“此刻为您献上/正在播放/即将为您播放 具体歌曲”这类选曲提示语必须按普通 `ContentType.TEXT` 进入 TTS 播报和 assistant 聊天记录，不得只作为屏幕状态；音乐播放入队必须按 `FIRST/ACTION -> MIDDLE/TEXT -> MIDDLE/FILE -> LAST/ACTION` 发送播放边界，确保提示语播完后再播放文件，并确保火山双流、阿里云流式、讯飞流式、Minimax 等 provider 能把暂存文件音频 flush 到设备；曲库 `.xiaozhi-music-metadata.json` 支持 `aliases` 和 `description`，用于后台配置 ASR 近音、歌曲别名、用户俗称和模型可见背景说明，源码不得写入客户或歌曲专属语义。聊天记录中的 `play_music({...})` 和 `{"result": "正在为您播放音乐"}` 是工具调用审计记录，不应被当作播放失败错误。
 ```
 
 ## 16. ACR 镜像生产部署、模型可空与 FunASR 脱钩

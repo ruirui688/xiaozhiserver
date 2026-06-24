@@ -104,6 +104,33 @@ export default {
             }).send();
     },
 
+    updateMusicMetadata(path, description, aliases, callback, failCallback) {
+        const params = new URLSearchParams();
+        params.append('path', path);
+        params.append('description', description || '');
+        (aliases || []).forEach((alias) => {
+            params.append('aliases', alias);
+        });
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/music/files/metadata?${params.toString()}`)
+            .method('PUT')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .fail((res) => {
+                RequestService.clearRequestTime();
+                if (failCallback) {
+                    failCallback(res);
+                }
+            })
+            .networkFail(() => {
+                RequestService.reAjaxFun(() => {
+                    this.updateMusicMetadata(path, description, aliases, callback, failCallback);
+                });
+            }).send();
+    },
+
     getPlayUrl(path) {
         return `${getServiceUrl()}/admin/music/play?path=${encodeURIComponent(path)}`;
     }

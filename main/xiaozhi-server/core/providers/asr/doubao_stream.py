@@ -31,6 +31,7 @@ class ASRProvider(ASRProviderBase):
         # 配置参数
         self.appid = str(config.get("appid"))
         self.access_token = config.get("access_token")
+        self.api_key = config.get("api_key")
         # 资源ID，用于区分不同的ASR模型（默认1.0模型小时版，v2版本使用seed-asr）
         self.resource_id = config.get("resource_id", "volc.bigasr.sauc.duration")
 
@@ -60,7 +61,7 @@ class ASRProvider(ASRProviderBase):
         self.language = config.get("language") if self.enable_multilingual else None
         self.bits = config.get("bits", 16)
         self.channel = config.get("channel", 1)
-        self.auth_method = config.get("auth_method", "token")
+        self.auth_method = config.get("auth_method", "api_key" if self.api_key else "token")
         self.secret = config.get("secret", "access_secret")
         end_window_size = config.get("end_window_size")
         self.end_window_size = int(end_window_size) if end_window_size else 200
@@ -324,6 +325,12 @@ class ASRProvider(ASRProviderBase):
         return req
 
     def token_auth(self):
+        if self.auth_method == "api_key" or self.api_key:
+            return {
+                "X-Api-Key": self.api_key or self.access_token,
+                "X-Api-Resource-Id": self.resource_id,
+                "X-Api-Connect-Id": str(uuid.uuid4()),
+            }
         return {
             "X-Api-App-Key": self.appid,
             "X-Api-Access-Key": self.access_token,

@@ -210,6 +210,22 @@ main/xiaozhi-server/core/providers/tools/server_plugins/plugin_executor.py
 
 内置插件如果命中 `all_function_registry`，优先使用插件 Python 函数注册的 description。后台 `plugins[func_name].description` 可以覆盖工具描述。
 
+`play_music` 还有额外的曲库上下文注入。`ConnectionHandler.chat()` 会在当前智能体具备 `play_music` 工具时，向本轮 LLM 请求插入 `<music_library>` system 段，内容来自 `plugins_func/functions/play_music.py` 扫描到的本地音乐文件、`aliases` 和 `description`。`ServerPluginExecutor._init_music_description()` 也会把曲库摘要补进工具描述。
+
+音乐相关提示词边界：
+
+```text
+用户问“有什么歌、你会放什么歌、曲库里有什么”
+  -> LLM 根据 <music_library> 直接回答
+  -> 不调用 play_music
+
+用户明确要求播放、唱、放某首歌或随机播放音乐
+  -> LLM / intent_llm 调用 play_music
+  -> 服务端执行真实本地文件播放
+```
+
+`play_music` 的工具结果使用 `Action.RECORD` 写入工具调用审计，不再请求 LLM 二次改写。真实出声由 TTS 队列完成：先以普通 `ContentType.TEXT` 播放“即将为您播放 具体歌曲”等选曲提示语，再以 `ContentType.FILE` 播放本地音乐文件，并用 `LAST/ACTION` 结束边界触发流式 provider flush。聊天记录中的 `play_music({...})` 和 `{"result": "正在为您播放音乐"}` 不能单独作为播放成功或失败依据。
+
 纯语言游戏不再由 `ServerPluginExecutor` 构造工具描述。用户发起成语接龙、你说我猜等玩法时，主 LLM 直接根据对话上下文处理。
 
 ## 8. 主聊天 function_call 注入

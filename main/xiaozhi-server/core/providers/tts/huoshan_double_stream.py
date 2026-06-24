@@ -6,6 +6,7 @@ import asyncio
 import traceback
 import websockets
 
+from collections.abc import Mapping
 from typing import Callable, Any
 from config.logger import setup_logging
 from core.utils.util import check_model_key
@@ -16,6 +17,14 @@ from core.providers.tts.dto.dto import SentenceType, ContentType, InterfaceType
 
 TAG = __name__
 logger = setup_logging()
+
+DOUBAO_BIGTTS_RESOURCE_ID = "volc.service_type.10029"
+DOUBAO_SEED_TTS_2_RESOURCE_ID = "seed-tts-2.0"
+SUPPORTED_DOUBAO_TTS_RESOURCES = {
+    DOUBAO_BIGTTS_RESOURCE_ID: "豆包语音合成大模型（火山服务 10007）",
+    DOUBAO_SEED_TTS_2_RESOURCE_ID: "豆包语音合成模型 2.0（火山服务 10035）",
+}
+HUOSHAN_DOUBLE_STREAM_WS_URL = "wss://openspeech.bytedance.com/api/v3/tts/bidirection"
 
 PROTOCOL_VERSION = 0b0001
 DEFAULT_HEADER_SIZE = 0b0001
@@ -145,10 +154,22 @@ class TTSProvider(TTSProviderBase):
         self.interface_type = InterfaceType.DUAL_STREAM
         self._monitor_task = None  # 监听任务引用
         self.appId = config.get("appid")
+        self.api_key = config.get("api_key")
         self.access_token = config.get("access_token")
         self.cluster = config.get("cluster")
-        self.resource_id = config.get("resource_id")
-        self.resource_type = True if self.resource_id == "seed-tts-2.0" else False
+        self.resource_id = str(
+            config.get("resource_id") or DOUBAO_BIGTTS_RESOURCE_ID
+        ).strip()
+        if self.resource_id not in SUPPORTED_DOUBAO_TTS_RESOURCES:
+            supported = "、".join(
+                f"{name}: {resource_id}"
+                for resource_id, name in SUPPORTED_DOUBAO_TTS_RESOURCES.items()
+            )
+            raise ValueError(
+                "豆包 TTS 仅支持火山官方两个双向流式服务："
+                f"{supported}；当前 resource_id={self.resource_id or '<empty>'}"
+            )
+        self.resource_type = self.resource_id == DOUBAO_SEED_TTS_2_RESOURCE_ID
         self.report_on_last = self.resource_type
         self.activate_session = False
         if config.get("private_voice"):
@@ -174,10 +195,31 @@ class TTSProvider(TTSProviderBase):
         # 默认 mix_speaker 配置
         default_mix_speaker = {}
 
-        # 合并用户配置
-        self.audio_params = {**default_audio_params, **config.get("audio_params", {})}
-        self.additions = {**default_additions, **config.get("additions", {})}
-        self.mix_speaker = {**default_mix_speaker, **config.get("mix_speaker", {})}
+        # 合并用户配置。智控台可能把高级 JSON 字段以字符串下发，先统一解析成字典。
+        self.audio_params = {
+            **default_audio_params,
+            **self._mapping_config(config, "audio_params"),
+        }
+        self.additions = {
+            **default_additions,
+            **self._mapping_config(config, "additions"),
+        }
+        self.mix_speaker = {
+            **default_mix_speaker,
+            **self._mapping_config(config, "mix_speaker"),
+        }
+        self.additions["post_process"] = self._mapping_value(
+            self.additions.get("post_process"), "additions.post_process"
+        )
+        self.audio_format = str(
+            config.get("format")
+            or config.get("audio_format")
+            or config.get("response_format")
+            or self.audio_params.get("format")
+            or "pcm"
+        ).strip()
+        self.audio_file_type = self.audio_format
+        self._merge_flat_audio_params(config)
 
         # 应用百分比调整（如果存在），否则使用公有化配置
         if "ttsVolume" in config:
@@ -195,16 +237,76 @@ class TTSProvider(TTSProviderBase):
                 config["ttsPitch"], min_val=-12, max_val=12, base_val=0
             ))
 
-        self.ws_url = config.get("ws_url")
+        self.ws_url = str(config.get("ws_url") or HUOSHAN_DOUBLE_STREAM_WS_URL).strip()
+        if self.ws_url != HUOSHAN_DOUBLE_STREAM_WS_URL:
+            raise ValueError(
+                "豆包 TTS 仅支持火山官方双向流式 WebSocket 地址："
+                f"{HUOSHAN_DOUBLE_STREAM_WS_URL}；当前 ws_url={self.ws_url or '<empty>'}"
+            )
         self.authorization = config.get("authorization")
         self.header = {"Authorization": f"{self.authorization}{self.access_token}"}
         enable_ws_reuse_value = config.get("enable_ws_reuse", True)
         self.enable_ws_reuse = False if str(enable_ws_reuse_value).lower() == 'false' else True
         self.tts_text = ""
 
-        model_key_msg = check_model_key("TTS", self.access_token)
+        model_key_msg = check_model_key("TTS", self.api_key or self.access_token)
         if model_key_msg:
             logger.bind(tag=TAG).error(model_key_msg)
+
+    def _build_ws_headers(self):
+        ws_header = {
+            "X-Api-Resource-Id": self.resource_id,
+            "X-Api-Connect-Id": str(uuid.uuid4()),
+        }
+        if self.api_key:
+            ws_header["X-Api-Key"] = self.api_key
+            return ws_header
+        ws_header["X-Api-App-Key"] = self.appId
+        ws_header["X-Api-Access-Key"] = self.access_token
+        return ws_header
+
+    def _mapping_config(self, config, key):
+        return self._mapping_value(config.get(key), key)
+
+    def _mapping_value(self, value, field_name):
+        if value in (None, ""):
+            return {}
+        if isinstance(value, Mapping):
+            return dict(value)
+        if isinstance(value, str):
+            text = value.strip()
+            if not text or text.lower() in ("null", "undefined"):
+                return {}
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{field_name} 必须是 JSON 对象字符串：{exc.msg}") from exc
+            if parsed is None:
+                return {}
+            if isinstance(parsed, Mapping):
+                return dict(parsed)
+        raise ValueError(f"{field_name} 必须是 JSON 对象，当前类型为 {type(value).__name__}")
+
+    def _merge_flat_audio_params(self, config):
+        for key in (
+            "speech_rate",
+            "loudness_rate",
+            "sample_rate",
+            "emotion",
+            "emotion_scale",
+            "language",
+        ):
+            value = config.get(key)
+            if value not in (None, ""):
+                self.audio_params[key] = value
+
+        pitch = config.get("pitch")
+        if pitch not in (None, ""):
+            post_process = self._mapping_value(
+                self.additions.get("post_process"), "additions.post_process"
+            )
+            self.additions["post_process"] = post_process
+            post_process["pitch"] = pitch
 
     async def open_audio_channels(self, conn):
         try:
@@ -229,12 +331,7 @@ class TTSProvider(TTSProviderBase):
                     except:
                         pass
             logger.bind(tag=TAG).debug("开始建立新连接...")
-            ws_header = {
-                "X-Api-App-Key": self.appId,
-                "X-Api-Access-Key": self.access_token,
-                "X-Api-Resource-Id": self.resource_id,
-                "X-Api-Connect-Id": uuid.uuid4(),
-            }
+            ws_header = self._build_ws_headers()
             self.ws = await websockets.connect(
                 self.ws_url, additional_headers=ws_header, max_size=1000000000
             )
@@ -689,8 +786,9 @@ class TTSProvider(TTSProviderBase):
         event=EVENT_NONE,
         text="",
         speaker="",
-        audio_format="pcm",
+        audio_format=None,
     ):
+        audio_format = audio_format or self.audio_format
         # 构建 req_params
         req_params = {
             "text": text,
@@ -751,12 +849,7 @@ class TTSProvider(TTSProviderBase):
 
             async def _generate_audio():
                 # 创建新的WebSocket连接
-                ws_header = {
-                    "X-Api-App-Key": self.appId,
-                    "X-Api-Access-Key": self.access_token,
-                    "X-Api-Resource-Id": self.resource_id,
-                    "X-Api-Connect-Id": uuid.uuid4(),
-                }
+                ws_header = self._build_ws_headers()
                 ws = await websockets.connect(
                     self.ws_url, additional_headers=ws_header, max_size=1000000000
                 )

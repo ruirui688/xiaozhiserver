@@ -12,6 +12,12 @@ from core.utils.tts import convert_percentage_to_range
 TAG = __name__
 logger = setup_logging()
 
+DEPRECATION_MESSAGE = (
+    "DoubaoTTS HTTP 兼容 provider 已不再作为本项目有效豆包 TTS 入口；"
+    "新增配置请使用 huoshan_double_stream，并只选择火山服务 10007 "
+    "resource_id=volc.service_type.10029 或服务 10035 resource_id=seed-tts-2.0。"
+)
+
 
 class TTSProvider(TTSProviderBase):
     TTS_PARAM_CONFIG = [
@@ -22,6 +28,7 @@ class TTSProvider(TTSProviderBase):
 
     def __init__(self, config, delete_audio_file):
         super().__init__(config, delete_audio_file)
+        logger.bind(tag=TAG).warning(DEPRECATION_MESSAGE)
         if config.get("appid"):
             self.appid = int(config.get("appid"))
         else:

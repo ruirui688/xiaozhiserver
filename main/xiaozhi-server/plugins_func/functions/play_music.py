@@ -5,9 +5,10 @@ import random
 import difflib
 import json
 import traceback
+import asyncio
+import concurrent.futures
+import uuid
 from pathlib import Path
-from core.handle.sendAudioHandle import send_tts_message
-from core.handle.reportHandle import enqueue_tts_report
 from plugins_func.register import register_function, ToolType, ActionResponse, Action
 from core.utils.dialogue import Message
 from core.providers.tts.dto.dto import TTSMessageDTO, SentenceType, ContentType
@@ -56,23 +57,22 @@ def play_music(conn: "ConnectionHandler", song_name: str):
                 action=Action.RESPONSE, result="系统繁忙", response="请稍后再试"
             )
 
-        # 提交异步任务
-        task = conn.loop.create_task(
-            handle_music_command(conn, music_intent)  # 封装异步逻辑
+        future = asyncio.run_coroutine_threadsafe(
+            handle_music_command(conn, music_intent),
+            conn.loop,
         )
-
-        # 非阻塞回调处理
-        def handle_done(f):
-            try:
-                f.result()  # 可在此处理成功逻辑
-                conn.logger.bind(tag=TAG).info("播放完成")
-            except Exception as e:
-                conn.logger.bind(tag=TAG).error(f"播放失败: {e}")
-
-        task.add_done_callback(handle_done)
+        future.result(timeout=int(conn.config.get("tool_call_timeout", 30)))
+        conn.logger.bind(tag=TAG).info("音乐播放任务已入队")
 
         return ActionResponse(
             action=Action.RECORD, result="正在为您播放音乐", response="正在为您播放音乐"
+        )
+    except concurrent.futures.TimeoutError:
+        conn.logger.bind(tag=TAG).error("音乐播放任务提交超时")
+        return ActionResponse(
+            action=Action.RESPONSE,
+            result="音乐播放任务提交超时",
+            response="播放音乐超时了，请稍后再试",
         )
     except Exception as e:
         conn.logger.bind(tag=TAG).error(f"处理音乐意图错误: {e}")
@@ -143,6 +143,13 @@ def list_available_music(conn: "ConnectionHandler", limit=20):
     for relative_path in music_config.get("music_files", []):
         names.append(os.path.splitext(os.path.basename(relative_path))[0])
     return names[:limit]
+
+
+def list_music_prompt_entries(conn: "ConnectionHandler", limit=30):
+    """Return model-facing music entries including aliases and descriptions."""
+    music_config = initialize_music_handler(conn)
+    entries = music_config.get("music_file_names", [])
+    return entries[:limit]
 
 
 def _config_bool(value, default=False):
@@ -362,23 +369,6 @@ def _get_optimized_music_path(selected_music, music_path):
     return optimized_path
 
 
-async def _send_music_display_text(conn: "ConnectionHandler", text):
-    conn.tts.store_tts_text(conn.sentence_id, text)
-    conn.dialogue.put(Message(role="assistant", content=text))
-    try:
-        await send_tts_message(conn, "sentence_start", text)
-    except Exception as e:
-        conn.logger.bind(tag=TAG).warning(f"发送音乐文本状态失败: {e}")
-
-
-def _report_music_display_text(conn: "ConnectionHandler", text):
-    """Record the selected song prompt even when the music file itself is not TTS."""
-    try:
-        enqueue_tts_report(conn, text, [])
-    except Exception as e:
-        conn.logger.bind(tag=TAG).warning(f"上报音乐播放状态失败: {e}")
-
-
 def _enqueue_music_file(conn: "ConnectionHandler", playback_path):
     conn.tts.tts_text_queue.put(
         TTSMessageDTO(
@@ -428,25 +418,19 @@ async def play_local_music(conn: "ConnectionHandler", specific_file=None):
         if playback_path != music_path:
             conn.logger.bind(tag=TAG).info(f"使用低延时音乐缓存: {playback_path}")
         text = _get_random_play_prompt(selected_music)
+        conn.sentence_id = str(uuid.uuid4().hex)
 
-        announce_before_play = MUSIC_CACHE.get("announce_before_play", False)
         _enqueue_playback_boundary(conn, SentenceType.FIRST)
-        if announce_before_play:
-            conn.tts.store_tts_text(conn.sentence_id, text)
-            conn.dialogue.put(Message(role="assistant", content=text))
-            conn.tts.tts_text_queue.put(
-                TTSMessageDTO(
-                    sentence_id=conn.sentence_id,
-                    sentence_type=SentenceType.MIDDLE,
-                    content_type=ContentType.TEXT,
-                    content_detail=text,
-                )
+        conn.tts.store_tts_text(conn.sentence_id, text)
+        conn.dialogue.put(Message(role="assistant", content=text))
+        conn.tts.tts_text_queue.put(
+            TTSMessageDTO(
+                sentence_id=conn.sentence_id,
+                sentence_type=SentenceType.MIDDLE,
+                content_type=ContentType.TEXT,
+                content_detail=text,
             )
-        else:
-            conn.logger.bind(tag=TAG).info("跳过音乐播放前TTS介绍语，直接播放音乐")
-            await _send_music_display_text(conn, text)
-            _report_music_display_text(conn, text)
-
+        )
         _enqueue_music_file(conn, playback_path)
         _enqueue_playback_boundary(conn, SentenceType.LAST)
 

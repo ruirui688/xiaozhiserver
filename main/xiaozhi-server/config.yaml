@@ -676,7 +676,7 @@ LLM:
     # 定义LLM API类型
     type: openai
     # 先开通服务，打开以下网址，创建网关访问密钥，搜索并勾选 Doubao-pro-32k-functioncall ，开通
-    # 如果需要使用边缘大模型网关提供的语音合成，一并勾选 Doubao-语音合成 ，另见 TTS.VolcesAiGatewayTTS 配置
+    # 本项目豆包语音合成只保留 TTS.DoubaoBigTTSStream 和 TTS.DoubaoSeedTTS2Stream 两个火山官方双流入口
     # https://console.volcengine.com/vei/aigateway/
     # 开通后，进入这里获取密钥：https://console.volcengine.com/vei/aigateway/tokens-list
     base_url: https://ai-gateway.vei.volces.com/v1
@@ -758,45 +758,39 @@ VLLM:
     temperature: 0.4
     top_p: 0.9
 TTS:
-  # 当前支持的type为edge、doubao，可自行适配
+  # 豆包 TTS 仅保留 huoshan_double_stream 的两个官方火山服务入口：10007 和 10035
   EdgeTTS:
     # 定义TTS API类型
     type: edge
     voice: zh-CN-XiaoxiaoNeural
     output_dir: tmp/
     # language: "中文"  # 指定输出语种,如:中文、英语、日语、韩语等,请根据所选音色支持的语言进行设置,不填则默认为中文
-  DoubaoTTS:
-    # 定义TTS API类型
-    type: doubao
-    # 火山引擎语音合成服务，需要先在火山引擎控制台创建应用并获取appid和access_token
-    # 山引擎语音一定要购买花钱，起步价30元，就有100并发了。如果用免费的只有2个并发，会经常报tts错误
-    # 购买服务后，购买免费的音色后，可能要等半小时左右，才能使用。
-    # 普通音色在这里开通：https://console.volcengine.com/speech/service/8
-    # 湾湾小何音色在这里开通：https://console.volcengine.com/speech/service/10007，开通后将下面的voice设置成zh_female_wanwanxiaohe_moon_bigtts
-    api_url: https://openspeech.bytedance.com/api/v1/tts
-    voice: BV001_streaming
-    output_dir: tmp/
-    authorization: "Bearer;"
-    appid: 你的火山引擎语音合成服务appid
-    access_token: 你的火山引擎语音合成服务access_token
-    cluster: volcano_tts
-    speed_ratio: 1.0
-    volume_ratio: 1.0
-    pitch_ratio: 1.0
-    # language: "中文"  # 指定输出语种,如:中文、英语、日语、韩语等,请根据所选音色支持的语言进行设置,不填则默认为中文
-  #火山tts，支持双向流式tts
-  HuoshanDoubleStreamTTS:
+  # 豆包语音合成大模型，火山控制台服务 10007，仅支持官方双向流式 TTS
+  DoubaoBigTTSStream:
     type: huoshan_double_stream
     # 访问 https://console.volcengine.com/speech/service/10007 开通语音合成大模型，购买音色
-    # 在页面底部获取appid和access_token
     # 资源ID固定为：volc.service_type.10029（大模型语音合成及混音）
-    # 如果是机智云，把接口地址换成wss://bytedance.gizwitsapi.com/api/v3/tts/bidirection
-    # 机智云不需要天填 appid
     ws_url: wss://openspeech.bytedance.com/api/v3/tts/bidirection
-    appid: 你的火山引擎语音合成服务appid
-    access_token: 你的火山引擎语音合成服务access_token
+    # 新版控制台“快捷 API 接入”优先填写 api_key
+    api_key: 你的火山引擎语音合成服务APIKey
+    # 旧版 App ID + Access Token 鉴权保留兼容；已填写 api_key 时可以留空
+    appid:
+    access_token:
     resource_id: volc.service_type.10029
+    # 音色 Voice_type。常用音色示例：
+    #   zh_female_wanwanxiaohe_moon_bigtts   湾湾小何
+    #   zh_male_shaonianzixin_moon_bigtts     少年梓辛/Brayan
+    #   zh_female_shuangkuaisisi_moon_bigtts  爽快思思/Skye
+    #   zh_male_wennuanahu_moon_bigtts        温暖阿虎/Alvin
     speaker: zh_female_wanwanxiaohe_moon_bigtts
+    # 常用音频参数直接改这里；也会自动归并到火山 audio_params / additions。
+    format: pcm              # 输出格式：pcm、wav、mp3（设备实时播报推荐 pcm）
+    speech_rate: 0           # 语速：-50 到 100，0 为默认
+    loudness_rate: 0         # 音量：-50 到 100，0 为默认
+    pitch: 0                 # 音高：-12 到 12，0 为默认
+    # 仅部分音色支持情感；不确定时留空。
+    # emotion: neutral       # neutral、happy、sad、angry、fearful、disgusted、surprised
+    # emotion_scale: 4       # 情感强度：1 到 5
     # 开启WebSocket连接复用，默认复用（注意：复用后设备处于聆听状态时空闲链接会占并发数）
     enable_ws_reuse: True
     # 相关参数文档：https://www.volcengine.com/docs/6561/1329505
@@ -825,19 +819,28 @@ TTS:
     #     - source_speaker: zh_male_ahu_conversation_wvae_bigtts
     #       mix_factor: 0.4
     # language: "中文"  # 指定输出语种,如:中文、英语、日语、韩语等,请根据所选音色支持的语言进行设置,不填则默认为中文
-  #豆包语音合成模型2.0，支持双向流式tts（基于seed-tts-2.0资源）
-  HuoshanDoubleStreamTTSV2:
+  # 豆包语音合成模型 2.0，火山控制台服务 10035，仅支持官方双向流式 TTS
+  DoubaoSeedTTS2Stream:
     type: huoshan_double_stream
     # 访问 https://console.volcengine.com/speech/service/10035 开通语音合成大模型，购买音色
-    # 在页面底部获取appid和access_token
     # 资源ID固定为：seed-tts-2.0（豆包语音合成模型2.0）
-    # 如果是机智云，把接口地址换成wss://bytedance.gizwitsapi.com/api/v3/tts/bidirection
-    # 机智云不需要天填 appid
     ws_url: wss://openspeech.bytedance.com/api/v3/tts/bidirection
-    appid: 你的火山引擎语音合成服务appid
-    access_token: 你的火山引擎语音合成服务access_token
+    # 新版控制台“快捷 API 接入”优先填写 api_key
+    api_key: 你的火山引擎语音合成服务APIKey
+    # 旧版 App ID + Access Token 鉴权保留兼容；已填写 api_key 时可以留空
+    appid:
+    access_token:
     resource_id: seed-tts-2.0
+    # 音色 Voice_type。2.0 音色以火山服务 10035 控制台已开通列表为准。
     speaker: zh_female_xiaohe_uranus_bigtts
+    # 常用音频参数直接改这里；也会自动归并到火山 audio_params / additions。
+    format: pcm              # 输出格式：pcm、wav、mp3（设备实时播报推荐 pcm）
+    speech_rate: 0           # 语速：-50 到 100，0 为默认
+    loudness_rate: 0         # 音量：-50 到 100，0 为默认
+    pitch: 0                 # 音高：-12 到 12，0 为默认
+    # 仅部分音色支持情感；不确定时留空。
+    # emotion: neutral       # neutral、happy、sad、angry、fearful、disgusted、surprised
+    # emotion_scale: 4       # 情感强度：1 到 5
     # 开启WebSocket连接复用，默认复用（注意：复用后设备处于聆听状态时空闲链接会占并发数）
     enable_ws_reuse: True
     # 相关参数文档：https://www.volcengine.com/docs/6561/1329505
@@ -872,21 +875,6 @@ TTS:
     # 以下可不用设置，使用默认设置
     # speed: 1  # 语速：-0.5到2
     # loudness_rate: 0  # 音量：-50到100
-  VolcesAiGatewayTTS:
-    type: openai
-    # 火山引擎 - 边缘大模型网关
-    # 先开通服务，打开以下网址，创建网关访问密钥，搜索并勾选 Doubao-语音合成 ，开通
-    # 如果需要使用边缘大模型网关提供的 LLM，一并勾选 Doubao-pro-32k-functioncall ，另见 LLM.VolcesAiGatewayLLM 配置
-    # https://console.volcengine.com/vei/aigateway/
-    # 开通后，进入这里获取密钥：https://console.volcengine.com/vei/aigateway/tokens-list
-    api_key: 你的网关访问密钥
-    api_url: https://ai-gateway.vei.volces.com/v1/audio/speech
-    model: doubao-tts
-    # 音色列表见 https://www.volcengine.com/docs/6561/1257544
-    voice: zh_male_shaonianzixin_moon_bigtts
-    speed: 1
-    output_dir: tmp/
-    # language: "中文"  # 指定输出语种,如:中文、英语、日语、韩语等,请根据所选音色支持的语言进行设置,不填则默认为中文
   FishSpeech:
     # 参照教程：https://github.com/xinnan-tech/xiaozhi-esp32-server/blob/main/docs/fish-speech-integration.md
     type: fishspeech
@@ -1047,20 +1035,6 @@ TTS:
     # format: wav  # 音频格式：pcm、wav、mp3
     # volume: 0  # 音量：-10到10
     # speech_rate: 0  # 语速：-2到6
-  TTS302AI:
-    # 302AI语音合成服务，需要先在302平台创建账户充值，并获取密钥信息
-    # 添加 302.ai TTS 配置
-    # token申请地址：https://dash.302.ai/
-    # 获取api_keyn路径：https://dash.302.ai/apis/list
-    # 价格，$35/百万字符。火山原版¥450元/百万字符
-    type: doubao
-    api_url: https://api.302ai.cn/doubao/tts_hd
-    authorization: "Bearer "
-    # 湾湾小何音色
-    voice: "zh_female_wanwanxiaohe_moon_bigtts"
-    output_dir: tmp/
-    access_token: "你的302API密钥"
-    # language: "中文"  # 指定输出语种,如:中文、英语、日语、韩语等,请根据所选音色支持的语言进行设置,不填则默认为中文
   OpenAITTS:
     # openai官方文本转语音服务，可支持全球大多数语种
     type: openai

@@ -226,6 +226,17 @@ Java 后台负责选择和保存这些模块，Python 在设备连接时按配�
 | 设备端 IoT | 设备上报的属性、方法 | 设备 hello / descriptor | Python 发设备控制消息 |
 | 设备端 MCP | `self.get_device_status`、`self.screen.set_brightness` | 设备声明 `features.mcp=true` 后 `tools/list` | Python 发 `tools/call` 给设备 |
 
+服务器音乐播放是内置插件，但它不是普通“文本回复”。`play_music` 的调用应由主 LLM function_call 或 `intent_llm` 根据工具描述和 `<music_library>` 曲库上下文决定；服务端只对“我不听了、别放了、停止播放”等停止语义做确定性拦截。播放执行时，选曲提示语必须作为普通 TTS 文本播报，再把本地音乐文件作为 `ContentType.FILE` 接入同一播放边界：
+
+```text
+FIRST/ACTION
+  -> MIDDLE/TEXT  选曲提示语，例如“即将为您播放 孙燕姿 - 我怀念的”
+  -> MIDDLE/FILE  本地 mp3/wav/p3 音乐文件
+  -> LAST/ACTION
+```
+
+这个边界是设备真实出声的关键。火山双流、阿里云流式、讯飞流式、Minimax 等 TTS provider 会先暂存文件音频，只有收到 `LAST` 才能 flush 到 WebSocket。管理后台聊天记录里的 `play_music({...})` 和 `{"result": "正在为您播放音乐"}` 只是工具调用审计记录，不代表文件音频已经被设备播放。
+
 统一工具入口：
 
 ```text
