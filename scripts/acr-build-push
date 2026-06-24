@@ -12,11 +12,11 @@ MYSQL_IMAGE_REPOSITORY="${MYSQL_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/m
 REDIS_IMAGE_REPOSITORY="${REDIS_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/redis}"
 PLATFORMS="${PLATFORMS:-linux/amd64}"
 PUSH="${PUSH:-true}"
-BUILD_BASE="${BUILD_BASE:-true}"
+BUILD_BASE="${BUILD_BASE:-auto}"
 BUILD_ENGINE="${BUILD_ENGINE:-docker}"
 PYTHON_BASE_IMAGE="${PYTHON_BASE_IMAGE:-python:3.10-slim-bookworm}"
 SERVER_BASE_IMAGE="${SERVER_BASE_IMAGE:-}"
-MIRROR_RUNTIME_IMAGES="${MIRROR_RUNTIME_IMAGES:-true}"
+MIRROR_RUNTIME_IMAGES="${MIRROR_RUNTIME_IMAGES:-auto}"
 MYSQL_SOURCE_IMAGE="${MYSQL_SOURCE_IMAGE:-mysql:8.4}"
 REDIS_SOURCE_IMAGE="${REDIS_SOURCE_IMAGE:-redis:8.0}"
 VERBOSE="${VERBOSE:-false}"
@@ -57,6 +57,16 @@ if [[ "$PARALLEL_IMAGE_BUILDS" != "true" && "$PARALLEL_IMAGE_BUILDS" != "false" 
   exit 1
 fi
 
+if [[ "$BUILD_BASE" != "true" && "$BUILD_BASE" != "false" && "$BUILD_BASE" != "auto" ]]; then
+  echo "BUILD_BASE must be true, false, or auto" >&2
+  exit 1
+fi
+
+if [[ "$MIRROR_RUNTIME_IMAGES" != "true" && "$MIRROR_RUNTIME_IMAGES" != "false" && "$MIRROR_RUNTIME_IMAGES" != "auto" ]]; then
+  echo "MIRROR_RUNTIME_IMAGES must be true, false, or auto" >&2
+  exit 1
+fi
+
 cat <<EOF
 Building and pushing xiaozhi images to Aliyun ACR.
 
@@ -79,6 +89,7 @@ Default build engine:
 
 Build options:
   build_base=$BUILD_BASE server_base_image=${SERVER_BASE_IMAGE:-auto}
+  mirror_runtime_images=$MIRROR_RUNTIME_IMAGES
 
 Docker output:
   quiet=$XIAOZHI_DOCKER_QUIET verbose=$VERBOSE
@@ -100,6 +111,30 @@ mirror_runtime_images() {
     VERBOSE="$VERBOSE" \
     XIAOZHI_DOCKER_QUIET="$XIAOZHI_DOCKER_QUIET" \
     "$ROOT_DIR/scripts/acr-mirror-runtime-images"
+}
+
+should_mirror_runtime_images() {
+  [[ "$PUSH" == "true" ]] || return 1
+
+  if [[ "$MIRROR_RUNTIME_IMAGES" == "false" ]]; then
+    return 1
+  fi
+
+  if [[ "$MIRROR_RUNTIME_IMAGES" == "true" ]]; then
+    return 0
+  fi
+
+  local missing=false
+  for image in "$MYSQL_IMAGE_REPOSITORY:$MYSQL_TARGET_TAG" "$REDIS_IMAGE_REPOSITORY:$REDIS_TARGET_TAG"; do
+    if docker manifest inspect "$image" >/dev/null 2>&1; then
+      echo "Runtime image already exists in ACR: $image"
+    else
+      echo "Runtime image missing in ACR, will mirror: $image"
+      missing=true
+    fi
+  done
+
+  [[ "$missing" == "true" ]]
 }
 
 build_business_images() {
@@ -132,7 +167,12 @@ wait_for_release_step() {
   return 1
 }
 
-if [[ "$PUSH" == "true" && "$MIRROR_RUNTIME_IMAGES" == "true" && "$PARALLEL_RELEASE_STEPS" == "true" ]]; then
+RUNTIME_MIRROR_NEEDED=false
+if should_mirror_runtime_images; then
+  RUNTIME_MIRROR_NEEDED=true
+fi
+
+if [[ "$RUNTIME_MIRROR_NEEDED" == "true" && "$PARALLEL_RELEASE_STEPS" == "true" ]]; then
   mirror_runtime_images &
   MIRROR_PID=$!
   build_business_images &
@@ -144,7 +184,7 @@ if [[ "$PUSH" == "true" && "$MIRROR_RUNTIME_IMAGES" == "true" && "$PARALLEL_RELE
   exit "$RELEASE_STATUS"
 fi
 
-if [[ "$PUSH" == "true" && "$MIRROR_RUNTIME_IMAGES" == "true" ]]; then
+if [[ "$RUNTIME_MIRROR_NEEDED" == "true" ]]; then
   mirror_runtime_images
 fi
 

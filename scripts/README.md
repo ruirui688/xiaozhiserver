@@ -27,14 +27,13 @@ scripts/acr-login
 scripts/acr-build-push
 ```
 
-`scripts/acr-build-push` 会同时发布业务镜像和运行依赖镜像：
+`scripts/acr-build-push` 是日常一键发布入口。它默认自动复用已有基础镜像和运行时镜像，只在缓存不存在时补齐：
 
 ```text
 xiaozhi-server:latest
 xiaozhi-web:latest
-xiaozhi-server-base:latest
-mysql:8.4
-redis:8.0
+xiaozhi-server-base:latest / xiaozhi-server-base:base-<依赖哈希>
+mysql:8.4 / redis:8.0
 ```
 
 默认发布命令使用单平台 Docker 构建并推送 `linux/amd64` 镜像，避免 buildx 容器走不可用的 Docker Hub 镜像加速器。需要多架构镜像时再显式启用 buildx：
@@ -49,19 +48,31 @@ BUILD_ENGINE=buildx PLATFORMS=linux/amd64,linux/arm64 scripts/acr-build-push
 VERBOSE=true scripts/acr-build-push
 ```
 
-发布脚本默认并行执行互不依赖的步骤：运行时镜像同步与业务镜像构建可并行，`xiaozhi-server` 与 `xiaozhi-web` 也可并行。`xiaozhi-server` 只有在 `BUILD_BASE=true` 时会等待 `xiaozhi-server-base` 先完成。需要降低本机负载时可关闭并行：
+发布脚本默认并行执行互不依赖的步骤：运行时镜像同步与业务镜像构建可并行，`xiaozhi-server` 与 `xiaozhi-web` 也可并行。`xiaozhi-server` 只有在确实需要构建 `xiaozhi-server-base` 时才会等待基础镜像先完成。需要降低本机负载时可关闭并行：
 
 ```bash
 PARALLEL_RELEASE_STEPS=false PARALLEL_IMAGE_BUILDS=false scripts/acr-build-push
 ```
 
-只改 Java/Web 管理端且没有改 Python 依赖或 `Dockerfile-server-base` 时，可复用已有 server base，跳过最慢的 Python 依赖层：
+默认值已经适合日常发布：
+
+```bash
+BUILD_BASE=auto MIRROR_RUNTIME_IMAGES=auto scripts/acr-build-push
+```
+
+只改 Java/Web 管理端且明确不需要检查基础镜像或运行时镜像时，可显式跳过：
 
 ```bash
 BUILD_BASE=false \
 SERVER_BASE_IMAGE=crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-server-base:latest \
 MIRROR_RUNTIME_IMAGES=false \
 scripts/acr-build-push
+```
+
+修改了 `Dockerfile-server-base`、`main/xiaozhi-server/requirements-docker.txt` 或 Python 系统依赖时，强制重建基础镜像：
+
+```bash
+BUILD_BASE=true scripts/acr-build-push
 ```
 
 生产服务器拉取镜像部署：

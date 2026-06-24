@@ -24,10 +24,11 @@ crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/mysql:8.
 crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/redis:8.0
 ```
 
-构建流程内部还会维护一个基础镜像：
+构建流程内部还会维护基础镜像：
 
 ```text
 crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-server-base:latest
+crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-server-base:base-<依赖哈希>
 ```
 
 `xiaozhi-server-base` 只用于加速构建，不在生产服务器直接运行。
@@ -71,7 +72,7 @@ yihuixiaozhi/mysql
 yihuixiaozhi/redis
 ```
 
-`mysql:8.4` 和 `redis:8.0` 会被同步到 ACR，生产服务器不需要访问 Docker Hub。
+`mysql:8.4` 和 `redis:8.0` 会被同步到 ACR，生产服务器不需要访问 Docker Hub。发布脚本默认 `MIRROR_RUNTIME_IMAGES=auto`，如果 ACR 中已存在这两个运行时镜像，会自动跳过同步。
 
 `scripts/acr-build-push` 默认使用单平台 Docker 构建，避免 buildx 容器读取不可用的 Docker Hub 镜像加速器。
 
@@ -82,19 +83,33 @@ yihuixiaozhi/redis
 xiaozhi-server  与  xiaozhi-web/api  可并行
 ```
 
-`xiaozhi-server` 只有在 `BUILD_BASE=true` 时会等待 `xiaozhi-server-base` 先完成。需要降低本机负载或排查并发构建问题时，可以关闭并行：
+发布脚本默认 `BUILD_BASE=auto`。它会优先复用 `xiaozhi-server-base:base-<依赖哈希>`，其次复用 `xiaozhi-server-base:latest`，只有缓存不存在时才重建 Python 基础镜像。`xiaozhi-server` 只有在确实需要构建 `xiaozhi-server-base` 时才会等待基础镜像先完成。
+
+需要降低本机负载或排查并发构建问题时，可以关闭并行：
 
 ```bash
 PARALLEL_RELEASE_STEPS=false PARALLEL_IMAGE_BUILDS=false scripts/acr-build-push
 ```
 
-只改 Java 管理 API 或 Web 管理后台，且没有改 `Dockerfile-server-base`、`main/xiaozhi-server/requirements-docker.txt` 或 Python 系统依赖时，可以复用已有 `xiaozhi-server-base:latest`，跳过最慢的 Python 依赖层：
+默认日常发布命令等价于：
+
+```bash
+BUILD_BASE=auto MIRROR_RUNTIME_IMAGES=auto scripts/acr-build-push
+```
+
+只改 Java 管理 API 或 Web 管理后台，且明确不需要检查基础镜像或运行时镜像时，可以显式跳过：
 
 ```bash
 BUILD_BASE=false \
 SERVER_BASE_IMAGE=crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-server-base:latest \
 MIRROR_RUNTIME_IMAGES=false \
 scripts/acr-build-push
+```
+
+修改了 `Dockerfile-server-base`、`main/xiaozhi-server/requirements-docker.txt` 或 Python 系统依赖时，强制重建基础镜像：
+
+```bash
+BUILD_BASE=true scripts/acr-build-push
 ```
 
 发布脚本默认隐藏 Docker 逐层构建和推送明细，只输出步骤摘要。完整日志会写入 `/tmp/xiaozhi-*` 临时目录。需要排查构建细节时使用：

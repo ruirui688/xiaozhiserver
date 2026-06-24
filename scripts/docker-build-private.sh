@@ -16,7 +16,7 @@ case "$(uname -m)" in
 esac
 PLATFORMS="${PLATFORMS:-$DEFAULT_PLATFORM}"
 PUSH="${PUSH:-false}"
-BUILD_BASE="${BUILD_BASE:-true}"
+BUILD_BASE="${BUILD_BASE:-auto}"
 BUILD_ENGINE="${BUILD_ENGINE:-buildx}"
 BUILDER_NAME="${BUILDER_NAME:-xiaozhi-builder}"
 PYTHON_BASE_IMAGE="${PYTHON_BASE_IMAGE:-python:3.10-slim}"
@@ -82,6 +82,11 @@ fi
 
 if [[ "$PUSH" != "true" && "$PUSH" != "false" ]]; then
   echo "PUSH must be true or false" >&2
+  exit 1
+fi
+
+if [[ "$BUILD_BASE" != "true" && "$BUILD_BASE" != "false" && "$BUILD_BASE" != "auto" ]]; then
+  echo "BUILD_BASE must be true, false, or auto" >&2
   exit 1
 fi
 
@@ -201,6 +206,25 @@ push_image() {
   fi
 }
 
+hash_server_base_inputs() {
+  {
+    printf 'PYTHON_BASE_IMAGE=%s\n' "$PYTHON_BASE_IMAGE"
+    printf 'DEBIAN_MIRROR=%s\n' "$DEBIAN_MIRROR"
+    printf 'DEBIAN_SECURITY_MIRROR=%s\n' "$DEBIAN_SECURITY_MIRROR"
+    printf 'SERVER_REQUIREMENTS=%s\n' "$SERVER_REQUIREMENTS"
+    sha256sum "$ROOT_DIR/Dockerfile-server-base" "$ROOT_DIR/$SERVER_REQUIREMENTS"
+  } | sha256sum | cut -c1-12
+}
+
+SERVER_BASE_CACHE_TAG="${SERVER_BASE_CACHE_TAG:-base-$(hash_server_base_inputs)}"
+SERVER_BASE_CACHE_IMAGE="$SERVER_BASE_IMAGE_REPOSITORY:$SERVER_BASE_CACHE_TAG"
+
+image_available_locally_or_remote() {
+  local image="$1"
+  docker image inspect "$image" >/dev/null 2>&1 && return 0
+  docker pull --quiet "$image" >/dev/null 2>&1
+}
+
 if [[ "$PRINT_BUILD_CONFIG" != "false" ]]; then
   echo "Image repositories:"
   echo "  server:      $SERVER_IMAGE_REPOSITORY"
@@ -217,6 +241,7 @@ if [[ "$PRINT_BUILD_CONFIG" != "false" ]]; then
   echo "Debian mirror: $DEBIAN_MIRROR"
   echo "Debian security mirror: $DEBIAN_SECURITY_MIRROR"
   echo "Server requirements: $SERVER_REQUIREMENTS"
+  echo "Server base cache image: $SERVER_BASE_CACHE_IMAGE"
   echo "Parallel image builds: $PARALLEL_IMAGE_BUILDS"
   if [[ -n "$BUILDKIT_REGISTRY_MIRROR" ]]; then
     echo "BuildKit registry mirror:"
@@ -241,19 +266,36 @@ fi
 build_server_pipeline() {
   local server_base_image="${SERVER_BASE_IMAGE:-}"
 
-  if [[ "$BUILD_BASE" == "true" ]]; then
+  if [[ -n "$server_base_image" ]]; then
+    echo "Use explicit server base image: $server_base_image"
+  elif [[ "$BUILD_BASE" == "false" ]]; then
+    server_base_image="$SERVER_BASE_IMAGE_REPOSITORY:latest"
+    echo "Use latest server base image: $server_base_image"
+  elif [[ "$BUILD_BASE" == "auto" ]] && image_available_locally_or_remote "$SERVER_BASE_CACHE_IMAGE"; then
+    server_base_image="$SERVER_BASE_CACHE_IMAGE"
+    echo "Use cached server base image: $server_base_image"
+  elif [[ "$BUILD_BASE" == "auto" ]] && image_available_locally_or_remote "$SERVER_BASE_IMAGE_REPOSITORY:latest"; then
+    echo "Use latest server base image as cache seed: $SERVER_BASE_IMAGE_REPOSITORY:latest"
+    if [[ "$BUILD_ENGINE" == "docker" ]]; then
+      docker tag "$SERVER_BASE_IMAGE_REPOSITORY:latest" "$SERVER_BASE_CACHE_IMAGE"
+      push_image "$SERVER_BASE_CACHE_IMAGE"
+      server_base_image="$SERVER_BASE_CACHE_IMAGE"
+    else
+      server_base_image="$SERVER_BASE_IMAGE_REPOSITORY:latest"
+    fi
+  else
     build_image "Build server base image" Dockerfile-server-base \
       --build-arg "PYTHON_BASE_IMAGE=$PYTHON_BASE_IMAGE" \
       --build-arg "DEBIAN_MIRROR=$DEBIAN_MIRROR" \
       --build-arg "DEBIAN_SECURITY_MIRROR=$DEBIAN_SECURITY_MIRROR" \
       --build-arg "SERVER_REQUIREMENTS=$SERVER_REQUIREMENTS" \
       --tag "$SERVER_BASE_IMAGE_REPOSITORY:latest" \
-      --tag "$SERVER_BASE_IMAGE_REPOSITORY:$VERSION"
+      --tag "$SERVER_BASE_IMAGE_REPOSITORY:$VERSION" \
+      --tag "$SERVER_BASE_CACHE_IMAGE"
     push_image "$SERVER_BASE_IMAGE_REPOSITORY:latest"
     push_image "$SERVER_BASE_IMAGE_REPOSITORY:$VERSION"
-    server_base_image="$SERVER_BASE_IMAGE_REPOSITORY:$VERSION"
-  elif [[ -z "$server_base_image" ]]; then
-    server_base_image="$SERVER_BASE_IMAGE_REPOSITORY:latest"
+    push_image "$SERVER_BASE_CACHE_IMAGE"
+    server_base_image="$SERVER_BASE_CACHE_IMAGE"
   fi
 
   build_image "Build xiaozhi-server image" Dockerfile-server \
