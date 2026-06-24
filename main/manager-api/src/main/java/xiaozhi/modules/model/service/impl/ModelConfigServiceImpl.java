@@ -125,6 +125,10 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             "base_url", "api_url", "url", "server_url", "ws_url", "host");
     private static final String HUOSHAN_DOUBLE_STREAM_TYPE = "huoshan_double_stream";
     private static final String HUOSHAN_DOUBLE_STREAM_WS_URL = "wss://openspeech.bytedance.com/api/v3/tts/bidirection";
+    private static final String DOUBAO_BIGTTS_RESOURCE_ID = "volc.service_type.10029";
+    private static final String DOUBAO_BIGTTS_DEFAULT_SPEAKER = "zh_male_shaonianzixin_moon_bigtts";
+    private static final String DOUBAO_SEED_TTS_2_RESOURCE_ID = "seed-tts-2.0";
+    private static final String DOUBAO_SEED_TTS_2_DEFAULT_SPEAKER = "zh_female_xiaohe_uranus_bigtts";
 
     @Override
     public List<ModelBasicInfoDTO> getModelCodeList(String modelType, String modelName) {
@@ -590,14 +594,21 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         setIfNotBlank(config, "resource_id", upstreamModel);
         mergeConfigMap(config, body.getParams());
         mergeConfigMap(config, body.getSecrets());
-        normalizeHuoshanDoubleStreamTtsConfig(config);
+        normalizeHuoshanDoubleStreamTtsConfig(config, body.getTemplateCode(), provideCode);
         return config;
     }
 
-    private void normalizeHuoshanDoubleStreamTtsConfig(JSONObject config) {
-        if (config == null || !HUOSHAN_DOUBLE_STREAM_TYPE.equalsIgnoreCase(config.getStr("type"))) {
+    private void normalizeHuoshanDoubleStreamTtsConfig(ModelConfigEntity model, JSONObject config) {
+        String templateCode = model == null ? "" : model.getTemplateCode();
+        String adapterCode = model == null ? "" : model.getAdapterCode();
+        normalizeHuoshanDoubleStreamTtsConfig(config, templateCode, adapterCode);
+    }
+
+    private void normalizeHuoshanDoubleStreamTtsConfig(JSONObject config, String templateCode, String adapterCode) {
+        if (config == null || !isHuoshanDoubleStreamTtsConfig(config, templateCode, adapterCode)) {
             return;
         }
+        config.set("type", HUOSHAN_DOUBLE_STREAM_TYPE);
         config.set("ws_url", HUOSHAN_DOUBLE_STREAM_WS_URL);
         for (String key : List.of("base_url", "api_url", "url", "server_url", "host", "endpoint_url")) {
             String value = config.getStr(key);
@@ -605,6 +616,41 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                 config.remove(key);
             }
         }
+        if (!hasUsableHuoshanTtsField(config.getStr("resource_id"))) {
+            config.set("resource_id", resolveDefaultHuoshanTtsResourceId(templateCode));
+        }
+        if (!hasUsableHuoshanTtsField(config.getStr("speaker"))) {
+            config.set("speaker", resolveDefaultHuoshanTtsSpeaker(templateCode));
+        }
+    }
+
+    private boolean hasUsableHuoshanTtsField(String value) {
+        if (!hasUsableTextValue(value)) {
+            return false;
+        }
+        return !"BV001_streaming".equalsIgnoreCase(value)
+                && !"BV700_streaming".equalsIgnoreCase(value);
+    }
+
+    private boolean isHuoshanDoubleStreamTtsConfig(JSONObject config, String templateCode, String adapterCode) {
+        return HUOSHAN_DOUBLE_STREAM_TYPE.equalsIgnoreCase(StringUtils.defaultString(adapterCode))
+                || HUOSHAN_DOUBLE_STREAM_TYPE.equalsIgnoreCase(config.getStr("type"))
+                || "TTS_DOUBAO_BIGTTS_STREAM".equalsIgnoreCase(StringUtils.defaultString(templateCode))
+                || "TTS_DOUBAO_SEED_TTS_2_STREAM".equalsIgnoreCase(StringUtils.defaultString(templateCode));
+    }
+
+    private String resolveDefaultHuoshanTtsResourceId(String templateCode) {
+        if ("TTS_DOUBAO_SEED_TTS_2_STREAM".equalsIgnoreCase(StringUtils.defaultString(templateCode))) {
+            return DOUBAO_SEED_TTS_2_RESOURCE_ID;
+        }
+        return DOUBAO_BIGTTS_RESOURCE_ID;
+    }
+
+    private String resolveDefaultHuoshanTtsSpeaker(String templateCode) {
+        if ("TTS_DOUBAO_SEED_TTS_2_STREAM".equalsIgnoreCase(StringUtils.defaultString(templateCode))) {
+            return DOUBAO_SEED_TTS_2_DEFAULT_SPEAKER;
+        }
+        return DOUBAO_BIGTTS_DEFAULT_SPEAKER;
     }
 
     private boolean isLegacyHuoshanTtsEndpoint(String value) {
@@ -1030,7 +1076,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         }
 
         JSONObject configJson = modelConfig.getConfigJson();
-        normalizeHuoshanDoubleStreamTtsConfig(configJson);
+        normalizeHuoshanDoubleStreamTtsConfig(modelConfig, configJson);
         String type = StringUtils.lowerCase(configJson.getStr("type"));
         if (StringUtils.isBlank(type)) {
             result.setSuccess(false);
