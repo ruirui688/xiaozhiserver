@@ -99,64 +99,44 @@
                 min-width="250"
               >
                 <template slot-scope="scope">
-                  <el-tooltip
-                    :content="getCatalogTooltip(scope.row)"
-                    placement="top"
-                    effect="light"
-                  >
-                    <div class="catalog-cell">
-                      <div class="catalog-main">
-                        <span class="catalog-vendor">{{ getVendorName(scope.row) }}</span>
-                        <el-tag
-                          v-if="shouldShowCatalogStatusTag(scope.row)"
-                          size="mini"
-                          :type="getCatalogStatusTagType(scope.row)"
-                          class="catalog-status-tag"
-                        >
-                          {{ getCatalogStatusText(scope.row) }}
-                        </el-tag>
-                      </div>
-                      <div v-if="getProductName(scope.row)" class="catalog-sub">
-                        {{ getProductName(scope.row) }}
-                      </div>
+                  <div class="catalog-cell">
+                    <div class="catalog-main">
+                      <span class="catalog-vendor">{{ getVendorName(scope.row) }}</span>
+                      <el-tag
+                        v-if="shouldShowCatalogStatusTag(scope.row)"
+                        size="mini"
+                        :type="getCatalogStatusTagType(scope.row)"
+                        class="catalog-status-tag"
+                      >
+                        {{ getCatalogStatusText(scope.row) }}
+                      </el-tag>
                     </div>
-                  </el-tooltip>
+                    <div v-if="getProductName(scope.row)" class="catalog-sub">
+                      {{ getProductName(scope.row) }}
+                    </div>
+                  </div>
                 </template>
               </el-table-column>
               <el-table-column :label="$t('modelConfig.isEnabled')" align="center" width="88">
                 <template slot-scope="scope">
-                  <el-tooltip
-                    :disabled="canToggleEnabled(scope.row)"
-                    :content="getEnableDisabledReason(scope.row)"
-                    placement="top"
-                    effect="light"
-                  >
-                    <el-switch
-                      v-model="scope.row.isEnabled"
-                      class="custom-switch"
-                      :active-value="1"
-                      :inactive-value="0"
-                      :disabled="!canToggleEnabled(scope.row)"
-                      @change="handleStatusChange(scope.row, $event)"
-                    />
-                  </el-tooltip>
+                  <el-switch
+                    v-model="scope.row.isEnabled"
+                    class="custom-switch"
+                    :active-value="1"
+                    :inactive-value="0"
+                    :disabled="!canToggleEnabled(scope.row)"
+                    @change="handleStatusChange(scope.row, $event)"
+                  />
                 </template>
               </el-table-column>
               <el-table-column :label="$t('modelConfig.testStatus')" align="center" width="92">
                 <template slot-scope="scope">
-                  <el-tooltip
-                    :disabled="!scope.row.testMessage"
-                    :content="scope.row.testMessage"
-                    placement="top"
-                    effect="light"
+                  <el-tag
+                    size="mini"
+                    :type="getTestStatusTagType(scope.row.testStatus)"
                   >
-                    <el-tag
-                      size="mini"
-                      :type="getTestStatusTagType(scope.row.testStatus)"
-                    >
-                      {{ getTestStatusText(scope.row.testStatus) }}
-                    </el-tag>
-                  </el-tooltip>
+                    {{ getTestStatusText(scope.row.testStatus) }}
+                  </el-tag>
                 </template>
               </el-table-column>
               <el-table-column
@@ -183,49 +163,41 @@
               >
                 <template slot-scope="scope">
                   <div class="row-actions">
-                    <el-tooltip :content="getTestActionTooltip(scope.row)" placement="top">
-                      <el-button
-                        type="text"
-                        size="mini"
-                        :loading="testingModelId === scope.row.id"
-                        :disabled="!canRunModelTest(scope.row)"
-                        @click="testModel(scope.row)"
-                        class="table-action-btn edit-btn"
-                      >
-                        <i class="el-icon-video-play"></i>
-                      </el-button>
-                    </el-tooltip>
-                    <el-tooltip :content="$t('modelConfig.edit')" placement="top">
-                      <el-button
-                        type="text"
-                        size="mini"
-                        @click="editModel(scope.row)"
-                        class="table-action-btn edit-btn"
-                      >
-                        <i class="el-icon-edit"></i>
-                      </el-button>
-                    </el-tooltip>
-                    <el-tooltip :content="getDuplicateActionTooltip(scope.row)" placement="top">
-                      <el-button
-                        type="text"
-                        size="mini"
-                        :disabled="!canDuplicateModel(scope.row)"
-                        @click="duplicateModel(scope.row)"
-                        class="table-action-btn edit-btn"
-                      >
-                        <i class="el-icon-document-copy"></i>
-                      </el-button>
-                    </el-tooltip>
-                    <el-tooltip :content="$t('modelConfig.delete')" placement="top">
-                      <el-button
-                        type="text"
-                        size="mini"
-                        @click="deleteModel(scope.row)"
-                        class="table-action-btn delete-btn"
-                      >
-                        <i class="el-icon-delete"></i>
-                      </el-button>
-                    </el-tooltip>
+                    <el-button
+                      type="text"
+                      size="mini"
+                      :loading="testingModelId === scope.row.id"
+                      :disabled="!canRunModelTest(scope.row)"
+                      @click="testModel(scope.row)"
+                      class="table-action-btn edit-btn"
+                    >
+                      <i class="el-icon-video-play"></i>
+                    </el-button>
+                    <el-button
+                      type="text"
+                      size="mini"
+                      @click="editModel(scope.row)"
+                      class="table-action-btn edit-btn"
+                    >
+                      <i class="el-icon-edit"></i>
+                    </el-button>
+                    <el-button
+                      type="text"
+                      size="mini"
+                      :disabled="!canDuplicateModel(scope.row)"
+                      @click="duplicateModel(scope.row)"
+                      class="table-action-btn edit-btn"
+                    >
+                      <i class="el-icon-document-copy"></i>
+                    </el-button>
+                    <el-button
+                      type="text"
+                      size="mini"
+                      @click="deleteModel(scope.row)"
+                      class="table-action-btn delete-btn"
+                    >
+                      <i class="el-icon-delete"></i>
+                    </el-button>
                   </div>
                 </template>
               </el-table-column>
@@ -664,12 +636,6 @@ export default {
     canToggleEnabled(model) {
       return model.isEnabled === 1 || (this.isModelSupportedForActions(model) && model.testStatus === 1);
     },
-    getEnableDisabledReason(model) {
-      if (!this.isModelSupportedForActions(model)) {
-        return this.$t("modelConfig.unsupportedCannotEnable");
-      }
-      return this.$t("modelConfig.enableRequiresTestPassed");
-    },
     canRunModelTest(model) {
       return !this.testingModelId && this.isModelSupportedForActions(model);
     },
@@ -678,18 +644,6 @@ export default {
     },
     canSelectForPerformance(model) {
       return this.isModelSupportedForActions(model);
-    },
-    getTestActionTooltip(model) {
-      if (!this.isModelSupportedForActions(model)) {
-        return this.$t("modelConfig.unsupportedCannotTest");
-      }
-      return this.$t("modelConfig.test");
-    },
-    getDuplicateActionTooltip(model) {
-      if (!this.canDuplicateModel(model)) {
-        return this.$t("modelConfig.unsupportedViewOnly");
-      }
-      return this.$t("modelConfig.duplicate");
     },
     normalizeStatus(value) {
       return String(value || "").toUpperCase();
@@ -824,17 +778,6 @@ export default {
       const access = (model && model.accessModeLabel) || "";
       const protocol = (model && (model.protocolLabel || model.protocol)) || "";
       return [access, protocol, this.getAdapterName(model)].filter(Boolean).join(" · ");
-    },
-    getCatalogTooltip(model) {
-      return [
-        this.getVendorProduct(model),
-        this.getAccessSummary(model),
-        model && model.recommendedFor ? `推荐：${model.recommendedFor}` : "",
-        model && model.avoidWhen ? `限制：${model.avoidWhen}` : "",
-        model && model.testContract ? `测试要求：${model.testContract}` : "",
-        model && model.requiredFields && model.requiredFields.length ? `必填字段：${model.requiredFields.join("、")}` : "",
-        model && model.sourceCheckedAt ? `来源核验：${model.sourceCheckedAt}` : "",
-      ].filter(Boolean).join("\n");
     },
     getCatalogStatusText(model) {
       if (!model || !model.supportedStatus) {

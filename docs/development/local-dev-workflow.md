@@ -66,6 +66,45 @@ XIAOZHI_SERVER_PYTHON=/path/to/conda/envs/xiaozhi-esp32-server/bin/python script
 
 如果 Conda 环境不存在，`scripts/dev doctor` 和 `scripts/dev start server` 会失败并提示初始化环境。不要为了绕过失败而退回系统 Python；那类错误通常只是依赖环境不一致，不能代表项目真实运行状态。
 
+### Conda 测试环境异常排查
+
+如果 `conda run -n xiaozhi-esp32-server python -m pytest ...` 在导入阶段报 `ValueError: bad marshal data`，或 `pytest` 入口脚本指向旧路径，例如 `/root/miniconda3/...`，先按环境问题处理，不要改测试代码或退回系统 Python。
+
+推荐检查顺序：
+
+```bash
+cd main/xiaozhi-server
+conda run -n xiaozhi-esp32-server python -c "import sys; print(sys.executable); print(sys.version)"
+sed -n '1,4p' ~/miniconda3/envs/xiaozhi-esp32-server/bin/pytest
+conda run -n xiaozhi-esp32-server python -m pytest --version
+conda run -n xiaozhi-esp32-server pytest --version
+```
+
+如果确认是 Conda 环境内 `.pyc` 损坏，可以删除损坏的字节码缓存，让解释器按需重建。不要删除源码文件或仓库测试文件。
+
+```bash
+conda run -n xiaozhi-esp32-server python -c "from pathlib import Path; import marshal; base=Path.home()/'miniconda3/envs/xiaozhi-esp32-server/lib/python3.10/site-packages'; bad=[]
+for path in base.rglob('*.pyc'):
+    try:
+        f=path.open('rb'); f.read(16); marshal.load(f); f.close()
+    except Exception as exc:
+        bad.append(path)
+for path in bad:
+    print(path); path.unlink()
+print(f'removed={len(bad)}')"
+```
+
+如果清理 `.pyc` 后仍在 `import ssl`、`import _hashlib`、`python -m pip show pytest` 或 `python -m pytest` 时段错误，优先检查 Conda 环境内 OpenSSL 是否损坏或版本不一致：
+
+```bash
+conda run -n xiaozhi-esp32-server env PYTHONFAULTHANDLER=1 python -X faulthandler -c "import ssl, _hashlib; print(ssl.OPENSSL_VERSION)"
+conda list -n xiaozhi-esp32-server | rg '^(openssl|python|ca-certificates|certifi)\s'
+sha256sum ~/miniconda3/envs/xiaozhi-esp32-server/lib/libssl.so.3 \
+  ~/miniconda3/envs/xiaozhi-esp32-server/lib/libcrypto.so.3
+```
+
+网络可用时可以用 Conda 重新安装 `openssl`。如果远程源不可用但本机 `~/miniconda3/pkgs/` 里有匹配的 `openssl-*.conda` 缓存包，可以离线重装对应包修复运行库；修复后必须重新验证 `import ssl`、`pytest --version` 和目标测试。
+
 ## 服务端口
 
 | 服务 | 默认地址 |

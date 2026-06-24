@@ -18,6 +18,8 @@ public interface MusicLibraryService {
 
     MusicFileDTO updateDescription(String path, String description) throws IOException;
 
+    MusicFileDTO updateMetadata(String path, String description, List<String> aliases) throws IOException;
+
     void delete(String path) throws IOException;
 
     Path resolveExistingFile(String path) throws IOException;

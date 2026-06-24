@@ -226,9 +226,6 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             }
         }
         if ("TTS".equalsIgnoreCase(modelType) && "openai".equalsIgnoreCase(providerCode)) {
-            if (haystack.contains("volces") || haystack.contains("ai-gateway")) {
-                return find("TTS_VOLCES_AI_GATEWAY_OPENAI");
-            }
             return find("TTS_OPENAI_SPEECH");
         }
         if ("ASR".equalsIgnoreCase(modelType) && "openai".equalsIgnoreCase(providerCode)) {
@@ -781,17 +778,17 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         items.add(item("ASR_DOUBAO_BIGASR_STREAM", "ASR", "doubao_stream", "豆包大模型 ASR",
                 "火山引擎", "豆包大模型流式语音识别", "asr", "语音识别", "websocket", "WebSocket 流式",
                 "cloud", "云平台", "WebSocket", "Resource ID", "resource_id",
-                List.of("appid", "access_token"), List.of("appid", "access_token", "resource_id"),
-                List.of("resource_id", "end_window_size", "enable_multilingual", "language"),
-                List.of("旧大模型 ASR 资源 ID 常见为 volc.bigasr.sauc.duration。"),
+                List.of("api_key"), List.of("api_key", "resource_id"),
+                List.of("auth_method", "appid", "access_token", "resource_id", "end_window_size", "enable_multilingual", "language"),
+                List.of("新版控制台使用 API Key 鉴权；旧 App ID + Access Token 仅作为兼容字段保留。旧大模型 ASR 资源 ID 常见为 volc.bigasr.sauc.duration。"),
                 List.of(), List.of("DoubaoStreamASR", "volc.bigasr"),
                 "https://www.volcengine.com/docs/6561/1354869"));
         items.add(item("ASR_DOUBAO_SEED_ASR_2_STREAM", "ASR", "doubao_stream", "Seed ASR 2.0",
                 "火山引擎", "豆包语音识别 Seed ASR 2.0", "asr", "语音识别", "websocket", "WebSocket 流式",
                 "cloud", "云平台", "WebSocket", "Resource ID", "resource_id",
-                List.of("appid", "access_token"), List.of("appid", "access_token", "resource_id"),
-                List.of("resource_id", "end_window_size", "enable_multilingual", "language"),
-                List.of("Seed ASR 2.0 资源 ID 常见为 volc.seedasr.sauc.duration。"),
+                List.of("api_key"), List.of("api_key", "resource_id"),
+                List.of("auth_method", "appid", "access_token", "resource_id", "end_window_size", "enable_multilingual", "language"),
+                List.of("新版控制台使用 API Key 鉴权；旧 App ID + Access Token 仅作为兼容字段保留。Seed ASR 2.0 资源 ID 常见为 volc.seedasr.sauc.duration。"),
                 List.of(), List.of("DoubaoStreamASRV2", "seedasr", "volc.seedasr"),
                 "https://www.volcengine.com/docs/6561/1354869"));
         items.add(item("ASR_TENCENT_SENTENCE", "ASR", "tencent", "腾讯云 ASR",
@@ -897,27 +894,35 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 List.of(), List.of("voice"), List.of("voice"),
                 List.of("无需云端密钥，依赖 edge-tts 库。"), List.of(), List.of("EdgeTTS"),
                 "https://github.com/rany2/edge-tts"));
-        items.add(item("TTS_DOUBAO_HTTP", "TTS", "doubao", "豆包 TTS HTTP",
-                "火山引擎", "豆包语音合成旧版", "tts", "语音合成", "http", "HTTP 非流式",
+        ModelCatalogDTO doubaoHttp = item("TTS_DOUBAO_HTTP", "TTS", "doubao", "豆包语音合成 HTTP 兼容",
+                "火山引擎", "豆包语音合成 HTTP 兼容", "tts", "语音合成", "http", "HTTP",
                 "cloud", "云平台", "HTTP", "音色", "voice",
                 List.of("access_token", "authorization", "appid"), List.of("api_url", "voice"),
                 List.of("appid", "access_token", "cluster", "speed_ratio", "volume_ratio", "pitch_ratio"),
-                List.of("旧版 HTTP TTS，不是双向流式 Seed TTS 2.0。"), List.of(),
-                List.of("DoubaoTTS", "TTS302AI"), "https://www.volcengine.com/docs/6561"));
-        items.add(item("TTS_DOUBAO_BIGTTS_STREAM", "TTS", "huoshan_double_stream", "豆包大模型 TTS",
+                List.of("仅用于兼容历史 DoubaoTTS 配置，新增配置请使用控制台里的“豆包语音合成大模型”或“豆包语音合成模型 2.0”。"),
+                List.of("新增配置入口已隐藏，避免和当前火山控制台模型名称混淆。"),
+                List.of("DoubaoTTS", "TTS302AI"), "https://www.volcengine.com/docs/6561");
+        doubaoHttp.setHidden(true);
+        doubaoHttp.setDeprecated(true);
+        doubaoHttp.setSelectable(false);
+        doubaoHttp.setSupportedStatus("DEPRECATED");
+        items.add(doubaoHttp);
+        items.add(item("TTS_DOUBAO_BIGTTS_STREAM", "TTS", "huoshan_double_stream", "豆包语音合成大模型",
                 "火山引擎", "豆包语音合成大模型", "tts", "语音合成", "websocket-bidirectional", "WebSocket 双向流式",
-                "cloud", "云平台", "WebSocket", "Resource ID", "resource_id",
-                List.of("appid", "access_token"), List.of("ws_url", "appid", "access_token", "resource_id", "speaker"),
-                List.of("ws_url", "resource_id", "speaker", "enable_ws_reuse", "audio_params", "additions"),
-                List.of("TTS 1.0 大模型资源 ID 常见为 volc.service_type.10029。"),
+                "cloud", "云平台", "WebSocket", "模型/Resource ID", "resource_id",
+                List.of("api_key", "appid", "access_token"), List.of("ws_url", "resource_id", "speaker"),
+                List.of("appid", "access_token", "format", "speech_rate", "loudness_rate", "pitch",
+                        "emotion", "emotion_scale", "enable_ws_reuse", "audio_params", "additions", "mix_speaker"),
+                List.of("对应火山控制台“语音合成大模型”服务 10007。新版控制台使用 API Key 接入，模型资源 ID 通常为 volc.service_type.10029。常用音色、语速、音量、音高、情感可直接在字段里配置，高级参数仍可用 JSON 透传。"),
                 List.of(), List.of("HuoshanDoubleStreamTTS", "volc.service_type.10029"),
                 "https://www.volcengine.com/docs/6561/1329505"));
-        items.add(item("TTS_DOUBAO_SEED_TTS_2_STREAM", "TTS", "huoshan_double_stream", "Seed TTS 2.0",
-                "火山引擎", "豆包语音合成 Seed TTS 2.0", "tts", "语音合成", "websocket-bidirectional", "WebSocket 双向流式",
-                "cloud", "云平台", "WebSocket", "Resource ID", "resource_id",
-                List.of("appid", "access_token"), List.of("ws_url", "appid", "access_token", "resource_id", "speaker"),
-                List.of("ws_url", "resource_id", "speaker", "enable_ws_reuse", "audio_params"),
-                List.of("Seed TTS 2.0 资源 ID 为 seed-tts-2.0。"),
+        items.add(item("TTS_DOUBAO_SEED_TTS_2_STREAM", "TTS", "huoshan_double_stream", "豆包语音合成模型 2.0",
+                "火山引擎", "豆包语音合成模型 2.0", "tts", "语音合成", "websocket-bidirectional", "WebSocket 双向流式",
+                "cloud", "云平台", "WebSocket", "模型/Resource ID", "resource_id",
+                List.of("api_key", "appid", "access_token"), List.of("ws_url", "resource_id", "speaker"),
+                List.of("appid", "access_token", "format", "speech_rate", "loudness_rate", "pitch",
+                        "emotion", "emotion_scale", "enable_ws_reuse", "audio_params", "additions"),
+                List.of("对应火山控制台“豆包语音合成模型 2.0”服务 10035。新版控制台使用 API Key 接入，模型资源 ID 固定为 seed-tts-2.0。常用音色、语速、音量、音高、情感可直接在字段里配置，高级参数仍可用 JSON 透传。"),
                 List.of(), List.of("HuoshanDoubleStreamTTSV2", "seed-tts-2.0", "TTS_HSDSTTS_V2"),
                 "https://www.volcengine.com/docs/6561/1329505"));
         items.add(item("TTS_SILICONFLOW_COSYVOICE", "TTS", "siliconflow", "硅基流动 CosyVoice",
@@ -932,12 +937,19 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 List.of("access_token"), List.of("access_token", "voice"),
                 List.of("response_format", "speed", "loudness_rate"), List.of(), List.of(),
                 List.of("CozeCnTTS"), "https://www.coze.cn/open"));
-        items.add(item("TTS_VOLCES_AI_GATEWAY_OPENAI", "TTS", "openai", "火山 AI Gateway TTS",
+        ModelCatalogDTO volcesGatewayTts = item("TTS_VOLCES_AI_GATEWAY_OPENAI", "TTS", "openai", "火山 AI Gateway TTS",
                 "火山引擎", "边缘大模型网关语音合成", "tts", "语音合成", "openai-compatible", "OpenAI 兼容",
                 "cloud", "云平台", "OpenAI Speech Compatible", "模型/音色", "model",
                 List.of("api_key"), List.of("api_key", "api_url", "model", "voice"),
-                List.of("speed", "format"), List.of("通过火山边缘大模型网关访问语音合成。"), List.of(),
-                List.of("VolcesAiGatewayTTS", "doubao-tts", "ai-gateway"), "https://console.volcengine.com/vei/aigateway/"));
+                List.of("speed", "format"),
+                List.of("不作为本项目豆包 TTS 有效入口；豆包语音合成只保留火山服务 10007 和 10035 两个双向流式入口。"),
+                List.of("新增豆包 TTS 配置不要使用 AI Gateway。"),
+                List.of("VolcesAiGatewayTTS", "doubao-tts", "ai-gateway"), "https://console.volcengine.com/vei/aigateway/");
+        volcesGatewayTts.setHidden(true);
+        volcesGatewayTts.setDeprecated(true);
+        volcesGatewayTts.setSelectable(false);
+        volcesGatewayTts.setSupportedStatus("DEPRECATED");
+        items.add(volcesGatewayTts);
         items.add(item("TTS_OPENAI_SPEECH", "TTS", "openai", "OpenAI TTS",
                 "OpenAI", "Text to Speech", "tts", "语音合成", "http", "HTTP",
                 "cloud", "云平台", "OpenAI Audio", "模型/音色", "model",
@@ -1463,10 +1475,20 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             case "TTS_DOUBAO_BIGTTS_STREAM" -> {
                 setFieldDefault(dto, "ws_url", "wss://openspeech.bytedance.com/api/v3/tts/bidirection");
                 setFieldDefault(dto, "resource_id", "volc.service_type.10029");
+                setFieldDefault(dto, "speaker", "zh_female_wanwanxiaohe_moon_bigtts");
+                setFieldDefault(dto, "format", "pcm");
+                setFieldDefault(dto, "speech_rate", "0");
+                setFieldDefault(dto, "loudness_rate", "0");
+                setFieldDefault(dto, "pitch", "0");
             }
             case "TTS_DOUBAO_SEED_TTS_2_STREAM" -> {
                 setFieldDefault(dto, "ws_url", "wss://openspeech.bytedance.com/api/v3/tts/bidirection");
                 setFieldDefault(dto, "resource_id", "seed-tts-2.0");
+                setFieldDefault(dto, "speaker", "zh_female_xiaohe_uranus_bigtts");
+                setFieldDefault(dto, "format", "pcm");
+                setFieldDefault(dto, "speech_rate", "0");
+                setFieldDefault(dto, "loudness_rate", "0");
+                setFieldDefault(dto, "pitch", "0");
             }
             case "TTS_FISHSPEECH" -> setFieldDefault(dto, "api_url", "http://127.0.0.1:8080/v1/tts");
             case "TTS_GPT_SOVITS_V2" -> setFieldDefault(dto, "url", "http://127.0.0.1:9880/tts");

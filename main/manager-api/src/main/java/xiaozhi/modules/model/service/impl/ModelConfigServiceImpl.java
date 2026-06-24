@@ -123,6 +123,12 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             "model_name", "model", "resource_id", "model_dir", "llm_model", "llm");
     private static final List<String> ENDPOINT_FIELDS = List.of(
             "base_url", "api_url", "url", "server_url", "ws_url", "host");
+    private static final String HUOSHAN_DOUBLE_STREAM_TYPE = "huoshan_double_stream";
+    private static final String HUOSHAN_DOUBLE_STREAM_WS_URL = "wss://openspeech.bytedance.com/api/v3/tts/bidirection";
+    private static final String DOUBAO_BIGTTS_RESOURCE_ID = "volc.service_type.10029";
+    private static final String DOUBAO_BIGTTS_DEFAULT_SPEAKER = "zh_male_shaonianzixin_moon_bigtts";
+    private static final String DOUBAO_SEED_TTS_2_RESOURCE_ID = "seed-tts-2.0";
+    private static final String DOUBAO_SEED_TTS_2_DEFAULT_SPEAKER = "zh_female_xiaohe_uranus_bigtts";
 
     @Override
     public List<ModelBasicInfoDTO> getModelCodeList(String modelType, String modelName) {
@@ -588,7 +594,73 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         setIfNotBlank(config, "resource_id", upstreamModel);
         mergeConfigMap(config, body.getParams());
         mergeConfigMap(config, body.getSecrets());
+        normalizeHuoshanDoubleStreamTtsConfig(config, body.getTemplateCode(), provideCode);
         return config;
+    }
+
+    private void normalizeHuoshanDoubleStreamTtsConfig(ModelConfigEntity model, JSONObject config) {
+        String templateCode = model == null ? "" : model.getTemplateCode();
+        String adapterCode = model == null ? "" : model.getAdapterCode();
+        normalizeHuoshanDoubleStreamTtsConfig(config, templateCode, adapterCode);
+    }
+
+    private void normalizeHuoshanDoubleStreamTtsConfig(JSONObject config, String templateCode, String adapterCode) {
+        if (config == null || !isHuoshanDoubleStreamTtsConfig(config, templateCode, adapterCode)) {
+            return;
+        }
+        config.set("type", HUOSHAN_DOUBLE_STREAM_TYPE);
+        config.set("ws_url", HUOSHAN_DOUBLE_STREAM_WS_URL);
+        for (String key : List.of("base_url", "api_url", "url", "server_url", "host", "endpoint_url")) {
+            String value = config.getStr(key);
+            if (isLegacyHuoshanTtsEndpoint(value)) {
+                config.remove(key);
+            }
+        }
+        if (!hasUsableHuoshanTtsField(config.getStr("resource_id"))) {
+            config.set("resource_id", resolveDefaultHuoshanTtsResourceId(templateCode));
+        }
+        if (!hasUsableHuoshanTtsField(config.getStr("speaker"))) {
+            config.set("speaker", resolveDefaultHuoshanTtsSpeaker(templateCode));
+        }
+    }
+
+    private boolean hasUsableHuoshanTtsField(String value) {
+        if (!hasUsableTextValue(value)) {
+            return false;
+        }
+        return !"BV001_streaming".equalsIgnoreCase(value)
+                && !"BV700_streaming".equalsIgnoreCase(value);
+    }
+
+    private boolean isHuoshanDoubleStreamTtsConfig(JSONObject config, String templateCode, String adapterCode) {
+        return HUOSHAN_DOUBLE_STREAM_TYPE.equalsIgnoreCase(StringUtils.defaultString(adapterCode))
+                || HUOSHAN_DOUBLE_STREAM_TYPE.equalsIgnoreCase(config.getStr("type"))
+                || "TTS_DOUBAO_BIGTTS_STREAM".equalsIgnoreCase(StringUtils.defaultString(templateCode))
+                || "TTS_DOUBAO_SEED_TTS_2_STREAM".equalsIgnoreCase(StringUtils.defaultString(templateCode));
+    }
+
+    private String resolveDefaultHuoshanTtsResourceId(String templateCode) {
+        if ("TTS_DOUBAO_SEED_TTS_2_STREAM".equalsIgnoreCase(StringUtils.defaultString(templateCode))) {
+            return DOUBAO_SEED_TTS_2_RESOURCE_ID;
+        }
+        return DOUBAO_BIGTTS_RESOURCE_ID;
+    }
+
+    private String resolveDefaultHuoshanTtsSpeaker(String templateCode) {
+        if ("TTS_DOUBAO_SEED_TTS_2_STREAM".equalsIgnoreCase(StringUtils.defaultString(templateCode))) {
+            return DOUBAO_SEED_TTS_2_DEFAULT_SPEAKER;
+        }
+        return DOUBAO_BIGTTS_DEFAULT_SPEAKER;
+    }
+
+    private boolean isLegacyHuoshanTtsEndpoint(String value) {
+        if (StringUtils.isBlank(value)) {
+            return false;
+        }
+        String normalized = value.trim().toLowerCase();
+        return normalized.contains("openspeech.bytedance.com/api/v3/tts/unidirectional")
+                || (normalized.startsWith("https://openspeech.bytedance.com/api/v3/tts/")
+                        && !normalized.startsWith(HUOSHAN_DOUBLE_STREAM_WS_URL));
     }
 
     private void mergeConfigMap(JSONObject config, Map<String, Object> values) {
@@ -1004,6 +1076,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         }
 
         JSONObject configJson = modelConfig.getConfigJson();
+        normalizeHuoshanDoubleStreamTtsConfig(modelConfig, configJson);
         String type = StringUtils.lowerCase(configJson.getStr("type"));
         if (StringUtils.isBlank(type)) {
             result.setSuccess(false);
@@ -1408,12 +1481,19 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         ModelTestResultDTO result = new ModelTestResultDTO();
         String appid = configJson.getStr("appid");
         String accessToken = configJson.getStr("access_token");
+        String apiKey = configJson.getStr("api_key");
         String resourceId = configJson.getStr("resource_id");
-        if (StringUtils.isAnyBlank(appid, accessToken, resourceId)
-                || isPlaceholderSecret(appid)
-                || isPlaceholderSecret(accessToken)) {
+        boolean useApiKey = hasUsableConfigValue(configJson, "api_key")
+                || "api_key".equalsIgnoreCase(StringUtils.defaultString(configJson.getStr("auth_method")));
+        boolean hasLegacyCredentials = StringUtils.isNoneBlank(appid, accessToken)
+                && !isPlaceholderSecret(appid)
+                && !isPlaceholderSecret(accessToken);
+        if (StringUtils.isBlank(resourceId)
+                || isPlaceholderSecret(resourceId)
+                || (useApiKey && !hasUsableConfigValue(configJson, "api_key"))
+                || (!useApiKey && !hasLegacyCredentials)) {
             result.setSuccess(false);
-            result.setMessage("豆包流式 ASR 缺少有效 appid、access_token 或 resource_id");
+            result.setMessage("豆包流式 ASR 缺少有效 api_key/resource_id，或旧版 appid/access_token/resource_id");
             result.setTestInput("resource_id：" + StringUtils.defaultString(resourceId, "-")
                     + "\n测试内容：真实音频流式识别");
             result.setTestOutput(result.getMessage());
@@ -1443,12 +1523,18 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         try {
             BinaryResponseQueueListener listener = new BinaryResponseQueueListener();
             long startTime = System.currentTimeMillis();
-            WebSocket webSocket = HttpClient.newHttpClient()
+            WebSocket.Builder webSocketBuilder = HttpClient.newHttpClient()
                     .newWebSocketBuilder()
-                    .header("X-Api-App-Key", appid)
-                    .header("X-Api-Access-Key", accessToken)
                     .header("X-Api-Resource-Id", resourceId)
-                    .header("X-Api-Connect-Id", UUID.randomUUID().toString())
+                    .header("X-Api-Connect-Id", UUID.randomUUID().toString());
+            if (useApiKey) {
+                webSocketBuilder.header("X-Api-Key", apiKey);
+            } else {
+                webSocketBuilder
+                        .header("X-Api-App-Key", appid)
+                        .header("X-Api-Access-Key", accessToken);
+            }
+            WebSocket webSocket = webSocketBuilder
                     .buildAsync(URI.create(wsUrl), listener)
                     .get(10, TimeUnit.SECONDS);
 
@@ -1747,8 +1833,15 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         String text = inputDetail == null ? sample.getStr("input_summary") : inputDetail.getStr("text");
         String sampleRate = inputDetail == null ? null : StringUtils.defaultString(inputDetail.getStr("sample_rate"));
         String audioFormat = inputDetail == null ? null : inputDetail.getStr("audio_format");
+        String resourceId = inputDetail == null ? null : inputDetail.getStr("resource_id");
+        String speaker = inputDetail == null ? null : inputDetail.getStr("speaker");
+        Object audioParamsValue = inputDetail == null ? null : inputDetail.get("audio_params");
+        String audioParams = audioParamsValue == null ? null : String.valueOf(audioParamsValue);
         return "供应器类型：" + providerType
                 + "\n文本：" + StringUtils.defaultIfBlank(text, TTS_TEST_TEXT)
+                + (StringUtils.isNotBlank(resourceId) ? "\nResource ID：" + resourceId : "")
+                + (StringUtils.isNotBlank(speaker) ? "\n音色：" + speaker : "")
+                + (StringUtils.isNotBlank(audioParams) ? "\n音频参数：" + audioParams : "")
                 + (StringUtils.isNotBlank(sampleRate) ? "\n采样率：" + sampleRate : "")
                 + (StringUtils.isNotBlank(audioFormat) ? "\n音频格式：" + audioFormat : "")
                 + "\n测试方式：xiaozhi-server 运行时 provider 真实合成";
@@ -2067,7 +2160,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                 case "tencent" -> List.of("appid", "secret_id", "secret_key", "voice");
                 case "gpt_sovits_v2", "gpt_sovits_v3", "custom", "paddle_speech" -> List.of("url");
                 case "aliyun", "aliyun_stream" -> List.of("appkey", "voice");
-                case "huoshan_double_stream" -> List.of("appid", "access_token", "resource_id", "speaker");
+                case "huoshan_double_stream" -> List.of("resource_id", "speaker");
                 case "index_stream" -> List.of("api_url", "voice");
                 case "minimax_httpstream" -> List.of("api_key", "group_id", "voice_id", "model");
                 case "alibl_stream" -> List.of("appkey", "voice", "model");
@@ -2109,6 +2202,9 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     private List<List<String>> getRequiredAnyFieldGroups(String modelType, String type) {
         String normalizedModelType = StringUtils.defaultString(modelType).toUpperCase();
         String normalizedType = StringUtils.lowerCase(StringUtils.defaultString(type));
+        if ("ASR".equals(normalizedModelType) && "doubao_stream".equals(normalizedType)) {
+            return List.of(List.of("api_key", "access_token"));
+        }
         if ("TTS".equals(normalizedModelType) && "doubao".equals(normalizedType)) {
             return List.of(List.of("access_token", "authorization"));
         }
@@ -2116,6 +2212,17 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     }
 
     private List<String> getMissingAlternativeRequirements(JSONObject configJson, String modelType, String type) {
+        String normalizedModelType = StringUtils.defaultString(modelType).toUpperCase();
+        String normalizedType = StringUtils.lowerCase(StringUtils.defaultString(type));
+        if ("TTS".equals(normalizedModelType) && "huoshan_double_stream".equals(normalizedType)) {
+            boolean hasApiKey = hasUsableConfigValue(configJson, "api_key");
+            boolean hasLegacyPair = hasUsableConfigValue(configJson, "appid")
+                    && hasUsableConfigValue(configJson, "access_token");
+            if (!hasApiKey && !hasLegacyPair) {
+                return List.of("api_key 或 appid/access_token");
+            }
+            return List.of();
+        }
         if (!isAliyunNlsModel(modelType, type)) {
             return List.of();
         }

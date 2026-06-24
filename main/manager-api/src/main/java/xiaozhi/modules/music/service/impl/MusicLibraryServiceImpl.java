@@ -16,6 +16,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.apache.commons.lang3.StringUtils;
@@ -42,6 +43,8 @@ public class MusicLibraryServiceImpl implements MusicLibraryService {
     private static final String OPTIMIZED_EXTENSION = ".p3";
     private static final long OPTIMIZE_TIMEOUT_MINUTES = 5;
     private static final int MAX_DESCRIPTION_LENGTH = 500;
+    private static final int MAX_ALIAS_LENGTH = 50;
+    private static final int MAX_ALIASES = 20;
 
     private final Path musicRoot;
     private final Path musicCacheRoot;
@@ -77,7 +80,9 @@ public class MusicLibraryServiceImpl implements MusicLibraryService {
                             || item.getName().toLowerCase(Locale.ROOT).contains(normalizedKeyword)
                             || item.getPath().toLowerCase(Locale.ROOT).contains(normalizedKeyword)
                             || StringUtils.defaultString(item.getDescription()).toLowerCase(Locale.ROOT)
-                                    .contains(normalizedKeyword))
+                                    .contains(normalizedKeyword)
+                            || item.getAliases().stream()
+                                    .anyMatch(alias -> alias.toLowerCase(Locale.ROOT).contains(normalizedKeyword)))
                     .sorted(Comparator.comparing(MusicFileDTO::getUpdateTime).reversed())
                     .forEach(files::add);
         } catch (IOException e) {
@@ -167,13 +172,26 @@ public class MusicLibraryServiceImpl implements MusicLibraryService {
         String normalizedPath = normalizeRelativePath(target);
         String cleanDescription = normalizeDescription(description);
         Map<String, MusicMetadata> metadata = readMetadata();
+        MusicMetadata existing = metadata.getOrDefault(normalizedPath, new MusicMetadata());
         if (StringUtils.isBlank(cleanDescription)) {
-            metadata.remove(normalizedPath);
+            existing.setDescription("");
         } else {
-            MusicMetadata item = metadata.getOrDefault(normalizedPath, new MusicMetadata());
-            item.setDescription(cleanDescription);
-            metadata.put(normalizedPath, item);
+            existing.setDescription(cleanDescription);
         }
+        putOrRemoveMetadata(metadata, normalizedPath, existing);
+        writeMetadata(metadata);
+        return toDTO(target);
+    }
+
+    @Override
+    public MusicFileDTO updateMetadata(String path, String description, List<String> aliases) throws IOException {
+        Path target = resolveExistingFile(path);
+        String normalizedPath = normalizeRelativePath(target);
+        MusicMetadata item = new MusicMetadata();
+        item.setDescription(normalizeDescription(description));
+        item.setAliases(normalizeAliases(aliases));
+        Map<String, MusicMetadata> metadata = readMetadata();
+        putOrRemoveMetadata(metadata, normalizedPath, item);
         writeMetadata(metadata);
         return toDTO(target);
     }
@@ -229,7 +247,9 @@ public class MusicLibraryServiceImpl implements MusicLibraryService {
             dto.setSize(Files.size(file));
             dto.setUpdateTime(Files.getLastModifiedTime(file).toMillis());
             dto.setPlayUrl("/admin/music/play?path=" + URLEncoder.encode(normalizedPath, StandardCharsets.UTF_8));
-            dto.setDescription(getDescription(normalizedPath));
+            MusicMetadata metadata = getMetadata(normalizedPath);
+            dto.setDescription(metadata == null ? "" : StringUtils.defaultString(metadata.getDescription()));
+            dto.setAliases(metadata == null ? List.of() : safeAliases(metadata));
             return dto;
         } catch (IOException e) {
             throw new IllegalStateException("读取音乐文件信息失败：" + e.getMessage(), e);
@@ -241,9 +261,12 @@ public class MusicLibraryServiceImpl implements MusicLibraryService {
         return relativePath.toString().replace('\\', '/');
     }
 
-    private String getDescription(String normalizedPath) {
-        MusicMetadata metadata = readMetadata().get(normalizedPath);
-        return metadata == null ? "" : StringUtils.defaultString(metadata.getDescription());
+    private MusicMetadata getMetadata(String normalizedPath) {
+        return readMetadata().get(normalizedPath);
+    }
+
+    private List<String> safeAliases(MusicMetadata metadata) {
+        return metadata.getAliases() == null ? List.of() : new ArrayList<>(metadata.getAliases());
     }
 
     private String normalizeDescription(String description) {
@@ -254,6 +277,34 @@ public class MusicLibraryServiceImpl implements MusicLibraryService {
             throw new IllegalArgumentException("音乐提示词最多 " + MAX_DESCRIPTION_LENGTH + " 个字符");
         }
         return cleanDescription;
+    }
+
+    private List<String> normalizeAliases(List<String> aliases) {
+        if (aliases == null) {
+            return List.of();
+        }
+        return aliases.stream()
+                .map(alias -> StringUtils.defaultString(alias)
+                        .replaceAll("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]", "")
+                        .trim())
+                .filter(StringUtils::isNotBlank)
+                .distinct()
+                .limit(MAX_ALIASES)
+                .map(alias -> {
+                    if (alias.length() > MAX_ALIAS_LENGTH) {
+                        throw new IllegalArgumentException("音乐别名最多 " + MAX_ALIAS_LENGTH + " 个字符");
+                    }
+                    return alias;
+                })
+                .collect(Collectors.toList());
+    }
+
+    private void putOrRemoveMetadata(Map<String, MusicMetadata> metadata, String path, MusicMetadata item) {
+        if (item == null || !item.hasContent()) {
+            metadata.remove(path);
+            return;
+        }
+        metadata.put(path, item);
     }
 
     private Map<String, MusicMetadata> readMetadata() {
@@ -278,9 +329,11 @@ public class MusicLibraryServiceImpl implements MusicLibraryService {
             String path = StringUtils.defaultString(entry.getKey()).replace('\\', '/').trim();
             MusicMetadata value = entry.getValue();
             String description = value == null ? "" : normalizeDescription(value.getDescription());
-            if (StringUtils.isNotBlank(path) && StringUtils.isNotBlank(description)) {
+            List<String> aliases = value == null ? List.of() : normalizeAliases(value.getAliases());
+            if (StringUtils.isNotBlank(path) && (StringUtils.isNotBlank(description) || !aliases.isEmpty())) {
                 MusicMetadata item = new MusicMetadata();
                 item.setDescription(description);
+                item.setAliases(aliases);
                 cleanedMetadata.put(path, item);
             }
         }
@@ -516,5 +569,10 @@ public class MusicLibraryServiceImpl implements MusicLibraryService {
     @Data
     private static class MusicMetadata {
         private String description;
+        private List<String> aliases = new ArrayList<>();
+
+        private boolean hasContent() {
+            return StringUtils.isNotBlank(description) || (aliases != null && !aliases.isEmpty());
+        }
     }
 }

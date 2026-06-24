@@ -1101,6 +1101,7 @@ class ConnectionHandler:
             llm_dialogue = self._with_freeform_game_prompt(
                 llm_dialogue, freeform_game_prompt
             )
+            llm_dialogue = self._with_music_library_context(llm_dialogue)
 
             if self.intent_type == "function_call" and functions is not None:
                 # 使用支持functions的streaming接口
@@ -1463,6 +1464,37 @@ class ConnectionHandler:
                 insert_at = index
                 break
         messages.insert(insert_at, {"role": "system", "content": prompt})
+        return messages
+
+    def _with_music_library_context(self, llm_dialogue):
+        if not getattr(self, "func_handler", None):
+            return llm_dialogue
+        if not self.func_handler.has_tool("play_music"):
+            return llm_dialogue
+        try:
+            from plugins_func.functions.play_music import list_music_prompt_entries
+
+            music_entries = list_music_prompt_entries(self, limit=30)
+        except Exception as e:
+            self.logger.bind(tag=TAG).debug(f"构建音乐曲库上下文失败: {e}")
+            return llm_dialogue
+        if not music_entries:
+            return llm_dialogue
+
+        context = (
+            "<music_library>\n"
+            "用户询问你会放什么歌、有什么歌、曲库里有什么时，直接根据这里的本地曲库回答，不要调用 play_music。\n"
+            "用户明确要求播放、唱、放某首歌或随机播放音乐时，才调用 play_music。\n"
+            f"本地曲库：{'；'.join(music_entries)}\n"
+            "</music_library>"
+        )
+        messages = list(llm_dialogue)
+        insert_at = len(messages)
+        for index in range(len(messages) - 1, -1, -1):
+            if messages[index].get("role") == "user":
+                insert_at = index
+                break
+        messages.insert(insert_at, {"role": "system", "content": context})
         return messages
 
     def _get_enabled_plugin_configs(self):

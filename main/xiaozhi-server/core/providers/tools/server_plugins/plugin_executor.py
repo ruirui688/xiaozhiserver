@@ -123,6 +123,8 @@ class ServerPluginExecutor(ToolExecutor):
                 # 新闻插件：根据配置更新新闻源参数描述
                 if func_name == "get_news_from_newsnow":
                     self._init_news_source_description(tool_description, func_name)
+                elif func_name == "play_music":
+                    self._init_music_description(tool_description)
 
                 tools[func_name] = ToolDefinition(
                     name=func_name,
@@ -164,6 +166,33 @@ class ServerPluginExecutor(ToolExecutor):
             tool_description["function"]["parameters"]["properties"]["source"][
                 "description"
             ] = f"新闻源的标准中文名称，例如{sources_str}等。可选参数，如果不提供则使用默认新闻源"
+        except (KeyError, TypeError):
+            pass
+
+    def _init_music_description(self, tool_description):
+        """Expose the local music library to the model without pre-routing requests."""
+        try:
+            from plugins_func.functions.play_music import list_music_prompt_entries
+
+            music_entries = list_music_prompt_entries(self.conn, limit=30)
+        except Exception as e:
+            if hasattr(self.conn, "logger"):
+                self.conn.logger.bind(tag=__name__).warning(
+                    f"构建音乐工具描述失败: {e}"
+                )
+            music_entries = []
+
+        library_text = "；".join(music_entries) if music_entries else "当前本地曲库为空或暂未扫描到歌曲"
+        guidance = (
+            " 用户询问“你会放什么歌”“有什么歌”“曲库里有什么”时，不要调用本工具，"
+            f"直接根据本地曲库回答。当前本地曲库：{library_text}。"
+            " 只有用户明确要求播放、唱、放某首歌或随机播放音乐时，才调用本工具。"
+        )
+        try:
+            function_desc = tool_description["function"]
+            base_desc = str(function_desc.get("description") or "")
+            if guidance not in base_desc:
+                function_desc["description"] = base_desc + guidance
         except (KeyError, TypeError):
             pass
 

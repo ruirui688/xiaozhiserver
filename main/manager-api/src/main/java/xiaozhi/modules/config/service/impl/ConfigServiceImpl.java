@@ -449,8 +449,9 @@ public class ConfigServiceImpl implements ConfigService {
             if (model == null) {
                 continue;
             }
-            if (model.getConfigJson() != null) {
-                Map<String, Object> runtimeConfig = new HashMap<>(model.getConfigJson());
+            Map<String, Object> modelRuntime = buildModelConfig(model);
+            Map<String, Object> runtimeConfig = typedConfig(modelRuntime);
+            if (runtimeConfig != null) {
                 // 如果是TTS类型，添加private_voice属性
                 if ("TTS".equals(modelTypes[i])) {
                     if (voice != null)
@@ -501,7 +502,7 @@ public class ConfigServiceImpl implements ConfigService {
                         }
                     }
                 }
-                modelConfig.put(model.getId(), buildModelConfig(model, runtimeConfig));
+                modelConfig.put(model.getId(), modelRuntime);
                 // 如果是LLM类型，且intentLLMModelId不为空，则添加附加模型
                 if ("LLM".equals(modelTypes[i])) {
                     if (StringUtils.isNotBlank(intentLLMModelId)) {
@@ -544,19 +545,35 @@ public class ConfigServiceImpl implements ConfigService {
     }
 
     private Map<String, Object> buildModelConfig(ModelConfigEntity model) {
-        return buildModelConfig(model,
-                model == null || model.getConfigJson() == null ? null : new HashMap<>(model.getConfigJson()));
+        Map<String, Object> config = modelRuntimeAssembler.buildRuntimeModel(model);
+        config.put("typed_config", mergeRuntimeTypedConfig(model, config.get("typed_config")));
+        return config;
     }
 
-    private Map<String, Object> buildModelConfig(ModelConfigEntity model, Map<String, Object> runtimeConfig) {
-        Map<String, Object> config = modelRuntimeAssembler.buildRuntimeModel(model);
-        if (model == null) {
-            return config;
+    static Map<String, Object> mergeRuntimeTypedConfig(ModelConfigEntity model, Object assembledTypedConfig) {
+        Map<String, Object> merged = new HashMap<>();
+        if (model != null && model.getConfigJson() != null) {
+            merged.putAll(model.getConfigJson());
         }
-        if (runtimeConfig != null) {
-            config.put("typed_config", runtimeConfig);
+        if (assembledTypedConfig instanceof Map<?, ?> typedConfig) {
+            for (Map.Entry<?, ?> entry : typedConfig.entrySet()) {
+                if (entry.getKey() != null) {
+                    merged.put(String.valueOf(entry.getKey()), entry.getValue());
+                }
+            }
         }
-        return config;
+        return merged;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> typedConfig(Map<String, Object> modelRuntime) {
+        Object typedConfig = modelRuntime.get("typed_config");
+        if (typedConfig instanceof Map<?, ?>) {
+            return (Map<String, Object>) typedConfig;
+        }
+        Map<String, Object> emptyConfig = new HashMap<>();
+        modelRuntime.put("typed_config", emptyConfig);
+        return emptyConfig;
     }
 
     private ModelConfigEntity resolveUsableModel(String modelType, String modelId) {

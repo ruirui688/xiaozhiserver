@@ -84,6 +84,21 @@ public class MusicLibraryController {
         }
     }
 
+    @PutMapping("/files/metadata")
+    @Operation(summary = "更新服务器音乐提示词和别名")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<MusicFileDTO> updateMetadata(
+            @RequestParam("path") String path,
+            @RequestParam(required = false) String description,
+            @RequestParam(required = false) List<String> aliases) {
+        try {
+            return new Result<MusicFileDTO>().ok(musicLibraryService.updateMetadata(path, description, aliases));
+        } catch (Exception e) {
+            log.error("更新服务器音乐元数据失败", e);
+            return new Result<MusicFileDTO>().error(e.getMessage());
+        }
+    }
+
     @DeleteMapping("/files")
     @Operation(summary = "删除服务器音乐文件")
     @RequiresPermissions("sys:role:superAdmin")

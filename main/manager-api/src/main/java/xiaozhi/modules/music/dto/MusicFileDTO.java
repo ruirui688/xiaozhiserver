@@ -1,5 +1,7 @@
 package xiaozhi.modules.music.dto;
 
+import java.util.List;
+
 import lombok.Data;
 
 @Data
@@ -11,4 +13,5 @@ public class MusicFileDTO {
     private Long updateTime;
     private String playUrl;
     private String description;
+    private List<String> aliases;
 }

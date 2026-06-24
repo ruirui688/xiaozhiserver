@@ -108,7 +108,7 @@ async def _recognize_asr_sample(asr, provider_type, pcm, started):
 
 
 async def _recognize_doubao_stream(asr, pcm, started):
-    headers = asr.token_auth() if getattr(asr, "auth_method", "token") == "token" else None
+    headers = asr.token_auth()
     async with websockets.connect(
         asr.ws_url,
         additional_headers=headers,

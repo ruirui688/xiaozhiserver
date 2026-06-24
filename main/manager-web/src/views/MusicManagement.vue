@@ -10,7 +10,7 @@
       <div class="right-operations">
         <el-input
           v-model="keyword"
-          placeholder="搜索歌曲名称/提示词"
+          placeholder="搜索歌曲名称/别名/提示词"
           class="search-input"
           clearable
           @keyup.enter.native="handleSearch"
@@ -58,7 +58,12 @@
               element-loading-background="rgba(255, 255, 255, 0.7)"
             >
               <el-table-column label="歌曲文件" prop="name" min-width="220" />
-              <el-table-column label="提示词" min-width="240" show-overflow-tooltip>
+              <el-table-column label="别名/说法" min-width="240" show-overflow-tooltip>
+                <template slot-scope="scope">
+                  <span class="alias-text">{{ formatAliases(scope.row.aliases) }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="歌曲提示词" min-width="280" show-overflow-tooltip>
                 <template slot-scope="scope">
                   <span class="description-text">{{ scope.row.description || '-' }}</span>
                 </template>
@@ -77,7 +82,7 @@
                     {{ playingPath === scope.row.path ? '停止' : '试听' }}
                   </el-button>
                   <el-button size="mini" type="text" @click="editMusicDescription(scope.row)">
-                    提示词
+                    编辑配置
                   </el-button>
                   <el-button size="mini" type="text" @click="renameMusic(scope.row)">
                     重命名
@@ -96,12 +101,49 @@
             <div v-if="!loading && musicList.length === 0" class="empty-state">
               <i class="el-icon-headset"></i>
               <div>还没有上传音乐</div>
-              <span>上传 MP3 后，可为音乐添加提示词，小智能按歌名、提示词或随机播放。</span>
+              <span>上传 MP3 后，可为音乐添加别名和提示词，小智能按歌名、别名、提示词或随机播放。</span>
             </div>
           </el-card>
         </div>
       </div>
     </div>
+
+    <el-dialog
+      title="编辑音乐配置"
+      :visible.sync="metadataDialogVisible"
+      width="560px"
+      append-to-body
+    >
+      <el-form label-position="top">
+        <el-form-item label="歌曲文件">
+          <el-input :value="metadataForm.name" disabled />
+        </el-form-item>
+        <el-form-item label="别名/近音词">
+          <el-input
+            v-model="metadataForm.aliasesText"
+            type="textarea"
+            :rows="3"
+            placeholder="例如：品牌星光、星光之歌、主题歌"
+          />
+        </el-form-item>
+        <el-form-item label="歌曲提示词">
+          <el-input
+            v-model="metadataForm.description"
+            type="textarea"
+            :rows="5"
+            maxlength="500"
+            show-word-limit
+            placeholder="说明这首歌是什么、适合什么时候推荐、背景信息"
+          />
+        </el-form-item>
+      </el-form>
+      <span slot="footer" class="dialog-footer">
+        <el-button @click="metadataDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="metadataSaving" @click="saveMusicMetadata">
+          保存
+        </el-button>
+      </span>
+    </el-dialog>
 
     <el-footer>
       <version-footer />
@@ -127,7 +169,15 @@ export default {
       musicDir: "",
       total: 0,
       audio: null,
-      playingPath: ""
+      playingPath: "",
+      metadataDialogVisible: false,
+      metadataSaving: false,
+      metadataForm: {
+        path: "",
+        name: "",
+        aliasesText: "",
+        description: ""
+      }
     };
   },
   created() {
@@ -251,32 +301,33 @@ export default {
       }).catch(() => {});
     },
     editMusicDescription(row) {
-      this.$prompt("请输入音乐提示词，例如：慧苑星光是慧苑的主题曲", "编辑提示词", {
-        confirmButtonText: "确定",
-        cancelButtonText: "取消",
-        inputType: "textarea",
-        inputValue: row.description || "",
-        inputValidator: (value) => {
-          const text = (value || "").trim();
-          if (text.length > 500) {
-            return "提示词最多 500 个字符";
-          }
-          return true;
+      this.metadataForm = {
+        path: row.path,
+        name: row.name,
+        aliasesText: (row.aliases || []).join("、"),
+        description: row.description || ""
+      };
+      this.metadataDialogVisible = true;
+    },
+    saveMusicMetadata() {
+      const description = (this.metadataForm.description || "").trim();
+      if (description.length > 500) {
+        this.$message.error("提示词最多 500 个字符");
+        return;
+      }
+      const aliases = this.parseAliases(this.metadataForm.aliasesText);
+      this.metadataSaving = true;
+      Api.music.updateMusicMetadata(this.metadataForm.path, description, aliases, (res) => {
+        this.metadataSaving = false;
+        if (res.data.code === 0) {
+          this.$message.success("音乐配置已保存");
+          this.metadataDialogVisible = false;
+          this.fetchMusicList();
         }
-      }).then(({ value }) => {
-        const description = (value || "").trim();
-        if (description === (row.description || "")) {
-          return;
-        }
-        Api.music.updateMusicDescription(row.path, description, (res) => {
-          if (res.data.code === 0) {
-            this.$message.success("提示词已保存");
-            this.fetchMusicList();
-          }
-        }, (res) => {
-          this.$message.error(res?.data?.msg || "保存提示词失败");
-        });
-      }).catch(() => {});
+      }, (res) => {
+        this.metadataSaving = false;
+        this.$message.error(res?.data?.msg || "保存音乐配置失败");
+      });
     },
     deleteMusic(row) {
       this.$confirm(`确认删除《${row.name}》吗？`, "提示", {
@@ -320,6 +371,18 @@ export default {
       const date = new Date(normalizedTimestamp);
       const pad = (value) => String(value).padStart(2, "0");
       return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    },
+    parseAliases(text) {
+      return Array.from(new Set((text || "")
+        .split(/[、,，;；\n\r]+/)
+        .map((item) => item.trim())
+        .filter(Boolean)));
+    },
+    formatAliases(aliases) {
+      if (!aliases || aliases.length === 0) {
+        return "-";
+      }
+      return aliases.join("、");
     }
   }
 };
@@ -407,6 +470,10 @@ export default {
 }
 
 .description-text {
+  color: #4a5568;
+}
+
+.alias-text {
   color: #4a5568;
 }
 
