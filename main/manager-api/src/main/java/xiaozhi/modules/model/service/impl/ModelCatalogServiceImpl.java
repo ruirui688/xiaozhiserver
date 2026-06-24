@@ -130,7 +130,6 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             "LLM_OPENAI_COMPATIBLE",
             "LLM_ALI_QWEN_OPENAI",
             "LLM_ALI_QWEN_OMNI_REALTIME",
-            "LLM_DOUBAO_ARK_OPENAI",
             "LLM_DOUBAO_SEED_OPENAI",
             "LLM_DEEPSEEK_OPENAI",
             "LLM_ZHIPU_GLM_OPENAI",
@@ -318,7 +317,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             if (haystack.contains("seed")) {
                 return find("LLM_DOUBAO_SEED_OPENAI");
             }
-            return find("LLM_DOUBAO_ARK_OPENAI");
+            return find("LLM_OPENAI_COMPATIBLE");
         }
         if (haystack.contains("deepseek")) {
             return find("LLM_DEEPSEEK_OPENAI");
@@ -1064,16 +1063,6 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 "当前项目没有独立 Realtime provider；连接形态是 wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=qwen3.5-omni-plus-realtime，事件协议包含 session.update、input_audio_buffer.append/commit、response.create、response.audio.delta、response.text.delta 和 response.function_call_arguments.delta/done，不能套用普通 OpenAI Chat 或百炼 Application adapter。",
                 "https://help.aliyun.com/zh/model-studio",
                 List.of("qwen3.5-omni-plus-realtime", "qwen3.5-omni-flash-realtime", "qwen3-omni-flash-realtime")));
-        ModelCatalogDTO doubaoArkLegacy = openAiLlm("LLM_DOUBAO_ARK_OPENAI", "火山引擎", "豆包方舟旧版兼容",
-                "OpenAI 兼容聊天", "doubao-1-5-pro-32k-250115",
-                "历史 Doubao 1.5 配置兼容入口；新增配置请使用豆包 Seed 系列。", List.of("DoubaoLLM", "ark.cn"));
-        doubaoArkLegacy.setHidden(true);
-        doubaoArkLegacy.setDeprecated(true);
-        doubaoArkLegacy.setSupportedStatus("DEPRECATED");
-        doubaoArkLegacy.setSelectable(false);
-        doubaoArkLegacy.setAvoidWhen("新增豆包 LLM 配置不要选择旧版豆包方舟入口，请使用“火山引擎 / 豆包 Seed 系列”。");
-        doubaoArkLegacy.setKnownLimitations(List.of("该入口仅用于识别和兼容历史 DoubaoLLM 配置，新增配置已隐藏。"));
-        items.add(doubaoArkLegacy);
         ModelCatalogDTO doubaoSeed = openAiLlm("LLM_DOUBAO_SEED_OPENAI", "火山引擎", "豆包 Seed 系列",
                 "OpenAI 兼容聊天",
                 "Doubao-Seed-Evolving / Doubao-Seed-2.1-turbo / Doubao-Seed-2.1-pro / Doubao-Seed-2.0 系列",
@@ -1366,11 +1355,6 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 setFieldDefault(dto, "base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1");
                 setFieldDefault(dto, "model_name", "qwen3.7-max");
                 setFieldOptions(dto, "model_name", ALI_QWEN_TEXT_MODELS);
-            }
-            case "LLM_DOUBAO_ARK_OPENAI" -> {
-                setFieldDefault(dto, "base_url", "https://ark.cn-beijing.volces.com/api/v3");
-                setFieldDefault(dto, "model_name", "doubao-1-5-pro");
-                setFieldOptions(dto, "model_name", List.of("doubao-1-5-pro", "doubao-1-5-lite", "doubao-pro-32k-functioncall-241028"));
             }
             case "LLM_DOUBAO_SEED_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "https://ark.cn-beijing.volces.com/api/v3");
