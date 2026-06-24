@@ -101,7 +101,24 @@
 
         <div style="display: flex; gap: 20px; margin-bottom: 0">
           <el-form-item :label="currentUpstreamLabel" prop="upstreamModelId" style="flex: 1">
-            <el-input v-model="form.upstreamModelId" :placeholder="$t('modelConfigDialog.enterUpstreamModel')"
+            <el-select
+              v-if="upstreamModelOptions.length"
+              v-model="form.upstreamModelId"
+              :placeholder="$t('modelConfigDialog.enterUpstreamModel')"
+              class="custom-select custom-input-bg"
+              style="width: 100%"
+              filterable
+              allow-create
+              default-first-option
+            >
+              <el-option
+                v-for="option in upstreamModelOptions"
+                :key="option"
+                :label="option"
+                :value="option"
+              />
+            </el-select>
+            <el-input v-else v-model="form.upstreamModelId" :placeholder="$t('modelConfigDialog.enterUpstreamModel')"
               class="custom-input-bg"></el-input>
           </el-form-item>
           <el-form-item prop="endpointUrl" style="flex: 1">
@@ -380,6 +397,10 @@ export default {
     },
     currentUpstreamLabel() {
       return this.currentTemplate.upstreamResourceLabel || this.$t("modelConfigDialog.upstreamModel");
+    },
+    upstreamModelOptions() {
+      const field = this.getUpstreamModelField(this.currentTemplate);
+      return field && Array.isArray(field.options) ? field.options : [];
     },
     endpointPlaceholder() {
       return this.endpointDefaultValue
@@ -730,6 +751,12 @@ export default {
     },
     endpointKeys() {
       return ["base_url", "api_url", "url", "ws_url", "server_url", "host", "endpoint_url"];
+    },
+    getUpstreamModelField(template = {}) {
+      const upstreamKey = template.upstreamModelField || "";
+      return (template.fieldSchemas || []).find((field) =>
+        field.key === upstreamKey || ["model_name", "model", "resource_id"].includes(field.key)
+      );
     },
     applyTemplateDefaults(template = {}) {
       const upstreamKey = template.upstreamModelField || "";
