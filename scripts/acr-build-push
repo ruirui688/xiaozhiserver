@@ -28,6 +28,15 @@ PARALLEL_IMAGE_BUILDS_CONFIGURED="${PARALLEL_IMAGE_BUILDS+x}"
 PARALLEL_RELEASE_STEPS="${PARALLEL_RELEASE_STEPS:-true}"
 PARALLEL_IMAGE_BUILDS="${PARALLEL_IMAGE_BUILDS:-true}"
 
+is_quiet() {
+  [[ "$VERBOSE" != "true" && "$XIAOZHI_DOCKER_QUIET" == "true" ]]
+}
+
+short_image_name() {
+  local image="$1"
+  printf '%s' "${image##*/}"
+}
+
 if [[ -z "${VERSION:-}" ]]; then
   if VERSION_TAG="$(git -C "$ROOT_DIR" describe --tags --exact-match 2>/dev/null)"; then
     VERSION="${VERSION_TAG#v}"
@@ -90,7 +99,21 @@ if [[ "$VERBOSE" != "true" && "$XIAOZHI_DOCKER_QUIET" == "true" && "$XIAOZHI_PRO
   fi
 fi
 
-cat <<EOF
+print_release_summary() {
+  if is_quiet; then
+    cat <<EOF
+ACR release
+  version:   $VERSION
+  images:    $(short_image_name "$SERVER_IMAGE_REPOSITORY:$VERSION"), $(short_image_name "$WEB_IMAGE_REPOSITORY:$VERSION")
+  runtime:   mysql:$MYSQL_TARGET_TAG, redis:$REDIS_TARGET_TAG
+  options:   engine=$BUILD_ENGINE base=$BUILD_BASE runtime=$MIRROR_RUNTIME_IMAGES parallel=$PARALLEL_RELEASE_STEPS/$PARALLEL_IMAGE_BUILDS
+  output:    quiet progress=$XIAOZHI_PROGRESS interval=${XIAOZHI_PROGRESS_INTERVAL}s
+
+EOF
+    return
+  fi
+
+  cat <<EOF
 Building and pushing xiaozhi images to Aliyun ACR.
 
 Version:
@@ -124,6 +147,9 @@ Parallelism:
 This command still needs access to Docker build base images unless you override
 PYTHON_BASE_IMAGE, NODE_BASE_IMAGE, MAVEN_BASE_IMAGE, and WEB_RUNTIME_BASE_IMAGE.
 EOF
+}
+
+print_release_summary
 
 mirror_runtime_images() {
   ACR_REGISTRY="$ACR_REGISTRY" \
@@ -153,9 +179,17 @@ should_mirror_runtime_images() {
   local missing=false
   for image in "$MYSQL_IMAGE_REPOSITORY:$MYSQL_TARGET_TAG" "$REDIS_IMAGE_REPOSITORY:$REDIS_TARGET_TAG"; do
     if docker manifest inspect "$image" >/dev/null 2>&1; then
-      echo "Runtime image already exists in ACR: $image"
+      if is_quiet; then
+        echo "Runtime OK: $(short_image_name "$image")"
+      else
+        echo "Runtime image already exists in ACR: $image"
+      fi
     else
-      echo "Runtime image missing in ACR, will mirror: $image"
+      if is_quiet; then
+        echo "Runtime mirror needed: $(short_image_name "$image")"
+      else
+        echo "Runtime image missing in ACR, will mirror: $image"
+      fi
       missing=true
     fi
   done

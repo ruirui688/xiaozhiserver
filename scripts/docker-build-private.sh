@@ -462,23 +462,35 @@ if [[ "$PRINT_BUILD_CONFIG" != "false" ]]; then
   fi
 fi
 if is_quiet; then
-  echo "Docker detail logs: $LOG_DIR"
-  echo "Set VERBOSE=true to show raw Docker build and push output."
+  echo "Logs: $LOG_DIR  (VERBOSE=true for raw Docker output)"
 fi
+
+print_base_image_status() {
+  local message="$1"
+  local image="${2:-}"
+
+  if is_quiet && [[ -n "$image" ]]; then
+    echo "$message: $(short_image_name "$image")"
+  elif [[ -n "$image" ]]; then
+    echo "$message: $image"
+  else
+    echo "$message"
+  fi
+}
 
 build_server_pipeline() {
   local server_base_image="${SERVER_BASE_IMAGE:-}"
 
   if [[ -n "$server_base_image" ]]; then
-    echo "Use explicit server base image: $server_base_image"
+    print_base_image_status "Base image explicit" "$server_base_image"
   elif [[ "$BUILD_BASE" == "false" ]]; then
     server_base_image="$SERVER_BASE_IMAGE_REPOSITORY:latest"
-    echo "Use latest server base image: $server_base_image"
+    print_base_image_status "Base image latest" "$server_base_image"
   elif [[ "$BUILD_BASE" == "auto" ]] && image_available_locally_or_remote "$SERVER_BASE_CACHE_IMAGE"; then
     server_base_image="$SERVER_BASE_CACHE_IMAGE"
-    echo "Use cached server base image: $server_base_image"
+    print_base_image_status "Base image cached" "$server_base_image"
   elif [[ "$BUILD_BASE" == "auto" ]] && image_available_locally_or_remote "$SERVER_BASE_IMAGE_REPOSITORY:latest"; then
-    echo "Use latest server base image as cache seed: $SERVER_BASE_IMAGE_REPOSITORY:latest"
+    print_base_image_status "Base image cache seed" "$SERVER_BASE_IMAGE_REPOSITORY:latest"
     if [[ "$BUILD_ENGINE" == "docker" ]]; then
       docker tag "$SERVER_BASE_IMAGE_REPOSITORY:latest" "$SERVER_BASE_CACHE_IMAGE"
       push_image "$SERVER_BASE_CACHE_IMAGE"

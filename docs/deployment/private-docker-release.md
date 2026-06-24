@@ -112,7 +112,7 @@ scripts/acr-build-push
 BUILD_BASE=true scripts/acr-build-push
 ```
 
-发布脚本默认隐藏 Docker 逐层构建和推送明细，只输出步骤摘要。完整日志会写入 `/tmp/xiaozhi-*` 临时目录。需要排查构建细节时使用：
+发布脚本默认隐藏 Docker 逐层构建和推送明细，只输出短摘要、运行时镜像状态、每个构建/推送步骤的进度和结果。完整日志会写入 `/tmp/xiaozhi-*` 临时目录。需要排查构建细节时使用：
 
 ```bash
 VERBOSE=true scripts/acr-build-push

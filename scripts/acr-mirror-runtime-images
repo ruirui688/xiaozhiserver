@@ -258,16 +258,20 @@ mirror_image() {
   run_docker_step "Push $(short_image_name "$target_repository:$tag")" docker push --quiet "$target_repository:$tag"
 }
 
-cat <<EOF
+if is_quiet; then
+  echo "Mirror runtime images: mysql:$(image_tag "$MYSQL_SOURCE_IMAGE"), redis:$(image_tag "$REDIS_SOURCE_IMAGE")"
+else
+  cat <<EOF
 Mirroring runtime dependency images to Aliyun ACR.
 
 Runtime image repositories:
   mysql: $MYSQL_IMAGE_REPOSITORY:$(image_tag "$MYSQL_SOURCE_IMAGE")
   redis: $REDIS_IMAGE_REPOSITORY:$(image_tag "$REDIS_SOURCE_IMAGE")
 EOF
+fi
 
 if is_quiet; then
-  echo "Docker detail logs: $LOG_DIR"
+  echo "Logs: $LOG_DIR"
 fi
 
 mirror_image "$MYSQL_SOURCE_IMAGE" "$MYSQL_IMAGE_REPOSITORY"

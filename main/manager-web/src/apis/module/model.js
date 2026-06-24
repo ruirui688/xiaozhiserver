@@ -13,20 +13,19 @@ function firstNonEmpty(...values) {
 function buildModelPayload(formData = {}, provideCode = '') {
   const params = { ...(formData.params || {}) };
   const secrets = { ...(formData.secrets || {}) };
-  const modelName = firstNonEmpty(formData.modelName, formData.displayName, formData.upstreamModelId);
-  const adapterCode = firstNonEmpty(formData.adapterCode, formData.providerCode, provideCode);
 
   return {
     id: formData.id,
-    modelName,
-    displayName: modelName,
-    adapterCode,
-    providerCode: adapterCode,
+    modelCode: formData.modelCode,
+    modelName: formData.modelName || formData.displayName,
+    displayName: formData.displayName || formData.modelName,
+    adapterCode: firstNonEmpty(formData.adapterCode, formData.providerCode, provideCode),
+    providerCode: firstNonEmpty(formData.providerCode, formData.adapterCode, provideCode),
     templateCode: formData.templateCode,
     vendorName: formData.vendorName,
     productName: formData.productName,
     protocol: firstNonEmpty(formData.protocol),
-    upstreamModelId: modelName,
+    upstreamModelId: firstNonEmpty(formData.upstreamModelId),
     endpointUrl: firstNonEmpty(formData.endpointUrl),
     params,
     secrets,
