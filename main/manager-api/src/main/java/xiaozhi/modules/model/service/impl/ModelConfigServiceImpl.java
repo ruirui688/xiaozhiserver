@@ -132,7 +132,8 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                         .eq("is_enabled", 1)
                         .eq("test_status", MODEL_TEST_PASSED)
                         .like(StringUtils.isNotBlank(modelName), "model_name", modelName)
-                        .select("id", "model_name")
+                        .select("id", "model_name", "model_code", "adapter_code", "vendor_name",
+                                "product_name", "protocol", "upstream_model_id")
                         .orderByAsc("sort"));
         return ConvertUtils.sourceToTarget(entities, ModelBasicInfoDTO.class);
     }
@@ -145,12 +146,19 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                         .eq("is_enabled", 1)
                         .eq("test_status", MODEL_TEST_PASSED)
                         .like(StringUtils.isNotBlank(modelName), "model_name", modelName)
-                        .select("id", "model_name", "adapter_code", "upstream_model_id", "endpoint_url"));
+                        .select("id", "model_name", "model_code", "adapter_code", "vendor_name",
+                                "product_name", "protocol", "upstream_model_id", "endpoint_url"));
 
         return attachRuntimeConfigs(entities).stream().map(item -> {
             LlmModelBasicInfoDTO dto = new LlmModelBasicInfoDTO();
             dto.setId(item.getId());
             dto.setModelName(item.getModelName());
+            dto.setModelCode(item.getModelCode());
+            dto.setAdapterCode(item.getAdapterCode());
+            dto.setVendorName(item.getVendorName());
+            dto.setProductName(item.getProductName());
+            dto.setProtocol(item.getProtocol());
+            dto.setUpstreamModelId(item.getUpstreamModelId());
             String type = item.getConfigJson() == null ? "" : item.getConfigJson().getOrDefault("type", "").toString();
             dto.setType(type);
             return dto;

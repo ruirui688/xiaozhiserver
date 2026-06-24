@@ -398,7 +398,7 @@ export default {
       ].filter(Boolean).join(" · ");
     },
     currentUpstreamLabel() {
-      return this.currentTemplate.upstreamResourceLabel || this.$t("modelConfigDialog.upstreamModel");
+      return this.normalizeUpstreamLabel(this.currentTemplate.upstreamResourceLabel);
     },
     upstreamModelOptions() {
       const field = this.getUpstreamModelField(this.currentTemplate);
@@ -811,6 +811,16 @@ export default {
       return (template.fieldSchemas || []).find((field) =>
         field.key === upstreamKey || ["model_name", "model", "resource_id"].includes(field.key)
       );
+    },
+    normalizeUpstreamLabel(label) {
+      const text = String(label || "").trim();
+      if (!text || ["模型", "模型名称", "模型名"].includes(text)) {
+        return this.$t("modelConfigDialog.upstreamModel");
+      }
+      if (["资源", "资源ID", "资源 ID"].includes(text)) {
+        return this.$t("modelConfigDialog.upstreamResource");
+      }
+      return text.startsWith("上游") ? text : `上游${text}`;
     },
     applyTemplateDefaults(template = {}) {
       const upstreamKey = template.upstreamModelField || "";

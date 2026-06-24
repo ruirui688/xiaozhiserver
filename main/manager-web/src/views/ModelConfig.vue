@@ -91,7 +91,9 @@
               >
                 <template slot-scope="scope">
                   <div class="model-primary">{{ scope.row.modelName }}</div>
-                  <div v-if="scope.row.modelCode" class="model-secondary">{{ scope.row.modelCode }}</div>
+                  <div v-if="scope.row.modelCode" class="model-secondary">
+                    {{ $t("modelConfig.internalCode") }}：{{ scope.row.modelCode }}
+                  </div>
                 </template>
               </el-table-column>
               <el-table-column

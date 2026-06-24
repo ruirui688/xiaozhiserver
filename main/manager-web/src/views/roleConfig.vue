@@ -195,6 +195,7 @@
                             clearable
                             :placeholder="$t('roleConfig.pleaseSelect')"
                             class="form-select"
+                            popper-class="model-select-dropdown"
                             @change="handleModelChange('VAD', $event)"
                           >
                             <el-option
@@ -202,7 +203,12 @@
                               :key="`option-vad-${optionIndex}`"
                               :label="item.label"
                               :value="item.value"
-                            />
+                            >
+                              <div class="model-option-content">
+                                <div class="model-option-title">{{ item.title || item.label }}</div>
+                                <div v-if="item.meta" class="model-option-meta">{{ item.meta }}</div>
+                              </div>
+                            </el-option>
                           </el-select>
                         </div>
                       </el-form-item>
@@ -222,6 +228,7 @@
                             clearable
                             :placeholder="$t('roleConfig.pleaseSelect')"
                             class="form-select"
+                            popper-class="model-select-dropdown"
                             @change="handleModelChange('ASR', $event)"
                           >
                             <el-option
@@ -229,7 +236,12 @@
                               :key="`option-asr-${optionIndex}`"
                               :label="item.label"
                               :value="item.value"
-                            />
+                            >
+                              <div class="model-option-content">
+                                <div class="model-option-title">{{ item.title || item.label }}</div>
+                                <div v-if="item.meta" class="model-option-meta">{{ item.meta }}</div>
+                              </div>
+                            </el-option>
                           </el-select>
                         </div>
                       </el-form-item>
@@ -248,6 +260,7 @@
                             clearable
                             :placeholder="$t('roleConfig.pleaseSelect')"
                             class="form-select"
+                            popper-class="model-select-dropdown"
                             @change="handleModelChange('LLM', $event)"
                           >
                             <el-option
@@ -255,7 +268,12 @@
                               :key="`option-llm-${optionIndex}`"
                               :label="item.label"
                               :value="item.value"
-                            />
+                            >
+                              <div class="model-option-content">
+                                <div class="model-option-title">{{ item.title || item.label }}</div>
+                                <div v-if="item.meta" class="model-option-meta">{{ item.meta }}</div>
+                              </div>
+                            </el-option>
                           </el-select>
                         </div>
                       </el-form-item>
@@ -272,13 +290,19 @@
                             clearable
                             :placeholder="$t('roleConfig.pleaseSelect')"
                             class="form-select"
+                            popper-class="model-select-dropdown"
                           >
                             <el-option
                               v-for="(item, optionIndex) in modelOptions['SLM']"
                               :key="`option-slm-${optionIndex}`"
                               :label="item.label"
                               :value="item.value"
-                            />
+                            >
+                              <div class="model-option-content">
+                                <div class="model-option-title">{{ item.title || item.label }}</div>
+                                <div v-if="item.meta" class="model-option-meta">{{ item.meta }}</div>
+                              </div>
+                            </el-option>
                           </el-select>
                         </div>
                       </el-form-item>
@@ -300,6 +324,7 @@
                           clearable
                           :placeholder="$t('roleConfig.pleaseSelect')"
                           class="form-select"
+                          popper-class="model-select-dropdown"
                           @change="handleModelChange(model.type, $event)"
                         >
                           <el-option
@@ -308,7 +333,12 @@
                             :key="`option-${index}-${optionIndex}`"
                             :label="item.label"
                             :value="item.value"
-                          />
+                          >
+                            <div class="model-option-content">
+                              <div class="model-option-title">{{ item.title || item.label }}</div>
+                              <div v-if="item.meta" class="model-option-meta">{{ item.meta }}</div>
+                            </div>
+                          </el-option>
                         </el-select>
                         <div
                           v-if="
@@ -810,11 +840,7 @@ export default {
         if (model.type != "LLM") {
           Api.model.getModelNames(model.type, "", ({ data }) => {
             if (data.code === 0) {
-              const options = data.data.map((item) => ({
-                value: item.id,
-                label: item.modelName,
-                isHidden: false,
-              }));
+              const options = data.data.map((item) => this.buildModelOption(item));
               this.$set(
                 this.modelOptions,
                 model.type,
@@ -835,13 +861,10 @@ export default {
             if (data.code === 0) {
               let LLMdata = [];
               data.data.forEach((item) => {
-                LLMdata.push({
-                  value: item.id,
-                  label: item.modelName,
-                  isHidden: false,
+                const option = this.buildModelOption(item);
+                LLMdata.push(option);
+                this.llmModeTypeMap.set(item.id, option.type);
               });
-              this.llmModeTypeMap.set(item.id, item.type);
-            });
               this.$set(this.modelOptions, model.type, LLMdata);
               this.queueNoAvailableModelWarning(model, LLMdata);
             } else {
@@ -850,6 +873,37 @@ export default {
           });
         }
       });
+    },
+    buildModelOption(item = {}) {
+      const configName = item.modelName || item.id || "";
+      const upstreamModel = item.upstreamModelId || "";
+      const title = upstreamModel || configName;
+      const provider = [item.vendorName, item.productName].filter(Boolean).join(" / ");
+      const adapter = item.adapterCode || item.type || "";
+      const protocol = item.protocol || "";
+      const metaParts = [];
+
+      if (upstreamModel && configName && configName !== upstreamModel) {
+        metaParts.push(`配置：${configName}`);
+      }
+      if (provider) {
+        metaParts.push(provider);
+      } else if (adapter) {
+        metaParts.push(adapter);
+      }
+      if (protocol) {
+        metaParts.push(protocol);
+      }
+
+      return {
+        value: item.id,
+        label: provider ? `${title} · ${provider}` : title,
+        title,
+        meta: metaParts.join(" · "),
+        type: item.type || item.adapterCode || "",
+        isHidden: false,
+        raw: item,
+      };
     },
     shouldWarnNoAvailableModel(model, options) {
       if (options.length > 0) {
@@ -2107,5 +2161,43 @@ export default {
 .custom-tooltip {
   max-width: 400px !important;
   word-break: break-word;
+}
+
+.model-select-dropdown .el-select-dropdown__item {
+  height: auto;
+  min-height: 46px;
+  line-height: normal;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.model-option-content {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+
+.model-option-title {
+  color: #303133;
+  font-size: 14px;
+  line-height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-option-meta {
+  color: #909399;
+  font-size: 12px;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-select-dropdown .el-select-dropdown__item.selected .model-option-title {
+  color: #409eff;
+  font-weight: 600;
 }
 </style>
