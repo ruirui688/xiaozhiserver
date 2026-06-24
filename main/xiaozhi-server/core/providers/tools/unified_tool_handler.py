@@ -3,6 +3,7 @@
 import json
 from typing import Dict, List, Any, Optional
 from config.logger import setup_logging
+from core.utils.util import is_placeholder_value
 from plugins_func.loadplugins import auto_import_modules
 
 from .base import ToolType
@@ -89,7 +90,7 @@ class UnifiedToolHandler:
 
             if (
                 mcp_endpoint_url
-                and "你的" not in mcp_endpoint_url
+                and not is_placeholder_value(mcp_endpoint_url)
                 and mcp_endpoint_url != "null"
             ):
                 self.logger.info(f"正在初始化MCP接入点: {mcp_endpoint_url}")

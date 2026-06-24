@@ -28,7 +28,7 @@ async def run_asr_samples(model, provider_type, config, iterations):
     if not audio_files:
         raise AsrTestAudioNotFound("未找到 ASR 测试音频")
 
-    include_audio_preview = bool(model.get("include_audio_preview"))
+    include_audio_preview = model.get("include_audio_preview") is not False
     asr = create_asr_instance(provider_type, config, delete_audio_file=True)
     asr.audio_format = "pcm"
     samples = []

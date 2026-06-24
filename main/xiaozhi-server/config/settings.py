@@ -16,7 +16,9 @@ def check_config_file():
     custom_config_file = get_project_dir() + "data/." + default_config_file
     if not os.path.exists(custom_config_file):
         raise FileNotFoundError(
-            "找不到data/.config.yaml文件，请按教程确认该配置文件是否存在"
+            f"找不到 {custom_config_file} 文件。\n"
+            f"请将 config.yaml 或 config_from_api.yaml 复制到 data/ 目录并重命名为 .config.yaml。\n"
+            f"例如: cp {get_project_dir()}config.yaml {custom_config_file}"
         )
 
     # 检查是否从API读取配置

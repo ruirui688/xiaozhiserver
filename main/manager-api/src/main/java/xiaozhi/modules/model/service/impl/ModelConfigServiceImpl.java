@@ -1240,6 +1240,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     }
 
     private ModelTestResultDTO testOpenAiCompatibleModel(JSONObject configJson) {
+        // TODO: migrate to LlmClient
         ModelTestResultDTO result = new ModelTestResultDTO();
         String baseUrl = configJson.getStr("base_url");
         String model = configJson.getStr("model_name");
@@ -1688,6 +1689,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     }
 
     private ModelTestResultDTO testOpenAiVisionModel(JSONObject configJson) {
+        // TODO: migrate to LlmClient
         ModelTestResultDTO result = new ModelTestResultDTO();
         String baseUrl = StringUtils.defaultIfBlank(configJson.getStr("base_url"), configJson.getStr("url"));
         String model = configJson.getStr("model_name");

@@ -19,16 +19,16 @@
 ## 项目结构
 
 ```text
-main/
+main/                 业务模块（[入口](./main/README.md)）
   xiaozhi-server/    Python 核心服务
   manager-api/       Java Spring Boot 管理后台 API
   manager-web/       Web 管理后台
   manager-mobile/    移动端管理后台
-docs/                项目文档
-scripts/dev          本地开发统一入口
-runtime/             本地运行产物目录，仅提交 .gitkeep
-config/examples/     脱敏配置示例
-deploy/              部署资产归档边界
+docs/                 项目文档（[入口](./docs/README.md)）
+scripts/              本地开发与发布脚本（[入口](./scripts/README.md)）
+runtime/              本地运行产物目录，仅提交 .gitkeep
+config/examples/      脱敏配置示例
+deploy/               部署资产归档边界（[入口](./deploy/README.md)）
 ```
 
 常用服务端口：

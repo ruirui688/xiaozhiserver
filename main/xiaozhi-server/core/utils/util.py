@@ -600,6 +600,25 @@ def validate_mcp_endpoint(mcp_endpoint: str) -> bool:
 
     return True
 
+PLACEHOLDER_PATTERNS = [
+    "你的", "你", "your_", "your ", "change_me", "changeme",
+    "todo", "TODO", "占位", "示例"
+]
+
+def is_placeholder_value(value):
+    """Check if a config value appears to be an unconfigured placeholder."""
+    if value is None:
+        return True
+    if not isinstance(value, str):
+        return False
+    if not value.strip():
+        return True
+    value_lower = value.lower().strip()
+    for pattern in PLACEHOLDER_PATTERNS:
+        if pattern.lower() in value_lower:
+            return True
+    return False
+
 def get_system_error_response(config: dict) -> str:
     """获取系统错误时的回复
 

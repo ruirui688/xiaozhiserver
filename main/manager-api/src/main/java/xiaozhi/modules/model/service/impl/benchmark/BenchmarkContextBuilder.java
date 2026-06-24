@@ -157,6 +157,9 @@ public class BenchmarkContextBuilder {
         item.set("model_type", model.getModelType());
         item.set("provider_type", model.getConfigJson().getStr("type"));
         item.set("config", model.getConfigJson());
+        if ("ASR".equalsIgnoreCase(StringUtils.defaultString(model.getModelType()))) {
+            item.set("include_audio_preview", true);
+        }
         return item;
     }
 

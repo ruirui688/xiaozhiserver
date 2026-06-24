@@ -37,7 +37,6 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
     private final ModelTemplateDao modelTemplateDao;
     private final ModelTemplateFieldDao modelTemplateFieldDao;
 
-    private static final List<ModelCatalogDTO> CATALOG = buildCatalog();
     private static final List<String> ALI_QWEN_TEXT_MODELS = List.of(
             "qwen3.7-max",
             "qwen3.7-plus",
@@ -83,6 +82,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             "qwen-omni-turbo",
             "qwen2.5-omni-7b",
             "qwq-plus");
+    private static final List<ModelCatalogDTO> CATALOG = buildCatalog();
     private static final Set<String> STATIC_FIELD_SCHEMA_TEMPLATE_CODES = Set.of(
             "ASR_FUN_SERVER",
             "ASR_DOUBAO_LEGACY_HTTP",
@@ -1521,7 +1521,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 .filter(field -> key.equals(field.getKey()))
                 .findFirst()
                 .ifPresent(field -> {
-                    field.setOptions(options);
+                    field.setOptions(options == null ? List.of() : options);
                     field.setInputType("select");
                 });
     }
