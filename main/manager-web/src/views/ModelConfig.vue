@@ -87,17 +87,17 @@
               <el-table-column
                 :label="$t('modelConfig.configName')"
                 align="left"
-                min-width="150"
+                min-width="140"
               >
                 <template slot-scope="scope">
                   <div class="model-primary">{{ scope.row.modelName }}</div>
-                  <div class="model-secondary">{{ scope.row.modelCode || scope.row.id }}</div>
+                  <div v-if="scope.row.modelCode" class="model-secondary">{{ scope.row.modelCode }}</div>
                 </template>
               </el-table-column>
               <el-table-column
                 :label="$t('modelConfig.upstreamModel')"
-                align="center"
-                min-width="105"
+                align="left"
+                min-width="150"
               >
                 <template slot-scope="scope">
                   <div class="upstream-cell">{{ getUpstreamModel(scope.row) }}</div>
@@ -116,9 +116,9 @@
                   >
                     <div class="catalog-cell">
                       <div class="catalog-main">
-                        {{ getVendorProduct(scope.row) }}
+                        <span class="catalog-vendor">{{ getVendorName(scope.row) }}</span>
                         <el-tag
-                          v-if="scope.row.supportedStatus"
+                          v-if="shouldShowCatalogStatusTag(scope.row)"
                           size="mini"
                           :type="getCatalogStatusTagType(scope.row)"
                           class="catalog-status-tag"
@@ -126,8 +126,8 @@
                           {{ getCatalogStatusText(scope.row) }}
                         </el-tag>
                       </div>
-                      <div class="catalog-sub">
-                        {{ getAccessSummary(scope.row) }}
+                      <div v-if="getProductName(scope.row)" class="catalog-sub">
+                        {{ getProductName(scope.row) }}
                       </div>
                     </div>
                   </el-tooltip>
@@ -813,18 +813,21 @@ export default {
         return "";
       }
       if (model.supportedStatus === "NEEDS_ADAPTER") {
-        return "待适配/不可启用";
+        return "待适配";
       }
       if (model.supportedStatus === "PARTIAL" || model.supportedStatus === "NEEDS_REVIEW") {
-        return "部分适配/需审核";
+        return "需审核";
       }
       if (model.supportedStatus === "DEPRECATED" || model.deprecated) {
         return "旧版兼容";
       }
-      if (model.migrationStatus === "NEEDS_REVIEW") {
-        return "部分适配/需审核";
+      if (model.selectable === false) {
+        return "不可启用";
       }
-      return "已适配/可直接配置测试";
+      if (model.migrationStatus === "NEEDS_REVIEW") {
+        return "需审核";
+      }
+      return "已适配";
     },
     getCatalogStatusTagType(model) {
       if (!model || !model.supportedStatus) {
@@ -839,15 +842,35 @@ export default {
       if (model.supportedStatus === "DEPRECATED" || model.deprecated) {
         return "info";
       }
+      if (model.selectable === false) {
+        return "warning";
+      }
       return "success";
     },
+    shouldShowCatalogStatusTag(model) {
+      if (!model) {
+        return false;
+      }
+      return model.selectable === false
+        || model.deprecated
+        || model.migrationStatus === "NEEDS_REVIEW"
+        || ["NEEDS_ADAPTER", "PARTIAL", "NEEDS_REVIEW", "DEPRECATED"].includes(model.supportedStatus);
+    },
     getVendorProduct(model) {
-      const vendor = (model && (model.vendorName || model.platformName)) || "";
-      const product = (model && model.productName) || "";
+      const vendor = this.getVendorName(model, "");
+      const product = this.getProductName(model);
       if (vendor && product) {
         return `${vendor} / ${product}`;
       }
       return this.displayValue(vendor || product);
+    },
+    getVendorName(model, fallback = this.$t("modelConfig.unknown")) {
+      const vendor = (model && (model.vendorName || model.platformName)) || "";
+      return this.displayValue(vendor, fallback);
+    },
+    getProductName(model) {
+      const product = (model && model.productName) || "";
+      return product;
     },
     handleTestModelResponse(data) {
       const result = data.data || {
@@ -1825,9 +1848,8 @@ export default {
 }
 
 .upstream-cell {
-  max-width: 150px;
-  margin: 0 auto;
-  color: #5e687d;
+  color: #303a52;
+  font-weight: 500;
   line-height: 20px;
   word-break: break-word;
 }
@@ -1848,6 +1870,13 @@ export default {
   min-width: 0;
 }
 
+.catalog-vendor {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .catalog-status-tag {
   flex: 0 0 auto;
 }
@@ -1857,10 +1886,9 @@ export default {
   font-size: 12px;
   line-height: 17px;
   margin-top: 4px;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .row-actions {
