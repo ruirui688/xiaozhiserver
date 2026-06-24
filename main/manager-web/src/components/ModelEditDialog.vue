@@ -382,7 +382,9 @@ export default {
       ];
     },
     currentTemplate() {
-      return this.findTemplate(this.form.templateCode) || {};
+      return this.findTemplate(this.form.templateCode)
+        || this.findTemplate(this.resolveTemplateCode(this.form.templateCode, this.form))
+        || {};
     },
     selectedTemplateBlocked() {
       return this.isBlockedTemplateStatus(this.currentTemplate);
@@ -474,7 +476,7 @@ export default {
     providerStatusText(item) {
       if (!item) return "";
       if (item.deprecated || item.supportedStatus === "DEPRECATED") return "不可用";
-      if (item.supportedStatus === "NEEDS_REVIEW") return "需审核";
+      if (item.supportedStatus === "NEEDS_REVIEW") return "待补全";
       if (item.supportedStatus === "PARTIAL") return "部分适配";
       if (item.supportedStatus === "NEEDS_ADAPTER") return "待接入";
       if (item.selectable === false) return "不可启用";
@@ -517,7 +519,7 @@ export default {
                 this.modelData.modelCode + this.$t("modelConfigDialog.copySuffix");
 
             }
-            this.pendingProviderType = model.templateCode || model.adapterCode || model.providerCode;
+            this.pendingProviderType = this.resolveTemplateCode(model.templateCode || model.modelCode || model.adapterCode || model.providerCode, model);
             this.pendingModelData = model;
 
             if (this.providersLoaded) {
@@ -631,6 +633,9 @@ export default {
         this.providersLoaded = true;
         this.allProvidersData = data;
 
+        if (this.pendingModelData) {
+          this.pendingProviderType = this.resolveTemplateCode(this.pendingProviderType, this.pendingModelData);
+        }
         if (this.pendingProviderType) {
           this.loadProviderFields(this.pendingProviderType);
         }
@@ -654,9 +659,53 @@ export default {
     findTemplate(templateCode) {
       return (this.allProvidersData || []).find((item) => item.templateCode === templateCode);
     },
+    resolveTemplateCode(templateCode, model = {}) {
+      if (this.isAliBailianQwenModel(model)) {
+        const template = this.findTemplate("LLM_ALI_QWEN_OPENAI");
+        if (template) {
+          return template.templateCode;
+        }
+      }
+      if (templateCode && this.findTemplate(templateCode)) {
+        return templateCode;
+      }
+      return templateCode;
+    },
+    isAliBailianQwenModel(model = {}) {
+      const params = model.params || {};
+      const configJson = model.configJson || {};
+      const values = [
+        model.id,
+        model.modelCode,
+        model.modelName,
+        model.templateCode,
+        model.vendorName,
+        model.productName,
+        model.upstreamModelId,
+        model.endpointUrl,
+        params.base_url,
+        params.api_url,
+        params.model_name,
+        params.model,
+        configJson.base_url,
+        configJson.api_url,
+        configJson.model_name,
+        configJson.model,
+      ].filter(Boolean).join(" ").toLowerCase();
+      return values.includes("llm_alillm")
+        || values.includes("alillm")
+        || values.includes("aliyun")
+        || values.includes("dashscope.aliyuncs.com")
+        || values.includes("阿里云百炼")
+        || values.includes("通义")
+        || values.includes("百炼")
+        || /\bqwq[-_\w.]*/.test(values)
+        || /\bqwen[-_\w.]*/.test(values);
+    },
     loadProviderFields(templateCode) {
       if (this.allProvidersData) {
-        const provider = this.findTemplate(templateCode) || (this.allProvidersData || []).find(
+        const resolvedTemplateCode = this.resolveTemplateCode(templateCode, this.pendingModelData || this.form);
+        const provider = this.findTemplate(resolvedTemplateCode) || this.findTemplate(templateCode) || (this.allProvidersData || []).find(
           (p) => p.providerCode === templateCode
         );
         if (provider) {
@@ -675,12 +724,13 @@ export default {
               advanced: !!f.advanced,
             }));
 
-          if (this.pendingModelData && (this.pendingProviderType === templateCode || this.pendingProviderType === provider.providerCode)) {
-            if (!this.pendingModelData.templateCode) {
-              this.pendingModelData.templateCode = provider.templateCode;
-              this.pendingModelData.adapterCode = provider.providerCode;
-              this.pendingModelData.providerCode = provider.providerCode;
-            }
+          if (this.pendingModelData) {
+            this.pendingModelData.templateCode = provider.templateCode;
+            this.pendingModelData.adapterCode = provider.providerCode;
+            this.pendingModelData.providerCode = provider.providerCode;
+            this.pendingModelData.vendorName = provider.vendorName || this.pendingModelData.vendorName;
+            this.pendingModelData.productName = provider.productName || this.pendingModelData.productName;
+            this.pendingModelData.protocol = provider.protocolLabel || this.pendingModelData.protocol;
             this.processModelData(this.pendingModelData);
             this.pendingModelData = null;
             this.pendingProviderType = null;
