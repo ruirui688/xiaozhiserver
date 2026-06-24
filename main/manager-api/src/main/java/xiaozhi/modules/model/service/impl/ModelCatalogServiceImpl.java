@@ -37,7 +37,6 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
     private final ModelTemplateDao modelTemplateDao;
     private final ModelTemplateFieldDao modelTemplateFieldDao;
 
-    private static final List<ModelCatalogDTO> CATALOG = buildCatalog();
     private static final List<String> ALI_QWEN_TEXT_MODELS = List.of(
             "qwen3.7-max",
             "qwen3.7-plus",
@@ -83,6 +82,14 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             "qwen-omni-turbo",
             "qwen2.5-omni-7b",
             "qwq-plus");
+    private static final List<String> DOUBAO_SEED_TEXT_MODELS = List.of(
+            "doubao-seed-evolving",
+            "doubao-seed-2-1-turbo-260628",
+            "doubao-seed-2-1-pro-260628",
+            "doubao-seed-2-0-pro-260215",
+            "doubao-seed-2-0-mini-260428",
+            "doubao-seed-2-0-lite-260428");
+    private static final List<ModelCatalogDTO> CATALOG = buildCatalog();
     private static final Set<String> STATIC_FIELD_SCHEMA_TEMPLATE_CODES = Set.of(
             "ASR_FUN_SERVER",
             "ASR_DOUBAO_LEGACY_HTTP",
@@ -120,7 +127,6 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             "LLM_OPENAI_COMPATIBLE",
             "LLM_ALI_QWEN_OPENAI",
             "LLM_ALI_QWEN_OMNI_REALTIME",
-            "LLM_DOUBAO_ARK_OPENAI",
             "LLM_DOUBAO_SEED_OPENAI",
             "LLM_DEEPSEEK_OPENAI",
             "LLM_ZHIPU_GLM_OPENAI",
@@ -308,7 +314,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             if (haystack.contains("seed")) {
                 return find("LLM_DOUBAO_SEED_OPENAI");
             }
-            return find("LLM_DOUBAO_ARK_OPENAI");
+            return find("LLM_OPENAI_COMPATIBLE");
         }
         if (haystack.contains("deepseek")) {
             return find("LLM_DEEPSEEK_OPENAI");
@@ -1054,12 +1060,18 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 "当前项目没有独立 Realtime provider；连接形态是 wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=qwen3.5-omni-plus-realtime，事件协议包含 session.update、input_audio_buffer.append/commit、response.create、response.audio.delta、response.text.delta 和 response.function_call_arguments.delta/done，不能套用普通 OpenAI Chat 或百炼 Application adapter。",
                 "https://help.aliyun.com/zh/model-studio",
                 List.of("qwen3.5-omni-plus-realtime", "qwen3.5-omni-flash-realtime", "qwen3-omni-flash-realtime")));
-        items.add(openAiLlm("LLM_DOUBAO_ARK_OPENAI", "火山引擎", "豆包方舟", "OpenAI 兼容聊天", "doubao-1-5-pro",
-                "通过火山方舟 OpenAI 兼容接口接入豆包模型。", List.of("DoubaoLLM", "ark.cn")));
-        items.add(openAiLlm("LLM_DOUBAO_SEED_OPENAI", "火山引擎", "豆包 Seed 系列", "OpenAI 兼容聊天",
-                "doubao-seed-1-6 / doubao-seed-2-0",
-                "通过火山方舟 OpenAI 兼容接口接入豆包 Seed 系列；具体 model_name 以方舟控制台开通结果为准。",
-                List.of("doubao-seed", "doubao-seed-1-6", "doubao-seed-2-0")));
+        ModelCatalogDTO doubaoSeed = openAiLlm("LLM_DOUBAO_SEED_OPENAI", "火山引擎", "豆包 Seed 系列",
+                "OpenAI 兼容聊天",
+                "Doubao-Seed-Evolving / Doubao-Seed-2.1-turbo / Doubao-Seed-2.1-pro / Doubao-Seed-2.0 系列",
+                "通过火山方舟 OpenAI 兼容接口接入豆包 Seed 系列；model_name 必须填写方舟控制台已开通的具体模型 ID。",
+                List.of("doubao-seed", "doubao-seed-evolving", "doubao-seed-2-1", "doubao-seed-2-0"));
+        doubaoSeed.setDocLink("https://www.volcengine.com/docs/82379/1554709");
+        doubaoSeed.setAvoidWhen("不要填写 doubao-seed-2-0 这类泛化系列名；方舟 Chat Completions 要求 model 精确等于控制台已开通模型 ID。");
+        doubaoSeed.setKnownLimitations(List.of(
+                "方舟开通管理中的展示名通常是 Doubao-Seed-2.1-turbo 这类产品名；实际 model 参数需要使用控制台或官方模型列表中的可调用 ID，例如 doubao-seed-2-1-turbo-260628。短 ID 在部分账号或套餐下可能返回 NotFound。",
+                "账号未开通对应模型时，即使 ID 正确也会返回无权限或 NotFound。"));
+        doubaoSeed.setSourceCheckedAt("2026-06-24");
+        items.add(doubaoSeed);
         items.add(unavailable("LLM_DOUBAO_AUDIO_UNDERSTANDING", "LLM", "火山引擎",
                 "方舟音频理解", "llm", "Chat/Responses 音频理解", "OpenAI 兼容多模态",
                 "音频问答、语音内容理解。",
@@ -1341,15 +1353,10 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 setFieldDefault(dto, "model_name", "qwen3.7-max");
                 setFieldOptions(dto, "model_name", ALI_QWEN_TEXT_MODELS);
             }
-            case "LLM_DOUBAO_ARK_OPENAI" -> {
-                setFieldDefault(dto, "base_url", "https://ark.cn-beijing.volces.com/api/v3");
-                setFieldDefault(dto, "model_name", "doubao-1-5-pro");
-                setFieldOptions(dto, "model_name", List.of("doubao-1-5-pro", "doubao-1-5-lite", "doubao-pro-32k-functioncall-241028"));
-            }
             case "LLM_DOUBAO_SEED_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "https://ark.cn-beijing.volces.com/api/v3");
-                setFieldDefault(dto, "model_name", "doubao-seed-1-6");
-                setFieldOptions(dto, "model_name", List.of("doubao-seed-1-6", "doubao-seed-1-6-flash", "doubao-seed-2-0"));
+                setFieldDefault(dto, "model_name", "doubao-seed-2-1-turbo-260628");
+                setFieldOptions(dto, "model_name", DOUBAO_SEED_TEXT_MODELS);
             }
             case "LLM_DEEPSEEK_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "https://api.deepseek.com");
@@ -1421,6 +1428,21 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 setFieldOptions(dto, "model", List.of("paraformer-realtime-v2", "paraformer-realtime-v1", "paraformer-realtime-8k-v1"));
             }
             case "TTS_DOUBAO_HTTP" -> setFieldDefault(dto, "api_url", "https://openspeech.bytedance.com/api/v1/tts");
+            case "TTS_EDGE" -> {
+                setFieldDefault(dto, "voice", "zh-CN-XiaoxiaoNeural");
+                setFieldOptions(dto, "voice", List.of(
+                        "zh-CN-XiaoxiaoNeural",
+                        "zh-CN-YunyangNeural",
+                        "zh-CN-XiaoyiNeural",
+                        "zh-CN-YunjianNeural",
+                        "zh-CN-YunxiNeural",
+                        "zh-CN-YunxiaNeural",
+                        "zh-CN-liaoning-XiaobeiNeural",
+                        "zh-CN-shaanxi-XiaoniNeural",
+                        "zh-HK-HiuGaaiNeural",
+                        "zh-HK-HiuMaanNeural",
+                        "zh-HK-WanLungNeural"));
+            }
             case "TTS_SILICONFLOW_COSYVOICE" -> {
                 setFieldDefault(dto, "model", "FunAudioLLM/CosyVoice2-0.5B");
                 setFieldDefault(dto, "voice", "FunAudioLLM/CosyVoice2-0.5B:alex");
@@ -1521,7 +1543,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 .filter(field -> key.equals(field.getKey()))
                 .findFirst()
                 .ifPresent(field -> {
-                    field.setOptions(options);
+                    field.setOptions(options == null ? List.of() : options);
                     field.setInputType("select");
                 });
     }

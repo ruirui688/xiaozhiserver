@@ -245,6 +245,7 @@ public class BenchmarkCaseGenerator {
     }
 
     private String invokeLlm(ModelConfigEntity llmModel, String prompt) {
+        // TODO: migrate to LlmClient
         JSONObject config = llmModel.getConfigJson();
         String apiUrl = normalizeChatCompletionsUrl(config.getStr("base_url"));
 

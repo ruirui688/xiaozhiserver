@@ -704,6 +704,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     }
 
     private String requestLlmMessageContent(Map<String, Object> requestBody) throws Exception {
+        // TODO: migrate to LlmClient
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.setBearerAuth(llmApiKey);

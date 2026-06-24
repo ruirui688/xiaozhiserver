@@ -20,7 +20,8 @@ def get_project_dir():
 
 
 def _is_placeholder_config_value(value):
-    return value is None or value == "" or value == "null" or "你的" in str(value)
+    from core.utils.util import is_placeholder_value
+    return is_placeholder_value(value) or value == "null"
 
 
 def read_config(config_path):
@@ -43,7 +44,11 @@ def load_config():
 
     # 加载默认配置
     default_config = read_config(default_config_path)
-    custom_config = read_config(custom_config_path)
+    try:
+        custom_config = read_config(custom_config_path)
+    except FileNotFoundError:
+        print(f"警告：自定义配置文件 {custom_config_path} 不存在，仅使用默认配置")
+        custom_config = {}
 
     if custom_config.get("manager-api", {}).get("url"):
         import asyncio

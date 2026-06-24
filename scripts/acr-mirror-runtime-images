@@ -9,10 +9,47 @@ MYSQL_IMAGE_REPOSITORY="${MYSQL_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/m
 REDIS_IMAGE_REPOSITORY="${REDIS_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/redis}"
 VERBOSE="${VERBOSE:-false}"
 XIAOZHI_DOCKER_QUIET="${XIAOZHI_DOCKER_QUIET:-true}"
+XIAOZHI_PROGRESS="${XIAOZHI_PROGRESS:-true}"
+XIAOZHI_PROGRESS_INTERVAL="${XIAOZHI_PROGRESS_INTERVAL:-30}"
+XIAOZHI_PROGRESS_ANIMATION_INTERVAL="${XIAOZHI_PROGRESS_ANIMATION_INTERVAL:-0.12}"
 LOG_DIR="${LOG_DIR:-$(mktemp -d -t xiaozhi-acr-mirror.XXXXXX)}"
 
 is_quiet() {
   [[ "$VERBOSE" != "true" && "$XIAOZHI_DOCKER_QUIET" == "true" ]]
+}
+
+progress_enabled() {
+  [[ "$XIAOZHI_PROGRESS" == "true" && "$XIAOZHI_PROGRESS_INTERVAL" =~ ^[0-9]+$ && "$XIAOZHI_PROGRESS_INTERVAL" -gt 0 ]]
+}
+
+if [[ "$XIAOZHI_PROGRESS" != "true" && "$XIAOZHI_PROGRESS" != "false" ]]; then
+  echo "XIAOZHI_PROGRESS must be true or false" >&2
+  exit 1
+fi
+
+if [[ ! "$XIAOZHI_PROGRESS_INTERVAL" =~ ^[0-9]+$ || "$XIAOZHI_PROGRESS_INTERVAL" -le 0 ]]; then
+  echo "XIAOZHI_PROGRESS_INTERVAL must be a positive integer" >&2
+  exit 1
+fi
+
+if [[ ! "$XIAOZHI_PROGRESS_ANIMATION_INTERVAL" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+  echo "XIAOZHI_PROGRESS_ANIMATION_INTERVAL must be a positive number" >&2
+  exit 1
+fi
+
+format_duration() {
+  local seconds="$1"
+  printf '%02d:%02d' "$((seconds / 60))" "$((seconds % 60))"
+}
+
+supports_unicode() {
+  local charset="${LC_ALL:-${LC_CTYPE:-${LANG:-}}}"
+  [[ "$charset" == *UTF-8* || "$charset" == *utf8* || "$charset" == *utf-8* ]]
+}
+
+short_image_name() {
+  local image="$1"
+  printf '%s' "${image##*/}"
 }
 
 image_tag() {
@@ -25,24 +62,189 @@ image_tag() {
   echo "${tail##*:}"
 }
 
+progress_label() {
+  local label="$1"
+  if [[ "${#label}" -gt 30 ]]; then
+    printf '%s...' "${label:0:27}"
+  else
+    printf '%s' "$label"
+  fi
+}
+
+progress_frames_unicode() {
+  printf '%s\n' \
+    '╺━━━━━━━━━━━━━━' '━╺━━━━━━━━━━━━━' '━━╺━━━━━━━━━━━━' '━━━╺━━━━━━━━━━━' \
+    '━━━━╺━━━━━━━━━━' '━━━━━╺━━━━━━━━━' '━━━━━━╺━━━━━━━━' '━━━━━━━╺━━━━━━━' \
+    '━━━━━━━━╺━━━━━━' '━━━━━━━━━╺━━━━━' '━━━━━━━━━━╺━━━━' '━━━━━━━━━━━╺━━━' \
+    '━━━━━━━━━━━━╺━━' '━━━━━━━━━━━━━╺━' '━━━━━━━━━━━━━━╸' '━━━━━━━━━━━━━╸━' \
+    '━━━━━━━━━━━━╸━━' '━━━━━━━━━━━╸━━━' '━━━━━━━━━━╸━━━━' '━━━━━━━━━╸━━━━━' \
+    '━━━━━━━━╸━━━━━━' '━━━━━━━╸━━━━━━━' '━━━━━━╸━━━━━━━━' '━━━━━╸━━━━━━━━━' \
+    '━━━━╸━━━━━━━━━━' '━━━╸━━━━━━━━━━━' '━━╸━━━━━━━━━━━━' '━╸━━━━━━━━━━━━━'
+}
+
+progress_frames_ascii() {
+  printf '%s\n' \
+    '>..............' '.>.............' '..>............' '...>...........' \
+    '....>..........' '.....>.........' '......>........' '.......>.......' \
+    '........>......' '.........>.....' '..........>....' '...........>...' \
+    '............>..' '.............>.' '..............>' '.............<.' \
+    '............<..' '...........<...' '..........<....' '.........<.....' \
+    '........<......' '.......<.......' '......<........' '.....<.........' \
+    '....<..........' '...<...........' '..<............' '.<.............'
+}
+
+restore_progress_line() {
+  printf '\r\033[2K\033[?25h'
+}
+
+watch_background_task() {
+  local pid="$1"
+  local label="$2"
+  local log_file="$3"
+  local display_label
+  local start_time
+  local now
+  local elapsed
+  local elapsed_text
+  local exit_code
+  start_time="$(date +%s)"
+  display_label="$(progress_label "$label")"
+
+  if ! progress_enabled; then
+    set +e
+    wait "$pid"
+    exit_code=$?
+    set -e
+    elapsed_text="$(format_duration "$(($(date +%s) - start_time))")"
+    if [[ "$exit_code" -eq 0 ]]; then
+      echo "  OK ($elapsed_text)"
+    else
+      echo "  FAILED after $elapsed_text. Full log: $log_file" >&2
+    fi
+    return "$exit_code"
+  fi
+
+  local done_icon="OK"
+  local fail_icon="FAIL"
+  local green=$'\033[32m'
+  local red=$'\033[31m'
+  local cyan=$'\033[36m'
+  local dim=$'\033[2m'
+  local reset=$'\033[0m'
+
+  if [[ ! -t 1 ]]; then
+    printf '• %s started  log: %s\n' "$display_label" "$log_file"
+    trap 'kill "$pid" 2>/dev/null || true; exit 130' INT
+    trap 'kill "$pid" 2>/dev/null || true; exit 143' TERM
+
+    while kill -0 "$pid" 2>/dev/null; do
+      sleep "$XIAOZHI_PROGRESS_INTERVAL"
+      if kill -0 "$pid" 2>/dev/null; then
+        now="$(date +%s)"
+        elapsed=$((now - start_time))
+        elapsed_text="$(format_duration "$elapsed")"
+        printf '• %s still running  elapsed: %s  log: %s\n' "$display_label" "$elapsed_text" "$log_file"
+      fi
+    done
+
+    set +e
+    wait "$pid"
+    exit_code=$?
+    set -e
+    elapsed_text="$(format_duration "$(($(date +%s) - start_time))")"
+
+    if supports_unicode; then
+      done_icon="✓"
+      fail_icon="✗"
+    fi
+
+    if [[ "$exit_code" -eq 0 ]]; then
+      printf '%s %s completed  elapsed: %s\n' "$done_icon" "$display_label" "$elapsed_text"
+    else
+      printf '%s %s failed  elapsed: %s  log: %s\n' "$fail_icon" "$display_label" "$elapsed_text" "$log_file" >&2
+    fi
+
+    trap - INT TERM
+    return "$exit_code"
+  fi
+
+  local -a spinner
+  local -a progress_frames
+  if supports_unicode; then
+    spinner=( '⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏' )
+    mapfile -t progress_frames < <(progress_frames_unicode)
+    done_icon="✔"
+    fail_icon="✖"
+  else
+    spinner=( '|' '/' '-' '\\' )
+    mapfile -t progress_frames < <(progress_frames_ascii)
+  fi
+
+  local spinner_index=0
+  local progress_index=0
+
+  printf '\033[?25l'
+  trap 'restore_progress_line; kill "$pid" 2>/dev/null || true; exit 130' INT
+  trap 'restore_progress_line; kill "$pid" 2>/dev/null || true; exit 143' TERM
+  trap 'restore_progress_line' EXIT
+
+  while kill -0 "$pid" 2>/dev/null; do
+    now="$(date +%s)"
+    elapsed=$((now - start_time))
+    elapsed_text="$(format_duration "$elapsed")"
+
+    printf '\r\033[2K%s%s%s  %-30s %s%s%s   %s' \
+      "$cyan" "${spinner[$spinner_index]}" "$reset" \
+      "$display_label" \
+      "$dim" "${progress_frames[$progress_index]}" "$reset" \
+      "$elapsed_text"
+
+    spinner_index=$(((spinner_index + 1) % ${#spinner[@]}))
+    progress_index=$(((progress_index + 1) % ${#progress_frames[@]}))
+    sleep "$XIAOZHI_PROGRESS_ANIMATION_INTERVAL"
+  done
+
+  set +e
+  wait "$pid"
+  exit_code=$?
+  set -e
+  elapsed_text="$(format_duration "$(($(date +%s) - start_time))")"
+
+  printf '\r\033[2K'
+  if [[ "$exit_code" -eq 0 ]]; then
+    printf '%s%s%s  %-30s %scompleted%s   %s\n' \
+      "$green" "$done_icon" "$reset" "$display_label" "$green" "$reset" "$elapsed_text"
+  else
+    printf '%s%s%s  %-30s %sfailed%s      %s\n' \
+      "$red" "$fail_icon" "$reset" "$display_label" "$red" "$reset" "$elapsed_text" >&2
+    printf '   %sLog:%s %s\n' "$dim" "$reset" "$log_file" >&2
+  fi
+
+  printf '\033[?25h'
+  trap - EXIT INT TERM
+  return "$exit_code"
+}
+
 run_docker_step() {
   local label="$1"
   shift
 
-  echo "$label"
   if ! is_quiet; then
+    echo "$label"
     "$@"
     return
   fi
 
   local log_file="$LOG_DIR/$(printf '%s' "$label" | tr -cs '[:alnum:]_.-' '_' | sed 's/^_*//; s/_*$//').log"
-  if "$@" >"$log_file" 2>&1; then
-    echo "  OK"
-  else
-    echo "  FAILED. Full log: $log_file" >&2
-    tail -n 80 "$log_file" >&2 || true
-    return 1
+  local cmd_pid
+
+  if ! progress_enabled; then
+    echo "$label"
   fi
+
+  "$@" >"$log_file" 2>&1 &
+  cmd_pid=$!
+  watch_background_task "$cmd_pid" "$label" "$log_file"
 }
 
 mirror_image() {
@@ -51,21 +253,25 @@ mirror_image() {
   local tag
   tag="$(image_tag "$source_image")"
 
-  run_docker_step "Pull $source_image" docker pull --quiet "$source_image"
+  run_docker_step "Pull $(short_image_name "$source_image")" docker pull --quiet "$source_image"
   docker tag "$source_image" "$target_repository:$tag"
-  run_docker_step "Push $target_repository:$tag" docker push --quiet "$target_repository:$tag"
+  run_docker_step "Push $(short_image_name "$target_repository:$tag")" docker push --quiet "$target_repository:$tag"
 }
 
-cat <<EOF
+if is_quiet; then
+  echo "Mirror runtime images: mysql:$(image_tag "$MYSQL_SOURCE_IMAGE"), redis:$(image_tag "$REDIS_SOURCE_IMAGE")"
+else
+  cat <<EOF
 Mirroring runtime dependency images to Aliyun ACR.
 
 Runtime image repositories:
   mysql: $MYSQL_IMAGE_REPOSITORY:$(image_tag "$MYSQL_SOURCE_IMAGE")
   redis: $REDIS_IMAGE_REPOSITORY:$(image_tag "$REDIS_SOURCE_IMAGE")
 EOF
+fi
 
 if is_quiet; then
-  echo "Docker detail logs: $LOG_DIR"
+  echo "Logs: $LOG_DIR"
 fi
 
 mirror_image "$MYSQL_SOURCE_IMAGE" "$MYSQL_IMAGE_REPOSITORY"

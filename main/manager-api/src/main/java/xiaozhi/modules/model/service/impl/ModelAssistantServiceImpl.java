@@ -14,13 +14,7 @@ import java.util.Map;
 import java.util.Set;
 
 import org.apache.commons.lang3.StringUtils;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
 
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
@@ -28,6 +22,7 @@ import cn.hutool.json.JSONUtil;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import xiaozhi.common.exception.RenException;
+import xiaozhi.common.llm.LlmClient;
 import xiaozhi.modules.model.dto.ModelAssistantApplyRequestDTO;
 import xiaozhi.modules.model.dto.ModelAssistantApplyResponseDTO;
 import xiaozhi.modules.model.dto.ModelAssistantApplyResponseDTO.ArtifactWriteResultDTO;
@@ -73,7 +68,7 @@ public class ModelAssistantServiceImpl implements ModelAssistantService {
     private final SysParamsService sysParamsService;
     private final ModelConfigService modelConfigService;
     private final ModelCatalogService modelCatalogService;
-    private final RestTemplate restTemplate;
+    private final LlmClient llmClient;
 
     @Override
     public ModelAssistantSettingsDTO getSettings() {
@@ -250,31 +245,20 @@ public class ModelAssistantServiceImpl implements ModelAssistantService {
     private String invokeLlm(ModelConfigEntity llmModel, String prompt) {
         JSONObject config = llmModel.getConfigJson();
         String apiUrl = normalizeChatCompletionsUrl(config.getStr("base_url"));
+        String apiKey = config.getStr("api_key");
+        String model = config.getStr("model_name");
 
-        Map<String, Object> requestBody = new LinkedHashMap<>();
-        requestBody.put("model", config.getStr("model_name"));
-        requestBody.put("messages", List.of(
-                Map.of("role", "user", "content", prompt)));
-        requestBody.put("max_tokens", defaultNumber(config.getInt("max_tokens"), 3000));
+        List<Map<String, String>> messages = List.of(
+                Map.of("role", "user", "content", prompt));
+
+        Map<String, Object> options = new LinkedHashMap<>();
+        options.put("max_tokens", defaultNumber(config.getInt("max_tokens"), 3000));
         if (!StringUtils.containsIgnoreCase(config.getStr("base_url"), "api.deepseek.com")) {
-            requestBody.put("temperature", defaultDouble(config.getDouble("temperature"), 0.2D));
+            options.put("temperature", defaultDouble(config.getDouble("temperature"), 0.2D));
         }
-        applyDeepSeekOptions(config, requestBody);
+        applyDeepSeekOptions(config, options);
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.setBearerAuth(config.getStr("api_key"));
-
-        ResponseEntity<String> response = restTemplate.exchange(
-                apiUrl,
-                HttpMethod.POST,
-                new HttpEntity<>(requestBody, headers),
-                String.class);
-        if (!response.getStatusCode().is2xxSuccessful()) {
-            throw new RenException("助手 LLM 调用失败：" + response.getStatusCode());
-        }
-
-        JSONObject body = JSONUtil.parseObj(response.getBody());
+        JSONObject body = (JSONObject) llmClient.chatCompletion(apiUrl, apiKey, model, messages, options);
         JSONArray choices = body.getJSONArray("choices");
         if (choices == null || choices.isEmpty()) {
             throw new RenException("助手 LLM 没有返回候选结果");

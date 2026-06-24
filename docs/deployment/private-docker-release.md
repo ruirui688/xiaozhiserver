@@ -112,10 +112,18 @@ scripts/acr-build-push
 BUILD_BASE=true scripts/acr-build-push
 ```
 
-发布脚本默认隐藏 Docker 逐层构建和推送明细，只输出步骤摘要。完整日志会写入 `/tmp/xiaozhi-*` 临时目录。需要排查构建细节时使用：
+发布脚本默认隐藏 Docker 逐层构建和推送明细，只输出短摘要、运行时镜像状态、每个构建/推送步骤的进度和结果。完整日志会写入 `/tmp/xiaozhi-*` 临时目录。需要排查构建细节时使用：
 
 ```bash
 VERBOSE=true scripts/acr-build-push
+```
+
+安静输出下，交互式终端默认在同一行显示 `⠴ Build manager web/api image ━━━━━╸━━━━━━━━━ 00:35` 这类不确定进度条，只表示任务仍在运行，不代表真实百分比；为避免多个后台任务抢占同一行，交互式安静进度模式默认串行执行步骤，显式设置并行变量时仍可并行。非 TTY 日志会按 `XIAOZHI_PROGRESS_INTERVAL` 保留多行心跳，Docker 原始进度仍写入临时日志。需要调整或关闭时使用：
+
+```bash
+XIAOZHI_PROGRESS_INTERVAL=10 scripts/acr-build-push
+XIAOZHI_PROGRESS=false scripts/acr-build-push
+PARALLEL_RELEASE_STEPS=true PARALLEL_IMAGE_BUILDS=true scripts/acr-build-push
 ```
 
 如需多架构镜像，再显式启用 buildx：

@@ -1,4 +1,7 @@
 ## 智控台移动版（manager-mobile）
+
+本文档是开发类文档，如需部署小智服务端，[点击这里查看部署教程](../../docs/deployment/private-docker-release.md)。
+
 基于 uni-app v3 + Vue 3 + Vite 的跨端移动管理端，支持 App（Android & iOS）和微信小程序。
 
 ### 平台兼容性

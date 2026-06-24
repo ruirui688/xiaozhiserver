@@ -5,7 +5,7 @@ import asyncio
 from aioconsole import ainput
 from config.settings import load_config
 from config.logger import setup_logging
-from core.utils.util import get_local_ip, validate_mcp_endpoint
+from core.utils.util import get_local_ip, validate_mcp_endpoint, is_placeholder_value
 from core.http_server import SimpleHttpServer
 from core.websocket_server import WebSocketServer
 from core.utils.util import check_ffmpeg_installed
@@ -53,10 +53,10 @@ async def main():
     auth_key = config["server"].get("auth_key", "")
     
     # 验证auth_key，无效则尝试使用manager-api.secret
-    if not auth_key or len(auth_key) == 0 or "你" in auth_key:
+    if not auth_key or len(auth_key) == 0 or is_placeholder_value(auth_key):
         auth_key = config.get("manager-api", {}).get("secret", "")
         # 验证secret，无效则生成随机密钥
-        if not auth_key or len(auth_key) == 0 or "你" in auth_key:
+        if not auth_key or len(auth_key) == 0 or is_placeholder_value(auth_key):
             auth_key = str(uuid.uuid4().hex)
     
     config["server"]["auth_key"] = auth_key
@@ -91,7 +91,7 @@ async def main():
         port,
     )
     mcp_endpoint = config.get("mcp_endpoint", None)
-    if mcp_endpoint is not None and "你" not in mcp_endpoint:
+    if mcp_endpoint is not None and not is_placeholder_value(mcp_endpoint):
         # 校验MCP接入点格式
         if validate_mcp_endpoint(mcp_endpoint):
             logger.bind(tag=TAG).info("mcp接入点是\t{}", mcp_endpoint)

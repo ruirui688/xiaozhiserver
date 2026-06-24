@@ -1,6 +1,7 @@
 import asyncio
 from aiohttp import web
 from config.logger import setup_logging
+from core.utils.util import is_placeholder_value
 from core.api.ota_handler import OTAHandler
 from core.api.vision_handler import VisionHandler
 from core.api.device_mcp_handler import DeviceMcpHandler
@@ -31,7 +32,7 @@ class SimpleHttpServer:
         server_config = self.config["server"]
         websocket_config = server_config.get("websocket")
 
-        if websocket_config and "你" not in websocket_config:
+        if websocket_config and not is_placeholder_value(websocket_config):
             return websocket_config
         else:
             return f"ws://{local_ip}:{port}/xiaozhi/v1/"

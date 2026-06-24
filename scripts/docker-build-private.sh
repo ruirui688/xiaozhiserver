@@ -32,6 +32,9 @@ BUILDKIT_HTTPS_PROXY="${BUILDKIT_HTTPS_PROXY:-${HTTPS_PROXY:-${https_proxy:-}}}"
 BUILDKIT_NO_PROXY="${BUILDKIT_NO_PROXY:-${NO_PROXY:-${no_proxy:-}}}"
 VERBOSE="${VERBOSE:-false}"
 XIAOZHI_DOCKER_QUIET="${XIAOZHI_DOCKER_QUIET:-true}"
+XIAOZHI_PROGRESS="${XIAOZHI_PROGRESS:-true}"
+XIAOZHI_PROGRESS_INTERVAL="${XIAOZHI_PROGRESS_INTERVAL:-30}"
+XIAOZHI_PROGRESS_ANIMATION_INTERVAL="${XIAOZHI_PROGRESS_ANIMATION_INTERVAL:-0.12}"
 PARALLEL_IMAGE_BUILDS="${PARALLEL_IMAGE_BUILDS:-true}"
 PRINT_BUILD_CONFIG="${PRINT_BUILD_CONFIG:-true}"
 LOG_DIR="${LOG_DIR:-$(mktemp -d -t xiaozhi-docker-build.XXXXXX)}"
@@ -110,6 +113,21 @@ if [[ "$PARALLEL_IMAGE_BUILDS" != "true" && "$PARALLEL_IMAGE_BUILDS" != "false" 
   exit 1
 fi
 
+if [[ "$XIAOZHI_PROGRESS" != "true" && "$XIAOZHI_PROGRESS" != "false" ]]; then
+  echo "XIAOZHI_PROGRESS must be true or false" >&2
+  exit 1
+fi
+
+if [[ ! "$XIAOZHI_PROGRESS_INTERVAL" =~ ^[0-9]+$ || "$XIAOZHI_PROGRESS_INTERVAL" -le 0 ]]; then
+  echo "XIAOZHI_PROGRESS_INTERVAL must be a positive integer" >&2
+  exit 1
+fi
+
+if [[ ! "$XIAOZHI_PROGRESS_ANIMATION_INTERVAL" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+  echo "XIAOZHI_PROGRESS_ANIMATION_INTERVAL must be a positive number" >&2
+  exit 1
+fi
+
 create_builder() {
   if [[ -n "$BUILDKIT_REGISTRY_MIRROR" ]]; then
     BUILDKITD_CONFIG="$(mktemp)"
@@ -156,24 +174,208 @@ is_quiet() {
   [[ "$VERBOSE" != "true" && "$XIAOZHI_DOCKER_QUIET" == "true" ]]
 }
 
+progress_enabled() {
+  [[ "$XIAOZHI_PROGRESS" == "true" && "$XIAOZHI_PROGRESS_INTERVAL" =~ ^[0-9]+$ && "$XIAOZHI_PROGRESS_INTERVAL" -gt 0 ]]
+}
+
+format_duration() {
+  local seconds="$1"
+  printf '%02d:%02d' "$((seconds / 60))" "$((seconds % 60))"
+}
+
+supports_unicode() {
+  local charset="${LC_ALL:-${LC_CTYPE:-${LANG:-}}}"
+  [[ "$charset" == *UTF-8* || "$charset" == *utf8* || "$charset" == *utf-8* ]]
+}
+
+short_image_name() {
+  local image="$1"
+  printf '%s' "${image##*/}"
+}
+
+progress_label() {
+  local label="$1"
+  if [[ "${#label}" -gt 30 ]]; then
+    printf '%s...' "${label:0:27}"
+  else
+    printf '%s' "$label"
+  fi
+}
+
+progress_frames_unicode() {
+  printf '%s\n' \
+    '╺━━━━━━━━━━━━━━' '━╺━━━━━━━━━━━━━' '━━╺━━━━━━━━━━━━' '━━━╺━━━━━━━━━━━' \
+    '━━━━╺━━━━━━━━━━' '━━━━━╺━━━━━━━━━' '━━━━━━╺━━━━━━━━' '━━━━━━━╺━━━━━━━' \
+    '━━━━━━━━╺━━━━━━' '━━━━━━━━━╺━━━━━' '━━━━━━━━━━╺━━━━' '━━━━━━━━━━━╺━━━' \
+    '━━━━━━━━━━━━╺━━' '━━━━━━━━━━━━━╺━' '━━━━━━━━━━━━━━╸' '━━━━━━━━━━━━━╸━' \
+    '━━━━━━━━━━━━╸━━' '━━━━━━━━━━━╸━━━' '━━━━━━━━━━╸━━━━' '━━━━━━━━━╸━━━━━' \
+    '━━━━━━━━╸━━━━━━' '━━━━━━━╸━━━━━━━' '━━━━━━╸━━━━━━━━' '━━━━━╸━━━━━━━━━' \
+    '━━━━╸━━━━━━━━━━' '━━━╸━━━━━━━━━━━' '━━╸━━━━━━━━━━━━' '━╸━━━━━━━━━━━━━'
+}
+
+progress_frames_ascii() {
+  printf '%s\n' \
+    '>..............' '.>.............' '..>............' '...>...........' \
+    '....>..........' '.....>.........' '......>........' '.......>.......' \
+    '........>......' '.........>.....' '..........>....' '...........>...' \
+    '............>..' '.............>.' '..............>' '.............<.' \
+    '............<..' '...........<...' '..........<....' '.........<.....' \
+    '........<......' '.......<.......' '......<........' '.....<.........' \
+    '....<..........' '...<...........' '..<............' '.<.............'
+}
+
+restore_progress_line() {
+  printf '\r\033[2K\033[?25h'
+}
+
+watch_background_task() {
+  local pid="$1"
+  local label="$2"
+  local log_file="$3"
+  local display_label
+  local start_time
+  local now
+  local elapsed
+  local elapsed_text
+  local exit_code
+  start_time="$(date +%s)"
+  display_label="$(progress_label "$label")"
+
+  if ! progress_enabled; then
+    set +e
+    wait "$pid"
+    exit_code=$?
+    set -e
+    elapsed_text="$(format_duration "$(($(date +%s) - start_time))")"
+    if [[ "$exit_code" -eq 0 ]]; then
+      echo "  OK ($elapsed_text)"
+    else
+      echo "  FAILED after $elapsed_text. Full log: $log_file" >&2
+    fi
+    return "$exit_code"
+  fi
+
+  local done_icon="OK"
+  local fail_icon="FAIL"
+  local green=$'\033[32m'
+  local red=$'\033[31m'
+  local cyan=$'\033[36m'
+  local dim=$'\033[2m'
+  local reset=$'\033[0m'
+
+  if [[ ! -t 1 ]]; then
+    printf '• %s started  log: %s\n' "$display_label" "$log_file"
+    trap 'kill "$pid" 2>/dev/null || true; exit 130' INT
+    trap 'kill "$pid" 2>/dev/null || true; exit 143' TERM
+
+    while kill -0 "$pid" 2>/dev/null; do
+      sleep "$XIAOZHI_PROGRESS_INTERVAL"
+      if kill -0 "$pid" 2>/dev/null; then
+        now="$(date +%s)"
+        elapsed=$((now - start_time))
+        elapsed_text="$(format_duration "$elapsed")"
+        printf '• %s still running  elapsed: %s  log: %s\n' "$display_label" "$elapsed_text" "$log_file"
+      fi
+    done
+
+    set +e
+    wait "$pid"
+    exit_code=$?
+    set -e
+    elapsed_text="$(format_duration "$(($(date +%s) - start_time))")"
+
+    if supports_unicode; then
+      done_icon="✓"
+      fail_icon="✗"
+    fi
+
+    if [[ "$exit_code" -eq 0 ]]; then
+      printf '%s %s completed  elapsed: %s\n' "$done_icon" "$display_label" "$elapsed_text"
+    else
+      printf '%s %s failed  elapsed: %s  log: %s\n' "$fail_icon" "$display_label" "$elapsed_text" "$log_file" >&2
+    fi
+
+    trap - INT TERM
+    return "$exit_code"
+  fi
+
+  local -a spinner
+  local -a progress_frames
+  if supports_unicode; then
+    spinner=( '⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏' )
+    mapfile -t progress_frames < <(progress_frames_unicode)
+    done_icon="✔"
+    fail_icon="✖"
+  else
+    spinner=( '|' '/' '-' '\\' )
+    mapfile -t progress_frames < <(progress_frames_ascii)
+  fi
+
+  local spinner_index=0
+  local progress_index=0
+
+  printf '\033[?25l'
+  trap 'restore_progress_line; kill "$pid" 2>/dev/null || true; exit 130' INT
+  trap 'restore_progress_line; kill "$pid" 2>/dev/null || true; exit 143' TERM
+  trap 'restore_progress_line' EXIT
+
+  while kill -0 "$pid" 2>/dev/null; do
+    now="$(date +%s)"
+    elapsed=$((now - start_time))
+    elapsed_text="$(format_duration "$elapsed")"
+
+    printf '\r\033[2K%s%s%s  %-30s %s%s%s   %s' \
+      "$cyan" "${spinner[$spinner_index]}" "$reset" \
+      "$display_label" \
+      "$dim" "${progress_frames[$progress_index]}" "$reset" \
+      "$elapsed_text"
+
+    spinner_index=$(((spinner_index + 1) % ${#spinner[@]}))
+    progress_index=$(((progress_index + 1) % ${#progress_frames[@]}))
+    sleep "$XIAOZHI_PROGRESS_ANIMATION_INTERVAL"
+  done
+
+  set +e
+  wait "$pid"
+  exit_code=$?
+  set -e
+  elapsed_text="$(format_duration "$(($(date +%s) - start_time))")"
+
+  printf '\r\033[2K'
+  if [[ "$exit_code" -eq 0 ]]; then
+    printf '%s%s%s  %-30s %scompleted%s   %s\n' \
+      "$green" "$done_icon" "$reset" "$display_label" "$green" "$reset" "$elapsed_text"
+  else
+    printf '%s%s%s  %-30s %sfailed%s      %s\n' \
+      "$red" "$fail_icon" "$reset" "$display_label" "$red" "$reset" "$elapsed_text" >&2
+    printf '   %sLog:%s %s\n' "$dim" "$reset" "$log_file" >&2
+  fi
+
+  printf '\033[?25h'
+  trap - EXIT INT TERM
+  return "$exit_code"
+}
+
 run_docker_step() {
   local label="$1"
   shift
 
-  echo "$label"
   if ! is_quiet; then
+    echo "$label"
     "$@"
     return
   fi
 
   local log_file="$LOG_DIR/$(printf '%s' "$label" | tr -cs '[:alnum:]_.-' '_' | sed 's/^_*//; s/_*$//').log"
-  if "$@" >"$log_file" 2>&1; then
-    echo "  OK"
-  else
-    echo "  FAILED. Full log: $log_file" >&2
-    tail -n 120 "$log_file" >&2 || true
-    return 1
+  local cmd_pid
+
+  if ! progress_enabled; then
+    echo "$label"
   fi
+
+  "$@" >"$log_file" 2>&1 &
+  cmd_pid=$!
+  watch_background_task "$cmd_pid" "$label" "$log_file"
 }
 
 build_image() {
@@ -199,10 +401,11 @@ build_image() {
 push_image() {
   [[ "$BUILD_ENGINE" == "docker" && "$PUSH" == "true" ]] || return 0
   local image="$1"
+  local label="Push $(short_image_name "$image")"
   if is_quiet; then
-    run_docker_step "Push $image" docker push --quiet "$image"
+    run_docker_step "$label" docker push --quiet "$image"
   else
-    run_docker_step "Push $image" docker push "$image"
+    run_docker_step "$label" docker push "$image"
   fi
 }
 
@@ -259,23 +462,35 @@ if [[ "$PRINT_BUILD_CONFIG" != "false" ]]; then
   fi
 fi
 if is_quiet; then
-  echo "Docker detail logs: $LOG_DIR"
-  echo "Set VERBOSE=true to show raw Docker build and push output."
+  echo "Logs: $LOG_DIR  (VERBOSE=true for raw Docker output)"
 fi
+
+print_base_image_status() {
+  local message="$1"
+  local image="${2:-}"
+
+  if is_quiet && [[ -n "$image" ]]; then
+    echo "$message: $(short_image_name "$image")"
+  elif [[ -n "$image" ]]; then
+    echo "$message: $image"
+  else
+    echo "$message"
+  fi
+}
 
 build_server_pipeline() {
   local server_base_image="${SERVER_BASE_IMAGE:-}"
 
   if [[ -n "$server_base_image" ]]; then
-    echo "Use explicit server base image: $server_base_image"
+    print_base_image_status "Base image explicit" "$server_base_image"
   elif [[ "$BUILD_BASE" == "false" ]]; then
     server_base_image="$SERVER_BASE_IMAGE_REPOSITORY:latest"
-    echo "Use latest server base image: $server_base_image"
+    print_base_image_status "Base image latest" "$server_base_image"
   elif [[ "$BUILD_BASE" == "auto" ]] && image_available_locally_or_remote "$SERVER_BASE_CACHE_IMAGE"; then
     server_base_image="$SERVER_BASE_CACHE_IMAGE"
-    echo "Use cached server base image: $server_base_image"
+    print_base_image_status "Base image cached" "$server_base_image"
   elif [[ "$BUILD_BASE" == "auto" ]] && image_available_locally_or_remote "$SERVER_BASE_IMAGE_REPOSITORY:latest"; then
-    echo "Use latest server base image as cache seed: $SERVER_BASE_IMAGE_REPOSITORY:latest"
+    print_base_image_status "Base image cache seed" "$SERVER_BASE_IMAGE_REPOSITORY:latest"
     if [[ "$BUILD_ENGINE" == "docker" ]]; then
       docker tag "$SERVER_BASE_IMAGE_REPOSITORY:latest" "$SERVER_BASE_CACHE_IMAGE"
       push_image "$SERVER_BASE_CACHE_IMAGE"

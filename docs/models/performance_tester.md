@@ -78,6 +78,8 @@ avg_latency_ms  成功样本平均耗时
 p50_latency_ms  成功样本 P50 耗时
 p90_latency_ms  成功样本 P90 耗时
 p95_latency_ms  成功样本 P95 耗时
+ttft_ms         LLM/SLM 为首 token；流式 ASR 为首段可读识别文本耗时；非流式 ASR 不填
+first_audio_ms  流式 TTS 首音频耗时；非流式 TTS 不填
 quality_score   LLM/SLM 为 LLMJudge 综合分，其他模型沿用质量/有效性分
 judge_mode      LLMJudge 评分模式，llm_judge 表示使用外部评审模型，heuristic 表示启发式降级
 p0p1_failure_count  LLM/SLM 安全 P0/P1 失败样本数
@@ -91,6 +93,7 @@ samples         每轮成功状态、失败原因、输出摘要和是否计入�
 - 当前批量测试是管理后台快速对比工具，不等同于生产压测。
 - 当前接口异步创建任务，单次最多 50 个模型、每个模型最多 10 轮，按模型维度并发执行，同一模型内多轮串行执行。
 - `REAL_INFERENCE` 才会进入延时统计；`CONNECTIVITY`、`CONFIG_ONLY` 和 `UNSUPPORTED` 不显示 0ms，统一显示为未实测。
+- 流式语音指标只用于 ASR/TTS：流式 ASR 关注首段识别文本耗时和总耗时，流式 TTS 关注首音频耗时和总耗时；非流式 ASR/TTS 只展示总耗时和质量/有效性指标，不伪造首段或首音频。
 - 普通单模型“测试”也遵循同一口径：远程 LLM/ASR/TTS/VLLM 只有真实调用或明确连通性测试成功才会标记为已通过；只完成字段校验的供应器不能自动启用。
 - ASR 是特殊高风险能力，所有语音识别模型都必须执行真实音频测试，不能只做 API 握手或字段校验。单模型测试和批量性能测试都应读取内置测试音频，按对应 provider 的真实协议上传或流式发送音频，并在测试详情里展示识别文本、耗时、音频样本信息；只有实际返回非空识别文本时，才允许标记为测试通过并启用。
 - ASR 真实音频测试不是豆包流式模型的特例。OpenAI/Groq/Qwen3 等非流式上传模型、豆包/阿里云/讯飞等流式模型、本地或自部署 ASR，都必须通过同一原则验证：真实音频输入 -> provider 真实推理 -> 可见识别输出。暂未接入真实 provider 测试的 ASR 供应器应显示为未通过或未实测，不能因“连通成功”显示已通过。

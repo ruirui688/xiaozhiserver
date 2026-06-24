@@ -108,6 +108,15 @@ docs/integrations/prompt-injection-engineering.md
 历史源码升级：deployment/dev-ops-integration.md，不作为本项目生产入口
 ```
 
+部署资产与脚本入口：
+
+- [../deploy/README.md](../deploy/README.md) - `deploy/` 目录治理边界，声明 `docker/`、`server/`、`release/` 三个分域及其与 `docs/deployment/`、`scripts/` 的关系。
+- [../deploy/docker/README.md](../deploy/docker/README.md) - Docker 构建与容器运行资产归档边界。
+- [../deploy/server/README.md](../deploy/server/README.md) - 服务器安装、升级、回滚与运行时目录初始化资产归档边界。
+- [../deploy/release/README.md](../deploy/release/README.md) - 镜像发布、版本打标、私有仓库推送与发布校验资产归档边界。
+- [../deploy/production/README.md](../deploy/production/README.md) - 最小生产部署包说明。描述 `/opt/xiaozhi-data` 持久化目录、标准生产命令和容器间网络调用规则。
+- [../scripts/README.md](../scripts/README.md) - 脚本入口说明。列出常用本地开发、ACR 构建推送和生产拉取部署命令，以及脚本分组与生产约束。
+
 ## 6. 设备与固件
 
 用于 ESP32 固件、设备配置、OTA、MQTT 网关和设备互呼。AI 只有在修改设备协议、OTA、MQTT、设备呼叫或固件相关逻辑时，才需要读取本分类文档。

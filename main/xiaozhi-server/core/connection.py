@@ -174,6 +174,11 @@ class ConnectionHandler:
         # 处理TTS响应没有文本返回
         self.tts_MessageText = ""
 
+        # websocket音频缓冲区（替换之前的延迟初始化hasattr检查）
+        self.audio_timestamp_buffer = {}
+        self.last_processed_timestamp = 0
+        self.max_timestamp_buffer_size = 20
+
         # iot相关变量
         self.iot_descriptors = {}
         self.func_handler = None
@@ -289,51 +294,38 @@ class ConnectionHandler:
         welcome_msg["audio_params"] = audio_params
         return welcome_msg
 
+    def _run_async_in_daemon_thread(self, coro, thread_name):
+        """Run an async coroutine in a new daemon thread with its own event loop."""
+        def _run():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(coro)
+            except Exception as e:
+                self.logger.bind(msg_id=self.session_id).warning(f"{thread_name} failed: {e}")
+            finally:
+                loop.close()
+        t = threading.Thread(target=_run, daemon=True, name=thread_name)
+        t.start()
+
     async def _save_and_close(self, ws):
         """保存记忆并关闭连接"""
         try:
             # 守护线程1：独立生成标题（不依赖记忆模型）
             if self.session_id:
-                def generate_title_task():
-                    try:
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                        loop.run_until_complete(
-                            generate_and_save_chat_title(self.session_id)
-                        )
-                    except Exception as e:
-                        self.logger.bind(tag=TAG).error(f"生成标题失败: {e}")
-                    finally:
-                        try:
-                            loop.close()
-                        except Exception:
-                            pass
-
-                threading.Thread(target=generate_title_task, daemon=True).start()
+                self._run_async_in_daemon_thread(
+                    generate_and_save_chat_title(self.session_id),
+                    "title-generator",
+                )
 
             # 守护线程2：走老流程记忆保存（仅记忆，不含标题）
             if self.memory:
-                # 使用线程池异步保存记忆
-                def save_memory_task():
-                    try:
-                        # 创建新事件循环（避免与主循环冲突）
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                        loop.run_until_complete(
-                            self.memory.save_memory(
-                                self.dialogue.dialogue, self.session_id
-                            )
-                        )
-                    except Exception as e:
-                        self.logger.bind(tag=TAG).error(f"保存记忆失败: {e}")
-                    finally:
-                        try:
-                            loop.close()
-                        except Exception:
-                            pass
-
-                # 启动线程保存记忆，不等待完成
-                threading.Thread(target=save_memory_task, daemon=True).start()
+                self._run_async_in_daemon_thread(
+                    self.memory.save_memory(
+                        self.dialogue.dialogue, self.session_id
+                    ),
+                    "memory-save",
+                )
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"保存记忆失败: {e}")
         finally:
@@ -451,12 +443,6 @@ class ConnectionHandler:
 
     def _process_websocket_audio(self, audio_data, timestamp):
         """处理WebSocket格式的音频包"""
-        # 初始化时间戳序列管理
-        if not hasattr(self, "audio_timestamp_buffer"):
-            self.audio_timestamp_buffer = {}
-            self.last_processed_timestamp = 0
-            self.max_timestamp_buffer_size = 20
-
         # 如果时间戳是递增的，直接处理
         if timestamp >= self.last_processed_timestamp:
             self.asr_audio_queue.put(audio_data)
@@ -533,9 +519,10 @@ class ConnectionHandler:
             if self.tts is None:
                 self.tts = self._initialize_tts()
             # 打开语音合成通道
-            asyncio.run_coroutine_threadsafe(
+            tts_future = asyncio.run_coroutine_threadsafe(
                 self.tts.open_audio_channels(self), self.loop
             )
+            tts_future.add_done_callback(lambda f: self.logger.bind(tag=TAG).warning(f"TTS channel open failed: {f.exception()}") if f.exception() else None)
             if self.need_bind:
                 self.bind_completed_event.set()
                 return
@@ -564,9 +551,10 @@ class ConnectionHandler:
             self._initialize_voiceprint()
             # 打开语音识别通道
             if self.asr is not None:
-                asyncio.run_coroutine_threadsafe(
+                asr_future = asyncio.run_coroutine_threadsafe(
                     self.asr.open_audio_channels(self), self.loop
                 )
+                asr_future.add_done_callback(lambda f: self.logger.bind(tag=TAG).warning(f"ASR channel open failed: {f.exception()}") if f.exception() else None)
             else:
                 self.logger.bind(tag=TAG).warning("ASR未配置，语音识别暂不可用")
 
@@ -992,7 +980,8 @@ class ConnectionHandler:
 
         # 异步初始化工具处理器
         if hasattr(self, "loop") and self.loop:
-            asyncio.run_coroutine_threadsafe(self.func_handler._initialize(), self.loop)
+            handler_future = asyncio.run_coroutine_threadsafe(self.func_handler._initialize(), self.loop)
+            handler_future.add_done_callback(lambda f: self.logger.bind(tag=TAG).warning(f"Tool handler init failed: {f.exception()}") if f.exception() else None)
 
     def _resolve_runtime_intent_type(self, configured_intent_type):
         if configured_intent_type != "function_call":
@@ -1214,10 +1203,11 @@ class ConnectionHandler:
                 # 在llm回复中获取情绪表情，一轮对话只在开头获取一次
                 if emotion_flag and content is not None and content.strip():
                     if (self.features or {}).get("emoji", True):
-                        asyncio.run_coroutine_threadsafe(
+                        emotion_future = asyncio.run_coroutine_threadsafe(
                             textUtils.get_emotion(self, content),
                             self.loop,
                         )
+                        emotion_future.add_done_callback(lambda f: self.logger.bind(tag=TAG).warning(f"Emotion detection failed: {f.exception()}") if f.exception() else None)
                     emotion_flag = False
 
                 if content is not None and len(content) > 0:
@@ -1499,6 +1489,49 @@ class ConnectionHandler:
             if name in enabled_names
         }
 
+    def _build_tool_call_messages(self, tool_results_with_data):
+        """Build assistant tool_calls message and tool response messages in dialogue.
+
+        Args:
+            tool_results_with_data: List of (result, tool_call_data) tuples
+
+        Returns:
+            List of all_tool_calls dicts that were inserted
+        """
+        all_tool_calls = [
+            {
+                "id": tool_call_data["id"],
+                "function": {
+                    "arguments": (
+                        "{}"
+                        if tool_call_data["arguments"] == ""
+                        else tool_call_data["arguments"]
+                    ),
+                    "name": tool_call_data["name"],
+                },
+                "type": "function",
+                "index": idx,
+            }
+            for idx, (_, tool_call_data) in enumerate(tool_results_with_data)
+        ]
+        self.dialogue.put(Message(role="assistant", tool_calls=all_tool_calls))
+
+        for result, tool_call_data in tool_results_with_data:
+            text = result.result or ""
+            self.dialogue.put(
+                Message(
+                    role="tool",
+                    tool_call_id=(
+                        str(uuid.uuid4())
+                        if tool_call_data["id"] is None
+                        else tool_call_data["id"]
+                    ),
+                    content=text,
+                )
+            )
+
+        return all_tool_calls
+
     def _handle_function_result(
         self,
         tool_results,
@@ -1553,39 +1586,7 @@ class ConnectionHandler:
         if record_tools:
             if is_aborted():
                 return
-            # 构造 assistant 消息（含 tool_calls），记录"模型调用了哪些工具"
-            all_tool_calls = [
-                {
-                    "id": tool_call_data["id"],
-                    "function": {
-                        "arguments": (
-                            "{}"
-                            if tool_call_data["arguments"] == ""
-                            else tool_call_data["arguments"]
-                        ),
-                        "name": tool_call_data["name"],
-                    },
-                    "type": "function",
-                    "index": idx,
-                }
-                for idx, (_, tool_call_data) in enumerate(record_tools)
-            ]
-            self.dialogue.put(Message(role="assistant", tool_calls=all_tool_calls))
-
-            # 写入每条工具的执行结果，记录"工具返回了什么"
-            for result, tool_call_data in record_tools:
-                text = result.result or ""
-                self.dialogue.put(
-                    Message(
-                        role="tool",
-                        tool_call_id=(
-                            str(uuid.uuid4())
-                            if tool_call_data["id"] is None
-                            else tool_call_data["id"]
-                        ),
-                        content=text,
-                    )
-                )
+            self._build_tool_call_messages(record_tools)
 
             # 用固定文本作为最终回复，补全标准三段式，保证下一条消息是 user 而非接 tool
             response_parts = []
@@ -1602,38 +1603,7 @@ class ConnectionHandler:
         if need_llm_tools:
             if is_aborted():
                 return
-            all_tool_calls = [
-                {
-                    "id": tool_call_data["id"],
-                    "function": {
-                        "arguments": (
-                            "{}"
-                            if tool_call_data["arguments"] == ""
-                            else tool_call_data["arguments"]
-                        ),
-                        "name": tool_call_data["name"],
-                    },
-                    "type": "function",
-                    "index": idx,
-                }
-                for idx, (_, tool_call_data) in enumerate(need_llm_tools)
-            ]
-            self.dialogue.put(Message(role="assistant", tool_calls=all_tool_calls))
-
-            for result, tool_call_data in need_llm_tools:
-                text = result.result
-                if text is not None and len(text) > 0:
-                    self.dialogue.put(
-                        Message(
-                            role="tool",
-                            tool_call_id=(
-                                str(uuid.uuid4())
-                                if tool_call_data["id"] is None
-                                else tool_call_data["id"]
-                            ),
-                            content=text,
-                        )
-                    )
+            self._build_tool_call_messages(need_llm_tools)
 
             if not is_aborted():
                 self.chat(None, depth=depth + 1, allow_tools=False)

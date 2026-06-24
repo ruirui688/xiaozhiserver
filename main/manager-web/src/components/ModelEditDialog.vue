@@ -42,11 +42,28 @@
 
       <el-form :model="form" ref="form" label-width="auto" label-position="left" class="custom-form">
         <div style="display: flex; gap: 20px; margin-bottom: 0">
-          <el-form-item :label="$t('modelConfigDialog.configName')" prop="modelName" style="flex: 1">
-            <el-input v-model="form.modelName" :placeholder="$t('modelConfigDialog.enterModelName')"
+          <el-form-item :label="$t('modelConfigDialog.modelName')" prop="modelName" style="flex: 1">
+            <el-select
+              v-if="modelNameOptions.length"
+              v-model="form.modelName"
+              :placeholder="$t('modelConfigDialog.enterModelName')"
+              class="custom-select custom-input-bg"
+              style="width: 100%"
+              filterable
+              allow-create
+              default-first-option
+            >
+              <el-option
+                v-for="option in modelNameOptions"
+                :key="option"
+                :label="option"
+                :value="option"
+              />
+            </el-select>
+            <el-input v-else v-model="form.modelName" :placeholder="$t('modelConfigDialog.enterModelName')"
               class="custom-input-bg"></el-input>
           </el-form-item>
-          <el-form-item :label="$t('modelConfigDialog.catalogItem')" prop="templateCode" style="flex: 1">
+          <el-form-item :label="$t('modelConfigDialog.modelProvider')" prop="templateCode" style="flex: 1">
             <el-select v-model="form.templateCode" :placeholder="$t('modelConfigDialog.selectSupplier')"
               class="custom-select custom-input-bg" style="width: 100%" @focus="loadProviders" filterable
               @change="handleTemplateChange">
@@ -60,7 +77,7 @@
                 <div class="provider-option">
                   <div class="provider-option-main">
                     <span class="provider-option-title">{{ item.title }}</span>
-                    <span class="provider-option-meta">{{ item.meta }}</span>
+                    <span v-if="item.meta" class="provider-option-meta">{{ item.meta }}</span>
                   </div>
                   <el-tag size="mini" :type="providerStatusType(item.raw)">
                     {{ providerStatusText(item.raw) }}
@@ -71,84 +88,19 @@
           </el-form-item>
         </div>
 
-        <div v-if="form.templateCode" class="catalog-detail">
-          <div class="catalog-detail-main">
-            <span class="catalog-detail-title">{{ getVendorProductText() }}</span>
-            <el-tag size="mini" :type="providerStatusType(currentTemplate)">
-              {{ providerStatusText(currentTemplate) }}
-            </el-tag>
-            <span class="catalog-detail-meta">{{ catalogMetaText }}</span>
-          </div>
-          <div class="catalog-detail-grid">
-            <div v-if="currentTemplate.recommendedFor">
-              <span class="catalog-detail-label">{{ $t("modelConfigDialog.recommendedFor") }}</span>
-              {{ currentTemplate.recommendedFor }}
-            </div>
-            <div v-if="currentTemplate.avoidWhen">
-              <span class="catalog-detail-label">{{ $t("modelConfigDialog.avoidWhen") }}</span>
-              {{ currentTemplate.avoidWhen }}
-            </div>
-            <div v-if="currentTemplate.testContract">
-              <span class="catalog-detail-label">{{ $t("modelConfigDialog.testContract") }}</span>
-              {{ currentTemplate.testContract }}
-            </div>
-            <div v-if="currentTemplate.sourceCheckedAt">
-              <span class="catalog-detail-label">{{ $t("modelConfigDialog.sourceCheckedAt") }}</span>
-              {{ currentTemplate.sourceCheckedAt }}
-            </div>
-          </div>
-        </div>
-
-        <div style="display: flex; gap: 20px; margin-bottom: 0">
-          <el-form-item :label="currentUpstreamLabel" prop="upstreamModelId" style="flex: 1">
-            <el-select
-              v-if="upstreamModelOptions.length"
-              v-model="form.upstreamModelId"
-              :placeholder="$t('modelConfigDialog.enterUpstreamModel')"
-              class="custom-select custom-input-bg"
-              style="width: 100%"
-              filterable
-              allow-create
-              default-first-option
-            >
-              <el-option
-                v-for="option in upstreamModelOptions"
-                :key="option"
-                :label="option"
-                :value="option"
-              />
-            </el-select>
-            <el-input v-else v-model="form.upstreamModelId" :placeholder="$t('modelConfigDialog.enterUpstreamModel')"
-              class="custom-input-bg"></el-input>
-          </el-form-item>
-          <el-form-item prop="endpointUrl" style="flex: 1">
-            <template slot="label">
-              <span>{{ $t('modelConfigDialog.endpointUrl') }}</span>
-              <el-tooltip :content="endpointHelpText" placement="top">
-                <i class="el-icon-question field-help-icon"></i>
-              </el-tooltip>
-            </template>
-            <el-input v-model="form.endpointUrl" :placeholder="endpointPlaceholder"
-              class="custom-input-bg"></el-input>
-            <div class="field-tip">{{ endpointHelpText }}</div>
-          </el-form-item>
-        </div>
-
         <el-collapse class="advanced-collapse">
           <el-collapse-item :title="$t('modelConfigDialog.advancedSettings')" name="advanced">
             <div style="display: flex; gap: 20px; margin-bottom: 0">
-              <el-form-item :label="$t('modelConfigDialog.modelCode')" prop="modelCode" style="flex: 1">
-                <el-input v-model="form.modelCode" :placeholder="$t('modelConfigDialog.enterModelCode')"
+              <el-form-item v-if="shouldShowEndpointField" prop="endpointUrl" style="flex: 1">
+                <template slot="label">
+                  <span>{{ $t('modelConfigDialog.endpointUrl') }}</span>
+                  <el-tooltip :content="endpointHelpText" placement="top">
+                    <i class="el-icon-question field-help-icon"></i>
+                  </el-tooltip>
+                </template>
+                <el-input v-model="form.endpointUrl" :placeholder="endpointPlaceholder"
                   class="custom-input-bg"></el-input>
-              </el-form-item>
-              <el-form-item :label="$t('modelConfigDialog.protocol')" prop="protocol" style="flex: 1">
-                <el-input v-model="form.protocol" :placeholder="$t('modelConfigDialog.enterProtocol')"
-                  class="custom-input-bg"></el-input>
-              </el-form-item>
-            </div>
-            <div style="display: flex; gap: 20px; margin-bottom: 0">
-              <el-form-item :label="$t('modelConfig.vendorProduct')" style="flex: 1">
-                <el-input :value="getVendorProductText()" class="custom-input-bg" disabled></el-input>
+                <div class="field-tip">{{ endpointHelpText }}</div>
               </el-form-item>
               <el-form-item :label="$t('modelConfigDialog.sortOrder')" prop="sort" style="flex: 1">
                 <el-input v-model.number="form.sort" type="number" :placeholder="$t('modelConfigDialog.enterSortOrder')"
@@ -339,14 +291,12 @@ export default {
       form: {
         id: "",
         modelType: "",
-        modelCode: "",
         modelName: "",
         adapterCode: "",
         templateCode: "",
         vendorName: "",
         productName: "",
         protocol: "",
-        upstreamModelId: "",
         endpointUrl: "",
         isDefault: false,
         isEnabled: false,
@@ -389,32 +339,22 @@ export default {
     selectedTemplateBlocked() {
       return this.isBlockedTemplateStatus(this.currentTemplate);
     },
-    catalogMetaText() {
-      const template = this.currentTemplate || {};
-      return [
-        template.accessModeLabel || template.accessMode,
-        template.protocolLabel || template.protocol,
-        template.providerCode,
-      ].filter(Boolean).join(" · ");
-    },
-    currentUpstreamLabel() {
-      return this.currentTemplate.upstreamResourceLabel || this.$t("modelConfigDialog.upstreamModel");
-    },
-    upstreamModelOptions() {
-      const field = this.getUpstreamModelField(this.currentTemplate);
+    modelNameOptions() {
+      const field = this.getModelNameTemplateField(this.currentTemplate);
       return field && Array.isArray(field.options) ? field.options : [];
+    },
+    shouldShowEndpointField() {
+      return !!this.getEndpointField(this.currentTemplate) || !!this.form.endpointUrl;
     },
     endpointPlaceholder() {
       return this.endpointDefaultValue
         || "云厂商默认地址可留空；自部署或兼容接口填写 https://... 或 wss://...";
     },
     endpointHelpText() {
-      return "接口端点是厂商或自部署服务的 API 地址。云厂商适配器已有默认地址时可留空；只有接入自定义网关、兼容接口或私有部署时才需要填写。";
+      return "接口端点是厂商或自部署服务的 API 地址。云厂商已有默认地址时可留空；只有接入自定义网关、兼容接口或私有部署时才需要填写。";
     },
     endpointDefaultValue() {
-      const endpointField = (this.currentTemplate.fieldSchemas || []).find((field) =>
-        this.endpointKeys().includes(field.key)
-      );
+      const endpointField = this.getEndpointField(this.currentTemplate);
       return endpointField && endpointField.defaultValue ? String(endpointField.defaultValue) : "";
     },
   },
@@ -448,14 +388,12 @@ export default {
       this.form = {
         id: "",
         modelType: "",
-        modelCode: "",
         modelName: "",
         adapterCode: "",
         templateCode: "",
         vendorName: "",
         productName: "",
         protocol: "",
-        upstreamModelId: "",
         endpointUrl: "",
         isDefault: false,
         isEnabled: false,
@@ -515,11 +453,8 @@ export default {
             if (this.modelData.duplicateMode) {
               model.modelName =
                 this.modelData.modelName + this.$t("modelConfigDialog.copySuffix");
-              model.modelCode =
-                this.modelData.modelCode + this.$t("modelConfigDialog.copySuffix");
-
             }
-            this.pendingProviderType = this.resolveTemplateCode(model.templateCode || model.modelCode || model.adapterCode || model.providerCode, model);
+            this.pendingProviderType = this.resolveTemplateCode(model.templateCode || model.adapterCode || model.providerCode, model);
             this.pendingModelData = model;
 
             if (this.providersLoaded) {
@@ -582,10 +517,8 @@ export default {
           this.$set(this.form[target], key, parsed);
         }
       });
-
       return {
         id: this.modelData.id,
-        modelCode: this.form.modelCode,
         modelName: this.form.modelName,
         displayName: this.form.modelName,
         adapterCode: this.form.adapterCode,
@@ -594,7 +527,6 @@ export default {
         vendorName: this.form.vendorName,
         productName: this.form.productName,
         protocol: this.form.protocol,
-        upstreamModelId: this.form.upstreamModelId,
         endpointUrl: this.form.endpointUrl,
         params: { ...this.form.params },
         secrets: { ...this.form.secrets },
@@ -619,11 +551,10 @@ export default {
           .map((item) => {
             const status = this.providerStatusText(item);
             const title = `${item.vendorName || ""} / ${item.productName || item.adapterName || item.providerCode}`;
-            const meta = [item.accessModeLabel || item.accessMode, item.protocolLabel || item.protocol].filter(Boolean).join(" · ");
             return {
               label: `${title}${status ? ` ${status}` : ""}`,
               title,
-              meta,
+              meta: "",
               templateCode: item.templateCode,
               providerCode: String(item.providerCode || ""),
               disabled: this.isBlockedTemplateStatus(item),
@@ -676,12 +607,10 @@ export default {
       const configJson = model.configJson || {};
       const values = [
         model.id,
-        model.modelCode,
         model.modelName,
         model.templateCode,
         model.vendorName,
         model.productName,
-        model.upstreamModelId,
         model.endpointUrl,
         params.base_url,
         params.api_url,
@@ -767,9 +696,9 @@ export default {
         access_key_id: "填写 AccessKey ID",
         access_key_secret: "填写 AccessKey Secret",
         authorization: "填写鉴权头内容，例如 Bearer ...",
-        resource_id: "填写资源 ID，例如 volc.seedasr.sauc.duration",
-        model_name: "填写上游模型 ID，例如 qwen-flash",
-        model: "填写上游模型 ID",
+        resource_id: "填写模型名称或资源 ID，例如 volc.seedasr.sauc.duration",
+        model_name: "填写模型名称，例如 qwen-flash",
+        model: "填写模型名称",
         voice: "填写音色 ID",
         speaker: "填写音色或说话人 ID",
       };
@@ -806,14 +735,23 @@ export default {
     endpointKeys() {
       return ["base_url", "api_url", "url", "ws_url", "server_url", "host", "endpoint_url"];
     },
-    getUpstreamModelField(template = {}) {
-      const upstreamKey = template.upstreamModelField || "";
+    getEndpointField(template = {}) {
       return (template.fieldSchemas || []).find((field) =>
-        field.key === upstreamKey || ["model_name", "model", "resource_id"].includes(field.key)
+        this.endpointKeys().includes(field.key)
       );
     },
-    applyTemplateDefaults(template = {}) {
+    getModelNameTemplateField(template = {}) {
       const upstreamKey = template.upstreamModelField || "";
+      return (template.fieldSchemas || []).find((field) =>
+        field.key === upstreamKey
+          || ["model_name", "model", "resource_id"].includes(field.key)
+      );
+    },
+    isModelNameMetadataField(key, template = {}) {
+      const upstreamKey = template.upstreamModelField || "";
+      return key === upstreamKey || ["model_name", "model", "resource_id"].includes(key);
+    },
+    applyTemplateDefaults(template = {}) {
       (template.fieldSchemas || []).forEach((field) => {
         const value = field.defaultValue;
         if (value === undefined || value === null || value === "") {
@@ -823,8 +761,8 @@ export default {
           if (!this.form.endpointUrl) this.form.endpointUrl = value;
           return;
         }
-        if (field.key === upstreamKey || ["model_name", "model", "resource_id"].includes(field.key)) {
-          if (!this.form.upstreamModelId) this.form.upstreamModelId = value;
+        if (this.isModelNameMetadataField(field.key, template)) {
+          if (!this.form.modelName) this.form.modelName = value;
           return;
         }
         const target = this.getFieldTarget(field);
@@ -882,7 +820,7 @@ export default {
         access_key_secret: "访问密钥 Secret，请勿填写到备注或公开文档。",
         secret_id: "访问密钥 ID，本身不是密钥；需要与 Secret Key 配套使用。",
         secret_key: "访问密钥 Secret，请勿填写到备注或公开文档。",
-        resource_id: "云平台开通具体语音服务后得到的资源标识，不等同于配置名称。",
+        resource_id: "云平台开通具体语音服务后得到的模型或资源标识。",
         enable_multilingual: "豆包流式 ASR 多语种识别开关，普通中文识别保持关闭即可。",
         end_window_size: "流式识别断句静音窗口，数值越大越不容易提前断句。",
         language: "指定识别语言编码，例如 zh-CN。",
@@ -922,14 +860,12 @@ export default {
       this.form = {
         id: model.id,
         modelType: model.modelType,
-        modelCode: model.modelCode,
-        modelName: model.modelName,
+        modelName: model.modelName || model.upstreamModelId || "",
         adapterCode: model.adapterCode || model.providerCode || "",
         templateCode: model.templateCode || "",
         vendorName: model.vendorName || "",
         productName: model.productName || "",
         protocol: model.protocol || "",
-        upstreamModelId: model.upstreamModelId || "",
         endpointUrl: model.endpointUrl || "",
         isDefault: model.isDefault,
         isEnabled: model.isEnabled,
@@ -939,6 +875,10 @@ export default {
         params,
         secrets,
       };
+      const modelNameField = this.getModelNameTemplateField(this.currentTemplate);
+      if (!this.form.modelName && modelNameField && modelNameField.defaultValue) {
+        this.form.modelName = String(modelNameField.defaultValue);
+      }
     },
     applyAssistantDraft(payload = {}) {
       const draft = payload.configJson || {};
@@ -955,13 +895,14 @@ export default {
           vendorName: template ? template.vendorName : this.form.vendorName,
           productName: template ? template.productName : this.form.productName,
           protocol: payload.protocol || draft.protocol || this.form.protocol,
-          upstreamModelId:
+          modelName:
+            payload.modelName ||
             payload.upstreamModelId ||
             draft.model_name ||
             draft.model ||
             draft.resource_id ||
             draft.voice ||
-            this.form.upstreamModelId,
+            this.form.modelName,
           endpointUrl:
             payload.endpointUrl ||
             draft.base_url ||

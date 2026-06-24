@@ -395,10 +395,10 @@
             <div class="performance-result-metrics">
               <span>{{ $t("modelConfig.avgLatency") }} {{ formatMeasuredLatency(row, "avgLatencyMs") }}</span>
               <span v-if="isModelType(row, 'llm')">{{ $t("modelConfig.qualityScore") }} {{ formatScore(row.qualityScore) }}</span>
-              <span v-if="isModelType(row, 'llm')">{{ $t("modelConfig.ttft") }} {{ formatMetric(row.ttftMs, " ms") }}</span>
               <span v-if="isModelType(row, 'llm')">P0/P1 {{ row.p0p1FailureCount || 0 }}</span>
-              <span v-if="isModelType(row, 'tts')">{{ $t("modelConfig.firstAudio") }} {{ formatMetric(row.firstAudioMs, " ms") }}</span>
+              <span v-if="hasMetric(row.firstAudioMs) && isModelType(row, 'tts')">{{ $t("modelConfig.firstAudio") }} {{ formatMetric(row.firstAudioMs, " ms") }}</span>
               <span v-if="isModelType(row, 'tts')">{{ $t("modelConfig.rtf") }} {{ formatMetric(row.rtf, "") }}</span>
+              <span v-if="hasMetric(row.ttftMs) && isModelType(row, 'asr')">{{ $t("modelConfig.firstAsrText") }} {{ formatMetric(row.ttftMs, " ms") }}</span>
               <span v-if="isModelType(row, 'asr')">{{ $t("modelConfig.cer") }} {{ formatPercent(row.cer) }}</span>
               <span v-if="isModelType(row, 'asr')">{{ $t("modelConfig.wer") }} {{ formatPercent(row.wer) }}</span>
             </div>
@@ -524,21 +524,42 @@
                 </div>
               </div>
 
+              <div v-if="hasSampleAudioPreview(selectedPerformanceSample)" class="performance-audio-preview">
+                <div v-if="getAsrInputAudioUrl(selectedPerformanceSample)" class="performance-audio-item">
+                  <div class="performance-field-label">语音样本</div>
+                  <audio
+                    :src="getAsrInputAudioUrl(selectedPerformanceSample)"
+                    controls
+                    preload="metadata"
+                  ></audio>
+                  <span>{{ getInputDetail(selectedPerformanceSample).audio_name || selectedPerformanceSample.inputSummary }}</span>
+                </div>
+                <div v-if="getTtsOutputAudioUrl(selectedPerformanceSample)" class="performance-audio-item">
+                  <div class="performance-field-label">合成音频</div>
+                  <audio
+                    :src="getTtsOutputAudioUrl(selectedPerformanceSample)"
+                    controls
+                    preload="metadata"
+                  ></audio>
+                  <span>{{ getTtsPreviewMeta(selectedPerformanceSample) }}</span>
+                </div>
+              </div>
+
               <div class="performance-sample-metrics">
-                <span v-if="isSampleType(selectedPerformanceSample, 'llm')">
-                  {{ $t("modelConfig.ttft") }} {{ formatMetric(selectedPerformanceSample.ttftMs, " ms") }}
-                </span>
                 <span v-if="isSampleType(selectedPerformanceSample, 'llm')">
                   {{ $t("modelConfig.tokensPerSecond") }} {{ formatMetric(selectedPerformanceSample.tokensPerSecond, "") }}
                 </span>
                 <span v-if="isSampleType(selectedPerformanceSample, 'llm')">
                   {{ $t("modelConfig.qualityScore") }} {{ formatScore(selectedPerformanceSample.qualityScore) }}
                 </span>
-                <span v-if="isSampleType(selectedPerformanceSample, 'tts')">
+                <span v-if="hasMetric(selectedPerformanceSample.firstAudioMs) && isSampleType(selectedPerformanceSample, 'tts')">
                   {{ $t("modelConfig.firstAudio") }} {{ formatMetric(selectedPerformanceSample.firstAudioMs, " ms") }}
                 </span>
                 <span v-if="isSampleType(selectedPerformanceSample, 'tts')">
                   {{ $t("modelConfig.rtf") }} {{ formatMetric(selectedPerformanceSample.rtf, "") }}
+                </span>
+                <span v-if="hasMetric(selectedPerformanceSample.ttftMs) && isSampleType(selectedPerformanceSample, 'asr')">
+                  {{ $t("modelConfig.firstAsrText") }} {{ formatMetric(selectedPerformanceSample.ttftMs, " ms") }}
                 </span>
                 <span v-if="isSampleType(selectedPerformanceSample, 'asr')">
                   {{ $t("modelConfig.cer") }} {{ formatPercent(selectedPerformanceSample.cer) }}
@@ -981,6 +1002,9 @@ export default {
       }
       return `${value}${unit}`;
     },
+    hasMetric(value) {
+      return value !== null && value !== undefined && value !== "";
+    },
     formatScore(value) {
       if (value === null || value === undefined || value === "") {
         return "-";
@@ -1222,6 +1246,14 @@ export default {
       if (messages.length) {
         return messages.filter((item) => item && item.role !== "system");
       }
+      if (this.isSampleType(sample, "tts")) {
+        return [
+          {
+            role: "user",
+            content: inputDetail.text || (sample && sample.inputSummary) || "-",
+          },
+        ];
+      }
       return [
         {
           role: "user",
@@ -1244,7 +1276,31 @@ export default {
     },
     getSampleAssistantText(sample) {
       const outputDetail = this.getOutputDetail(sample);
+      if (this.isSampleType(sample, "asr")) {
+        return outputDetail.recognized_text || (sample && sample.outputSummary) || "-";
+      }
+      if (this.isSampleType(sample, "tts")) {
+        const audioBytes = outputDetail.audio_bytes || 0;
+        return audioBytes ? `已生成音频，${audioBytes} 字节` : (sample && sample.outputSummary) || "-";
+      }
       return outputDetail.assistant_text || (sample && sample.outputSummary) || "-";
+    },
+    getAsrInputAudioUrl(sample) {
+      const inputDetail = this.getInputDetail(sample);
+      return this.isSampleType(sample, "asr") ? (inputDetail.audio_data_url || "") : "";
+    },
+    getTtsOutputAudioUrl(sample) {
+      const outputDetail = this.getOutputDetail(sample);
+      return this.isSampleType(sample, "tts") ? (outputDetail.audio_data_url || "") : "";
+    },
+    hasSampleAudioPreview(sample) {
+      return !!(this.getAsrInputAudioUrl(sample) || this.getTtsOutputAudioUrl(sample));
+    },
+    getTtsPreviewMeta(sample) {
+      const outputDetail = this.getOutputDetail(sample);
+      const format = outputDetail.audio_preview_format || outputDetail.output_file_type || "audio";
+      const bytes = outputDetail.audio_bytes || 0;
+      return bytes ? `${format} / ${bytes} 字节` : format;
     },
     getSampleExpectedBehavior(sample) {
       const inputDetail = this.getInputDetail(sample);
@@ -2630,6 +2686,35 @@ export default {
   margin-top: 8px;
   color: #909399;
   font-size: 12px;
+}
+
+.performance-audio-preview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.performance-audio-item {
+  padding: 10px;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.performance-audio-item audio {
+  display: block;
+  width: 100%;
+  height: 36px;
+}
+
+.performance-audio-item span {
+  display: block;
+  margin-top: 6px;
+  color: #606266;
+  font-size: 12px;
+  line-height: 1.4;
+  word-break: break-word;
 }
 
 .judge-score-panel {
