@@ -5,11 +5,13 @@ import threading
 import time
 
 from core.providers.tts.dto.dto import InterfaceType
+from core.providers.tts.dto.dto import TTSMessageDTO
 from core.utils.opus_encoder_utils import OpusEncoderUtils
 from core.utils.tts import create_instance as create_tts_instance
 
 
 AUDIO_VALID_BYTES = 256
+STREAM_DRAIN_TIMEOUT_SECONDS = 5
 DEFAULT_TTS_SAMPLES = [
     "你好，我是小智。",
     "现在是上午八点三十分，天气晴。",
@@ -118,9 +120,11 @@ async def _synthesize_stream_tts_sample(tts, text):
             tts.store_tts_text(tts.conn.sentence_id, text)
         await tts.text_to_speak(text, None)
         await tts.finish_session(tts.conn.sentence_id)
+        await _wait_for_tts_audio(tts)
         return b""
 
     result = await tts.text_to_speak(text, True)
+    await _wait_for_tts_audio(tts)
     return result
 
 
@@ -145,6 +149,7 @@ def _measure_tts_audio_size(result, output_file, tts):
 
     queue_size = _drain_tts_audio_queue_size(getattr(tts, "tts_audio_queue", None))
     queue_size += _drain_tts_audio_queue_size(getattr(getattr(tts, "conn", None), "tts_audio_queue", None))
+    queue_size += _before_stop_play_files_size(getattr(tts, "before_stop_play_files", None))
     return max(size, queue_size)
 
 
@@ -168,9 +173,54 @@ def _drain_tts_audio_queue_size(audio_queue):
 def _nested_audio_size(value):
     if isinstance(value, (bytes, bytearray)):
         return len(value)
+    if isinstance(value, str):
+        return os.path.getsize(value) if os.path.exists(value) else 0
+    if isinstance(value, TTSMessageDTO):
+        size = _nested_audio_size(value.content_file)
+        size += _nested_audio_size(value.content_detail)
+        return size
     if isinstance(value, (list, tuple)):
         return sum(_nested_audio_size(item) for item in value)
+    if isinstance(value, dict):
+        return sum(_nested_audio_size(item) for item in value.values())
+    if value is not None and (hasattr(value, "content_file") or hasattr(value, "content_detail")):
+        size = _nested_audio_size(getattr(value, "content_file", None))
+        size += _nested_audio_size(getattr(value, "content_detail", None))
+        return size
     return 0
+
+
+async def _wait_for_tts_audio(tts, timeout=STREAM_DRAIN_TIMEOUT_SECONDS):
+    started = time.perf_counter()
+    while time.perf_counter() - started < timeout:
+        if _has_tts_audio(tts):
+            return
+        await asyncio.sleep(0.05)
+
+
+def _has_tts_audio(tts):
+    queues = [
+        getattr(tts, "tts_audio_queue", None),
+        getattr(getattr(tts, "conn", None), "tts_audio_queue", None),
+    ]
+    if any(_peek_tts_audio_queue_size(audio_queue) > 0 for audio_queue in queues):
+        return True
+    return _before_stop_play_files_size(getattr(tts, "before_stop_play_files", None)) > 0
+
+
+def _peek_tts_audio_queue_size(audio_queue):
+    if audio_queue is None:
+        return 0
+    try:
+        return sum(_nested_audio_size(item) for item in list(audio_queue.queue))
+    except Exception:
+        return 0
+
+
+def _before_stop_play_files_size(items):
+    if not items:
+        return 0
+    return _nested_audio_size(items)
 
 
 def _remove_file_quietly(path):

@@ -100,13 +100,15 @@ public class ModelBenchmarkServiceImpl implements ModelBenchmarkService {
         task.setUpdateDate(now);
         taskDao.insert(task);
 
-        JSONObject judgeConfig = contextBuilder.buildJudgeConfig(request);
-        if (!judgeConfig.isEmpty()) {
-            JUDGE_CONFIGS.put(task.getId(), judgeConfig);
-        }
-        JSONObject agentContext = contextBuilder.buildAgentContext(request);
-        if (!agentContext.isEmpty()) {
-            AGENT_CONTEXTS.put(task.getId(), agentContext);
+        if (isLlmOrSlm(task.getModelType())) {
+            JSONObject judgeConfig = contextBuilder.buildJudgeConfig(request);
+            if (!judgeConfig.isEmpty()) {
+                JUDGE_CONFIGS.put(task.getId(), judgeConfig);
+            }
+            JSONObject agentContext = contextBuilder.buildAgentContext(request);
+            if (!agentContext.isEmpty()) {
+                AGENT_CONTEXTS.put(task.getId(), agentContext);
+            }
         }
         CompletableFuture.runAsync(() -> runTask(task.getId()), BENCHMARK_EXECUTOR);
 
@@ -251,5 +253,10 @@ public class ModelBenchmarkServiceImpl implements ModelBenchmarkService {
 
     private String newId() {
         return UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private boolean isLlmOrSlm(String modelType) {
+        return "LLM".equalsIgnoreCase(StringUtils.defaultString(modelType))
+                || "SLM".equalsIgnoreCase(StringUtils.defaultString(modelType));
     }
 }
