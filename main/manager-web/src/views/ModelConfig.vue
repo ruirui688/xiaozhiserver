@@ -815,7 +815,7 @@ export default {
         return "待适配";
       }
       if (model.supportedStatus === "PARTIAL" || model.supportedStatus === "NEEDS_REVIEW") {
-        return "需审核";
+        return "待补全";
       }
       if (model.supportedStatus === "DEPRECATED" || model.deprecated) {
         return "不可用";
