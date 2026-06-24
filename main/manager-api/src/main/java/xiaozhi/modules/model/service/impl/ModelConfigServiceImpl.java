@@ -123,6 +123,8 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             "model_name", "model", "resource_id", "model_dir", "llm_model", "llm");
     private static final List<String> ENDPOINT_FIELDS = List.of(
             "base_url", "api_url", "url", "server_url", "ws_url", "host");
+    private static final String HUOSHAN_DOUBLE_STREAM_TYPE = "huoshan_double_stream";
+    private static final String HUOSHAN_DOUBLE_STREAM_WS_URL = "wss://openspeech.bytedance.com/api/v3/tts/bidirection";
 
     @Override
     public List<ModelBasicInfoDTO> getModelCodeList(String modelType, String modelName) {
@@ -588,7 +590,31 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         setIfNotBlank(config, "resource_id", upstreamModel);
         mergeConfigMap(config, body.getParams());
         mergeConfigMap(config, body.getSecrets());
+        normalizeHuoshanDoubleStreamTtsConfig(config);
         return config;
+    }
+
+    private void normalizeHuoshanDoubleStreamTtsConfig(JSONObject config) {
+        if (config == null || !HUOSHAN_DOUBLE_STREAM_TYPE.equalsIgnoreCase(config.getStr("type"))) {
+            return;
+        }
+        config.set("ws_url", HUOSHAN_DOUBLE_STREAM_WS_URL);
+        for (String key : List.of("base_url", "api_url", "url", "server_url", "host", "endpoint_url")) {
+            String value = config.getStr(key);
+            if (isLegacyHuoshanTtsEndpoint(value)) {
+                config.remove(key);
+            }
+        }
+    }
+
+    private boolean isLegacyHuoshanTtsEndpoint(String value) {
+        if (StringUtils.isBlank(value)) {
+            return false;
+        }
+        String normalized = value.trim().toLowerCase();
+        return normalized.contains("openspeech.bytedance.com/api/v3/tts/unidirectional")
+                || (normalized.startsWith("https://openspeech.bytedance.com/api/v3/tts/")
+                        && !normalized.startsWith(HUOSHAN_DOUBLE_STREAM_WS_URL));
     }
 
     private void mergeConfigMap(JSONObject config, Map<String, Object> values) {
@@ -1004,6 +1030,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         }
 
         JSONObject configJson = modelConfig.getConfigJson();
+        normalizeHuoshanDoubleStreamTtsConfig(configJson);
         String type = StringUtils.lowerCase(configJson.getStr("type"));
         if (StringUtils.isBlank(type)) {
             result.setSuccess(false);
