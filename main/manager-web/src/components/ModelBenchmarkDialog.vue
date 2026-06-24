@@ -395,10 +395,10 @@
             <div class="performance-result-metrics">
               <span>{{ $t("modelConfig.avgLatency") }} {{ formatMeasuredLatency(row, "avgLatencyMs") }}</span>
               <span v-if="isModelType(row, 'llm')">{{ $t("modelConfig.qualityScore") }} {{ formatScore(row.qualityScore) }}</span>
-              <span v-if="isModelType(row, 'llm')">{{ $t("modelConfig.ttft") }} {{ formatMetric(row.ttftMs, " ms") }}</span>
               <span v-if="isModelType(row, 'llm')">P0/P1 {{ row.p0p1FailureCount || 0 }}</span>
-              <span v-if="isModelType(row, 'tts')">{{ $t("modelConfig.firstAudio") }} {{ formatMetric(row.firstAudioMs, " ms") }}</span>
+              <span v-if="hasMetric(row.firstAudioMs) && isModelType(row, 'tts')">{{ $t("modelConfig.firstAudio") }} {{ formatMetric(row.firstAudioMs, " ms") }}</span>
               <span v-if="isModelType(row, 'tts')">{{ $t("modelConfig.rtf") }} {{ formatMetric(row.rtf, "") }}</span>
+              <span v-if="hasMetric(row.ttftMs) && isModelType(row, 'asr')">{{ $t("modelConfig.firstAsrText") }} {{ formatMetric(row.ttftMs, " ms") }}</span>
               <span v-if="isModelType(row, 'asr')">{{ $t("modelConfig.cer") }} {{ formatPercent(row.cer) }}</span>
               <span v-if="isModelType(row, 'asr')">{{ $t("modelConfig.wer") }} {{ formatPercent(row.wer) }}</span>
             </div>
@@ -547,19 +547,19 @@
 
               <div class="performance-sample-metrics">
                 <span v-if="isSampleType(selectedPerformanceSample, 'llm')">
-                  {{ $t("modelConfig.ttft") }} {{ formatMetric(selectedPerformanceSample.ttftMs, " ms") }}
-                </span>
-                <span v-if="isSampleType(selectedPerformanceSample, 'llm')">
                   {{ $t("modelConfig.tokensPerSecond") }} {{ formatMetric(selectedPerformanceSample.tokensPerSecond, "") }}
                 </span>
                 <span v-if="isSampleType(selectedPerformanceSample, 'llm')">
                   {{ $t("modelConfig.qualityScore") }} {{ formatScore(selectedPerformanceSample.qualityScore) }}
                 </span>
-                <span v-if="isSampleType(selectedPerformanceSample, 'tts')">
+                <span v-if="hasMetric(selectedPerformanceSample.firstAudioMs) && isSampleType(selectedPerformanceSample, 'tts')">
                   {{ $t("modelConfig.firstAudio") }} {{ formatMetric(selectedPerformanceSample.firstAudioMs, " ms") }}
                 </span>
                 <span v-if="isSampleType(selectedPerformanceSample, 'tts')">
                   {{ $t("modelConfig.rtf") }} {{ formatMetric(selectedPerformanceSample.rtf, "") }}
+                </span>
+                <span v-if="hasMetric(selectedPerformanceSample.ttftMs) && isSampleType(selectedPerformanceSample, 'asr')">
+                  {{ $t("modelConfig.firstAsrText") }} {{ formatMetric(selectedPerformanceSample.ttftMs, " ms") }}
                 </span>
                 <span v-if="isSampleType(selectedPerformanceSample, 'asr')">
                   {{ $t("modelConfig.cer") }} {{ formatPercent(selectedPerformanceSample.cer) }}
@@ -1001,6 +1001,9 @@ export default {
         return "-";
       }
       return `${value}${unit}`;
+    },
+    hasMetric(value) {
+      return value !== null && value !== undefined && value !== "";
     },
     formatScore(value) {
       if (value === null || value === undefined || value === "") {

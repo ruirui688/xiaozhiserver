@@ -82,6 +82,15 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             "qwen-omni-turbo",
             "qwen2.5-omni-7b",
             "qwq-plus");
+    private static final List<String> DOUBAO_SEED_TEXT_MODELS = List.of(
+            "doubao-seed-evolving",
+            "doubao-seed-2-1-turbo",
+            "doubao-seed-2-1-pro",
+            "doubao-seed-2-0-pro",
+            "doubao-seed-2-0-mini",
+            "doubao-seed-2-0-lite",
+            "doubao-seed-2-0-code",
+            "doubao-seed-1-8");
     private static final List<ModelCatalogDTO> CATALOG = buildCatalog();
     private static final Set<String> STATIC_FIELD_SCHEMA_TEMPLATE_CODES = Set.of(
             "ASR_FUN_SERVER",
@@ -1056,10 +1065,18 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 List.of("qwen3.5-omni-plus-realtime", "qwen3.5-omni-flash-realtime", "qwen3-omni-flash-realtime")));
         items.add(openAiLlm("LLM_DOUBAO_ARK_OPENAI", "火山引擎", "豆包方舟", "OpenAI 兼容聊天", "doubao-1-5-pro",
                 "通过火山方舟 OpenAI 兼容接口接入豆包模型。", List.of("DoubaoLLM", "ark.cn")));
-        items.add(openAiLlm("LLM_DOUBAO_SEED_OPENAI", "火山引擎", "豆包 Seed 系列", "OpenAI 兼容聊天",
-                "doubao-seed-1-6 / doubao-seed-2-0",
-                "通过火山方舟 OpenAI 兼容接口接入豆包 Seed 系列；具体 model_name 以方舟控制台开通结果为准。",
-                List.of("doubao-seed", "doubao-seed-1-6", "doubao-seed-2-0")));
+        ModelCatalogDTO doubaoSeed = openAiLlm("LLM_DOUBAO_SEED_OPENAI", "火山引擎", "豆包 Seed 系列",
+                "OpenAI 兼容聊天",
+                "Doubao-Seed-Evolving / Doubao-Seed-2.1-turbo / Doubao-Seed-2.1-pro / Doubao-Seed-2.0 系列",
+                "通过火山方舟 OpenAI 兼容接口接入豆包 Seed 系列；model_name 必须填写方舟控制台已开通的具体模型 ID。",
+                List.of("doubao-seed", "doubao-seed-evolving", "doubao-seed-2-1", "doubao-seed-2-0"));
+        doubaoSeed.setDocLink("https://www.volcengine.com/docs/82379/1554709");
+        doubaoSeed.setAvoidWhen("不要填写 doubao-seed-2-0 这类泛化系列名；方舟 Chat Completions 要求 model 精确等于控制台已开通模型 ID。");
+        doubaoSeed.setKnownLimitations(List.of(
+                "方舟开通管理中的展示名通常是 Doubao-Seed-2.1-turbo 这类产品名；实际 model 参数使用小写连字符形式，例如 doubao-seed-2-1-turbo。",
+                "账号未开通对应模型时，即使 ID 正确也会返回无权限或 NotFound。"));
+        doubaoSeed.setSourceCheckedAt("2026-06-24");
+        items.add(doubaoSeed);
         items.add(unavailable("LLM_DOUBAO_AUDIO_UNDERSTANDING", "LLM", "火山引擎",
                 "方舟音频理解", "llm", "Chat/Responses 音频理解", "OpenAI 兼容多模态",
                 "音频问答、语音内容理解。",
@@ -1348,8 +1365,8 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             }
             case "LLM_DOUBAO_SEED_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "https://ark.cn-beijing.volces.com/api/v3");
-                setFieldDefault(dto, "model_name", "doubao-seed-1-6");
-                setFieldOptions(dto, "model_name", List.of("doubao-seed-1-6", "doubao-seed-1-6-flash", "doubao-seed-2-0"));
+                setFieldDefault(dto, "model_name", "doubao-seed-2-1-turbo");
+                setFieldOptions(dto, "model_name", DOUBAO_SEED_TEXT_MODELS);
             }
             case "LLM_DEEPSEEK_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "https://api.deepseek.com");

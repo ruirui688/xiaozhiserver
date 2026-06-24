@@ -85,21 +85,12 @@
                 :cell-class-name="selectionCellClassName"
               ></el-table-column>
               <el-table-column
-                :label="$t('modelConfig.configName')"
+                :label="$t('modelConfig.modelName')"
                 align="left"
-                min-width="140"
+                min-width="180"
               >
                 <template slot-scope="scope">
                   <div class="model-primary">{{ scope.row.modelName }}</div>
-                </template>
-              </el-table-column>
-              <el-table-column
-                :label="$t('modelConfig.upstreamModel')"
-                align="left"
-                min-width="150"
-              >
-                <template slot-scope="scope">
-                  <div class="upstream-cell">{{ getUpstreamModel(scope.row) }}</div>
                 </template>
               </el-table-column>
               <el-table-column
@@ -366,6 +357,14 @@
           <div class="test-result-row">
             <span class="test-result-label">{{ $t("modelConfig.responseTime") }}</span>
             <span>{{ formatResponseTime(currentTestResult.responseTimeMs) }}</span>
+          </div>
+          <div v-if="shouldShowFirstTextMetric(currentTestResult)" class="test-result-row">
+            <span class="test-result-label">{{ $t("modelConfig.firstAsrText") }}</span>
+            <span>{{ formatResponseTime(currentTestResult.firstTextMs) }}</span>
+          </div>
+          <div v-if="shouldShowFirstAudioMetric(currentTestResult)" class="test-result-row">
+            <span class="test-result-label">{{ $t("modelConfig.firstAudio") }}</span>
+            <span>{{ formatResponseTime(currentTestResult.firstAudioMs) }}</span>
           </div>
           <div class="test-result-block">
             <div class="test-result-label">{{ getTestInputLabel(currentTestResult) }}</div>
@@ -754,6 +753,12 @@ export default {
     },
     shouldShowOutputAudio(result) {
       return !!(result && result.testAudioDataUrl && this.isTtsTestResult(result));
+    },
+    shouldShowFirstTextMetric(result) {
+      return !!(result && this.activeTab === "asr" && result.firstTextMs !== null && result.firstTextMs !== undefined && result.firstTextMs !== "");
+    },
+    shouldShowFirstAudioMetric(result) {
+      return !!(result && this.activeTab === "tts" && result.firstAudioMs !== null && result.firstAudioMs !== undefined && result.firstAudioMs !== "");
     },
     getTestInputLabel(result) {
       return this.isTtsTestResult(result)

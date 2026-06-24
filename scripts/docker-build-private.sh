@@ -188,7 +188,43 @@ supports_unicode() {
   [[ "$charset" == *UTF-8* || "$charset" == *utf8* || "$charset" == *utf-8* ]]
 }
 
-restore_progress_terminal() {
+short_image_name() {
+  local image="$1"
+  printf '%s' "${image##*/}"
+}
+
+progress_label() {
+  local label="$1"
+  if [[ "${#label}" -gt 30 ]]; then
+    printf '%s...' "${label:0:27}"
+  else
+    printf '%s' "$label"
+  fi
+}
+
+progress_frames_unicode() {
+  printf '%s\n' \
+    '╺━━━━━━━━━━━━━━' '━╺━━━━━━━━━━━━━' '━━╺━━━━━━━━━━━━' '━━━╺━━━━━━━━━━━' \
+    '━━━━╺━━━━━━━━━━' '━━━━━╺━━━━━━━━━' '━━━━━━╺━━━━━━━━' '━━━━━━━╺━━━━━━━' \
+    '━━━━━━━━╺━━━━━━' '━━━━━━━━━╺━━━━━' '━━━━━━━━━━╺━━━━' '━━━━━━━━━━━╺━━━' \
+    '━━━━━━━━━━━━╺━━' '━━━━━━━━━━━━━╺━' '━━━━━━━━━━━━━━╸' '━━━━━━━━━━━━━╸━' \
+    '━━━━━━━━━━━━╸━━' '━━━━━━━━━━━╸━━━' '━━━━━━━━━━╸━━━━' '━━━━━━━━━╸━━━━━' \
+    '━━━━━━━━╸━━━━━━' '━━━━━━━╸━━━━━━━' '━━━━━━╸━━━━━━━━' '━━━━━╸━━━━━━━━━' \
+    '━━━━╸━━━━━━━━━━' '━━━╸━━━━━━━━━━━' '━━╸━━━━━━━━━━━━' '━╸━━━━━━━━━━━━━'
+}
+
+progress_frames_ascii() {
+  printf '%s\n' \
+    '>..............' '.>.............' '..>............' '...>...........' \
+    '....>..........' '.....>.........' '......>........' '.......>.......' \
+    '........>......' '.........>.....' '..........>....' '...........>...' \
+    '............>..' '.............>.' '..............>' '.............<.' \
+    '............<..' '...........<...' '..........<....' '.........<.....' \
+    '........<......' '.......<.......' '......<........' '.....<.........' \
+    '....<..........' '...<...........' '..<............' '.<.............'
+}
+
+restore_progress_line() {
   printf '\r\033[2K\033[?25h'
 }
 
@@ -196,12 +232,14 @@ watch_background_task() {
   local pid="$1"
   local label="$2"
   local log_file="$3"
+  local display_label
   local start_time
   local now
   local elapsed
   local elapsed_text
   local exit_code
   start_time="$(date +%s)"
+  display_label="$(progress_label "$label")"
 
   if ! progress_enabled; then
     set +e
@@ -217,16 +255,26 @@ watch_background_task() {
     return "$exit_code"
   fi
 
+  local done_icon="OK"
+  local fail_icon="FAIL"
+  local green=$'\033[32m'
+  local red=$'\033[31m'
+  local cyan=$'\033[36m'
+  local dim=$'\033[2m'
+  local reset=$'\033[0m'
+
   if [[ ! -t 1 ]]; then
-    printf '  • %s started  log: %s\n' "$label" "$log_file"
+    printf '• %s started  log: %s\n' "$display_label" "$log_file"
+    trap 'kill "$pid" 2>/dev/null || true; exit 130' INT
+    trap 'kill "$pid" 2>/dev/null || true; exit 143' TERM
+
     while kill -0 "$pid" 2>/dev/null; do
       sleep "$XIAOZHI_PROGRESS_INTERVAL"
       if kill -0 "$pid" 2>/dev/null; then
         now="$(date +%s)"
         elapsed=$((now - start_time))
         elapsed_text="$(format_duration "$elapsed")"
-        printf '  • %s still running  elapsed: %s  log: %s\n' \
-          "$label" "$elapsed_text" "$log_file"
+        printf '• %s still running  elapsed: %s  log: %s\n' "$display_label" "$elapsed_text" "$log_file"
       fi
     done
 
@@ -236,52 +284,40 @@ watch_background_task() {
     set -e
     elapsed_text="$(format_duration "$(($(date +%s) - start_time))")"
 
-    if [[ "$exit_code" -eq 0 ]]; then
-      printf '  ✓ %s completed  elapsed: %s\n' "$label" "$elapsed_text"
-    else
-      printf '  ✗ %s failed  elapsed: %s  log: %s\n' "$label" "$elapsed_text" "$log_file" >&2
+    if supports_unicode; then
+      done_icon="✓"
+      fail_icon="✗"
     fi
+
+    if [[ "$exit_code" -eq 0 ]]; then
+      printf '%s %s completed  elapsed: %s\n' "$done_icon" "$display_label" "$elapsed_text"
+    else
+      printf '%s %s failed  elapsed: %s  log: %s\n' "$fail_icon" "$display_label" "$elapsed_text" "$log_file" >&2
+    fi
+
+    trap - INT TERM
     return "$exit_code"
   fi
 
   local -a spinner
   local -a progress_frames
-  local done_icon="OK"
-  local fail_icon="FAIL"
   if supports_unicode; then
     spinner=( '⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏' )
-    progress_frames=(
-      '╺━━━━━━━━━━━━━━' '━╺━━━━━━━━━━━━━' '━━╺━━━━━━━━━━━━' '━━━╺━━━━━━━━━━━'
-      '━━━━╺━━━━━━━━━━' '━━━━━╺━━━━━━━━━' '━━━━━━╺━━━━━━━━' '━━━━━━━╺━━━━━━━'
-      '━━━━━━━━╺━━━━━━' '━━━━━━━━━╺━━━━━' '━━━━━━━━━━╺━━━━' '━━━━━━━━━━━╺━━━'
-      '━━━━━━━━━━━━╺━━' '━━━━━━━━━━━━━╺━' '━━━━━━━━━━━━━━╸' '━━━━━━━━━━━━━╸━'
-      '━━━━━━━━━━━━╸━━' '━━━━━━━━━━━╸━━━' '━━━━━━━━━━╸━━━━' '━━━━━━━━━╸━━━━━'
-      '━━━━━━━━╸━━━━━━' '━━━━━━━╸━━━━━━━' '━━━━━━╸━━━━━━━━' '━━━━━╸━━━━━━━━━'
-      '━━━━╸━━━━━━━━━━' '━━━╸━━━━━━━━━━━' '━━╸━━━━━━━━━━━━' '━╸━━━━━━━━━━━━━'
-    )
+    mapfile -t progress_frames < <(progress_frames_unicode)
     done_icon="✔"
     fail_icon="✖"
   else
-    spinner=( '|' '/' '-' '\' )
-    progress_frames=(
-      '>..............' '.>.............' '..>............' '...>...........'
-      '....>..........' '.....>.........' '......>........' '.......>.......'
-      '........>......' '.........>.....' '..........>....' '...........>...'
-      '............>..' '.............>.' '..............>'
-    )
+    spinner=( '|' '/' '-' '\\' )
+    mapfile -t progress_frames < <(progress_frames_ascii)
   fi
 
-  local cyan=$'\033[36m'
-  local green=$'\033[32m'
-  local red=$'\033[31m'
-  local dim=$'\033[2m'
-  local reset=$'\033[0m'
   local spinner_index=0
   local progress_index=0
 
   printf '\033[?25l'
-  trap 'restore_progress_terminal; kill "$pid" 2>/dev/null || true; exit 130' INT
-  trap 'restore_progress_terminal; kill "$pid" 2>/dev/null || true; exit 143' TERM
+  trap 'restore_progress_line; kill "$pid" 2>/dev/null || true; exit 130' INT
+  trap 'restore_progress_line; kill "$pid" 2>/dev/null || true; exit 143' TERM
+  trap 'restore_progress_line' EXIT
 
   while kill -0 "$pid" 2>/dev/null; do
     now="$(date +%s)"
@@ -290,7 +326,7 @@ watch_background_task() {
 
     printf '\r\033[2K%s%s%s  %-30s %s%s%s   %s' \
       "$cyan" "${spinner[$spinner_index]}" "$reset" \
-      "$label" \
+      "$display_label" \
       "$dim" "${progress_frames[$progress_index]}" "$reset" \
       "$elapsed_text"
 
@@ -308,21 +344,15 @@ watch_background_task() {
   printf '\r\033[2K'
   if [[ "$exit_code" -eq 0 ]]; then
     printf '%s%s%s  %-30s %scompleted%s   %s\n' \
-      "$green" "$done_icon" "$reset" \
-      "$label" \
-      "$green" "$reset" \
-      "$elapsed_text"
+      "$green" "$done_icon" "$reset" "$display_label" "$green" "$reset" "$elapsed_text"
   else
     printf '%s%s%s  %-30s %sfailed%s      %s\n' \
-      "$red" "$fail_icon" "$reset" \
-      "$label" \
-      "$red" "$reset" \
-      "$elapsed_text" >&2
+      "$red" "$fail_icon" "$reset" "$display_label" "$red" "$reset" "$elapsed_text" >&2
     printf '   %sLog:%s %s\n' "$dim" "$reset" "$log_file" >&2
   fi
 
   printf '\033[?25h'
-  trap - INT TERM
+  trap - EXIT INT TERM
   return "$exit_code"
 }
 
@@ -371,10 +401,11 @@ build_image() {
 push_image() {
   [[ "$BUILD_ENGINE" == "docker" && "$PUSH" == "true" ]] || return 0
   local image="$1"
+  local label="Push $(short_image_name "$image")"
   if is_quiet; then
-    run_docker_step "Push $image" docker push --quiet "$image"
+    run_docker_step "$label" docker push --quiet "$image"
   else
-    run_docker_step "Push $image" docker push "$image"
+    run_docker_step "$label" docker push "$image"
   fi
 }
 

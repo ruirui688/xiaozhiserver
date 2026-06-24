@@ -13,19 +13,20 @@ function firstNonEmpty(...values) {
 function buildModelPayload(formData = {}, provideCode = '') {
   const params = { ...(formData.params || {}) };
   const secrets = { ...(formData.secrets || {}) };
+  const modelName = firstNonEmpty(formData.modelName, formData.displayName, formData.upstreamModelId);
+  const adapterCode = firstNonEmpty(formData.adapterCode, formData.providerCode, provideCode);
 
   return {
     id: formData.id,
-    modelCode: formData.modelCode,
-    modelName: formData.modelName || formData.displayName,
-    displayName: formData.displayName || formData.modelName,
-    adapterCode: firstNonEmpty(formData.adapterCode, formData.providerCode, provideCode),
-    providerCode: firstNonEmpty(formData.providerCode, formData.adapterCode, provideCode),
+    modelName,
+    displayName: modelName,
+    adapterCode,
+    providerCode: adapterCode,
     templateCode: formData.templateCode,
     vendorName: formData.vendorName,
     productName: formData.productName,
     protocol: firstNonEmpty(formData.protocol),
-    upstreamModelId: firstNonEmpty(formData.upstreamModelId),
+    upstreamModelId: modelName,
     endpointUrl: firstNonEmpty(formData.endpointUrl),
     params,
     secrets,
@@ -500,7 +501,7 @@ export default {
         })
       }).send()
   },
-  // 获取标准模型目录
+  // 获取模型提供商列表
   getModelCatalog(params, callback) {
     const queryParams = new URLSearchParams();
     if (params.modelType) queryParams.append('modelType', params.modelType);
@@ -521,12 +522,12 @@ export default {
         callback(res)
       })
       .networkFail((err) => {
-        console.error('获取标准模型目录失败:', err)
+        console.error('获取模型提供商失败:', err)
         RequestService.clearRequestTime()
         callback({
           data: {
             code: -1,
-            msg: err?.msg || '获取标准模型目录失败'
+            msg: err?.msg || '获取模型提供商失败'
           }
         })
       }).send()

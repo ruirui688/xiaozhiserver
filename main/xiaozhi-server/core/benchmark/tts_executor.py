@@ -24,6 +24,7 @@ DEFAULT_TTS_SAMPLES = [
 async def run_tts_samples(provider_type, config, iterations):
     tts = create_tts_instance(provider_type, config, delete_audio_file=True)
     tts.conn = _BenchmarkTtsConn(sample_rate=int(config.get("sample_rate") or 16000))
+    tts.tts_audio_queue = _BenchmarkAudioQueue()
     if not hasattr(tts, "opus_encoder") or tts.opus_encoder is None:
         tts.opus_encoder = OpusEncoderUtils(
             sample_rate=tts.conn.sample_rate,
@@ -40,9 +41,10 @@ async def run_tts_samples(provider_type, config, iterations):
             audio_size = 0
             audio_data_url = ""
             audio_preview_format = ""
+            first_audio_ms = None
             output_file = None
             try:
-                result, output_file = await _synthesize_tts_sample(tts, text)
+                result, output_file, first_audio_ms = await _synthesize_tts_sample(tts, text, started)
                 latency_ms = int((time.perf_counter() - started) * 1000)
                 audio_result = _collect_tts_audio_result(result, output_file, tts)
                 audio_size = audio_result["audio_size"]
@@ -62,7 +64,7 @@ async def run_tts_samples(provider_type, config, iterations):
                 "success": success,
                 "measured": success,
                 "latency_ms": latency_ms,
-                "first_audio_ms": latency_ms if success else None,
+                "first_audio_ms": first_audio_ms if success else None,
                 "input_summary": text,
                 "output_summary": f"音频字节数：{audio_size}",
                 "process_steps": [
@@ -81,6 +83,7 @@ async def run_tts_samples(provider_type, config, iterations):
                     "audio_preview_format": audio_preview_format,
                     "audio_data_url": audio_data_url,
                     "valid_audio": success,
+                    "first_audio_ms": first_audio_ms if success else None,
                 },
                 "message": message,
                 "error_type": None if success else "EMPTY_AUDIO_OR_ERROR",
@@ -103,38 +106,48 @@ class _BenchmarkTtsConn:
         self.sentence_id = "benchmark"
         self.stop_event = threading.Event()
         self.client_abort = False
-        self.tts_audio_queue = queue.Queue()
+        self.tts_audio_queue = _BenchmarkAudioQueue()
         try:
             self.loop = asyncio.get_running_loop()
         except RuntimeError:
             self.loop = None
 
 
-async def _synthesize_tts_sample(tts, text):
+class _BenchmarkAudioQueue(queue.Queue):
+    def __init__(self):
+        super().__init__()
+        self.first_audio_at = None
+
+    def put(self, item, block=True, timeout=None):
+        if self.first_audio_at is None and _nested_audio_size(item) > 0:
+            self.first_audio_at = time.perf_counter()
+        return super().put(item, block, timeout)
+
+
+async def _synthesize_tts_sample(tts, text, started):
     interface_type = getattr(tts, "interface_type", None)
     if interface_type in (InterfaceType.DUAL_STREAM, InterfaceType.SINGLE_STREAM):
-        return await _synthesize_stream_tts_sample(tts, text), None
+        result, first_audio_ms = await _synthesize_stream_tts_sample(tts, text, started)
+        return result, None, first_audio_ms
 
     output_file = _generate_tts_output_file(tts)
     if output_file:
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
     result = await tts.text_to_speak(text, output_file)
-    return result, output_file
+    return result, output_file, None
 
 
-async def _synthesize_stream_tts_sample(tts, text):
+async def _synthesize_stream_tts_sample(tts, text, started):
     if hasattr(tts, "start_session") and hasattr(tts, "finish_session"):
         await tts.start_session(tts.conn.sentence_id)
         if hasattr(tts, "store_tts_text"):
             tts.store_tts_text(tts.conn.sentence_id, text)
         await tts.text_to_speak(text, None)
         await tts.finish_session(tts.conn.sentence_id)
-        await _wait_for_tts_audio(tts)
-        return b""
+        return b"", _first_tts_audio_ms(tts, started)
 
     result = await tts.text_to_speak(text, True)
-    await _wait_for_tts_audio(tts)
-    return result
+    return result, _first_tts_audio_ms(tts, started)
 
 
 def _generate_tts_output_file(tts):
@@ -218,14 +231,6 @@ def _nested_audio_chunks(value):
     return []
 
 
-async def _wait_for_tts_audio(tts, timeout=STREAM_DRAIN_TIMEOUT_SECONDS):
-    started = time.perf_counter()
-    while time.perf_counter() - started < timeout:
-        if _has_tts_audio(tts):
-            return
-        await asyncio.sleep(0.05)
-
-
 def _has_tts_audio(tts):
     queues = [
         getattr(tts, "tts_audio_queue", None),
@@ -234,6 +239,17 @@ def _has_tts_audio(tts):
     if any(_peek_tts_audio_queue_size(audio_queue) > 0 for audio_queue in queues):
         return True
     return _before_stop_play_files_size(getattr(tts, "before_stop_play_files", None)) > 0
+
+
+def _first_tts_audio_ms(tts, benchmark_started):
+    first_timestamp = getattr(getattr(tts, "tts_audio_queue", None), "first_audio_at", None)
+    conn_audio_queue = getattr(getattr(tts, "conn", None), "tts_audio_queue", None)
+    conn_timestamp = getattr(conn_audio_queue, "first_audio_at", None)
+    if conn_timestamp is not None and (first_timestamp is None or conn_timestamp < first_timestamp):
+        first_timestamp = conn_timestamp
+    if first_timestamp is None:
+        return None
+    return max(0, int((first_timestamp - benchmark_started) * 1000))
 
 
 def _peek_tts_audio_queue_size(audio_queue):

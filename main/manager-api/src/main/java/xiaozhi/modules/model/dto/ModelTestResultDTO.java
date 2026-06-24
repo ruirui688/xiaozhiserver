@@ -44,6 +44,12 @@ public class ModelTestResultDTO implements Serializable {
     @Schema(description = "响应耗时(毫秒)")
     private Long responseTimeMs;
 
+    @Schema(description = "流式 ASR 首段识别耗时(毫秒)")
+    private Long firstTextMs;
+
+    @Schema(description = "流式 TTS 首音频耗时(毫秒)")
+    private Long firstAudioMs;
+
     @Schema(description = "测试状态(0未测试 1通过 2失败)")
     private Integer testStatus;
 

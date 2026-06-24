@@ -36,11 +36,12 @@ async def run_asr_samples(model, provider_type, config, iterations):
         audio = audio_files[index % len(audio_files)]
         started = time.perf_counter()
         text = ""
+        first_text_ms = None
         success = False
         message = "OK"
         try:
             pcm = _wav_to_pcm(audio["path"], audio["data"])
-            text = await _recognize_asr_sample(asr, provider_type, pcm)
+            text, first_text_ms = await _recognize_asr_sample(asr, provider_type, pcm, started)
             latency_ms = int((time.perf_counter() - started) * 1000)
             success = bool(str(text or "").strip())
             if not success:
@@ -55,6 +56,7 @@ async def run_asr_samples(model, provider_type, config, iterations):
             "success": success,
             "measured": success,
             "latency_ms": latency_ms,
+            "ttft_ms": first_text_ms,
             "cer": char_error_rate(reference, text) if reference else None,
             "wer": word_error_rate(reference, text) if reference else None,
             "input_summary": audio["name"],
@@ -74,6 +76,7 @@ async def run_asr_samples(model, provider_type, config, iterations):
             },
             "output_detail": {
                 "recognized_text": str(text or ""),
+                "first_text_ms": first_text_ms,
                 "cer": char_error_rate(reference, text) if reference else None,
                 "wer": word_error_rate(reference, text) if reference else None,
             },
@@ -92,19 +95,19 @@ def _build_audio_data_url(audio):
     return f"data:{media_type};base64,{base64.b64encode(data).decode('ascii')}"
 
 
-async def _recognize_asr_sample(asr, provider_type, pcm):
+async def _recognize_asr_sample(asr, provider_type, pcm, started):
     provider_type = str(provider_type or "").lower()
     if provider_type == "doubao_stream":
-        return await _recognize_doubao_stream(asr, pcm)
+        return await _recognize_doubao_stream(asr, pcm, started)
     if provider_type == "aliyun_stream":
-        return await _recognize_aliyun_stream(asr, pcm)
+        return await _recognize_aliyun_stream(asr, pcm, started)
     if provider_type == "xunfei_stream":
-        return await _recognize_xunfei_stream(asr, pcm)
+        return await _recognize_xunfei_stream(asr, pcm, started)
     text, _ = await asr.speech_to_text_wrapper([pcm], "benchmark", "pcm")
-    return text
+    return text, None
 
 
-async def _recognize_doubao_stream(asr, pcm):
+async def _recognize_doubao_stream(asr, pcm, started):
     headers = asr.token_auth() if getattr(asr, "auth_method", "token") == "token" else None
     async with websockets.connect(
         asr.ws_url,
@@ -135,8 +138,8 @@ async def _recognize_doubao_stream(asr, pcm):
             result = asr.parse_response(await asyncio.wait_for(ws.recv(), timeout=10))
             text = _extract_doubao_text(result)
             if text:
-                return text
-        return ""
+                return text, int((time.perf_counter() - started) * 1000)
+        return "", None
 
 
 def _extract_doubao_text(result):
@@ -153,7 +156,7 @@ def _extract_doubao_text(result):
     return result_body.get("text") or ""
 
 
-async def _recognize_aliyun_stream(asr, pcm):
+async def _recognize_aliyun_stream(asr, pcm, started):
     if hasattr(asr, "_is_token_expired") and asr._is_token_expired():
         asr._refresh_token()
     async with websockets.connect(
@@ -197,6 +200,7 @@ async def _recognize_aliyun_stream(asr, pcm):
         }, ensure_ascii=False))
 
         texts = []
+        first_text_ms = None
         for _ in range(30):
             message = await asyncio.wait_for(ws.recv(), timeout=10)
             result = json.loads(message)
@@ -204,11 +208,15 @@ async def _recognize_aliyun_stream(asr, pcm):
             payload = result.get("payload", {})
             if header.get("status") not in (None, 20000000):
                 raise RuntimeError(header.get("status_text") or str(header))
+            if header.get("name") == "TranscriptionResultChanged" and payload.get("result") and first_text_ms is None:
+                first_text_ms = int((time.perf_counter() - started) * 1000)
             if header.get("name") == "SentenceEnd" and payload.get("result"):
+                if first_text_ms is None:
+                    first_text_ms = int((time.perf_counter() - started) * 1000)
                 texts.append(payload.get("result"))
             if header.get("name") in ("TranscriptionCompleted", "TaskFailed"):
                 break
-        return "".join(texts)
+        return "".join(texts), first_text_ms
 
 
 async def _wait_aliyun_started(ws):
@@ -229,7 +237,7 @@ async def _send_pcm_frames(ws, pcm, frame_size=3200, delay=0.02):
             await asyncio.sleep(delay)
 
 
-async def _recognize_xunfei_stream(asr, pcm):
+async def _recognize_xunfei_stream(asr, pcm, started):
     async with websockets.connect(
         asr.create_url(),
         max_size=1000000000,
@@ -262,6 +270,7 @@ async def _recognize_xunfei_stream(asr, pcm):
             await asyncio.sleep(0.04)
 
         text_parts = []
+        first_text_ms = None
         async for message in ws:
             result = json.loads(message)
             header = result.get("header", {})
@@ -273,10 +282,13 @@ async def _recognize_xunfei_stream(asr, pcm):
                 decoded = base64.b64decode(text_data).decode("utf-8")
                 text_json = json.loads(decoded)
                 ws_result = text_json.get("ws") or []
-                text_parts.extend(cw.get("w", "") for seg in ws_result for cw in seg.get("cw", []))
+                chunk_text = "".join(cw.get("w", "") for seg in ws_result for cw in seg.get("cw", []))
+                if chunk_text and first_text_ms is None:
+                    first_text_ms = int((time.perf_counter() - started) * 1000)
+                text_parts.append(chunk_text)
             if header.get("status") == 2:
                 break
-        return "".join(text_parts)
+        return "".join(text_parts), first_text_ms
 
 
 def _load_audio_files(preferred_name=None):

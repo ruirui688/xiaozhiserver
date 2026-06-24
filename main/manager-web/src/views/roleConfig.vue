@@ -875,9 +875,7 @@ export default {
       });
     },
     buildModelOption(item = {}) {
-      const configName = item.modelName || item.id || "";
-      const upstreamModel = item.upstreamModelId || "";
-      const title = upstreamModel || configName;
+      const title = item.modelName || item.id || "";
       const provider = [item.vendorName, item.productName].filter(Boolean).join(" / ");
       const meta = provider || item.vendorName || item.productName || "";
 

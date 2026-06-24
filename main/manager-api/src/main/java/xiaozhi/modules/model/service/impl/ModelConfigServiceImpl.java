@@ -465,8 +465,9 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         modelConfigEntity.setModelType(modelType);
 
         // 2. 更新基础字段
-        modelConfigEntity.setModelCode(modelConfigBodyDTO.getModelCode());
-        modelConfigEntity.setModelName(modelConfigBodyDTO.getModelName());
+        modelConfigEntity.setModelName(normalizeUserModelName(modelConfigBodyDTO, originalEntity.getModelName()));
+        modelConfigEntity.setModelCode(resolveInternalModelCode(modelConfigBodyDTO, modelConfigEntity.getModelName(),
+                originalEntity.getModelCode()));
         applyStandardModelFields(modelConfigEntity, modelConfigBodyDTO);
         modelConfigEntity.setSort(modelConfigBodyDTO.getSort());
         modelConfigEntity.setIsEnabled(0);
@@ -487,6 +488,9 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     private ModelConfigEntity prepareAddEntity(ModelConfigBodyDTO modelConfigBodyDTO, String modelType) {
         ModelConfigEntity modelConfigEntity = ConvertUtils.sourceToTarget(modelConfigBodyDTO, ModelConfigEntity.class);
         modelConfigEntity.setModelType(modelType);
+        modelConfigEntity.setModelName(normalizeUserModelName(modelConfigBodyDTO, modelConfigEntity.getModelName()));
+        modelConfigEntity.setModelCode(resolveInternalModelCode(modelConfigBodyDTO, modelConfigEntity.getModelName(),
+                null));
         applyStandardModelFields(modelConfigEntity, modelConfigBodyDTO);
         modelConfigEntity.setIsDefault(0);
         modelConfigEntity.setIsEnabled(0);
@@ -531,6 +535,8 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     }
 
     private void applyStandardModelFields(ModelConfigEntity entity, ModelConfigBodyDTO body) {
+        String userModelName = normalizeUserModelName(body, entity.getModelName());
+        String upstreamModel = firstNonBlank(body.getUpstreamModelId(), userModelName, entity.getUpstreamModelId());
         entity.setAdapterCode(firstNonBlank(
                 body.getAdapterCode(),
                 body.getProviderCode(),
@@ -539,8 +545,27 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         entity.setVendorName(StringUtils.defaultString(body.getVendorName(), entity.getVendorName()));
         entity.setProductName(StringUtils.defaultString(body.getProductName(), entity.getProductName()));
         entity.setProtocol(StringUtils.defaultString(body.getProtocol(), entity.getProtocol()));
-        entity.setUpstreamModelId(StringUtils.defaultString(body.getUpstreamModelId(), entity.getUpstreamModelId()));
+        entity.setUpstreamModelId(StringUtils.defaultString(upstreamModel, entity.getUpstreamModelId()));
         entity.setEndpointUrl(StringUtils.defaultString(body.getEndpointUrl(), entity.getEndpointUrl()));
+    }
+
+    private String normalizeUserModelName(ModelConfigBodyDTO body, String fallback) {
+        if (body == null) {
+            return StringUtils.defaultString(fallback);
+        }
+        return firstNonBlank(body.getModelName(), body.getUpstreamModelId(), fallback);
+    }
+
+    private String resolveInternalModelCode(ModelConfigBodyDTO body, String modelName, String fallback) {
+        if (body == null) {
+            return StringUtils.defaultString(fallback);
+        }
+        return firstNonBlank(
+                fallback,
+                body.getAdapterCode(),
+                body.getProviderCode(),
+                body.getTemplateCode(),
+                modelName);
     }
 
     private JSONObject buildStandardRuntimeConfig(ModelConfigBodyDTO body, String provideCode) {
@@ -548,6 +573,8 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         if (body == null) {
             return config;
         }
+        String userModelName = normalizeUserModelName(body, "");
+        String upstreamModel = firstNonBlank(body.getUpstreamModelId(), userModelName);
         setIfNotBlank(config, "type", firstNonBlank(body.getAdapterCode(), body.getProviderCode(), provideCode));
         setIfNotBlank(config, "protocol", body.getProtocol());
         setIfNotBlank(config, "base_url", body.getEndpointUrl());
@@ -556,9 +583,9 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         setIfNotBlank(config, "ws_url", body.getEndpointUrl());
         setIfNotBlank(config, "host", body.getEndpointUrl());
         setIfNotBlank(config, "endpoint_url", body.getEndpointUrl());
-        setIfNotBlank(config, "model_name", body.getUpstreamModelId());
-        setIfNotBlank(config, "model", body.getUpstreamModelId());
-        setIfNotBlank(config, "resource_id", body.getUpstreamModelId());
+        setIfNotBlank(config, "model_name", upstreamModel);
+        setIfNotBlank(config, "model", upstreamModel);
+        setIfNotBlank(config, "resource_id", upstreamModel);
         mergeConfigMap(config, body.getParams());
         mergeConfigMap(config, body.getSecrets());
         return config;
@@ -1543,6 +1570,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             if (latencyMs != null) {
                 result.setResponseTimeMs(latencyMs);
             }
+            result.setFirstTextMs(sample.getLong("ttft_ms"));
             result.setTestInput(buildRuntimeBenchmarkAsrInput(sample, providerType));
             result.setTestAudioDataUrl(buildRuntimeBenchmarkAsrAudioDataUrl(sample));
             result.setTestOutput(StringUtils.defaultIfBlank(recognizedText, sample.toStringPretty()));
@@ -1695,6 +1723,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             if (latencyMs != null) {
                 result.setResponseTimeMs(latencyMs);
             }
+            result.setFirstAudioMs(sample.getLong("first_audio_ms"));
             result.setTestInput(buildRuntimeBenchmarkTtsInput(sample, providerType));
             result.setTestAudioDataUrl(buildRuntimeBenchmarkTtsAudioDataUrl(sample));
             result.setTestOutput(buildRuntimeBenchmarkTtsOutput(sample));
