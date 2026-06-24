@@ -146,7 +146,7 @@ source_checked_at       最后核验日期
 | 官方产品 | 当前适配状态 | 页面应如何提示 |
 | --- | --- | --- |
 | 火山方舟 Chat/Responses 模型 | `SUPPORTED`，OpenAI 兼容 LLM | 通过 `https://ark.cn-beijing.volces.com/api/v3`、`model_name`、API Key 接入 |
-| Doubao Seed 2.1/2.0 系列 | `SUPPORTED`，取决于账号开通和模型 ID | 当前目录列出 Doubao-Seed-Evolving、2.1-turbo、2.1-pro、2.0-pro/mini/lite/code 和 1.8；模型名称必须填写方舟实际调用 ID，例如 `doubao-seed-2-1-turbo` |
+| Doubao Seed 2.1/2.0 系列 | `SUPPORTED`，取决于账号开通和模型 ID | 当前目录列出 Doubao-Seed-Evolving、2.1-turbo、2.1-pro、2.0-pro/mini/lite/code 和 1.8；模型名称必须填写方舟实际调用 ID。短 ID 在部分账号或套餐下会返回 NotFound，优先使用官方模型列表中的完整版本 ID，例如 `doubao-seed-2-1-turbo-260628` |
 | Doubao 1.5/1.6 旧模型 | `SUPPORTED`，兼容已有配置 | 不应成为唯一默认；页面应提示有更新系列可选 |
 | Doubao Vision / 多模态模型 | `PARTIAL`，走 OpenAI 兼容 VLLM 后必须图片测试 | 需要单独 VLLM 目录项，不能隐藏在通用 OpenAI 兼容里 |
 
@@ -186,8 +186,8 @@ ASR 实时设备对话：
 ```text
 火山方舟 Doubao Seed Chat
   -> 使用已有 openai LLM 模板，字段为 base_url、model_name、api_key
-  -> model_name 必须是方舟控制台已开通模型的实际调用 ID，不能填 doubao-seed-2-0 这类泛化系列名
-  -> 当前下拉包含 doubao-seed-evolving、doubao-seed-2-1-turbo、doubao-seed-2-1-pro、doubao-seed-2-0-pro、doubao-seed-2-0-mini、doubao-seed-2-0-lite、doubao-seed-2-0-code、doubao-seed-1-8
+  -> model_name 必须是方舟控制台或官方模型列表中的实际调用 ID，不能填 doubao-seed-2-0 这类泛化系列名
+  -> 当前下拉优先给出带日期后缀的完整版本 ID，例如 doubao-seed-2-1-turbo-260628、doubao-seed-2-0-mini-260428；短 ID 仅作为兼容候选，若返回 InvalidEndpointOrModel.NotFound 应改用完整版本 ID 或检查 API Key 项目权限
 
 普通通义千问 Chat / 视觉 OpenAI 兼容
   -> 使用已有 openai LLM/VLLM 模板，字段为 base_url、model_name、api_key

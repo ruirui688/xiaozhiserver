@@ -84,12 +84,21 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             "qwq-plus");
     private static final List<String> DOUBAO_SEED_TEXT_MODELS = List.of(
             "doubao-seed-evolving",
+            "doubao-seed-2-1-turbo-260628",
             "doubao-seed-2-1-turbo",
+            "doubao-seed-2-1-pro-260628",
             "doubao-seed-2-1-pro",
+            "doubao-seed-2-0-pro-260215",
             "doubao-seed-2-0-pro",
+            "doubao-seed-2-0-mini-260428",
+            "doubao-seed-2-0-mini-260215",
             "doubao-seed-2-0-mini",
+            "doubao-seed-2-0-lite-260428",
+            "doubao-seed-2-0-lite-260215",
             "doubao-seed-2-0-lite",
+            "doubao-seed-2-0-code-preview-260215",
             "doubao-seed-2-0-code",
+            "doubao-seed-1-8-251228",
             "doubao-seed-1-8");
     private static final List<ModelCatalogDTO> CATALOG = buildCatalog();
     private static final Set<String> STATIC_FIELD_SCHEMA_TEMPLATE_CODES = Set.of(
@@ -1073,7 +1082,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         doubaoSeed.setDocLink("https://www.volcengine.com/docs/82379/1554709");
         doubaoSeed.setAvoidWhen("不要填写 doubao-seed-2-0 这类泛化系列名；方舟 Chat Completions 要求 model 精确等于控制台已开通模型 ID。");
         doubaoSeed.setKnownLimitations(List.of(
-                "方舟开通管理中的展示名通常是 Doubao-Seed-2.1-turbo 这类产品名；实际 model 参数使用小写连字符形式，例如 doubao-seed-2-1-turbo。",
+                "方舟开通管理中的展示名通常是 Doubao-Seed-2.1-turbo 这类产品名；实际 model 参数需要使用控制台或官方模型列表中的可调用 ID，例如 doubao-seed-2-1-turbo-260628。短 ID 在部分账号或套餐下可能返回 NotFound。",
                 "账号未开通对应模型时，即使 ID 正确也会返回无权限或 NotFound。"));
         doubaoSeed.setSourceCheckedAt("2026-06-24");
         items.add(doubaoSeed);
@@ -1365,7 +1374,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             }
             case "LLM_DOUBAO_SEED_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "https://ark.cn-beijing.volces.com/api/v3");
-                setFieldDefault(dto, "model_name", "doubao-seed-2-1-turbo");
+                setFieldDefault(dto, "model_name", "doubao-seed-2-1-turbo-260628");
                 setFieldOptions(dto, "model_name", DOUBAO_SEED_TEXT_MODELS);
             }
             case "LLM_DEEPSEEK_OPENAI" -> {
