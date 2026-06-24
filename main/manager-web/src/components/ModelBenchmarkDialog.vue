@@ -7,7 +7,10 @@
       append-to-body
       class="performance-result-dialog"
     >
-      <div class="benchmark-setup">
+      <div
+        class="benchmark-setup"
+        :class="{ 'is-voice-benchmark': isVoiceBenchmark }"
+      >
         <div class="benchmark-section benchmark-run-section">
           <div class="benchmark-section-head">
             <div>
@@ -52,7 +55,7 @@
             }}
           </div>
         </div>
-        <div class="benchmark-section benchmark-case-section">
+        <div v-if="isLlmBenchmark" class="benchmark-section benchmark-case-section">
           <div class="benchmark-section-head">
             <div>
               <strong>测试用例</strong>
@@ -171,7 +174,25 @@
             当前不需要填写测试问题，后端会使用内置标准样本集。
           </div>
         </div>
-        <div class="benchmark-section benchmark-runtime-section">
+        <div v-else class="benchmark-section benchmark-voice-section">
+          <div class="benchmark-section-head">
+            <div>
+              <strong>{{ getVoiceBenchmarkTitle() }}</strong>
+              <span>{{ getVoiceBenchmarkHint() }}</span>
+            </div>
+          </div>
+          <div class="benchmark-voice-standard">
+            <i :class="getVoiceBenchmarkIcon()"></i>
+            <div>
+              <strong>{{ getVoiceBenchmarkStandardTitle() }}</strong>
+              <span>{{ getVoiceBenchmarkStandardHint() }}</span>
+            </div>
+          </div>
+          <div class="benchmark-built-in-note">
+            {{ getVoiceBenchmarkNote() }}
+          </div>
+        </div>
+        <div v-if="isLlmBenchmark" class="benchmark-section benchmark-runtime-section">
           <div class="benchmark-section-head">
             <div>
               <strong>评审与运行环境</strong>
@@ -886,6 +907,15 @@ export default {
     hiddenReportQuestionCount() {
       return this.getHiddenListCount(this.reportCustomQuestions, this.reportQuestionsExpanded);
     },
+    normalizedModelType() {
+      return String(this.modelType || "").toLowerCase();
+    },
+    isLlmBenchmark() {
+      return this.normalizedModelType === "llm" || this.normalizedModelType === "slm";
+    },
+    isVoiceBenchmark() {
+      return this.normalizedModelType === "asr" || this.normalizedModelType === "tts";
+    },
   },
   watch: {
     visible(value) {
@@ -898,9 +928,11 @@ export default {
     },
   },
   created() {
-    this.loadPerformanceJudgeConfig();
-    this.loadPerformanceJudgeModels();
-    this.loadPerformanceAgents();
+    if (this.isLlmBenchmark) {
+      this.loadPerformanceJudgeConfig();
+      this.loadPerformanceJudgeModels();
+      this.loadPerformanceAgents();
+    }
   },
   beforeDestroy() {
     this.stopPerformancePolling();
@@ -913,6 +945,13 @@ export default {
       this.selectedPerformanceResultId = "";
       this.selectedPerformanceSampleKey = "";
       this.reportQuestionsExpanded = false;
+      if (this.isLlmBenchmark) {
+        this.loadPerformanceJudgeConfig();
+        this.loadPerformanceJudgeModels();
+        this.loadPerformanceAgents();
+      } else {
+        this.resetLlmBenchmarkOptions();
+      }
     },
     formatResponseTime(responseTimeMs) {
       if (responseTimeMs === null || responseTimeMs === undefined || responseTimeMs === "") {
@@ -987,6 +1026,9 @@ export default {
         .filter((item) => item.length > 0);
     },
     getCaseModeHint() {
+      if (!this.isLlmBenchmark) {
+        return this.getVoiceBenchmarkHint();
+      }
       if (this.benchmarkCaseMode === "built_in") {
         return "默认走后端内置样本，适合快速对比模型质量。";
       }
@@ -994,6 +1036,53 @@ export default {
         return "选择预设后会自动填入多轮业务问题，可直接开始测试。";
       }
       return "生成能力依赖后端接口；未接入时会提示并保留当前用例。";
+    },
+    getVoiceBenchmarkTitle() {
+      if (this.normalizedModelType === "asr") {
+        return "语音识别测试";
+      }
+      if (this.normalizedModelType === "tts") {
+        return "语音合成测试";
+      }
+      return "内置标准测试";
+    },
+    getVoiceBenchmarkHint() {
+      if (this.normalizedModelType === "asr") {
+        return "直接使用后端内置标准音频，不需要配置 Judge、智能体或测试问题。";
+      }
+      if (this.normalizedModelType === "tts") {
+        return "直接使用后端内置中文播报文本，不需要配置 Judge、智能体或真实设备。";
+      }
+      return "使用后端内置样本执行真实 provider 测试。";
+    },
+    getVoiceBenchmarkIcon() {
+      return this.normalizedModelType === "asr" ? "el-icon-microphone" : "el-icon-headset";
+    },
+    getVoiceBenchmarkStandardTitle() {
+      return this.normalizedModelType === "asr" ? "内置语音样本" : "内置合成文本";
+    },
+    getVoiceBenchmarkStandardHint() {
+      if (this.normalizedModelType === "asr") {
+        return "默认读取 xiaozhi-server 的标准 wakeup_words_short.wav 音频并执行真实识别。";
+      }
+      return "默认使用固定中文短句调用 TTS provider，并检查生成音频是否有效。";
+    },
+    getVoiceBenchmarkNote() {
+      if (this.normalizedModelType === "asr") {
+        return "这里测的是语音识别模型本身：音频输入、识别文本、耗时和空识别率。LLM 业务用例、Judge 和真实设备上下文只用于 LLM/SLM 评测。";
+      }
+      return "这里测的是语音合成模型本身：文本输入、音频输出、首音频耗时和音频有效性。无需选择智能体或设备。";
+    },
+    resetLlmBenchmarkOptions() {
+      this.performanceJudgeModelId = DEFAULT_PERFORMANCE_JUDGE_CONFIG.modelId;
+      this.performanceAgentId = DEFAULT_PERFORMANCE_JUDGE_CONFIG.agentId;
+      this.performanceDeviceId = DEFAULT_PERFORMANCE_JUDGE_CONFIG.deviceId;
+      this.performanceCustomQuestionsText = "";
+      this.selectedBenchmarkPresetId = "";
+      this.benchmarkCaseMode = "built_in";
+      this.benchmarkQuestionsExpanded = false;
+      this.benchmarkQuestionsEditing = false;
+      this.performanceDevices = [];
     },
     selectBenchmarkCaseMode(mode) {
       if (this.performanceTesting) {
@@ -1642,7 +1731,9 @@ export default {
         return;
       }
       this.stopPerformancePolling();
-      this.savePerformanceJudgeConfig(true);
+      if (this.isLlmBenchmark) {
+        this.savePerformanceJudgeConfig(true);
+      }
       this.performanceTesting = true;
       this.reportQuestionsExpanded = false;
       this.performanceReport = {
@@ -1652,23 +1743,26 @@ export default {
         modelIds,
         iterations: this.performanceIterations,
         concurrency: this.performanceConcurrency,
-        agentId: this.performanceAgentId,
-        deviceId: this.performanceDeviceId,
-        customQuestions,
+        agentId: this.isLlmBenchmark ? this.performanceAgentId : "",
+        deviceId: this.isLlmBenchmark ? this.performanceDeviceId : "",
+        customQuestions: this.isLlmBenchmark ? customQuestions : [],
         results: [],
       };
       this.syncSelectedPerformanceResult(this.performanceReport);
+      const request = {
+        modelType: this.modelType,
+        modelIds,
+        iterations: this.performanceIterations,
+        concurrency: this.performanceConcurrency,
+      };
+      if (this.isLlmBenchmark) {
+        request.judgeModelId = this.performanceJudgeModelId;
+        request.agentId = this.performanceAgentId;
+        request.deviceId = this.performanceDeviceId;
+        request.customQuestions = customQuestions;
+      }
       Api.model.performanceTest(
-        {
-          modelType: this.modelType,
-          modelIds,
-          iterations: this.performanceIterations,
-          concurrency: this.performanceConcurrency,
-          judgeModelId: this.performanceJudgeModelId,
-          agentId: this.performanceAgentId,
-          deviceId: this.performanceDeviceId,
-          customQuestions,
-        },
+        request,
         ({ data }) => {
           if (data.code === 0) {
             this.performanceTaskId = data.data.taskId;
@@ -1763,6 +1857,10 @@ export default {
   grid-template-columns: minmax(220px, 0.75fr) minmax(420px, 1.35fr) minmax(340px, 1fr);
   gap: 12px;
   margin-bottom: 12px;
+}
+
+.benchmark-setup.is-voice-benchmark {
+  grid-template-columns: minmax(220px, 0.8fr) minmax(420px, 1.2fr);
 }
 
 .benchmark-section {
@@ -1886,7 +1984,8 @@ export default {
 
 .benchmark-generate-panel,
 .benchmark-built-in-note,
-.benchmark-question-preview {
+.benchmark-question-preview,
+.benchmark-voice-standard {
   margin-top: 10px;
   padding: 10px;
   border: 1px solid #edf0f5;
@@ -1901,17 +2000,34 @@ export default {
   gap: 10px;
 }
 
+.benchmark-voice-standard {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.benchmark-voice-standard i {
+  color: #409eff;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
 .benchmark-generate-panel strong,
-.benchmark-generate-panel span {
+.benchmark-generate-panel span,
+.benchmark-voice-standard strong,
+.benchmark-voice-standard span {
   display: block;
 }
 
-.benchmark-generate-panel strong {
+.benchmark-generate-panel strong,
+.benchmark-voice-standard strong {
   color: #303133;
   font-size: 13px;
 }
 
 .benchmark-generate-panel span,
+.benchmark-voice-standard span,
 .benchmark-built-in-note {
   color: #606266;
   font-size: 12px;
