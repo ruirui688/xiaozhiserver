@@ -803,6 +803,9 @@ export default {
         this.getAccessSummary(model),
         model && model.recommendedFor ? `推荐：${model.recommendedFor}` : "",
         model && model.avoidWhen ? `限制：${model.avoidWhen}` : "",
+        model && model.testContract ? `测试要求：${model.testContract}` : "",
+        model && model.requiredFields && model.requiredFields.length ? `必填字段：${model.requiredFields.join("、")}` : "",
+        model && model.sourceCheckedAt ? `来源核验：${model.sourceCheckedAt}` : "",
       ].filter(Boolean).join("\n");
     },
     getCatalogStatusText(model) {

@@ -117,6 +117,7 @@ docs/integrations/prompt-injection-engineering.md
 - [device/ota-upgrade-guide.md](./device/ota-upgrade-guide.md) - 单模块部署的固件 OTA 自动升级配置指南。用于准备固件文件、配置 OTA 服务、让设备通过服务端自动升级。
 - [device/device-call-guide.md](./device/device-call-guide.md) - 设备间相互呼叫插件使用指南。用于配置设备互呼能力、理解启用前提、插件配置和调用流程。
 - [device/mqtt-gateway-integration.md](./device/mqtt-gateway-integration.md) - MQTT 网关部署教程。用于部署 MQTT 网关、连接设备消息通道、配置网关与小智服务端之间的通信。
+- [device/websocket-mcp-boot-connection-change.md](./device/websocket-mcp-boot-connection-change.md) - 设备开机后常驻 WebSocket 与 MCP 可见性改动说明。用于理解设备端主动连接、重连、空闲常驻连接和 MCP 初始化时序。
 
 ## 7. MCP 与工具调用
 
@@ -128,6 +129,7 @@ docs/integrations/prompt-injection-engineering.md
 - [mcp/mcp-vision-integration.md](./mcp/mcp-vision-integration.md) - 视觉模型使用指南。用于开启服务端视觉模型、选择视觉模型供应商、配置视觉接口并排查网络可用性。
 - [mcp/context-provider-integration.md](./mcp/context-provider-integration.md) - 上下文源使用教程。用于为智能体注入外部上下文、理解上下文源接口规范、配置服务端调用上下文提供方。
 - [mcp/no-code-http-tools.md](./mcp/no-code-http-tools.md) - 可视化 MCP HTTP 工具。用于理解智控台配置 HTTP 工具、manager-api 保存配置、Python 桥接脚本注册 MCP tools 的完整链路和安全边界。
+- [mcp/chat-history-mcp-troubleshooting.md](./mcp/chat-history-mcp-troubleshooting.md) - 聊天记录图片与 MCP 工具显示问题排查。用于排查聊天历史图片缺失、设备 MCP 工具列表为空、调试连接和真实设备运行时状态混淆等问题。
 
 ## 8. 模型、语音与记忆
 
@@ -139,6 +141,7 @@ docs/integrations/prompt-injection-engineering.md
 - [models/index-stream-integration.md](./models/index-stream-integration.md) - IndexStreamTTS 使用指南。用于部署 IndexStreamTTS 环境、配置 Conda 环境、启动服务并接入流式 TTS。
 - [models/powermem-integration.md](./models/powermem-integration.md) - PowerMem 记忆组件集成指南。用于给智能体接入长期记忆能力，包含组件安装、功能特性和服务配置。
 - [models/local-knowledge-integration.md](./models/local-knowledge-integration.md) - 本地知识库与大模型切片指南。用于配置 `RAG_LocalKnowledge`、在知识库界面配置阿里云百炼/OpenAI 兼容切片模型、重新解析旧文档和排查本地知识库召回为空。
+- [models/model-management.md](./models/model-management.md) - 模型管理存储与保存架构。用于对照智控台模型配置页面，理解配置名称、模型编码、上游模型、厂商产品、普通参数、密钥参数、模板字段、保存接口、数据库表和运行时下发协议。
 - [models/model-config-catalog.md](./models/model-config-catalog.md) - 标准模型配置目录与治理说明。用于梳理 ASR、TTS、LLM、VLLM、SLM、Memory、Intent、RAG、VAD、声纹和插件 RAG 的厂商、产品、能力、接入方式、标准字段、参数/密钥分表和运行时 `model_config` 契约。
 - [models/ragflow-integration.md](./models/ragflow-integration.md) - RAGFlow 集成指南。用于部署 RAGFlow、检查 MySQL/Redis、配置知识库问答和服务端 RAG 调用。
 - [models/performance_tester.md](./models/performance_tester.md) - 模型性能测试工具使用指南。用于测试 ASR、大语言模型、非流式 TTS、流式 TTS、视觉模型的延迟和稳定性。
@@ -199,6 +202,17 @@ AI 禁止：
 ## 12. 文档移动规则
 
 官方原有文档已按主题移动到分类目录。移动后必须维护相对链接，避免破坏图片路径和文档互链。
+
+模块目录 README 可以留在模块根目录，作为该模块开发入口。例如：
+
+```text
+main/README.md
+main/manager-api/README.md
+main/manager-web/README.md
+main/manager-mobile/README.md
+```
+
+通用专题、架构、部署教程、排障记录、设备/MCP/模型/集成说明必须进入 `docs/` 对应分类。不要在 `main/` 下新增通用 `doc/` 或 `docs/` 目录。
 
 本地新增的强制规范统一放在：
 

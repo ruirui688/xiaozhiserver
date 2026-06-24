@@ -39,15 +39,59 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
 
     private static final List<ModelCatalogDTO> CATALOG = buildCatalog();
     private static final Set<String> STATIC_FIELD_SCHEMA_TEMPLATE_CODES = Set.of(
+            "ASR_FUN_SERVER",
+            "ASR_DOUBAO_LEGACY_HTTP",
             "ASR_XUNFEI_STREAM",
             "ASR_DOUBAO_BIGASR_STREAM",
             "ASR_DOUBAO_SEED_ASR_2_STREAM",
+            "ASR_TENCENT_SENTENCE",
+            "ASR_ALIYUN_NLS_HTTP",
+            "ASR_ALIYUN_NLS_STREAM",
+            "ASR_BAIDU_SPEECH",
+            "ASR_OPENAI_TRANSCRIBE",
+            "ASR_GROQ_OPENAI_TRANSCRIBE",
+            "ASR_QWEN3_FLASH",
+            "ASR_ALIYUN_BAILIAN_PARAFORMER",
+            "TTS_DOUBAO_HTTP",
             "TTS_XUNFEI_STREAM",
             "TTS_DOUBAO_BIGTTS_STREAM",
             "TTS_DOUBAO_SEED_TTS_2_STREAM",
+            "TTS_SILICONFLOW_COSYVOICE",
+            "TTS_COZE_CN",
+            "TTS_VOLCES_AI_GATEWAY_OPENAI",
+            "TTS_OPENAI_SPEECH",
+            "TTS_FISHSPEECH",
+            "TTS_GPT_SOVITS_V2",
+            "TTS_GPT_SOVITS_V3",
+            "TTS_MINIMAX_STREAM",
+            "TTS_ALIYUN_NLS",
+            "TTS_ALIYUN_NLS_STREAM",
+            "TTS_ALIYUN_BAILIAN_COSYVOICE",
+            "TTS_TENCENT",
+            "TTS_CUSTOM_HTTP",
+            "TTS_PADDLESPEECH",
+            "TTS_INDEX_STREAM",
+            "TTS_LINKERAI",
+            "LLM_OPENAI_COMPATIBLE",
+            "LLM_ALI_QWEN_OPENAI",
+            "LLM_ALI_BAILIAN_APP",
+            "LLM_ALI_QWEN_OMNI_REALTIME",
             "LLM_DOUBAO_ARK_OPENAI",
             "LLM_DOUBAO_SEED_OPENAI",
-            "LLM_DEEPSEEK_OPENAI");
+            "LLM_DEEPSEEK_OPENAI",
+            "LLM_ZHIPU_GLM_OPENAI",
+            "LLM_OLLAMA_LOCAL",
+            "LLM_DIFY_APP",
+            "LLM_GEMINI",
+            "LLM_COZE",
+            "LLM_FASTGPT",
+            "LLM_XINFERENCE_LOCAL",
+            "LLM_LM_STUDIO_OPENAI",
+            "LLM_HOME_ASSISTANT",
+            "VLLM_OPENAI_COMPATIBLE",
+            "VLLM_ZHIPU_GLM_OPENAI",
+            "VLLM_QWEN_VL_OPENAI",
+            "VLLM_XUNFEI_SPARK_OPENAI");
     private volatile boolean catalogSeedChecked = false;
 
     @Override
@@ -288,6 +332,17 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             entity.setDocLink(template.getDocLink());
             entity.setEnabled(Boolean.TRUE.equals(template.getHidden()) || Boolean.TRUE.equals(template.getDeprecated()) ? 0 : 1);
             entity.setSort(template.getSort());
+            entity.setSupportedStatus(StringUtils.defaultIfBlank(template.getSupportedStatus(), "SUPPORTED"));
+            entity.setSelectable(Boolean.TRUE.equals(template.getSelectable()) ? 1 : 0);
+            entity.setHidden(Boolean.TRUE.equals(template.getHidden()) ? 1 : 0);
+            entity.setDeprecated(Boolean.TRUE.equals(template.getDeprecated()) ? 1 : 0);
+            entity.setRecommendedFor(template.getRecommendedFor());
+            entity.setAvoidWhen(template.getAvoidWhen());
+            entity.setTestContract(template.getTestContract());
+            entity.setSourceCheckedAt(template.getSourceCheckedAt());
+            entity.setSetupHintsJson(serializeStringList(template.getSetupHints()));
+            entity.setKnownLimitationsJson(serializeStringList(template.getKnownLimitations()));
+            entity.setAliasesJson(serializeStringList(template.getAliases()));
             modelTemplateDao.insert(entity);
 
             for (ModelFieldSchemaDTO schema : template.getFieldSchemas()) {
@@ -337,23 +392,26 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 .filter(item -> StringUtils.equals(item.getTemplateCode(), entity.getTemplateCode()))
                 .findFirst()
                 .orElse(null);
+        boolean useStaticVerifiedCatalog = usesStaticFieldSchema(staticMeta);
 
         dto.setTemplateCode(entity.getTemplateCode());
         dto.setModelType(entity.getModelType());
-        dto.setProviderCode(entity.getAdapterCode());
+        dto.setProviderCode(useStaticVerifiedCatalog ? staticMeta.getProviderCode() : entity.getAdapterCode());
         dto.setAdapterName(staticMeta == null ? entity.getProductName() : staticMeta.getAdapterName());
         dto.setVendorName(staticMeta == null ? entity.getVendorName() : staticMeta.getVendorName());
         dto.setProductName(staticMeta == null ? entity.getProductName() : staticMeta.getProductName());
-        dto.setCapability(entity.getCapability());
+        dto.setCapability(useStaticVerifiedCatalog ? staticMeta.getCapability() : entity.getCapability());
         dto.setCapabilityLabel(staticMeta == null ? entity.getCapability() : staticMeta.getCapabilityLabel());
-        dto.setAccessMode(entity.getAccessMode());
+        dto.setAccessMode(useStaticVerifiedCatalog ? staticMeta.getAccessMode() : entity.getAccessMode());
         dto.setAccessModeLabel(staticMeta == null ? entity.getAccessMode() : staticMeta.getAccessModeLabel());
-        dto.setDeployment(entity.getDeployment());
+        dto.setDeployment(useStaticVerifiedCatalog ? staticMeta.getDeployment() : entity.getDeployment());
         dto.setDeploymentLabel(staticMeta == null ? entity.getDeployment() : staticMeta.getDeploymentLabel());
-        dto.setProtocolLabel(StringUtils.defaultIfBlank(entity.getProtocol(), staticMeta == null ? "" : staticMeta.getProtocolLabel()));
+        dto.setProtocolLabel(useStaticVerifiedCatalog
+                ? staticMeta.getProtocolLabel()
+                : StringUtils.defaultIfBlank(entity.getProtocol(), staticMeta == null ? "" : staticMeta.getProtocolLabel()));
         dto.setUpstreamResourceLabel(staticMeta == null ? entity.getUpstreamModelField() : staticMeta.getUpstreamResourceLabel());
-        dto.setUpstreamModelField(entity.getUpstreamModelField());
-        if (usesStaticFieldSchema(staticMeta)) {
+        dto.setUpstreamModelField(useStaticVerifiedCatalog ? staticMeta.getUpstreamModelField() : entity.getUpstreamModelField());
+        if (useStaticVerifiedCatalog) {
             dto.setCredentialFields(staticMeta.getCredentialFields());
             dto.setRequiredFields(staticMeta.getRequiredFields());
             dto.setRecommendedFields(staticMeta.getRecommendedFields());
@@ -368,18 +426,46 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                     .map(ModelTemplateFieldEntity::getFieldKey).toList());
             dto.setFieldSchemas(fields.stream().map(this::toFieldSchemaDTO).toList());
         }
-        dto.setDocLink(StringUtils.defaultIfBlank(entity.getDocLink(), staticMeta == null ? "" : staticMeta.getDocLink()));
-        dto.setSetupHints(staticMeta == null ? List.of() : staticMeta.getSetupHints());
-        dto.setKnownLimitations(staticMeta == null ? List.of() : staticMeta.getKnownLimitations());
-        dto.setSupportedStatus(staticMeta == null ? "SUPPORTED" : staticMeta.getSupportedStatus());
-        dto.setSelectable(staticMeta == null ? true : staticMeta.getSelectable());
-        dto.setRecommendedFor(staticMeta == null ? null : staticMeta.getRecommendedFor());
-        dto.setAvoidWhen(staticMeta == null ? null : staticMeta.getAvoidWhen());
-        dto.setTestContract(staticMeta == null ? defaultTestContract(entity.getModelType()) : staticMeta.getTestContract());
-        dto.setSourceCheckedAt(staticMeta == null ? null : staticMeta.getSourceCheckedAt());
-        dto.setAliases(staticMeta == null ? List.of() : staticMeta.getAliases());
-        dto.setHidden(intValue(entity.getEnabled()) == 0);
-        dto.setDeprecated(staticMeta != null && Boolean.TRUE.equals(staticMeta.getDeprecated()));
+        dto.setDocLink(useStaticVerifiedCatalog
+                ? staticMeta.getDocLink()
+                : StringUtils.defaultIfBlank(entity.getDocLink(), staticMeta == null ? "" : staticMeta.getDocLink()));
+        dto.setSetupHints(useStaticVerifiedCatalog
+                ? staticMeta.getSetupHints()
+                : firstNonEmptyList(parseStringList(entity.getSetupHintsJson()),
+                        staticMeta == null ? List.of() : staticMeta.getSetupHints()));
+        dto.setKnownLimitations(useStaticVerifiedCatalog
+                ? staticMeta.getKnownLimitations()
+                : firstNonEmptyList(parseStringList(entity.getKnownLimitationsJson()),
+                        staticMeta == null ? List.of() : staticMeta.getKnownLimitations()));
+        dto.setSupportedStatus(StringUtils.defaultIfBlank(entity.getSupportedStatus(),
+                staticMeta == null ? "SUPPORTED" : staticMeta.getSupportedStatus()));
+        dto.setSelectable(entity.getSelectable() == null
+                ? staticMeta == null || Boolean.TRUE.equals(staticMeta.getSelectable())
+                : intValue(entity.getSelectable()) == 1);
+        dto.setRecommendedFor(useStaticVerifiedCatalog
+                ? staticMeta.getRecommendedFor()
+                : StringUtils.defaultIfBlank(entity.getRecommendedFor(),
+                        staticMeta == null ? null : staticMeta.getRecommendedFor()));
+        dto.setAvoidWhen(useStaticVerifiedCatalog
+                ? staticMeta.getAvoidWhen()
+                : StringUtils.defaultIfBlank(entity.getAvoidWhen(),
+                        staticMeta == null ? null : staticMeta.getAvoidWhen()));
+        dto.setTestContract(useStaticVerifiedCatalog
+                ? staticMeta.getTestContract()
+                : StringUtils.defaultIfBlank(entity.getTestContract(),
+                        staticMeta == null ? defaultTestContract(entity.getModelType()) : staticMeta.getTestContract()));
+        dto.setSourceCheckedAt(useStaticVerifiedCatalog
+                ? staticMeta.getSourceCheckedAt()
+                : StringUtils.defaultIfBlank(entity.getSourceCheckedAt(),
+                        staticMeta == null ? null : staticMeta.getSourceCheckedAt()));
+        dto.setAliases(useStaticVerifiedCatalog
+                ? staticMeta.getAliases()
+                : firstNonEmptyList(parseStringList(entity.getAliasesJson()),
+                        staticMeta == null ? List.of() : staticMeta.getAliases()));
+        dto.setHidden(entity.getHidden() == null ? intValue(entity.getEnabled()) == 0 : intValue(entity.getHidden()) == 1);
+        dto.setDeprecated(entity.getDeprecated() == null
+                ? staticMeta != null && Boolean.TRUE.equals(staticMeta.getDeprecated())
+                : intValue(entity.getDeprecated()) == 1);
         dto.setSort(entity.getSort());
         return dto;
     }
@@ -465,6 +551,31 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         } catch (Exception ignored) {
             return value;
         }
+    }
+
+    private String serializeStringList(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return null;
+        }
+        return JSONUtil.toJsonStr(values);
+    }
+
+    private List<String> parseStringList(String valuesJson) {
+        if (StringUtils.isBlank(valuesJson)) {
+            return List.of();
+        }
+        try {
+            return JSONUtil.parseArray(valuesJson).stream()
+                    .map(String::valueOf)
+                    .filter(StringUtils::isNotBlank)
+                    .toList();
+        } catch (Exception ignored) {
+            return List.of();
+        }
+    }
+
+    private List<String> firstNonEmptyList(List<String> first, List<String> second) {
+        return first == null || first.isEmpty() ? second : first;
     }
 
     private List<String> parseOptions(String optionsJson) {
@@ -885,6 +996,12 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 List.of("is_no_prompt", "ali_memory_id"),
                 List.of("这是百炼应用调用，不是普通 OpenAI 兼容模型调用。"), List.of(), List.of("AliAppLLM"),
                 "https://help.aliyun.com/zh/model-studio"));
+        items.add(unavailable("LLM_ALI_QWEN_OMNI_REALTIME", "LLM", "阿里云百炼",
+                "Qwen Omni Realtime", "llm", "Realtime WebSocket 音频/文本多模态", "DashScope Realtime WebSocket",
+                "浏览器实时语音、多模态输入输出、Function Calling 探针验证场景。",
+                "当前项目没有独立 Realtime provider；连接形态是 wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=qwen3.5-omni-plus-realtime，事件协议包含 session.update、input_audio_buffer.append/commit、response.create、response.audio.delta、response.text.delta 和 response.function_call_arguments.delta/done，不能套用普通 OpenAI Chat 或百炼 Application adapter。",
+                "https://help.aliyun.com/zh/model-studio",
+                List.of("qwen3.5-omni-plus-realtime", "qwen3.5-omni-flash-realtime", "qwen3-omni-flash-realtime")));
         items.add(openAiLlm("LLM_DOUBAO_ARK_OPENAI", "火山引擎", "豆包方舟", "OpenAI 兼容聊天", "doubao-1-5-pro",
                 "通过火山方舟 OpenAI 兼容接口接入豆包模型。", List.of("DoubaoLLM", "ark.cn")));
         items.add(openAiLlm("LLM_DOUBAO_SEED_OPENAI", "火山引擎", "豆包 Seed 系列", "OpenAI 兼容聊天",
@@ -1162,17 +1279,26 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
 
     private static void applyTemplateDefaults(ModelCatalogDTO dto) {
         switch (dto.getTemplateCode()) {
+            case "LLM_OPENAI_COMPATIBLE" -> {
+                setFieldDefault(dto, "base_url", "https://api.openai.com/v1");
+                setFieldDefault(dto, "model_name", "gpt-4o-mini");
+                setFieldOptions(dto, "model_name", List.of("gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1"));
+            }
             case "LLM_ALI_QWEN_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1");
                 setFieldDefault(dto, "model_name", "qwen-flash");
+                setFieldOptions(dto, "model_name", List.of("qwen-flash", "qwen-plus", "qwen-max", "qwen-turbo"));
             }
+            case "LLM_ALI_BAILIAN_APP" -> setFieldDefault(dto, "base_url", "https://dashscope.aliyuncs.com/api/v1");
             case "LLM_DOUBAO_ARK_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "https://ark.cn-beijing.volces.com/api/v3");
                 setFieldDefault(dto, "model_name", "doubao-1-5-pro");
+                setFieldOptions(dto, "model_name", List.of("doubao-1-5-pro", "doubao-1-5-lite", "doubao-pro-32k-functioncall-241028"));
             }
             case "LLM_DOUBAO_SEED_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "https://ark.cn-beijing.volces.com/api/v3");
                 setFieldDefault(dto, "model_name", "doubao-seed-1-6");
+                setFieldOptions(dto, "model_name", List.of("doubao-seed-1-6", "doubao-seed-1-6-flash", "doubao-seed-2-0"));
             }
             case "LLM_DEEPSEEK_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "https://api.deepseek.com");
@@ -1180,32 +1306,87 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 setFieldDefault(dto, "max_tokens", 500);
                 setFieldDefault(dto, "thinking", "disabled");
                 setFieldDefault(dto, "reasoning_effort", "high");
+                setFieldOptions(dto, "model_name", List.of("deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"));
             }
             case "LLM_ZHIPU_GLM_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "https://open.bigmodel.cn/api/paas/v4");
                 setFieldDefault(dto, "model_name", "glm-4-flash");
+                setFieldOptions(dto, "model_name", List.of("glm-4-flash", "glm-4-plus", "glm-4-air", "glm-4v-flash"));
             }
+            case "LLM_DIFY_APP" -> setFieldDefault(dto, "base_url", "https://api.dify.ai/v1");
             case "LLM_OLLAMA_LOCAL" -> {
                 setFieldDefault(dto, "base_url", "http://127.0.0.1:11434/v1");
                 setFieldDefault(dto, "model_name", "qwen2.5:7b");
+                setFieldOptions(dto, "model_name", List.of("qwen2.5:7b", "qwen3:8b", "llama3.1:8b", "deepseek-r1:8b"));
             }
+            case "LLM_FASTGPT" -> setFieldDefault(dto, "base_url", "http://127.0.0.1:3000/api/v1");
+            case "LLM_XINFERENCE_LOCAL" -> setFieldDefault(dto, "base_url", "http://127.0.0.1:9997/v1");
             case "LLM_LM_STUDIO_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "http://127.0.0.1:1234/v1");
                 setFieldDefault(dto, "api_key", "lm-studio");
+                setFieldOptions(dto, "model_name", List.of("deepseek-r1-distill-llama-8b@q4_k_m", "qwen2.5-7b-instruct"));
+            }
+            case "LLM_HOME_ASSISTANT" -> setFieldDefault(dto, "base_url", "http://127.0.0.1:8123");
+            case "ASR_FUN_SERVER" -> {
+                setFieldDefault(dto, "host", "127.0.0.1");
+                setFieldDefault(dto, "port", 10095);
             }
             case "ASR_DOUBAO_BIGASR_STREAM" -> setFieldDefault(dto, "resource_id", "volc.bigasr.sauc.duration");
             case "ASR_DOUBAO_SEED_ASR_2_STREAM" -> setFieldDefault(dto, "resource_id", "volc.seedasr.sauc.duration");
+            case "ASR_TENCENT_SENTENCE" -> setFieldDefault(dto, "output_dir", "tmp/");
+            case "ASR_ALIYUN_NLS_HTTP" -> {
+                setFieldDefault(dto, "appkey", "");
+                setFieldDefault(dto, "output_dir", "tmp/");
+            }
+            case "ASR_ALIYUN_NLS_STREAM" -> {
+                setFieldDefault(dto, "host", "nls-gateway-cn-shanghai.aliyuncs.com");
+                setFieldDefault(dto, "appkey", "");
+                setFieldDefault(dto, "output_dir", "tmp/");
+            }
+            case "ASR_BAIDU_SPEECH" -> setFieldDefault(dto, "dev_pid", 1537);
+            case "ASR_OPENAI_TRANSCRIBE" -> {
+                setFieldDefault(dto, "base_url", "https://api.openai.com/v1");
+                setFieldDefault(dto, "model_name", "gpt-4o-mini-transcribe");
+                setFieldOptions(dto, "model_name", List.of("gpt-4o-mini-transcribe", "gpt-4o-transcribe", "whisper-1"));
+            }
+            case "ASR_GROQ_OPENAI_TRANSCRIBE" -> {
+                setFieldDefault(dto, "base_url", "https://api.groq.com/openai/v1");
+                setFieldDefault(dto, "model_name", "whisper-large-v3");
+                setFieldOptions(dto, "model_name", List.of("whisper-large-v3", "whisper-large-v3-turbo"));
+            }
             case "ASR_XUNFEI_STREAM" -> {
                 setFieldDefault(dto, "domain", "slm");
                 setFieldDefault(dto, "language", "zh_cn");
                 setFieldDefault(dto, "accent", "mandarin");
+                setFieldDefault(dto, "dwa", "wpgs");
             }
             case "ASR_QWEN3_FLASH" -> {
                 setFieldDefault(dto, "base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1");
                 setFieldDefault(dto, "model_name", "qwen3-asr-flash");
+                setFieldOptions(dto, "model_name", List.of("qwen3-asr-flash", "qwen3-asr-flash-filetrans"));
             }
-            case "ASR_ALIYUN_BAILIAN_PARAFORMER" -> setFieldDefault(dto, "model", "paraformer-realtime-v2");
+            case "ASR_ALIYUN_BAILIAN_PARAFORMER" -> {
+                setFieldDefault(dto, "model", "paraformer-realtime-v2");
+                setFieldOptions(dto, "model", List.of("paraformer-realtime-v2", "paraformer-realtime-v1", "paraformer-realtime-8k-v1"));
+            }
             case "TTS_DOUBAO_HTTP" -> setFieldDefault(dto, "api_url", "https://openspeech.bytedance.com/api/v1/tts");
+            case "TTS_SILICONFLOW_COSYVOICE" -> {
+                setFieldDefault(dto, "model", "FunAudioLLM/CosyVoice2-0.5B");
+                setFieldDefault(dto, "voice", "FunAudioLLM/CosyVoice2-0.5B:alex");
+                setFieldDefault(dto, "response_format", "mp3");
+            }
+            case "TTS_COZE_CN" -> {
+                setFieldDefault(dto, "model", "speech-02-hd");
+                setFieldDefault(dto, "response_format", "wav");
+            }
+            case "TTS_OPENAI_SPEECH" -> {
+                setFieldDefault(dto, "api_url", "https://api.openai.com/v1/audio/speech");
+                setFieldDefault(dto, "model", "gpt-4o-mini-tts");
+                setFieldOptions(dto, "model", List.of("gpt-4o-mini-tts", "tts-1", "tts-1-hd"));
+                setFieldDefault(dto, "voice", "alloy");
+                setFieldOptions(dto, "voice", List.of("alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"));
+                setFieldDefault(dto, "format", "wav");
+            }
             case "TTS_DOUBAO_BIGTTS_STREAM" -> {
                 setFieldDefault(dto, "ws_url", "wss://openspeech.bytedance.com/api/v3/tts/bidirection");
                 setFieldDefault(dto, "resource_id", "volc.service_type.10029");
@@ -1214,22 +1395,64 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 setFieldDefault(dto, "ws_url", "wss://openspeech.bytedance.com/api/v3/tts/bidirection");
                 setFieldDefault(dto, "resource_id", "seed-tts-2.0");
             }
+            case "TTS_FISHSPEECH" -> setFieldDefault(dto, "api_url", "http://127.0.0.1:8080/v1/tts");
+            case "TTS_GPT_SOVITS_V2" -> setFieldDefault(dto, "url", "http://127.0.0.1:9880/tts");
+            case "TTS_GPT_SOVITS_V3" -> setFieldDefault(dto, "url", "http://127.0.0.1:9880/tts");
+            case "TTS_MINIMAX_STREAM" -> {
+                setFieldDefault(dto, "model", "speech-02-hd");
+                setFieldOptions(dto, "model", List.of("speech-02-hd", "speech-02-turbo", "speech-01-hd", "speech-01-turbo"));
+                setFieldDefault(dto, "voice_id", "female-shaonv");
+            }
+            case "TTS_ALIYUN_NLS" -> {
+                setFieldDefault(dto, "host", "nls-gateway-cn-shanghai.aliyuncs.com");
+                setFieldDefault(dto, "voice", "longxiaochun");
+                setFieldDefault(dto, "format", "pcm");
+            }
+            case "TTS_ALIYUN_NLS_STREAM" -> {
+                setFieldDefault(dto, "host", "nls-gateway-cn-beijing.aliyuncs.com");
+                setFieldDefault(dto, "voice", "longxiaochun");
+                setFieldDefault(dto, "format", "pcm");
+            }
             case "TTS_XUNFEI_STREAM" -> {
+                setFieldDefault(dto, "api_url", "wss://cbm01.cn-huabei-1.xf-yun.com/v1/private/mcd9m97e6");
+                setFieldDefault(dto, "voice", "x5_lingxiaoxuan_flow");
                 setFieldDefault(dto, "format", "audio/L16;rate=16000");
                 setFieldDefault(dto, "volume", 50);
                 setFieldDefault(dto, "speed", 50);
                 setFieldDefault(dto, "pitch", 50);
                 setFieldDefault(dto, "oral_level", "mid");
             }
-            case "TTS_ALIYUN_BAILIAN_COSYVOICE" -> setFieldDefault(dto, "model", "cosyvoice-v2");
+            case "TTS_ALIYUN_BAILIAN_COSYVOICE" -> {
+                setFieldDefault(dto, "model", "cosyvoice-v2");
+                setFieldOptions(dto, "model", List.of("cosyvoice-v2", "cosyvoice-v1"));
+                setFieldDefault(dto, "voice", "longxiaochun_v2");
+                setFieldDefault(dto, "format", "pcm");
+            }
+            case "TTS_TENCENT" -> {
+                setFieldDefault(dto, "region", "ap-guangzhou");
+                setFieldDefault(dto, "voice", 101001);
+                setFieldDefault(dto, "format", "wav");
+            }
+            case "TTS_PADDLESPEECH" -> setFieldDefault(dto, "url", "ws://127.0.0.1:8092/paddlespeech/tts/streaming");
+            case "TTS_INDEX_STREAM" -> {
+                setFieldDefault(dto, "api_url", "http://127.0.0.1:11996/tts");
+                setFieldDefault(dto, "voice", "xiao_he");
+            }
             case "VLLM_ZHIPU_GLM_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "https://open.bigmodel.cn/api/paas/v4");
                 setFieldDefault(dto, "model_name", "glm-4v-flash");
             }
+            case "VLLM_OPENAI_COMPATIBLE" -> {
+                setFieldDefault(dto, "base_url", "https://api.openai.com/v1");
+                setFieldDefault(dto, "model_name", "gpt-4o-mini");
+                setFieldOptions(dto, "model_name", List.of("gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1"));
+            }
             case "VLLM_QWEN_VL_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1");
                 setFieldDefault(dto, "model_name", "qwen-vl-plus");
+                setFieldOptions(dto, "model_name", List.of("qwen-vl-plus", "qwen-vl-max", "qwen2.5-vl-7b-instruct", "qwen2.5-vl-72b-instruct"));
             }
+            case "VLLM_XUNFEI_SPARK_OPENAI" -> setFieldDefault(dto, "model_name", "generalv3.5");
             default -> {
             }
         }
@@ -1240,6 +1463,16 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 .filter(field -> key.equals(field.getKey()))
                 .findFirst()
                 .ifPresent(field -> field.setDefaultValue(value));
+    }
+
+    private static void setFieldOptions(ModelCatalogDTO dto, String key, List<String> options) {
+        dto.getFieldSchemas().stream()
+                .filter(field -> key.equals(field.getKey()))
+                .findFirst()
+                .ifPresent(field -> {
+                    field.setOptions(options);
+                    field.setInputType("select");
+                });
     }
 
     private static List<ModelFieldSchemaDTO> buildFieldSchemas(List<String> credentialFields,
@@ -1315,8 +1548,16 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             case "model", "model_name" -> "模型";
             case "resource_id" -> "Resource ID";
             case "voice", "speaker", "voice_id" -> "音色";
+            case "private_voice" -> "私有音色";
+            case "group_id" -> "Group ID";
             case "model_dir" -> "模型目录";
             case "model_path" -> "模型路径";
+            case "host" -> "Host";
+            case "port" -> "端口";
+            case "format", "response_format" -> "音频格式";
+            case "region" -> "地域";
+            case "language" -> "语言";
+            case "dev_pid" -> "语言模型";
             default -> key;
         };
     }
@@ -1358,12 +1599,25 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         return switch (key) {
             case "appid", "app_id" -> "厂商控制台应用 ID，本身不是密钥。";
             case "access_key_id" -> "访问密钥 ID，本身不是密钥；需要与 AccessKey Secret 配套使用。";
+            case "access_key_secret" -> "访问密钥 Secret，只保存到密钥表，不要写入备注或文档。";
             case "secret_id" -> "访问密钥 ID，本身不是密钥；需要与 Secret Key 配套使用。";
+            case "secret_key" -> "访问密钥 Secret，只保存到密钥表，不要写入备注或文档。";
+            case "api_key" -> "调用厂商接口的 API Key，只保存到密钥表。";
+            case "api_secret" -> "调用厂商接口的 API Secret，只保存到密钥表。";
+            case "access_token", "personal_access_token", "token" -> "调用厂商接口的访问令牌，只保存到密钥表。";
+            case "group_id" -> "MiniMax 控制台中的用户组 ID，用于拼接流式 TTS 调用地址。";
             case "resource_id" -> "云平台开通具体语音服务后得到的资源标识，不等同于配置名称。";
             case "model", "model_name" -> "上游平台实际调用的模型 ID。";
             case "voice", "speaker", "voice_id" -> "上游平台音色 ID。";
+            case "private_voice" -> "智能体私有音色覆盖字段；为空时使用当前模型默认音色。";
             case "base_url", "api_url", "ws_url" -> "接口地址，注意是否需要包含具体 path。";
+            case "host" -> "服务域名或主机名；NLS 类服务会由运行时拼接协议和路径。";
+            case "port" -> "自部署服务端口。";
             case "appkey" -> "阿里云 NLS 项目 AppKey，不是 API Key。";
+            case "format", "response_format" -> "厂商返回的音频格式，需和设备播放链路支持的格式匹配。";
+            case "region" -> "云厂商地域，通常影响签名和就近访问。";
+            case "language" -> "识别语言编码；不确定时保持默认中文或自动检测。";
+            case "dev_pid" -> "百度短语音识别语言模型编号，1537 表示普通话输入法模型。";
             case "enable_multilingual" -> "多语种识别开关，普通中文识别保持关闭即可。";
             case "end_window_size", "max_sentence_silence" -> "流式识别断句静音窗口，数值越大越不容易提前断句。";
             case "thinking" -> "是否开启模型思考模式，语音场景通常关闭以降低延迟。";
@@ -1377,6 +1631,8 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             case "protocol" -> List.of("websocket");
             case "mode" -> List.of("chat-messages", "workflows/run", "completion-messages");
             case "model_type" -> List.of("sense_voice", "paraformer");
+            case "thinking" -> List.of("disabled", "enabled");
+            case "reasoning_effort" -> List.of("high", "max");
             default -> List.of();
         };
     }

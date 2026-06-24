@@ -51,4 +51,37 @@ public class ModelTemplateEntity {
 
     @Schema(description = "排序")
     private Integer sort;
+
+    @Schema(description = "适配状态")
+    private String supportedStatus;
+
+    @Schema(description = "是否可选择配置")
+    private Integer selectable;
+
+    @Schema(description = "是否隐藏")
+    private Integer hidden;
+
+    @Schema(description = "是否旧版兼容/废弃")
+    private Integer deprecated;
+
+    @Schema(description = "推荐场景")
+    private String recommendedFor;
+
+    @Schema(description = "不适用场景")
+    private String avoidWhen;
+
+    @Schema(description = "真实测试契约")
+    private String testContract;
+
+    @Schema(description = "来源最后核验日期")
+    private String sourceCheckedAt;
+
+    @Schema(description = "配置提示JSON")
+    private String setupHintsJson;
+
+    @Schema(description = "已知限制JSON")
+    private String knownLimitationsJson;
+
+    @Schema(description = "别名JSON")
+    private String aliasesJson;
 }

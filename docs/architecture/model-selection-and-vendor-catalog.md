@@ -177,6 +177,27 @@ ASR 实时设备对话：
   Sherpa-ONNX / FunASR / Vosk，按部署成本和识别质量评测选择
 ```
 
+### 6.1 阿里云百炼 Realtime / Omni 边界
+
+`qwen3.5-omni-plus-realtime`、`qwen3.5-omni-flash-realtime` 等 Realtime WebSocket 模型可以通过截图、百炼 CLI、官方文档和实际 WebSocket 握手识别出协议线索，但不能自动归入当前普通 LLM OpenAI Chat 目录。
+
+当前处理规则：
+
+```text
+普通通义千问 Chat / 视觉 OpenAI 兼容
+  -> 使用已有 openai LLM/VLLM 模板，字段为 base_url、model_name、api_key
+
+百炼 Paraformer 实时识别
+  -> 使用已有 aliyunbl_stream ASR provider，必须真实音频测试
+
+Qwen Omni Realtime WebSocket
+  -> 目录可展示为 NEEDS_ADAPTER
+  -> 不允许保存为可启用模型
+  -> 需要新增独立 realtime provider、浏览器/后端代理协议和真实音频/文本/工具调用测试后才能转为 SUPPORTED
+```
+
+因此，模型列表来源可以来自截图、CLI、官方文档和探针验证，但“可配置启用”必须以项目目录状态、provider 实现和真实测试结果为准。
+
 TTS 实时设备播报：
 
 ```text
