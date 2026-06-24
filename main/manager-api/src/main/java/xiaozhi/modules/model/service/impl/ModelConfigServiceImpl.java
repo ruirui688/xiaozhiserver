@@ -1088,6 +1088,12 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         if ("TTS".equals(modelType) && "openai".equals(type)) {
             return TEST_LEVEL_REAL_INFERENCE;
         }
+        if ("TTS".equals(modelType)
+                && (CollectionUtil.isNotEmpty(getRequiredFields(modelType, type))
+                        || CollectionUtil.isNotEmpty(getRequiredAnyFieldGroups(modelType, type))
+                        || CollectionUtil.isNotEmpty(getMissingAlternativeRequirements(modelConfig.getConfigJson(), modelType, type)))) {
+            return TEST_LEVEL_REAL_INFERENCE;
+        }
         if ("ASR".equals(modelType) && "doubao_stream".equals(type)) {
             return TEST_LEVEL_REAL_INFERENCE;
         }
@@ -1169,8 +1175,11 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         if ("openai".equals(type)) {
             return testOpenAiTtsModel(configJson);
         }
-        ModelTestResultDTO result = new ModelTestResultDTO();
-        return validateBasicModelConfig(configJson, type, "TTS");
+        ModelTestResultDTO configCheck = validateBasicModelConfig(configJson, type, "TTS");
+        if (!Boolean.TRUE.equals(configCheck.getSuccess())) {
+            return configCheck;
+        }
+        return testTtsModelViaRuntimeBenchmark(configJson, type);
     }
 
     private ModelTestResultDTO testLanguageModel(JSONObject configJson, String type) {
@@ -1563,11 +1572,11 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             ResponseEntity<String> response = benchmarkRestTemplate.exchange(
                     url, HttpMethod.POST, new HttpEntity<>(payload.toString(), headers), String.class);
             if (!response.getStatusCode().is2xxSuccessful()) {
-                throw new RenException("xiaozhi-server ASR 测试接口返回异常：" + response.getStatusCode());
+                throw new RenException("xiaozhi-server 运行时真实测试接口返回异常：" + response.getStatusCode());
             }
             return JSONUtil.parseObj(response.getBody());
         } catch (ResourceAccessException e) {
-            throw new RenException("无法连接 xiaozhi-server ASR 真实测试接口：" + url
+            throw new RenException("无法连接 xiaozhi-server 运行时真实测试接口：" + url
                     + "。请先确认 xiaozhi-server 已启动且 HTTP 端口可访问；源码开发可执行 `scripts/dev status server`。原始错误："
                     + e.getMessage(), e);
         }
@@ -1631,6 +1640,116 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                 "../xiaozhi-server/config/assets/" + audioName,
                 "main/xiaozhi-server/config/assets/" + audioName));
         return buildAudioDataUrl(audioPath);
+    }
+
+    private ModelTestResultDTO testTtsModelViaRuntimeBenchmark(JSONObject configJson, String type) {
+        ModelTestResultDTO result = new ModelTestResultDTO();
+        String providerType = StringUtils.defaultString(type);
+        String modelName = firstNonBlank(configJson, "model", "model_name", "resource_id", "voice", "speaker",
+                "voice_id", "api_url", "url");
+        result.setTestInput("供应器类型：" + providerType
+                + "\n模型/音色：" + StringUtils.defaultIfBlank(modelName, "-")
+                + "\n测试文本：" + TTS_TEST_TEXT
+                + "\n测试方式：调用 xiaozhi-server 运行时 provider 执行 1 轮真实 TTS 合成");
+
+        try {
+            JSONObject payload = new JSONObject();
+            payload.set("task_id", "single-tts-test-" + UUID.randomUUID());
+            payload.set("model_type", "TTS");
+            payload.set("iterations", 1);
+            payload.set("concurrency", 1);
+
+            JSONObject model = new JSONObject();
+            model.set("id", "single-tts-test");
+            model.set("model_name", StringUtils.defaultIfBlank(modelName, providerType));
+            model.set("model_type", "TTS");
+            model.set("provider_type", providerType);
+            model.set("config", configJson);
+            JSONArray models = new JSONArray();
+            models.add(model);
+            payload.set("models", models);
+
+            long startTime = System.currentTimeMillis();
+            JSONObject response = callRuntimeBenchmark(payload);
+            result.setResponseTimeMs(System.currentTimeMillis() - startTime);
+
+            JSONObject benchmarkResult = firstJsonObject(response.getJSONArray("results"));
+            if (benchmarkResult == null) {
+                result.setSuccess(false);
+                result.setMessage("TTS 真实合成测试没有返回结果");
+                result.setTestOutput(response.toStringPretty());
+                return result;
+            }
+
+            JSONObject sample = firstJsonObject(benchmarkResult.getJSONArray("samples"));
+            if (sample == null) {
+                result.setSuccess(false);
+                result.setMessage(StringUtils.defaultIfBlank(
+                        benchmarkResult.getStr("error_summary"),
+                        "TTS 真实合成测试没有返回样本"));
+                result.setTestOutput(benchmarkResult.toStringPretty());
+                return result;
+            }
+
+            Long latencyMs = sample.getLong("latency_ms");
+            if (latencyMs != null) {
+                result.setResponseTimeMs(latencyMs);
+            }
+            result.setTestInput(buildRuntimeBenchmarkTtsInput(sample, providerType));
+            result.setTestAudioDataUrl(buildRuntimeBenchmarkTtsAudioDataUrl(sample));
+            result.setTestOutput(buildRuntimeBenchmarkTtsOutput(sample));
+            boolean success = Boolean.TRUE.equals(sample.getBool("success"))
+                    && getRuntimeBenchmarkTtsAudioBytes(sample) > 0;
+            result.setSuccess(success);
+            result.setMessage(success
+                    ? "TTS 真实合成测试通过"
+                    : StringUtils.defaultIfBlank(sample.getStr("message"), "TTS 真实合成未生成有效音频"));
+            return result;
+        } catch (Exception e) {
+            result.setSuccess(false);
+            result.setMessage("TTS 真实合成测试失败：" + StringUtils.defaultIfBlank(e.getMessage(), e.getClass().getSimpleName()));
+            result.setTestOutput(result.getMessage());
+            return result;
+        }
+    }
+
+    private String buildRuntimeBenchmarkTtsInput(JSONObject sample, String providerType) {
+        JSONObject inputDetail = sample.getJSONObject("input_detail");
+        String text = inputDetail == null ? sample.getStr("input_summary") : inputDetail.getStr("text");
+        String sampleRate = inputDetail == null ? null : StringUtils.defaultString(inputDetail.getStr("sample_rate"));
+        String audioFormat = inputDetail == null ? null : inputDetail.getStr("audio_format");
+        return "供应器类型：" + providerType
+                + "\n文本：" + StringUtils.defaultIfBlank(text, TTS_TEST_TEXT)
+                + (StringUtils.isNotBlank(sampleRate) ? "\n采样率：" + sampleRate : "")
+                + (StringUtils.isNotBlank(audioFormat) ? "\n音频格式：" + audioFormat : "")
+                + "\n测试方式：xiaozhi-server 运行时 provider 真实合成";
+    }
+
+    private String buildRuntimeBenchmarkTtsOutput(JSONObject sample) {
+        JSONObject outputDetail = sample.getJSONObject("output_detail");
+        if (outputDetail == null) {
+            return StringUtils.defaultString(sample.getStr("output_summary"));
+        }
+        String audioBytes = StringUtils.defaultString(outputDetail.getStr("audio_bytes"));
+        String outputFileType = outputDetail.getStr("output_file_type");
+        String previewFormat = outputDetail.getStr("audio_preview_format");
+        return "音频字节数：" + StringUtils.defaultIfBlank(audioBytes, "0")
+                + (StringUtils.isNotBlank(outputFileType) ? "\n输出类型：" + outputFileType : "")
+                + (StringUtils.isNotBlank(previewFormat) ? "\n预览格式：" + previewFormat : "");
+    }
+
+    private String buildRuntimeBenchmarkTtsAudioDataUrl(JSONObject sample) {
+        JSONObject outputDetail = sample.getJSONObject("output_detail");
+        return outputDetail == null ? "" : StringUtils.defaultString(outputDetail.getStr("audio_data_url"));
+    }
+
+    private long getRuntimeBenchmarkTtsAudioBytes(JSONObject sample) {
+        JSONObject outputDetail = sample.getJSONObject("output_detail");
+        if (outputDetail == null) {
+            return 0;
+        }
+        Long audioBytes = outputDetail.getLong("audio_bytes");
+        return audioBytes == null ? 0 : audioBytes;
     }
 
     private String firstNonBlank(JSONObject configJson, String... fields) {

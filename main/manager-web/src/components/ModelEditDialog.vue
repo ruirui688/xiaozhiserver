@@ -99,12 +99,12 @@
           </div>
         </div>
 
-        <div style="display: flex; gap: 20px; margin-bottom: 0">
-          <el-form-item :label="currentUpstreamLabel" prop="upstreamModelId" style="flex: 1">
+        <div v-if="shouldShowUpstreamField || shouldShowEndpointField" style="display: flex; gap: 20px; margin-bottom: 0">
+          <el-form-item v-if="shouldShowUpstreamField" :label="currentUpstreamLabel" prop="upstreamModelId" style="flex: 1">
             <el-select
               v-if="upstreamModelOptions.length"
               v-model="form.upstreamModelId"
-              :placeholder="$t('modelConfigDialog.enterUpstreamModel')"
+              :placeholder="upstreamPlaceholder"
               class="custom-select custom-input-bg"
               style="width: 100%"
               filterable
@@ -118,10 +118,10 @@
                 :value="option"
               />
             </el-select>
-            <el-input v-else v-model="form.upstreamModelId" :placeholder="$t('modelConfigDialog.enterUpstreamModel')"
+            <el-input v-else v-model="form.upstreamModelId" :placeholder="upstreamPlaceholder"
               class="custom-input-bg"></el-input>
           </el-form-item>
-          <el-form-item prop="endpointUrl" style="flex: 1">
+          <el-form-item v-if="shouldShowEndpointField" prop="endpointUrl" style="flex: 1">
             <template slot="label">
               <span>{{ $t('modelConfigDialog.endpointUrl') }}</span>
               <el-tooltip :content="endpointHelpText" placement="top">
@@ -404,6 +404,22 @@ export default {
       const field = this.getUpstreamModelField(this.currentTemplate);
       return field && Array.isArray(field.options) ? field.options : [];
     },
+    shouldShowUpstreamField() {
+      return !!this.getUpstreamModelField(this.currentTemplate) || !!this.form.upstreamModelId;
+    },
+    shouldShowEndpointField() {
+      return !!this.getEndpointField(this.currentTemplate) || !!this.form.endpointUrl;
+    },
+    upstreamPlaceholder() {
+      const field = this.getUpstreamModelField(this.currentTemplate) || {};
+      if (["voice", "speaker", "voice_id"].includes(field.key)) {
+        return "请选择或填写音色 ID";
+      }
+      if (["appkey", "cluster"].includes(field.key)) {
+        return "请输入上游资源或项目标识";
+      }
+      return this.$t("modelConfigDialog.enterUpstreamModel");
+    },
     endpointPlaceholder() {
       return this.endpointDefaultValue
         || "云厂商默认地址可留空；自部署或兼容接口填写 https://... 或 wss://...";
@@ -412,9 +428,7 @@ export default {
       return "接口端点是厂商或自部署服务的 API 地址。云厂商适配器已有默认地址时可留空；只有接入自定义网关、兼容接口或私有部署时才需要填写。";
     },
     endpointDefaultValue() {
-      const endpointField = (this.currentTemplate.fieldSchemas || []).find((field) =>
-        this.endpointKeys().includes(field.key)
-      );
+      const endpointField = this.getEndpointField(this.currentTemplate);
       return endpointField && endpointField.defaultValue ? String(endpointField.defaultValue) : "";
     },
   },
@@ -806,10 +820,16 @@ export default {
     endpointKeys() {
       return ["base_url", "api_url", "url", "ws_url", "server_url", "host", "endpoint_url"];
     },
+    getEndpointField(template = {}) {
+      return (template.fieldSchemas || []).find((field) =>
+        this.endpointKeys().includes(field.key)
+      );
+    },
     getUpstreamModelField(template = {}) {
       const upstreamKey = template.upstreamModelField || "";
       return (template.fieldSchemas || []).find((field) =>
-        field.key === upstreamKey || ["model_name", "model", "resource_id"].includes(field.key)
+        field.key === upstreamKey
+          || ["model_name", "model", "resource_id", "voice", "speaker", "voice_id", "appkey", "cluster"].includes(field.key)
       );
     },
     normalizeUpstreamLabel(label) {
@@ -819,6 +839,9 @@ export default {
       }
       if (["资源", "资源ID", "资源 ID"].includes(text)) {
         return this.$t("modelConfigDialog.upstreamResource");
+      }
+      if (["音色", "音色ID", "音色 ID"].includes(text)) {
+        return "音色";
       }
       return text.startsWith("上游") ? text : `上游${text}`;
     },
@@ -949,6 +972,10 @@ export default {
         params,
         secrets,
       };
+      const upstreamField = this.getUpstreamModelField(this.currentTemplate);
+      if (!this.form.upstreamModelId && upstreamField && upstreamField.defaultValue) {
+        this.form.upstreamModelId = String(upstreamField.defaultValue);
+      }
     },
     applyAssistantDraft(payload = {}) {
       const draft = payload.configJson || {};

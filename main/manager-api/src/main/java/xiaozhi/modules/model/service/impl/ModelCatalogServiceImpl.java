@@ -1421,6 +1421,21 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 setFieldOptions(dto, "model", List.of("paraformer-realtime-v2", "paraformer-realtime-v1", "paraformer-realtime-8k-v1"));
             }
             case "TTS_DOUBAO_HTTP" -> setFieldDefault(dto, "api_url", "https://openspeech.bytedance.com/api/v1/tts");
+            case "TTS_EDGE" -> {
+                setFieldDefault(dto, "voice", "zh-CN-XiaoxiaoNeural");
+                setFieldOptions(dto, "voice", List.of(
+                        "zh-CN-XiaoxiaoNeural",
+                        "zh-CN-YunyangNeural",
+                        "zh-CN-XiaoyiNeural",
+                        "zh-CN-YunjianNeural",
+                        "zh-CN-YunxiNeural",
+                        "zh-CN-YunxiaNeural",
+                        "zh-CN-liaoning-XiaobeiNeural",
+                        "zh-CN-shaanxi-XiaoniNeural",
+                        "zh-HK-HiuGaaiNeural",
+                        "zh-HK-HiuMaanNeural",
+                        "zh-HK-WanLungNeural"));
+            }
             case "TTS_SILICONFLOW_COSYVOICE" -> {
                 setFieldDefault(dto, "model", "FunAudioLLM/CosyVoice2-0.5B");
                 setFieldDefault(dto, "voice", "FunAudioLLM/CosyVoice2-0.5B:alex");
