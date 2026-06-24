@@ -186,6 +186,8 @@ ASR 实时设备对话：
 ```text
 普通通义千问 Chat / 视觉 OpenAI 兼容
   -> 使用已有 openai LLM/VLLM 模板，字段为 base_url、model_name、api_key
+  -> LLM 模型下拉按阿里云百炼文本生成官方文档维护，覆盖推荐模型、Qwen3.7、Qwen3.6、Qwen3.5、Qwen3、Qwen Coder、Qwen MT、Qwen Long、Character、结构化输出、Omni Turbo、Qwen-Plus/Max/Flash/Turbo 和 QwQ-Plus 等当前文本生成模型
+  -> 不列带日期的历史快照、Preview 或控制台标注即将下线的版本
 
 百炼 Paraformer 实时识别
   -> 使用已有 aliyunbl_stream ASR provider，必须真实音频测试
@@ -197,6 +199,8 @@ Qwen Omni Realtime WebSocket
 ```
 
 因此，模型列表来源可以来自截图、CLI、官方文档和探针验证，但“可配置启用”必须以项目目录状态、provider 实现和真实测试结果为准。
+
+截至 2026-06-24，百炼文本生成官方文档列出的当前主线模型应优先进入 `LLM_ALI_QWEN_OPENAI`；文档中的历史快照模型只用于锁定特定版本，不进入标准下拉。后台 `LLM_ALI_QWEN_OPENAI` 模板只承接普通通义千问 Chat 文本模型；Audio、Realtime/Omni、视觉专用模型、应用 API 分别需要独立目录项或 adapter，不能套用普通 OpenAI Chat。
 
 TTS 实时设备播报：
 

@@ -38,6 +38,51 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
     private final ModelTemplateFieldDao modelTemplateFieldDao;
 
     private static final List<ModelCatalogDTO> CATALOG = buildCatalog();
+    private static final List<String> ALI_QWEN_TEXT_MODELS = List.of(
+            "qwen3.7-max",
+            "qwen3.7-plus",
+            "qwen3.6-plus",
+            "qwen3.6-flash",
+            "qwen3.5-plus",
+            "qwen3.5-flash",
+            "qwen3.5-397b-a17b",
+            "qwen3.5-122b-a10b",
+            "qwen3.5-35b-a3b",
+            "qwen3.5-27b",
+            "qwen3-max",
+            "qwen3-235b-a22b",
+            "qwen3-235b-a22b-instruct-2507",
+            "qwen3-235b-a22b-thinking-2507",
+            "qwen3-next-80b-a3b-thinking",
+            "qwen3-next-80b-a3b-instruct",
+            "qwen3-32b",
+            "qwen3-30b-a3b",
+            "qwen3-30b-a3b-thinking-2507",
+            "qwen3-30b-a3b-instruct-2507",
+            "qwen3-14b",
+            "qwen3-8b",
+            "qwen3-coder-plus",
+            "qwen3-coder-flash",
+            "qwen3-coder-next",
+            "qwen3-coder-480b-a35b-instruct",
+            "qwen3-coder-30b-a3b-instruct",
+            "qwen-plus",
+            "qwen-max",
+            "qwen-flash",
+            "qwen-turbo",
+            "qwen-long",
+            "qwen-long-latest",
+            "qwen-mt-plus",
+            "qwen-mt-turbo",
+            "qwen-mt-flash",
+            "qwen-mt-lite",
+            "qwen-plus-character",
+            "qwen-plus-character-ja",
+            "qwen-flash-character",
+            "qwen-structured-output",
+            "qwen-omni-turbo",
+            "qwen2.5-omni-7b",
+            "qwq-plus");
     private static final Set<String> STATIC_FIELD_SCHEMA_TEMPLATE_CODES = Set.of(
             "ASR_FUN_SERVER",
             "ASR_DOUBAO_LEGACY_HTTP",
@@ -993,8 +1038,17 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
     private static void addLlm(List<ModelCatalogDTO> items) {
         items.add(openAiLlm("LLM_OPENAI_COMPATIBLE", "OpenAI 兼容", "OpenAI Compatible", "OpenAI 兼容聊天", "api.openai.com",
                 "OpenAI 兼容接口要求 base_url、model_name、api_key。", List.of("AliLLM", "SLM_openai")));
-        items.add(openAiLlm("LLM_ALI_QWEN_OPENAI", "阿里云百炼", "通义千问 OpenAI 兼容", "OpenAI 兼容聊天", "qwen-flash",
-                "通过 DashScope compatible-mode/v1 接入通义千问。", List.of("AliLLM", "Qwen")));
+        ModelCatalogDTO qwenLlm = openAiLlm("LLM_ALI_QWEN_OPENAI", "阿里云百炼", "通义千问 OpenAI 兼容", "OpenAI 兼容聊天",
+                "qwen3.7-max / qwen3.7-plus / qwen3.6-flash / qwen3-coder-plus / qwen-long / qwen-mt-plus",
+                "通过 DashScope compatible-mode/v1 接入通义千问；模型列表按阿里云百炼文本生成官方文档维护，排除历史快照、Preview 和即将下线版本。",
+                List.of("AliLLM", "Qwen", "qwen3.7", "qwen3.6", "qwen3.5", "qwen3-coder", "qwen-mt", "qwen-long", "qwq-plus"));
+        qwenLlm.setDocLink("https://help.aliyun.com/zh/model-studio/models");
+        qwenLlm.setAvoidWhen("不要选择带日期的快照版、Preview 或控制台标注即将下线的版本；Qwen Audio 只支持 DashScope 协议，不走 OpenAI 兼容模板。");
+        qwenLlm.setKnownLimitations(List.of(
+                "带日期的历史快照版本只供锁定特定版本使用，不进入标准下拉。",
+                "Qwen Audio、Omni Realtime 和视觉专用模型需要独立目录或 adapter，不套用普通文本 Chat 模板。"));
+        qwenLlm.setSourceCheckedAt("2026-06-24");
+        items.add(qwenLlm);
         items.add(item("LLM_ALI_BAILIAN_APP", "LLM", "AliBL", "百炼应用",
                 "阿里云百炼", "百炼 Application", "llm", "大语言模型", "application-api", "应用 API",
                 "cloud", "云平台", "DashScope Application", "应用 ID", "app_id",
@@ -1292,8 +1346,8 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             }
             case "LLM_ALI_QWEN_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1");
-                setFieldDefault(dto, "model_name", "qwen-flash");
-                setFieldOptions(dto, "model_name", List.of("qwen-flash", "qwen-plus", "qwen-max", "qwen-turbo"));
+                setFieldDefault(dto, "model_name", "qwen3.7-max");
+                setFieldOptions(dto, "model_name", ALI_QWEN_TEXT_MODELS);
             }
             case "LLM_ALI_BAILIAN_APP" -> setFieldDefault(dto, "base_url", "https://dashscope.aliyuncs.com/api/v1");
             case "LLM_DOUBAO_ARK_OPENAI" -> {
