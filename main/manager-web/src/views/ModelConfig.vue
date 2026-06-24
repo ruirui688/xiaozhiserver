@@ -91,9 +91,6 @@
               >
                 <template slot-scope="scope">
                   <div class="model-primary">{{ scope.row.modelName }}</div>
-                  <div v-if="scope.row.modelCode" class="model-secondary">
-                    {{ $t("modelConfig.internalCode") }}：{{ scope.row.modelCode }}
-                  </div>
                 </template>
               </el-table-column>
               <el-table-column
@@ -371,7 +368,7 @@
             <span>{{ formatResponseTime(currentTestResult.responseTimeMs) }}</span>
           </div>
           <div class="test-result-block">
-            <div class="test-result-label">{{ $t("modelConfig.testInput") }}</div>
+            <div class="test-result-label">{{ getTestInputLabel(currentTestResult) }}</div>
             <div v-if="currentTestResult.testImageDataUrl" class="test-result-image-wrap">
               <img
                 class="test-result-image"
@@ -379,13 +376,19 @@
                 alt="test image"
               />
             </div>
-            <div v-if="currentTestResult.testAudioDataUrl" class="test-result-audio-wrap">
+            <div v-if="shouldShowInputAudio(currentTestResult)" class="test-result-audio-wrap">
               <audio class="test-result-audio" :src="currentTestResult.testAudioDataUrl" controls />
             </div>
             <pre>{{ currentTestResult.testInput || "-" }}</pre>
           </div>
           <div class="test-result-block">
-            <div class="test-result-label">{{ $t("modelConfig.testOutput") }}</div>
+            <div class="test-result-label">{{ getTestOutputLabel(currentTestResult) }}</div>
+            <div v-if="shouldShowOutputAudio(currentTestResult)" class="test-result-audio-wrap">
+              <div class="test-result-audio-title">
+                {{ $t("modelConfig.ttsAudioPreview") }}
+              </div>
+              <audio class="test-result-audio" :src="currentTestResult.testAudioDataUrl" controls />
+            </div>
             <pre>{{ formatTestOutput(currentTestResult.testOutput) }}</pre>
           </div>
         </div>
@@ -742,6 +745,25 @@ export default {
     },
     isModelTestVerified(result) {
       return !!result && (result.verified === true || result.testStatus === 1);
+    },
+    isTtsTestResult(result) {
+      return !!result && this.activeTab === "tts";
+    },
+    shouldShowInputAudio(result) {
+      return !!(result && result.testAudioDataUrl && !this.isTtsTestResult(result));
+    },
+    shouldShowOutputAudio(result) {
+      return !!(result && result.testAudioDataUrl && this.isTtsTestResult(result));
+    },
+    getTestInputLabel(result) {
+      return this.isTtsTestResult(result)
+        ? this.$t("modelConfig.ttsInputText")
+        : this.$t("modelConfig.testInput");
+    },
+    getTestOutputLabel(result) {
+      return this.isTtsTestResult(result)
+        ? this.$t("modelConfig.ttsOutputAudio")
+        : this.$t("modelConfig.testOutput");
     },
     formatResponseTime(responseTimeMs) {
       if (responseTimeMs === null || responseTimeMs === undefined || responseTimeMs === "") {
@@ -1827,6 +1849,13 @@ export default {
   border: 1px solid #e4e7ed;
   border-radius: 4px;
   background: #f7f9fc;
+}
+
+.test-result-audio-title {
+  margin-bottom: 8px;
+  color: #606266;
+  font-size: 13px;
+  line-height: 18px;
 }
 
 .test-result-audio {

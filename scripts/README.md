@@ -48,6 +48,14 @@ BUILD_ENGINE=buildx PLATFORMS=linux/amd64,linux/arm64 scripts/acr-build-push
 VERBOSE=true scripts/acr-build-push
 ```
 
+安静输出下，交互式终端会显示不确定进度动画，只表示任务仍在运行，不代表真实百分比；非 TTY 环境默认每 30 秒打印一次简洁心跳，避免污染 CI 或部署日志。可以按需调整或关闭：
+
+```bash
+XIAOZHI_PROGRESS_INTERVAL=10 scripts/acr-build-push
+XIAOZHI_PROGRESS_ANIMATION_INTERVAL=0.08 scripts/acr-build-push
+XIAOZHI_PROGRESS=false scripts/acr-build-push
+```
+
 发布脚本默认并行执行互不依赖的步骤：运行时镜像同步与业务镜像构建可并行，`xiaozhi-server` 与 `xiaozhi-web` 也可并行。`xiaozhi-server` 只有在确实需要构建 `xiaozhi-server-base` 时才会等待基础镜像先完成。需要降低本机负载时可关闭并行：
 
 ```bash

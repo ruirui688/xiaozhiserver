@@ -879,27 +879,13 @@ export default {
       const upstreamModel = item.upstreamModelId || "";
       const title = upstreamModel || configName;
       const provider = [item.vendorName, item.productName].filter(Boolean).join(" / ");
-      const adapter = item.adapterCode || item.type || "";
-      const protocol = item.protocol || "";
-      const metaParts = [];
-
-      if (upstreamModel && configName && configName !== upstreamModel) {
-        metaParts.push(`配置：${configName}`);
-      }
-      if (provider) {
-        metaParts.push(provider);
-      } else if (adapter) {
-        metaParts.push(adapter);
-      }
-      if (protocol) {
-        metaParts.push(protocol);
-      }
+      const meta = provider || item.vendorName || item.productName || "";
 
       return {
         value: item.id,
-        label: provider ? `${title} · ${provider}` : title,
+        label: meta ? `${title} · ${meta}` : title,
         title,
-        meta: metaParts.join(" · "),
+        meta,
         type: item.type || item.adapterCode || "",
         isHidden: false,
         raw: item,

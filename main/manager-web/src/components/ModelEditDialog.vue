@@ -42,11 +42,29 @@
 
       <el-form :model="form" ref="form" label-width="auto" label-position="left" class="custom-form">
         <div style="display: flex; gap: 20px; margin-bottom: 0">
-          <el-form-item :label="$t('modelConfigDialog.configName')" prop="modelName" style="flex: 1">
-            <el-input v-model="form.modelName" :placeholder="$t('modelConfigDialog.enterModelName')"
-              class="custom-input-bg"></el-input>
+          <el-form-item :label="$t('modelConfigDialog.modelName')" prop="modelName" style="flex: 1">
+            <el-select
+              v-if="upstreamModelOptions.length"
+              v-model="form.modelName"
+              :placeholder="$t('modelConfigDialog.enterModelName')"
+              class="custom-select custom-input-bg"
+              style="width: 100%"
+              filterable
+              allow-create
+              default-first-option
+              @change="syncUpstreamFromModelName"
+            >
+              <el-option
+                v-for="option in upstreamModelOptions"
+                :key="option"
+                :label="option"
+                :value="option"
+              />
+            </el-select>
+            <el-input v-else v-model="form.modelName" :placeholder="$t('modelConfigDialog.enterModelName')"
+              class="custom-input-bg" @input="syncUpstreamFromModelName"></el-input>
           </el-form-item>
-          <el-form-item :label="$t('modelConfigDialog.catalogItem')" prop="templateCode" style="flex: 1">
+          <el-form-item :label="$t('modelConfigDialog.modelProvider')" prop="templateCode" style="flex: 1">
             <el-select v-model="form.templateCode" :placeholder="$t('modelConfigDialog.selectSupplier')"
               class="custom-select custom-input-bg" style="width: 100%" @focus="loadProviders" filterable
               @change="handleTemplateChange">
@@ -60,7 +78,7 @@
                 <div class="provider-option">
                   <div class="provider-option-main">
                     <span class="provider-option-title">{{ item.title }}</span>
-                    <span class="provider-option-meta">{{ item.meta }}</span>
+                    <span v-if="item.meta" class="provider-option-meta">{{ item.meta }}</span>
                   </div>
                   <el-tag size="mini" :type="providerStatusType(item.raw)">
                     {{ providerStatusText(item.raw) }}
@@ -71,84 +89,19 @@
           </el-form-item>
         </div>
 
-        <div v-if="form.templateCode" class="catalog-detail">
-          <div class="catalog-detail-main">
-            <span class="catalog-detail-title">{{ getVendorProductText() }}</span>
-            <el-tag size="mini" :type="providerStatusType(currentTemplate)">
-              {{ providerStatusText(currentTemplate) }}
-            </el-tag>
-            <span class="catalog-detail-meta">{{ catalogMetaText }}</span>
-          </div>
-          <div class="catalog-detail-grid">
-            <div v-if="currentTemplate.recommendedFor">
-              <span class="catalog-detail-label">{{ $t("modelConfigDialog.recommendedFor") }}</span>
-              {{ currentTemplate.recommendedFor }}
-            </div>
-            <div v-if="currentTemplate.avoidWhen">
-              <span class="catalog-detail-label">{{ $t("modelConfigDialog.avoidWhen") }}</span>
-              {{ currentTemplate.avoidWhen }}
-            </div>
-            <div v-if="currentTemplate.testContract">
-              <span class="catalog-detail-label">{{ $t("modelConfigDialog.testContract") }}</span>
-              {{ currentTemplate.testContract }}
-            </div>
-            <div v-if="currentTemplate.sourceCheckedAt">
-              <span class="catalog-detail-label">{{ $t("modelConfigDialog.sourceCheckedAt") }}</span>
-              {{ currentTemplate.sourceCheckedAt }}
-            </div>
-          </div>
-        </div>
-
-        <div v-if="shouldShowUpstreamField || shouldShowEndpointField" style="display: flex; gap: 20px; margin-bottom: 0">
-          <el-form-item v-if="shouldShowUpstreamField" :label="currentUpstreamLabel" prop="upstreamModelId" style="flex: 1">
-            <el-select
-              v-if="upstreamModelOptions.length"
-              v-model="form.upstreamModelId"
-              :placeholder="upstreamPlaceholder"
-              class="custom-select custom-input-bg"
-              style="width: 100%"
-              filterable
-              allow-create
-              default-first-option
-            >
-              <el-option
-                v-for="option in upstreamModelOptions"
-                :key="option"
-                :label="option"
-                :value="option"
-              />
-            </el-select>
-            <el-input v-else v-model="form.upstreamModelId" :placeholder="upstreamPlaceholder"
-              class="custom-input-bg"></el-input>
-          </el-form-item>
-          <el-form-item v-if="shouldShowEndpointField" prop="endpointUrl" style="flex: 1">
-            <template slot="label">
-              <span>{{ $t('modelConfigDialog.endpointUrl') }}</span>
-              <el-tooltip :content="endpointHelpText" placement="top">
-                <i class="el-icon-question field-help-icon"></i>
-              </el-tooltip>
-            </template>
-            <el-input v-model="form.endpointUrl" :placeholder="endpointPlaceholder"
-              class="custom-input-bg"></el-input>
-            <div class="field-tip">{{ endpointHelpText }}</div>
-          </el-form-item>
-        </div>
-
         <el-collapse class="advanced-collapse">
           <el-collapse-item :title="$t('modelConfigDialog.advancedSettings')" name="advanced">
             <div style="display: flex; gap: 20px; margin-bottom: 0">
-              <el-form-item :label="$t('modelConfigDialog.modelCode')" prop="modelCode" style="flex: 1">
-                <el-input v-model="form.modelCode" :placeholder="$t('modelConfigDialog.enterModelCode')"
+              <el-form-item v-if="shouldShowEndpointField" prop="endpointUrl" style="flex: 1">
+                <template slot="label">
+                  <span>{{ $t('modelConfigDialog.endpointUrl') }}</span>
+                  <el-tooltip :content="endpointHelpText" placement="top">
+                    <i class="el-icon-question field-help-icon"></i>
+                  </el-tooltip>
+                </template>
+                <el-input v-model="form.endpointUrl" :placeholder="endpointPlaceholder"
                   class="custom-input-bg"></el-input>
-              </el-form-item>
-              <el-form-item :label="$t('modelConfigDialog.protocol')" prop="protocol" style="flex: 1">
-                <el-input v-model="form.protocol" :placeholder="$t('modelConfigDialog.enterProtocol')"
-                  class="custom-input-bg"></el-input>
-              </el-form-item>
-            </div>
-            <div style="display: flex; gap: 20px; margin-bottom: 0">
-              <el-form-item :label="$t('modelConfig.vendorProduct')" style="flex: 1">
-                <el-input :value="getVendorProductText()" class="custom-input-bg" disabled></el-input>
+                <div class="field-tip">{{ endpointHelpText }}</div>
               </el-form-item>
               <el-form-item :label="$t('modelConfigDialog.sortOrder')" prop="sort" style="flex: 1">
                 <el-input v-model.number="form.sort" type="number" :placeholder="$t('modelConfigDialog.enterSortOrder')"
@@ -596,6 +549,10 @@ export default {
           this.$set(this.form[target], key, parsed);
         }
       });
+      this.syncUpstreamFromModelName();
+      if (!this.form.modelCode) {
+        this.form.modelCode = this.form.modelName || this.form.upstreamModelId || this.form.adapterCode || "";
+      }
 
       return {
         id: this.modelData.id,
@@ -633,11 +590,10 @@ export default {
           .map((item) => {
             const status = this.providerStatusText(item);
             const title = `${item.vendorName || ""} / ${item.productName || item.adapterName || item.providerCode}`;
-            const meta = [item.accessModeLabel || item.accessMode, item.protocolLabel || item.protocol].filter(Boolean).join(" · ");
             return {
               label: `${title}${status ? ` ${status}` : ""}`,
               title,
-              meta,
+              meta: "",
               templateCode: item.templateCode,
               providerCode: String(item.providerCode || ""),
               disabled: this.isBlockedTemplateStatus(item),
@@ -668,6 +624,7 @@ export default {
       this.form.protocol = template.protocolLabel || "";
       this.form.docLink = template.docLink || this.form.docLink;
       this.applyTemplateDefaults(template);
+      this.syncModelNameFromUpstream();
       this.loadProviderFields(templateCode);
     },
     findTemplate(templateCode) {
@@ -866,6 +823,30 @@ export default {
         }
       });
     },
+    syncModelNameFromUpstream() {
+      const upstream = String(this.form.upstreamModelId || "").trim();
+      if (!upstream) {
+        return;
+      }
+      const current = String(this.form.modelName || "").trim();
+      if (!current || current === this.form.modelCode || current === this.form.id) {
+        this.form.modelName = upstream;
+      }
+    },
+    syncUpstreamFromModelName() {
+      const name = String(this.form.modelName || "").trim();
+      if (!name) {
+        return;
+      }
+      const upstreamField = this.getUpstreamModelField(this.currentTemplate);
+      if (!upstreamField) {
+        return;
+      }
+      const key = upstreamField.key || "";
+      if (["model_name", "model", "resource_id"].includes(key) || this.modelType === "llm") {
+        this.form.upstreamModelId = name;
+      }
+    },
     isFieldVisible(field) {
       if (!field.visibleWhen) {
         return true;
@@ -956,7 +937,7 @@ export default {
         id: model.id,
         modelType: model.modelType,
         modelCode: model.modelCode,
-        modelName: model.modelName,
+        modelName: model.upstreamModelId || model.modelName,
         adapterCode: model.adapterCode || model.providerCode || "",
         templateCode: model.templateCode || "",
         vendorName: model.vendorName || "",

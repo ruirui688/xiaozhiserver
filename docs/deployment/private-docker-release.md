@@ -118,6 +118,14 @@ BUILD_BASE=true scripts/acr-build-push
 VERBOSE=true scripts/acr-build-push
 ```
 
+安静输出下，交互式终端会显示不确定进度动画，只表示任务仍在运行，不代表真实百分比；非 TTY 环境默认每 30 秒打印一次简洁心跳，避免污染 CI 或部署日志。需要调整或关闭时使用：
+
+```bash
+XIAOZHI_PROGRESS_INTERVAL=10 scripts/acr-build-push
+XIAOZHI_PROGRESS_ANIMATION_INTERVAL=0.08 scripts/acr-build-push
+XIAOZHI_PROGRESS=false scripts/acr-build-push
+```
+
 如需多架构镜像，再显式启用 buildx：
 
 ```bash
