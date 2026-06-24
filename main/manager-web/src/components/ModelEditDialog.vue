@@ -473,7 +473,7 @@ export default {
     },
     providerStatusText(item) {
       if (!item) return "";
-      if (item.deprecated || item.supportedStatus === "DEPRECATED") return "旧版兼容";
+      if (item.deprecated || item.supportedStatus === "DEPRECATED") return "不可用";
       if (item.supportedStatus === "NEEDS_REVIEW") return "需审核";
       if (item.supportedStatus === "PARTIAL") return "部分适配";
       if (item.supportedStatus === "NEEDS_ADAPTER") return "待接入";
@@ -482,15 +482,17 @@ export default {
     },
     providerStatusType(item) {
       if (!item) return "info";
-      if (item.deprecated || item.supportedStatus === "DEPRECATED") return "info";
+      if (item.deprecated || item.supportedStatus === "DEPRECATED") return "danger";
       if (item.supportedStatus === "PARTIAL" || item.supportedStatus === "NEEDS_REVIEW") return "warning";
       if (item.supportedStatus === "NEEDS_ADAPTER") return "danger";
       if (item.selectable === false) return "warning";
       return "success";
     },
     isBlockedTemplateStatus(item = {}) {
+      const status = String(item.supportedStatus || "").toUpperCase();
       return item.selectable === false
-        || ["NEEDS_ADAPTER", "PARTIAL", "NEEDS_REVIEW"].includes(String(item.supportedStatus || "").toUpperCase());
+        || item.deprecated
+        || ["NEEDS_ADAPTER", "DEPRECATED"].includes(status);
     },
     providerSort(item) {
       const statusRank = {
