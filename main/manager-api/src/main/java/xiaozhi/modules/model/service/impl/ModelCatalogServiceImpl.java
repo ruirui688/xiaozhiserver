@@ -437,11 +437,15 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 ? staticMeta.getKnownLimitations()
                 : firstNonEmptyList(parseStringList(entity.getKnownLimitationsJson()),
                         staticMeta == null ? List.of() : staticMeta.getKnownLimitations()));
-        dto.setSupportedStatus(StringUtils.defaultIfBlank(entity.getSupportedStatus(),
-                staticMeta == null ? "SUPPORTED" : staticMeta.getSupportedStatus()));
-        dto.setSelectable(entity.getSelectable() == null
-                ? staticMeta == null || Boolean.TRUE.equals(staticMeta.getSelectable())
-                : intValue(entity.getSelectable()) == 1);
+        dto.setSupportedStatus(useStaticVerifiedCatalog
+                ? staticMeta.getSupportedStatus()
+                : StringUtils.defaultIfBlank(entity.getSupportedStatus(),
+                        staticMeta == null ? "SUPPORTED" : staticMeta.getSupportedStatus()));
+        dto.setSelectable(useStaticVerifiedCatalog
+                ? Boolean.TRUE.equals(staticMeta.getSelectable())
+                : entity.getSelectable() == null
+                        ? staticMeta == null || Boolean.TRUE.equals(staticMeta.getSelectable())
+                        : intValue(entity.getSelectable()) == 1);
         dto.setRecommendedFor(useStaticVerifiedCatalog
                 ? staticMeta.getRecommendedFor()
                 : StringUtils.defaultIfBlank(entity.getRecommendedFor(),
@@ -463,9 +467,11 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 : firstNonEmptyList(parseStringList(entity.getAliasesJson()),
                         staticMeta == null ? List.of() : staticMeta.getAliases()));
         dto.setHidden(entity.getHidden() == null ? intValue(entity.getEnabled()) == 0 : intValue(entity.getHidden()) == 1);
-        dto.setDeprecated(entity.getDeprecated() == null
-                ? staticMeta != null && Boolean.TRUE.equals(staticMeta.getDeprecated())
-                : intValue(entity.getDeprecated()) == 1);
+        dto.setDeprecated(useStaticVerifiedCatalog
+                ? Boolean.TRUE.equals(staticMeta.getDeprecated())
+                : entity.getDeprecated() == null
+                        ? staticMeta != null && Boolean.TRUE.equals(staticMeta.getDeprecated())
+                        : intValue(entity.getDeprecated()) == 1);
         dto.setSort(entity.getSort());
         return dto;
     }

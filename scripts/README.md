@@ -49,6 +49,21 @@ BUILD_ENGINE=buildx PLATFORMS=linux/amd64,linux/arm64 scripts/acr-build-push
 VERBOSE=true scripts/acr-build-push
 ```
 
+发布脚本默认并行执行互不依赖的步骤：运行时镜像同步与业务镜像构建可并行，`xiaozhi-server` 与 `xiaozhi-web` 也可并行。`xiaozhi-server` 只有在 `BUILD_BASE=true` 时会等待 `xiaozhi-server-base` 先完成。需要降低本机负载时可关闭并行：
+
+```bash
+PARALLEL_RELEASE_STEPS=false PARALLEL_IMAGE_BUILDS=false scripts/acr-build-push
+```
+
+只改 Java/Web 管理端且没有改 Python 依赖或 `Dockerfile-server-base` 时，可复用已有 server base，跳过最慢的 Python 依赖层：
+
+```bash
+BUILD_BASE=false \
+SERVER_BASE_IMAGE=crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-server-base:latest \
+MIRROR_RUNTIME_IMAGES=false \
+scripts/acr-build-push
+```
+
 生产服务器拉取镜像部署：
 
 ```bash

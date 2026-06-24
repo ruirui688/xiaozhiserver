@@ -477,6 +477,7 @@ export default {
       if (item.supportedStatus === "NEEDS_REVIEW") return "需审核";
       if (item.supportedStatus === "PARTIAL") return "部分适配";
       if (item.supportedStatus === "NEEDS_ADAPTER") return "待接入";
+      if (item.selectable === false) return "不可启用";
       return "已适配";
     },
     providerStatusType(item) {
@@ -484,6 +485,7 @@ export default {
       if (item.deprecated || item.supportedStatus === "DEPRECATED") return "info";
       if (item.supportedStatus === "PARTIAL" || item.supportedStatus === "NEEDS_REVIEW") return "warning";
       if (item.supportedStatus === "NEEDS_ADAPTER") return "danger";
+      if (item.selectable === false) return "warning";
       return "success";
     },
     isBlockedTemplateStatus(item = {}) {
