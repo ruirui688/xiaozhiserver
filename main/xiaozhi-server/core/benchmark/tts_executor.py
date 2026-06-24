@@ -144,10 +144,25 @@ async def _synthesize_stream_tts_sample(tts, text, started):
             tts.store_tts_text(tts.conn.sentence_id, text)
         await tts.text_to_speak(text, None)
         await tts.finish_session(tts.conn.sentence_id)
+        await _wait_for_stream_tts_audio(tts)
         return b"", _first_tts_audio_ms(tts, started)
 
     result = await tts.text_to_speak(text, True)
+    await _wait_for_stream_tts_audio(tts)
     return result, _first_tts_audio_ms(tts, started)
+
+
+async def _wait_for_stream_tts_audio(tts):
+    deadline = time.perf_counter() + STREAM_DRAIN_TIMEOUT_SECONDS
+    while time.perf_counter() < deadline:
+        if _has_tts_audio(tts):
+            return
+        if not getattr(tts, "activate_session", False):
+            await asyncio.sleep(0.05)
+            if _has_tts_audio(tts):
+                return
+            return
+        await asyncio.sleep(0.05)
 
 
 def _generate_tts_output_file(tts):

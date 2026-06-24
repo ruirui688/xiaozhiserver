@@ -685,7 +685,7 @@ export default {
       const key = field.key || "";
       const label = field.label || key;
       const examples = {
-        appid: "从火山引擎控制台复制 App ID，例如 9062696951",
+        appid: "从火山引擎控制台复制 App ID",
         app_id: "从厂商控制台复制 App ID",
         appkey: "填写阿里云 NLS 项目 AppKey",
         access_token: "填写厂商控制台生成的 Access Token",

@@ -897,27 +897,33 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 List.of(), List.of("voice"), List.of("voice"),
                 List.of("无需云端密钥，依赖 edge-tts 库。"), List.of(), List.of("EdgeTTS"),
                 "https://github.com/rany2/edge-tts"));
-        items.add(item("TTS_DOUBAO_HTTP", "TTS", "doubao", "豆包 TTS HTTP",
-                "火山引擎", "豆包语音合成旧版", "tts", "语音合成", "http", "HTTP 非流式",
+        ModelCatalogDTO doubaoHttp = item("TTS_DOUBAO_HTTP", "TTS", "doubao", "豆包语音合成 HTTP 兼容",
+                "火山引擎", "豆包语音合成 HTTP 兼容", "tts", "语音合成", "http", "HTTP",
                 "cloud", "云平台", "HTTP", "音色", "voice",
                 List.of("access_token", "authorization", "appid"), List.of("api_url", "voice"),
                 List.of("appid", "access_token", "cluster", "speed_ratio", "volume_ratio", "pitch_ratio"),
-                List.of("旧版 HTTP TTS，不是双向流式 Seed TTS 2.0。"), List.of(),
-                List.of("DoubaoTTS", "TTS302AI"), "https://www.volcengine.com/docs/6561"));
-        items.add(item("TTS_DOUBAO_BIGTTS_STREAM", "TTS", "huoshan_double_stream", "豆包大模型 TTS",
+                List.of("仅用于兼容历史 DoubaoTTS 配置，新增配置请使用控制台里的“豆包语音合成大模型”或“豆包语音合成模型 2.0”。"),
+                List.of("新增配置入口已隐藏，避免和当前火山控制台模型名称混淆。"),
+                List.of("DoubaoTTS", "TTS302AI"), "https://www.volcengine.com/docs/6561");
+        doubaoHttp.setHidden(true);
+        doubaoHttp.setDeprecated(true);
+        doubaoHttp.setSelectable(false);
+        doubaoHttp.setSupportedStatus("DEPRECATED");
+        items.add(doubaoHttp);
+        items.add(item("TTS_DOUBAO_BIGTTS_STREAM", "TTS", "huoshan_double_stream", "豆包语音合成大模型",
                 "火山引擎", "豆包语音合成大模型", "tts", "语音合成", "websocket-bidirectional", "WebSocket 双向流式",
-                "cloud", "云平台", "WebSocket", "Resource ID", "resource_id",
+                "cloud", "云平台", "WebSocket", "模型/Resource ID", "resource_id",
                 List.of("appid", "access_token"), List.of("ws_url", "appid", "access_token", "resource_id", "speaker"),
                 List.of("ws_url", "resource_id", "speaker", "enable_ws_reuse", "audio_params", "additions"),
-                List.of("TTS 1.0 大模型资源 ID 常见为 volc.service_type.10029。"),
+                List.of("对应火山控制台“语音合成大模型”。模型资源 ID 通常为 volc.service_type.10029。"),
                 List.of(), List.of("HuoshanDoubleStreamTTS", "volc.service_type.10029"),
                 "https://www.volcengine.com/docs/6561/1329505"));
-        items.add(item("TTS_DOUBAO_SEED_TTS_2_STREAM", "TTS", "huoshan_double_stream", "Seed TTS 2.0",
-                "火山引擎", "豆包语音合成 Seed TTS 2.0", "tts", "语音合成", "websocket-bidirectional", "WebSocket 双向流式",
-                "cloud", "云平台", "WebSocket", "Resource ID", "resource_id",
+        items.add(item("TTS_DOUBAO_SEED_TTS_2_STREAM", "TTS", "huoshan_double_stream", "豆包语音合成模型 2.0",
+                "火山引擎", "豆包语音合成模型 2.0", "tts", "语音合成", "websocket-bidirectional", "WebSocket 双向流式",
+                "cloud", "云平台", "WebSocket", "模型/Resource ID", "resource_id",
                 List.of("appid", "access_token"), List.of("ws_url", "appid", "access_token", "resource_id", "speaker"),
                 List.of("ws_url", "resource_id", "speaker", "enable_ws_reuse", "audio_params"),
-                List.of("Seed TTS 2.0 资源 ID 为 seed-tts-2.0。"),
+                List.of("对应火山控制台“豆包语音合成模型 2.0”。模型资源 ID 固定为 seed-tts-2.0。"),
                 List.of(), List.of("HuoshanDoubleStreamTTSV2", "seed-tts-2.0", "TTS_HSDSTTS_V2"),
                 "https://www.volcengine.com/docs/6561/1329505"));
         items.add(item("TTS_SILICONFLOW_COSYVOICE", "TTS", "siliconflow", "硅基流动 CosyVoice",
