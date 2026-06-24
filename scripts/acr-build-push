@@ -12,13 +12,17 @@ MYSQL_IMAGE_REPOSITORY="${MYSQL_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/m
 REDIS_IMAGE_REPOSITORY="${REDIS_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/redis}"
 PLATFORMS="${PLATFORMS:-linux/amd64}"
 PUSH="${PUSH:-true}"
+BUILD_BASE="${BUILD_BASE:-true}"
 BUILD_ENGINE="${BUILD_ENGINE:-docker}"
 PYTHON_BASE_IMAGE="${PYTHON_BASE_IMAGE:-python:3.10-slim-bookworm}"
+SERVER_BASE_IMAGE="${SERVER_BASE_IMAGE:-}"
 MIRROR_RUNTIME_IMAGES="${MIRROR_RUNTIME_IMAGES:-true}"
 MYSQL_SOURCE_IMAGE="${MYSQL_SOURCE_IMAGE:-mysql:8.4}"
 REDIS_SOURCE_IMAGE="${REDIS_SOURCE_IMAGE:-redis:8.0}"
 VERBOSE="${VERBOSE:-false}"
 XIAOZHI_DOCKER_QUIET="${XIAOZHI_DOCKER_QUIET:-true}"
+PARALLEL_RELEASE_STEPS="${PARALLEL_RELEASE_STEPS:-true}"
+PARALLEL_IMAGE_BUILDS="${PARALLEL_IMAGE_BUILDS:-true}"
 
 if [[ -z "${VERSION:-}" ]]; then
   if VERSION_TAG="$(git -C "$ROOT_DIR" describe --tags --exact-match 2>/dev/null)"; then
@@ -43,6 +47,16 @@ image_tag() {
 MYSQL_TARGET_TAG="$(image_tag "$MYSQL_SOURCE_IMAGE")"
 REDIS_TARGET_TAG="$(image_tag "$REDIS_SOURCE_IMAGE")"
 
+if [[ "$PARALLEL_RELEASE_STEPS" != "true" && "$PARALLEL_RELEASE_STEPS" != "false" ]]; then
+  echo "PARALLEL_RELEASE_STEPS must be true or false" >&2
+  exit 1
+fi
+
+if [[ "$PARALLEL_IMAGE_BUILDS" != "true" && "$PARALLEL_IMAGE_BUILDS" != "false" ]]; then
+  echo "PARALLEL_IMAGE_BUILDS must be true or false" >&2
+  exit 1
+fi
+
 cat <<EOF
 Building and pushing xiaozhi images to Aliyun ACR.
 
@@ -63,14 +77,20 @@ Runtime image sources:
 Default build engine:
   $BUILD_ENGINE
 
+Build options:
+  build_base=$BUILD_BASE server_base_image=${SERVER_BASE_IMAGE:-auto}
+
 Docker output:
   quiet=$XIAOZHI_DOCKER_QUIET verbose=$VERBOSE
+
+Parallelism:
+  release_steps=$PARALLEL_RELEASE_STEPS image_builds=$PARALLEL_IMAGE_BUILDS
 
 This command still needs access to Docker build base images unless you override
 PYTHON_BASE_IMAGE, NODE_BASE_IMAGE, MAVEN_BASE_IMAGE, and WEB_RUNTIME_BASE_IMAGE.
 EOF
 
-if [[ "$PUSH" == "true" && "$MIRROR_RUNTIME_IMAGES" == "true" ]]; then
+mirror_runtime_images() {
   ACR_REGISTRY="$ACR_REGISTRY" \
     ACR_NAMESPACE="$ACR_NAMESPACE" \
     MYSQL_SOURCE_IMAGE="$MYSQL_SOURCE_IMAGE" \
@@ -80,11 +100,14 @@ if [[ "$PUSH" == "true" && "$MIRROR_RUNTIME_IMAGES" == "true" ]]; then
     VERBOSE="$VERBOSE" \
     XIAOZHI_DOCKER_QUIET="$XIAOZHI_DOCKER_QUIET" \
     "$ROOT_DIR/scripts/acr-mirror-runtime-images"
-fi
+}
 
-SERVER_IMAGE_REPOSITORY="$SERVER_IMAGE_REPOSITORY" \
+build_business_images() {
+  SERVER_IMAGE_REPOSITORY="$SERVER_IMAGE_REPOSITORY" \
   WEB_IMAGE_REPOSITORY="$WEB_IMAGE_REPOSITORY" \
   SERVER_BASE_IMAGE_REPOSITORY="$SERVER_BASE_IMAGE_REPOSITORY" \
+  BUILD_BASE="$BUILD_BASE" \
+  SERVER_BASE_IMAGE="$SERVER_BASE_IMAGE" \
   BUILD_ENGINE="$BUILD_ENGINE" \
   PYTHON_BASE_IMAGE="$PYTHON_BASE_IMAGE" \
   PUSH="$PUSH" \
@@ -92,5 +115,37 @@ SERVER_IMAGE_REPOSITORY="$SERVER_IMAGE_REPOSITORY" \
   VERSION="$VERSION" \
   VERBOSE="$VERBOSE" \
   XIAOZHI_DOCKER_QUIET="$XIAOZHI_DOCKER_QUIET" \
+  PARALLEL_IMAGE_BUILDS="$PARALLEL_IMAGE_BUILDS" \
   PRINT_BUILD_CONFIG=false \
   "$ROOT_DIR/scripts/docker-build-private.sh"
+}
+
+wait_for_release_step() {
+  local label="$1"
+  local pid="$2"
+
+  if wait "$pid"; then
+    echo "$label step OK"
+    return 0
+  fi
+  echo "$label step FAILED" >&2
+  return 1
+}
+
+if [[ "$PUSH" == "true" && "$MIRROR_RUNTIME_IMAGES" == "true" && "$PARALLEL_RELEASE_STEPS" == "true" ]]; then
+  mirror_runtime_images &
+  MIRROR_PID=$!
+  build_business_images &
+  BUILD_PID=$!
+
+  RELEASE_STATUS=0
+  wait_for_release_step "Runtime image mirror" "$MIRROR_PID" || RELEASE_STATUS=1
+  wait_for_release_step "Business image build" "$BUILD_PID" || RELEASE_STATUS=1
+  exit "$RELEASE_STATUS"
+fi
+
+if [[ "$PUSH" == "true" && "$MIRROR_RUNTIME_IMAGES" == "true" ]]; then
+  mirror_runtime_images
+fi
+
+build_business_images

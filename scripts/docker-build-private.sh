@@ -32,6 +32,7 @@ BUILDKIT_HTTPS_PROXY="${BUILDKIT_HTTPS_PROXY:-${HTTPS_PROXY:-${https_proxy:-}}}"
 BUILDKIT_NO_PROXY="${BUILDKIT_NO_PROXY:-${NO_PROXY:-${no_proxy:-}}}"
 VERBOSE="${VERBOSE:-false}"
 XIAOZHI_DOCKER_QUIET="${XIAOZHI_DOCKER_QUIET:-true}"
+PARALLEL_IMAGE_BUILDS="${PARALLEL_IMAGE_BUILDS:-true}"
 PRINT_BUILD_CONFIG="${PRINT_BUILD_CONFIG:-true}"
 LOG_DIR="${LOG_DIR:-$(mktemp -d -t xiaozhi-docker-build.XXXXXX)}"
 RECREATE_BUILDER=false
@@ -96,6 +97,11 @@ fi
 
 if [[ "$BUILD_ENGINE" == "docker" && "$PLATFORMS" == *,* ]]; then
   echo "BUILD_ENGINE=docker only supports one platform. Use BUILD_ENGINE=buildx for multi-platform builds." >&2
+  exit 1
+fi
+
+if [[ "$PARALLEL_IMAGE_BUILDS" != "true" && "$PARALLEL_IMAGE_BUILDS" != "false" ]]; then
+  echo "PARALLEL_IMAGE_BUILDS must be true or false" >&2
   exit 1
 fi
 
@@ -211,6 +217,7 @@ if [[ "$PRINT_BUILD_CONFIG" != "false" ]]; then
   echo "Debian mirror: $DEBIAN_MIRROR"
   echo "Debian security mirror: $DEBIAN_SECURITY_MIRROR"
   echo "Server requirements: $SERVER_REQUIREMENTS"
+  echo "Parallel image builds: $PARALLEL_IMAGE_BUILDS"
   if [[ -n "$BUILDKIT_REGISTRY_MIRROR" ]]; then
     echo "BuildKit registry mirror:"
     while IFS= read -r mirror; do
@@ -231,40 +238,70 @@ if is_quiet; then
   echo "Set VERBOSE=true to show raw Docker build and push output."
 fi
 
-if [[ "$BUILD_BASE" == "true" ]]; then
-  build_image "Build server base image" Dockerfile-server-base \
-    --build-arg "PYTHON_BASE_IMAGE=$PYTHON_BASE_IMAGE" \
-    --build-arg "DEBIAN_MIRROR=$DEBIAN_MIRROR" \
-    --build-arg "DEBIAN_SECURITY_MIRROR=$DEBIAN_SECURITY_MIRROR" \
-    --build-arg "SERVER_REQUIREMENTS=$SERVER_REQUIREMENTS" \
-    --tag "$SERVER_BASE_IMAGE_REPOSITORY:latest" \
-    --tag "$SERVER_BASE_IMAGE_REPOSITORY:$VERSION"
-  push_image "$SERVER_BASE_IMAGE_REPOSITORY:latest"
-  push_image "$SERVER_BASE_IMAGE_REPOSITORY:$VERSION"
-fi
+build_server_pipeline() {
+  local server_base_image="${SERVER_BASE_IMAGE:-}"
 
-if [[ -z "${SERVER_BASE_IMAGE:-}" ]]; then
   if [[ "$BUILD_BASE" == "true" ]]; then
-    SERVER_BASE_IMAGE="$SERVER_BASE_IMAGE_REPOSITORY:$VERSION"
-  else
-    SERVER_BASE_IMAGE="$SERVER_BASE_IMAGE_REPOSITORY:latest"
+    build_image "Build server base image" Dockerfile-server-base \
+      --build-arg "PYTHON_BASE_IMAGE=$PYTHON_BASE_IMAGE" \
+      --build-arg "DEBIAN_MIRROR=$DEBIAN_MIRROR" \
+      --build-arg "DEBIAN_SECURITY_MIRROR=$DEBIAN_SECURITY_MIRROR" \
+      --build-arg "SERVER_REQUIREMENTS=$SERVER_REQUIREMENTS" \
+      --tag "$SERVER_BASE_IMAGE_REPOSITORY:latest" \
+      --tag "$SERVER_BASE_IMAGE_REPOSITORY:$VERSION"
+    push_image "$SERVER_BASE_IMAGE_REPOSITORY:latest"
+    push_image "$SERVER_BASE_IMAGE_REPOSITORY:$VERSION"
+    server_base_image="$SERVER_BASE_IMAGE_REPOSITORY:$VERSION"
+  elif [[ -z "$server_base_image" ]]; then
+    server_base_image="$SERVER_BASE_IMAGE_REPOSITORY:latest"
   fi
+
+  build_image "Build xiaozhi-server image" Dockerfile-server \
+    --build-arg "SERVER_BASE_IMAGE=$server_base_image" \
+    --tag "$SERVER_IMAGE_REPOSITORY:latest" \
+    --tag "$SERVER_IMAGE_REPOSITORY:$VERSION"
+  push_image "$SERVER_IMAGE_REPOSITORY:latest"
+  push_image "$SERVER_IMAGE_REPOSITORY:$VERSION"
+}
+
+build_web_pipeline() {
+  build_image "Build manager web/api image" Dockerfile-web \
+    --build-arg "NODE_BASE_IMAGE=$NODE_BASE_IMAGE" \
+    --build-arg "MAVEN_BASE_IMAGE=$MAVEN_BASE_IMAGE" \
+    --build-arg "WEB_RUNTIME_BASE_IMAGE=$WEB_RUNTIME_BASE_IMAGE" \
+    --tag "$WEB_IMAGE_REPOSITORY:latest" \
+    --tag "$WEB_IMAGE_REPOSITORY:$VERSION"
+  push_image "$WEB_IMAGE_REPOSITORY:latest"
+  push_image "$WEB_IMAGE_REPOSITORY:$VERSION"
+}
+
+wait_for_pipeline() {
+  local label="$1"
+  local pid="$2"
+
+  if wait "$pid"; then
+    echo "$label pipeline OK"
+    return 0
+  fi
+  echo "$label pipeline FAILED" >&2
+  return 1
+}
+
+if [[ "$PARALLEL_IMAGE_BUILDS" == "true" ]]; then
+  build_server_pipeline &
+  SERVER_PIPELINE_PID=$!
+  build_web_pipeline &
+  WEB_PIPELINE_PID=$!
+
+  PIPELINE_STATUS=0
+  wait_for_pipeline "Server" "$SERVER_PIPELINE_PID" || PIPELINE_STATUS=1
+  wait_for_pipeline "Web/API" "$WEB_PIPELINE_PID" || PIPELINE_STATUS=1
+  if [[ "$PIPELINE_STATUS" -ne 0 ]]; then
+    exit "$PIPELINE_STATUS"
+  fi
+else
+  build_server_pipeline
+  build_web_pipeline
 fi
-
-build_image "Build xiaozhi-server image" Dockerfile-server \
-  --build-arg "SERVER_BASE_IMAGE=$SERVER_BASE_IMAGE" \
-  --tag "$SERVER_IMAGE_REPOSITORY:latest" \
-  --tag "$SERVER_IMAGE_REPOSITORY:$VERSION"
-push_image "$SERVER_IMAGE_REPOSITORY:latest"
-push_image "$SERVER_IMAGE_REPOSITORY:$VERSION"
-
-build_image "Build manager web/api image" Dockerfile-web \
-  --build-arg "NODE_BASE_IMAGE=$NODE_BASE_IMAGE" \
-  --build-arg "MAVEN_BASE_IMAGE=$MAVEN_BASE_IMAGE" \
-  --build-arg "WEB_RUNTIME_BASE_IMAGE=$WEB_RUNTIME_BASE_IMAGE" \
-  --tag "$WEB_IMAGE_REPOSITORY:latest" \
-  --tag "$WEB_IMAGE_REPOSITORY:$VERSION"
-push_image "$WEB_IMAGE_REPOSITORY:latest"
-push_image "$WEB_IMAGE_REPOSITORY:$VERSION"
 
 echo "Done."
