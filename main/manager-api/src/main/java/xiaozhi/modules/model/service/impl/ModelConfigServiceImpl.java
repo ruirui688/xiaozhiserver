@@ -594,30 +594,37 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             dto.setMigrationStatus("UNSUPPORTED");
             return;
         }
-        dto.setTemplateCode(catalog.getTemplateCode());
-        dto.setVendorName(catalog.getVendorName());
-        dto.setProductName(catalog.getProductName());
-        dto.setCapabilityLabel(catalog.getCapabilityLabel());
-        dto.setAccessModeLabel(catalog.getAccessModeLabel());
-        dto.setDeploymentLabel(catalog.getDeploymentLabel());
-        dto.setProtocolLabel(catalog.getProtocolLabel());
-        dto.setUpstreamResourceLabel(catalog.getUpstreamResourceLabel());
-        dto.setCredentialSummary(catalog.getCredentialFields());
-        dto.setRequiredFields(catalog.getRequiredFields());
-        dto.setSetupHints(catalog.getSetupHints());
-        dto.setKnownLimitations(catalog.getKnownLimitations());
+        applyResolvedCatalogToDto(dto, catalog);
         dto.setMigrationStatus(hasMissingCatalogRequiredFields(entity, dto, catalog) ? "NEEDS_REVIEW" : "AUTO");
-        dto.setSupportedStatus(catalog.getSupportedStatus());
-        dto.setSelectable(catalog.getSelectable());
-        dto.setRecommendedFor(catalog.getRecommendedFor());
-        dto.setAvoidWhen(catalog.getAvoidWhen());
-        dto.setTestContract(catalog.getTestContract());
         if (StringUtils.isBlank(dto.getPlatformName())) {
             dto.setPlatformName(catalog.getVendorName());
         }
         if (StringUtils.isBlank(dto.getAdapterLabel())) {
             dto.setAdapterLabel(StringUtils.defaultIfBlank(catalog.getAdapterName(), displayInfo.providerCode));
         }
+    }
+
+    private void applyResolvedCatalogToDto(ModelConfigDTO dto, ModelCatalogDTO catalog) {
+        dto.setTemplateCode(catalog.getTemplateCode());
+        dto.setVendorName(catalog.getVendorName());
+        dto.setProductName(catalog.getProductName());
+        dto.setAdapterCode(catalog.getProviderCode());
+        dto.setProviderCode(catalog.getProviderCode());
+        dto.setCapabilityLabel(catalog.getCapabilityLabel());
+        dto.setAccessModeLabel(catalog.getAccessModeLabel());
+        dto.setDeploymentLabel(catalog.getDeploymentLabel());
+        dto.setProtocolLabel(catalog.getProtocolLabel());
+        dto.setProtocol(catalog.getProtocolLabel());
+        dto.setUpstreamResourceLabel(catalog.getUpstreamResourceLabel());
+        dto.setCredentialSummary(catalog.getCredentialFields());
+        dto.setRequiredFields(catalog.getRequiredFields());
+        dto.setSetupHints(catalog.getSetupHints());
+        dto.setKnownLimitations(catalog.getKnownLimitations());
+        dto.setSupportedStatus(catalog.getSupportedStatus());
+        dto.setSelectable(catalog.getSelectable());
+        dto.setRecommendedFor(catalog.getRecommendedFor());
+        dto.setAvoidWhen(catalog.getAvoidWhen());
+        dto.setTestContract(catalog.getTestContract());
     }
 
     private boolean hasMissingCatalogRequiredFields(ModelConfigEntity entity, ModelConfigDTO dto, ModelCatalogDTO catalog) {

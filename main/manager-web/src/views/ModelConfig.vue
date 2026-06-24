@@ -690,16 +690,15 @@ export default {
     normalizeStatus(value) {
       return String(value || "").toUpperCase();
     },
-    isUnsupportedCatalogStatus(supportedStatus, migrationStatus) {
+    isUnsupportedCatalogStatus(supportedStatus) {
       const status = this.normalizeStatus(supportedStatus);
-      const migration = this.normalizeStatus(migrationStatus);
-      return ["NEEDS_ADAPTER", "PARTIAL", "NEEDS_REVIEW"].includes(status) || migration === "NEEDS_REVIEW";
+      return ["NEEDS_ADAPTER", "DEPRECATED"].includes(status);
     },
     isModelSupportedForActions(model) {
       if (!model) {
         return false;
       }
-      return !this.isUnsupportedCatalogStatus(model.supportedStatus, model.migrationStatus);
+      return model.selectable !== false && !model.deprecated && !this.isUnsupportedCatalogStatus(model.supportedStatus);
     },
     findCatalogItemForForm(formData = {}, provideCode = "") {
       const templateCode = formData.templateCode || "";
@@ -727,7 +726,7 @@ export default {
       if (!item) {
         return true;
       }
-      return !this.isUnsupportedCatalogStatus(item.supportedStatus, item.migrationStatus);
+      return item.selectable !== false && !item.deprecated && !this.isUnsupportedCatalogStatus(item.supportedStatus);
     },
     clearTestingModelState() {
       this.testingModelId = "";
@@ -819,13 +818,13 @@ export default {
         return "需审核";
       }
       if (model.supportedStatus === "DEPRECATED" || model.deprecated) {
-        return "旧版兼容";
+        return "不可用";
       }
       if (model.selectable === false) {
         return "不可启用";
       }
       if (model.migrationStatus === "NEEDS_REVIEW") {
-        return "需审核";
+        return "待补全";
       }
       return "已适配";
     },

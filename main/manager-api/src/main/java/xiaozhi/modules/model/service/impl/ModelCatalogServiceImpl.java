@@ -119,7 +119,6 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             "TTS_LINKERAI",
             "LLM_OPENAI_COMPATIBLE",
             "LLM_ALI_QWEN_OPENAI",
-            "LLM_ALI_BAILIAN_APP",
             "LLM_ALI_QWEN_OMNI_REALTIME",
             "LLM_DOUBAO_ARK_OPENAI",
             "LLM_DOUBAO_SEED_OPENAI",
@@ -1038,7 +1037,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
     private static void addLlm(List<ModelCatalogDTO> items) {
         items.add(openAiLlm("LLM_OPENAI_COMPATIBLE", "OpenAI 兼容", "OpenAI Compatible", "OpenAI 兼容聊天", "api.openai.com",
                 "OpenAI 兼容接口要求 base_url、model_name、api_key。", List.of("AliLLM", "SLM_openai")));
-        ModelCatalogDTO qwenLlm = openAiLlm("LLM_ALI_QWEN_OPENAI", "阿里云百炼", "通义千问 OpenAI 兼容", "OpenAI 兼容聊天",
+        ModelCatalogDTO qwenLlm = openAiLlm("LLM_ALI_QWEN_OPENAI", "阿里云百炼", "阿里云百炼", "OpenAI 兼容聊天",
                 "qwen3.7-max / qwen3.7-plus / qwen3.6-flash / qwen3-coder-plus / qwen-long / qwen-mt-plus",
                 "通过 DashScope compatible-mode/v1 接入通义千问；模型列表按阿里云百炼文本生成官方文档维护，排除历史快照、Preview 和即将下线版本。",
                 List.of("AliLLM", "Qwen", "qwen3.7", "qwen3.6", "qwen3.5", "qwen3-coder", "qwen-mt", "qwen-long", "qwq-plus"));
@@ -1049,21 +1048,6 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 "Qwen Audio、Omni Realtime 和视觉专用模型需要独立目录或 adapter，不套用普通文本 Chat 模板。"));
         qwenLlm.setSourceCheckedAt("2026-06-24");
         items.add(qwenLlm);
-        ModelCatalogDTO bailianApp = item("LLM_ALI_BAILIAN_APP", "LLM", "AliBL", "百炼应用",
-                "阿里云百炼", "百炼应用 API", "llm", "大语言模型", "application-api", "应用 API",
-                "cloud", "云平台", "DashScope Application", "应用 ID", "app_id",
-                List.of("api_key", "app_id"), List.of("base_url", "app_id", "api_key"),
-                List.of("is_no_prompt", "ali_memory_id"),
-                List.of("这是百炼应用调用，不是普通 Qwen 模型调用；如果只是填 API Key 并选择 qwen 模型，请使用“通义千问 OpenAI 兼容”。"),
-                List.of("旧版兼容入口，普通模型配置页默认不展示。"), List.of("AliAppLLM"),
-                "https://help.aliyun.com/zh/model-studio");
-        bailianApp.setDeprecated(true);
-        bailianApp.setHidden(true);
-        bailianApp.setSelectable(false);
-        bailianApp.setSupportedStatus("DEPRECATED");
-        bailianApp.setRecommendedFor("仅用于已有百炼应用 ID 的旧配置兼容。");
-        bailianApp.setAvoidWhen("不要把 qwen-flash、qwen-plus 等模型名填到应用 ID；普通百炼模型请使用通义千问 OpenAI 兼容入口。");
-        items.add(bailianApp);
         items.add(unavailable("LLM_ALI_QWEN_OMNI_REALTIME", "LLM", "阿里云百炼",
                 "Qwen Omni Realtime", "llm", "Realtime WebSocket 音频/文本多模态", "DashScope Realtime WebSocket",
                 "浏览器实时语音、多模态输入输出、Function Calling 探针验证场景。",
@@ -1357,7 +1341,6 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 setFieldDefault(dto, "model_name", "qwen3.7-max");
                 setFieldOptions(dto, "model_name", ALI_QWEN_TEXT_MODELS);
             }
-            case "LLM_ALI_BAILIAN_APP" -> setFieldDefault(dto, "base_url", "https://dashscope.aliyuncs.com/api/v1");
             case "LLM_DOUBAO_ARK_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "https://ark.cn-beijing.volces.com/api/v3");
                 setFieldDefault(dto, "model_name", "doubao-1-5-pro");
