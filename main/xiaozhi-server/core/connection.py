@@ -32,6 +32,7 @@ from core.utils.dialogue import Message, Dialogue
 from core.providers.asr.dto.dto import InterfaceType
 from core.handle.textHandle import handleTextMessage
 from core.providers.tools.unified_tool_handler import UnifiedToolHandler
+from core.providers.tools.tool_protocol_guard import looks_like_unhandled_tool_protocol
 from plugins_func.loadplugins import auto_import_modules
 from plugins_func.register import Action, ActionResponse
 from core.auth import AuthenticationError
@@ -1124,6 +1125,7 @@ class ConnectionHandler:
         # 支持多个并行工具调用 - 使用列表存储
         tool_calls_list = []  # 格式: [{"id": "", "name": "", "arguments": ""}]
         content_arguments = ""
+        unhandled_tool_protocol = False
         emotion_flag = True
         try:
             for response in llm_responses:
@@ -1143,6 +1145,25 @@ class ConnectionHandler:
                     if not tool_call_flag and content_arguments.startswith("<tool_call>"):
                         # print("content_arguments", content_arguments)
                         tool_call_flag = True
+                    elif (
+                        not tool_call_flag
+                        and looks_like_unhandled_tool_protocol(content_arguments)
+                    ):
+                        tool_call_flag = True
+                        unhandled_tool_protocol = True
+                        content = None
+                    elif (
+                        not tool_call_flag
+                        and content_arguments.lstrip().startswith("<")
+                        and len(content_arguments.strip()) < 80
+                    ):
+                        content = None
+                    elif (
+                        not tool_call_flag
+                        and content_arguments.lstrip().startswith("<")
+                    ):
+                        content = content_arguments
+                        content_arguments = ""
 
                     if tools_call is not None and len(tools_call) > 0:
                         tool_call_flag = True
@@ -1219,7 +1240,14 @@ class ConnectionHandler:
         if tool_call_flag:
             bHasError = False
             # 处理基于文本的工具调用格式
-            if len(tool_calls_list) == 0 and content_arguments:
+            if unhandled_tool_protocol:
+                bHasError = True
+                safe_message = "设备控制请求没有执行成功，模型返回了无法识别的工具调用格式。"
+                response_message.append(safe_message)
+                self.logger.bind(tag=TAG).error(
+                    f"unsupported tool protocol from LLM: {content_arguments}"
+                )
+            elif len(tool_calls_list) == 0 and content_arguments:
                 a = extract_json_from_string(content_arguments)
                 if a is not None:
                     try:

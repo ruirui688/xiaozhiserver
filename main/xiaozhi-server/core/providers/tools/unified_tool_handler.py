@@ -4,6 +4,7 @@ import json
 from typing import Dict, List, Any, Optional
 from config.logger import setup_logging
 from core.utils.util import is_placeholder_value
+from core.providers.tools.home_assistant_config import is_home_assistant_runtime_enabled
 from plugins_func.loadplugins import auto_import_modules
 
 from .base import ToolType
@@ -111,15 +112,7 @@ class UnifiedToolHandler:
 
     def _is_home_assistant_configured(self) -> bool:
         """Return True only when Home Assistant is explicitly configured."""
-        plugins = self.config.get("plugins", {}) if hasattr(self, "config") else {}
-        ha_config = plugins.get("home_assistant") or plugins.get("hass_get_state")
-        if not ha_config:
-            return False
-        # Config exists and has at minimum an api_key / base_url
-        return bool(
-            isinstance(ha_config, dict)
-            and (ha_config.get("api_key") or ha_config.get("base_url"))
-        )
+        return is_home_assistant_runtime_enabled(self.conn)
 
     def _initialize_home_assistant(self):
         """初始化Home Assistant提示词"""
