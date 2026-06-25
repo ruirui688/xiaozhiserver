@@ -385,16 +385,20 @@ public class ModelRuntimeAssembler {
         }
         config.set("type", HUOSHAN_DOUBLE_STREAM_TYPE);
         config.set("ws_url", HUOSHAN_DOUBLE_STREAM_WS_URL);
+        config.remove("model_name");
+        config.remove("model");
         for (String key : List.of("base_url", "api_url", "url", "server_url", "host", "endpoint_url")) {
             String value = config.getStr(key);
             if (isLegacyHuoshanTtsEndpoint(value)) {
                 config.remove(key);
             }
         }
-        if (!hasUsableHuoshanTtsField(config.getStr("resource_id"))) {
+        if (isManagedDoubaoTtsTemplate(model)) {
+            config.set("resource_id", resolveDefaultHuoshanTtsResourceId(model));
+        } else if (!hasUsableHuoshanTtsField(config.getStr("resource_id"))) {
             config.set("resource_id", resolveDefaultHuoshanTtsResourceId(model));
         }
-        if (!hasUsableHuoshanTtsField(config.getStr("speaker"))) {
+        if (!hasUsableHuoshanTtsSpeaker(model, config.getStr("speaker"))) {
             config.set("speaker", resolveDefaultHuoshanTtsSpeaker(model));
         }
     }
@@ -422,6 +426,21 @@ public class ModelRuntimeAssembler {
             return DOUBAO_SEED_TTS_2_DEFAULT_SPEAKER;
         }
         return DOUBAO_BIGTTS_DEFAULT_SPEAKER;
+    }
+
+    private boolean isManagedDoubaoTtsTemplate(ModelConfigEntity model) {
+        String templateCode = model == null ? "" : model.getTemplateCode();
+        return "TTS_DOUBAO_BIGTTS_STREAM".equalsIgnoreCase(StringUtils.defaultString(templateCode))
+                || "TTS_DOUBAO_SEED_TTS_2_STREAM".equalsIgnoreCase(StringUtils.defaultString(templateCode));
+    }
+
+    private boolean hasUsableHuoshanTtsSpeaker(ModelConfigEntity model, String value) {
+        if (!hasUsableHuoshanTtsField(value)) {
+            return false;
+        }
+        String templateCode = model == null ? "" : model.getTemplateCode();
+        return !"TTS_DOUBAO_SEED_TTS_2_STREAM".equalsIgnoreCase(StringUtils.defaultString(templateCode))
+                || !StringUtils.endsWithIgnoreCase(StringUtils.trim(value), "_moon_bigtts");
     }
 
     private boolean hasUsableHuoshanTtsField(String value) {
