@@ -11,6 +11,24 @@ import asyncio
 from urllib.parse import urlparse, urlencode
 from tabulate import tabulate
 from config.settings import load_config
+from core.providers.tts.huoshan_double_stream import (
+    TTSProvider as DoubaoSeedTTS2Provider,
+    Header,
+    Optional,
+    FULL_CLIENT_REQUEST,
+    AUDIO_ONLY_RESPONSE,
+    MsgTypeFlagWithEvent,
+    JSON,
+    EVENT_ConnectionStarted,
+    EVENT_StartSession,
+    EVENT_SessionStarted,
+    EVENT_TaskRequest,
+    EVENT_FinishSession,
+    EVENT_SessionFinished,
+    EVENT_SessionFailed,
+    EVENT_TTSResponse,
+    EVENT_UsageResponse,
+)
 
 description = "流式TTS语音合成首词耗时测试"
 class StreamTTSPerformanceTester:
@@ -219,62 +237,92 @@ class StreamTTSPerformanceTester:
         
         for i in range(test_count):
             try:
-                tts_config = self.config["TTS"]["HuoshanDoubleStreamTTS"]
-                ws_url = tts_config["ws_url"]
-                app_id = tts_config["appid"]
-                access_token = tts_config["access_token"]
-                resource_id = tts_config["resource_id"]
-                speaker = tts_config["speaker"]
+                tts_config = self.config["TTS"]["DoubaoSeedTTS2Stream"]
+                provider = DoubaoSeedTTS2Provider(
+                    {
+                        **tts_config,
+                        "enable_ws_reuse": False,
+                    },
+                    True,
+                )
 
                 start_time = time.time()
-                ws_header = {
-                    "X-Api-App-Key": app_id,
-                    "X-Api-Access-Key": access_token,
-                    "X-Api-Resource-Id": resource_id,
-                    "X-Api-Connect-Id": str(uuid.uuid4()),
-                }
-                async with websockets.connect(ws_url, additional_headers=ws_header, max_size=1000000000) as ws:
+                async with websockets.connect(
+                    provider.ws_url,
+                    additional_headers=provider._build_ws_headers(),
+                    max_size=1000000000,
+                ) as ws:
+                    provider.ws = ws
+                    await provider.start_connection()
+                    await provider._wait_for_event(
+                        ws, EVENT_ConnectionStarted, timeout=provider.tts_timeout
+                    )
                     session_id = uuid.uuid4().hex
 
                     # 发送会话启动请求
-                    header = bytes([
-                        (0b0001 << 4) | 0b0001,  
-                        0b0001 << 4 | 0b1011,     
-                        0b0001 << 4 | 0b0000,
-                    ])
-                    optional = bytearray()
-                    optional.extend((1).to_bytes(4, "big", signed=True))
-                    session_id_bytes = session_id.encode()
-                    optional.extend(len(session_id_bytes).to_bytes(4, "big", signed=True))
-                    optional.extend(session_id_bytes)
-                    payload = json.dumps({"speaker": speaker}).encode()
-                    await ws.send(header + optional + len(payload).to_bytes(4, "big", signed=True) + payload)
+                    header = Header(
+                        message_type=FULL_CLIENT_REQUEST,
+                        message_type_specific_flags=MsgTypeFlagWithEvent,
+                        serial_method=JSON,
+                    ).as_bytes()
+                    optional = Optional(event=EVENT_StartSession, sessionId=session_id).as_bytes()
+                    payload = provider.get_payload_bytes(
+                        event=EVENT_StartSession,
+                        speaker=provider.voice,
+                    )
+                    await provider.send_event(ws, header, optional, payload)
+                    await provider._wait_for_event(
+                        ws, EVENT_SessionStarted, timeout=provider.tts_timeout
+                    )
 
                     # 发送文本
-                    header = bytes([
-                        (0b0001 << 4) | 0b0001,  
-                        0b0001 << 4 | 0b1011,    
-                        0b0001 << 4 | 0b0000,
-                        0
-                    ])
-                    optional = bytearray()
-                    optional.extend((200).to_bytes(4, "big", signed=True))
-                    session_id_bytes = session_id.encode()
-                    optional.extend(len(session_id_bytes).to_bytes(4, "big", signed=True))
-                    optional.extend(session_id_bytes)
-                    payload = json.dumps({"text": text, "speaker": speaker}).encode()
-                    await ws.send(header + optional + len(payload).to_bytes(4, "big", signed=True) + payload)
+                    header = Header(
+                        message_type=FULL_CLIENT_REQUEST,
+                        message_type_specific_flags=MsgTypeFlagWithEvent,
+                        serial_method=JSON,
+                    ).as_bytes()
+                    optional = Optional(event=EVENT_TaskRequest, sessionId=session_id).as_bytes()
+                    payload = provider.get_payload_bytes(
+                        event=EVENT_TaskRequest,
+                        text=text,
+                        speaker=provider.voice,
+                    )
+                    await provider.send_event(ws, header, optional, payload)
 
-                    first_chunk = await ws.recv()
-                    latency = time.time() - start_time
-                    latencies.append(latency)
-                    print(f"[火山引擎TTS] 第{i+1}次 首词延迟: {latency:.3f}s")
+                    # 结束会话，让服务端开始完整返回音频。
+                    optional = Optional(event=EVENT_FinishSession, sessionId=session_id).as_bytes()
+                    await provider.send_event(ws, header, optional, b"{}")
+
+                    while True:
+                        res = await provider._receive_response(
+                            ws, timeout=provider.tts_timeout
+                        )
+                        if (
+                            res.optional.event == EVENT_TTSResponse
+                            and res.header.message_type == AUDIO_ONLY_RESPONSE
+                        ):
+                            latency = time.time() - start_time
+                            latencies.append(latency)
+                            print(f"[豆包Seed TTS 2.0] 第{i+1}次 首音频延迟: {latency:.3f}s")
+                            break
+                        if res.optional.event == EVENT_UsageResponse:
+                            continue
+                        if res.optional.event == EVENT_SessionFailed:
+                            detail = res.payload.decode("utf-8", "ignore") if res.payload else ""
+                            raise Exception(f"合成失败: {detail}")
+                        if res.optional.event == EVENT_SessionFinished:
+                            raise Exception("任务结束但未收到音频")
+
+                    try:
+                        await provider.finish_connection()
+                    except Exception:
+                        pass
 
             except Exception as e:
-                print(f"[火山引擎TTS] 第{i+1}次测试失败: {str(e)}")
+                print(f"[豆包Seed TTS 2.0] 第{i+1}次测试失败: {str(e)}")
                 latencies.append(None)
         
-        return self._calculate_result("火山引擎TTS", latencies, test_count)
+        return self._calculate_result("豆包Seed TTS 2.0", latencies, test_count)
 
     async def test_paddlespeech_tts(self, text=None, test_count=5):
         """测试PaddleSpeech流式TTS首词延迟（测试多次取平均）"""

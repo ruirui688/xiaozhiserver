@@ -18,10 +18,8 @@ from core.providers.tts.dto.dto import SentenceType, ContentType, InterfaceType
 TAG = __name__
 logger = setup_logging()
 
-DOUBAO_BIGTTS_RESOURCE_ID = "volc.service_type.10029"
 DOUBAO_SEED_TTS_2_RESOURCE_ID = "seed-tts-2.0"
 SUPPORTED_DOUBAO_TTS_RESOURCES = {
-    DOUBAO_BIGTTS_RESOURCE_ID: "豆包语音合成大模型（火山服务 10007）",
     DOUBAO_SEED_TTS_2_RESOURCE_ID: "豆包语音合成模型 2.0（火山服务 10035）",
 }
 HUOSHAN_DOUBLE_STREAM_WS_URL = "wss://openspeech.bytedance.com/api/v3/tts/bidirection"
@@ -69,6 +67,7 @@ EVENT_SessionCanceled = 151
 EVENT_SessionFinished = 152
 
 EVENT_SessionFailed = 153
+EVENT_UsageResponse = 154
 
 # 上行通用事件
 EVENT_TaskRequest = 200
@@ -154,12 +153,9 @@ class TTSProvider(TTSProviderBase):
         self.interface_type = InterfaceType.DUAL_STREAM
         self._monitor_task = None  # 监听任务引用
         self._session_error = None  # 会话失败时的错误信息
-        self.appId = config.get("appid")
         self.api_key = config.get("api_key")
-        self.access_token = config.get("access_token")
-        self.cluster = config.get("cluster")
         self.resource_id = str(
-            config.get("resource_id") or DOUBAO_BIGTTS_RESOURCE_ID
+            config.get("resource_id") or DOUBAO_SEED_TTS_2_RESOURCE_ID
         ).strip()
         if self.resource_id not in SUPPORTED_DOUBAO_TTS_RESOURCES:
             supported = "、".join(
@@ -167,11 +163,10 @@ class TTSProvider(TTSProviderBase):
                 for resource_id, name in SUPPORTED_DOUBAO_TTS_RESOURCES.items()
             )
             raise ValueError(
-                "豆包 TTS 仅支持火山官方两个双向流式服务："
+                "豆包 TTS 仅支持火山 Seed TTS 2.0 双向流式服务："
                 f"{supported}；当前 resource_id={self.resource_id or '<empty>'}"
             )
-        self.resource_type = self.resource_id == DOUBAO_SEED_TTS_2_RESOURCE_ID
-        self.report_on_last = self.resource_type
+        self.report_on_last = True
         self.activate_session = False
         if config.get("private_voice"):
             self.voice = config.get("private_voice")
@@ -193,9 +188,6 @@ class TTSProvider(TTSProviderBase):
             }
         }
 
-        # 默认 mix_speaker 配置
-        default_mix_speaker = {}
-
         # 合并用户配置。智控台可能把高级 JSON 字段以字符串下发，先统一解析成字典。
         self.audio_params = {
             **default_audio_params,
@@ -204,10 +196,6 @@ class TTSProvider(TTSProviderBase):
         self.additions = {
             **default_additions,
             **self._mapping_config(config, "additions"),
-        }
-        self.mix_speaker = {
-            **default_mix_speaker,
-            **self._mapping_config(config, "mix_speaker"),
         }
         self.additions["post_process"] = self._mapping_value(
             self.additions.get("post_process"), "additions.post_process"
@@ -244,26 +232,23 @@ class TTSProvider(TTSProviderBase):
                 "豆包 TTS 仅支持火山官方双向流式 WebSocket 地址："
                 f"{HUOSHAN_DOUBLE_STREAM_WS_URL}；当前 ws_url={self.ws_url or '<empty>'}"
             )
-        self.authorization = config.get("authorization")
-        self.header = {"Authorization": f"{self.authorization}{self.access_token}"}
         enable_ws_reuse_value = config.get("enable_ws_reuse", True)
         self.enable_ws_reuse = False if str(enable_ws_reuse_value).lower() == 'false' else True
         self.tts_text = ""
 
-        model_key_msg = check_model_key("TTS", self.api_key or self.access_token)
+        model_key_msg = check_model_key("TTS", self.api_key)
         if model_key_msg:
             logger.bind(tag=TAG).error(model_key_msg)
+        if not self.api_key:
+            raise ValueError("豆包 TTS 需要配置 api_key")
 
     def _build_ws_headers(self):
         ws_header = {
             "X-Api-Resource-Id": self.resource_id,
             "X-Api-Connect-Id": str(uuid.uuid4()),
+            "X-Control-Require-Usage-Tokens-Return": "*",
         }
-        if self.api_key:
-            ws_header["X-Api-Key"] = self.api_key
-            return ws_header
-        ws_header["X-Api-App-Key"] = self.appId
-        ws_header["X-Api-Access-Key"] = self.access_token
+        ws_header["X-Api-Key"] = self.api_key
         return ws_header
 
     def _mapping_config(self, config, key):
@@ -337,11 +322,9 @@ class TTSProvider(TTSProviderBase):
                 self.ws_url, additional_headers=ws_header, max_size=1000000000
             )
             logger.bind(tag=TAG).debug("WebSocket连接建立成功")
-            
-            # 连接建立成功后，启动监听任务
-            if self._monitor_task is None or self._monitor_task.done():
-                logger.bind(tag=TAG).debug("启动监听任务...")
-                self._monitor_task = asyncio.create_task(self._start_monitor_tts_response())
+            await self.start_connection()
+            await self._wait_for_event(self.ws, EVENT_ConnectionStarted, timeout=10)
+            logger.bind(tag=TAG).debug("TTS连接启动成功")
             
             return self.ws
         except Exception as e:
@@ -517,6 +500,10 @@ class TTSProvider(TTSProviderBase):
             )
             await self.send_event(self.ws, header, optional, payload)
             logger.bind(tag=TAG).debug("会话启动请求已发送")
+            if self._monitor_task is None or self._monitor_task.done():
+                await self._wait_for_event(self.ws, EVENT_SessionStarted, timeout=10)
+                logger.bind(tag=TAG).debug("TTS会话启动成功")
+                self._monitor_task = asyncio.create_task(self._start_monitor_tts_response())
         except Exception as e:
             logger.bind(tag=TAG).error(f"启动会话失败: {str(e)}")
             # 确保清理资源
@@ -614,31 +601,20 @@ class TTSProvider(TTSProviderBase):
                     if res.optional.event == EVENT_SessionCanceled:
                         logger.bind(tag=TAG).debug(f"释放服务端资源成功～～")
                         self.activate_session = False
-                    elif not self.resource_type and res.optional.event == EVENT_TTSSentenceStart:
-                        json_data = json.loads(res.payload.decode("utf-8"))
-                        self.tts_text = json_data.get("text", "")
-                        logger.bind(tag=TAG).debug(f"句子语音生成开始: {self.tts_text}")
-                        # 将TTS服务返回的替换后文本还原为原始文本，用于字幕显示
-                        display_text = self._restore_original_text(self.tts_text)
-                        self.tts_audio_queue.put((SentenceType.FIRST, [], display_text))
                     elif (
                         res.optional.event == EVENT_TTSResponse
                         and res.header.message_type == AUDIO_ONLY_RESPONSE
                     ):
-                        # 处理seed-tts-2.0文本字幕
-                        if self.resource_type:
-                            tts_text = self.get_tts_text(self.conn.sentence_id)
-                            if tts_text:
-                                logger.bind(tag=TAG).info(
-                                    f"句子语音生成成功： {tts_text}"
-                                )
-                                self.tts_audio_queue.put(
-                                    (SentenceType.FIRST, [], tts_text)
-                                )
-                                self.clear_tts_text(self.conn.sentence_id)
+                        tts_text = self.get_tts_text(self.conn.sentence_id)
+                        if tts_text:
+                            logger.bind(tag=TAG).info(
+                                f"句子语音生成成功： {tts_text}"
+                            )
+                            self.tts_audio_queue.put(
+                                (SentenceType.FIRST, [], tts_text)
+                            )
+                            self.clear_tts_text(self.conn.sentence_id)
                         self.wav_to_opus_data_audio_raw_stream(res.payload, callback=self.handle_opus)
-                    elif not self.resource_type and res.optional.event == EVENT_TTSSentenceEnd:
-                        logger.bind(tag=TAG).info(f"句子语音生成成功：{self.tts_text}")
                     elif res.optional.event == EVENT_SessionFailed:
                         error_msg = ""
                         try:
@@ -713,6 +689,30 @@ class TTSProvider(TTSProviderBase):
         )
         return await self.send_event(self.ws, header, optional, payload)
 
+    async def _receive_response(self, ws: websockets.WebSocketClientProtocol, timeout=None) -> Response:
+        if timeout:
+            msg = await asyncio.wait_for(ws.recv(), timeout=timeout)
+        else:
+            msg = await ws.recv()
+        return self.parser_response(msg)
+
+    async def _wait_for_event(self, ws: websockets.WebSocketClientProtocol, event: int, timeout=None) -> Response:
+        while True:
+            res = await self._receive_response(ws, timeout=timeout)
+            self.print_response(res, f"wait_event {event}:")
+            if res.header.message_type == ERROR_INFORMATION:
+                detail = res.payload.decode("utf-8", "ignore") if res.payload else ""
+                raise RuntimeError(f"TTS WebSocket 错误: code={res.optional.errorCode}, detail={detail}")
+            if res.optional.event in (EVENT_ConnectionFailed, EVENT_SessionFailed):
+                detail = ""
+                if res.payload:
+                    detail = res.payload.decode("utf-8", "ignore")
+                elif res.optional.response_meta_json:
+                    detail = res.optional.response_meta_json
+                raise RuntimeError(f"TTS 事件失败: event={res.optional.event}, detail={detail}")
+            if res.optional.event == event:
+                return res
+
     # 读取 res 数组某段 字符串内容
     def read_res_content(self, res: bytes, offset: int):
         content_size = int.from_bytes(res[offset : offset + 4], "big", signed=True)
@@ -741,35 +741,37 @@ class TTSProvider(TTSProviderBase):
         header.header_size = res[0] & 0x0F
         header.message_type = (res[1] >> 4) & num
         header.message_type_specific_flags = res[1] & 0x0F
-        header.serialization_method = res[2] >> num
+        header.serialization_method = (res[2] >> 4) & num
         header.message_compression = res[2] & 0x0F
         header.reserved = res[3]
         #
-        offset = 4
+        offset = header.header_size * 4
         optional = response.optional
-        if header.message_type == FULL_SERVER_RESPONSE or AUDIO_ONLY_RESPONSE:
+        if header.message_type in (FULL_SERVER_RESPONSE, AUDIO_ONLY_RESPONSE):
             # read event
             if header.message_type_specific_flags == MsgTypeFlagWithEvent:
-                optional.event = int.from_bytes(res[offset:8], "big", signed=True)
+                optional.event = int.from_bytes(res[offset:offset + 4], "big", signed=True)
                 offset += 4
                 if optional.event == EVENT_NONE:
                     return response
-                # read connectionId
                 elif optional.event == EVENT_ConnectionStarted:
                     optional.connectionId, offset = self.read_res_content(res, offset)
-                elif optional.event == EVENT_ConnectionFailed:
-                    optional.response_meta_json, offset = self.read_res_content(
-                        res, offset
-                    )
+                    response.payload, offset = self.read_res_payload(res, offset)
                 elif (
-                    optional.event == EVENT_SessionStarted
-                    or optional.event == EVENT_SessionFailed
-                    or optional.event == EVENT_SessionFinished
+                    optional.event == EVENT_ConnectionFailed
+                    or optional.event == EVENT_ConnectionFinished
+                ):
+                    optional.connectionId, offset = self.read_res_content(res, offset)
+                    response.payload, offset = self.read_res_payload(res, offset)
+                    optional.response_meta_json = response.payload.decode("utf-8", "ignore") if response.payload else None
+                elif optional.event in (
+                    EVENT_SessionStarted,
+                    EVENT_SessionFailed,
+                    EVENT_SessionFinished,
                 ):
                     optional.sessionId, offset = self.read_res_content(res, offset)
-                    optional.response_meta_json, offset = self.read_res_content(
-                        res, offset
-                    )
+                    response.payload, offset = self.read_res_payload(res, offset)
+                    optional.response_meta_json = response.payload.decode("utf-8", "ignore") if response.payload else None
                 else:
                     optional.sessionId, offset = self.read_res_content(res, offset)
                     response.payload, offset = self.read_res_payload(res, offset)
@@ -786,6 +788,7 @@ class TTSProvider(TTSProviderBase):
         header = Header(
             message_type=FULL_CLIENT_REQUEST,
             message_type_specific_flags=MsgTypeFlagWithEvent,
+            serial_method=JSON,
         ).as_bytes()
         optional = Optional(event=EVENT_Start_Connection).as_bytes()
         payload = str.encode("{}")
@@ -812,10 +815,6 @@ class TTSProvider(TTSProviderBase):
             "additions": json.dumps(self.additions)
         }
         
-        # 如果有 mix_speaker 配置，添加到 req_params
-        if self.mix_speaker:
-            req_params["mix_speaker"] = self.mix_speaker
-
         return str.encode(
             json.dumps(
                 {
@@ -870,6 +869,11 @@ class TTSProvider(TTSProviderBase):
                 )
 
                 try:
+                    # 启动连接
+                    self.ws = ws
+                    await self.start_connection()
+                    await self._wait_for_event(ws, EVENT_ConnectionStarted, timeout=self.tts_timeout)
+
                     # 启动会话
                     header = Header(
                         message_type=FULL_CLIENT_REQUEST,
@@ -883,6 +887,7 @@ class TTSProvider(TTSProviderBase):
                         event=EVENT_StartSession, speaker=self.voice
                     )
                     await self.send_event(ws, header, optional, payload)
+                    await self._wait_for_event(ws, EVENT_SessionStarted, timeout=self.tts_timeout)
 
                     # 发送文本
                     header = Header(
@@ -920,15 +925,26 @@ class TTSProvider(TTSProviderBase):
                             and res.header.message_type == AUDIO_ONLY_RESPONSE
                         ):
                             self.wav_to_opus_data_audio_raw_stream(res.payload, callback=lambda opus_frame: audio_data.append(opus_frame))
+                        elif res.optional.event == EVENT_UsageResponse:
+                            continue
+                        elif res.optional.event == EVENT_SessionFailed:
+                            detail = res.payload.decode("utf-8", "ignore") if res.payload else ""
+                            raise RuntimeError(f"TTS 会话失败: {detail}")
                         elif res.optional.event == EVENT_SessionFinished:
                             break
 
                 finally:
                     # 清理资源
                     try:
+                        await self.finish_connection()
+                        await self._wait_for_event(ws, EVENT_ConnectionFinished, timeout=5)
+                    except Exception:
+                        pass
+                    try:
                         await ws.close()
                     except:
                         pass
+                    self.ws = None
 
             # 运行异步任务
             loop.run_until_complete(_generate_audio())

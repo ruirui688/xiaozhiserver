@@ -43,10 +43,8 @@ public class ModelRuntimeAssembler {
             "model_name", "model", "resource_id", "voice", "speaker", "model_dir", "model_path", "appkey", "cluster"));
     private static final String HUOSHAN_DOUBLE_STREAM_TYPE = "huoshan_double_stream";
     private static final String HUOSHAN_DOUBLE_STREAM_WS_URL = "wss://openspeech.bytedance.com/api/v3/tts/bidirection";
-    private static final String DOUBAO_BIGTTS_RESOURCE_ID = "volc.service_type.10029";
-    private static final String DOUBAO_BIGTTS_DEFAULT_SPEAKER = "zh_male_shaonianzixin_moon_bigtts";
     private static final String DOUBAO_SEED_TTS_2_RESOURCE_ID = "seed-tts-2.0";
-    private static final String DOUBAO_SEED_TTS_2_DEFAULT_SPEAKER = "zh_female_xiaohe_uranus_bigtts";
+    private static final String DOUBAO_SEED_TTS_2_DEFAULT_SPEAKER = "zh_female_sophie_uranus_bigtts";
 
     private final ModelConfigParamDao modelConfigParamDao;
     private final ModelConfigSecretDao modelConfigSecretDao;
@@ -408,30 +406,20 @@ public class ModelRuntimeAssembler {
         String templateCode = model == null ? "" : model.getTemplateCode();
         return HUOSHAN_DOUBLE_STREAM_TYPE.equalsIgnoreCase(StringUtils.defaultString(adapterCode))
                 || HUOSHAN_DOUBLE_STREAM_TYPE.equalsIgnoreCase(config.getStr("type"))
-                || "TTS_DOUBAO_BIGTTS_STREAM".equalsIgnoreCase(StringUtils.defaultString(templateCode))
                 || "TTS_DOUBAO_SEED_TTS_2_STREAM".equalsIgnoreCase(StringUtils.defaultString(templateCode));
     }
 
     private String resolveDefaultHuoshanTtsResourceId(ModelConfigEntity model) {
-        String templateCode = model == null ? "" : model.getTemplateCode();
-        if ("TTS_DOUBAO_SEED_TTS_2_STREAM".equalsIgnoreCase(StringUtils.defaultString(templateCode))) {
-            return DOUBAO_SEED_TTS_2_RESOURCE_ID;
-        }
-        return DOUBAO_BIGTTS_RESOURCE_ID;
+        return DOUBAO_SEED_TTS_2_RESOURCE_ID;
     }
 
     private String resolveDefaultHuoshanTtsSpeaker(ModelConfigEntity model) {
-        String templateCode = model == null ? "" : model.getTemplateCode();
-        if ("TTS_DOUBAO_SEED_TTS_2_STREAM".equalsIgnoreCase(StringUtils.defaultString(templateCode))) {
-            return DOUBAO_SEED_TTS_2_DEFAULT_SPEAKER;
-        }
-        return DOUBAO_BIGTTS_DEFAULT_SPEAKER;
+        return DOUBAO_SEED_TTS_2_DEFAULT_SPEAKER;
     }
 
     private boolean isManagedDoubaoTtsTemplate(ModelConfigEntity model) {
         String templateCode = model == null ? "" : model.getTemplateCode();
-        return "TTS_DOUBAO_BIGTTS_STREAM".equalsIgnoreCase(StringUtils.defaultString(templateCode))
-                || "TTS_DOUBAO_SEED_TTS_2_STREAM".equalsIgnoreCase(StringUtils.defaultString(templateCode));
+        return "TTS_DOUBAO_SEED_TTS_2_STREAM".equalsIgnoreCase(StringUtils.defaultString(templateCode));
     }
 
     private boolean hasUsableHuoshanTtsSpeaker(ModelConfigEntity model, String value) {
