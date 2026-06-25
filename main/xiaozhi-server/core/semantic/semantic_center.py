@@ -56,6 +56,11 @@ class SemanticCenter:
             await handleAbortMessage(conn)
             conn.last_tool_context = None
             conn.last_music_song_name = None
+            # handleAbortMessage sets client_abort=True; for music.stop
+            # (which has no decision.reply → _speak is never called to
+            # reset it), we must clear it here so the TTS pipeline can
+            # resume for subsequent interactions.
+            conn.client_abort = False
             if intent.full_name == "interrupt.stop_all":
                 await self._try_stop_motion(conn)
             if decision.reply:
