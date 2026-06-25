@@ -25,6 +25,7 @@ class PolicyEngine:
             return Decision(
                 decision="execute",
                 priority=95,
+                reply="好的，已停止播放。",
                 next_state="idle",
             )
 
