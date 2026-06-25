@@ -1124,8 +1124,6 @@ class ConnectionHandler:
         # 支持多个并行工具调用 - 使用列表存储
         tool_calls_list = []  # 格式: [{"id": "", "name": "", "arguments": ""}]
         content_arguments = ""
-        assistant_text_started = False
-        assistant_opening_buffer = ""
         emotion_flag = True
         try:
             for response in llm_responses:
@@ -1151,53 +1149,22 @@ class ConnectionHandler:
                         self._merge_tool_calls(tool_calls_list, tools_call)
 
                     # 流式提取 direct_answer 的 response 参数，实时送 TTS
-                    # 使用安全缓冲区，防止 JSON 闭合符号泄漏到 TTS
-                    _DA_STREAM_BUFFER = 5
                     for tc in tool_calls_list:
                         if tc["name"] == "direct_answer" and tc.get("arguments"):
                             da_text = self._extract_direct_answer_response(tc["arguments"])
                             sent_len = tc.get("_da_sent", 0)
                             if da_text and len(da_text) > sent_len:
-                                safe_end = max(sent_len, len(da_text) - _DA_STREAM_BUFFER)
-                                if safe_end > sent_len:
-                                    new_part = da_text[sent_len:safe_end]
-                                    # 清理 delta 中可能泄漏的 JSON 闭合垃圾
-                                    new_part = self._clean_response_garbage(new_part)
-                                    if not tc.get("_da_text_started"):
-                                        opening_buffer = (
-                                            tc.get("_da_opening_buffer", "") + new_part
+                                new_part = da_text[sent_len:]
+                                if new_part:
+                                    tc["_da_sent"] = len(da_text)
+                                    self.tts.tts_text_queue.put(
+                                        TTSMessageDTO(
+                                            sentence_id=current_sentence_id,
+                                            sentence_type=SentenceType.MIDDLE,
+                                            content_type=ContentType.TEXT,
+                                            content_detail=new_part,
                                         )
-                                        tc["_da_opening_buffer"] = opening_buffer
-                                        new_part = self._clean_assistant_output(
-                                            opening_buffer, at_start=True
-                                        )
-                                        if (
-                                            (
-                                                new_part == ""
-                                                or self._is_partial_blocked_opening(
-                                                    opening_buffer
-                                                )
-                                            )
-                                            and len(opening_buffer) < 24
-                                            and self._may_be_blocked_opening(
-                                                opening_buffer
-                                            )
-                                        ):
-                                            tc["_da_sent"] = safe_end
-                                            continue
-                                        tc["_da_text_started"] = True
-                                    else:
-                                        new_part = self._clean_assistant_output(new_part)
-                                    if new_part:
-                                        tc["_da_sent"] = safe_end
-                                        self.tts.tts_text_queue.put(
-                                            TTSMessageDTO(
-                                                sentence_id=current_sentence_id,
-                                                sentence_type=SentenceType.MIDDLE,
-                                                content_type=ContentType.TEXT,
-                                                content_detail=new_part,
-                                            )
-                                        )
+                                    )
                 else:
                     content = response
 
@@ -1213,30 +1180,6 @@ class ConnectionHandler:
 
                 if content is not None and len(content) > 0:
                     if not tool_call_flag:
-                        if not assistant_text_started:
-                            assistant_opening_buffer += content
-                            cleaned_content = self._clean_assistant_output(
-                                assistant_opening_buffer, at_start=True
-                            )
-                            if (
-                                (
-                                    cleaned_content == ""
-                                    or self._is_partial_blocked_opening(
-                                        assistant_opening_buffer
-                                    )
-                                )
-                                and len(assistant_opening_buffer) < 24
-                                and self._may_be_blocked_opening(
-                                    assistant_opening_buffer
-                                )
-                            ):
-                                continue
-                            content = cleaned_content
-                            assistant_text_started = True
-                        else:
-                            content = self._clean_assistant_output(content)
-                        if not content:
-                            continue
                         response_message.append(content)
                         self.tts.tts_text_queue.put(
                             TTSMessageDTO(
@@ -1269,9 +1212,6 @@ class ConnectionHandler:
         if self.client_abort or current_abort_generation != self.abort_generation:
             if len(response_message) > 0:
                 interrupted_text = "".join(response_message)
-                interrupted_text = self._clean_assistant_output(
-                    interrupted_text, at_start=True
-                )
                 if interrupted_text:
                     self.dialogue.put(Message(role="assistant", content=interrupted_text))
             return
@@ -1321,31 +1261,15 @@ class ConnectionHandler:
                             sent_len = tc.get("_da_sent", 0)
                             remaining = da_response[sent_len:]
                             if remaining:
-                                remaining = self._clean_response_garbage(remaining)
-                                if not tc.get("_da_text_started"):
-                                    opening_buffer = (
-                                        tc.get("_da_opening_buffer", "") + remaining
+                                self.tts.tts_text_queue.put(
+                                    TTSMessageDTO(
+                                        sentence_id=current_sentence_id,
+                                        sentence_type=SentenceType.MIDDLE,
+                                        content_type=ContentType.TEXT,
+                                        content_detail=remaining,
                                     )
-                                    remaining = self._clean_assistant_output(
-                                        opening_buffer, at_start=True
-                                    )
-                                    tc["_da_text_started"] = True
-                                else:
-                                    remaining = self._clean_assistant_output(remaining)
-                                if remaining:
-                                    self.tts.tts_text_queue.put(
-                                        TTSMessageDTO(
-                                            sentence_id=current_sentence_id,
-                                            sentence_type=SentenceType.MIDDLE,
-                                            content_type=ContentType.TEXT,
-                                            content_detail=remaining,
-                                        )
-                                    )
+                                )
                             # 写入对话历史
-                            da_response = self._clean_response_garbage(da_response)
-                            da_response = self._clean_assistant_output(
-                                da_response, at_start=True
-                            )
                             self.tts.store_tts_text(current_sentence_id, da_response)
                             self.dialogue.put(Message(role="assistant", content=da_response))
 
@@ -1432,7 +1356,6 @@ class ConnectionHandler:
         # 存储对话内容
         if len(response_message) > 0:
             text_buff = "".join(response_message)
-            text_buff = self._clean_assistant_output(text_buff, at_start=True)
             self.tts.store_tts_text(current_sentence_id, text_buff)
             self.dialogue.put(Message(role="assistant", content=text_buff))
 
@@ -1592,7 +1515,6 @@ class ConnectionHandler:
                 Action.ERROR,
             ]:
                 text = result.response if result.response else result.result
-                text = self._clean_assistant_output(text, at_start=True)
                 if streamed_text and text in streamed_text:
                     self.logger.bind(tag=TAG).debug(
                         f"Skipping duplicate TTS for tool {tool_call_data['name']}, already streamed"
@@ -1627,9 +1549,7 @@ class ConnectionHandler:
                 if resp:
                     response_parts.append(resp)
             if response_parts:
-                response_text = self._clean_assistant_output(
-                    "，".join(response_parts), at_start=True
-                )
+                response_text = "，".join(response_parts)
                 self.dialogue.put(Message(role="assistant", content=response_text))
 
         if need_llm_tools:
@@ -1897,34 +1817,6 @@ class ConnectionHandler:
         # 处理 JSON 转义
         raw = raw.replace('\\"', '"').replace('\\n', '\n').replace('\\\\', '\\')
         return raw
-
-    @staticmethod
-    def _clean_response_garbage(text):
-        """Bypassed — all text goes through LLM, no rule-based filtering."""
-        return text
-
-    @staticmethod
-    def _clean_bad_game_turnover(text):
-        """Bypassed — all text goes through LLM, no rule-based filtering."""
-        return text
-
-    @staticmethod
-    def _clean_assistant_output(text, at_start=False):
-        """Bypassed — all text goes through LLM, no rule-based filtering."""
-        if not text:
-            return text
-        text = ConnectionHandler._clean_bad_game_turnover(text)
-        return text if text else ""
-
-    @staticmethod
-    def _may_be_blocked_opening(text):
-        """Bypassed — all text goes through LLM, no rule-based filtering."""
-        return False
-
-    @staticmethod
-    def _is_partial_blocked_opening(text):
-        """Bypassed — all text goes through LLM, no rule-based filtering."""
-        return False
 
     def _merge_tool_calls(self, tool_calls_list, tools_call):
         """合并工具调用列表
