@@ -908,23 +908,29 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         doubaoHttp.setSupportedStatus("DEPRECATED");
         items.add(doubaoHttp);
         items.add(item("TTS_DOUBAO_BIGTTS_STREAM", "TTS", "huoshan_double_stream", "豆包语音合成大模型",
-                "火山引擎", "豆包语音合成大模型", "tts", "语音合成", "websocket-bidirectional", "WebSocket 双向流式",
+                "火山引擎", "语音合成大模型（服务 10007）", "tts", "语音合成", "websocket-bidirectional", "WebSocket 双向流式",
                 "cloud", "云平台", "WebSocket", "模型/Resource ID", "resource_id",
                 List.of("api_key", "appid", "access_token"), List.of("ws_url", "resource_id", "speaker"),
                 List.of("appid", "access_token", "format", "speech_rate", "loudness_rate", "pitch",
                         "emotion", "emotion_scale", "enable_ws_reuse", "audio_params", "additions", "mix_speaker"),
-                List.of("对应火山控制台“语音合成大模型”服务 10007。新版控制台使用 API Key 接入，模型资源 ID 通常为 volc.service_type.10029。常用音色、语速、音量、音高、情感可直接在字段里配置，高级参数仍可用 JSON 透传。"),
-                List.of(), List.of("HuoshanDoubleStreamTTS", "volc.service_type.10029"),
-                "https://www.volcengine.com/docs/6561/1329505"));
+                List.of("火山控制台 → 语音合成 → 服务 10007",
+                        "resource_id 固定填写 volc.service_type.10029",
+                        "推荐使用 API Key 接入；旧版 App ID + Access Token 仅作为兼容字段"),
+                List.of("需要在火山服务 10007 中开通模型和音色；音色列表以控制台实际展示为准"),
+                List.of("HuoshanDoubleStreamTTS", "volc.service_type.10029"),
+                "https://console.volcengine.com/speech/service/10007"));
         items.add(item("TTS_DOUBAO_SEED_TTS_2_STREAM", "TTS", "huoshan_double_stream", "豆包语音合成模型 2.0",
-                "火山引擎", "豆包语音合成模型 2.0", "tts", "语音合成", "websocket-bidirectional", "WebSocket 双向流式",
+                "火山引擎", "语音合成模型 2.0（服务 10035）", "tts", "语音合成", "websocket-bidirectional", "WebSocket 双向流式",
                 "cloud", "云平台", "WebSocket", "模型/Resource ID", "resource_id",
                 List.of("api_key", "appid", "access_token"), List.of("ws_url", "resource_id", "speaker"),
                 List.of("appid", "access_token", "format", "speech_rate", "loudness_rate", "pitch",
                         "emotion", "emotion_scale", "enable_ws_reuse", "audio_params", "additions"),
-                List.of("对应火山控制台“豆包语音合成模型 2.0”服务 10035。新版控制台使用 API Key 接入，模型资源 ID 固定为 seed-tts-2.0。常用音色、语速、音量、音高、情感可直接在字段里配置，高级参数仍可用 JSON 透传。"),
-                List.of(), List.of("HuoshanDoubleStreamTTSV2", "seed-tts-2.0", "TTS_HSDSTTS_V2"),
-                "https://www.volcengine.com/docs/6561/1329505"));
+                List.of("火山控制台 → 语音合成 → 服务 10035",
+                        "resource_id 固定填写 seed-tts-2.0",
+                        "推荐使用 API Key 接入；旧版 App ID + Access Token 仅作为兼容字段"),
+                List.of("需要在火山服务 10035 中开通模型和音色；2.0 模型音色列表与大模型（10007）不同，需在 10035 控制台单独查看"),
+                List.of("HuoshanDoubleStreamTTSV2", "seed-tts-2.0", "TTS_HSDSTTS_V2"),
+                "https://console.volcengine.com/speech/service/10035"));
         items.add(item("TTS_SILICONFLOW_COSYVOICE", "TTS", "siliconflow", "硅基流动 CosyVoice",
                 "硅基流动", "CosyVoice2", "tts", "语音合成", "http", "HTTP",
                 "cloud", "云平台", "HTTP", "模型/音色", "model",
