@@ -200,6 +200,7 @@ class TTSProvider(TTSProviderBase):
         self.additions["post_process"] = self._mapping_value(
             self.additions.get("post_process"), "additions.post_process"
         )
+        self._normalize_audio_params()
         self.audio_format = str(
             config.get("format")
             or config.get("audio_format")
@@ -209,6 +210,7 @@ class TTSProvider(TTSProviderBase):
         ).strip()
         self.audio_file_type = self.audio_format
         self._merge_flat_audio_params(config)
+        self._normalize_audio_params()
 
         # 应用百分比调整（如果存在），否则使用公有化配置
         if "ttsVolume" in config:
@@ -273,6 +275,33 @@ class TTSProvider(TTSProviderBase):
                 return dict(parsed)
         raise ValueError(f"{field_name} 必须是 JSON 对象，当前类型为 {type(value).__name__}")
 
+    def _normalize_audio_params(self):
+        for key in ("speech_rate", "loudness_rate", "sample_rate", "emotion_scale"):
+            if key in self.audio_params:
+                self.audio_params[key] = self._numeric_value(self.audio_params[key], key)
+
+        post_process = self.additions.get("post_process")
+        if isinstance(post_process, Mapping) and "pitch" in post_process:
+            post_process["pitch"] = self._numeric_value(post_process["pitch"], "pitch")
+
+    def _numeric_value(self, value, field_name):
+        if value in (None, ""):
+            return value
+        if isinstance(value, bool):
+            raise ValueError(f"{field_name} 必须是数字，当前类型为 boolean")
+        if isinstance(value, (int, float)):
+            return value
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return value
+            try:
+                number = float(text)
+            except ValueError as exc:
+                raise ValueError(f"{field_name} 必须是数字，当前值为 {value!r}") from exc
+            return int(number) if number.is_integer() else number
+        raise ValueError(f"{field_name} 必须是数字，当前类型为 {type(value).__name__}")
+
     def _merge_flat_audio_params(self, config):
         for key in (
             "speech_rate",
@@ -284,7 +313,10 @@ class TTSProvider(TTSProviderBase):
         ):
             value = config.get(key)
             if value not in (None, ""):
-                self.audio_params[key] = value
+                if key in ("emotion", "language"):
+                    self.audio_params[key] = value
+                else:
+                    self.audio_params[key] = self._numeric_value(value, key)
 
         pitch = config.get("pitch")
         if pitch not in (None, ""):
@@ -292,7 +324,7 @@ class TTSProvider(TTSProviderBase):
                 self.additions.get("post_process"), "additions.post_process"
             )
             self.additions["post_process"] = post_process
-            post_process["pitch"] = pitch
+            post_process["pitch"] = self._numeric_value(pitch, "pitch")
 
     async def open_audio_channels(self, conn):
         try:
