@@ -618,11 +618,14 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         }
         if (isManagedDoubaoTtsTemplate(templateCode)) {
             config.set("resource_id", resolveDefaultHuoshanTtsResourceId(templateCode));
-        } else if (!hasUsableHuoshanTtsField(config.getStr("resource_id"))) {
-            config.set("resource_id", resolveDefaultHuoshanTtsResourceId(templateCode));
-        }
-        if (!hasUsableHuoshanTtsSpeaker(templateCode, config.getStr("speaker"))) {
             config.set("speaker", resolveDefaultHuoshanTtsSpeaker(templateCode));
+        } else {
+            if (!hasUsableHuoshanTtsField(config.getStr("resource_id"))) {
+                config.set("resource_id", resolveDefaultHuoshanTtsResourceId(templateCode));
+            }
+            if (!hasUsableHuoshanTtsSpeaker(templateCode, config.getStr("speaker"))) {
+                config.set("speaker", resolveDefaultHuoshanTtsSpeaker(templateCode));
+            }
         }
     }
 
