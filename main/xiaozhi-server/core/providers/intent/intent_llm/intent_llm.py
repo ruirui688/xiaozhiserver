@@ -115,7 +115,7 @@ class IntentProvider(IntentProviderBase):
             "特殊说明：\n"
             "- 当用户单次输入包含多个指令时（如'打开灯并且调高音量'）\n"
             "- 请返回多个function_call组成的JSON数组\n"
-            "- 示例：{'function_calls': [{name:'light_on'}, {name:'volume_up'}]}\n\n"
+            "- 示例：{'function_calls': [{'name': 'self_screen_set_brightness', 'arguments': {'brightness': 80}}, {'name': 'self_audio_speaker_volume_up'}]}\n\n"
             "【最终警告】绝对禁止输出任何自然语言、表情符号或解释文字！只能输出有效JSON格式！违反此规则将导致系统错误！"
         )
         return prompt

@@ -114,7 +114,9 @@ def handle_hass_set_state(conn: "ConnectionHandler", entity_id, state):
         description = f"亮度已调整到{state['input']}"
         action = "turn_on"
         arg = "brightness_pct"
-        value = state["input"]
+        # Coerce to int because LLM (especially intent_llm) may return string values
+        input_val = int(state["input"])
+        value = input_val
     elif state["type"] == "set_color":
         description = f"颜色已调整到{state['rgb_color']}"
         action = "turn_on"
@@ -135,9 +137,11 @@ def handle_hass_set_state(conn: "ConnectionHandler", entity_id, state):
         description = f"音量已调整到{state['input']}"
         action = state["type"]
         arg = "volume_level"
-        value = state["input"]
-        if state["input"] >= 1:
-            value = state["input"] / 100
+        # Coerce to int because LLM (especially intent_llm) may return string values
+        input_val = int(state["input"])
+        value = input_val
+        if input_val >= 1:
+            value = input_val / 100
     elif state["type"] == "volume_mute":
         description = f"设备已静音"
         action = state["type"]
