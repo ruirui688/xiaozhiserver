@@ -297,6 +297,7 @@ export default {
         vendorName: "",
         productName: "",
         protocol: "",
+        upstreamModelId: "",
         endpointUrl: "",
         isDefault: false,
         isEnabled: false,
@@ -394,6 +395,7 @@ export default {
         vendorName: "",
         productName: "",
         protocol: "",
+        upstreamModelId: "",
         endpointUrl: "",
         isDefault: false,
         isEnabled: false,
@@ -527,6 +529,7 @@ export default {
         vendorName: this.form.vendorName,
         productName: this.form.productName,
         protocol: this.form.protocol,
+        upstreamModelId: this.form.upstreamModelId || this.form.modelName,
         endpointUrl: this.form.endpointUrl,
         params: { ...this.form.params },
         secrets: { ...this.form.secrets },
@@ -583,8 +586,9 @@ export default {
       this.form.vendorName = template.vendorName || "";
       this.form.productName = template.productName || "";
       this.form.protocol = template.protocolLabel || "";
-      this.form.docLink = template.docLink || this.form.docLink;
-      this.applyTemplateDefaults(template);
+      this.form.docLink = template.docLink || "";
+      this.form.remark = this.buildTemplateRemark(template);
+      this.rebuildTemplateRuntimeFields(template);
       this.loadProviderFields(templateCode);
     },
     findTemplate(templateCode) {
@@ -751,22 +755,63 @@ export default {
       const upstreamKey = template.upstreamModelField || "";
       return key === upstreamKey || ["model_name", "model", "resource_id"].includes(key);
     },
-    applyTemplateDefaults(template = {}) {
+    rebuildTemplateRuntimeFields(template = {}) {
+      const preserved = this.extractReusableCredentialValues(template);
+      this.form.params = { ...preserved.params };
+      this.form.secrets = { ...preserved.secrets };
+      this.form.endpointUrl = "";
+      this.form.upstreamModelId = "";
+      this.fieldJsonMap = {};
+      this.applyTemplateDefaults(template, { overwrite: true });
+    },
+    extractReusableCredentialValues(template = {}) {
+      const params = {};
+      const secrets = {};
+      (template.fieldSchemas || []).forEach((field) => {
+        const key = field.key;
+        if (!key || !this.isReusableCredentialField(field)) {
+          return;
+        }
+        const target = this.getFieldTarget(field);
+        const source = target === "secrets" ? this.form.secrets : this.form.params;
+        const value = source ? source[key] : undefined;
+        if (value === undefined || value === null || value === "") {
+          return;
+        }
+        if (target === "secrets") {
+          secrets[key] = value;
+        } else {
+          params[key] = value;
+        }
+      });
+      return { params, secrets };
+    },
+    isReusableCredentialField(field = {}) {
+      const group = String(field.group || "").toLowerCase();
+      return group === "credentials" || this.isSecretField(field.key);
+    },
+    buildTemplateRemark(template = {}) {
+      const hints = Array.isArray(template.setupHints) ? template.setupHints.filter(Boolean) : [];
+      return hints.length ? hints.join("\n") : "";
+    },
+    applyTemplateDefaults(template = {}, options = {}) {
+      const overwrite = !!options.overwrite;
       (template.fieldSchemas || []).forEach((field) => {
         const value = field.defaultValue;
         if (value === undefined || value === null || value === "") {
           return;
         }
         if (this.endpointKeys().includes(field.key)) {
-          if (!this.form.endpointUrl) this.form.endpointUrl = value;
+          if (overwrite || !this.form.endpointUrl) this.form.endpointUrl = value;
           return;
         }
         if (this.isModelNameMetadataField(field.key, template)) {
+          if (overwrite || !this.form.upstreamModelId) this.form.upstreamModelId = value;
           if (!this.form.modelName) this.form.modelName = value;
           return;
         }
         const target = this.getFieldTarget(field);
-        if (this.form[target][field.key] === undefined || this.form[target][field.key] === "") {
+        if (overwrite || this.form[target][field.key] === undefined || this.form[target][field.key] === "") {
           this.$set(this.form[target], field.key, value);
         }
       });
@@ -866,6 +911,7 @@ export default {
         vendorName: model.vendorName || "",
         productName: model.productName || "",
         protocol: model.protocol || "",
+        upstreamModelId: model.upstreamModelId || "",
         endpointUrl: model.endpointUrl || "",
         isDefault: model.isDefault,
         isEnabled: model.isEnabled,

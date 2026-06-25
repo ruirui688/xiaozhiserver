@@ -610,16 +610,20 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         }
         config.set("type", HUOSHAN_DOUBLE_STREAM_TYPE);
         config.set("ws_url", HUOSHAN_DOUBLE_STREAM_WS_URL);
+        config.remove("model_name");
+        config.remove("model");
         for (String key : List.of("base_url", "api_url", "url", "server_url", "host", "endpoint_url")) {
             String value = config.getStr(key);
             if (isLegacyHuoshanTtsEndpoint(value)) {
                 config.remove(key);
             }
         }
-        if (!hasUsableHuoshanTtsField(config.getStr("resource_id"))) {
+        if (isManagedDoubaoTtsTemplate(templateCode)) {
+            config.set("resource_id", resolveDefaultHuoshanTtsResourceId(templateCode));
+        } else if (!hasUsableHuoshanTtsField(config.getStr("resource_id"))) {
             config.set("resource_id", resolveDefaultHuoshanTtsResourceId(templateCode));
         }
-        if (!hasUsableHuoshanTtsField(config.getStr("speaker"))) {
+        if (!hasUsableHuoshanTtsSpeaker(templateCode, config.getStr("speaker"))) {
             config.set("speaker", resolveDefaultHuoshanTtsSpeaker(templateCode));
         }
     }
@@ -651,6 +655,19 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             return DOUBAO_SEED_TTS_2_DEFAULT_SPEAKER;
         }
         return DOUBAO_BIGTTS_DEFAULT_SPEAKER;
+    }
+
+    private boolean isManagedDoubaoTtsTemplate(String templateCode) {
+        return "TTS_DOUBAO_BIGTTS_STREAM".equalsIgnoreCase(StringUtils.defaultString(templateCode))
+                || "TTS_DOUBAO_SEED_TTS_2_STREAM".equalsIgnoreCase(StringUtils.defaultString(templateCode));
+    }
+
+    private boolean hasUsableHuoshanTtsSpeaker(String templateCode, String value) {
+        if (!hasUsableHuoshanTtsField(value)) {
+            return false;
+        }
+        return !"TTS_DOUBAO_SEED_TTS_2_STREAM".equalsIgnoreCase(StringUtils.defaultString(templateCode))
+                || !StringUtils.endsWithIgnoreCase(StringUtils.trim(value), "_moon_bigtts");
     }
 
     private boolean isLegacyHuoshanTtsEndpoint(String value) {
