@@ -6,6 +6,7 @@ from ..base import IntentProviderBase
 from plugins_func.functions.play_music import initialize_music_handler
 from config.logger import setup_logging
 from core.utils.util import get_system_error_response
+from core.providers.tools.home_assistant_config import build_home_assistant_devices_prompt
 import re
 import json
 import hashlib
@@ -182,16 +183,7 @@ class IntentProvider(IntentProviderBase):
         music_file_names = music_config["music_file_names"]
         prompt_music = f"{self.promot}\n<musicNames>{music_file_names}\n</musicNames>"
 
-        home_assistant_cfg = conn.config["plugins"].get("home_assistant")
-        if home_assistant_cfg:
-            devices = home_assistant_cfg.get("devices", [])
-        else:
-            devices = []
-        if len(devices) > 0:
-            hass_prompt = "\n下面是我家智能设备列表（位置，设备名，entity_id），可以通过homeassistant控制\n"
-            for device in devices:
-                hass_prompt += device + "\n"
-            prompt_music += hass_prompt
+        prompt_music += build_home_assistant_devices_prompt(conn)
 
         logger.bind(tag=TAG).debug(f"User prompt: {prompt_music}")
 
