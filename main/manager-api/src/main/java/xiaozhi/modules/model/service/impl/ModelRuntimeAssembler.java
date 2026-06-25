@@ -212,6 +212,8 @@ public class ModelRuntimeAssembler {
         }
         normalizeHuoshanDoubleStreamTtsConfig(model, config);
         updateModelMetadata(model, config);
+        Map<String, ModelTemplateFieldEntity> templateFieldMap = templateFieldMap(
+                loadTemplateFields(model.getTemplateCode()));
         Map<String, ModelConfigSecretEntity> existingSecrets = new HashMap<>();
         for (ModelConfigSecretEntity secret : loadSecrets(model.getId())) {
             existingSecrets.put(secret.getSecretKey(), secret);
@@ -242,11 +244,40 @@ public class ModelRuntimeAssembler {
                 param.setModelId(model.getId());
                 param.setParamKey(key);
                 param.setParamValue(serializeParamValue(value));
-                param.setValueType(inferValueType(value));
-                param.setParamGroup(inferParamGroup(key));
+                ModelTemplateFieldEntity templateField = templateFieldMap.get(key);
+                param.setValueType(resolveValueType(value, templateField));
+                param.setParamGroup(resolveParamGroup(key, templateField));
                 modelConfigParamDao.insert(param);
             }
         }
+    }
+
+    private Map<String, ModelTemplateFieldEntity> templateFieldMap(List<ModelTemplateFieldEntity> fields) {
+        Map<String, ModelTemplateFieldEntity> result = new HashMap<>();
+        for (ModelTemplateFieldEntity field : fields) {
+            if (field == null || StringUtils.isBlank(field.getFieldKey())) {
+                continue;
+            }
+            result.put(field.getFieldKey(), field);
+            if (StringUtils.isNotBlank(field.getRuntimeKey())) {
+                result.put(field.getRuntimeKey(), field);
+            }
+        }
+        return result;
+    }
+
+    private String resolveValueType(Object value, ModelTemplateFieldEntity templateField) {
+        if (templateField != null && StringUtils.isNotBlank(templateField.getValueType())) {
+            return templateField.getValueType();
+        }
+        return inferValueType(value);
+    }
+
+    private String resolveParamGroup(String key, ModelTemplateFieldEntity templateField) {
+        if (templateField != null && StringUtils.isNotBlank(templateField.getFieldGroup())) {
+            return templateField.getFieldGroup();
+        }
+        return inferParamGroup(key);
     }
 
     private Object parseTypedValue(String value, String valueType) {

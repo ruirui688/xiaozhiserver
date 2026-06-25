@@ -55,6 +55,25 @@ def test_doubao_tts_merges_flat_audio_fields():
     assert provider.audio_file_type == "wav"
 
 
+def test_doubao_tts_coerces_string_audio_numbers():
+    provider = TTSProvider(
+        _base_config(
+            speech_rate="0",
+            loudness_rate="0",
+            sample_rate="24000",
+            pitch="0",
+            emotion_scale="4",
+        ),
+        True,
+    )
+
+    assert provider.audio_params["speech_rate"] == 0
+    assert provider.audio_params["loudness_rate"] == 0
+    assert provider.audio_params["sample_rate"] == 24000
+    assert provider.audio_params["emotion_scale"] == 4
+    assert provider.additions["post_process"]["pitch"] == 0
+
+
 def test_doubao_tts_accepts_json_string_advanced_fields():
     provider = TTSProvider(
         _base_config(
