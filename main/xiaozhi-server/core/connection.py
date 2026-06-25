@@ -1900,138 +1900,31 @@ class ConnectionHandler:
 
     @staticmethod
     def _clean_response_garbage(text):
-        """清理 response 中可能泄漏的 JSON 闭合符号。
-        模型有时会在 response 内容中生成 JSON 闭合字符（如 ）"}} 或 '})，
-        这些不是故事内容的一部分，需要去除。
-        """
-        if not text:
-            return text
-        # 清理独立一行的 JSON 闭合垃圾（如 ）"}}  '}}  "}}  }}  } ）
-        _garbage_chars = frozenset('")\'}）')
-        lines = text.split('\n')
-        cleaned = []
-        for line in lines:
-            stripped = line.strip()
-            if stripped and len(stripped) <= 8 and all(c in _garbage_chars for c in stripped):
-                continue
-            cleaned.append(line)
-        result = '\n'.join(cleaned)
-        # 清理末尾残留的 JSON 闭合符号
-        result = re.sub(r'["\'}\]]+$', '', result.rstrip()).rstrip()
-        return result
+        """Bypassed — all text goes through LLM, no rule-based filtering."""
+        return text
 
     @staticmethod
     def _clean_bad_game_turnover(text):
-        if not text:
-            return text
-        bad_patterns = (
-            r"[^。！？!?；;\n]*(轮到你了|该你了)[。！？!?；;\n]?\s*[^。！？!?；;\n]*(我来猜|心里想)[^。！？!?；;\n]*[。！？!?；;\n]?",
-            r"[^。！？!?；;\n]*(轮到你了|该你了)[^。！？!?；;\n]*(我来猜|心里想)[^。！？!?；;\n]*[。！？!?；;\n]?",
-            r"[^。！？!?；;\n]*(心里想什么|心里想的是什么)[^。！？!?；;\n]*[。！？!?；;\n]?",
-        )
-        result = text
-        for pattern in bad_patterns:
-            result = re.sub(pattern, "", result)
-        return result.strip()
+        """Bypassed — all text goes through LLM, no rule-based filtering."""
+        return text
 
     @staticmethod
     def _clean_assistant_output(text, at_start=False):
-        """清理会让语音助手显得迟钝的句首填充词。"""
+        """Bypassed — all text goes through LLM, no rule-based filtering."""
         if not text:
             return text
         text = ConnectionHandler._clean_bad_game_turnover(text)
-        if not text:
-            return text
-        if not at_start:
-            return text
-
-        result = text.lstrip()
-        blocked_openings = (
-            "哈哈",
-            "哈喽",
-            "不好意思",
-            "对不起",
-            "好的",
-            "好啦",
-            "好呀",
-            "好",
-            "哎呀",
-            "哎",
-            "抱歉",
-            "呃",
-            "嗯",
-        )
-        separators = " \t\r\n，,。.!！、~～…：:；;？?）)]}\"'"
-        changed = True
-        while changed:
-            changed = False
-            for opening in blocked_openings:
-                if result == opening:
-                    return ""
-                if (
-                    result.startswith(opening)
-                    and len(result) > len(opening)
-                    and result[len(opening)] in separators
-                ):
-                    result = result[len(opening):].lstrip(separators)
-                    changed = True
-                    break
-        return result
+        return text if text else ""
 
     @staticmethod
     def _may_be_blocked_opening(text):
-        if not text:
-            return False
-        stripped = text.lstrip()
-        blocked_openings = (
-            "哈哈",
-            "哈喽",
-            "不好意思",
-            "对不起",
-            "好的",
-            "好啦",
-            "好呀",
-            "好",
-            "哎呀",
-            "哎",
-            "抱歉",
-            "呃",
-            "嗯",
-        )
-        separators = " \t\r\n，,。.!！、~～…：:；;？?）)]}\"'"
-        for opening in blocked_openings:
-            if opening.startswith(stripped):
-                return True
-            if stripped == opening:
-                return True
-            if (
-                stripped.startswith(opening)
-                and len(stripped) > len(opening)
-                and stripped[len(opening)] in separators
-            ):
-                return True
+        """Bypassed — all text goes through LLM, no rule-based filtering."""
         return False
 
     @staticmethod
     def _is_partial_blocked_opening(text):
-        if not text:
-            return False
-        stripped = text.lstrip()
-        blocked_openings = (
-            "哈哈",
-            "哈喽",
-            "不好意思",
-            "对不起",
-            "好的",
-            "好啦",
-            "好呀",
-            "哎呀",
-            "抱歉",
-        )
-        return any(
-            opening.startswith(stripped) and stripped != opening
-            for opening in blocked_openings
-        )
+        """Bypassed — all text goes through LLM, no rule-based filtering."""
+        return False
 
     def _merge_tool_calls(self, tool_calls_list, tools_call):
         """合并工具调用列表
