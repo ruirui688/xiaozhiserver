@@ -68,8 +68,9 @@ class UnifiedToolHandler:
             # 初始化MCP接入点
             await self._initialize_mcp_endpoint()
 
-            # 初始化Home Assistant（如果需要）
-            self._initialize_home_assistant()
+            # 初始化Home Assistant（仅当服务端已配置时）
+            if self._is_home_assistant_configured():
+                self._initialize_home_assistant()
 
             self.finish_init = True
             self.logger.debug("统一工具处理器初始化完成")
@@ -107,6 +108,18 @@ class UnifiedToolHandler:
 
         except Exception as e:
             self.logger.error(f"初始化MCP接入点失败: {e}")
+
+    def _is_home_assistant_configured(self) -> bool:
+        """Return True only when Home Assistant is explicitly configured."""
+        plugins = self.config.get("plugins", {}) if hasattr(self, "config") else {}
+        ha_config = plugins.get("home_assistant") or plugins.get("hass_get_state")
+        if not ha_config:
+            return False
+        # Config exists and has at minimum an api_key / base_url
+        return bool(
+            isinstance(ha_config, dict)
+            and (ha_config.get("api_key") or ha_config.get("base_url"))
+        )
 
     def _initialize_home_assistant(self):
         """初始化Home Assistant提示词"""
