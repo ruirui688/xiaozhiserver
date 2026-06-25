@@ -5,6 +5,7 @@ services:
     depends_on:
       - xiaozhi-esp32-server-db
       - xiaozhi-esp32-server-redis
+      - xiaozhi-esp32-server-web
     restart: always
     networks:
       - default
@@ -75,6 +76,9 @@ services:
       - default
     expose:
       - 6379
+    volumes:
+      - ./redis/data:/data
+    command: redis-server --appendonly yes
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s

@@ -61,6 +61,7 @@ fi
 mkdir -p \
   "$DATA_DIR/data" \
   "$DATA_DIR/mysql/data" \
+  "$DATA_DIR/redis/data" \
   "$DATA_DIR/music" \
   "$DATA_DIR/uploadfile"
 
@@ -88,6 +89,22 @@ EOF
 
 echo "Starting Docker services from $DATA_DIR"
 docker compose -f "$DATA_DIR/docker-compose.yml" --env-file "$DATA_DIR/.env" up -d
+
+echo "Waiting for manager-api to start (Liquibase migrations run during this phase, max 180s)..."
+STARTUP_TIMEOUT=180
+STARTUP_START="$(date +%s)"
+while true; do
+  if docker logs xiaozhi-esp32-server-web 2>&1 | grep -q "Started AdminApplication in"; then
+    echo "manager-api started successfully (Liquibase migrations completed)"
+    break
+  fi
+  if [ "$(($(date +%s) - STARTUP_START))" -gt "$STARTUP_TIMEOUT" ]; then
+    echo "ERROR: manager-api failed to start within ${STARTUP_TIMEOUT}s." >&2
+    echo "Check logs: docker logs xiaozhi-esp32-server-web" >&2
+    exit 1
+  fi
+  sleep 2
+done
 
 LOCAL_IP="$(hostname -I | awk '{print $1}')"
 cat <<EOF

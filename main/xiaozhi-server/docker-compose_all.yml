@@ -1,6 +1,5 @@
 # Docker安装全模块
 
-version: '3'
 services:
   # Server模块
   xiaozhi-esp32-server:
@@ -9,6 +8,7 @@ services:
     depends_on:
       - xiaozhi-esp32-server-db
       - xiaozhi-esp32-server-redis
+      - xiaozhi-esp32-server-web
     restart: always
     networks:
       - default
@@ -79,6 +79,9 @@ services:
       - 6379
     container_name: xiaozhi-esp32-server-redis
     restart: always
+    volumes:
+      - ./redis/data:/data
+    command: redis-server --appendonly yes
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
