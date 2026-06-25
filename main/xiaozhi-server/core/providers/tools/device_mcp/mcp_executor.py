@@ -23,6 +23,31 @@ class DeviceMCPExecutor(ToolExecutor):
     def __init__(self, conn):
         self.conn = conn
 
+    def _build_control_response(self, tool_name: str, arguments: Dict[str, Any]) -> str:
+        """为控制类工具构建包含参数值的响应消息"""
+        if not arguments:
+            return self.FAST_RESPONSE_CONTROL_TOOLS.get(tool_name, "")
+
+        if tool_name == "self_audio_speaker_set_volume":
+            volume = arguments.get("volume")
+            if volume is not None:
+                return f"音量已设置为 {volume}%。"
+            return self.FAST_RESPONSE_CONTROL_TOOLS[tool_name]
+
+        if tool_name == "self_screen_set_brightness":
+            brightness = arguments.get("brightness")
+            if brightness is not None:
+                return f"亮度已设置为 {brightness}%。"
+            return self.FAST_RESPONSE_CONTROL_TOOLS[tool_name]
+
+        if tool_name == "self_screen_set_theme":
+            theme = arguments.get("theme")
+            if theme:
+                return f"主题已切换为「{theme}」。"
+            return self.FAST_RESPONSE_CONTROL_TOOLS[tool_name]
+
+        return self.FAST_RESPONSE_CONTROL_TOOLS.get(tool_name, "")
+
     async def execute(
         self, conn: "ConnectionHandler", tool_name: str, arguments: Dict[str, Any]
     ) -> ActionResponse:
@@ -75,9 +100,10 @@ class DeviceMCPExecutor(ToolExecutor):
                 )
 
             if tool_name in self.FAST_RESPONSE_CONTROL_TOOLS:
+                response = self._build_control_response(tool_name, arguments)
                 return ActionResponse(
                     action=Action.RESPONSE,
-                    response=self.FAST_RESPONSE_CONTROL_TOOLS[tool_name],
+                    response=response,
                 )
 
             return ActionResponse(action=Action.REQLLM, result=str(result))
@@ -86,9 +112,10 @@ class DeviceMCPExecutor(ToolExecutor):
             return ActionResponse(action=Action.NOTFOUND, response=str(e))
         except TimeoutError:
             if tool_name in self.FAST_RESPONSE_CONTROL_TOOLS:
+                response = self._build_control_response(tool_name, arguments)
                 return ActionResponse(
                     action=Action.RESPONSE,
-                    response=self.FAST_RESPONSE_CONTROL_TOOLS[tool_name],
+                    response=response,
                 )
             return ActionResponse(action=Action.ERROR, response="设备端工具响应超时")
         except Exception as e:
