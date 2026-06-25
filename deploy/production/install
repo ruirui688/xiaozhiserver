@@ -89,40 +89,78 @@ XIAOZHI_MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD
 XIAOZHI_SERVER_HTTP_BASE_URL=$SERVER_HTTP_BASE_URL
 EOF
 
+# Write docker-compose.yml with the deploy version tag (so compose file
+# reflects the actual image being used, not a hardcoded :latest).
+sed -i "s/:latest\$/:$VERSION/" "$DATA_DIR/docker-compose.yml"
+
 echo "Starting Docker services from $DATA_DIR"
 docker compose -f "$DATA_DIR/docker-compose.yml" --env-file "$DATA_DIR/.env" up -d
 
-echo "Waiting for manager-api to start (Liquibase migrations run during this phase, max 180s)..."
-STARTUP_TIMEOUT=180
-STARTUP_START="$(date +%s)"
-DOT_INTERVAL=2
-SUMMARY_INTERVAL=30
-last_dot=0
-last_summary=0
-while true; do
-  if docker logs xiaozhi-esp32-server-web 2>&1 | grep -q "Started AdminApplication in"; then
-    echo ""
-    echo "manager-api started successfully (Liquibase migrations completed)"
-    break
+_wait_manager_api_startup() {
+  local timeout="${1:-180}"
+  local start_ts
+  start_ts="$(date +%s)"
+  local dot_interval=2
+  local summary_interval=30
+  local last_dot=0
+  local last_summary=0
+
+  echo "Waiting for manager-api to start (Liquibase migrations run during this phase, max ${timeout}s)..."
+  while true; do
+    if docker logs xiaozhi-esp32-server-web 2>&1 | grep -q "Started AdminApplication in"; then
+      echo ""
+      echo "manager-api started successfully (Liquibase migrations completed)"
+      return 0
+    fi
+    local elapsed=$(( $(date +%s) - start_ts ))
+    if [ "$elapsed" -gt "$timeout" ]; then
+      echo ""
+      echo "ERROR: manager-api failed to start within ${timeout}s." >&2
+      echo "Last 20 lines of container logs:" >&2
+      docker logs xiaozhi-esp32-server-web --tail 20 >&2
+      return 1
+    fi
+    if [ $((elapsed - last_summary)) -ge "$summary_interval" ]; then
+      printf "[%ds]" "$elapsed"
+      last_summary="$elapsed"
+      last_dot="$elapsed"
+    elif [ $((elapsed - last_dot)) -ge "$dot_interval" ]; then
+      printf "."
+      last_dot="$elapsed"
+    fi
+    sleep 1
+  done
+}
+
+# Detect whether the container was just created/restarted, or was already
+# running from a previous deploy.  Only wait for the startup log line when
+# the container actually just booted.
+CONTAINER_STATUS=$(docker inspect --format='{{.State.Status}}' xiaozhi-esp32-server-web 2>/dev/null || echo "missing")
+CONTAINER_STARTED=$(docker inspect --format='{{.State.StartedAt}}' xiaozhi-esp32-server-web 2>/dev/null || echo "")
+
+NEED_STARTUP_WAIT=true
+if [ "$CONTAINER_STATUS" = "running" ] && [ -n "$CONTAINER_STARTED" ]; then
+  STARTED_TS=$(date -d "$CONTAINER_STARTED" +%s 2>/dev/null || echo "0")
+  NOW_TS=$(date +%s)
+  UPTIME=$((NOW_TS - STARTED_TS))
+  if [ "$UPTIME" -gt 60 ]; then
+    echo "manager-api was already running (uptime: ${UPTIME}s) — skipping startup wait"
+    NEED_STARTUP_WAIT=false
   fi
-  elapsed=$(( $(date +%s) - STARTUP_START ))
-  if [ "$elapsed" -gt "$STARTUP_TIMEOUT" ]; then
-    echo ""
-    echo "ERROR: manager-api failed to start within ${STARTUP_TIMEOUT}s." >&2
-    echo "Last 20 lines of container logs:" >&2
-    docker logs xiaozhi-esp32-server-web --tail 20 >&2
-    exit 1
-  fi
-  if [ $((elapsed - last_summary)) -ge "$SUMMARY_INTERVAL" ]; then
-    printf "[${elapsed}s]"
-    last_summary="$elapsed"
-    last_dot="$elapsed"
-  elif [ $((elapsed - last_dot)) -ge "$DOT_INTERVAL" ]; then
-    printf "."
-    last_dot="$elapsed"
-  fi
-  sleep 1
-done
+fi
+
+if [ "$NEED_STARTUP_WAIT" = "true" ]; then
+  _wait_manager_api_startup 180 || exit 1
+fi
+
+# Final verify: container must be running
+FINAL_STATUS=$(docker inspect --format='{{.State.Status}}' xiaozhi-esp32-server-web 2>/dev/null || echo "missing")
+if [ "$FINAL_STATUS" != "running" ]; then
+  echo "ERROR: manager-api container is not running (status: $FINAL_STATUS)" >&2
+  docker logs xiaozhi-esp32-server-web --tail 20 >&2
+  exit 1
+fi
+echo "manager-api health check: $FINAL_STATUS"
 
 LOCAL_IP="$(hostname -I | awk '{print $1}')"
 cat <<EOF
