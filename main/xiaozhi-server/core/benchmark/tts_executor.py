@@ -25,7 +25,7 @@ DEFAULT_TTS_SAMPLES = [
 
 async def run_tts_samples(provider_type, config, iterations):
     tts = create_tts_instance(provider_type, config, delete_audio_file=True)
-    tts.conn = _BenchmarkTtsConn(sample_rate=int(config.get("sample_rate") or 16000))
+    tts.conn = _BenchmarkTtsConn(sample_rate=int(config.get("sample_rate") or 24000))
     tts.tts_audio_queue = _BenchmarkAudioQueue()
     if not hasattr(tts, "opus_encoder") or tts.opus_encoder is None:
         tts.opus_encoder = OpusEncoderUtils(
@@ -212,13 +212,24 @@ def _collect_tts_audio_result(result, output_file, tts):
     elif isinstance(result, str) and os.path.exists(result):
         audio_bytes = _read_file_bytes(result)
         audio_format = _infer_audio_format(result, getattr(tts, "audio_file_type", None))
+    elif isinstance(result, (list, tuple, dict, TTSMessageDTO)) or (
+        result is not None and (hasattr(result, "content_file") or hasattr(result, "content_detail"))
+    ):
+        result_audio = _nested_audio_chunks(result)
+        if result_audio:
+            preview_bytes = _opus_preview_to_wav(
+                result_audio,
+                getattr(getattr(tts, "conn", None), "sample_rate", 24000),
+            )
+            audio_bytes = preview_bytes or b"".join(result_audio)
+            audio_format = "wav" if preview_bytes else "opus"
 
     queue_audio = _drain_tts_audio_queue_audio(getattr(tts, "tts_audio_queue", None))
     queue_audio += _drain_tts_audio_queue_audio(getattr(getattr(tts, "conn", None), "tts_audio_queue", None))
     queue_audio += _before_stop_play_files_audio(getattr(tts, "before_stop_play_files", None))
     queue_audio_size = sum(len(chunk) for chunk in queue_audio)
     if queue_audio_size > len(audio_bytes):
-        preview_bytes = _opus_preview_to_wav(queue_audio, getattr(getattr(tts, "conn", None), "sample_rate", 16000))
+        preview_bytes = _opus_preview_to_wav(queue_audio, getattr(getattr(tts, "conn", None), "sample_rate", 24000))
         audio_bytes = preview_bytes or b"".join(queue_audio)
         audio_format = "wav" if preview_bytes else "opus"
 
@@ -417,7 +428,7 @@ def _has_playable_audio_header(audio_bytes, audio_format):
 
 def _opus_preview_to_wav(opus_chunks, sample_rate):
     try:
-        return opus_datas_to_wav_bytes(opus_chunks, sample_rate=int(sample_rate or 16000), channels=1)
+        return opus_datas_to_wav_bytes(opus_chunks, sample_rate=int(sample_rate or 24000), channels=1)
     except Exception:
         return b""
 

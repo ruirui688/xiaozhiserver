@@ -393,11 +393,14 @@ public class ModelRuntimeAssembler {
         }
         if (isManagedDoubaoTtsTemplate(model)) {
             config.set("resource_id", resolveDefaultHuoshanTtsResourceId(model));
-        } else if (!hasUsableHuoshanTtsField(config.getStr("resource_id"))) {
-            config.set("resource_id", resolveDefaultHuoshanTtsResourceId(model));
-        }
-        if (!hasUsableHuoshanTtsSpeaker(model, config.getStr("speaker"))) {
             config.set("speaker", resolveDefaultHuoshanTtsSpeaker(model));
+        } else {
+            if (!hasUsableHuoshanTtsField(config.getStr("resource_id"))) {
+                config.set("resource_id", resolveDefaultHuoshanTtsResourceId(model));
+            }
+            if (!hasUsableHuoshanTtsSpeaker(model, config.getStr("speaker"))) {
+                config.set("speaker", resolveDefaultHuoshanTtsSpeaker(model));
+            }
         }
     }
 
