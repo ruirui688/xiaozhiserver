@@ -205,23 +205,6 @@ SERVER_GATED_IOT_DEVICES = {
 }
 ```
 
-### 语义控制路由（SemanticControl）
-
-`core/semantic/` 提供了**先于 LLM 的确定性指令拦截层**。高置信度指令在到达 LLM
-之前被路由并直接执行工具调用，避免 LLM 的工具选择歧义。
-
-当前拦截的指令类型：
-- `interrupt.stop_all` — 停止/暂停
-- `music.stop` — 停止音乐播放
-- `device.volume_up` / `device.volume_down` — 相对音量调整（"声音小一点"、"太大声了"等）
-- `game.exit` / `game.answer` — 游戏控制
-- `context.continue` — 继续对话
-
-新增确定性指令时：
-1. `router.py` 中添加检测逻辑 → 生成 `IntentFrame`
-2. `policy_engine.py` 中添加决策 → 映射到具体工具调用
-3. 优先级为绝对设定（如 `device.volume_down`）优先于 LLM 的模糊决策
-
 ---
 
 ## 5. Git 与工作区安全

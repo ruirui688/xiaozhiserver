@@ -55,24 +55,6 @@ class PolicyEngine:
                 reason="no_active_game",
             )
 
-        if intent.full_name == "device.volume_down":
-            return Decision(
-                decision="execute",
-                priority=90,
-                executor="self_audio_speaker_volume_down",
-                reply="好的，音量已调小。",
-                next_state="idle",
-            )
-
-        if intent.full_name == "device.volume_up":
-            return Decision(
-                decision="execute",
-                priority=90,
-                executor="self_audio_speaker_volume_up",
-                reply="好的，音量已调大。",
-                next_state="idle",
-            )
-
         if intent.full_name == "context.continue":
             if context.state == "idle":
                 return Decision(
