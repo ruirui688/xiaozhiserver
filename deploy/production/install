@@ -13,6 +13,7 @@ DEFAULT_WEB_IMAGE_REPOSITORY="crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliy
 DEFAULT_MYSQL_IMAGE="crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/mysql:8.4"
 DEFAULT_REDIS_IMAGE="crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/redis:8.0"
 DEFAULT_SERVER_HTTP_BASE_URL="http://xiaozhi-esp32-server:8003"
+VERSION="${VERSION:-latest}"
 
 read_existing_env() {
   local key="$1"
@@ -65,9 +66,10 @@ mkdir -p \
   "$DATA_DIR/music" \
   "$DATA_DIR/uploadfile"
 
+echo "Deploying version: $VERSION"
 echo "Pulling Docker images from configured registries"
-docker pull "$SERVER_IMAGE_REPOSITORY:latest"
-docker pull "$WEB_IMAGE_REPOSITORY:latest"
+docker pull "$SERVER_IMAGE_REPOSITORY:$VERSION"
+docker pull "$WEB_IMAGE_REPOSITORY:$VERSION"
 docker pull "$MYSQL_IMAGE"
 docker pull "$REDIS_IMAGE"
 
@@ -93,17 +95,33 @@ docker compose -f "$DATA_DIR/docker-compose.yml" --env-file "$DATA_DIR/.env" up 
 echo "Waiting for manager-api to start (Liquibase migrations run during this phase, max 180s)..."
 STARTUP_TIMEOUT=180
 STARTUP_START="$(date +%s)"
+DOT_INTERVAL=2
+SUMMARY_INTERVAL=30
+last_dot=0
+last_summary=0
 while true; do
   if docker logs xiaozhi-esp32-server-web 2>&1 | grep -q "Started AdminApplication in"; then
+    echo ""
     echo "manager-api started successfully (Liquibase migrations completed)"
     break
   fi
-  if [ "$(($(date +%s) - STARTUP_START))" -gt "$STARTUP_TIMEOUT" ]; then
+  elapsed=$(( $(date +%s) - STARTUP_START ))
+  if [ "$elapsed" -gt "$STARTUP_TIMEOUT" ]; then
+    echo ""
     echo "ERROR: manager-api failed to start within ${STARTUP_TIMEOUT}s." >&2
-    echo "Check logs: docker logs xiaozhi-esp32-server-web" >&2
+    echo "Last 20 lines of container logs:" >&2
+    docker logs xiaozhi-esp32-server-web --tail 20 >&2
     exit 1
   fi
-  sleep 2
+  if [ $((elapsed - last_summary)) -ge "$SUMMARY_INTERVAL" ]; then
+    printf "[${elapsed}s]"
+    last_summary="$elapsed"
+    last_dot="$elapsed"
+  elif [ $((elapsed - last_dot)) -ge "$DOT_INTERVAL" ]; then
+    printf "."
+    last_dot="$elapsed"
+  fi
+  sleep 1
 done
 
 LOCAL_IP="$(hostname -I | awk '{print $1}')"
@@ -117,8 +135,8 @@ benchmark API:    $SERVER_HTTP_BASE_URL/benchmark/models
 
 This deployment uses Docker images:
 
-  $SERVER_IMAGE_REPOSITORY:latest
-  $WEB_IMAGE_REPOSITORY:latest
+  $SERVER_IMAGE_REPOSITORY:$VERSION
+  $WEB_IMAGE_REPOSITORY:$VERSION
   $MYSQL_IMAGE
   $REDIS_IMAGE
 

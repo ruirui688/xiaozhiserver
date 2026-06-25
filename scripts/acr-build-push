@@ -251,3 +251,9 @@ if [[ "$RUNTIME_MIRROR_NEEDED" == "true" ]]; then
 fi
 
 build_business_images
+
+echo ""
+echo "=== Build complete ==="
+echo "Version: $VERSION"
+echo "Deploy: VERSION=$VERSION ./deploy/production/upgrade"
+echo ""

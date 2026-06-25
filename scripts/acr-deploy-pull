@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+VERSION="${VERSION:-latest}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -15,10 +16,11 @@ else
 fi
 
 echo "Deploying xiaozhi from Aliyun ACR images:"
-echo "  $SERVER_IMAGE_REPOSITORY:latest"
-echo "  $WEB_IMAGE_REPOSITORY:latest"
+echo "  $SERVER_IMAGE_REPOSITORY:$VERSION"
+echo "  $WEB_IMAGE_REPOSITORY:$VERSION"
 
-DEPLOY_MODE=pull \
+VERSION="$VERSION" \
+  DEPLOY_MODE=pull \
   SERVER_IMAGE_REPOSITORY="$SERVER_IMAGE_REPOSITORY" \
   WEB_IMAGE_REPOSITORY="$WEB_IMAGE_REPOSITORY" \
   "${DEPLOY_CMD[@]}"
