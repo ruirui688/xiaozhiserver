@@ -126,7 +126,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     private static final String HUOSHAN_DOUBLE_STREAM_TYPE = "huoshan_double_stream";
     private static final String HUOSHAN_DOUBLE_STREAM_WS_URL = "wss://openspeech.bytedance.com/api/v3/tts/bidirection";
     private static final String DOUBAO_BIGTTS_RESOURCE_ID = "volc.service_type.10029";
-    private static final String DOUBAO_BIGTTS_DEFAULT_SPEAKER = "zh_male_shaonianzixin_moon_bigtts";
+    private static final String DOUBAO_BIGTTS_DEFAULT_SPEAKER = "zh_female_wanwanxiaohe_moon_bigtts";
     private static final String DOUBAO_SEED_TTS_2_RESOURCE_ID = "seed-tts-2.0";
     private static final String DOUBAO_SEED_TTS_2_DEFAULT_SPEAKER = "zh_female_xiaohe_uranus_bigtts";
 

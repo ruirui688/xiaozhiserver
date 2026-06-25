@@ -16,7 +16,8 @@ Important persistent subdirectories:
 
 ```text
 /opt/xiaozhi-data/data        xiaozhi-server private config
-/opt/xiaozhi-data/mysql/data  MySQL data
+/opt/xiaozhi-data/mysql/data  MySQL data (InnoDB)
+/opt/xiaozhi-data/redis/data  Redis AOF persistence data
 /opt/xiaozhi-data/uploadfile  manager-api uploads
 /opt/xiaozhi-data/music       uploaded server music library
 ```
@@ -28,6 +29,31 @@ sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
 ./install
 ./upgrade
 ```
+
+## Container startup order
+
+Compose enforces the following dependency chain:
+
+```
+MySQL (healthy) ──┐
+                   ├──→ Web/Java (started) ──→ Python server (started)
+Redis (healthy) ──┘
+```
+
+- `xiaozhi-esp32-server-web` waits for MySQL and Redis health checks, then
+  runs Liquibase migrations during Spring Boot startup.
+- `xiaozhi-esp32-server` waits for the web container to start before
+  launching, avoiding crash-restart loops while the Java API initializes.
+- `./install` verifies the web container logs for `Started AdminApplication
+  in` (timeout 180s) and exits non-zero if startup fails.
+
+## Redis persistence
+
+Redis runs with AOF (`--appendonly yes`) and stores its data at
+`/opt/xiaozhi-data/redis/data`. User sessions survive container restarts and
+`./upgrade` runs.
+
+## Internal service URLs
 
 `xiaozhi-esp32-server-web` calls the Python benchmark HTTP API through the
 Docker service name by default:
