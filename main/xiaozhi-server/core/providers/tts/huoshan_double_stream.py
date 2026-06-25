@@ -153,6 +153,7 @@ class TTSProvider(TTSProviderBase):
         self.ws = None
         self.interface_type = InterfaceType.DUAL_STREAM
         self._monitor_task = None  # 监听任务引用
+        self._session_error = None  # 会话失败时的错误信息
         self.appId = config.get("appid")
         self.api_key = config.get("api_key")
         self.access_token = config.get("access_token")
@@ -638,6 +639,20 @@ class TTSProvider(TTSProviderBase):
                         self.wav_to_opus_data_audio_raw_stream(res.payload, callback=self.handle_opus)
                     elif not self.resource_type and res.optional.event == EVENT_TTSSentenceEnd:
                         logger.bind(tag=TAG).info(f"句子语音生成成功：{self.tts_text}")
+                    elif res.optional.event == EVENT_SessionFailed:
+                        error_msg = ""
+                        try:
+                            if res.optional.response_meta_json:
+                                error_meta = json.loads(res.optional.response_meta_json)
+                                error_msg = error_meta.get("message", res.optional.response_meta_json)
+                        except Exception:
+                            error_msg = str(res.optional.response_meta_json or "")
+                        self._session_error = (
+                            f"TTS 会话启动失败（resource_id={self.resource_id}, "
+                            f"speaker={self.voice}）：{error_msg or '未知错误'}"
+                        )
+                        logger.bind(tag=TAG).error(self._session_error)
+                        self.activate_session = False
                     elif res.optional.event == EVENT_SessionFinished:
                         logger.bind(tag=TAG).debug(f"会话结束～～")
                         self.activate_session = False

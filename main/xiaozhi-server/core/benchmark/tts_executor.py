@@ -158,6 +158,9 @@ async def _synthesize_stream_tts_sample(tts, text, started):
         await tts.text_to_speak(text, None)
         await tts.finish_session(tts.conn.sentence_id)
         await _wait_for_stream_tts_audio(tts)
+        session_error = getattr(tts, "_session_error", None)
+        if session_error:
+            raise RuntimeError(session_error)
         return b"", _first_tts_audio_ms(tts, started)
 
     result = await tts.text_to_speak(text, True)

@@ -27,6 +27,19 @@ scripts/acr-login
 scripts/acr-build-push
 ```
 
+> ⚠️ **发布前必须先合并到 `main` 分支。**
+>
+> `acr-build-push` 将当前分支的代码构建为 Docker 镜像并推送到 ACR 的
+> `:latest` 标签。生产服务器 `./upgrade` 始终从 `main` 拉取部署脚本
+> （docker-compose.yml, install），同时从 ACR 拉取 `:latest` 镜像。
+>
+> 如果从 feature 分支推送镜像而部署脚本还在 `main`，两边的
+> docker-compose.yml 不一致（容器依赖、卷挂载等可能缺失），
+> 镜像代码也与部署配置不匹配。
+>
+> **正确流程：先 `git checkout main && git merge <feature>`，再从 `main`
+> 执行 `acr-build-push`。** 详见 `deploy/production/README.md`。
+
 `scripts/acr-build-push` 是日常一键发布入口。它默认自动复用已有基础镜像和运行时镜像，只在缓存不存在时补齐：
 
 ```text
