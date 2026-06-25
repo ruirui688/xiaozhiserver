@@ -23,10 +23,9 @@ def build_config(args):
     return {
         "type": "huoshan_double_stream",
         "ws_url": args.ws_url or env("HUOSHAN_TTS_WS_URL", "wss://openspeech.bytedance.com/api/v3/tts/bidirection"),
-        "appid": args.appid or env("HUOSHAN_TTS_APPID"),
-        "access_token": args.access_token or env("HUOSHAN_TTS_ACCESS_TOKEN"),
+        "api_key": args.api_key or env("VOLC_TTS_API_KEY") or env("HUOSHAN_TTS_API_KEY"),
         "resource_id": resource_id,
-        "speaker": args.speaker or env("HUOSHAN_TTS_SPEAKER"),
+        "speaker": args.speaker or env("HUOSHAN_TTS_SPEAKER", "zh_female_sophie_uranus_bigtts"),
         "enable_ws_reuse": False,
         "sample_rate": args.sample_rate,
         "tts_timeout": args.timeout,
@@ -43,24 +42,19 @@ def build_config(args):
 
 
 def validate_config(config):
-    missing = [
-        key
-        for key in ("appid", "access_token", "resource_id", "speaker")
-        if not config.get(key)
-    ]
+    missing = [key for key in ("api_key", "resource_id", "speaker") if not config.get(key)]
     if missing:
         raise SystemExit("缺少环境变量或参数: " + ", ".join(missing))
 
 
 async def main():
     parser = argparse.ArgumentParser(description="Test Huoshan/Doubao bidirectional streaming TTS.")
-    parser.add_argument("--appid")
-    parser.add_argument("--access-token")
+    parser.add_argument("--api-key")
     parser.add_argument("--resource-id")
     parser.add_argument("--speaker")
     parser.add_argument("--ws-url")
     parser.add_argument("--iterations", type=int, default=1)
-    parser.add_argument("--sample-rate", type=int, default=16000)
+    parser.add_argument("--sample-rate", type=int, default=24000)
     parser.add_argument("--timeout", type=int, default=20)
     args = parser.parse_args()
 

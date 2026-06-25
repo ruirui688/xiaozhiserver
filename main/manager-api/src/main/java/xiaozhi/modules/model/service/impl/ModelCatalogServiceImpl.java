@@ -104,26 +104,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             "ASR_GROQ_OPENAI_TRANSCRIBE",
             "ASR_QWEN3_FLASH",
             "ASR_ALIYUN_BAILIAN_PARAFORMER",
-            "TTS_DOUBAO_HTTP",
-            "TTS_XUNFEI_STREAM",
-            "TTS_DOUBAO_BIGTTS_STREAM",
             "TTS_DOUBAO_SEED_TTS_2_STREAM",
-            "TTS_SILICONFLOW_COSYVOICE",
-            "TTS_COZE_CN",
-            "TTS_VOLCES_AI_GATEWAY_OPENAI",
-            "TTS_OPENAI_SPEECH",
-            "TTS_FISHSPEECH",
-            "TTS_GPT_SOVITS_V2",
-            "TTS_GPT_SOVITS_V3",
-            "TTS_MINIMAX_STREAM",
-            "TTS_ALIYUN_NLS",
-            "TTS_ALIYUN_NLS_STREAM",
-            "TTS_ALIYUN_BAILIAN_COSYVOICE",
-            "TTS_TENCENT",
-            "TTS_CUSTOM_HTTP",
-            "TTS_PADDLESPEECH",
-            "TTS_INDEX_STREAM",
-            "TTS_LINKERAI",
             "LLM_OPENAI_COMPATIBLE",
             "LLM_ALI_QWEN_OPENAI",
             "LLM_ALI_QWEN_OMNI_REALTIME",
@@ -212,11 +193,8 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             }
             return find("ASR_DOUBAO_BIGASR_STREAM");
         }
-        if ("TTS".equalsIgnoreCase(modelType) && "huoshan_double_stream".equalsIgnoreCase(providerCode)) {
-            if (haystack.contains("seed-tts-2.0")) {
-                return find("TTS_DOUBAO_SEED_TTS_2_STREAM");
-            }
-            return find("TTS_DOUBAO_BIGTTS_STREAM");
+        if ("TTS".equalsIgnoreCase(modelType)) {
+            return find("TTS_DOUBAO_SEED_TTS_2_STREAM");
         }
         if (("LLM".equalsIgnoreCase(modelType) || "SLM".equalsIgnoreCase(modelType)
                 || "VLLM".equalsIgnoreCase(modelType)) && "openai".equalsIgnoreCase(providerCode)) {
@@ -224,9 +202,6 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             if (inferred != null) {
                 return inferred;
             }
-        }
-        if ("TTS".equalsIgnoreCase(modelType) && "openai".equalsIgnoreCase(providerCode)) {
-            return find("TTS_OPENAI_SPEECH");
         }
         if ("ASR".equalsIgnoreCase(modelType) && "openai".equalsIgnoreCase(providerCode)) {
             if (haystack.contains("groq")) {
@@ -888,174 +863,18 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
     }
 
     private static void addTts(List<ModelCatalogDTO> items) {
-        items.add(item("TTS_EDGE", "TTS", "edge", "Edge TTS",
-                "Microsoft", "Edge TTS", "tts", "语音合成", "library", "本地库",
-                "local", "本地运行", "edge-tts", "音色", "voice",
-                List.of(), List.of("voice"), List.of("voice"),
-                List.of("无需云端密钥，依赖 edge-tts 库。"), List.of(), List.of("EdgeTTS"),
-                "https://github.com/rany2/edge-tts"));
-        ModelCatalogDTO doubaoHttp = item("TTS_DOUBAO_HTTP", "TTS", "doubao", "豆包语音合成 HTTP 兼容",
-                "火山引擎", "豆包语音合成 HTTP 兼容", "tts", "语音合成", "http", "HTTP",
-                "cloud", "云平台", "HTTP", "音色", "voice",
-                List.of("access_token", "authorization", "appid"), List.of("api_url", "voice"),
-                List.of("appid", "access_token", "cluster", "speed_ratio", "volume_ratio", "pitch_ratio"),
-                List.of("仅用于兼容历史 DoubaoTTS 配置，新增配置请使用控制台里的“豆包语音合成大模型”或“豆包语音合成模型 2.0”。"),
-                List.of("新增配置入口已隐藏，避免和当前火山控制台模型名称混淆。"),
-                List.of("DoubaoTTS", "TTS302AI"), "https://www.volcengine.com/docs/6561");
-        doubaoHttp.setHidden(true);
-        doubaoHttp.setDeprecated(true);
-        doubaoHttp.setSelectable(false);
-        doubaoHttp.setSupportedStatus("DEPRECATED");
-        items.add(doubaoHttp);
-        items.add(item("TTS_DOUBAO_BIGTTS_STREAM", "TTS", "huoshan_double_stream", "豆包语音合成大模型",
-                "火山引擎", "语音合成大模型（服务 10007）", "tts", "语音合成", "websocket-bidirectional", "WebSocket 双向流式",
-                "cloud", "云平台", "WebSocket", "资源 ID", "resource_id",
-                List.of("appid", "access_token"), List.of("ws_url", "resource_id", "speaker"),
-                List.of("api_key", "format", "audio_params", "enable_ws_reuse",
-                        "speech_rate", "loudness_rate", "pitch", "emotion", "emotion_scale", "additions", "mix_speaker"),
-                List.of("访问 https://console.volcengine.com/speech/service/10007 开通语音合成大模型，购买音色",
-                        "在页面底部获取 appid 和 access_token",
-                        "资源 ID 固定为：volc.service_type.10029（大模型语音合成及混音）"),
-                List.of(),
-                List.of("HuoshanDoubleStreamTTS", "volc.service_type.10029"),
-                "https://console.volcengine.com/speech/service/10007"));
         items.add(item("TTS_DOUBAO_SEED_TTS_2_STREAM", "TTS", "huoshan_double_stream", "豆包语音合成模型 2.0",
                 "火山引擎", "语音合成模型 2.0（服务 10035）", "tts", "语音合成", "websocket-bidirectional", "WebSocket 双向流式",
                 "cloud", "云平台", "WebSocket", "资源 ID", "resource_id",
-                List.of("appid", "access_token"), List.of("ws_url", "resource_id", "speaker"),
+                List.of("api_key"), List.of("api_key", "ws_url", "resource_id", "speaker"),
                 List.of("api_key", "format", "audio_params", "enable_ws_reuse",
                         "speech_rate", "loudness_rate", "pitch", "emotion", "emotion_scale", "additions"),
-                List.of("访问 https://console.volcengine.com/speech/service/10035 开通语音合成模型 2.0，购买音色",
-                        "在页面底部获取 appid 和 access_token",
+                List.of("按火山文档 https://www.volcengine.com/docs/6561/2532486 接入豆包语音合成模型 2.0",
+                        "只使用控制台 API Key 鉴权，对应 WebSocket 请求头 X-Api-Key",
                         "资源 ID 固定为：seed-tts-2.0（豆包语音合成模型 2.0）"),
                 List.of(),
                 List.of("HuoshanDoubleStreamTTSV2", "seed-tts-2.0", "TTS_HSDSTTS_V2"),
-                "https://console.volcengine.com/speech/service/10035"));
-        items.add(item("TTS_SILICONFLOW_COSYVOICE", "TTS", "siliconflow", "硅基流动 CosyVoice",
-                "硅基流动", "CosyVoice2", "tts", "语音合成", "http", "HTTP",
-                "cloud", "云平台", "HTTP", "模型/音色", "model",
-                List.of("access_token"), List.of("access_token", "model", "voice"),
-                List.of("model", "voice", "response_format"), List.of("voice 通常包含模型名前缀。"),
-                List.of(), List.of("CosyVoiceSiliconflow"), "https://cloud.siliconflow.cn"));
-        items.add(item("TTS_COZE_CN", "TTS", "cozecn", "Coze 语音合成",
-                "Coze", "扣子中国 TTS", "tts", "语音合成", "http", "HTTP",
-                "cloud", "云平台", "HTTP", "音色", "voice",
-                List.of("access_token"), List.of("access_token", "voice"),
-                List.of("response_format", "speed", "loudness_rate"), List.of(), List.of(),
-                List.of("CozeCnTTS"), "https://www.coze.cn/open"));
-        ModelCatalogDTO volcesGatewayTts = item("TTS_VOLCES_AI_GATEWAY_OPENAI", "TTS", "openai", "火山 AI Gateway TTS",
-                "火山引擎", "边缘大模型网关语音合成", "tts", "语音合成", "openai-compatible", "OpenAI 兼容",
-                "cloud", "云平台", "OpenAI Speech Compatible", "模型/音色", "model",
-                List.of("api_key"), List.of("api_key", "api_url", "model", "voice"),
-                List.of("speed", "format"),
-                List.of("不作为本项目豆包 TTS 有效入口；豆包语音合成只保留火山服务 10007 和 10035 两个双向流式入口。"),
-                List.of("新增豆包 TTS 配置不要使用 AI Gateway。"),
-                List.of("VolcesAiGatewayTTS", "doubao-tts", "ai-gateway"), "https://console.volcengine.com/vei/aigateway/");
-        volcesGatewayTts.setHidden(true);
-        volcesGatewayTts.setDeprecated(true);
-        volcesGatewayTts.setSelectable(false);
-        volcesGatewayTts.setSupportedStatus("DEPRECATED");
-        items.add(volcesGatewayTts);
-        items.add(item("TTS_OPENAI_SPEECH", "TTS", "openai", "OpenAI TTS",
-                "OpenAI", "Text to Speech", "tts", "语音合成", "http", "HTTP",
-                "cloud", "云平台", "OpenAI Audio", "模型/音色", "model",
-                List.of("api_key"), List.of("api_key", "api_url", "model", "voice"),
-                List.of("speed", "format"), List.of(), List.of(), List.of("OpenAITTS", "tts-1"),
-                "https://developers.openai.com/api/docs/guides/text-to-speech"));
-        items.add(item("TTS_FISHSPEECH", "TTS", "fishspeech", "Fish Speech",
-                "Fish Speech", "自部署语音合成", "tts", "语音合成", "http", "HTTP",
-                "local", "自部署服务", "HTTP msgpack", "参考音频/角色", "reference_id",
-                List.of("api_key"), List.of("api_url"), List.of("reference_id", "reference_audio", "reference_text",
-                        "response_format", "streaming", "temperature"),
-                List.of("本地或远程自部署，重点配置 api_url 和参考音频。"), List.of(), List.of("FishSpeech"),
-                "https://github.com/fishaudio/fish-speech"));
-        items.add(item("TTS_GPT_SOVITS_V2", "TTS", "gpt_sovits_v2", "GPT-SoVITS v2",
-                "GPT-SoVITS", "v2 自部署服务", "tts", "语音合成", "http", "HTTP",
-                "local", "自部署服务", "HTTP", "参考音频", "ref_audio_path",
-                List.of(), List.of("url"), List.of("text_lang", "ref_audio_path", "prompt_text", "top_k", "top_p",
-                        "temperature", "streaming_mode"),
-                List.of("需要先启动 GPT-SoVITS v2 API 服务。"), List.of(), List.of("GPT_SOVITS_V2"),
-                "https://github.com/RVC-Boss/GPT-SoVITS"));
-        items.add(item("TTS_GPT_SOVITS_V3", "TTS", "gpt_sovits_v3", "GPT-SoVITS v3",
-                "GPT-SoVITS", "v3 自部署服务", "tts", "语音合成", "http", "HTTP",
-                "local", "自部署服务", "HTTP", "参考音频", "refer_wav_path",
-                List.of(), List.of("url"), List.of("text_language", "refer_wav_path", "prompt_text", "sample_steps"),
-                List.of("需要先启动 GPT-SoVITS v3 API 服务。"), List.of(), List.of("GPT_SOVITS_V3"),
-                "https://github.com/RVC-Boss/GPT-SoVITS"));
-        items.add(item("TTS_MINIMAX_STREAM", "TTS", "minimax_httpstream", "MiniMax 流式 TTS",
-                "MiniMax", "Speech HTTP Stream", "tts", "语音合成", "http-stream", "HTTP 流式",
-                "cloud", "云平台", "HTTP Stream", "模型/音色", "model",
-                List.of("api_key", "group_id"), List.of("api_key", "group_id", "voice_id", "model"),
-                List.of("voice_setting", "pronunciation_dict", "audio_setting"),
-                List.of("返回十六进制音频流。"), List.of(), List.of("MinimaxTTSHTTPStream", "TTS_MinimaxStreamTTS"),
-                "https://www.minimaxi.com/document"));
-        items.add(item("TTS_ALIYUN_NLS", "TTS", "aliyun", "阿里云 NLS TTS",
-                "阿里云", "智能语音交互语音合成", "tts", "语音合成", "http", "HTTP 非流式",
-                "cloud", "云平台", "HTTP", "AppKey/音色", "appkey",
-                List.of("token", "access_key_id", "access_key_secret"), List.of("appkey", "voice"),
-                List.of("voice", "format", "volume", "speech_rate", "pitch_rate"),
-                List.of("token 和 AccessKey 二选一。"), List.of(), List.of("AliyunTTS"),
-                "https://help.aliyun.com/zh/isi"));
-        items.add(item("TTS_ALIYUN_NLS_STREAM", "TTS", "aliyun_stream", "阿里云 NLS 流式 TTS",
-                "阿里云", "CosyVoice 流式合成", "tts", "语音合成", "websocket", "WebSocket 流式",
-                "cloud", "云平台", "WebSocket", "AppKey/音色", "appkey",
-                List.of("token", "access_key_id", "access_key_secret"), List.of("appkey", "voice"),
-                List.of("host", "format", "volume", "speech_rate", "pitch_rate"),
-                List.of("大模型音色需确认地域支持。"), List.of(), List.of("AliyunStreamTTS"),
-                "https://help.aliyun.com/zh/isi"));
-        items.add(item("TTS_ALIYUN_BAILIAN_COSYVOICE", "TTS", "alibl_stream", "百炼 CosyVoice",
-                "阿里云百炼", "CosyVoice 大模型流式合成", "tts", "语音合成", "websocket", "WebSocket 流式",
-                "cloud", "云平台", "DashScope WebSocket", "模型/音色", "model",
-                List.of("api_key"), List.of("api_key", "model", "voice"),
-                List.of("format", "volume", "rate", "pitch"),
-                List.of("推荐使用 cosyvoice-v2；v3 和部分音色可能需要单独开通。"), List.of(),
-                List.of("AliBLTTS", "TTS_AliBLStreamTTS", "cosyvoice-v2"),
-                "https://help.aliyun.com/zh/model-studio"));
-        items.add(item("TTS_TENCENT", "TTS", "tencent", "腾讯云 TTS",
-                "腾讯云", "语音合成", "tts", "语音合成", "http", "HTTP",
-                "cloud", "云平台", "HTTP TC3", "音色", "voice",
-                List.of("appid", "secret_id", "secret_key"), List.of("appid", "secret_id", "secret_key", "voice"),
-                List.of("region", "format", "speed", "volume"), List.of(), List.of(), List.of("TencentTTS"),
-                "https://cloud.tencent.com/document/product/1073"));
-        items.add(item("TTS_CUSTOM_HTTP", "TTS", "custom", "自定义 HTTP TTS",
-                "自定义", "HTTP 语音合成服务", "tts", "语音合成", "http", "HTTP",
-                "service", "自定义服务", "HTTP", "服务地址", "url",
-                List.of(), List.of("url"), List.of("method", "params", "headers", "format"),
-                List.of("params 支持 {prompt_text} 占位符。"), List.of(), List.of("CustomTTS"),
-                ""));
-        items.add(item("TTS_PADDLESPEECH", "TTS", "paddle_speech", "PaddleSpeech",
-                "PaddleSpeech", "自部署流式语音合成", "tts", "语音合成", "websocket", "WebSocket 流式",
-                "local", "自部署服务", "WebSocket", "服务地址", "url",
-                List.of(), List.of("url"), List.of("protocol", "spk_id", "speed", "volume"),
-                List.of("当前运行时代码只支持 websocket 分支。"),
-                List.of("protocol=http 不应在标准模型向导中作为可选项展示。"), List.of("PaddleSpeechTTS"),
-                "https://github.com/PaddlePaddle/PaddleSpeech"));
-        items.add(item("TTS_INDEX_STREAM", "TTS", "index_stream", "IndexStreamTTS",
-                "IndexTTS", "Index-TTS-vLLM", "tts", "语音合成", "http-stream", "HTTP 流式",
-                "local", "自部署服务", "HTTP", "音色", "voice",
-                List.of(), List.of("api_url", "voice"), List.of("api_url", "voice"),
-                List.of("当前运行时代码固定输出 pcm。"),
-                List.of("audio_format 配置存在但运行时代码固定为 pcm。"), List.of("IndexStreamTTS"),
-                "https://github.com/Ksuriuri/index-tts-vllm"));
-        items.add(item("TTS_XUNFEI_STREAM", "TTS", "xunfei_stream", "讯飞超拟人合成",
-                "讯飞开放平台", "超拟人语音合成", "tts", "语音合成", "websocket-bidirectional", "WebSocket 双向流式",
-                "cloud", "云平台", "WebSocket", "音色", "voice",
-                List.of("app_id", "api_key", "api_secret"), List.of("app_id", "api_key", "api_secret", "voice"),
-                List.of("api_url", "format", "volume", "speed", "pitch", "oral_level", "spark_assist"),
-                List.of("APPID、APIKey、APISecret 都来自讯飞开放平台应用。"), List.of(),
-                List.of("XunFeiTTS", "TTS_XunFeiStreamTTS"),
-                "https://www.xfyun.cn/doc/tts"));
-        items.add(unavailable("TTS_XUNFEI_ONLINE_STANDARD", "TTS", "讯飞开放平台",
-                "在线语音合成标准版", "tts", "HTTP/WebSocket 语音合成", "讯飞普通 TTS",
-                "普通语音合成、低接入成本场景。",
-                "当前 `xunfei_stream` TTS 面向超拟人合成，不应把普通 TTS 服务直接套进去。",
-                "https://www.xfyun.cn/doc/tts", List.of("online_tts", "standard_tts")));
-        items.add(item("TTS_LINKERAI", "TTS", "linkerai", "Linkerai TTS",
-                "Linkerai", "语音合成", "tts", "语音合成", "http", "HTTP",
-                "cloud", "云平台", "HTTP", "音色", "voice",
-                List.of("access_token"), List.of("api_url", "access_token", "voice"),
-                List.of("audio_format"), List.of(), List.of(), List.of("LinkeraiTTS"),
-                ""));
+                "https://www.volcengine.com/docs/6561/2532486"));
     }
 
     private static void addLlm(List<ModelCatalogDTO> items) {
@@ -1445,99 +1264,14 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 setFieldDefault(dto, "model", "paraformer-realtime-v2");
                 setFieldOptions(dto, "model", List.of("paraformer-realtime-v2", "paraformer-realtime-v1", "paraformer-realtime-8k-v1"));
             }
-            case "TTS_DOUBAO_HTTP" -> setFieldDefault(dto, "api_url", "https://openspeech.bytedance.com/api/v1/tts");
-            case "TTS_EDGE" -> {
-                setFieldDefault(dto, "voice", "zh-CN-XiaoxiaoNeural");
-                setFieldOptions(dto, "voice", List.of(
-                        "zh-CN-XiaoxiaoNeural",
-                        "zh-CN-YunyangNeural",
-                        "zh-CN-XiaoyiNeural",
-                        "zh-CN-YunjianNeural",
-                        "zh-CN-YunxiNeural",
-                        "zh-CN-YunxiaNeural",
-                        "zh-CN-liaoning-XiaobeiNeural",
-                        "zh-CN-shaanxi-XiaoniNeural",
-                        "zh-HK-HiuGaaiNeural",
-                        "zh-HK-HiuMaanNeural",
-                        "zh-HK-WanLungNeural"));
-            }
-            case "TTS_SILICONFLOW_COSYVOICE" -> {
-                setFieldDefault(dto, "model", "FunAudioLLM/CosyVoice2-0.5B");
-                setFieldDefault(dto, "voice", "FunAudioLLM/CosyVoice2-0.5B:alex");
-                setFieldDefault(dto, "response_format", "mp3");
-            }
-            case "TTS_COZE_CN" -> {
-                setFieldDefault(dto, "model", "speech-02-hd");
-                setFieldDefault(dto, "response_format", "wav");
-            }
-            case "TTS_OPENAI_SPEECH" -> {
-                setFieldDefault(dto, "api_url", "https://api.openai.com/v1/audio/speech");
-                setFieldDefault(dto, "model", "gpt-4o-mini-tts");
-                setFieldOptions(dto, "model", List.of("gpt-4o-mini-tts", "tts-1", "tts-1-hd"));
-                setFieldDefault(dto, "voice", "alloy");
-                setFieldOptions(dto, "voice", List.of("alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"));
-                setFieldDefault(dto, "format", "wav");
-            }
-            case "TTS_DOUBAO_BIGTTS_STREAM" -> {
-                setFieldDefault(dto, "ws_url", "wss://openspeech.bytedance.com/api/v3/tts/bidirection");
-                setFieldDefault(dto, "resource_id", "volc.service_type.10029");
-                setFieldDefault(dto, "speaker", "zh_female_wanwanxiaohe_moon_bigtts");
-                setFieldDefault(dto, "format", "pcm");
-                setFieldDefault(dto, "speech_rate", "0");
-                setFieldDefault(dto, "loudness_rate", "0");
-                setFieldDefault(dto, "pitch", "0");
-            }
             case "TTS_DOUBAO_SEED_TTS_2_STREAM" -> {
                 setFieldDefault(dto, "ws_url", "wss://openspeech.bytedance.com/api/v3/tts/bidirection");
                 setFieldDefault(dto, "resource_id", "seed-tts-2.0");
-                setFieldDefault(dto, "speaker", "zh_female_xiaohe_uranus_bigtts");
+                setFieldDefault(dto, "speaker", "zh_female_sophie_uranus_bigtts");
                 setFieldDefault(dto, "format", "pcm");
                 setFieldDefault(dto, "speech_rate", "0");
                 setFieldDefault(dto, "loudness_rate", "0");
                 setFieldDefault(dto, "pitch", "0");
-            }
-            case "TTS_FISHSPEECH" -> setFieldDefault(dto, "api_url", "http://127.0.0.1:8080/v1/tts");
-            case "TTS_GPT_SOVITS_V2" -> setFieldDefault(dto, "url", "http://127.0.0.1:9880/tts");
-            case "TTS_GPT_SOVITS_V3" -> setFieldDefault(dto, "url", "http://127.0.0.1:9880/tts");
-            case "TTS_MINIMAX_STREAM" -> {
-                setFieldDefault(dto, "model", "speech-02-hd");
-                setFieldOptions(dto, "model", List.of("speech-02-hd", "speech-02-turbo", "speech-01-hd", "speech-01-turbo"));
-                setFieldDefault(dto, "voice_id", "female-shaonv");
-            }
-            case "TTS_ALIYUN_NLS" -> {
-                setFieldDefault(dto, "host", "nls-gateway-cn-shanghai.aliyuncs.com");
-                setFieldDefault(dto, "voice", "longxiaochun");
-                setFieldDefault(dto, "format", "pcm");
-            }
-            case "TTS_ALIYUN_NLS_STREAM" -> {
-                setFieldDefault(dto, "host", "nls-gateway-cn-beijing.aliyuncs.com");
-                setFieldDefault(dto, "voice", "longxiaochun");
-                setFieldDefault(dto, "format", "pcm");
-            }
-            case "TTS_XUNFEI_STREAM" -> {
-                setFieldDefault(dto, "api_url", "wss://cbm01.cn-huabei-1.xf-yun.com/v1/private/mcd9m97e6");
-                setFieldDefault(dto, "voice", "x5_lingxiaoxuan_flow");
-                setFieldDefault(dto, "format", "audio/L16;rate=16000");
-                setFieldDefault(dto, "volume", 50);
-                setFieldDefault(dto, "speed", 50);
-                setFieldDefault(dto, "pitch", 50);
-                setFieldDefault(dto, "oral_level", "mid");
-            }
-            case "TTS_ALIYUN_BAILIAN_COSYVOICE" -> {
-                setFieldDefault(dto, "model", "cosyvoice-v2");
-                setFieldOptions(dto, "model", List.of("cosyvoice-v2", "cosyvoice-v1"));
-                setFieldDefault(dto, "voice", "longxiaochun_v2");
-                setFieldDefault(dto, "format", "pcm");
-            }
-            case "TTS_TENCENT" -> {
-                setFieldDefault(dto, "region", "ap-guangzhou");
-                setFieldDefault(dto, "voice", 101001);
-                setFieldDefault(dto, "format", "wav");
-            }
-            case "TTS_PADDLESPEECH" -> setFieldDefault(dto, "url", "ws://127.0.0.1:8092/paddlespeech/tts/streaming");
-            case "TTS_INDEX_STREAM" -> {
-                setFieldDefault(dto, "api_url", "http://127.0.0.1:11996/tts");
-                setFieldDefault(dto, "voice", "xiao_he");
             }
             case "VLLM_ZHIPU_GLM_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "https://open.bigmodel.cn/api/paas/v4");

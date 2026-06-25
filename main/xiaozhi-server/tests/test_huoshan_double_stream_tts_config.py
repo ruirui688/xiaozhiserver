@@ -16,19 +16,21 @@ def _base_config(**overrides):
         "type": "huoshan_double_stream",
         "ws_url": "wss://openspeech.bytedance.com/api/v3/tts/bidirection",
         "api_key": "test-api-key",
-        "resource_id": "volc.service_type.10029",
-        "speaker": "zh_female_wanwanxiaohe_moon_bigtts",
+        "resource_id": "seed-tts-2.0",
+        "speaker": "zh_female_sophie_uranus_bigtts",
         "output_dir": "tmp/",
     }
     config.update(overrides)
     return config
 
 
-def test_doubao_tts_accepts_only_supported_resources():
-    TTSProvider(_base_config(resource_id="volc.service_type.10029"), True)
+def test_doubao_tts_accepts_only_seed_tts_2_resource():
     TTSProvider(_base_config(resource_id="seed-tts-2.0"), True)
 
-    with pytest.raises(ValueError, match="仅支持火山官方两个双向流式服务"):
+    with pytest.raises(ValueError, match="仅支持火山 Seed TTS 2.0 双向流式服务"):
+        TTSProvider(_base_config(resource_id="legacy-resource"), True)
+
+    with pytest.raises(ValueError, match="仅支持火山 Seed TTS 2.0 双向流式服务"):
         TTSProvider(_base_config(resource_id="legacy-http-tts"), True)
 
 
@@ -58,7 +60,6 @@ def test_doubao_tts_accepts_json_string_advanced_fields():
         _base_config(
             audio_params='{"speech_rate": 15, "loudness_rate": 8}',
             additions='{"post_process": {"pitch": 3}}',
-            mix_speaker='{}',
         ),
         True,
     )
@@ -66,7 +67,11 @@ def test_doubao_tts_accepts_json_string_advanced_fields():
     assert provider.audio_params["speech_rate"] == 15
     assert provider.audio_params["loudness_rate"] == 8
     assert provider.additions["post_process"]["pitch"] == 3
-    assert provider.mix_speaker == {}
+
+
+def test_doubao_tts_requires_api_key():
+    with pytest.raises(ValueError, match="需要配置 api_key"):
+        TTSProvider(_base_config(api_key=""), True)
 
 
 def test_doubao_tts_rejects_invalid_json_string_advanced_fields():
