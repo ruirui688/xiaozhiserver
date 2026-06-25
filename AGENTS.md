@@ -176,6 +176,35 @@ xiaozhi-server   → 只负责真实 provider 调用、样本执行、指标输�
 允许：匹配 adapter、生成配置草案、写入白名单路径的草案文件。
 禁止：直接启用模型、生成/保存真实 API Key、协议不兼容硬说兼容、生产环境写源码。
 
+### 工具注册门控规则
+
+LLM 可用的 function list 由两类工具源汇聚而成，它们的注册机制门控方式不同：
+
+| 工具源 | 注册方式 | 门控 |
+|--------|---------|------|
+| Server Plugin (`plugins_func/functions/`) | `@register_function` 装饰器 | 仅 `Intent.<selected>.functions` 中列出的函数会被 `ServerPluginExecutor.get_tools()` 选取 |
+| Server MCP | 外部 MCP 服务器 | 仅当配置了 MCP 端点且连接成功 |
+| **Device IoT** | ESP32 设备 WebSocket 上报 `{"type":"iot","descriptors":[...]}` | `iot_handler.py` 中 `SERVER_GATED_IOT_DEVICES` 映射控制。设备名在映射中时须对应服务端能力已启用才会注册；不在映射中的设备名默认放行（向后兼容） |
+| Device MCP | ESP32 设备 MCP 协议 `tools/list` | 无条件注册（设备固件自行控制） |
+| MCP Endpoint | 外部 MCP 接入点 | 仅当配置了 `mcp_endpoint` URL |
+
+**关键原则**：设备端上报的 IoT 描述符不能绕过服务端配置直接成为 LLM 工具。
+新增需要服务端显式启用的 IoT 设备类型时，在 `SERVER_GATED_IOT_DEVICES` 中添加条目：
+
+```python
+# core/providers/tools/device_iot/iot_handler.py
+SERVER_GATED_IOT_DEVICES = {
+    "hass": {
+        "config_check": lambda conn: bool(
+            conn.config.get("plugins", {}).get("home_assistant")
+            or conn.config.get("plugins", {}).get("hass_get_state")
+        ),
+        "label": "Home Assistant",
+    },
+    # 新增设备类型在此添加
+}
+```
+
 ---
 
 ## 5. Git 与工作区安全

@@ -1,15 +1,63 @@
-"""IoT设备支持模块，提供IoT设备描述符和状态处理"""
+"""IoT设备支持模块，提供IoT设备描述符和状态处理
+
+IoT descriptors sent by the device are gated by server-side configuration.  Only
+device types whose corresponding server capability is enabled are registered as
+LLM-callable tools.  Add new entries to SERVER_GATED_IOT_DEVICES when introducing
+a device type that requires explicit server-side opt-in.
+"""
 
 import asyncio
 from config.logger import setup_logging
 from .iot_descriptor import IotDescriptor
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Dict, Any
 
 if TYPE_CHECKING:
     from core.connection import ConnectionHandler
 
 TAG = __name__
 logger = setup_logging()
+
+
+# ---------------------------------------------------------------------------
+# Server-gated IoT device allowlist
+#
+# Keys are matched case-insensitively against the descriptor "name" field sent
+# by the device.  When a device name is listed here the corresponding
+# `config_check(conn)` must return True before the descriptor is registered.
+# Descriptors whose name is NOT listed here are allowed by default (backward
+# compatibility for un-gated IoT device types).
+# ---------------------------------------------------------------------------
+def _ha_configured(conn: "ConnectionHandler") -> bool:
+    """Return True if Home Assistant is configured on the server."""
+    plugins = conn.config.get("plugins", {}) if hasattr(conn, "config") else {}
+    return bool(plugins.get("home_assistant") or plugins.get("hass_get_state"))
+
+
+SERVER_GATED_IOT_DEVICES: Dict[str, Dict[str, Any]] = {
+    "hass": {
+        "config_check": _ha_configured,
+        "label": "Home Assistant",
+    },
+}
+
+
+def _is_iot_device_allowed(conn: "ConnectionHandler", device_name: str) -> bool:
+    """Check whether an IoT device descriptor should be registered as tools.
+
+    Returns False only when the device name is listed in
+    SERVER_GATED_IOT_DEVICES and its config_check fails.
+    """
+    rule = SERVER_GATED_IOT_DEVICES.get(device_name.lower())
+    if rule is None:
+        return True  # not gated – allow
+    allowed = rule["config_check"](conn)
+    if not allowed:
+        logger.bind(tag=TAG).info(
+            "IoT device %r (%s) ignored – server-side capability not enabled",
+            device_name,
+            rule["label"],
+        )
+    return allowed
 
 
 async def handleIotDescriptors(conn: "ConnectionHandler", descriptors):
@@ -27,10 +75,15 @@ async def handleIotDescriptors(conn: "ConnectionHandler", descriptors):
             return
 
     functions_changed = False
+    allowed_descriptors = []
 
     for descriptor in descriptors:
         # 如果descriptor没有properties和methods，则直接跳过
         if "properties" not in descriptor and "methods" not in descriptor:
+            continue
+
+        device_name = descriptor.get("name", "")
+        if not _is_iot_device_allowed(conn, device_name):
             continue
 
         # 处理缺失properties的情况
@@ -55,12 +108,13 @@ async def handleIotDescriptors(conn: "ConnectionHandler", descriptors):
             descriptor["methods"],
         )
         conn.iot_descriptors[descriptor["name"]] = iot_descriptor
+        allowed_descriptors.append(descriptor)
         functions_changed = True
 
     # 如果注册了新函数，更新function描述列表
     if functions_changed and hasattr(conn, "func_handler"):
-        # 注册IoT工具到统一工具处理器
-        await conn.func_handler.register_iot_tools(descriptors)
+        # 注册IoT工具到统一工具处理器（仅限通过门控的描述符）
+        await conn.func_handler.register_iot_tools(allowed_descriptors)
 
         conn.func_handler.current_support_functions()
 
