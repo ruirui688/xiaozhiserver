@@ -18,6 +18,7 @@ class DeviceMCPExecutor(ToolExecutor):
         "self_audio_speaker_volume_down": "音量调小指令已发送。",
         "self_screen_set_brightness": "亮度设置指令已发送。",
         "self_screen_set_theme": "主题设置指令已发送。",
+        "self_update_device": "设备更新指令已发送。",
     }
 
     def __init__(self, conn):
@@ -45,6 +46,30 @@ class DeviceMCPExecutor(ToolExecutor):
             if theme:
                 return f"主题已切换为「{theme}」。"
             return self.FAST_RESPONSE_CONTROL_TOOLS[tool_name]
+
+        if tool_name == "self_update_device":
+            updates = arguments.get("updates", {})
+            if isinstance(updates, dict):
+                audio_speaker = updates.get("audio_speaker", {})
+                if isinstance(audio_speaker, dict):
+                    volume = audio_speaker.get("volume")
+                    if volume is not None:
+                        return f"音量已设置为 {volume}%。"
+                screen = updates.get("screen", {})
+                if isinstance(screen, dict):
+                    brightness = screen.get("brightness")
+                    if brightness is not None:
+                        return f"亮度已设置为 {brightness}%。"
+            return self.FAST_RESPONSE_CONTROL_TOOLS[tool_name]
+
+        # 通用处理：任何self_开头的工具，如果参数中包含volume或brightness则直接响应
+        if tool_name.startswith("self_"):
+            volume = arguments.get("volume")
+            if volume is not None:
+                return f"音量已设置为 {volume}%。"
+            brightness = arguments.get("brightness")
+            if brightness is not None:
+                return f"亮度已设置为 {brightness}%。"
 
         return self.FAST_RESPONSE_CONTROL_TOOLS.get(tool_name, "")
 

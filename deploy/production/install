@@ -67,11 +67,11 @@ mkdir -p \
   "$DATA_DIR/uploadfile"
 
 echo "Deploying version: $VERSION"
-echo "Pulling Docker images from configured registries"
-docker pull "$SERVER_IMAGE_REPOSITORY:$VERSION"
-docker pull "$WEB_IMAGE_REPOSITORY:$VERSION"
-docker pull "$MYSQL_IMAGE"
-docker pull "$REDIS_IMAGE"
+echo "Images: pulling $SERVER_IMAGE_REPOSITORY:$VERSION $WEB_IMAGE_REPOSITORY:$VERSION mysql redis"
+docker pull --quiet "$SERVER_IMAGE_REPOSITORY:$VERSION" 2>/dev/null
+docker pull --quiet "$WEB_IMAGE_REPOSITORY:$VERSION" 2>/dev/null
+docker pull --quiet "$MYSQL_IMAGE" 2>/dev/null
+docker pull --quiet "$REDIS_IMAGE" 2>/dev/null
 
 cp "$SCRIPT_DIR/docker-compose.yml" "$DATA_DIR/docker-compose.yml"
 
@@ -94,7 +94,8 @@ EOF
 sed -i "s/:latest\$/:$VERSION/" "$DATA_DIR/docker-compose.yml"
 
 echo "Starting Docker services from $DATA_DIR"
-docker compose -f "$DATA_DIR/docker-compose.yml" --env-file "$DATA_DIR/.env" up -d
+docker compose -f "$DATA_DIR/docker-compose.yml" --env-file "$DATA_DIR/.env" up -d --quiet-pull >/dev/null 2>&1
+echo "Services: all 4 containers running"
 
 _wait_manager_api_startup() {
   local timeout="${1:-180}"
@@ -164,26 +165,8 @@ echo "manager-api health check: $FINAL_STATUS"
 
 LOCAL_IP="$(hostname -I | awk '{print $1}')"
 cat <<EOF
-Docker services submitted.
+manager-web:  http://$LOCAL_IP:8002
+websocket:    ws://$LOCAL_IP:8000/xiaozhi/v1/
 
-manager-web/api:  http://$LOCAL_IP:8002
-websocket:        ws://$LOCAL_IP:8000/xiaozhi/v1/
-vision API:       http://$LOCAL_IP:8003/mcp/vision/explain
-benchmark API:    $SERVER_HTTP_BASE_URL/benchmark/models
-
-This deployment uses Docker images:
-
-  $SERVER_IMAGE_REPOSITORY:$VERSION
-  $WEB_IMAGE_REPOSITORY:$VERSION
-  $MYSQL_IMAGE
-  $REDIS_IMAGE
-
-After the first administrator account is registered, open the console parameter page,
-copy server.secret, write it to:
-
-  $DATA_DIR/data/.config.yaml
-
-Then configure the required models in the console and restart the core service:
-
-  docker restart xiaozhi-esp32-server
+images:       $SERVER_IMAGE_REPOSITORY:$VERSION, $WEB_IMAGE_REPOSITORY:$VERSION
 EOF
