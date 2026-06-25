@@ -8,11 +8,8 @@ if REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)"; th
   BRANCH="$(git -C "$REPO_ROOT" symbolic-ref --short HEAD 2>/dev/null || true)"
   if [[ -n "$BRANCH" ]]; then
     REMOTE="${REMOTE:-origin}"
-    echo "Updating deployment assets from $REMOTE/$BRANCH"
-    git -C "$REPO_ROOT" pull --ff-only "$REMOTE" "$BRANCH"
+    git -C "$REPO_ROOT" pull --ff-only "$REMOTE" "$BRANCH" >/dev/null 2>&1
   fi
 fi
-
-echo "Deploying version: $VERSION"
 
 VERSION="$VERSION" exec "$SCRIPT_DIR/install"

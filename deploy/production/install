@@ -66,12 +66,14 @@ mkdir -p \
   "$DATA_DIR/music" \
   "$DATA_DIR/uploadfile"
 
-echo "Deploying version: $VERSION"
-echo "Images: pulling $SERVER_IMAGE_REPOSITORY:$VERSION $WEB_IMAGE_REPOSITORY:$VERSION mysql redis"
-docker pull --quiet "$SERVER_IMAGE_REPOSITORY:$VERSION" 2>/dev/null
-docker pull --quiet "$WEB_IMAGE_REPOSITORY:$VERSION" 2>/dev/null
-docker pull --quiet "$MYSQL_IMAGE" 2>/dev/null
-docker pull --quiet "$REDIS_IMAGE" 2>/dev/null
+echo "=== Deploy version: $VERSION ==="
+
+printf "pull images..."
+docker pull --quiet "$SERVER_IMAGE_REPOSITORY:$VERSION" >/dev/null 2>&1
+docker pull --quiet "$WEB_IMAGE_REPOSITORY:$VERSION" >/dev/null 2>&1
+docker pull --quiet "$MYSQL_IMAGE" >/dev/null 2>&1
+docker pull --quiet "$REDIS_IMAGE" >/dev/null 2>&1
+echo " done"
 
 cp "$SCRIPT_DIR/docker-compose.yml" "$DATA_DIR/docker-compose.yml"
 
@@ -89,84 +91,61 @@ XIAOZHI_MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD
 XIAOZHI_SERVER_HTTP_BASE_URL=$SERVER_HTTP_BASE_URL
 EOF
 
-# Write docker-compose.yml with the deploy version tag (so compose file
-# reflects the actual image being used, not a hardcoded :latest).
 sed -i "s/:latest\$/:$VERSION/" "$DATA_DIR/docker-compose.yml"
 
-echo "Starting Docker services from $DATA_DIR"
 docker compose -f "$DATA_DIR/docker-compose.yml" --env-file "$DATA_DIR/.env" up -d --quiet-pull >/dev/null 2>&1
-echo "Services: all 4 containers running"
+echo "services up"
 
 _wait_manager_api_startup() {
   local timeout="${1:-180}"
   local start_ts
   start_ts="$(date +%s)"
-  local dot_interval=2
-  local summary_interval=30
-  local last_dot=0
-  local last_summary=0
 
-  echo "Waiting for manager-api to start (Liquibase migrations run during this phase, max ${timeout}s)..."
+  printf "waiting for manager-api..."
   while true; do
     if docker logs xiaozhi-esp32-server-web 2>&1 | grep -q "Started AdminApplication in"; then
-      echo ""
-      echo "manager-api started successfully (Liquibase migrations completed)"
+      echo " ready"
       return 0
     fi
     local elapsed=$(( $(date +%s) - start_ts ))
     if [ "$elapsed" -gt "$timeout" ]; then
-      echo ""
-      echo "ERROR: manager-api failed to start within ${timeout}s." >&2
-      echo "Last 20 lines of container logs:" >&2
+      echo " FAILED"
+      echo "ERROR: manager-api did not start within ${timeout}s." >&2
+      echo "--- last 20 log lines ---" >&2
       docker logs xiaozhi-esp32-server-web --tail 20 >&2
       return 1
     fi
-    if [ $((elapsed - last_summary)) -ge "$summary_interval" ]; then
-      printf "[%ds]" "$elapsed"
-      last_summary="$elapsed"
-      last_dot="$elapsed"
-    elif [ $((elapsed - last_dot)) -ge "$dot_interval" ]; then
-      printf "."
-      last_dot="$elapsed"
+    if [ $((elapsed % 10)) -eq 0 ]; then
+      printf " %ds" "$elapsed"
     fi
     sleep 1
   done
 }
 
-# Detect whether the container was just created/restarted, or was already
-# running from a previous deploy.  Only wait for the startup log line when
-# the container actually just booted.
+# Skip startup wait if container was already running before this deploy.
 CONTAINER_STATUS=$(docker inspect --format='{{.State.Status}}' xiaozhi-esp32-server-web 2>/dev/null || echo "missing")
 CONTAINER_STARTED=$(docker inspect --format='{{.State.StartedAt}}' xiaozhi-esp32-server-web 2>/dev/null || echo "")
 
-NEED_STARTUP_WAIT=true
 if [ "$CONTAINER_STATUS" = "running" ] && [ -n "$CONTAINER_STARTED" ]; then
   STARTED_TS=$(date -d "$CONTAINER_STARTED" +%s 2>/dev/null || echo "0")
-  NOW_TS=$(date +%s)
-  UPTIME=$((NOW_TS - STARTED_TS))
+  UPTIME=$(( $(date +%s) - STARTED_TS ))
   if [ "$UPTIME" -gt 60 ]; then
-    echo "manager-api was already running (uptime: ${UPTIME}s) — skipping startup wait"
-    NEED_STARTUP_WAIT=false
+    echo "manager-api: already running (${UPTIME}s uptime)"
+  else
+    _wait_manager_api_startup 180 || exit 1
   fi
-fi
-
-if [ "$NEED_STARTUP_WAIT" = "true" ]; then
+else
   _wait_manager_api_startup 180 || exit 1
 fi
 
-# Final verify: container must be running
 FINAL_STATUS=$(docker inspect --format='{{.State.Status}}' xiaozhi-esp32-server-web 2>/dev/null || echo "missing")
 if [ "$FINAL_STATUS" != "running" ]; then
-  echo "ERROR: manager-api container is not running (status: $FINAL_STATUS)" >&2
+  echo "ERROR: manager-api not running (status: $FINAL_STATUS)" >&2
   docker logs xiaozhi-esp32-server-web --tail 20 >&2
   exit 1
 fi
-echo "manager-api health check: $FINAL_STATUS"
 
-LOCAL_IP="$(hostname -I | awk '{print $1}')"
-cat <<EOF
-manager-web:  http://$LOCAL_IP:8002
-websocket:    ws://$LOCAL_IP:8000/xiaozhi/v1/
-
-images:       $SERVER_IMAGE_REPOSITORY:$VERSION, $WEB_IMAGE_REPOSITORY:$VERSION
-EOF
+LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+echo ""
+echo "manager-web: http://$LOCAL_IP:8002"
+echo "websocket:   ws://$LOCAL_IP:8000/xiaozhi/v1/"
