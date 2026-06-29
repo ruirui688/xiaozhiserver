@@ -183,12 +183,6 @@ export default {
     },
     memoryTypeOptions() {
       return this.dynamicOptions('memoryType', this.editForm.memoryType);
-    },
-    dynamicOptions(field, currentValue) {
-      const values = new Set();
-      (this.dashboard.facts || []).forEach(item => { if (item && item[field]) values.add(item[field]); });
-      if (currentValue) values.add(currentValue);
-      return Array.from(values).map(v => ({ value: v, label: String(v).replace(/_/g, ' ') }));
     }
   },
   mounted() {
@@ -256,6 +250,12 @@ export default {
           this.loadData();
         });
       }).catch(() => {});
+    },
+    dynamicOptions(field, currentValue) {
+      const values = new Set();
+      (this.dashboard.facts || []).forEach(item => { if (item && item[field]) values.add(item[field]); });
+      if (currentValue) values.add(currentValue);
+      return Array.from(values).map(v => ({ value: v, label: String(v).replace(/_/g, ' ') }));
     },
     categoryFormatter(row) { return this.categoryText(row.category); },
     memoryTypeFormatter(row) { return this.memoryTypeText(row.memoryType); },
