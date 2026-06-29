@@ -4,40 +4,10 @@ VERSION="${VERSION:-latest}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-format_duration() {
-  local total="${1:-0}"
-  printf "%02d:%02d" "$((total / 60))" "$((total % 60))"
-}
-
-run_step() {
-  local label="$1"
-  shift
-  local start_ts end_ts elapsed
-  start_ts="$(date +%s)"
-  printf "  %-34s" "$label"
-  if "$@" >/dev/null 2>&1; then
-    end_ts="$(date +%s)"
-    elapsed=$((end_ts - start_ts))
-    printf "OK   %s\n" "$(format_duration "$elapsed")"
-    return 0
-  fi
-  end_ts="$(date +%s)"
-  elapsed=$((end_ts - start_ts))
-  printf "FAIL %s\n" "$(format_duration "$elapsed")"
-  return 1
-}
-
 short_commit() {
   local repo="$1"
   git -C "$repo" rev-parse --short HEAD 2>/dev/null || printf "unknown"
 }
-
-echo "=== Xiaozhi production upgrade ==="
-printf "  %-18s %s\n" "target version:" "$VERSION"
-printf "  %-18s %s\n" "deploy dir:" "$SCRIPT_DIR"
-if [[ "$VERSION" == "latest" ]]; then
-  echo "  note: latest is mutable; use VERSION=<git-short-sha> ./upgrade for an exact release."
-fi
 
 DEPLOY_GIT_BRANCH=""
 DEPLOY_GIT_BEFORE=""
@@ -49,18 +19,14 @@ if REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)"; th
     REMOTE="${REMOTE:-origin}"
     DEPLOY_GIT_BRANCH="$BRANCH"
     DEPLOY_GIT_BEFORE="$(short_commit "$REPO_ROOT")"
-    printf "  %-18s %s/%s %s\n" "deploy source:" "$REMOTE" "$BRANCH" "$DEPLOY_GIT_BEFORE"
-    echo ""
-    echo "Deploy asset update"
-    run_step "Pull deploy assets" git -C "$REPO_ROOT" pull --ff-only "$REMOTE" "$BRANCH"
+    if ! git -C "$REPO_ROOT" pull --ff-only "$REMOTE" "$BRANCH" >/dev/null 2>&1; then
+      echo "Pull deploy assets failed: $REMOTE/$BRANCH" >&2
+      exit 1
+    fi
     DEPLOY_GIT_AFTER="$(short_commit "$REPO_ROOT")"
-    printf "  %-34s%s -> %s\n" "Deploy assets commit" "$DEPLOY_GIT_BEFORE" "$DEPLOY_GIT_AFTER"
   fi
-else
-  printf "  %-18s %s\n" "deploy source:" "manual files, no git checkout"
 fi
 
-echo ""
 DEPLOY_GIT_BRANCH="$DEPLOY_GIT_BRANCH" \
 DEPLOY_GIT_BEFORE="$DEPLOY_GIT_BEFORE" \
 DEPLOY_GIT_AFTER="$DEPLOY_GIT_AFTER" \

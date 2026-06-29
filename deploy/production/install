@@ -94,6 +94,27 @@ XIAOZHI_LOG_MAX_FILE=$LOG_MAX_FILE
 EOF
 }
 
+pull_images() {
+  docker pull --quiet "$SERVER_IMAGE" >/dev/null
+  docker pull --quiet "$WEB_IMAGE" >/dev/null
+  docker pull --quiet "$MYSQL_IMAGE" >/dev/null
+  docker pull --quiet "$REDIS_IMAGE" >/dev/null
+}
+
+prepare_runtime_files() {
+  cp "$SCRIPT_DIR/docker-compose.yml" "$DATA_DIR/docker-compose.yml"
+  if [[ ! -f "$DATA_DIR/data/.config.yaml" ]]; then
+    cp "$SCRIPT_DIR/config_from_api.yaml" "$DATA_DIR/data/.config.yaml"
+  fi
+  write_runtime_env
+  sed -i "s|:latest\$|:$VERSION|" "$DATA_DIR/docker-compose.yml"
+}
+
+start_services() {
+  docker compose -f "$DATA_DIR/docker-compose.yml" --env-file "$DATA_DIR/.env" config >/dev/null
+  docker compose -f "$DATA_DIR/docker-compose.yml" --env-file "$DATA_DIR/.env" up -d --quiet-pull >/dev/null
+}
+
 DEPLOY_MODE="${DEPLOY_MODE:-$(read_existing_env XIAOZHI_DEPLOY_MODE)}"
 DEPLOY_MODE="${DEPLOY_MODE:-pull}"
 CURRENT_DEPLOY_VERSION="$(read_existing_env XIAOZHI_DEPLOY_VERSION)"
@@ -183,9 +204,6 @@ if ! docker compose version >/dev/null 2>&1; then
   exit 1
 fi
 
-CURRENT_SERVER_IMAGE="$(container_image xiaozhi-esp32-server)"
-CURRENT_WEB_IMAGE="$(container_image xiaozhi-esp32-server-web)"
-
 mkdir -p \
   "$DATA_DIR/data" \
   "$DATA_DIR/mysql/data" \
@@ -195,53 +213,31 @@ mkdir -p \
 
 SERVER_IMAGE="$SERVER_IMAGE_REPOSITORY:$VERSION"
 WEB_IMAGE="$WEB_IMAGE_REPOSITORY:$VERSION"
-
-echo "=== Xiaozhi production deploy ==="
-printf "  %-18s %s\n" "target version:" "$VERSION"
-printf "  %-18s %s\n" "current version:" "$CURRENT_DEPLOY_VERSION"
-printf "  %-18s %s\n" "current server:" "$CURRENT_SERVER_IMAGE"
-printf "  %-18s %s\n" "current web:" "$CURRENT_WEB_IMAGE"
-printf "  %-18s %s\n" "data dir:" "$DATA_DIR"
-if [[ -n "${DEPLOY_GIT_BRANCH:-}" ]]; then
-  printf "  %-18s %s %s -> %s\n" "deploy assets:" "$DEPLOY_GIT_BRANCH" "${DEPLOY_GIT_BEFORE:-unknown}" "${DEPLOY_GIT_AFTER:-unknown}"
+VERSION_LABEL="$VERSION"
+if [[ "$VERSION" == "latest" ]]; then
+  VERSION_LABEL="latest (mutable)"
 fi
-printf "  %-18s %s\n" "server image:" "$SERVER_IMAGE"
-printf "  %-18s %s\n" "web image:" "$WEB_IMAGE"
-printf "  %-18s %s\n" "mysql image:" "$MYSQL_IMAGE"
-printf "  %-18s %s\n" "redis image:" "$REDIS_IMAGE"
-printf "  %-18s server=%s/%s web=%s/%s mysql=%s/%s redis=%s/%s\n" \
+
+echo "Production deploy"
+printf "  %-10s %s\n" "version:" "$VERSION_LABEL"
+printf "  %-10s %s\n" "current:" "$CURRENT_DEPLOY_VERSION"
+if [[ -n "${DEPLOY_GIT_BRANCH:-}" ]]; then
+  printf "  %-10s %s %s -> %s\n" "assets:" "$DEPLOY_GIT_BRANCH" "${DEPLOY_GIT_BEFORE:-unknown}" "${DEPLOY_GIT_AFTER:-unknown}"
+fi
+printf "  %-10s %s, %s\n" "images:" "$(short_image_name "$SERVER_IMAGE")" "$(short_image_name "$WEB_IMAGE")"
+printf "  %-10s %s, %s\n" "runtime:" "$(short_image_name "$MYSQL_IMAGE")" "$(short_image_name "$REDIS_IMAGE")"
+printf "  %-10s server=%s/%s web=%s/%s mysql=%s/%s redis=%s/%s\n" \
   "limits:" \
   "$SERVER_CPUS" "$SERVER_MEM_LIMIT" \
   "$WEB_CPUS" "$WEB_MEM_LIMIT" \
   "$MYSQL_CPUS" "$MYSQL_MEM_LIMIT" \
   "$REDIS_CPUS" "$REDIS_MEM_LIMIT"
-if [[ "$VERSION" == "latest" ]]; then
-  echo "  note: latest is mutable; use VERSION=<git-short-sha> ./upgrade for an exact release."
-fi
+printf "  %-10s %s\n" "data:" "$DATA_DIR"
 
 echo ""
-echo "Image pull"
-run_step "Pull $(short_image_name "$SERVER_IMAGE")" docker pull --quiet "$SERVER_IMAGE"
-run_step "Pull $(short_image_name "$WEB_IMAGE")" docker pull --quiet "$WEB_IMAGE"
-run_step "Pull $(short_image_name "$MYSQL_IMAGE")" docker pull --quiet "$MYSQL_IMAGE"
-run_step "Pull $(short_image_name "$REDIS_IMAGE")" docker pull --quiet "$REDIS_IMAGE"
-
-echo ""
-echo "Prepare runtime files"
-run_step "Copy compose template" cp "$SCRIPT_DIR/docker-compose.yml" "$DATA_DIR/docker-compose.yml"
-if [[ ! -f "$DATA_DIR/data/.config.yaml" ]]; then
-  run_step "Initialize server config" cp "$SCRIPT_DIR/config_from_api.yaml" "$DATA_DIR/data/.config.yaml"
-else
-  printf "  %-34sSKIP existing\n" "Initialize server config"
-fi
-
-run_step "Write runtime env" write_runtime_env
-
-echo ""
-echo "Compose deploy"
-run_step "Pin compose image tags" sed -i "s|:latest\$|:$VERSION|" "$DATA_DIR/docker-compose.yml"
-run_step "Validate compose config" docker compose -f "$DATA_DIR/docker-compose.yml" --env-file "$DATA_DIR/.env" config
-run_step "Start compose services" docker compose -f "$DATA_DIR/docker-compose.yml" --env-file "$DATA_DIR/.env" up -d --quiet-pull
+run_step "Pull images" pull_images
+run_step "Prepare runtime files" prepare_runtime_files
+run_step "Start services" start_services
 
 _wait_manager_api_startup() {
   local timeout="${1:-180}"
@@ -292,11 +288,9 @@ fi
 
 LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 echo ""
-echo "Deploy complete"
-printf "  %-18s %s\n" "version:" "$VERSION"
-printf "  %-18s %s\n" "server:" "$(container_image xiaozhi-esp32-server)"
-printf "  %-18s %s\n" "web:" "$(container_image xiaozhi-esp32-server-web)"
-printf "  %-18s %s\n" "mysql:" "$(container_image xiaozhi-esp32-server-db)"
-printf "  %-18s %s\n" "redis:" "$(container_image xiaozhi-esp32-server-redis)"
+echo "=== Deploy complete ==="
+echo "Version: $VERSION"
+echo "Images: $(short_image_name "$(container_image xiaozhi-esp32-server)"), $(short_image_name "$(container_image xiaozhi-esp32-server-web)")"
+echo "Runtime: $(short_image_name "$(container_image xiaozhi-esp32-server-db)"), $(short_image_name "$(container_image xiaozhi-esp32-server-redis)")"
 echo "manager-web: http://$LOCAL_IP:8002"
 echo "websocket:   ws://$LOCAL_IP:8000/xiaozhi/v1/"

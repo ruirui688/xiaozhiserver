@@ -264,7 +264,7 @@
 
 ```text
 定制模块：ACR 镜像生产部署、模型默认配置、后台智能体模板、Python 运行时模型初始化
-改动原因：源码仍完整推送到私有 Git 仓库，但生产服务器不再拉取完整源码，也不从源码构建业务镜像。唯一生产路线改为本地或构建机先构建 `xiaozhi-server` / `xiaozhi-web` 并推送到阿里云 ACR，同时把 `mysql:8.4` 和 `redis:8.0` 同步到 ACR；生产端只 sparse-checkout `deploy/production` 最小部署资产，再从 ACR 拉取全部运行镜像并启动；`xiaozhi-server-base` 仅作为构建缓存镜像，不作为生产运行镜像；升级脚本必须明确输出 target version、current version、部署资产 commit、拉取镜像和最终运行镜像，并在 `/opt/xiaozhi-data/.env` 记录 `XIAOZHI_DEPLOY_VERSION`；本地生产部署不再使用 FunASR / SenseVoiceSmall / model.pt 作为默认语音识别链路；生产 Docker 镜像默认使用 `requirements-docker.txt`，不安装 torch / torchaudio；生产安装阶段允许 ASR、VAD、LLM、TTS、VLLM、Memory、Intent 等模型全部暂时为空，管理员后续在智控台按实际需要配置模型。
+改动原因：源码仍完整推送到私有 Git 仓库，但生产服务器不再拉取完整源码，也不从源码构建业务镜像。唯一生产路线改为本地或构建机先构建 `xiaozhi-server` / `xiaozhi-web` 并推送到阿里云 ACR，同时把 `mysql:8.4` 和 `redis:8.0` 同步到 ACR；生产端只 sparse-checkout `deploy/production` 最小部署资产，再从 ACR 拉取全部运行镜像并启动；`xiaozhi-server-base` 仅作为构建缓存镜像，不作为生产运行镜像；升级脚本必须用接近 `acr-build-push` 的摘要格式输出 version、current、assets、images、runtime 和最终访问地址，并在 `/opt/xiaozhi-data/.env` 记录 `XIAOZHI_DEPLOY_VERSION`；本地生产部署不再使用 FunASR / SenseVoiceSmall / model.pt 作为默认语音识别链路；生产 Docker 镜像默认使用 `requirements-docker.txt`，不安装 torch / torchaudio；生产安装阶段允许 ASR、VAD、LLM、TTS、VLLM、Memory、Intent 等模型全部暂时为空，管理员后续在智控台按实际需要配置模型。
 关键文件：
   - Dockerfile-server
   - Dockerfile-server-base
@@ -290,7 +290,7 @@
   - main/manager-web/src/views/roleConfig.vue
   - docs/deployment/private-docker-release.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改 Dockerfile、Docker Compose、安装脚本、默认模型配置、智能体模板初始化、模型配置下发或 WebSocket 初始化流程，必须保留“源码完整进入私有 Git 仓库，但生产服务器只 sparse-checkout `deploy/production` 最小部署资产；生产服务器只拉取阿里云 ACR 中已发布运行镜像，不在生产端源码构建，也不依赖 Docker Hub；生产运行镜像命名为 `xiaozhi-server:latest`、`xiaozhi-web:latest`、`mysql:8.4`、`redis:8.0`，同时支持 Git 短哈希精确版本；`xiaozhi-server-base` 只服务于构建流程；生产用户只需要记住 `~/work/xiaozhi-deploy` 部署资产目录、`/opt/xiaozhi-data` 数据目录、`deploy/production/install` 首次部署和 `deploy/production/upgrade` 后续升级；升级输出必须能看出本次目标版本、上次部署版本、部署资产 commit 和最终运行镜像；生产安装不下载、不挂载、不要求 model.pt；生产镜像默认不安装 torch / torchaudio，除非显式使用完整 requirements 启用本地 FunASR；FunASR/FunASRServer 不作为可用默认 ASR；所有模型字段允许为空；模型缺失时服务可启动但对应能力不可用并记录清晰提示”的约定。
+官方同步时的处理规则：如果官方修改 Dockerfile、Docker Compose、安装脚本、默认模型配置、智能体模板初始化、模型配置下发或 WebSocket 初始化流程，必须保留“源码完整进入私有 Git 仓库，但生产服务器只 sparse-checkout `deploy/production` 最小部署资产；生产服务器只拉取阿里云 ACR 中已发布运行镜像，不在生产端源码构建，也不依赖 Docker Hub；生产运行镜像命名为 `xiaozhi-server:latest`、`xiaozhi-web:latest`、`mysql:8.4`、`redis:8.0`，同时支持 Git 短哈希精确版本；`xiaozhi-server-base` 只服务于构建流程；生产用户只需要记住 `~/work/xiaozhi-deploy` 部署资产目录、`/opt/xiaozhi-data` 数据目录、`deploy/production/install` 首次部署和 `deploy/production/upgrade` 后续升级；升级输出必须保持摘要式，能看出本次目标版本、上次部署版本、部署资产 commit、最终运行镜像和访问地址；生产安装不下载、不挂载、不要求 model.pt；生产镜像默认不安装 torch / torchaudio，除非显式使用完整 requirements 启用本地 FunASR；FunASR/FunASRServer 不作为可用默认 ASR；所有模型字段允许为空；模型缺失时服务可启动但对应能力不可用并记录清晰提示”的约定。
 ```
 
 ## 18. 标准模型存储与运行时契约

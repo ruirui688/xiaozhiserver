@@ -254,14 +254,19 @@ VERSION=fb945e48 ./upgrade
 是可变标签，不适合排查“服务器现在到底安装了哪个版本”。生产排障或回滚时
 优先使用短哈希版本。
 
-升级脚本会明确输出：
+升级脚本会用接近构建脚本的摘要格式输出：
 
 ```text
-target version   本次请求部署的镜像版本
-current version  /opt/xiaozhi-data/.env 中记录的上次部署版本
-deploy assets    部署脚本所在 Git 分支，以及 pull 前后的 commit
-server/web image 本次将拉取并启动的业务镜像完整名称
-Deploy complete  最终运行中容器绑定的镜像名称
+Production deploy
+  version   本次请求部署的镜像版本
+  current   /opt/xiaozhi-data/.env 中记录的上次部署版本
+  assets    部署脚本所在 Git 分支，以及 pull 前后的 commit
+  images    本次将拉取并启动的业务镜像
+
+=== Deploy complete ===
+Version    最终部署版本
+Images     最终运行中容器绑定的业务镜像
+Runtime    最终运行中容器绑定的 MySQL/Redis 镜像
 ```
 
 `./upgrade` 会更新 sparse-checkout 中的部署资产，复用 `/opt/xiaozhi-data/.env`
