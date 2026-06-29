@@ -49,6 +49,41 @@ def _get_beijing_time_context() -> str:
     return get_current_datetime()
 
 
+def _bool_config(value, default=False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
+
+
+def _int_config(value, default: int, minimum: int = 0) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(parsed, minimum)
+
+
+def _build_search_query(query: str, current_time_context: str, include_time_context: bool = True) -> str:
+    query = query.strip()
+    if not include_time_context or not current_time_context:
+        return query
+    if current_time_context in query:
+        return query
+    return f"{query} 当前北京时间 {current_time_context}"
+
+
+def _truncate_text(value: str, max_chars: int) -> str:
+    if not value or max_chars <= 0:
+        return ""
+    if len(value) <= max_chars:
+        return value
+    return value[:max_chars].rstrip() + "..."
+
+
 def _string_value(value) -> str:
     if value is None:
         return ""
@@ -75,11 +110,14 @@ def _build_search_context(
     items,
     answer: str = "",
     current_time_context: str = "",
+    search_query: str = "",
+    content_max_chars: int = 3000,
 ) -> str:
     current_time_context = current_time_context or _get_beijing_time_context()
     lines = [
         "【联网搜索结果】",
         f"用户原始查询：{query}",
+        f"实际搜索查询：{search_query or query}",
         f"当前参考时间：{current_time_context}",
         f"搜索源：{provider_label}",
         "回答要求：",
@@ -98,6 +136,8 @@ def _build_search_context(
         link = _first_text(item, ("link", "url", "href"))
         date = _first_text(item, ("date", "published_date", "publishedAt", "time"))
         snippet = _first_text(item, ("summary", "snippet", "content", "description"))
+        content = _first_text(item, ("content", "raw_content", "rawContent"))
+        content = _truncate_text(content, content_max_chars)
 
         lines.append(f"{i}. 标题：{title}")
         if date:
@@ -106,11 +146,13 @@ def _build_search_context(
             lines.append(f"   链接：{link}")
         if snippet:
             lines.append(f"   摘要：{snippet}")
+        if content and content != snippet:
+            lines.append(f"   正文：{content}")
 
     return "\n".join(lines)
 
 
-def _post_metaso(api_key: str, query: str, max_results: int):
+def _post_metaso(api_key: str, query: str, max_results: int, include_raw_content: bool):
     url = "https://metaso.cn/api/v1/search"
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -122,7 +164,7 @@ def _post_metaso(api_key: str, query: str, max_results: int):
         "stream": False,
         "scope": "webpage",
         "includeSummary": True,
-        "includeRawContent": False,
+        "includeRawContent": include_raw_content,
         "conciseSnippet": False,
     }
     logger.bind(tag=TAG).debug(f"秘塔搜索请求 | URL: {url} | payload: {payload}")
@@ -141,9 +183,18 @@ def _search_metaso(
     query: str,
     max_results: int,
     current_time_context: str = "",
+    include_raw_content: bool = True,
+    content_max_chars: int = 3000,
+    include_time_context: bool = True,
 ) -> str:
     """调用秘塔搜索API"""
-    data = _post_metaso(api_key, query, max_results)
+    current_time_context = current_time_context or _get_beijing_time_context()
+    search_query = _build_search_query(
+        query,
+        current_time_context,
+        include_time_context=include_time_context,
+    )
+    data = _post_metaso(api_key, search_query, max_results, include_raw_content)
 
     webpages = data.get("webpages", [])
     if not webpages:
@@ -156,6 +207,8 @@ def _search_metaso(
         webpages,
         answer=answer,
         current_time_context=current_time_context,
+        search_query=search_query,
+        content_max_chars=content_max_chars,
     )
 
 
@@ -164,18 +217,28 @@ def _search_tavily(
     query: str,
     max_results: int,
     current_time_context: str = "",
+    include_raw_content: bool = True,
+    content_max_chars: int = 3000,
+    include_time_context: bool = True,
 ) -> str:
     """调用Tavily搜索API"""
+    current_time_context = current_time_context or _get_beijing_time_context()
     url = "https://api.tavily.com/search"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
+    search_query = _build_search_query(
+        query,
+        current_time_context,
+        include_time_context=include_time_context,
+    )
     payload = {
-        "query": query,
+        "query": search_query,
         "max_results": max_results,
         "search_depth": "advanced",
         "include_answer": "advanced",
+        "include_raw_content": include_raw_content,
     }
     logger.bind(tag=TAG).debug(f"Tavily搜索请求 | URL: {url} | payload: {payload}")
     response = requests.post(url, json=payload, headers=headers, timeout=15)
@@ -194,6 +257,8 @@ def _search_tavily(
         results,
         answer=answer,
         current_time_context=current_time_context,
+        search_query=search_query,
+        content_max_chars=content_max_chars,
     )
 
 
@@ -209,10 +274,20 @@ def web_search(conn: "ConnectionHandler", query: str = None, lang: str = None, *
 
     web_search_config = conn.config.get("plugins", {}).get("web_search", {})
     provider = web_search_config.get("provider", "").lower()
-    try:
-        max_results = int(web_search_config.get("max_results", 3))
-    except (TypeError, ValueError):
-        max_results = 3
+    max_results = _int_config(web_search_config.get("max_results"), 3, minimum=1)
+    include_raw_content = _bool_config(
+        web_search_config.get("include_raw_content"),
+        default=True,
+    )
+    include_time_context = _bool_config(
+        web_search_config.get("include_time_context"),
+        default=True,
+    )
+    content_max_chars = _int_config(
+        web_search_config.get("content_max_chars"),
+        3000,
+        minimum=500,
+    )
     logger.bind(tag=TAG).info(f"web_search 配置 | provider={provider} | max_results={max_results} | config_keys={list(web_search_config.keys())}")
 
     api_key = web_search_config.get("api_key", "")
@@ -231,6 +306,9 @@ def web_search(conn: "ConnectionHandler", query: str = None, lang: str = None, *
             query,
             max_results,
             current_time_context=current_time_context,
+            include_raw_content=include_raw_content,
+            include_time_context=include_time_context,
+            content_max_chars=content_max_chars,
         )
     elif provider == "tavily":
         search_fn = lambda: _search_tavily(
@@ -238,6 +316,9 @@ def web_search(conn: "ConnectionHandler", query: str = None, lang: str = None, *
             query,
             max_results,
             current_time_context=current_time_context,
+            include_raw_content=include_raw_content,
+            include_time_context=include_time_context,
+            content_max_chars=content_max_chars,
         )
     else:
         return ActionResponse(
@@ -251,7 +332,8 @@ def web_search(conn: "ConnectionHandler", query: str = None, lang: str = None, *
         result_text = search_fn()
         elapsed = time.time() - start_time
         logger.bind(tag=TAG).info(f"联网搜索完成 | provider={provider} | elapsed={elapsed:.3f}s")
-        logger.bind(tag=TAG).info(f"搜索结果组装完成:\n{result_text}")
+        logger.bind(tag=TAG).info(f"搜索结果组装完成 | chars={len(result_text)}")
+        logger.bind(tag=TAG).debug(f"搜索结果预览:\n{_truncate_text(result_text, 2000)}")
     except requests.exceptions.Timeout:
         logger.bind(tag=TAG).error("联网搜索请求超时")
         result_text = "联网搜索请求超时，请稍后重试。"
