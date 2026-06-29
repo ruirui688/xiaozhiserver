@@ -1022,6 +1022,7 @@ class ConnectionHandler:
         self.dialogue.update_system_message(self.prompt)
 
     def chat(self, query, depth=0, allow_tools=True):
+        chat_started_at = time.monotonic()
         current_abort_generation = self.abort_generation
         # 保存当前任务的sentence_id到局部变量，避免被新任务覆盖
         current_sentence_id = None
@@ -1104,7 +1105,9 @@ class ConnectionHandler:
             )
             llm_dialogue = self._with_music_library_context(llm_dialogue)
 
-            if self.intent_type == "function_call" and functions is not None:
+            llm_started_at = time.monotonic()
+            tools_enabled = self.intent_type == "function_call" and functions is not None
+            if tools_enabled:
                 # 使用支持functions的streaming接口
                 llm_responses = self.llm.response_with_functions(
                     self.session_id,
@@ -1116,6 +1119,10 @@ class ConnectionHandler:
                     self.session_id,
                     llm_dialogue,
                 )
+            self.logger.bind(tag=TAG).info(
+                f"LLM请求已发起 | depth={depth} | tools_enabled={tools_enabled} | "
+                f"elapsed={time.monotonic() - llm_started_at:.3f}s"
+            )
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"LLM 处理出错 {query}: {e}")
             return None
@@ -1130,8 +1137,15 @@ class ConnectionHandler:
         defer_plain_content_for_tools = (
             self.intent_type == "function_call" and functions is not None
         )
+        first_llm_chunk_at = None
         try:
             for response in llm_responses:
+                if first_llm_chunk_at is None:
+                    first_llm_chunk_at = time.monotonic()
+                    self.logger.bind(tag=TAG).info(
+                        f"LLM首个响应分片 | depth={depth} | "
+                        f"elapsed={first_llm_chunk_at - llm_started_at:.3f}s"
+                    )
                 if (
                         self.client_abort
                         or current_abort_generation != self.abort_generation
@@ -1231,8 +1245,13 @@ class ConnectionHandler:
                         sentence_type=SentenceType.LAST,
                         content_type=ContentType.ACTION,
                     )
-                )
+            )
             return
+        self.logger.bind(tag=TAG).info(
+            f"LLM响应流完成 | depth={depth} | elapsed={time.monotonic() - llm_started_at:.3f}s | "
+            f"tool_call={tool_call_flag} | tool_count={len(tool_calls_list)} | "
+            f"content_chars={sum(len(part) for part in response_message)}"
+        )
 
         if self.client_abort or current_abort_generation != self.abort_generation:
             if len(response_message) > 0:
@@ -1354,16 +1373,21 @@ class ConnectionHandler:
                         ),
                         self.loop,
                     )
-                    futures_with_data.append((future, tool_call_data, tool_input))
+                    futures_with_data.append((future, tool_call_data, tool_input, time.monotonic()))
 
                 # 工具调用超时时间，可配置，默认30秒
                 tool_call_timeout = int(self.config.get("tool_call_timeout", 30))
                 # 等待协程结束（实际等待时长为最慢的那个）
                 tool_results = []
 
-                for future, tool_call_data, tool_input in futures_with_data:
+                for future, tool_call_data, tool_input, tool_started_at in futures_with_data:
                     try:
                         result = future.result(timeout=tool_call_timeout)
+                        action_name = getattr(result.action, "name", result.action)
+                        self.logger.bind(tag=TAG).info(
+                            f"工具调用完成 | name={tool_call_data.get('name')} | "
+                            f"action={action_name} | elapsed={time.monotonic() - tool_started_at:.3f}s"
+                        )
                         tool_results.append((result, tool_call_data))
                         # 使用公共方法上报工具调用结果
                         report_result = result.result if result.result else result.response
@@ -1413,6 +1437,10 @@ class ConnectionHandler:
                     sentence_type=SentenceType.LAST,
                     content_type=ContentType.ACTION,
                 )
+            )
+            self.logger.bind(tag=TAG).info(
+                f"对话处理结束 | elapsed={time.monotonic() - chat_started_at:.3f}s | "
+                f"sentence_id={current_sentence_id}"
             )
             # 使用lambda延迟计算，只有在DEBUG级别时才执行get_llm_dialogue()
             self.logger.bind(tag=TAG).debug(

@@ -32,6 +32,21 @@ class ModelCatalogServiceImplTest {
         assertEquals("qwen3.7-max", modelNameField.getDefaultValue());
     }
 
+    @Test
+    void doubaoSeedTtsKeepsWebsocketReuseEnabledByDefault() throws Exception {
+        ModelCatalogDTO ttsTemplate = staticCatalog().stream()
+                .filter(item -> "TTS_DOUBAO_SEED_TTS_2_STREAM".equals(item.getTemplateCode()))
+                .findFirst()
+                .orElseThrow();
+
+        ModelFieldSchemaDTO wsReuseField = ttsTemplate.getFieldSchemas().stream()
+                .filter(field -> "enable_ws_reuse".equals(field.getKey()))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(true, wsReuseField.getDefaultValue());
+    }
+
     @SuppressWarnings("unchecked")
     private List<ModelCatalogDTO> staticCatalog() throws Exception {
         Field catalogField = ModelCatalogServiceImpl.class.getDeclaredField("CATALOG");

@@ -2,6 +2,7 @@ import os
 import uuid
 import json
 import queue
+import time
 import asyncio
 import traceback
 import websockets
@@ -422,13 +423,17 @@ class TTSProvider(TTSProviderBase):
                             logger.bind(tag=TAG).debug(f"自动生成新的 会话ID: {self.conn.sentence_id}")
 
                         logger.bind(tag=TAG).debug("开始启动TTS会话...")
+                        tts_session_started_at = time.monotonic()
                         future = asyncio.run_coroutine_threadsafe(
                             self.start_session(self.conn.sentence_id),
                             loop=self.conn.loop,
                         )
                         future.result(timeout=self.tts_timeout)
                         self.before_stop_play_files.clear()
-                        logger.bind(tag=TAG).debug("TTS会话启动成功")
+                        logger.bind(tag=TAG).info(
+                            f"TTS会话启动成功 | elapsed={time.monotonic() - tts_session_started_at:.3f}s | "
+                            f"enable_ws_reuse={self.enable_ws_reuse}"
+                        )
                     except Exception as e:
                         logger.bind(tag=TAG).error(f"启动TTS会话失败: {str(e)}")
                         continue
@@ -439,11 +444,16 @@ class TTSProvider(TTSProviderBase):
                             logger.bind(tag=TAG).debug(
                                 f"开始发送TTS文本: {message.content_detail}"
                             )
+                            tts_text_started_at = time.monotonic()
                             future = asyncio.run_coroutine_threadsafe(
                                 self.text_to_speak(message.content_detail, None),
                                 loop=self.conn.loop,
                             )
                             future.result(timeout=self.tts_timeout)
+                            logger.bind(tag=TAG).info(
+                                f"TTS文本发送完成 | elapsed={time.monotonic() - tts_text_started_at:.3f}s | "
+                                f"chars={len(message.content_detail)}"
+                            )
                         except Exception as e:
                             logger.bind(tag=TAG).error(f"发送TTS文本失败: {str(e)}")
                             continue
@@ -458,11 +468,15 @@ class TTSProvider(TTSProviderBase):
                 if message.sentence_type == SentenceType.LAST:
                     try:
                         logger.bind(tag=TAG).debug("开始结束TTS会话...")
+                        tts_finish_started_at = time.monotonic()
                         future = asyncio.run_coroutine_threadsafe(
                             self.finish_session(self.conn.sentence_id),
                             loop=self.conn.loop,
                         )
                         future.result(timeout=self.tts_timeout)
+                        logger.bind(tag=TAG).info(
+                            f"TTS会话结束成功 | elapsed={time.monotonic() - tts_finish_started_at:.3f}s"
+                        )
                     except Exception as e:
                         logger.bind(tag=TAG).error(f"结束TTS会话失败: {str(e)}")
                         continue

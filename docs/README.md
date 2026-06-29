@@ -78,6 +78,7 @@ docs/integrations/prompt-injection-engineering.md
 - [architecture/model-benchmark-and-assistant.md](./architecture/model-benchmark-and-assistant.md) - 模型专业评测与配置智能助手架构。用于理解模型批量真实评测、LLMJudge、真实设备运行时评测、模型配置助手、接入草案写入、残留草案清理和提交治理边界。
 - [architecture/model-selection-and-vendor-catalog.md](./architecture/model-selection-and-vendor-catalog.md) - 模型选择与厂商目录架构。用于把讯飞、豆包等厂商产品、模型系列、协议、适配状态、推荐场景和真实测试要求整理成可选择目录，避免用户在模型配置页猜 adapter。
 - [architecture/current-code-map.md](./architecture/current-code-map.md) - 当前代码地图与梳理报告。用于快速了解当前仓库模块结构、运行链路、未提交能力、风险和验证矩阵，是后续开发前的代码导航。
+- [architecture/semantic-interruption-and-e2e-voice-model-analysis.md](./architecture/semantic-interruption-and-e2e-voice-model-analysis.md) - 语义打断与端到端语音模型演进分析。用于评估当前打断机制局限、语义打断方案和端到端语音模型演进路线。
 
 ## 4. 本地开发环境
 
@@ -97,6 +98,7 @@ docs/integrations/prompt-injection-engineering.md
 - [deployment/Deployment_all.md](./deployment/Deployment_all.md) - 官方全模块 Docker 兼容说明。仅用于参考官方默认部署方式，不作为本项目私有生产部署主入口。
 - [deployment/dev-ops-integration.md](./deployment/dev-ops-integration.md) - 历史源码部署参考。仅用于理解旧流程，不作为本项目生产入口。
 - [deployment/docker-build.md](./deployment/docker-build.md) - 历史本地 Docker 构建参考。仅用于排查旧镜像命名或官方兼容问题，不作为本项目生产入口。
+- [deployment/local-docker-deploy-guide.md](./deployment/local-docker-deploy-guide.md) - 本地 Docker 部署指南。用于本地或测试环境构建镜像、Docker Compose 启动、初始化配置和排查，不替代生产 ACR 部署入口。
 - [deployment/paddlespeech-deploy.md](./deployment/paddlespeech-deploy.md) - PaddleSpeech TTS 部署与接入指南。用于安装 PaddleSpeech 服务、启动 TTS 服务并把它接入小智服务端的场景。
 
 部署文档优先级：
@@ -151,7 +153,12 @@ docs/integrations/prompt-injection-engineering.md
 - [models/powermem-integration.md](./models/powermem-integration.md) - PowerMem 记忆组件集成指南。用于给智能体接入长期记忆能力，包含组件安装、功能特性和服务配置。
 - [models/local-knowledge-integration.md](./models/local-knowledge-integration.md) - 本地知识库与大模型切片指南。用于配置 `RAG_LocalKnowledge`、在知识库界面配置阿里云百炼/OpenAI 兼容切片模型、重新解析旧文档和排查本地知识库召回为空。
 - [models/model-management.md](./models/model-management.md) - 模型管理存储与保存架构。用于对照智控台模型配置页面，理解配置名称、模型编码、上游模型、厂商产品、普通参数、密钥参数、模板字段、保存接口、数据库表和运行时下发协议。
+- [models/model-management-architecture-analysis.md](./models/model-management-architecture-analysis.md) - 模型管理与配置体系完整分析。用于梳理模型类型、适配器、协议、新旧配置链路和模型注册发现机制的历史问题。
 - [models/model-config-catalog.md](./models/model-config-catalog.md) - 标准模型配置目录与治理说明。用于梳理 ASR、TTS、LLM、VLLM、SLM、Memory、Intent、RAG、VAD、声纹和插件 RAG 的厂商、产品、能力、接入方式、标准字段、参数/密钥分表和运行时 `model_config` 契约。
+- [models/doubao-tts-voice-selection-analysis.md](./models/doubao-tts-voice-selection-analysis.md) - 豆包 TTS 音色选择问题分析。用于理解管理端音色列表只显示单一音色的数据库来源和后续修复方向。
+- [models/memory-summary-display-issue-analysis.md](./models/memory-summary-display-issue-analysis.md) - 短期记忆总结显示问题分析。用于排查 `mem_local_short` 保存路径与角色配置界面显示不一致的问题。
+- [models/voice-pipeline-latency-analysis.md](./models/voice-pipeline-latency-analysis.md) - 语音管道延迟分析。用于拆解 ASR、LLM、TTS、音频发送和 UI 展示的延迟组成。
+- [models/volume-system-analysis.md](./models/volume-system-analysis.md) - 音量系统混乱分析。用于区分设备扬声器音量、TTS 合成音量和浏览器播放音量的边界。
 - [models/ragflow-integration.md](./models/ragflow-integration.md) - RAGFlow 集成指南。用于部署 RAGFlow、检查 MySQL/Redis、配置知识库问答和服务端 RAG 调用。
 - [models/performance_tester.md](./models/performance_tester.md) - 模型性能测试工具使用指南。用于测试 ASR、大语言模型、非流式 TTS、流式 TTS、视觉模型的延迟和稳定性。
 
@@ -172,6 +179,7 @@ docs/integrations/prompt-injection-engineering.md
 用于问题排查、贡献说明和图片资源。AI 只有在整理文档、排查问题或更新 README 时，才需要读取本分类文档。
 
 - [reference/FAQ.md](./reference/FAQ.md) - 常见问题排查文档。用于处理语音识别异常、TTS 错误、超时、服务启动失败、配置不生效等常见问题。
+- [reference/system-issues-and-optimization-backlog.md](./reference/system-issues-and-optimization-backlog.md) - 系统问题与优化清单。用于集中查看音量、语音延迟、TTS 音色、记忆显示、聊天记录和模型管理等已识别问题。
 - [reference/contributor_open_letter.md](./reference/contributor_open_letter.md) - 开发者公开信与贡献指南。用于理解官方项目目标、贡献方式、提交内容要求和社区协作方式。
 - [images/](./images/) - 文档图片资源目录。用于部署架构图、截图和说明图片；修改引用图片或移动文档时必须检查图片路径。
 

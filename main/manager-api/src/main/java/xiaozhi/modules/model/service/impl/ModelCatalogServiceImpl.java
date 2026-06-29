@@ -1272,6 +1272,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 setFieldDefault(dto, "speech_rate", "0");
                 setFieldDefault(dto, "loudness_rate", "0");
                 setFieldDefault(dto, "pitch", "0");
+                setFieldDefault(dto, "enable_ws_reuse", true);
             }
             case "VLLM_ZHIPU_GLM_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "https://open.bigmodel.cn/api/paas/v4");
