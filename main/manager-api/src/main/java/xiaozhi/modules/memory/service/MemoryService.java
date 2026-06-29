@@ -30,4 +30,11 @@ public interface MemoryService {
     void confirmCandidate(String agentId, String candidateId, String actorType, String actorId);
 
     void rejectCandidate(String agentId, String candidateId, String actorType, String actorId);
+
+    /**
+     * PowerMem-style session memory processing.
+     * Triggered on session close to analyze full conversation and
+     * auto-extract/update/delete facts without human confirmation.
+     */
+    int processSessionMemories(String sessionId, String agentId);
 }

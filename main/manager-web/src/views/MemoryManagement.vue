@@ -174,11 +174,14 @@
       </el-tab-pane>
 
       <el-tab-pane label="事实记忆" name="facts">
+        <el-alert type="success" :closable="false" show-icon style="margin-bottom:12px">
+          <span slot="title">维护模型自动从对话中抽取事实并直接写入记忆库，同时自动去重、更新和遗忘。你无需手动确认，只需必要时编辑或删除。</span>
+        </el-alert>
         <el-table v-loading="loading" :data="dashboard.facts" border height="520">
           <el-table-column prop="category" label="分类" width="120" :formatter="categoryFormatter" />
           <el-table-column prop="memoryType" label="类型" width="120" :formatter="memoryTypeFormatter" />
-          <el-table-column prop="canonicalText" label="内容" min-width="320" show-overflow-tooltip />
-          <el-table-column prop="scopeId" label="适用范围" width="170" :formatter="scopeFormatter" show-overflow-tooltip />
+          <el-table-column prop="canonicalText" label="内容" min-width="280" show-overflow-tooltip />
+          <el-table-column prop="confirmationState" label="来源" width="80" :formatter="sourceFormatter" />
           <el-table-column prop="confidence" label="置信" width="80" />
           <el-table-column prop="importance" label="重要性" width="90" />
           <el-table-column prop="status" label="状态" width="90" :formatter="statusFormatter" />
@@ -192,11 +195,8 @@
         </el-table>
       </el-tab-pane>
 
-      <el-tab-pane label="候选记录" name="candidates">
-        <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px">
-          <span slot="title">维护模型自动生成的记忆已直接存入事实记忆表，无需手动确认。此页面仅展示管理员手动创建的候选记录。</span>
-        </el-alert>
-        <el-table :data="dashboard.candidates" border height="490">
+      <el-tab-pane label="候选记录" name="candidates" v-if="dashboard.candidates && dashboard.candidates.length > 0">
+        <el-table :data="dashboard.candidates" border height="480">
           <el-table-column prop="category" label="分类" width="120" :formatter="categoryFormatter" />
           <el-table-column prop="canonicalText" label="内容" min-width="360" show-overflow-tooltip />
           <el-table-column prop="confidence" label="置信" width="80" />
@@ -759,6 +759,13 @@ export default {
     },
     scopeFormatter(row) {
       return this.scopeText(row.scopeType, row.scopeId);
+    },
+    sourceFormatter(row) {
+      const state = row.confirmationState || row.status || '';
+      if (state === 'auto') return '🤖 自动';
+      if (state === 'explicit') return '📝 手动';
+      if (state === 'manual') return '📝 手动';
+      return state;
     }
   }
 };
