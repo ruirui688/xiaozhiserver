@@ -421,7 +421,8 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
             existingEntity.setSummaryMemory("");
             // 删除记忆
         } else if (existingEntity.getMemModelId() != null
-                && existingEntity.getMemModelId().equals(Constant.MEMORY_MEM_REPORT_ONLY)) {
+                && (existingEntity.getMemModelId().equals(Constant.MEMORY_MEM_REPORT_ONLY)
+                || existingEntity.getMemModelId().equals(Constant.MEMORY_MANAGED_MEMORY))) {
             existingEntity.setSummaryMemory("");
         }
 

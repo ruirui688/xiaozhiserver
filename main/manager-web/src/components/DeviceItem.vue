@@ -31,16 +31,16 @@
       <div class="settings-btn" @click="handleDeviceManage">
         {{ $t('home.deviceManagement') }}({{ device.deviceCount }})
       </div>
-      <div :class="['settings-btn', { 'disabled-btn': device.memModelId === 'Memory_nomem' }]"
+      <div :class="['settings-btn', { 'disabled-btn': !isMemoryEnabled }]"
         @click="handleChatHistory">
-        <el-tooltip effect="light" v-if="device.memModelId === 'Memory_nomem'" :content="$t('home.enableMemory')" placement="top">
+        <el-tooltip effect="light" v-if="!isMemoryEnabled" :content="$t('home.enableMemory')" placement="top">
           <span>{{ $t('home.chatHistory') }}</span>
         </el-tooltip>
         <span v-else>{{ $t('home.chatHistory') }}</span>
       </div>
-      <div :class="['settings-btn', { 'disabled-btn': device.memModelId === 'Memory_nomem' }]"
+      <div v-if="isGovernedMemory" class="settings-btn"
         @click="handleMemoryManage">
-        记忆
+        长期记忆
       </div>
     </div>
     <div class="version-info">
@@ -96,6 +96,12 @@ export default {
     tags() {
       if (!this.device.tags) return [];
       return this.device.tags.map((tag) => tag.tagName);
+    },
+    isMemoryEnabled() {
+      return Boolean(this.device.memModelId && this.device.memModelId !== 'Memory_nomem');
+    },
+    isGovernedMemory() {
+      return this.device.memModelId === 'Memory_managed_memory';
     }
   },
   methods: {
@@ -112,13 +118,13 @@ export default {
       this.$router.push({ path: '/device-management', query: { agentId: this.device.agentId } });
     },
     handleChatHistory() {
-      if (this.device.memModelId === 'Memory_nomem') {
+      if (!this.isMemoryEnabled) {
         return
       }
       this.$emit('chat-history', { agentId: this.device.agentId, agentName: this.device.agentName })
     },
     handleMemoryManage() {
-      if (this.device.memModelId === 'Memory_nomem') {
+      if (!this.isGovernedMemory) {
         return
       }
       this.$router.push({ path: '/memory-management', query: { agentId: this.device.agentId, agentName: this.device.agentName } });

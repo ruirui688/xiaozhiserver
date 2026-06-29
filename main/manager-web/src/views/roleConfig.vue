@@ -343,7 +343,7 @@
                         <div
                           v-if="
                             model.type === 'Memory' &&
-                            form.model.memModelId !== 'Memory_nomem'
+                            isMemoryModelEnabled(form.model.memModelId)
                           "
                           class="chat-history-options"
                         >
@@ -1039,14 +1039,14 @@ export default {
         this.fetchAllFunctions();
       }
       if (type === "Memory") {
-        if (value === "Memory_nomem") {
+        if (!this.isMemoryModelEnabled(value)) {
           // 无记忆功能的模型，默认不记录聊天记录
           this.form.chatHistoryConf = 0;
         } else {
           // 有记忆功能的模型，默认记录文本和语音
           this.form.chatHistoryConf = 2;
         }
-        if (value === "Memory_nomem" || value === "Memory_mem_report_only") {
+        if (this.isSummaryMemoryDisabled(value)) {
           this.tempSummaryMemory = this.form.summaryMemory;
           this.form.summaryMemory = "";
         } else if (this.tempSummaryMemory !== "" && this.form.summaryMemory === "") {
@@ -1501,9 +1501,18 @@ export default {
       }
     },
     updateChatHistoryConf() {
-      if (this.form.model.memModelId === "Memory_nomem") {
+      if (!this.isMemoryModelEnabled(this.form.model.memModelId)) {
         this.form.chatHistoryConf = 0;
       }
+    },
+    isMemoryModelEnabled(modelId) {
+      return Boolean(modelId && modelId !== "Memory_nomem");
+    },
+    isSummaryMemoryDisabled(modelId) {
+      return !modelId ||
+        modelId === "Memory_nomem" ||
+        modelId === "Memory_mem_report_only" ||
+        modelId === "Memory_managed_memory";
     },
     // 加载功能状态
     async loadFeatureStatus() {
