@@ -11,21 +11,53 @@
       </div>
     </div>
 
-    <div class="memory-actions">
-      <el-input v-model="rememberText" placeholder="输入需要长期记住的事实或偏好" clearable />
-      <el-button type="primary" icon="el-icon-plus" @click="remember">记住</el-button>
-      <el-input v-model="forgetText" placeholder="输入需要忘记或屏蔽的内容" clearable />
-      <el-button type="danger" icon="el-icon-delete" @click="forget">忘记</el-button>
+    <div class="memory-maintenance">
+      <div class="maintenance-block">
+        <div class="maintenance-label">手动记住</div>
+        <el-input v-model="rememberText" placeholder="输入需要长期保留的事实或偏好" clearable />
+        <el-button type="primary" icon="el-icon-plus" @click="remember">写入</el-button>
+      </div>
+      <div class="maintenance-block">
+        <div class="maintenance-label">手动忘记</div>
+        <el-input v-model="forgetText" placeholder="输入需要屏蔽或遗忘的内容" clearable />
+        <el-button type="danger" icon="el-icon-delete" @click="forget">加入名单</el-button>
+      </div>
     </div>
 
     <el-tabs v-model="activeTab" class="memory-tabs">
       <el-tab-pane label="图谱" name="graph">
+        <div class="overview-grid">
+          <div class="overview-item">
+            <span>生效事实</span>
+            <strong>{{ memoryGraph.stats.facts }}</strong>
+          </div>
+          <div class="overview-item warning">
+            <span>待确认候选</span>
+            <strong>{{ memoryGraph.stats.candidates }}</strong>
+          </div>
+          <div class="overview-item">
+            <span>记忆分类</span>
+            <strong>{{ memoryGraph.stats.categories }}</strong>
+          </div>
+          <div class="overview-item danger">
+            <span>忘记规则</span>
+            <strong>{{ memoryGraph.stats.tombstones }}</strong>
+          </div>
+        </div>
+
         <div class="graph-toolbar">
-          <div class="graph-metrics">
-            <span>事实 {{ memoryGraph.stats.facts }}</span>
-            <span>候选 {{ memoryGraph.stats.candidates }}</span>
-            <span>分类 {{ memoryGraph.stats.categories }}</span>
-            <span>忘记 {{ memoryGraph.stats.tombstones }}</span>
+          <div class="graph-filters">
+            <span>分类</span>
+            <el-radio-group v-model="graphCategoryFilter" size="mini">
+              <el-radio-button label="all">全部</el-radio-button>
+              <el-radio-button
+                v-for="category in memoryGraph.categoryOptions"
+                :key="category.value"
+                :label="category.value"
+              >
+                {{ category.label }}
+              </el-radio-button>
+            </el-radio-group>
           </div>
           <div class="graph-legend">
             <span><i class="legend-dot agent"></i>智能体</span>
@@ -68,6 +100,9 @@
               </g>
             </svg>
             <el-empty v-else description="暂无可视化记忆"></el-empty>
+            <div v-if="memoryGraph.stats.hidden" class="graph-hidden-tip">
+              已隐藏 {{ memoryGraph.stats.hidden }} 条低优先级记录，可在下方表格查看完整列表。
+            </div>
           </div>
 
           <div class="graph-detail">
@@ -98,8 +133,42 @@
             </template>
             <template v-else>
               <div class="detail-type">节点详情</div>
-              <div class="detail-content">点击一条事实记忆后，可以在这里直接编辑、归档或删除。</div>
+              <div class="detail-content">点击左侧分类、事实、候选或忘记规则后，在这里查看完整内容和可用操作。</div>
             </template>
+          </div>
+        </div>
+
+        <div class="graph-records">
+          <div class="records-section">
+            <div class="records-title">事实记忆</div>
+            <el-table :data="visibleGraphFacts" border height="240" size="mini" empty-text="暂无事实记忆">
+              <el-table-column prop="category" label="分类" width="120" :formatter="categoryFormatter" />
+              <el-table-column prop="canonicalText" label="内容" min-width="280" show-overflow-tooltip />
+              <el-table-column prop="importance" label="重要性" width="80" />
+              <el-table-column prop="status" label="状态" width="90" :formatter="statusFormatter" />
+              <el-table-column label="操作" width="190" fixed="right">
+                <template slot-scope="{ row }">
+                  <el-button size="mini" type="text" @click="selectFactRow(row)">查看</el-button>
+                  <el-button size="mini" type="text" @click="openEdit(row)">编辑</el-button>
+                  <el-button size="mini" type="text" class="danger-action" @click="deleteFact(row)">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+          <div class="records-section">
+            <div class="records-title">候选记忆</div>
+            <el-table :data="visibleGraphCandidates" border height="240" size="mini" empty-text="暂无待确认候选">
+              <el-table-column prop="category" label="分类" width="120" :formatter="categoryFormatter" />
+              <el-table-column prop="canonicalText" label="内容" min-width="260" show-overflow-tooltip />
+              <el-table-column prop="confidence" label="置信" width="80" />
+              <el-table-column label="操作" width="150" fixed="right">
+                <template slot-scope="{ row }">
+                  <el-button size="mini" type="text" @click="selectCandidateRow(row)">查看</el-button>
+                  <el-button size="mini" type="text" @click="confirmCandidate(row)">确认</el-button>
+                  <el-button size="mini" type="text" @click="rejectCandidate(row)">拒绝</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
           </div>
         </div>
       </el-tab-pane>
@@ -172,10 +241,24 @@
     <el-dialog title="编辑记忆" :visible.sync="editVisible" width="560px">
       <el-form :model="editForm" label-width="90px">
         <el-form-item label="类型">
-          <el-input v-model="editForm.memoryType" />
+          <el-select v-model="editForm.memoryType" filterable allow-create default-first-option style="width: 100%">
+            <el-option
+              v-for="item in memoryTypeOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="分类">
-          <el-input v-model="editForm.category" />
+          <el-select v-model="editForm.category" filterable allow-create default-first-option style="width: 100%">
+            <el-option
+              v-for="item in categoryOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="内容">
           <el-input v-model="editForm.canonicalText" type="textarea" :rows="5" />
@@ -206,6 +289,7 @@ export default {
       agentName: '',
       loading: false,
       activeTab: 'graph',
+      graphCategoryFilter: 'all',
       rememberText: '',
       forgetText: '',
       editVisible: false,
@@ -223,6 +307,32 @@ export default {
     };
   },
   computed: {
+    memoryTypeOptions() {
+      return this.dynamicOptions('memoryType', this.editForm.memoryType);
+    },
+    categoryOptions() {
+      return this.dynamicOptions('category', this.editForm.category);
+    },
+    filteredFacts() {
+      const facts = (this.dashboard.facts || []).filter((item) => item.status !== 'deleted');
+      if (this.graphCategoryFilter === 'all') {
+        return facts;
+      }
+      return facts.filter((item) => (item.category || '未分类') === this.graphCategoryFilter);
+    },
+    filteredCandidates() {
+      const candidates = (this.dashboard.candidates || []).filter((item) => item.status === 'pending');
+      if (this.graphCategoryFilter === 'all') {
+        return candidates;
+      }
+      return candidates.filter((item) => (item.category || '候选') === this.graphCategoryFilter);
+    },
+    visibleGraphFacts() {
+      return this.filteredFacts.slice(0, 20);
+    },
+    visibleGraphCandidates() {
+      return this.filteredCandidates.slice(0, 20);
+    },
     memoryGraph() {
       const facts = (this.dashboard.facts || []).filter((item) => item.status !== 'deleted');
       const candidates = (this.dashboard.candidates || []).filter((item) => item.status === 'pending');
@@ -230,16 +340,23 @@ export default {
       const nodes = [];
       const edges = [];
       const nodeMap = new Map();
-      const maxFacts = 28;
-      const maxCandidates = 12;
-      const maxTombstones = 10;
-      const visibleFacts = facts.slice(0, maxFacts);
-      const visibleCandidates = candidates.slice(0, maxCandidates);
+      const maxFacts = 16;
+      const maxCandidates = 8;
+      const maxTombstones = 6;
+      const selectedFacts = this.filteredFacts;
+      const selectedCandidates = this.filteredCandidates;
+      const visibleFacts = selectedFacts.slice(0, maxFacts);
+      const visibleCandidates = selectedCandidates.slice(0, maxCandidates);
       const visibleTombstones = tombstones.slice(0, maxTombstones);
-      const categories = Array.from(new Set([
-        ...visibleFacts.map((item) => item.category || '未分类'),
-        ...visibleCandidates.map((item) => item.category || '候选')
-      ])).slice(0, 10);
+      const allCategories = Array.from(new Set([
+        ...facts.map((item) => item.category || '未分类'),
+        ...candidates.map((item) => item.category || '候选')
+      ]));
+      const categories = (this.graphCategoryFilter === 'all' ? allCategories : [this.graphCategoryFilter]).slice(0, 8);
+      const categoryOptions = allCategories.map((category) => ({
+        value: category,
+        label: this.categoryText(category)
+      }));
 
       const addNode = (node) => {
         nodes.push(node);
@@ -360,8 +477,8 @@ export default {
           record: tombstone,
           statusLabel: this.statusText(tombstone.status),
           tagType: 'danger',
-          x: 900,
-          y: yFor(index, Math.max(visibleTombstones.length, 1), 420, 520) - 21,
+          x: 910,
+          y: yFor(index, Math.max(visibleTombstones.length, 1), 408, 520) - 21,
           width: 180,
           title: tombstone.patternText || '忘记规则',
           subtitle: tombstone.reason || this.statusText(tombstone.status),
@@ -377,13 +494,14 @@ export default {
       return {
         nodes,
         edges,
+        categoryOptions,
         stats: {
           facts: facts.length,
           candidates: candidates.length,
-          categories: categories.length,
+          categories: allCategories.length,
           tombstones: tombstones.length,
-          hidden: Math.max(0, facts.length - maxFacts)
-            + Math.max(0, candidates.length - maxCandidates)
+          hidden: Math.max(0, selectedFacts.length - maxFacts)
+            + Math.max(0, selectedCandidates.length - maxCandidates)
             + Math.max(0, tombstones.length - maxTombstones)
         }
       };
@@ -514,6 +632,66 @@ export default {
     selectGraphNode(node) {
       this.selectedGraphNode = node;
     },
+    dynamicOptions(field, currentValue) {
+      const values = new Set();
+      [...(this.dashboard.facts || []), ...(this.dashboard.candidates || [])].forEach((item) => {
+        if (item && item[field]) {
+          values.add(item[field]);
+        }
+      });
+      if (currentValue) {
+        values.add(currentValue);
+      }
+      return Array.from(values).map((value) => ({
+        value,
+        label: this.formatMemoryLabel(value)
+      }));
+    },
+    selectFactRow(row) {
+      const id = `fact-${row.memoryId}`;
+      const node = this.memoryGraph.nodes.find((item) => item.id === id);
+      this.selectedGraphNode = node || this.buildGraphNode({
+        id,
+        type: 'fact',
+        typeLabel: '事实记忆',
+        actionType: 'fact',
+        record: row,
+        title: row.canonicalText || '未命名事实',
+        subtitle: `${this.memoryTypeText(row.memoryType)} · ${this.statusText(row.status)}`,
+        statusLabel: this.statusText(row.status),
+        tagType: 'success',
+        content: row.canonicalText,
+        meta: [
+          { label: '记忆类型', value: this.memoryTypeText(row.memoryType) },
+          { label: '记忆分类', value: this.categoryText(row.category) },
+          { label: '适用范围', value: this.scopeText(row.scopeType, row.scopeId) },
+          { label: '置信度', value: this.scorePercent(row.confidence) },
+          { label: '重要性', value: this.scorePercent(row.importance) }
+        ]
+      });
+    },
+    selectCandidateRow(row) {
+      const id = `candidate-${row.candidateId}`;
+      const node = this.memoryGraph.nodes.find((item) => item.id === id);
+      this.selectedGraphNode = node || this.buildGraphNode({
+        id,
+        type: 'candidate',
+        typeLabel: '候选记忆',
+        actionType: 'candidate',
+        record: row,
+        title: row.canonicalText || '候选记忆',
+        subtitle: `${this.categoryText(row.category)} · ${this.statusText(row.status)}`,
+        statusLabel: this.statusText(row.status),
+        tagType: 'warning',
+        content: row.canonicalText,
+        meta: [
+          { label: '记忆分类', value: this.categoryText(row.category) },
+          { label: '记忆类型', value: this.memoryTypeText(row.memoryType) },
+          { label: '置信度', value: this.scorePercent(row.confidence) },
+          { label: '重要性', value: this.scorePercent(row.importance) }
+        ]
+      });
+    },
     truncateGraphText(text, maxLength) {
       const value = String(text || '');
       return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
@@ -529,24 +707,22 @@ export default {
       const categoryMap = {
         explicit: '用户明确记住',
         manual: '手动维护',
-        preference: '偏好',
-        profile: '画像',
         tool: '工具经验',
         candidate: '候选'
       };
-      return categoryMap[value] || value || '未分类';
+      return categoryMap[value] || this.formatMemoryLabel(value) || '未分类';
     },
     memoryTypeText(value) {
       const typeMap = {
-        preference: '偏好事实',
-        profile: '用户画像',
-        episodic: '事件事实',
-        semantic: '长期事实',
         tool_behavior: '工具经验',
         explicit: '明确记住',
         memory: '长期记忆'
       };
-      return typeMap[value] || value || '长期记忆';
+      return typeMap[value] || this.formatMemoryLabel(value) || '长期记忆';
+    },
+    formatMemoryLabel(value) {
+      if (!value) return '';
+      return String(value).replace(/_/g, ' ');
     },
     statusText(value) {
       const statusMap = {
@@ -617,17 +793,71 @@ export default {
   gap: 10px;
 }
 
-.memory-actions {
+.memory-maintenance {
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) auto minmax(240px, 1fr) auto;
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
   margin-bottom: 14px;
+}
+
+.maintenance-block {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e4e8f1;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.maintenance-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #2f3548;
 }
 
 .memory-tabs {
   background: #fff;
   padding: 16px;
   border-radius: 8px;
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.overview-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 64px;
+  padding: 0 16px;
+  border: 1px solid #e4e8f1;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.overview-item span {
+  font-size: 13px;
+  color: #687186;
+}
+
+.overview-item strong {
+  font-size: 24px;
+  line-height: 1;
+  color: #2f3548;
+}
+
+.overview-item.warning strong {
+  color: #b7791f;
+}
+
+.overview-item.danger strong {
+  color: #c53030;
 }
 
 .graph-toolbar {
@@ -638,20 +868,19 @@ export default {
   margin-bottom: 12px;
 }
 
-.graph-metrics,
+.graph-filters,
 .graph-legend {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 10px;
   font-size: 12px;
   color: #687186;
 }
 
-.graph-metrics span {
-  padding: 5px 8px;
-  background: #f4f6fb;
-  border: 1px solid #e5e9f2;
-  border-radius: 6px;
+.graph-filters > span {
+  font-weight: 700;
+  color: #2f3548;
 }
 
 .graph-legend span {
@@ -681,6 +910,7 @@ export default {
 }
 
 .graph-canvas {
+  position: relative;
   min-height: 560px;
   border: 1px solid #e4e8f1;
   border-radius: 8px;
@@ -737,6 +967,18 @@ export default {
 
 .graph-node.selected rect {
   stroke-width: 2.4;
+}
+
+.graph-hidden-tip {
+  position: absolute;
+  left: 14px;
+  bottom: 12px;
+  padding: 6px 10px;
+  border: 1px solid #dce3ef;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #687186;
+  font-size: 12px;
 }
 
 .node-title {
@@ -817,9 +1059,37 @@ export default {
   border-top: 1px solid #eef1f7;
 }
 
+.graph-records {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.records-section {
+  min-width: 0;
+}
+
+.records-title {
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #2f3548;
+}
+
+.danger-action {
+  color: #c53030;
+}
+
 @media (max-width: 900px) {
-  .memory-actions,
-  .graph-layout {
+  .memory-maintenance,
+  .graph-layout,
+  .graph-records,
+  .overview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .maintenance-block {
     grid-template-columns: 1fr;
   }
 

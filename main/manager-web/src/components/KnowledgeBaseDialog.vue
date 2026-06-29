@@ -1,32 +1,33 @@
 <template>
   <el-dialog :title="title" :visible="dialogVisible" width="800px" class="knowledge-base-dialog" @close="handleClose">
     <el-form ref="knowledgeBaseForm" :model="form" :rules="rules" label-width="130px" size="medium">
-      <el-form-item :label="$t('knowledgeBaseDialog.name')" prop="name">
-        <el-input v-model="form.name" :placeholder="$t('knowledgeBaseDialog.namePlaceholder')" clearable></el-input>
-      </el-form-item>
-      <el-form-item :label="$t('knowledgeBaseDialog.description')" prop="description">
-        <el-input v-model="form.description" :placeholder="$t('knowledgeBaseDialog.descriptionPlaceholder')"
-          type="textarea" :rows="4" maxlength="300" show-word-limit></el-input>
-      </el-form-item>
-      <el-form-item :label="$t('knowledgeBaseDialog.ragModel')" prop="ragModelId">
-        <el-select v-model="form.ragModelId" :placeholder="$t('knowledgeBaseDialog.ragModelPlaceholder')" clearable
-          filterable style="width: 100%" @focus="loadRAGModels">
-          <el-option v-for="model in ragModels" :key="model.id" :label="model.modelName" :value="model.id">
-          </el-option>
-        </el-select>
-      </el-form-item>
-      <el-divider content-position="left">{{ $t('knowledgeBaseDialog.chunkModelConfig') }}</el-divider>
-      <div class="chunk-config-panel" :class="{ 'is-disabled': !parserForm.llm_enabled }">
-        <div class="chunk-config-header">
-          <div>
-            <div class="chunk-config-title">{{ $t('knowledgeBaseDialog.llmEnabled') }}</div>
-            <div class="chunk-config-status">
-              {{ parserForm.llm_enabled ? $t('knowledgeBaseDialog.llmEnabledStatus') : $t('knowledgeBaseDialog.llmDisabledStatus') }}
-            </div>
-          </div>
+      <div class="dialog-section">
+        <div class="section-title">基础信息</div>
+        <el-form-item :label="$t('knowledgeBaseDialog.name')" prop="name">
+          <el-input v-model="form.name" :placeholder="$t('knowledgeBaseDialog.namePlaceholder')" clearable></el-input>
+        </el-form-item>
+        <el-form-item :label="$t('knowledgeBaseDialog.description')" prop="description">
+          <el-input v-model="form.description" :placeholder="$t('knowledgeBaseDialog.descriptionPlaceholder')"
+            type="textarea" :rows="4" maxlength="300" show-word-limit></el-input>
+        </el-form-item>
+      </div>
+
+      <div class="dialog-section">
+        <div class="section-title">检索模型</div>
+        <el-form-item :label="$t('knowledgeBaseDialog.ragModel')" prop="ragModelId">
+          <el-select v-model="form.ragModelId" :placeholder="$t('knowledgeBaseDialog.ragModelPlaceholder')" clearable
+            filterable style="width: 100%" @focus="loadRAGModels">
+            <el-option v-for="model in ragModels" :key="model.id" :label="model.modelName" :value="model.id">
+            </el-option>
+          </el-select>
+        </el-form-item>
+      </div>
+
+      <div class="dialog-section">
+        <div class="section-header">
+          <div class="section-title">{{ $t('knowledgeBaseDialog.chunkModelConfig') }}</div>
           <el-switch v-model="parserForm.llm_enabled"></el-switch>
         </div>
-
         <div class="chunk-config-fields" v-if="parserForm.llm_enabled">
           <el-form-item :label="$t('knowledgeBaseDialog.llmModelConfig')">
             <el-select v-model="parserForm.llm_model_id" :placeholder="$t('knowledgeBaseDialog.llmModelConfigPlaceholder')"
@@ -48,57 +49,62 @@
             </div>
           </div>
         </div>
+        <el-empty v-else :image-size="48" description="未启用大模型切片，上传文档时使用规则切片"></el-empty>
       </div>
-      <el-divider content-position="left">{{ $t('knowledgeBaseDialog.retrievalConfig') }}</el-divider>
-      <el-row :gutter="12">
-        <el-col :span="12">
-          <el-form-item :label="$t('knowledgeBaseDialog.retrievalMode')">
-            <el-radio-group v-model="retrievalForm.mode" size="small">
-              <el-radio-button label="normal">{{ $t('knowledgeBaseDialog.retrievalModeNormal') }}</el-radio-button>
-              <el-radio-button label="exhibition">{{ $t('knowledgeBaseDialog.retrievalModeExhibition') }}</el-radio-button>
-            </el-radio-group>
+
+      <el-collapse v-model="advancedPanels" class="advanced-collapse">
+        <el-collapse-item :title="$t('knowledgeBaseDialog.retrievalConfig')" name="retrieval">
+          <el-row :gutter="12">
+            <el-col :span="12">
+              <el-form-item :label="$t('knowledgeBaseDialog.retrievalMode')">
+                <el-radio-group v-model="retrievalForm.mode" size="small">
+                  <el-radio-button label="normal">{{ $t('knowledgeBaseDialog.retrievalModeNormal') }}</el-radio-button>
+                  <el-radio-button label="exhibition">{{ $t('knowledgeBaseDialog.retrievalModeExhibition') }}</el-radio-button>
+                </el-radio-group>
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item :label="$t('knowledgeBaseDialog.searchType')">
+                <el-radio-group v-model="retrievalForm.search_type" size="small">
+                  <el-radio-button label="semantic">{{ $t('knowledgeBaseDialog.searchTypeSemantic') }}</el-radio-button>
+                  <el-radio-button label="hybrid">{{ $t('knowledgeBaseDialog.searchTypeHybrid') }}</el-radio-button>
+                </el-radio-group>
+              </el-form-item>
+            </el-col>
+          </el-row>
+          <el-row :gutter="12">
+            <el-col :span="12">
+              <el-form-item :label="$t('knowledgeBaseDialog.semanticLevel')">
+                <el-input-number v-model="retrievalForm.semantic_level" :min="1" :max="5" :step="1"
+                  style="width: 100%"></el-input-number>
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item :label="$t('knowledgeBaseDialog.semanticTopK')">
+                <el-input-number v-model="retrievalForm.semantic_top_k" :min="1" :max="50" :step="1"
+                  style="width: 100%"></el-input-number>
+              </el-form-item>
+            </el-col>
+          </el-row>
+          <el-row :gutter="12">
+            <el-col :span="12">
+              <el-form-item :label="$t('knowledgeBaseDialog.faqThreshold')">
+                <el-input-number v-model="retrievalForm.faq_threshold" :min="0" :max="1" :step="0.01" :precision="2"
+                  style="width: 100%"></el-input-number>
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item :label="$t('knowledgeBaseDialog.semanticThreshold')">
+                <el-input-number v-model="retrievalForm.semantic_threshold" :min="0" :max="1" :step="0.01" :precision="2"
+                  style="width: 100%"></el-input-number>
+              </el-form-item>
+            </el-col>
+          </el-row>
+          <el-form-item :label="$t('knowledgeBaseDialog.rerankEnabled')">
+            <el-switch v-model="retrievalForm.rerank_enabled"></el-switch>
           </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item :label="$t('knowledgeBaseDialog.searchType')">
-            <el-radio-group v-model="retrievalForm.search_type" size="small">
-              <el-radio-button label="semantic">{{ $t('knowledgeBaseDialog.searchTypeSemantic') }}</el-radio-button>
-              <el-radio-button label="hybrid">{{ $t('knowledgeBaseDialog.searchTypeHybrid') }}</el-radio-button>
-            </el-radio-group>
-          </el-form-item>
-        </el-col>
-      </el-row>
-      <el-row :gutter="12">
-        <el-col :span="12">
-          <el-form-item :label="$t('knowledgeBaseDialog.semanticLevel')">
-            <el-input-number v-model="retrievalForm.semantic_level" :min="1" :max="5" :step="1"
-              style="width: 100%"></el-input-number>
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item :label="$t('knowledgeBaseDialog.semanticTopK')">
-            <el-input-number v-model="retrievalForm.semantic_top_k" :min="1" :max="50" :step="1"
-              style="width: 100%"></el-input-number>
-          </el-form-item>
-        </el-col>
-      </el-row>
-      <el-row :gutter="12">
-        <el-col :span="12">
-          <el-form-item :label="$t('knowledgeBaseDialog.faqThreshold')">
-            <el-input-number v-model="retrievalForm.faq_threshold" :min="0" :max="1" :step="0.01" :precision="2"
-              style="width: 100%"></el-input-number>
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item :label="$t('knowledgeBaseDialog.semanticThreshold')">
-            <el-input-number v-model="retrievalForm.semantic_threshold" :min="0" :max="1" :step="0.01" :precision="2"
-              style="width: 100%"></el-input-number>
-          </el-form-item>
-        </el-col>
-      </el-row>
-      <el-form-item :label="$t('knowledgeBaseDialog.rerankEnabled')">
-        <el-switch v-model="retrievalForm.rerank_enabled"></el-switch>
-      </el-form-item>
+        </el-collapse-item>
+      </el-collapse>
     </el-form>
     <div slot="footer" class="dialog-footer">
       <el-button @click="handleClose">{{ $t('knowledgeBaseDialog.cancel') }}</el-button>
@@ -138,6 +144,7 @@ export default {
       dialogVisible: this.visible,
       ragModels: [],
       llmModels: [],
+      advancedPanels: [],
       parserForm: this.defaultParserForm(),
       retrievalForm: this.defaultRetrievalForm(),
       parserConfigValue: {},
@@ -298,7 +305,6 @@ export default {
         };
         this.parserConfigValue = parserConfig;
       } catch (e) {
-        console.warn("parserConfig解析失败，使用默认切片模型配置", e);
         this.parserForm = defaults;
         this.retrievalForm = retrievalDefaults;
         this.parserConfigValue = {};
@@ -337,15 +343,12 @@ export default {
       this.$emit("update:visible", false);
     },
     handleSubmit() {
-      console.log('KnowledgeBaseDialog handleSubmit called');
       if (this.parserForm.llm_enabled && !this.parserForm.llm_model_id) {
         this.$message.error(this.$t('knowledgeBaseDialog.llmModelConfigRequired'));
         return;
       }
       this.$refs.knowledgeBaseForm.validate(valid => {
-        console.log('Form validation result:', valid);
         if (valid) {
-          console.log('Emitting submit event with form:', this.form);
           this.$emit("submit", {
             ...this.form,
             parserConfig: this.buildParserConfig()
@@ -358,20 +361,14 @@ export default {
         return; // 已经加载过，避免重复加载
       }
 
-      console.log('开始加载RAG模型列表');
       Api.model.getRAGModels((res) => {
-        console.log('RAG模型列表响应:', res);
         if (res.data && res.data.code === 0) {
           this.ragModels = res.data.data || [];
-          console.log('RAG模型列表加载成功，共', this.ragModels.length, '个模型');
 
-          // 如果是新增知识库且没有设置ragModelId，则默认选择第一个RAG模型
           if (!this.form.id && !this.form.ragModelId && this.ragModels.length > 0) {
             this.$set(this.form, 'ragModelId', this.ragModels[0].id);
-            console.log('已设置默认RAG模型:', this.ragModels[0].id);
           }
         } else {
-          console.error('获取RAG模型列表失败:', res.data?.msg);
           this.$message.error(this.$t('knowledgeBaseDialog.loadRAGModelsFailed'));
         }
       });
@@ -407,7 +404,7 @@ export default {
 <style lang="scss" scoped>
 .knowledge-base-dialog {
   ::v-deep .el-dialog {
-    border-radius: 20px;
+    border-radius: 8px;
     overflow: hidden;
   }
 
@@ -423,6 +420,33 @@ export default {
     font-weight: 500;
     color: #34495e;
     font-size: 14px;
+  }
+
+  .dialog-section {
+    margin-bottom: 18px;
+    padding: 16px 18px;
+    border: 1px solid #e4e8f1;
+    border-radius: 8px;
+    background: #fff;
+  }
+
+  .section-title {
+    margin-bottom: 14px;
+    font-size: 15px;
+    line-height: 20px;
+    font-weight: 700;
+    color: #2f3548;
+  }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+
+    .section-title {
+      margin-bottom: 0;
+    }
   }
 
   ::v-deep .el-input {
@@ -469,43 +493,9 @@ export default {
     }
   }
 
-  .chunk-config-panel {
-    margin-bottom: 22px;
-    padding: 18px 20px;
-    border: 1px solid #dfe6f2;
-    border-radius: 8px;
-    background: #f8fafc;
-    transition: border-color 0.2s ease, background 0.2s ease;
-
-    &.is-disabled {
-      background: #fbfcfe;
-      border-color: #e8edf5;
-    }
-  }
-
-  .chunk-config-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    margin-bottom: 16px;
-  }
-
-  .chunk-config-title {
-    font-size: 16px;
-    line-height: 22px;
-    font-weight: 600;
-    color: #1f2d3d;
-  }
-
-  .chunk-config-status {
-    margin-top: 4px;
-    font-size: 13px;
-    line-height: 18px;
-    color: #7b8794;
-  }
-
   .chunk-config-fields {
+    margin-top: 16px;
+
     ::v-deep .el-form-item {
       margin-bottom: 16px;
     }
@@ -539,6 +529,28 @@ export default {
     font-size: 14px;
     line-height: 20px;
     color: #34495e;
+  }
+
+  .advanced-collapse {
+    margin-top: 2px;
+    border-top: 1px solid #e4e8f1;
+    border-bottom: 1px solid #e4e8f1;
+
+    ::v-deep .el-collapse-item__header {
+      padding: 0 18px;
+      font-size: 15px;
+      font-weight: 700;
+      color: #2f3548;
+      background: #f8fafc;
+    }
+
+    ::v-deep .el-collapse-item__content {
+      padding: 18px 18px 4px;
+    }
+  }
+
+  ::v-deep .el-empty {
+    padding: 18px 0 4px;
   }
 
   .dialog-footer {

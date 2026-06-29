@@ -22,7 +22,7 @@ function getAuthToken() {
  */
 function makeApiRequest(config) {
   const token = getAuthToken();
-  const { url, method, data, headers, callback, errorCallback, errorMessage, retryFunction } = config;
+  const { url, method, data, headers, callback, errorCallback, retryFunction } = config;
 
   const requestBuilder = RequestService.sendRequest()
     .url(url)
@@ -42,7 +42,6 @@ function makeApiRequest(config) {
       callback(res);
     })
     .fail((err) => {
-      console.error(errorMessage || '操作失败', err);
       if (errorCallback) {
         errorCallback(err);
       }
@@ -90,28 +89,13 @@ export default {
    * @param {Function} errorCallback - 错误回调
    */
   createKnowledgeBase(data, callback, errorCallback) {
-    console.log('createKnowledgeBase called with data:', data);
-    console.log('API URL:', `${getServiceUrl()}/datasets`);
-
     makeApiRequest({
       url: `${getServiceUrl()}/datasets`,
       method: 'POST',
       data: data,
       headers: { 'Content-Type': 'application/json' },
-      callback: (res) => {
-        console.log('createKnowledgeBase success response:', res);
-        callback(res);
-      },
-      errorCallback: (err) => {
-        console.error('创建知识库失败:', err);
-        if (err.response) {
-          console.error('Error response data:', err.response.data);
-          console.error('Error response status:', err.response.status);
-        }
-        if (errorCallback) {
-          errorCallback(err);
-        }
-      },
+      callback: callback,
+      errorCallback: errorCallback,
       errorMessage: '创建知识库失败',
       retryFunction: () => this.createKnowledgeBase(data, callback, errorCallback)
     });
@@ -125,9 +109,6 @@ export default {
    * @param {Function} errorCallback - 错误回调
    */
   updateKnowledgeBase(datasetId, data, callback, errorCallback) {
-    console.log('updateKnowledgeBase called with datasetId:', datasetId, 'data:', data);
-    console.log('API URL:', `${getServiceUrl()}/datasets/${datasetId}`);
-
     makeApiRequest({
       url: `${getServiceUrl()}/datasets/${datasetId}`,
       method: 'PUT',
@@ -147,9 +128,6 @@ export default {
    * @param {Function} errorCallback - 错误回调
    */
   deleteKnowledgeBase(datasetId, callback, errorCallback) {
-    console.log('deleteKnowledgeBase called with datasetId:', datasetId);
-    console.log('API URL:', `${getServiceUrl()}/datasets/${datasetId}`);
-
     makeApiRequest({
       url: `${getServiceUrl()}/datasets/${datasetId}`,
       method: 'DELETE',
