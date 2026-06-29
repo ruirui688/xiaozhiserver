@@ -4,7 +4,9 @@
 """
 
 import cnlunar
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+BEIJING_TZ = timezone(timedelta(hours=8), name="Asia/Shanghai")
 
 WEEKDAY_MAP = {
     "Monday": "星期一",
@@ -21,21 +23,28 @@ def get_current_time() -> str:
     """
     获取当前时间字符串 (格式: HH:MM)
     """
-    return datetime.now().strftime("%H:%M")
+    return datetime.now(BEIJING_TZ).strftime("%H:%M")
+
+
+def get_current_datetime() -> str:
+    """
+    获取当前北京时间字符串 (格式: YYYY-MM-DD HH:MM 北京时间)
+    """
+    return datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M 北京时间")
 
 
 def get_current_date() -> str:
     """
     获取今天日期字符串 (格式: YYYY-MM-DD)
     """
-    return datetime.now().strftime("%Y-%m-%d")
+    return datetime.now(BEIJING_TZ).strftime("%Y-%m-%d")
 
 
 def get_current_weekday() -> str:
     """
     获取今天星期几
     """
-    now = datetime.now()
+    now = datetime.now(BEIJING_TZ)
     return WEEKDAY_MAP[now.strftime("%A")]
 
 
@@ -44,7 +53,7 @@ def get_current_lunar_date() -> str:
     获取农历日期字符串
     """
     try:
-        now = datetime.now()
+        now = datetime.now(BEIJING_TZ)
         today_lunar = cnlunar.Lunar(now, godType="8char")
         return "%s年%s%s" % (
             today_lunar.lunarYearCn,

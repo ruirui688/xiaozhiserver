@@ -2,6 +2,7 @@ import uuid
 import re
 from typing import List, Dict
 from datetime import datetime
+from core.utils.current_time import get_current_datetime
 
 
 class Message:
@@ -130,7 +131,7 @@ class Dialogue:
         if system_message and dynamic_part:
             # 替换时间占位符
             dynamic_part = dynamic_part.replace(
-                "{{current_time}}", datetime.now().strftime("%H:%M")
+                "{{current_time}}", get_current_datetime()
             )
 
             # 填充记忆
