@@ -198,7 +198,11 @@ def _search_tavily(
 
 
 @register_function("web_search", WEB_SEARCH_FUNCTION_DESC, ToolType.SYSTEM_CTL)
-def web_search(conn: "ConnectionHandler", query: str = None):
+def web_search(conn: "ConnectionHandler", query: str = None, lang: str = None, **extra_args):
+    if lang or extra_args:
+        logger.bind(tag=TAG).debug(
+            f"web_search 忽略非核心参数 | lang={lang} | extra_args={extra_args}"
+        )
     logger.bind(tag=TAG).info(f"web_search 被调用 | query={query}")
     if not query:
         return ActionResponse(Action.REQLLM, "请提供搜索关键词。", None)
