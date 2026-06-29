@@ -3,4 +3,65 @@
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="xiaozhi.modules.knowledge.dao.KnowledgeChunkDao">
+    <resultMap id="BaseResultMap" type="xiaozhi.modules.knowledge.entity.KnowledgeChunkEntity">
+        <id property="id" column="id" jdbcType="VARCHAR"/>
+        <result property="datasetId" column="dataset_id" jdbcType="VARCHAR"/>
+        <result property="documentId" column="document_id" jdbcType="VARCHAR"/>
+        <result property="chunkId" column="chunk_id" jdbcType="VARCHAR"/>
+        <result property="content" column="content" jdbcType="LONGVARCHAR"/>
+        <result property="question" column="question" jdbcType="LONGVARCHAR"/>
+        <result property="answer" column="answer" jdbcType="LONGVARCHAR"/>
+        <result property="sortOrder" column="sort_order" jdbcType="INTEGER"/>
+        <result property="tokenCount" column="token_count" jdbcType="BIGINT"/>
+        <result property="createdAt" column="created_at" jdbcType="TIMESTAMP"/>
+        <result property="updatedAt" column="updated_at" jdbcType="TIMESTAMP"/>
+    </resultMap>
+
+    <select id="selectRetrievalCandidates" resultMap="BaseResultMap">
+        SELECT
+            id,
+            dataset_id,
+            document_id,
+            chunk_id,
+            content,
+            question,
+            answer,
+            sort_order,
+            token_count,
+            created_at,
+            updated_at
+        FROM ai_rag_knowledge_chunk
+        WHERE dataset_id IN
+        <foreach collection="datasetIds" item="datasetId" open="(" separator="," close=")">
+            #{datasetId}
+        </foreach>
+        <if test="documentIds != null and documentIds.size() > 0">
+            AND document_id IN
+            <foreach collection="documentIds" item="documentId" open="(" separator="," close=")">
+                #{documentId}
+            </foreach>
+        </if>
+        <choose>
+            <when test="fulltextQuery != null and fulltextQuery != ''">
+                AND (
+                    MATCH(content, question, answer) AGAINST(#{fulltextQuery} IN BOOLEAN MODE)
+                )
+            </when>
+            <when test="terms != null and terms.size() > 0">
+                AND
+                <foreach collection="terms" item="term" open="(" separator=" OR " close=")">
+                    INSTR(content, #{term}) > 0
+                    OR INSTR(question, #{term}) > 0
+                    OR INSTR(answer, #{term}) > 0
+                </foreach>
+            </when>
+        </choose>
+        ORDER BY
+        <if test="fulltextQuery != null and fulltextQuery != ''">
+            MATCH(content, question, answer) AGAINST(#{fulltextQuery} IN BOOLEAN MODE) DESC,
+        </if>
+            sort_order ASC,
+            id ASC
+        LIMIT #{limit}
+    </select>
 </mapper>

@@ -113,7 +113,21 @@
 官方同步时的处理规则：如果官方修改启动脚本、配置目录、Docker/Compose、部署文档、.gitignore 或开发规范，必须保留以下约定：日常本地开发以 `scripts/dev` 为统一入口；私有配置和运行产物进入 `runtime/` 或旧兼容私有路径且不得提交；脱敏示例进入 `config/examples/`；部署资产后续归档到 `deploy/`；现有部署脚本迁移前必须保留兼容入口；官方同步前必须按 `upstream-sync-policy.md` 审查本地定制。
 ```
 
-## 8. 天气查询容错
+## 8. 生产 Docker Compose 资源限制
+
+```text
+定制模块：生产 Docker Compose 资源限制
+改动原因：生产服务器目标规格可能只有 2 核 4G。为避免 Python、Java/Web、MySQL 或 Redis 任一容器内存/CPU 失控拖死宿主机，生产最小部署包在 docker-compose.yml 中设置 cpus、mem_limit、memswap_limit、pids_limit 和日志大小限制；install 会把默认限制写入 /opt/xiaozhi-data/.env 并保留已有覆盖值。Java 容器通过 JAVA_TOOL_OPTIONS 约束堆内存，MySQL 和 Redis 也设置与容器上限匹配的运行参数。
+关键文件：
+  - deploy/production/docker-compose.yml
+  - deploy/production/install
+  - deploy/production/README.md
+  - docs/deployment/private-docker-release.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改 Docker Compose、安装脚本或生产部署文档，必须保留 2 核 4G 默认资源预算、memswap_limit 等于 mem_limit 的防 swap 约定、/opt/xiaozhi-data/.env 中 XIAOZHI_* 资源变量的持久化覆盖能力，以及 Java/MySQL/Redis 与容器限制匹配的运行参数。
+```
+
+## 9. 天气查询容错
 
 ```text
 定制模块：xiaozhi-server 天气插件
@@ -125,7 +139,7 @@
 官方同步时的处理规则：如果官方修改 get_weather 插件，必须保留以下约定：和风接口异常、认证失败、Host 无效、城市查询失败或页面抓取失败时，先使用 Open-Meteo 兜底查询；`南京市玄武区`、`南京市江宁区` 等区县输入需要规范化为城市候选；工具结果必须以 Action.RESPONSE 直接返回给用户，不能再交给 LLM 把接口错误改写成地点不存在。
 ```
 
-## 9. 视觉解释接口后台参数化
+## 10. 视觉解释接口后台参数化
 
 ```text
 定制模块：视觉模型配置下发、后台参数管理、Python 配置合并
@@ -142,7 +156,7 @@
 官方同步时的处理规则：如果官方修改 server 配置下发、SysParamsController、ConfigServiceImpl、config_loader.py 或视觉接口逻辑，必须保留 `server.vision_explain` 作为后台参数；Python 从 manager-api 读取配置时，监听地址 `server.ip/port/http_port/auth_key` 可继续以本地文件为准，但下发给设备的 `server.vision_explain` 默认必须使用后台值，只有本地文件配置了非空、非 `null`、非 `你的...` 的真实值时才允许覆盖。修改参数后需要刷新 Redis `server:config` 和 `sys:params` 缓存或通过后台保存参数触发配置重建，并重启/通知 xiaozhi-server 重新读取配置。
 ```
 
-## 10. 语义控制中枢与语音操作系统架构
+## 11. 语义控制中枢与语音操作系统架构
 
 ```text
 定制模块：xiaozhi-server 语义前置控制链路
@@ -159,7 +173,7 @@
 官方同步时的处理规则：如果官方修改 startToChat、ConnectionHandler 初始化、handle_user_intent、GameSessionManager、UnifiedToolHandler、ToolManager、abortHandle、TTS 入队或 function-call 主链路，必须保留语义控制中枢在旧意图/LLM 之前的前置拦截位置；未命中高置信度规则时必须继续兜底到旧 handle_user_intent 和 conn.chat；停止类指令必须复用 handleAbortMessage 并允许配置动作停止工具；纯语言游戏不得优先回到 active_game_tool，应交给主 LLM 对话，并只从已启用功能插件读取可编辑软规则；退出游戏不得关闭 websocket；语义模块顶层导入应尽量轻量，避免引入 opus/loguru 等运行依赖导致纯单元测试无法导入。
 ```
 
-## 11. 管理后台模型测试详情字段补全
+## 12. 管理后台模型测试详情字段补全
 
 ```text
 定制模块：manager-api 模型配置测试接口
@@ -172,25 +186,29 @@
 官方同步时的处理规则：如果官方修改模型测试接口、ModelTestResultDTO 或 manager-web 测试详情弹窗，必须保留 testModel 返回 testInput、testOutput、responseTimeMs、testStatus、testTime 的约定；视觉模型测试必须通过 testImageDataUrl 或等效可浏览器访问的预览字段展示真实测试图片，不能只显示服务端本地路径；OpenAI 兼容 LLM、Ollama、OpenAI ASR/TTS、豆包流式 ASR、视觉模型、Intent 和基础配置校验都应返回可读的测试输入与输出摘要；真实接口调用要记录调用耗时，未显式计时的路径必须由 testModel 兜底补充耗时；输出摘要不得包含 api_key、access_token、secret_key 等敏感字段。
 ```
 
-## 12. 本地知识库大模型切片与中文召回增强
+## 13. 本地知识库大模型切片与中文召回增强
 
 ```text
 定制模块：manager-api 本地知识库适配器、manager-web 知识库配置弹窗、xiaozhi-server 本地知识库工具
-改动原因：本地知识库原先对 md/txt 文档主要按固定字符数硬切，容易把标题、适用问题、正文或一句话切开；召回也只按空格/标点切词，中文整句没有空格时容易查不到。现在知识库新增/编辑界面可以为每个知识库配置阿里云百炼/OpenAI 兼容切片模型，文档解析时优先由大模型按语义结构生成 JSON 切片；召回同时匹配 content/question/answer，并使用中文 n-gram 增强自然句检索。
+改动原因：本地知识库原先对 md/txt 文档主要按固定字符数硬切，容易把标题、适用问题、正文或一句话切开；召回也只按空格/标点切词，中文整句没有空格时容易查不到。现在知识库新增/编辑界面可以为每个知识库选择模型管理中已配置的 LLM 作为切片模型，parser_config 只保存 llm_model_id 和切片参数，API Key、接口地址和上游模型名由模型管理统一维护；文档解析时优先由大模型按语义结构生成 JSON 切片；召回同时匹配 content/question/answer，并使用中文 n-gram 增强自然句检索。为避免大知识库检索时全量加载 chunk 和 O(n*m) 字符串匹配打爆 CPU，本地召回必须先在数据库中按 dataset/document 做有界候选召回，再在 Java 内存中对有限候选精排；知识库高级设置保存在 parser_config.retrieval_config 中，用于控制常规/展会模式、语义/混合检索、召回级别、最大召回数、阈值和重排开关。
 关键文件：
   - main/manager-api/src/main/java/xiaozhi/modules/knowledge/rag/impl/LocalKnowledgeAdapter.java
+  - main/manager-api/src/main/java/xiaozhi/modules/knowledge/dao/KnowledgeChunkDao.java
+  - main/manager-api/src/main/resources/mapper/knowledge/KnowledgeChunkDao.xml
   - main/manager-api/src/main/java/xiaozhi/modules/knowledge/service/impl/KnowledgeBaseServiceImpl.java
   - main/manager-api/src/main/resources/db/changelog/202606111650.sql
+  - main/manager-api/src/main/resources/db/changelog/202606291030.sql
+  - main/manager-api/src/main/resources/db/changelog/db.changelog-master.yaml
   - main/manager-web/src/components/KnowledgeBaseDialog.vue
   - main/manager-web/src/views/KnowledgeBaseManagement.vue
   - main/manager-web/src/i18n/zh_CN.js
   - main/xiaozhi-server/plugins_func/functions/search_from_local_knowledge.py
   - docs/models/local-knowledge-integration.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改本地知识库、RAG 模型配置、知识库弹窗、文档解析或本地知识库工具，必须保留知识库级 parser_config 覆盖 RAG_LocalKnowledge 默认配置的约定；百炼/OpenAI 兼容切片模型应在知识库界面配置，不要求用户去后台模型配置手动改全局模型；文档解析优先走大模型切片，失败时才回退段落切分；旧文档必须重新解析才应用新切片；召回必须同时匹配 content/question/answer，并保留中文自然句 n-gram 检索增强。
+官方同步时的处理规则：如果官方修改本地知识库、RAG 模型配置、知识库弹窗、文档解析、本地知识库工具、知识库数据库迁移或切片查询 DAO，必须保留知识库级 parser_config 覆盖 RAG_LocalKnowledge 默认配置的约定；知识库切片模型应通过 llm_model_id 复用模型管理中的 LLM 配置，知识库配置不得再次要求用户填写真实 API Key；文档解析优先走大模型切片，失败时才回退段落切分；旧文档必须重新解析才应用新切片；召回必须同时匹配 content/question/answer，并保留中文自然句 n-gram 检索增强；检索链路禁止退回全量 selectList 后逐条 contains 的实现，必须保留 SQL LIMIT 候选召回、候选 term 数量上限、最终返回数量上限和 parser_config.retrieval_config 的兼容读取；新增全文索引迁移必须登记到 db.changelog-master.yaml。
 ```
 
-## 13. 图片识别自然表达优化
+## 14. 图片识别自然表达优化
 
 ```text
 定制模块：xiaozhi-server OpenAI 兼容视觉模型、VLLM 模型配置、manager-api VLLM 供应器字段
@@ -205,7 +223,7 @@
 官方同步时的处理规则：如果官方修改 VLLM provider、视觉模型配置或模型供应器字段，必须保留默认自然表达提示词、可配置 prompt、生成参数透传和无配置时的默认兜底；视觉回复不得退回编号报告式模板。
 ```
 
-## 14. 可视化 MCP HTTP 工具
+## 15. 可视化 MCP HTTP 工具
 
 ```text
 定制模块：manager-web 智能体功能弹窗、manager-api no-code MCP tool 配置、xiaozhi-server MCP HTTP 工具桥
@@ -224,7 +242,7 @@
 官方同步时的处理规则：如果官方修改 MCP endpoint、智能体功能配置、ConfigController、AgentMcpAccessPointController 或工具 schema 下发链路，必须保留 no-code HTTP tool 的完整链路：Web 配置 JSON -> `ai_agent_mcp_no_code_tools` -> `/config/mcp/no-code-tools/{agentId}` -> `no_code_mcp_tools.py` -> MCP Endpoint tools/list/tools/call。该能力必须继续标注为高风险 HTTP 工具桥，生产环境应限制可信用户、保护 `MANAGER_API_SECRET`，并避免访问内网管理端口、云元数据地址和敏感服务。
 ```
 
-## 15. 服务器音乐播放状态与音频队列边界
+## 16. 服务器音乐播放状态与音频队列边界
 
 ```text
 定制模块：xiaozhi-server 服务器音乐播放插件
@@ -242,7 +260,7 @@
 官方同步时的处理规则：如果官方修改 `handle_user_intent`、语义控制中枢、`play_music`、TTS 队列、`Action.RECORD`、`ContentType.FILE` 或流式 TTS provider，必须保留以下约定：播放、唱某首歌、随机播放、换一首、曲库查询和音乐上下文续播应由大模型根据 `play_music` 工具描述、`<music_library>` 曲库上下文和用户表达调度，不得在旧意图入口里硬编码直接调用播放工具；“我不听了/别放了/停止播放”等停止命令可以由语义控制中枢确定性处理，且 `stop` 必须先于播放触发词处理，并直接走 `handleAbortMessage`，不得被抽成歌名；工具同步结果应使用用户可读的“正在为您播放音乐”，不要只返回“指令已接收”；“此刻为您献上/正在播放/即将为您播放 具体歌曲”这类选曲提示语必须按普通 `ContentType.TEXT` 进入 TTS 播报和 assistant 聊天记录，不得只作为屏幕状态；音乐播放入队必须按 `FIRST/ACTION -> MIDDLE/TEXT -> MIDDLE/FILE -> LAST/ACTION` 发送播放边界，确保提示语播完后再播放文件，并确保火山双流、阿里云流式、讯飞流式、Minimax 等 provider 能把暂存文件音频 flush 到设备；曲库 `.xiaozhi-music-metadata.json` 支持 `aliases` 和 `description`，用于后台配置 ASR 近音、歌曲别名、用户俗称和模型可见背景说明，源码不得写入客户或歌曲专属语义。聊天记录中的 `play_music({...})` 和 `{"result": "正在为您播放音乐"}` 是工具调用审计记录，不应被当作播放失败错误。
 ```
 
-## 16. ACR 镜像生产部署、模型可空与 FunASR 脱钩
+## 17. ACR 镜像生产部署、模型可空与 FunASR 脱钩
 
 ```text
 定制模块：ACR 镜像生产部署、模型默认配置、后台智能体模板、Python 运行时模型初始化
@@ -275,7 +293,7 @@
 官方同步时的处理规则：如果官方修改 Dockerfile、Docker Compose、安装脚本、默认模型配置、智能体模板初始化、模型配置下发或 WebSocket 初始化流程，必须保留“源码完整进入私有 Git 仓库，但生产服务器只 sparse-checkout `deploy/production` 最小部署资产；生产服务器只拉取阿里云 ACR 中已发布运行镜像，不在生产端源码构建，也不依赖 Docker Hub；生产运行镜像命名为 `xiaozhi-server:latest`、`xiaozhi-web:latest`、`mysql:8.4`、`redis:8.0`；`xiaozhi-server-base` 只服务于构建流程；生产用户只需要记住 `~/work/xiaozhi-deploy` 部署资产目录、`/opt/xiaozhi-data` 数据目录、`deploy/production/install` 首次部署和 `deploy/production/upgrade` 后续升级；生产安装不下载、不挂载、不要求 model.pt；生产镜像默认不安装 torch / torchaudio，除非显式使用完整 requirements 启用本地 FunASR；FunASR/FunASRServer 不作为可用默认 ASR；所有模型字段允许为空；模型缺失时服务可启动但对应能力不可用并记录清晰提示”的约定。
 ```
 
-## 17. 标准模型存储与运行时契约
+## 18. 标准模型存储与运行时契约
 
 ```text
 定制模块：manager-api 模型配置接口、manager-web 模型配置弹窗、xiaozhi-server 模型运行时初始化
@@ -294,7 +312,7 @@
 官方同步时的处理规则：如果官方修改模型配置查询、编辑、列表 DTO 转换、模型配置弹窗、配置下发或 Python 初始化流程，必须保留标准模型存储边界：新增/编辑接口提交 `adapterCode`、`protocol`、`upstreamModelId`、`endpointUrl`、`params`、`secrets`；后端保存到通用字段、参数表和密钥表；前端密钥只回显脱敏值，未修改的脱敏值保存时保留原密钥；运行时只下发 `selected_module + model_config`。
 ```
 
-## 18. 管理后台模型批量性能测试
+## 19. 管理后台模型批量性能测试
 
 ```text
 定制模块：manager-web 模型批量性能测试入口、manager-api 异步任务与结果入库、xiaozhi-server benchmark HTTP 接口和 runner
@@ -314,7 +332,7 @@
 ASR 专项规则：所有语音识别模型的“测试”都必须执行真实音频识别流程，包含 OpenAI/Groq/Qwen3 这类非流式上传模型、豆包/阿里云/讯飞这类流式模型，以及本地或自部署 ASR。测试详情必须能看到测试音频信息、识别文本和耗时；不能把初始化握手、接口连通、鉴权成功或必填字段完整显示为“已通过”。暂未实现真实音频测试的 ASR 供应器只能显示未通过或未实测，不能自动启用。ASR 单模型测试默认统一使用 `main/xiaozhi-server/config/assets/wakeup_words_short.wav`，不能因为 provider 实现路径或目录遍历顺序不同而使用不同音频；标准音频缺失时才允许降级到其他内置 wav。
 ```
 
-## 19. 模型配置智能助手
+## 20. 模型配置智能助手
 
 ```text
 定制模块：manager-api 模型配置助手、manager-web 模型配置页右侧助手
