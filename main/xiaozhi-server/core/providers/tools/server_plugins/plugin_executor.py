@@ -125,6 +125,8 @@ class ServerPluginExecutor(ToolExecutor):
                     self._init_news_source_description(tool_description, func_name)
                 elif func_name == "play_music":
                     self._init_music_description(tool_description)
+                elif func_name == "web_search":
+                    self._init_web_search_description(tool_description)
 
                 tools[func_name] = ToolDefinition(
                     name=func_name,
@@ -187,6 +189,22 @@ class ServerPluginExecutor(ToolExecutor):
             " 用户询问“你会放什么歌”“有什么歌”“曲库里有什么”时，不要调用本工具，"
             f"直接根据本地曲库回答。当前本地曲库：{library_text}。"
             " 只有用户明确要求播放、唱、放某首歌或随机播放音乐时，才调用本工具。"
+        )
+        try:
+            function_desc = tool_description["function"]
+            base_desc = str(function_desc.get("description") or "")
+            if guidance not in base_desc:
+                function_desc["description"] = base_desc + guidance
+        except (KeyError, TypeError):
+            pass
+
+    def _init_web_search_description(self, tool_description):
+        """Keep web search routing precise even when backend config overrides description."""
+        guidance = (
+            " 当用户要求联网查询、搜索最新信息、比分赛果、新闻事件详情或实时资料时调用本工具。"
+            "不要用于查询本地知识库、播放音乐或控制设备。"
+            "查询比分、赛果、比赛结果时，query 应优先使用“队伍A 队伍B 比分/比赛结果”这类短查询词，"
+            "不要强行加入今天日期。"
         )
         try:
             function_desc = tool_description["function"]
