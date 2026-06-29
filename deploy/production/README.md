@@ -37,7 +37,7 @@ scripts/acr-build-push
 
 # 3. On the production server — both sources are now from main
 cd ~/work/xiaozhi-deploy/deploy/production
-./upgrade
+VERSION=<git-short-sha> ./upgrade
 ```
 
 **Never run `acr-build-push` from a feature branch and then upgrade production
@@ -76,7 +76,21 @@ Standard production commands:
 ```bash
 sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
 ./install
-./upgrade
+VERSION=<git-short-sha> ./upgrade
+```
+
+`./upgrade` still supports `VERSION=latest`, but `latest` is a mutable tag. Use
+the short Git hash printed by `scripts/acr-build-push` when you need to know the
+exact image version installed on the server.
+
+Upgrade output is intentionally verbose:
+
+```text
+target version   image tag requested for this deployment
+current version  version stored in /opt/xiaozhi-data/.env from the previous run
+deploy assets    Git branch and deploy script commit before/after pull
+server/web image full image references that will be pulled and started
+Deploy complete  final image references actually attached to running containers
 ```
 
 ## Container startup order
