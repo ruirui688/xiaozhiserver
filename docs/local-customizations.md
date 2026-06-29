@@ -348,3 +348,24 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方修改模型配置页、模型配置接口、LLM 配置表或 provider/catalog 结构，必须保留以下约定：助手设置只保存已配置 LLM 的 modelId；base_url、api_key、model_name 等凭据来自标准模型配置；发送给助手的上下文必须脱敏；助手可以生成配置草案、协议接入草案、实现任务和自动化产物草案，并在用户点击后把产物写入工作区；写入必须限制在模型接入相关白名单路径，默认不覆盖已有文件，禁止绝对路径和路径越界；助手不得直接保存模型配置、启用模型、执行生产数据库变更或标记测试通过；协议不匹配时必须返回未适配，不能把同厂商不同协议的 adapter 当作可用；真正接入新协议必须经过代码审核、数据库迁移审查和真实模型测试。
 ```
+
+## 21. 长期记忆维护基础设施
+
+```text
+定制模块：manager-api 长期记忆事实层、manager-web 记忆管理页、xiaozhi-server 记忆事件上报和查询注入
+改动原因：原有 summaryMemory、mem_local_short、PowerMem 等能力偏运行时摘要或 provider 接入，缺少统一的长期维护底座。现在新增 source_event -> candidate -> fact -> revision/profile/tool_behavior/tombstone 的 MySQL 首期事实层，支持显式记住/忘记、管理端查看编辑删除归档、忘记名单、审计轨迹和运行时记忆上下文查询。Memory 模型配置可通过 `maintenance_llm` 引用模型管理里已经配置和测试的 LLM，例如 DeepSeek/OpenAI 兼容模型，用于把普通用户发言抽取为待确认候选记忆；Memory 配置不保存 API Key、Base URL 或上游模型名。Python 在聊天记录上报时同步写入原始记忆事件，LLM 前把 manager-api 长期记忆和现有 Memory provider 结果合并注入，并为记忆查询设置超时，避免拖住语音主链路。
+关键文件：
+  - main/manager-api/src/main/java/xiaozhi/modules/memory/
+  - main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelCatalogServiceImpl.java
+  - main/manager-api/src/main/resources/db/changelog/202606291520.sql
+  - main/manager-api/src/main/resources/db/changelog/db.changelog-master.yaml
+  - main/manager-web/src/views/MemoryManagement.vue
+  - main/manager-web/src/apis/module/memory.js
+  - main/manager-web/src/components/DeviceItem.vue
+  - main/xiaozhi-server/config/manage_api_client.py
+  - main/xiaozhi-server/core/handle/reportHandle.py
+  - main/xiaozhi-server/core/connection.py
+  - docs/architecture/long-term-memory-maintenance.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改 Memory provider、聊天记录上报、ConfigController、AgentController、Shiro config、角色首页、模型配置目录或数据库迁移，必须保留长期记忆事实层和 `/config/memory/**` server-secret 入口；运行时查询失败或超时时必须降级为空记忆，不能阻塞语音回复；`nomem` 模式不得注入长期记忆；`maintenance_llm` 只能引用已配置的 LLM modelId，不能把 DeepSeek 等模型密钥复制到 Memory 配置或记忆表；维护模型只能创建 `pending` 候选，不得绕过管理端确认直接写 active fact；管理端删除/归档/确认/拒绝必须写 revision 审计；显式忘记必须写 tombstone 并阻止对应内容继续被主动使用。
+```
