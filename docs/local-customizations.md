@@ -366,6 +366,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/xiaozhi-server/core/handle/reportHandle.py
   - main/xiaozhi-server/core/connection.py
   - docs/architecture/long-term-memory-maintenance.md
+  - docs/models/memory-and-knowledge-governance.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改 Memory provider、聊天记录上报、ConfigController、AgentController、Shiro config、角色首页、模型配置目录或数据库迁移，必须保留长期记忆事实层、`managed_memory` 入口和 `/config/memory/**` server-secret 入口；运行时查询失败或超时时必须降级为空记忆，不能阻塞语音回复；`nomem` 模式不得注入长期记忆；`maintenance_llm` 只能引用已配置的 LLM modelId，不能把 DeepSeek 等模型密钥复制到 Memory 配置或记忆表；维护模型只能创建 `pending` 候选，不得绕过管理端确认直接写 active fact；管理端删除/归档/确认/拒绝必须写 revision 审计；显式忘记必须写 tombstone 并阻止对应内容继续被主动使用。
+官方同步时的处理规则：如果官方修改 Memory provider、聊天记录上报、ConfigController、AgentController、Shiro config、角色首页、模型配置目录、知识库切片配置或数据库迁移，必须保留长期记忆事实层、`managed_memory` 入口和 `/config/memory/**` server-secret 入口；运行时查询失败或超时时必须降级为空记忆，不能阻塞语音回复；`nomem` 模式不得注入长期记忆，且未选择治理型记忆模式时前端不得自动弹出治理记忆专属字段；`maintenance_llm` 只能引用已配置的 LLM/SLM modelId，不能把 DeepSeek 等模型密钥复制到 Memory 配置或记忆表；知识库 LLM 辅助必须通过模型管理中的模型列表选择 `parser_config.llm_model_id`，不得在知识库页面重复保存 API Key、Base URL 或上游模型名；维护模型只能创建 `pending` 候选，不得绕过管理端确认直接写 active fact；管理端删除/归档/确认/拒绝必须写 revision 审计；显式忘记必须写 tombstone 并阻止对应内容继续被主动使用；删除 `summary_memory` 前必须先完成 Java、Vue、Python、文档和迁移的完整兼容替代。
 ```
