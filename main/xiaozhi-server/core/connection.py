@@ -27,7 +27,7 @@ from core.utils.modules_initialize import (
 )
 from core.handle.reportHandle import report, enqueue_tool_report
 from core.providers.tts.default import DefaultTTS
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from core.utils.dialogue import Message, Dialogue
 from core.providers.asr.dto.dto import InterfaceType
 from core.handle.textHandle import handleTextMessage
@@ -39,7 +39,12 @@ from core.auth import AuthenticationError
 from config.config_loader import get_private_config_from_api
 from core.providers.tts.dto.dto import ContentType, TTSMessageDTO, SentenceType
 from config.logger import setup_logging, build_module_string, create_connection_logger
-from config.manage_api_client import DeviceNotFoundException, DeviceBindException, generate_and_save_chat_title
+from config.manage_api_client import (
+    DeviceNotFoundException,
+    DeviceBindException,
+    generate_and_save_chat_title,
+    query_managed_memory,
+)
 from core.utils.model_config import has_runtime_config, normalize_runtime_config
 from core.utils.prompt_manager import PromptManager
 from core.utils.voiceprint_provider import VoiceprintProvider
@@ -984,6 +989,48 @@ class ConnectionHandler:
             handler_future = asyncio.run_coroutine_threadsafe(self.func_handler._initialize(), self.loop)
             handler_future.add_done_callback(lambda f: self.logger.bind(tag=TAG).warning(f"Tool handler init failed: {f.exception()}") if f.exception() else None)
 
+    def _query_memory_context(self, query):
+        if not query:
+            return None
+
+        memory_parts = []
+        if self.memory is not None:
+            future = asyncio.run_coroutine_threadsafe(
+                self.memory.query_memory(query), self.loop
+            )
+            try:
+                memory_str = future.result(timeout=2)
+                if memory_str:
+                    memory_parts.append(memory_str)
+            except TimeoutError:
+                future.cancel()
+                self.logger.bind(tag=TAG).warning("本地记忆查询超时，已跳过本轮记忆注入")
+            except Exception as e:
+                self.logger.bind(tag=TAG).warning(f"本地记忆查询失败，已跳过: {e}")
+
+        if self.read_config_from_api:
+            selected_memory = self.config.get("selected_module", {}).get("Memory")
+            memory_type = (
+                self.config.get("Memory", {})
+                .get(selected_memory, {})
+                .get("type")
+            )
+            if selected_memory and memory_type != "nomem":
+                future = asyncio.run_coroutine_threadsafe(
+                    query_managed_memory(self.device_id, query), self.loop
+                )
+                try:
+                    managed_memory = future.result(timeout=2)
+                    if managed_memory:
+                        memory_parts.append(managed_memory)
+                except TimeoutError:
+                    future.cancel()
+                    self.logger.bind(tag=TAG).warning("长期记忆查询超时，已跳过本轮记忆注入")
+                except Exception as e:
+                    self.logger.bind(tag=TAG).warning(f"长期记忆查询失败，已跳过: {e}")
+
+        return "\n\n".join(memory_parts) if memory_parts else None
+
     def _resolve_runtime_intent_type(self, configured_intent_type):
         if configured_intent_type != "function_call":
             return configured_intent_type
@@ -1088,13 +1135,7 @@ class ConnectionHandler:
 
         try:
             # 使用带记忆的对话
-            memory_str = None
-            # 仅当query非空（代表用户询问）时查询记忆
-            if self.memory is not None and query:
-                future = asyncio.run_coroutine_threadsafe(
-                    self.memory.query_memory(query), self.loop
-                )
-                memory_str = future.result()
+            memory_str = self._query_memory_context(query)
 
             llm_dialogue = self.dialogue.get_llm_dialogue_with_memory(
                 memory_str, self.config.get("voiceprint", {})

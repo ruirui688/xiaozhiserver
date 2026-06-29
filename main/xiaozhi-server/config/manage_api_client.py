@@ -245,6 +245,59 @@ async def report(
         return None
 
 
+async def report_memory_event(
+    mac_address: str,
+    session_id: str,
+    chat_type: int,
+    content: str,
+    event_type: str = "chat",
+    report_time: Optional[int] = None,
+) -> Optional[Dict]:
+    """上报长期记忆原始事件。失败不影响实时对话和聊天记录。"""
+    if not content or not ManageApiClient._instance:
+        return None
+    try:
+        return await ManageApiClient._instance._execute_async_request(
+            "POST",
+            "/config/memory/events",
+            json={
+                "macAddress": mac_address,
+                "sessionId": session_id,
+                "chatType": chat_type,
+                "eventType": event_type,
+                "contentText": content,
+                "sourceTimestamp": report_time,
+            },
+        )
+    except Exception as e:
+        print(f"长期记忆事件上报失败: {e}")
+        return None
+
+
+async def query_managed_memory(
+    mac_address: str, query: str, limit: int = 8
+) -> Optional[str]:
+    """查询 manager-api 维护的长期记忆上下文。"""
+    if not query or not ManageApiClient._instance:
+        return None
+    try:
+        result = await ManageApiClient._instance._execute_async_request(
+            "POST",
+            "/config/memory/query",
+            json={
+                "macAddress": mac_address,
+                "query": query,
+                "limit": limit,
+            },
+        )
+        if isinstance(result, dict):
+            return result.get("context") or ""
+        return ""
+    except Exception as e:
+        print(f"长期记忆查询失败: {e}")
+        return None
+
+
 async def lookup_address_book(caller_mac: str, nickname: str) -> Optional[Dict]:
     """根据昵称查找目标设备"""
     if not ManageApiClient._instance:

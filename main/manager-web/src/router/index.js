@@ -246,6 +246,17 @@ const routes = [
       title: '通讯录管理'
     }
   },
+  {
+    path: '/memory-management',
+    name: 'MemoryManagement',
+    component: function () {
+      return import('../views/MemoryManagement.vue')
+    },
+    meta: {
+      requiresAuth: true,
+      title: '记忆管理'
+    }
+  },
 ]
 const router = new VueRouter({
   base: process.env.VUE_APP_PUBLIC_PATH || '/',
@@ -265,7 +276,7 @@ VueRouter.prototype.push = function push(location) {
 }
 
 // 需要登录才能访问的路由
-const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'ModelConfig', 'KnowledgeBaseManagement', 'KnowledgeFileUpload', 'AddressBookManagement', 'FunctionPluginManagement', 'MusicManagement']
+const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'ModelConfig', 'KnowledgeBaseManagement', 'KnowledgeFileUpload', 'AddressBookManagement', 'FunctionPluginManagement', 'MusicManagement', 'MemoryManagement']
 
 // 路由守卫
 router.beforeEach((to, from, next) => {

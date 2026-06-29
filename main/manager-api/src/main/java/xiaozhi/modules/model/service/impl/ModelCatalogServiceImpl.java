@@ -122,7 +122,10 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             "VLLM_OPENAI_COMPATIBLE",
             "VLLM_ZHIPU_GLM_OPENAI",
             "VLLM_QWEN_VL_OPENAI",
-            "VLLM_XUNFEI_SPARK_OPENAI");
+            "VLLM_XUNFEI_SPARK_OPENAI",
+            "MEMORY_LOCAL_SHORT",
+            "MEMORY_MEM0",
+            "MEMORY_POWERMEM");
     private volatile boolean catalogSeedChecked = false;
 
     @Override
@@ -1020,18 +1023,18 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         items.add(item("MEMORY_LOCAL_SHORT", "Memory", "mem_local_short", "本地短记忆",
                 "本地系统", "短期记忆", "memory", "记忆", "builtin", "内置",
                 "local", "本地", "YAML", "总结 LLM", "llm",
-                List.of(), List.of("llm"), List.of("llm"), List.of("使用 LLM 总结，默认写入本地数据文件。"),
+                List.of(), List.of("llm"), List.of("llm", "maintenance_llm"), List.of("使用 LLM 总结，默认写入本地数据文件。"),
                 List.of(), List.of("Memory_mem_local_short"), ""));
         items.add(item("MEMORY_MEM0", "Memory", "mem0ai", "Mem0AI",
                 "Mem0", "云端记忆", "memory", "记忆", "api", "云 API",
                 "cloud", "云平台", "HTTP", "API Key", "api_key",
-                List.of("api_key"), List.of("api_key"), List.of("api_version"), List.of(), List.of(),
+                List.of("api_key"), List.of("api_key"), List.of("api_version", "maintenance_llm"), List.of(), List.of(),
                 List.of("Memory_mem0ai"), "https://docs.mem0.ai"));
         items.add(item("MEMORY_POWERMEM", "Memory", "powermem", "PowerMem",
                 "PowerMem", "长期记忆", "memory", "记忆", "service", "本地/云组合",
                 "service", "本地/云服务", "LLM+Embedding+VectorStore", "LLM/Embedding", "llm_model",
                 List.of("llm_api_key", "embedding_api_key"), List.of("llm_model", "llm_api_key", "embedding_model", "embedding_api_key"),
-                List.of("vector_store", "enable_user_profile"), List.of("支持 sqlite/oceanbase/postgres 等向量存储。"),
+                List.of("vector_store", "enable_user_profile", "maintenance_llm"), List.of("支持 sqlite/oceanbase/postgres 等向量存储。"),
                 List.of(), List.of("Memory_powermem"), ""));
         ModelCatalogDTO reportOnly = item("MEMORY_REPORT_ONLY", "Memory", "mem_report_only", "仅上报记忆",
                 "本地系统", "仅上报聊天记录", "memory", "记忆", "builtin", "内置",
@@ -1381,6 +1384,8 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             case "api_url" -> "API URL";
             case "ws_url" -> "WebSocket URL";
             case "model", "model_name" -> "模型";
+            case "llm" -> "总结 LLM";
+            case "maintenance_llm" -> "记忆维护 LLM";
             case "resource_id" -> "Resource ID";
             case "voice", "speaker", "voice_id" -> "音色";
             case "private_voice" -> "私有音色";
@@ -1443,6 +1448,8 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             case "group_id" -> "MiniMax 控制台中的用户组 ID，用于拼接流式 TTS 调用地址。";
             case "resource_id" -> "云平台开通具体语音服务后得到的资源标识，不等同于配置名称。";
             case "model", "model_name" -> "上游平台实际调用的模型 ID。";
+            case "llm" -> "用于短记忆总结的 LLM 模型配置 ID。";
+            case "maintenance_llm" -> "用于长期记忆候选抽取的 LLM 模型配置 ID，例如模型管理中已配置的 DeepSeek/OpenAI 兼容模型；密钥仍保存在对应 LLM 配置中。";
             case "voice", "speaker", "voice_id" -> "上游平台音色 ID。";
             case "private_voice" -> "智能体私有音色覆盖字段；为空时使用当前模型默认音色。";
             case "base_url", "api_url", "ws_url" -> "接口地址，注意是否需要包含具体 path。";
