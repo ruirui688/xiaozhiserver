@@ -83,14 +83,19 @@ VERSION=<git-short-sha> ./upgrade
 the short Git hash printed by `scripts/acr-build-push` when you need to know the
 exact image version installed on the server.
 
-Upgrade output is intentionally verbose:
+Upgrade output is intentionally compact:
 
 ```text
-target version   image tag requested for this deployment
-current version  version stored in /opt/xiaozhi-data/.env from the previous run
-deploy assets    Git branch and deploy script commit before/after pull
-server/web image full image references that will be pulled and started
-Deploy complete  final image references actually attached to running containers
+Production deploy
+  version   image tag requested for this deployment
+  current   version stored in /opt/xiaozhi-data/.env from the previous run
+  assets    Git branch and deploy script commit before/after pull
+  images    business image tags to pull and run
+
+=== Deploy complete ===
+Version    final deployed version
+Images     final business images attached to running containers
+Runtime    final MySQL/Redis images attached to running containers
 ```
 
 ## Container startup order
