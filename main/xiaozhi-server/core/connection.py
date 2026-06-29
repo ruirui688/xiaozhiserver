@@ -1127,6 +1127,9 @@ class ConnectionHandler:
         content_arguments = ""
         unhandled_tool_protocol = False
         emotion_flag = True
+        defer_plain_content_for_tools = (
+            self.intent_type == "function_call" and functions is not None
+        )
         try:
             for response in llm_responses:
                 if (
@@ -1202,14 +1205,15 @@ class ConnectionHandler:
                 if content is not None and len(content) > 0:
                     if not tool_call_flag:
                         response_message.append(content)
-                        self.tts.tts_text_queue.put(
-                            TTSMessageDTO(
-                                sentence_id=current_sentence_id,
-                                sentence_type=SentenceType.MIDDLE,
-                                content_type=ContentType.TEXT,
-                                content_detail=content,
+                        if not defer_plain_content_for_tools:
+                            self.tts.tts_text_queue.put(
+                                TTSMessageDTO(
+                                    sentence_id=current_sentence_id,
+                                    sentence_type=SentenceType.MIDDLE,
+                                    content_type=ContentType.TEXT,
+                                    content_detail=content,
+                                )
                             )
-                        )
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"LLM stream processing error: {e}")
             self.tts.tts_text_queue.put(
@@ -1322,9 +1326,15 @@ class ConnectionHandler:
                 # LLM 流式阶段已播报过的文本
                 streamed_text = ""
                 if len(response_message) > 0:
-                    streamed_text = "".join(response_message)
-                    self.tts.store_tts_text(current_sentence_id, streamed_text)
-                    self.dialogue.put(Message(role="assistant", content=streamed_text))
+                    if defer_plain_content_for_tools:
+                        discarded_text = "".join(response_message)
+                        self.logger.bind(tag=TAG).debug(
+                            f"丢弃工具调用前的过渡文本: {discarded_text}"
+                        )
+                    else:
+                        streamed_text = "".join(response_message)
+                        self.tts.store_tts_text(current_sentence_id, streamed_text)
+                        self.dialogue.put(Message(role="assistant", content=streamed_text))
                 response_message.clear()
 
                 # 收集所有工具调用的 Future
@@ -1384,6 +1394,15 @@ class ConnectionHandler:
         # 存储对话内容
         if len(response_message) > 0:
             text_buff = "".join(response_message)
+            if defer_plain_content_for_tools:
+                self.tts.tts_text_queue.put(
+                    TTSMessageDTO(
+                        sentence_id=current_sentence_id,
+                        sentence_type=SentenceType.MIDDLE,
+                        content_type=ContentType.TEXT,
+                        content_detail=text_buff,
+                    )
+                )
             self.tts.store_tts_text(current_sentence_id, text_buff)
             self.dialogue.put(Message(role="assistant", content=text_buff))
 
