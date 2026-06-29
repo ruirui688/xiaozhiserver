@@ -161,6 +161,7 @@ export default {
       activeAudioClipId: null,
       audioClips: {},
       playingAudioClipId: null,
+      textRenderTimers: {},
       audioContext: null,
       audioStream: null,
       mediaSource: null,
@@ -290,6 +291,8 @@ export default {
       this.activeAudioClipId = null;
       this.audioClips = {};
       this.playingAudioClipId = null;
+      Object.values(this.textRenderTimers).forEach(timer => clearTimeout(timer));
+      this.textRenderTimers = {};
       this.stopHeartbeat();
       this.stopStatusRefresh();
       this.stopToolRefresh();
@@ -552,9 +555,10 @@ export default {
       }
       if (payload.text) {
         const clipId = this.activeAudioClipId || this.startNewAudioClip();
-        const message = this.addMessage('assistant', payload.text, { audioClipId: clipId });
+        const message = this.addMessage('assistant', payload.text, { audioClipId: clipId, time: '' });
         this.activeAssistantMessageId = message.id;
         this.attachClipToMessage(clipId, message.id);
+        this.markClipTextRendered(clipId);
       }
     },
     startNewAudioClip() {
@@ -567,6 +571,9 @@ export default {
         bytes: 0,
         frames: 0,
         messageId: null,
+        messageRendered: false,
+        pendingPlaybackChunks: [],
+        firstAudioStartedAt: null,
         completed: false
       });
       return clipId;
@@ -589,6 +596,22 @@ export default {
       if (message && !message.audioClipId) {
         this.$set(message, 'audioClipId', clipId);
       }
+    },
+    markClipTextRendered(clipId) {
+      if (this.textRenderTimers[clipId]) {
+        clearTimeout(this.textRenderTimers[clipId]);
+        delete this.textRenderTimers[clipId];
+      }
+      this.$nextTick(() => {
+        const timer = setTimeout(() => {
+          const clip = this.audioClips[clipId];
+          if (!clip) return;
+          this.$set(clip, 'messageRendered', true);
+          this.flushClipPlayback(clipId);
+          delete this.textRenderTimers[clipId];
+        }, 0);
+        this.$set(this.textRenderTimers, clipId, timer);
+      });
     },
     async ensureOpusDecoder() {
       if (!this.opusDecoder) {
@@ -626,7 +649,7 @@ export default {
         if (decoded && decoded.samplesDecoded > 0) {
           const chunk = this.cloneDecodedAudio(decoded);
           clip.chunks.push(chunk);
-          this.playDecodedChunks([chunk], false);
+          this.enqueueClipPlayback(clipId, chunk);
         }
       } catch (e) {
         this.addEvent(`audio decode failed: ${e.message || e}`);
@@ -637,6 +660,40 @@ export default {
         sampleRate: decoded.sampleRate,
         channelData: decoded.channelData.map(channel => new Float32Array(channel))
       };
+    },
+    enqueueClipPlayback(clipId, chunk) {
+      const clip = this.audioClips[clipId];
+      if (!clip) return;
+      if (!clip.messageRendered) {
+        clip.pendingPlaybackChunks.push(chunk);
+        return;
+      }
+      this.startClipPlayback(clip, [chunk]);
+    },
+    flushClipPlayback(clipId) {
+      const clip = this.audioClips[clipId];
+      if (!clip || !clip.messageRendered || clip.pendingPlaybackChunks.length === 0) {
+        return;
+      }
+      const chunks = clip.pendingPlaybackChunks.splice(0);
+      this.startClipPlayback(clip, chunks);
+    },
+    startClipPlayback(clip, chunks) {
+      if (!clip || !chunks || chunks.length === 0) return;
+      if (!clip.firstAudioStartedAt) {
+        const firstAudioStartedAt = Date.now();
+        this.$set(clip, 'firstAudioStartedAt', firstAudioStartedAt);
+        this.updateMessageFirstAudioTime(clip.messageId, firstAudioStartedAt);
+      }
+      this.playDecodedChunks(chunks, false);
+    },
+    updateMessageFirstAudioTime(messageId, timestamp) {
+      const message = this.messages.find(item => item.id === messageId);
+      if (!message) return;
+      this.$set(message, 'time', this.formatMessageTime(timestamp));
+    },
+    formatMessageTime(timestamp) {
+      return new Date(timestamp).toLocaleTimeString();
     },
     playDecodedChunks(chunks, resetCursor = true) {
       if (!chunks || chunks.length === 0) return;
