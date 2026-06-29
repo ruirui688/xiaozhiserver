@@ -44,6 +44,7 @@ from config.manage_api_client import (
     DeviceBindException,
     generate_and_save_chat_title,
     query_managed_memory,
+    trigger_session_memory_processing,
 )
 from core.utils.model_config import has_runtime_config, normalize_runtime_config
 from core.utils.prompt_manager import PromptManager
@@ -331,6 +332,14 @@ class ConnectionHandler:
                         self.dialogue.dialogue, self.session_id
                     ),
                     "memory-save",
+                )
+
+            # 守护线程3：PowerMem-style 会话记忆处理（全量对话分析）
+            agent_id = self.config.get("agent_id") if self.config else None
+            if self.session_id and agent_id and self.read_config_from_api:
+                self._run_async_in_daemon_thread(
+                    trigger_session_memory_processing(self.session_id, agent_id),
+                    "session-memory",
                 )
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"保存记忆失败: {e}")

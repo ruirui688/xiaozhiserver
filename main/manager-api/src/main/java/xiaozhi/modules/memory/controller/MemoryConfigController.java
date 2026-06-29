@@ -1,5 +1,8 @@
 package xiaozhi.modules.memory.controller;
 
+import java.util.Map;
+
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -48,5 +51,17 @@ public class MemoryConfigController {
     public Result<Void> forget(@RequestBody MemoryForgetDTO dto) {
         memoryService.forget(dto, "system", null);
         return new Result<Void>().ok(null);
+    }
+
+    @PostMapping("process-session")
+    @Operation(summary = "PowerMem-style session memory processing on session close")
+    public Result<Integer> processSession(@RequestBody Map<String, String> body) {
+        String sessionId = body.get("sessionId");
+        String agentId = body.get("agentId");
+        if (StringUtils.isBlank(sessionId) || StringUtils.isBlank(agentId)) {
+            return new Result<Integer>().error("sessionId and agentId are required");
+        }
+        int count = memoryService.processSessionMemories(sessionId, agentId);
+        return new Result<Integer>().ok(count);
     }
 }

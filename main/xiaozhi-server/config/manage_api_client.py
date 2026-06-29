@@ -298,6 +298,25 @@ async def query_managed_memory(
         return None
 
 
+async def trigger_session_memory_processing(
+    session_id: str, agent_id: str
+) -> Optional[int]:
+    """会话关闭时触发 PowerMem-style 记忆处理。失败不影响主链路。"""
+    if not session_id or not agent_id or not ManageApiClient._instance:
+        return None
+    try:
+        result = await ManageApiClient._instance._execute_async_request(
+            "POST",
+            "/config/memory/process-session",
+            json={"sessionId": session_id, "agentId": agent_id},
+        )
+        if isinstance(result, dict):
+            return result.get("data") if isinstance(result.get("data"), int) else 0
+        return 0
+    except Exception:
+        return None
+
+
 async def lookup_address_book(caller_mac: str, nickname: str) -> Optional[Dict]:
     """根据昵称查找目标设备"""
     if not ManageApiClient._instance:
