@@ -33,6 +33,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
 
+import cn.hutool.json.JSONObject;
+
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -60,6 +62,8 @@ import xiaozhi.modules.knowledge.entity.DocumentEntity;
 import xiaozhi.modules.knowledge.entity.KnowledgeBaseEntity;
 import xiaozhi.modules.knowledge.entity.KnowledgeChunkEntity;
 import xiaozhi.modules.knowledge.rag.KnowledgeBaseAdapter;
+import xiaozhi.modules.model.entity.ModelConfigEntity;
+import xiaozhi.modules.model.service.ModelConfigService;
 
 @Slf4j
 public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
@@ -81,8 +85,10 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private KnowledgeChunkDao chunkDao;
     private DocumentDao documentDao;
     private KnowledgeBaseDao knowledgeBaseDao;
+    private ModelConfigService modelConfigService;
     private int maxChunkChars = DEFAULT_MAX_CHUNK_CHARS;
     private boolean llmEnabled;
+    private String llmModelId;
     private String llmBaseUrl = DEFAULT_LLM_BASE_URL;
     private String llmApiKey;
     private String llmModel = DEFAULT_LLM_MODEL;
@@ -111,11 +117,14 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         this.chunkDao = SpringContextUtils.getBean(KnowledgeChunkDao.class);
         this.documentDao = SpringContextUtils.getBean(DocumentDao.class);
         this.knowledgeBaseDao = SpringContextUtils.getBean(KnowledgeBaseDao.class);
+        this.modelConfigService = SpringContextUtils.getBean(ModelConfigService.class);
         maxChunkChars = getIntConfig("max_chunk_chars", DEFAULT_MAX_CHUNK_CHARS, 200, 20000);
         llmEnabled = getBooleanConfig("llm_enabled", false);
+        llmModelId = getStringConfig("llm_model_id", "");
         llmBaseUrl = getStringConfig("llm_base_url", DEFAULT_LLM_BASE_URL);
         llmApiKey = getStringConfig("llm_api_key", "");
         llmModel = getStringConfig("llm_model", DEFAULT_LLM_MODEL);
+        applyManagedLlmConfig();
         llmTimeoutSeconds = getIntConfig("llm_timeout_seconds", DEFAULT_LLM_TIMEOUT_SECONDS, 10, 600);
         llmMaxInputChars = getIntConfig("llm_max_input_chars", DEFAULT_LLM_MAX_INPUT_CHARS, 500, 20000);
         llmMaxTokens = getIntConfig("llm_max_tokens", DEFAULT_LLM_MAX_TOKENS, 200, 8000);
@@ -344,6 +353,46 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             }
             target.putIfAbsent(StringUtils.defaultIfBlank(chunk.getChunkId(), chunk.getId()), chunk);
         }
+    }
+
+    private void applyManagedLlmConfig() {
+        if (StringUtils.isBlank(llmModelId)) {
+            return;
+        }
+        ModelConfigEntity model = modelConfigService.getModelByIdFromCache(llmModelId);
+        if (model == null || model.getConfigJson() == null) {
+            log.warn("本地知识库切片模型配置不存在，modelId={}，将回退规则切片", llmModelId);
+            llmApiKey = "";
+            return;
+        }
+        if (!"LLM".equalsIgnoreCase(model.getModelType())) {
+            log.warn("本地知识库切片模型不是 LLM 类型，modelId={}，modelType={}", llmModelId, model.getModelType());
+            llmApiKey = "";
+            return;
+        }
+        if (!Integer.valueOf(1).equals(model.getIsEnabled())
+                || !Integer.valueOf(1).equals(model.getTestStatus())) {
+            log.warn("本地知识库切片模型未启用或未测试通过，modelId={}，将回退规则切片", llmModelId);
+            llmApiKey = "";
+            return;
+        }
+        JSONObject modelConfig = model.getConfigJson();
+        llmBaseUrl = firstConfigString(modelConfig, llmBaseUrl, "base_url", "url", "api_url", "endpoint_url");
+        llmApiKey = firstConfigString(modelConfig, llmApiKey, "api_key", "api_password", "access_token", "token");
+        llmModel = firstConfigString(modelConfig, llmModel, "model_name", "model", "llm_model", "resource_id");
+    }
+
+    private String firstConfigString(JSONObject config, String defaultValue, String... keys) {
+        if (config == null) {
+            return defaultValue;
+        }
+        for (String key : keys) {
+            String value = config.getStr(key);
+            if (StringUtils.isNotBlank(value)) {
+                return value;
+            }
+        }
+        return defaultValue;
     }
 
     @Override

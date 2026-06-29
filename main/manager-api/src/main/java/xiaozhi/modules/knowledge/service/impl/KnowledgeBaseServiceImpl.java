@@ -512,6 +512,7 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
             for (String key : List.of(
                     "max_chunk_chars",
                     "llm_enabled",
+                    "llm_model_id",
                     "llm_base_url",
                     "llm_api_key",
                     "llm_model",
