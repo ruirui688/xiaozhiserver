@@ -325,5 +325,5 @@ WHERE d.mac_address = '<your_device_mac>';
 4. **可能：前端 UI 清空** — 如果在角色配置界面切换过记忆模型类型，`summaryMemory` 被临时清空，刷新页面后无法恢复。
 
 相关文档：
-- [[volume-system-analysis]] — 音量系统混乱分析
-- [[doubao-tts-voice-selection-analysis]] — 豆包 TTS 音色选择问题
+- [volume-system-analysis](volume-system-analysis.md) — 音量系统混乱分析
+- [doubao-tts-voice-selection-analysis](doubao-tts-voice-selection-analysis.md) — 豆包 TTS 音色选择问题

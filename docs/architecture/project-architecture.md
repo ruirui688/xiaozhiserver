@@ -4,7 +4,13 @@
 
 - 云端实时链路、配置下发和 MCP 三类链路细节见 [云端运行架构与配置链路](./cloud-runtime-architecture.md)。
 - 确定性语音控制、状态管理、拒识和旧 LLM 兜底链路见 [语义控制中枢架构](./semantic-control-center.md)。
-- 提示词、工具 schema、MCP description、状态机游戏的注入细节见 [提示词注入工程](../integrations/prompt-injection-engineering.md)。
+- 提示词、工具 schema、MCP description、状态机游戏的注入细节见 [提示词注入工程](./prompt-injection-engineering.md)。
+- 功能插件统一管理、声明式互动和插件注册执行见 [功能插件架构](./function-plugin-architecture.md)。
+- 长期记忆事实层、事件上报、管理端维护和运行时查询注入见 [长期记忆维护架构](./long-term-memory-maintenance.md)。
+- 模型评测、LLMJudge、异步任务和配置助手见 [模型评测与助手架构](./model-benchmark-and-assistant.md)。
+- 模型厂商目录、协议适配和推荐场景见 [模型选择与厂商目录架构](./model-selection-and-vendor-catalog.md)。
+- 语义打断方案与端到端语音模型演进见 [语义打断与端到端语音模型演进分析](./semantic-interruption-and-e2e-voice-model-analysis.md)。
+- 代码级文件导航和模块验证矩阵见 [当前代码地图](./current-code-map.md)。
 - 本地二次开发长期保护点见 [本地定制记录](../local-customizations.md)。
 
 ## 1. 总体架构
@@ -152,7 +158,7 @@ MCP 必须区分三类：
 | 服务器侧 MCP | Python 本地 MCP server 配置返回 `tools/list` | Python 作为 MCP client 调用 |
 | 设备端 MCP | 设备声明 `features.mcp=true` 后返回 `tools/list` | Python 向设备发 `tools/call` |
 
-纯语言游戏不再由 Python 服务端状态机接管，应交给主 LLM 根据对话上下文自然处理。需要排查提示词和工具时，优先沿 [提示词注入工程](../integrations/prompt-injection-engineering.md) 中的 `PromptManager`、`Dialogue`、`UnifiedToolHandler`、Intent、MCP executor 链路检查。
+纯语言游戏不再由 Python 服务端状态机接管，应交给主 LLM 根据对话上下文自然处理。需要排查提示词和工具时，优先沿 [提示词注入工程](./prompt-injection-engineering.md) 中的 `PromptManager`、`Dialogue`、`UnifiedToolHandler`、Intent、MCP executor 链路检查。
 
 ## 6. 运行产物边界
 
@@ -216,7 +222,7 @@ MCP 必须区分三类：
 | 问题 | 优先阅读 |
 | --- | --- |
 | 后台改了但设备没变化 | [云端运行架构与配置链路](./cloud-runtime-architecture.md) 的配置下发、OTA、排查顺序 |
-| 模型没有看到提示词或工具 | [提示词注入工程](../integrations/prompt-injection-engineering.md) 的 system prompt、tools、intent_llm、MCP 注入 |
+| 模型没有看到提示词或工具 | [提示词注入工程](./prompt-injection-engineering.md) 的 system prompt、tools、intent_llm、MCP 注入 |
 | 插件、MCP、状态机游戏被官方更新影响 | [本地定制记录](../local-customizations.md) 和 [官方上游同步策略](../standards/upstream-sync-policy.md) |
 | 不确定某文件能否提交 | 开发规范、配置运行策略和本文“运行产物边界” |
 | 不确定单模块还是全模块部署 | 本文“部署边界”和 `docs/deployment/` 下对应部署文档 |

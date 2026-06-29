@@ -200,5 +200,5 @@ VALUES
 **这不是技术限制，是项目迁移时人为只保留了一个已验证的音色。** 旧版迁移清理掉了之前所有音色记录，新版只加了回一个探测脚本确认通过的默认值，并未补全火山引擎支持的其他音色。代码架构完全支持多音色，只需要在 `ai_tts_voice` 表中添加更多经过验证的记录即可。
 
 相关问题：
-- [[volume-system-analysis]] — TTS 音量范围混乱问题
+- [volume-system-analysis](volume-system-analysis.md) — TTS 音量范围混乱问题
 - 豆包 Seed TTS 2.0 仅支持 `seed-tts-2.0` 这一个 resource_id（`huoshan_double_stream.py:160-168` 硬编码限制），无法使用火山引擎的其他语音服务

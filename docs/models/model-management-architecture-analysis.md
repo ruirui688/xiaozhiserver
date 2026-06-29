@@ -708,8 +708,8 @@ nointent, intent_llm, function_call
 ---
 
 > 相关文档：
-> - [[system-issues-and-optimization-backlog]] — 系统问题与优化清单（20 个问题）
-> - [[doubao-tts-voice-selection-analysis]] — 豆包 TTS 音色选择问题
-> - [[volume-system-analysis]] — 音量系统混乱分析
-> - [[voice-pipeline-latency-analysis]] — 语音管道延迟分析
-> - [[memory-summary-display-issue-analysis]] — 记忆总结显示问题
+> - [system-issues-and-optimization-backlog](../reference/system-issues-and-optimization-backlog.md) — 系统问题与优化清单（20 个问题）
+> - [doubao-tts-voice-selection-analysis](doubao-tts-voice-selection-analysis.md) — 豆包 TTS 音色选择问题
+> - [volume-system-analysis](volume-system-analysis.md) — 音量系统混乱分析
+> - [voice-pipeline-latency-analysis](voice-pipeline-latency-analysis.md) — 语音管道延迟分析
+> - [memory-summary-display-issue-analysis](memory-summary-display-issue-analysis.md) — 记忆总结显示问题

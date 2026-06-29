@@ -1,6 +1,6 @@
 # 官方上游同步策略
 
-本文规定本项目从官方 `xiaozhi-esp32-server` 同步源码时的边界、检查清单和冲突处理规则。它与 [本地定制记录](../local-customizations.md)、[项目完整架构与文档导航](../architecture/project-architecture.md)、[云端运行架构与配置链路](../architecture/cloud-runtime-architecture.md)、[提示词注入工程](../integrations/prompt-injection-engineering.md) 一起使用。
+本文规定本项目从官方 `xiaozhi-esp32-server` 同步源码时的边界、检查清单和冲突处理规则。它与 [本地定制记录](../local-customizations.md)、[项目完整架构与文档导航](../architecture/project-architecture.md)、[云端运行架构与配置链路](../architecture/cloud-runtime-architecture.md)、[提示词注入工程](../architecture/prompt-injection-engineering.md) 一起使用。
 
 ## 1. 边界定义
 
@@ -103,7 +103,7 @@ scripts/
 Dockerfile*
 main/xiaozhi-server/docker-compose*.yml
 docs/architecture/
-docs/integrations/prompt-injection-engineering.md
+docs/architecture/prompt-injection-engineering.md
 docs/local-customizations.md
 ```
 
@@ -139,8 +139,8 @@ docs/local-customizations.md
 | 变化 | 需要更新 |
 | --- | --- |
 | 连接初始化、配置拉取、OTA、WebSocket、MQTT | `docs/architecture/cloud-runtime-architecture.md` 和本文相关检查项 |
-| PromptManager、Dialogue、Memory、voiceprint、context_providers | `docs/integrations/prompt-injection-engineering.md` |
-| 工具执行器、插件注册、MCP executor、Intent provider | `docs/integrations/prompt-injection-engineering.md` 和 `docs/local-customizations.md` |
+| PromptManager、Dialogue、Memory、voiceprint、context_providers | `docs/architecture/prompt-injection-engineering.md` |
+| 工具执行器、插件注册、MCP executor、Intent provider | `docs/architecture/prompt-injection-engineering.md` 和 `docs/local-customizations.md` |
 | 新增或调整本地长期定制 | `docs/local-customizations.md` |
 | 部署、端口、Docker、配置文件路径 | 部署文档、开发规范和项目架构导航 |
 

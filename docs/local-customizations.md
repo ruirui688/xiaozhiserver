@@ -10,8 +10,8 @@
 关键文件：
   - main/xiaozhi-server/core/providers/tools/server_plugins/plugin_executor.py
   - docs/architecture/cloud-runtime-architecture.md
-  - docs/integrations/function-plugin-architecture.md
-  - docs/integrations/prompt-injection-engineering.md
+  - docs/architecture/function-plugin-architecture.md
+  - docs/architecture/prompt-injection-engineering.md
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方也修改插件注册、工具描述生成、提示词注入、配置下发、MCP 工具发现或 ServerPluginExecutor 执行流程，必须人工合并，保留 Function Plugin 顶层模型、声明式互动模式、状态机游戏模式、custom_plugin 兼容字段、parameters_schema、opening_message、instructions 等配置约定，并同步更新云端运行架构和提示词注入工程文档。
 ```
@@ -88,7 +88,7 @@
 关键文件：
   - docs/architecture/project-architecture.md
   - docs/architecture/cloud-runtime-architecture.md
-  - docs/integrations/prompt-injection-engineering.md
+  - docs/architecture/prompt-injection-engineering.md
   - docs/README.md
 是否允许被官方覆盖：否
 官方同步时的处理规则：官方文档同步时不得删除这些架构和提示词工程文档；如果官方修改连接初始化、PromptManager、Dialogue、UnifiedToolHandler、MCP executor、Intent provider、ConfigServiceImpl 或插件执行器，必须同步校正文档中的真实代码路径和运行链路。

@@ -48,13 +48,13 @@
 
 ## 3. 代码定位与问题判断
 
-本次问题排查中，关键代码位置如下：
+本次问题排查中，关键代码位置如下（位于 xiaozhi-esp32-cam 固件仓库）：
 
-- [main/application.cc](D:/Codex_ws/Robot/xiaozhi/xiaozhi-esp32-cam/main/application.cc)
-- [main/protocols/websocket_protocol.cc](D:/Codex_ws/Robot/xiaozhi/xiaozhi-esp32-cam/main/protocols/websocket_protocol.cc)
-- [main/protocols/websocket_protocol.h](D:/Codex_ws/Robot/xiaozhi/xiaozhi-esp32-cam/main/protocols/websocket_protocol.h)
-- [main/ota.cc](D:/Codex_ws/Robot/xiaozhi/xiaozhi-esp32-cam/main/ota.cc)
-- [main/mcp_server.cc](D:/Codex_ws/Robot/xiaozhi/xiaozhi-esp32-cam/main/mcp_server.cc)
+- `main/application.cc`
+- `main/protocols/websocket_protocol.cc`
+- `main/protocols/websocket_protocol.h`
+- `main/ota.cc`
+- `main/mcp_server.cc`
 
 结论如下：
 
@@ -80,7 +80,7 @@
 
 修改位置：
 
-- [main/protocols/websocket_protocol.cc](D:/Codex_ws/Robot/xiaozhi/xiaozhi-esp32-cam/main/protocols/websocket_protocol.cc:46)
+- `main/protocols/websocket_protocol.cc`
 
 改动前：
 
@@ -95,9 +95,9 @@
 
 修改位置：
 
-- [main/protocols/websocket_protocol.h](D:/Codex_ws/Robot/xiaozhi/xiaozhi-esp32-cam/main/protocols/websocket_protocol.h:28)
-- [main/protocols/websocket_protocol.cc](D:/Codex_ws/Robot/xiaozhi/xiaozhi-esp32-cam/main/protocols/websocket_protocol.cc:17)
-- [main/protocols/websocket_protocol.cc](D:/Codex_ws/Robot/xiaozhi/xiaozhi-esp32-cam/main/protocols/websocket_protocol.cc:287)
+- `main/protocols/websocket_protocol.h`
+- `main/protocols/websocket_protocol.cc`
+- `main/protocols/websocket_protocol.cc`
 
 新增内容：
 
@@ -115,10 +115,10 @@
 
 修改位置：
 
-- [main/protocols/websocket_protocol.h](D:/Codex_ws/Robot/xiaozhi/xiaozhi-esp32-cam/main/protocols/websocket_protocol.h:34)
-- [main/protocols/websocket_protocol.cc](D:/Codex_ws/Robot/xiaozhi/xiaozhi-esp32-cam/main/protocols/websocket_protocol.cc:96)
-- [main/protocols/websocket_protocol.cc](D:/Codex_ws/Robot/xiaozhi/xiaozhi-esp32-cam/main/protocols/websocket_protocol.cc:100)
-- [main/protocols/websocket_protocol.cc](D:/Codex_ws/Robot/xiaozhi/xiaozhi-esp32-cam/main/protocols/websocket_protocol.cc:110)
+- `main/protocols/websocket_protocol.h`
+- `main/protocols/websocket_protocol.cc`
+- `main/protocols/websocket_protocol.cc`
+- `main/protocols/websocket_protocol.cc`
 
 新增状态：
 
@@ -137,7 +137,7 @@
 
 修改位置：
 
-- [main/protocols/websocket_protocol.cc](D:/Codex_ws/Robot/xiaozhi/xiaozhi-esp32-cam/main/protocols/websocket_protocol.cc:109)
+- `main/protocols/websocket_protocol.cc`
 
 行为说明：
 
@@ -154,7 +154,7 @@
 
 修改位置：
 
-- [main/application.cc](D:/Codex_ws/Robot/xiaozhi/xiaozhi-esp32-cam/main/application.cc:863)
+- `main/application.cc`
 
 问题背景：
 
@@ -169,7 +169,7 @@
 
 修改位置：
 
-- [main/application.cc](D:/Codex_ws/Robot/xiaozhi/xiaozhi-esp32-cam/main/application.cc:1050)
+- `main/application.cc`
 
 原因：
 
@@ -315,16 +315,16 @@
 
 本次改动涉及的主要文件如下：
 
-- [main/protocols/websocket_protocol.h](D:/Codex_ws/Robot/xiaozhi/xiaozhi-esp32-cam/main/protocols/websocket_protocol.h)
-- [main/protocols/websocket_protocol.cc](D:/Codex_ws/Robot/xiaozhi/xiaozhi-esp32-cam/main/protocols/websocket_protocol.cc)
-- [main/application.cc](D:/Codex_ws/Robot/xiaozhi/xiaozhi-esp32-cam/main/application.cc)
+- `main/protocols/websocket_protocol.h`
+- `main/protocols/websocket_protocol.cc`
+- `main/application.cc`
 
 关联参考文件：
 
-- [main/ota.cc](D:/Codex_ws/Robot/xiaozhi/xiaozhi-esp32-cam/main/ota.cc)
-- [main/mcp_server.cc](D:/Codex_ws/Robot/xiaozhi/xiaozhi-esp32-cam/main/mcp_server.cc)
-- [docs/websocket_zh.md](D:/Codex_ws/Robot/xiaozhi/xiaozhi-esp32-cam/docs/websocket_zh.md)
-- [docs/mcp-protocol_zh.md](D:/Codex_ws/Robot/xiaozhi/xiaozhi-esp32-cam/docs/mcp-protocol_zh.md)
+- `main/ota.cc`
+- `main/mcp_server.cc`
+- `docs/websocket_zh.md`
+- `docs/mcp-protocol_zh.md`
 
 ## 10. 总结
 

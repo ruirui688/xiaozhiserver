@@ -316,3 +316,9 @@ conda run -n xiaozhi-esp32-server pytest tests
 ```
 
 如果本地缺少 `pytest` 或项目依赖，需要先按开发环境文档安装依赖。
+
+## 5. 关联文档
+
+- [语义打断与端到端语音模型演进分析](./semantic-interruption-and-e2e-voice-model-analysis.md) — 语义打断方案设计与端到端模型演进路线
+- [云端运行架构与配置链路](./cloud-runtime-architecture.md) — 语义控制中枢在全链路中的位置
+- [提示词注入工程](./prompt-injection-engineering.md) — LLM 兜底时的提示词和行为约束

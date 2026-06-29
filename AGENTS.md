@@ -13,13 +13,13 @@ xiaozhi-esp32-server = 端云协同语音智能体平台
 
 ESP32 设备 ──WebSocket──→ xiaozhi-server (Python, port 8000/8003)
                                 ├── VAD → ASR → SemanticCenter → LLM → TTS → 音频回传
-                                ├── 17种 ASR / 22种 TTS / 11种 LLM provider
-                                ├── 14个功能插件 / 3类 MCP 链路 / 语义控制中枢
+                                ├── 12种 ASR / 17种 TTS / 9种 LLM provider
+                                ├── 15个功能插件 / 3类 MCP 链路 / 语义控制中枢 / 长期记忆
                                 └── 通过 HTTP 从 manager-api 拉取配置
 
 manager-web / manager-mobile ──HTTP──→ manager-api (Java, port 8002)
-                                          ├── MySQL + Redis + Liquibase (~130 migrations)
-                                          ├── 智能体 / 模型 / 设备 / 知识库 / OTA / 声纹管理
+                                          ├── MySQL + Redis + Liquibase (143 migrations)
+                                          ├── 智能体 / 模型 / 设备 / 知识库 / OTA / 声纹 / 记忆管理
                                           └── 模型评测编排 (调用 xiaozhi-server benchmark API)
 ```
 
@@ -27,12 +27,12 @@ manager-web / manager-mobile ──HTTP──→ manager-api (Java, port 8002)
 
 | 模块 | 语言/框架 | 文件数 | 职责 |
 |------|----------|--------|------|
-| `main/xiaozhi-server/` | Python 3.10, aiohttp | 207 .py | 实时语音服务：WebSocket、VAD/ASR/LLM/TTS、插件、MCP |
-| `main/manager-api/` | Java 21, Spring Boot 3.4 | 372 .java | 管理 API：配置下发、模型管理、评测编排、权限 |
-| `main/manager-web/` | Vue 2, Element UI | 23 views + 30 components | Web 智控台 |
-| `main/manager-mobile/` | Vue 3, uni-app, TypeScript | 跨11平台 | 移动端智控台 |
-| `docs/` | 57 .md | — | 架构、部署、开发、集成、MCP、模型、规范 |
-| `deploy/` / `scripts/` | Shell | — | 本地开发入口 + ACR 生产部署 |
+| `main/xiaozhi-server/` | Python 3.10, aiohttp | 218 .py | 实时语音服务：WebSocket、VAD/ASR/LLM/TTS、插件、MCP |
+| `main/manager-api/` | Java 21, Spring Boot 3.4 | 406 .java | 管理 API：配置下发、模型管理、评测编排、权限、记忆 |
+| `main/manager-web/` | Vue 2, Element UI | 183 .vue (26 views, 34 components) | Web 智控台 |
+| `main/manager-mobile/` | Vue 3, uni-app, TypeScript | 152 .vue | 移动端智控台 (H5/iOS/Android/微信) |
+| `docs/` | 64 .md | — | 架构、部署、开发、集成、MCP、模型、规范 |
+| `deploy/` / `scripts/` | 12 Shell scripts | — | 本地开发入口 + ACR 生产部署 |
 
 ---
 
@@ -99,7 +99,12 @@ Web 管理后台
   → docs/architecture/project-architecture.md
   → docs/architecture/cloud-runtime-architecture.md
   → docs/architecture/semantic-control-center.md
-  → docs/integrations/prompt-injection-engineering.md
+  → docs/architecture/prompt-injection-engineering.md
+  → docs/architecture/function-plugin-architecture.md
+
+长期记忆
+  → docs/architecture/long-term-memory-maintenance.md
+  → main/manager-api/.../modules/memory/ (25个文件)
 
 配置 / 运行产物
   → docs/standards/config-runtime-policy.md
@@ -154,10 +159,11 @@ scripts/dev stop
 
 | 文件 | 当前规模 | 替代方向 |
 |------|---------|---------|
-| `core/connection.py` | 2060行 | 新逻辑放入 `core/handle/` 子模块 |
-| `ModelBenchmarkServiceImpl.java` | 超大 | 拆入 `service/impl/benchmark/` helper |
-| `ModelConfig.vue` | 超大 | 拆入独立组件和弹窗 |
-| `ModelAssistantServiceImpl.java` | 超大 | 拆入独立 agent 类 |
+| `core/connection.py` | 1963行 | 新逻辑放入 `core/handle/` 子模块 |
+| `ModelConfigServiceImpl.java` | 2542行 | 拆入 provider 子目录和 helper 类 |
+| `ModelConfig.vue` | 1889行 | 拆入独立组件和弹窗（已有 `ModelEditDialog.vue`、`ModelBenchmarkDialog.vue`） |
+| `ModelBenchmarkDialog.vue` | 2817行 | 拆入 benchmark 子组件 |
+| `ModelAssistantServiceImpl.java` | 793行 | 拆入独立 agent 类 |
 
 如果必须修改这些文件，需要说明：**为什么不能拆？是否增加职责混杂？是否同步更新架构文档？**
 
@@ -386,13 +392,15 @@ Python 入口:        main/xiaozhi-server/app.py
 配置文件:           main/xiaozhi-server/config.yaml
 私有配置:           main/xiaozhi-server/data/.config.yaml
 提示词模板:         main/xiaozhi-server/agent-base-prompt.txt
-中央状态机:         main/xiaozhi-server/core/connection.py (2060行)
-语义控制中枢:       main/xiaozhi-server/core/semantic/
-功能插件:           main/xiaozhi-server/plugins_func/functions/ (14个)
+中央状态机:         main/xiaozhi-server/core/connection.py (1963行)
+语义控制中枢:       main/xiaozhi-server/core/semantic/ (9个文件, 741行)
+语音处理:           main/xiaozhi-server/core/handle/ (18个文件, 1708行)
+功能插件:           main/xiaozhi-server/plugins_func/functions/ (15个)
 模型评测运行器:     main/xiaozhi-server/core/benchmark/runner.py
-Java 评测编排:      .../model/service/impl/ModelBenchmarkServiceImpl.java
-数据库迁移:         main/manager-api/src/main/resources/db/changelog/
-本地开发入口:       scripts/dev
+Java 评测编排:      .../model/service/impl/ModelBenchmarkServiceImpl.java (262行)
+长期记忆服务:       .../memory/service/impl/MemoryServiceImpl.java (844行)
+数据库迁移:         main/manager-api/src/main/resources/db/changelog/ (143个迁移)
+本地开发入口:       scripts/dev (748行)
 生产部署入口:       docs/deployment/private-docker-release.md
 生产部署包:         deploy/production/
 ```

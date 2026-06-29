@@ -328,6 +328,8 @@ powermem
 - 维护模型生成的内容默认进入 `ai_memory_candidate`，由管理端确认后才进入长期事实层；显式“记住/忘记”仍由长期记忆服务的确定性规则处理。
 - 向量库、画像开关、记忆总结策略属于 Memory 自身字段。
 
+Memory 完整架构和管理端功能见 [长期记忆维护架构](../architecture/long-term-memory-maintenance.md)。
+
 ### Intent
 
 意图识别能力，负责决定用户文本是否进入工具调用、继续聊天或特殊控制。

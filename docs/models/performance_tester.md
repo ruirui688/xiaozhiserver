@@ -159,3 +159,8 @@ ASR:
 ```
 conda run -n xiaozhi-esp32-server python performance_tester.py
 ```
+
+## 关联文档
+
+- [模型评测与配置智能助手架构](../architecture/model-benchmark-and-assistant.md) — 批量测试的架构设计、LLMJudge 评审和配置助手
+- [模型管理存储与保存架构](./model-management.md) — 模型配置保存与运行时下发协议

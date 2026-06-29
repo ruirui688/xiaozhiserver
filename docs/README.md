@@ -53,7 +53,7 @@ main/manager-api/src/main/resources/application-dev.yml
 docs/architecture/project-architecture.md
 docs/architecture/cloud-runtime-architecture.md
 docs/architecture/semantic-control-center.md
-docs/integrations/prompt-injection-engineering.md
+docs/architecture/prompt-injection-engineering.md
 ```
 
 ## 2. 强制规范
@@ -80,6 +80,9 @@ docs/integrations/prompt-injection-engineering.md
 - [architecture/model-selection-and-vendor-catalog.md](./architecture/model-selection-and-vendor-catalog.md) - 模型选择与厂商目录架构。用于把讯飞、豆包等厂商产品、模型系列、协议、适配状态、推荐场景和真实测试要求整理成可选择目录，避免用户在模型配置页猜 adapter。
 - [architecture/current-code-map.md](./architecture/current-code-map.md) - 当前代码地图与梳理报告。用于快速了解当前仓库模块结构、运行链路、未提交能力、风险和验证矩阵，是后续开发前的代码导航。
 - [architecture/semantic-interruption-and-e2e-voice-model-analysis.md](./architecture/semantic-interruption-and-e2e-voice-model-analysis.md) - 语义打断与端到端语音模型演进分析。用于评估当前打断机制局限、语义打断方案和端到端语音模型演进路线。
+- [architecture/function-plugin-architecture.md](./architecture/function-plugin-architecture.md) - 功能插件架构。用于理解智能体功能库如何统一管理天气、新闻、音乐播放、HomeAssistant、讲段子、热梗、成语接龙、你说我猜等能力，区分系统能力、互动玩法和系统能力二级分类。
+- [architecture/stateful-game-session.md](./architecture/stateful-game-session.md) - 状态机游戏会话逻辑。用于理解"你说我猜""我想你猜""成语接龙"的触发、状态保存、每轮判定、提示、退出和扩展规则。
+- [architecture/prompt-injection-engineering.md](./architecture/prompt-injection-engineering.md) - 提示词注入工程。用于理解系统提示词、工具描述、声明式插件提示词、状态机游戏规则如何进入大模型，以及为什么状态机玩法不再依赖后台大段 prompt。
 
 ## 4. 本地开发环境
 
@@ -171,9 +174,6 @@ docs/integrations/prompt-injection-engineering.md
 - [integrations/ali-sms-integration.md](./integrations/ali-sms-integration.md) - 阿里云短信集成指南。用于添加短信签名、短信模板、创建短信账号、开通权限并配置短信发送能力。
 - [integrations/homeassistant-integration.md](./integrations/homeassistant-integration.md) - Home Assistant 集成指南。用于把小智 ESP32 开源服务端接入 Home Assistant，实现智能家居设备控制。
 - [integrations/newsnow_plugin_config.md](./integrations/newsnow_plugin_config.md) - NewsNow 新闻源插件配置指南。用于配置新闻源、通过 Web 管理界面维护新闻插件、调整新闻查询来源。
-- [integrations/function-plugin-architecture.md](./integrations/function-plugin-architecture.md) - 功能插件架构。用于理解智能体功能库如何统一管理天气、新闻、音乐播放、HomeAssistant、讲段子、热梗、成语接龙、你说我猜等能力，区分系统能力、互动玩法和系统能力二级分类。
-- [integrations/stateful-game-session.md](./integrations/stateful-game-session.md) - 状态机游戏会话逻辑。用于理解“你说我猜”“我想你猜”“成语接龙”的触发、状态保存、每轮判定、提示、退出和扩展规则。
-- [integrations/prompt-injection-engineering.md](./integrations/prompt-injection-engineering.md) - 提示词注入工程。用于理解系统提示词、工具描述、声明式插件提示词、状态机游戏规则如何进入大模型，以及为什么状态机玩法不再依赖后台大段 prompt。
 
 ## 10. 通用参考
 
@@ -193,7 +193,7 @@ AI 必须按任务读取文档：
 模块任务：对应模块 README
 数据库任务：manager-api db/changelog
 配置任务：scripts/dev + config.yaml / config_from_api.yaml / application*.yml
-架构/提示词/插件/MCP/语义控制任务：docs/architecture/* + docs/integrations/prompt-injection-engineering.md
+架构/提示词/插件/MCP/语义控制任务：docs/architecture/* + docs/architecture/prompt-injection-engineering.md
 配置/运行产物治理任务：docs/standards/config-runtime-policy.md
 文档治理任务：docs/standards/documentation-policy.md
 官方同步任务：docs/standards/upstream-sync-policy.md

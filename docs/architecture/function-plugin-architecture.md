@@ -216,7 +216,7 @@ provider_code 命中真实服务端工具
 互动游戏边界见：
 
 ```text
-docs/integrations/stateful-game-session.md
+docs/architecture/stateful-game-session.md
 ```
 
 当前原则：纯语言游戏交给主 LLM 自由对话，但规则来源仍是功能插件。智能体勾选某个游戏插件后，`instructions` / `opening_message` 会作为临时软提示词注入主 LLM；不要用小候选库、关键词规则或固定问答状态机压过模型能力。
@@ -236,7 +236,7 @@ docs/integrations/stateful-game-session.md
 
 ```text
 docs/architecture/cloud-runtime-architecture.md
-docs/integrations/prompt-injection-engineering.md
+docs/architecture/prompt-injection-engineering.md
 ```
 
 新增模式前必须先定义：
