@@ -91,3 +91,25 @@ def test_beijing_time_context_uses_shared_current_time(monkeypatch):
     )
 
     assert web_search._get_beijing_time_context() == "2026-06-29 15:45 北京时间"
+
+
+def test_web_search_ignores_lang_argument_without_losing_query():
+    class FakeConn:
+        config = {
+            "plugins": {
+                "web_search": {
+                    "provider": "metaso",
+                    "max_results": 5,
+                    "api_key": "",
+                }
+            }
+        }
+
+    result = web_search.web_search(
+        FakeConn(),
+        query="今天晚上有什么球赛",
+        lang="zh_CN",
+    )
+
+    assert result.action == web_search.Action.REQLLM
+    assert "未配置API Key" in result.result
