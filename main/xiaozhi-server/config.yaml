@@ -344,6 +344,10 @@ Memory:
   nomem:
     # 不想使用记忆功能，可以使用nomem
     type: nomem
+  managed_memory:
+    # 智控台治理记忆：不在 Python provider 内保存私有记忆
+    # 聊天事件、候选记忆、事实确认、审计、删除和运行时查询由 manager-api 长期记忆层统一处理
+    type: managed_memory
   mem_local_short:
     # 本地记忆功能，通过selected_module的llm总结，数据保存在本地服务器，不会上传到外部服务器
     type: mem_local_short

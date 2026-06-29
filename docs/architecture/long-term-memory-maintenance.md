@@ -62,10 +62,18 @@ scope_id   = agent_id
 - `mem_local_short`：短摘要记忆，仍可写 `summaryMemory`。
 - `powermem`：PowerMem 检索和画像能力，仍按 provider 配置运行。
 - `mem0ai`：第三方记忆服务。
+- `managed_memory`：智控台治理记忆，provider 本身不保存私有记忆；事件、候选、事实、审计、忘记名单和运行时查询全部走 manager-api。
 - `mem_report_only`：只上报聊天记录。
 - `nomem`：不使用记忆。
 
 长期记忆维护层是 manager-api 侧的治理能力。它不替代 provider，而是在全模块部署时为所有非 `nomem` 记忆模式提供统一的维护、查询和删除入口。Python 会把 provider 查询结果与 manager-api 长期记忆查询结果合并后注入主 LLM。
+
+`managed_memory` 是推荐的治理型入口，用于把 PowerMem 的“长期检索、画像、衰减、经验沉淀”设计方向落到本项目已有的管理端事实层中：
+
+- Python 侧只声明记忆模式，不再新建本地向量库、文件摘要或第三方服务状态。
+- manager-api 侧保留 `source_event -> candidate -> fact -> revision/profile/tool_behavior/tombstone` 的审计链路。
+- 运行时查询仍受设备/智能体作用域、删除墓碑、超时降级和 `nomem` 门控控制。
+- 后续如引入向量、全文、图关系或时间衰减召回，应扩展 manager-api 检索层，而不是继续增加 Python provider 私有存储。
 
 ## 维护模型配置
 

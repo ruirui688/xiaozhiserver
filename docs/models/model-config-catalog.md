@@ -318,12 +318,14 @@ nomem
 mem_local_short
 mem0ai
 powermem
+managed_memory
 ```
 
 标准归类原则：
 
 - `Memory` 是记忆系统，不是 LLM 或 RAG；它可以引用 LLM、SLM、Embedding、向量库，但不拥有这些模型的全量字段。
 - `mem_local_short.llm`、`powermem.llm` 等字段应逐步迁移为模型引用 ID，减少重复维护 API Key。
+- `managed_memory` 是智控台治理记忆入口：不在 Python provider 内保存私有记忆，由 manager-api 长期记忆层统一承担事件上报、候选确认、事实审计、删除墓碑和运行时查询。
 - `maintenance_llm` 是长期记忆维护模型引用，用于把普通用户发言抽取为待确认候选记忆；它必须保存模型管理中的 LLM 配置 ID，例如 DeepSeek/OpenAI 兼容模型 ID，不能保存 API Key、Base URL 或上游模型名。
 - 维护模型生成的内容默认进入 `ai_memory_candidate`，由管理端确认后才进入长期事实层；显式“记住/忘记”仍由长期记忆服务的确定性规则处理。
 - 向量库、画像开关、记忆总结策略属于 Memory 自身字段。
