@@ -231,16 +231,27 @@ export default {
               change: (val) => this.$emit("json-change", field, val),
             },
           });
-        } else if (field.type === "select") {
+        } else if (field.type === "select" || field.type === "model-select") {
           control = h("el-select", {
             class: "custom-select custom-input-bg",
             style: { width: "100%" },
-            props: { value: form[field.target][field.prop], placeholder: field.placeholder },
+            props: {
+              value: form[field.target][field.prop],
+              placeholder: field.placeholder,
+              filterable: true,
+              clearable: true,
+              loading: !!field.loading,
+            },
             on: { input: this.updateValue },
           }, (field.options || []).map((option) => h("el-option", {
             key: option.value,
             props: { label: option.label, value: option.value },
-          })));
+          }, [
+            h("div", { class: "model-reference-option" }, [
+              h("div", { class: "model-reference-title" }, option.label),
+              option.meta ? h("div", { class: "model-reference-meta" }, option.meta) : null,
+            ]),
+          ])));
         } else if (field.type === "switch") {
           control = h("el-switch", {
             props: { value: form[field.target][field.prop] },
@@ -287,6 +298,8 @@ export default {
       pendingProviderType: null,
       pendingModelData: null,
       dynamicCallInfoFields: [],
+      modelReferenceOptionsCache: {},
+      modelReferenceLoading: {},
       fieldJsonMap: {}, // 用于存储JSON字段的字符串形式
       form: {
         id: "",
@@ -642,20 +655,31 @@ export default {
           (p) => p.providerCode === templateCode
         );
         if (provider) {
-          this.dynamicCallInfoFields = (provider.fieldSchemas || [])
-            .filter((f) => !this.isMetadataField(f.key, provider))
-            .map((f) => ({
-              label: f.label || f.key,
-              prop: f.key,
-              target: this.getFieldTarget(f),
-              type: this.getInputType(f),
-              options: (f.options || []).map((option) => ({ label: option, value: option })),
-              placeholder: this.getFieldPlaceholder(f),
-              section: this.getFieldSection(f),
-              helpText: f.helpText || this.getFieldHelpText(f.key),
-              visibleWhen: f.visibleWhen || "",
-              advanced: !!f.advanced,
-            }));
+            this.dynamicCallInfoFields = (provider.fieldSchemas || [])
+              .filter((f) => !this.isMetadataField(f.key, provider))
+              .map((f) => {
+                const inputType = this.getInputType(f);
+                const modelTypes = inputType === "model-select" ? this.getModelReferenceTypes(f) : [];
+                const modelReferenceKey = modelTypes.length ? this.modelReferenceKey(modelTypes) : "";
+                return {
+                  label: f.label || f.key,
+                  prop: f.key,
+                  target: this.getFieldTarget(f),
+                  type: inputType,
+                  modelTypes,
+                  modelReferenceKey,
+                  loading: inputType === "model-select" && !!this.modelReferenceLoading[modelReferenceKey],
+                  options: inputType === "model-select"
+                    ? (this.modelReferenceOptionsCache[modelReferenceKey] || [])
+                    : (f.options || []).map((option) => ({ label: option, value: option })),
+                  placeholder: this.getFieldPlaceholder(f),
+                  section: this.getFieldSection(f),
+                  helpText: f.helpText || this.getFieldHelpText(f.key),
+                  visibleWhen: f.visibleWhen || "",
+                  advanced: !!f.advanced,
+                };
+              });
+          this.ensureModelReferenceOptionsForFields();
 
           if (this.pendingModelData) {
             this.pendingModelData.templateCode = provider.templateCode;
@@ -674,6 +698,9 @@ export default {
       }
     },
     getInputType(field) {
+      if (["model-select", "model_reference", "model-reference"].includes(field.inputType)) {
+        return "model-select";
+      }
       if (field.inputType === "textarea" || field.type === "json") {
         return "json-textarea";
       }
@@ -705,8 +732,90 @@ export default {
         model: "填写模型名称",
         voice: "填写音色 ID",
         speaker: "填写音色或说话人 ID",
+        maintenance_llm: "选择已配置并测试通过的 LLM/SLM，留空则只做显式记住/忘记，不做模型候选抽取",
       };
       return examples[key] || `请输入${label}`;
+    },
+    getModelReferenceTypes(field = {}) {
+      const options = Array.isArray(field.options) ? field.options : [];
+      const modelTypes = options
+        .map((item) => String(item || "").toUpperCase())
+        .filter((item) => ["LLM", "SLM", "VLLM", "RAG"].includes(item));
+      return modelTypes.length ? modelTypes : ["LLM"];
+    },
+    modelReferenceKey(modelTypes = []) {
+      return modelTypes.map((item) => String(item).toUpperCase()).sort().join(",");
+    },
+    ensureModelReferenceOptionsForFields() {
+      const groups = new Map();
+      this.dynamicCallInfoFields
+        .filter((field) => field.type === "model-select")
+        .forEach((field) => {
+          if (!field.modelReferenceKey) {
+            return;
+          }
+          groups.set(field.modelReferenceKey, field.modelTypes);
+        });
+      groups.forEach((modelTypes, key) => this.loadModelReferenceOptions(key, modelTypes));
+    },
+    loadModelReferenceOptions(key, modelTypes) {
+      if (this.modelReferenceOptionsCache[key]) {
+        this.applyModelReferenceOptions(key, this.modelReferenceOptionsCache[key], false);
+        return;
+      }
+      if (this.modelReferenceLoading[key]) {
+        return;
+      }
+      this.$set(this.modelReferenceLoading, key, true);
+      this.applyModelReferenceOptions(key, [], true);
+      Promise.all(modelTypes.map((modelType) => this.fetchModelReferenceOptions(modelType)))
+        .then((groups) => {
+          const options = groups
+            .flat()
+            .sort((a, b) => a.sort - b.sort || a.label.localeCompare(b.label, "zh-Hans-CN"));
+          this.$set(this.modelReferenceOptionsCache, key, options);
+          this.applyModelReferenceOptions(key, options, false);
+        })
+        .catch(() => {
+          this.$message.error("加载可用模型列表失败");
+          this.applyModelReferenceOptions(key, [], false);
+        })
+        .finally(() => {
+          this.$set(this.modelReferenceLoading, key, false);
+        });
+    },
+    fetchModelReferenceOptions(modelType) {
+      return new Promise((resolve, reject) => {
+        Api.model.getModelList({ modelType, modelName: "", page: 1, limit: 100 }, ({ data }) => {
+          if (!data || data.code !== 0) {
+            reject(new Error(data && data.msg ? data.msg : "load model list failed"));
+            return;
+          }
+          const list = data.data && data.data.list ? data.data.list : [];
+          resolve(list
+            .filter((model) => Number(model.isEnabled) === 1 && Number(model.testStatus) === 1)
+            .map((model) => ({
+              label: this.formatModelReferenceLabel(model, modelType),
+              value: model.id,
+              meta: [model.vendorName, model.productName, model.adapterCode || model.providerCode]
+                .filter(Boolean)
+                .join(" / "),
+              sort: Number(model.sort) || 999,
+            })));
+        });
+      });
+    },
+    formatModelReferenceLabel(model, modelType) {
+      const name = model.modelName || model.displayName || model.id;
+      return `${name} (${modelType})`;
+    },
+    applyModelReferenceOptions(key, options, loading) {
+      this.dynamicCallInfoFields.forEach((field) => {
+        if (field.modelReferenceKey === key) {
+          this.$set(field, "options", options);
+          this.$set(field, "loading", loading);
+        }
+      });
     },
     getFieldTarget(field) {
       if (this.isSecretField(field.key)) {
@@ -871,6 +980,7 @@ export default {
         language: "指定识别语言编码，例如 zh-CN。",
         thinking: "是否开启模型思考模式，语音场景通常关闭以降低延迟。",
         reasoning_effort: "思考强度，仅在 thinking 启用时生效。",
+        maintenance_llm: "选择一个已配置并测试通过的 LLM/SLM 作为记忆维护模型。它会从用户发言中抽取候选记忆，进入管理端确认流程；不会在 Memory 配置里保存 API Key。",
       }[key] || "";
     },
     normalizeDynamicFieldValue(value, field) {
