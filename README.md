@@ -49,7 +49,7 @@ deploy/               部署资产归档边界（[入口](./deploy/README.md)）
 - [当前代码地图与梳理报告](./docs/architecture/current-code-map.md)
 - [项目完整架构与文档导航](./docs/architecture/project-architecture.md)
 - [云端运行架构与配置链路](./docs/architecture/cloud-runtime-architecture.md)
-- [提示词注入工程](./docs/integrations/prompt-injection-engineering.md)
+- [提示词注入工程](./docs/architecture/prompt-injection-engineering.md)
 - [配置与运行产物治理策略](./docs/standards/config-runtime-policy.md)
 
 生产部署入口：

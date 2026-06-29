@@ -6,10 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a **heavily customized fork** of `xiaozhi-esp32-server` — an end-to-end voice AI platform for ESP32 smart hardware. Four modules work together:
 
-- **Python real-time service** (207 files) — WebSocket voice pipeline: VAD → ASR → SemanticControl → LLM → TTS
-- **Java management API** (372 files) — Spring Boot 3.4, model configs, benchmark orchestration, auth
-- **Vue 2 Web console** (23 views) — Element UI admin panel
-- **Vue 3 uni-app mobile** — cross-platform (H5/iOS/Android/WeChat)
+- **Python real-time service** (218 files) — WebSocket voice pipeline: VAD → ASR → SemanticCenter → LLM → TTS
+- **Java management API** (406 files) — Spring Boot 3.4, model configs, benchmark orchestration, auth, memory
+- **Vue 2 Web console** (183 .vue files, 26 views + 34 components) — Element UI admin panel
+- **Vue 3 uni-app mobile** (152 .vue files) — cross-platform (H5/iOS/Android/WeChat)
 
 Production deployment uses Aliyun ACR container images; no source builds on production.
 
@@ -39,10 +39,11 @@ If the Conda env is unavailable, state "not verified in project Conda runtime" �
 ## Code Modification Principles
 
 - **Don't grow the giants.** These files are already too large and should NOT be expanded:
-  - `main/xiaozhi-server/core/connection.py` (2060 lines)
-  - `main/manager-api/.../ModelBenchmarkServiceImpl.java`
-  - `main/manager-web/src/views/ModelConfig.vue`
-  - `main/manager-api/.../ModelAssistantServiceImpl.java`
+  - `main/xiaozhi-server/core/connection.py` (1963 lines)
+  - `main/manager-api/.../ModelConfigServiceImpl.java` (2542 lines)
+  - `main/manager-web/src/views/ModelConfig.vue` (1889 lines)
+  - `main/manager-web/src/components/ModelBenchmarkDialog.vue` (2817 lines)
+  - `main/manager-api/.../ModelAssistantServiceImpl.java` (793 lines)
   - Instead, add new logic in dedicated helper/module/component files
 
 - **Don't mix concerns.** Model benchmark UI goes in `ModelBenchmarkDialog.vue`, not `ModelConfig.vue`. ASR/TTS/VLLM benchmark logic goes in `core/benchmark/`, not `runner.py` alone.
@@ -56,7 +57,9 @@ If the Conda env is unavailable, state "not verified in project Conda runtime" �
 ### Voice Pipeline (per connection)
 ```
 Opus audio frames → VAD segmentation → ASR text → SemanticCenter (deterministic pre-check)
+  → SemanticInterruption (LLM-judged barge-in during TTS playback)
   → Intent/LLM chat + tool calls → TTS synthesis → audio back to device
+  → Memory event reporting → long-term memory injection on next turn
 ```
 
 ### Three tool invocation modes

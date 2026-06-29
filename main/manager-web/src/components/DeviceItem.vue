@@ -38,6 +38,10 @@
         </el-tooltip>
         <span v-else>{{ $t('home.chatHistory') }}</span>
       </div>
+      <div :class="['settings-btn', { 'disabled-btn': device.memModelId === 'Memory_nomem' }]"
+        @click="handleMemoryManage">
+        记忆
+      </div>
     </div>
     <div class="version-info">
       <div>{{ $t('home.lastConversation') }}：{{ formattedLastConnectedTime }}</div>
@@ -112,6 +116,12 @@ export default {
         return
       }
       this.$emit('chat-history', { agentId: this.device.agentId, agentName: this.device.agentName })
+    },
+    handleMemoryManage() {
+      if (this.device.memModelId === 'Memory_nomem') {
+        return
+      }
+      this.$router.push({ path: '/memory-management', query: { agentId: this.device.agentId, agentName: this.device.agentName } });
     }
   },
 }

@@ -85,6 +85,13 @@ enable_websocket_ping: false
 #   > 0: 使用固定延迟（毫秒）发送，例如: 60
 tts_audio_send_delay: 0
 
+# 语义打断配置
+# 当设备在 TTS 播放期间识别到用户说话时，先让当前 LLM 基于少量上下文裁决：
+# continue = 附和/反馈，继续播报；interrupt/new_turn = 打断播报并处理用户输入。
+semantic_interruption:
+  enabled: true
+  timeout_seconds: 1.5
+
 exit_commands:
   - "退出"
   - "关闭"

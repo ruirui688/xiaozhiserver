@@ -442,7 +442,7 @@ public Result<PageData<AgentChatSessionDTO>> getAgentSessions(
 
 ## 六、模型管理与配置体系混乱
 
-> 📄 完整分析见 [[model-management-architecture-analysis]]
+> 📄 完整分析见 [model-management-architecture-analysis](../models/model-management-architecture-analysis.md)
 
 ### 概述
 
@@ -521,7 +521,7 @@ Java 侧有 `SLM` 模型类型和 `slm_model_id` 字段，但 Python 侧完全�
 
 ## 七、语义打断与端到端语音模型演进
 
-> 📄 完整分析见 [[semantic-interruption-and-e2e-voice-model-analysis]]
+> 📄 完整分析见 [semantic-interruption-and-e2e-voice-model-analysis](../architecture/semantic-interruption-and-e2e-voice-model-analysis.md)
 
 ### 概述
 

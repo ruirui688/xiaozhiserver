@@ -190,7 +190,7 @@ Java 后台负责选择和保存这些模块，Python 在设备连接时按配�
 | `change_role` 内置角色提示词 | `plugins_func/functions/change_role.py` | 当前会话动态切换角色 |
 | 设备端 MCP prompt | 设备固件 MCP 工具定义 | 覆盖设备工具的 description |
 
-完整注入链路见 [提示词注入工程](../integrations/prompt-injection-engineering.md)。
+完整注入链路见 [提示词注入工程](./prompt-injection-engineering.md)。
 
 ## 7. 工具调用模式
 
@@ -272,6 +272,15 @@ MCP 在本项目中至少有三条链路，必须分开理解。
 ```
 
 区别在于工具是谁提供、谁执行。
+
+详细的 MCP 接入、配置和使用方法见以下专题文档：
+
+- [MCP 接入点部署使用指南](../mcp/mcp-endpoint-enable.md)
+- [MCP 接入点功能接入指南](../mcp/mcp-endpoint-integration.md)
+- [可视化 MCP HTTP 工具](../mcp/no-code-http-tools.md)
+- [上下文源使用教程](../mcp/context-provider-integration.md)
+- [视觉模型使用指南](../mcp/mcp-vision-integration.md)
+- [MCP 方法获取设备信息](../mcp/mcp-get-device-info.md)
 
 ## 10. 外部 MCP Endpoint
 

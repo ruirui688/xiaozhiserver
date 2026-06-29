@@ -10,8 +10,8 @@
 关键文件：
   - main/xiaozhi-server/core/providers/tools/server_plugins/plugin_executor.py
   - docs/architecture/cloud-runtime-architecture.md
-  - docs/integrations/function-plugin-architecture.md
-  - docs/integrations/prompt-injection-engineering.md
+  - docs/architecture/function-plugin-architecture.md
+  - docs/architecture/prompt-injection-engineering.md
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方也修改插件注册、工具描述生成、提示词注入、配置下发、MCP 工具发现或 ServerPluginExecutor 执行流程，必须人工合并，保留 Function Plugin 顶层模型、声明式互动模式、状态机游戏模式、custom_plugin 兼容字段、parameters_schema、opening_message、instructions 等配置约定，并同步更新云端运行架构和提示词注入工程文档。
 ```
@@ -88,7 +88,7 @@
 关键文件：
   - docs/architecture/project-architecture.md
   - docs/architecture/cloud-runtime-architecture.md
-  - docs/integrations/prompt-injection-engineering.md
+  - docs/architecture/prompt-injection-engineering.md
   - docs/README.md
 是否允许被官方覆盖：否
 官方同步时的处理规则：官方文档同步时不得删除这些架构和提示词工程文档；如果官方修改连接初始化、PromptManager、Dialogue、UnifiedToolHandler、MCP executor、Intent provider、ConfigServiceImpl 或插件执行器，必须同步校正文档中的真实代码路径和运行链路。
@@ -166,11 +166,12 @@
   - main/xiaozhi-server/core/connection.py
   - main/xiaozhi-server/core/handle/receiveAudioHandle.py
   - main/xiaozhi-server/core/providers/tools/unified_tool_handler.py
+  - main/xiaozhi-server/tests/test_semantic_interruption.py
   - main/xiaozhi-server/tests/test_semantic_router.py
   - main/xiaozhi-server/tests/test_semantic_policy.py
   - docs/architecture/semantic-control-center.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改 startToChat、ConnectionHandler 初始化、handle_user_intent、GameSessionManager、UnifiedToolHandler、ToolManager、abortHandle、TTS 入队或 function-call 主链路，必须保留语义控制中枢在旧意图/LLM 之前的前置拦截位置；未命中高置信度规则时必须继续兜底到旧 handle_user_intent 和 conn.chat；停止类指令必须复用 handleAbortMessage 并允许配置动作停止工具；纯语言游戏不得优先回到 active_game_tool，应交给主 LLM 对话，并只从已启用功能插件读取可编辑软规则；退出游戏不得关闭 websocket；语义模块顶层导入应尽量轻量，避免引入 opus/loguru 等运行依赖导致纯单元测试无法导入。
+官方同步时的处理规则：如果官方修改 startToChat、ConnectionHandler 初始化、handle_user_intent、GameSessionManager、UnifiedToolHandler、ToolManager、abortHandle、TTS 入队或 function-call 主链路，必须保留语义控制中枢在旧意图/LLM 之前的前置拦截位置；TTS 播放期间识别到用户重叠说话时，是否打断必须由当前 LLM 基于少量上下文裁决 continue / interrupt / new_turn，服务端不得用附和词表、停止词表或长度阈值替代语义打断判断；LLM 裁决为 continue 时不得清空 TTS 队列、不得进入主聊天；裁决为 interrupt/new_turn 或裁决失败时才复用 handleAbortMessage；未命中高置信度规则时必须继续兜底到旧 handle_user_intent 和 conn.chat；停止类指令必须复用 handleAbortMessage 并允许配置动作停止工具；纯语言游戏不得优先回到 active_game_tool，应交给主 LLM 对话，并只从已启用功能插件读取可编辑软规则；退出游戏不得关闭 websocket；语义模块顶层导入应尽量轻量，避免引入 opus/loguru 等运行依赖导致纯单元测试无法导入。
 ```
 
 ## 12. 管理后台模型测试详情字段补全
@@ -346,4 +347,25 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/manager-web/src/views/ModelConfig.vue
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方修改模型配置页、模型配置接口、LLM 配置表或 provider/catalog 结构，必须保留以下约定：助手设置只保存已配置 LLM 的 modelId；base_url、api_key、model_name 等凭据来自标准模型配置；发送给助手的上下文必须脱敏；助手可以生成配置草案、协议接入草案、实现任务和自动化产物草案，并在用户点击后把产物写入工作区；写入必须限制在模型接入相关白名单路径，默认不覆盖已有文件，禁止绝对路径和路径越界；助手不得直接保存模型配置、启用模型、执行生产数据库变更或标记测试通过；协议不匹配时必须返回未适配，不能把同厂商不同协议的 adapter 当作可用；真正接入新协议必须经过代码审核、数据库迁移审查和真实模型测试。
+```
+
+## 21. 长期记忆维护基础设施
+
+```text
+定制模块：manager-api 长期记忆事实层、manager-web 记忆管理页、xiaozhi-server 记忆事件上报和查询注入
+改动原因：原有 summaryMemory、mem_local_short、PowerMem 等能力偏运行时摘要或 provider 接入，缺少统一的长期维护底座。现在新增 source_event -> candidate -> fact -> revision/profile/tool_behavior/tombstone 的 MySQL 首期事实层，支持显式记住/忘记、管理端查看编辑删除归档、忘记名单、审计轨迹和运行时记忆上下文查询。Memory 模型配置可通过 `maintenance_llm` 引用模型管理里已经配置和测试的 LLM，例如 DeepSeek/OpenAI 兼容模型，用于把普通用户发言抽取为待确认候选记忆；Memory 配置不保存 API Key、Base URL 或上游模型名。Python 在聊天记录上报时同步写入原始记忆事件，LLM 前把 manager-api 长期记忆和现有 Memory provider 结果合并注入，并为记忆查询设置超时，避免拖住语音主链路。
+关键文件：
+  - main/manager-api/src/main/java/xiaozhi/modules/memory/
+  - main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelCatalogServiceImpl.java
+  - main/manager-api/src/main/resources/db/changelog/202606291520.sql
+  - main/manager-api/src/main/resources/db/changelog/db.changelog-master.yaml
+  - main/manager-web/src/views/MemoryManagement.vue
+  - main/manager-web/src/apis/module/memory.js
+  - main/manager-web/src/components/DeviceItem.vue
+  - main/xiaozhi-server/config/manage_api_client.py
+  - main/xiaozhi-server/core/handle/reportHandle.py
+  - main/xiaozhi-server/core/connection.py
+  - docs/architecture/long-term-memory-maintenance.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改 Memory provider、聊天记录上报、ConfigController、AgentController、Shiro config、角色首页、模型配置目录或数据库迁移，必须保留长期记忆事实层和 `/config/memory/**` server-secret 入口；运行时查询失败或超时时必须降级为空记忆，不能阻塞语音回复；`nomem` 模式不得注入长期记忆；`maintenance_llm` 只能引用已配置的 LLM modelId，不能把 DeepSeek 等模型密钥复制到 Memory 配置或记忆表；维护模型只能创建 `pending` 候选，不得绕过管理端确认直接写 active fact；管理端删除/归档/确认/拒绝必须写 revision 审计；显式忘记必须写 tombstone 并阻止对应内容继续被主动使用。
 ```

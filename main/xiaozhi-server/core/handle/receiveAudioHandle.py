@@ -9,6 +9,7 @@ from core.utils.util import audio_to_data
 from core.utils.correct_words import apply_correct_words
 from core.handle.abortHandle import handleAbortMessage
 from core.handle.intentHandler import handle_user_intent
+from core.semantic.interruption import SemanticInterruptionClassifier
 from core.utils.output_counter import check_device_output_limit
 from core.handle.sendAudioHandle import send_stt_message, SentenceType
 
@@ -45,6 +46,7 @@ async def startToChat(conn: "ConnectionHandler", text):
     speaker_name = None
     language_tag = None
     actual_text = text
+    raw_interruption_text = text
 
     try:
         # 尝试解析JSON格式的输入
@@ -93,6 +95,28 @@ async def startToChat(conn: "ConnectionHandler", text):
 
     # manual 模式下不打断正在播放的内容
     if conn.client_is_speaking and conn.client_listen_mode != "manual":
+        interruption_config = conn.config.get("semantic_interruption", {}) or {}
+        if interruption_config.get("enabled", True):
+            context = None
+            if getattr(conn, "semantic_center", None):
+                context = conn.semantic_center.state_manager.get_context(conn)
+            if context is None:
+                context = type(
+                    "RobotContext",
+                    (),
+                    {"active_game_tool": None},
+                )()
+            classifier = SemanticInterruptionClassifier()
+            classification = await classifier.classify(
+                conn, raw_interruption_text, context
+            )
+            conn.logger.bind(tag=TAG).info(
+                "语义打断分类: "
+                f"category={classification.category}, "
+                f"reason={classification.reason}"
+            )
+            if not classification.should_abort:
+                return
         await handleAbortMessage(conn)
 
     # 语义控制中枢优先处理高置信度控制类指令，未处理再进入旧流程

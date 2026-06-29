@@ -42,6 +42,7 @@ MCP / 插件 / IoT 是工具执行层
 ```text
 main/xiaozhi-server/core/semantic/
   frames.py            语义数据结构
+  interruption.py      TTS 播放期间重叠语音的大模型打断裁决
   normalizer.py        文本标准化
   router.py            高置信度规则路由
   state_manager.py     连接级状态投影
@@ -56,6 +57,7 @@ ConnectionHandler.__init__
   -> self.semantic_center = SemanticCenter()
 
 startToChat()
+  -> 如果 TTS 正在播放，先调用 SemanticInterruptionClassifier 让当前 LLM 裁决是否打断
   -> conn.semantic_center.handle_user_text(conn, actual_text)
   -> 未处理时继续走 handle_user_intent()
   -> 再未处理时继续走 conn.chat()
@@ -78,6 +80,30 @@ UnifiedToolHandler.handle_llm_function_call()
 ```
 
 所以当前改造是“确定性控制前移”，不是删除 function-call。
+
+### 播报期间语义打断
+
+用户在 TTS 播放期间说话时，服务端不再仅因为 ASR 出了文本就立即 `handleAbortMessage()`。
+
+当前链路：
+
+```text
+ASR 文本
+  -> SemanticInterruptionClassifier
+  -> 当前 LLM response_no_stream 裁决 continue / interrupt / new_turn
+  -> continue：不打断、不进入主聊天，当前 TTS 继续
+  -> interrupt/new_turn：复用 handleAbortMessage()，再进入现有 SemanticCenter / Intent / Chat 链路
+```
+
+裁决请求只携带少量上下文：
+
+```text
+assistant_state
+recent_dialogue 最近最多 4 条 user/assistant 文本
+overlap_user_text 当前重叠语音文本
+```
+
+服务端不维护附和词表、停止词表或长度阈值来替代判断；只负责请求 LLM、解析 JSON 结果和执行结果。LLM 裁决失败或返回非法 JSON 时，为避免真实打断请求被吞掉，保守回退为 `new_turn` 并走旧打断流程。
 
 ## 3. 核心数据结构
 
@@ -290,3 +316,9 @@ conda run -n xiaozhi-esp32-server pytest tests
 ```
 
 如果本地缺少 `pytest` 或项目依赖，需要先按开发环境文档安装依赖。
+
+## 5. 关联文档
+
+- [语义打断与端到端语音模型演进分析](./semantic-interruption-and-e2e-voice-model-analysis.md) — 语义打断方案设计与端到端模型演进路线
+- [云端运行架构与配置链路](./cloud-runtime-architecture.md) — 语义控制中枢在全链路中的位置
+- [提示词注入工程](./prompt-injection-engineering.md) — LLM 兜底时的提示词和行为约束

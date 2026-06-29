@@ -554,4 +554,4 @@ ESP32 设备
 
 ---
 
-> 📄 关联文档：[[model-management-architecture-analysis]] | [[system-issues-and-optimization-backlog]]
+> 📄 关联文档：[model-management-architecture-analysis](../models/model-management-architecture-analysis.md) | [system-issues-and-optimization-backlog](../reference/system-issues-and-optimization-backlog.md)
