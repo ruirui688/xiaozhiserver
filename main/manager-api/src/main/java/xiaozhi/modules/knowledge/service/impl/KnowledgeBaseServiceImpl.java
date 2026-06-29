@@ -517,7 +517,15 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
                     "llm_model",
                     "llm_timeout_seconds",
                     "llm_max_input_chars",
-                    "llm_max_tokens")) {
+                    "llm_max_tokens",
+                    "retrieval_config",
+                    "mode",
+                    "search_type",
+                    "semantic_level",
+                    "semantic_top_k",
+                    "faq_threshold",
+                    "semantic_threshold",
+                    "rerank_enabled")) {
                 Object value = datasetConfig.get(key);
                 if (value != null && StringUtils.isNotBlank(value.toString())) {
                     config.put(key, value);

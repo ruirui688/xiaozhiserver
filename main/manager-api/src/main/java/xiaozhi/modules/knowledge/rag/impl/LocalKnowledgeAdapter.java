@@ -6,10 +6,11 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -69,6 +70,11 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private static final int DEFAULT_LLM_TIMEOUT_SECONDS = 90;
     private static final int DEFAULT_LLM_MAX_INPUT_CHARS = 12000;
     private static final int DEFAULT_LLM_MAX_TOKENS = 4000;
+    private static final int DEFAULT_RETRIEVAL_TOP_K = 10;
+    private static final int DEFAULT_RETRIEVAL_LEVEL = 4;
+    private static final int DEFAULT_CANDIDATE_LIMIT = 400;
+    private static final int MAX_CANDIDATE_LIMIT = 2000;
+    private static final int MAX_RETRIEVAL_TERMS = 32;
 
     private Map<String, Object> config = new HashMap<>();
     private ObjectMapper objectMapper;
@@ -84,6 +90,14 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private int llmMaxInputChars = DEFAULT_LLM_MAX_INPUT_CHARS;
     private int llmMaxTokens = DEFAULT_LLM_MAX_TOKENS;
     private RestTemplate llmRestTemplate;
+    private boolean hasRetrievalConfig;
+    private String retrievalMode = "normal";
+    private String searchType = "semantic";
+    private int semanticLevel = DEFAULT_RETRIEVAL_LEVEL;
+    private int semanticTopK = DEFAULT_RETRIEVAL_TOP_K;
+    private float faqThreshold = 1.0F;
+    private float semanticThreshold = 0.05F;
+    private boolean rerankEnabled;
 
     @Override
     public String getAdapterType() {
@@ -105,6 +119,15 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         llmTimeoutSeconds = getIntConfig("llm_timeout_seconds", DEFAULT_LLM_TIMEOUT_SECONDS, 10, 600);
         llmMaxInputChars = getIntConfig("llm_max_input_chars", DEFAULT_LLM_MAX_INPUT_CHARS, 500, 20000);
         llmMaxTokens = getIntConfig("llm_max_tokens", DEFAULT_LLM_MAX_TOKENS, 200, 8000);
+        Map<String, Object> retrievalConfig = getMapConfig("retrieval_config");
+        hasRetrievalConfig = retrievalConfig != null && !retrievalConfig.isEmpty();
+        retrievalMode = getStringConfig(retrievalConfig, "mode", getStringConfig("mode", "normal"));
+        searchType = getStringConfig(retrievalConfig, "search_type", getStringConfig("search_type", "semantic"));
+        semanticLevel = getIntConfig(retrievalConfig, "semantic_level", DEFAULT_RETRIEVAL_LEVEL, 1, 5);
+        semanticTopK = getIntConfig(retrievalConfig, "semantic_top_k", DEFAULT_RETRIEVAL_TOP_K, 1, 50);
+        faqThreshold = getFloatConfig(retrievalConfig, "faq_threshold", 1.0F, 0F, 1F);
+        semanticThreshold = getFloatConfig(retrievalConfig, "semantic_threshold", 0.05F, 0F, 1F);
+        rerankEnabled = getBooleanConfig(retrievalConfig, "rerank_enabled", getBooleanConfig("rerank_enabled", false));
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory();
         factory.setReadTimeout(java.time.Duration.ofSeconds(llmTimeoutSeconds));
         this.llmRestTemplate = new RestTemplate(factory);
@@ -221,21 +244,21 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
 
     @Override
     public RetrievalDTO.ResultVO retrievalTest(RetrievalDTO.TestReq req) {
-        QueryWrapper<KnowledgeChunkEntity> query = new QueryWrapper<>();
-        query.in("dataset_id", req.getDatasetIds());
-        if (req.getDocumentIds() != null && !req.getDocumentIds().isEmpty()) {
-            query.in("document_id", req.getDocumentIds());
-        }
-        List<KnowledgeChunkEntity> chunks = chunkDao.selectList(query);
         String question = StringUtils.defaultString(req.getQuestion());
-        int pageSize = req.getPageSize() == null || req.getPageSize() < 1 ? 10 : req.getPageSize();
+        int pageSize = clamp(req.getPageSize() == null ? 10 : req.getPageSize(), 1, 100);
+        int resultLimit = resolveResultLimit(req, pageSize);
+        Set<String> terms = tokenize(question.toLowerCase());
+        List<String> candidateTerms = selectCandidateTerms(terms);
+        int candidateLimit = resolveCandidateLimit(req, resultLimit);
+        String fulltextQuery = buildFulltextQuery(candidateTerms);
+        List<KnowledgeChunkEntity> chunks = loadRetrievalCandidates(req, candidateTerms, fulltextQuery, candidateLimit);
 
         Map<String, DocumentEntity> docs = loadDocs(chunks);
         List<ScoredChunk> scored = chunks.stream()
-                .map(chunk -> new ScoredChunk(chunk, score(question, chunk)))
-                .filter(item -> item.getScore() > 0 || StringUtils.isBlank(question))
+                .map(chunk -> new ScoredChunk(chunk, score(question, chunk, terms)))
+                .filter(item -> shouldKeepScore(question, item.getScore()))
                 .sorted(Comparator.comparing(ScoredChunk::getScore).reversed())
-                .limit(pageSize)
+                .limit(resultLimit)
                 .collect(Collectors.toList());
 
         List<RetrievalDTO.HitVO> hits = new ArrayList<>();
@@ -275,6 +298,52 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
                 .docAggs(docAggs)
                 .total((long) hits.size())
                 .build();
+    }
+
+    private List<KnowledgeChunkEntity> loadRetrievalCandidates(
+            RetrievalDTO.TestReq req,
+            List<String> candidateTerms,
+            String fulltextQuery,
+            int candidateLimit) {
+        Map<String, KnowledgeChunkEntity> candidates = new LinkedHashMap<>();
+        if (StringUtils.isNotBlank(fulltextQuery)) {
+            addCandidates(candidates, chunkDao.selectRetrievalCandidates(
+                    req.getDatasetIds(),
+                    req.getDocumentIds(),
+                    Collections.emptyList(),
+                    fulltextQuery,
+                    candidateLimit));
+        }
+        if ((StringUtils.isBlank(fulltextQuery) || candidates.size() < candidateLimit)
+                && candidateTerms != null && !candidateTerms.isEmpty()) {
+            addCandidates(candidates, chunkDao.selectRetrievalCandidates(
+                    req.getDatasetIds(),
+                    req.getDocumentIds(),
+                    candidateTerms,
+                    null,
+                    candidateLimit - candidates.size()));
+        }
+        if (candidates.isEmpty() && (candidateTerms == null || candidateTerms.isEmpty())) {
+            addCandidates(candidates, chunkDao.selectRetrievalCandidates(
+                    req.getDatasetIds(),
+                    req.getDocumentIds(),
+                    Collections.emptyList(),
+                    null,
+                    candidateLimit));
+        }
+        return new ArrayList<>(candidates.values());
+    }
+
+    private void addCandidates(Map<String, KnowledgeChunkEntity> target, List<KnowledgeChunkEntity> chunks) {
+        if (chunks == null || chunks.isEmpty()) {
+            return;
+        }
+        for (KnowledgeChunkEntity chunk : chunks) {
+            if (chunk == null) {
+                continue;
+            }
+            target.putIfAbsent(StringUtils.defaultIfBlank(chunk.getChunkId(), chunk.getId()), chunk);
+        }
     }
 
     @Override
@@ -949,7 +1018,68 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         }
     }
 
-    private Float score(String question, KnowledgeChunkEntity chunk) {
+    private int resolveResultLimit(RetrievalDTO.TestReq req, int pageSize) {
+        int limit = pageSize;
+        if (req.getTopK() != null && req.getTopK() > 0) {
+            limit = Math.min(limit, clamp(req.getTopK(), 1, 100));
+        } else if (hasRetrievalConfig) {
+            limit = Math.min(limit, semanticTopK);
+        }
+        return Math.max(1, limit);
+    }
+
+    private int resolveCandidateLimit(RetrievalDTO.TestReq req, int resultLimit) {
+        int requestedTopK = req.getTopK() == null || req.getTopK() < 1 ? semanticTopK : req.getTopK();
+        int baseLimit = Math.max(DEFAULT_CANDIDATE_LIMIT, Math.max(resultLimit, requestedTopK) * 20);
+        if (StringUtils.equalsIgnoreCase(searchType, "hybrid")) {
+            baseLimit = Math.max(baseLimit, resultLimit * 30);
+        }
+        if (StringUtils.equalsIgnoreCase(retrievalMode, "exhibition")) {
+            baseLimit = Math.max(baseLimit, resultLimit * 25);
+        }
+        if (rerankEnabled) {
+            baseLimit = Math.max(baseLimit, resultLimit * 30);
+        }
+        return clamp(baseLimit, resultLimit, MAX_CANDIDATE_LIMIT);
+    }
+
+    private boolean shouldKeepScore(String question, float score) {
+        if (StringUtils.isBlank(question)) {
+            return true;
+        }
+        if (score >= faqThreshold) {
+            return true;
+        }
+        return score >= semanticThreshold;
+    }
+
+    private List<String> selectCandidateTerms(Set<String> terms) {
+        if (terms == null || terms.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return terms.stream()
+                .filter(StringUtils::isNotBlank)
+                .filter(term -> term.length() >= 2 || containsNonCjk(term))
+                .sorted(Comparator
+                        .comparingInt(String::length).reversed()
+                        .thenComparing(Comparator.naturalOrder()))
+                .limit(MAX_RETRIEVAL_TERMS)
+                .collect(Collectors.toList());
+    }
+
+    private String buildFulltextQuery(List<String> terms) {
+        if (terms == null || terms.isEmpty()) {
+            return null;
+        }
+        return terms.stream()
+                .filter(term -> term.length() >= 2)
+                .limit(12)
+                .map(term -> "+" + term.replaceAll("[+\\-<>()~*\"@]+", ""))
+                .filter(term -> term.length() > 1)
+                .collect(Collectors.joining(" "));
+    }
+
+    private Float score(String question, KnowledgeChunkEntity chunk, Set<String> terms) {
         String content = String.join("\n",
                 StringUtils.defaultString(chunk.getContent()),
                 StringUtils.defaultString(chunk.getQuestion()),
@@ -961,7 +1091,6 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         if (content.contains(q)) {
             return 1F;
         }
-        Set<String> terms = tokenize(q);
         if (terms.isEmpty()) {
             return 0F;
         }
@@ -993,17 +1122,24 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     }
 
     private Set<String> tokenize(String text) {
-        Set<String> terms = new HashSet<>();
+        Set<String> terms = new LinkedHashSet<>();
         for (String rawTerm : text.split("[\\s,，。！？；;:：、]+")) {
             String term = StringUtils.trimToEmpty(rawTerm);
             if (StringUtils.isBlank(term)) {
                 continue;
             }
-            terms.add(term);
+            addTermWithLimit(terms, term);
             if (containsCjk(term) && term.length() > 2) {
                 addCjkNgrams(terms, term, 4);
-                addCjkNgrams(terms, term, 3);
-                addCjkNgrams(terms, term, 2);
+                if (semanticLevel >= 2) {
+                    addCjkNgrams(terms, term, 3);
+                }
+                if (semanticLevel >= 4) {
+                    addCjkNgrams(terms, term, 2);
+                }
+            }
+            if (terms.size() >= MAX_RETRIEVAL_TERMS) {
+                break;
             }
         }
         return terms;
@@ -1016,8 +1152,17 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         for (int i = 0; i <= text.length() - size; i++) {
             String gram = text.substring(i, i + size);
             if (containsCjk(gram) && !isWeakCjkTerm(gram)) {
-                terms.add(gram);
+                addTermWithLimit(terms, gram);
+                if (terms.size() >= MAX_RETRIEVAL_TERMS) {
+                    return;
+                }
             }
+        }
+    }
+
+    private void addTermWithLimit(Set<String> terms, String term) {
+        if (terms.size() < MAX_RETRIEVAL_TERMS) {
+            terms.add(term);
         }
     }
 
@@ -1118,8 +1263,25 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         return StringUtils.defaultIfBlank(value == null ? null : value.toString(), defaultValue);
     }
 
+    private String getStringConfig(Map<String, Object> source, String key, String defaultValue) {
+        if (source == null) {
+            return defaultValue;
+        }
+        Object value = source.get(key);
+        return StringUtils.defaultIfBlank(value == null ? null : value.toString(), defaultValue);
+    }
+
     private boolean getBooleanConfig(String key, boolean defaultValue) {
         Object value = config.get(key);
+        return parseBooleanConfig(value, defaultValue);
+    }
+
+    private boolean getBooleanConfig(Map<String, Object> source, String key, boolean defaultValue) {
+        Object value = source == null ? null : source.get(key);
+        return parseBooleanConfig(value, defaultValue);
+    }
+
+    private boolean parseBooleanConfig(Object value, boolean defaultValue) {
         if (value == null) {
             return defaultValue;
         }
@@ -1138,6 +1300,15 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
 
     private int getIntConfig(String key, int defaultValue, int min, int max) {
         Object value = config.get(key);
+        return parseIntConfig(key, value, defaultValue, min, max);
+    }
+
+    private int getIntConfig(Map<String, Object> source, String key, int defaultValue, int min, int max) {
+        Object value = source == null ? null : source.get(key);
+        return parseIntConfig(key, value, defaultValue, min, max);
+    }
+
+    private int parseIntConfig(String key, Object value, int defaultValue, int min, int max) {
         if (value == null) {
             return defaultValue;
         }
@@ -1148,6 +1319,42 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             log.warn("本地知识库 {} 配置无效，使用默认值 {}", key, defaultValue);
             return defaultValue;
         }
+    }
+
+    private int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private float getFloatConfig(Map<String, Object> source, String key, float defaultValue, float min, float max) {
+        Object value = source == null ? null : source.get(key);
+        if (value == null) {
+            return defaultValue;
+        }
+        try {
+            float parsed = Float.parseFloat(value.toString());
+            return Math.max(min, Math.min(max, parsed));
+        } catch (NumberFormatException e) {
+            log.warn("本地知识库 {} 配置无效，使用默认值 {}", key, defaultValue);
+            return defaultValue;
+        }
+    }
+
+    private Map<String, Object> getMapConfig(String key) {
+        Object value = config.get(key);
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> result = new HashMap<>();
+            map.forEach((k, v) -> result.put(String.valueOf(k), v));
+            return result;
+        }
+        if (value instanceof String text && StringUtils.isNotBlank(text)) {
+            try {
+                return objectMapper.readValue(text, new TypeReference<Map<String, Object>>() {
+                });
+            } catch (Exception e) {
+                log.warn("解析本地知识库 {} 配置失败，忽略检索扩展配置: {}", key, e.getMessage());
+            }
+        }
+        return Collections.emptyMap();
     }
 
     private boolean isPlaceholderSecret(String value) {

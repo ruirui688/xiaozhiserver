@@ -1,6 +1,6 @@
 <template>
-  <el-dialog :title="title" :visible="dialogVisible" width="720px" class="knowledge-base-dialog" @close="handleClose">
-    <el-form ref="knowledgeBaseForm" :model="form" :rules="rules" label-width="100px" size="medium">
+  <el-dialog :title="title" :visible="dialogVisible" width="800px" class="knowledge-base-dialog" @close="handleClose">
+    <el-form ref="knowledgeBaseForm" :model="form" :rules="rules" label-width="130px" size="medium">
       <el-form-item :label="$t('knowledgeBaseDialog.name')" prop="name">
         <el-input v-model="form.name" :placeholder="$t('knowledgeBaseDialog.namePlaceholder')" clearable></el-input>
       </el-form-item>
@@ -44,6 +44,56 @@
           </el-col>
         </el-row>
       </template>
+      <el-divider content-position="left">{{ $t('knowledgeBaseDialog.retrievalConfig') }}</el-divider>
+      <el-row :gutter="12">
+        <el-col :span="12">
+          <el-form-item :label="$t('knowledgeBaseDialog.retrievalMode')">
+            <el-radio-group v-model="retrievalForm.mode" size="small">
+              <el-radio-button label="normal">{{ $t('knowledgeBaseDialog.retrievalModeNormal') }}</el-radio-button>
+              <el-radio-button label="exhibition">{{ $t('knowledgeBaseDialog.retrievalModeExhibition') }}</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
+          <el-form-item :label="$t('knowledgeBaseDialog.searchType')">
+            <el-radio-group v-model="retrievalForm.search_type" size="small">
+              <el-radio-button label="semantic">{{ $t('knowledgeBaseDialog.searchTypeSemantic') }}</el-radio-button>
+              <el-radio-button label="hybrid">{{ $t('knowledgeBaseDialog.searchTypeHybrid') }}</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
+        </el-col>
+      </el-row>
+      <el-row :gutter="12">
+        <el-col :span="12">
+          <el-form-item :label="$t('knowledgeBaseDialog.semanticLevel')">
+            <el-input-number v-model="retrievalForm.semantic_level" :min="1" :max="5" :step="1"
+              style="width: 100%"></el-input-number>
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
+          <el-form-item :label="$t('knowledgeBaseDialog.semanticTopK')">
+            <el-input-number v-model="retrievalForm.semantic_top_k" :min="1" :max="50" :step="1"
+              style="width: 100%"></el-input-number>
+          </el-form-item>
+        </el-col>
+      </el-row>
+      <el-row :gutter="12">
+        <el-col :span="12">
+          <el-form-item :label="$t('knowledgeBaseDialog.faqThreshold')">
+            <el-input-number v-model="retrievalForm.faq_threshold" :min="0" :max="1" :step="0.01" :precision="2"
+              style="width: 100%"></el-input-number>
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
+          <el-form-item :label="$t('knowledgeBaseDialog.semanticThreshold')">
+            <el-input-number v-model="retrievalForm.semantic_threshold" :min="0" :max="1" :step="0.01" :precision="2"
+              style="width: 100%"></el-input-number>
+          </el-form-item>
+        </el-col>
+      </el-row>
+      <el-form-item :label="$t('knowledgeBaseDialog.rerankEnabled')">
+        <el-switch v-model="retrievalForm.rerank_enabled"></el-switch>
+      </el-form-item>
     </el-form>
     <div slot="footer" class="dialog-footer">
       <el-button @click="handleClose">{{ $t('knowledgeBaseDialog.cancel') }}</el-button>
@@ -83,6 +133,8 @@ export default {
       dialogVisible: this.visible,
       ragModels: [],
       parserForm: this.defaultParserForm(),
+      retrievalForm: this.defaultRetrievalForm(),
+      parserConfigValue: {},
       rules: {
         name: [
           {
@@ -163,34 +215,106 @@ export default {
         llm_max_tokens: 4000
       };
     },
+    defaultRetrievalForm() {
+      return {
+        mode: "normal",
+        search_type: "semantic",
+        semantic_level: 4,
+        semantic_top_k: 10,
+        faq_threshold: 1.0,
+        semantic_threshold: 0.05,
+        rerank_enabled: false
+      };
+    },
+    normalizeNumber(value, defaultValue) {
+      const numberValue = Number(value);
+      return Number.isFinite(numberValue) ? numberValue : defaultValue;
+    },
+    getConfigValue(primaryConfig, secondaryConfig, key, defaultValue) {
+      if (primaryConfig && Object.prototype.hasOwnProperty.call(primaryConfig, key)) {
+        return primaryConfig[key];
+      }
+      if (secondaryConfig && Object.prototype.hasOwnProperty.call(secondaryConfig, key)) {
+        return secondaryConfig[key];
+      }
+      return defaultValue;
+    },
     syncParserFormFromValue() {
       const defaults = this.defaultParserForm();
+      const retrievalDefaults = this.defaultRetrievalForm();
       if (!this.form || !this.form.parserConfig) {
         this.parserForm = defaults;
+        this.retrievalForm = retrievalDefaults;
+        this.parserConfigValue = {};
         return;
       }
       try {
         const parsed = typeof this.form.parserConfig === "string"
           ? JSON.parse(this.form.parserConfig)
           : this.form.parserConfig;
+        const parserConfig = parsed || {};
+        const retrievalConfig = parserConfig.retrieval_config || {};
         this.parserForm = {
           ...defaults,
-          ...(parsed || {})
+          ...parserConfig
         };
+        this.retrievalForm = {
+          ...retrievalDefaults,
+          ...retrievalConfig,
+          mode: this.getConfigValue(retrievalConfig, parserConfig, "mode", retrievalDefaults.mode),
+          search_type: this.getConfigValue(
+            retrievalConfig,
+            parserConfig,
+            "search_type",
+            retrievalDefaults.search_type
+          ),
+          semantic_level: this.normalizeNumber(
+            this.getConfigValue(retrievalConfig, parserConfig, "semantic_level"),
+            retrievalDefaults.semantic_level
+          ),
+          semantic_top_k: this.normalizeNumber(
+            this.getConfigValue(retrievalConfig, parserConfig, "semantic_top_k"),
+            retrievalDefaults.semantic_top_k
+          ),
+          faq_threshold: this.normalizeNumber(
+            this.getConfigValue(retrievalConfig, parserConfig, "faq_threshold"),
+            retrievalDefaults.faq_threshold
+          ),
+          semantic_threshold: this.normalizeNumber(
+            this.getConfigValue(retrievalConfig, parserConfig, "semantic_threshold"),
+            retrievalDefaults.semantic_threshold
+          ),
+          rerank_enabled: typeof retrievalConfig.rerank_enabled === "boolean"
+            ? retrievalConfig.rerank_enabled
+            : !!parserConfig.rerank_enabled
+        };
+        this.parserConfigValue = parserConfig;
       } catch (e) {
         console.warn("parserConfig解析失败，使用默认切片模型配置", e);
         this.parserForm = defaults;
+        this.retrievalForm = retrievalDefaults;
+        this.parserConfigValue = {};
       }
     },
     buildParserConfig() {
       return JSON.stringify({
+        ...this.parserConfigValue,
         max_chunk_chars: 1200,
         llm_enabled: !!this.parserForm.llm_enabled,
         llm_base_url: this.parserForm.llm_base_url,
         llm_api_key: this.parserForm.llm_api_key,
         llm_model: this.parserForm.llm_model,
         llm_max_input_chars: this.parserForm.llm_max_input_chars,
-        llm_max_tokens: this.parserForm.llm_max_tokens
+        llm_max_tokens: this.parserForm.llm_max_tokens,
+        retrieval_config: {
+          mode: this.retrievalForm.mode,
+          search_type: this.retrievalForm.search_type,
+          semantic_level: this.retrievalForm.semantic_level,
+          semantic_top_k: this.retrievalForm.semantic_top_k,
+          faq_threshold: this.retrievalForm.faq_threshold,
+          semantic_threshold: this.retrievalForm.semantic_threshold,
+          rerank_enabled: !!this.retrievalForm.rerank_enabled
+        }
       });
     },
     handleClose() {
