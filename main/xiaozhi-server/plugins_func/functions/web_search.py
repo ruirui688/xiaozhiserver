@@ -1,8 +1,7 @@
 import requests
 import time
-from datetime import datetime
-from zoneinfo import ZoneInfo
 from config.logger import setup_logging
+from core.utils.current_time import get_current_datetime
 from plugins_func.register import (
     register_function,
     ToolType,
@@ -20,7 +19,7 @@ logger = setup_logging()
 _DEFAULT_DESCRIPTION = (
     "联网搜索工具。当用户明确要求联网查询、搜索最新信息、比分赛果、新闻事件详情或实时资料时使用此工具。"
     "不要用于查询本地知识库、播放音乐或控制设备。"
-    "当用户使用今天、今晚、明天、昨天等相对时间时，query 必须写清北京时间和用户关心的时间范围。"
+    "用户使用今天、今晚、明天、昨天等相对时间时，必须按系统提示词中的当前北京时间理解。"
 )
 
 WEB_SEARCH_FUNCTION_DESC = {
@@ -36,9 +35,7 @@ WEB_SEARCH_FUNCTION_DESC = {
                     "description": (
                         "搜索关键词或完整问题。必须结合用户当前原话和已明确上下文生成，"
                         "例如用户追问“联网搜搜呢”时，要把上一轮关心的对象一并写入查询词。"
-                        "查询今晚、今天、明天、昨天的赛程时，必须在 query 中明确北京时间和具体时间范围，"
-                        "例如“北京时间 2026年6月29日 晚上 世界杯 剩余赛程”。"
-                        "查询比分、赛果、比赛结果时，不要强行加入今天日期，优先使用“队伍A 队伍B 比分/比赛结果”这类短查询词。"
+                        "不要脱离用户原意自行补充未确认的赛事、地点或日期。"
                     ),
                 }
             },
@@ -49,11 +46,7 @@ WEB_SEARCH_FUNCTION_DESC = {
 
 
 def _get_beijing_time_context() -> str:
-    try:
-        now = datetime.now(ZoneInfo("Asia/Shanghai"))
-    except Exception:
-        now = datetime.now()
-    return now.strftime("%Y年%m月%d日 %H:%M:%S 北京时间")
+    return get_current_datetime()
 
 
 def _string_value(value) -> str:
@@ -94,8 +87,7 @@ def _build_search_context(
         "2. 优先采用日期最新且与问题直接相关的结果。",
         "3. 如果搜索结果没有给出明确答案，就直接说明没有查到明确结果。",
         "4. 涉及比分、时间、结论时，要保留关键依据，不要改写成相反结论。",
-        "5. 搜索结果里的“日期”通常是文章发布时间，不一定是比赛开球时间；必须从标题、摘要或正文中识别真实比赛时间。",
-        "6. 用户问“今晚/今天晚上”时，应按北京时间当前参考时间理解为当前时刻之后的晚间时段；已经结束的凌晨比赛不能说成今晚将进行。",
+        "5. 搜索结果里的日期可能是发布时间，也可能是事件时间；不能把不确定的日期当成确定事实。",
     ]
     if answer:
         lines.append(f"搜索源摘要：{answer}")

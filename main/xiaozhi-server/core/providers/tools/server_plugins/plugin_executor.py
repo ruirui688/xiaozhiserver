@@ -200,13 +200,21 @@ class ServerPluginExecutor(ToolExecutor):
 
     def _init_web_search_description(self, tool_description):
         """Keep web search routing precise even when backend config overrides description."""
+        try:
+            from core.utils.current_time import get_current_datetime
+
+            current_time = get_current_datetime()
+        except Exception:
+            current_time = ""
+
         guidance = (
             " 当用户要求联网查询、搜索最新信息、比分赛果、新闻事件详情或实时资料时调用本工具。"
             "不要用于查询本地知识库、播放音乐或控制设备。"
-            "当用户使用今天、今晚、明天、昨天等相对时间时，query 必须写清北京时间和用户关心的时间范围。"
-            "查询比分、赛果、比赛结果时，query 应优先使用“队伍A 队伍B 比分/比赛结果”这类短查询词，"
-            "不要强行加入今天日期。"
+            "用户使用今天、今晚、明天、昨天等相对时间时，必须按系统提示词中的当前北京时间理解。"
+            "不要脱离用户原意自行补充未确认的赛事、地点或日期。"
         )
+        if current_time:
+            guidance += f" 当前北京时间：{current_time}。"
         try:
             function_desc = tool_description["function"]
             base_desc = str(function_desc.get("description") or "")
