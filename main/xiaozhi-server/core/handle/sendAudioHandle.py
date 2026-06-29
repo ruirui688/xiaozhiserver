@@ -329,6 +329,8 @@ async def send_stt_message(conn: "ConnectionHandler", text):
     await send_tts_message(conn, "start")
     # 发送start消息后客户端状态会处于说话中状态，同步服务端状态
     conn.client_is_speaking = True
+    # 记录 TTS 开始时间戳，用于后续回声保护和语义打断窗口判断
+    conn._tts_started_at = time.time() * 1000
 
 
 async def send_display_message(conn: "ConnectionHandler", text):

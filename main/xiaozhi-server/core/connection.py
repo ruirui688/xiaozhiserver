@@ -1298,7 +1298,10 @@ class ConnectionHandler:
             if len(response_message) > 0:
                 interrupted_text = "".join(response_message)
                 if interrupted_text:
-                    self.dialogue.put(Message(role="assistant", content=interrupted_text))
+                    self.logger.bind(tag=TAG).debug(
+                        f"LLM流式响应被打断，丢弃部分文本(不写入对话历史): "
+                        f"{interrupted_text[:80]}..."
+                    )
             return
         # 处理function call
         if tool_call_flag:
@@ -1712,6 +1715,7 @@ class ConnectionHandler:
 
     def clearSpeakStatus(self):
         self.client_is_speaking = False
+        self._tts_started_at = 0.0
         self.logger.bind(tag=TAG).debug(f"清除服务端讲话状态")
 
     async def close(self, ws=None):
@@ -1838,6 +1842,15 @@ class ConnectionHandler:
                 self.audio_rate_controller.reset()
                 self.logger.bind(tag=TAG).debug("已重置音频流控器")
 
+        # 排空 ASR 音频输入队列，防止旧音频包在打断后继续触发识别
+        import queue as q_mod
+        while True:
+            try:
+                self.asr_audio_queue.get_nowait()
+            except q_mod.Empty:
+                break
+
+        if self.tts:
             self.logger.bind(tag=TAG).debug(
                 f"清理结束: TTS队列大小={self.tts.tts_text_queue.qsize()}, 音频队列大小={self.tts.tts_audio_queue.qsize()}"
             )

@@ -57,8 +57,10 @@ decision 含义：
                 timeout=timeout,
             )
         except Exception as e:
-            conn.logger.bind(tag=__name__).warning(f"语义打断大模型裁决失败: {e}")
-            return InterruptionClassification("new_turn", "llm_error")
+            conn.logger.bind(tag=__name__).warning(
+                f"语义打断大模型裁决失败，默认不打断: {e}"
+            )
+            return InterruptionClassification("continue", "llm_error")
 
         return self._parse_response(raw_response)
 
@@ -102,7 +104,7 @@ decision 含义：
             return InterruptionClassification("interrupt", reason, raw)
         if decision == "new_turn":
             return InterruptionClassification("new_turn", reason, raw)
-        return InterruptionClassification("new_turn", "invalid_llm_decision", raw)
+        return InterruptionClassification("continue", "invalid_llm_decision", raw)
 
     def _loads_json(self, raw: str) -> dict:
         try:

@@ -24,10 +24,12 @@ class Message:
 
 
 class Dialogue:
-    def __init__(self):
+    def __init__(self, max_history_turns: int = 0):
         self.dialogue: List[Message] = []
         # 获取当前时间
         self.current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # 最大对话轮次数，0 表示不限制。每轮 = 1 user + 1 assistant (可能 + tool)
+        self.max_history_turns = max_history_turns
 
     def put(self, message: Message):
         self.dialogue.append(message)
@@ -165,10 +167,34 @@ class Dialogue:
 
             dialogue.append({"role": "system", "content": dynamic_part})
 
-        # 第四段：实际对话历史（不含 few-shot）
+        # 第四段：实际对话历史（不含 few-shot），超过最大轮数时截断旧轮次
         actual_messages = [m for m in non_system_messages if not m.is_temporary]
+        actual_messages = self._truncate_history(actual_messages)
         complete_actual = self._ensure_tool_calls_complete(actual_messages)
         for m in complete_actual:
             self.getMessages(m, dialogue)
 
         return dialogue
+
+    def _truncate_history(self, messages: List[Message]) -> List[Message]:
+        """截断对话历史，保留最近的 N 轮对话（每轮从 user 消息开始）。
+
+        超过 max_history_turns 时，删除最旧的轮次。
+        max_history_turns=0 时不限制。
+        """
+        if self.max_history_turns <= 0:
+            return messages
+
+        # 从后往前统计 user 消息数量，找到保留的起始位置
+        user_count = 0
+        keep_from = 0
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].role == "user":
+                user_count += 1
+                if user_count >= self.max_history_turns:
+                    keep_from = i
+                    break
+
+        if keep_from > 0:
+            return messages[keep_from:]
+        return messages

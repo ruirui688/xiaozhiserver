@@ -732,7 +732,7 @@ export default {
         model: "填写模型名称",
         voice: "填写音色 ID",
         speaker: "填写音色或说话人 ID",
-        maintenance_llm: "选择已配置并测试通过的 LLM/SLM，留空则只做显式记住/忘记，不做模型候选抽取",
+        maintenance_llm: "选择已配置并测试通过的 LLM/SLM 作为维护模型。留空则只做显式记住/忘记，不做自动抽取",
       };
       return examples[key] || `请输入${label}`;
     },
@@ -980,7 +980,7 @@ export default {
         language: "指定识别语言编码，例如 zh-CN。",
         thinking: "是否开启模型思考模式，语音场景通常关闭以降低延迟。",
         reasoning_effort: "思考强度，仅在 thinking 启用时生效。",
-        maintenance_llm: "选择一个已配置并测试通过的 LLM/SLM 作为记忆维护模型。它会从用户发言中抽取候选记忆，进入管理端确认流程；不会在 Memory 配置里保存 API Key。",
+        maintenance_llm: "选择一个已配置并测试通过的 LLM/SLM 作为记忆维护模型。它会从用户发言中自动抽取长期事实并直接写入记忆库，无需手动确认。不会在 Memory 配置里保存 API Key。",
       }[key] || "";
     },
     normalizeDynamicFieldValue(value, field) {
