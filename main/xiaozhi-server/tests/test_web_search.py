@@ -56,6 +56,7 @@ def test_metaso_search_keeps_snippet_and_answer_constraints(monkeypatch):
                         "title": "加拿大1比0战胜南非，晋级2026美加墨世界杯十六强",
                         "link": "https://www.news.cn/sports/example.html",
                         "snippet": "6月28日，南非队球员在比赛后离场。",
+                        "content": "6月30日（周二）\n01:00C1VSF2第74场\n04:30E1VSA3/B3/C3/D3/F3第75场",
                         "date": "2026年06月28日",
                     }
                 ]
@@ -73,14 +74,50 @@ def test_metaso_search_keeps_snippet_and_answer_constraints(monkeypatch):
     result = web_search._search_metaso("mk-test", "南非加拿大比赛结果", 5)
 
     assert captured["url"] == "https://metaso.cn/api/v1/search"
-    assert captured["payload"]["q"] == "南非加拿大比赛结果"
+    assert captured["payload"]["q"] == "南非加拿大比赛结果 当前北京时间 2026-06-29 15:00 北京时间"
     assert captured["payload"]["size"] == 5
+    assert captured["payload"]["includeRawContent"] is True
+    assert "实际搜索查询：南非加拿大比赛结果 当前北京时间 2026-06-29 15:00 北京时间" in result
     assert "当前参考时间：2026-06-29 15:00 北京时间" in result
     assert "只能依据下面列出的搜索结果回答" in result
     assert "不能把不确定的日期当成确定事实" in result
     assert "加拿大1比0战胜南非" in result
     assert "摘要：6月28日，南非队球员在比赛后离场。" in result
+    assert "正文：6月30日（周二）" in result
+    assert "04:30E1VSA3/B3/C3/D3/F3第75场" in result
     assert "链接：https://www.news.cn/sports/example.html" in result
+
+
+def test_metaso_search_can_disable_raw_content_and_time_context(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"webpages": [{"title": "测试", "snippet": "摘要"}]}
+
+    def fake_post(url, json, headers, timeout):
+        captured["payload"] = json
+        return FakeResponse()
+
+    monkeypatch.setattr(web_search.requests, "post", fake_post)
+
+    result = web_search._search_metaso(
+        "mk-test",
+        "今天有什么比赛",
+        3,
+        current_time_context="2026-06-29 15:00 北京时间",
+        include_raw_content=False,
+        include_time_context=False,
+    )
+
+    assert captured["payload"]["q"] == "今天有什么比赛"
+    assert captured["payload"]["includeRawContent"] is False
+    assert "实际搜索查询：今天有什么比赛" in result
 
 
 def test_beijing_time_context_uses_shared_current_time(monkeypatch):
