@@ -156,6 +156,7 @@ docs/architecture/prompt-injection-engineering.md
 - [models/index-stream-integration.md](./models/index-stream-integration.md) - IndexStreamTTS 使用指南。用于部署 IndexStreamTTS 环境、配置 Conda 环境、启动服务并接入流式 TTS。
 - [models/powermem-integration.md](./models/powermem-integration.md) - PowerMem 记忆组件集成指南。用于给智能体接入长期记忆能力，包含组件安装、功能特性和服务配置。
 - [models/local-knowledge-integration.md](./models/local-knowledge-integration.md) - 本地知识库与大模型切片指南。用于配置 `RAG_LocalKnowledge`、在知识库界面配置阿里云百炼/OpenAI 兼容切片模型、重新解析旧文档和排查本地知识库召回为空。
+- [models/memory-and-knowledge-governance.md](./models/memory-and-knowledge-governance.md) - 记忆系统与知识库治理保证。用于约束 `managed_memory`、`maintenance_llm`、PowerMem 借鉴点、知识库 LLM 切片模型选择、UI 逻辑、数据库迁移和后续验证边界。
 - [models/model-management.md](./models/model-management.md) - 模型管理存储与保存架构。用于对照智控台模型配置页面，理解配置名称、模型编码、上游模型、厂商产品、普通参数、密钥参数、模板字段、保存接口、数据库表和运行时下发协议。
 - [models/model-management-architecture-analysis.md](./models/model-management-architecture-analysis.md) - 模型管理与配置体系完整分析。用于梳理模型类型、适配器、协议、新旧配置链路和模型注册发现机制的历史问题。
 - [models/model-config-catalog.md](./models/model-config-catalog.md) - 标准模型配置目录与治理说明。用于梳理 ASR、TTS、LLM、VLLM、SLM、Memory、Intent、RAG、VAD、声纹和插件 RAG 的厂商、产品、能力、接入方式、标准字段、参数/密钥分表和运行时 `model_config` 契约。

@@ -107,7 +107,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     private static final int MODEL_TEST_FAILED = 2;
     private static final Set<String> LOCAL_TESTABLE_TYPES = new HashSet<>(List.of(
             "silero", "nomem", "mem_local_short",
-            "mem_report_only", "nointent", "function_call"));
+            "mem_report_only", "managed_memory", "nointent", "function_call"));
     private static final String LLM_TEST_PROMPT = "请只回复 OK";
     private static final String TTS_TEST_TEXT = "你好，我是小智，语音合成测试成功。";
     private static final String VLLM_TEST_QUESTION = "请用一句话描述这张图片。";
@@ -1118,6 +1118,10 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                 result = testIntentModel(configJson);
                 return applyModelTestSemantics(result, testLevel);
             }
+            if ("MEMORY".equals(modelType)) {
+                result = testMemoryModel(configJson, type);
+                return applyModelTestSemantics(result, testLevel);
+            }
             if (LOCAL_TESTABLE_TYPES.contains(type)) {
                 result = validateBasicModelConfig(configJson, type, modelType);
                 return applyModelTestSemantics(result, testLevel);
@@ -1216,6 +1220,10 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         if ("INTENT".equals(modelType) && "intent_llm".equals(type)) {
             return TEST_LEVEL_CONFIG_ONLY;
         }
+        if ("MEMORY".equals(modelType)
+                && ("nomem".equals(type) || "mem_report_only".equals(type) || "managed_memory".equals(type))) {
+            return TEST_LEVEL_RUNTIME_CONFIG;
+        }
         if ("VAD".equals(modelType) && "silero".equals(type)) {
             return TEST_LEVEL_RUNTIME_CONFIG;
         }
@@ -1244,6 +1252,76 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             return "配置校验";
         }
         return "未实测";
+    }
+
+    private ModelTestResultDTO testMemoryModel(JSONObject configJson, String type) {
+        String normalizedType = StringUtils.lowerCase(StringUtils.defaultString(type));
+        if ("nomem".equals(normalizedType)) {
+            return buildLocalMemoryTestResult(normalizedType, "无记忆模式配置有效，不会保存、查询或注入长期记忆。");
+        }
+        if ("mem_report_only".equals(normalizedType)) {
+            return buildLocalMemoryTestResult(normalizedType, "仅上报聊天记录模式配置有效，不会执行记忆总结。");
+        }
+        if ("managed_memory".equals(normalizedType)) {
+            return testManagedMemoryModel(configJson, normalizedType);
+        }
+        return validateBasicModelConfig(configJson, normalizedType, "MEMORY");
+    }
+
+    private ModelTestResultDTO testManagedMemoryModel(JSONObject configJson, String type) {
+        ModelTestResultDTO result = new ModelTestResultDTO();
+        String maintenanceModelId = StringUtils.defaultIfBlank(
+                configJson.getStr("maintenance_llm"),
+                configJson.getStr("memory_maintenance_llm"));
+        result.setTestInput("模型类型：MEMORY\n供应器类型：" + type + "\n维护模型："
+                + StringUtils.defaultIfBlank(maintenanceModelId, "未配置"));
+
+        if (StringUtils.isBlank(maintenanceModelId)) {
+            result.setSuccess(true);
+            result.setMessage("智控台治理记忆配置通过；未配置维护模型时，只执行显式记住/忘记和管理端人工维护。");
+            result.setTestOutput("manager-api 长期记忆治理链路可启用；维护模型为空，不产生外部模型调用。");
+            return result;
+        }
+
+        ModelConfigEntity maintenanceModel = modelConfigDao.selectById(maintenanceModelId);
+        if (maintenanceModel == null) {
+            result.setSuccess(false);
+            result.setMessage("记忆维护模型不存在：" + maintenanceModelId);
+            result.setTestOutput(result.getMessage());
+            return result;
+        }
+
+        String modelType = StringUtils.defaultString(maintenanceModel.getModelType()).toUpperCase();
+        if (!"LLM".equals(modelType) && !"SLM".equals(modelType)) {
+            result.setSuccess(false);
+            result.setMessage("记忆维护模型必须引用 LLM 或 SLM，当前类型：" + maintenanceModel.getModelType());
+            result.setTestOutput(result.getMessage());
+            return result;
+        }
+
+        if (!Integer.valueOf(1).equals(maintenanceModel.getIsEnabled())
+                || !Integer.valueOf(MODEL_TEST_PASSED).equals(maintenanceModel.getTestStatus())) {
+            result.setSuccess(false);
+            result.setMessage("记忆维护模型尚未启用或测试通过，请先在模型管理中测试该 LLM/SLM。");
+            result.setTestOutput("维护模型：" + maintenanceModelId + "，启用状态：" + maintenanceModel.getIsEnabled()
+                    + "，测试状态：" + maintenanceModel.getTestStatus());
+            return result;
+        }
+
+        result.setSuccess(true);
+        result.setMessage("智控台治理记忆配置通过；记忆维护模型已启用并测试通过。");
+        result.setTestOutput("维护模型：" + maintenanceModel.getModelName() + " (" + maintenanceModel.getId()
+                + ")，类型：" + modelType + "。Memory 配置只保存模型 ID，不保存 API Key。");
+        return result;
+    }
+
+    private ModelTestResultDTO buildLocalMemoryTestResult(String type, String message) {
+        ModelTestResultDTO result = new ModelTestResultDTO();
+        result.setSuccess(true);
+        result.setMessage(message);
+        result.setTestInput("模型类型：MEMORY\n供应器类型：" + type + "\n测试内容：本地运行时配置校验");
+        result.setTestOutput(message);
+        return result;
     }
 
     private ModelTestResultDTO testIntentModel(JSONObject configJson) {
