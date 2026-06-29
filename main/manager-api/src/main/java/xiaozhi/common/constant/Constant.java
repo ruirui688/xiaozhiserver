@@ -177,6 +177,11 @@ public interface Constant {
     String MEMORY_POWERMEM = "Memory_powermem";
 
     /**
+     * 智控台治理记忆
+     */
+    String MEMORY_MANAGED_MEMORY = "Memory_managed_memory";
+
+    /**
      * 火山引擎双声道语音克隆
      */
     String VOICE_CLONE_HUOSHAN_DOUBLE_STREAM = "huoshan_double_stream";
