@@ -95,9 +95,10 @@ def test_llm_interrupt_decision_aborts():
     assert result.should_abort
 
 
-def test_invalid_llm_decision_falls_back_to_abort():
+def test_invalid_llm_decision_falls_back_to_continue():
+    """LLM 返回无效 JSON 时，默认不打断（fail-open 策略），避免误中断 TTS 播报"""
     result, _ = _classify("not json", "我想问个问题")
 
-    assert result.category == "new_turn"
-    assert result.should_abort
+    assert result.category == "continue"
+    assert not result.should_abort
     assert result.reason == "invalid_llm_decision"

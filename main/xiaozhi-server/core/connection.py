@@ -547,6 +547,12 @@ class ConnectionHandler:
                     f"快速初始化组件: prompt成功 {prompt[:50]}..."
                 )
 
+            """设置对话历史截断"""
+            max_turns = int(self.config.get("dialogue", {}).get("max_history_turns", 0))
+            if max_turns > 0:
+                self.dialogue.max_history_turns = max_turns
+                self.logger.bind(tag=TAG).info(f"对话历史截断已启用: max_history_turns={max_turns}")
+
             """初始化本地组件"""
             if self.vad is None:
                 self.vad = self._vad
