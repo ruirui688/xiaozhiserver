@@ -15,7 +15,8 @@ TAG = __name__
 logger = setup_logging()
 
 _DEFAULT_DESCRIPTION = (
-    "联网搜索工具。当用户明确需要联网搜索问题时使用此工具。"
+    "联网搜索工具。当用户明确要求联网查询、搜索最新信息、比分赛果、新闻事件详情或实时资料时使用此工具。"
+    "不要用于查询本地知识库、播放音乐或控制设备。"
 )
 
 WEB_SEARCH_FUNCTION_DESC = {
@@ -28,13 +29,68 @@ WEB_SEARCH_FUNCTION_DESC = {
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "搜索关键词或问题",
+                    "description": (
+                        "搜索关键词或完整问题。必须结合用户当前原话和已明确上下文生成，"
+                        "例如用户追问“联网搜搜呢”时，要把上一轮关心的对象一并写入查询词。"
+                    ),
                 }
             },
             "required": ["query"],
         },
     },
 }
+
+
+def _string_value(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (list, tuple)):
+        return " ".join(_string_value(item) for item in value if item is not None).strip()
+    if isinstance(value, dict):
+        return " ".join(_string_value(item) for item in value.values()).strip()
+    return str(value).strip()
+
+
+def _first_text(item: dict, keys) -> str:
+    for key in keys:
+        value = _string_value(item.get(key))
+        if value:
+            return value
+    return ""
+
+
+def _build_search_context(query: str, provider_label: str, items, answer: str = "") -> str:
+    lines = [
+        "【联网搜索结果】",
+        f"用户原始查询：{query}",
+        f"搜索源：{provider_label}",
+        "回答要求：",
+        "1. 只能依据下面列出的搜索结果回答，不要使用旧知识或猜测。",
+        "2. 优先采用日期最新且与问题直接相关的结果。",
+        "3. 如果搜索结果没有给出明确答案，就直接说明没有查到明确结果。",
+        "4. 涉及比分、时间、结论时，要保留关键依据，不要改写成相反结论。",
+    ]
+    if answer:
+        lines.append(f"搜索源摘要：{answer}")
+    lines.append("搜索结果明细：")
+
+    for i, item in enumerate(items, 1):
+        title = _first_text(item, ("title", "name")) or "无标题"
+        link = _first_text(item, ("link", "url", "href"))
+        date = _first_text(item, ("date", "published_date", "publishedAt", "time"))
+        snippet = _first_text(item, ("summary", "snippet", "content", "description"))
+
+        lines.append(f"{i}. 标题：{title}")
+        if date:
+            lines.append(f"   日期：{date}")
+        if link:
+            lines.append(f"   链接：{link}")
+        if snippet:
+            lines.append(f"   摘要：{snippet}")
+
+    return "\n".join(lines)
 
 
 def _search_metaso(api_key: str, query: str, max_results: int) -> str:
@@ -63,18 +119,8 @@ def _search_metaso(api_key: str, query: str, max_results: int) -> str:
     if not webpages:
         return "未找到相关搜索结果。"
 
-    lines = ["【联网搜索结果】"]
-    for i, item in enumerate(webpages, 1):
-        title = item.get("title", "无标题")
-        snippet = item.get("summary", "")
-        date = item.get("date", "")
-        lines.append(f"{i}. 标题：{title}")
-        if date:
-            lines.append(f"   日期：{date}")
-        if snippet:
-            lines.append(f"   摘要：{snippet}")
-
-    return "\n".join(lines)
+    answer = _first_text(data, ("answer", "summary"))
+    return _build_search_context(query, "秘塔搜索", webpages, answer=answer)
 
 
 def _search_tavily(api_key: str, query: str, max_results: int) -> str:
@@ -100,16 +146,8 @@ def _search_tavily(api_key: str, query: str, max_results: int) -> str:
     if not results:
         return "未找到相关搜索结果。"
 
-    answer = data.get("answer", "")
-    lines = [f"【联网搜索结果】\n总结：{answer}"]
-    # for i, item in enumerate(results, 1):
-    #     title = item.get("title", "无标题")
-    #     summary = item.get("content", "")
-    #     lines.append(f"{i}. 标题：{title}")
-    #     if summary:
-    #         lines.append(f"   摘要：{summary}")
-
-    return "\n".join(lines)
+    answer = _first_text(data, ("answer",))
+    return _build_search_context(query, "Tavily", results, answer=answer)
 
 
 @register_function("web_search", WEB_SEARCH_FUNCTION_DESC, ToolType.SYSTEM_CTL)
@@ -120,7 +158,10 @@ def web_search(conn: "ConnectionHandler", query: str = None):
 
     web_search_config = conn.config.get("plugins", {}).get("web_search", {})
     provider = web_search_config.get("provider", "").lower()
-    max_results = int(web_search_config.get("max_results", 3))
+    try:
+        max_results = int(web_search_config.get("max_results", 3))
+    except (TypeError, ValueError):
+        max_results = 3
     logger.bind(tag=TAG).info(f"web_search 配置 | provider={provider} | max_results={max_results} | config_keys={list(web_search_config.keys())}")
 
     api_key = web_search_config.get("api_key", "")
