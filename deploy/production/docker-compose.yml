@@ -1,7 +1,17 @@
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: ${XIAOZHI_LOG_MAX_SIZE:-50m}
+    max-file: ${XIAOZHI_LOG_MAX_FILE:-3}
+
 services:
   xiaozhi-esp32-server:
     image: ${XIAOZHI_SERVER_IMAGE_REPOSITORY:-crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-server}:latest
     container_name: xiaozhi-esp32-server
+    cpus: ${XIAOZHI_SERVER_CPUS:-0.75}
+    mem_limit: ${XIAOZHI_SERVER_MEM_LIMIT:-768m}
+    memswap_limit: ${XIAOZHI_SERVER_MEMSWAP_LIMIT:-768m}
+    pids_limit: ${XIAOZHI_SERVER_PIDS_LIMIT:-512}
     depends_on:
       - xiaozhi-esp32-server-db
       - xiaozhi-esp32-server-redis
@@ -16,6 +26,7 @@ services:
       - seccomp:unconfined
     environment:
       - TZ=Asia/Shanghai
+    logging: *default-logging
     volumes:
       - ./data:/opt/xiaozhi-esp32-server/data
       - ./music:/opt/xiaozhi-esp32-server/music
@@ -23,6 +34,10 @@ services:
   xiaozhi-esp32-server-web:
     image: ${XIAOZHI_WEB_IMAGE_REPOSITORY:-crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-web}:latest
     container_name: xiaozhi-esp32-server-web
+    cpus: ${XIAOZHI_WEB_CPUS:-0.80}
+    mem_limit: ${XIAOZHI_WEB_MEM_LIMIT:-1280m}
+    memswap_limit: ${XIAOZHI_WEB_MEMSWAP_LIMIT:-1280m}
+    pids_limit: ${XIAOZHI_WEB_PIDS_LIMIT:-512}
     restart: always
     networks:
       - default
@@ -35,6 +50,7 @@ services:
       - "8002:8002"
     environment:
       - TZ=Asia/Shanghai
+      - JAVA_TOOL_OPTIONS=${XIAOZHI_WEB_JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=60.0 -XX:InitialRAMPercentage=20.0 -XX:+ExitOnOutOfMemoryError}
       - SPRING_DATASOURCE_DRUID_URL=jdbc:mysql://xiaozhi-esp32-server-db:3306/xiaozhi_esp32_server?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&nullCatalogMeansCurrent=true&connectTimeout=30000&socketTimeout=30000&autoReconnect=true&failOverReadOnly=false&maxReconnects=10
       - SPRING_DATASOURCE_DRUID_USERNAME=root
       - SPRING_DATASOURCE_DRUID_PASSWORD=${XIAOZHI_MYSQL_ROOT_PASSWORD:-123456}
@@ -43,6 +59,7 @@ services:
       - SPRING_DATA_REDIS_PORT=6379
       - XIAOZHI_SERVER_HTTP_BASE_URL=${XIAOZHI_SERVER_HTTP_BASE_URL:-http://xiaozhi-esp32-server:8003}
       - XIAOZHI_MUSIC_DIR=/music
+    logging: *default-logging
     volumes:
       - ./uploadfile:/uploadfile
       - ./music:/music
@@ -50,6 +67,10 @@ services:
   xiaozhi-esp32-server-db:
     image: ${XIAOZHI_MYSQL_IMAGE:-crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/mysql:8.4}
     container_name: xiaozhi-esp32-server-db
+    cpus: ${XIAOZHI_MYSQL_CPUS:-0.35}
+    mem_limit: ${XIAOZHI_MYSQL_MEM_LIMIT:-1024m}
+    memswap_limit: ${XIAOZHI_MYSQL_MEMSWAP_LIMIT:-1024m}
+    pids_limit: ${XIAOZHI_MYSQL_PIDS_LIMIT:-256}
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       timeout: 45s
@@ -60,6 +81,13 @@ services:
       - default
     expose:
       - 3306
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --innodb-buffer-pool-size=${XIAOZHI_MYSQL_INNODB_BUFFER_POOL_SIZE:-256M}
+      - --max-connections=${XIAOZHI_MYSQL_MAX_CONNECTIONS:-80}
+      - --table-open-cache=${XIAOZHI_MYSQL_TABLE_OPEN_CACHE:-512}
+      - --performance-schema=${XIAOZHI_MYSQL_PERFORMANCE_SCHEMA:-OFF}
     volumes:
       - ./mysql/data:/var/lib/mysql
     environment:
@@ -67,10 +95,15 @@ services:
       - MYSQL_ROOT_PASSWORD=${XIAOZHI_MYSQL_ROOT_PASSWORD:-123456}
       - MYSQL_DATABASE=xiaozhi_esp32_server
       - MYSQL_INITDB_ARGS="--character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci"
+    logging: *default-logging
 
   xiaozhi-esp32-server-redis:
     image: ${XIAOZHI_REDIS_IMAGE:-crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/redis:8.0}
     container_name: xiaozhi-esp32-server-redis
+    cpus: ${XIAOZHI_REDIS_CPUS:-0.10}
+    mem_limit: ${XIAOZHI_REDIS_MEM_LIMIT:-256m}
+    memswap_limit: ${XIAOZHI_REDIS_MEMSWAP_LIMIT:-256m}
+    pids_limit: ${XIAOZHI_REDIS_PIDS_LIMIT:-128}
     restart: always
     networks:
       - default
@@ -78,12 +111,20 @@ services:
       - 6379
     volumes:
       - ./redis/data:/data
-    command: redis-server --appendonly yes
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - ${XIAOZHI_REDIS_MAXMEMORY:-192mb}
+      - --maxmemory-policy
+      - ${XIAOZHI_REDIS_MAXMEMORY_POLICY:-allkeys-lru}
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 3
+    logging: *default-logging
 
 networks:
   default:

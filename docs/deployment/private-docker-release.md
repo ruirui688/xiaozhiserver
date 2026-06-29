@@ -190,6 +190,45 @@ XIAOZHI_SERVER_HTTP_BASE_URL=http://xiaozhi-esp32-server:8003
 不要配置成 `http://127.0.0.1:8003`，否则模型专业评测会从 manager-api
 容器访问自身的 8003 端口，无法调用到 Python 的 `/benchmark/models`。
 
+## 容器资源限制
+
+生产 Compose 模板默认按 2 核 4G 服务器做保守限制。限制写在
+`deploy/production/docker-compose.yml` 中，`./install` 会同步生成到
+`/opt/xiaozhi-data/.env`，后续 `./upgrade` 会继续复用。
+
+默认资源预算：
+
+```text
+Python xiaozhi-server  CPU 0.75核  内存 768m
+Java/Web manager-api   CPU 0.80核  内存 1280m
+MySQL                  CPU 0.35核  内存 1024m
+Redis                  CPU 0.10核  内存 256m
+合计                   CPU 2.00核  内存约 3328m
+```
+
+这样会给宿主机、Docker daemon、内核页缓存和临时峰值保留约 700MB
+以上空间。`memswap_limit` 默认等于 `mem_limit`，避免容器内存不足时把
+宿主机拖入 swap 导致整机卡死。容器触发内存上限时会由 Docker 重启，
+优先保护宿主机可操作性。
+
+对应调优变量可直接写入 `/opt/xiaozhi-data/.env` 后执行 `./upgrade`：
+
+```text
+XIAOZHI_SERVER_CPUS=0.75
+XIAOZHI_SERVER_MEM_LIMIT=768m
+XIAOZHI_WEB_CPUS=0.80
+XIAOZHI_WEB_MEM_LIMIT=1280m
+XIAOZHI_MYSQL_CPUS=0.35
+XIAOZHI_MYSQL_MEM_LIMIT=1024m
+XIAOZHI_REDIS_CPUS=0.10
+XIAOZHI_REDIS_MEM_LIMIT=256m
+```
+
+Java 容器通过 `XIAOZHI_WEB_JAVA_TOOL_OPTIONS` 控制堆内存占容器内存的比例；
+MySQL 默认限制 `innodb_buffer_pool_size=256M`、`max_connections=80`；
+Redis 默认 `maxmemory=192mb` 且使用 `allkeys-lru`，避免缓存无限增长。
+如服务器规格高于 2 核 4G，可以按比例上调这些变量。
+
 ## 升级
 
 先在本地或构建机发布新镜像：

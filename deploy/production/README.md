@@ -102,6 +102,27 @@ Redis runs with AOF (`--appendonly yes`) and stores its data at
 `/opt/xiaozhi-data/redis/data`. User sessions survive container restarts and
 `./upgrade` runs.
 
+## Resource limits
+
+The production compose file includes runtime limits for a 2 CPU / 4 GB server:
+
+```text
+xiaozhi-esp32-server       0.75 CPU / 768m
+xiaozhi-esp32-server-web   0.80 CPU / 1280m
+xiaozhi-esp32-server-db    0.35 CPU / 1024m
+xiaozhi-esp32-server-redis 0.10 CPU / 256m
+```
+
+The limits are applied at Docker Compose runtime, not baked into the images.
+`memswap_limit` defaults to the same value as `mem_limit` to avoid swap storms
+on small hosts. The Java container also sets `JAVA_TOOL_OPTIONS`; MySQL and
+Redis have matching memory-related runtime parameters.
+
+Override the `XIAOZHI_*_CPUS`, `XIAOZHI_*_MEM_LIMIT`,
+`XIAOZHI_MYSQL_INNODB_BUFFER_POOL_SIZE`, `XIAOZHI_REDIS_MAXMEMORY`, or
+`XIAOZHI_WEB_JAVA_TOOL_OPTIONS` values in `/opt/xiaozhi-data/.env` when the
+server size changes.
+
 ## Internal service URLs
 
 `xiaozhi-esp32-server-web` calls the Python benchmark HTTP API through the
