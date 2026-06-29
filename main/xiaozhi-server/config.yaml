@@ -91,6 +91,22 @@ tts_audio_send_delay: 0
 semantic_interruption:
   enabled: true
   timeout_seconds: 1.5
+  # LLM 裁决失败或超时时默认行为: true=不打断(fail-open), false=打断(fail-close)
+  fail_open: true
+  # TTS 开始播放后的保护窗口(毫秒)，窗口内的语义打断请求会被忽略
+  tts_grace_ms: 800
+
+# 对话历史管理
+dialogue:
+  # 最大对话轮次数，0 表示不限制。超过时删除最旧的轮次
+  max_history_turns: 20
+
+# 设备 detect 模式防抖配置（设备端本地 ASR 后发送 detect 文本）
+listen_detect:
+  # detect 事件最小间隔(毫秒)，用于防止设备回声触发连续打断
+  min_interval_ms: 500
+  # TTS 开始播放后的 detect 保护窗口(毫秒)
+  tts_grace_ms: 800
 
 exit_commands:
   - "退出"

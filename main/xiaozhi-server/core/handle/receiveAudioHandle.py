@@ -97,6 +97,26 @@ async def startToChat(conn: "ConnectionHandler", text):
     if conn.client_is_speaking and conn.client_listen_mode != "manual":
         interruption_config = conn.config.get("semantic_interruption", {}) or {}
         if interruption_config.get("enabled", True):
+            # TTS 刚启动保护: 避免设备回声在 TTS 刚开始播放时立即触发打断
+            now_ms = time.time() * 1000
+            tts_started_at = getattr(conn, "_tts_started_at", 0.0)
+            tts_grace_ms = int(
+                interruption_config.get("tts_grace_ms", 800)
+            )
+            if tts_started_at > 0 and (now_ms - tts_started_at) < tts_grace_ms:
+                conn.logger.bind(tag=TAG).debug(
+                    f"语义打断跳过(TTS保护窗口): text={raw_interruption_text[:50]}"
+                )
+                return
+            # 文本去重: 设备回声可能产生与当前 TTS 内容相同的 ASR 结果
+            last_abort_text = getattr(conn, "_last_abort_text", "")
+            if raw_interruption_text == last_abort_text:
+                conn.logger.bind(tag=TAG).debug(
+                    f"语义打断跳过(文本去重): text={raw_interruption_text[:50]}"
+                )
+                return
+            conn._last_abort_text = raw_interruption_text
+
             context = None
             if getattr(conn, "semantic_center", None):
                 context = conn.semantic_center.state_manager.get_context(conn)

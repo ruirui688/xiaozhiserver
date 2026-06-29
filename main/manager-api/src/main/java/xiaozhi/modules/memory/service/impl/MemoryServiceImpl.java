@@ -54,6 +54,7 @@ import xiaozhi.modules.memory.vo.MemoryDashboardVO;
 import xiaozhi.modules.memory.vo.MemoryQueryVO;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
+import xiaozhi.modules.model.service.impl.ModelRuntimeAssembler;
 import xiaozhi.modules.security.user.SecurityUser;
 
 @Service
@@ -122,6 +123,7 @@ public class MemoryServiceImpl implements MemoryService {
     private final AgentDao agentDao;
     private final LLMService llmService;
     private final ModelConfigService modelConfigService;
+    private final ModelRuntimeAssembler modelRuntimeAssembler;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -533,7 +535,7 @@ public class MemoryServiceImpl implements MemoryService {
             if (candidateJson == null) {
                 continue;
             }
-            if (createCandidateInternal(agent, scopeId, sourceEventId, maintenanceModelId, candidateJson)) {
+            if (createFactFromMaintenance(agent, scopeId, sourceEventId, maintenanceModelId, candidateJson)) {
                 saved++;
             }
         }
@@ -545,10 +547,12 @@ public class MemoryServiceImpl implements MemoryService {
         }
         try {
             ModelConfigEntity memoryConfig = modelConfigService.getModelByIdFromCache(agent.getMemModelId());
-            if (memoryConfig == null || memoryConfig.getConfigJson() == null) {
+            if (memoryConfig == null) {
                 return null;
             }
-            JSONObject config = memoryConfig.getConfigJson();
+            // buildTypedConfig reads the latest params from ai_model_config_param table,
+            // avoiding stale configJson from Redis cache or the DB config_json column
+            JSONObject config = modelRuntimeAssembler.buildTypedConfig(memoryConfig);
             return StringUtils.defaultIfBlank(config.getStr(MAINTENANCE_LLM_FIELD),
                     config.getStr("memory_maintenance_llm"));
         } catch (Exception e) {
@@ -606,29 +610,63 @@ public class MemoryServiceImpl implements MemoryService {
         return null;
     }
 
-    private boolean createCandidateInternal(AgentEntity agent, String scopeId, String sourceEventId,
-                                            String maintenanceModelId, JSONObject candidateJson) {
-        String action = normalizeCandidateAction(candidateJson.getStr("action"));
+    private boolean createFactFromMaintenance(AgentEntity agent, String scopeId, String sourceEventId,
+                                              String maintenanceModelId, JSONObject factJson) {
+        String action = normalizeCandidateAction(factJson.getStr("action"));
         if ("IGNORE".equals(action)) {
             return false;
         }
-        String canonical = cleanupMemoryText(candidateJson.getStr("canonical_text"));
+        String canonical = cleanupMemoryText(factJson.getStr("canonical_text"));
         if (isLowQualityMemoryText(canonical)) {
             return false;
         }
-        String memoryType = normalizeMemoryLabel(candidateJson.getStr("memory_type"), "长期记忆");
-        String category = normalizeMemoryLabel(candidateJson.getStr("category"), "未分类");
-        BigDecimal confidence = score(candidateJson.get("confidence"), DEFAULT_SCORE);
-        BigDecimal importance = score(candidateJson.get("importance"), DEFAULT_SCORE);
+        String memoryType = normalizeMemoryLabel(factJson.getStr("memory_type"), "长期记忆");
+        String category = normalizeMemoryLabel(factJson.getStr("category"), "未分类");
+        BigDecimal confidence = score(factJson.get("confidence"), DEFAULT_SCORE);
+        BigDecimal importance = score(factJson.get("importance"), DEFAULT_SCORE);
         if (confidence.compareTo(new BigDecimal("0.500")) < 0 || importance.compareTo(new BigDecimal("0.350")) < 0) {
             return false;
         }
-        String relatedMemoryId = StringUtils.trimToEmpty(candidateJson.getStr("related_memory_id"));
-        MemoryFactEntity relatedFact = findRelatedFact(agent.getId(), scopeId, relatedMemoryId, canonical, memoryType, category);
+        String relatedMemoryId = StringUtils.trimToEmpty(factJson.getStr("related_memory_id"));
+        String sensitivity = normalizeSensitivity(factJson.getStr("sensitivity"));
+
+        // Handle UPDATE: find and update existing fact directly
+        if ("UPDATE".equals(action) && StringUtils.isNotBlank(relatedMemoryId)) {
+            MemoryFactEntity existingFact = factDao.selectOne(new QueryWrapper<MemoryFactEntity>()
+                    .eq("agent_id", agent.getId())
+                    .eq("scope_type", SCOPE_DEVICE)
+                    .eq("scope_id", scopeId)
+                    .eq("memory_id", relatedMemoryId)
+                    .ne("status", STATUS_DELETED)
+                    .last("LIMIT 1"));
+            if (existingFact != null) {
+                String before = JsonUtils.toJsonString(existingFact);
+                existingFact.setMemoryType(memoryType);
+                existingFact.setCategory(category);
+                existingFact.setCanonicalText(canonical);
+                existingFact.setConfidence(max(existingFact.getConfidence(), confidence));
+                existingFact.setImportance(max(existingFact.getImportance(), importance));
+                existingFact.setSensitivity(sensitivity);
+                existingFact.setStatus(STATUS_ACTIVE);
+                existingFact.setLastSeenAt(new Date());
+                existingFact.setUpdatedAt(new Date());
+                factDao.updateById(existingFact);
+                writeRevision(agent.getId(), existingFact.getMemoryId(), "update_from_maintenance", before,
+                        JsonUtils.toJsonString(existingFact), "system", maintenanceModelId, "维护模型更新事实");
+                log.info("维护模型更新事实，memoryId: {}, text: {}", existingFact.getMemoryId(), canonical);
+                return true;
+            }
+        }
+
+        // For ADD (or UPDATE without a valid related_memory_id): check duplicates and create fact directly
+        MemoryFactEntity relatedFact = findRelatedFact(agent.getId(), scopeId, relatedMemoryId,
+                canonical, memoryType, category);
         if (relatedFact != null && isEquivalentMemory(relatedFact.getCanonicalText(), canonical)) {
             refreshFactEvidence(relatedFact, confidence, "system", maintenanceModelId, "维护模型重复证据刷新");
+            log.info("维护模型刷新已有事实，memoryId: {}, text: {}", relatedFact.getMemoryId(), canonical);
             return false;
         }
+
         String hash = sha256(agent.getId() + "|" + scopeId + "|" + canonical);
         if (factDao.selectCount(new QueryWrapper<MemoryFactEntity>()
                 .eq("agent_id", agent.getId())
@@ -638,41 +676,39 @@ public class MemoryServiceImpl implements MemoryService {
                 .ne("status", STATUS_DELETED)) > 0) {
             return false;
         }
-        if (candidateDao.selectCount(new QueryWrapper<MemoryCandidateEntity>()
-                .eq("agent_id", agent.getId())
-                .eq("scope_type", SCOPE_DEVICE)
-                .eq("scope_id", scopeId)
-                .eq("canonical_text", canonical)
-                .eq("status", STATUS_PENDING)) > 0) {
-            return false;
-        }
 
-        MemoryCandidateEntity candidate = new MemoryCandidateEntity();
-        candidate.setCandidateId(uuid());
-        candidate.setAgentId(agent.getId());
-        candidate.setUserId(agent.getUserId());
-        candidate.setScopeType(SCOPE_DEVICE);
-        candidate.setScopeId(scopeId);
-        candidate.setMemoryType(memoryType);
-        candidate.setCategory(category);
-        candidate.setCanonicalText(canonical);
-        candidate.setPayload(JSONUtil.toJsonStr(Map.of(
-                "action", relatedFact == null ? action : "UPDATE",
-                "related_memory_id", relatedFact == null ? relatedMemoryId : relatedFact.getMemoryId(),
+        // Create fact directly (not a candidate)
+        MemoryFactEntity fact = new MemoryFactEntity();
+        fact.setMemoryId(uuid());
+        fact.setAgentId(agent.getId());
+        fact.setUserId(agent.getUserId());
+        fact.setMacAddress(scopeId);
+        fact.setScopeType(SCOPE_DEVICE);
+        fact.setScopeId(scopeId);
+        fact.setMemoryType(memoryType);
+        fact.setCategory(category);
+        fact.setCanonicalText(canonical);
+        fact.setPayload(JSONUtil.toJsonStr(Map.of(
                 "maintenance_llm", maintenanceModelId,
                 "source", MAINTENANCE_EXTRACTOR_VERSION,
-                "reason", StringUtils.defaultString(candidateJson.getStr("reason")))));
-        candidate.setConfidence(confidence);
-        candidate.setImportance(importance);
-        candidate.setSensitivity(normalizeSensitivity(candidateJson.getStr("sensitivity")));
-        candidate.setStatus(STATUS_PENDING);
-        candidate.setSourceEventId(sourceEventId);
-        candidate.setExtractorVersion(MAINTENANCE_EXTRACTOR_VERSION);
-        candidate.setCreatedAt(new Date());
-        candidate.setUpdatedAt(new Date());
-        candidateDao.insert(candidate);
-        writeRevision(agent.getId(), null, "create_candidate", null, JsonUtils.toJsonString(candidate),
-                "system", maintenanceModelId, "维护模型生成候选记忆");
+                "reason", StringUtils.defaultString(factJson.getStr("reason")))));
+        fact.setImportance(importance);
+        fact.setConfidence(confidence);
+        fact.setSensitivity(sensitivity);
+        fact.setConfirmationState("auto");
+        fact.setStatus(STATUS_ACTIVE);
+        fact.setValidFrom(new Date());
+        fact.setFirstSeenAt(new Date());
+        fact.setLastSeenAt(new Date());
+        fact.setSourceEventId(sourceEventId);
+        fact.setSourceHash(hash);
+        fact.setExtractorVersion(MAINTENANCE_EXTRACTOR_VERSION);
+        fact.setCreatedAt(new Date());
+        fact.setUpdatedAt(new Date());
+        factDao.insert(fact);
+        writeRevision(agent.getId(), fact.getMemoryId(), "create_from_maintenance", null,
+                JsonUtils.toJsonString(fact), "system", maintenanceModelId, "维护模型创建事实");
+        log.info("维护模型创建事实，memoryId: {}, text: {}", fact.getMemoryId(), canonical);
         return true;
     }
 

@@ -192,8 +192,11 @@
         </el-table>
       </el-tab-pane>
 
-      <el-tab-pane label="候选记忆" name="candidates">
-        <el-table :data="dashboard.candidates" border height="520">
+      <el-tab-pane label="候选记录" name="candidates">
+        <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px">
+          <span slot="title">维护模型自动生成的记忆已直接存入事实记忆表，无需手动确认。此页面仅展示管理员手动创建的候选记录。</span>
+        </el-alert>
+        <el-table :data="dashboard.candidates" border height="490">
           <el-table-column prop="category" label="分类" width="120" :formatter="categoryFormatter" />
           <el-table-column prop="canonicalText" label="内容" min-width="360" show-overflow-tooltip />
           <el-table-column prop="confidence" label="置信" width="80" />
