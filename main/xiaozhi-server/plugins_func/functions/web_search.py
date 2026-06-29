@@ -1,4 +1,5 @@
 import requests
+import time
 from config.logger import setup_logging
 from plugins_func.register import (
     register_function,
@@ -32,6 +33,7 @@ WEB_SEARCH_FUNCTION_DESC = {
                     "description": (
                         "搜索关键词或完整问题。必须结合用户当前原话和已明确上下文生成，"
                         "例如用户追问“联网搜搜呢”时，要把上一轮关心的对象一并写入查询词。"
+                        "查询比分、赛果、比赛结果时，不要强行加入今天日期，优先使用“队伍A 队伍B 比分/比赛结果”这类短查询词。"
                     ),
                 }
             },
@@ -93,8 +95,7 @@ def _build_search_context(query: str, provider_label: str, items, answer: str = 
     return "\n".join(lines)
 
 
-def _search_metaso(api_key: str, query: str, max_results: int) -> str:
-    """调用秘塔搜索API"""
+def _post_metaso(api_key: str, query: str, max_results: int):
     url = "https://metaso.cn/api/v1/search"
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -110,10 +111,19 @@ def _search_metaso(api_key: str, query: str, max_results: int) -> str:
         "conciseSnippet": False,
     }
     logger.bind(tag=TAG).debug(f"秘塔搜索请求 | URL: {url} | payload: {payload}")
+    start_time = time.time()
     response = requests.post(url, json=payload, headers=headers, timeout=15)
     response.raise_for_status()
-    data = response.json()
-    logger.bind(tag=TAG).debug(f"秘塔搜索响应 | status: {response.status_code}")
+    elapsed = time.time() - start_time
+    logger.bind(tag=TAG).info(
+        f"秘塔搜索响应 | status={response.status_code} | elapsed={elapsed:.3f}s | query={query}"
+    )
+    return response.json()
+
+
+def _search_metaso(api_key: str, query: str, max_results: int) -> str:
+    """调用秘塔搜索API"""
+    data = _post_metaso(api_key, query, max_results)
 
     webpages = data.get("webpages", [])
     if not webpages:
@@ -183,8 +193,11 @@ def web_search(conn: "ConnectionHandler", query: str = None):
             None,
         )
 
+    start_time = time.time()
     try:
         result_text = search_fn()
+        elapsed = time.time() - start_time
+        logger.bind(tag=TAG).info(f"联网搜索完成 | provider={provider} | elapsed={elapsed:.3f}s")
         logger.bind(tag=TAG).info(f"搜索结果组装完成:\n{result_text}")
     except requests.exceptions.Timeout:
         logger.bind(tag=TAG).error("联网搜索请求超时")
