@@ -3,11 +3,15 @@
     <HeaderBar />
 
     <div class="operation-bar">
-      <h2 class="page-title">{{ $t('knowledgeBaseManagement.title') }}</h2>
+      <div>
+        <h2 class="page-title">{{ $t('knowledgeBaseManagement.title') }}</h2>
+        <div class="page-subtitle">管理业务资料、FAQ 和本地文档检索配置</div>
+      </div>
       <div class="right-operations">
         <el-input :placeholder="$t('knowledgeBaseManagement.searchPlaceholder')" v-model="searchName" class="search-input"
           @keyup.enter.native="handleSearch" clearable />
-        <el-button class="btn-search" @click="handleSearch">{{ $t('knowledgeBaseManagement.search') }}</el-button>
+        <el-button icon="el-icon-search" @click="handleSearch">{{ $t('knowledgeBaseManagement.search') }}</el-button>
+        <el-button type="primary" icon="el-icon-plus" @click="showAddDialog">{{ $t('knowledgeBaseManagement.add') }}</el-button>
       </div>
     </div>
 
@@ -15,6 +19,20 @@
       <div class="content-panel">
         <div class="content-area">
           <el-card class="params-card" shadow="never">
+            <div class="table-toolbar">
+              <div class="toolbar-summary">
+                <strong>{{ total }}</strong>
+                <span>个知识库</span>
+              </div>
+              <div class="toolbar-actions">
+                <el-button size="mini" @click="toggleSelectAll">
+                  {{ isAllSelected ? $t('knowledgeBaseManagement.cancelSelectAll') : $t('knowledgeBaseManagement.selectAll') }}
+                </el-button>
+                <el-button size="mini" type="danger" icon="el-icon-delete" @click="deleteSelectedKnowledgeBase" :disabled="selectedKnowledgeBase.length === 0">
+                  {{ $t('knowledgeBaseManagement.delete') }}
+                </el-button>
+              </div>
+            </div>
             <div>
               <el-table ref="paramsTable" :data="knowledgeBaseList" class="transparent-table" v-loading="loading"
                 :element-loading-text="$t('common.loading')" element-loading-spinner="el-icon-loading"
@@ -55,13 +73,13 @@
                 </el-table-column>
                 <el-table-column :label="$t('knowledgeBaseManagement.operation')" align="center">
                   <template slot-scope="scope">
-                    <el-button size="mini" type="text" @click="showViewDialog(scope.row)">
+                    <el-button size="mini" type="text" icon="el-icon-document" @click="showViewDialog(scope.row)">
                       {{ $t('knowledgeBaseManagement.view') }}
                     </el-button>
-                    <el-button size="mini" type="text" @click="showEditDialog(scope.row)">
+                    <el-button size="mini" type="text" icon="el-icon-edit" @click="showEditDialog(scope.row)">
                       {{ $t('knowledgeBaseManagement.edit') }}
                     </el-button>
-                    <el-button size="mini" type="text" @click="deleteSingleKnowledgeBase(scope.row)">
+                    <el-button size="mini" type="text" icon="el-icon-delete" class="danger-action" @click="deleteSingleKnowledgeBase(scope.row)">
                       {{ $t('knowledgeBaseManagement.delete') }}
                     </el-button>
                   </template>
@@ -70,38 +88,16 @@
             </div>
 
             <div class="table_bottom">
-              <div class="ctrl_btn">
-                <el-button size="mini" type="primary" @click="toggleSelectAll">
-                  {{ isAllSelected ? $t('knowledgeBaseManagement.cancelSelectAll') : $t('knowledgeBaseManagement.selectAll') }}
-                </el-button>
-                <el-button size="mini" type="success" @click="showAddDialog">
-                  {{ $t('knowledgeBaseManagement.add') }}
-                </el-button>
-                <el-button size="mini" type="danger" icon="el-icon-delete" @click="deleteSelectedKnowledgeBase" :disabled="selectedKnowledgeBase.length === 0">
-                  {{ $t('knowledgeBaseManagement.delete') }}
-                </el-button>
-              </div>
-              <div class="custom-pagination">
-                <el-select v-model="pageSize" @change="handlePageSizeChange" class="page-size-select">
-                  <el-option v-for="item in pageSizeOptions" :key="item"
-                    :label="`${item}${$t('knowledgeBaseManagement.itemsPerPage')}`" :value="item">
-                  </el-option>
-                </el-select>
-                <button class="pagination-btn" :disabled="currentPage === 1" @click="goFirst">
-                  {{ $t('knowledgeBaseManagement.firstPage') }}
-                </button>
-                <button class="pagination-btn" :disabled="currentPage === 1" @click="goPrev">
-                  {{ $t('knowledgeBaseManagement.prevPage') }}
-                </button>
-                <button v-for="page in visiblePages" :key="page" class="pagination-btn"
-                  :class="{ active: page === currentPage }" @click="goToPage(page)">
-                  {{ page }}
-                </button>
-                <button class="pagination-btn" :disabled="currentPage === pageCount" @click="goNext">
-                  {{ $t('knowledgeBaseManagement.nextPage') }}
-                </button>
-                <span class="total-text">{{ $t('knowledgeBaseManagement.totalRecords', { total }) }}</span>
-              </div>
+              <el-pagination
+                background
+                layout="total, sizes, prev, pager, next, jumper"
+                :current-page="currentPage"
+                :page-size="pageSize"
+                :page-sizes="pageSizeOptions"
+                :total="total"
+                @size-change="handlePageSizeChange"
+                @current-change="handleCurrentPageChange"
+              />
             </div>
           </el-card>
         </div>
@@ -151,26 +147,6 @@ export default {
   created() {
     this.fetchKnowledgeBaseList();
   },
-  computed: {
-    pageCount() {
-      return Math.ceil(this.total / this.pageSize);
-    },
-    visiblePages() {
-      const pages = [];
-      const maxVisible = 3;
-      let start = Math.max(1, this.currentPage - 1);
-      let end = Math.min(this.pageCount, start + maxVisible - 1);
-
-      if (end - start + 1 < maxVisible) {
-        start = Math.max(1, end - maxVisible + 1);
-      }
-
-      for (let i = start; i <= end; i++) {
-        pages.push(i);
-      }
-      return pages;
-    },
-  },
   methods: {
     handlePageSizeChange: function(val) {
       this.pageSize = val;
@@ -187,15 +163,10 @@ export default {
         },
         (res) => {
           this.loading = false;
-          console.log('getKnowledgeBaseList response:', res); // 添加调试日志
-          
-          // 修复：从 res.data 获取分页数据，而不是 res.data.data
-          // 因为 knowledgeBase.js 直接传递了整个响应对象
           if (res.data && res.data.code === 0) {
             const pageData = res.data.data || {};
             this.knowledgeBaseList = pageData.list || [];
             this.total = pageData.total || 0;
-            console.log('Updated knowledgeBaseList:', this.knowledgeBaseList); // 添加调试日志
           } else {
             this.$message.error({
               message: res.data?.msg || this.$t('knowledgeBaseManagement.getKnowledgeBaseListFailed'),
@@ -236,7 +207,6 @@ export default {
       return 'header-cell';
     },
     showAddDialog: function() {
-      console.log('showAddDialog called');
       this.dialogTitle = this.$t('knowledgeBaseManagement.addKnowledgeBase');
       this.knowledgeBaseForm = {
         id: null,
@@ -247,7 +217,6 @@ export default {
         parserConfig: ""
       };
       this.dialogVisible = true;
-      console.log('dialogVisible set to:', this.dialogVisible);
     },
     showViewDialog: function(row) {
       // 跳转到上传文件页面，传递知识库ID和名称
@@ -273,11 +242,8 @@ export default {
       this.dialogVisible = true;
     },
     handleSubmit: function(form) {
-      console.log('handleSubmit called with form:', form);
       if (form.id) {
-        console.log('Editing knowledge base:', form.datasetId);
         Api.knowledgeBase.updateKnowledgeBase(form.datasetId, form, (res) => {
-          console.log('Update response:', res);
           if (res.data && res.data.code === 0) {
             this.dialogVisible = false;
             this.fetchKnowledgeBaseList();
@@ -286,17 +252,13 @@ export default {
             this.$message.error(res.data?.msg || this.$t('knowledgeBaseManagement.updateFailed'));
           }
         }, (err) => {
-          console.log('Error callback received:', err);
-          // 错误回调处理后端返回的错误信息
           if (err && err.data) {
-            console.log('后端返回错误消息:', err.data.msg || err.msg);
             this.$message.error(err.data.msg || err.msg || this.$t('knowledgeBaseManagement.updateFailed'));
           } else {
             this.$message.error(this.$t('knowledgeBaseManagement.updateFailed'));
           }
         });
       } else {
-        // 新增 - 只传递必要的字段，不传递id
         const createData = {
           name: form.name,
           description: form.description,
@@ -304,9 +266,7 @@ export default {
           ragModelId: form.ragModelId,
           parserConfig: form.parserConfig
         };
-        console.log('Creating knowledge base with data:', createData);
         Api.knowledgeBase.createKnowledgeBase(createData, (res) => {
-          console.log('Create response:', res);
           if (res.data && res.data.code === 0) {
             this.dialogVisible = false;
             this.fetchKnowledgeBaseList();
@@ -315,10 +275,7 @@ export default {
             this.$message.error(res.data?.msg || this.$t('knowledgeBaseManagement.addFailed'));
           }
         }, (err) => {
-          console.log('Error callback received:', err);
-          // 错误回调处理后端返回的错误信息
           if (err && err.data) {
-            console.log('后端返回错误消息:', err.data.msg || err.msg);
             this.$message.error(err.data.msg || err.msg || this.$t('knowledgeBaseManagement.addFailed'));
           } else {
             this.$message.error(this.$t('knowledgeBaseManagement.addFailed'));
@@ -349,10 +306,7 @@ export default {
             this.$message.error(res.data?.msg || this.$t('knowledgeBaseManagement.deleteFailed'));
           }
         }, (err) => {
-          console.log('Error callback received:', err);
-          // 错误回调处理后端返回的错误信息
           if (err && err.data) {
-            console.log('后端返回错误消息:', err.data.msg || err.msg);
             this.$message.error(err.data.msg || err.msg || this.$t('knowledgeBaseManagement.deleteFailed'));
           } else {
             this.$message.error(this.$t('knowledgeBaseManagement.deleteFailed'));
@@ -383,10 +337,7 @@ export default {
             this.$message.error(res.data?.msg || this.$t('knowledgeBaseManagement.deleteFailed'));
           }
         }, (err) => {
-          console.log('Error callback received:', err);
-          // 错误回调处理后端返回的错误信息
           if (err && err.data) {
-            console.log('后端返回错误消息:', err.data.msg || err.msg);
             this.$message.error(err.data.msg || err.msg || this.$t('knowledgeBaseManagement.deleteFailed'));
           } else {
             this.$message.error(this.$t('knowledgeBaseManagement.deleteFailed'));
@@ -401,54 +352,28 @@ export default {
       });
     },
     handleStatusChange: function(row) {
-      // 只传递需要更新的字段，确保包含id字段
       const updateForm = {
-        id: row.id, // 添加id字段，后端需要此字段来定位记录
+        id: row.id,
         datasetId: row.datasetId,
         name: row.name,
         description: row.description,
         status: row.status
       };
-      console.log('Updating knowledge base status:', updateForm); // 添加调试日志
       Api.knowledgeBase.updateKnowledgeBase(row.datasetId, updateForm, (res) => {
-        console.log('Status update response:', res); // 添加调试日志
         if (res.data && res.data.code !== 0) {
-          // 恢复原来的状态
           this.fetchKnowledgeBaseList();
           this.$message.error(res.data?.msg || this.$t('knowledgeBaseManagement.updateFailed'));
         } else {
-          // 更新成功，显示成功消息
           this.$message.success(this.$t('knowledgeBaseManagement.updateSuccess'));
         }
       }, () => {
-        // 恢复原来的状态
         this.fetchKnowledgeBaseList();
         this.$message.error(this.$t('knowledgeBaseManagement.updateFailed'));
       });
     },
-    goToPage: function(page) {
-      if (page !== this.currentPage) {
-        this.currentPage = page;
-        this.fetchKnowledgeBaseList();
-      }
-    },
-    goFirst: function() {
-      if (this.currentPage !== 1) {
-        this.currentPage = 1;
-        this.fetchKnowledgeBaseList();
-      }
-    },
-    goPrev: function() {
-      if (this.currentPage > 1) {
-        this.currentPage--;
-        this.fetchKnowledgeBaseList();
-      }
-    },
-    goNext: function() {
-      if (this.currentPage < this.pageCount) {
-        this.currentPage++;
-        this.fetchKnowledgeBaseList();
-      }
+    handleCurrentPageChange: function(page) {
+      this.currentPage = page;
+      this.fetchKnowledgeBaseList();
     },
     formatDate: function(dateString) {
       if (!dateString) return '';
@@ -467,23 +392,19 @@ export default {
     display: flex;
     position: relative;
     flex-direction: column;
-    background-size: cover;
-    background: linear-gradient(to bottom right, #dce8ff, #e4eeff, #e6cbfd) center;
-    -webkit-background-size: cover;
-    -o-background-size: cover;
+    background: #f5f7fb;
     overflow: hidden;
 }
 
 .main-wrapper {
-    // 顶部 63px 底部 35px 查询72px
     height: calc(100vh - 63px - 35px - 72px);
     margin: 0 22px;
-    border-radius: 15px;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
     position: relative;
-    background: rgba(237, 242, 255, 0.5);
+    background: #fff;
     display: flex;
     flex-direction: column;
+    border: 1px solid #e4e8f1;
 }
 
 .operation-bar {
@@ -496,6 +417,13 @@ export default {
 .page-title {
     font-size: 24px;
     margin: 0;
+    color: #2f3548;
+}
+
+.page-subtitle {
+    margin-top: 6px;
+    font-size: 13px;
+    color: #737b91;
 }
 
 .right-operations {
@@ -508,20 +436,13 @@ export default {
     width: 240px;
 }
 
-.btn-search {
-    background: linear-gradient(135deg, #6b8cff, #a966ff);
-    border: none;
-    color: white;
-}
-
 .content-panel {
     flex: 1;
     display: flex;
     overflow: hidden;
     height: 100%;
-    border-radius: 15px;
+    border-radius: 8px;
     background: transparent;
-    border: 1px solid #fff;
 }
 
 .content-area {
@@ -552,158 +473,39 @@ export default {
     }
 }
 
-.table_bottom {
+.table-toolbar {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-top: auto; 
-    width: 100%;
+    gap: 12px;
+    margin-bottom: 12px;
 }
 
-.ctrl_btn {
+.toolbar-summary {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    color: #687186;
+    font-size: 13px;
+}
+
+.toolbar-summary strong {
+    color: #2f3548;
+    font-size: 20px;
+}
+
+.toolbar-actions {
     display: flex;
     gap: 8px;
-    padding-left: 26px;
-
-    .el-button {
-        min-width: 72px;
-        height: 32px;
-        padding: 7px 12px 7px 10px;
-        font-size: 12px;
-        border-radius: 4px;
-        line-height: 1;
-        font-weight: 500;
-        border: none;
-        transition: all 0.3s ease;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-
-        &:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-        }
-    }
-
-    .el-button--primary {
-        background: #5f70f3;
-        color: white;
-    }
-
-    .el-button--danger {
-        background: #fd5b63;
-        color: white;
-    }
 }
 
-.custom-pagination {
+.table_bottom {
     display: flex;
+    justify-content: flex-end;
     align-items: center;
-    gap: 5px;
-
-    .el-select {
-        margin-right: 8px;
-    }
-
-    .pagination-btn:first-child,
-    .pagination-btn:nth-child(2),
-    .pagination-btn:nth-last-child(2),
-    .pagination-btn:nth-child(3) {
-        min-width: 60px;
-        height: 32px;
-        padding: 0 12px;
-        border-radius: 4px;
-        border: 1px solid #e4e7ed;
-        background: #dee7ff;
-        color: #606266;
-        font-size: 14px;
-        cursor: pointer;
-        transition: all 0.3s ease;
-
-        &:hover {
-            background: #d7dce6;
-        }
-
-        &:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-        }
-    }
-
-    .pagination-btn:not(:first-child):not(:nth-child(3)):not(:nth-child(2)):not(:nth-last-child(2)) {
-        min-width: 28px;
-        height: 32px;
-        padding: 0;
-        border-radius: 4px;
-        border: 1px solid transparent;
-        background: transparent;
-        color: #606266;
-        font-size: 14px;
-        cursor: pointer;
-        transition: all 0.3s ease;
-
-        &:hover {
-            background: rgba(245, 247, 250, 0.3);
-        }
-    }
-
-    .pagination-btn.active {
-        background: #5f70f3 !important;
-        color: #ffffff !important;
-        border-color: #5f70f3 !important;
-
-        &:hover {
-            background: #6d7cf5 !important;
-        }
-    }
-}
-
-.total-text {
-    margin-left: 10px;
-    color: #606266;
-    font-size: 14px;
-}
-
-.page-size-select {
-    width: 100px;
-    margin-right: 10px;
-
-    :deep(.el-input__inner) {
-        height: 32px;
-        line-height: 32px;
-        border-radius: 4px;
-        border: 1px solid #e4e7ed;
-        background: #dee7ff;
-        color: #606266;
-        font-size: 14px;
-    }
-
-    :deep(.el-input__suffix) {
-        right: 6px;
-        width: 15px;
-        height: 20px;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        top: 6px;
-        border-radius: 4px;
-    }
-
-    :deep(.el-input__suffix-inner) {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 100%;
-    }
-
-    :deep(.el-icon-arrow-up:before) {
-        content: "";
-        display: inline-block;
-        border-left: 6px solid transparent;
-        border-right: 6px solid transparent;
-        border-top: 9px solid #606266;
-        position: relative;
-        transform: rotate(0deg);
-        transition: transform 0.3s;
-    }
+    margin-top: auto;
+    padding-top: 12px;
+    width: 100%;
 }
 
 :deep(.transparent-table) {
@@ -724,8 +526,8 @@ export default {
     }
 
     .el-table__header th {
-        background: white !important;
-        color: black;
+        background: #f8fafc !important;
+        color: #2f3548;
         font-weight: 600;
         height: 40px;
         padding: 8px 0;
@@ -756,11 +558,15 @@ export default {
 }
 
 :deep(.el-table .el-button--text) {
-    color: #7079aa !important;
+    color: #3f6fd8 !important;
 }
 
 :deep(.el-table .el-button--text:hover) {
-    color: #5a64b5 !important;
+    color: #2f58b8 !important;
+}
+
+:deep(.el-table .danger-action.el-button--text) {
+    color: #c53030 !important;
 }
 
 :deep(.el-checkbox__inner) {
@@ -807,7 +613,7 @@ export default {
 @media (min-width: 1144px) {
     .table_bottom {
         display: flex;
-        justify-content: space-between;
+        justify-content: flex-end;
         align-items: center;
         margin-top: auto;
     }

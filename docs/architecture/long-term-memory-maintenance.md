@@ -75,6 +75,23 @@ scope_id   = agent_id
 - 运行时查询仍受设备/智能体作用域、删除墓碑、超时降级和 `nomem` 门控控制。
 - 后续如引入向量、全文、图关系或时间衰减召回，应扩展 manager-api 检索层，而不是继续增加 Python provider 私有存储。
 
+## PowerMem 借鉴后的治理分层
+
+PowerMem 的核心价值不是“把所有聊天都存下来”，而是把记忆拆成可维护生命周期：抽取、去重、更新、检索、衰减和画像。当前项目首期不直接引入 PowerMem 的向量存储或独立 `UserMemory` 运行态，但 `managed_memory` 必须吸收以下治理规则：
+
+```text
+source_event 原始证据
+  -> maintenance_llm 只生成候选，不直接生效
+  -> candidate 标注 ADD / UPDATE / IGNORE
+  -> 人工确认后写入或更新 fact
+  -> revision 记录每次确认、更新、刷新、删除
+  -> query 只读取 active fact，不读取候选和原始聊天
+```
+
+分类不使用服务端预设表。维护模型应根据已有记忆和当前语义自主归纳分类：能复用已有分类就复用，不能复用时生成稳定、简短、面向人的分类。服务端只保存和展示分类，不通过关键词规则强行改写分类。
+
+维护模型可以输出 `ADD`、`UPDATE`、`IGNORE` 三类维护动作。重复内容应返回 `IGNORE`；修正已有事实时返回 `UPDATE` 和 `related_memory_id`；真正的新长期事实才返回 `ADD`。后端只做通用质量门控、近似重复检查和审计记录，不内置业务分类规则。
+
 ## 维护模型配置
 
 Memory 模型配置可以通过普通参数 `maintenance_llm` 指定一个已在模型管理中配置好的 LLM 模型 ID，例如 DeepSeek、通义千问、OpenAI 兼容服务或本地 Ollama。

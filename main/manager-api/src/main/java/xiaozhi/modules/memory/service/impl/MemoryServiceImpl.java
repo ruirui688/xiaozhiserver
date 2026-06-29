@@ -71,34 +71,44 @@ public class MemoryServiceImpl implements MemoryService {
     private static final BigDecimal MAX_SCORE = new BigDecimal("1.000");
     private static final int MAX_MAINTENANCE_INPUT_CHARS = 2000;
     private static final String MAINTENANCE_LLM_FIELD = "maintenance_llm";
-    private static final String MAINTENANCE_EXTRACTOR_VERSION = "maintenance-llm-v1";
+    private static final String MAINTENANCE_EXTRACTOR_VERSION = "maintenance-llm-v2";
     private static final String MAINTENANCE_PROMPT = """
-            你是小智服务器的长期记忆维护助手。请只从用户这一次发言中抽取未来对话有长期价值的稳定事实。
+            你是小智服务器的长期记忆维护助手。你的任务不是保存聊天记录，而是维护一份干净、可复用、可更新的长期事实库。
 
-            严格规则：
-            1. 只抽取用户本人或其长期偏好、身份、家庭、地点、习惯、长期项目、设备使用偏好。
-            2. 不要抽取天气、时间、寒暄、一次性请求、工具调用结果、设备控制结果、推测内容。
-            3. 不要抽取密码、API Key、Token、身份证、银行卡、精确住址等高敏感内容。
-            4. 不处理“忘记/删除记忆”请求，这类请求由服务端显式规则处理。
-            5. 没有可维护记忆时返回 {"memories":[]}。
-            6. 只返回 JSON，不要解释，不要 Markdown。
+            已有长期记忆：
+            {history_memory}
+
+            只处理下面这一次用户发言：
+            {conversation}
+
+            维护规则：
+            1. 只保留未来对话有稳定价值的信息。
+            2. 跳过不应进入长期事实库的噪声、临时内容、转述内容和低可信内容。
+            3. 不保存密码、Token、API Key、身份证、银行卡、精确住址等高敏感内容。
+            4. 如果新发言和已有记忆重复，返回 action=IGNORE，不要改写成新记忆。
+            5. 如果新发言修正了已有记忆，返回 action=UPDATE，并填写 related_memory_id。
+            6. canonical_text 必须是一句完整中文事实，不要带引号、口头禅、对话语气或“用户说/他说”等前缀。
+            7. category 由你根据已有记忆和当前语义自行归类；能复用已有分类就复用，不能复用时生成一个稳定、简短、面向人的中文分类。
+            8. memory_type 由你根据语义自行归纳，要求稳定、简短，不要使用一次性短语。
+            9. 没有可维护内容时返回 {"memories":[]}。
+            10. 只返回 JSON，不要解释，不要 Markdown。
 
             JSON 格式：
             {
               "memories": [
                 {
-                  "memory_type": "profile|preference|relationship|project|device_behavior|other",
-                  "category": "简短中文分类",
+                  "action": "ADD|UPDATE|IGNORE",
+                  "related_memory_id": "仅 UPDATE 时填写已有记忆 ID，否则为空",
+                  "memory_type": "稳定、简短的记忆类型",
+                  "category": "稳定、简短的中文分类",
                   "canonical_text": "可直接写入记忆候选的中文事实",
                   "confidence": 0.0,
                   "importance": 0.0,
-                  "sensitivity": "normal|personal|sensitive"
+                  "sensitivity": "normal|personal|sensitive",
+                  "reason": "为什么值得维护，少于30字"
                 }
               ]
             }
-
-            用户发言：
-            {conversation}
             """;
 
     private final MemorySourceEventDao sourceEventDao;
@@ -335,8 +345,7 @@ public class MemoryServiceImpl implements MemoryService {
         }
         AgentEntity agent = agentDao.selectById(agentId);
         AgentScope scope = new AgentScope(agent, candidate.getScopeId());
-        String memoryId = createFactInternal(scope, candidate.getCanonicalText(), candidate.getCategory(),
-                candidate.getMemoryType(), candidate.getSourceEventId(), actorType, actorId);
+        String memoryId = applyCandidateToFact(scope, candidate, actorType, actorId);
         candidate.setStatus("confirmed");
         candidate.setUpdatedAt(new Date());
         candidateDao.updateById(candidate);
@@ -356,6 +365,34 @@ public class MemoryServiceImpl implements MemoryService {
                 actorType, actorId, "候选记忆拒绝");
     }
 
+    private String applyCandidateToFact(AgentScope scope, MemoryCandidateEntity candidate, String actorType, String actorId) {
+        JSONObject payload = parsePayload(candidate.getPayload());
+        String action = normalizeCandidateAction(payload.getStr("action"));
+        String relatedMemoryId = payload.getStr("related_memory_id");
+        MemoryFactEntity relatedFact = findRelatedFact(scope.agent.getId(), scope.scopeId, relatedMemoryId,
+                candidate.getCanonicalText(), candidate.getMemoryType(), candidate.getCategory());
+        if ("UPDATE".equals(action) && relatedFact != null) {
+            String before = JsonUtils.toJsonString(relatedFact);
+            relatedFact.setMemoryType(normalizeMemoryLabel(candidate.getMemoryType(), "长期记忆"));
+            relatedFact.setCategory(normalizeMemoryLabel(candidate.getCategory(), "未分类"));
+            relatedFact.setCanonicalText(cleanupMemoryText(candidate.getCanonicalText()));
+            relatedFact.setConfidence(max(relatedFact.getConfidence(), candidate.getConfidence()));
+            relatedFact.setImportance(max(relatedFact.getImportance(), candidate.getImportance()));
+            relatedFact.setSensitivity(normalizeSensitivity(candidate.getSensitivity()));
+            relatedFact.setStatus(STATUS_ACTIVE);
+            relatedFact.setLastSeenAt(new Date());
+            relatedFact.setUpdatedAt(new Date());
+            relatedFact.setPayload(mergeFactPayload(relatedFact.getPayload(), candidate.getPayload()));
+            factDao.updateById(relatedFact);
+            writeRevision(scope.agent.getId(), relatedFact.getMemoryId(), "update_from_candidate", before,
+                    JsonUtils.toJsonString(relatedFact), actorType, actorId, "候选记忆更新已有事实");
+            return relatedFact.getMemoryId();
+        }
+        return createFactInternal(scope, candidate.getCanonicalText(),
+                normalizeMemoryLabel(candidate.getCategory(), "未分类"),
+                normalizeMemoryLabel(candidate.getMemoryType(), "长期记忆"), candidate.getSourceEventId(), actorType, actorId);
+    }
+
     private String createFactInternal(AgentScope scope, String text, String category, String memoryType,
                                       String sourceEventId, String actorType, String actorId) {
         String canonical = cleanupMemoryText(text);
@@ -372,13 +409,7 @@ public class MemoryServiceImpl implements MemoryService {
                 .last("LIMIT 1");
         MemoryFactEntity existing = factDao.selectOne(wrapper);
         if (existing != null) {
-            existing.setLastSeenAt(new Date());
-            existing.setConfidence(max(existing.getConfidence(), DEFAULT_SCORE));
-            existing.setStatus(STATUS_ACTIVE);
-            existing.setUpdatedAt(new Date());
-            factDao.updateById(existing);
-            writeRevision(scope.agent.getId(), existing.getMemoryId(), "refresh", null,
-                    JsonUtils.toJsonString(existing), actorType, actorId, "重复证据刷新");
+            refreshFactEvidence(existing, DEFAULT_SCORE, actorType, actorId, "重复证据刷新");
             return existing.getMemoryId();
         }
         MemoryFactEntity fact = new MemoryFactEntity();
@@ -388,8 +419,8 @@ public class MemoryServiceImpl implements MemoryService {
         fact.setMacAddress(scope.scopeId);
         fact.setScopeType(SCOPE_DEVICE);
         fact.setScopeId(scope.scopeId);
-        fact.setMemoryType(memoryType);
-        fact.setCategory(category);
+        fact.setMemoryType(normalizeMemoryLabel(memoryType, "长期记忆"));
+        fact.setCategory(normalizeMemoryLabel(category, "未分类"));
         fact.setCanonicalText(canonical);
         fact.setPayload("{}");
         fact.setImportance(DEFAULT_SCORE);
@@ -483,7 +514,8 @@ public class MemoryServiceImpl implements MemoryService {
             return;
         }
         String promptInput = StringUtils.abbreviate(content, MAX_MAINTENANCE_INPUT_CHARS);
-        String output = llmService.generateSummaryWithHistory(promptInput, "", MAINTENANCE_PROMPT, maintenanceModelId);
+        String memoryContext = buildMaintenanceMemoryContext(agent.getId(), scopeId);
+        String output = llmService.generateSummaryWithHistory(promptInput, memoryContext, MAINTENANCE_PROMPT, maintenanceModelId);
         if (StringUtils.isBlank(output) || output.contains("不可用") || output.contains("失败")) {
             log.warn("长期记忆维护模型返回不可用结果，agentId: {}, modelId: {}", agent.getId(), maintenanceModelId);
             return;
@@ -576,8 +608,25 @@ public class MemoryServiceImpl implements MemoryService {
 
     private boolean createCandidateInternal(AgentEntity agent, String scopeId, String sourceEventId,
                                             String maintenanceModelId, JSONObject candidateJson) {
+        String action = normalizeCandidateAction(candidateJson.getStr("action"));
+        if ("IGNORE".equals(action)) {
+            return false;
+        }
         String canonical = cleanupMemoryText(candidateJson.getStr("canonical_text"));
-        if (StringUtils.isBlank(canonical) || canonical.length() < 3 || canonical.length() > 300) {
+        if (isLowQualityMemoryText(canonical)) {
+            return false;
+        }
+        String memoryType = normalizeMemoryLabel(candidateJson.getStr("memory_type"), "长期记忆");
+        String category = normalizeMemoryLabel(candidateJson.getStr("category"), "未分类");
+        BigDecimal confidence = score(candidateJson.get("confidence"), DEFAULT_SCORE);
+        BigDecimal importance = score(candidateJson.get("importance"), DEFAULT_SCORE);
+        if (confidence.compareTo(new BigDecimal("0.500")) < 0 || importance.compareTo(new BigDecimal("0.350")) < 0) {
+            return false;
+        }
+        String relatedMemoryId = StringUtils.trimToEmpty(candidateJson.getStr("related_memory_id"));
+        MemoryFactEntity relatedFact = findRelatedFact(agent.getId(), scopeId, relatedMemoryId, canonical, memoryType, category);
+        if (relatedFact != null && isEquivalentMemory(relatedFact.getCanonicalText(), canonical)) {
+            refreshFactEvidence(relatedFact, confidence, "system", maintenanceModelId, "维护模型重复证据刷新");
             return false;
         }
         String hash = sha256(agent.getId() + "|" + scopeId + "|" + canonical);
@@ -604,14 +653,17 @@ public class MemoryServiceImpl implements MemoryService {
         candidate.setUserId(agent.getUserId());
         candidate.setScopeType(SCOPE_DEVICE);
         candidate.setScopeId(scopeId);
-        candidate.setMemoryType(normalizeMemoryType(candidateJson.getStr("memory_type")));
-        candidate.setCategory(StringUtils.defaultIfBlank(cleanupMemoryText(candidateJson.getStr("category")), "模型候选"));
+        candidate.setMemoryType(memoryType);
+        candidate.setCategory(category);
         candidate.setCanonicalText(canonical);
         candidate.setPayload(JSONUtil.toJsonStr(Map.of(
+                "action", relatedFact == null ? action : "UPDATE",
+                "related_memory_id", relatedFact == null ? relatedMemoryId : relatedFact.getMemoryId(),
                 "maintenance_llm", maintenanceModelId,
-                "source", MAINTENANCE_EXTRACTOR_VERSION)));
-        candidate.setConfidence(score(candidateJson.get("confidence"), DEFAULT_SCORE));
-        candidate.setImportance(score(candidateJson.get("importance"), DEFAULT_SCORE));
+                "source", MAINTENANCE_EXTRACTOR_VERSION,
+                "reason", StringUtils.defaultString(candidateJson.getStr("reason")))));
+        candidate.setConfidence(confidence);
+        candidate.setImportance(importance);
         candidate.setSensitivity(normalizeSensitivity(candidateJson.getStr("sensitivity")));
         candidate.setStatus(STATUS_PENDING);
         candidate.setSourceEventId(sourceEventId);
@@ -624,12 +676,131 @@ public class MemoryServiceImpl implements MemoryService {
         return true;
     }
 
-    private String normalizeMemoryType(String value) {
-        String type = StringUtils.defaultIfBlank(value, "other").trim();
-        if (List.of("profile", "preference", "relationship", "project", "device_behavior", "other").contains(type)) {
-            return type;
+    private String buildMaintenanceMemoryContext(String agentId, String scopeId) {
+        List<MemoryFactEntity> facts = factDao.selectList(new QueryWrapper<MemoryFactEntity>()
+                .eq("agent_id", agentId)
+                .eq("scope_type", SCOPE_DEVICE)
+                .eq("scope_id", scopeId)
+                .eq("status", STATUS_ACTIVE)
+                .orderByDesc("importance", "last_seen_at")
+                .last("LIMIT 30"));
+        if (facts.isEmpty()) {
+            return "无已有长期记忆";
         }
-        return "other";
+        StringBuilder builder = new StringBuilder();
+        for (MemoryFactEntity fact : facts) {
+            builder.append("- id=").append(fact.getMemoryId())
+                    .append(" type=").append(fact.getMemoryType())
+                    .append(" category=").append(fact.getCategory())
+                    .append(" text=").append(fact.getCanonicalText())
+                    .append("\n");
+        }
+        return builder.toString();
+    }
+
+    private JSONObject parsePayload(String payload) {
+        if (StringUtils.isBlank(payload)) {
+            return new JSONObject();
+        }
+        try {
+            return JSONUtil.parseObj(payload);
+        } catch (Exception e) {
+            return new JSONObject();
+        }
+    }
+
+    private String mergeFactPayload(String factPayload, String candidatePayload) {
+        JSONObject merged = parsePayload(factPayload);
+        JSONObject candidate = parsePayload(candidatePayload);
+        merged.set("last_candidate_action", candidate.getStr("action"));
+        merged.set("last_candidate_reason", candidate.getStr("reason"));
+        merged.set("maintenance_source", candidate.getStr("source"));
+        return merged.toString();
+    }
+
+    private void refreshFactEvidence(MemoryFactEntity fact, BigDecimal confidence, String actorType, String actorId, String reason) {
+        fact.setLastSeenAt(new Date());
+        fact.setConfidence(max(fact.getConfidence(), confidence == null ? DEFAULT_SCORE : confidence));
+        fact.setStatus(STATUS_ACTIVE);
+        fact.setUpdatedAt(new Date());
+        factDao.updateById(fact);
+        writeRevision(fact.getAgentId(), fact.getMemoryId(), "refresh", null,
+                JsonUtils.toJsonString(fact), actorType, actorId, reason);
+    }
+
+    private MemoryFactEntity findRelatedFact(String agentId, String scopeId, String relatedMemoryId,
+                                             String canonical, String memoryType, String category) {
+        if (StringUtils.isNotBlank(relatedMemoryId)) {
+            MemoryFactEntity byId = factDao.selectOne(new QueryWrapper<MemoryFactEntity>()
+                    .eq("agent_id", agentId)
+                    .eq("scope_type", SCOPE_DEVICE)
+                    .eq("scope_id", scopeId)
+                    .eq("memory_id", relatedMemoryId)
+                    .ne("status", STATUS_DELETED)
+                    .last("LIMIT 1"));
+            if (byId != null) {
+                return byId;
+            }
+        }
+        String normalizedCategory = normalizeMemoryLabel(category, "未分类");
+        List<MemoryFactEntity> facts = factDao.selectList(new QueryWrapper<MemoryFactEntity>()
+                .eq("agent_id", agentId)
+                .eq("scope_type", SCOPE_DEVICE)
+                .eq("scope_id", scopeId)
+                .eq("status", STATUS_ACTIVE)
+                .eq("category", normalizedCategory)
+                .orderByDesc("updated_at")
+                .last("LIMIT 30"));
+        for (MemoryFactEntity fact : facts) {
+            if (isEquivalentMemory(fact.getCanonicalText(), canonical)) {
+                return fact;
+            }
+        }
+        return null;
+    }
+
+    private boolean isEquivalentMemory(String left, String right) {
+        String normalizedLeft = normalizeForCompare(left);
+        String normalizedRight = normalizeForCompare(right);
+        if (StringUtils.isBlank(normalizedLeft) || StringUtils.isBlank(normalizedRight)) {
+            return false;
+        }
+        return normalizedLeft.equals(normalizedRight)
+                || normalizedLeft.contains(normalizedRight)
+                || normalizedRight.contains(normalizedLeft);
+    }
+
+    private String normalizeForCompare(String text) {
+        return StringUtils.defaultString(text)
+                .replaceAll("[\\s，。！？、；：,.!?;:\"'“”‘’（）()《》<>\\[\\]【】]", "")
+                .replace("用户的", "")
+                .replace("用户", "")
+                .replace("本人", "")
+                .trim();
+    }
+
+    private boolean isLowQualityMemoryText(String canonical) {
+        String text = cleanupMemoryText(canonical);
+        if (StringUtils.isBlank(text) || text.length() < 6 || text.length() > 220) {
+            return true;
+        }
+        return false;
+    }
+
+    private String normalizeCandidateAction(String value) {
+        String action = StringUtils.defaultIfBlank(value, "ADD").trim().toUpperCase();
+        if (List.of("ADD", "UPDATE", "IGNORE").contains(action)) {
+            return action;
+        }
+        return "ADD";
+    }
+
+    private String normalizeMemoryLabel(String value, String defaultValue) {
+        String label = cleanupMemoryText(value);
+        if (StringUtils.isBlank(label)) {
+            return defaultValue;
+        }
+        return StringUtils.abbreviate(label, 40);
     }
 
     private String normalizeSensitivity(String value) {
