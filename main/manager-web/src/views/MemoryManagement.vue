@@ -72,8 +72,13 @@
 
           <div class="graph-detail">
             <template v-if="selectedGraphNode">
-              <div class="detail-type">{{ selectedGraphNode.typeLabel }}</div>
-              <div class="detail-title">{{ selectedGraphNode.rawTitle }}</div>
+              <div class="detail-header">
+                <div>
+                  <div class="detail-type">{{ selectedGraphNode.typeLabel }}</div>
+                  <div class="detail-title">{{ selectedGraphNode.rawTitle }}</div>
+                </div>
+                <el-tag size="mini" :type="selectedGraphNode.tagType">{{ selectedGraphNode.statusLabel }}</el-tag>
+              </div>
               <div class="detail-content">{{ selectedGraphNode.content || '无详细内容' }}</div>
               <div class="detail-meta" v-if="selectedGraphNode.meta.length">
                 <div v-for="item in selectedGraphNode.meta" :key="item.label">
@@ -81,10 +86,19 @@
                   <strong>{{ item.value }}</strong>
                 </div>
               </div>
+              <div class="detail-actions" v-if="selectedGraphNode.actionType === 'fact'">
+                <el-button size="mini" icon="el-icon-edit" @click="openGraphFactEdit">编辑</el-button>
+                <el-button size="mini" icon="el-icon-folder" @click="archiveGraphFact">归档</el-button>
+                <el-button size="mini" type="danger" icon="el-icon-delete" @click="deleteGraphFact">删除</el-button>
+              </div>
+              <div class="detail-actions" v-else-if="selectedGraphNode.actionType === 'candidate'">
+                <el-button size="mini" type="primary" @click="confirmGraphCandidate">确认记忆</el-button>
+                <el-button size="mini" @click="rejectGraphCandidate">拒绝</el-button>
+              </div>
             </template>
             <template v-else>
               <div class="detail-type">节点详情</div>
-              <div class="detail-content">点击图谱中的节点查看完整记忆内容、置信度、重要性和状态。</div>
+              <div class="detail-content">点击一条事实记忆后，可以在这里直接编辑、归档或删除。</div>
             </template>
           </div>
         </div>
@@ -92,13 +106,13 @@
 
       <el-tab-pane label="事实记忆" name="facts">
         <el-table v-loading="loading" :data="dashboard.facts" border height="520">
-          <el-table-column prop="category" label="分类" width="120" />
-          <el-table-column prop="memoryType" label="类型" width="120" />
+          <el-table-column prop="category" label="分类" width="120" :formatter="categoryFormatter" />
+          <el-table-column prop="memoryType" label="类型" width="120" :formatter="memoryTypeFormatter" />
           <el-table-column prop="canonicalText" label="内容" min-width="320" show-overflow-tooltip />
-          <el-table-column prop="scopeId" label="作用域" width="170" show-overflow-tooltip />
+          <el-table-column prop="scopeId" label="适用范围" width="170" :formatter="scopeFormatter" show-overflow-tooltip />
           <el-table-column prop="confidence" label="置信" width="80" />
           <el-table-column prop="importance" label="重要性" width="90" />
-          <el-table-column prop="status" label="状态" width="90" />
+          <el-table-column prop="status" label="状态" width="90" :formatter="statusFormatter" />
           <el-table-column label="操作" width="210" fixed="right">
             <template slot-scope="{ row }">
               <el-button size="mini" icon="el-icon-edit" @click="openEdit(row)">编辑</el-button>
@@ -111,10 +125,10 @@
 
       <el-tab-pane label="候选记忆" name="candidates">
         <el-table :data="dashboard.candidates" border height="520">
-          <el-table-column prop="category" label="分类" width="120" />
+          <el-table-column prop="category" label="分类" width="120" :formatter="categoryFormatter" />
           <el-table-column prop="canonicalText" label="内容" min-width="360" show-overflow-tooltip />
           <el-table-column prop="confidence" label="置信" width="80" />
-          <el-table-column prop="status" label="状态" width="100" />
+          <el-table-column prop="status" label="状态" width="100" :formatter="statusFormatter" />
           <el-table-column label="操作" width="160">
             <template slot-scope="{ row }">
               <el-button size="mini" type="primary" :disabled="row.status !== 'pending'" @click="confirmCandidate(row)">确认</el-button>
@@ -139,7 +153,7 @@
         <el-table :data="dashboard.tombstones" border height="520">
           <el-table-column prop="patternText" label="内容" min-width="360" show-overflow-tooltip />
           <el-table-column prop="reason" label="原因" min-width="180" show-overflow-tooltip />
-          <el-table-column prop="status" label="状态" width="100" />
+          <el-table-column prop="status" label="状态" width="100" :formatter="statusFormatter" />
           <el-table-column prop="createdAt" label="创建时间" width="180" />
         </el-table>
       </el-tab-pane>
@@ -274,9 +288,9 @@ export default {
           typeLabel: '记忆分类',
           x: 245,
           y: yFor(index, categories.length) - 21,
-          title: category,
+          title: this.categoryText(category),
           subtitle: `${categoryFacts.length + categoryCandidates.length} 条`,
-          content: category,
+          content: this.categoryText(category),
           meta: [
             { label: '事实', value: categoryFacts.length },
             { label: '候选', value: categoryCandidates.length }
@@ -291,14 +305,19 @@ export default {
           id,
           type: 'fact',
           typeLabel: '事实记忆',
+          actionType: 'fact',
+          record: fact,
+          statusLabel: this.statusText(fact.status),
+          tagType: 'success',
           x: 475,
           y: yFor(index, visibleFacts.length, 28, 516) - 21,
           title: fact.canonicalText || '未命名事实',
-          subtitle: `${fact.memoryType || 'memory'} · ${fact.status || 'active'}`,
+          subtitle: `${this.memoryTypeText(fact.memoryType)} · ${this.statusText(fact.status)}`,
           content: fact.canonicalText,
           meta: [
-            { label: '分类', value: fact.category || '未分类' },
-            { label: '作用域', value: fact.scopeId || '-' },
+            { label: '记忆类型', value: this.memoryTypeText(fact.memoryType) },
+            { label: '记忆分类', value: this.categoryText(fact.category) },
+            { label: '适用范围', value: this.scopeText(fact.scopeType, fact.scopeId) },
             { label: '置信度', value: this.scorePercent(fact.confidence) },
             { label: '重要性', value: this.scorePercent(fact.importance) }
           ]
@@ -312,13 +331,18 @@ export default {
           id,
           type: 'candidate',
           typeLabel: '候选记忆',
+          actionType: 'candidate',
+          record: candidate,
+          statusLabel: this.statusText(candidate.status),
+          tagType: 'warning',
           x: 735,
           y: yFor(index, Math.max(visibleCandidates.length, 1), 58, 368) - 21,
           title: candidate.canonicalText || '候选记忆',
-          subtitle: `${candidate.category || '候选'} · ${candidate.status || 'pending'}`,
+          subtitle: `${this.categoryText(candidate.category)} · ${this.statusText(candidate.status)}`,
           content: candidate.canonicalText,
           meta: [
-            { label: '分类', value: candidate.category || '候选' },
+            { label: '记忆分类', value: this.categoryText(candidate.category) },
+            { label: '记忆类型', value: this.memoryTypeText(candidate.memoryType) },
             { label: '置信度', value: this.scorePercent(candidate.confidence) },
             { label: '重要性', value: this.scorePercent(candidate.importance) }
           ]
@@ -332,15 +356,19 @@ export default {
           id,
           type: 'tombstone',
           typeLabel: '忘记规则',
+          actionType: 'tombstone',
+          record: tombstone,
+          statusLabel: this.statusText(tombstone.status),
+          tagType: 'danger',
           x: 900,
           y: yFor(index, Math.max(visibleTombstones.length, 1), 420, 520) - 21,
           width: 180,
           title: tombstone.patternText || '忘记规则',
-          subtitle: tombstone.reason || tombstone.status || 'active',
+          subtitle: tombstone.reason || this.statusText(tombstone.status),
           content: tombstone.patternText,
           meta: [
             { label: '原因', value: tombstone.reason || '-' },
-            { label: '状态', value: tombstone.status || '-' }
+            { label: '状态', value: this.statusText(tombstone.status) }
           ]
         }));
         addEdge('agent', id);
@@ -431,6 +459,21 @@ export default {
         });
       }).catch(() => {});
     },
+    openGraphFactEdit() {
+      const row = this.selectedGraphNode && this.selectedGraphNode.record;
+      if (!row) return;
+      this.openEdit(row);
+    },
+    archiveGraphFact() {
+      const row = this.selectedGraphNode && this.selectedGraphNode.record;
+      if (!row) return;
+      this.archiveFact(row);
+    },
+    deleteGraphFact() {
+      const row = this.selectedGraphNode && this.selectedGraphNode.record;
+      if (!row) return;
+      this.deleteFact(row);
+    },
     confirmCandidate(row) {
       Api.memory.confirmCandidate(this.agentId, row.candidateId, () => {
         this.$message.success('已确认');
@@ -443,6 +486,16 @@ export default {
         this.loadData();
       });
     },
+    confirmGraphCandidate() {
+      const row = this.selectedGraphNode && this.selectedGraphNode.record;
+      if (!row) return;
+      this.confirmCandidate(row);
+    },
+    rejectGraphCandidate() {
+      const row = this.selectedGraphNode && this.selectedGraphNode.record;
+      if (!row) return;
+      this.rejectCandidate(row);
+    },
     buildGraphNode(node) {
       const width = node.width || 190;
       const height = node.height || 42;
@@ -453,7 +506,9 @@ export default {
         rawTitle: node.title,
         title: this.truncateGraphText(node.title, width > 180 ? 16 : 13),
         subtitle: this.truncateGraphText(node.subtitle, width > 180 ? 18 : 14),
-        meta: node.meta || []
+        meta: node.meta || [],
+        statusLabel: node.statusLabel || '查看',
+        tagType: node.tagType || ''
       };
     },
     selectGraphNode(node) {
@@ -469,6 +524,62 @@ export default {
         return '-';
       }
       return `${Math.round(number * 100)}%`;
+    },
+    categoryText(value) {
+      const categoryMap = {
+        explicit: '用户明确记住',
+        manual: '手动维护',
+        preference: '偏好',
+        profile: '画像',
+        tool: '工具经验',
+        candidate: '候选'
+      };
+      return categoryMap[value] || value || '未分类';
+    },
+    memoryTypeText(value) {
+      const typeMap = {
+        preference: '偏好事实',
+        profile: '用户画像',
+        episodic: '事件事实',
+        semantic: '长期事实',
+        tool_behavior: '工具经验',
+        explicit: '明确记住',
+        memory: '长期记忆'
+      };
+      return typeMap[value] || value || '长期记忆';
+    },
+    statusText(value) {
+      const statusMap = {
+        active: '生效中',
+        pending: '待确认',
+        confirmed: '已确认',
+        rejected: '已拒绝',
+        archived: '已归档',
+        deleted: '已删除'
+      };
+      return statusMap[value] || value || '生效中';
+    },
+    scopeText(scopeType, scopeId) {
+      if (!scopeId) return '-';
+      if (scopeType === 'device') {
+        return `设备 ${scopeId}`;
+      }
+      if (scopeType === 'agent') {
+        return '当前智能体';
+      }
+      return scopeId;
+    },
+    categoryFormatter(row) {
+      return this.categoryText(row.category);
+    },
+    memoryTypeFormatter(row) {
+      return this.memoryTypeText(row.memoryType);
+    },
+    statusFormatter(row) {
+      return this.statusText(row.status);
+    },
+    scopeFormatter(row) {
+      return this.scopeText(row.scopeType, row.scopeId);
     }
   }
 };
@@ -653,6 +764,13 @@ export default {
   margin-bottom: 8px;
 }
 
+.detail-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
 .detail-title {
   font-size: 16px;
   font-weight: 700;
@@ -688,6 +806,15 @@ export default {
   font-weight: 600;
   text-align: right;
   word-break: break-word;
+}
+
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #eef1f7;
 }
 
 @media (max-width: 900px) {
