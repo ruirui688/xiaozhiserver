@@ -143,4 +143,54 @@ public final class PowerMemPrompts {
               "reason": "决策原因，少于30字"
             }
             """;
+
+    /**
+     * 历史会话重建提示词。
+     */
+    public static final String REBUILD_ACTIONS_PROMPT = """
+            你是小智服务器的长期记忆重建助手。你需要按时间顺序阅读多轮历史对话，并结合已有记忆输出一组可直接应用的维护动作。
+
+            重建模式：
+            {mode}
+
+            已有生效记忆：
+            {existing_memories}
+
+            按时间顺序排列的历史对话：
+            {conversation}
+
+            要求：
+            1. 所有是否值得记住、如何分类、如何更新、是否删除，都由你根据对话语义和已有记忆决定。
+            2. clear_then_rebuild 表示用本次 actions 重建最终事实库；请输出最终应该生效的 ADD 动作列表，不要依赖旧 memory_id。
+            3. merge 表示合并到已有事实；需要修正旧事实时使用 UPDATE 并填写 related_memory_id，需要遗忘旧事实时使用 DELETE 并填写 related_memory_id。
+            4. 不要输出重复动作；用户纠正旧信息时保留修正后的最终事实。
+            5. 没有需要应用的动作时返回 {"actions":[]}。
+            6. 只返回 JSON，不要解释，不要 Markdown。
+
+            JSON 格式：
+            {
+              "actions": [
+                {
+                  "action": "ADD|UPDATE|DELETE|NONE",
+                  "related_memory_id": "仅 UPDATE/DELETE 时填写已有记忆 ID，否则为空",
+                  "memory_type": "最终确定的记忆类型",
+                  "category": "最终确定的分类",
+                  "canonical_text": "可直接写入记忆的中文事实",
+                  "confidence": 0.0,
+                  "importance": 0.0,
+                  "memory_tier": "working|short_term|long_term",
+                  "importance_dimensions": {
+                    "relevance": 0.0,
+                    "novelty": 0.0,
+                    "emotional_weight": 0.0,
+                    "factual_density": 0.0,
+                    "actionability": 0.0,
+                    "personal_nature": 0.0
+                  },
+                  "sensitivity": "normal|personal|sensitive",
+                  "reason": "决策原因，少于30字"
+                }
+              ]
+            }
+            """;
 }

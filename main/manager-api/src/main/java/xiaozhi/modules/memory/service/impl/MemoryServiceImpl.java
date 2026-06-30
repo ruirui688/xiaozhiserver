@@ -87,6 +87,7 @@ public class MemoryServiceImpl implements MemoryService {
     private static final String MAINTENANCE_LLM_FIELD = "maintenance_llm";
     private static final String MAINTENANCE_EXTRACTOR_VERSION = "maintenance-llm-v3-powerMem";
     private static final int SESSION_MAX_CHARS = 8000;
+    private static final int REBUILD_MAX_TOTAL_CHARS = 48000;
 
     private final MemorySourceEventDao sourceEventDao;
     private final MemoryCandidateDao candidateDao;
@@ -111,8 +112,12 @@ public class MemoryServiceImpl implements MemoryService {
             return;
         }
         String content = normalizeContent(dto.getContentText(), dto.getContentJson());
+        String eventId = StringUtils.defaultIfBlank(dto.getEventId(), uuid());
+        if (sourceEventDao.selectCount(new QueryWrapper<MemorySourceEventEntity>().eq("event_id", eventId)) > 0) {
+            return;
+        }
         MemorySourceEventEntity event = new MemorySourceEventEntity();
-        event.setEventId(uuid());
+        event.setEventId(eventId);
         event.setAgentId(scope.agent.getId());
         event.setUserId(scope.agent.getUserId());
         event.setMacAddress(dto.getMacAddress());
@@ -157,7 +162,7 @@ public class MemoryServiceImpl implements MemoryService {
         // Stage 1: 提取事实
         String extractionPrompt = PowerMemPrompts.EXTRACTION_PROMPT.replace("{conversation}",
                 StringUtils.abbreviate(conversation, SESSION_MAX_CHARS));
-        String extractionOutput = llmService.generateSummary(extractionPrompt, maintenanceModelId);
+        String extractionOutput = llmService.generateJson(extractionPrompt, maintenanceModelId);
         if (StringUtils.isBlank(extractionOutput)) {
             log.warn("processSessionMemories: Stage 1 提取失败, agentId={}", agentId);
             return 0;
@@ -178,7 +183,7 @@ public class MemoryServiceImpl implements MemoryService {
             List<MemoryFactEntity> similarFacts = findSimilarFacts(agentId, agentId,
                     factText + "\n" + conversation, maintenanceModelId);
             String decisionPrompt = buildDecisionPrompt(factJson, similarFacts);
-            String decisionOutput = llmService.generateSummary(decisionPrompt, maintenanceModelId);
+            String decisionOutput = llmService.generateJson(decisionPrompt, maintenanceModelId);
             if (StringUtils.isBlank(decisionOutput)) continue;
 
             JSONObject decision = parseDecisionResult(decisionOutput);
@@ -244,6 +249,26 @@ public class MemoryServiceImpl implements MemoryService {
             log.warn("解析 Stage 2 决策结果失败: {}", e.getMessage());
             return null;
         }
+    }
+
+    private JSONArray parseActionsResult(String output) {
+        String jsonText = extractJsonObject(output);
+        if (StringUtils.isBlank(jsonText)) return null;
+        try {
+            JSONObject root = JSONUtil.parseObj(jsonText);
+            JSONArray actions = root.getJSONArray("actions");
+            if (actions != null) {
+                return actions;
+            }
+            if (StringUtils.isNotBlank(root.getStr("action"))) {
+                JSONArray single = new JSONArray();
+                single.add(root);
+                return single;
+            }
+        } catch (Exception e) {
+            log.warn("解析维护动作列表失败: {}", e.getMessage());
+        }
+        return null;
     }
 
     /**
@@ -355,36 +380,22 @@ public class MemoryServiceImpl implements MemoryService {
         if ("NONE".equals(action)) {
             return false;
         }
-        if ("UPDATE".equals(action) || "DELETE".equals(action)) {
-            if (dryRun) {
-                MemoryCandidateEntity preview = buildCandidate(agent, scopeId, sourceEventId, json, modelId, action);
-                if (preview != null && result != null) {
-                    result.getCandidates().add(preview);
-                }
-                return preview != null;
-            }
-            return executeMemoryAction(agent, scopeId, json, modelId);
-        }
-
-        MemoryCandidateEntity candidate = buildCandidate(agent, scopeId, sourceEventId, json, modelId, action);
-        if (candidate == null) {
-            return false;
-        }
-        if (result != null) {
-            result.getCandidates().add(candidate);
-        }
         if (dryRun) {
-            return true;
+            MemoryCandidateEntity preview = buildCandidate(agent, scopeId, sourceEventId, json, modelId, action);
+            if (preview != null && result != null) {
+                result.getCandidates().add(preview);
+            }
+            return preview != null;
         }
-        candidateDao.insert(candidate);
-        writeRevision(agent.getId(), null, "create_candidate", null, JsonUtils.toJsonString(candidate),
-                "system", modelId, "维护模型生成候选记忆");
-        return true;
+        return executeMemoryAction(agent, scopeId, json, modelId);
     }
 
     private MemoryCandidateEntity buildCandidate(AgentEntity agent, String scopeId, String sourceEventId, JSONObject json,
                                                  String modelId, String action) {
         String canonical = cleanupMemoryText(json.getStr("canonical_text"));
+        if (StringUtils.isBlank(canonical) && !"DELETE".equals(action)) {
+            return null;
+        }
         BigDecimal confidence = score(json.get("confidence"), DEFAULT_SCORE);
         BigDecimal importance = score(json.get("importance"), DEFAULT_SCORE);
         JSONObject payload = new JSONObject();
@@ -421,6 +432,9 @@ public class MemoryServiceImpl implements MemoryService {
         if ("NONE".equals(action)) return false;
 
         String canonical = cleanupMemoryText(json.getStr("canonical_text"));
+        if (StringUtils.isBlank(canonical) && !"DELETE".equals(action)) {
+            return false;
+        }
 
         if ("DELETE".equals(action)) {
             String relatedId = StringUtils.trimToEmpty(json.getStr("related_memory_id"));
@@ -841,31 +855,81 @@ public class MemoryServiceImpl implements MemoryService {
         result.setDryRun(dryRun);
         result.setMode(mode);
 
-        if (!dryRun && "clear_then_rebuild".equalsIgnoreCase(mode)) {
+        List<AgentChatSessionDTO> sessions = recentSessions(agent.getId(), limit);
+        result.setSessionsRead(sessions.size());
+        List<List<AgentChatHistoryDTO>> histories = new ArrayList<>();
+        String scopeId = agent.getId();
+        for (int i = sessions.size() - 1; i >= 0; i--) {
+            AgentChatSessionDTO session = sessions.get(i);
+            result.getSessionIds().add(session.getSessionId());
+            List<AgentChatHistoryDTO> history = agentChatHistoryService.getChatHistoryBySessionId(agent.getId(), session.getSessionId());
+            histories.add(history);
+            String sessionScopeId = firstScopeId(history, "");
+            if (StringUtils.isNotBlank(sessionScopeId)) {
+                scopeId = sessionScopeId;
+            }
+        }
+
+        List<JSONObject> actions = buildRebuildActions(agent, scopeId, histories, mode);
+        for (JSONObject action : actions) {
+            if (applyMaintenanceDecision(agent, scopeId, null, action, getMaintenanceLlmModelId(agent), true, result)) {
+                result.setActionsProposed(result.getActionsProposed() + 1);
+                result.setCandidatesCreated(result.getCandidatesCreated() + 1);
+            }
+        }
+        if (dryRun || actions.isEmpty()) {
+            return result;
+        }
+
+        if ("clear_then_rebuild".equalsIgnoreCase(mode)) {
             MemoryRebuildResultVO cleared = clearMemories(agentId, actorType, actorId);
             result.setFactsCleared(cleared.getFactsCleared());
             result.setCandidatesCleared(cleared.getCandidatesCleared());
             result.setTombstonesCleared(cleared.getTombstonesCleared());
         }
 
-        List<AgentChatSessionDTO> sessions = recentSessions(agent.getId(), limit);
-        result.setSessionsRead(sessions.size());
-        for (int i = sessions.size() - 1; i >= 0; i--) {
-            AgentChatSessionDTO session = sessions.get(i);
-            result.getSessionIds().add(session.getSessionId());
-            List<AgentChatHistoryDTO> history = agentChatHistoryService.getChatHistoryBySessionId(agent.getId(), session.getSessionId());
-            String conversation = buildConversationForMaintenance(history);
-            if (StringUtils.isBlank(conversation)) {
-                continue;
+        String maintenanceModelId = getMaintenanceLlmModelId(agent);
+        int applied = 0;
+        for (JSONObject action : actions) {
+            if (applyMaintenanceDecision(agent, scopeId, null, action, maintenanceModelId, false, null)) {
+                applied++;
             }
-            String scopeId = firstScopeId(history, agent.getId());
-            rebuildConversation(agent, scopeId, conversation, dryRun, result);
         }
+        result.setFactsChanged(applied);
         if (!dryRun) {
             writeRevision(agent.getId(), null, "rebuild_memory", null, JsonUtils.toJsonString(result),
                     actorType, actorId, "从聊天记录重建记忆");
         }
         return result;
+    }
+
+    private List<JSONObject> buildRebuildActions(AgentEntity agent, String scopeId,
+                                                 List<List<AgentChatHistoryDTO>> histories, String mode) {
+        String maintenanceModelId = getMaintenanceLlmModelId(agent);
+        if (StringUtils.isBlank(maintenanceModelId)) {
+            return List.of();
+        }
+        String conversation = buildCombinedConversationForMaintenance(histories);
+        if (StringUtils.isBlank(conversation)) {
+            return List.of();
+        }
+        String prompt = PowerMemPrompts.REBUILD_ACTIONS_PROMPT
+                .replace("{mode}", StringUtils.defaultIfBlank(mode, "merge"))
+                .replace("{existing_memories}", buildMaintenanceMemoryContext(agent.getId(), scopeId))
+                .replace("{conversation}", conversation);
+        String output = llmService.generateJson(prompt, maintenanceModelId);
+        JSONArray arr = parseActionsResult(output);
+        if (arr == null || arr.isEmpty()) {
+            return List.of();
+        }
+        List<JSONObject> actions = new ArrayList<>();
+        for (Object item : arr) {
+            JSONObject action = toJsonObject(item);
+            if (action != null && !"NONE".equals(normalizeAction(action.getStr("action")))) {
+                actions.add(action);
+            }
+        }
+        return actions;
     }
 
     private List<AgentChatSessionDTO> recentSessions(String agentId, int limit) {
@@ -897,6 +961,21 @@ public class MemoryServiceImpl implements MemoryService {
         return StringUtils.abbreviate(builder.toString(), SESSION_MAX_CHARS);
     }
 
+    private String buildCombinedConversationForMaintenance(List<List<AgentChatHistoryDTO>> histories) {
+        if (histories == null || histories.isEmpty()) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        for (List<AgentChatHistoryDTO> history : histories) {
+            String conversation = buildConversationForMaintenance(history);
+            if (StringUtils.isBlank(conversation)) {
+                continue;
+            }
+            builder.append("【会话】\n").append(conversation).append("\n");
+        }
+        return StringUtils.abbreviate(builder.toString(), REBUILD_MAX_TOTAL_CHARS);
+    }
+
     private String firstScopeId(List<AgentChatHistoryDTO> history, String defaultScopeId) {
         if (history != null) {
             for (AgentChatHistoryDTO item : history) {
@@ -915,7 +994,7 @@ public class MemoryServiceImpl implements MemoryService {
             return;
         }
         String extractionPrompt = PowerMemPrompts.EXTRACTION_PROMPT.replace("{conversation}", conversation);
-        String extractionOutput = llmService.generateSummary(extractionPrompt, maintenanceModelId);
+        String extractionOutput = llmService.generateJson(extractionPrompt, maintenanceModelId);
         JSONArray facts = parseExtractionResult(extractionOutput);
         if (facts == null || facts.isEmpty()) {
             return;
@@ -927,7 +1006,7 @@ public class MemoryServiceImpl implements MemoryService {
 
             List<MemoryFactEntity> similarFacts = findSimilarFacts(agent.getId(), scopeId,
                     factText + "\n" + conversation, maintenanceModelId);
-            String decisionOutput = llmService.generateSummary(buildDecisionPrompt(factJson, similarFacts), maintenanceModelId);
+            String decisionOutput = llmService.generateJson(buildDecisionPrompt(factJson, similarFacts), maintenanceModelId);
             JSONObject decision = parseDecisionResult(decisionOutput);
             if (decision == null) continue;
             mergeExtractionIntoDecision(factJson, decision);
@@ -1046,7 +1125,7 @@ public class MemoryServiceImpl implements MemoryService {
         String prompt = PowerMemPrompts.COMMAND_DECISION_PROMPT
                 .replace("{instruction}", instruction)
                 .replace("{existing_memories}", buildMaintenanceMemoryContext(agent.getId(), scopeId));
-        String output = llmService.generateSummary(prompt, maintenanceModelId);
+        String output = llmService.generateJson(prompt, maintenanceModelId);
         JSONObject decision = parseDecisionResult(output);
         if (decision == null) {
             throw new IllegalStateException("记忆维护模型未返回有效决策");
@@ -1097,7 +1176,7 @@ public class MemoryServiceImpl implements MemoryService {
 
         // Stage 1: 提取事实（不看已有记忆）
         String extractionPrompt = PowerMemPrompts.EXTRACTION_PROMPT.replace("{conversation}", promptInput);
-        String extractionOutput = llmService.generateSummary(extractionPrompt, maintenanceModelId);
+        String extractionOutput = llmService.generateJson(extractionPrompt, maintenanceModelId);
         if (StringUtils.isBlank(extractionOutput)) {
             log.warn("Stage 1 事实提取失败，agentId: {}", agent.getId());
             return;
@@ -1120,7 +1199,7 @@ public class MemoryServiceImpl implements MemoryService {
 
             // Stage 2b: 决策 — LLM 判断 ADD/UPDATE/DELETE/NONE
             String decisionPrompt = buildDecisionPrompt(factJson, similarFacts);
-            String decisionOutput = llmService.generateSummary(decisionPrompt, maintenanceModelId);
+            String decisionOutput = llmService.generateJson(decisionPrompt, maintenanceModelId);
             if (StringUtils.isBlank(decisionOutput)) {
                 continue;
             }

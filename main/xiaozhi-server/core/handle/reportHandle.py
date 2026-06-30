@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 from config.manage_api_client import report as manage_report
 from config.manage_api_client import report_memory_event
+from config.manage_api_client import build_memory_event_id
 
 TAG = __name__
 
@@ -48,13 +49,22 @@ async def report(conn: "ConnectionHandler", type, text, opus_data, report_time):
             audio=audio_data,
             report_time=report_time,
         )
+        event_type = "tool" if type == 3 else "chat"
         await report_memory_event(
             mac_address=conn.device_id,
             session_id=conn.session_id,
             chat_type=type,
             content=text,
-            event_type="tool" if type == 3 else "chat",
+            event_type=event_type,
             report_time=report_time,
+            event_id=build_memory_event_id(
+                conn.device_id,
+                conn.session_id,
+                type,
+                event_type,
+                text,
+                report_time,
+            ),
         )
     except Exception as e:
         conn.logger.bind(tag=TAG).error(f"聊天记录上报失败: {e}")

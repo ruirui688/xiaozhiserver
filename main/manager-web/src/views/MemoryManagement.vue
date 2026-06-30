@@ -169,14 +169,14 @@
     >
       <div class="rebuild-summary" v-if="rebuildPreviewResult">
         <el-tag size="mini" type="info">会话 {{ rebuildPreviewResult.sessionsRead || 0 }}</el-tag>
-        <el-tag size="mini" type="warning">候选 {{ previewCandidates.length }}</el-tag>
+        <el-tag size="mini" type="warning">动作 {{ previewCandidates.length }}</el-tag>
         <el-tag size="mini">最近 {{ rebuildPreviewResult.sessionLimit || rebuildSessionLimit }} 个</el-tag>
       </div>
       <el-table
         :data="previewCandidates"
         size="small"
         max-height="420"
-        empty-text="维护模型未返回需要写入的候选记忆"
+        empty-text="维护模型未返回需要应用的记忆动作"
       >
         <el-table-column label="动作" width="90">
           <template slot-scope="{row}">{{ candidateAction(row) }}</template>
@@ -435,14 +435,14 @@ export default {
       })
     },
     handleRebuild() {
-      this.$confirm(`确定清空当前记忆，并按最近 ${this.rebuildSessionLimit} 个会话重新生成记忆吗？`, '重建记忆', {
+      this.$confirm(`确定按最近 ${this.rebuildSessionLimit} 个会话重新生成记忆吗？维护模型成功返回动作后才会替换当前记忆。`, '重建记忆', {
         type: 'warning',
         confirmButtonClass: 'el-button--primary'
       }).then(() => {
         this.rebuildLoading = true
         Api.memory.rebuild(this.agentId, this.rebuildPayload(false), (res) => {
           const data = this.unwrapResult(res)
-          this.$message.success(`重建完成：读取 ${data.sessionsRead || 0} 个会话，生成 ${data.candidatesCreated || 0} 条候选`)
+          this.$message.success(`重建完成：读取 ${data.sessionsRead || 0} 个会话，应用 ${data.factsChanged || 0} 条记忆动作`)
           this.rebuildLoading = false
           this.rebuildPreviewVisible = false
           this.fetch()

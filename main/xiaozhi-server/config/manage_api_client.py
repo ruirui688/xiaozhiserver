@@ -1,5 +1,6 @@
 import os
 import base64
+import hashlib
 from typing import Optional, Dict
 
 import httpx
@@ -252,6 +253,7 @@ async def report_memory_event(
     content: str,
     event_type: str = "chat",
     report_time: Optional[int] = None,
+    event_id: Optional[str] = None,
 ) -> Optional[Dict]:
     """上报长期记忆原始事件。失败不影响实时对话和聊天记录。"""
     if not content or not ManageApiClient._instance:
@@ -261,6 +263,7 @@ async def report_memory_event(
             "POST",
             "/config/memory/events",
             json={
+                "eventId": event_id,
                 "macAddress": mac_address,
                 "sessionId": session_id,
                 "chatType": chat_type,
@@ -272,6 +275,27 @@ async def report_memory_event(
     except Exception as e:
         print(f"长期记忆事件上报失败: {e}")
         return None
+
+
+def build_memory_event_id(
+    mac_address: str,
+    session_id: str,
+    chat_type: int,
+    event_type: str,
+    content: str,
+    report_time: Optional[int],
+) -> str:
+    raw = "|".join(
+        [
+            mac_address or "",
+            session_id or "",
+            str(chat_type),
+            event_type or "",
+            content or "",
+            str(report_time or ""),
+        ]
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 async def query_managed_memory(
