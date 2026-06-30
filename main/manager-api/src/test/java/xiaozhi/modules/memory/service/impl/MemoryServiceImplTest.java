@@ -129,7 +129,7 @@ class MemoryServiceImplTest {
     void clearThenRebuildAppliesLlmAddActionAsActiveFact() {
         MemoryFactEntity existing = activeFact("old-1", "用户的旧记忆");
         when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(existing));
-        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID))).thenReturn("""
+        String addAction = """
                 {
                   "actions": [
                     {
@@ -154,7 +154,8 @@ class MemoryServiceImplTest {
                     }
                   ]
                 }
-                """);
+                """;
+        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID))).thenReturn(addAction, addAction);
 
         MemoryRebuildResultVO result = memoryService.rebuildFromRecentChatHistory(
                 AGENT_ID, rebuildRequest(false), "user", "tester");
@@ -206,6 +207,32 @@ class MemoryServiceImplTest {
                             }
                           ]
                         }
+                        """)
+                .thenReturn("""
+                        {
+                          "actions": [
+                            {
+                              "action": "ADD",
+                              "related_memory_id": "",
+                              "memory_type": "人物关系",
+                              "category": "工作关系",
+                              "canonical_text": "用户的老板是钟文杰",
+                              "confidence": 0.92,
+                              "importance": 0.86,
+                              "memory_tier": "long_term",
+                              "importance_dimensions": {
+                                "relevance": 0.9,
+                                "novelty": 0.8,
+                                "emotional_weight": 0.2,
+                                "factual_density": 0.9,
+                                "actionability": 0.6,
+                                "personal_nature": 0.7
+                              },
+                              "sensitivity": "normal",
+                              "reason": "审校格式"
+                            }
+                          ]
+                        }
                         """);
 
         MemoryRebuildResultVO result = memoryService.rebuildFromRecentChatHistory(
@@ -213,7 +240,7 @@ class MemoryServiceImplTest {
 
         assertEquals(1, result.getActionsProposed());
         assertEquals(1, result.getFactsChanged());
-        verify(llmService, times(2)).generateJson(any(), eq(MAINTENANCE_MODEL_ID));
+        verify(llmService, times(3)).generateJson(any(), eq(MAINTENANCE_MODEL_ID));
         ArgumentCaptor<MemoryFactEntity> factCaptor = ArgumentCaptor.forClass(MemoryFactEntity.class);
         verify(factDao).insert(factCaptor.capture());
         assertEquals("用户的老板是钟文杰", factCaptor.getValue().getCanonicalText());

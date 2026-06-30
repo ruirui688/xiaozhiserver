@@ -915,7 +915,7 @@ public class MemoryServiceImpl implements MemoryService {
         }
         String prompt = PowerMemPrompts.REBUILD_ACTIONS_PROMPT
                 .replace("{mode}", StringUtils.defaultIfBlank(mode, "merge"))
-                .replace("{existing_memories}", buildMaintenanceMemoryContext(agent.getId(), scopeId))
+                .replace("{existing_memories}", buildRebuildExistingMemoryContext(agent.getId(), scopeId, mode))
                 .replace("{conversation}", conversation);
         String output = llmService.generateJson(prompt, maintenanceModelId);
         JSONArray arr = parseActionsResult(output);
@@ -928,6 +928,10 @@ public class MemoryServiceImpl implements MemoryService {
         if (arr == null || arr.isEmpty()) {
             return List.of();
         }
+        JSONArray reviewed = reviewRebuildActions(arr, mode, maintenanceModelId);
+        if (reviewed != null && !reviewed.isEmpty()) {
+            arr = reviewed;
+        }
         List<JSONObject> actions = new ArrayList<>();
         for (Object item : arr) {
             JSONObject action = toJsonObject(item);
@@ -936,6 +940,28 @@ public class MemoryServiceImpl implements MemoryService {
             }
         }
         return actions;
+    }
+
+    private String buildRebuildExistingMemoryContext(String agentId, String scopeId, String mode) {
+        if ("clear_then_rebuild".equalsIgnoreCase(mode)) {
+            return "本次是清空后重建，不使用旧 memory_id；请只输出最终应生效的 ADD 事实。";
+        }
+        return buildMaintenanceMemoryContext(agentId, scopeId);
+    }
+
+    private JSONArray reviewRebuildActions(JSONArray actions, String mode, String maintenanceModelId) {
+        String prompt = PowerMemPrompts.ACTIONS_REVIEW_PROMPT
+                .replace("{mode}", StringUtils.defaultIfBlank(mode, "merge"))
+                .replace("{actions_json}", JSONUtil.toJsonStr(Map.of("actions", actions)));
+        String output = llmService.generateJson(prompt, maintenanceModelId);
+        JSONArray reviewed = parseActionsResult(output);
+        if ((reviewed == null || reviewed.isEmpty()) && StringUtils.isNotBlank(output)) {
+            String repaired = llmService.generateJson(
+                    PowerMemPrompts.JSON_REPAIR_PROMPT.replace("{raw_output}", output),
+                    maintenanceModelId);
+            reviewed = parseActionsResult(repaired);
+        }
+        return reviewed;
     }
 
     private List<AgentChatSessionDTO> recentSessions(String agentId, int limit) {
