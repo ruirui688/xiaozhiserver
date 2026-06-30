@@ -1,7 +1,7 @@
 import { getServiceUrl } from '../api';
 import RequestService from '../httpRequest';
 
-function request(method, url, data, callback, networkFail) {
+function request(method, url, data, callback, networkFail, fail, timeout) {
   const req = RequestService.sendRequest()
     .url(`${getServiceUrl()}${url}`)
     .method(method)
@@ -14,8 +14,14 @@ function request(method, url, data, callback, networkFail) {
         networkFail(err);
         return;
       }
-      RequestService.reAjaxFun(() => request(method, url, data, callback, networkFail));
+      RequestService.reAjaxFun(() => request(method, url, data, callback, networkFail, fail, timeout));
     });
+  if (fail) {
+    req.fail(fail);
+  }
+  if (timeout) {
+    req.timeout(timeout);
+  }
   if (data) {
     req.data(data);
   }
@@ -37,6 +43,15 @@ export default {
   },
   deleteFact(agentId, memoryId, callback) {
     request('DELETE', `/agent/${agentId}/memories/facts/${memoryId}`, null, callback);
+  },
+  clear(agentId, callback, networkFail, fail) {
+    request('POST', `/agent/${agentId}/memories/clear`, {}, callback, networkFail, fail);
+  },
+  rebuildPreview(agentId, data, callback, networkFail, fail) {
+    request('POST', `/agent/${agentId}/memories/rebuild-preview`, data, callback, networkFail, fail, 300000);
+  },
+  rebuild(agentId, data, callback, networkFail, fail) {
+    request('POST', `/agent/${agentId}/memories/rebuild`, data, callback, networkFail, fail, 300000);
   },
   remember(agentId, data, callback) {
     request('POST', `/agent/${agentId}/memories/remember`, data, callback);

@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -24,10 +25,15 @@ import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import xiaozhi.common.constant.Constant;
+import xiaozhi.common.page.PageData;
 import xiaozhi.common.user.UserDetail;
 import xiaozhi.common.utils.JsonUtils;
+import xiaozhi.modules.agent.dto.AgentChatHistoryDTO;
+import xiaozhi.modules.agent.dto.AgentChatSessionDTO;
 import xiaozhi.modules.agent.dao.AgentDao;
 import xiaozhi.modules.agent.entity.AgentEntity;
+import xiaozhi.modules.agent.service.AgentChatHistoryService;
 import xiaozhi.modules.device.dao.DeviceDao;
 import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.llm.service.EmbeddingService;
@@ -44,6 +50,7 @@ import xiaozhi.modules.memory.dto.MemoryFactDTO;
 import xiaozhi.modules.memory.dto.MemoryForgetDTO;
 import xiaozhi.modules.memory.dto.MemoryQueryDTO;
 import xiaozhi.modules.memory.dto.MemoryRememberDTO;
+import xiaozhi.modules.memory.dto.MemoryRebuildRequestDTO;
 import xiaozhi.modules.memory.entity.MemoryCandidateEntity;
 import xiaozhi.modules.memory.entity.MemoryFactEntity;
 import xiaozhi.modules.memory.entity.MemoryForgetTombstoneEntity;
@@ -54,9 +61,9 @@ import xiaozhi.modules.memory.entity.MemoryToolBehaviorEntity;
 import xiaozhi.modules.memory.prompt.PowerMemPrompts;
 import xiaozhi.modules.memory.service.MemoryService;
 import xiaozhi.modules.memory.utils.MemorySimilarityUtils;
-import xiaozhi.modules.memory.utils.MemoryTierHelper;
 import xiaozhi.modules.memory.vo.MemoryDashboardVO;
 import xiaozhi.modules.memory.vo.MemoryQueryVO;
+import xiaozhi.modules.memory.vo.MemoryRebuildResultVO;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
 import xiaozhi.modules.model.service.impl.ModelRuntimeAssembler;
@@ -71,6 +78,7 @@ public class MemoryServiceImpl implements MemoryService {
     private static final String STATUS_DELETED = "deleted";
     private static final String STATUS_PENDING = "pending";
     private static final String STATUS_REJECTED = "rejected";
+    private static final String STATUS_INACTIVE = "inactive";
     private static final String SCOPE_DEVICE = "device";
     private static final BigDecimal DEFAULT_SCORE = new BigDecimal("0.700");
     private static final BigDecimal MIN_SCORE = new BigDecimal("0.000");
@@ -93,6 +101,7 @@ public class MemoryServiceImpl implements MemoryService {
     private final EmbeddingService embeddingService;
     private final ModelConfigService modelConfigService;
     private final ModelRuntimeAssembler modelRuntimeAssembler;
+    private final AgentChatHistoryService agentChatHistoryService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -123,16 +132,6 @@ public class MemoryServiceImpl implements MemoryService {
         if (StringUtils.isBlank(content)) {
             return;
         }
-        String rememberText = extractRemember(content);
-        if (StringUtils.isNotBlank(rememberText)) {
-            createFactInternal(scope, rememberText, "explicit", "preference", event.getEventId(), "system", null);
-            return;
-        }
-        String forgetText = extractForget(content);
-        if (StringUtils.isNotBlank(forgetText)) {
-            forgetInternal(scope, forgetText, "用户显式要求忘记", event.getEventId(), "system", null);
-            return;
-        }
         if (shouldRunMaintenanceExtraction(dto, content)) {
             runAfterCommit(() -> createCandidatesWithMaintenanceModel(scope.agent, scope.scopeId, event.getEventId(), content));
         }
@@ -159,7 +158,7 @@ public class MemoryServiceImpl implements MemoryService {
         String extractionPrompt = PowerMemPrompts.EXTRACTION_PROMPT.replace("{conversation}",
                 StringUtils.abbreviate(conversation, SESSION_MAX_CHARS));
         String extractionOutput = llmService.generateSummary(extractionPrompt, maintenanceModelId);
-        if (StringUtils.isBlank(extractionOutput) || extractionOutput.contains("不可用") || extractionOutput.contains("失败")) {
+        if (StringUtils.isBlank(extractionOutput)) {
             log.warn("processSessionMemories: Stage 1 提取失败, agentId={}", agentId);
             return 0;
         }
@@ -170,23 +169,22 @@ public class MemoryServiceImpl implements MemoryService {
 
         int count = 0;
         for (Object item : facts) {
-            if (count >= 5) break;
             JSONObject factJson = toJsonObject(item);
             if (factJson == null) continue;
 
             String factText = factJson.getStr("text", factJson.getStr("canonical_text"));
-            if (isLowQualityMemoryText(factText)) continue;
 
             // Stage 2: 语义搜索 + 决策
-            List<MemoryFactEntity> similarFacts = findSimilarFacts(agentId, agentId, factText, maintenanceModelId);
+            List<MemoryFactEntity> similarFacts = findSimilarFacts(agentId, agentId,
+                    factText + "\n" + conversation, maintenanceModelId);
             String decisionPrompt = buildDecisionPrompt(factJson, similarFacts);
             String decisionOutput = llmService.generateSummary(decisionPrompt, maintenanceModelId);
-            if (StringUtils.isBlank(decisionOutput) || decisionOutput.contains("不可用")) continue;
+            if (StringUtils.isBlank(decisionOutput)) continue;
 
             JSONObject decision = parseDecisionResult(decisionOutput);
             if (decision == null) continue;
             mergeExtractionIntoDecision(factJson, decision);
-            if (executeMemoryAction(agent, agentId, decision, maintenanceModelId)) count++;
+            if (applyMaintenanceDecision(agent, agentId, null, decision, maintenanceModelId, false, null)) count++;
         }
         log.info("processSessionMemories: agentId={}, sessionId={}, factsChanged={}", agentId, sessionId, count);
         return count;
@@ -289,13 +287,15 @@ public class MemoryServiceImpl implements MemoryService {
                 .replace("{fact_memory_type}", StringUtils.defaultString(factJson.getStr("memory_type"), "长期记忆"))
                 .replace("{fact_confidence}", String.valueOf(factJson.get("confidence") != null
                         ? factJson.get("confidence") : 0.7))
+                .replace("{fact_importance}", String.valueOf(factJson.get("importance") != null
+                        ? factJson.get("importance") : 0.7))
                 .replace("{similar_count}", String.valueOf(similarFacts == null ? 0 : similarFacts.size()))
                 .replace("{similar_memories}", similarBlock.toString());
     }
 
     /**
-     * 向量语义搜索：找到与新事实最相似的已有活跃记忆（最多 3 条）。
-     * <p>如果嵌入服务不可用，回退到关键词搜索。</p>
+     * 向量语义搜索：找到与新事实最相似的已有活跃记忆。
+     * <p>如果嵌入服务不可用，把最近记忆交给维护模型决策。</p>
      */
     private List<MemoryFactEntity> findSimilarFacts(String agentId, String scopeId, String text, String modelId) {
         float[] queryEmbedding = generateEmbedding(text, modelId);
@@ -316,30 +316,19 @@ public class MemoryServiceImpl implements MemoryService {
                 float[] factEmb = MemorySimilarityUtils.parseEmbedding(fact.getEmbeddingJson());
                 if (factEmb != null) {
                     double sim = MemorySimilarityUtils.cosineSimilarity(queryEmbedding, factEmb);
-                    if (sim > 0.55) { // 低于 0.55 认为不相关
-                        scored.add(Map.entry(fact, sim));
-                    }
+                    scored.add(Map.entry(fact, sim));
                 }
             }
             scored.sort((a, b) -> Double.compare(b.getValue(), a.getValue()));
             List<MemoryFactEntity> top = new ArrayList<>();
-            for (int i = 0; i < Math.min(3, scored.size()); i++) {
+            for (int i = 0; i < Math.min(10, scored.size()); i++) {
                 top.add(scored.get(i).getKey());
             }
             return top;
         }
 
-        // 回退：关键词匹配
-        String keyword = compactQuery(text);
-        if (StringUtils.isBlank(keyword)) return List.of();
-        List<MemoryFactEntity> keywordMatches = new ArrayList<>();
-        for (MemoryFactEntity fact : allActive) {
-            if (StringUtils.containsIgnoreCase(fact.getCanonicalText(), keyword)
-                    || StringUtils.containsIgnoreCase(fact.getCategory(), keyword)) {
-                keywordMatches.add(fact);
-            }
-        }
-        return keywordMatches.size() > 3 ? keywordMatches.subList(0, 3) : keywordMatches;
+        // 回退：不给内容做规则判断，把最近记忆一并交给维护模型决策。
+        return allActive.size() > 10 ? allActive.subList(0, 10) : allActive;
     }
 
     /**
@@ -355,9 +344,76 @@ public class MemoryServiceImpl implements MemoryService {
             }
             return result;
         } catch (Exception e) {
-            log.debug("生成嵌入向量失败（将回退到字符串比较）: {}", e.getMessage());
+            log.debug("生成嵌入向量失败（将回退到维护模型上下文决策）: {}", e.getMessage());
             return null;
         }
+    }
+
+    private boolean applyMaintenanceDecision(AgentEntity agent, String scopeId, String sourceEventId, JSONObject json,
+                                             String modelId, boolean dryRun, MemoryRebuildResultVO result) {
+        String action = normalizeAction(json.getStr("action"));
+        if ("NONE".equals(action)) {
+            return false;
+        }
+        if ("UPDATE".equals(action) || "DELETE".equals(action)) {
+            if (dryRun) {
+                MemoryCandidateEntity preview = buildCandidate(agent, scopeId, sourceEventId, json, modelId, action);
+                if (preview != null && result != null) {
+                    result.getCandidates().add(preview);
+                }
+                return preview != null;
+            }
+            return executeMemoryAction(agent, scopeId, json, modelId);
+        }
+
+        MemoryCandidateEntity candidate = buildCandidate(agent, scopeId, sourceEventId, json, modelId, action);
+        if (candidate == null) {
+            return false;
+        }
+        if (result != null) {
+            result.getCandidates().add(candidate);
+        }
+        if (dryRun) {
+            return true;
+        }
+        candidateDao.insert(candidate);
+        writeRevision(agent.getId(), null, "create_candidate", null, JsonUtils.toJsonString(candidate),
+                "system", modelId, "维护模型生成候选记忆");
+        return true;
+    }
+
+    private MemoryCandidateEntity buildCandidate(AgentEntity agent, String scopeId, String sourceEventId, JSONObject json,
+                                                 String modelId, String action) {
+        String canonical = cleanupMemoryText(json.getStr("canonical_text"));
+        BigDecimal confidence = score(json.get("confidence"), DEFAULT_SCORE);
+        BigDecimal importance = score(json.get("importance"), DEFAULT_SCORE);
+        JSONObject payload = new JSONObject();
+        payload.set("action", action);
+        payload.set("related_memory_id", StringUtils.trimToEmpty(json.getStr("related_memory_id")));
+        payload.set("reason", StringUtils.defaultString(json.getStr("reason")));
+        payload.set("source", MAINTENANCE_EXTRACTOR_VERSION);
+        payload.set("maintenance_llm", modelId);
+        payload.set("importance_dimensions", json.get("importance_dimensions"));
+
+        MemoryCandidateEntity candidate = new MemoryCandidateEntity();
+        candidate.setCandidateId(uuid());
+        candidate.setAgentId(agent.getId());
+        candidate.setUserId(agent.getUserId());
+        candidate.setScopeType(SCOPE_DEVICE);
+        candidate.setScopeId(scopeId);
+        candidate.setMemoryType(normalizeMemoryLabel(json.getStr("memory_type"), "长期记忆"));
+        candidate.setCategory(normalizeMemoryLabel(json.getStr("category"), "未分类"));
+        candidate.setCanonicalText(canonical);
+        candidate.setPayload(payload.toString());
+        candidate.setConfidence(confidence);
+        candidate.setImportance(importance);
+        candidate.setSensitivity(normalizeSensitivity(json.getStr("sensitivity")));
+        candidate.setStatus(STATUS_PENDING);
+        candidate.setSourceEventId(sourceEventId);
+        candidate.setExtractorVersion(MAINTENANCE_EXTRACTOR_VERSION);
+        candidate.setCreatedAt(new Date());
+        candidate.setUpdatedAt(new Date());
+        return candidate;
     }
 
     private boolean executeMemoryAction(AgentEntity agent, String scopeId, JSONObject json, String modelId) {
@@ -365,7 +421,6 @@ public class MemoryServiceImpl implements MemoryService {
         if ("NONE".equals(action)) return false;
 
         String canonical = cleanupMemoryText(json.getStr("canonical_text"));
-        if (isLowQualityMemoryText(canonical) && !"DELETE".equals(action)) return false;
 
         if ("DELETE".equals(action)) {
             String relatedId = StringUtils.trimToEmpty(json.getStr("related_memory_id"));
@@ -391,16 +446,10 @@ public class MemoryServiceImpl implements MemoryService {
         String memoryType = normalizeMemoryLabel(json.getStr("memory_type"), "长期记忆");
         String category = normalizeMemoryLabel(json.getStr("category"), "未分类");
         BigDecimal confidence = score(json.get("confidence"), DEFAULT_SCORE);
-        // 多维度重要性复合评分
-        BigDecimal importance = computeImportanceFromDimensions(json);
-        if (importance == null) {
-            importance = score(json.get("importance"), DEFAULT_SCORE);
-        }
-        if (confidence.compareTo(new BigDecimal("0.450")) < 0 || importance.compareTo(new BigDecimal("0.300")) < 0)
-            return false;
+        BigDecimal importance = score(json.get("importance"), DEFAULT_SCORE);
         String relatedId = StringUtils.trimToEmpty(json.getStr("related_memory_id"));
         String sensitivity = normalizeSensitivity(json.getStr("sensitivity"));
-        String tier = MemoryTierHelper.classifyTier(importance.doubleValue()).name().toLowerCase();
+        String tier = normalizeMemoryTier(json.getStr("memory_tier"));
         String dimensionsJson = extractDimensionsJson(json);
 
         if ("UPDATE".equals(action) && StringUtils.isNotBlank(relatedId)) {
@@ -417,7 +466,7 @@ public class MemoryServiceImpl implements MemoryService {
                 fact.setImportance(max(fact.getImportance(), importance));
                 fact.setSensitivity(sensitivity);
                 if (StringUtils.isNotBlank(dimensionsJson)) fact.setImportanceDimensions(dimensionsJson);
-                fact.setMemoryTier(tier);
+                if (StringUtils.isNotBlank(tier)) fact.setMemoryTier(tier);
                 fact.setStatus(STATUS_ACTIVE);
                 fact.setLastSeenAt(new Date());
                 fact.setUpdatedAt(new Date());
@@ -429,12 +478,7 @@ public class MemoryServiceImpl implements MemoryService {
             }
         }
 
-        // ADD: check duplicates then create
-        MemoryFactEntity relatedFact = findRelatedFact(agent.getId(), scopeId, relatedId, canonical, memoryType, category);
-        if (relatedFact != null && isEquivalentMemory(relatedFact.getCanonicalText(), canonical)) {
-            refreshFactEvidence(relatedFact, confidence, "system", modelId, "维护模型重复证据刷新");
-            return false;
-        }
+        // ADD: 维护模型已经完成语义去重/更新判断；这里仅避免完全相同的来源哈希重复写入。
         String hash = sha256(agent.getId() + "|" + scopeId + "|" + canonical);
         if (factDao.selectCount(new QueryWrapper<MemoryFactEntity>()
                 .eq("agent_id", agent.getId()).eq("scope_type", SCOPE_DEVICE)
@@ -458,7 +502,7 @@ public class MemoryServiceImpl implements MemoryService {
         fact.setSensitivity(sensitivity);
         fact.setConfirmationState("auto");
         fact.setStatus(STATUS_ACTIVE);
-        fact.setMemoryTier(tier);
+        if (StringUtils.isNotBlank(tier)) fact.setMemoryTier(tier);
         if (StringUtils.isNotBlank(dimensionsJson)) fact.setImportanceDimensions(dimensionsJson);
         // 异步生成嵌入向量（不阻塞事实写入）
         float[] embedding = generateEmbedding(canonical, modelId);
@@ -481,26 +525,8 @@ public class MemoryServiceImpl implements MemoryService {
     }
 
     private String normalizeAction(String value) {
-        String action = StringUtils.defaultIfBlank(value, "ADD").trim().toUpperCase();
-        return List.of("ADD", "UPDATE", "DELETE", "NONE").contains(action) ? action : "ADD";
-    }
-
-    /**
-     * 从 LLM 返回的多维度评分 JSON 计算加权复合重要性。
-     */
-    private BigDecimal computeImportanceFromDimensions(JSONObject json) {
-        Object dimsRaw = json.get("importance_dimensions");
-        if (dimsRaw == null) return null;
-        try {
-            @SuppressWarnings("unchecked")
-            Map<String, Double> dims = (dimsRaw instanceof Map)
-                    ? (Map<String, Double>) dimsRaw
-                    : JSONUtil.parseObj(dimsRaw).toBean(Map.class);
-            double composite = MemorySimilarityUtils.compositeImportance(dims);
-            return new BigDecimal(String.format("%.3f", composite));
-        } catch (Exception e) {
-            return null;
-        }
+        String action = StringUtils.defaultIfBlank(value, "NONE").trim().toUpperCase();
+        return List.of("ADD", "UPDATE", "DELETE", "NONE").contains(action) ? action : "NONE";
     }
 
     /**
@@ -622,7 +648,6 @@ public class MemoryServiceImpl implements MemoryService {
         vo.setBlockedPatterns(tombstoneDao.selectList(tombstoneWrapper).stream()
                 .map(MemoryForgetTombstoneEntity::getPatternText)
                 .toList());
-        applyDecayToFacts(vo.getFacts());
         vo.setContext(buildContext(vo));
         return vo;
     }
@@ -634,8 +659,7 @@ public class MemoryServiceImpl implements MemoryService {
         if (scope.agent == null || StringUtils.isBlank(dto.getText())) {
             return;
         }
-        createFactInternal(scope, dto.getText(), StringUtils.defaultIfBlank(dto.getCategory(), "explicit"),
-                "preference", null, actorType, actorId);
+        applyMaintenanceInstruction(scope.agent, scope.scopeId, dto.getText(), actorType, actorId);
     }
 
     @Override
@@ -645,7 +669,7 @@ public class MemoryServiceImpl implements MemoryService {
         if (scope.agent == null || StringUtils.isBlank(dto.getText())) {
             return;
         }
-        forgetInternal(scope, dto.getText(), StringUtils.defaultIfBlank(dto.getReason(), "手动忘记"), null, actorType, actorId);
+        applyMaintenanceInstruction(scope.agent, scope.scopeId, dto.getText(), actorType, actorId);
     }
 
     @Override
@@ -675,7 +699,6 @@ public class MemoryServiceImpl implements MemoryService {
         QueryWrapper<MemoryProfileEntity> profileWrapper = new QueryWrapper<>();
         profileWrapper.eq("agent_id", agentId).orderByDesc("updated_at").last("LIMIT 1");
         vo.setProfile(profileDao.selectOne(profileWrapper));
-        applyDecayToFacts(vo.getFacts());
         return vo;
     }
 
@@ -761,6 +784,179 @@ public class MemoryServiceImpl implements MemoryService {
                 actorType, actorId, "候选记忆拒绝");
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public MemoryRebuildResultVO clearMemories(String agentId, String actorType, String actorId) {
+        AgentEntity agent = assertAgentOwner(agentId);
+        MemoryRebuildResultVO result = new MemoryRebuildResultVO();
+        result.setMode("clear");
+
+        List<MemoryFactEntity> facts = factDao.selectList(new QueryWrapper<MemoryFactEntity>()
+                .eq("agent_id", agent.getId()).ne("status", STATUS_DELETED));
+        for (MemoryFactEntity fact : facts) {
+            String before = JsonUtils.toJsonString(fact);
+            fact.setStatus(STATUS_DELETED);
+            fact.setValidTo(new Date());
+            fact.setUpdatedAt(new Date());
+            factDao.updateById(fact);
+            writeRevision(agent.getId(), fact.getMemoryId(), "clear_delete", before, JsonUtils.toJsonString(fact),
+                    actorType, actorId, "清空记忆");
+        }
+        result.setFactsCleared(facts.size());
+
+        List<MemoryCandidateEntity> candidates = candidateDao.selectList(new QueryWrapper<MemoryCandidateEntity>()
+                .eq("agent_id", agent.getId()).eq("status", STATUS_PENDING));
+        for (MemoryCandidateEntity candidate : candidates) {
+            candidate.setStatus(STATUS_REJECTED);
+            candidate.setUpdatedAt(new Date());
+            candidateDao.updateById(candidate);
+        }
+        result.setCandidatesCleared(candidates.size());
+
+        List<MemoryForgetTombstoneEntity> tombstones = tombstoneDao.selectList(new QueryWrapper<MemoryForgetTombstoneEntity>()
+                .eq("agent_id", agent.getId()).eq("status", STATUS_ACTIVE));
+        for (MemoryForgetTombstoneEntity tombstone : tombstones) {
+            tombstone.setStatus(STATUS_INACTIVE);
+            tombstone.setUpdatedAt(new Date());
+            tombstoneDao.updateById(tombstone);
+        }
+        result.setTombstonesCleared(tombstones.size());
+        writeRevision(agent.getId(), null, "clear_memory", null, JsonUtils.toJsonString(result),
+                actorType, actorId, "清空当前智能体记忆");
+        return result;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public MemoryRebuildResultVO rebuildFromRecentChatHistory(String agentId, MemoryRebuildRequestDTO dto,
+                                                              String actorType, String actorId) {
+        AgentEntity agent = assertAgentOwner(agentId);
+        MemoryRebuildRequestDTO request = dto == null ? new MemoryRebuildRequestDTO() : dto;
+        int limit = request.getSessionLimit() == null ? 15 : Math.max(1, Math.min(request.getSessionLimit(), 50));
+        boolean dryRun = request.getDryRun() == null || request.getDryRun();
+        String mode = StringUtils.defaultIfBlank(request.getMode(), "merge");
+
+        MemoryRebuildResultVO result = new MemoryRebuildResultVO();
+        result.setSessionLimit(limit);
+        result.setDryRun(dryRun);
+        result.setMode(mode);
+
+        if (!dryRun && "clear_then_rebuild".equalsIgnoreCase(mode)) {
+            MemoryRebuildResultVO cleared = clearMemories(agentId, actorType, actorId);
+            result.setFactsCleared(cleared.getFactsCleared());
+            result.setCandidatesCleared(cleared.getCandidatesCleared());
+            result.setTombstonesCleared(cleared.getTombstonesCleared());
+        }
+
+        List<AgentChatSessionDTO> sessions = recentSessions(agent.getId(), limit);
+        result.setSessionsRead(sessions.size());
+        for (int i = sessions.size() - 1; i >= 0; i--) {
+            AgentChatSessionDTO session = sessions.get(i);
+            result.getSessionIds().add(session.getSessionId());
+            List<AgentChatHistoryDTO> history = agentChatHistoryService.getChatHistoryBySessionId(agent.getId(), session.getSessionId());
+            String conversation = buildConversationForMaintenance(history);
+            if (StringUtils.isBlank(conversation)) {
+                continue;
+            }
+            String scopeId = firstScopeId(history, agent.getId());
+            rebuildConversation(agent, scopeId, conversation, dryRun, result);
+        }
+        if (!dryRun) {
+            writeRevision(agent.getId(), null, "rebuild_memory", null, JsonUtils.toJsonString(result),
+                    actorType, actorId, "从聊天记录重建记忆");
+        }
+        return result;
+    }
+
+    private List<AgentChatSessionDTO> recentSessions(String agentId, int limit) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("agentId", agentId);
+        params.put(Constant.PAGE, 1);
+        params.put(Constant.LIMIT, limit);
+        PageData<AgentChatSessionDTO> page = agentChatHistoryService.getSessionListByAgentId(params);
+        return page == null || page.getList() == null ? List.of() : page.getList();
+    }
+
+    private String buildConversationForMaintenance(List<AgentChatHistoryDTO> history) {
+        if (history == null || history.isEmpty()) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        for (AgentChatHistoryDTO item : history) {
+            if (item == null || item.getChatType() == null || item.getChatType() == 3) {
+                continue;
+            }
+            String content = normalizeChatHistoryContent(item.getContent());
+            if (StringUtils.isBlank(content)) {
+                continue;
+            }
+            builder.append(item.getChatType() == 1 ? "用户: " : "助手: ")
+                    .append(content)
+                    .append("\n");
+        }
+        return StringUtils.abbreviate(builder.toString(), SESSION_MAX_CHARS);
+    }
+
+    private String firstScopeId(List<AgentChatHistoryDTO> history, String defaultScopeId) {
+        if (history != null) {
+            for (AgentChatHistoryDTO item : history) {
+                if (item != null && StringUtils.isNotBlank(item.getMacAddress())) {
+                    return item.getMacAddress();
+                }
+            }
+        }
+        return defaultScopeId;
+    }
+
+    private void rebuildConversation(AgentEntity agent, String scopeId, String conversation, boolean dryRun,
+                                     MemoryRebuildResultVO result) {
+        String maintenanceModelId = getMaintenanceLlmModelId(agent);
+        if (StringUtils.isBlank(maintenanceModelId)) {
+            return;
+        }
+        String extractionPrompt = PowerMemPrompts.EXTRACTION_PROMPT.replace("{conversation}", conversation);
+        String extractionOutput = llmService.generateSummary(extractionPrompt, maintenanceModelId);
+        JSONArray facts = parseExtractionResult(extractionOutput);
+        if (facts == null || facts.isEmpty()) {
+            return;
+        }
+        for (Object item : facts) {
+            JSONObject factJson = toJsonObject(item);
+            if (factJson == null) continue;
+            String factText = factJson.getStr("text", factJson.getStr("canonical_text"));
+
+            List<MemoryFactEntity> similarFacts = findSimilarFacts(agent.getId(), scopeId,
+                    factText + "\n" + conversation, maintenanceModelId);
+            String decisionOutput = llmService.generateSummary(buildDecisionPrompt(factJson, similarFacts), maintenanceModelId);
+            JSONObject decision = parseDecisionResult(decisionOutput);
+            if (decision == null) continue;
+            mergeExtractionIntoDecision(factJson, decision);
+            String action = normalizeAction(decision.getStr("action"));
+            if (applyMaintenanceDecision(agent, scopeId, null, decision, maintenanceModelId, dryRun, result)) {
+                if ("UPDATE".equals(action) || "DELETE".equals(action)) {
+                    result.setFactsChanged(result.getFactsChanged() + 1);
+                } else if ("ADD".equals(action)) {
+                    result.setCandidatesCreated(result.getCandidatesCreated() + 1);
+                }
+            }
+        }
+    }
+
+    private String normalizeChatHistoryContent(String content) {
+        if (StringUtils.isBlank(content)) {
+            return "";
+        }
+        try {
+            Map<?, ?> jsonMap = JsonUtils.parseObject(content, Map.class);
+            if (jsonMap != null && jsonMap.containsKey("content")) {
+                Object value = jsonMap.get("content");
+                return value == null ? "" : String.valueOf(value).trim();
+            }
+        } catch (Exception ignored) {
+        }
+        return content.trim();
+    }
+
     private String applyCandidateToFact(AgentScope scope, MemoryCandidateEntity candidate, String actorType, String actorId) {
         JSONObject payload = parsePayload(candidate.getPayload());
         String action = normalizeCandidateAction(payload.getStr("action"));
@@ -838,49 +1034,33 @@ public class MemoryServiceImpl implements MemoryService {
         return fact.getMemoryId();
     }
 
-    private void forgetInternal(AgentScope scope, String text, String reason, String sourceEventId,
-                                String actorType, String actorId) {
-        String pattern = cleanupMemoryText(text);
-        MemoryForgetTombstoneEntity tombstone = new MemoryForgetTombstoneEntity();
-        tombstone.setTombstoneId(uuid());
-        tombstone.setAgentId(scope.agent.getId());
-        tombstone.setUserId(scope.agent.getUserId());
-        tombstone.setScopeType(SCOPE_DEVICE);
-        tombstone.setScopeId(scope.scopeId);
-        tombstone.setPatternText(pattern);
-        tombstone.setReason(reason);
-        tombstone.setStatus(STATUS_ACTIVE);
-        tombstone.setSourceEventId(sourceEventId);
-        tombstone.setCreatedAt(new Date());
-        tombstone.setUpdatedAt(new Date());
-        tombstoneDao.insert(tombstone);
-
-        if (StringUtils.isNotBlank(pattern)) {
-            List<MemoryFactEntity> matched = factDao.selectList(new QueryWrapper<MemoryFactEntity>()
-                    .eq("agent_id", scope.agent.getId())
-                    .eq("scope_type", SCOPE_DEVICE)
-                    .eq("scope_id", scope.scopeId)
-                    .eq("status", STATUS_ACTIVE)
-                    .like("canonical_text", pattern));
-            for (MemoryFactEntity fact : matched) {
-                String before = JsonUtils.toJsonString(fact);
-                fact.setStatus(STATUS_DELETED);
-                fact.setValidTo(new Date());
-                fact.setUpdatedAt(new Date());
-                factDao.updateById(fact);
-                writeRevision(scope.agent.getId(), fact.getMemoryId(), "delete", before, JsonUtils.toJsonString(fact),
-                        actorType, actorId, "忘记规则命中");
-            }
+    private boolean applyMaintenanceInstruction(AgentEntity agent, String scopeId, String instruction,
+                                                String actorType, String actorId) {
+        String maintenanceModelId = getMaintenanceLlmModelId(agent);
+        if (StringUtils.isBlank(instruction)) {
+            return false;
         }
-        writeRevision(scope.agent.getId(), null, "forget", null, JsonUtils.toJsonString(tombstone),
-                actorType, actorId, reason);
+        if (StringUtils.isBlank(maintenanceModelId)) {
+            throw new IllegalStateException("未配置记忆维护模型");
+        }
+        String prompt = PowerMemPrompts.COMMAND_DECISION_PROMPT
+                .replace("{instruction}", instruction)
+                .replace("{existing_memories}", buildMaintenanceMemoryContext(agent.getId(), scopeId));
+        String output = llmService.generateSummary(prompt, maintenanceModelId);
+        JSONObject decision = parseDecisionResult(output);
+        if (decision == null) {
+            throw new IllegalStateException("记忆维护模型未返回有效决策");
+        }
+        boolean changed = applyMaintenanceDecision(agent, scopeId, null, decision, maintenanceModelId, false, null);
+        writeRevision(agent.getId(), null, "maintenance_instruction", instruction, JsonUtils.toJsonString(decision),
+                actorType, actorId, "维护模型处理管理端指令");
+        return changed;
     }
 
     private boolean shouldRunMaintenanceExtraction(MemoryEventDTO dto, String content) {
         return dto != null
                 && Integer.valueOf(1).equals(dto.getChatType())
-                && StringUtils.isNotBlank(content)
-                && content.length() >= 4;
+                && StringUtils.isNotBlank(content);
     }
 
     private void runAfterCommit(Runnable task) {
@@ -918,7 +1098,7 @@ public class MemoryServiceImpl implements MemoryService {
         // Stage 1: 提取事实（不看已有记忆）
         String extractionPrompt = PowerMemPrompts.EXTRACTION_PROMPT.replace("{conversation}", promptInput);
         String extractionOutput = llmService.generateSummary(extractionPrompt, maintenanceModelId);
-        if (StringUtils.isBlank(extractionOutput) || extractionOutput.contains("不可用") || extractionOutput.contains("失败")) {
+        if (StringUtils.isBlank(extractionOutput)) {
             log.warn("Stage 1 事实提取失败，agentId: {}", agent.getId());
             return;
         }
@@ -929,20 +1109,19 @@ public class MemoryServiceImpl implements MemoryService {
 
         int saved = 0;
         for (Object item : facts) {
-            if (saved >= 5) break;
             JSONObject factJson = toJsonObject(item);
             if (factJson == null) continue;
 
             String factText = factJson.getStr("text", factJson.getStr("canonical_text"));
-            if (isLowQualityMemoryText(factText)) continue;
 
             // Stage 2a: 语义搜索 — 找到 top-3 相似已有记忆
-            List<MemoryFactEntity> similarFacts = findSimilarFacts(agent.getId(), scopeId, factText, maintenanceModelId);
+            List<MemoryFactEntity> similarFacts = findSimilarFacts(agent.getId(), scopeId,
+                    factText + "\n" + content, maintenanceModelId);
 
             // Stage 2b: 决策 — LLM 判断 ADD/UPDATE/DELETE/NONE
             String decisionPrompt = buildDecisionPrompt(factJson, similarFacts);
             String decisionOutput = llmService.generateSummary(decisionPrompt, maintenanceModelId);
-            if (StringUtils.isBlank(decisionOutput) || decisionOutput.contains("不可用")) {
+            if (StringUtils.isBlank(decisionOutput)) {
                 continue;
             }
             JSONObject decision = parseDecisionResult(decisionOutput);
@@ -951,7 +1130,7 @@ public class MemoryServiceImpl implements MemoryService {
             // 合并 Stage 1 提取信息到决策结果
             mergeExtractionIntoDecision(factJson, decision);
 
-            if (executeMemoryAction(agent, scopeId, decision, maintenanceModelId)) {
+            if (applyMaintenanceDecision(agent, scopeId, sourceEventId, decision, maintenanceModelId, false, null)) {
                 saved++;
             }
         }
@@ -1080,45 +1259,16 @@ public class MemoryServiceImpl implements MemoryService {
 
     private MemoryFactEntity findRelatedFact(String agentId, String scopeId, String relatedMemoryId,
                                              String canonical, String memoryType, String category) {
-        if (StringUtils.isNotBlank(relatedMemoryId)) {
-            MemoryFactEntity byId = factDao.selectOne(new QueryWrapper<MemoryFactEntity>()
-                    .eq("agent_id", agentId)
-                    .eq("scope_type", SCOPE_DEVICE)
-                    .eq("scope_id", scopeId)
-                    .eq("memory_id", relatedMemoryId)
-                    .ne("status", STATUS_DELETED)
-                    .last("LIMIT 1"));
-            if (byId != null) {
-                return byId;
-            }
+        if (StringUtils.isBlank(relatedMemoryId)) {
+            return null;
         }
-        String normalizedCategory = normalizeMemoryLabel(category, "未分类");
-        List<MemoryFactEntity> facts = factDao.selectList(new QueryWrapper<MemoryFactEntity>()
+        return factDao.selectOne(new QueryWrapper<MemoryFactEntity>()
                 .eq("agent_id", agentId)
                 .eq("scope_type", SCOPE_DEVICE)
                 .eq("scope_id", scopeId)
-                .eq("status", STATUS_ACTIVE)
-                .eq("category", normalizedCategory)
-                .orderByDesc("updated_at")
-                .last("LIMIT 30"));
-        for (MemoryFactEntity fact : facts) {
-            if (isEquivalentMemory(fact.getCanonicalText(), canonical)) {
-                return fact;
-            }
-        }
-        return null;
-    }
-
-    private boolean isEquivalentMemory(String left, String right) {
-        return MemorySimilarityUtils.isSemanticallyEquivalent(left, right, null, null);
-    }
-
-    private boolean isLowQualityMemoryText(String canonical) {
-        String text = cleanupMemoryText(canonical);
-        if (StringUtils.isBlank(text) || text.length() < 6 || text.length() > 220) {
-            return true;
-        }
-        return false;
+                .eq("memory_id", relatedMemoryId)
+                .ne("status", STATUS_DELETED)
+                .last("LIMIT 1"));
     }
 
     private String normalizeCandidateAction(String value) {
@@ -1143,6 +1293,11 @@ public class MemoryServiceImpl implements MemoryService {
             return sensitivity;
         }
         return "normal";
+    }
+
+    private String normalizeMemoryTier(String value) {
+        String tier = StringUtils.trimToEmpty(value).toLowerCase();
+        return List.of("working", "short_term", "long_term").contains(tier) ? tier : "";
     }
 
     private BigDecimal score(Object value, BigDecimal defaultValue) {
@@ -1244,69 +1399,6 @@ public class MemoryServiceImpl implements MemoryService {
         return agent;
     }
 
-    private void applyDecayToFacts(List<MemoryFactEntity> facts) {
-        if (facts == null || facts.isEmpty()) return;
-        long now = System.currentTimeMillis();
-        for (MemoryFactEntity fact : facts) {
-            if (!STATUS_ACTIVE.equals(fact.getStatus())) continue;
-            if (fact.getLastSeenAt() == null) {
-                fact.setLastSeenAt(fact.getCreatedAt() != null ? fact.getCreatedAt() : new Date());
-            }
-
-            // 使用层级特定的衰减参数
-            MemoryTierHelper.Tier tier = resolveTier(fact);
-            double decayRate = MemoryTierHelper.getDecayRate(tier);
-            double initialRetention = MemoryTierHelper.getInitialRetention(tier);
-            double reinforcementFactor = MemoryTierHelper.getReinforcementFactor(tier);
-
-            long daysSinceLastSeen = Math.max(0, (now - fact.getLastSeenAt().getTime()) / 86400000L);
-            double retention = initialRetention * Math.exp(-decayRate * daysSinceLastSeen);
-            double reinforced = Math.min(1.0, retention + reinforcementFactor);
-            BigDecimal newConfidence = new BigDecimal(String.format("%.3f", reinforced));
-            if (newConfidence.compareTo(MAX_SCORE) > 0) newConfidence = MAX_SCORE;
-
-            // 检查是否需要更新层级（重要性变化）
-            String expectedTier = tier.name().toLowerCase();
-            if (!expectedTier.equals(fact.getMemoryTier())) {
-                fact.setMemoryTier(expectedTier);
-                fact.setUpdatedAt(new Date());
-                factDao.updateById(fact);
-            }
-
-            if (newConfidence.compareTo(new BigDecimal(String.valueOf(MemoryTierHelper.FORGET_THRESHOLD))) < 0) {
-                fact.setStatus(STATUS_DELETED);
-                fact.setValidTo(new Date());
-                fact.setUpdatedAt(new Date());
-                factDao.updateById(fact);
-                writeRevision(fact.getAgentId(), fact.getMemoryId(), "decay_forget", null, null,
-                        "system", "ebbinghaus",
-                        String.format("自动衰减遗忘: tier=%s retention=%.3f days=%d", tier, retention, daysSinceLastSeen));
-                log.info("艾宾浩斯衰减自动遗忘, memoryId={}, tier={}, retention={:.3f}, days={}",
-                        fact.getMemoryId(), tier, retention, daysSinceLastSeen);
-            } else if (Math.abs(newConfidence.doubleValue() - (fact.getConfidence() != null
-                    ? fact.getConfidence().doubleValue() : initialRetention)) > 0.05) {
-                fact.setConfidence(newConfidence);
-                fact.setUpdatedAt(new Date());
-                factDao.updateById(fact);
-            }
-        }
-    }
-
-    /**
-     * 从事实的 memory_tier 字段或重要性解析记忆层级。
-     */
-    private MemoryTierHelper.Tier resolveTier(MemoryFactEntity fact) {
-        if (StringUtils.isNotBlank(fact.getMemoryTier())) {
-            try {
-                return MemoryTierHelper.Tier.valueOf(fact.getMemoryTier().toUpperCase());
-            } catch (IllegalArgumentException ignored) {
-            }
-        }
-        // 从重要性推断
-        double importance = fact.getImportance() != null ? fact.getImportance().doubleValue() : 0.5;
-        return MemoryTierHelper.classifyTier(importance);
-    }
-
     private String buildContext(MemoryQueryVO vo) {
         StringBuilder builder = new StringBuilder();
         if (StringUtils.isNotBlank(vo.getProfile())) {
@@ -1347,26 +1439,6 @@ public class MemoryServiceImpl implements MemoryService {
         }
         Object content = json.get("content");
         return content == null ? JsonUtils.toJsonString(json) : String.valueOf(content);
-    }
-
-    private String extractRemember(String text) {
-        String[] markers = {"记住", "帮我记住", "请记住", "你要记住"};
-        return extractAfterMarker(text, markers);
-    }
-
-    private String extractForget(String text) {
-        String[] markers = {"忘记", "删掉记忆", "删除记忆", "不要记得", "别记住"};
-        return extractAfterMarker(text, markers);
-    }
-
-    private String extractAfterMarker(String text, String[] markers) {
-        for (String marker : markers) {
-            int index = text.indexOf(marker);
-            if (index >= 0) {
-                return cleanupMemoryText(text.substring(index + marker.length()));
-            }
-        }
-        return null;
     }
 
     private String cleanupMemoryText(String text) {

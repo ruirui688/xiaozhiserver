@@ -102,3 +102,39 @@ def test_invalid_llm_decision_falls_back_to_continue():
     assert result.category == "continue"
     assert not result.should_abort
     assert result.reason == "invalid_llm_decision"
+
+
+def test_acknowledgement_examples_follow_llm_continue_decision():
+    for text in ["嗯", "好", "？"]:
+        result, conn = _classify(
+            '{"decision":"continue","reason":"短反馈"}',
+            text,
+        )
+
+        assert result.category == "continue"
+        assert not result.should_abort
+        payload = json.loads(conn.llm.calls[0]["user_prompt"])
+        assert payload["overlap_user_text"] == text
+
+
+def test_new_turn_examples_follow_llm_abort_decision():
+    for text in ["等等我问另一个问题", "不是这个"]:
+        result, conn = _classify(
+            '{"decision":"new_turn","reason":"新问题"}',
+            text,
+        )
+
+        assert result.category == "new_turn"
+        assert result.should_abort
+        payload = json.loads(conn.llm.calls[0]["user_prompt"])
+        assert payload["overlap_user_text"] == text
+
+
+def test_explicit_stop_example_follows_llm_interrupt_decision():
+    result, _ = _classify(
+        '{"decision":"interrupt","reason":"停止播报"}',
+        "别说了",
+    )
+
+    assert result.category == "interrupt"
+    assert result.should_abort

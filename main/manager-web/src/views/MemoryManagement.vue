@@ -9,6 +9,17 @@
         <div class="page-subtitle">{{ agentName || agentId }}</div>
       </div>
       <div class="right-operations">
+        <el-input-number
+          v-model="rebuildSessionLimit"
+          size="small"
+          :min="1"
+          :max="50"
+          :controls="false"
+          class="session-limit-input"
+        />
+        <el-button size="small" icon="el-icon-view" :loading="rebuildLoading" @click="handleRebuildPreview">预览重建</el-button>
+        <el-button size="small" type="primary" icon="el-icon-magic-stick" :loading="rebuildLoading" @click="handleRebuild">重建记忆</el-button>
+        <el-button size="small" type="danger" icon="el-icon-delete" :loading="clearLoading" @click="handleClear">清空记忆</el-button>
         <el-button size="small" icon="el-icon-edit" @click="showRemember = !showRemember">记住</el-button>
         <el-button size="small" icon="el-icon-delete" @click="showForget = !showForget">忘记</el-button>
         <el-button size="small" icon="el-icon-refresh" @click="fetch" :loading="loading">刷新</el-button>
@@ -150,6 +161,46 @@
       @cancel="editVisible = false"
     />
 
+    <el-dialog
+      title="重建预览"
+      :visible.sync="rebuildPreviewVisible"
+      width="860px"
+      append-to-body
+    >
+      <div class="rebuild-summary" v-if="rebuildPreviewResult">
+        <el-tag size="mini" type="info">会话 {{ rebuildPreviewResult.sessionsRead || 0 }}</el-tag>
+        <el-tag size="mini" type="warning">候选 {{ previewCandidates.length }}</el-tag>
+        <el-tag size="mini">最近 {{ rebuildPreviewResult.sessionLimit || rebuildSessionLimit }} 个</el-tag>
+      </div>
+      <el-table
+        :data="previewCandidates"
+        size="small"
+        max-height="420"
+        empty-text="维护模型未返回需要写入的候选记忆"
+      >
+        <el-table-column label="动作" width="90">
+          <template slot-scope="{row}">{{ candidateAction(row) }}</template>
+        </el-table-column>
+        <el-table-column label="内容" prop="canonicalText" min-width="280" show-overflow-tooltip />
+        <el-table-column label="分类" width="120">
+          <template slot-scope="{row}">{{ row.category || '未分类' }}</template>
+        </el-table-column>
+        <el-table-column label="类型" width="120">
+          <template slot-scope="{row}">{{ row.memoryType || '长期记忆' }}</template>
+        </el-table-column>
+        <el-table-column label="置信度" width="90">
+          <template slot-scope="{row}">{{ pct(row.confidence) }}%</template>
+        </el-table-column>
+        <el-table-column label="重要性" width="90">
+          <template slot-scope="{row}">{{ pct(row.importance) }}%</template>
+        </el-table-column>
+      </el-table>
+      <span slot="footer">
+        <el-button size="small" @click="rebuildPreviewVisible = false">关闭</el-button>
+        <el-button size="small" type="primary" :loading="rebuildLoading" @click="handleRebuild">按此配置重建</el-button>
+      </span>
+    </el-dialog>
+
     <el-footer><VersionFooter /></el-footer>
   </div>
 </template>
@@ -198,7 +249,14 @@ export default {
       // Edit dialog
       editVisible: false,
       editItem: {},
-      editMemoryId: ''
+      editMemoryId: '',
+      // Rebuild
+      rebuildSessionLimit: 15,
+      rebuildMode: 'clear_then_rebuild',
+      rebuildLoading: false,
+      clearLoading: false,
+      rebuildPreviewVisible: false,
+      rebuildPreviewResult: null
     }
   },
   computed: {
@@ -216,6 +274,9 @@ export default {
     },
     existingTypes() {
       return [...new Set(this.activeFacts.map(f => f.memoryType).filter(Boolean))]
+    },
+    previewCandidates() {
+      return (this.rebuildPreviewResult && this.rebuildPreviewResult.candidates) || []
     }
   },
   mounted() {
@@ -237,6 +298,10 @@ export default {
       }, () => {
         this.loading = false
       })
+    },
+
+    unwrapResult(res) {
+      return (res && res.data && res.data.data) ? res.data.data : (res && res.data) || {}
     },
 
     handleTabClick() {
@@ -329,11 +394,84 @@ export default {
       })
     },
 
+    // --- Clear / rebuild ---
+    rebuildPayload(dryRun) {
+      return {
+        sessionLimit: this.rebuildSessionLimit,
+        mode: this.rebuildMode,
+        dryRun
+      }
+    },
+    handleClear() {
+      this.$confirm('确定清空当前智能体的事实记忆、候选记忆和忘记项吗？此操作会写入删除状态。', '清空记忆', {
+        type: 'warning',
+        confirmButtonClass: 'el-button--danger'
+      }).then(() => {
+        this.clearLoading = true
+        Api.memory.clear(this.agentId, (res) => {
+          const data = this.unwrapResult(res)
+          this.$message.success(`已清空 ${data.factsCleared || 0} 条事实记忆`)
+          this.clearLoading = false
+          this.fetch()
+        }, () => {
+          this.clearLoading = false
+        }, () => {
+          this.clearLoading = false
+        })
+      }).catch(() => {
+        this.clearLoading = false
+      })
+    },
+    handleRebuildPreview() {
+      this.rebuildLoading = true
+      Api.memory.rebuildPreview(this.agentId, this.rebuildPayload(true), (res) => {
+        this.rebuildPreviewResult = this.unwrapResult(res)
+        this.rebuildPreviewVisible = true
+        this.rebuildLoading = false
+      }, () => {
+        this.rebuildLoading = false
+      }, () => {
+        this.rebuildLoading = false
+      })
+    },
+    handleRebuild() {
+      this.$confirm(`确定清空当前记忆，并按最近 ${this.rebuildSessionLimit} 个会话重新生成记忆吗？`, '重建记忆', {
+        type: 'warning',
+        confirmButtonClass: 'el-button--primary'
+      }).then(() => {
+        this.rebuildLoading = true
+        Api.memory.rebuild(this.agentId, this.rebuildPayload(false), (res) => {
+          const data = this.unwrapResult(res)
+          this.$message.success(`重建完成：读取 ${data.sessionsRead || 0} 个会话，生成 ${data.candidatesCreated || 0} 条候选`)
+          this.rebuildLoading = false
+          this.rebuildPreviewVisible = false
+          this.fetch()
+        }, () => {
+          this.rebuildLoading = false
+        }, () => {
+          this.rebuildLoading = false
+        })
+      }).catch(() => {
+        this.rebuildLoading = false
+      })
+    },
+    candidateAction(row) {
+      try {
+        const payload = JSON.parse(row.payload || '{}')
+        return payload.action || 'ADD'
+      } catch (e) {
+        return 'ADD'
+      }
+    },
+    pct(v) {
+      return Math.round((Number(v) || 0) * 100)
+    },
+
     // --- Quick remember/forget ---
     handleRemember() {
       if (!this.rememberText.trim()) return
       Api.memory.remember(this.agentId, { text: this.rememberText.trim(), category: 'manual' }, () => {
-        this.$message.success('已写入记忆')
+        this.$message.success('已交给维护模型处理')
         this.rememberText = ''
         this.showRemember = false
         this.fetch()
@@ -342,7 +480,7 @@ export default {
     handleForget() {
       if (!this.forgetText.trim()) return
       Api.memory.forget(this.agentId, { text: this.forgetText.trim(), reason: '管理端手动忘记' }, () => {
-        this.$message.success('已添加忘记规则')
+        this.$message.success('已交给维护模型处理')
         this.forgetText = ''
         this.showForget = false
         this.fetch()
@@ -380,6 +518,11 @@ export default {
     display: flex;
     gap: 8px;
     align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .session-limit-input {
+    width: 76px;
   }
 }
 
@@ -425,6 +568,12 @@ export default {
 .stat-card--auto em { color: #3f6fd8; }
 .stat-card--warn em { color: #e05555; }
 .stat-card--info em { color: #7c6fd6; }
+
+.rebuild-summary {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
 
 .main-wrapper {
   flex: 1;
