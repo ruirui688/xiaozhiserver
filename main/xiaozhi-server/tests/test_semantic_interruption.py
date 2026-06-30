@@ -95,17 +95,16 @@ def test_llm_interrupt_decision_aborts():
     assert result.should_abort
 
 
-def test_invalid_llm_decision_falls_back_to_continue():
-    """LLM 返回无效 JSON 时，默认不打断（fail-open 策略），避免误中断 TTS 播报"""
+def test_invalid_llm_decision_falls_back_to_new_turn():
     result, _ = _classify("not json", "我想问个问题")
 
-    assert result.category == "continue"
-    assert not result.should_abort
+    assert result.category == "new_turn"
+    assert result.should_abort
     assert result.reason == "invalid_llm_decision"
 
 
 def test_acknowledgement_examples_follow_llm_continue_decision():
-    for text in ["嗯", "好", "？"]:
+    for text in ["嗯", "好", "对", "明白了", "继续听着呢"]:
         result, conn = _classify(
             '{"decision":"continue","reason":"短反馈"}',
             text,
@@ -118,7 +117,7 @@ def test_acknowledgement_examples_follow_llm_continue_decision():
 
 
 def test_new_turn_examples_follow_llm_abort_decision():
-    for text in ["等等我问另一个问题", "不是这个"]:
+    for text in ["等等我问另一个问题", "不是这个", "你说错了", "换个话题"]:
         result, conn = _classify(
             '{"decision":"new_turn","reason":"新问题"}',
             text,

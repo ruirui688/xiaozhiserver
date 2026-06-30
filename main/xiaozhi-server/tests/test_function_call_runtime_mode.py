@@ -8,6 +8,7 @@ if str(SERVER_ROOT) not in sys.path:
 
 from core.connection import ConnectionHandler
 from core.providers.intent.function_call.function_call import IntentProvider as FunctionCallIntent
+from plugins_func.register import Action, ActionResponse
 
 
 class NativeFunctionCallLLM:
@@ -97,3 +98,35 @@ def test_function_call_degrade_creates_default_intent_llm_config():
     assert conn.config["Intent"]["intent_llm"]["functions"] == [
         "self_audio_speaker_set_volume"
     ]
+
+
+def test_reqlm_tool_result_can_continue_tool_chain():
+    conn = _conn(NativeFunctionCallLLM())
+    calls = []
+
+    def fake_chat(query, depth=0, allow_tools=True):
+        calls.append({"query": query, "depth": depth, "allow_tools": allow_tools})
+
+    conn.chat = fake_chat
+    conn.client_abort = False
+    conn.abort_generation = 0
+    conn.sentence_id = "sentence-1"
+
+    result = ActionResponse(
+        action=Action.REQLLM,
+        result='{"audio_speaker":{"volume":100}}',
+    )
+    tool_call_data = {
+        "id": "call-1",
+        "name": "self_get_device_status",
+        "arguments": "{}",
+    }
+
+    conn._handle_function_result(
+        [(result, tool_call_data)],
+        depth=0,
+        sentence_id="sentence-1",
+        abort_generation=0,
+    )
+
+    assert calls == [{"query": None, "depth": 1, "allow_tools": True}]

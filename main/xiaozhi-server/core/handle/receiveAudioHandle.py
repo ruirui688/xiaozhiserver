@@ -1,4 +1,3 @@
-import time
 import json
 import asyncio
 from typing import TYPE_CHECKING
@@ -52,7 +51,7 @@ async def startToChat(conn: "ConnectionHandler", text):
     speaker_name = None
     language_tag = None
     actual_text = text
-    raw_interruption_text = text
+    interruption_text = text
 
     try:
         # 尝试解析JSON格式的输入
@@ -61,7 +60,7 @@ async def startToChat(conn: "ConnectionHandler", text):
             if "speaker" in data and "content" in data:
                 speaker_name = data["speaker"]
                 language_tag = data["language"]
-                actual_text = data["content"]
+                interruption_text = data.get("content") or text
                 conn.logger.bind(tag=TAG).info(f"解析到说话人信息: {speaker_name}")
 
                 # 直接使用JSON格式的文本，不解析
@@ -78,8 +77,11 @@ async def startToChat(conn: "ConnectionHandler", text):
                 data = json.loads(actual_text)
                 if "speaker" in data and "content" in data:
                     speaker_name = data["speaker"]
+                    interruption_text = data.get("content") or interruption_text
         except (json.JSONDecodeError, KeyError):
             pass
+    elif actual_text != text:
+        interruption_text = actual_text
 
     # 保存说话人信息到连接对象
     if speaker_name:
@@ -99,63 +101,43 @@ async def startToChat(conn: "ConnectionHandler", text):
             await max_out_size(conn)
             return True
 
-    # manual 模式下不打断正在播放的内容
+    # manual 模式下不打断正在播放的内容；auto 模式交给当前 LLM 做语义裁决。
     if conn.client_is_speaking and conn.client_listen_mode != "manual":
-        interruption_config = conn.config.get("semantic_interruption", {}) or {}
-        if interruption_config.get("enabled", True):
-            # TTS 刚启动保护: 避免设备回声在 TTS 刚开始播放时立即触发打断
-            now_ms = time.time() * 1000
-            tts_started_at = getattr(conn, "_tts_started_at", 0.0)
-            tts_grace_ms = int(
-                interruption_config.get("tts_grace_ms", 800)
-            )
-            if tts_started_at > 0 and (now_ms - tts_started_at) < tts_grace_ms:
-                conn.logger.bind(tag=TAG).debug(
-                    f"语义打断跳过(TTS保护窗口): text={raw_interruption_text[:50]}"
-                )
-                return False
-            # 文本去重: 设备回声可能产生与当前 TTS 内容相同的 ASR 结果
-            last_abort_text = getattr(conn, "_last_abort_text", "")
-            if raw_interruption_text == last_abort_text:
-                conn.logger.bind(tag=TAG).debug(
-                    f"语义打断跳过(文本去重): text={raw_interruption_text[:50]}"
-                )
-                return False
-            conn._last_abort_text = raw_interruption_text
-
-            context = None
-            if getattr(conn, "semantic_center", None):
-                context = conn.semantic_center.state_manager.get_context(conn)
-            if context is None:
-                context = type(
-                    "RobotContext",
-                    (),
-                    {"active_game_tool": None},
-                )()
-            classifier = SemanticInterruptionClassifier()
-            classification = await classifier.classify(
-                conn, raw_interruption_text, context
-            )
+        context = None
+        if getattr(conn, "semantic_center", None):
+            context = conn.semantic_center.state_manager.get_context(conn)
+        if context is None:
+            context = type(
+                "RobotContext",
+                (),
+                {"active_game_tool": None},
+            )()
+        classifier = SemanticInterruptionClassifier()
+        classification = await classifier.classify(
+            conn, interruption_text, context
+        )
+        conn.logger.bind(tag=TAG).info(
+            "语义打断分类: "
+            f"category={classification.category}, "
+            f"reason={classification.reason}"
+        )
+        if not classification.should_abort:
             conn.logger.bind(tag=TAG).info(
-                "语义打断分类: "
-                f"category={classification.category}, "
-                f"reason={classification.reason}"
-            )
-            if not classification.should_abort:
-                conn.logger.bind(tag=TAG).info(
-                    "语义打断裁决继续播报: "
-                    f"category={classification.category}, "
-                    f"reason={classification.reason}, "
-                    f"text={raw_interruption_text[:50]}"
-                )
-                return False
-            conn.logger.bind(tag=TAG).info(
-                "语义打断裁决进入新轮: "
+                "语义打断裁决继续播报: "
                 f"category={classification.category}, "
                 f"reason={classification.reason}, "
-                f"text={raw_interruption_text[:50]}"
+                f"text={interruption_text[:50]}"
             )
+            return False
+        conn.logger.bind(tag=TAG).info(
+            "语义打断裁决进入新轮: "
+            f"category={classification.category}, "
+            f"reason={classification.reason}, "
+            f"text={interruption_text[:50]}"
+        )
         await handleAbortMessage(conn)
+        if classification.category == "interrupt":
+            return True
 
     # 语义控制中枢优先处理高置信度控制类指令，未处理再进入旧流程
     if getattr(conn, "semantic_center", None):

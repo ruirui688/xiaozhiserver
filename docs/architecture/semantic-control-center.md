@@ -92,7 +92,8 @@ ASR 文本
   -> SemanticInterruptionClassifier
   -> 当前 LLM response_no_stream 裁决 continue / interrupt / new_turn
   -> continue：不打断、不进入主聊天，当前 TTS 继续
-  -> interrupt/new_turn：复用 handleAbortMessage()，再进入现有 SemanticCenter / Intent / Chat 链路
+  -> interrupt：复用 handleAbortMessage()，只停止当前播报，不再把停止语当作新聊天
+  -> new_turn：复用 handleAbortMessage()，再进入现有 SemanticCenter / Intent / Chat 链路
 ```
 
 裁决请求只携带少量上下文：
@@ -103,7 +104,7 @@ recent_dialogue 最近最多 4 条 user/assistant 文本
 overlap_user_text 当前重叠语音文本
 ```
 
-服务端不维护附和词表、停止词表或长度阈值来替代判断；只负责请求 LLM、解析 JSON 结果和执行结果。LLM 裁决失败或返回非法 JSON 时，为避免真实打断请求被吞掉，保守回退为 `new_turn` 并走旧打断流程。
+服务端不维护附和词表、停止词表或长度阈值来替代判断；只负责请求 LLM、解析 JSON 结果和执行结果。LLM 裁决失败或返回非法 JSON 时，为避免真实打断请求被吞掉，回退为 `new_turn` 并走旧打断流程。
 
 ## 3. 核心数据结构
 

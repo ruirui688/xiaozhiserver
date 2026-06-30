@@ -1693,7 +1693,7 @@ class ConnectionHandler:
             self._build_tool_call_messages(need_llm_tools)
 
             if not is_aborted():
-                self.chat(None, depth=depth + 1, allow_tools=False)
+                self.chat(None, depth=depth + 1, allow_tools=True)
 
     def _report_worker(self):
         """聊天记录上报工作线程"""

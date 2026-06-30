@@ -64,48 +64,7 @@ class ListenTextMessageHandler(TextMessageHandler):
                     original_text
                 )
 
-                # detect 模式防抖/回声保护:
-                # 设备端 VAD 可能在 TTS 播放时将扬声器声音误判为用户语音，
-                # 导致频繁触发语义打断。此处做三层保护:
-                # 1) 最小间隔检查 2) 相同文本去重 3) TTS 刚启动保护
-                now_ms = time.time() * 1000
-                min_interval_ms = int(
-                    conn.config.get("listen_detect", {}).get("min_interval_ms", 500)
-                )
-                tts_started_at = getattr(conn, "_tts_started_at", 0.0)
-                tts_grace_ms = int(
-                    conn.config.get("listen_detect", {}).get("tts_grace_ms", 800)
-                )
-                last_detect_at = getattr(conn, "_last_detect_at", 0.0)
-                last_detect_text = getattr(conn, "_last_detect_text", "")
-
-                # 跳过条件: 短时间内重复的相同文本(设备回声)
-                if (
-                    original_text == last_detect_text
-                    and (now_ms - last_detect_at) < min_interval_ms * 2
-                ):
-                    conn.logger.bind(tag=TAG).debug(
-                        f"detect 消息去重，跳过相同文本: {original_text[:50]}"
-                    )
-                    return
-
-                # 跳过条件: TTS 刚启动(grace period)且非唤醒词/呼叫指令
-                is_special = original_text.startswith("[device_call]") or (
-                    filtered_text in conn.config.get("wakeup_words", [])
-                )
-                if (
-                    conn.client_is_speaking
-                    and not is_special
-                    and tts_started_at > 0
-                    and (now_ms - tts_started_at) < tts_grace_ms
-                ):
-                    conn.logger.bind(tag=TAG).debug(
-                        f"detect 消息在 TTS 保护窗口内，跳过: {original_text[:50]}"
-                    )
-                    return
-
-                conn._last_detect_at = now_ms
-                conn._last_detect_text = original_text
+                # 特殊指令仍走原有专用入口；普通重叠文本交给 startToChat 的 LLM 语义打断裁决。
 
                 # 检查是否是设备呼叫指令 [device_call]
                 if original_text.startswith("[device_call]"):
