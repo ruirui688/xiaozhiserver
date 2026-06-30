@@ -164,8 +164,10 @@ public final class PowerMemPrompts {
             2. clear_then_rebuild 表示用本次 actions 重建最终事实库；请输出最终应该生效的 ADD 动作列表，不要依赖旧 memory_id。
             3. merge 表示合并到已有事实；需要修正旧事实时使用 UPDATE 并填写 related_memory_id，需要遗忘旧事实时使用 DELETE 并填写 related_memory_id。
             4. 不要输出重复动作；用户纠正旧信息时保留修正后的最终事实。
-            5. 没有需要应用的动作时返回 {"actions":[]}。
-            6. 只返回 JSON，不要解释，不要 Markdown。
+            5. category 和 memory_type 必须是自然中文短语，面向管理后台用户阅读；不要输出英文枚举、下划线字段名或数据库字段名。
+            6. canonical_text 必须是单条自然中文事实，不要把互不相关的信息硬合并到同一句。
+            7. 没有需要应用的动作时返回 {"actions":[]}。
+            8. 只返回 JSON，不要解释，不要 Markdown。
 
             JSON 格式：
             {
