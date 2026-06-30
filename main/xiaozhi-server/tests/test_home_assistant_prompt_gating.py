@@ -64,3 +64,13 @@ def test_dsml_tool_protocol_is_detected_as_unhandled_model_protocol():
     text = '< | | DSML | |tool_calls>< | | DSML | | invoke name="set_device_volume">'
 
     assert looks_like_unhandled_tool_protocol(text)
+
+
+def test_html_escaped_dsml_tool_protocol_is_detected():
+    text = (
+        "系统反馈现在音量是100。"
+        "&lt; | | DSML | |tool_calls&gt;"
+        "&lt; | | DSML | | invoke name=&quot;hass_set_volume&quot;&gt;"
+    )
+
+    assert looks_like_unhandled_tool_protocol(text)

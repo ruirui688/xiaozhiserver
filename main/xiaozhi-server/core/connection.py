@@ -1325,6 +1325,7 @@ class ConnectionHandler:
             if unhandled_tool_protocol:
                 bHasError = True
                 safe_message = "设备控制请求没有执行成功，模型返回了无法识别的工具调用格式。"
+                response_message.clear()
                 response_message.append(safe_message)
                 self.logger.bind(tag=TAG).error(
                     f"unsupported tool protocol from LLM: {content_arguments}"
