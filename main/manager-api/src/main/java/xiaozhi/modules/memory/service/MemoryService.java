@@ -5,8 +5,10 @@ import xiaozhi.modules.memory.dto.MemoryFactDTO;
 import xiaozhi.modules.memory.dto.MemoryForgetDTO;
 import xiaozhi.modules.memory.dto.MemoryQueryDTO;
 import xiaozhi.modules.memory.dto.MemoryRememberDTO;
+import xiaozhi.modules.memory.dto.MemoryRebuildRequestDTO;
 import xiaozhi.modules.memory.vo.MemoryDashboardVO;
 import xiaozhi.modules.memory.vo.MemoryQueryVO;
+import xiaozhi.modules.memory.vo.MemoryRebuildResultVO;
 
 public interface MemoryService {
     void recordEvent(MemoryEventDTO dto);
@@ -30,6 +32,11 @@ public interface MemoryService {
     void confirmCandidate(String agentId, String candidateId, String actorType, String actorId);
 
     void rejectCandidate(String agentId, String candidateId, String actorType, String actorId);
+
+    MemoryRebuildResultVO clearMemories(String agentId, String actorType, String actorId);
+
+    MemoryRebuildResultVO rebuildFromRecentChatHistory(String agentId, MemoryRebuildRequestDTO dto,
+                                                       String actorType, String actorId);
 
     /**
      * PowerMem-style session memory processing.

@@ -157,10 +157,15 @@ export default {
       opusDecoderReady: null,
       playbackAudioContext: null,
       playbackCursor: 0,
+      activePlaybackSources: [],
+      assistantSpeaking: false,
       activeAssistantMessageId: null,
       activeAudioClipId: null,
       audioClips: {},
       playingAudioClipId: null,
+      pendingTurns: [],
+      turnSequence: 0,
+      inputMode: 'idle',
       textRenderTimers: {},
       audioContext: null,
       audioStream: null,
@@ -287,10 +292,15 @@ export default {
       this.statusLoading = false;
       this.inputText = '';
       this.pcmRemainder = new Int16Array(0);
+      this.activePlaybackSources = [];
+      this.assistantSpeaking = false;
       this.activeAssistantMessageId = null;
       this.activeAudioClipId = null;
       this.audioClips = {};
       this.playingAudioClipId = null;
+      this.pendingTurns = [];
+      this.turnSequence = 0;
+      this.inputMode = 'idle';
       Object.values(this.textRenderTimers).forEach(timer => clearTimeout(timer));
       this.textRenderTimers = {};
       this.stopHeartbeat();
@@ -396,6 +406,8 @@ export default {
       this.ws.onclose = () => {
         this.connected = false;
         this.connecting = false;
+        this.assistantSpeaking = false;
+        this.inputMode = 'idle';
         this.stopHeartbeat();
         this.finishActiveAudioClip();
         this.stopRecording();
@@ -431,9 +443,35 @@ export default {
     sendText() {
       const text = this.inputText.trim();
       if (!text || !this.connected) return;
-      this.addMessage('user', text, { pending: true, source: 'local-text', createdAt: Date.now() });
+      const turn = this.createPendingTurn(text, 'local-text');
+      this.addMessage('user', text, {
+        pending: true,
+        source: 'local-text',
+        turnId: turn.id,
+        overlap: turn.overlap,
+        createdAt: turn.createdAt
+      });
       this.sendJson({ type: 'listen', state: 'detect', text });
       this.inputText = '';
+    },
+    createPendingTurn(text, source) {
+      this.prunePendingTurns();
+      const turn = {
+        id: `turn-${Date.now()}-${this.turnSequence++}`,
+        text,
+        source,
+        overlap: this.assistantSpeaking,
+        createdAt: Date.now()
+      };
+      this.pendingTurns.push(turn);
+      if (turn.overlap) {
+        this.addEvent(`overlap input -> ${this.compactText(text)}`);
+      }
+      return turn;
+    },
+    prunePendingTurns() {
+      const now = Date.now();
+      this.pendingTurns = this.pendingTurns.filter(turn => now - turn.createdAt <= PENDING_CONFIRM_WINDOW_MS);
     },
     sendJson(payload) {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
@@ -546,14 +584,23 @@ export default {
     },
     handleTtsMessage(payload) {
       if (payload.state === 'start') {
+        this.assistantSpeaking = true;
+        this.inputMode = 'assistant_speaking';
         this.startNewAudioClip();
         return;
       }
       if (payload.state === 'stop') {
+        if (payload.reason === 'abort') {
+          this.stopActivePlaybackSources();
+        }
+        this.assistantSpeaking = false;
+        this.inputMode = this.recording ? 'recording' : 'idle';
         this.finishActiveAudioClip();
         return;
       }
       if (payload.text) {
+        this.assistantSpeaking = true;
+        this.inputMode = 'assistant_speaking';
         const clipId = this.activeAudioClipId || this.startNewAudioClip();
         const message = this.addMessage('assistant', payload.text, { audioClipId: clipId, time: '' });
         this.activeAssistantMessageId = message.id;
@@ -715,6 +762,10 @@ export default {
         source.buffer = buffer;
         source.connect(context.destination);
         const startAt = Math.max(context.currentTime, this.playbackCursor);
+        this.activePlaybackSources.push(source);
+        source.onended = () => {
+          this.activePlaybackSources = this.activePlaybackSources.filter(item => item !== source);
+        };
         source.start(startAt);
         this.playbackCursor = startAt + buffer.duration;
       });
@@ -738,6 +789,7 @@ export default {
       return this.playingAudioClipId === clipId ? 'el-icon-loading' : 'el-icon-video-play';
     },
     releasePlayback() {
+      this.stopActivePlaybackSources();
       if (this.playbackAudioContext) {
         this.playbackAudioContext.close();
         this.playbackAudioContext = null;
@@ -748,6 +800,21 @@ export default {
         this.opusDecoderReady = null;
       }
       this.playbackCursor = 0;
+    },
+    stopActivePlaybackSources() {
+      this.activePlaybackSources.forEach(source => {
+        try {
+          source.stop();
+        } catch (e) {
+          // The source may have already ended.
+        }
+      });
+      this.activePlaybackSources = [];
+      if (this.playbackAudioContext) {
+        this.playbackCursor = this.playbackAudioContext.currentTime;
+      } else {
+        this.playbackCursor = 0;
+      }
     },
     addMessage(role, content, extra = {}) {
       const message = {
@@ -775,6 +842,7 @@ export default {
       if (!pending) return false;
       this.$set(pending, 'pending', false);
       pending.time = new Date().toLocaleTimeString();
+      this.pendingTurns = this.pendingTurns.filter(turn => turn.id !== pending.turnId);
       return true;
     },
     addEvent(text, extra = {}) {
@@ -894,8 +962,9 @@ export default {
         this.mediaSource.connect(this.processor);
         this.processor.connect(this.audioContext.destination);
         this.pcmRemainder = new Int16Array(0);
-        this.sendJson({ type: 'listen', state: 'start', mode: 'manual' });
+        this.sendJson({ type: 'listen', state: 'start', mode: 'auto' });
         this.recording = true;
+        this.inputMode = 'recording';
         this.addMessage('user', this.$t('deviceDebug.voiceRecording'));
       } catch (e) {
         this.$message.error(this.$t('deviceDebug.micFailed'));
@@ -927,6 +996,7 @@ export default {
       if (this.connected) {
         this.sendJson({ type: 'listen', state: 'stop' });
       }
+      this.inputMode = this.assistantSpeaking ? 'assistant_speaking' : 'idle';
     },
     resample(input, fromRate, toRate) {
       if (fromRate === toRate) return input;
@@ -1026,6 +1096,8 @@ export default {
       this.ws = null;
       this.connected = false;
       this.connecting = false;
+      this.assistantSpeaking = false;
+      this.inputMode = 'idle';
     }
   }
 };

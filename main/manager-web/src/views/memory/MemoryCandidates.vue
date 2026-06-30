@@ -3,10 +3,10 @@
     <el-table :data="candidates" v-loading="loading" class="transparent-table" empty-text="暂无待确认的候选记忆">
       <el-table-column label="内容" prop="canonicalText" show-overflow-tooltip min-width="260" />
       <el-table-column label="分类" width="100">
-        <template slot-scope="{row}"><el-tag size="mini" type="info">{{ row.category || '未分类' }}</el-tag></template>
+        <template slot-scope="{row}"><el-tag size="mini" type="info">{{ categoryLabel(row.category) }}</el-tag></template>
       </el-table-column>
       <el-table-column label="类型" width="100">
-        <template slot-scope="{row}"><el-tag size="mini">{{ row.memoryType || '长期记忆' }}</el-tag></template>
+        <template slot-scope="{row}"><el-tag size="mini">{{ memoryTypeLabel(row.memoryType) }}</el-tag></template>
       </el-table-column>
       <el-table-column label="置信度" width="100">
         <template slot-scope="{row}">
@@ -36,6 +36,8 @@
 </template>
 
 <script>
+import { categoryLabel, memoryTypeLabel } from '@/utils/memoryLabels'
+
 export default {
   name: 'MemoryCandidates',
   props: {
@@ -43,6 +45,8 @@ export default {
     loading: { type: Boolean, default: false }
   },
   methods: {
+    categoryLabel,
+    memoryTypeLabel,
     pct(v) { return Math.round((Number(v) || 0) * 100) }
   }
 }

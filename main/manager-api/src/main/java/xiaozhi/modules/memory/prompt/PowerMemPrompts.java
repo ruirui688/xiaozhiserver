@@ -22,15 +22,12 @@ public final class PowerMemPrompts {
             本次对话内容：
             {conversation}
 
-            提取规则：
+            提取要求：
             1. 每条事实必须是一句完整、独立、可验证的中文陈述。
-            2. 事实应该具有长期价值——将来可能需要回忆或用于个性化回复。
-            3. 跳过以下内容：
-               - 天气、时间、寒暄、一次性请求
-               - 工具调用结果、设备控制指令
-               - 密码、Token、API Key、身份证、银行卡、精确住址
-            4. category 自行归类，简洁稳定。
-            5. confidence(0-1) 表示事实可信度。用户主动声明的偏好/身份可达 0.8-1.0，推断出的信息 0.5-0.7。
+            2. 只抽取用户提供或用户确认的信息；不要把助手自己的表达写成用户记忆。
+            3. 用户修正旧信息时，只输出修正后的事实。
+            4. category、memory_type、importance、memory_tier 由你根据语义自行判断。
+            5. confidence 表示事实可信度，importance 表示长期保存价值，取值范围均为 0 到 1。
             6. 没有可提取内容时返回 {"facts":[]}。
             7. 只返回 JSON，不要解释，不要 Markdown。
 
@@ -40,8 +37,10 @@ public final class PowerMemPrompts {
                 {
                   "text": "可直接写入记忆的中文事实",
                   "category": "中文分类名",
-                  "memory_type": "身份信息|用户偏好|生活习惯|社会关系|长期项目|其他",
+                  "memory_type": "中文记忆类型",
                   "confidence": 0.0,
+                  "importance": 0.0,
+                  "memory_tier": "working|short_term|long_term",
                   "importance_dimensions": {
                     "relevance": 0.0,
                     "novelty": 0.0,
@@ -67,17 +66,17 @@ public final class PowerMemPrompts {
             - category: {fact_category}
             - memory_type: {fact_memory_type}
             - confidence: {fact_confidence}
+            - importance: {fact_importance}
 
             语义相似的已有记忆（共 {similar_count} 条）：
             {similar_memories}
 
-            决策规则：
-            1. 全新信息，与所有已有记忆都不重复 → action=ADD
-            2. 修正/补充已有记忆（信息更精确或更新）→ action=UPDATE，必须填写 related_memory_id
-            3. 与已有记忆矛盾且新信息更可信 → action=UPDATE（覆盖旧事实），填写 related_memory_id
-            4. 涉及"忘记""不再""不需要"等否定意图 → action=DELETE，填写 related_memory_id
-            5. 与已有记忆完全重复 → action=NONE（跳过）
-            6. 信息太模糊、无长期价值 → action=NONE
+            决策要求：
+            1. 你必须根据新事实与已有记忆的语义关系选择 action。
+            2. 需要修改或删除已有记忆时，必须填写 related_memory_id。
+            3. 需要新增记忆时，填写最终可写入的 canonical_text。
+            4. 不需要写入、更新或删除时，返回 action=NONE。
+            5. memory_type、category、canonical_text、confidence、importance、memory_tier、sensitivity 都由你最终确定。
 
             JSON 格式：
             {
@@ -87,6 +86,8 @@ public final class PowerMemPrompts {
               "category": "最终确定的分类",
               "canonical_text": "可直接写入记忆的中文事实，不带语气词",
               "confidence": 0.0,
+              "importance": 0.0,
+              "memory_tier": "working|short_term|long_term",
               "importance_dimensions": {
                 "relevance": 0.0,
                 "novelty": 0.0,
@@ -100,5 +101,46 @@ public final class PowerMemPrompts {
             }
 
             只返回 JSON，不要解释。
+            """;
+
+    /**
+     * 管理端手动指令提示词。
+     */
+    public static final String COMMAND_DECISION_PROMPT = """
+            你是小智服务器的长期记忆维护助手。管理端给出了一条记忆维护指令，你需要结合已有记忆输出一个结构化动作。
+
+            管理端指令：
+            {instruction}
+
+            已有记忆：
+            {existing_memories}
+
+            要求：
+            1. 只根据指令语义和已有记忆决定 ADD、UPDATE、DELETE 或 NONE。
+            2. UPDATE 或 DELETE 必须填写 related_memory_id。
+            3. ADD 或 UPDATE 必须填写 canonical_text、memory_type、category、confidence、importance、memory_tier 和 sensitivity。
+            4. 只返回 JSON，不要解释，不要 Markdown。
+
+            JSON 格式：
+            {
+              "action": "ADD|UPDATE|DELETE|NONE",
+              "related_memory_id": "仅 UPDATE/DELETE 时填写已有记忆 ID，否则为空",
+              "memory_type": "最终确定的记忆类型",
+              "category": "最终确定的分类",
+              "canonical_text": "可直接写入记忆的中文事实",
+              "confidence": 0.0,
+              "importance": 0.0,
+              "memory_tier": "working|short_term|long_term",
+              "importance_dimensions": {
+                "relevance": 0.0,
+                "novelty": 0.0,
+                "emotional_weight": 0.0,
+                "factual_density": 0.0,
+                "actionability": 0.0,
+                "personal_nature": 0.0
+              },
+              "sensitivity": "normal|personal|sensitive",
+              "reason": "决策原因，少于30字"
+            }
             """;
 }

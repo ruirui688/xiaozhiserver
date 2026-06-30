@@ -42,6 +42,12 @@ async def resume_vad_detection(conn: "ConnectionHandler"):
 
 
 async def startToChat(conn: "ConnectionHandler", text):
+    """Handle recognized user text.
+
+    Returns True when the text should be treated as an accepted user turn.
+    Returns False when overlap speech is classified as continue/echo and should
+    not be persisted as a standalone chat-history turn.
+    """
     # 检查输入是否是JSON格式（包含说话人信息）
     speaker_name = None
     language_tag = None
@@ -83,7 +89,7 @@ async def startToChat(conn: "ConnectionHandler", text):
 
     if conn.need_bind:
         await check_bind_device(conn)
-        return
+        return True
 
     # 如果当日的输出字数大于限定的字数
     if conn.max_output_size > 0:
@@ -91,7 +97,7 @@ async def startToChat(conn: "ConnectionHandler", text):
             conn.headers.get("device-id"), conn.max_output_size
         ):
             await max_out_size(conn)
-            return
+            return True
 
     # manual 模式下不打断正在播放的内容
     if conn.client_is_speaking and conn.client_listen_mode != "manual":
@@ -107,14 +113,14 @@ async def startToChat(conn: "ConnectionHandler", text):
                 conn.logger.bind(tag=TAG).debug(
                     f"语义打断跳过(TTS保护窗口): text={raw_interruption_text[:50]}"
                 )
-                return
+                return False
             # 文本去重: 设备回声可能产生与当前 TTS 内容相同的 ASR 结果
             last_abort_text = getattr(conn, "_last_abort_text", "")
             if raw_interruption_text == last_abort_text:
                 conn.logger.bind(tag=TAG).debug(
                     f"语义打断跳过(文本去重): text={raw_interruption_text[:50]}"
                 )
-                return
+                return False
             conn._last_abort_text = raw_interruption_text
 
             context = None
@@ -136,32 +142,45 @@ async def startToChat(conn: "ConnectionHandler", text):
                 f"reason={classification.reason}"
             )
             if not classification.should_abort:
-                return
+                conn.logger.bind(tag=TAG).info(
+                    "语义打断裁决继续播报: "
+                    f"category={classification.category}, "
+                    f"reason={classification.reason}, "
+                    f"text={raw_interruption_text[:50]}"
+                )
+                return False
+            conn.logger.bind(tag=TAG).info(
+                "语义打断裁决进入新轮: "
+                f"category={classification.category}, "
+                f"reason={classification.reason}, "
+                f"text={raw_interruption_text[:50]}"
+            )
         await handleAbortMessage(conn)
 
     # 语义控制中枢优先处理高置信度控制类指令，未处理再进入旧流程
     if getattr(conn, "semantic_center", None):
         semantic_handled = await conn.semantic_center.handle_user_text(conn, actual_text)
         if semantic_handled:
-            return
+            return True
 
     # 首先进行意图分析，使用实际文本内容
     intent_handled = await handle_user_intent(conn, actual_text)
 
     if intent_handled:
         # 如果意图已被处理，不再进行聊天
-        return
+        return True
 
     # 意图未被处理，继续常规聊天流程，使用实际文本内容
     await send_stt_message(conn, actual_text)
     if conn.llm is None:
         conn.logger.bind(tag=TAG).warning("LLM未配置，无法生成回复")
-        return
+        return True
 
     # 准备开始新会话
     conn.client_abort = False
 
     conn.executor.submit(conn.chat, actual_text)
+    return True
 
 
 async def no_voice_close_connect(conn: "ConnectionHandler", have_voice):

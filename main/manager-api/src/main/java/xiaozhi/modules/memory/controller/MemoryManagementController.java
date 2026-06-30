@@ -18,8 +18,10 @@ import xiaozhi.common.utils.Result;
 import xiaozhi.modules.memory.dto.MemoryFactDTO;
 import xiaozhi.modules.memory.dto.MemoryForgetDTO;
 import xiaozhi.modules.memory.dto.MemoryRememberDTO;
+import xiaozhi.modules.memory.dto.MemoryRebuildRequestDTO;
 import xiaozhi.modules.memory.service.MemoryService;
 import xiaozhi.modules.memory.vo.MemoryDashboardVO;
+import xiaozhi.modules.memory.vo.MemoryRebuildResultVO;
 import xiaozhi.modules.security.user.SecurityUser;
 
 @RestController
@@ -82,6 +84,39 @@ public class MemoryManagementController {
     public Result<Void> rejectCandidate(@PathVariable String agentId, @PathVariable String candidateId) {
         memoryService.rejectCandidate(agentId, candidateId, "user", currentUserId());
         return new Result<Void>().ok(null);
+    }
+
+    @PostMapping("clear")
+    @Operation(summary = "清空当前智能体长期记忆")
+    @RequiresPermissions("sys:role:normal")
+    public Result<MemoryRebuildResultVO> clear(@PathVariable String agentId) {
+        return new Result<MemoryRebuildResultVO>().ok(memoryService.clearMemories(agentId, "user", currentUserId()));
+    }
+
+    @PostMapping("rebuild-preview")
+    @Operation(summary = "从最近聊天记录预览重建长期记忆")
+    @RequiresPermissions("sys:role:normal")
+    public Result<MemoryRebuildResultVO> rebuildPreview(@PathVariable String agentId,
+                                                        @RequestBody(required = false) MemoryRebuildRequestDTO dto) {
+        if (dto == null) {
+            dto = new MemoryRebuildRequestDTO();
+        }
+        dto.setDryRun(true);
+        return new Result<MemoryRebuildResultVO>().ok(
+                memoryService.rebuildFromRecentChatHistory(agentId, dto, "user", currentUserId()));
+    }
+
+    @PostMapping("rebuild")
+    @Operation(summary = "从最近聊天记录重建长期记忆")
+    @RequiresPermissions("sys:role:normal")
+    public Result<MemoryRebuildResultVO> rebuild(@PathVariable String agentId,
+                                                 @RequestBody(required = false) MemoryRebuildRequestDTO dto) {
+        if (dto == null) {
+            dto = new MemoryRebuildRequestDTO();
+        }
+        dto.setDryRun(false);
+        return new Result<MemoryRebuildResultVO>().ok(
+                memoryService.rebuildFromRecentChatHistory(agentId, dto, "user", currentUserId()));
     }
 
     @PostMapping("remember")

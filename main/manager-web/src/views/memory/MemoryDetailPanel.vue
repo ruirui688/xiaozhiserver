@@ -29,11 +29,11 @@
           <div class="detail-section" v-if="itemType==='fact'">
             <h4 class="section-title">分类与属性</h4>
             <div class="detail-grid">
-              <div class="detail-field"><label>分类</label><span>{{ memory.category || '未分类' }}</span></div>
-              <div class="detail-field"><label>类型</label><span>{{ memory.memoryType || '长期记忆' }}</span></div>
+              <div class="detail-field"><label>分类</label><span>{{ categoryLabel(memory.category) }}</span></div>
+              <div class="detail-field"><label>类型</label><span>{{ memoryTypeLabel(memory.memoryType) }}</span></div>
               <div class="detail-field"><label>来源</label><el-tag size="mini" :type="memory.confirmationState==='auto'?'success':'warning'">{{ memory.confirmationState==='auto'?'自动抽取':'手动创建' }}</el-tag></div>
               <div class="detail-field"><label>层级</label><el-tag size="mini" :type="tierTagType">{{ tierLabel }}</el-tag></div>
-              <div class="detail-field"><label>状态</label><el-tag size="mini" :type="memory.status==='active'?'success':'info'">{{ memory.status==='active'?'活跃':'已归档' }}</el-tag></div>
+              <div class="detail-field"><label>状态</label><el-tag size="mini" :type="memory.status==='active'?'success':'info'">{{ statusLabel(memory.status) }}</el-tag></div>
               <div class="detail-field"><label>敏感度</label><el-tag size="mini" :type="sensitivityTagType">{{ sensitivityLabel }}</el-tag></div>
             </div>
           </div>
@@ -70,7 +70,7 @@
             <div class="detail-grid">
               <div class="detail-field"><label>规则内容</label><span>{{ memory.patternText || '-' }}</span></div>
               <div class="detail-field"><label>原因</label><span>{{ memory.reason || '-' }}</span></div>
-              <div class="detail-field"><label>状态</label><el-tag size="mini" :type="memory.status==='active'?'success':'info'">{{ memory.status || '-' }}</el-tag></div>
+              <div class="detail-field"><label>状态</label><el-tag size="mini" :type="memory.status==='active'?'success':'info'">{{ statusLabel(memory.status) }}</el-tag></div>
             </div>
           </div>
 
@@ -105,6 +105,8 @@
 </template>
 
 <script>
+import { categoryLabel, memoryTypeLabel, sensitivityLabel, tierLabel, statusLabel } from '@/utils/memoryLabels'
+
 export default {
   name: 'MemoryDetailPanel',
   props: {
@@ -117,11 +119,7 @@ export default {
       return (this.memory.canonicalText || this.memory.patternText || '未知').slice(0, 60)
     },
     tierLabel() {
-      const t = this.memory.memoryTier || ''
-      if (t === 'LONG_TERM' || t === 'long_term') return '长期记忆'
-      if (t === 'SHORT_TERM' || t === 'short_term') return '短期记忆'
-      if (t === 'WORKING' || t === 'working') return '工作记忆'
-      return t || '标准'
+      return tierLabel(this.memory.memoryTier)
     },
     tierTagType() {
       const t = this.memory.memoryTier || ''
@@ -131,8 +129,7 @@ export default {
       return ''
     },
     sensitivityLabel() {
-      const s = this.memory.sensitivity || 'normal'
-      return s === 'sensitive' ? '敏感' : s === 'personal' ? '个人' : '普通'
+      return sensitivityLabel(this.memory.sensitivity)
     },
     sensitivityTagType() {
       const s = this.memory.sensitivity || 'normal'
@@ -175,6 +172,9 @@ export default {
     }
   },
   methods: {
+    categoryLabel,
+    memoryTypeLabel,
+    statusLabel,
     pct(v) { return Math.round((Number(v) || 0) * 100) },
     onKeyup(e) {
       if (e.key === 'Escape' && this.visible) {

@@ -68,7 +68,7 @@
       </el-table-column>
       <el-table-column label="状态" width="80">
         <template slot-scope="{row}">
-          <el-tag size="mini" :type="row.status==='active'?'success':'info'">{{ row.status==='active'?'活跃':'归档' }}</el-tag>
+          <el-tag size="mini" :type="row.status==='active'?'success':'info'">{{ statusLabel(row.status) }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="更新时间" width="150">
@@ -109,6 +109,8 @@
 </template>
 
 <script>
+import { statusLabel, tierLabel } from '@/utils/memoryLabels'
+
 export default {
   name: 'MemoryList',
   props: {
@@ -175,13 +177,9 @@ export default {
       return p >= 70 ? '#2ecc71' : p >= 40 ? '#f0b060' : '#909399'
     },
     tierLabel(t) {
-      if (!t) return '标准'
-      const tl = t.toLowerCase()
-      if (tl === 'long_term') return '长期记忆'
-      if (tl === 'short_term') return '短期记忆'
-      if (tl === 'working') return '工作记忆'
-      return t
+      return tierLabel(t)
     },
+    statusLabel,
     tierTagType(t) {
       if (!t) return ''
       const tl = t.toLowerCase()
