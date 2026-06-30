@@ -919,6 +919,12 @@ public class MemoryServiceImpl implements MemoryService {
                 .replace("{conversation}", conversation);
         String output = llmService.generateJson(prompt, maintenanceModelId);
         JSONArray arr = parseActionsResult(output);
+        if ((arr == null || arr.isEmpty()) && StringUtils.isNotBlank(output)) {
+            String repaired = llmService.generateJson(
+                    PowerMemPrompts.JSON_REPAIR_PROMPT.replace("{raw_output}", output),
+                    maintenanceModelId);
+            arr = parseActionsResult(repaired);
+        }
         if (arr == null || arr.isEmpty()) {
             return List.of();
         }

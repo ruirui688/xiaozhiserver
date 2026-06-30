@@ -193,4 +193,38 @@ public final class PowerMemPrompts {
               ]
             }
             """;
+
+    public static final String JSON_REPAIR_PROMPT = """
+            你是 JSON 修复器。下面是同一个记忆维护模型刚刚返回的内容，但它不是合法 JSON。
+            请只做格式修复：保留原有 action、related_memory_id、memory_type、category、canonical_text、confidence、importance、memory_tier、importance_dimensions、sensitivity、reason 的语义，不新增、不删除、不改写记忆判断。
+
+            原始输出：
+            {raw_output}
+
+            只返回合法 JSON，不要解释，不要 Markdown。目标格式：
+            {
+              "actions": [
+                {
+                  "action": "ADD|UPDATE|DELETE|NONE",
+                  "related_memory_id": "",
+                  "memory_type": "",
+                  "category": "",
+                  "canonical_text": "",
+                  "confidence": 0.0,
+                  "importance": 0.0,
+                  "memory_tier": "working|short_term|long_term",
+                  "importance_dimensions": {
+                    "relevance": 0.0,
+                    "novelty": 0.0,
+                    "emotional_weight": 0.0,
+                    "factual_density": 0.0,
+                    "actionability": 0.0,
+                    "personal_nature": 0.0
+                  },
+                  "sensitivity": "normal|personal|sensitive",
+                  "reason": ""
+                }
+              ]
+            }
+            """;
 }

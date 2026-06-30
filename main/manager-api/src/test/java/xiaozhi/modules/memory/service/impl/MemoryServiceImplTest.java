@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -172,6 +173,50 @@ class MemoryServiceImplTest {
         assertEquals("auto", inserted.getConfirmationState());
         assertEquals(SCOPE_ID, inserted.getScopeId());
         assertTrue(inserted.getImportance().compareTo(new BigDecimal("0.86")) == 0);
+    }
+
+    @Test
+    void rebuildRepairsInvalidJsonWithMaintenanceLlmBeforeApplyingActions() {
+        MemoryFactEntity existing = activeFact("old-1", "用户的旧记忆");
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(existing));
+        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID)))
+                .thenReturn("{\"actions\":[{\"action\":\"ADD\",\"canonical_text\":\"用户的老板是钟文杰\"")
+                .thenReturn("""
+                        {
+                          "actions": [
+                            {
+                              "action": "ADD",
+                              "related_memory_id": "",
+                              "memory_type": "人物关系",
+                              "category": "工作关系",
+                              "canonical_text": "用户的老板是钟文杰",
+                              "confidence": 0.92,
+                              "importance": 0.86,
+                              "memory_tier": "long_term",
+                              "importance_dimensions": {
+                                "relevance": 0.9,
+                                "novelty": 0.8,
+                                "emotional_weight": 0.2,
+                                "factual_density": 0.9,
+                                "actionability": 0.6,
+                                "personal_nature": 0.7
+                              },
+                              "sensitivity": "normal",
+                              "reason": "修复格式"
+                            }
+                          ]
+                        }
+                        """);
+
+        MemoryRebuildResultVO result = memoryService.rebuildFromRecentChatHistory(
+                AGENT_ID, rebuildRequest(false), "user", "tester");
+
+        assertEquals(1, result.getActionsProposed());
+        assertEquals(1, result.getFactsChanged());
+        verify(llmService, times(2)).generateJson(any(), eq(MAINTENANCE_MODEL_ID));
+        ArgumentCaptor<MemoryFactEntity> factCaptor = ArgumentCaptor.forClass(MemoryFactEntity.class);
+        verify(factDao).insert(factCaptor.capture());
+        assertEquals("用户的老板是钟文杰", factCaptor.getValue().getCanonicalText());
     }
 
     private MemoryRebuildRequestDTO rebuildRequest(boolean dryRun) {

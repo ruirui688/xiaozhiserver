@@ -201,7 +201,11 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
             if (!isDeepSeek(baseUrl)) {
                 requestBody.put("temperature", temperature != null ? temperature : 0.7);
             }
-            requestBody.put("max_tokens", maxTokens != null ? maxTokens : 2000);
+            int outputTokens = maxTokens != null ? maxTokens : 2000;
+            if (jsonMode) {
+                outputTokens = Math.max(outputTokens, 4000);
+            }
+            requestBody.put("max_tokens", outputTokens);
             if (jsonMode) {
                 requestBody.put("response_format", Map.of("type", "json_object"));
             }
