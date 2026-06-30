@@ -928,7 +928,7 @@ public class MemoryServiceImpl implements MemoryService {
         if (arr == null || arr.isEmpty()) {
             return List.of();
         }
-        JSONArray reviewed = reviewRebuildActions(arr, mode, maintenanceModelId);
+        JSONArray reviewed = reviewRebuildActions(arr, mode, conversation, maintenanceModelId);
         if (reviewed != null && !reviewed.isEmpty()) {
             arr = reviewed;
         }
@@ -949,9 +949,11 @@ public class MemoryServiceImpl implements MemoryService {
         return buildMaintenanceMemoryContext(agentId, scopeId);
     }
 
-    private JSONArray reviewRebuildActions(JSONArray actions, String mode, String maintenanceModelId) {
+    private JSONArray reviewRebuildActions(JSONArray actions, String mode, String evidenceContext,
+                                           String maintenanceModelId) {
         String prompt = PowerMemPrompts.ACTIONS_REVIEW_PROMPT
                 .replace("{mode}", StringUtils.defaultIfBlank(mode, "merge"))
+                .replace("{evidence_context}", StringUtils.defaultIfBlank(evidenceContext, "无额外证据"))
                 .replace("{actions_json}", JSONUtil.toJsonStr(Map.of("actions", actions)));
         String output = llmService.generateJson(prompt, maintenanceModelId);
         JSONArray reviewed = parseActionsResult(output);
@@ -1161,6 +1163,17 @@ public class MemoryServiceImpl implements MemoryService {
         JSONObject decision = parseDecisionResult(output);
         if (decision == null) {
             throw new IllegalStateException("记忆维护模型未返回有效决策");
+        }
+        JSONArray instructionActions = new JSONArray();
+        instructionActions.add(decision);
+        String evidenceContext = "管理端指令：\n" + instruction + "\n\n已有记忆：\n"
+                + buildMaintenanceMemoryContext(agent.getId(), scopeId);
+        JSONArray reviewed = reviewRebuildActions(instructionActions, "merge", evidenceContext, maintenanceModelId);
+        if (reviewed != null && !reviewed.isEmpty()) {
+            JSONObject reviewedDecision = toJsonObject(reviewed.get(0));
+            if (reviewedDecision != null) {
+                decision = reviewedDecision;
+            }
         }
         boolean changed = applyMaintenanceDecision(agent, scopeId, null, decision, maintenanceModelId, false, null);
         writeRevision(agent.getId(), null, "maintenance_instruction",

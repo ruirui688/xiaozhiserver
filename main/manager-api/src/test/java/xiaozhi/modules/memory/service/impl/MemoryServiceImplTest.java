@@ -36,6 +36,7 @@ import xiaozhi.modules.memory.dao.MemoryProfileDao;
 import xiaozhi.modules.memory.dao.MemoryRevisionDao;
 import xiaozhi.modules.memory.dao.MemorySourceEventDao;
 import xiaozhi.modules.memory.dao.MemoryToolBehaviorDao;
+import xiaozhi.modules.memory.dto.MemoryRememberDTO;
 import xiaozhi.modules.memory.dto.MemoryRebuildRequestDTO;
 import xiaozhi.modules.memory.entity.MemoryFactEntity;
 import xiaozhi.modules.memory.vo.MemoryRebuildResultVO;
@@ -244,6 +245,72 @@ class MemoryServiceImplTest {
         ArgumentCaptor<MemoryFactEntity> factCaptor = ArgumentCaptor.forClass(MemoryFactEntity.class);
         verify(factDao).insert(factCaptor.capture());
         assertEquals("用户的老板是钟文杰", factCaptor.getValue().getCanonicalText());
+    }
+
+    @Test
+    void rememberReviewsMaintenanceDecisionBeforeWritingFact() {
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID)))
+                .thenReturn("""
+                        {
+                          "action": "ADD",
+                          "related_memory_id": "",
+                          "memory_type": "factual",
+                          "category": "relationship",
+                          "canonical_text": "我的老板是钟文杰",
+                          "confidence": 0.92,
+                          "importance": 0.86,
+                          "memory_tier": "long_term",
+                          "importance_dimensions": {
+                            "relevance": 0.9,
+                            "novelty": 0.8,
+                            "emotional_weight": 0.2,
+                            "factual_density": 0.9,
+                            "actionability": 0.6,
+                            "personal_nature": 0.7
+                          },
+                          "sensitivity": "normal",
+                          "reason": "用户明确说明"
+                        }
+                        """)
+                .thenReturn("""
+                        {
+                          "actions": [
+                            {
+                              "action": "ADD",
+                              "related_memory_id": "",
+                              "memory_type": "人物关系",
+                              "category": "工作关系",
+                              "canonical_text": "我的老板是钟文杰",
+                              "confidence": 0.92,
+                              "importance": 0.86,
+                              "memory_tier": "long_term",
+                              "importance_dimensions": {
+                                "relevance": 0.9,
+                                "novelty": 0.8,
+                                "emotional_weight": 0.2,
+                                "factual_density": 0.9,
+                                "actionability": 0.6,
+                                "personal_nature": 0.7
+                              },
+                              "sensitivity": "normal",
+                              "reason": "标签审校"
+                            }
+                          ]
+                        }
+                        """);
+
+        MemoryRememberDTO dto = new MemoryRememberDTO();
+        dto.setAgentId(AGENT_ID);
+        dto.setText("我的老板是钟文杰");
+        memoryService.remember(dto, "user", "tester");
+
+        ArgumentCaptor<MemoryFactEntity> factCaptor = ArgumentCaptor.forClass(MemoryFactEntity.class);
+        verify(factDao).insert(factCaptor.capture());
+        MemoryFactEntity fact = factCaptor.getValue();
+        assertEquals("我的老板是钟文杰", fact.getCanonicalText());
+        assertEquals("工作关系", fact.getCategory());
+        assertEquals("人物关系", fact.getMemoryType());
     }
 
     private MemoryRebuildRequestDTO rebuildRequest(boolean dryRun) {

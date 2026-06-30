@@ -232,14 +232,18 @@ public final class PowerMemPrompts {
 
     public static final String ACTIONS_REVIEW_PROMPT = """
             你是小智服务器的长期记忆动作审校助手。下面是一组已经由维护模型决定的记忆动作。
-            请只做可读性和结构审校：保留原有是否记住、是否更新、是否删除的判断，不新增记忆事实，不删除记忆事实，不改变用户事实含义。
+            请只做证据核对、可读性和结构审校：保留原有是否记住、是否更新、是否删除的判断，不新增记忆事实，不删除记忆事实，不扩展用户事实含义。
+
+            可核对证据：
+            {evidence_context}
 
             审校要求：
             1. category 和 memory_type 必须改写为自然中文短语，面向管理后台用户阅读。
             2. 不要输出英文枚举、下划线字段名或数据库字段名，例如 personal_info、preference、hobby、fact。
-            3. canonical_text 必须是单条自然中文事实；如果一句中混合了互不相关的信息，只保留同一事实核心，不扩展新事实。
-            4. clear_then_rebuild 模式下不要输出 DELETE 动作；最终事实库只需要 ADD 动作。
-            5. 只返回合法 JSON，不要解释，不要 Markdown。
+            3. canonical_text 必须只保留证据中能直接支持的单条自然中文事实；无法从证据确认的尾巴、推测、误听或混杂内容必须删去。
+            4. 如果一句中混合了互不相关的信息，只保留同一事实核心，不扩展新事实。
+            5. clear_then_rebuild 模式下不要输出 DELETE 动作；最终事实库只需要 ADD 动作。
+            6. 只返回合法 JSON，不要解释，不要 Markdown。
 
             重建模式：
             {mode}
