@@ -95,8 +95,8 @@
                 :filter="n===picked?'url(#dropHl)':n.hl?'url(#glow)':'url(#drop)'"
                 style="transition: stroke 0.2s" />
               <text :x="-n.w/2+14" y="-6" font-size="13" font-weight="600" fill="#2f3548" text-anchor="start">
-                <tspan v-if="n.line1.length <= 16">{{ n.line1 }}</tspan>
-                <tspan v-else>{{ n.line1.slice(0, 16) }}…</tspan>
+                <tspan v-if="n.line1.length <= 22">{{ n.line1 }}</tspan>
+                <tspan v-else>{{ n.line1.slice(0, 22) }}…</tspan>
               </text>
               <text :x="-n.w/2+14" y="12" font-size="11" fill="#687186" text-anchor="start">{{ n.sub }}</text>
               <rect :x="n.w/2-14" y="-n.h/2+4" width="10" height="10" rx="5" :fill="n.dot" />
@@ -178,8 +178,6 @@ export default {
     catLabel(v) { const m = { explicit: '明确记住', manual: '手动维护' }; return m[v] || v || '未分类' },
 
     buildGraph() {
-      const canvas = this.$refs.canvas
-      const H = canvas ? Math.max(520, canvas.clientHeight) : 560
       const activeFacts = this.facts.filter(f => f.status !== 'deleted')
       const activeTombs = (this.tombstones || []).filter(t => t.status === 'active')
       const nodes = [], edges = []
@@ -199,46 +197,67 @@ export default {
       const catList = Array.from(groups.entries())
         .sort((a, b) => b[1].length - a[1].length || String(a[0]).localeCompare(String(b[0]), 'zh-CN'))
 
-      const catSpacing = 104
-      const catStartY = catList.length ? -(catList.length - 1) * catSpacing / 2 : 0
+      const cardW = 300, cardH = 58, cardGapX = 330, cardGapY = 76
+      const lanes = catList.map(([name, items]) => {
+        const columns = items.length > 6 ? Math.ceil(items.length / 6) : 1
+        const rows = Math.max(1, Math.ceil(items.length / columns))
+        return {
+          name,
+          items,
+          columns,
+          rows,
+          height: Math.max(116, rows * cardGapY + 28)
+        }
+      })
+      const totalLaneHeight = lanes.reduce((sum, lane) => sum + lane.height, 0)
+      const laneGap = 34
+      let nextLaneY = -(totalLaneHeight + Math.max(0, lanes.length - 1) * laneGap) / 2
       const ay = 0
       nodes.push({ id: agentId, type: 'agent', label: this.agentName || '智能体', sub: `${activeFacts.length} 条事实`, x: ax, y: ay })
 
       // Category layout
       const catX = 190
+      const factStartX = 410
       const catNodes = []
 
-      catList.forEach(([name, items], i) => {
-        const cy = catStartY + i * catSpacing
+      lanes.forEach((lane, i) => {
+        const cy = nextLaneY + lane.height / 2
         const cid = ++nid
         const hue = (i * 137.508) % 360
         const bg = `hsl(${hue},45%,92%)`, stroke = `hsl(${hue},40%,65%)`
-        const collapsed = this.collapsedCats[name] || false
+        const collapsed = this.collapsedCats[lane.name] || false
         nodes.push({
           id: cid, type: 'cat',
-          label: this.catLabel(name),
-          sub: `${items.length} 条`,
-          factCount: items.length,
+          label: this.catLabel(lane.name),
+          sub: `${lane.items.length} 条`,
+          factCount: lane.items.length,
           bg, stroke, x: catX, y: cy,
-          catName: name,
+          catName: lane.name,
           collapsed
         })
-        catNodes.push({ id: cid, x: catX, y: cy, items, catName: name })
+        catNodes.push({
+          id: cid,
+          x: catX,
+          y: cy,
+          items: lane.items,
+          catName: lane.name,
+          rows: lane.rows,
+          columns: lane.columns,
+          height: lane.height
+        })
         edges.push({ id: `e-${agentId}-${cid}`, from: agentId, to: cid, hl: false })
+        nextLaneY += lane.height + laneGap
       })
 
       // Fact cards
-      const cardW = 260, cardH = 58, cardGapX = 290, cardGapY = 72
-      const factStartX = 390
       let globalCol = 0
 
       catNodes.forEach(cn => {
-        const perCol = Math.min(5, Math.max(1, Math.ceil(Math.sqrt(cn.items.length))))
         cn.items.forEach((item, i) => {
-          const col = Math.floor(i / perCol)
-          const row = i % perCol
+          const col = Math.floor(i / cn.rows)
+          const row = i % cn.rows
           const x = factStartX + col * cardGapX
-          const y = cn.y - (perCol - 1) * cardGapY / 2 + row * cardGapY
+          const y = cn.y - (cn.rows - 1) * cardGapY / 2 + row * cardGapY
           const isAuto = item.confirmationState === 'auto'
           const fid = ++nid
           const text = item.canonicalText || item.patternText || '?'
