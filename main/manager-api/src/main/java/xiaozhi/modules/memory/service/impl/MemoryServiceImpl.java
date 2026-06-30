@@ -1163,7 +1163,8 @@ public class MemoryServiceImpl implements MemoryService {
             throw new IllegalStateException("记忆维护模型未返回有效决策");
         }
         boolean changed = applyMaintenanceDecision(agent, scopeId, null, decision, maintenanceModelId, false, null);
-        writeRevision(agent.getId(), null, "maintenance_instruction", instruction, JsonUtils.toJsonString(decision),
+        writeRevision(agent.getId(), null, "maintenance_instruction",
+                JsonUtils.toJsonString(Map.of("instruction", instruction)), JsonUtils.toJsonString(decision),
                 actorType, actorId, "维护模型处理管理端指令");
         return changed;
     }
