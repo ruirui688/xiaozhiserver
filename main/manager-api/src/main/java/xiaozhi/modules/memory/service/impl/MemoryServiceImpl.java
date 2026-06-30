@@ -180,7 +180,7 @@ public class MemoryServiceImpl implements MemoryService {
             String factText = factJson.getStr("text", factJson.getStr("canonical_text"));
 
             // Stage 2: 语义搜索 + 决策
-            List<MemoryFactEntity> similarFacts = findSimilarFacts(agentId, agentId,
+            List<MemoryFactEntity> similarFacts = findSimilarFacts(agentId, null,
                     factText + "\n" + conversation, maintenanceModelId);
             String decisionPrompt = buildDecisionPrompt(factJson, similarFacts);
             String decisionOutput = llmService.generateJson(decisionPrompt, maintenanceModelId);
@@ -324,11 +324,13 @@ public class MemoryServiceImpl implements MemoryService {
      */
     private List<MemoryFactEntity> findSimilarFacts(String agentId, String scopeId, String text, String modelId) {
         float[] queryEmbedding = generateEmbedding(text, modelId);
-        List<MemoryFactEntity> allActive = factDao.selectList(new QueryWrapper<MemoryFactEntity>()
+        QueryWrapper<MemoryFactEntity> wrapper = new QueryWrapper<MemoryFactEntity>()
                 .eq("agent_id", agentId)
-                .eq("scope_type", SCOPE_DEVICE)
-                .eq("scope_id", scopeId)
-                .eq("status", STATUS_ACTIVE)
+                .eq("status", STATUS_ACTIVE);
+        if (StringUtils.isNotBlank(scopeId)) {
+            wrapper.eq("scope_type", SCOPE_DEVICE).eq("scope_id", scopeId);
+        }
+        List<MemoryFactEntity> allActive = factDao.selectList(wrapper
                 .orderByDesc("importance", "last_seen_at")
                 .last("LIMIT 100"));
 
@@ -467,10 +469,7 @@ public class MemoryServiceImpl implements MemoryService {
         String dimensionsJson = extractDimensionsJson(json);
 
         if ("UPDATE".equals(action) && StringUtils.isNotBlank(relatedId)) {
-            MemoryFactEntity fact = factDao.selectOne(new QueryWrapper<MemoryFactEntity>()
-                    .eq("agent_id", agent.getId()).eq("memory_id", relatedId)
-                    .eq("scope_type", SCOPE_DEVICE).eq("scope_id", scopeId)
-                    .ne("status", STATUS_DELETED).last("LIMIT 1"));
+            MemoryFactEntity fact = findRelatedFact(agent.getId(), relatedId);
             if (fact != null) {
                 String before = JsonUtils.toJsonString(fact);
                 fact.setMemoryType(memoryType);
@@ -1074,8 +1073,7 @@ public class MemoryServiceImpl implements MemoryService {
         JSONObject payload = parsePayload(candidate.getPayload());
         String action = normalizeCandidateAction(payload.getStr("action"));
         String relatedMemoryId = payload.getStr("related_memory_id");
-        MemoryFactEntity relatedFact = findRelatedFact(scope.agent.getId(), scope.scopeId, relatedMemoryId,
-                candidate.getCanonicalText(), candidate.getMemoryType(), candidate.getCategory());
+        MemoryFactEntity relatedFact = findRelatedFact(scope.agent.getId(), relatedMemoryId);
         if ("UPDATE".equals(action) && relatedFact != null) {
             String before = JsonUtils.toJsonString(relatedFact);
             relatedFact.setMemoryType(normalizeMemoryLabel(candidate.getMemoryType(), "长期记忆"));
@@ -1156,9 +1154,10 @@ public class MemoryServiceImpl implements MemoryService {
         if (StringUtils.isBlank(maintenanceModelId)) {
             throw new IllegalStateException("未配置记忆维护模型");
         }
+        String existingMemories = buildMaintenanceMemoryContext(agent.getId(), null);
         String prompt = PowerMemPrompts.COMMAND_DECISION_PROMPT
                 .replace("{instruction}", instruction)
-                .replace("{existing_memories}", buildMaintenanceMemoryContext(agent.getId(), scopeId));
+                .replace("{existing_memories}", existingMemories);
         String output = llmService.generateJson(prompt, maintenanceModelId);
         JSONObject decision = parseDecisionResult(output);
         if (decision == null) {
@@ -1166,8 +1165,7 @@ public class MemoryServiceImpl implements MemoryService {
         }
         JSONArray instructionActions = new JSONArray();
         instructionActions.add(decision);
-        String evidenceContext = "管理端指令：\n" + instruction + "\n\n已有记忆：\n"
-                + buildMaintenanceMemoryContext(agent.getId(), scopeId);
+        String evidenceContext = "管理端指令：\n" + instruction + "\n\n已有记忆：\n" + existingMemories;
         JSONArray reviewed = reviewRebuildActions(instructionActions, "merge", evidenceContext, maintenanceModelId);
         if (reviewed != null && !reviewed.isEmpty()) {
             JSONObject reviewedDecision = toJsonObject(reviewed.get(0));
@@ -1240,7 +1238,7 @@ public class MemoryServiceImpl implements MemoryService {
             String factText = factJson.getStr("text", factJson.getStr("canonical_text"));
 
             // Stage 2a: 语义搜索 — 找到 top-3 相似已有记忆
-            List<MemoryFactEntity> similarFacts = findSimilarFacts(agent.getId(), scopeId,
+            List<MemoryFactEntity> similarFacts = findSimilarFacts(agent.getId(), null,
                     factText + "\n" + content, maintenanceModelId);
 
             // Stage 2b: 决策 — LLM 判断 ADD/UPDATE/DELETE/NONE
@@ -1331,11 +1329,15 @@ public class MemoryServiceImpl implements MemoryService {
     }
 
     private String buildMaintenanceMemoryContext(String agentId, String scopeId) {
-        List<MemoryFactEntity> facts = factDao.selectList(new QueryWrapper<MemoryFactEntity>()
+        QueryWrapper<MemoryFactEntity> wrapper = new QueryWrapper<MemoryFactEntity>()
                 .eq("agent_id", agentId)
-                .eq("scope_type", SCOPE_DEVICE)
-                .eq("scope_id", scopeId)
-                .eq("status", STATUS_ACTIVE)
+                .eq("status", STATUS_ACTIVE);
+        if (StringUtils.isNotBlank(scopeId)) {
+            wrapper.and(w -> w.eq("scope_type", SCOPE_DEVICE).eq("scope_id", scopeId)
+                    .or()
+                    .eq("scope_type", SCOPE_DEVICE).eq("scope_id", agentId));
+        }
+        List<MemoryFactEntity> facts = factDao.selectList(wrapper
                 .orderByDesc("importance", "last_seen_at")
                 .last("LIMIT 30"));
         if (facts.isEmpty()) {
@@ -1382,15 +1384,12 @@ public class MemoryServiceImpl implements MemoryService {
                 JsonUtils.toJsonString(fact), actorType, actorId, reason);
     }
 
-    private MemoryFactEntity findRelatedFact(String agentId, String scopeId, String relatedMemoryId,
-                                             String canonical, String memoryType, String category) {
+    private MemoryFactEntity findRelatedFact(String agentId, String relatedMemoryId) {
         if (StringUtils.isBlank(relatedMemoryId)) {
             return null;
         }
         return factDao.selectOne(new QueryWrapper<MemoryFactEntity>()
                 .eq("agent_id", agentId)
-                .eq("scope_type", SCOPE_DEVICE)
-                .eq("scope_id", scopeId)
                 .eq("memory_id", relatedMemoryId)
                 .ne("status", STATUS_DELETED)
                 .last("LIMIT 1"));

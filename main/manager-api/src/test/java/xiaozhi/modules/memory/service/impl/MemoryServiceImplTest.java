@@ -313,6 +313,147 @@ class MemoryServiceImplTest {
         assertEquals("人物关系", fact.getMemoryType());
     }
 
+    @Test
+    void rememberCanUpdateExistingDeviceScopedFactWithoutMacAddress() {
+        MemoryFactEntity existing = activeFact("fact-1", "高瑞瑞的领导是钟文杰");
+        existing.setCategory("人际关系");
+        existing.setMemoryType("领导信息");
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(existing));
+        when(factDao.selectOne(any(Wrapper.class))).thenReturn(existing);
+        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID)))
+                .thenReturn("""
+                        {
+                          "action": "UPDATE",
+                          "related_memory_id": "fact-1",
+                          "memory_type": "人物关系",
+                          "category": "工作关系",
+                          "canonical_text": "高瑞瑞的老板是钟文杰",
+                          "confidence": 0.92,
+                          "importance": 0.86,
+                          "memory_tier": "long_term",
+                          "importance_dimensions": {
+                            "relevance": 0.9,
+                            "novelty": 0.8,
+                            "emotional_weight": 0.2,
+                            "factual_density": 0.9,
+                            "actionability": 0.6,
+                            "personal_nature": 0.7
+                          },
+                          "sensitivity": "normal",
+                          "reason": "补充老板称呼"
+                        }
+                        """)
+                .thenReturn("""
+                        {
+                          "actions": [
+                            {
+                              "action": "UPDATE",
+                              "related_memory_id": "fact-1",
+                              "memory_type": "人物关系",
+                              "category": "工作关系",
+                              "canonical_text": "高瑞瑞的老板是钟文杰",
+                              "confidence": 0.92,
+                              "importance": 0.86,
+                              "memory_tier": "long_term",
+                              "importance_dimensions": {
+                                "relevance": 0.9,
+                                "novelty": 0.8,
+                                "emotional_weight": 0.2,
+                                "factual_density": 0.9,
+                                "actionability": 0.6,
+                                "personal_nature": 0.7
+                              },
+                              "sensitivity": "normal",
+                              "reason": "审校通过"
+                            }
+                          ]
+                        }
+                        """);
+
+        MemoryRememberDTO dto = new MemoryRememberDTO();
+        dto.setAgentId(AGENT_ID);
+        dto.setText("我的老板是钟文杰");
+        memoryService.remember(dto, "user", "tester");
+
+        verify(factDao, never()).insert(any());
+        ArgumentCaptor<MemoryFactEntity> factCaptor = ArgumentCaptor.forClass(MemoryFactEntity.class);
+        verify(factDao).updateById(factCaptor.capture());
+        MemoryFactEntity updated = factCaptor.getValue();
+        assertEquals("fact-1", updated.getMemoryId());
+        assertEquals("高瑞瑞的老板是钟文杰", updated.getCanonicalText());
+        assertEquals(SCOPE_ID, updated.getScopeId());
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(llmService, times(2)).generateJson(promptCaptor.capture(), eq(MAINTENANCE_MODEL_ID));
+        assertTrue(promptCaptor.getAllValues().get(0).contains("id=fact-1"));
+        assertTrue(promptCaptor.getAllValues().get(0).contains("高瑞瑞的领导是钟文杰"));
+    }
+
+    @Test
+    void rememberReviewCanTurnAddIntoUpdateForExistingFact() {
+        MemoryFactEntity existing = activeFact("fact-1", "高瑞瑞的领导是钟文杰");
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(existing));
+        when(factDao.selectOne(any(Wrapper.class))).thenReturn(existing);
+        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID)))
+                .thenReturn("""
+                        {
+                          "action": "ADD",
+                          "related_memory_id": "",
+                          "memory_type": "事实",
+                          "category": "个人",
+                          "canonical_text": "钟文杰是用户的老板",
+                          "confidence": 0.92,
+                          "importance": 0.86,
+                          "memory_tier": "long_term",
+                          "importance_dimensions": {
+                            "relevance": 0.9,
+                            "novelty": 0.8,
+                            "emotional_weight": 0.2,
+                            "factual_density": 0.9,
+                            "actionability": 0.6,
+                            "personal_nature": 0.7
+                          },
+                          "sensitivity": "normal",
+                          "reason": "用户明确说明"
+                        }
+                        """)
+                .thenReturn("""
+                        {
+                          "actions": [
+                            {
+                              "action": "UPDATE",
+                              "related_memory_id": "fact-1",
+                              "memory_type": "人物关系",
+                              "category": "工作关系",
+                              "canonical_text": "高瑞瑞的老板是钟文杰",
+                              "confidence": 0.92,
+                              "importance": 0.86,
+                              "memory_tier": "long_term",
+                              "importance_dimensions": {
+                                "relevance": 0.9,
+                                "novelty": 0.8,
+                                "emotional_weight": 0.2,
+                                "factual_density": 0.9,
+                                "actionability": 0.6,
+                                "personal_nature": 0.7
+                              },
+                              "sensitivity": "normal",
+                              "reason": "已有同一人物关系"
+                            }
+                          ]
+                        }
+                        """);
+
+        MemoryRememberDTO dto = new MemoryRememberDTO();
+        dto.setAgentId(AGENT_ID);
+        dto.setText("我的老板是钟文杰");
+        memoryService.remember(dto, "user", "tester");
+
+        verify(factDao, never()).insert(any());
+        ArgumentCaptor<MemoryFactEntity> factCaptor = ArgumentCaptor.forClass(MemoryFactEntity.class);
+        verify(factDao).updateById(factCaptor.capture());
+        assertEquals("高瑞瑞的老板是钟文杰", factCaptor.getValue().getCanonicalText());
+    }
+
     private MemoryRebuildRequestDTO rebuildRequest(boolean dryRun) {
         MemoryRebuildRequestDTO request = new MemoryRebuildRequestDTO();
         request.setSessionLimit(15);
