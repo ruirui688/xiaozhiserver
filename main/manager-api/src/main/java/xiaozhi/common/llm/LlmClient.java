@@ -1,5 +1,6 @@
 package xiaozhi.common.llm;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -110,6 +111,67 @@ public class LlmClient {
             return JSONUtil.parseObj(response.getBody());
         } catch (Exception e) {
             throw new LlmException("LLM 响应 JSON 解析失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 调用 OpenAI 兼容的 embeddings 接口获取文本向量
+     *
+     * @param endpoint 完整的 embeddings URL（例如 https://api.openai.com/v1/embeddings）
+     * @param apiKey   API 密钥
+     * @param model    嵌入模型名称（例如 text-embedding-3-small）
+     * @param input    待向量化的文本
+     * @return 嵌入向量（浮点数列表）
+     * @throws LlmException 调用失败或返回非 2xx 状态码时抛出
+     */
+    @SuppressWarnings("unchecked")
+    public List<Double> embedding(String endpoint, String apiKey, String model, String input) {
+        Map<String, Object> requestBody = new LinkedHashMap<>();
+        requestBody.put("model", model);
+        requestBody.put("input", input);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setBearerAuth(apiKey);
+
+        log.debug("Embedding 请求: endpoint={}, model={}", endpoint, model);
+
+        ResponseEntity<String> response;
+        try {
+            response = restTemplate.exchange(
+                    endpoint,
+                    HttpMethod.POST,
+                    new HttpEntity<>(requestBody, headers),
+                    String.class);
+        } catch (Exception e) {
+            throw new LlmException("Embedding 调用异常: " + e.getMessage(), e);
+        }
+
+        if (!response.getStatusCode().is2xxSuccessful()) {
+            String responseBody = response.getBody();
+            String detail = responseBody != null ? responseBody : "(无响应体)";
+            throw new LlmException("Embedding 调用失败，HTTP 状态码: " + response.getStatusCode() + "，响应: " + detail);
+        }
+
+        try {
+            Map<String, Object> result = JSONUtil.parseObj(response.getBody());
+            List<Map<String, Object>> data = (List<Map<String, Object>>) result.get("data");
+            if (data == null || data.isEmpty()) {
+                throw new LlmException("Embedding 响应中缺少 data 字段");
+            }
+            Object embeddingRaw = data.get(0).get("embedding");
+            if (embeddingRaw instanceof List<?> embeddingList) {
+                List<Double> vector = new ArrayList<>(embeddingList.size());
+                for (Object item : embeddingList) {
+                    vector.add(item instanceof Number n ? n.doubleValue() : Double.parseDouble(String.valueOf(item)));
+                }
+                return vector;
+            }
+            throw new LlmException("Embedding 响应格式异常: " + embeddingRaw);
+        } catch (LlmException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new LlmException("Embedding 响应 JSON 解析失败: " + e.getMessage(), e);
         }
     }
 }

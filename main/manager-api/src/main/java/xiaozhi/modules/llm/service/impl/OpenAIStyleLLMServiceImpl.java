@@ -1,5 +1,6 @@
 package xiaozhi.modules.llm.service.impl;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -19,9 +20,11 @@ import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import lombok.extern.slf4j.Slf4j;
+import xiaozhi.modules.llm.service.EmbeddingService;
 import xiaozhi.modules.llm.service.LLMService;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
+import xiaozhi.modules.model.service.impl.ModelRuntimeAssembler;
 
 /**
  * OpenAI风格API的LLM服务实现
@@ -43,6 +46,12 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
 
     @Autowired
     private ModelConfigService modelConfigService;
+
+    @Autowired
+    private EmbeddingService embeddingService;
+
+    @Autowired
+    private ModelRuntimeAssembler modelRuntimeAssembler;
 
     private final RestTemplate restTemplate = new RestTemplate();
 
@@ -480,5 +489,47 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
         }
 
         return null;
+    }
+
+    @Override
+    public List<Double> generateEmbedding(String text, String modelId) {
+        if (StringUtils.isBlank(text) || StringUtils.isBlank(modelId)) {
+            return null;
+        }
+        try {
+            ModelConfigEntity config = modelConfigService.getModelByIdFromCache(modelId);
+            if (config == null) {
+                log.warn("generateEmbedding: 未找到模型配置, modelId={}", modelId);
+                return null;
+            }
+
+            // 使用 buildTypedConfig 读取最新的运行时参数（避免 Redis 缓存脏数据）
+            JSONObject runtimeConfig = modelRuntimeAssembler.buildTypedConfig(config);
+            String baseUrl = runtimeConfig.getStr("base_url");
+            String apiKey = runtimeConfig.getStr("api_key");
+            String embeddingModel = StringUtils.defaultIfBlank(
+                    runtimeConfig.getStr("embedding_model"),
+                    runtimeConfig.getStr("model_name"));
+
+            if (StringUtils.isBlank(baseUrl) || StringUtils.isBlank(apiKey)
+                    || StringUtils.isBlank(embeddingModel)) {
+                log.warn("generateEmbedding: 配置不完整, baseUrl={}, hasApiKey={}, embeddingModel={}",
+                        baseUrl, StringUtils.isNotBlank(apiKey), embeddingModel);
+                return null;
+            }
+
+            float[] vector = embeddingService.getEmbedding(text, baseUrl, apiKey, embeddingModel);
+            if (vector == null) {
+                return null;
+            }
+            List<Double> result = new ArrayList<>(vector.length);
+            for (float v : vector) {
+                result.add((double) v);
+            }
+            return result;
+        } catch (Exception e) {
+            log.warn("generateEmbedding 失败: {}", e.getMessage());
+            return null;
+        }
     }
 }

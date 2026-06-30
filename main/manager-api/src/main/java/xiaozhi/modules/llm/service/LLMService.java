@@ -1,5 +1,7 @@
 package xiaozhi.modules.llm.service;
 
+import java.util.List;
+
 /**
  * LLM服务接口
  * 支持多种大模型调用
@@ -70,10 +72,19 @@ public interface LLMService {
 
     /**
      * 生成会话标题
-     * 
+     *
      * @param conversation 对话内容
      * @param modelId      模型ID
      * @return 标题（约15字）
      */
     String generateTitle(String conversation, String modelId);
+
+    /**
+     * 生成文本嵌入向量（OpenAI 兼容 embeddings API）
+     *
+     * @param text    待向量化的文本
+     * @param modelId 模型配置ID（用于获取 base_url / api_key / embedding_model）
+     * @return 嵌入向量（浮点数列表），失败时返回 null
+     */
+    List<Double> generateEmbedding(String text, String modelId);
 }

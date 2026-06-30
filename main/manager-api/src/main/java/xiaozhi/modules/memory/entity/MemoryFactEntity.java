@@ -40,6 +40,12 @@ public class MemoryFactEntity {
     private String sourceEventId;
     private String sourceHash;
     private String extractorVersion;
+    @TableField("embedding_json")
+    private String embeddingJson;
+    @TableField("importance_dimensions")
+    private String importanceDimensions;
+    @TableField("memory_tier")
+    private String memoryTier;
     private Date createdAt;
     private Date updatedAt;
 }
