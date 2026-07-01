@@ -80,6 +80,8 @@ def test_metaso_search_keeps_snippet_and_answer_constraints(monkeypatch):
     assert "实际搜索查询：南非加拿大比赛结果 当前北京时间 2026-06-29 15:00 北京时间" in result
     assert "当前参考时间：2026-06-29 15:00 北京时间" in result
     assert "只能依据下面列出的搜索结果回答" in result
+    assert "先判断每条结果是否真正回答了用户原始查询" in result
+    assert "重新调用 web_search 生成更精确的查询" in result
     assert "不能把不确定的日期当成确定事实" in result
     assert "加拿大1比0战胜南非" in result
     assert "摘要：6月28日，南非队球员在比赛后离场。" in result
@@ -128,6 +130,18 @@ def test_beijing_time_context_uses_shared_current_time(monkeypatch):
     )
 
     assert web_search._get_beijing_time_context() == "2026-06-29 15:45 北京时间"
+
+
+def test_web_search_description_preserves_user_temporal_intent():
+    description = web_search.WEB_SEARCH_FUNCTION_DESC["function"]["description"]
+    query_description = web_search.WEB_SEARCH_FUNCTION_DESC["function"]["parameters"][
+        "properties"
+    ]["query"]["description"]
+
+    assert "保留用户原话里的时间范围" in description
+    assert "避免改写成泛泛的赛程" in description
+    assert "必须保留用户原话中的相对时间" in query_description
+    assert "不要把“今天早上已经结束的结果”改写成宽泛的“最新资料”或“赛程对阵”" in query_description
 
 
 def test_web_search_ignores_lang_argument_without_losing_query():
