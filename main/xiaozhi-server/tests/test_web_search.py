@@ -138,10 +138,12 @@ def test_web_search_description_preserves_user_temporal_intent():
         "properties"
     ]["query"]["description"]
 
-    assert "保留用户原话里的时间范围" in description
+    assert "保留用户原话里的相对时间短语" in description
+    assert "绝对日期" in description
     assert "避免改写成泛泛的赛程" in description
-    assert "必须保留用户原话中的相对时间" in query_description
-    assert "不要把“今天早上已经结束的结果”改写成宽泛的“最新资料”或“赛程对阵”" in query_description
+    assert "必须保留用户原话中的相对时间短语" in query_description
+    assert "查询词要同时包含原始相对时间短语和根据当前北京时间换算出的绝对日期" in query_description
+    assert "查询词要体现已发生/已结束" in query_description
 
 
 def test_web_search_ignores_lang_argument_without_losing_query():
