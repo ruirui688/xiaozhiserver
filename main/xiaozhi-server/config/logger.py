@@ -1,7 +1,6 @@
 import os
 import sys
 from loguru import logger
-from config.config_loader import load_config
 from config.settings import check_config_file
 from datetime import datetime
 
@@ -48,6 +47,7 @@ def formatter(record):
 def setup_logging():
     check_config_file()
     """从配置文件中读取日志配置，并设置日志输出格式和级别"""
+    from config.config_loader import load_config  # lazy import — break circular import
     config = load_config()
     log_config = config["log"]
     global _logger_initialized
