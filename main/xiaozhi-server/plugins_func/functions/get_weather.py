@@ -187,19 +187,30 @@ def fetch_weather_warning(location_id, api_key, api_host):
     )
     data = response.json()
     if data.get("error") is not None:
+        detail = data.get("error", {}).get("detail") or "unknown error"
         logger.bind(tag=TAG).error(
-            f"获取天气预警失败，原因：{data.get('error', {}).get('detail')}"
+            f"获取天气预警失败，原因：{detail}"
         )
-        return None
+        return {"error": detail}
     if data.get("code") and str(data.get("code")) != "200":
-        logger.bind(tag=TAG).error(f"获取天气预警失败，code={data.get('code')}")
-        return None
-    return data.get("warning", [])
+        error = f"code={data.get('code')}"
+        logger.bind(tag=TAG).error(f"获取天气预警失败，{error}")
+        return {"error": error}
+    return {"warnings": data.get("warning", [])}
 
 
-def build_weather_warning_report(city_name, warnings):
-    if warnings is None:
-        return f"暂时没查到{city_name}的天气预警。"
+def build_weather_warning_report(city_name, warning_result):
+    if warning_result is None:
+        return f"天气预警接口暂时不可用，不能确认{city_name}预警状态。"
+    if isinstance(warning_result, dict):
+        error = warning_result.get("error")
+        if error:
+            if "No permission" in error:
+                return f"天气预警接口当前没有可用权限，不能确认{city_name}预警状态。"
+            return f"天气预警接口暂时不可用，不能确认{city_name}预警状态。"
+        warnings = warning_result.get("warnings", [])
+    else:
+        warnings = warning_result
     if not warnings:
         return f"{city_name}当前未查到生效天气预警。"
 
@@ -419,11 +430,11 @@ def get_weather(
                     Action.RESPONSE,
                     response=f"暂时没查到{location}的天气预警。",
                 )
-            warnings = fetch_weather_warning(city_info["id"], api_key, api_host)
+            warning_result = fetch_weather_warning(city_info["id"], api_key, api_host)
             city_name = city_info.get("name") or location
             return ActionResponse(
                 Action.RESPONSE,
-                response=build_weather_warning_report(city_name, warnings),
+                response=build_weather_warning_report(city_name, warning_result),
             )
         except Exception as e:
             logger.bind(tag=TAG).error(f"天气预警查询异常: {e}")

@@ -61,17 +61,28 @@ def test_get_weather_schema_exposes_warning_query_type():
 def test_build_weather_warning_report_is_concise():
     report = get_weather.build_weather_warning_report(
         "广州",
-        [
-            {
-                "title": "广州市高温黄色预警",
-                "typeName": "高温",
-                "severity": "黄色",
-                "status": "生效",
-            }
-        ],
+        {
+            "warnings": [
+                {
+                    "title": "广州市高温黄色预警",
+                    "typeName": "高温",
+                    "severity": "黄色",
+                    "status": "生效",
+                }
+            ]
+        },
     )
 
     assert report == "广州当前有天气预警：广州市高温黄色预警，状态生效。"
+
+
+def test_build_weather_warning_report_reports_permission_error():
+    report = get_weather.build_weather_warning_report(
+        "广州",
+        {"error": "No permission to request this data."},
+    )
+
+    assert report == "天气预警接口当前没有可用权限，不能确认广州预警状态。"
 
 
 def test_get_weather_warning_branch_uses_warning_api(monkeypatch):
@@ -83,7 +94,7 @@ def test_get_weather_warning_branch_uses_warning_api(monkeypatch):
 
     def fake_warning(location_id, api_key, api_host):
         captured["warning_lookup"] = (location_id, api_key, api_host)
-        return []
+        return {"warnings": []}
 
     monkeypatch.setattr(get_weather, "fetch_city_info", fake_city_info)
     monkeypatch.setattr(get_weather, "fetch_weather_warning", fake_warning)
