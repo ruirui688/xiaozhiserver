@@ -86,6 +86,9 @@ def test_metaso_search_keeps_snippet_and_answer_constraints(monkeypatch):
     assert "不要擅自补充搜索结果没有明确写出的赛事阶段、轮次、状态、胜者或比分" in result
     assert "用户没有询问阶段或轮次时，不要主动概括为小组赛、淘汰赛、决赛等阶段" in result
     assert "使用“比赛”这类中性表述" in result
+    assert "最终回复只给最小必要事实" in result
+    assert "不要主动补充球员、进球分钟、下一轮对手、历史纪录、阶段轮次" in result
+    assert "不要使用Markdown加粗、列表符号或分段标题" in result
     assert "不能把不确定的日期当成确定事实" in result
     assert "加拿大1比0战胜南非" in result
     assert "摘要：6月28日，南非队球员在比赛后离场。" in result
