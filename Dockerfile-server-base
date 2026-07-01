@@ -1,5 +1,6 @@
 # Dockerfile-server-base
 # 基础镜像，包含系统依赖和Python包
+# For production, pin to digest: FROM python:3.10-slim@sha256:...
 ARG PYTHON_BASE_IMAGE=python:3.10-slim
 FROM ${PYTHON_BASE_IMAGE}
 

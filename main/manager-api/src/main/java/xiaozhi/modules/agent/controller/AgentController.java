@@ -108,6 +108,11 @@ public class AgentController {
     @Operation(summary = "获取智能体详情")
     @RequiresPermissions("sys:role:normal")
     public Result<AgentInfoVO> getAgentById(@PathVariable("id") String id) {
+        // Verify user owns this agent
+        UserDetail user = SecurityUser.getUser();
+        if (!agentService.checkAgentPermission(id, user.getId())) {
+            return new Result<AgentInfoVO>().error("没有权限查看该智能体");
+        }
         AgentInfoVO agent = agentService.getAgentById(id);
         return ResultUtils.success(agent);
     }
@@ -123,9 +128,14 @@ public class AgentController {
     @PutMapping("/saveMemory/{macAddress}")
     @Operation(summary = "根据设备id更新智能体")
     public Result<Void> updateByDeviceId(@PathVariable String macAddress, @RequestBody @Valid AgentMemoryDTO dto) {
+        // Verify user owns this device
+        UserDetail user = SecurityUser.getUser();
         DeviceEntity device = deviceService.getDeviceByMacAddress(macAddress);
         if (device == null) {
             return new Result<>();
+        }
+        if (!agentService.checkAgentPermission(device.getAgentId(), user.getId())) {
+            return new Result<Void>().error("没有权限操作该设备");
         }
         AgentUpdateDTO agentUpdateDTO = new AgentUpdateDTO();
         agentUpdateDTO.setSummaryMemory(dto.getSummaryMemory());

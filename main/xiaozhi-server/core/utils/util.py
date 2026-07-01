@@ -5,11 +5,13 @@ import copy
 import wave
 import socket
 import asyncio
+import ipaddress
 import requests
 import subprocess
 import numpy as np
 import opuslib_next
 from io import BytesIO
+from urllib.parse import urlparse
 from core.utils import p3
 from core.utils.model_config import (
     get_typed_config,
@@ -578,7 +580,7 @@ def sanitize_tool_name(name: str) -> str:
 
 def validate_mcp_endpoint(mcp_endpoint: str) -> bool:
     """
-    校验MCP接入点格式
+    校验MCP接入点格式，包含SSRF防护
 
     Args:
         mcp_endpoint: MCP接入点字符串
@@ -587,14 +589,25 @@ def validate_mcp_endpoint(mcp_endpoint: str) -> bool:
         bool: 是否有效
     """
     # 1. 检查是否以ws开头
-    if not mcp_endpoint.startswith("ws"):
+    if not mcp_endpoint or not mcp_endpoint.startswith("ws"):
         return False
 
-    # 2. 检查是否包含key、call字样
+    # 2. SSRF防护：解析URL并验证IP地址
+    try:
+        parsed = urlparse(mcp_endpoint)
+        host = parsed.hostname
+        if host:
+            addr = ipaddress.ip_address(host)
+            if addr.is_private or addr.is_loopback or addr.is_link_local:
+                return False
+    except ValueError:
+        pass  # 域名而非IP，允许通过
+
+    # 3. 检查是否包含key、call字样
     if "key" in mcp_endpoint.lower() or "call" in mcp_endpoint.lower():
         return False
 
-    # 3. 检查是否包含/mcp/字样
+    # 4. 检查是否包含/mcp/字样
     if "/mcp/" not in mcp_endpoint:
         return False
 

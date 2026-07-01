@@ -166,7 +166,27 @@ WEATHER_CODE_MAP = {
 }
 
 
+# 允许的天气API主机列表
+ALLOWED_WEATHER_API_HOSTS = [
+    "geoapi.qweather.com",
+    "api.qweather.com",
+    "devapi.qweather.com",
+    "geocoding-api.open-meteo.com",
+    "api.open-meteo.com",
+]
+
+
+def _validate_weather_api_host(api_host: str) -> bool:
+    """验证天气API主机名是否在允许列表中"""
+    if not api_host:
+        return False
+    return api_host in ALLOWED_WEATHER_API_HOSTS
+
+
 def fetch_city_info(location, api_key, api_host):
+    if not _validate_weather_api_host(api_host):
+        logger.bind(tag=TAG).error(f"不允许的天气API主机: {api_host}")
+        return None
     url = f"https://{api_host}/geo/v2/city/lookup?key={api_key}&location={location}&lang=zh"
     response = requests.get(url, headers=HEADERS, timeout=10).json()
     if response.get("error") is not None:
@@ -178,6 +198,9 @@ def fetch_city_info(location, api_key, api_host):
 
 
 def fetch_weather_warning(location_id, api_key, api_host):
+    if not _validate_weather_api_host(api_host):
+        logger.bind(tag=TAG).error(f"不允许的天气API主机: {api_host}")
+        return None
     url = f"https://{api_host}/v7/warning/now"
     response = requests.get(
         url,

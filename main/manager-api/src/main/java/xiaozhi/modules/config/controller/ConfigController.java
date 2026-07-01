@@ -1,5 +1,6 @@
 package xiaozhi.modules.config.controller;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -64,9 +65,25 @@ public class ConfigController {
     @PostMapping("knowledge/retrieval")
     @Operation(summary = "服务端知识库召回接口")
     public Result<Object> retrieval(@RequestBody Map<String, Object> body) {
+        // Safely extract dataset_ids and question with type checks
+        Object datasetIdsObj = body.get("dataset_ids");
+        @SuppressWarnings("unchecked")
+        List<String> datasetIds = new ArrayList<>();
+        if (datasetIdsObj instanceof List<?>) {
+            for (Object item : (List<?>) datasetIdsObj) {
+                if (item instanceof String) {
+                    datasetIds.add((String) item);
+                }
+            }
+        }
+        String question = null;
+        Object questionObj = body.get("question");
+        if (questionObj instanceof String) {
+            question = (String) questionObj;
+        }
         RetrievalDTO.TestReq req = RetrievalDTO.TestReq.builder()
-                .datasetIds((List<String>) body.get("dataset_ids"))
-                .question((String) body.get("question"))
+                .datasetIds(datasetIds)
+                .question(question)
                 .page(1)
                 .pageSize(10)
                 .build();

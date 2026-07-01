@@ -76,8 +76,8 @@ public class ShiroConfig {
         filterMap.put("/otaMag/download/**", "anon");
         filterMap.put("/webjars/**", "anon");
         filterMap.put("/druid/**", "anon");
-        filterMap.put("/v3/api-docs/**", "anon");
-        filterMap.put("/doc.html", "anon");
+        filterMap.put("/v3/api-docs/**", "authc");
+        filterMap.put("/doc.html", "authc");
         filterMap.put("/favicon.ico", "anon");
         filterMap.put("/user/captcha", "anon");
         filterMap.put("/user/smsVerification", "anon");

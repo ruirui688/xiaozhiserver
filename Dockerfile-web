@@ -1,5 +1,5 @@
 # 第一阶段：构建Vue前端
-ARG NODE_BASE_IMAGE=node:18
+ARG NODE_BASE_IMAGE=node:20
 ARG MAVEN_BASE_IMAGE=maven:3.9.4-eclipse-temurin-21
 ARG WEB_RUNTIME_BASE_IMAGE=bellsoft/liberica-runtime-container:jre-21-glibc
 FROM ${NODE_BASE_IMAGE} AS web-builder
@@ -46,6 +46,10 @@ COPY --from=api-builder /app/target/xiaozhi-esp32-api.jar /app/xiaozhi-esp32-api
 
 # 暴露端口
 EXPOSE 8002
+
+# 健康检查：每30秒检查HTTP 8002端口 (curl is installed via apk above)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD curl -f http://localhost:8002/ || exit 1
 
 # 启动脚本
 COPY docs/docker/start.sh /start.sh

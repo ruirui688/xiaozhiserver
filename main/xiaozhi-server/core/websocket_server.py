@@ -65,7 +65,7 @@ class WebSocketServer:
         self.active_handlers = set()
 
         auth_config = self.config["server"].get("auth", {})
-        self.auth_enable = auth_config.get("enabled", False)
+        self.auth_enable = auth_config.get("enabled", True)
         # 设备白名单
         self.allowed_devices = set(auth_config.get("allowed_devices", []))
         secret_key = self.config["server"]["auth_key"]
@@ -96,18 +96,23 @@ class WebSocketServer:
                 return
             parsed_url = urlparse(request_path)
             query_params = parse_qs(parsed_url.query)
+
+            def _sanitize_header_value(value: str) -> str:
+                """Strip newlines, carriage returns, and null bytes from header values to prevent header injection."""
+                return value.replace("\r", "").replace("\n", "").replace("\x00", "")
+
             if "device-id" not in query_params:
                 await websocket.send("端口正常，如需测试连接，请使用ESP32设备或WebSocket客户端")
                 await websocket.close()
                 return
             else:
-                websocket.request.headers["device-id"] = query_params["device-id"][0]
+                websocket.request.headers["device-id"] = _sanitize_header_value(query_params["device-id"][0])
             if "client-id" in query_params:
-                websocket.request.headers["client-id"] = query_params["client-id"][0]
+                websocket.request.headers["client-id"] = _sanitize_header_value(query_params["client-id"][0])
             if "authorization" in query_params:
-                websocket.request.headers["authorization"] = query_params[
-                    "authorization"
-                ][0]
+                websocket.request.headers["authorization"] = _sanitize_header_value(
+                    query_params["authorization"][0]
+                )
 
         """处理新连接，每次创建独立的ConnectionHandler"""
         # 先认证，后建立连接

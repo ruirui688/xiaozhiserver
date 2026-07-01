@@ -60,7 +60,6 @@ def search_from_ragflow(conn: "ConnectionHandler", question=None):
             json=payload,
             headers=headers,
             timeout=5,
-            verify=False,
         )
 
         # 显式设置响应的编码为utf-8

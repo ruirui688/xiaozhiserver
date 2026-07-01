@@ -110,6 +110,24 @@ GET_NEWS_FROM_NEWSNOW_FUNCTION_DESC = {
 }
 
 
+# 允许的新闻API主机列表
+ALLOWED_NEWS_API_HOSTS = ["newsnow.busiyi.world", "newsnow.io", "api.newsnow.io"]
+
+
+def _validate_news_url(url: str) -> bool:
+    """验证新闻API URL是否在允许的主机列表中"""
+    from urllib.parse import urlparse
+    if not url:
+        return False
+    try:
+        parsed = urlparse(url)
+        if not parsed.hostname:
+            return False
+        return parsed.hostname in ALLOWED_NEWS_API_HOSTS
+    except Exception:
+        return False
+
+
 def fetch_news_from_api(conn: "ConnectionHandler", source="thepaper"):
     """从API获取新闻列表"""
     try:
@@ -117,6 +135,9 @@ def fetch_news_from_api(conn: "ConnectionHandler", source="thepaper"):
 
         news_config = conn.config.get("plugins", {}).get("get_news_from_newsnow", {})
         if news_config.get("url"):
+            if not _validate_news_url(news_config["url"]):
+                logger.bind(tag=TAG).error(f"不允许的新闻API URL: {news_config['url']}")
+                return []
             api_url = news_config["url"] + source
 
         headers = {"User-Agent": "Mozilla/5.0"}

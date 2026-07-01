@@ -6,5 +6,9 @@ FROM ${SERVER_BASE_IMAGE}
 
 COPY main/xiaozhi-server .
 
+# 健康检查：每30秒检测8000端口是否可达
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD python -c "import socket; s=socket.socket(); s.settimeout(5); s.connect(('localhost',8000)); s.close()"
+
 # 启动应用
 CMD ["python", "app.py"]

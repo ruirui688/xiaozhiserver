@@ -183,6 +183,22 @@ class ServerMCPClient:
                         if self.config["command"] == "npx"
                         else self.config["command"]
                     )
+                    # SECURITY: npx -y auto-downloads packages from npm registry.
+                    # Warn if no package.json / lockfile found in the MCP server directory.
+                    if self.config["command"] == "npx" and "-y" in self.config.get("args", []):
+                        mcp_dir = os.path.dirname(os.path.abspath(__file__))
+                        has_lock = (
+                            os.path.exists(os.path.join(mcp_dir, "package.json"))
+                            or os.path.exists(os.path.join(mcp_dir, "package-lock.json"))
+                            or os.path.exists(os.path.join(mcp_dir, "yarn.lock"))
+                            or os.path.exists(os.path.join(mcp_dir, "pnpm-lock.yaml"))
+                        )
+                        if not has_lock:
+                            self.logger.bind(tag=TAG).warning(
+                                "npx -y detected without package.json/lockfile in MCP server directory. "
+                                "This auto-downloads packages at runtime, creating a supply chain risk. "
+                                "For production, pre-install MCP servers via package.json + lockfile."
+                            )
                     env = {**os.environ, **self.config.get("env", {})}
                     params = StdioServerParameters(
                         command=cmd,

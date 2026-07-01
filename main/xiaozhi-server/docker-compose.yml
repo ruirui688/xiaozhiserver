@@ -6,8 +6,6 @@ services:
     image: ${XIAOZHI_IMAGE_REPOSITORY:-xiaozhi-esp32-server-local}:server_latest
     container_name: xiaozhi-esp32-server
     restart: always
-    security_opt:
-      - seccomp:unconfined
     environment:
       - TZ=UTC
     ports:

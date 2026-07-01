@@ -52,6 +52,8 @@ log:
   log_dir: tmp
   # 设置日志文件
   log_file: "server.log"
+  # 在 Docker 中运行时可设 log_to_file: false，只输出到 stdout（由 Docker 日志驱动收集），避免双写日志
+  log_to_file: true
   # 设置数据文件路径
   data_dir: data
 

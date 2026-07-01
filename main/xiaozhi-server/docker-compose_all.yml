@@ -11,15 +11,6 @@ services:
       - xiaozhi-esp32-server-web
     restart: always
     networks:
-      - default
-    ports:
-      # ws服务端
-      - "8000:8000"
-      # http服务的端口，用于视觉分析接口
-      - "8003:8003"
-    security_opt:
-      - seccomp:unconfined
-    environment:
       - TZ=Asia/Shanghai
     volumes:
       # 配置文件目录
@@ -44,9 +35,9 @@ services:
       - TZ=Asia/Shanghai
       - SPRING_DATASOURCE_DRUID_URL=jdbc:mysql://xiaozhi-esp32-server-db:3306/xiaozhi_esp32_server?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&nullCatalogMeansCurrent=true&connectTimeout=30000&socketTimeout=30000&autoReconnect=true&failOverReadOnly=false&maxReconnects=10
       - SPRING_DATASOURCE_DRUID_USERNAME=root
-      - SPRING_DATASOURCE_DRUID_PASSWORD=${XIAOZHI_MYSQL_ROOT_PASSWORD:-123456}
+      - SPRING_DATASOURCE_DRUID_PASSWORD=${XIAOZHI_MYSQL_ROOT_PASSWORD:?MySQL root password required}
       - SPRING_DATA_REDIS_HOST=xiaozhi-esp32-server-redis
-      - SPRING_DATA_REDIS_PASSWORD=
+      - SPRING_DATA_REDIS_PASSWORD=${XIAOZHI_REDIS_PASSWORD:?Redis password required}
       - SPRING_DATA_REDIS_PORT=6379
     volumes:
       # 配置文件目录
@@ -69,7 +60,7 @@ services:
       - ./mysql/data:/var/lib/mysql
     environment:
       - TZ=Asia/Shanghai
-      - MYSQL_ROOT_PASSWORD=${XIAOZHI_MYSQL_ROOT_PASSWORD:-123456}
+      - MYSQL_ROOT_PASSWORD=${XIAOZHI_MYSQL_ROOT_PASSWORD:?MySQL root password required}
       - MYSQL_DATABASE=xiaozhi_esp32_server
       - MYSQL_INITDB_ARGS="--character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci"
   # redis模块
@@ -81,7 +72,7 @@ services:
     restart: always
     volumes:
       - ./redis/data:/data
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --requirepass ${XIAOZHI_REDIS_PASSWORD:?Redis password required}
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s

@@ -53,19 +53,30 @@ async def main():
     for warning in provider_warnings:
         logger.bind(tag="ProviderValidator").warning(warning)
 
-    # auth_key优先级：配置文件server.auth_key > manager-api.secret > 自动生成
+    # auth_key优先级：配置文件server.auth_key > manager-api.secret > data/.auth_key文件 > 自动生成
     # auth_key用于jwt认证，比如视觉分析接口的jwt认证、ota接口的token生成与websocket认证
-    # 获取配置文件中的auth_key
+    # 持久化到 data/.auth_key 文件，确保重启后设备token仍然有效
+    auth_key_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", ".auth_key")
     auth_key = config["server"].get("auth_key", "")
-    
+
     # 验证auth_key，无效则尝试使用manager-api.secret
     if not auth_key or len(auth_key) == 0 or is_placeholder_value(auth_key):
         auth_key = config.get("manager-api", {}).get("secret", "")
-        # 验证secret，无效则生成随机密钥
+        # 验证secret，无效则尝试从持久文件读取
         if not auth_key or len(auth_key) == 0 or is_placeholder_value(auth_key):
-            auth_key = str(uuid.uuid4().hex)
-    
+            if os.path.exists(auth_key_file):
+                with open(auth_key_file, "r") as f:
+                    auth_key = f.read().strip()
+            # 文件中也无效，生成随机密钥
+            if not auth_key or len(auth_key) == 0 or is_placeholder_value(auth_key):
+                auth_key = str(uuid.uuid4().hex)
+
     config["server"]["auth_key"] = auth_key
+
+    # 持久化auth_key到文件，确保重启后一致
+    os.makedirs(os.path.dirname(auth_key_file), exist_ok=True)
+    with open(auth_key_file, "w") as f:
+        f.write(auth_key)
 
     # 后台/nohup 启动时 stdin 不可交互，跳过 stdin 监听，避免服务立即退出
     stdin_task = None

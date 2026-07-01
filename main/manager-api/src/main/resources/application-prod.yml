@@ -7,7 +7,9 @@ knife4j:
   production: true
   enable: false
   basic:
-    enable: false
+    enable: true
+    username: admin
+    password: ${KNIFE4J_PASSWORD:}
 
 spring:
   datasource:

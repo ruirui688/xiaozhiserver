@@ -111,6 +111,9 @@ public class ConfigServiceImpl implements ConfigService {
                 isCache);
 
         // 将配置存入Redis
+        // TODO: The full config including API keys and secrets is cached in Redis.
+        // Consider encrypting sensitive values before caching (e.g. AES-GCM with a
+        // per-deployment key stored as an env var or Vault secret).
         redisUtils.set(RedisKeys.getServerConfigKey(), result);
 
         return result;
