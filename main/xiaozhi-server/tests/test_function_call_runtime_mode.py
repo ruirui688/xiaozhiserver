@@ -1,4 +1,5 @@
 import sys
+import queue
 from pathlib import Path
 
 
@@ -8,6 +9,7 @@ if str(SERVER_ROOT) not in sys.path:
 
 from core.connection import ConnectionHandler
 from core.providers.intent.function_call.function_call import IntentProvider as FunctionCallIntent
+from core.providers.tts.dto.dto import ContentType
 from plugins_func.register import Action, ActionResponse
 
 
@@ -17,6 +19,62 @@ class NativeFunctionCallLLM:
 
 class TextOnlyLLM:
     supports_native_function_call = False
+
+
+class CapturingFunctionCallLLM:
+    supports_native_function_call = True
+
+    def __init__(self, responses):
+        self.responses = responses
+        self.calls = []
+
+    def response_with_functions(self, session_id, dialogue, functions):
+        self.calls.append(
+            {
+                "session_id": session_id,
+                "dialogue": dialogue,
+                "functions": functions,
+            }
+        )
+        return iter(self.responses)
+
+    def response(self, session_id, dialogue):
+        raise AssertionError("function_call mode must use response_with_functions")
+
+
+class CapturingTTS:
+    def __init__(self):
+        self.tts_text_queue = queue.Queue()
+        self.stored_text = []
+
+    def store_tts_text(self, sentence_id, text):
+        self.stored_text.append(text)
+
+    def queued_text(self):
+        items = list(self.tts_text_queue.queue)
+        return [
+            item.content_detail
+            for item in items
+            if item.content_type == ContentType.TEXT and item.content_detail
+        ]
+
+
+class CapturingToolHandler:
+    def __init__(self, functions):
+        self.functions = functions
+        self.calls = []
+
+    def get_functions(self):
+        return list(self.functions)
+
+    def has_tool(self, name):
+        return any(
+            item.get("function", {}).get("name") == name for item in self.functions
+        )
+
+    async def handle_llm_function_call(self, conn, tool_call_data):
+        self.calls.append(tool_call_data)
+        return ActionResponse(action=Action.RESPONSE, response="执行完成")
 
 
 def _config():
@@ -63,6 +121,30 @@ def _conn_without_intent_llm_config(llm):
         _memory=None,
         _intent=FunctionCallIntent({}),
     )
+
+
+def _tool(name):
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": f"{name} description",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+
+
+def _chat_conn(llm, tool_handler):
+    conn = _conn(llm)
+    conn.intent_type = "function_call"
+    conn.configured_intent_type = "function_call"
+    conn.func_handler = tool_handler
+    conn.tts = CapturingTTS()
+    conn.features = {"emoji": False}
+    conn.read_config_from_api = False
+    conn.memory = None
+    conn.loop = None
+    return conn
 
 
 def test_function_call_mode_kept_for_native_provider():
@@ -130,3 +212,46 @@ def test_reqlm_tool_result_can_continue_tool_chain():
     )
 
     assert calls == [{"query": None, "depth": 1, "allow_tools": True}]
+
+
+def test_function_call_chat_passes_full_tool_schema_to_main_llm():
+    tools = [_tool("play_music"), _tool("self_audio_speaker_set_volume")]
+    llm = CapturingFunctionCallLLM([("直接回复", None)])
+    conn = _chat_conn(llm, CapturingToolHandler(tools))
+
+    assert conn.chat("那你放个歌") is True
+
+    assert len(llm.calls) == 1
+    function_names = [
+        item.get("function", {}).get("name") for item in llm.calls[0]["functions"]
+    ]
+    assert function_names == [
+        "play_music",
+        "self_audio_speaker_set_volume",
+        "direct_answer",
+    ]
+    assert conn.tts.queued_text() == ["直接回复"]
+    assert conn.tts.stored_text == ["直接回复"]
+
+
+def test_function_call_chat_blocks_dsml_protocol_text_from_tts_and_history():
+    dsml = (
+        "<｜｜DSML｜｜tool_calls>\n"
+        "<｜｜DSML｜｜invoke name=\"play_music\">\n"
+        "<｜｜DSML｜｜parameter name=\"query\" string=\"true\">随机</｜｜DSML｜｜parameter>"
+    )
+    tool_handler = CapturingToolHandler([_tool("play_music")])
+    llm = CapturingFunctionCallLLM([(dsml, None)])
+    conn = _chat_conn(llm, tool_handler)
+
+    assert conn.chat("那你放个歌") is True
+
+    queued_text = "".join(conn.tts.queued_text())
+    stored_text = "".join(conn.tts.stored_text)
+    history_text = "\n".join(
+        message.content or "" for message in conn.dialogue.dialogue
+    )
+    assert "DSML" not in queued_text
+    assert "DSML" not in stored_text
+    assert "DSML" not in history_text
+    assert tool_handler.calls == []

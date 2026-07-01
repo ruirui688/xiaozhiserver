@@ -68,6 +68,17 @@ TAG = __name__
 auto_import_modules("plugins_func.functions")
 
 
+def _sanitize_log_text(value, limit=500):
+    text = str(value)
+    text = re.sub(
+        r"(?i)(authorization|api[_-]?key|access[_-]?token|secret[_-]?key|token|secret)"
+        r'(\s*[:=]\s*)(".*?"|\'.*?\'|[^\s,;}]+)',
+        r"\1\2***",
+        text,
+    )
+    return text[:limit]
+
+
 class TTSException(RuntimeError):
     pass
 
@@ -1327,11 +1338,11 @@ class ConnectionHandler:
             # 处理基于文本的工具调用格式
             if unhandled_tool_protocol:
                 bHasError = True
-                safe_message = "设备控制请求没有执行成功，模型返回了无法识别的工具调用格式。"
                 response_message.clear()
-                response_message.append(safe_message)
+                if not first_tts_text_enqueued:
+                    queue_tts_text("这个工具调用没有按正确格式返回，我先不执行。")
                 self.logger.bind(tag=TAG).error(
-                    f"unsupported tool protocol from LLM: {content_arguments}"
+                    f"unsupported tool protocol from LLM: {_sanitize_log_text(content_arguments)}"
                 )
             elif len(tool_calls_list) == 0 and content_arguments:
                 a = extract_json_from_string(content_arguments)
@@ -1350,13 +1361,14 @@ class ConnectionHandler:
                         )
                     except Exception as e:
                         bHasError = True
-                        response_message.append(a)
                 else:
                     bHasError = True
-                    response_message.append(content_arguments)
                 if bHasError:
+                    response_message.clear()
+                    if not first_tts_text_enqueued:
+                        queue_tts_text("这个工具调用没有按正确格式返回，我先不执行。")
                     self.logger.bind(tag=TAG).error(
-                        f"function call error: {content_arguments}"
+                        f"function call error: {_sanitize_log_text(content_arguments)}"
                     )
 
             if not bHasError and len(tool_calls_list) > 0:
