@@ -27,7 +27,6 @@ import xiaozhi.modules.agent.dto.AgentChatSessionDTO;
 import xiaozhi.modules.agent.entity.AgentEntity;
 import xiaozhi.modules.agent.service.AgentChatHistoryService;
 import xiaozhi.modules.device.dao.DeviceDao;
-import xiaozhi.modules.llm.service.EmbeddingService;
 import xiaozhi.modules.llm.service.LLMService;
 import xiaozhi.modules.memory.dao.MemoryCandidateDao;
 import xiaozhi.modules.memory.dao.MemoryFactDao;
@@ -61,7 +60,6 @@ class MemoryServiceImplTest {
     private final DeviceDao deviceDao = mock(DeviceDao.class);
     private final AgentDao agentDao = mock(AgentDao.class);
     private final LLMService llmService = mock(LLMService.class);
-    private final EmbeddingService embeddingService = mock(EmbeddingService.class);
     private final ModelConfigService modelConfigService = mock(ModelConfigService.class);
     private final ModelRuntimeAssembler modelRuntimeAssembler = mock(ModelRuntimeAssembler.class);
     private final AgentChatHistoryService agentChatHistoryService = mock(AgentChatHistoryService.class);
@@ -70,6 +68,28 @@ class MemoryServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        MemoryQueryServiceImpl memoryQueryService = new MemoryQueryServiceImpl(
+                factDao,
+                profileDao,
+                toolBehaviorDao,
+                tombstoneDao,
+                deviceDao,
+                agentDao,
+                llmService,
+                modelConfigService,
+                modelRuntimeAssembler);
+        MemoryMaintenanceServiceImpl memoryMaintenanceService = new MemoryMaintenanceServiceImpl(
+                sourceEventDao,
+                candidateDao,
+                factDao,
+                revisionDao,
+                tombstoneDao,
+                deviceDao,
+                agentDao,
+                llmService,
+                modelConfigService,
+                modelRuntimeAssembler,
+                agentChatHistoryService);
         memoryService = new MemoryServiceImpl(
                 sourceEventDao,
                 candidateDao,
@@ -80,11 +100,8 @@ class MemoryServiceImplTest {
                 tombstoneDao,
                 deviceDao,
                 agentDao,
-                llmService,
-                embeddingService,
-                modelConfigService,
-                modelRuntimeAssembler,
-                agentChatHistoryService);
+                memoryQueryService,
+                memoryMaintenanceService);
 
         AgentEntity agent = new AgentEntity();
         agent.setId(AGENT_ID);
@@ -319,7 +336,7 @@ class MemoryServiceImplTest {
         existing.setCategory("人际关系");
         existing.setMemoryType("领导信息");
         when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(existing));
-        when(factDao.selectOne(any(Wrapper.class))).thenReturn(existing);
+        when(factDao.selectOne(any(Wrapper.class))).thenReturn(existing, (MemoryFactEntity) null);
         when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID)))
                 .thenReturn("""
                         {
@@ -392,7 +409,7 @@ class MemoryServiceImplTest {
     void rememberReviewCanTurnAddIntoUpdateForExistingFact() {
         MemoryFactEntity existing = activeFact("fact-1", "高瑞瑞的领导是钟文杰");
         when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(existing));
-        when(factDao.selectOne(any(Wrapper.class))).thenReturn(existing);
+        when(factDao.selectOne(any(Wrapper.class))).thenReturn(existing, (MemoryFactEntity) null);
         when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID)))
                 .thenReturn("""
                         {

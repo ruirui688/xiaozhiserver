@@ -1238,7 +1238,7 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
                         .header(Header.CONTENT_TYPE, ContentType.JSON.getValue())
                         .header(Header.AUTHORIZATION, "Bearer " + generateBearerToken())
                         .body(JSONUtil.toJsonStr(requestBody))
-                        .timeout(10000) // 超时，毫秒
+                        .timeout(3000) // 调试工具列表兜底查询，避免拖住管理后台弹窗
                         .execute().body();
             } catch (Exception e) {
                 resultData.put("message", "MQTT网关工具查询失败: " + e.getMessage());

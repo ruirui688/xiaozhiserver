@@ -119,6 +119,7 @@ export default {
       deviceRuntimeStatus: null,
       statusLoading: false,
       toolsLoading: false,
+      toolsRequesting: false,
       heartbeatTimer: null,
       statusRefreshTimer: null,
       toolRefreshTimer: null,
@@ -257,6 +258,7 @@ export default {
       this.mcpToolsStatus = '';
       this.deviceRuntimeStatus = null;
       this.statusLoading = false;
+      this.toolsRequesting = false;
       this.pcmRemainder = new Int16Array(0);
       this.activePlaybackSources = [];
       this.assistantSpeaking = false;
@@ -317,6 +319,10 @@ export default {
         this.mcpTools = [];
         return Promise.resolve([]);
       }
+      if (this.toolsRequesting) {
+        return Promise.resolve(this.mcpTools);
+      }
+      this.toolsRequesting = true;
       return new Promise((resolve) => {
         Api.device.getDeviceTools(this.deviceId, (res) => {
           const data = res && res.data && res.data.data;
@@ -324,6 +330,7 @@ export default {
           this.mcpTools = tools;
           this.mcpToolsStatus = this.resolveToolsStatus(res, data, tools);
           this.addEvent(`device mcp tools/list -> ${tools.length}`);
+          this.toolsRequesting = false;
           resolve(tools);
         });
       });
