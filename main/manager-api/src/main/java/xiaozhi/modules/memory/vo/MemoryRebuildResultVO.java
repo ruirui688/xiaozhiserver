@@ -15,6 +15,7 @@ public class MemoryRebuildResultVO {
     private int factsCleared;
     private int candidatesCleared;
     private int tombstonesCleared;
+    private int actionsProposed;
     private int factsChanged;
     private int candidatesCreated;
     private boolean dryRun;

@@ -1,5 +1,6 @@
 # Dockerfile-server-base
 # 基础镜像，包含系统依赖和Python包
+# For production, pin to digest: FROM python:3.10-slim@sha256:...
 ARG PYTHON_BASE_IMAGE=python:3.10-slim
 FROM ${PYTHON_BASE_IMAGE}
 
@@ -47,3 +48,8 @@ COPY ${SERVER_REQUIREMENTS} requirements.txt
 # 安装Python依赖
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt --default-timeout=120 --retries 5
+
+# Create non-root user for security
+RUN groupadd -r xiaozhi && useradd -r -g xiaozhi -d /opt/xiaozhi-esp32-server xiaozhi && \
+    chown -R xiaozhi:xiaozhi /opt/xiaozhi-esp32-server
+USER xiaozhi

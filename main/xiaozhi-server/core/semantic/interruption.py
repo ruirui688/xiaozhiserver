@@ -48,19 +48,26 @@ decision 含义：
         timeout = float(config.get("timeout_seconds", 1.5))
 
         try:
-            raw_response = await asyncio.wait_for(
-                asyncio.to_thread(
-                    conn.llm.response_no_stream,
-                    system_prompt=self.SYSTEM_PROMPT,
-                    user_prompt=user_prompt,
-                ),
-                timeout=timeout,
+            # 创建可取消的线程任务，避免超时后线程继续运行
+            thread_future = asyncio.to_thread(
+                conn.llm.response_no_stream,
+                system_prompt=self.SYSTEM_PROMPT,
+                user_prompt=user_prompt,
             )
+            raw_response = await asyncio.wait_for(thread_future, timeout=timeout)
+        except asyncio.TimeoutError:
+            conn.logger.bind(tag=__name__).warning(
+                f"语义打断大模型裁决超时({timeout}s)，按新用户轮次处理"
+            )
+            # 取消底层线程任务（asyncio.to_thread 返回的 Future 可取消）
+            if not thread_future.done():
+                thread_future.cancel()
+            return InterruptionClassification("new_turn", "llm_timeout")
         except Exception as e:
             conn.logger.bind(tag=__name__).warning(
-                f"语义打断大模型裁决失败，默认不打断: {e}"
+                f"语义打断大模型裁决失败，按新用户轮次处理: {e}"
             )
-            return InterruptionClassification("continue", "llm_error")
+            return InterruptionClassification("new_turn", "llm_error")
 
         return self._parse_response(raw_response)
 
@@ -104,7 +111,7 @@ decision 含义：
             return InterruptionClassification("interrupt", reason, raw)
         if decision == "new_turn":
             return InterruptionClassification("new_turn", reason, raw)
-        return InterruptionClassification("continue", "invalid_llm_decision", raw)
+        return InterruptionClassification("new_turn", "invalid_llm_decision", raw)
 
     def _loads_json(self, raw: str) -> dict:
         try:

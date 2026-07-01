@@ -1,4 +1,6 @@
 {
+  // SECURITY WARNING: npx -y auto-downloads packages. Use only trusted packages.
+  // For production: pre-install MCP servers via package.json + lockfile instead.
   "des": [
     "在data目录下创建.mcp_server_settings.json文件，可以选择下面的MCP服务，也可以自行添加新的MCP服务。",
     "后面不断测试补充好用的mcp服务，欢迎大家一起补充。",

@@ -4,7 +4,7 @@
 # This image intentionally excludes torch/torchaudio and the pip silero_vad
 # package. The production path uses cloud ASR providers and the local Silero VAD
 # provider loads the checked-in ONNX model through onnxruntime.
-numpy==1.26.4
+numpy>=1.27.0
 onnxruntime==1.17.3
 #--------- cozepy0.20.0要求websockets<15.0.0，以下暂时不推荐升级的依赖
 websockets==14.2
@@ -24,7 +24,7 @@ loguru==0.7.3
 requests==2.32.5
 cozepy==0.20.0
 mem0ai==1.0.0
-powermem>=0.3.1
+powermem==0.3.1
 bs4==0.0.2
 modelscope==1.32.0
 sherpa_onnx==1.12.29

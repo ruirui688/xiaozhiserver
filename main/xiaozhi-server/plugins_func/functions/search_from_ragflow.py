@@ -25,6 +25,12 @@ SEARCH_FROM_RAGFLOW_FUNCTION_DESC = {
 }
 
 
+# TODO: 知识库结果与记忆结果是两个独立的来源，LLM 应当交叉验证两者的一致性。
+# 当用户询问个性化信息(记忆)和事实性知识(知识库)时，目前的实现分别返回独立的上下文块。
+# 未来应增加编排层(Orchestration Layer)，自动合并/去重/对比知识库与记忆的结果，
+# 并在两者冲突时通知用户。
+
+
 @register_function(
     "search_from_ragflow", SEARCH_FROM_RAGFLOW_FUNCTION_DESC, ToolType.SYSTEM_CTL
 )
@@ -54,7 +60,6 @@ def search_from_ragflow(conn: "ConnectionHandler", question=None):
             json=payload,
             headers=headers,
             timeout=5,
-            verify=False,
         )
 
         # 显式设置响应的编码为utf-8
@@ -144,7 +149,7 @@ def search_from_ragflow(conn: "ConnectionHandler", question=None):
                     error_detail = e.response.json().get("error", {}).get("message", "")
                     if error_detail:
                         error_response += f"\n错误详情：{error_detail}"
-                except:
+                except Exception:
                     pass
             else:
                 error_response = f"RAG接口HTTP异常：{str(e)}"

@@ -22,7 +22,8 @@ class IntentProvider(IntentProviderBase):
     def __init__(self, config):
         super().__init__(config)
         self.llm = None
-        self.promot = ""
+        self.prompt = ""
+        self._cached_func_count = 0
         # 导入全局缓存管理器
         from core.utils.cache.manager import cache_manager, CacheType
 
@@ -168,7 +169,9 @@ class IntentProvider(IntentProviderBase):
             )
             return cached_intent
 
-        if self.promot == "":
+        current_func_count = len(conn.func_handler.get_functions()) if conn.func_handler.get_functions() else 0
+
+        if self.prompt == "" or self._cached_func_count != current_func_count:
             functions = conn.func_handler.get_functions()
             if hasattr(conn, "mcp_client"):
                 mcp_tools = conn.mcp_client.get_available_tools()
@@ -177,11 +180,12 @@ class IntentProvider(IntentProviderBase):
                         functions = []
                     functions.extend(mcp_tools)
 
-            self.promot = self.get_intent_system_prompt(functions)
+            self.prompt = self.get_intent_system_prompt(functions)
+            self._cached_func_count = current_func_count
 
         music_config = initialize_music_handler(conn)
         music_file_names = music_config["music_file_names"]
-        prompt_music = f"{self.promot}\n<musicNames>{music_file_names}\n</musicNames>"
+        prompt_music = f"{self.prompt}\n<musicNames>{music_file_names}\n</musicNames>"
 
         prompt_music += build_home_assistant_devices_prompt(conn)
 

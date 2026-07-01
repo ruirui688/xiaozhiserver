@@ -12,6 +12,21 @@ import importlib
 logger = setup_logging()
 
 
+def list_available_providers():
+    """List all available LLM provider types under core/providers/llm/"""
+    provider_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'providers', 'llm')
+    if not os.path.isdir(provider_dir):
+        return []
+    types = []
+    for entry in sorted(os.listdir(provider_dir)):
+        entry_path = os.path.join(provider_dir, entry)
+        if os.path.isdir(entry_path) and not entry.startswith('_'):
+            provider_file = os.path.join(entry_path, f"{entry}.py")
+            if os.path.isfile(provider_file):
+                types.append(entry)
+    return types
+
+
 def create_instance(class_name, *args, **kwargs):
     # 创建LLM实例
     if os.path.exists(os.path.join('core', 'providers', 'llm', class_name, f'{class_name}.py')):
@@ -20,4 +35,4 @@ def create_instance(class_name, *args, **kwargs):
             sys.modules[lib_name] = importlib.import_module(f'{lib_name}')
         return sys.modules[lib_name].LLMProvider(*args, **kwargs)
 
-    raise ValueError(f"不支持的LLM类型: {class_name}，请检查该配置的type是否设置正确")
+    raise ValueError(f"不支持的LLM类型: {class_name}。可用类型: {', '.join(list_available_providers())}")

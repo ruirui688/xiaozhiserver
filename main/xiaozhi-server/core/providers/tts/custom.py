@@ -2,6 +2,7 @@ import os
 import json
 import uuid
 import requests
+import aiohttp
 from config.logger import setup_logging
 from datetime import datetime
 from core.providers.tts.base import TTSProviderBase
@@ -37,17 +38,20 @@ class TTSProvider(TTSProviderBase):
                 v = v.replace("{prompt_text}", text)
             request_params[k] = v
 
-        if self.method.upper() == "POST":
-            resp = requests.post(self.url, json=request_params, headers=self.headers)
-        else:
-            resp = requests.get(self.url, params=request_params, headers=self.headers)
-        if resp.status_code == 200:
-            if output_file:
-                with open(output_file, "wb") as file:
-                    file.write(resp.content)
+        async with aiohttp.ClientSession() as session:
+            if self.method.upper() == "POST":
+                resp = await session.post(self.url, json=request_params, headers=self.headers)
             else:
-                return resp.content
-        else:
-            error_msg = f"Custom TTS请求失败: {resp.status_code} - {resp.text}"
-            logger.bind(tag=TAG).error(error_msg)
-            raise Exception(error_msg)  # 抛出异常，让调用方捕获
+                resp = await session.get(self.url, params=request_params, headers=self.headers)
+            if resp.status == 200:
+                audio_data = await resp.read()
+                if output_file:
+                    with open(output_file, "wb") as file:
+                        file.write(audio_data)
+                else:
+                    return audio_data
+            else:
+                error_text = await resp.text()
+                error_msg = f"Custom TTS请求失败: {resp.status} - {error_text}"
+                logger.bind(tag=TAG).error(error_msg)
+                raise Exception(error_msg)  # 抛出异常，让调用方捕获

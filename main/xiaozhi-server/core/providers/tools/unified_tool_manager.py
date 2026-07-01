@@ -38,7 +38,13 @@ class ToolManager:
                 tools = executor.get_tools()
                 for name, definition in tools.items():
                     if name in all_tools:
-                        self.logger.warning(f"工具名称冲突: {name}")
+                        existing_type = all_tools[name].tool_type.value
+                        incoming_type = tool_type.value
+                        self.logger.warning(
+                            f"工具名称冲突: {name} (已有: {existing_type}, "
+                            f"跳过: {incoming_type}) — 保留先注册的 {existing_type}"
+                        )
+                        continue  # 保留先注册的工具（SERVER_PLUGIN优先）
                     all_tools[name] = definition
             except Exception as e:
                 self.logger.error(f"获取{tool_type.value}工具时出错: {e}")

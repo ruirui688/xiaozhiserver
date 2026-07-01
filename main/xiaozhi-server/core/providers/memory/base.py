@@ -16,7 +16,7 @@ class MemoryProviderBase(ABC):
     @abstractmethod
     async def save_memory(self, msgs, session_id=None):
         """Save a new memory for specific role and return memory ID"""
-        print("this is base func", msgs)
+        logger.bind(tag="memory").debug(f"this is base func {msgs}")
 
     @abstractmethod
     async def query_memory(self, query: str) -> str:

@@ -7,6 +7,7 @@ import os
 import re
 import glob
 from typing import Dict, List, Tuple
+from urllib.parse import urljoin
 from aiohttp import web
 
 from core.auth import AuthManager
@@ -14,6 +15,23 @@ from core.utils.util import get_local_ip, get_vision_url
 from core.api.base_handler import BaseHandler
 
 TAG = __name__
+
+
+# Simple in-memory rate limiter for OTA requests per device
+_ota_rate_limit_map: Dict[str, int] = {}  # device_id -> last_request_timestamp
+
+
+def _check_ota_rate_limit(device_id: str, cooldown_seconds: int = 5) -> bool:
+    """Check if this device is requesting too frequently.
+
+    Returns True if the request is allowed, False if it should be rate-limited.
+    """
+    now = int(time.time())
+    last = _ota_rate_limit_map.get(device_id, 0)
+    if now - last < cooldown_seconds:
+        return False
+    _ota_rate_limit_map[device_id] = now
+    return True
 
 
 def _safe_basename(filename: str) -> str:
@@ -47,7 +65,7 @@ class OTAHandler(BaseHandler):
     def __init__(self, config: dict):
         super().__init__(config)
         auth_config = config["server"].get("auth", {})
-        self.auth_enable = auth_config.get("enabled", False)
+        self.auth_enable = auth_config.get("enabled", True)
         # 设备白名单
         self.allowed_devices = set(auth_config.get("allowed_devices", []))
         secret_key = config["server"]["auth_key"]
@@ -152,7 +170,8 @@ class OTAHandler(BaseHandler):
         try:
             data = await request.text()
             self.logger.bind(tag=TAG).debug(f"OTA请求方法: {request.method}")
-            self.logger.bind(tag=TAG).debug(f"OTA请求头: {request.headers}")
+            safe_headers = {k: "***" if k.lower() in ("authorization", "api-key", "x-api-key", "auth", "token") else v for k, v in request.headers.items()}
+            self.logger.bind(tag=TAG).debug(f"OTA请求头: {safe_headers}")
             self.logger.bind(tag=TAG).debug(f"OTA请求数据: {data}")
 
             device_id = request.headers.get("device-id", "")
@@ -160,6 +179,17 @@ class OTAHandler(BaseHandler):
                 self.logger.bind(tag=TAG).info(f"OTA请求设备ID: {device_id}")
             else:
                 raise Exception("OTA请求设备ID为空")
+
+            # Apply rate limiting per device
+            if not _check_ota_rate_limit(device_id):
+                self.logger.bind(tag=TAG).warning(f"OTA请求频率过高，设备ID: {device_id}")
+                response = web.Response(
+                    text=json.dumps({"success": False, "message": "too many requests"}),
+                    content_type="application/json",
+                    status=429,
+                )
+                self._add_cors_headers(response)
+                return response
 
             client_id = request.headers.get("client-id", "")
             if client_id:
@@ -315,11 +345,12 @@ class OTAHandler(BaseHandler):
                     if _is_higher_version(ver, device_version):
                         # build download url (only allow download via our download endpoint)
                         chosen_version = ver
-                        # Use get_vision_url to get the base URL and replace the path
+                        # Use get_vision_url to get the base URL, then append the download path
                         vision_url = get_vision_url(self.config)
-                        # Replace the path from "/mcp/vision/explain" to "/xiaozhi/ota/download/{fname}"
-                        chosen_url = vision_url.replace(
-                            "/mcp/vision/explain", f"/xiaozhi/ota/download/{fname}"
+                        # 使用 urljoin 避免脆弱的字符串替换
+                        chosen_url = urljoin(
+                            vision_url.rstrip("/") + "/",
+                            f"xiaozhi/ota/download/{fname}",
                         )
                         break
 

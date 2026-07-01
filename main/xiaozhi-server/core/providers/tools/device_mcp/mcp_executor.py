@@ -1,5 +1,6 @@
 """设备端MCP工具执行器"""
 
+import json
 from typing import Dict, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -13,65 +14,41 @@ class DeviceMCPExecutor(ToolExecutor):
     """设备端MCP工具执行器"""
 
     FAST_RESPONSE_CONTROL_TOOLS = {
-        "self_audio_speaker_set_volume": "音量设置指令已发送。",
-        "self_audio_speaker_volume_up": "音量调大指令已发送。",
-        "self_audio_speaker_volume_down": "音量调小指令已发送。",
-        "self_screen_set_brightness": "亮度设置指令已发送。",
-        "self_screen_set_theme": "主题设置指令已发送。",
-        "self_update_device": "设备更新指令已发送。",
+        "self_audio_speaker_set_volume",
+        "self_audio_speaker_volume_up",
+        "self_audio_speaker_volume_down",
+        "self_screen_set_brightness",
+        "self_screen_set_theme",
+        "self_update_device",
     }
 
     def __init__(self, conn):
         self.conn = conn
 
-    def _build_control_response(self, tool_name: str, arguments: Dict[str, Any]) -> str:
-        """为控制类工具构建包含参数值的响应消息"""
-        if not arguments:
-            return self.FAST_RESPONSE_CONTROL_TOOLS.get(tool_name, "")
+    @staticmethod
+    def _json_result(payload: Dict[str, Any]) -> str:
+        return json.dumps(payload, ensure_ascii=False)
 
-        if tool_name == "self_audio_speaker_set_volume":
-            volume = arguments.get("volume")
-            if volume is not None:
-                return f"音量已设置为 {volume}%。"
-            return self.FAST_RESPONSE_CONTROL_TOOLS[tool_name]
-
-        if tool_name == "self_screen_set_brightness":
-            brightness = arguments.get("brightness")
-            if brightness is not None:
-                return f"亮度已设置为 {brightness}%。"
-            return self.FAST_RESPONSE_CONTROL_TOOLS[tool_name]
-
-        if tool_name == "self_screen_set_theme":
-            theme = arguments.get("theme")
-            if theme:
-                return f"主题已切换为「{theme}」。"
-            return self.FAST_RESPONSE_CONTROL_TOOLS[tool_name]
-
-        if tool_name == "self_update_device":
-            updates = arguments.get("updates", {})
-            if isinstance(updates, dict):
-                audio_speaker = updates.get("audio_speaker", {})
-                if isinstance(audio_speaker, dict):
-                    volume = audio_speaker.get("volume")
-                    if volume is not None:
-                        return f"音量已设置为 {volume}%。"
-                screen = updates.get("screen", {})
-                if isinstance(screen, dict):
-                    brightness = screen.get("brightness")
-                    if brightness is not None:
-                        return f"亮度已设置为 {brightness}%。"
-            return self.FAST_RESPONSE_CONTROL_TOOLS[tool_name]
-
-        # 通用处理：任何self_开头的工具，如果参数中包含volume或brightness则直接响应
-        if tool_name.startswith("self_"):
-            volume = arguments.get("volume")
-            if volume is not None:
-                return f"音量已设置为 {volume}%。"
-            brightness = arguments.get("brightness")
-            if brightness is not None:
-                return f"亮度已设置为 {brightness}%。"
-
-        return self.FAST_RESPONSE_CONTROL_TOOLS.get(tool_name, "")
+    def _build_control_result(
+        self,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        *,
+        raw_result: Any = None,
+        error: str = None,
+        transport_result_received: bool = False,
+    ) -> str:
+        return self._json_result(
+            {
+                "tool": tool_name,
+                "arguments": arguments or {},
+                "transport": "device_mcp",
+                "transport_result_received": transport_result_received,
+                "state_verified": False,
+                "raw_result": raw_result,
+                "error": error,
+            }
+        )
 
     async def execute(
         self, conn: "ConnectionHandler", tool_name: str, arguments: Dict[str, Any]
@@ -90,9 +67,6 @@ class DeviceMCPExecutor(ToolExecutor):
             )
 
         try:
-            # 转换参数为JSON字符串
-            import json
-
             args_str = json.dumps(arguments) if arguments else "{}"
 
             # 调用设备端MCP工具
@@ -117,18 +91,29 @@ class DeviceMCPExecutor(ToolExecutor):
                 and isinstance(resultJson, dict)
                 and "action" in resultJson
             ):
+                action_name = resultJson.get("action")
+                action = Action.__members__.get(action_name) if action_name else None
+                if action is None:
+                    self.logger.warning(
+                        f"Device returned unknown action: {action_name}, treating as ERROR"
+                    )
+                    action = Action.ERROR
                 result_for_history = json.dumps(resultJson, ensure_ascii=False)
                 return ActionResponse(
-                    action=Action[resultJson["action"]],
+                    action=action,
                     result=result_for_history,
                     response=resultJson.get("response", ""),
                 )
 
             if tool_name in self.FAST_RESPONSE_CONTROL_TOOLS:
-                response = self._build_control_response(tool_name, arguments)
                 return ActionResponse(
-                    action=Action.RESPONSE,
-                    response=response,
+                    action=Action.REQLLM,
+                    result=self._build_control_result(
+                        tool_name,
+                        arguments,
+                        raw_result=result,
+                        transport_result_received=True,
+                    ),
                 )
 
             return ActionResponse(action=Action.REQLLM, result=str(result))
@@ -137,10 +122,14 @@ class DeviceMCPExecutor(ToolExecutor):
             return ActionResponse(action=Action.NOTFOUND, response=str(e))
         except TimeoutError:
             if tool_name in self.FAST_RESPONSE_CONTROL_TOOLS:
-                response = self._build_control_response(tool_name, arguments)
                 return ActionResponse(
-                    action=Action.RESPONSE,
-                    response=response,
+                    action=Action.REQLLM,
+                    result=self._build_control_result(
+                        tool_name,
+                        arguments,
+                        error="timeout",
+                        transport_result_received=False,
+                    ),
                 )
             return ActionResponse(action=Action.ERROR, response="设备端工具响应超时")
         except Exception as e:
@@ -148,8 +137,14 @@ class DeviceMCPExecutor(ToolExecutor):
 
     def _get_tool_timeout(self, conn: "ConnectionHandler", tool_name: str) -> int:
         if tool_name in self.FAST_RESPONSE_CONTROL_TOOLS:
-            return int(conn.config.get("device_mcp_control_timeout", 3))
-        return int(conn.config.get("device_mcp_tool_call_timeout", 10))
+            try:
+                return int(conn.config.get("device_mcp_control_timeout", 3))
+            except (TypeError, ValueError):
+                return 3
+        try:
+            return int(conn.config.get("device_mcp_tool_call_timeout", 10))
+        except (TypeError, ValueError):
+            return 10
 
     def get_tools(self) -> Dict[str, ToolDefinition]:
         """获取所有设备端MCP工具"""

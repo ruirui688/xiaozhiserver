@@ -102,12 +102,13 @@ class VoiceprintProvider:
         logger.bind(tag=TAG).info("执行声纹服务器健康检查")
         
         try:
-            # 健康检查URL
+            # 健康检查URL（从查询参数移到Authorization头）
             parsed_url = urlparse(self.api_url)
-            health_url = f"{parsed_url.scheme}://{parsed_url.netloc}/voiceprint/health?key={self.api_key}"
-            
-            # 发送健康检查请求
-            response = requests.get(health_url, timeout=3)
+            health_url = f"{parsed_url.scheme}://{parsed_url.netloc}/voiceprint/health"
+
+            # 发送健康检查请求（API key通过Authorization头传递）
+            headers = {"Authorization": f"Bearer {self.api_key}"}
+            response = requests.get(health_url, headers=headers, timeout=3)
             
             if response.status_code == 200:
                 result = response.json()

@@ -71,6 +71,14 @@ def register_connection(conn: "ConnectionHandler") -> None:
         return
     keys = _connection_keys(conn)
     for key in keys:
+        existing = _connections.get(key)
+        if existing is not None and existing is not conn:
+            logger.bind(tag=TAG).warning(
+                "覆盖已有运行时连接: key={}, old_device_id={}, new_device_id={}",
+                key,
+                existing.device_id,
+                conn.device_id,
+            )
         _connections[key] = conn
     conn._runtime_registry_keys = keys
     logger.bind(tag=TAG).info(

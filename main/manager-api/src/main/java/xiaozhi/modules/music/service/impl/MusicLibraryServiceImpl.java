@@ -5,6 +5,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.net.URLEncoder;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
@@ -230,11 +231,19 @@ public class MusicLibraryServiceImpl implements MusicLibraryService {
         if (StringUtils.isBlank(path)) {
             throw new IllegalArgumentException("文件路径不能为空");
         }
-        Path target = musicRoot.resolve(path).normalize();
-        if (!target.startsWith(musicRoot)) {
-            throw new IllegalArgumentException("文件路径不合法");
+        try {
+            Path target = musicRoot.resolve(path).normalize();
+            Path musicRootReal = musicRoot.toRealPath();
+            Path realTarget = target.toRealPath();
+            if (!realTarget.startsWith(musicRootReal)) {
+                throw new IllegalArgumentException("文件路径不合法");
+            }
+            return target;
+        } catch (NoSuchFileException e) {
+            throw new IllegalArgumentException("文件不存在");
+        } catch (IOException e) {
+            throw new IllegalArgumentException("文件路径解析失败: " + e.getMessage());
         }
-        return target;
     }
 
     private MusicFileDTO toDTO(Path file) {

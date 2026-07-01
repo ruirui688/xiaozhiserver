@@ -119,7 +119,7 @@ class ASRProvider(ASRProviderBase):
             else:
                 expire_time = datetime.strptime(expire_str, "%Y-%m-%dT%H:%M:%SZ")
             self.expire_time = expire_time.timestamp() - 60
-        except:
+        except Exception:
             self.expire_time = None
 
     def _is_token_expired(self):

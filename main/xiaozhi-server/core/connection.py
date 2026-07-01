@@ -50,9 +50,15 @@ from core.utils.model_config import has_runtime_config, normalize_runtime_config
 from core.utils.prompt_manager import PromptManager
 from core.utils.voiceprint_provider import VoiceprintProvider
 from core.utils.util import get_system_error_response
+from core.handle.audioInitializer import (
+    initialize_tts as _ext_init_tts,
+    initialize_asr as _ext_init_asr,
+    initialize_voiceprint as _ext_init_voiceprint,
+)
+from core.handle.reportThreadManager import ReportThreadManager
 from core.utils import textUtils
 from core.utils.correct_words import parse_correct_words
-from core.game_session import GameSessionManager
+from core.game import GameSessionManager
 from core.semantic.semantic_center import SemanticCenter
 from core.device_runtime_registry import register_connection, unregister_connection
 
@@ -136,12 +142,16 @@ class ConnectionHandler:
         self.stop_event = threading.Event()
         self.executor = ThreadPoolExecutor(max_workers=5)
 
+        # client_abort 跨线程读写锁（event loop / TTS text / TTS audio 线程）
+        self._abort_lock = threading.Lock()
+
         # 添加上报线程池
         self.report_queue = queue.Queue()
         self.report_thread = None
         # 未来可以通过修改此处，调节asr的上报和tts的上报，目前默认都开启
         self.report_asr_enable = self.read_config_from_api
         self.report_tts_enable = self.read_config_from_api
+        self.report_manager = ReportThreadManager()
 
         # 依赖的组件
         self.vad = None
@@ -155,6 +165,9 @@ class ConnectionHandler:
 
         # 为每个连接单独管理声纹识别
         self.voiceprint_provider = None
+
+        # 模块初始化完成事件，_route_message 在处理音频前检查此事件
+        self._modules_ready = threading.Event()
 
         # vad相关变量
         self.client_audio_buffer = bytearray()
@@ -198,9 +211,10 @@ class ConnectionHandler:
         self.configured_intent_type = "nointent"
         self.intent_type = "nointent"
 
-        self.timeout_seconds = (
+        # 超时时间统一用毫秒（与 first_activity_time / last_activity_time 一致）
+        self._timeout_ms = (
                 int(self.config.get("close_connection_no_voice_time", 120)) + 60
-        )  # 在原来第一道关闭的基础上加60秒，进行二道关闭
+        ) * 1000  # 在原来第一道关闭的基础上加60秒，进行二道关闭
         self.timeout_task = None
 
         # {"mcp":true} 表示启用MCP功能
@@ -302,7 +316,12 @@ class ConnectionHandler:
         return welcome_msg
 
     def _run_async_in_daemon_thread(self, coro, thread_name):
-        """Run an async coroutine in a new daemon thread with its own event loop."""
+        """Run an async coroutine in a new daemon thread with its own event loop.
+
+        Returns the thread so callers can join() it before shutdown.
+        Daemon threads are killed when the process exits, so callers MUST
+        join() these threads during graceful shutdown (see _save_and_close).
+        """
         def _run():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
@@ -312,39 +331,50 @@ class ConnectionHandler:
                 self.logger.bind(msg_id=self.session_id).warning(f"{thread_name} failed: {e}")
             finally:
                 loop.close()
-        t = threading.Thread(target=_run, daemon=True, name=thread_name)
+        t = threading.Thread(target=_run, daemon=False, name=thread_name)
         t.start()
+        return t
 
     async def _save_and_close(self, ws):
         """保存记忆并关闭连接"""
+        threads = []
         try:
             # 守护线程1：独立生成标题（不依赖记忆模型）
             if self.session_id:
-                self._run_async_in_daemon_thread(
-                    generate_and_save_chat_title(self.session_id),
-                    "title-generator",
+                threads.append(
+                    self._run_async_in_daemon_thread(
+                        generate_and_save_chat_title(self.session_id),
+                        "title-generator",
+                    )
                 )
 
             # 守护线程2：走老流程记忆保存（仅记忆，不含标题）
             if self.memory:
-                self._run_async_in_daemon_thread(
-                    self.memory.save_memory(
-                        self.dialogue.dialogue, self.session_id
-                    ),
-                    "memory-save",
+                threads.append(
+                    self._run_async_in_daemon_thread(
+                        self.memory.save_memory(
+                            self.dialogue.dialogue, self.session_id
+                        ),
+                        "memory-save",
+                    )
                 )
 
             # 守护线程3：PowerMem-style 会话记忆处理（全量对话分析）
             agent_id = self.config.get("agent_id") if self.config else None
             if self.session_id and agent_id and self.read_config_from_api:
-                self._run_async_in_daemon_thread(
-                    trigger_session_memory_processing(self.session_id, agent_id),
-                    "session-memory",
+                threads.append(
+                    self._run_async_in_daemon_thread(
+                        trigger_session_memory_processing(self.session_id, agent_id),
+                        "session-memory",
+                    )
                 )
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"保存记忆失败: {e}")
         finally:
-            # 立即关闭连接，不等待记忆保存完成
+            # 等待所有记忆保存线程完成（最多等待30秒），避免守护线程被进程退出中断
+            for t in threads:
+                t.join(timeout=10)
+            # 关闭连接
             try:
                 await self.close(ws)
             except Exception as close_error:
@@ -399,6 +429,9 @@ class ConnectionHandler:
         if isinstance(message, str):
             await handleTextMessage(self, message)
         elif isinstance(message, bytes):
+            # 等待模块初始化完成后再处理音频
+            if not self._modules_ready.is_set():
+                return
             if self.vad is None or self.asr is None:
                 return
 
@@ -502,6 +535,8 @@ class ConnectionHandler:
             # 异步执行重启操作
             def restart_server():
                 """实际执行重启的方法"""
+                self.logger.bind(tag=TAG).warning("Server restarting - unsaved dialogue state will be regenerated on reconnect")
+                # TODO: 实现优雅关闭，保存对话状态到持久化存储，新进程启动时恢复
                 time.sleep(1)
                 self.logger.bind(tag=TAG).info("执行服务器重启...")
                 subprocess.Popen(
@@ -537,7 +572,11 @@ class ConnectionHandler:
             tts_future = asyncio.run_coroutine_threadsafe(
                 self.tts.open_audio_channels(self), self.loop
             )
-            tts_future.add_done_callback(lambda f: self.logger.bind(tag=TAG).warning(f"TTS channel open failed: {f.exception()}") if f.exception() else None)
+            def _on_tts_open_done(f):
+                if f.exception():
+                    self.logger.bind(tag=TAG).warning(f"TTS channel open failed: {f.exception()}")
+                    self.client_is_speaking = False
+            tts_future.add_done_callback(_on_tts_open_done)
             if self.need_bind:
                 self.bind_completed_event.set()
                 return
@@ -592,6 +631,8 @@ class ConnectionHandler:
 
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"实例化组件失败: {e}")
+
+        self._modules_ready.set()
 
     def _init_prompt_enhancement(self):
 
@@ -668,65 +709,16 @@ class ConnectionHandler:
         self.logger.bind(tag=TAG).debug("已注入工具调用 few-shot 示例")
 
     def _init_report_threads(self):
-        """初始化ASR和TTS上报线程"""
-        if not self.read_config_from_api or self.need_bind:
-            return
-        if self.chat_history_conf == 0:
-            return
-        if self.report_thread is None or not self.report_thread.is_alive():
-            self.report_thread = threading.Thread(
-                target=self._report_worker, daemon=True
-            )
-            self.report_thread.start()
-            self.logger.bind(tag=TAG).info("TTS上报线程已启动")
+        self.report_manager.start(self)
 
     def _initialize_tts(self):
-        """初始化TTS"""
-        tts = None
-        if not self.need_bind:
-            tts = initialize_tts(self.config)
-
-        if tts is None:
-            tts = DefaultTTS(self.config, delete_audio_file=True)
-
-        return tts
+        return _ext_init_tts(self)
 
     def _initialize_asr(self):
-        """初始化ASR"""
-        selected_asr = self.config.get("selected_module", {}).get("ASR")
-        if not selected_asr or not self.config.get("ASR", {}).get(selected_asr):
-            return None
-        common_selected_asr = self.common_config.get("selected_module", {}).get("ASR")
-        if (
-                self._asr is not None
-                and hasattr(self._asr, "interface_type")
-                and self._asr.interface_type == InterfaceType.LOCAL
-                and selected_asr == common_selected_asr
-        ):
-            # 如果公共ASR是本地服务，则直接返回
-            # 因为本地一个实例ASR，可以被多个连接共享
-            asr = self._asr
-        else:
-            # 远程ASR需要连接级实例；私有配置选择了不同ASR时也不能复用公共本地ASR。
-            asr = initialize_asr(self.config)
-
-        return asr
+        return _ext_init_asr(self)
 
     def _initialize_voiceprint(self):
-        """为当前连接初始化声纹识别"""
-        try:
-            voiceprint_config = self.config.get("voiceprint", {})
-            if voiceprint_config:
-                voiceprint_provider = VoiceprintProvider(voiceprint_config)
-                if voiceprint_provider is not None and voiceprint_provider.enabled:
-                    self.voiceprint_provider = voiceprint_provider
-                    self.logger.bind(tag=TAG).info("声纹识别功能已在连接时动态启用")
-                else:
-                    self.logger.bind(tag=TAG).warning("声纹识别功能启用但配置不完整")
-            else:
-                self.logger.bind(tag=TAG).info("声纹识别功能未启用")
-        except Exception as e:
-            self.logger.bind(tag=TAG).warning(f"声纹识别初始化失败: {str(e)}")
+        return _ext_init_voiceprint(self)
 
     async def _background_initialize(self):
         """在后台初始化配置和组件（完全不阻塞主循环）"""
@@ -1009,20 +1001,14 @@ class ConnectionHandler:
             return None
 
         memory_parts = []
-        if self.memory is not None:
-            future = asyncio.run_coroutine_threadsafe(
-                self.memory.query_memory(query), self.loop
-            )
-            try:
-                memory_str = future.result(timeout=2)
-                if memory_str:
-                    memory_parts.append(memory_str)
-            except TimeoutError:
-                future.cancel()
-                self.logger.bind(tag=TAG).warning("本地记忆查询超时，已跳过本轮记忆注入")
-            except Exception as e:
-                self.logger.bind(tag=TAG).warning(f"本地记忆查询失败，已跳过: {e}")
 
+        # NOTE: When read_config_from_api=True and memory_type != "nomem",
+        # there are TWO potential memory sources:
+        #   1. Local provider memory (self.memory.query_memory)
+        #   2. Managed memory from manager-api (query_managed_memory)
+        # If managed memory returns results, we skip the local query to
+        # avoid dual-source conflicts (the managed memory is authoritative).
+        managed_result = None
         if self.read_config_from_api:
             selected_memory = self.config.get("selected_module", {}).get("Memory")
             memory_type = (
@@ -1035,14 +1021,31 @@ class ConnectionHandler:
                     query_managed_memory(self.device_id, query), self.loop
                 )
                 try:
-                    managed_memory = future.result(timeout=2)
-                    if managed_memory:
-                        memory_parts.append(managed_memory)
+                    managed_result = future.result(timeout=2)
+                    if managed_result:
+                        memory_parts.append(managed_result)
                 except TimeoutError:
                     future.cancel()
                     self.logger.bind(tag=TAG).warning("长期记忆查询超时，已跳过本轮记忆注入")
                 except Exception as e:
                     self.logger.bind(tag=TAG).warning(f"长期记忆查询失败，已跳过: {e}")
+
+        # Only query local provider memory if managed memory returned nothing.
+        # This prevents the LLM from receiving duplicate/conflicting memory from
+        # two sources at once.
+        if not managed_result and self.memory is not None:
+            future = asyncio.run_coroutine_threadsafe(
+                self.memory.query_memory(query), self.loop
+            )
+            try:
+                memory_str = future.result(timeout=2)
+                if memory_str:
+                    memory_parts.append(memory_str)
+            except TimeoutError:
+                future.cancel()
+                self.logger.bind(tag=TAG).warning("本地记忆查询超时，已跳过本轮记忆注入")
+            except Exception as e:
+                self.logger.bind(tag=TAG).warning(f"本地记忆查询失败，已跳过: {e}")
 
         return "\n\n".join(memory_parts) if memory_parts else None
 
@@ -1325,6 +1328,7 @@ class ConnectionHandler:
             if unhandled_tool_protocol:
                 bHasError = True
                 safe_message = "设备控制请求没有执行成功，模型返回了无法识别的工具调用格式。"
+                response_message.clear()
                 response_message.append(safe_message)
                 self.logger.bind(tag=TAG).error(
                     f"unsupported tool protocol from LLM: {content_arguments}"
@@ -1692,41 +1696,13 @@ class ConnectionHandler:
             self._build_tool_call_messages(need_llm_tools)
 
             if not is_aborted():
-                self.chat(None, depth=depth + 1, allow_tools=False)
+                self.chat(None, depth=depth + 1, allow_tools=True)
 
     def _report_worker(self):
-        """聊天记录上报工作线程"""
-        while not self.stop_event.is_set():
-            try:
-                # 从队列获取数据，设置超时以便定期检查停止事件
-                item = self.report_queue.get(timeout=1)
-                if item is None:  # 检测毒丸对象
-                    break
-                try:
-                    # 检查线程池状态
-                    if self.executor is None:
-                        continue
-                    # 提交任务到线程池
-                    self.executor.submit(self._process_report, *item)
-                except Exception as e:
-                    self.logger.bind(tag=TAG).error(f"聊天记录上报线程异常: {e}")
-            except queue.Empty:
-                continue
-            except Exception as e:
-                self.logger.bind(tag=TAG).error(f"聊天记录上报工作线程异常: {e}")
-
-        self.logger.bind(tag=TAG).info("聊天记录上报线程已退出")
+        self.report_manager._report_worker(self)
 
     def _process_report(self, type, text, audio_data, report_time):
-        """处理上报任务"""
-        try:
-            # 执行异步上报（在事件循环中运行）
-            asyncio.run(report(self, type, text, audio_data, report_time))
-        except Exception as e:
-            self.logger.bind(tag=TAG).error(f"上报处理异常: {e}")
-        finally:
-            # 标记任务完成
-            self.report_queue.task_done()
+        self.report_manager._process_report(self, type, text, audio_data, report_time)
 
     def clearSpeakStatus(self):
         self.client_is_speaking = False
@@ -1766,12 +1742,22 @@ class ConnectionHandler:
                         f"清理工具处理器时出错: {cleanup_error}"
                     )
 
+            # MCP pending call results 由 func_handler.cleanup() 统一清理，此处不再重复调用
+
+            # 停止上报线程
+            if hasattr(self, "report_manager"):
+                self.report_manager.stop(self)
+
             # 触发停止事件
             if self.stop_event:
                 self.stop_event.set()
 
             # 清空任务队列
             self.clear_queues()
+
+            # Clean up IoT descriptors
+            if hasattr(self, "iot_descriptors"):
+                self.iot_descriptors.clear()
 
             # 关闭WebSocket连接
             try:
@@ -1909,7 +1895,7 @@ class ConnectionHandler:
                 # 检查是否超时（只有在时间戳已初始化的情况下）
                 if last_activity_time > 0.0:
                     current_time = time.time() * 1000
-                    if current_time - last_activity_time > self.timeout_seconds * 1000:
+                    if current_time - last_activity_time > self._timeout_ms:
                         if not self.stop_event.is_set():
                             self.logger.bind(tag=TAG).info("连接超时，准备关闭")
                             # 设置停止事件，防止重复处理

@@ -79,7 +79,8 @@ class ASRProvider(ASRProviderBase):
                 self.is_processing = True
                 # 建立新的WebSocket连接
                 headers = self.token_auth()
-                logger.bind(tag=TAG).info(f"正在连接ASR服务，headers: {headers}")
+                safe_headers = {k: "***" if k.lower() in ("authorization", "api-key", "x-api-key") else v for k, v in headers.items()}
+                logger.bind(tag=TAG).info(f"正在连接ASR服务，headers: {safe_headers}")
 
                 self.asr_ws = await websockets.connect(
                     self.ws_url,

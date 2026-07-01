@@ -13,8 +13,11 @@ import org.springframework.web.bind.annotation.RestController;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.AllArgsConstructor;
+import xiaozhi.common.exception.ErrorCode;
+import xiaozhi.common.exception.RenException;
 import xiaozhi.common.user.UserDetail;
 import xiaozhi.common.utils.Result;
+import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.memory.dto.MemoryFactDTO;
 import xiaozhi.modules.memory.dto.MemoryForgetDTO;
 import xiaozhi.modules.memory.dto.MemoryRememberDTO;
@@ -30,11 +33,15 @@ import xiaozhi.modules.security.user.SecurityUser;
 @AllArgsConstructor
 public class MemoryManagementController {
     private final MemoryService memoryService;
+    private final AgentService agentService;
 
     @GetMapping
     @Operation(summary = "获取智能体长期记忆维护视图")
     @RequiresPermissions("sys:role:normal")
     public Result<MemoryDashboardVO> dashboard(@PathVariable String agentId) {
+        if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
+            throw new RenException(ErrorCode.NO_PERMISSION);
+        }
         return new Result<MemoryDashboardVO>().ok(memoryService.dashboard(agentId));
     }
 
@@ -42,6 +49,9 @@ public class MemoryManagementController {
     @Operation(summary = "手动新增长期事实记忆")
     @RequiresPermissions("sys:role:normal")
     public Result<String> createFact(@PathVariable String agentId, @RequestBody MemoryFactDTO dto) {
+        if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
+            throw new RenException(ErrorCode.NO_PERMISSION);
+        }
         return new Result<String>().ok(memoryService.createFact(agentId, dto, "user", currentUserId()));
     }
 
@@ -50,6 +60,9 @@ public class MemoryManagementController {
     @RequiresPermissions("sys:role:normal")
     public Result<Void> updateFact(@PathVariable String agentId, @PathVariable String memoryId,
                                    @RequestBody MemoryFactDTO dto) {
+        if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
+            throw new RenException(ErrorCode.NO_PERMISSION);
+        }
         memoryService.updateFact(agentId, memoryId, dto, "user", currentUserId());
         return new Result<Void>().ok(null);
     }
@@ -58,6 +71,9 @@ public class MemoryManagementController {
     @Operation(summary = "归档长期事实记忆")
     @RequiresPermissions("sys:role:normal")
     public Result<Void> archiveFact(@PathVariable String agentId, @PathVariable String memoryId) {
+        if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
+            throw new RenException(ErrorCode.NO_PERMISSION);
+        }
         memoryService.archiveFact(agentId, memoryId, "user", currentUserId());
         return new Result<Void>().ok(null);
     }
@@ -66,6 +82,9 @@ public class MemoryManagementController {
     @Operation(summary = "删除长期事实记忆")
     @RequiresPermissions("sys:role:normal")
     public Result<Void> deleteFact(@PathVariable String agentId, @PathVariable String memoryId) {
+        if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
+            throw new RenException(ErrorCode.NO_PERMISSION);
+        }
         memoryService.deleteFact(agentId, memoryId, "user", currentUserId());
         return new Result<Void>().ok(null);
     }
@@ -74,6 +93,9 @@ public class MemoryManagementController {
     @Operation(summary = "确认候选记忆")
     @RequiresPermissions("sys:role:normal")
     public Result<Void> confirmCandidate(@PathVariable String agentId, @PathVariable String candidateId) {
+        if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
+            throw new RenException(ErrorCode.NO_PERMISSION);
+        }
         memoryService.confirmCandidate(agentId, candidateId, "user", currentUserId());
         return new Result<Void>().ok(null);
     }
@@ -82,6 +104,9 @@ public class MemoryManagementController {
     @Operation(summary = "拒绝候选记忆")
     @RequiresPermissions("sys:role:normal")
     public Result<Void> rejectCandidate(@PathVariable String agentId, @PathVariable String candidateId) {
+        if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
+            throw new RenException(ErrorCode.NO_PERMISSION);
+        }
         memoryService.rejectCandidate(agentId, candidateId, "user", currentUserId());
         return new Result<Void>().ok(null);
     }
@@ -90,6 +115,9 @@ public class MemoryManagementController {
     @Operation(summary = "清空当前智能体长期记忆")
     @RequiresPermissions("sys:role:normal")
     public Result<MemoryRebuildResultVO> clear(@PathVariable String agentId) {
+        if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
+            throw new RenException(ErrorCode.NO_PERMISSION);
+        }
         return new Result<MemoryRebuildResultVO>().ok(memoryService.clearMemories(agentId, "user", currentUserId()));
     }
 
@@ -98,6 +126,9 @@ public class MemoryManagementController {
     @RequiresPermissions("sys:role:normal")
     public Result<MemoryRebuildResultVO> rebuildPreview(@PathVariable String agentId,
                                                         @RequestBody(required = false) MemoryRebuildRequestDTO dto) {
+        if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
+            throw new RenException(ErrorCode.NO_PERMISSION);
+        }
         if (dto == null) {
             dto = new MemoryRebuildRequestDTO();
         }
@@ -111,6 +142,9 @@ public class MemoryManagementController {
     @RequiresPermissions("sys:role:normal")
     public Result<MemoryRebuildResultVO> rebuild(@PathVariable String agentId,
                                                  @RequestBody(required = false) MemoryRebuildRequestDTO dto) {
+        if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
+            throw new RenException(ErrorCode.NO_PERMISSION);
+        }
         if (dto == null) {
             dto = new MemoryRebuildRequestDTO();
         }
@@ -123,6 +157,9 @@ public class MemoryManagementController {
     @Operation(summary = "手动记住")
     @RequiresPermissions("sys:role:normal")
     public Result<Void> remember(@PathVariable String agentId, @RequestBody MemoryRememberDTO dto) {
+        if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
+            throw new RenException(ErrorCode.NO_PERMISSION);
+        }
         dto.setAgentId(agentId);
         memoryService.remember(dto, "user", currentUserId());
         return new Result<Void>().ok(null);
@@ -132,6 +169,9 @@ public class MemoryManagementController {
     @Operation(summary = "手动忘记")
     @RequiresPermissions("sys:role:normal")
     public Result<Void> forget(@PathVariable String agentId, @RequestBody MemoryForgetDTO dto) {
+        if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
+            throw new RenException(ErrorCode.NO_PERMISSION);
+        }
         dto.setAgentId(agentId);
         memoryService.forget(dto, "user", currentUserId());
         return new Result<Void>().ok(null);

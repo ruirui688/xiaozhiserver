@@ -161,7 +161,9 @@ async def handle_mcp_message(
                     f"客户端MCP服务器信息: name={name}, version={version}"
                 )
 
-            await asyncio.sleep(1)
+            # 等待短暂 tick 让事件循环有机会处理网络回包，
+            # 不依赖固定 sleep，后续应由设备主动回复来驱动流程
+            await asyncio.sleep(0)
             logger.bind(tag=TAG).info("MCP初始化完成，开始请求设备工具列表")
             await send_mcp_tools_list_request(conn)
 
@@ -203,7 +205,7 @@ async def handle_mcp_message(
                     await mcp_client.add_tool(new_tool)
                     logger.bind(tag=TAG).debug(f"客户端工具 #{i+1}: {name}")
 
-                # 替换所有工具描述中的工具名称
+                # 替换所有工具描述中的工具名称（使用词边界正则）
                 for tool_data in mcp_client.tools.values():
                     if "description" in tool_data:
                         description = tool_data["description"]
@@ -212,8 +214,10 @@ async def handle_mcp_message(
                             sanitized_name,
                             original_name,
                         ) in mcp_client.name_mapping.items():
-                            description = description.replace(
-                                original_name, sanitized_name
+                            description = re.sub(
+                                r'\b' + re.escape(original_name) + r'\b',
+                                sanitized_name,
+                                description,
                             )
                         tool_data["description"] = description
 
@@ -347,8 +351,8 @@ async def call_mcp_tool(
                 except json.JSONDecodeError:
                     # 如果解析失败，尝试合并多个JSON对象
                     try:
-                        # 使用正则表达式匹配所有JSON对象
-                        json_objects = re.findall(r"\{[^{}]*\}", args)
+                        # 使用正则表达式匹配JSON对象（支持一层嵌套）
+                        json_objects = re.findall(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", args)
                         if len(json_objects) > 1:
                             # 合并所有JSON对象
                             merged_dict = {}

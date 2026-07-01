@@ -8,6 +8,9 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.backends import default_backend
 import base64
+from config.logger import setup_logging
+
+logger = setup_logging()
 
 
 class AuthToken:
@@ -122,5 +125,5 @@ class AuthToken:
         except json.JSONDecodeError:
             return False, None
         except Exception as e:  # 捕获其他可能的错误
-            print(f"Token verification failed: {str(e)}")
+            logger.bind(tag="auth").error(f"Token verification failed: {str(e)}")
             return False, None

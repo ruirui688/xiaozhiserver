@@ -58,55 +58,19 @@
         </div>
       </aside>
       <main class="debug-main">
-        <div ref="messagePane" class="message-pane">
-          <div v-if="messages.length === 0" class="empty-chat">
-            {{ emptyChatText }}
-          </div>
-          <div v-for="message in messages" :key="message.id" class="chat-row" :class="message.role">
-            <img class="chat-avatar" :src="message.role === 'assistant' ? botAvatar : userAvatar" />
-            <div class="chat-bubble">
-              <div v-if="message.content" class="chat-text">{{ message.content }}</div>
-              <div v-if="message.imageUrl" class="chat-image-wrapper">
-                <el-image
-                  class="chat-image"
-                  :src="message.imageUrl"
-                  :preview-src-list="[message.imageUrl]"
-                  fit="cover">
-                  <div slot="error" class="image-error">
-                    {{ message.imageUrl }}
-                  </div>
-                </el-image>
-              </div>
-              <div class="chat-meta">
-                <span class="chat-time">{{ message.time }}</span>
-                <i
-                  v-if="message.audioClipId"
-                  :class="getAudioIconClass(message.audioClipId)"
-                  class="chat-audio-icon"
-                  @click="playAudioClip(message.audioClipId)">
-                </i>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="input-bar">
-          <el-input
-            v-model="inputText"
-            :placeholder="inputPlaceholder"
-            @keyup.enter.native="sendText"
-            :disabled="!connected"
-            clearable />
-          <el-button type="primary" icon="el-icon-position" @click="sendText" :disabled="!connected || !inputText.trim()">
-            {{ $t('deviceDebug.send') }}
-          </el-button>
-          <el-button
-            :type="recording ? 'danger' : 'default'"
-            :icon="recording ? 'el-icon-video-pause' : 'el-icon-microphone'"
-            @click="toggleRecording"
-            :disabled="!connected || audioStarting">
-            {{ recording ? $t('deviceDebug.stopVoice') : $t('deviceDebug.voiceInput') }}
-          </el-button>
-        </div>
+        <chat-message-list
+          :messages="messages"
+          :connected="connected"
+          :empty-chat-text="emptyChatText"
+          :playing-audio-clip-id="playingAudioClipId"
+          @play-audio="playAudioClip" />
+        <chat-input-panel
+          :connected="connected"
+          :recording="recording"
+          :audio-starting="audioStarting"
+          :input-placeholder="inputPlaceholder"
+          @send="sendText"
+          @toggle-recording="toggleRecording" />
       </main>
     </div>
   </el-dialog>
@@ -115,6 +79,8 @@
 <script>
 import Api from '@/apis/api';
 import { OpusDecoder } from 'opus-decoder';
+import ChatMessageList from '@/components/device/ChatMessageList';
+import ChatInputPanel from '@/components/device/ChatInputPanel';
 
 const INPUT_SAMPLE_RATE = 16000;
 const PCM_FRAME_SAMPLES = 960;
@@ -125,6 +91,10 @@ const PENDING_CONFIRM_WINDOW_MS = 10000;
 
 export default {
   name: 'DeviceChatDebugDialog',
+  components: {
+    ChatMessageList,
+    ChatInputPanel
+  },
   props: {
     visible: {
       type: Boolean,
@@ -142,7 +112,6 @@ export default {
       ws: null,
       connected: false,
       connecting: false,
-      inputText: '',
       messages: [],
       events: [],
       mcpTools: [],
@@ -173,9 +142,7 @@ export default {
       processor: null,
       pcmRemainder: new Int16Array(0),
       recording: false,
-      audioStarting: false,
-      botAvatar: require('@/assets/xiaozhi-logo.png'),
-      userAvatar: require('@/assets/user-avatar1.png')
+      audioStarting: false
     };
   },
   computed: {
@@ -290,7 +257,6 @@ export default {
       this.mcpToolsStatus = '';
       this.deviceRuntimeStatus = null;
       this.statusLoading = false;
-      this.inputText = '';
       this.pcmRemainder = new Int16Array(0);
       this.activePlaybackSources = [];
       this.assistantSpeaking = false;
@@ -440,8 +406,7 @@ export default {
         }
       });
     },
-    sendText() {
-      const text = this.inputText.trim();
+    sendText(text) {
       if (!text || !this.connected) return;
       const turn = this.createPendingTurn(text, 'local-text');
       this.addMessage('user', text, {
@@ -452,7 +417,6 @@ export default {
         createdAt: turn.createdAt
       });
       this.sendJson({ type: 'listen', state: 'detect', text });
-      this.inputText = '';
     },
     createPendingTurn(text, source) {
       this.prunePendingTurns();
@@ -825,10 +789,6 @@ export default {
         ...extra
       };
       this.messages.push(message);
-      this.$nextTick(() => {
-        const pane = this.$refs.messagePane;
-        if (pane) pane.scrollTop = pane.scrollHeight;
-      });
       return message;
     },
     confirmPendingUserMessage(content) {
@@ -1220,125 +1180,5 @@ export default {
   min-width: 0;
   display: flex;
   flex-direction: column;
-}
-
-.message-pane {
-  flex: 1;
-  overflow-y: auto;
-  padding: 24px;
-  background: #fff;
-}
-
-.empty-chat {
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #909399;
-}
-
-.chat-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin-bottom: 18px;
-}
-
-.chat-row.user {
-  flex-direction: row-reverse;
-}
-
-.chat-avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-}
-
-.chat-bubble {
-  max-width: 68%;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: #f2f3f5;
-  color: #303133;
-  line-height: 20px;
-  text-align: left;
-}
-
-.chat-row.user .chat-bubble {
-  background: #1890ff;
-  color: white;
-}
-
-.chat-text {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.chat-image-wrapper {
-  margin-top: 6px;
-}
-
-.chat-image {
-  display: block;
-  width: 220px;
-  max-width: 100%;
-  height: 150px;
-  border-radius: 6px;
-  overflow: hidden;
-  cursor: zoom-in;
-  background-color: #f5f7fa;
-}
-
-.image-error {
-  width: 220px;
-  max-width: 100%;
-  min-height: 80px;
-  box-sizing: border-box;
-  padding: 12px;
-  color: #909399;
-  word-break: break-all;
-  background-color: #f5f7fa;
-}
-
-.chat-meta {
-  margin-top: 4px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.chat-row.user .chat-meta {
-  justify-content: flex-end;
-}
-
-.chat-time {
-  font-size: 11px;
-  color: #909399;
-}
-
-.chat-row.user .chat-time {
-  color: rgba(255, 255, 255, 0.75);
-}
-
-.chat-audio-icon {
-  color: #1890ff;
-  font-size: 17px;
-  cursor: pointer;
-}
-
-.chat-row.user .chat-audio-icon {
-  color: rgba(255, 255, 255, 0.85);
-}
-
-.input-bar {
-  display: flex;
-  gap: 10px;
-  padding: 14px 16px;
-  border-top: 1px solid #ebeef5;
-  background: #fff;
-}
-
-.input-bar .el-input {
-  flex: 1;
 }
 </style>

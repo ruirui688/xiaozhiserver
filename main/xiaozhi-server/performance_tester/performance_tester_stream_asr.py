@@ -189,7 +189,7 @@ class QwenASRFlashTester(BaseASRTester):
             if temp_file_path and os.path.exists(temp_file_path):
                 try:
                     os.unlink(temp_file_path)
-                except:
+                except Exception:
                     pass
 
     async def test(self, test_count=5):

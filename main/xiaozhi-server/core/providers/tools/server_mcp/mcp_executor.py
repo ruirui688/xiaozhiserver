@@ -68,6 +68,12 @@ class ServerMCPExecutor(ToolExecutor):
             tools[tool_name] = ToolDefinition(
                 name=tool_name, description=tool, tool_type=ToolType.SERVER_MCP
             )
+            # 同时注册带mcp_前缀的别名，使LLM可以使用任意一种形式
+            if not tool_name.startswith("mcp_"):
+                alias_name = "mcp_" + tool_name
+                tools[alias_name] = ToolDefinition(
+                    name=alias_name, description=tool, tool_type=ToolType.SERVER_MCP
+                )
 
         return tools
 

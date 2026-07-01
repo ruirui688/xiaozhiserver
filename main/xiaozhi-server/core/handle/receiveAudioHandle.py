@@ -1,4 +1,3 @@
-import time
 import json
 import asyncio
 from typing import TYPE_CHECKING
@@ -10,6 +9,8 @@ from core.utils.correct_words import apply_correct_words
 from core.handle.abortHandle import handleAbortMessage
 from core.handle.intentHandler import handle_user_intent
 from core.semantic.interruption import SemanticInterruptionClassifier
+from core.semantic.router import SemanticRouter
+from core.semantic.normalizer import TextNormalizer
 from core.utils.output_counter import check_device_output_limit
 from core.handle.sendAudioHandle import send_stt_message, SentenceType
 
@@ -52,7 +53,7 @@ async def startToChat(conn: "ConnectionHandler", text):
     speaker_name = None
     language_tag = None
     actual_text = text
-    raw_interruption_text = text
+    interruption_text = text
 
     try:
         # 尝试解析JSON格式的输入
@@ -61,7 +62,7 @@ async def startToChat(conn: "ConnectionHandler", text):
             if "speaker" in data and "content" in data:
                 speaker_name = data["speaker"]
                 language_tag = data["language"]
-                actual_text = data["content"]
+                interruption_text = data.get("content") or text
                 conn.logger.bind(tag=TAG).info(f"解析到说话人信息: {speaker_name}")
 
                 # 直接使用JSON格式的文本，不解析
@@ -78,8 +79,11 @@ async def startToChat(conn: "ConnectionHandler", text):
                 data = json.loads(actual_text)
                 if "speaker" in data and "content" in data:
                     speaker_name = data["speaker"]
+                    interruption_text = data.get("content") or interruption_text
         except (json.JSONDecodeError, KeyError):
             pass
+    elif actual_text != text:
+        interruption_text = actual_text
 
     # 保存说话人信息到连接对象
     if speaker_name:
@@ -99,63 +103,55 @@ async def startToChat(conn: "ConnectionHandler", text):
             await max_out_size(conn)
             return True
 
-    # manual 模式下不打断正在播放的内容
+    # manual 模式下不打断正在播放的内容；auto 模式交给当前 LLM 做语义裁决。
     if conn.client_is_speaking and conn.client_listen_mode != "manual":
-        interruption_config = conn.config.get("semantic_interruption", {}) or {}
-        if interruption_config.get("enabled", True):
-            # TTS 刚启动保护: 避免设备回声在 TTS 刚开始播放时立即触发打断
-            now_ms = time.time() * 1000
-            tts_started_at = getattr(conn, "_tts_started_at", 0.0)
-            tts_grace_ms = int(
-                interruption_config.get("tts_grace_ms", 800)
-            )
-            if tts_started_at > 0 and (now_ms - tts_started_at) < tts_grace_ms:
-                conn.logger.bind(tag=TAG).debug(
-                    f"语义打断跳过(TTS保护窗口): text={raw_interruption_text[:50]}"
-                )
-                return False
-            # 文本去重: 设备回声可能产生与当前 TTS 内容相同的 ASR 结果
-            last_abort_text = getattr(conn, "_last_abort_text", "")
-            if raw_interruption_text == last_abort_text:
-                conn.logger.bind(tag=TAG).debug(
-                    f"语义打断跳过(文本去重): text={raw_interruption_text[:50]}"
-                )
-                return False
-            conn._last_abort_text = raw_interruption_text
-
-            context = None
-            if getattr(conn, "semantic_center", None):
-                context = conn.semantic_center.state_manager.get_context(conn)
-            if context is None:
-                context = type(
-                    "RobotContext",
-                    (),
-                    {"active_game_tool": None},
-                )()
-            classifier = SemanticInterruptionClassifier()
-            classification = await classifier.classify(
-                conn, raw_interruption_text, context
-            )
+        context = None
+        if getattr(conn, "semantic_center", None):
+            context = conn.semantic_center.state_manager.get_context(conn)
+        if context is None:
+            context = type(
+                "RobotContext",
+                (),
+                {"active_game_tool": None},
+            )()
+        # Fast-path: check against deterministic stop words before firing LLM
+        normalizer = TextNormalizer()
+        route_key = normalizer.route_key(interruption_text)
+        if route_key in SemanticRouter.STOP_ALL:
+            # Deterministic stop — skip LLM call, abort immediately
+            await handleAbortMessage(conn)
+            handled_by_semantic = await conn.semantic_center.handle_user_text(conn, interruption_text)
+            if not handled_by_semantic:
+                with conn._abort_lock:
+                    conn.client_abort = False
+                conn.executor.submit(conn.chat, interruption_text)
+            return
+        classifier = SemanticInterruptionClassifier()
+        classification = await classifier.classify(
+            conn, interruption_text, context
+        )
+        conn.logger.bind(tag=TAG).info(
+            "语义打断分类: "
+            f"category={classification.category}, "
+            f"reason={classification.reason}"
+        )
+        if not classification.should_abort:
             conn.logger.bind(tag=TAG).info(
-                "语义打断分类: "
-                f"category={classification.category}, "
-                f"reason={classification.reason}"
-            )
-            if not classification.should_abort:
-                conn.logger.bind(tag=TAG).info(
-                    "语义打断裁决继续播报: "
-                    f"category={classification.category}, "
-                    f"reason={classification.reason}, "
-                    f"text={raw_interruption_text[:50]}"
-                )
-                return False
-            conn.logger.bind(tag=TAG).info(
-                "语义打断裁决进入新轮: "
+                "语义打断裁决继续播报: "
                 f"category={classification.category}, "
                 f"reason={classification.reason}, "
-                f"text={raw_interruption_text[:50]}"
+                f"text={interruption_text[:50]}"
             )
+            return False
+        conn.logger.bind(tag=TAG).info(
+            "语义打断裁决进入新轮: "
+            f"category={classification.category}, "
+            f"reason={classification.reason}, "
+            f"text={interruption_text[:50]}"
+        )
         await handleAbortMessage(conn)
+        if classification.category == "interrupt":
+            return True
 
     # 语义控制中枢优先处理高置信度控制类指令，未处理再进入旧流程
     if getattr(conn, "semantic_center", None):
@@ -177,9 +173,11 @@ async def startToChat(conn: "ConnectionHandler", text):
         return True
 
     # 准备开始新会话
-    conn.client_abort = False
+    with conn._abort_lock:
+        conn.client_abort = False
 
-    conn.executor.submit(conn.chat, actual_text)
+    future = conn.executor.submit(conn.chat, actual_text)
+    future.add_done_callback(lambda f: conn.logger.bind(tag=__name__).error(f"chat() failed: {f.exception()}") if f.exception() else None)
     return True
 
 
@@ -198,7 +196,8 @@ async def no_voice_close_connect(conn: "ConnectionHandler", have_voice):
             and no_voice_time > 1000 * close_connection_no_voice_time
         ):
             conn.close_after_chat = True
-            conn.client_abort = False
+            with conn._abort_lock:
+                conn.client_abort = False
             end_prompt = conn.config.get("end_prompt", {})
             if end_prompt and end_prompt.get("enable", True) is False:
                 conn.logger.bind(tag=TAG).info("结束对话，无需发送结束提示语")
@@ -212,7 +211,8 @@ async def no_voice_close_connect(conn: "ConnectionHandler", have_voice):
 
 async def max_out_size(conn: "ConnectionHandler"):
     # 播放超出最大输出字数的提示
-    conn.client_abort = False
+    with conn._abort_lock:
+        conn.client_abort = False
     text = "不好意思，我现在有点事情要忙，明天这个时候我们再聊，约好了哦！明天不见不散，拜拜！"
     await send_stt_message(conn, text)
     file_path = "config/assets/max_output_size.wav"
@@ -251,7 +251,8 @@ async def check_bind_device(conn: "ConnectionHandler"):
         conn.tts.tts_audio_queue.put((SentenceType.LAST, [], None))
     else:
         # 播放未绑定提示
-        conn.client_abort = False
+        with conn._abort_lock:
+            conn.client_abort = False
         text = f"没有找到该设备的版本信息，请正确配置 OTA地址，然后重新编译固件。"
         await send_stt_message(conn, text)
         music_path = "config/assets/bind_not_found.wav"

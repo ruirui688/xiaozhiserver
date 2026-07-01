@@ -405,7 +405,12 @@ i_think_you_guess
 当前实现：
 
 ```text
-main/xiaozhi-server/core/game_session.py
+main/xiaozhi-server/core/game/ (6 files, 1513 lines, re-exported from game_session.py)
+  GameSessionManager (in base.py) - class constants + shared helpers
+  GuessMyWordGame (in guess_my_word.py) - server picks word, user guesses
+  UserDescribesGame (in user_describes.py) - user describes, server guesses
+  IdiomChainGame (in idiom_chain.py) - idiom chain game
+  FreeformGameManager (in freeform.py) - LLM-driven freeform games
   GameSessionManager.FREEFORM_GAME_TOOLS
   GameSessionManager.build_freeform_game_prompt()
   GameSessionManager.GUESS_MY_WORD_TOOLS = set()

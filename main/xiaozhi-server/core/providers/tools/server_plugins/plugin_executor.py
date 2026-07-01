@@ -8,7 +8,8 @@ if TYPE_CHECKING:
     from core.connection import ConnectionHandler
 from ..base import ToolType, ToolDefinition, ToolExecutor
 from plugins_func.register import all_function_registry, Action, ActionResponse
-from core.game_session import GameSessionManager
+from plugins_func.register import ToolType as PluginBehavior
+from core.game import GameSessionManager
 
 
 class ServerPluginExecutor(ToolExecutor):
@@ -58,11 +59,11 @@ class ServerPluginExecutor(ToolExecutor):
         # 根据工具类型决定如何调用。插件函数通常是同步 I/O，放到线程里避免阻塞事件循环。
         if hasattr(func_item, "type"):
             func_type = func_item.type
-            if func_type.code in [4, 5]:  # SYSTEM_CTL, IOT_CTL (需要conn参数)
+            if func_type.code in (PluginBehavior.SYSTEM_CTL.code, PluginBehavior.IOT_CTL.code):  # SYSTEM_CTL, IOT_CTL (需要conn参数)
                 return func_item.func(conn, **arguments)
-            if func_type.code == 2:  # WAIT
+            if func_type.code == PluginBehavior.WAIT.code:  # WAIT
                 return func_item.func(**arguments)
-            if func_type.code == 3:  # CHANGE_SYS_PROMPT
+            if func_type.code == PluginBehavior.CHANGE_SYS_PROMPT.code:  # CHANGE_SYS_PROMPT
                 return func_item.func(conn, **arguments)
             return func_item.func(**arguments)
 
@@ -211,6 +212,9 @@ class ServerPluginExecutor(ToolExecutor):
             " 当用户要求联网查询、搜索最新信息、比分赛果、新闻事件详情或实时资料时调用本工具。"
             "不要用于查询本地知识库、播放音乐或控制设备。"
             "用户使用今天、今晚、明天、昨天等相对时间时，必须按系统提示词中的当前北京时间理解。"
+            "生成查询词时必须同时保留用户原话里的相对时间短语、绝对日期、目标对象和问题类型。"
+            "用户问已发生的结果、赛果、比分、结论或最新进展时，查询词必须体现这个目标，"
+            "不要改写成泛泛的赛程、资料或百科查询。"
             "不要脱离用户原意自行补充未确认的赛事、地点或日期。"
         )
         if current_time:

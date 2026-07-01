@@ -1,4 +1,5 @@
 import requests
+import aiohttp
 from config.logger import setup_logging
 from core.providers.tts.base import TTSProviderBase
 from core.utils.util import parse_string_to_list
@@ -51,14 +52,17 @@ class TTSProvider(TTSProviderBase):
             "if_sr": self.if_sr,
         }
 
-        resp = requests.get(self.url, params=request_params)
-        if resp.status_code == 200:
-            if output_file:
-                with open(output_file, "wb") as file:
-                    file.write(resp.content)
-            else:
-                return resp.content
-        else:
-            error_msg = f"GPT_SoVITS_V3 TTS请求失败: {resp.status_code} - {resp.text}"
-            logger.bind(tag=TAG).error(error_msg)
-            raise Exception(error_msg)
+        async with aiohttp.ClientSession() as session:
+            async with session.get(self.url, params=request_params) as resp:
+                if resp.status == 200:
+                    audio_data = await resp.read()
+                    if output_file:
+                        with open(output_file, "wb") as file:
+                            file.write(audio_data)
+                    else:
+                        return audio_data
+                else:
+                    error_text = await resp.text()
+                    error_msg = f"GPT_SoVITS_V3 TTS请求失败: {resp.status} - {error_text}"
+                    logger.bind(tag=TAG).error(error_msg)
+                    raise Exception(error_msg)

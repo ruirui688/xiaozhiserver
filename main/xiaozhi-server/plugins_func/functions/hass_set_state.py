@@ -2,6 +2,7 @@ from plugins_func.register import register_function, ToolType, ActionResponse, A
 from plugins_func.functions.hass_init import initialize_hass_handler
 from config.logger import setup_logging
 import asyncio
+import json
 import requests
 from typing import TYPE_CHECKING
 
@@ -59,14 +60,31 @@ def hass_set_state(conn: "ConnectionHandler", entity_id="", state=None):
         state = {}
     try:
         ha_response = handle_hass_set_state(conn, entity_id, state)
-        return ActionResponse(Action.REQLLM, ha_response, None)
+        return ActionResponse(
+            Action.REQLLM,
+            json.dumps(ha_response, ensure_ascii=False),
+            None,
+        )
     except asyncio.TimeoutError:
         logger.bind(tag=TAG).error("设置Home Assistant状态超时")
-        return ActionResponse(Action.ERROR, "请求超时", None)
+        return ActionResponse(
+            Action.REQLLM,
+            json.dumps(
+                {"ok": False, "transport": "home_assistant", "error": "timeout"},
+                ensure_ascii=False,
+            ),
+            None,
+        )
     except Exception as e:
-        error_msg = f"执行Home Assistant操作失败"
-        logger.bind(tag=TAG).error(error_msg)
-        return ActionResponse(Action.ERROR, error_msg, None)
+        logger.bind(tag=TAG).error(f"执行Home Assistant操作失败: {e}")
+        return ActionResponse(
+            Action.REQLLM,
+            json.dumps(
+                {"ok": False, "transport": "home_assistant", "error": str(e)},
+                ensure_ascii=False,
+            ),
+            None,
+        )
 
 
 def handle_hass_set_state(conn: "ConnectionHandler", entity_id, state):
@@ -80,12 +98,16 @@ def handle_hass_set_state(conn: "ConnectionHandler", entity_id, state):
     if len(domains) > 1:
         domain = domains[0]
     else:
-        return "执行失败，错误的设备id"
+        return {
+            "ok": False,
+            "transport": "home_assistant",
+            "entity_id": entity_id,
+            "error": "invalid_entity_id",
+        }
     action = ""
     arg = ""
     value = ""
     if state["type"] == "turn_on":
-        description = "设备已打开"
         if domain == "cover":
             action = "open_cover"
         elif domain == "vacuum":
@@ -93,7 +115,6 @@ def handle_hass_set_state(conn: "ConnectionHandler", entity_id, state):
         else:
             action = "turn_on"
     elif state["type"] == "turn_off":
-        description = "设备已关闭"
         if domain == "cover":
             action = "close_cover"
         elif domain == "vacuum":
@@ -101,54 +122,42 @@ def handle_hass_set_state(conn: "ConnectionHandler", entity_id, state):
         else:
             action = "turn_off"
     elif state["type"] == "brightness_up":
-        description = "灯光已调亮"
         action = "turn_on"
         arg = "brightness_step_pct"
         value = 10
     elif state["type"] == "brightness_down":
-        description = "灯光已调暗"
         action = "turn_on"
         arg = "brightness_step_pct"
         value = -10
     elif state["type"] == "brightness_value":
-        description = f"亮度已调整到{state['input']}"
         action = "turn_on"
         arg = "brightness_pct"
-        # Coerce to int because LLM (especially intent_llm) may return string values
         input_val = int(state["input"])
         value = input_val
     elif state["type"] == "set_color":
-        description = f"颜色已调整到{state['rgb_color']}"
         action = "turn_on"
         arg = "rgb_color"
         value = state["rgb_color"]
     elif state["type"] == "set_kelvin":
-        description = f"色温已调整到{state['input']}K"
         action = "turn_on"
         arg = "kelvin"
         value = state["input"]
     elif state["type"] == "volume_up":
-        description = "音量已调大"
         action = state["type"]
     elif state["type"] == "volume_down":
-        description = "音量已调小"
         action = state["type"]
     elif state["type"] == "volume_set":
-        description = f"音量已调整到{state['input']}"
         action = state["type"]
         arg = "volume_level"
-        # Coerce to int because LLM (especially intent_llm) may return string values
         input_val = int(state["input"])
         value = input_val
         if input_val >= 1:
             value = input_val / 100
     elif state["type"] == "volume_mute":
-        description = f"设备已静音"
         action = state["type"]
         arg = "is_volume_muted"
         value = state["is_muted"]
     elif state["type"] == "pause":
-        description = f"设备已暂停"
         action = state["type"]
         if domain == "media_player":
             action = "media_pause"
@@ -157,13 +166,19 @@ def handle_hass_set_state(conn: "ConnectionHandler", entity_id, state):
         if domain == "vacuum":
             action = "pause"
     elif state["type"] == "continue":
-        description = f"设备已继续"
         if domain == "media_player":
             action = "media_play"
         if domain == "vacuum":
             action = "start"
     else:
-        return f"{domain} {state['type']}功能尚未支持"
+        return {
+            "ok": False,
+            "transport": "home_assistant",
+            "entity_id": entity_id,
+            "domain": domain,
+            "state": state,
+            "error": "unsupported_state_type",
+        }
 
     if arg == "":
         data = {
@@ -175,9 +190,16 @@ def handle_hass_set_state(conn: "ConnectionHandler", entity_id, state):
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     response = requests.post(url, headers=headers, json=data, timeout=5)  # 设置5秒超时
     logger.bind(tag=TAG).info(
-        f"设置状态:{description},url:{url},return_code:{response.status_code}"
+        f"Home Assistant service call: domain={domain}, action={action}, return_code={response.status_code}"
     )
-    if response.status_code == 200:
-        return description
-    else:
-        return f"设置失败，错误码: {response.status_code}"
+    return {
+        "ok": response.status_code == 200,
+        "transport": "home_assistant",
+        "entity_id": entity_id,
+        "domain": domain,
+        "service": action,
+        "request": data,
+        "http_status": response.status_code,
+        "state_verified": False,
+        "state": state,
+    }

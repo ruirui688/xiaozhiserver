@@ -56,13 +56,8 @@ public class SysUserTokenServiceImpl extends BaseServiceImpl<SysUserTokenDao, Sy
             // 保存token
             this.insert(tokenEntity);
         } else {
-            // 判断token是否过期
-            if (tokenEntity.getExpireDate().getTime() < System.currentTimeMillis()) {
-                // token过期，重新生成token
-                token = TokenGenerator.generateValue();
-            } else {
-                token = tokenEntity.getToken();
-            }
+            // Always generate a new token on login (don't reuse old tokens)
+            token = TokenGenerator.generateValue();
 
             tokenEntity.setToken(token);
             tokenEntity.setUpdateDate(now);

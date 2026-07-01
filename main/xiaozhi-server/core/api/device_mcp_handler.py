@@ -1,3 +1,13 @@
+"""
+设备端MCP HTTP API。
+
+此API使用原始auth_key鉴权（而非JWT），因为设备MCP调用来自受信内部网络。
+- 内部网络请求通过原始auth_key进行简单Bearer token校验
+- 身份校验直接比对服务器配置的auth_key和manager-api密钥
+- 不签发JWT，不依赖第三方认证服务
+这是有意为之的设计，保持了内部网络调用的简洁性。
+"""
+
 import json
 from aiohttp import web
 
@@ -20,6 +30,12 @@ class DeviceMcpHandler(BaseHandler):
         return response
 
     def _is_authorized(self, request) -> bool:
+        # Design note: HTTP API authentication uses a shared secret (server auth_key
+        # or manager-api secret) rather than per-device JWT tokens.  This is because
+        # these endpoints are called by the management console (manager-api / web),
+        # not by individual devices.  The WebSocket connection uses JWT tokens for
+        # per-device auth; the HTTP API is a separate control plane that relies on
+        # the backend-to-backend shared secret for simplicity.
         auth_header = request.headers.get("Authorization", "")
         if not auth_header.startswith("Bearer "):
             return False

@@ -376,7 +376,9 @@ class TTSProviderBase(ABC):
         while not self.conn.stop_event.is_set():
             try:
                 message = self.tts_text_queue.get(timeout=1)
-                if self.conn.client_abort:
+                with self.conn._abort_lock:
+                    _aborted = self.conn.client_abort
+                if _aborted:
                     logger.bind(tag=TAG).info("收到打断信息，终止TTS文本处理线程")
                     continue
                 # 过滤旧消息：检查sentence_id是否匹配
@@ -437,7 +439,9 @@ class TTSProviderBase(ABC):
                         break
                     continue
 
-                if self.conn.client_abort:
+                with self.conn._abort_lock:
+                    _aborted = self.conn.client_abort
+                if _aborted:
                     logger.bind(tag=TAG).debug("收到打断信号，跳过当前音频数据")
                     enqueue_text, enqueue_audio = None, []
                     continue
@@ -469,6 +473,11 @@ class TTSProviderBase(ABC):
                     sendAudioMessage(self.conn, sentence_type, audio_datas, text, sentence_id),
                     self.conn.loop,
                 )
+                # 追踪待处理的 future，供 close() 取消
+                if not hasattr(self, "_pending_futures"):
+                    self._pending_futures = set()
+                self._pending_futures.add(future)
+                future.add_done_callback(self._pending_futures.discard)
                 future.result()
 
                 # 记录输出和报告
@@ -487,6 +496,12 @@ class TTSProviderBase(ABC):
     async def close(self):
         """资源清理方法"""
         self._sentence_text_map.clear()
+        # 取消所有待处理的 run_coroutine_threadsafe futures，避免挂起的协程阻塞关闭
+        pending = getattr(self, "_pending_futures", set())
+        for fut in list(pending):
+            if not fut.done():
+                fut.cancel()
+        pending.clear()
         if hasattr(self, "ws") and self.ws:
             await self.ws.close()
 

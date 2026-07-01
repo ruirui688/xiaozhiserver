@@ -97,7 +97,7 @@ class MemoryProvider(MemoryProviderBase):
                         # Parse and reformat the timestamp
                         dt = timestamp.split(".")[0]  # Remove milliseconds
                         formatted_time = dt.replace("T", " ")
-                    except:
+                    except Exception:
                         formatted_time = timestamp
                 memory = entry.get("memory", "")
                 if timestamp and memory:

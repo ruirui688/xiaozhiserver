@@ -28,6 +28,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -85,7 +86,7 @@ public class OTAMagController {
     @PostMapping
     @Operation(summary = "保存 OTA 固件信息")
     @RequiresPermissions("sys:role:superAdmin")
-    public Result<Void> save(@RequestBody OtaEntity entity) {
+    public Result<Void> save(@Valid @RequestBody OtaEntity entity) {
         if (entity == null) {
             return new Result<Void>().error("固件信息不能为空");
         }
@@ -186,12 +187,21 @@ public class OTAMagController {
             String originalFilename = otaEntity.getType() + "_" + otaEntity.getVersion();
             Path path;
 
+            // 定义固件根目录（用于路径遍历防护）
+            Path firmwareRoot = Paths.get(System.getProperty("user.dir"), "firmware").toAbsolutePath().normalize();
+
             // 检查是否是绝对路径
             if (Paths.get(firmwarePath).isAbsolute()) {
-                path = Paths.get(firmwarePath);
+                path = Paths.get(firmwarePath).normalize();
             } else {
                 // 如果是相对路径，则从当前工作目录解析
-                path = Paths.get(System.getProperty("user.dir"), firmwarePath);
+                path = Paths.get(System.getProperty("user.dir"), firmwarePath).normalize();
+            }
+
+            // 路径遍历防护：确保解析后的路径在固件根目录下
+            if (!path.startsWith(firmwareRoot)) {
+                logger.warn("Path traversal attempt blocked: {} is not under firmware root: {}", path, firmwareRoot);
+                return ResponseEntity.notFound().build();
             }
 
             logger.info("Attempting to download firmware for ID: {}, DB path: {}, resolved path: {}",

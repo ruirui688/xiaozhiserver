@@ -140,6 +140,16 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
 
     @Override
     public String generateSummary(String conversation, String promptTemplate, String modelId) {
+        return generateSummaryInternal(conversation, promptTemplate, modelId, false, false);
+    }
+
+    @Override
+    public String generateJson(String conversation, String modelId) {
+        return generateSummaryInternal(conversation, "{conversation}", modelId, true, true);
+    }
+
+    private String generateSummaryInternal(String conversation, String promptTemplate, String modelId,
+                                           boolean jsonMode, boolean allowJsonFallback) {
         if (!isAvailable()) {
             log.warn("LLM服务不可用，无法生成总结");
             return "LLM服务不可用，无法生成总结";
@@ -191,7 +201,14 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
             if (!isDeepSeek(baseUrl)) {
                 requestBody.put("temperature", temperature != null ? temperature : 0.7);
             }
-            requestBody.put("max_tokens", maxTokens != null ? maxTokens : 2000);
+            int outputTokens = maxTokens != null ? maxTokens : 2000;
+            if (jsonMode) {
+                outputTokens = Math.max(outputTokens, 4000);
+            }
+            requestBody.put("max_tokens", outputTokens);
+            if (jsonMode) {
+                requestBody.put("response_format", Map.of("type", "json_object"));
+            }
 
             applyProviderOptions(baseUrl, configJson, requestBody);
 
@@ -224,8 +241,15 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
                 }
             } else {
                 log.error("LLM API调用失败，状态码：{}，响应：{}", response.getStatusCode(), response.getBody());
+                if (jsonMode && allowJsonFallback) {
+                    return generateSummaryInternal(conversation, promptTemplate, modelId, false, false);
+                }
             }
         } catch (Exception e) {
+            if (jsonMode && allowJsonFallback) {
+                log.warn("调用LLM JSON模式失败，改用普通模式重试，modelId: {}, error: {}", modelId, e.getMessage());
+                return generateSummaryInternal(conversation, promptTemplate, modelId, false, false);
+            }
             log.error("调用LLM服务生成总结时发生异常，modelId: {}", modelId, e);
         }
 

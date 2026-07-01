@@ -39,6 +39,11 @@ class MemoryProvider(MemoryProviderBase):
 
     def __init__(self, config: Dict[str, Any], summary_memory: Optional[str] = None):
         super().__init__(config)
+        # NOTE: summary_memory is accepted for API compatibility but intentionally
+        # ignored by powermem. Summary handling is delegated to the Java-side
+        # memory pipeline (manager-api), which has its own summarization process
+        # triggered via memory source events. Accepting summary_memory here would
+        # create a race between the Python-side and Java-side summarization pipelines.
         self.use_powermem = False
         self.memory_client = None
         self.enable_user_profile = False

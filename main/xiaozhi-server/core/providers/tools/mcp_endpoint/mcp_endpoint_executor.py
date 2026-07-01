@@ -52,8 +52,15 @@ class MCPEndpointExecutor(ToolExecutor):
                 and isinstance(resultJson, dict)
                 and "action" in resultJson
             ):
+                action_name = resultJson.get("action")
+                action = Action.__members__.get(action_name) if action_name else None
+                if action is None:
+                    self.conn.logger.warning(
+                        f"Device returned unknown action: {action_name}, treating as ERROR"
+                    )
+                    action = Action.ERROR
                 return ActionResponse(
-                    action=Action[resultJson["action"]],
+                    action=action,
                     response=resultJson.get("response", ""),
                 )
 

@@ -83,6 +83,10 @@ docs/architecture/prompt-injection-engineering.md
 - [architecture/function-plugin-architecture.md](./architecture/function-plugin-architecture.md) - 功能插件架构。用于理解智能体功能库如何统一管理天气、新闻、音乐播放、HomeAssistant、讲段子、热梗、成语接龙、你说我猜等能力，区分系统能力、互动玩法和系统能力二级分类。
 - [architecture/stateful-game-session.md](./architecture/stateful-game-session.md) - 状态机游戏会话逻辑。用于理解"你说我猜""我想你猜""成语接龙"的触发、状态保存、每轮判定、提示、退出和扩展规则。
 - [architecture/prompt-injection-engineering.md](./architecture/prompt-injection-engineering.md) - 提示词注入工程。用于理解系统提示词、工具描述、声明式插件提示词、状态机游戏规则如何进入大模型，以及为什么状态机玩法不再依赖后台大段 prompt。
+- [architecture/device-interaction-chain.md](./architecture/device-interaction-chain.md) - 设备交互完整链路。用于理解 ESP32 设备从 WebSocket 连接到音频上行/下行、IoT 描述符注册、Device MCP、OTA 升级和连接生命周期管理的完整流程。
+- [architecture/memory-system-chain.md](./architecture/memory-system-chain.md) - 记忆系统完整链路。用于理解 Python Memory Provider → Java PowerMem 双阶段提取决策 → MySQL 持久化 → LLM 上下文注入的端到端记忆管道。
+- [architecture/mcp-chains.md](./architecture/mcp-chains.md) - MCP 三类链路架构。用于理解外部 MCP Endpoint、服务器侧 MCP、设备侧 MCP 的工具发现、注册、调用和 BaseMCPClient 共享基类。
+- [architecture/knowledge-base-chain.md](./architecture/knowledge-base-chain.md) - 知识库完整链路。用于理解文件上传 → LocalKnowledge/RAGFlow 分块向量化 → 混合检索 → LLM 工具注入的端到端知识库流程。
 
 ## 4. 本地开发环境
 

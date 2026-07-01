@@ -5,3 +5,6 @@ __pycache__
 Dockerfile
 tmp/
 data/
+main/manager-web/.env*
+main/manager-mobile/.env*
+main/manager-mobile/env/.env*

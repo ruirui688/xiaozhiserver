@@ -24,7 +24,9 @@ def check_config_file():
     # 检查是否从API读取配置
     config = load_config()
     if config.get("read_config_from_api", False):
-        print("从API读取配置")
+        from config.logger import setup_logging
+        logger = setup_logging()
+        logger.bind(tag="config").info("从API读取配置")
         old_config_origin = read_config(custom_config_file)
         if old_config_origin.get("selected_module") is not None:
             error_msg = "您的配置文件好像既包含智控台的配置又包含本地配置：\n"

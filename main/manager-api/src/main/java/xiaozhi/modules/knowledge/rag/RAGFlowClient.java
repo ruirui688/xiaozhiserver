@@ -15,18 +15,15 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 
-import java.text.SimpleDateFormat;
-import java.util.TimeZone;
-import java.util.Locale;
-import java.net.URLEncoder;
-import java.io.UnsupportedEncodingException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.io.OutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import java.util.function.Consumer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -58,10 +55,10 @@ public class RAGFlowClient {
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
         this.apiKey = apiKey;
         this.objectMapper = new ObjectMapper();
-        // [Reinforce] 兼容 RAGFlow 返回的 RFC 1123 日期格式 (如: Tue, 10 Feb 2026 10:27:35 GMT)
-        this.objectMapper
-                .setDateFormat(new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US));
-        this.objectMapper.setTimeZone(TimeZone.getTimeZone("GMT"));
+        // [RAGFlowClient] 兼容 RAGFlow 返回的多种日期格式（RFC 1123 和 ISO 8601）。
+        // 不再设置固定 DateFormat，改为让 Jackson 将日期字段作为字符串保留在 Map 中，
+        // 由上层 Adapter 按需解析。这样可以同时支持两种格式而不抛异常。
+        // 原有 SimpleDateFormat 和 TimeZone 配置已于 Issue #11 移除。
 
         // 优先从 Spring 上下文中获取池化的 RestTemplate Bean (Issue 3: 连接池化)
         RestTemplate pooledTemplate = null;
@@ -71,7 +68,9 @@ public class RAGFlowClient {
             log.warn("无法从 SpringContext 获取池化 RestTemplate，将退化为简单连接模式: {}", e.getMessage());
         }
 
-        if (false) { // Force new RestTemplate for debugging
+        // [Issue #3] 使用全局池化的 RestTemplate（从 Spring 上下文获取），
+        // 以复用连接池和统一超时配置。若无法获取则退化为简单连接模式。
+        if (pooledTemplate != null) {
             this.restTemplate = pooledTemplate;
             log.debug("RAGFlowClient 已成功挂载全局池化 RestTemplate");
         } else {

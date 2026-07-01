@@ -19,8 +19,10 @@ import xiaozhi.common.service.impl.BaseServiceImpl;
 import xiaozhi.common.utils.ConvertUtils;
 import xiaozhi.common.utils.JsonUtils;
 import xiaozhi.modules.knowledge.dao.KnowledgeBaseDao;
+import xiaozhi.modules.knowledge.dao.KnowledgeChunkDao;
 import xiaozhi.modules.knowledge.dao.DocumentDao;
 import xiaozhi.modules.knowledge.entity.DocumentEntity;
+import xiaozhi.modules.knowledge.entity.KnowledgeChunkEntity;
 import xiaozhi.modules.knowledge.dto.KnowledgeBaseDTO;
 import xiaozhi.modules.knowledge.dto.dataset.DatasetDTO;
 import xiaozhi.modules.knowledge.entity.KnowledgeBaseEntity;
@@ -48,6 +50,7 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
         implements KnowledgeBaseService {
 
     private final KnowledgeBaseDao knowledgeBaseDao;
+    private final KnowledgeChunkDao knowledgeChunkDao;
     private final DocumentDao documentDao;
     private final ModelConfigService modelConfigService;
     private final ModelConfigDao modelConfigDao;
@@ -111,9 +114,29 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
             }
 
             // 同步名称（去掉 username_ 前缀）
+            // [Issue #7] 使用当前登录用户名作为前缀匹配，而非简单查找第一个下划线。
+            // 例如 username=john_doe, datasetName=my_dataset, RAGFlow存储为 john_doe_my_dataset。
+            // 之前用 ragflowName.indexOf('_') 会错误截取为 doe_my_dataset。
             String ragflowName = datasetInfo.getName();
             if (StringUtils.isNotBlank(ragflowName)) {
-                String localName = ragflowName.contains("_") ? ragflowName.substring(ragflowName.indexOf('_') + 1) : ragflowName;
+                String localName = ragflowName;
+                // 尝试用当前用户名前缀剥离
+                String currentUsername = null;
+                try {
+                    currentUsername = SecurityUser.getUser().getUsername();
+                } catch (Exception e) {
+                    log.warn("无法获取当前用户名，使用备用剥离策略: {}", e.getMessage());
+                }
+                if (StringUtils.isNotBlank(currentUsername)) {
+                    String prefix = currentUsername + "_";
+                    if (ragflowName.startsWith(prefix)) {
+                        localName = ragflowName.substring(prefix.length());
+                    }
+                }
+                // 备用方案：取最后一个下划线后的部分
+                if (localName.equals(ragflowName) && ragflowName.contains("_")) {
+                    localName = ragflowName.substring(ragflowName.lastIndexOf('_') + 1);
+                }
                 if (!localName.equals(dto.getName())) {
                     log.info("同步知识库名称: {} -> {}", dto.getName(), localName);
                     KnowledgeBaseEntity entity = knowledgeBaseDao.selectById(dto.getId());
@@ -411,8 +434,18 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
         }
 
         // 3. Local Delete (Safe Order)
-        // 恢复正确顺序：先删子表 (Plugin Mapping)，再删主表 (Entity)
+        // 恢复正确顺序：先删子表 (Chunks → Plugin Mapping → Documents)，再删主表 (Entity)
         if (apiDeleteSuccess) {
+            // [Issue #13] 清理可能残留的本地知识库切片，防止适配器切换后产生孤立数据
+            try {
+                int chunkDeleted = knowledgeChunkDao.delete(
+                        new QueryWrapper<KnowledgeChunkEntity>().eq("dataset_id", datasetId));
+                if (chunkDeleted > 0) {
+                    log.info("已清理 {} 个本地知识库切片记录, datasetId={}", chunkDeleted, datasetId);
+                }
+            } catch (Exception e) {
+                log.warn("清理本地切片记录失败(不影响主流程): {}", e.getMessage());
+            }
             log.info("开始删除ai_agent_plugin_mapping表中与知识库ID '{}' 相关的映射记录", entity.getId());
             log.info("开始删除关联数据, entityId: {}", entity.getId());
             knowledgeBaseDao.deletePluginMappingByKnowledgeBaseId(entity.getId());
@@ -526,7 +559,10 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
                     "semantic_top_k",
                     "faq_threshold",
                     "semantic_threshold",
-                    "rerank_enabled")) {
+                    "rerank_enabled",
+                    "embedding_model",
+                    "embedding_base_url",
+                    "embedding_api_key")) {
                 Object value = datasetConfig.get(key);
                 if (value != null && StringUtils.isNotBlank(value.toString())) {
                     config.put(key, value);

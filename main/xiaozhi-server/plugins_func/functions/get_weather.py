@@ -19,7 +19,8 @@ GET_WEATHER_FUNCTION_DESC = {
         "description": (
             "获取某个地点的天气，用户应提供一个位置，比如用户说杭州天气，参数为：杭州。"
             "如果用户说的是省份，默认用省会城市。如果用户说的不是省份或城市而是一个地名，默认用该地所在省份的省会城市。"
-            "重要：本地未来7天天气已在上下文中提供，用户未指明其他城市时绝对不要调用此工具。"
+            "重要：本地未来7天天气已在上下文中提供，用户未指明其他城市且未询问实时状态/预警时不要调用此工具。"
+            "用户询问天气预警、预警级别或预警状态时，query_type必须传warning；普通当前天气或天气预报传weather。"
         ),
         "parameters": {
             "type": "object",
@@ -31,6 +32,11 @@ GET_WEATHER_FUNCTION_DESC = {
                 "lang": {
                     "type": "string",
                     "description": "返回用户使用的语言code，例如zh_CN/zh_HK/en_US/ja_JP等，默认zh_CN",
+                },
+                "query_type": {
+                    "type": "string",
+                    "description": "查询类型。普通当前天气或天气预报传weather；天气预警、预警级别或预警状态传warning。",
+                    "enum": ["weather", "warning"],
                 },
             },
             "required": ["lang"],
@@ -160,7 +166,27 @@ WEATHER_CODE_MAP = {
 }
 
 
+# 允许的天气API主机列表
+ALLOWED_WEATHER_API_HOSTS = [
+    "geoapi.qweather.com",
+    "api.qweather.com",
+    "devapi.qweather.com",
+    "geocoding-api.open-meteo.com",
+    "api.open-meteo.com",
+]
+
+
+def _validate_weather_api_host(api_host: str) -> bool:
+    """验证天气API主机名是否在允许列表中"""
+    if not api_host:
+        return False
+    return api_host in ALLOWED_WEATHER_API_HOSTS
+
+
 def fetch_city_info(location, api_key, api_host):
+    if not _validate_weather_api_host(api_host):
+        logger.bind(tag=TAG).error(f"不允许的天气API主机: {api_host}")
+        return None
     url = f"https://{api_host}/geo/v2/city/lookup?key={api_key}&location={location}&lang=zh"
     response = requests.get(url, headers=HEADERS, timeout=10).json()
     if response.get("error") is not None:
@@ -169,6 +195,62 @@ def fetch_city_info(location, api_key, api_host):
         )
         return None
     return response.get("location", [])[0] if response.get("location") else None
+
+
+def fetch_weather_warning(location_id, api_key, api_host):
+    if not _validate_weather_api_host(api_host):
+        logger.bind(tag=TAG).error(f"不允许的天气API主机: {api_host}")
+        return None
+    url = f"https://{api_host}/v7/warning/now"
+    response = requests.get(
+        url,
+        params={"key": api_key, "location": location_id, "lang": "zh"},
+        headers=HEADERS,
+        timeout=10,
+    )
+    data = response.json()
+    if data.get("error") is not None:
+        detail = data.get("error", {}).get("detail") or "unknown error"
+        logger.bind(tag=TAG).error(
+            f"获取天气预警失败，原因：{detail}"
+        )
+        return {"error": detail}
+    if data.get("code") and str(data.get("code")) != "200":
+        error = f"code={data.get('code')}"
+        logger.bind(tag=TAG).error(f"获取天气预警失败，{error}")
+        return {"error": error}
+    return {"warnings": data.get("warning", [])}
+
+
+def build_weather_warning_report(city_name, warning_result):
+    if warning_result is None:
+        return f"天气预警接口暂时不可用，不能确认{city_name}预警状态。"
+    if isinstance(warning_result, dict):
+        error = warning_result.get("error")
+        if error:
+            if "No permission" in error:
+                return f"天气预警接口当前没有可用权限，不能确认{city_name}预警状态。"
+            return f"天气预警接口暂时不可用，不能确认{city_name}预警状态。"
+        warnings = warning_result.get("warnings", [])
+    else:
+        warnings = warning_result
+    if not warnings:
+        return f"{city_name}当前未查到生效天气预警。"
+
+    parts = []
+    for item in warnings[:3]:
+        title = (item.get("title") or "").strip()
+        type_name = (item.get("typeName") or "").strip()
+        severity = (item.get("severity") or item.get("severityColor") or "").strip()
+        status = (item.get("status") or "").strip()
+        summary = title or "".join(part for part in [type_name, severity, "预警"] if part)
+        if status and status not in summary:
+            summary = f"{summary}，状态{status}"
+        parts.append(summary)
+
+    if not parts:
+        return f"{city_name}当前未查到生效天气预警。"
+    return f"{city_name}当前有天气预警：" + "；".join(parts) + "。"
 
 
 def fetch_weather_page(url):
@@ -323,7 +405,12 @@ def build_open_meteo_weather_report(location):
 
 
 @register_function("get_weather", GET_WEATHER_FUNCTION_DESC, ToolType.SYSTEM_CTL)
-def get_weather(conn: "ConnectionHandler", location: str = None, lang: str = "zh_CN"):
+def get_weather(
+    conn: "ConnectionHandler",
+    location: str = None,
+    lang: str = "zh_CN",
+    query_type: str = "weather",
+):
     from core.utils.cache.manager import cache_manager, CacheType
 
     weather_config = conn.config.get("plugins", {}).get("get_weather", {})
@@ -352,6 +439,33 @@ def get_weather(conn: "ConnectionHandler", location: str = None, lang: str = "zh
         else:
             # 若无IP，使用默认位置
             location = default_location
+
+    if query_type == "warning":
+        if not api_key or not api_host:
+            return ActionResponse(
+                Action.RESPONSE,
+                response=f"天气预警查询未配置API Key或API Host，暂时无法查询{location}预警。",
+            )
+        try:
+            city_info = fetch_city_info(location, api_key, api_host)
+            if not city_info:
+                return ActionResponse(
+                    Action.RESPONSE,
+                    response=f"暂时没查到{location}的天气预警。",
+                )
+            warning_result = fetch_weather_warning(city_info["id"], api_key, api_host)
+            city_name = city_info.get("name") or location
+            return ActionResponse(
+                Action.RESPONSE,
+                response=build_weather_warning_report(city_name, warning_result),
+            )
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"天气预警查询异常: {e}")
+            return ActionResponse(
+                Action.RESPONSE,
+                response=f"暂时没查到{location}的天气预警。",
+            )
+
     # 尝试从缓存获取完整天气报告
     weather_cache_key = f"full_weather_{location}_{lang}"
     cached_weather_report = cache_manager.get(CacheType.WEATHER, weather_cache_key)

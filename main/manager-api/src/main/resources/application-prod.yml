@@ -1,0 +1,62 @@
+# ============================================================
+# Production profile — all sensitive values from environment
+# Activate with: SPRING_PROFILES_ACTIVE=prod
+# ============================================================
+
+knife4j:
+  production: true
+  enable: false
+  basic:
+    enable: true
+    username: admin
+    password: ${KNIFE4J_PASSWORD:}
+
+spring:
+  datasource:
+    druid:
+      driver-class-name: com.mysql.cj.jdbc.Driver
+      url: ${DB_URL:jdbc:mysql://127.0.0.1:3306/xiaozhi_esp32_server?useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC&nullCatalogMeansCurrent=true}
+      username: ${DB_USERNAME}
+      password: ${DB_PASSWORD}
+      initial-size: 5
+      max-active: 50
+      min-idle: 5
+      max-wait: 6000
+      pool-prepared-statements: true
+      max-pool-prepared-statement-per-connection-size: 20
+      time-between-eviction-runs-millis: 60000
+      min-evictable-idle-time-millis: 300000
+      test-while-idle: true
+      test-on-borrow: true
+      test-on-return: false
+      stat-view-servlet:
+        enabled: false
+      filter:
+        stat:
+          log-slow-sql: true
+          slow-sql-millis: 1000
+          merge-sql: false
+        wall:
+          config:
+            multi-statement-allow: true
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: 0
+      timeout: 10000ms
+      lettuce:
+        pool:
+          max-active: 20
+          max-idle: 10
+          min-idle: 5
+        shutdown-timeout: 100ms
+
+xiaozhi:
+  cors:
+    allowed-origins: ${CORS_ORIGINS:http://localhost:8002}
+
+renren:
+  redis:
+    open: true

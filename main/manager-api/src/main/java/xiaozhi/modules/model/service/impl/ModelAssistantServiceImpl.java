@@ -461,37 +461,21 @@ public class ModelAssistantServiceImpl implements ModelAssistantService {
                                 })
                                 return f"{self.endpoint}?{query}"
 
-                            async def speech_to_text(self, pcm_bytes):
-                                # TODO: 使用项目现有 websocket 客户端模式发送 start/audio/end 帧
-                                # TODO: 聚合服务端转写事件，返回最终非空文本
-                                raise NotImplementedError("需按官方 RTASR LLM WebSocket 帧格式完成")
+                            # Provider implementation to be added when specifications are confirmed
                         """),
                 artifact(
                         "main/manager-api/src/main/resources/db/changelog/YYYYMMDDHHMM.sql",
                         "新增后台 ASR 接入方式和字段迁移草案",
                         "sql",
                         """
-                        -- 草案：字段结构需按 ai_model_provider 当前表结构调整
-                        INSERT INTO ai_model_provider
-                          (model_type, provider_code, name, fields, sort, creator, create_date)
-                        VALUES
-                          ('ASR', 'xunfei_rtasr_llm', '讯飞实时语音转写大模型',
-                           '[{"key":"app_id","label":"AppID","required":true},{"key":"access_key_id","label":"AccessKeyId","required":true},{"key":"access_key_secret","label":"AccessKeySecret","required":true,"secret":true},{"key":"lang","label":"语言","default":"cn"},{"key":"audio_encode","label":"音频编码","default":"pcm"},{"key":"samplerate","label":"采样率","default":16000}]',
-                           0, 1, NOW());
+                        -- Provider implementation to be added when specifications are confirmed
                         """),
                 artifact(
                         "main/xiaozhi-server/tests/test_xunfei_rtasr_llm_asr.py",
                         "真实音频识别测试草案",
                         "python",
                         """
-                        import pytest
-
-
-                        @pytest.mark.integration
-                        def test_xunfei_rtasr_llm_requires_real_transcript():
-                            # 使用统一测试音频，转换为 16k/16bit/mono PCM 后调用 provider
-                            # 断言：只连通不能通过，必须返回非空识别文本、耗时和原始错误详情
-                            pass
+                        # Provider implementation to be added when specifications are confirmed
                         """));
     }
 
@@ -532,32 +516,21 @@ public class ModelAssistantServiceImpl implements ModelAssistantService {
                         "新增 provider 草案",
                         "python",
                         """
-                        # 草案：根据官方文档补齐 endpoint、鉴权、请求体和结果解析
-                        class NewProvider:
-                            def __init__(self, config):
-                                self.config = config
-
-                            async def call(self, payload):
-                                # TODO: 调用真实模型接口
-                                # TODO: 解析业务输出，不能把连通成功当作测试通过
-                                raise NotImplementedError
+                        # Provider implementation to be added when specifications are confirmed
                         """),
                 artifact(
                         "main/manager-api/src/main/resources/db/changelog/YYYYMMDDHHMM.sql",
                         "新增 provider 字段迁移草案",
                         "sql",
                         """
-                        -- 草案：按 ai_model_provider 当前表结构注册 provider_code、字段定义和文档链接
-                        -- INSERT INTO ai_model_provider (...) VALUES (...);
+                        -- Provider implementation to be added when specifications are confirmed
                         """),
                 artifact(
                         "tests/integration/test_" + adapter + ".py",
                         "真实模型测试草案",
                         "python",
                         """
-                        def test_provider_returns_real_result():
-                            # TODO: 使用真实输入断言业务输出非空，并保留错误详情
-                            pass
+                        # Provider implementation to be added when specifications are confirmed
                         """));
     }
 

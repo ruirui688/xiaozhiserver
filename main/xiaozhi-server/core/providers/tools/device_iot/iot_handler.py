@@ -107,7 +107,9 @@ async def handleIotDescriptors(conn: "ConnectionHandler", descriptors):
             descriptor["properties"],
             descriptor["methods"],
         )
+        # 只将允许的描述符存入 conn.iot_descriptors，与注册为工具的集合保持一致
         conn.iot_descriptors[descriptor["name"]] = iot_descriptor
+        iot_descriptor._gated = True  # 标记为已通过门控
         allowed_descriptors.append(descriptor)
         functions_changed = True
 
@@ -127,15 +129,28 @@ async def handleIotStatus(conn: "ConnectionHandler", states):
                 for property_item in value.properties:
                     for k, v in state["state"].items():
                         if property_item["name"] == k:
+                            # 类型转换：存储的值可能为默认初始值（0/False/""），
+                            # 所以不能直接比较类型，应让存储值适配收到的实际类型
                             if type(v) != type(property_item["value"]):
-                                logger.bind(tag=TAG).error(
-                                    f"属性{property_item['name']}的值类型不匹配"
+                                logger.bind(tag=TAG).debug(
+                                    f"属性{property_item['name']}类型不匹配，转换存储值类型: "
+                                    f"期望{type(v).__name__}，当前{type(property_item['value']).__name__}"
                                 )
-                                break
+                                # 转换存储值为传入值的类型
+                                try:
+                                    if isinstance(v, bool):
+                                        stored = str(property_item["value"]).lower() in ("true", "1", "yes")
+                                    elif isinstance(v, (int, float)):
+                                        stored = type(v)(property_item["value"])
+                                    else:
+                                        stored = v  # 用新值覆盖
+                                    property_item["value"] = stored
+                                except (ValueError, TypeError):
+                                    property_item["value"] = v
                             else:
                                 property_item["value"] = v
-                                logger.bind(tag=TAG).info(
-                                    f"物联网状态更新: {key} , {property_item['name']} = {v}"
-                                )
+                            logger.bind(tag=TAG).info(
+                                f"物联网状态更新: {key} , {property_item['name']} = {v}"
+                            )
                             break
                 break

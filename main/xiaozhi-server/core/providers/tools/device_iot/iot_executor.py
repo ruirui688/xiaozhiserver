@@ -13,6 +13,9 @@ class DeviceIoTExecutor(ToolExecutor):
     def __init__(self, conn):
         self.conn = conn
         self.iot_tools: Dict[str, ToolDefinition] = {}
+        # 存储工具名称到设备信息的映射，避免笨重的下划线分割
+        # tool_name -> {"device_name": str, "operation": "get"|"control", "property_name"|"method_name": str}
+        self._tool_device_map: Dict[str, Dict[str, str]] = {}
 
     async def execute(
         self, conn, tool_name: str, arguments: Dict[str, Any]
@@ -24,39 +27,46 @@ class DeviceIoTExecutor(ToolExecutor):
             )
 
         try:
-            # 解析工具名称，获取设备名和操作类型
+            # 通过预先构建的映射表解析设备名和操作，避免下划线分割在多段设备名上出错
+            tool_info = self._tool_device_map.get(tool_name)
+            if tool_info is None:
+                return ActionResponse(
+                    action=Action.ERROR, response=f"无法解析IoT工具名称: {tool_name}"
+                )
+            device_name = tool_info["device_name"]
             if tool_name.startswith("get_"):
-                # 查询操作：get_devicename_property
-                parts = tool_name.split("_", 2)
-                if len(parts) >= 3:
-                    device_name = parts[1]
-                    property_name = parts[2]
+                property_name = tool_info.get("property_name")
+                if property_name is None:
+                    return ActionResponse(
+                        action=Action.ERROR, response=f"无法解析IoT工具名称: {tool_name}"
+                    )
 
-                    value = await self._get_iot_status(device_name, property_name)
-                    if value is not None:
-                        # 处理响应模板
-                        response_success = arguments.get(
-                            "response_success", "查询成功：{value}"
-                        )
-                        response = response_success.replace("{value}", str(value))
+                value = await self._get_iot_status(device_name, property_name)
+                if value is not None:
+                    # 处理响应模板
+                    response_success = arguments.get(
+                        "response_success", "查询成功：{value}"
+                    )
+                    response = response_success.replace("{value}", str(value))
 
-                        return ActionResponse(
-                            action=Action.RESPONSE,
-                            response=response,
-                        )
-                    else:
-                        response_failure = arguments.get(
-                            "response_failure", f"无法获取{device_name}的状态"
-                        )
-                        return ActionResponse(
-                            action=Action.ERROR, response=response_failure
-                        )
+                    return ActionResponse(
+                        action=Action.RESPONSE,
+                        response=response,
+                    )
+                else:
+                    response_failure = arguments.get(
+                        "response_failure", f"无法获取{device_name}的状态"
+                    )
+                    return ActionResponse(
+                        action=Action.ERROR, response=response_failure
+                    )
             else:
-                # 控制操作：devicename_method
-                parts = tool_name.split("_", 1)
-                if len(parts) >= 2:
-                    device_name = parts[0]
-                    method_name = parts[1]
+                # 控制操作
+                method_name = tool_info.get("method_name")
+                if method_name is None:
+                    return ActionResponse(
+                        action=Action.ERROR, response=f"无法解析IoT工具名称: {tool_name}"
+                    )
 
                     # 提取控制参数（排除响应参数）
                     control_params = {
@@ -170,6 +180,10 @@ class DeviceIoTExecutor(ToolExecutor):
                         description=tool_desc,
                         tool_type=ToolType.DEVICE_IOT,
                     )
+                    self._tool_device_map[tool_name] = {
+                        "device_name": device_name,
+                        "property_name": prop_name,
+                    }
 
             # 注册控制工具
             if "methods" in descriptor:
@@ -228,6 +242,10 @@ class DeviceIoTExecutor(ToolExecutor):
                         description=tool_desc,
                         tool_type=ToolType.DEVICE_IOT,
                     )
+                    self._tool_device_map[tool_name] = {
+                        "device_name": device_name,
+                        "method_name": method_name,
+                    }
 
     def get_tools(self) -> Dict[str, ToolDefinition]:
         """获取所有设备端IoT工具"""

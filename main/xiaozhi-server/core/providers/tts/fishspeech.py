@@ -1,5 +1,6 @@
 import base64
 import requests
+import aiohttp
 import ormsgpack
 from pathlib import Path
 from pydantic import BaseModel, Field, conint, model_validator
@@ -160,28 +161,29 @@ class TTSProvider(TTSProviderBase):
 
         pydantic_data = ServeTTSRequest(**data)
 
-        response = requests.post(
-            self.api_url,
-            data=ormsgpack.packb(
-                pydantic_data, option=ormsgpack.OPT_SERIALIZE_PYDANTIC
-            ),
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/msgpack",
-            },
-        )
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                self.api_url,
+                data=ormsgpack.packb(
+                    pydantic_data, option=ormsgpack.OPT_SERIALIZE_PYDANTIC
+                ),
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/msgpack",
+                },
+            ) as response:
+                if response.status == 200:
+                    audio_content = await response.read()
 
-        if response.status_code == 200:
-            audio_content = response.content
+                    if output_file:
+                        with open(output_file, "wb") as audio_file:
+                            audio_file.write(audio_content)
+                    else:
+                        return audio_content
 
-            if output_file:
-                with open(output_file, "wb") as audio_file:
-                    audio_file.write(audio_content)
-            else:
-                return audio_content
-
-        else:
-            error_msg = f"Request failed with status code {response.status_code}"
-            print(error_msg)
-            print(response.json())
-            raise Exception(error_msg)
+                else:
+                    error_msg = f"Request failed with status code {response.status}"
+                    logger.bind(tag=__name__).error(error_msg)
+                    error_json = await response.json()
+                    logger.bind(tag=__name__).error(str(error_json))
+                    raise Exception(error_msg)

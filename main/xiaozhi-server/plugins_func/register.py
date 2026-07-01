@@ -6,6 +6,11 @@ TAG = __name__
 logger = setup_logging()
 
 
+# NOTE: This ToolType enum describes legacy plugin EXECUTION BEHAVIOR.
+# It is distinct from core/providers/tools/base/tool_types.ToolType which
+# categorizes tools by SOURCE (server_plugin, device_iot, etc.).
+# Both enums are in active use. Do not merge or rename without
+# updating plugin_executor.py references to numeric codes [4, 5].
 class ToolType(Enum):
     NONE = (1, "调用完工具后，不做其他操作")
     WAIT = (2, "调用工具，等待函数返回")

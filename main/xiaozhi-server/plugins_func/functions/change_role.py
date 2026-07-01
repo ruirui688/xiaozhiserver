@@ -53,6 +53,11 @@ def change_role(conn: "ConnectionHandler", role: str, role_name: str):
         )
     new_prompt = prompts[role].replace("{{assistant_name}}", role_name)
     conn.change_system_prompt(new_prompt)
+    # Re-run prompt enhancement to restore time/weather/location/context after role change
+    if hasattr(conn, '_init_prompt_enhancement'):
+        conn._init_prompt_enhancement()
+    if hasattr(conn, '_inject_tool_call_fewshot'):
+        conn._inject_tool_call_fewshot()
     logger.bind(tag=TAG).info(f"准备切换角色:{role},角色名字:{role_name}")
     res = f"切换角色成功,我是{role}{role_name}"
     return ActionResponse(action=Action.RESPONSE, result="切换角色已处理", response=res)

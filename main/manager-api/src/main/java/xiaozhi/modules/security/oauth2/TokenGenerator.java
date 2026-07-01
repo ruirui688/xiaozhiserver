@@ -33,7 +33,7 @@ public class TokenGenerator {
 
     public static String generateValue(String param) {
         try {
-            MessageDigest algorithm = MessageDigest.getInstance("MD5");
+            MessageDigest algorithm = MessageDigest.getInstance("SHA-256");
             algorithm.reset();
             algorithm.update(param.getBytes());
             byte[] messageDigest = algorithm.digest();

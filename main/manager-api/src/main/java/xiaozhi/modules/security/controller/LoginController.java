@@ -142,10 +142,10 @@ public class LoginController {
             }
         }
 
-        // 按照用户名获取用户
+        // 按照用户名获取用户 - return generic error to avoid account enumeration
         SysUserDTO userDTO = sysUserService.getByUsername(login.getUsername());
         if (userDTO != null) {
-            throw new RenException(ErrorCode.PHONE_ALREADY_REGISTERED);
+            throw new RenException(ErrorCode.ADD_DATA_FAILED);
         }
         userDTO = new SysUserDTO();
         userDTO.setUsername(login.getUsername());

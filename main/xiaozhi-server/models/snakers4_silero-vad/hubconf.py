@@ -18,7 +18,7 @@ def versiontuple(v):
     for i in splitted:
         try:
             version_list.append(int(i))
-        except:
+        except Exception:
             version_list.append(0)
     return tuple(version_list)
 

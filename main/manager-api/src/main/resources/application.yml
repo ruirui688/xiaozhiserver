@@ -30,9 +30,9 @@ spring:
 knife4j:
   enable: true
   basic:
-    enable: false
+    enable: true
     username: admin
-    password: admin
+    password: ${KNIFE4J_PASSWORD:admin}
   setting:
     enableFooter: false
 
@@ -49,6 +49,10 @@ xiaozhi:
     # 本机源码开发默认用 127.0.0.1；Docker/多机部署请用环境变量覆盖：
     # XIAOZHI_SERVER_HTTP_BASE_URL=http://xiaozhi-esp32-server:8003
     http-base-url: ${XIAOZHI_SERVER_HTTP_BASE_URL:http://127.0.0.1:8003}
+
+# 知识库配置
+knowledge:
+  max-upload-size: 10485760  # 知识库文档上传大小限制（默认 10MB）
 
 #mybatis
 mybatis-plus:

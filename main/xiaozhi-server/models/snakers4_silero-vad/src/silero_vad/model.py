@@ -20,12 +20,12 @@ def load_silero_vad(onnx=False, opset_version=16):
     try:
         import importlib_resources as impresources
         model_file_path = str(impresources.files(package_path).joinpath(model_name))
-    except:
+    except Exception:
         from importlib import resources as impresources
         try:
             with impresources.path(package_path, model_name) as f:
                 model_file_path = f
-        except:
+        except Exception:
             model_file_path = str(impresources.files(package_path).joinpath(model_name))
 
     if onnx:

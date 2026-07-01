@@ -135,6 +135,10 @@ class ServerMCPClient:
         loop = self._worker_task.get_loop()
         coro = self.session.call_tool(real_name, arguments=arguments, read_timeout_seconds=read_timeout_seconds, progress_callback=progress_callback, meta=meta)
 
+        # 防御性检查：当调用方协程运行在与MCP客户端工作协程不同的事件循环中时，
+        # 使用 asyncio.run_coroutine_threadsafe 将协程调度到目标事件循环执行。
+        # 这在ServerMCPClient的工具调用被非主循环上下文调用时触发（例如：从线程池、
+        # 外部接口回调或其他自定义事件循环中调用call_tool时）。
         if loop is asyncio.get_running_loop():
             return await coro
 
@@ -179,6 +183,22 @@ class ServerMCPClient:
                         if self.config["command"] == "npx"
                         else self.config["command"]
                     )
+                    # SECURITY: npx -y auto-downloads packages from npm registry.
+                    # Warn if no package.json / lockfile found in the MCP server directory.
+                    if self.config["command"] == "npx" and "-y" in self.config.get("args", []):
+                        mcp_dir = os.path.dirname(os.path.abspath(__file__))
+                        has_lock = (
+                            os.path.exists(os.path.join(mcp_dir, "package.json"))
+                            or os.path.exists(os.path.join(mcp_dir, "package-lock.json"))
+                            or os.path.exists(os.path.join(mcp_dir, "yarn.lock"))
+                            or os.path.exists(os.path.join(mcp_dir, "pnpm-lock.yaml"))
+                        )
+                        if not has_lock:
+                            self.logger.bind(tag=TAG).warning(
+                                "npx -y detected without package.json/lockfile in MCP server directory. "
+                                "This auto-downloads packages at runtime, creating a supply chain risk. "
+                                "For production, pre-install MCP servers via package.json + lockfile."
+                            )
                     env = {**os.environ, **self.config.get("env", {})}
                     params = StdioServerParameters(
                         command=cmd,

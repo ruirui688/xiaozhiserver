@@ -45,6 +45,15 @@ public interface LLMService {
     String generateSummary(String conversation, String promptTemplate, String modelId);
 
     /**
+     * 生成结构化 JSON 输出（指定模型ID）。
+     *
+     * @param conversation 提示词内容
+     * @param modelId      模型ID
+     * @return JSON 文本；模型或供应商不支持 JSON 模式时由实现回退普通生成
+     */
+    String generateJson(String conversation, String modelId);
+
+    /**
      * 生成聊天记录总结（包含历史记忆合并）
      * 
      * @param conversation   对话内容

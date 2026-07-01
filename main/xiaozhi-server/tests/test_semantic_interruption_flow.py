@@ -2,6 +2,7 @@ import asyncio
 import json
 import queue
 import sys
+import time
 from pathlib import Path
 
 
@@ -60,8 +61,7 @@ class _Executor:
 class _Conn:
     def __init__(self, decision):
         self.config = {
-            "semantic_interruption": {"timeout_seconds": 1.0, "tts_grace_ms": 0},
-            "listen_detect": {"tts_grace_ms": 0},
+            "semantic_interruption": {"timeout_seconds": 1.0},
             "wakeup_words": [],
         }
         self.llm = _LLM(decision)
@@ -126,6 +126,26 @@ def test_overlap_continue_does_not_abort_or_submit_chat(monkeypatch):
     assert all(message.get("state") != "stop" for message in conn.websocket.messages)
 
 
+def test_overlap_json_content_is_used_for_llm_classification(monkeypatch):
+    conn, accepted = asyncio.run(
+        _start_to_chat_with_intent_patch(
+            monkeypatch,
+            json.dumps(
+                {"speaker": "user-a", "language": "zh", "content": "嗯"},
+                ensure_ascii=False,
+            ),
+            {"decision": "continue", "reason": "短反馈"},
+        )
+    )
+
+    assert accepted is False
+    payload = json.loads(conn.llm.calls[0]["user_prompt"])
+    assert payload["overlap_user_text"] == "嗯"
+    assert conn.current_speaker == "user-a"
+    assert conn.abort_generation == 0
+    assert conn.executor.submitted == []
+
+
 def test_overlap_new_turn_aborts_then_submits_new_chat(monkeypatch):
     conn, accepted = asyncio.run(
         _start_to_chat_with_intent_patch(
@@ -144,7 +164,26 @@ def test_overlap_new_turn_aborts_then_submits_new_chat(monkeypatch):
     assert any(message.get("type") == "stt" for message in conn.websocket.messages)
 
 
-def test_overlap_interrupt_aborts_then_submits_stop_text(monkeypatch):
+def test_overlap_new_turn_is_not_suppressed_when_tts_just_started(monkeypatch):
+    conn = _Conn({"decision": "new_turn", "reason": "新问题"})
+    conn._tts_started_at = time.time() * 1000
+
+    import core.handle.receiveAudioHandle as receive_handle
+
+    async def _no_intent(conn, actual_text):
+        return False
+
+    monkeypatch.setattr(receive_handle, "handle_user_intent", _no_intent)
+
+    accepted = asyncio.run(startToChat(conn, "等一下我问个问题"))
+
+    assert accepted is True
+    assert conn.llm.calls
+    assert conn.abort_generation == 1
+    assert conn.executor.submitted[0][1] == ("等一下我问个问题",)
+
+
+def test_overlap_interrupt_aborts_without_submitting_chat(monkeypatch):
     conn, accepted = asyncio.run(
         _start_to_chat_with_intent_patch(
             monkeypatch,
@@ -155,7 +194,40 @@ def test_overlap_interrupt_aborts_then_submits_stop_text(monkeypatch):
 
     assert accepted is True
     assert conn.abort_generation == 1
-    assert conn.executor.submitted[0][1] == ("别说了",)
+    assert conn.executor.submitted == []
+    assert conn.websocket.messages[0]["type"] == "tts"
+    assert conn.websocket.messages[0]["state"] == "stop"
+
+
+def test_overlap_interrupt_does_not_enter_semantic_center(monkeypatch):
+    import core.handle.receiveAudioHandle as receive_handle
+
+    class _SemanticCenter:
+        def __init__(self):
+            self.calls = 0
+            self.state_manager = self
+
+        def get_context(self, conn):
+            return None
+
+        async def handle_user_text(self, conn, text):
+            self.calls += 1
+            conn.abort_generation += 10
+            return True
+
+    async def _no_intent(conn, actual_text):
+        return False
+
+    monkeypatch.setattr(receive_handle, "handle_user_intent", _no_intent)
+    conn = _Conn({"decision": "interrupt", "reason": "停止播报"})
+    conn.semantic_center = _SemanticCenter()
+
+    accepted = asyncio.run(startToChat(conn, "别说了"))
+
+    assert accepted is True
+    assert conn.abort_generation == 1
+    assert conn.semantic_center.calls == 0
+    assert conn.executor.submitted == []
 
 
 def test_listen_detect_continue_is_not_reported(monkeypatch):
@@ -212,3 +284,34 @@ def test_listen_detect_new_turn_is_reported(monkeypatch):
 
     assert reports == [("不是这个", [])]
     assert conn.executor.submitted[0][1] == ("不是这个",)
+
+
+def test_listen_detect_new_turn_is_not_suppressed_when_tts_just_started(monkeypatch):
+    import core.handle.textHandler.listenMessageHandler as listen_handler
+    import core.handle.receiveAudioHandle as receive_handle
+
+    reports = []
+
+    async def _no_intent(conn, actual_text):
+        return False
+
+    monkeypatch.setattr(receive_handle, "handle_user_intent", _no_intent)
+    monkeypatch.setattr(
+        listen_handler,
+        "enqueue_asr_report",
+        lambda conn, text, opus_data: reports.append((text, opus_data)),
+    )
+
+    conn = _Conn({"decision": "new_turn", "reason": "新问题"})
+    conn._tts_started_at = time.time() * 1000
+    asyncio.run(
+        ListenTextMessageHandler().handle(
+            conn,
+            {"type": "listen", "state": "detect", "text": "等一下我问个问题"},
+        )
+    )
+
+    assert conn.llm.calls
+    assert reports == [("等一下我问个问题", [])]
+    assert conn.abort_generation == 1
+    assert conn.executor.submitted[0][1] == ("等一下我问个问题",)

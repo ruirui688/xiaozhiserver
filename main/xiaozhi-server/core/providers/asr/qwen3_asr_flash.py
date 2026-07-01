@@ -101,7 +101,7 @@ class ASRProvider(ASRProviderBase):
                     text = chunk["output"]["choices"][0]["message"].content[0]["text"]
                     # 更新为最新的完整文本
                     full_text = text.strip()
-                except:
+                except Exception:
                     pass
             
             return full_text, file_path

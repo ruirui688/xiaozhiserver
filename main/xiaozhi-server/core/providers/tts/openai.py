@@ -1,4 +1,5 @@
 import requests
+import aiohttp
 from core.utils.util import check_model_key
 from core.providers.tts.base import TTSProviderBase
 from config.logger import setup_logging
@@ -47,14 +48,17 @@ class TTSProvider(TTSProviderBase):
             "response_format": self.audio_file_type,
             "speed": self.speed,
         }
-        response = requests.post(self.api_url, json=data, headers=headers)
-        if response.status_code == 200:
-            if output_file:
-                with open(output_file, "wb") as audio_file:
-                    audio_file.write(response.content)
-            else:
-                return response.content
-        else:
-            raise Exception(
-                f"OpenAI TTS请求失败: {response.status_code} - {response.text}"
-            )
+        async with aiohttp.ClientSession() as session:
+            async with session.post(self.api_url, json=data, headers=headers) as response:
+                if response.status == 200:
+                    audio_content = await response.read()
+                    if output_file:
+                        with open(output_file, "wb") as audio_file:
+                            audio_file.write(audio_content)
+                    else:
+                        return audio_content
+                else:
+                    error_text = await response.text()
+                    raise Exception(
+                        f"OpenAI TTS请求失败: {response.status} - {error_text}"
+                    )
