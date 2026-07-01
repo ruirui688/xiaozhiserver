@@ -22,14 +22,23 @@ import memory from './module/memory.js'
  * 开发时自动读取使用.env.development文件
  * 编译时自动读取使用.env.production文件
  */
+const DEFAULT_API_SERVICE = '/xiaozhi'
 const DEV_API_SERVICE = process.env.VUE_APP_API_BASE_URL
+
+function normalizeServiceUrl(url) {
+    const value = typeof url === 'string' ? url.trim() : ''
+    if (!value || value === 'undefined' || value === 'null') {
+        return DEFAULT_API_SERVICE
+    }
+    return value.replace(/\/+$/, '')
+}
 
 /**
  * 根据开发环境返回接口url
  * @returns {string}
  */
 export function getServiceUrl() {
-    return DEV_API_SERVICE
+    return normalizeServiceUrl(DEV_API_SERVICE)
 }
 
 /** request服务封装 */
