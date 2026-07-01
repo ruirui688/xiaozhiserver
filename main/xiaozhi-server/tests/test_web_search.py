@@ -82,6 +82,8 @@ def test_metaso_search_keeps_snippet_and_answer_constraints(monkeypatch):
     assert "只能依据下面列出的搜索结果回答" in result
     assert "先判断每条结果是否真正回答了用户原始查询" in result
     assert "重新调用 web_search 生成更精确的查询" in result
+    assert "只有搜索结果明确给出比分、胜负、晋级、完成等信息，才能当作已确认结果" in result
+    assert "不要擅自补充搜索结果没有明确写出的赛事阶段、轮次、状态、胜者或比分" in result
     assert "不能把不确定的日期当成确定事实" in result
     assert "加拿大1比0战胜南非" in result
     assert "摘要：6月28日，南非队球员在比赛后离场。" in result
