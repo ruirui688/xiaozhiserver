@@ -4,10 +4,9 @@ import hashlib
 from typing import Optional, Dict
 
 import httpx
-from config.logger import setup_logging
+from loguru import logger
 
 TAG = __name__
-logger = setup_logging()
 
 
 class DeviceNotFoundException(Exception):

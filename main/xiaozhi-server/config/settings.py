@@ -24,8 +24,7 @@ def check_config_file():
     # 检查是否从API读取配置
     config = load_config()
     if config.get("read_config_from_api", False):
-        from config.logger import setup_logging
-        logger = setup_logging()
+        from loguru import logger
         logger.bind(tag="config").info("从API读取配置")
         old_config_origin = read_config(custom_config_file)
         if old_config_origin.get("selected_module") is not None:

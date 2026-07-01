@@ -1339,8 +1339,14 @@ class ConnectionHandler:
             if unhandled_tool_protocol:
                 bHasError = True
                 response_message.clear()
-                if not first_tts_text_enqueued:
-                    queue_tts_text("这个工具调用没有按正确格式返回，我先不执行。")
+                self.tts.tts_text_queue.put(
+                    TTSMessageDTO(
+                        sentence_id=current_sentence_id,
+                        sentence_type=SentenceType.MIDDLE,
+                        content_type=ContentType.TEXT,
+                        content_detail="这个工具调用没有按正确格式返回，我先不执行。",
+                    )
+                )
                 self.logger.bind(tag=TAG).error(
                     f"unsupported tool protocol from LLM: {_sanitize_log_text(content_arguments)}"
                 )
@@ -1365,8 +1371,14 @@ class ConnectionHandler:
                     bHasError = True
                 if bHasError:
                     response_message.clear()
-                    if not first_tts_text_enqueued:
-                        queue_tts_text("这个工具调用没有按正确格式返回，我先不执行。")
+                    self.tts.tts_text_queue.put(
+                        TTSMessageDTO(
+                            sentence_id=current_sentence_id,
+                            sentence_type=SentenceType.MIDDLE,
+                            content_type=ContentType.TEXT,
+                            content_detail="这个工具调用没有按正确格式返回，我先不执行。",
+                        )
+                    )
                     self.logger.bind(tag=TAG).error(
                         f"function call error: {_sanitize_log_text(content_arguments)}"
                     )

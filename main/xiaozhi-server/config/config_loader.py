@@ -2,6 +2,7 @@ import os
 import asyncio
 import yaml
 from collections.abc import Mapping
+from loguru import logger
 from config.manage_api_client import (
     init_service,
     get_server_config,
@@ -12,9 +13,6 @@ from config.manage_api_client import (
     DeviceBindException,
 )
 from core.utils.model_config import apply_legacy_runtime_view
-from config.logger import setup_logging
-
-logger = setup_logging()
 
 
 def get_project_dir():
