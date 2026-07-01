@@ -18,7 +18,7 @@ ESP32 设备 ──WebSocket──→ xiaozhi-server (Python, port 8000/8003)
                                 └── 通过 HTTP 从 manager-api 拉取配置
 
 manager-web / manager-mobile ──HTTP──→ manager-api (Java, port 8002)
-                                          ├── MySQL + Redis + Liquibase (147 migrations)
+                                          ├── MySQL + Redis + Liquibase (148 migrations)
                                           ├── 智能体 / 模型 / 设备 / 知识库 / OTA / 声纹 / 记忆管理
                                           └── 模型评测编排 (调用 xiaozhi-server benchmark API)
 ```
@@ -28,11 +28,20 @@ manager-web / manager-mobile ──HTTP──→ manager-api (Java, port 8002)
 | 模块 | 语言/框架 | 文件数 | 职责 |
 |------|----------|--------|------|
 | `main/xiaozhi-server/` | Python 3.10, aiohttp | 226 .py | 实时语音服务：WebSocket、VAD/ASR/LLM/TTS、插件、MCP |
-| `main/manager-api/` | Java 21, Spring Boot 3.4 | 420 .java | 管理 API：配置下发、模型管理、评测编排、权限、记忆、知识库 |
+| `main/manager-api/` | Java 21, Spring Boot 3.4.4 | 420 .java | 管理 API：配置下发、模型管理、评测编排、权限、记忆、知识库 |
 | `main/manager-web/` | Vue 2, Element UI | 68 .vue (33 views, 34 components) | Web 智控台 |
 | `main/manager-mobile/` | Vue 3, uni-app, TypeScript | 26 .vue (source) | 移动端智控台 (H5/iOS/Android/微信) |
-| `docs/` | 71 .md | — | 架构、部署、开发、集成、MCP、模型、规范 |
+| `docs/` | 71 .md | — | 架构、部署、开发、集成、MCP、模型、安全、规范 |
 | `deploy/` / `scripts/` | 12 Shell scripts | — | 本地开发入口 + ACR 生产部署 |
+
+### 安全态势
+
+项目已完成 2026-07 全量安全审计与修复：
+- WebSocket 认证**默认开启**，OTA 端点有速率限制
+- CORS origin-aware 模式，Knife4j 生产需认证
+- 生产部署**必须**配置 TLS 反向代理 + MySQL/Redis 强密码
+- API key 日志已脱敏，SSRF MCP 端点有私有 IP 拦截
+- 详见 §13 安全开发规则
 
 ---
 
@@ -63,6 +72,7 @@ docs/local-customizations.md
 需要读哪些专项文档？
 需要跑哪些最小验证？
 是否涉及数据库、配置、密钥、生产、长期服务或外部模型调用？
+是否涉及认证、授权、加密、日志脱敏或安全敏感路径？
 ```
 
 ---
@@ -78,7 +88,7 @@ docs/local-customizations.md
 
 Python 核心服务
   → main/xiaozhi-server/requirements.txt
-  → core/connection.py (1945行中央状态机，修改前必须读)
+  → core/connection.py (1977行中央状态机，修改前必须读)
   → 相关 core/handle/、core/providers/、core/semantic/、plugins_func/
 
 Java 管理 API
@@ -113,6 +123,12 @@ Web 管理后台
   → docs/architecture/knowledge-base-chain.md
   → docs/models/local-knowledge-integration.md
   → main/manager-api/.../modules/knowledge/
+
+认证 / 授权 / 安全
+  → main/manager-api/.../modules/security/config/ShiroConfig.java
+  → main/manager-api/.../modules/security/secret/ServerSecretFilter.java
+  → main/xiaozhi-server/core/utils/auth.py
+  → main/xiaozhi-server/core/websocket_server.py
 
 配置 / 运行产物
   → docs/standards/config-runtime-policy.md
@@ -197,15 +213,17 @@ xiaozhi-server   → 只负责真实 provider 调用、样本执行、指标输�
 
 ### 工具注册门控规则
 
-LLM 可用的 function list 由两类工具源汇聚而成，它们的注册机制门控方式不同：
+LLM 可用的 function list 由五类工具源汇聚而成，注册优先级（高→低）：
 
-| 工具源 | 注册方式 | 门控 |
-|--------|---------|------|
-| Server Plugin (`plugins_func/functions/`) | `@register_function` 装饰器 | 仅 `Intent.<selected>.functions` 中列出的函数会被 `ServerPluginExecutor.get_tools()` 选取 |
-| Server MCP | 外部 MCP 服务器 | 仅当配置了 MCP 端点且连接成功 |
-| **Device IoT** | ESP32 设备 WebSocket 上报 `{"type":"iot","descriptors":[...]}` | `iot_handler.py` 中 `SERVER_GATED_IOT_DEVICES` 映射控制。设备名在映射中时须对应服务端能力已启用才会注册；不在映射中的设备名默认放行（向后兼容） |
-| Device MCP | ESP32 设备 MCP 协议 `tools/list` | 无条件注册（设备固件自行控制） |
-| MCP Endpoint | 外部 MCP 接入点 | 仅当配置了 `mcp_endpoint` URL |
+| 优先级 | 工具源 | 注册方式 | 门控 |
+|--------|--------|---------|------|
+| 1 (最高) | Server Plugin | `@register_function` 装饰器 | `Intent.<selected>.functions` 白名单 |
+| 2 | Server MCP | 本地 MCP 服务器 | MCP 端点配置且连接成功 |
+| 3 | Device IoT | 设备 WebSocket 上报 descriptors | `SERVER_GATED_IOT_DEVICES` 门控映射 |
+| 4 | Device MCP | 设备 MCP `tools/list` | 设备 `features.mcp=true` |
+| 5 (最低) | MCP Endpoint | 外部 MCP 接入点 | `mcp_endpoint` URL 配置且通过 SSRF 验证 |
+
+**冲突解决**：同名工具先注册者保留（Server Plugin 最高优先级），后注册者跳过并记录 warning。
 
 **关键原则**：设备端上报的 IoT 描述符不能绕过服务端配置直接成为 LLM 工具。
 新增需要服务端显式启用的 IoT 设备类型时，在 `SERVER_GATED_IOT_DEVICES` 中添加条目：
@@ -223,6 +241,21 @@ SERVER_GATED_IOT_DEVICES = {
     # 新增设备类型在此添加
 }
 ```
+
+### 认证与授权边界
+
+```
+WebSocket 设备连接 → auth.enabled (默认开启) → JWT token 验证 → 设备白名单旁路
+HTTP API (Python)  → origin-aware CORS → Bearer token (原始共享密钥，内网可信)
+Java API           → Shiro JWT Filter → @RequiresPermissions 注解
+Server-to-Server   → ServerSecretFilter (共享密钥, /config/**)
+匿名端点           → /ota/**, /user/login, /user/register, /user/captcha
+```
+
+**修改认证相关代码时必须检查**：
+- 是否新增了匿名端点？→ 必须在 ShiroConfig 中显式声明为 `anon`
+- 是否修改了 ServerSecretFilter 覆盖范围？→ 回顾所有 `/config/**` 路径
+- 是否在日志中打印了 Authorization header 或 API key？→ 必须脱敏
 
 ---
 
@@ -251,10 +284,11 @@ upstream  = 官方仓库 (只允许 fetch/diff/sync，禁止 push)
 ## 6. 配置与敏感信息边界
 
 ```text
-可以提交       main/xiaozhi-server/config.yaml（默认配置）
+可以提交       main/xiaozhi-server/config.yaml（默认配置，含占位符值）
               config/examples/*（脱敏示例）
               .env.example / .env.template / .env.sample
               runtime/.gitkeep
+              application-prod.yml (环境变量占位符，不含真实密钥)
 
 禁止提交       main/xiaozhi-server/data/.config.yaml（私有配置）
               .env / .env.local / .env.dev / .env.prod
@@ -263,7 +297,21 @@ upstream  = 官方仓库 (只允许 fetch/diff/sync，禁止 push)
               runtime/*（除 .gitkeep 外）
               模型大文件 (model.pt, sherpa-onnx*)
               生产数据库 dump
+              包含真实密钥的 application-dev.yml
 ```
+
+### 日志脱敏规则
+
+修改任何涉及 HTTP 请求、WebSocket 连接、API 调用的代码时，**禁止**在日志中打印以下原始值：
+
+```text
+Authorization header
+api_key / Api-Key / X-Api-Key
+access_token / secret_key / private_key
+Bearer token
+```
+
+必须使用脱敏工具函数（参见 `core/utils/util.py` 或项目已有的脱敏模式）替换为 `***`。
 
 ### 禁止提交的草案特征
 
@@ -307,7 +355,8 @@ pass  # TODO         (占位代码)
 | Java 测试 | `cd main/manager-api && mvn test` | 必须（修改 Java 时） |
 | Web 构建 | `cd main/manager-web && npm run build` | 必须（修改 Web 时） |
 | Mobile 构建 | `cd main/manager-mobile && pnpm build:h5` | 必须（修改 Mobile 时） |
-| Shell 语法 | `bash -n scripts/dev scripts/start-dev.sh` | 修改脚本时 |
+| Shell 语法 | `bash -n scripts/dev scripts/start-dev.sh docker-setup.sh` | 修改脚本时 |
+| Docker 语法 | `docker compose -f deploy/production/docker-compose.yml config --quiet` | 修改 compose 时 |
 | 环境体检 | `scripts/dev doctor` | 推荐 |
 
 **验证规则**：
@@ -315,6 +364,7 @@ pass  # TODO         (占位代码)
 - 修改 Java → 至少 `mvn test`，如果 POM 跳过测试要说清楚
 - 修改 Web → 至少 `npm run build`
 - 修改数据库 → 检查 changelog 和 master.yaml
+- 修改 Docker/部署 → 检查 compose 文件语法 + bash -n 所有脚本
 - 禁止把外部模型真实调用、长期服务启动、生产部署当作默认验证
 
 ---
@@ -349,6 +399,15 @@ main/manager-mobile/         移动端
 - 必须检查是否有草案残留、未登记迁移、敏感信息和跨边界改动
 - 必须统一运行可自动结束的验证命令
 
+### 安全审查规则（新增）
+
+修改任何涉及以下路径的代码时，集成者必须额外检查：
+- 认证逻辑（ShiroConfig, auth.py, websocket_server.py）
+- 授权检查（@RequiresPermissions, checkAgentPermission）
+- API 密钥处理（日志脱敏, 传输加密, Redis 缓存）
+- 文件上传/下载路径（路径穿越检查）
+- MCP 端点 URL（SSRF 验证）
+
 ---
 
 ## 10. 提交规范
@@ -361,6 +420,7 @@ refactor  重构
 test      测试
 chore     构建、依赖、脚本等杂项
 deploy    部署相关
+security  安全加固（认证、授权、加密、脱敏、依赖升级）
 ```
 
 提交信息格式：`type: description`（如 `feat: add voice benchmark flow`）
@@ -404,6 +464,7 @@ deploy    部署相关
 Python 入口:        main/xiaozhi-server/app.py
 配置文件:           main/xiaozhi-server/config.yaml
 私有配置:           main/xiaozhi-server/data/.config.yaml
+认证密钥持久化:     main/xiaozhi-server/data/.auth_key
 提示词模板:         main/xiaozhi-server/agent-base-prompt.txt
 中央状态机:         main/xiaozhi-server/core/connection.py (1977行)
 语义控制中枢:       main/xiaozhi-server/core/semantic/ (8个文件, ~800行)
@@ -411,18 +472,25 @@ Python 入口:        main/xiaozhi-server/app.py
 功能插件:           main/xiaozhi-server/plugins_func/functions/ (15个)
 游戏会话:           main/xiaozhi-server/core/game/ (6个文件, 1513行)
 MCP 基类:          main/xiaozhi-server/core/providers/tools/base/mcp_client_base.py (122行)
+Python 认证:        main/xiaozhi-server/core/utils/auth.py
+Python CORS:        main/xiaozhi-server/core/api/base_handler.py (~40行)
 模型评测运行器:     main/xiaozhi-server/core/benchmark/runner.py
+SSRF 验证:          main/xiaozhi-server/core/utils/util.py (validate_mcp_endpoint)
+Provider 验证:      main/xiaozhi-server/core/utils/provider_validator.py
+Java 安全配置:      .../modules/security/config/ShiroConfig.java
+Java Token 生成:    .../modules/security/oauth2/TokenGenerator.java (SHA-256)
+Java 服务端密钥:    .../modules/security/secret/ServerSecretFilter.java
 Java 评测编排:      .../model/service/impl/ModelBenchmarkServiceImpl.java (262行)
 Java 模型测试:      .../model/service/impl/ModelTestServiceImpl.java (1578行)
 长期记忆服务:       .../memory/service/impl/MemoryServiceImpl.java (491行)
 长期记忆维护:       .../memory/service/impl/MemoryMaintenanceServiceImpl.java (1061行)
 长期记忆查询:       .../memory/service/impl/MemoryQueryServiceImpl.java (266行)
 本地知识库引擎:     .../knowledge/rag/impl/LocalKnowledgeAdapter.java (1658行)
-Provider 验证:      main/xiaozhi-server/core/utils/provider_validator.py
 数据库迁移:         main/manager-api/src/main/resources/db/changelog/ (148个迁移)
 本地开发入口:       scripts/dev (748行)
 生产部署入口:       docs/deployment/private-docker-release.md
 生产部署包:         deploy/production/
+生产 Compose:       deploy/production/docker-compose.yml
 ```
 
 ### 本地开发常用命令
@@ -453,5 +521,66 @@ cd main/manager-web && npm run build
 cd main/manager-mobile && pnpm build:h5
 
 # Shell
-bash -n scripts/dev scripts/start-dev.sh
+bash -n scripts/dev scripts/start-dev.sh docker-setup.sh
+
+# Docker Compose
+docker compose -f deploy/production/docker-compose.yml config --quiet
 ```
+
+---
+
+## 13. 安全开发规则
+
+以下规则源自 2026-07 全量安全审计（66 个漏洞修复），后续开发**必须**遵守。
+
+### 认证
+
+1. WebSocket 认证**默认开启**。新增 WebSocket 入口时，认证必须是 opt-out（默认需要），不是 opt-in。
+2. 所有新增 HTTP 端点必须在 ShiroConfig 中显式声明权限（`anon`/`authc`/`server`）。不得依赖"默认拒绝"。
+3. 匿名端点（`/ota/**`, `/user/login` 等）必须有速率限制或防暴力破解措施。
+4. Token 生成使用 SHA-256，禁止 MD5/SHA-1。
+
+### 授权
+
+5. 所有 CRUD 操作**必须校验资源所有权**。`agentId`/`deviceId` 不能从请求体直接信任 — 必须验证当前用户是否有权限。
+6. ServerSecretFilter 覆盖的 `/config/**` 路径内的端点，也必须有 per-agent 鉴权（不能只依赖共享密钥）。
+7. 新增 controller 方法时，检查是否需要 `@RequiresPermissions` 注解。
+
+### 加密与传输
+
+8. 生产部署**必须**配置 TLS 反向代理。`config.yaml` 中的 `websocket` URL 在生产应使用 `wss://`。
+9. MySQL/Redis 密码**禁止**设置默认值。docker-compose 中必须使用 `${VAR:?required}` 强制用户设置。
+10. 禁止在 Docker Compose 中使用 `seccomp:unconfined`。
+
+### API 密钥处理
+
+11. **禁止**在 INFO 级别日志中打印原始 `Authorization` header、`api_key`、`access_token`。必须脱敏为 `***`。
+12. **禁止**将 API key 放在 URL query parameter 中传输（会泄露到代理日志）。
+13. **禁止**在代码中硬编码 API key、密码、Token、AppID 等敏感值。使用环境变量或配置文件占位符。
+14. `config.yaml` 中的敏感值必须是占位符（如 `你的xxx APIKey`），真实值通过 `data/.config.yaml` 注入。
+
+### 输入验证
+
+15. 所有文件路径参数必须做路径穿越检查（`toRealPath()` + `startsWith(root)`）。
+16. 所有用户提供的 URL（MCP endpoint、RAGFlow base_url、天气/新闻 API URL）必须做 SSRF 验证 — 阻止私有 IP、回环地址、链路本地地址。
+17. 文件上传必须同时检查扩展名和 MIME 类型（不单独依赖扩展名）。
+18. 所有 `@RequestBody` 参数应添加 `@Valid` 注解。
+
+### 依赖管理
+
+19. Python 依赖使用 `==` 精确版本锁定（禁止 `>=` 仅最小版本）。
+20. Docker 基础镜像使用具体版本标签（如 `python:3.10-slim`），生产推荐使用 digest 锁定。
+21. MCP Server 配置中使用 `npx -y` 的包必须有安全审查记录。生产环境推荐预安装 MCP 服务器包。
+
+### 容器安全
+
+22. 所有 Docker 容器必须有 `cap_drop: [ALL]`，仅 `cap_add` 所需最小权限。
+23. 所有 Dockerfile 必须有 `HEALTHCHECK` 指令。
+24. `.env*` 文件必须在 `.dockerignore` 中排除。
+25. 容器以非 root 用户运行（已实现，新增容器必须延续）。
+
+### 安全验证
+
+26. 修改认证/授权/加密代码时，额外运行：`rg -n "except:" main/xiaozhi-server/core` 检查是否有裸 except 吞掉安全异常。
+27. 新增数据库迁移时，检查是否涉及敏感字段（密码、token、secret），确认存储方式安全。
+28. 修改 Docker Compose 时，验证：`docker compose config --quiet` 且人工检查是否有弱密码默认值。

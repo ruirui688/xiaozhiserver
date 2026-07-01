@@ -6,10 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a **heavily customized fork** of `xiaozhi-esp32-server` — an end-to-end voice AI platform for ESP32 smart hardware. Four modules work together:
 
-- **Python real-time service** (218 files) — WebSocket voice pipeline: VAD → ASR → SemanticCenter → LLM → TTS
-- **Java management API** (406 files) — Spring Boot 3.4, model configs, benchmark orchestration, auth, memory
-- **Vue 2 Web console** (183 .vue files, 26 views + 34 components) — Element UI admin panel
-- **Vue 3 uni-app mobile** (152 .vue files) — cross-platform (H5/iOS/Android/WeChat)
+- **Python real-time service** (226 files) — WebSocket voice pipeline: VAD → ASR → SemanticCenter → LLM → TTS
+- **Java management API** (420 files) — Spring Boot 3.4.4, model configs, benchmark orchestration, auth, memory
+- **Vue 2 Web console** (68 .vue files, 33 views + 34 components) — Element UI admin panel
+- **Vue 3 uni-app mobile** (26 .vue files) — cross-platform (H5/iOS/Android/WeChat)
 
 Production deployment uses Aliyun ACR container images; no source builds on production.
 
@@ -93,6 +93,12 @@ manager-web/manager-mobile → manager-api → MySQL/Redis
 - ❌ Start long-running services or call external model APIs as default verification
 - ❌ Create placeholder migrations, empty providers, fake tests, or un-runnable draft files
 - ❌ Delete tests, downgrade verification, or silently swallow errors to pass a build
+- ❌ Log raw Authorization headers, API keys, or tokens — use sanitized `***` replacements
+- ❌ Hardcode passwords, API keys, or AppIDs — use env vars or placeholder configs
+- ❌ Set MySQL/Redis password defaults to weak values (`123456`, empty string)
+- ❌ Use `seccomp:unconfined` or omit `cap_drop` in Docker Compose
+- ❌ Set `verify=False` in Python requests or `ssl.CERT_NONE` in SSL contexts
+- ❌ Place API keys in URL query parameters (leaks to proxy logs)
 
 ## Verification Priority
 
@@ -105,8 +111,10 @@ Use commands that finish on their own — don't start long-running services unle
 | Java files | `cd main/manager-api && mvn test` |
 | Web files | `cd main/manager-web && npm run build` |
 | Mobile files | `cd main/manager-mobile && pnpm build:h5` |
-| Shell scripts | `bash -n scripts/dev scripts/start-dev.sh` |
+| Shell scripts | `bash -n scripts/dev scripts/start-dev.sh docker-setup.sh` |
+| Docker Compose | `docker compose -f deploy/production/docker-compose.yml config --quiet` |
 | DB migrations | Check `db.changelog-master.yaml` is updated |
+| Auth/security code | `rg -n "except:" main/xiaozhi-server/core` (bare except check) |
 | Docs | Check relative links resolve correctly |
 
 ## Output Format
@@ -120,3 +128,31 @@ After completing work, report:
 6. If multi-agent: each sub-agent's scope and the final integration result
 
 Be concise. Don't dump irrelevant docs or command output.
+
+## Security Quick Reference
+
+Project underwent full security audit (2026-07, 66 vulns fixed). Key rules when touching security-sensitive code:
+
+### Auth & Secrets
+- WebSocket auth **enabled by default** (`websocket_server.py:68`, `ota_handler.py:51`)
+- Token generation uses SHA-256 (`TokenGenerator.java:36`), NOT MD5
+- API keys/Authorization headers **must be sanitized** before logging → `***`
+- Never hardcode passwords — use `${VAR:?required}` in docker-compose
+
+### Input Safety
+- File paths must pass traversal check: `toRealPath().startsWith(root)`
+- User-supplied URLs (MCP, RAGFlow, weather) must validate against private IPs
+- `@Valid` annotation on `@RequestBody` parameters
+- File uploads: check extension AND MIME type
+
+### Docker
+- `cap_drop: [ALL]` on all services, `cap_add` only needed caps
+- No `seccomp:unconfined` in compose files
+- Non-root user in all images
+- HEALTHCHECK in every Dockerfile
+
+### SSL/TLS
+- Never `verify=False` in requests or `ssl.CERT_NONE` in SSL contexts
+- Production requires TLS reverse proxy (nginx) for `wss://` and `https://`
+
+See AGENTS.md §13 for complete security development rules.
