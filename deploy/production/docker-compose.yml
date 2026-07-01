@@ -87,8 +87,6 @@ services:
       - default
     expose:
       - 3306
-    cap_drop:
-      - ALL
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
@@ -117,8 +115,6 @@ services:
       - default
     expose:
       - 6379
-    cap_drop:
-      - ALL
     volumes:
       - ./redis/data:/data
     command:
