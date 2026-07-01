@@ -37,6 +37,12 @@ SEARCH_FROM_LOCAL_KNOWLEDGE_FUNCTION_DESC = {
 }
 
 
+# TODO: 知识库结果与记忆结果是两个独立的来源，LLM 应当交叉验证两者的一致性。
+# 当用户询问个性化信息(记忆)和事实性知识(知识库)时，目前的实现分别返回独立的上下文块。
+# 未来应增加编排层(Orchestration Layer)，自动合并/去重/对比知识库与记忆的结果，
+# 并在两者冲突时通知用户。
+
+
 @register_function(
     "search_from_local_knowledge",
     SEARCH_FROM_LOCAL_KNOWLEDGE_FUNCTION_DESC,

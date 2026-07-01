@@ -173,7 +173,7 @@ class TTSProvider(TTSProviderBase):
         finally:
             return None
 
-    async def text_to_speak(self, text, is_last):
+    async def text_to_speak(self, text, output_file=None):
         """流式处理TTS音频，每句只推送一次音频列表"""
         payload = {
             "model": self.model,
@@ -279,7 +279,7 @@ class TTSProvider(TTSProviderBase):
                         self.pcm_buffer.clear()
 
                     # 如果是最后一段，输出音频获取完毕
-                    if is_last:
+                    if output_file:
                         self._process_before_stop_play_files()
 
         except Exception as e:

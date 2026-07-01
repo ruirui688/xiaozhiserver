@@ -21,8 +21,9 @@ async def connect_mcp_endpoint(mcp_endpoint_url: str, conn=None) -> MCPEndpointC
 
         mcp_client = MCPEndpointClient(conn)
         mcp_client.set_websocket(websocket)
+        mcp_client.endpoint_url = mcp_endpoint_url  # 保存URL用于重连
 
-        # 启动消息监听器
+        # 启动消息监听器（内部处理重连）
         asyncio.create_task(_message_listener(mcp_client))
 
         # 发送初始化消息
@@ -42,17 +43,51 @@ async def connect_mcp_endpoint(mcp_endpoint_url: str, conn=None) -> MCPEndpointC
         return None
 
 
-async def _message_listener(mcp_client: MCPEndpointClient):
-    """监听MCP接入点消息"""
-    try:
-        async for message in mcp_client.websocket:
-            await handle_mcp_endpoint_message(mcp_client, message)
-    except websockets.exceptions.ConnectionClosed:
-        logger.bind(tag=TAG).info("MCP接入点连接已关闭")
-    except Exception as e:
-        logger.bind(tag=TAG).error(f"MCP接入点消息监听器错误: {e}")
-    finally:
-        await mcp_client.set_ready(False)
+async def _message_listener(mcp_client: MCPEndpointClient, max_retries: int = 3, retry_delay: int = 5):
+    """监听MCP接入点消息，连接断开时自动重连
+
+    Args:
+        mcp_client: MCP接入点客户端
+        max_retries: 最大重连次数（默认3次）
+        retry_delay: 重连间隔秒数（默认5秒）
+    """
+    retry_count = 0
+    permanent_failure = False
+
+    while retry_count <= max_retries and not permanent_failure:
+        try:
+            async for message in mcp_client.websocket:
+                await handle_mcp_endpoint_message(mcp_client, message)
+        except websockets.exceptions.ConnectionClosed:
+            logger.bind(tag=TAG).info("MCP接入点连接已关闭")
+        except Exception as e:
+            logger.bind(tag=TAG).error(f"MCP接入点消息监听器错误: {e}")
+        finally:
+            await mcp_client.set_ready(False)
+
+        retry_count += 1
+        if retry_count > max_retries:
+            logger.bind(tag=TAG).error(
+                f"MCP接入点重连失败次数已达上限 ({max_retries}次)，标记为永久故障"
+            )
+            mcp_client.permanent_failure = True
+            break
+
+        logger.bind(tag=TAG).info(
+            f"尝试重新连接MCP接入点 (第{retry_count}/{max_retries}次)..."
+        )
+        try:
+            new_websocket = await websockets.connect(mcp_client.endpoint_url)
+            mcp_client.set_websocket(new_websocket)
+            await send_mcp_endpoint_initialize(mcp_client)
+            await send_mcp_endpoint_notification(mcp_client, "notifications/initialized")
+            await send_mcp_endpoint_tools_list(mcp_client)
+            logger.bind(tag=TAG).info("MCP接入点重连成功")
+        except Exception as e:
+            logger.bind(tag=TAG).error(
+                f"MCP接入点重连失败 (第{retry_count}/{max_retries}次): {e}"
+            )
+            await asyncio.sleep(retry_delay)
 
 
 async def handle_mcp_endpoint_message(mcp_client: MCPEndpointClient, message: str):
@@ -144,19 +179,8 @@ async def handle_mcp_endpoint_message(mcp_client: MCPEndpointClient, message: st
                         await mcp_client.add_tool(new_tool)
                         logger.bind(tag=TAG).debug(f"MCP接入点工具 #{i+1}: {name}")
 
-                    # 替换所有工具描述中的工具名称
-                    for tool_data in mcp_client.tools.values():
-                        if "description" in tool_data:
-                            description = tool_data["description"]
-                            # 遍历所有工具名称进行替换
-                            for (
-                                sanitized_name,
-                                original_name,
-                            ) in mcp_client.name_mapping.items():
-                                description = description.replace(
-                                    original_name, sanitized_name
-                                )
-                            tool_data["description"] = description
+                    # 替换所有工具描述中的工具名称（使用词边界正则）
+                    mcp_client._sanitize_descriptions()
 
                     next_cursor = (
                         result.get("nextCursor", "") if result is not None else ""
@@ -185,7 +209,7 @@ async def handle_mcp_endpoint_message(mcp_client: MCPEndpointClient, message: st
                             mcp_client.conn.func_handler.current_support_functions()
 
                         logger.bind(tag=TAG).info(
-                            f"MCP接入点工具获取完成，共 {len(mcp_client.tools)} 个工具"
+                            f"MCP接入点工具获取完成，共 {mcp_client.tool_count} 个工具"
                         )
                 else:
                     logger.bind(tag=TAG).warning(

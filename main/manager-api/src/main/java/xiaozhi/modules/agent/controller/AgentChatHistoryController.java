@@ -25,6 +25,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import xiaozhi.common.constant.Constant;
 import xiaozhi.common.exception.ErrorCode;
 import xiaozhi.common.exception.RenException;
@@ -43,6 +44,7 @@ import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.agent.service.biz.AgentChatHistoryBizService;
 import xiaozhi.modules.security.user.SecurityUser;
 
+@Slf4j
 @Tag(name = "智能体聊天历史管理")
 @RequiredArgsConstructor
 @RestController
@@ -282,7 +284,7 @@ public class AgentChatHistoryController {
                 out.flush();
             }
         } catch (IOException e) {
-            e.printStackTrace();
+            log.error("Failed to export chat history", e);
         }
     }
 

@@ -61,6 +61,9 @@ class WebSocketServer:
         self._intent = modules["intent"] if "intent" in modules else None
         self._memory = modules["memory"] if "memory" in modules else None
 
+        # Track active connection handlers for cache invalidation
+        self.active_handlers = set()
+
         auth_config = self.config["server"].get("auth", {})
         self.auth_enable = auth_config.get("enabled", False)
         # 设备白名单
@@ -133,11 +136,13 @@ class WebSocketServer:
             self._intent,
             self,  # 传入server实例
         )
+        self.active_handlers.add(handler)
         try:
             await handler.handle_connection(websocket)
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"处理连接时出错: {e}")
         finally:
+            self.active_handlers.discard(handler)
             # 强制关闭连接（如果还没有关闭的话）
             try:
                 # 安全地检查WebSocket状态并关闭
@@ -208,6 +213,10 @@ class WebSocketServer:
                     self._intent = modules["intent"]
                 if "memory" in modules:
                     self._memory = modules["memory"]
+                # Invalidate all device prompt caches so next request rebuilds with new config
+                for handler in self.active_handlers:
+                    if hasattr(handler, 'prompt_manager') and handler.prompt_manager:
+                        handler.prompt_manager.invalidate_device_cache()
                 self.logger.bind(tag=TAG).info(f"更新配置任务执行完毕")
                 return True
         except Exception as e:

@@ -41,6 +41,8 @@ import xiaozhi.modules.knowledge.rag.KnowledgeBaseAdapterFactory;
 import xiaozhi.modules.knowledge.service.KnowledgeBaseService;
 import xiaozhi.modules.knowledge.service.KnowledgeFilesService;
 
+import org.springframework.beans.factory.annotation.Value;
+
 @Service
 @Slf4j
 public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, DocumentEntity>
@@ -50,6 +52,9 @@ public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, Docu
     private final DocumentDao documentDao;
     private final ObjectMapper objectMapper;
     private final RedisUtils redisUtils;
+
+    @Value("${knowledge.max-upload-size:10485760}")
+    private long maxUploadSize;
 
     public KnowledgeFilesServiceImpl(KnowledgeBaseService knowledgeBaseService,
             DocumentDao documentDao,
@@ -367,6 +372,15 @@ public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, Docu
 
         log.info("=== 开始文档上传操作 (强一致性优化) ===");
 
+        // 1.0 文件大小检查
+        if (file.getSize() > maxUploadSize) {
+            long maxMB = maxUploadSize / (1024 * 1024);
+            long fileMB = file.getSize() / (1024 * 1024);
+            log.warn("上传文件超过大小限制: fileSize={}, maxSize={}", file.getSize(), maxUploadSize);
+            throw new RenException(ErrorCode.UPLOAD_FILE_ERROR,
+                    "文件大小超过限制（最大 " + maxMB + "MB），当前文件大小：" + fileMB + "MB");
+        }
+
         // 1. 准备工作 (非事务性)
         String fileName = StringUtils.isNotBlank(name) ? name : file.getOriginalFilename();
         if (StringUtils.isBlank(fileName)) {
@@ -531,16 +545,17 @@ public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, Docu
         Map<String, Object> ragConfig = knowledgeBaseService.getRAGConfigByDatasetId(datasetId);
         KnowledgeBaseAdapter adapter = KnowledgeBaseAdapterFactory.getAdapter(extractAdapterType(ragConfig), ragConfig);
 
-        // 3. 执行远程删除
+        // 3. 执行远程删除，成功后清理本地影子记录
         try {
             adapter.deleteDocument(datasetId, req);
             log.info("远程批量删除请求成功");
+            // 远程删除成功后才原子化清理本地影子记录并同步统计数据
+            self.deleteDocumentShadows(documentIds, datasetId, totalChunkDelta, totalTokenDelta);
+            log.info("本地影子记录已清除");
         } catch (Exception e) {
-            log.warn("远程删除请求部分或全部失败: {}", e.getMessage());
+            log.error("远程删除请求失败，本地影子记录未删除以防止数据不一致: {}", e.getMessage());
+            throw new RenException(ErrorCode.RAG_API_ERROR, "RAGFlow删除失败: " + e.getMessage());
         }
-
-        // 4. 原子化清理本地影子记录并同步统计数据
-        self.deleteDocumentShadows(documentIds, datasetId, totalChunkDelta, totalTokenDelta);
 
         // 5. 清理缓存
         try {

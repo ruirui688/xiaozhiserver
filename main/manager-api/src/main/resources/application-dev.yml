@@ -7,6 +7,9 @@ knife4j:
     password: 2ZABCDEUgF
   setting:
     enableFooter: false
+xiaozhi:
+  cors:
+    allowed-origins: http://localhost:8002,http://localhost:9000
 spring:
   datasource:
     druid:

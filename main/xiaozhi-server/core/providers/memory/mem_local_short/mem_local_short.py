@@ -86,7 +86,7 @@ def extract_json_data(json_code):
             jsonData = json.loads(json_code)
             return json_code
         except Exception as e:
-            print("Error:", e)
+            logger.bind(tag=__name__).error(f"Error: {e}")
         return ""
     jsonData = json_code[start + 7 : end]
     return jsonData
@@ -174,6 +174,8 @@ class MemoryProvider(MemoryProviderBase):
         msgStr += f"当前时间：{time_str}"
 
         if self.save_to_file:
+            result = None
+            json_str = None
             try:
                 result = self.llm.response_no_stream(
                     short_term_memory_prompt,
@@ -182,11 +184,34 @@ class MemoryProvider(MemoryProviderBase):
                     temperature=0.2,
                 )
                 json_str = extract_json_data(result)
-                json.loads(json_str)  # 检查json格式是否正确
+                try:
+                    json.loads(json_str)  # 检查json格式是否正确
+                except (json.JSONDecodeError, ValueError) as json_err:
+                    logger.bind(tag=TAG).warning(
+                        f"JSON解析失败，尝试发送给LLM修复: {json_err}. "
+                        f"原始输出截断: {result[:200]}"
+                    )
+                    # 一次重试：送回LLM修复JSON
+                    repair_prompt = (
+                        "以下内容应该是合法的JSON，但解析失败了。请修复JSON格式，只输出修复后的JSON，不要添加解释。\n"
+                        f"原始内容：\n{result}"
+                    )
+                    repair_result = self.llm.response_no_stream(
+                        "你是一个JSON修复助手。",
+                        repair_prompt,
+                        max_tokens=2000,
+                        temperature=0.1,
+                    )
+                    json_str = extract_json_data(repair_result)
+                    json.loads(json_str)  # 再次校验
                 self.short_memory = json_str
                 self.save_memory_to_file()
             except Exception as e:
-                logger.bind(tag=TAG).error(f"Error in saving memory: {e}")
+                logger.bind(tag=TAG).error(f"JSON保存记忆失败，保留原始输出作为回退: {e}")
+                # 保存原始输出作为回退，避免记忆丢失
+                fallback = result if result else (json_str if json_str else msgStr[:500])
+                self.short_memory = fallback
+                self.save_memory_to_file()
         else:
             # 当save_to_file为False时，调用Java端的聊天记录总结接口
             summary_id = session_id if session_id else self.role_id

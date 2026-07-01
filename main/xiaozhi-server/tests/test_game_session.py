@@ -7,7 +7,7 @@ SERVER_ROOT = Path(__file__).resolve().parents[1]
 if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 
-from core.game_session import GameSessionManager
+from core.game import GameSessionManager
 
 
 def test_freeform_games_do_not_force_stateful_routing():

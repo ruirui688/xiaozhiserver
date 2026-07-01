@@ -8,7 +8,8 @@ if TYPE_CHECKING:
     from core.connection import ConnectionHandler
 from ..base import ToolType, ToolDefinition, ToolExecutor
 from plugins_func.register import all_function_registry, Action, ActionResponse
-from core.game_session import GameSessionManager
+from plugins_func.register import ToolType as PluginBehavior
+from core.game import GameSessionManager
 
 
 class ServerPluginExecutor(ToolExecutor):
@@ -58,11 +59,11 @@ class ServerPluginExecutor(ToolExecutor):
         # 根据工具类型决定如何调用。插件函数通常是同步 I/O，放到线程里避免阻塞事件循环。
         if hasattr(func_item, "type"):
             func_type = func_item.type
-            if func_type.code in [4, 5]:  # SYSTEM_CTL, IOT_CTL (需要conn参数)
+            if func_type.code in (PluginBehavior.SYSTEM_CTL.code, PluginBehavior.IOT_CTL.code):  # SYSTEM_CTL, IOT_CTL (需要conn参数)
                 return func_item.func(conn, **arguments)
-            if func_type.code == 2:  # WAIT
+            if func_type.code == PluginBehavior.WAIT.code:  # WAIT
                 return func_item.func(**arguments)
-            if func_type.code == 3:  # CHANGE_SYS_PROMPT
+            if func_type.code == PluginBehavior.CHANGE_SYS_PROMPT.code:  # CHANGE_SYS_PROMPT
                 return func_item.func(conn, **arguments)
             return func_item.func(**arguments)
 

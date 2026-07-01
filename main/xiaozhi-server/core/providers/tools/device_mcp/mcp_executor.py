@@ -91,9 +91,16 @@ class DeviceMCPExecutor(ToolExecutor):
                 and isinstance(resultJson, dict)
                 and "action" in resultJson
             ):
+                action_name = resultJson.get("action")
+                action = Action.__members__.get(action_name) if action_name else None
+                if action is None:
+                    self.logger.warning(
+                        f"Device returned unknown action: {action_name}, treating as ERROR"
+                    )
+                    action = Action.ERROR
                 result_for_history = json.dumps(resultJson, ensure_ascii=False)
                 return ActionResponse(
-                    action=Action[resultJson["action"]],
+                    action=action,
                     result=result_for_history,
                     response=resultJson.get("response", ""),
                 )
@@ -130,8 +137,14 @@ class DeviceMCPExecutor(ToolExecutor):
 
     def _get_tool_timeout(self, conn: "ConnectionHandler", tool_name: str) -> int:
         if tool_name in self.FAST_RESPONSE_CONTROL_TOOLS:
-            return int(conn.config.get("device_mcp_control_timeout", 3))
-        return int(conn.config.get("device_mcp_tool_call_timeout", 10))
+            try:
+                return int(conn.config.get("device_mcp_control_timeout", 3))
+            except (TypeError, ValueError):
+                return 3
+        try:
+            return int(conn.config.get("device_mcp_tool_call_timeout", 10))
+        except (TypeError, ValueError):
+            return 10
 
     def get_tools(self) -> Dict[str, ToolDefinition]:
         """获取所有设备端MCP工具"""

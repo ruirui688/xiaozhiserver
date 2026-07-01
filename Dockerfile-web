@@ -50,4 +50,10 @@ EXPOSE 8002
 # 启动脚本
 COPY docs/docker/start.sh /start.sh
 RUN chmod +x /start.sh
+
+# Create non-root user and set permissions
+RUN addgroup -S xiaozhi && adduser -S xiaozhi -G xiaozhi && \
+    chown -R xiaozhi:xiaozhi /app /usr/share/nginx/html /var/log/nginx /var/tmp/nginx /run/nginx
+USER xiaozhi
+
 CMD ["/start.sh"]

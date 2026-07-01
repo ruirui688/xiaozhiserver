@@ -7,12 +7,17 @@ import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.Date;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * 日期处理
  * Copyright (c) 人人开源 All rights reserved.
  * Website: https://www.renren.io
  */
 public class DateUtils {
+    private static final Logger logger = LoggerFactory.getLogger(DateUtils.class);
+
     /**
      * 时间格式(yyyy-MM-dd)
      */
@@ -60,7 +65,7 @@ public class DateUtils {
         try {
             return new SimpleDateFormat(pattern).parse(date);
         } catch (ParseException e) {
-            e.printStackTrace();
+            logger.error("Failed to parse date: {}", date, e);
         }
         return null;
     }

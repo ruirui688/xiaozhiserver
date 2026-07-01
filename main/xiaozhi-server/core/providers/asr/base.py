@@ -49,6 +49,9 @@ class ASRProviderBase(ABC):
                     handleAudioMessage(conn, message),
                     conn.loop,
                 )
+                # 已知瓶颈：future.result() 会阻塞 ASR 消费者线程直到协程完成。
+                # 在同步上下文中这是必要的，但阻塞期间新音频包将堆积在队列中。
+                # 架构改进方案：改为异步生产者-消费者模式，或使用回压机制控制队列长度。  # noqa: SIM115
                 future.result()
             except queue.Empty:
                 continue

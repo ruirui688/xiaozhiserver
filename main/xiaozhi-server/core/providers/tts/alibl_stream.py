@@ -220,7 +220,7 @@ class TTSProvider(TTSProviderBase):
             if self.ws:
                 try:
                     await self.ws.close()
-                except:
+                except Exception:
                     pass
                 self.ws = None
             raise
@@ -321,7 +321,7 @@ class TTSProvider(TTSProviderBase):
         if self.ws:
             try:
                 await self.ws.close()
-            except:
+            except Exception:
                 pass
             self.ws = None
             self.last_active_time = None
@@ -392,7 +392,7 @@ class TTSProvider(TTSProviderBase):
             if self.ws:
                 try:
                     await self.ws.close()
-                except:
+                except Exception:
                     pass
                 self.ws = None
         # 监听任务退出时清理引用
@@ -539,7 +539,7 @@ class TTSProvider(TTSProviderBase):
                     # 清理资源
                     try:
                         await ws.close()
-                    except:
+                    except Exception:
                         pass
 
             # 运行异步任务

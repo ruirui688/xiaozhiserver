@@ -5,6 +5,9 @@ import time
 import hashlib
 import portalocker
 from typing import Dict
+from config.logger import setup_logging
+
+logger = setup_logging()
 
 
 class FileLock:
@@ -64,10 +67,10 @@ class WakeupWordsConfig:
                     self._last_load_time = current_time
                     return config
         except (TimeoutError, IOError) as e:
-            print(f"加载配置文件失败: {e}")
+            logger.bind(tag="wakeup_word").error(f"加载配置文件失败: {e}")
             return {}
         except Exception as e:
-            print(f"加载配置文件时发生未知错误: {e}")
+            logger.bind(tag="wakeup_word").error(f"加载配置文件时发生未知错误: {e}")
             return {}
 
     def _save_config(self, config: Dict):
@@ -79,10 +82,10 @@ class WakeupWordsConfig:
                     self._config_cache = config
                     self._last_load_time = time.time()
         except (TimeoutError, IOError) as e:
-            print(f"保存配置文件失败: {e}")
+            logger.bind(tag="wakeup_word").error(f"保存配置文件失败: {e}")
             raise
         except Exception as e:
-            print(f"保存配置文件时发生未知错误: {e}")
+            logger.bind(tag="wakeup_word").error(f"保存配置文件时发生未知错误: {e}")
             raise
 
     def get_wakeup_response(self, voice: str) -> Dict:
@@ -116,7 +119,7 @@ class WakeupWordsConfig:
             }
             self._save_config(config)
         except Exception as e:
-            print(f"更新唤醒词回复配置失败: {e}")
+            logger.bind(tag="wakeup_word").error(f"更新唤醒词回复配置失败: {e}")
             raise
 
     def generate_file_path(self, voice: str) -> str:
@@ -131,10 +134,10 @@ class WakeupWordsConfig:
                 try:
                     os.remove(file_path)
                 except Exception as e:
-                    print(f"删除已存在的音频文件失败: {e}")
+                    logger.bind(tag="wakeup_word").error(f"删除已存在的音频文件失败: {e}")
                     raise
 
             return file_path
         except Exception as e:
-            print(f"生成音频文件路径失败: {e}")
+            logger.bind(tag="wakeup_word").error(f"生成音频文件路径失败: {e}")
             raise

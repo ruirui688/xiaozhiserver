@@ -1,19 +1,19 @@
 """
-TTS上报功能已集成到ConnectionHandler类中。
+TTS上报功能由 ReportThreadManager 管理。
 
 上报功能包括：
-1. 每个连接对象拥有自己的上报队列和处理线程
+1. 每个连接对象通过 ReportThreadManager 管理自己的上报队列和处理线程
 2. 上报线程的生命周期与连接对象绑定
-3. 使用ConnectionHandler.enqueue_tts_report方法进行上报
+3. 使用 enqueue_tts_report / enqueue_tool_report 函数进行上报
 
-具体实现请参考core/connection.py中的相关代码。
+具体实现请参考 core/handle/reportThreadManager.py。
 """
 
 import time
 import json
 import opuslib_next
 from typing import TYPE_CHECKING
-from core.game_session import GameSessionManager
+from core.game import GameSessionManager
 
 if TYPE_CHECKING:
     from core.connection import ConnectionHandler

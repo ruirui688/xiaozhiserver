@@ -36,6 +36,7 @@ import org.springframework.web.client.RestTemplate;
 import cn.hutool.json.JSONObject;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -62,6 +63,7 @@ import xiaozhi.modules.knowledge.entity.DocumentEntity;
 import xiaozhi.modules.knowledge.entity.KnowledgeBaseEntity;
 import xiaozhi.modules.knowledge.entity.KnowledgeChunkEntity;
 import xiaozhi.modules.knowledge.rag.KnowledgeBaseAdapter;
+import xiaozhi.modules.llm.service.EmbeddingService;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
 
@@ -96,6 +98,12 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private int llmMaxInputChars = DEFAULT_LLM_MAX_INPUT_CHARS;
     private int llmMaxTokens = DEFAULT_LLM_MAX_TOKENS;
     private RestTemplate llmRestTemplate;
+    private EmbeddingService embeddingService;
+    private boolean embeddingEnabled;
+    private String embeddingBaseUrl;
+    private String embeddingApiKey;
+    private String embeddingModel;
+    private boolean llmChunkingFailed;
     private boolean hasRetrievalConfig;
     private String retrievalMode = "normal";
     private String searchType = "semantic";
@@ -128,6 +136,22 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         llmTimeoutSeconds = getIntConfig("llm_timeout_seconds", DEFAULT_LLM_TIMEOUT_SECONDS, 10, 600);
         llmMaxInputChars = getIntConfig("llm_max_input_chars", DEFAULT_LLM_MAX_INPUT_CHARS, 500, 20000);
         llmMaxTokens = getIntConfig("llm_max_tokens", DEFAULT_LLM_MAX_TOKENS, 200, 8000);
+        // [Issue #1] Initialize EmbeddingService for vector similarity search
+        try {
+            this.embeddingService = SpringContextUtils.getBean(EmbeddingService.class);
+        } catch (Exception e) {
+            log.warn("本地知识库无法获取 EmbeddingService，向量检索将不可用: {}", e.getMessage());
+            this.embeddingService = null;
+        }
+        this.embeddingBaseUrl = getStringConfig("embedding_base_url", getStringConfig("llm_base_url", ""));
+        this.embeddingApiKey = getStringConfig("embedding_api_key", getStringConfig("llm_api_key", ""));
+        this.embeddingModel = getStringConfig("embedding_model", "");
+        this.embeddingEnabled = embeddingService != null
+                && StringUtils.isNoneBlank(embeddingBaseUrl, embeddingApiKey, embeddingModel)
+                && !isPlaceholderSecret(embeddingApiKey);
+        if (this.embeddingEnabled) {
+            log.info("本地知识库向量检索已启用, model={}", embeddingModel);
+        }
         Map<String, Object> retrievalConfig = getMapConfig("retrieval_config");
         hasRetrievalConfig = retrievalConfig != null && !retrievalConfig.isEmpty();
         retrievalMode = getStringConfig(retrievalConfig, "mode", getStringConfig("mode", "normal"));
@@ -182,6 +206,8 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     public KnowledgeFilesDTO uploadDocument(DocumentDTO.UploadReq req) {
         String documentId = newId();
         String filename = StringUtils.defaultIfBlank(req.getName(), req.getFile().getOriginalFilename());
+        // [Issue #8] 重置 LLM 切片失败标记
+        llmChunkingFailed = false;
         try {
             List<LocalChunk> chunks = parseFile(filename, req.getFile().getInputStream());
             replaceChunks(req.getDatasetId(), documentId, chunks);
@@ -201,6 +227,18 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             dto.setCreatedAt(new Date());
             dto.setUpdatedAt(new Date());
             dto.setMetaFields(req.getMetaFields());
+            // [Issue #8] 若 LLM 切片失败降级为规则切片，在元数据中记录质量降级提示
+            if (llmChunkingFailed) {
+                Map<String, Object> qualityNote = new HashMap<>();
+                qualityNote.put("quality_degraded", true);
+                qualityNote.put("note", "LLM切片失败降级为规则切片，切片质量可能低于预期");
+                if (dto.getMetaFields() != null) {
+                    dto.getMetaFields().putAll(qualityNote);
+                } else {
+                    dto.setMetaFields(qualityNote);
+                }
+                log.warn("本地知识库文档 {} 切片质量降级: LLM切片失败，使用规则切片", filename);
+            }
             return dto;
         } catch (Exception e) {
             log.error("本地知识库文件解析失败: {}", filename, e);
@@ -262,9 +300,27 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         String fulltextQuery = buildFulltextQuery(candidateTerms);
         List<KnowledgeChunkEntity> chunks = loadRetrievalCandidates(req, candidateTerms, fulltextQuery, candidateLimit);
 
+        // [Issue #1] 生成查询向量用于相似度检索
+        float[] queryEmbedding;
+        if (embeddingEnabled) {
+            queryEmbedding = embeddingService.getEmbedding(
+                    question, embeddingBaseUrl, embeddingApiKey, embeddingModel);
+            if (queryEmbedding == null) {
+                log.warn("本地知识库向量嵌入不可用，已回退关键词检索");
+            }
+        } else {
+            queryEmbedding = null;
+        }
+        boolean vectorAvailable = queryEmbedding != null;
+
         Map<String, DocumentEntity> docs = loadDocs(chunks);
         List<ScoredChunk> scored = chunks.stream()
-                .map(chunk -> new ScoredChunk(chunk, score(question, chunk, terms)))
+                .map(chunk -> {
+                    float keywordScore = score(question, chunk, terms);
+                    float vecScore = computeVectorSimilarity(queryEmbedding, chunk.getEmbeddingJson());
+                    float combinedScore = computeCombinedScore(keywordScore, vecScore, vectorAvailable);
+                    return new ScoredChunk(chunk, combinedScore, keywordScore, vecScore);
+                })
                 .filter(item -> shouldKeepScore(question, item.getScore()))
                 .sorted(Comparator.comparing(ScoredChunk::getScore).reversed())
                 .limit(resultLimit)
@@ -282,8 +338,8 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
                     .datasetId(chunk.getDatasetId())
                     .documentName(doc == null ? null : doc.getName())
                     .similarity(item.getScore())
-                    .termSimilarity(item.getScore())
-                    .vectorSimilarity(0F)
+                    .termSimilarity(item.getKeywordScore())
+                    .vectorSimilarity(item.getVectorScore())
                     .index(index++)
                     .questions(StringUtils.isBlank(chunk.getQuestion()) ? null : List.of(chunk.getQuestion()))
                     .build());
@@ -407,28 +463,37 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
 
     @Override
     public Map<String, Object> getSupportedConfig() {
-        return Map.of(
-                "max_chunk_chars", "单个切片的最大字符数",
-                "llm_enabled", "是否启用大模型切片精修",
-                "llm_base_url", "OpenAI兼容接口地址",
-                "llm_api_key", "OpenAI兼容接口密钥",
-                "llm_model", "切片精修模型",
-                "llm_timeout_seconds", "单次模型请求超时时间",
-                "llm_max_input_chars", "单次送入模型的最大字符数",
-                "llm_max_tokens", "模型输出最大Token数");
+        Map<String, String> configs = new LinkedHashMap<>();
+        configs.put("max_chunk_chars", "单个切片的最大字符数");
+        configs.put("llm_enabled", "是否启用大模型切片精修");
+        configs.put("llm_base_url", "OpenAI兼容接口地址");
+        configs.put("llm_api_key", "OpenAI兼容接口密钥");
+        configs.put("llm_model", "切片精修模型");
+        configs.put("llm_timeout_seconds", "单次模型请求超时时间");
+        configs.put("llm_max_input_chars", "单次送入模型的最大字符数");
+        configs.put("llm_max_tokens", "模型输出最大Token数");
+        configs.put("embedding_model", "嵌入向量模型名称（用于向量检索）");
+        configs.put("embedding_base_url", "嵌入向量API地址（默认复用llm_base_url）");
+        configs.put("embedding_api_key", "嵌入向量API密钥（默认复用llm_api_key）");
+        return configs.entrySet().stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
     }
 
     @Override
     public Map<String, Object> getDefaultConfig() {
-        return Map.of(
-                "max_chunk_chars", DEFAULT_MAX_CHUNK_CHARS,
-                "llm_enabled", false,
-                "llm_base_url", DEFAULT_LLM_BASE_URL,
-                "llm_api_key", "",
-                "llm_model", DEFAULT_LLM_MODEL,
-                "llm_timeout_seconds", DEFAULT_LLM_TIMEOUT_SECONDS,
-                "llm_max_input_chars", DEFAULT_LLM_MAX_INPUT_CHARS,
-                "llm_max_tokens", DEFAULT_LLM_MAX_TOKENS);
+        Map<String, Object> defaults = new LinkedHashMap<>();
+        defaults.put("max_chunk_chars", DEFAULT_MAX_CHUNK_CHARS);
+        defaults.put("llm_enabled", false);
+        defaults.put("llm_base_url", DEFAULT_LLM_BASE_URL);
+        defaults.put("llm_api_key", "");
+        defaults.put("llm_model", DEFAULT_LLM_MODEL);
+        defaults.put("llm_timeout_seconds", DEFAULT_LLM_TIMEOUT_SECONDS);
+        defaults.put("llm_max_input_chars", DEFAULT_LLM_MAX_INPUT_CHARS);
+        defaults.put("llm_max_tokens", DEFAULT_LLM_MAX_TOKENS);
+        defaults.put("embedding_model", "");
+        defaults.put("embedding_base_url", DEFAULT_LLM_BASE_URL);
+        defaults.put("embedding_api_key", "");
+        return defaults;
     }
 
     @Override
@@ -531,15 +596,18 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     }
 
     private void replaceChunks(String datasetId, String documentId, List<LocalChunk> chunks) {
-        chunkDao.delete(new QueryWrapper<KnowledgeChunkEntity>()
+        // [Issue #10] 验证删除是否成功，避免旧 chunk_id 与新 chunk_id 冲突
+        int deleted = chunkDao.delete(new QueryWrapper<KnowledgeChunkEntity>()
                 .eq("dataset_id", datasetId)
                 .eq("document_id", documentId));
+        boolean useTimestampSuffix = (deleted == 0 && !chunks.isEmpty());
+        long timestamp = useTimestampSuffix ? System.currentTimeMillis() : 0;
         int index = 0;
         for (LocalChunk chunk : chunks) {
             KnowledgeChunkEntity entity = new KnowledgeChunkEntity();
             entity.setDatasetId(datasetId);
             entity.setDocumentId(documentId);
-            entity.setChunkId(documentId + "_" + index);
+            entity.setChunkId(documentId + "_" + index + (useTimestampSuffix ? "_" + timestamp : ""));
             entity.setContent(chunk.getContent());
             entity.setQuestion(chunk.getQuestion());
             entity.setAnswer(chunk.getAnswer());
@@ -550,6 +618,8 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             chunkDao.insert(entity);
             index++;
         }
+        // [Issue #1] 为新切片生成嵌入向量
+        generateAndStoreEmbeddings(datasetId, documentId);
     }
 
     private List<LocalChunk> parseFile(String filename, InputStream inputStream) throws Exception {
@@ -713,12 +783,17 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
                 refined.add(refineChunkWithLlm(original));
             } catch (Exception e) {
                 log.warn("本地知识库第 {} 个切片大模型精修失败，已回退规则切片: {}", i + 1, e.getMessage());
+                llmChunkingFailed = true;
                 refined.add(original);
             }
         }
         return refined;
     }
 
+    /**
+     * [Issue #5] 对每个分段进行 LLM 切片。若首次失败则重试一次，重试失败后该分段
+     * 回退到规则切片，而非放弃整个文档。
+     */
     private List<LocalChunk> chunkDocumentWithLlm(String filename, String text) {
         if (!llmAvailable() || StringUtils.isBlank(text)) {
             return List.of();
@@ -727,12 +802,27 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         List<String> sections = splitLlmInputSections(text);
         for (int i = 0; i < sections.size(); i++) {
             String section = sections.get(i);
-            try {
-                chunks.addAll(chunkSectionWithLlm(filename, section, i + 1, sections.size()));
-            } catch (Exception e) {
-                log.warn("本地知识库大模型切片失败，文件={}，分段={}/{}，已回退规则切片: {}",
-                        filename, i + 1, sections.size(), e.getMessage());
-                return List.of();
+            boolean success = false;
+            for (int attempt = 0; attempt <= 1; attempt++) {
+                try {
+                    chunks.addAll(chunkSectionWithLlm(filename, section, i + 1, sections.size()));
+                    success = true;
+                    break;
+                } catch (Exception e) {
+                    if (attempt == 0) {
+                        log.warn("本地知识库大模型切片分段{}/{}首次失败，即将重试: {}",
+                                i + 1, sections.size(), e.getMessage());
+                    } else {
+                        log.warn("本地知识库大模型切片分段{}/{}重试后仍失败，回退规则切片: {}",
+                                i + 1, sections.size(), e.getMessage());
+                    }
+                }
+            }
+            if (!success) {
+                // 记录 LLM 切片失败标记，用于 uploadDocument() 中标记质量降级
+                llmChunkingFailed = true;
+                // 回退到规则切片
+                chunks.addAll(splitByParagraphs(section));
             }
         }
         return chunks.stream()
@@ -1423,8 +1513,125 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         return dotIndex >= 0 ? filename.substring(dotIndex + 1).toLowerCase() : "";
     }
 
+    /**
+     * 估算文本的 token 数量。
+     * [Issue #4] 对 CJK 字符（中文、日文、韩文）使用 1.5 tokens/字符的比率，
+     * 对英文及其他 ASCII 字符使用 0.75 tokens/字符的比率，比简单的 length/2 更精确。
+     */
     private Long estimateTokens(String content) {
-        return Math.max(1L, StringUtils.defaultString(content).length() / 2L);
+        String text = StringUtils.defaultString(content);
+        if (text.isEmpty()) {
+            return 1L;
+        }
+        long cjkChars = 0;
+        long otherChars = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (Character.UnicodeScript.of(c) == Character.UnicodeScript.HAN
+                    || Character.UnicodeScript.of(c) == Character.UnicodeScript.HIRAGANA
+                    || Character.UnicodeScript.of(c) == Character.UnicodeScript.KATAKANA
+                    || Character.UnicodeScript.of(c) == Character.UnicodeScript.HANGUL) {
+                cjkChars++;
+            } else {
+                otherChars++;
+            }
+        }
+        long estimated = (long) Math.ceil(cjkChars * 1.5 + otherChars * 0.75);
+        return Math.max(1L, estimated);
+    }
+
+    /**
+     * [Issue #1] 为新插入的切片生成向量嵌入。
+     * 查询新插入的切片列表，逐条生成 embedding 并写回 database。
+     * 若 embedding 服务不可用，静默跳过。
+     */
+    private void generateAndStoreEmbeddings(String datasetId, String documentId) {
+        if (!embeddingEnabled) {
+            return;
+        }
+        List<KnowledgeChunkEntity> storedChunks = chunkDao.selectList(
+                new QueryWrapper<KnowledgeChunkEntity>()
+                        .eq("dataset_id", datasetId)
+                        .eq("document_id", documentId)
+                        .orderByAsc("sort_order"));
+        for (KnowledgeChunkEntity chunk : storedChunks) {
+            try {
+                String text = String.join("\n",
+                        StringUtils.defaultString(chunk.getContent()),
+                        StringUtils.defaultString(chunk.getQuestion()),
+                        StringUtils.defaultString(chunk.getAnswer()));
+                float[] embedding = embeddingService.getEmbedding(
+                        text, embeddingBaseUrl, embeddingApiKey, embeddingModel);
+                if (embedding != null && embedding.length > 0) {
+                    String json = objectMapper.writeValueAsString(embedding);
+                    KnowledgeChunkEntity update = new KnowledgeChunkEntity();
+                    update.setId(chunk.getId());
+                    update.setEmbeddingJson(json);
+                    chunkDao.updateById(update);
+                }
+            } catch (Exception e) {
+                log.warn("生成chunk embedding失败, chunkId={}: {}", chunk.getChunkId(), e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * [Issue #1] 计算两个 float 数组的余弦相似度。
+     */
+    private float cosineSimilarity(float[] a, float[] b) {
+        if (a == null || b == null || a.length != b.length || a.length == 0) {
+            return 0F;
+        }
+        double dotProduct = 0, normA = 0, normB = 0;
+        for (int i = 0; i < a.length; i++) {
+            dotProduct += (double) a[i] * b[i];
+            normA += (double) a[i] * a[i];
+            normB += (double) b[i] * b[i];
+        }
+        if (normA <= 0 || normB <= 0) {
+            return 0F;
+        }
+        return (float) (dotProduct / (Math.sqrt(normA) * Math.sqrt(normB)));
+    }
+
+    /**
+     * [Issue #1] 将 JSON 格式的嵌入向量反序列化为 float[]。
+     */
+    private float[] parseEmbeddingJson(String embeddingJson) {
+        if (StringUtils.isBlank(embeddingJson)) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(embeddingJson, float[].class);
+        } catch (Exception e) {
+            log.debug("解析embedding_json失败: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * [Issue #1] 计算 query 与 chunk 的向量相似度。
+     */
+    private float computeVectorSimilarity(float[] queryEmbedding, String chunkEmbeddingJson) {
+        if (queryEmbedding == null || StringUtils.isBlank(chunkEmbeddingJson)) {
+            return 0F;
+        }
+        float[] chunkEmbedding = parseEmbeddingJson(chunkEmbeddingJson);
+        if (chunkEmbedding == null) {
+            return 0F;
+        }
+        return cosineSimilarity(queryEmbedding, chunkEmbedding);
+    }
+
+    /**
+     * [Issue #1] 融合关键词得分和向量相似度得到最终得分。
+     */
+    private float computeCombinedScore(float keywordScore, float vectorScore, boolean embeddingAvailable) {
+        if (!embeddingAvailable || vectorScore <= 0F) {
+            return keywordScore;
+        }
+        // 关键词匹配和向量检索各占 50% 权重
+        return 0.5F * keywordScore + 0.5F * vectorScore;
     }
 
     private String newId() {
@@ -1444,6 +1651,8 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     @AllArgsConstructor
     private static class ScoredChunk {
         private KnowledgeChunkEntity chunk;
-        private Float score;
+        private Float score; // Combined score (keyword + vector weighted)
+        private Float keywordScore; // Keyword overlap score
+        private Float vectorScore; // Embedding cosine similarity
     }
 }

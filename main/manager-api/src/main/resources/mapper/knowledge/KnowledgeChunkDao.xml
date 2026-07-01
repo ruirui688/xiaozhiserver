@@ -13,6 +13,7 @@
         <result property="answer" column="answer" jdbcType="LONGVARCHAR"/>
         <result property="sortOrder" column="sort_order" jdbcType="INTEGER"/>
         <result property="tokenCount" column="token_count" jdbcType="BIGINT"/>
+        <result property="embeddingJson" column="embedding_json" jdbcType="LONGVARCHAR"/>
         <result property="createdAt" column="created_at" jdbcType="TIMESTAMP"/>
         <result property="updatedAt" column="updated_at" jdbcType="TIMESTAMP"/>
     </resultMap>
@@ -28,6 +29,7 @@
             answer,
             sort_order,
             token_count,
+            embedding_json,
             created_at,
             updated_at
         FROM ai_rag_knowledge_chunk

@@ -12,6 +12,9 @@ from config.manage_api_client import (
     DeviceBindException,
 )
 from core.utils.model_config import apply_legacy_runtime_view
+from config.logger import setup_logging
+
+logger = setup_logging()
 
 
 def get_project_dir():
@@ -47,7 +50,7 @@ def load_config():
     try:
         custom_config = read_config(custom_config_path)
     except FileNotFoundError:
-        print(f"警告：自定义配置文件 {custom_config_path} 不存在，仅使用默认配置")
+        logger.bind(tag="config").warning(f"自定义配置文件 {custom_config_path} 不存在，仅使用默认配置")
         custom_config = {}
 
     if custom_config.get("manager-api", {}).get("url"):
@@ -165,7 +168,7 @@ def ensure_directories(config):
         try:
             os.makedirs(dir_path, exist_ok=True)
         except PermissionError:
-            print(f"警告：无法创建目录 {dir_path}，请检查写入权限")
+            logger.bind(tag="config").warning(f"无法创建目录 {dir_path}，请检查写入权限")
 
 
 def merge_configs(default_config, custom_config):

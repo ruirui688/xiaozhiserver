@@ -39,14 +39,18 @@ If the Conda env is unavailable, state "not verified in project Conda runtime" â
 ## Code Modification Principles
 
 - **Don't grow the giants.** These files are already too large and should NOT be expanded:
-  - `main/xiaozhi-server/core/connection.py` (1963 lines)
-  - `main/manager-api/.../ModelConfigServiceImpl.java` (2542 lines)
+  - `main/xiaozhi-server/core/connection.py` (1977 lines)
+  - `main/manager-api/.../ModelConfigServiceImpl.java` (985 lines, model testing split to `ModelTestServiceImpl.java`)
+  - `main/manager-api/.../MemoryServiceImpl.java` (491 lines, maintenance split to `MemoryMaintenanceServiceImpl.java`)
+  - `main/manager-api/.../MemoryMaintenanceServiceImpl.java` (1061 lines)
   - `main/manager-web/src/views/ModelConfig.vue` (1889 lines)
-  - `main/manager-web/src/components/ModelBenchmarkDialog.vue` (2817 lines)
-  - `main/manager-api/.../ModelAssistantServiceImpl.java` (793 lines)
+  - `main/manager-web/src/components/ModelBenchmarkDialog.vue` (489 lines, split to `BenchmarkConfigPanel.vue` + `BenchmarkResultPanel.vue`)
+  - `main/manager-api/.../ModelAssistantServiceImpl.java` (766 lines)
+  - `main/manager-api/.../LocalKnowledgeAdapter.java` (1658 lines)
+  - `main/manager-web/src/views/KnowledgeFileUpload.vue` (1260 lines, split to `knowledge/FileUploadPanel.vue` + `FilePreviewDialog.vue`)
   - Instead, add new logic in dedicated helper/module/component files
 
-- **Don't mix concerns.** Model benchmark UI goes in `ModelBenchmarkDialog.vue`, not `ModelConfig.vue`. ASR/TTS/VLLM benchmark logic goes in `core/benchmark/`, not `runner.py` alone.
+- **Don't mix concerns.** Model benchmark UI goes in `BenchmarkConfigPanel.vue`/`BenchmarkResultPanel.vue`, not `ModelConfig.vue`. Model testing logic goes in `ModelTestServiceImpl.java`, not `ModelConfigServiceImpl.java`. Game logic goes in `core/game/`, not in the connection handler.
 
 - **Don't commit drafts.** Delete placeholder providers, `raise NotImplementedError`, `# TODO: call real API`, and unregistered DB migrations before committing.
 

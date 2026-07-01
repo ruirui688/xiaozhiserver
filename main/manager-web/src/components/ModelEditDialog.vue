@@ -119,50 +119,13 @@
         </el-collapse>
       </el-form>
 
-      <div style="font-size: 20px; font-weight: bold; color: #3d4566; margin-bottom: 15px">
-        {{ $t("modelConfigDialog.callInfo") }}
-      </div>
-      <div style="height: 2px; background: #e9e9e9; margin-bottom: 22px"></div>
-
-      <el-form :model="form" ref="callInfoForm" label-width="auto" class="custom-form">
-        <template v-for="section in visibleFieldSections">
-          <div v-if="section.fields.length" :key="section.key" class="field-section">
-            <div v-if="!section.collapsible" class="field-section-title">{{ section.title }}</div>
-            <template v-if="section.collapsible">
-              <el-collapse class="advanced-collapse">
-                <el-collapse-item :title="section.title" :name="section.key">
-                  <template v-for="(row, rowIndex) in chunkFields(section.fields)">
-                    <div :key="`${section.key}-${rowIndex}`" class="field-row">
-                      <model-field-control
-                        v-for="field in row"
-                        :key="field.prop"
-                        :field="field"
-                        :form="form"
-                        :field-json-map="fieldJsonMap"
-                        @json-change="handleJsonChange"
-                      />
-                    </div>
-                  </template>
-                </el-collapse-item>
-              </el-collapse>
-            </template>
-            <template v-else>
-              <template v-for="(row, rowIndex) in chunkFields(section.fields)">
-                <div :key="`${section.key}-${rowIndex}`" class="field-row">
-                  <model-field-control
-                    v-for="field in row"
-                    :key="field.prop"
-                    :field="field"
-                    :form="form"
-                    :field-json-map="fieldJsonMap"
-                    @json-change="handleJsonChange"
-                  />
-                </div>
-              </template>
-            </template>
-          </div>
-        </template>
-      </el-form>
+      <model-config-form
+        :form="form"
+        :dynamic-call-info-fields="dynamicCallInfoFields"
+        :field-json-map="fieldJsonMap"
+        :visible-field-sections="visibleFieldSections"
+        @json-change="handleJsonChange"
+      />
     </div>
 
     <div class="dialog-actions">
@@ -184,99 +147,12 @@
 
 <script>
 import Api from "@/apis/api";
+import ModelConfigForm from "@/components/model/ModelConfigForm.vue";
 
 export default {
   name: "ModelEditDialog",
   components: {
-    ModelFieldControl: {
-      props: {
-        field: { type: Object, required: true },
-        form: { type: Object, required: true },
-        fieldJsonMap: { type: Object, required: true },
-      },
-      methods: {
-        updateValue(value) {
-          this.$set(this.form[this.field.target], this.field.prop, value);
-        },
-        updateJsonValue(value) {
-          this.$set(this.fieldJsonMap, this.field.prop, value);
-        },
-      },
-      render(h) {
-        const field = this.field;
-        const form = this.form;
-        const jsonMap = this.fieldJsonMap;
-        const scopedSlots = {
-          label: () => [
-            h("span", field.label),
-            field.helpText
-              ? h("el-tooltip", { props: { content: field.helpText, placement: "top" } }, [
-                  h("i", { class: "el-icon-question field-help-icon" }),
-                ])
-              : null,
-          ],
-        };
-        let control;
-        if (field.type === "json-textarea") {
-          control = h("el-input", {
-            class: "custom-input-bg",
-            props: {
-              value: jsonMap[field.prop],
-              type: "textarea",
-              rows: 3,
-              placeholder: field.placeholder,
-            },
-            on: {
-              input: this.updateJsonValue,
-              change: (val) => this.$emit("json-change", field, val),
-            },
-          });
-        } else if (field.type === "select" || field.type === "model-select") {
-          control = h("el-select", {
-            class: "custom-select custom-input-bg",
-            style: { width: "100%" },
-            props: {
-              value: form[field.target][field.prop],
-              placeholder: field.placeholder,
-              filterable: true,
-              clearable: true,
-              loading: !!field.loading,
-            },
-            on: { input: this.updateValue },
-          }, (field.options || []).map((option) => h("el-option", {
-            key: option.value,
-            props: { label: option.label, value: option.value },
-          }, [
-            h("div", { class: "model-reference-option" }, [
-              h("div", { class: "model-reference-title" }, option.label),
-              option.meta ? h("div", { class: "model-reference-meta" }, option.meta) : null,
-            ]),
-          ])));
-        } else if (field.type === "switch") {
-          control = h("el-switch", {
-            props: { value: form[field.target][field.prop] },
-            on: { input: this.updateValue },
-          });
-        } else {
-          control = h("el-input", {
-            class: "custom-input-bg",
-            props: {
-              value: form[field.target][field.prop],
-              placeholder: field.placeholder,
-              type: field.type === "number" ? "number" : "text",
-              showPassword: false,
-            },
-            on: { input: this.updateValue },
-          });
-        }
-        return h("el-form-item", {
-          class: "field-form-item",
-          style: { flex: "1" },
-          props: { prop: field.prop, label: field.label },
-          scopedSlots,
-        }, [control]);
-      },
-    },
+    ModelConfigForm,
   },
   props: {
     visible: { type: Boolean, default: false },
@@ -954,14 +830,6 @@ export default {
         "personal_access_token",
       ].includes(key);
     },
-    chunkFields(fields) {
-      const chunkSize = 2;
-      const result = [];
-      for (let i = 0; i < fields.length; i += chunkSize) {
-        result.push(fields.slice(i, i + chunkSize));
-      }
-      return result;
-    },
     getFieldHelpText(key) {
       return {
         appid: "厂商控制台应用 ID，本身不是密钥。",
@@ -1267,10 +1135,6 @@ export default {
   transform: rotate(180deg);
 }
 
-.custom-form .el-form-item {
-  margin-bottom: 20px;
-}
-
 .catalog-detail {
   border: 1px solid #e7ebf3;
   border-radius: 6px;
@@ -1316,17 +1180,6 @@ export default {
   margin-right: 6px;
 }
 
-.custom-form .el-form-item__label {
-  color: #3d4566;
-  font-weight: normal;
-  text-align: right;
-  padding-right: 20px;
-}
-
-.field-section {
-  margin-bottom: 10px;
-}
-
 .provider-option {
   display: flex;
   align-items: center;
@@ -1360,40 +1213,6 @@ export default {
   white-space: nowrap;
 }
 
-.field-section-title {
-  color: #3d4566;
-  font-size: 15px;
-  font-weight: 600;
-  margin: 0 0 12px;
-}
-
-.field-row {
-  display: flex;
-  gap: 20px;
-  margin-bottom: 0;
-}
-
-.field-help-icon {
-  color: #8a94ad;
-  font-size: 14px;
-  margin-left: 5px;
-  cursor: help;
-}
-
-.field-tip {
-  color: #7b8499;
-  font-size: 12px;
-  line-height: 1.5;
-  margin-top: 6px;
-}
-
-.field-form-item {
-  min-width: 0;
-}
-
-.field-section .advanced-collapse {
-  margin-top: 0;
-}
 
 .custom-form .el-form-item.prop-remark .el-form-item__label {
   margin-top: -4px;

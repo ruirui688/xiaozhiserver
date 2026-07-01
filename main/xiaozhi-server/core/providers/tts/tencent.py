@@ -5,6 +5,7 @@ import uuid
 import json
 import base64
 import requests
+import aiohttp
 from datetime import datetime, timezone
 from core.providers.tts.base import TTSProviderBase
 
@@ -153,34 +154,35 @@ class TTSProvider(TTSProviderBase):
             headers = self._get_auth_headers(request_json)
 
             # 发送请求
-            resp = requests.post(
-                self.api_url, json.dumps(request_json), headers=headers
-            )
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.api_url, data=json.dumps(request_json), headers=headers
+                ) as resp:
+                    # 检查响应
+                    if resp.status == 200:
+                        response_data = await resp.json()
 
-            # 检查响应
-            if resp.status_code == 200:
-                response_data = resp.json()
+                        # 检查是否成功
+                        if response_data.get("Response", {}).get("Error") is not None:
+                            error_info = response_data["Response"]["Error"]
+                            raise Exception(
+                                f"API返回错误: {error_info['Code']}: {error_info['Message']}"
+                            )
 
-                # 检查是否成功
-                if response_data.get("Response", {}).get("Error") is not None:
-                    error_info = response_data["Response"]["Error"]
-                    raise Exception(
-                        f"API返回错误: {error_info['Code']}: {error_info['Message']}"
-                    )
-
-                # 解码Base64音频数据
-                audio_bytes = base64.b64decode(response_data["Response"].get("Audio"))
-                if audio_bytes:
-                    if output_file:
-                        with open(output_file, "wb") as f:
-                            f.write(audio_bytes)
+                        # 解码Base64音频数据
+                        audio_bytes = base64.b64decode(response_data["Response"].get("Audio"))
+                        if audio_bytes:
+                            if output_file:
+                                with open(output_file, "wb") as f:
+                                    f.write(audio_bytes)
+                            else:
+                                return audio_bytes
+                        else:
+                            raise Exception(f"{__name__}: 没有返回音频数据: {response_data}")
                     else:
-                        return audio_bytes
-                else:
-                    raise Exception(f"{__name__}: 没有返回音频数据: {response_data}")
-            else:
-                raise Exception(
-                    f"{__name__} status_code: {resp.status_code} response: {resp.content}"
-                )
+                        error_content = await resp.read()
+                        raise Exception(
+                            f"{__name__} status_code: {resp.status} response: {error_content}"
+                        )
         except Exception as e:
             raise Exception(f"{__name__} error: {e}")

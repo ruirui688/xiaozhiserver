@@ -21,3 +21,4 @@ class DefaultTTS(TTSProviderBase):
 
     async def text_to_speak(self, text, output_file):
         logger.bind(tag=TAG).error(f"无法实例化 TTS 服务，请检查配置")
+        raise RuntimeError("DefaultTTS 不可用：未配置有效的 TTS 服务")

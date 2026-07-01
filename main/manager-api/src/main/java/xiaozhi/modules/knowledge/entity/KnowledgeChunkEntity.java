@@ -46,6 +46,9 @@ public class KnowledgeChunkEntity implements Serializable {
     @Schema(description = "粗略Token数")
     private Long tokenCount;
 
+    @Schema(description = "文本嵌入向量（JSON数组），用于本地知识库向量相似度检索")
+    private String embeddingJson;
+
     @Schema(description = "创建时间")
     @TableField(fill = FieldFill.INSERT)
     private Date createdAt;

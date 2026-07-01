@@ -148,7 +148,7 @@ def read_audio(path: str,
         ]
 
         wav, sr = torchaudio.sox_effects.apply_effects_file(path, effects=effects)
-    except:
+    except Exception:
         wav, sr = torchaudio.load(path)
 
         if wav.size(0) > 1:
@@ -257,7 +257,7 @@ def get_speech_timestamps(audio: torch.Tensor,
     if not torch.is_tensor(audio):
         try:
             audio = torch.Tensor(audio)
-        except:
+        except Exception:
             raise TypeError("Audio cannot be casted to tensor. Cast it manually")
 
     if len(audio.shape) > 1:
@@ -452,7 +452,7 @@ class VADIterator:
         if not torch.is_tensor(x):
             try:
                 x = torch.Tensor(x)
-            except:
+            except Exception:
                 raise TypeError("Audio cannot be casted to tensor. Cast it manually")
 
         window_size_samples = len(x[0]) if x.dim() == 2 else len(x)

@@ -40,14 +40,15 @@ MCP / 插件 / IoT 是工具执行层
 新增代码位置：
 
 ```text
-main/xiaozhi-server/core/semantic/
-  frames.py            语义数据结构
+main/xiaozhi-server/core/semantic/  (8 文件, ~800 行)
+  frames.py            语义数据结构 (ASRResult, RobotContext, IntentFrame, Decision)
   interruption.py      TTS 播放期间重叠语音的大模型打断裁决
-  normalizer.py        文本标准化
-  router.py            高置信度规则路由
-  state_manager.py     连接级状态投影
-  policy_engine.py     状态与策略判断
-  semantic_center.py   编排执行
+  normalizer.py        文本标准化 (route_key, 标点/空格/唤醒词移除)
+  router.py            高置信度规则路由 (STOP_ALL/音乐/游戏/继续/兜底)
+  state_manager.py     连接级状态投影 (RLock 线程安全)
+  policy_engine.py     状态与策略判断 (execute/reject/fallback_chat)
+  semantic_center.py   编排执行 (4 阶段管道: normalize→route→decide→execute)
+  music_intent.py      音乐领域命令解析器
 ```
 
 接入点：
@@ -161,19 +162,17 @@ reason
 
 ### 停止类
 
-这些说法会直接路由到 `interrupt.stop_all`：
+这些说法会直接路由到 `interrupt.stop_all`（共 48 个条目）：
 
 ```text
-停
-停止
-暂停
-别动
-别说了
-不要说了
-闭嘴
-停止表演
-你先停一下
-小智你先别演了
+停 / 停止 / 暂停 / 停下 / 别动 / 闭嘴 / 别吵了
+别说了 / 你不要说了 / 不要说了 / 你先别说了 / 你别说了
+取消 / 算了 / 没事了 / 没什么
+停止表演 / 你先别演了 / 小智你先别演了
+够了 / 别tm说了 / 你给老子闭嘴 / 能不能安静点
+行了行了 / 够了够了 / 好了好了 / 得得得
+嘘 / 静音 / 别吵 / 安静 / 别说话
+shut up / stop / silence / quiet / enough
 ```
 
 处理方式：
@@ -196,20 +195,19 @@ SemanticCenter -> handleAbortMessage()
 用户说：
 
 ```text
-退出游戏
-结束游戏
-不玩了
-游戏结束
+退出游戏 / 结束游戏 / 不玩了 / 游戏结束 / 不猜了 / 换游戏 / 换个游戏 / 停
 ```
 
 会触发：
 
 ```text
 game.exit
-  -> GameSessionManager.clear_active_games()
-  -> TTS 回复“好的，游戏先到这。”
-  -> 不关闭 websocket
+  → GameSessionManager.clear_active_games()
+  → TTS 回复”好的，游戏先到这。”
+  → 不关闭 websocket
 ```
+
+游戏快捷启动（新增）：`GameSessionManager.get_requested_game_tool()` 现在检测用户文本是否包含游戏关键词（如”成语接龙””你说我猜”），命中时直接返回游戏工具名，跳过 intent LLM 调用。
 
 这和旧的 `exit_commands` 不同。旧退出命令仍用于关闭连接。
 
@@ -257,6 +255,10 @@ client_is_speaking -> speaking
 ```
 
 当前状态是连接级内存，断线丢失。需要跨连接恢复时，再引入按 `device_id/session_id` 的状态存储。
+
+**线程安全（新增）**：`StateManager` 使用 `threading.RLock`（可重入锁）保护所有状态读写 — `record_intent()` 调用 `transition()` 在同一流程中不会死锁。`semantic_center._invoke_tool()` 新增 try/except 保护工具调用异常。
+
+**路由日志（新增）**：`router.py` 和 `semantic_center.py` 中所有路由决策和语义处理路径均添加 debug 级别日志，用于生产环境诊断。
 
 ## 6. 与工具系统的关系
 

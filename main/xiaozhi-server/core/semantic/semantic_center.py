@@ -34,8 +34,17 @@ class SemanticCenter:
         intent = self.router.route(asr_result, context)
         decision = self.policy_engine.decide(intent, context)
 
+        conn.logger.bind(tag=__name__).debug(
+            "handle_user_text text=%s intent=%s decision=%s reply=%s",
+            asr_result.normalized_text, intent.full_name, decision.decision, decision.reply,
+        )
+
         self.state_manager.record_intent(intent.full_name)
         if intent.full_name == "chat.normal" or decision.decision == "fallback_chat":
+            conn.logger.bind(tag=__name__).debug(
+                "handle_user_text fallthrough intent=%s decision=%s",
+                intent.full_name, decision.decision,
+            )
             return False
 
         from core.handle.sendAudioHandle import send_stt_message
@@ -43,14 +52,19 @@ class SemanticCenter:
         await send_stt_message(conn, asr_result.display_text)
 
         if decision.decision == "reject":
+            conn.logger.bind(tag=__name__).debug("handle_user_text handled reject: %s", decision.reply)
             await self._speak(conn, decision.reply or "这个指令现在不能执行。")
             self.state_manager.transition(decision.next_state)
             return True
 
         if decision.decision != "execute":
+            conn.logger.bind(tag=__name__).debug("handle_user_text fallthrough decision=%s", decision.decision)
             return False
 
         if intent.full_name in {"interrupt.stop_all", "music.stop"}:
+            conn.logger.bind(tag=__name__).debug(
+                "handle_user_text handled %s reply=%s", intent.full_name, decision.reply,
+            )
             from core.handle.abortHandle import handleAbortMessage
 
             await handleAbortMessage(conn)
@@ -60,6 +74,10 @@ class SemanticCenter:
             # (which has no decision.reply → _speak is never called to
             # reset it), we must clear it here so the TTS pipeline can
             # resume for subsequent interactions.
+            # NOTE: handleAbortMessage sets client_abort=True.
+            # For music.stop, no _speak() call follows (decision.reply triggers _speak below),
+            # so we must manually reset client_abort to allow the TTS pipeline to resume.
+            # TODO: Move this reset into handleAbortMessage as a proper post-abort state.
             conn.client_abort = False
             if intent.full_name == "interrupt.stop_all":
                 await self._try_stop_motion(conn)
@@ -69,6 +87,7 @@ class SemanticCenter:
             return True
 
         if intent.full_name == "game.exit":
+            conn.logger.bind(tag=__name__).debug("handle_user_text handled game.exit")
             if hasattr(conn, "game_session_manager") and conn.game_session_manager:
                 conn.game_session_manager.clear_active_games()
             await self._speak(conn, decision.reply or "好的，游戏先到这。")
@@ -76,6 +95,10 @@ class SemanticCenter:
             return True
 
         if decision.executor:
+            conn.logger.bind(tag=__name__).debug(
+                "handle_user_text handled executor=%s arguments=%s",
+                decision.executor, decision.arguments,
+            )
             result = await self._invoke_tool(conn, decision)
             await self._handle_tool_result(conn, result, decision)
             return True
@@ -99,7 +122,12 @@ class SemanticCenter:
             "id": str(uuid.uuid4().hex),
             "arguments": json.dumps(tool_input, ensure_ascii=False),
         }
-        result = await conn.func_handler.handle_llm_function_call(conn, function_call_data)
+        result = None
+        try:
+            result = await conn.func_handler.handle_llm_function_call(conn, function_call_data)
+        except Exception as e:
+            conn.logger.bind(tag=__name__).error(f"工具调用失败: {e}")
+            return ActionResponse(Action.RESPONSE, response="工具调用出了点问题，请稍后再试。")
         report_result = result.result if result and result.result else result.response if result else None
         enqueue_tool_report(
             conn,

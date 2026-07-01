@@ -1,0 +1,68 @@
+"""Report thread management for connections."""
+import queue
+import threading
+import asyncio
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.connection import ConnectionHandler
+
+from core.handle.reportHandle import report
+
+TAG = __name__
+
+
+class ReportThreadManager:
+    """Manages report worker thread for a connection."""
+
+    def start(self, conn: "ConnectionHandler"):
+        """初始化ASR和TTS上报线程"""
+        if not conn.read_config_from_api or conn.need_bind:
+            return
+        if conn.chat_history_conf == 0:
+            return
+        if conn.report_thread is None or not conn.report_thread.is_alive():
+            conn.report_thread = threading.Thread(
+                target=self._report_worker, args=(conn,), daemon=True
+            )
+            conn.report_thread.start()
+            conn.logger.bind(tag=TAG).info("TTS上报线程已启动")
+
+    def _report_worker(self, conn: "ConnectionHandler"):
+        """聊天记录上报工作线程"""
+        while not conn.stop_event.is_set():
+            try:
+                # 从队列获取数据，设置超时以便定期检查停止事件
+                item = conn.report_queue.get(timeout=1)
+                if item is None:  # 检测毒丸对象
+                    break
+                try:
+                    # 检查线程池状态
+                    if conn.executor is None:
+                        continue
+                    # 提交任务到线程池
+                    conn.executor.submit(self._process_report, conn, *item)
+                except Exception as e:
+                    conn.logger.bind(tag=TAG).error(f"聊天记录上报线程异常: {e}")
+            except queue.Empty:
+                continue
+            except Exception as e:
+                conn.logger.bind(tag=TAG).error(f"聊天记录上报工作线程异常: {e}")
+
+        conn.logger.bind(tag=TAG).info("聊天记录上报线程已退出")
+
+    def _process_report(self, conn: "ConnectionHandler", type, text, audio_data, report_time):
+        """处理上报任务"""
+        try:
+            # 执行异步上报（在事件循环中运行）
+            asyncio.run(report(conn, type, text, audio_data, report_time))
+        except Exception as e:
+            conn.logger.bind(tag=TAG).error(f"上报处理异常: {e}")
+        finally:
+            # 标记任务完成
+            conn.report_queue.task_done()
+
+    def stop(self, conn: "ConnectionHandler"):
+        """Stop the report thread by sending poison pill."""
+        if conn.report_thread and conn.report_thread.is_alive():
+            conn.report_queue.put(None)

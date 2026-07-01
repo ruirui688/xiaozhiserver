@@ -296,3 +296,17 @@ class PromptManager:
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"构建增强提示词失败: {e}")
             return user_prompt
+
+    def invalidate_device_cache(self, device_id: str = None):
+        """Invalidate cached device prompts to force rebuild on next request."""
+        try:
+            if device_id:
+                cache_key = f"device_prompt:{device_id}"
+                self.cache_manager.delete(self.CacheType.DEVICE_PROMPT, cache_key)
+                self.logger.bind(tag=TAG).debug(f"Invalidated prompt cache for device {device_id}")
+            else:
+                # Invalidate all device prompts
+                self.cache_manager.clear(self.CacheType.DEVICE_PROMPT)
+                self.logger.bind(tag=TAG).info("Invalidated all device prompt caches")
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"Failed to invalidate device prompt cache: {e}")

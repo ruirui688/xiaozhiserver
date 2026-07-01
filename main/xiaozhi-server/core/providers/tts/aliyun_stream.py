@@ -324,7 +324,7 @@ class TTSProvider(TTSProviderBase):
             if self.ws:
                 try:
                     await self.ws.close()
-                except:
+                except Exception:
                     pass
                 self.ws = None
             raise
@@ -414,7 +414,7 @@ class TTSProvider(TTSProviderBase):
         if self.ws:
             try:
                 await self.ws.close()
-            except:
+            except Exception:
                 pass
             self.ws = None
             self.last_active_time = None
@@ -478,7 +478,7 @@ class TTSProvider(TTSProviderBase):
             if self.ws:
                 try:
                     await self.ws.close()
-                except:
+                except Exception:
                     pass
                 self.ws = None
         # 监听任务退出时清理引用
@@ -630,7 +630,7 @@ class TTSProvider(TTSProviderBase):
                 finally:
                     try:
                         await ws.close()
-                    except:
+                    except Exception:
                         pass
 
             loop.run_until_complete(_generate_audio())

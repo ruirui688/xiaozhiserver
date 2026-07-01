@@ -18,6 +18,11 @@ TAG = __name__
 class MemoryProvider(MemoryProviderBase):
     def __init__(self, config, summary_memory=None):
         super().__init__(config)
+        # NOTE: summary_memory is accepted for API compatibility but intentionally
+        # ignored by managed_memory. The summary pipeline is handled entirely on
+        # the Java side (manager-api), which has its own separate summarization
+        # process triggered via memory source events. Passing summary_memory here
+        # would create a race between the Python-side and Java-side pipelines.
         self.role_id = None
 
     async def init_memory(self, role_id, llm, summary_memory=None, save_to_file=True):

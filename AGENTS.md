@@ -18,7 +18,7 @@ ESP32 设备 ──WebSocket──→ xiaozhi-server (Python, port 8000/8003)
                                 └── 通过 HTTP 从 manager-api 拉取配置
 
 manager-web / manager-mobile ──HTTP──→ manager-api (Java, port 8002)
-                                          ├── MySQL + Redis + Liquibase (143 migrations)
+                                          ├── MySQL + Redis + Liquibase (147 migrations)
                                           ├── 智能体 / 模型 / 设备 / 知识库 / OTA / 声纹 / 记忆管理
                                           └── 模型评测编排 (调用 xiaozhi-server benchmark API)
 ```
@@ -27,11 +27,11 @@ manager-web / manager-mobile ──HTTP──→ manager-api (Java, port 8002)
 
 | 模块 | 语言/框架 | 文件数 | 职责 |
 |------|----------|--------|------|
-| `main/xiaozhi-server/` | Python 3.10, aiohttp | 218 .py | 实时语音服务：WebSocket、VAD/ASR/LLM/TTS、插件、MCP |
-| `main/manager-api/` | Java 21, Spring Boot 3.4 | 406 .java | 管理 API：配置下发、模型管理、评测编排、权限、记忆 |
-| `main/manager-web/` | Vue 2, Element UI | 183 .vue (26 views, 34 components) | Web 智控台 |
-| `main/manager-mobile/` | Vue 3, uni-app, TypeScript | 152 .vue | 移动端智控台 (H5/iOS/Android/微信) |
-| `docs/` | 64 .md | — | 架构、部署、开发、集成、MCP、模型、规范 |
+| `main/xiaozhi-server/` | Python 3.10, aiohttp | 226 .py | 实时语音服务：WebSocket、VAD/ASR/LLM/TTS、插件、MCP |
+| `main/manager-api/` | Java 21, Spring Boot 3.4 | 420 .java | 管理 API：配置下发、模型管理、评测编排、权限、记忆、知识库 |
+| `main/manager-web/` | Vue 2, Element UI | 68 .vue (33 views, 34 components) | Web 智控台 |
+| `main/manager-mobile/` | Vue 3, uni-app, TypeScript | 26 .vue (source) | 移动端智控台 (H5/iOS/Android/微信) |
+| `docs/` | 71 .md | — | 架构、部署、开发、集成、MCP、模型、规范 |
 | `deploy/` / `scripts/` | 12 Shell scripts | — | 本地开发入口 + ACR 生产部署 |
 
 ---
@@ -78,7 +78,7 @@ docs/local-customizations.md
 
 Python 核心服务
   → main/xiaozhi-server/requirements.txt
-  → core/connection.py (2060行中央状态机，修改前必须读)
+  → core/connection.py (1945行中央状态机，修改前必须读)
   → 相关 core/handle/、core/providers/、core/semantic/、plugins_func/
 
 Java 管理 API
@@ -101,10 +101,18 @@ Web 管理后台
   → docs/architecture/semantic-control-center.md
   → docs/architecture/prompt-injection-engineering.md
   → docs/architecture/function-plugin-architecture.md
+  → docs/architecture/device-interaction-chain.md
+  → docs/architecture/mcp-chains.md
 
 长期记忆
   → docs/architecture/long-term-memory-maintenance.md
+  → docs/architecture/memory-system-chain.md
   → main/manager-api/.../modules/memory/ (25个文件)
+
+知识库 / RAG
+  → docs/architecture/knowledge-base-chain.md
+  → docs/models/local-knowledge-integration.md
+  → main/manager-api/.../modules/knowledge/
 
 配置 / 运行产物
   → docs/standards/config-runtime-policy.md
@@ -159,11 +167,16 @@ scripts/dev stop
 
 | 文件 | 当前规模 | 替代方向 |
 |------|---------|---------|
-| `core/connection.py` | 1963行 | 新逻辑放入 `core/handle/` 子模块 |
-| `ModelConfigServiceImpl.java` | 2542行 | 拆入 provider 子目录和 helper 类 |
-| `ModelConfig.vue` | 1889行 | 拆入独立组件和弹窗（已有 `ModelEditDialog.vue`、`ModelBenchmarkDialog.vue`） |
-| `ModelBenchmarkDialog.vue` | 2817行 | 拆入 benchmark 子组件 |
-| `ModelAssistantServiceImpl.java` | 793行 | 拆入独立 agent 类 |
+| `core/connection.py` | 1977行 | 音频初始化已拆至 `core/handle/audioInitializer.py`, 报告线程已拆至 `reportThreadManager.py` |
+| `ModelConfigServiceImpl.java` | 985行 | 模型测试已拆至 `ModelTestServiceImpl.java` (1578行) |
+| `ModelBenchmarkDialog.vue` | 489行 | 已拆至 `BenchmarkConfigPanel.vue` + `BenchmarkResultPanel.vue` |
+| `MemoryServiceImpl.java` | 491行 | 已拆至 `MemoryMaintenanceServiceImpl.java` (1061行) + `MemoryQueryServiceImpl.java` (266行) |
+| `game_session.py` | 7行 (thin re-export) | 已拆至 `core/game/` (6文件, 1513行) |
+| `ModelAssistantServiceImpl.java` | 766行 | 草案代码已清理 |
+| `ModelConfig.vue` | 1889行 | 测评 UI 已拆至 `ModelBenchmarkDialog.vue` |
+| `roleConfig.vue` | 610行 | 编辑弹窗已拆至 `role/RoleEditDialog.vue` + `RoleTestDialog.vue` |
+| `LocalKnowledgeAdapter.java` | 1658行 | 本地 KB 引擎（含向量嵌入 + LLM 分块） |
+| `KnowledgeFileUpload.vue` | 1260行 | 已拆至 `knowledge/FileUploadPanel.vue` + `FilePreviewDialog.vue` |
 
 如果必须修改这些文件，需要说明：**为什么不能拆？是否增加职责混杂？是否同步更新架构文档？**
 
@@ -392,14 +405,21 @@ Python 入口:        main/xiaozhi-server/app.py
 配置文件:           main/xiaozhi-server/config.yaml
 私有配置:           main/xiaozhi-server/data/.config.yaml
 提示词模板:         main/xiaozhi-server/agent-base-prompt.txt
-中央状态机:         main/xiaozhi-server/core/connection.py (1963行)
-语义控制中枢:       main/xiaozhi-server/core/semantic/ (9个文件, 741行)
-语音处理:           main/xiaozhi-server/core/handle/ (18个文件, 1708行)
+中央状态机:         main/xiaozhi-server/core/connection.py (1977行)
+语义控制中枢:       main/xiaozhi-server/core/semantic/ (8个文件, ~800行)
+语音处理:           main/xiaozhi-server/core/handle/ (22个文件, ~2000行)
 功能插件:           main/xiaozhi-server/plugins_func/functions/ (15个)
+游戏会话:           main/xiaozhi-server/core/game/ (6个文件, 1513行)
+MCP 基类:          main/xiaozhi-server/core/providers/tools/base/mcp_client_base.py (122行)
 模型评测运行器:     main/xiaozhi-server/core/benchmark/runner.py
 Java 评测编排:      .../model/service/impl/ModelBenchmarkServiceImpl.java (262行)
-长期记忆服务:       .../memory/service/impl/MemoryServiceImpl.java (844行)
-数据库迁移:         main/manager-api/src/main/resources/db/changelog/ (143个迁移)
+Java 模型测试:      .../model/service/impl/ModelTestServiceImpl.java (1578行)
+长期记忆服务:       .../memory/service/impl/MemoryServiceImpl.java (491行)
+长期记忆维护:       .../memory/service/impl/MemoryMaintenanceServiceImpl.java (1061行)
+长期记忆查询:       .../memory/service/impl/MemoryQueryServiceImpl.java (266行)
+本地知识库引擎:     .../knowledge/rag/impl/LocalKnowledgeAdapter.java (1658行)
+Provider 验证:      main/xiaozhi-server/core/utils/provider_validator.py
+数据库迁移:         main/manager-api/src/main/resources/db/changelog/ (148个迁移)
 本地开发入口:       scripts/dev (748行)
 生产部署入口:       docs/deployment/private-docker-release.md
 生产部署包:         deploy/production/

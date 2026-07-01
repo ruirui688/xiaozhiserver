@@ -347,7 +347,7 @@ class TTSProvider(TTSProviderBase):
                 else:
                     try:
                         await self.finish_connection()
-                    except:
+                    except Exception:
                         pass
             logger.bind(tag=TAG).debug("开始建立新连接...")
             ws_header = self._build_ws_headers()
@@ -378,7 +378,7 @@ class TTSProvider(TTSProviderBase):
                 optional = Optional(event=EVENT_FinishConnection).as_bytes()
                 payload = str.encode("{}")
                 await self.send_event(self.ws, header, optional, payload)
-        except:
+        except Exception:
             pass
 
     def tts_text_priority_thread(self):
@@ -515,7 +515,7 @@ class TTSProvider(TTSProviderBase):
             if self.ws:
                 try:
                     await self.ws.close()
-                except:
+                except Exception:
                     pass
                 self.ws = None
             raise
@@ -617,7 +617,7 @@ class TTSProvider(TTSProviderBase):
         if self.ws:
             try:
                 await self.ws.close()
-            except:
+            except Exception:
                 pass
             self.ws = None
 
@@ -695,7 +695,7 @@ class TTSProvider(TTSProviderBase):
             if self.ws:
                 try:
                     await self.ws.close()
-                except:
+                except Exception:
                     pass
                 self.ws = None
         # 监听任务退出时清理引用
@@ -988,7 +988,7 @@ class TTSProvider(TTSProviderBase):
                         pass
                     try:
                         await ws.close()
-                    except:
+                    except Exception:
                         pass
                     self.ws = None
 

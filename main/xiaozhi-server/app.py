@@ -47,6 +47,12 @@ async def main():
     check_ffmpeg_installed()
     config = load_config()
 
+    # Validate configured providers at startup
+    from core.utils.provider_validator import validate_all_providers
+    provider_warnings = validate_all_providers(config)
+    for warning in provider_warnings:
+        logger.bind(tag="ProviderValidator").warning(warning)
+
     # auth_key优先级：配置文件server.auth_key > manager-api.secret > 自动生成
     # auth_key用于jwt认证，比如视觉分析接口的jwt认证、ota接口的token生成与websocket认证
     # 获取配置文件中的auth_key

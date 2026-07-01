@@ -2,6 +2,8 @@
 ARG SERVER_BASE_IMAGE=xiaozhi-server-base-local:latest
 FROM ${SERVER_BASE_IMAGE}
 
+# Non-root user (xiaozhi) is inherited from the server-base image
+
 COPY main/xiaozhi-server .
 
 # 启动应用

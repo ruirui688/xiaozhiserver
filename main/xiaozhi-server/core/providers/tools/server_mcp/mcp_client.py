@@ -135,6 +135,10 @@ class ServerMCPClient:
         loop = self._worker_task.get_loop()
         coro = self.session.call_tool(real_name, arguments=arguments, read_timeout_seconds=read_timeout_seconds, progress_callback=progress_callback, meta=meta)
 
+        # 防御性检查：当调用方协程运行在与MCP客户端工作协程不同的事件循环中时，
+        # 使用 asyncio.run_coroutine_threadsafe 将协程调度到目标事件循环执行。
+        # 这在ServerMCPClient的工具调用被非主循环上下文调用时触发（例如：从线程池、
+        # 外部接口回调或其他自定义事件循环中调用call_tool时）。
         if loop is asyncio.get_running_loop():
             return await coro
 

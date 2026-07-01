@@ -7,6 +7,7 @@ import os
 import re
 import glob
 from typing import Dict, List, Tuple
+from urllib.parse import urljoin
 from aiohttp import web
 
 from core.auth import AuthManager
@@ -315,11 +316,12 @@ class OTAHandler(BaseHandler):
                     if _is_higher_version(ver, device_version):
                         # build download url (only allow download via our download endpoint)
                         chosen_version = ver
-                        # Use get_vision_url to get the base URL and replace the path
+                        # Use get_vision_url to get the base URL, then append the download path
                         vision_url = get_vision_url(self.config)
-                        # Replace the path from "/mcp/vision/explain" to "/xiaozhi/ota/download/{fname}"
-                        chosen_url = vision_url.replace(
-                            "/mcp/vision/explain", f"/xiaozhi/ota/download/{fname}"
+                        # 使用 urljoin 避免脆弱的字符串替换
+                        chosen_url = urljoin(
+                            vision_url.rstrip("/") + "/",
+                            f"xiaozhi/ota/download/{fname}",
                         )
                         break
 

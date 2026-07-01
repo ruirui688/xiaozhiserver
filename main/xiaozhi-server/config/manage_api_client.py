@@ -4,8 +4,10 @@ import hashlib
 from typing import Optional, Dict
 
 import httpx
+from config.logger import setup_logging
 
 TAG = __name__
+logger = setup_logging()
 
 
 class DeviceNotFoundException(Exception):
@@ -139,7 +141,7 @@ class ManageApiClient:
                 # 判断是否应该重试
                 if retry_count < cls.max_retries and cls._should_retry(e):
                     retry_count += 1
-                    print(
+                    logger.bind(tag="manage_api").debug(
                         f"{method} {endpoint} 异步请求失败，将在 {cls.retry_delay:.1f} 秒后进行第 {retry_count} 次重试"
                     )
                     await asyncio.sleep(cls.retry_delay)
@@ -192,7 +194,7 @@ async def get_correct_words(mac_address: str) -> Optional[Dict]:
             json={"macAddress": mac_address}
         )
     except Exception as e:
-        print(f"获取替换词失败: {e}")
+        logger.bind(tag="manage_api").error(f"获取替换词失败: {e}")
         return None
 
 
@@ -204,7 +206,7 @@ async def generate_and_save_chat_summary(session_id: str) -> Optional[Dict]:
             f"/agent/chat-summary/{session_id}/save",
         )
     except Exception as e:
-        print(f"生成并保存聊天记录总结失败: {e}")
+        logger.bind(tag="manage_api").error(f"生成并保存聊天记录总结失败: {e}")
         return None
 
 
@@ -216,7 +218,7 @@ async def generate_and_save_chat_title(session_id: str) -> Optional[Dict]:
             f"/agent/chat-title/{session_id}/generate",
         )
     except Exception as e:
-        print(f"生成并保存聊天标题失败: {e}")
+        logger.bind(tag="manage_api").error(f"生成并保存聊天标题失败: {e}")
         return None
 
 
@@ -325,20 +327,39 @@ async def query_managed_memory(
 async def trigger_session_memory_processing(
     session_id: str, agent_id: str
 ) -> Optional[int]:
-    """会话关闭时触发 PowerMem-style 记忆处理。失败不影响主链路。"""
+    """会话关闭时触发 PowerMem-style 记忆处理。失败不影响主链路。
+
+    使用指数退避重试（1s / 2s / 4s，最多 3 次）应对瞬态 HTTP 故障。
+    """
     if not session_id or not agent_id or not ManageApiClient._instance:
         return None
-    try:
-        result = await ManageApiClient._instance._execute_async_request(
-            "POST",
-            "/config/memory/process-session",
-            json={"sessionId": session_id, "agentId": agent_id},
-        )
-        if isinstance(result, dict):
-            return result.get("data") if isinstance(result.get("data"), int) else 0
-        return 0
-    except Exception:
+    if not ManageApiClient._instance:
         return None
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            result = await ManageApiClient._instance._async_request(
+                "POST",
+                "/config/memory/process-session",
+                json={"sessionId": session_id, "agentId": agent_id},
+            )
+            if isinstance(result, dict):
+                return result.get("data") if isinstance(result.get("data"), int) else 0
+            return 0
+        except Exception as e:
+            if attempt < max_attempts - 1 and ManageApiClient._instance._should_retry(e):
+                delay = 2 ** attempt  # 1s, 2s, 4s
+                logger.bind(tag="manage_api").debug(
+                    f"POST /config/memory/process-session 失败（{attempt+1}/{max_attempts}），"
+                    f"{delay}s 后重试: {e}"
+                )
+                import asyncio
+                await asyncio.sleep(delay)
+            else:
+                logger.bind(tag="manage_api").warning(
+                    f"POST /config/memory/process-session 最终失败（{attempt+1}/{max_attempts}）: {e}"
+                )
+                return None
 
 
 async def lookup_address_book(caller_mac: str, nickname: str) -> Optional[Dict]:

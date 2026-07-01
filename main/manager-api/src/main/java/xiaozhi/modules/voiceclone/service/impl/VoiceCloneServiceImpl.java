@@ -298,7 +298,7 @@ public class VoiceCloneServiceImpl extends BaseServiceImpl<VoiceCloneDao, VoiceC
             baseDao.updateById(entity);
             throw re;
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("Voice clone training failed", e);
             entity.setTrainStatus(3);
             entity.setTrainError(e.getMessage());
             baseDao.updateById(entity);

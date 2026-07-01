@@ -5,6 +5,7 @@ import time
 import hashlib
 import base64
 import requests
+import aiohttp
 
 from urllib import parse
 from datetime import datetime
@@ -188,25 +189,28 @@ class TTSProvider(TTSProviderBase):
 
         # print(self.api_url, json.dumps(request_json, ensure_ascii=False))
         try:
-            resp = requests.post(
-                self.api_url, json.dumps(request_json), headers=self.header
-            )
-            if resp.status_code == 401:  # Token过期特殊处理
-                self._refresh_token()
-                resp = requests.post(
-                    self.api_url, json.dumps(request_json), headers=self.header
+            async with aiohttp.ClientSession() as session:
+                resp = await session.post(
+                    self.api_url, data=json.dumps(request_json), headers=self.header
                 )
-            # 检查返回请求数据的mime类型是否是audio/***，是则保存到指定路径下；返回的是binary格式的
-            if resp.headers["Content-Type"].startswith("audio/"):
-                if output_file:
-                    with open(output_file, "wb") as f:
-                        f.write(resp.content)
-                    return output_file
+                if resp.status == 401:  # Token过期特殊处理
+                    self._refresh_token()
+                    resp = await session.post(
+                        self.api_url, data=json.dumps(request_json), headers=self.header
+                    )
+                # 检查返回请求数据的mime类型是否是audio/***，是则保存到指定路径下；返回的是binary格式的
+                if resp.headers["Content-Type"].startswith("audio/"):
+                    audio_data = await resp.read()
+                    if output_file:
+                        with open(output_file, "wb") as f:
+                            f.write(audio_data)
+                        return output_file
+                    else:
+                        return audio_data
                 else:
-                    return resp.content
-            else:
-                raise Exception(
-                    f"{__name__} status_code: {resp.status_code} response: {resp.content}"
-                )
+                    error_text = await resp.text()
+                    raise Exception(
+                        f"{__name__} status_code: {resp.status} response: {error_text}"
+                    )
         except Exception as e:
             raise Exception(f"{__name__} error: {e}")

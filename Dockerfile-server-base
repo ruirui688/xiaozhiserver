@@ -47,3 +47,8 @@ COPY ${SERVER_REQUIREMENTS} requirements.txt
 # 安装Python依赖
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt --default-timeout=120 --retries 5
+
+# Create non-root user for security
+RUN groupadd -r xiaozhi && useradd -r -g xiaozhi -d /opt/xiaozhi-esp32-server xiaozhi && \
+    chown -R xiaozhi:xiaozhi /opt/xiaozhi-esp32-server
+USER xiaozhi
