@@ -82,17 +82,14 @@ def test_metaso_search_keeps_snippet_and_answer_constraints(monkeypatch):
     assert "只能依据下面列出的搜索结果回答" in result
     assert "先判断每条结果是否真正回答了用户原始查询" in result
     assert "重新调用 web_search 生成更精确的查询" in result
-    assert "只有搜索结果明确给出比分、胜负、晋级、完成等信息，才能当作已确认结果" in result
-    assert "不要擅自补充搜索结果没有明确写出的赛事阶段、轮次、状态、胜者或比分" in result
-    assert "用户没有询问阶段或轮次时，不要主动概括为小组赛、淘汰赛、决赛等阶段" in result
-    assert "使用“比赛”这类中性表述" in result
-    assert "最终回复只给最小必要事实" in result
-    assert "不要主动补充球员、进球分钟、下一轮对手、历史纪录、阶段轮次" in result
-    assert "这些细节都视为干扰信息" in result
+    assert "只陈述搜索结果明确支持的事实" in result
+    assert "标为未确认" in result
+    assert "回答范围必须贴合用户问法" in result
+    assert "不要主动展开背景、人物、过程、后续安排、分类标签、预测或评价" in result
     assert "不要使用Markdown加粗、列表符号或分段标题" in result
-    assert "查到明确比分：A队x比yB队" in result
     assert "最终回答前自检" in result
-    assert "其他内容全部删掉" in result
+    assert "回复是否只覆盖了用户问到的字段" in result
+    assert "不能从搜索结果直接定位的内容，说明未查到明确依据" in result
     assert "不能把不确定的日期当成确定事实" in result
     assert "加拿大1比0战胜南非" in result
     assert "摘要：6月28日，南非队球员在比赛后离场。" in result
@@ -151,16 +148,16 @@ def test_web_search_description_preserves_user_temporal_intent():
 
     assert "保留用户原话里的相对时间短语" in description
     assert "绝对日期" in description
-    assert "避免改写成泛泛的赛程" in description
+    assert "避免改写成泛泛的资料或百科查询" in description
     assert "必须保留用户原话中的相对时间短语" in query_description
     assert "查询词要同时包含原始相对时间短语和根据当前北京时间换算出的绝对日期" in query_description
-    assert "查询词要体现已发生/已结束" in query_description
+    assert "查询词要体现用户要查的事实目标" in query_description
 
 
 def test_base_prompt_routes_latest_queries_to_web_search():
     prompt = (SERVER_ROOT / "agent-base-prompt.txt").read_text(encoding="utf-8")
 
-    assert "联网搜索、查最新、实时资料、今天/昨天/刚结束的结果/比分/赛果→web_search" in prompt
+    assert "联网搜索、查最新、实时资料、今天/昨天/刚发生/刚结束的事实、结果、状态、数据→web_search" in prompt
     assert "禁止在调用工具前用静态知识否定用户的问题" in prompt
 
 
