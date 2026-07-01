@@ -88,7 +88,11 @@ def test_metaso_search_keeps_snippet_and_answer_constraints(monkeypatch):
     assert "使用“比赛”这类中性表述" in result
     assert "最终回复只给最小必要事实" in result
     assert "不要主动补充球员、进球分钟、下一轮对手、历史纪录、阶段轮次" in result
+    assert "这些细节都视为干扰信息" in result
     assert "不要使用Markdown加粗、列表符号或分段标题" in result
+    assert "查到明确比分：A队x比yB队" in result
+    assert "最终回答前自检" in result
+    assert "其他内容全部删掉" in result
     assert "不能把不确定的日期当成确定事实" in result
     assert "加拿大1比0战胜南非" in result
     assert "摘要：6月28日，南非队球员在比赛后离场。" in result
