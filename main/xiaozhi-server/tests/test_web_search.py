@@ -157,8 +157,10 @@ def test_web_search_description_preserves_user_temporal_intent():
 def test_base_prompt_routes_latest_queries_to_web_search():
     prompt = (SERVER_ROOT / "agent-base-prompt.txt").read_text(encoding="utf-8")
 
-    assert "联网搜索、查最新、实时资料、今天/昨天/刚发生/刚结束的事实、结果、状态、数据→web_search" in prompt
+    assert "非天气类联网搜索、查最新、实时资料、今天/昨天/刚发生/刚结束的事实、结果、状态、数据→web_search" in prompt
     assert "禁止在调用工具前用静态知识否定用户的问题" in prompt
+    assert "天气预警、最新/实时天气状态、其他城市天气→get_weather" in prompt
+    assert "不要因为用户说“搜一下”或“最新”就把天气类问题交给web_search" in prompt
 
 
 def test_web_search_ignores_lang_argument_without_losing_query():
