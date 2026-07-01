@@ -150,6 +150,13 @@ def test_web_search_description_preserves_user_temporal_intent():
     assert "查询词要体现已发生/已结束" in query_description
 
 
+def test_base_prompt_routes_latest_queries_to_web_search():
+    prompt = (SERVER_ROOT / "agent-base-prompt.txt").read_text(encoding="utf-8")
+
+    assert "联网搜索、查最新、实时资料、今天/昨天/刚结束的结果/比分/赛果→web_search" in prompt
+    assert "禁止在调用工具前用静态知识否定用户的问题" in prompt
+
+
 def test_web_search_ignores_lang_argument_without_losing_query():
     class FakeConn:
         config = {
