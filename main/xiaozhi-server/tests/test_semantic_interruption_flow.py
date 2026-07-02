@@ -205,7 +205,7 @@ def test_overlap_interrupt_aborts_without_submitting_chat(monkeypatch):
     assert conn.websocket.messages[0]["state"] == "stop"
 
 
-def test_overlap_interrupt_does_not_enter_semantic_center(monkeypatch):
+def test_overlap_interrupt_control_stops_after_semantic_center(monkeypatch):
     import core.handle.receiveAudioHandle as receive_handle
 
     class _SemanticCenter:
@@ -218,7 +218,6 @@ def test_overlap_interrupt_does_not_enter_semantic_center(monkeypatch):
 
         async def handle_user_text(self, conn, text):
             self.calls += 1
-            conn.abort_generation += 10
             return True
 
     async def _no_intent(conn, actual_text):
@@ -228,12 +227,44 @@ def test_overlap_interrupt_does_not_enter_semantic_center(monkeypatch):
     conn = _Conn({"decision": "interrupt", "reason": "停止播报"})
     conn.semantic_center = _SemanticCenter()
 
-    accepted = asyncio.run(startToChat(conn, "别说了"))
+    accepted = asyncio.run(startToChat(conn, "先停一下"))
 
     assert accepted is True
     assert conn.abort_generation == 1
-    assert conn.semantic_center.calls == 0
+    assert conn.semantic_center.calls == 1
     assert conn.executor.submitted == []
+
+
+def test_overlap_interrupt_with_new_request_falls_through_to_chat(monkeypatch):
+    import core.handle.receiveAudioHandle as receive_handle
+
+    class _SemanticCenter:
+        def __init__(self):
+            self.calls = 0
+            self.state_manager = self
+
+        def get_context(self, conn):
+            return None
+
+        async def handle_user_text(self, conn, text):
+            self.calls += 1
+            return False
+
+    async def _no_intent(conn, actual_text):
+        return False
+
+    monkeypatch.setattr(receive_handle, "handle_user_intent", _no_intent)
+    conn = _Conn({"decision": "interrupt", "reason": "用户明确要求自己唱"})
+    conn.semantic_center = _SemanticCenter()
+
+    accepted = asyncio.run(startToChat(conn, "要你自己唱"))
+
+    assert accepted is True
+    assert conn.abort_generation == 1
+    assert conn.semantic_center.calls == 1
+    assert conn.executor.submitted
+    assert conn.executor.submitted[0][1] == ("要你自己唱",)
+    assert any(message.get("type") == "stt" for message in conn.websocket.messages)
 
 
 def test_listen_detect_continue_is_not_reported(monkeypatch):
