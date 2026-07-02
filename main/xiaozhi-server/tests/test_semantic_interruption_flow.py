@@ -2,8 +2,10 @@ import asyncio
 import json
 import queue
 import sys
+import threading
 import time
 from pathlib import Path
+from concurrent.futures import Future
 
 
 SERVER_ROOT = Path(__file__).resolve().parents[1]
@@ -56,6 +58,9 @@ class _Executor:
 
     def submit(self, fn, *args):
         self.submitted.append((fn, args))
+        future = Future()
+        future.set_result(None)
+        return future
 
 
 class _Conn:
@@ -80,6 +85,7 @@ class _Conn:
         self.client_abort = False
         self.close_after_chat = False
         self.abort_generation = 0
+        self._abort_lock = threading.Lock()
         self.session_id = "s1"
         self.current_speaker = None
         self.correct_word_replacements = {}

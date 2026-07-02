@@ -48,18 +48,20 @@ decision 含义：
         timeout = float(config.get("timeout_seconds", 1.5))
 
         try:
-            # 创建可取消的线程任务，避免超时后线程继续运行
-            thread_future = asyncio.to_thread(
-                conn.llm.response_no_stream,
-                system_prompt=self.SYSTEM_PROMPT,
-                user_prompt=user_prompt,
+            # asyncio.to_thread returns a coroutine; wrap it in a Task so timeout
+            # handling can cancel/check it without crashing the connection.
+            thread_future = asyncio.create_task(
+                asyncio.to_thread(
+                    conn.llm.response_no_stream,
+                    system_prompt=self.SYSTEM_PROMPT,
+                    user_prompt=user_prompt,
+                )
             )
             raw_response = await asyncio.wait_for(thread_future, timeout=timeout)
         except asyncio.TimeoutError:
             conn.logger.bind(tag=__name__).warning(
                 f"语义打断大模型裁决超时({timeout}s)，按新用户轮次处理"
             )
-            # 取消底层线程任务（asyncio.to_thread 返回的 Future 可取消）
             if not thread_future.done():
                 thread_future.cancel()
             return InterruptionClassification("new_turn", "llm_timeout")

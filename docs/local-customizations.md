@@ -171,7 +171,7 @@
   - main/xiaozhi-server/tests/test_semantic_policy.py
   - docs/architecture/semantic-control-center.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改 startToChat、ConnectionHandler 初始化、handle_user_intent、GameSessionManager、UnifiedToolHandler、ToolManager、abortHandle、TTS 入队或 function-call 主链路，必须保留语义控制中枢在旧意图/LLM 之前的前置拦截位置；TTS 播放期间识别到用户重叠说话时，是否打断必须由当前 LLM 基于少量上下文裁决 continue / interrupt / new_turn，服务端不得用附和词表、停止词表或长度阈值替代语义打断判断；LLM 裁决为 continue 时不得清空 TTS 队列、不得进入主聊天；裁决为 interrupt 时只复用 handleAbortMessage 停止当前播报，不再把停止语当作新聊天；裁决为 new_turn 或裁决失败时复用 handleAbortMessage 后继续处理新输入；未命中高置信度规则时必须继续兜底到旧 handle_user_intent 和 conn.chat；停止类指令必须复用 handleAbortMessage 并允许配置动作停止工具；纯语言游戏不得优先回到 active_game_tool，应交给主 LLM 对话，并只从已启用功能插件读取可编辑软规则；退出游戏不得关闭 websocket；语义模块顶层导入应尽量轻量，避免引入 opus/loguru 等运行依赖导致纯单元测试无法导入。
+官方同步时的处理规则：如果官方修改 startToChat、ConnectionHandler 初始化、handle_user_intent、GameSessionManager、UnifiedToolHandler、ToolManager、abortHandle、TTS 入队或 function-call 主链路，必须保留语义控制中枢在旧意图/LLM 之前的前置拦截位置；TTS 播放期间识别到用户重叠说话时，是否打断必须由当前 LLM 基于少量上下文裁决 continue / interrupt / new_turn，服务端不得用附和词表、停止词表或长度阈值替代语义打断判断；语义打断裁决器调用 LLM 时必须有短超时，超时、解析失败或模型异常必须降级为 new_turn 并继续处理用户新输入，不能让异常冒泡关闭 WebSocket；LLM 裁决为 continue 时不得清空 TTS 队列、不得进入主聊天；裁决为 interrupt 时只复用 handleAbortMessage 停止当前播报，不再把停止语当作新聊天；裁决为 new_turn 或裁决失败时复用 handleAbortMessage 后继续处理新输入；未命中高置信度规则时必须继续兜底到旧 handle_user_intent 和 conn.chat；停止类指令必须复用 handleAbortMessage 并允许配置动作停止工具；纯语言游戏不得优先回到 active_game_tool，应交给主 LLM 对话，并只从已启用功能插件读取可编辑软规则；退出游戏不得关闭 websocket；语义模块顶层导入应尽量轻量，避免引入 opus/loguru 等运行依赖导致纯单元测试无法导入。
 ```
 
 ## 12. 管理后台模型测试详情字段补全
@@ -369,4 +369,22 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - docs/models/memory-and-knowledge-governance.md
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方修改 Memory provider、聊天记录上报、ConfigController、AgentController、Shiro config、角色首页、模型配置目录、知识库切片配置或数据库迁移，必须保留长期记忆事实层、`managed_memory` 入口和 `/config/memory/**` server-secret 入口；运行时查询失败或超时时必须降级为空记忆，不能阻塞语音回复；`nomem` 模式不得注入长期记忆，且未选择治理型记忆模式时前端不得自动弹出治理记忆专属字段；`maintenance_llm` 只能引用已配置的 LLM/SLM modelId，不能把 DeepSeek 等模型密钥复制到 Memory 配置或记忆表；知识库 LLM 辅助必须通过模型管理中的模型列表选择 `parser_config.llm_model_id`，不得在知识库页面重复保存 API Key、Base URL 或上游模型名；维护模型只能创建 `pending` 候选，不得绕过管理端确认直接写 active fact；管理端删除/归档/确认/拒绝必须写 revision 审计；显式忘记必须写 tombstone 并阻止对应内容继续被主动使用；删除 `summary_memory` 前必须先完成 Java、Vue、Python、文档和迁移的完整兼容替代。
+```
+
+## 22. 设备对话调试离线可用边界
+
+```text
+定制模块：manager-web 设备对话调试弹窗、xiaozhi-server 虚拟调试连接、Dialogue 系统提示词维护、设备 MCP 状态展示
+改动原因：管理端“对话调试”本质是 `manager-debug-*` 虚拟调试会话，用真实设备 MAC 拉取绑定智能体配置来测试文本对话、知识库、普通服务端插件、外部 MCP、人设和模型配置。真实 ESP32 是否在线只应影响设备自身 MCP / IoT / 摄像头 / 音量亮度等硬件工具，不能导致整个对话调试不可用。曾出现调试连接能发送文本但收不到回复的问题，根因是 `Dialogue.update_system_message()` 在持有非重入锁时调用 `put()` 导致首次 system prompt 写入死锁，日志表现为只有“LLM 收到用户消息”，没有后续“LLM 请求已发起”。
+关键文件：
+  - main/manager-web/src/components/DeviceChatDebugDialog.vue
+  - main/manager-web/src/i18n/zh_CN.js
+  - main/xiaozhi-server/core/utils/dialogue.py
+  - main/xiaozhi-server/tests/test_dialogue.py
+  - main/xiaozhi-server/core/device_runtime_registry.py
+  - main/xiaozhi-server/core/api/device_mcp_handler.py
+  - main/manager-api/src/main/java/xiaozhi/modules/device/service/impl/DeviceServiceImpl.java
+  - docs/mcp/chat-history-mcp-troubleshooting.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改设备调试弹窗、WebSocket 连接初始化、Dialogue、PromptManager、设备 MCP 注册表、设备 MCP HTTP 状态接口或 manager-api 设备调试接口，必须保留以下约定：`manager-debug-*` 调试连接不得注册为真实设备运行时连接，不得覆盖真实设备 MCP/IoT；真实设备未连接时，页面应明确提示“仅设备 MCP 工具不可用”，但仍允许文本、知识库、普通插件、外部 MCP 和智能体配置调试；离线时不要持续轮询设备 MCP 工具列表刷屏，状态轮询可保留以便设备上线后自动恢复工具；`Dialogue.update_system_message()` 不得在持有同一把非重入锁时递归调用 `put()`；调试链路排障时看到“收到 listen / LLM 收到用户消息”但没有“LLM 请求已发起”，应优先检查 LLM 前置准备阶段和 system prompt 写入死锁，而不是误判为真实设备未上线。
 ```
