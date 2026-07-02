@@ -393,12 +393,12 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 
 ```text
 定制模块：manager-web 登录页、manager-api 登录验证码链路
-改动原因：登录接口会把图形验证码和密码拼接后通过 SM2 加密提交，manager-api 解密后用 captchaId 校验验证码并立即删除缓存。验证码是一次性的；如果前端允许按钮点击、回车或网络重试在同一个 captchaId 上重复提交，第一次请求会消费验证码，后续重复请求即使用户输入正确也会报验证码错误。登录页必须在请求完成前加提交锁，失败后刷新验证码并解锁，成功后跳转，不得无条件定时刷新或重复提交同一个 captchaId。
+改动原因：登录接口会把图形验证码和密码拼接后通过 SM2 加密提交，manager-api 解密后用 captchaId 校验验证码并立即删除缓存。验证码是一次性的；如果前端允许按钮点击、回车或网络重试在同一个 captchaId 上重复提交，第一次请求会消费验证码，后续重复请求即使用户输入正确也会报验证码错误。登录页必须在请求完成前加提交锁，失败后刷新验证码并解锁，成功后跳转，不得无条件定时刷新或重复提交同一个 captchaId。登录、注册、找回密码等携带一次性验证码的接口遇到 HTTP 401/403 或非 200 响应时必须按本次失败处理，不能通过 `reAjaxFun` 自动重放同一份加密请求体。
 关键文件：
   - main/manager-web/src/views/login.vue
   - main/manager-web/src/views/auth.scss
   - main/manager-api/src/main/java/xiaozhi/common/utils/Sm2DecryptUtil.java
   - main/manager-api/src/main/java/xiaozhi/modules/security/service/impl/CaptchaServiceImpl.java
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改登录页、验证码接口、SM2 加密或 CaptchaService，必须保留验证码一次性消费边界和前端防重复提交锁；登录失败后需要刷新验证码，成功后不得继续发起第二次同 captchaId 的登录请求；不要把验证码错误简单归因于用户输入错误，需同时检查 captchaId 是否被重复消费。
+官方同步时的处理规则：如果官方修改登录页、验证码接口、SM2 加密或 CaptchaService，必须保留验证码一次性消费边界和前端防重复提交锁；登录失败后需要刷新验证码，成功后不得继续发起第二次同 captchaId 的登录请求；`user.login()` 的 networkFail 分支不得自动重试同一份 loginForm，必须回调登录页解锁和刷新验证码；不要把验证码错误简单归因于用户输入错误，需同时检查 captchaId 是否被重复消费。
 ```

@@ -297,7 +297,7 @@ export default {
         (err) => {
           this.loginSubmitting = false;
           // 直接使用后端返回的国际化消息
-          let errorMessage = err.data.msg || "登录失败";
+          let errorMessage = (err && err.data && err.data.msg) || "登录失败，请刷新验证码后重试";
 
           showDanger(errorMessage);
           this.fetchCaptcha();
