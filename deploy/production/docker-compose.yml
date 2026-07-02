@@ -60,6 +60,7 @@ services:
       - SPRING_DATA_REDIS_PASSWORD=${XIAOZHI_REDIS_PASSWORD:-}
       - SPRING_DATA_REDIS_PORT=6379
       - XIAOZHI_SERVER_HTTP_BASE_URL=${XIAOZHI_SERVER_HTTP_BASE_URL:-http://xiaozhi-esp32-server:8003}
+      - CORS_ORIGINS=${XIAOZHI_CORS_ORIGINS:-http://localhost:8002,http://127.0.0.1:8002,http://*:8002}
       - XIAOZHI_MUSIC_DIR=/music
     logging: *default-logging
     cap_drop:

@@ -291,7 +291,7 @@
   - main/manager-web/src/views/roleConfig.vue
   - docs/deployment/private-docker-release.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改 Dockerfile、Docker Compose、安装脚本、默认模型配置、智能体模板初始化、模型配置下发或 WebSocket 初始化流程，必须保留“源码完整进入私有 Git 仓库，但生产服务器只 sparse-checkout `deploy/production` 最小部署资产；生产服务器只拉取阿里云 ACR 中已发布运行镜像，不在生产端源码构建，也不依赖 Docker Hub；生产运行镜像命名为 `xiaozhi-server:latest`、`xiaozhi-web:latest`、`mysql:8.4`、`redis:8.0`，同时支持 Git 短哈希精确版本；`xiaozhi-server-base` 只服务于构建流程；生产用户只需要记住 `~/work/xiaozhi-deploy` 部署资产目录、`/opt/xiaozhi-data` 数据目录、`deploy/production/install` 首次部署和 `deploy/production/upgrade` 后续升级；升级输出必须保持摘要式，能看出本次目标版本、上次部署版本、部署资产 commit、最终运行镜像和访问地址；生产安装不下载、不挂载、不要求 model.pt；生产镜像默认不安装 torch / torchaudio，除非显式使用完整 requirements 启用本地 FunASR；FunASR/FunASRServer 不作为可用默认 ASR；所有模型字段允许为空；模型缺失时服务可启动但对应能力不可用并记录清晰提示”的约定。
+官方同步时的处理规则：如果官方修改 Dockerfile、Docker Compose、安装脚本、默认模型配置、智能体模板初始化、模型配置下发或 WebSocket 初始化流程，必须保留“源码完整进入私有 Git 仓库，但生产服务器只 sparse-checkout `deploy/production` 最小部署资产；生产服务器只拉取阿里云 ACR 中已发布运行镜像，不在生产端源码构建，也不依赖 Docker Hub；生产运行镜像命名为 `xiaozhi-server:latest`、`xiaozhi-web:latest`、`mysql:8.4`、`redis:8.0`，同时支持 Git 短哈希精确版本；`xiaozhi-server-base` 只服务于构建流程；生产用户只需要记住 `~/work/xiaozhi-deploy` 部署资产目录、`/opt/xiaozhi-data` 数据目录、`deploy/production/install` 首次部署和 `deploy/production/upgrade` 后续升级；升级输出必须保持摘要式，能看出本次目标版本、上次部署版本、部署资产 commit、最终运行镜像和访问地址；生产安装不下载、不挂载、不要求 model.pt；生产镜像默认不安装 torch / torchaudio，除非显式使用完整 requirements 启用本地 FunASR；FunASR/FunASRServer 不作为可用默认 ASR；所有模型字段允许为空；模型缺失时服务可启动但对应能力不可用并记录清晰提示；manager-api 即使运行在 dev profile，CORS 也必须读取 `CORS_ORIGINS` 环境变量，生产 `/opt/xiaozhi-data/.env` 的 `XIAOZHI_CORS_ORIGINS` 必须包含浏览器实际访问 Origin，例如 `http://公网IP:8002`，否则登录/注册等浏览器 POST 会在进入业务代码前被 Spring 拦截为 HTTP 403”的约定。
 ```
 
 ## 18. 标准模型存储与运行时契约
