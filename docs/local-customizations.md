@@ -388,3 +388,17 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方修改设备调试弹窗、WebSocket 连接初始化、Dialogue、PromptManager、设备 MCP 注册表、设备 MCP HTTP 状态接口或 manager-api 设备调试接口，必须保留以下约定：`manager-debug-*` 调试连接不得注册为真实设备运行时连接，不得覆盖真实设备 MCP/IoT；真实设备未连接时，页面应明确提示“仅设备 MCP 工具不可用”，但仍允许文本、知识库、普通插件、外部 MCP 和智能体配置调试；离线时不要持续轮询设备 MCP 工具列表刷屏，状态轮询可保留以便设备上线后自动恢复工具；`Dialogue.update_system_message()` 不得在持有同一把非重入锁时递归调用 `put()`；调试链路排障时看到“收到 listen / LLM 收到用户消息”但没有“LLM 请求已发起”，应优先检查 LLM 前置准备阶段和 system prompt 写入死锁，而不是误判为真实设备未上线。
 ```
+
+## 23. 登录验证码一次性消费与防重复提交
+
+```text
+定制模块：manager-web 登录页、manager-api 登录验证码链路
+改动原因：登录接口会把图形验证码和密码拼接后通过 SM2 加密提交，manager-api 解密后用 captchaId 校验验证码并立即删除缓存。验证码是一次性的；如果前端允许按钮点击、回车或网络重试在同一个 captchaId 上重复提交，第一次请求会消费验证码，后续重复请求即使用户输入正确也会报验证码错误。登录页必须在请求完成前加提交锁，失败后刷新验证码并解锁，成功后跳转，不得无条件定时刷新或重复提交同一个 captchaId。
+关键文件：
+  - main/manager-web/src/views/login.vue
+  - main/manager-web/src/views/auth.scss
+  - main/manager-api/src/main/java/xiaozhi/common/utils/Sm2DecryptUtil.java
+  - main/manager-api/src/main/java/xiaozhi/modules/security/service/impl/CaptchaServiceImpl.java
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改登录页、验证码接口、SM2 加密或 CaptchaService，必须保留验证码一次性消费边界和前端防重复提交锁；登录失败后需要刷新验证码，成功后不得继续发起第二次同 captchaId 的登录请求；不要把验证码错误简单归因于用户输入错误，需同时检查 captchaId 是否被重复消费。
+```

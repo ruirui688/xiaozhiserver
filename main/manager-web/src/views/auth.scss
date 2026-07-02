@@ -71,6 +71,11 @@
   margin: 15px 30px 15px 30px;
 }
 
+.login-btn.disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
 .input-box {
   display: flex;
   margin-top: 20px;
