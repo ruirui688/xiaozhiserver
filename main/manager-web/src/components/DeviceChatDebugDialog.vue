@@ -165,6 +165,9 @@ export default {
       };
       return statusMap[this.deviceStatusCode] || this.$t('deviceDebug.noTools');
     },
+    shouldFetchDeviceTools() {
+      return ['mcp_initializing', 'mcp_ready'].includes(this.deviceStatusCode);
+    },
     deviceStatusCode() {
       return (this.deviceRuntimeStatus && this.deviceRuntimeStatus.status) || 'unknown';
     },
@@ -283,8 +286,14 @@ export default {
     loadTools() {
       if (!this.deviceId) return;
       this.toolsLoading = true;
-      this.fetchDeviceStatus();
-      this.fetchDeviceTools().finally(() => {
+      this.fetchDeviceStatus().then(() => {
+        if (this.shouldFetchDeviceTools) {
+          return this.fetchDeviceTools();
+        }
+        this.mcpTools = [];
+        this.mcpToolsStatus = '';
+        return [];
+      }).finally(() => {
         this.toolsLoading = false;
       });
       this.startStatusRefresh();
@@ -1019,7 +1028,11 @@ export default {
     startStatusRefresh() {
       this.stopStatusRefresh();
       this.statusRefreshTimer = setInterval(() => {
-        this.fetchDeviceStatus();
+        this.fetchDeviceStatus().then(() => {
+          if (this.shouldFetchDeviceTools && this.mcpTools.length === 0) {
+            this.fetchDeviceTools();
+          }
+        });
       }, STATUS_REFRESH_INTERVAL_MS);
     },
     stopStatusRefresh() {
@@ -1030,9 +1043,11 @@ export default {
     },
     startToolRefresh() {
       this.stopToolRefresh();
-      this.fetchDeviceTools();
+      if (this.shouldFetchDeviceTools) {
+        this.fetchDeviceTools();
+      }
       this.toolRefreshTimer = setInterval(() => {
-        if (this.deviceStatusCode !== 'mcp_ready') {
+        if (this.shouldFetchDeviceTools && this.deviceStatusCode !== 'mcp_ready') {
           this.fetchDeviceTools();
         }
       }, TOOL_REFRESH_INTERVAL_MS);
@@ -1045,8 +1060,11 @@ export default {
     },
     disconnectDebug() {
       this.closeDebugSession(false);
-      this.fetchDeviceStatus();
-      this.fetchDeviceTools();
+      this.fetchDeviceStatus().then(() => {
+        if (this.shouldFetchDeviceTools) {
+          this.fetchDeviceTools();
+        }
+      });
     },
     closeDebugSession(stopPolling) {
       this.stopRecording();

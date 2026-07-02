@@ -66,7 +66,7 @@ class Dialogue:
             if system_msg:
                 system_msg.content = new_content
             else:
-                self.put(Message(role="system", content=new_content))
+                self.dialogue.append(Message(role="system", content=new_content))
 
     def _ensure_tool_calls_complete(self, messages: List[Message]) -> List[Message]:
         """
