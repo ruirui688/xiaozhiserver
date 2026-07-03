@@ -146,6 +146,24 @@ are preserved during upgrade; if an older deployment still has
 `XIAOZHI_SERVER_MEM_LIMIT=768m`, raise it to at least `2048m` before enabling
 FunASR.
 
+## Pull cache behavior
+
+Production hosts do not build images and do not install Python, Java, Node.js,
+or FunASR dependencies. `install` and `upgrade` only pull already published ACR
+images and restart Docker Compose services.
+
+Docker reuses local image layers automatically. If the server base dependencies
+and SenseVoiceSmall model layer are unchanged, a later upgrade usually pulls
+only the new application layers for the selected Git version tag.
+
+Build-side cache controls stay on the build machine:
+
+```text
+BUILD_BASE=auto   reuse xiaozhi-server-base when dependency inputs match
+BUILD_BASE=false  skip server-base checks for Java/Web-only releases
+BUILD_BASE=true   rebuild server-base after Python dependency changes
+```
+
 ## Internal service URLs
 
 `xiaozhi-esp32-server-web` calls the Python benchmark HTTP API through the

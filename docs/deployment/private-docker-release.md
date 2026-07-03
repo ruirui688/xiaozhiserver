@@ -165,6 +165,39 @@ INSTALL_FUNASR_MODEL=false scripts/acr-build-push
 
 这种情况下必须用自定义镜像或其他挂载方式提供 `models/SenseVoiceSmall/model.pt`，否则后台测试 `fun_local` 会失败。
 
+### 3.4 缓存与加速策略
+
+发布速度主要受三类内容影响：
+
+| 内容 | 缓存位置 | 什么时候复用 | 什么时候变慢 |
+|------|----------|--------------|--------------|
+| Python 依赖层 | 本机构建缓存 + ACR `xiaozhi-server-base:base-<依赖哈希>` | `requirements-docker.txt`、`Dockerfile-server-base`、基础镜像参数未变化 | 改 Python 依赖、系统依赖、基础镜像 |
+| FunASR 模型 | 构建机本地 `model.pt` + Docker/ACR 镜像层 | 模型文件内容未变化，ACR 已有相同 layer | 第一次推送模型层，或替换模型文件 |
+| 业务代码层 | 本机 Docker layer cache + ACR 已推送 layer | 只改少量代码时本地构建较快，推送只上传新增层 | 每次 commit 都会生成新的业务镜像 tag |
+
+日常使用建议：
+
+```bash
+# 默认：自动检查并复用 base/runtime 缓存
+scripts/acr-build-push
+
+# 只改 Java/Web 或文档，且确认 server base/runtime 不需要检查
+BUILD_BASE=false MIRROR_RUNTIME_IMAGES=false scripts/acr-build-push
+
+# 改了 Python 依赖或 Dockerfile-server-base，才强制重建 base
+BUILD_BASE=true scripts/acr-build-push
+```
+
+不要删除构建机上的：
+
+```text
+main/xiaozhi-server/models/SenseVoiceSmall/model.pt
+```
+
+保留它可以避免每次构建重新下载模型。`.dockerignore` 会把该文件排除在普通源码上下文之外，服务镜像只通过 `--build-context funasr_model=...` 显式复制模型，避免同一次构建重复传输大文件。
+
+生产服务器的 `./install` / `./upgrade` 不会编译代码、不会执行 `pip install`、不会下载 FunASR 模型，只会从 ACR 拉取镜像。Docker pull 会自动复用生产服务器本地已有镜像层：如果 base 依赖层和模型层没有变化，升级时通常只需要拉取新的小业务层。
+
 ---
 
 ## 4. 首次部署

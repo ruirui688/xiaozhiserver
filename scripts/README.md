@@ -96,6 +96,31 @@ scripts/acr-build-push
 BUILD_BASE=true scripts/acr-build-push
 ```
 
+### 构建缓存与提速
+
+`acr-build-push` 的缓存边界如下：
+
+```text
+xiaozhi-server-base:base-<依赖哈希>  Python/FunASR/CPU PyTorch 依赖缓存
+xiaozhi-server:<commit>             服务代码 + SenseVoiceSmall 模型
+xiaozhi-web:<commit>                manager-api + manager-web
+mysql:8.4 / redis:8.0               运行时镜像，ACR 已存在时跳过同步
+```
+
+日常只改业务代码时使用默认命令即可，脚本会优先复用现有 base。只有改了 `requirements-docker.txt`、`Dockerfile-server-base`、Python 基础镜像或系统包时，才需要 `BUILD_BASE=true`。只改 Java/Web、文档或部署说明且确认运行时镜像已在 ACR 时，可以用下面命令减少检查和推送：
+
+```bash
+BUILD_BASE=false MIRROR_RUNTIME_IMAGES=false scripts/acr-build-push
+```
+
+FunASR 模型文件保留在构建机本地：
+
+```text
+main/xiaozhi-server/models/SenseVoiceSmall/model.pt
+```
+
+这样后续构建会直接复制本地文件，不会重新下载。该文件被 `.gitignore` 和 `.dockerignore` 排除，不进入 Git，也不通过普通源码上下文重复传输；服务镜像只通过 `funasr_model` build context 显式打包它。
+
 生产服务器拉取镜像部署：
 
 ```bash
