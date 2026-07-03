@@ -189,6 +189,8 @@ public class OTAMagController {
 
             // 定义固件根目录（用于路径遍历防护）
             Path firmwareRoot = Paths.get(System.getProperty("user.dir"), "firmware").toAbsolutePath().normalize();
+            Path uploadRoot = Paths.get(System.getProperty("user.dir"), "uploadfile").toAbsolutePath().normalize();
+            List<Path> allowedRoots = List.of(firmwareRoot, uploadRoot);
 
             // 检查是否是绝对路径
             if (Paths.get(firmwarePath).isAbsolute()) {
@@ -198,9 +200,9 @@ public class OTAMagController {
                 path = Paths.get(System.getProperty("user.dir"), firmwarePath).normalize();
             }
 
-            // 路径遍历防护：确保解析后的路径在固件根目录下
-            if (!path.startsWith(firmwareRoot)) {
-                logger.warn("Path traversal attempt blocked: {} is not under firmware root: {}", path, firmwareRoot);
+            // 路径遍历防护：确保解析后的路径在允许的固件目录下
+            if (allowedRoots.stream().noneMatch(path::startsWith)) {
+                logger.warn("Path traversal attempt blocked: {} is not under allowed firmware roots: {}", path, allowedRoots);
                 return ResponseEntity.notFound().build();
             }
 
@@ -210,15 +212,19 @@ public class OTAMagController {
             if (!Files.exists(path) || !Files.isRegularFile(path)) {
                 // 尝试直接从firmware目录下查找文件名
                 String fileName = new File(firmwarePath).getName();
-                Path altPath = Paths.get(System.getProperty("user.dir"), "firmware", fileName);
+                Path altPath = Paths.get(System.getProperty("user.dir"), "firmware", fileName).toAbsolutePath().normalize();
+                Path uploadAltPath = Paths.get(System.getProperty("user.dir"), "uploadfile", fileName).toAbsolutePath().normalize();
 
-                logger.info("File not found at primary path, trying alternative path: {}", altPath.toAbsolutePath());
+                logger.info("File not found at primary path, trying alternative paths: {}, {}",
+                        altPath.toAbsolutePath(), uploadAltPath.toAbsolutePath());
 
                 if (Files.exists(altPath) && Files.isRegularFile(altPath)) {
                     path = altPath;
+                } else if (Files.exists(uploadAltPath) && Files.isRegularFile(uploadAltPath)) {
+                    path = uploadAltPath;
                 } else {
-                    logger.error("Firmware file not found at either path: {} or {}",
-                            path.toAbsolutePath(), altPath.toAbsolutePath());
+                    logger.error("Firmware file not found at expected paths: {}, {}, {}",
+                            path.toAbsolutePath(), altPath.toAbsolutePath(), uploadAltPath.toAbsolutePath());
                     return ResponseEntity.notFound().build();
                 }
             }

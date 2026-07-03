@@ -265,7 +265,7 @@
 
 ```text
 定制模块：ACR 镜像生产部署、模型默认配置、后台智能体模板、Python 运行时模型初始化
-改动原因：源码仍完整推送到私有 Git 仓库，但生产服务器不再拉取完整源码，也不从源码构建业务镜像。唯一生产路线改为本地或构建机先构建 `xiaozhi-server` / `xiaozhi-web` 并推送到阿里云 ACR，同时把 `mysql:8.4` 和 `redis:8.0` 同步到 ACR；生产端只 sparse-checkout `deploy/production` 最小部署资产，再从 ACR 拉取全部运行镜像并启动；`xiaozhi-server-base` 仅作为构建缓存镜像，不作为生产运行镜像；升级脚本必须用接近 `acr-build-push` 的摘要格式输出 version、current、assets、images、runtime 和最终访问地址，并在 `/opt/xiaozhi-data/.env` 记录 `XIAOZHI_DEPLOY_VERSION`；生产 Docker 镜像默认使用 `requirements-docker.txt`，安装 CPU 版 torch / torchaudio / funasr，并在 `xiaozhi-server` 镜像构建阶段优先复用构建机本地 SenseVoiceSmall `model.pt`，本地不存在时才从配置的 URL 下载，从而支持 FunASR 本地 CPU 识别；生产安装阶段允许 ASR、VAD、LLM、TTS、VLLM、Memory、Intent 等模型全部暂时为空，管理员后续在智控台按实际需要配置模型。
+改动原因：源码仍完整推送到私有 Git 仓库，但生产服务器不再拉取完整源码，也不从源码构建业务镜像。唯一生产路线改为本地或构建机先构建 `xiaozhi-server` / `xiaozhi-web` 并推送到阿里云 ACR，同时把 `mysql:8.4` 和 `redis:8.0` 同步到 ACR；生产端只 sparse-checkout `deploy/production` 最小部署资产，再从 ACR 拉取全部运行镜像并启动；`xiaozhi-server-base` 仅作为构建缓存镜像，不作为生产运行镜像；基础镜像以 `base-<依赖哈希>` 作为依赖缓存标签，默认 `BUILD_BASE=auto` 复用已有 base，只有 Python 依赖或基础镜像输入变化才重建；升级脚本必须用接近 `acr-build-push` 的摘要格式输出 version、current、assets、images、runtime 和最终访问地址，并在 `/opt/xiaozhi-data/.env` 记录 `XIAOZHI_DEPLOY_VERSION`；生产 Docker 镜像默认使用 `requirements-docker.txt`，安装 CPU 版 torch / torchaudio / funasr，并在 `xiaozhi-server` 镜像构建阶段优先复用构建机本地 SenseVoiceSmall `model.pt`，本地不存在时才从配置的 URL 下载，从而支持 FunASR 本地 CPU 识别；`.dockerignore` 必须排除本地 `model.pt`，避免模型同时走普通源码上下文和 FunASR 专用 build context；生产安装阶段允许 ASR、VAD、LLM、TTS、VLLM、Memory、Intent 等模型全部暂时为空，管理员后续在智控台按实际需要配置模型。
 关键文件：
   - Dockerfile-server
   - Dockerfile-server-base
@@ -287,11 +287,12 @@
   - main/xiaozhi-server/core/websocket_server.py
   - main/xiaozhi-server/core/connection.py
   - main/xiaozhi-server/core/utils/modules_initialize.py
+  - main/manager-api/src/main/java/xiaozhi/modules/device/controller/OTAMagController.java
   - main/manager-api/src/main/resources/db/changelog/202606171430.sql
   - main/manager-web/src/views/roleConfig.vue
   - docs/deployment/private-docker-release.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改 Dockerfile、Docker Compose、安装脚本、默认模型配置、智能体模板初始化、模型配置下发或 WebSocket 初始化流程，必须保留“源码完整进入私有 Git 仓库，但生产服务器只 sparse-checkout `deploy/production` 最小部署资产；生产服务器只拉取阿里云 ACR 中已发布运行镜像，不在生产端源码构建，也不依赖 Docker Hub；生产运行镜像命名为 `xiaozhi-server:latest`、`xiaozhi-web:latest`、`mysql:8.4`、`redis:8.0`，同时支持 Git 短哈希精确版本；`xiaozhi-server-base` 只服务于构建流程；生产用户只需要记住 `~/work/xiaozhi-deploy` 部署资产目录、`/opt/xiaozhi-data` 数据目录、`deploy/production/install` 首次部署和 `deploy/production/upgrade` 后续升级；升级输出必须保持摘要式，能看出本次目标版本、上次部署版本、部署资产 commit、最终运行镜像和访问地址；生产服务器不执行 pip install、不下载源码依赖、不手工安装 FunASR；FunASR CPU 运行依赖由构建机写入 ACR 镜像，SenseVoiceSmall model.pt 优先从构建机本地文件复制进镜像，本地不存在时才下载；默认资源预算必须给 Python 容器至少 2G 内存并允许通过 `/opt/xiaozhi-data/.env` 覆盖；所有模型字段允许为空；模型缺失时服务可启动但对应能力不可用并记录清晰提示；manager-api 即使运行在 dev profile，CORS 也必须读取 `CORS_ORIGINS` 环境变量，生产 `/opt/xiaozhi-data/.env` 的 `XIAOZHI_CORS_ORIGINS` 必须包含浏览器实际访问 Origin，例如 `http://公网IP:8002`，否则登录/注册等浏览器 POST 会在进入业务代码前被 Spring 拦截为 HTTP 403”的约定。
+官方同步时的处理规则：如果官方修改 Dockerfile、Docker Compose、安装脚本、默认模型配置、智能体模板初始化、模型配置下发或 WebSocket 初始化流程，必须保留“源码完整进入私有 Git 仓库，但生产服务器只 sparse-checkout `deploy/production` 最小部署资产；生产服务器只拉取阿里云 ACR 中已发布运行镜像，不在生产端源码构建，也不依赖 Docker Hub；发布脚本必须同时推送 `xiaozhi-server:latest`、`xiaozhi-web:latest` 和 Git 短哈希标签；生产日常 `./install` / `./upgrade` 默认拉取 `latest`，短哈希 `VERSION=<sha>` 只用于固定版本部署或回滚；`mysql:8.4`、`redis:8.0` 作为运行时镜像同步到 ACR；`xiaozhi-server-base` 只服务于构建流程，必须保留 `base-<依赖哈希>` 缓存标签和 `BUILD_BASE=auto/false/true` 控制；生产用户只需要记住 `~/work/xiaozhi-deploy` 部署资产目录、`/opt/xiaozhi-data` 数据目录、`deploy/production/install` 首次部署和 `deploy/production/upgrade` 后续升级；升级输出必须保持摘要式，能看出本次目标版本、上次部署版本、部署资产 commit、最终运行镜像和访问地址；生产服务器不执行 pip install、不下载源码依赖、不手工安装 FunASR；FunASR CPU 运行依赖由构建机写入 ACR 镜像，SenseVoiceSmall model.pt 优先从构建机本地文件复制进镜像，本地不存在时才下载，且 `.dockerignore` 必须避免普通源码上下文重复传输模型；安装脚本必须在 manager-api 启动后从 MySQL 容器读取 `sys_params.server.secret`，自动写入 `/opt/xiaozhi-data/data/.config.yaml` 并重启 xiaozhi-server，不要求用户手工复制密钥；Python 容器以 999:999 非 root 用户运行，`/opt/xiaozhi-data/data` bind mount 必须允许该用户读写，`.config.yaml` 应由 999:999 持有且 0600；manager-api/web 容器以 100:101 非 root 用户运行，`/opt/xiaozhi-data/uploadfile` 和 `music` 必须允许该用户写入，确保 OTA 固件和音乐上传可落盘；OTA 下载路径校验必须允许 `firmware` 和 `uploadfile` 两个根目录，同时继续阻止路径穿越；默认资源预算必须给 Python 容器至少 2G 内存并允许通过 `/opt/xiaozhi-data/.env` 覆盖；所有模型字段允许为空；模型缺失时服务可启动但对应能力不可用并记录清晰提示；manager-api 即使运行在 dev profile，CORS 也必须读取 `CORS_ORIGINS` 环境变量，生产 `/opt/xiaozhi-data/.env` 的 `XIAOZHI_CORS_ORIGINS` 必须包含浏览器实际访问 Origin，例如 `http://公网IP:8002`，否则登录/注册等浏览器 POST 会在进入业务代码前被 Spring 拦截为 HTTP 403”的约定。
 ```
 
 ## 18. 标准模型存储与运行时契约

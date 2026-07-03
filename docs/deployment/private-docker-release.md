@@ -50,9 +50,9 @@
 # 构建机：发布镜像
 scripts/acr-login && scripts/acr-build-push
 
-# 生产机：升级到指定版本
+# 生产机：升级到最新发布镜像
 cd ~/work/xiaozhi-deploy/deploy/production
-VERSION=<git短哈希> ./upgrade
+./upgrade
 
 # 生产机：查看日志
 docker logs -f xiaozhi-esp32-server
@@ -165,6 +165,39 @@ INSTALL_FUNASR_MODEL=false scripts/acr-build-push
 
 这种情况下必须用自定义镜像或其他挂载方式提供 `models/SenseVoiceSmall/model.pt`，否则后台测试 `fun_local` 会失败。
 
+### 3.4 缓存与加速策略
+
+发布速度主要受三类内容影响：
+
+| 内容 | 缓存位置 | 什么时候复用 | 什么时候变慢 |
+|------|----------|--------------|--------------|
+| Python 依赖层 | 本机构建缓存 + ACR `xiaozhi-server-base:base-<依赖哈希>` | `requirements-docker.txt`、`Dockerfile-server-base`、基础镜像参数未变化 | 改 Python 依赖、系统依赖、基础镜像 |
+| FunASR 模型 | 构建机本地 `model.pt` + Docker/ACR 镜像层 | 模型文件内容未变化，ACR 已有相同 layer | 第一次推送模型层，或替换模型文件 |
+| 业务代码层 | 本机 Docker layer cache + ACR 已推送 layer | 只改少量代码时本地构建较快，推送只上传新增层 | 每次 commit 都会生成新的业务镜像 tag |
+
+日常使用建议：
+
+```bash
+# 默认：自动检查并复用 base/runtime 缓存
+scripts/acr-build-push
+
+# 只改 Java/Web 或文档，且确认 server base/runtime 不需要检查
+BUILD_BASE=false MIRROR_RUNTIME_IMAGES=false scripts/acr-build-push
+
+# 改了 Python 依赖或 Dockerfile-server-base，才强制重建 base
+BUILD_BASE=true scripts/acr-build-push
+```
+
+不要删除构建机上的：
+
+```text
+main/xiaozhi-server/models/SenseVoiceSmall/model.pt
+```
+
+保留它可以避免每次构建重新下载模型。`.dockerignore` 会把该文件排除在普通源码上下文之外，服务镜像只通过 `--build-context funasr_model=...` 显式复制模型，避免同一次构建重复传输大文件。
+
+生产服务器的 `./install` / `./upgrade` 不会编译代码、不会执行 `pip install`、不会下载 FunASR 模型，只会从 ACR 拉取镜像。Docker pull 会自动复用生产服务器本地已有镜像层：如果 base 依赖层和模型层没有变化，升级时通常只需要拉取新的小业务层。
+
 ---
 
 ## 4. 首次部署
@@ -210,7 +243,11 @@ XIAOZHI_SERVER_HTTP_BASE_URL=http://xiaozhi-esp32-server:8003
 
 ### 5.1 私有配置
 
-首次注册管理员后，在智控台参数管理中找到 `server.secret`，写入 `/opt/xiaozhi-data/data/.config.yaml`：
+`./install` / `./upgrade` 会在 manager-api 启动后自动读取数据库中的
+`server.secret`，写入 `/opt/xiaozhi-data/data/.config.yaml`，并重启
+`xiaozhi-server`。首次部署不需要手工复制 `server.secret`。
+
+如需调整设备可访问地址，只修改 `server.vision_explain` 等公网地址字段：
 
 ```yaml
 server:
@@ -220,7 +257,7 @@ server:
   vision_explain: http://服务器IP或域名:8003/mcp/vision/explain
 manager-api:
   url: http://xiaozhi-esp32-server-web:8002/xiaozhi
-  secret: <粘贴 server.secret>
+  secret: <由安装脚本自动同步>
 ```
 
 ### 5.2 三类地址（容易配错）
@@ -272,11 +309,11 @@ docker restart xiaozhi-esp32-server
 ```bash
 # 1. 构建机：发布新版本
 scripts/acr-build-push
-# 输出示例：Pushed xiaozhi-server:fb945e48
+# 输出会同时给出 latest 部署命令和短哈希固定版本部署命令
 
 # 2. 生产机：升级
 cd ~/work/xiaozhi-deploy/deploy/production
-VERSION=fb945e48 ./upgrade
+./upgrade
 ```
 
 `./upgrade` 输出摘要：
@@ -294,7 +331,7 @@ Images     运行中容器绑定的业务镜像
 Runtime    运行中容器绑定的 MySQL/Redis 镜像
 ```
 
-`./upgrade` 会更新 sparse-checkout 资产，复用 `.env` 配置，拉取指定版本并重启容器。
+`./upgrade` 会更新 sparse-checkout 资产，复用 `.env` 配置，默认拉取 `latest` 并重启容器。需要固定版本或回滚时，才显式使用 `VERSION=<git短哈希> ./upgrade`。
 
 ### 6.2 回滚
 

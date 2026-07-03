@@ -273,5 +273,6 @@ build_business_images
 echo ""
 echo "=== Build complete ==="
 echo "Version: $VERSION"
-echo "Deploy: VERSION=$VERSION ./deploy/production/upgrade"
+echo "Deploy latest: ./deploy/production/upgrade"
+echo "Deploy pinned: VERSION=$VERSION ./deploy/production/upgrade"
 echo ""

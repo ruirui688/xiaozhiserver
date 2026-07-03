@@ -37,7 +37,7 @@ scripts/acr-build-push
 
 # 3. On the production server — both sources are now from main
 cd ~/work/xiaozhi-deploy/deploy/production
-VERSION=<git-short-sha> ./upgrade
+./upgrade
 ```
 
 **Never run `acr-build-push` from a feature branch and then upgrade production
@@ -71,17 +71,32 @@ Important persistent subdirectories:
 /opt/xiaozhi-data/music       uploaded server music library
 ```
 
+The install script fixes bind-mount ownership for the non-root containers:
+
+```text
+data       999:999  xiaozhi-server writes .auth_key and reads .config.yaml
+uploadfile 100:101  manager-api writes OTA firmware uploads
+music      100:101  manager-api writes uploaded music; xiaozhi-server reads it
+```
+
 Standard production commands:
 
 ```bash
 sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
 ./install
-VERSION=<git-short-sha> ./upgrade
+./upgrade
 ```
 
-`./upgrade` still supports `VERSION=latest`, but `latest` is a mutable tag. Use
-the short Git hash printed by `scripts/acr-build-push` when you need to know the
-exact image version installed on the server.
+`./install` and `./upgrade` default to `VERSION=latest`, so the normal path is:
+build and push from the build machine, then run `./upgrade` on production. Use
+`VERSION=<git-short-sha> ./upgrade` only when you need a pinned deployment or
+rollback.
+
+`./install` waits for manager-api startup, reads the generated `server.secret`
+from the MySQL container, writes it into
+`/opt/xiaozhi-data/data/.config.yaml`, fixes bind-mount permissions for the
+non-root Python container user, and restarts `xiaozhi-server`. First install no
+longer requires manually copying `server.secret` from the web console.
 
 Upgrade output is intentionally compact:
 
@@ -114,6 +129,8 @@ Redis (healthy) ──┘
   launching, avoiding crash-restart loops while the Java API initializes.
 - `./install` verifies the web container logs for `Started AdminApplication
   in` (timeout 180s) and exits non-zero if startup fails.
+- After manager-api is ready, `./install` syncs `server.secret` into the Python
+  private config and waits for `xiaozhi-esp32-server` to stay running.
 
 ## Redis persistence
 
@@ -145,6 +162,24 @@ Override the `XIAOZHI_*_CPUS`, `XIAOZHI_*_MEM_LIMIT`,
 are preserved during upgrade; if an older deployment still has
 `XIAOZHI_SERVER_MEM_LIMIT=768m`, raise it to at least `2048m` before enabling
 FunASR.
+
+## Pull cache behavior
+
+Production hosts do not build images and do not install Python, Java, Node.js,
+or FunASR dependencies. `install` and `upgrade` only pull already published ACR
+images and restart Docker Compose services.
+
+Docker reuses local image layers automatically. If the server base dependencies
+and SenseVoiceSmall model layer are unchanged, a later upgrade usually pulls
+only the new application layers for the selected Git version tag.
+
+Build-side cache controls stay on the build machine:
+
+```text
+BUILD_BASE=auto   reuse xiaozhi-server-base when dependency inputs match
+BUILD_BASE=false  skip server-base checks for Java/Web-only releases
+BUILD_BASE=true   rebuild server-base after Python dependency changes
+```
 
 ## Internal service URLs
 
