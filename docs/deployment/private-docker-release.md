@@ -216,6 +216,9 @@ sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
 ./install
 ```
 
+必须使用 `sudo docker login`。安装脚本会自动提权并强制 Docker 使用
+`/root/.docker/config.json`，与 `sudo docker pull` 的凭据位置保持一致。
+
 `./install` 会：
 
 ```text

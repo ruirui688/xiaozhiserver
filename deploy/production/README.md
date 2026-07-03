@@ -87,6 +87,10 @@ sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
 ./upgrade
 ```
 
+Use `sudo docker login`, not plain `docker login`. `install` escalates to root
+and forces Docker to read `/root/.docker/config.json`; this matches the
+credentials used by `sudo docker pull`.
+
 `./install` and `./upgrade` default to `VERSION=latest`, so the normal path is:
 build and push from the build machine, then run `./upgrade` on production. Use
 `VERSION=<git-short-sha> ./upgrade` only when you need a pinned deployment or
