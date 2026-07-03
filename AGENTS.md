@@ -279,6 +279,23 @@ upstream  = 官方仓库 (只允许 fetch/diff/sync，禁止 push)
 - 不删除未跟踪文件（除非确认是草案/缓存/运行产物）
 - 不把"工作区既有改动"当成自己的改动
 
+### 构建缓存保护
+
+Docker / BuildKit / pip / apt 缓存是本项目镜像构建速度的关键资产。没有用户明确授权，任何 AI 工具和自动化脚本都**禁止**清理或删除以下缓存与镜像：
+
+```text
+Docker build cache / BuildKit cache
+docker builder prune / docker buildx prune / docker system prune / docker image prune
+pip cache / apt cache
+xiaozhi-server-base-common:*
+xiaozhi-server-base-lite:*
+xiaozhi-server-base-funasr:*
+旧兼容 xiaozhi-server-base:*
+main/xiaozhi-server/models/SenseVoiceSmall/model.pt
+```
+
+允许查看缓存、复用缓存、按 profile 新增缓存标签。需要释放磁盘空间时，必须先说明会删除哪些缓存、会导致哪些构建重新下载依赖，并获得用户明确同意。禁止为了"重新构建干净"擅自删除缓存。
+
 ---
 
 ## 6. 配置与敏感信息边界
