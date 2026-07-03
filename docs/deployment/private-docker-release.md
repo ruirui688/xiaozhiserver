@@ -1,208 +1,188 @@
 # ACR 镜像生产部署
 
-本项目唯一生产部署方式：
+这是本项目的唯一生产部署入口。
 
 ```text
-源码推送私有 Git → 构建机打包镜像 → 推送 ACR → 生产服务器拉取最小资产 + 已发布镜像
+开发/构建机：完整源码 -> 构建镜像 -> 推送阿里云 ACR
+生产服务器：最小部署资产 -> docker pull ACR 镜像 -> Docker Compose 启动
 ```
 
-生产服务器不保存完整源码，不安装 Maven、Node.js、Conda 或 Python 依赖。
+生产服务器不编译源码，不安装 Maven、Node.js、Conda、Python 依赖或 FunASR 模型。所有运行代码、模型依赖和 CPU FunASR 运行时都必须已经在镜像里。
 
 ---
 
-## 目录
+## 1. 先确认三件事
 
-1. [快速参考](#1-快速参考)
-2. [镜像与目录](#2-镜像与目录)
-3. [构建与发布](#3-构建与发布)
-4. [首次部署](#4-首次部署)
-5. [配置上线](#5-配置上线)
-6. [升级](#6-升级)
-7. [日常运维](#7-日常运维)
-8. [资源调优](#8-资源调优)
-9. [变量覆盖](#9-变量覆盖)
+### 1.1 生产只认两个来源
 
----
-
-## 1. 快速参考
-
-### 角色速查
-
-| 你是什么角色 | 看哪些章节 |
-|-------------|-----------|
-| 构建/发布镜像 | [§3 构建与发布](#3-构建与发布) |
-| 首次部署到新服务器 | [§4 首次部署](#4-首次部署) → [§5 配置上线](#5-配置上线) |
-| 日常升级 | [§6 升级](#6-升级) |
-| 运维管理 | [§7 日常运维](#7-日常运维) |
-| 调优资源 | [§8 资源调优](#8-资源调优) |
-
-### 关键路径
+生产升级同时读取两个来源：
 
 ```text
-构建机:   ~/work/xiaozhi-esp32-server                完整源码
-生产机:   ~/work/xiaozhi-deploy/deploy/production    最小部署资产（sparse-checkout）
-持久化:   ~/xiaozhi-data                            数据、配置、上传文件
+Git origin/main                  deploy/production/install、upgrade、docker-compose.yml
+阿里云 ACR :latest 或短哈希 tag   xiaozhi-server、xiaozhi-web、mysql、redis 镜像
 ```
 
-### 常用命令
+这两个来源必须来自同一次 `main` 发布。不要在 feature 分支构建并推送 `latest`，然后让生产服务器从 `main` 拉部署脚本；那会造成镜像代码和 compose/install 逻辑不匹配。
+
+正确顺序：
 
 ```bash
-# 构建机：发布镜像
-scripts/acr-login && scripts/acr-build-push
+git checkout main
+git pull --ff-only origin main
 
-# 生产机：升级到最新发布镜像
+# 确认你的改动已经合并进 main 后，再构建推送镜像
+scripts/acr-login
+scripts/acr-build-push
+
+# 生产服务器只执行安装或升级
 cd ~/work/xiaozhi-deploy/deploy/production
 ./upgrade
+```
 
-# 生产机：查看日志
-docker logs -f xiaozhi-esp32-server
+### 1.2 默认部署 latest
+
+`scripts/acr-build-push` 每次会同时推送：
+
+```text
+xiaozhi-server:latest
+xiaozhi-server:<git短哈希>
+xiaozhi-web:latest
+xiaozhi-web:<git短哈希>
+```
+
+生产 `./install` 和 `./upgrade` 默认使用 `VERSION=latest`，所以日常发布后不需要手写版本号：
+
+```bash
+./install
+./upgrade
+```
+
+只有要固定版本或回滚时才使用：
+
+```bash
+VERSION=<git短哈希> ./upgrade
+```
+
+### 1.3 默认数据在部署用户家目录
+
+默认持久化目录：
+
+```text
+~/xiaozhi-data
+```
+
+主要内容：
+
+```text
+~/xiaozhi-data/.env          部署变量、镜像仓库、资源限制
+~/xiaozhi-data/docker-compose.yml
+~/xiaozhi-data/data          xiaozhi-server 私有配置
+~/xiaozhi-data/mysql/data    MySQL 数据
+~/xiaozhi-data/redis/data    Redis 数据
+~/xiaozhi-data/uploadfile    OTA 固件上传
+~/xiaozhi-data/music         音乐文件
+```
+
+旧部署如果仍要使用 `/opt/xiaozhi-data`，必须显式指定：
+
+```bash
+DATA_DIR=/opt/xiaozhi-data ./upgrade
 ```
 
 ---
 
-## 2. 镜像与目录
+## 2. 镜像清单
 
-### 2.1 镜像清单
-
-生产服务器只从 ACR 拉取：
+默认 ACR 地址：
 
 ```text
 crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/
-  ├── xiaozhi-server:latest          Python 实时语音服务
-  ├── xiaozhi-web:latest             Java API + Vue Web 智控台
-  ├── mysql:8.4                      MySQL 数据库
-  └── redis:8.0                      Redis 缓存
 ```
 
-构建过程内部使用（不部署到生产）：
+生产运行镜像：
 
 ```text
-  └── xiaozhi-server-base:latest      Python 基础镜像（加速构建）
-  └── xiaozhi-server-base:base-<依赖哈希>   带版本的基础镜像
+xiaozhi-server:latest    Python 实时语音服务，内置 CPU FunASR/SenseVoiceSmall
+xiaozhi-web:latest       Java manager-api + Vue manager-web
+mysql:8.4                MySQL 运行时镜像
+redis:8.0                Redis 运行时镜像
 ```
 
-每次发布同时推送 Git 短哈希版本（如 `xiaozhi-server:60c9ee96`）。`latest` 用于常规升级，短哈希用于定位和回滚。
-
-### 2.2 目录约定
+构建缓存镜像：
 
 ```text
-~/work/xiaozhi-deploy   生产服务器最小部署资产目录（sparse-checkout deploy/production）
-~/xiaozhi-data          生产持久化目录
-  ├── data/             私有配置（.config.yaml）
-  ├── mysql/data/       数据库文件
-  ├── uploadfile/       上传文件
-  └── music/            音乐文件
+xiaozhi-server-base:latest
+xiaozhi-server-base:base-<依赖哈希>
 ```
 
-升级镜像不会删除 `~/xiaozhi-data`。
+`xiaozhi-server-base` 只用于加速构建，不由生产 compose 直接启动。
 
 ---
 
-## 3. 构建与发布
+## 3. 构建并推送镜像
 
-在本地开发机或构建机执行。
-
-### 3.1 日常发布
+在完整源码所在的开发机或构建机执行：
 
 ```bash
 cd ~/work/xiaozhi-esp32-server
+git checkout main
+git pull --ff-only origin main
 scripts/acr-login
 scripts/acr-build-push
 ```
 
 默认行为：
-- `BUILD_BASE=auto`：优先复用基础镜像缓存，仅在依赖变更时重建
-- `MIRROR_RUNTIME_IMAGES=auto`：ACR 已有 mysql/redis 时自动跳过同步
-- 并行构建 `xiaozhi-server` 和 `xiaozhi-web`
 
-输出只显示短摘要。完整构建日志写入 `/tmp/xiaozhi-*` 临时目录。
+```text
+BUILD_BASE=auto              自动复用或补齐 xiaozhi-server-base
+MIRROR_RUNTIME_IMAGES=auto   ACR 已有 mysql/redis 时跳过同步
+BUILD_ENGINE=docker          单平台 linux/amd64 构建
+PUSH=true                    构建后推送 ACR
+```
 
-### 3.2 场景化命令
+常用覆盖：
 
 | 场景 | 命令 |
 |------|------|
-| **只改了 Java/Web**（跳过基础镜像检查） | `BUILD_BASE=false MIRROR_RUNTIME_IMAGES=false scripts/acr-build-push` |
-| **改了 Python 依赖**（强制重建基础镜像） | `BUILD_BASE=true scripts/acr-build-push` |
-| **排查构建失败**（显示详细日志） | `VERBOSE=true scripts/acr-build-push` |
-| **多架构镜像** | `BUILD_ENGINE=buildx PLATFORMS=linux/amd64,linux/arm64 scripts/acr-build-push` |
-| **关闭并行** | `PARALLEL_RELEASE_STEPS=false PARALLEL_IMAGE_BUILDS=false scripts/acr-build-push` |
+| 只改 Java/Web，确认不需要检查基础镜像和运行时镜像 | `BUILD_BASE=false MIRROR_RUNTIME_IMAGES=false scripts/acr-build-push` |
+| 改了 Python 依赖或 `Dockerfile-server-base` | `BUILD_BASE=true scripts/acr-build-push` |
+| 查看完整 Docker 输出 | `VERBOSE=true scripts/acr-build-push` |
+| 构建多架构镜像 | `BUILD_ENGINE=buildx PLATFORMS=linux/amd64,linux/arm64 scripts/acr-build-push` |
+| 降低构建机并发负载 | `PARALLEL_RELEASE_STEPS=false PARALLEL_IMAGE_BUILDS=false scripts/acr-build-push` |
 
-### 3.3 Python 依赖与本地 FunASR
-
-生产镜像默认使用 `requirements-docker.txt`，并内置 CPU 版 FunASR 本地识别运行时：
-
-```text
-torch/torchaudio CPU wheel
-funasr
-SenseVoiceSmall model.pt
-```
-
-默认构建会优先复用构建机上的本地模型文件：
+FunASR 模型默认来源：
 
 ```text
 main/xiaozhi-server/models/SenseVoiceSmall/model.pt
 ```
 
-如果本地模型存在，构建会直接把它复制进 `xiaozhi-server` 镜像；如果不存在，才会从 `FUNASR_MODEL_URL` 下载。生产服务器只需要拉取 ACR 镜像，不需要在服务器上执行 `pip install`、下载源码依赖或手工安装 FunASR。
+如果这个文件存在，构建会直接打进 `xiaozhi-server` 镜像；不存在时才从 `FUNASR_MODEL_URL` 下载。保留本地模型文件可以避免每次构建重新下载。
 
-如果模型文件放在其他目录，可以指定：
+模型在其他位置时：
 
 ```bash
 FUNASR_MODEL_LOCAL_PATH=/path/to/model.pt scripts/acr-build-push
 ```
 
-如果构建机没有本地模型，且网络无法访问默认模型地址，可以覆盖下载地址：
+临时使用镜像源下载时：
 
 ```bash
 FUNASR_MODEL_URL=https://your-mirror.example/SenseVoiceSmall/model.pt scripts/acr-build-push
 ```
 
-如果只想构建不含内置 FunASR 模型文件的镜像：
+不把模型打进镜像时：
 
 ```bash
 INSTALL_FUNASR_MODEL=false scripts/acr-build-push
 ```
 
-这种情况下必须用自定义镜像或其他挂载方式提供 `models/SenseVoiceSmall/model.pt`，否则后台测试 `fun_local` 会失败。
-
-### 3.4 缓存与加速策略
-
-发布速度主要受三类内容影响：
-
-| 内容 | 缓存位置 | 什么时候复用 | 什么时候变慢 |
-|------|----------|--------------|--------------|
-| Python 依赖层 | 本机构建缓存 + ACR `xiaozhi-server-base:base-<依赖哈希>` | `requirements-docker.txt`、`Dockerfile-server-base`、基础镜像参数未变化 | 改 Python 依赖、系统依赖、基础镜像 |
-| FunASR 模型 | 构建机本地 `model.pt` + Docker/ACR 镜像层 | 模型文件内容未变化，ACR 已有相同 layer | 第一次推送模型层，或替换模型文件 |
-| 业务代码层 | 本机 Docker layer cache + ACR 已推送 layer | 只改少量代码时本地构建较快，推送只上传新增层 | 每次 commit 都会生成新的业务镜像 tag |
-
-日常使用建议：
-
-```bash
-# 默认：自动检查并复用 base/runtime 缓存
-scripts/acr-build-push
-
-# 只改 Java/Web 或文档，且确认 server base/runtime 不需要检查
-BUILD_BASE=false MIRROR_RUNTIME_IMAGES=false scripts/acr-build-push
-
-# 改了 Python 依赖或 Dockerfile-server-base，才强制重建 base
-BUILD_BASE=true scripts/acr-build-push
-```
-
-不要删除构建机上的：
-
-```text
-main/xiaozhi-server/models/SenseVoiceSmall/model.pt
-```
-
-保留它可以避免每次构建重新下载模型。`.dockerignore` 会把该文件排除在普通源码上下文之外，服务镜像只通过 `--build-context funasr_model=...` 显式复制模型，避免同一次构建重复传输大文件。
-
-生产服务器的 `./install` / `./upgrade` 不会编译代码、不会执行 `pip install`、不会下载 FunASR 模型，只会从 ACR 拉取镜像。Docker pull 会自动复用生产服务器本地已有镜像层：如果 base 依赖层和模型层没有变化，升级时通常只需要拉取新的小业务层。
+这种镜像不适合当前默认生产方案，除非你另行挂载 `models/SenseVoiceSmall/model.pt`。
 
 ---
 
-## 4. 首次部署
+## 4. 首次安装
 
-在生产服务器执行。部署固定使用私有仓库的 `main` 分支。
+在生产服务器执行。只拉取 `deploy/production` 最小资产：
 
 ```bash
 mkdir -p ~/work
@@ -212,86 +192,113 @@ git clone --filter=blob:none --sparse --branch main \
 cd ~/work/xiaozhi-deploy
 git sparse-checkout set deploy/production
 cd deploy/production
+```
+
+登录 ACR。这里要和安装脚本实际使用的 Docker 权限一致：
+
+```bash
+# 当前用户可以直接 docker ps 时，用普通登录
+docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
+
+# 当前用户不能直接访问 Docker daemon 时，用 sudo 登录
 sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
+```
+
+执行安装：
+
+```bash
 ./install
 ```
 
-安装脚本主体按当前部署用户运行，默认把运行数据写入
-`~/xiaozhi-data`。容器 bind mount 的 UID/GID 修正也通过一次性 Docker
-容器完成，宿主机脚本不会整体切换到 root。
-
-如果当前用户已经加入 `docker` 组，脚本会直接使用普通 `docker` 命令，
-可以先执行普通 `docker login`。如果当前用户不能直接访问 Docker
-daemon，脚本会自动使用 `sudo docker`，此时必须先执行：
-
-```bash
-sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
-```
-
-旧部署如果仍要复用 `/opt/xiaozhi-data`，必须显式指定：
-
-```bash
-DATA_DIR=/opt/xiaozhi-data ./upgrade
-```
-
-`./install` 会：
+安装脚本会自动：
 
 ```text
-1. 从 ACR 拉取 xiaozhi-server:latest / xiaozhi-web:latest / mysql:8.4 / redis:8.0
-2. 创建 `~/xiaozhi-data`
-3. 生成 `~/xiaozhi-data/.env`
-4. 初始化 `~/xiaozhi-data/data/.config.yaml`
-5. 启动 Docker Compose 服务
+1. 判断使用 docker 还是 sudo docker
+2. 拉取 xiaozhi-server、xiaozhi-web、mysql、redis 镜像
+3. 创建 ~/xiaozhi-data
+4. 生成 ~/xiaozhi-data/.env 和 docker-compose.yml
+5. 初始化 data/.config.yaml
+6. 修正 bind mount 目录属主，让非 root 容器可写
+7. 启动 MySQL、Redis、manager-api/web、xiaozhi-server
+8. 从数据库读取 manager-api 的 server.secret，写回 .config.yaml
+9. 重启 xiaozhi-server
 ```
 
-首次部署后 `.env` 记录：
+首次安装成功后会输出类似：
 
 ```text
-XIAOZHI_DEPLOY_MODE=pull
-XIAOZHI_SERVER_IMAGE_REPOSITORY=.../xiaozhi-server
-XIAOZHI_WEB_IMAGE_REPOSITORY=.../xiaozhi-web
-XIAOZHI_SERVER_HTTP_BASE_URL=http://xiaozhi-esp32-server:8003
+=== Deploy complete ===
+Version: latest
+manager-web: http://<服务器IP>:8002
+websocket:   ws://<服务器IP>:8000/xiaozhi/v1/
 ```
-
-> ⚠️ `XIAOZHI_SERVER_HTTP_BASE_URL` 是 manager-api 容器访问 Python 服务的 Docker 内网地址。**不要**改成 `http://127.0.0.1:8003`，否则模型评测会从 manager-api 容器访问自身端口，无法调用 Python `/benchmark/models`。
 
 ---
 
-## 5. 配置上线
+## 5. 升级
 
-### 5.1 私有配置
+标准升级：
 
-`./install` / `./upgrade` 会在 manager-api 启动后自动读取数据库中的
-`server.secret`，写入 `~/xiaozhi-data/data/.config.yaml`，并重启
-`xiaozhi-server`。首次部署不需要手工复制 `server.secret`。
-
-如需调整设备可访问地址，只修改 `server.vision_explain` 等公网地址字段：
-
-```yaml
-server:
-  ip: 0.0.0.0
-  port: 8000
-  http_port: 8003
-  vision_explain: http://服务器IP或域名:8003/mcp/vision/explain
-manager-api:
-  url: http://xiaozhi-esp32-server-web:8002/xiaozhi
-  secret: <由安装脚本自动同步>
+```bash
+cd ~/work/xiaozhi-deploy/deploy/production
+./upgrade
 ```
 
-### 5.2 三类地址（容易配错）
+`./upgrade` 会先对最小部署资产执行：
 
-| 用途 | 正确写法 | 错误写法 |
-|------|---------|---------|
-| 浏览器访问智控台 | `http://服务器公网IP:8002` | — |
-| **容器内**访问 API | `http://xiaozhi-esp32-server-web:8002/xiaozhi` | ❌ `http://公网IP:8002` |
-| **设备**访问服务端 | `ws://服务器公网IP:8000/xiaozhi/v1/` | ❌ `ws://xiaozhi-esp32-server-web:8000/` |
+```text
+git pull --ff-only origin <当前分支>
+```
 
-- `manager-api.url` 是容器内网地址，保持默认不要改。
-- 设备地址（`server.websocket`、`server.ota`、`server.vision_explain`）必须从 ESP32 设备网络可达。
+然后复用 `~/xiaozhi-data/.env`，默认拉取 `latest` 镜像并重启服务。
 
-### 5.3 参数字典确认
+回滚或固定版本：
 
-在智控台"参数字典"中确认：
+```bash
+VERSION=<git短哈希> ./upgrade
+```
+
+升级不会删除：
+
+```text
+~/xiaozhi-data/mysql/data
+~/xiaozhi-data/redis/data
+~/xiaozhi-data/data
+~/xiaozhi-data/uploadfile
+~/xiaozhi-data/music
+```
+
+---
+
+## 6. 配置上线
+
+### 6.1 不要改错地址
+
+三类地址必须分清：
+
+| 用途 | 正确示例 | 说明 |
+|------|----------|------|
+| 浏览器访问智控台 | `http://服务器IP:8002` | 用户浏览器访问 |
+| manager-api 容器访问 Python | `http://xiaozhi-esp32-server:8003` | Docker 内网地址，写在 `.env` 的 `XIAOZHI_SERVER_HTTP_BASE_URL` |
+| xiaozhi-server 访问 manager-api | `http://xiaozhi-esp32-server-web:8002/xiaozhi` | 写在 `data/.config.yaml` 的 `manager-api.url` |
+| ESP32 设备访问 WebSocket | `ws://服务器IP:8000/xiaozhi/v1/` | 设备网络必须可达 |
+| ESP32 设备访问 OTA | `http://服务器IP:8003/xiaozhi/ota/` | 设备网络必须可达 |
+
+不要把容器内地址改成 `127.0.0.1`。在容器里，`127.0.0.1` 只代表当前容器自己。
+
+### 6.2 manager-api.secret 自动同步
+
+`./install` / `./upgrade` 会在 manager-api 启动后自动读取数据库中的 `server.secret`，写入：
+
+```text
+~/xiaozhi-data/data/.config.yaml
+```
+
+首次安装不需要去网页手工复制密钥。
+
+### 6.3 设备公网地址
+
+在智控台“参数字典”里确认设备可访问地址：
 
 ```text
 server.websocket      ws://服务器IP或域名:8000/xiaozhi/v1/
@@ -299,131 +306,148 @@ server.ota            http://服务器IP或域名:8003/xiaozhi/ota/
 server.vision_explain http://服务器IP或域名:8003/mcp/vision/explain
 ```
 
-配置完成后：
-
-```bash
-docker restart xiaozhi-esp32-server
-```
-
-### 5.4 持久化保护
-
-以下目录**绝对不能删除**：
-
-```text
-~/xiaozhi-data/mysql/data     数据库
-~/xiaozhi-data/data           私有配置
-~/xiaozhi-data/uploadfile     上传文件
-~/xiaozhi-data/music          音乐文件
-```
-
-音乐管理上传的音频保存到 `~/xiaozhi-data/music`，同时挂载给 web 容器（展示列表）和 server 容器（设备播放）。
+生产环境建议通过 TLS 反向代理暴露公网入口，并把设备地址改成 `wss://` / `https://`。
 
 ---
 
-## 6. 升级
+## 7. 缓存与速度
 
-### 6.1 标准升级
+### 7.1 构建机缓存
+
+构建慢主要来自三层：
+
+| 层 | 缓存方式 | 什么时候会重新构建或上传 |
+|----|----------|--------------------------|
+| Python/FunASR 依赖 | Docker layer + ACR `xiaozhi-server-base:base-<依赖哈希>` | 改 `requirements-docker.txt`、基础镜像、系统包或 server-base Dockerfile |
+| SenseVoiceSmall 模型 | 本地 `model.pt` + 镜像 layer | 第一次打包模型，或替换模型文件 |
+| 业务代码 | Docker layer + `:<git短哈希>` / `:latest` | 每次业务代码变化 |
+
+日常只改业务逻辑时，直接运行：
 
 ```bash
-# 1. 构建机：发布新版本
 scripts/acr-build-push
-# 输出会同时给出 latest 部署命令和短哈希固定版本部署命令
+```
 
-# 2. 生产机：升级
+不要清理构建机 Docker cache，也不要删除：
+
+```text
+main/xiaozhi-server/models/SenseVoiceSmall/model.pt
+```
+
+### 7.2 生产服务器 pull 缓存
+
+生产服务器不会构建，只会 `docker pull`。Docker 会自动复用本机已有镜像层：
+
+```text
+基础依赖层没变   不重复下载 CPU PyTorch/FunASR
+模型层没变       不重复下载 SenseVoiceSmall layer
+业务层变了       只拉取新的业务层
+```
+
+所以升级速度取决于本次镜像和上次镜像有多少 layer 变化。
+
+---
+
+## 8. 权限与数据目录
+
+安装脚本主体按当前部署用户运行，默认数据放在当前部署用户的家目录。只有访问 Docker daemon 时才可能使用 `sudo docker`。
+
+脚本会打印当前选择：
+
+```text
+docker: docker (config: /home/ubuntu/.docker)
+docker: sudo docker (config: /root/.docker)
+data:   /home/ubuntu/xiaozhi-data
+```
+
+如果显示 `sudo docker`，ACR 登录凭据必须在 root 的 Docker config 里：
+
+```bash
+sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
+```
+
+如果显示普通 `docker`，使用当前用户登录即可：
+
+```bash
+docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
+```
+
+容器内仍然是非 root 用户运行。脚本会通过一次性 Docker 容器修正 bind mount 权限：
+
+```text
+data        999:999   xiaozhi-server 写 .auth_key 和 .config.yaml
+uploadfile  100:101   manager-api 写 OTA 固件
+music       100:101   manager-api 写音乐，xiaozhi-server 读取
+```
+
+---
+
+## 9. 日常运维
+
+默认路径：
+
+```bash
+COMPOSE=~/xiaozhi-data/docker-compose.yml
+ENV=~/xiaozhi-data/.env
+```
+
+查看状态：
+
+```bash
+docker compose -f ~/xiaozhi-data/docker-compose.yml --env-file ~/xiaozhi-data/.env ps
+```
+
+重启全部：
+
+```bash
+docker compose -f ~/xiaozhi-data/docker-compose.yml --env-file ~/xiaozhi-data/.env restart
+```
+
+停止容器但保留数据：
+
+```bash
+docker compose -f ~/xiaozhi-data/docker-compose.yml --env-file ~/xiaozhi-data/.env down
+```
+
+单服务日志：
+
+```bash
+docker logs -f xiaozhi-esp32-server
+docker logs -f xiaozhi-esp32-server-web
+docker logs -f xiaozhi-esp32-server-db
+docker logs -f xiaozhi-esp32-server-redis
+```
+
+单服务重启：
+
+```bash
+docker restart xiaozhi-esp32-server
+docker restart xiaozhi-esp32-server-web
+```
+
+---
+
+## 10. 资源调优
+
+默认按 2 核 4G、CPU FunASR 设计：
+
+| 容器 | CPU | 内存 |
+|------|-----|------|
+| xiaozhi-server | 1.00 | 2048m |
+| xiaozhi-web | 0.60 | 1024m |
+| MySQL | 0.30 | 768m |
+| Redis | 0.10 | 192m |
+
+`memswap_limit` 默认等于 `mem_limit`，避免小机器进入长期 swap。Python 容器低于 2G 时，CPU FunASR/SenseVoiceSmall 更容易启动失败或被 OOM kill。
+
+调整 `~/xiaozhi-data/.env` 后执行：
+
+```bash
 cd ~/work/xiaozhi-deploy/deploy/production
 ./upgrade
 ```
 
-`./upgrade` 输出摘要：
-
-```text
-Production deploy
-  version   本次请求部署的版本
-  current   ~/xiaozhi-data/.env 中记录的上次版本
-  assets    部署脚本所在 Git 分支及 pull 前后 commit
-  images    本次拉取并启动的业务镜像
-
-=== Deploy complete ===
-Version    最终部署版本
-Images     运行中容器绑定的业务镜像
-Runtime    运行中容器绑定的 MySQL/Redis 镜像
-```
-
-`./upgrade` 会更新 sparse-checkout 资产，复用 `.env` 配置，默认拉取 `latest` 并重启容器。需要固定版本或回滚时，才显式使用 `VERSION=<git短哈希> ./upgrade`。
-
-### 6.2 回滚
-
-```bash
-VERSION=<上一个正常版本> ./upgrade
-```
-
----
-
-## 7. 日常运维
-
-生产服务器统一通过 `~/xiaozhi-data/docker-compose.yml` 和 `~/xiaozhi-data/.env` 管理。
-旧部署如仍使用 `/opt/xiaozhi-data`，下面命令中的路径需要对应替换或
-显式设置 `DATA_DIR=/opt/xiaozhi-data`。
-
-### 服务管理
-
-```bash
-# 查看状态
-docker compose -f ~/xiaozhi-data/docker-compose.yml \
-  --env-file ~/xiaozhi-data/.env ps
-
-# 启动
-docker compose -f ~/xiaozhi-data/docker-compose.yml \
-  --env-file ~/xiaozhi-data/.env up -d
-
-# 停止（保留容器）
-docker compose -f ~/xiaozhi-data/docker-compose.yml \
-  --env-file ~/xiaozhi-data/.env stop
-
-# 停止并移除容器和网络（保留数据）
-docker compose -f ~/xiaozhi-data/docker-compose.yml \
-  --env-file ~/xiaozhi-data/.env down
-
-# 重启全部
-docker compose -f ~/xiaozhi-data/docker-compose.yml \
-  --env-file ~/xiaozhi-data/.env restart
-```
-
-### 单服务重启
-
-```bash
-docker restart xiaozhi-esp32-server        # Python 语音服务
-docker restart xiaozhi-esp32-server-web    # Java API + Web 智控台
-```
-
-### 日志
-
-```bash
-docker logs -f xiaozhi-esp32-server        # Python 日志
-docker logs -f xiaozhi-esp32-server-web    # Java/Web 日志
-docker logs -f xiaozhi-esp32-server-db     # MySQL 日志
-docker logs -f xiaozhi-esp32-server-redis  # Redis 日志
-```
-
----
-
-## 8. 资源调优
-
-### 8.1 默认限制（2 核 4G 服务器，CPU FunASR）
-
-| 容器 | CPU | 内存 |
-|------|-----|------|
-| xiaozhi-server (Python + FunASR) | 1.00 核 | 2048 MB |
-| xiaozhi-esp32-server-web (Java) | 0.60 核 | 1024 MB |
-| MySQL | 0.30 核 | 768 MB |
-| Redis | 0.10 核 | 192 MB |
-| **合计** | **2.00 核** | **~4032 MB** |
-
-FunASR/SenseVoiceSmall 是 CPU 本地推理，Python 容器内存低于 2GB 时容易初始化失败或被 OOM kill。`memswap_limit` 等于 `mem_limit`，防止 swap 拖死宿主机。
-
-### 8.2 调整资源
-
-编辑 `~/xiaozhi-data/.env`，修改对应变量后执行 `./upgrade`：
+常用变量：
 
 ```text
 XIAOZHI_SERVER_CPUS=1.00
@@ -432,32 +456,25 @@ XIAOZHI_SERVER_MEMSWAP_LIMIT=2048m
 XIAOZHI_FUNASR_THREADS=2
 XIAOZHI_WEB_CPUS=0.60
 XIAOZHI_WEB_MEM_LIMIT=1024m
-XIAOZHI_MYSQL_CPUS=0.30
 XIAOZHI_MYSQL_MEM_LIMIT=768m
-XIAOZHI_REDIS_CPUS=0.10
 XIAOZHI_REDIS_MEM_LIMIT=192m
 ```
 
-老部署如果 `.env` 中仍保留旧的 `XIAOZHI_SERVER_MEM_LIMIT=768m`，升级脚本会尊重旧值。启用 FunASR 前需要手工调整为至少 `2048m`。
-
-### 8.3 内部调优
-
-| 服务 | 参数 | 默认值 |
-|------|------|--------|
-| Java | `XIAOZHI_WEB_JAVA_TOOL_OPTIONS` | 堆内存占容器内存比例 |
-| MySQL | `innodb_buffer_pool_size` | 192M |
-| MySQL | `max_connections` | 80 |
-| Redis | `maxmemory` | 128mb / `allkeys-lru` |
-
-服务器规格更高时按比例上调。
+旧部署如果 `.env` 里仍保留 `XIAOZHI_SERVER_MEM_LIMIT=768m`，升级脚本会尊重旧值。启用 FunASR 前必须手工调到至少 `2048m`。
 
 ---
 
-## 9. 变量覆盖
+## 11. 更换仓库或镜像
 
-仅在需要更换镜像仓库或镜像来源时使用。
+构建推送到其他 ACR namespace：
 
-### 业务镜像
+```bash
+ACR_REGISTRY=你的registry \
+ACR_NAMESPACE=你的namespace \
+scripts/acr-build-push
+```
+
+生产安装使用其他业务镜像仓库：
 
 ```bash
 SERVER_IMAGE_REPOSITORY=你的仓库/xiaozhi-server \
@@ -465,7 +482,7 @@ WEB_IMAGE_REPOSITORY=你的仓库/xiaozhi-web \
 ./install
 ```
 
-### 运行时镜像
+生产安装使用其他运行时镜像：
 
 ```bash
 MYSQL_IMAGE=你的仓库/mysql:8.4 \
@@ -473,6 +490,121 @@ REDIS_IMAGE=你的仓库/redis:8.0 \
 ./install
 ```
 
-### 部署模式
+`.env` 中 `XIAOZHI_DEPLOY_MODE=pull` 不要改成源码构建模式。生产服务器没有构建工具链。
 
-`.env` 中 `XIAOZHI_DEPLOY_MODE=pull` 表示从 ACR 拉取。不要改成源码构建模式 — 生产服务器没有构建工具链。
+---
+
+## 12. 常见失败
+
+### 12.1 `Pull images FAIL`
+
+先看脚本输出的 Docker 选择：
+
+```text
+docker: docker (config: /home/ubuntu/.docker)
+docker: sudo docker (config: /root/.docker)
+```
+
+然后用同一种权限手工拉取完整镜像名：
+
+```bash
+docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-server:latest
+docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-web:latest
+docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/mysql:8.4
+docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/redis:8.0
+
+sudo docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-server:latest
+sudo docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-web:latest
+sudo docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/mysql:8.4
+sudo docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/redis:8.0
+```
+
+如果手工 `docker pull` 成功但 `./install` 失败，通常是普通用户和 `sudo` 使用了不同的 Docker config。按脚本打印的 `docker:` 行重新登录。
+
+如果提示 repository does not exist，常见原因是：
+
+```text
+镜像还没有推送到 ACR
+ACR namespace 写错，不是 yihuixiaozhi
+登录的是普通 docker，但脚本实际使用 sudo docker
+只推送了 xiaozhi-server，没有推送 xiaozhi-web/mysql/redis
+```
+
+### 12.2 manager-api 启动超时
+
+查看日志：
+
+```bash
+docker logs --tail 120 xiaozhi-esp32-server-web
+docker logs --tail 120 xiaozhi-esp32-server-db
+```
+
+重点检查 MySQL 是否启动、Liquibase 是否报错、数据库密码是否和 `.env` 一致。
+
+### 12.3 xiaozhi-server 反复重启
+
+查看日志：
+
+```bash
+docker logs --tail 120 xiaozhi-esp32-server
+```
+
+常见原因：
+
+```text
+~/xiaozhi-data/data/.config.yaml 配置错误
+manager-api.url 被改成公网地址或 127.0.0.1
+server.secret 没同步成功
+Python 容器内存过低，FunASR 初始化失败
+```
+
+### 12.4 OTA 或音乐上传失败
+
+检查宿主机目录：
+
+```bash
+ls -ld ~/xiaozhi-data/uploadfile ~/xiaozhi-data/music
+```
+
+修复方式是重新运行安装脚本，让它通过容器修正 bind mount 权限：
+
+```bash
+cd ~/work/xiaozhi-deploy/deploy/production
+./install
+```
+
+不要手工把目录改成全局可写。
+
+### 12.5 设备连不上
+
+确认三件事：
+
+```text
+server.websocket 是设备可访问的公网或局域网地址
+防火墙放行 8000/8002/8003，或已经配置 TLS 反向代理
+设备固件使用的是你的 OTA/WebSocket 地址，不是官方默认地址
+```
+
+---
+
+## 13. 发布前检查清单
+
+构建机：
+
+```text
+代码已合并到 main
+git pull --ff-only origin main 已完成
+scripts/acr-build-push 成功
+ACR 中存在 xiaozhi-server/latest、xiaozhi-web/latest、mysql/8.4、redis/8.0
+```
+
+生产服务器：
+
+```text
+deploy/production 来自 origin/main
+docker 或 sudo docker 已登录 ACR
+./upgrade 成功
+docker ps 显示四个容器运行
+manager-web 可访问
+设备 WebSocket/OTA 地址已配置为设备可达地址
+```
