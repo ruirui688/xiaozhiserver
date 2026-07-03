@@ -168,6 +168,7 @@ docs/architecture/prompt-injection-engineering.md
 - [models/memory-summary-display-issue-analysis.md](./models/memory-summary-display-issue-analysis.md) - 短期记忆总结显示问题分析。用于排查 `mem_local_short` 保存路径与角色配置界面显示不一致的问题。
 - [models/voice-pipeline-latency-analysis.md](./models/voice-pipeline-latency-analysis.md) - 语音管道延迟分析。用于拆解 ASR、LLM、TTS、音频发送和 UI 展示的延迟组成。
 - [models/volume-system-analysis.md](./models/volume-system-analysis.md) - 音量系统混乱分析。用于区分设备扬声器音量、TTS 合成音量和浏览器播放音量的边界。
+- [models/funasr-sensevoice-resource-benchmark.md](./models/funasr-sensevoice-resource-benchmark.md) - FunASR / SenseVoiceSmall 本地语音识别资源与并发测试报告。用于确认 ACR 生产镜像中本地 ASR 的最低内存、推荐 CPU/内存配置和多人同时识别时的延迟曲线。
 - [models/ragflow-integration.md](./models/ragflow-integration.md) - RAGFlow 集成指南。用于部署 RAGFlow、检查 MySQL/Redis、配置知识库问答和服务端 RAG 调用。
 - [models/performance_tester.md](./models/performance_tester.md) - 模型性能测试工具使用指南。用于测试 ASR、大语言模型、非流式 TTS、流式 TTS、视觉模型的延迟和稳定性。
 
