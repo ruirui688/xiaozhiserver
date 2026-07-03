@@ -129,6 +129,9 @@ sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
 ./install
 ```
 
+必须使用 `sudo docker login`，因为安装脚本提权后会使用 root 的 Docker
+凭据目录 `/root/.docker/config.json` 拉取 ACR 镜像。
+
 生产服务器升级：
 
 ```bash

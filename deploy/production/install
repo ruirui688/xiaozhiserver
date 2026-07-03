@@ -5,7 +5,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DATA_DIR="${DATA_DIR:-${INSTALL_DIR:-/opt/xiaozhi-data}}"
 
 if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-  exec sudo -E "$0" "$@"
+  # Preserve caller overrides such as VERSION/DATA_DIR, but force Docker to use
+  # root's credential store. Without this, sudo -E keeps HOME=/home/<user> and
+  # docker pull cannot see credentials created by sudo docker login.
+  exec sudo -E HOME=/root DOCKER_CONFIG=/root/.docker "$0" "$@"
 fi
 
 DEFAULT_SERVER_IMAGE_REPOSITORY="crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-server"
