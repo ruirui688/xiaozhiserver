@@ -26,6 +26,9 @@ WEB_RUNTIME_BASE_IMAGE="${WEB_RUNTIME_BASE_IMAGE:-bellsoft/liberica-runtime-cont
 DEBIAN_MIRROR="${DEBIAN_MIRROR:-https://mirrors.aliyun.com/debian}"
 DEBIAN_SECURITY_MIRROR="${DEBIAN_SECURITY_MIRROR:-https://mirrors.aliyun.com/debian-security}"
 SERVER_REQUIREMENTS="${SERVER_REQUIREMENTS:-main/xiaozhi-server/requirements-docker.txt}"
+PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}"
+PIP_TRUSTED_HOST="${PIP_TRUSTED_HOST:-mirrors.aliyun.com}"
+PYTORCH_INDEX_URL="${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}"
 INSTALL_FUNASR_MODEL="${INSTALL_FUNASR_MODEL:-true}"
 FUNASR_MODEL_URL="${FUNASR_MODEL_URL:-https://modelscope.cn/models/iic/SenseVoiceSmall/resolve/master/model.pt}"
 FUNASR_MODEL_LOCAL_PATH="${FUNASR_MODEL_LOCAL_PATH:-$ROOT_DIR/main/xiaozhi-server/models/SenseVoiceSmall/model.pt}"
@@ -534,6 +537,9 @@ build_server_pipeline() {
       --build-arg "DEBIAN_MIRROR=$DEBIAN_MIRROR" \
       --build-arg "DEBIAN_SECURITY_MIRROR=$DEBIAN_SECURITY_MIRROR" \
       --build-arg "SERVER_REQUIREMENTS=$SERVER_REQUIREMENTS" \
+      --build-arg "PIP_INDEX_URL=$PIP_INDEX_URL" \
+      --build-arg "PIP_TRUSTED_HOST=$PIP_TRUSTED_HOST" \
+      --build-arg "PYTORCH_INDEX_URL=$PYTORCH_INDEX_URL" \
       --tag "$SERVER_BASE_IMAGE_REPOSITORY:latest" \
       --tag "$SERVER_BASE_IMAGE_REPOSITORY:$VERSION" \
       --tag "$SERVER_BASE_CACHE_IMAGE"
