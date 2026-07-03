@@ -7,7 +7,14 @@ REPO_ROOT = SERVER_ROOT.parents[1]
 if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 
-from core.benchmark.asr_executor import STANDARD_ASR_TEST_AUDIO, _build_audio_data_url, _load_audio_files
+from core.benchmark.asr_executor import (
+    STANDARD_ASR_TEST_AUDIO,
+    _build_audio_data_url,
+    _latency_after_audio,
+    _load_audio_files,
+    _pcm_duration_ms,
+    _wav_to_pcm,
+)
 
 
 def test_load_standard_asr_audio_from_repo_root(monkeypatch):
@@ -36,3 +43,18 @@ def test_build_audio_preview_data_url(monkeypatch):
     data_url = _build_audio_data_url(audio)
 
     assert data_url.startswith("data:audio/wav;base64,")
+
+
+def test_standard_asr_audio_duration_is_reported(monkeypatch):
+    monkeypatch.chdir(REPO_ROOT)
+
+    audio = _load_audio_files(STANDARD_ASR_TEST_AUDIO)[0]
+    pcm = _wav_to_pcm(audio["path"], audio["data"])
+
+    assert _pcm_duration_ms(pcm) == 1560
+
+
+def test_latency_after_audio_uses_tail_latency():
+    assert _latency_after_audio(2161, 1560) == 601
+    assert _latency_after_audio(1200, 1560) == 0
+    assert _latency_after_audio(None, 1560) is None
