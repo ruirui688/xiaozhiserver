@@ -232,7 +232,7 @@ build_business_images() {
   FUNASR_MODEL_CONTEXT="$FUNASR_MODEL_CONTEXT" \
   PARALLEL_IMAGE_BUILDS="$PARALLEL_IMAGE_BUILDS" \
   PRINT_BUILD_CONFIG=false \
-  "$ROOT_DIR/scripts/docker-build-private.sh"
+  bash "$ROOT_DIR/scripts/docker-build-private.sh"
 }
 
 wait_for_release_step() {
