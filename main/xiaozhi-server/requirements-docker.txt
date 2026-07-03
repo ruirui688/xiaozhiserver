@@ -1,10 +1,13 @@
 # -*- coding:utf-8 -*-
 # Production Docker runtime dependencies.
 #
-# This image intentionally excludes torch/torchaudio and the pip silero_vad
-# package. The production path uses cloud ASR providers and the local Silero VAD
-# provider loads the checked-in ONNX model through onnxruntime.
-numpy>=1.27.0
+# The production image supports CPU-only local FunASR/SenseVoice inference.
+# PyTorch CPU wheels are resolved from the official CPU wheel index; the image
+# does not require CUDA or GPU drivers.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.2.2+cpu
+torchaudio==2.2.2+cpu
+numpy==1.26.4
 onnxruntime==1.17.3
 #--------- cozepy0.20.0要求websockets<15.0.0，以下暂时不推荐升级的依赖
 websockets==14.2
@@ -12,6 +15,7 @@ websockets==14.2
 pyyml==0.0.2
 opuslib_next==1.1.5
 pydub==0.25.1
+funasr==1.2.7
 openai==2.8.1
 google-generativeai==0.8.5
 edge_tts==7.2.6

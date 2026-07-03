@@ -8,9 +8,9 @@ services:
   xiaozhi-esp32-server:
     image: ${XIAOZHI_SERVER_IMAGE_REPOSITORY:-crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-server}:latest
     container_name: xiaozhi-esp32-server
-    cpus: ${XIAOZHI_SERVER_CPUS:-0.75}
-    mem_limit: ${XIAOZHI_SERVER_MEM_LIMIT:-768m}
-    memswap_limit: ${XIAOZHI_SERVER_MEMSWAP_LIMIT:-768m}
+    cpus: ${XIAOZHI_SERVER_CPUS:-1.00}
+    mem_limit: ${XIAOZHI_SERVER_MEM_LIMIT:-2048m}
+    memswap_limit: ${XIAOZHI_SERVER_MEMSWAP_LIMIT:-2048m}
     pids_limit: ${XIAOZHI_SERVER_PIDS_LIMIT:-512}
     depends_on:
       - xiaozhi-esp32-server-db
@@ -24,6 +24,8 @@ services:
       - "8003:8003"
     environment:
       - TZ=Asia/Shanghai
+      - OMP_NUM_THREADS=${XIAOZHI_FUNASR_THREADS:-2}
+      - MKL_NUM_THREADS=${XIAOZHI_FUNASR_THREADS:-2}
     logging: *default-logging
     cap_drop:
       - ALL
@@ -36,9 +38,9 @@ services:
   xiaozhi-esp32-server-web:
     image: ${XIAOZHI_WEB_IMAGE_REPOSITORY:-crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-web}:latest
     container_name: xiaozhi-esp32-server-web
-    cpus: ${XIAOZHI_WEB_CPUS:-0.80}
-    mem_limit: ${XIAOZHI_WEB_MEM_LIMIT:-1280m}
-    memswap_limit: ${XIAOZHI_WEB_MEMSWAP_LIMIT:-1280m}
+    cpus: ${XIAOZHI_WEB_CPUS:-0.60}
+    mem_limit: ${XIAOZHI_WEB_MEM_LIMIT:-1024m}
+    memswap_limit: ${XIAOZHI_WEB_MEMSWAP_LIMIT:-1024m}
     pids_limit: ${XIAOZHI_WEB_PIDS_LIMIT:-512}
     restart: always
     networks:
@@ -60,6 +62,7 @@ services:
       - SPRING_DATA_REDIS_PASSWORD=${XIAOZHI_REDIS_PASSWORD:-}
       - SPRING_DATA_REDIS_PORT=6379
       - XIAOZHI_SERVER_HTTP_BASE_URL=${XIAOZHI_SERVER_HTTP_BASE_URL:-http://xiaozhi-esp32-server:8003}
+      - CORS_ORIGINS=${XIAOZHI_CORS_ORIGINS:-http://localhost:8002,http://127.0.0.1:8002,http://*:8002}
       - XIAOZHI_MUSIC_DIR=/music
     logging: *default-logging
     cap_drop:
@@ -73,9 +76,9 @@ services:
   xiaozhi-esp32-server-db:
     image: ${XIAOZHI_MYSQL_IMAGE:-crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/mysql:8.4}
     container_name: xiaozhi-esp32-server-db
-    cpus: ${XIAOZHI_MYSQL_CPUS:-0.35}
-    mem_limit: ${XIAOZHI_MYSQL_MEM_LIMIT:-1024m}
-    memswap_limit: ${XIAOZHI_MYSQL_MEMSWAP_LIMIT:-1024m}
+    cpus: ${XIAOZHI_MYSQL_CPUS:-0.30}
+    mem_limit: ${XIAOZHI_MYSQL_MEM_LIMIT:-768m}
+    memswap_limit: ${XIAOZHI_MYSQL_MEMSWAP_LIMIT:-768m}
     pids_limit: ${XIAOZHI_MYSQL_PIDS_LIMIT:-256}
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
@@ -90,7 +93,7 @@ services:
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
-      - --innodb-buffer-pool-size=${XIAOZHI_MYSQL_INNODB_BUFFER_POOL_SIZE:-256M}
+      - --innodb-buffer-pool-size=${XIAOZHI_MYSQL_INNODB_BUFFER_POOL_SIZE:-192M}
       - --max-connections=${XIAOZHI_MYSQL_MAX_CONNECTIONS:-80}
       - --table-open-cache=${XIAOZHI_MYSQL_TABLE_OPEN_CACHE:-512}
       - --performance-schema=${XIAOZHI_MYSQL_PERFORMANCE_SCHEMA:-OFF}
@@ -107,8 +110,8 @@ services:
     image: ${XIAOZHI_REDIS_IMAGE:-crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/redis:8.0}
     container_name: xiaozhi-esp32-server-redis
     cpus: ${XIAOZHI_REDIS_CPUS:-0.10}
-    mem_limit: ${XIAOZHI_REDIS_MEM_LIMIT:-256m}
-    memswap_limit: ${XIAOZHI_REDIS_MEMSWAP_LIMIT:-256m}
+    mem_limit: ${XIAOZHI_REDIS_MEM_LIMIT:-192m}
+    memswap_limit: ${XIAOZHI_REDIS_MEMSWAP_LIMIT:-192m}
     pids_limit: ${XIAOZHI_REDIS_PIDS_LIMIT:-128}
     restart: always
     networks:
@@ -122,7 +125,7 @@ services:
       - --appendonly
       - "yes"
       - --maxmemory
-      - ${XIAOZHI_REDIS_MAXMEMORY:-192mb}
+      - ${XIAOZHI_REDIS_MAXMEMORY:-128mb}
       - --maxmemory-policy
       - ${XIAOZHI_REDIS_MAXMEMORY_POLICY:-allkeys-lru}
     healthcheck:

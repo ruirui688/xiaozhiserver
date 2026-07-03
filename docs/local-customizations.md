@@ -117,14 +117,14 @@
 
 ```text
 定制模块：生产 Docker Compose 资源限制
-改动原因：生产服务器目标规格可能只有 2 核 4G。为避免 Python、Java/Web、MySQL 或 Redis 任一容器内存/CPU 失控拖死宿主机，生产最小部署包在 docker-compose.yml 中设置 cpus、mem_limit、memswap_limit、pids_limit 和日志大小限制；install 会把默认限制写入 /opt/xiaozhi-data/.env 并保留已有覆盖值。Java 容器通过 JAVA_TOOL_OPTIONS 约束堆内存，MySQL 和 Redis 也设置与容器上限匹配的运行参数。
+改动原因：生产服务器目标规格可能只有 2 核 4G，且 Python 容器默认启用 CPU FunASR/SenseVoiceSmall 本地识别。为避免 Python、Java/Web、MySQL 或 Redis 任一容器内存/CPU 失控拖死宿主机，生产最小部署包在 docker-compose.yml 中设置 cpus、mem_limit、memswap_limit、pids_limit 和日志大小限制；install 会把默认限制写入 /opt/xiaozhi-data/.env 并保留已有覆盖值。默认预算优先给 Python/FunASR 至少 2G 内存，并压缩 Java/Web、MySQL 和 Redis 的默认内存；Java 容器通过 JAVA_TOOL_OPTIONS 约束堆内存，MySQL 和 Redis 也设置与容器上限匹配的运行参数。
 关键文件：
   - deploy/production/docker-compose.yml
   - deploy/production/install
   - deploy/production/README.md
   - docs/deployment/private-docker-release.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改 Docker Compose、安装脚本或生产部署文档，必须保留 2 核 4G 默认资源预算、memswap_limit 等于 mem_limit 的防 swap 约定、/opt/xiaozhi-data/.env 中 XIAOZHI_* 资源变量的持久化覆盖能力，以及 Java/MySQL/Redis 与容器限制匹配的运行参数。
+官方同步时的处理规则：如果官方修改 Docker Compose、安装脚本或生产部署文档，必须保留 2 核 4G 默认资源预算、Python/FunASR 至少 2G 内存、memswap_limit 等于 mem_limit 的防 swap 约定、/opt/xiaozhi-data/.env 中 XIAOZHI_* 资源变量的持久化覆盖能力，以及 Java/MySQL/Redis 与容器限制匹配的运行参数。
 ```
 
 ## 9. 天气查询容错
@@ -171,7 +171,7 @@
   - main/xiaozhi-server/tests/test_semantic_policy.py
   - docs/architecture/semantic-control-center.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改 startToChat、ConnectionHandler 初始化、handle_user_intent、GameSessionManager、UnifiedToolHandler、ToolManager、abortHandle、TTS 入队或 function-call 主链路，必须保留语义控制中枢在旧意图/LLM 之前的前置拦截位置；TTS 播放期间识别到用户重叠说话时，是否打断必须由当前 LLM 基于少量上下文裁决 continue / interrupt / new_turn，服务端不得用附和词表、停止词表或长度阈值替代语义打断判断；LLM 裁决为 continue 时不得清空 TTS 队列、不得进入主聊天；裁决为 interrupt 时只复用 handleAbortMessage 停止当前播报，不再把停止语当作新聊天；裁决为 new_turn 或裁决失败时复用 handleAbortMessage 后继续处理新输入；未命中高置信度规则时必须继续兜底到旧 handle_user_intent 和 conn.chat；停止类指令必须复用 handleAbortMessage 并允许配置动作停止工具；纯语言游戏不得优先回到 active_game_tool，应交给主 LLM 对话，并只从已启用功能插件读取可编辑软规则；退出游戏不得关闭 websocket；语义模块顶层导入应尽量轻量，避免引入 opus/loguru 等运行依赖导致纯单元测试无法导入。
+官方同步时的处理规则：如果官方修改 startToChat、ConnectionHandler 初始化、handle_user_intent、GameSessionManager、UnifiedToolHandler、ToolManager、abortHandle、TTS 入队或 function-call 主链路，必须保留语义控制中枢在旧意图/LLM 之前的前置拦截位置；TTS 播放期间识别到用户重叠说话时，是否打断必须由当前 LLM 基于少量上下文裁决 continue / interrupt / new_turn，服务端不得用附和词表、停止词表或长度阈值替代语义打断判断；语义打断裁决器调用 LLM 时必须有短超时，超时、解析失败或模型异常必须降级为 new_turn 并继续处理用户新输入，不能让异常冒泡关闭 WebSocket；LLM 裁决为 continue 时不得清空 TTS 队列、不得进入主聊天；裁决为 interrupt 时先复用 handleAbortMessage 停止当前播报，随后必须交给语义中枢确认是否为停止/退出等高置信控制指令，若未命中控制指令则继续按 new_turn 进入旧 handle_user_intent 和 conn.chat，避免“要你自己唱”这类带新任务的打断被吞掉；裁决为 new_turn 或裁决失败时复用 handleAbortMessage 后继续处理新输入；未命中高置信度规则时必须继续兜底到旧 handle_user_intent 和 conn.chat；停止类指令必须复用 handleAbortMessage 并允许配置动作停止工具；纯语言游戏不得优先回到 active_game_tool，应交给主 LLM 对话，并只从已启用功能插件读取可编辑软规则；退出游戏不得关闭 websocket；语义模块顶层导入应尽量轻量，避免引入 opus/loguru 等运行依赖导致纯单元测试无法导入。
 ```
 
 ## 12. 管理后台模型测试详情字段补全
@@ -261,11 +261,11 @@
 官方同步时的处理规则：如果官方修改 `handle_user_intent`、语义控制中枢、`play_music`、TTS 队列、`Action.RECORD`、`ContentType.FILE` 或流式 TTS provider，必须保留以下约定：播放、唱某首歌、随机播放、换一首、曲库查询和音乐上下文续播应由大模型根据 `play_music` 工具描述、`<music_library>` 曲库上下文和用户表达调度，不得在旧意图入口里硬编码直接调用播放工具；“我不听了/别放了/停止播放”等停止命令可以由语义控制中枢确定性处理，且 `stop` 必须先于播放触发词处理，并直接走 `handleAbortMessage`，不得被抽成歌名；工具同步结果应使用用户可读的“正在为您播放音乐”，不要只返回“指令已接收”；“此刻为您献上/正在播放/即将为您播放 具体歌曲”这类选曲提示语必须按普通 `ContentType.TEXT` 进入 TTS 播报和 assistant 聊天记录，不得只作为屏幕状态；音乐播放入队必须按 `FIRST/ACTION -> MIDDLE/TEXT -> MIDDLE/FILE -> LAST/ACTION` 发送播放边界，确保提示语播完后再播放文件，并确保火山双流、阿里云流式、讯飞流式、Minimax 等 provider 能把暂存文件音频 flush 到设备；曲库 `.xiaozhi-music-metadata.json` 支持 `aliases` 和 `description`，用于后台配置 ASR 近音、歌曲别名、用户俗称和模型可见背景说明，源码不得写入客户或歌曲专属语义。聊天记录中的 `play_music({...})` 和 `{"result": "正在为您播放音乐"}` 是工具调用审计记录，不应被当作播放失败错误。
 ```
 
-## 17. ACR 镜像生产部署、模型可空与 FunASR 脱钩
+## 17. ACR 镜像生产部署、模型可空与 CPU FunASR
 
 ```text
 定制模块：ACR 镜像生产部署、模型默认配置、后台智能体模板、Python 运行时模型初始化
-改动原因：源码仍完整推送到私有 Git 仓库，但生产服务器不再拉取完整源码，也不从源码构建业务镜像。唯一生产路线改为本地或构建机先构建 `xiaozhi-server` / `xiaozhi-web` 并推送到阿里云 ACR，同时把 `mysql:8.4` 和 `redis:8.0` 同步到 ACR；生产端只 sparse-checkout `deploy/production` 最小部署资产，再从 ACR 拉取全部运行镜像并启动；`xiaozhi-server-base` 仅作为构建缓存镜像，不作为生产运行镜像；升级脚本必须用接近 `acr-build-push` 的摘要格式输出 version、current、assets、images、runtime 和最终访问地址，并在 `/opt/xiaozhi-data/.env` 记录 `XIAOZHI_DEPLOY_VERSION`；本地生产部署不再使用 FunASR / SenseVoiceSmall / model.pt 作为默认语音识别链路；生产 Docker 镜像默认使用 `requirements-docker.txt`，不安装 torch / torchaudio；生产安装阶段允许 ASR、VAD、LLM、TTS、VLLM、Memory、Intent 等模型全部暂时为空，管理员后续在智控台按实际需要配置模型。
+改动原因：源码仍完整推送到私有 Git 仓库，但生产服务器不再拉取完整源码，也不从源码构建业务镜像。唯一生产路线改为本地或构建机先构建 `xiaozhi-server` / `xiaozhi-web` 并推送到阿里云 ACR，同时把 `mysql:8.4` 和 `redis:8.0` 同步到 ACR；生产端只 sparse-checkout `deploy/production` 最小部署资产，再从 ACR 拉取全部运行镜像并启动；`xiaozhi-server-base` 仅作为构建缓存镜像，不作为生产运行镜像；升级脚本必须用接近 `acr-build-push` 的摘要格式输出 version、current、assets、images、runtime 和最终访问地址，并在 `/opt/xiaozhi-data/.env` 记录 `XIAOZHI_DEPLOY_VERSION`；生产 Docker 镜像默认使用 `requirements-docker.txt`，安装 CPU 版 torch / torchaudio / funasr，并在 `xiaozhi-server` 镜像构建阶段优先复用构建机本地 SenseVoiceSmall `model.pt`，本地不存在时才从配置的 URL 下载，从而支持 FunASR 本地 CPU 识别；生产安装阶段允许 ASR、VAD、LLM、TTS、VLLM、Memory、Intent 等模型全部暂时为空，管理员后续在智控台按实际需要配置模型。
 关键文件：
   - Dockerfile-server
   - Dockerfile-server-base
@@ -291,7 +291,7 @@
   - main/manager-web/src/views/roleConfig.vue
   - docs/deployment/private-docker-release.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改 Dockerfile、Docker Compose、安装脚本、默认模型配置、智能体模板初始化、模型配置下发或 WebSocket 初始化流程，必须保留“源码完整进入私有 Git 仓库，但生产服务器只 sparse-checkout `deploy/production` 最小部署资产；生产服务器只拉取阿里云 ACR 中已发布运行镜像，不在生产端源码构建，也不依赖 Docker Hub；生产运行镜像命名为 `xiaozhi-server:latest`、`xiaozhi-web:latest`、`mysql:8.4`、`redis:8.0`，同时支持 Git 短哈希精确版本；`xiaozhi-server-base` 只服务于构建流程；生产用户只需要记住 `~/work/xiaozhi-deploy` 部署资产目录、`/opt/xiaozhi-data` 数据目录、`deploy/production/install` 首次部署和 `deploy/production/upgrade` 后续升级；升级输出必须保持摘要式，能看出本次目标版本、上次部署版本、部署资产 commit、最终运行镜像和访问地址；生产安装不下载、不挂载、不要求 model.pt；生产镜像默认不安装 torch / torchaudio，除非显式使用完整 requirements 启用本地 FunASR；FunASR/FunASRServer 不作为可用默认 ASR；所有模型字段允许为空；模型缺失时服务可启动但对应能力不可用并记录清晰提示”的约定。
+官方同步时的处理规则：如果官方修改 Dockerfile、Docker Compose、安装脚本、默认模型配置、智能体模板初始化、模型配置下发或 WebSocket 初始化流程，必须保留“源码完整进入私有 Git 仓库，但生产服务器只 sparse-checkout `deploy/production` 最小部署资产；生产服务器只拉取阿里云 ACR 中已发布运行镜像，不在生产端源码构建，也不依赖 Docker Hub；生产运行镜像命名为 `xiaozhi-server:latest`、`xiaozhi-web:latest`、`mysql:8.4`、`redis:8.0`，同时支持 Git 短哈希精确版本；`xiaozhi-server-base` 只服务于构建流程；生产用户只需要记住 `~/work/xiaozhi-deploy` 部署资产目录、`/opt/xiaozhi-data` 数据目录、`deploy/production/install` 首次部署和 `deploy/production/upgrade` 后续升级；升级输出必须保持摘要式，能看出本次目标版本、上次部署版本、部署资产 commit、最终运行镜像和访问地址；生产服务器不执行 pip install、不下载源码依赖、不手工安装 FunASR；FunASR CPU 运行依赖由构建机写入 ACR 镜像，SenseVoiceSmall model.pt 优先从构建机本地文件复制进镜像，本地不存在时才下载；默认资源预算必须给 Python 容器至少 2G 内存并允许通过 `/opt/xiaozhi-data/.env` 覆盖；所有模型字段允许为空；模型缺失时服务可启动但对应能力不可用并记录清晰提示；manager-api 即使运行在 dev profile，CORS 也必须读取 `CORS_ORIGINS` 环境变量，生产 `/opt/xiaozhi-data/.env` 的 `XIAOZHI_CORS_ORIGINS` 必须包含浏览器实际访问 Origin，例如 `http://公网IP:8002`，否则登录/注册等浏览器 POST 会在进入业务代码前被 Spring 拦截为 HTTP 403”的约定。
 ```
 
 ## 18. 标准模型存储与运行时契约
@@ -369,4 +369,36 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - docs/models/memory-and-knowledge-governance.md
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方修改 Memory provider、聊天记录上报、ConfigController、AgentController、Shiro config、角色首页、模型配置目录、知识库切片配置或数据库迁移，必须保留长期记忆事实层、`managed_memory` 入口和 `/config/memory/**` server-secret 入口；运行时查询失败或超时时必须降级为空记忆，不能阻塞语音回复；`nomem` 模式不得注入长期记忆，且未选择治理型记忆模式时前端不得自动弹出治理记忆专属字段；`maintenance_llm` 只能引用已配置的 LLM/SLM modelId，不能把 DeepSeek 等模型密钥复制到 Memory 配置或记忆表；知识库 LLM 辅助必须通过模型管理中的模型列表选择 `parser_config.llm_model_id`，不得在知识库页面重复保存 API Key、Base URL 或上游模型名；维护模型只能创建 `pending` 候选，不得绕过管理端确认直接写 active fact；管理端删除/归档/确认/拒绝必须写 revision 审计；显式忘记必须写 tombstone 并阻止对应内容继续被主动使用；删除 `summary_memory` 前必须先完成 Java、Vue、Python、文档和迁移的完整兼容替代。
+```
+
+## 22. 设备对话调试离线可用边界
+
+```text
+定制模块：manager-web 设备对话调试弹窗、xiaozhi-server 虚拟调试连接、Dialogue 系统提示词维护、设备 MCP 状态展示
+改动原因：管理端“对话调试”本质是 `manager-debug-*` 虚拟调试会话，用真实设备 MAC 拉取绑定智能体配置来测试文本对话、知识库、普通服务端插件、外部 MCP、人设和模型配置。真实 ESP32 是否在线只应影响设备自身 MCP / IoT / 摄像头 / 音量亮度等硬件工具，不能导致整个对话调试不可用。曾出现调试连接能发送文本但收不到回复的问题，根因是 `Dialogue.update_system_message()` 在持有非重入锁时调用 `put()` 导致首次 system prompt 写入死锁，日志表现为只有“LLM 收到用户消息”，没有后续“LLM 请求已发起”。
+关键文件：
+  - main/manager-web/src/components/DeviceChatDebugDialog.vue
+  - main/manager-web/src/i18n/zh_CN.js
+  - main/xiaozhi-server/core/utils/dialogue.py
+  - main/xiaozhi-server/tests/test_dialogue.py
+  - main/xiaozhi-server/core/device_runtime_registry.py
+  - main/xiaozhi-server/core/api/device_mcp_handler.py
+  - main/manager-api/src/main/java/xiaozhi/modules/device/service/impl/DeviceServiceImpl.java
+  - docs/mcp/chat-history-mcp-troubleshooting.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改设备调试弹窗、WebSocket 连接初始化、Dialogue、PromptManager、设备 MCP 注册表、设备 MCP HTTP 状态接口或 manager-api 设备调试接口，必须保留以下约定：`manager-debug-*` 调试连接不得注册为真实设备运行时连接，不得覆盖真实设备 MCP/IoT；真实设备未连接时，页面应明确提示“仅设备 MCP 工具不可用”，但仍允许文本、知识库、普通插件、外部 MCP 和智能体配置调试；离线时不要持续轮询设备 MCP 工具列表刷屏，状态轮询可保留以便设备上线后自动恢复工具；`Dialogue.update_system_message()` 不得在持有同一把非重入锁时递归调用 `put()`；调试链路排障时看到“收到 listen / LLM 收到用户消息”但没有“LLM 请求已发起”，应优先检查 LLM 前置准备阶段和 system prompt 写入死锁，而不是误判为真实设备未上线。
+```
+
+## 23. 登录验证码一次性消费与防重复提交
+
+```text
+定制模块：manager-web 登录页、manager-api 登录验证码链路
+改动原因：登录接口会把图形验证码和密码拼接后通过 SM2 加密提交，manager-api 解密后用 captchaId 校验验证码并立即删除缓存。验证码是一次性的；如果前端允许按钮点击、回车或网络重试在同一个 captchaId 上重复提交，第一次请求会消费验证码，后续重复请求即使用户输入正确也会报验证码错误。登录页必须在请求完成前加提交锁，失败后刷新验证码并解锁，成功后跳转，不得无条件定时刷新或重复提交同一个 captchaId。登录、注册、找回密码等携带一次性验证码的接口遇到 HTTP 401/403 或非 200 响应时必须按本次失败处理，不能通过 `reAjaxFun` 自动重放同一份加密请求体。
+关键文件：
+  - main/manager-web/src/views/login.vue
+  - main/manager-web/src/views/auth.scss
+  - main/manager-api/src/main/java/xiaozhi/common/utils/Sm2DecryptUtil.java
+  - main/manager-api/src/main/java/xiaozhi/modules/security/service/impl/CaptchaServiceImpl.java
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改登录页、验证码接口、SM2 加密或 CaptchaService，必须保留验证码一次性消费边界和前端防重复提交锁；登录失败后需要刷新验证码，成功后不得继续发起第二次同 captchaId 的登录请求；`user.login()` 的 networkFail 分支不得自动重试同一份 loginForm，必须回调登录页解锁和刷新验证码；不要把验证码错误简单归因于用户输入错误，需同时检查 captchaId 是否被重复消费。
 ```

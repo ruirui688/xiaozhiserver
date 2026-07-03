@@ -20,6 +20,10 @@ MIRROR_RUNTIME_IMAGES="${MIRROR_RUNTIME_IMAGES:-auto}"
 MYSQL_SOURCE_IMAGE="${MYSQL_SOURCE_IMAGE:-mysql:8.4}"
 REDIS_SOURCE_IMAGE="${REDIS_SOURCE_IMAGE:-redis:8.0}"
 VERBOSE="${VERBOSE:-false}"
+INSTALL_FUNASR_MODEL="${INSTALL_FUNASR_MODEL:-true}"
+FUNASR_MODEL_URL="${FUNASR_MODEL_URL:-https://modelscope.cn/models/iic/SenseVoiceSmall/resolve/master/model.pt}"
+FUNASR_MODEL_LOCAL_PATH="${FUNASR_MODEL_LOCAL_PATH:-}"
+FUNASR_MODEL_CONTEXT="${FUNASR_MODEL_CONTEXT:-}"
 XIAOZHI_DOCKER_QUIET="${XIAOZHI_DOCKER_QUIET:-true}"
 XIAOZHI_PROGRESS="${XIAOZHI_PROGRESS:-true}"
 XIAOZHI_PROGRESS_INTERVAL="${XIAOZHI_PROGRESS_INTERVAL:-5}"
@@ -80,6 +84,11 @@ if [[ "$MIRROR_RUNTIME_IMAGES" != "true" && "$MIRROR_RUNTIME_IMAGES" != "false" 
   exit 1
 fi
 
+if [[ "$INSTALL_FUNASR_MODEL" != "true" && "$INSTALL_FUNASR_MODEL" != "false" ]]; then
+  echo "INSTALL_FUNASR_MODEL must be true or false" >&2
+  exit 1
+fi
+
 if [[ "$XIAOZHI_PROGRESS" != "true" && "$XIAOZHI_PROGRESS" != "false" ]]; then
   echo "XIAOZHI_PROGRESS must be true or false" >&2
   exit 1
@@ -107,6 +116,7 @@ ACR release
   images:    $(short_image_name "$SERVER_IMAGE_REPOSITORY:$VERSION"), $(short_image_name "$WEB_IMAGE_REPOSITORY:$VERSION")
   runtime:   mysql:$MYSQL_TARGET_TAG, redis:$REDIS_TARGET_TAG
   options:   engine=$BUILD_ENGINE base=$BUILD_BASE runtime=$MIRROR_RUNTIME_IMAGES parallel=$PARALLEL_RELEASE_STEPS/$PARALLEL_IMAGE_BUILDS
+  funasr:    cpu=true model=$INSTALL_FUNASR_MODEL
   output:    quiet progress=$XIAOZHI_PROGRESS interval=${XIAOZHI_PROGRESS_INTERVAL}s
 
 EOF
@@ -136,6 +146,10 @@ Default build engine:
 Build options:
   build_base=$BUILD_BASE server_base_image=${SERVER_BASE_IMAGE:-auto}
   mirror_runtime_images=$MIRROR_RUNTIME_IMAGES
+  install_funasr_model=$INSTALL_FUNASR_MODEL
+  funasr_model_local_path=${FUNASR_MODEL_LOCAL_PATH:-auto}
+  funasr_model_context=${FUNASR_MODEL_CONTEXT:-auto}
+  funasr_model_url=$FUNASR_MODEL_URL
 
 Docker output:
   quiet=$XIAOZHI_DOCKER_QUIET verbose=$VERBOSE
@@ -212,6 +226,10 @@ build_business_images() {
   XIAOZHI_DOCKER_QUIET="$XIAOZHI_DOCKER_QUIET" \
   XIAOZHI_PROGRESS="$XIAOZHI_PROGRESS" \
   XIAOZHI_PROGRESS_INTERVAL="$XIAOZHI_PROGRESS_INTERVAL" \
+  INSTALL_FUNASR_MODEL="$INSTALL_FUNASR_MODEL" \
+  FUNASR_MODEL_URL="$FUNASR_MODEL_URL" \
+  FUNASR_MODEL_LOCAL_PATH="$FUNASR_MODEL_LOCAL_PATH" \
+  FUNASR_MODEL_CONTEXT="$FUNASR_MODEL_CONTEXT" \
   PARALLEL_IMAGE_BUILDS="$PARALLEL_IMAGE_BUILDS" \
   PRINT_BUILD_CONFIG=false \
   "$ROOT_DIR/scripts/docker-build-private.sh"

@@ -91,7 +91,7 @@
               </div>
             </div>
           </div>
-          <div class="login-btn" @click="login">{{ $t("login.login") }}</div>
+          <div class="login-btn" :class="{ disabled: loginSubmitting }" @click="login">{{ $t("login.login") }}</div>
 
           <!-- 登录方式切换按钮 -->
           <div class="login-type-container" v-if="enableMobileRegister">
@@ -162,6 +162,7 @@ export default {
       captchaUuid: "",
       captchaUrl: "",
       isMobileLogin: false,
+      loginSubmitting: false,
     };
   },
   mounted() {
@@ -232,6 +233,9 @@ export default {
     },
 
     async login() {
+      if (this.loginSubmitting) {
+        return;
+      }
       if (this.isMobileLogin) {
         // 手机号登录验证
         if (!validateMobile(this.form.mobile, this.form.areaCode)) {
@@ -253,6 +257,10 @@ export default {
       }
       // 验证验证码
       if (!this.validateInput(this.form.captcha, 'login.requiredCaptcha')) {
+        return;
+      }
+      if (!this.sm2PublicKey) {
+        showDanger(this.$t('sm2.publicKeyNotConfigured'));
         return;
       }
       // 加密密码
@@ -278,6 +286,7 @@ export default {
         captchaId: this.form.captchaId
       };
 
+      this.loginSubmitting = true;
       Api.user.login(
         loginData,
         ({ data }) => {
@@ -286,17 +295,14 @@ export default {
           this.getUserInfo();
         },
         (err) => {
+          this.loginSubmitting = false;
           // 直接使用后端返回的国际化消息
-          let errorMessage = err.data.msg || "登录失败";
+          let errorMessage = (err && err.data && err.data.msg) || "登录失败，请刷新验证码后重试";
 
           showDanger(errorMessage);
+          this.fetchCaptcha();
         }
       );
-
-      // 重新获取验证码
-      setTimeout(() => {
-        this.fetchCaptcha();
-      }, 1000);
     },
 
     goToRegister() {

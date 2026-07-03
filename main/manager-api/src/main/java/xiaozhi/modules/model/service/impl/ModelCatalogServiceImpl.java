@@ -1033,8 +1033,9 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         items.add(item("MEMORY_POWERMEM", "Memory", "powermem", "PowerMem",
                 "PowerMem", "长期记忆", "memory", "记忆", "service", "本地/云组合",
                 "service", "本地/云服务", "LLM+Embedding+VectorStore", "LLM/Embedding", "llm_model",
-                List.of("llm_api_key", "embedding_api_key"), List.of("llm_model", "llm_api_key", "embedding_model", "embedding_api_key"),
-                List.of("vector_store", "enable_user_profile", "maintenance_llm"), List.of("支持 sqlite/oceanbase/postgres 等向量存储。"),
+                List.of("llm_api_key"), List.of("llm_model", "llm_api_key", "embedding_model"),
+                List.of("embedding_provider", "embedding_dims", "vector_store", "enable_user_profile", "maintenance_llm"),
+                List.of("支持 sqlite/oceanbase/postgres 等向量存储；使用本地 default embedding 时无需 embedding_api_key。"),
                 List.of(), List.of("Memory_powermem"), ""));
         ModelCatalogDTO reportOnly = item("MEMORY_REPORT_ONLY", "Memory", "mem_report_only", "仅上报记忆",
                 "本地系统", "仅上报聊天记录", "memory", "记忆", "builtin", "内置",

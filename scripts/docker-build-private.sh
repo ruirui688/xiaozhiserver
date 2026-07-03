@@ -26,6 +26,10 @@ WEB_RUNTIME_BASE_IMAGE="${WEB_RUNTIME_BASE_IMAGE:-bellsoft/liberica-runtime-cont
 DEBIAN_MIRROR="${DEBIAN_MIRROR:-https://mirrors.aliyun.com/debian}"
 DEBIAN_SECURITY_MIRROR="${DEBIAN_SECURITY_MIRROR:-https://mirrors.aliyun.com/debian-security}"
 SERVER_REQUIREMENTS="${SERVER_REQUIREMENTS:-main/xiaozhi-server/requirements-docker.txt}"
+INSTALL_FUNASR_MODEL="${INSTALL_FUNASR_MODEL:-true}"
+FUNASR_MODEL_URL="${FUNASR_MODEL_URL:-https://modelscope.cn/models/iic/SenseVoiceSmall/resolve/master/model.pt}"
+FUNASR_MODEL_LOCAL_PATH="${FUNASR_MODEL_LOCAL_PATH:-$ROOT_DIR/main/xiaozhi-server/models/SenseVoiceSmall/model.pt}"
+FUNASR_MODEL_CONTEXT="${FUNASR_MODEL_CONTEXT:-}"
 BUILDKIT_REGISTRY_MIRROR="${BUILDKIT_REGISTRY_MIRROR:-}"
 BUILDKIT_HTTP_PROXY="${BUILDKIT_HTTP_PROXY:-${HTTP_PROXY:-${http_proxy:-}}}"
 BUILDKIT_HTTPS_PROXY="${BUILDKIT_HTTPS_PROXY:-${HTTPS_PROXY:-${https_proxy:-}}}"
@@ -39,6 +43,15 @@ PARALLEL_IMAGE_BUILDS="${PARALLEL_IMAGE_BUILDS:-true}"
 PRINT_BUILD_CONFIG="${PRINT_BUILD_CONFIG:-true}"
 LOG_DIR="${LOG_DIR:-$(mktemp -d -t xiaozhi-docker-build.XXXXXX)}"
 RECREATE_BUILDER=false
+
+if [[ -z "$FUNASR_MODEL_CONTEXT" ]]; then
+  if [[ -s "$FUNASR_MODEL_LOCAL_PATH" ]]; then
+    FUNASR_MODEL_CONTEXT="$(dirname "$FUNASR_MODEL_LOCAL_PATH")"
+  else
+    FUNASR_MODEL_CONTEXT="$LOG_DIR/empty-funasr-model"
+    mkdir -p "$FUNASR_MODEL_CONTEXT"
+  fi
+fi
 
 if [[ "$BUILDKIT_REGISTRY_MIRROR" == "none" || "$BUILDKIT_REGISTRY_MIRROR" == "false" ]]; then
   BUILDKIT_REGISTRY_MIRROR=""
@@ -100,6 +113,11 @@ fi
 
 if [[ "$BUILD_ENGINE" != "buildx" && "$BUILD_ENGINE" != "docker" ]]; then
   echo "BUILD_ENGINE must be buildx or docker" >&2
+  exit 1
+fi
+
+if [[ "$INSTALL_FUNASR_MODEL" != "true" && "$INSTALL_FUNASR_MODEL" != "false" ]]; then
+  echo "INSTALL_FUNASR_MODEL must be true or false" >&2
   exit 1
 fi
 
@@ -419,8 +437,17 @@ hash_server_base_inputs() {
   } | sha256sum | cut -c1-12
 }
 
+funasr_model_cache_key() {
+  if [[ -s "$FUNASR_MODEL_CONTEXT/model.pt" ]]; then
+    sha256sum "$FUNASR_MODEL_CONTEXT/model.pt" | cut -c1-12
+    return
+  fi
+  printf '%s' "$FUNASR_MODEL_URL" | sha256sum | cut -c1-12
+}
+
 SERVER_BASE_CACHE_TAG="${SERVER_BASE_CACHE_TAG:-base-$(hash_server_base_inputs)}"
 SERVER_BASE_CACHE_IMAGE="$SERVER_BASE_IMAGE_REPOSITORY:$SERVER_BASE_CACHE_TAG"
+FUNASR_MODEL_DIGEST="${FUNASR_MODEL_DIGEST:-$(funasr_model_cache_key)}"
 
 image_available_locally_or_remote() {
   local image="$1"
@@ -444,6 +471,9 @@ if [[ "$PRINT_BUILD_CONFIG" != "false" ]]; then
   echo "Debian mirror: $DEBIAN_MIRROR"
   echo "Debian security mirror: $DEBIAN_SECURITY_MIRROR"
   echo "Server requirements: $SERVER_REQUIREMENTS"
+  echo "Install FunASR model: $INSTALL_FUNASR_MODEL"
+  echo "FunASR model context: $FUNASR_MODEL_CONTEXT"
+  echo "FunASR model URL: $FUNASR_MODEL_URL"
   echo "Server base cache image: $SERVER_BASE_CACHE_IMAGE"
   echo "Parallel image builds: $PARALLEL_IMAGE_BUILDS"
   if [[ -n "$BUILDKIT_REGISTRY_MIRROR" ]]; then
@@ -514,7 +544,11 @@ build_server_pipeline() {
   fi
 
   build_image "Build xiaozhi-server image" Dockerfile-server \
+    --build-context "funasr_model=$FUNASR_MODEL_CONTEXT" \
     --build-arg "SERVER_BASE_IMAGE=$server_base_image" \
+    --build-arg "INSTALL_FUNASR_MODEL=$INSTALL_FUNASR_MODEL" \
+    --build-arg "FUNASR_MODEL_URL=$FUNASR_MODEL_URL" \
+    --build-arg "FUNASR_MODEL_DIGEST=$FUNASR_MODEL_DIGEST" \
     --tag "$SERVER_IMAGE_REPOSITORY:latest" \
     --tag "$SERVER_IMAGE_REPOSITORY:$VERSION"
   push_image "$SERVER_IMAGE_REPOSITORY:latest"

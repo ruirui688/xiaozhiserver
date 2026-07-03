@@ -1,6 +1,23 @@
 import { getServiceUrl } from '../api';
 import RequestService from '../httpRequest';
 
+function networkErrorResponse(message) {
+    return {
+        data: {
+            code: -1,
+            msg: message,
+            data: []
+        }
+    };
+}
+
+function networkErrorSummary(err) {
+    if (!err) return 'unknown';
+    if (err.status) return `status=${err.status}`;
+    if (err.message) return err.message;
+    return 'network error';
+}
+
 export default {
     // 已绑设备
     getAgentBindDevices(agentId, callback) {
@@ -12,10 +29,8 @@ export default {
                 callback(res);
             })
             .networkFail((err) => {
-                console.error('获取设备列表失败:', err);
-                RequestService.reAjaxFun(() => {
-                    this.getAgentBindDevices(agentId, callback);
-                });
+                console.error('获取设备列表失败:', networkErrorSummary(err));
+                if (callback) callback(networkErrorResponse('获取设备列表失败'));
             }).send();
     },
     // 解绑设备
@@ -29,10 +44,8 @@ export default {
                 callback(res);
             })
             .networkFail((err) => {
-                console.error('解绑设备失败:', err);
-                RequestService.reAjaxFun(() => {
-                    this.unbindDevice(device_id, callback);
-                });
+                console.error('解绑设备失败:', networkErrorSummary(err));
+                if (callback) callback(networkErrorResponse('解绑设备失败'));
             }).send();
     },
     // 绑定设备
@@ -45,10 +58,8 @@ export default {
                 callback(res);
             })
             .networkFail((err) => {
-                console.error('绑定设备失败:', err);
-                RequestService.reAjaxFun(() => {
-                    this.bindDevice(agentId, deviceCode, callback);
-                });
+                console.error('绑定设备失败:', networkErrorSummary(err));
+                if (callback) callback(networkErrorResponse('绑定设备失败'));
             }).send();
     },
     updateDeviceInfo(id, payload, callback) {
@@ -61,11 +72,8 @@ export default {
                 callback(res)
             })
             .networkFail((err) => {
-                console.error('更新OTA状态失败:', err)
-                this.$message.error(err.msg || '更新OTA状态失败')
-                RequestService.reAjaxFun(() => {
-                    this.updateDeviceInfo(id, payload, callback)
-                })
+                console.error('更新OTA状态失败:', networkErrorSummary(err))
+                if (callback) callback(networkErrorResponse('更新OTA状态失败'))
             }).send()
     },
     // 手动添加设备
@@ -79,10 +87,8 @@ export default {
                 callback(res);
             })
             .networkFail((err) => {
-                console.error('手动添加设备失败:', err);
-                RequestService.reAjaxFun(() => {
-                    this.manualAddDevice(params, callback);
-                });
+                console.error('手动添加设备失败:', networkErrorSummary(err));
+                if (callback) callback(networkErrorResponse('手动添加设备失败'));
             }).send();
     },
     // 获取设备对话调试连接信息
@@ -90,15 +96,14 @@ export default {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/device/debug/${deviceId}`)
             .method('GET')
+            .timeout(10000)
             .success((res) => {
                 RequestService.clearRequestTime();
                 callback(res);
             })
             .networkFail((err) => {
-                console.error('获取设备调试连接信息失败:', err);
-                RequestService.reAjaxFun(() => {
-                    this.getDeviceDebugInfo(deviceId, callback);
-                });
+                console.error('获取设备调试连接信息失败:', networkErrorSummary(err));
+                if (callback) callback(networkErrorResponse('获取设备调试连接信息失败'));
             }).send();
     },
     // 获取设备对话调试状态
@@ -106,6 +111,7 @@ export default {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/device/debug/status/${deviceId}`)
             .method('GET')
+            .timeout(10000)
             .success((res) => {
                 RequestService.clearRequestTime();
                 callback(res);
@@ -114,10 +120,8 @@ export default {
                 callback(res);
             })
             .networkFail((err) => {
-                console.error('获取设备调试状态失败:', err);
-                RequestService.reAjaxFun(() => {
-                    this.getDeviceDebugStatus(deviceId, callback);
-                });
+                console.error('获取设备调试状态失败:', networkErrorSummary(err));
+                if (callback) callback(networkErrorResponse('获取设备调试状态失败'));
             }).send();
     },
     // 获取设备MCP工具列表
@@ -126,6 +130,7 @@ export default {
             .url(`${getServiceUrl()}/device/tools/list/${deviceId}`)
             .method('POST')
             .data({})
+            .timeout(10000)
             .success((res) => {
                 RequestService.clearRequestTime();
                 callback(res);
@@ -134,10 +139,8 @@ export default {
                 callback(res);
             })
             .networkFail((err) => {
-                console.error('获取设备工具列表失败:', err);
-                RequestService.reAjaxFun(() => {
-                    this.getDeviceTools(deviceId, callback);
-                });
+                console.error('获取设备工具列表失败:', networkErrorSummary(err));
+                if (callback) callback(networkErrorResponse('获取设备工具列表失败'));
             }).send();
     },
     // 调用设备MCP工具
@@ -146,6 +149,7 @@ export default {
             .url(`${getServiceUrl()}/device/tools/call/${deviceId}`)
             .method('POST')
             .data(params)
+            .timeout(20000)
             .success((res) => {
                 RequestService.clearRequestTime();
                 callback(res);
@@ -154,10 +158,8 @@ export default {
                 callback(res);
             })
             .networkFail((err) => {
-                console.error('调用设备工具失败:', err);
-                RequestService.reAjaxFun(() => {
-                    this.callDeviceTool(deviceId, params, callback);
-                });
+                console.error('调用设备工具失败:', networkErrorSummary(err));
+                if (callback) callback(networkErrorResponse('调用设备工具失败'));
             }).send();
     },
     // 获取设备状态
@@ -166,6 +168,7 @@ export default {
             .url(`${getServiceUrl()}/device/bind/${agentId}`)
             .method('POST')
             .data({}) // 发送空对象作为请求体
+            .timeout(12000)
             .success((res) => {
                 RequestService.clearRequestTime();
                 callback(res);
@@ -174,10 +177,8 @@ export default {
                 callback(res);
             })
             .networkFail((err) => {
-                console.error('获取设备状态失败:', err);
-                RequestService.reAjaxFun(() => {
-                    this.getDeviceStatus(agentId, callback);
-                });
+                console.error('获取设备状态失败:', networkErrorSummary(err));
+                callback(networkErrorResponse('获取设备状态失败'));
             }).send();
     },
 }

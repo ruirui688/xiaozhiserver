@@ -104,6 +104,8 @@ async def startToChat(conn: "ConnectionHandler", text):
             return True
 
     # manual 模式下不打断正在播放的内容；auto 模式交给当前 LLM 做语义裁决。
+    semantic_checked_after_interrupt = False
+
     if conn.client_is_speaking and conn.client_listen_mode != "manual":
         context = None
         if getattr(conn, "semantic_center", None):
@@ -120,12 +122,14 @@ async def startToChat(conn: "ConnectionHandler", text):
         if route_key in SemanticRouter.STOP_ALL:
             # Deterministic stop — skip LLM call, abort immediately
             await handleAbortMessage(conn)
-            handled_by_semantic = await conn.semantic_center.handle_user_text(conn, interruption_text)
-            if not handled_by_semantic:
+            handled_by_semantic = False
+            if getattr(conn, "semantic_center", None):
+                handled_by_semantic = await conn.semantic_center.handle_user_text(conn, interruption_text)
+            if not handled_by_semantic and getattr(conn, "semantic_center", None):
                 with conn._abort_lock:
                     conn.client_abort = False
                 conn.executor.submit(conn.chat, interruption_text)
-            return
+            return True
         classifier = SemanticInterruptionClassifier()
         classification = await classifier.classify(
             conn, interruption_text, context
@@ -151,10 +155,20 @@ async def startToChat(conn: "ConnectionHandler", text):
         )
         await handleAbortMessage(conn)
         if classification.category == "interrupt":
-            return True
+            if getattr(conn, "semantic_center", None):
+                semantic_checked_after_interrupt = True
+                handled_by_semantic = await conn.semantic_center.handle_user_text(conn, actual_text)
+                if handled_by_semantic:
+                    return True
+                conn.logger.bind(tag=TAG).info(
+                    "语义打断interrupt未命中控制指令，按新用户轮次处理: "
+                    f"text={interruption_text[:50]}"
+                )
+            else:
+                return True
 
     # 语义控制中枢优先处理高置信度控制类指令，未处理再进入旧流程
-    if getattr(conn, "semantic_center", None):
+    if getattr(conn, "semantic_center", None) and not semantic_checked_after_interrupt:
         semantic_handled = await conn.semantic_center.handle_user_text(conn, actual_text)
         if semantic_handled:
             return True

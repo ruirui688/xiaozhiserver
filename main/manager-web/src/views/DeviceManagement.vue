@@ -225,8 +225,9 @@ export default {
         const res = await Api.dict.getDictDataByType('FIRMWARE_TYPE')
         this.firmwareTypes = res.data
       } catch (error) {
-        console.error(this.$t('device.getFirmwareTypeFailed') + ':', error)
-        this.$message.error(error.message || this.$t('device.getFirmwareTypeFailed'))
+        const errorSummary = error && error.status ? `status=${error.status}` : (error && error.message) || 'unknown'
+        console.error(this.$t('device.getFirmwareTypeFailed') + ':', errorSummary)
+        this.$message.error((error && error.message) || this.$t('device.getFirmwareTypeFailed'))
       }
     },
     handlePageSizeChange(val) {
@@ -419,10 +420,7 @@ export default {
 
     // 获取设备状态
     fetchDeviceStatus(agentId) {
-      // 开启表格等待状态，处理动态加载表头导致鼠标所在行的hover事件无法移除的问题
-      this.loading = true;
       Api.device.getDeviceStatus(agentId, ({ data }) => {
-        this.loading = false;
         if (data.code === 0) {
           try {
             // 解析后端返回的设备状态JSON

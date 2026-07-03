@@ -119,6 +119,7 @@ export default {
       deviceRuntimeStatus: null,
       statusLoading: false,
       toolsLoading: false,
+      toolsRequesting: false,
       heartbeatTimer: null,
       statusRefreshTimer: null,
       toolRefreshTimer: null,
@@ -163,6 +164,9 @@ export default {
         runtime_unavailable: this.$t('deviceDebug.statusRuntimeUnavailable')
       };
       return statusMap[this.deviceStatusCode] || this.$t('deviceDebug.noTools');
+    },
+    shouldFetchDeviceTools() {
+      return ['mcp_initializing', 'mcp_ready'].includes(this.deviceStatusCode);
     },
     deviceStatusCode() {
       return (this.deviceRuntimeStatus && this.deviceRuntimeStatus.status) || 'unknown';
@@ -257,6 +261,7 @@ export default {
       this.mcpToolsStatus = '';
       this.deviceRuntimeStatus = null;
       this.statusLoading = false;
+      this.toolsRequesting = false;
       this.pcmRemainder = new Int16Array(0);
       this.activePlaybackSources = [];
       this.assistantSpeaking = false;
@@ -281,8 +286,14 @@ export default {
     loadTools() {
       if (!this.deviceId) return;
       this.toolsLoading = true;
-      this.fetchDeviceStatus();
-      this.fetchDeviceTools().finally(() => {
+      this.fetchDeviceStatus().then(() => {
+        if (this.shouldFetchDeviceTools) {
+          return this.fetchDeviceTools();
+        }
+        this.mcpTools = [];
+        this.mcpToolsStatus = '';
+        return [];
+      }).finally(() => {
         this.toolsLoading = false;
       });
       this.startStatusRefresh();
@@ -317,6 +328,10 @@ export default {
         this.mcpTools = [];
         return Promise.resolve([]);
       }
+      if (this.toolsRequesting) {
+        return Promise.resolve(this.mcpTools);
+      }
+      this.toolsRequesting = true;
       return new Promise((resolve) => {
         Api.device.getDeviceTools(this.deviceId, (res) => {
           const data = res && res.data && res.data.data;
@@ -324,6 +339,7 @@ export default {
           this.mcpTools = tools;
           this.mcpToolsStatus = this.resolveToolsStatus(res, data, tools);
           this.addEvent(`device mcp tools/list -> ${tools.length}`);
+          this.toolsRequesting = false;
           resolve(tools);
         });
       });
@@ -1012,7 +1028,11 @@ export default {
     startStatusRefresh() {
       this.stopStatusRefresh();
       this.statusRefreshTimer = setInterval(() => {
-        this.fetchDeviceStatus();
+        this.fetchDeviceStatus().then(() => {
+          if (this.shouldFetchDeviceTools && this.mcpTools.length === 0) {
+            this.fetchDeviceTools();
+          }
+        });
       }, STATUS_REFRESH_INTERVAL_MS);
     },
     stopStatusRefresh() {
@@ -1023,9 +1043,11 @@ export default {
     },
     startToolRefresh() {
       this.stopToolRefresh();
-      this.fetchDeviceTools();
+      if (this.shouldFetchDeviceTools) {
+        this.fetchDeviceTools();
+      }
       this.toolRefreshTimer = setInterval(() => {
-        if (this.deviceStatusCode !== 'mcp_ready') {
+        if (this.shouldFetchDeviceTools && this.deviceStatusCode !== 'mcp_ready') {
           this.fetchDeviceTools();
         }
       }, TOOL_REFRESH_INTERVAL_MS);
@@ -1038,8 +1060,11 @@ export default {
     },
     disconnectDebug() {
       this.closeDebugSession(false);
-      this.fetchDeviceStatus();
-      this.fetchDeviceTools();
+      this.fetchDeviceStatus().then(() => {
+        if (this.shouldFetchDeviceTools) {
+          this.fetchDeviceTools();
+        }
+      });
     },
     closeDebugSession(stopPolling) {
       this.stopRecording();

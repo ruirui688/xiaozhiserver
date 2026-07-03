@@ -1,6 +1,7 @@
 import asyncio
 import json
 import sys
+import time
 from pathlib import Path
 
 
@@ -22,19 +23,22 @@ class _Logger:
 
 
 class _LLM:
-    def __init__(self, response):
+    def __init__(self, response, delay=0):
         self.response = response
+        self.delay = delay
         self.calls = []
 
     def response_no_stream(self, **kwargs):
         self.calls.append(kwargs)
+        if self.delay:
+            time.sleep(self.delay)
         return self.response
 
 
 class _Conn:
-    def __init__(self, llm_response):
-        self.config = {"semantic_interruption": {"timeout_seconds": 1.0}}
-        self.llm = _LLM(llm_response)
+    def __init__(self, llm_response, timeout_seconds=1.0, llm_delay=0):
+        self.config = {"semantic_interruption": {"timeout_seconds": timeout_seconds}}
+        self.llm = _LLM(llm_response, delay=llm_delay)
         self.logger = _Logger()
         self.dialogue = Dialogue()
         self.dialogue.put(Message(role="user", content="介绍一下这个展品"))
@@ -55,6 +59,13 @@ def _context():
 
 def _classify(llm_response, text):
     conn = _Conn(llm_response)
+    result = asyncio.run(
+        SemanticInterruptionClassifier().classify(conn, text, _context())
+    )
+    return result, conn
+
+
+def _classify_with_conn(conn, text):
     result = asyncio.run(
         SemanticInterruptionClassifier().classify(conn, text, _context())
     )
@@ -137,3 +148,18 @@ def test_explicit_stop_example_follows_llm_interrupt_decision():
 
     assert result.category == "interrupt"
     assert result.should_abort
+
+
+def test_llm_timeout_falls_back_to_new_turn_without_crashing():
+    conn = _Conn(
+        '{"decision":"continue","reason":"太慢"}',
+        timeout_seconds=0.01,
+        llm_delay=0.05,
+    )
+
+    result, conn = _classify_with_conn(conn, "你开心吗")
+
+    assert result.category == "new_turn"
+    assert result.should_abort
+    assert result.reason == "llm_timeout"
+    assert conn.llm.calls

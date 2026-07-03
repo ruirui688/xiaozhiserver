@@ -8,3 +8,4 @@ data/
 main/manager-web/.env*
 main/manager-mobile/.env*
 main/manager-mobile/env/.env*
+main/xiaozhi-server/models/SenseVoiceSmall/model.pt

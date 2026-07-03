@@ -15,12 +15,15 @@ export default {
             })
             .fail((err) => {
                 RequestService.clearRequestTime()
-                failCallback(err)
+                if (failCallback) {
+                    failCallback(err)
+                }
             })
-            .networkFail(() => {
-                RequestService.reAjaxFun(() => {
-                    this.login(loginForm, callback)
-                })
+            .networkFail((err) => {
+                RequestService.clearRequestTime()
+                if (failCallback) {
+                    failCallback(err)
+                }
             }).send()
     },
     // 获取验证码

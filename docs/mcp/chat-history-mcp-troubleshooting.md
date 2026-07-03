@@ -278,6 +278,68 @@ MCP：不可用 / 已连接，未启用 MCP / 初始化中 / 已就绪
 
 1. `python3 -m py_compile main/xiaozhi-server/core/connection.py main/xiaozhi-server/core/handle/helloHandle.py main/xiaozhi-server/core/providers/tools/device_mcp/mcp_handler.py main/xiaozhi-server/core/api/device_mcp_handler.py` 通过。
 
+### 2026-07-02 离线设备仍应允许对话调试
+
+现象：真实 ESP32 设备不在线时，管理端“对话调试”可以建立 `manager-debug-*` 调试 WebSocket，也能发送文本，但页面收不到助手回复；左侧同时显示“真实设备：未连接”“设备 MCP 工具为空”。
+
+排查日志显示，调试连接发送的文本已经进入 Python 实时服务：
+
+```text
+收到listen消息：{"type":"listen","state":"detect","text":"你好"}
+大模型收到用户消息: 你好
+```
+
+但后续没有出现 `LLM请求已发起` 日志，说明卡点不在前端 WebSocket，也不在真实设备在线状态，而是在调试连接进入 LLM 前的运行时准备阶段。
+
+核心边界结论：
+
+1. `manager-debug-*` 是管理端创建的虚拟调试会话，用真实设备 MAC 拉取该设备绑定的智能体配置。
+2. 真实设备是否在线，只应该影响设备自身 MCP / IoT / 摄像头 / 音量亮度等硬件工具。
+3. 文本对话、知识库、普通服务端插件、外部 MCP、智能体人设和模型配置调试，不应依赖真实 ESP32 在线。
+4. `device_runtime_registry.py` 仍必须跳过 `manager-debug-*`，避免调试连接覆盖真实设备运行时连接。
+5. 前端状态必须把“调试会话连接”“真实设备运行时连接”“设备 MCP 状态”分开展示，不能把“真实设备未连接”解释成整个调试不可用。
+
+本次根因：
+
+`Dialogue.update_system_message()` 在持有 `threading.Lock` 时调用 `self.put()`，而 `put()` 会再次获取同一把非重入锁。调试连接初始化 system prompt 时，如果当前对话还没有 system message，会在这里死锁，表现为：
+
+```text
+大模型收到用户消息
+  -> 无 LLM请求已发起
+  -> 页面一直收不到助手回复
+```
+
+修复：
+
+1. `core/utils/dialogue.py` 中 `update_system_message()` 在锁内直接 append system message，不再递归调用 `put()`。
+2. 新增 `tests/test_dialogue.py`，覆盖首次新增和后续替换 system message，防止死锁回归。
+3. `DeviceChatDebugDialog.vue` 离线时不再持续轮询 `/device/tools/list/{deviceId}`，只保留状态轮询；待真实设备上线且 MCP 初始化/就绪后再拉取工具。
+4. `zh_CN.js` 文案明确：“真实设备未连接，仅设备 MCP 工具不可用；文本、知识库和普通插件调试可继续”。
+
+同日追加严重问题：用户在助手播报期间输入“你开心吗”后，页面不再收到任何回复，输入框变为“请先连接调试会话”。生产日志显示该输入进入了语义打断分类：
+
+```text
+收到listen消息：{"type":"listen","state":"detect","text":"你开心吗"}
+语义打断大模型裁决超时(1.5s)，按新用户轮次处理
+Connection error: 'coroutine' object has no attribute 'done'
+```
+
+根因是 `SemanticInterruptionClassifier.classify()` 使用 `asyncio.to_thread(...)` 后直接把返回值当作 Future，在超时分支访问 `.done()`。但 `asyncio.to_thread` 返回的是 coroutine，不是 Task/Future；超时时兜底分支反而抛出 `AttributeError`，导致 `ConnectionHandler` 关闭 WebSocket。
+
+修复：
+
+1. `core/semantic/interruption.py` 将 `asyncio.to_thread(...)` 包装为 `asyncio.create_task(...)`，超时后可安全判断和取消。
+2. 新增 `test_llm_timeout_falls_back_to_new_turn_without_crashing`，确保裁决超时时返回 `new_turn/llm_timeout` 而不是关闭连接。
+3. 补齐语义打断流程测试桩的 `_abort_lock` 和 executor Future 行为，验证 new_turn 分支会 abort 当前播报并提交新聊天。
+
+后续修改这条链路时必须保持：
+
+```text
+真实设备离线 != 调试不可用
+真实设备离线 == 设备本身 MCP/IoT/硬件能力不可用
+语义打断裁决超时 != 连接错误；必须降级为 new_turn 并继续处理用户新问题
+```
+
 ### 2026-06-16 MQTT 网关路径状态修复记录
 
 截图复核时仍显示：
