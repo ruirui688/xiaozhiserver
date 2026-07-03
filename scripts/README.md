@@ -136,6 +136,8 @@ cd deploy/production
 ./upgrade
 ```
 
+需要固定部署或回滚时，才使用 `VERSION=<git短哈希> ./upgrade`。
+
 首次部署后，`/opt/xiaozhi-data/.env` 会记录 `XIAOZHI_DEPLOY_MODE=pull`、`XIAOZHI_SERVER_IMAGE_REPOSITORY` 和 `XIAOZHI_WEB_IMAGE_REPOSITORY`。后续 `deploy/production/upgrade` 会复用该配置。
 
 ## 脚本分组

@@ -37,7 +37,7 @@ scripts/acr-build-push
 
 # 3. On the production server — both sources are now from main
 cd ~/work/xiaozhi-deploy/deploy/production
-VERSION=<git-short-sha> ./upgrade
+./upgrade
 ```
 
 **Never run `acr-build-push` from a feature branch and then upgrade production
@@ -84,12 +84,13 @@ Standard production commands:
 ```bash
 sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
 ./install
-VERSION=<git-short-sha> ./upgrade
+./upgrade
 ```
 
-`./upgrade` still supports `VERSION=latest`, but `latest` is a mutable tag. Use
-the short Git hash printed by `scripts/acr-build-push` when you need to know the
-exact image version installed on the server.
+`./install` and `./upgrade` default to `VERSION=latest`, so the normal path is:
+build and push from the build machine, then run `./upgrade` on production. Use
+`VERSION=<git-short-sha> ./upgrade` only when you need a pinned deployment or
+rollback.
 
 `./install` waits for manager-api startup, reads the generated `server.secret`
 from the MySQL container, writes it into

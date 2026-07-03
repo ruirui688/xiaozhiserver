@@ -50,9 +50,9 @@
 # 构建机：发布镜像
 scripts/acr-login && scripts/acr-build-push
 
-# 生产机：升级到指定版本
+# 生产机：升级到最新发布镜像
 cd ~/work/xiaozhi-deploy/deploy/production
-VERSION=<git短哈希> ./upgrade
+./upgrade
 
 # 生产机：查看日志
 docker logs -f xiaozhi-esp32-server
@@ -309,11 +309,11 @@ docker restart xiaozhi-esp32-server
 ```bash
 # 1. 构建机：发布新版本
 scripts/acr-build-push
-# 输出示例：Pushed xiaozhi-server:fb945e48
+# 输出会同时给出 latest 部署命令和短哈希固定版本部署命令
 
 # 2. 生产机：升级
 cd ~/work/xiaozhi-deploy/deploy/production
-VERSION=fb945e48 ./upgrade
+./upgrade
 ```
 
 `./upgrade` 输出摘要：
@@ -331,7 +331,7 @@ Images     运行中容器绑定的业务镜像
 Runtime    运行中容器绑定的 MySQL/Redis 镜像
 ```
 
-`./upgrade` 会更新 sparse-checkout 资产，复用 `.env` 配置，拉取指定版本并重启容器。
+`./upgrade` 会更新 sparse-checkout 资产，复用 `.env` 配置，默认拉取 `latest` 并重启容器。需要固定版本或回滚时，才显式使用 `VERSION=<git短哈希> ./upgrade`。
 
 ### 6.2 回滚
 
