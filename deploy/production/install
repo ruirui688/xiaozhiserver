@@ -114,8 +114,12 @@ prepare_runtime_files() {
   fi
   write_runtime_env
   sed -i "s|:latest\$|:$VERSION|" "$DATA_DIR/docker-compose.yml"
-  chown -R 999:999 "$DATA_DIR/data" "$DATA_DIR/music"
-  chmod 755 "$DATA_DIR/data" "$DATA_DIR/music"
+  # xiaozhi-server runs as 999:999 and writes data/.auth_key.
+  chown -R 999:999 "$DATA_DIR/data"
+  chmod 755 "$DATA_DIR/data"
+  # manager-api/web runs as 100:101 and writes OTA firmware plus music uploads.
+  chown -R 100:101 "$DATA_DIR/uploadfile" "$DATA_DIR/music"
+  chmod 755 "$DATA_DIR/uploadfile" "$DATA_DIR/music"
   chmod 644 "$DATA_DIR/data/.config.yaml"
 }
 

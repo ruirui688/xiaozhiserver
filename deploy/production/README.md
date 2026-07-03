@@ -71,6 +71,14 @@ Important persistent subdirectories:
 /opt/xiaozhi-data/music       uploaded server music library
 ```
 
+The install script fixes bind-mount ownership for the non-root containers:
+
+```text
+data       999:999  xiaozhi-server writes .auth_key and reads .config.yaml
+uploadfile 100:101  manager-api writes OTA firmware uploads
+music      100:101  manager-api writes uploaded music; xiaozhi-server reads it
+```
+
 Standard production commands:
 
 ```bash
