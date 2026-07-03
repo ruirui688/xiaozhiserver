@@ -23,18 +23,23 @@ format_duration() {
 run_step() {
   local label="$1"
   shift
-  local start_ts end_ts elapsed
+  local start_ts end_ts elapsed log_file
+  log_file="$(mktemp -t xiaozhi-install-step.XXXXXX.log)"
   start_ts="$(date +%s)"
   printf "  %-34s" "$label"
-  if "$@" >/dev/null 2>&1; then
+  if "$@" >"$log_file" 2>&1; then
     end_ts="$(date +%s)"
     elapsed=$((end_ts - start_ts))
     printf "OK   %s\n" "$(format_duration "$elapsed")"
+    rm -f "$log_file"
     return 0
   fi
   end_ts="$(date +%s)"
   elapsed=$((end_ts - start_ts))
   printf "FAIL %s\n" "$(format_duration "$elapsed")"
+  echo "ERROR: $label failed. Last output:" >&2
+  tail -40 "$log_file" >&2
+  rm -f "$log_file"
   return 1
 }
 
@@ -287,6 +292,15 @@ if [ "$FINAL_STATUS" != "running" ]; then
   echo "ERROR: manager-api not running (status: $FINAL_STATUS)" >&2
   docker logs xiaozhi-esp32-server-web --tail 20 >&2
   exit 1
+fi
+
+SERVER_STATUS=$(docker inspect --format='{{.State.Status}}' xiaozhi-esp32-server 2>/dev/null || echo "missing")
+if [ "$SERVER_STATUS" != "running" ]; then
+  echo "WARNING: xiaozhi-server is not running yet (status: $SERVER_STATUS)." >&2
+  echo "If this is the first install, configure manager-api.server.secret in $DATA_DIR/data/.config.yaml after creating the admin user, then restart with:" >&2
+  echo "  docker compose -f $DATA_DIR/docker-compose.yml --env-file $DATA_DIR/.env up -d xiaozhi-esp32-server" >&2
+  echo "--- xiaozhi-server last 20 log lines ---" >&2
+  docker logs xiaozhi-esp32-server --tail 20 >&2 || true
 fi
 
 LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
