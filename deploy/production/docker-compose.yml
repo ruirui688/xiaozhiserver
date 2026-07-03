@@ -57,7 +57,7 @@ services:
       - JAVA_TOOL_OPTIONS=${XIAOZHI_WEB_JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=60.0 -XX:InitialRAMPercentage=20.0 -XX:+ExitOnOutOfMemoryError}
       - SPRING_DATASOURCE_DRUID_URL=jdbc:mysql://xiaozhi-esp32-server-db:3306/xiaozhi_esp32_server?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&nullCatalogMeansCurrent=true&connectTimeout=30000&socketTimeout=30000&autoReconnect=true&failOverReadOnly=false&maxReconnects=10
       - SPRING_DATASOURCE_DRUID_USERNAME=root
-      - SPRING_DATASOURCE_DRUID_PASSWORD=${XIAOZHI_MYSQL_ROOT_PASSWORD:?Set XIAOZHI_MYSQL_ROOT_PASSWORD in /opt/xiaozhi-data/.env}
+      - SPRING_DATASOURCE_DRUID_PASSWORD=${XIAOZHI_MYSQL_ROOT_PASSWORD:?Set XIAOZHI_MYSQL_ROOT_PASSWORD in DATA_DIR/.env}
       - SPRING_DATA_REDIS_HOST=xiaozhi-esp32-server-redis
       - SPRING_DATA_REDIS_PASSWORD=${XIAOZHI_REDIS_PASSWORD:-}
       - SPRING_DATA_REDIS_PORT=6379
@@ -101,7 +101,7 @@ services:
       - ./mysql/data:/var/lib/mysql
     environment:
       - TZ=Asia/Shanghai
-      - MYSQL_ROOT_PASSWORD=${XIAOZHI_MYSQL_ROOT_PASSWORD:?Set XIAOZHI_MYSQL_ROOT_PASSWORD in /opt/xiaozhi-data/.env}
+      - MYSQL_ROOT_PASSWORD=${XIAOZHI_MYSQL_ROOT_PASSWORD:?Set XIAOZHI_MYSQL_ROOT_PASSWORD in DATA_DIR/.env}
       - MYSQL_DATABASE=xiaozhi_esp32_server
       - MYSQL_INITDB_ARGS="--character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci"
     logging: *default-logging

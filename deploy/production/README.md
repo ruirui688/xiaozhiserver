@@ -49,26 +49,27 @@ copied manually), update the deploy files first before pulling new images:
 
 ```bash
 # Manual deploy file update (non-git production server)
-scp deploy/production/docker-compose.yml production:/opt/xiaozhi-data/
-scp deploy/production/install production:/opt/xiaozhi-data/
+scp deploy/production/docker-compose.yml production:~/xiaozhi-data/
+scp deploy/production/install production:~/xiaozhi-data/
 ```
 
 ## Runtime data
 
-Runtime data is stored outside the Git checkout:
+Runtime data is stored outside the Git checkout, under the deploying user's
+home directory by default:
 
 ```text
-/opt/xiaozhi-data
+~/xiaozhi-data
 ```
 
 Important persistent subdirectories:
 
 ```text
-/opt/xiaozhi-data/data        xiaozhi-server private config
-/opt/xiaozhi-data/mysql/data  MySQL data (InnoDB)
-/opt/xiaozhi-data/redis/data  Redis AOF persistence data
-/opt/xiaozhi-data/uploadfile  manager-api uploads
-/opt/xiaozhi-data/music       uploaded server music library
+~/xiaozhi-data/data        xiaozhi-server private config
+~/xiaozhi-data/mysql/data  MySQL data (InnoDB)
+~/xiaozhi-data/redis/data  Redis AOF persistence data
+~/xiaozhi-data/uploadfile  manager-api uploads
+~/xiaozhi-data/music       uploaded server music library
 ```
 
 The install script fixes bind-mount ownership for the non-root containers:
@@ -87,9 +88,26 @@ sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
 ./upgrade
 ```
 
-Use `sudo docker login`, not plain `docker login`. `install` escalates to root
-and forces Docker to read `/root/.docker/config.json`; this matches the
-credentials used by `sudo docker pull`.
+`install` no longer runs the whole script as root. It keeps deploy files,
+generated compose files, `.env`, database files, uploads, and private config
+under `~/xiaozhi-data` by default. The bind-mount ownership fix is performed
+through one-shot Docker containers, so elevated host access is limited to Docker
+when the current user cannot access Docker directly.
+
+If the current user can access the Docker daemon, `install` uses plain
+`docker`. Otherwise it runs Docker as `sudo docker`, which means ACR login must
+exist in root's Docker config:
+
+```bash
+sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
+```
+
+For legacy deployments that intentionally keep data under `/opt/xiaozhi-data`,
+run with an explicit data directory:
+
+```bash
+DATA_DIR=/opt/xiaozhi-data ./upgrade
+```
 
 `./install` and `./upgrade` default to `VERSION=latest`, so the normal path is:
 build and push from the build machine, then run `./upgrade` on production. Use
@@ -98,7 +116,7 @@ rollback.
 
 `./install` waits for manager-api startup, reads the generated `server.secret`
 from the MySQL container, writes it into
-`/opt/xiaozhi-data/data/.config.yaml`, fixes bind-mount permissions for the
+`~/xiaozhi-data/data/.config.yaml`, fixes bind-mount permissions for the
 non-root Python container user, and restarts `xiaozhi-server`. First install no
 longer requires manually copying `server.secret` from the web console.
 
@@ -107,7 +125,7 @@ Upgrade output is intentionally compact:
 ```text
 Production deploy
   version   image tag requested for this deployment
-  current   version stored in /opt/xiaozhi-data/.env from the previous run
+  current   version stored in DATA_DIR/.env from the previous run
   assets    Git branch and deploy script commit before/after pull
   images    business image tags to pull and run
 
@@ -139,7 +157,7 @@ Redis (healthy) ──┘
 ## Redis persistence
 
 Redis runs with AOF (`--appendonly yes`) and stores its data at
-`/opt/xiaozhi-data/redis/data`. User sessions survive container restarts and
+`~/xiaozhi-data/redis/data`. User sessions survive container restarts and
 `./upgrade` runs.
 
 ## Resource limits
@@ -162,7 +180,7 @@ about 2 GB of memory for reliable startup on CPU-only hosts.
 Override the `XIAOZHI_*_CPUS`, `XIAOZHI_*_MEM_LIMIT`,
 `XIAOZHI_FUNASR_THREADS`, `XIAOZHI_MYSQL_INNODB_BUFFER_POOL_SIZE`,
 `XIAOZHI_REDIS_MAXMEMORY`, or `XIAOZHI_WEB_JAVA_TOOL_OPTIONS` values in
-`/opt/xiaozhi-data/.env` when the server size changes. Existing `.env` values
+`~/xiaozhi-data/.env` when the server size changes. Existing `.env` values
 are preserved during upgrade; if an older deployment still has
 `XIAOZHI_SERVER_MEM_LIMIT=768m`, raise it to at least `2048m` before enabling
 FunASR.

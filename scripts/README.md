@@ -129,8 +129,10 @@ sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
 ./install
 ```
 
-必须使用 `sudo docker login`，因为安装脚本提权后会使用 root 的 Docker
-凭据目录 `/root/.docker/config.json` 拉取 ACR 镜像。
+安装脚本主体按当前部署用户运行，默认数据目录是 `~/xiaozhi-data`。
+如果当前用户能直接访问 Docker daemon，脚本使用普通 `docker`；如果不能，
+脚本只对 Docker 命令使用 `sudo docker`，因此这种主机上需要先执行
+`sudo docker login`。
 
 生产服务器升级：
 
@@ -141,7 +143,7 @@ cd deploy/production
 
 需要固定部署或回滚时，才使用 `VERSION=<git短哈希> ./upgrade`。
 
-首次部署后，`/opt/xiaozhi-data/.env` 会记录 `XIAOZHI_DEPLOY_MODE=pull`、`XIAOZHI_SERVER_IMAGE_REPOSITORY` 和 `XIAOZHI_WEB_IMAGE_REPOSITORY`。后续 `deploy/production/upgrade` 会复用该配置。
+首次部署后，`~/xiaozhi-data/.env` 会记录 `XIAOZHI_DEPLOY_MODE=pull`、`XIAOZHI_SERVER_IMAGE_REPOSITORY` 和 `XIAOZHI_WEB_IMAGE_REPOSITORY`。后续 `deploy/production/upgrade` 会复用该配置。旧部署如需继续使用 `/opt/xiaozhi-data`，执行时显式传入 `DATA_DIR=/opt/xiaozhi-data`。
 
 ## 脚本分组
 

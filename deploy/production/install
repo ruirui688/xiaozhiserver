@@ -2,14 +2,42 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DATA_DIR="${DATA_DIR:-${INSTALL_DIR:-/opt/xiaozhi-data}}"
-
-if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-  # Preserve caller overrides such as VERSION/DATA_DIR, but force Docker to use
-  # root's credential store. Without this, sudo -E keeps HOME=/home/<user> and
-  # docker pull cannot see credentials created by sudo docker login.
-  exec sudo -E HOME=/root DOCKER_CONFIG=/root/.docker "$0" "$@"
+DEPLOY_USER="${XIAOZHI_DEPLOY_USER:-${SUDO_USER:-${USER:-$(id -un)}}}"
+DEPLOY_HOME="${XIAOZHI_DEPLOY_HOME:-}"
+if [[ -z "$DEPLOY_HOME" && "$DEPLOY_USER" != "root" ]]; then
+  DEPLOY_HOME="$(getent passwd "$DEPLOY_USER" 2>/dev/null | cut -d: -f6 || true)"
 fi
+DEPLOY_HOME="${DEPLOY_HOME:-${HOME:-/root}}"
+DATA_DIR="${DATA_DIR:-${INSTALL_DIR:-$DEPLOY_HOME/xiaozhi-data}}"
+
+DOCKER_CMD=(docker)
+DOCKER_CONFIG_DISPLAY="${DOCKER_CONFIG:-${HOME:-$DEPLOY_HOME}/.docker}"
+
+configure_docker_command() {
+  if docker info >/dev/null 2>&1; then
+    DOCKER_CMD=(docker)
+    DOCKER_CONFIG_DISPLAY="${DOCKER_CONFIG:-${HOME:-$DEPLOY_HOME}/.docker}"
+    return
+  fi
+
+  if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+    DOCKER_CMD=(docker)
+    DOCKER_CONFIG_DISPLAY="${DOCKER_CONFIG:-${HOME:-/root}/.docker}"
+    return
+  fi
+
+  if ! command -v sudo >/dev/null 2>&1; then
+    echo "Docker daemon is not reachable by the current user, and sudo is not available." >&2
+    exit 1
+  fi
+
+  DOCKER_CMD=(sudo docker)
+  DOCKER_CONFIG_DISPLAY="/root/.docker"
+}
+
+docker_cmd() {
+  "${DOCKER_CMD[@]}" "$@"
+}
 
 DEFAULT_SERVER_IMAGE_REPOSITORY="crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-server"
 DEFAULT_WEB_IMAGE_REPOSITORY="crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-web"
@@ -54,7 +82,7 @@ short_image_name() {
 
 container_image() {
   local container="$1"
-  docker inspect --format='{{.Config.Image}}' "$container" 2>/dev/null || printf "-"
+  docker_cmd inspect --format='{{.Config.Image}}' "$container" 2>/dev/null || printf "-"
 }
 
 read_existing_env() {
@@ -104,35 +132,58 @@ EOF
 }
 
 pull_images() {
-  docker pull --quiet "$SERVER_IMAGE" >/dev/null
-  docker pull --quiet "$WEB_IMAGE" >/dev/null
-  docker pull --quiet "$MYSQL_IMAGE" >/dev/null
-  docker pull --quiet "$REDIS_IMAGE" >/dev/null
+  docker_cmd pull --quiet "$SERVER_IMAGE" >/dev/null
+  docker_cmd pull --quiet "$WEB_IMAGE" >/dev/null
+  docker_cmd pull --quiet "$MYSQL_IMAGE" >/dev/null
+  docker_cmd pull --quiet "$REDIS_IMAGE" >/dev/null
+}
+
+fix_runtime_ownership() {
+  docker_cmd run --rm --user 0 --entrypoint sh \
+    -v "$DATA_DIR/data:/target" \
+    "$SERVER_IMAGE" \
+    -c "chown -R 999:999 /target && chmod 755 /target && if [ -f /target/.config.yaml ]; then chmod 644 /target/.config.yaml; fi" \
+    >/dev/null
+
+  docker_cmd run --rm --user 0 --entrypoint sh \
+    -v "$DATA_DIR/uploadfile:/uploadfile" \
+    -v "$DATA_DIR/music:/music" \
+    "$SERVER_IMAGE" \
+    -c "chown -R 100:101 /uploadfile /music && chmod 755 /uploadfile /music" \
+    >/dev/null
+}
+
+ensure_private_config() {
+  if [[ -f "$DATA_DIR/data/.config.yaml" ]]; then
+    return
+  fi
+  if cp "$SCRIPT_DIR/config_from_api.yaml" "$DATA_DIR/data/.config.yaml" 2>/dev/null; then
+    return
+  fi
+
+  docker_cmd run --rm --user 0 --entrypoint sh \
+    -v "$SCRIPT_DIR/config_from_api.yaml:/tmp/config.yaml:ro" \
+    -v "$DATA_DIR/data:/target" \
+    "$SERVER_IMAGE" \
+    -c "cp /tmp/config.yaml /target/.config.yaml" \
+    >/dev/null
 }
 
 prepare_runtime_files() {
   cp "$SCRIPT_DIR/docker-compose.yml" "$DATA_DIR/docker-compose.yml"
-  if [[ ! -f "$DATA_DIR/data/.config.yaml" ]]; then
-    cp "$SCRIPT_DIR/config_from_api.yaml" "$DATA_DIR/data/.config.yaml"
-  fi
+  ensure_private_config
   write_runtime_env
   sed -i "s|:latest\$|:$VERSION|" "$DATA_DIR/docker-compose.yml"
-  # xiaozhi-server runs as 999:999 and writes data/.auth_key.
-  chown -R 999:999 "$DATA_DIR/data"
-  chmod 755 "$DATA_DIR/data"
-  # manager-api/web runs as 100:101 and writes OTA firmware plus music uploads.
-  chown -R 100:101 "$DATA_DIR/uploadfile" "$DATA_DIR/music"
-  chmod 755 "$DATA_DIR/uploadfile" "$DATA_DIR/music"
-  chmod 644 "$DATA_DIR/data/.config.yaml"
+  fix_runtime_ownership
 }
 
 start_services() {
-  docker compose -f "$DATA_DIR/docker-compose.yml" --env-file "$DATA_DIR/.env" config >/dev/null
-  docker compose -f "$DATA_DIR/docker-compose.yml" --env-file "$DATA_DIR/.env" up -d --quiet-pull >/dev/null
+  docker_cmd compose -f "$DATA_DIR/docker-compose.yml" --env-file "$DATA_DIR/.env" config >/dev/null
+  docker_cmd compose -f "$DATA_DIR/docker-compose.yml" --env-file "$DATA_DIR/.env" up -d --quiet-pull >/dev/null
 }
 
 read_server_secret_from_db() {
-  docker exec xiaozhi-esp32-server-db \
+  docker_cmd exec xiaozhi-esp32-server-db \
     mysql -uroot -p"$MYSQL_ROOT_PASSWORD" --batch --skip-column-names \
     xiaozhi_esp32_server \
     -e "SELECT param_value FROM sys_params WHERE param_code='server.secret' LIMIT 1;" \
@@ -176,12 +227,17 @@ sync_manager_api_secret() {
       }
     }
   ' "$config_file" >"$tmp_file"
-  install -o 999 -g 999 -m 600 "$tmp_file" "$config_file"
+  docker_cmd run --rm --user 0 --entrypoint sh \
+    -v "$tmp_file:/tmp/new-config.yaml:ro" \
+    -v "$DATA_DIR/data:/target" \
+    "$SERVER_IMAGE" \
+    -c "cat /tmp/new-config.yaml > /target/.config.yaml && chown 999:999 /target/.config.yaml && chmod 600 /target/.config.yaml" \
+    >/dev/null
   rm -f "$tmp_file"
 }
 
 restart_server_service() {
-  docker compose -f "$DATA_DIR/docker-compose.yml" --env-file "$DATA_DIR/.env" up -d --quiet-pull xiaozhi-esp32-server >/dev/null
+  docker_cmd compose -f "$DATA_DIR/docker-compose.yml" --env-file "$DATA_DIR/.env" up -d --quiet-pull xiaozhi-esp32-server >/dev/null
 }
 
 wait_server_running() {
@@ -191,8 +247,8 @@ wait_server_running() {
   stable_since=0
   last_restart_count=""
   while true; do
-    status="$(docker inspect --format='{{.State.Status}}' xiaozhi-esp32-server 2>/dev/null || echo "missing")"
-    restart_count="$(docker inspect --format='{{.RestartCount}}' xiaozhi-esp32-server 2>/dev/null || echo "-1")"
+    status="$(docker_cmd inspect --format='{{.State.Status}}' xiaozhi-esp32-server 2>/dev/null || echo "missing")"
+    restart_count="$(docker_cmd inspect --format='{{.RestartCount}}' xiaozhi-esp32-server 2>/dev/null || echo "-1")"
     if [[ "$status" == "running" ]]; then
       if [[ "$restart_count" != "$last_restart_count" ]]; then
         last_restart_count="$restart_count"
@@ -206,7 +262,7 @@ wait_server_running() {
     elapsed=$(( $(date +%s) - start_ts ))
     if [[ "$elapsed" -gt "$timeout" ]]; then
       echo "xiaozhi-server did not enter running state within ${timeout}s (status: $status)." >&2
-      docker logs xiaozhi-esp32-server --tail 30 >&2 || true
+      docker_cmd logs xiaozhi-esp32-server --tail 30 >&2 || true
       return 1
     fi
     sleep 1
@@ -299,7 +355,9 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! docker compose version >/dev/null 2>&1; then
+configure_docker_command
+
+if ! docker_cmd compose version >/dev/null 2>&1; then
   echo "Docker Compose plugin is not available. Install docker-compose-plugin first." >&2
   exit 1
 fi
@@ -333,6 +391,7 @@ printf "  %-10s server=%s/%s web=%s/%s mysql=%s/%s redis=%s/%s\n" \
   "$MYSQL_CPUS" "$MYSQL_MEM_LIMIT" \
   "$REDIS_CPUS" "$REDIS_MEM_LIMIT"
 printf "  %-10s %s\n" "data:" "$DATA_DIR"
+printf "  %-10s %s (config: %s)\n" "docker:" "${DOCKER_CMD[*]}" "$DOCKER_CONFIG_DISPLAY"
 
 echo ""
 run_step "Pull images" pull_images
@@ -346,7 +405,7 @@ _wait_manager_api_startup() {
 
   printf "  %-34s" "Wait manager-api startup"
   while true; do
-    if docker logs xiaozhi-esp32-server-web 2>&1 | grep -q "Started AdminApplication in"; then
+    if docker_cmd logs xiaozhi-esp32-server-web 2>&1 | grep -q "Started AdminApplication in"; then
       local elapsed=$(( $(date +%s) - start_ts ))
       printf "OK   %s\n" "$(format_duration "$elapsed")"
       return 0
@@ -356,7 +415,7 @@ _wait_manager_api_startup() {
       printf "FAIL %s\n" "$(format_duration "$elapsed")"
       echo "ERROR: manager-api did not start within ${timeout}s." >&2
       echo "--- last 20 log lines ---" >&2
-      docker logs xiaozhi-esp32-server-web --tail 20 >&2
+      docker_cmd logs xiaozhi-esp32-server-web --tail 20 >&2
       return 1
     fi
     sleep 1
@@ -364,8 +423,8 @@ _wait_manager_api_startup() {
 }
 
 # Skip startup wait if container was already running before this deploy.
-CONTAINER_STATUS=$(docker inspect --format='{{.State.Status}}' xiaozhi-esp32-server-web 2>/dev/null || echo "missing")
-CONTAINER_STARTED=$(docker inspect --format='{{.State.StartedAt}}' xiaozhi-esp32-server-web 2>/dev/null || echo "")
+CONTAINER_STATUS=$(docker_cmd inspect --format='{{.State.Status}}' xiaozhi-esp32-server-web 2>/dev/null || echo "missing")
+CONTAINER_STARTED=$(docker_cmd inspect --format='{{.State.StartedAt}}' xiaozhi-esp32-server-web 2>/dev/null || echo "")
 
 if [ "$CONTAINER_STATUS" = "running" ] && [ -n "$CONTAINER_STARTED" ]; then
   STARTED_TS=$(date -d "$CONTAINER_STARTED" +%s 2>/dev/null || echo "0")
@@ -383,20 +442,20 @@ run_step "Sync manager-api secret" sync_manager_api_secret
 run_step "Restart xiaozhi-server" restart_server_service
 run_step "Wait xiaozhi-server startup" wait_server_running
 
-FINAL_STATUS=$(docker inspect --format='{{.State.Status}}' xiaozhi-esp32-server-web 2>/dev/null || echo "missing")
+FINAL_STATUS=$(docker_cmd inspect --format='{{.State.Status}}' xiaozhi-esp32-server-web 2>/dev/null || echo "missing")
 if [ "$FINAL_STATUS" != "running" ]; then
   echo "ERROR: manager-api not running (status: $FINAL_STATUS)" >&2
-  docker logs xiaozhi-esp32-server-web --tail 20 >&2
+  docker_cmd logs xiaozhi-esp32-server-web --tail 20 >&2
   exit 1
 fi
 
-SERVER_STATUS=$(docker inspect --format='{{.State.Status}}' xiaozhi-esp32-server 2>/dev/null || echo "missing")
+SERVER_STATUS=$(docker_cmd inspect --format='{{.State.Status}}' xiaozhi-esp32-server 2>/dev/null || echo "missing")
 if [ "$SERVER_STATUS" != "running" ]; then
   echo "WARNING: xiaozhi-server is not running yet (status: $SERVER_STATUS)." >&2
   echo "If this is the first install, configure manager-api.server.secret in $DATA_DIR/data/.config.yaml after creating the admin user, then restart with:" >&2
-  echo "  docker compose -f $DATA_DIR/docker-compose.yml --env-file $DATA_DIR/.env up -d xiaozhi-esp32-server" >&2
+  echo "  ${DOCKER_CMD[*]} compose -f $DATA_DIR/docker-compose.yml --env-file $DATA_DIR/.env up -d xiaozhi-esp32-server" >&2
   echo "--- xiaozhi-server last 20 log lines ---" >&2
-  docker logs xiaozhi-esp32-server --tail 20 >&2 || true
+  docker_cmd logs xiaozhi-esp32-server --tail 20 >&2 || true
 fi
 
 LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')

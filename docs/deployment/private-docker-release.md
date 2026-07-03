@@ -41,7 +41,7 @@
 ```text
 构建机:   ~/work/xiaozhi-esp32-server                完整源码
 生产机:   ~/work/xiaozhi-deploy/deploy/production    最小部署资产（sparse-checkout）
-持久化:   /opt/xiaozhi-data                          数据、配置、上传文件
+持久化:   ~/xiaozhi-data                            数据、配置、上传文件
 ```
 
 ### 常用命令
@@ -87,14 +87,14 @@ crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/
 
 ```text
 ~/work/xiaozhi-deploy   生产服务器最小部署资产目录（sparse-checkout deploy/production）
-/opt/xiaozhi-data       生产持久化目录
+~/xiaozhi-data          生产持久化目录
   ├── data/             私有配置（.config.yaml）
   ├── mysql/data/       数据库文件
   ├── uploadfile/       上传文件
   └── music/            音乐文件
 ```
 
-升级镜像不会删除 `/opt/xiaozhi-data`。
+升级镜像不会删除 `~/xiaozhi-data`。
 
 ---
 
@@ -216,16 +216,31 @@ sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
 ./install
 ```
 
-必须使用 `sudo docker login`。安装脚本会自动提权并强制 Docker 使用
-`/root/.docker/config.json`，与 `sudo docker pull` 的凭据位置保持一致。
+安装脚本主体按当前部署用户运行，默认把运行数据写入
+`~/xiaozhi-data`。容器 bind mount 的 UID/GID 修正也通过一次性 Docker
+容器完成，宿主机脚本不会整体切换到 root。
+
+如果当前用户已经加入 `docker` 组，脚本会直接使用普通 `docker` 命令，
+可以先执行普通 `docker login`。如果当前用户不能直接访问 Docker
+daemon，脚本会自动使用 `sudo docker`，此时必须先执行：
+
+```bash
+sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
+```
+
+旧部署如果仍要复用 `/opt/xiaozhi-data`，必须显式指定：
+
+```bash
+DATA_DIR=/opt/xiaozhi-data ./upgrade
+```
 
 `./install` 会：
 
 ```text
 1. 从 ACR 拉取 xiaozhi-server:latest / xiaozhi-web:latest / mysql:8.4 / redis:8.0
-2. 创建 /opt/xiaozhi-data
-3. 生成 /opt/xiaozhi-data/.env
-4. 初始化 /opt/xiaozhi-data/data/.config.yaml
+2. 创建 `~/xiaozhi-data`
+3. 生成 `~/xiaozhi-data/.env`
+4. 初始化 `~/xiaozhi-data/data/.config.yaml`
 5. 启动 Docker Compose 服务
 ```
 
@@ -247,7 +262,7 @@ XIAOZHI_SERVER_HTTP_BASE_URL=http://xiaozhi-esp32-server:8003
 ### 5.1 私有配置
 
 `./install` / `./upgrade` 会在 manager-api 启动后自动读取数据库中的
-`server.secret`，写入 `/opt/xiaozhi-data/data/.config.yaml`，并重启
+`server.secret`，写入 `~/xiaozhi-data/data/.config.yaml`，并重启
 `xiaozhi-server`。首次部署不需要手工复制 `server.secret`。
 
 如需调整设备可访问地址，只修改 `server.vision_explain` 等公网地址字段：
@@ -295,13 +310,13 @@ docker restart xiaozhi-esp32-server
 以下目录**绝对不能删除**：
 
 ```text
-/opt/xiaozhi-data/mysql/data     数据库
-/opt/xiaozhi-data/data           私有配置
-/opt/xiaozhi-data/uploadfile     上传文件
-/opt/xiaozhi-data/music          音乐文件
+~/xiaozhi-data/mysql/data     数据库
+~/xiaozhi-data/data           私有配置
+~/xiaozhi-data/uploadfile     上传文件
+~/xiaozhi-data/music          音乐文件
 ```
 
-音乐管理上传的音频保存到 `/opt/xiaozhi-data/music`，同时挂载给 web 容器（展示列表）和 server 容器（设备播放）。
+音乐管理上传的音频保存到 `~/xiaozhi-data/music`，同时挂载给 web 容器（展示列表）和 server 容器（设备播放）。
 
 ---
 
@@ -324,7 +339,7 @@ cd ~/work/xiaozhi-deploy/deploy/production
 ```text
 Production deploy
   version   本次请求部署的版本
-  current   /opt/xiaozhi-data/.env 中记录的上次版本
+  current   ~/xiaozhi-data/.env 中记录的上次版本
   assets    部署脚本所在 Git 分支及 pull 前后 commit
   images    本次拉取并启动的业务镜像
 
@@ -346,30 +361,32 @@ VERSION=<上一个正常版本> ./upgrade
 
 ## 7. 日常运维
 
-生产服务器统一通过 `/opt/xiaozhi-data/docker-compose.yml` 和 `/opt/xiaozhi-data/.env` 管理。
+生产服务器统一通过 `~/xiaozhi-data/docker-compose.yml` 和 `~/xiaozhi-data/.env` 管理。
+旧部署如仍使用 `/opt/xiaozhi-data`，下面命令中的路径需要对应替换或
+显式设置 `DATA_DIR=/opt/xiaozhi-data`。
 
 ### 服务管理
 
 ```bash
 # 查看状态
-docker compose -f /opt/xiaozhi-data/docker-compose.yml \
-  --env-file /opt/xiaozhi-data/.env ps
+docker compose -f ~/xiaozhi-data/docker-compose.yml \
+  --env-file ~/xiaozhi-data/.env ps
 
 # 启动
-docker compose -f /opt/xiaozhi-data/docker-compose.yml \
-  --env-file /opt/xiaozhi-data/.env up -d
+docker compose -f ~/xiaozhi-data/docker-compose.yml \
+  --env-file ~/xiaozhi-data/.env up -d
 
 # 停止（保留容器）
-docker compose -f /opt/xiaozhi-data/docker-compose.yml \
-  --env-file /opt/xiaozhi-data/.env stop
+docker compose -f ~/xiaozhi-data/docker-compose.yml \
+  --env-file ~/xiaozhi-data/.env stop
 
 # 停止并移除容器和网络（保留数据）
-docker compose -f /opt/xiaozhi-data/docker-compose.yml \
-  --env-file /opt/xiaozhi-data/.env down
+docker compose -f ~/xiaozhi-data/docker-compose.yml \
+  --env-file ~/xiaozhi-data/.env down
 
 # 重启全部
-docker compose -f /opt/xiaozhi-data/docker-compose.yml \
-  --env-file /opt/xiaozhi-data/.env restart
+docker compose -f ~/xiaozhi-data/docker-compose.yml \
+  --env-file ~/xiaozhi-data/.env restart
 ```
 
 ### 单服务重启
@@ -406,7 +423,7 @@ FunASR/SenseVoiceSmall 是 CPU 本地推理，Python 容器内存低于 2GB 时�
 
 ### 8.2 调整资源
 
-编辑 `/opt/xiaozhi-data/.env`，修改对应变量后执行 `./upgrade`：
+编辑 `~/xiaozhi-data/.env`，修改对应变量后执行 `./upgrade`：
 
 ```text
 XIAOZHI_SERVER_CPUS=1.00
