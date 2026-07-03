@@ -1,0 +1,20 @@
+ARG SERVER_COMMON_BASE_IMAGE=xiaozhi-server-base-common-local:latest
+FROM ${SERVER_COMMON_BASE_IMAGE}
+
+ARG SERVER_REQUIREMENTS=main/xiaozhi-server/requirements-docker.txt
+ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+
+USER root
+WORKDIR /opt/xiaozhi-esp32-server
+
+COPY ${SERVER_REQUIREMENTS} requirements.txt
+
+RUN if [ -n "$PYTORCH_INDEX_URL" ]; then \
+      sed -i "s#^--extra-index-url https://download.pytorch.org/whl/cpu#--extra-index-url ${PYTORCH_INDEX_URL}#" requirements.txt; \
+    fi
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements.txt --default-timeout=120 --retries 5 && \
+    chown -R xiaozhi:xiaozhi /opt/xiaozhi-esp32-server
+
+USER xiaozhi

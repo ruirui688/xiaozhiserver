@@ -4,11 +4,10 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEFAULT_SERVER_IMAGE_REPOSITORY="xiaozhi-server-local"
 DEFAULT_WEB_IMAGE_REPOSITORY="xiaozhi-web-local"
-DEFAULT_SERVER_BASE_IMAGE_REPOSITORY="xiaozhi-server-base-local"
+DEFAULT_SERVER_COMMON_BASE_IMAGE_REPOSITORY="xiaozhi-server-base-common-local"
 
 SERVER_IMAGE_REPOSITORY="${SERVER_IMAGE_REPOSITORY:-$DEFAULT_SERVER_IMAGE_REPOSITORY}"
 WEB_IMAGE_REPOSITORY="${WEB_IMAGE_REPOSITORY:-$DEFAULT_WEB_IMAGE_REPOSITORY}"
-SERVER_BASE_IMAGE_REPOSITORY="${SERVER_BASE_IMAGE_REPOSITORY:-$DEFAULT_SERVER_BASE_IMAGE_REPOSITORY}"
 case "$(uname -m)" in
   x86_64) DEFAULT_PLATFORM="linux/amd64" ;;
   aarch64 | arm64) DEFAULT_PLATFORM="linux/arm64" ;;
@@ -19,27 +18,39 @@ PUSH="${PUSH:-false}"
 BUILD_BASE="${BUILD_BASE:-auto}"
 BUILD_ENGINE="${BUILD_ENGINE:-buildx}"
 BUILDER_NAME="${BUILDER_NAME:-xiaozhi-builder}"
-PYTHON_BASE_IMAGE="${PYTHON_BASE_IMAGE:-python:3.10-slim}"
-NODE_BASE_IMAGE="${NODE_BASE_IMAGE:-node:18}"
-MAVEN_BASE_IMAGE="${MAVEN_BASE_IMAGE:-maven:3.9.4-eclipse-temurin-21}"
-WEB_RUNTIME_BASE_IMAGE="${WEB_RUNTIME_BASE_IMAGE:-bellsoft/liberica-runtime-container:jre-21-glibc}"
+PYTHON_BASE_IMAGE="${PYTHON_BASE_IMAGE:-docker.m.daocloud.io/library/python:3.10-slim}"
+NODE_BASE_IMAGE="${NODE_BASE_IMAGE:-docker.m.daocloud.io/library/node:20}"
+MAVEN_BASE_IMAGE="${MAVEN_BASE_IMAGE:-docker.m.daocloud.io/library/maven:3.9.4-eclipse-temurin-21}"
+WEB_RUNTIME_BASE_IMAGE="${WEB_RUNTIME_BASE_IMAGE:-docker.m.daocloud.io/bellsoft/liberica-runtime-container:jre-21-glibc}"
 DEBIAN_MIRROR="${DEBIAN_MIRROR:-https://mirrors.aliyun.com/debian}"
 DEBIAN_SECURITY_MIRROR="${DEBIAN_SECURITY_MIRROR:-https://mirrors.aliyun.com/debian-security}"
-SERVER_INSTALL_PROFILE="${SERVER_INSTALL_PROFILE:-standard}"
+SERVER_INSTALL_PROFILE="${SERVER_INSTALL_PROFILE:-lite}"
 case "$SERVER_INSTALL_PROFILE" in
-  standard)
+  standard | lite)
+    SERVER_INSTALL_PROFILE="lite"
     SERVER_REQUIREMENTS="${SERVER_REQUIREMENTS:-main/xiaozhi-server/requirements-docker.txt}"
     INSTALL_FUNASR_MODEL="${INSTALL_FUNASR_MODEL:-false}"
     ;;
   funasr)
-    SERVER_REQUIREMENTS="${SERVER_REQUIREMENTS:-main/xiaozhi-server/requirements-docker-funasr.txt}"
+    SERVER_REQUIREMENTS="${SERVER_REQUIREMENTS:-main/xiaozhi-server/requirements-docker.txt}"
+    SERVER_REQUIREMENTS_FUNASR="${SERVER_REQUIREMENTS_FUNASR:-main/xiaozhi-server/requirements-docker-funasr-extra.txt}"
     INSTALL_FUNASR_MODEL="${INSTALL_FUNASR_MODEL:-true}"
     ;;
   *)
-    echo "SERVER_INSTALL_PROFILE must be standard or funasr" >&2
+    echo "SERVER_INSTALL_PROFILE must be lite, standard, or funasr" >&2
     exit 1
     ;;
 esac
+SERVER_COMMON_BASE_IMAGE_REPOSITORY="${SERVER_COMMON_BASE_IMAGE_REPOSITORY:-$DEFAULT_SERVER_COMMON_BASE_IMAGE_REPOSITORY}"
+SERVER_LITE_BASE_IMAGE_REPOSITORY="${SERVER_LITE_BASE_IMAGE_REPOSITORY:-xiaozhi-server-base-lite-local}"
+SERVER_FUNASR_BASE_IMAGE_REPOSITORY="${SERVER_FUNASR_BASE_IMAGE_REPOSITORY:-xiaozhi-server-base-funasr-local}"
+if [[ -z "${SERVER_BASE_IMAGE_REPOSITORY:-}" ]]; then
+  if [[ "$SERVER_INSTALL_PROFILE" == "funasr" ]]; then
+    SERVER_BASE_IMAGE_REPOSITORY="$SERVER_FUNASR_BASE_IMAGE_REPOSITORY"
+  else
+    SERVER_BASE_IMAGE_REPOSITORY="$SERVER_LITE_BASE_IMAGE_REPOSITORY"
+  fi
+fi
 PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}"
 PIP_TRUSTED_HOST="${PIP_TRUSTED_HOST:-mirrors.aliyun.com}"
 PYTORCH_INDEX_URL="${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}"
@@ -58,6 +69,8 @@ XIAOZHI_PROGRESS_ANIMATION_INTERVAL="${XIAOZHI_PROGRESS_ANIMATION_INTERVAL:-0.12
 PARALLEL_IMAGE_BUILDS="${PARALLEL_IMAGE_BUILDS:-true}"
 PRINT_BUILD_CONFIG="${PRINT_BUILD_CONFIG:-true}"
 LOG_DIR="${LOG_DIR:-$(mktemp -d -t xiaozhi-docker-build.XXXXXX)}"
+SERVER_BASE_CACHE_VERSION="${SERVER_BASE_CACHE_VERSION:-v2}"
+SERVER_BASE_SEED_LATEST="${SERVER_BASE_SEED_LATEST:-false}"
 RECREATE_BUILDER=false
 
 if [[ -z "$FUNASR_MODEL_CONTEXT" ]]; then
@@ -137,8 +150,8 @@ if [[ "$INSTALL_FUNASR_MODEL" != "true" && "$INSTALL_FUNASR_MODEL" != "false" ]]
   exit 1
 fi
 
-if [[ "$SERVER_INSTALL_PROFILE" == "standard" && "$INSTALL_FUNASR_MODEL" == "true" ]]; then
-  echo "SERVER_INSTALL_PROFILE=standard does not include local FunASR; use SERVER_INSTALL_PROFILE=funasr to install the model." >&2
+if [[ "$SERVER_INSTALL_PROFILE" == "lite" && "$INSTALL_FUNASR_MODEL" == "true" ]]; then
+  echo "SERVER_INSTALL_PROFILE=lite does not include local FunASR; use SERVER_INSTALL_PROFILE=funasr to install the model." >&2
   exit 1
 fi
 
@@ -149,6 +162,11 @@ fi
 
 if [[ "$PARALLEL_IMAGE_BUILDS" != "true" && "$PARALLEL_IMAGE_BUILDS" != "false" ]]; then
   echo "PARALLEL_IMAGE_BUILDS must be true or false" >&2
+  exit 1
+fi
+
+if [[ "$SERVER_BASE_SEED_LATEST" != "true" && "$SERVER_BASE_SEED_LATEST" != "false" ]]; then
+  echo "SERVER_BASE_SEED_LATEST must be true or false" >&2
   exit 1
 fi
 
@@ -448,14 +466,34 @@ push_image() {
   fi
 }
 
-hash_server_base_inputs() {
+hash_common_base_inputs() {
   {
+    printf 'SERVER_BASE_CACHE_VERSION=%s\n' "$SERVER_BASE_CACHE_VERSION"
     printf 'PYTHON_BASE_IMAGE=%s\n' "$PYTHON_BASE_IMAGE"
     printf 'DEBIAN_MIRROR=%s\n' "$DEBIAN_MIRROR"
     printf 'DEBIAN_SECURITY_MIRROR=%s\n' "$DEBIAN_SECURITY_MIRROR"
-    printf 'SERVER_INSTALL_PROFILE=%s\n' "$SERVER_INSTALL_PROFILE"
+    sha256sum "$ROOT_DIR/Dockerfile-server-base"
+  } | sha256sum | cut -c1-12
+}
+
+hash_lite_base_inputs() {
+  {
+    printf 'SERVER_BASE_CACHE_VERSION=%s\n' "$SERVER_BASE_CACHE_VERSION"
+    printf 'SERVER_COMMON_BASE_CACHE_TAG=%s\n' "$SERVER_COMMON_BASE_CACHE_TAG"
     printf 'SERVER_REQUIREMENTS=%s\n' "$SERVER_REQUIREMENTS"
-    sha256sum "$ROOT_DIR/Dockerfile-server-base" "$ROOT_DIR/$SERVER_REQUIREMENTS"
+    printf 'PIP_INDEX_URL=%s\n' "$PIP_INDEX_URL"
+    printf 'PIP_TRUSTED_HOST=%s\n' "$PIP_TRUSTED_HOST"
+    sha256sum "$ROOT_DIR/Dockerfile-server-base-lite" "$ROOT_DIR/$SERVER_REQUIREMENTS"
+  } | sha256sum | cut -c1-12
+}
+
+hash_funasr_base_inputs() {
+  {
+    printf 'SERVER_BASE_CACHE_VERSION=%s\n' "$SERVER_BASE_CACHE_VERSION"
+    printf 'SERVER_LITE_BASE_CACHE_TAG=%s\n' "$SERVER_LITE_BASE_CACHE_TAG"
+    printf 'SERVER_REQUIREMENTS_FUNASR=%s\n' "$SERVER_REQUIREMENTS_FUNASR"
+    printf 'PYTORCH_INDEX_URL=%s\n' "$PYTORCH_INDEX_URL"
+    sha256sum "$ROOT_DIR/Dockerfile-server-base-funasr" "$ROOT_DIR/$SERVER_REQUIREMENTS_FUNASR"
   } | sha256sum | cut -c1-12
 }
 
@@ -467,7 +505,15 @@ funasr_model_cache_key() {
   printf '%s' "$FUNASR_MODEL_URL" | sha256sum | cut -c1-12
 }
 
-SERVER_BASE_CACHE_TAG="${SERVER_BASE_CACHE_TAG:-base-$(hash_server_base_inputs)}"
+SERVER_COMMON_BASE_CACHE_TAG="${SERVER_COMMON_BASE_CACHE_TAG:-base-$(hash_common_base_inputs)}"
+SERVER_COMMON_BASE_CACHE_IMAGE="$SERVER_COMMON_BASE_IMAGE_REPOSITORY:$SERVER_COMMON_BASE_CACHE_TAG"
+SERVER_LITE_BASE_CACHE_TAG="${SERVER_LITE_BASE_CACHE_TAG:-base-$(hash_lite_base_inputs)}"
+SERVER_LITE_BASE_CACHE_IMAGE="$SERVER_LITE_BASE_IMAGE_REPOSITORY:$SERVER_LITE_BASE_CACHE_TAG"
+if [[ "$SERVER_INSTALL_PROFILE" == "funasr" ]]; then
+  SERVER_BASE_CACHE_TAG="${SERVER_BASE_CACHE_TAG:-base-$(hash_funasr_base_inputs)}"
+else
+  SERVER_BASE_CACHE_TAG="${SERVER_BASE_CACHE_TAG:-$SERVER_LITE_BASE_CACHE_TAG}"
+fi
 SERVER_BASE_CACHE_IMAGE="$SERVER_BASE_IMAGE_REPOSITORY:$SERVER_BASE_CACHE_TAG"
 FUNASR_MODEL_DIGEST="${FUNASR_MODEL_DIGEST:-$(funasr_model_cache_key)}"
 
@@ -481,7 +527,9 @@ if [[ "$PRINT_BUILD_CONFIG" != "false" ]]; then
   echo "Image repositories:"
   echo "  server:      $SERVER_IMAGE_REPOSITORY"
   echo "  web:         $WEB_IMAGE_REPOSITORY"
-  echo "  server-base: $SERVER_BASE_IMAGE_REPOSITORY"
+  echo "  base-common: $SERVER_COMMON_BASE_IMAGE_REPOSITORY"
+  echo "  base-lite:   $SERVER_LITE_BASE_IMAGE_REPOSITORY"
+  echo "  base-funasr: $SERVER_FUNASR_BASE_IMAGE_REPOSITORY"
   echo "Version: $VERSION"
   echo "Platforms: $PLATFORMS"
   echo "Push: $PUSH"
@@ -494,10 +542,17 @@ if [[ "$PRINT_BUILD_CONFIG" != "false" ]]; then
   echo "Debian security mirror: $DEBIAN_SECURITY_MIRROR"
   echo "Server install profile: $SERVER_INSTALL_PROFILE"
   echo "Server requirements: $SERVER_REQUIREMENTS"
+  if [[ "$SERVER_INSTALL_PROFILE" == "funasr" ]]; then
+    echo "Server FunASR requirements: $SERVER_REQUIREMENTS_FUNASR"
+  fi
+  echo "Server base cache version: $SERVER_BASE_CACHE_VERSION"
+  echo "Server base seed latest: $SERVER_BASE_SEED_LATEST"
   echo "Install FunASR model: $INSTALL_FUNASR_MODEL"
   echo "FunASR model context: $FUNASR_MODEL_CONTEXT"
   echo "FunASR model URL: $FUNASR_MODEL_URL"
-  echo "Server base cache image: $SERVER_BASE_CACHE_IMAGE"
+  echo "Common base cache image: $SERVER_COMMON_BASE_CACHE_IMAGE"
+  echo "Lite base cache image: $SERVER_LITE_BASE_CACHE_IMAGE"
+  echo "Selected base cache image: $SERVER_BASE_CACHE_IMAGE"
   echo "Parallel image builds: $PARALLEL_IMAGE_BUILDS"
   if [[ -n "$BUILDKIT_REGISTRY_MIRROR" ]]; then
     echo "BuildKit registry mirror:"
@@ -531,6 +586,64 @@ print_base_image_status() {
   fi
 }
 
+build_common_base() {
+  if [[ "$BUILD_BASE" == "auto" ]] && image_available_locally_or_remote "$SERVER_COMMON_BASE_CACHE_IMAGE"; then
+    print_base_image_status "Common base cached" "$SERVER_COMMON_BASE_CACHE_IMAGE"
+    return
+  fi
+
+  build_image "Build common server base" Dockerfile-server-base \
+    --build-arg "PYTHON_BASE_IMAGE=$PYTHON_BASE_IMAGE" \
+    --build-arg "DEBIAN_MIRROR=$DEBIAN_MIRROR" \
+    --build-arg "DEBIAN_SECURITY_MIRROR=$DEBIAN_SECURITY_MIRROR" \
+    --build-arg "PIP_INDEX_URL=$PIP_INDEX_URL" \
+    --build-arg "PIP_TRUSTED_HOST=$PIP_TRUSTED_HOST" \
+    --tag "$SERVER_COMMON_BASE_IMAGE_REPOSITORY:latest" \
+    --tag "$SERVER_COMMON_BASE_IMAGE_REPOSITORY:$VERSION" \
+    --tag "$SERVER_COMMON_BASE_CACHE_IMAGE"
+  push_image "$SERVER_COMMON_BASE_IMAGE_REPOSITORY:latest"
+  push_image "$SERVER_COMMON_BASE_IMAGE_REPOSITORY:$VERSION"
+  push_image "$SERVER_COMMON_BASE_CACHE_IMAGE"
+}
+
+build_lite_base() {
+  build_common_base
+  if [[ "$BUILD_BASE" == "auto" ]] && image_available_locally_or_remote "$SERVER_LITE_BASE_CACHE_IMAGE"; then
+    print_base_image_status "Lite base cached" "$SERVER_LITE_BASE_CACHE_IMAGE"
+    return
+  fi
+
+  build_image "Build lite server base" Dockerfile-server-base-lite \
+    --build-arg "SERVER_COMMON_BASE_IMAGE=$SERVER_COMMON_BASE_CACHE_IMAGE" \
+    --build-arg "SERVER_REQUIREMENTS=$SERVER_REQUIREMENTS" \
+    --build-arg "PYTORCH_INDEX_URL=$PYTORCH_INDEX_URL" \
+    --tag "$SERVER_LITE_BASE_IMAGE_REPOSITORY:latest" \
+    --tag "$SERVER_LITE_BASE_IMAGE_REPOSITORY:$VERSION" \
+    --tag "$SERVER_LITE_BASE_CACHE_IMAGE"
+  push_image "$SERVER_LITE_BASE_IMAGE_REPOSITORY:latest"
+  push_image "$SERVER_LITE_BASE_IMAGE_REPOSITORY:$VERSION"
+  push_image "$SERVER_LITE_BASE_CACHE_IMAGE"
+}
+
+build_funasr_base() {
+  build_lite_base
+  if [[ "$BUILD_BASE" == "auto" ]] && image_available_locally_or_remote "$SERVER_BASE_CACHE_IMAGE"; then
+    print_base_image_status "FunASR base cached" "$SERVER_BASE_CACHE_IMAGE"
+    return
+  fi
+
+  build_image "Build FunASR server base" Dockerfile-server-base-funasr \
+    --build-arg "SERVER_LITE_BASE_IMAGE=$SERVER_LITE_BASE_CACHE_IMAGE" \
+    --build-arg "SERVER_REQUIREMENTS_FUNASR=$SERVER_REQUIREMENTS_FUNASR" \
+    --build-arg "PYTORCH_INDEX_URL=$PYTORCH_INDEX_URL" \
+    --tag "$SERVER_BASE_IMAGE_REPOSITORY:latest" \
+    --tag "$SERVER_BASE_IMAGE_REPOSITORY:$VERSION" \
+    --tag "$SERVER_BASE_CACHE_IMAGE"
+  push_image "$SERVER_BASE_IMAGE_REPOSITORY:latest"
+  push_image "$SERVER_BASE_IMAGE_REPOSITORY:$VERSION"
+  push_image "$SERVER_BASE_CACHE_IMAGE"
+}
+
 build_server_pipeline() {
   local server_base_image="${SERVER_BASE_IMAGE:-}"
 
@@ -542,7 +655,7 @@ build_server_pipeline() {
   elif [[ "$BUILD_BASE" == "auto" ]] && image_available_locally_or_remote "$SERVER_BASE_CACHE_IMAGE"; then
     server_base_image="$SERVER_BASE_CACHE_IMAGE"
     print_base_image_status "Base image cached" "$server_base_image"
-  elif [[ "$BUILD_BASE" == "auto" ]] && image_available_locally_or_remote "$SERVER_BASE_IMAGE_REPOSITORY:latest"; then
+  elif [[ "$BUILD_BASE" == "auto" && "$SERVER_BASE_SEED_LATEST" == "true" ]] && image_available_locally_or_remote "$SERVER_BASE_IMAGE_REPOSITORY:latest"; then
     print_base_image_status "Base image cache seed" "$SERVER_BASE_IMAGE_REPOSITORY:latest"
     if [[ "$BUILD_ENGINE" == "docker" ]]; then
       docker tag "$SERVER_BASE_IMAGE_REPOSITORY:latest" "$SERVER_BASE_CACHE_IMAGE"
@@ -552,20 +665,11 @@ build_server_pipeline() {
       server_base_image="$SERVER_BASE_IMAGE_REPOSITORY:latest"
     fi
   else
-    build_image "Build server base image" Dockerfile-server-base \
-      --build-arg "PYTHON_BASE_IMAGE=$PYTHON_BASE_IMAGE" \
-      --build-arg "DEBIAN_MIRROR=$DEBIAN_MIRROR" \
-      --build-arg "DEBIAN_SECURITY_MIRROR=$DEBIAN_SECURITY_MIRROR" \
-      --build-arg "SERVER_REQUIREMENTS=$SERVER_REQUIREMENTS" \
-      --build-arg "PIP_INDEX_URL=$PIP_INDEX_URL" \
-      --build-arg "PIP_TRUSTED_HOST=$PIP_TRUSTED_HOST" \
-      --build-arg "PYTORCH_INDEX_URL=$PYTORCH_INDEX_URL" \
-      --tag "$SERVER_BASE_IMAGE_REPOSITORY:latest" \
-      --tag "$SERVER_BASE_IMAGE_REPOSITORY:$VERSION" \
-      --tag "$SERVER_BASE_CACHE_IMAGE"
-    push_image "$SERVER_BASE_IMAGE_REPOSITORY:latest"
-    push_image "$SERVER_BASE_IMAGE_REPOSITORY:$VERSION"
-    push_image "$SERVER_BASE_CACHE_IMAGE"
+    if [[ "$SERVER_INSTALL_PROFILE" == "funasr" ]]; then
+      build_funasr_base
+    else
+      build_lite_base
+    fi
     server_base_image="$SERVER_BASE_CACHE_IMAGE"
   fi
 

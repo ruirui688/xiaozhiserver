@@ -1,11 +1,10 @@
 # -*- coding:utf-8 -*-
 # Production Docker runtime dependencies with local CPU FunASR/SenseVoice.
 #
-# This profile installs the standard Docker runtime plus CPU-only PyTorch,
-# torchaudio, and FunASR. It is required only when ASR type is `fun_local`.
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.2.2+cpu
-torchaudio==2.2.2+cpu
+# This compatibility file installs the lite Docker runtime plus CPU-only
+# PyTorch, torchaudio, and FunASR. Docker builds use
+# requirements-docker.txt + requirements-docker-funasr-extra.txt so lite and
+# FunASR images can share the common/lite cache layers.
 numpy==1.26.4
 onnxruntime==1.17.3
 #--------- cozepy0.20.0要求websockets<15.0.0，以下暂时不推荐升级的依赖
@@ -14,6 +13,9 @@ websockets==14.2
 pyyml==0.0.2
 opuslib_next==1.1.5
 pydub==0.25.1
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.2.2+cpu
+torchaudio==2.2.2+cpu
 funasr==1.2.7
 openai==2.8.1
 google-generativeai==0.8.5

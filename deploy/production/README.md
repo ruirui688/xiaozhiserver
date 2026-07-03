@@ -217,7 +217,7 @@ layers for the selected Git version tag.
 Build-side cache controls stay on the build machine:
 
 ```text
-BUILD_BASE=auto   reuse xiaozhi-server-base when dependency inputs match
+BUILD_BASE=auto   reuse common/lite/funasr server-base layers when dependency inputs match
 BUILD_BASE=false  skip server-base checks for Java/Web-only releases
 BUILD_BASE=true   rebuild server-base after Python dependency changes
 ```
