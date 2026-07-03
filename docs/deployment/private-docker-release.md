@@ -243,7 +243,11 @@ XIAOZHI_SERVER_HTTP_BASE_URL=http://xiaozhi-esp32-server:8003
 
 ### 5.1 私有配置
 
-首次注册管理员后，在智控台参数管理中找到 `server.secret`，写入 `/opt/xiaozhi-data/data/.config.yaml`：
+`./install` / `./upgrade` 会在 manager-api 启动后自动读取数据库中的
+`server.secret`，写入 `/opt/xiaozhi-data/data/.config.yaml`，并重启
+`xiaozhi-server`。首次部署不需要手工复制 `server.secret`。
+
+如需调整设备可访问地址，只修改 `server.vision_explain` 等公网地址字段：
 
 ```yaml
 server:
@@ -253,7 +257,7 @@ server:
   vision_explain: http://服务器IP或域名:8003/mcp/vision/explain
 manager-api:
   url: http://xiaozhi-esp32-server-web:8002/xiaozhi
-  secret: <粘贴 server.secret>
+  secret: <由安装脚本自动同步>
 ```
 
 ### 5.2 三类地址（容易配错）

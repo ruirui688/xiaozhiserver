@@ -83,6 +83,12 @@ VERSION=<git-short-sha> ./upgrade
 the short Git hash printed by `scripts/acr-build-push` when you need to know the
 exact image version installed on the server.
 
+`./install` waits for manager-api startup, reads the generated `server.secret`
+from the MySQL container, writes it into
+`/opt/xiaozhi-data/data/.config.yaml`, fixes bind-mount permissions for the
+non-root Python container user, and restarts `xiaozhi-server`. First install no
+longer requires manually copying `server.secret` from the web console.
+
 Upgrade output is intentionally compact:
 
 ```text
@@ -114,6 +120,8 @@ Redis (healthy) ──┘
   launching, avoiding crash-restart loops while the Java API initializes.
 - `./install` verifies the web container logs for `Started AdminApplication
   in` (timeout 180s) and exits non-zero if startup fails.
+- After manager-api is ready, `./install` syncs `server.secret` into the Python
+  private config and waits for `xiaozhi-esp32-server` to stay running.
 
 ## Redis persistence
 

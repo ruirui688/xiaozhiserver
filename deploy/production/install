@@ -114,11 +114,96 @@ prepare_runtime_files() {
   fi
   write_runtime_env
   sed -i "s|:latest\$|:$VERSION|" "$DATA_DIR/docker-compose.yml"
+  chown -R 999:999 "$DATA_DIR/data" "$DATA_DIR/music"
+  chmod 755 "$DATA_DIR/data" "$DATA_DIR/music"
+  chmod 644 "$DATA_DIR/data/.config.yaml"
 }
 
 start_services() {
   docker compose -f "$DATA_DIR/docker-compose.yml" --env-file "$DATA_DIR/.env" config >/dev/null
   docker compose -f "$DATA_DIR/docker-compose.yml" --env-file "$DATA_DIR/.env" up -d --quiet-pull >/dev/null
+}
+
+read_server_secret_from_db() {
+  docker exec xiaozhi-esp32-server-db \
+    mysql -uroot -p"$MYSQL_ROOT_PASSWORD" --batch --skip-column-names \
+    xiaozhi_esp32_server \
+    -e "SELECT param_value FROM sys_params WHERE param_code='server.secret' LIMIT 1;" \
+    2>/dev/null | tr -d '\r' | tail -n 1
+}
+
+sync_manager_api_secret() {
+  local config_file="$DATA_DIR/data/.config.yaml"
+  local server_secret tmp_file
+
+  server_secret="$(read_server_secret_from_db)"
+  if [[ -z "$server_secret" || "$server_secret" == "null" || "$server_secret" == *" "* ]]; then
+    echo "Could not read a usable server.secret from manager-api database." >&2
+    return 1
+  fi
+
+  tmp_file="$(mktemp -t xiaozhi-config.XXXXXX.yaml)"
+  awk -v secret="$server_secret" '
+    BEGIN { in_manager = 0; written = 0 }
+    /^manager-api:[[:space:]]*$/ {
+      in_manager = 1
+      print
+      next
+    }
+    /^[^[:space:]#][^:]*:[[:space:]]*/ && $0 !~ /^manager-api:[[:space:]]*$/ {
+      if (in_manager && !written) {
+        print "  secret: " secret
+        written = 1
+      }
+      in_manager = 0
+    }
+    in_manager && /^[[:space:]]+secret:[[:space:]]*/ {
+      print "  secret: " secret
+      written = 1
+      next
+    }
+    { print }
+    END {
+      if (in_manager && !written) {
+        print "  secret: " secret
+      }
+    }
+  ' "$config_file" >"$tmp_file"
+  install -o 999 -g 999 -m 600 "$tmp_file" "$config_file"
+  rm -f "$tmp_file"
+}
+
+restart_server_service() {
+  docker compose -f "$DATA_DIR/docker-compose.yml" --env-file "$DATA_DIR/.env" up -d --quiet-pull xiaozhi-esp32-server >/dev/null
+}
+
+wait_server_running() {
+  local timeout="${1:-90}"
+  local start_ts elapsed status restart_count stable_since last_restart_count
+  start_ts="$(date +%s)"
+  stable_since=0
+  last_restart_count=""
+  while true; do
+    status="$(docker inspect --format='{{.State.Status}}' xiaozhi-esp32-server 2>/dev/null || echo "missing")"
+    restart_count="$(docker inspect --format='{{.RestartCount}}' xiaozhi-esp32-server 2>/dev/null || echo "-1")"
+    if [[ "$status" == "running" ]]; then
+      if [[ "$restart_count" != "$last_restart_count" ]]; then
+        last_restart_count="$restart_count"
+        stable_since="$(date +%s)"
+      elif [[ $(( $(date +%s) - stable_since )) -ge 10 ]]; then
+        return 0
+      fi
+    else
+      stable_since=0
+    fi
+    elapsed=$(( $(date +%s) - start_ts ))
+    if [[ "$elapsed" -gt "$timeout" ]]; then
+      echo "xiaozhi-server did not enter running state within ${timeout}s (status: $status)." >&2
+      docker logs xiaozhi-esp32-server --tail 30 >&2 || true
+      return 1
+    fi
+    sleep 1
+  done
 }
 
 DEPLOY_MODE="${DEPLOY_MODE:-$(read_existing_env XIAOZHI_DEPLOY_MODE)}"
@@ -286,6 +371,10 @@ if [ "$CONTAINER_STATUS" = "running" ] && [ -n "$CONTAINER_STARTED" ]; then
 else
   _wait_manager_api_startup 180 || exit 1
 fi
+
+run_step "Sync manager-api secret" sync_manager_api_secret
+run_step "Restart xiaozhi-server" restart_server_service
+run_step "Wait xiaozhi-server startup" wait_server_running
 
 FINAL_STATUS=$(docker inspect --format='{{.State.Status}}' xiaozhi-esp32-server-web 2>/dev/null || echo "missing")
 if [ "$FINAL_STATUS" != "running" ]; then
