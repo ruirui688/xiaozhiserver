@@ -16,6 +16,8 @@ PLATFORMS="${PLATFORMS:-linux/amd64}"
 PUSH="${PUSH:-true}"
 BUILD_BASE="${BUILD_BASE:-auto}"
 BUILD_ENGINE="${BUILD_ENGINE:-docker}"
+IMAGE_TAG_SUFFIX="${IMAGE_TAG_SUFFIX:-}"
+CHANNEL_TAG="${CHANNEL_TAG:-latest}"
 PYTHON_BASE_IMAGE="${PYTHON_BASE_IMAGE:-docker.m.daocloud.io/library/python:3.10-slim-bookworm}"
 NODE_BASE_IMAGE="${NODE_BASE_IMAGE:-docker.m.daocloud.io/library/node:20}"
 MAVEN_BASE_IMAGE="${MAVEN_BASE_IMAGE:-docker.m.daocloud.io/library/maven:3.9.4-eclipse-temurin-21}"
@@ -80,6 +82,7 @@ if [[ -z "${VERSION:-}" ]]; then
     VERSION="local"
   fi
 fi
+IMAGE_VERSION_TAG="${VERSION}${IMAGE_TAG_SUFFIX}"
 
 image_tag() {
   local image="$1"
@@ -153,7 +156,8 @@ print_release_summary() {
     cat <<EOF
 ACR release
   version:   $VERSION
-  images:    $(short_image_name "$SERVER_IMAGE_REPOSITORY:$VERSION"), $(short_image_name "$WEB_IMAGE_REPOSITORY:$VERSION")
+  tags:      $CHANNEL_TAG, $IMAGE_VERSION_TAG
+  images:    $(short_image_name "$SERVER_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"), $(short_image_name "$WEB_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG")
   runtime:   mysql:$MYSQL_TARGET_TAG, redis:$REDIS_TARGET_TAG
   options:   profile=$SERVER_INSTALL_PROFILE engine=$BUILD_ENGINE base=$BUILD_BASE seed_latest=$SERVER_BASE_SEED_LATEST runtime=$MIRROR_RUNTIME_IMAGES parallel=$PARALLEL_RELEASE_STEPS/$PARALLEL_IMAGE_BUILDS
   funasr:    local=$([[ "$SERVER_INSTALL_PROFILE" == "funasr" ]] && echo true || echo false) model=$INSTALL_FUNASR_MODEL
@@ -168,6 +172,9 @@ Building and pushing xiaozhi images to Aliyun ACR.
 
 Version:
   $VERSION
+
+Image tags:
+  channel=$CHANNEL_TAG version=$IMAGE_VERSION_TAG
 
 Image repositories:
   server:      $SERVER_IMAGE_REPOSITORY
@@ -277,6 +284,8 @@ build_business_images() {
   SERVER_REQUIREMENTS_FUNASR="${SERVER_REQUIREMENTS_FUNASR:-}" \
   SERVER_BASE_CACHE_VERSION="$SERVER_BASE_CACHE_VERSION" \
   SERVER_BASE_SEED_LATEST="$SERVER_BASE_SEED_LATEST" \
+  IMAGE_TAG_SUFFIX="$IMAGE_TAG_SUFFIX" \
+  CHANNEL_TAG="$CHANNEL_TAG" \
   PUSH="$PUSH" \
   PLATFORMS="$PLATFORMS" \
   VERSION="$VERSION" \
@@ -331,6 +340,7 @@ build_business_images
 echo ""
 echo "=== Build complete ==="
 echo "Version: $VERSION"
-echo "Deploy latest: ./deploy/production/upgrade"
-echo "Deploy pinned: VERSION=$VERSION ./deploy/production/upgrade"
+echo "Image tags: $CHANNEL_TAG, $IMAGE_VERSION_TAG"
+echo "Deploy channel: VERSION=$CHANNEL_TAG ./deploy/production/upgrade"
+echo "Deploy pinned: VERSION=$IMAGE_VERSION_TAG ./deploy/production/upgrade"
 echo ""

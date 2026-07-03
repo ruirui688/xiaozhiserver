@@ -18,6 +18,8 @@ PUSH="${PUSH:-false}"
 BUILD_BASE="${BUILD_BASE:-auto}"
 BUILD_ENGINE="${BUILD_ENGINE:-buildx}"
 BUILDER_NAME="${BUILDER_NAME:-xiaozhi-builder}"
+IMAGE_TAG_SUFFIX="${IMAGE_TAG_SUFFIX:-}"
+CHANNEL_TAG="${CHANNEL_TAG:-latest}"
 PYTHON_BASE_IMAGE="${PYTHON_BASE_IMAGE:-docker.m.daocloud.io/library/python:3.10-slim}"
 NODE_BASE_IMAGE="${NODE_BASE_IMAGE:-docker.m.daocloud.io/library/node:20}"
 MAVEN_BASE_IMAGE="${MAVEN_BASE_IMAGE:-docker.m.daocloud.io/library/maven:3.9.4-eclipse-temurin-21}"
@@ -124,6 +126,7 @@ if [[ -z "${VERSION:-}" ]]; then
     VERSION="local"
   fi
 fi
+IMAGE_VERSION_TAG="${VERSION}${IMAGE_TAG_SUFFIX}"
 
 if [[ "$PUSH" != "true" && "$PUSH" != "false" ]]; then
   echo "PUSH must be true or false" >&2
@@ -531,6 +534,8 @@ if [[ "$PRINT_BUILD_CONFIG" != "false" ]]; then
   echo "  base-lite:   $SERVER_LITE_BASE_IMAGE_REPOSITORY"
   echo "  base-funasr: $SERVER_FUNASR_BASE_IMAGE_REPOSITORY"
   echo "Version: $VERSION"
+  echo "Image version tag: $IMAGE_VERSION_TAG"
+  echo "Channel tag: $CHANNEL_TAG"
   echo "Platforms: $PLATFORMS"
   echo "Push: $PUSH"
   echo "Build engine: $BUILD_ENGINE"
@@ -679,10 +684,10 @@ build_server_pipeline() {
     --build-arg "INSTALL_FUNASR_MODEL=$INSTALL_FUNASR_MODEL" \
     --build-arg "FUNASR_MODEL_URL=$FUNASR_MODEL_URL" \
     --build-arg "FUNASR_MODEL_DIGEST=$FUNASR_MODEL_DIGEST" \
-    --tag "$SERVER_IMAGE_REPOSITORY:latest" \
-    --tag "$SERVER_IMAGE_REPOSITORY:$VERSION"
-  push_image "$SERVER_IMAGE_REPOSITORY:latest"
-  push_image "$SERVER_IMAGE_REPOSITORY:$VERSION"
+    --tag "$SERVER_IMAGE_REPOSITORY:$CHANNEL_TAG" \
+    --tag "$SERVER_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"
+  push_image "$SERVER_IMAGE_REPOSITORY:$CHANNEL_TAG"
+  push_image "$SERVER_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"
 }
 
 build_web_pipeline() {
@@ -690,10 +695,10 @@ build_web_pipeline() {
     --build-arg "NODE_BASE_IMAGE=$NODE_BASE_IMAGE" \
     --build-arg "MAVEN_BASE_IMAGE=$MAVEN_BASE_IMAGE" \
     --build-arg "WEB_RUNTIME_BASE_IMAGE=$WEB_RUNTIME_BASE_IMAGE" \
-    --tag "$WEB_IMAGE_REPOSITORY:latest" \
-    --tag "$WEB_IMAGE_REPOSITORY:$VERSION"
-  push_image "$WEB_IMAGE_REPOSITORY:latest"
-  push_image "$WEB_IMAGE_REPOSITORY:$VERSION"
+    --tag "$WEB_IMAGE_REPOSITORY:$CHANNEL_TAG" \
+    --tag "$WEB_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"
+  push_image "$WEB_IMAGE_REPOSITORY:$CHANNEL_TAG"
+  push_image "$WEB_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"
 }
 
 wait_for_pipeline() {
