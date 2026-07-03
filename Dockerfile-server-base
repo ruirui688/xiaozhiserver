@@ -9,8 +9,10 @@ ARG DEBIAN_SECURITY_MIRROR=https://mirrors.aliyun.com/debian-security
 ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
 ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
 
-# 安装系统依赖
-RUN set -eux; \
+# 安装系统依赖。apt cache mount keeps interrupted downloads reusable.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
         sed -i \
             -e "s#http://deb.debian.org/debian-security#${DEBIAN_SECURITY_MIRROR}#g" \
@@ -25,9 +27,7 @@ RUN set -eux; \
     apt-get update && \
     apt-get install -y --no-install-recommends libopus0 ffmpeg locales && \
     sed -i '/zh_CN.UTF-8/s/^# //g' /etc/locale.gen && \
-    locale-gen && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    locale-gen
 
 # 配置pip镜像源并设置超时和重试
 RUN pip config set global.index-url "$PIP_INDEX_URL" && \
