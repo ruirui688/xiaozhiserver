@@ -15,12 +15,26 @@ PUSH="${PUSH:-true}"
 BUILD_BASE="${BUILD_BASE:-auto}"
 BUILD_ENGINE="${BUILD_ENGINE:-docker}"
 PYTHON_BASE_IMAGE="${PYTHON_BASE_IMAGE:-python:3.10-slim-bookworm}"
+SERVER_INSTALL_PROFILE="${SERVER_INSTALL_PROFILE:-standard}"
+case "$SERVER_INSTALL_PROFILE" in
+  standard)
+    SERVER_REQUIREMENTS="${SERVER_REQUIREMENTS:-main/xiaozhi-server/requirements-docker.txt}"
+    INSTALL_FUNASR_MODEL="${INSTALL_FUNASR_MODEL:-false}"
+    ;;
+  funasr)
+    SERVER_REQUIREMENTS="${SERVER_REQUIREMENTS:-main/xiaozhi-server/requirements-docker-funasr.txt}"
+    INSTALL_FUNASR_MODEL="${INSTALL_FUNASR_MODEL:-true}"
+    ;;
+  *)
+    echo "SERVER_INSTALL_PROFILE must be standard or funasr" >&2
+    exit 1
+    ;;
+esac
 SERVER_BASE_IMAGE="${SERVER_BASE_IMAGE:-}"
 MIRROR_RUNTIME_IMAGES="${MIRROR_RUNTIME_IMAGES:-auto}"
 MYSQL_SOURCE_IMAGE="${MYSQL_SOURCE_IMAGE:-mysql:8.4}"
 REDIS_SOURCE_IMAGE="${REDIS_SOURCE_IMAGE:-redis:8.0}"
 VERBOSE="${VERBOSE:-false}"
-INSTALL_FUNASR_MODEL="${INSTALL_FUNASR_MODEL:-true}"
 FUNASR_MODEL_URL="${FUNASR_MODEL_URL:-https://modelscope.cn/models/iic/SenseVoiceSmall/resolve/master/model.pt}"
 FUNASR_MODEL_LOCAL_PATH="${FUNASR_MODEL_LOCAL_PATH:-}"
 FUNASR_MODEL_CONTEXT="${FUNASR_MODEL_CONTEXT:-}"
@@ -89,6 +103,11 @@ if [[ "$INSTALL_FUNASR_MODEL" != "true" && "$INSTALL_FUNASR_MODEL" != "false" ]]
   exit 1
 fi
 
+if [[ "$SERVER_INSTALL_PROFILE" == "standard" && "$INSTALL_FUNASR_MODEL" == "true" ]]; then
+  echo "SERVER_INSTALL_PROFILE=standard does not include local FunASR; use scripts/acr-build-push-funasr or SERVER_INSTALL_PROFILE=funasr." >&2
+  exit 1
+fi
+
 if [[ "$XIAOZHI_PROGRESS" != "true" && "$XIAOZHI_PROGRESS" != "false" ]]; then
   echo "XIAOZHI_PROGRESS must be true or false" >&2
   exit 1
@@ -115,8 +134,8 @@ ACR release
   version:   $VERSION
   images:    $(short_image_name "$SERVER_IMAGE_REPOSITORY:$VERSION"), $(short_image_name "$WEB_IMAGE_REPOSITORY:$VERSION")
   runtime:   mysql:$MYSQL_TARGET_TAG, redis:$REDIS_TARGET_TAG
-  options:   engine=$BUILD_ENGINE base=$BUILD_BASE runtime=$MIRROR_RUNTIME_IMAGES parallel=$PARALLEL_RELEASE_STEPS/$PARALLEL_IMAGE_BUILDS
-  funasr:    cpu=true model=$INSTALL_FUNASR_MODEL
+  options:   profile=$SERVER_INSTALL_PROFILE engine=$BUILD_ENGINE base=$BUILD_BASE runtime=$MIRROR_RUNTIME_IMAGES parallel=$PARALLEL_RELEASE_STEPS/$PARALLEL_IMAGE_BUILDS
+  funasr:    local=$([[ "$SERVER_INSTALL_PROFILE" == "funasr" ]] && echo true || echo false) model=$INSTALL_FUNASR_MODEL
   output:    quiet progress=$XIAOZHI_PROGRESS interval=${XIAOZHI_PROGRESS_INTERVAL}s
 
 EOF
@@ -144,6 +163,8 @@ Default build engine:
   $BUILD_ENGINE
 
 Build options:
+  server_install_profile=$SERVER_INSTALL_PROFILE
+  server_requirements=$SERVER_REQUIREMENTS
   build_base=$BUILD_BASE server_base_image=${SERVER_BASE_IMAGE:-auto}
   mirror_runtime_images=$MIRROR_RUNTIME_IMAGES
   install_funasr_model=$INSTALL_FUNASR_MODEL
@@ -219,6 +240,8 @@ build_business_images() {
   SERVER_BASE_IMAGE="$SERVER_BASE_IMAGE" \
   BUILD_ENGINE="$BUILD_ENGINE" \
   PYTHON_BASE_IMAGE="$PYTHON_BASE_IMAGE" \
+  SERVER_INSTALL_PROFILE="$SERVER_INSTALL_PROFILE" \
+  SERVER_REQUIREMENTS="$SERVER_REQUIREMENTS" \
   PUSH="$PUSH" \
   PLATFORMS="$PLATFORMS" \
   VERSION="$VERSION" \

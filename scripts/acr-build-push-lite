@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+SERVER_INSTALL_PROFILE=standard \
+INSTALL_FUNASR_MODEL=false \
+bash "$ROOT_DIR/scripts/acr-build-push" "$@"

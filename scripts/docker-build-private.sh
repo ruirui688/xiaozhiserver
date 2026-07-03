@@ -25,11 +25,24 @@ MAVEN_BASE_IMAGE="${MAVEN_BASE_IMAGE:-maven:3.9.4-eclipse-temurin-21}"
 WEB_RUNTIME_BASE_IMAGE="${WEB_RUNTIME_BASE_IMAGE:-bellsoft/liberica-runtime-container:jre-21-glibc}"
 DEBIAN_MIRROR="${DEBIAN_MIRROR:-https://mirrors.aliyun.com/debian}"
 DEBIAN_SECURITY_MIRROR="${DEBIAN_SECURITY_MIRROR:-https://mirrors.aliyun.com/debian-security}"
-SERVER_REQUIREMENTS="${SERVER_REQUIREMENTS:-main/xiaozhi-server/requirements-docker.txt}"
+SERVER_INSTALL_PROFILE="${SERVER_INSTALL_PROFILE:-standard}"
+case "$SERVER_INSTALL_PROFILE" in
+  standard)
+    SERVER_REQUIREMENTS="${SERVER_REQUIREMENTS:-main/xiaozhi-server/requirements-docker.txt}"
+    INSTALL_FUNASR_MODEL="${INSTALL_FUNASR_MODEL:-false}"
+    ;;
+  funasr)
+    SERVER_REQUIREMENTS="${SERVER_REQUIREMENTS:-main/xiaozhi-server/requirements-docker-funasr.txt}"
+    INSTALL_FUNASR_MODEL="${INSTALL_FUNASR_MODEL:-true}"
+    ;;
+  *)
+    echo "SERVER_INSTALL_PROFILE must be standard or funasr" >&2
+    exit 1
+    ;;
+esac
 PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}"
 PIP_TRUSTED_HOST="${PIP_TRUSTED_HOST:-mirrors.aliyun.com}"
 PYTORCH_INDEX_URL="${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}"
-INSTALL_FUNASR_MODEL="${INSTALL_FUNASR_MODEL:-true}"
 FUNASR_MODEL_URL="${FUNASR_MODEL_URL:-https://modelscope.cn/models/iic/SenseVoiceSmall/resolve/master/model.pt}"
 FUNASR_MODEL_LOCAL_PATH="${FUNASR_MODEL_LOCAL_PATH:-$ROOT_DIR/main/xiaozhi-server/models/SenseVoiceSmall/model.pt}"
 FUNASR_MODEL_CONTEXT="${FUNASR_MODEL_CONTEXT:-}"
@@ -121,6 +134,11 @@ fi
 
 if [[ "$INSTALL_FUNASR_MODEL" != "true" && "$INSTALL_FUNASR_MODEL" != "false" ]]; then
   echo "INSTALL_FUNASR_MODEL must be true or false" >&2
+  exit 1
+fi
+
+if [[ "$SERVER_INSTALL_PROFILE" == "standard" && "$INSTALL_FUNASR_MODEL" == "true" ]]; then
+  echo "SERVER_INSTALL_PROFILE=standard does not include local FunASR; use SERVER_INSTALL_PROFILE=funasr to install the model." >&2
   exit 1
 fi
 
@@ -435,6 +453,7 @@ hash_server_base_inputs() {
     printf 'PYTHON_BASE_IMAGE=%s\n' "$PYTHON_BASE_IMAGE"
     printf 'DEBIAN_MIRROR=%s\n' "$DEBIAN_MIRROR"
     printf 'DEBIAN_SECURITY_MIRROR=%s\n' "$DEBIAN_SECURITY_MIRROR"
+    printf 'SERVER_INSTALL_PROFILE=%s\n' "$SERVER_INSTALL_PROFILE"
     printf 'SERVER_REQUIREMENTS=%s\n' "$SERVER_REQUIREMENTS"
     sha256sum "$ROOT_DIR/Dockerfile-server-base" "$ROOT_DIR/$SERVER_REQUIREMENTS"
   } | sha256sum | cut -c1-12
@@ -473,6 +492,7 @@ if [[ "$PRINT_BUILD_CONFIG" != "false" ]]; then
   echo "Web runtime base image: $WEB_RUNTIME_BASE_IMAGE"
   echo "Debian mirror: $DEBIAN_MIRROR"
   echo "Debian security mirror: $DEBIAN_SECURITY_MIRROR"
+  echo "Server install profile: $SERVER_INSTALL_PROFILE"
   echo "Server requirements: $SERVER_REQUIREMENTS"
   echo "Install FunASR model: $INSTALL_FUNASR_MODEL"
   echo "FunASR model context: $FUNASR_MODEL_CONTEXT"

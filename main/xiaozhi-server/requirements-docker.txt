@@ -1,12 +1,10 @@
 # -*- coding:utf-8 -*-
-# Production Docker runtime dependencies.
+# Production Docker runtime dependencies without local FunASR.
 #
-# The production image supports CPU-only local FunASR/SenseVoice inference.
-# PyTorch CPU wheels are resolved from the official CPU wheel index; the image
-# does not require CUDA or GPU drivers.
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.2.2+cpu
-torchaudio==2.2.2+cpu
+# Use this profile when ASR runs through remote providers such as Doubao,
+# Aliyun, Tencent, Xunfei, OpenAI-compatible ASR, FunASR server, or other
+# network services. It intentionally does not install torch, torchaudio, or
+# funasr, so Docker builds are much faster and the image is smaller.
 numpy==1.26.4
 onnxruntime==1.17.3
 #--------- cozepy0.20.0要求websockets<15.0.0，以下暂时不推荐升级的依赖
@@ -15,7 +13,6 @@ websockets==14.2
 pyyml==0.0.2
 opuslib_next==1.1.5
 pydub==0.25.1
-funasr==1.2.7
 openai==2.8.1
 google-generativeai==0.8.5
 edge_tts==7.2.6
