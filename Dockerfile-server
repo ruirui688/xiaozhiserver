@@ -3,8 +3,29 @@ ARG SERVER_BASE_IMAGE=xiaozhi-server-base-local:latest
 FROM ${SERVER_BASE_IMAGE}
 
 # Non-root user (xiaozhi) is inherited from the server-base image
+ARG INSTALL_FUNASR_MODEL=true
+ARG FUNASR_MODEL_URL=https://modelscope.cn/models/iic/SenseVoiceSmall/resolve/master/model.pt
+ARG FUNASR_MODEL_DIGEST=remote
 
-COPY main/xiaozhi-server .
+COPY --chown=xiaozhi:xiaozhi main/xiaozhi-server .
+
+RUN --mount=from=funasr_model,source=.,target=/tmp/funasr-model,readonly \
+    if [ "$INSTALL_FUNASR_MODEL" = "true" ]; then \
+      echo "FunASR model digest: $FUNASR_MODEL_DIGEST"; \
+      if [ -s /tmp/funasr-model/model.pt ]; then \
+        echo "Using local FunASR model from build context"; \
+        cp /tmp/funasr-model/model.pt models/SenseVoiceSmall/model.pt; \
+      else \
+        for attempt in 1 2 3; do \
+          echo "Downloading FunASR SenseVoiceSmall model (${attempt}/3): $FUNASR_MODEL_URL"; \
+          FUNASR_MODEL_URL="$FUNASR_MODEL_URL" python -c 'import os, pathlib, urllib.request; url=os.environ["FUNASR_MODEL_URL"]; target=pathlib.Path("models/SenseVoiceSmall/model.pt"); target.parent.mkdir(parents=True, exist_ok=True); urllib.request.urlretrieve(url, target); assert target.stat().st_size > 0, "downloaded model is empty"' \
+            && break; \
+          rm -f models/SenseVoiceSmall/model.pt; \
+          if [ "$attempt" = "3" ]; then exit 1; fi; \
+          sleep 3; \
+        done; \
+      fi; \
+    fi
 
 # 健康检查：每30秒检测8000端口是否可达
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

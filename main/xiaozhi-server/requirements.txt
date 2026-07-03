@@ -2,7 +2,7 @@
 #--------- 本项目推荐环境是python3.10，以下暂时不推荐升级的依赖
 torch==2.2.2
 torchaudio==2.2.2
-numpy>=1.27.0
+numpy==1.26.4
 #--------- cozepy0.20.0要求websockets<15.0.0，以下暂时不推荐升级的依赖
 websockets==14.2
 #--------- 以下是可升级的依赖
@@ -10,6 +10,7 @@ pyyml==0.0.2
 silero_vad==6.1.0
 opuslib_next==1.1.5
 pydub==0.25.1
+funasr==1.2.7
 openai==2.8.1
 google-generativeai==0.8.5
 edge_tts==7.2.6

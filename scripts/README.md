@@ -140,5 +140,5 @@ start-dev.sh                旧开发入口，仅转发到 scripts/dev
 
 - 不在生产服务器编译业务镜像，生产安装脚本只支持 pull 模式。
 - 不把 ACR 密码、数据库密码、Redis 密码或生产私有配置写入 Git。
-- 生产镜像默认使用 `main/xiaozhi-server/requirements-docker.txt`，不安装 `torch` / `torchaudio`。
-- 如果确实需要容器内本地 FunASR，构建时显式设置 `SERVER_REQUIREMENTS=main/xiaozhi-server/requirements.txt`。
+- 生产镜像默认使用 `main/xiaozhi-server/requirements-docker.txt`，安装 CPU 版 `torch` / `torchaudio` / `funasr`。
+- 服务镜像构建阶段优先复用 `main/xiaozhi-server/models/SenseVoiceSmall/model.pt`；如果模型在其他目录，使用 `FUNASR_MODEL_LOCAL_PATH=/path/to/model.pt scripts/acr-build-push`；本地没有模型时才用 `FUNASR_MODEL_URL=...` 下载；如果不想把模型放进镜像，使用 `INSTALL_FUNASR_MODEL=false scripts/acr-build-push`。

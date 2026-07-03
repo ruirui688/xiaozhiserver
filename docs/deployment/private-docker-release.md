@@ -127,13 +127,43 @@ scripts/acr-build-push
 | **多架构镜像** | `BUILD_ENGINE=buildx PLATFORMS=linux/amd64,linux/arm64 scripts/acr-build-push` |
 | **关闭并行** | `PARALLEL_RELEASE_STEPS=false PARALLEL_IMAGE_BUILDS=false scripts/acr-build-push` |
 
-### 3.3 Python 依赖
+### 3.3 Python 依赖与本地 FunASR
 
-生产镜像默认使用 `requirements-docker.txt`（不含 torch/torchaudio，使用云端 ASR + ONNX VAD）。如需本地 FunASR：
+生产镜像默认使用 `requirements-docker.txt`，并内置 CPU 版 FunASR 本地识别运行时：
+
+```text
+torch/torchaudio CPU wheel
+funasr
+SenseVoiceSmall model.pt
+```
+
+默认构建会优先复用构建机上的本地模型文件：
+
+```text
+main/xiaozhi-server/models/SenseVoiceSmall/model.pt
+```
+
+如果本地模型存在，构建会直接把它复制进 `xiaozhi-server` 镜像；如果不存在，才会从 `FUNASR_MODEL_URL` 下载。生产服务器只需要拉取 ACR 镜像，不需要在服务器上执行 `pip install`、下载源码依赖或手工安装 FunASR。
+
+如果模型文件放在其他目录，可以指定：
 
 ```bash
-SERVER_REQUIREMENTS=main/xiaozhi-server/requirements.txt scripts/acr-build-push
+FUNASR_MODEL_LOCAL_PATH=/path/to/model.pt scripts/acr-build-push
 ```
+
+如果构建机没有本地模型，且网络无法访问默认模型地址，可以覆盖下载地址：
+
+```bash
+FUNASR_MODEL_URL=https://your-mirror.example/SenseVoiceSmall/model.pt scripts/acr-build-push
+```
+
+如果只想构建不含内置 FunASR 模型文件的镜像：
+
+```bash
+INSTALL_FUNASR_MODEL=false scripts/acr-build-push
+```
+
+这种情况下必须用自定义镜像或其他挂载方式提供 `models/SenseVoiceSmall/model.pt`，否则后台测试 `fun_local` 会失败。
 
 ---
 
@@ -322,41 +352,45 @@ docker logs -f xiaozhi-esp32-server-redis  # Redis 日志
 
 ## 8. 资源调优
 
-### 8.1 默认限制（2 核 4G 服务器）
+### 8.1 默认限制（2 核 4G 服务器，CPU FunASR）
 
 | 容器 | CPU | 内存 |
 |------|-----|------|
-| xiaozhi-server (Python) | 0.75 核 | 768 MB |
-| xiaozhi-esp32-server-web (Java) | 0.80 核 | 1280 MB |
-| MySQL | 0.35 核 | 1024 MB |
-| Redis | 0.10 核 | 256 MB |
-| **合计** | **2.00 核** | **~3328 MB** |
+| xiaozhi-server (Python + FunASR) | 1.00 核 | 2048 MB |
+| xiaozhi-esp32-server-web (Java) | 0.60 核 | 1024 MB |
+| MySQL | 0.30 核 | 768 MB |
+| Redis | 0.10 核 | 192 MB |
+| **合计** | **2.00 核** | **~4032 MB** |
 
-给宿主机保留约 700MB。`memswap_limit` 等于 `mem_limit`，防止 swap 拖死宿主机。
+FunASR/SenseVoiceSmall 是 CPU 本地推理，Python 容器内存低于 2GB 时容易初始化失败或被 OOM kill。`memswap_limit` 等于 `mem_limit`，防止 swap 拖死宿主机。
 
 ### 8.2 调整资源
 
 编辑 `/opt/xiaozhi-data/.env`，修改对应变量后执行 `./upgrade`：
 
 ```text
-XIAOZHI_SERVER_CPUS=0.75
-XIAOZHI_SERVER_MEM_LIMIT=768m
-XIAOZHI_WEB_CPUS=0.80
-XIAOZHI_WEB_MEM_LIMIT=1280m
-XIAOZHI_MYSQL_CPUS=0.35
-XIAOZHI_MYSQL_MEM_LIMIT=1024m
+XIAOZHI_SERVER_CPUS=1.00
+XIAOZHI_SERVER_MEM_LIMIT=2048m
+XIAOZHI_SERVER_MEMSWAP_LIMIT=2048m
+XIAOZHI_FUNASR_THREADS=2
+XIAOZHI_WEB_CPUS=0.60
+XIAOZHI_WEB_MEM_LIMIT=1024m
+XIAOZHI_MYSQL_CPUS=0.30
+XIAOZHI_MYSQL_MEM_LIMIT=768m
 XIAOZHI_REDIS_CPUS=0.10
-XIAOZHI_REDIS_MEM_LIMIT=256m
+XIAOZHI_REDIS_MEM_LIMIT=192m
 ```
+
+老部署如果 `.env` 中仍保留旧的 `XIAOZHI_SERVER_MEM_LIMIT=768m`，升级脚本会尊重旧值。启用 FunASR 前需要手工调整为至少 `2048m`。
 
 ### 8.3 内部调优
 
 | 服务 | 参数 | 默认值 |
 |------|------|--------|
 | Java | `XIAOZHI_WEB_JAVA_TOOL_OPTIONS` | 堆内存占容器内存比例 |
-| MySQL | `innodb_buffer_pool_size` | 256M |
+| MySQL | `innodb_buffer_pool_size` | 192M |
 | MySQL | `max_connections` | 80 |
-| Redis | `maxmemory` | 192mb / `allkeys-lru` |
+| Redis | `maxmemory` | 128mb / `allkeys-lru` |
 
 服务器规格更高时按比例上调。
 

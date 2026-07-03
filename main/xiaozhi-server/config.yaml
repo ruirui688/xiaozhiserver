@@ -363,6 +363,12 @@ Memory:
     llm: ChatGLMLLM
 
 ASR:
+  FunASR:
+    # FunASR / SenseVoiceSmall 本地 CPU 语音识别。
+    # Docker 生产镜像默认安装 FunASR CPU 依赖，并在镜像构建阶段下载 model.pt。
+    type: fun_local
+    model_dir: models/SenseVoiceSmall
+    output_dir: tmp/
   SherpaASR:
     # Sherpa-ONNX 本地语音识别（需手动下载模型）
     type: sherpa_onnx_local
