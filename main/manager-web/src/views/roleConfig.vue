@@ -81,6 +81,8 @@
               @update:currentFunctions="val => currentFunctions = val"
               @update:currentKnowledgeBases="val => currentKnowledgeBases = val"
               @update:checkedReplacementWordIds="val => checkedReplacementWordIds = val"
+              @update:voiceOptions="val => voiceOptions = val"
+              @update:selectedLanguage="val => selectedLanguage = val"
               @form-change="handleFormChange"
             />
           </el-card>

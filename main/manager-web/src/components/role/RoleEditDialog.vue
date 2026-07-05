@@ -687,6 +687,9 @@ export default {
       }
       const allVoices = Object.values(this.voiceDetails);
       const filteredVoices = allVoices.filter(voice => {
+        if (!this.localSelectedLanguage) {
+          return true;
+        }
         if (!voice.languages) {
           return Boolean(voice.isClone);
         }
@@ -1058,6 +1061,7 @@ export default {
       handler(newVal) {
         if (newVal !== this.localSelectedLanguage) {
           this.localSelectedLanguage = newVal;
+          this.$nextTick(this.filterVoicesByLanguage);
         }
       },
     },
