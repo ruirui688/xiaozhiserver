@@ -1,0 +1,23 @@
+ARG ASSETS_RUNTIME_BASE_IMAGE=alpine:3.20
+
+FROM ${ASSETS_RUNTIME_BASE_IMAGE}
+
+RUN apk add --no-cache --no-scripts nginx \
+    && (addgroup -S nginx 2>/dev/null || true) \
+    && (adduser -S -D -H -G nginx nginx 2>/dev/null || true) \
+    && mkdir -p /run/nginx /var/log/nginx /var/lib/nginx/logs /usr/share/nginx/html/generator/static \
+        /tmp/nginx-client-body /tmp/nginx-proxy /tmp/nginx-fastcgi /tmp/nginx-uwsgi /tmp/nginx-scgi \
+    && chown -R nginx:nginx /run/nginx /var/log/nginx /var/lib/nginx /usr/share/nginx/html \
+        /tmp/nginx-client-body /tmp/nginx-proxy /tmp/nginx-fastcgi /tmp/nginx-uwsgi /tmp/nginx-scgi
+
+COPY docs/docker/nginx-manager-assets.conf /etc/nginx/nginx.conf
+COPY --chown=nginx:nginx main/manager-web/public/generator/static /usr/share/nginx/html/generator/static
+
+USER nginx
+
+EXPOSE 8004
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:8004/generator/static/wakenet_model/wn8_alexa/_MODEL_INFO_ || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]

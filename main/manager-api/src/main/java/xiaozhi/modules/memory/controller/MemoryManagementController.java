@@ -153,6 +153,28 @@ public class MemoryManagementController {
                 memoryService.rebuildFromRecentChatHistory(agentId, dto, "user", currentUserId()));
     }
 
+    @PostMapping("review-preview")
+    @Operation(summary = "预览当前生效记忆质量重审")
+    @RequiresPermissions("sys:role:normal")
+    public Result<MemoryRebuildResultVO> reviewPreview(@PathVariable String agentId) {
+        if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
+            throw new RenException(ErrorCode.NO_PERMISSION);
+        }
+        return new Result<MemoryRebuildResultVO>().ok(
+                memoryService.reviewActiveMemories(agentId, true, "user", currentUserId()));
+    }
+
+    @PostMapping("review")
+    @Operation(summary = "执行当前生效记忆质量重审")
+    @RequiresPermissions("sys:role:normal")
+    public Result<MemoryRebuildResultVO> review(@PathVariable String agentId) {
+        if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
+            throw new RenException(ErrorCode.NO_PERMISSION);
+        }
+        return new Result<MemoryRebuildResultVO>().ok(
+                memoryService.reviewActiveMemories(agentId, false, "user", currentUserId()));
+    }
+
     @PostMapping("remember")
     @Operation(summary = "手动记住")
     @RequiresPermissions("sys:role:normal")

@@ -53,6 +53,12 @@ export default {
   rebuild(agentId, data, callback, networkFail, fail) {
     request('POST', `/agent/${agentId}/memories/rebuild`, data, callback, networkFail, fail, 300000);
   },
+  reviewPreview(agentId, callback, networkFail, fail) {
+    request('POST', `/agent/${agentId}/memories/review-preview`, {}, callback, networkFail, fail, 300000);
+  },
+  review(agentId, callback, networkFail, fail) {
+    request('POST', `/agent/${agentId}/memories/review`, {}, callback, networkFail, fail, 300000);
+  },
   remember(agentId, data, callback) {
     request('POST', `/agent/${agentId}/memories/remember`, data, callback);
   },

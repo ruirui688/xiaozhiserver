@@ -53,7 +53,7 @@ SERVER_INSTALL_PROFILE=lite scripts/acr-build-push
 SERVER_INSTALL_PROFILE=funasr scripts/acr-build-push
 ```
 
-发布脚本默认把 Python、Node、Maven 和 BellSoft 运行时基础镜像指向
+发布脚本默认把 Python、Node、Maven、Java runtime 和 Nginx runtime 基础镜像指向
 `docker.m.daocloud.io`，避免构建机 Docker daemon 配了失效公共 mirror 时
 拉取基础镜像失败。仍可按需覆盖：
 
@@ -61,7 +61,9 @@ SERVER_INSTALL_PROFILE=funasr scripts/acr-build-push
 PYTHON_BASE_IMAGE=python:3.10-slim-bookworm \
 NODE_BASE_IMAGE=node:20 \
 MAVEN_BASE_IMAGE=maven:3.9.4-eclipse-temurin-21 \
-WEB_RUNTIME_BASE_IMAGE=bellsoft/liberica-runtime-container:jre-21-glibc \
+API_RUNTIME_BASE_IMAGE=bellsoft/liberica-runtime-container:jre-21-glibc \
+MANAGER_WEB_RUNTIME_BASE_IMAGE=alpine:3.20 \
+ASSETS_RUNTIME_BASE_IMAGE=alpine:3.20 \
 scripts/acr-build-push-lite
 ```
 
@@ -93,10 +95,14 @@ base 当成通用缓存，避免 lite 镜像混入 FunASR。
 
 ```text
 xiaozhi-server:latest
-xiaozhi-web:latest
+xiaozhi-manager-api:latest
+xiaozhi-manager-web:latest
+xiaozhi-manager-assets:latest
 xiaozhi-server-base-common/lite/funasr:latest
 xiaozhi-server-base-common/lite/funasr:base-<依赖哈希>
-xiaozhi-web:web-<内容哈希>
+xiaozhi-manager-api:api-<内容哈希>
+xiaozhi-manager-web:web-<内容哈希>
+xiaozhi-manager-assets:assets-<内容哈希>
 mysql:8.4 / redis:8.0
 ```
 
@@ -112,7 +118,7 @@ BUILD_ENGINE=buildx PLATFORMS=linux/amd64,linux/arm64 scripts/acr-build-push
 VERBOSE=true scripts/acr-build-push
 ```
 
-安静输出下，交互式终端默认在同一行显示 `⠴ Build manager web/api image ━━━━━╸━━━━━━━━━ 00:35` 这类不确定进度条，只表示任务仍在运行，不代表真实百分比；为避免多个后台任务抢占同一行，交互式安静进度模式默认串行执行步骤，显式设置并行变量时仍可并行。非 TTY 日志会按 `XIAOZHI_PROGRESS_INTERVAL` 保留多行心跳，Docker 原始进度仍写入临时日志。可以按需调整或关闭：
+安静输出下，交互式终端默认在同一行显示 `⠴ Build manager Web image ━━━━━╸━━━━━━━━━ 00:35` 这类不确定进度条，只表示任务仍在运行，不代表真实百分比；为避免多个后台任务抢占同一行，交互式安静进度模式默认串行执行步骤，显式设置并行变量时仍可并行。非 TTY 日志会按 `XIAOZHI_PROGRESS_INTERVAL` 保留多行心跳，Docker 原始进度仍写入临时日志。可以按需调整或关闭：
 
 ```bash
 XIAOZHI_PROGRESS_INTERVAL=10 scripts/acr-build-push
@@ -120,7 +126,7 @@ XIAOZHI_PROGRESS=false scripts/acr-build-push
 PARALLEL_RELEASE_STEPS=true PARALLEL_IMAGE_BUILDS=true scripts/acr-build-push
 ```
 
-非交互式环境或显式开启并行时，发布脚本可以并行执行互不依赖的步骤：运行时镜像同步与业务镜像构建可并行，`xiaozhi-server` 与 `xiaozhi-web` 也可并行。`xiaozhi-server` 只有在确实需要构建 `xiaozhi-server-base` 时才会等待基础镜像先完成。需要降低本机负载时可关闭并行：
+非交互式环境或显式开启并行时，发布脚本可以并行执行互不依赖的步骤：运行时镜像同步与业务镜像构建可并行，`xiaozhi-server`、`xiaozhi-manager-api`、`xiaozhi-manager-web` 和 `xiaozhi-manager-assets` 也可并行。`xiaozhi-server` 只有在确实需要构建 `xiaozhi-server-base` 时才会等待基础镜像先完成。需要降低本机负载时可关闭并行：
 
 ```bash
 PARALLEL_RELEASE_STEPS=false PARALLEL_IMAGE_BUILDS=false scripts/acr-build-push
@@ -156,12 +162,14 @@ xiaozhi-server-base-common:base-<hash>  系统依赖缓存
 xiaozhi-server-base-lite:base-<hash>    普通 Python 依赖缓存
 xiaozhi-server-base-funasr:base-<hash>  CPU PyTorch/FunASR 追加层缓存
 xiaozhi-server:<commit>             服务代码；FunASR profile 会额外包含 SenseVoiceSmall 模型
-xiaozhi-web:web-<hash>              manager-api + manager-web 内容缓存，源码未变时直接复用
-xiaozhi-web:<commit>                manager-api + manager-web
+xiaozhi-manager-api:api-<hash>      Java API 内容缓存，源码未变时直接复用
+xiaozhi-manager-web:web-<hash>      Vue 管理端内容缓存，源码未变时直接复用
+xiaozhi-manager-assets:assets-<hash> 大静态资源缓存，资源未变时直接复用
+xiaozhi-manager-api/web/assets:<commit> 拆分后的管理端运行镜像
 mysql:8.4 / redis:8.0               运行时镜像，ACR 已存在时跳过同步
 ```
 
-日常只改业务代码时使用对应 profile 的发布入口即可，脚本会优先复用现有 base 和 Web/API 内容缓存。只有改了 `requirements-docker*.txt`、`Dockerfile-server-base`、Python 基础镜像或系统包时，才需要 `BUILD_BASE=true`。只改 Java/Web、文档或部署说明且确认运行时镜像已在 ACR 时，可以用下面命令减少检查和推送：
+日常只改业务代码时使用对应 profile 的发布入口即可，脚本会优先复用现有 base 和拆分后的 manager-api / manager-web / manager-assets 内容缓存。只有改了 `requirements-docker*.txt`、`Dockerfile-server-base`、Python 基础镜像或系统包时，才需要 `BUILD_BASE=true`。只改 Java/Web、文档或部署说明且确认运行时镜像已在 ACR 时，可以用下面命令减少检查和推送：
 
 ```bash
 BUILD_BASE=false MIRROR_RUNTIME_IMAGES=false scripts/acr-build-push
@@ -197,7 +205,7 @@ cd deploy/production
 
 需要固定部署或回滚时，才使用 `VERSION=<git短哈希> ./upgrade`。
 
-首次部署后，`~/xiaozhi-data/.env` 会记录 `XIAOZHI_DEPLOY_MODE=pull`、`XIAOZHI_SERVER_IMAGE_REPOSITORY` 和 `XIAOZHI_WEB_IMAGE_REPOSITORY`。后续 `deploy/production/upgrade` 会复用该配置。旧部署如需继续使用 `/opt/xiaozhi-data`，执行时显式传入 `DATA_DIR=/opt/xiaozhi-data`。
+首次部署后，`~/xiaozhi-data/.env` 会记录 `XIAOZHI_DEPLOY_MODE=pull`、`XIAOZHI_SERVER_IMAGE_REPOSITORY`、`XIAOZHI_MANAGER_API_IMAGE_REPOSITORY`、`XIAOZHI_MANAGER_WEB_IMAGE_REPOSITORY` 和 `XIAOZHI_MANAGER_ASSETS_IMAGE_REPOSITORY`。后续 `deploy/production/upgrade` 会复用该配置。旧部署如需继续使用 `/opt/xiaozhi-data`，执行时显式传入 `DATA_DIR=/opt/xiaozhi-data`。
 
 ## 脚本分组
 

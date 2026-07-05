@@ -1,6 +1,7 @@
 package xiaozhi.modules.memory.service.impl;
 
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 
@@ -58,6 +59,7 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
             return vo;
         }
         int limit = dto.getLimit() == null ? 8 : Math.max(1, Math.min(dto.getLimit(), 20));
+        Date now = new Date();
 
         // 用户画像
         QueryWrapper<MemoryProfileEntity> profileWrapper = new QueryWrapper<>();
@@ -89,6 +91,7 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
                     .eq("scope_type", MemoryHelper.SCOPE_DEVICE)
                     .and(w -> w.eq("scope_id", scope.scopeId).or().eq("scope_id", scope.agent.getId()))
                     .eq("status", MemoryHelper.STATUS_ACTIVE)
+                    .and(w -> w.isNull("expires_at").or().gt("expires_at", now))
                     .orderByDesc("importance", "last_seen_at")
                     .last("LIMIT 200"));
             List<Map.Entry<MemoryFactEntity, Double>> scored = new ArrayList<>();
@@ -119,7 +122,8 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
             factWrapper.eq("agent_id", scope.agent.getId())
                     .eq("scope_type", MemoryHelper.SCOPE_DEVICE)
                     .and(w -> w.eq("scope_id", scope.scopeId).or().eq("scope_id", scope.agent.getId()))
-                    .eq("status", MemoryHelper.STATUS_ACTIVE);
+                    .eq("status", MemoryHelper.STATUS_ACTIVE)
+                    .and(w -> w.isNull("expires_at").or().gt("expires_at", now));
             if (StringUtils.isNotBlank(keyword)) {
                 factWrapper.and(w -> w.like("canonical_text", keyword).or().like("category", keyword));
             }
@@ -131,12 +135,14 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
                         .eq("scope_type", MemoryHelper.SCOPE_DEVICE)
                         .and(w -> w.eq("scope_id", scope.scopeId).or().eq("scope_id", scope.agent.getId()))
                         .eq("status", MemoryHelper.STATUS_ACTIVE)
+                        .and(w -> w.isNull("expires_at").or().gt("expires_at", now))
                         .orderByDesc("importance", "last_seen_at")
                         .last("LIMIT " + limit);
                 facts = factDao.selectList(fallback);
             }
         }
         vo.setFacts(facts);
+        refreshFactAccess(facts, now);
 
         // 工具行为
         QueryWrapper<MemoryToolBehaviorEntity> toolWrapper = new QueryWrapper<>();
@@ -196,6 +202,17 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
             }
         }
         return builder.toString().trim();
+    }
+
+    private void refreshFactAccess(List<MemoryFactEntity> facts, Date now) {
+        if (facts == null || facts.isEmpty()) {
+            return;
+        }
+        for (MemoryFactEntity fact : facts) {
+            fact.setLastSeenAt(now);
+            fact.setUpdatedAt(now);
+            factDao.updateById(fact);
+        }
     }
 
     /**

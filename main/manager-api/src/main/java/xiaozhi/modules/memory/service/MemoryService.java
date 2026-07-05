@@ -38,6 +38,8 @@ public interface MemoryService {
     MemoryRebuildResultVO rebuildFromRecentChatHistory(String agentId, MemoryRebuildRequestDTO dto,
                                                        String actorType, String actorId);
 
+    MemoryRebuildResultVO reviewActiveMemories(String agentId, boolean dryRun, String actorType, String actorId);
+
     /**
      * PowerMem-style session memory processing.
      * Triggered on session close to analyze full conversation and

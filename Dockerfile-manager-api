@@ -1,0 +1,28 @@
+ARG MAVEN_BASE_IMAGE=maven:3.9.4-eclipse-temurin-21
+ARG API_RUNTIME_BASE_IMAGE=bellsoft/liberica-runtime-container:jre-21-glibc
+
+FROM ${MAVEN_BASE_IMAGE} AS api-builder
+WORKDIR /app
+COPY main/manager-api/pom.xml .
+COPY main/manager-api/src ./src
+RUN --mount=type=cache,target=/root/.m2,sharing=locked \
+    mvn clean package -Dmaven.test.skip=true
+
+FROM ${API_RUNTIME_BASE_IMAGE}
+WORKDIR /app
+
+RUN apk add --no-cache --no-scripts bash fontconfig ttf-dejavu \
+    && addgroup -S xiaozhi && adduser -S xiaozhi -G xiaozhi
+
+COPY --chown=xiaozhi:xiaozhi --from=api-builder /app/target/xiaozhi-esp32-api.jar /app/xiaozhi-esp32-api.jar
+COPY --chown=xiaozhi:xiaozhi docs/docker/start-api.sh /start-api.sh
+RUN chmod +x /start-api.sh
+
+EXPOSE 8003
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD ps | grep -q "[x]iaozhi-esp32-api.jar" || exit 1
+
+USER xiaozhi
+
+CMD ["/start-api.sh"]

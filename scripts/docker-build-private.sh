@@ -3,11 +3,15 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEFAULT_SERVER_IMAGE_REPOSITORY="xiaozhi-server-local"
-DEFAULT_WEB_IMAGE_REPOSITORY="xiaozhi-web-local"
+DEFAULT_MANAGER_API_IMAGE_REPOSITORY="xiaozhi-manager-api-local"
+DEFAULT_MANAGER_WEB_IMAGE_REPOSITORY="xiaozhi-manager-web-local"
+DEFAULT_MANAGER_ASSETS_IMAGE_REPOSITORY="xiaozhi-manager-assets-local"
 DEFAULT_SERVER_COMMON_BASE_IMAGE_REPOSITORY="xiaozhi-server-base-common-local"
 
 SERVER_IMAGE_REPOSITORY="${SERVER_IMAGE_REPOSITORY:-$DEFAULT_SERVER_IMAGE_REPOSITORY}"
-WEB_IMAGE_REPOSITORY="${WEB_IMAGE_REPOSITORY:-$DEFAULT_WEB_IMAGE_REPOSITORY}"
+MANAGER_API_IMAGE_REPOSITORY="${MANAGER_API_IMAGE_REPOSITORY:-$DEFAULT_MANAGER_API_IMAGE_REPOSITORY}"
+MANAGER_WEB_IMAGE_REPOSITORY="${MANAGER_WEB_IMAGE_REPOSITORY:-$DEFAULT_MANAGER_WEB_IMAGE_REPOSITORY}"
+MANAGER_ASSETS_IMAGE_REPOSITORY="${MANAGER_ASSETS_IMAGE_REPOSITORY:-$DEFAULT_MANAGER_ASSETS_IMAGE_REPOSITORY}"
 case "$(uname -m)" in
   x86_64) DEFAULT_PLATFORM="linux/amd64" ;;
   aarch64 | arm64) DEFAULT_PLATFORM="linux/arm64" ;;
@@ -24,6 +28,9 @@ PYTHON_BASE_IMAGE="${PYTHON_BASE_IMAGE:-docker.m.daocloud.io/library/python:3.10
 NODE_BASE_IMAGE="${NODE_BASE_IMAGE:-docker.m.daocloud.io/library/node:20}"
 MAVEN_BASE_IMAGE="${MAVEN_BASE_IMAGE:-docker.m.daocloud.io/library/maven:3.9.4-eclipse-temurin-21}"
 WEB_RUNTIME_BASE_IMAGE="${WEB_RUNTIME_BASE_IMAGE:-docker.m.daocloud.io/bellsoft/liberica-runtime-container:jre-21-glibc}"
+API_RUNTIME_BASE_IMAGE="${API_RUNTIME_BASE_IMAGE:-$WEB_RUNTIME_BASE_IMAGE}"
+MANAGER_WEB_RUNTIME_BASE_IMAGE="${MANAGER_WEB_RUNTIME_BASE_IMAGE:-docker.m.daocloud.io/library/alpine:3.20}"
+ASSETS_RUNTIME_BASE_IMAGE="${ASSETS_RUNTIME_BASE_IMAGE:-docker.m.daocloud.io/library/alpine:3.20}"
 DEBIAN_MIRROR="${DEBIAN_MIRROR:-https://mirrors.aliyun.com/debian}"
 DEBIAN_SECURITY_MIRROR="${DEBIAN_SECURITY_MIRROR:-https://mirrors.aliyun.com/debian-security}"
 SERVER_INSTALL_PROFILE="${SERVER_INSTALL_PROFILE:-lite}"
@@ -73,8 +80,9 @@ PRINT_BUILD_CONFIG="${PRINT_BUILD_CONFIG:-true}"
 LOG_DIR="${LOG_DIR:-$(mktemp -d -t xiaozhi-docker-build.XXXXXX)}"
 SERVER_BASE_CACHE_VERSION="${SERVER_BASE_CACHE_VERSION:-v2}"
 SERVER_BASE_SEED_LATEST="${SERVER_BASE_SEED_LATEST:-false}"
-WEB_CACHE_VERSION="${WEB_CACHE_VERSION:-v1}"
-WEB_FRONTEND_CACHE_VERSION="${WEB_FRONTEND_CACHE_VERSION:-v1}"
+MANAGER_API_CACHE_VERSION="${MANAGER_API_CACHE_VERSION:-v1}"
+MANAGER_WEB_CACHE_VERSION="${MANAGER_WEB_CACHE_VERSION:-v1}"
+MANAGER_ASSETS_CACHE_VERSION="${MANAGER_ASSETS_CACHE_VERSION:-v1}"
 RECREATE_BUILDER=false
 
 if [[ -z "$FUNASR_MODEL_CONTEXT" ]]; then
@@ -529,16 +537,15 @@ hash_funasr_base_inputs() {
   } | sha256sum | cut -c1-12
 }
 
-hash_web_inputs() {
+hash_manager_api_inputs() {
   {
-    printf 'WEB_CACHE_VERSION=%s\n' "$WEB_CACHE_VERSION"
+    printf 'MANAGER_API_CACHE_VERSION=%s\n' "$MANAGER_API_CACHE_VERSION"
     printf 'MAVEN_BASE_IMAGE=%s\n' "$MAVEN_BASE_IMAGE"
-    printf 'WEB_RUNTIME_BASE_IMAGE=%s\n' "$WEB_RUNTIME_BASE_IMAGE"
-    printf 'WEB_FRONTEND_CACHE_TAG=%s\n' "$WEB_FRONTEND_CACHE_TAG"
-    git -C "$ROOT_DIR" ls-files -z \
-      Dockerfile-web-runtime \
-      docs/docker/nginx.conf \
-      docs/docker/start.sh \
+    printf 'API_RUNTIME_BASE_IMAGE=%s\n' "$API_RUNTIME_BASE_IMAGE"
+    git -C "$ROOT_DIR" ls-files -z --cached --others --exclude-standard -- \
+      Dockerfile-manager-api \
+      Dockerfile-manager-api.dockerignore \
+      docs/docker/start-api.sh \
       main/manager-api/pom.xml \
       main/manager-api/src \
       | sort -z \
@@ -546,13 +553,46 @@ hash_web_inputs() {
   } | sha256sum | cut -c1-12
 }
 
-hash_web_frontend_inputs() {
+hash_manager_web_inputs() {
   {
-    printf 'WEB_FRONTEND_CACHE_VERSION=%s\n' "$WEB_FRONTEND_CACHE_VERSION"
+    printf 'MANAGER_WEB_CACHE_VERSION=%s\n' "$MANAGER_WEB_CACHE_VERSION"
     printf 'NODE_BASE_IMAGE=%s\n' "$NODE_BASE_IMAGE"
-    git -C "$ROOT_DIR" ls-files -z \
-      Dockerfile-web \
-      main/manager-web \
+    printf 'MANAGER_WEB_RUNTIME_BASE_IMAGE=%s\n' "$MANAGER_WEB_RUNTIME_BASE_IMAGE"
+    git -C "$ROOT_DIR" ls-files -z --cached --others --exclude-standard -- \
+      Dockerfile-manager-web \
+      Dockerfile-manager-web.dockerignore \
+      docs/docker/nginx-manager-web.conf \
+      main/manager-web/.npmrc \
+      main/manager-web/babel.config.js \
+      main/manager-web/jsconfig.json \
+      main/manager-web/package-lock.json \
+      main/manager-web/package.json \
+      main/manager-web/vue.config.js \
+      main/manager-web/src \
+      main/manager-web/public/favicon.ico \
+      main/manager-web/public/index.html \
+      main/manager-web/public/offline.html \
+      main/manager-web/public/privacy-policy.html \
+      main/manager-web/public/user-agreement.html \
+      main/manager-web/public/generator/README.md \
+      main/manager-web/public/generator/favicon.ico \
+      main/manager-web/public/generator/index.html \
+      main/manager-web/public/generator/assets \
+      main/manager-web/public/generator/workers \
+      | sort -z \
+      | (cd "$ROOT_DIR" && xargs -0 -r sha256sum)
+  } | sha256sum | cut -c1-12
+}
+
+hash_manager_assets_inputs() {
+  {
+    printf 'MANAGER_ASSETS_CACHE_VERSION=%s\n' "$MANAGER_ASSETS_CACHE_VERSION"
+    printf 'ASSETS_RUNTIME_BASE_IMAGE=%s\n' "$ASSETS_RUNTIME_BASE_IMAGE"
+    git -C "$ROOT_DIR" ls-files -z --cached --others --exclude-standard -- \
+      Dockerfile-manager-assets \
+      Dockerfile-manager-assets.dockerignore \
+      docs/docker/nginx-manager-assets.conf \
+      main/manager-web/public/generator/static \
       | sort -z \
       | (cd "$ROOT_DIR" && xargs -0 -r sha256sum)
   } | sha256sum | cut -c1-12
@@ -577,10 +617,12 @@ else
 fi
 SERVER_BASE_CACHE_IMAGE="$SERVER_BASE_IMAGE_REPOSITORY:$SERVER_BASE_CACHE_TAG"
 FUNASR_MODEL_DIGEST="${FUNASR_MODEL_DIGEST:-$(funasr_model_cache_key)}"
-WEB_FRONTEND_CACHE_TAG="${WEB_FRONTEND_CACHE_TAG:-web-frontend-$(hash_web_frontend_inputs)}"
-WEB_FRONTEND_CACHE_IMAGE="$WEB_IMAGE_REPOSITORY:$WEB_FRONTEND_CACHE_TAG"
-WEB_CACHE_TAG="${WEB_CACHE_TAG:-web-$(hash_web_inputs)}"
-WEB_CACHE_IMAGE="$WEB_IMAGE_REPOSITORY:$WEB_CACHE_TAG"
+MANAGER_API_CACHE_TAG="${MANAGER_API_CACHE_TAG:-api-$(hash_manager_api_inputs)}"
+MANAGER_API_CACHE_IMAGE="$MANAGER_API_IMAGE_REPOSITORY:$MANAGER_API_CACHE_TAG"
+MANAGER_WEB_CACHE_TAG="${MANAGER_WEB_CACHE_TAG:-web-$(hash_manager_web_inputs)}"
+MANAGER_WEB_CACHE_IMAGE="$MANAGER_WEB_IMAGE_REPOSITORY:$MANAGER_WEB_CACHE_TAG"
+MANAGER_ASSETS_CACHE_TAG="${MANAGER_ASSETS_CACHE_TAG:-assets-$(hash_manager_assets_inputs)}"
+MANAGER_ASSETS_CACHE_IMAGE="$MANAGER_ASSETS_IMAGE_REPOSITORY:$MANAGER_ASSETS_CACHE_TAG"
 
 image_available_locally_or_remote() {
   local image="$1"
@@ -591,7 +633,9 @@ image_available_locally_or_remote() {
 if [[ "$PRINT_BUILD_CONFIG" != "false" ]]; then
   echo "Image repositories:"
   echo "  server:      $SERVER_IMAGE_REPOSITORY"
-  echo "  web:         $WEB_IMAGE_REPOSITORY"
+  echo "  manager-api: $MANAGER_API_IMAGE_REPOSITORY"
+  echo "  manager-web: $MANAGER_WEB_IMAGE_REPOSITORY"
+  echo "  assets:      $MANAGER_ASSETS_IMAGE_REPOSITORY"
   echo "  base-common: $SERVER_COMMON_BASE_IMAGE_REPOSITORY"
   echo "  base-lite:   $SERVER_LITE_BASE_IMAGE_REPOSITORY"
   echo "  base-funasr: $SERVER_FUNASR_BASE_IMAGE_REPOSITORY"
@@ -605,6 +649,9 @@ if [[ "$PRINT_BUILD_CONFIG" != "false" ]]; then
   echo "Node base image: $NODE_BASE_IMAGE"
   echo "Maven base image: $MAVEN_BASE_IMAGE"
   echo "Web runtime base image: $WEB_RUNTIME_BASE_IMAGE"
+  echo "API runtime base image: $API_RUNTIME_BASE_IMAGE"
+  echo "Manager web runtime base image: $MANAGER_WEB_RUNTIME_BASE_IMAGE"
+  echo "Assets runtime base image: $ASSETS_RUNTIME_BASE_IMAGE"
   echo "Debian mirror: $DEBIAN_MIRROR"
   echo "Debian security mirror: $DEBIAN_SECURITY_MIRROR"
   echo "Server install profile: $SERVER_INSTALL_PROFILE"
@@ -614,16 +661,18 @@ if [[ "$PRINT_BUILD_CONFIG" != "false" ]]; then
   fi
   echo "Server base cache version: $SERVER_BASE_CACHE_VERSION"
   echo "Server base seed latest: $SERVER_BASE_SEED_LATEST"
-  echo "Web/API cache version: $WEB_CACHE_VERSION"
-  echo "Web frontend cache version: $WEB_FRONTEND_CACHE_VERSION"
+  echo "Manager API cache version: $MANAGER_API_CACHE_VERSION"
+  echo "Manager Web cache version: $MANAGER_WEB_CACHE_VERSION"
+  echo "Manager assets cache version: $MANAGER_ASSETS_CACHE_VERSION"
   echo "Install FunASR model: $INSTALL_FUNASR_MODEL"
   echo "FunASR model context: $FUNASR_MODEL_CONTEXT"
   echo "FunASR model URL: $FUNASR_MODEL_URL"
   echo "Common base cache image: $SERVER_COMMON_BASE_CACHE_IMAGE"
   echo "Lite base cache image: $SERVER_LITE_BASE_CACHE_IMAGE"
   echo "Selected base cache image: $SERVER_BASE_CACHE_IMAGE"
-  echo "Web frontend cache image: $WEB_FRONTEND_CACHE_IMAGE"
-  echo "Web/API cache image: $WEB_CACHE_IMAGE"
+  echo "Manager API cache image: $MANAGER_API_CACHE_IMAGE"
+  echo "Manager Web cache image: $MANAGER_WEB_CACHE_IMAGE"
+  echo "Manager assets cache image: $MANAGER_ASSETS_CACHE_IMAGE"
   echo "Parallel image builds: $PARALLEL_IMAGE_BUILDS"
   if [[ -n "$BUILDKIT_REGISTRY_MIRROR" ]]; then
     echo "BuildKit registry mirror:"
@@ -756,54 +805,92 @@ build_server_pipeline() {
   push_image "$SERVER_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"
 }
 
-ensure_web_frontend_cache() {
-  if [[ "$BUILD_BASE" == "auto" ]] && image_available_locally_or_remote "$WEB_FRONTEND_CACHE_IMAGE"; then
-    print_base_image_status "Web frontend cached" "$WEB_FRONTEND_CACHE_IMAGE"
+retag_or_push_component() {
+  local cache_image="$1"
+  local repository="$2"
+
+  if remote_retag_image "$cache_image" "$repository:$CHANNEL_TAG"; then
+    remote_retag_image "$cache_image" "$repository:$IMAGE_VERSION_TAG"
     return
   fi
 
-  build_image "Build manager frontend cache" Dockerfile-web \
-    --target web-builder \
-    --build-arg "NODE_BASE_IMAGE=$NODE_BASE_IMAGE" \
-    --tag "$WEB_FRONTEND_CACHE_IMAGE"
-  push_image "$WEB_FRONTEND_CACHE_IMAGE"
+  docker tag "$cache_image" "$repository:$CHANNEL_TAG"
+  docker tag "$cache_image" "$repository:$IMAGE_VERSION_TAG"
+  push_local_image "$repository:$CHANNEL_TAG"
+  push_local_image "$repository:$IMAGE_VERSION_TAG"
 }
 
-build_web_pipeline() {
-  if [[ "$BUILD_BASE" == "auto" ]] && image_available_locally_or_remote "$WEB_CACHE_IMAGE"; then
-    print_base_image_status "Web/API image cached" "$WEB_CACHE_IMAGE"
-
-    if [[ "$PUSH" == "true" ]] && ! image_exists_remote "$WEB_CACHE_IMAGE"; then
-      push_local_image "$WEB_CACHE_IMAGE"
+build_manager_api_pipeline() {
+  if image_available_locally_or_remote "$MANAGER_API_CACHE_IMAGE"; then
+    print_base_image_status "Manager API cached" "$MANAGER_API_CACHE_IMAGE"
+    if [[ "$PUSH" == "true" ]] && ! image_exists_remote "$MANAGER_API_CACHE_IMAGE"; then
+      push_local_image "$MANAGER_API_CACHE_IMAGE"
     fi
-
-    if remote_retag_image "$WEB_CACHE_IMAGE" "$WEB_IMAGE_REPOSITORY:$CHANNEL_TAG"; then
-      remote_retag_image "$WEB_CACHE_IMAGE" "$WEB_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"
-      return
-    fi
-
-    docker tag "$WEB_CACHE_IMAGE" "$WEB_IMAGE_REPOSITORY:$CHANNEL_TAG"
-    docker tag "$WEB_CACHE_IMAGE" "$WEB_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"
-    push_local_image "$WEB_IMAGE_REPOSITORY:$CHANNEL_TAG"
-    push_local_image "$WEB_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"
+    retag_or_push_component "$MANAGER_API_CACHE_IMAGE" "$MANAGER_API_IMAGE_REPOSITORY"
     return
   fi
 
-  ensure_web_frontend_cache
-
-  build_image "Build manager web/api image" Dockerfile-web-runtime \
+  build_image "Build manager API image" Dockerfile-manager-api \
     --build-arg "MAVEN_BASE_IMAGE=$MAVEN_BASE_IMAGE" \
-    --build-arg "WEB_RUNTIME_BASE_IMAGE=$WEB_RUNTIME_BASE_IMAGE" \
-    --build-arg "WEB_DIST_IMAGE=$WEB_FRONTEND_CACHE_IMAGE" \
-    --tag "$WEB_IMAGE_REPOSITORY:$CHANNEL_TAG" \
-    --tag "$WEB_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG" \
-    --tag "$WEB_CACHE_IMAGE"
-  push_image "$WEB_CACHE_IMAGE"
-  if ! remote_retag_image "$WEB_CACHE_IMAGE" "$WEB_IMAGE_REPOSITORY:$CHANNEL_TAG"; then
-    push_image "$WEB_IMAGE_REPOSITORY:$CHANNEL_TAG"
+    --build-arg "API_RUNTIME_BASE_IMAGE=$API_RUNTIME_BASE_IMAGE" \
+    --tag "$MANAGER_API_IMAGE_REPOSITORY:$CHANNEL_TAG" \
+    --tag "$MANAGER_API_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG" \
+    --tag "$MANAGER_API_CACHE_IMAGE"
+  push_image "$MANAGER_API_CACHE_IMAGE"
+  if ! remote_retag_image "$MANAGER_API_CACHE_IMAGE" "$MANAGER_API_IMAGE_REPOSITORY:$CHANNEL_TAG"; then
+    push_image "$MANAGER_API_IMAGE_REPOSITORY:$CHANNEL_TAG"
   fi
-  if ! remote_retag_image "$WEB_CACHE_IMAGE" "$WEB_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"; then
-    push_image "$WEB_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"
+  if ! remote_retag_image "$MANAGER_API_CACHE_IMAGE" "$MANAGER_API_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"; then
+    push_image "$MANAGER_API_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"
+  fi
+}
+
+build_manager_web_pipeline() {
+  if image_available_locally_or_remote "$MANAGER_WEB_CACHE_IMAGE"; then
+    print_base_image_status "Manager Web cached" "$MANAGER_WEB_CACHE_IMAGE"
+    if [[ "$PUSH" == "true" ]] && ! image_exists_remote "$MANAGER_WEB_CACHE_IMAGE"; then
+      push_local_image "$MANAGER_WEB_CACHE_IMAGE"
+    fi
+    retag_or_push_component "$MANAGER_WEB_CACHE_IMAGE" "$MANAGER_WEB_IMAGE_REPOSITORY"
+    return
+  fi
+
+  build_image "Build manager Web image" Dockerfile-manager-web \
+    --build-arg "NODE_BASE_IMAGE=$NODE_BASE_IMAGE" \
+    --build-arg "WEB_RUNTIME_BASE_IMAGE=$MANAGER_WEB_RUNTIME_BASE_IMAGE" \
+    --tag "$MANAGER_WEB_IMAGE_REPOSITORY:$CHANNEL_TAG" \
+    --tag "$MANAGER_WEB_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG" \
+    --tag "$MANAGER_WEB_CACHE_IMAGE"
+  push_image "$MANAGER_WEB_CACHE_IMAGE"
+  if ! remote_retag_image "$MANAGER_WEB_CACHE_IMAGE" "$MANAGER_WEB_IMAGE_REPOSITORY:$CHANNEL_TAG"; then
+    push_image "$MANAGER_WEB_IMAGE_REPOSITORY:$CHANNEL_TAG"
+  fi
+  if ! remote_retag_image "$MANAGER_WEB_CACHE_IMAGE" "$MANAGER_WEB_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"; then
+    push_image "$MANAGER_WEB_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"
+  fi
+}
+
+build_manager_assets_pipeline() {
+  if image_available_locally_or_remote "$MANAGER_ASSETS_CACHE_IMAGE"; then
+    print_base_image_status "Manager assets cached" "$MANAGER_ASSETS_CACHE_IMAGE"
+    if [[ "$PUSH" == "true" ]] && ! image_exists_remote "$MANAGER_ASSETS_CACHE_IMAGE"; then
+      push_local_image "$MANAGER_ASSETS_CACHE_IMAGE"
+    fi
+    retag_or_push_component "$MANAGER_ASSETS_CACHE_IMAGE" "$MANAGER_ASSETS_IMAGE_REPOSITORY"
+    return
+  fi
+
+  build_image "Build manager assets image" Dockerfile-manager-assets \
+    --build-arg "ASSETS_RUNTIME_BASE_IMAGE=$ASSETS_RUNTIME_BASE_IMAGE" \
+    --tag "$MANAGER_ASSETS_IMAGE_REPOSITORY:$CHANNEL_TAG" \
+    --tag "$MANAGER_ASSETS_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG" \
+    --tag "$MANAGER_ASSETS_CACHE_IMAGE"
+  push_image "$MANAGER_ASSETS_CACHE_IMAGE"
+  if ! remote_retag_image "$MANAGER_ASSETS_CACHE_IMAGE" "$MANAGER_ASSETS_IMAGE_REPOSITORY:$CHANNEL_TAG"; then
+    push_image "$MANAGER_ASSETS_IMAGE_REPOSITORY:$CHANNEL_TAG"
+  fi
+  if ! remote_retag_image "$MANAGER_ASSETS_CACHE_IMAGE" "$MANAGER_ASSETS_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"; then
+    push_image "$MANAGER_ASSETS_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"
   fi
 }
 
@@ -822,18 +909,26 @@ wait_for_pipeline() {
 if [[ "$PARALLEL_IMAGE_BUILDS" == "true" ]]; then
   build_server_pipeline &
   SERVER_PIPELINE_PID=$!
-  build_web_pipeline &
-  WEB_PIPELINE_PID=$!
+  build_manager_api_pipeline &
+  MANAGER_API_PIPELINE_PID=$!
+  build_manager_web_pipeline &
+  MANAGER_WEB_PIPELINE_PID=$!
+  build_manager_assets_pipeline &
+  MANAGER_ASSETS_PIPELINE_PID=$!
 
   PIPELINE_STATUS=0
   wait_for_pipeline "Server" "$SERVER_PIPELINE_PID" || PIPELINE_STATUS=1
-  wait_for_pipeline "Web/API" "$WEB_PIPELINE_PID" || PIPELINE_STATUS=1
+  wait_for_pipeline "Manager API" "$MANAGER_API_PIPELINE_PID" || PIPELINE_STATUS=1
+  wait_for_pipeline "Manager Web" "$MANAGER_WEB_PIPELINE_PID" || PIPELINE_STATUS=1
+  wait_for_pipeline "Manager assets" "$MANAGER_ASSETS_PIPELINE_PID" || PIPELINE_STATUS=1
   if [[ "$PIPELINE_STATUS" -ne 0 ]]; then
     exit "$PIPELINE_STATUS"
   fi
 else
   build_server_pipeline
-  build_web_pipeline
+  build_manager_api_pipeline
+  build_manager_web_pipeline
+  build_manager_assets_pipeline
 fi
 
 echo "Done."
