@@ -233,11 +233,14 @@ export default {
       const field = this.getModelNameTemplateField(this.currentTemplate);
       return field && Array.isArray(field.options) ? field.options : [];
     },
-    isManagedDoubaoSeedTtsTemplate() {
-      return this.form.templateCode === "TTS_DOUBAO_SEED_TTS_2_STREAM";
+    isManagedDoubaoTtsTemplate() {
+      return [
+        "TTS_DOUBAO_BIGTTS_STREAM",
+        "TTS_DOUBAO_SEED_TTS_2_STREAM",
+      ].includes(this.form.templateCode);
     },
     shouldShowModelMetadataAdvanced() {
-      return !this.isManagedDoubaoSeedTtsTemplate;
+      return !this.isManagedDoubaoTtsTemplate;
     },
     shouldShowEndpointField() {
       return !!this.getEndpointField(this.currentTemplate) || !!this.form.endpointUrl;

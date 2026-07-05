@@ -17,7 +17,9 @@ final class HuoshanDoubleStreamTtsHelper {
     static final String HUOSHAN_DOUBLE_STREAM_TYPE = "huoshan_double_stream";
     static final String HUOSHAN_DOUBLE_STREAM_WS_URL = "wss://openspeech.bytedance.com/api/v3/tts/bidirection";
     static final String DOUBAO_SEED_TTS_2_RESOURCE_ID = "seed-tts-2.0";
+    static final String DOUBAO_BIGTTS_RESOURCE_ID = "volc.service_type.10029";
     static final String DOUBAO_SEED_TTS_2_DEFAULT_SPEAKER = "zh_female_sophie_uranus_bigtts";
+    static final String DOUBAO_BIGTTS_DEFAULT_SPEAKER = "zh_female_wanwanxiaohe_moon_bigtts";
 
     private HuoshanDoubleStreamTtsHelper() {
     }
@@ -50,16 +52,16 @@ final class HuoshanDoubleStreamTtsHelper {
             }
         }
         if (isManagedDoubaoTtsTemplate(templateCode)) {
-            config.set("resource_id", DOUBAO_SEED_TTS_2_RESOURCE_ID);
+            config.set("resource_id", resourceIdForTemplate(templateCode));
             if (!hasUsableHuoshanTtsSpeaker(templateCode, config.getStr("speaker"))) {
-                config.set("speaker", DOUBAO_SEED_TTS_2_DEFAULT_SPEAKER);
+                config.set("speaker", defaultSpeakerForTemplate(templateCode));
             }
         } else {
-            if (!hasUsableHuoshanTtsField(config.getStr("resource_id"))) {
+            if (!isSupportedResourceId(config.getStr("resource_id"))) {
                 config.set("resource_id", DOUBAO_SEED_TTS_2_RESOURCE_ID);
             }
             if (!hasUsableHuoshanTtsSpeaker(templateCode, config.getStr("speaker"))) {
-                config.set("speaker", DOUBAO_SEED_TTS_2_DEFAULT_SPEAKER);
+                config.set("speaker", defaultSpeakerForResource(config.getStr("resource_id")));
             }
         }
     }
@@ -67,7 +69,7 @@ final class HuoshanDoubleStreamTtsHelper {
     static boolean isHuoshanDoubleStreamTtsConfig(JSONObject config, String templateCode, String adapterCode) {
         return HUOSHAN_DOUBLE_STREAM_TYPE.equalsIgnoreCase(StringUtils.defaultString(adapterCode))
                 || HUOSHAN_DOUBLE_STREAM_TYPE.equalsIgnoreCase(config.getStr("type"))
-                || "TTS_DOUBAO_SEED_TTS_2_STREAM".equalsIgnoreCase(StringUtils.defaultString(templateCode));
+                || isManagedDoubaoTtsTemplate(templateCode);
     }
 
     static boolean hasUsableHuoshanTtsField(String value) {
@@ -97,7 +99,9 @@ final class HuoshanDoubleStreamTtsHelper {
     }
 
     static boolean isManagedDoubaoTtsTemplate(String templateCode) {
-        return "TTS_DOUBAO_SEED_TTS_2_STREAM".equalsIgnoreCase(StringUtils.defaultString(templateCode));
+        String normalized = StringUtils.defaultString(templateCode);
+        return "TTS_DOUBAO_SEED_TTS_2_STREAM".equalsIgnoreCase(normalized)
+                || "TTS_DOUBAO_BIGTTS_STREAM".equalsIgnoreCase(normalized);
     }
 
     static boolean hasUsableHuoshanTtsSpeaker(String templateCode, String value) {
@@ -106,6 +110,29 @@ final class HuoshanDoubleStreamTtsHelper {
         }
         return !"TTS_DOUBAO_SEED_TTS_2_STREAM".equalsIgnoreCase(StringUtils.defaultString(templateCode))
                 || !StringUtils.endsWithIgnoreCase(StringUtils.trim(value), "_moon_bigtts");
+    }
+
+    private static String resourceIdForTemplate(String templateCode) {
+        if ("TTS_DOUBAO_BIGTTS_STREAM".equalsIgnoreCase(StringUtils.defaultString(templateCode))) {
+            return DOUBAO_BIGTTS_RESOURCE_ID;
+        }
+        return DOUBAO_SEED_TTS_2_RESOURCE_ID;
+    }
+
+    private static String defaultSpeakerForTemplate(String templateCode) {
+        return defaultSpeakerForResource(resourceIdForTemplate(templateCode));
+    }
+
+    private static String defaultSpeakerForResource(String resourceId) {
+        if (DOUBAO_BIGTTS_RESOURCE_ID.equalsIgnoreCase(StringUtils.defaultString(resourceId))) {
+            return DOUBAO_BIGTTS_DEFAULT_SPEAKER;
+        }
+        return DOUBAO_SEED_TTS_2_DEFAULT_SPEAKER;
+    }
+
+    private static boolean isSupportedResourceId(String resourceId) {
+        return DOUBAO_SEED_TTS_2_RESOURCE_ID.equalsIgnoreCase(StringUtils.defaultString(resourceId))
+                || DOUBAO_BIGTTS_RESOURCE_ID.equalsIgnoreCase(StringUtils.defaultString(resourceId));
     }
 
     static boolean isLegacyHuoshanTtsEndpoint(String value) {

@@ -22,13 +22,25 @@ def _base_config(**overrides):
     return config
 
 
-def test_doubao_tts_uses_seed_tts_2_fixed_protocol_defaults():
-    provider = TTSProvider(_base_config(resource_id="legacy-resource", ws_url="wss://example.invalid"), True)
+def test_doubao_tts_uses_seed_tts_2_default_protocol_defaults():
+    provider = TTSProvider(_base_config(ws_url="wss://example.invalid"), True)
 
     assert provider.resource_id == "seed-tts-2.0"
     assert provider.ws_url == "wss://openspeech.bytedance.com/api/v3/tts/bidirection"
     assert provider.audio_format == "pcm"
     assert provider.enable_ws_reuse is True
+
+
+def test_doubao_tts_accepts_biggtts_resource_id():
+    provider = TTSProvider(_base_config(resource_id="volc.service_type.10029", speaker=""), True)
+
+    assert provider.resource_id == "volc.service_type.10029"
+    assert provider.voice == "zh_female_wanwanxiaohe_moon_bigtts"
+
+
+def test_doubao_tts_rejects_unknown_resource_id():
+    with pytest.raises(ValueError, match="不支持的豆包 TTS resource_id"):
+        TTSProvider(_base_config(resource_id="legacy-resource"), True)
 
 
 def test_doubao_tts_merges_flat_audio_fields():

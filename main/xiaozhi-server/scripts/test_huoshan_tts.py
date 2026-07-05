@@ -22,6 +22,7 @@ def build_config(args):
     config = {
         "type": "huoshan_double_stream",
         "api_key": args.api_key or env("VOLC_TTS_API_KEY") or env("HUOSHAN_TTS_API_KEY"),
+        "resource_id": args.resource_id or env("HUOSHAN_TTS_RESOURCE_ID", "seed-tts-2.0"),
         "speaker": args.speaker or env("HUOSHAN_TTS_SPEAKER", "zh_female_sophie_uranus_bigtts"),
         "sample_rate": args.sample_rate,
         "tts_timeout": args.timeout,
@@ -45,6 +46,7 @@ def validate_config(config):
 async def main():
     parser = argparse.ArgumentParser(description="Test Huoshan/Doubao bidirectional streaming TTS.")
     parser.add_argument("--api-key")
+    parser.add_argument("--resource-id", choices=["seed-tts-2.0", "volc.service_type.10029"])
     parser.add_argument("--speaker")
     parser.add_argument("--speech-rate", type=int, default=0)
     parser.add_argument("--loudness-rate", type=int, default=0)

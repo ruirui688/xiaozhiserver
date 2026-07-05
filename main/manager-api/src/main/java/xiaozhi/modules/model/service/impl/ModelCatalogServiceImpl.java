@@ -103,6 +103,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             "ASR_GROQ_OPENAI_TRANSCRIBE",
             "ASR_QWEN3_FLASH",
             "ASR_ALIYUN_BAILIAN_PARAFORMER",
+            "TTS_DOUBAO_BIGTTS_STREAM",
             "TTS_DOUBAO_SEED_TTS_2_STREAM",
             "LLM_OPENAI_COMPATIBLE",
             "LLM_ALI_QWEN_OPENAI",
@@ -195,7 +196,10 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         if ("ASR".equalsIgnoreCase(modelType) && "doubao_stream".equalsIgnoreCase(providerCode)) {
             return find("ASR_DOUBAO_SEED_ASR_2_STREAM");
         }
-        if ("TTS".equalsIgnoreCase(modelType)) {
+        if ("TTS".equalsIgnoreCase(modelType) && "huoshan_double_stream".equalsIgnoreCase(providerCode)) {
+            if (haystack.contains("volc.service_type.10029")) {
+                return find("TTS_DOUBAO_BIGTTS_STREAM");
+            }
             return find("TTS_DOUBAO_SEED_TTS_2_STREAM");
         }
         if (("LLM".equalsIgnoreCase(modelType) || "SLM".equalsIgnoreCase(modelType)
@@ -859,6 +863,17 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
     }
 
     private static void addTts(List<ModelCatalogDTO> items) {
+        items.add(item("TTS_DOUBAO_BIGTTS_STREAM", "TTS", "huoshan_double_stream", "语音合成大模型",
+                "火山引擎", "语音合成大模型（服务 10029）", "tts", "语音合成", "websocket-bidirectional", "WebSocket 双向流式",
+                "cloud", "云平台", "WebSocket", "资源 ID", "resource_id",
+                List.of("api_key"), List.of("api_key", "speaker", "speech_rate", "loudness_rate", "pitch"),
+                List.of(),
+                List.of("按火山文档 https://www.volcengine.com/docs/6561/1329505 接入语音合成大模型",
+                        "只需要填写控制台 API Key 和服务 10029 可用音色",
+                        "resource_id 固定为 volc.service_type.10029，WebSocket 地址、PCM 输出和连接复用由运行时固定管理"),
+                List.of("音色必须来自已开通服务 10029 的可用 Voice_type。"),
+                List.of("HuoshanDoubleStreamTTS", "volc.service_type.10029", "TTS_HSDSTTS"),
+                "https://www.volcengine.com/docs/6561/1329505"));
         items.add(item("TTS_DOUBAO_SEED_TTS_2_STREAM", "TTS", "huoshan_double_stream", "豆包语音合成模型 2.0",
                 "火山引擎", "语音合成模型 2.0（服务 10035）", "tts", "语音合成", "websocket-bidirectional", "WebSocket 双向流式",
                 "cloud", "云平台", "WebSocket", "资源 ID", "resource_id",
@@ -1266,6 +1281,12 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 setFieldDefault(dto, "loudness_rate", "0");
                 setFieldDefault(dto, "pitch", "0");
             }
+            case "TTS_DOUBAO_BIGTTS_STREAM" -> {
+                setFieldDefault(dto, "speaker", "zh_female_wanwanxiaohe_moon_bigtts");
+                setFieldDefault(dto, "speech_rate", "0");
+                setFieldDefault(dto, "loudness_rate", "0");
+                setFieldDefault(dto, "pitch", "0");
+            }
             case "VLLM_ZHIPU_GLM_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "https://open.bigmodel.cn/api/paas/v4");
                 setFieldDefault(dto, "model_name", "glm-4v-flash");
@@ -1381,6 +1402,9 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             case "maintenance_llm" -> "记忆维护 LLM";
             case "resource_id" -> "Resource ID";
             case "voice", "speaker", "voice_id" -> "音色";
+            case "speech_rate" -> "语速";
+            case "loudness_rate" -> "音量";
+            case "pitch" -> "音高";
             case "private_voice" -> "私有音色";
             case "group_id" -> "Group ID";
             case "model_dir" -> "模型目录";
@@ -1401,7 +1425,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             return "password";
         }
         if (Stream.of("threshold", "temperature", "top_p", "top_k", "max_tokens", "port", "sample_rate",
-                "volume", "speed", "pitch", "rate", "end_window_size", "max_sentence_silence")
+                "volume", "speed", "pitch", "rate", "speech_rate", "loudness_rate", "end_window_size", "max_sentence_silence")
                 .anyMatch(key::equals)) {
             return "number";
         }
@@ -1425,6 +1449,9 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         if (key.contains("model") || key.contains("resource") || key.equals("voice") || key.equals("speaker")
                 || key.equals("appkey")) {
             return "upstream";
+        }
+        if (Set.of("speech_rate", "loudness_rate", "pitch").contains(key)) {
+            return "common";
         }
         return "advanced";
     }

@@ -1181,9 +1181,6 @@ public class ModelTestServiceImpl implements ModelTestService {
     private static List<List<String>> getRequiredAnyFieldGroups(String modelType, String type) {
         String normalizedModelType = StringUtils.defaultString(modelType).toUpperCase();
         String normalizedType = StringUtils.lowerCase(StringUtils.defaultString(type));
-        if ("TTS".equals(normalizedModelType) && "doubao".equals(normalizedType)) {
-            return List.of(List.of("access_token", "authorization"));
-        }
         return List.of();
     }
 

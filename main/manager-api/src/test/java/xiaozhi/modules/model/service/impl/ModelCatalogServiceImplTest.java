@@ -49,6 +49,18 @@ class ModelCatalogServiceImplTest {
         assertFalse(fieldKeys.contains("enable_ws_reuse"));
     }
 
+    @Test
+    void doubaoTtsCatalogContainsAllSupportedVariants() throws Exception {
+        List<String> templateCodes = staticCatalog().stream()
+                .filter(item -> "TTS".equals(item.getModelType()) && "火山引擎".equals(item.getVendorName()))
+                .map(ModelCatalogDTO::getTemplateCode)
+                .toList();
+
+        assertEquals(List.of(
+                "TTS_DOUBAO_BIGTTS_STREAM",
+                "TTS_DOUBAO_SEED_TTS_2_STREAM"), templateCodes);
+    }
+
     @SuppressWarnings("unchecked")
     private List<ModelCatalogDTO> staticCatalog() throws Exception {
         Field catalogField = ModelCatalogServiceImpl.class.getDeclaredField("CATALOG");

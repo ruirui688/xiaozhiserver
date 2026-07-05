@@ -20,8 +20,10 @@ TAG = __name__
 logger = setup_logging()
 
 DOUBAO_SEED_TTS_2_RESOURCE_ID = "seed-tts-2.0"
+DOUBAO_BIGTTS_RESOURCE_ID = "volc.service_type.10029"
 SUPPORTED_DOUBAO_TTS_RESOURCES = {
     DOUBAO_SEED_TTS_2_RESOURCE_ID: "豆包语音合成模型 2.0（火山服务 10035）",
+    DOUBAO_BIGTTS_RESOURCE_ID: "语音合成大模型（火山服务 10029）",
 }
 HUOSHAN_DOUBLE_STREAM_WS_URL = "wss://openspeech.bytedance.com/api/v3/tts/bidirection"
 
@@ -155,7 +157,7 @@ class TTSProvider(TTSProviderBase):
         self._monitor_task = None  # 监听任务引用
         self._session_error = None  # 会话失败时的错误信息
         self.api_key = config.get("api_key")
-        self.resource_id = DOUBAO_SEED_TTS_2_RESOURCE_ID
+        self.resource_id = self._normalize_resource_id(config.get("resource_id"))
         self.report_on_last = True
         self.activate_session = False
         if config.get("private_voice"):
@@ -163,7 +165,7 @@ class TTSProvider(TTSProviderBase):
         else:
             self.voice = config.get("speaker")
         if not self.voice:
-            self.voice = "zh_female_sophie_uranus_bigtts"
+            self.voice = self._default_voice_for_resource()
 
         # 默认 audio_params 配置
         default_audio_params = {
@@ -223,6 +225,18 @@ class TTSProvider(TTSProviderBase):
             logger.bind(tag=TAG).error(model_key_msg)
         if not self.api_key:
             raise ValueError("豆包 TTS 需要配置 api_key")
+
+    def _normalize_resource_id(self, value):
+        resource_id = str(value or "").strip() or DOUBAO_SEED_TTS_2_RESOURCE_ID
+        if resource_id not in SUPPORTED_DOUBAO_TTS_RESOURCES:
+            supported = ", ".join(SUPPORTED_DOUBAO_TTS_RESOURCES)
+            raise ValueError(f"不支持的豆包 TTS resource_id: {resource_id}，仅支持 {supported}")
+        return resource_id
+
+    def _default_voice_for_resource(self):
+        if self.resource_id == DOUBAO_BIGTTS_RESOURCE_ID:
+            return "zh_female_wanwanxiaohe_moon_bigtts"
+        return "zh_female_sophie_uranus_bigtts"
 
     def _build_ws_headers(self):
         ws_header = {
