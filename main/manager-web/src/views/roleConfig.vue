@@ -64,13 +64,11 @@
               :llm-mode-type-map="llmModeTypeMap"
               :templates="templates"
               :voice-options="voiceOptions"
-              :language-options="languageOptions"
               :voice-details="voiceDetails"
               :feature-status="featureStatus"
               :current-functions="currentFunctions"
               :current-knowledge-bases="currentKnowledgeBases"
               :current-context-providers="currentContextProviders"
-              :selected-language="selectedLanguage"
               :playing-voice="playingVoice"
               :current-playing-voice-id="currentPlayingVoiceId"
               :is-paused="isPaused"
@@ -82,7 +80,6 @@
               @update:currentKnowledgeBases="val => currentKnowledgeBases = val"
               @update:checkedReplacementWordIds="val => checkedReplacementWordIds = val"
               @update:voiceOptions="val => voiceOptions = val"
-              @update:selectedLanguage="val => selectedLanguage = val"
               @tts-model-changed="handleTtsModelChanged"
               @form-change="handleFormChange"
             />
@@ -123,7 +120,6 @@ export default {
         langCode: "",
         language: "",
         sort: "",
-        ttsLanguage: "",
         model: {
           ttsModelId: "",
           vadModelId: "",
@@ -157,8 +153,6 @@ export default {
       playingVoice: false,
       isPaused: false,
       currentPlayingVoiceId: null,
-      languageOptions: [],
-      selectedLanguage: "",
       featureStatus: {
         vad: false,
         asr: false,
@@ -289,7 +283,6 @@ export default {
           };
           this.checkedReplacementWordIds = data.data.correctWordFileIds || [];
           this.currentContextProviders = data.data.contextProviders || [];
-          this.selectedLanguage = data.data.ttsLanguage || "";
           this.loadVoicesForTtsModel(this.form.model.ttsModelId, this.form.ttsVoiceId);
         }
       });
@@ -302,7 +295,6 @@ export default {
         this.voiceRequestSeq += 1;
         this.voiceDetails = {};
         this.voiceOptions = [];
-        this.languageOptions = [];
         return;
       }
       const requestSeq = this.voiceRequestSeq + 1;
@@ -316,7 +308,6 @@ export default {
         if (!data || data.code !== 0) {
           this.voiceDetails = {};
           this.voiceOptions = [];
-          this.languageOptions = [];
           return;
         }
         const voices = Array.isArray(data.data) ? data.data : [];
@@ -331,11 +322,7 @@ export default {
           };
           return details;
         }, {});
-        this.languageOptions = this.buildLanguageOptions(voices);
-        if (this.selectedLanguage && !this.languageOptions.some((item) => item.value === this.selectedLanguage)) {
-          this.selectedLanguage = "";
-        }
-        this.voiceOptions = this.buildVoiceOptions(voices, this.selectedLanguage);
+        this.voiceOptions = this.buildVoiceOptions(voices);
         if (preferredVoiceId && this.voiceDetails[preferredVoiceId]) {
           this.form.ttsVoiceId = preferredVoiceId;
         } else if (!this.voiceOptions.some((item) => item.value === this.form.ttsVoiceId)) {
@@ -343,36 +330,8 @@ export default {
         }
       });
     },
-    buildLanguageOptions(voices = []) {
-      const languages = new Set();
-      voices.forEach((voice) => {
-        String(voice.languages || "")
-          .split(/[、；;,，]/)
-          .map((item) => item.trim())
-          .filter(Boolean)
-          .forEach((language) => languages.add(language));
-      });
-      return Array.from(languages).map((language) => ({
-        label: language,
-        value: language,
-      }));
-    },
-    buildVoiceOptions(voices = [], language = "") {
-      return voices
-        .filter((voice) => {
-          if (!language) {
-            return true;
-          }
-          if (!voice.languages) {
-            return Boolean(voice.isClone);
-          }
-          return String(voice.languages)
-            .split(/[、；;,，]/)
-            .map((item) => item.trim())
-            .filter(Boolean)
-            .includes(language);
-        })
-        .map((voice) => ({
+    buildVoiceOptions(voices = []) {
+      return voices.map((voice) => ({
           value: voice.id,
           label: voice.name,
           voiceDemo: voice.voiceDemo,
