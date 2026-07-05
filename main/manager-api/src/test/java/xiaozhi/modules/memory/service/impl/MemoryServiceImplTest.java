@@ -1,6 +1,8 @@
 package xiaozhi.modules.memory.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -192,6 +194,112 @@ class MemoryServiceImplTest {
         assertEquals("auto", inserted.getConfirmationState());
         assertEquals(SCOPE_ID, inserted.getScopeId());
         assertTrue(inserted.getImportance().compareTo(new BigDecimal("0.86")) == 0);
+        assertEquals("long_term", inserted.getMemoryTier());
+        assertNull(inserted.getExpiresAt());
+    }
+
+    @Test
+    void clearThenRebuildSkipsLowQualityAddBeforeClearingExistingFacts() {
+        MemoryFactEntity existing = activeFact("old-1", "用户的旧记忆");
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(existing));
+        String lowQualityAdd = """
+                {
+                  "actions": [
+                    {
+                      "action": "ADD",
+                      "related_memory_id": "",
+                      "memory_type": "普通事实",
+                      "category": "普通事实",
+                      "canonical_text": "用户刚才随口说了一句话",
+                      "confidence": 0.40,
+                      "importance": 0.20,
+                      "memory_tier": "working",
+                      "sensitivity": "normal",
+                      "reason": "复用价值低"
+                    }
+                  ]
+                }
+                """;
+        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID))).thenReturn(lowQualityAdd, lowQualityAdd);
+
+        MemoryRebuildResultVO result = memoryService.rebuildFromRecentChatHistory(
+                AGENT_ID, rebuildRequest(false), "user", "tester");
+
+        assertEquals(0, result.getActionsProposed());
+        assertEquals(0, result.getFactsCleared());
+        assertEquals(0, result.getFactsChanged());
+        verify(factDao, never()).updateById(any());
+        verify(factDao, never()).insert(any());
+    }
+
+    @Test
+    void shortTermAddGetsExpiry() {
+        MemoryFactEntity existing = activeFact("old-1", "用户的旧记忆");
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(existing));
+        String shortTermAdd = """
+                {
+                  "actions": [
+                    {
+                      "action": "ADD",
+                      "related_memory_id": "",
+                      "memory_type": "阶段性事项",
+                      "category": "近期安排",
+                      "canonical_text": "用户近期正在准备一次演示",
+                      "confidence": 0.88,
+                      "importance": 0.62,
+                      "memory_tier": "short_term",
+                      "sensitivity": "normal",
+                      "reason": "阶段性有用"
+                    }
+                  ]
+                }
+                """;
+        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID))).thenReturn(shortTermAdd, shortTermAdd);
+
+        memoryService.rebuildFromRecentChatHistory(AGENT_ID, rebuildRequest(false), "user", "tester");
+
+        ArgumentCaptor<MemoryFactEntity> factCaptor = ArgumentCaptor.forClass(MemoryFactEntity.class);
+        verify(factDao).insert(factCaptor.capture());
+        MemoryFactEntity inserted = factCaptor.getValue();
+        assertEquals("short_term", inserted.getMemoryTier());
+        assertNotNull(inserted.getExpiresAt());
+    }
+
+    @Test
+    void reviewActiveMemoriesCanArchiveExistingFact() {
+        MemoryFactEntity existing = activeFact("fact-archive", "用户的一条旧阶段性记忆");
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(existing));
+        when(factDao.selectOne(any(Wrapper.class))).thenReturn(existing);
+        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID))).thenReturn("""
+                {
+                  "actions": [
+                    {
+                      "action": "ARCHIVE",
+                      "related_memory_id": "fact-archive",
+                      "memory_type": "阶段性事项",
+                      "category": "旧事项",
+                      "canonical_text": "用户的一条旧阶段性记忆",
+                      "confidence": 0.80,
+                      "importance": 0.30,
+                      "memory_tier": "working",
+                      "sensitivity": "normal",
+                      "reason": "不再主动注入"
+                    }
+                  ]
+                }
+                """);
+
+        MemoryRebuildResultVO result = memoryService.reviewActiveMemories(
+                AGENT_ID, false, "user", "tester");
+
+        assertEquals(1, result.getActionsProposed());
+        assertEquals(1, result.getFactsChanged());
+        ArgumentCaptor<MemoryFactEntity> factCaptor = ArgumentCaptor.forClass(MemoryFactEntity.class);
+        verify(factDao).updateById(factCaptor.capture());
+        MemoryFactEntity archived = factCaptor.getValue();
+        assertEquals("archived", archived.getStatus());
+        assertNotNull(archived.getArchivedAt());
+        assertNotNull(archived.getValidTo());
     }
 
     @Test

@@ -196,7 +196,7 @@ testing their selected remote ASR path.
 
 Override the `XIAOZHI_*_CPUS`, `XIAOZHI_*_MEM_LIMIT`,
 `XIAOZHI_FUNASR_THREADS`, `XIAOZHI_MYSQL_INNODB_BUFFER_POOL_SIZE`,
-`XIAOZHI_REDIS_MAXMEMORY`, or `XIAOZHI_WEB_JAVA_TOOL_OPTIONS` values in
+`XIAOZHI_REDIS_MAXMEMORY`, or `XIAOZHI_MANAGER_API_JAVA_TOOL_OPTIONS` values in
 `~/xiaozhi-data/.env` when the server size changes. Existing `.env` values
 are preserved during upgrade; if an older deployment still has
 `XIAOZHI_SERVER_MEM_LIMIT=768m`, raise it to at least `2048m` before enabling
@@ -222,11 +222,12 @@ BUILD_BASE=false  skip server-base checks for Java/Web-only releases
 BUILD_BASE=true   rebuild server-base after Python dependency changes
 ```
 
-The release script also publishes `xiaozhi-web:web-<content-hash>` for the
-combined manager-api/manager-web image. When `Dockerfile-web`, `manager-api/src`,
-`manager-web`, nginx/start config, and Web base image inputs are unchanged,
-later lite/funasr releases reuse that cached Web/API image instead of rebuilding
-and re-uploading the same large layers.
+The release script publishes separate content-cache tags for the management
+stack: `xiaozhi-manager-api:api-<content-hash>`,
+`xiaozhi-manager-web:web-<content-hash>`, and
+`xiaozhi-manager-assets:assets-<content-hash>`. A Vue-only change no longer
+rebuilds or re-uploads the Java API image or the large static assets image; a
+Java-only change no longer rebuilds the Vue image.
 
 ## Internal service URLs
 

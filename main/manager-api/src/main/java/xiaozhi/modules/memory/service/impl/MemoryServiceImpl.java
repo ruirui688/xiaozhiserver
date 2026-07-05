@@ -1,6 +1,8 @@
 package xiaozhi.modules.memory.service.impl;
 
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Date;
 import java.util.List;
 
@@ -45,6 +47,7 @@ import xiaozhi.modules.memory.service.MemoryMaintenanceService;
 import xiaozhi.modules.memory.service.MemoryQueryService;
 import xiaozhi.modules.memory.service.MemoryService;
 import xiaozhi.modules.memory.utils.MemoryHelper;
+import xiaozhi.modules.memory.utils.MemoryTierHelper;
 import xiaozhi.modules.memory.vo.MemoryDashboardVO;
 import xiaozhi.modules.memory.vo.MemoryQueryVO;
 import xiaozhi.modules.memory.vo.MemoryRebuildResultVO;
@@ -270,6 +273,13 @@ public class MemoryServiceImpl implements MemoryService {
         return memoryMaintenanceService.rebuildFromRecentChatHistory(agentId, dto, actorType, actorId);
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public MemoryRebuildResultVO reviewActiveMemories(String agentId, boolean dryRun, String actorType, String actorId) {
+        assertAgentOwner(agentId);
+        return memoryMaintenanceService.reviewActiveMemories(agentId, dryRun, actorType, actorId);
+    }
+
     // ===================== 私有辅助方法 =====================
 
     private AgentScope resolveScope(String agentId, String macAddress) {
@@ -349,7 +359,23 @@ public class MemoryServiceImpl implements MemoryService {
         JSONObject payload = MemoryHelper.parsePayload(candidate.getPayload());
         String action = MemoryHelper.normalizeCandidateAction(payload.getStr("action"));
         String relatedMemoryId = payload.getStr("related_memory_id");
+        String tier = resolveMemoryTier(payload.getStr("memory_tier"), candidate.getImportance());
         MemoryFactEntity relatedFact = findRelatedFact(scope.agent.getId(), relatedMemoryId);
+        if (("ARCHIVE".equals(action) || "DELETE".equals(action)) && relatedFact != null) {
+            String before = JsonUtils.toJsonString(relatedFact);
+            relatedFact.setStatus("ARCHIVE".equals(action)
+                    ? MemoryHelper.STATUS_ARCHIVED : MemoryHelper.STATUS_DELETED);
+            relatedFact.setValidTo(new Date());
+            if ("ARCHIVE".equals(action)) {
+                relatedFact.setArchivedAt(new Date());
+            }
+            relatedFact.setUpdatedAt(new Date());
+            factDao.updateById(relatedFact);
+            writeRevision(scope.agent.getId(), relatedFact.getMemoryId(),
+                    "ARCHIVE".equals(action) ? "archive_from_candidate" : "delete_from_candidate",
+                    before, JsonUtils.toJsonString(relatedFact), actorType, actorId, "候选记忆生命周期动作");
+            return relatedFact.getMemoryId();
+        }
         if ("UPDATE".equals(action) && relatedFact != null) {
             String before = JsonUtils.toJsonString(relatedFact);
             relatedFact.setMemoryType(MemoryHelper.normalizeMemoryLabel(candidate.getMemoryType(), "长期记忆"));
@@ -358,6 +384,8 @@ public class MemoryServiceImpl implements MemoryService {
             relatedFact.setConfidence(MemoryHelper.max(relatedFact.getConfidence(), candidate.getConfidence()));
             relatedFact.setImportance(MemoryHelper.max(relatedFact.getImportance(), candidate.getImportance()));
             relatedFact.setSensitivity(MemoryHelper.normalizeSensitivity(candidate.getSensitivity()));
+            relatedFact.setMemoryTier(tier);
+            relatedFact.setExpiresAt(resolveExpiresAt(tier));
             relatedFact.setStatus(MemoryHelper.STATUS_ACTIVE);
             relatedFact.setLastSeenAt(new Date());
             relatedFact.setUpdatedAt(new Date());
@@ -370,11 +398,16 @@ public class MemoryServiceImpl implements MemoryService {
         return createFactInternal(scope, candidate.getCanonicalText(),
                 MemoryHelper.normalizeMemoryLabel(candidate.getCategory(), "未分类"),
                 MemoryHelper.normalizeMemoryLabel(candidate.getMemoryType(), "长期记忆"),
-                candidate.getSourceEventId(), actorType, actorId);
+                candidate.getSourceEventId(), actorType, actorId, tier);
     }
 
     private String createFactInternal(AgentScope scope, String text, String category, String memoryType,
                                       String sourceEventId, String actorType, String actorId) {
+        return createFactInternal(scope, text, category, memoryType, sourceEventId, actorType, actorId, null);
+    }
+
+    private String createFactInternal(AgentScope scope, String text, String category, String memoryType,
+                                      String sourceEventId, String actorType, String actorId, String memoryTier) {
         String canonical = MemoryHelper.cleanupMemoryText(text);
         if (StringUtils.isBlank(canonical)) {
             return null;
@@ -408,6 +441,10 @@ public class MemoryServiceImpl implements MemoryService {
         fact.setSensitivity("normal");
         fact.setConfirmationState("auto");
         fact.setStatus(MemoryHelper.STATUS_ACTIVE);
+        if (StringUtils.isNotBlank(memoryTier)) {
+            fact.setMemoryTier(memoryTier);
+            fact.setExpiresAt(resolveExpiresAt(memoryTier));
+        }
         fact.setValidFrom(new Date());
         fact.setFirstSeenAt(new Date());
         fact.setLastSeenAt(new Date());
@@ -484,6 +521,27 @@ public class MemoryServiceImpl implements MemoryService {
         merged.set("last_candidate_reason", candidate.getStr("reason"));
         merged.set("maintenance_source", candidate.getStr("source"));
         return merged.toString();
+    }
+
+    private String resolveMemoryTier(String rawTier, BigDecimal importance) {
+        String tier = MemoryHelper.normalizeMemoryTier(rawTier);
+        if (StringUtils.isNotBlank(tier)) {
+            return tier;
+        }
+        MemoryTierHelper.Tier classified = MemoryTierHelper.classifyTier(
+                importance == null ? MemoryHelper.DEFAULT_SCORE.doubleValue() : importance.doubleValue());
+        return classified.name().toLowerCase();
+    }
+
+    private Date resolveExpiresAt(String tier) {
+        String normalized = MemoryHelper.normalizeMemoryTier(tier);
+        if ("working".equals(normalized)) {
+            return Date.from(Instant.now().plus(MemoryHelper.WORKING_MEMORY_TTL_HOURS, ChronoUnit.HOURS));
+        }
+        if ("short_term".equals(normalized)) {
+            return Date.from(Instant.now().plus(MemoryHelper.SHORT_TERM_MEMORY_TTL_DAYS, ChronoUnit.DAYS));
+        }
+        return null;
     }
 
     private record AgentScope(AgentEntity agent, String scopeId) {

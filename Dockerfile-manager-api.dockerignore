@@ -1,0 +1,16 @@
+.git
+.gitignore
+runtime/
+logs/
+*.log
+deploy/
+main/xiaozhi-server/
+main/manager-web/
+main/manager-mobile/
+main/manager-api/target/
+docs/**
+!docs/
+!docs/docker/
+!docs/docker/start-api.sh
+Dockerfile*
+!Dockerfile-manager-api

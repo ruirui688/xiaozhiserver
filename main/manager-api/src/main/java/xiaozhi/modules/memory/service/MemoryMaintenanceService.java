@@ -29,6 +29,11 @@ public interface MemoryMaintenanceService {
                                                        String actorType, String actorId);
 
     /**
+     * 使用维护模型按通用生命周期原则重审当前生效记忆。
+     */
+    MemoryRebuildResultVO reviewActiveMemories(String agentId, boolean dryRun, String actorType, String actorId);
+
+    /**
      * 使用维护模型为单条内容创建候选记忆（异步管线入口）。
      */
     void createCandidatesWithMaintenanceModel(AgentEntity agent, String scopeId, String sourceEventId, String content);

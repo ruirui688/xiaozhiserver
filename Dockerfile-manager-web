@@ -1,0 +1,44 @@
+ARG NODE_BASE_IMAGE=node:20
+ARG WEB_RUNTIME_BASE_IMAGE=alpine:3.20
+
+FROM ${NODE_BASE_IMAGE} AS web-builder
+WORKDIR /app
+ARG VUE_APP_API_BASE_URL=/xiaozhi
+ARG VUE_APP_PUBLIC_PATH=/
+ARG VUE_APP_USE_CDN=false
+ENV VUE_APP_API_BASE_URL=${VUE_APP_API_BASE_URL}
+ENV VUE_APP_PUBLIC_PATH=${VUE_APP_PUBLIC_PATH}
+ENV VUE_APP_USE_CDN=${VUE_APP_USE_CDN}
+COPY main/manager-web/package*.json ./
+COPY main/manager-web/.npmrc ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm install
+COPY main/manager-web/babel.config.js main/manager-web/jsconfig.json main/manager-web/vue.config.js ./
+COPY main/manager-web/src ./src
+COPY main/manager-web/public/favicon.ico main/manager-web/public/index.html main/manager-web/public/offline.html main/manager-web/public/privacy-policy.html main/manager-web/public/user-agreement.html ./public/
+COPY main/manager-web/public/generator/README.md main/manager-web/public/generator/favicon.ico main/manager-web/public/generator/index.html ./public/generator/
+COPY main/manager-web/public/generator/assets ./public/generator/assets
+COPY main/manager-web/public/generator/workers ./public/generator/workers
+RUN npm run build
+
+FROM ${WEB_RUNTIME_BASE_IMAGE}
+
+RUN apk add --no-cache --no-scripts nginx \
+    && (addgroup -S nginx 2>/dev/null || true) \
+    && (adduser -S -D -H -G nginx nginx 2>/dev/null || true) \
+    && mkdir -p /run/nginx /var/log/nginx /var/lib/nginx/logs /usr/share/nginx/html \
+        /tmp/nginx-client-body /tmp/nginx-proxy /tmp/nginx-fastcgi /tmp/nginx-uwsgi /tmp/nginx-scgi \
+    && chown -R nginx:nginx /run/nginx /var/log/nginx /var/lib/nginx /usr/share/nginx/html \
+        /tmp/nginx-client-body /tmp/nginx-proxy /tmp/nginx-fastcgi /tmp/nginx-uwsgi /tmp/nginx-scgi
+
+COPY docs/docker/nginx-manager-web.conf /etc/nginx/nginx.conf
+COPY --chown=nginx:nginx --from=web-builder /app/dist /usr/share/nginx/html
+
+USER nginx
+
+EXPOSE 8002
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:8002/ || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]

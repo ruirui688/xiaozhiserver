@@ -19,6 +19,8 @@
         />
         <el-button size="small" icon="el-icon-view" :loading="rebuildLoading" @click="handleRebuildPreview">预览重建</el-button>
         <el-button size="small" type="primary" icon="el-icon-magic-stick" :loading="rebuildLoading" @click="handleRebuild">重建记忆</el-button>
+        <el-button size="small" icon="el-icon-view" :loading="reviewLoading" @click="handleReviewPreview">预览重审</el-button>
+        <el-button size="small" type="primary" icon="el-icon-refresh" :loading="reviewLoading" @click="handleReview">重审记忆</el-button>
         <el-button size="small" type="danger" icon="el-icon-delete" :loading="clearLoading" @click="handleClear">清空记忆</el-button>
         <el-button size="small" icon="el-icon-edit" @click="showRemember = !showRemember">记住</el-button>
         <el-button size="small" icon="el-icon-delete" @click="showForget = !showForget">忘记</el-button>
@@ -162,7 +164,7 @@
     />
 
     <el-dialog
-      title="重建预览"
+      :title="previewDialogTitle"
       :visible.sync="rebuildPreviewVisible"
       width="860px"
       append-to-body
@@ -170,7 +172,8 @@
       <div class="rebuild-summary" v-if="rebuildPreviewResult">
         <el-tag size="mini" type="info">会话 {{ rebuildPreviewResult.sessionsRead || 0 }}</el-tag>
         <el-tag size="mini" type="warning">动作 {{ previewCandidates.length }}</el-tag>
-        <el-tag size="mini">最近 {{ rebuildPreviewResult.sessionLimit || rebuildSessionLimit }} 个</el-tag>
+        <el-tag v-if="previewMode === 'rebuild'" size="mini">最近 {{ rebuildPreviewResult.sessionLimit || rebuildSessionLimit }} 个</el-tag>
+        <el-tag v-else size="mini">通用生命周期</el-tag>
       </div>
       <el-table
         :data="previewCandidates"
@@ -197,7 +200,8 @@
       </el-table>
       <span slot="footer">
         <el-button size="small" @click="rebuildPreviewVisible = false">关闭</el-button>
-        <el-button size="small" type="primary" :loading="rebuildLoading" @click="handleRebuild">按此配置重建</el-button>
+        <el-button v-if="previewMode === 'rebuild'" size="small" type="primary" :loading="rebuildLoading" @click="handleRebuild">按此配置重建</el-button>
+        <el-button v-else size="small" type="primary" :loading="reviewLoading" @click="handleReview">执行重审</el-button>
       </span>
     </el-dialog>
 
@@ -254,9 +258,11 @@ export default {
       rebuildSessionLimit: 15,
       rebuildMode: 'clear_then_rebuild',
       rebuildLoading: false,
+      reviewLoading: false,
       clearLoading: false,
       rebuildPreviewVisible: false,
-      rebuildPreviewResult: null
+      rebuildPreviewResult: null,
+      previewMode: 'rebuild'
     }
   },
   computed: {
@@ -277,6 +283,9 @@ export default {
     },
     previewCandidates() {
       return (this.rebuildPreviewResult && this.rebuildPreviewResult.candidates) || []
+    },
+    previewDialogTitle() {
+      return this.previewMode === 'review' ? '重审预览' : '重建预览'
     }
   },
   mounted() {
@@ -424,6 +433,7 @@ export default {
     },
     handleRebuildPreview() {
       this.rebuildLoading = true
+      this.previewMode = 'rebuild'
       Api.memory.rebuildPreview(this.agentId, this.rebuildPayload(true), (res) => {
         this.rebuildPreviewResult = this.unwrapResult(res)
         this.rebuildPreviewVisible = true
@@ -453,6 +463,40 @@ export default {
         })
       }).catch(() => {
         this.rebuildLoading = false
+      })
+    },
+    handleReviewPreview() {
+      this.reviewLoading = true
+      this.previewMode = 'review'
+      Api.memory.reviewPreview(this.agentId, (res) => {
+        this.rebuildPreviewResult = this.unwrapResult(res)
+        this.rebuildPreviewVisible = true
+        this.reviewLoading = false
+      }, () => {
+        this.reviewLoading = false
+      }, () => {
+        this.reviewLoading = false
+      })
+    },
+    handleReview() {
+      this.$confirm('确定让维护模型按通用生命周期原则重审当前生效记忆吗？不会使用业务关键词规则。', '重审记忆', {
+        type: 'warning',
+        confirmButtonClass: 'el-button--primary'
+      }).then(() => {
+        this.reviewLoading = true
+        Api.memory.review(this.agentId, (res) => {
+          const data = this.unwrapResult(res)
+          this.$message.success(`重审完成：应用 ${data.factsChanged || 0} 条记忆动作`)
+          this.reviewLoading = false
+          this.rebuildPreviewVisible = false
+          this.fetch()
+        }, () => {
+          this.reviewLoading = false
+        }, () => {
+          this.reviewLoading = false
+        })
+      }).catch(() => {
+        this.reviewLoading = false
       })
     },
     candidateAction(row) {

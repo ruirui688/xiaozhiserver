@@ -35,11 +35,15 @@ public class MemoryHelper {
     public static final BigDecimal DEFAULT_SCORE = new BigDecimal("0.700");
     public static final BigDecimal MIN_SCORE = new BigDecimal("0.000");
     public static final BigDecimal MAX_SCORE = new BigDecimal("1.000");
+    public static final BigDecimal MIN_AUTO_IMPORTANCE = new BigDecimal("0.350");
+    public static final BigDecimal MIN_AUTO_CONFIDENCE = new BigDecimal("0.500");
     public static final int MAX_MAINTENANCE_INPUT_CHARS = 2000;
     public static final String MAINTENANCE_LLM_FIELD = "maintenance_llm";
     public static final String MAINTENANCE_EXTRACTOR_VERSION = "maintenance-llm-v3-powerMem";
     public static final int SESSION_MAX_CHARS = 8000;
     public static final int REBUILD_MAX_TOTAL_CHARS = 48000;
+    public static final int WORKING_MEMORY_TTL_HOURS = 24;
+    public static final int SHORT_TERM_MEMORY_TTL_DAYS = 30;
 
     // ===================== 纯工具方法 =====================
 
@@ -142,7 +146,7 @@ public class MemoryHelper {
      */
     public static String normalizeAction(String value) {
         String action = StringUtils.defaultIfBlank(value, "NONE").trim().toUpperCase();
-        return List.of("ADD", "UPDATE", "DELETE", "NONE").contains(action) ? action : "NONE";
+        return List.of("ADD", "UPDATE", "DELETE", "ARCHIVE", "NONE").contains(action) ? action : "NONE";
     }
 
     /**
@@ -180,7 +184,7 @@ public class MemoryHelper {
      */
     public static String normalizeCandidateAction(String value) {
         String action = StringUtils.defaultIfBlank(value, "ADD").trim().toUpperCase();
-        if (List.of("ADD", "UPDATE", "IGNORE").contains(action)) {
+        if (List.of("ADD", "UPDATE", "DELETE", "ARCHIVE", "IGNORE").contains(action)) {
             return action;
         }
         return "ADD";
