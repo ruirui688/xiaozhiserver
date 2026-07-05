@@ -222,6 +222,12 @@ BUILD_BASE=false  skip server-base checks for Java/Web-only releases
 BUILD_BASE=true   rebuild server-base after Python dependency changes
 ```
 
+The release script also publishes `xiaozhi-web:web-<content-hash>` for the
+combined manager-api/manager-web image. When `Dockerfile-web`, `manager-api/src`,
+`manager-web`, nginx/start config, and Web base image inputs are unchanged,
+later lite/funasr releases reuse that cached Web/API image instead of rebuilding
+and re-uploading the same large layers.
+
 ## Internal service URLs
 
 `xiaozhi-esp32-server-web` calls the Python benchmark HTTP API through the

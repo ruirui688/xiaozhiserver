@@ -96,6 +96,7 @@ xiaozhi-server:latest
 xiaozhi-web:latest
 xiaozhi-server-base-common/lite/funasr:latest
 xiaozhi-server-base-common/lite/funasr:base-<依赖哈希>
+xiaozhi-web:web-<内容哈希>
 mysql:8.4 / redis:8.0
 ```
 
@@ -155,11 +156,12 @@ xiaozhi-server-base-common:base-<hash>  系统依赖缓存
 xiaozhi-server-base-lite:base-<hash>    普通 Python 依赖缓存
 xiaozhi-server-base-funasr:base-<hash>  CPU PyTorch/FunASR 追加层缓存
 xiaozhi-server:<commit>             服务代码；FunASR profile 会额外包含 SenseVoiceSmall 模型
+xiaozhi-web:web-<hash>              manager-api + manager-web 内容缓存，源码未变时直接复用
 xiaozhi-web:<commit>                manager-api + manager-web
 mysql:8.4 / redis:8.0               运行时镜像，ACR 已存在时跳过同步
 ```
 
-日常只改业务代码时使用对应 profile 的发布入口即可，脚本会优先复用现有 base。只有改了 `requirements-docker*.txt`、`Dockerfile-server-base`、Python 基础镜像或系统包时，才需要 `BUILD_BASE=true`。只改 Java/Web、文档或部署说明且确认运行时镜像已在 ACR 时，可以用下面命令减少检查和推送：
+日常只改业务代码时使用对应 profile 的发布入口即可，脚本会优先复用现有 base 和 Web/API 内容缓存。只有改了 `requirements-docker*.txt`、`Dockerfile-server-base`、Python 基础镜像或系统包时，才需要 `BUILD_BASE=true`。只改 Java/Web、文档或部署说明且确认运行时镜像已在 ACR 时，可以用下面命令减少检查和推送：
 
 ```bash
 BUILD_BASE=false MIRROR_RUNTIME_IMAGES=false scripts/acr-build-push

@@ -114,9 +114,10 @@ redis:8.0                Redis 运行时镜像
 xiaozhi-server-base-common:latest / base-<依赖哈希>
 xiaozhi-server-base-lite:latest / base-<依赖哈希>
 xiaozhi-server-base-funasr:latest / base-<依赖哈希>
+xiaozhi-web:web-<内容哈希>
 ```
 
-这些 base 镜像只用于加速构建，不由生产 compose 直接启动。FunASR base 从 lite base 追加重依赖，lite 和 FunASR 共享 common/lite 缓存层。
+这些 base/cache 镜像只用于加速构建，不由生产 compose 直接启动。FunASR base 从 lite base 追加重依赖，lite 和 FunASR 共享 common/lite 缓存层；Web/API 内容未变化时会直接复用 `xiaozhi-web:web-<内容哈希>`，避免切换 lite/funasr 时重复构建和上传同一个管理端镜像。
 
 ---
 
@@ -142,6 +143,7 @@ PUSH=true                    构建后推送 ACR
 SERVER_INSTALL_PROFILE=lite 不安装本地 FunASR，ASR 使用远程 provider
 基础镜像默认使用 docker.m.daocloud.io 前缀，避免失效 Docker daemon mirror
 BUILD_BASE=auto 只复用精确依赖 hash 的 base 缓存，不默认用 latest 冒充
+Web/API 源码未变化时复用 xiaozhi-web:web-<内容哈希>，不重跑 npm/maven/docker build
 ```
 
 两种服务端 profile：
@@ -342,7 +344,8 @@ server.vision_explain http://服务器IP或域名:8003/mcp/vision/explain
 | 普通 Python 依赖 | Docker layer + ACR `xiaozhi-server-base-lite:base-<依赖哈希>` | 改 `requirements-docker.txt` 或 lite base Dockerfile |
 | FunASR 追加依赖 | Docker layer + ACR `xiaozhi-server-base-funasr:base-<依赖哈希>` | 改 `requirements-docker-funasr-extra.txt` 或 FunASR base Dockerfile |
 | SenseVoiceSmall 模型 | 本地 `model.pt` + 镜像 layer | 第一次打包模型，或替换模型文件 |
-| 业务代码 | Docker layer + `:<git短哈希>` / `:latest` | 每次业务代码变化 |
+| Web/API 管理端 | ACR `xiaozhi-web:web-<内容哈希>` + channel/version tag | 改 `Dockerfile-web`、`manager-api/src`、`manager-web`、nginx/start 配置或 Web 基础镜像 |
+| 服务端业务代码 | Docker layer + `:<git短哈希>` / channel tag | 每次 Python 服务代码变化 |
 
 日常只改业务逻辑时，直接运行：
 
