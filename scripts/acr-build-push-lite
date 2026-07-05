@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+SERVER_INSTALL_PROFILE=lite \
+INSTALL_FUNASR_MODEL=false \
+IMAGE_TAG_SUFFIX="${IMAGE_TAG_SUFFIX:--lite}" \
+CHANNEL_TAG="${CHANNEL_TAG:-lite}" \
+bash "$ROOT_DIR/scripts/acr-build-push" "$@"

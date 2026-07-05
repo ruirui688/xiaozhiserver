@@ -32,14 +32,27 @@
             {{ $t('deviceDebug.disconnect') }}
           </el-button>
         </div>
-        <div class="side-section">
+        <div class="side-section tools-section">
           <div class="side-heading">{{ $t('deviceDebug.mcpTools') }}</div>
           <div v-if="toolsLoading" class="side-muted">{{ $t('deviceDebug.loadingTools') }}</div>
           <div v-else-if="mcpTools.length === 0" class="side-muted">{{ mcpToolsStatusText }}</div>
           <div v-else class="tool-list">
-            <el-tag v-for="tool in mcpTools" :key="tool.name || tool" size="mini">
-              {{ tool.name || tool }}
-            </el-tag>
+            <el-tooltip
+              v-for="tool in mcpTools"
+              :key="getToolName(tool)"
+              placement="right"
+              effect="dark"
+              :open-delay="200"
+              popper-class="mcp-tool-tooltip">
+              <div slot="content" class="tool-tooltip-content">
+                <div class="tool-tooltip-title">{{ getToolName(tool) }}</div>
+                <div class="tool-tooltip-line">{{ getToolDescription(tool) }}</div>
+                <div class="tool-tooltip-line">{{ getToolParameterSummary(tool) }}</div>
+              </div>
+              <el-tag size="mini" class="tool-tag">
+                {{ getToolName(tool) }}
+              </el-tag>
+            </el-tooltip>
           </div>
         </div>
         <div class="side-section raw-section">
@@ -351,6 +364,67 @@ export default {
       if (data && data.message) return data.message;
       if (data && data.ready === false) return this.$t('deviceDebug.mcpNotReady');
       return this.$t('deviceDebug.noTools');
+    },
+    getToolName(tool) {
+      if (typeof tool === 'string') {
+        return tool;
+      }
+      return (tool && (tool.name || tool.title || tool.id)) || this.$t('deviceDebug.unknownTool');
+    },
+    getToolDescription(tool) {
+      if (tool && typeof tool === 'object' && tool.description) {
+        return `${this.$t('deviceDebug.toolDescription')}${tool.description}`;
+      }
+      const fallback = this.getFallbackToolDescription(this.getToolName(tool));
+      return `${this.$t('deviceDebug.toolDescription')}${fallback}`;
+    },
+    getFallbackToolDescription(name) {
+      const descriptions = {
+        self_get_device_status: '查询设备整体运行状态。',
+        self_get_head_status: '查询设备头部或朝向状态。',
+        self_get_body_status: '查询设备机身状态。',
+        self_audio_speaker_set_volume: '设置设备扬声器音量。',
+        self_debug_get_runtime_status: '查询设备当前运行时调试状态。',
+        self_debug_get_mcp_tools: '查询设备当前暴露的 MCP 工具列表。',
+        self_screen_set_brightness: '设置设备屏幕亮度。',
+        self_screen_set_theme: '切换设备屏幕主题。',
+        self_screen_show_qrcode: '在设备屏幕上显示二维码。',
+        self_screen_clear_qrcode: '清除设备屏幕上的二维码。',
+        self_otto_walk_forward: '控制 Otto 形态设备向前行走。',
+        self_otto_turn_left: '控制 Otto 形态设备向左转。',
+        self_otto_jump: '控制 Otto 形态设备跳跃。',
+        self_otto_swing: '控制 Otto 形态设备摆动。',
+        self_otto_moonwalk: '控制 Otto 形态设备月球漫步。',
+        self_otto_bend: '控制 Otto 形态设备弯腰。',
+        self_otto_shake_leg: '控制 Otto 形态设备抖腿。',
+        self_otto_updown: '控制 Otto 形态设备上下运动。',
+        self_otto_hands_up: '控制 Otto 形态设备抬手。',
+        self_otto_hands_down: '控制 Otto 形态设备放下手。',
+        self_otto_hand_wave: '控制 Otto 形态设备挥手。',
+        self_otto_stop: '停止 Otto 形态设备当前动作。',
+        self_otto_set_trim: '校准 Otto 形态设备舵机偏移。',
+        self_otto_get_trims: '读取 Otto 形态设备舵机校准值。',
+        self_otto_get_status: '查询 Otto 形态设备当前状态。',
+        self_battery_get_level: '查询设备电池电量。'
+      };
+      return descriptions[name] || '设备侧提供的 MCP 工具，可由智能体调用来读取状态或控制设备能力。';
+    },
+    getToolParameterSummary(tool) {
+      if (!tool || typeof tool !== 'object') {
+        return `${this.$t('deviceDebug.toolParameters')}${this.$t('deviceDebug.toolParametersUnknown')}`;
+      }
+      const schema = tool.inputSchema || tool.input_schema || tool.parameters;
+      const properties = schema && schema.properties;
+      if (!properties || typeof properties !== 'object' || Object.keys(properties).length === 0) {
+        return `${this.$t('deviceDebug.toolParameters')}${this.$t('deviceDebug.toolParametersNone')}`;
+      }
+      const required = Array.isArray(schema.required) ? schema.required : [];
+      const names = Object.keys(properties).slice(0, 6).map((key) => {
+        const marker = required.includes(key) ? '*' : '';
+        return `${key}${marker}`;
+      });
+      const suffix = Object.keys(properties).length > names.length ? '...' : '';
+      return `${this.$t('deviceDebug.toolParameters')}${names.join(', ')}${suffix}`;
     },
     connectDebug() {
       if (!this.deviceId || this.connected || this.connecting) return;
@@ -1091,9 +1165,10 @@ export default {
 <style scoped>
 .debug-shell {
   display: flex;
-  height: 68vh;
-  min-height: 520px;
+  height: min(68vh, calc(100vh - 180px));
+  min-height: 420px;
   border-top: 1px solid #ebeef5;
+  overflow: hidden;
 }
 
 .debug-side {
@@ -1104,6 +1179,8 @@ export default {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .status-block {
@@ -1145,11 +1222,22 @@ export default {
 
 .side-section {
   margin-bottom: 18px;
+  min-height: 0;
+}
+
+.tools-section {
+  flex: 0 1 auto;
+  max-height: 45%;
+  display: flex;
+  flex-direction: column;
 }
 
 .raw-section {
-  flex: 1;
+  flex: 1 1 160px;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .side-heading {
@@ -1169,10 +1257,25 @@ export default {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+  align-content: flex-start;
+}
+
+.tool-list .tool-tag {
+  max-width: 100%;
+  height: auto;
+  line-height: 18px;
+  padding: 2px 6px;
+  white-space: normal;
+  word-break: break-all;
+  cursor: help;
 }
 
 .event-list {
-  height: calc(100% - 24px);
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   font-size: 12px;
   line-height: 18px;
@@ -1203,7 +1306,24 @@ export default {
 .debug-main {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+
+.tool-tooltip-content {
+  max-width: 320px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.tool-tooltip-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.tool-tooltip-line + .tool-tooltip-line {
+  margin-top: 4px;
 }
 </style>

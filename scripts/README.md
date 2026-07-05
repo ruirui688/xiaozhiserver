@@ -27,6 +27,55 @@ scripts/acr-login
 scripts/acr-build-push
 ```
 
+服务端镜像有两种安装/构建 profile：
+
+| 入口 | 用途 | Python 依赖 | FunASR 模型 |
+|------|------|-------------|-------------|
+| `scripts/acr-build-push-lite` | 不使用本地 FunASR，ASR 走豆包、阿里云、腾讯、讯飞、OpenAI 兼容、FunASR server 等远程服务 | `requirements-docker.txt`，不安装 `torch` / `torchaudio` / `funasr` | 不打包 |
+| `scripts/acr-build-push-funasr` | 使用本地 `fun_local` / SenseVoiceSmall CPU 识别 | 先复用 `requirements-docker.txt`，再追加 `requirements-docker-funasr-extra.txt` | 默认打包 |
+
+日常不需要本地 FunASR 时优先用轻量入口：
+
+```bash
+scripts/acr-build-push-lite
+```
+
+需要切回本地 FunASR 时使用：
+
+```bash
+scripts/acr-build-push-funasr
+```
+
+底层也可以直接切换：
+
+```bash
+SERVER_INSTALL_PROFILE=lite scripts/acr-build-push
+SERVER_INSTALL_PROFILE=funasr scripts/acr-build-push
+```
+
+发布脚本默认把 Python、Node、Maven 和 BellSoft 运行时基础镜像指向
+`docker.m.daocloud.io`，避免构建机 Docker daemon 配了失效公共 mirror 时
+拉取基础镜像失败。仍可按需覆盖：
+
+```bash
+PYTHON_BASE_IMAGE=python:3.10-slim-bookworm \
+NODE_BASE_IMAGE=node:20 \
+MAVEN_BASE_IMAGE=maven:3.9.4-eclipse-temurin-21 \
+WEB_RUNTIME_BASE_IMAGE=bellsoft/liberica-runtime-container:jre-21-glibc \
+scripts/acr-build-push-lite
+```
+
+服务端 base 缓存分三层，lite 和 FunASR 共享 common/lite 层，FunASR 只额外追加重依赖：
+
+```text
+xiaozhi-server-base-common  系统依赖、locale、pip 基础配置
+xiaozhi-server-base-lite    common + 普通 Python 依赖
+xiaozhi-server-base-funasr  lite + torch / torchaudio / funasr
+```
+
+`BUILD_BASE=auto` 只复用对应层的精确 `base-<hash>` 缓存，不再把旧的单仓库
+base 当成通用缓存，避免 lite 镜像混入 FunASR。
+
 > ⚠️ **发布前必须先合并到 `main` 分支。**
 >
 > `acr-build-push` 将当前分支的代码构建为 Docker 镜像并推送到 ACR 的
@@ -45,7 +94,8 @@ scripts/acr-build-push
 ```text
 xiaozhi-server:latest
 xiaozhi-web:latest
-xiaozhi-server-base:latest / xiaozhi-server-base:base-<依赖哈希>
+xiaozhi-server-base-common/lite/funasr:latest
+xiaozhi-server-base-common/lite/funasr:base-<依赖哈希>
 mysql:8.4 / redis:8.0
 ```
 
@@ -85,12 +135,12 @@ BUILD_BASE=auto MIRROR_RUNTIME_IMAGES=auto scripts/acr-build-push
 
 ```bash
 BUILD_BASE=false \
-SERVER_BASE_IMAGE=crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-server-base:latest \
+SERVER_BASE_IMAGE=crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-server-base-lite:latest \
 MIRROR_RUNTIME_IMAGES=false \
-scripts/acr-build-push
+scripts/acr-build-push-lite
 ```
 
-修改了 `Dockerfile-server-base`、`main/xiaozhi-server/requirements-docker.txt` 或 Python 系统依赖时，强制重建基础镜像：
+修改了 `Dockerfile-server-base`、`main/xiaozhi-server/requirements-docker*.txt` 或 Python 系统依赖时，强制重建基础镜像：
 
 ```bash
 BUILD_BASE=true scripts/acr-build-push
@@ -101,25 +151,27 @@ BUILD_BASE=true scripts/acr-build-push
 `acr-build-push` 的缓存边界如下：
 
 ```text
-xiaozhi-server-base:base-<依赖哈希>  Python/FunASR/CPU PyTorch 依赖缓存
-xiaozhi-server:<commit>             服务代码 + SenseVoiceSmall 模型
+xiaozhi-server-base-common:base-<hash>  系统依赖缓存
+xiaozhi-server-base-lite:base-<hash>    普通 Python 依赖缓存
+xiaozhi-server-base-funasr:base-<hash>  CPU PyTorch/FunASR 追加层缓存
+xiaozhi-server:<commit>             服务代码；FunASR profile 会额外包含 SenseVoiceSmall 模型
 xiaozhi-web:<commit>                manager-api + manager-web
 mysql:8.4 / redis:8.0               运行时镜像，ACR 已存在时跳过同步
 ```
 
-日常只改业务代码时使用默认命令即可，脚本会优先复用现有 base。只有改了 `requirements-docker.txt`、`Dockerfile-server-base`、Python 基础镜像或系统包时，才需要 `BUILD_BASE=true`。只改 Java/Web、文档或部署说明且确认运行时镜像已在 ACR 时，可以用下面命令减少检查和推送：
+日常只改业务代码时使用对应 profile 的发布入口即可，脚本会优先复用现有 base。只有改了 `requirements-docker*.txt`、`Dockerfile-server-base`、Python 基础镜像或系统包时，才需要 `BUILD_BASE=true`。只改 Java/Web、文档或部署说明且确认运行时镜像已在 ACR 时，可以用下面命令减少检查和推送：
 
 ```bash
 BUILD_BASE=false MIRROR_RUNTIME_IMAGES=false scripts/acr-build-push
 ```
 
-FunASR 模型文件保留在构建机本地：
+FunASR profile 会优先复用构建机本地模型文件：
 
 ```text
 main/xiaozhi-server/models/SenseVoiceSmall/model.pt
 ```
 
-这样后续构建会直接复制本地文件，不会重新下载。该文件被 `.gitignore` 和 `.dockerignore` 排除，不进入 Git，也不通过普通源码上下文重复传输；服务镜像只通过 `funasr_model` build context 显式打包它。
+这样后续 FunASR 构建会直接复制本地文件，不会重新下载。该文件被 `.gitignore` 和 `.dockerignore` 排除，不进入 Git，也不通过普通源码上下文重复传输；服务镜像只通过 `funasr_model` build context 显式打包它。轻量 profile 不读取也不下载这个模型。
 
 生产服务器拉取镜像部署：
 
@@ -153,6 +205,8 @@ cd deploy/production
 dev                  本地源码开发统一入口
 acr-login            登录阿里云 ACR
 acr-build-push       构建并推送业务镜像，并同步 MySQL/Redis 到 ACR
+acr-build-push-lite  构建并推送不含本地 FunASR 的轻量业务镜像
+acr-build-push-funasr 构建并推送包含本地 FunASR/SenseVoice 的业务镜像
 acr-deploy-pull      兼容入口，转发到 deploy/production/install
 deploy               兼容入口，转发到 deploy/production/install
 upgrade              兼容入口，转发到 deploy/production/upgrade
@@ -172,5 +226,6 @@ start-dev.sh                旧开发入口，仅转发到 scripts/dev
 
 - 不在生产服务器编译业务镜像，生产安装脚本只支持 pull 模式。
 - 不把 ACR 密码、数据库密码、Redis 密码或生产私有配置写入 Git。
-- 生产镜像默认使用 `main/xiaozhi-server/requirements-docker.txt`，安装 CPU 版 `torch` / `torchaudio` / `funasr`。
-- 服务镜像构建阶段优先复用 `main/xiaozhi-server/models/SenseVoiceSmall/model.pt`；如果模型在其他目录，使用 `FUNASR_MODEL_LOCAL_PATH=/path/to/model.pt scripts/acr-build-push`；本地没有模型时才用 `FUNASR_MODEL_URL=...` 下载；如果不想把模型放进镜像，使用 `INSTALL_FUNASR_MODEL=false scripts/acr-build-push`。
+- 轻量生产镜像使用 `main/xiaozhi-server/requirements-docker.txt`，不安装 CPU PyTorch / FunASR。
+- FunASR 生产镜像在 lite 依赖上追加 `main/xiaozhi-server/requirements-docker-funasr-extra.txt`，安装 CPU 版 `torch` / `torchaudio` / `funasr`。
+- FunASR 服务镜像构建阶段优先复用 `main/xiaozhi-server/models/SenseVoiceSmall/model.pt`；如果模型在其他目录，使用 `FUNASR_MODEL_LOCAL_PATH=/path/to/model.pt scripts/acr-build-push-funasr`；本地没有模型时才用 `FUNASR_MODEL_URL=...` 下载。

@@ -759,10 +759,14 @@ public class ModelTestServiceImpl implements ModelTestService {
 
             String recognizedText = extractRuntimeBenchmarkRecognizedText(sample);
             Long latencyMs = sample.getLong("latency_ms");
-            if (latencyMs != null) {
+            Long tailLatencyMs = getRuntimeBenchmarkAsrTailLatencyMs(sample);
+            if (tailLatencyMs != null) {
+                result.setResponseTimeMs(tailLatencyMs);
+            } else if (latencyMs != null) {
                 result.setResponseTimeMs(latencyMs);
             }
-            result.setFirstTextMs(sample.getLong("ttft_ms"));
+            Long firstTextTailMs = getRuntimeBenchmarkAsrFirstTextTailLatencyMs(sample);
+            result.setFirstTextMs(firstTextTailMs != null ? firstTextTailMs : sample.getLong("ttft_ms"));
             result.setTestInput(buildRuntimeBenchmarkAsrInput(sample, providerType));
             result.setTestAudioDataUrl(buildRuntimeBenchmarkAsrAudioDataUrl(sample));
             result.setTestOutput(StringUtils.defaultIfBlank(recognizedText, sample.toStringPretty()));
@@ -830,12 +834,32 @@ public class ModelTestServiceImpl implements ModelTestService {
         String audioName = inputDetail == null ? sample.getStr("input_summary") : inputDetail.getStr("audio_name");
         String reference = inputDetail == null ? null : inputDetail.getStr("reference_text");
         String audioBytes = inputDetail == null ? null : StringUtils.defaultString(inputDetail.getStr("audio_bytes"));
+        Long audioDurationMs = inputDetail == null ? null : inputDetail.getLong("audio_duration_ms");
+        Long totalLatencyMs = sample.getLong("latency_ms");
+        Long tailLatencyMs = getRuntimeBenchmarkAsrTailLatencyMs(sample);
         return "供应器类型：" + providerType
                 + "\n音频：" + StringUtils.defaultIfBlank(audioName, "-")
                 + "\n音频格式：pcm"
                 + (StringUtils.isNotBlank(audioBytes) ? "\n音频大小：" + audioBytes + " bytes" : "")
+                + (audioDurationMs != null ? "\n音频时长：" + audioDurationMs + " ms" : "")
+                + (totalLatencyMs != null ? "\n端到端耗时：" + totalLatencyMs + " ms" : "")
+                + (tailLatencyMs != null ? "\n说完后识别尾延迟：" + tailLatencyMs + " ms" : "")
                 + (StringUtils.isNotBlank(reference) ? "\n参考文本：" + reference : "")
                 + "\n测试方式：xiaozhi-server 运行时 provider 真实识别";
+    }
+
+    private Long getRuntimeBenchmarkAsrTailLatencyMs(JSONObject sample) {
+        Long topLevelTailLatencyMs = sample == null ? null : sample.getLong("tail_latency_ms");
+        if (topLevelTailLatencyMs != null) {
+            return topLevelTailLatencyMs;
+        }
+        JSONObject outputDetail = sample == null ? null : sample.getJSONObject("output_detail");
+        return outputDetail == null ? null : outputDetail.getLong("tail_latency_ms");
+    }
+
+    private Long getRuntimeBenchmarkAsrFirstTextTailLatencyMs(JSONObject sample) {
+        JSONObject outputDetail = sample == null ? null : sample.getJSONObject("output_detail");
+        return outputDetail == null ? null : outputDetail.getLong("first_text_tail_ms");
     }
 
     private String extractRuntimeBenchmarkRecognizedText(JSONObject sample) {

@@ -6,7 +6,6 @@ import shutil
 import psutil
 import asyncio
 
-from funasr import AutoModel
 from config.logger import setup_logging
 from typing import Optional, Tuple, List
 from core.providers.asr.utils import lang_tag_filter
@@ -15,6 +14,14 @@ from core.providers.asr.dto.dto import InterfaceType
 
 TAG = __name__
 logger = setup_logging()
+
+try:
+    from funasr import AutoModel
+except ModuleNotFoundError as exc:
+    AutoModel = None
+    FUNASR_IMPORT_ERROR = exc
+else:
+    FUNASR_IMPORT_ERROR = None
 
 MAX_RETRIES = 2
 RETRY_DELAY = 1  # 重试延迟（秒）
@@ -40,6 +47,14 @@ class CaptureOutput:
 class ASRProvider(ASRProviderBase):
     def __init__(self, config: dict, delete_audio_file: bool):
         super().__init__()
+
+        if AutoModel is None:
+            raise RuntimeError(
+                "当前 Python 运行时未安装 funasr。"
+                "如果要使用本地 FunASR/SenseVoice ASR，请使用 FunASR 安装或构建入口；"
+                "Docker 发布使用 scripts/acr-build-push-funasr，"
+                "源码环境使用 main/xiaozhi-server/requirements.txt 或 requirements-docker-funasr.txt。"
+            ) from FUNASR_IMPORT_ERROR
         
         # 内存检测，要求大于2G
         min_mem_bytes = 2 * 1024 * 1024 * 1024

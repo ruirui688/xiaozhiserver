@@ -102,7 +102,7 @@ crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/
 生产运行镜像：
 
 ```text
-xiaozhi-server:latest    Python 实时语音服务，内置 CPU FunASR/SenseVoiceSmall
+xiaozhi-server:latest    Python 实时语音服务，可发布为轻量 profile 或 FunASR profile
 xiaozhi-web:latest       Java manager-api + Vue manager-web
 mysql:8.4                MySQL 运行时镜像
 redis:8.0                Redis 运行时镜像
@@ -111,11 +111,12 @@ redis:8.0                Redis 运行时镜像
 构建缓存镜像：
 
 ```text
-xiaozhi-server-base:latest
-xiaozhi-server-base:base-<依赖哈希>
+xiaozhi-server-base-common:latest / base-<依赖哈希>
+xiaozhi-server-base-lite:latest / base-<依赖哈希>
+xiaozhi-server-base-funasr:latest / base-<依赖哈希>
 ```
 
-`xiaozhi-server-base` 只用于加速构建，不由生产 compose 直接启动。
+这些 base 镜像只用于加速构建，不由生产 compose 直接启动。FunASR base 从 lite base 追加重依赖，lite 和 FunASR 共享 common/lite 缓存层。
 
 ---
 
@@ -134,46 +135,65 @@ scripts/acr-build-push
 默认行为：
 
 ```text
-BUILD_BASE=auto              自动复用或补齐 xiaozhi-server-base
+BUILD_BASE=auto              自动复用或补齐 common/lite/funasr base
 MIRROR_RUNTIME_IMAGES=auto   ACR 已有 mysql/redis 时跳过同步
 BUILD_ENGINE=docker          单平台 linux/amd64 构建
 PUSH=true                    构建后推送 ACR
+SERVER_INSTALL_PROFILE=lite 不安装本地 FunASR，ASR 使用远程 provider
+基础镜像默认使用 docker.m.daocloud.io 前缀，避免失效 Docker daemon mirror
+BUILD_BASE=auto 只复用精确依赖 hash 的 base 缓存，不默认用 latest 冒充
+```
+
+两种服务端 profile：
+
+| 入口 | 适用场景 | 依赖清单 | 镜像内容 |
+|------|----------|----------|----------|
+| `scripts/acr-build-push-lite` | 不使用本地 FunASR，ASR 走远程 provider 或 FunASR server | `requirements-docker.txt` | 不含 `torch` / `torchaudio` / `funasr`，不打包 SenseVoiceSmall |
+| `scripts/acr-build-push-funasr` | 使用本地 `fun_local` / SenseVoiceSmall CPU 识别 | `requirements-docker.txt` + `requirements-docker-funasr-extra.txt` | 在 lite base 上追加 CPU PyTorch / FunASR，并默认打包 SenseVoiceSmall |
+
+也可以直接覆盖底层变量：
+
+```bash
+SERVER_INSTALL_PROFILE=lite scripts/acr-build-push
+SERVER_INSTALL_PROFILE=funasr scripts/acr-build-push
 ```
 
 常用覆盖：
 
 | 场景 | 命令 |
 |------|------|
+| 不使用本地 FunASR，构建轻量服务端镜像 | `scripts/acr-build-push-lite` |
+| 使用本地 FunASR，构建完整服务端镜像 | `scripts/acr-build-push-funasr` |
 | 只改 Java/Web，确认不需要检查基础镜像和运行时镜像 | `BUILD_BASE=false MIRROR_RUNTIME_IMAGES=false scripts/acr-build-push` |
 | 改了 Python 依赖或 `Dockerfile-server-base` | `BUILD_BASE=true scripts/acr-build-push` |
 | 查看完整 Docker 输出 | `VERBOSE=true scripts/acr-build-push` |
 | 构建多架构镜像 | `BUILD_ENGINE=buildx PLATFORMS=linux/amd64,linux/arm64 scripts/acr-build-push` |
 | 降低构建机并发负载 | `PARALLEL_RELEASE_STEPS=false PARALLEL_IMAGE_BUILDS=false scripts/acr-build-push` |
 
-FunASR 模型默认来源：
+FunASR profile 的模型默认来源：
 
 ```text
 main/xiaozhi-server/models/SenseVoiceSmall/model.pt
 ```
 
-如果这个文件存在，构建会直接打进 `xiaozhi-server` 镜像；不存在时才从 `FUNASR_MODEL_URL` 下载。保留本地模型文件可以避免每次构建重新下载。
+如果这个文件存在，FunASR 构建会直接打进 `xiaozhi-server` 镜像；不存在时才从 `FUNASR_MODEL_URL` 下载。保留本地模型文件可以避免每次构建重新下载。轻量 profile 不读取也不下载该模型。
 
 模型在其他位置时：
 
 ```bash
-FUNASR_MODEL_LOCAL_PATH=/path/to/model.pt scripts/acr-build-push
+FUNASR_MODEL_LOCAL_PATH=/path/to/model.pt scripts/acr-build-push-funasr
 ```
 
 临时使用镜像源下载时：
 
 ```bash
-FUNASR_MODEL_URL=https://your-mirror.example/SenseVoiceSmall/model.pt scripts/acr-build-push
+FUNASR_MODEL_URL=https://your-mirror.example/SenseVoiceSmall/model.pt scripts/acr-build-push-funasr
 ```
 
-不把模型打进镜像时：
+FunASR profile 临时不把模型打进镜像时：
 
 ```bash
-INSTALL_FUNASR_MODEL=false scripts/acr-build-push
+INSTALL_FUNASR_MODEL=false scripts/acr-build-push-funasr
 ```
 
 这种镜像不适合当前默认生产方案，除非你另行挂载 `models/SenseVoiceSmall/model.pt`。
@@ -318,7 +338,9 @@ server.vision_explain http://服务器IP或域名:8003/mcp/vision/explain
 
 | 层 | 缓存方式 | 什么时候会重新构建或上传 |
 |----|----------|--------------------------|
-| Python/FunASR 依赖 | Docker layer + ACR `xiaozhi-server-base:base-<依赖哈希>` | 改 `requirements-docker.txt`、基础镜像、系统包或 server-base Dockerfile |
+| 系统依赖 | Docker layer + ACR `xiaozhi-server-base-common:base-<依赖哈希>` | 改 Python 基础镜像、系统包或 common base Dockerfile |
+| 普通 Python 依赖 | Docker layer + ACR `xiaozhi-server-base-lite:base-<依赖哈希>` | 改 `requirements-docker.txt` 或 lite base Dockerfile |
+| FunASR 追加依赖 | Docker layer + ACR `xiaozhi-server-base-funasr:base-<依赖哈希>` | 改 `requirements-docker-funasr-extra.txt` 或 FunASR base Dockerfile |
 | SenseVoiceSmall 模型 | 本地 `model.pt` + 镜像 layer | 第一次打包模型，或替换模型文件 |
 | 业务代码 | Docker layer + `:<git短哈希>` / `:latest` | 每次业务代码变化 |
 

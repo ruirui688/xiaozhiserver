@@ -1,0 +1,6 @@
+# -*- coding:utf-8 -*-
+# Extra dependencies for local CPU FunASR/SenseVoice on top of the lite Docker runtime.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.2.2+cpu
+torchaudio==2.2.2+cpu
+funasr==1.2.7

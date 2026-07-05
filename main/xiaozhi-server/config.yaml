@@ -365,7 +365,8 @@ Memory:
 ASR:
   FunASR:
     # FunASR / SenseVoiceSmall 本地 CPU 语音识别。
-    # Docker 生产镜像默认安装 FunASR CPU 依赖，并在镜像构建阶段下载 model.pt。
+    # 仅 FunASR 安装/构建入口会安装 torch / torchaudio / funasr 并打包 model.pt。
+    # 轻量 Docker 镜像不包含本地 FunASR；使用轻量镜像时请在智控台选择远程 ASR。
     type: fun_local
     model_dir: models/SenseVoiceSmall
     output_dir: tmp/

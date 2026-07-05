@@ -7,26 +7,58 @@ ACR_REGISTRY="${ACR_REGISTRY:-crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliy
 ACR_NAMESPACE="${ACR_NAMESPACE:-yihuixiaozhi}"
 SERVER_IMAGE_REPOSITORY="${SERVER_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/xiaozhi-server}"
 WEB_IMAGE_REPOSITORY="${WEB_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/xiaozhi-web}"
-SERVER_BASE_IMAGE_REPOSITORY="${SERVER_BASE_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/xiaozhi-server-base}"
+SERVER_COMMON_BASE_IMAGE_REPOSITORY="${SERVER_COMMON_BASE_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/xiaozhi-server-base-common}"
+SERVER_LITE_BASE_IMAGE_REPOSITORY="${SERVER_LITE_BASE_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/xiaozhi-server-base-lite}"
+SERVER_FUNASR_BASE_IMAGE_REPOSITORY="${SERVER_FUNASR_BASE_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/xiaozhi-server-base-funasr}"
 MYSQL_IMAGE_REPOSITORY="${MYSQL_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/mysql}"
 REDIS_IMAGE_REPOSITORY="${REDIS_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/redis}"
 PLATFORMS="${PLATFORMS:-linux/amd64}"
 PUSH="${PUSH:-true}"
 BUILD_BASE="${BUILD_BASE:-auto}"
 BUILD_ENGINE="${BUILD_ENGINE:-docker}"
-PYTHON_BASE_IMAGE="${PYTHON_BASE_IMAGE:-python:3.10-slim-bookworm}"
+IMAGE_TAG_SUFFIX="${IMAGE_TAG_SUFFIX:-}"
+CHANNEL_TAG="${CHANNEL_TAG:-latest}"
+PYTHON_BASE_IMAGE="${PYTHON_BASE_IMAGE:-docker.m.daocloud.io/library/python:3.10-slim-bookworm}"
+NODE_BASE_IMAGE="${NODE_BASE_IMAGE:-docker.m.daocloud.io/library/node:20}"
+MAVEN_BASE_IMAGE="${MAVEN_BASE_IMAGE:-docker.m.daocloud.io/library/maven:3.9.4-eclipse-temurin-21}"
+WEB_RUNTIME_BASE_IMAGE="${WEB_RUNTIME_BASE_IMAGE:-docker.m.daocloud.io/bellsoft/liberica-runtime-container:jre-21-glibc}"
+SERVER_INSTALL_PROFILE="${SERVER_INSTALL_PROFILE:-lite}"
+case "$SERVER_INSTALL_PROFILE" in
+  standard | lite)
+    SERVER_INSTALL_PROFILE="lite"
+    SERVER_REQUIREMENTS="${SERVER_REQUIREMENTS:-main/xiaozhi-server/requirements-docker.txt}"
+    INSTALL_FUNASR_MODEL="${INSTALL_FUNASR_MODEL:-false}"
+    ;;
+  funasr)
+    SERVER_REQUIREMENTS="${SERVER_REQUIREMENTS:-main/xiaozhi-server/requirements-docker.txt}"
+    SERVER_REQUIREMENTS_FUNASR="${SERVER_REQUIREMENTS_FUNASR:-main/xiaozhi-server/requirements-docker-funasr-extra.txt}"
+    INSTALL_FUNASR_MODEL="${INSTALL_FUNASR_MODEL:-true}"
+    ;;
+  *)
+    echo "SERVER_INSTALL_PROFILE must be lite, standard, or funasr" >&2
+    exit 1
+    ;;
+esac
+if [[ -z "${SERVER_BASE_IMAGE_REPOSITORY:-}" ]]; then
+  if [[ "$SERVER_INSTALL_PROFILE" == "funasr" ]]; then
+    SERVER_BASE_IMAGE_REPOSITORY="$SERVER_FUNASR_BASE_IMAGE_REPOSITORY"
+  else
+    SERVER_BASE_IMAGE_REPOSITORY="$SERVER_LITE_BASE_IMAGE_REPOSITORY"
+  fi
+fi
 SERVER_BASE_IMAGE="${SERVER_BASE_IMAGE:-}"
 MIRROR_RUNTIME_IMAGES="${MIRROR_RUNTIME_IMAGES:-auto}"
 MYSQL_SOURCE_IMAGE="${MYSQL_SOURCE_IMAGE:-mysql:8.4}"
 REDIS_SOURCE_IMAGE="${REDIS_SOURCE_IMAGE:-redis:8.0}"
 VERBOSE="${VERBOSE:-false}"
-INSTALL_FUNASR_MODEL="${INSTALL_FUNASR_MODEL:-true}"
 FUNASR_MODEL_URL="${FUNASR_MODEL_URL:-https://modelscope.cn/models/iic/SenseVoiceSmall/resolve/master/model.pt}"
 FUNASR_MODEL_LOCAL_PATH="${FUNASR_MODEL_LOCAL_PATH:-}"
 FUNASR_MODEL_CONTEXT="${FUNASR_MODEL_CONTEXT:-}"
 XIAOZHI_DOCKER_QUIET="${XIAOZHI_DOCKER_QUIET:-true}"
 XIAOZHI_PROGRESS="${XIAOZHI_PROGRESS:-true}"
 XIAOZHI_PROGRESS_INTERVAL="${XIAOZHI_PROGRESS_INTERVAL:-5}"
+SERVER_BASE_CACHE_VERSION="${SERVER_BASE_CACHE_VERSION:-v2}"
+SERVER_BASE_SEED_LATEST="${SERVER_BASE_SEED_LATEST:-false}"
 PARALLEL_RELEASE_STEPS_CONFIGURED="${PARALLEL_RELEASE_STEPS+x}"
 PARALLEL_IMAGE_BUILDS_CONFIGURED="${PARALLEL_IMAGE_BUILDS+x}"
 PARALLEL_RELEASE_STEPS="${PARALLEL_RELEASE_STEPS:-true}"
@@ -50,6 +82,7 @@ if [[ -z "${VERSION:-}" ]]; then
     VERSION="local"
   fi
 fi
+IMAGE_VERSION_TAG="${VERSION}${IMAGE_TAG_SUFFIX}"
 
 image_tag() {
   local image="$1"
@@ -84,8 +117,18 @@ if [[ "$MIRROR_RUNTIME_IMAGES" != "true" && "$MIRROR_RUNTIME_IMAGES" != "false" 
   exit 1
 fi
 
+if [[ "$SERVER_BASE_SEED_LATEST" != "true" && "$SERVER_BASE_SEED_LATEST" != "false" ]]; then
+  echo "SERVER_BASE_SEED_LATEST must be true or false" >&2
+  exit 1
+fi
+
 if [[ "$INSTALL_FUNASR_MODEL" != "true" && "$INSTALL_FUNASR_MODEL" != "false" ]]; then
   echo "INSTALL_FUNASR_MODEL must be true or false" >&2
+  exit 1
+fi
+
+if [[ "$SERVER_INSTALL_PROFILE" == "lite" && "$INSTALL_FUNASR_MODEL" == "true" ]]; then
+  echo "SERVER_INSTALL_PROFILE=lite does not include local FunASR; use scripts/acr-build-push-funasr or SERVER_INSTALL_PROFILE=funasr." >&2
   exit 1
 fi
 
@@ -113,10 +156,11 @@ print_release_summary() {
     cat <<EOF
 ACR release
   version:   $VERSION
-  images:    $(short_image_name "$SERVER_IMAGE_REPOSITORY:$VERSION"), $(short_image_name "$WEB_IMAGE_REPOSITORY:$VERSION")
+  tags:      $CHANNEL_TAG, $IMAGE_VERSION_TAG
+  images:    $(short_image_name "$SERVER_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"), $(short_image_name "$WEB_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG")
   runtime:   mysql:$MYSQL_TARGET_TAG, redis:$REDIS_TARGET_TAG
-  options:   engine=$BUILD_ENGINE base=$BUILD_BASE runtime=$MIRROR_RUNTIME_IMAGES parallel=$PARALLEL_RELEASE_STEPS/$PARALLEL_IMAGE_BUILDS
-  funasr:    cpu=true model=$INSTALL_FUNASR_MODEL
+  options:   profile=$SERVER_INSTALL_PROFILE engine=$BUILD_ENGINE base=$BUILD_BASE seed_latest=$SERVER_BASE_SEED_LATEST runtime=$MIRROR_RUNTIME_IMAGES parallel=$PARALLEL_RELEASE_STEPS/$PARALLEL_IMAGE_BUILDS
+  funasr:    local=$([[ "$SERVER_INSTALL_PROFILE" == "funasr" ]] && echo true || echo false) model=$INSTALL_FUNASR_MODEL
   output:    quiet progress=$XIAOZHI_PROGRESS interval=${XIAOZHI_PROGRESS_INTERVAL}s
 
 EOF
@@ -129,10 +173,15 @@ Building and pushing xiaozhi images to Aliyun ACR.
 Version:
   $VERSION
 
+Image tags:
+  channel=$CHANNEL_TAG version=$IMAGE_VERSION_TAG
+
 Image repositories:
   server:      $SERVER_IMAGE_REPOSITORY
   web:         $WEB_IMAGE_REPOSITORY
-  server-base: $SERVER_BASE_IMAGE_REPOSITORY
+  base-common: $SERVER_COMMON_BASE_IMAGE_REPOSITORY
+  base-lite:   $SERVER_LITE_BASE_IMAGE_REPOSITORY
+  base-funasr: $SERVER_FUNASR_BASE_IMAGE_REPOSITORY
   mysql:       $MYSQL_IMAGE_REPOSITORY:$MYSQL_TARGET_TAG
   redis:       $REDIS_IMAGE_REPOSITORY:$REDIS_TARGET_TAG
 
@@ -144,6 +193,11 @@ Default build engine:
   $BUILD_ENGINE
 
 Build options:
+  server_install_profile=$SERVER_INSTALL_PROFILE
+  server_requirements=$SERVER_REQUIREMENTS
+  server_requirements_funasr=${SERVER_REQUIREMENTS_FUNASR:-none}
+  server_base_cache_version=$SERVER_BASE_CACHE_VERSION
+  server_base_seed_latest=$SERVER_BASE_SEED_LATEST
   build_base=$BUILD_BASE server_base_image=${SERVER_BASE_IMAGE:-auto}
   mirror_runtime_images=$MIRROR_RUNTIME_IMAGES
   install_funasr_model=$INSTALL_FUNASR_MODEL
@@ -214,11 +268,24 @@ should_mirror_runtime_images() {
 build_business_images() {
   SERVER_IMAGE_REPOSITORY="$SERVER_IMAGE_REPOSITORY" \
   WEB_IMAGE_REPOSITORY="$WEB_IMAGE_REPOSITORY" \
+  SERVER_COMMON_BASE_IMAGE_REPOSITORY="$SERVER_COMMON_BASE_IMAGE_REPOSITORY" \
+  SERVER_LITE_BASE_IMAGE_REPOSITORY="$SERVER_LITE_BASE_IMAGE_REPOSITORY" \
+  SERVER_FUNASR_BASE_IMAGE_REPOSITORY="$SERVER_FUNASR_BASE_IMAGE_REPOSITORY" \
   SERVER_BASE_IMAGE_REPOSITORY="$SERVER_BASE_IMAGE_REPOSITORY" \
   BUILD_BASE="$BUILD_BASE" \
   SERVER_BASE_IMAGE="$SERVER_BASE_IMAGE" \
   BUILD_ENGINE="$BUILD_ENGINE" \
   PYTHON_BASE_IMAGE="$PYTHON_BASE_IMAGE" \
+  NODE_BASE_IMAGE="$NODE_BASE_IMAGE" \
+  MAVEN_BASE_IMAGE="$MAVEN_BASE_IMAGE" \
+  WEB_RUNTIME_BASE_IMAGE="$WEB_RUNTIME_BASE_IMAGE" \
+  SERVER_INSTALL_PROFILE="$SERVER_INSTALL_PROFILE" \
+  SERVER_REQUIREMENTS="$SERVER_REQUIREMENTS" \
+  SERVER_REQUIREMENTS_FUNASR="${SERVER_REQUIREMENTS_FUNASR:-}" \
+  SERVER_BASE_CACHE_VERSION="$SERVER_BASE_CACHE_VERSION" \
+  SERVER_BASE_SEED_LATEST="$SERVER_BASE_SEED_LATEST" \
+  IMAGE_TAG_SUFFIX="$IMAGE_TAG_SUFFIX" \
+  CHANNEL_TAG="$CHANNEL_TAG" \
   PUSH="$PUSH" \
   PLATFORMS="$PLATFORMS" \
   VERSION="$VERSION" \
@@ -273,6 +340,7 @@ build_business_images
 echo ""
 echo "=== Build complete ==="
 echo "Version: $VERSION"
-echo "Deploy latest: ./deploy/production/upgrade"
-echo "Deploy pinned: VERSION=$VERSION ./deploy/production/upgrade"
+echo "Image tags: $CHANNEL_TAG, $IMAGE_VERSION_TAG"
+echo "Deploy channel: VERSION=$CHANNEL_TAG ./deploy/production/upgrade"
+echo "Deploy pinned: VERSION=$IMAGE_VERSION_TAG ./deploy/production/upgrade"
 echo ""

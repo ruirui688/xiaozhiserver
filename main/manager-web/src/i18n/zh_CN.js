@@ -584,6 +584,11 @@ export default {
   'deviceDebug.toolsUnavailableOffline': '真实设备未连接，仅设备 MCP 工具不可用；文本、知识库和普通插件调试可继续',
   'deviceDebug.debugConnectHint': '连接调试会话后可测试文本、知识库和普通插件',
   'deviceDebug.inputConnectPlaceholder': '请先连接调试会话',
+  'deviceDebug.unknownTool': '未知工具',
+  'deviceDebug.toolDescription': '用途：',
+  'deviceDebug.toolParameters': '参数：',
+  'deviceDebug.toolParametersNone': '无参数',
+  'deviceDebug.toolParametersUnknown': '未声明',
 
   'cache.status': '缓存状态',
   'cache.cdnEnabled': 'CDN模式已启用',

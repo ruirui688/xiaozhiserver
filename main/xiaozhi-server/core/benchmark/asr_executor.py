@@ -39,15 +39,25 @@ async def run_asr_samples(model, provider_type, config, iterations):
         first_text_ms = None
         success = False
         message = "OK"
+        pcm = b""
+        audio_duration_ms = 0
+        tail_latency_ms = None
+        first_text_tail_ms = None
         try:
             pcm = _wav_to_pcm(audio["path"], audio["data"])
+            audio_duration_ms = _pcm_duration_ms(pcm)
             text, first_text_ms = await _recognize_asr_sample(asr, provider_type, pcm, started)
             latency_ms = int((time.perf_counter() - started) * 1000)
+            tail_latency_ms = _latency_after_audio(latency_ms, audio_duration_ms)
+            first_text_tail_ms = _latency_after_audio(first_text_ms, audio_duration_ms)
             success = bool(str(text or "").strip())
             if not success:
                 message = "识别文本为空"
         except Exception as exc:
             latency_ms = int((time.perf_counter() - started) * 1000)
+            audio_duration_ms = _pcm_duration_ms(pcm)
+            tail_latency_ms = _latency_after_audio(latency_ms, audio_duration_ms)
+            first_text_tail_ms = None
             message = str(exc)
         reference = audio.get("reference")
         samples.append({
@@ -56,6 +66,7 @@ async def run_asr_samples(model, provider_type, config, iterations):
             "success": success,
             "measured": success,
             "latency_ms": latency_ms,
+            "tail_latency_ms": tail_latency_ms,
             "ttft_ms": first_text_ms,
             "cer": char_error_rate(reference, text) if reference else None,
             "wer": word_error_rate(reference, text) if reference else None,
@@ -72,11 +83,15 @@ async def run_asr_samples(model, provider_type, config, iterations):
                 "audio_format": "pcm",
                 "reference_text": reference,
                 "audio_bytes": len(audio.get("data") or b""),
+                "pcm_bytes": len(pcm),
+                "audio_duration_ms": audio_duration_ms,
                 "audio_data_url": _build_audio_data_url(audio) if include_audio_preview else None,
             },
             "output_detail": {
                 "recognized_text": str(text or ""),
                 "first_text_ms": first_text_ms,
+                "tail_latency_ms": tail_latency_ms,
+                "first_text_tail_ms": first_text_tail_ms,
                 "cer": char_error_rate(reference, text) if reference else None,
                 "wer": word_error_rate(reference, text) if reference else None,
             },
@@ -128,18 +143,38 @@ async def _recognize_doubao_stream(asr, pcm, started):
         if "code" in init_result and init_result.get("code") != 1000:
             raise RuntimeError(str(init_result.get("payload_msg") or init_result))
 
-        audio_payload = gzip.compress(pcm)
-        audio_request = bytearray(asr.generate_last_audio_default_header())
-        audio_request.extend(len(audio_payload).to_bytes(4, "big"))
-        audio_request.extend(audio_payload)
-        await ws.send(audio_request)
+        receive_task = asyncio.create_task(_receive_doubao_results(asr, ws, started))
+        try:
+            await _send_doubao_pcm_frames(asr, ws, pcm)
+            return await asyncio.wait_for(receive_task, timeout=10)
+        finally:
+            if not receive_task.done():
+                receive_task.cancel()
 
-        for _ in range(20):
-            result = asr.parse_response(await asyncio.wait_for(ws.recv(), timeout=10))
-            text = _extract_doubao_text(result)
-            if text:
-                return text, int((time.perf_counter() - started) * 1000)
-        return "", None
+
+async def _send_doubao_pcm_frames(asr, ws, pcm, frame_size=1920, delay=0.06):
+    for start in range(0, len(pcm), frame_size):
+        payload = gzip.compress(pcm[start:start + frame_size])
+        audio_request = bytearray(asr.generate_audio_default_header())
+        audio_request.extend(len(payload).to_bytes(4, "big"))
+        audio_request.extend(payload)
+        await ws.send(audio_request)
+        if delay:
+            await asyncio.sleep(delay)
+    empty_payload = gzip.compress(b"")
+    last_audio_request = bytearray(asr.generate_last_audio_default_header())
+    last_audio_request.extend(len(empty_payload).to_bytes(4, "big"))
+    last_audio_request.extend(empty_payload)
+    await ws.send(last_audio_request)
+
+
+async def _receive_doubao_results(asr, ws, started):
+    for _ in range(30):
+        result = asr.parse_response(await asyncio.wait_for(ws.recv(), timeout=10))
+        text = _extract_doubao_text(result)
+        if text:
+            return text, int((time.perf_counter() - started) * 1000)
+    return "", None
 
 
 def _extract_doubao_text(result):
@@ -188,35 +223,43 @@ async def _recognize_aliyun_stream(asr, pcm, started):
         }, ensure_ascii=False))
 
         await _wait_aliyun_started(ws)
-        await _send_pcm_frames(ws, pcm)
-        await ws.send(json.dumps({
-            "header": {
-                "namespace": "SpeechTranscriber",
-                "name": "StopTranscription",
-                "message_id": uuid.uuid4().hex,
-                "task_id": task_id,
-                "appkey": asr.appkey,
-            }
-        }, ensure_ascii=False))
+        receive_task = asyncio.create_task(_receive_aliyun_results(ws, started))
+        try:
+            await _send_pcm_frames(ws, pcm)
+            await ws.send(json.dumps({
+                "header": {
+                    "namespace": "SpeechTranscriber",
+                    "name": "StopTranscription",
+                    "message_id": uuid.uuid4().hex,
+                    "task_id": task_id,
+                    "appkey": asr.appkey,
+                }
+            }, ensure_ascii=False))
+            return await asyncio.wait_for(receive_task, timeout=10)
+        finally:
+            if not receive_task.done():
+                receive_task.cancel()
 
-        texts = []
-        first_text_ms = None
-        for _ in range(30):
-            message = await asyncio.wait_for(ws.recv(), timeout=10)
-            result = json.loads(message)
-            header = result.get("header", {})
-            payload = result.get("payload", {})
-            if header.get("status") not in (None, 20000000):
-                raise RuntimeError(header.get("status_text") or str(header))
-            if header.get("name") == "TranscriptionResultChanged" and payload.get("result") and first_text_ms is None:
+
+async def _receive_aliyun_results(ws, started):
+    texts = []
+    first_text_ms = None
+    for _ in range(30):
+        message = await asyncio.wait_for(ws.recv(), timeout=10)
+        result = json.loads(message)
+        header = result.get("header", {})
+        payload = result.get("payload", {})
+        if header.get("status") not in (None, 20000000):
+            raise RuntimeError(header.get("status_text") or str(header))
+        if header.get("name") == "TranscriptionResultChanged" and payload.get("result") and first_text_ms is None:
+            first_text_ms = int((time.perf_counter() - started) * 1000)
+        if header.get("name") == "SentenceEnd" and payload.get("result"):
+            if first_text_ms is None:
                 first_text_ms = int((time.perf_counter() - started) * 1000)
-            if header.get("name") == "SentenceEnd" and payload.get("result"):
-                if first_text_ms is None:
-                    first_text_ms = int((time.perf_counter() - started) * 1000)
-                texts.append(payload.get("result"))
-            if header.get("name") in ("TranscriptionCompleted", "TaskFailed"):
-                break
-        return "".join(texts), first_text_ms
+            texts.append(payload.get("result"))
+        if header.get("name") in ("TranscriptionCompleted", "TaskFailed"):
+            break
+    return "".join(texts), first_text_ms
 
 
 async def _wait_aliyun_started(ws):
@@ -230,7 +273,7 @@ async def _wait_aliyun_started(ws):
     raise TimeoutError("阿里云 ASR 未进入可发送音频状态")
 
 
-async def _send_pcm_frames(ws, pcm, frame_size=3200, delay=0.02):
+async def _send_pcm_frames(ws, pcm, frame_size=1920, delay=0.06):
     for start in range(0, len(pcm), frame_size):
         await ws.send(pcm[start:start + frame_size])
         if delay:
@@ -245,50 +288,61 @@ async def _recognize_xunfei_stream(asr, pcm, started):
         ping_timeout=None,
         close_timeout=10,
     ) as ws:
-        frame_size = 1280
-        pos = 0
-        while pos < len(pcm):
-            chunk = pcm[pos:pos + frame_size]
-            if pos == 0:
-                status = 0
-            elif pos + frame_size >= len(pcm):
-                status = 2
-            else:
-                status = 1
-            await ws.send(json.dumps({
-                "header": {"status": status, "app_id": asr.app_id},
-                "parameter": {"iat": asr.iat_params},
-                "payload": {
-                    "audio": {
-                        "audio": base64.b64encode(chunk).decode(),
-                        "sample_rate": 16000,
-                        "encoding": "raw",
-                    }
-                },
-            }, ensure_ascii=False))
-            pos += frame_size
-            await asyncio.sleep(0.04)
+        receive_task = asyncio.create_task(_receive_xunfei_results(ws, started))
+        try:
+            await _send_xunfei_pcm_frames(asr, ws, pcm)
+            return await asyncio.wait_for(receive_task, timeout=10)
+        finally:
+            if not receive_task.done():
+                receive_task.cancel()
 
-        text_parts = []
-        first_text_ms = None
-        async for message in ws:
-            result = json.loads(message)
-            header = result.get("header", {})
-            if header.get("code", 0) != 0:
-                raise RuntimeError(header.get("message") or str(result))
-            payload = result.get("payload", {})
-            text_data = ((payload.get("result") or {}).get("text") or "")
-            if text_data:
-                decoded = base64.b64decode(text_data).decode("utf-8")
-                text_json = json.loads(decoded)
-                ws_result = text_json.get("ws") or []
-                chunk_text = "".join(cw.get("w", "") for seg in ws_result for cw in seg.get("cw", []))
-                if chunk_text and first_text_ms is None:
-                    first_text_ms = int((time.perf_counter() - started) * 1000)
-                text_parts.append(chunk_text)
-            if header.get("status") == 2:
-                break
-        return "".join(text_parts), first_text_ms
+
+async def _send_xunfei_pcm_frames(asr, ws, pcm, frame_size=1280, delay=0.04):
+    pos = 0
+    while pos < len(pcm):
+        chunk = pcm[pos:pos + frame_size]
+        if pos == 0:
+            status = 0
+        elif pos + frame_size >= len(pcm):
+            status = 2
+        else:
+            status = 1
+        await ws.send(json.dumps({
+            "header": {"status": status, "app_id": asr.app_id},
+            "parameter": {"iat": asr.iat_params},
+            "payload": {
+                "audio": {
+                    "audio": base64.b64encode(chunk).decode(),
+                    "sample_rate": 16000,
+                    "encoding": "raw",
+                }
+            },
+        }, ensure_ascii=False))
+        pos += frame_size
+        await asyncio.sleep(delay)
+
+
+async def _receive_xunfei_results(ws, started):
+    text_parts = []
+    first_text_ms = None
+    async for message in ws:
+        result = json.loads(message)
+        header = result.get("header", {})
+        if header.get("code", 0) != 0:
+            raise RuntimeError(header.get("message") or str(result))
+        payload = result.get("payload", {})
+        text_data = ((payload.get("result") or {}).get("text") or "")
+        if text_data:
+            decoded = base64.b64decode(text_data).decode("utf-8")
+            text_json = json.loads(decoded)
+            ws_result = text_json.get("ws") or []
+            chunk_text = "".join(cw.get("w", "") for seg in ws_result for cw in seg.get("cw", []))
+            if chunk_text and first_text_ms is None:
+                first_text_ms = int((time.perf_counter() - started) * 1000)
+            text_parts.append(chunk_text)
+        if header.get("status") == 2:
+            break
+    return "".join(text_parts), first_text_ms
 
 
 def _load_audio_files(preferred_name=None):
@@ -342,3 +396,16 @@ def _wav_to_pcm(path, data):
         with wave.open(path, "rb") as wav_file:
             return wav_file.readframes(wav_file.getnframes())
     return data
+
+
+def _pcm_duration_ms(pcm, sample_rate=16000, sample_width=2, channels=1):
+    if not pcm:
+        return 0
+    bytes_per_second = sample_rate * sample_width * channels
+    return int(round(len(pcm) / bytes_per_second * 1000))
+
+
+def _latency_after_audio(latency_ms, audio_duration_ms):
+    if latency_ms is None:
+        return None
+    return max(0, int(latency_ms) - int(audio_duration_ms or 0))

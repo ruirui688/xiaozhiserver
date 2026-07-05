@@ -160,6 +160,20 @@ Redis runs with AOF (`--appendonly yes`) and stores its data at
 `~/xiaozhi-data/redis/data`. User sessions survive container restarts and
 `./upgrade` runs.
 
+## Server image profiles
+
+The Python server image can be published in two profiles:
+
+```text
+lite     scripts/acr-build-push-lite    no local FunASR, no torch/funasr wheels
+funasr   scripts/acr-build-push-funasr  local FunASR/SenseVoiceSmall enabled
+```
+
+Use the lite profile when ASR is provided by remote vendors or a separate
+FunASR server. Use the FunASR profile only when the selected ASR adapter is
+`fun_local`. Switching profiles means publishing a new `xiaozhi-server` image
+and running `./upgrade`; Docker Compose itself does not need a different file.
+
 ## Resource limits
 
 The production compose file includes runtime limits for a 2 CPU / 4 GB server
@@ -174,8 +188,11 @@ xiaozhi-esp32-server-redis 0.10 CPU / 192m
 
 The limits are applied at Docker Compose runtime, not baked into the images.
 `memswap_limit` defaults to the same value as `mem_limit` to avoid swap storms
-on small hosts. FunASR/SenseVoiceSmall runs in the Python container and needs
-about 2 GB of memory for reliable startup on CPU-only hosts.
+on small hosts. FunASR/SenseVoiceSmall runs in the Python container only when
+the FunASR profile image is published and the selected ASR adapter is
+`fun_local`; it needs about 2 GB of memory for reliable startup on CPU-only
+hosts. Lite profile deployments can lower the Python memory limit after
+testing their selected remote ASR path.
 
 Override the `XIAOZHI_*_CPUS`, `XIAOZHI_*_MEM_LIMIT`,
 `XIAOZHI_FUNASR_THREADS`, `XIAOZHI_MYSQL_INNODB_BUFFER_POOL_SIZE`,
@@ -191,14 +208,16 @@ Production hosts do not build images and do not install Python, Java, Node.js,
 or FunASR dependencies. `install` and `upgrade` only pull already published ACR
 images and restart Docker Compose services.
 
-Docker reuses local image layers automatically. If the server base dependencies
-and SenseVoiceSmall model layer are unchanged, a later upgrade usually pulls
-only the new application layers for the selected Git version tag.
+Docker reuses local image layers automatically. Lite and FunASR builds use
+different dependency hashes, so switching profiles pulls the matching base
+layers once. If the selected profile dependencies and SenseVoiceSmall model
+layer are unchanged, a later upgrade usually pulls only the new application
+layers for the selected Git version tag.
 
 Build-side cache controls stay on the build machine:
 
 ```text
-BUILD_BASE=auto   reuse xiaozhi-server-base when dependency inputs match
+BUILD_BASE=auto   reuse common/lite/funasr server-base layers when dependency inputs match
 BUILD_BASE=false  skip server-base checks for Java/Web-only releases
 BUILD_BASE=true   rebuild server-base after Python dependency changes
 ```
