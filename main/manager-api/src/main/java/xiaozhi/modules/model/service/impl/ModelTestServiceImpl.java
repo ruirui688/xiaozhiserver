@@ -8,11 +8,6 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.Duration;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.WebSocket;
-import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -25,9 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
-import java.util.zip.GZIPOutputStream;
 
 import javax.imageio.ImageIO;
 
@@ -78,7 +71,6 @@ public class ModelTestServiceImpl implements ModelTestService {
     private static final String TTS_TEST_TEXT = "你好，我是小智，语音合成测试成功。";
     private static final String VLLM_TEST_QUESTION = "请用一句话描述这张图片。";
     private static final String STANDARD_ASR_TEST_AUDIO = "wakeup_words_short.wav";
-    private static final int DOUBAO_ASR_MAX_RESULT_MESSAGES = 20;
     private static final int SINGLE_ASR_BENCHMARK_TIMEOUT_SECONDS = 120;
     private static final String TEST_LEVEL_REAL_INFERENCE = "REAL_INFERENCE";
     private static final String TEST_LEVEL_CONNECTIVITY = "CONNECTIVITY";
@@ -229,7 +221,7 @@ public class ModelTestServiceImpl implements ModelTestService {
                         || CollectionUtil.isNotEmpty(getMissingAlternativeRequirements(modelConfig.getConfigJson(), modelType, type)))) {
             return TEST_LEVEL_REAL_INFERENCE;
         }
-        if ("ASR".equals(modelType) && "doubao_stream".equals(type)) {
+        if ("ASR".equals(modelType) && ("doubao_stream".equals(type) || "doubao_recording".equals(type))) {
             return TEST_LEVEL_REAL_INFERENCE;
         }
         if ("ASR".equals(modelType)
@@ -576,131 +568,6 @@ public class ModelTestServiceImpl implements ModelTestService {
         } catch (Exception e) {
             result.setSuccess(false);
             result.setMessage("ASR 真实音频测试失败：" + StringUtils.defaultIfBlank(e.getMessage(), e.getClass().getSimpleName()));
-            if (StringUtils.isBlank(result.getTestOutput())) {
-                result.setTestOutput(result.getMessage());
-            }
-            return result;
-        }
-    }
-
-    private ModelTestResultDTO testDoubaoStreamAsrModel(JSONObject configJson) {
-        ModelTestResultDTO result = new ModelTestResultDTO();
-        String appid = configJson.getStr("appid");
-        String accessToken = configJson.getStr("access_token");
-        String apiKey = configJson.getStr("api_key");
-        String resourceId = configJson.getStr("resource_id");
-        boolean useApiKey = hasUsableConfigValue(configJson, "api_key")
-                || "api_key".equalsIgnoreCase(StringUtils.defaultString(configJson.getStr("auth_method")));
-        boolean hasLegacyCredentials = StringUtils.isNoneBlank(appid, accessToken)
-                && !isPlaceholderSecret(appid)
-                && !isPlaceholderSecret(accessToken);
-        if (StringUtils.isBlank(resourceId)
-                || isPlaceholderSecret(resourceId)
-                || (useApiKey && !hasUsableConfigValue(configJson, "api_key"))
-                || (!useApiKey && !hasLegacyCredentials)) {
-            result.setSuccess(false);
-            result.setMessage("豆包流式 ASR 缺少有效 api_key/resource_id，或旧版 appid/access_token/resource_id");
-            result.setTestInput("resource_id：" + StringUtils.defaultString(resourceId, "-")
-                    + "\n测试内容：真实音频流式识别");
-            result.setTestOutput(result.getMessage());
-            return result;
-        }
-
-        boolean enableMultilingual = Boolean.parseBoolean(StringUtils.defaultString(configJson.getStr("enable_multilingual"), "false"));
-        String wsUrl = enableMultilingual
-                ? "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream"
-                : "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async";
-
-        Path audioPath = findAsrTestAudioPath();
-        if (audioPath == null) {
-            result.setSuccess(false);
-            result.setMessage("未找到 ASR 测试音频，期望来源：main/xiaozhi-server/config/assets/*.wav");
-            result.setTestInput("WebSocket：" + wsUrl + "\nresource_id：" + resourceId
-                    + "\n测试内容：真实音频流式识别");
-            result.setTestOutput(result.getMessage());
-            return result;
-        }
-
-        result.setTestInput("WebSocket：" + wsUrl + "\nresource_id：" + resourceId
-                + "\n音频：" + audioPath
-                + "\n测试内容：真实音频流式识别");
-        result.setTestAudioDataUrl(buildAudioDataUrl(audioPath));
-
-        try {
-            BinaryResponseQueueListener listener = new BinaryResponseQueueListener();
-            long startTime = System.currentTimeMillis();
-            WebSocket.Builder webSocketBuilder = HttpClient.newHttpClient()
-                    .newWebSocketBuilder()
-                    .header("X-Api-Resource-Id", resourceId)
-                    .header("X-Api-Connect-Id", UUID.randomUUID().toString());
-            if (useApiKey) {
-                webSocketBuilder.header("X-Api-Key", apiKey);
-            } else {
-                webSocketBuilder
-                        .header("X-Api-App-Key", appid)
-                        .header("X-Api-Access-Key", accessToken);
-            }
-            WebSocket webSocket = webSocketBuilder
-                    .buildAsync(URI.create(wsUrl), listener)
-                    .get(10, TimeUnit.SECONDS);
-
-            byte[] request = buildDoubaoStreamAsrInitRequest(configJson, appid, accessToken, enableMultilingual);
-            webSocket.sendBinary(ByteBuffer.wrap(request), true).get(10, TimeUnit.SECONDS);
-            JSONObject initResponse = parseDoubaoStreamAsrResponse(listener.poll(10, TimeUnit.SECONDS));
-            result.setTestOutput(initResponse.toStringPretty());
-
-            if (initResponse.containsKey("code") && initResponse.getInt("code") != 1000) {
-                result.setSuccess(false);
-                result.setMessage("豆包流式 ASR 初始化失败：" + extractDoubaoErrorMessage(initResponse));
-                webSocket.sendClose(WebSocket.NORMAL_CLOSURE, "test finished");
-                return result;
-            }
-
-            JSONObject payload = initResponse.getJSONObject("payload_msg");
-            if (payload != null && payload.containsKey("code") && payload.getInt("code") != 1000 && payload.getInt("code") != 0) {
-                result.setSuccess(false);
-                result.setMessage("豆包流式 ASR 初始化失败：" + extractDoubaoErrorMessage(initResponse));
-                webSocket.sendClose(WebSocket.NORMAL_CLOSURE, "test finished");
-                return result;
-            }
-            if (payload != null && payload.containsKey("error")) {
-                result.setSuccess(false);
-                result.setMessage("豆包流式 ASR 初始化失败：" + payload.getStr("error"));
-                webSocket.sendClose(WebSocket.NORMAL_CLOSURE, "test finished");
-                return result;
-            }
-
-            byte[] pcmBytes = readAsrTestPcmBytes(audioPath);
-            byte[] audioRequest = buildDoubaoStreamAsrAudioRequest(pcmBytes, true);
-            webSocket.sendBinary(ByteBuffer.wrap(audioRequest), true).get(10, TimeUnit.SECONDS);
-
-            List<String> responseSummaries = new ArrayList<>();
-            String recognizedText = "";
-            for (int i = 0; i < DOUBAO_ASR_MAX_RESULT_MESSAGES; i++) {
-                JSONObject asrResponse = parseDoubaoStreamAsrResponse(listener.poll(10, TimeUnit.SECONDS));
-                responseSummaries.add(asrResponse.toStringPretty());
-                recognizedText = extractDoubaoRecognizedText(asrResponse);
-                if (StringUtils.isNotBlank(recognizedText)) {
-                    break;
-                }
-            }
-            result.setResponseTimeMs(System.currentTimeMillis() - startTime);
-            webSocket.sendClose(WebSocket.NORMAL_CLOSURE, "test finished");
-
-            if (StringUtils.isNotBlank(recognizedText)) {
-                result.setSuccess(true);
-                result.setMessage("豆包流式 ASR 真实音频测试通过，样本：" + audioPath);
-                result.setTestOutput(recognizedText);
-                return result;
-            }
-
-            result.setSuccess(false);
-            result.setMessage("豆包流式 ASR 未返回识别文本，样本：" + audioPath);
-            result.setTestOutput(String.join("\n\n", responseSummaries));
-            return result;
-        } catch (Exception e) {
-            result.setSuccess(false);
-            result.setMessage("豆包流式 ASR 真实音频测试失败：" + StringUtils.defaultIfBlank(e.getMessage(), e.getClass().getSimpleName()));
             if (StringUtils.isBlank(result.getTestOutput())) {
                 result.setTestOutput(result.getMessage());
             }
@@ -1270,6 +1137,7 @@ public class ModelTestServiceImpl implements ModelTestService {
                 case "vosk" -> List.of("model_path");
                 case "fun_server" -> List.of("host", "port");
                 case "doubao" -> List.of("appid", "access_token", "cluster");
+                case "doubao_recording", "doubao_stream" -> List.of("api_key");
                 case "tencent" -> List.of("appid", "secret_id", "secret_key");
                 case "aliyun", "aliyun_stream" -> List.of("appkey");
                 case "baidu" -> List.of("app_id", "api_key", "secret_key");
@@ -1319,9 +1187,6 @@ public class ModelTestServiceImpl implements ModelTestService {
     private static List<List<String>> getRequiredAnyFieldGroups(String modelType, String type) {
         String normalizedModelType = StringUtils.defaultString(modelType).toUpperCase();
         String normalizedType = StringUtils.lowerCase(StringUtils.defaultString(type));
-        if ("ASR".equals(normalizedModelType) && "doubao_stream".equals(normalizedType)) {
-            return List.of(List.of("api_key", "access_token"));
-        }
         if ("TTS".equals(normalizedModelType) && "doubao".equals(normalizedType)) {
             return List.of(List.of("access_token", "authorization"));
         }
@@ -1378,144 +1243,6 @@ public class ModelTestServiceImpl implements ModelTestService {
 
     private static boolean hasUsableTextValue(String stringValue) {
         return StringUtils.isNotBlank(stringValue) && !"null".equalsIgnoreCase(stringValue) && !isPlaceholderSecret(stringValue);
-    }
-
-    private byte[] buildDoubaoStreamAsrInitRequest(JSONObject configJson, String appid, String accessToken,
-            boolean enableMultilingual) throws IOException {
-        JSONObject request = new JSONObject();
-        request.set("app", new JSONObject()
-                .set("appid", appid)
-                .set("token", accessToken));
-        request.set("user", new JSONObject()
-                .set("uid", StringUtils.defaultIfBlank(configJson.getStr("uid"), "streaming_asr_service")));
-
-        JSONObject corpus = new JSONObject()
-                .set("boosting_table_name", StringUtils.defaultString(configJson.getStr("boosting_table_name")))
-                .set("correct_table_name", StringUtils.defaultString(configJson.getStr("correct_table_name")));
-        JSONObject requestBody = new JSONObject()
-                .set("reqid", UUID.randomUUID().toString())
-                .set("workflow", StringUtils.defaultIfBlank(
-                        configJson.getStr("workflow"),
-                        "audio_in,resample,partition,vad,fe,decode,itn,nlu_punctuate"))
-                .set("show_utterances", true)
-                .set("result_type", StringUtils.defaultIfBlank(configJson.getStr("result_type"), "single"))
-                .set("sequence", 1)
-                .set("end_window_size", configJson.getInt("end_window_size", 200))
-                .set("corpus", corpus);
-        request.set("request", requestBody);
-
-        JSONObject audio = new JSONObject()
-                .set("format", StringUtils.defaultIfBlank(configJson.getStr("format"), "pcm"))
-                .set("codec", StringUtils.defaultIfBlank(configJson.getStr("codec"), "pcm"))
-                .set("rate", configJson.getInt("sample_rate", 16000))
-                .set("bits", configJson.getInt("bits", 16))
-                .set("channel", configJson.getInt("channel", 1))
-                .set("sample_rate", configJson.getInt("sample_rate", 16000));
-        if (enableMultilingual && StringUtils.isNotBlank(configJson.getStr("language"))) {
-            audio.set("language", configJson.getStr("language"));
-        }
-        request.set("audio", audio);
-
-        byte[] payload = gzipCompress(request.toString().getBytes(StandardCharsets.UTF_8));
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        output.write(generateDoubaoHeader(0x01, 0x01, 0x00, 0x01, 0x01));
-        output.write(ByteBuffer.allocate(4).putInt(payload.length).array());
-        output.write(payload);
-        return output.toByteArray();
-    }
-
-    private byte[] buildDoubaoStreamAsrAudioRequest(byte[] pcmBytes, boolean last) throws IOException {
-        byte[] payload = gzipCompress(pcmBytes == null ? new byte[0] : pcmBytes);
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        output.write(generateDoubaoHeader(0x01, 0x02, last ? 0x02 : 0x00, 0x01, 0x01));
-        output.write(ByteBuffer.allocate(4).putInt(payload.length).array());
-        output.write(payload);
-        return output.toByteArray();
-    }
-
-    private static byte[] generateDoubaoHeader(int version, int messageType, int messageTypeSpecificFlags,
-            int serialMethod, int compressionType) {
-        return new byte[] {
-                (byte) ((version << 4) | 0x01),
-                (byte) ((messageType << 4) | messageTypeSpecificFlags),
-                (byte) ((serialMethod << 4) | compressionType),
-                0x00
-        };
-    }
-
-    private static byte[] gzipCompress(byte[] bytes) throws IOException {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        try (GZIPOutputStream gzipOutputStream = new GZIPOutputStream(output)) {
-            gzipOutputStream.write(bytes);
-        }
-        return output.toByteArray();
-    }
-
-    private static JSONObject parseDoubaoStreamAsrResponse(byte[] response) {
-        if (response.length < 4) {
-            throw new IllegalArgumentException("响应数据长度不足：" + response.length);
-        }
-
-        int messageType = (response[1] & 0xFF) >> 4;
-        if (messageType == 0x0F) {
-            int code = ByteBuffer.wrap(response, 4, 4).getInt();
-            String errorText = response.length > 12
-                    ? new String(response, 12, response.length - 12, StandardCharsets.UTF_8)
-                    : "";
-            JSONObject parsed = new JSONObject();
-            parsed.set("code", code);
-            parsed.set("payload_msg", JSONUtil.isTypeJSON(errorText) ? JSONUtil.parseObj(errorText)
-                    : new JSONObject().set("error", errorText));
-            return parsed;
-        }
-
-        String payloadText;
-        if (response.length >= 12) {
-            int length = ByteBuffer.wrap(response, 8, 4).getInt();
-            if (length > 0 && length <= response.length - 12) {
-                payloadText = new String(response, 12, length, StandardCharsets.UTF_8);
-            } else {
-                payloadText = new String(response, 8, response.length - 8, StandardCharsets.UTF_8);
-            }
-        } else {
-            payloadText = new String(response, 4, response.length - 4, StandardCharsets.UTF_8);
-        }
-
-        JSONObject parsed = new JSONObject();
-        parsed.set("payload_msg", JSONUtil.parseObj(payloadText));
-        return parsed;
-    }
-
-    private static String extractDoubaoErrorMessage(JSONObject parsedResponse) {
-        JSONObject payload = parsedResponse.getJSONObject("payload_msg");
-        if (payload == null) {
-            return parsedResponse.toString();
-        }
-        return StringUtils.defaultIfBlank(payload.getStr("error"), payload.toString());
-    }
-
-    private static String extractDoubaoRecognizedText(JSONObject parsedResponse) {
-        JSONObject payload = parsedResponse.getJSONObject("payload_msg");
-        if (payload == null) {
-            return "";
-        }
-        JSONObject result = payload.getJSONObject("result");
-        if (result == null) {
-            return "";
-        }
-        JSONArray utterances = result.getJSONArray("utterances");
-        if (utterances != null && !utterances.isEmpty()) {
-            String text = utterances.stream()
-                    .map(JSONUtil::parseObj)
-                    .filter(item -> Boolean.TRUE.equals(item.getBool("definite")))
-                    .map(item -> StringUtils.defaultString(item.getStr("text")))
-                    .filter(StringUtils::isNotBlank)
-                    .collect(Collectors.joining());
-            if (StringUtils.isNotBlank(text)) {
-                return text;
-            }
-        }
-        return StringUtils.defaultString(result.getStr("text"));
     }
 
     private static boolean isPlaceholderSecret(String value) {

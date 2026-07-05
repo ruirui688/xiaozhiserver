@@ -74,6 +74,7 @@ LOG_DIR="${LOG_DIR:-$(mktemp -d -t xiaozhi-docker-build.XXXXXX)}"
 SERVER_BASE_CACHE_VERSION="${SERVER_BASE_CACHE_VERSION:-v2}"
 SERVER_BASE_SEED_LATEST="${SERVER_BASE_SEED_LATEST:-false}"
 WEB_CACHE_VERSION="${WEB_CACHE_VERSION:-v1}"
+WEB_FRONTEND_CACHE_VERSION="${WEB_FRONTEND_CACHE_VERSION:-v1}"
 RECREATE_BUILDER=false
 
 if [[ -z "$FUNASR_MODEL_CONTEXT" ]]; then
@@ -481,6 +482,22 @@ push_local_image() {
   fi
 }
 
+image_exists_remote() {
+  local image="$1"
+  docker manifest inspect "$image" >/dev/null 2>&1
+}
+
+remote_retag_image() {
+  [[ "$PUSH" == "true" ]] || return 1
+  local source="$1"
+  local target="$2"
+  local label="Retag $(short_image_name "$target")"
+
+  image_exists_remote "$source" || return 1
+  docker buildx version >/dev/null 2>&1 || return 1
+  run_docker_step "$label" docker buildx imagetools create --tag "$target" "$source"
+}
+
 hash_common_base_inputs() {
   {
     printf 'SERVER_BASE_CACHE_VERSION=%s\n' "$SERVER_BASE_CACHE_VERSION"
@@ -515,15 +532,26 @@ hash_funasr_base_inputs() {
 hash_web_inputs() {
   {
     printf 'WEB_CACHE_VERSION=%s\n' "$WEB_CACHE_VERSION"
-    printf 'NODE_BASE_IMAGE=%s\n' "$NODE_BASE_IMAGE"
     printf 'MAVEN_BASE_IMAGE=%s\n' "$MAVEN_BASE_IMAGE"
     printf 'WEB_RUNTIME_BASE_IMAGE=%s\n' "$WEB_RUNTIME_BASE_IMAGE"
+    printf 'WEB_FRONTEND_CACHE_TAG=%s\n' "$WEB_FRONTEND_CACHE_TAG"
     git -C "$ROOT_DIR" ls-files -z \
-      Dockerfile-web \
+      Dockerfile-web-runtime \
       docs/docker/nginx.conf \
       docs/docker/start.sh \
       main/manager-api/pom.xml \
       main/manager-api/src \
+      | sort -z \
+      | (cd "$ROOT_DIR" && xargs -0 -r sha256sum)
+  } | sha256sum | cut -c1-12
+}
+
+hash_web_frontend_inputs() {
+  {
+    printf 'WEB_FRONTEND_CACHE_VERSION=%s\n' "$WEB_FRONTEND_CACHE_VERSION"
+    printf 'NODE_BASE_IMAGE=%s\n' "$NODE_BASE_IMAGE"
+    git -C "$ROOT_DIR" ls-files -z \
+      Dockerfile-web \
       main/manager-web \
       | sort -z \
       | (cd "$ROOT_DIR" && xargs -0 -r sha256sum)
@@ -549,6 +577,8 @@ else
 fi
 SERVER_BASE_CACHE_IMAGE="$SERVER_BASE_IMAGE_REPOSITORY:$SERVER_BASE_CACHE_TAG"
 FUNASR_MODEL_DIGEST="${FUNASR_MODEL_DIGEST:-$(funasr_model_cache_key)}"
+WEB_FRONTEND_CACHE_TAG="${WEB_FRONTEND_CACHE_TAG:-web-frontend-$(hash_web_frontend_inputs)}"
+WEB_FRONTEND_CACHE_IMAGE="$WEB_IMAGE_REPOSITORY:$WEB_FRONTEND_CACHE_TAG"
 WEB_CACHE_TAG="${WEB_CACHE_TAG:-web-$(hash_web_inputs)}"
 WEB_CACHE_IMAGE="$WEB_IMAGE_REPOSITORY:$WEB_CACHE_TAG"
 
@@ -585,12 +615,14 @@ if [[ "$PRINT_BUILD_CONFIG" != "false" ]]; then
   echo "Server base cache version: $SERVER_BASE_CACHE_VERSION"
   echo "Server base seed latest: $SERVER_BASE_SEED_LATEST"
   echo "Web/API cache version: $WEB_CACHE_VERSION"
+  echo "Web frontend cache version: $WEB_FRONTEND_CACHE_VERSION"
   echo "Install FunASR model: $INSTALL_FUNASR_MODEL"
   echo "FunASR model context: $FUNASR_MODEL_CONTEXT"
   echo "FunASR model URL: $FUNASR_MODEL_URL"
   echo "Common base cache image: $SERVER_COMMON_BASE_CACHE_IMAGE"
   echo "Lite base cache image: $SERVER_LITE_BASE_CACHE_IMAGE"
   echo "Selected base cache image: $SERVER_BASE_CACHE_IMAGE"
+  echo "Web frontend cache image: $WEB_FRONTEND_CACHE_IMAGE"
   echo "Web/API cache image: $WEB_CACHE_IMAGE"
   echo "Parallel image builds: $PARALLEL_IMAGE_BUILDS"
   if [[ -n "$BUILDKIT_REGISTRY_MIRROR" ]]; then
@@ -724,27 +756,55 @@ build_server_pipeline() {
   push_image "$SERVER_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"
 }
 
+ensure_web_frontend_cache() {
+  if [[ "$BUILD_BASE" == "auto" ]] && image_available_locally_or_remote "$WEB_FRONTEND_CACHE_IMAGE"; then
+    print_base_image_status "Web frontend cached" "$WEB_FRONTEND_CACHE_IMAGE"
+    return
+  fi
+
+  build_image "Build manager frontend cache" Dockerfile-web \
+    --target web-builder \
+    --build-arg "NODE_BASE_IMAGE=$NODE_BASE_IMAGE" \
+    --tag "$WEB_FRONTEND_CACHE_IMAGE"
+  push_image "$WEB_FRONTEND_CACHE_IMAGE"
+}
+
 build_web_pipeline() {
   if [[ "$BUILD_BASE" == "auto" ]] && image_available_locally_or_remote "$WEB_CACHE_IMAGE"; then
     print_base_image_status "Web/API image cached" "$WEB_CACHE_IMAGE"
+
+    if [[ "$PUSH" == "true" ]] && ! image_exists_remote "$WEB_CACHE_IMAGE"; then
+      push_local_image "$WEB_CACHE_IMAGE"
+    fi
+
+    if remote_retag_image "$WEB_CACHE_IMAGE" "$WEB_IMAGE_REPOSITORY:$CHANNEL_TAG"; then
+      remote_retag_image "$WEB_CACHE_IMAGE" "$WEB_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"
+      return
+    fi
+
     docker tag "$WEB_CACHE_IMAGE" "$WEB_IMAGE_REPOSITORY:$CHANNEL_TAG"
     docker tag "$WEB_CACHE_IMAGE" "$WEB_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"
-    push_local_image "$WEB_CACHE_IMAGE"
     push_local_image "$WEB_IMAGE_REPOSITORY:$CHANNEL_TAG"
     push_local_image "$WEB_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"
     return
   fi
 
-  build_image "Build manager web/api image" Dockerfile-web \
-    --build-arg "NODE_BASE_IMAGE=$NODE_BASE_IMAGE" \
+  ensure_web_frontend_cache
+
+  build_image "Build manager web/api image" Dockerfile-web-runtime \
     --build-arg "MAVEN_BASE_IMAGE=$MAVEN_BASE_IMAGE" \
     --build-arg "WEB_RUNTIME_BASE_IMAGE=$WEB_RUNTIME_BASE_IMAGE" \
+    --build-arg "WEB_DIST_IMAGE=$WEB_FRONTEND_CACHE_IMAGE" \
     --tag "$WEB_IMAGE_REPOSITORY:$CHANNEL_TAG" \
     --tag "$WEB_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG" \
     --tag "$WEB_CACHE_IMAGE"
-  push_image "$WEB_IMAGE_REPOSITORY:$CHANNEL_TAG"
-  push_image "$WEB_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"
   push_image "$WEB_CACHE_IMAGE"
+  if ! remote_retag_image "$WEB_CACHE_IMAGE" "$WEB_IMAGE_REPOSITORY:$CHANNEL_TAG"; then
+    push_image "$WEB_IMAGE_REPOSITORY:$CHANNEL_TAG"
+  fi
+  if ! remote_retag_image "$WEB_CACHE_IMAGE" "$WEB_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"; then
+    push_image "$WEB_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"
+  fi
 }
 
 wait_for_pipeline() {

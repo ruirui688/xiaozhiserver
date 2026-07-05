@@ -92,9 +92,8 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
     private static final List<ModelCatalogDTO> CATALOG = buildCatalog();
     private static final Set<String> STATIC_FIELD_SCHEMA_TEMPLATE_CODES = Set.of(
             "ASR_FUN_SERVER",
-            "ASR_DOUBAO_LEGACY_HTTP",
+            "ASR_DOUBAO_RECORDING_ASR_2",
             "ASR_XUNFEI_STREAM",
-            "ASR_DOUBAO_BIGASR_STREAM",
             "ASR_DOUBAO_SEED_ASR_2_STREAM",
             "ASR_TENCENT_SENTENCE",
             "ASR_ALIYUN_NLS_HTTP",
@@ -190,11 +189,11 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             return exact;
         }
 
+        if ("ASR".equalsIgnoreCase(modelType) && "doubao_recording".equalsIgnoreCase(providerCode)) {
+            return find("ASR_DOUBAO_RECORDING_ASR_2");
+        }
         if ("ASR".equalsIgnoreCase(modelType) && "doubao_stream".equalsIgnoreCase(providerCode)) {
-            if (haystack.contains("seedasr")) {
-                return find("ASR_DOUBAO_SEED_ASR_2_STREAM");
-            }
-            return find("ASR_DOUBAO_BIGASR_STREAM");
+            return find("ASR_DOUBAO_SEED_ASR_2_STREAM");
         }
         if ("TTS".equalsIgnoreCase(modelType)) {
             return find("TTS_DOUBAO_SEED_TTS_2_STREAM");
@@ -746,27 +745,21 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 List.of("api_key"), List.of("host", "port"), List.of("host", "port", "type", "is_ssl"),
                 List.of("适合把 FunASR 单独部署成服务后接入。"), List.of(), List.of("FunASRServer"),
                 "https://github.com/modelscope/FunASR"));
-        items.add(item("ASR_DOUBAO_LEGACY_HTTP", "ASR", "doubao", "豆包旧版 ASR",
-                "火山引擎", "豆包语音识别旧版", "asr", "语音识别", "http", "HTTP 非流式",
-                "cloud", "云平台", "HTTP", "集群", "cluster",
-                List.of("appid", "access_token"), List.of("appid", "access_token", "cluster"),
-                List.of("appid", "access_token", "cluster", "boosting_table_name", "correct_table_name"),
-                List.of("这是旧版按次识别接口，不是 Seed ASR 2.0。"), List.of(), List.of("DoubaoASR"),
-                "https://www.volcengine.com/docs/6561"));
-        items.add(item("ASR_DOUBAO_BIGASR_STREAM", "ASR", "doubao_stream", "豆包大模型 ASR",
-                "火山引擎", "豆包大模型流式语音识别", "asr", "语音识别", "websocket", "WebSocket 流式",
+        items.add(item("ASR_DOUBAO_RECORDING_ASR_2", "ASR", "doubao_recording", "豆包录音识别模型2.0",
+                "火山引擎", "豆包录音识别模型2.0", "asr", "语音识别", "http", "HTTP 录音文件识别",
+                "cloud", "云平台", "HTTP", "Resource ID", "resource_id",
+                List.of("api_key"), List.of("api_key"),
+                List.of("context_text"),
+                List.of("只需填写火山控制台 API Key；Resource ID 固定为 volc.seedasr.auc。"),
+                List.of("适合录音文件或非实时识别；设备实时对话建议使用流式 2.0。"),
+                List.of("DoubaoRecordingASR2", "volc.seedasr.auc"),
+                "https://www.volcengine.com/docs/6561/1354868"));
+        items.add(item("ASR_DOUBAO_SEED_ASR_2_STREAM", "ASR", "doubao_stream", "豆包流式语音识别模型2.0",
+                "火山引擎", "豆包流式语音识别模型2.0", "asr", "语音识别", "websocket", "WebSocket 流式",
                 "cloud", "云平台", "WebSocket", "Resource ID", "resource_id",
-                List.of("api_key"), List.of("api_key", "resource_id"),
-                List.of("auth_method", "appid", "access_token", "resource_id", "end_window_size", "enable_multilingual", "language"),
-                List.of("新版控制台使用 API Key 鉴权；旧 App ID + Access Token 仅作为兼容字段保留。旧大模型 ASR 资源 ID 常见为 volc.bigasr.sauc.duration。"),
-                List.of(), List.of("DoubaoStreamASR", "volc.bigasr"),
-                "https://www.volcengine.com/docs/6561/1354869"));
-        items.add(item("ASR_DOUBAO_SEED_ASR_2_STREAM", "ASR", "doubao_stream", "Seed ASR 2.0",
-                "火山引擎", "豆包语音识别 Seed ASR 2.0", "asr", "语音识别", "websocket", "WebSocket 流式",
-                "cloud", "云平台", "WebSocket", "Resource ID", "resource_id",
-                List.of("api_key"), List.of("api_key", "resource_id"),
-                List.of("auth_method", "appid", "access_token", "resource_id", "end_window_size", "enable_multilingual", "language"),
-                List.of("新版控制台使用 API Key 鉴权；旧 App ID + Access Token 仅作为兼容字段保留。Seed ASR 2.0 资源 ID 常见为 volc.seedasr.sauc.duration。"),
+                List.of("api_key"), List.of("api_key"),
+                List.of("context_text"),
+                List.of("只需填写火山控制台 API Key；Resource ID 固定为 volc.seedasr.sauc.duration。"),
                 List.of(), List.of("DoubaoStreamASRV2", "seedasr", "volc.seedasr"),
                 "https://www.volcengine.com/docs/6561/1354869"));
         items.add(item("ASR_TENCENT_SENTENCE", "ASR", "tencent", "腾讯云 ASR",
@@ -1230,7 +1223,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 setFieldDefault(dto, "host", "127.0.0.1");
                 setFieldDefault(dto, "port", 10095);
             }
-            case "ASR_DOUBAO_BIGASR_STREAM" -> setFieldDefault(dto, "resource_id", "volc.bigasr.sauc.duration");
+            case "ASR_DOUBAO_RECORDING_ASR_2" -> setFieldDefault(dto, "resource_id", "volc.seedasr.auc");
             case "ASR_DOUBAO_SEED_ASR_2_STREAM" -> setFieldDefault(dto, "resource_id", "volc.seedasr.sauc.duration");
             case "ASR_TENCENT_SENTENCE" -> setFieldDefault(dto, "output_dir", "tmp/");
             case "ASR_ALIYUN_NLS_HTTP" -> {
@@ -1335,6 +1328,9 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         field.setLabel(labelFor(key));
         field.setType(typeFor(key));
         field.setInputType(inputTypeForTypeStatic(field.getType(), secret, optionsFor(key)));
+        if ("context_text".equals(key)) {
+            field.setInputType("textarea");
+        }
         field.setGroup(groupFor(key, credential));
         field.setRuntimeKey(key);
         field.setAdvanced("advanced".equals(groupFor(key, credential)));
@@ -1399,6 +1395,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             case "format", "response_format" -> "音频格式";
             case "region" -> "地域";
             case "language" -> "语言";
+            case "context_text" -> "上下文文本";
             case "dev_pid" -> "语言模型";
             default -> key;
         };
@@ -1461,6 +1458,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             case "format", "response_format" -> "厂商返回的音频格式，需和设备播放链路支持的格式匹配。";
             case "region" -> "云厂商地域，通常影响签名和就近访问。";
             case "language" -> "识别语言编码；不确定时保持默认中文或自动检测。";
+            case "context_text" -> "可选上下文文本，用于提升专有名词和业务场景识别准确率；为空时不发送。";
             case "dev_pid" -> "百度短语音识别语言模型编号，1537 表示普通话输入法模型。";
             case "enable_multilingual" -> "多语种识别开关，普通中文识别保持关闭即可。";
             case "end_window_size", "max_sentence_silence" -> "流式识别断句静音窗口，数值越大越不容易提前断句。";

@@ -28,27 +28,18 @@ class ASRProvider(ASRProviderBase):
         self.is_processing = False  # 添加处理状态标志
         self._is_stopping = False  # 添加停止标志，防止竞态条件
 
-        # 配置参数
-        self.appid = str(config.get("appid"))
-        self.access_token = config.get("access_token")
         self.api_key = config.get("api_key")
-        # 资源ID，用于区分不同的ASR模型（默认1.0模型小时版，v2版本使用seed-asr）
-        self.resource_id = config.get("resource_id", "volc.bigasr.sauc.duration")
+        if not self.api_key:
+            raise ValueError("豆包流式语音识别模型2.0需要配置 api_key")
+        self.resource_id = config.get("resource_id", "volc.seedasr.sauc.duration")
 
-        self.boosting_table_name = config.get("boosting_table_name", "")
-        self.correct_table_name = config.get("correct_table_name", "")
+        self.context_text = config.get("context_text", "")
         self.output_dir = config.get("output_dir", "tmp/")
         self.delete_audio_file = delete_audio_file
 
-        # 火山引擎ASR配置
-        enable_multilingual = config.get("enable_multilingual", False)
-        self.enable_multilingual = (
-            False if str(enable_multilingual).lower() == "false" else True
+        self.ws_url = config.get(
+            "ws_url", "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
         )
-        if self.enable_multilingual:
-            self.ws_url = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream"
-        else:
-            self.ws_url = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
         self.uid = config.get("uid", "streaming_asr_service")
         self.workflow = config.get(
             "workflow", "audio_in,resample,partition,vad,fe,decode,itn,nlu_punctuate"
@@ -57,14 +48,8 @@ class ASRProvider(ASRProviderBase):
         self.format = config.get("format", "pcm")
         self.codec = config.get("codec", "pcm")
         self.rate = config.get("sample_rate", 16000)
-        # language参数仅在多语种模式(bigmodel_nostream)下有效
-        self.language = config.get("language") if self.enable_multilingual else None
         self.bits = config.get("bits", 16)
         self.channel = config.get("channel", 1)
-        self.auth_method = config.get("auth_method", "api_key" if self.api_key else "token")
-        self.secret = config.get("secret", "access_secret")
-        end_window_size = config.get("end_window_size")
-        self.end_window_size = int(end_window_size) if end_window_size else 200
 
     async def open_audio_channels(self, conn):
         await super().open_audio_channels(conn)
@@ -183,8 +168,7 @@ class ASRProvider(ASRProviderBase):
                             utterances = payload["result"].get("utterances", [])
                             # 检查duration和空文本的情况
                             if (
-                                not self.enable_multilingual  # 注意：多语种模式不返回中间结果，需要等待最终结果
-                                and payload.get("audio_info", {}).get("duration", 0)
+                                payload.get("audio_info", {}).get("duration", 0)
                                 > 2000
                                 and not utterances
                                 and not payload["result"].get("text")
@@ -198,10 +182,6 @@ class ASRProvider(ASRProviderBase):
 
                             # 专门处理没有文本的识别结果（手动模式下可能已经识别完成但是没松按键）
                             elif not payload["result"].get("text") and not utterances:
-                                # 多语种模式会持续返回空文本，直到最后返回完整结果，所以需要排除
-                                if self.enable_multilingual:
-                                    continue
-
                                 if conn.client_listen_mode == "manual" and conn.client_voice_stop and len(audio_data) > 15:
                                     logger.bind(tag=TAG).debug("消息结束收到停止信号，触发处理")
                                     await self.handle_voice_stop(conn, audio_data)
@@ -289,10 +269,6 @@ class ASRProvider(ASRProviderBase):
 
     def construct_request(self, reqid):
         req = {
-            "app": {
-                "appid": self.appid,
-                "token": self.access_token,
-            },
             "user": {"uid": self.uid},
             "request": {
                 "reqid": reqid,
@@ -300,11 +276,6 @@ class ASRProvider(ASRProviderBase):
                 "show_utterances": True,
                 "result_type": self.result_type,
                 "sequence": 1,
-                "end_window_size": self.end_window_size,
-                "corpus": {
-                    "boosting_table_name": self.boosting_table_name,
-                    "correct_table_name": self.correct_table_name,
-                }
             },
             "audio": {
                 "format": self.format,
@@ -316,9 +287,8 @@ class ASRProvider(ASRProviderBase):
             },
         }
 
-        # language参数仅在多语种模式下添加
-        if self.enable_multilingual and self.language:
-            req["audio"]["language"] = self.language
+        if self.context_text:
+            req["request"]["context"] = self.context_text
 
         logger.bind(tag=TAG).debug(
             f"构造请求参数: {json.dumps(req, ensure_ascii=False)}"
@@ -326,15 +296,8 @@ class ASRProvider(ASRProviderBase):
         return req
 
     def token_auth(self):
-        if self.auth_method == "api_key" or self.api_key:
-            return {
-                "X-Api-Key": self.api_key or self.access_token,
-                "X-Api-Resource-Id": self.resource_id,
-                "X-Api-Connect-Id": str(uuid.uuid4()),
-            }
         return {
-            "X-Api-App-Key": self.appid,
-            "X-Api-Access-Key": self.access_token,
+            "X-Api-Key": self.api_key,
             "X-Api-Resource-Id": self.resource_id,
             "X-Api-Connect-Id": str(uuid.uuid4()),
         }

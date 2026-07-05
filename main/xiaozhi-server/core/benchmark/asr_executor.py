@@ -169,12 +169,27 @@ async def _send_doubao_pcm_frames(asr, ws, pcm, frame_size=1920, delay=0.06):
 
 
 async def _receive_doubao_results(asr, ws, started):
+    best_text = ""
+    first_text_ms = None
     for _ in range(30):
-        result = asr.parse_response(await asyncio.wait_for(ws.recv(), timeout=10))
+        timeout = 10 if not best_text else 1.5
+        try:
+            result = asr.parse_response(await asyncio.wait_for(ws.recv(), timeout=timeout))
+        except asyncio.TimeoutError:
+            if best_text:
+                return best_text, first_text_ms
+            raise
+        except websockets.ConnectionClosed:
+            if best_text:
+                return best_text, first_text_ms
+            raise
         text = _extract_doubao_text(result)
         if text:
-            return text, int((time.perf_counter() - started) * 1000)
-    return "", None
+            if first_text_ms is None:
+                first_text_ms = int((time.perf_counter() - started) * 1000)
+            if len(text) >= len(best_text):
+                best_text = text
+    return best_text, first_text_ms
 
 
 def _extract_doubao_text(result):
