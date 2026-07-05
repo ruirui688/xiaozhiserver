@@ -22,23 +22,24 @@ RUN apk update && \
     && rm -rf /var/cache/apk/* \
     && mkdir -p /run/nginx /var/log/nginx /var/lib/nginx/tmp/client_body /var/lib/nginx/tmp/proxy /etc/nginx/conf.d
 
-COPY --from=web-dist /app/public/generator/static/fonts/*.ttf /usr/share/fonts/
+RUN addgroup -S xiaozhi && adduser -S xiaozhi -G xiaozhi && \
+    chown -R xiaozhi:xiaozhi /var/log/nginx /var/lib/nginx /run/nginx
+
+COPY --chown=xiaozhi:xiaozhi --from=web-dist /app/public/generator/static/fonts/*.ttf /usr/share/fonts/
 RUN fc-cache -f -v
 
 COPY docs/docker/nginx.conf /etc/nginx/nginx.conf
-COPY --from=web-dist /app/dist /usr/share/nginx/html
-COPY --from=api-builder /app/target/xiaozhi-esp32-api.jar /app/xiaozhi-esp32-api.jar
+COPY --chown=xiaozhi:xiaozhi --from=web-dist /app/dist /usr/share/nginx/html
+COPY --chown=xiaozhi:xiaozhi --from=api-builder /app/target/xiaozhi-esp32-api.jar /app/xiaozhi-esp32-api.jar
 
 EXPOSE 8002
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD wget -q -O /dev/null http://localhost:8002/ || exit 1
 
-COPY docs/docker/start.sh /start.sh
+COPY --chown=xiaozhi:xiaozhi docs/docker/start.sh /start.sh
 RUN chmod +x /start.sh
 
-RUN addgroup -S xiaozhi && adduser -S xiaozhi -G xiaozhi && \
-    chown -R xiaozhi:xiaozhi /app /usr/share/nginx/html /var/log/nginx /var/lib/nginx /run/nginx
 USER xiaozhi
 
 CMD ["/start.sh"]

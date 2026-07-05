@@ -25,6 +25,8 @@ main/xiaozhi-server/.pytest_cache/
 main/manager-web/.env*
 main/manager-web/node_modules/
 main/manager-web/dist/
+main/manager-web/.webpack_cache/
+main/manager-web/.cache/
 main/manager-mobile/.env*
 main/manager-mobile/env/.env*
 main/manager-mobile/node_modules/
