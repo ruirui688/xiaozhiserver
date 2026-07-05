@@ -19,30 +19,25 @@ def env(name, default=None):
 
 
 def build_config(args):
-    resource_id = args.resource_id or env("HUOSHAN_TTS_RESOURCE_ID", "seed-tts-2.0")
-    return {
+    config = {
         "type": "huoshan_double_stream",
-        "ws_url": args.ws_url or env("HUOSHAN_TTS_WS_URL", "wss://openspeech.bytedance.com/api/v3/tts/bidirection"),
         "api_key": args.api_key or env("VOLC_TTS_API_KEY") or env("HUOSHAN_TTS_API_KEY"),
-        "resource_id": resource_id,
         "speaker": args.speaker or env("HUOSHAN_TTS_SPEAKER", "zh_female_sophie_uranus_bigtts"),
-        "enable_ws_reuse": False,
         "sample_rate": args.sample_rate,
         "tts_timeout": args.timeout,
-        "audio_params": {
-            "speech_rate": 0,
-            "loudness_rate": 0,
-        },
-        "additions": {
-            "post_process": {
-                "pitch": 0,
-            },
-        },
+        "speech_rate": args.speech_rate,
+        "loudness_rate": args.loudness_rate,
+        "pitch": args.pitch,
     }
+    if args.emotion:
+        config["emotion"] = args.emotion
+    if args.emotion_scale is not None:
+        config["emotion_scale"] = args.emotion_scale
+    return config
 
 
 def validate_config(config):
-    missing = [key for key in ("api_key", "resource_id", "speaker") if not config.get(key)]
+    missing = [key for key in ("api_key", "speaker") if not config.get(key)]
     if missing:
         raise SystemExit("缺少环境变量或参数: " + ", ".join(missing))
 
@@ -50,9 +45,12 @@ def validate_config(config):
 async def main():
     parser = argparse.ArgumentParser(description="Test Huoshan/Doubao bidirectional streaming TTS.")
     parser.add_argument("--api-key")
-    parser.add_argument("--resource-id")
     parser.add_argument("--speaker")
-    parser.add_argument("--ws-url")
+    parser.add_argument("--speech-rate", type=int, default=0)
+    parser.add_argument("--loudness-rate", type=int, default=0)
+    parser.add_argument("--pitch", type=int, default=0)
+    parser.add_argument("--emotion")
+    parser.add_argument("--emotion-scale", type=float)
     parser.add_argument("--iterations", type=int, default=1)
     parser.add_argument("--sample-rate", type=int, default=24000)
     parser.add_argument("--timeout", type=int, default=20)

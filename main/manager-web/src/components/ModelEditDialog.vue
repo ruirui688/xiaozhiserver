@@ -88,7 +88,7 @@
           </el-form-item>
         </div>
 
-        <el-collapse class="advanced-collapse">
+        <el-collapse v-if="shouldShowModelMetadataAdvanced" class="advanced-collapse">
           <el-collapse-item :title="$t('modelConfigDialog.advancedSettings')" name="advanced">
             <div style="display: flex; gap: 20px; margin-bottom: 0">
               <el-form-item v-if="shouldShowEndpointField" prop="endpointUrl" style="flex: 1">
@@ -232,6 +232,12 @@ export default {
     modelNameOptions() {
       const field = this.getModelNameTemplateField(this.currentTemplate);
       return field && Array.isArray(field.options) ? field.options : [];
+    },
+    isManagedDoubaoSeedTtsTemplate() {
+      return this.form.templateCode === "TTS_DOUBAO_SEED_TTS_2_STREAM";
+    },
+    shouldShowModelMetadataAdvanced() {
+      return !this.isManagedDoubaoSeedTtsTemplate;
     },
     shouldShowEndpointField() {
       return !!this.getEndpointField(this.currentTemplate) || !!this.form.endpointUrl;

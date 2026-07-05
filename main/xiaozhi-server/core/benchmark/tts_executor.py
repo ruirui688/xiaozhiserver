@@ -84,9 +84,9 @@ async def run_tts_samples(provider_type, config, iterations):
                     "text": text,
                     "sample_rate": getattr(tts.conn, "sample_rate", None),
                     "audio_format": getattr(tts.conn, "audio_format", None),
-                    "resource_id": config.get("resource_id"),
-                    "speaker": config.get("speaker") or config.get("voice") or config.get("voice_id"),
-                    "audio_params": config.get("audio_params"),
+                    "resource_id": getattr(tts, "resource_id", None) or config.get("resource_id"),
+                    "speaker": getattr(tts, "voice", None) or config.get("speaker") or config.get("voice") or config.get("voice_id"),
+                    "audio_params": getattr(tts, "audio_params", None) or config.get("audio_params"),
                 },
                 "output_detail": {
                     "audio_bytes": audio_size,

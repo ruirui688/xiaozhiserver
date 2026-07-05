@@ -745,20 +745,11 @@ TTS:
   DoubaoSeedTTS2Stream:
     type: huoshan_double_stream
     # 按文档 https://www.volcengine.com/docs/6561/2532486 接入，购买并选择可用音色
-    ws_url: wss://openspeech.bytedance.com/api/v3/tts/bidirection
     # API Key 会作为 WebSocket 请求头 X-Api-Key 发送
     api_key: 你的火山引擎语音合成服务APIKey
-    resource_id: seed-tts-2.0
     # 音色 Voice_type。必须使用服务 10035 下已开通/可用的音色。
     speaker: zh_female_sophie_uranus_bigtts
-    format: pcm
+    # 可选声音调节：语速/音量范围 -50~100，音高范围 -12~12。
     speech_rate: 0
     loudness_rate: 0
     pitch: 0
-    enable_ws_reuse: True
-    audio_params:
-      speech_rate: 0
-      loudness_rate: 0
-    additions:
-      post_process:
-        pitch: 0

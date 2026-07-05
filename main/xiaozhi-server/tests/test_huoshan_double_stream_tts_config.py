@@ -14,9 +14,7 @@ from core.providers.tts.huoshan_double_stream import TTSProvider
 def _base_config(**overrides):
     config = {
         "type": "huoshan_double_stream",
-        "ws_url": "wss://openspeech.bytedance.com/api/v3/tts/bidirection",
         "api_key": "test-api-key",
-        "resource_id": "seed-tts-2.0",
         "speaker": "zh_female_sophie_uranus_bigtts",
         "output_dir": "tmp/",
     }
@@ -24,14 +22,13 @@ def _base_config(**overrides):
     return config
 
 
-def test_doubao_tts_accepts_only_seed_tts_2_resource():
-    TTSProvider(_base_config(resource_id="seed-tts-2.0"), True)
+def test_doubao_tts_uses_seed_tts_2_fixed_protocol_defaults():
+    provider = TTSProvider(_base_config(resource_id="legacy-resource", ws_url="wss://example.invalid"), True)
 
-    with pytest.raises(ValueError, match="仅支持火山 Seed TTS 2.0 双向流式服务"):
-        TTSProvider(_base_config(resource_id="legacy-resource"), True)
-
-    with pytest.raises(ValueError, match="仅支持火山 Seed TTS 2.0 双向流式服务"):
-        TTSProvider(_base_config(resource_id="legacy-http-tts"), True)
+    assert provider.resource_id == "seed-tts-2.0"
+    assert provider.ws_url == "wss://openspeech.bytedance.com/api/v3/tts/bidirection"
+    assert provider.audio_format == "pcm"
+    assert provider.enable_ws_reuse is True
 
 
 def test_doubao_tts_merges_flat_audio_fields():
@@ -42,7 +39,6 @@ def test_doubao_tts_merges_flat_audio_fields():
             pitch=2,
             emotion="happy",
             emotion_scale=4,
-            format="wav",
         ),
         True,
     )
@@ -52,7 +48,7 @@ def test_doubao_tts_merges_flat_audio_fields():
     assert provider.audio_params["emotion"] == "happy"
     assert provider.audio_params["emotion_scale"] == 4
     assert provider.additions["post_process"]["pitch"] == 2
-    assert provider.audio_file_type == "wav"
+    assert provider.audio_file_type == "pcm"
 
 
 def test_doubao_tts_coerces_string_audio_numbers():

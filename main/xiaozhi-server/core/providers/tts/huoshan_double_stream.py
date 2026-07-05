@@ -155,24 +155,15 @@ class TTSProvider(TTSProviderBase):
         self._monitor_task = None  # 监听任务引用
         self._session_error = None  # 会话失败时的错误信息
         self.api_key = config.get("api_key")
-        self.resource_id = str(
-            config.get("resource_id") or DOUBAO_SEED_TTS_2_RESOURCE_ID
-        ).strip()
-        if self.resource_id not in SUPPORTED_DOUBAO_TTS_RESOURCES:
-            supported = "、".join(
-                f"{name}: {resource_id}"
-                for resource_id, name in SUPPORTED_DOUBAO_TTS_RESOURCES.items()
-            )
-            raise ValueError(
-                "豆包 TTS 仅支持火山 Seed TTS 2.0 双向流式服务："
-                f"{supported}；当前 resource_id={self.resource_id or '<empty>'}"
-            )
+        self.resource_id = DOUBAO_SEED_TTS_2_RESOURCE_ID
         self.report_on_last = True
         self.activate_session = False
         if config.get("private_voice"):
             self.voice = config.get("private_voice")
         else:
             self.voice = config.get("speaker")
+        if not self.voice:
+            self.voice = "zh_female_sophie_uranus_bigtts"
 
         # 默认 audio_params 配置
         default_audio_params = {
@@ -202,13 +193,7 @@ class TTSProvider(TTSProviderBase):
             self.additions.get("post_process"), "additions.post_process"
         )
         self._normalize_audio_params()
-        self.audio_format = str(
-            config.get("format")
-            or config.get("audio_format")
-            or config.get("response_format")
-            or self.audio_params.get("format")
-            or "pcm"
-        ).strip()
+        self.audio_format = "pcm"
         self.audio_file_type = self.audio_format
         self._merge_flat_audio_params(config)
         self._normalize_audio_params()
@@ -229,14 +214,8 @@ class TTSProvider(TTSProviderBase):
                 config["ttsPitch"], min_val=-12, max_val=12, base_val=0
             ))
 
-        self.ws_url = str(config.get("ws_url") or HUOSHAN_DOUBLE_STREAM_WS_URL).strip()
-        if self.ws_url != HUOSHAN_DOUBLE_STREAM_WS_URL:
-            raise ValueError(
-                "豆包 TTS 仅支持火山官方双向流式 WebSocket 地址："
-                f"{HUOSHAN_DOUBLE_STREAM_WS_URL}；当前 ws_url={self.ws_url or '<empty>'}"
-            )
-        enable_ws_reuse_value = config.get("enable_ws_reuse", True)
-        self.enable_ws_reuse = False if str(enable_ws_reuse_value).lower() == 'false' else True
+        self.ws_url = HUOSHAN_DOUBLE_STREAM_WS_URL
+        self.enable_ws_reuse = True
         self.tts_text = ""
 
         model_key_msg = check_model_key("TTS", self.api_key)

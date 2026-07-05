@@ -51,7 +51,9 @@ final class HuoshanDoubleStreamTtsHelper {
         }
         if (isManagedDoubaoTtsTemplate(templateCode)) {
             config.set("resource_id", DOUBAO_SEED_TTS_2_RESOURCE_ID);
-            config.set("speaker", DOUBAO_SEED_TTS_2_DEFAULT_SPEAKER);
+            if (!hasUsableHuoshanTtsSpeaker(templateCode, config.getStr("speaker"))) {
+                config.set("speaker", DOUBAO_SEED_TTS_2_DEFAULT_SPEAKER);
+            }
         } else {
             if (!hasUsableHuoshanTtsField(config.getStr("resource_id"))) {
                 config.set("resource_id", DOUBAO_SEED_TTS_2_RESOURCE_ID);

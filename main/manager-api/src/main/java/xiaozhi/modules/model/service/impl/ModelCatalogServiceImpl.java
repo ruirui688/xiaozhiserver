@@ -862,12 +862,11 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         items.add(item("TTS_DOUBAO_SEED_TTS_2_STREAM", "TTS", "huoshan_double_stream", "豆包语音合成模型 2.0",
                 "火山引擎", "语音合成模型 2.0（服务 10035）", "tts", "语音合成", "websocket-bidirectional", "WebSocket 双向流式",
                 "cloud", "云平台", "WebSocket", "资源 ID", "resource_id",
-                List.of("api_key"), List.of("api_key", "ws_url", "resource_id", "speaker"),
-                List.of("api_key", "format", "audio_params", "enable_ws_reuse",
-                        "speech_rate", "loudness_rate", "pitch", "emotion", "emotion_scale", "additions"),
+                List.of("api_key"), List.of("api_key", "speaker", "speech_rate", "loudness_rate", "pitch"),
+                List.of(),
                 List.of("按火山文档 https://www.volcengine.com/docs/6561/2532486 接入豆包语音合成模型 2.0",
-                        "只使用控制台 API Key 鉴权，对应 WebSocket 请求头 X-Api-Key",
-                        "资源 ID 固定为：seed-tts-2.0（豆包语音合成模型 2.0）"),
+                        "只需要填写控制台 API Key 和服务 10035 可用音色",
+                        "resource_id、WebSocket 地址、PCM 输出和连接复用由运行时固定管理"),
                 List.of(),
                 List.of("HuoshanDoubleStreamTTSV2", "seed-tts-2.0", "TTS_HSDSTTS_V2"),
                 "https://www.volcengine.com/docs/6561/2532486"));
@@ -1262,14 +1261,10 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 setFieldOptions(dto, "model", List.of("paraformer-realtime-v2", "paraformer-realtime-v1", "paraformer-realtime-8k-v1"));
             }
             case "TTS_DOUBAO_SEED_TTS_2_STREAM" -> {
-                setFieldDefault(dto, "ws_url", "wss://openspeech.bytedance.com/api/v3/tts/bidirection");
-                setFieldDefault(dto, "resource_id", "seed-tts-2.0");
                 setFieldDefault(dto, "speaker", "zh_female_sophie_uranus_bigtts");
-                setFieldDefault(dto, "format", "pcm");
                 setFieldDefault(dto, "speech_rate", "0");
                 setFieldDefault(dto, "loudness_rate", "0");
                 setFieldDefault(dto, "pitch", "0");
-                setFieldDefault(dto, "enable_ws_reuse", true);
             }
             case "VLLM_ZHIPU_GLM_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "https://open.bigmodel.cn/api/paas/v4");

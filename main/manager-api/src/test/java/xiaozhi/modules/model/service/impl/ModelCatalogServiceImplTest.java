@@ -33,18 +33,20 @@ class ModelCatalogServiceImplTest {
     }
 
     @Test
-    void doubaoSeedTtsKeepsWebsocketReuseEnabledByDefault() throws Exception {
+    void doubaoSeedTtsExposesOnlyUserEditableFields() throws Exception {
         ModelCatalogDTO ttsTemplate = staticCatalog().stream()
                 .filter(item -> "TTS_DOUBAO_SEED_TTS_2_STREAM".equals(item.getTemplateCode()))
                 .findFirst()
                 .orElseThrow();
 
-        ModelFieldSchemaDTO wsReuseField = ttsTemplate.getFieldSchemas().stream()
-                .filter(field -> "enable_ws_reuse".equals(field.getKey()))
-                .findFirst()
-                .orElseThrow();
+        List<String> fieldKeys = ttsTemplate.getFieldSchemas().stream()
+                .map(ModelFieldSchemaDTO::getKey)
+                .toList();
 
-        assertEquals(true, wsReuseField.getDefaultValue());
+        assertEquals(List.of("api_key", "speaker", "speech_rate", "loudness_rate", "pitch"), fieldKeys);
+        assertFalse(fieldKeys.contains("ws_url"));
+        assertFalse(fieldKeys.contains("resource_id"));
+        assertFalse(fieldKeys.contains("enable_ws_reuse"));
     }
 
     @SuppressWarnings("unchecked")

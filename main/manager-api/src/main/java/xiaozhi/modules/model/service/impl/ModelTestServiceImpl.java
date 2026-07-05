@@ -1143,7 +1143,7 @@ public class ModelTestServiceImpl implements ModelTestService {
         }
         if ("TTS".equals(normalizedModelType)) {
             return switch (normalizedType) {
-                case "huoshan_double_stream" -> List.of("api_key", "resource_id", "speaker");
+                case "huoshan_double_stream" -> List.of("api_key");
                 default -> List.of();
             };
         }
