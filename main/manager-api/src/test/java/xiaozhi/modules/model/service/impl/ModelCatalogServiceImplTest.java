@@ -47,6 +47,42 @@ class ModelCatalogServiceImplTest {
         assertFalse(fieldKeys.contains("ws_url"));
         assertFalse(fieldKeys.contains("resource_id"));
         assertFalse(fieldKeys.contains("enable_ws_reuse"));
+
+        ModelFieldSchemaDTO speakerField = ttsTemplate.getFieldSchemas().stream()
+                .filter(field -> "speaker".equals(field.getKey()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("select", speakerField.getInputType());
+        assertFalse(speakerField.getOptions().isEmpty());
+        assertEquals("zh_female_sophie_uranus_bigtts", speakerField.getDefaultValue());
+
+        ModelFieldSchemaDTO speechRateField = ttsTemplate.getFieldSchemas().stream()
+                .filter(field -> "speech_rate".equals(field.getKey()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("语速(-50~100)", speechRateField.getLabel());
+    }
+
+    @Test
+    void doubaoBigTtsExposesVoiceOptionsAndVisibleParameterRanges() throws Exception {
+        ModelCatalogDTO ttsTemplate = staticCatalog().stream()
+                .filter(item -> "TTS_DOUBAO_BIGTTS_STREAM".equals(item.getTemplateCode()))
+                .findFirst()
+                .orElseThrow();
+
+        ModelFieldSchemaDTO speakerField = ttsTemplate.getFieldSchemas().stream()
+                .filter(field -> "speaker".equals(field.getKey()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("select", speakerField.getInputType());
+        assertFalse(speakerField.getOptions().isEmpty());
+        assertEquals("zh_female_wanwanxiaohe_moon_bigtts", speakerField.getDefaultValue());
+
+        List<String> parameterLabels = ttsTemplate.getFieldSchemas().stream()
+                .filter(field -> List.of("speech_rate", "loudness_rate", "pitch").contains(field.getKey()))
+                .map(ModelFieldSchemaDTO::getLabel)
+                .toList();
+        assertEquals(List.of("语速(-50~100)", "音量(-50~100)", "音高(-12~12)"), parameterLabels);
     }
 
     @Test

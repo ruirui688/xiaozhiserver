@@ -556,7 +556,7 @@ export default {
                   loading: inputType === "model-select" && !!this.modelReferenceLoading[modelReferenceKey],
                   options: inputType === "model-select"
                     ? (this.modelReferenceOptionsCache[modelReferenceKey] || [])
-                    : (f.options || []).map((option) => ({ label: option, value: option })),
+                    : this.normalizeFieldOptions(f),
                   placeholder: this.getFieldPlaceholder(f),
                   section: this.getFieldSection(f),
                   helpText: f.helpText || this.getFieldHelpText(f.key),
@@ -616,10 +616,57 @@ export default {
         model_name: "填写模型名称，例如 qwen-flash",
         model: "填写模型名称",
         voice: "填写音色 ID",
-        speaker: "填写音色或说话人 ID",
+        speaker: "选择音色 Voice_type",
         maintenance_llm: "选择已配置并测试通过的 LLM/SLM 作为维护模型。留空则只做显式记住/忘记，不做自动抽取",
+        speech_rate: "范围 -50 到 100，0 为默认语速",
+        loudness_rate: "范围 -50 到 100，0 为默认音量",
+        pitch: "范围 -12 到 12，0 为默认音高",
       };
       return examples[key] || `请输入${label}`;
+    },
+    normalizeFieldOptions(field = {}) {
+      return (field.options || []).map((option) => {
+        if (option && typeof option === "object") {
+          const value = option.value || option.code || option.id || option.label || option.name;
+          return {
+            label: option.label || option.name || value,
+            value,
+            meta: option.meta || option.desc || "",
+          };
+        }
+        const value = String(option);
+        return {
+          label: this.formatStaticOptionLabel(field.key, value),
+          value,
+        };
+      });
+    },
+    formatStaticOptionLabel(fieldKey, value) {
+      if (fieldKey !== "speaker") {
+        return value;
+      }
+      const voiceNames = {
+        zh_female_sophie_uranus_bigtts: "魅力苏菲",
+        zh_female_xiaohe_uranus_bigtts: "湾湾小何",
+        zh_female_vv_uranus_bigtts: "Vivi",
+        zh_male_yangguangqingnian_uranus_bigtts: "阳光青年",
+        zh_male_m191_uranus_bigtts: "云舟",
+        zh_male_shaonianzixin_uranus_bigtts: "少年梓辛",
+        zh_female_qingxinnvsheng_uranus_bigtts: "清新女声",
+        zh_female_cancan_uranus_bigtts: "知性灿灿",
+        zh_female_linjianvhai_uranus_bigtts: "邻家女孩",
+        zh_female_shuangkuaisisi_uranus_bigtts: "爽快思思",
+        zh_female_wanwanxiaohe_moon_bigtts: "湾湾小何",
+        zh_female_shuangkuaisisi_moon_bigtts: "爽快思思",
+        zh_male_wennuanahu_moon_bigtts: "温暖阿虎",
+        zh_male_shaonianzixin_moon_bigtts: "少年梓辛",
+        zh_female_linjianvhai_moon_bigtts: "邻家女孩",
+        zh_male_yangguangqingnian_moon_bigtts: "阳光青年",
+        zh_male_jingqiangkanye_moon_bigtts: "京腔侃爷",
+        zh_female_gaolengyujie_moon_bigtts: "高冷御姐",
+        zh_female_meilinvyou_moon_bigtts: "魅力女友",
+      };
+      return voiceNames[value] ? `${voiceNames[value]} (${value})` : value;
     },
     getModelReferenceTypes(field = {}) {
       const options = Array.isArray(field.options) ? field.options : [];

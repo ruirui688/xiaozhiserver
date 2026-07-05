@@ -361,31 +361,6 @@
               </div>
             </el-form-item>
             <div class="model-row">
-              <!-- Language filter -->
-              <el-form-item class="model-item language-select-item">
-                <template #label>
-                  <el-tooltip :content="$t('roleConfig.tooltip.language')" placement="top" effect="light" popper-class="custom-tooltip">
-                    <span>{{ $t('roleConfig.language') }}</span>
-                  </el-tooltip>
-                </template>
-                <div class="model-select-wrapper">
-                  <el-select
-                    v-model="localSelectedLanguage"
-                    :placeholder="$t('roleConfig.selectLanguage')"
-                    class="form-select language-select"
-                    @change="filterVoicesByLanguage"
-                  >
-                    <el-option
-                      v-for="(lang, index) in languageOptions"
-                      :key="`lang-${index}`"
-                      :label="lang.label"
-                      :value="lang.value"
-                    />
-                  </el-select>
-                </div>
-              </el-form-item>
-
-              <!-- Voice selection -->
               <el-form-item class="model-item">
                 <template #label>
                   <el-tooltip :content="$t('roleConfig.tooltip.voiceType')" placement="top" effect="light" popper-class="custom-tooltip">
@@ -488,13 +463,11 @@ export default {
     modelOptions: { type: Object, default: () => ({}) },
     templates: { type: Array, default: () => [] },
     voiceOptions: { type: Array, default: () => [] },
-    languageOptions: { type: Array, default: () => [] },
     voiceDetails: { type: Object, default: () => ({}) },
     featureStatus: { type: Object, default: () => ({}) },
     currentFunctions: { type: Array, default: () => [] },
     currentKnowledgeBases: { type: Array, default: () => [] },
     currentContextProviders: { type: Array, default: () => [] },
-    selectedLanguage: { type: String, default: '' },
     playingVoice: { type: Boolean, default: false },
     currentPlayingVoiceId: { type: String, default: '' },
     isPaused: { type: Boolean, default: false },
@@ -505,7 +478,6 @@ export default {
   data() {
     return {
       form: this.buildFormFromProp(this.initialForm),
-      localSelectedLanguage: this.selectedLanguage,
       showFunctionDialog: false,
       showKnowledgeBaseDialog: false,
       showTtsAdvancedDialog: false,
@@ -542,7 +514,6 @@ export default {
         langCode: initial.langCode || "",
         language: initial.language || "",
         sort: initial.sort || "",
-        ttsLanguage: initial.ttsLanguage || "",
         model: {
           ttsModelId: (initial.model && initial.model.ttsModelId) || "",
           vadModelId: (initial.model && initial.model.vadModelId) || "",
@@ -559,7 +530,6 @@ export default {
       return {
         agentCode: "", agentName: "", ttsVoiceId: "", ttsVolume: null, ttsRate: null, ttsPitch: null,
         chatHistoryConf: 0, systemPrompt: "", summaryMemory: "", langCode: "", language: "", sort: "",
-        ttsLanguage: "",
         model: { ttsModelId: "", vadModelId: "", asrModelId: "", llmModelId: "", slmModelId: "", vllmModelId: "", memModelId: "", intentModelId: "" }
       };
     },
@@ -581,7 +551,6 @@ export default {
         vllmModelId: this.form.model.vllmModelId,
         ttsModelId: this.form.model.ttsModelId,
         ttsVoiceId: this.form.ttsVoiceId,
-        ttsLanguage: this.localSelectedLanguage,
         chatHistoryConf: this.form.chatHistoryConf,
         memModelId: this.form.model.memModelId,
         intentModelId: this.form.model.intentModelId,
@@ -679,39 +648,6 @@ export default {
           );
         }
       }, 100);
-    },
-    filterVoicesByLanguage() {
-      if (!this.voiceDetails || Object.keys(this.voiceDetails).length === 0) {
-        this.$emit('update:voiceOptions', []);
-        return;
-      }
-      const allVoices = Object.values(this.voiceDetails);
-      const filteredVoices = allVoices.filter(voice => {
-        if (!voice.languages) {
-          return Boolean(voice.isClone);
-        }
-        const languagesArray = voice.languages.split(/[、；;,，]/).map(lang => lang.trim()).filter(lang => lang);
-        return languagesArray.includes(this.localSelectedLanguage);
-      });
-      const newVoiceOptions = filteredVoices.map((voice) => ({
-        value: voice.id,
-        label: voice.name,
-        voiceDemo: voice.voiceDemo,
-        voice_demo: voice.voice_demo,
-        isClone: Boolean(voice.isClone),
-        train_status: voice.trainStatus,
-      }));
-      this.$emit('update:voiceOptions', newVoiceOptions);
-      const currentVoiceSupportsLanguage = this.form.ttsVoiceId &&
-        filteredVoices.some(voice => voice.id === this.form.ttsVoiceId);
-      if (!currentVoiceSupportsLanguage) {
-        this.form.ttsVoiceId = filteredVoices.length > 0 ? filteredVoices[0].id : '';
-      }
-      this.ttsSettings = {
-        volume: this.form.ttsVolume !== null && this.form.ttsVolume !== undefined ? this.form.ttsVolume : 0,
-        speed: this.form.ttsRate !== null && this.form.ttsRate !== undefined ? this.form.ttsRate : 0,
-        pitch: this.form.ttsPitch !== null && this.form.ttsPitch !== undefined ? this.form.ttsPitch : 0
-      };
     },
     getFunctionDisplayChar(name) {
       if (!name || name.length === 0) return "";
@@ -1054,16 +990,6 @@ export default {
       },
       deep: true,
     },
-    selectedLanguage: {
-      handler(newVal) {
-        if (newVal !== this.localSelectedLanguage) {
-          this.localSelectedLanguage = newVal;
-        }
-      },
-    },
-    localSelectedLanguage(newVal) {
-      this.$emit('update:selectedLanguage', newVal);
-    },
     'form.model.ttsModelId': {
       handler(newVal, oldVal) {
         if (newVal) {
@@ -1182,15 +1108,6 @@ export default {
 .model-row .model-item {
   flex: 1;
   margin-bottom: 0;
-}
-
-.model-row .language-select-item {
-  flex: 0 0 35%;
-  max-width: 35%;
-}
-
-.model-row .language-select-item .language-select {
-  width: 100%;
 }
 
 .model-row .el-form-item__label {

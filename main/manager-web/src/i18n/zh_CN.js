@@ -865,8 +865,6 @@ export default {
   'roleConfig.memoryHis': '记忆',
   'roleConfig.memory': '记忆模式(Mem)',
   'roleConfig.tts': '语音合成(TTS)',
-  'roleConfig.language': '对话语言(Lang)',
-  'roleConfig.selectLanguage': '请选择语言',
   'roleConfig.voiceType': '声音音色(Voice)',
   'roleConfig.ttsVolume': '音量',
   'roleConfig.ttsRate': '语速',
@@ -929,7 +927,6 @@ export default {
   'roleConfig.tooltip.intent': '意图识别（Intent Detection）：分析用户语音或文本，判断用户的真实意图，如查询、聊天、控制设备等',
   'roleConfig.tooltip.memory': '记忆模型（Memory Model）：管理对话历史的存储和摘要，决定AI能否记住之前的对话内容，实现长期记忆功能',
   'roleConfig.tooltip.tts': '语音合成（Text-to-Speech）：将文字转换为自然语音，决定AI说话的声音、语速和语调',
-  'roleConfig.tooltip.language': '选择音色所属的语言，系统将筛选出支持该语言的可用音色',
   'roleConfig.tooltip.voiceType': '选择AI助手说话的声音，不同音色具有不同的声音特点和风格，部分音色支持试听功能，点击播放按钮可预览效果',
 
   // 功能管理对话框文本

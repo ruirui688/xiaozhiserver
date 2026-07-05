@@ -64,13 +64,11 @@
               :llm-mode-type-map="llmModeTypeMap"
               :templates="templates"
               :voice-options="voiceOptions"
-              :language-options="languageOptions"
               :voice-details="voiceDetails"
               :feature-status="featureStatus"
               :current-functions="currentFunctions"
               :current-knowledge-bases="currentKnowledgeBases"
               :current-context-providers="currentContextProviders"
-              :selected-language="selectedLanguage"
               :playing-voice="playingVoice"
               :current-playing-voice-id="currentPlayingVoiceId"
               :is-paused="isPaused"
@@ -81,6 +79,8 @@
               @update:currentFunctions="val => currentFunctions = val"
               @update:currentKnowledgeBases="val => currentKnowledgeBases = val"
               @update:checkedReplacementWordIds="val => checkedReplacementWordIds = val"
+              @update:voiceOptions="val => voiceOptions = val"
+              @tts-model-changed="handleTtsModelChanged"
               @form-change="handleFormChange"
             />
           </el-card>
@@ -120,7 +120,6 @@ export default {
         langCode: "",
         language: "",
         sort: "",
-        ttsLanguage: "",
         model: {
           ttsModelId: "",
           vadModelId: "",
@@ -154,8 +153,6 @@ export default {
       playingVoice: false,
       isPaused: false,
       currentPlayingVoiceId: null,
-      languageOptions: [],
-      selectedLanguage: "",
       featureStatus: {
         vad: false,
         asr: false,
@@ -164,6 +161,8 @@ export default {
       inputVisible: false,
       inputValue: "",
       checkedReplacementWordIds: [],
+      loadingVoices: false,
+      voiceRequestSeq: 0,
     };
   },
   methods: {
@@ -284,8 +283,61 @@ export default {
           };
           this.checkedReplacementWordIds = data.data.correctWordFileIds || [];
           this.currentContextProviders = data.data.contextProviders || [];
+          this.loadVoicesForTtsModel(this.form.model.ttsModelId, this.form.ttsVoiceId);
         }
       });
+    },
+    handleTtsModelChanged(ttsModelId) {
+      this.loadVoicesForTtsModel(ttsModelId, this.form.ttsVoiceId);
+    },
+    loadVoicesForTtsModel(ttsModelId, preferredVoiceId = "") {
+      if (!ttsModelId) {
+        this.voiceRequestSeq += 1;
+        this.voiceDetails = {};
+        this.voiceOptions = [];
+        return;
+      }
+      const requestSeq = this.voiceRequestSeq + 1;
+      this.voiceRequestSeq = requestSeq;
+      this.loadingVoices = true;
+      Api.model.getModelVoices(ttsModelId, "", ({ data }) => {
+        if (requestSeq !== this.voiceRequestSeq) {
+          return;
+        }
+        this.loadingVoices = false;
+        if (!data || data.code !== 0) {
+          this.voiceDetails = {};
+          this.voiceOptions = [];
+          return;
+        }
+        const voices = Array.isArray(data.data) ? data.data : [];
+        this.voiceDetails = voices.reduce((details, voice) => {
+          details[voice.id] = {
+            id: voice.id,
+            name: voice.name,
+            languages: voice.languages || "",
+            voiceDemo: voice.voiceDemo || "",
+            voice_demo: voice.voiceDemo || "",
+            isClone: Boolean(voice.isClone),
+          };
+          return details;
+        }, {});
+        this.voiceOptions = this.buildVoiceOptions(voices);
+        if (preferredVoiceId && this.voiceDetails[preferredVoiceId]) {
+          this.form.ttsVoiceId = preferredVoiceId;
+        } else if (!this.voiceOptions.some((item) => item.value === this.form.ttsVoiceId)) {
+          this.form.ttsVoiceId = this.voiceOptions.length > 0 ? this.voiceOptions[0].value : "";
+        }
+      });
+    },
+    buildVoiceOptions(voices = []) {
+      return voices.map((voice) => ({
+          value: voice.id,
+          label: voice.name,
+          voiceDemo: voice.voiceDemo,
+          voice_demo: voice.voiceDemo,
+          isClone: Boolean(voice.isClone),
+        }));
     },
 
     // ===== Save / Reset Flow =====

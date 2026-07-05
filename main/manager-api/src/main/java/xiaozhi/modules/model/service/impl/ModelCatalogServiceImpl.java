@@ -89,6 +89,27 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             "doubao-seed-2-0-pro-260215",
             "doubao-seed-2-0-mini-260428",
             "doubao-seed-2-0-lite-260428");
+    private static final List<String> DOUBAO_SEED_TTS_2_VOICES = List.of(
+            "zh_female_sophie_uranus_bigtts",
+            "zh_female_xiaohe_uranus_bigtts",
+            "zh_female_vv_uranus_bigtts",
+            "zh_male_yangguangqingnian_uranus_bigtts",
+            "zh_male_m191_uranus_bigtts",
+            "zh_male_shaonianzixin_uranus_bigtts",
+            "zh_female_qingxinnvsheng_uranus_bigtts",
+            "zh_female_cancan_uranus_bigtts",
+            "zh_female_linjianvhai_uranus_bigtts",
+            "zh_female_shuangkuaisisi_uranus_bigtts");
+    private static final List<String> DOUBAO_BIGTTS_VOICES = List.of(
+            "zh_female_wanwanxiaohe_moon_bigtts",
+            "zh_female_shuangkuaisisi_moon_bigtts",
+            "zh_male_wennuanahu_moon_bigtts",
+            "zh_male_shaonianzixin_moon_bigtts",
+            "zh_female_linjianvhai_moon_bigtts",
+            "zh_male_yangguangqingnian_moon_bigtts",
+            "zh_male_jingqiangkanye_moon_bigtts",
+            "zh_female_gaolengyujie_moon_bigtts",
+            "zh_female_meilinvyou_moon_bigtts");
     private static final List<ModelCatalogDTO> CATALOG = buildCatalog();
     private static final Set<String> STATIC_FIELD_SCHEMA_TEMPLATE_CODES = Set.of(
             "ASR_FUN_SERVER",
@@ -1277,12 +1298,16 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             }
             case "TTS_DOUBAO_SEED_TTS_2_STREAM" -> {
                 setFieldDefault(dto, "speaker", "zh_female_sophie_uranus_bigtts");
+                setFieldOptions(dto, "speaker", DOUBAO_SEED_TTS_2_VOICES);
+                applyDoubaoTtsFieldText(dto);
                 setFieldDefault(dto, "speech_rate", "0");
                 setFieldDefault(dto, "loudness_rate", "0");
                 setFieldDefault(dto, "pitch", "0");
             }
             case "TTS_DOUBAO_BIGTTS_STREAM" -> {
                 setFieldDefault(dto, "speaker", "zh_female_wanwanxiaohe_moon_bigtts");
+                setFieldOptions(dto, "speaker", DOUBAO_BIGTTS_VOICES);
+                applyDoubaoTtsFieldText(dto);
                 setFieldDefault(dto, "speech_rate", "0");
                 setFieldDefault(dto, "loudness_rate", "0");
                 setFieldDefault(dto, "pitch", "0");
@@ -1322,6 +1347,31 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                     field.setOptions(options == null ? List.of() : options);
                     field.setInputType("select");
                 });
+    }
+
+    private static void applyDoubaoTtsFieldText(ModelCatalogDTO dto) {
+        dto.getFieldSchemas().forEach(field -> {
+            switch (field.getKey()) {
+                case "speaker" -> {
+                    field.setLabel("音色 Voice_type");
+                    field.setHelpText("选择已开通服务可用的火山 Voice_type。角色配置中的声音音色可覆盖这里的默认音色。");
+                }
+                case "speech_rate" -> {
+                    field.setLabel("语速(-50~100)");
+                    field.setHelpText("范围 -50 到 100，0 为默认语速。");
+                }
+                case "loudness_rate" -> {
+                    field.setLabel("音量(-50~100)");
+                    field.setHelpText("范围 -50 到 100，0 为默认音量。");
+                }
+                case "pitch" -> {
+                    field.setLabel("音高(-12~12)");
+                    field.setHelpText("范围 -12 到 12，0 为默认音高。");
+                }
+                default -> {
+                }
+            }
+        });
     }
 
     private static List<ModelFieldSchemaDTO> buildFieldSchemas(List<String> credentialFields,
