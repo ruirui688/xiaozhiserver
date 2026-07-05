@@ -10,6 +10,7 @@ if str(SERVER_ROOT) not in sys.path:
 from core.benchmark.asr_executor import (
     STANDARD_ASR_TEST_AUDIO,
     _build_audio_data_url,
+    _is_realtime_streaming_provider,
     _latency_after_audio,
     _load_audio_files,
     _pcm_duration_ms,
@@ -58,3 +59,9 @@ def test_latency_after_audio_uses_tail_latency():
     assert _latency_after_audio(2161, 1560) == 601
     assert _latency_after_audio(1200, 1560) == 0
     assert _latency_after_audio(None, 1560) is None
+
+
+def test_tail_latency_only_applies_to_realtime_streaming_asr():
+    assert _is_realtime_streaming_provider("doubao_stream")
+    assert _is_realtime_streaming_provider("aliyun_stream")
+    assert not _is_realtime_streaming_provider("doubao_recording")

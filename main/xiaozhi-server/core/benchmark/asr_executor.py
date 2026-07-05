@@ -48,15 +48,17 @@ async def run_asr_samples(model, provider_type, config, iterations):
             audio_duration_ms = _pcm_duration_ms(pcm)
             text, first_text_ms = await _recognize_asr_sample(asr, provider_type, pcm, started)
             latency_ms = int((time.perf_counter() - started) * 1000)
-            tail_latency_ms = _latency_after_audio(latency_ms, audio_duration_ms)
-            first_text_tail_ms = _latency_after_audio(first_text_ms, audio_duration_ms)
+            if _is_realtime_streaming_provider(provider_type):
+                tail_latency_ms = _latency_after_audio(latency_ms, audio_duration_ms)
+                first_text_tail_ms = _latency_after_audio(first_text_ms, audio_duration_ms)
             success = bool(str(text or "").strip())
             if not success:
                 message = "识别文本为空"
         except Exception as exc:
             latency_ms = int((time.perf_counter() - started) * 1000)
             audio_duration_ms = _pcm_duration_ms(pcm)
-            tail_latency_ms = _latency_after_audio(latency_ms, audio_duration_ms)
+            if _is_realtime_streaming_provider(provider_type):
+                tail_latency_ms = _latency_after_audio(latency_ms, audio_duration_ms)
             first_text_tail_ms = None
             message = str(exc)
         reference = audio.get("reference")
@@ -108,6 +110,14 @@ def _build_audio_data_url(audio):
     filename = str(audio.get("name") or "").lower()
     media_type = "audio/mpeg" if filename.endswith(".mp3") else "audio/wav"
     return f"data:{media_type};base64,{base64.b64encode(data).decode('ascii')}"
+
+
+def _is_realtime_streaming_provider(provider_type):
+    return str(provider_type or "").lower() in {
+        "doubao_stream",
+        "aliyun_stream",
+        "xunfei_stream",
+    }
 
 
 async def _recognize_asr_sample(asr, provider_type, pcm, started):
