@@ -1,0 +1,44 @@
+ARG MAVEN_BASE_IMAGE=maven:3.9.4-eclipse-temurin-21
+ARG WEB_RUNTIME_BASE_IMAGE=bellsoft/liberica-runtime-container:jre-21-glibc
+ARG WEB_DIST_IMAGE
+
+FROM ${WEB_DIST_IMAGE} AS web-dist
+
+FROM ${MAVEN_BASE_IMAGE} AS api-builder
+WORKDIR /app
+COPY main/manager-api/pom.xml .
+COPY main/manager-api/src ./src
+RUN --mount=type=cache,target=/root/.m2,sharing=locked \
+    mvn clean package -Dmaven.test.skip=true
+
+FROM ${WEB_RUNTIME_BASE_IMAGE}
+
+RUN apk update && \
+    apk add --no-cache --no-scripts \
+        nginx \
+        bash \
+        fontconfig \
+        ttf-dejavu \
+    && rm -rf /var/cache/apk/* \
+    && mkdir -p /run/nginx /var/log/nginx /var/lib/nginx/tmp/client_body /var/lib/nginx/tmp/proxy /etc/nginx/conf.d
+
+COPY --from=web-dist /app/public/generator/static/fonts/*.ttf /usr/share/fonts/
+RUN fc-cache -f -v
+
+COPY docs/docker/nginx.conf /etc/nginx/nginx.conf
+COPY --from=web-dist /app/dist /usr/share/nginx/html
+COPY --from=api-builder /app/target/xiaozhi-esp32-api.jar /app/xiaozhi-esp32-api.jar
+
+EXPOSE 8002
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD wget -q -O /dev/null http://localhost:8002/ || exit 1
+
+COPY docs/docker/start.sh /start.sh
+RUN chmod +x /start.sh
+
+RUN addgroup -S xiaozhi && adduser -S xiaozhi -G xiaozhi && \
+    chown -R xiaozhi:xiaozhi /app /usr/share/nginx/html /var/log/nginx /var/lib/nginx /run/nginx
+USER xiaozhi
+
+CMD ["/start.sh"]

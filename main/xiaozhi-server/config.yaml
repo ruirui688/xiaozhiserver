@@ -384,60 +384,21 @@ ASR:
     model_dir: models/sherpa-onnx-paraformer-zh-small-2024-03-09
     output_dir: tmp/
     model_type: paraformer
-  DoubaoASR:
-    # 可以在这里申请相关Key等信息
-    # https://console.volcengine.com/speech/app
-    # DoubaoASR和DoubaoStreamASR的区别是：DoubaoASR是按次收费，DoubaoStreamASR是按时收费
-    # 一般来说按次收费的更便宜，但是DoubaoStreamASR使用了大模型技术，效果更好
-    type: doubao
-    appid: 你的火山引擎语音合成服务appid
-    access_token: 你的火山引擎语音合成服务access_token
-    cluster: volcengine_input_common
-    # 热词、替换词使用流程：https://www.volcengine.com/docs/6561/155738
-    boosting_table_name: （选填）你的热词文件名称
-    correct_table_name: （选填）你的替换词文件名称
-    output_dir: tmp/
-  DoubaoStreamASR:
-    # 可以在这里申请相关Key等信息
-    # https://console.volcengine.com/speech/app
-    # DoubaoASR和DoubaoStreamASR的区别是：DoubaoASR是按次收费，DoubaoStreamASR是按时收费
-    # 开通地址https://console.volcengine.com/speech/service/10011
-    # 一般来说按次收费的更便宜，但是DoubaoStreamASR使用了大模型技术，效果更好
-    type: doubao_stream
-    appid: 你的火山引擎语音合成服务appid
-    access_token: 你的火山引擎语音合成服务access_token
-    # 资源ID：小时版 volc.bigasr.sauc.duration，并发版 volc.bigasr.sauc.concurrent
-    resource_id: volc.bigasr.sauc.duration
-    # 热词、替换词使用流程：https://www.volcengine.com/docs/6561/155738
-    boosting_table_name: （选填）你的热词文件名称
-    correct_table_name: （选填）你的替换词文件名称
-    # 是否开启多语种识别模式
-    enable_multilingual: False
-    # 多语种识别当该键为空时，该模型支持中英文、上海话、闽南语，四川、陕西、粤语识别。当将其设置为特定键时，它可以识别指定语言。
-    # 详细语言列表参考 https://www.volcengine.com/docs/6561/1354869
-    # language: zh-cn
-    # 静音判定时长(ms)，默认200ms
-    end_window_size: 200
+  DoubaoRecordingASR2:
+    # 豆包录音识别模型2.0，官方文档：https://www.volcengine.com/docs/6561/1354868
+    type: doubao_recording
+    api_key: 你的火山引擎语音识别服务APIKey
+    resource_id: volc.seedasr.auc
+    # 可选：上下文文本，用于提高特定场景识别准确率
+    context_text: ""
     output_dir: tmp/
   DoubaoStreamASRV2:
-    # 豆包语音识别模型2.0（基于火山引擎seed-asr）
-    # 开通地址：https://console.volcengine.com/speech/service/10038
-    # 价格更为便宜，建议在高并发场景下使用
+    # 豆包流式语音识别模型2.0，官方文档：https://www.volcengine.com/docs/6561/1354869
     type: doubao_stream
-    appid: 你的火山引擎语音合成服务appid
-    access_token: 你的火山引擎语音合成服务access_token
-    # 资源ID：小时版 volc.seedasr.sauc.duration，并发版 volc.seedasr.sauc.concurrent
+    api_key: 你的火山引擎语音识别服务APIKey
     resource_id: volc.seedasr.sauc.duration
-    # 热词、替换词使用流程：https://www.volcengine.com/docs/6561/155738
-    boosting_table_name: （选填）你的热词文件名称
-    correct_table_name: （选填）你的替换词文件名称
-    # 是否开启多语种识别模式
-    enable_multilingual: False
-    # 多语种识别当该键为空时，该模型支持中英文、上海话、闽南语，四川、陕西、粤语识别。当将其设置为特定键时，它可以识别指定语言。
-    # 详细语言列表参考 https://www.volcengine.com/docs/6561/1354869
-    # language: zh-cn
-    # 静音判定时长(ms)，默认200ms
-    end_window_size: 200
+    # 可选：上下文文本，用于提高特定场景识别准确率
+    context_text: ""
     output_dir: tmp/
   TencentASR:
     # token申请地址：https://console.cloud.tencent.com/cam/capi
