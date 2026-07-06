@@ -257,7 +257,7 @@ class ConnectionHandler:
             else:
                 self.client_ip = ws.remote_address[0]
             self.logger.bind(tag=TAG).info(
-                f"{self.client_ip} conn - Headers: {self.headers}"
+                f"{self.client_ip} conn - Headers: {_sanitize_log_text(self.headers)}"
             )
 
             self.device_id = self.headers.get("device-id", None)
@@ -1012,6 +1012,7 @@ class ConnectionHandler:
             return None
 
         memory_parts = []
+        memory_type = None
 
         # NOTE: When read_config_from_api=True and memory_type != "nomem",
         # there are TWO potential memory sources:
@@ -1028,8 +1029,9 @@ class ConnectionHandler:
                 .get("type")
             )
             if selected_memory and memory_type != "nomem":
+                agent_id = self.config.get("agent_id") if self.config else None
                 future = asyncio.run_coroutine_threadsafe(
-                    query_managed_memory(self.device_id, query), self.loop
+                    query_managed_memory(self.device_id, query, agent_id=agent_id), self.loop
                 )
                 try:
                     managed_result = future.result(timeout=2)
@@ -1044,7 +1046,7 @@ class ConnectionHandler:
         # Only query local provider memory if managed memory returned nothing.
         # This prevents the LLM from receiving duplicate/conflicting memory from
         # two sources at once.
-        if not managed_result and self.memory is not None:
+        if not managed_result and self.memory is not None and memory_type != "managed_memory":
             future = asyncio.run_coroutine_threadsafe(
                 self.memory.query_memory(query), self.loop
             )

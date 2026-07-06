@@ -7,5 +7,6 @@ public class MemoryForgetDTO {
     private String macAddress;
     private String agentId;
     private String text;
+    private String patternType;
     private String reason;
 }

@@ -95,13 +95,28 @@
               {{ formatPercent(row.successRate) }}
             </el-tag>
           </div>
+          <div v-if="isModelType(row, 'asr')" class="asr-decision" :class="getAsrDecision(row).type">
+            <div>
+              <strong>{{ getAsrDecision(row).title }}</strong>
+              <span>{{ getAsrDecision(row).detail }}</span>
+            </div>
+          </div>
           <div class="performance-result-metrics">
-            <span>{{ $t("modelConfig.avgLatency") }} {{ formatMeasuredLatency(row, "avgLatencyMs") }}</span>
+            <template v-if="isModelType(row, 'asr')">
+              <span
+                v-for="metric in getAsrResultMetrics(row)"
+                :key="metric.key"
+                class="asr-latency-chip"
+                :class="{ primary: metric.primary }"
+              >
+                {{ metric.label }} {{ metric.value }}
+              </span>
+            </template>
+            <span v-else>{{ $t("modelConfig.avgLatency") }} {{ formatMeasuredLatency(row, "avgLatencyMs") }}</span>
             <span v-if="isModelType(row, 'llm')">{{ $t("modelConfig.qualityScore") }} {{ formatScore(row.qualityScore) }}</span>
             <span v-if="isModelType(row, 'llm')">P0/P1 {{ row.p0p1FailureCount || 0 }}</span>
             <span v-if="hasMetric(row.firstAudioMs) && isModelType(row, 'tts')">{{ $t("modelConfig.firstAudio") }} {{ formatMetric(row.firstAudioMs, " ms") }}</span>
             <span v-if="isModelType(row, 'tts')">{{ $t("modelConfig.rtf") }} {{ formatMetric(row.rtf, "") }}</span>
-            <span v-if="hasMetric(row.ttftMs) && isModelType(row, 'asr')">{{ $t("modelConfig.firstAsrText") }} {{ formatMetric(row.ttftMs, " ms") }}</span>
             <span v-if="isModelType(row, 'asr')">{{ $t("modelConfig.cer") }} {{ formatPercent(row.cer) }}</span>
             <span v-if="isModelType(row, 'asr')">{{ $t("modelConfig.wer") }} {{ formatPercent(row.wer) }}</span>
           </div>
@@ -122,7 +137,7 @@
             <span>{{ $t("modelConfig.successRate") }}</span>
             <strong>{{ formatPercent(selectedPerformanceResult.successRate) }}</strong>
           </div>
-          <div>
+          <div v-if="!isModelType(selectedPerformanceResult, 'asr')">
             <span>{{ $t("modelConfig.avgLatency") }}</span>
             <strong>{{ formatMeasuredLatency(selectedPerformanceResult, "avgLatencyMs") }}</strong>
           </div>
@@ -138,6 +153,24 @@
             <span>{{ $t("modelConfig.judgeMode") }}</span>
             <strong>{{ formatJudgeMode(selectedPerformanceResult.judgeMode) }}</strong>
           </div>
+        </div>
+        <div v-if="selectedPerformanceResult && isModelType(selectedPerformanceResult, 'asr')" class="asr-latency-panel">
+          <div class="asr-latency-verdict" :class="getAsrDecision(selectedPerformanceResult).type">
+            <strong>{{ getAsrDecision(selectedPerformanceResult).title }}</strong>
+            <span>{{ getAsrDecision(selectedPerformanceResult).detail }}</span>
+          </div>
+          <div
+            v-for="metric in getAsrResultMetrics(selectedPerformanceResult, true)"
+            :key="metric.key"
+            class="asr-latency-card"
+            :class="{ primary: metric.primary }"
+          >
+            <span>{{ metric.label }}</span>
+            <strong>{{ metric.value }}</strong>
+          </div>
+          <p v-if="isStreamingAsrResult(selectedPerformanceResult)">
+            {{ $t("modelConfig.asrStreamingLatencyHint") }}
+          </p>
         </div>
         <div v-if="selectedPerformanceResult && isModelType(selectedPerformanceResult, 'llm')" class="judge-summary">
           <div class="judge-summary-title">{{ $t("modelConfig.dimensionScores") }}</div>
@@ -249,6 +282,16 @@
             </div>
 
             <div class="performance-sample-metrics">
+              <template v-if="isSampleType(selectedPerformanceSample, 'asr')">
+                <span
+                  v-for="metric in getAsrSampleMetrics(selectedPerformanceSample)"
+                  :key="metric.key"
+                  class="asr-latency-chip"
+                  :class="{ primary: metric.primary }"
+                >
+                  {{ metric.label }} {{ metric.value }}
+                </span>
+              </template>
               <span v-if="isSampleType(selectedPerformanceSample, 'llm')">
                 {{ $t("modelConfig.tokensPerSecond") }} {{ formatMetric(selectedPerformanceSample.tokensPerSecond, "") }}
               </span>
@@ -260,9 +303,6 @@
               </span>
               <span v-if="isSampleType(selectedPerformanceSample, 'tts')">
                 {{ $t("modelConfig.rtf") }} {{ formatMetric(selectedPerformanceSample.rtf, "") }}
-              </span>
-              <span v-if="hasMetric(selectedPerformanceSample.ttftMs) && isSampleType(selectedPerformanceSample, 'asr')">
-                {{ $t("modelConfig.firstAsrText") }} {{ formatMetric(selectedPerformanceSample.ttftMs, " ms") }}
               </span>
               <span v-if="isSampleType(selectedPerformanceSample, 'asr')">
                 {{ $t("modelConfig.cer") }} {{ formatPercent(selectedPerformanceSample.cer) }}
@@ -534,8 +574,170 @@ export default {
       if (value === null || value === undefined || value === "") return "-";
       return `${value}${unit}`;
     },
+    formatMetricMs(value) {
+      return this.hasMetric(value) ? `${value} ms` : "-";
+    },
     hasMetric(value) {
       return value !== null && value !== undefined && value !== "";
+    },
+    getAsrResultMetrics(row, includeAudioDuration = false) {
+      const metrics = [];
+      const comparableLatencyMs = this.getAsrComparableLatency(row);
+      if (this.hasMetric(comparableLatencyMs)) {
+        metrics.push({
+          key: "wait",
+          label: this.$t("modelConfig.asrUserWait"),
+          value: this.formatMetricMs(comparableLatencyMs),
+          primary: true,
+        });
+      }
+      if (this.hasMetric(row && row.ttftMs)) {
+        metrics.push({
+          key: "first",
+          label: this.$t("modelConfig.firstAsrText"),
+          value: this.formatMetricMs(row.ttftMs),
+        });
+      }
+      if (this.hasMetric(row && row.avgLatencyMs)) {
+        metrics.push({
+          key: "total",
+          label: this.$t("modelConfig.asrTotalLatency"),
+          value: this.formatMetricMs(row.avgLatencyMs),
+        });
+      }
+      const audioDurationMs = this.getAsrResultAudioDuration(row);
+      if (includeAudioDuration && this.hasMetric(audioDurationMs)) {
+        metrics.push({
+          key: "audio",
+          label: this.$t("modelConfig.asrAudioDuration"),
+          value: this.formatMetricMs(audioDurationMs),
+        });
+      }
+      return metrics;
+    },
+    getAsrSampleMetrics(sample) {
+      const metrics = [
+        {
+          key: "wait",
+          label: this.$t("modelConfig.asrUserWait"),
+          value: this.formatMetricMs(this.getAsrSampleComparableLatency(sample)),
+          primary: true,
+        },
+      ];
+      if (this.hasMetric(sample && sample.ttftMs)) {
+        metrics.push({
+          key: "first",
+          label: this.$t("modelConfig.firstAsrText"),
+          value: this.formatMetricMs(sample.ttftMs),
+        });
+      }
+      const tailLatencyMs = this.getAsrSampleTailLatency(sample);
+      if (this.hasMetric(tailLatencyMs)) {
+        metrics.push({
+          key: "tail",
+          label: this.$t("modelConfig.asrTailLatency"),
+          value: this.formatMetricMs(tailLatencyMs),
+          primary: true,
+        });
+      }
+      const audioDurationMs = this.getAsrSampleAudioDuration(sample);
+      if (this.hasMetric(audioDurationMs)) {
+        metrics.push({
+          key: "audio",
+          label: this.$t("modelConfig.asrAudioDuration"),
+          value: this.formatMetricMs(audioDurationMs),
+        });
+      }
+      const totalLatencyMs = this.getSampleLatencyMs(sample);
+      if (this.hasMetric(totalLatencyMs)) {
+        metrics.push({
+          key: "total",
+          label: this.$t("modelConfig.asrTotalLatency"),
+          value: this.formatMetricMs(totalLatencyMs),
+        });
+      }
+      return metrics;
+    },
+    getSampleLatencyMs(sample) {
+      return this.pickMetricValue(sample, ["responseTimeMs", "latencyMs", "latency_ms", "durationMs"]);
+    },
+    getAsrResultTailLatency(row) {
+      const samples = (row && row.samples) || [];
+      const values = samples
+        .map((sample) => this.getAsrSampleTailLatency(sample))
+        .filter((value) => this.hasMetric(value))
+        .map((value) => Number(value));
+      if (!values.length) return null;
+      return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
+    },
+    getAsrComparableLatency(row) {
+      const tailLatencyMs = this.getAsrResultTailLatency(row);
+      if (this.hasMetric(tailLatencyMs)) return tailLatencyMs;
+      return this.pickMetricValue(row, ["avgLatencyMs", "latencyMs", "responseTimeMs"]);
+    },
+    getAsrSampleComparableLatency(sample) {
+      const tailLatencyMs = this.getAsrSampleTailLatency(sample);
+      if (this.hasMetric(tailLatencyMs)) return tailLatencyMs;
+      return this.getSampleLatencyMs(sample);
+    },
+    getFastestAsrLatency() {
+      const values = this.performanceResults
+        .filter((row) => this.isModelType(row, "asr") && row && row.successRate > 0)
+        .map((row) => Number(this.getAsrComparableLatency(row)))
+        .filter((value) => !Number.isNaN(value));
+      return values.length ? Math.min.apply(null, values) : null;
+    },
+    getAsrDecision(row) {
+      const latency = this.getAsrComparableLatency(row);
+      if (!this.hasMetric(latency)) {
+        return {
+          type: "neutral",
+          title: "没有可比较的真实耗时",
+          detail: "这条结果缺少可用于判断体感等待的 ASR 延迟数据。",
+        };
+      }
+      const fastest = this.getFastestAsrLatency();
+      const delta = this.hasMetric(fastest) ? Number(latency) - Number(fastest) : 0;
+      const isFastest = this.hasMetric(fastest) && Math.abs(delta) < 1;
+      const modeText = this.isStreamingAsrResult(row)
+        ? "边说边出字，适合实时对话"
+        : "需说完后再识别，适合整句转写";
+      const title = isFastest
+        ? `当前体感最快：说完后等 ${this.formatMetricMs(latency)}`
+        : `说完后等 ${this.formatMetricMs(latency)}，比最快慢 ${this.formatMetricMs(Math.max(0, Math.round(delta)))}`;
+      const firstText = this.hasMetric(row && row.ttftMs)
+        ? `首段约 ${this.formatMetricMs(row.ttftMs)} 出字。`
+        : "";
+      return {
+        type: isFastest ? "best" : "slower",
+        title,
+        detail: `${modeText}。${firstText}`,
+      };
+    },
+    getAsrResultAudioDuration(row) {
+      const sample = row && Array.isArray(row.samples) ? row.samples[0] : null;
+      return this.getAsrSampleAudioDuration(sample);
+    },
+    getAsrSampleTailLatency(sample) {
+      const outputDetail = this.getOutputDetail(sample);
+      const topLevelValue = this.pickMetricValue(sample, ["tailLatencyMs", "tail_latency_ms"]);
+      if (this.hasMetric(topLevelValue)) return topLevelValue;
+      return this.pickMetricValue(outputDetail, ["tail_latency_ms", "tailLatencyMs"]);
+    },
+    getAsrSampleAudioDuration(sample) {
+      const inputDetail = this.getInputDetail(sample);
+      return this.pickMetricValue(inputDetail, ["audio_duration_ms", "audioDurationMs"]);
+    },
+    pickMetricValue(source, keys) {
+      if (!source) return null;
+      for (const key of keys) {
+        const value = source[key];
+        if (this.hasMetric(value)) return value;
+      }
+      return null;
+    },
+    isStreamingAsrResult(row) {
+      return this.isModelType(row, "asr") && this.hasMetric(this.getAsrResultTailLatency(row));
     },
     formatP0P1(value) {
       if (!Array.isArray(value) || value.length === 0) return this.$t("modelConfig.none");
@@ -929,6 +1131,73 @@ export default {
   line-height: 1.4;
 }
 
+.asr-decision {
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.asr-decision.best {
+  border-color: #95d475;
+  background: #f0f9eb;
+}
+
+.asr-decision.slower {
+  border-color: #f3d19e;
+  background: #fdf6ec;
+}
+
+.asr-decision strong,
+.asr-decision span {
+  display: block;
+}
+
+.asr-decision strong {
+  color: #303133;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.asr-decision span {
+  margin-top: 3px;
+  color: #606266;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.asr-latency-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 7px;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  background: #fff;
+  color: #606266;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.asr-latency-chip.primary {
+  border-color: #b3d8ff;
+  background: #ecf5ff;
+  color: #337ecc;
+  font-weight: 600;
+}
+
+.asr-latency-note {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-left: 3px solid #409eff;
+  background: #f4f9ff;
+  color: #606266;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .performance-result-item p {
   margin: 8px 0 0;
   color: #606266;
@@ -971,6 +1240,89 @@ export default {
   min-width: 0;
   text-align: right;
   word-break: break-word;
+}
+
+.asr-latency-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid #d9ecff;
+  border-radius: 4px;
+  background: #f4f9ff;
+}
+
+.asr-latency-verdict {
+  grid-column: 1 / -1;
+  padding: 10px;
+  border: 1px solid #d9ecff;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.asr-latency-verdict.best {
+  border-color: #95d475;
+  background: #f0f9eb;
+}
+
+.asr-latency-verdict.slower {
+  border-color: #f3d19e;
+  background: #fdf6ec;
+}
+
+.asr-latency-verdict strong,
+.asr-latency-verdict span {
+  display: block;
+}
+
+.asr-latency-verdict strong {
+  color: #303133;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.asr-latency-verdict span {
+  margin-top: 4px;
+  color: #606266;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.asr-latency-card {
+  padding: 8px;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.asr-latency-card span {
+  display: block;
+  margin-bottom: 4px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.asr-latency-card strong {
+  color: #303133;
+  font-size: 16px;
+  line-height: 1.3;
+}
+
+.asr-latency-card.primary {
+  border-color: #b3d8ff;
+}
+
+.asr-latency-card.primary strong {
+  color: #337ecc;
+}
+
+.asr-latency-panel p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #606266;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .judge-summary {

@@ -119,7 +119,8 @@ public class MemoryServiceImpl implements MemoryService {
         if (scope.agent == null || StringUtils.isBlank(dto.getText())) {
             return;
         }
-        memoryMaintenanceService.applyMaintenanceInstruction(scope.agent, scope.scopeId, dto.getText(), actorType, actorId);
+        memoryMaintenanceService.applyRememberInstruction(scope.agent, scope.scopeId, dto.getText(),
+                dto.getCategory(), actorType, actorId);
     }
 
     @Override
@@ -129,7 +130,8 @@ public class MemoryServiceImpl implements MemoryService {
         if (scope.agent == null || StringUtils.isBlank(dto.getText())) {
             return;
         }
-        memoryMaintenanceService.applyMaintenanceInstruction(scope.agent, scope.scopeId, dto.getText(), actorType, actorId);
+        memoryMaintenanceService.applyForgetInstruction(scope.agent, scope.scopeId, dto.getText(),
+                dto.getPatternType(), dto.getReason(), actorType, actorId);
     }
 
     @Override

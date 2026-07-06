@@ -31,7 +31,8 @@ public final class PowerMemPrompts {
             6. 只抽取未来对话可能复用的信息；没有可复用记忆价值时返回 {"facts":[]}。
             7. working 表示短暂上下文，short_term 表示阶段性有用，long_term 表示稳定长期事实或偏好。
             8. 不要依赖固定业务分类；是否值得记住完全由语义、可复用性、稳定性和证据强度决定。
-            9. 只返回 JSON，不要解释，不要 Markdown。
+            9. 如果用户同时表达“原本想要/偏好 X，但最终选择/得到 Y”，不要只保留最终状态；应把原始偏好和最终状态合并为同一条可读事实。
+            10. 只返回 JSON，不要解释，不要 Markdown。
 
             JSON 格式：
             {
@@ -81,6 +82,7 @@ public final class PowerMemPrompts {
             5. memory_type、category、canonical_text、confidence、importance、memory_tier、sensitivity 都由你最终确定。
             6. importance 代表未来可复用价值，confidence 代表证据确定性；低价值或低确定性内容应返回 NONE 或给出较低分。
             7. 不要依赖固定业务分类；只按语义稳定性、可复用性、用户个人相关性和证据强度决策。
+            8. 用户要求对第三方保密的秘密、生日、驾考挫折等隐私经历必须标为 sensitivity=sensitive；这类事实只应在用户直接询问时使用，不应主动泛化注入。
 
             JSON 格式：
             {
@@ -108,27 +110,31 @@ public final class PowerMemPrompts {
             """;
 
     /**
-     * 管理端手动指令提示词。
+     * 管理端显式记住提示词。
      */
-    public static final String COMMAND_DECISION_PROMPT = """
-            你是小智服务器的长期记忆维护助手。管理端给出了一条记忆维护指令，你需要结合已有记忆输出一个结构化动作。
+    public static final String REMEMBER_COMMAND_PROMPT = """
+            你是小智服务器的长期记忆维护助手。管理端给出了一条“显式记住”指令，你需要结合已有记忆输出一个结构化动作。
 
-            管理端指令：
-            {instruction}
+            显式记住内容：
+            {text}
+
+            用户指定分类（可为空）：
+            {category}
 
             已有记忆：
             {existing_memories}
 
             要求：
-            1. 只根据指令语义和已有记忆决定 ADD、UPDATE、ARCHIVE、DELETE 或 NONE。
-            2. UPDATE、ARCHIVE 或 DELETE 必须填写 related_memory_id。
+            1. 这是“记住”入口，通常输出 ADD 或 UPDATE；只有内容无事实价值、明显误听或不应保存时才输出 NONE。
+            2. 如果已有记忆表达同一事实或需要修正旧事实，输出 UPDATE 并填写 related_memory_id。
             3. ADD 或 UPDATE 必须填写 canonical_text、memory_type、category、confidence、importance、memory_tier 和 sensitivity。
-            4. 只返回 JSON，不要解释，不要 Markdown。
+            4. category 可以参考用户指定分类，但必须改写为自然中文短语。
+            5. 只返回 JSON，不要解释，不要 Markdown。
 
             JSON 格式：
             {
-              "action": "ADD|UPDATE|ARCHIVE|DELETE|NONE",
-              "related_memory_id": "仅 UPDATE/ARCHIVE/DELETE 时填写已有记忆 ID，否则为空",
+              "action": "ADD|UPDATE|NONE",
+              "related_memory_id": "仅 UPDATE 时填写已有记忆 ID，否则为空",
               "memory_type": "最终确定的记忆类型",
               "category": "最终确定的分类",
               "canonical_text": "可直接写入记忆的中文事实",
@@ -145,6 +151,44 @@ public final class PowerMemPrompts {
               },
               "sensitivity": "normal|personal|sensitive",
               "reason": "决策原因，少于30字"
+            }
+            """;
+
+    /**
+     * 管理端显式忘记提示词。
+     */
+    public static final String FORGET_COMMAND_PROMPT = """
+            你是小智服务器的长期记忆治理助手。管理端给出了一条“显式忘记”指令，你需要找出应删除或归档的已有记忆，并生成阻止回流的忘记规则。
+
+            显式忘记内容：
+            {text}
+
+            忘记原因（可为空）：
+            {reason}
+
+            规则类型偏好（semantic/exact/category，可为空）：
+            {pattern_type}
+
+            已有记忆：
+            {existing_memories}
+
+            要求：
+            1. 这是“忘记”入口，不要输出 ADD 或 UPDATE。
+            2. 如果已有记忆应彻底遗忘，输出 DELETE；如果只是未来不主动注入，输出 ARCHIVE。
+            3. 能匹配到已有记忆时必须填写 related_memory_id。
+            4. tombstone_pattern 必须是可阻止历史重建回流的简短中文规则，优先使用用户要求忘记的核心内容。
+            5. 没有匹配事实时仍然返回 NONE，但必须填写 tombstone_pattern，用于阻止未来重新写入。
+            6. 只返回 JSON，不要解释，不要 Markdown。
+
+            JSON 格式：
+            {
+              "action": "DELETE|ARCHIVE|NONE",
+              "related_memory_id": "仅 DELETE/ARCHIVE 时填写已有记忆 ID，否则为空",
+              "canonical_text": "被忘记事实或规则核心文本",
+              "tombstone_pattern": "忘记规则文本",
+              "pattern_type": "semantic|exact|category",
+              "confidence": 0.0,
+              "reason": "忘记原因，少于30字"
             }
             """;
 
@@ -247,10 +291,12 @@ public final class PowerMemPrompts {
             2. 不要输出英文枚举、下划线字段名或数据库字段名，例如 personal_info、preference、hobby、fact。
             3. canonical_text 必须只保留证据中能直接支持的单条自然中文事实；无法从证据确认的尾巴、推测、误听或混杂内容必须删去。
             4. 如果一句中混合了互不相关的信息，只保留同一事实核心，不扩展新事实。
-            5. merge 模式下，如果 ADD 与已有记忆表达同一事实、同义称呼、补充称呼或纠正旧事实，应改为 UPDATE 并填写 related_memory_id。
-            6. 对未来复用价值低、证据不足或不应进入长期事实库的动作，应改为 NONE；对已有但不再适合主动注入的事实可改为 ARCHIVE。
-            7. clear_then_rebuild 模式下不要输出 UPDATE、ARCHIVE 或 DELETE 动作；最终事实库只需要 ADD 或 NONE 动作。
-            8. 只返回合法 JSON，不要解释，不要 Markdown。
+            5. 如果证据显示“原本想要/偏好 X，但最终选择/得到 Y”，不要删掉原始偏好；应保留为同一条事实的限定说明。
+            6. merge 模式下，如果 ADD 与已有记忆表达同一事实、同义称呼、补充称呼或纠正旧事实，应改为 UPDATE 并填写 related_memory_id。
+            7. 对未来复用价值低、证据不足或不应进入长期事实库的动作，应改为 NONE；对已有但不再适合主动注入的事实可改为 ARCHIVE。
+            8. clear_then_rebuild 模式下不要输出 UPDATE、ARCHIVE 或 DELETE 动作；最终事实库只需要 ADD 或 NONE 动作。
+            9. 用户要求对第三方保密的秘密、生日、驾考挫折等隐私经历必须标为 sensitivity=sensitive；这类事实只应在用户直接询问时使用，不应主动泛化注入。
+            10. 只返回合法 JSON，不要解释，不要 Markdown。
 
             重建模式：
             {mode}

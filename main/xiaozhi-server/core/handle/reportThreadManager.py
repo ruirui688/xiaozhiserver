@@ -2,6 +2,7 @@
 import queue
 import threading
 import asyncio
+import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -35,14 +36,17 @@ class ReportThreadManager:
                 # 从队列获取数据，设置超时以便定期检查停止事件
                 item = conn.report_queue.get(timeout=1)
                 if item is None:  # 检测毒丸对象
+                    conn.report_queue.task_done()
                     break
                 try:
                     # 检查线程池状态
                     if conn.executor is None:
+                        conn.report_queue.task_done()
                         continue
                     # 提交任务到线程池
                     conn.executor.submit(self._process_report, conn, *item)
                 except Exception as e:
+                    conn.report_queue.task_done()
                     conn.logger.bind(tag=TAG).error(f"聊天记录上报线程异常: {e}")
             except queue.Empty:
                 continue
@@ -63,6 +67,12 @@ class ReportThreadManager:
             conn.report_queue.task_done()
 
     def stop(self, conn: "ConnectionHandler"):
-        """Stop the report thread by sending poison pill."""
+        """Stop the report thread and wait briefly for queued reports."""
         if conn.report_thread and conn.report_thread.is_alive():
             conn.report_queue.put(None)
+            conn.report_thread.join(timeout=2)
+        deadline = time.time() + 10
+        while getattr(conn.report_queue, "unfinished_tasks", 0) > 0 and time.time() < deadline:
+            time.sleep(0.05)
+        if getattr(conn.report_queue, "unfinished_tasks", 0) > 0:
+            conn.logger.bind(tag=TAG).warning("聊天记录上报队列仍有未完成任务，关闭流程继续")

@@ -2,7 +2,7 @@
   <div class="recall-view">
     <div class="recall-controls">
       <div class="recall-input-row">
-        <el-input v-model="queryText" type="textarea" :rows="3" placeholder="输入测试查询文本，模拟记忆召回效果..." @keyup.ctrl.enter.native="runTest" />
+        <el-input v-model="queryText" type="textarea" :rows="3" placeholder="输入测试查询文本，本地模拟记忆召回效果..." @keyup.ctrl.enter.native="runTest" />
       </div>
       <div class="recall-params">
         <div class="param-group">
@@ -27,7 +27,7 @@
     <div class="recall-results" v-if="results.length > 0">
       <div class="results-header">
         <strong>{{ results.length }} 条匹配</strong>
-        <span class="results-hint">按相关性从高到低排列</span>
+        <span class="results-hint">按本地模拟相关性从高到低排列，不调用真实运行时查询</span>
       </div>
       <div class="result-item" v-for="(r, i) in results" :key="r.memoryId || i">
         <div class="result-rank">{{ i + 1 }}</div>
@@ -57,7 +57,7 @@
       <div v-else>
         <i class="el-icon-search" style="font-size:40px;color:#c0c4cc;margin-bottom:8px" />
         <p>输入查询文本并点击「开始测试」</p>
-        <span>模拟记忆召回效果，无需调用真实 LLM</span>
+          <span>仅基于当前事实记忆本地模拟，不调用真实运行时查询</span>
       </div>
     </div>
   </div>

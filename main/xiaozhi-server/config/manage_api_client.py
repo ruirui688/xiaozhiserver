@@ -255,6 +255,7 @@ async def report_memory_event(
     event_type: str = "chat",
     report_time: Optional[int] = None,
     event_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
 ) -> Optional[Dict]:
     """上报长期记忆原始事件。失败不影响实时对话和聊天记录。"""
     if not content or not ManageApiClient._instance:
@@ -266,6 +267,7 @@ async def report_memory_event(
             json={
                 "eventId": event_id,
                 "macAddress": mac_address,
+                "agentId": agent_id,
                 "sessionId": session_id,
                 "chatType": chat_type,
                 "eventType": event_type,
@@ -300,7 +302,7 @@ def build_memory_event_id(
 
 
 async def query_managed_memory(
-    mac_address: str, query: str, limit: int = 8
+    mac_address: str, query: str, limit: int = 8, agent_id: Optional[str] = None
 ) -> Optional[str]:
     """查询 manager-api 维护的长期记忆上下文。"""
     if not query or not ManageApiClient._instance:
@@ -311,6 +313,7 @@ async def query_managed_memory(
             "/config/memory/query",
             json={
                 "macAddress": mac_address,
+                "agentId": agent_id,
                 "query": query,
                 "limit": limit,
             },
@@ -342,6 +345,8 @@ async def trigger_session_memory_processing(
                 "/config/memory/process-session",
                 json={"sessionId": session_id, "agentId": agent_id},
             )
+            if isinstance(result, int):
+                return result
             if isinstance(result, dict):
                 return result.get("data") if isinstance(result.get("data"), int) else 0
             return 0

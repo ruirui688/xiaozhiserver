@@ -60,6 +60,10 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
         }
         int limit = dto.getLimit() == null ? 8 : Math.max(1, Math.min(dto.getLimit(), 20));
         Date now = new Date();
+        List<MemoryForgetTombstoneEntity> activeTombstones = loadActiveTombstones(scope.agent.getId(), scope.scopeId);
+        vo.setBlockedPatterns(activeTombstones.stream()
+                .map(MemoryForgetTombstoneEntity::getPatternText)
+                .toList());
 
         // 用户画像
         QueryWrapper<MemoryProfileEntity> profileWrapper = new QueryWrapper<>();
@@ -130,19 +134,11 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
             factWrapper.orderByDesc("importance", "last_seen_at").last("LIMIT " + limit);
             facts = factDao.selectList(factWrapper);
             if (facts.isEmpty() && StringUtils.isNotBlank(keyword)) {
-                QueryWrapper<MemoryFactEntity> fallback = new QueryWrapper<>();
-                fallback.eq("agent_id", scope.agent.getId())
-                        .eq("scope_type", MemoryHelper.SCOPE_DEVICE)
-                        .and(w -> w.eq("scope_id", scope.scopeId).or().eq("scope_id", scope.agent.getId()))
-                        .eq("status", MemoryHelper.STATUS_ACTIVE)
-                        .and(w -> w.isNull("expires_at").or().gt("expires_at", now))
-                        .orderByDesc("importance", "last_seen_at")
-                        .last("LIMIT " + limit);
-                facts = factDao.selectList(fallback);
+                vo.getDebugSignals().add("keyword_no_match_no_broad_fallback");
             }
         }
+        facts = filterBlockedFacts(facts, activeTombstones, vo);
         vo.setFacts(facts);
-        refreshFactAccess(facts, now);
 
         // 工具行为
         QueryWrapper<MemoryToolBehaviorEntity> toolWrapper = new QueryWrapper<>();
@@ -153,17 +149,6 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
                 .last("LIMIT 5");
         vo.setToolBehaviors(toolBehaviorDao.selectList(toolWrapper));
 
-        // 忘记名单
-        QueryWrapper<MemoryForgetTombstoneEntity> tombstoneWrapper = new QueryWrapper<>();
-        tombstoneWrapper.eq("agent_id", scope.agent.getId())
-                .eq("scope_type", MemoryHelper.SCOPE_DEVICE)
-                .and(w -> w.eq("scope_id", scope.scopeId).or().eq("scope_id", scope.agent.getId()))
-                .eq("status", MemoryHelper.STATUS_ACTIVE)
-                .orderByDesc("created_at")
-                .last("LIMIT 10");
-        vo.setBlockedPatterns(tombstoneDao.selectList(tombstoneWrapper).stream()
-                .map(MemoryForgetTombstoneEntity::getPatternText)
-                .toList());
         vo.setContext(buildContext(vo));
         return vo;
     }
@@ -204,17 +189,6 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
         return builder.toString().trim();
     }
 
-    private void refreshFactAccess(List<MemoryFactEntity> facts, Date now) {
-        if (facts == null || facts.isEmpty()) {
-            return;
-        }
-        for (MemoryFactEntity fact : facts) {
-            fact.setLastSeenAt(now);
-            fact.setUpdatedAt(now);
-            factDao.updateById(fact);
-        }
-    }
-
     /**
      * 解析作用域：通过 macAddress / agentId 确定智能体和 scopeId。
      */
@@ -251,6 +225,57 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
             log.debug("生成嵌入向量失败（将回退到维护模型上下文决策）: {}", e.getMessage());
             return null;
         }
+    }
+
+    private List<MemoryForgetTombstoneEntity> loadActiveTombstones(String agentId, String scopeId) {
+        QueryWrapper<MemoryForgetTombstoneEntity> tombstoneWrapper = new QueryWrapper<>();
+        tombstoneWrapper.eq("agent_id", agentId)
+                .eq("scope_type", MemoryHelper.SCOPE_DEVICE)
+                .and(w -> w.eq("scope_id", scopeId).or().eq("scope_id", agentId))
+                .eq("status", MemoryHelper.STATUS_ACTIVE)
+                .orderByDesc("created_at")
+                .last("LIMIT 50");
+        return tombstoneDao.selectList(tombstoneWrapper);
+    }
+
+    private List<MemoryFactEntity> filterBlockedFacts(List<MemoryFactEntity> facts,
+                                                      List<MemoryForgetTombstoneEntity> tombstones,
+                                                      MemoryQueryVO vo) {
+        if (facts == null || facts.isEmpty() || tombstones == null || tombstones.isEmpty()) {
+            return facts == null ? List.of() : facts;
+        }
+        List<MemoryFactEntity> filtered = new ArrayList<>();
+        for (MemoryFactEntity fact : facts) {
+            MemoryForgetTombstoneEntity matched = findMatchedTombstone(fact, tombstones);
+            if (matched == null) {
+                filtered.add(fact);
+            } else {
+                vo.getMatchedTombstones().add(matched);
+                vo.getDebugSignals().add("fact_blocked_by_tombstone:" + fact.getMemoryId());
+            }
+        }
+        return filtered;
+    }
+
+    private MemoryForgetTombstoneEntity findMatchedTombstone(MemoryFactEntity fact,
+                                                            List<MemoryForgetTombstoneEntity> tombstones) {
+        String text = compactForTombstoneMatch(fact == null ? null : fact.getCanonicalText());
+        if (StringUtils.isBlank(text)) {
+            return null;
+        }
+        for (MemoryForgetTombstoneEntity tombstone : tombstones) {
+            String pattern = compactForTombstoneMatch(tombstone.getPatternText());
+            if (StringUtils.isNotBlank(pattern) && (text.contains(pattern) || pattern.contains(text))) {
+                return tombstone;
+            }
+        }
+        return null;
+    }
+
+    private String compactForTombstoneMatch(String text) {
+        return MemoryHelper.cleanupMemoryText(text)
+                .replaceAll("[\\p{Punct}\\s，。！？、；：]+", "")
+                .toLowerCase();
     }
 
     /**

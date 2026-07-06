@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -97,10 +98,33 @@ class ModelCatalogServiceImplTest {
                 "TTS_DOUBAO_SEED_TTS_2_STREAM"), templateCodes);
     }
 
+    @Test
+    void slmCatalogViewReusesLlmTemplateButKeepsSlmType() throws Exception {
+        ModelCatalogDTO llmTemplate = staticCatalog().stream()
+                .filter(item -> "LLM_OPENAI_COMPATIBLE".equals(item.getTemplateCode()))
+                .findFirst()
+                .orElseThrow();
+
+        ModelCatalogDTO slmTemplate = toSlmCatalogView(llmTemplate);
+
+        assertEquals("SLM_OPENAI_COMPATIBLE", slmTemplate.getTemplateCode());
+        assertEquals("SLM", slmTemplate.getModelType());
+        assertEquals("openai", slmTemplate.getProviderCode());
+        assertEquals(llmTemplate.getFieldSchemas(), slmTemplate.getFieldSchemas());
+        assertEquals("必须执行真实对话调用；主对话模型还应跑真实设备智能体评测。", slmTemplate.getTestContract());
+    }
+
     @SuppressWarnings("unchecked")
     private List<ModelCatalogDTO> staticCatalog() throws Exception {
         Field catalogField = ModelCatalogServiceImpl.class.getDeclaredField("CATALOG");
         catalogField.setAccessible(true);
         return (List<ModelCatalogDTO>) catalogField.get(null);
+    }
+
+    private ModelCatalogDTO toSlmCatalogView(ModelCatalogDTO llmTemplate) throws Exception {
+        ModelCatalogServiceImpl service = new ModelCatalogServiceImpl(null, null, null);
+        Method method = ModelCatalogServiceImpl.class.getDeclaredMethod("toSlmCatalogView", ModelCatalogDTO.class);
+        method.setAccessible(true);
+        return (ModelCatalogDTO) method.invoke(service, llmTemplate);
     }
 }

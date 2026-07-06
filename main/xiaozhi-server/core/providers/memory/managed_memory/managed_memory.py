@@ -25,8 +25,8 @@ class MemoryProvider(MemoryProviderBase):
         # would create a race between the Python-side and Java-side pipelines.
         self.role_id = None
 
-    async def init_memory(self, role_id, llm, summary_memory=None, save_to_file=True):
-        self.role_id = role_id
+    def init_memory(self, role_id, llm, summary_memory=None, save_to_file=True):
+        super().init_memory(role_id=role_id, llm=llm)
 
     async def save_memory(self, msgs, session_id=None):
         logger.bind(tag=TAG).debug(
