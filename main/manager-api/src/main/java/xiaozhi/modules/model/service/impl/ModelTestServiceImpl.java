@@ -125,12 +125,16 @@ public class ModelTestServiceImpl implements ModelTestService {
                 result = testTtsModel(configJson, type);
                 return applyModelTestSemantics(result, testLevel);
             }
-            if ("INTENT".equals(modelType) && "intent_llm".equals(type)) {
-                result = testIntentModel(configJson);
+            if ("INTENT".equals(modelType)) {
+                result = testIntentModel(configJson, type);
                 return applyModelTestSemantics(result, testLevel);
             }
             if ("MEMORY".equals(modelType)) {
                 result = testMemoryModel(configJson, type);
+                return applyModelTestSemantics(result, testLevel);
+            }
+            if ("RAG".equals(modelType)) {
+                result = testRagModel(configJson, type);
                 return applyModelTestSemantics(result, testLevel);
             }
             if (LOCAL_TESTABLE_TYPES.contains(type)) {
@@ -230,14 +234,18 @@ public class ModelTestServiceImpl implements ModelTestService {
                         || CollectionUtil.isNotEmpty(getMissingAlternativeRequirements(modelConfig.getConfigJson(), modelType, type)))) {
             return TEST_LEVEL_REAL_INFERENCE;
         }
-        if ("INTENT".equals(modelType) && "intent_llm".equals(type)) {
-            return TEST_LEVEL_CONFIG_ONLY;
+        if ("INTENT".equals(modelType)
+                && ("nointent".equals(type) || "function_call".equals(type) || "intent_llm".equals(type))) {
+            return TEST_LEVEL_RUNTIME_CONFIG;
         }
         if ("MEMORY".equals(modelType)
                 && ("nomem".equals(type) || "mem_report_only".equals(type) || "managed_memory".equals(type))) {
             return TEST_LEVEL_RUNTIME_CONFIG;
         }
         if ("VAD".equals(modelType) && "silero".equals(type)) {
+            return TEST_LEVEL_RUNTIME_CONFIG;
+        }
+        if ("RAG".equals(modelType) && "local_knowledge".equals(type)) {
             return TEST_LEVEL_RUNTIME_CONFIG;
         }
         if (LOCAL_TESTABLE_TYPES.contains(type)) {
@@ -337,7 +345,18 @@ public class ModelTestServiceImpl implements ModelTestService {
         return result;
     }
 
-    private ModelTestResultDTO testIntentModel(JSONObject configJson) {
+    private ModelTestResultDTO testIntentModel(JSONObject configJson, String type) {
+        String normalizedType = StringUtils.lowerCase(StringUtils.defaultString(type));
+        if ("nointent".equals(normalizedType)) {
+            return buildLocalIntentTestResult(normalizedType, "无意图识别配置有效，用户输入会直接进入主聊天。");
+        }
+        if ("function_call".equals(normalizedType)) {
+            return buildLocalIntentTestResult(normalizedType, "函数调用意图配置有效，将由主 LLM 的工具调用能力选择函数。");
+        }
+        if (!"intent_llm".equals(normalizedType)) {
+            return validateBasicModelConfig(configJson, normalizedType, "INTENT");
+        }
+
         ModelTestResultDTO result = new ModelTestResultDTO();
         String llmModelId = configJson.getStr("llm");
         if (StringUtils.isBlank(llmModelId)) {
@@ -359,6 +378,30 @@ public class ModelTestServiceImpl implements ModelTestService {
         result.setMessage("关联 LLM 已测试通过");
         result.setTestInput("关联 LLM：" + llmModelId);
         result.setTestOutput("关联 LLM 已通过测试，可用于意图识别");
+        return result;
+    }
+
+    private ModelTestResultDTO testRagModel(JSONObject configJson, String type) {
+        String normalizedType = StringUtils.lowerCase(StringUtils.defaultString(type));
+        if ("local_knowledge".equals(normalizedType)) {
+            ModelTestResultDTO result = new ModelTestResultDTO();
+            String maxChunkChars = StringUtils.defaultIfBlank(configJson.getStr("max_chunk_chars"), "默认");
+            result.setSuccess(true);
+            result.setMessage("本地知识库运行时配置通过；数据存储和召回由 manager-api 知识库模块执行。");
+            result.setTestInput("模型类型：RAG\n供应器类型：" + normalizedType
+                    + "\n测试内容：本地知识库运行时配置校验\n切片最大字符数：" + maxChunkChars);
+            result.setTestOutput("本地知识库适配器可启用；实际召回效果请在知识库页面使用召回测试验证。");
+            return result;
+        }
+        return validateBasicModelConfig(configJson, normalizedType, "RAG");
+    }
+
+    private ModelTestResultDTO buildLocalIntentTestResult(String type, String message) {
+        ModelTestResultDTO result = new ModelTestResultDTO();
+        result.setSuccess(true);
+        result.setMessage(message);
+        result.setTestInput("模型类型：INTENT\n供应器类型：" + type + "\n测试内容：本地运行时配置校验");
+        result.setTestOutput(message);
         return result;
     }
 
