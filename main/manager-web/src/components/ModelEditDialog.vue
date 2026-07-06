@@ -541,7 +541,7 @@ export default {
         );
         if (provider) {
             this.dynamicCallInfoFields = (provider.fieldSchemas || [])
-              .filter((f) => !this.isMetadataField(f.key, provider))
+              .filter((f) => !this.isMetadataField(f.key, provider, f))
               .map((f) => {
                 const inputType = this.getInputType(f);
                 const modelTypes = inputType === "model-select" ? this.getModelReferenceTypes(f) : [];
@@ -617,7 +617,8 @@ export default {
         model: "填写模型名称",
         voice: "填写音色 ID",
         speaker: "选择音色 Voice_type",
-        maintenance_llm: "选择已配置并测试通过的 LLM/SLM 作为维护模型。留空则只做显式记住/忘记，不做自动抽取",
+        llm: "选择已配置并测试通过的 LLM/SLM 作为外挂意图识别模型。不会在意图识别配置里重复保存 API Key",
+        maintenance_llm: "必选。选择已配置并测试通过的 LLM/SLM 作为记忆维护模型；这里只保存模型 ID，不保存 API Key",
         speech_rate: "范围 -50 到 100，0 为默认语速",
         loudness_rate: "范围 -50 到 100，0 为默认音量",
         pitch: "范围 -12 到 12，0 为默认音高",
@@ -765,7 +766,10 @@ export default {
       }
       return "common";
     },
-    isMetadataField(key, template = {}) {
+    isMetadataField(key, template = {}, field = {}) {
+      if (this.getInputType(field) === "model-select" || ["llm", "maintenance_llm"].includes(key)) {
+        return false;
+      }
       if (this.endpointKeys().includes(key)) {
         return true;
       }
@@ -904,7 +908,7 @@ export default {
         language: "指定识别语言编码，例如 zh-CN。",
         thinking: "是否开启模型思考模式，语音场景通常关闭以降低延迟。",
         reasoning_effort: "思考强度，仅在 thinking 启用时生效。",
-        maintenance_llm: "选择一个已配置并测试通过的 LLM/SLM 作为记忆维护模型。它会从用户发言中自动抽取长期事实并直接写入记忆库，无需手动确认。不会在 Memory 配置里保存 API Key。",
+        maintenance_llm: "选择一个已配置并测试通过的 LLM/SLM 作为记忆维护模型。它用于抽取、合并、显式记住/忘记和 tombstone 治理；候选仅用于预览/审核，运行时只召回生效事实。不会在 Memory 配置里保存 API Key。",
       }[key] || "";
     },
     normalizeDynamicFieldValue(value, field) {

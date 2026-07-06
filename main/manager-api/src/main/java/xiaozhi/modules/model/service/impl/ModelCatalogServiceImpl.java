@@ -305,29 +305,40 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
     }
 
     private ModelCatalogDTO inferOpenAiCompatible(String modelType, String haystack) {
-        String type = "VLLM".equalsIgnoreCase(modelType) ? "VLLM" : "LLM";
+        String type = "VLLM".equalsIgnoreCase(modelType) ? "VLLM"
+                : "SLM".equalsIgnoreCase(modelType) ? "SLM" : "LLM";
         if (haystack.contains("dashscope") || haystack.contains("qwen")) {
-            return "VLLM".equals(type) ? find("VLLM_QWEN_VL_OPENAI") : find("LLM_ALI_QWEN_OPENAI");
+            return "VLLM".equals(type) ? find("VLLM_QWEN_VL_OPENAI")
+                    : find(textTemplateCode(type, "LLM_ALI_QWEN_OPENAI"));
         }
         if (haystack.contains("ark.cn") || haystack.contains("doubao")) {
             if (haystack.contains("seed")) {
-                return find("LLM_DOUBAO_SEED_OPENAI");
+                return find(textTemplateCode(type, "LLM_DOUBAO_SEED_OPENAI"));
             }
-            return find("LLM_OPENAI_COMPATIBLE");
+            return find(textTemplateCode(type, "LLM_OPENAI_COMPATIBLE"));
         }
         if (haystack.contains("deepseek")) {
-            return find("LLM_DEEPSEEK_OPENAI");
+            return find(textTemplateCode(type, "LLM_DEEPSEEK_OPENAI"));
         }
         if (haystack.contains("bigmodel") || haystack.contains("glm")) {
-            return "VLLM".equals(type) ? find("VLLM_ZHIPU_GLM_OPENAI") : find("LLM_ZHIPU_GLM_OPENAI");
+            return "VLLM".equals(type) ? find("VLLM_ZHIPU_GLM_OPENAI")
+                    : find(textTemplateCode(type, "LLM_ZHIPU_GLM_OPENAI"));
         }
         if (haystack.contains("xf-yun") || haystack.contains("spark")) {
-            return "VLLM".equals(type) ? find("VLLM_XUNFEI_SPARK_OPENAI") : find("LLM_OPENAI_COMPATIBLE");
+            return "VLLM".equals(type) ? find("VLLM_XUNFEI_SPARK_OPENAI")
+                    : find(textTemplateCode(type, "LLM_OPENAI_COMPATIBLE"));
         }
         if (haystack.contains("localhost:1234") || haystack.contains("lm-studio")) {
-            return find("LLM_LM_STUDIO_OPENAI");
+            return find(textTemplateCode(type, "LLM_LM_STUDIO_OPENAI"));
         }
-        return "VLLM".equals(type) ? find("VLLM_OPENAI_COMPATIBLE") : find("LLM_OPENAI_COMPATIBLE");
+        return "VLLM".equals(type) ? find("VLLM_OPENAI_COMPATIBLE") : find(textTemplateCode(type, "LLM_OPENAI_COMPATIBLE"));
+    }
+
+    private String textTemplateCode(String modelType, String llmTemplateCode) {
+        if ("SLM".equalsIgnoreCase(modelType)) {
+            return toSlmTemplateCode(llmTemplateCode);
+        }
+        return llmTemplateCode;
     }
 
     private ModelCatalogDTO find(String templateCode) {
@@ -340,17 +351,87 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
     private List<ModelCatalogDTO> effectiveCatalog() {
         ensureCatalogSeeded();
         List<ModelCatalogDTO> fromDb = loadCatalogFromDatabase();
-        if (fromDb.isEmpty()) {
-            return CATALOG;
-        }
         Map<String, ModelCatalogDTO> merged = new HashMap<>();
+        if (fromDb.isEmpty()) {
+            for (ModelCatalogDTO item : CATALOG) {
+                merged.put(item.getTemplateCode(), item);
+            }
+            addSlmCatalogViews(merged);
+            return new ArrayList<>(merged.values());
+        }
         for (ModelCatalogDTO item : fromDb) {
             merged.put(item.getTemplateCode(), item);
         }
         for (ModelCatalogDTO item : CATALOG) {
             merged.putIfAbsent(item.getTemplateCode(), item);
         }
+        addSlmCatalogViews(merged);
         return new ArrayList<>(merged.values());
+    }
+
+    private void addSlmCatalogViews(Map<String, ModelCatalogDTO> catalog) {
+        List<ModelCatalogDTO> llmTemplates = new ArrayList<>(catalog.values()).stream()
+                .filter(item -> "LLM".equalsIgnoreCase(item.getModelType()))
+                .filter(item -> !Boolean.TRUE.equals(item.getHidden()))
+                .filter(item -> !Boolean.TRUE.equals(item.getDeprecated()))
+                .filter(item -> Boolean.TRUE.equals(item.getSelectable()))
+                .toList();
+        for (ModelCatalogDTO llmTemplate : llmTemplates) {
+            ModelCatalogDTO slmTemplate = toSlmCatalogView(llmTemplate);
+            catalog.putIfAbsent(slmTemplate.getTemplateCode(), slmTemplate);
+        }
+    }
+
+    private ModelCatalogDTO toSlmCatalogView(ModelCatalogDTO source) {
+        ModelCatalogDTO dto = new ModelCatalogDTO();
+        dto.setTemplateCode(toSlmTemplateCode(source.getTemplateCode()));
+        dto.setModelType("SLM");
+        dto.setProviderCode(source.getProviderCode());
+        dto.setAdapterName(source.getAdapterName());
+        dto.setVendorName(source.getVendorName());
+        dto.setProductName(source.getProductName());
+        dto.setCapability(source.getCapability());
+        dto.setCapabilityLabel("小参数模型");
+        dto.setAccessMode(source.getAccessMode());
+        dto.setAccessModeLabel(source.getAccessModeLabel());
+        dto.setDeployment(source.getDeployment());
+        dto.setDeploymentLabel(source.getDeploymentLabel());
+        dto.setProtocolLabel(source.getProtocolLabel());
+        dto.setUpstreamResourceLabel(source.getUpstreamResourceLabel());
+        dto.setUpstreamModelField(source.getUpstreamModelField());
+        dto.setCredentialFields(source.getCredentialFields());
+        dto.setRequiredFields(source.getRequiredFields());
+        dto.setRecommendedFields(source.getRecommendedFields());
+        dto.setFieldSchemas(source.getFieldSchemas());
+        dto.setDocLink(source.getDocLink());
+        dto.setSetupHints(source.getSetupHints());
+        dto.setKnownLimitations(source.getKnownLimitations());
+        dto.setHidden(source.getHidden());
+        dto.setDeprecated(source.getDeprecated());
+        dto.setSupportedStatus(source.getSupportedStatus());
+        dto.setSelectable(source.getSelectable());
+        dto.setRecommendedFor("摘要、标题、记忆维护、意图识别等轻量文本任务；底层复用 LLM 聊天模型 provider。");
+        dto.setAvoidWhen(source.getAvoidWhen());
+        dto.setTestContract(defaultTestContract("SLM"));
+        dto.setSourceCheckedAt(source.getSourceCheckedAt());
+        dto.setAliases(buildSlmAliases(source));
+        dto.setSort(source.getSort());
+        return dto;
+    }
+
+    private List<String> buildSlmAliases(ModelCatalogDTO source) {
+        List<String> aliases = new ArrayList<>();
+        aliases.add(toSlmTemplateCode(source.getTemplateCode()));
+        aliases.add(source.getTemplateCode());
+        aliases.addAll(source.getAliases());
+        return aliases.stream().filter(StringUtils::isNotBlank).distinct().toList();
+    }
+
+    private String toSlmTemplateCode(String templateCode) {
+        if (StringUtils.startsWithIgnoreCase(templateCode, "LLM_")) {
+            return "SLM_" + templateCode.substring(4);
+        }
+        return "SLM_" + templateCode;
     }
 
     private synchronized void ensureCatalogSeeded() {
@@ -1077,8 +1158,8 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 "local", "本地", "None", "无", "",
                 List.of(), List.of(), List.of(), List.of("所有请求直接进入聊天。"), List.of(),
                 List.of("Intent_nointent"), ""));
-        items.add(item("INTENT_LLM", "Intent", "intent_llm", "LLM 意图识别",
-                "本地系统", "LLM 意图识别", "intent", "意图识别", "llm", "LLM 分类",
+        items.add(item("INTENT_LLM", "Intent", "intent_llm", "外挂大模型意图识别",
+                "本地系统", "外挂大模型意图识别", "intent", "意图识别", "llm", "LLM 分类",
                 "local", "本地", "LLM", "LLM 模型", "llm",
                 List.of(), List.of("llm"), List.of("llm", "functions"),
                 List.of("可使用独立小模型做意图识别。"), List.of(), List.of("Intent_intent_llm"), ""));
@@ -1390,10 +1471,13 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
     private static ModelFieldSchemaDTO field(String key, boolean credential, boolean required, int order) {
         ModelFieldSchemaDTO field = new ModelFieldSchemaDTO();
         boolean secret = isSecretKey(key);
+        boolean modelReference = isModelReferenceKey(key);
         field.setKey(key);
         field.setLabel(labelFor(key));
         field.setType(typeFor(key));
-        field.setInputType(inputTypeForTypeStatic(field.getType(), secret, optionsFor(key)));
+        field.setInputType(modelReference
+                ? "model-select"
+                : inputTypeForTypeStatic(field.getType(), secret, optionsFor(key)));
         if ("context_text".equals(key)) {
             field.setInputType("textarea");
         }
@@ -1405,7 +1489,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         field.setDefaultValue(defaultValueFor(key));
         field.setOrder(order);
         field.setHelpText(helpFor(key));
-        field.setOptions(optionsFor(key));
+        field.setOptions(modelReference ? MODEL_REFERENCE_OPTIONS : optionsFor(key));
         return field;
     }
 
@@ -1448,7 +1532,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             case "api_url" -> "API URL";
             case "ws_url" -> "WebSocket URL";
             case "model", "model_name" -> "模型";
-            case "llm" -> "总结 LLM";
+            case "llm" -> "外挂大模型";
             case "maintenance_llm" -> "记忆维护 LLM";
             case "resource_id" -> "Resource ID";
             case "voice", "speaker", "voice_id" -> "音色";
@@ -1519,7 +1603,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             case "group_id" -> "MiniMax 控制台中的用户组 ID，用于拼接流式 TTS 调用地址。";
             case "resource_id" -> "云平台开通具体语音服务后得到的资源标识，不等同于配置名称。";
             case "model", "model_name" -> "上游平台实际调用的模型 ID。";
-            case "llm" -> "用于短记忆总结的 LLM 模型配置 ID。";
+            case "llm" -> "选择模型管理中已配置并测试通过的 LLM/SLM，作为外挂意图识别或短记忆总结模型；密钥仍保存在对应 LLM/SLM 配置中。";
             case "maintenance_llm" -> "用于长期记忆候选抽取的 LLM 模型配置 ID，例如模型管理中已配置的 DeepSeek/OpenAI 兼容模型；密钥仍保存在对应 LLM 配置中。";
             case "voice", "speaker", "voice_id" -> "上游平台音色 ID。";
             case "private_voice" -> "智能体私有音色覆盖字段；为空时使用当前模型默认音色。";
@@ -1563,5 +1647,10 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 || lower.endsWith("_api_secret")
                 || lower.endsWith("_token")
                 || lower.endsWith("_password");
+    }
+    private static final List<String> MODEL_REFERENCE_OPTIONS = List.of("LLM", "SLM");
+
+    private static boolean isModelReferenceKey(String key) {
+        return Set.of("llm", "maintenance_llm").contains(StringUtils.lowerCase(StringUtils.defaultString(key)));
     }
 }

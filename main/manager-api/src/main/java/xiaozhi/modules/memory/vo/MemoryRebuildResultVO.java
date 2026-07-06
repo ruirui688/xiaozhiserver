@@ -13,8 +13,14 @@ public class MemoryRebuildResultVO {
     private int sessionLimit;
     private int sessionsRead;
     private int factsCleared;
+    private int factsAdded;
+    private int factsUpdated;
+    private int factsArchived;
+    private int factsDeleted;
     private int candidatesCleared;
     private int tombstonesCleared;
+    private int tombstonesCreated;
+    private int skippedLowQuality;
     private int actionsProposed;
     private int factsChanged;
     private int candidatesCreated;

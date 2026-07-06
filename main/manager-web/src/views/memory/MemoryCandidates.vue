@@ -1,6 +1,7 @@
 <template>
   <div class="candidates-view">
-    <el-table :data="candidates" v-loading="loading" class="transparent-table" empty-text="暂无待确认的候选记忆">
+    <div class="candidates-note">候选预览不会参与运行时召回，确认后才进入事实记忆；自动维护会直接写入生效事实。</div>
+    <el-table :data="candidates" v-loading="loading" class="transparent-table" empty-text="暂无候选预览">
       <el-table-column label="内容" prop="canonicalText" show-overflow-tooltip min-width="260" />
       <el-table-column label="分类" width="100">
         <template slot-scope="{row}"><el-tag size="mini" type="info">{{ categoryLabel(row.category) }}</el-tag></template>
@@ -30,7 +31,7 @@
     </el-table>
     <div class="candidates-info" v-if="candidates.length === 0 && !loading">
       <i class="el-icon-check" style="font-size:40px;color:#c0c4cc;margin-bottom:8px" />
-      <p>所有候选记忆已处理完毕</p>
+      <p>暂无候选预览</p>
     </div>
   </div>
 </template>
@@ -54,5 +55,6 @@ export default {
 
 <style scoped>
 .candidates-view { padding: 0; }
+.candidates-note { margin-bottom: 12px; color: #718096; font-size: 13px; }
 .candidates-info { display: flex; flex-direction: column; align-items: center; padding: 60px 0; color: #a0aec0; font-size: 14px; }
 </style>

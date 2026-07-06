@@ -39,10 +39,18 @@ public interface MemoryMaintenanceService {
     void createCandidatesWithMaintenanceModel(AgentEntity agent, String scopeId, String sourceEventId, String content);
 
     /**
-     * 使用维护模型处理管理端指令（remember / forget）。
+     * 使用维护模型处理显式记住指令。
      *
      * @return 是否发生了变更
      */
-    boolean applyMaintenanceInstruction(AgentEntity agent, String scopeId, String instruction,
-                                        String actorType, String actorId);
+    boolean applyRememberInstruction(AgentEntity agent, String scopeId, String text, String category,
+                                     String actorType, String actorId);
+
+    /**
+     * 使用维护模型处理显式忘记指令，并写入 tombstone 阻止历史重建回流。
+     *
+     * @return 是否发生了变更
+     */
+    boolean applyForgetInstruction(AgentEntity agent, String scopeId, String text, String patternType, String reason,
+                                   String actorType, String actorId);
 }

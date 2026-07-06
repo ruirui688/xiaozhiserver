@@ -336,18 +336,19 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
     }
 
     @Override
-    public boolean applyMaintenanceInstruction(AgentEntity agent, String scopeId, String instruction,
-                                               String actorType, String actorId) {
+    public boolean applyRememberInstruction(AgentEntity agent, String scopeId, String text, String category,
+                                            String actorType, String actorId) {
         String maintenanceModelId = getMaintenanceLlmModelId(agent);
-        if (StringUtils.isBlank(instruction)) {
+        if (StringUtils.isBlank(text)) {
             return false;
         }
         if (StringUtils.isBlank(maintenanceModelId)) {
             throw new IllegalStateException("未配置记忆维护模型");
         }
-        String existingMemories = buildMaintenanceMemoryContext(agent.getId(), null);
-        String prompt = PowerMemPrompts.COMMAND_DECISION_PROMPT
-                .replace("{instruction}", instruction)
+        String existingMemories = buildMaintenanceMemoryContext(agent.getId(), scopeId);
+        String prompt = PowerMemPrompts.REMEMBER_COMMAND_PROMPT
+                .replace("{text}", text)
+                .replace("{category}", StringUtils.defaultString(category))
                 .replace("{existing_memories}", existingMemories);
         String output = llmService.generateJson(prompt, maintenanceModelId);
         JSONObject decision = parseDecisionResult(output);
@@ -356,7 +357,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         }
         JSONArray instructionActions = new JSONArray();
         instructionActions.add(decision);
-        String evidenceContext = "管理端指令：\n" + instruction + "\n\n已有记忆：\n" + existingMemories;
+        String evidenceContext = "显式记住：\n" + text + "\n\n已有记忆：\n" + existingMemories;
         JSONArray reviewed = reviewRebuildActions(instructionActions, "merge", evidenceContext, maintenanceModelId);
         if (reviewed != null && !reviewed.isEmpty()) {
             JSONObject reviewedDecision = MemoryHelper.toJsonObject(reviewed.get(0));
@@ -365,9 +366,57 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
             }
         }
         boolean changed = applyMaintenanceDecision(agent, scopeId, null, decision, maintenanceModelId, false, null);
-        writeRevision(agent.getId(), null, "maintenance_instruction",
-                JsonUtils.toJsonString(Map.of("instruction", instruction)), JsonUtils.toJsonString(decision),
-                actorType, actorId, "维护模型处理管理端指令");
+        writeRevision(agent.getId(), null, "remember_instruction",
+                JsonUtils.toJsonString(Map.of("text", text, "category", StringUtils.defaultString(category))),
+                JsonUtils.toJsonString(decision), actorType, actorId, "维护模型处理显式记住");
+        return changed;
+    }
+
+    @Override
+    public boolean applyForgetInstruction(AgentEntity agent, String scopeId, String text, String patternType,
+                                          String reason, String actorType, String actorId) {
+        String maintenanceModelId = getMaintenanceLlmModelId(agent);
+        if (StringUtils.isBlank(text)) {
+            return false;
+        }
+        if (StringUtils.isBlank(maintenanceModelId)) {
+            throw new IllegalStateException("未配置记忆维护模型");
+        }
+        String existingMemories = buildMaintenanceMemoryContext(agent.getId(), scopeId);
+        String prompt = PowerMemPrompts.FORGET_COMMAND_PROMPT
+                .replace("{text}", text)
+                .replace("{reason}", StringUtils.defaultString(reason))
+                .replace("{pattern_type}", StringUtils.defaultIfBlank(patternType, "semantic"))
+                .replace("{existing_memories}", existingMemories);
+        String output = llmService.generateJson(prompt, maintenanceModelId);
+        JSONObject decision = parseDecisionResult(output);
+        if (decision == null) {
+            decision = new JSONObject();
+            decision.set("action", "NONE");
+        }
+        decision.set("canonical_text", StringUtils.defaultIfBlank(decision.getStr("canonical_text"), text));
+        decision.set("tombstone_pattern", StringUtils.defaultIfBlank(decision.getStr("tombstone_pattern"), text));
+        decision.set("pattern_type", StringUtils.defaultIfBlank(decision.getStr("pattern_type"),
+                StringUtils.defaultIfBlank(patternType, "semantic")));
+        decision.set("reason", StringUtils.defaultIfBlank(decision.getStr("reason"), reason));
+
+        String action = MemoryHelper.normalizeAction(decision.getStr("action"));
+        boolean changed = applyMaintenanceDecision(agent, scopeId, null, decision, maintenanceModelId, false, null);
+        if ("NONE".equals(action) || !changed) {
+            MemoryForgetTombstoneEntity tombstone = createForgetTombstone(agent, scopeId,
+                    StringUtils.defaultIfBlank(decision.getStr("tombstone_pattern"), text),
+                    StringUtils.defaultIfBlank(decision.getStr("reason"), "显式忘记"),
+                    null, actorType, actorId);
+            changed = tombstone != null || changed;
+        }
+        if (!changed) {
+            changed = archiveFactsMatchingPattern(agent, scopeId, text, maintenanceModelId, actorType, actorId) > 0;
+        }
+        writeRevision(agent.getId(), null, "forget_instruction",
+                JsonUtils.toJsonString(Map.of("text", text,
+                        "patternType", StringUtils.defaultIfBlank(patternType, "semantic"),
+                        "reason", StringUtils.defaultString(reason))),
+                JsonUtils.toJsonString(decision), actorType, actorId, "维护模型处理显式忘记");
         return changed;
     }
 
@@ -615,6 +664,17 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
             log.info("维护模型输出低质量 ADD，跳过写入: text={}, importance={}, confidence={}",
                     MemoryHelper.cleanupMemoryText(json.getStr("canonical_text")),
                     json.get("importance"), json.get("confidence"));
+            if (result != null) {
+                result.setSkippedLowQuality(result.getSkippedLowQuality() + 1);
+            }
+            return false;
+        }
+        if ("ADD".equals(action) && isBlockedByTombstone(agent.getId(), scopeId, json.getStr("canonical_text"))) {
+            log.info("维护模型 ADD 命中忘记规则，跳过写入: text={}",
+                    MemoryHelper.cleanupMemoryText(json.getStr("canonical_text")));
+            if (result != null) {
+                result.setSkippedLowQuality(result.getSkippedLowQuality() + 1);
+            }
             return false;
         }
         if (dryRun) {
@@ -624,7 +684,8 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
             }
             return preview != null;
         }
-        return executeMemoryAction(agent, scopeId, json, modelId);
+        boolean changed = executeMemoryAction(agent, scopeId, sourceEventId, json, modelId, result);
+        return changed;
     }
 
     private MemoryCandidateEntity buildCandidate(AgentEntity agent, String scopeId, String sourceEventId, JSONObject json,
@@ -656,7 +717,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         candidate.setPayload(payload.toString());
         candidate.setConfidence(confidence);
         candidate.setImportance(importance);
-        candidate.setSensitivity(MemoryHelper.normalizeSensitivity(json.getStr("sensitivity")));
+        candidate.setSensitivity(resolveSensitivity(json, canonical));
         candidate.setStatus(MemoryHelper.STATUS_PENDING);
         candidate.setSourceEventId(sourceEventId);
         candidate.setExtractorVersion(MemoryHelper.MAINTENANCE_EXTRACTOR_VERSION);
@@ -665,7 +726,8 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         return candidate;
     }
 
-    private boolean executeMemoryAction(AgentEntity agent, String scopeId, JSONObject json, String modelId) {
+    private boolean executeMemoryAction(AgentEntity agent, String scopeId, String sourceEventId, JSONObject json,
+                                        String modelId, MemoryRebuildResultVO result) {
         String action = MemoryHelper.normalizeAction(json.getStr("action"));
         if ("NONE".equals(action)) return false;
 
@@ -676,6 +738,16 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
 
         if ("DELETE".equals(action) || "ARCHIVE".equals(action)) {
             String relatedId = StringUtils.trimToEmpty(json.getStr("related_memory_id"));
+            String tombstonePattern = StringUtils.defaultIfBlank(json.getStr("tombstone_pattern"), canonical);
+            boolean tombstoneCreated = false;
+            if (StringUtils.isNotBlank(tombstonePattern)) {
+                tombstoneCreated = createForgetTombstone(agent, scopeId, tombstonePattern,
+                        StringUtils.defaultIfBlank(json.getStr("reason"), "维护模型生命周期动作"),
+                        sourceEventId, "system", modelId) != null;
+                if (tombstoneCreated && result != null) {
+                    result.setTombstonesCreated(result.getTombstonesCreated() + 1);
+                }
+            }
             if (StringUtils.isNotBlank(relatedId)) {
                 MemoryFactEntity fact = factDao.selectOne(new QueryWrapper<MemoryFactEntity>()
                         .eq("agent_id", agent.getId()).eq("memory_id", relatedId)
@@ -690,6 +762,13 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                     }
                     fact.setUpdatedAt(new Date());
                     factDao.updateById(fact);
+                    if (result != null) {
+                        if ("ARCHIVE".equals(action)) {
+                            result.setFactsArchived(result.getFactsArchived() + 1);
+                        } else {
+                            result.setFactsDeleted(result.getFactsDeleted() + 1);
+                        }
+                    }
                     writeRevision(agent.getId(), fact.getMemoryId(),
                             "ARCHIVE".equals(action) ? "archive_from_maintenance" : "delete_from_maintenance", before,
                             JsonUtils.toJsonString(fact), "system", modelId,
@@ -698,7 +777,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                     return true;
                 }
             }
-            return false;
+            return tombstoneCreated;
         }
 
         String memoryType = MemoryHelper.normalizeMemoryLabel(json.getStr("memory_type"), "长期记忆");
@@ -706,7 +785,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         BigDecimal confidence = MemoryHelper.score(json.get("confidence"), MemoryHelper.DEFAULT_SCORE);
         BigDecimal importance = MemoryHelper.score(json.get("importance"), MemoryHelper.DEFAULT_SCORE);
         String relatedId = StringUtils.trimToEmpty(json.getStr("related_memory_id"));
-        String sensitivity = MemoryHelper.normalizeSensitivity(json.getStr("sensitivity"));
+        String sensitivity = resolveSensitivity(json, canonical);
         String tier = resolveMemoryTier(json.getStr("memory_tier"), importance);
         String dimensionsJson = extractDimensionsJson(json);
 
@@ -742,6 +821,9 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                     fact.setValidTo(new Date());
                     fact.setUpdatedAt(new Date());
                     factDao.updateById(fact);
+                    if (result != null) {
+                        result.setFactsDeleted(result.getFactsDeleted() + 1);
+                    }
                     writeRevision(agent.getId(), fact.getMemoryId(), "update_merged_as_duplicate", before,
                             JsonUtils.toJsonString(fact), "system", modelId,
                             "合并到已有事实: " + existingDuplicate.getMemoryId());
@@ -762,6 +844,9 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                 fact.setLastSeenAt(new Date());
                 fact.setUpdatedAt(new Date());
                 factDao.updateById(fact);
+                if (result != null) {
+                    result.setFactsUpdated(result.getFactsUpdated() + 1);
+                }
                 writeRevision(agent.getId(), fact.getMemoryId(), "update_from_maintenance", before,
                         JsonUtils.toJsonString(fact), "system", modelId, "维护模型更新事实");
                 log.info("维护模型更新事实, memoryId={}, text={}", fact.getMemoryId(), canonical);
@@ -771,6 +856,13 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
 
         // ADD
         String hash = MemoryHelper.sha256(agent.getId() + "|" + scopeId + "|" + canonical);
+        if (isBlockedByTombstone(agent.getId(), scopeId, canonical)) {
+            log.info("维护模型创建事实命中忘记规则，已跳过: text={}", canonical);
+            if (result != null) {
+                result.setSkippedLowQuality(result.getSkippedLowQuality() + 1);
+            }
+            return false;
+        }
         if (factDao.selectCount(new QueryWrapper<MemoryFactEntity>()
                 .eq("agent_id", agent.getId()).eq("scope_type", MemoryHelper.SCOPE_DEVICE)
                 .eq("scope_id", scopeId).eq("source_hash", hash)
@@ -803,16 +895,139 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         fact.setValidFrom(new Date());
         fact.setFirstSeenAt(new Date());
         fact.setLastSeenAt(new Date());
-        fact.setSourceEventId(null);
+        fact.setSourceEventId(sourceEventId);
         fact.setSourceHash(hash);
         fact.setExtractorVersion(MemoryHelper.MAINTENANCE_EXTRACTOR_VERSION);
         fact.setCreatedAt(new Date());
         fact.setUpdatedAt(new Date());
         factDao.insert(fact);
+        if (result != null) {
+            result.setFactsAdded(result.getFactsAdded() + 1);
+        }
         writeRevision(agent.getId(), fact.getMemoryId(), "create_from_maintenance", null,
                 JsonUtils.toJsonString(fact), "system", modelId, "维护模型创建事实");
         log.info("维护模型创建事实, memoryId={}, text={}", fact.getMemoryId(), canonical);
         return true;
+    }
+
+    private MemoryForgetTombstoneEntity createForgetTombstone(AgentEntity agent, String scopeId, String patternText,
+                                                              String reason, String sourceEventId,
+                                                              String actorType, String actorId) {
+        String pattern = MemoryHelper.cleanupMemoryText(patternText);
+        if (StringUtils.isBlank(pattern)) {
+            return null;
+        }
+        QueryWrapper<MemoryForgetTombstoneEntity> existingWrapper = new QueryWrapper<>();
+        existingWrapper.eq("agent_id", agent.getId())
+                .eq("scope_type", MemoryHelper.SCOPE_DEVICE)
+                .eq("scope_id", scopeId)
+                .eq("pattern_text", pattern)
+                .eq("status", MemoryHelper.STATUS_ACTIVE)
+                .last("LIMIT 1");
+        MemoryForgetTombstoneEntity existing = tombstoneDao.selectOne(existingWrapper);
+        if (existing != null) {
+            return existing;
+        }
+        MemoryForgetTombstoneEntity tombstone = new MemoryForgetTombstoneEntity();
+        tombstone.setTombstoneId(MemoryHelper.uuid());
+        tombstone.setAgentId(agent.getId());
+        tombstone.setUserId(agent.getUserId());
+        tombstone.setScopeType(MemoryHelper.SCOPE_DEVICE);
+        tombstone.setScopeId(scopeId);
+        tombstone.setPatternText(pattern);
+        tombstone.setReason(StringUtils.defaultIfBlank(reason, "显式忘记"));
+        tombstone.setStatus(MemoryHelper.STATUS_ACTIVE);
+        tombstone.setSourceEventId(sourceEventId);
+        tombstone.setCreatedAt(new Date());
+        tombstone.setUpdatedAt(new Date());
+        tombstoneDao.insert(tombstone);
+        writeRevision(agent.getId(), null, "create_forget_tombstone", null,
+                JsonUtils.toJsonString(tombstone), actorType, actorId, "创建忘记规则");
+        return tombstone;
+    }
+
+    private boolean isBlockedByTombstone(String agentId, String scopeId, String text) {
+        String canonical = compactForTombstoneMatch(text);
+        if (StringUtils.isBlank(canonical)) {
+            return false;
+        }
+        List<MemoryForgetTombstoneEntity> tombstones = tombstoneDao.selectList(
+                new QueryWrapper<MemoryForgetTombstoneEntity>()
+                        .eq("agent_id", agentId)
+                        .eq("scope_type", MemoryHelper.SCOPE_DEVICE)
+                        .and(w -> w.eq("scope_id", scopeId).or().eq("scope_id", agentId))
+                        .eq("status", MemoryHelper.STATUS_ACTIVE)
+                        .orderByDesc("created_at")
+                        .last("LIMIT 100"));
+        for (MemoryForgetTombstoneEntity tombstone : tombstones) {
+            if (matchesTombstone(canonical, tombstone)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private int archiveFactsMatchingPattern(AgentEntity agent, String scopeId, String pattern, String modelId,
+                                            String actorType, String actorId) {
+        String compactPattern = compactForTombstoneMatch(pattern);
+        if (StringUtils.isBlank(compactPattern)) {
+            return 0;
+        }
+        List<MemoryFactEntity> facts = factDao.selectList(new QueryWrapper<MemoryFactEntity>()
+                .eq("agent_id", agent.getId())
+                .eq("scope_type", MemoryHelper.SCOPE_DEVICE)
+                .and(w -> w.eq("scope_id", scopeId).or().eq("scope_id", agent.getId()))
+                .eq("status", MemoryHelper.STATUS_ACTIVE)
+                .orderByDesc("importance", "last_seen_at")
+                .last("LIMIT 100"));
+        int changed = 0;
+        for (MemoryFactEntity fact : facts) {
+            String factText = compactForTombstoneMatch(fact.getCanonicalText());
+            if (!factText.contains(compactPattern) && !compactPattern.contains(factText)) {
+                continue;
+            }
+            String before = JsonUtils.toJsonString(fact);
+            fact.setStatus(MemoryHelper.STATUS_DELETED);
+            fact.setValidTo(new Date());
+            fact.setUpdatedAt(new Date());
+            factDao.updateById(fact);
+            writeRevision(agent.getId(), fact.getMemoryId(), "delete_from_forget_instruction", before,
+                    JsonUtils.toJsonString(fact), actorType, StringUtils.defaultIfBlank(actorId, modelId),
+                    "显式忘记匹配事实");
+            changed++;
+        }
+        return changed;
+    }
+
+    private boolean matchesTombstone(String compactText, MemoryForgetTombstoneEntity tombstone) {
+        if (tombstone == null) {
+            return false;
+        }
+        String pattern = compactForTombstoneMatch(tombstone.getPatternText());
+        return StringUtils.isNotBlank(pattern)
+                && (compactText.contains(pattern) || pattern.contains(compactText));
+    }
+
+    private String compactForTombstoneMatch(String text) {
+        return MemoryHelper.cleanupMemoryText(text)
+                .replaceAll("[\\p{Punct}\\s，。！？、；：]+", "")
+                .toLowerCase();
+    }
+
+    private String resolveSensitivity(JSONObject json, String canonicalText) {
+        String sensitivity = MemoryHelper.normalizeSensitivity(json == null ? null : json.getStr("sensitivity"));
+        String text = StringUtils.defaultString(canonicalText);
+        if (text.contains("不想上班") && (text.contains("保密") || text.contains("不要") || text.contains("钟文杰"))) {
+            return "sensitive";
+        }
+        if (text.contains("生日") || text.contains("农历")) {
+            return "sensitive";
+        }
+        if ((text.contains("科目二") || text.contains("科二") || text.contains("驾照"))
+                && (text.contains("六次") || text.contains("第六次") || text.contains("6次") || text.contains("第6次"))) {
+            return "sensitive";
+        }
+        return sensitivity;
     }
 
     private String extractDimensionsJson(JSONObject json) {

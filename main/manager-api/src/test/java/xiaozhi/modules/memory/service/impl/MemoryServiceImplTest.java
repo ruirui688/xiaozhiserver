@@ -37,9 +37,14 @@ import xiaozhi.modules.memory.dao.MemoryProfileDao;
 import xiaozhi.modules.memory.dao.MemoryRevisionDao;
 import xiaozhi.modules.memory.dao.MemorySourceEventDao;
 import xiaozhi.modules.memory.dao.MemoryToolBehaviorDao;
+import xiaozhi.modules.memory.dto.MemoryEventDTO;
+import xiaozhi.modules.memory.dto.MemoryForgetDTO;
+import xiaozhi.modules.memory.dto.MemoryQueryDTO;
 import xiaozhi.modules.memory.dto.MemoryRememberDTO;
 import xiaozhi.modules.memory.dto.MemoryRebuildRequestDTO;
 import xiaozhi.modules.memory.entity.MemoryFactEntity;
+import xiaozhi.modules.memory.entity.MemoryForgetTombstoneEntity;
+import xiaozhi.modules.memory.vo.MemoryQueryVO;
 import xiaozhi.modules.memory.vo.MemoryRebuildResultVO;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
@@ -577,6 +582,159 @@ class MemoryServiceImplTest {
         ArgumentCaptor<MemoryFactEntity> factCaptor = ArgumentCaptor.forClass(MemoryFactEntity.class);
         verify(factDao).updateById(factCaptor.capture());
         assertEquals("高瑞瑞的老板是钟文杰", factCaptor.getValue().getCanonicalText());
+    }
+
+    @Test
+    void recordEventMaintenanceAddPreservesSourceEventId() {
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID)))
+                .thenReturn("""
+                        {
+                          "facts": [
+                            {
+                              "text": "用户喜欢自己熬番茄酱配饺子",
+                              "category": "饮食偏好",
+                              "memory_type": "用户偏好",
+                              "confidence": 0.92,
+                              "importance": 0.72,
+                              "memory_tier": "long_term"
+                            }
+                          ]
+                        }
+                        """)
+                .thenReturn("""
+                        {
+                          "action": "ADD",
+                          "related_memory_id": "",
+                          "memory_type": "用户偏好",
+                          "category": "饮食偏好",
+                          "canonical_text": "用户喜欢自己熬番茄酱配饺子",
+                          "confidence": 0.92,
+                          "importance": 0.72,
+                          "memory_tier": "long_term",
+                          "sensitivity": "normal",
+                          "reason": "用户明确说明"
+                        }
+                        """);
+
+        MemoryEventDTO dto = new MemoryEventDTO();
+        dto.setAgentId(AGENT_ID);
+        dto.setMacAddress(SCOPE_ID);
+        dto.setSessionId("session-1");
+        dto.setEventId("evt-1");
+        dto.setChatType(1);
+        dto.setContentText("我喜欢自己熬番茄酱配饺子");
+        memoryService.recordEvent(dto);
+
+        ArgumentCaptor<MemoryFactEntity> factCaptor = ArgumentCaptor.forClass(MemoryFactEntity.class);
+        verify(factDao).insert(factCaptor.capture());
+        MemoryFactEntity inserted = factCaptor.getValue();
+        assertEquals("用户喜欢自己熬番茄酱配饺子", inserted.getCanonicalText());
+        assertEquals("evt-1", inserted.getSourceEventId());
+        assertTrue(inserted.getPayload().contains(MAINTENANCE_MODEL_ID));
+    }
+
+    @Test
+    void forgetDeletesFactAndWritesActiveTombstone() {
+        MemoryFactEntity existing = activeFact("fact-secret", "用户不想让钟文杰知道自己不想上班");
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(existing));
+        when(factDao.selectOne(any(Wrapper.class))).thenReturn(existing);
+        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID))).thenReturn("""
+                {
+                  "action": "DELETE",
+                  "related_memory_id": "fact-secret",
+                  "canonical_text": "用户不想让钟文杰知道自己不想上班",
+                  "tombstone_pattern": "不想让钟文杰知道自己不想上班",
+                  "pattern_type": "semantic",
+                  "confidence": 0.95,
+                  "reason": "用户显式忘记"
+                }
+                """);
+
+        MemoryForgetDTO dto = new MemoryForgetDTO();
+        dto.setAgentId(AGENT_ID);
+        dto.setText("忘记我不想让钟文杰知道自己不想上班");
+        dto.setReason("管理端手动忘记");
+        memoryService.forget(dto, "user", "tester");
+
+        ArgumentCaptor<MemoryForgetTombstoneEntity> tombstoneCaptor =
+                ArgumentCaptor.forClass(MemoryForgetTombstoneEntity.class);
+        verify(tombstoneDao).insert(tombstoneCaptor.capture());
+        MemoryForgetTombstoneEntity tombstone = tombstoneCaptor.getValue();
+        assertEquals(AGENT_ID, tombstone.getAgentId());
+        assertEquals(AGENT_ID, tombstone.getScopeId());
+        assertEquals("active", tombstone.getStatus());
+        assertEquals("不想让钟文杰知道自己不想上班", tombstone.getPatternText());
+
+        ArgumentCaptor<MemoryFactEntity> factCaptor = ArgumentCaptor.forClass(MemoryFactEntity.class);
+        verify(factDao).updateById(factCaptor.capture());
+        assertEquals("deleted", factCaptor.getValue().getStatus());
+    }
+
+    @Test
+    void queryDoesNotRefreshLastSeenAndFiltersTombstone() {
+        MemoryFactEntity blocked = activeFact("fact-secret", "用户不想让钟文杰知道自己不想上班");
+        MemoryFactEntity visible = activeFact("fact-bike", "用户有一辆黑色鱼雷6自行车");
+        MemoryForgetTombstoneEntity tombstone = new MemoryForgetTombstoneEntity();
+        tombstone.setPatternText("不想让钟文杰知道自己不想上班");
+        tombstone.setStatus("active");
+        when(tombstoneDao.selectList(any(Wrapper.class))).thenReturn(List.of(tombstone));
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(blocked, visible));
+
+        MemoryQueryDTO dto = new MemoryQueryDTO();
+        dto.setAgentId(AGENT_ID);
+        dto.setQuery("");
+        MemoryQueryVO result = memoryService.query(dto);
+
+        assertEquals(1, result.getFacts().size());
+        assertEquals("fact-bike", result.getFacts().get(0).getMemoryId());
+        assertEquals(1, result.getMatchedTombstones().size());
+        verify(factDao, never()).updateById(any());
+    }
+
+    @Test
+    void maintenanceAddUpliftsDrivingTestSensitivity() {
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID))).thenReturn("""
+                {
+                  "action": "ADD",
+                  "related_memory_id": "",
+                  "memory_type": "个人经历",
+                  "category": "驾考经历",
+                  "canonical_text": "用户驾照科目二第6次才通过",
+                  "confidence": 0.92,
+                  "importance": 0.72,
+                  "memory_tier": "long_term",
+                  "sensitivity": "personal",
+                  "reason": "用户明确说明"
+                }
+                """).thenReturn("""
+                {
+                  "actions": [
+                    {
+                      "action": "ADD",
+                      "related_memory_id": "",
+                      "memory_type": "个人经历",
+                      "category": "驾考经历",
+                      "canonical_text": "用户驾照科目二第6次才通过",
+                      "confidence": 0.92,
+                      "importance": 0.72,
+                      "memory_tier": "long_term",
+                      "sensitivity": "personal",
+                      "reason": "审校通过"
+                    }
+                  ]
+                }
+                """);
+
+        MemoryRememberDTO dto = new MemoryRememberDTO();
+        dto.setAgentId(AGENT_ID);
+        dto.setText("我驾照科目二第6次才通过");
+        memoryService.remember(dto, "user", "tester");
+
+        ArgumentCaptor<MemoryFactEntity> factCaptor = ArgumentCaptor.forClass(MemoryFactEntity.class);
+        verify(factDao).insert(factCaptor.capture());
+        assertEquals("sensitive", factCaptor.getValue().getSensitivity());
     }
 
     private MemoryRebuildRequestDTO rebuildRequest(boolean dryRun) {

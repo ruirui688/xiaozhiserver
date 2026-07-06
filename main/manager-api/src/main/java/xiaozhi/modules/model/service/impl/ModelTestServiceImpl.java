@@ -70,6 +70,8 @@ public class ModelTestServiceImpl implements ModelTestService {
     private static final String LLM_TEST_PROMPT = "请只回复 OK";
     private static final String TTS_TEST_TEXT = "你好，我是小智，语音合成测试成功。";
     private static final String VLLM_TEST_QUESTION = "请用一句话描述这张图片。";
+    private static final String INTENT_LLM_TEST_TEXT = "你好啊";
+    private static final String INTENT_LLM_EXPECTED_FUNCTION = "continue_chat";
     private static final String STANDARD_ASR_TEST_AUDIO = "wakeup_words_short.wav";
     private static final int SINGLE_ASR_BENCHMARK_TIMEOUT_SECONDS = 120;
     private static final String TEST_LEVEL_REAL_INFERENCE = "REAL_INFERENCE";
@@ -234,8 +236,10 @@ public class ModelTestServiceImpl implements ModelTestService {
                         || CollectionUtil.isNotEmpty(getMissingAlternativeRequirements(modelConfig.getConfigJson(), modelType, type)))) {
             return TEST_LEVEL_REAL_INFERENCE;
         }
-        if ("INTENT".equals(modelType)
-                && ("nointent".equals(type) || "function_call".equals(type) || "intent_llm".equals(type))) {
+        if ("INTENT".equals(modelType) && "intent_llm".equals(type)) {
+            return TEST_LEVEL_REAL_INFERENCE;
+        }
+        if ("INTENT".equals(modelType) && ("nointent".equals(type) || "function_call".equals(type))) {
             return TEST_LEVEL_RUNTIME_CONFIG;
         }
         if ("MEMORY".equals(modelType)
@@ -298,9 +302,9 @@ public class ModelTestServiceImpl implements ModelTestService {
                 + StringUtils.defaultIfBlank(maintenanceModelId, "未配置"));
 
         if (StringUtils.isBlank(maintenanceModelId)) {
-            result.setSuccess(true);
-            result.setMessage("智控台治理记忆配置通过；未配置维护模型时，只执行显式记住/忘记和管理端人工维护。");
-            result.setTestOutput("manager-api 长期记忆治理链路可启用；维护模型为空，不产生外部模型调用。");
+            result.setSuccess(false);
+            result.setMessage("智控台治理记忆必须配置维护模型，请选择已启用且测试通过的 LLM/SLM。");
+            result.setTestOutput("managed_memory 依赖维护模型执行自动抽取、显式记住、显式忘记和 tombstone 治理。");
             return result;
         }
 
@@ -361,23 +365,48 @@ public class ModelTestServiceImpl implements ModelTestService {
         String llmModelId = configJson.getStr("llm");
         if (StringUtils.isBlank(llmModelId)) {
             result.setSuccess(false);
-            result.setMessage("意图识别配置缺少关联 LLM");
-            result.setTestInput("关联 LLM：未配置");
+            result.setMessage("外挂大模型意图识别缺少关联 LLM，无法执行真实意图分类测试");
+            result.setTestInput("关联 LLM：未配置\n测试文本：" + INTENT_LLM_TEST_TEXT);
             result.setTestOutput(result.getMessage());
             return result;
         }
         ModelConfigEntity llm = attachRuntimeConfig(modelConfigDao.selectById(llmModelId));
-        if (llm == null || llm.getTestStatus() == null || llm.getTestStatus() != MODEL_TEST_PASSED) {
+        if (llm == null) {
             result.setSuccess(false);
-            result.setMessage("关联 LLM 尚未测试通过");
-            result.setTestInput("关联 LLM：" + llmModelId);
+            result.setMessage("关联 LLM 不存在：" + llmModelId);
+            result.setTestInput("关联 LLM：" + llmModelId + "\n测试文本：" + INTENT_LLM_TEST_TEXT);
             result.setTestOutput(result.getMessage());
             return result;
         }
-        result.setSuccess(true);
-        result.setMessage("关联 LLM 已测试通过");
-        result.setTestInput("关联 LLM：" + llmModelId);
-        result.setTestOutput("关联 LLM 已通过测试，可用于意图识别");
+        String llmModelType = StringUtils.defaultString(llm.getModelType()).toUpperCase();
+        if (!"LLM".equals(llmModelType) && !"SLM".equals(llmModelType)) {
+            result.setSuccess(false);
+            result.setMessage("外挂大模型意图识别只能关联 LLM 或 SLM，当前类型：" + llm.getModelType());
+            result.setTestInput("关联 LLM：" + llmModelId + "\n测试文本：" + INTENT_LLM_TEST_TEXT);
+            result.setTestOutput(result.getMessage());
+            return result;
+        }
+        if (llm.getConfigJson() == null) {
+            result.setSuccess(false);
+            result.setMessage("关联 LLM 配置为空：" + llmModelId);
+            result.setTestInput("关联 LLM：" + llmModelId + "\n测试文本：" + INTENT_LLM_TEST_TEXT);
+            result.setTestOutput(result.getMessage());
+            return result;
+        }
+        String llmType = StringUtils.lowerCase(llm.getConfigJson().getStr("type"));
+        if ("openai".equals(llmType)) {
+            return testOpenAiIntentLlmModel(llm.getConfigJson(), llmModelId);
+        }
+        if ("ollama".equals(llmType)) {
+            return testOllamaIntentLlmModel(llm.getConfigJson(), llmModelId);
+        }
+
+        result.setSuccess(false);
+        result.setMessage("关联 LLM 类型暂不支持真实意图分类测试：" + StringUtils.defaultIfBlank(llmType, "-"));
+        result.setTestInput("关联 LLM：" + llmModelId
+                + "\n供应器类型：" + StringUtils.defaultIfBlank(llmType, "-")
+                + "\n测试文本：" + INTENT_LLM_TEST_TEXT);
+        result.setTestOutput("当前单模型测试只支持通过 OpenAI 兼容或 Ollama 接口执行外挂大模型意图识别真实调用。");
         return result;
     }
 
@@ -403,6 +432,151 @@ public class ModelTestServiceImpl implements ModelTestService {
         result.setTestInput("模型类型：INTENT\n供应器类型：" + type + "\n测试内容：本地运行时配置校验");
         result.setTestOutput(message);
         return result;
+    }
+
+   private ModelTestResultDTO testOpenAiIntentLlmModel(JSONObject configJson, String llmModelId) {
+       ModelTestResultDTO result = new ModelTestResultDTO();
+       String baseUrl = configJson.getStr("base_url");
+       String model = configJson.getStr("model_name");
+       String apiKey = StringUtils.defaultIfBlank(configJson.getStr("api_key"), configJson.getStr("api_password"));
+        String missingField = describeOpenAiIntentLlmMissingField(baseUrl, model, apiKey);
+        if (missingField != null) {
+            result.setSuccess(false);
+            result.setMessage(missingField);
+            result.setTestInput("关联 LLM：" + llmModelId
+                    + "\n接口：" + StringUtils.defaultString(baseUrl, "-")
+                    + "\n模型：" + StringUtils.defaultString(model, "-")
+                    + "\nAPI Key：" + describeApiKeyStatus(apiKey)
+                    + "\n测试文本：" + INTENT_LLM_TEST_TEXT);
+            result.setTestOutput(missingField + " 请在模型管理中编辑该关联 LLM，补全缺失配置后重试。");
+            return result;
+        }
+
+        String apiUrl = buildChatCompletionsUrl(baseUrl);
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("model", model);
+        requestBody.put("messages", List.of(
+                Map.of("role", "system", "content", buildIntentLlmTestSystemPrompt()),
+                Map.of("role", "user", "content", buildIntentLlmTestUserPrompt())));
+        if (!isDeepSeek(baseUrl)) {
+            requestBody.put("temperature", 0);
+        }
+        requestBody.put("max_tokens", 80);
+        applyDeepSeekOptions(baseUrl, configJson, requestBody);
+        result.setTestInput("关联 LLM：" + llmModelId
+                + "\n接口：" + apiUrl
+                + "\n模型：" + model
+                + "\n测试文本：" + INTENT_LLM_TEST_TEXT
+                + "\n期望意图：" + INTENT_LLM_EXPECTED_FUNCTION);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("Authorization", "Bearer " + apiKey);
+        long startTime = System.currentTimeMillis();
+        ResponseEntity<String> response = restTemplate.exchange(
+                apiUrl, HttpMethod.POST, new HttpEntity<>(requestBody, headers), String.class);
+        result.setResponseTimeMs(System.currentTimeMillis() - startTime);
+        result.setTestOutput(StringUtils.defaultString(response.getBody()));
+        if (!response.getStatusCode().is2xxSuccessful()) {
+            result.setSuccess(false);
+            result.setMessage("外挂大模型意图识别接口返回非成功状态：" + response.getStatusCode());
+            return result;
+        }
+        JSONObject responseJson = JSONUtil.parseObj(response.getBody());
+        String answer = extractOpenAiChoiceText(responseJson.getJSONArray("choices"));
+        return applyIntentLlmJsonResult(result, answer);
+    }
+
+   private ModelTestResultDTO testOllamaIntentLlmModel(JSONObject configJson, String llmModelId) {
+       ModelTestResultDTO result = new ModelTestResultDTO();
+       String baseUrl = configJson.getStr("base_url");
+       String model = configJson.getStr("model_name");
+        String missingField = describeOllamaIntentLlmMissingField(baseUrl, model);
+        if (missingField != null) {
+            result.setSuccess(false);
+            result.setMessage(missingField);
+            result.setTestInput("关联 LLM：" + llmModelId
+                    + "\n接口：" + StringUtils.defaultString(baseUrl, "-")
+                    + "\n模型：" + StringUtils.defaultString(model, "-")
+                    + "\n测试文本：" + INTENT_LLM_TEST_TEXT);
+            result.setTestOutput(missingField + " 请在模型管理中编辑该关联 LLM，补全缺失配置后重试。");
+            return result;
+        }
+
+        String apiUrl = baseUrl.endsWith("/") ? baseUrl + "api/chat" : baseUrl + "/api/chat";
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("model", model);
+        requestBody.put("messages", List.of(
+                Map.of("role", "system", "content", buildIntentLlmTestSystemPrompt()),
+                Map.of("role", "user", "content", buildIntentLlmTestUserPrompt())));
+        requestBody.put("stream", false);
+        result.setTestInput("关联 LLM：" + llmModelId
+                + "\n接口：" + apiUrl
+                + "\n模型：" + model
+                + "\n测试文本：" + INTENT_LLM_TEST_TEXT
+                + "\n期望意图：" + INTENT_LLM_EXPECTED_FUNCTION);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        long startTime = System.currentTimeMillis();
+        ResponseEntity<String> response = restTemplate.exchange(
+                apiUrl, HttpMethod.POST, new HttpEntity<>(requestBody, headers), String.class);
+        result.setResponseTimeMs(System.currentTimeMillis() - startTime);
+        result.setTestOutput(StringUtils.defaultString(response.getBody()));
+        if (!response.getStatusCode().is2xxSuccessful()) {
+            result.setSuccess(false);
+            result.setMessage("外挂大模型意图识别接口返回非成功状态：" + response.getStatusCode());
+            return result;
+        }
+        JSONObject responseJson = JSONUtil.parseObj(response.getBody());
+        JSONObject message = responseJson.getJSONObject("message");
+        String answer = message == null ? responseJson.getStr("response") : message.getStr("content");
+        return applyIntentLlmJsonResult(result, answer);
+    }
+
+    private static String buildIntentLlmTestSystemPrompt() {
+        return "你是小智的外挂大模型意图识别器，只能返回 JSON，不能返回自然语言。"
+                + "可用函数：continue_chat 表示普通聊天；handle_exit_intent 表示用户明确要求结束对话。"
+                + "如果用户没有明确要求调用工具或结束对话，必须返回 {\"function_call\":{\"name\":\"continue_chat\"}}。";
+    }
+
+    private static String buildIntentLlmTestUserPrompt() {
+        return "current dialogue:\nUser: " + INTENT_LLM_TEST_TEXT + "\n";
+    }
+
+    private ModelTestResultDTO applyIntentLlmJsonResult(ModelTestResultDTO result, String answer) {
+        String normalizedAnswer = extractJsonObjectText(answer);
+        if (StringUtils.isNotBlank(normalizedAnswer)) {
+            result.setTestOutput(normalizedAnswer);
+        } else {
+            result.setTestOutput(StringUtils.defaultString(answer));
+        }
+        try {
+            JSONObject intentJson = JSONUtil.parseObj(normalizedAnswer);
+            JSONObject functionCall = intentJson.getJSONObject("function_call");
+            String functionName = functionCall == null ? "" : functionCall.getStr("name");
+            boolean success = INTENT_LLM_EXPECTED_FUNCTION.equals(functionName);
+            result.setSuccess(success);
+            result.setMessage(success
+                    ? "外挂大模型意图识别真实调用通过"
+                    : "外挂大模型意图识别返回的 function_call.name 不符合预期：" + StringUtils.defaultIfBlank(functionName, "-"));
+            return result;
+        } catch (Exception e) {
+            result.setSuccess(false);
+            result.setMessage("外挂大模型意图识别未返回合法 JSON function_call："
+                    + StringUtils.defaultIfBlank(e.getMessage(), e.getClass().getSimpleName()));
+            return result;
+        }
+    }
+
+    private static String extractJsonObjectText(String text) {
+        String value = StringUtils.trimToEmpty(text);
+        int start = value.indexOf('{');
+        int end = value.lastIndexOf('}');
+        if (start < 0 || end < start) {
+            return "";
+        }
+        return value.substring(start, end + 1);
     }
 
     private ModelTestResultDTO testAsrModel(JSONObject configJson, String type) {
@@ -1279,16 +1453,48 @@ public class ModelTestServiceImpl implements ModelTestService {
         return StringUtils.isNotBlank(stringValue) && !"null".equalsIgnoreCase(stringValue) && !isPlaceholderSecret(stringValue);
     }
 
-    private static boolean isPlaceholderSecret(String value) {
-        String lowerValue = StringUtils.defaultString(value).toLowerCase();
-        return lowerValue.contains("你的")
-                || lowerValue.contains("请输入")
-                || lowerValue.contains("placeholder")
-                || lowerValue.contains("your ")
-                || lowerValue.contains("your_")
-                || lowerValue.contains("sk-xxx")
-                || lowerValue.contains("xxxx")
-                || lowerValue.contains("***");
+   private static boolean isPlaceholderSecret(String value) {
+       String lowerValue = StringUtils.defaultString(value).toLowerCase();
+       return lowerValue.contains("你的")
+               || lowerValue.contains("请输入")
+               || lowerValue.contains("placeholder")
+               || lowerValue.contains("your ")
+               || lowerValue.contains("your_")
+               || lowerValue.contains("sk-xxx")
+               || lowerValue.contains("xxxx")
+               || lowerValue.contains("***");
+   }
+    private static String describeApiKeyStatus(String apiKey) {
+        if (StringUtils.isBlank(apiKey)) {
+            return "未配置";
+        }
+        return isPlaceholderSecret(apiKey) ? "占位符，需填写真实密钥" : "已配置";
+    }
+
+    private static String describeOpenAiIntentLlmMissingField(String baseUrl, String model, String apiKey) {
+        if (StringUtils.isBlank(baseUrl)) {
+            return "关联 OpenAI 兼容 LLM 缺少 base_url（接口地址）";
+        }
+        if (StringUtils.isBlank(model)) {
+            return "关联 OpenAI 兼容 LLM 缺少 model_name（模型名称）";
+        }
+        if (StringUtils.isBlank(apiKey)) {
+            return "关联 OpenAI 兼容 LLM 缺少 api_key（API 密钥）";
+        }
+        if (isPlaceholderSecret(apiKey)) {
+            return "关联 OpenAI 兼容 LLM 的 api_key 仍为占位符，请填写真实密钥";
+        }
+        return null;
+    }
+
+    private static String describeOllamaIntentLlmMissingField(String baseUrl, String model) {
+        if (StringUtils.isBlank(baseUrl)) {
+            return "关联 Ollama LLM 缺少 base_url（服务地址）";
+        }
+        if (StringUtils.isBlank(model)) {
+            return "关联 Ollama LLM 缺少 model_name（模型名称）";
+        }
+        return null;
     }
 
     private static Path findFirstExistingPath(List<String> candidates) {

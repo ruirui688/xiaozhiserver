@@ -35,12 +35,10 @@ async def report(conn: "ConnectionHandler", type, text, opus_data, report_time):
         opus_data: opus音频数据
         report_time: 上报时间
     """
+    audio_data = None
     try:
         if opus_data:
             audio_data = opus_to_wav(conn, opus_data)
-        else:
-            audio_data = None
-        # 执行异步上报
         await manage_report(
             mac_address=conn.device_id,
             session_id=conn.session_id,
@@ -49,7 +47,12 @@ async def report(conn: "ConnectionHandler", type, text, opus_data, report_time):
             audio=audio_data,
             report_time=report_time,
         )
+    except Exception as e:
+        conn.logger.bind(tag=TAG).error(f"聊天记录上报失败: {e}")
+
+    try:
         event_type = "tool" if type == 3 else "chat"
+        agent_id = conn.config.get("agent_id") if getattr(conn, "config", None) else None
         await report_memory_event(
             mac_address=conn.device_id,
             session_id=conn.session_id,
@@ -57,6 +60,7 @@ async def report(conn: "ConnectionHandler", type, text, opus_data, report_time):
             content=text,
             event_type=event_type,
             report_time=report_time,
+            agent_id=agent_id,
             event_id=build_memory_event_id(
                 conn.device_id,
                 conn.session_id,
@@ -67,7 +71,7 @@ async def report(conn: "ConnectionHandler", type, text, opus_data, report_time):
             ),
         )
     except Exception as e:
-        conn.logger.bind(tag=TAG).error(f"聊天记录上报失败: {e}")
+        conn.logger.bind(tag=TAG).error(f"长期记忆事件上报失败: {e}")
 
 
 def opus_to_wav(conn: "ConnectionHandler", opus_data):

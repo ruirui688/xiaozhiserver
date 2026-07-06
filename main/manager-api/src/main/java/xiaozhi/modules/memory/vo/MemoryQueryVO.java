@@ -5,6 +5,7 @@ import java.util.List;
 
 import lombok.Data;
 import xiaozhi.modules.memory.entity.MemoryFactEntity;
+import xiaozhi.modules.memory.entity.MemoryForgetTombstoneEntity;
 import xiaozhi.modules.memory.entity.MemoryToolBehaviorEntity;
 
 @Data
@@ -13,5 +14,7 @@ public class MemoryQueryVO {
     private List<MemoryFactEntity> facts = new ArrayList<>();
     private List<MemoryToolBehaviorEntity> toolBehaviors = new ArrayList<>();
     private List<String> blockedPatterns = new ArrayList<>();
+    private List<MemoryForgetTombstoneEntity> matchedTombstones = new ArrayList<>();
+    private List<String> debugSignals = new ArrayList<>();
     private String context;
 }
