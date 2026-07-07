@@ -615,11 +615,24 @@ ACR namespace 写错，不是 yihuixiaozhi
 查看日志：
 
 ```bash
-docker logs --tail 120 xiaozhi-esp32-server-web
+docker logs --tail 120 xiaozhi-esp32-manager-api
 docker logs --tail 120 xiaozhi-esp32-server-db
 ```
 
 重点检查 MySQL 是否启动、Liquibase 是否报错、数据库密码是否和 `.env` 一致。
+
+如果日志里出现类似：
+
+```text
+Validation Failed:
+db/changelog/db.changelog-master.yaml::<id>::<author> was: <old> but is now: <new>
+```
+
+说明生产数据库已经执行过这个 Liquibase changeSet，但当前镜像里的同一个
+changeSet 被改过。处理原则是：不要清数据库、不要删 `DATABASECHANGELOG`，
+先恢复或兼容旧 checksum，再新增一个新的迁移文件补偿当前需要的数据库变更。
+已执行过的迁移文件、changeSet id、author 和 sqlFile 路径都不能当作普通代码
+继续修改。
 
 ### 12.3 xiaozhi-server 反复重启
 
