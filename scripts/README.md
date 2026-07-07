@@ -77,6 +77,10 @@ xiaozhi-server-base-funasr  lite + torch / torchaudio / funasr
 
 `BUILD_BASE=auto` 只复用对应层的精确 `base-<hash>` 缓存，不再把旧的单仓库
 base 当成通用缓存，避免 lite 镜像混入 FunASR。
+`base-<hash>` 只按构建参数、逻辑文件路径和文件内容计算，不依赖 Git worktree
+所在的绝对路径；从不同 worktree 执行同一份内容的构建，会命中同一批 ACR
+base 缓存。脚本仍会探测旧版路径相关 cache tag，命中时只给旧镜像追加新的稳定
+tag 并推送，不删除本地或 ACR 中已有缓存。
 
 > ⚠️ **发布前必须先合并到 `main` 分支。**
 >
@@ -173,6 +177,15 @@ mysql:8.4 / redis:8.0               运行时镜像，ACR 已存在时跳过同�
 
 ```bash
 BUILD_BASE=false MIRROR_RUNTIME_IMAGES=false scripts/acr-build-push
+```
+
+多个 Git worktree 可以直接从各自目录运行发布脚本；只要构建输入内容一致，
+服务端 base、manager-api、manager-web 和 manager-assets 的 cache tag 都会一致。
+不要为了切换 worktree 清理 Docker/BuildKit/ACR 缓存。
+需要只对比缓存 tag、不触发构建时，可以在两个 worktree 分别运行：
+
+```bash
+PRINT_BUILD_CONFIG_ONLY=true scripts/acr-build-push-lite
 ```
 
 FunASR profile 会优先复用构建机本地模型文件：

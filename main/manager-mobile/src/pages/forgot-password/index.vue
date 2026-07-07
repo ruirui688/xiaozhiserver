@@ -13,34 +13,14 @@ import { computed, onMounted, ref } from "vue";
 import { onLoad } from "@dcloudio/uni-app";
 import { useConfigStore } from "@/store";
 import { getEnvBaseUrl, sm2Encrypt } from "@/utils";
+import { getSafeAreaInsets } from "@/utils/system";
 import { toast } from "@/utils/toast";
 // 导入国际化相关功能
 import { t, initI18n } from "@/i18n";
 // 导入API接口
 import { retrievePassword, sendSmsCode } from "@/api/auth";
 
-// 获取屏幕边界到安全区域距离
-let safeAreaInsets;
-let systemInfo;
-
-// #ifdef MP-WEIXIN
-// 微信小程序使用新的API
-systemInfo = uni.getWindowInfo();
-safeAreaInsets = systemInfo.safeArea
-  ? {
-      top: systemInfo.safeArea.top,
-      right: systemInfo.windowWidth - systemInfo.safeArea.right,
-      bottom: systemInfo.windowHeight - systemInfo.safeArea.bottom,
-      left: systemInfo.safeArea.left,
-    }
-  : null;
-// #endif
-
-// #ifndef MP-WEIXIN
-// 其他平台继续使用uni API
-systemInfo = uni.getSystemInfoSync();
-safeAreaInsets = systemInfo.safeAreaInsets;
-// #endif
+const safeAreaInsets = getSafeAreaInsets();
 
 // 表单数据
 interface ForgotPasswordData {

@@ -376,6 +376,16 @@ server.vision_explain http://服务器IP或域名:8003/mcp/vision/explain
 | manager-assets | ACR `xiaozhi-manager-assets:assets-<内容哈希>` + channel/version tag | 改 `public/generator/static/**` 大静态资源或 assets Nginx 配置 |
 | 服务端业务代码 | Docker layer + `:<git短哈希>` / channel tag | 每次 Python 服务代码变化 |
 
+`base-<依赖哈希>` 按构建参数、逻辑文件路径和文件内容计算，不包含 Git worktree
+的绝对路径。多个 worktree 构建同一份内容时，会复用同一批
+`xiaozhi-server-base-*` ACR 缓存。脚本会兼容探测旧版路径相关 cache tag；
+如果旧 tag 存在而新稳定 tag 不存在，会给旧镜像追加新 tag 并推送，不删除旧缓存。
+需要只对比缓存 tag、不触发构建时，可以在不同 worktree 分别运行：
+
+```bash
+PRINT_BUILD_CONFIG_ONLY=true scripts/acr-build-push-lite
+```
+
 日常只改业务逻辑时，直接运行：
 
 ```bash

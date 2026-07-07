@@ -15,6 +15,7 @@ import { t } from '@/i18n'
 import { useConfigStore } from '@/store'
 import { clearServerBaseUrlOverride, getEnvBaseUrl, getServerBaseUrlOverride, setServerBaseUrlOverride } from '@/utils'
 import { isMp } from '@/utils/platform'
+import { getSystemSummary } from '@/utils/system'
 
 defineOptions({
   name: 'SettingsPage',
@@ -37,8 +38,7 @@ const urlError = ref('')
 
 // 系统信息（保留）
 const systemInfo = computed(() => {
-  const info = uni.getSystemInfoSync()
-  return `${info.platform} ${info.system}`
+  return getSystemSummary()
 })
 
 // 读取本地覆盖地址

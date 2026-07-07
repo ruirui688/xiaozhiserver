@@ -1,6 +1,7 @@
 packages:
   - '**'
   - '!node_modules'
-
 patchedDependencies:
   '@dcloudio/uni-h5': patches/@dcloudio__uni-h5.patch
+  wot-design-uni@1.9.1: patches/wot-design-uni@1.9.1.patch
+  z-paging@2.8.7: patches/z-paging@2.8.7.patch

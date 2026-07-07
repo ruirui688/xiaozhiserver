@@ -1,5 +1,4 @@
-<!-- 使用 type="home" 属性设置首页，其他页面不需要设置，默认为page -->
-<route lang="jsonc" type="home">
+<route lang="jsonc" type="page">
 {
   "layout": "tabbar",
   "style": {
@@ -12,40 +11,20 @@
 
 <script lang="ts" setup>
 import type { Agent } from '@/api/agent/types'
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 // 在组件挂载后设置导航栏标题
 import { useMessage } from 'wot-design-uni'
 import useZPaging from 'z-paging/components/z-paging/js/hooks/useZPaging.js'
 import { createAgent, deleteAgent, getAgentList } from '@/api/agent/agent'
 import { t } from '@/i18n'
+import { getSafeAreaInsets } from '@/utils/system'
 import { toast } from '@/utils/toast'
 
 defineOptions({
   name: 'Home',
 })
 
-// 获取屏幕边界到安全区域距离
-let safeAreaInsets: any
-let systemInfo: any
-
-// #ifdef MP-WEIXIN
-// 微信小程序使用新的API
-systemInfo = uni.getWindowInfo()
-safeAreaInsets = systemInfo.safeArea
-  ? {
-      top: systemInfo.safeArea.top,
-      right: systemInfo.windowWidth - systemInfo.safeArea.right,
-      bottom: systemInfo.windowHeight - systemInfo.safeArea.bottom,
-      left: systemInfo.safeArea.left,
-    }
-  : null
-// #endif
-
-// #ifndef MP-WEIXIN
-// 其他平台继续使用uni API
-systemInfo = uni.getSystemInfoSync()
-safeAreaInsets = systemInfo.safeAreaInsets
-// #endif
+const safeAreaInsets = getSafeAreaInsets()
 
 // 智能体数据
 const agentList = ref<Agent[]>([])
@@ -54,8 +33,76 @@ useZPaging(pagingRef)
 // 消息组件
 const message = useMessage()
 
+const totalDeviceCount = computed(() =>
+  agentList.value.reduce((total, agent) => total + (Number(agent.deviceCount) || 0), 0),
+)
+
+const activeAgentCount = computed(() =>
+  agentList.value.filter(agent => Boolean(agent.lastConnectedAt)).length,
+)
+
+const latestActiveAgent = computed(() => {
+  return [...agentList.value]
+    .filter(agent => agent.lastConnectedAt)
+    .sort((a, b) => new Date(b.lastConnectedAt || 0).getTime() - new Date(a.lastConnectedAt || 0).getTime())[0]
+})
+
+const overviewItems = computed(() => [
+  {
+    label: t('home.totalAgents'),
+    value: agentList.value.length,
+    icon: 'user',
+  },
+  {
+    label: t('home.totalDevices'),
+    value: totalDeviceCount.value,
+    icon: 'phone',
+  },
+  {
+    label: t('home.activeAgents'),
+    value: activeAgentCount.value,
+    icon: 'time',
+  },
+])
+
+const quickActions = computed(() => [
+  {
+    label: t('home.quickCreateAgent'),
+    desc: t('home.quickCreateAgentDesc'),
+    icon: 'add',
+    action: openCreateDialog,
+  },
+  {
+    label: t('home.quickDeviceConfig'),
+    desc: t('home.quickDeviceConfigDesc'),
+    icon: 'setting',
+    action: () => uni.switchTab({ url: '/pages/device-config/index' }),
+  },
+])
+
+function hasToken() {
+  try {
+    const authInfo = JSON.parse(uni.getStorageSync('token') || '{}')
+    return Boolean(authInfo?.token)
+  }
+  catch {
+    return false
+  }
+}
+
+function goToLogin() {
+  uni.reLaunch({ url: '/pages/login/index' })
+}
+
 // z-paging查询列表数据
 async function queryList(pageNo: number, pageSize: number) {
+  if (!hasToken()) {
+    agentList.value = []
+    pagingRef.value?.complete([])
+    goToLogin()
+    return
+  }
+
   try {
     console.log('z-paging获取智能体列表')
 
@@ -69,8 +116,8 @@ async function queryList(pageNo: number, pageSize: number) {
   }
   catch (error) {
     console.error('获取智能体列表失败:', error)
-    // 告知z-paging数据加载失败
-    pagingRef.value.complete(false)
+    agentList.value = []
+    pagingRef.value?.complete([])
   }
 }
 
@@ -119,6 +166,11 @@ function handleCardClick(agent: Agent) {
 
 // 打开创建对话框
 function openCreateDialog() {
+  if (!hasToken()) {
+    goToLogin()
+    return
+  }
+
   message
     .prompt({
       title: t('home.dialogTitle'),
@@ -208,6 +260,69 @@ onMounted(() => {
     </template>
 
     <!-- 智能体卡片列表 -->
+    <view class="overview-panel">
+      <view class="overview-grid">
+        <view v-for="item in overviewItems" :key="item.label" class="overview-item">
+          <view class="overview-icon">
+            <wd-icon :name="item.icon" />
+          </view>
+          <view class="overview-copy">
+            <text class="overview-value">
+              {{ item.value }}
+            </text>
+            <text class="overview-label">
+              {{ item.label }}
+            </text>
+          </view>
+        </view>
+      </view>
+
+      <view v-if="latestActiveAgent" class="latest-strip" @click="handleCardClick(latestActiveAgent)">
+        <view class="latest-copy">
+          <text class="latest-label">
+            {{ t('home.latestActiveAgent') }}
+          </text>
+          <text class="latest-name">
+            {{ latestActiveAgent.agentName }}
+          </text>
+        </view>
+        <text class="latest-time">
+          {{ formatTime(latestActiveAgent.lastConnectedAt || '') }}
+        </text>
+      </view>
+    </view>
+
+    <view class="quick-panel">
+      <view
+        v-for="action in quickActions"
+        :key="action.label"
+        class="quick-item"
+        @click="action.action()"
+      >
+        <view class="quick-icon">
+          <wd-icon :name="action.icon" />
+        </view>
+        <view class="quick-copy">
+          <text class="quick-title">
+            {{ action.label }}
+          </text>
+          <text class="quick-desc">
+            {{ action.desc }}
+          </text>
+        </view>
+        <wd-icon name="arrow-right" custom-class="quick-arrow" />
+      </view>
+    </view>
+
+    <view class="section-heading">
+      <text class="section-title">
+        {{ t('home.agentList') }}
+      </text>
+      <text class="section-count">
+        {{ agentList.length }} {{ t('home.agentUnit') }}
+      </text>
+    </view>
+
     <view class="agent-list">
       <view v-for="agent in agentList" :key="agent.id" class="agent-item">
         <wd-swipe-action>
@@ -406,6 +521,192 @@ onMounted(() => {
   flex-direction: column;
   gap: 16rpx;
   padding: 0 20rpx;
+}
+
+.overview-panel {
+  padding: 0 20rpx 20rpx;
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12rpx;
+}
+
+.overview-item {
+  min-height: 136rpx;
+  padding: 20rpx 14rpx;
+  background: #ffffff;
+  border: 1rpx solid #edf0f5;
+  border-radius: 16rpx;
+  box-shadow: 0 4rpx 18rpx rgba(22, 33, 55, 0.05);
+  box-sizing: border-box;
+}
+
+.overview-icon {
+  width: 48rpx;
+  height: 48rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12rpx;
+  color: #3977d6;
+  background: #edf5ff;
+  border-radius: 14rpx;
+}
+
+.overview-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.overview-value {
+  font-size: 36rpx;
+  line-height: 44rpx;
+  font-weight: 700;
+  color: #162137;
+}
+
+.overview-label {
+  font-size: 22rpx;
+  line-height: 30rpx;
+  color: #6b7280;
+  word-break: keep-all;
+}
+
+.latest-strip {
+  min-height: 88rpx;
+  margin-top: 14rpx;
+  padding: 18rpx 20rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+  background: #f8fbff;
+  border: 1rpx solid #e3eefc;
+  border-radius: 16rpx;
+  box-sizing: border-box;
+
+  &:active {
+    background: #eef6ff;
+  }
+}
+
+.latest-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.latest-label {
+  font-size: 22rpx;
+  line-height: 30rpx;
+  color: #6b7280;
+}
+
+.latest-name {
+  max-width: 420rpx;
+  font-size: 28rpx;
+  line-height: 36rpx;
+  font-weight: 600;
+  color: #162137;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.latest-time {
+  flex-shrink: 0;
+  font-size: 24rpx;
+  line-height: 32rpx;
+  color: #3977d6;
+}
+
+.quick-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+  padding: 0 20rpx 24rpx;
+}
+
+.quick-item {
+  min-height: 108rpx;
+  padding: 18rpx 20rpx;
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  background: #ffffff;
+  border: 1rpx solid #edf0f5;
+  border-radius: 16rpx;
+  box-shadow: 0 4rpx 18rpx rgba(22, 33, 55, 0.05);
+  box-sizing: border-box;
+
+  &:active {
+    background: #f8f9fb;
+  }
+}
+
+.quick-icon {
+  width: 56rpx;
+  height: 56rpx;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #3977d6;
+  background: #edf5ff;
+  border-radius: 16rpx;
+}
+
+.quick-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.quick-title {
+  font-size: 28rpx;
+  line-height: 36rpx;
+  font-weight: 600;
+  color: #162137;
+}
+
+.quick-desc {
+  font-size: 22rpx;
+  line-height: 30rpx;
+  color: #6b7280;
+}
+
+:deep(.quick-arrow) {
+  flex-shrink: 0;
+  font-size: 24rpx;
+  color: #a8b0bd;
+}
+
+.section-heading {
+  padding: 0 24rpx 16rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.section-title {
+  font-size: 30rpx;
+  line-height: 38rpx;
+  font-weight: 700;
+  color: #162137;
+}
+
+.section-count {
+  flex-shrink: 0;
+  font-size: 24rpx;
+  line-height: 32rpx;
+  color: #6b7280;
 }
 
 .agent-item {

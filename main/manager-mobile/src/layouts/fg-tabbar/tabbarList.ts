@@ -58,6 +58,11 @@ export const tabbarList: FgTabBarItem[] = [
 export const cacheTabbarEnable = selectedTabbarStrategy === TABBAR_MAP.NATIVE_TABBAR
   || selectedTabbarStrategy === TABBAR_MAP.CUSTOM_TABBAR_WITH_CACHE
 
+const nativeTabbarList: TabBar['list'] = tabbarList.map((item) => {
+  const { icon, iconType, ...nativeItem } = item
+  return nativeItem
+}) as TabBar['list']
+
 const _tabbar: TabBar = {
   // 只有微信小程序支持 custom。App 和 H5 不生效
   custom: selectedTabbarStrategy === TABBAR_MAP.CUSTOM_TABBAR_WITH_CACHE,
@@ -69,7 +74,9 @@ const _tabbar: TabBar = {
   fontSize: '10px',
   iconWidth: '24px',
   spacing: '3px',
-  list: tabbarList as unknown as TabBar['list'],
+  list: selectedTabbarStrategy === TABBAR_MAP.NATIVE_TABBAR
+    ? nativeTabbarList
+    : tabbarList as unknown as TabBar['list'],
 }
 
 // 0和1 需要显示底部的tabbar的各种配置，以利用缓存

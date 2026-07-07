@@ -15,6 +15,7 @@ import { ref } from 'vue'
 import { getAudioId, getChatHistory } from '@/api/chat-history/chat-history'
 import { t } from '@/i18n'
 import { debounce, getEnvBaseUrl } from '@/utils'
+import { getSafeAreaInsets } from '@/utils/system'
 import { toast } from '@/utils/toast'
 
 defineOptions({
@@ -31,26 +32,7 @@ type ParsedChatMessage = ChatMessage & {
   parsedContent: ParsedMessageContent
 }
 
-// 获取屏幕边界到安全区域距离
-let safeAreaInsets: any
-let systemInfo: any
-
-// #ifdef MP-WEIXIN
-systemInfo = uni.getWindowInfo()
-safeAreaInsets = systemInfo.safeArea
-  ? {
-      top: systemInfo.safeArea.top,
-      right: systemInfo.windowWidth - systemInfo.safeArea.right,
-      bottom: systemInfo.windowHeight - systemInfo.safeArea.bottom,
-      left: systemInfo.safeArea.left,
-    }
-  : null
-// #endif
-
-// #ifndef MP-WEIXIN
-systemInfo = uni.getSystemInfoSync()
-safeAreaInsets = systemInfo.safeAreaInsets
-// #endif
+const safeAreaInsets = getSafeAreaInsets()
 
 // 页面参数
 const sessionId = ref('')

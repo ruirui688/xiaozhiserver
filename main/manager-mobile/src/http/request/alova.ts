@@ -126,6 +126,7 @@ const alovaInstance = createAlova({
       if (code === ResultEnum.Unauthorized) {
         // 清除token并跳转到登录页
         uni.removeStorageSync('token')
+        uni.removeStorageSync('userInfo')
         uni.reLaunch({ url: '/pages/login/index' })
         throw new Error(`请求错误[${code}]：${msg}`)
       }

@@ -4,6 +4,7 @@ import { computed, onMounted, ref } from 'vue'
 import { getChatSessions } from '@/api/chat-history/chat-history'
 import { t } from '@/i18n'
 import { deepClone } from '@/utils'
+import { getSafeAreaInsets } from '@/utils/system'
 
 defineOptions({
   name: 'ChatHistory',
@@ -18,26 +19,7 @@ interface Props {
   agentId?: string
 }
 
-// 获取屏幕边界到安全区域距离
-let safeAreaInsets: any
-let systemInfo: any
-
-// #ifdef MP-WEIXIN
-systemInfo = uni.getWindowInfo()
-safeAreaInsets = systemInfo.safeArea
-  ? {
-      top: systemInfo.safeArea.top,
-      right: systemInfo.windowWidth - systemInfo.safeArea.right,
-      bottom: systemInfo.windowHeight - systemInfo.safeArea.bottom,
-      left: systemInfo.safeArea.left,
-    }
-  : null
-// #endif
-
-// #ifndef MP-WEIXIN
-systemInfo = uni.getSystemInfoSync()
-safeAreaInsets = systemInfo.safeAreaInsets
-// #endif
+const safeAreaInsets = getSafeAreaInsets()
 
 // 聊天会话数据
 const sessionList = ref<ChatSession[]>([])

@@ -1,4 +1,4 @@
-<route lang="jsonc" type="page">
+<route lang="jsonc" type="home">
 {
   "layout": "default",
   "style": {
@@ -10,36 +10,16 @@
 
 <script lang="ts" setup>
 import type { LoginData } from '@/api/auth'
-import { computed, onMounted, ref } from 'vue'
-import { login } from '@/api/auth'
+import { computed, ref } from 'vue'
+import { login, wxBind, wxLogin } from '@/api/auth'
 import { initI18n, t } from '@/i18n'
 import { useConfigStore, useUserStore } from '@/store'
 // 导入SM2加密工具
 import { getEnvBaseUrl, sm2Encrypt } from '@/utils'
+import { getSafeAreaInsets } from '@/utils/system'
 import { toast } from '@/utils/toast'
 
-// 获取屏幕边界到安全区域距离
-let safeAreaInsets
-let systemInfo
-
-// #ifdef MP-WEIXIN
-// 微信小程序使用新的API
-systemInfo = uni.getWindowInfo()
-safeAreaInsets = systemInfo.safeArea
-  ? {
-      top: systemInfo.safeArea.top,
-      right: systemInfo.windowWidth - systemInfo.safeArea.right,
-      bottom: systemInfo.windowHeight - systemInfo.safeArea.bottom,
-      left: systemInfo.safeArea.left,
-    }
-  : null
-// #endif
-
-// #ifndef MP-WEIXIN
-// 其他平台继续使用uni API
-systemInfo = uni.getSystemInfoSync()
-safeAreaInsets = systemInfo.safeAreaInsets
-// #endif
+const safeAreaInsets = getSafeAreaInsets()
 // 表单数据
 const formData = ref({
   username: '',
@@ -53,6 +33,8 @@ const formData = ref({
 // 验证码图片
 const captchaImage = ref('')
 const loading = ref(false)
+const wxLoading = ref(false)
+const showPasswordLogin = ref(true)
 
 // 登录方式：'username' | 'mobile'
 const loginType = ref<'username' | 'mobile'>('username')
@@ -69,6 +51,10 @@ const selectedAreaName = ref('中国大陆')
 // 计算属性：是否启用手机号登录
 const enableMobileLogin = computed(() => {
   return configStore.config.enableMobileRegister
+})
+
+const allowUserRegister = computed(() => {
+  return Boolean(configStore.config.allowUserRegister)
 })
 
 // 计算属性：区号列表
@@ -130,6 +116,44 @@ function goToPrivacyPolicy() {
   })
 }
 
+function showPasswordForm() {
+  showPasswordLogin.value = true
+}
+
+async function enterHome() {
+  await userStore.getUserInfo()
+  uni.reLaunch({
+    url: '/pages/index/index',
+  })
+}
+
+async function bindCurrentWechatAccount() {
+  // #ifndef MP-WEIXIN
+  return
+  // #endif
+
+  // #ifdef MP-WEIXIN
+  try {
+    const loginResult = await uni.login({ provider: 'weixin' })
+    if (loginResult.code)
+      await wxBind({ code: loginResult.code })
+  }
+  catch (error) {
+    console.warn('绑定微信账号失败:', error)
+  }
+  // #endif
+}
+
+function getWxLoginErrorMessage(error: unknown) {
+  if (typeof error === 'string')
+    return error
+  if (error instanceof Error)
+    return error.message || t('login.wxLoginFailed')
+  if (error && typeof error === 'object' && 'errMsg' in error)
+    return String((error as { errMsg?: string }).errMsg || t('login.wxLoginFailed'))
+  return t('login.wxLoginFailed')
+}
+
 // 生成UUID
 function generateUUID() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -137,6 +161,22 @@ function generateUUID() {
     const v = c === 'x' ? r : (r & 0x3 | 0x8)
     return v.toString(16)
   })
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer) {
+  // #ifdef MP-WEIXIN
+  return wx.arrayBufferToBase64(buffer)
+  // #endif
+
+  // #ifndef MP-WEIXIN
+  let binary = ''
+  const bytes = new Uint8Array(buffer)
+  const chunkSize = 0x8000
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
+  }
+  return btoa(binary)
+  // #endif
 }
 
 // 跳转至服务端设置页面
@@ -150,7 +190,33 @@ function goToServerSetting() {
 async function refreshCaptcha() {
   const uuid = generateUUID()
   formData.value.captchaId = uuid
-  captchaImage.value = `${getEnvBaseUrl()}/user/captcha?uuid=${uuid}&t=${Date.now()}`
+  const captchaUrl = `${getEnvBaseUrl()}/user/captcha?uuid=${uuid}&t=${Date.now()}`
+
+  // #ifdef MP-WEIXIN
+  try {
+    const response = await uni.request({
+      url: captchaUrl,
+      method: 'GET',
+      responseType: 'arraybuffer',
+      timeout: 5000,
+    })
+
+    if (response.statusCode === 200 && response.data) {
+      captchaImage.value = `data:image/png;base64,${arrayBufferToBase64(response.data as ArrayBuffer)}`
+      return
+    }
+  }
+  catch (error) {
+    if (showPasswordLogin.value)
+      toast.warning(t('login.captchaLoadFailed'))
+  }
+  captchaImage.value = ''
+  return
+  // #endif
+
+  // #ifndef MP-WEIXIN
+  captchaImage.value = captchaUrl
+  // #endif
 }
 
 // 登录
@@ -183,7 +249,22 @@ async function handleLogin() {
     return
   }
 
+  if (!formData.value.captchaId) {
+    await refreshCaptcha()
+    toast.warning(t('login.enterCaptcha'))
+    return
+  }
+
   // 检查SM2公钥是否配置
+  if (!configStore.config.sm2PublicKey) {
+    try {
+      await configStore.fetchPublicConfig()
+    }
+    catch {
+      toast.warning(t('login.serverUnavailable'))
+      return
+    }
+  }
   const sm2PublicKey = configStore.config.sm2PublicKey
   if (!sm2PublicKey) {
     toast.warning(t('sm2.publicKeyNotConfigured'))
@@ -224,15 +305,13 @@ async function handleLogin() {
     const response = await login(loginData)
     // 存储token
     uni.setStorageSync('token', JSON.stringify(response))
-    await userStore.getUserInfo()
+    await bindCurrentWechatAccount()
 
     toast.success(t('message.loginSuccess'))
 
     // 跳转到主页
     setTimeout(() => {
-      uni.reLaunch({
-        url: '/pages/index/index',
-      })
+      enterHome()
     }, 1000)
   }
   catch (error: any) {
@@ -244,25 +323,48 @@ async function handleLogin() {
   }
 }
 
-// 页面加载时获取验证码
+async function handleWxLogin(options: { silent?: boolean } = {}) {
+  // #ifndef MP-WEIXIN
+  showPasswordLogin.value = true
+  return
+  // #endif
+
+  // #ifdef MP-WEIXIN
+  try {
+    wxLoading.value = true
+    const loginResult = await uni.login({ provider: 'weixin' })
+    if (!loginResult.code) {
+      if (!options.silent)
+        toast.warning(t('login.wxLoginFailed'))
+      return
+    }
+
+    const response = await wxLogin({ code: loginResult.code })
+    uni.setStorageSync('token', JSON.stringify(response))
+    toast.success(t('message.loginSuccess'))
+    await enterHome()
+  }
+  catch (error) {
+    if (!options.silent) {
+      console.error('微信登录失败:', error)
+      toast.warning(`${t('login.wxLoginFailed')}: ${getWxLoginErrorMessage(error)}`)
+    }
+    showPasswordLogin.value = true
+  }
+  finally {
+    wxLoading.value = false
+  }
+  // #endif
+}
+
+// 页面加载时只准备本页数据，不自动触发网络登录。
 onLoad(() => {
-  refreshCaptcha()
+  showPasswordLogin.value = true
 })
 
 // 初始化国际化
 initI18n()
 
-// 组件挂载时确保配置已加载
-onMounted(async () => {
-  if (!configStore.config.name) {
-    try {
-      await configStore.fetchPublicConfig()
-    }
-    catch (error) {
-      console.error(t('login.fetchConfigError'), error)
-    }
-  }
-})
 </script>
 
 <template>
@@ -289,6 +391,28 @@ onMounted(async () => {
 
     <view class="form-container">
       <view class="form">
+        <!-- #ifdef MP-WEIXIN -->
+        <view class="wechat-login-panel">
+          <view class="wechat-title">
+            {{ t('login.wechatLoginTitle') }}
+          </view>
+          <view class="wechat-desc">
+            {{ t('login.wechatLoginDesc') }}
+          </view>
+          <view class="wechat-login-btn" @click="handleWxLogin">
+            <text>{{ wxLoading ? t('login.loggingIn') : t('login.wechatLoginButton') }}</text>
+          </view>
+          <view
+            v-if="!showPasswordLogin"
+            class="password-entry"
+            @click="showPasswordForm"
+          >
+            {{ t('login.passwordLogin') }}
+          </view>
+        </view>
+        <!-- #endif -->
+
+        <template v-if="showPasswordLogin">
         <!-- 手机号登录 -->
         <template v-if="loginType === 'mobile'">
           <view class="input-group">
@@ -351,7 +475,10 @@ onMounted(async () => {
               :maxlength="6"
             />
             <view class="captcha-image" @click="refreshCaptcha">
-              <image :src="captchaImage" class="captcha-img" />
+              <image v-if="captchaImage" :src="captchaImage" class="captcha-img" />
+              <text v-else class="captcha-placeholder">
+                {{ t('login.loadCaptcha') }}
+              </text>
             </view>
           </view>
         </view>
@@ -363,7 +490,7 @@ onMounted(async () => {
         </view>
 
         <view class="hint-row">
-          <view class="register-hint">
+          <view v-if="allowUserRegister" class="register-hint">
             <text class="register-link" @click="goToRegister">
               {{ t('login.noAccount') }}
             </text>
@@ -405,6 +532,7 @@ onMounted(async () => {
             </view>
           </view>
         </view>
+        </template>
       </view>
     </view>
 
@@ -573,6 +701,7 @@ onMounted(async () => {
               height: 100%;
             }
 
+            .captcha-placeholder,
             .captcha-loading {
               font-size: 20rpx;
               color: #999;
@@ -772,6 +901,53 @@ onMounted(async () => {
       }
     }
   }
+}
+
+.wechat-login-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 20rpx;
+}
+
+.wechat-title {
+  font-size: 34rpx;
+  line-height: 44rpx;
+  font-weight: 700;
+  color: #1f2937;
+  text-align: center;
+}
+
+.wechat-desc {
+  font-size: 24rpx;
+  line-height: 34rpx;
+  color: #6b7280;
+  text-align: center;
+}
+
+.wechat-login-btn {
+  height: 96rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14rpx;
+  border-radius: 16rpx;
+  background: #07c160;
+  color: #ffffff;
+  font-size: 30rpx;
+  font-weight: 600;
+
+  &:active {
+    background: #06ad56;
+  }
+}
+
+.password-entry {
+  padding: 16rpx 0 4rpx;
+  font-size: 26rpx;
+  line-height: 34rpx;
+  color: #4f7ee8;
+  text-align: center;
 }
 
 // 区号选择弹窗样式

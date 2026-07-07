@@ -4,6 +4,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -14,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 
+import cn.hutool.crypto.digest.DigestUtil;
 import lombok.AllArgsConstructor;
 import xiaozhi.common.constant.Constant;
 import xiaozhi.common.exception.ErrorCode;
@@ -58,6 +60,58 @@ public class SysUserServiceImpl extends BaseServiceImpl<SysUserDao, SysUserEntit
         }
         SysUserEntity entity = users.get(0);
         return ConvertUtils.sourceToTarget(entity, SysUserDTO.class);
+    }
+
+    @Override
+    public SysUserDTO getByWxOpenid(String wxOpenid) {
+        if (StringUtils.isBlank(wxOpenid)) {
+            return null;
+        }
+        QueryWrapper<SysUserEntity> queryWrapper = new QueryWrapper<>();
+        queryWrapper.eq("wx_openid", wxOpenid);
+        List<SysUserEntity> users = sysUserDao.selectList(queryWrapper);
+        if (users == null || users.isEmpty()) {
+            return null;
+        }
+        return ConvertUtils.sourceToTarget(users.get(0), SysUserDTO.class);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public SysUserDTO createWechatUser(String wxOpenid, String wxUnionid) {
+        SysUserDTO existing = getByWxOpenid(wxOpenid);
+        if (existing != null) {
+            return existing;
+        }
+
+        SysUserEntity entity = new SysUserEntity();
+        entity.setUsername("wx_" + DigestUtil.sha256Hex(wxOpenid).substring(0, 24));
+        entity.setPassword(PasswordUtils.encode(UUID.randomUUID() + "Aa1!"));
+        entity.setWxOpenid(wxOpenid);
+        entity.setWxUnionid(wxUnionid);
+        entity.setSuperAdmin(SuperAdminEnum.NO.value());
+        entity.setStatus(1);
+        insert(entity);
+        return ConvertUtils.sourceToTarget(entity, SysUserDTO.class);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void bindWechatUser(Long userId, String wxOpenid, String wxUnionid) {
+        if (userId == null || StringUtils.isBlank(wxOpenid)) {
+            throw new RenException(ErrorCode.TOKEN_INVALID);
+        }
+
+        SysUserDTO existing = getByWxOpenid(wxOpenid);
+        if (existing != null && !userId.equals(existing.getId())) {
+            throw new RenException("该微信账号已绑定其他用户");
+        }
+
+        SysUserEntity entity = new SysUserEntity();
+        entity.setId(userId);
+        entity.setWxOpenid(wxOpenid);
+        entity.setWxUnionid(wxUnionid);
+        updateById(entity);
     }
 
     @Override

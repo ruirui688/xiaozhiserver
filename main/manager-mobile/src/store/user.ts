@@ -26,13 +26,10 @@ export const useUserStore = defineStore(
     // 设置用户信息
     const setUserInfo = (val: UserInfo & { avatar?: string, token?: string }) => {
       console.log('设置用户信息', val)
-      // 若头像为空 则使用默认头像
-      if (!val.avatar) {
+      // 若头像为空则使用默认头像，已有头像保留后端返回值。
+      if (!val.avatar)
         val.avatar = userInfoState.avatar
-      }
-      else {
-        val.avatar = 'https://oss.laf.run/ukw0y1-site/avatar.jpg?feige'
-      }
+
       userInfo.value = val
     }
     const setUserAvatar = (avatar: string) => {

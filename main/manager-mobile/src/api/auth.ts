@@ -16,6 +16,10 @@ export interface LoginResponse {
   clientHash: string
 }
 
+export interface WxLoginData {
+  code: string
+}
+
 // 验证码响应数据类型
 export interface CaptchaResponse {
   captchaId: string
@@ -39,6 +43,25 @@ export function login(data: LoginData) {
     meta: {
       ignoreAuth: true,
       toast: true,
+    },
+  })
+}
+
+export function wxLogin(data: WxLoginData) {
+  return http.Post<LoginResponse>('/user/wx-login', data, {
+    meta: {
+      ignoreAuth: true,
+      toast: false,
+      isExposeError: true,
+    },
+  })
+}
+
+export function wxBind(data: WxLoginData) {
+  return http.Post<void>('/user/wx-bind', data, {
+    meta: {
+      ignoreAuth: false,
+      toast: false,
     },
   })
 }

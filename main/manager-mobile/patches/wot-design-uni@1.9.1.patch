@@ -1,0 +1,70 @@
+diff --git a/components/wd-fab/wd-fab.vue b/components/wd-fab/wd-fab.vue
+index aff26059582ef4d0b45259c9e8aced564628fd01..7755ac84213aa30ac3df0ddf5aeefdcb125469d8 100644
+--- a/components/wd-fab/wd-fab.vue
++++ b/components/wd-fab/wd-fab.vue
+@@ -103,7 +103,13 @@ const bounding = reactive({
+ })
+ 
+ async function getBounding() {
+-  const sysInfo = uni.getSystemInfoSync()
++  let sysInfo: any
++  // #ifdef MP-WEIXIN
++  sysInfo = uni.getWindowInfo()
++  // #endif
++  // #ifndef MP-WEIXIN
++  sysInfo = uni.getSystemInfoSync()
++  // #endif
+   try {
+     const trigerInfo = await getRect('#trigger', false, proxy)
+     fabSize.width = trigerInfo.width || 56
+diff --git a/components/wd-navbar/wd-navbar.vue b/components/wd-navbar/wd-navbar.vue
+index 0965d55c76ea00d48444a7c6e32f5d5b74f2655a..241f35dcd3d2d649398d83741312a6ddb20c9774 100644
+--- a/components/wd-navbar/wd-navbar.vue
++++ b/components/wd-navbar/wd-navbar.vue
+@@ -52,7 +52,13 @@ const emit = defineEmits(['click-left', 'click-right'])
+ 
+ const height = ref<number | ''>('') // 占位高度
+ 
+-const { statusBarHeight } = uni.getSystemInfoSync()
++let statusBarHeight = 0
++// #ifdef MP-WEIXIN
++statusBarHeight = uni.getWindowInfo().statusBarHeight || 0
++// #endif
++// #ifndef MP-WEIXIN
++statusBarHeight = uni.getSystemInfoSync().statusBarHeight || 0
++// #endif
+ 
+ watch(
+   [() => props.fixed, () => props.placeholder],
+diff --git a/components/wd-popup/wd-popup.vue b/components/wd-popup/wd-popup.vue
+index ff5ad0d1050312ca6a63f1f0a5b3363bef65763d..8509ee0bbda49d1844a29f16d7cc1f65caaa54ef 100644
+--- a/components/wd-popup/wd-popup.vue
++++ b/components/wd-popup/wd-popup.vue
+@@ -100,18 +100,20 @@ const rootClass = computed(() => {
+ 
+ onBeforeMount(() => {
+   if (props.safeAreaInsetBottom) {
+-    const { safeArea, screenHeight, safeAreaInsets } = uni.getSystemInfoSync()
+-
++    // #ifdef MP-WEIXIN
++    const windowInfo = uni.getWindowInfo()
++    safeBottom.value = windowInfo.safeArea
++      ? windowInfo.windowHeight - (windowInfo.safeArea.bottom || 0)
++      : 0
++    // #endif
++    // #ifndef MP-WEIXIN
++    const { safeArea, safeAreaInsets } = uni.getSystemInfoSync()
+     if (safeArea) {
+-      // #ifdef MP-WEIXIN
+-      safeBottom.value = screenHeight - (safeArea!.bottom || 0)
+-      // #endif
+-      // #ifndef MP-WEIXIN
+       safeBottom.value = safeAreaInsets ? safeAreaInsets.bottom : 0
+-      // #endif
+     } else {
+       safeBottom.value = 0
+     }
++    // #endif
+   }
+ })
+ 

@@ -15,6 +15,12 @@ public interface SysUserService extends BaseService<SysUserEntity> {
 
     SysUserDTO getByUsername(String username);
 
+    SysUserDTO getByWxOpenid(String wxOpenid);
+
+    SysUserDTO createWechatUser(String wxOpenid, String wxUnionid);
+
+    void bindWechatUser(Long userId, String wxOpenid, String wxUnionid);
+
     SysUserDTO getByUserId(Long userId);
 
     void save(SysUserDTO dto);

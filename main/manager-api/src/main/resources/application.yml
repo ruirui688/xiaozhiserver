@@ -50,6 +50,11 @@ xiaozhi:
     # XIAOZHI_SERVER_HTTP_BASE_URL=http://xiaozhi-esp32-server:8003
     http-base-url: ${XIAOZHI_SERVER_HTTP_BASE_URL:http://127.0.0.1:8003}
 
+wechat:
+  mini-program:
+    app-id: ${WECHAT_MINI_PROGRAM_APP_ID:}
+    app-secret: ${WECHAT_MINI_PROGRAM_APP_SECRET:}
+
 # 知识库配置
 knowledge:
   max-upload-size: 10485760  # 知识库文档上传大小限制（默认 10MB）
