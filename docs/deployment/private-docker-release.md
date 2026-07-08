@@ -327,13 +327,16 @@ VERSION=<git短哈希> ./upgrade
 
 | 用途 | 正确示例 | 说明 |
 |------|----------|------|
-| 浏览器访问智控台 | `http://服务器IP:8002` | 用户浏览器访问 |
+| 浏览器访问智控台 | `https://yh.wejoy.link/` | 生产环境通过 HTTPS 反向代理访问 |
 | manager-api 容器访问 Python | `http://xiaozhi-esp32-server:8003` | Docker 内网地址，写在 `.env` 的 `XIAOZHI_SERVER_HTTP_BASE_URL` |
 | xiaozhi-server 访问 manager-api | `http://xiaozhi-esp32-server-web:8002/xiaozhi` | 写在 `data/.config.yaml` 的 `manager-api.url` |
-| ESP32 设备访问 WebSocket | `ws://服务器IP:8000/xiaozhi/v1/` | 设备网络必须可达 |
-| ESP32 设备访问 OTA | `http://服务器IP:8003/xiaozhi/ota/` | 设备网络必须可达 |
+| ESP32 设备访问 WebSocket | `wss://yh.wejoy.link/xiaozhi/v1/` | 生产环境公网地址，设备网络必须可达 |
+| ESP32 设备访问 OTA | `https://yh.wejoy.link/xiaozhi/ota/` | 生产环境公网地址，设备网络必须可达 |
+| 微信小程序访问 API | `https://yh.wejoy.link/xiaozhi` | 必须配置为微信小程序 request 合法域名 |
 
 不要把容器内地址改成 `127.0.0.1`。在容器里，`127.0.0.1` 只代表当前容器自己。
+也不要把 `.env` 里的 `XIAOZHI_SERVER_HTTP_BASE_URL` 改成公网 HTTPS 地址；它是
+manager-api 容器访问 Python 容器的内网地址。
 
 ### 6.2 manager-api.secret 自动同步
 
@@ -350,12 +353,33 @@ VERSION=<git短哈希> ./upgrade
 在智控台“参数字典”里确认设备可访问地址：
 
 ```text
-server.websocket      ws://服务器IP或域名:8000/xiaozhi/v1/
-server.ota            http://服务器IP或域名:8003/xiaozhi/ota/
-server.vision_explain http://服务器IP或域名:8003/mcp/vision/explain
+server.websocket      wss://yh.wejoy.link/xiaozhi/v1/
+server.ota            https://yh.wejoy.link/xiaozhi/ota/
+server.vision_explain https://yh.wejoy.link/mcp/vision/explain
 ```
 
-生产环境建议通过 TLS 反向代理暴露公网入口，并把设备地址改成 `wss://` / `https://`。
+生产环境必须通过 TLS 反向代理暴露公网入口，并把设备地址改成 `wss://` / `https://`。
+部署包提供了 `deploy/production/nginx-https.conf.example`，映射关系如下：
+
+```text
+https://yh.wejoy.link/                   -> 127.0.0.1:8002
+https://yh.wejoy.link/xiaozhi/           -> 127.0.0.1:8002/xiaozhi/
+https://yh.wejoy.link/xiaozhi/ota/       -> 127.0.0.1:8003/xiaozhi/ota/
+https://yh.wejoy.link/mcp/vision/explain -> 127.0.0.1:8003/mcp/vision/explain
+wss://yh.wejoy.link/xiaozhi/v1/          -> 127.0.0.1:8000/xiaozhi/v1/
+```
+
+在服务器 `~/xiaozhi-data/.env` 中设置：
+
+```bash
+XIAOZHI_PUBLIC_DOMAIN=yh.wejoy.link
+XIAOZHI_PUBLIC_BASE_URL=https://yh.wejoy.link
+XIAOZHI_CORS_ORIGINS=https://yh.wejoy.link
+```
+
+然后执行 `./upgrade`。HTTPS 打通后，在微信公众平台把
+`https://yh.wejoy.link` 加入小程序 request 合法域名；上线版小程序不能依赖
+开发者工具里的“关闭合法域名校验”。
 
 ---
 

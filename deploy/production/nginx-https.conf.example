@@ -1,0 +1,58 @@
+# Example HTTPS/WSS reverse proxy for production.
+# Replace yh.wejoy.link and certificate paths before enabling this file.
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    listen 80;
+    server_name yh.wejoy.link;
+
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name yh.wejoy.link;
+
+    ssl_certificate     /etc/nginx/certs/yh.wejoy.link/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/yh.wejoy.link/privkey.pem;
+
+    client_max_body_size 50m;
+
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+
+    location /xiaozhi/v1/ {
+        proxy_pass http://127.0.0.1:8000/xiaozhi/v1/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    location /xiaozhi/ota/ {
+        proxy_pass http://127.0.0.1:8003/xiaozhi/ota/;
+    }
+
+    location = /mcp/vision/explain {
+        proxy_pass http://127.0.0.1:8003/mcp/vision/explain;
+    }
+
+    location /xiaozhi/ {
+        proxy_pass http://127.0.0.1:8002/xiaozhi/;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8002/;
+    }
+}
