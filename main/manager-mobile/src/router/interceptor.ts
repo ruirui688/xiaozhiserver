@@ -11,6 +11,15 @@ import { needLoginPages as _needLoginPages, getLastPage, getNeedLoginPages } fro
 const loginRoute = import.meta.env.VITE_LOGIN_URL
 
 function isLogined() {
+  try {
+    const authInfo = JSON.parse(uni.getStorageSync('token') || '{}')
+    if (authInfo?.token) {
+      return true
+    }
+  }
+  catch {
+    return false
+  }
   const userStore = useUserStore()
   return !!userStore.userInfo.username
 }

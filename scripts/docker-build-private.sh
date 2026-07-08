@@ -77,6 +77,7 @@ XIAOZHI_PROGRESS_INTERVAL="${XIAOZHI_PROGRESS_INTERVAL:-30}"
 XIAOZHI_PROGRESS_ANIMATION_INTERVAL="${XIAOZHI_PROGRESS_ANIMATION_INTERVAL:-0.12}"
 PARALLEL_IMAGE_BUILDS="${PARALLEL_IMAGE_BUILDS:-true}"
 PRINT_BUILD_CONFIG="${PRINT_BUILD_CONFIG:-true}"
+PRINT_BUILD_CONFIG_ONLY="${PRINT_BUILD_CONFIG_ONLY:-false}"
 LOG_DIR="${LOG_DIR:-$(mktemp -d -t xiaozhi-docker-build.XXXXXX)}"
 SERVER_BASE_CACHE_VERSION="${SERVER_BASE_CACHE_VERSION:-v2}"
 SERVER_BASE_SEED_LATEST="${SERVER_BASE_SEED_LATEST:-false}"
@@ -175,6 +176,11 @@ fi
 
 if [[ "$PARALLEL_IMAGE_BUILDS" != "true" && "$PARALLEL_IMAGE_BUILDS" != "false" ]]; then
   echo "PARALLEL_IMAGE_BUILDS must be true or false" >&2
+  exit 1
+fi
+
+if [[ "$PRINT_BUILD_CONFIG_ONLY" != "true" && "$PRINT_BUILD_CONFIG_ONLY" != "false" ]]; then
+  echo "PRINT_BUILD_CONFIG_ONLY must be true or false" >&2
   exit 1
 fi
 
@@ -506,7 +512,26 @@ remote_retag_image() {
   run_docker_step "$label" docker buildx imagetools create --tag "$target" "$source"
 }
 
+hash_file_content() {
+  local logical_path="$1"
+  local file_path="$2"
+  local digest
+
+  digest="$(sha256sum "$file_path" | awk '{print $1}')"
+  printf '%s  %s\n' "$digest" "$logical_path"
+}
+
 hash_common_base_inputs() {
+  {
+    printf 'SERVER_BASE_CACHE_VERSION=%s\n' "$SERVER_BASE_CACHE_VERSION"
+    printf 'PYTHON_BASE_IMAGE=%s\n' "$PYTHON_BASE_IMAGE"
+    printf 'DEBIAN_MIRROR=%s\n' "$DEBIAN_MIRROR"
+    printf 'DEBIAN_SECURITY_MIRROR=%s\n' "$DEBIAN_SECURITY_MIRROR"
+    hash_file_content "Dockerfile-server-base" "$ROOT_DIR/Dockerfile-server-base"
+  } | sha256sum | cut -c1-12
+}
+
+hash_common_base_inputs_legacy() {
   {
     printf 'SERVER_BASE_CACHE_VERSION=%s\n' "$SERVER_BASE_CACHE_VERSION"
     printf 'PYTHON_BASE_IMAGE=%s\n' "$PYTHON_BASE_IMAGE"
@@ -523,6 +548,18 @@ hash_lite_base_inputs() {
     printf 'SERVER_REQUIREMENTS=%s\n' "$SERVER_REQUIREMENTS"
     printf 'PIP_INDEX_URL=%s\n' "$PIP_INDEX_URL"
     printf 'PIP_TRUSTED_HOST=%s\n' "$PIP_TRUSTED_HOST"
+    hash_file_content "Dockerfile-server-base-lite" "$ROOT_DIR/Dockerfile-server-base-lite"
+    hash_file_content "$SERVER_REQUIREMENTS" "$ROOT_DIR/$SERVER_REQUIREMENTS"
+  } | sha256sum | cut -c1-12
+}
+
+hash_lite_base_inputs_legacy() {
+  {
+    printf 'SERVER_BASE_CACHE_VERSION=%s\n' "$SERVER_BASE_CACHE_VERSION"
+    printf 'SERVER_COMMON_BASE_CACHE_TAG=%s\n' "$SERVER_COMMON_BASE_CACHE_TAG_LEGACY"
+    printf 'SERVER_REQUIREMENTS=%s\n' "$SERVER_REQUIREMENTS"
+    printf 'PIP_INDEX_URL=%s\n' "$PIP_INDEX_URL"
+    printf 'PIP_TRUSTED_HOST=%s\n' "$PIP_TRUSTED_HOST"
     sha256sum "$ROOT_DIR/Dockerfile-server-base-lite" "$ROOT_DIR/$SERVER_REQUIREMENTS"
   } | sha256sum | cut -c1-12
 }
@@ -531,6 +568,17 @@ hash_funasr_base_inputs() {
   {
     printf 'SERVER_BASE_CACHE_VERSION=%s\n' "$SERVER_BASE_CACHE_VERSION"
     printf 'SERVER_LITE_BASE_CACHE_TAG=%s\n' "$SERVER_LITE_BASE_CACHE_TAG"
+    printf 'SERVER_REQUIREMENTS_FUNASR=%s\n' "$SERVER_REQUIREMENTS_FUNASR"
+    printf 'PYTORCH_INDEX_URL=%s\n' "$PYTORCH_INDEX_URL"
+    hash_file_content "Dockerfile-server-base-funasr" "$ROOT_DIR/Dockerfile-server-base-funasr"
+    hash_file_content "$SERVER_REQUIREMENTS_FUNASR" "$ROOT_DIR/$SERVER_REQUIREMENTS_FUNASR"
+  } | sha256sum | cut -c1-12
+}
+
+hash_funasr_base_inputs_legacy() {
+  {
+    printf 'SERVER_BASE_CACHE_VERSION=%s\n' "$SERVER_BASE_CACHE_VERSION"
+    printf 'SERVER_LITE_BASE_CACHE_TAG=%s\n' "$SERVER_LITE_BASE_CACHE_TAG_LEGACY"
     printf 'SERVER_REQUIREMENTS_FUNASR=%s\n' "$SERVER_REQUIREMENTS_FUNASR"
     printf 'PYTORCH_INDEX_URL=%s\n' "$PYTORCH_INDEX_URL"
     sha256sum "$ROOT_DIR/Dockerfile-server-base-funasr" "$ROOT_DIR/$SERVER_REQUIREMENTS_FUNASR"
@@ -606,16 +654,23 @@ funasr_model_cache_key() {
   printf '%s' "$FUNASR_MODEL_URL" | sha256sum | cut -c1-12
 }
 
+SERVER_COMMON_BASE_CACHE_TAG_LEGACY="base-$(hash_common_base_inputs_legacy)"
 SERVER_COMMON_BASE_CACHE_TAG="${SERVER_COMMON_BASE_CACHE_TAG:-base-$(hash_common_base_inputs)}"
 SERVER_COMMON_BASE_CACHE_IMAGE="$SERVER_COMMON_BASE_IMAGE_REPOSITORY:$SERVER_COMMON_BASE_CACHE_TAG"
+SERVER_COMMON_BASE_CACHE_IMAGE_LEGACY="$SERVER_COMMON_BASE_IMAGE_REPOSITORY:$SERVER_COMMON_BASE_CACHE_TAG_LEGACY"
+SERVER_LITE_BASE_CACHE_TAG_LEGACY="base-$(hash_lite_base_inputs_legacy)"
 SERVER_LITE_BASE_CACHE_TAG="${SERVER_LITE_BASE_CACHE_TAG:-base-$(hash_lite_base_inputs)}"
 SERVER_LITE_BASE_CACHE_IMAGE="$SERVER_LITE_BASE_IMAGE_REPOSITORY:$SERVER_LITE_BASE_CACHE_TAG"
+SERVER_LITE_BASE_CACHE_IMAGE_LEGACY="$SERVER_LITE_BASE_IMAGE_REPOSITORY:$SERVER_LITE_BASE_CACHE_TAG_LEGACY"
 if [[ "$SERVER_INSTALL_PROFILE" == "funasr" ]]; then
+  SERVER_BASE_CACHE_TAG_LEGACY="base-$(hash_funasr_base_inputs_legacy)"
   SERVER_BASE_CACHE_TAG="${SERVER_BASE_CACHE_TAG:-base-$(hash_funasr_base_inputs)}"
 else
+  SERVER_BASE_CACHE_TAG_LEGACY="$SERVER_LITE_BASE_CACHE_TAG_LEGACY"
   SERVER_BASE_CACHE_TAG="${SERVER_BASE_CACHE_TAG:-$SERVER_LITE_BASE_CACHE_TAG}"
 fi
 SERVER_BASE_CACHE_IMAGE="$SERVER_BASE_IMAGE_REPOSITORY:$SERVER_BASE_CACHE_TAG"
+SERVER_BASE_CACHE_IMAGE_LEGACY="$SERVER_BASE_IMAGE_REPOSITORY:$SERVER_BASE_CACHE_TAG_LEGACY"
 FUNASR_MODEL_DIGEST="${FUNASR_MODEL_DIGEST:-$(funasr_model_cache_key)}"
 MANAGER_API_CACHE_TAG="${MANAGER_API_CACHE_TAG:-api-$(hash_manager_api_inputs)}"
 MANAGER_API_CACHE_IMAGE="$MANAGER_API_IMAGE_REPOSITORY:$MANAGER_API_CACHE_TAG"
@@ -628,6 +683,34 @@ image_available_locally_or_remote() {
   local image="$1"
   docker image inspect "$image" >/dev/null 2>&1 && return 0
   docker pull --quiet "$image" >/dev/null 2>&1
+}
+
+promote_legacy_cache_image() {
+  local current_image="$1"
+  local legacy_image="$2"
+  local label="$3"
+
+  [[ "$BUILD_BASE" == "auto" ]] || return 1
+  [[ "$current_image" != "$legacy_image" ]] || return 1
+
+  if ! image_available_locally_or_remote "$legacy_image"; then
+    return 1
+  fi
+
+  print_base_image_status "$label legacy cache found" "$legacy_image"
+  if [[ "$PUSH" == "true" ]] && remote_retag_image "$legacy_image" "$current_image"; then
+    print_base_image_status "$label legacy cache retagged" "$current_image"
+    return 0
+  fi
+
+  if docker image inspect "$legacy_image" >/dev/null 2>&1; then
+    docker tag "$legacy_image" "$current_image"
+    push_local_image "$current_image"
+    print_base_image_status "$label legacy cache tagged locally" "$current_image"
+    return 0
+  fi
+
+  return 1
 }
 
 if [[ "$PRINT_BUILD_CONFIG" != "false" ]]; then
@@ -670,6 +753,9 @@ if [[ "$PRINT_BUILD_CONFIG" != "false" ]]; then
   echo "Common base cache image: $SERVER_COMMON_BASE_CACHE_IMAGE"
   echo "Lite base cache image: $SERVER_LITE_BASE_CACHE_IMAGE"
   echo "Selected base cache image: $SERVER_BASE_CACHE_IMAGE"
+  echo "Legacy common base cache image: $SERVER_COMMON_BASE_CACHE_IMAGE_LEGACY"
+  echo "Legacy lite base cache image: $SERVER_LITE_BASE_CACHE_IMAGE_LEGACY"
+  echo "Legacy selected base cache image: $SERVER_BASE_CACHE_IMAGE_LEGACY"
   echo "Manager API cache image: $MANAGER_API_CACHE_IMAGE"
   echo "Manager Web cache image: $MANAGER_WEB_CACHE_IMAGE"
   echo "Manager assets cache image: $MANAGER_ASSETS_CACHE_IMAGE"
@@ -693,6 +779,10 @@ if is_quiet; then
   echo "Logs: $LOG_DIR  (VERBOSE=true for raw Docker output)"
 fi
 
+if [[ "$PRINT_BUILD_CONFIG_ONLY" == "true" ]]; then
+  exit 0
+fi
+
 print_base_image_status() {
   local message="$1"
   local image="${2:-}"
@@ -709,6 +799,9 @@ print_base_image_status() {
 build_common_base() {
   if [[ "$BUILD_BASE" == "auto" ]] && image_available_locally_or_remote "$SERVER_COMMON_BASE_CACHE_IMAGE"; then
     print_base_image_status "Common base cached" "$SERVER_COMMON_BASE_CACHE_IMAGE"
+    return
+  fi
+  if promote_legacy_cache_image "$SERVER_COMMON_BASE_CACHE_IMAGE" "$SERVER_COMMON_BASE_CACHE_IMAGE_LEGACY" "Common base"; then
     return
   fi
 
@@ -732,6 +825,9 @@ build_lite_base() {
     print_base_image_status "Lite base cached" "$SERVER_LITE_BASE_CACHE_IMAGE"
     return
   fi
+  if promote_legacy_cache_image "$SERVER_LITE_BASE_CACHE_IMAGE" "$SERVER_LITE_BASE_CACHE_IMAGE_LEGACY" "Lite base"; then
+    return
+  fi
 
   build_image "Build lite server base" Dockerfile-server-base-lite \
     --build-arg "SERVER_COMMON_BASE_IMAGE=$SERVER_COMMON_BASE_CACHE_IMAGE" \
@@ -749,6 +845,9 @@ build_funasr_base() {
   build_lite_base
   if [[ "$BUILD_BASE" == "auto" ]] && image_available_locally_or_remote "$SERVER_BASE_CACHE_IMAGE"; then
     print_base_image_status "FunASR base cached" "$SERVER_BASE_CACHE_IMAGE"
+    return
+  fi
+  if promote_legacy_cache_image "$SERVER_BASE_CACHE_IMAGE" "$SERVER_BASE_CACHE_IMAGE_LEGACY" "FunASR base"; then
     return
   fi
 

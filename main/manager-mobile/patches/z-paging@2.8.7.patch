@@ -1,0 +1,21 @@
+diff --git a/components/z-paging/css/z-paging-main.css b/components/z-paging/css/z-paging-main.css
+index 9825869ed9d8aed882c606d905d971c03ea10241..0bf10dcb40516a07967f386dec49f247d0ec2664 100644
+--- a/components/z-paging/css/z-paging-main.css
++++ b/components/z-paging/css/z-paging-main.css
+@@ -87,16 +87,6 @@
+ 	left: 0;
+ }
+ 
+-/* #ifndef APP-NVUE */
+-.zp-scroll-view-hide-scrollbar ::-webkit-scrollbar {
+-	display: none;
+-	-webkit-appearance: none;
+-	width: 0 !important;
+-	height: 0 !important;
+-	background: transparent;
+-}
+-/* #endif */
+-
+ .zp-paging-touch-view {
+ 	width: 100%;
+ 	height: 100%;

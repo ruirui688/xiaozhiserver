@@ -6,6 +6,7 @@ import { useToast } from 'wot-design-uni/components/wd-toast'
 import { createVoicePrint, deleteVoicePrint, getAudioDownloadId, getChatHistory, getVoicePrintList, updateVoicePrint } from '@/api/voiceprint'
 import { t } from '@/i18n'
 import { getEnvBaseUrl } from '@/utils'
+import { getSafeAreaInsets } from '@/utils/system'
 
 defineOptions({
   name: 'VoicePrintManage',
@@ -22,26 +23,7 @@ interface Props {
   agentId?: string
 }
 
-// 获取屏幕边界到安全区域距离
-let safeAreaInsets: any
-let systemInfo: any
-
-// #ifdef MP-WEIXIN
-systemInfo = uni.getWindowInfo()
-safeAreaInsets = systemInfo.safeArea
-  ? {
-      top: systemInfo.safeArea.top,
-      right: systemInfo.windowWidth - systemInfo.safeArea.right,
-      bottom: systemInfo.windowHeight - systemInfo.safeArea.bottom,
-      left: systemInfo.safeArea.left,
-    }
-  : null
-// #endif
-
-// #ifndef MP-WEIXIN
-systemInfo = uni.getSystemInfoSync()
-safeAreaInsets = systemInfo.safeAreaInsets
-// #endif
+const safeAreaInsets = getSafeAreaInsets()
 
 const message = useMessage()
 const toast = useToast()

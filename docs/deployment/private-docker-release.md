@@ -327,13 +327,16 @@ VERSION=<git短哈希> ./upgrade
 
 | 用途 | 正确示例 | 说明 |
 |------|----------|------|
-| 浏览器访问智控台 | `http://服务器IP:8002` | 用户浏览器访问 |
+| 浏览器访问智控台 | `https://yh.wejoy.link/` | 生产环境通过 HTTPS 反向代理访问 |
 | manager-api 容器访问 Python | `http://xiaozhi-esp32-server:8003` | Docker 内网地址，写在 `.env` 的 `XIAOZHI_SERVER_HTTP_BASE_URL` |
 | xiaozhi-server 访问 manager-api | `http://xiaozhi-esp32-server-web:8002/xiaozhi` | 写在 `data/.config.yaml` 的 `manager-api.url` |
-| ESP32 设备访问 WebSocket | `ws://服务器IP:8000/xiaozhi/v1/` | 设备网络必须可达 |
-| ESP32 设备访问 OTA | `http://服务器IP:8003/xiaozhi/ota/` | 设备网络必须可达 |
+| ESP32 设备访问 WebSocket | `wss://yh.wejoy.link/xiaozhi/v1/` | 生产环境公网地址，设备网络必须可达 |
+| ESP32 设备访问 OTA | `https://yh.wejoy.link/xiaozhi/ota/` | 生产环境公网地址，设备网络必须可达 |
+| 微信小程序访问 API | `https://yh.wejoy.link/xiaozhi` | 必须配置为微信小程序 request 合法域名 |
 
 不要把容器内地址改成 `127.0.0.1`。在容器里，`127.0.0.1` 只代表当前容器自己。
+也不要把 `.env` 里的 `XIAOZHI_SERVER_HTTP_BASE_URL` 改成公网 HTTPS 地址；它是
+manager-api 容器访问 Python 容器的内网地址。
 
 ### 6.2 manager-api.secret 自动同步
 
@@ -350,12 +353,33 @@ VERSION=<git短哈希> ./upgrade
 在智控台“参数字典”里确认设备可访问地址：
 
 ```text
-server.websocket      ws://服务器IP或域名:8000/xiaozhi/v1/
-server.ota            http://服务器IP或域名:8003/xiaozhi/ota/
-server.vision_explain http://服务器IP或域名:8003/mcp/vision/explain
+server.websocket      wss://yh.wejoy.link/xiaozhi/v1/
+server.ota            https://yh.wejoy.link/xiaozhi/ota/
+server.vision_explain https://yh.wejoy.link/mcp/vision/explain
 ```
 
-生产环境建议通过 TLS 反向代理暴露公网入口，并把设备地址改成 `wss://` / `https://`。
+生产环境必须通过 TLS 反向代理暴露公网入口，并把设备地址改成 `wss://` / `https://`。
+部署包提供了 `deploy/production/nginx-https.conf.example`，映射关系如下：
+
+```text
+https://yh.wejoy.link/                   -> 127.0.0.1:8002
+https://yh.wejoy.link/xiaozhi/           -> 127.0.0.1:8002/xiaozhi/
+https://yh.wejoy.link/xiaozhi/ota/       -> 127.0.0.1:8003/xiaozhi/ota/
+https://yh.wejoy.link/mcp/vision/explain -> 127.0.0.1:8003/mcp/vision/explain
+wss://yh.wejoy.link/xiaozhi/v1/          -> 127.0.0.1:8000/xiaozhi/v1/
+```
+
+在服务器 `~/xiaozhi-data/.env` 中设置：
+
+```bash
+XIAOZHI_PUBLIC_DOMAIN=yh.wejoy.link
+XIAOZHI_PUBLIC_BASE_URL=https://yh.wejoy.link
+XIAOZHI_CORS_ORIGINS=https://yh.wejoy.link
+```
+
+然后执行 `./upgrade`。HTTPS 打通后，在微信公众平台把
+`https://yh.wejoy.link` 加入小程序 request 合法域名；上线版小程序不能依赖
+开发者工具里的“关闭合法域名校验”。
 
 ---
 
@@ -375,6 +399,16 @@ server.vision_explain http://服务器IP或域名:8003/mcp/vision/explain
 | manager-web | ACR `xiaozhi-manager-web:web-<内容哈希>` + channel/version tag | 改 Vue 源码、前端构建配置、Web Nginx 配置或前端基础镜像 |
 | manager-assets | ACR `xiaozhi-manager-assets:assets-<内容哈希>` + channel/version tag | 改 `public/generator/static/**` 大静态资源或 assets Nginx 配置 |
 | 服务端业务代码 | Docker layer + `:<git短哈希>` / channel tag | 每次 Python 服务代码变化 |
+
+`base-<依赖哈希>` 按构建参数、逻辑文件路径和文件内容计算，不包含 Git worktree
+的绝对路径。多个 worktree 构建同一份内容时，会复用同一批
+`xiaozhi-server-base-*` ACR 缓存。脚本会兼容探测旧版路径相关 cache tag；
+如果旧 tag 存在而新稳定 tag 不存在，会给旧镜像追加新 tag 并推送，不删除旧缓存。
+需要只对比缓存 tag、不触发构建时，可以在不同 worktree 分别运行：
+
+```bash
+PRINT_BUILD_CONFIG_ONLY=true scripts/acr-build-push-lite
+```
 
 日常只改业务逻辑时，直接运行：
 
@@ -605,11 +639,24 @@ ACR namespace 写错，不是 yihuixiaozhi
 查看日志：
 
 ```bash
-docker logs --tail 120 xiaozhi-esp32-server-web
+docker logs --tail 120 xiaozhi-esp32-manager-api
 docker logs --tail 120 xiaozhi-esp32-server-db
 ```
 
 重点检查 MySQL 是否启动、Liquibase 是否报错、数据库密码是否和 `.env` 一致。
+
+如果日志里出现类似：
+
+```text
+Validation Failed:
+db/changelog/db.changelog-master.yaml::<id>::<author> was: <old> but is now: <new>
+```
+
+说明生产数据库已经执行过这个 Liquibase changeSet，但当前镜像里的同一个
+changeSet 被改过。处理原则是：不要清数据库、不要删 `DATABASECHANGELOG`，
+先恢复或兼容旧 checksum，再新增一个新的迁移文件补偿当前需要的数据库变更。
+已执行过的迁移文件、changeSet id、author 和 sqlFile 路径都不能当作普通代码
+继续修改。
 
 ### 12.3 xiaozhi-server 反复重启
 

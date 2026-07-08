@@ -1,4 +1,4 @@
-<route lang="jsonc" type="page">
+<route lang="jsonc" type="home">
 {
   "layout": "default",
   "style": {
@@ -10,36 +10,16 @@
 
 <script lang="ts" setup>
 import type { LoginData } from '@/api/auth'
-import { computed, onMounted, ref } from 'vue'
-import { login } from '@/api/auth'
+import { computed, ref } from 'vue'
+import { login, wxBind, wxLogin } from '@/api/auth'
 import { initI18n, t } from '@/i18n'
 import { useConfigStore, useUserStore } from '@/store'
 // 导入SM2加密工具
 import { getEnvBaseUrl, sm2Encrypt } from '@/utils'
+import { getSafeAreaInsets } from '@/utils/system'
 import { toast } from '@/utils/toast'
 
-// 获取屏幕边界到安全区域距离
-let safeAreaInsets
-let systemInfo
-
-// #ifdef MP-WEIXIN
-// 微信小程序使用新的API
-systemInfo = uni.getWindowInfo()
-safeAreaInsets = systemInfo.safeArea
-  ? {
-      top: systemInfo.safeArea.top,
-      right: systemInfo.windowWidth - systemInfo.safeArea.right,
-      bottom: systemInfo.windowHeight - systemInfo.safeArea.bottom,
-      left: systemInfo.safeArea.left,
-    }
-  : null
-// #endif
-
-// #ifndef MP-WEIXIN
-// 其他平台继续使用uni API
-systemInfo = uni.getSystemInfoSync()
-safeAreaInsets = systemInfo.safeAreaInsets
-// #endif
+const safeAreaInsets = getSafeAreaInsets()
 // 表单数据
 const formData = ref({
   username: '',
@@ -53,6 +33,8 @@ const formData = ref({
 // 验证码图片
 const captchaImage = ref('')
 const loading = ref(false)
+const wxLoading = ref(false)
+const showPasswordLogin = ref(true)
 
 // 登录方式：'username' | 'mobile'
 const loginType = ref<'username' | 'mobile'>('username')
@@ -69,6 +51,10 @@ const selectedAreaName = ref('中国大陆')
 // 计算属性：是否启用手机号登录
 const enableMobileLogin = computed(() => {
   return configStore.config.enableMobileRegister
+})
+
+const allowUserRegister = computed(() => {
+  return Boolean(configStore.config.allowUserRegister)
 })
 
 // 计算属性：区号列表
@@ -130,6 +116,44 @@ function goToPrivacyPolicy() {
   })
 }
 
+function showPasswordForm() {
+  showPasswordLogin.value = true
+}
+
+async function enterHome() {
+  await userStore.getUserInfo()
+  uni.reLaunch({
+    url: '/pages/index/index',
+  })
+}
+
+async function bindCurrentWechatAccount() {
+  // #ifndef MP-WEIXIN
+  return
+  // #endif
+
+  // #ifdef MP-WEIXIN
+  try {
+    const loginResult = await uni.login({ provider: 'weixin' })
+    if (loginResult.code)
+      await wxBind({ code: loginResult.code })
+  }
+  catch (error) {
+    console.warn('绑定微信账号失败:', error)
+  }
+  // #endif
+}
+
+function getWxLoginErrorMessage(error: unknown) {
+  if (typeof error === 'string')
+    return error
+  if (error instanceof Error)
+    return error.message || t('login.wxLoginFailed')
+  if (error && typeof error === 'object' && 'errMsg' in error)
+    return String((error as { errMsg?: string }).errMsg || t('login.wxLoginFailed'))
+  return t('login.wxLoginFailed')
+}
+
 // 生成UUID
 function generateUUID() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -137,6 +161,22 @@ function generateUUID() {
     const v = c === 'x' ? r : (r & 0x3 | 0x8)
     return v.toString(16)
   })
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer) {
+  // #ifdef MP-WEIXIN
+  return wx.arrayBufferToBase64(buffer)
+  // #endif
+
+  // #ifndef MP-WEIXIN
+  let binary = ''
+  const bytes = new Uint8Array(buffer)
+  const chunkSize = 0x8000
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
+  }
+  return btoa(binary)
+  // #endif
 }
 
 // 跳转至服务端设置页面
@@ -150,7 +190,33 @@ function goToServerSetting() {
 async function refreshCaptcha() {
   const uuid = generateUUID()
   formData.value.captchaId = uuid
-  captchaImage.value = `${getEnvBaseUrl()}/user/captcha?uuid=${uuid}&t=${Date.now()}`
+  const captchaUrl = `${getEnvBaseUrl()}/user/captcha?uuid=${uuid}&t=${Date.now()}`
+
+  // #ifdef MP-WEIXIN
+  try {
+    const response = await uni.request({
+      url: captchaUrl,
+      method: 'GET',
+      responseType: 'arraybuffer',
+      timeout: 5000,
+    })
+
+    if (response.statusCode === 200 && response.data) {
+      captchaImage.value = `data:image/png;base64,${arrayBufferToBase64(response.data as ArrayBuffer)}`
+      return
+    }
+  }
+  catch (error) {
+    if (showPasswordLogin.value)
+      toast.warning(t('login.captchaLoadFailed'))
+  }
+  captchaImage.value = ''
+  return
+  // #endif
+
+  // #ifndef MP-WEIXIN
+  captchaImage.value = captchaUrl
+  // #endif
 }
 
 // 登录
@@ -183,7 +249,22 @@ async function handleLogin() {
     return
   }
 
+  if (!formData.value.captchaId) {
+    await refreshCaptcha()
+    toast.warning(t('login.enterCaptcha'))
+    return
+  }
+
   // 检查SM2公钥是否配置
+  if (!configStore.config.sm2PublicKey) {
+    try {
+      await configStore.fetchPublicConfig()
+    }
+    catch {
+      toast.warning(t('login.serverUnavailable'))
+      return
+    }
+  }
   const sm2PublicKey = configStore.config.sm2PublicKey
   if (!sm2PublicKey) {
     toast.warning(t('sm2.publicKeyNotConfigured'))
@@ -224,18 +305,26 @@ async function handleLogin() {
     const response = await login(loginData)
     // 存储token
     uni.setStorageSync('token', JSON.stringify(response))
-    await userStore.getUserInfo()
+    await bindCurrentWechatAccount()
 
     toast.success(t('message.loginSuccess'))
 
     // 跳转到主页
     setTimeout(() => {
-      uni.reLaunch({
-        url: '/pages/index/index',
-      })
+      enterHome()
     }, 1000)
   }
   catch (error: any) {
+    const errorMessage = error?.message || String(error || '')
+    if (errorMessage.includes('请求错误[10067]')) {
+      toast.warning(t('login.captchaError'))
+    }
+    else if (errorMessage.includes('请求错误[10004]')) {
+      toast.warning(t('message.loginFail'))
+    }
+    else {
+      toast.warning(errorMessage || t('message.loginFail'))
+    }
     // 登录失败重新获取验证码
     refreshCaptcha()
   }
@@ -244,32 +333,55 @@ async function handleLogin() {
   }
 }
 
-// 页面加载时获取验证码
+async function handleWxLogin(options: { silent?: boolean } = {}) {
+  // #ifndef MP-WEIXIN
+  showPasswordLogin.value = true
+  return
+  // #endif
+
+  // #ifdef MP-WEIXIN
+  try {
+    wxLoading.value = true
+    const loginResult = await uni.login({ provider: 'weixin' })
+    if (!loginResult.code) {
+      if (!options.silent)
+        toast.warning(t('login.wxLoginFailed'))
+      return
+    }
+
+    const response = await wxLogin({ code: loginResult.code })
+    uni.setStorageSync('token', JSON.stringify(response))
+    toast.success(t('message.loginSuccess'))
+    await enterHome()
+  }
+  catch (error) {
+    if (!options.silent) {
+      console.error('微信登录失败:', error)
+      toast.warning(`${t('login.wxLoginFailed')}: ${getWxLoginErrorMessage(error)}`)
+    }
+    showPasswordLogin.value = true
+  }
+  finally {
+    wxLoading.value = false
+  }
+  // #endif
+}
+
+// 页面加载时只准备本页数据，不自动触发网络登录。
 onLoad(() => {
-  refreshCaptcha()
+  showPasswordLogin.value = true
 })
 
 // 初始化国际化
 initI18n()
 
-// 组件挂载时确保配置已加载
-onMounted(async () => {
-  if (!configStore.config.name) {
-    try {
-      await configStore.fetchPublicConfig()
-    }
-    catch (error) {
-      console.error(t('login.fetchConfigError'), error)
-    }
-  }
-})
 </script>
 
 <template>
   <view class="app-container box-border h-screen w-full" :style="{ paddingTop: `${safeAreaInsets?.top}px` }">
     <view class="header">
       <view class="logo-section">
-        <wd-img :width="80" :height="80" round src="/static/logo.png" class="logo" />
+        <wd-img :width="72" :height="72" round src="/static/logo.png" class="logo" />
         <text class="welcome-text">
           {{ t('login.welcomeBack') }}
         </text>
@@ -289,122 +401,160 @@ onMounted(async () => {
 
     <view class="form-container">
       <view class="form">
-        <!-- 手机号登录 -->
-        <template v-if="loginType === 'mobile'">
-          <view class="input-group">
-            <view class="input-wrapper mobile-wrapper">
-              <view class="area-code-selector" @click="openAreaCodeSheet">
-                <text class="area-code-text">
-                  {{ selectedAreaCode }}
-                </text>
-                <wd-icon name="arrow-down" custom-class="area-code-arrow" />
+        <!-- #ifdef MP-WEIXIN -->
+        <view class="wechat-login-panel">
+          <view class="wechat-title">
+            {{ t('login.wechatLoginTitle') }}
+          </view>
+          <view class="wechat-desc">
+            {{ t('login.wechatLoginDesc') }}
+          </view>
+          <view class="wechat-login-btn" @click="handleWxLogin">
+            <text>{{ wxLoading ? t('login.loggingIn') : t('login.wechatLoginButton') }}</text>
+          </view>
+          <view
+            v-if="!showPasswordLogin"
+            class="password-entry"
+            @click="showPasswordForm"
+          >
+            {{ t('login.passwordLogin') }}
+          </view>
+        </view>
+        <!-- #endif -->
+
+        <template v-if="showPasswordLogin">
+          <!-- #ifdef MP-WEIXIN -->
+          <view class="login-divider">
+            <view class="divider-line" />
+            <text class="divider-text">
+              {{ t('login.passwordLogin') }}
+            </text>
+            <view class="divider-line" />
+          </view>
+          <!-- #endif -->
+
+          <view class="password-form">
+            <!-- 手机号登录 -->
+            <template v-if="loginType === 'mobile'">
+              <view class="input-group">
+                <view class="input-wrapper mobile-wrapper">
+                  <view class="area-code-selector" @click="openAreaCodeSheet">
+                    <text class="area-code-text">
+                      {{ selectedAreaCode }}
+                    </text>
+                    <wd-icon name="arrow-down" custom-class="area-code-arrow" />
+                  </view>
+                  <view class="mobile-input-wrapper">
+                    <wd-input
+                      v-model="formData.mobile"
+                      custom-class="styled-input"
+                      no-border
+                      :placeholder="t('login.enterPhone')"
+                      type="number"
+                      :maxlength="11"
+                    />
+                  </view>
+                </view>
               </view>
-              <view class="mobile-input-wrapper">
+            </template>
+
+            <!-- 用户名登录 -->
+            <template v-else>
+              <view class="input-group">
+                <view class="input-wrapper">
+                  <wd-input
+                    v-model="formData.username"
+                    custom-class="styled-input"
+                    no-border
+                    :placeholder="t('login.enterUsername')"
+                  />
+                </view>
+              </view>
+            </template>
+
+            <view class="input-group">
+              <view class="input-wrapper">
                 <wd-input
-                  v-model="formData.mobile"
+                  v-model="formData.password"
                   custom-class="styled-input"
                   no-border
-                  :placeholder="t('login.enterPhone')"
-                  type="number"
-                  :maxlength="11"
+                  :placeholder="t('login.enterPassword')"
+                  clearable
+                  show-password
+                  :maxlength="20"
                 />
               </view>
             </view>
-          </view>
-        </template>
 
-        <!-- 用户名登录 -->
-        <template v-else>
-          <view class="input-group">
-            <view class="input-wrapper">
-              <wd-input
-                v-model="formData.username"
-                custom-class="styled-input"
-                no-border
-                :placeholder="t('login.enterUsername')"
-              />
-            </view>
-          </view>
-        </template>
-
-        <view class="input-group">
-          <view class="input-wrapper">
-            <wd-input
-              v-model="formData.password"
-              custom-class="styled-input"
-              no-border
-              :placeholder="t('login.enterPassword')"
-              clearable
-              show-password
-              :maxlength="20"
-            />
-          </view>
-        </view>
-
-        <view class="input-group">
-          <view class="input-wrapper captcha-wrapper">
-            <wd-input
-              v-model="formData.captcha"
-              custom-class="styled-input"
-              no-border
-              :placeholder="t('login.enterCaptcha')"
-              :maxlength="6"
-            />
-            <view class="captcha-image" @click="refreshCaptcha">
-              <image :src="captchaImage" class="captcha-img" />
-            </view>
-          </view>
-        </view>
-        <view
-          class="login-btn"
-          @click="handleLogin"
-        >
-          {{ loading ? t('login.loggingIn') : t('login.loginButton') }}
-        </view>
-
-        <view class="hint-row">
-          <view class="register-hint">
-            <text class="register-link" @click="goToRegister">
-              {{ t('login.noAccount') }}
-            </text>
-          </view>
-
-          <view class="forgot-password">
-            <text class="forgot-text" @click="goToForgotPassword">
-              {{ t('login.forgotPassword') }}
-            </text>
-          </view>
-        </view>
-
-        <view class="policy-links">
-          <text class="policy-link" @click="goToUserAgreement">
-            {{ t('login.userAgreement') }}
-          </text>
-          <text class="policy-divider">|</text>
-          <text class="policy-link" @click="goToPrivacyPolicy">
-            {{ t('login.privacyPolicy') }}
-          </text>
-        </view>
-
-        <!-- 登录方式切换 -->
-        <view v-if="enableMobileLogin" class="login-type-switch">
-          <view class="switch-tabs">
-            <view
-              class="switch-tab"
-              :class="{ active: loginType === 'username' }"
-              @click="toggleLoginType"
-            >
-              <wd-icon name="user" />
+            <view class="input-group">
+              <view class="input-wrapper captcha-wrapper">
+                <wd-input
+                  v-model="formData.captcha"
+                  custom-class="styled-input"
+                  no-border
+                  :placeholder="t('login.enterCaptcha')"
+                  :maxlength="6"
+                />
+                <view class="captcha-image" @click="refreshCaptcha">
+                  <image v-if="captchaImage" :src="captchaImage" class="captcha-img" />
+                  <text v-else class="captcha-placeholder">
+                    {{ t('login.loadCaptcha') }}
+                  </text>
+                </view>
+              </view>
             </view>
             <view
-              class="switch-tab"
-              :class="{ active: loginType === 'mobile' }"
-              @click="toggleLoginType"
+              class="login-btn"
+              @click="handleLogin"
             >
-              <wd-icon name="phone" />
+              {{ loading ? t('login.loggingIn') : t('login.loginButton') }}
+            </view>
+
+            <view class="hint-row">
+              <view class="register-hint">
+                <text class="register-link" @click="goToRegister">
+                  {{ t('login.noAccount') }}
+                </text>
+              </view>
+
+              <view class="forgot-password">
+                <text class="forgot-text" @click="goToForgotPassword">
+                  {{ t('login.forgotPassword') }}
+                </text>
+              </view>
+            </view>
+
+            <view class="policy-links">
+              <text class="policy-link" @click="goToUserAgreement">
+                {{ t('login.userAgreement') }}
+              </text>
+              <text class="policy-divider">|</text>
+              <text class="policy-link" @click="goToPrivacyPolicy">
+                {{ t('login.privacyPolicy') }}
+              </text>
+            </view>
+
+            <!-- 登录方式切换 -->
+            <view v-if="enableMobileLogin" class="login-type-switch">
+              <view class="switch-tabs">
+                <view
+                  class="switch-tab"
+                  :class="{ active: loginType === 'username' }"
+                  @click="toggleLoginType"
+                >
+                  <wd-icon name="user" />
+                </view>
+                <view
+                  class="switch-tab"
+                  :class="{ active: loginType === 'mobile' }"
+                  @click="toggleLoginType"
+                >
+                  <wd-icon name="phone" />
+                </view>
+              </view>
             </view>
           </view>
-        </view>
+        </template>
       </view>
     </view>
 
@@ -456,109 +606,92 @@ onMounted(async () => {
 
 <style lang="scss" scoped>
 .app-container {
-  background: linear-gradient(145deg, #f5f8fd, #6baaff, #9ebbfc, #f5f8fd);
+  background:
+    linear-gradient(180deg, rgba(75, 132, 240, 0.78) 0%, rgba(121, 171, 248, 0.58) 34%, rgba(247, 249, 252, 1) 70%),
+    #f7f9fc;
   display: flex;
   flex-direction: column;
   position: relative;
   overflow: hidden;
   min-height: 100vh;
-
-  &::before {
-    content: '';
-    position: absolute;
-    top: -50%;
-    left: -50%;
-    width: 200%;
-    height: 200%;
-    background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 0%, transparent 70%);
-    animation: float 6s ease-in-out infinite;
-  }
-}
-
-@keyframes float {
-  0%,
-  100% {
-    transform: translateY(0px) rotate(0deg);
-  }
-  50% {
-    transform: translateY(-20px) rotate(180deg);
-  }
 }
 
 .header {
   flex: 0 0 auto;
-  min-height: 280rpx;
+  min-height: 246rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 15% 0 40rpx 0;
+  padding: 56rpx 0 24rpx 0;
 
   .logo-section {
     text-align: center;
 
     .logo {
-      margin-bottom: 20rpx;
-      box-shadow: 0 8rpx 32rpx rgba(0, 0, 0, 0.1);
+      margin-bottom: 18rpx;
+      box-shadow: 0 10rpx 30rpx rgba(28, 78, 150, 0.18);
     }
 
     .welcome-text {
       display: block;
       color: #ffffff;
-      font-size: 40rpx;
-      font-weight: 600;
-      margin-bottom: 12rpx;
-      text-shadow: 0 2rpx 4rpx rgba(0, 0, 0, 0.1);
+      font-size: 38rpx;
+      font-weight: 700;
+      margin-bottom: 8rpx;
+      text-shadow: 0 2rpx 8rpx rgba(39, 91, 161, 0.22);
     }
 
     .subtitle {
       display: block;
-      color: rgba(255, 255, 255, 0.8);
-      font-size: 26rpx;
+      color: rgba(255, 255, 255, 0.88);
+      font-size: 24rpx;
       font-weight: 400;
     }
   }
 }
 
 .form-container {
-  padding: 0 40rpx 40rpx 40rpx;
+  padding: 0 40rpx 32rpx 40rpx;
   flex: 1;
   display: flex;
   align-items: flex-start;
 
   .form {
     width: 100%;
-    background: rgba(255, 255, 255, 0.95);
-    border-radius: 24rpx;
-    padding: 40rpx 30rpx 30rpx 30rpx;
+    background: #ffffff;
+    border-radius: 18rpx;
+    padding: 28rpx;
     backdrop-filter: blur(10rpx);
-    box-shadow: 0 20rpx 60rpx rgba(0, 0, 0, 0.1);
-    border: 1rpx solid rgba(255, 255, 255, 0.2);
-    max-height: calc(100vh - 350rpx);
+    box-shadow: 0 14rpx 38rpx rgba(35, 51, 83, 0.12);
+    border: 1rpx solid rgba(207, 216, 230, 0.8);
+    max-height: calc(100vh - 300rpx);
     overflow-y: auto;
 
     .input-group {
-      margin-bottom: 24rpx;
+      margin-bottom: 18rpx;
 
       .input-wrapper {
         position: relative;
-        border-radius: 16rpx;
-        padding: 20rpx 16rpx;
-        border: 2rpx solid #e9ecef;
-        transition: all 0.3s ease;
+        border-radius: 12rpx;
+        padding: 15rpx 16rpx;
+        border: 1rpx solid #dce4f0;
+        background: #f8fafc;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
         display: flex;
         align-items: center;
+        min-height: 58rpx;
 
         &:focus-within {
-          border-color: #667eea;
+          border-color: #4d80f0;
           background: #ffffff;
-          box-shadow: 0 0 0 6rpx rgba(102, 126, 234, 0.1);
+          box-shadow: 0 0 0 5rpx rgba(77, 128, 240, 0.1);
         }
 
         &.captcha-wrapper {
           .captcha-image {
-            margin-left: 20rpx;
-            width: 150rpx;
-            height: 60rpx;
+            margin-left: 16rpx;
+            width: 148rpx;
+            height: 58rpx;
             border-radius: 8rpx;
             overflow: hidden;
             cursor: pointer;
@@ -573,6 +706,7 @@ onMounted(async () => {
               height: 100%;
             }
 
+            .captcha-placeholder,
             .captcha-loading {
               font-size: 20rpx;
               color: #999;
@@ -590,20 +724,20 @@ onMounted(async () => {
           .area-code-selector {
             flex: 0 0 160rpx;
             background: #f8f9fa;
-            border-radius: 16rpx;
-            padding: 20rpx 16rpx;
-            border: 2rpx solid #e9ecef;
-            height: 45rpx;
+            border-radius: 12rpx;
+            padding: 15rpx 16rpx;
+            border: 1rpx solid #dce4f0;
+            min-height: 58rpx;
             display: flex;
             align-items: center;
             justify-content: space-between;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
 
             &:hover {
-              border-color: #667eea;
+              border-color: #4d80f0;
               background: #ffffff;
-              box-shadow: 0 0 0 6rpx rgba(102, 126, 234, 0.1);
+              box-shadow: 0 0 0 5rpx rgba(77, 128, 240, 0.1);
             }
 
             .area-code-text {
@@ -622,15 +756,15 @@ onMounted(async () => {
           .mobile-input-wrapper {
             flex: 1;
             background: #f8f9fa;
-            border-radius: 16rpx;
-            padding: 20rpx 16rpx;
-            border: 2rpx solid #e9ecef;
-            transition: all 0.3s ease;
+            border-radius: 12rpx;
+            padding: 15rpx 16rpx;
+            border: 1rpx solid #dce4f0;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
 
             &:focus-within {
-              border-color: #667eea;
+              border-color: #4d80f0;
               background: #ffffff;
-              box-shadow: 0 0 0 6rpx rgba(102, 126, 234, 0.1);
+              box-shadow: 0 0 0 5rpx rgba(77, 128, 240, 0.1);
             }
           }
         }
@@ -639,13 +773,13 @@ onMounted(async () => {
           background: transparent !important;
           border: none !important;
           outline: none !important;
-          font-size: 32rpx;
-          color: #333333;
+          font-size: 29rpx;
+          color: #1f2937;
           flex: 1;
 
           &::placeholder {
-            color: #999999;
-            font-size: 28rpx;
+            color: #9aa4b2;
+            font-size: 27rpx;
           }
         }
       }
@@ -655,15 +789,15 @@ onMounted(async () => {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 30rpx;
+      margin-bottom: 22rpx;
     }
 
     .policy-links {
       display: flex;
       justify-content: center;
       align-items: center;
-      gap: 20rpx;
-      margin-bottom: 30rpx;
+      gap: 18rpx;
+      margin-bottom: 18rpx;
 
       .policy-link {
         color: #667eea;
@@ -695,21 +829,21 @@ onMounted(async () => {
 
     .login-btn {
       width: 100%;
-      height: 80rpx;
+      height: 76rpx;
       border: none;
-      border-radius: 16rpx;
+      border-radius: 12rpx;
       font-size: 30rpx;
       font-weight: 600;
       color: #ffffff;
-      margin-bottom: 30rpx;
-      box-shadow: 0 8rpx 24rpx rgba(102, 126, 234, 0.3);
-      transition: all 0.3s ease;
+      margin-bottom: 22rpx;
+      box-shadow: 0 8rpx 18rpx rgba(77, 128, 240, 0.24);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
       background-color: var(--wot-button-primary-bg-color, var(--wot-color-theme, #4d80f0));
       text-align: center;
-      line-height: 80rpx;
+      line-height: 76rpx;
       &:active {
         transform: translateY(2rpx);
-        box-shadow: 0 4rpx 12rpx rgba(102, 126, 234, 0.3);
+        box-shadow: 0 4rpx 10rpx rgba(77, 128, 240, 0.24);
       }
 
       &:disabled {
@@ -772,6 +906,78 @@ onMounted(async () => {
       }
     }
   }
+}
+
+.wechat-login-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12rpx;
+}
+
+.wechat-title {
+  font-size: 30rpx;
+  line-height: 38rpx;
+  font-weight: 700;
+  color: #1f2937;
+  text-align: center;
+}
+
+.wechat-desc {
+  font-size: 24rpx;
+  line-height: 32rpx;
+  color: #6b7280;
+  text-align: center;
+}
+
+.wechat-login-btn {
+  height: 82rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14rpx;
+  border-radius: 12rpx;
+  background: #07c160;
+  color: #ffffff;
+  font-size: 30rpx;
+  font-weight: 600;
+  margin-top: 10rpx;
+  box-shadow: 0 8rpx 18rpx rgba(7, 193, 96, 0.2);
+
+  &:active {
+    background: #06ad56;
+  }
+}
+
+.password-entry {
+  padding: 16rpx 0 4rpx;
+  font-size: 26rpx;
+  line-height: 34rpx;
+  color: #4f7ee8;
+  text-align: center;
+}
+
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  margin: 22rpx 0 18rpx;
+}
+
+.divider-line {
+  flex: 1;
+  height: 1rpx;
+  background: #e3e8f0;
+}
+
+.divider-text {
+  color: #667085;
+  font-size: 24rpx;
+  line-height: 32rpx;
+}
+
+.password-form {
+  display: block;
 }
 
 // 区号选择弹窗样式

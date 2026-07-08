@@ -356,6 +356,8 @@ pass  # TODO         (占位代码)
 - 新增迁移 SQL → 立即登记到 master.yaml
 - 已发布迁移 → 禁止修改
 - 已部署 changeSet id → 禁止修改
+- 已执行过的 changeSet 内容、author、id、sqlFile 路径 → 禁止回头修改；Liquibase checksum 不一致会导致 manager-api 拒绝启动
+- 需要修正旧迁移效果 → 新增后续迁移补偿；只有兼容历史库启动时才允许补 `validCheckSum`，且必须另建新迁移执行当前期望变更
 - 生产发布前 → 必须备份数据库
 - 禁止把生产数据库 dump 提交到 Git
 

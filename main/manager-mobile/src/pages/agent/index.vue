@@ -16,32 +16,14 @@ import { t } from '@/i18n'
 import ChatHistory from '@/pages/chat-history/index.vue'
 import DeviceManagement from '@/pages/device/index.vue'
 import VoiceprintManagement from '@/pages/voiceprint/index.vue'
+import { getSafeAreaInsets } from '@/utils/system'
 import AgentEdit from './edit.vue'
 
 defineOptions({
   name: 'AgentIndex',
 })
 
-// 获取屏幕边界到安全区域距离
-let safeAreaInsets: any
-let systemInfo: any
-
-// #ifdef MP-WEIXIN
-systemInfo = uni.getWindowInfo()
-safeAreaInsets = systemInfo.safeArea
-  ? {
-      top: systemInfo.safeArea.top,
-      right: systemInfo.windowWidth - systemInfo.safeArea.right,
-      bottom: systemInfo.windowHeight - systemInfo.safeArea.bottom,
-      left: systemInfo.safeArea.left,
-    }
-  : null
-// #endif
-
-// #ifndef MP-WEIXIN
-systemInfo = uni.getSystemInfoSync()
-safeAreaInsets = systemInfo.safeAreaInsets
-// #endif
+const safeAreaInsets = getSafeAreaInsets()
 
 // 智能体ID
 const currentAgentId = ref('default')

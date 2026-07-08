@@ -40,6 +40,12 @@ public class SysUserDTO implements Serializable {
     @NotBlank(message = "{sysuser.password.require}", groups = AddGroup.class)
     private String password;
 
+    @Schema(description = "微信小程序openid")
+    private String wxOpenid;
+
+    @Schema(description = "微信unionid")
+    private String wxUnionid;
+
     @Schema(description = "姓名", required = true)
     @NotBlank(message = "{sysuser.realname.require}", groups = DefaultGroup.class)
     private String realName;

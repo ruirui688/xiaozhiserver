@@ -20,9 +20,27 @@ onShow(() => {
   console.log('App Show')
   // 使用setTimeout延迟执行，确保tabBar已经初始化
   setTimeout(() => {
-    updateTabBarText()
+    updateTabBarTextIfNeeded()
   }, 100)
 })
+
+function isCurrentPageInTabBar() {
+  const pages = getCurrentPages()
+  const currentPage = pages[pages.length - 1]
+  const currentRoute = currentPage?.route
+  return [
+    'pages/index/index',
+    'pages/device-config/index',
+    'pages/settings/index',
+  ].includes(currentRoute || '')
+}
+
+function updateTabBarTextIfNeeded() {
+  if (!isCurrentPageInTabBar())
+    return
+
+  updateTabBarText()
+}
 
 // 动态更新tabBar文本
 function updateTabBarText() {

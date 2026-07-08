@@ -16,6 +16,10 @@ export interface LoginResponse {
   clientHash: string
 }
 
+export interface WxLoginData {
+  code: string
+}
+
 // 验证码响应数据类型
 export interface CaptchaResponse {
   captchaId: string
@@ -38,7 +42,26 @@ export function login(data: LoginData) {
   return http.Post<LoginResponse>('/user/login', data, {
     meta: {
       ignoreAuth: true,
-      toast: true,
+      toast: false,
+    },
+  })
+}
+
+export function wxLogin(data: WxLoginData) {
+  return http.Post<LoginResponse>('/user/wx-login', data, {
+    meta: {
+      ignoreAuth: true,
+      toast: false,
+      isExposeError: true,
+    },
+  })
+}
+
+export function wxBind(data: WxLoginData) {
+  return http.Post<void>('/user/wx-bind', data, {
+    meta: {
+      ignoreAuth: false,
+      toast: false,
     },
   })
 }
@@ -83,6 +106,7 @@ export function getUserInfo() {
 // 获取公共配置
 export function getPublicConfig() {
   return http.Get<PublicConfig>('/user/pub-config', {
+    timeout: 15000,
     meta: {
       ignoreAuth: true,
       toast: false,

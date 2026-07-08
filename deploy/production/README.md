@@ -51,6 +51,7 @@ copied manually), update the deploy files first before pulling new images:
 # Manual deploy file update (non-git production server)
 scp deploy/production/docker-compose.yml production:~/xiaozhi-data/
 scp deploy/production/install production:~/xiaozhi-data/
+scp deploy/production/nginx-https.conf.example production:~/xiaozhi-data/
 ```
 
 ## Runtime data
@@ -134,6 +135,63 @@ Version    final deployed version
 Images     final business images attached to running containers
 Runtime    final MySQL/Redis images attached to running containers
 ```
+
+## HTTPS/WSS public entry
+
+WeChat mini programs and production ESP32 devices should use a public HTTPS/WSS
+entry. Keep Docker internal URLs unchanged, and terminate TLS in Nginx, SLB, or
+another reverse proxy on the host.
+
+For `yh.wejoy.link`, the public addresses are:
+
+```text
+manager-web          https://yh.wejoy.link/
+manager-api          https://yh.wejoy.link/xiaozhi/
+OTA                  https://yh.wejoy.link/xiaozhi/ota/
+vision explain       https://yh.wejoy.link/mcp/vision/explain
+WebSocket            wss://yh.wejoy.link/xiaozhi/v1/
+mini program API     https://yh.wejoy.link/xiaozhi
+```
+
+Use `nginx-https.conf.example` as the host Nginx template. Replace the domain
+and certificate paths, then enable the file in the host Nginx configuration.
+The template proxies:
+
+```text
+https://domain/                  -> 127.0.0.1:8002
+https://domain/xiaozhi/          -> 127.0.0.1:8002/xiaozhi/
+https://domain/xiaozhi/ota/      -> 127.0.0.1:8003/xiaozhi/ota/
+https://domain/mcp/vision/explain -> 127.0.0.1:8003/mcp/vision/explain
+wss://domain/xiaozhi/v1/         -> 127.0.0.1:8000/xiaozhi/v1/
+```
+
+Set these values in `~/xiaozhi-data/.env` after HTTPS is available:
+
+```bash
+XIAOZHI_PUBLIC_DOMAIN=yh.wejoy.link
+XIAOZHI_PUBLIC_BASE_URL=https://yh.wejoy.link
+XIAOZHI_CORS_ORIGINS=https://yh.wejoy.link
+```
+
+Then run `./upgrade`. The install output will include both local test URLs and
+public HTTPS/WSS URLs when the public variables are set.
+
+For the WeChat mini program, add `https://yh.wejoy.link` to the mini program
+request legal domain in WeChat Official Accounts Platform. The mini program
+production build already uses `https://yh.wejoy.link/xiaozhi` as the API base
+URL.
+
+For devices, update the manager console parameter dictionary to:
+
+```text
+server.websocket      wss://yh.wejoy.link/xiaozhi/v1/
+server.ota            https://yh.wejoy.link/xiaozhi/ota/
+server.vision_explain https://yh.wejoy.link/mcp/vision/explain
+```
+
+Only ports 80 and 443 need to be public after the reverse proxy is ready. Ports
+8000, 8002, 8003, MySQL, and Redis should be restricted by the host firewall or
+security group.
 
 ## Container startup order
 
@@ -241,3 +299,8 @@ XIAOZHI_SERVER_HTTP_BASE_URL=http://xiaozhi-esp32-server:8003
 Do not set this to `127.0.0.1` inside Docker. In the manager-api container,
 `127.0.0.1` means the Java/Web container itself, not the Python server
 container.
+
+The public HTTPS domain is configured separately with `XIAOZHI_PUBLIC_DOMAIN`,
+`XIAOZHI_PUBLIC_BASE_URL`, and `XIAOZHI_CORS_ORIGINS`. Do not replace
+`XIAOZHI_SERVER_HTTP_BASE_URL` with `https://yh.wejoy.link`; that value is for
+manager-api calling the Python container inside Docker.

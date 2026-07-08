@@ -26,6 +26,14 @@ public class SysUserEntity extends BaseEntity {
      */
     private String password;
     /**
+     * 微信小程序 openid
+     */
+    private String wxOpenid;
+    /**
+     * 微信 unionid
+     */
+    private String wxUnionid;
+    /**
      * 超级管理员 0：否 1：是
      */
     private Integer superAdmin;

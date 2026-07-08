@@ -289,6 +289,8 @@ main/manager-api/src/main/resources/db/changelog/db.changelog-master.yaml
 - 所有迁移 SQL 必须登记到 `db.changelog-master.yaml`。
 - 已发布的迁移文件禁止修改。
 - 已部署到测试或生产的 `changeSet id` 禁止修改。
+- 已执行过的 changeSet 内容、author、id、sqlFile 路径都不能回头改；Liquibase 会把这些内容计入 checksum，生产库对不上会拒绝启动 manager-api。
+- 需要修正已发布迁移的效果时，保留旧迁移不动，新增一个后续迁移补偿；只有在兼容历史 checksum 时，才允许在旧 changeSet 上补充 `validCheckSum`，并且必须另建新迁移执行当前期望的数据修正。
 - 手工修改生产数据库后，必须补充迁移脚本。
 - 生产发布前必须备份数据库。
 - 禁止把生产数据库 dump 提交到 Git。

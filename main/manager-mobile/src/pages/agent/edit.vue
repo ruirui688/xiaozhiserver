@@ -166,9 +166,6 @@ function handleInputConfirm() {
   inputVisible.value = false
 }
 
-// 是否禁用历史记忆输入框
-const isMemoryDisabled = computed(() => formData.value.memModelId !== 'Memory_mem_local_short')
-
 // 打开上下文源编辑弹窗
 function openContextProviderDialog() {
   uni.navigateTo({
@@ -956,26 +953,6 @@ onMounted(async () => {
             <text>{{ t('agent.editFunctions') }}</text>
           </view>
         </view>
-      </view>
-    </view>
-
-    <!-- 记忆历史标题 -->
-    <view class="pb-[20rpx]">
-      <text class="text-[32rpx] text-[#232338] font-bold">
-        {{ t('agent.historyMemory') }}
-      </text>
-    </view>
-
-    <!-- 记忆历史卡片 -->
-    <view class="mb-[24rpx] border border-[#eeeeee] rounded-[20rpx] bg-[#fbfbfb] p-[24rpx]" style="box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.04);">
-      <view class="mb-[24rpx] last:mb-0">
-        <textarea
-          v-model="formData.summaryMemory"
-          :placeholder="t('agent.memoryContent')"
-          :disabled="isMemoryDisabled"
-          :style="isMemoryDisabled ? 'background: #f0f0f0' : ''"
-          class="box-border h-[500rpx] w-full resize-none break-words break-all border border-[#eeeeee] rounded-[12rpx] p-[20rpx] text-[26rpx] leading-[1.6] opacity-80 outline-none"
-        />
       </view>
     </view>
 

@@ -31,9 +31,11 @@ import xiaozhi.common.validator.AssertUtils;
 import xiaozhi.common.validator.ValidatorUtils;
 import xiaozhi.modules.security.dto.LoginDTO;
 import xiaozhi.modules.security.dto.SmsVerificationDTO;
+import xiaozhi.modules.security.dto.WxLoginDTO;
 import xiaozhi.modules.security.password.PasswordUtils;
 import xiaozhi.modules.security.service.CaptchaService;
 import xiaozhi.modules.security.service.SysUserTokenService;
+import xiaozhi.modules.security.service.WechatMiniProgramService;
 import xiaozhi.modules.security.user.SecurityUser;
 import xiaozhi.modules.sys.dto.PasswordDTO;
 import xiaozhi.modules.sys.dto.RetrievePasswordDTO;
@@ -57,6 +59,7 @@ public class LoginController {
     private final CaptchaService captchaService;
     private final SysParamsService sysParamsService;
     private final SysDictDataService sysDictDataService;
+    private final WechatMiniProgramService wechatMiniProgramService;
 
     @GetMapping("/captcha")
     @Operation(summary = "验证码")
@@ -108,6 +111,20 @@ public class LoginController {
             throw new RenException(ErrorCode.ACCOUNT_PASSWORD_ERROR);
         }
         return sysUserTokenService.createToken(userDTO.getId());
+    }
+
+    @PostMapping("/wx-login")
+    @Operation(summary = "微信小程序登录")
+    public Result<TokenDTO> wxLogin(@RequestBody WxLoginDTO login) {
+        ValidatorUtils.validateEntity(login);
+        return wechatMiniProgramService.loginByCode(login.getCode());
+    }
+
+    @PostMapping("/wx-bind")
+    @Operation(summary = "绑定微信小程序账号")
+    public Result<Void> wxBind(@RequestBody WxLoginDTO login) {
+        ValidatorUtils.validateEntity(login);
+        return wechatMiniProgramService.bindByCode(SecurityUser.getUserId(), login.getCode());
     }
 
     @PostMapping("/register")

@@ -1,8 +1,6 @@
 import smCrypto from 'sm-crypto'
 import { pages, subPackages } from '@/pages.json'
 
-import { isMpWeixin } from './platform'
-
 /**
  * 运行时服务端地址覆盖存储键
  */
@@ -136,67 +134,26 @@ export function getEnvBaseUrl() {
   if (override)
     return override
 
-  // 请求基准地址（默认来源于 env）
-  let baseUrl = import.meta.env.VITE_SERVER_BASEURL
-
-  // # 有些同学可能需要在微信小程序里面根据 develop、trial、release 分别设置上传地址，参考代码如下。
-  const VITE_SERVER_BASEURL__WEIXIN_DEVELOP = 'https://ukw0y1.laf.run'
-  const VITE_SERVER_BASEURL__WEIXIN_TRIAL = 'https://ukw0y1.laf.run'
-  const VITE_SERVER_BASEURL__WEIXIN_RELEASE = 'https://ukw0y1.laf.run'
-
-  // 微信小程序端环境区分
-  if (isMpWeixin) {
-    const {
-      miniProgram: { envVersion },
-    } = uni.getAccountInfoSync()
-
-    switch (envVersion) {
-      case 'develop':
-        baseUrl = VITE_SERVER_BASEURL__WEIXIN_DEVELOP || baseUrl
-        break
-      case 'trial':
-        baseUrl = VITE_SERVER_BASEURL__WEIXIN_TRIAL || baseUrl
-        break
-      case 'release':
-        baseUrl = VITE_SERVER_BASEURL__WEIXIN_RELEASE || baseUrl
-        break
-    }
-  }
-
-  return baseUrl
+  return import.meta.env.VITE_SERVER_BASEURL
 }
 
 /**
  * 根据微信小程序当前环境，判断应该获取的 UPLOAD_BASEURL
  */
 export function getEnvBaseUploadUrl() {
-  // 请求基准地址
-  let baseUploadUrl = import.meta.env.VITE_UPLOAD_BASEURL
+  const baseUploadUrl = import.meta.env.VITE_UPLOAD_BASEURL
 
-  const VITE_UPLOAD_BASEURL__WEIXIN_DEVELOP = 'https://ukw0y1.laf.run/upload'
-  const VITE_UPLOAD_BASEURL__WEIXIN_TRIAL = 'https://ukw0y1.laf.run/upload'
-  const VITE_UPLOAD_BASEURL__WEIXIN_RELEASE = 'https://ukw0y1.laf.run/upload'
+  if (!baseUploadUrl)
+    return ''
 
-  // 微信小程序端环境区分
-  if (isMpWeixin) {
-    const {
-      miniProgram: { envVersion },
-    } = uni.getAccountInfoSync()
+  if (/^https?:\/\//.test(baseUploadUrl))
+    return baseUploadUrl
 
-    switch (envVersion) {
-      case 'develop':
-        baseUploadUrl = VITE_UPLOAD_BASEURL__WEIXIN_DEVELOP || baseUploadUrl
-        break
-      case 'trial':
-        baseUploadUrl = VITE_UPLOAD_BASEURL__WEIXIN_TRIAL || baseUploadUrl
-        break
-      case 'release':
-        baseUploadUrl = VITE_UPLOAD_BASEURL__WEIXIN_RELEASE || baseUploadUrl
-        break
-    }
-  }
+  const baseUrl = getEnvBaseUrl()
+  if (!baseUrl)
+    return baseUploadUrl
 
-  return baseUploadUrl
+  return `${baseUrl.replace(/\/$/, '')}/${baseUploadUrl.replace(/^\//, '')}`
 }
 
 /**

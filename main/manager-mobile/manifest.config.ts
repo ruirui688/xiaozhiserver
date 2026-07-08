@@ -18,7 +18,10 @@ const {
   VITE_WX_APPID,
   VITE_APP_PUBLIC_BASE,
   VITE_FALLBACK_LOCALE,
+  VITE_MP_WEIXIN_URL_CHECK,
 } = env
+
+const mpWeixinUrlCheck = VITE_MP_WEIXIN_URL_CHECK === 'true'
 
 export default defineManifestConfig({
   'name': VITE_APP_TITLE,
@@ -121,7 +124,7 @@ export default defineManifestConfig({
   'mp-weixin': {
     appid: VITE_WX_APPID,
     setting: {
-      urlCheck: false,
+      urlCheck: mpWeixinUrlCheck,
       // 是否启用 ES6 转 ES5
       es6: true,
       minified: true,
