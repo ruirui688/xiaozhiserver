@@ -153,9 +153,10 @@ WebSocket            wss://yh.wejoy.link/xiaozhi/v1/
 mini program API     https://yh.wejoy.link/xiaozhi
 ```
 
-Use `nginx-https.conf.example` as the host Nginx template. Replace the domain
-and certificate paths, then enable the file in the host Nginx configuration.
-The template proxies:
+Use `nginx-https.conf.example` as the host Nginx template. The template assumes
+Certbot/Let's Encrypt certificate paths under
+`/etc/letsencrypt/live/yh.wejoy.link/`; replace the domain and paths only when
+your public domain or certificate provider is different. The template proxies:
 
 ```text
 https://domain/                  -> 127.0.0.1:8002
