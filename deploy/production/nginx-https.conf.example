@@ -1,5 +1,6 @@
 # Example HTTPS/WSS reverse proxy for production.
-# Replace yh.wejoy.link and certificate paths before enabling this file.
+# Replace yh.wejoy.link if your public domain is different.
+# The certificate paths below match the default Certbot/Let's Encrypt layout.
 
 map $http_upgrade $connection_upgrade {
     default upgrade;
@@ -17,8 +18,8 @@ server {
     listen 443 ssl http2;
     server_name yh.wejoy.link;
 
-    ssl_certificate     /etc/nginx/certs/yh.wejoy.link/fullchain.pem;
-    ssl_certificate_key /etc/nginx/certs/yh.wejoy.link/privkey.pem;
+    ssl_certificate     /etc/letsencrypt/live/yh.wejoy.link/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/yh.wejoy.link/privkey.pem;
 
     client_max_body_size 50m;
 
