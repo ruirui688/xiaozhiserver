@@ -381,6 +381,196 @@ XIAOZHI_CORS_ORIGINS=https://yh.wejoy.link
 `https://yh.wejoy.link` 加入小程序 request 合法域名；上线版小程序不能依赖
 开发者工具里的“关闭合法域名校验”。
 
+### 6.4 生产 HTTPS/WSS 完整流程
+
+生产环境接入微信小程序时，必须先让公网域名具备可信 HTTPS 入口。SSL 证书和
+ICP备案是两件独立的事：证书解决浏览器、小程序和设备是否信任
+`https://yh.wejoy.link`；备案解决中国大陆服务器对外提供网站服务的合规问题。
+
+推荐入口链路：
+
+```text
+浏览器/小程序/设备
+  -> https://yh.wejoy.link / wss://yh.wejoy.link
+  -> 宿主机 Nginx 80/443
+  -> 127.0.0.1:8002 / 127.0.0.1:8003 / 127.0.0.1:8000
+  -> Docker 容器服务
+```
+
+#### 6.4.1 前置检查
+
+确认域名、安全组和服务器防火墙都已经准备好：
+
+```bash
+# 域名必须解析到当前服务器公网 IP
+dig +short yh.wejoy.link
+
+# 阿里云安全组入方向至少放行 TCP:80 和 TCP:443
+# 服务器本机防火墙也要允许 80/443
+sudo ufw status
+
+# 业务容器本地端口应已经正常监听
+sudo ss -lntp | grep -E ':(8000|8002|8003)\b'
+```
+
+阿里云安全组建议先放行：
+
+```text
+0.0.0.0/0  TCP:80
+0.0.0.0/0  TCP:443
+```
+
+如果服务器启用了 IPv6，再补：
+
+```text
+::/0        TCP:80
+::/0        TCP:443
+```
+
+#### 6.4.2 安装 Nginx 和证书工具
+
+Let's Encrypt 是生产可用的免费公开 CA 证书，适合个人、小团队和常规企业服务。
+如果需要企业主体增强验证，也可以改用阿里云 SSL 证书服务申请 DV/OV 证书。
+
+在服务器安装 Nginx 和 Certbot：
+
+```bash
+sudo apt update
+sudo apt install -y nginx certbot python3-certbot-nginx
+sudo systemctl enable nginx
+sudo systemctl start nginx
+sudo nginx -t
+```
+
+#### 6.4.3 申请 `yh.wejoy.link` 证书
+
+使用 Nginx 插件自动申请证书：
+
+```bash
+sudo certbot --nginx -d yh.wejoy.link
+```
+
+按提示填写邮箱、同意服务条款，并选择 HTTP 自动跳转 HTTPS。申请成功后证书路径通常是：
+
+```text
+/etc/letsencrypt/live/yh.wejoy.link/fullchain.pem
+/etc/letsencrypt/live/yh.wejoy.link/privkey.pem
+```
+
+验证自动续期：
+
+```bash
+sudo systemctl status certbot.timer --no-pager
+sudo certbot renew --dry-run
+```
+
+如果需要显式保证续期后重载 Nginx：
+
+```bash
+sudo certbot renew --deploy-hook "systemctl reload nginx"
+```
+
+#### 6.4.4 配置 Nginx 反向代理
+
+复制部署包中的模板：
+
+```bash
+cd ~/work/xiaozhi-deploy
+sudo cp deploy/production/nginx-https.conf.example /etc/nginx/sites-available/xiaozhi.conf
+sudo ln -sf /etc/nginx/sites-available/xiaozhi.conf /etc/nginx/sites-enabled/xiaozhi.conf
+```
+
+编辑 `/etc/nginx/sites-available/xiaozhi.conf`，确认域名和证书路径：
+
+```nginx
+server_name yh.wejoy.link;
+ssl_certificate     /etc/letsencrypt/live/yh.wejoy.link/fullchain.pem;
+ssl_certificate_key /etc/letsencrypt/live/yh.wejoy.link/privkey.pem;
+```
+
+模板中的关键映射必须保持一致：
+
+```text
+https://yh.wejoy.link/                   -> http://127.0.0.1:8002/
+https://yh.wejoy.link/xiaozhi/           -> http://127.0.0.1:8002/xiaozhi/
+https://yh.wejoy.link/xiaozhi/ota/       -> http://127.0.0.1:8003/xiaozhi/ota/
+https://yh.wejoy.link/mcp/vision/explain -> http://127.0.0.1:8003/mcp/vision/explain
+wss://yh.wejoy.link/xiaozhi/v1/          -> ws://127.0.0.1:8000/xiaozhi/v1/
+```
+
+检查并重载：
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+#### 6.4.5 写入部署环境变量
+
+服务器 `~/xiaozhi-data/.env` 中保留 Docker 内网地址，同时增加公网地址：
+
+```bash
+XIAOZHI_SERVER_HTTP_BASE_URL=http://xiaozhi-esp32-server:8003
+XIAOZHI_PUBLIC_DOMAIN=yh.wejoy.link
+XIAOZHI_PUBLIC_BASE_URL=https://yh.wejoy.link
+XIAOZHI_CORS_ORIGINS=https://yh.wejoy.link
+```
+
+不要把 `XIAOZHI_SERVER_HTTP_BASE_URL` 改成 `https://yh.wejoy.link`；它只给
+manager-api 容器访问 Python 容器使用。
+
+重新部署：
+
+```bash
+VERSION=latest ./deploy/production/upgrade
+```
+
+#### 6.4.6 验证 HTTPS/WSS 入口
+
+先验证 HTTPS：
+
+```bash
+curl -I https://yh.wejoy.link
+curl -I https://yh.wejoy.link/xiaozhi/user/pub-config
+curl -I https://yh.wejoy.link/xiaozhi/ota/
+```
+
+再验证 Nginx 监听和日志：
+
+```bash
+sudo ss -lntp | grep ':443'
+sudo journalctl -u nginx -n 80 --no-pager
+sudo tail -n 80 /var/log/nginx/error.log
+```
+
+浏览器能访问 `https://yh.wejoy.link/` 后，在智控台“参数字典”写入：
+
+```text
+server.websocket      wss://yh.wejoy.link/xiaozhi/v1/
+server.ota            https://yh.wejoy.link/xiaozhi/ota/
+server.vision_explain https://yh.wejoy.link/mcp/vision/explain
+```
+
+微信公众平台配置：
+
+```text
+request 合法域名: https://yh.wejoy.link
+socket 合法域名:  wss://yh.wejoy.link
+```
+
+#### 6.4.7 生产安全收口
+
+HTTPS/WSS 验证通过后，公网安全组只保留必要入口：
+
+```text
+80   HTTP 跳转 HTTPS / 证书续期
+443  HTTPS/WSS 统一入口
+22   SSH，仅允许自己的固定公网 IP 更好
+```
+
+`8000`、`8002`、`8003`、MySQL 和 Redis 不应继续对全网开放。它们应只被宿主机
+Nginx 或 Docker 内网访问。
+
 ---
 
 ## 7. 缓存与速度
