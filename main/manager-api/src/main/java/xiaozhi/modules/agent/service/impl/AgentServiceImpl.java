@@ -19,6 +19,7 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import xiaozhi.common.constant.Constant;
 import xiaozhi.common.exception.ErrorCode;
 import xiaozhi.common.exception.RenException;
@@ -62,6 +63,7 @@ import xiaozhi.modules.timbre.service.TimbreService;
 
 @Service
 @AllArgsConstructor
+@Slf4j
 public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> implements AgentService {
     private final AgentDao agentDao;
     private final AgentTagDao agentTagDao;
@@ -181,37 +183,101 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
     private AgentDTO buildAgentDTO(AgentEntity agent) {
         AgentDTO dto = new AgentDTO();
         dto.setId(agent.getId());
-        dto.setAgentName(agent.getAgentName());
-        dto.setSystemPrompt(agent.getSystemPrompt());
+        dto.setAgentName(defaultString(agent.getAgentName()));
+        dto.setSystemPrompt(defaultString(agent.getSystemPrompt()));
+        dto.setSummaryMemory(defaultString(agent.getSummaryMemory()));
 
         // 获取 TTS 模型名称
-        dto.setTtsModelName(modelConfigService.getModelNameById(agent.getTtsModelId()));
+        dto.setTtsModelName(resolveModelName(agent.getId(), "TTS", agent.getTtsModelId()));
 
         // 获取 LLM 模型名称
-        dto.setLlmModelName(modelConfigService.getModelNameById(agent.getLlmModelId()));
+        dto.setLlmModelName(resolveModelName(agent.getId(), "LLM", agent.getLlmModelId()));
 
         // 获取 VLLM 模型名称
-        dto.setVllmModelName(modelConfigService.getModelNameById(agent.getVllmModelId()));
+        dto.setVllmModelName(resolveModelName(agent.getId(), "VLLM", agent.getVllmModelId()));
 
         // 获取记忆模型名称
-        dto.setMemModelId(agent.getMemModelId());
+        dto.setMemModelId(defaultString(agent.getMemModelId()));
 
         // 获取 TTS 音色名称
-        dto.setTtsVoiceName(timbreModelService.getTimbreNameById(agent.getTtsVoiceId()));
+        dto.setTtsVoiceName(resolveTimbreName(agent.getId(), agent.getTtsVoiceId()));
 
         // 获取智能体最近的最后连接时长
-        dto.setLastConnectedAt(deviceService.getLatestLastConnectionTime(agent.getId()));
+        dto.setLastConnectedAt(resolveLastConnectedAt(agent.getId()));
 
         // 获取设备数量
-        dto.setDeviceCount(getDeviceCountByAgentId(agent.getId()));
+        dto.setDeviceCount(resolveDeviceCount(agent.getId()));
 
         // 获取标签列表
-        List<AgentTagEntity> tags = agentTagDao.selectByAgentId(agent.getId());
-        if (ToolUtil.isNotEmpty(tags)) {
-            dto.setTags(tags.stream().map(this::convertTagToDTO).collect(Collectors.toList()));
-        }
+        dto.setTags(resolveTags(agent.getId()));
 
         return dto;
+    }
+
+    private String resolveModelName(String agentId, String modelType, String modelId) {
+        if (StringUtils.isBlank(modelId)) {
+            return "";
+        }
+        try {
+            String modelName = modelConfigService.getModelNameById(modelId);
+            if (StringUtils.isNotBlank(modelName)) {
+                return modelName;
+            }
+            log.warn("智能体列表存在缺失模型配置: agentId={}, modelType={}, modelId={}", agentId, modelType, modelId);
+        } catch (Exception e) {
+            log.warn("智能体列表读取模型配置失败: agentId={}, modelType={}, modelId={}", agentId, modelType, modelId, e);
+        }
+        return "配置缺失";
+    }
+
+    private String resolveTimbreName(String agentId, String timbreId) {
+        if (StringUtils.isBlank(timbreId)) {
+            return "";
+        }
+        try {
+            String timbreName = timbreModelService.getTimbreNameById(timbreId);
+            if (StringUtils.isNotBlank(timbreName)) {
+                return timbreName;
+            }
+            log.warn("智能体列表存在缺失音色配置: agentId={}, timbreId={}", agentId, timbreId);
+        } catch (Exception e) {
+            log.warn("智能体列表读取音色配置失败: agentId={}, timbreId={}", agentId, timbreId, e);
+        }
+        return "配置缺失";
+    }
+
+    private Date resolveLastConnectedAt(String agentId) {
+        try {
+            return deviceService.getLatestLastConnectionTime(agentId);
+        } catch (Exception e) {
+            log.warn("智能体列表读取最近连接时间失败: agentId={}", agentId, e);
+            return null;
+        }
+    }
+
+    private Integer resolveDeviceCount(String agentId) {
+        try {
+            return getDeviceCountByAgentId(agentId);
+        } catch (Exception e) {
+            log.warn("智能体列表读取设备数量失败: agentId={}", agentId, e);
+            return 0;
+        }
+    }
+
+    private List<AgentTagDTO> resolveTags(String agentId) {
+        try {
+            List<AgentTagEntity> tags = agentTagDao.selectByAgentId(agentId);
+            if (ToolUtil.isNotEmpty(tags)) {
+                return tags.stream().map(this::convertTagToDTO).collect(Collectors.toList());
+            }
+        } catch (Exception e) {
+            log.warn("智能体列表读取标签失败: agentId={}", agentId, e);
+        }
+        return new ArrayList<>();
+    }
+
+    private String defaultString(String value) {
+        return value == null ? "" : value;
     }
 
     private AgentTagDTO convertTagToDTO(AgentTagEntity entity) {

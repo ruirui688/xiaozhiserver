@@ -94,11 +94,29 @@ function goToLogin() {
   uni.reLaunch({ url: '/pages/login/index' })
 }
 
+function completePaging(data: Agent[]) {
+  pagingRef.value?.complete(data)?.catch((error: unknown) => {
+    console.warn('z-paging complete ignored:', error)
+  })
+}
+
+function refreshPaging() {
+  pagingRef.value?.refresh()?.catch((error: unknown) => {
+    console.warn('z-paging refresh ignored:', error)
+  })
+}
+
+function reloadPaging() {
+  pagingRef.value?.reload()?.catch((error: unknown) => {
+    console.warn('z-paging reload ignored:', error)
+  })
+}
+
 // z-paging查询列表数据
 async function queryList(pageNo: number, pageSize: number) {
   if (!hasToken()) {
     agentList.value = []
-    pagingRef.value?.complete([])
+    completePaging([])
     goToLogin()
     return
   }
@@ -112,12 +130,12 @@ async function queryList(pageNo: number, pageSize: number) {
     agentList.value = response
 
     // 直接返回全部数据，不需要分页处理
-    pagingRef.value.complete(response)
+    completePaging(response)
   }
   catch (error) {
     console.error('获取智能体列表失败:', error)
     agentList.value = []
-    pagingRef.value?.complete([])
+    completePaging([])
   }
 }
 
@@ -126,7 +144,7 @@ async function handleCreateAgent(agentName: string) {
   try {
     await createAgent({ agentName: agentName.trim() })
     // 创建成功后刷新列表
-    pagingRef.value.reload()
+    reloadPaging()
     toast.success(`${t('home.agentName')}"${agentName}"${t('message.saveSuccess')}`)
   }
   catch (error: any) {
@@ -141,7 +159,7 @@ async function handleDeleteAgent(agent: Agent) {
   try {
     await deleteAgent(agent.id)
     // 删除成功后刷新列表
-    pagingRef.value.reload()
+    reloadPaging()
     toast.success(`${t('home.agentName')}${t('message.deleteSuccess')}`)
   }
   catch (error: any) {
@@ -210,9 +228,7 @@ function formatTime(timeStr: string) {
 // 页面显示时刷新列表
 onShow(() => {
   console.log('首页 onShow，刷新智能体列表')
-  if (pagingRef.value) {
-    pagingRef.value.refresh()
-  }
+  refreshPaging()
 })
 
 onMounted(() => {
@@ -226,7 +242,7 @@ onMounted(() => {
   <z-paging
     ref="pagingRef" v-model="agentList" :refresher-enabled="true" :auto-show-back-to-top="true"
     :loading-more-enabled="false" :show-loading-more="false" :hide-empty-view="false" :empty-view-text="t('home.emptyState')"
-    empty-view-img="" :refresher-threshold="80" :back-to-top-style="{
+    empty-view-img="" :refresher-threshold="80" :call-network-reject="false" :back-to-top-style="{
       backgroundColor: '#fff',
       borderRadius: '50%',
       width: '56px',

@@ -12,7 +12,7 @@ patchedDependencies:
     hash: 5763725268e9a493075be3c82d91b590b9ae30e997a04a418494dd7d6d327b9d
     path: patches/@dcloudio__uni-h5.patch
   wot-design-uni@1.9.1:
-    hash: b395ed78fac161babb00d23fd92930ff81a0f7a4c7a1c87ef9354e4818ed82fb
+    hash: 40a753094a04c88bfe77b4018f2a9fd1437a8b249bed5f99b9e6d168f9339078
     path: patches/wot-design-uni@1.9.1.patch
   z-paging@2.8.7:
     hash: ca1892d2f980cbc64a87da30c13c731b8b0340796ddba82bc8fefeb4a9f4398e

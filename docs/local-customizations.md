@@ -412,3 +412,19 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方修改登录页、验证码接口、SM2 加密或 CaptchaService，必须保留验证码一次性消费边界和前端防重复提交锁；登录失败后需要刷新验证码，成功后不得继续发起第二次同 captchaId 的登录请求；`user.login()` 的 networkFail 分支不得自动重试同一份 loginForm，必须回调登录页解锁和刷新验证码；不要把验证码错误简单归因于用户输入错误，需同时检查 captchaId 是否被重复消费。
 ```
+
+## 24. manager-mobile WSL + Windows 微信开发者工具联调
+
+```text
+定制模块：manager-mobile 微信小程序本地开发流程
+改动原因：项目源码运行在 WSL 仓库中，但微信开发者工具运行在 Windows 中，并导入 D 盘目录 `D:\codexws\xiaozhi-mp-weixin`。后续开发不能直接修改 D 盘编译产物，也不能把微信开发者工具导入目录误认为源码目录。标准流程是先在 WSL 的 `main/manager-mobile` 中构建 `dist/build/mp-weixin`，再同步到 `/mnt/d/codexws/xiaozhi-mp-weixin`。
+关键文件：
+  - main/manager-mobile/README.md
+  - main/manager-mobile/manifest.config.ts
+  - main/manager-mobile/env/.env.development
+  - main/manager-mobile/env/.env.production
+  - main/manager-mobile/env/.env.test
+  - D:\codexws\xiaozhi-mp-weixin (Windows 编译产物目录，不属于 Git 源码)
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改 manager-mobile 构建脚本、manifest、微信小程序配置或 README，必须保留 WSL 源码目录与 Windows 微信开发者工具导入目录分离的约定；刷新 Windows 侧本地调试小程序时使用 `pnpm build:mp:local` 后执行 `rsync -a --delete --exclude='project.private.config.json' dist/build/mp-weixin/ /mnt/d/codexws/xiaozhi-mp-weixin/`，该脚本必须生成 `urlCheck=false` 以允许本地 `http://127.0.0.1:8002/xiaozhi` 调试；正式上传审核前才使用 `pnpm build:mp`，并必须使用 HTTPS 合法域名和 `urlCheck=true`；不得直接编辑 D 盘产物目录中的业务代码；不得覆盖 `project.private.config.json`。
+```

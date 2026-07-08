@@ -42,7 +42,7 @@ export function login(data: LoginData) {
   return http.Post<LoginResponse>('/user/login', data, {
     meta: {
       ignoreAuth: true,
-      toast: true,
+      toast: false,
     },
   })
 }
@@ -106,6 +106,7 @@ export function getUserInfo() {
 // 获取公共配置
 export function getPublicConfig() {
   return http.Get<PublicConfig>('/user/pub-config', {
+    timeout: 15000,
     meta: {
       ignoreAuth: true,
       toast: false,

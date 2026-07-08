@@ -315,6 +315,16 @@ async function handleLogin() {
     }, 1000)
   }
   catch (error: any) {
+    const errorMessage = error?.message || String(error || '')
+    if (errorMessage.includes('请求错误[10067]')) {
+      toast.warning(t('login.captchaError'))
+    }
+    else if (errorMessage.includes('请求错误[10004]')) {
+      toast.warning(t('message.loginFail'))
+    }
+    else {
+      toast.warning(errorMessage || t('message.loginFail'))
+    }
     // 登录失败重新获取验证码
     refreshCaptcha()
   }
@@ -371,7 +381,7 @@ initI18n()
   <view class="app-container box-border h-screen w-full" :style="{ paddingTop: `${safeAreaInsets?.top}px` }">
     <view class="header">
       <view class="logo-section">
-        <wd-img :width="80" :height="80" round src="/static/logo.png" class="logo" />
+        <wd-img :width="72" :height="72" round src="/static/logo.png" class="logo" />
         <text class="welcome-text">
           {{ t('login.welcomeBack') }}
         </text>
@@ -413,125 +423,137 @@ initI18n()
         <!-- #endif -->
 
         <template v-if="showPasswordLogin">
-        <!-- 手机号登录 -->
-        <template v-if="loginType === 'mobile'">
-          <view class="input-group">
-            <view class="input-wrapper mobile-wrapper">
-              <view class="area-code-selector" @click="openAreaCodeSheet">
-                <text class="area-code-text">
-                  {{ selectedAreaCode }}
-                </text>
-                <wd-icon name="arrow-down" custom-class="area-code-arrow" />
+          <!-- #ifdef MP-WEIXIN -->
+          <view class="login-divider">
+            <view class="divider-line" />
+            <text class="divider-text">
+              {{ t('login.passwordLogin') }}
+            </text>
+            <view class="divider-line" />
+          </view>
+          <!-- #endif -->
+
+          <view class="password-form">
+            <!-- 手机号登录 -->
+            <template v-if="loginType === 'mobile'">
+              <view class="input-group">
+                <view class="input-wrapper mobile-wrapper">
+                  <view class="area-code-selector" @click="openAreaCodeSheet">
+                    <text class="area-code-text">
+                      {{ selectedAreaCode }}
+                    </text>
+                    <wd-icon name="arrow-down" custom-class="area-code-arrow" />
+                  </view>
+                  <view class="mobile-input-wrapper">
+                    <wd-input
+                      v-model="formData.mobile"
+                      custom-class="styled-input"
+                      no-border
+                      :placeholder="t('login.enterPhone')"
+                      type="number"
+                      :maxlength="11"
+                    />
+                  </view>
+                </view>
               </view>
-              <view class="mobile-input-wrapper">
+            </template>
+
+            <!-- 用户名登录 -->
+            <template v-else>
+              <view class="input-group">
+                <view class="input-wrapper">
+                  <wd-input
+                    v-model="formData.username"
+                    custom-class="styled-input"
+                    no-border
+                    :placeholder="t('login.enterUsername')"
+                  />
+                </view>
+              </view>
+            </template>
+
+            <view class="input-group">
+              <view class="input-wrapper">
                 <wd-input
-                  v-model="formData.mobile"
+                  v-model="formData.password"
                   custom-class="styled-input"
                   no-border
-                  :placeholder="t('login.enterPhone')"
-                  type="number"
-                  :maxlength="11"
+                  :placeholder="t('login.enterPassword')"
+                  clearable
+                  show-password
+                  :maxlength="20"
                 />
               </view>
             </view>
-          </view>
-        </template>
 
-        <!-- 用户名登录 -->
-        <template v-else>
-          <view class="input-group">
-            <view class="input-wrapper">
-              <wd-input
-                v-model="formData.username"
-                custom-class="styled-input"
-                no-border
-                :placeholder="t('login.enterUsername')"
-              />
+            <view class="input-group">
+              <view class="input-wrapper captcha-wrapper">
+                <wd-input
+                  v-model="formData.captcha"
+                  custom-class="styled-input"
+                  no-border
+                  :placeholder="t('login.enterCaptcha')"
+                  :maxlength="6"
+                />
+                <view class="captcha-image" @click="refreshCaptcha">
+                  <image v-if="captchaImage" :src="captchaImage" class="captcha-img" />
+                  <text v-else class="captcha-placeholder">
+                    {{ t('login.loadCaptcha') }}
+                  </text>
+                </view>
+              </view>
             </view>
-          </view>
-        </template>
+            <view
+              class="login-btn"
+              @click="handleLogin"
+            >
+              {{ loading ? t('login.loggingIn') : t('login.loginButton') }}
+            </view>
 
-        <view class="input-group">
-          <view class="input-wrapper">
-            <wd-input
-              v-model="formData.password"
-              custom-class="styled-input"
-              no-border
-              :placeholder="t('login.enterPassword')"
-              clearable
-              show-password
-              :maxlength="20"
-            />
-          </view>
-        </view>
+            <view class="hint-row">
+              <view class="register-hint">
+                <text class="register-link" @click="goToRegister">
+                  {{ t('login.noAccount') }}
+                </text>
+              </view>
 
-        <view class="input-group">
-          <view class="input-wrapper captcha-wrapper">
-            <wd-input
-              v-model="formData.captcha"
-              custom-class="styled-input"
-              no-border
-              :placeholder="t('login.enterCaptcha')"
-              :maxlength="6"
-            />
-            <view class="captcha-image" @click="refreshCaptcha">
-              <image v-if="captchaImage" :src="captchaImage" class="captcha-img" />
-              <text v-else class="captcha-placeholder">
-                {{ t('login.loadCaptcha') }}
+              <view class="forgot-password">
+                <text class="forgot-text" @click="goToForgotPassword">
+                  {{ t('login.forgotPassword') }}
+                </text>
+              </view>
+            </view>
+
+            <view class="policy-links">
+              <text class="policy-link" @click="goToUserAgreement">
+                {{ t('login.userAgreement') }}
+              </text>
+              <text class="policy-divider">|</text>
+              <text class="policy-link" @click="goToPrivacyPolicy">
+                {{ t('login.privacyPolicy') }}
               </text>
             </view>
-          </view>
-        </view>
-        <view
-          class="login-btn"
-          @click="handleLogin"
-        >
-          {{ loading ? t('login.loggingIn') : t('login.loginButton') }}
-        </view>
 
-        <view class="hint-row">
-          <view v-if="allowUserRegister" class="register-hint">
-            <text class="register-link" @click="goToRegister">
-              {{ t('login.noAccount') }}
-            </text>
-          </view>
-
-          <view class="forgot-password">
-            <text class="forgot-text" @click="goToForgotPassword">
-              {{ t('login.forgotPassword') }}
-            </text>
-          </view>
-        </view>
-
-        <view class="policy-links">
-          <text class="policy-link" @click="goToUserAgreement">
-            {{ t('login.userAgreement') }}
-          </text>
-          <text class="policy-divider">|</text>
-          <text class="policy-link" @click="goToPrivacyPolicy">
-            {{ t('login.privacyPolicy') }}
-          </text>
-        </view>
-
-        <!-- 登录方式切换 -->
-        <view v-if="enableMobileLogin" class="login-type-switch">
-          <view class="switch-tabs">
-            <view
-              class="switch-tab"
-              :class="{ active: loginType === 'username' }"
-              @click="toggleLoginType"
-            >
-              <wd-icon name="user" />
-            </view>
-            <view
-              class="switch-tab"
-              :class="{ active: loginType === 'mobile' }"
-              @click="toggleLoginType"
-            >
-              <wd-icon name="phone" />
+            <!-- 登录方式切换 -->
+            <view v-if="enableMobileLogin" class="login-type-switch">
+              <view class="switch-tabs">
+                <view
+                  class="switch-tab"
+                  :class="{ active: loginType === 'username' }"
+                  @click="toggleLoginType"
+                >
+                  <wd-icon name="user" />
+                </view>
+                <view
+                  class="switch-tab"
+                  :class="{ active: loginType === 'mobile' }"
+                  @click="toggleLoginType"
+                >
+                  <wd-icon name="phone" />
+                </view>
+              </view>
             </view>
           </view>
-        </view>
         </template>
       </view>
     </view>
@@ -584,109 +606,92 @@ initI18n()
 
 <style lang="scss" scoped>
 .app-container {
-  background: linear-gradient(145deg, #f5f8fd, #6baaff, #9ebbfc, #f5f8fd);
+  background:
+    linear-gradient(180deg, rgba(75, 132, 240, 0.78) 0%, rgba(121, 171, 248, 0.58) 34%, rgba(247, 249, 252, 1) 70%),
+    #f7f9fc;
   display: flex;
   flex-direction: column;
   position: relative;
   overflow: hidden;
   min-height: 100vh;
-
-  &::before {
-    content: '';
-    position: absolute;
-    top: -50%;
-    left: -50%;
-    width: 200%;
-    height: 200%;
-    background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 0%, transparent 70%);
-    animation: float 6s ease-in-out infinite;
-  }
-}
-
-@keyframes float {
-  0%,
-  100% {
-    transform: translateY(0px) rotate(0deg);
-  }
-  50% {
-    transform: translateY(-20px) rotate(180deg);
-  }
 }
 
 .header {
   flex: 0 0 auto;
-  min-height: 280rpx;
+  min-height: 246rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 15% 0 40rpx 0;
+  padding: 56rpx 0 24rpx 0;
 
   .logo-section {
     text-align: center;
 
     .logo {
-      margin-bottom: 20rpx;
-      box-shadow: 0 8rpx 32rpx rgba(0, 0, 0, 0.1);
+      margin-bottom: 18rpx;
+      box-shadow: 0 10rpx 30rpx rgba(28, 78, 150, 0.18);
     }
 
     .welcome-text {
       display: block;
       color: #ffffff;
-      font-size: 40rpx;
-      font-weight: 600;
-      margin-bottom: 12rpx;
-      text-shadow: 0 2rpx 4rpx rgba(0, 0, 0, 0.1);
+      font-size: 38rpx;
+      font-weight: 700;
+      margin-bottom: 8rpx;
+      text-shadow: 0 2rpx 8rpx rgba(39, 91, 161, 0.22);
     }
 
     .subtitle {
       display: block;
-      color: rgba(255, 255, 255, 0.8);
-      font-size: 26rpx;
+      color: rgba(255, 255, 255, 0.88);
+      font-size: 24rpx;
       font-weight: 400;
     }
   }
 }
 
 .form-container {
-  padding: 0 40rpx 40rpx 40rpx;
+  padding: 0 40rpx 32rpx 40rpx;
   flex: 1;
   display: flex;
   align-items: flex-start;
 
   .form {
     width: 100%;
-    background: rgba(255, 255, 255, 0.95);
-    border-radius: 24rpx;
-    padding: 40rpx 30rpx 30rpx 30rpx;
+    background: #ffffff;
+    border-radius: 18rpx;
+    padding: 28rpx;
     backdrop-filter: blur(10rpx);
-    box-shadow: 0 20rpx 60rpx rgba(0, 0, 0, 0.1);
-    border: 1rpx solid rgba(255, 255, 255, 0.2);
-    max-height: calc(100vh - 350rpx);
+    box-shadow: 0 14rpx 38rpx rgba(35, 51, 83, 0.12);
+    border: 1rpx solid rgba(207, 216, 230, 0.8);
+    max-height: calc(100vh - 300rpx);
     overflow-y: auto;
 
     .input-group {
-      margin-bottom: 24rpx;
+      margin-bottom: 18rpx;
 
       .input-wrapper {
         position: relative;
-        border-radius: 16rpx;
-        padding: 20rpx 16rpx;
-        border: 2rpx solid #e9ecef;
-        transition: all 0.3s ease;
+        border-radius: 12rpx;
+        padding: 15rpx 16rpx;
+        border: 1rpx solid #dce4f0;
+        background: #f8fafc;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
         display: flex;
         align-items: center;
+        min-height: 58rpx;
 
         &:focus-within {
-          border-color: #667eea;
+          border-color: #4d80f0;
           background: #ffffff;
-          box-shadow: 0 0 0 6rpx rgba(102, 126, 234, 0.1);
+          box-shadow: 0 0 0 5rpx rgba(77, 128, 240, 0.1);
         }
 
         &.captcha-wrapper {
           .captcha-image {
-            margin-left: 20rpx;
-            width: 150rpx;
-            height: 60rpx;
+            margin-left: 16rpx;
+            width: 148rpx;
+            height: 58rpx;
             border-radius: 8rpx;
             overflow: hidden;
             cursor: pointer;
@@ -719,20 +724,20 @@ initI18n()
           .area-code-selector {
             flex: 0 0 160rpx;
             background: #f8f9fa;
-            border-radius: 16rpx;
-            padding: 20rpx 16rpx;
-            border: 2rpx solid #e9ecef;
-            height: 45rpx;
+            border-radius: 12rpx;
+            padding: 15rpx 16rpx;
+            border: 1rpx solid #dce4f0;
+            min-height: 58rpx;
             display: flex;
             align-items: center;
             justify-content: space-between;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
 
             &:hover {
-              border-color: #667eea;
+              border-color: #4d80f0;
               background: #ffffff;
-              box-shadow: 0 0 0 6rpx rgba(102, 126, 234, 0.1);
+              box-shadow: 0 0 0 5rpx rgba(77, 128, 240, 0.1);
             }
 
             .area-code-text {
@@ -751,15 +756,15 @@ initI18n()
           .mobile-input-wrapper {
             flex: 1;
             background: #f8f9fa;
-            border-radius: 16rpx;
-            padding: 20rpx 16rpx;
-            border: 2rpx solid #e9ecef;
-            transition: all 0.3s ease;
+            border-radius: 12rpx;
+            padding: 15rpx 16rpx;
+            border: 1rpx solid #dce4f0;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
 
             &:focus-within {
-              border-color: #667eea;
+              border-color: #4d80f0;
               background: #ffffff;
-              box-shadow: 0 0 0 6rpx rgba(102, 126, 234, 0.1);
+              box-shadow: 0 0 0 5rpx rgba(77, 128, 240, 0.1);
             }
           }
         }
@@ -768,13 +773,13 @@ initI18n()
           background: transparent !important;
           border: none !important;
           outline: none !important;
-          font-size: 32rpx;
-          color: #333333;
+          font-size: 29rpx;
+          color: #1f2937;
           flex: 1;
 
           &::placeholder {
-            color: #999999;
-            font-size: 28rpx;
+            color: #9aa4b2;
+            font-size: 27rpx;
           }
         }
       }
@@ -784,15 +789,15 @@ initI18n()
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 30rpx;
+      margin-bottom: 22rpx;
     }
 
     .policy-links {
       display: flex;
       justify-content: center;
       align-items: center;
-      gap: 20rpx;
-      margin-bottom: 30rpx;
+      gap: 18rpx;
+      margin-bottom: 18rpx;
 
       .policy-link {
         color: #667eea;
@@ -824,21 +829,21 @@ initI18n()
 
     .login-btn {
       width: 100%;
-      height: 80rpx;
+      height: 76rpx;
       border: none;
-      border-radius: 16rpx;
+      border-radius: 12rpx;
       font-size: 30rpx;
       font-weight: 600;
       color: #ffffff;
-      margin-bottom: 30rpx;
-      box-shadow: 0 8rpx 24rpx rgba(102, 126, 234, 0.3);
-      transition: all 0.3s ease;
+      margin-bottom: 22rpx;
+      box-shadow: 0 8rpx 18rpx rgba(77, 128, 240, 0.24);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
       background-color: var(--wot-button-primary-bg-color, var(--wot-color-theme, #4d80f0));
       text-align: center;
-      line-height: 80rpx;
+      line-height: 76rpx;
       &:active {
         transform: translateY(2rpx);
-        box-shadow: 0 4rpx 12rpx rgba(102, 126, 234, 0.3);
+        box-shadow: 0 4rpx 10rpx rgba(77, 128, 240, 0.24);
       }
 
       &:disabled {
@@ -907,12 +912,12 @@ initI18n()
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 20rpx;
+  gap: 12rpx;
 }
 
 .wechat-title {
-  font-size: 34rpx;
-  line-height: 44rpx;
+  font-size: 30rpx;
+  line-height: 38rpx;
   font-weight: 700;
   color: #1f2937;
   text-align: center;
@@ -920,22 +925,24 @@ initI18n()
 
 .wechat-desc {
   font-size: 24rpx;
-  line-height: 34rpx;
+  line-height: 32rpx;
   color: #6b7280;
   text-align: center;
 }
 
 .wechat-login-btn {
-  height: 96rpx;
+  height: 82rpx;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 14rpx;
-  border-radius: 16rpx;
+  border-radius: 12rpx;
   background: #07c160;
   color: #ffffff;
   font-size: 30rpx;
   font-weight: 600;
+  margin-top: 10rpx;
+  box-shadow: 0 8rpx 18rpx rgba(7, 193, 96, 0.2);
 
   &:active {
     background: #06ad56;
@@ -948,6 +955,29 @@ initI18n()
   line-height: 34rpx;
   color: #4f7ee8;
   text-align: center;
+}
+
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  margin: 22rpx 0 18rpx;
+}
+
+.divider-line {
+  flex: 1;
+  height: 1rpx;
+  background: #e3e8f0;
+}
+
+.divider-text {
+  color: #667085;
+  font-size: 24rpx;
+  line-height: 32rpx;
+}
+
+.password-form {
+  display: block;
 }
 
 // 区号选择弹窗样式

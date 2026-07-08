@@ -33,6 +33,35 @@ pnpm i
 - 微信小程序：`pnpm dev:mp` 或 `pnpm dev:mp-weixin`，然后用微信开发者工具导入 `dist/dev/mp-weixin`
 - App：用 HBuilderX 导入 `manager-mobile`，然后参考下面的教程就能运行了
 
+### WSL + Windows 微信开发者工具联调
+当前常用开发方式是：源码、构建命令在 WSL 仓库中执行，微信开发者工具运行在 Windows 中，并导入 Windows D 盘的小程序产物目录。
+
+```text
+WSL 源码目录:
+  /home/rui/work/xiaozhi-esp32-server-mini-program-development/main/manager-mobile
+
+Windows 微信开发者工具导入目录:
+  D:\codexws\xiaozhi-mp-weixin
+
+WSL 访问该目录的路径:
+  /mnt/d/codexws/xiaozhi-mp-weixin
+```
+
+刷新 Windows 侧小程序产物时，在 WSL 中执行：
+
+```bash
+cd main/manager-mobile
+pnpm build:mp:local
+rsync -a --delete --exclude='project.private.config.json' dist/build/mp-weixin/ /mnt/d/codexws/xiaozhi-mp-weixin/
+```
+
+注意：
+- 不要直接编辑 `D:\codexws\xiaozhi-mp-weixin` 中的业务代码；该目录是微信开发者工具导入的编译产物，会被下一次同步覆盖。
+- 源码改动只写 `main/manager-mobile/src/`、`env/`、`manifest.config.ts` 等 WSL 仓库文件。
+- 同步时保留 `project.private.config.json`，避免覆盖微信开发者工具本地私有设置。
+- `pnpm build:mp:local` 使用 development 配置，生成 `urlCheck=false`，用于本地 `http://127.0.0.1:8002/xiaozhi` 调试。
+- 正式上传审核前使用 `pnpm build:mp`，生成 `urlCheck=true`，并必须使用微信公众平台配置过的 HTTPS 合法域名。
+
 ### 环境变量与配置
 项目使用自定义 `env` 目录存放环境文件，按 Vite 规范命名：`.env.development`、`.env.production` 等。
 
@@ -163,6 +192,7 @@ pnpm dev:mp        # 等价 dev:mp-weixin
 
 # 构建
 pnpm build:mp      # 等价 build:mp-weixin
+pnpm build:mp:local # 本地微信开发者工具调试，关闭 request 合法域名校验
 
 # 其他
 pnpm type-check
