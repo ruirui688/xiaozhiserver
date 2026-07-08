@@ -364,7 +364,7 @@ server.vision_explain https://yh.wejoy.link/mcp/vision/explain
 ```text
 https://yh.wejoy.link/                   -> 127.0.0.1:8002
 https://yh.wejoy.link/xiaozhi/           -> 127.0.0.1:8002/xiaozhi/
-https://yh.wejoy.link/xiaozhi/ota/       -> 127.0.0.1:8003/xiaozhi/ota/
+https://yh.wejoy.link/xiaozhi/ota/       -> 127.0.0.1:8002/xiaozhi/ota/
 https://yh.wejoy.link/mcp/vision/explain -> 127.0.0.1:8003/mcp/vision/explain
 wss://yh.wejoy.link/xiaozhi/v1/          -> 127.0.0.1:8000/xiaozhi/v1/
 ```
@@ -488,14 +488,55 @@ ssl_certificate     /etc/letsencrypt/live/yh.wejoy.link/fullchain.pem;
 ssl_certificate_key /etc/letsencrypt/live/yh.wejoy.link/privkey.pem;
 ```
 
+Certbot 默认不会把证书写到 `/etc/nginx/certs/`。如果模板或旧配置里还有下面这种
+占位路径，必须改成上面的 `/etc/letsencrypt/live/yh.wejoy.link/`：
+
+```nginx
+ssl_certificate     /etc/nginx/certs/yh.wejoy.link/fullchain.pem;
+ssl_certificate_key /etc/nginx/certs/yh.wejoy.link/privkey.pem;
+```
+
+可以用下面命令确认实际证书文件存在：
+
+```bash
+sudo ls -l /etc/letsencrypt/live/yh.wejoy.link/
+```
+
 模板中的关键映射必须保持一致：
 
 ```text
 https://yh.wejoy.link/                   -> http://127.0.0.1:8002/
 https://yh.wejoy.link/xiaozhi/           -> http://127.0.0.1:8002/xiaozhi/
-https://yh.wejoy.link/xiaozhi/ota/       -> http://127.0.0.1:8003/xiaozhi/ota/
+https://yh.wejoy.link/xiaozhi/ota/       -> http://127.0.0.1:8002/xiaozhi/ota/
 https://yh.wejoy.link/mcp/vision/explain -> http://127.0.0.1:8003/mcp/vision/explain
 wss://yh.wejoy.link/xiaozhi/v1/          -> ws://127.0.0.1:8000/xiaozhi/v1/
+```
+
+全模块生产部署中，`/xiaozhi/ota/` 必须反代到 `manager-api / manager-web`
+容器暴露的 `8002`。Python `xiaozhi-server` 在读取后台配置时不会注册
+`/xiaozhi/ota/` 路由，反代到 `8003` 会导致后台保存 `server.ota` 时出现
+“OTA接口验证失败”。
+
+如果曾经直接对 Nginx 默认站点执行过 `certbot --nginx -d yh.wejoy.link`，Certbot
+可能已经把 `server_name yh.wejoy.link` 写入
+`/etc/nginx/sites-enabled/default`。此时再启用 `xiaozhi.conf` 会形成同一域名的
+重复 server block，`sudo nginx -t` 会出现类似警告：
+
+```text
+conflicting server name "yh.wejoy.link" on 0.0.0.0:80, ignored
+conflicting server name "yh.wejoy.link" on 0.0.0.0:443, ignored
+```
+
+这个问题的典型现象是：`https://yh.wejoy.link/` 显示 Ubuntu/Nginx 默认页，
+`https://yh.wejoy.link/xiaozhi/...` 返回 Nginx 404，但容器的 `8000/8002/8003`
+端口和本机 `127.0.0.1:8002` 访问都正常。
+
+启用 `xiaozhi.conf` 后，必须确保 `yh.wejoy.link` 只在一个启用站点中声明。
+推荐禁用默认站点的软链接，保留 `sites-available/default` 原文件作为系统参考：
+
+```bash
+sudo grep -R "server_name .*yh.wejoy.link" -n /etc/nginx/sites-enabled /etc/nginx/conf.d
+sudo unlink /etc/nginx/sites-enabled/default
 ```
 
 检查并重载：

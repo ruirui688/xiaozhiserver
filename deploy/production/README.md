@@ -161,7 +161,7 @@ your public domain or certificate provider is different. The template proxies:
 ```text
 https://domain/                  -> 127.0.0.1:8002
 https://domain/xiaozhi/          -> 127.0.0.1:8002/xiaozhi/
-https://domain/xiaozhi/ota/      -> 127.0.0.1:8003/xiaozhi/ota/
+https://domain/xiaozhi/ota/      -> 127.0.0.1:8002/xiaozhi/ota/
 https://domain/mcp/vision/explain -> 127.0.0.1:8003/mcp/vision/explain
 wss://domain/xiaozhi/v1/         -> 127.0.0.1:8000/xiaozhi/v1/
 ```
