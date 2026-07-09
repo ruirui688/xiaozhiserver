@@ -12,7 +12,7 @@ import {
   servoNumberField
 } from './robot_servo_mapping.js';
 
-const JOINT_SIDE_CAR_URL = new URL('../assets/otto-debug/joints/otto_robot_joints.json', import.meta.url).href;
+const JOINT_SIDE_CAR_URL = `${process.env.BASE_URL || '/'}otto-debug/joints/otto_robot_joints.json`;
 
 function degToRad(degrees) {
   return degrees * Math.PI / 180;
