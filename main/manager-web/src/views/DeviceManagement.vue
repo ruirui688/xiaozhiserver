@@ -306,7 +306,7 @@ export default {
       this.debugDialogVisible = true;
     },
     handleOttoDanceDebug(row) {
-      this.$router.push({
+      const route = this.$router.resolve({
         path: '/otto-dance-debug',
         query: {
           deviceId: row.device_id,
@@ -316,6 +316,7 @@ export default {
           alias: row.remark || ''
         }
       });
+      window.open(route.href, '_blank', 'noopener');
     },
     submitRemark(row) {
       if (row._submitting) return;
