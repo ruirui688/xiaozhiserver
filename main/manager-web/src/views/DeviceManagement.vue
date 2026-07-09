@@ -74,6 +74,9 @@
                   <el-button size="mini" type="text" @click="handleDebug(scope.row)">
                     {{ $t('device.dialogDebug') }}
                   </el-button>
+                  <el-button v-if="isOttoDevice(scope.row)" size="mini" type="text" @click="handleOttoDanceDebug(scope.row)">
+                    {{ $t('device.ottoDanceDebug') }}
+                  </el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -302,6 +305,18 @@ export default {
       this.debugDevice = row;
       this.debugDialogVisible = true;
     },
+    handleOttoDanceDebug(row) {
+      this.$router.push({
+        path: '/otto-dance-debug',
+        query: {
+          deviceId: row.device_id,
+          agentId: this.currentAgentId,
+          model: row.model || '',
+          mac: row.macAddress || '',
+          alias: row.remark || ''
+        }
+      });
+    },
     submitRemark(row) {
       if (row._submitting) return;
 
@@ -506,6 +521,10 @@ export default {
     isGenerate(row) {
       const version = row.firmwareVersion.replace(/\./g, '');
       return Number(version) >= 200;
+    },
+    isOttoDevice(row) {
+      const model = String(row.model || '').toLowerCase();
+      return model.includes('otto');
     },
     formatRelativeTime(timestamp) {
       if (!timestamp) return '-';

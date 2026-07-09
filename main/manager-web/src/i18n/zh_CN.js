@@ -501,6 +501,7 @@ export default {
   'device.unbind': '解绑',
   'device.deviceThemeGeneration': '设备主题生成',
   'device.dialogDebug': '对话调试',
+  'device.ottoDanceDebug': '舞蹈调试',
   'device.toolCall': '工具调用',
   'device.selectAtLeastOne': '请至少选择一条记录',
   'device.confirmBatchUnbind': '确认要解绑选中的 {count} 台设备吗？',
