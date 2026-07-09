@@ -149,7 +149,6 @@ docs/architecture/prompt-injection-engineering.md
 - [mcp/mcp-vision-integration.md](./mcp/mcp-vision-integration.md) - 视觉模型使用指南。用于开启服务端视觉模型、选择视觉模型供应商、配置视觉接口并排查网络可用性。
 - [mcp/context-provider-integration.md](./mcp/context-provider-integration.md) - 上下文源使用教程。用于为智能体注入外部上下文、理解上下文源接口规范、配置服务端调用上下文提供方。
 - [mcp/no-code-http-tools.md](./mcp/no-code-http-tools.md) - 可视化 MCP HTTP 工具。用于理解智控台配置 HTTP 工具、manager-api 保存配置、Python 桥接脚本注册 MCP tools 的完整链路和安全边界。
-- [mcp/chat-history-mcp-troubleshooting.md](./mcp/chat-history-mcp-troubleshooting.md) - 聊天记录图片与 MCP 工具显示问题排查。用于排查聊天历史图片缺失、设备 MCP 工具列表为空、调试连接和真实设备运行时状态混淆等问题。
 
 ## 8. 模型、语音与记忆
 

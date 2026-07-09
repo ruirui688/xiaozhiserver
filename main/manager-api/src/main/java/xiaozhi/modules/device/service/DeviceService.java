@@ -8,8 +8,6 @@ import xiaozhi.common.page.PageData;
 import xiaozhi.common.service.BaseService;
 import xiaozhi.modules.device.dto.DeviceManualAddDTO;
 import xiaozhi.modules.device.dto.DevicePageUserDTO;
-import xiaozhi.modules.device.dto.DeviceDebugInfoDTO;
-import xiaozhi.modules.device.dto.DeviceDebugStatusDTO;
 import xiaozhi.modules.device.dto.DeviceReportReqDTO;
 import xiaozhi.modules.device.dto.DeviceReportRespDTO;
 import xiaozhi.modules.device.entity.DeviceEntity;
@@ -122,20 +120,6 @@ public interface DeviceService extends BaseService<DeviceEntity> {
     String generateWebSocketToken(String clientId, String username) throws Exception;
 
     /**
-     * 获取设备对话调试连接信息
-     *
-     * @param userId   用户ID
-     * @param deviceId 设备ID
-     * @return 调试连接信息
-     */
-    DeviceDebugInfoDTO getDeviceDebugInfo(Long userId, String deviceId);
-
-    /**
-     * 获取设备对话调试状态
-     */
-    DeviceDebugStatusDTO getDeviceDebugStatus(Long userId, String deviceId);
-
-    /**
      * 根据MAC地址搜索设备
      *
      * @param macAddress MAC地址关键词
@@ -143,16 +127,6 @@ public interface DeviceService extends BaseService<DeviceEntity> {
      * @return 设备列表
      */
     List<DeviceEntity> searchDevicesByMacAddress(String macAddress, Long userId);
-
-    /**
-     * 获取设备工具列表
-     */
-    Object getDeviceTools(String deviceId);
-
-    /**
-     * 调用设备工具
-     */
-    Object callDeviceTool(String deviceId, String toolName, Map<String, Object> arguments);
 
     /**
      * 转发呼叫请求到网关

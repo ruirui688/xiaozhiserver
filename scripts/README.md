@@ -101,12 +101,10 @@ tag 并推送，不删除本地或 ACR 中已有缓存。
 xiaozhi-server:latest
 xiaozhi-manager-api:latest
 xiaozhi-manager-web:latest
-xiaozhi-manager-assets:latest
 xiaozhi-server-base-common/lite/funasr:latest
 xiaozhi-server-base-common/lite/funasr:base-<依赖哈希>
 xiaozhi-manager-api:api-<内容哈希>
 xiaozhi-manager-web:web-<内容哈希>
-xiaozhi-manager-assets:assets-<内容哈希>
 mysql:8.4 / redis:8.0
 ```
 
@@ -130,7 +128,7 @@ XIAOZHI_PROGRESS=false scripts/acr-build-push
 PARALLEL_RELEASE_STEPS=true PARALLEL_IMAGE_BUILDS=true scripts/acr-build-push
 ```
 
-非交互式环境或显式开启并行时，发布脚本可以并行执行互不依赖的步骤：运行时镜像同步与业务镜像构建可并行，`xiaozhi-server`、`xiaozhi-manager-api`、`xiaozhi-manager-web` 和 `xiaozhi-manager-assets` 也可并行。`xiaozhi-server` 只有在确实需要构建 `xiaozhi-server-base` 时才会等待基础镜像先完成。需要降低本机负载时可关闭并行：
+非交互式环境或显式开启并行时，发布脚本可以并行执行互不依赖的步骤：运行时镜像同步与业务镜像构建可并行，`xiaozhi-server`、`xiaozhi-manager-api` 和 `xiaozhi-manager-web` 也可并行。`xiaozhi-server` 只有在确实需要构建 `xiaozhi-server-base` 时才会等待基础镜像先完成。需要降低本机负载时可关闭并行：
 
 ```bash
 PARALLEL_RELEASE_STEPS=false PARALLEL_IMAGE_BUILDS=false scripts/acr-build-push
@@ -168,19 +166,18 @@ xiaozhi-server-base-funasr:base-<hash>  CPU PyTorch/FunASR 追加层缓存
 xiaozhi-server:<commit>             服务代码；FunASR profile 会额外包含 SenseVoiceSmall 模型
 xiaozhi-manager-api:api-<hash>      Java API 内容缓存，源码未变时直接复用
 xiaozhi-manager-web:web-<hash>      Vue 管理端内容缓存，源码未变时直接复用
-xiaozhi-manager-assets:assets-<hash> 大静态资源缓存，资源未变时直接复用
-xiaozhi-manager-api/web/assets:<commit> 拆分后的管理端运行镜像
+xiaozhi-manager-api/web:<commit>    拆分后的管理端运行镜像
 mysql:8.4 / redis:8.0               运行时镜像，ACR 已存在时跳过同步
 ```
 
-日常只改业务代码时使用对应 profile 的发布入口即可，脚本会优先复用现有 base 和拆分后的 manager-api / manager-web / manager-assets 内容缓存。只有改了 `requirements-docker*.txt`、`Dockerfile-server-base`、Python 基础镜像或系统包时，才需要 `BUILD_BASE=true`。只改 Java/Web、文档或部署说明且确认运行时镜像已在 ACR 时，可以用下面命令减少检查和推送：
+日常只改业务代码时使用对应 profile 的发布入口即可，脚本会优先复用现有 base 和拆分后的 manager-api / manager-web 内容缓存。只有改了 `requirements-docker*.txt`、`Dockerfile-server-base`、Python 基础镜像或系统包时，才需要 `BUILD_BASE=true`。只改 Java/Web、文档或部署说明且确认运行时镜像已在 ACR 时，可以用下面命令减少检查和推送：
 
 ```bash
 BUILD_BASE=false MIRROR_RUNTIME_IMAGES=false scripts/acr-build-push
 ```
 
 多个 Git worktree 可以直接从各自目录运行发布脚本；只要构建输入内容一致，
-服务端 base、manager-api、manager-web 和 manager-assets 的 cache tag 都会一致。
+服务端 base、manager-api 和 manager-web 的 cache tag 都会一致。
 不要为了切换 worktree 清理 Docker/BuildKit/ACR 缓存。
 需要只对比缓存 tag、不触发构建时，可以在两个 worktree 分别运行：
 
@@ -218,7 +215,7 @@ cd deploy/production
 
 需要固定部署或回滚时，才使用 `VERSION=<git短哈希> ./upgrade`。
 
-首次部署后，`~/xiaozhi-data/.env` 会记录 `XIAOZHI_DEPLOY_MODE=pull`、`XIAOZHI_SERVER_IMAGE_REPOSITORY`、`XIAOZHI_MANAGER_API_IMAGE_REPOSITORY`、`XIAOZHI_MANAGER_WEB_IMAGE_REPOSITORY` 和 `XIAOZHI_MANAGER_ASSETS_IMAGE_REPOSITORY`。后续 `deploy/production/upgrade` 会复用该配置。旧部署如需继续使用 `/opt/xiaozhi-data`，执行时显式传入 `DATA_DIR=/opt/xiaozhi-data`。
+首次部署后，`~/xiaozhi-data/.env` 会记录 `XIAOZHI_DEPLOY_MODE=pull`、`XIAOZHI_SERVER_IMAGE_REPOSITORY`、`XIAOZHI_MANAGER_API_IMAGE_REPOSITORY` 和 `XIAOZHI_MANAGER_WEB_IMAGE_REPOSITORY`。后续 `deploy/production/upgrade` 会复用该配置。旧部署如需继续使用 `/opt/xiaozhi-data`，执行时显式传入 `DATA_DIR=/opt/xiaozhi-data`。
 
 ## 脚本分组
 

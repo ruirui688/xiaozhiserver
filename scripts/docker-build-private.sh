@@ -5,13 +5,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEFAULT_SERVER_IMAGE_REPOSITORY="xiaozhi-server-local"
 DEFAULT_MANAGER_API_IMAGE_REPOSITORY="xiaozhi-manager-api-local"
 DEFAULT_MANAGER_WEB_IMAGE_REPOSITORY="xiaozhi-manager-web-local"
-DEFAULT_MANAGER_ASSETS_IMAGE_REPOSITORY="xiaozhi-manager-assets-local"
 DEFAULT_SERVER_COMMON_BASE_IMAGE_REPOSITORY="xiaozhi-server-base-common-local"
 
 SERVER_IMAGE_REPOSITORY="${SERVER_IMAGE_REPOSITORY:-$DEFAULT_SERVER_IMAGE_REPOSITORY}"
 MANAGER_API_IMAGE_REPOSITORY="${MANAGER_API_IMAGE_REPOSITORY:-$DEFAULT_MANAGER_API_IMAGE_REPOSITORY}"
 MANAGER_WEB_IMAGE_REPOSITORY="${MANAGER_WEB_IMAGE_REPOSITORY:-$DEFAULT_MANAGER_WEB_IMAGE_REPOSITORY}"
-MANAGER_ASSETS_IMAGE_REPOSITORY="${MANAGER_ASSETS_IMAGE_REPOSITORY:-$DEFAULT_MANAGER_ASSETS_IMAGE_REPOSITORY}"
 case "$(uname -m)" in
   x86_64) DEFAULT_PLATFORM="linux/amd64" ;;
   aarch64 | arm64) DEFAULT_PLATFORM="linux/arm64" ;;
@@ -30,7 +28,6 @@ MAVEN_BASE_IMAGE="${MAVEN_BASE_IMAGE:-docker.m.daocloud.io/library/maven:3.9.4-e
 WEB_RUNTIME_BASE_IMAGE="${WEB_RUNTIME_BASE_IMAGE:-docker.m.daocloud.io/bellsoft/liberica-runtime-container:jre-21-glibc}"
 API_RUNTIME_BASE_IMAGE="${API_RUNTIME_BASE_IMAGE:-$WEB_RUNTIME_BASE_IMAGE}"
 MANAGER_WEB_RUNTIME_BASE_IMAGE="${MANAGER_WEB_RUNTIME_BASE_IMAGE:-docker.m.daocloud.io/library/alpine:3.20}"
-ASSETS_RUNTIME_BASE_IMAGE="${ASSETS_RUNTIME_BASE_IMAGE:-docker.m.daocloud.io/library/alpine:3.20}"
 DEBIAN_MIRROR="${DEBIAN_MIRROR:-https://mirrors.aliyun.com/debian}"
 DEBIAN_SECURITY_MIRROR="${DEBIAN_SECURITY_MIRROR:-https://mirrors.aliyun.com/debian-security}"
 SERVER_INSTALL_PROFILE="${SERVER_INSTALL_PROFILE:-lite}"
@@ -83,7 +80,6 @@ SERVER_BASE_CACHE_VERSION="${SERVER_BASE_CACHE_VERSION:-v2}"
 SERVER_BASE_SEED_LATEST="${SERVER_BASE_SEED_LATEST:-false}"
 MANAGER_API_CACHE_VERSION="${MANAGER_API_CACHE_VERSION:-v1}"
 MANAGER_WEB_CACHE_VERSION="${MANAGER_WEB_CACHE_VERSION:-v1}"
-MANAGER_ASSETS_CACHE_VERSION="${MANAGER_ASSETS_CACHE_VERSION:-v1}"
 RECREATE_BUILDER=false
 
 if [[ -z "$FUNASR_MODEL_CONTEXT" ]]; then
@@ -585,6 +581,15 @@ hash_funasr_base_inputs_legacy() {
   } | sha256sum | cut -c1-12
 }
 
+hash_existing_git_paths() {
+  local path
+  while IFS= read -r -d '' path; do
+    if [[ -e "$path" ]]; then
+      sha256sum "$path"
+    fi
+  done
+}
+
 hash_manager_api_inputs() {
   {
     printf 'MANAGER_API_CACHE_VERSION=%s\n' "$MANAGER_API_CACHE_VERSION"
@@ -597,7 +602,7 @@ hash_manager_api_inputs() {
       main/manager-api/pom.xml \
       main/manager-api/src \
       | sort -z \
-      | (cd "$ROOT_DIR" && xargs -0 -r sha256sum)
+      | (cd "$ROOT_DIR" && hash_existing_git_paths)
   } | sha256sum | cut -c1-12
 }
 
@@ -622,27 +627,8 @@ hash_manager_web_inputs() {
       main/manager-web/public/offline.html \
       main/manager-web/public/privacy-policy.html \
       main/manager-web/public/user-agreement.html \
-      main/manager-web/public/generator/README.md \
-      main/manager-web/public/generator/favicon.ico \
-      main/manager-web/public/generator/index.html \
-      main/manager-web/public/generator/assets \
-      main/manager-web/public/generator/workers \
       | sort -z \
-      | (cd "$ROOT_DIR" && xargs -0 -r sha256sum)
-  } | sha256sum | cut -c1-12
-}
-
-hash_manager_assets_inputs() {
-  {
-    printf 'MANAGER_ASSETS_CACHE_VERSION=%s\n' "$MANAGER_ASSETS_CACHE_VERSION"
-    printf 'ASSETS_RUNTIME_BASE_IMAGE=%s\n' "$ASSETS_RUNTIME_BASE_IMAGE"
-    git -C "$ROOT_DIR" ls-files -z --cached --others --exclude-standard -- \
-      Dockerfile-manager-assets \
-      Dockerfile-manager-assets.dockerignore \
-      docs/docker/nginx-manager-assets.conf \
-      main/manager-web/public/generator/static \
-      | sort -z \
-      | (cd "$ROOT_DIR" && xargs -0 -r sha256sum)
+      | (cd "$ROOT_DIR" && hash_existing_git_paths)
   } | sha256sum | cut -c1-12
 }
 
@@ -676,8 +662,6 @@ MANAGER_API_CACHE_TAG="${MANAGER_API_CACHE_TAG:-api-$(hash_manager_api_inputs)}"
 MANAGER_API_CACHE_IMAGE="$MANAGER_API_IMAGE_REPOSITORY:$MANAGER_API_CACHE_TAG"
 MANAGER_WEB_CACHE_TAG="${MANAGER_WEB_CACHE_TAG:-web-$(hash_manager_web_inputs)}"
 MANAGER_WEB_CACHE_IMAGE="$MANAGER_WEB_IMAGE_REPOSITORY:$MANAGER_WEB_CACHE_TAG"
-MANAGER_ASSETS_CACHE_TAG="${MANAGER_ASSETS_CACHE_TAG:-assets-$(hash_manager_assets_inputs)}"
-MANAGER_ASSETS_CACHE_IMAGE="$MANAGER_ASSETS_IMAGE_REPOSITORY:$MANAGER_ASSETS_CACHE_TAG"
 
 image_available_locally_or_remote() {
   local image="$1"
@@ -718,7 +702,6 @@ if [[ "$PRINT_BUILD_CONFIG" != "false" ]]; then
   echo "  server:      $SERVER_IMAGE_REPOSITORY"
   echo "  manager-api: $MANAGER_API_IMAGE_REPOSITORY"
   echo "  manager-web: $MANAGER_WEB_IMAGE_REPOSITORY"
-  echo "  assets:      $MANAGER_ASSETS_IMAGE_REPOSITORY"
   echo "  base-common: $SERVER_COMMON_BASE_IMAGE_REPOSITORY"
   echo "  base-lite:   $SERVER_LITE_BASE_IMAGE_REPOSITORY"
   echo "  base-funasr: $SERVER_FUNASR_BASE_IMAGE_REPOSITORY"
@@ -734,7 +717,6 @@ if [[ "$PRINT_BUILD_CONFIG" != "false" ]]; then
   echo "Web runtime base image: $WEB_RUNTIME_BASE_IMAGE"
   echo "API runtime base image: $API_RUNTIME_BASE_IMAGE"
   echo "Manager web runtime base image: $MANAGER_WEB_RUNTIME_BASE_IMAGE"
-  echo "Assets runtime base image: $ASSETS_RUNTIME_BASE_IMAGE"
   echo "Debian mirror: $DEBIAN_MIRROR"
   echo "Debian security mirror: $DEBIAN_SECURITY_MIRROR"
   echo "Server install profile: $SERVER_INSTALL_PROFILE"
@@ -746,7 +728,6 @@ if [[ "$PRINT_BUILD_CONFIG" != "false" ]]; then
   echo "Server base seed latest: $SERVER_BASE_SEED_LATEST"
   echo "Manager API cache version: $MANAGER_API_CACHE_VERSION"
   echo "Manager Web cache version: $MANAGER_WEB_CACHE_VERSION"
-  echo "Manager assets cache version: $MANAGER_ASSETS_CACHE_VERSION"
   echo "Install FunASR model: $INSTALL_FUNASR_MODEL"
   echo "FunASR model context: $FUNASR_MODEL_CONTEXT"
   echo "FunASR model URL: $FUNASR_MODEL_URL"
@@ -758,7 +739,6 @@ if [[ "$PRINT_BUILD_CONFIG" != "false" ]]; then
   echo "Legacy selected base cache image: $SERVER_BASE_CACHE_IMAGE_LEGACY"
   echo "Manager API cache image: $MANAGER_API_CACHE_IMAGE"
   echo "Manager Web cache image: $MANAGER_WEB_CACHE_IMAGE"
-  echo "Manager assets cache image: $MANAGER_ASSETS_CACHE_IMAGE"
   echo "Parallel image builds: $PARALLEL_IMAGE_BUILDS"
   if [[ -n "$BUILDKIT_REGISTRY_MIRROR" ]]; then
     echo "BuildKit registry mirror:"
@@ -969,30 +949,6 @@ build_manager_web_pipeline() {
   fi
 }
 
-build_manager_assets_pipeline() {
-  if image_available_locally_or_remote "$MANAGER_ASSETS_CACHE_IMAGE"; then
-    print_base_image_status "Manager assets cached" "$MANAGER_ASSETS_CACHE_IMAGE"
-    if [[ "$PUSH" == "true" ]] && ! image_exists_remote "$MANAGER_ASSETS_CACHE_IMAGE"; then
-      push_local_image "$MANAGER_ASSETS_CACHE_IMAGE"
-    fi
-    retag_or_push_component "$MANAGER_ASSETS_CACHE_IMAGE" "$MANAGER_ASSETS_IMAGE_REPOSITORY"
-    return
-  fi
-
-  build_image "Build manager assets image" Dockerfile-manager-assets \
-    --build-arg "ASSETS_RUNTIME_BASE_IMAGE=$ASSETS_RUNTIME_BASE_IMAGE" \
-    --tag "$MANAGER_ASSETS_IMAGE_REPOSITORY:$CHANNEL_TAG" \
-    --tag "$MANAGER_ASSETS_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG" \
-    --tag "$MANAGER_ASSETS_CACHE_IMAGE"
-  push_image "$MANAGER_ASSETS_CACHE_IMAGE"
-  if ! remote_retag_image "$MANAGER_ASSETS_CACHE_IMAGE" "$MANAGER_ASSETS_IMAGE_REPOSITORY:$CHANNEL_TAG"; then
-    push_image "$MANAGER_ASSETS_IMAGE_REPOSITORY:$CHANNEL_TAG"
-  fi
-  if ! remote_retag_image "$MANAGER_ASSETS_CACHE_IMAGE" "$MANAGER_ASSETS_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"; then
-    push_image "$MANAGER_ASSETS_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"
-  fi
-}
-
 wait_for_pipeline() {
   local label="$1"
   local pid="$2"
@@ -1012,14 +968,11 @@ if [[ "$PARALLEL_IMAGE_BUILDS" == "true" ]]; then
   MANAGER_API_PIPELINE_PID=$!
   build_manager_web_pipeline &
   MANAGER_WEB_PIPELINE_PID=$!
-  build_manager_assets_pipeline &
-  MANAGER_ASSETS_PIPELINE_PID=$!
 
   PIPELINE_STATUS=0
   wait_for_pipeline "Server" "$SERVER_PIPELINE_PID" || PIPELINE_STATUS=1
   wait_for_pipeline "Manager API" "$MANAGER_API_PIPELINE_PID" || PIPELINE_STATUS=1
   wait_for_pipeline "Manager Web" "$MANAGER_WEB_PIPELINE_PID" || PIPELINE_STATUS=1
-  wait_for_pipeline "Manager assets" "$MANAGER_ASSETS_PIPELINE_PID" || PIPELINE_STATUS=1
   if [[ "$PIPELINE_STATUS" -ne 0 ]]; then
     exit "$PIPELINE_STATUS"
   fi
@@ -1027,7 +980,6 @@ else
   build_server_pipeline
   build_manager_api_pipeline
   build_manager_web_pipeline
-  build_manager_assets_pipeline
 fi
 
 echo "Done."

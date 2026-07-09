@@ -222,12 +222,6 @@ class ConnectionHandler:
         self.configured_intent_type = "nointent"
         self.intent_type = "nointent"
 
-        # 超时时间统一用毫秒（与 first_activity_time / last_activity_time 一致）
-        self._timeout_ms = (
-                int(self.config.get("close_connection_no_voice_time", 120)) + 60
-        ) * 1000  # 在原来第一道关闭的基础上加60秒，进行二道关闭
-        self.timeout_task = None
-
         # {"mcp":true} 表示启用MCP功能
         self.features = None
 
@@ -275,9 +269,6 @@ class ConnectionHandler:
             # 初始化活动时间戳
             self.first_activity_time = time.time() * 1000
             self.last_activity_time = time.time() * 1000
-
-            # 启动超时检查任务
-            self.timeout_task = asyncio.create_task(self._check_timeout())
 
             self.welcome_msg = self._build_welcome_msg()
 
@@ -1750,15 +1741,6 @@ class ConnectionHandler:
             if hasattr(self, "audio_buffer"):
                 self.audio_buffer.clear()
 
-            # 取消超时任务
-            if self.timeout_task and not self.timeout_task.done():
-                self.timeout_task.cancel()
-                try:
-                    await self.timeout_task
-                except asyncio.CancelledError:
-                    pass
-                self.timeout_task = None
-
             # 清理工具处理器资源
             if hasattr(self, "func_handler") and self.func_handler:
                 try:
@@ -1909,37 +1891,6 @@ class ConnectionHandler:
             self.close_after_chat = True
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"Chat and close error: {str(e)}")
-
-    async def _check_timeout(self):
-        """检查连接超时"""
-        try:
-            while not self.stop_event.is_set():
-                last_activity_time = self.last_activity_time
-                if self.need_bind:
-                    last_activity_time = self.first_activity_time
-
-                # 检查是否超时（只有在时间戳已初始化的情况下）
-                if last_activity_time > 0.0:
-                    current_time = time.time() * 1000
-                    if current_time - last_activity_time > self._timeout_ms:
-                        if not self.stop_event.is_set():
-                            self.logger.bind(tag=TAG).info("连接超时，准备关闭")
-                            # 设置停止事件，防止重复处理
-                            self.stop_event.set()
-                            # 使用 try-except 包装关闭操作，确保不会因为异常而阻塞
-                            try:
-                                await self.close(self.websocket)
-                            except Exception as close_error:
-                                self.logger.bind(tag=TAG).error(
-                                    f"超时关闭连接时出错: {close_error}"
-                                )
-                        break
-                # 每10秒检查一次，避免过于频繁
-                await asyncio.sleep(10)
-        except Exception as e:
-            self.logger.bind(tag=TAG).error(f"超时检查任务出错: {e}")
-        finally:
-            self.logger.bind(tag=TAG).info("超时检查任务已退出")
 
     @staticmethod
     def _extract_direct_answer_response(arguments_str):

@@ -19,7 +19,7 @@
 
 ```text
 Git origin/main                  deploy/production/install、upgrade、docker-compose.yml
-阿里云 ACR :latest 或短哈希 tag   xiaozhi-server、xiaozhi-manager-api、xiaozhi-manager-web、xiaozhi-manager-assets、mysql、redis 镜像
+阿里云 ACR :latest 或短哈希 tag   xiaozhi-server、xiaozhi-manager-api、xiaozhi-manager-web、mysql、redis 镜像
 ```
 
 这两个来源必须来自同一次 `main` 发布。不要在 feature 分支构建并推送 `latest`，然后让生产服务器从 `main` 拉部署脚本；那会造成镜像代码和 compose/install 逻辑不匹配。
@@ -50,8 +50,6 @@ xiaozhi-manager-api:latest
 xiaozhi-manager-api:<git短哈希>
 xiaozhi-manager-web:latest
 xiaozhi-manager-web:<git短哈希>
-xiaozhi-manager-assets:latest
-xiaozhi-manager-assets:<git短哈希>
 ```
 
 生产 `./install` 和 `./upgrade` 默认使用 `VERSION=latest`，所以日常发布后不需要手写版本号：
@@ -109,7 +107,6 @@ crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/
 xiaozhi-server:latest    Python 实时语音服务，可发布为轻量 profile 或 FunASR profile
 xiaozhi-manager-api:latest     Java manager-api
 xiaozhi-manager-web:latest     Nginx + Vue manager-web dist，统一暴露 8002
-xiaozhi-manager-assets:latest  manager-web 大静态资源 `/generator/static/**`
 mysql:8.4                MySQL 运行时镜像
 redis:8.0                Redis 运行时镜像
 ```
@@ -122,10 +119,9 @@ xiaozhi-server-base-lite:latest / base-<依赖哈希>
 xiaozhi-server-base-funasr:latest / base-<依赖哈希>
 xiaozhi-manager-api:api-<内容哈希>
 xiaozhi-manager-web:web-<内容哈希>
-xiaozhi-manager-assets:assets-<内容哈希>
 ```
 
-这些 base/cache 镜像只用于加速构建，不由生产 compose 直接启动。FunASR base 从 lite base 追加重依赖，lite 和 FunASR 共享 common/lite 缓存层；manager-api、manager-web 和 manager-assets 分别按内容哈希复用缓存。只改 Vue 页面时不会重建 Java API 或大静态资源镜像，只改 Java 时不会重建前端镜像。
+这些 base/cache 镜像只用于加速构建，不由生产 compose 直接启动。FunASR base 从 lite base 追加重依赖，lite 和 FunASR 共享 common/lite 缓存层；manager-api 和 manager-web 分别按内容哈希复用缓存。只改 Vue 页面时不会重建 Java API，只改 Java 时不会重建前端镜像。
 
 ---
 
@@ -151,7 +147,7 @@ PUSH=true                    构建后推送 ACR
 SERVER_INSTALL_PROFILE=lite 不安装本地 FunASR，ASR 使用远程 provider
 基础镜像默认使用 docker.m.daocloud.io 前缀，避免失效 Docker daemon mirror
 BUILD_BASE=auto 只复用精确依赖 hash 的 base 缓存，不默认用 latest 冒充
-manager-api / manager-web / manager-assets 分别复用 api-/web-/assets-<内容哈希>，未变化组件不重跑构建
+manager-api / manager-web 分别复用 api-/web-<内容哈希>，未变化组件不重跑构建
 ```
 
 两种服务端 profile：
@@ -190,13 +186,13 @@ PUSH=false BUILD_BASE=false scripts/acr-build-push-lite
 `deploy/production/upgrade` 是生产拉取入口，会先从 ACR `docker pull` 对应
 `VERSION`，因此会覆盖同名本地标签。没有把修复后的
 `xiaozhi-server`、`xiaozhi-manager-api`、`xiaozhi-manager-web`、
-`xiaozhi-manager-assets` 推送到 ACR 前，不要用 `./upgrade` 验证本地镜像。
+对应的 manager-api / manager-web 镜像推送到 ACR 前，不要用 `./upgrade` 验证本地镜像。
 需要临时验证本地镜像时，只能在确认 `~/xiaozhi-data/.env` 指向同名本地标签后，
 用 Docker Compose 直接重建目标服务，且不要先执行 pull：
 
 ```bash
 docker compose -f ~/xiaozhi-data/docker-compose.yml --env-file ~/xiaozhi-data/.env \
-  up -d --no-deps --force-recreate xiaozhi-esp32-manager-assets xiaozhi-esp32-server-web
+  up -d --no-deps --force-recreate xiaozhi-esp32-server-web
 ```
 
 FunASR profile 的模型默认来源：
@@ -263,7 +259,7 @@ sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
 
 ```text
 1. 判断使用 docker 还是 sudo docker
-2. 拉取 xiaozhi-server、xiaozhi-manager-api、xiaozhi-manager-web、xiaozhi-manager-assets、mysql、redis 镜像
+2. 拉取 xiaozhi-server、xiaozhi-manager-api、xiaozhi-manager-web、mysql、redis 镜像
 3. 创建 ~/xiaozhi-data
 4. 生成 ~/xiaozhi-data/.env 和 docker-compose.yml
 5. 初始化 data/.config.yaml
@@ -628,7 +624,6 @@ Nginx 或 Docker 内网访问。
 | SenseVoiceSmall 模型 | 本地 `model.pt` + 镜像 layer | 第一次打包模型，或替换模型文件 |
 | manager-api | ACR `xiaozhi-manager-api:api-<内容哈希>` + channel/version tag | 改 Java 源码、`pom.xml`、API Dockerfile 或 API 启动脚本 |
 | manager-web | ACR `xiaozhi-manager-web:web-<内容哈希>` + channel/version tag | 改 Vue 源码、前端构建配置、Web Nginx 配置或前端基础镜像 |
-| manager-assets | ACR `xiaozhi-manager-assets:assets-<内容哈希>` + channel/version tag | 改 `public/generator/static/**` 大静态资源或 assets Nginx 配置 |
 | 服务端业务代码 | Docker layer + `:<git短哈希>` / channel tag | 每次 Python 服务代码变化 |
 
 `base-<依赖哈希>` 按构建参数、逻辑文件路径和文件内容计算，不包含 Git worktree
@@ -663,7 +658,7 @@ main/xiaozhi-server/models/SenseVoiceSmall/model.pt
 业务层变了       只拉取对应组件的新业务层
 ```
 
-所以升级速度取决于本次镜像和上次镜像有多少 layer 变化。拆分后，常见小改动只影响一个组件镜像：只改 Vue 页面时通常只拉 `xiaozhi-manager-web` 的新层；只改 Java 时只拉 `xiaozhi-manager-api`；大静态资源不变时不会重复拉取 `xiaozhi-manager-assets`。
+所以升级速度取决于本次镜像和上次镜像有多少 layer 变化。拆分后，常见小改动只影响一个组件镜像：只改 Vue 页面时通常只拉 `xiaozhi-manager-web` 的新层；只改 Java 时只拉 `xiaozhi-manager-api`。
 
 ---
 
@@ -734,7 +729,6 @@ docker compose -f ~/xiaozhi-data/docker-compose.yml --env-file ~/xiaozhi-data/.e
 docker logs -f xiaozhi-esp32-server
 docker logs -f xiaozhi-esp32-server-web
 docker logs -f xiaozhi-esp32-manager-api
-docker logs -f xiaozhi-esp32-manager-assets
 docker logs -f xiaozhi-esp32-server-db
 docker logs -f xiaozhi-esp32-server-redis
 ```
@@ -745,7 +739,6 @@ docker logs -f xiaozhi-esp32-server-redis
 docker restart xiaozhi-esp32-server
 docker restart xiaozhi-esp32-server-web
 docker restart xiaozhi-esp32-manager-api
-docker restart xiaozhi-esp32-manager-assets
 ```
 
 ---
@@ -759,7 +752,6 @@ docker restart xiaozhi-esp32-manager-assets
 | xiaozhi-server | 1.00 | 2048m |
 | xiaozhi-manager-api | 0.50 | 896m |
 | xiaozhi-manager-web | 0.20 | 192m |
-| xiaozhi-manager-assets | 0.10 | 128m |
 | MySQL | 0.30 | 768m |
 | Redis | 0.10 | 192m |
 
@@ -783,8 +775,6 @@ XIAOZHI_MANAGER_API_CPUS=0.50
 XIAOZHI_MANAGER_API_MEM_LIMIT=896m
 XIAOZHI_MANAGER_WEB_CPUS=0.20
 XIAOZHI_MANAGER_WEB_MEM_LIMIT=192m
-XIAOZHI_MANAGER_ASSETS_CPUS=0.10
-XIAOZHI_MANAGER_ASSETS_MEM_LIMIT=128m
 XIAOZHI_MYSQL_MEM_LIMIT=768m
 XIAOZHI_REDIS_MEM_LIMIT=192m
 ```
@@ -809,7 +799,6 @@ scripts/acr-build-push
 SERVER_IMAGE_REPOSITORY=你的仓库/xiaozhi-server \
 MANAGER_API_IMAGE_REPOSITORY=你的仓库/xiaozhi-manager-api \
 MANAGER_WEB_IMAGE_REPOSITORY=你的仓库/xiaozhi-manager-web \
-MANAGER_ASSETS_IMAGE_REPOSITORY=你的仓库/xiaozhi-manager-assets \
 ./install
 ```
 
@@ -842,14 +831,12 @@ docker: sudo docker (config: /root/.docker)
 docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-server:latest
 docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-manager-api:latest
 docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-manager-web:latest
-docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-manager-assets:latest
 docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/mysql:8.4
 docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/redis:8.0
 
 sudo docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-server:latest
 sudo docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-manager-api:latest
 sudo docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-manager-web:latest
-sudo docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-manager-assets:latest
 sudo docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/mysql:8.4
 sudo docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/redis:8.0
 ```
@@ -862,7 +849,7 @@ sudo docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihu
 镜像还没有推送到 ACR
 ACR namespace 写错，不是 yihuixiaozhi
 登录的是普通 docker，但脚本实际使用 sudo docker
-只推送了 xiaozhi-server，没有推送 xiaozhi-manager-api/xiaozhi-manager-web/xiaozhi-manager-assets/mysql/redis
+只推送了 xiaozhi-server，没有推送 xiaozhi-manager-api/xiaozhi-manager-web/mysql/redis
 ```
 
 ### 12.2 manager-api 启动超时
@@ -943,7 +930,7 @@ server.websocket 是设备可访问的公网或局域网地址
 代码已合并到 main
 git pull --ff-only origin main 已完成
 scripts/acr-build-push 成功
-ACR 中存在 xiaozhi-server/latest、xiaozhi-manager-api/latest、xiaozhi-manager-web/latest、xiaozhi-manager-assets/latest、mysql/8.4、redis/8.0
+ACR 中存在 xiaozhi-server/latest、xiaozhi-manager-api/latest、xiaozhi-manager-web/latest、mysql/8.4、redis/8.0
 ```
 
 生产服务器：

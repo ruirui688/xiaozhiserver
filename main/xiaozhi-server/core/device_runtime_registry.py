@@ -43,13 +43,6 @@ def _connection_keys(conn: "ConnectionHandler") -> Set[str]:
     return keys
 
 
-def is_debug_connection(conn: "ConnectionHandler") -> bool:
-    client_id = ""
-    if conn.headers:
-        client_id = conn.headers.get("client-id", "") or ""
-    return client_id.startswith("manager-debug-")
-
-
 def _client_id(conn: "ConnectionHandler") -> str:
     if not conn.headers:
         return ""
@@ -61,13 +54,6 @@ def register_connection(conn: "ConnectionHandler") -> None:
     conn._runtime_registry_keys = set()
     if not conn.device_id:
         logger.bind(tag=TAG).warning("跳过运行时设备注册: 缺少device-id, client-id={}", client_id)
-        return
-    if is_debug_connection(conn):
-        logger.bind(tag=TAG).info(
-            "跳过运行时设备注册: 调试连接不作为真实设备, device-id={}, client-id={}",
-            conn.device_id,
-            client_id,
-        )
         return
     keys = _connection_keys(conn)
     for key in keys:
