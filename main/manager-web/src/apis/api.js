@@ -15,7 +15,6 @@ import addressBook from './module/addressBook.js'
 import music from './module/music.js'
 import memory from './module/memory.js'
 import workspace from './module/workspace.js'
-import ottoDebug from './module/ottoDebug.js'
 
 
 
@@ -61,6 +60,5 @@ export default {
     addressBook,
     music,
     memory,
-    workspace,
-    ottoDebug
+    workspace
   }

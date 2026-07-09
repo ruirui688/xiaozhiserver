@@ -50,7 +50,6 @@ generate_mysql_password() {
 DEFAULT_SERVER_IMAGE_REPOSITORY="crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-server"
 DEFAULT_MANAGER_API_IMAGE_REPOSITORY="crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-manager-api"
 DEFAULT_MANAGER_WEB_IMAGE_REPOSITORY="crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-manager-web"
-DEFAULT_MANAGER_ASSETS_IMAGE_REPOSITORY="crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-manager-assets"
 DEFAULT_MYSQL_IMAGE="crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/mysql:8.4"
 DEFAULT_REDIS_IMAGE="crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/redis:8.0"
 DEFAULT_SERVER_HTTP_BASE_URL="http://xiaozhi-esp32-server:8003"
@@ -109,7 +108,6 @@ XIAOZHI_DEPLOY_VERSION=$VERSION
 XIAOZHI_SERVER_IMAGE_REPOSITORY=$SERVER_IMAGE_REPOSITORY
 XIAOZHI_MANAGER_API_IMAGE_REPOSITORY=$MANAGER_API_IMAGE_REPOSITORY
 XIAOZHI_MANAGER_WEB_IMAGE_REPOSITORY=$MANAGER_WEB_IMAGE_REPOSITORY
-XIAOZHI_MANAGER_ASSETS_IMAGE_REPOSITORY=$MANAGER_ASSETS_IMAGE_REPOSITORY
 XIAOZHI_MYSQL_IMAGE=$MYSQL_IMAGE
 XIAOZHI_REDIS_IMAGE=$REDIS_IMAGE
 XIAOZHI_PUBLIC_DOMAIN=$PUBLIC_DOMAIN
@@ -131,10 +129,6 @@ XIAOZHI_MANAGER_WEB_CPUS=$MANAGER_WEB_CPUS
 XIAOZHI_MANAGER_WEB_MEM_LIMIT=$MANAGER_WEB_MEM_LIMIT
 XIAOZHI_MANAGER_WEB_MEMSWAP_LIMIT=$MANAGER_WEB_MEMSWAP_LIMIT
 XIAOZHI_MANAGER_WEB_PIDS_LIMIT=$MANAGER_WEB_PIDS_LIMIT
-XIAOZHI_MANAGER_ASSETS_CPUS=$MANAGER_ASSETS_CPUS
-XIAOZHI_MANAGER_ASSETS_MEM_LIMIT=$MANAGER_ASSETS_MEM_LIMIT
-XIAOZHI_MANAGER_ASSETS_MEMSWAP_LIMIT=$MANAGER_ASSETS_MEMSWAP_LIMIT
-XIAOZHI_MANAGER_ASSETS_PIDS_LIMIT=$MANAGER_ASSETS_PIDS_LIMIT
 XIAOZHI_MYSQL_CPUS=$MYSQL_CPUS
 XIAOZHI_MYSQL_MEM_LIMIT=$MYSQL_MEM_LIMIT
 XIAOZHI_MYSQL_MEMSWAP_LIMIT=$MYSQL_MEMSWAP_LIMIT
@@ -158,7 +152,6 @@ pull_images() {
   docker_cmd pull --quiet "$SERVER_IMAGE" >/dev/null
   docker_cmd pull --quiet "$MANAGER_API_IMAGE" >/dev/null
   docker_cmd pull --quiet "$MANAGER_WEB_IMAGE" >/dev/null
-  docker_cmd pull --quiet "$MANAGER_ASSETS_IMAGE" >/dev/null
   docker_cmd pull --quiet "$MYSQL_IMAGE" >/dev/null
   docker_cmd pull --quiet "$REDIS_IMAGE" >/dev/null
 }
@@ -304,8 +297,6 @@ MANAGER_API_IMAGE_REPOSITORY="${MANAGER_API_IMAGE_REPOSITORY:-$(read_existing_en
 MANAGER_API_IMAGE_REPOSITORY="${MANAGER_API_IMAGE_REPOSITORY:-$DEFAULT_MANAGER_API_IMAGE_REPOSITORY}"
 MANAGER_WEB_IMAGE_REPOSITORY="${MANAGER_WEB_IMAGE_REPOSITORY:-$(read_existing_env XIAOZHI_MANAGER_WEB_IMAGE_REPOSITORY)}"
 MANAGER_WEB_IMAGE_REPOSITORY="${MANAGER_WEB_IMAGE_REPOSITORY:-$DEFAULT_MANAGER_WEB_IMAGE_REPOSITORY}"
-MANAGER_ASSETS_IMAGE_REPOSITORY="${MANAGER_ASSETS_IMAGE_REPOSITORY:-$(read_existing_env XIAOZHI_MANAGER_ASSETS_IMAGE_REPOSITORY)}"
-MANAGER_ASSETS_IMAGE_REPOSITORY="${MANAGER_ASSETS_IMAGE_REPOSITORY:-$DEFAULT_MANAGER_ASSETS_IMAGE_REPOSITORY}"
 MYSQL_IMAGE="${MYSQL_IMAGE:-$(read_existing_env XIAOZHI_MYSQL_IMAGE)}"
 MYSQL_IMAGE="${MYSQL_IMAGE:-$DEFAULT_MYSQL_IMAGE}"
 REDIS_IMAGE="${REDIS_IMAGE:-$(read_existing_env XIAOZHI_REDIS_IMAGE)}"
@@ -359,14 +350,6 @@ MANAGER_WEB_MEMSWAP_LIMIT="${XIAOZHI_MANAGER_WEB_MEMSWAP_LIMIT:-$(read_existing_
 MANAGER_WEB_MEMSWAP_LIMIT="${MANAGER_WEB_MEMSWAP_LIMIT:-$MANAGER_WEB_MEM_LIMIT}"
 MANAGER_WEB_PIDS_LIMIT="${XIAOZHI_MANAGER_WEB_PIDS_LIMIT:-$(read_existing_env XIAOZHI_MANAGER_WEB_PIDS_LIMIT)}"
 MANAGER_WEB_PIDS_LIMIT="${MANAGER_WEB_PIDS_LIMIT:-128}"
-MANAGER_ASSETS_CPUS="${XIAOZHI_MANAGER_ASSETS_CPUS:-$(read_existing_env XIAOZHI_MANAGER_ASSETS_CPUS)}"
-MANAGER_ASSETS_CPUS="${MANAGER_ASSETS_CPUS:-0.10}"
-MANAGER_ASSETS_MEM_LIMIT="${XIAOZHI_MANAGER_ASSETS_MEM_LIMIT:-$(read_existing_env XIAOZHI_MANAGER_ASSETS_MEM_LIMIT)}"
-MANAGER_ASSETS_MEM_LIMIT="${MANAGER_ASSETS_MEM_LIMIT:-128m}"
-MANAGER_ASSETS_MEMSWAP_LIMIT="${XIAOZHI_MANAGER_ASSETS_MEMSWAP_LIMIT:-$(read_existing_env XIAOZHI_MANAGER_ASSETS_MEMSWAP_LIMIT)}"
-MANAGER_ASSETS_MEMSWAP_LIMIT="${MANAGER_ASSETS_MEMSWAP_LIMIT:-$MANAGER_ASSETS_MEM_LIMIT}"
-MANAGER_ASSETS_PIDS_LIMIT="${XIAOZHI_MANAGER_ASSETS_PIDS_LIMIT:-$(read_existing_env XIAOZHI_MANAGER_ASSETS_PIDS_LIMIT)}"
-MANAGER_ASSETS_PIDS_LIMIT="${MANAGER_ASSETS_PIDS_LIMIT:-128}"
 MYSQL_CPUS="${XIAOZHI_MYSQL_CPUS:-$(read_existing_env XIAOZHI_MYSQL_CPUS)}"
 MYSQL_CPUS="${MYSQL_CPUS:-0.30}"
 MYSQL_MEM_LIMIT="${XIAOZHI_MYSQL_MEM_LIMIT:-$(read_existing_env XIAOZHI_MYSQL_MEM_LIMIT)}"
@@ -433,7 +416,6 @@ mkdir -p \
 SERVER_IMAGE="$SERVER_IMAGE_REPOSITORY:$VERSION"
 MANAGER_API_IMAGE="$MANAGER_API_IMAGE_REPOSITORY:$VERSION"
 MANAGER_WEB_IMAGE="$MANAGER_WEB_IMAGE_REPOSITORY:$VERSION"
-MANAGER_ASSETS_IMAGE="$MANAGER_ASSETS_IMAGE_REPOSITORY:$VERSION"
 VERSION_LABEL="$VERSION"
 if [[ "$VERSION" == "latest" ]]; then
   VERSION_LABEL="latest (mutable)"
@@ -446,14 +428,13 @@ if [[ -n "${DEPLOY_GIT_BRANCH:-}" ]]; then
   printf "  %-10s %s %s -> %s\n" "assets:" "$DEPLOY_GIT_BRANCH" "${DEPLOY_GIT_BEFORE:-unknown}" "${DEPLOY_GIT_AFTER:-unknown}"
 fi
 printf "  %-10s %s\n" "server:" "$(short_image_name "$SERVER_IMAGE")"
-printf "  %-10s %s, %s, %s\n" "manager:" "$(short_image_name "$MANAGER_API_IMAGE")" "$(short_image_name "$MANAGER_WEB_IMAGE")" "$(short_image_name "$MANAGER_ASSETS_IMAGE")"
+printf "  %-10s %s, %s\n" "manager:" "$(short_image_name "$MANAGER_API_IMAGE")" "$(short_image_name "$MANAGER_WEB_IMAGE")"
 printf "  %-10s %s, %s\n" "runtime:" "$(short_image_name "$MYSQL_IMAGE")" "$(short_image_name "$REDIS_IMAGE")"
-printf "  %-10s server=%s/%s api=%s/%s web=%s/%s assets=%s/%s mysql=%s/%s redis=%s/%s\n" \
+printf "  %-10s server=%s/%s api=%s/%s web=%s/%s mysql=%s/%s redis=%s/%s\n" \
   "limits:" \
   "$SERVER_CPUS" "$SERVER_MEM_LIMIT" \
   "$MANAGER_API_CPUS" "$MANAGER_API_MEM_LIMIT" \
   "$MANAGER_WEB_CPUS" "$MANAGER_WEB_MEM_LIMIT" \
-  "$MANAGER_ASSETS_CPUS" "$MANAGER_ASSETS_MEM_LIMIT" \
   "$MYSQL_CPUS" "$MYSQL_MEM_LIMIT" \
   "$REDIS_CPUS" "$REDIS_MEM_LIMIT"
 printf "  %-10s %s\n" "data:" "$DATA_DIR"
@@ -528,7 +509,7 @@ LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 echo ""
 echo "=== Deploy complete ==="
 echo "Version: $VERSION"
-echo "Images: $(short_image_name "$(container_image xiaozhi-esp32-server)"), $(short_image_name "$(container_image xiaozhi-esp32-manager-api)"), $(short_image_name "$(container_image xiaozhi-esp32-server-web)"), $(short_image_name "$(container_image xiaozhi-esp32-manager-assets)")"
+echo "Images: $(short_image_name "$(container_image xiaozhi-esp32-server)"), $(short_image_name "$(container_image xiaozhi-esp32-manager-api)"), $(short_image_name "$(container_image xiaozhi-esp32-server-web)")"
 echo "Runtime: $(short_image_name "$(container_image xiaozhi-esp32-server-db)"), $(short_image_name "$(container_image xiaozhi-esp32-server-redis)")"
 echo "manager-web: http://$LOCAL_IP:8002"
 echo "websocket:   ws://$LOCAL_IP:8000/xiaozhi/v1/"

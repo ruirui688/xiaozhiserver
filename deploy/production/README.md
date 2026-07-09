@@ -283,10 +283,9 @@ BUILD_BASE=true   rebuild server-base after Python dependency changes
 
 The release script publishes separate content-cache tags for the management
 stack: `xiaozhi-manager-api:api-<content-hash>`,
-`xiaozhi-manager-web:web-<content-hash>`, and
-`xiaozhi-manager-assets:assets-<content-hash>`. A Vue-only change no longer
-rebuilds or re-uploads the Java API image or the large static assets image; a
-Java-only change no longer rebuilds the Vue image.
+`xiaozhi-manager-web:web-<content-hash>`. A Vue-only change no longer
+rebuilds or re-uploads the Java API image; a Java-only change no longer
+rebuilds the Vue image.
 
 ## Internal service URLs
 

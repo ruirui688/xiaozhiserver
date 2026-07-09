@@ -273,7 +273,6 @@
   - Dockerfile-server-base-funasr
   - Dockerfile-manager-api
   - Dockerfile-manager-web
-  - Dockerfile-manager-assets
   - scripts/deploy
   - scripts/upgrade
   - scripts/acr-build-push
@@ -301,7 +300,7 @@
   - main/manager-web/src/views/roleConfig.vue
   - docs/deployment/private-docker-release.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改 Dockerfile、Docker Compose、安装脚本、默认模型配置、智能体模板初始化、模型配置下发或 WebSocket 初始化流程，必须保留“源码完整进入私有 Git 仓库，但生产服务器只 sparse-checkout `deploy/production` 最小部署资产；生产服务器只拉取阿里云 ACR 中已发布运行镜像，不在生产端源码构建，也不依赖 Docker Hub；发布脚本必须同时推送 `xiaozhi-server:latest`、`xiaozhi-manager-api:latest`、`xiaozhi-manager-web:latest`、`xiaozhi-manager-assets:latest` 和 Git 短哈希标签；生产日常 `./install` / `./upgrade` 默认拉取 `latest`，短哈希 `VERSION=<sha>` 只用于固定版本部署或回滚；`mysql:8.4`、`redis:8.0` 作为运行时镜像同步到 ACR；服务端 base 必须保留 common/lite/funasr 三层缓存、`base-<依赖哈希>` 缓存标签和 `BUILD_BASE=auto/false/true` 控制；管理端必须保留 manager-api、manager-web、manager-assets 三个拆分镜像和 `api-/web-/assets-<内容哈希>` 缓存标签，避免前端小改动重复构建或拉取 Java API 与大静态资源；服务端镜像必须保留 `SERVER_INSTALL_PROFILE=lite|funasr`、`scripts/acr-build-push-lite`、`scripts/acr-build-push-funasr`、`requirements-docker.txt` 轻量依赖和 `requirements-docker-funasr-extra.txt` 本地 FunASR 追加依赖这两条清晰入口；生产用户只需要记住 `~/work/xiaozhi-deploy` 部署资产目录、`~/xiaozhi-data` 数据目录、`deploy/production/install` 首次部署和 `deploy/production/upgrade` 后续升级；安装脚本主体必须按部署用户运行，运行数据、生成的 compose、`.env`、私有配置、数据库、上传文件默认放在 `~/xiaozhi-data`；容器 bind mount 的 UID/GID 权限修正必须通过一次性 Docker 容器执行，不直接把整个宿主机脚本切到 root；如果当前用户不能直接访问 Docker daemon，脚本使用 `sudo docker`，此时 ACR 凭据必须来自 `sudo docker login` 的 root Docker config；升级输出必须保持摘要式，能看出本次目标版本、上次部署版本、部署资产 commit、最终运行镜像、数据目录、Docker 调用方式和访问地址；生产服务器不执行 pip install、不下载源码依赖、不手工安装 FunASR；FunASR CPU 运行依赖只在 FunASR profile 中由构建机写入 ACR 镜像，SenseVoiceSmall model.pt 优先从构建机本地文件复制进镜像，本地不存在时才下载，且 `.dockerignore` 必须避免普通源码上下文重复传输模型；安装脚本必须在 manager-api 启动后从 MySQL 容器读取 `sys_params.server.secret`，自动写入 `~/xiaozhi-data/data/.config.yaml` 并重启 xiaozhi-server，不要求用户手工复制密钥；Python 容器以 999:999 非 root 用户运行，`~/xiaozhi-data/data` bind mount 必须允许该用户读写，`.config.yaml` 应由 999:999 持有且 0600；manager-api 容器必须允许写入 `uploadfile` 和 `music` bind mount，确保 OTA 固件和音乐上传可落盘；OTA 下载路径校验必须允许 `firmware` 和 `uploadfile` 两个根目录，同时继续阻止路径穿越；默认资源预算必须给 Python 容器至少 2G 内存并允许通过 `~/xiaozhi-data/.env` 覆盖；所有模型字段允许为空；模型缺失时服务可启动但对应能力不可用并记录清晰提示；manager-api 即使运行在 dev profile，CORS 也必须读取 `CORS_ORIGINS` 环境变量，生产 `~/xiaozhi-data/.env` 的 `XIAOZHI_CORS_ORIGINS` 必须包含浏览器实际访问 Origin，例如 `http://公网IP:8002`，否则登录/注册等浏览器 POST 会在进入业务代码前被 Spring 拦截为 HTTP 403”的约定。
+官方同步时的处理规则：如果官方修改 Dockerfile、Docker Compose、安装脚本、默认模型配置、智能体模板初始化、模型配置下发或 WebSocket 初始化流程，必须保留“源码完整进入私有 Git 仓库，但生产服务器只 sparse-checkout `deploy/production` 最小部署资产；生产服务器只拉取阿里云 ACR 中已发布运行镜像，不在生产端源码构建，也不依赖 Docker Hub；发布脚本必须同时推送 `xiaozhi-server:latest`、`xiaozhi-manager-api:latest`、`xiaozhi-manager-web:latest` 和 Git 短哈希标签；生产日常 `./install` / `./upgrade` 默认拉取 `latest`，短哈希 `VERSION=<sha>` 只用于固定版本部署或回滚；`mysql:8.4`、`redis:8.0` 作为运行时镜像同步到 ACR；服务端 base 必须保留 common/lite/funasr 三层缓存、`base-<依赖哈希>` 缓存标签和 `BUILD_BASE=auto/false/true` 控制；管理端必须保留 manager-api、manager-web 两个拆分镜像和 `api-/web-<内容哈希>` 缓存标签；服务端镜像必须保留 `SERVER_INSTALL_PROFILE=lite|funasr`、`scripts/acr-build-push-lite`、`scripts/acr-build-push-funasr`、`requirements-docker.txt` 轻量依赖和 `requirements-docker-funasr-extra.txt` 本地 FunASR 追加依赖这两条清晰入口；生产用户只需要记住 `~/work/xiaozhi-deploy` 部署资产目录、`~/xiaozhi-data` 数据目录、`deploy/production/install` 首次部署和 `deploy/production/upgrade` 后续升级；安装脚本主体必须按部署用户运行，运行数据、生成的 compose、`.env`、私有配置、数据库、上传文件默认放在 `~/xiaozhi-data`；容器 bind mount 的 UID/GID 权限修正必须通过一次性 Docker 容器执行，不直接把整个宿主机脚本切到 root；如果当前用户不能直接访问 Docker daemon，脚本使用 `sudo docker`，此时 ACR 凭据必须来自 `sudo docker login` 的 root Docker config；升级输出必须保持摘要式，能看出本次目标版本、上次部署版本、部署资产 commit、最终运行镜像、数据目录、Docker 调用方式和访问地址；生产服务器不执行 pip install、不下载源码依赖、不手工安装 FunASR；FunASR CPU 运行依赖只在 FunASR profile 中由构建机写入 ACR 镜像，SenseVoiceSmall model.pt 优先从构建机本地文件复制进镜像，本地不存在时才下载，且 `.dockerignore` 必须避免普通源码上下文重复传输模型；安装脚本必须在 manager-api 启动后从 MySQL 容器读取 `sys_params.server.secret`，自动写入 `~/xiaozhi-data/data/.config.yaml` 并重启 xiaozhi-server，不要求用户手工复制密钥；Python 容器以 999:999 非 root 用户运行，`~/xiaozhi-data/data` bind mount 必须允许该用户读写，`.config.yaml` 应由 999:999 持有且 0600；manager-api 容器必须允许写入 `uploadfile` 和 `music` bind mount，确保 OTA 固件和音乐上传可落盘；OTA 下载路径校验必须允许 `firmware` 和 `uploadfile` 两个根目录，同时继续阻止路径穿越；默认资源预算必须给 Python 容器至少 2G 内存并允许通过 `~/xiaozhi-data/.env` 覆盖；所有模型字段允许为空；模型缺失时服务可启动但对应能力不可用并记录清晰提示；manager-api 即使运行在 dev profile，CORS 也必须读取 `CORS_ORIGINS` 环境变量，生产 `~/xiaozhi-data/.env` 的 `XIAOZHI_CORS_ORIGINS` 必须包含浏览器实际访问 Origin，例如 `http://公网IP:8002`，否则登录/注册等浏览器 POST 会在进入业务代码前被 Spring 拦截为 HTTP 403”的约定。
 ```
 
 ## 18. 标准模型存储与运行时契约
@@ -381,22 +380,19 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 官方同步时的处理规则：如果官方修改 Memory provider、聊天记录上报、ConfigController、AgentController、Shiro config、角色首页、模型配置目录、知识库切片配置或数据库迁移，必须保留长期记忆事实层、`managed_memory` 入口和 `/config/memory/**` server-secret 入口；运行时查询失败或超时时必须降级为空记忆，不能阻塞语音回复；`nomem` 模式不得注入长期记忆，且未选择治理型记忆模式时前端不得自动弹出治理记忆专属字段；`maintenance_llm` 只能引用已配置的 LLM/SLM modelId，不能把 DeepSeek 等模型密钥复制到 Memory 配置或记忆表；知识库 LLM 辅助必须通过模型管理中的模型列表选择 `parser_config.llm_model_id`，不得在知识库页面重复保存 API Key、Base URL 或上游模型名；维护模型只能创建 `pending` 候选，不得绕过管理端确认直接写 active fact；管理端删除/归档/确认/拒绝必须写 revision 审计；显式忘记必须写 tombstone 并阻止对应内容继续被主动使用；删除 `summary_memory` 前必须先完成 Java、Vue、Python、文档和迁移的完整兼容替代。
 ```
 
-## 22. 设备对话调试离线可用边界
+## 22. 设备对话调试已移除
 
 ```text
-定制模块：manager-web 设备对话调试弹窗、xiaozhi-server 虚拟调试连接、Dialogue 系统提示词维护、设备 MCP 状态展示
-改动原因：管理端“对话调试”本质是 `manager-debug-*` 虚拟调试会话，用真实设备 MAC 拉取绑定智能体配置来测试文本对话、知识库、普通服务端插件、外部 MCP、人设和模型配置。真实 ESP32 是否在线只应影响设备自身 MCP / IoT / 摄像头 / 音量亮度等硬件工具，不能导致整个对话调试不可用。曾出现调试连接能发送文本但收不到回复的问题，根因是 `Dialogue.update_system_message()` 在持有非重入锁时调用 `put()` 导致首次 system prompt 写入死锁，日志表现为只有“LLM 收到用户消息”，没有后续“LLM 请求已发起”。
+定制模块：manager-web 设备对话调试、Otto舞蹈调试、设备主题生成、manager-api 设备调试接口、xiaozhi-server 虚拟调试连接
+改动原因：2026-07-10 起不再保留管理端设备调试能力。设备管理页不再提供对话调试、Otto 舞蹈调试或设备主题生成入口；manager-web 不再发布 `/generator` 静态生成器；manager-api 不再暴露 `/device/debug/**`、`/device/tools/**`、`/device/otto-debug/**` 调试接口；xiaozhi-server 不再保留 `manager-debug-*` 虚拟调试连接特殊注册逻辑。真实设备 WebSocket、OTA、设备绑定、设备互呼、Device MCP/IoT 运行时能力仍按业务链路保留。
 关键文件：
-  - main/manager-web/src/components/DeviceChatDebugDialog.vue
+  - main/manager-web/src/views/DeviceManagement.vue
   - main/manager-web/src/i18n/zh_CN.js
-  - main/xiaozhi-server/core/utils/dialogue.py
-  - main/xiaozhi-server/tests/test_dialogue.py
   - main/xiaozhi-server/core/device_runtime_registry.py
-  - main/xiaozhi-server/core/api/device_mcp_handler.py
   - main/manager-api/src/main/java/xiaozhi/modules/device/service/impl/DeviceServiceImpl.java
-  - docs/mcp/chat-history-mcp-troubleshooting.md
+  - main/manager-api/src/main/java/xiaozhi/modules/device/controller/DeviceController.java
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改设备调试弹窗、WebSocket 连接初始化、Dialogue、PromptManager、设备 MCP 注册表、设备 MCP HTTP 状态接口或 manager-api 设备调试接口，必须保留以下约定：`manager-debug-*` 调试连接不得注册为真实设备运行时连接，不得覆盖真实设备 MCP/IoT；真实设备未连接时，页面应明确提示“仅设备 MCP 工具不可用”，但仍允许文本、知识库、普通插件、外部 MCP 和智能体配置调试；离线时不要持续轮询设备 MCP 工具列表刷屏，状态轮询可保留以便设备上线后自动恢复工具；`Dialogue.update_system_message()` 不得在持有同一把非重入锁时递归调用 `put()`；调试链路排障时看到“收到 listen / LLM 收到用户消息”但没有“LLM 请求已发起”，应优先检查 LLM 前置准备阶段和 system prompt 写入死锁，而不是误判为真实设备未上线。
+官方同步时的处理规则：如果官方重新引入管理端设备调试、虚拟 WebSocket 调试连接、Otto 调试工作台或设备工具调试接口，默认不合并这些能力；如业务重新需要，必须重新做权限、资源占用、接口暴露和真实设备连接隔离审查。
 ```
 
 ## 23. 登录验证码一次性消费与防重复提交

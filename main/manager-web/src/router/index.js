@@ -61,17 +61,6 @@ const routes = [
       return import('../views/DeviceManagement.vue')
     }
   },
-  {
-    path: '/otto-dance-debug',
-    name: 'OttoDanceDebug',
-    component: function () {
-      return import('../views/OttoDanceDebug.vue')
-    },
-    meta: {
-      requiresAuth: true,
-      title: 'Otto舞蹈调试'
-    }
-  },
   // 添加用户管理路由
   {
     path: '/user-management',

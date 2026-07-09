@@ -68,15 +68,6 @@
                   <el-button size="mini" type="text" @click="handleUnbind(scope.row.device_id)">
                     {{ $t('device.unbind') }}
                   </el-button>
-                  <el-button v-if="isGenerate(scope.row)" size="mini" type="text" @click="handleGenertor(scope.row)">
-                    {{ $t('device.deviceThemeGeneration') }}
-                  </el-button>
-                  <el-button size="mini" type="text" @click="handleDebug(scope.row)">
-                    {{ $t('device.dialogDebug') }}
-                  </el-button>
-                  <el-button v-if="isOttoDevice(scope.row)" size="mini" type="text" @click="handleOttoDanceDebug(scope.row)">
-                    {{ $t('device.ottoDanceDebug') }}
-                  </el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -129,7 +120,6 @@
       @refresh="fetchBindDevices(currentAgentId)" />
     <ManualAddDeviceDialog :visible.sync="manualAddDeviceDialogVisible" :agent-id="currentAgentId"
       @refresh="fetchBindDevices(currentAgentId)" />
-    <DeviceChatDebugDialog :visible.sync="debugDialogVisible" :device="debugDevice" />
     <el-footer>
       <version-footer />
     </el-footer>
@@ -141,7 +131,6 @@ import Api from '@/apis/api';
 import AddDeviceDialog from "@/components/AddDeviceDialog.vue";
 import HeaderBar from "@/components/HeaderBar.vue";
 import ManualAddDeviceDialog from "@/components/ManualAddDeviceDialog.vue";
-import DeviceChatDebugDialog from "@/components/DeviceChatDebugDialog.vue";
 import VersionFooter from "@/components/VersionFooter.vue";
 import MacAddressMask from "@/components/MacAddressMask.vue";
 
@@ -150,7 +139,6 @@ export default {
     HeaderBar,
     AddDeviceDialog,
     ManualAddDeviceDialog,
-    DeviceChatDebugDialog,
     VersionFooter,
     MacAddressMask,
   },
@@ -158,8 +146,6 @@ export default {
     return {
       addDeviceDialogVisible: false,
       manualAddDeviceDialogVisible: false,
-      debugDialogVisible: false,
-      debugDevice: {},
       selectedDeviceId: '',
       searchKeyword: "",
       activeSearchKeyword: "",
@@ -301,23 +287,6 @@ export default {
     handleManualAddDevice() {
       this.manualAddDeviceDialogVisible = true;
     },
-    handleDebug(row) {
-      this.debugDevice = row;
-      this.debugDialogVisible = true;
-    },
-    handleOttoDanceDebug(row) {
-      const route = this.$router.resolve({
-        path: '/otto-dance-debug',
-        query: {
-          deviceId: row.device_id,
-          agentId: this.currentAgentId,
-          model: row.model || '',
-          mac: row.macAddress || '',
-          alias: row.remark || ''
-        }
-      });
-      window.open(route.href, '_blank', 'noopener');
-    },
     submitRemark(row) {
       if (row._submitting) return;
 
@@ -375,13 +344,6 @@ export default {
           }
         });
       });
-    },
-    handleGenertor(row) {
-      const pathname = window.location.pathname;
-      const basePath = pathname.split('/').slice(0, -1).join('/');
-      const url = `${window.location.origin}${basePath}/generator/?deviceId=${row.device_id}`;
-      sessionStorage.setItem('devicePath', window.location.href);
-      window.location.href = url;
     },
     goFirst() {
       this.currentPage = 1;
@@ -517,15 +479,6 @@ export default {
         row.otaSwitch = !row.otaSwitch
         this.$message.error(msg || this.$t('message.error'))
       })
-    },
-    // 判断是否可以生成表情、主题、字体bin文件
-    isGenerate(row) {
-      const version = row.firmwareVersion.replace(/\./g, '');
-      return Number(version) >= 200;
-    },
-    isOttoDevice(row) {
-      const model = String(row.model || '').toLowerCase();
-      return model.includes('otto');
     },
     formatRelativeTime(timestamp) {
       if (!timestamp) return '-';
