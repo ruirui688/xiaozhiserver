@@ -596,27 +596,31 @@ export default {
 
 <style lang="scss" scoped>
 .header {
-  background: #f6fcfe66;
-  border: 1px solid #fff;
-  height: 63px !important;
+  background: rgba(246, 250, 255, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.92);
+  border-bottom-color: rgba(205, 218, 246, 0.75);
+  height: 72px !important;
   min-width: 900px;
   /* 设置最小宽度防止过度压缩 */
   overflow: visible;
+  backdrop-filter: blur(10px);
 }
 
 .header-container {
   display: flex;
-  justify-content: space-between;
   align-items: center;
   height: 100%;
-  padding: 0 10px;
+  gap: 24px;
+  padding: 0 24px;
+  box-sizing: border-box;
 }
 
 .header-left {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-width: 120px;
+  width: 180px;
+  flex: 0 0 180px;
   cursor: pointer;
 }
 
@@ -632,48 +636,65 @@ export default {
 .header-center {
   display: flex;
   align-items: center;
-  gap: 25px;
-  position: absolute;
-  left: 50%;
-  transform: translateX(calc(-50% - 80px));
+  justify-content: center;
+  gap: 18px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .header-right {
   display: flex;
   align-items: center;
-  gap: 7px;
-  min-width: 300px;
+  gap: 12px;
+  flex: 0 0 auto;
   justify-content: flex-end;
+  min-width: 0;
 }
 
 .workspace-select {
-  width: 150px;
+  width: 210px;
   flex-shrink: 0;
+}
+
+.workspace-select::v-deep .el-input__inner {
+  height: 38px;
+  line-height: 38px;
+  border-radius: 6px;
+  border-color: #d8dfed;
+  color: #4a536f;
+  font-size: 14px;
 }
 
 .equipment-management {
-  height: 30px;
-  border-radius: 15px;
-  background: #deeafe;
+  height: 42px;
+  border-radius: 21px;
+  background: rgba(221, 234, 254, 0.82);
   display: flex;
   justify-content: center;
-  font-size: 14px;
-  font-weight: 500;
-  gap: 7px;
+  font-size: 15px;
+  font-weight: 600;
+  gap: 8px;
   color: #3d4566;
-  margin-left: 1px;
   align-items: center;
-  transition: all 0.3s ease;
+  transition: all 0.18s ease;
   cursor: pointer;
   flex-shrink: 0;
   /* 防止导航按钮被压缩 */
-  padding: 0 15px;
+  padding: 0 18px;
   position: relative;
+  white-space: nowrap;
+}
+
+.equipment-management:hover {
+  background: #d5e3ff;
+  transform: translateY(-1px);
 }
 
 .equipment-management.active-tab {
-  background: #5778ff !important;
+  background: linear-gradient(135deg, #4e73ff, #6688ff) !important;
   color: #fff !important;
+  box-shadow: 0 8px 18px rgba(87, 120, 255, 0.22);
 }
 
 .equipment-management img {
@@ -682,10 +703,8 @@ export default {
 }
 
 .search-container {
-  margin-right: 5px;
-  flex: 0.9;
-  min-width: 60px;
-  max-width: none;
+  width: 280px;
+  flex: 0 0 280px;
 }
 
 .search-wrapper {
@@ -760,7 +779,7 @@ export default {
   align-items: center;
   gap: 7px;
   height: 100%;
-  padding: 0 15px;
+  padding: 0 18px;
 }
 
 .search-history-item:hover .clear-item-icon {
@@ -772,22 +791,25 @@ export default {
 }
 
 .custom-search-input>>>.el-input__inner {
-  height: 18px;
-  border-radius: 9px;
+  height: 40px;
+  line-height: 40px;
+  border-radius: 6px;
   background-color: #fff;
-  border: 1px solid #e4e6ef;
-  padding-left: 8px;
-  font-size: 9px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  border: 1px solid #d8dfed;
+  padding-left: 18px;
+  padding-right: 36px;
+  font-size: 14px;
+  color: #4a536f;
+  box-shadow: 0 2px 8px rgba(40, 66, 120, 0.06);
   width: 100%;
 }
 
 .search-icon {
   cursor: pointer;
-  color: #909399;
-  margin-right: 3px;
-  font-size: 9px;
-  line-height: 18px;
+  color: #9aa5bd;
+  margin-right: 6px;
+  font-size: 15px;
+  line-height: 40px;
 }
 
 .custom-search-input::v-deep .el-input__suffix-inner {
@@ -797,33 +819,80 @@ export default {
 }
 
 .avatar-img {
-  width: 21px;
-  height: 21px;
+  width: 30px;
+  height: 30px;
   flex-shrink: 0;
   cursor: pointer;
 }
 
 .el-user-dropdown {
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  max-width: 150px;
+  overflow: hidden;
+  color: #3d4566;
+  font-size: 15px;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 /* 导航文本样式 - 支持中英文换行 */
 .nav-text {
-  white-space: normal;
+  white-space: nowrap;
   text-align: center;
-  max-width: 80px;
   line-height: 1.2;
 }
 
 /* 响应式调整 */
-@media (max-width: 1200px) {
-  .header-center {
+@media (max-width: 1500px) {
+  .header-container {
     gap: 14px;
+    padding: 0 16px;
+  }
+
+  .header-left {
+    width: 150px;
+    flex-basis: 150px;
+  }
+
+  .header-center {
+    gap: 10px;
   }
 
   .equipment-management {
-    min-width: 80px;
-    font-size: 10px;
+    height: 38px;
+    padding: 0 13px;
+    font-size: 13px;
+  }
+
+  .search-container {
+    width: 220px;
+    flex-basis: 220px;
+  }
+
+  .workspace-select {
+    width: 180px;
+  }
+}
+
+@media (max-width: 1200px) {
+  .header-center {
+    gap: 8px;
+  }
+
+  .equipment-management {
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  .search-container {
+    width: 180px;
+    flex-basis: 180px;
+  }
+
+  .workspace-select {
+    width: 155px;
   }
 }
 

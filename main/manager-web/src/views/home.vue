@@ -2,7 +2,7 @@
   <div class="welcome">
     <!-- 公共头部 -->
     <HeaderBar :devices="devices" @search="handleSearch" @search-reset="handleSearchReset" />
-    <el-main style="padding: 20px;display: flex;flex-direction: column;">
+    <el-main class="home-main">
       <div>
         <!-- 首页内容 -->
         <div class="add-device">
@@ -222,13 +222,14 @@ export default {
 
 .add-device {
   height: 195px;
-  border-radius: 15px;
+  border-radius: 18px;
   position: relative;
   overflow: hidden;
   background: linear-gradient(269.62deg,
       #e0e6fd 0%,
       #cce7ff 49.69%,
       #d3d3fe 100%);
+  box-shadow: 0 18px 42px rgba(91, 123, 210, 0.12);
 }
 
 .add-device-bg {
@@ -300,7 +301,13 @@ export default {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
   gap: 30px;
-  padding: 30px 0;
+  padding: 30px 0 20px;
+}
+
+.home-main {
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
 }
 
 /* 在 DeviceItem.vue 的样式中 */
