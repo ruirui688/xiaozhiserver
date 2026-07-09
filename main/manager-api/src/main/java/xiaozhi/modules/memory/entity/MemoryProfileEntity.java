@@ -17,6 +17,7 @@ public class MemoryProfileEntity {
     private String profileId;
     private String agentId;
     private Long userId;
+    private String workspaceId;
     private String scopeType;
     private String scopeId;
     @TableField("profile_json")

@@ -92,6 +92,12 @@
           }" />
           <span class="nav-text">{{ $t("header.addressBook") }}</span>
         </div>
+        <div class="equipment-management"
+          :class="{ 'active-tab': $route.path === '/organization-management' }"
+          @click="handleRouter('organizationManagement')">
+          <i class="el-icon-s-custom"></i>
+          <span class="nav-text">组织管理</span>
+        </div>
         <el-dropdown v-if="userInfo.superAdmin" trigger="click" class="equipment-management more-dropdown" :class="{
           'active-tab':
             $route.path === '/dict-management' ||
@@ -190,6 +196,10 @@
           </div>
         </div>
 
+        <el-select v-model="currentWorkspaceId" class="workspace-select" size="mini" @change="handleWorkspaceChange">
+          <el-option v-for="item in workspaceList" :key="item.id" :label="item.name" :value="item.id" />
+        </el-select>
+
         <img loading="lazy" alt="" src="@/assets/home/avatar.png" class="avatar-img" @click="handleAvatarClick" />
         <span class="el-user-dropdown" @click="handleAvatarClick">
           {{ userInfo.username || "加载中..." }}
@@ -212,6 +222,7 @@
 
 <script>
 import featureManager from "@/utils/featureManager"; // 引入功能管理工具类
+import Api from "@/apis/api";
 import { mapActions, mapState } from "vuex";
 import ChangePasswordDialog from "./ChangePasswordDialog.vue"; // 引入修改密码弹窗组件
 
@@ -233,6 +244,8 @@ export default {
       // 搜索历史相关
       searchHistory: [],
       showHistory: false,
+      workspaceList: [],
+      currentWorkspaceId: localStorage.getItem("currentWorkspaceId") || "",
       SEARCH_HISTORY_KEY: "xiaozhi_search_history",
       MAX_HISTORY_COUNT: 3,
       // Cascader 配置
@@ -248,6 +261,7 @@ export default {
         modelConfig: "/model-config",
         knowledgeBaseManagement: "/knowledge-base-management",
         addressBookManagement: "/address-book-management",
+        organizationManagement: "/organization-management",
         voiceCloneManagement: "/voice-clone-management",
         voiceResourceManagement: "/voice-resource-management",
         paramManagement: "/params-management",
@@ -297,6 +311,7 @@ export default {
     this.loadSearchHistory();
     // 等待featureManager初始化完成后再加载功能状态
     await this.loadFeatureStatus();
+    this.loadWorkspaces();
   },
   //移除事件监听器
   beforeDestroy() {
@@ -305,6 +320,33 @@ export default {
   methods: {
     handleRouter(type) {
       this.$router.push(this.routerPaths[type]);
+    },
+    loadWorkspaces() {
+      Api.workspace.list(({ data }) => {
+        if (data && data.code === 0 && Array.isArray(data.data)) {
+          this.workspaceList = data.data;
+          const exists = this.workspaceList.some(item => item.id === this.currentWorkspaceId);
+          if (!this.currentWorkspaceId || !exists) {
+            const current = this.workspaceList[0];
+            if (current) {
+              this.currentWorkspaceId = current.id;
+              localStorage.setItem("currentWorkspaceId", current.id);
+            }
+          }
+          const selected = this.workspaceList.find(item => item.id === this.currentWorkspaceId);
+          if (selected) {
+            localStorage.setItem("currentWorkspaceCanWrite", selected.canWrite ? "true" : "false");
+          }
+        }
+      });
+    },
+    handleWorkspaceChange(value) {
+      localStorage.setItem("currentWorkspaceId", value);
+      const selected = this.workspaceList.find(item => item.id === value);
+      if (selected) {
+        localStorage.setItem("currentWorkspaceCanWrite", selected.canWrite ? "true" : "false");
+      }
+      window.location.reload();
     },
     // 加载功能状态
     async loadFeatureStatus() {
@@ -602,6 +644,11 @@ export default {
   gap: 7px;
   min-width: 300px;
   justify-content: flex-end;
+}
+
+.workspace-select {
+  width: 150px;
+  flex-shrink: 0;
 }
 
 .equipment-management {

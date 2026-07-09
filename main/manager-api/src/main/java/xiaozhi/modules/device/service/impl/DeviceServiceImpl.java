@@ -71,9 +71,13 @@ import xiaozhi.modules.device.entity.OtaEntity;
 import xiaozhi.modules.device.service.DeviceService;
 import xiaozhi.modules.device.service.OtaService;
 import xiaozhi.modules.device.vo.UserShowDeviceListVO;
+import xiaozhi.modules.agent.dao.AgentDao;
+import xiaozhi.modules.agent.entity.AgentEntity;
 import xiaozhi.modules.security.user.SecurityUser;
 import xiaozhi.modules.sys.service.SysParamsService;
 import xiaozhi.modules.sys.service.SysUserUtilService;
+import xiaozhi.modules.workspace.service.WorkspacePermissionService;
+import xiaozhi.modules.workspace.service.WorkspaceService;
 
 @Slf4j
 @Service
@@ -86,6 +90,9 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
     private final SysParamsService sysParamsService;
     private final RedisUtils redisUtils;
     private final OtaService otaService;
+    private final AgentDao agentDao;
+    private final WorkspaceService workspaceService;
+    private final WorkspacePermissionService workspacePermissionService;
 
     @Async
     public void updateDeviceConnectionInfo(String agentId, String deviceId, String appVersion) {
@@ -138,10 +145,16 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         if (user.getId() == null) {
             throw new RenException(ErrorCode.USER_NOT_LOGIN);
         }
+        AgentEntity agent = agentDao.selectById(agentId);
+        if (agent == null) {
+            throw new RenException(ErrorCode.AGENT_NOT_FOUND);
+        }
+        workspacePermissionService.requireWrite(agent.getWorkspaceId());
 
         Date currentTime = new Date();
         DeviceEntity deviceEntity = new DeviceEntity();
         deviceEntity.setId(deviceId);
+        deviceEntity.setWorkspaceId(agent.getWorkspaceId());
         deviceEntity.setBoard(board);
         deviceEntity.setAgentId(agentId);
         deviceEntity.setAppVersion(appVersion);
@@ -305,8 +318,9 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
 
     @Override
     public List<DeviceEntity> getUserDevices(Long userId, String agentId) {
+        String workspaceId = workspaceService.getCurrentWorkspaceEntity().getId();
         QueryWrapper<DeviceEntity> wrapper = new QueryWrapper<>();
-        wrapper.eq("user_id", userId);
+        wrapper.eq("workspace_id", workspaceId);
         wrapper.eq("agent_id", agentId);
         return baseDao.selectList(wrapper);
     }
@@ -332,13 +346,14 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         if (device == null) {
             return;
         }
+        workspacePermissionService.requireWrite(device.getWorkspaceId());
         if (StringUtils.isNotBlank(device.getAgentId())) {
             // 清除智能体设备数量缓存
             redisUtils.delete(RedisKeys.getAgentDeviceCountById(device.getAgentId()));
         }
 
         UpdateWrapper<DeviceEntity> wrapper = new UpdateWrapper<>();
-        wrapper.eq("user_id", userId);
+        wrapper.eq("workspace_id", device.getWorkspaceId());
         wrapper.eq("id", deviceId);
         baseDao.delete(wrapper);
     }
@@ -553,6 +568,11 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
 
     @Override
     public void manualAddDevice(Long userId, DeviceManualAddDTO dto) {
+        AgentEntity agent = agentDao.selectById(dto.getAgentId());
+        if (agent == null) {
+            throw new RenException(ErrorCode.AGENT_NOT_FOUND);
+        }
+        workspacePermissionService.requireWrite(agent.getWorkspaceId());
         // 检查mac是否已存在
         QueryWrapper<DeviceEntity> wrapper = new QueryWrapper<>();
         wrapper.eq("mac_address", dto.getMacAddress());
@@ -564,6 +584,7 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         DeviceEntity entity = new DeviceEntity();
         entity.setId(dto.getMacAddress());
         entity.setUserId(userId);
+        entity.setWorkspaceId(agent.getWorkspaceId());
         entity.setAgentId(dto.getAgentId());
         entity.setBoard(dto.getBoard());
         entity.setAppVersion(dto.getAppVersion());
@@ -582,9 +603,10 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
 
     @Override
     public List<DeviceEntity> searchDevicesByMacAddress(String macAddress, Long userId) {
+        String workspaceId = workspaceService.getCurrentWorkspaceEntity().getId();
         QueryWrapper<DeviceEntity> wrapper = new QueryWrapper<>();
         wrapper.like("mac_address", macAddress);
-        wrapper.eq("user_id", userId);
+        wrapper.eq("workspace_id", workspaceId);
         return deviceDao.selectList(wrapper);
     }
 
@@ -640,9 +662,10 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
     @Override
     public DeviceDebugInfoDTO getDeviceDebugInfo(Long userId, String deviceId) {
         DeviceEntity device = baseDao.selectById(deviceId);
-        if (device == null || !device.getUserId().equals(userId)) {
+        if (device == null) {
             throw new RenException(ErrorCode.DEVICE_NOT_EXIST);
         }
+        workspacePermissionService.requireWrite(device.getWorkspaceId());
 
         String wsUrl = sysParamsService.getValue(Constant.SERVER_WEBSOCKET, true);
         if (StringUtils.isBlank(wsUrl) || "null".equals(wsUrl)) {
@@ -677,9 +700,10 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
     @Override
     public DeviceDebugStatusDTO getDeviceDebugStatus(Long userId, String deviceId) {
         DeviceEntity device = baseDao.selectById(deviceId);
-        if (device == null || !device.getUserId().equals(userId)) {
+        if (device == null) {
             throw new RenException(ErrorCode.DEVICE_NOT_EXIST);
         }
+        workspacePermissionService.requireWrite(device.getWorkspaceId());
         DeviceDebugStatusDTO runtimeStatus = getDeviceDebugStatusFromRuntime(device);
         if (Boolean.TRUE.equals(runtimeStatus.getRuntimeConnected())) {
             return runtimeStatus;
@@ -1163,12 +1187,7 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         if (device == null) {
             return null;
         }
-
-        // 检查设备是否属于当前用户
-        UserDetail user = SecurityUser.getUser();
-        if (!device.getUserId().equals(user.getId())) {
-            return null;
-        }
+        workspacePermissionService.requireRead(device.getWorkspaceId());
 
         Object runtimeTools = getDeviceToolsFromRuntime(device);
         if (runtimeTools != null) {
@@ -1377,12 +1396,7 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         if (device == null) {
             return null;
         }
-
-        // 检查设备是否属于当前用户
-        UserDetail user = SecurityUser.getUser();
-        if (!device.getUserId().equals(user.getId())) {
-            return null;
-        }
+        workspacePermissionService.requireWrite(device.getWorkspaceId());
 
         Object runtimeResult = callDeviceToolFromRuntime(device, toolName, arguments);
         if (runtimeResult != null) {

@@ -17,7 +17,7 @@ class FeatureManager {
             },
             knowledgeBase: {
                 name: 'feature.knowledgeBase.name',
-                enabled: false,
+                enabled: true,
                 description: 'feature.knowledgeBase.description'
             },
             mcpAccessPoint: {

@@ -25,6 +25,7 @@ import xiaozhi.common.constant.Constant;
 import xiaozhi.common.page.PageData;
 import xiaozhi.common.user.UserDetail;
 import xiaozhi.common.utils.JsonUtils;
+import xiaozhi.common.utils.SpringContextUtils;
 import xiaozhi.modules.agent.dao.AgentDao;
 import xiaozhi.modules.agent.dto.AgentChatHistoryDTO;
 import xiaozhi.modules.agent.dto.AgentChatSessionDTO;
@@ -54,6 +55,7 @@ import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
 import xiaozhi.modules.model.service.impl.ModelRuntimeAssembler;
 import xiaozhi.modules.security.user.SecurityUser;
+import xiaozhi.modules.workspace.service.WorkspaceService;
 
 @Service
 @AllArgsConstructor
@@ -709,6 +711,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         candidate.setCandidateId(MemoryHelper.uuid());
         candidate.setAgentId(agent.getId());
         candidate.setUserId(agent.getUserId());
+        candidate.setWorkspaceId(agent.getWorkspaceId());
         candidate.setScopeType(MemoryHelper.SCOPE_DEVICE);
         candidate.setScopeId(scopeId);
         candidate.setMemoryType(MemoryHelper.normalizeMemoryLabel(json.getStr("memory_type"), "长期记忆"));
@@ -872,6 +875,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         fact.setMemoryId(MemoryHelper.uuid());
         fact.setAgentId(agent.getId());
         fact.setUserId(agent.getUserId());
+        fact.setWorkspaceId(agent.getWorkspaceId());
         fact.setMacAddress(scopeId);
         fact.setScopeType(MemoryHelper.SCOPE_DEVICE);
         fact.setScopeId(scopeId);
@@ -932,6 +936,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         tombstone.setTombstoneId(MemoryHelper.uuid());
         tombstone.setAgentId(agent.getId());
         tombstone.setUserId(agent.getUserId());
+        tombstone.setWorkspaceId(agent.getWorkspaceId());
         tombstone.setScopeType(MemoryHelper.SCOPE_DEVICE);
         tombstone.setScopeId(scopeId);
         tombstone.setPatternText(pattern);
@@ -1327,6 +1332,10 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         revision.setRevisionId(MemoryHelper.uuid());
         revision.setMemoryId(memoryId);
         revision.setAgentId(agentId);
+        AgentEntity agent = agentDao.selectById(agentId);
+        if (agent != null) {
+            revision.setWorkspaceId(agent.getWorkspaceId());
+        }
         revision.setRevisionAction(action);
         revision.setBeforePayload(before);
         revision.setAfterPayload(after);
@@ -1374,10 +1383,14 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         }
         UserDetail user = SecurityUser.getUser();
         if (user != null && user.getSuperAdmin() != null && user.getSuperAdmin() != 1
-                && !user.getId().equals(agent.getUserId())) {
+                && !workspaceService().canRead(agent.getWorkspaceId(), user.getId())) {
             throw new IllegalArgumentException("无权访问该智能体记忆");
         }
         return agent;
+    }
+
+    private WorkspaceService workspaceService() {
+        return SpringContextUtils.getBean(WorkspaceService.class);
     }
 
     private AgentScope resolveScope(String agentId, String macAddress) {

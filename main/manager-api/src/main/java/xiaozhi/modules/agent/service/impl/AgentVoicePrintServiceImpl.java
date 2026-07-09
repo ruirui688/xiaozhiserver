@@ -113,8 +113,7 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
             try {
                 // 删除声纹,按照指定当前登录用户和智能体
                 int row = baseMapper.delete(new LambdaQueryWrapper<AgentVoicePrintEntity>()
-                        .eq(AgentVoicePrintEntity::getId, voicePrintId)
-                        .eq(AgentVoicePrintEntity::getCreator, userId));
+                        .eq(AgentVoicePrintEntity::getId, voicePrintId));
                 if (row != 1) {
                     status.setRollbackOnly(); // 标记事务回滚
                     return false;
@@ -144,8 +143,7 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
     public List<AgentVoicePrintVO> list(Long userId, String agentId) {
         // 按照指定当前登录用户和智能体查找数据
         List<AgentVoicePrintEntity> list = baseMapper.selectList(new LambdaQueryWrapper<AgentVoicePrintEntity>()
-                .eq(AgentVoicePrintEntity::getAgentId, agentId)
-                .eq(AgentVoicePrintEntity::getCreator, userId));
+                .eq(AgentVoicePrintEntity::getAgentId, agentId));
         return list.stream().map(entity -> {
             // 遍历转换成AgentVoicePrintVO类型
             return ConvertUtils.sourceToTarget(entity, AgentVoicePrintVO.class);
@@ -157,8 +155,7 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
     public boolean update(Long userId, AgentVoicePrintUpdateDTO dto) {
         AgentVoicePrintEntity agentVoicePrintEntity = baseMapper
                 .selectOne(new LambdaQueryWrapper<AgentVoicePrintEntity>()
-                        .eq(AgentVoicePrintEntity::getId, dto.getId())
-                        .eq(AgentVoicePrintEntity::getCreator, userId));
+                        .eq(AgentVoicePrintEntity::getId, dto.getId()));
         if (agentVoicePrintEntity == null) {
             return false;
         }
@@ -212,6 +209,12 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
                 throw new RenException(ErrorCode.VOICEPRINT_UPDATE_ADMIN_ERROR);
             }
         }));
+    }
+
+    @Override
+    public String getAgentIdByVoicePrintId(String voicePrintId) {
+        AgentVoicePrintEntity entity = baseMapper.selectById(voicePrintId);
+        return entity == null ? null : entity.getAgentId();
     }
 
     /**

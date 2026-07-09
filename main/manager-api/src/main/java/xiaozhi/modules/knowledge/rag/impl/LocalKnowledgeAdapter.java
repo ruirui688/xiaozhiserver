@@ -602,10 +602,14 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
                 .eq("document_id", documentId));
         boolean useTimestampSuffix = (deleted == 0 && !chunks.isEmpty());
         long timestamp = useTimestampSuffix ? System.currentTimeMillis() : 0;
+        KnowledgeBaseEntity dataset = knowledgeBaseDao.selectOne(
+                new QueryWrapper<KnowledgeBaseEntity>().eq("dataset_id", datasetId).last("LIMIT 1"));
+        String workspaceId = dataset == null ? null : dataset.getWorkspaceId();
         int index = 0;
         for (LocalChunk chunk : chunks) {
             KnowledgeChunkEntity entity = new KnowledgeChunkEntity();
             entity.setDatasetId(datasetId);
+            entity.setWorkspaceId(workspaceId);
             entity.setDocumentId(documentId);
             entity.setChunkId(documentId + "_" + index + (useTimestampSuffix ? "_" + timestamp : ""));
             entity.setContent(chunk.getContent());

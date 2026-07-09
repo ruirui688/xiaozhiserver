@@ -17,10 +17,12 @@ import xiaozhi.common.exception.ErrorCode;
 import xiaozhi.common.user.UserDetail;
 import xiaozhi.common.utils.Result;
 import xiaozhi.modules.agent.dto.McpNoCodeToolDTO;
+import xiaozhi.modules.agent.entity.AgentEntity;
 import xiaozhi.modules.agent.service.AgentMcpAccessPointService;
 import xiaozhi.modules.agent.service.AgentMcpNoCodeToolService;
 import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.security.user.SecurityUser;
+import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 
 @Tag(name = "智能体Mcp接入点管理")
 @RequiredArgsConstructor
@@ -30,6 +32,7 @@ public class AgentMcpAccessPointController {
     private final AgentMcpAccessPointService agentMcpAccessPointService;
     private final AgentMcpNoCodeToolService agentMcpNoCodeToolService;
     private final AgentService agentService;
+    private final WorkspacePermissionService workspacePermissionService;
 
     /**
      * 获取智能体的Mcp接入点地址
@@ -91,6 +94,11 @@ public class AgentMcpAccessPointController {
         if (!agentService.checkAgentPermission(agentId, user.getId())) {
             return new Result<Void>().error(ErrorCode.MCP_ACCESS_POINT_TOOLS_LIST_NO_PERMISSION);
         }
+        AgentEntity agent = agentService.getAgentById(agentId);
+        if (agent == null) {
+            return new Result<Void>().error(ErrorCode.AGENT_NOT_FOUND);
+        }
+        workspacePermissionService.requireWrite(agent.getWorkspaceId());
         agentMcpNoCodeToolService.saveToolsByAgentId(agentId, tools);
         return new Result<Void>().ok(null);
     }

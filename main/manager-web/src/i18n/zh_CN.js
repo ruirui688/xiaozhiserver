@@ -680,7 +680,7 @@ export default {
   // 用户信息
   'user.info': '用户信息',
   'user.username': '用户名',
-  'user.mobile': '手机号',
+  'user.mobile': '用户名',
   'user.userid': '用户Id',
   'user.deviceCount': '设备数量',
   'user.createDate': '注册时间',
@@ -713,7 +713,7 @@ export default {
   'user.confirmStatusChange': '确定要{action}选中的{count}个用户吗？',
   'user.statusChangeSuccess': '成功{action}{count}个用户',
   'user.invalidUserId': '存在无效的用户ID',
-  'user.searchPhone': '请输入手机号码查询',
+  'user.searchPhone': '请输入用户名查询',
   'user.search': '搜索',
 
   // 字段管理页面文本

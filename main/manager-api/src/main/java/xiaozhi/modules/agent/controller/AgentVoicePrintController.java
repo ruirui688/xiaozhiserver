@@ -22,10 +22,13 @@ import xiaozhi.common.exception.RenException;
 import xiaozhi.common.utils.Result;
 import xiaozhi.modules.agent.dto.AgentVoicePrintSaveDTO;
 import xiaozhi.modules.agent.dto.AgentVoicePrintUpdateDTO;
+import xiaozhi.modules.agent.entity.AgentEntity;
+import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.agent.service.AgentVoicePrintService;
 import xiaozhi.modules.agent.vo.AgentVoicePrintVO;
 import xiaozhi.modules.security.user.SecurityUser;
 import xiaozhi.modules.sys.service.SysParamsService;
+import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 
 @Tag(name = "智能体声纹管理")
 @AllArgsConstructor
@@ -34,11 +37,14 @@ import xiaozhi.modules.sys.service.SysParamsService;
 public class AgentVoicePrintController {
     private final AgentVoicePrintService agentVoicePrintService;
     private final SysParamsService sysParamsService;
+    private final AgentService agentService;
+    private final WorkspacePermissionService workspacePermissionService;
 
     @PostMapping
     @Operation(summary = "创建智能体的声纹")
     @RequiresPermissions("sys:role:normal")
     public Result<Void> save(@RequestBody @Valid AgentVoicePrintSaveDTO dto) {
+        requireAgentWrite(dto.getAgentId());
         boolean b = agentVoicePrintService.insert(dto);
         if (b) {
             return new Result<>();
@@ -50,6 +56,7 @@ public class AgentVoicePrintController {
     @Operation(summary = "更新智能体的对应声纹")
     @RequiresPermissions("sys:role:normal")
     public Result<Void> update(@RequestBody @Valid AgentVoicePrintUpdateDTO dto) {
+        requireAgentWrite(agentVoicePrintService.getAgentIdByVoicePrintId(dto.getId()));
         Long userId = SecurityUser.getUserId();
         boolean b = agentVoicePrintService.update(userId, dto);
         if (b) {
@@ -62,6 +69,7 @@ public class AgentVoicePrintController {
     @Operation(summary = "删除智能体对应声纹")
     @RequiresPermissions("sys:role:normal")
     public Result<Void> delete(@PathVariable String id) {
+        requireAgentWrite(agentVoicePrintService.getAgentIdByVoicePrintId(id));
         Long userId = SecurityUser.getUserId();
         // 先删除关联的设备
         boolean delete = agentVoicePrintService.delete(userId, id);
@@ -80,8 +88,22 @@ public class AgentVoicePrintController {
             throw new RenException(ErrorCode.VOICEPRINT_API_NOT_CONFIGURED);
         }
         Long userId = SecurityUser.getUserId();
+        if (!agentService.checkAgentPermission(id, userId)) {
+            throw new RenException(ErrorCode.NO_PERMISSION);
+        }
         List<AgentVoicePrintVO> list = agentVoicePrintService.list(userId, id);
         return new Result<List<AgentVoicePrintVO>>().ok(list);
+    }
+
+    private void requireAgentWrite(String agentId) {
+        if (StringUtils.isBlank(agentId)) {
+            throw new RenException(ErrorCode.NO_PERMISSION);
+        }
+        AgentEntity agent = agentService.getAgentById(agentId);
+        if (agent == null) {
+            throw new RenException(ErrorCode.AGENT_NOT_FOUND);
+        }
+        workspacePermissionService.requireWrite(agent.getWorkspaceId());
     }
 
 }

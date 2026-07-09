@@ -23,7 +23,6 @@ import xiaozhi.common.exception.RenException;
 import xiaozhi.common.page.PageData;
 import xiaozhi.common.service.impl.BaseServiceImpl;
 import xiaozhi.common.utils.ConvertUtils;
-import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.device.service.DeviceService;
 import xiaozhi.modules.security.password.PasswordUtils;
 import xiaozhi.modules.sys.dao.SysUserDao;
@@ -35,6 +34,7 @@ import xiaozhi.modules.sys.enums.SuperAdminEnum;
 import xiaozhi.modules.sys.service.SysParamsService;
 import xiaozhi.modules.sys.service.SysUserService;
 import xiaozhi.modules.sys.vo.AdminPageUserVO;
+import xiaozhi.modules.workspace.service.WorkspaceService;
 
 /**
  * 系统用户
@@ -46,9 +46,9 @@ public class SysUserServiceImpl extends BaseServiceImpl<SysUserDao, SysUserEntit
 
     private final DeviceService deviceService;
 
-    private final AgentService agentService;
-
     private final SysParamsService sysParamsService;
+
+    private final WorkspaceService workspaceService;
 
     @Override
     public SysUserDTO getByUsername(String username) {
@@ -150,12 +150,9 @@ public class SysUserServiceImpl extends BaseServiceImpl<SysUserDao, SysUserEntit
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deleteById(Long id) {
+        workspaceService.prepareUserDeletion(id);
         // 删除用户
         baseDao.deleteById(id);
-        // 删除设备
-        deviceService.deleteByUserId(id);
-        // 删除智能体
-        agentService.deleteAgentByUserId(id);
     }
 
     @Override

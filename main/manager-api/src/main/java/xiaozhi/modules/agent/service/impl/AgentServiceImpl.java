@@ -60,6 +60,9 @@ import xiaozhi.modules.model.service.ModelProviderService;
 import xiaozhi.modules.security.user.SecurityUser;
 import xiaozhi.modules.sys.enums.SuperAdminEnum;
 import xiaozhi.modules.timbre.service.TimbreService;
+import xiaozhi.modules.workspace.entity.WorkspaceEntity;
+import xiaozhi.modules.workspace.service.WorkspacePermissionService;
+import xiaozhi.modules.workspace.service.WorkspaceService;
 
 @Service
 @AllArgsConstructor
@@ -78,6 +81,8 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
     private final AgentContextProviderService agentContextProviderService;
     private final AgentTagService agentTagService;
     private final CorrectWordFileService correctWordFileService;
+    private final WorkspaceService workspaceService;
+    private final WorkspacePermissionService workspacePermissionService;
 
     @Override
     public PageData<AgentEntity> adminAgentList(Map<String, Object> params) {
@@ -145,8 +150,9 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
 
     @Override
     public List<AgentDTO> getUserAgents(Long userId, String keyword, String searchType) {
+        String workspaceId = workspaceService.getCurrentWorkspaceEntity().getId();
         QueryWrapper<AgentEntity> queryWrapper = new QueryWrapper<>();
-        queryWrapper.eq("user_id", userId).orderByDesc("created_at");
+        queryWrapper.eq("workspace_id", workspaceId).orderByDesc("created_at");
 
         if (StringUtils.isNotBlank(keyword)) {
             queryWrapper.and(w -> {
@@ -334,8 +340,10 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
             return true;
         }
 
-        // 检查是否是智能体的所有者
-        return userId.equals(agent.getUserId());
+        if (StringUtils.isBlank(agent.getWorkspaceId())) {
+            return userId.equals(agent.getUserId());
+        }
+        return workspaceService.canRead(agent.getWorkspaceId(), userId);
     }
 
     // 根据id更新智能体信息
@@ -347,6 +355,7 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
         if (existingEntity == null) {
             throw new RenException(ErrorCode.AGENT_NOT_FOUND);
         }
+        workspacePermissionService.requireWrite(existingEntity.getWorkspaceId());
 
         // 只更新提供的非空字段
         if (dto.getAgentName() != null) {
@@ -596,7 +605,9 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
 
         // 设置用户ID和创建者信息
         UserDetail user = SecurityUser.getUser();
+        WorkspaceEntity workspace = workspaceService.getCurrentWorkspaceEntity();
         entity.setUserId(user.getId());
+        entity.setWorkspaceId(workspace.getId());
         entity.setCreator(user.getId());
         entity.setCreatedAt(new Date());
 

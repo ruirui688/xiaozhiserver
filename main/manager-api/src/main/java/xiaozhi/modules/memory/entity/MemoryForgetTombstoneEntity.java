@@ -16,6 +16,7 @@ public class MemoryForgetTombstoneEntity {
     private String tombstoneId;
     private String agentId;
     private Long userId;
+    private String workspaceId;
     private String scopeType;
     private String scopeId;
     private String patternText;

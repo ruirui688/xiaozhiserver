@@ -25,6 +25,9 @@ public class KnowledgeChunkEntity implements Serializable {
     @Schema(description = "知识库ID")
     private String datasetId;
 
+    @Schema(description = "所属工作空间ID")
+    private String workspaceId;
+
     @Schema(description = "文档ID")
     private String documentId;
 

@@ -29,6 +29,7 @@ import xiaozhi.modules.knowledge.service.KnowledgeBaseService;
 import xiaozhi.modules.knowledge.service.KnowledgeManagerService;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.security.user.SecurityUser;
+import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 
 @AllArgsConstructor
 @RestController
@@ -38,6 +39,7 @@ public class KnowledgeBaseController {
 
     private final KnowledgeBaseService knowledgeBaseService;
     private final KnowledgeManagerService knowledgeManagerService;
+    private final WorkspacePermissionService workspacePermissionService;
 
     @GetMapping
     @Operation(summary = "分页查询知识库列表")
@@ -61,15 +63,8 @@ public class KnowledgeBaseController {
     @Operation(summary = "根据知识库ID获取知识库详情")
     @RequiresPermissions("sys:role:normal")
     public Result<KnowledgeBaseDTO> getByDatasetId(@PathVariable("dataset_id") String datasetId) {
-        // 获取当前登录用户ID
-        Long currentUserId = SecurityUser.getUserId();
-
         KnowledgeBaseDTO knowledgeBaseDTO = knowledgeBaseService.getByDatasetId(datasetId);
-
-        // 检查权限：用户只能查看自己创建的知识库
-        if (knowledgeBaseDTO.getCreator() == null || !knowledgeBaseDTO.getCreator().equals(currentUserId)) {
-            throw new RenException(ErrorCode.NO_PERMISSION);
-        }
+        workspacePermissionService.requireRead(knowledgeBaseDTO.getWorkspaceId());
 
         return new Result<KnowledgeBaseDTO>().ok(knowledgeBaseDTO);
     }
@@ -87,16 +82,9 @@ public class KnowledgeBaseController {
     @RequiresPermissions("sys:role:normal")
     public Result<KnowledgeBaseDTO> update(@PathVariable("dataset_id") String datasetId,
             @RequestBody @Validated KnowledgeBaseDTO knowledgeBaseDTO) {
-        // 获取当前登录用户ID
-        Long currentUserId = SecurityUser.getUserId();
-
         // 先获取现有知识库信息以检查权限
         KnowledgeBaseDTO existingKnowledgeBase = knowledgeBaseService.getByDatasetId(datasetId);
-
-        // 检查权限：用户只能更新自己创建的知识库
-        if (existingKnowledgeBase.getCreator() == null || !existingKnowledgeBase.getCreator().equals(currentUserId)) {
-            throw new RenException(ErrorCode.NO_PERMISSION);
-        }
+        workspacePermissionService.requireWrite(existingKnowledgeBase.getWorkspaceId());
 
         // [FIX] 注入 ID，防止 Service 层找不到记录
         knowledgeBaseDTO.setId(existingKnowledgeBase.getId());
@@ -110,16 +98,9 @@ public class KnowledgeBaseController {
     @Parameter(name = "dataset_id", description = "知识库ID", required = true)
     @RequiresPermissions("sys:role:normal")
     public Result<Void> delete(@PathVariable("dataset_id") String datasetId) {
-        // 获取当前登录用户ID
-        Long currentUserId = SecurityUser.getUserId();
-
         // 先获取现有知识库信息以检查权限
         KnowledgeBaseDTO existingKnowledgeBase = knowledgeBaseService.getByDatasetId(datasetId);
-
-        // 检查权限：用户只能删除自己创建的知识库
-        if (existingKnowledgeBase.getCreator() == null || !existingKnowledgeBase.getCreator().equals(currentUserId)) {
-            throw new RenException(ErrorCode.NO_PERMISSION);
-        }
+        workspacePermissionService.requireWrite(existingKnowledgeBase.getWorkspaceId());
 
         // [Architecture Fix] 通过编排层级联删除，防止孤儿数据并解决循环依赖
         knowledgeManagerService.deleteDatasetWithFiles(datasetId);
@@ -135,17 +116,12 @@ public class KnowledgeBaseController {
             throw new RenException(ErrorCode.PARAMS_GET_ERROR);
         }
 
-        // 获取当前登录用户ID
-        Long currentUserId = SecurityUser.getUserId();
         List<String> idList = Arrays.asList(ids.split(","));
         List<KnowledgeBaseDTO> knowledgeBaseDTOs = Optional.ofNullable(knowledgeBaseService.getByDatasetIdList(idList))
                 .orElseGet(ArrayList::new);
         if (ToolUtil.isNotEmpty(knowledgeBaseDTOs)) {
             knowledgeBaseDTOs.forEach(item -> {
-                // 检查权限：用户只能删除自己创建的知识库
-                if (item.getCreator() == null || !item.getCreator().equals(currentUserId)) {
-                    throw new RenException(ErrorCode.NO_PERMISSION);
-                }
+                workspacePermissionService.requireWrite(item.getWorkspaceId());
                 // [Architecture Fix] 通过编排层级联删除
                 knowledgeManagerService.deleteDatasetWithFiles(item.getDatasetId());
             });
