@@ -28,17 +28,7 @@
           </div>
         </div>
         <div class="device-list-container">
-          <template v-if="isLoading">
-            <div v-for="i in skeletonCount" :key="'skeleton-' + i" class="skeleton-item">
-              <div class="skeleton-image"></div>
-              <div class="skeleton-content">
-                <div class="skeleton-line"></div>
-                <div class="skeleton-line-short"></div>
-              </div>
-            </div>
-          </template>
-
-          <template v-else>
+          <template v-if="!isLoading">
             <DeviceItem v-for="(item, index) in devices" :key="index" :device="item" :feature-status="featureStatus" 
               :can-write="canWrite"
               @configure="goToRoleConfig" @deviceManage="handleDeviceManage" @delete="handleDeleteAgent" 
@@ -76,7 +66,6 @@ export default {
       isSearching: false,
       searchRegex: null,
       isLoading: true,
-      skeletonCount: localStorage.getItem('skeletonCount') || 8,
       showChatHistory: false,
       currentAgentId: '',
       currentAgentName: '',
@@ -172,12 +161,6 @@ export default {
             ...item,
             agentId: item.id
           }));
-
-          // 动态设置骨架屏数量（可选）
-          this.skeletonCount = Math.min(
-            Math.max(this.originalDevices.length, 3), // 最少3个
-            10 // 最多10个
-          );
 
           this.handleSearchReset();
         }
@@ -337,65 +320,4 @@ export default {
   /* 居中显示 */
 }
 
-/* 骨架屏动画 */
-@keyframes shimmer {
-  100% {
-    transform: translateX(100%);
-  }
-}
-
-.skeleton-item {
-  background: #fff;
-  border-radius: 8px;
-  padding: 20px;
-  height: 120px;
-  position: relative;
-  overflow: hidden;
-  margin-bottom: 20px;
-}
-
-.skeleton-image {
-  width: 80px;
-  height: 80px;
-  background: #f0f2f5;
-  border-radius: 4px;
-  float: left;
-  position: relative;
-  overflow: hidden;
-}
-
-.skeleton-content {
-  margin-left: 100px;
-}
-
-.skeleton-line {
-  height: 16px;
-  background: #f0f2f5;
-  border-radius: 4px;
-  margin-bottom: 12px;
-  width: 70%;
-  position: relative;
-  overflow: hidden;
-}
-
-.skeleton-line-short {
-  height: 12px;
-  background: #f0f2f5;
-  border-radius: 4px;
-  width: 50%;
-}
-
-.skeleton-item::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 50%;
-  height: 100%;
-  background: linear-gradient(90deg,
-      rgba(255, 255, 255, 0),
-      rgba(255, 255, 255, 0.3),
-      rgba(255, 255, 255, 0));
-  animation: shimmer 1.5s infinite;
-}
 </style>
