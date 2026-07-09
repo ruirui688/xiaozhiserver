@@ -17,6 +17,7 @@ public class MemorySourceEventEntity {
     private String eventId;
     private String agentId;
     private Long userId;
+    private String workspaceId;
     private String macAddress;
     private String sessionId;
     private String scopeType;

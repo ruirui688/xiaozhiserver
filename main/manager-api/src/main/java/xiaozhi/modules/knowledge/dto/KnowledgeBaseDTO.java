@@ -23,6 +23,9 @@ public class KnowledgeBaseDTO implements Serializable {
     @Schema(description = "RAG模型配置ID")
     private String ragModelId;
 
+    @Schema(description = "所属工作空间ID")
+    private String workspaceId;
+
     @Schema(description = "知识库名称")
     private String name;
 

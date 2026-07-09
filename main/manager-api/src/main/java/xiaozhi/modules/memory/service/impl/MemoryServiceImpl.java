@@ -19,6 +19,7 @@ import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import xiaozhi.common.user.UserDetail;
 import xiaozhi.common.utils.JsonUtils;
+import xiaozhi.common.utils.SpringContextUtils;
 import xiaozhi.modules.agent.dao.AgentDao;
 import xiaozhi.modules.agent.entity.AgentEntity;
 import xiaozhi.modules.device.dao.DeviceDao;
@@ -52,6 +53,7 @@ import xiaozhi.modules.memory.vo.MemoryDashboardVO;
 import xiaozhi.modules.memory.vo.MemoryQueryVO;
 import xiaozhi.modules.memory.vo.MemoryRebuildResultVO;
 import xiaozhi.modules.security.user.SecurityUser;
+import xiaozhi.modules.workspace.service.WorkspaceService;
 
 @Service
 @AllArgsConstructor
@@ -89,6 +91,7 @@ public class MemoryServiceImpl implements MemoryService {
         event.setEventId(eventId);
         event.setAgentId(scope.agent.getId());
         event.setUserId(scope.agent.getUserId());
+        event.setWorkspaceId(scope.agent.getWorkspaceId());
         event.setMacAddress(dto.getMacAddress());
         event.setSessionId(dto.getSessionId());
         event.setScopeType(MemoryHelper.SCOPE_DEVICE);
@@ -308,10 +311,14 @@ public class MemoryServiceImpl implements MemoryService {
         }
         UserDetail user = SecurityUser.getUser();
         if (user != null && user.getSuperAdmin() != null && user.getSuperAdmin() != 1
-                && !user.getId().equals(agent.getUserId())) {
+                && !workspaceService().canRead(agent.getWorkspaceId(), user.getId())) {
             throw new IllegalArgumentException("无权访问该智能体记忆");
         }
         return agent;
+    }
+
+    private WorkspaceService workspaceService() {
+        return SpringContextUtils.getBean(WorkspaceService.class);
     }
 
     private void writeRevision(String agentId, String memoryId, String action, String before, String after,
@@ -320,6 +327,10 @@ public class MemoryServiceImpl implements MemoryService {
         revision.setRevisionId(MemoryHelper.uuid());
         revision.setMemoryId(memoryId);
         revision.setAgentId(agentId);
+        AgentEntity agent = agentDao.selectById(agentId);
+        if (agent != null) {
+            revision.setWorkspaceId(agent.getWorkspaceId());
+        }
         revision.setRevisionAction(action);
         revision.setBeforePayload(before);
         revision.setAfterPayload(after);
@@ -431,6 +442,7 @@ public class MemoryServiceImpl implements MemoryService {
         fact.setMemoryId(MemoryHelper.uuid());
         fact.setAgentId(scope.agent.getId());
         fact.setUserId(scope.agent.getUserId());
+        fact.setWorkspaceId(scope.agent.getWorkspaceId());
         fact.setMacAddress(scope.scopeId);
         fact.setScopeType(MemoryHelper.SCOPE_DEVICE);
         fact.setScopeId(scope.scopeId);

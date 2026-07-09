@@ -31,12 +31,17 @@ import xiaozhi.modules.device.dto.DeviceRegisterDTO;
 import xiaozhi.modules.device.dto.DeviceToolsCallReqDTO;
 import xiaozhi.modules.device.dto.DeviceUnBindDTO;
 import xiaozhi.modules.device.dto.DeviceUpdateDTO;
+import xiaozhi.modules.device.dto.OttoDebugConfigDTO;
+import xiaozhi.modules.device.dto.OttoDebugConnectDTO;
+import xiaozhi.modules.device.dto.OttoDebugToolsReqDTO;
 import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.device.service.DeviceAddressBookService;
 import xiaozhi.modules.device.service.DeviceService;
+import xiaozhi.modules.device.service.OttoDebugService;
 import xiaozhi.modules.device.vo.UserShowDeviceListVO;
 import xiaozhi.modules.security.user.SecurityUser;
 import xiaozhi.modules.sys.service.SysParamsService;
+import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 
 @Tag(name = "设备管理")
 @RestController
@@ -44,15 +49,20 @@ import xiaozhi.modules.sys.service.SysParamsService;
 public class DeviceController {
     private final DeviceService deviceService;
     private final DeviceAddressBookService deviceAddressBookService;
+    private final OttoDebugService ottoDebugService;
     private final RedisUtils redisUtils;
     private final SysParamsService sysParamsService;
+    private final WorkspacePermissionService workspacePermissionService;
 
     public DeviceController(DeviceService deviceService, DeviceAddressBookService deviceAddressBookService,
-            RedisUtils redisUtils, SysParamsService sysParamsService) {
+            OttoDebugService ottoDebugService, RedisUtils redisUtils, SysParamsService sysParamsService,
+            WorkspacePermissionService workspacePermissionService) {
         this.deviceService = deviceService;
         this.deviceAddressBookService = deviceAddressBookService;
+        this.ottoDebugService = ottoDebugService;
         this.redisUtils = redisUtils;
         this.sysParamsService = sysParamsService;
+        this.workspacePermissionService = workspacePermissionService;
     }
 
     @PostMapping("/bind/{agentId}/{deviceCode}")
@@ -122,9 +132,7 @@ public class DeviceController {
             return new Result<Void>().error("设备不存在");
         }
         UserDetail user = SecurityUser.getUser();
-        if (!entity.getUserId().equals(user.getId())) {
-            return new Result<Void>().error("设备不存在");
-        }
+        workspacePermissionService.requireWrite(entity.getWorkspaceId());
         BeanUtils.copyProperties(deviceUpdateDTO, entity);
         deviceService.updateById(entity);
         return new Result<Void>();
@@ -185,6 +193,71 @@ public class DeviceController {
         Result<Object> response = new Result<Object>();
         response.setMsg("Tools called successfully");
         return response.ok(result);
+    }
+
+    @PostMapping("/otto-debug/{deviceId}/connect")
+    @Operation(summary = "连接Otto舞蹈调试端")
+    @RequiresPermissions("sys:role:normal")
+    public Result<Object> connectOttoDebug(@PathVariable String deviceId,
+            @Valid @RequestBody OttoDebugConnectDTO request) {
+        UserDetail user = SecurityUser.getUser();
+        return new Result<Object>().ok(ottoDebugService.connect(user.getId(), deviceId, request.getHost()));
+    }
+
+    @PostMapping("/otto-debug/{deviceId}/snapshot")
+    @Operation(summary = "获取Otto舞蹈调试快照")
+    @RequiresPermissions("sys:role:normal")
+    public Result<Object> getOttoDebugSnapshot(@PathVariable String deviceId) {
+        UserDetail user = SecurityUser.getUser();
+        return new Result<Object>().ok(ottoDebugService.snapshot(user.getId(), deviceId));
+    }
+
+    @PostMapping("/otto-debug/{deviceId}/tools")
+    @Operation(summary = "获取Otto调试工具列表")
+    @RequiresPermissions("sys:role:normal")
+    public Result<Object> getOttoDebugTools(@PathVariable String deviceId,
+            @RequestBody OttoDebugToolsReqDTO request) {
+        UserDetail user = SecurityUser.getUser();
+        return new Result<Object>().ok(
+                ottoDebugService.listTools(user.getId(), deviceId, request.getCursor(), request.getLimit()));
+    }
+
+    @PostMapping("/otto-debug/{deviceId}/tool-call")
+    @Operation(summary = "调用Otto调试工具")
+    @RequiresPermissions("sys:role:normal")
+    public Result<Object> callOttoDebugTool(@PathVariable String deviceId,
+            @Valid @RequestBody DeviceToolsCallReqDTO request) {
+        UserDetail user = SecurityUser.getUser();
+        return new Result<Object>().ok(
+                ottoDebugService.callTool(user.getId(), deviceId, request.getName(), request.getArguments()));
+    }
+
+    @PostMapping("/otto-debug/{deviceId}/tool-call-fast")
+    @Operation(summary = "快速下发Otto调试工具")
+    @RequiresPermissions("sys:role:normal")
+    public Result<Object> callOttoDebugToolFast(@PathVariable String deviceId,
+            @Valid @RequestBody DeviceToolsCallReqDTO request) {
+        UserDetail user = SecurityUser.getUser();
+        return new Result<Object>().ok(
+                ottoDebugService.callToolFast(user.getId(), deviceId, request.getName(), request.getArguments()));
+    }
+
+    @GetMapping("/otto-debug/{deviceId}/config")
+    @Operation(summary = "获取Otto调试配置")
+    @RequiresPermissions("sys:role:normal")
+    public Result<Object> getOttoDebugConfig(@PathVariable String deviceId) {
+        UserDetail user = SecurityUser.getUser();
+        return new Result<Object>().ok(ottoDebugService.getConfig(user.getId(), deviceId));
+    }
+
+    @PostMapping("/otto-debug/{deviceId}/config")
+    @Operation(summary = "设置Otto调试配置")
+    @RequiresPermissions("sys:role:normal")
+    public Result<Object> setOttoDebugConfig(@PathVariable String deviceId,
+            @Valid @RequestBody OttoDebugConfigDTO request) {
+        UserDetail user = SecurityUser.getUser();
+        return new Result<Object>().ok(
+                ottoDebugService.setConfig(user.getId(), deviceId, request.getKey(), request.getValue()));
     }
 
     @GetMapping("/address-book/{macAddress}")

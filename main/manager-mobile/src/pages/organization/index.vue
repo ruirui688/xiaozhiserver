@@ -1,0 +1,404 @@
+<route lang="jsonc" type="page">
+{
+  "layout": "default",
+  "style": {
+    "navigationBarTitleText": "组织管理",
+    "navigationStyle": "custom"
+  }
+}
+</route>
+
+<script lang="ts" setup>
+import type { Workspace, WorkspaceMember, WorkspaceRole } from '@/api/workspace'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useToast } from 'wot-design-uni'
+import {
+  acceptWorkspaceInvitation,
+  getWorkspaceList,
+  getWorkspaceMembers,
+  inviteWorkspaceMember,
+  leaveWorkspace,
+  removeWorkspaceMember,
+  updateWorkspaceMemberRole,
+} from '@/api/workspace'
+import { useUserStore } from '@/store'
+
+defineOptions({
+  name: 'OrganizationPage',
+})
+
+const maxMembers = 5
+const toast = useToast()
+const userStore = useUserStore()
+
+const loading = ref(false)
+const memberLoading = ref(false)
+const workspaceList = ref<Workspace[]>([])
+const currentWorkspaceId = ref(uni.getStorageSync('currentWorkspaceId') || '')
+const members = ref<WorkspaceMember[]>([])
+const inviteCode = ref('')
+const lastInviteCode = ref('')
+const showInvitePanel = ref(false)
+const inviteForm = reactive({
+  username: '',
+  role: 'MEMBER' as WorkspaceRole,
+})
+
+const currentWorkspace = computed(() => {
+  return workspaceList.value.find(item => item.id === currentWorkspaceId.value)
+})
+
+const canWrite = computed(() => !!currentWorkspace.value?.canWrite)
+const isOwner = computed(() => currentWorkspace.value?.currentUserRole === 'OWNER')
+const canLeaveWorkspace = computed(() => !!currentWorkspace.value && currentWorkspace.value.currentUserRole !== 'OWNER')
+const currentUserId = computed(() => userStore.userInfo.id)
+
+function roleLabel(role: WorkspaceRole | string) {
+  const labels: Record<string, string> = { OWNER: '所有者', ADMIN: '管理员', MEMBER: '普通成员' }
+  return labels[role] || role
+}
+
+function roleClass(role: WorkspaceRole | string) {
+  const classes: Record<string, string> = {
+    OWNER: 'bg-[#fff1f0] text-[#cf1322]',
+    ADMIN: 'bg-[#fff7e6] text-[#ad6800]',
+    MEMBER: 'bg-[#eef3ff] text-[#336cff]',
+  }
+  return classes[role] || 'bg-[#f0f2f5] text-[#65686f]'
+}
+
+function goBack() {
+  uni.navigateBack()
+}
+
+function isSelf(member: WorkspaceMember) {
+  return String(member.userId) === String(currentUserId.value)
+}
+
+function canChangeRole(member: WorkspaceMember) {
+  return isOwner.value && !isSelf(member)
+}
+
+function canRemoveMember(member: WorkspaceMember) {
+  if (!canWrite.value || isSelf(member))
+    return false
+  if (isOwner.value)
+    return true
+  return member.role !== 'OWNER'
+}
+
+async function loadWorkspaces(preferredWorkspaceId = currentWorkspaceId.value) {
+  loading.value = true
+  try {
+    workspaceList.value = await getWorkspaceList()
+    const preferred = preferredWorkspaceId && workspaceList.value.some(item => item.id === preferredWorkspaceId)
+      ? preferredWorkspaceId
+      : workspaceList.value[0]?.id || ''
+
+    if (preferred) {
+      await selectWorkspace(preferred)
+    }
+    else {
+      currentWorkspaceId.value = ''
+      members.value = []
+      uni.removeStorageSync('currentWorkspaceId')
+    }
+  }
+  finally {
+    loading.value = false
+  }
+}
+
+async function selectWorkspace(workspaceId: string) {
+  currentWorkspaceId.value = workspaceId
+  uni.setStorageSync('currentWorkspaceId', workspaceId)
+  await loadMembers()
+}
+
+async function loadMembers() {
+  if (!currentWorkspaceId.value)
+    return
+  memberLoading.value = true
+  try {
+    members.value = await getWorkspaceMembers(currentWorkspaceId.value)
+  }
+  finally {
+    memberLoading.value = false
+  }
+}
+
+async function acceptInvitation() {
+  const code = inviteCode.value.trim()
+  if (!code) {
+    toast.warning('请输入邀请码')
+    return
+  }
+  const workspace = await acceptWorkspaceInvitation(code)
+  inviteCode.value = ''
+  toast.success('已加入工作空间')
+  await loadWorkspaces(workspace.id)
+}
+
+async function inviteMember() {
+  const username = inviteForm.username.trim()
+  if (!currentWorkspaceId.value || !username)
+    return toast.warning('请输入用户名')
+  if (members.value.length >= maxMembers)
+    return toast.warning('工作空间成员上限为5人')
+
+  const invitation = await inviteWorkspaceMember(currentWorkspaceId.value, {
+    username,
+    role: inviteForm.role,
+  })
+  lastInviteCode.value = invitation.code
+  toast.success('邀请已生成')
+}
+
+function closeInvitePanel() {
+  showInvitePanel.value = false
+  inviteForm.username = ''
+  inviteForm.role = 'MEMBER'
+  lastInviteCode.value = ''
+}
+
+function chooseInviteRole(role: WorkspaceRole) {
+  inviteForm.role = role
+}
+
+function chooseMemberRole(member: WorkspaceMember) {
+  if (!canChangeRole(member))
+    return
+  uni.showActionSheet({
+    itemList: ['管理员', '普通成员'],
+    success: async (res) => {
+      const nextRole: WorkspaceRole = res.tapIndex === 0 ? 'ADMIN' : 'MEMBER'
+      if (nextRole === member.role)
+        return
+      await updateWorkspaceMemberRole(currentWorkspaceId.value, member.userId, nextRole)
+      toast.success('角色已更新')
+      await loadMembers()
+    },
+  })
+}
+
+function confirmRemoveMember(member: WorkspaceMember) {
+  if (!canRemoveMember(member))
+    return
+  uni.showModal({
+    title: '移除成员',
+    content: `确定移除 ${member.username} 吗？`,
+    confirmText: '移除',
+    confirmColor: '#e5484d',
+    success: async (res) => {
+      if (!res.confirm)
+        return
+      await removeWorkspaceMember(currentWorkspaceId.value, member.userId)
+      toast.success('成员已移除')
+      await loadMembers()
+    },
+  })
+}
+
+function confirmLeaveWorkspace() {
+  if (!currentWorkspaceId.value || !canLeaveWorkspace.value)
+    return
+  uni.showModal({
+    title: '退出工作空间',
+    content: '确定退出当前工作空间吗？',
+    confirmText: '退出',
+    confirmColor: '#e5484d',
+    success: async (res) => {
+      if (!res.confirm)
+        return
+      await leaveWorkspace(currentWorkspaceId.value)
+      toast.success('已退出工作空间')
+      currentWorkspaceId.value = ''
+      uni.removeStorageSync('currentWorkspaceId')
+      await loadWorkspaces('')
+    },
+  })
+}
+
+onMounted(async () => {
+  uni.setNavigationBarTitle({ title: '组织管理' })
+  if (!userStore.userInfo.id)
+    await userStore.getUserInfo()
+  await loadWorkspaces()
+})
+</script>
+
+<template>
+  <view class="min-h-screen bg-[#f5f7fb]">
+    <wd-navbar title="组织管理" placeholder safe-area-inset-top fixed left-arrow @click-left="goBack" />
+
+    <view class="p-[24rpx]">
+      <view class="mb-[24rpx] flex gap-[16rpx]">
+        <view class="min-w-0 flex-1 overflow-hidden rounded-[16rpx] bg-white px-[24rpx]">
+          <wd-input
+            v-model="inviteCode"
+            clearable
+            :maxlength="64"
+            placeholder="输入邀请码加入"
+            custom-class="!border-none h-[76rpx] items-center"
+            input-class="text-[28rpx] text-[#232338]"
+          />
+        </view>
+        <wd-button type="primary" custom-class="h-[76rpx] rounded-[16rpx] px-[30rpx] bg-[#336cff] border-none" @click="acceptInvitation">
+          加入
+        </wd-button>
+      </view>
+
+      <view v-if="loading" class="py-[80rpx] text-center text-[26rpx] text-[#8b8f9b]">
+        加载中...
+      </view>
+
+      <template v-else>
+        <scroll-view v-if="workspaceList.length > 0" scroll-x class="mb-[24rpx] whitespace-nowrap">
+          <view
+            v-for="workspace in workspaceList"
+            :key="workspace.id"
+            class="mr-[16rpx] inline-flex max-w-[420rpx] items-center gap-[12rpx] rounded-[16rpx] px-[24rpx] py-[18rpx]"
+            :class="workspace.id === currentWorkspaceId ? 'bg-[#336cff] text-white' : 'bg-white text-[#232338]'"
+            @click="selectWorkspace(workspace.id)"
+          >
+            <text class="truncate text-[28rpx] font-semibold">
+              {{ workspace.name }}
+            </text>
+            <text
+              class="shrink-0 rounded-full px-[14rpx] py-[4rpx] text-[22rpx]"
+              :class="workspace.id === currentWorkspaceId ? 'bg-white/20 text-white' : roleClass(workspace.currentUserRole)"
+            >
+              {{ roleLabel(workspace.currentUserRole) }}
+            </text>
+          </view>
+        </scroll-view>
+
+        <view v-if="currentWorkspace" class="mb-[24rpx] rounded-[20rpx] bg-white p-[28rpx]">
+          <view class="mb-[20rpx] flex items-start justify-between gap-[20rpx]">
+            <view class="min-w-0">
+              <text class="block truncate text-[34rpx] text-[#232338] font-bold">
+                {{ currentWorkspace.name }}
+              </text>
+              <text class="mt-[8rpx] block text-[24rpx] text-[#8b8f9b]">
+                成员 {{ members.length }}/{{ maxMembers }}
+              </text>
+            </view>
+            <view class="flex shrink-0 gap-[12rpx]">
+              <wd-button
+                v-if="canLeaveWorkspace"
+                type="default"
+                size="small"
+                custom-class="rounded-[14rpx] text-[#65686f]"
+                @click="confirmLeaveWorkspace"
+              >
+                退出
+              </wd-button>
+              <wd-button
+                v-if="canWrite"
+                type="primary"
+                size="small"
+                :disabled="members.length >= maxMembers"
+                custom-class="rounded-[14rpx] bg-[#336cff] border-none"
+                @click="showInvitePanel = true"
+              >
+                邀请
+              </wd-button>
+            </view>
+          </view>
+
+          <view v-if="memberLoading" class="py-[48rpx] text-center text-[26rpx] text-[#8b8f9b]">
+            加载成员中...
+          </view>
+
+          <view v-else class="space-y-[16rpx]">
+            <view
+              v-for="member in members"
+              :key="member.userId"
+              class="rounded-[16rpx] bg-[#f5f7fb] p-[22rpx]"
+            >
+              <view class="flex items-center justify-between gap-[16rpx]">
+                <view class="min-w-0">
+                  <text class="block truncate text-[28rpx] text-[#232338] font-semibold">
+                    {{ member.username }}
+                  </text>
+                  <text v-if="member.joinedAt" class="mt-[6rpx] block text-[22rpx] text-[#8b8f9b]">
+                    {{ member.joinedAt }}
+                  </text>
+                </view>
+                <view class="flex shrink-0 items-center gap-[12rpx]">
+                  <view
+                    class="rounded-full px-[16rpx] py-[6rpx] text-[22rpx]"
+                    :class="roleClass(member.role)"
+                    @click="chooseMemberRole(member)"
+                  >
+                    {{ roleLabel(member.role) }}
+                  </view>
+                  <wd-button
+                    v-if="canRemoveMember(member)"
+                    type="error"
+                    size="small"
+                    custom-class="rounded-[14rpx]"
+                    @click="confirmRemoveMember(member)"
+                  >
+                    移除
+                  </wd-button>
+                </view>
+              </view>
+            </view>
+          </view>
+        </view>
+
+        <view v-else class="rounded-[20rpx] bg-white p-[48rpx] text-center text-[26rpx] text-[#8b8f9b]">
+          暂无工作空间
+        </view>
+      </template>
+    </view>
+
+    <view v-if="showInvitePanel" class="fixed inset-0 z-20 bg-black/35" @click="closeInvitePanel">
+      <view class="absolute bottom-0 left-0 right-0 rounded-t-[28rpx] bg-white p-[28rpx]" @click.stop>
+        <view class="mb-[24rpx] flex items-center justify-between">
+          <text class="text-[32rpx] text-[#232338] font-bold">
+            邀请成员
+          </text>
+          <wd-icon name="close" custom-class="text-[34rpx] text-[#8b8f9b]" @click="closeInvitePanel" />
+        </view>
+
+        <view class="mb-[20rpx] overflow-hidden rounded-[16rpx] bg-[#f5f7fb] px-[20rpx]">
+          <wd-input
+            v-model="inviteForm.username"
+            clearable
+            :maxlength="64"
+            placeholder="请输入已注册用户名"
+            custom-class="!border-none h-[80rpx] items-center"
+            input-class="text-[28rpx] text-[#232338]"
+          />
+        </view>
+
+        <view class="mb-[24rpx] flex gap-[16rpx]">
+          <view
+            class="flex-1 rounded-[16rpx] px-[20rpx] py-[18rpx] text-center text-[26rpx] font-semibold"
+            :class="inviteForm.role === 'ADMIN' ? 'bg-[#fff7e6] text-[#ad6800]' : 'bg-[#f5f7fb] text-[#65686f]'"
+            @click="chooseInviteRole('ADMIN')"
+          >
+            管理员
+          </view>
+          <view
+            class="flex-1 rounded-[16rpx] px-[20rpx] py-[18rpx] text-center text-[26rpx] font-semibold"
+            :class="inviteForm.role === 'MEMBER' ? 'bg-[#eef3ff] text-[#336cff]' : 'bg-[#f5f7fb] text-[#65686f]'"
+            @click="chooseInviteRole('MEMBER')"
+          >
+            普通成员
+          </view>
+        </view>
+
+        <view v-if="lastInviteCode" class="mb-[24rpx] rounded-[16rpx] bg-[#f5f7fb] p-[20rpx] text-[26rpx] text-[#232338]">
+          邀请码：{{ lastInviteCode }}
+        </view>
+
+        <wd-button block type="primary" custom-class="h-[84rpx] rounded-[18rpx] bg-[#336cff] border-none" @click="inviteMember">
+          生成邀请
+        </wd-button>
+      </view>
+    </view>
+  </view>
+</template>

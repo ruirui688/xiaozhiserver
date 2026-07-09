@@ -44,6 +44,7 @@ import xiaozhi.modules.sys.service.SysDictDataService;
 import xiaozhi.modules.sys.service.SysParamsService;
 import xiaozhi.modules.sys.service.SysUserService;
 import xiaozhi.modules.sys.vo.SysDictDataItem;
+import xiaozhi.modules.workspace.service.WorkspaceService;
 
 /**
  * 登录控制层
@@ -60,6 +61,7 @@ public class LoginController {
     private final SysParamsService sysParamsService;
     private final SysDictDataService sysDictDataService;
     private final WechatMiniProgramService wechatMiniProgramService;
+    private final WorkspaceService workspaceService;
 
     @GetMapping("/captcha")
     @Operation(summary = "验证码")
@@ -168,6 +170,10 @@ public class LoginController {
         userDTO.setUsername(login.getUsername());
         userDTO.setPassword(login.getPassword());
         sysUserService.save(userDTO);
+        SysUserDTO savedUser = sysUserService.getByUsername(login.getUsername());
+        if (savedUser != null) {
+            workspaceService.ensureDefaultWorkspace(savedUser.getId());
+        }
         return new Result<>();
     }
 

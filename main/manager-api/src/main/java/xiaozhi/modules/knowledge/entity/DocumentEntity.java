@@ -29,6 +29,9 @@ public class DocumentEntity implements Serializable {
     @Schema(description = "知识库ID (关联 ai_rag_dataset.dataset_id)")
     private String datasetId;
 
+    @Schema(description = "所属工作空间ID")
+    private String workspaceId;
+
     @Schema(description = "RAGFlow文档ID (远程ID)")
     private String documentId;
 

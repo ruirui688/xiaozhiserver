@@ -501,6 +501,7 @@ export default {
   'device.unbind': '解绑',
   'device.deviceThemeGeneration': '设备主题生成',
   'device.dialogDebug': '对话调试',
+  'device.ottoDanceDebug': '舞蹈调试',
   'device.toolCall': '工具调用',
   'device.selectAtLeastOne': '请至少选择一条记录',
   'device.confirmBatchUnbind': '确认要解绑选中的 {count} 台设备吗？',
@@ -680,7 +681,7 @@ export default {
   // 用户信息
   'user.info': '用户信息',
   'user.username': '用户名',
-  'user.mobile': '手机号',
+  'user.mobile': '用户名',
   'user.userid': '用户Id',
   'user.deviceCount': '设备数量',
   'user.createDate': '注册时间',
@@ -713,7 +714,7 @@ export default {
   'user.confirmStatusChange': '确定要{action}选中的{count}个用户吗？',
   'user.statusChangeSuccess': '成功{action}{count}个用户',
   'user.invalidUserId': '存在无效的用户ID',
-  'user.searchPhone': '请输入手机号码查询',
+  'user.searchPhone': '请输入用户名查询',
   'user.search': '搜索',
 
   // 字段管理页面文本

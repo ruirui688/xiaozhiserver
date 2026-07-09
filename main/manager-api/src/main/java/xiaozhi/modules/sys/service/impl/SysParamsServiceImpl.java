@@ -212,6 +212,17 @@ public class SysParamsServiceImpl extends BaseServiceImpl<SysParamsDao, SysParam
 
         // 初始化SM2密钥对
         initSM2KeyPair();
+
+        // Liquibase migrations may update sys_params before the application starts.
+        // Refresh cached public menu config so users see the migrated feature flags.
+        refreshParamCache(Constant.SYSTEM_WEB_MENU);
+    }
+
+    private void refreshParamCache(String paramCode) {
+        String paramValue = getValue(paramCode, false);
+        if (paramValue != null) {
+            sysParamsRedis.set(paramCode, paramValue);
+        }
     }
 
     /**

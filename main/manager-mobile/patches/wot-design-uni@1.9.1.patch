@@ -21,7 +21,7 @@ diff --git a/components/wd-icon/index.scss b/components/wd-icon/index.scss
 index 1b0b0f1c9c76cb7c5049772f9bdce2c90efb3b7f..b5c8a6934fe4e97338cc6e6f48623162d58f7352 100644
 --- a/components/wd-icon/index.scss
 +++ b/components/wd-icon/index.scss
-@@ -2,10 +2,18 @@
+@@ -2,11 +2,16 @@
  @import '../common/abstracts/mixin';
 
  @font-face {
@@ -61,7 +61,7 @@ diff --git a/components/wd-popup/wd-popup.vue b/components/wd-popup/wd-popup.vue
 index ff5ad0d1050312ca6a63f1f0a5b3363bef65763d..8509ee0bbda49d1844a29f16d7cc1f65caaa54ef 100644
 --- a/components/wd-popup/wd-popup.vue
 +++ b/components/wd-popup/wd-popup.vue
-@@ -100,18 +100,20 @@ const rootClass = computed(() => {
+@@ -100,17 +100,19 @@ const rootClass = computed(() => {
 
  onBeforeMount(() => {
    if (props.safeAreaInsetBottom) {
@@ -88,4 +88,3 @@ index ff5ad0d1050312ca6a63f1f0a5b3363bef65763d..8509ee0bbda49d1844a29f16d7cc1f65
 +    // #endif
    }
  })
-

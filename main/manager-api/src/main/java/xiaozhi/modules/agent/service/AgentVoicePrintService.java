@@ -47,4 +47,6 @@ public interface AgentVoicePrintService {
      */
     boolean update(Long userId, AgentVoicePrintUpdateDTO dto);
 
+    String getAgentIdByVoicePrintId(String voicePrintId);
+
 }

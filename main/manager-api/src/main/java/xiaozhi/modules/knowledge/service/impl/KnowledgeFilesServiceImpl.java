@@ -36,6 +36,7 @@ import xiaozhi.common.redis.RedisUtils;
 import xiaozhi.common.service.impl.BaseServiceImpl;
 import xiaozhi.modules.knowledge.dao.DocumentDao;
 import xiaozhi.modules.knowledge.entity.DocumentEntity;
+import xiaozhi.modules.knowledge.dto.KnowledgeBaseDTO;
 import xiaozhi.modules.knowledge.rag.KnowledgeBaseAdapter;
 import xiaozhi.modules.knowledge.rag.KnowledgeBaseAdapterFactory;
 import xiaozhi.modules.knowledge.service.KnowledgeBaseService;
@@ -448,6 +449,8 @@ public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, Docu
             Map<String, Object> parserConfig) {
         DocumentEntity entity = new DocumentEntity();
         entity.setDatasetId(datasetId);
+        KnowledgeBaseDTO dataset = knowledgeBaseService.getByDatasetId(datasetId);
+        entity.setWorkspaceId(dataset.getWorkspaceId());
         entity.setDocumentId(result.getDocumentId());
         entity.setName(StringUtils.isNotBlank(result.getName()) ? result.getName() : originalName);
         entity.setSize(result.getFileSize());

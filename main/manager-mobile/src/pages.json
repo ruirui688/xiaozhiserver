@@ -157,6 +157,15 @@
       }
     },
     {
+      "path": "pages/organization/index",
+      "type": "page",
+      "layout": "default",
+      "style": {
+        "navigationBarTitleText": "组织管理",
+        "navigationStyle": "custom"
+      }
+    },
+    {
       "path": "pages/register/index",
       "type": "page",
       "layout": "default",
