@@ -1,24 +1,37 @@
 <template>
   <div class="otto-page">
-    <HeaderBar />
     <div class="debug-header">
-      <div>
+      <div class="debug-title">
+        <span class="debug-kicker">Device Debug Workbench</span>
         <h2>Otto舞蹈调试</h2>
-        <span>{{ deviceTitle }}</span>
+        <div class="debug-meta">
+          <span>{{ deviceTitle }}</span>
+          <em :class="statusKind">{{ statusText }}</em>
+        </div>
       </div>
-      <el-button size="mini" @click="$router.back()">返回</el-button>
+      <div class="debug-actions">
+        <el-button size="small" @click="refreshSnapshot">刷新状态</el-button>
+        <el-button size="small" type="danger" plain @click="quickStop">停止</el-button>
+        <el-button size="small" @click="leavePage">返回</el-button>
+      </div>
     </div>
 
     <main class="debug-layout">
       <aside class="side-panel">
-        <div class="preview">
-          <div ref="robotTwin" class="robot-twin"></div>
-          <div class="preview-hud">
-            <span ref="robotStatus">加载3D模型...</span>
-            <el-button size="mini" @click="resetCamera">复位视角</el-button>
+        <section class="viewer-card">
+          <div class="viewer-head">
+            <div>
+              <strong>3D 姿态预览</strong>
+              <span ref="robotStatus">加载3D模型...</span>
+            </div>
+            <el-button size="mini" icon="el-icon-refresh-right" @click="resetCamera">复位视角</el-button>
           </div>
-        </div>
-        <div class="side-body">
+          <div class="preview">
+            <div ref="robotTwin" class="robot-twin"></div>
+          </div>
+        </section>
+
+        <section class="side-body">
           <div class="connect-row">
             <el-input v-model.trim="deviceHost" placeholder="设备 IP，例如 10.119.129.112" @keyup.enter.native="connectDevice" />
             <el-button type="primary" :loading="connecting" @click="connectDevice">连接</el-button>
@@ -41,7 +54,7 @@
               <pre>{{ resultText }}</pre>
             </el-collapse-item>
           </el-collapse>
-        </div>
+        </section>
       </aside>
 
       <section class="work-panel">
@@ -191,7 +204,6 @@
 
 <script>
 import Api from '@/apis/api';
-import HeaderBar from '@/components/HeaderBar.vue';
 import { createRobotTwinViewer } from '@/otto-debug/robot_twin_viewer';
 import { createOttoActionPreviewPlayer } from '@/otto-debug/otto_action_preview';
 
@@ -200,7 +212,6 @@ const MODEL_URL = `${process.env.BASE_URL || '/'}otto-debug/models/otto_robot_po
 
 export default {
   name: 'OttoDanceDebug',
-  components: { HeaderBar },
   data() {
     return {
       deviceId: this.$route.query.deviceId || '',
@@ -265,7 +276,11 @@ export default {
     },
     actionCategories() {
       const categories = new Set(this.actions.map(item => item.category || 'motion'));
-      return [{ value: 'all', label: '全部' }].concat([...categories].map(value => ({ value, label: value })));
+      return [{ value: 'all', label: `全部 ${this.actions.length}` }]
+        .concat([...categories].map(value => {
+          const count = this.actions.filter(item => (item.category || 'motion') === value).length;
+          return { value, label: `${value} ${count}` };
+        }));
     },
     actions() {
       const schemaActions = this.pick(this.actionSchema, 'actions');
@@ -500,6 +515,12 @@ export default {
       if (this.actionPreview) this.actionPreview.stop();
       if (tool) this.callToolByName(tool.name, {}, false, true);
     },
+    leavePage() {
+      window.close();
+      window.setTimeout(() => {
+        if (!window.closed) this.$router.back();
+      }, 80);
+    },
     onServoInput(servo) {
       this.updateRobotTwin();
       if (!this.servoRealtime) return;
@@ -713,89 +734,136 @@ export default {
 .otto-page {
   min-width: 960px;
   min-height: 100vh;
-  background: #f7f8fa;
+  background: #eef2f6;
   color: #171a1f;
+  overflow: hidden;
 }
 
 .debug-header {
-  height: 64px;
-  padding: 10px 22px;
+  height: 82px;
+  padding: 0 28px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #171a1f;
+  background: #14181e;
   color: #fff;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .06);
+}
+
+.debug-title {
+  min-width: 0;
+}
+
+.debug-kicker {
+  display: inline-block;
+  margin-bottom: 4px;
+  color: #f5b46d;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .debug-header h2 {
   margin: 0;
-  font-size: 18px;
+  font-size: 22px;
+  line-height: 1.2;
+  letter-spacing: 0;
 }
 
-.debug-header span {
-  color: #ffd9ad;
-  font-size: 12px;
+.debug-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 5px;
+  color: #98a2b3;
+  font-size: 13px;
+}
+
+.debug-meta em {
+  font-style: normal;
+}
+
+.debug-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .debug-layout {
-  height: calc(100vh - 64px);
+  height: calc(100vh - 82px);
   display: grid;
-  grid-template-columns: minmax(360px, 430px) minmax(0, 1fr);
-  gap: 14px;
-  padding: 14px;
+  grid-template-columns: minmax(360px, 440px) minmax(0, 1fr);
+  gap: 18px;
+  padding: 18px;
+  overflow: hidden;
 }
 
 .side-panel,
 .work-panel {
   min-height: 0;
   background: #fff;
-  border: 1px solid #e5e7eb;
+  border: 1px solid #dfe5ee;
   border-radius: 8px;
   overflow: hidden;
-  box-shadow: 0 10px 28px rgba(36, 24, 16, .06);
+  box-shadow: 0 14px 36px rgba(15, 23, 42, .08);
+}
+
+.side-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.viewer-card {
+  flex: 0 0 auto;
+  background: #fbf4e9;
+  border-bottom: 1px solid #e6edf5;
+}
+
+.viewer-head {
+  min-height: 62px;
+  padding: 16px 16px 10px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.viewer-head strong {
+  display: block;
+  color: #182230;
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+.viewer-head span {
+  display: block;
+  margin-top: 4px;
+  color: #667085;
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .preview {
-  height: min(46vh, 420px);
-  min-height: 300px;
+  height: clamp(330px, 43vh, 480px);
   position: relative;
-  border-bottom: 1px solid #eef0f3;
-  background: #f8f2e8;
+  background: #fbf4e9;
 }
 
 .robot-twin {
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, #fbf7ef 0%, #edf1f4 100%);
-}
-
-.preview-hud {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  pointer-events: none;
-}
-
-.preview-hud span {
-  color: #667085;
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.preview-hud .el-button {
-  pointer-events: auto;
+  background: linear-gradient(180deg, #fbf4e9 0%, #f6efe3 100%);
 }
 
 .side-body,
 .debug-tabs ::v-deep .el-tab-pane {
-  padding: 14px;
+  padding: 18px;
+}
+
+.side-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: #fff;
 }
 
 .connect-row,
@@ -803,32 +871,38 @@ export default {
 .frame-toolbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  margin-bottom: 10px;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.connect-row + .connect-row {
+  grid-template-columns: 1fr 1fr;
 }
 
 .status-line {
-  margin: 8px 0 12px;
-  font-size: 13px;
+  margin: 12px 0;
+  color: #667085;
+  font-size: 15px;
+  line-height: 1.45;
 }
 
 .muted { color: #87909f; }
-.ok { color: #087443; }
-.warn { color: #a15c08; }
-.bad { color: #b42318; }
+.ok { color: #067647; }
+.warn { color: #b54708; }
+.bad { color: #d92d20; }
 
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 10px;
 }
 
 .metric {
-  min-height: 62px;
-  padding: 9px 10px;
-  border: 1px solid #eef0f3;
+  min-height: 58px;
+  padding: 10px 12px;
+  border: 1px solid #edf1f7;
   border-radius: 7px;
-  background: #fffdfa;
+  background: #fbfcfe;
 }
 
 .metric span {
@@ -840,7 +914,8 @@ export default {
 .metric strong {
   display: block;
   margin-top: 5px;
-  font-size: 18px;
+  color: #182230;
+  font-size: 16px;
   overflow-wrap: anywhere;
 }
 
@@ -849,12 +924,12 @@ export default {
 }
 
 .note {
-  padding: 9px 10px;
-  background: #fff3ed;
-  border: 1px solid #f7c276;
-  color: #7a3d00;
+  padding: 10px 12px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #9a3412;
   border-radius: 7px;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
 
 .work-panel {
@@ -868,19 +943,67 @@ export default {
   overflow: auto;
 }
 
+.debug-tabs ::v-deep .el-tabs__header {
+  margin: 0;
+  padding: 14px 16px;
+  background: #fbf7ef;
+  border-bottom: 1px solid #e6edf5;
+}
+
+.debug-tabs ::v-deep .el-tabs__nav-wrap::after {
+  display: none;
+}
+
+.debug-tabs ::v-deep .el-tabs__active-bar {
+  display: none;
+}
+
+.debug-tabs ::v-deep .el-tabs__nav {
+  display: flex;
+  gap: 10px;
+}
+
+.debug-tabs ::v-deep .el-tabs__item {
+  height: 42px;
+  padding: 0 16px !important;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #d7e0ec;
+  border-radius: 7px;
+  background: #fff;
+  color: #182230;
+  font-size: 16px;
+  line-height: 42px;
+}
+
+.debug-tabs ::v-deep .el-tabs__item.is-active {
+  background: #f45116;
+  border-color: #f45116;
+  color: #fff;
+  font-weight: 700;
+}
+
+.debug-tabs ::v-deep .el-tabs__content {
+  min-height: 0;
+}
+
 .category-row,
 .frame-actions,
 .card-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.category-row .el-button {
+  margin-left: 0;
 }
 
 .action-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 12px;
 }
 
 .action-card,
@@ -888,7 +1011,7 @@ export default {
 .frame-item,
 .tool-detail,
 .servo-card {
-  border: 1px solid #e5e7eb;
+  border: 1px solid #e4eaf2;
   border-radius: 8px;
   background: #fff;
 }
@@ -902,7 +1025,7 @@ export default {
 
 .action-card span,
 .tool-item span {
-  color: #87909f;
+  color: #667085;
   font-size: 12px;
   overflow-wrap: anywhere;
 }
@@ -945,7 +1068,7 @@ label {
 }
 
 .servo-title span {
-  color: #f05a1a;
+  color: #f45116;
   font-weight: 700;
 }
 
@@ -976,8 +1099,8 @@ label {
 }
 
 .tool-item.active {
-  border-color: #f05a1a;
-  background: #fff3ed;
+  border-color: #f45116;
+  background: #fff7ed;
 }
 
 .tool-detail {
@@ -996,13 +1119,48 @@ pre {
 }
 
 .empty {
+  max-width: 360px;
   color: #87909f;
-  padding: 12px;
+  padding: 8px 0;
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.otto-page ::v-deep .el-button--primary {
+  background-color: #f45116;
+  border-color: #f45116;
+}
+
+.otto-page ::v-deep .el-button--primary:hover,
+.otto-page ::v-deep .el-button--primary:focus {
+  background-color: #e54810;
+  border-color: #e54810;
+}
+
+.otto-page ::v-deep .el-button--danger.is-plain {
+  background: #fff5f5;
+}
+
+.otto-page ::v-deep .el-input__inner {
+  height: 42px;
+  border-color: #d7e0ec;
+  border-radius: 7px;
+  font-size: 16px;
+}
+
+.otto-page ::v-deep .el-button {
+  border-radius: 7px;
+  font-size: 15px;
+}
+
+.otto-page ::v-deep .el-button--mini {
+  font-size: 13px;
 }
 
 @media (max-width: 1240px) {
   .otto-page {
     min-width: 0;
+    overflow: auto;
   }
 
   .debug-layout,
