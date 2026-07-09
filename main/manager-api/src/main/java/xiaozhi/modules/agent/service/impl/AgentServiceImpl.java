@@ -18,6 +18,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 
+import cn.hutool.json.JSONObject;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import xiaozhi.common.constant.Constant;
@@ -533,13 +534,41 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
             return true;
         }
         ModelConfigEntity llmModelData = modelConfigService.selectById(llmModelId);
-        String type = llmModelData.getConfigJson().get("type").toString();
+        String type = resolveLLMProviderType(llmModelData);
+        if (StringUtils.isBlank(type)) {
+            log.warn("LLM model provider type is empty, skip intent parameter strict check. llmModelId={}", llmModelId);
+            return true;
+        }
         // 如果查询大语言模型是openai或者ollama，意图识别选参数都可以
-        if ("openai".equals(type) || "ollama".equals(type)) {
+        if (StringUtils.equalsAnyIgnoreCase(type, "openai", "ollama")) {
             return true;
         }
         // 除了openai和ollama的类型，不可以选择id为Intent_function_call（函数调用）的意图识别
         return !"Intent_function_call".equals(intentModelId);
+    }
+
+    private String resolveLLMProviderType(ModelConfigEntity model) {
+        if (model == null) {
+            return "";
+        }
+        JSONObject configJson = model.getConfigJson();
+        if (configJson != null) {
+            String type = configJson.getStr("type");
+            if (StringUtils.isNotBlank(type)) {
+                return StringUtils.lowerCase(type);
+            }
+        }
+        if (StringUtils.isNotBlank(model.getAdapterCode())) {
+            return StringUtils.lowerCase(model.getAdapterCode());
+        }
+        String templateCode = StringUtils.defaultString(model.getTemplateCode());
+        if (StringUtils.containsIgnoreCase(templateCode, "_OPENAI")) {
+            return "openai";
+        }
+        if (StringUtils.containsIgnoreCase(templateCode, "_OLLAMA")) {
+            return "ollama";
+        }
+        return "";
     }
 
     @Override

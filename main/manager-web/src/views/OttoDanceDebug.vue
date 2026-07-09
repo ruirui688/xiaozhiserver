@@ -1,33 +1,22 @@
 <template>
   <div class="otto-page">
     <div class="debug-header">
-      <div class="debug-title">
-        <span class="debug-kicker">Device Debug Workbench</span>
-        <h2>Otto舞蹈调试</h2>
-        <div class="debug-meta">
-          <span>{{ deviceTitle }}</span>
-          <em :class="statusKind">{{ statusText }}</em>
-        </div>
+      <div class="debug-brand">
+        <strong>Otto MCP Studio</strong>
+        <span>舞蹈调试工作台</span>
       </div>
-      <div class="debug-actions">
-        <el-button size="small" @click="refreshSnapshot">刷新状态</el-button>
-        <el-button size="small" type="danger" plain @click="quickStop">停止</el-button>
-        <el-button size="small" @click="leavePage">返回</el-button>
-      </div>
+      <div class="debug-status" :class="statusKind">{{ statusText }}</div>
     </div>
 
     <main class="debug-layout">
       <aside class="side-panel">
         <section class="viewer-card">
-          <div class="viewer-head">
-            <div>
-              <strong>3D 姿态预览</strong>
-              <span ref="robotStatus">加载3D模型...</span>
-            </div>
-            <el-button size="mini" icon="el-icon-refresh-right" @click="resetCamera">复位视角</el-button>
-          </div>
           <div class="preview">
             <div ref="robotTwin" class="robot-twin"></div>
+          </div>
+          <div class="preview-footer">
+            <span ref="robotStatus">加载3D模型...</span>
+            <el-button size="mini" icon="el-icon-refresh-right" @click="resetCamera">复位视角</el-button>
           </div>
         </section>
 
@@ -515,12 +504,6 @@ export default {
       if (this.actionPreview) this.actionPreview.stop();
       if (tool) this.callToolByName(tool.name, {}, false, true);
     },
-    leavePage() {
-      window.close();
-      window.setTimeout(() => {
-        if (!window.closed) this.$router.back();
-      }, 80);
-    },
     onServoInput(servo) {
       this.updateRobotTwin();
       if (!this.servoRealtime) return;
@@ -733,14 +716,14 @@ export default {
 <style scoped>
 .otto-page {
   min-width: 960px;
-  min-height: 100vh;
+  height: 100vh;
   background: #eef2f6;
   color: #171a1f;
   overflow: hidden;
 }
 
 .debug-header {
-  height: 82px;
+  height: 74px;
   padding: 0 28px;
   display: flex;
   align-items: center;
@@ -750,48 +733,38 @@ export default {
   box-shadow: 0 1px 0 rgba(255, 255, 255, .06);
 }
 
-.debug-title {
+.debug-brand {
   min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
 }
 
-.debug-kicker {
-  display: inline-block;
-  margin-bottom: 4px;
-  color: #f5b46d;
+.debug-brand strong {
+  color: #fff;
+  font-size: 21px;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.debug-brand span {
+  color: #f3bd80;
   font-size: 13px;
   font-weight: 700;
+  white-space: nowrap;
 }
 
-.debug-header h2 {
-  margin: 0;
-  font-size: 22px;
-  line-height: 1.2;
-  letter-spacing: 0;
-}
-
-.debug-meta {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 5px;
+.debug-status {
   color: #98a2b3;
-  font-size: 13px;
-}
-
-.debug-meta em {
-  font-style: normal;
-}
-
-.debug-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  font-size: 16px;
+  white-space: nowrap;
 }
 
 .debug-layout {
-  height: calc(100vh - 82px);
+  height: calc(100vh - 74px);
   display: grid;
-  grid-template-columns: minmax(360px, 440px) minmax(0, 1fr);
+  grid-template-columns: minmax(360px, 430px) minmax(0, 1fr);
   gap: 18px;
   padding: 18px;
   overflow: hidden;
@@ -818,32 +791,8 @@ export default {
   border-bottom: 1px solid #e6edf5;
 }
 
-.viewer-head {
-  min-height: 62px;
-  padding: 16px 16px 10px;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.viewer-head strong {
-  display: block;
-  color: #182230;
-  font-size: 15px;
-  line-height: 1.3;
-}
-
-.viewer-head span {
-  display: block;
-  margin-top: 4px;
-  color: #667085;
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-
 .preview {
-  height: clamp(330px, 43vh, 480px);
+  height: clamp(350px, 45vh, 500px);
   position: relative;
   background: #fbf4e9;
 }
@@ -852,6 +801,25 @@ export default {
   position: absolute;
   inset: 0;
   background: linear-gradient(180deg, #fbf4e9 0%, #f6efe3 100%);
+}
+
+.preview-footer {
+  min-height: 58px;
+  padding: 10px 16px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #fbf4e9;
+}
+
+.preview-footer span {
+  min-width: 0;
+  color: #667085;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .side-body,
@@ -945,7 +913,7 @@ export default {
 
 .debug-tabs ::v-deep .el-tabs__header {
   margin: 0;
-  padding: 14px 16px;
+  padding: 14px 18px;
   background: #fbf7ef;
   border-bottom: 1px solid #e6edf5;
 }
@@ -960,12 +928,12 @@ export default {
 
 .debug-tabs ::v-deep .el-tabs__nav {
   display: flex;
-  gap: 10px;
+  gap: 12px;
 }
 
 .debug-tabs ::v-deep .el-tabs__item {
-  height: 42px;
-  padding: 0 16px !important;
+  height: 46px;
+  padding: 0 18px !important;
   display: inline-flex;
   align-items: center;
   border: 1px solid #d7e0ec;
@@ -973,7 +941,7 @@ export default {
   background: #fff;
   color: #182230;
   font-size: 16px;
-  line-height: 42px;
+  line-height: 46px;
 }
 
 .debug-tabs ::v-deep .el-tabs__item.is-active {
