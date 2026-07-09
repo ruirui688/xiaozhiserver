@@ -259,6 +259,12 @@ function showAbout() {
   })
 }
 
+function openOrganizationManagement() {
+  uni.navigateTo({
+    url: '/pages/organization/index',
+  })
+}
+
 onMounted(async () => {
   // 仅在非小程序环境加载服务端地址设置
   if (!isMp) {
@@ -381,6 +387,35 @@ onMounted(async () => {
                 {{ t('settings.clearCache') }}
               </view>
             </view>
+          </view>
+        </view>
+      </view>
+
+      <!-- 组织管理 -->
+      <view class="mb-[32rpx]">
+        <view class="mb-[24rpx] flex items-center">
+          <text class="text-[32rpx] text-[#232338] font-bold">
+            {{ t('settings.organizationSettings') }}
+          </text>
+        </view>
+
+        <view
+          class="border border-[#eeeeee] rounded-[24rpx] bg-[#fbfbfb] p-[32rpx]"
+          style="box-shadow: 0 4rpx 20rpx rgba(0, 0, 0, 0.06);"
+        >
+          <view
+            class="flex cursor-pointer items-center justify-between border border-[#eeeeee] rounded-[16rpx] bg-[#f5f7fb] p-[24rpx] transition-all active:bg-[#eef3ff]"
+            @click="openOrganizationManagement"
+          >
+            <view>
+              <text class="text-[28rpx] text-[#232338] font-medium">
+                {{ t('settings.organizationManagement') }}
+              </text>
+              <text class="mt-[4rpx] block text-[24rpx] text-[#9d9ea3]">
+                {{ t('settings.organizationDesc') }}
+              </text>
+            </view>
+            <wd-icon name="arrow-right" custom-class="text-[32rpx] text-[#9d9ea3]" />
           </view>
         </view>
       </view>

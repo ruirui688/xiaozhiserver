@@ -13,7 +13,18 @@ const themeVars: ConfigProviderThemeVars = {
   <wd-config-provider :theme-vars="themeVars">
     <slot />
     <FgTabbar />
+    <view class="wot-build-deps">
+      <wd-checkbox-group>
+        <wd-checkbox />
+      </wd-checkbox-group>
+    </view>
     <wd-toast />
     <wd-message-box />
   </wd-config-provider>
 </template>
+
+<style scoped>
+.wot-build-deps {
+  display: none;
+}
+</style>

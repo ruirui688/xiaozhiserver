@@ -12,7 +12,7 @@ patchedDependencies:
     hash: 5763725268e9a493075be3c82d91b590b9ae30e997a04a418494dd7d6d327b9d
     path: patches/@dcloudio__uni-h5.patch
   wot-design-uni@1.9.1:
-    hash: 40a753094a04c88bfe77b4018f2a9fd1437a8b249bed5f99b9e6d168f9339078
+    hash: 2f8b2fb5176dbd64a391015be5c5779f9cd13eb158c49ac44d71c1acd9157875
     path: patches/wot-design-uni@1.9.1.patch
   z-paging@2.8.7:
     hash: ca1892d2f980cbc64a87da30c13c731b8b0340796ddba82bc8fefeb4a9f4398e
@@ -105,7 +105,7 @@ importers:
         version: 3.5.15(typescript@5.7.2)
       wot-design-uni:
         specifier: ^1.9.1
-        version: 1.9.1(patch_hash=b395ed78fac161babb00d23fd92930ff81a0f7a4c7a1c87ef9354e4818ed82fb)(vue@3.5.15(typescript@5.7.2))
+        version: 1.9.1(patch_hash=2f8b2fb5176dbd64a391015be5c5779f9cd13eb158c49ac44d71c1acd9157875)(vue@3.5.15(typescript@5.7.2))
       z-paging:
         specifier: 2.8.7
         version: 2.8.7(patch_hash=ca1892d2f980cbc64a87da30c13c731b8b0340796ddba82bc8fefeb4a9f4398e)
@@ -15013,7 +15013,7 @@ snapshots:
 
   wordwrap@1.0.0: {}
 
-  wot-design-uni@1.9.1(patch_hash=b395ed78fac161babb00d23fd92930ff81a0f7a4c7a1c87ef9354e4818ed82fb)(vue@3.5.15(typescript@5.7.2)):
+  wot-design-uni@1.9.1(patch_hash=2f8b2fb5176dbd64a391015be5c5779f9cd13eb158c49ac44d71c1acd9157875)(vue@3.5.15(typescript@5.7.2)):
     dependencies:
       vue: 3.5.15(typescript@5.7.2)
 
