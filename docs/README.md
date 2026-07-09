@@ -87,6 +87,7 @@ docs/architecture/prompt-injection-engineering.md
 - [architecture/memory-system-chain.md](./architecture/memory-system-chain.md) - 记忆系统完整链路。用于理解 Python Memory Provider → Java PowerMem 双阶段提取决策 → MySQL 持久化 → LLM 上下文注入的端到端记忆管道。
 - [architecture/mcp-chains.md](./architecture/mcp-chains.md) - MCP 三类链路架构。用于理解外部 MCP Endpoint、服务器侧 MCP、设备侧 MCP 的工具发现、注册、调用和 BaseMCPClient 共享基类。
 - [architecture/knowledge-base-chain.md](./architecture/knowledge-base-chain.md) - 知识库完整链路。用于理解文件上传 → LocalKnowledge/RAGFlow 分块向量化 → 混合检索 → LLM 工具注入的端到端知识库流程。
+- [architecture/workspace-organization-management.md](./architecture/workspace-organization-management.md) - 工作空间组织管理与数据隔离。用于理解用户注册默认工作空间、成员角色权限、智能体/设备/记忆/知识库等业务资源共享范围、服务端鉴权和跨工作空间泄露防护。
 
 ## 4. 本地开发环境
 

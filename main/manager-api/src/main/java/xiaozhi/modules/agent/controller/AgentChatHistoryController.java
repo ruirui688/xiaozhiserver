@@ -39,10 +39,12 @@ import xiaozhi.common.utils.Result;
 import xiaozhi.modules.agent.dto.AgentChatHistoryDTO;
 import xiaozhi.modules.agent.dto.AgentChatHistoryReportDTO;
 import xiaozhi.modules.agent.dto.AgentChatSessionDTO;
+import xiaozhi.modules.agent.entity.AgentEntity;
 import xiaozhi.modules.agent.service.AgentChatHistoryService;
 import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.agent.service.biz.AgentChatHistoryBizService;
 import xiaozhi.modules.security.user.SecurityUser;
+import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 
 @Slf4j
 @Tag(name = "智能体聊天历史管理")
@@ -54,6 +56,7 @@ public class AgentChatHistoryController {
     private final AgentChatHistoryService agentChatHistoryService;
     private final AgentService agentService;
     private final RedisUtils redisUtils;
+    private final WorkspacePermissionService workspacePermissionService;
 
     /**
      * 小智服务聊天上报请求
@@ -101,6 +104,7 @@ public class AgentChatHistoryController {
     @DeleteMapping("/{agentId}")
     public Result<Void> deleteByAgentId(@PathVariable("agentId") String agentId) {
         checkAgentPermission(agentId);
+        requireAgentWrite(agentId);
         agentChatHistoryService.deleteByAgentId(agentId, true, true);
         return new Result<Void>().ok(null);
     }
@@ -117,6 +121,7 @@ public class AgentChatHistoryController {
     public Result<Void> deleteBySessionId(@PathVariable("agentId") String agentId,
             @PathVariable("sessionId") String sessionId) {
         checkAgentPermission(agentId);
+        requireAgentWrite(agentId);
         agentChatHistoryService.deleteBySessionId(agentId, sessionId);
         return new Result<Void>().ok(null);
     }
@@ -133,6 +138,7 @@ public class AgentChatHistoryController {
     public Result<Void> deleteByMessageId(@PathVariable("agentId") String agentId,
             @PathVariable("messageId") Long messageId) {
         checkAgentPermission(agentId);
+        requireAgentWrite(agentId);
         agentChatHistoryService.deleteByMessageId(agentId, messageId);
         return new Result<Void>().ok(null);
     }
@@ -296,5 +302,13 @@ public class AgentChatHistoryController {
         if (!agentService.checkAgentPermission(agentId, user.getId())) {
             throw new RenException(ErrorCode.CHAT_HISTORY_NO_PERMISSION);
         }
+    }
+
+    private void requireAgentWrite(String agentId) {
+        AgentEntity agent = agentService.getAgentById(agentId);
+        if (agent == null) {
+            throw new RenException(ErrorCode.AGENT_NOT_FOUND);
+        }
+        workspacePermissionService.requireWrite(agent.getWorkspaceId());
     }
 }

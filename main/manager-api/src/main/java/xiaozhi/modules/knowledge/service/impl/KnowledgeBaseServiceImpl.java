@@ -33,6 +33,8 @@ import xiaozhi.modules.model.dao.ModelConfigDao;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
 import xiaozhi.modules.security.user.SecurityUser;
+import xiaozhi.modules.workspace.service.WorkspacePermissionService;
+import xiaozhi.modules.workspace.service.WorkspaceService;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -55,6 +57,8 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
     private final ModelConfigService modelConfigService;
     private final ModelConfigDao modelConfigDao;
     private final RedisUtils redisUtils;
+    private final WorkspaceService workspaceService;
+    private final WorkspacePermissionService workspacePermissionService;
 
     @Override
     public PageData<KnowledgeBaseDTO> getPageList(KnowledgeBaseDTO knowledgeBaseDTO, Integer page, Integer limit) {
@@ -64,7 +68,7 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
         if (knowledgeBaseDTO != null) {
             queryWrapper.like(StringUtils.isNotBlank(knowledgeBaseDTO.getName()), "name", knowledgeBaseDTO.getName());
             queryWrapper.eq(knowledgeBaseDTO.getStatus() != null, "status", knowledgeBaseDTO.getStatus());
-            queryWrapper.eq("creator", knowledgeBaseDTO.getCreator());
+            queryWrapper.eq("workspace_id", workspaceService.getCurrentWorkspaceEntity().getId());
         }
         queryWrapper.orderByDesc("created_at");
 
@@ -255,6 +259,7 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
 
             // 3. Local Save (Shadow)
             KnowledgeBaseEntity entity = ConvertUtils.sourceToTarget(dto, KnowledgeBaseEntity.class);
+            entity.setWorkspaceId(workspaceService.getCurrentWorkspaceEntity().getId());
 
             // [Production Fix] 统一本地 ID 与 RAGFlow ID，防止前端调用 /delete 或 /update 时因 ID 混淆（本地
             // UUID vs RAG UUID）导致 10163 错误
@@ -319,6 +324,7 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
             log.error("Update failed: Entity not found for ID={}", dto.getId());
             throw new RenException(ErrorCode.Knowledge_Base_RECORD_NOT_EXISTS);
         }
+        workspacePermissionService.requireWrite(entity.getWorkspaceId());
 
         checkDuplicateName(dto.getName(), dto.getId());
 
@@ -407,6 +413,7 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
             log.warn("记录不存在，datasetId: {}", datasetId);
             throw new RenException(ErrorCode.Knowledge_Base_RECORD_NOT_EXISTS);
         }
+        workspacePermissionService.requireWrite(entity.getWorkspaceId());
         log.info("找到记录: ID={}, datasetId={}, ragModelId={}",
                 entity.getId(), entity.getDatasetId(), entity.getRagModelId());
 
@@ -508,7 +515,7 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
         if (StringUtils.isBlank(name))
             return;
         QueryWrapper<KnowledgeBaseEntity> qw = new QueryWrapper<>();
-        qw.eq("name", name).eq("creator", SecurityUser.getUserId());
+        qw.eq("name", name).eq("workspace_id", workspaceService.getCurrentWorkspaceEntity().getId());
         if (excludeId != null)
             qw.ne("id", excludeId);
         if (knowledgeBaseDao.selectCount(qw) > 0) {

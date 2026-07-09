@@ -70,6 +70,13 @@ const routes = [
     }
   },
   {
+    path: '/organization-management',
+    name: 'OrganizationManagement',
+    component: function () {
+      return import('../views/OrganizationManagement.vue')
+    }
+  },
+  {
     path: '/model-config',
     name: 'ModelConfig',
     component: function () {

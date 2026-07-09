@@ -22,6 +22,9 @@ public class AgentEntity {
     @Schema(description = "所属用户ID")
     private Long userId;
 
+    @Schema(description = "所属工作空间ID")
+    private String workspaceId;
+
     @Schema(description = "智能体编码")
     private String agentCode;
 

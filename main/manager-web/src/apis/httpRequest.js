@@ -33,6 +33,10 @@ function sendRequest() {
             if (isNotNull(store.getters.getToken)) {
                 this._header.Authorization = 'Bearer ' + (JSON.parse(store.getters.getToken)).token
             }
+            const workspaceId = localStorage.getItem('currentWorkspaceId')
+            if (workspaceId) {
+                this._header['X-Workspace-Id'] = workspaceId
+            }
 
             // 打印请求信息
             fly.request(this._url, this._data, {

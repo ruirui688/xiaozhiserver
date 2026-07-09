@@ -36,6 +36,8 @@ export default new Vuex.Store({
     setToken(state, token) {
       state.token = token
       localStorage.setItem('token', token)
+      localStorage.removeItem('currentWorkspaceId')
+      localStorage.removeItem('currentWorkspaceCanWrite')
     },
     setUserInfo(state, userInfo) {
       state.userInfo = userInfo
@@ -50,6 +52,8 @@ export default new Vuex.Store({
       state.userInfo = {}
       localStorage.removeItem('token')
       localStorage.removeItem('userInfo')
+      localStorage.removeItem('currentWorkspaceId')
+      localStorage.removeItem('currentWorkspaceCanWrite')
     }
   },
   actions: {

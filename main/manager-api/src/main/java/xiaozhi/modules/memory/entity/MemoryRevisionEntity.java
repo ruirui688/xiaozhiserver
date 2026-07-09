@@ -17,6 +17,7 @@ public class MemoryRevisionEntity {
     private String revisionId;
     private String memoryId;
     private String agentId;
+    private String workspaceId;
     private String revisionAction;
     @TableField("before_payload")
     private String beforePayload;

@@ -16,7 +16,7 @@
             <div class="hi-hint">
               let's have a wonderful day!
             </div>
-            <div class="add-device-btn">
+            <div v-if="canWrite" class="add-device-btn">
               <div class="left-add" @click="showAddDialog">
                 {{ $t('home.addAgent') }}
               </div>
@@ -40,6 +40,7 @@
 
           <template v-else>
             <DeviceItem v-for="(item, index) in devices" :key="index" :device="item" :feature-status="featureStatus" 
+              :can-write="canWrite"
               @configure="goToRoleConfig" @deviceManage="handleDeviceManage" @delete="handleDeleteAgent" 
               @chat-history="handleShowChatHistory" />
           </template>
@@ -79,6 +80,7 @@ export default {
       showChatHistory: false,
       currentAgentId: '',
       currentAgentName: '',
+      canWrite: localStorage.getItem('currentWorkspaceCanWrite') !== 'false',
       // 功能状态
       featureStatus: {
         voiceprintRecognition: false,
@@ -89,6 +91,7 @@ export default {
   },
 
   async mounted() {
+    this.loadWorkspacePermission();
     this.fetchAgentList();
     await this.loadFeatureStatus();
   },
@@ -104,8 +107,19 @@ export default {
         knowledgeBase: config.knowledgeBase
       };
     },
+    loadWorkspacePermission() {
+      Api.workspace.current(({ data }) => {
+        if (data && data.code === 0 && data.data) {
+          this.canWrite = Boolean(data.data.canWrite);
+          localStorage.setItem('currentWorkspaceCanWrite', this.canWrite ? 'true' : 'false');
+        }
+      });
+    },
     
     showAddDialog() {
+      if (!this.canWrite) {
+        return;
+      }
       this.addDeviceDialogVisible = true
     },
     goToRoleConfig() {

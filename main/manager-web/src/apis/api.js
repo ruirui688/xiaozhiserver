@@ -14,6 +14,7 @@ import correctWord from './module/correctWord.js'
 import addressBook from './module/addressBook.js'
 import music from './module/music.js'
 import memory from './module/memory.js'
+import workspace from './module/workspace.js'
 
 
 
@@ -58,5 +59,6 @@ export default {
     correctWord,
     addressBook,
     music,
-    memory
+    memory,
+    workspace
   }

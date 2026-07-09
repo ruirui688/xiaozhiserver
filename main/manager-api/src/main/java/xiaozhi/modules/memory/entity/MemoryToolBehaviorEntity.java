@@ -18,6 +18,7 @@ public class MemoryToolBehaviorEntity {
     private String behaviorId;
     private String agentId;
     private Long userId;
+    private String workspaceId;
     private String scopeType;
     private String scopeId;
     private String toolName;

@@ -17,6 +17,7 @@ import xiaozhi.common.exception.ErrorCode;
 import xiaozhi.common.exception.RenException;
 import xiaozhi.common.user.UserDetail;
 import xiaozhi.common.utils.Result;
+import xiaozhi.modules.agent.entity.AgentEntity;
 import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.memory.dto.MemoryFactDTO;
 import xiaozhi.modules.memory.dto.MemoryForgetDTO;
@@ -26,6 +27,7 @@ import xiaozhi.modules.memory.service.MemoryService;
 import xiaozhi.modules.memory.vo.MemoryDashboardVO;
 import xiaozhi.modules.memory.vo.MemoryRebuildResultVO;
 import xiaozhi.modules.security.user.SecurityUser;
+import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 
 @RestController
 @RequestMapping("agent/{agentId}/memories")
@@ -34,6 +36,7 @@ import xiaozhi.modules.security.user.SecurityUser;
 public class MemoryManagementController {
     private final MemoryService memoryService;
     private final AgentService agentService;
+    private final WorkspacePermissionService workspacePermissionService;
 
     @GetMapping
     @Operation(summary = "获取智能体长期记忆维护视图")
@@ -52,6 +55,7 @@ public class MemoryManagementController {
         if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
             throw new RenException(ErrorCode.NO_PERMISSION);
         }
+        requireAgentWrite(agentId);
         return new Result<String>().ok(memoryService.createFact(agentId, dto, "user", currentUserId()));
     }
 
@@ -63,6 +67,7 @@ public class MemoryManagementController {
         if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
             throw new RenException(ErrorCode.NO_PERMISSION);
         }
+        requireAgentWrite(agentId);
         memoryService.updateFact(agentId, memoryId, dto, "user", currentUserId());
         return new Result<Void>().ok(null);
     }
@@ -74,6 +79,7 @@ public class MemoryManagementController {
         if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
             throw new RenException(ErrorCode.NO_PERMISSION);
         }
+        requireAgentWrite(agentId);
         memoryService.archiveFact(agentId, memoryId, "user", currentUserId());
         return new Result<Void>().ok(null);
     }
@@ -85,6 +91,7 @@ public class MemoryManagementController {
         if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
             throw new RenException(ErrorCode.NO_PERMISSION);
         }
+        requireAgentWrite(agentId);
         memoryService.deleteFact(agentId, memoryId, "user", currentUserId());
         return new Result<Void>().ok(null);
     }
@@ -96,6 +103,7 @@ public class MemoryManagementController {
         if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
             throw new RenException(ErrorCode.NO_PERMISSION);
         }
+        requireAgentWrite(agentId);
         memoryService.confirmCandidate(agentId, candidateId, "user", currentUserId());
         return new Result<Void>().ok(null);
     }
@@ -107,6 +115,7 @@ public class MemoryManagementController {
         if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
             throw new RenException(ErrorCode.NO_PERMISSION);
         }
+        requireAgentWrite(agentId);
         memoryService.rejectCandidate(agentId, candidateId, "user", currentUserId());
         return new Result<Void>().ok(null);
     }
@@ -118,6 +127,7 @@ public class MemoryManagementController {
         if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
             throw new RenException(ErrorCode.NO_PERMISSION);
         }
+        requireAgentWrite(agentId);
         return new Result<MemoryRebuildResultVO>().ok(memoryService.clearMemories(agentId, "user", currentUserId()));
     }
 
@@ -129,6 +139,7 @@ public class MemoryManagementController {
         if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
             throw new RenException(ErrorCode.NO_PERMISSION);
         }
+        requireAgentWrite(agentId);
         if (dto == null) {
             dto = new MemoryRebuildRequestDTO();
         }
@@ -145,6 +156,7 @@ public class MemoryManagementController {
         if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
             throw new RenException(ErrorCode.NO_PERMISSION);
         }
+        requireAgentWrite(agentId);
         if (dto == null) {
             dto = new MemoryRebuildRequestDTO();
         }
@@ -160,6 +172,7 @@ public class MemoryManagementController {
         if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
             throw new RenException(ErrorCode.NO_PERMISSION);
         }
+        requireAgentWrite(agentId);
         return new Result<MemoryRebuildResultVO>().ok(
                 memoryService.reviewActiveMemories(agentId, true, "user", currentUserId()));
     }
@@ -171,6 +184,7 @@ public class MemoryManagementController {
         if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
             throw new RenException(ErrorCode.NO_PERMISSION);
         }
+        requireAgentWrite(agentId);
         return new Result<MemoryRebuildResultVO>().ok(
                 memoryService.reviewActiveMemories(agentId, false, "user", currentUserId()));
     }
@@ -182,6 +196,7 @@ public class MemoryManagementController {
         if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
             throw new RenException(ErrorCode.NO_PERMISSION);
         }
+        requireAgentWrite(agentId);
         dto.setAgentId(agentId);
         memoryService.remember(dto, "user", currentUserId());
         return new Result<Void>().ok(null);
@@ -194,6 +209,7 @@ public class MemoryManagementController {
         if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
             throw new RenException(ErrorCode.NO_PERMISSION);
         }
+        requireAgentWrite(agentId);
         dto.setAgentId(agentId);
         memoryService.forget(dto, "user", currentUserId());
         return new Result<Void>().ok(null);
@@ -202,5 +218,13 @@ public class MemoryManagementController {
     private String currentUserId() {
         UserDetail user = SecurityUser.getUser();
         return user == null ? null : String.valueOf(user.getId());
+    }
+
+    private void requireAgentWrite(String agentId) {
+        AgentEntity agent = agentService.getAgentById(agentId);
+        if (agent == null) {
+            throw new RenException(ErrorCode.AGENT_NOT_FOUND);
+        }
+        workspacePermissionService.requireWrite(agent.getWorkspaceId());
     }
 }

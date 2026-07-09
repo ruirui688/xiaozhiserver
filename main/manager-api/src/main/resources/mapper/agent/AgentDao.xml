@@ -9,6 +9,7 @@
     <resultMap id="AgentInfoMap" type="xiaozhi.modules.agent.vo.AgentInfoVO">
         <id column="id"           property="id"/>
         <result column="userId"    property="userId"/>
+        <result column="workspaceId" property="workspaceId"/>
         <result column="agentCode" property="agentCode"/>
         <result column="agentName" property="agentName"/>
         <result column="asrModelId" property="asrModelId"/>
@@ -43,6 +44,7 @@
     <select id="selectAgentInfoById" resultMap="AgentInfoMap">
         SELECT a.id,
                a.user_id           AS userId,
+               a.workspace_id      AS workspaceId,
                a.agent_code        AS agentCode,
                a.agent_name        AS agentName,
                a.asr_model_id      AS asrModelId,
@@ -84,4 +86,4 @@
         FROM ai_agent a
         WHERE a.id = #{agentId}
     </select>
-</mapper> 
+</mapper>

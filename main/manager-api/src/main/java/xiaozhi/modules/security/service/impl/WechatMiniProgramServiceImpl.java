@@ -19,6 +19,7 @@ import xiaozhi.modules.security.service.SysUserTokenService;
 import xiaozhi.modules.security.service.WechatMiniProgramService;
 import xiaozhi.modules.sys.dto.SysUserDTO;
 import xiaozhi.modules.sys.service.SysUserService;
+import xiaozhi.modules.workspace.service.WorkspaceService;
 
 @Slf4j
 @Service
@@ -32,6 +33,7 @@ public class WechatMiniProgramServiceImpl implements WechatMiniProgramService {
     private final RedisUtils redisUtils;
     private final SysUserService sysUserService;
     private final SysUserTokenService sysUserTokenService;
+    private final WorkspaceService workspaceService;
 
     @Value("${wechat.mini-program.app-id:}")
     private String appId;
@@ -52,6 +54,7 @@ public class WechatMiniProgramServiceImpl implements WechatMiniProgramService {
         SysUserDTO user = sysUserService.getByWxOpenid(openid);
         if (user == null) {
             user = sysUserService.createWechatUser(openid, json.getStr("unionid"));
+            workspaceService.ensureDefaultWorkspace(user.getId());
         }
         return sysUserTokenService.createToken(user.getId());
     }

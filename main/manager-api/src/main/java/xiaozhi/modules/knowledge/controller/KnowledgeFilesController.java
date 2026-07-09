@@ -26,6 +26,7 @@ import xiaozhi.modules.knowledge.dto.document.RetrievalDTO;
 import xiaozhi.modules.knowledge.service.KnowledgeBaseService;
 import xiaozhi.modules.knowledge.service.KnowledgeFilesService;
 import xiaozhi.modules.security.user.SecurityUser;
+import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 
 @AllArgsConstructor
 @RestController
@@ -35,23 +36,22 @@ public class KnowledgeFilesController {
 
     private final KnowledgeFilesService knowledgeFilesService;
     private final KnowledgeBaseService knowledgeBaseService;
+    private final WorkspacePermissionService workspacePermissionService;
 
     /**
      * 验证当前用户是否有权限操作指定知识库
      * 
      * @param datasetId 知识库ID
      */
-    private void validateKnowledgeBasePermission(String datasetId) {
-        // 获取当前登录用户ID
-        Long currentUserId = SecurityUser.getUserId();
-
+    private void validateKnowledgeBaseReadPermission(String datasetId) {
         // 获取知识库信息
         KnowledgeBaseDTO knowledgeBase = knowledgeBaseService.getByDatasetId(datasetId);
+        workspacePermissionService.requireRead(knowledgeBase.getWorkspaceId());
+    }
 
-        // 检查权限：用户只能操作自己创建的知识库
-        if (knowledgeBase.getCreator() == null || !knowledgeBase.getCreator().equals(currentUserId)) {
-            throw new RenException(ErrorCode.NO_PERMISSION);
-        }
+    private void validateKnowledgeBaseWritePermission(String datasetId) {
+        KnowledgeBaseDTO knowledgeBase = knowledgeBaseService.getByDatasetId(datasetId);
+        workspacePermissionService.requireWrite(knowledgeBase.getWorkspaceId());
     }
 
     @GetMapping("/documents")
@@ -64,7 +64,7 @@ public class KnowledgeFilesController {
             @RequestParam(required = false, defaultValue = "1") Integer page,
             @RequestParam(required = false, defaultValue = "10") Integer page_size) {
         // 验证知识库权限
-        validateKnowledgeBasePermission(datasetId);
+        validateKnowledgeBaseReadPermission(datasetId);
 
         // 组装参数
         KnowledgeFilesDTO knowledgeFilesDTO = new KnowledgeFilesDTO();
@@ -84,7 +84,7 @@ public class KnowledgeFilesController {
             @RequestParam(required = false, defaultValue = "1") Integer page,
             @RequestParam(required = false, defaultValue = "10") Integer page_size) {
         // 验证知识库权限
-        validateKnowledgeBasePermission(datasetId);
+        validateKnowledgeBaseReadPermission(datasetId);
         // 组装参数
         KnowledgeFilesDTO knowledgeFilesDTO = new KnowledgeFilesDTO();
         knowledgeFilesDTO.setDatasetId(datasetId);
@@ -105,7 +105,7 @@ public class KnowledgeFilesController {
             @RequestParam(required = false) String parserConfig) {
 
         // 验证知识库权限
-        validateKnowledgeBasePermission(datasetId);
+        validateKnowledgeBaseWritePermission(datasetId);
 
         KnowledgeFilesDTO resp = knowledgeFilesService.uploadDocument(datasetId, file, name,
                 metaFields != null ? parseJsonMap(metaFields) : null,
@@ -120,7 +120,7 @@ public class KnowledgeFilesController {
     public Result<Void> delete(@PathVariable("dataset_id") String datasetId,
             @RequestBody DocumentDTO.BatchIdReq req) {
         // 验证知识库权限
-        validateKnowledgeBasePermission(datasetId);
+        validateKnowledgeBaseWritePermission(datasetId);
 
         knowledgeFilesService.deleteDocuments(datasetId, req);
         return new Result<>();
@@ -132,7 +132,7 @@ public class KnowledgeFilesController {
     public Result<Void> deleteSingle(@PathVariable("dataset_id") String datasetId,
             @PathVariable("document_id") String documentId) {
         // 验证知识库权限
-        validateKnowledgeBasePermission(datasetId);
+        validateKnowledgeBaseWritePermission(datasetId);
 
         DocumentDTO.BatchIdReq req = new DocumentDTO.BatchIdReq();
         req.setIds(java.util.Collections.singletonList(documentId));
@@ -146,7 +146,7 @@ public class KnowledgeFilesController {
     public Result<Void> parseDocuments(@PathVariable("dataset_id") String datasetId,
             @RequestBody Map<String, List<String>> requestBody) {
         // 验证知识库权限
-        validateKnowledgeBasePermission(datasetId);
+        validateKnowledgeBaseWritePermission(datasetId);
 
         List<String> documentIds = requestBody.get("document_ids");
         if (documentIds == null || documentIds.isEmpty()) {
@@ -173,7 +173,7 @@ public class KnowledgeFilesController {
             @RequestParam(required = false) String id) {
 
         // 验证权限 (内部已包含知识库存在性校验与归属权校验)
-        validateKnowledgeBasePermission(datasetId);
+        validateKnowledgeBaseReadPermission(datasetId);
 
         // 构建请求对象
         ChunkDTO.ListReq req = ChunkDTO.ListReq.builder()
@@ -196,7 +196,7 @@ public class KnowledgeFilesController {
             @RequestBody RetrievalDTO.TestReq req) {
 
         // 验证知识库权限
-        validateKnowledgeBasePermission(datasetId);
+        validateKnowledgeBaseReadPermission(datasetId);
 
         // 业务下沉逻辑：如果未指定知识库ID，则设为当前路径中的 datasetId
         if (req.getDatasetIds() == null || req.getDatasetIds().isEmpty()) {

@@ -7,7 +7,7 @@
       </div>
     </el-tooltip>
       <div>
-        <img src="@/assets/home/delete.png" alt="" style="width: 18px;height: 18px;margin-right: 10px;"
+        <img v-if="canWrite" src="@/assets/home/delete.png" alt="" style="width: 18px;height: 18px;margin-right: 10px;"
           @click.stop="handleDelete" />
         <el-tooltip class="item" effect="light" :content="device.systemPrompt" placement="top"
           popper-class="device-item-tooltip"> 
@@ -22,10 +22,10 @@
       {{ $t('home.voiceModel') }}：{{ device.ttsModelName }} ({{ device.ttsVoiceName }})
     </div>
     <div style="display: flex;gap: 10px;align-items: center;">
-      <div class="settings-btn" @click="handleConfigure">
+      <div v-if="canWrite" class="settings-btn" @click="handleConfigure">
         {{ $t('home.configureRole') }}
       </div>
-      <div v-if="featureStatus.voiceprintRecognition" class="settings-btn" @click="handleVoicePrint">
+      <div v-if="canWrite && featureStatus.voiceprintRecognition" class="settings-btn" @click="handleVoicePrint">
         {{ $t('home.voiceprintRecognition') }}
       </div>
       <div class="settings-btn" @click="handleDeviceManage">
@@ -68,7 +68,8 @@ export default {
         voiceClone: false,
         knowledgeBase: false
       })
-    }
+    },
+    canWrite: { type: Boolean, default: true }
   },
   data() {
     return { switchValue: false }

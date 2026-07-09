@@ -37,6 +37,7 @@ import xiaozhi.modules.device.service.DeviceService;
 import xiaozhi.modules.device.vo.UserShowDeviceListVO;
 import xiaozhi.modules.security.user.SecurityUser;
 import xiaozhi.modules.sys.service.SysParamsService;
+import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 
 @Tag(name = "设备管理")
 @RestController
@@ -46,13 +47,15 @@ public class DeviceController {
     private final DeviceAddressBookService deviceAddressBookService;
     private final RedisUtils redisUtils;
     private final SysParamsService sysParamsService;
+    private final WorkspacePermissionService workspacePermissionService;
 
     public DeviceController(DeviceService deviceService, DeviceAddressBookService deviceAddressBookService,
-            RedisUtils redisUtils, SysParamsService sysParamsService) {
+            RedisUtils redisUtils, SysParamsService sysParamsService, WorkspacePermissionService workspacePermissionService) {
         this.deviceService = deviceService;
         this.deviceAddressBookService = deviceAddressBookService;
         this.redisUtils = redisUtils;
         this.sysParamsService = sysParamsService;
+        this.workspacePermissionService = workspacePermissionService;
     }
 
     @PostMapping("/bind/{agentId}/{deviceCode}")
@@ -122,9 +125,7 @@ public class DeviceController {
             return new Result<Void>().error("设备不存在");
         }
         UserDetail user = SecurityUser.getUser();
-        if (!entity.getUserId().equals(user.getId())) {
-            return new Result<Void>().error("设备不存在");
-        }
+        workspacePermissionService.requireWrite(entity.getWorkspaceId());
         BeanUtils.copyProperties(deviceUpdateDTO, entity);
         deviceService.updateById(entity);
         return new Result<Void>();

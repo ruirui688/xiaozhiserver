@@ -27,6 +27,9 @@ public class KnowledgeBaseEntity {
     @Schema(description = "RAG模型配置ID (连接RAGFlow的凭证指针)")
     private String ragModelId;
 
+    @Schema(description = "所属工作空间ID")
+    private String workspaceId;
+
     @Schema(description = "租户ID")
     private String tenantId;
 

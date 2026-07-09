@@ -18,6 +18,7 @@ public class MemoryFactEntity {
     private String memoryId;
     private String agentId;
     private Long userId;
+    private String workspaceId;
     private String macAddress;
     private String scopeType;
     private String scopeId;

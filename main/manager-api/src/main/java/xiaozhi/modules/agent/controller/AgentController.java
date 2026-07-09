@@ -59,6 +59,7 @@ import xiaozhi.modules.agent.vo.AgentInfoVO;
 import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.device.service.DeviceService;
 import xiaozhi.modules.security.user.SecurityUser;
+import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 
 @Tag(name = "智能体管理")
 @AllArgsConstructor
@@ -77,6 +78,7 @@ public class AgentController {
     private final RedisUtils redisUtils;
     private final AgentTagService agentTagService;
     private final CorrectWordFileService correctWordFileService;
+    private final WorkspacePermissionService workspacePermissionService;
 
     @GetMapping("/list")
     @Operation(summary = "获取用户智能体列表")
@@ -183,6 +185,8 @@ public class AgentController {
     @Operation(summary = "删除智能体")
     @RequiresPermissions("sys:role:normal")
     public Result<Void> delete(@PathVariable String id) {
+        AgentInfoVO agent = agentService.getAgentById(id);
+        workspacePermissionService.requireWrite(agent.getWorkspaceId());
         // 先删除关联的设备
         deviceService.deleteByAgentId(id);
         // 删除关联的聊天记录
@@ -344,6 +348,8 @@ public class AgentController {
     @Operation(summary = "保存智能体的标签")
     @RequiresPermissions("sys:role:normal")
     public Result<Void> saveAgentTags(@PathVariable String id, @RequestBody Map<String, Object> params) {
+        AgentInfoVO agent = agentService.getAgentById(id);
+        workspacePermissionService.requireWrite(agent.getWorkspaceId());
         List<String> tagIds = (List<String>) params.get("tagIds");
         List<String> tagNames = (List<String>) params.get("tagNames");
         agentTagService.saveAgentTags(id, tagIds, tagNames);
