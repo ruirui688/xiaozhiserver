@@ -49,6 +49,10 @@ server {
         proxy_pass http://127.0.0.1:8003/mcp/vision/explain;
     }
 
+    location /device/mcp/ {
+        proxy_pass http://127.0.0.1:8003/device/mcp/;
+    }
+
     location /xiaozhi/ {
         proxy_pass http://127.0.0.1:8002/xiaozhi/;
     }
