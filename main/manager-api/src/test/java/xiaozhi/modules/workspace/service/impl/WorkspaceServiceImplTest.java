@@ -213,10 +213,9 @@ class WorkspaceServiceImplTest {
     }
 
     @Test
-    void ownerCannotLeaveWhenLastOwner() {
+    void ownerCannotLeaveWorkspaceDirectly() {
         when(memberDao.selectOne(any(Wrapper.class)))
                 .thenReturn(member("workspace-a", USER_ID, WorkspaceService.ROLE_OWNER));
-        when(memberDao.selectCount(any(Wrapper.class))).thenReturn(1L);
 
         try (MockedStatic<SecurityUser> ignored = mockSecurityUser(USER_ID, false)) {
             assertThrows(RenException.class, () -> workspaceService.leaveWorkspace("workspace-a"));

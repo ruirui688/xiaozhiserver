@@ -238,8 +238,8 @@ public class WorkspaceServiceImpl extends BaseServiceImpl<WorkspaceDao, Workspac
         if (member == null) {
             throw new RenException(ErrorCode.NO_PERMISSION);
         }
-        if (ROLE_OWNER.equals(member.getRole()) && countOwners(workspaceId) <= 1) {
-            throw new RenException("不能退出最后一个所有者，请先转让所有者");
+        if (ROLE_OWNER.equals(member.getRole())) {
+            throw new RenException("所有者不能直接退出工作空间，请先转让所有者");
         }
         disableMember(workspaceId, userId);
     }

@@ -270,9 +270,9 @@ DELETE /workspace/{workspaceId}/members/me
 
 ```text
 1. 当前用户必须是该工作空间 active 成员
-2. 如果当前用户是 OWNER 且是最后一个 OWNER
+2. 如果当前用户是 OWNER
    -> 拒绝退出
-   -> 要求先转让 OWNER
+   -> 要求先转让或调整所有者身份
 3. 退出时只停用成员关系，不删除工作空间资源
 ```
 

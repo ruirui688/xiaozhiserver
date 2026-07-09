@@ -33,7 +33,7 @@
               <span class="member-hint">成员 {{ members.length }}/5，共享智能体、设备、记忆、聊天记录、知识库和声纹等业务资源</span>
             </div>
             <div class="member-actions">
-              <el-button size="small" @click="leaveWorkspace">退出工作空间</el-button>
+              <el-button v-if="canLeaveWorkspace" size="small" @click="leaveWorkspace">退出工作空间</el-button>
               <el-button
                 v-if="canWrite"
                 size="small"
@@ -138,6 +138,9 @@ export default {
     },
     isOwner() {
       return this.currentWorkspace && this.currentWorkspace.currentUserRole === "OWNER";
+    },
+    canLeaveWorkspace() {
+      return this.currentWorkspace && this.currentWorkspace.currentUserRole !== "OWNER";
     },
     currentUserId() {
       const userInfo = this.$store.state.userInfo || {};
