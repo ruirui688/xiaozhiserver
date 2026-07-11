@@ -1,5 +1,6 @@
 import json
 import gzip
+import math
 import uuid
 import asyncio
 import websockets
@@ -50,6 +51,22 @@ class ASRProvider(ASRProviderBase):
         self.rate = config.get("sample_rate", 16000)
         self.bits = config.get("bits", 16)
         self.channel = config.get("channel", 1)
+        self.init_timeout_seconds = self._positive_seconds(
+            config, "init_timeout_seconds", 10
+        )
+        self.response_timeout_seconds = self._positive_seconds(
+            config, "response_timeout_seconds", 15
+        )
+
+    @staticmethod
+    def _positive_seconds(config, key, default):
+        try:
+            value = float(config.get(key, default))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{key} 必须是大于 0 的数字") from exc
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError(f"{key} 必须是大于 0 的数字")
+        return value
 
     async def open_audio_channels(self, conn):
         await super().open_audio_channels(conn)
@@ -89,7 +106,15 @@ class ASRProvider(ASRProviderBase):
                     await self.asr_ws.send(full_client_request)
 
                     # 等待初始化响应
-                    init_res = await self.asr_ws.recv()
+                    try:
+                        init_res = await asyncio.wait_for(
+                            self.asr_ws.recv(), timeout=self.init_timeout_seconds
+                        )
+                    except asyncio.TimeoutError as exc:
+                        raise TimeoutError(
+                            "等待ASR初始化响应超时: "
+                            f"timeout={self.init_timeout_seconds:.1f}s"
+                        ) from exc
                     result = self.parse_response(init_res)
                     logger.bind(tag=TAG).info(f"收到初始化响应: {result}")
 
@@ -133,6 +158,8 @@ class ASRProvider(ASRProviderBase):
                     await self.asr_ws.close()
                     self.asr_ws = None
                 self.is_processing = False
+                self._is_stopping = False
+                conn.reset_audio_states()
                 return
 
         # 发送当前音频数据
@@ -153,7 +180,11 @@ class ASRProvider(ASRProviderBase):
                 # 获取当前连接的音频数据
                 audio_data = conn.asr_audio
                 try:
-                    response = await self.asr_ws.recv()
+                    # 每收到一个中间结果都会重新计算等待时间，兼容持续返回
+                    # 中间结果的长语音；上游半开且长期无响应时则主动清理连接。
+                    response = await asyncio.wait_for(
+                        self.asr_ws.recv(), timeout=self.response_timeout_seconds
+                    )
                     result = self.parse_response(response)
                     logger.bind(tag=TAG).debug(f"收到ASR结果: {result}")
 
@@ -221,6 +252,13 @@ class ASRProvider(ASRProviderBase):
 
                 except websockets.ConnectionClosed:
                     logger.bind(tag=TAG).info("ASR服务连接已关闭")
+                    self.is_processing = False
+                    break
+                except asyncio.TimeoutError:
+                    logger.bind(tag=TAG).error(
+                        "等待ASR结果超时: "
+                        f"timeout={self.response_timeout_seconds:.1f}s"
+                    )
                     self.is_processing = False
                     break
                 except Exception as e:

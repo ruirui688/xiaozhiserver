@@ -64,6 +64,7 @@ from core.device_runtime_registry import register_connection, unregister_connect
 
 
 TAG = __name__
+CLOSE_TIMEOUT_SECONDS = 10.0
 
 auto_import_modules("plugins_func.functions")
 
@@ -77,6 +78,35 @@ def _sanitize_log_text(value, limit=500):
         text,
     )
     return text[:limit]
+
+
+def _sanitize_headers_for_log(headers):
+    """Return a copy of request headers with credential-bearing values redacted."""
+    if not headers:
+        return {}
+
+    sanitized = {}
+    for key, value in headers.items():
+        normalized_key = str(key).strip().lower().replace("_", "-")
+        is_sensitive = (
+            normalized_key
+            in {
+                "authorization",
+                "proxy-authorization",
+                "cookie",
+                "set-cookie",
+            }
+            or "token" in normalized_key
+            or "api-key" in normalized_key
+            or "apikey" in normalized_key
+            or "secret" in normalized_key
+        )
+        sanitized[key] = "***" if is_sensitive else value
+    return sanitized
+
+
+def _format_headers_for_log(headers, limit=500):
+    return str(_sanitize_headers_for_log(headers))[:limit]
 
 
 class TTSException(RuntimeError):
@@ -152,6 +182,12 @@ class ConnectionHandler:
         self.loop = None  # 在 handle_connection 中获取运行中的事件循环
         self.stop_event = threading.Event()
         self.executor = ThreadPoolExecutor(max_workers=5)
+        self.closing = False
+        self.closed = False
+        self._close_lock = asyncio.Lock()
+        self._lifecycle_lock = threading.Lock()
+        self._background_initialize_task = None
+        self._components_initialize_future = None
 
         # client_abort 跨线程读写锁（event loop / TTS text / TTS audio 线程）
         self._abort_lock = threading.Lock()
@@ -251,7 +287,7 @@ class ConnectionHandler:
             else:
                 self.client_ip = ws.remote_address[0]
             self.logger.bind(tag=TAG).info(
-                f"{self.client_ip} conn - Headers: {_sanitize_log_text(self.headers)}"
+                f"{self.client_ip} conn - Headers: {_format_headers_for_log(self.headers)}"
             )
 
             self.device_id = self.headers.get("device-id", None)
@@ -277,7 +313,10 @@ class ConnectionHandler:
             self.logger.bind(tag=TAG).info(f"配置输出音频采样率为: {self.sample_rate}")
 
             # 在后台初始化配置和组件（完全不阻塞主循环）
-            asyncio.create_task(self._background_initialize())
+            self._background_initialize_task = asyncio.create_task(
+                self._background_initialize(),
+                name=f"connection-init-{self.session_id}",
+            )
 
             try:
                 async for message in self.websocket:
@@ -337,9 +376,100 @@ class ConnectionHandler:
         t.start()
         return t
 
+    def _begin_closing(self):
+        """Publish shutdown intent before any slow cleanup starts."""
+        lifecycle_lock = getattr(self, "_lifecycle_lock", None)
+        if lifecycle_lock is not None:
+            with lifecycle_lock:
+                first_close = not self.closing
+                self.closing = True
+        else:
+            first_close = not getattr(self, "closing", False)
+            self.closing = True
+
+        stop_event = getattr(self, "stop_event", None)
+        if stop_event is not None:
+            stop_event.set()
+
+        abort_lock = getattr(self, "_abort_lock", None)
+        if abort_lock is not None:
+            with abort_lock:
+                self.client_abort = True
+                if first_close:
+                    self.abort_generation += 1
+        else:
+            self.client_abort = True
+            if first_close:
+                self.abort_generation = getattr(self, "abort_generation", 0) + 1
+
+        if first_close:
+            rate_controller = getattr(self, "audio_rate_controller", None)
+            if rate_controller is not None:
+                try:
+                    rate_controller.stop_sending()
+                    rate_controller.reset()
+                except Exception as exc:
+                    self.logger.bind(tag=TAG).warning(
+                        f"停止音频流控器失败，继续关闭连接: {exc}"
+                    )
+
+        background_task = getattr(self, "_background_initialize_task", None)
+        if background_task is not None and not background_task.done():
+            background_task.cancel()
+        return first_close
+
+    def _assign_initialized_component(self, name, value):
+        if value is None:
+            return False
+        lifecycle_lock = getattr(self, "_lifecycle_lock", None)
+        if lifecycle_lock is None:
+            if getattr(self, "closing", False):
+                return False
+            setattr(self, name, value)
+            return True
+        with lifecycle_lock:
+            if self.closing:
+                return False
+            setattr(self, name, value)
+            return True
+
+    @staticmethod
+    def _remaining_close_time(deadline):
+        return max(0.0, deadline - time.monotonic())
+
+    @staticmethod
+    def _join_threads_until(threads, deadline):
+        for thread in threads:
+            remaining = max(0.0, deadline - time.monotonic())
+            if remaining <= 0:
+                break
+            thread.join(timeout=remaining)
+
+    async def _wait_for_background_initialize(self, deadline):
+        task = getattr(self, "_background_initialize_task", None)
+        if task is None or task.done() or task is asyncio.current_task():
+            return
+        task.cancel()
+        remaining = self._remaining_close_time(deadline)
+        if remaining <= 0:
+            return
+        done, _ = await asyncio.wait({task}, timeout=remaining)
+        if task in done:
+            try:
+                task.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                self.logger.bind(tag=TAG).warning(
+                    f"后台初始化结束时出现异常: {exc}"
+                )
+
     async def _save_and_close(self, ws):
         """保存记忆并关闭连接"""
+        deadline = time.monotonic() + CLOSE_TIMEOUT_SECONDS
+        self._begin_closing()
         threads = []
+        join_task = None
         try:
             # 守护线程1：独立生成标题（不依赖记忆模型）
             if self.session_id:
@@ -373,16 +503,28 @@ class ConnectionHandler:
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"保存记忆失败: {e}")
         finally:
-            # 等待所有记忆保存线程完成（最多等待30秒），避免守护线程被进程退出中断
-            for t in threads:
-                t.join(timeout=10)
-            # 关闭连接
+            # 记忆线程等待与连接清理并行执行，共享同一个关闭总期限。
+            if threads:
+                join_task = asyncio.create_task(
+                    asyncio.to_thread(self._join_threads_until, threads, deadline)
+                )
             try:
-                await self.close(ws)
+                await self.close(ws, _deadline=deadline)
             except Exception as close_error:
                 self.logger.bind(tag=TAG).error(
                     f"保存记忆后关闭连接失败: {close_error}"
                 )
+            finally:
+                if join_task is not None:
+                    remaining = self._remaining_close_time(deadline)
+                    if remaining > 0:
+                        done, _ = await asyncio.wait(
+                            {join_task}, timeout=remaining
+                        )
+                        if join_task not in done:
+                            join_task.cancel()
+                    else:
+                        join_task.cancel()
 
     async def _discard_message_with_bind_prompt(self):
         """丢弃消息并检查是否需要播放绑定提示"""
@@ -568,8 +710,14 @@ class ConnectionHandler:
 
     def _initialize_components(self):
         try:
+            if self.closing:
+                return
             if self.tts is None:
-                self.tts = self._initialize_tts()
+                initialized_tts = self._initialize_tts()
+                if not self._assign_initialized_component("tts", initialized_tts):
+                    return
+            if self.closing:
+                return
             # 打开语音合成通道
             tts_future = asyncio.run_coroutine_threadsafe(
                 self.tts.open_audio_channels(self), self.loop
@@ -604,13 +752,25 @@ class ConnectionHandler:
                 self.logger.bind(tag=TAG).info(f"对话历史截断已启用: max_history_turns={max_turns}")
 
             """初始化本地组件"""
-            if self.vad is None:
-                self.vad = self._vad
+            if self.closing:
+                return
+            if self.vad is None and self._vad is not None:
+                if not self._assign_initialized_component("vad", self._vad):
+                    return
             if self.asr is None:
-                self.asr = self._initialize_asr()
+                initialized_asr = self._initialize_asr()
+                if initialized_asr is not None and not self._assign_initialized_component(
+                    "asr", initialized_asr
+                ):
+                    return
 
             # 初始化声纹识别
+            if self.closing:
+                return
             self._initialize_voiceprint()
+            if self.closing:
+                self.voiceprint_provider = None
+                return
             # 打开语音识别通道
             if self.asr is not None:
                 asr_future = asyncio.run_coroutine_threadsafe(
@@ -625,6 +785,8 @@ class ConnectionHandler:
             """加载意图识别"""
             self._initialize_intent()
             """初始化上报线程"""
+            if self.closing:
+                return
             self._init_report_threads()
             """更新系统提示词"""
             self._init_prompt_enhancement()
@@ -634,7 +796,8 @@ class ConnectionHandler:
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"实例化组件失败: {e}")
 
-        self._modules_ready.set()
+        if not self.closing:
+            self._modules_ready.set()
 
     def _init_prompt_enhancement(self):
 
@@ -725,17 +888,26 @@ class ConnectionHandler:
     async def _background_initialize(self):
         """在后台初始化配置和组件（完全不阻塞主循环）"""
         try:
+            if self.closing:
+                return
             # 异步获取差异化配置
             should_initialize = await self._initialize_private_config_async()
-            if not should_initialize:
+            if not should_initialize or self.closing:
                 return
             # 在线程池中初始化组件
-            self.executor.submit(self._initialize_components)
+            executor = self.executor
+            if executor is None:
+                return
+            self._components_initialize_future = executor.submit(
+                self._initialize_components
+            )
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"后台初始化失败: {e}")
 
     async def _initialize_private_config_async(self):
         """从接口异步获取差异化配置（异步版本，不阻塞主循环）"""
+        if self.closing:
+            return False
         if not self.read_config_from_api:
             self.need_bind = False
             self.bind_completed_event.set()
@@ -747,6 +919,8 @@ class ConnectionHandler:
                 self.headers.get("device-id"),
                 self.headers.get("client-id", self.headers.get("device-id")),
             )
+            if self.closing:
+                return False
             private_config["delete_audio"] = bool(self.config.get("delete_audio", True))
             normalize_runtime_config(private_config)
             self.logger.bind(tag=TAG).info(
@@ -755,20 +929,28 @@ class ConnectionHandler:
             self.need_bind = False
             self.bind_completed_event.set()
         except DeviceNotFoundException as e:
+            if self.closing:
+                return False
             self.need_bind = True
             self.bind_completed_event.set()
             private_config = {}
         except DeviceBindException as e:
+            if self.closing:
+                return False
             self.need_bind = True
             self.bind_code = e.bind_code
             self.bind_completed_event.set()
             private_config = {}
         except Exception as e:
+            if self.closing:
+                return False
             self.logger.bind(tag=TAG).error(f"异步获取差异化配置失败: {e}")
             self.initialization_failed = True
             self.bind_completed_event.set()
             return False
 
+        if self.closing:
+            return False
         init_vad = check_vad_update(self.common_config, private_config)
         init_asr = check_asr_update(self.common_config, private_config)
         init_llm, init_tts, init_memory, init_intent = (
@@ -792,18 +974,12 @@ class ConnectionHandler:
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"初始化组件失败: {e}")
             modules = {}
-        if modules.get("tts", None) is not None:
-            self.tts = modules["tts"]
-        if modules.get("vad", None) is not None:
-            self.vad = modules["vad"]
-        if modules.get("asr", None) is not None:
-            self.asr = modules["asr"]
-        if modules.get("llm", None) is not None:
-            self.llm = modules["llm"]
-        if modules.get("intent", None) is not None:
-            self.intent = modules["intent"]
-        if modules.get("memory", None) is not None:
-            self.memory = modules["memory"]
+        if self.closing:
+            return False
+        for name in ("tts", "vad", "asr", "llm", "intent", "memory"):
+            value = modules.get(name)
+            if value is not None and not self._assign_initialized_component(name, value):
+                return False
         return True
 
     def _apply_private_runtime_config(self, private_config):
@@ -1726,16 +1902,83 @@ class ConnectionHandler:
         self._tts_started_at = 0.0
         self.logger.bind(tag=TAG).debug(f"清除服务端讲话状态")
 
-    async def close(self, ws=None):
-        """资源清理方法"""
+    async def _run_blocking_cleanup(self, callback, deadline, label):
+        remaining = self._remaining_close_time(deadline)
+        if remaining <= 0:
+            return False
+        task = asyncio.create_task(asyncio.to_thread(callback))
+        done, _ = await asyncio.wait({task}, timeout=remaining)
+        if task not in done:
+            task.cancel()
+            self.logger.bind(tag=TAG).warning(f"{label}超过关闭总期限，继续清理")
+            return False
         try:
+            task.result()
+        except Exception as exc:
+            self.logger.bind(tag=TAG).error(f"{label}时出错: {exc}")
+            return False
+        return True
+
+    async def _run_async_cleanup(self, callback, deadline, label):
+        remaining = self._remaining_close_time(deadline)
+        if remaining <= 0:
+            return False
+        try:
+            task = asyncio.create_task(callback())
+        except Exception as exc:
+            self.logger.bind(tag=TAG).error(f"{label}时出错: {exc}")
+            return False
+        done, _ = await asyncio.wait({task}, timeout=remaining)
+        if task not in done:
+            task.cancel()
+            self.logger.bind(tag=TAG).warning(f"{label}超过关闭总期限，继续清理")
+            return False
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            return False
+        except Exception as exc:
+            self.logger.bind(tag=TAG).error(f"{label}时出错: {exc}")
+            return False
+        return True
+
+    async def close(self, ws=None, _deadline=None):
+        """资源清理方法"""
+        self._begin_closing()
+        deadline = _deadline or (time.monotonic() + CLOSE_TIMEOUT_SECONDS)
+        close_lock = getattr(self, "_close_lock", None)
+        if close_lock is None:
+            close_lock = asyncio.Lock()
+            self._close_lock = close_lock
+
+        remaining = self._remaining_close_time(deadline)
+        if remaining <= 0:
+            return
+        try:
+            await asyncio.wait_for(close_lock.acquire(), timeout=remaining)
+        except asyncio.TimeoutError:
+            return
+
+        try:
+            if self.closed:
+                return
+
+            await self._wait_for_background_initialize(deadline)
+            components_future = getattr(self, "_components_initialize_future", None)
+            if components_future is not None and not components_future.done():
+                components_future.cancel()
+
             # 清理 VAD 连接资源
             if (
                     hasattr(self, "vad")
                     and self.vad
                     and hasattr(self.vad, "release_conn_resources")
             ):
-                self.vad.release_conn_resources(self)
+                await self._run_blocking_cleanup(
+                    lambda: self.vad.release_conn_resources(self),
+                    deadline,
+                    "清理VAD连接资源",
+                )
 
             # 清理音频缓冲区
             if hasattr(self, "audio_buffer"):
@@ -1743,22 +1986,22 @@ class ConnectionHandler:
 
             # 清理工具处理器资源
             if hasattr(self, "func_handler") and self.func_handler:
-                try:
-                    await self.func_handler.cleanup()
-                except Exception as cleanup_error:
-                    self.logger.bind(tag=TAG).error(
-                        f"清理工具处理器时出错: {cleanup_error}"
-                    )
+                await self._run_async_cleanup(
+                    self.func_handler.cleanup,
+                    deadline,
+                    "清理工具处理器",
+                )
 
             # MCP pending call results 由 func_handler.cleanup() 统一清理，此处不再重复调用
 
             # 停止上报线程
             if hasattr(self, "report_manager"):
-                self.report_manager.stop(self)
-
-            # 触发停止事件
-            if self.stop_event:
-                self.stop_event.set()
+                report_timeout = self._remaining_close_time(deadline)
+                await self._run_blocking_cleanup(
+                    lambda: self.report_manager.stop(self, timeout=report_timeout),
+                    deadline,
+                    "停止上报线程",
+                )
 
             # 清空任务队列
             self.clear_queues()
@@ -1768,45 +2011,18 @@ class ConnectionHandler:
                 self.iot_descriptors.clear()
 
             # 关闭WebSocket连接
-            try:
-                if ws:
-                    # 安全地检查WebSocket状态并关闭
-                    try:
-                        if hasattr(ws, "closed") and not ws.closed:
-                            await ws.close()
-                        elif hasattr(ws, "state") and ws.state.name != "CLOSED":
-                            await ws.close()
-                        else:
-                            # 如果没有closed属性，直接尝试关闭
-                            await ws.close()
-                    except Exception:
-                        # 如果关闭失败，忽略错误
-                        pass
-                elif self.websocket:
-                    try:
-                        if (
-                                hasattr(self.websocket, "closed")
-                                and not self.websocket.closed
-                        ):
-                            await self.websocket.close()
-                        elif (
-                                hasattr(self.websocket, "state")
-                                and self.websocket.state.name != "CLOSED"
-                        ):
-                            await self.websocket.close()
-                        else:
-                            # 如果没有closed属性，直接尝试关闭
-                            await self.websocket.close()
-                    except Exception:
-                        # 如果关闭失败，忽略错误
-                        pass
-            except Exception as ws_error:
-                self.logger.bind(tag=TAG).error(f"关闭WebSocket连接时出错: {ws_error}")
+            websocket = ws or self.websocket
+            if websocket is not None:
+                await self._run_async_cleanup(
+                    websocket.close,
+                    deadline,
+                    "关闭WebSocket连接",
+                )
 
             if self.tts:
-                await self.tts.close()
+                await self._run_async_cleanup(self.tts.close, deadline, "关闭TTS")
             if self.asr:
-                await self.asr.close()
+                await self._run_async_cleanup(self.asr.close, deadline, "关闭ASR")
 
             # 最后关闭线程池（避免阻塞）
             if self.executor:
@@ -1821,9 +2037,10 @@ class ConnectionHandler:
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"关闭连接时出错: {e}")
         finally:
-            # 确保停止事件被设置
+            self.closed = True
             if self.stop_event:
                 self.stop_event.set()
+            close_lock.release()
 
     def clear_queues(self):
         """清空所有任务队列"""

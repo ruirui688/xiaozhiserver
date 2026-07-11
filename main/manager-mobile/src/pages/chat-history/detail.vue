@@ -14,7 +14,7 @@ import { onLoad, onUnload } from '@dcloudio/uni-app'
 import { ref } from 'vue'
 import { getAudioId, getChatHistory } from '@/api/chat-history/chat-history'
 import { t } from '@/i18n'
-import { debounce, getEnvBaseUrl } from '@/utils'
+import { debounce, getEnvBaseUrl, parseDateTime } from '@/utils'
 import { getSafeAreaInsets } from '@/utils/system'
 import { toast } from '@/utils/toast'
 
@@ -101,8 +101,7 @@ function formatTime(timeStr: string) {
   if (!timeStr)
     return t('chatHistory.unknownTime')
 
-  // 处理时间字符串，确保格式正确
-  const date = new Date(timeStr.replace(' ', 'T')) // 转换为ISO格式
+  const date = parseDateTime(timeStr)
   const now = new Date()
 
   // 检查日期是否有效

@@ -1,5 +1,4 @@
 import json
-import asyncio
 import time
 from typing import TYPE_CHECKING
 
@@ -14,6 +13,7 @@ from core.semantic.router import SemanticRouter
 from core.semantic.normalizer import TextNormalizer
 from core.utils.output_counter import check_device_output_limit
 from core.handle.sendAudioHandle import send_stt_message, SentenceType
+from core.handle.wakeupHandle import should_ignore_wakeup_audio
 
 TAG = __name__
 
@@ -22,24 +22,15 @@ async def handleAudioMessage(conn: "ConnectionHandler", audio):
     if conn.vad is None or conn.asr is None:
         conn.logger.bind(tag=TAG).warning("VAD或ASR未配置，忽略音频消息")
         return
+    # 无AEC设备可通过wakeup_vad_ignore_ms配置短暂回声保护；默认0不丢首包。
+    # 必须在VAD前判断，避免唤醒回复音频污染VAD内部状态。
+    if should_ignore_wakeup_audio(conn):
+        return
     # 当前片段是否有人说话
     have_voice = conn.vad.is_vad(conn, audio)
-    # 如果设备刚刚被唤醒，短暂忽略VAD检测
-    if hasattr(conn, "just_woken_up") and conn.just_woken_up:
-        have_voice = False
-        # 设置一个短暂延迟后恢复VAD检测
-        if not hasattr(conn, "vad_resume_task") or conn.vad_resume_task.done():
-            conn.vad_resume_task = asyncio.create_task(resume_vad_detection(conn))
-        return
     update_voice_activity(conn, have_voice)
     # 接收音频
     await conn.asr.receive_audio(conn, audio, have_voice)
-
-
-async def resume_vad_detection(conn: "ConnectionHandler"):
-    # 等待2秒后恢复VAD检测
-    await asyncio.sleep(2)
-    conn.just_woken_up = False
 
 
 async def startToChat(conn: "ConnectionHandler", text):

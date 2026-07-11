@@ -37,14 +37,6 @@ export const tabbarList: FgTabBarItem[] = [
     iconType: 'uiLib',
   },
   {
-    iconPath: 'static/tabbar/network.png',
-    selectedIconPath: 'static/tabbar/network_activate.png',
-    pagePath: 'pages/device-config/index',
-    text: '配网',
-    icon: 'i-carbon-network-3',
-    iconType: 'uiLib',
-  },
-  {
     iconPath: 'static/tabbar/system.png',
     selectedIconPath: 'static/tabbar/system_activate.png',
     pagePath: 'pages/settings/index',

@@ -1,6 +1,8 @@
 import httpx
 import openai
 import json
+import math
+import time
 from openai.types import CompletionUsage
 from config.logger import setup_logging
 from core.utils.util import check_model_key
@@ -37,14 +39,25 @@ class LLMProvider(LLMProviderBase):
                 pool=timeout_config.get("pool", 2.0),
                 connect=timeout_config.get("connect", 3.0),
                 write=timeout_config.get("write", 5.0),
-                read=timeout_config.get("read", 60.0)
+                read=timeout_config.get("read", 15.0)
             )
         elif isinstance(timeout_config, (int, float)) and timeout_config > 0:
             # 兼容旧的单一超时配置（整数或浮点数）
             custom_timeout = httpx.Timeout(timeout_config)
         else:
-            # 未配置或配置无效，使用默认值
-            custom_timeout = httpx.Timeout(300)
+            # 语音链路默认采用短超时，避免单个上游请求长期占满连接线程池。
+            custom_timeout = httpx.Timeout(
+                pool=2.0,
+                connect=3.0,
+                write=5.0,
+                read=15.0,
+            )
+
+        self.stream_total_timeout_seconds = self._positive_seconds(
+            config,
+            "stream_total_timeout_seconds",
+            30,
+        )
 
         self.thinking = self._normalize_thinking_config(config.get("thinking"))
         self.reasoning_effort = self._normalize_reasoning_effort(
@@ -85,6 +98,42 @@ class LLMProvider(LLMProviderBase):
             if "role" in msg and "content" not in msg:
                 msg["content"] = ""
         return dialogue
+
+    @staticmethod
+    def _positive_seconds(config, key, default):
+        try:
+            value = float(config.get(key, default))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{key} 必须是大于 0 的数字") from exc
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError(f"{key} 必须是大于 0 的数字")
+        return value
+
+    def _iter_stream_with_deadline(self, stream):
+        """Iterate a synchronous SDK stream within a total wall-clock budget.
+
+        The SDK's HTTP read timeout remains responsible for a stream that never
+        yields its first chunk. This deadline bounds streams that keep yielding
+        partial data without finishing.
+        """
+        deadline = time.monotonic() + self.stream_total_timeout_seconds
+        iterator = iter(stream)
+        while True:
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    "LLM流式响应超过总时限"
+                    f"（{self.stream_total_timeout_seconds:.1f}s）"
+                )
+            try:
+                chunk = next(iterator)
+            except StopIteration:
+                return
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    "LLM流式响应超过总时限"
+                    f"（{self.stream_total_timeout_seconds:.1f}s）"
+                )
+            yield chunk
 
     @staticmethod
     def _normalize_thinking_config(value):
@@ -193,7 +242,7 @@ class LLMProvider(LLMProviderBase):
 
         is_active = True
         try:            
-            for chunk in responses:
+            for chunk in self._iter_stream_with_deadline(responses):
                 try:
                     delta = chunk.choices[0].delta if getattr(chunk, "choices", None) else None
                     content = getattr(delta, "content", "") if delta else ""
@@ -243,7 +292,7 @@ class LLMProvider(LLMProviderBase):
         stream = self.client.chat.completions.create(**request_params)
 
         try:
-            for chunk in stream:
+            for chunk in self._iter_stream_with_deadline(stream):
                 if getattr(chunk, "choices", None):
                     delta = chunk.choices[0].delta
                     content = getattr(delta, "content", "")

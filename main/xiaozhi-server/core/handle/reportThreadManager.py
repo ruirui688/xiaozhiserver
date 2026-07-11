@@ -66,13 +66,36 @@ class ReportThreadManager:
             # 标记任务完成
             conn.report_queue.task_done()
 
-    def stop(self, conn: "ConnectionHandler"):
-        """Stop the report thread and wait briefly for queued reports."""
+    def stop(self, conn: "ConnectionHandler", timeout=10.0):
+        """Stop the report thread within one monotonic deadline.
+
+        This method is intentionally synchronous. Connection shutdown runs it
+        via ``asyncio.to_thread`` so the join and polling sleeps never block the
+        server event loop.
+        """
+        deadline = time.monotonic() + max(0.0, float(timeout))
         if conn.report_thread and conn.report_thread.is_alive():
             conn.report_queue.put(None)
-            conn.report_thread.join(timeout=2)
-        deadline = time.time() + 10
-        while getattr(conn.report_queue, "unfinished_tasks", 0) > 0 and time.time() < deadline:
-            time.sleep(0.05)
+            remaining = max(0.0, deadline - time.monotonic())
+            if remaining > 0:
+                conn.report_thread.join(timeout=min(2.0, remaining))
+
+        # stop_event is set before this cleanup starts. If the worker observed
+        # it before consuming the poison pill, drain items it can no longer
+        # process and balance Queue.unfinished_tasks.
+        if not conn.report_thread or not conn.report_thread.is_alive():
+            while True:
+                try:
+                    conn.report_queue.get_nowait()
+                except queue.Empty:
+                    break
+                else:
+                    conn.report_queue.task_done()
+
+        while (
+            getattr(conn.report_queue, "unfinished_tasks", 0) > 0
+            and time.monotonic() < deadline
+        ):
+            time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
         if getattr(conn.report_queue, "unfinished_tasks", 0) > 0:
             conn.logger.bind(tag=TAG).warning("聊天记录上报队列仍有未完成任务，关闭流程继续")

@@ -1,5 +1,6 @@
 import os
 import re
+import math
 import uuid
 import queue
 import asyncio
@@ -38,6 +39,10 @@ class TTSProviderBase(ABC):
         self.audio_file_type = "wav"
         self.output_file = config.get("output_dir", "tmp/")
         self.tts_timeout = int(config.get("tts_timeout", 15))
+        self.audio_send_timeout_seconds = self._positive_timeout(
+            config.get("audio_send_timeout_seconds", 5),
+            "audio_send_timeout_seconds",
+        )
         self.tts_text_queue = queue.Queue()
         self.tts_audio_queue = queue.Queue()
         self.tts_audio_first_sentence = True
@@ -107,6 +112,16 @@ class TTSProviderBase(ABC):
         self.tts_stop_request = False
         self.processed_chars = 0
         self.is_first_sentence = True
+
+    @staticmethod
+    def _positive_timeout(value, field_name):
+        try:
+            timeout = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{field_name} 必须是大于 0 的数字") from exc
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError(f"{field_name} 必须是大于 0 的数字")
+        return timeout
 
     def generate_filename(self, extension=".wav"):
         return os.path.join(
@@ -478,14 +493,41 @@ class TTSProviderBase(ABC):
                     self._pending_futures = set()
                 self._pending_futures.add(future)
                 future.add_done_callback(self._pending_futures.discard)
-                future.result()
+                try:
+                    future.result(timeout=self.audio_send_timeout_seconds)
+                except concurrent.futures.TimeoutError:
+                    future.cancel()
+                    with self.conn._abort_lock:
+                        aborted = self.conn.client_abort
+                    if self.conn.stop_event.is_set() or aborted:
+                        logger.bind(tag=TAG).debug("连接停止或会话取消，终止等待音频发送")
+                        continue
+                    logger.bind(tag=TAG).error(
+                        "设备音频发送超时: "
+                        f"timeout={self.audio_send_timeout_seconds:.1f}s"
+                    )
+                    continue
+                except concurrent.futures.CancelledError:
+                    if self.conn.stop_event.is_set():
+                        break
+                    with self.conn._abort_lock:
+                        aborted = self.conn.client_abort
+                    if aborted:
+                        logger.bind(tag=TAG).debug("会话取消，音频发送任务已终止")
+                        continue
+                    raise
 
                 # 记录输出和报告
                 if self.conn.max_output_size > 0 and text:
                     add_device_output(self.conn.headers.get("device-id"), len(text))
 
             except Exception as e:
-                logger.bind(tag=TAG).error(f"audio_play_priority_thread: {text} {e}")
+                if self.conn.stop_event.is_set():
+                    break
+                logger.bind(tag=TAG).error(
+                    f"audio_play_priority_thread: text_present={bool(text)}, "
+                    f"error_type={type(e).__name__}, reason={e}"
+                )
 
     async def start_session(self, session_id):
         pass

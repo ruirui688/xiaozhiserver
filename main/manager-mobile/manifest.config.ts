@@ -134,12 +134,6 @@ export default defineManifestConfig({
     },
     usingComponents: true,
     // __usePrivacyCheck__: true,
-    permission: {
-      'scope.userLocation': {
-        desc: 'WiFi配网功能需要获取位置权限',
-      },
-    },
-    requiredPrivateInfos: ['getLocation'],
   },
   'mp-alipay': {
     usingComponents: true,

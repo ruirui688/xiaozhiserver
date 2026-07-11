@@ -3,7 +3,7 @@ import type { ChatSession } from '@/api/chat-history/types'
 import { computed, onMounted, ref } from 'vue'
 import { getChatSessions } from '@/api/chat-history/chat-history'
 import { t } from '@/i18n'
-import { deepClone } from '@/utils'
+import { deepClone, parseDateTime } from '@/utils'
 import { getSafeAreaInsets } from '@/utils/system'
 
 defineOptions({
@@ -102,8 +102,7 @@ function formatTime(timeStr: string) {
   if (!timeStr)
     return t('chatHistory.unknownTime')
 
-  // 处理时间字符串，确保格式正确
-  const date = new Date(timeStr.replace(' ', 'T')) // 转换为ISO格式
+  const date = parseDateTime(timeStr)
   const now = new Date()
 
   // 检查日期是否有效

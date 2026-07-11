@@ -1,10 +1,12 @@
+import asyncio
 import base64
+import math
 import os
 import time
 import uuid
 from typing import List, Optional, Tuple
 
-import requests
+import aiohttp
 
 from config.logger import setup_logging
 from core.providers.asr.base import ASRProviderBase
@@ -34,9 +36,32 @@ class ASRProvider(ASRProviderBase):
         self.context_text = config.get("context_text", "")
         self.output_dir = config.get("output_dir", "tmp/")
         self.delete_audio_file = delete_audio_file
-        self.query_interval_seconds = float(config.get("query_interval_seconds", 1))
-        self.query_timeout_seconds = int(config.get("query_timeout_seconds", 60))
+        self.http_timeout_seconds = self._positive_seconds(
+            config,
+            "http_timeout_seconds",
+            10,
+        )
+        self.query_interval_seconds = self._positive_seconds(
+            config,
+            "query_interval_seconds",
+            0.2,
+        )
+        self.query_timeout_seconds = self._positive_seconds(
+            config,
+            "query_timeout_seconds",
+            15,
+        )
         os.makedirs(self.output_dir, exist_ok=True)
+
+    @staticmethod
+    def _positive_seconds(config: dict, key: str, default: float) -> float:
+        try:
+            value = float(config.get(key, default))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{key} 必须是大于 0 的数字") from exc
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError(f"{key} 必须是大于 0 的数字")
+        return value
 
     def _headers(self, request_id: str, *, sequence: Optional[str] = None) -> dict:
         headers = {
@@ -70,6 +95,39 @@ class ASRProvider(ASRProviderBase):
             payload["request"]["context"] = self.context_text
         return payload
 
+    async def _post_json(
+        self,
+        session: aiohttp.ClientSession,
+        url: str,
+        *,
+        headers: dict,
+        payload: dict,
+        timeout_seconds: float,
+        stage: str,
+    ) -> dict:
+        timeout = aiohttp.ClientTimeout(total=timeout_seconds)
+        try:
+            async with session.post(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=timeout,
+            ) as response:
+                if response.status >= 400:
+                    raise RuntimeError(f"{stage}失败: HTTP {response.status}")
+                try:
+                    result = await response.json(content_type=None)
+                except (ValueError, aiohttp.ContentTypeError) as exc:
+                    raise RuntimeError(f"{stage}失败: 响应不是有效 JSON") from exc
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(f"{stage}超时（{timeout_seconds:.1f}s）") from exc
+        except aiohttp.ClientError as exc:
+            raise RuntimeError(f"{stage}网络请求失败: {type(exc).__name__}") from exc
+
+        if not isinstance(result, dict):
+            raise RuntimeError(f"{stage}失败: 响应不是 JSON 对象")
+        return result
+
     async def speech_to_text(
         self,
         opus_data: List[bytes],
@@ -85,53 +143,95 @@ class ASRProvider(ASRProviderBase):
         if not wav_bytes:
             return "", artifacts.file_path
 
-        start_time = time.time()
+        start_time = time.monotonic()
+        submit_elapsed = 0.0
+        query_count = 0
+        stage = "submit"
         try:
-            submit_response = requests.post(
-                self.submit_url,
-                headers=self._headers(request_id, sequence="-1"),
-                json=self._build_submit_payload(wav_bytes, request_id),
-                timeout=15,
-            )
-            if submit_response.status_code >= 400:
-                raise RuntimeError(
-                    f"提交录音识别失败: {submit_response.status_code} {submit_response.text}"
+            # requests 默认读取系统代理；trust_env=True 保留这一部署兼容性。
+            async with aiohttp.ClientSession(trust_env=True) as session:
+                submit_payload = await self._post_json(
+                    session,
+                    self.submit_url,
+                    headers=self._headers(request_id, sequence="-1"),
+                    payload=self._build_submit_payload(wav_bytes, request_id),
+                    timeout_seconds=self.http_timeout_seconds,
+                    stage="提交录音识别",
                 )
-
-            text = self._extract_text(submit_response.json())
-            if text:
+                submit_elapsed = time.monotonic() - start_time
                 logger.bind(tag=TAG).debug(
-                    f"录音识别耗时: {time.time() - start_time:.3f}s | 结果: {text}"
+                    f"录音识别提交完成: elapsed={submit_elapsed:.3f}s"
                 )
-                return text, artifacts.file_path
 
-            deadline = time.time() + self.query_timeout_seconds
-            while time.time() < deadline:
-                time.sleep(self.query_interval_seconds)
-                query_response = requests.post(
-                    self.query_url,
-                    headers=self._headers(request_id),
-                    json={"request": {"reqid": request_id}},
-                    timeout=15,
-                )
-                if query_response.status_code >= 400:
-                    raise RuntimeError(
-                        f"查询录音识别结果失败: {query_response.status_code} {query_response.text}"
-                    )
-                payload = query_response.json()
-                text = self._extract_text(payload)
+                text = self._extract_text(submit_payload)
                 if text:
-                    logger.bind(tag=TAG).debug(
-                        f"录音识别耗时: {time.time() - start_time:.3f}s | 结果: {text}"
-                    )
+                    self._log_success(start_time, submit_elapsed, query_count, text)
                     return text, artifacts.file_path
-                if self._is_failed(payload):
-                    raise RuntimeError(f"录音识别失败: {payload}")
 
-            raise TimeoutError("查询录音识别结果超时")
+                stage = "query"
+                deadline = time.monotonic() + self.query_timeout_seconds
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    await asyncio.sleep(min(self.query_interval_seconds, remaining))
+
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    query_count += 1
+                    query_payload = await self._post_json(
+                        session,
+                        self.query_url,
+                        headers=self._headers(request_id),
+                        payload={"request": {"reqid": request_id}},
+                        timeout_seconds=min(self.http_timeout_seconds, remaining),
+                        stage="查询录音识别结果",
+                    )
+                    text = self._extract_text(query_payload)
+                    if text:
+                        self._log_success(start_time, submit_elapsed, query_count, text)
+                        return text, artifacts.file_path
+                    if self._is_failed(query_payload):
+                        provider_code = query_payload.get("code")
+                        provider_status = str(
+                            query_payload.get("status")
+                            or query_payload.get("message")
+                            or ""
+                        ).lower()
+                        if provider_status not in {"failed", "failure", "error"}:
+                            provider_status = ""
+                        raise RuntimeError(
+                            "录音识别失败: "
+                            f"provider_code={provider_code}, "
+                            f"provider_status={provider_status}"
+                        )
+
+                raise TimeoutError(
+                    f"查询录音识别结果超时（{self.query_timeout_seconds:.1f}s）"
+                )
         except Exception as e:
-            logger.bind(tag=TAG).error(f"录音识别失败: {e}")
+            elapsed = time.monotonic() - start_time
+            logger.bind(tag=TAG).error(
+                "录音识别失败: "
+                f"stage={stage}, elapsed={elapsed:.3f}s, "
+                f"error_type={type(e).__name__}, reason={e}"
+            )
             return "", artifacts.file_path
+
+    @staticmethod
+    def _log_success(
+        start_time: float,
+        submit_elapsed: float,
+        query_count: int,
+        text: str,
+    ) -> None:
+        logger.bind(tag=TAG).debug(
+            "录音识别完成: "
+            f"total={time.monotonic() - start_time:.3f}s, "
+            f"submit={submit_elapsed:.3f}s, queries={query_count}, "
+            f"text_length={len(text)}"
+        )
 
     @staticmethod
     def _extract_text(payload: dict) -> str:

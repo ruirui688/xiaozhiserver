@@ -22,6 +22,7 @@ import {
   updateWorkspaceMemberRole,
 } from '@/api/workspace'
 import { useUserStore } from '@/store'
+import { parseDateTime } from '@/utils'
 
 defineOptions({
   name: 'OrganizationPage',
@@ -33,6 +34,7 @@ const userStore = useUserStore()
 
 const loading = ref(false)
 const memberLoading = ref(false)
+const loadError = ref('')
 const workspaceList = ref<Workspace[]>([])
 const currentWorkspaceId = ref(uni.getStorageSync('currentWorkspaceId') || '')
 const members = ref<WorkspaceMember[]>([])
@@ -67,6 +69,28 @@ function roleClass(role: WorkspaceRole | string) {
   return classes[role] || 'bg-[#f0f2f5] text-[#65686f]'
 }
 
+function formatJoinedAt(value?: string) {
+  if (!value)
+    return ''
+
+  const date = parseDateTime(value)
+  if (Number.isNaN(date.getTime()))
+    return value
+
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hour = String(date.getHours()).padStart(2, '0')
+  const minute = String(date.getMinutes()).padStart(2, '0')
+  return `${month}-${day} ${hour}:${minute}`
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : String(error || '')
+  if (/timeout/i.test(message))
+    return '网络请求超时，请稍后重试'
+  return message || fallback
+}
+
 function goBack() {
   uni.navigateBack()
 }
@@ -89,6 +113,7 @@ function canRemoveMember(member: WorkspaceMember) {
 
 async function loadWorkspaces(preferredWorkspaceId = currentWorkspaceId.value) {
   loading.value = true
+  loadError.value = ''
   try {
     workspaceList.value = await getWorkspaceList()
     const preferred = preferredWorkspaceId && workspaceList.value.some(item => item.id === preferredWorkspaceId)
@@ -103,6 +128,10 @@ async function loadWorkspaces(preferredWorkspaceId = currentWorkspaceId.value) {
       members.value = []
       uni.removeStorageSync('currentWorkspaceId')
     }
+  }
+  catch (error) {
+    loadError.value = getErrorMessage(error, '工作空间加载失败')
+    toast.warning(loadError.value)
   }
   finally {
     loading.value = false
@@ -122,6 +151,10 @@ async function loadMembers() {
   try {
     members.value = await getWorkspaceMembers(currentWorkspaceId.value)
   }
+  catch (error) {
+    members.value = []
+    toast.warning(getErrorMessage(error, '成员加载失败'))
+  }
   finally {
     memberLoading.value = false
   }
@@ -133,10 +166,15 @@ async function acceptInvitation() {
     toast.warning('请输入邀请码')
     return
   }
-  const workspace = await acceptWorkspaceInvitation(code)
-  inviteCode.value = ''
-  toast.success('已加入工作空间')
-  await loadWorkspaces(workspace.id)
+  try {
+    const workspace = await acceptWorkspaceInvitation(code)
+    inviteCode.value = ''
+    toast.success('已加入工作空间')
+    await loadWorkspaces(workspace.id)
+  }
+  catch (error) {
+    toast.warning(getErrorMessage(error, '加入工作空间失败'))
+  }
 }
 
 async function inviteMember() {
@@ -146,12 +184,17 @@ async function inviteMember() {
   if (members.value.length >= maxMembers)
     return toast.warning('工作空间成员上限为5人')
 
-  const invitation = await inviteWorkspaceMember(currentWorkspaceId.value, {
-    username,
-    role: inviteForm.role,
-  })
-  lastInviteCode.value = invitation.code
-  toast.success('邀请已生成')
+  try {
+    const invitation = await inviteWorkspaceMember(currentWorkspaceId.value, {
+      username,
+      role: inviteForm.role,
+    })
+    lastInviteCode.value = invitation.code
+    toast.success('邀请已生成')
+  }
+  catch (error) {
+    toast.warning(getErrorMessage(error, '邀请生成失败'))
+  }
 }
 
 function closeInvitePanel() {
@@ -174,9 +217,14 @@ function chooseMemberRole(member: WorkspaceMember) {
       const nextRole: WorkspaceRole = res.tapIndex === 0 ? 'ADMIN' : 'MEMBER'
       if (nextRole === member.role)
         return
-      await updateWorkspaceMemberRole(currentWorkspaceId.value, member.userId, nextRole)
-      toast.success('角色已更新')
-      await loadMembers()
+      try {
+        await updateWorkspaceMemberRole(currentWorkspaceId.value, member.userId, nextRole)
+        toast.success('角色已更新')
+        await loadMembers()
+      }
+      catch (error) {
+        toast.warning(getErrorMessage(error, '角色更新失败'))
+      }
     },
   })
 }
@@ -192,9 +240,14 @@ function confirmRemoveMember(member: WorkspaceMember) {
     success: async (res) => {
       if (!res.confirm)
         return
-      await removeWorkspaceMember(currentWorkspaceId.value, member.userId)
-      toast.success('成员已移除')
-      await loadMembers()
+      try {
+        await removeWorkspaceMember(currentWorkspaceId.value, member.userId)
+        toast.success('成员已移除')
+        await loadMembers()
+      }
+      catch (error) {
+        toast.warning(getErrorMessage(error, '移除成员失败'))
+      }
     },
   })
 }
@@ -210,11 +263,16 @@ function confirmLeaveWorkspace() {
     success: async (res) => {
       if (!res.confirm)
         return
-      await leaveWorkspace(currentWorkspaceId.value)
-      toast.success('已退出工作空间')
-      currentWorkspaceId.value = ''
-      uni.removeStorageSync('currentWorkspaceId')
-      await loadWorkspaces('')
+      try {
+        await leaveWorkspace(currentWorkspaceId.value)
+        toast.success('已退出工作空间')
+        currentWorkspaceId.value = ''
+        uni.removeStorageSync('currentWorkspaceId')
+        await loadWorkspaces('')
+      }
+      catch (error) {
+        toast.warning(getErrorMessage(error, '退出工作空间失败'))
+      }
     },
   })
 }
@@ -231,34 +289,56 @@ onMounted(async () => {
   <view class="min-h-screen bg-[#f5f7fb]">
     <wd-navbar title="组织管理" placeholder safe-area-inset-top fixed left-arrow @click-left="goBack" />
 
-    <view class="p-[24rpx]">
-      <view class="mb-[24rpx] flex gap-[16rpx]">
-        <view class="min-w-0 flex-1 overflow-hidden rounded-[16rpx] bg-white px-[24rpx]">
-          <wd-input
-            v-model="inviteCode"
-            clearable
-            :maxlength="64"
-            placeholder="输入邀请码加入"
-            custom-class="!border-none h-[76rpx] items-center"
-            input-class="text-[28rpx] text-[#232338]"
-          />
+    <view class="px-[24rpx] pb-[40rpx] pt-[20rpx]">
+      <view class="mb-[22rpx] rounded-[18rpx] bg-white p-[20rpx]">
+        <view class="mb-[14rpx] flex items-center justify-between">
+          <text class="text-[26rpx] font-semibold text-[#232338]">
+            加入工作空间
+          </text>
+          <text class="text-[22rpx] text-[#8b8f9b]">
+            邀请码加入
+          </text>
         </view>
-        <wd-button type="primary" custom-class="h-[76rpx] rounded-[16rpx] px-[30rpx] bg-[#336cff] border-none" @click="acceptInvitation">
-          加入
-        </wd-button>
+        <view class="flex items-center gap-[14rpx]">
+          <view class="min-w-0 flex-1 overflow-hidden rounded-[14rpx] bg-[#f5f7fb] px-[20rpx]">
+            <wd-input
+              v-model="inviteCode"
+              clearable
+              :maxlength="64"
+              placeholder="输入邀请码"
+              custom-class="!border-none h-[72rpx] items-center"
+              input-class="text-[28rpx] text-[#232338]"
+            />
+          </view>
+          <wd-button type="primary" custom-class="h-[72rpx] rounded-[14rpx] px-[32rpx] bg-[#336cff] border-none" @click="acceptInvitation">
+            加入
+          </wd-button>
+        </view>
       </view>
 
       <view v-if="loading" class="py-[80rpx] text-center text-[26rpx] text-[#8b8f9b]">
         加载中...
       </view>
 
+      <view v-else-if="loadError" class="rounded-[22rpx] bg-white p-[48rpx] text-center">
+        <text class="block text-[28rpx] font-semibold text-[#232338]">
+          加载失败
+        </text>
+        <text class="mt-[10rpx] block text-[24rpx] text-[#8b8f9b]">
+          {{ loadError }}
+        </text>
+        <wd-button type="primary" size="small" custom-class="mt-[24rpx] h-[64rpx] rounded-[14rpx] bg-[#336cff] border-none px-[32rpx]" @click="loadWorkspaces()">
+          重试
+        </wd-button>
+      </view>
+
       <template v-else>
-        <scroll-view v-if="workspaceList.length > 0" scroll-x class="mb-[24rpx] whitespace-nowrap">
+        <scroll-view v-if="workspaceList.length > 0" scroll-x class="mb-[20rpx] whitespace-nowrap">
           <view
             v-for="workspace in workspaceList"
             :key="workspace.id"
-            class="mr-[16rpx] inline-flex max-w-[420rpx] items-center gap-[12rpx] rounded-[16rpx] px-[24rpx] py-[18rpx]"
-            :class="workspace.id === currentWorkspaceId ? 'bg-[#336cff] text-white' : 'bg-white text-[#232338]'"
+            class="mr-[14rpx] inline-flex max-w-[430rpx] items-center gap-[10rpx] rounded-[16rpx] px-[22rpx] py-[16rpx]"
+            :class="workspace.id === currentWorkspaceId ? 'bg-[#336cff] text-white shadow-sm' : 'bg-white text-[#232338]'"
             @click="selectWorkspace(workspace.id)"
           >
             <text class="truncate text-[28rpx] font-semibold">
@@ -273,37 +353,54 @@ onMounted(async () => {
           </view>
         </scroll-view>
 
-        <view v-if="currentWorkspace" class="mb-[24rpx] rounded-[20rpx] bg-white p-[28rpx]">
-          <view class="mb-[20rpx] flex items-start justify-between gap-[20rpx]">
-            <view class="min-w-0">
-              <text class="block truncate text-[34rpx] text-[#232338] font-bold">
-                {{ currentWorkspace.name }}
-              </text>
-              <text class="mt-[8rpx] block text-[24rpx] text-[#8b8f9b]">
-                成员 {{ members.length }}/{{ maxMembers }}
+        <view v-if="currentWorkspace" class="mb-[22rpx] rounded-[22rpx] bg-white p-[26rpx]">
+          <view class="mb-[22rpx]">
+            <view class="mb-[16rpx] flex items-start justify-between gap-[20rpx]">
+              <view class="min-w-0 flex-1">
+                <text class="block truncate text-[34rpx] font-bold text-[#232338]">
+                  {{ currentWorkspace.name }}
+                </text>
+                <text class="mt-[8rpx] block text-[24rpx] text-[#8b8f9b]">
+                  成员 {{ members.length }}/{{ maxMembers }}
+                </text>
+              </view>
+              <text class="shrink-0 rounded-full px-[16rpx] py-[6rpx] text-[22rpx]" :class="roleClass(currentWorkspace.currentUserRole)">
+                {{ roleLabel(currentWorkspace.currentUserRole) }}
               </text>
             </view>
-            <view class="flex shrink-0 gap-[12rpx]">
-              <wd-button
-                v-if="canLeaveWorkspace"
-                type="default"
-                size="small"
-                custom-class="rounded-[14rpx] text-[#65686f]"
-                @click="confirmLeaveWorkspace"
-              >
-                退出
-              </wd-button>
+
+            <view class="flex gap-[14rpx]">
               <wd-button
                 v-if="canWrite"
                 type="primary"
                 size="small"
                 :disabled="members.length >= maxMembers"
-                custom-class="rounded-[14rpx] bg-[#336cff] border-none"
+                custom-class="flex-1 h-[68rpx] rounded-[14rpx] bg-[#336cff] border-none"
                 @click="showInvitePanel = true"
               >
-                邀请
+                邀请成员
+              </wd-button>
+              <wd-button
+                v-if="canLeaveWorkspace"
+                type="default"
+                size="small"
+                custom-class="h-[68rpx] rounded-[14rpx] px-[28rpx] text-[#65686f]"
+                @click="confirmLeaveWorkspace"
+              >
+                退出
               </wd-button>
             </view>
+          </view>
+        </view>
+
+        <view v-if="currentWorkspace" class="rounded-[22rpx] bg-white p-[24rpx]">
+          <view class="mb-[18rpx] flex items-center justify-between">
+            <text class="text-[30rpx] font-bold text-[#232338]">
+              成员
+            </text>
+            <text class="text-[22rpx] text-[#8b8f9b]">
+              {{ members.length }}/{{ maxMembers }}
+            </text>
           </view>
 
           <view v-if="memberLoading" class="py-[48rpx] text-center text-[26rpx] text-[#8b8f9b]">
@@ -314,42 +411,57 @@ onMounted(async () => {
             <view
               v-for="member in members"
               :key="member.userId"
-              class="rounded-[16rpx] bg-[#f5f7fb] p-[22rpx]"
+              class="rounded-[18rpx] bg-[#f5f7fb] p-[22rpx]"
             >
-              <view class="flex items-center justify-between gap-[16rpx]">
-                <view class="min-w-0">
-                  <text class="block truncate text-[28rpx] text-[#232338] font-semibold">
+              <view class="mb-[16rpx] flex items-start justify-between gap-[16rpx]">
+                <view class="min-w-0 flex-1">
+                  <text class="block truncate text-[29rpx] font-semibold text-[#232338]">
                     {{ member.username }}
                   </text>
-                  <text v-if="member.joinedAt" class="mt-[6rpx] block text-[22rpx] text-[#8b8f9b]">
-                    {{ member.joinedAt }}
+                  <text v-if="member.joinedAt" class="mt-[6rpx] block text-[23rpx] text-[#8b8f9b]">
+                    加入于 {{ formatJoinedAt(member.joinedAt) }}
                   </text>
                 </view>
-                <view class="flex shrink-0 items-center gap-[12rpx]">
-                  <view
-                    class="rounded-full px-[16rpx] py-[6rpx] text-[22rpx]"
-                    :class="roleClass(member.role)"
-                    @click="chooseMemberRole(member)"
-                  >
-                    {{ roleLabel(member.role) }}
-                  </view>
-                  <wd-button
-                    v-if="canRemoveMember(member)"
-                    type="error"
-                    size="small"
-                    custom-class="rounded-[14rpx]"
-                    @click="confirmRemoveMember(member)"
-                  >
-                    移除
-                  </wd-button>
+                <view
+                  class="shrink-0 rounded-full px-[16rpx] py-[6rpx] text-[22rpx]"
+                  :class="roleClass(member.role)"
+                  @click="chooseMemberRole(member)"
+                >
+                  {{ roleLabel(member.role) }}
                 </view>
+              </view>
+
+              <view v-if="canRemoveMember(member) || canChangeRole(member)" class="flex justify-end gap-[12rpx]">
+                <wd-button
+                  v-if="canChangeRole(member)"
+                  type="default"
+                  size="small"
+                  custom-class="h-[58rpx] rounded-[12rpx] px-[24rpx] text-[#336cff]"
+                  @click="chooseMemberRole(member)"
+                >
+                  调整角色
+                </wd-button>
+                <wd-button
+                  v-if="canRemoveMember(member)"
+                  type="error"
+                  size="small"
+                  custom-class="h-[58rpx] rounded-[12rpx] px-[24rpx]"
+                  @click="confirmRemoveMember(member)"
+                >
+                  移除
+                </wd-button>
               </view>
             </view>
           </view>
         </view>
 
-        <view v-else class="rounded-[20rpx] bg-white p-[48rpx] text-center text-[26rpx] text-[#8b8f9b]">
-          暂无工作空间
+        <view v-else class="rounded-[22rpx] bg-white p-[48rpx] text-center">
+          <text class="block text-[28rpx] font-semibold text-[#232338]">
+            暂无工作空间
+          </text>
+          <text class="mt-[10rpx] block text-[24rpx] text-[#8b8f9b]">
+            输入邀请码后即可加入
+          </text>
         </view>
       </template>
     </view>
@@ -391,8 +503,13 @@ onMounted(async () => {
           </view>
         </view>
 
-        <view v-if="lastInviteCode" class="mb-[24rpx] rounded-[16rpx] bg-[#f5f7fb] p-[20rpx] text-[26rpx] text-[#232338]">
-          邀请码：{{ lastInviteCode }}
+        <view v-if="lastInviteCode" class="mb-[24rpx] rounded-[16rpx] bg-[#f5f7fb] p-[20rpx]">
+          <text class="block text-[22rpx] text-[#8b8f9b]">
+            邀请码
+          </text>
+          <text class="mt-[6rpx] block break-all text-[30rpx] font-semibold text-[#232338]">
+            {{ lastInviteCode }}
+          </text>
         </view>
 
         <wd-button block type="primary" custom-class="h-[84rpx] rounded-[18rpx] bg-[#336cff] border-none" @click="inviteMember">

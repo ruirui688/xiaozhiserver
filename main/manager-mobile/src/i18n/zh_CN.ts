@@ -2,7 +2,6 @@
 export default {
   // TabBar
   'tabBar.home': '首页',
-  'tabBar.deviceConfig': '配网',
   'tabBar.settings': '系统',
   // 设置页面标题
   'settings.title': '设置',
@@ -87,8 +86,6 @@ export default {
   'home.latestActiveAgent': '最近活跃智能体',
   'home.quickCreateAgent': '创建智能体',
   'home.quickCreateAgentDesc': '快速新建一个语音助手',
-  'home.quickDeviceConfig': '设备配网',
-  'home.quickDeviceConfigDesc': '进入小程序配网流程',
   'home.agentList': '智能体列表',
   'home.agentUnit': '个',
 

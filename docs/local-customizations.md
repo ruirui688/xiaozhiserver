@@ -424,3 +424,42 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方修改 manager-mobile 构建脚本、manifest、微信小程序配置或 README，必须保留 WSL 源码目录与 Windows 微信开发者工具导入目录分离的约定；刷新 Windows 侧本地调试小程序时使用 `pnpm build:mp:local` 后执行 `rsync -a --delete --exclude='project.private.config.json' dist/build/mp-weixin/ /mnt/d/codexws/xiaozhi-mp-weixin/`，该脚本必须生成 `urlCheck=false` 以允许本地 `http://127.0.0.1:8002/xiaozhi` 调试；正式上传审核前才使用 `pnpm build:mp`，并必须使用 HTTPS 合法域名和 `urlCheck=true`；不得直接编辑 D 盘产物目录中的业务代码；不得覆盖 `project.private.config.json`。
 ```
+
+## 25. 真机语音链路低延迟、ASR 长尾与连接日志安全
+
+```text
+定制模块：xiaozhi-server 豆包录音 ASR、唤醒首轮收音、WebSocket 请求头日志、运行时设备注册表
+改动原因：2026-07-11 ESP32 真机与腾讯云日志联调确认，正常轮 ASR 到 LLM 请求约 121.5ms、LLM 首响应约 114.6ms、ASR 到整句 TTS 音频生成约 1.321s；实际严重卡顿来自豆包录音 ASR 约 60 秒查询超时、约 15 秒 HTTPS 读超时，以及唤醒后固定丢弃 2 秒上行音频和默认 2.4-2.7 秒欢迎语。豆包 provider 原先在 async 方法中调用 requests.post 和 time.sleep，会阻塞事件循环并放大音频队列积压。连接日志还可能输出原始 Authorization，旧连接晚注销也必须保证不能删除重连后新对象的注册映射。
+关键行为：
+  - 豆包录音 ASR 使用 aiohttp 异步提交/查询；http_timeout_seconds 默认10秒、query_interval_seconds 默认0.2秒、query_timeout_seconds 默认15秒。
+  - 豆包流式 ASR 初始化/结果等待分别由 init_timeout_seconds 默认10秒、response_timeout_seconds 默认15秒保护，超时后关闭WebSocket并复位音频状态。
+  - wakeup_vad_ignore_ms 默认0；无AEC且存在欢迎语回采时可配置500-2000ms，2000ms等价于旧兼容行为。
+  - enable_greeting 默认false，需要欢迎语时由私有配置显式覆盖。
+  - 唤醒词缓存仅在开关开启且文本命中后等待TTS，普通文本不再被额外阻塞最多3秒。
+  - SeedTTS2 正常结束必须冲刷不足60ms的Opus尾帧，取消、失败或异常断链必须重置编码器，禁止残留样本跨会话。
+  - 请求头日志按键名屏蔽 Authorization、Proxy-Authorization、Cookie、Set-Cookie、token、api-key、apikey、secret。
+  - unregister_connection 只删除仍指向当前关闭对象的键，旧连接不能误删新连接。
+关键文件：
+  - main/xiaozhi-server/config.yaml
+  - main/xiaozhi-server/core/providers/asr/doubao_recording.py
+  - main/xiaozhi-server/core/providers/asr/doubao_stream.py
+  - main/xiaozhi-server/core/providers/tts/huoshan_double_stream.py
+  - main/xiaozhi-server/core/handle/wakeupHandle.py
+  - main/xiaozhi-server/core/handle/helloHandle.py
+  - main/xiaozhi-server/core/handle/receiveAudioHandle.py
+  - main/xiaozhi-server/core/handle/textHandler/listenMessageHandler.py
+  - main/xiaozhi-server/core/connection.py
+  - main/xiaozhi-server/core/device_runtime_registry.py
+  - main/xiaozhi-server/tests/test_doubao_recording_asr.py
+  - main/xiaozhi-server/tests/test_doubao_stream_asr.py
+  - main/xiaozhi-server/tests/test_huoshan_double_stream_tts_config.py
+  - main/xiaozhi-server/tests/test_wakeup_vad_ignore.py
+  - main/xiaozhi-server/tests/test_connection_log_sanitization.py
+  - main/xiaozhi-server/tests/test_device_runtime_registry.py
+  - docs/models/voice-pipeline-latency-analysis.md
+  - docs/architecture/device-interaction-chain.md
+是否允许被官方覆盖：否
+本次发布状态：只修改并验证源码；未构建镜像、未部署、未重启腾讯云生产服务。用户手动发布后才进行真实服务端回归。
+真实外部回归：豆包录音ASR 4/4、流式ASR修复前后5/5、SeedTTS2连续5会话、DeepSeek v4-pro/v4-flash原生与仓库provider均成功；当前provider完整ASR→LLM→TTS链路连续3/3成功，平均约3.753秒。真实凭据只用于进程内测试且未落盘；测试完成后应轮换在会话或截图中暴露过的凭据。
+官方同步时的处理规则：如果官方修改豆包录音/流式 ASR、SeedTTS2、唤醒词处理、欢迎语、连接日志或设备注册表，必须保留异步 HTTP 与总预算超时、流式WebSocket无界等待保护、Opus尾帧冲刷、默认零毫秒首轮音频丢弃、欢迎语显式开启、按请求头键名脱敏和对象身份注销校验。不得重新在 async provider 中引入 requests/time.sleep，不得把 Authorization、token、API key、Cookie 或 secret 写入日志；调整 ASR 超时、TTS编码边界和唤醒回声窗口时必须同步更新默认配置、专项测试、语音延迟文档，并在真实设备上验证首句不丢、无多句聚合、连续TTS无串音和重连映射稳定。
+```

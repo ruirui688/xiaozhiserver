@@ -78,6 +78,22 @@ connection.py:227-298  handle_connection()
 
 **同步保护**：后台初始化通过 `_modules_ready` Event 与消息循环同步 — audio 处理在 Event.set() 之前被阻塞。
 
+### 2.5 唤醒后的首轮收音
+
+```text
+设备 wakeup/listen 消息
+  → helloHandle.py 或 listenMessageHandler.py
+  → wakeupHandle.py: arm_wakeup_vad_ignore()
+  → receiveAudioHandle.py: should_ignore_wakeup_audio()
+  → VAD → ASR
+```
+
+- `wakeup_vad_ignore_ms` 默认 `0`，唤醒后第一包音频直接进入 VAD/ASR，不再固定丢弃 2 秒。
+- `enable_greeting` 默认 `false`，避免 2.4-2.7 秒欢迎语占用首轮交互。
+- 唤醒词缓存先检查开关和文本是否命中，再等待 TTS 初始化；普通文本与关闭缓存的请求不再被额外阻塞最多 3 秒。
+- 无 AEC 或扬声器回声会回采进麦克风的设备，可在私有配置中把 `wakeup_vad_ignore_ms` 设为 500-2000ms；设为 `2000` 可恢复旧版兼容行为。
+- 忽略窗口使用 `time.monotonic()` 判断，不创建延迟任务；配置非法、负数或非有限值时安全回退为 0。
+
 ## 3. 音频上行链路（ASR）
 
 ### 3.1 音频帧接收
@@ -112,7 +128,27 @@ providers/asr/base.py:84-180  handle_voice_stop()
   → receiveAudioHandle.py:45-179  startToChat(conn, text)
 ```
 
-**已知瓶颈**：`future.result()` 阻塞 ASR 线程 — 一个慢 chunk 阻塞所有后续。后续可改为 async 原生 ASR provider。
+ASR 基类仍通过工作线程桥接异步 provider；provider 内部不能再使用同步 HTTP 或 `time.sleep()`，否则慢请求会阻塞共享事件循环并放大队列积压。
+
+豆包录音识别 `providers/asr/doubao_recording.py` 使用原生异步提交与轮询：
+
+```text
+POST submit (aiohttp, http_timeout_seconds)
+  → 若响应已含文本则返回
+  → await asyncio.sleep(query_interval_seconds)
+  → POST query（单次 timeout 不超过剩余总预算）
+  → 最长等待 query_timeout_seconds
+```
+
+默认值为 `http_timeout_seconds=10`、`query_interval_seconds=0.2`、`query_timeout_seconds=15`。日志只记录阶段、耗时、查询次数、结果长度和错误类型，不记录识别正文或凭据。
+
+豆包流式识别 `providers/asr/doubao_stream.py` 的生产路径还包含两层超时：
+
+- `init_timeout_seconds=10`：限制初始化请求发出后等待首个服务端响应的时间；
+- `response_timeout_seconds=15`：限制等待下一条识别结果的时间，每收到中间结果后重新计时，兼容持续回包的长语音；
+- 超时、401、断链或初始化失败都会关闭 WebSocket、清理引用并复位 `is_processing`、`_is_stopping` 和连接音频状态。
+
+真实标准音频测试中，录音 ASR 4/4 成功，流式 ASR 修复前后共 5/5 成功；无效凭据分别在 298ms、195ms 返回 401，没有出现无限等待。
 
 ## 4. 音频下行链路（TTS）
 
@@ -136,6 +172,8 @@ providers/tts/base.py:375-416  tts_text_priority_thread（守护线程）
   → providers/tts/base.py:418-479  _audio_play_priority_thread
     - Opus 编码 → run_coroutine_threadsafe → WebSocket 发送
 ```
+
+SeedTTS2 双流 provider 在 `EVENT_SessionFinished` 后先用 `is_end=True` 冲刷不足 60ms 的 PCM 尾帧，再发布 `SentenceType.LAST`。取消、失败或异常断链时调用 `OpusEncoderUtils.reset_state()`，防止上一轮残留样本进入下一轮。真实连续 5 会话的 PCM/Opus 均可解码，修复后每轮编码缓冲均为 0。
 
 ### 4.3 流控
 
@@ -272,6 +310,7 @@ device_runtime_registry.py:59-81  register_connection()
   - 全局字典：device-id + client-id → ConnectionHandler
   - MQTT 网关：分割 @@@ 组 ID
   - 重连时覆盖旧条目（记录 warning）
+  - 注销时仅删除当前仍指向该连接对象的键；旧连接晚关闭不能删除新连接映射
 ```
 
 ### 9.2 超时检测
@@ -351,6 +390,13 @@ connection.py:325-360  _save_and_close()
 | 8 | `_modules_ready` 缺少同步 | 添加 threading.Event |
 | 9 | 注册表静默覆盖旧连接 | 添加 warning 日志 |
 | 10 | `_save_and_close` 守护线程丢数据 | 改为非守护 + join(10s) |
+| 11 | 唤醒后固定丢弃 2 秒音频 | 新增 `wakeup_vad_ignore_ms`，默认 0，可配置恢复兼容窗口 |
+| 12 | 默认欢迎语阻塞首轮交互 | `enable_greeting` 默认改为 false |
+| 13 | 豆包录音 ASR 同步 HTTP/休眠阻塞事件循环 | 改为 aiohttp 异步提交、轮询和总预算超时 |
+| 14 | WebSocket 请求头脱敏正则可能泄露令牌 | 按 header 键结构化屏蔽 Authorization/token/api-key/cookie/secret |
+| 15 | 旧连接注销误删新连接映射风险 | 注销前校验注册表中的对象身份，并增加覆盖重连测试 |
+| 16 | 豆包流式 ASR 初始化/结果等待无明确边界 | 新增 10s 初始化超时和 15s 结果超时，失败后关闭并复位状态 |
+| 17 | SeedTTS2 不足 60ms 的 Opus 尾帧跨会话残留 | 正常结束冲刷尾帧，取消/失败/断链重置编码器 |
 
 ## 12. 排查方法
 
@@ -366,4 +412,9 @@ scripts/dev logs server -f | grep -E "mcp|tools/list|initialize"
 
 # 查看 OTA 请求
 scripts/dev logs server -f | grep -E "OTA|firmware|ota_handler"
+
+# 手动部署后检查语音长尾（不要输出请求头或私有配置）
+scripts/dev logs server -f | grep -E "录音识别完成|录音识别失败|查询录音识别结果超时"
 ```
+
+2026-07-11 的源码修复没有构建镜像、没有部署或重启腾讯云服务。生产验证必须等用户手动发布后执行，并同时观察设备串口、ASR 阶段耗时、WebSocket 重连映射和日志脱敏结果。

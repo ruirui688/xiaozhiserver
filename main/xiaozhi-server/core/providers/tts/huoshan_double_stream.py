@@ -6,6 +6,7 @@ import time
 import asyncio
 import traceback
 import websockets
+import concurrent.futures
 
 from collections.abc import Mapping
 from typing import Callable, Any
@@ -156,6 +157,8 @@ class TTSProvider(TTSProviderBase):
         self.interface_type = InterfaceType.DUAL_STREAM
         self._monitor_task = None  # 监听任务引用
         self._session_error = None  # 会话失败时的错误信息
+        self._session_started_event = None
+        self._session_finished_event = None
         self.api_key = config.get("api_key")
         self.resource_id = self._normalize_resource_id(config.get("resource_id"))
         self.report_on_last = True
@@ -219,6 +222,22 @@ class TTSProvider(TTSProviderBase):
         self.ws_url = HUOSHAN_DOUBLE_STREAM_WS_URL
         self.enable_ws_reuse = True
         self.tts_text = ""
+        self.connection_timeout_seconds = self._positive_timeout(
+            config.get("connection_timeout_seconds", 5),
+            "connection_timeout_seconds",
+        )
+        self.session_timeout_seconds = self._positive_timeout(
+            config.get("session_timeout_seconds", 5),
+            "session_timeout_seconds",
+        )
+        self.response_timeout_seconds = self._positive_timeout(
+            config.get("response_timeout_seconds", 5),
+            "response_timeout_seconds",
+        )
+        self.send_timeout_seconds = self._positive_timeout(
+            config.get("send_timeout_seconds", 3),
+            "send_timeout_seconds",
+        )
 
         model_key_msg = check_model_key("TTS", self.api_key)
         if model_key_msg:
@@ -344,19 +363,74 @@ class TTSProvider(TTSProviderBase):
                         pass
             logger.bind(tag=TAG).debug("开始建立新连接...")
             ws_header = self._build_ws_headers()
-            self.ws = await websockets.connect(
-                self.ws_url, additional_headers=ws_header, max_size=1000000000
+            self.ws = await asyncio.wait_for(
+                websockets.connect(
+                    self.ws_url,
+                    additional_headers=ws_header,
+                    max_size=1000000000,
+                ),
+                timeout=self.connection_timeout_seconds,
             )
             logger.bind(tag=TAG).debug("WebSocket连接建立成功")
             await self.start_connection()
-            await self._wait_for_event(self.ws, EVENT_ConnectionStarted, timeout=10)
+            await self._wait_for_event(
+                self.ws,
+                EVENT_ConnectionStarted,
+                timeout=self.connection_timeout_seconds,
+            )
             logger.bind(tag=TAG).debug("TTS连接启动成功")
             
             return self.ws
         except Exception as e:
             logger.bind(tag=TAG).error(f"建立连接失败: {str(e)}")
+            if self.ws:
+                try:
+                    await self.ws.close()
+                except Exception:
+                    pass
             self.ws = None
             raise
+
+    def _reset_session_waiters(self):
+        self._session_error = None
+        self._session_started_event = asyncio.Event()
+        self._session_finished_event = asyncio.Event()
+
+    def _wake_session_waiters(self):
+        for event in (self._session_started_event, self._session_finished_event):
+            if event is not None:
+                event.set()
+
+    async def _wait_for_session_event(self, event, stage):
+        try:
+            await asyncio.wait_for(
+                event.wait(),
+                timeout=self.session_timeout_seconds,
+            )
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(
+                f"{stage}超时（{self.session_timeout_seconds:.1f}s）"
+            ) from exc
+        if self._session_error:
+            raise RuntimeError(self._session_error)
+
+    def _wait_threadsafe_future(self, future, stage):
+        try:
+            return future.result(timeout=self.tts_timeout)
+        except (concurrent.futures.TimeoutError, TimeoutError) as exc:
+            future.cancel()
+            close_future = None
+            if self.conn and self.conn.loop and not self.conn.loop.is_closed():
+                close_future = asyncio.run_coroutine_threadsafe(
+                    self.close(), self.conn.loop
+                )
+                try:
+                    close_future.result(timeout=self.tts_timeout)
+                except Exception:
+                    close_future.cancel()
+            raise TimeoutError(
+                f"{stage}超时（{self.tts_timeout:.1f}s），已取消并清理TTS连接"
+            ) from exc
     
     async def finish_connection(self):
         """发送 FinishConnection 事件，等待服务端返回 EVENT_ConnectionFinished"""
@@ -421,7 +495,7 @@ class TTSProvider(TTSProviderBase):
                             self.start_session(self.conn.sentence_id),
                             loop=self.conn.loop,
                         )
-                        future.result(timeout=self.tts_timeout)
+                        self._wait_threadsafe_future(future, "启动TTS会话")
                         self.before_stop_play_files.clear()
                         logger.bind(tag=TAG).info(
                             f"TTS会话启动成功 | elapsed={time.monotonic() - tts_session_started_at:.3f}s | "
@@ -442,7 +516,7 @@ class TTSProvider(TTSProviderBase):
                                 self.text_to_speak(message.content_detail, None),
                                 loop=self.conn.loop,
                             )
-                            future.result(timeout=self.tts_timeout)
+                            self._wait_threadsafe_future(future, "发送TTS文本")
                             logger.bind(tag=TAG).info(
                                 f"TTS文本发送完成 | elapsed={time.monotonic() - tts_text_started_at:.3f}s | "
                                 f"chars={len(message.content_detail)}"
@@ -466,7 +540,7 @@ class TTSProvider(TTSProviderBase):
                             self.finish_session(self.conn.sentence_id),
                             loop=self.conn.loop,
                         )
-                        future.result(timeout=self.tts_timeout)
+                        self._wait_threadsafe_future(future, "结束TTS会话")
                         logger.bind(tag=TAG).info(
                             f"TTS会话结束成功 | elapsed={time.monotonic() - tts_finish_started_at:.3f}s"
                         )
@@ -520,11 +594,15 @@ class TTSProvider(TTSProviderBase):
             if self.activate_session:
                 await self.close()
             
-            # 设置会话激活标志
-            self.activate_session = True
-            
             # 确保连接建立
             await self._ensure_connection()
+
+            self._reset_session_waiters()
+            self.activate_session = True
+            if self._monitor_task is None or self._monitor_task.done():
+                self._monitor_task = asyncio.create_task(
+                    self._start_monitor_tts_response()
+                )
 
             header = Header(
                 message_type=FULL_CLIENT_REQUEST,
@@ -539,10 +617,11 @@ class TTSProvider(TTSProviderBase):
             )
             await self.send_event(self.ws, header, optional, payload)
             logger.bind(tag=TAG).debug("会话启动请求已发送")
-            if self._monitor_task is None or self._monitor_task.done():
-                await self._wait_for_event(self.ws, EVENT_SessionStarted, timeout=10)
-                logger.bind(tag=TAG).debug("TTS会话启动成功")
-                self._monitor_task = asyncio.create_task(self._start_monitor_tts_response())
+            await self._wait_for_session_event(
+                self._session_started_event,
+                "等待TTS会话启动响应",
+            )
+            logger.bind(tag=TAG).debug("TTS会话启动成功")
         except Exception as e:
             logger.bind(tag=TAG).error(f"启动会话失败: {str(e)}")
             # 确保清理资源
@@ -564,6 +643,10 @@ class TTSProvider(TTSProviderBase):
                 payload = str.encode("{}")
                 await self.send_event(self.ws, header, optional, payload)
                 logger.bind(tag=TAG).debug("会话结束请求已发送")
+                await self._wait_for_session_event(
+                    self._session_finished_event,
+                    "等待TTS会话结束响应",
+                )
 
         except Exception as e:
             logger.bind(tag=TAG).error(f"关闭会话失败: {str(e)}")
@@ -613,6 +696,7 @@ class TTSProvider(TTSProviderBase):
             except Exception:
                 pass
             self.ws = None
+        self._wake_session_waiters()
 
     async def _start_monitor_tts_response(self):
         """监听TTS响应 - 长期运行"""
@@ -620,7 +704,13 @@ class TTSProvider(TTSProviderBase):
             while not self.conn.stop_event.is_set():
                 try:
                     # 确保 `recv()` 运行在同一个 event loop
-                    msg = await self.ws.recv()
+                    if self.activate_session:
+                        msg = await asyncio.wait_for(
+                            self.ws.recv(),
+                            timeout=self.response_timeout_seconds,
+                        )
+                    else:
+                        msg = await self.ws.recv()
                     res = self.parser_response(msg)
                     self.print_response(res, "send_text res:")
 
@@ -628,6 +718,11 @@ class TTSProvider(TTSProviderBase):
                     if res.optional.event == EVENT_ConnectionFinished:
                         logger.bind(tag=TAG).debug(f"链接关闭成功～～")
                         break
+
+                    if res.optional.event == EVENT_SessionStarted:
+                        if self._session_started_event is not None:
+                            self._session_started_event.set()
+                        continue
 
                     # 只处理当前活跃会话的响应
                     if res.optional.sessionId and self.conn.sentence_id != res.optional.sessionId:
@@ -639,7 +734,10 @@ class TTSProvider(TTSProviderBase):
 
                     if res.optional.event == EVENT_SessionCanceled:
                         logger.bind(tag=TAG).debug(f"释放服务端资源成功～～")
+                        self._reset_opus_audio_stream()
                         self.activate_session = False
+                        if self._session_finished_event is not None:
+                            self._session_finished_event.set()
                     elif (
                         res.optional.event == EVENT_TTSResponse
                         and res.header.message_type == AUDIO_ONLY_RESPONSE
@@ -667,21 +765,43 @@ class TTSProvider(TTSProviderBase):
                             f"speaker={self.voice}）：{error_msg or '未知错误'}"
                         )
                         logger.bind(tag=TAG).error(self._session_error)
+                        self._reset_opus_audio_stream()
                         self.activate_session = False
+                        self._wake_session_waiters()
                     elif res.optional.event == EVENT_SessionFinished:
                         logger.bind(tag=TAG).debug(f"会话结束～～")
+                        self._flush_opus_audio_stream()
                         self.activate_session = False
                         self._process_before_stop_play_files()
+                        if self._session_finished_event is not None:
+                            self._session_finished_event.set()
                         # 非复用模式下，会话结束后发送 FinishConnection
                         if not self.enable_ws_reuse:
                             await self.finish_connection()
                 except websockets.ConnectionClosed:
                     logger.bind(tag=TAG).warning("WebSocket连接已关闭")
+                    self._session_error = "TTS WebSocket连接已关闭"
+                    self._wake_session_waiters()
+                    break
+                except asyncio.TimeoutError:
+                    logger.bind(tag=TAG).error(
+                        "等待TTS下行响应超时: "
+                        f"timeout={self.response_timeout_seconds:.1f}s"
+                    )
+                    self._session_error = (
+                        "等待TTS下行响应超时"
+                        f"（{self.response_timeout_seconds:.1f}s）"
+                    )
+                    self._wake_session_waiters()
                     break
                 except Exception as e:
                     logger.bind(tag=TAG).error(
                         f"Error in _start_monitor_tts_response: {e}"
                     )
+                    self._session_error = (
+                        f"TTS下行响应异常: {type(e).__name__}"
+                    )
+                    self._wake_session_waiters()
                     traceback.print_exc()
                     break
             # 连接异常时关闭WebSocket
@@ -693,8 +813,32 @@ class TTSProvider(TTSProviderBase):
                 self.ws = None
         # 监听任务退出时清理引用
         finally:
+            if self.activate_session:
+                self._reset_opus_audio_stream()
             self.activate_session = False
+            self._wake_session_waiters()
             self._monitor_task = None
+
+    def _flush_opus_audio_stream(self):
+        """Flush the final partial PCM frame before publishing the session LAST marker."""
+        if not getattr(self, "opus_encoder", None):
+            return
+        try:
+            self.wav_to_opus_data_audio_raw_stream(
+                b"", is_end=True, callback=self.handle_opus
+            )
+        except Exception as exc:
+            logger.bind(tag=TAG).warning(f"冲刷TTS Opus尾帧失败: {exc}")
+
+    def _reset_opus_audio_stream(self):
+        """Discard audio buffered by an aborted/failed session."""
+        encoder = getattr(self, "opus_encoder", None)
+        if not encoder or not hasattr(encoder, "reset_state"):
+            return
+        try:
+            encoder.reset_state()
+        except Exception as exc:
+            logger.bind(tag=TAG).warning(f"重置TTS Opus编码器失败: {exc}")
 
     async def send_event(
         self,
@@ -711,7 +855,18 @@ class TTSProvider(TTSProviderBase):
                 payload_size = len(payload).to_bytes(4, "big", signed=True)
                 full_client_request.extend(payload_size)
                 full_client_request.extend(payload)
-            await ws.send(full_client_request)
+            await asyncio.wait_for(
+                ws.send(full_client_request),
+                timeout=self.send_timeout_seconds,
+            )
+        except asyncio.TimeoutError as exc:
+            logger.bind(tag=TAG).error(
+                "发送TTS WebSocket事件超时: "
+                f"timeout={self.send_timeout_seconds:.1f}s"
+            )
+            raise TimeoutError(
+                f"发送TTS WebSocket事件超时（{self.send_timeout_seconds:.1f}s）"
+            ) from exc
         except websockets.ConnectionClosed:
             logger.bind(tag=TAG).error(f"ConnectionClosed")
             raise
@@ -903,15 +1058,24 @@ class TTSProvider(TTSProviderBase):
             async def _generate_audio():
                 # 创建新的WebSocket连接
                 ws_header = self._build_ws_headers()
-                ws = await websockets.connect(
-                    self.ws_url, additional_headers=ws_header, max_size=1000000000
+                ws = await asyncio.wait_for(
+                    websockets.connect(
+                        self.ws_url,
+                        additional_headers=ws_header,
+                        max_size=1000000000,
+                    ),
+                    timeout=self.connection_timeout_seconds,
                 )
 
                 try:
                     # 启动连接
                     self.ws = ws
                     await self.start_connection()
-                    await self._wait_for_event(ws, EVENT_ConnectionStarted, timeout=self.tts_timeout)
+                    await self._wait_for_event(
+                        ws,
+                        EVENT_ConnectionStarted,
+                        timeout=self.connection_timeout_seconds,
+                    )
 
                     # 启动会话
                     header = Header(
@@ -926,7 +1090,11 @@ class TTSProvider(TTSProviderBase):
                         event=EVENT_StartSession, speaker=self.voice
                     )
                     await self.send_event(ws, header, optional, payload)
-                    await self._wait_for_event(ws, EVENT_SessionStarted, timeout=self.tts_timeout)
+                    await self._wait_for_event(
+                        ws,
+                        EVENT_SessionStarted,
+                        timeout=self.session_timeout_seconds,
+                    )
 
                     # 发送文本
                     header = Header(
@@ -956,8 +1124,10 @@ class TTSProvider(TTSProviderBase):
 
                     # 接收音频数据
                     while True:
-                        msg = await ws.recv()
-                        res = self.parser_response(msg)
+                        res = await self._receive_response(
+                            ws,
+                            timeout=self.response_timeout_seconds,
+                        )
 
                         if (
                             res.optional.event == EVENT_TTSResponse

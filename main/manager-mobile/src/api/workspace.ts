@@ -26,6 +26,7 @@ export interface WorkspaceInvitation {
 
 export function getWorkspaceList() {
   return http.Get<Workspace[]>('/workspace/list', {
+    timeout: 15000,
     meta: {
       ignoreAuth: false,
       toast: false,
@@ -38,6 +39,7 @@ export function getWorkspaceList() {
 
 export function getWorkspaceMembers(workspaceId: string) {
   return http.Get<WorkspaceMember[]>(`/workspace/${workspaceId}/members`, {
+    timeout: 15000,
     meta: {
       ignoreAuth: false,
       toast: false,
@@ -50,6 +52,7 @@ export function getWorkspaceMembers(workspaceId: string) {
 
 export function inviteWorkspaceMember(workspaceId: string, data: { username: string, role: WorkspaceRole }) {
   return http.Post<WorkspaceInvitation>(`/workspace/${workspaceId}/invitations`, data, {
+    timeout: 15000,
     meta: {
       ignoreAuth: false,
       toast: false,
@@ -59,6 +62,7 @@ export function inviteWorkspaceMember(workspaceId: string, data: { username: str
 
 export function acceptWorkspaceInvitation(code: string) {
   return http.Post<Workspace>(`/workspace/invitations/${code}/accept`, {}, {
+    timeout: 15000,
     meta: {
       ignoreAuth: false,
       toast: false,
@@ -68,6 +72,7 @@ export function acceptWorkspaceInvitation(code: string) {
 
 export function updateWorkspaceMemberRole(workspaceId: string, userId: number, role: WorkspaceRole) {
   return http.Put<void>(`/workspace/${workspaceId}/members/${userId}/role`, { role }, {
+    timeout: 15000,
     meta: {
       ignoreAuth: false,
       toast: false,
@@ -77,6 +82,7 @@ export function updateWorkspaceMemberRole(workspaceId: string, userId: number, r
 
 export function removeWorkspaceMember(workspaceId: string, userId: number) {
   return http.Delete<void>(`/workspace/${workspaceId}/members/${userId}`, {
+    timeout: 15000,
     meta: {
       ignoreAuth: false,
       toast: false,
@@ -86,6 +92,7 @@ export function removeWorkspaceMember(workspaceId: string, userId: number) {
 
 export function leaveWorkspace(workspaceId: string) {
   return http.Delete<void>(`/workspace/${workspaceId}/members/me`, {
+    timeout: 15000,
     meta: {
       ignoreAuth: false,
       toast: false,
