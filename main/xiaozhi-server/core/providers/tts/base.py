@@ -378,6 +378,24 @@ class TTSProviderBase(ABC):
         if sentence_id in self._sentence_text_map:
             del self._sentence_text_map[sentence_id]
 
+    def _audio_message_timeout(self, sentence_type):
+        """Return the thread-side wait budget for one audio message.
+
+        LAST includes draining the rate-controlled audio queue.  That drain has
+        its own duration-aware timeout in sendAudioHandle, so the thread-side
+        guard must not expire first and cancel an otherwise healthy playback.
+        """
+        if sentence_type == SentenceType.LAST:
+            completion_timeout = self.conn.config.get(
+                "tts_audio_completion_timeout_seconds", 20
+            )
+            completion_timeout = self._positive_timeout(
+                completion_timeout,
+                "tts_audio_completion_timeout_seconds",
+            )
+            return completion_timeout + self.audio_send_timeout_seconds
+        return self.audio_send_timeout_seconds
+
     def _restore_original_text(self, text):
         if not self._reverse_words_pattern or not text:
             return text
@@ -493,8 +511,9 @@ class TTSProviderBase(ABC):
                     self._pending_futures = set()
                 self._pending_futures.add(future)
                 future.add_done_callback(self._pending_futures.discard)
+                message_timeout = self._audio_message_timeout(sentence_type)
                 try:
-                    future.result(timeout=self.audio_send_timeout_seconds)
+                    future.result(timeout=message_timeout)
                 except concurrent.futures.TimeoutError:
                     future.cancel()
                     with self.conn._abort_lock:
@@ -504,7 +523,7 @@ class TTSProviderBase(ABC):
                         continue
                     logger.bind(tag=TAG).error(
                         "设备音频发送超时: "
-                        f"timeout={self.audio_send_timeout_seconds:.1f}s"
+                        f"timeout={message_timeout:.1f}s"
                     )
                     continue
                 except concurrent.futures.CancelledError:

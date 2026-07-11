@@ -28,6 +28,11 @@ async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text
         conn.tts.tts_audio_first_sentence = False
 
     if sentenceType == SentenceType.FIRST:
+        # 只有 TTS 真正产生首段音频时才进入 speaking。ASR 文本到达到
+        # 此刻之间仍是等待回复阶段，不应把新用户轮次当成播放打断。
+        await send_tts_message(conn, "start")
+        conn.client_is_speaking = True
+        conn._tts_started_at = time.time() * 1000
         # 同一句子的后续消息加入流控队列，其他情况立即发送
         if (
             hasattr(conn, "audio_rate_controller")
@@ -332,8 +337,13 @@ async def send_tts_message(conn: "ConnectionHandler", state, text=None):
             )
             audios = await audio_to_data(stop_tts_notify_voice, is_opus=True)
             await sendAudio(conn, audios)
-        # 等待所有音频包发送完成
-        await _wait_for_audio_completion(conn)
+        # 等待所有音频包发送完成。即使发送失败或超时，也要继续
+        # 收敛服务端 speaking 状态并尽力通知设备 stop。
+        completion_error = None
+        try:
+            await _wait_for_audio_completion(conn)
+        except (TimeoutError, RuntimeError) as exc:
+            completion_error = exc
 
         # 检查是否是当前轮次
         if current_sentence_id != conn.sentence_id:
@@ -346,6 +356,8 @@ async def send_tts_message(conn: "ConnectionHandler", state, text=None):
 
     # 发送消息到客户端
     await conn.websocket.send(json.dumps(message))
+    if state == "stop" and completion_error is not None:
+        raise completion_error
 
 
 async def send_stt_message(conn: "ConnectionHandler", text):
@@ -374,11 +386,6 @@ async def send_stt_message(conn: "ConnectionHandler", text):
     await conn.websocket.send(
         json.dumps({"type": "stt", "text": stt_text, "session_id": conn.session_id})
     )
-    await send_tts_message(conn, "start")
-    # 发送start消息后客户端状态会处于说话中状态，同步服务端状态
-    conn.client_is_speaking = True
-    # 记录 TTS 开始时间戳，用于后续回声保护和语义打断窗口判断
-    conn._tts_started_at = time.time() * 1000
 
 
 async def send_display_message(conn: "ConnectionHandler", text):

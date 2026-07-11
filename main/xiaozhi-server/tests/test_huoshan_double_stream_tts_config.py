@@ -11,8 +11,13 @@ SERVER_ROOT = Path(__file__).resolve().parents[1]
 if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 
+from config import settings
+
+settings.config_file_valid = True
+
 from core.providers.tts import huoshan_double_stream
 from core.providers.tts.huoshan_double_stream import TTSProvider
+from core.providers.tts.dto.dto import SentenceType
 
 
 def _base_config(**overrides):
@@ -170,6 +175,19 @@ def test_doubao_tts_timeout_configuration_defaults_and_overrides():
     assert configured.response_timeout_seconds == 0.3
     assert configured.send_timeout_seconds == 0.4
     assert configured.audio_send_timeout_seconds == 0.5
+
+
+def test_last_audio_message_wait_budget_includes_queue_drain_timeout():
+    provider = TTSProvider(
+        _base_config(audio_send_timeout_seconds=5),
+        True,
+    )
+    provider.conn = SimpleNamespace(
+        config={"tts_audio_completion_timeout_seconds": 20}
+    )
+
+    assert provider._audio_message_timeout(SentenceType.MIDDLE) == 5
+    assert provider._audio_message_timeout(SentenceType.LAST) == 25
 
 
 @pytest.mark.parametrize(

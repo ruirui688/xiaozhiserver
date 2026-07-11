@@ -13,6 +13,7 @@ if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 
 from core.handle.receiveAudioHandle import startToChat
+from core.handle.sendAudioHandle import send_stt_message
 from core.handle.textHandler.listenMessageHandler import ListenTextMessageHandler
 from core.utils.dialogue import Dialogue, Message
 
@@ -130,6 +131,17 @@ def test_overlap_continue_does_not_abort_or_submit_chat(monkeypatch):
     assert conn.abort_generation == 0
     assert conn.executor.submitted == []
     assert all(message.get("state") != "stop" for message in conn.websocket.messages)
+
+
+def test_stt_does_not_mark_speaking_before_tts_has_audio():
+    conn = _Conn({"decision": "continue", "reason": "短反馈"})
+    conn.client_is_speaking = False
+
+    asyncio.run(send_stt_message(conn, "第二个正常问题"))
+
+    assert conn.client_is_speaking is False
+    assert conn._tts_started_at == 0
+    assert [message["type"] for message in conn.websocket.messages] == ["stt"]
 
 
 def test_overlap_json_content_is_used_for_llm_classification(monkeypatch):
