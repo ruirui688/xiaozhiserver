@@ -32,12 +32,6 @@
         "text": "首页"
       },
       {
-        "iconPath": "static/tabbar/network.png",
-        "selectedIconPath": "static/tabbar/network_activate.png",
-        "pagePath": "pages/device-config/index",
-        "text": "配网"
-      },
-      {
         "iconPath": "static/tabbar/system.png",
         "selectedIconPath": "static/tabbar/system_activate.png",
         "pagePath": "pages/settings/index",
@@ -111,14 +105,6 @@
     {
       "path": "pages/device/index",
       "type": "page"
-    },
-    {
-      "path": "pages/device-config/index",
-      "type": "page",
-      "style": {
-        "navigationBarTitleText": "设备配置",
-        "navigationStyle": "custom"
-      }
     },
     {
       "path": "pages/forgot-password/index",

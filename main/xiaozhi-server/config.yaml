@@ -72,7 +72,10 @@ device_mcp_control_timeout: 3
 # 开启唤醒词加速
 enable_wakeup_words_response_cache: true
 # 开场是否回复唤醒词
-enable_greeting: true
+enable_greeting: false
+# 唤醒后忽略上行音频的时长（毫秒）。默认0以降低首轮延迟；
+# 无AEC且开启唤醒回复、存在扬声器回声的设备可设为2000兼容旧行为。
+wakeup_vad_ignore_ms: 0
 # 说完话是否开启提示音
 enable_stop_tts_notify: false
 # 说完话是否开启提示音，音效地址
@@ -86,6 +89,8 @@ enable_websocket_ping: false
 #   0: 使用精确时间控制，严格匹配音频帧率（默认，运行时按音频帧率计算）
 #   > 0: 使用固定延迟（毫秒）发送，例如: 60
 tts_audio_send_delay: 0
+# 等待流控队列完成的绝对上限（秒），上游发送半开时清理队列并失败返回。
+tts_audio_completion_timeout_seconds: 20
 
 # 语义打断配置
 # 当设备在 TTS 播放期间识别到用户说话时，先让当前 LLM 基于少量上下文裁决：
@@ -391,6 +396,12 @@ ASR:
     resource_id: volc.seedasr.auc
     # 可选：上下文文本，用于提高特定场景识别准确率
     context_text: ""
+    # 单次提交或查询请求的总超时（秒）
+    http_timeout_seconds: 10
+    # 查询结果的异步轮询间隔（秒）
+    query_interval_seconds: 0.2
+    # 提交成功后等待最终识别结果的总预算（秒）
+    query_timeout_seconds: 15
     output_dir: tmp/
   DoubaoStreamASRV2:
     # 豆包流式语音识别模型2.0，官方文档：https://www.volcengine.com/docs/6561/1354869
@@ -399,6 +410,10 @@ ASR:
     resource_id: volc.seedasr.sauc.duration
     # 可选：上下文文本，用于提高特定场景识别准确率
     context_text: ""
+    # WebSocket 建连后等待初始化响应的最大时间（秒）
+    init_timeout_seconds: 10
+    # 等待下一条流式识别结果的最大时间（秒）；每收到结果后重新计时
+    response_timeout_seconds: 15
     output_dir: tmp/
   TencentASR:
     # token申请地址：https://console.cloud.tencent.com/cam/capi
@@ -607,6 +622,14 @@ LLM:
     model_name: deepseek-v4-flash
     base_url: https://api.deepseek.com
     api_key: 你的deepseek web key
+    # HTTP阶段超时（秒）；语音交互应避免上游请求长期占满连接线程池
+    timeout:
+      pool: 2
+      connect: 3
+      write: 5
+      read: 15
+    # 流持续返回分片但迟迟不结束时的总预算；首包无响应仍由read超时控制
+    stream_total_timeout_seconds: 30
     # 思考模式: enabled / disabled；语音交互默认 disabled，响应更快
     thinking: disabled
     # 思考强度仅在 thinking: enabled 时生效: high / max
@@ -754,6 +777,13 @@ TTS:
     speech_rate: 0
     loudness_rate: 0
     pitch: 0
+    # WebSocket 建连、会话事件、会话内下行和单次发送的超时预算（秒）
+    connection_timeout_seconds: 5
+    session_timeout_seconds: 5
+    response_timeout_seconds: 5
+    send_timeout_seconds: 3
+    # 服务端向设备发送单批音频时的等待上限（秒）
+    audio_send_timeout_seconds: 5
 
   # 语音合成大模型，resource_id 固定为 volc.service_type.10029
   DoubaoBigTTSStream:
@@ -765,3 +795,8 @@ TTS:
     speech_rate: 0
     loudness_rate: 0
     pitch: 0
+    connection_timeout_seconds: 5
+    session_timeout_seconds: 5
+    response_timeout_seconds: 5
+    send_timeout_seconds: 3
+    audio_send_timeout_seconds: 5

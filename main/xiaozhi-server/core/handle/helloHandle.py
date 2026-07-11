@@ -14,6 +14,7 @@ from core.utils.wakeup_word import WakeupWordsConfig
 from core.handle.sendAudioHandle import sendAudioMessage, send_tts_message
 from core.utils.util import remove_punctuation_and_length, opus_datas_to_wav_bytes
 from core.providers.tools.device_mcp import MCPClient, send_mcp_initialize_message
+from core.handle.wakeupHandle import arm_wakeup_vad_ignore
 
 TAG = __name__
 
@@ -72,11 +73,17 @@ async def handleHelloMessage(conn: "ConnectionHandler", msg_json):
 
 
 async def checkWakeupWords(conn: "ConnectionHandler", text):
-    enable_wakeup_words_response_cache = conn.config[
-        "enable_wakeup_words_response_cache"
-    ]
+    enable_wakeup_words_response_cache = conn.config.get(
+        "enable_wakeup_words_response_cache", False
+    )
+    if not enable_wakeup_words_response_cache:
+        return False
 
-    # 等待tts初始化，最多等待3秒
+    _, filtered_text = remove_punctuation_and_length(text)
+    if filtered_text not in (conn.config.get("wakeup_words") or []):
+        return False
+
+    # 仅真正命中缓存唤醒词时等待TTS，普通用户文本不应被初始化过程阻塞。
     start_time = time.time()
     while time.time() - start_time < 3:
         if conn.tts:
@@ -85,14 +92,7 @@ async def checkWakeupWords(conn: "ConnectionHandler", text):
     else:
         return False
 
-    if not enable_wakeup_words_response_cache:
-        return False
-
-    _, filtered_text = remove_punctuation_and_length(text)
-    if filtered_text not in conn.config.get("wakeup_words"):
-        return False
-
-    conn.just_woken_up = True
+    arm_wakeup_vad_ignore(conn)
     await send_tts_message(conn, "start")
 
     # 获取当前音色

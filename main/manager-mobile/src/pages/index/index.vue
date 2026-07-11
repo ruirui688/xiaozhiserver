@@ -17,6 +17,7 @@ import { useMessage } from 'wot-design-uni'
 import useZPaging from 'z-paging/components/z-paging/js/hooks/useZPaging.js'
 import { createAgent, deleteAgent, getAgentList } from '@/api/agent/agent'
 import { t } from '@/i18n'
+import { parseDateTime } from '@/utils'
 import { getSafeAreaInsets } from '@/utils/system'
 import { toast } from '@/utils/toast'
 
@@ -44,7 +45,7 @@ const activeAgentCount = computed(() =>
 const latestActiveAgent = computed(() => {
   return [...agentList.value]
     .filter(agent => agent.lastConnectedAt)
-    .sort((a, b) => new Date(b.lastConnectedAt || 0).getTime() - new Date(a.lastConnectedAt || 0).getTime())[0]
+    .sort((a, b) => parseDateTime(b.lastConnectedAt).getTime() - parseDateTime(a.lastConnectedAt).getTime())[0]
 })
 
 const overviewItems = computed(() => [
@@ -71,12 +72,6 @@ const quickActions = computed(() => [
     desc: t('home.quickCreateAgentDesc'),
     icon: 'add',
     action: openCreateDialog,
-  },
-  {
-    label: t('home.quickDeviceConfig'),
-    desc: t('home.quickDeviceConfigDesc'),
-    icon: 'setting',
-    action: () => uni.switchTab({ url: '/pages/device-config/index' }),
   },
 ])
 
@@ -212,7 +207,10 @@ function openCreateDialog() {
 
 // 格式化时间
 function formatTime(timeStr: string) {
-  const date = new Date(timeStr)
+  const date = parseDateTime(timeStr)
+  if (Number.isNaN(date.getTime()))
+    return timeStr
+
   const now = new Date()
   const diff = now.getTime() - date.getTime()
 

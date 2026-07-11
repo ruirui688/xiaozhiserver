@@ -1,4 +1,5 @@
 import json
+import math
 import time
 import asyncio
 from typing import TYPE_CHECKING
@@ -66,7 +67,33 @@ async def _wait_for_audio_completion(conn: "ConnectionHandler"):
         conn.logger.bind(tag=TAG).debug(
             f"等待音频发送完成，队列中还有 {len(rate_controller.queue)} 个包"
         )
-        await rate_controller.queue_empty_event.wait()
+        if rate_controller.last_send_error is not None:
+            error = rate_controller.last_send_error
+            rate_controller.reset()
+            raise RuntimeError(
+                "音频发送失败，已清空发送队列: "
+                f"{type(error).__name__}"
+            ) from error
+        timeout_seconds = _audio_completion_timeout(conn, rate_controller)
+        try:
+            await asyncio.wait_for(
+                rate_controller.queue_empty_event.wait(),
+                timeout=timeout_seconds,
+            )
+        except asyncio.TimeoutError as exc:
+            rate_controller.reset()
+            raise TimeoutError(
+                "等待音频发送完成超时"
+                f"（{timeout_seconds:.1f}s），已清空发送队列"
+            ) from exc
+
+        if rate_controller.last_send_error is not None:
+            error = rate_controller.last_send_error
+            rate_controller.reset()
+            raise RuntimeError(
+                "音频发送失败，已清空发送队列: "
+                f"{type(error).__name__}"
+            ) from error
 
         # 等待预缓冲包播放完成
         # 前N个包直接发送，增加2个网络抖动包，需要额外等待它们在客户端播放完成
@@ -75,6 +102,27 @@ async def _wait_for_audio_completion(conn: "ConnectionHandler"):
         await asyncio.sleep(pre_buffer_playback_time)
 
         conn.logger.bind(tag=TAG).debug("音频发送完成")
+
+
+def _audio_completion_timeout(conn: "ConnectionHandler", rate_controller):
+    try:
+        absolute_limit = float(
+            conn.config.get("tts_audio_completion_timeout_seconds", 20)
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "tts_audio_completion_timeout_seconds 必须是大于 0 的数字"
+        ) from exc
+    if not math.isfinite(absolute_limit) or absolute_limit <= 0:
+        raise ValueError(
+            "tts_audio_completion_timeout_seconds 必须是大于 0 的数字"
+        )
+
+    queued_playback_seconds = (
+        len(rate_controller.queue) * rate_controller.frame_duration / 1000.0
+    )
+    dynamic_budget = max(5.0, queued_playback_seconds + 5.0)
+    return min(absolute_limit, dynamic_budget)
 
 
 async def _send_to_mqtt_gateway(

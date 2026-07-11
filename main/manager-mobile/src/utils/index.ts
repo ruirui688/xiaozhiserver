@@ -137,6 +137,49 @@ export function getEnvBaseUrl() {
   return import.meta.env.VITE_SERVER_BASEURL
 }
 
+export function parseDateTime(value: string | number | Date | null | undefined): Date {
+  if (value instanceof Date)
+    return new Date(value.getTime())
+
+  if (typeof value === 'number')
+    return new Date(value)
+
+  if (!value)
+    return new Date(Number.NaN)
+
+  const text = String(value).trim()
+  const match = text.match(
+    /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?(?:\.\d+)?(?:Z|([+-])(\d{2}):?(\d{2}))?$/,
+  )
+
+  if (match) {
+    const [, year, month, day, hour = '0', minute = '0', second = '0', offsetSign, offsetHour = '0', offsetMinute = '0'] = match
+    if (text.endsWith('Z') || offsetSign) {
+      const utcTime = Date.UTC(
+        Number(year),
+        Number(month) - 1,
+        Number(day),
+        Number(hour),
+        Number(minute),
+        Number(second),
+      )
+      const offset = (Number(offsetHour) * 60 + Number(offsetMinute)) * 60000
+      return new Date(offsetSign === '-' ? utcTime + offset : utcTime - offset)
+    }
+
+    return new Date(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second),
+    )
+  }
+
+  return new Date(Number.NaN)
+}
+
 /**
  * 根据微信小程序当前环境，判断应该获取的 UPLOAD_BASEURL
  */

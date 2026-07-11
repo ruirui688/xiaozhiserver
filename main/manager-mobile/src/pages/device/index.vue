@@ -4,6 +4,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useMessage } from 'wot-design-uni'
 import { bindDevice, bindDeviceManual, getBindDevices, getFirmwareTypes, unbindDevice, updateDeviceAutoUpdate } from '@/api/device'
 import { t } from '@/i18n'
+import { parseDateTime } from '@/utils'
 import { getSafeAreaInsets } from '@/utils/system'
 import { toast } from '@/utils/toast'
 
@@ -116,7 +117,10 @@ function getDeviceTypeName(boardKey: string): string {
 function formatTime(timeStr: string) {
   if (!timeStr)
     return t('device.neverConnected')
-  const date = new Date(timeStr)
+  const date = parseDateTime(timeStr)
+  if (Number.isNaN(date.getTime()))
+    return timeStr
+
   const now = new Date()
   const diff = now.getTime() - date.getTime()
 
