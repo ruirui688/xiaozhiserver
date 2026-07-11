@@ -57,7 +57,20 @@ async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text
     if not conn.calling and sentenceType == SentenceType.LAST:
         await send_tts_message(conn, "stop", None)
         if conn.close_after_chat:
-            await conn.close()
+            if (getattr(conn, "features", None) or {}).get(
+                "persistent_websocket"
+            ) is True:
+                # 新固件声明可复用控制通道时，退出只结束当前音频/对话轮次。
+                # WebSocket 保持连接，避免设备把服务端主动关闭误报成 TLS
+                # 接收错误后立即重连。未声明能力的旧固件维持原有行为。
+                conn.close_after_chat = False
+                conn.client_abort = False
+                conn.reset_audio_states()
+                conn.logger.bind(tag=TAG).info(
+                    "退出会话已完成，按客户端能力保持WebSocket连接"
+                )
+            else:
+                await conn.close()
 
 
 async def _wait_for_audio_completion(conn: "ConnectionHandler"):

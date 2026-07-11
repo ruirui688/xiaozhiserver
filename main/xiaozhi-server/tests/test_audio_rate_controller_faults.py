@@ -183,3 +183,60 @@ def test_first_audio_sets_speaking_and_preserves_protocol_order(monkeypatch):
         assert conn._tts_started_at > 0
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("features", "expected_close_calls", "expected_reset_calls"),
+    [
+        ({"persistent_websocket": True}, 0, 1),
+        ({"persistent_websocket": False}, 1, 0),
+        ({}, 1, 0),
+        (None, 1, 0),
+    ],
+)
+def test_exit_after_last_respects_persistent_websocket_capability(
+    monkeypatch, features, expected_close_calls, expected_reset_calls
+):
+    async def scenario():
+        close_calls = 0
+        reset_calls = 0
+
+        async def fake_send_tts_message(_conn, _state, _text=None):
+            return None
+
+        async def fake_send_audio(_conn, _audios, frame_duration=60):
+            return None
+
+        async def close():
+            nonlocal close_calls
+            close_calls += 1
+
+        def reset_audio_states():
+            nonlocal reset_calls
+            reset_calls += 1
+
+        conn = SimpleNamespace(
+            tts=SimpleNamespace(tts_audio_first_sentence=False),
+            sentence_id="turn-1",
+            calling=False,
+            close_after_chat=True,
+            client_abort=True,
+            features=features,
+            close=close,
+            reset_audio_states=reset_audio_states,
+            logger=FakeLogger(),
+        )
+        monkeypatch.setattr(sendAudioHandle, "send_tts_message", fake_send_tts_message)
+        monkeypatch.setattr(sendAudioHandle, "sendAudio", fake_send_audio)
+
+        await sendAudioHandle.sendAudioMessage(
+            conn, SentenceType.LAST, [], None, "turn-1"
+        )
+
+        assert close_calls == expected_close_calls
+        assert reset_calls == expected_reset_calls
+        if features == {"persistent_websocket": True}:
+            assert conn.close_after_chat is False
+            assert conn.client_abort is False
+
+    asyncio.run(scenario())
