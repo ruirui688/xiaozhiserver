@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sys
 import time
 from pathlib import Path
@@ -17,6 +18,7 @@ settings.config_file_valid = True
 
 from core.handle import sendAudioHandle
 from core.utils.audioRateController import AudioRateController
+from core.providers.tts.dto.dto import SentenceType
 
 
 class FakeLogger:
@@ -24,6 +26,9 @@ class FakeLogger:
         return self
 
     def debug(self, message):
+        return None
+
+    def info(self, message):
         return None
 
 
@@ -137,3 +142,44 @@ def test_audio_completion_timeout_uses_queue_duration_with_absolute_cap():
     controller.queue.clear()
     controller.queue.append(("audio", b"opus"))
     assert sendAudioHandle._audio_completion_timeout(conn, controller) == pytest.approx(5.06)
+
+
+def test_first_audio_sets_speaking_and_preserves_protocol_order(monkeypatch):
+    async def scenario():
+        sent = []
+
+        class RecordingWebSocket:
+            async def send(self, payload):
+                sent.append(payload)
+
+        conn = SimpleNamespace(
+            websocket=RecordingWebSocket(),
+            client_abort=False,
+            client_is_speaking=False,
+            conn_from_mqtt_gateway=False,
+            last_activity_time=0,
+            config={"tts_audio_send_delay": -1},
+            logger=FakeLogger(),
+            tts=SimpleNamespace(tts_audio_first_sentence=True),
+            sentence_id="turn-1",
+            session_id="session-1",
+            calling=False,
+            close_after_chat=False,
+            _tts_started_at=0,
+        )
+
+        async def fake_send_audio(_conn, _audios, frame_duration=60):
+            sent.append(b"opus")
+
+        monkeypatch.setattr(sendAudioHandle, "sendAudio", fake_send_audio)
+        await sendAudioHandle.sendAudioMessage(
+            conn, SentenceType.FIRST, b"opus", "你好", "turn-1"
+        )
+
+        states = [json.loads(payload)["state"] for payload in sent[:2]]
+        assert states == ["start", "sentence_start"]
+        assert sent[2] == b"opus"
+        assert conn.client_is_speaking is True
+        assert conn._tts_started_at > 0
+
+    asyncio.run(scenario())
