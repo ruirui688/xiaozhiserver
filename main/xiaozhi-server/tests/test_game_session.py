@@ -181,8 +181,19 @@ def _install_plugin_executor_stubs(monkeypatch):
             self.result = result
             self.response = response
 
+    class PluginBehaviorItem:
+        def __init__(self, code):
+            self.code = code
+
+    class PluginBehavior:
+        WAIT = PluginBehaviorItem(2)
+        CHANGE_SYS_PROMPT = PluginBehaviorItem(3)
+        SYSTEM_CTL = PluginBehaviorItem(4)
+        IOT_CTL = PluginBehaviorItem(5)
+
     register_mod.Action = Action
     register_mod.ActionResponse = ActionResponse
+    register_mod.ToolType = PluginBehavior
     monkeypatch.setitem(sys.modules, "plugins_func.register", register_mod)
 
     base_mod = types.ModuleType("core.providers.tools.base")

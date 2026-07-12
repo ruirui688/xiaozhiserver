@@ -1,3 +1,12 @@
+---
+status: supporting
+owner: model
+last_verified: 2026-07-12
+source_paths:
+  - main/manager-api/src/main/java/xiaozhi/modules/model
+  - main/manager-web/src/views/ModelConfig.vue
+---
+
 # 模型选择与厂商目录架构
 
 本文定义智控台模型配置页的目标形态：用户不应先选择底层 `adapter`，再猜厂商控制台里哪个服务能用；系统应提前整理厂商产品、模型系列、协议、适配状态和推荐场景，让用户先选业务目标，再选择经过标注的模型目录项。

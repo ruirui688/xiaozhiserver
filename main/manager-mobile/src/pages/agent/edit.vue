@@ -5,6 +5,7 @@ import { getAgentDetail, getAgentTags, getAllLanguage, getModelOptions, getPlugi
 import { t } from '@/i18n'
 import { usePluginStore, useProvider, useSpeedPitch } from '@/store'
 import { toast } from '@/utils/toast'
+import AgentModelConfigSection from './components/AgentModelConfigSection.vue'
 
 defineOptions({
   name: 'AgentEdit',
@@ -804,97 +805,11 @@ onMounted(async () => {
       </view>
     </view>
 
-    <!-- 模型配置标题 -->
-    <view class="pb-[20rpx]">
-      <text class="text-[32rpx] text-[#232338] font-bold">
-        {{ t('agent.modelConfig') }}
-      </text>
-    </view>
-
-    <!-- 模型配置卡片 -->
-    <view class="mb-[24rpx] border border-[#eeeeee] rounded-[20rpx] bg-[#fbfbfb] p-[24rpx]" style="box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.04);">
-      <view class="flex flex-col gap-[16rpx]">
-        <view class="flex cursor-pointer items-center justify-between border border-[#eeeeee] rounded-[12rpx] bg-[#f5f7fb] p-[20rpx] transition-all duration-300 active:bg-[#eef3ff]" @click="openPicker('vad')">
-          <text class="text-[28rpx] text-[#232338] font-medium">
-            {{ t('agent.vad') }}
-          </text>
-          <text class="mx-[16rpx] flex-1 text-right text-[26rpx] text-[#65686f]">
-            {{ displayNames.vad }}
-          </text>
-          <wd-icon name="arrow-right" custom-class="text-[20rpx] text-[#9d9ea3]" />
-        </view>
-
-        <view class="flex cursor-pointer items-center justify-between border border-[#eeeeee] rounded-[12rpx] bg-[#f5f7fb] p-[20rpx] transition-all duration-300 active:bg-[#eef3ff]" @click="openPicker('asr')">
-          <text class="text-[28rpx] text-[#232338] font-medium">
-            {{ t('agent.asr') }}
-          </text>
-          <text class="mx-[16rpx] flex-1 text-right text-[26rpx] text-[#65686f]">
-            {{ displayNames.asr }}
-          </text>
-          <wd-icon name="arrow-right" custom-class="text-[20rpx] text-[#9d9ea3]" />
-        </view>
-
-        <view class="flex cursor-pointer items-center justify-between border border-[#eeeeee] rounded-[12rpx] bg-[#f5f7fb] p-[20rpx] transition-all duration-300 active:bg-[#eef3ff]" @click="openPicker('llm')">
-          <text class="text-[28rpx] text-[#232338] font-medium">
-            {{ t('agent.llm') }}
-          </text>
-          <text class="mx-[16rpx] flex-1 text-right text-[26rpx] text-[#65686f]">
-            {{ displayNames.llm }}
-          </text>
-          <wd-icon name="arrow-right" custom-class="text-[20rpx] text-[#9d9ea3]" />
-        </view>
-
-        <view class="flex cursor-pointer items-center justify-between border border-[#eeeeee] rounded-[12rpx] bg-[#f5f7fb] p-[20rpx] transition-all duration-300 active:bg-[#eef3ff]" @click="openPicker('slm')">
-          <text class="text-[28rpx] text-[#232338] font-medium">
-            {{ t('agent.slm') }}
-          </text>
-          <text class="mx-[16rpx] flex-1 text-right text-[26rpx] text-[#65686f]">
-            {{ displayNames.slm }}
-          </text>
-          <wd-icon name="arrow-right" custom-class="text-[20rpx] text-[#9d9ea3]" />
-        </view>
-
-        <view class="flex cursor-pointer items-center justify-between border border-[#eeeeee] rounded-[12rpx] bg-[#f5f7fb] p-[20rpx] transition-all duration-300 active:bg-[#eef3ff]" @click="openPicker('vllm')">
-          <text class="text-[28rpx] text-[#232338] font-medium">
-            {{ t('agent.vllm') }}
-          </text>
-          <text class="mx-[16rpx] flex-1 text-right text-[26rpx] text-[#65686f]">
-            {{ displayNames.vllm }}
-          </text>
-          <wd-icon name="arrow-right" custom-class="text-[20rpx] text-[#9d9ea3]" />
-        </view>
-
-        <view class="flex cursor-pointer items-center justify-between border border-[#eeeeee] rounded-[12rpx] bg-[#f5f7fb] p-[20rpx] transition-all duration-300 active:bg-[#eef3ff]" @click="openPicker('intent')">
-          <text class="text-[28rpx] text-[#232338] font-medium">
-            {{ t('agent.intent') }}
-          </text>
-          <text class="mx-[16rpx] flex-1 text-right text-[26rpx] text-[#65686f]">
-            {{ displayNames.intent }}
-          </text>
-          <wd-icon name="arrow-right" custom-class="text-[20rpx] text-[#9d9ea3]" />
-        </view>
-
-        <view class="flex cursor-pointer items-center justify-between border border-[#eeeeee] rounded-[12rpx] bg-[#f5f7fb] p-[20rpx] transition-all duration-300 active:bg-[#eef3ff]" @click="openPicker('memory')">
-          <text class="text-[28rpx] text-[#232338] font-medium">
-            {{ t('agent.memory') }}
-          </text>
-          <text class="mx-[16rpx] flex-1 text-right text-[26rpx] text-[#65686f]">
-            {{ displayNames.memory }}
-          </text>
-          <wd-icon name="arrow-right" custom-class="text-[20rpx] text-[#9d9ea3]" />
-        </view>
-
-        <view v-show="isVisibleReport" class="flex cursor-pointer items-center justify-between border border-[#eeeeee] rounded-[12rpx] bg-[#f5f7fb] p-[20rpx] transition-all duration-300 active:bg-[#eef3ff]" @click="openPicker('report')">
-          <text class="text-[28rpx] text-[#232338] font-medium">
-            {{ t('agent.reportMode') }}
-          </text>
-          <text class="mx-[16rpx] flex-1 text-right text-[26rpx] text-[#65686f]">
-            {{ displayNames.report }}
-          </text>
-          <wd-icon name="arrow-right" custom-class="text-[20rpx] text-[#9d9ea3]" />
-        </view>
-      </view>
-    </view>
+    <AgentModelConfigSection
+      :display-names="displayNames"
+      :show-report="isVisibleReport"
+      @select="openPicker"
+    />
 
     <!-- 语音设置标题 -->
     <view class="pb-[20rpx]">

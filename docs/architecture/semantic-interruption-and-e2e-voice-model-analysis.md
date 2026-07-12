@@ -1,3 +1,12 @@
+---
+status: report
+owner: xiaozhi-server
+last_verified: 2026-07-12
+source_paths:
+  - main/xiaozhi-server/core/semantic
+  - main/xiaozhi-server/core/handle/receiveAudioHandle.py
+---
+
 # 语义打断与端到端语音模型演进分析
 
 > 分析日期：2026-06-26 | 分支：feature/model-performance-benchmark | 状态：仅记录，不修复

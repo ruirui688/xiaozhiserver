@@ -88,3 +88,50 @@ index ff5ad0d1050312ca6a63f1f0a5b3363bef65763d..8509ee0bbda49d1844a29f16d7cc1f65
 +    // #endif
    }
  })
+diff --git a/components/composables/useUpload.ts b/components/composables/useUpload.ts
+--- a/components/composables/useUpload.ts
++++ b/components/composables/useUpload.ts
+@@ -172,7 +172,7 @@ export function useUpload(options: UseUploadOptions) {
+         path: item.path || '',
+         name: item.name || '',
+         size: item.size,
+-        type: 'image',
++        type: 'image' as const,
+         thumb: item.path || ''
+       }))
+     }
+diff --git a/components/wd-picker/wd-picker.vue b/components/wd-picker/wd-picker.vue
+--- a/components/wd-picker/wd-picker.vue
++++ b/components/wd-picker/wd-picker.vue
+@@ -369,8 +369,12 @@ function setShowValue(items: ColumnItem | ColumnItem[]) {
+   // 避免值为空时调用自定义展示函数
+   if ((isArray(items) && !items.length) || !items) return
+
+-  const { valueKey, labelKey } = props
+-  showValue.value = (props.displayFormat || defaultDisplayFormat)(items, { valueKey, labelKey })
++  if (props.displayFormat) {
++    const { valueKey, labelKey } = props
++    showValue.value = props.displayFormat(items, { valueKey, labelKey })
++  } else {
++    showValue.value = defaultDisplayFormat(items, { labelKey: props.labelKey })
++  }
+ }
+ function noop() {}
+ function onPickStart() {
+diff --git a/components/wd-swiper/wd-swiper.vue b/components/wd-swiper/wd-swiper.vue
+--- a/components/wd-swiper/wd-swiper.vue
++++ b/components/wd-swiper/wd-swiper.vue
+@@ -136,9 +136,10 @@ const swiperIndicator = computed(() => {
+     indicatorPosition: indicatorPosition || 'bottom'
+   }
+   if (isObj(indicator)) {
+-    swiperIndicator.type = indicator.type || 'dots'
+-    swiperIndicator.minShowNum = indicator.minShowNum || 2
+-    swiperIndicator.showControls = indicator.showControls || false
++    const indicatorConfig = indicator as Partial<SwiperNavProps>
++    swiperIndicator.type = indicatorConfig.type || 'dots'
++    swiperIndicator.minShowNum = indicatorConfig.minShowNum || 2
++    swiperIndicator.showControls = indicatorConfig.showControls || false
+   }
+   return swiperIndicator
+ })

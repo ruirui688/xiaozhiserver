@@ -1,3 +1,12 @@
+---
+status: supporting
+owner: model
+last_verified: 2026-07-12
+source_paths:
+  - main/xiaozhi-server/core/benchmark
+  - main/manager-api/src/main/java/xiaozhi/modules/model
+---
+
 # 模型专业评测与配置智能助手架构
 
 本文记录智控台模型专业评测和模型配置智能助手的职责边界、调用链、分层关系和治理规则。两者都服务于模型接入治理，但不能互相替代：

@@ -1,3 +1,11 @@
+---
+status: supporting
+owner: xiaozhi-server
+last_verified: 2026-07-12
+source_paths:
+  - main/xiaozhi-server/core
+---
+
 # 设备交互完整链路
 
 本文档说明 ESP32 设备从 WebSocket 连接到音频上行/下行、IoT 描述符注册、Device MCP 工具发现、OTA 固件升级的完整链路，以及连接生命周期管理。
@@ -142,11 +150,16 @@ POST submit (aiohttp, http_timeout_seconds)
 
 默认值为 `http_timeout_seconds=10`、`query_interval_seconds=0.2`、`query_timeout_seconds=15`。日志只记录阶段、耗时、查询次数、结果长度和错误类型，不记录识别正文或凭据。
 
-豆包流式识别 `providers/asr/doubao_stream.py` 的生产路径还包含两层超时：
+豆包流式识别 `providers/asr/doubao_stream.py` 以本地 Silero VAD 作为自动/实时模式的结束判定，并使用分阶段超时保护：
 
-- `init_timeout_seconds=10`：限制初始化请求发出后等待首个服务端响应的时间；
-- `response_timeout_seconds=15`：限制等待下一条识别结果的时间，每收到中间结果后重新计时，兼容持续回包的长语音；
-- 超时、401、断链或初始化失败都会关闭 WebSocket、清理引用并复位 `is_processing`、`_is_stopping` 和连接音频状态。
+- 本地 VAD 设置 `client_voice_stop` 后，provider 先发送当前静音尾帧，再发送一次 LAST 空音频帧；接收任务继续等待火山返回最终 `definite` 结果。
+- 新会话建立时会回放 `conn.asr_audio` 末尾最多 10 帧。若当前帧已经包含在这批缓存中，`current_audio_sent` 会阻止它在缓存回放后再次发送。
+- `init_timeout_seconds=10`：限制初始化请求发出后等待首个服务端响应的时间。
+- `response_timeout_seconds=15`：限制发送 LAST 前等待下一条中间结果的时间，每收到一个结果后重新计时。
+- `final_response_timeout_seconds=5`：从发送 LAST 的时点开始计算等待最终结果的总预算，不会因中间状态重复延长。
+- 自动模式收到非空 `definite` 文本时，只要求当前会话存在音频帧即可进入 `handle_voice_stop`，短词不再受原先 `len(audio_data) > 15` 的限制；手动模式的无文本结束保护仍保留原有帧数条件。
+- 每个结果转发任务固定持有创建时的 WebSocket 和停止事件。旧任务结束时只关闭自己的 WebSocket；仅当共享 `asr_ws` 仍指向该会话时，才清空 provider 状态和连接音频，避免旧会话清理覆盖重连后的新会话。
+- 初始化、中间结果或最终结果超时，以及 401、断链和初始化失败，都会关闭对应 WebSocket 并复位该会话状态。
 
 真实标准音频测试中，录音 ASR 4/4 成功，流式 ASR 修复前后共 5/5 成功；无效凭据分别在 298ms、195ms 返回 401，没有出现无限等待。
 
@@ -395,7 +408,7 @@ connection.py:325-360  _save_and_close()
 | 13 | 豆包录音 ASR 同步 HTTP/休眠阻塞事件循环 | 改为 aiohttp 异步提交、轮询和总预算超时 |
 | 14 | WebSocket 请求头脱敏正则可能泄露令牌 | 按 header 键结构化屏蔽 Authorization/token/api-key/cookie/secret |
 | 15 | 旧连接注销误删新连接映射风险 | 注销前校验注册表中的对象身份，并增加覆盖重连测试 |
-| 16 | 豆包流式 ASR 初始化/结果等待无明确边界 | 新增 10s 初始化超时和 15s 结果超时，失败后关闭并复位状态 |
+| 16 | 豆包流式 ASR 判停、等待边界和重连清理不完整 | 本地 VAD 判停发送 LAST，增加 10s 初始化、15s 中间结果和 5s 最终结果预算，并按会话身份清理状态 |
 | 17 | SeedTTS2 不足 60ms 的 Opus 尾帧跨会话残留 | 正常结束冲刷尾帧，取消/失败/断链重置编码器 |
 
 ## 12. 排查方法

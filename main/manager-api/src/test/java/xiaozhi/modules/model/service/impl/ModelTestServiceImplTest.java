@@ -19,17 +19,31 @@ import cn.hutool.json.JSONObject;
 import xiaozhi.modules.model.dao.ModelConfigDao;
 import xiaozhi.modules.model.dto.ModelTestResultDTO;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
+import xiaozhi.modules.model.service.impl.tester.IntentModelTester;
 
 class ModelTestServiceImplTest {
 
     private final ModelConfigDao modelConfigDao = mock(ModelConfigDao.class);
     private final ModelRuntimeAssembler modelRuntimeAssembler = mock(ModelRuntimeAssembler.class);
     private final RestTemplate restTemplate = mock(RestTemplate.class);
+    private final IntentModelTester intentModelTester = new IntentModelTester(
+            modelConfigDao,
+            modelRuntimeAssembler,
+            restTemplate);
     private final ModelTestServiceImpl service = new ModelTestServiceImpl(
             modelConfigDao,
             modelRuntimeAssembler,
             restTemplate,
-            mock(Environment.class));
+            mock(Environment.class),
+            java.util.List.of(intentModelTester));
+
+    @Test
+    void intentExecutorOnlyClaimsSupportedIntentProviders() {
+        assertTrue(intentModelTester.supports("INTENT", "intent_llm"));
+        assertTrue(intentModelTester.supports("intent", "function_call"));
+        assertFalse(intentModelTester.supports("LLM", "intent_llm"));
+        assertFalse(intentModelTester.supports("INTENT", "unknown"));
+    }
 
     @Test
     void noIntentIsVerifiedAsRuntimeConfig() {
@@ -135,6 +149,7 @@ class ModelTestServiceImplTest {
         assertTrue(result.getMessage().contains("占位符"));
         assertTrue(result.getTestInput().contains("glm-4-flash"));
         assertTrue(result.getTestInput().contains("占位符，需填写真实密钥"));
+        assertFalse(result.getTestInput().contains("你的api_key"));
     }
 
     @Test
@@ -151,6 +166,7 @@ class ModelTestServiceImplTest {
 
         assertFalse(result.getSuccess());
         assertTrue(result.getMessage().contains("base_url"));
+        assertFalse(result.getTestInput().contains("sk-real-key"));
     }
 
     @Test

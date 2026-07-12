@@ -75,13 +75,13 @@ module.exports = defineConfig({
           name: 'chunk-vendors',
           test: /[\\/]node_modules[\\/]/,
           priority: -10,
-          chunks: 'initial',
+          chunks: 'all',
         },
         common: {
           name: 'chunk-common',
           minChunks: 2,
           priority: -20,
-          chunks: 'initial',
+          chunks: 'all',
           reuseExistingChunk: true,
         },
       }
@@ -95,21 +95,19 @@ module.exports = defineConfig({
   configureWebpack: config => {
     if (process.env.NODE_ENV === 'production') {
       // 开启多线程编译
-      config.optimization = {
-        minimize: true,
-        minimizer: [
-          new TerserPlugin({
-            parallel: true,
-            terserOptions: {
-              compress: {
-                drop_console: true,
-                drop_debugger: true,
-                pure_funcs: ['console.log']
-              }
+      config.optimization.minimize = true;
+      config.optimization.minimizer = [
+        new TerserPlugin({
+          parallel: true,
+          terserOptions: {
+            compress: {
+              drop_console: true,
+              drop_debugger: true,
+              pure_funcs: ['console.log']
             }
-          })
-        ]
-      };
+          }
+        })
+      ];
       config.plugins.push(
         new CompressionPlugin({
           algorithm: 'gzip',

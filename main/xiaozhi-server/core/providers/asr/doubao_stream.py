@@ -1,6 +1,7 @@
 import json
 import gzip
 import math
+import time
 import uuid
 import asyncio
 import websockets
@@ -28,6 +29,9 @@ class ASRProvider(ASRProviderBase):
         self.forward_task = None
         self.is_processing = False  # 添加处理状态标志
         self._is_stopping = False  # 添加停止标志，防止竞态条件
+        self._stop_sent_event = asyncio.Event()
+        self._stop_sent_at = None
+        self._stop_sent_times = {}
 
         self.api_key = config.get("api_key")
         if not self.api_key:
@@ -57,6 +61,9 @@ class ASRProvider(ASRProviderBase):
         self.response_timeout_seconds = self._positive_seconds(
             config, "response_timeout_seconds", 15
         )
+        self.final_response_timeout_seconds = self._positive_seconds(
+            config, "final_response_timeout_seconds", 5
+        )
 
     @staticmethod
     def _positive_seconds(config, key, default):
@@ -74,14 +81,25 @@ class ASRProvider(ASRProviderBase):
     async def receive_audio(self, conn: "ConnectionHandler", audio, audio_have_voice):
         # 先调用父类方法处理基础逻辑
         await super().receive_audio(conn, audio, audio_have_voice)
-        
+
+        current_audio_sent = False
+
         # 如果本次有声音，且之前没有建立连接
         if audio_have_voice and self.asr_ws is None and not self.is_processing:
             try:
                 self.is_processing = True
+                self._is_stopping = False
+                self._stop_sent_event = asyncio.Event()
+                self._stop_sent_at = None
+                self.text = ""
                 # 建立新的WebSocket连接
                 headers = self.token_auth()
-                safe_headers = {k: "***" if k.lower() in ("authorization", "api-key", "x-api-key") else v for k, v in headers.items()}
+                safe_headers = {
+                    key: "***"
+                    if key.lower() in ("authorization", "api-key", "x-api-key")
+                    else value
+                    for key, value in headers.items()
+                }
                 logger.bind(tag=TAG).info(f"正在连接ASR服务，headers: {safe_headers}")
 
                 self.asr_ws = await websockets.connect(
@@ -131,20 +149,22 @@ class ASRProvider(ASRProviderBase):
                     raise e
 
                 # 启动接收ASR结果的异步任务
-                self.forward_task = asyncio.create_task(self._forward_asr_results(conn))
+                session_ws = self.asr_ws
+                stop_sent_event = self._stop_sent_event
+                self.forward_task = asyncio.create_task(
+                    self._forward_asr_results(conn, session_ws, stop_sent_event)
+                )
 
                 # 发送缓存的音频数据
                 if conn.asr_audio and len(conn.asr_audio) > 0:
-                    for cached_audio in conn.asr_audio[-10:]:
+                    cached_audio_frames = list(conn.asr_audio[-10:])
+                    for index, cached_audio in enumerate(cached_audio_frames):
+                        if self._is_stopping or self.asr_ws is not session_ws:
+                            break
                         try:
-                            pcm_frame = self.decoder.decode(cached_audio, 960)
-                            payload = gzip.compress(pcm_frame)
-                            audio_request = bytearray(
-                                self.generate_audio_default_header()
-                            )
-                            audio_request.extend(len(payload).to_bytes(4, "big"))
-                            audio_request.extend(payload)
-                            await self.asr_ws.send(audio_request)
+                            await self._send_audio_frame(cached_audio, session_ws)
+                            if index == len(cached_audio_frames) - 1:
+                                current_audio_sent = True
                         except Exception as e:
                             logger.bind(tag=TAG).info(
                                 f"发送缓存音频数据时发生错误: {e}"
@@ -159,31 +179,108 @@ class ASRProvider(ASRProviderBase):
                     self.asr_ws = None
                 self.is_processing = False
                 self._is_stopping = False
+                self._stop_sent_event.clear()
+                self._stop_sent_at = None
                 conn.reset_audio_states()
                 return
 
         # 发送当前音频数据
-        if self.asr_ws and self.is_processing and not self._is_stopping:
+        if (
+            self.asr_ws
+            and self.is_processing
+            and not self._is_stopping
+            and not current_audio_sent
+        ):
             try:
-                pcm_frame = self.decoder.decode(audio, 960)
-                payload = gzip.compress(pcm_frame)
-                audio_request = bytearray(self.generate_audio_default_header())
-                audio_request.extend(len(payload).to_bytes(4, "big"))
-                audio_request.extend(payload)
-                await self.asr_ws.send(audio_request)
+                await self._send_audio_frame(audio, self.asr_ws)
             except Exception as e:
                 logger.bind(tag=TAG).info(f"发送音频数据时发生错误: {e}")
 
-    async def _forward_asr_results(self, conn: "ConnectionHandler"):
+        # 自动/实时模式依靠本地 VAD 判停。当前静音尾帧发送后立即提交
+        # LAST，接收任务继续等待火山返回最终 definite 结果。
+        if (
+            conn.client_voice_stop
+            and self.asr_ws
+            and self.is_processing
+            and not self._is_stopping
+        ):
+            await self._send_stop_request()
+
+    async def _send_audio_frame(self, opus_audio, session_ws=None):
+        target_ws = session_ws or self.asr_ws
+        if target_ws is None:
+            raise RuntimeError("ASR WebSocket 未连接")
+        pcm_frame = self.decoder.decode(opus_audio, 960)
+        payload = gzip.compress(pcm_frame)
+        audio_request = bytearray(self.generate_audio_default_header())
+        audio_request.extend(len(payload).to_bytes(4, "big"))
+        audio_request.extend(payload)
+        await target_ws.send(audio_request)
+
+    async def _recv_asr_result(self, session_ws, stop_sent_event):
+        """Wait for a result and switch to the final-result budget after LAST."""
+        recv_task = asyncio.create_task(session_ws.recv())
+        if stop_sent_event.is_set():
+            final_timeout = self._remaining_final_response_time(stop_sent_event)
+            return await asyncio.wait_for(
+                recv_task, timeout=final_timeout
+            )
+
+        stop_task = asyncio.create_task(stop_sent_event.wait())
         try:
-            while self.asr_ws and not conn.stop_event.is_set():
+            done, _ = await asyncio.wait(
+                {recv_task, stop_task},
+                timeout=self.response_timeout_seconds,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if recv_task in done:
+                return recv_task.result()
+            if stop_task in done:
+                final_timeout = self._remaining_final_response_time(stop_sent_event)
+                return await asyncio.wait_for(
+                    recv_task, timeout=final_timeout
+                )
+
+            recv_task.cancel()
+            raise TimeoutError(
+                "等待ASR中间结果超时: "
+                f"timeout={self.response_timeout_seconds:.1f}s"
+            )
+        finally:
+            if not stop_task.done():
+                stop_task.cancel()
+            if not recv_task.done():
+                recv_task.cancel()
+            await asyncio.gather(recv_task, stop_task, return_exceptions=True)
+
+    def _remaining_final_response_time(self, stop_sent_event=None):
+        stop_sent_at = self._stop_sent_times.get(
+            stop_sent_event, self._stop_sent_at
+        )
+        if stop_sent_at is None:
+            return self.final_response_timeout_seconds
+        remaining = self.final_response_timeout_seconds - (
+            time.monotonic() - stop_sent_at
+        )
+        if remaining <= 0:
+            raise TimeoutError("等待ASR最终结果超过总时限")
+        return remaining
+
+    async def _forward_asr_results(
+        self, conn: "ConnectionHandler", session_ws=None, stop_sent_event=None
+    ):
+        session_ws = session_ws or self.asr_ws
+        stop_sent_event = stop_sent_event or self._stop_sent_event
+        audio_state_released = False
+        try:
+            while session_ws and not conn.stop_event.is_set():
                 # 获取当前连接的音频数据
                 audio_data = conn.asr_audio
                 try:
-                    # 每收到一个中间结果都会重新计算等待时间，兼容持续返回
-                    # 中间结果的长语音；上游半开且长期无响应时则主动清理连接。
-                    response = await asyncio.wait_for(
-                        self.asr_ws.recv(), timeout=self.response_timeout_seconds
+                    # 每收到一个中间结果都会重新计算等待时间。发送 LAST 后，
+                    # 同一个 recv 会切换到更短且独立的最终结果等待预算。
+                    response = await self._recv_asr_result(
+                        session_ws, stop_sent_event
                     )
                     result = self.parse_response(response)
                     logger.bind(tag=TAG).debug(f"收到ASR结果: {result}")
@@ -207,16 +304,32 @@ class ASRProvider(ASRProviderBase):
                             ):
                                 logger.bind(tag=TAG).error(f"识别文本：空")
                                 self.text = ""
-                                if len(audio_data) > 15:  # 确保有足够音频数据
-                                    await self.handle_voice_stop(conn, audio_data)
+                                if len(audio_data) > 0:
+                                    audio_snapshot = list(audio_data)
+                                    conn.reset_audio_states()
+                                    audio_state_released = True
+                                    await self.handle_voice_stop(
+                                        conn, audio_snapshot
+                                    )
                                 break
 
                             # 专门处理没有文本的识别结果（手动模式下可能已经识别完成但是没松按键）
                             elif not payload["result"].get("text") and not utterances:
-                                if conn.client_listen_mode == "manual" and conn.client_voice_stop and len(audio_data) > 15:
-                                    logger.bind(tag=TAG).debug("消息结束收到停止信号，触发处理")
-                                    await self.handle_voice_stop(conn, audio_data)
-                                    break
+                                if (
+                                    conn.client_listen_mode == "manual"
+                                    and conn.client_voice_stop
+                                    and len(audio_data) > 15
+                                ):
+                                    logger.bind(tag=TAG).debug(
+                                        "消息结束收到停止信号，触发处理"
+                                    )
+                                    audio_snapshot = list(audio_data)
+                                    conn.reset_audio_states()
+                                    audio_state_released = True
+                                    await self.handle_voice_stop(
+                                        conn, audio_snapshot
+                                    )
+                                    return
 
                             for utterance in utterances:
                                 if utterance.get("definite", False):
@@ -234,17 +347,28 @@ class ASRProvider(ASRProviderBase):
 
                                         # 在接收消息中途时收到停止信号
                                         if conn.client_voice_stop and len(audio_data) > 0:
-                                            logger.bind(tag=TAG).debug("消息中途收到停止信号，触发处理")
-                                            await self.handle_voice_stop(conn, audio_data)
+                                            logger.bind(tag=TAG).debug(
+                                                "消息中途收到停止信号，触发处理"
+                                            )
+                                            audio_snapshot = list(audio_data)
+                                            conn.reset_audio_states()
+                                            audio_state_released = True
+                                            await self.handle_voice_stop(
+                                                conn, audio_snapshot
+                                            )
+                                            return
                                         break
                                     else:
                                         # 自动模式下直接覆盖
                                         self.text = current_text
-                                        if len(audio_data) > 15:  # 确保有足够音频数据
+                                        if len(audio_data) > 0:
+                                            audio_snapshot = list(audio_data)
+                                            conn.reset_audio_states()
+                                            audio_state_released = True
                                             await self.handle_voice_stop(
-                                                conn, audio_data
+                                                conn, audio_snapshot
                                             )
-                                    break
+                                        return
                         elif "error" in payload:
                             error_msg = payload.get("error", "未知错误")
                             logger.bind(tag=TAG).error(f"ASR服务返回错误: {error_msg}")
@@ -254,11 +378,20 @@ class ASRProvider(ASRProviderBase):
                     logger.bind(tag=TAG).info("ASR服务连接已关闭")
                     self.is_processing = False
                     break
-                except asyncio.TimeoutError:
-                    logger.bind(tag=TAG).error(
-                        "等待ASR结果超时: "
-                        f"timeout={self.response_timeout_seconds:.1f}s"
-                    )
+                except (asyncio.TimeoutError, TimeoutError) as exc:
+                    if stop_sent_event.is_set():
+                        logger.bind(tag=TAG).error(
+                            "发送结束帧后等待ASR最终结果超时: "
+                            f"timeout={self.final_response_timeout_seconds:.1f}s"
+                        )
+                    else:
+                        logger.bind(tag=TAG).error(
+                            str(exc)
+                            or (
+                                "等待ASR中间结果超时: "
+                                f"timeout={self.response_timeout_seconds:.1f}s"
+                            )
+                        )
                     self.is_processing = False
                     break
                 except Exception as e:
@@ -273,13 +406,26 @@ class ASRProvider(ASRProviderBase):
             if hasattr(e, "__cause__") and e.__cause__:
                 logger.bind(tag=TAG).error(f"错误原因: {str(e.__cause__)}")
         finally:
-            if self.asr_ws:
-                await self.asr_ws.close()
-                self.asr_ws = None
-            self.is_processing = False
-            self._is_stopping = False
-            # 重置所有音频相关状态
-            conn.reset_audio_states()
+            try:
+                if session_ws:
+                    await session_ws.close()
+            except Exception as exc:
+                logger.bind(tag=TAG).warning(f"关闭ASR会话连接失败: {exc}")
+            finally:
+                self._stop_sent_times.pop(stop_sent_event, None)
+                # handle_voice_stop() 会通过 stop_ws_connection() 先清空 asr_ws，
+                # 因此用每轮独立事件判断当前会话身份，避免漏清理当前轮或误清理新轮。
+                if self._stop_sent_event is stop_sent_event:
+                    self.asr_ws = None
+                    self.is_processing = False
+                    self._is_stopping = False
+                    stop_sent_event.clear()
+                    self._stop_sent_at = None
+                    self.text = ""
+                    self.forward_task = None
+                    # 只允许当前会话清理连接状态，避免旧任务影响重连后的新会话。
+                    if not audio_state_released:
+                        conn.reset_audio_states()
 
     def stop_ws_connection(self):
         if self.asr_ws:
@@ -287,23 +433,38 @@ class ASRProvider(ASRProviderBase):
             self.asr_ws = None
         self.is_processing = False
         self._is_stopping = False
+        self._stop_sent_event.clear()
+        self._stop_sent_at = None
+        self.text = ""
 
     async def _send_stop_request(self):
         """发送最后一个音频帧以通知服务器结束"""
+        if self._is_stopping or not self.asr_ws or not self.is_processing:
+            return False
+
+        session_ws = self.asr_ws
+        stop_sent_event = self._stop_sent_event
         self._is_stopping = True  # 先标记为停止状态，阻止后续音频发送
-        if self.asr_ws:
-            try:
-                # 发送结束标记的音频帧（gzip压缩的空数据）
-                empty_payload = gzip.compress(b"")
-                last_audio_request = bytearray(
-                    self.generate_last_audio_default_header()
-                )
-                last_audio_request.extend(len(empty_payload).to_bytes(4, "big"))
-                last_audio_request.extend(empty_payload)
-                await self.asr_ws.send(last_audio_request)
-                logger.bind(tag=TAG).debug("已发送结束音频帧")
-            except Exception as e:
-                logger.bind(tag=TAG).debug(f"发送结束音频帧时出错: {e}")
+        try:
+            # 发送结束标记的音频帧（gzip压缩的空数据）
+            empty_payload = gzip.compress(b"")
+            last_audio_request = bytearray(
+                self.generate_last_audio_default_header()
+            )
+            last_audio_request.extend(len(empty_payload).to_bytes(4, "big"))
+            last_audio_request.extend(empty_payload)
+            await session_ws.send(last_audio_request)
+            self._stop_sent_at = time.monotonic()
+            self._stop_sent_times[stop_sent_event] = self._stop_sent_at
+            stop_sent_event.set()
+            logger.bind(tag=TAG).debug("已发送结束音频帧")
+            return True
+        except Exception as e:
+            if self.asr_ws is session_ws:
+                self._is_stopping = False
+                self._stop_sent_at = None
+            logger.bind(tag=TAG).warning(f"发送结束音频帧时出错: {e}")
+            return False
 
     def construct_request(self, reqid):
         req = {
@@ -441,6 +602,11 @@ class ASRProvider(ASRProviderBase):
                 pass
             self.forward_task = None
         self.is_processing = False
+        self._is_stopping = False
+        self._stop_sent_event.clear()
+        self._stop_sent_at = None
+        self._stop_sent_times.clear()
+        self.text = ""
 
         # 显式释放decoder资源
         if hasattr(self, "decoder") and self.decoder is not None:

@@ -8,49 +8,49 @@ const routes = [
     path: '/',
     name: 'welcome',
     component: function () {
-      return import('../views/login.vue')
+      return import(/* webpackChunkName: "view-login" */ '../views/login.vue')
     }
   },
   {
     path: '/role-config',
     name: 'RoleConfig',
     component: function () {
-      return import('../views/roleConfig.vue')
+      return import(/* webpackChunkName: "view-role-config" */ '../views/roleConfig.vue')
     }
   },
   {
     path: '/voice-print',
     name: 'VoicePrint',
     component: function () {
-      return import('../views/VoicePrint.vue')
+      return import(/* webpackChunkName: "view-voice-print" */ '../views/VoicePrint.vue')
     }
   },
   {
     path: '/login',
     name: 'login',
     component: function () {
-      return import('../views/login.vue')
+      return import(/* webpackChunkName: "view-login" */ '../views/login.vue')
     }
   },
   {
     path: '/home',
     name: 'home',
     component: function () {
-      return import('../views/home.vue')
+      return import(/* webpackChunkName: "view-home" */ '../views/home.vue')
     }
   },
   {
     path: '/register',
     name: 'Register',
     component: function () {
-      return import('../views/register.vue')
+      return import(/* webpackChunkName: "view-register" */ '../views/register.vue')
     }
   },
   {
     path: '/retrieve-password',
     name: 'RetrievePassword',
     component: function () {
-      return import('../views/retrievePassword.vue')
+      return import(/* webpackChunkName: "view-retrieve-password" */ '../views/retrievePassword.vue')
     }
   },
   // 设备管理页面路由
@@ -58,7 +58,7 @@ const routes = [
     path: '/device-management',
     name: 'DeviceManagement',
     component: function () {
-      return import('../views/DeviceManagement.vue')
+      return import(/* webpackChunkName: "view-device-management" */ '../views/DeviceManagement.vue')
     }
   },
   // 添加用户管理路由
@@ -66,28 +66,28 @@ const routes = [
     path: '/user-management',
     name: 'UserManagement',
     component: function () {
-      return import('../views/UserManagement.vue')
+      return import(/* webpackChunkName: "view-user-management" */ '../views/UserManagement.vue')
     }
   },
   {
     path: '/organization-management',
     name: 'OrganizationManagement',
     component: function () {
-      return import('../views/OrganizationManagement.vue')
+      return import(/* webpackChunkName: "view-organization-management" */ '../views/OrganizationManagement.vue')
     }
   },
   {
     path: '/model-config',
     name: 'ModelConfig',
     component: function () {
-      return import('../views/ModelConfig.vue')
+      return import(/* webpackChunkName: "view-model-config" */ '../views/ModelConfig.vue')
     }
   },
   {
     path: '/params-management',
     name: 'ParamsManagement',
     component: function () {
-      return import('../views/ParamsManagement.vue')
+      return import(/* webpackChunkName: "view-params-management" */ '../views/ParamsManagement.vue')
     },
     meta: {
       requiresAuth: true,
@@ -98,7 +98,7 @@ const routes = [
     path: '/knowledge-base-management',
     name: 'KnowledgeBaseManagement',
     component: function () {
-      return import('../views/KnowledgeBaseManagement.vue')
+      return import(/* webpackChunkName: "view-knowledge-base-management" */ '../views/KnowledgeBaseManagement.vue')
     },
     meta: {
       requiresAuth: true,
@@ -109,7 +109,7 @@ const routes = [
     path: '/knowledge-file-upload',
     name: 'KnowledgeFileUpload',
     component: function () {
-      return import('../views/KnowledgeFileUpload.vue')
+      return import(/* webpackChunkName: "view-knowledge-file-upload" */ '../views/KnowledgeFileUpload.vue')
     },
     meta: {
       requiresAuth: true,
@@ -121,7 +121,7 @@ const routes = [
     path: '/server-side-management',
     name: 'ServerSideManager',
     component: function () {
-      return import('../views/ServerSideManager.vue')
+      return import(/* webpackChunkName: "view-server-side-management" */ '../views/ServerSideManager.vue')
     },
     meta: {
       requiresAuth: true,
@@ -132,7 +132,7 @@ const routes = [
     path: '/ota-management',
     name: 'OtaManagement',
     component: function () {
-      return import('../views/OtaManagement.vue')
+      return import(/* webpackChunkName: "view-ota-management" */ '../views/OtaManagement.vue')
     },
     meta: {
       requiresAuth: true,
@@ -143,7 +143,7 @@ const routes = [
     path: '/voice-resource-management',
     name: 'VoiceResourceManagement',
     component: function () {
-      return import('../views/VoiceResourceManagement.vue')
+      return import(/* webpackChunkName: "view-voice-resource-management" */ '../views/VoiceResourceManagement.vue')
     },
     meta: {
       requiresAuth: true,
@@ -154,7 +154,7 @@ const routes = [
     path: '/voice-clone-management',
     name: 'VoiceCloneManagement',
     component: function () {
-      return import('../views/VoiceCloneManagement.vue')
+      return import(/* webpackChunkName: "view-voice-clone-management" */ '../views/VoiceCloneManagement.vue')
     },
     meta: {
       requiresAuth: true,
@@ -165,14 +165,14 @@ const routes = [
     path: '/dict-management',
     name: 'DictManagement',
     component: function () {
-      return import('../views/DictManagement.vue')
+      return import(/* webpackChunkName: "view-dict-management" */ '../views/DictManagement.vue')
     }
   },
   {
     path: '/provider-management',
     name: 'ProviderManagement',
     component: function () {
-      return import('../views/ProviderManagement.vue')
+      return import(/* webpackChunkName: "view-provider-management" */ '../views/ProviderManagement.vue')
     }
   },
   {
@@ -183,7 +183,7 @@ const routes = [
     path: '/function-plugin-management',
     name: 'FunctionPluginManagement',
     component: function () {
-      return import('../views/FunctionPluginManagement.vue')
+      return import(/* webpackChunkName: "view-function-plugin-management" */ '../views/FunctionPluginManagement.vue')
     },
     meta: {
       requiresAuth: true,
@@ -194,7 +194,7 @@ const routes = [
     path: '/music-management',
     name: 'MusicManagement',
     component: function () {
-      return import('../views/MusicManagement.vue')
+      return import(/* webpackChunkName: "view-music-management" */ '../views/MusicManagement.vue')
     },
     meta: {
       requiresAuth: true,
@@ -206,7 +206,7 @@ const routes = [
     path: '/agent-template-management',
     name: 'AgentTemplateManagement',
     component: function () {
-      return import('../views/AgentTemplateManagement.vue')
+      return import(/* webpackChunkName: "view-agent-template-management" */ '../views/AgentTemplateManagement.vue')
     }
   },
   // 添加模板快速配置路由
@@ -214,7 +214,7 @@ const routes = [
     path: '/template-quick-config',
     name: 'TemplateQuickConfig',
     component: function () {
-      return import('../views/TemplateQuickConfig.vue')
+      return import(/* webpackChunkName: "view-template-quick-config" */ '../views/TemplateQuickConfig.vue')
     }
   },
   // 功能配置页面路由
@@ -222,7 +222,7 @@ const routes = [
     path: '/feature-management',
     name: 'FeatureManagement',
     component: function () {
-      return import('../views/FeatureManagement.vue')
+      return import(/* webpackChunkName: "view-feature-management" */ '../views/FeatureManagement.vue')
     },
     meta: {
       requiresAuth: true,
@@ -234,7 +234,7 @@ const routes = [
     path: '/replacement-word-management',
     name: 'ReplacementWordManagement',
     component: function () {
-      return import('../views/ReplacementWordManagement.vue')
+      return import(/* webpackChunkName: "view-replacement-word-management" */ '../views/ReplacementWordManagement.vue')
     },
     meta: {
       requiresAuth: true,
@@ -246,7 +246,7 @@ const routes = [
     path: '/address-book-management',
     name: 'AddressBookManagement',
     component: function () {
-      return import('../views/AddressBookManagement.vue')
+      return import(/* webpackChunkName: "view-address-book-management" */ '../views/AddressBookManagement.vue')
     },
     meta: {
       requiresAuth: true,
@@ -257,7 +257,7 @@ const routes = [
     path: '/memory-management',
     name: 'MemoryManagement',
     component: function () {
-      return import('../views/MemoryManagement.vue')
+      return import(/* webpackChunkName: "view-memory-management" */ '../views/MemoryManagement.vue')
     },
     meta: {
       requiresAuth: true,
