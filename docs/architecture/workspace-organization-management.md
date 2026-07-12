@@ -1,3 +1,12 @@
+---
+status: supporting
+owner: manager-api
+last_verified: 2026-07-12
+source_paths:
+  - main/manager-api/src/main/java/xiaozhi/modules/workspace
+  - main/manager-api/src/main/resources/db/changelog
+---
+
 # 工作空间组织管理与数据隔离
 
 本文档说明 manager-api / manager-web 中的组织工作空间模型、资源共享范围、权限规则、数据隔离方式和验证要求。后续新增智能体、设备、记忆、知识库等业务接口时，必须按本文档补齐工作空间鉴权。

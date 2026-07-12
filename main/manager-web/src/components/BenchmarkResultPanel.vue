@@ -39,39 +39,7 @@
         {{ report.errorMessage }}
       </div>
     </div>
-    <div v-if="reportCustomQuestions.length" class="performance-custom-question-panel">
-      <div class="performance-question-panel-head">
-        <div class="performance-field-label">
-          {{ $t("modelConfig.performanceSampleUsed") }}：{{ reportCustomQuestions.length }} 条
-        </div>
-        <el-button
-          v-if="hiddenReportQuestionCount > 0 || reportQuestionsExpanded"
-          type="text"
-          size="mini"
-          @click="reportQuestionsExpanded = !reportQuestionsExpanded"
-        >
-          {{ reportQuestionsExpanded ? "收起" : "展开全部" }}
-        </el-button>
-      </div>
-      <el-tag
-        v-for="(question, index) in visibleReportQuestions"
-        :key="`${index}-${question}`"
-        size="mini"
-        effect="plain"
-        class="benchmark-question-tag"
-      >
-        {{ question }}
-      </el-tag>
-      <el-tag
-        v-if="hiddenReportQuestionCount > 0"
-        size="mini"
-        type="info"
-        effect="plain"
-        class="benchmark-question-more"
-      >
-        还有 {{ hiddenReportQuestionCount }} 条
-      </el-tag>
-    </div>
+    <benchmark-question-list :questions="(report && report.customQuestions) || []" />
     <div v-if="report" class="performance-layout">
       <div class="performance-list">
         <div class="performance-list-head">
@@ -424,12 +392,16 @@
 </template>
 
 <script>
-const COMPACT_QUESTION_LIMIT = 6;
+import BenchmarkQuestionList from "./benchmark/BenchmarkQuestionList.vue";
+
 const COMPACT_MESSAGE_LIMIT = 4;
 const COMPACT_SCORE_LIMIT = 6;
 
 export default {
   name: "BenchmarkResultPanel",
+  components: {
+    BenchmarkQuestionList,
+  },
   props: {
     report: {
       type: Object,
@@ -450,7 +422,6 @@ export default {
   },
   data() {
     return {
-      reportQuestionsExpanded: false,
       selectedPerformanceResultId: this.selectedResultId || "",
       selectedPerformanceSampleKey: this.selectedSampleKey || "",
     };
@@ -477,15 +448,6 @@ export default {
         samples.find((item) => this.getPerformanceSampleKey(item) === this.selectedPerformanceSampleKey) ||
         samples[0]
       );
-    },
-    reportCustomQuestions() {
-      return this.getReportCustomQuestions(this.report);
-    },
-    visibleReportQuestions() {
-      return this.getCompactList(this.reportCustomQuestions, this.reportQuestionsExpanded);
-    },
-    hiddenReportQuestionCount() {
-      return this.getHiddenListCount(this.reportCustomQuestions, this.reportQuestionsExpanded);
     },
   },
   watch: {
@@ -757,18 +719,6 @@ export default {
         .map((key) => `${this.$t(`modelConfig.dimension.${key}`)}：${reasons[key]}`)
         .join("\n");
     },
-    getReportCustomQuestions(report) {
-      const questions = report && report.customQuestions;
-      return Array.isArray(questions) ? questions.filter((item) => item) : [];
-    },
-    getCompactList(items, expanded, limit = COMPACT_QUESTION_LIMIT) {
-      const list = Array.isArray(items) ? items : [];
-      return expanded ? list : list.slice(0, limit);
-    },
-    getHiddenListCount(items, expanded, limit = COMPACT_QUESTION_LIMIT) {
-      const list = Array.isArray(items) ? items : [];
-      return expanded ? 0 : Math.max(0, list.length - limit);
-    },
     getInputDetail(sample) {
       return (sample && sample.inputDetail) || {};
     },
@@ -1019,41 +969,6 @@ export default {
   color: #f56c6c;
   font-size: 12px;
   line-height: 1.5;
-  word-break: break-word;
-}
-
-.performance-custom-question-panel {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 12px;
-  padding: 10px 12px;
-  border: 1px solid #e4e7ed;
-  border-radius: 4px;
-  background: #fff;
-}
-
-.performance-custom-question-panel .performance-field-label {
-  margin-bottom: 0;
-}
-
-.performance-question-panel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-basis: 100%;
-  gap: 8px;
-}
-
-.benchmark-question-tag,
-.benchmark-question-more {
-  max-width: 100%;
-  height: auto;
-  min-height: 24px;
-  line-height: 18px;
-  padding-top: 2px;
-  padding-bottom: 2px;
-  white-space: normal;
   word-break: break-word;
 }
 
@@ -1642,11 +1557,6 @@ export default {
 }
 
 @media (max-width: 640px) {
-  .performance-question-panel-head {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
   .judge-sample-detail,
   .performance-sample-grid {
     grid-template-columns: 1fr;

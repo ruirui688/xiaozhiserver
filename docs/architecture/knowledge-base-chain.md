@@ -1,8 +1,17 @@
+---
+status: supporting
+owner: knowledge
+last_verified: 2026-07-12
+source_paths:
+  - main/manager-api/src/main/java/xiaozhi/modules/knowledge
+  - main/xiaozhi-server/plugins_func/functions/search_from_local_knowledge.py
+---
+
 # 知识库完整链路
 
 本文档说明 xiaozhi-esp32-server 知识库（Knowledge Base / RAG）的完整链路：从文件上传、分块、向量化，到检索注入 LLM 上下文的端到端流程。
 
-先读：[模型选择与厂商目录](model-selection-and-vendor-catalog.md)、[记忆系统与知识库治理](models/memory-and-knowledge-governance.md)。
+先读：[模型选择与厂商目录](model-selection-and-vendor-catalog.md)、[记忆系统与知识库治理](../models/memory-and-knowledge-governance.md)。
 
 ## 1. 总览
 

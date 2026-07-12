@@ -1,3 +1,12 @@
+---
+status: supporting
+owner: memory
+last_verified: 2026-07-12
+source_paths:
+  - main/manager-api/src/main/java/xiaozhi/modules/memory
+  - main/xiaozhi-server/core/providers/memory
+---
+
 # 长期记忆维护架构
 
 本文记录本项目长期记忆维护能力的首期工程边界。它解决的不是“保存聊天记录”，而是把设备对话、工具调用、用户显式记住/忘记和管理端维护动作，转成可归属、可查询、可修改、可归档、可删除、可审计的长期记忆对象。

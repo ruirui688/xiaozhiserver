@@ -44,6 +44,7 @@ import xiaozhi.modules.memory.dto.MemoryRememberDTO;
 import xiaozhi.modules.memory.dto.MemoryRebuildRequestDTO;
 import xiaozhi.modules.memory.entity.MemoryFactEntity;
 import xiaozhi.modules.memory.entity.MemoryForgetTombstoneEntity;
+import xiaozhi.modules.memory.service.impl.maintenance.MemoryMaintenanceOutputParser;
 import xiaozhi.modules.memory.vo.MemoryQueryVO;
 import xiaozhi.modules.memory.vo.MemoryRebuildResultVO;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
@@ -96,7 +97,8 @@ class MemoryServiceImplTest {
                 llmService,
                 modelConfigService,
                 modelRuntimeAssembler,
-                agentChatHistoryService);
+                agentChatHistoryService,
+                new MemoryMaintenanceOutputParser());
         memoryService = new MemoryServiceImpl(
                 sourceEventDao,
                 candidateDao,

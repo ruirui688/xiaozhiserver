@@ -1,3 +1,12 @@
+---
+status: supporting
+owner: runtime
+last_verified: 2026-07-12
+source_paths:
+  - main/xiaozhi-server/core/utils/prompt_manager.py
+  - main/xiaozhi-server/core/providers/tools
+---
+
 # 提示词注入工程
 
 本文档说明 xiaozhi-server 中“大模型能看到什么提示词、工具描述和上下文”，以及这些内容从后台配置到 Python 运行时再到模型请求的完整链路。

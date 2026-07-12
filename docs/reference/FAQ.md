@@ -3,7 +3,7 @@
 ### 1、为什么我说的话，小智识别出来很多韩文、日文、英文？🇰🇷
 
 建议：检查一下`models/SenseVoiceSmall`是否已经有`model.pt`
-文件，如果没有就要下载，查看这里[下载语音识别模型文件](../deployment/Deployment.md#模型文件)
+文件，如果没有就要下载，查看[开发环境中的模型准备说明](../development/ubuntu-source-development-environment.md#9-下载语音识别模型)。
 
 ### 2、为什么会出现"TTS 任务出错 文件不存在"？📁
 
@@ -60,10 +60,10 @@ VAD:
 ```
 
 ### 7、部署相关教程
-1、[如何进行最简化部署](../deployment/../deployment/Deployment.md)<br/>
-2、[如何进行全模块部署](../deployment/Deployment_all.md)<br/>
+1、[本地 Docker 部署](../deployment/local-docker-deploy-guide.md)<br/>
+2、[生产 ACR 镜像部署](../deployment/private-docker-release.md)<br/>
 3、[如何部署MQTT网关开启MQTT+UDP协议](../device/mqtt-gateway-integration.md)<br/>
-4、[如何自动拉取本项目最新代码自动编译和启动](../deployment/dev-ops-integration.md)<br/>
+4、[本地开发工作流](../development/local-dev-workflow.md)<br/>
 5、[如何与Nginx集成](https://github.com/xinnan-tech/xiaozhi-esp32-server/issues/791)<br/>
 
 ### 8、编译固件相关教程

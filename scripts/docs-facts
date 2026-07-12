@@ -1,0 +1,226 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+OUTPUT_FILE="$ROOT_DIR/docs/generated/repository-facts.md"
+MODE=write
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/docs-facts [--check]
+
+Generate the repository facts page. With --check, compare the committed page
+with freshly collected facts and fail when they differ.
+EOF
+}
+
+case "${1:-}" in
+  '') ;;
+  --check) MODE=check ;;
+  --help|-h)
+    usage
+    exit 0
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
+
+if (($# > 1)); then
+  usage >&2
+  exit 2
+fi
+
+cd "$ROOT_DIR"
+
+count_files() {
+  local root=$1
+  shift
+  find "$root" -type f "$@" -print | wc -l | tr -d ' '
+}
+
+xml_tag_value() {
+  local file=$1
+  local tag=$2
+  sed -n "s#.*<${tag}>\([^<]*\)</${tag}>.*#\1#p" "$file" | head -n 1
+}
+
+json_key_value() {
+  local file=$1
+  local key=$2
+  sed -n "s#^[[:space:]]*\"${key}\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*#\1#p" "$file" | head -n 1
+}
+
+dependency_version() {
+  local file=$1
+  local key=$2
+  json_key_value "$file" "$key" | sed 's/^[~^]//'
+}
+
+line_count() {
+  wc -l < "$1" | tr -d ' '
+}
+
+render_facts() {
+  local destination=$1
+  local generated_date=${DOCS_FACTS_DATE:-$(date -u +%F)}
+  local python_image
+  local spring_boot_version
+  local java_version
+  local web_vue_version
+  local web_element_version
+  local mobile_vue_version
+  local mobile_uni_version
+  local mobile_typescript_version
+  local python_source_count
+  local python_test_count
+  local java_source_count
+  local java_test_count
+  local web_source_count
+  local web_test_count
+  local mobile_source_count
+  local mobile_test_count
+  local liquibase_sql_count
+  local liquibase_changeset_count
+  local liquibase_registered_sql_count
+
+  python_image=$(sed -n 's/^ARG PYTHON_BASE_IMAGE=//p' Dockerfile-server-base | head -n 1)
+  spring_boot_version=$(awk '
+    /<parent>/ { in_parent = 1; next }
+    in_parent && /<version>/ {
+      line = $0
+      sub(/^.*<version>/, "", line)
+      sub(/<\/version>.*$/, "", line)
+      print line
+      exit
+    }
+    /<\/parent>/ { in_parent = 0 }
+  ' main/manager-api/pom.xml)
+  java_version=$(xml_tag_value main/manager-api/pom.xml java.version)
+  web_vue_version=$(dependency_version main/manager-web/package.json vue)
+  web_element_version=$(dependency_version main/manager-web/package.json element-ui)
+  mobile_vue_version=$(dependency_version main/manager-mobile/package.json vue)
+  mobile_uni_version=$(dependency_version main/manager-mobile/package.json @dcloudio/uni-app)
+  mobile_typescript_version=$(dependency_version main/manager-mobile/package.json typescript)
+
+  python_source_count=$(count_files main/xiaozhi-server -name '*.py' -not -path '*/tests/*')
+  python_test_count=$(count_files main/xiaozhi-server -name 'test_*.py')
+  java_source_count=$(count_files main/manager-api/src/main -name '*.java')
+  java_test_count=$(count_files main/manager-api/src/test -name '*Test.java')
+  web_source_count=$(count_files main/manager-web/src \( -name '*.vue' -o -name '*.js' -o -name '*.ts' \))
+  web_test_count=$(count_files main/manager-web \( -name '*.spec.js' -o -name '*.spec.ts' -o -name '*.test.js' -o -name '*.test.ts' \) -not -path '*/node_modules/*' -not -path '*/dist/*')
+  mobile_source_count=$(count_files main/manager-mobile/src \( -name '*.vue' -o -name '*.js' -o -name '*.ts' \))
+  mobile_test_count=$(count_files main/manager-mobile \( -name '*.spec.js' -o -name '*.spec.ts' -o -name '*.test.js' -o -name '*.test.ts' \) -not -path '*/node_modules/*' -not -path '*/dist/*')
+
+  liquibase_sql_count=$(find main/manager-api/src/main/resources/db/changelog -type f -name '*.sql' -print | wc -l | tr -d ' ')
+  liquibase_changeset_count=$(grep -Ec '^[[:space:]]*- changeSet:' main/manager-api/src/main/resources/db/changelog/db.changelog-master.yaml)
+  liquibase_registered_sql_count=$(grep -Eo 'classpath:db/changelog/[^[:space:]]+\.sql' main/manager-api/src/main/resources/db/changelog/db.changelog-master.yaml | sort -u | wc -l | tr -d ' ')
+
+  cat > "$destination" <<EOF
+---
+status: supporting
+owner: architecture
+last_verified: ${generated_date}
+source_paths:
+  - Dockerfile-server-base
+  - main/xiaozhi-server/
+  - main/manager-api/pom.xml
+  - main/manager-api/src/main/resources/db/changelog/
+  - main/manager-web/package.json
+  - main/manager-mobile/package.json
+---
+
+# 仓库事实
+
+> 本页由 \`scripts/docs-facts\` 生成，请勿手工编辑。运行 \`scripts/docs-facts\` 更新，运行 \`scripts/docs-facts --check\` 检查漂移。
+
+生成日期：\`${generated_date}\`（UTC）
+
+## 技术栈版本
+
+| 模块 | 运行时或框架 | 版本来源 |
+| --- | --- | --- |
+| xiaozhi-server | Python 3.10（基础镜像 \`${python_image}\`） | \`Dockerfile-server-base\` |
+| manager-api | Java ${java_version} / Spring Boot ${spring_boot_version} | \`main/manager-api/pom.xml\` |
+| manager-web | Vue ${web_vue_version} / Element UI ${web_element_version} | \`main/manager-web/package.json\` |
+| manager-mobile | Vue ${mobile_vue_version} / uni-app ${mobile_uni_version} / TypeScript ${mobile_typescript_version} | \`main/manager-mobile/package.json\` |
+
+依赖版本保留清单中的语义；表格为便于阅读去掉了 npm 的 \`^\` 或 \`~\` 前缀，锁定结果仍以对应 lockfile 为准。
+
+## 模块规模
+
+| 模块 | 源码文件 | 测试文件 | 统计口径 |
+| --- | ---: | ---: | --- |
+| xiaozhi-server | ${python_source_count} | ${python_test_count} | 源码为非 \`tests/\` 的 \`*.py\`；测试为 \`test_*.py\` |
+| manager-api | ${java_source_count} | ${java_test_count} | \`src/main/**/*.java\`；\`src/test/**/*Test.java\` |
+| manager-web | ${web_source_count} | ${web_test_count} | \`src/\` 下 \`*.vue/*.js/*.ts\`；\`*.spec.*/*.test.*\` |
+| manager-mobile | ${mobile_source_count} | ${mobile_test_count} | \`src/\` 下 \`*.vue/*.js/*.ts\`；\`*.spec.*/*.test.*\` |
+
+统计排除依赖和构建产物，不表示代码行数或测试覆盖率。
+
+## 关键入口
+
+| 边界 | 入口 |
+| --- | --- |
+| Python 实时服务 | \`main/xiaozhi-server/app.py\` |
+| Python WebSocket | \`main/xiaozhi-server/core/websocket_server.py\` |
+| Python HTTP | \`main/xiaozhi-server/core/http_server.py\` |
+| Java 管理 API | \`main/manager-api/src/main/java/xiaozhi/AdminApplication.java\` |
+| Java 数据库迁移 | \`main/manager-api/src/main/resources/db/changelog/db.changelog-master.yaml\` |
+| Web 管理后台 | \`main/manager-web/src/main.js\` |
+| Mobile 管理后台 | \`main/manager-mobile/src/main.ts\` |
+| 本地开发 | \`scripts/dev\` |
+| 生产部署 | \`deploy/production/docker-compose.yml\` |
+
+## 数据库迁移
+
+| 事实 | 数量 |
+| --- | ---: |
+| Liquibase SQL 文件 | ${liquibase_sql_count} |
+| master.yaml changeSet | ${liquibase_changeset_count} |
+| master.yaml 唯一 SQL 登记 | ${liquibase_registered_sql_count} |
+
+数量相等不代表迁移内容正确；\`scripts/docs-check\` 还会检查遗漏登记、重复登记和失效路径。
+
+## 关键大文件
+
+| 文件 | 行数 |
+| --- | ---: |
+| \`main/xiaozhi-server/core/connection.py\` | $(line_count main/xiaozhi-server/core/connection.py) |
+| \`main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelCatalogServiceImpl.java\` | $(line_count main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelCatalogServiceImpl.java) |
+| \`main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelTestServiceImpl.java\` | $(line_count main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelTestServiceImpl.java) |
+| \`main/manager-api/src/main/java/xiaozhi/modules/knowledge/rag/impl/LocalKnowledgeAdapter.java\` | $(line_count main/manager-api/src/main/java/xiaozhi/modules/knowledge/rag/impl/LocalKnowledgeAdapter.java) |
+| \`main/manager-api/src/main/java/xiaozhi/modules/memory/service/impl/MemoryMaintenanceServiceImpl.java\` | $(line_count main/manager-api/src/main/java/xiaozhi/modules/memory/service/impl/MemoryMaintenanceServiceImpl.java) |
+| \`main/manager-web/src/views/ModelConfig.vue\` | $(line_count main/manager-web/src/views/ModelConfig.vue) |
+| \`main/manager-web/src/components/BenchmarkResultPanel.vue\` | $(line_count main/manager-web/src/components/BenchmarkResultPanel.vue) |
+| \`main/manager-web/src/views/KnowledgeFileUpload.vue\` | $(line_count main/manager-web/src/views/KnowledgeFileUpload.vue) |
+| \`main/manager-mobile/src/pages/agent/edit.vue\` | $(line_count main/manager-mobile/src/pages/agent/edit.vue) |
+
+这些行数用于识别架构热点，不是强制拆分阈值。重构判断仍应结合职责、依赖和测试风险。
+EOF
+}
+
+tmp_file=$(mktemp)
+trap 'rm -f "$tmp_file"' EXIT
+render_facts "$tmp_file"
+
+if [[ "$MODE" == check ]]; then
+  if [[ ! -f "$OUTPUT_FILE" ]]; then
+    printf 'Repository facts are missing: %s\n' "${OUTPUT_FILE#"$ROOT_DIR"/}" >&2
+    printf 'Run scripts/docs-facts to generate them.\n' >&2
+    exit 1
+  fi
+  if ! cmp -s "$tmp_file" "$OUTPUT_FILE"; then
+    printf 'Repository facts are stale. Run scripts/docs-facts and commit the result.\n' >&2
+    diff -u "$OUTPUT_FILE" "$tmp_file" || true
+    exit 1
+  fi
+  printf 'Repository facts are current.\n'
+  exit 0
+fi
+
+mkdir -p "$(dirname "$OUTPUT_FILE")"
+cp "$tmp_file" "$OUTPUT_FILE"
+printf 'Generated %s\n' "${OUTPUT_FILE#"$ROOT_DIR"/}"

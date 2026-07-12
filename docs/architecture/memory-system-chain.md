@@ -1,3 +1,12 @@
+---
+status: supporting
+owner: memory
+last_verified: 2026-07-12
+source_paths:
+  - main/xiaozhi-server/core/providers/memory
+  - main/manager-api/src/main/java/xiaozhi/modules/memory
+---
+
 # 记忆系统完整链路
 
 本文档说明 xiaozhi-esp32-server 长期记忆系统的完整链路：从 Python 侧事件上报、记忆查询注入，到 Java 侧 PowerMem 双阶段提取决策、事实存储与维护。

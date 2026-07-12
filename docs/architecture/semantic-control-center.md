@@ -1,3 +1,12 @@
+---
+status: supporting
+owner: xiaozhi-server
+last_verified: 2026-07-12
+source_paths:
+  - main/xiaozhi-server/core/semantic
+  - main/xiaozhi-server/core/handle/receiveAudioHandle.py
+---
+
 # 语义控制中枢架构
 
 本文记录小智从“LLM 驱动工具调用”演进到“语音操作系统控制中枢”的第一阶段落地方式。目标不是多接几个 MCP，而是让高频控制、状态上下文、拒识和多轮任务先在服务端形成闭环。
@@ -320,7 +329,7 @@ conda run -n xiaozhi-esp32-server pytest tests
 
 如果本地缺少 `pytest` 或项目依赖，需要先按开发环境文档安装依赖。
 
-## 5. 关联文档
+## 9. 关联文档
 
 - [语义打断与端到端语音模型演进分析](./semantic-interruption-and-e2e-voice-model-analysis.md) — 语义打断方案设计与端到端模型演进路线
 - [云端运行架构与配置链路](./cloud-runtime-architecture.md) — 语义控制中枢在全链路中的位置

@@ -407,7 +407,10 @@ class GameSessionManager:
         normalized = self._normalize(user_message)
         for tool_name, aliases in self.FREEFORM_GAME_ALIASES.items():
             if self._contains_any(normalized, aliases):
-                return tool_name
+                # Freeform games are prompt-driven and must never be forced through
+                # the legacy stateful tool routing path.
+                if tool_name not in self.FREEFORM_GAME_TOOLS:
+                    return tool_name
         return None
 
     # ------------------------------------------------------------------ #

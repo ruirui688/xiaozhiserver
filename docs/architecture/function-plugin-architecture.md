@@ -1,3 +1,12 @@
+---
+status: supporting
+owner: tools
+last_verified: 2026-07-12
+source_paths:
+  - main/xiaozhi-server/core/providers/tools
+  - main/xiaozhi-server/plugins_func
+---
+
 # 功能插件架构
 
 ## 顶层模型

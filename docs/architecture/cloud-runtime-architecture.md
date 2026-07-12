@@ -1,3 +1,12 @@
+---
+status: supporting
+owner: runtime
+last_verified: 2026-07-12
+source_paths:
+  - main/xiaozhi-server
+  - main/manager-api/src/main/java/xiaozhi/modules/config
+---
+
 # 云端运行架构与配置链路
 
 本文档整理 `xiaozhi-esp32-server` 云端服务器的运行边界。重点说明：后台配置如何进入 Python 实时服务，设备什么时候看到这些配置，提示词、插件、MCP 和状态机能力分别在哪里生效。

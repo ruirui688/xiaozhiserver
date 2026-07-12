@@ -295,7 +295,6 @@ mkdir -p main/xiaozhi-server/models/SenseVoiceSmall
 模型文件下载方式参考：
 
 - 阿里魔搭：`https://modelscope.cn/models/iic/SenseVoiceSmall/resolve/master/model.pt`
-- 百度网盘：见 `docs/deployment/Deployment_all.md` 中的 SenseVoiceSmall 下载说明
 
 模型文件较大，不允许提交到 Git。
 

@@ -1,0 +1,203 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$ROOT_DIR"
+
+errors=0
+declare -A referenced_docs=()
+
+fail() {
+  printf 'ERROR: %s\n' "$*" >&2
+  errors=$((errors + 1))
+}
+
+check_required_entries() {
+  local entry
+  local required_entries=(
+    AGENTS.md
+    README.md
+    docs/README.md
+    docs/architecture/project-architecture.md
+    docs/deployment/private-docker-release.md
+    docs/standards/development-specification.md
+    docs/standards/ai-coding-agent-instructions.md
+    docs/standards/documentation-policy.md
+    docs/local-customizations.md
+    scripts/README.md
+    scripts/dev
+    main/xiaozhi-server/app.py
+    main/manager-api/README.md
+    main/manager-web/README.md
+    main/manager-mobile/README.md
+  )
+
+  for entry in "${required_entries[@]}"; do
+    [[ -e "$entry" ]] || fail "required project entry is missing: $entry"
+  done
+}
+
+check_headings() {
+  local file
+  local headings
+
+  while IFS= read -r file; do
+    headings=$(
+      awk '
+        BEGIN { in_fence = 0 }
+        /^```/ { in_fence = !in_fence; next }
+        !in_fence && /^# / { print NR ":" $0 }
+      ' "$file"
+    )
+    if [[ -z "$headings" ]]; then
+      fail "$file does not contain an H1 heading"
+    elif [[ $(wc -l <<< "$headings") -gt 1 ]]; then
+      fail "$file contains multiple H1 headings: $(tr '\n' ';' <<< "$headings")"
+    fi
+  done < <(find docs -type f -name '*.md' -print | sort)
+}
+
+check_markdown_links() {
+  local source
+  local line_number
+  local match
+  local target
+  local path_part
+  local resolved
+  local repo_relative
+
+  while IFS= read -r source; do
+    while IFS=: read -r line_number match; do
+      [[ -n "$match" ]] || continue
+      target=${match#*](}
+      target=${target%)}
+
+      if [[ "$target" == \<*\> ]]; then
+        target=${target#<}
+        target=${target%%>*}
+      else
+        target=${target%%[[:space:]]*}
+      fi
+
+      case "$target" in
+        ''|'#'*|http://*|https://*|mailto:*|tel:*|data:*) continue ;;
+      esac
+
+      path_part=${target%%#*}
+      path_part=${path_part%%\?*}
+      [[ -n "$path_part" ]] || continue
+
+      resolved=$(realpath -m "$(dirname "$source")/$path_part")
+      if [[ "$resolved" != "$ROOT_DIR" && "$resolved" != "$ROOT_DIR/"* ]]; then
+        fail "$source:$line_number link escapes the repository: $target"
+        continue
+      fi
+      if [[ ! -e "$resolved" ]]; then
+        fail "$source:$line_number has a broken relative link: $target"
+        continue
+      fi
+
+      repo_relative=${resolved#"$ROOT_DIR"/}
+      if [[ "$repo_relative" == docs/*.md ]]; then
+        referenced_docs["$repo_relative"]=1
+      fi
+    done < <(
+      awk '
+        BEGIN { in_fence = 0 }
+        /^[[:space:]]*```/ { in_fence = !in_fence; next }
+        !in_fence {
+          rest = $0
+          while (match(rest, /\[[^]]*\]\([^)]+\)/)) {
+            print NR ":" substr(rest, RSTART, RLENGTH)
+            rest = substr(rest, RSTART + RLENGTH)
+          }
+        }
+      ' "$source"
+    )
+  done < <(
+    find . -type f -name '*.md' \
+      -not -path './.git/*' \
+      -not -path '*/node_modules/*' \
+      -not -path '*/target/*' \
+      -not -path '*/dist/*' \
+      -print | sed 's#^./##' | sort
+  )
+}
+
+check_orphan_docs() {
+  local file
+
+  while IFS= read -r file; do
+    case "$file" in
+      docs/README.md) continue ;;
+    esac
+    [[ -n "${referenced_docs[$file]:-}" ]] || fail "documentation page is not linked from another Markdown file: $file"
+  done < <(find docs -type f -name '*.md' -print | sort)
+}
+
+check_liquibase_registration() {
+  local changelog_dir=main/manager-api/src/main/resources/db/changelog
+  local master=$changelog_dir/db.changelog-master.yaml
+  local sql_file
+  local reference
+  local duplicate
+  declare -A sql_files=()
+  declare -A master_refs=()
+
+  [[ -f "$master" ]] || {
+    fail "Liquibase master changelog is missing: $master"
+    return
+  }
+
+  while IFS= read -r sql_file; do
+    sql_files["$sql_file"]=1
+  done < <(find "$changelog_dir" -type f -name '*.sql' -printf '%P\n' | sort)
+
+  while IFS= read -r reference; do
+    reference=${reference#classpath:db/changelog/}
+    master_refs["$reference"]=1
+  done < <(grep -Eo 'classpath:db/changelog/[^[:space:]]+\.sql' "$master" | sort -u)
+
+  while IFS= read -r duplicate; do
+    fail "Liquibase SQL is registered more than once: $duplicate"
+  done < <(
+    grep -Eo 'classpath:db/changelog/[^[:space:]]+\.sql' "$master" \
+      | sed 's#classpath:db/changelog/##' \
+      | sort | uniq -d
+  )
+
+  for sql_file in "${!sql_files[@]}"; do
+    [[ -n "${master_refs[$sql_file]:-}" ]] || fail "Liquibase SQL is not registered in master changelog: $sql_file"
+  done
+  for reference in "${!master_refs[@]}"; do
+    [[ -n "${sql_files[$reference]:-}" ]] || fail "Liquibase master references a missing SQL file: $reference"
+  done
+}
+
+check_readme_remote_policy() {
+  if grep -Eq '(^|[[:space:]])origin[[:space:]]+(ssh://|git@|https?://)' README.md; then
+    fail "README.md must not hard-code a private origin URL; use 'git remote -v' as the source of truth"
+  fi
+}
+
+check_generated_facts() {
+  if ! scripts/docs-facts --check; then
+    fail "generated repository facts are stale"
+  fi
+}
+
+check_required_entries
+check_generated_facts
+check_headings
+check_markdown_links
+check_orphan_docs
+check_liquibase_registration
+check_readme_remote_policy
+
+if ((errors > 0)); then
+  printf '\nDocumentation checks failed with %d error(s).\n' "$errors" >&2
+  exit 1
+fi
+
+printf 'Documentation checks passed.\n'

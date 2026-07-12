@@ -89,7 +89,7 @@ async def get_config_from_api_async(config):
         "url": config["manager-api"].get("url", ""),
         "secret": config["manager-api"].get("secret", ""),
     }
-    auth_enabled = config_data.get("server", {}).get("auth", {}).get("enabled", False)
+    auth_enabled = config_data.get("server", {}).get("auth", {}).get("enabled", True)
     server_config = config_data.setdefault("server", {})
     local_server_config = config.get("server", {})
     # 服务监听配置以本地为准；下发给设备的地址默认使用后台参数。

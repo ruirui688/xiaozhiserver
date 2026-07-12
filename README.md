@@ -39,22 +39,25 @@ deploy/               部署资产归档边界（[入口](./deploy/README.md)）
 8002  管理后台接口与页面
 ```
 
+## 文档入口
+
+第一次接触项目，按以下顺序阅读：
+
+1. [项目架构总览](./docs/architecture/project-architecture.md) - 理解模块边界、控制面、实时数据面和关键链路。
+2. [文档任务门户](./docs/README.md) - 按开发、部署、排障或专项任务进入对应文档。
+3. [本地开发工作流](./docs/development/local-dev-workflow.md) - 使用统一脚本启动和验证服务。
+
+生产环境只使用 [ACR 镜像生产部署](./docs/deployment/private-docker-release.md)。历史官方部署教程和服务器源码自动升级流程不属于本项目生产入口。
+
 ## 开发规范
 
 本项目的本地开发、Git 管理、数据库变更、配置管理、阿里云部署和官方上游同步，必须遵守：
 
 - [小智服务器开发规范](./docs/standards/development-specification.md)
 - [AI 编程工具工作指令](./docs/standards/ai-coding-agent-instructions.md)
-- [文档分类索引](./docs/README.md)
-- [当前代码地图与梳理报告](./docs/architecture/current-code-map.md)
-- [项目完整架构与文档导航](./docs/architecture/project-architecture.md)
-- [云端运行架构与配置链路](./docs/architecture/cloud-runtime-architecture.md)
-- [提示词注入工程](./docs/architecture/prompt-injection-engineering.md)
+- [文档任务门户](./docs/README.md)
+- [项目架构总览](./docs/architecture/project-architecture.md)
 - [配置与运行产物治理策略](./docs/standards/config-runtime-policy.md)
-
-生产部署入口：
-
-- [ACR 镜像生产部署](./docs/deployment/private-docker-release.md)
 
 本地开发统一入口：
 
@@ -107,14 +110,13 @@ AGENTS.md
   -> 生产服务器拉取已发布镜像并启动
 ```
 
-私有仓库的标准远端名为 `origin`，官方上游仓库的标准远端名为 `upstream`。本项目当前约定：
+私有仓库的标准远端名为 `origin`，官方上游仓库的标准远端名为 `upstream`。远端 URL 可能随环境或仓库迁移而变化，操作前必须以以下命令的实际输出为准：
 
-```text
-origin    ssh://git@10.144.92.32:222/gaoruirui688/xiaozhi-esp32-server.git
-upstream  https://github.com/xinnan-tech/xiaozhi-esp32-server.git
+```bash
+git remote -v
 ```
 
-本地二次开发代码必须推送到 `origin`，禁止推送到官方 `upstream`。
+`origin` 必须指向允许推送的私有仓库；`upstream` 用于获取官方更新，禁止向其推送。本地二次开发代码只能推送到核对后的 `origin`。
 
 如果需要跟进官方仓库更新，必须先在 `sync/upstream-YYYYMMDD` 分支中合并 `upstream/main`，完成冲突处理和测试后，再合并到本地 `main` 分支。
 

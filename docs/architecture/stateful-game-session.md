@@ -1,3 +1,12 @@
+---
+status: supporting
+owner: tools
+last_verified: 2026-07-12
+source_paths:
+  - main/xiaozhi-server/core/game
+  - main/xiaozhi-server/core/providers/tools/server_plugins
+---
+
 # 游戏会话边界
 
 本文记录 xiaozhi-server 中互动游戏的当前运行边界。

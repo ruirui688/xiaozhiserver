@@ -29,8 +29,8 @@ server:
   timezone_offset: +8
   # 认证配置
   auth:
-    # 是否启用认证
-    enabled: false
+    # 是否启用认证。默认开启；仅限受控开发环境可在 data/.config.yaml 中显式关闭。
+    enabled: true
     # 白名单设备ID列表
     # 如果属于白名单内的设备，不校验token，直接放行
     allowed_devices:
@@ -414,6 +414,8 @@ ASR:
     init_timeout_seconds: 10
     # 等待下一条流式识别结果的最大时间（秒）；每收到结果后重新计时
     response_timeout_seconds: 15
+    # 发送 LAST 后等待最终 definite 结果的总预算（秒）
+    final_response_timeout_seconds: 5
     output_dir: tmp/
   TencentASR:
     # token申请地址：https://console.cloud.tencent.com/cam/capi

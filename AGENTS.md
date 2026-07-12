@@ -18,21 +18,23 @@ ESP32 设备 ──WebSocket──→ xiaozhi-server (Python, port 8000/8003)
                                 └── 通过 HTTP 从 manager-api 拉取配置
 
 manager-web / manager-mobile ──HTTP──→ manager-api (Java, port 8002)
-                                          ├── MySQL + Redis + Liquibase (148 migrations)
+                                          ├── MySQL + Redis + Liquibase
                                           ├── 智能体 / 模型 / 设备 / 知识库 / OTA / 声纹 / 记忆管理
                                           └── 模型评测编排 (调用 xiaozhi-server benchmark API)
 ```
 
 ### 模块清单
 
-| 模块 | 语言/框架 | 文件数 | 职责 |
-|------|----------|--------|------|
-| `main/xiaozhi-server/` | Python 3.10, aiohttp | 226 .py | 实时语音服务：WebSocket、VAD/ASR/LLM/TTS、插件、MCP |
-| `main/manager-api/` | Java 21, Spring Boot 3.4.4 | 420 .java | 管理 API：配置下发、模型管理、评测编排、权限、记忆、知识库 |
-| `main/manager-web/` | Vue 2, Element UI | 68 .vue (33 views, 34 components) | Web 智控台 |
-| `main/manager-mobile/` | Vue 3, uni-app, TypeScript | 26 .vue (source) | 移动端智控台 (H5/iOS/Android/微信) |
-| `docs/` | 71 .md | — | 架构、部署、开发、集成、MCP、模型、安全、规范 |
-| `deploy/` / `scripts/` | 12 Shell scripts | — | 本地开发入口 + ACR 生产部署 |
+| 模块 | 语言/框架 | 职责 |
+|------|----------|------|
+| `main/xiaozhi-server/` | Python 3.10, aiohttp | 实时语音服务：WebSocket、VAD/ASR/LLM/TTS、插件、MCP |
+| `main/manager-api/` | Java 21, Spring Boot 3.4.4 | 管理 API：配置下发、模型管理、评测编排、权限、记忆、知识库 |
+| `main/manager-web/` | Vue 2, Element UI | Web 智控台 |
+| `main/manager-mobile/` | Vue 3, uni-app, TypeScript | 移动端智控台 (H5/iOS/Android/微信) |
+| `docs/` | Markdown | 架构、部署、开发、集成、MCP、模型、安全、规范 |
+| `deploy/` / `scripts/` | Shell / Compose | 本地开发入口 + ACR 生产部署 |
+
+模块数量、测试数量、迁移数量和热点文件行数统一查看 `docs/generated/repository-facts.md`，禁止在本文件重复维护动态数字。
 
 ### 安全态势
 
@@ -88,7 +90,7 @@ docs/local-customizations.md
 
 Python 核心服务
   → main/xiaozhi-server/requirements.txt
-  → core/connection.py (1977行中央状态机，修改前必须读)
+  → core/connection.py (中央状态机，修改前必须读)
   → 相关 core/handle/、core/providers/、core/semantic/、plugins_func/
 
 Java 管理 API
@@ -181,13 +183,13 @@ scripts/dev stop
 
 后续开发必须优先降低混乱度，**不得继续膨胀以下巨型文件**：
 
-| 文件 | 当前规模 | 替代方向 |
-|------|---------|---------|
-| `core/connection.py` | 1977行 | 音频初始化已拆至 `core/handle/audioInitializer.py`, 报告线程已拆至 `reportThreadManager.py` |
-| `ModelConfigServiceImpl.java` | 985行 | 模型测试已拆至 `ModelTestServiceImpl.java` (1578行) |
-| `ModelBenchmarkDialog.vue` | 489行 | 已拆至 `BenchmarkConfigPanel.vue` + `BenchmarkResultPanel.vue` |
-| `MemoryServiceImpl.java` | 491行 | 已拆至 `MemoryMaintenanceServiceImpl.java` (1061行) + `MemoryQueryServiceImpl.java` (266行) |
-| `game_session.py` | 7行 (thin re-export) | 已拆至 `core/game/` (6文件, 1513行) |
+| 文件 | 替代方向 |
+|------|---------|
+| `core/connection.py` | 音频初始化已拆至 `core/handle/audioInitializer.py`，报告线程已拆至 `reportThreadManager.py`，关闭生命周期已拆至 `core/session/` |
+| `ModelConfigServiceImpl.java` | 模型测试已拆至 `ModelTestServiceImpl.java`，继续通过 tester 执行器分域 |
+| `ModelBenchmarkDialog.vue` | 已拆至 `BenchmarkConfigPanel.vue` + `BenchmarkResultPanel.vue` |
+| `MemoryServiceImpl.java` | 已拆至维护、查询服务，维护输出解析继续下沉到独立组件 |
+| `game_session.py` | 保持 thin re-export，具体实现位于 `core/game/` |
 | `ModelAssistantServiceImpl.java` | 766行 | 草案代码已清理 |
 | `ModelConfig.vue` | 1889行 | 测评 UI 已拆至 `ModelBenchmarkDialog.vue` |
 | `roleConfig.vue` | 610行 | 编辑弹窗已拆至 `role/RoleEditDialog.vue` + `RoleTestDialog.vue` |
@@ -485,7 +487,7 @@ Python 入口:        main/xiaozhi-server/app.py
 私有配置:           main/xiaozhi-server/data/.config.yaml
 认证密钥持久化:     main/xiaozhi-server/data/.auth_key
 提示词模板:         main/xiaozhi-server/agent-base-prompt.txt
-中央状态机:         main/xiaozhi-server/core/connection.py (1977行)
+中央状态机:         main/xiaozhi-server/core/connection.py
 语义控制中枢:       main/xiaozhi-server/core/semantic/ (8个文件, ~800行)
 语音处理:           main/xiaozhi-server/core/handle/ (22个文件, ~2000行)
 功能插件:           main/xiaozhi-server/plugins_func/functions/ (15个)
@@ -500,12 +502,12 @@ Java 安全配置:      .../modules/security/config/ShiroConfig.java
 Java Token 生成:    .../modules/security/oauth2/TokenGenerator.java (SHA-256)
 Java 服务端密钥:    .../modules/security/secret/ServerSecretFilter.java
 Java 评测编排:      .../model/service/impl/ModelBenchmarkServiceImpl.java (262行)
-Java 模型测试:      .../model/service/impl/ModelTestServiceImpl.java (1578行)
+Java 模型测试:      .../model/service/impl/ModelTestServiceImpl.java
 长期记忆服务:       .../memory/service/impl/MemoryServiceImpl.java (491行)
-长期记忆维护:       .../memory/service/impl/MemoryMaintenanceServiceImpl.java (1061行)
+长期记忆维护:       .../memory/service/impl/MemoryMaintenanceServiceImpl.java
 长期记忆查询:       .../memory/service/impl/MemoryQueryServiceImpl.java (266行)
 本地知识库引擎:     .../knowledge/rag/impl/LocalKnowledgeAdapter.java (1658行)
-数据库迁移:         main/manager-api/src/main/resources/db/changelog/ (148个迁移)
+数据库迁移:         main/manager-api/src/main/resources/db/changelog/
 本地开发入口:       scripts/dev (748行)
 生产部署入口:       docs/deployment/private-docker-release.md
 生产部署包:         deploy/production/

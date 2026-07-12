@@ -6,11 +6,23 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  docs-check:
+    name: Documentation & Repository Policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run documentation checks
+        run: scripts/docs-check
+
   python-check:
     name: Python Syntax & Test
     runs-on: ubuntu-latest
-    continue-on-error: true
     defaults:
       run:
         working-directory: main/xiaozhi-server
@@ -21,29 +33,23 @@ jobs:
         uses: conda-incubator/setup-miniconda@v3
         with:
           python-version: "3.10"
-          auto-update-conda: true
+          auto-update-conda: false
           activate-environment: xiaozhi-esp32-server
 
       - name: Install dependencies
-        shell: bash -el {0}
         run: |
-          conda install -y pip
-          pip install -r requirements.txt 2>/dev/null || echo "Some packages may not be available, continuing..."
-          pip install pytest pytest-asyncio 2>/dev/null || true
+          conda install -n xiaozhi-esp32-server -y pip
+          conda run -n xiaozhi-esp32-server python -m pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Syntax check (compileall)
-        shell: bash -el {0}
-        run: python -m compileall . -q
+        run: conda run -n xiaozhi-esp32-server python -m compileall . -q
 
       - name: Run tests
-        shell: bash -el {0}
-        run: |
-          python -m pytest tests/ -v --timeout=30 --ignore=tests/test_huoshan_double_stream_tts_config.py 2>/dev/null || echo "Tests completed (some may be skipped)"
+        run: conda run -n xiaozhi-esp32-server python -m pytest tests/ -v
 
   java-check:
-    name: Java Compile & Test
+    name: Java Test
     runs-on: ubuntu-latest
-    continue-on-error: true
     defaults:
       run:
         working-directory: main/manager-api
@@ -57,16 +63,12 @@ jobs:
           distribution: "temurin"
           cache: "maven"
 
-      - name: Compile
-        run: mvn compile -q
-
       - name: Run tests
-        run: mvn test -q 2>/dev/null || echo "Tests skipped or failed (may need database) - non-blocking"
+        run: mvn test
 
   web-check:
     name: Web Frontend Build
     runs-on: ubuntu-latest
-    continue-on-error: true
     defaults:
       run:
         working-directory: main/manager-web
@@ -82,28 +84,39 @@ jobs:
 
       - name: Install & Build
         run: |
-          npm ci 2>/dev/null || npm install
+          npm ci
           npm run build
 
   mobile-check:
-    name: Mobile Frontend Build
+    name: Mobile Type Check & Build
     runs-on: ubuntu-latest
-    continue-on-error: true
     defaults:
       run:
         working-directory: main/manager-mobile
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.10.0
+          run_install: false
+
       - name: Setup Node 18
         uses: actions/setup-node@v4
         with:
           node-version: "18"
+          cache: "pnpm"
+          cache-dependency-path: main/manager-mobile/pnpm-lock.yaml
 
-      - name: Install pnpm
-        run: npm install -g pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
-      - name: Install & Build
-        run: |
-          pnpm install --no-frozen-lockfile
-          pnpm build:h5
+      - name: Type check
+        run: pnpm type-check
+
+      - name: Build H5
+        run: pnpm build:h5
+
+      - name: Build WeChat Mini Program
+        run: pnpm build:mp-weixin

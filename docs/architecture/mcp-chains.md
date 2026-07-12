@@ -1,3 +1,11 @@
+---
+status: supporting
+owner: tools
+last_verified: 2026-07-12
+source_paths:
+  - main/xiaozhi-server/core/providers/tools
+---
+
 # MCP 三类链路架构
 
 本文档说明 xiaozhi-esp32-server 中三条 MCP (Model Context Protocol) 工具链路的工具发现、注册和调用完整流程。

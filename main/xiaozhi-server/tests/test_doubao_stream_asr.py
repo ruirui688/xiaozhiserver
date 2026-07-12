@@ -1,4 +1,5 @@
 import asyncio
+import gzip
 import sys
 import time
 from pathlib import Path
@@ -40,6 +41,30 @@ class FakeWebSocket:
         self.closed = True
 
 
+class FinalAfterLastWebSocket(FakeWebSocket):
+    def __init__(self):
+        super().__init__()
+        self.last_frame_sent = asyncio.Event()
+        self.recv_count = 0
+
+    async def send(self, payload):
+        await super().send(payload)
+        if len(payload) >= 2 and payload[1] & 0x0F == 0x02:
+            self.last_frame_sent.set()
+
+    async def recv(self):
+        self.recv_count += 1
+        if self.recv_count == 1:
+            return b"init"
+        await self.last_frame_sent.wait()
+        return b"final"
+
+
+class FailingSendWebSocket(FakeWebSocket):
+    async def send(self, payload):
+        raise RuntimeError("simulated send failure")
+
+
 class FakeConnection:
     def __init__(self):
         self.client_listen_mode = "auto"
@@ -51,6 +76,9 @@ class FakeConnection:
 
     def reset_audio_states(self):
         self.reset_count += 1
+        self.client_have_voice = False
+        self.client_voice_stop = False
+        self.asr_audio.clear()
 
 
 def _provider(tmp_path, **overrides):
@@ -66,14 +94,17 @@ def test_stream_timeout_configuration_defaults_and_overrides(tmp_path):
     provider = _provider(tmp_path)
     assert provider.init_timeout_seconds == 10
     assert provider.response_timeout_seconds == 15
+    assert provider.final_response_timeout_seconds == 5
 
     configured = _provider(
         tmp_path,
         init_timeout_seconds="0.25",
         response_timeout_seconds="1.5",
+        final_response_timeout_seconds="0.75",
     )
     assert configured.init_timeout_seconds == 0.25
     assert configured.response_timeout_seconds == 1.5
+    assert configured.final_response_timeout_seconds == 0.75
 
 
 @pytest.mark.parametrize(
@@ -82,6 +113,7 @@ def test_stream_timeout_configuration_defaults_and_overrides(tmp_path):
         ("init_timeout_seconds", 0),
         ("response_timeout_seconds", -1),
         ("response_timeout_seconds", "invalid"),
+        ("final_response_timeout_seconds", 0),
     ],
 )
 def test_stream_timeout_configuration_rejects_invalid_values(
@@ -214,3 +246,158 @@ def test_result_half_open_keeps_heartbeat_and_next_forwarder_starts(tmp_path):
     assert provider.asr_ws is None
     assert provider.is_processing is False
     assert conn.reset_count == 2
+
+
+@pytest.mark.parametrize("recognized_text", ["是", "不是", "对", "退下", "停止"])
+def test_auto_vad_stop_sends_last_and_accepts_short_final_text(
+    monkeypatch, tmp_path, recognized_text
+):
+    websocket = FinalAfterLastWebSocket()
+
+    async def fake_connect(*args, **kwargs):
+        return websocket
+
+    monkeypatch.setattr(doubao_stream.websockets, "connect", fake_connect)
+    provider = _provider(tmp_path, final_response_timeout_seconds=0.1)
+    provider.decoder = type("Decoder", (), {"decode": lambda _self, data, _size: data})()
+    provider.parse_response = lambda response: (
+        {"code": 1000}
+        if response == b"init"
+        else {
+            "payload_msg": {
+                "result": {
+                    "text": recognized_text,
+                    "utterances": [
+                        {"text": recognized_text, "definite": True}
+                    ],
+                }
+            }
+        }
+    )
+    conn = FakeConnection()
+    conn.asr = provider
+    handled = []
+
+    async def fake_handle_voice_stop(_conn, audio_data):
+        text, _ = await provider.speech_to_text(
+            audio_data, "session", "opus"
+        )
+        handled.append((text, list(audio_data)))
+        provider.stop_ws_connection()
+
+    provider.handle_voice_stop = fake_handle_voice_stop
+
+    async def scenario():
+        await provider.receive_audio(conn, b"voice-frame", True)
+        forward_task = provider.forward_task
+        conn.client_have_voice = True
+        conn.client_voice_stop = True
+        await provider.receive_audio(conn, b"silence-frame", False)
+        await asyncio.wait_for(forward_task, timeout=0.2)
+
+    asyncio.run(scenario())
+
+    audio_frames = [
+        payload for payload in websocket.sent if payload[1] >> 4 == 0x02
+    ]
+    regular_frames = [payload for payload in audio_frames if payload[1] & 0x0F == 0]
+    last_frames = [payload for payload in audio_frames if payload[1] & 0x0F == 0x02]
+
+    assert len(regular_frames) == 2
+    assert len(last_frames) == 1
+    assert gzip.decompress(last_frames[0][8:]) == b""
+    assert handled == [(recognized_text, [b"voice-frame", b"silence-frame"])]
+    assert websocket.closed is True
+    assert conn.reset_count == 1
+    assert conn.client_voice_stop is False
+    assert conn.asr_audio == []
+    assert provider.forward_task is None
+
+
+def test_stop_request_is_idempotent(tmp_path):
+    websocket = FakeWebSocket()
+    provider = _provider(tmp_path)
+    provider.asr_ws = websocket
+    provider.is_processing = True
+
+    async def scenario():
+        return await asyncio.gather(
+            provider._send_stop_request(),
+            provider._send_stop_request(),
+        )
+
+    first, second = asyncio.run(scenario())
+
+    assert first is True
+    assert second is False
+    assert len(websocket.sent) == 1
+    assert websocket.sent[0][1] == 0x22
+
+
+def test_stop_request_send_failure_allows_retry(tmp_path):
+    provider = _provider(tmp_path)
+    provider.asr_ws = FailingSendWebSocket()
+    provider.is_processing = True
+
+    sent = asyncio.run(provider._send_stop_request())
+
+    assert sent is False
+    assert provider._is_stopping is False
+    assert provider._stop_sent_at is None
+    assert provider._stop_sent_event.is_set() is False
+
+
+def test_final_result_timeout_uses_final_budget_and_cleans_state(tmp_path):
+    websocket = FakeWebSocket(recv_delay=1)
+    provider = _provider(
+        tmp_path,
+        response_timeout_seconds=1,
+        final_response_timeout_seconds=0.01,
+    )
+    provider.asr_ws = websocket
+    provider.is_processing = True
+    provider._is_stopping = True
+    provider._stop_sent_at = time.monotonic()
+    provider._stop_sent_event.set()
+    provider.text = "stale partial text"
+    conn = FakeConnection()
+
+    started = time.monotonic()
+    asyncio.run(provider._forward_asr_results(conn))
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 0.1
+    assert websocket.closed is True
+    assert provider.text == ""
+    assert provider.asr_ws is None
+    assert provider.is_processing is False
+    assert conn.reset_count == 1
+
+
+def test_old_forwarder_does_not_close_or_reset_new_session(tmp_path):
+    old_websocket = FakeWebSocket(responses=[b"old-error"])
+    new_websocket = FakeWebSocket()
+    provider = _provider(tmp_path)
+    provider.parse_response = lambda _response: {
+        "payload_msg": {"error": "old session finished"}
+    }
+    provider.asr_ws = old_websocket
+    provider.is_processing = True
+    old_stop_event = asyncio.Event()
+    conn = FakeConnection()
+
+    async def scenario():
+        task = asyncio.create_task(
+            provider._forward_asr_results(conn, old_websocket, old_stop_event)
+        )
+        provider.asr_ws = new_websocket
+        provider.is_processing = True
+        await task
+
+    asyncio.run(scenario())
+
+    assert old_websocket.closed is True
+    assert new_websocket.closed is False
+    assert provider.asr_ws is new_websocket
+    assert provider.is_processing is True
+    assert conn.reset_count == 0

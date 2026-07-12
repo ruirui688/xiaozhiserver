@@ -47,6 +47,7 @@ import xiaozhi.modules.memory.entity.MemoryRevisionEntity;
 import xiaozhi.modules.memory.entity.MemorySourceEventEntity;
 import xiaozhi.modules.memory.prompt.PowerMemPrompts;
 import xiaozhi.modules.memory.service.MemoryMaintenanceService;
+import xiaozhi.modules.memory.service.impl.maintenance.MemoryMaintenanceOutputParser;
 import xiaozhi.modules.memory.utils.MemoryHelper;
 import xiaozhi.modules.memory.utils.MemorySimilarityUtils;
 import xiaozhi.modules.memory.utils.MemoryTierHelper;
@@ -73,6 +74,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
     private final ModelConfigService modelConfigService;
     private final ModelRuntimeAssembler modelRuntimeAssembler;
     private final AgentChatHistoryService agentChatHistoryService;
+    private final MemoryMaintenanceOutputParser outputParser;
 
     // ===================== 公开方法 =====================
 
@@ -101,7 +103,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
             log.warn("processSessionMemories: Stage 1 提取失败, agentId={}", agentId);
             return 0;
         }
-        JSONArray facts = parseExtractionResult(extractionOutput);
+        JSONArray facts = outputParser.parseExtractionResult(extractionOutput);
         if (facts == null || facts.isEmpty()) {
             return 0;
         }
@@ -120,9 +122,9 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
             String decisionOutput = llmService.generateJson(decisionPrompt, maintenanceModelId);
             if (StringUtils.isBlank(decisionOutput)) continue;
 
-            JSONObject decision = parseDecisionResult(decisionOutput);
+            JSONObject decision = outputParser.parseDecisionResult(decisionOutput);
             if (decision == null) continue;
-            mergeExtractionIntoDecision(factJson, decision);
+            outputParser.mergeExtractionIntoDecision(factJson, decision);
             if (applyMaintenanceDecision(agent, agentId, null, decision, maintenanceModelId, false, null)) count++;
         }
         log.info("processSessionMemories: agentId={}, sessionId={}, factsChanged={}", agentId, sessionId, count);
@@ -259,12 +261,12 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         String prompt = PowerMemPrompts.ACTIVE_FACTS_REVIEW_PROMPT
                 .replace("{active_memories}", buildActiveFactsReviewContext(facts));
         String output = llmService.generateJson(prompt, maintenanceModelId);
-        JSONArray actions = parseActionsResult(output);
+        JSONArray actions = outputParser.parseActionsResult(output);
         if ((actions == null || actions.isEmpty()) && StringUtils.isNotBlank(output)) {
             String repaired = llmService.generateJson(
                     PowerMemPrompts.JSON_REPAIR_PROMPT.replace("{raw_output}", output),
                     maintenanceModelId);
-            actions = parseActionsResult(repaired);
+            actions = outputParser.parseActionsResult(repaired);
         }
         if (actions == null || actions.isEmpty()) {
             return result;
@@ -304,7 +306,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
             log.warn("Stage 1 事实提取失败，agentId: {}", agent.getId());
             return;
         }
-        JSONArray facts = parseExtractionResult(extractionOutput);
+        JSONArray facts = outputParser.parseExtractionResult(extractionOutput);
         if (facts == null || facts.isEmpty()) {
             return;
         }
@@ -326,10 +328,10 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
             if (StringUtils.isBlank(decisionOutput)) {
                 continue;
             }
-            JSONObject decision = parseDecisionResult(decisionOutput);
+            JSONObject decision = outputParser.parseDecisionResult(decisionOutput);
             if (decision == null) continue;
 
-            mergeExtractionIntoDecision(factJson, decision);
+            outputParser.mergeExtractionIntoDecision(factJson, decision);
 
             if (applyMaintenanceDecision(agent, scopeId, sourceEventId, decision, maintenanceModelId, false, null)) {
                 saved++;
@@ -353,7 +355,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                 .replace("{category}", StringUtils.defaultString(category))
                 .replace("{existing_memories}", existingMemories);
         String output = llmService.generateJson(prompt, maintenanceModelId);
-        JSONObject decision = parseDecisionResult(output);
+        JSONObject decision = outputParser.parseDecisionResult(output);
         if (decision == null) {
             throw new IllegalStateException("记忆维护模型未返回有效决策");
         }
@@ -391,7 +393,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                 .replace("{pattern_type}", StringUtils.defaultIfBlank(patternType, "semantic"))
                 .replace("{existing_memories}", existingMemories);
         String output = llmService.generateJson(prompt, maintenanceModelId);
-        JSONObject decision = parseDecisionResult(output);
+        JSONObject decision = outputParser.parseDecisionResult(output);
         if (decision == null) {
             decision = new JSONObject();
             decision.set("action", "NONE");
@@ -509,70 +511,6 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
             }
         }
         return StringUtils.abbreviate(sb.toString(), MemoryHelper.SESSION_MAX_CHARS);
-    }
-
-    private JSONArray parseExtractionResult(String output) {
-        String jsonText = MemoryHelper.extractJsonObject(output);
-        if (StringUtils.isBlank(jsonText)) return null;
-        try {
-            JSONObject root = JSONUtil.parseObj(jsonText);
-            JSONArray arr = root.getJSONArray("facts");
-            if (arr != null) return arr;
-            if (StringUtils.isNotBlank(root.getStr("text")) || StringUtils.isNotBlank(root.getStr("canonical_text"))) {
-                JSONArray single = new JSONArray();
-                single.add(root);
-                return single;
-            }
-        } catch (Exception e) {
-            log.warn("解析 Stage 1 提取结果失败: {}", e.getMessage());
-        }
-        return null;
-    }
-
-    private JSONObject parseDecisionResult(String output) {
-        String jsonText = MemoryHelper.extractJsonObject(output);
-        if (StringUtils.isBlank(jsonText)) return null;
-        try {
-            return JSONUtil.parseObj(jsonText);
-        } catch (Exception e) {
-            log.warn("解析 Stage 2 决策结果失败: {}", e.getMessage());
-            return null;
-        }
-    }
-
-    private JSONArray parseActionsResult(String output) {
-        String jsonText = MemoryHelper.extractJsonObject(output);
-        if (StringUtils.isBlank(jsonText)) return null;
-        try {
-            JSONObject root = JSONUtil.parseObj(jsonText);
-            JSONArray actions = root.getJSONArray("actions");
-            if (actions != null) {
-                return actions;
-            }
-            if (StringUtils.isNotBlank(root.getStr("action"))) {
-                JSONArray single = new JSONArray();
-                single.add(root);
-                return single;
-            }
-        } catch (Exception e) {
-            log.warn("解析维护动作列表失败: {}", e.getMessage());
-        }
-        return null;
-    }
-
-    private void mergeExtractionIntoDecision(JSONObject extraction, JSONObject decision) {
-        if (StringUtils.isBlank(decision.getStr("canonical_text"))) {
-            decision.set("canonical_text", extraction.getStr("text", extraction.getStr("canonical_text")));
-        }
-        if (StringUtils.isBlank(decision.getStr("category"))) {
-            decision.set("category", extraction.getStr("category"));
-        }
-        if (StringUtils.isBlank(decision.getStr("memory_type"))) {
-            decision.set("memory_type", extraction.getStr("memory_type"));
-        }
-        if (decision.get("importance_dimensions") == null && extraction.get("importance_dimensions") != null) {
-            decision.set("importance_dimensions", extraction.get("importance_dimensions"));
-        }
     }
 
     private String buildDecisionPrompt(JSONObject factJson, List<MemoryFactEntity> similarFacts) {
@@ -1105,12 +1043,12 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                 .replace("{existing_memories}", buildRebuildExistingMemoryContext(agent.getId(), scopeId, mode))
                 .replace("{conversation}", conversation);
         String output = llmService.generateJson(prompt, maintenanceModelId);
-        JSONArray arr = parseActionsResult(output);
+        JSONArray arr = outputParser.parseActionsResult(output);
         if ((arr == null || arr.isEmpty()) && StringUtils.isNotBlank(output)) {
             String repaired = llmService.generateJson(
                     PowerMemPrompts.JSON_REPAIR_PROMPT.replace("{raw_output}", output),
                     maintenanceModelId);
-            arr = parseActionsResult(repaired);
+            arr = outputParser.parseActionsResult(repaired);
         }
         if (arr == null || arr.isEmpty()) {
             return List.of();
@@ -1143,12 +1081,12 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                 .replace("{evidence_context}", StringUtils.defaultIfBlank(evidenceContext, "无额外证据"))
                 .replace("{actions_json}", JSONUtil.toJsonStr(Map.of("actions", actions)));
         String output = llmService.generateJson(prompt, maintenanceModelId);
-        JSONArray reviewed = parseActionsResult(output);
+        JSONArray reviewed = outputParser.parseActionsResult(output);
         if ((reviewed == null || reviewed.isEmpty()) && StringUtils.isNotBlank(output)) {
             String repaired = llmService.generateJson(
                     PowerMemPrompts.JSON_REPAIR_PROMPT.replace("{raw_output}", output),
                     maintenanceModelId);
-            reviewed = parseActionsResult(repaired);
+            reviewed = outputParser.parseActionsResult(repaired);
         }
         return reviewed;
     }
@@ -1216,7 +1154,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         }
         String extractionPrompt = PowerMemPrompts.EXTRACTION_PROMPT.replace("{conversation}", conversation);
         String extractionOutput = llmService.generateJson(extractionPrompt, maintenanceModelId);
-        JSONArray facts = parseExtractionResult(extractionOutput);
+        JSONArray facts = outputParser.parseExtractionResult(extractionOutput);
         if (facts == null || facts.isEmpty()) {
             return;
         }
@@ -1228,9 +1166,9 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
             List<MemoryFactEntity> similarFacts = findSimilarFacts(agent.getId(), scopeId,
                     factText + "\n" + conversation, maintenanceModelId);
             String decisionOutput = llmService.generateJson(buildDecisionPrompt(factJson, similarFacts), maintenanceModelId);
-            JSONObject decision = parseDecisionResult(decisionOutput);
+            JSONObject decision = outputParser.parseDecisionResult(decisionOutput);
             if (decision == null) continue;
-            mergeExtractionIntoDecision(factJson, decision);
+            outputParser.mergeExtractionIntoDecision(factJson, decision);
             String action = MemoryHelper.normalizeAction(decision.getStr("action"));
             if (applyMaintenanceDecision(agent, scopeId, null, decision, maintenanceModelId, dryRun, result)) {
                 if ("UPDATE".equals(action) || "DELETE".equals(action)) {
@@ -1255,28 +1193,6 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         } catch (Exception ignored) {
         }
         return content.trim();
-    }
-
-    private JSONArray parseMaintenanceMemories(String output) {
-        String jsonText = MemoryHelper.extractJsonObject(output);
-        if (StringUtils.isBlank(jsonText)) {
-            return null;
-        }
-        try {
-            JSONObject root = JSONUtil.parseObj(jsonText);
-            JSONArray memories = root.getJSONArray("memories");
-            if (memories != null) {
-                return memories;
-            }
-            if (StringUtils.isNotBlank(root.getStr("canonical_text"))) {
-                JSONArray single = new JSONArray();
-                single.add(root);
-                return single;
-            }
-        } catch (Exception e) {
-            log.warn("解析长期记忆维护模型 JSON 失败: {}", e.getMessage());
-        }
-        return null;
     }
 
     // ===================== 共享辅助方法 =====================

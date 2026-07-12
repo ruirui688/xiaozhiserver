@@ -63,6 +63,7 @@ import xiaozhi.modules.knowledge.entity.DocumentEntity;
 import xiaozhi.modules.knowledge.entity.KnowledgeBaseEntity;
 import xiaozhi.modules.knowledge.entity.KnowledgeChunkEntity;
 import xiaozhi.modules.knowledge.rag.KnowledgeBaseAdapter;
+import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeConfigParser;
 import xiaozhi.modules.llm.service.EmbeddingService;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
@@ -82,7 +83,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private static final int MAX_CANDIDATE_LIMIT = 2000;
     private static final int MAX_RETRIEVAL_TERMS = 32;
 
-    private Map<String, Object> config = new HashMap<>();
+    private LocalKnowledgeConfigParser configParser;
     private ObjectMapper objectMapper;
     private KnowledgeChunkDao chunkDao;
     private DocumentDao documentDao;
@@ -120,22 +121,22 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
 
     @Override
     public void initialize(Map<String, Object> config) {
-        this.config = config == null ? new HashMap<>() : new HashMap<>(config);
         this.objectMapper = SpringContextUtils.getBean(ObjectMapper.class);
+        this.configParser = new LocalKnowledgeConfigParser(config, objectMapper);
         this.chunkDao = SpringContextUtils.getBean(KnowledgeChunkDao.class);
         this.documentDao = SpringContextUtils.getBean(DocumentDao.class);
         this.knowledgeBaseDao = SpringContextUtils.getBean(KnowledgeBaseDao.class);
         this.modelConfigService = SpringContextUtils.getBean(ModelConfigService.class);
-        maxChunkChars = getIntConfig("max_chunk_chars", DEFAULT_MAX_CHUNK_CHARS, 200, 20000);
-        llmEnabled = getBooleanConfig("llm_enabled", false);
-        llmModelId = getStringConfig("llm_model_id", "");
-        llmBaseUrl = getStringConfig("llm_base_url", DEFAULT_LLM_BASE_URL);
-        llmApiKey = getStringConfig("llm_api_key", "");
-        llmModel = getStringConfig("llm_model", DEFAULT_LLM_MODEL);
+        maxChunkChars = configParser.getInt("max_chunk_chars", DEFAULT_MAX_CHUNK_CHARS, 200, 20000);
+        llmEnabled = configParser.getBoolean("llm_enabled", false);
+        llmModelId = configParser.getString("llm_model_id", "");
+        llmBaseUrl = configParser.getString("llm_base_url", DEFAULT_LLM_BASE_URL);
+        llmApiKey = configParser.getString("llm_api_key", "");
+        llmModel = configParser.getString("llm_model", DEFAULT_LLM_MODEL);
         applyManagedLlmConfig();
-        llmTimeoutSeconds = getIntConfig("llm_timeout_seconds", DEFAULT_LLM_TIMEOUT_SECONDS, 10, 600);
-        llmMaxInputChars = getIntConfig("llm_max_input_chars", DEFAULT_LLM_MAX_INPUT_CHARS, 500, 20000);
-        llmMaxTokens = getIntConfig("llm_max_tokens", DEFAULT_LLM_MAX_TOKENS, 200, 8000);
+        llmTimeoutSeconds = configParser.getInt("llm_timeout_seconds", DEFAULT_LLM_TIMEOUT_SECONDS, 10, 600);
+        llmMaxInputChars = configParser.getInt("llm_max_input_chars", DEFAULT_LLM_MAX_INPUT_CHARS, 500, 20000);
+        llmMaxTokens = configParser.getInt("llm_max_tokens", DEFAULT_LLM_MAX_TOKENS, 200, 8000);
         // [Issue #1] Initialize EmbeddingService for vector similarity search
         try {
             this.embeddingService = SpringContextUtils.getBean(EmbeddingService.class);
@@ -143,24 +144,28 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             log.warn("本地知识库无法获取 EmbeddingService，向量检索将不可用: {}", e.getMessage());
             this.embeddingService = null;
         }
-        this.embeddingBaseUrl = getStringConfig("embedding_base_url", getStringConfig("llm_base_url", ""));
-        this.embeddingApiKey = getStringConfig("embedding_api_key", getStringConfig("llm_api_key", ""));
-        this.embeddingModel = getStringConfig("embedding_model", "");
+        this.embeddingBaseUrl = configParser.getString(
+                "embedding_base_url", configParser.getString("llm_base_url", ""));
+        this.embeddingApiKey = configParser.getString(
+                "embedding_api_key", configParser.getString("llm_api_key", ""));
+        this.embeddingModel = configParser.getString("embedding_model", "");
         this.embeddingEnabled = embeddingService != null
                 && StringUtils.isNoneBlank(embeddingBaseUrl, embeddingApiKey, embeddingModel)
-                && !isPlaceholderSecret(embeddingApiKey);
+                && !LocalKnowledgeConfigParser.isPlaceholderSecret(embeddingApiKey);
         if (this.embeddingEnabled) {
             log.info("本地知识库向量检索已启用, model={}", embeddingModel);
         }
-        Map<String, Object> retrievalConfig = getMapConfig("retrieval_config");
+        Map<String, Object> retrievalConfig = configParser.getMap("retrieval_config");
         hasRetrievalConfig = retrievalConfig != null && !retrievalConfig.isEmpty();
-        retrievalMode = getStringConfig(retrievalConfig, "mode", getStringConfig("mode", "normal"));
-        searchType = getStringConfig(retrievalConfig, "search_type", getStringConfig("search_type", "semantic"));
-        semanticLevel = getIntConfig(retrievalConfig, "semantic_level", DEFAULT_RETRIEVAL_LEVEL, 1, 5);
-        semanticTopK = getIntConfig(retrievalConfig, "semantic_top_k", DEFAULT_RETRIEVAL_TOP_K, 1, 50);
-        faqThreshold = getFloatConfig(retrievalConfig, "faq_threshold", 1.0F, 0F, 1F);
-        semanticThreshold = getFloatConfig(retrievalConfig, "semantic_threshold", 0.05F, 0F, 1F);
-        rerankEnabled = getBooleanConfig(retrievalConfig, "rerank_enabled", getBooleanConfig("rerank_enabled", false));
+        retrievalMode = configParser.getString(retrievalConfig, "mode", configParser.getString("mode", "normal"));
+        searchType = configParser.getString(
+                retrievalConfig, "search_type", configParser.getString("search_type", "semantic"));
+        semanticLevel = configParser.getInt(retrievalConfig, "semantic_level", DEFAULT_RETRIEVAL_LEVEL, 1, 5);
+        semanticTopK = configParser.getInt(retrievalConfig, "semantic_top_k", DEFAULT_RETRIEVAL_TOP_K, 1, 50);
+        faqThreshold = configParser.getFloat(retrievalConfig, "faq_threshold", 1.0F, 0F, 1F);
+        semanticThreshold = configParser.getFloat(retrievalConfig, "semantic_threshold", 0.05F, 0F, 1F);
+        rerankEnabled = configParser.getBoolean(
+                retrievalConfig, "rerank_enabled", configParser.getBoolean("rerank_enabled", false));
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory();
         factory.setReadTimeout(java.time.Duration.ofSeconds(llmTimeoutSeconds));
         this.llmRestTemplate = new RestTemplate(factory);
@@ -292,7 +297,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     @Override
     public RetrievalDTO.ResultVO retrievalTest(RetrievalDTO.TestReq req) {
         String question = StringUtils.defaultString(req.getQuestion());
-        int pageSize = clamp(req.getPageSize() == null ? 10 : req.getPageSize(), 1, 100);
+        int pageSize = LocalKnowledgeConfigParser.clamp(req.getPageSize() == null ? 10 : req.getPageSize(), 1, 100);
         int resultLimit = resolveResultLimit(req, pageSize);
         Set<String> terms = tokenize(question.toLowerCase());
         List<String> candidateTerms = selectCandidateTerms(terms);
@@ -777,7 +782,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
 
     private List<LocalChunk> refineChunksWithLlm(List<LocalChunk> chunks) {
         if (!llmEnabled || StringUtils.isAnyBlank(llmBaseUrl, llmApiKey, llmModel)
-                || isPlaceholderSecret(llmApiKey) || chunks.isEmpty()) {
+                || LocalKnowledgeConfigParser.isPlaceholderSecret(llmApiKey) || chunks.isEmpty()) {
             return chunks;
         }
         List<LocalChunk> refined = new ArrayList<>();
@@ -836,7 +841,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
 
     private boolean llmAvailable() {
         return llmEnabled && StringUtils.isNoneBlank(llmBaseUrl, llmApiKey, llmModel)
-                && !isPlaceholderSecret(llmApiKey);
+                && !LocalKnowledgeConfigParser.isPlaceholderSecret(llmApiKey);
     }
 
     private List<String> splitLlmInputSections(String text) {
@@ -1164,7 +1169,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private int resolveResultLimit(RetrievalDTO.TestReq req, int pageSize) {
         int limit = pageSize;
         if (req.getTopK() != null && req.getTopK() > 0) {
-            limit = Math.min(limit, clamp(req.getTopK(), 1, 100));
+            limit = Math.min(limit, LocalKnowledgeConfigParser.clamp(req.getTopK(), 1, 100));
         } else if (hasRetrievalConfig) {
             limit = Math.min(limit, semanticTopK);
         }
@@ -1183,7 +1188,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         if (rerankEnabled) {
             baseLimit = Math.max(baseLimit, resultLimit * 30);
         }
-        return clamp(baseLimit, resultLimit, MAX_CANDIDATE_LIMIT);
+        return LocalKnowledgeConfigParser.clamp(baseLimit, resultLimit, MAX_CANDIDATE_LIMIT);
     }
 
     private boolean shouldKeepScore(String question, float score) {
@@ -1399,111 +1404,6 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
 
     private String getCell(List<String> row, int index) {
         return index >= 0 && index < row.size() ? row.get(index) : "";
-    }
-
-    private String getStringConfig(String key, String defaultValue) {
-        Object value = config.get(key);
-        return StringUtils.defaultIfBlank(value == null ? null : value.toString(), defaultValue);
-    }
-
-    private String getStringConfig(Map<String, Object> source, String key, String defaultValue) {
-        if (source == null) {
-            return defaultValue;
-        }
-        Object value = source.get(key);
-        return StringUtils.defaultIfBlank(value == null ? null : value.toString(), defaultValue);
-    }
-
-    private boolean getBooleanConfig(String key, boolean defaultValue) {
-        Object value = config.get(key);
-        return parseBooleanConfig(value, defaultValue);
-    }
-
-    private boolean getBooleanConfig(Map<String, Object> source, String key, boolean defaultValue) {
-        Object value = source == null ? null : source.get(key);
-        return parseBooleanConfig(value, defaultValue);
-    }
-
-    private boolean parseBooleanConfig(Object value, boolean defaultValue) {
-        if (value == null) {
-            return defaultValue;
-        }
-        if (value instanceof Boolean bool) {
-            return bool;
-        }
-        String text = value.toString().trim();
-        if (StringUtils.equalsAnyIgnoreCase(text, "true", "1", "yes", "y", "on")) {
-            return true;
-        }
-        if (StringUtils.equalsAnyIgnoreCase(text, "false", "0", "no", "n", "off")) {
-            return false;
-        }
-        return defaultValue;
-    }
-
-    private int getIntConfig(String key, int defaultValue, int min, int max) {
-        Object value = config.get(key);
-        return parseIntConfig(key, value, defaultValue, min, max);
-    }
-
-    private int getIntConfig(Map<String, Object> source, String key, int defaultValue, int min, int max) {
-        Object value = source == null ? null : source.get(key);
-        return parseIntConfig(key, value, defaultValue, min, max);
-    }
-
-    private int parseIntConfig(String key, Object value, int defaultValue, int min, int max) {
-        if (value == null) {
-            return defaultValue;
-        }
-        try {
-            int parsed = Integer.parseInt(value.toString());
-            return Math.max(min, Math.min(max, parsed));
-        } catch (NumberFormatException e) {
-            log.warn("本地知识库 {} 配置无效，使用默认值 {}", key, defaultValue);
-            return defaultValue;
-        }
-    }
-
-    private int clamp(int value, int min, int max) {
-        return Math.max(min, Math.min(max, value));
-    }
-
-    private float getFloatConfig(Map<String, Object> source, String key, float defaultValue, float min, float max) {
-        Object value = source == null ? null : source.get(key);
-        if (value == null) {
-            return defaultValue;
-        }
-        try {
-            float parsed = Float.parseFloat(value.toString());
-            return Math.max(min, Math.min(max, parsed));
-        } catch (NumberFormatException e) {
-            log.warn("本地知识库 {} 配置无效，使用默认值 {}", key, defaultValue);
-            return defaultValue;
-        }
-    }
-
-    private Map<String, Object> getMapConfig(String key) {
-        Object value = config.get(key);
-        if (value instanceof Map<?, ?> map) {
-            Map<String, Object> result = new HashMap<>();
-            map.forEach((k, v) -> result.put(String.valueOf(k), v));
-            return result;
-        }
-        if (value instanceof String text && StringUtils.isNotBlank(text)) {
-            try {
-                return objectMapper.readValue(text, new TypeReference<Map<String, Object>>() {
-                });
-            } catch (Exception e) {
-                log.warn("解析本地知识库 {} 配置失败，忽略检索扩展配置: {}", key, e.getMessage());
-            }
-        }
-        return Collections.emptyMap();
-    }
-
-    private boolean isPlaceholderSecret(String value) {
-        String text = StringUtils.trimToEmpty(value);
-        return StringUtils.equalsAnyIgnoreCase(text, "your_api_key", "your_key", "api_key", "none")
-                || text.contains("你的");
     }
 
     private <T> List<T> paginate(List<T> items, int page, int pageSize) {
