@@ -118,29 +118,30 @@ server.voiceprint_similarity_threshold = 0.4
 
 ## 4. 智能体绑定规则
 
-在智能体的“声纹识别”页面，从该智能体自己的聊天音频中选择 WAV 来源，填写姓名和描述后保存。
+在智能体的“声纹识别”页面，从该智能体自己的聊天音频中选择 2 到 5 段 WAV 注册样本，填写姓名和描述后保存。
 
 服务端规则：
 
-1. 创建前确认音频属于当前智能体。
+1. 创建前确认每段音频都属于当前智能体。
 2. 当前智能体已有 5 条时直接拒绝第 6 条。
-3. 使用 `user_id=agentId` 调用远程注册接口。
-4. `speaker_id` 使用本地声纹记录 UUID。
-5. 同一智能体内先做重复声纹检测，避免同一个人重复占用名额。
-6. 删除时同时删除本地记录和远程特征；远程失败会回滚本地删除，避免孤儿声纹占用额度。
+3. 每次注册或替换样本必须提交 2 到 5 段样本；manager-api 要求每段 WAV 可解析且时长为 3 到 30 秒。
+4. 使用 `user_id=agentId` 和多段 `files` 调用远程注册接口，由 voiceprint-api 聚合多段 embedding。
+5. `speaker_id` 使用本地声纹记录 UUID。
+6. 同一智能体内先做重复声纹检测，避免同一个人重复占用名额。
+7. 删除时同时删除本地记录和远程特征；远程失败会回滚本地删除，避免孤儿声纹占用额度。
 
 Web 和 Mobile 页面均显示 `已绑定数/5`。前端限制只用于交互提示，最终约束由 manager-api 和 voiceprint-api 共同保证。
 
 ## 5. 实时识别链路
 
-xiaozhi-server 假设一句话内只有一个说话人。音频到达后，完整语音持续进入 ASR；声纹链路只累计 VAD 判定为有效人声的前 1 秒：
+xiaozhi-server 假设一句话内只有一个说话人。音频到达后，完整语音持续进入 ASR；声纹链路只累计 VAD 判定为有效人声的前 N 秒，默认 1.0 秒。全模块部署可在参数管理中调整 `server.voiceprint_sample_seconds`，运行时限制范围为 0.5 到 5.0 秒：
 
 ```text
 设备持续上传音频
   ├─ 完整音频持续进入 ASR
-  └─ 仅累计前 1.0 秒有效人声
-       ├─ 不足 1.0 秒：句末直接跳过声纹
-       └─ 达到 1.0 秒：立即异步调用一次 /voiceprint/identify
+  └─ 仅累计前 N 秒有效人声
+       ├─ 不足 N 秒：句末直接跳过声纹
+       └─ 达到 N 秒：立即异步调用一次 /voiceprint/identify
             └─ 后续音频不再进入本句声纹请求
 
 ASR 得到最终文本
@@ -171,7 +172,7 @@ voiceprint:
       user_id: agent-id
 ```
 
-Token 会在 Python 配置日志中脱敏。`timeout_seconds` 是远程请求自身的保护上限；实时对话真正追加的句末等待由更短的 `result_wait_ms` 控制，默认最多 300ms。
+Token 会在 Python 配置日志中脱敏。`sample_seconds` 来自参数管理的 `server.voiceprint_sample_seconds`，默认 1.0；`timeout_seconds` 是远程请求自身的保护上限；实时对话真正追加的句末等待由更短的 `result_wait_ms` 控制，默认最多 300ms。
 
 识别出的身份只在本会话首次进入 LLM 的用户消息和 system 上下文；后续轮次依赖对话历史，不再每轮重复姓名，避免模型机械地反复称呼用户。
 
@@ -190,7 +191,9 @@ Token 会在 Python 配置日志中脱敏。`timeout_seconds` 是远程请求自
 - `speaker_id` 是长期记忆的稳定关联键，显示姓名只用于界面展示。
 - 新抽取的事实会在 `payload` 中保存 `speaker_id` 和姓名快照。
 - 当前说话人只召回自己的专属记忆和没有身份归属的共享记忆，不会读取其他声纹用户的专属事实。
-- 不足 1 秒、识别失败或陌生人本轮没有可信 `speaker_id`，因此只使用共享记忆。
+- 不足 `server.voiceprint_sample_seconds`、识别失败或陌生人本轮没有可信 `speaker_id`，因此只使用共享记忆。
+
+聊天记录下载会生成 ZIP 包，不再只是纯文本。包内包含 `history.txt`、`metadata.json` 和有权限导出的 `audio/` WAV 文件；`metadata.json` 保留原始 `content`、解析后的声纹识别结果、音频文件路径、音频字节数、WAV 时长和相邻消息时间差。当前历史表没有持久化完整 ASR/LLM/TTS 分段延时链路，因此下载包只能给出消息时间差和音频时长，并在 metadata 中明确标注该限制。
 
 ## 6. 历史数据升级
 
@@ -248,7 +251,7 @@ curl -H "Authorization: Bearer <token>" \
 5. 真实设备能识别本人，陌生人返回未知说话人。
 6. 声纹服务器断开或超时时，ASR/LLM 对话仍能继续。
 7. 日志中没有原始 Authorization、Token 或带密钥 URL。
-8. 不足 1 秒的短句不调用声纹，长句只上传前 1 秒有效人声。
+8. 不足 `server.voiceprint_sample_seconds` 的短句不调用声纹，长句只上传前 N 秒有效人声，默认 1 秒。
 9. 智能体未绑定声纹时，声纹服务没有识别请求。
 
 不要把真实外部调用、长期服务启动或生产部署作为默认自动化验证；生产联调需在发布和备份后单独执行。

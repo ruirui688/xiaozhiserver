@@ -264,4 +264,7 @@ public interface ErrorCode {
     // 声纹远程服务升级
     int AGENT_VOICEPRINT_LIMIT_REACHED = 10205; // 每个智能体最多绑定5个声纹
     int VOICEPRINT_TOKEN_NOT_CONFIGURED = 10206; // 声纹服务Token未配置
+    int VOICEPRINT_SAMPLE_COUNT_INVALID = 10207; // 声纹注册样本数量必须为2到5段
+    int VOICEPRINT_AUDIO_FORMAT_INVALID = 10208; // 声纹注册音频必须是可解析的WAV文件
+    int VOICEPRINT_AUDIO_DURATION_INVALID = 10209; // 声纹注册音频时长不符合要求
 }

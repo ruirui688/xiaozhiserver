@@ -196,7 +196,7 @@
           </div>
         </div>
 
-        <el-select v-model="currentWorkspaceId" class="workspace-select" size="mini" @change="handleWorkspaceChange">
+        <el-select v-model="currentWorkspaceId" class="workspace-select" size="mini" placeholder="工作空间加载中" @change="handleWorkspaceChange">
           <el-option v-for="item in workspaceList" :key="item.id" :label="item.name" :value="item.id" />
         </el-select>
 
@@ -245,7 +245,7 @@ export default {
       searchHistory: [],
       showHistory: false,
       workspaceList: [],
-      currentWorkspaceId: localStorage.getItem("currentWorkspaceId") || "",
+      currentWorkspaceId: "",
       SEARCH_HISTORY_KEY: "xiaozhi_search_history",
       MAX_HISTORY_COUNT: 3,
       // Cascader 配置
@@ -325,8 +325,12 @@ export default {
       Api.workspace.list(({ data }) => {
         if (data && data.code === 0 && Array.isArray(data.data)) {
           this.workspaceList = data.data;
-          const exists = this.workspaceList.some(item => item.id === this.currentWorkspaceId);
-          if (!this.currentWorkspaceId || !exists) {
+          const savedWorkspaceId = localStorage.getItem("currentWorkspaceId") || "";
+          const targetWorkspaceId = this.currentWorkspaceId || savedWorkspaceId;
+          const exists = this.workspaceList.some(item => item.id === targetWorkspaceId);
+          if (targetWorkspaceId && exists) {
+            this.currentWorkspaceId = targetWorkspaceId;
+          } else {
             const current = this.workspaceList[0];
             if (current) {
               this.currentWorkspaceId = current.id;

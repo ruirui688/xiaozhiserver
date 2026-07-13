@@ -1,14 +1,16 @@
 package xiaozhi.modules.agent.controller;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.shiro.authz.annotation.RequiresPermissions;
@@ -34,12 +36,14 @@ import xiaozhi.common.redis.RedisKeys;
 import xiaozhi.common.redis.RedisUtils;
 import xiaozhi.common.user.UserDetail;
 import xiaozhi.common.utils.DateUtils;
+import xiaozhi.common.utils.JsonUtils;
 import xiaozhi.common.utils.MessageUtils;
 import xiaozhi.common.utils.Result;
 import xiaozhi.modules.agent.dto.AgentChatHistoryDTO;
 import xiaozhi.modules.agent.dto.AgentChatHistoryReportDTO;
 import xiaozhi.modules.agent.dto.AgentChatSessionDTO;
 import xiaozhi.modules.agent.entity.AgentEntity;
+import xiaozhi.modules.agent.service.AgentChatAudioService;
 import xiaozhi.modules.agent.service.AgentChatHistoryService;
 import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.agent.service.biz.AgentChatHistoryBizService;
@@ -54,6 +58,7 @@ import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 public class AgentChatHistoryController {
     private final AgentChatHistoryBizService agentChatHistoryBizService;
     private final AgentChatHistoryService agentChatHistoryService;
+    private final AgentChatAudioService agentChatAudioService;
     private final AgentService agentService;
     private final RedisUtils redisUtils;
     private final WorkspacePermissionService workspacePermissionService;
@@ -249,48 +254,282 @@ public class AgentChatHistoryController {
      */
     private void downloadChatHistory(String agentId, List<String> sessionIds, HttpServletResponse response) {
         try {
-            // 设置响应头
-            response.setContentType("text/plain;charset=UTF-8");
-            String fileName = URLEncoder.encode("history.txt", StandardCharsets.UTF_8.toString());
+            response.setContentType("application/zip");
+            String fileName = URLEncoder.encode("chat-history-package.zip", StandardCharsets.UTF_8.toString());
             response.setHeader("Content-Disposition", "attachment;filename=" + fileName);
 
-            // 获取聊天记录并写入响应流
-            try (OutputStream out = response.getOutputStream()) {
-                // 为每个会话生成聊天记录
-                for (String sessionId : sessionIds) {
-                    // 获取该会话的所有聊天记录
+            try (ZipOutputStream zip = new ZipOutputStream(response.getOutputStream(), StandardCharsets.UTF_8)) {
+                StringBuilder text = new StringBuilder();
+                List<Map<String, Object>> sessions = new ArrayList<>();
+                for (int i = 0; i < sessionIds.size(); i++) {
+                    String sessionId = sessionIds.get(i);
                     List<AgentChatHistoryDTO> chatHistoryList = agentChatHistoryService
                             .getChatHistoryBySessionId(agentId, sessionId);
-
-                    // 从聊天记录中获取第一条消息的创建时间作为会话时间
-                    if (!chatHistoryList.isEmpty()) {
-                        Date firstMessageTime = chatHistoryList.get(0).getCreatedAt();
-                        String sessionTimeStr = DateUtils.format(firstMessageTime, DateUtils.DATE_TIME_PATTERN);
-                        out.write((sessionTimeStr + "\n").getBytes(StandardCharsets.UTF_8));
-                    }
-
-                    for (AgentChatHistoryDTO message : chatHistoryList) {
-                        String role = message.getChatType() == 1 ? MessageUtils.getMessage(ErrorCode.CHAT_ROLE_USER)
-                                : MessageUtils.getMessage(ErrorCode.CHAT_ROLE_AGENT);
-                        String direction = message.getChatType() == 1 ? ">>" : "<<";
-                        Date messageTime = message.getCreatedAt();
-                        String messageTimeStr = DateUtils.format(messageTime, DateUtils.DATE_TIME_PATTERN);
-                        String content = message.getContent();
-
-                        String line = "[" + role + "]-[" + messageTimeStr + "]" + direction + ":" + content + "\n";
-                        out.write(line.getBytes(StandardCharsets.UTF_8));
-                    }
-
-                    // 会话之间添加空行分隔
-                    if (sessionIds.indexOf(sessionId) < sessionIds.size() - 1) {
-                        out.write("\n".getBytes(StandardCharsets.UTF_8));
+                    sessions.add(buildSessionExport(agentId, sessionId, chatHistoryList, text, zip));
+                    if (i < sessionIds.size() - 1) {
+                        text.append('\n');
                     }
                 }
 
-                out.flush();
+                addZipEntry(zip, "history.txt", text.toString().getBytes(StandardCharsets.UTF_8));
+                addZipEntry(zip, "metadata.json", JsonUtils.toJsonString(buildMetadata(agentId, sessions))
+                        .getBytes(StandardCharsets.UTF_8));
+                addZipEntry(zip, "README.txt", buildReadme().getBytes(StandardCharsets.UTF_8));
+
+                zip.finish();
             }
         } catch (IOException e) {
             log.error("Failed to export chat history", e);
+        }
+    }
+
+    private Map<String, Object> buildSessionExport(
+            String agentId,
+            String sessionId,
+            List<AgentChatHistoryDTO> messages,
+            StringBuilder text,
+            ZipOutputStream zip) throws IOException {
+        Map<String, Object> session = new LinkedHashMap<>();
+        session.put("session_id", sessionId);
+        session.put("message_count", messages.size());
+        List<Map<String, Object>> exportedMessages = new ArrayList<>();
+        session.put("messages", exportedMessages);
+
+        if (!messages.isEmpty()) {
+            Date firstMessageTime = messages.get(0).getCreatedAt();
+            session.put("started_at", formatDate(firstMessageTime));
+            text.append(formatDate(firstMessageTime)).append('\n');
+        }
+
+        Date previousMessageTime = null;
+        int index = 1;
+        for (AgentChatHistoryDTO message : messages) {
+            String role = message.getChatType() == 1 ? MessageUtils.getMessage(ErrorCode.CHAT_ROLE_USER)
+                    : MessageUtils.getMessage(ErrorCode.CHAT_ROLE_AGENT);
+            String direction = message.getChatType() == 1 ? ">>" : "<<";
+            String messageTimeStr = formatDate(message.getCreatedAt());
+            MessageContent content = parseMessageContent(message.getContent());
+            AudioExport audio = exportMessageAudio(agentId, sessionId, index, message, zip);
+            long gapMs = previousMessageTime == null || message.getCreatedAt() == null
+                    ? 0
+                    : message.getCreatedAt().getTime() - previousMessageTime.getTime();
+
+            text.append("[")
+                    .append(role)
+                    .append("]-[")
+                    .append(messageTimeStr)
+                    .append("]")
+                    .append(direction)
+                    .append(":")
+                    .append(content.displayText())
+                    .append('\n');
+            if (content.speakerName() != null || content.speakerId() != null || content.speakerScore() != null) {
+                text.append("  voiceprint: speaker=")
+                        .append(StringUtils.defaultString(content.speakerName()))
+                        .append(", speaker_id=")
+                        .append(StringUtils.defaultString(content.speakerId()))
+                        .append(", score=")
+                        .append(content.speakerScore() == null ? "" : content.speakerScore())
+                        .append('\n');
+            }
+            if (StringUtils.isNotBlank(audio.path())) {
+                text.append("  audio: ").append(audio.path()).append('\n');
+            }
+
+            exportedMessages.add(buildMessageMetadata(index, role, message, content, audio, gapMs));
+            previousMessageTime = message.getCreatedAt();
+            index++;
+        }
+
+        return session;
+    }
+
+    private Map<String, Object> buildMessageMetadata(
+            int index,
+            String role,
+            AgentChatHistoryDTO message,
+            MessageContent content,
+            AudioExport audio,
+            long gapMs) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("index", index);
+        metadata.put("role", role);
+        metadata.put("chat_type", message.getChatType());
+        metadata.put("created_at", formatDate(message.getCreatedAt()));
+        metadata.put("mac_address", message.getMacAddress());
+        metadata.put("content", content.displayText());
+        metadata.put("raw_content", message.getContent());
+        metadata.put("voiceprint", content.voiceprintMetadata());
+        metadata.put("audio_id", message.getAudioId());
+        metadata.put("audio_file", audio.path());
+        metadata.put("audio_bytes", audio.bytes());
+        metadata.put("audio_duration_ms", audio.durationMs());
+        metadata.put("previous_message_gap_ms", gapMs);
+        metadata.put("latency_note", "历史表未持久化 ASR/LLM/TTS 分段耗时；这里只包含消息上报时间差和音频时长。");
+        return metadata;
+    }
+
+    private Map<String, Object> buildMetadata(String agentId, List<Map<String, Object>> sessions) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("agent_id", agentId);
+        metadata.put("exported_at", formatDate(new Date()));
+        metadata.put("format", "chat-history-package-v1");
+        metadata.put("sessions", sessions);
+        metadata.put("latency_coverage", "当前持久化数据只支持消息时间、相邻消息间隔、音频时长；完整 ASR/LLM/TTS 链路需后续新增上报字段。");
+        return metadata;
+    }
+
+    private AudioExport exportMessageAudio(
+            String agentId,
+            String sessionId,
+            int index,
+            AgentChatHistoryDTO message,
+            ZipOutputStream zip) throws IOException {
+        if (StringUtils.isBlank(message.getAudioId())
+                || !agentChatHistoryService.isAudioOwnedByAgent(message.getAudioId(), agentId)) {
+            return AudioExport.empty();
+        }
+        byte[] audio = agentChatAudioService.getAudio(message.getAudioId());
+        if (audio == null || audio.length == 0) {
+            return AudioExport.empty();
+        }
+        String role = message.getChatType() == 1 ? "user" : message.getChatType() == 2 ? "assistant" : "tool";
+        String path = "audio/" + safeFileName(sessionId) + "/" + String.format("%03d_%s_%s.wav",
+                index,
+                role,
+                safeFileName(message.getAudioId()));
+        addZipEntry(zip, path, audio);
+        return new AudioExport(path, audio.length, wavDurationMs(audio));
+    }
+
+    private void addZipEntry(ZipOutputStream zip, String path, byte[] data) throws IOException {
+        ZipEntry entry = new ZipEntry(path);
+        zip.putNextEntry(entry);
+        zip.write(data);
+        zip.closeEntry();
+    }
+
+    private MessageContent parseMessageContent(String rawContent) {
+        if (StringUtils.isBlank(rawContent)) {
+            return new MessageContent(rawContent, rawContent, null, null, null);
+        }
+        try {
+            Object parsed = JsonUtils.parseObject(rawContent, Object.class);
+            if (parsed instanceof Map<?, ?> map && map.get("content") != null) {
+                Object speakerScore = map.get("speaker_score");
+                return new MessageContent(
+                        rawContent,
+                        String.valueOf(map.get("content")),
+                        stringValue(map.get("speaker")),
+                        stringValue(map.get("speaker_id")),
+                        doubleValue(speakerScore));
+            }
+            return new MessageContent(rawContent, rawContent, null, null, null);
+        } catch (Exception ignored) {
+            return new MessageContent(rawContent, rawContent, null, null, null);
+        }
+    }
+
+    private String stringValue(Object value) {
+        String text = value == null ? null : String.valueOf(value);
+        return StringUtils.isBlank(text) ? null : text;
+    }
+
+    private Double doubleValue(Object value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Double.valueOf(String.valueOf(value));
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private long wavDurationMs(byte[] audio) {
+        if (audio == null || audio.length < 44
+                || audio[0] != 'R' || audio[1] != 'I' || audio[2] != 'F' || audio[3] != 'F') {
+            return 0L;
+        }
+        int channels = littleEndianUnsignedShort(audio, 22);
+        int sampleRate = littleEndianInt(audio, 24);
+        int bitsPerSample = littleEndianUnsignedShort(audio, 34);
+        int dataIndex = findDataChunk(audio);
+        if (channels <= 0 || sampleRate <= 0 || bitsPerSample <= 0 || dataIndex < 0 || dataIndex + 8 > audio.length) {
+            return 0L;
+        }
+        int dataSize = littleEndianInt(audio, dataIndex + 4);
+        double bytesPerSecond = sampleRate * channels * (bitsPerSample / 8.0);
+        return bytesPerSecond <= 0 ? 0L : Math.round(dataSize * 1000.0 / bytesPerSecond);
+    }
+
+    private int findDataChunk(byte[] audio) {
+        for (int i = 12; i <= audio.length - 8; i++) {
+            if (audio[i] == 'd' && audio[i + 1] == 'a' && audio[i + 2] == 't' && audio[i + 3] == 'a') {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private int littleEndianUnsignedShort(byte[] bytes, int offset) {
+        if (offset + 1 >= bytes.length) {
+            return 0;
+        }
+        return (bytes[offset] & 0xff) | ((bytes[offset + 1] & 0xff) << 8);
+    }
+
+    private int littleEndianInt(byte[] bytes, int offset) {
+        if (offset + 3 >= bytes.length) {
+            return 0;
+        }
+        return (bytes[offset] & 0xff)
+                | ((bytes[offset + 1] & 0xff) << 8)
+                | ((bytes[offset + 2] & 0xff) << 16)
+                | ((bytes[offset + 3] & 0xff) << 24);
+    }
+
+    private String formatDate(Date date) {
+        return date == null ? "" : DateUtils.format(date, DateUtils.DATE_TIME_PATTERN);
+    }
+
+    private String safeFileName(String value) {
+        if (StringUtils.isBlank(value)) {
+            return "unknown";
+        }
+        return value.replaceAll("[^a-zA-Z0-9._-]", "_");
+    }
+
+    private String buildReadme() {
+        return """
+                chat-history-package.zip 内容说明
+
+                history.txt: 便于阅读的聊天文本，包含声纹识别摘要和音频文件路径。
+                metadata.json: 结构化原始数据，包含原始 content、声纹识别结果、音频时长和相邻消息间隔。
+                audio/: 用户与智能体消息对应的 WAV 音频文件；只有历史记录中存在 audio_id 的消息才会导出。
+
+                注意：当前历史表没有持久化完整 ASR/LLM/TTS 分段延时链路。metadata.json 中的 latency_note 和 latency_coverage 只基于现有记录说明可用范围，完整链路需后续扩展上报字段。
+                """;
+    }
+
+    private record MessageContent(
+            String rawContent,
+            String displayText,
+            String speakerName,
+            String speakerId,
+            Double speakerScore) {
+        Map<String, Object> voiceprintMetadata() {
+            Map<String, Object> voiceprint = new LinkedHashMap<>();
+            voiceprint.put("speaker", speakerName);
+            voiceprint.put("speaker_id", speakerId);
+            voiceprint.put("speaker_score", speakerScore);
+            return voiceprint;
+        }
+    }
+
+    private record AudioExport(String path, Integer bytes, Long durationMs) {
+        static AudioExport empty() {
+            return new AudioExport(null, null, null);
         }
     }
 

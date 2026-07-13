@@ -131,7 +131,7 @@ manager-web 模型配置弹窗
 WebSocket / MQTT 收到音频
   -> VAD 判断语音段和结束点
   ├-> 完整音频持续交给 ASR 转文字
-  └-> 已绑定声纹时，仅累计前 1 秒有效人声并提前异步识别
+  └-> 已绑定声纹时，仅累计前 N 秒有效人声并提前异步识别（默认 1 秒，可由 server.voiceprint_sample_seconds 调整）
   -> 句末合并 ASR 文本与声纹结果（声纹最多追加等待 300ms）
   -> 语义控制中枢处理高频控制、状态上下文和拒识
   -> 未处理时进入 Intent 或 function_call 判断工具
