@@ -12,8 +12,14 @@
       </div>
 
       <el-form :model="form" :rules="rules" ref="form" label-width="auto" label-position="left" class="param-form">
-        <el-form-item :label="$t('voicePrintDialog.voicePrintVector')" prop="audioId" class="form-item">
-          <el-select v-model="form.audioId" :placeholder="$t('voicePrintDialog.selectVoiceMessage')" class="custom-select">
+        <el-form-item :label="$t('voicePrintDialog.voicePrintVector')" prop="audioIds" class="form-item">
+          <el-select
+            v-model="form.audioIds"
+            multiple
+            collapse-tags
+            :multiple-limit="5"
+            :placeholder="$t('voicePrintDialog.selectVoiceMessage')"
+            class="custom-select">
             <el-option v-for="item in valueTypeOptions" :key="item.audioId" :label="item.content" :value="item.audioId">
               <span style="float: left">{{ item.content }}</span>
               <span style="float: right; color: #8492a6; font-size: 13px">
@@ -67,6 +73,7 @@ export default {
       default: () => ({
         id: null,
         audioId: '',
+        audioIds: [],
         sourceName: '',
         introduce: ''
       })
@@ -88,13 +95,25 @@ export default {
         sourceName: [
           { required: true, message: '请输入名称', trigger: "blur" }
         ],
-        audioId: [
-          { required: true, message: '请选择音频向量', trigger: "change" }
+        audioIds: [
+          { validator: (rule, value, callback) => this.validateAudioIds(value, callback), trigger: "change" }
         ]
       }
     };
   },
   methods: {
+    validateAudioIds(value, callback) {
+      const count = Array.isArray(value) ? value.length : 0;
+      if (this.form.id && count === 0) {
+        callback();
+        return;
+      }
+      if (count < 2 || count > 5) {
+        callback(new Error(this.$t('voicePrintDialog.requiredAudioVector')));
+        return;
+      }
+      callback();
+    },
     getAudioIconClass(audioId) {
       if (this.playingAudioId === audioId) {
         return 'el-icon-loading';
@@ -167,8 +186,29 @@ export default {
         }))
       }
     },
+    'form.audioIds': {
+      handler(newVal) {
+        if (!Array.isArray(newVal) || newVal.length === 0) {
+          return;
+        }
+        newVal.forEach(audioId => {
+          if (audioId == null || audioId == "") {
+            return;
+          }
+          if (this.valueTypeOptions.some(item => item.audioId === audioId)) {
+            return;
+          }
+          api.agent.getContentByAudioId(audioId, ((data) => {
+            this.valueTypeOptions.push({
+              audioId, content: data.data.data
+            })
+          }))
+        });
+      },
+      deep: true
+    },
     'form.audioId'(newVal) {
-      if (newVal == null || newVal == "") {
+      if (newVal == null || newVal == "" || Array.isArray(this.form.audioIds)) {
         return
       }
       if (this.valueTypeOptions.some(item => item.audioId === newVal)) {

@@ -66,6 +66,7 @@ export default {
             paramForm: {
                 id: null,
                 audioId: '',
+                audioIds: [],
                 sourceName: '',
                 introduce: ''
             },
@@ -114,6 +115,7 @@ export default {
             this.paramForm = {
                 id: null,
                 audioId: '',
+                audioIds: [],
                 sourceName: '',
                 introduce: ''
             };
@@ -121,14 +123,26 @@ export default {
         },
         editVoicePrint(row) {
             this.dialogTitle = this.$t('voicePrint.editSpeaker');
-            this.paramForm = { ...row };
+            this.paramForm = {
+                ...row,
+                audioId: '',
+                audioIds: []
+            };
             this.dialogVisible = true;
         },
 
         handleSubmit({ form, done }) {
             if (form.id) {
                 // 编辑
-                Api.agent.updateAgentVoicePrint(form, ({ data }) => {
+                const payload = {
+                    id: form.id,
+                    sourceName: form.sourceName,
+                    introduce: form.introduce
+                };
+                if (Array.isArray(form.audioIds) && form.audioIds.length > 0) {
+                    payload.audioIds = form.audioIds;
+                }
+                Api.agent.updateAgentVoicePrint(payload, ({ data }) => {
                     if (data.code === 0) {
                         this.$message.success({
                             message: this.$t('voicePrint.updateSuccess'),
@@ -136,6 +150,11 @@ export default {
                         });
                         this.dialogVisible = false;
                         this.fetchVoicePrints();
+                    } else {
+                        this.$message.error({
+                            message: data.msg || this.$t('voicePrint.fetchFailed'),
+                            showClose: true
+                        });
                     }
                     done && done();
                 });
@@ -143,7 +162,7 @@ export default {
                 // 新增
                 Api.agent.addAgentVoicePrint({
                     agentId: this.agentId,
-                    audioId: form.audioId,
+                    audioIds: form.audioIds,
                     sourceName: form.sourceName,
                     introduce: form.introduce
                 }, ({ data }) => {
@@ -154,6 +173,11 @@ export default {
                         });
                         this.dialogVisible = false;
                         this.fetchVoicePrints();
+                    } else {
+                        this.$message.error({
+                            message: data.msg || this.$t('voicePrint.fetchFailed'),
+                            showClose: true
+                        });
                     }
                     done && done();
                 });
