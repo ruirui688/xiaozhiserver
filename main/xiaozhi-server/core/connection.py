@@ -43,6 +43,7 @@ from config.manage_api_client import (
     DeviceNotFoundException,
     DeviceBindException,
     generate_and_save_chat_title,
+    get_managed_memory_query_timeout,
     query_managed_memory,
     trigger_session_memory_processing,
 )
@@ -753,6 +754,12 @@ class ConnectionHandler:
             self.device_id,
             self.client_ip,
             emoji_enabled=(self.features or {}).get("emoji", True),
+            available_tools=(
+                self.func_handler.get_functions()
+                if self.intent_type == "function_call"
+                and getattr(self, "func_handler", None) is not None
+                else []
+            ),
         )
         if enhanced_prompt:
             self.change_system_prompt(enhanced_prompt)
@@ -1142,18 +1149,47 @@ class ConnectionHandler:
             )
             if selected_memory and memory_type != "nomem":
                 agent_id = self.config.get("agent_id") if self.config else None
+                query_started_at = time.monotonic()
                 future = asyncio.run_coroutine_threadsafe(
                     query_managed_memory(self.device_id, query, agent_id=agent_id), self.loop
                 )
                 try:
-                    managed_result = future.result(timeout=2)
+                    managed_result = future.result(
+                        timeout=get_managed_memory_query_timeout()
+                    )
+                    elapsed_ms = int((time.monotonic() - query_started_at) * 1000)
                     if managed_result:
                         memory_parts.append(managed_result)
+                        status = "success_with_context"
+                        context_chars = len(managed_result)
+                    elif managed_result == "":
+                        status = "success_empty"
+                        context_chars = 0
+                    else:
+                        status = "failed"
+                        context_chars = 0
+                    log_method = (
+                        self.logger.bind(tag=TAG).info
+                        if status.startswith("success_")
+                        else self.logger.bind(tag=TAG).warning
+                    )
+                    log_method(
+                        f"managed_memory_query status={status} "
+                        f"elapsed_ms={elapsed_ms} context_chars={context_chars}"
+                    )
                 except TimeoutError:
                     future.cancel()
-                    self.logger.bind(tag=TAG).warning("长期记忆查询超时，已跳过本轮记忆注入")
-                except Exception as e:
-                    self.logger.bind(tag=TAG).warning(f"长期记忆查询失败，已跳过: {e}")
+                    elapsed_ms = int((time.monotonic() - query_started_at) * 1000)
+                    self.logger.bind(tag=TAG).warning(
+                        "managed_memory_query status=timeout "
+                        f"elapsed_ms={elapsed_ms} context_chars=0"
+                    )
+                except Exception:
+                    elapsed_ms = int((time.monotonic() - query_started_at) * 1000)
+                    self.logger.bind(tag=TAG).warning(
+                        "managed_memory_query status=failed "
+                        f"elapsed_ms={elapsed_ms} context_chars=0"
+                    )
 
         # Only query local provider memory if managed memory returned nothing.
         # This prevents the LLM from receiving duplicate/conflicting memory from
@@ -1210,6 +1246,18 @@ class ConnectionHandler:
         self.prompt = prompt
         # 更新系统prompt至上下文
         self.dialogue.update_system_message(self.prompt)
+
+    def _refresh_available_tools_prompt(self, available_tools):
+        """Keep the system prompt aligned with the current tools schema."""
+        updated_prompt = self.prompt_manager.replace_available_tools_prompt(
+            self.prompt, available_tools
+        )
+        if updated_prompt != self.prompt:
+            self.change_system_prompt(updated_prompt)
+            tool_names = self.prompt_manager.get_available_tool_names(available_tools)
+            self.logger.bind(tag=TAG).debug(
+                f"系统提示词工具索引已同步: {tool_names}"
+            )
 
     def chat(self, query, depth=0, allow_tools=True):
         chat_started_at = time.monotonic()
@@ -1274,6 +1322,12 @@ class ConnectionHandler:
             # 递归调用（depth>0）不注入，避免模型在生成文本回复时再次调 direct_answer 导致循环
             if functions is not None and depth == 0:
                 functions.append(DIRECT_ANSWER_TOOL)
+
+        # Mirror the schema actually attached to this main-LLM request. Intent-LLM
+        # mode owns a separate tool prompt, and recursive final-answer turns may
+        # intentionally disable tools even though the session registry is populated.
+        prompt_tools = functions or []
+        self._refresh_available_tools_prompt(prompt_tools)
 
         response_message = []
 

@@ -4,7 +4,7 @@
 """
 
 import os
-from typing import Dict, Any, TYPE_CHECKING
+from typing import Dict, Any, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from core.connection import ConnectionHandler
@@ -228,7 +228,13 @@ class PromptManager:
             self.logger.bind(tag=TAG).error(f"更新上下文信息失败: {e}")
 
     def build_enhanced_prompt(
-        self, user_prompt: str, device_id: str, client_ip: str = None, *args, **kwargs
+        self,
+        user_prompt: str,
+        device_id: str,
+        client_ip: str = None,
+        *args,
+        available_tools: Optional[List[Dict[str, Any]]] = None,
+        **kwargs,
     ) -> str:
         """构建增强的系统提示词"""
         if not self.base_prompt_template:
@@ -268,6 +274,7 @@ class PromptManager:
 
             # 替换模板变量
             template = Template(self.base_prompt_template)
+            available_tools_prompt = self.build_available_tools_prompt(available_tools)
             enhanced_prompt = template.render(
                 base_prompt=user_prompt,
                 current_time=current_time,
@@ -281,6 +288,7 @@ class PromptManager:
                 client_ip=client_ip,
                 dynamic_context=self.context_data,
                 language=language,
+                available_tools_prompt=available_tools_prompt,
                 *args,
                 **kwargs,
             )
@@ -296,6 +304,53 @@ class PromptManager:
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"构建增强提示词失败: {e}")
             return user_prompt
+
+    @staticmethod
+    def get_available_tool_names(
+        available_tools: Optional[List[Dict[str, Any]]],
+    ) -> List[str]:
+        """Return the real function names exposed by the current tools schema."""
+        names = set()
+        for tool in available_tools or []:
+            if not isinstance(tool, dict):
+                continue
+            function = tool.get("function")
+            if not isinstance(function, dict):
+                continue
+            name = function.get("name")
+            if isinstance(name, str) and name.strip():
+                names.add(name.strip())
+        return sorted(names)
+
+    @classmethod
+    def build_available_tools_prompt(
+        cls, available_tools: Optional[List[Dict[str, Any]]]
+    ) -> str:
+        """Build a compact prompt index from the same schema sent to the LLM."""
+        names = cls.get_available_tool_names(available_tools)
+        if not names:
+            return "当前会话未注册任何可调用工具。"
+        return "当前会话实际注册的工具仅有：" + "、".join(names) + "。"
+
+    @classmethod
+    def replace_available_tools_prompt(
+        cls,
+        prompt: str,
+        available_tools: Optional[List[Dict[str, Any]]],
+    ) -> str:
+        """Update only the dynamic tool index and preserve other prompt additions."""
+        if not prompt:
+            return prompt
+        start_marker = "<available_tools>"
+        end_marker = "</available_tools>"
+        before, separator, remainder = prompt.partition(start_marker)
+        if not separator:
+            return prompt
+        _, end_separator, after = remainder.partition(end_marker)
+        if not end_separator:
+            return prompt
+        tool_prompt = cls.build_available_tools_prompt(available_tools)
+        return f"{before}{start_marker}\n{tool_prompt}\n{end_marker}{after}"
 
     def invalidate_device_cache(self, device_id: str = None):
         """Invalidate cached device prompts to force rebuild on next request."""

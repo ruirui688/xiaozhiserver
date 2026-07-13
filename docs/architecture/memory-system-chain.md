@@ -96,7 +96,7 @@ handle/reportThreadManager.py  ReportThreadManager
 | 服务 | 文件 | 行数 | 职责 |
 |------|------|------|------|
 | `MemoryServiceImpl` | `impl/MemoryServiceImpl.java` | 491 | 事件摄入编排 + 事实 CRUD |
-| `MemoryQueryServiceImpl` | `impl/MemoryQueryServiceImpl.java` | 266 | 语义 + 关键词查询 |
+| `MemoryQueryServiceImpl` | `impl/MemoryQueryServiceImpl.java` | 纯文本候选加载 + LLM 语义选择 |
 | `MemoryMaintenanceServiceImpl` | `impl/MemoryMaintenanceServiceImpl.java` | 1061 | PowerMem 双阶段管道 + 定时衰减 |
 
 ### 4.2 数据模型
@@ -105,27 +105,28 @@ handle/reportThreadManager.py  ReportThreadManager
 |----|------|------|
 | `ai_memory_source_event` | `MemorySourceEventEntity` | 原始对话事件 |
 | `ai_memory_candidate` | `MemoryCandidateEntity` | 未确认候选事实 |
-| `ai_memory_fact` | `MemoryFactEntity` | 确认长期事实 (embedding + importance + tier) |
+| `ai_memory_fact` | `MemoryFactEntity` | 确认长期文本事实（importance + tier + evidence） |
 | `ai_memory_revision` | `MemoryRevisionEntity` | 变更审计日志 |
 | `ai_memory_profile` | `MemoryProfileEntity` | 用户画像摘要 |
 | `ai_memory_tool_behavior` | `MemoryToolBehaviorEntity` | 工具使用统计 |
 | `ai_memory_forget_tombstone` | `MemoryForgetTombstoneEntity` | 遗忘模式阻止列表 |
 
-### 4.3 PowerMem 双阶段管道
+### 4.3 纯文本双阶段维护管道
 
 ```text
 Stage 1: 事实提取
   对话内容 → EXTRACTION_PROMPT + LLM → {"facts": [{text, category, memory_type, ...}]}
 
-Stage 2: 语义搜索 + 决策
-  每个事实 → generateEmbedding()
-    → cosine similarity 搜索现有事实 (top 10)
+Stage 2: 文本事实对比 + 决策
+  每个事实 → 加载当前设备作用域 + 智能体通用作用域的 active 文本事实（有界）
     → DECISION_PROMPT + LLM → {"action": "ADD|UPDATE|DELETE|NONE", ...}
     → applyMaintenanceDecision()
       - ADD: 插入 + 去重 (SHA256 hash)
-      - UPDATE: 查找 related_memory_id + 检查 canonical_text 重复
+      - UPDATE: related_memory_id 必须属于候选事实和当前作用域；无效 ID 直接拒绝，不降级为 ADD
       - DELETE: 软删除
       - NONE: 跳过
+
+`managed_memory` 不调用 embeddings API，也不要求向量数据库。主体、对象、指代、事实方向、分类和语义等价关系由维护 LLM 根据原始证据与已有文本事实判断；服务端只执行作用域、ID、状态、质量和审计门控。
 ```
 
 ### 4.4 三种触发场景
@@ -142,9 +143,12 @@ Stage 2: 语义搜索 + 决策
 MemoryQueryServiceImpl.query()
   1. 解析 scope (agent device / agent-level)
   2. 获取用户画像
-  3. 语义搜索（embedding + cosine similarity）OR 关键词 LIKE 回退
-  4. 获取 tool behaviors (top 5) + forget tombstones (top 10)
-  5. 构建 rich context 字符串
+  3. 加载当前作用域内有界的 active 文本事实
+  4. maintenance_llm 根据问题返回候选列表中真实的 memory_id
+  5. 服务端丢弃越界/伪造 ID，并按真实事实构建 context
+  6. 获取 tool behaviors (top 5) + forget tombstones (top 10)
+
+Python 通过 `manager-api.memory_query_timeout` 控制运行时等待预算，默认 12 秒；日志区分有上下文、空结果、失败和超时，只记录状态、耗时和字符数，不记录记忆正文。
 ```
 
 ### 4.6 定时衰减（新增）
@@ -218,7 +222,9 @@ memModelId = "Memory_nomem"
 | 2 | 双源记忆冲突（本地 + Java） | Java 优先，有结果时跳过本地 |
 | 3 | mem_local_short LLM 非 JSON 静默丢失 | JSON 修复重试 + 原始文本回退 |
 | 4 | session_memory_processing HTTP 无重试 | 指数退避重试（3次） |
-| 5 | embedding 失败时返回所有事实而非相似 | 返回空列表 |
+| 5 | 维护 LLM 被错误复用为 embedding 模型，DeepSeek `/embeddings` 404 | managed_memory 改为纯文本事实 + LLM 结构化 ID 选择，不再调用 embedding |
+| 6 | embedding 失败后整句 LIKE 无法召回同义问题 | LLM 根据完整语义从有界文本事实中选择真实 memory_id |
+| 7 | 无效 UPDATE 可能继续落入 ADD | related_memory_id 越界或缺失时直接拒绝 |
 | 6 | MemoryTierHelper 衰减从未调用 | @Scheduled 每日 3:00 定时任务 |
 | 7 | summaryMemory 配置泄露 | 文档注释说明 managed/powermem 忽略 |
 | 8 | UPDATE 路径缺少 canonical_text 去重 | 新增 source_hash 检查 + merge |

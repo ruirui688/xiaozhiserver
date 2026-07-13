@@ -695,7 +695,7 @@ class MemoryServiceImplTest {
     }
 
     @Test
-    void maintenanceAddUpliftsDrivingTestSensitivity() {
+    void maintenanceAddKeepsModelSelectedSensitivityWithoutKeywordOverride() {
         when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of());
         when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID))).thenReturn("""
                 {
@@ -736,7 +736,39 @@ class MemoryServiceImplTest {
 
         ArgumentCaptor<MemoryFactEntity> factCaptor = ArgumentCaptor.forClass(MemoryFactEntity.class);
         verify(factDao).insert(factCaptor.capture());
-        assertEquals("sensitive", factCaptor.getValue().getSensitivity());
+        assertEquals("personal", factCaptor.getValue().getSensitivity());
+    }
+
+    @Test
+    void rememberRejectsUpdateToUnknownMemoryIdWithoutFallingBackToAdd() {
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(factDao.selectOne(any(Wrapper.class))).thenReturn(null);
+        String invalidUpdate = """
+                {
+                  "action": "UPDATE",
+                  "related_memory_id": "invented-memory-id",
+                  "memory_type": "人物关系",
+                  "category": "工作关系",
+                  "canonical_text": "用户的老板是钟文杰",
+                  "confidence": 0.92,
+                  "importance": 0.86,
+                  "memory_tier": "long_term",
+                  "sensitivity": "normal",
+                  "reason": "模型返回了不存在的ID"
+                }
+                """;
+        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID)))
+                .thenReturn(invalidUpdate)
+                .thenReturn("{\"actions\":[" + invalidUpdate + "]}");
+
+        MemoryRememberDTO dto = new MemoryRememberDTO();
+        dto.setAgentId(AGENT_ID);
+        dto.setText("我的老板是钟文杰");
+        memoryService.remember(dto, "user", "tester");
+
+        verify(factDao, never()).insert(any());
+        verify(factDao, never()).updateById(any());
+        verify(llmService, never()).generateEmbedding(any(), any());
     }
 
     private MemoryRebuildRequestDTO rebuildRequest(boolean dryRun) {

@@ -1,12 +1,14 @@
 import os
 import base64
 import hashlib
+import math
 from typing import Optional, Dict
 
 import httpx
 from loguru import logger
 
 TAG = __name__
+DEFAULT_MANAGED_MEMORY_QUERY_TIMEOUT_SECONDS = 12.0
 
 
 class DeviceNotFoundException(Exception):
@@ -321,9 +323,28 @@ async def query_managed_memory(
         if isinstance(result, dict):
             return result.get("context") or ""
         return ""
-    except Exception as e:
-        print(f"长期记忆查询失败: {e}")
+    except Exception:
         return None
+
+
+def get_managed_memory_query_timeout() -> float:
+    """返回托管记忆查询的独立等待预算。
+
+    该查询可能包含一次 LLM 文本召回，不复用普通 HTTP 超时；
+    私有配置可通过 manager-api.memory_query_timeout 覆盖。
+    """
+    config = getattr(ManageApiClient, "config", None) or {}
+    raw_timeout = config.get(
+        "memory_query_timeout", DEFAULT_MANAGED_MEMORY_QUERY_TIMEOUT_SECONDS
+    )
+    try:
+        timeout = float(raw_timeout)
+    except (TypeError, ValueError):
+        timeout = DEFAULT_MANAGED_MEMORY_QUERY_TIMEOUT_SECONDS
+
+    if not math.isfinite(timeout) or timeout <= 0:
+        timeout = DEFAULT_MANAGED_MEMORY_QUERY_TIMEOUT_SECONDS
+    return timeout
 
 
 async def trigger_session_memory_processing(
