@@ -41,7 +41,7 @@
         </div>
 
         <!-- 新增/编辑参数对话框 -->
-        <voice-print-dialog :title="dialogTitle" :visible.sync="dialogVisible" :agentId="agentId" :form="paramForm"
+        <voice-print-dialog :title="dialogTitle" :visible.sync="dialogVisible" :agentId="agentId" :devices="deviceOptions" :form="paramForm"
             @submit="handleSubmit" @cancel="dialogVisible = false" />
         <el-footer>
             <version-footer />
@@ -71,7 +71,8 @@ export default {
                 introduce: ''
             },
             agentId: "1",
-            maxVoiceprints: 5
+            maxVoiceprints: 5,
+            deviceOptions: []
         };
     },
     computed: {
@@ -84,6 +85,7 @@ export default {
         if (agentId) {
             this.agentId = agentId
             this.fetchVoicePrints();
+            this.fetchDevices();
         }
     },
     methods: {
@@ -105,6 +107,17 @@ export default {
                     }
                 }
             );
+        },
+        fetchDevices() {
+            Api.device.getAgentBindDevices(this.agentId, ({ data }) => {
+                if (data.code === 0) {
+                    this.deviceOptions = data.data.map(device => ({
+                        deviceId: device.macAddress || device.id,
+                        label: device.alias || device.macAddress || device.id,
+                        board: device.board || ''
+                    })).filter(device => device.deviceId);
+                }
+            });
         },
         showAddDialog() {
             if (this.atLimit) {
@@ -132,6 +145,12 @@ export default {
         },
 
         handleSubmit({ form, done }) {
+            if (form.completedByEnrollment) {
+                this.dialogVisible = false;
+                this.fetchVoicePrints();
+                done && done();
+                return;
+            }
             if (form.id) {
                 // 编辑
                 const payload = {

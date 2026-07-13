@@ -90,6 +90,20 @@ class ASRProviderBase(ABC):
         """并行等待ASR与提前启动的句级声纹预取。"""
         try:
             total_start_time = time.monotonic()
+            enrollment = getattr(conn, "voiceprint_enrollment", None)
+            if enrollment is not None and enrollment.status.active:
+                consumed = await enrollment.collect_utterance(
+                    conn,
+                    asr_audio_task,
+                    conn.audio_format,
+                )
+                if consumed:
+                    logger.bind(tag=TAG).info(
+                        "声纹采集模式已消费当前语音分段，跳过ASR/LLM"
+                    )
+                    if conn.voiceprint_provider is not None:
+                        conn.voiceprint_provider.reset_utterance()
+                    return
 
             # 定义ASR任务
             asr_task = self.speech_to_text_wrapper(
