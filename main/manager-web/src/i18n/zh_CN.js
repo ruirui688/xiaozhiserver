@@ -221,8 +221,8 @@ export default {
 
   // 声纹对话框相关
   'voicePrintDialog.addSpeaker': '添加说话人',
-  'voicePrintDialog.voicePrintVector': '声纹向量',
-  'voicePrintDialog.selectVoiceMessage': '请选择一条语言消息',
+  'voicePrintDialog.voicePrintVector': '注册音频',
+  'voicePrintDialog.selectVoiceMessage': '请选择2到5条语音消息',
   'voicePrintDialog.name': '姓名',
   'voicePrintDialog.enterName': '请输入姓名',
   'voicePrintDialog.description': '描述',
@@ -231,7 +231,7 @@ export default {
   'voicePrintDialog.cancel': '取消',
   'voicePrintDialog.requiredDescription': '请输入描述',
   'voicePrintDialog.requiredName': '请输入姓名',
-  'voicePrintDialog.requiredAudioVector': '请选择音频向量',
+  'voicePrintDialog.requiredAudioVector': '请选择2到5条语音消息',
 
   // 上下文源对话框相关
   'contextProviderDialog.title': '编辑源',
