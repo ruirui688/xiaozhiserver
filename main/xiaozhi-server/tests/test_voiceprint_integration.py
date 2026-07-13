@@ -250,7 +250,7 @@ def test_voiceprint_identity_is_preserved_for_chat_history_and_memory_event():
     assert speaker_id == "voice-1"
 
 
-def test_speaker_context_is_injected_only_for_current_recognized_speaker():
+def test_speaker_context_marks_current_recognized_speaker_as_current_turn_user():
     dialogue = Dialogue()
     dialogue.put(
         Message(
@@ -275,13 +275,15 @@ def test_speaker_context_is_injected_only_for_current_recognized_speaker():
     first_system = "\n".join(
         message["content"] for message in first_turn if message["role"] == "system"
     )
-    assert "当前说话人：用户A" in first_system
+    assert "当前轮声纹识别到的说话人：用户A" in first_system
+    assert "刚刚说话的人、正在和你说话的人都优先指向上述说话人" in first_system
     assert "用户A：喜欢科技" in first_system
 
     later_turn = dialogue.get_llm_dialogue_with_memory(
-        "记忆内容", voiceprint_config, None
+        "记忆内容", voiceprint_config, "用户A"
     )
     later_system = "\n".join(
         message["content"] for message in later_turn if message["role"] == "system"
     )
-    assert "<speakers_info>" not in later_system
+    assert "当前轮声纹识别到的说话人：用户A" in later_system
+    assert "不要把历史对话、记忆或描述中提到的其他人名当成当前说话人" in later_system

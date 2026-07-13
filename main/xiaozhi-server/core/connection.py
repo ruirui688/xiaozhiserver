@@ -1337,17 +1337,15 @@ class ConnectionHandler:
             # 使用带记忆的对话
             memory_str = self._query_memory_context(query)
 
-            # 说话人身份只在本会话首次识别到该人时进入 system 上下文，避免模型每轮称呼名字。
+            # 当前轮说话人每次都作为 system 事实提供，避免模型把历史中提到的人误判为当前用户。
+            # 是否自然称呼用户由基础提示词约束，不能通过隐藏身份事实来实现。
             speaker_for_system = None
             current_speaker = (self.current_speaker or "").strip()
             current_speaker_key = self.current_speaker_id or current_speaker
-            if (
-                current_speaker
-                and current_speaker != "未知说话人"
-                and current_speaker_key not in self.system_introduced_speakers
-            ):
-                self.system_introduced_speakers.add(current_speaker_key)
+            if current_speaker and current_speaker != "未知说话人":
                 speaker_for_system = current_speaker
+                if current_speaker_key not in self.system_introduced_speakers:
+                    self.system_introduced_speakers.add(current_speaker_key)
 
             llm_dialogue = self.dialogue.get_llm_dialogue_with_memory(
                 memory_str,
