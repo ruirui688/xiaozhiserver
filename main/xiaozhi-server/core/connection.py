@@ -239,6 +239,7 @@ class ConnectionHandler:
         self.asr_audio = []
         self.asr_audio_queue = queue.Queue()
         self.current_speaker = None  # 存储当前说话人
+        self.current_speaker_id = None  # 当前说话人的稳定声纹记录ID
         self.introduced_speakers = set()  # 已通过用户消息向LLM引入过的说话人
         self.system_introduced_speakers = set()  # 已通过system上下文引入过的说话人
 
@@ -1141,9 +1142,18 @@ class ConnectionHandler:
             )
             if selected_memory and memory_type != "nomem":
                 agent_id = self.config.get("agent_id") if self.config else None
+                current_speaker_id = getattr(self, "current_speaker_id", None)
+                current_speaker_name = getattr(self, "current_speaker", None)
                 query_started_at = time.monotonic()
                 future = asyncio.run_coroutine_threadsafe(
-                    query_managed_memory(self.device_id, query, agent_id=agent_id), self.loop
+                    query_managed_memory(
+                        self.device_id,
+                        query,
+                        agent_id=agent_id,
+                        speaker_id=current_speaker_id,
+                        speaker_name=(current_speaker_name if current_speaker_id else None),
+                    ),
+                    self.loop,
                 )
                 try:
                     managed_result = future.result(
@@ -1330,12 +1340,13 @@ class ConnectionHandler:
             # 说话人身份只在本会话首次识别到该人时进入 system 上下文，避免模型每轮称呼名字。
             speaker_for_system = None
             current_speaker = (self.current_speaker or "").strip()
+            current_speaker_key = self.current_speaker_id or current_speaker
             if (
                 current_speaker
                 and current_speaker != "未知说话人"
-                and current_speaker not in self.system_introduced_speakers
+                and current_speaker_key not in self.system_introduced_speakers
             ):
-                self.system_introduced_speakers.add(current_speaker)
+                self.system_introduced_speakers.add(current_speaker_key)
                 speaker_for_system = current_speaker
 
             llm_dialogue = self.dialogue.get_llm_dialogue_with_memory(

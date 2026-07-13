@@ -117,14 +117,22 @@ class ASRProviderBase(ABC):
             if isinstance(voiceprint_result, Exception):
                 logger.bind(tag=TAG).error(f"声纹识别失败: {voiceprint_result}")
                 speaker_name = ""
+                speaker_id = None
+                speaker_score = None
             else:
-                speaker_name = voiceprint_result
+                speaker_name = getattr(voiceprint_result, "name", voiceprint_result) or ""
+                speaker_id = getattr(voiceprint_result, "speaker_id", None)
+                speaker_score = getattr(voiceprint_result, "score", None)
 
             # 判断 ASR 结果类型
             if isinstance(raw_text, dict):
                 # FunASR 返回的 dict 格式
                 if speaker_name:
                     raw_text["speaker"] = speaker_name
+                    if speaker_id:
+                        raw_text["speaker_id"] = speaker_id
+                    if speaker_score is not None:
+                        raw_text["speaker_score"] = round(float(speaker_score), 4)
 
                 # 记录识别结果
                 if raw_text.get("language"):
@@ -147,7 +155,9 @@ class ASRProviderBase(ABC):
                     logger.bind(tag=TAG).info(f"识别说话人: {speaker_name}")
 
                 # 构建包含说话人信息的JSON字符串
-                enhanced_text = self._build_enhanced_text(raw_text, speaker_name)
+                enhanced_text = self._build_enhanced_text(
+                    raw_text, speaker_name, speaker_id, speaker_score
+                )
                 content_for_length_check = raw_text
 
             # 性能监控
@@ -170,11 +180,22 @@ class ASRProviderBase(ABC):
 
             logger.bind(tag=TAG).debug(f"异常详情: {traceback.format_exc()}")
 
-    def _build_enhanced_text(self, text: str, speaker_name: Optional[str]) -> str:
+    def _build_enhanced_text(
+        self,
+        text: str,
+        speaker_name: Optional[str],
+        speaker_id: Optional[str] = None,
+        speaker_score: Optional[float] = None,
+    ) -> str:
         """构建包含说话人信息的文本（仅用于纯文本ASR）"""
         if speaker_name and speaker_name.strip():
+            payload = {"speaker": speaker_name, "content": text}
+            if speaker_id:
+                payload["speaker_id"] = speaker_id
+            if speaker_score is not None:
+                payload["speaker_score"] = round(float(speaker_score), 4)
             return json.dumps(
-                {"speaker": speaker_name, "content": text}, ensure_ascii=False
+                payload, ensure_ascii=False
             )
         else:
             return text

@@ -8,6 +8,8 @@ import lombok.Data;
 public class MemoryQueryDTO {
     private String macAddress;
     private String agentId;
+    private String speakerId;
+    private String speakerName;
     private String query;
     private Integer limit;
 }

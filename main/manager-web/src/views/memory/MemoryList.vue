@@ -7,6 +7,9 @@
         <el-select v-model="filterCategory" placeholder="分类" clearable size="small" style="width:130px">
           <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
         </el-select>
+        <el-select v-model="filterSpeaker" placeholder="人物" clearable size="small" style="width:130px">
+          <el-option v-for="s in speakers" :key="s.value" :label="s.label" :value="s.value" />
+        </el-select>
         <el-select v-model="filterState" placeholder="来源" clearable size="small" style="width:110px">
           <el-option label="自动抽取" value="auto" />
           <el-option label="手动创建" value="manual" />
@@ -42,6 +45,13 @@
       <el-table-column label="记忆内容" min-width="240" show-overflow-tooltip>
         <template slot-scope="{row}">
           <span class="fact-text">{{ row.canonicalText || row.patternText || '无内容' }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="关联人物" width="120" show-overflow-tooltip>
+        <template slot-scope="{row}">
+          <el-tag size="mini" :type="row.speakerId ? 'primary' : 'info'">
+            {{ row.speakerDisplay || '共享记忆' }}
+          </el-tag>
         </template>
       </el-table-column>
       <el-table-column label="分类" width="100">
@@ -121,6 +131,7 @@ export default {
     return {
       searchQuery: '',
       filterCategory: '',
+      filterSpeaker: '',
       filterState: '',
       filterTier: '',
       filterStatus: 'active',
@@ -133,6 +144,16 @@ export default {
   computed: {
     categories() {
       return [...new Set(this.facts.map(f => f.category || '未分类'))].sort()
+    },
+    speakers() {
+      const speakers = new Map()
+      this.facts.forEach(f => {
+        const value = f.speakerId || '__shared__'
+        speakers.set(value, f.speakerDisplay || '共享记忆')
+      })
+      return [...speakers.entries()]
+        .map(([value, label]) => ({ value, label }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'))
     },
     filteredFacts() {
       let list = this.facts
@@ -148,6 +169,9 @@ export default {
       if (this.filterCategory) {
         list = list.filter(f => (f.category || '未分类') === this.filterCategory)
       }
+      if (this.filterSpeaker) {
+        list = list.filter(f => (f.speakerId || '__shared__') === this.filterSpeaker)
+      }
       if (this.searchQuery) {
         const q = this.searchQuery.toLowerCase()
         list = list.filter(f =>
@@ -155,6 +179,7 @@ export default {
           (f.patternText || '').toLowerCase().includes(q) ||
           (f.category || '').toLowerCase().includes(q) ||
           (f.memoryType || '').toLowerCase().includes(q)
+          || (f.speakerDisplay || '').toLowerCase().includes(q)
         )
       }
       return list
@@ -166,6 +191,7 @@ export default {
   },
   watch: {
     filterCategory() { this.currentPage = 1 },
+    filterSpeaker() { this.currentPage = 1 },
     filterState() { this.currentPage = 1 },
     filterTier() { this.currentPage = 1 },
     filterStatus() { this.currentPage = 1 }

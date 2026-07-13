@@ -21,7 +21,7 @@
     <div class="device-name">
       {{ $t('home.voiceModel') }}：{{ device.ttsModelName }} ({{ device.ttsVoiceName }})
     </div>
-    <div style="display: flex;gap: 10px;align-items: center;">
+    <div class="device-actions">
       <div v-if="canWrite" class="settings-btn" @click="handleConfigure">
         {{ $t('home.configureRole') }}
       </div>
@@ -161,6 +161,10 @@ export default {
 }
 
 .settings-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
   font-weight: 500;
   font-size: 12px;
   color: #5778ff;
@@ -171,13 +175,23 @@ export default {
   line-height: 21px;
   cursor: pointer;
   border-radius: 14px;
+  white-space: nowrap;
+}
+
+.device-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  align-items: center;
+  gap: 7px 8px;
+  min-height: 49px;
 }
 
 .version-info {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 15px;
+  margin-top: 10px;
   font-size: 12px;
   color: #979db1;
   font-weight: 400;

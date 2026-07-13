@@ -34,6 +34,7 @@ import xiaozhi.modules.memory.entity.MemoryProfileEntity;
 import xiaozhi.modules.memory.entity.MemoryToolBehaviorEntity;
 import xiaozhi.modules.memory.service.MemoryQueryService;
 import xiaozhi.modules.memory.utils.MemoryHelper;
+import xiaozhi.modules.memory.utils.MemorySpeakerUtils;
 import xiaozhi.modules.memory.vo.MemoryQueryVO;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
@@ -82,8 +83,10 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
             vo.setProfile(StringUtils.defaultIfBlank(profile.getProfileSummary(), profile.getProfileJson()));
         }
 
-        List<MemoryFactEntity> candidates = loadActiveFacts(scope, now,
-                StringUtils.isBlank(dto.getQuery()) ? limit : MAX_TEXT_RECALL_CANDIDATES);
+        List<MemoryFactEntity> candidates = loadActiveFacts(
+                scope, now, MAX_TEXT_RECALL_CANDIDATES, dto.getSpeakerId()).stream()
+                .filter(fact -> MemorySpeakerUtils.isVisibleToSpeaker(fact, dto.getSpeakerId()))
+                .toList();
         candidates = filterBlockedFacts(candidates, activeTombstones, vo);
 
         List<MemoryFactEntity> facts;
@@ -109,7 +112,7 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
                 .last("LIMIT 5");
         vo.setToolBehaviors(toolBehaviorDao.selectList(toolWrapper));
 
-        vo.setContext(buildContext(vo));
+        vo.setContext(buildContext(vo, dto.getSpeakerName()));
         return vo;
     }
 
@@ -118,13 +121,16 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
     /**
      * 构建查询上下文字符串。
      */
-    private String buildContext(MemoryQueryVO vo) {
+    private String buildContext(MemoryQueryVO vo, String speakerName) {
         StringBuilder builder = new StringBuilder();
         if (StringUtils.isNotBlank(vo.getProfile())) {
             builder.append("【用户画像】\n").append(vo.getProfile()).append("\n\n");
         }
         if (!vo.getFacts().isEmpty()) {
-            builder.append("【长期记忆】\n");
+            String factTitle = StringUtils.isBlank(speakerName)
+                    ? "长期记忆"
+                    : StringUtils.abbreviate(speakerName.trim(), 40) + "的长期记忆";
+            builder.append("【").append(factTitle).append("】\n");
             for (MemoryFactEntity fact : vo.getFacts()) {
                 builder.append("- [").append(fact.getCategory()).append("] ")
                         .append(fact.getCanonicalText()).append("\n");
@@ -175,13 +181,21 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
         return new AgentScope(agent, scopeId);
     }
 
-    private List<MemoryFactEntity> loadActiveFacts(AgentScope scope, Date now, int limit) {
+    private List<MemoryFactEntity> loadActiveFacts(AgentScope scope, Date now, int limit, String speakerId) {
         QueryWrapper<MemoryFactEntity> wrapper = new QueryWrapper<>();
         wrapper.eq("agent_id", scope.agent.getId())
                 .eq("scope_type", MemoryHelper.SCOPE_DEVICE)
                 .and(w -> w.eq("scope_id", scope.scopeId).or().eq("scope_id", scope.agent.getId()))
                 .eq("status", MemoryHelper.STATUS_ACTIVE)
                 .and(w -> w.isNull("expires_at").or().gt("expires_at", now))
+                .and(w -> {
+                    w.isNull("payload")
+                            .or().apply("JSON_EXTRACT(payload, '$.speaker_id') IS NULL")
+                            .or().apply("JSON_UNQUOTE(JSON_EXTRACT(payload, '$.speaker_id')) = ''");
+                    if (StringUtils.isNotBlank(speakerId)) {
+                        w.or().apply("JSON_UNQUOTE(JSON_EXTRACT(payload, '$.speaker_id')) = {0}", speakerId);
+                    }
+                })
                 .orderByDesc("importance", "last_seen_at")
                 .last("LIMIT " + limit);
         return factDao.selectList(wrapper);

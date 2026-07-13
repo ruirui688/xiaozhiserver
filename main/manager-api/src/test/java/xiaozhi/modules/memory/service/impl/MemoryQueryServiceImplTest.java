@@ -154,6 +154,26 @@ class MemoryQueryServiceImplTest {
         assertTrue(result.getContext().endsWith("【记忆上下文已截断】"));
     }
 
+    @Test
+    void voiceprintSpeakerOnlyReceivesOwnAndSharedFacts() {
+        MemoryFactEntity shared = fact("memory-shared", "所有人都可以使用的共享信息");
+        MemoryFactEntity userA = fact("memory-a", "用户A喜欢骑自行车");
+        userA.setPayload("{\"speaker_id\":\"voice-a\",\"speaker_name\":\"用户A\"}");
+        MemoryFactEntity userB = fact("memory-b", "用户B喜欢游泳");
+        userB.setPayload("{\"speaker_id\":\"voice-b\",\"speaker_name\":\"用户B\"}");
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(userB, shared, userA));
+
+        MemoryQueryDTO dto = query("", 8);
+        dto.setSpeakerId("voice-a");
+        dto.setSpeakerName("用户A");
+        MemoryQueryVO result = service.query(dto);
+
+        assertEquals(List.of("memory-shared", "memory-a"),
+                result.getFacts().stream().map(MemoryFactEntity::getMemoryId).toList());
+        assertTrue(result.getContext().contains("【用户A的长期记忆】"));
+        assertTrue(!result.getContext().contains("用户B喜欢游泳"));
+    }
+
     private MemoryQueryDTO query(String text, int limit) {
         MemoryQueryDTO dto = new MemoryQueryDTO();
         dto.setAgentId(AGENT_ID);

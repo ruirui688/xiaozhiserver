@@ -3,6 +3,9 @@
     <div class="candidates-note">候选预览不会参与运行时召回，确认后才进入事实记忆；自动维护会直接写入生效事实。</div>
     <el-table :data="candidates" v-loading="loading" class="transparent-table" empty-text="暂无候选预览">
       <el-table-column label="内容" prop="canonicalText" show-overflow-tooltip min-width="260" />
+      <el-table-column label="关联人物" width="120" show-overflow-tooltip>
+        <template slot-scope="{row}"><el-tag size="mini" :type="row.speakerId ? 'primary' : 'info'">{{ row.speakerDisplay || '共享记忆' }}</el-tag></template>
+      </el-table-column>
       <el-table-column label="分类" width="100">
         <template slot-scope="{row}"><el-tag size="mini" type="info">{{ categoryLabel(row.category) }}</el-tag></template>
       </el-table-column>

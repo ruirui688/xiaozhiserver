@@ -78,6 +78,14 @@
               <text text-anchor="middle" dy="14" font-size="11" fill="#687186">{{ n.sub }}</text>
             </template>
 
+            <!-- Voiceprint speaker node -->
+            <template v-else-if="n.type==='speaker'">
+              <circle r="32" fill="#edf8f4" :stroke="n===picked?'#267d62':'#58a98d'" stroke-width="2"
+                :filter="n===picked?'url(#dropHl)':n.hl?'url(#glow)':'url(#drop)'" />
+              <text text-anchor="middle" dy="-3" font-size="12" font-weight="700" fill="#285b4a">{{ n.label }}</text>
+              <text text-anchor="middle" dy="13" font-size="10" fill="#5c7f73">{{ n.sub }}</text>
+            </template>
+
             <!-- Category node -->
             <template v-else-if="n.type==='cat'">
               <circle :r="26" :fill="n.bg" :stroke="n===picked?'#3f6fd8':n.hl?'#3f6fd8':n.stroke" stroke-width="2"
@@ -119,6 +127,7 @@
     <!-- Legend -->
     <div class="graph-legend">
       <span><i class="graph-dot" style="background:#3f6fd8"></i> 智能体</span>
+      <span><i class="graph-dot" style="background:#58a98d"></i> 声纹人物</span>
       <span><i class="graph-dot" style="background:#7c6fd6"></i> 分类</span>
       <span><i class="graph-dot" style="background:#2ecc71"></i> 自动记忆</span>
       <span><i class="graph-dot" style="background:#f0b060"></i> 手动记忆</span>
@@ -187,27 +196,50 @@ export default {
       const ax = 0
       const agentId = ++nid
 
-      // Group facts by category
-      const groups = new Map()
+      // Group facts by voiceprint identity, then by category.
+      const speakerGroups = new Map()
       activeFacts.forEach(f => {
-        const c = f.category || '未分类'
-        if (!groups.has(c)) groups.set(c, [])
-        groups.get(c).push(f)
+        const speakerKey = f.speakerId || '__shared__'
+        if (!speakerGroups.has(speakerKey)) {
+          speakerGroups.set(speakerKey, {
+            key: speakerKey,
+            label: f.speakerDisplay || '共享记忆',
+            facts: []
+          })
+        }
+        speakerGroups.get(speakerKey).facts.push(f)
       })
-      const catList = Array.from(groups.entries())
-        .sort((a, b) => b[1].length - a[1].length || String(a[0]).localeCompare(String(b[0]), 'zh-CN'))
+      const speakers = Array.from(speakerGroups.values())
+        .sort((a, b) => {
+          if (a.key === '__shared__') return 1
+          if (b.key === '__shared__') return -1
+          return a.label.localeCompare(b.label, 'zh-CN')
+        })
 
       const cardW = 300, cardH = 58, cardGapX = 330, cardGapY = 76
-      const lanes = catList.map(([name, items]) => {
-        const columns = items.length > 6 ? Math.ceil(items.length / 6) : 1
-        const rows = Math.max(1, Math.ceil(items.length / columns))
-        return {
-          name,
-          items,
-          columns,
-          rows,
-          height: Math.max(116, rows * cardGapY + 28)
-        }
+      const lanes = []
+      speakers.forEach(speaker => {
+        const categories = new Map()
+        speaker.facts.forEach(f => {
+          const category = f.category || '未分类'
+          if (!categories.has(category)) categories.set(category, [])
+          categories.get(category).push(f)
+        })
+        Array.from(categories.entries())
+          .sort((a, b) => b[1].length - a[1].length || String(a[0]).localeCompare(String(b[0]), 'zh-CN'))
+          .forEach(([name, items]) => {
+            const columns = items.length > 6 ? Math.ceil(items.length / 6) : 1
+            const rows = Math.max(1, Math.ceil(items.length / columns))
+            lanes.push({
+              speaker,
+              name,
+              groupKey: `${speaker.key}::${name}`,
+              items,
+              columns,
+              rows,
+              height: Math.max(116, rows * cardGapY + 28)
+            })
+          })
       })
       const totalLaneHeight = lanes.reduce((sum, lane) => sum + lane.height, 0)
       const laneGap = 34
@@ -215,24 +247,26 @@ export default {
       const ay = 0
       nodes.push({ id: agentId, type: 'agent', label: this.agentName || '智能体', sub: `${activeFacts.length} 条事实`, x: ax, y: ay })
 
-      // Category layout
-      const catX = 190
-      const factStartX = 410
+      // Speaker and category layout
+      const speakerX = 165
+      const catX = 345
+      const factStartX = 565
       const catNodes = []
+      const speakerLanePositions = new Map()
 
       lanes.forEach((lane, i) => {
         const cy = nextLaneY + lane.height / 2
         const cid = ++nid
         const hue = (i * 137.508) % 360
         const bg = `hsl(${hue},45%,92%)`, stroke = `hsl(${hue},40%,65%)`
-        const collapsed = this.collapsedCats[lane.name] || false
+        const collapsed = this.collapsedCats[lane.groupKey] || false
         nodes.push({
           id: cid, type: 'cat',
           label: this.catLabel(lane.name),
           sub: `${lane.items.length} 条`,
           factCount: lane.items.length,
           bg, stroke, x: catX, y: cy,
-          catName: lane.name,
+          catName: lane.groupKey,
           collapsed
         })
         catNodes.push({
@@ -240,13 +274,34 @@ export default {
           x: catX,
           y: cy,
           items: lane.items,
-          catName: lane.name,
+          catName: lane.groupKey,
           rows: lane.rows,
           columns: lane.columns,
           height: lane.height
         })
-        edges.push({ id: `e-${agentId}-${cid}`, from: agentId, to: cid, hl: false })
+        if (!speakerLanePositions.has(lane.speaker.key)) speakerLanePositions.set(lane.speaker.key, [])
+        speakerLanePositions.get(lane.speaker.key).push({ y: cy, categoryId: cid })
         nextLaneY += lane.height + laneGap
+      })
+
+      speakers.forEach(speaker => {
+        const positions = speakerLanePositions.get(speaker.key) || []
+        if (!positions.length) return
+        const sy = positions.reduce((sum, item) => sum + item.y, 0) / positions.length
+        const sid = ++nid
+        nodes.push({
+          id: sid,
+          type: 'speaker',
+          label: speaker.label,
+          sub: `${speaker.facts.length} 条`,
+          x: speakerX,
+          y: sy,
+          speakerKey: speaker.key
+        })
+        edges.push({ id: `e-${agentId}-${sid}`, from: agentId, to: sid, hl: false })
+        positions.forEach(position => {
+          edges.push({ id: `e-${sid}-${position.categoryId}`, from: sid, to: position.categoryId, hl: false })
+        })
       })
 
       // Fact cards
@@ -313,6 +368,7 @@ export default {
 
     nodeAnchor(n, dir) {
       if (n.type === 'agent') return { x: n.x + dir * 42, y: n.y }
+      if (n.type === 'speaker') return { x: n.x + dir * 32, y: n.y }
       if (n.type === 'cat') return { x: n.x + dir * 26, y: n.y }
       return { x: n.x + dir * ((n.w || 160) / 2), y: n.y }
     },
@@ -444,8 +500,8 @@ export default {
       const nodes = visible.length ? visible : this.visibleNodes
       if (!nodes.length) return null
       return nodes.reduce((box, n) => {
-        const halfW = n.type === 'agent' ? 42 : n.type === 'cat' ? 26 : (n.w || 160) / 2
-        const halfH = n.type === 'agent' ? 42 : n.type === 'cat' ? 26 : (n.h || 48) / 2
+        const halfW = n.type === 'agent' ? 42 : n.type === 'speaker' ? 32 : n.type === 'cat' ? 26 : (n.w || 160) / 2
+        const halfH = n.type === 'agent' ? 42 : n.type === 'speaker' ? 32 : n.type === 'cat' ? 26 : (n.h || 48) / 2
         return {
           minX: Math.min(box.minX, n.x - halfW),
           minY: Math.min(box.minY, n.y - halfH),

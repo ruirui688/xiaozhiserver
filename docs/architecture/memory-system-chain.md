@@ -78,6 +78,7 @@ handle/reportHandle.py:report()
     - event_id: SHA256(content) 幂等去重
     - chat_type: 1=user / 2=assistant / 3=tool
     - event_type: "chat" / "tool"
+    - speaker_id: 声纹匹配成功时携带稳定声纹记录 ID
 ```
 
 ### 3.2 上报线程管理
@@ -148,14 +149,22 @@ Stage 2: 文本事实对比 + 决策
 
 ```text
 MemoryQueryServiceImpl.query()
-  1. 解析 scope (agent device / agent-level)
+  1. 解析 scope (agent device / agent-level) 和当前声纹 speaker_id
   2. 获取用户画像
-  3. 加载当前作用域内有界的 active 文本事实
+  3. 加载当前作用域内有界的 active 文本事实，并只保留当前人物专属事实与共享事实
   4. maintenance_llm 根据问题返回候选列表中真实的 memory_id
   5. 服务端丢弃越界/伪造 ID，并按真实事实构建 context
   6. 获取 tool behaviors (top 5) + forget tombstones (top 10)
 
 最终注入语音对话的记忆 context 也有 2000 字符硬上限，作为历史超限数据和其他记忆区块的防御性保护。
+
+事实人物归属保存在 `ai_memory_fact.payload`：
+
+```json
+{"speaker_id":"voiceprint-record-id","speaker_name":"用户显示名"}
+```
+
+不含这两个字段的历史事实和手工事实保持共享语义。声纹显示名可以变化，运行时隔离始终使用稳定 `speaker_id`。
 
 Python 通过 `manager-api.memory_query_timeout` 控制运行时等待预算，默认 12 秒；日志区分有上下文、空结果、失败和超时，只记录状态、耗时和字符数，不记录记忆正文。
 ```

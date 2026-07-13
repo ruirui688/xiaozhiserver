@@ -27,6 +27,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 
 import cn.hutool.json.JSONObject;
+import cn.hutool.json.JSONUtil;
 import xiaozhi.common.page.PageData;
 import xiaozhi.modules.agent.dao.AgentDao;
 import xiaozhi.modules.agent.dto.AgentChatHistoryDTO;
@@ -53,6 +54,7 @@ import xiaozhi.modules.memory.entity.MemoryForgetTombstoneEntity;
 import xiaozhi.modules.memory.entity.MemorySessionStateEntity;
 import xiaozhi.modules.memory.entity.MemorySourceEventEntity;
 import xiaozhi.modules.memory.service.impl.maintenance.MemoryMaintenanceOutputParser;
+import xiaozhi.modules.memory.service.impl.maintenance.MemorySpeakerConversationBuilder;
 import xiaozhi.modules.memory.vo.MemoryQueryVO;
 import xiaozhi.modules.memory.vo.MemoryRebuildResultVO;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
@@ -111,6 +113,7 @@ class MemoryServiceImplTest {
                 modelRuntimeAssembler,
                 agentChatHistoryService,
                 new MemoryMaintenanceOutputParser(),
+                new MemorySpeakerConversationBuilder(),
                 transactionTemplate);
         memoryService = new MemoryServiceImpl(
                 sourceEventDao,
@@ -679,9 +682,48 @@ class MemoryServiceImplTest {
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         verify(llmService).generateJson(promptCaptor.capture(), eq(MAINTENANCE_MODEL_ID));
-        assertTrue(promptCaptor.getValue().contains("用户：我喜欢黑色自行车"));
+        assertTrue(promptCaptor.getValue().contains("用户[未识别]：我喜欢黑色自行车"));
         assertTrue(promptCaptor.getValue().contains("助手：我记住了你喜欢黑色自行车"));
         verify(sessionStateDao).complete(8L, 101L);
+    }
+
+    @Test
+    void idleSessionMemoryKeepsTrustedVoiceprintIdentityInFactPayload() {
+        MemorySessionStateEntity state = new MemorySessionStateEntity();
+        state.setId(9L);
+        state.setAgentId(AGENT_ID);
+        state.setSessionId("session-speaker");
+        state.setLastEventId(110L);
+        MemorySourceEventEntity event = new MemorySourceEventEntity();
+        event.setId(110L);
+        event.setChatType(1);
+        event.setSpeakerId("voice-1");
+        event.setContentText("我喜欢黑色自行车");
+        event.setContentJson("{\"speaker\":\"用户A\",\"speaker_id\":\"voice-1\",\"content\":\"我喜欢黑色自行车\"}");
+        when(sessionStateDao.selectOne(any(Wrapper.class))).thenReturn(state);
+        when(sessionStateDao.claimNow(eq(9L), eq(110L), any())).thenReturn(1);
+        when(sourceEventDao.selectList(any(Wrapper.class))).thenReturn(List.of(event));
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID)))
+                .thenReturn("""
+                        {"facts":[{"text":"用户A喜欢黑色自行车","category":"兴趣","memory_type":"偏好",
+                        "confidence":0.95,"importance":0.8,"memory_tier":"long_term"}]}
+                        """)
+                .thenReturn("""
+                        {"action":"ADD","canonical_text":"用户A喜欢黑色自行车","category":"兴趣",
+                        "memory_type":"偏好","confidence":0.95,"importance":0.8,"memory_tier":"long_term"}
+                        """);
+
+        assertEquals(1, memoryService.processSessionMemories("session-speaker", AGENT_ID));
+
+        ArgumentCaptor<MemoryFactEntity> factCaptor = ArgumentCaptor.forClass(MemoryFactEntity.class);
+        verify(factDao).insert(factCaptor.capture());
+        JSONObject payload = JSONUtil.parseObj(factCaptor.getValue().getPayload());
+        assertEquals("voice-1", payload.getStr("speaker_id"));
+        assertEquals("用户A", payload.getStr("speaker_name"));
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(llmService, times(2)).generateJson(promptCaptor.capture(), eq(MAINTENANCE_MODEL_ID));
+        assertTrue(promptCaptor.getAllValues().get(0).contains("用户[声纹=用户A, speaker_id=voice-1]"));
     }
 
     @Test
