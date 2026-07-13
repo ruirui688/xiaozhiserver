@@ -29,6 +29,14 @@ async def handleAudioMessage(conn: "ConnectionHandler", audio):
     # 当前片段是否有人说话
     have_voice = conn.vad.is_vad(conn, audio)
     update_voice_activity(conn, have_voice)
+    voiceprint_provider = getattr(conn, "voiceprint_provider", None)
+    if voiceprint_provider is not None:
+        voiceprint_provider.feed_audio_frame(
+            audio,
+            have_voice,
+            conn.audio_format,
+            conn.session_id,
+        )
     # 接收音频
     await conn.asr.receive_audio(conn, audio, have_voice)
 
@@ -42,7 +50,6 @@ async def startToChat(conn: "ConnectionHandler", text):
     """
     # 检查输入是否是JSON格式（包含说话人信息）
     speaker_name = None
-    language_tag = None
     actual_text = text
     interruption_text = text
 
@@ -52,12 +59,26 @@ async def startToChat(conn: "ConnectionHandler", text):
             data = json.loads(text)
             if "speaker" in data and "content" in data:
                 speaker_name = data["speaker"]
-                language_tag = data["language"]
-                interruption_text = data.get("content") or text
+                actual_content = data.get("content") or ""
+                interruption_text = actual_content or text
                 conn.logger.bind(tag=TAG).info(f"解析到说话人信息: {speaker_name}")
 
-                # 直接使用JSON格式的文本，不解析
-                actual_text = text
+                introduced_speakers = getattr(conn, "introduced_speakers", None)
+                if introduced_speakers is None:
+                    introduced_speakers = set()
+                    conn.introduced_speakers = introduced_speakers
+
+                # 已识别身份只在首次作为JSON交给LLM；后续使用纯文本，避免反复点名。
+                if (
+                    speaker_name
+                    and speaker_name != "未知说话人"
+                    and speaker_name in introduced_speakers
+                ):
+                    actual_text = actual_content
+                else:
+                    actual_text = text
+                    if speaker_name and speaker_name != "未知说话人":
+                        introduced_speakers.add(speaker_name)
     except (json.JSONDecodeError, KeyError):
         # 如果解析失败，继续使用原始文本
         pass

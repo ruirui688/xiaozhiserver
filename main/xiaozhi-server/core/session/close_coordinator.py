@@ -175,6 +175,10 @@ class CloseCoordinator:
                 await self.run_async_cleanup(conn.tts.close, deadline, "关闭TTS")
             if conn.asr:
                 await self.run_async_cleanup(conn.asr.close, deadline, "关闭ASR")
+            if conn.voiceprint_provider:
+                await self.run_async_cleanup(
+                    conn.voiceprint_provider.close, deadline, "关闭声纹识别"
+                )
 
             if conn.executor:
                 try:

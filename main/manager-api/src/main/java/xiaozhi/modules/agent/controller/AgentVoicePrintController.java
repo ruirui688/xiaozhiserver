@@ -25,9 +25,9 @@ import xiaozhi.modules.agent.dto.AgentVoicePrintUpdateDTO;
 import xiaozhi.modules.agent.entity.AgentEntity;
 import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.agent.service.AgentVoicePrintService;
+import xiaozhi.modules.agent.voiceprint.VoiceprintApiClient;
 import xiaozhi.modules.agent.vo.AgentVoicePrintVO;
 import xiaozhi.modules.security.user.SecurityUser;
-import xiaozhi.modules.sys.service.SysParamsService;
 import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 
 @Tag(name = "智能体声纹管理")
@@ -36,7 +36,7 @@ import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 @RequestMapping("/agent/voice-print")
 public class AgentVoicePrintController {
     private final AgentVoicePrintService agentVoicePrintService;
-    private final SysParamsService sysParamsService;
+    private final VoiceprintApiClient voiceprintApiClient;
     private final AgentService agentService;
     private final WorkspacePermissionService workspacePermissionService;
 
@@ -83,8 +83,7 @@ public class AgentVoicePrintController {
     @Operation(summary = "获取用户指定智能体声纹列表")
     @RequiresPermissions("sys:role:normal")
     public Result<List<AgentVoicePrintVO>> list(@PathVariable String id) {
-        String voiceprintUrl = sysParamsService.getValue("server.voice_print", true);
-        if (StringUtils.isBlank(voiceprintUrl) || "null".equals(voiceprintUrl)) {
+        if (!voiceprintApiClient.isConfigured()) {
             throw new RenException(ErrorCode.VOICEPRINT_API_NOT_CONFIGURED);
         }
         Long userId = SecurityUser.getUserId();

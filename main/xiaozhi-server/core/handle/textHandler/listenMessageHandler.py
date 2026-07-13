@@ -49,7 +49,7 @@ class ListenTextMessageHandler(TextMessageHandler):
                 # 非流式模式：直接触发ASR识别
                 if len(conn.asr_audio) > 0:
                     asr_audio_task = conn.asr_audio.copy()
-                    conn.reset_audio_states()
+                    conn.reset_audio_states(preserve_voiceprint=True)
 
                     if len(asr_audio_task) > 0:
                         await conn.asr.handle_voice_stop(conn, asr_audio_task)

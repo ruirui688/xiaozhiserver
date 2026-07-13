@@ -466,3 +466,26 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 真实外部回归：豆包录音ASR 4/4、流式ASR修复前后5/5、SeedTTS2连续5会话、DeepSeek v4-pro/v4-flash原生与仓库provider均成功；当前provider完整ASR→LLM→TTS链路连续3/3成功，平均约3.753秒。真实凭据只用于进程内测试且未落盘；测试完成后应轮换在会话或截图中暴露过的凭据。
 官方同步时的处理规则：如果官方修改豆包录音/流式 ASR、SeedTTS2、唤醒词处理、欢迎语、连接日志或设备注册表，必须保留异步 HTTP 与总预算超时、流式 WebSocket 分阶段等待保护、本地 VAD 判停发送唯一 LAST、缓存首帧去重、短词识别和按会话身份清理、Opus尾帧冲刷、默认零毫秒首轮音频丢弃、欢迎语显式开启、按请求头键名脱敏和对象身份注销校验。不得重新在 async provider 中引入 requests/time.sleep，不得把 Authorization、token、API key、Cookie 或 secret 写入日志；调整 ASR 超时、TTS编码边界和唤醒回声窗口时必须同步更新默认配置、专项测试、语音延迟文档，并在真实设备上验证首句不丢、短词可识别、无多句聚合、连续TTS无串音和重连映射稳定。
 ```
+
+## 26. 外置声纹服务、智能体隔离与五条上限
+
+```text
+定制模块：manager-api 声纹远程客户端与业务约束、xiaozhi-server 实时声纹 provider、Web/Mobile 声纹管理页
+改动原因：声纹模型独立部署在另一台服务器，voiceprint-api 0.1.0 起要求必填 user_id 并按用户隔离。小智侧必须从可信智能体绑定关系派生 user_id，不能信任浏览器或设备传入；每个智能体最多绑定 5 个声纹；API Token 必须从 URL 查询参数拆出，只通过 Bearer Header 传输。历史声纹在远程服务中属于 default 作用域，需要保留兼容并允许重新录音后迁移到 agentId 作用域。实时识别假设一句话只有一个说话人，只累计前 1 秒有效人声，达到时长立即与 ASR 并行预取，短句跳过、长句后段不再上传，句末最多追加等待 300ms；没有绑定声纹时必须零调用。官方上游 2026-07-13 的声纹对话修复同时表明，身份不应在每轮 system 和用户消息中重复注入，否则模型会机械地反复称呼名字。
+关键文件：
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/voiceprint/VoiceprintApiClient.java
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/service/impl/AgentVoicePrintServiceImpl.java
+  - main/manager-api/src/main/java/xiaozhi/modules/config/service/impl/ConfigServiceImpl.java
+  - main/manager-api/src/main/resources/db/changelog/202607131430.sql
+  - main/xiaozhi-server/core/utils/voiceprint_provider.py
+  - main/xiaozhi-server/core/providers/asr/base.py
+  - main/xiaozhi-server/core/providers/asr/doubao_stream.py
+  - main/xiaozhi-server/core/handle/receiveAudioHandle.py
+  - main/xiaozhi-server/core/connection.py
+  - main/xiaozhi-server/core/utils/dialogue.py
+  - main/manager-web/src/views/VoicePrint.vue
+  - main/manager-mobile/src/pages/voiceprint/index.vue
+  - docs/models/voiceprint-integration.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改声纹注册/识别/删除、配置下发、音频状态重置、ASR并行识别、对话身份注入或声纹页面，必须保留 `user_id=agentId` 的可信服务端派生、每智能体最多5条的后端与远程双重校验、`remote_user_id=default` 历史兼容、Token仅通过Bearer Header传输、私有/回环/链路本地目标拦截、结构化 speakers 配置、“前1秒有效人声达到后立即且每句只请求一次、不足1秒跳过、句末最多等待300ms、无绑定声纹零调用”以及“每个已识别身份只在本会话首次进入system和JSON用户消息”的行为。前端上限提示不能替代后端校验；删除远程失败时不得静默留下占用额度的孤儿声纹；日志不得输出Token、Authorization或带密钥URL。
+```

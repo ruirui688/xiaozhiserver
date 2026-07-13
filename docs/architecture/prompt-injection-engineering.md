@@ -1,9 +1,10 @@
 ---
 status: supporting
 owner: runtime
-last_verified: 2026-07-12
+last_verified: 2026-07-13
 source_paths:
   - main/xiaozhi-server/core/utils/prompt_manager.py
+  - main/xiaozhi-server/core/utils/dialogue.py
   - main/xiaozhi-server/core/providers/tools
 ---
 
@@ -157,7 +158,7 @@ if self.memory is not None and query:
 self.config.get("voiceprint", {})
 ```
 
-`Dialogue.get_llm_dialogue_with_memory()` 会把记忆和说话人信息插入给 LLM 使用。它不是后台角色 prompt 的一部分，但属于模型实际可见上下文。
+`Dialogue.get_llm_dialogue_with_memory()` 只在某个已识别说话人本会话首次出现时，把当前身份和结构化说话人信息插入给 LLM 使用；后续轮次依赖已形成的对话历史，不再每轮重复姓名。未知说话人不会获得完整人员列表。它不是后台角色 prompt 的一部分，但属于模型实际可见上下文。
 
 ## 6. 工具描述统一出口
 

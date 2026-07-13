@@ -73,9 +73,11 @@ class FakeConnection:
         self.client_voice_stop = False
         self.stop_event = type("StopEvent", (), {"is_set": lambda self: False})()
         self.reset_count = 0
+        self.reset_preserve_voiceprint = []
 
-    def reset_audio_states(self):
+    def reset_audio_states(self, preserve_voiceprint=False):
         self.reset_count += 1
+        self.reset_preserve_voiceprint.append(preserve_voiceprint)
         self.client_have_voice = False
         self.client_voice_stop = False
         self.asr_audio.clear()
@@ -309,6 +311,7 @@ def test_auto_vad_stop_sends_last_and_accepts_short_final_text(
     assert handled == [(recognized_text, [b"voice-frame", b"silence-frame"])]
     assert websocket.closed is True
     assert conn.reset_count == 1
+    assert conn.reset_preserve_voiceprint == [True]
     assert conn.client_voice_stop is False
     assert conn.asr_audio == []
     assert provider.forward_task is None

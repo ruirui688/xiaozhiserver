@@ -142,6 +142,11 @@ public interface Constant {
     String SERVER_VOICE_PRINT = "server.voice_print";
 
     /**
+     * 声纹服务 Bearer Token
+     */
+    String SERVER_VOICEPRINT_TOKEN = "server.voiceprint_token";
+
+    /**
      * mqtt密钥
      */
     String SERVER_MQTT_SECRET = "server.mqtt_signature_key";

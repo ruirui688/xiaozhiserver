@@ -21,6 +21,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.Parameters;
 import io.swagger.v3.oas.annotations.enums.ParameterIn;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
 import xiaozhi.common.annotation.LogOperation;
 import xiaozhi.common.constant.Constant;
@@ -33,6 +34,7 @@ import xiaozhi.common.validator.ValidatorUtils;
 import xiaozhi.common.validator.group.AddGroup;
 import xiaozhi.common.validator.group.DefaultGroup;
 import xiaozhi.common.validator.group.UpdateGroup;
+import xiaozhi.modules.agent.voiceprint.VoiceprintApiClient;
 import xiaozhi.modules.config.service.ConfigService;
 import xiaozhi.modules.sys.dto.SysParamsDTO;
 import xiaozhi.modules.sys.service.SysParamsService;
@@ -52,6 +54,7 @@ public class SysParamsController {
     private final SysParamsService sysParamsService;
     private final ConfigService configService;
     private final RestTemplate restTemplate;
+    private final VoiceprintApiClient voiceprintApiClient;
 
     @GetMapping("page")
     @Operation(summary = "分页")
@@ -82,9 +85,11 @@ public class SysParamsController {
     @Operation(summary = "保存")
     @LogOperation("保存")
     @RequiresPermissions("sys:role:superAdmin")
-    public Result<Void> save(@RequestBody SysParamsDTO dto) {
+    public Result<Void> save(@RequestBody @Valid SysParamsDTO dto) {
         // 效验数据
         ValidatorUtils.validateEntity(dto, AddGroup.class, DefaultGroup.class);
+
+        validateVoicePrint(dto.getParamCode(), dto.getParamValue());
 
         sysParamsService.save(dto);
         configService.getConfig(false);
@@ -95,7 +100,7 @@ public class SysParamsController {
     @Operation(summary = "修改")
     @LogOperation("修改")
     @RequiresPermissions("sys:role:superAdmin")
-    public Result<Void> update(@RequestBody SysParamsDTO dto) {
+    public Result<Void> update(@RequestBody @Valid SysParamsDTO dto) {
         // 效验数据
         ValidatorUtils.validateEntity(dto, UpdateGroup.class, DefaultGroup.class);
 
@@ -267,36 +272,7 @@ public class SysParamsController {
 
     // 验证声纹接口地址是否正常
     private void validateVoicePrint(String paramCode, String url) {
-        if (!paramCode.equals(Constant.SERVER_VOICE_PRINT)) {
-            return;
-        }
-        if (StringUtils.isBlank(url) || url.equals("null")) {
-            return;
-        }
-        if (url.contains("localhost") || url.contains("127.0.0.1")) {
-            throw new RenException(ErrorCode.VOICEPRINT_URL_LOCALHOST);
-        }
-        if (!url.toLowerCase().contains("key")) {
-            throw new RenException(ErrorCode.VOICEPRINT_URL_INVALID);
-        }
-        // 验证URL格式
-        if (!url.toLowerCase().startsWith("http")) {
-            throw new RenException(ErrorCode.VOICEPRINT_URL_PROTOCOL_ERROR);
-        }
-        try {
-            // 发送GET请求
-            ResponseEntity<String> response = restTemplate.getForEntity(url, String.class);
-            if (response.getStatusCode() != HttpStatus.OK) {
-                throw new RenException(ErrorCode.VOICEPRINT_INTERFACE_ACCESS_FAILED);
-            }
-            // 检查响应内容
-            String body = response.getBody();
-            if (body == null || !body.contains("healthy")) {
-                throw new RenException(ErrorCode.VOICEPRINT_INTERFACE_FORMAT_ERROR);
-            }
-        } catch (Exception e) {
-            throw new RenException(ErrorCode.VOICEPRINT_INTERFACE_VALIDATION_FAILED);
-        }
+        voiceprintApiClient.validateConfigurationChange(paramCode, url);
     }
 
     // 校验mqtt密钥长度和复杂度

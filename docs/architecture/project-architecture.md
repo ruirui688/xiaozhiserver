@@ -1,7 +1,7 @@
 ---
 status: canonical
 owner: architecture
-last_verified: 2026-07-12
+last_verified: 2026-07-13
 source_paths:
   - main/xiaozhi-server
   - main/manager-api
@@ -147,7 +147,7 @@ Java 的 `ModelRuntimeAssembler` 负责从通用字段、普通参数和密钥�
 | `plugins` | 已启用插件及智能体级参数 |
 | `mcp_endpoint` | 外部 MCP Endpoint |
 | `context_providers` | 动态上下文源 |
-| `voiceprint` | 声纹说话人信息 |
+| `voiceprint` | 外置声纹服务配置、`user_id=agentId` 和最多 5 条说话人信息 |
 
 完整时序见 [运行时链路](./runtime-flows.md)，字段责任见 [数据与契约](./data-and-contracts.md)。
 

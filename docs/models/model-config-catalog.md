@@ -1,3 +1,14 @@
+---
+status: supporting
+owner: models
+last_verified: 2026-07-13
+source_paths:
+  - main/manager-api/src/main/java/xiaozhi/modules/model
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/voiceprint
+  - main/xiaozhi-server/core/utils/model_config.py
+  - main/xiaozhi-server/core/utils/voiceprint_provider.py
+---
+
 # 标准模型配置目录
 
 本文档定义标准模型配置的分类目录、存储结构和字段分层，用于收敛智控台模型配置、`xiaozhi-server` 运行配置、知识库 RAG、声纹和插件 RAG 的配置边界。
@@ -422,22 +433,28 @@ silero
 ```text
 voiceprint
 server.voice_print
+server.voiceprint_token
 server.voiceprint_similarity_threshold
-ai_voiceprint
+ai_agent_voice_print
 ```
 
 当前字段：
 
 ```text
 url
+token
+user_id
 speakers
 similarity_threshold
+timeout_seconds
 ```
 
 标准归类原则：
 
 - 声纹不是 ASR；它依赖音频输入，但输出说话人身份。
 - 声纹服务地址和阈值属于系统能力配置；说话人注册数据属于业务数据，不进入模型配置表。
+- `server.voiceprint_token` 是敏感系统参数，只通过 Bearer Header 下发和调用，禁止进入 URL 或日志。
+- 全模块部署以智能体 ID 作为远程 `user_id`，每个智能体最多 5 条；历史数据用 `remote_user_id=default` 兼容。
 - 如果后续纳入模型配置，建议新增 `model_type = Voiceprint`，不要复用 `ASR`。
 - `speakers` 是环境或业务配置，不能把真实人员身份、描述和私有声纹数据写入默认配置。
 
@@ -732,6 +749,7 @@ server.websocket
 server.ota
 server.vision_explain
 server.voice_print
+server.voiceprint_token
 server.voiceprint_similarity_threshold
 manager-api.url
 manager-api.secret

@@ -34,6 +34,8 @@ const chatHistoryList = ref<ChatHistory[]>([])
 const chatHistoryActions = ref<any[]>([])
 const swipeStates = ref<Record<string, 'left' | 'close' | 'right'>>({})
 const loading = ref(false)
+const MAX_VOICEPRINTS_PER_AGENT = 5
+const atLimit = computed(() => voicePrintList.value.length >= MAX_VOICEPRINTS_PER_AGENT)
 
 // 音频播放相关
 const audioRef = ref<UniApp.InnerAudioContext | null>(null)
@@ -130,6 +132,11 @@ async function loadChatHistory() {
 function openAddDialog() {
   if (!currentAgentId.value) {
     toast.error(t('voiceprint.pleaseSelectAgent'))
+    return
+  }
+
+  if (atLimit.value) {
+    toast.warning(t('voiceprint.limitHint'))
     return
   }
 
@@ -362,6 +369,9 @@ defineExpose({
 
 <template>
   <view class="voiceprint-container" style="background: #f5f7fb; min-height: 100%;">
+    <view class="px-[24rpx] pt-[20rpx] text-right text-[24rpx] text-[#7b7f88]">
+      {{ voicePrintList.length }}/{{ MAX_VOICEPRINTS_PER_AGENT }}
+    </view>
     <!-- 加载状态 -->
     <view v-if="loading && voicePrintList.length === 0" class="loading-container">
       <wd-loading color="#336cff" />
@@ -423,9 +433,13 @@ defineExpose({
     </view>
 
     <!-- 浮动操作按钮 -->
-    <wd-fab custom-style="z-index:10" type="primary" size="small" :draggable="true" :expandable="false" @click="openAddDialog">
+    <wd-fab v-if="!atLimit" custom-style="z-index:10" type="primary" size="small" :draggable="true" :expandable="false" @click="openAddDialog">
       <wd-icon name="add" />
     </wd-fab>
+
+    <view v-else class="fixed bottom-[32rpx] right-[24rpx] rounded-[999rpx] bg-[#eef1f6] px-[24rpx] py-[14rpx] text-[24rpx] text-[#7b7f88]">
+      {{ t('voiceprint.limitReached') }}
+    </view>
 
     <!-- MessageBox 组件 -->
     <wd-message-box />

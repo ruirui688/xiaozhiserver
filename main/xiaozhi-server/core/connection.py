@@ -239,6 +239,8 @@ class ConnectionHandler:
         self.asr_audio = []
         self.asr_audio_queue = queue.Queue()
         self.current_speaker = None  # 存储当前说话人
+        self.introduced_speakers = set()  # 已通过用户消息向LLM引入过的说话人
+        self.system_introduced_speakers = set()  # 已通过system上下文引入过的说话人
 
         # llm相关变量
         self.dialogue = Dialogue()
@@ -1325,8 +1327,21 @@ class ConnectionHandler:
             # 使用带记忆的对话
             memory_str = self._query_memory_context(query)
 
+            # 说话人身份只在本会话首次识别到该人时进入 system 上下文，避免模型每轮称呼名字。
+            speaker_for_system = None
+            current_speaker = (self.current_speaker or "").strip()
+            if (
+                current_speaker
+                and current_speaker != "未知说话人"
+                and current_speaker not in self.system_introduced_speakers
+            ):
+                self.system_introduced_speakers.add(current_speaker)
+                speaker_for_system = current_speaker
+
             llm_dialogue = self.dialogue.get_llm_dialogue_with_memory(
-                memory_str, self.config.get("voiceprint", {})
+                memory_str,
+                self.config.get("voiceprint", {}),
+                speaker_for_system,
             )
             llm_dialogue = self._with_freeform_game_prompt(
                 llm_dialogue, freeform_game_prompt
@@ -1962,10 +1977,13 @@ class ConnectionHandler:
                 f"清理结束: TTS队列大小={self.tts.tts_text_queue.qsize()}, 音频队列大小={self.tts.tts_audio_queue.qsize()}"
             )
 
-    def reset_audio_states(self):
+    def reset_audio_states(self, preserve_voiceprint=False):
         """
         重置所有音频相关状态(VAD + ASR)
         """
+        if not preserve_voiceprint and self.voiceprint_provider is not None:
+            self.voiceprint_provider.reset_utterance()
+
         # Reset VAD states
         self.client_audio_buffer.clear()
         self.client_have_voice = False

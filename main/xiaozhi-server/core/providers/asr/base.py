@@ -78,40 +78,28 @@ class ASRProviderBase(ABC):
             # 自动模式下通过VAD检测到语音停止时触发识别
             if conn.asr.interface_type != InterfaceType.STREAM and conn.client_voice_stop:
                 asr_audio_task = conn.asr_audio.copy()
-                conn.reset_audio_states()
+                conn.reset_audio_states(preserve_voiceprint=True)
 
                 if len(asr_audio_task) > 15:
                     await self.handle_voice_stop(conn, asr_audio_task)
+                elif conn.voiceprint_provider is not None:
+                    conn.voiceprint_provider.reset_utterance()
 
     # 处理语音停止
     async def handle_voice_stop(self, conn: "ConnectionHandler", asr_audio_task: List[bytes]):
-        """并行处理ASR和声纹识别"""
+        """并行等待ASR与提前启动的句级声纹预取。"""
         try:
             total_start_time = time.monotonic()
-
-            # 准备音频数据
-            if conn.audio_format == "pcm":
-                pcm_data = asr_audio_task
-            else:
-                pcm_data = self.decode_opus(asr_audio_task)
-
-            combined_pcm_data = b"".join(pcm_data)
-
-            # 预先准备WAV数据
-            wav_data = None
-            if conn.voiceprint_provider and combined_pcm_data:
-                wav_data = self._pcm_to_wav(combined_pcm_data)
 
             # 定义ASR任务
             asr_task = self.speech_to_text_wrapper(
                 asr_audio_task, conn.session_id, conn.audio_format
             )
 
-            if conn.voiceprint_provider and wav_data:
-                voiceprint_task = conn.voiceprint_provider.identify_speaker(
-                    wav_data, conn.session_id
+            if conn.voiceprint_provider is not None:
+                voiceprint_task = (
+                    conn.voiceprint_provider.resolve_utterance_result()
                 )
-                # 并发等待两个结果
                 asr_result, voiceprint_result = await asyncio.gather(
                     asr_task, voiceprint_task, return_exceptions=True
                 )

@@ -12,6 +12,10 @@ SERVER_ROOT = Path(__file__).resolve().parents[1]
 if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 
+from config import settings
+
+settings.config_file_valid = True
+
 from core.handle.receiveAudioHandle import startToChat
 from core.handle.sendAudioHandle import send_stt_message
 from core.handle.textHandler.listenMessageHandler import ListenTextMessageHandler
@@ -89,6 +93,7 @@ class _Conn:
         self._abort_lock = threading.Lock()
         self.session_id = "s1"
         self.current_speaker = None
+        self.introduced_speakers = set()
         self.correct_word_replacements = {}
         self.semantic_center = None
         self._tts_started_at = 0
@@ -162,6 +167,27 @@ def test_overlap_json_content_is_used_for_llm_classification(monkeypatch):
     assert conn.current_speaker == "user-a"
     assert conn.abort_generation == 0
     assert conn.executor.submitted == []
+
+
+def test_recognized_speaker_json_is_only_submitted_on_first_turn(monkeypatch):
+    import core.handle.receiveAudioHandle as receive_handle
+
+    async def _no_intent(conn, actual_text):
+        return False
+
+    monkeypatch.setattr(receive_handle, "handle_user_intent", _no_intent)
+    conn = _Conn({"decision": "new_turn", "reason": "unused"})
+    conn.client_is_speaking = False
+    payload = json.dumps(
+        {"speaker": "user-a", "content": "你好"},
+        ensure_ascii=False,
+    )
+
+    asyncio.run(startToChat(conn, payload))
+    asyncio.run(startToChat(conn, payload))
+
+    assert conn.executor.submitted[0][1] == (payload,)
+    assert conn.executor.submitted[1][1] == ("你好",)
 
 
 def test_overlap_new_turn_aborts_then_submits_new_chat(monkeypatch):

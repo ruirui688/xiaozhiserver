@@ -260,4 +260,8 @@ public interface ErrorCode {
     // 替换词相关错误码
     int CORRECT_WORD_FILE_NAME_EXISTS = 10203; // 文件名已存在
     int FILE_SIZE_OVER_LIMIT = 10204; // 文件大小超过限制
+
+    // 声纹远程服务升级
+    int AGENT_VOICEPRINT_LIMIT_REACHED = 10205; // 每个智能体最多绑定5个声纹
+    int VOICEPRINT_TOKEN_NOT_CONFIGURED = 10206; // 声纹服务Token未配置
 }

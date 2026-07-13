@@ -1,199 +1,433 @@
 import asyncio
+import io
+import ipaddress
+import math
+import socket
 import time
+import wave
+from collections import defaultdict
+from typing import Dict, List, Optional, Tuple
+from urllib.parse import parse_qs, urlparse, urlunparse
+
 import aiohttp
-import requests
-from urllib.parse import urlparse, parse_qs
-from typing import Optional, Dict
+import opuslib_next
+
 from config.logger import setup_logging
-from core.utils.cache.manager import cache_manager
-from core.utils.cache.config import CacheType
 
 TAG = __name__
 logger = setup_logging()
 
 
 class VoiceprintProvider:
-    """声纹识别服务提供者"""
-    
+    """远程声纹识别服务提供者。"""
+
     def __init__(self, config: dict):
-        self.original_url = config.get("url", "")
-        self.speakers = config.get("speakers", [])
-        self.speaker_map = self._parse_speakers()
-        # 声纹识别相似度阈值，默认0.4
-        self.similarity_threshold = float(config.get("similarity_threshold", 0.4))
-        
-        # 解析API地址和密钥
-        self.api_url = None
-        self.api_key = None
-        self.speaker_ids = []
-        
-        if not self.original_url:
-            logger.bind(tag=TAG).warning("声纹识别URL未配置，声纹识别将被禁用")
-            self.enabled = False
+        self.original_url = str(config.get("url") or config.get("base_url") or "").strip()
+        self.default_user_id = str(config.get("user_id") or "default").strip()
+        self.similarity_threshold = self._bounded_float(
+            config.get("similarity_threshold", 0.4), 0.0, 1.0, 0.4
+        )
+        self.timeout_seconds = self._bounded_float(
+            config.get("timeout_seconds", 5), 0.5, 30.0, 5.0
+        )
+        self.sample_seconds = self._bounded_float(
+            config.get("sample_seconds", 1.0), 0.5, 5.0, 1.0
+        )
+        result_wait_ms = self._bounded_float(
+            config.get("result_wait_ms", 300), 0.0, 5000.0, 300.0
+        )
+        self.result_wait_seconds = result_wait_ms / 1000.0
+        self._sample_target_bytes = int(self.sample_seconds * 16000 * 2)
+        self._sample_target_bytes -= self._sample_target_bytes % 2
+        self._sample_pcm = bytearray()
+        self._sample_decoder = None
+        self._prefetch_task: Optional[asyncio.Task] = None
+        self._prefetch_started_at = 0.0
+        self._http_session: Optional[aiohttp.ClientSession] = None
+
+        self.api_key = str(config.get("token") or config.get("api_key") or "").strip()
+        self.api_url = self._build_identify_url(self.original_url)
+        if not self.api_key:
+            self.api_key = self._legacy_token_from_url(self.original_url)
+
+        self.speakers = config.get("speakers") or []
+        self.speaker_map: Dict[str, Dict[str, str]] = {}
+        self.candidates_by_user: Dict[str, List[str]] = defaultdict(list)
+        self._parse_speakers()
+
+        self.enabled = bool(
+            self.api_url
+            and self.api_key
+            and self.default_user_id
+            and self.candidates_by_user
+            and self._is_public_target(self.api_url)
+        )
+        if self.enabled:
+            logger.bind(tag=TAG).info(
+                "声纹识别已启用: "
+                f"API={self.api_url}, 说话人={len(self.speaker_map)}个, "
+                f"作用域={len(self.candidates_by_user)}个, "
+                f"相似度阈值={self.similarity_threshold}, "
+                f"采样时长={self.sample_seconds:.2f}s, "
+                f"句末等待={self.result_wait_seconds:.3f}s"
+            )
         else:
-            # 解析URL和key
-            parsed_url = urlparse(self.original_url)
-            base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
-            
-            # 从查询参数中提取key
-            query_params = parse_qs(parsed_url.query)
-            self.api_key = query_params.get('key', [''])[0]
-            
-            if not self.api_key:
-                logger.bind(tag=TAG).error("URL中未找到key参数，声纹识别将被禁用")
-                self.enabled = False
-            else:
-                # 构造identify接口地址
-                self.api_url = f"{base_url}/voiceprint/identify"
-                
-                # 提取speaker_ids
-                for speaker_str in self.speakers:
-                    try:
-                        parts = speaker_str.split(",", 2)
-                        if len(parts) >= 1:
-                            speaker_id = parts[0].strip()
-                            self.speaker_ids.append(speaker_id)
-                    except Exception:
-                        continue
-                
-                # 检查是否有有效的说话人配置
-                if not self.speaker_ids:
-                    logger.bind(tag=TAG).warning("未配置有效的说话人，声纹识别将被禁用")
-                    self.enabled = False
-                else:
-                    # 进行健康检查，验证服务器是否可用
-                    if self._check_server_health():
-                        self.enabled = True
-                        logger.bind(tag=TAG).info(f"声纹识别已启用: API={self.api_url}, 说话人={len(self.speaker_ids)}个, 相似度阈值={self.similarity_threshold}")
-                    else:
-                        self.enabled = False
-                        logger.bind(tag=TAG).warning(f"声纹识别服务器不可用，声纹识别已禁用: {self.api_url}")
-    
-    def _parse_speakers(self) -> Dict[str, Dict[str, str]]:
-        """解析说话人配置"""
-        speaker_map = {}
-        for speaker_str in self.speakers:
-            try:
-                parts = speaker_str.split(",", 2)
-                if len(parts) >= 3:
-                    speaker_id, name, description = parts[0].strip(), parts[1].strip(), parts[2].strip()
-                    speaker_map[speaker_id] = {
-                        "name": name,
-                        "description": description
-                    }
-            except Exception as e:
-                logger.bind(tag=TAG).warning(f"解析说话人配置失败: {speaker_str}, 错误: {e}")
-        return speaker_map
-    
-    def _check_server_health(self) -> bool:
-        """检查声纹识别服务器健康状态"""
-        if not self.api_url or not self.api_key:
-            return False
-    
-        cache_key = f"{self.api_url}:{self.api_key}"
-        
-        # 检查缓存
-        cached_result = cache_manager.get(CacheType.VOICEPRINT_HEALTH, cache_key)
-        if cached_result is not None:
-            logger.bind(tag=TAG).debug(f"使用缓存的健康状态: {cached_result}")
-            return cached_result
-        
-        # 缓存过期或不存在
-        logger.bind(tag=TAG).info("执行声纹服务器健康检查")
-        
-        try:
-            # 健康检查URL（从查询参数移到Authorization头）
-            parsed_url = urlparse(self.api_url)
-            health_url = f"{parsed_url.scheme}://{parsed_url.netloc}/voiceprint/health"
+            logger.bind(tag=TAG).warning(
+                "声纹识别配置不完整，需配置远程URL、Bearer Token、user_id和说话人"
+            )
 
-            # 发送健康检查请求（API key通过Authorization头传递）
-            headers = {"Authorization": f"Bearer {self.api_key}"}
-            response = requests.get(health_url, headers=headers, timeout=3)
-            
-            if response.status_code == 200:
-                result = response.json()
-                if result.get("status") == "healthy":
-                    logger.bind(tag=TAG).info("声纹识别服务器健康检查通过")
-                    is_healthy = True
-                else:
-                    logger.bind(tag=TAG).warning(f"声纹识别服务器状态异常: {result}")
-                    is_healthy = False
-            else:
-                logger.bind(tag=TAG).warning(f"声纹识别服务器健康检查失败: HTTP {response.status_code}")
-                is_healthy = False
-                
-        except requests.exceptions.ConnectTimeout:
-            logger.bind(tag=TAG).warning("声纹识别服务器连接超时")
-            is_healthy = False
-        except requests.exceptions.ConnectionError:
-            logger.bind(tag=TAG).warning("声纹识别服务器连接被拒绝")
-            is_healthy = False
-        except Exception as e:
-            logger.bind(tag=TAG).warning(f"声纹识别服务器健康检查异常: {e}")
-            is_healthy = False
-        
-        # 使用全局缓存管理器缓存结果
-        cache_manager.set(CacheType.VOICEPRINT_HEALTH, cache_key, is_healthy)
-        logger.bind(tag=TAG).info(f"健康检查结果已缓存: {is_healthy}")
-        
-        return is_healthy
-    
-    async def identify_speaker(self, audio_data: bytes, session_id: str) -> Optional[str]:
-        """识别说话人"""
-        if not self.enabled or not self.api_url or not self.api_key:
-            logger.bind(tag=TAG).debug("声纹识别功能已禁用或未配置，跳过识别")
-            return None
-            
+    @staticmethod
+    def _bounded_float(value, minimum: float, maximum: float, default: float) -> float:
         try:
-            api_start_time = time.monotonic()
-            
-            # 准备请求头
-            headers = {
-                'Authorization': f'Bearer {self.api_key}',
-                'Accept': 'application/json'
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return default
+        return min(maximum, max(minimum, parsed))
+
+    @staticmethod
+    def _legacy_token_from_url(raw_url: str) -> str:
+        if not raw_url:
+            return ""
+        try:
+            return parse_qs(urlparse(raw_url).query).get("key", [""])[0]
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _build_identify_url(raw_url: str) -> Optional[str]:
+        if not raw_url:
+            return None
+        try:
+            parsed = urlparse(raw_url)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                return None
+            path = (parsed.path or "").rstrip("/")
+            for suffix in ("/health", "/docs", "/openapi.json"):
+                if path.endswith("/voiceprint" + suffix):
+                    path = path[: -len(suffix)]
+                    break
+            if not path:
+                path = "/voiceprint"
+            elif not path.endswith("/voiceprint"):
+                path += "/voiceprint"
+            safe_root = urlunparse((parsed.scheme, parsed.netloc, path, "", "", ""))
+            return safe_root + "/identify"
+        except Exception:
+            return None
+
+    @staticmethod
+    def _is_public_target(raw_url: str) -> bool:
+        try:
+            host = urlparse(raw_url).hostname
+            if not host:
+                return False
+            addresses = {
+                item[4][0]
+                for item in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
             }
-            
-            # 准备multipart/form-data数据
-            data = aiohttp.FormData()
-            data.add_field('speaker_ids', ','.join(self.speaker_ids))
-            data.add_field('file', audio_data, filename='audio.wav', content_type='audio/wav')
-            
-            timeout = aiohttp.ClientTimeout(total=10)
-            
-            # 网络请求
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(self.api_url, headers=headers, data=data) as response:
-                    
-                    if response.status == 200:
-                        result = await response.json()
-                        speaker_id = result.get("speaker_id")
-                        score = result.get("score", 0)
-                        total_elapsed_time = time.monotonic() - api_start_time
-                        
-                        logger.bind(tag=TAG).info(f"声纹识别耗时: {total_elapsed_time:.3f}s")
-                        
-                        # 相似度阈值检查
-                        if score < self.similarity_threshold:
-                            logger.bind(tag=TAG).warning(f"声纹识别相似度{score:.3f}低于阈值{self.similarity_threshold}")
-                            return "未知说话人"
-                        
-                        if speaker_id and speaker_id in self.speaker_map:
-                            result_name = self.speaker_map[speaker_id]["name"]
-                            logger.bind(tag=TAG).info(f"声纹识别成功: {result_name} (相似度: {score:.3f})")
-                            return result_name
-                        else:
-                            logger.bind(tag=TAG).warning(f"未识别的说话人ID: {speaker_id}")
-                            return "未知说话人"
-                    else:
-                        logger.bind(tag=TAG).error(f"声纹识别API错误: HTTP {response.status}")
-                        return None
-                        
-        except asyncio.TimeoutError:
-            elapsed = time.monotonic() - api_start_time
-            logger.bind(tag=TAG).error(f"声纹识别超时: {elapsed:.3f}s")
-            return None
-        except Exception as e:
-            elapsed = time.monotonic() - api_start_time
-            logger.bind(tag=TAG).error(f"声纹识别失败: {e}")
+            if not addresses:
+                return False
+            for value in addresses:
+                address = ipaddress.ip_address(value)
+                if (
+                    address.is_private
+                    or address.is_loopback
+                    or address.is_link_local
+                    or address.is_multicast
+                    or address.is_unspecified
+                    or address.is_reserved
+                ):
+                    logger.bind(tag=TAG).warning("声纹识别URL指向非公网地址，已拒绝启用")
+                    return False
+            return True
+        except Exception as error:
+            logger.bind(tag=TAG).warning(
+                f"声纹识别URL解析失败: errorType={type(error).__name__}"
+            )
+            return False
+
+    def _parse_speakers(self) -> None:
+        for speaker in self.speakers:
+            parsed = self._parse_speaker(speaker)
+            if not parsed:
+                continue
+            speaker_id, name, description, remote_user_id = parsed
+            if speaker_id in self.speaker_map:
+                continue
+            self.speaker_map[speaker_id] = {
+                "name": name,
+                "description": description,
+                "user_id": remote_user_id,
+            }
+            self.candidates_by_user[remote_user_id].append(speaker_id)
+
+    def _parse_speaker(self, speaker) -> Optional[Tuple[str, str, str, str]]:
+        try:
+            if isinstance(speaker, dict):
+                speaker_id = str(speaker.get("speaker_id") or speaker.get("id") or "").strip()
+                name = str(speaker.get("name") or speaker.get("source_name") or "").strip()
+                description = str(
+                    speaker.get("description") or speaker.get("introduce") or ""
+                ).strip()
+                remote_user_id = str(speaker.get("user_id") or self.default_user_id).strip()
+            else:
+                parts = str(speaker).split(",", 2)
+                if len(parts) < 2:
+                    return None
+                speaker_id = parts[0].strip()
+                name = parts[1].strip()
+                description = parts[2].strip() if len(parts) >= 3 else ""
+                remote_user_id = self.default_user_id
+
+            if not speaker_id or not name or not remote_user_id:
+                return None
+            return speaker_id, name, description, remote_user_id
+        except Exception as error:
+            logger.bind(tag=TAG).warning(
+                f"解析声纹说话人配置失败: errorType={type(error).__name__}"
+            )
             return None
 
+    def feed_audio_frame(
+        self,
+        audio_data: bytes,
+        audio_have_voice: bool,
+        audio_format: str,
+        session_id: str,
+    ) -> None:
+        """累计一句话前段的有效人声，达到目标时长后立即预取身份。"""
+        if not self.enabled or not audio_data or self._prefetch_task is not None:
+            return
+
+        try:
+            if audio_format == "pcm":
+                pcm_frame = bytes(audio_data)
+            else:
+                if self._sample_decoder is None:
+                    self._sample_decoder = opuslib_next.Decoder(16000, 1)
+                pcm_frame = self._sample_decoder.decode(audio_data, 960)
+        except opuslib_next.OpusError as error:
+            logger.bind(tag=TAG).debug(
+                f"声纹预取Opus解码失败: errorType={type(error).__name__}"
+            )
+            return
+        except Exception as error:
+            logger.bind(tag=TAG).warning(
+                f"声纹预取音频处理失败: errorType={type(error).__name__}"
+            )
+            return
+
+        if not audio_have_voice or not pcm_frame:
+            return
+
+        remaining = self._sample_target_bytes - len(self._sample_pcm)
+        if remaining <= 0:
+            return
+        self._sample_pcm.extend(pcm_frame[:remaining])
+        if len(self._sample_pcm) < self._sample_target_bytes:
+            return
+
+        wav_data = self._pcm_to_wav(bytes(self._sample_pcm))
+        if not wav_data:
+            self.reset_utterance(cancel_task=False)
+            return
+
+        self._sample_decoder = None
+        self._prefetch_started_at = time.monotonic()
+        self._prefetch_task = asyncio.get_running_loop().create_task(
+            self.identify_speaker(wav_data, session_id),
+            name=f"voiceprint-prefetch-{session_id}",
+        )
+        logger.bind(tag=TAG).debug(
+            f"声纹预取已启动: sample_seconds={self.sample_seconds:.2f}"
+        )
+
+    async def resolve_utterance_result(self) -> Optional[str]:
+        """句末消费预取结果；短句跳过，未完成时只等待有限预算。"""
+        task = self._prefetch_task
+        if task is None:
+            sampled_seconds = len(self._sample_pcm) / (16000 * 2)
+            if sampled_seconds > 0:
+                logger.bind(tag=TAG).debug(
+                    "有效语音不足，跳过声纹识别: "
+                    f"sampled={sampled_seconds:.3f}s, required={self.sample_seconds:.3f}s"
+                )
+            self.reset_utterance(cancel_task=False)
+            return None
+
+        try:
+            if task.done():
+                result = task.result()
+            elif self.result_wait_seconds <= 0:
+                task.cancel()
+                result = None
+            else:
+                result = await asyncio.wait_for(
+                    task, timeout=self.result_wait_seconds
+                )
+            elapsed = time.monotonic() - self._prefetch_started_at
+            logger.bind(tag=TAG).debug(
+                f"声纹预取消费完成: elapsed={elapsed:.3f}s, matched={bool(result)}"
+            )
+            return result
+        except asyncio.TimeoutError:
+            logger.bind(tag=TAG).warning(
+                "声纹预取超过句末等待预算，当前轮降级为无身份: "
+                f"wait={self.result_wait_seconds:.3f}s"
+            )
+            return None
+        except asyncio.CancelledError:
+            return None
+        except Exception as error:
+            logger.bind(tag=TAG).warning(
+                f"读取声纹预取结果失败: errorType={type(error).__name__}"
+            )
+            return None
+        finally:
+            self.reset_utterance(cancel_task=not task.done())
+
+    def reset_utterance(self, cancel_task: bool = True) -> None:
+        """清理当前句的采样器和预取任务。"""
+        task = self._prefetch_task
+        if cancel_task and task is not None and not task.done():
+            task.cancel()
+        self._prefetch_task = None
+        self._prefetch_started_at = 0.0
+        self._sample_pcm.clear()
+        self._sample_decoder = None
+
+    @staticmethod
+    def _pcm_to_wav(pcm_data: bytes) -> bytes:
+        if not pcm_data:
+            return b""
+        if len(pcm_data) % 2 != 0:
+            pcm_data = pcm_data[:-1]
+        wav_buffer = io.BytesIO()
+        try:
+            with wave.open(wav_buffer, "wb") as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(16000)
+                wav_file.writeframes(pcm_data)
+            return wav_buffer.getvalue()
+        except Exception as error:
+            logger.bind(tag=TAG).warning(
+                f"声纹预取WAV转换失败: errorType={type(error).__name__}"
+            )
+            return b""
+
+    async def _get_http_session(self) -> aiohttp.ClientSession:
+        if self._http_session is None or self._http_session.closed:
+            timeout = aiohttp.ClientTimeout(
+                total=self.timeout_seconds,
+                connect=min(3.0, self.timeout_seconds),
+            )
+            self._http_session = aiohttp.ClientSession(
+                timeout=timeout,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Accept": "application/json",
+                },
+            )
+        return self._http_session
+
+    async def identify_speaker(self, audio_data: bytes, session_id: str) -> Optional[str]:
+        """在当前智能体的远程 user_id 作用域中识别说话人。"""
+        if not self.enabled or not audio_data:
+            return None
+
+        request_started_at = time.monotonic()
+        try:
+            session = await self._get_http_session()
+            tasks = [
+                self._identify_group(session, remote_user_id, speaker_ids, audio_data)
+                for remote_user_id, speaker_ids in self.candidates_by_user.items()
+            ]
+            responses = await asyncio.gather(*tasks, return_exceptions=True)
+
+            valid_results = []
+            for response in responses:
+                if isinstance(response, Exception):
+                    logger.bind(tag=TAG).warning(
+                        f"声纹识别分组请求失败: errorType={type(response).__name__}"
+                    )
+                    continue
+                if response is not None:
+                    valid_results.append(response)
+
+            if not valid_results:
+                return None
+
+            speaker_id, score = max(valid_results, key=lambda item: item[1])
+            elapsed = time.monotonic() - request_started_at
+            logger.bind(tag=TAG).info(f"声纹识别耗时: {elapsed:.3f}s")
+
+            if score < self.similarity_threshold or not speaker_id:
+                logger.bind(tag=TAG).info(
+                    f"声纹识别未达到阈值: score={score:.3f}, threshold={self.similarity_threshold}"
+                )
+                return "未知说话人"
+
+            speaker = self.speaker_map.get(speaker_id)
+            if not speaker:
+                logger.bind(tag=TAG).warning("声纹服务返回了当前智能体候选集之外的说话人")
+                return "未知说话人"
+
+            logger.bind(tag=TAG).info(
+                f"声纹识别成功: {speaker['name']} (相似度: {score:.3f})"
+            )
+            return speaker["name"]
+        except asyncio.TimeoutError:
+            elapsed = time.monotonic() - request_started_at
+            logger.bind(tag=TAG).warning(f"声纹识别超时: {elapsed:.3f}s")
+            return None
+        except Exception as error:
+            logger.bind(tag=TAG).warning(
+                f"声纹识别失败: errorType={type(error).__name__}"
+            )
+            return None
+
+    async def close(self) -> None:
+        self.reset_utterance()
+        if self._http_session is not None and not self._http_session.closed:
+            await self._http_session.close()
+        self._http_session = None
+
+    async def _identify_group(
+        self,
+        session: aiohttp.ClientSession,
+        remote_user_id: str,
+        speaker_ids: List[str],
+        audio_data: bytes,
+    ) -> Optional[Tuple[str, float]]:
+        data = aiohttp.FormData()
+        data.add_field("user_id", remote_user_id)
+        data.add_field("speaker_ids", ",".join(speaker_ids))
+        data.add_field(
+            "file",
+            audio_data,
+            filename="audio.wav",
+            content_type="audio/wav",
+        )
+
+        async with session.post(self.api_url, data=data) as response:
+            if response.status != 200:
+                error_code = "unknown"
+                try:
+                    payload = await response.json()
+                    error_code = str(payload.get("code") or "unknown")
+                except Exception:
+                    pass
+                logger.bind(tag=TAG).warning(
+                    f"声纹识别API错误: HTTP {response.status}, code={error_code}"
+                )
+                return None
+
+            result = await response.json()
+            try:
+                score = float(result.get("score") or 0)
+            except (TypeError, ValueError):
+                score = 0.0
+            if not math.isfinite(score):
+                score = 0.0
+            return str(result.get("speaker_id") or ""), score
