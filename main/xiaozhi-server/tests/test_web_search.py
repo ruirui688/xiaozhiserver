@@ -154,13 +154,15 @@ def test_web_search_description_preserves_user_temporal_intent():
     assert "查询词要体现用户要查的事实目标" in query_description
 
 
-def test_base_prompt_routes_latest_queries_to_web_search():
+def test_base_prompt_does_not_claim_optional_tools_are_always_available():
     prompt = (SERVER_ROOT / "agent-base-prompt.txt").read_text(encoding="utf-8")
 
-    assert "非天气类联网搜索、查最新、实时资料、今天/昨天/刚发生/刚结束的事实、结果、状态、数据→web_search" in prompt
-    assert "禁止在调用工具前用静态知识否定用户的问题" in prompt
-    assert "天气预警、最新/实时天气状态、其他城市天气→get_weather" in prompt
-    assert "不要因为用户说“搜一下”或“最新”就把天气类问题交给web_search" in prompt
+    assert "{{ available_tools_prompt }}" in prompt
+    assert "原生 tools / function calling schema" in prompt
+    assert "has_exit_tool" not in prompt
+    assert "必须调工具：播放音乐→play_music" not in prompt
+    assert "其他城市天气→get_weather" not in prompt
+    assert "非天气类联网搜索" not in prompt
 
 
 def test_web_search_ignores_lang_argument_without_losing_query():

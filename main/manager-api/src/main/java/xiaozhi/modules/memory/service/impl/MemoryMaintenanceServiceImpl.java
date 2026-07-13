@@ -49,7 +49,6 @@ import xiaozhi.modules.memory.prompt.PowerMemPrompts;
 import xiaozhi.modules.memory.service.MemoryMaintenanceService;
 import xiaozhi.modules.memory.service.impl.maintenance.MemoryMaintenanceOutputParser;
 import xiaozhi.modules.memory.utils.MemoryHelper;
-import xiaozhi.modules.memory.utils.MemorySimilarityUtils;
 import xiaozhi.modules.memory.utils.MemoryTierHelper;
 import xiaozhi.modules.memory.vo.MemoryRebuildResultVO;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
@@ -113,12 +112,9 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
             JSONObject factJson = MemoryHelper.toJsonObject(item);
             if (factJson == null) continue;
 
-            String factText = factJson.getStr("text", factJson.getStr("canonical_text"));
-
-            // Stage 2: 语义搜索 + 决策
-            List<MemoryFactEntity> similarFacts = findSimilarFacts(agentId, null,
-                    factText + "\n" + conversation, maintenanceModelId);
-            String decisionPrompt = buildDecisionPrompt(factJson, similarFacts);
+            // Stage 2: 将当前作用域内有界的文本事实交给维护 LLM 直接决策。
+            List<MemoryFactEntity> existingFacts = loadMaintenanceFacts(agentId, agentId);
+            String decisionPrompt = buildDecisionPrompt(factJson, existingFacts, conversation);
             String decisionOutput = llmService.generateJson(decisionPrompt, maintenanceModelId);
             if (StringUtils.isBlank(decisionOutput)) continue;
 
@@ -297,7 +293,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         if (StringUtils.isBlank(maintenanceModelId)) {
             return;
         }
-        String promptInput = StringUtils.abbreviate(content, MemoryHelper.MAX_MAINTENANCE_INPUT_CHARS);
+        String promptInput = "用户: " + StringUtils.abbreviate(content, MemoryHelper.MAX_MAINTENANCE_INPUT_CHARS);
 
         // Stage 1: 提取事实
         String extractionPrompt = PowerMemPrompts.EXTRACTION_PROMPT.replace("{conversation}", promptInput);
@@ -316,14 +312,9 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
             JSONObject factJson = MemoryHelper.toJsonObject(item);
             if (factJson == null) continue;
 
-            String factText = factJson.getStr("text", factJson.getStr("canonical_text"));
-
-            // Stage 2a: 语义搜索
-            List<MemoryFactEntity> similarFacts = findSimilarFacts(agent.getId(), null,
-                    factText + "\n" + content, maintenanceModelId);
-
-            // Stage 2b: 决策
-            String decisionPrompt = buildDecisionPrompt(factJson, similarFacts);
+            // Stage 2: 维护 LLM 直接对比当前作用域内的文本事实并决策。
+            List<MemoryFactEntity> existingFacts = loadMaintenanceFacts(agent.getId(), scopeId);
+            String decisionPrompt = buildDecisionPrompt(factJson, existingFacts, promptInput);
             String decisionOutput = llmService.generateJson(decisionPrompt, maintenanceModelId);
             if (StringUtils.isBlank(decisionOutput)) {
                 continue;
@@ -513,14 +504,15 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         return StringUtils.abbreviate(sb.toString(), MemoryHelper.SESSION_MAX_CHARS);
     }
 
-    private String buildDecisionPrompt(JSONObject factJson, List<MemoryFactEntity> similarFacts) {
-        StringBuilder similarBlock = new StringBuilder();
-        if (similarFacts == null || similarFacts.isEmpty()) {
-            similarBlock.append("（无语义相似的已有记忆）");
+    private String buildDecisionPrompt(JSONObject factJson, List<MemoryFactEntity> existingFacts,
+                                       String evidenceContext) {
+        StringBuilder existingBlock = new StringBuilder();
+        if (existingFacts == null || existingFacts.isEmpty()) {
+            existingBlock.append("（当前作用域无已有长期记忆）");
         } else {
-            for (int i = 0; i < similarFacts.size(); i++) {
-                MemoryFactEntity f = similarFacts.get(i);
-                similarBlock.append(i + 1).append(". id=").append(f.getMemoryId())
+            for (int i = 0; i < existingFacts.size(); i++) {
+                MemoryFactEntity f = existingFacts.get(i);
+                existingBlock.append(i + 1).append(". id=").append(f.getMemoryId())
                         .append(" category=").append(f.getCategory())
                         .append(" text=").append(f.getCanonicalText())
                         .append("\n");
@@ -535,63 +527,24 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                         ? factJson.get("confidence") : 0.7))
                 .replace("{fact_importance}", String.valueOf(factJson.get("importance") != null
                         ? factJson.get("importance") : 0.7))
-                .replace("{similar_count}", String.valueOf(similarFacts == null ? 0 : similarFacts.size()))
-                .replace("{similar_memories}", similarBlock.toString());
+                .replace("{existing_count}", String.valueOf(existingFacts == null ? 0 : existingFacts.size()))
+                .replace("{existing_memories}", existingBlock.toString())
+                .replace("{evidence_context}", StringUtils.defaultIfBlank(evidenceContext, "无可用对话证据"));
     }
 
-    private List<MemoryFactEntity> findSimilarFacts(String agentId, String scopeId, String text, String modelId) {
-        float[] queryEmbedding = generateEmbedding(text, modelId);
+    private List<MemoryFactEntity> loadMaintenanceFacts(String agentId, String scopeId) {
         QueryWrapper<MemoryFactEntity> wrapper = new QueryWrapper<MemoryFactEntity>()
                 .eq("agent_id", agentId)
                 .eq("status", MemoryHelper.STATUS_ACTIVE)
                 .and(w -> w.isNull("expires_at").or().gt("expires_at", new Date()));
         if (StringUtils.isNotBlank(scopeId)) {
-            wrapper.eq("scope_type", MemoryHelper.SCOPE_DEVICE).eq("scope_id", scopeId);
+            wrapper.and(w -> w.eq("scope_type", MemoryHelper.SCOPE_DEVICE).eq("scope_id", scopeId)
+                    .or()
+                    .eq("scope_type", MemoryHelper.SCOPE_DEVICE).eq("scope_id", agentId));
         }
-        List<MemoryFactEntity> allActive = factDao.selectList(wrapper
+        return factDao.selectList(wrapper
                 .orderByDesc("importance", "last_seen_at")
                 .last("LIMIT 100"));
-
-        if (allActive.isEmpty()) return List.of();
-
-        if (queryEmbedding != null) {
-            List<Map.Entry<MemoryFactEntity, Double>> scored = new ArrayList<>();
-            for (MemoryFactEntity fact : allActive) {
-                float[] factEmb = MemorySimilarityUtils.parseEmbedding(fact.getEmbeddingJson());
-                if (factEmb != null) {
-                    double sim = MemorySimilarityUtils.cosineSimilarity(queryEmbedding, factEmb);
-                    scored.add(Map.entry(fact, sim));
-                }
-            }
-            scored.sort((a, b) -> Double.compare(b.getValue(), a.getValue()));
-            List<MemoryFactEntity> top = new ArrayList<>();
-            for (int i = 0; i < Math.min(10, scored.size()); i++) {
-                top.add(scored.get(i).getKey());
-            }
-            return top;
-        }
-
-        // Embedding generation failed (e.g. upstream embedding model unavailable).
-        // Return empty list to signal "no semantically similar facts found" so the
-        // decision LLM treats the incoming fact as new rather than being biased by
-        // top-N-by-importance results that are not actually similar.
-        log.warn("findSimilarFacts: embedding generation returned null for agentId={}, returning empty list", agentId);
-        return List.of();
-    }
-
-    private float[] generateEmbedding(String text, String modelId) {
-        try {
-            List<Double> vector = llmService.generateEmbedding(text, modelId);
-            if (vector == null || vector.isEmpty()) return null;
-            float[] result = new float[vector.size()];
-            for (int i = 0; i < vector.size(); i++) {
-                result[i] = vector.get(i).floatValue();
-            }
-            return result;
-        } catch (Exception e) {
-            log.debug("生成嵌入向量失败（将回退到维护模型上下文决策）: {}", e.getMessage());
-            return null;
-        }
     }
 
     private boolean applyMaintenanceDecision(AgentEntity agent, String scopeId, String sourceEventId, JSONObject json,
@@ -731,7 +684,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         String dimensionsJson = extractDimensionsJson(json);
 
         if ("UPDATE".equals(action) && StringUtils.isNotBlank(relatedId)) {
-            MemoryFactEntity fact = findRelatedFact(agent.getId(), relatedId);
+            MemoryFactEntity fact = findRelatedFact(agent.getId(), scopeId, relatedId);
             if (fact != null) {
                 // Check if the new canonical_text already exists as a different fact
                 // (i.e. the LLM is trying to update this fact to match another one).
@@ -793,6 +746,13 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                 log.info("维护模型更新事实, memoryId={}, text={}", fact.getMemoryId(), canonical);
                 return true;
             }
+            log.warn("维护模型 UPDATE 指向无效或越界的 related_memory_id，已拒绝执行: agentId={}, relatedMemoryId={}",
+                    agent.getId(), relatedId);
+            return false;
+        }
+        if ("UPDATE".equals(action)) {
+            log.warn("维护模型 UPDATE 缺少 related_memory_id，已拒绝执行: agentId={}", agent.getId());
+            return false;
         }
 
         // ADD
@@ -830,10 +790,6 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         fact.setMemoryTier(tier);
         fact.setExpiresAt(resolveExpiresAt(tier));
         if (StringUtils.isNotBlank(dimensionsJson)) fact.setImportanceDimensions(dimensionsJson);
-        float[] embedding = generateEmbedding(canonical, modelId);
-        if (embedding != null) {
-            fact.setEmbeddingJson(MemorySimilarityUtils.encodeEmbedding(embedding));
-        }
         fact.setValidFrom(new Date());
         fact.setFirstSeenAt(new Date());
         fact.setLastSeenAt(new Date());
@@ -958,19 +914,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
     }
 
     private String resolveSensitivity(JSONObject json, String canonicalText) {
-        String sensitivity = MemoryHelper.normalizeSensitivity(json == null ? null : json.getStr("sensitivity"));
-        String text = StringUtils.defaultString(canonicalText);
-        if (text.contains("不想上班") && (text.contains("保密") || text.contains("不要") || text.contains("钟文杰"))) {
-            return "sensitive";
-        }
-        if (text.contains("生日") || text.contains("农历")) {
-            return "sensitive";
-        }
-        if ((text.contains("科目二") || text.contains("科二") || text.contains("驾照"))
-                && (text.contains("六次") || text.contains("第六次") || text.contains("6次") || text.contains("第6次"))) {
-            return "sensitive";
-        }
-        return sensitivity;
+        return MemoryHelper.normalizeSensitivity(json == null ? null : json.getStr("sensitivity"));
     }
 
     private String extractDimensionsJson(JSONObject json) {
@@ -1161,11 +1105,9 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         for (Object item : facts) {
             JSONObject factJson = MemoryHelper.toJsonObject(item);
             if (factJson == null) continue;
-            String factText = factJson.getStr("text", factJson.getStr("canonical_text"));
-
-            List<MemoryFactEntity> similarFacts = findSimilarFacts(agent.getId(), scopeId,
-                    factText + "\n" + conversation, maintenanceModelId);
-            String decisionOutput = llmService.generateJson(buildDecisionPrompt(factJson, similarFacts), maintenanceModelId);
+            List<MemoryFactEntity> existingFacts = loadMaintenanceFacts(agent.getId(), scopeId);
+            String decisionOutput = llmService.generateJson(
+                    buildDecisionPrompt(factJson, existingFacts, conversation), maintenanceModelId);
             JSONObject decision = outputParser.parseDecisionResult(decisionOutput);
             if (decision == null) continue;
             outputParser.mergeExtractionIntoDecision(factJson, decision);
@@ -1262,15 +1204,20 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         revisionDao.insert(revision);
     }
 
-    private MemoryFactEntity findRelatedFact(String agentId, String relatedMemoryId) {
+    private MemoryFactEntity findRelatedFact(String agentId, String scopeId, String relatedMemoryId) {
         if (StringUtils.isBlank(relatedMemoryId)) {
             return null;
         }
-        return factDao.selectOne(new QueryWrapper<MemoryFactEntity>()
+        QueryWrapper<MemoryFactEntity> wrapper = new QueryWrapper<MemoryFactEntity>()
                 .eq("agent_id", agentId)
                 .eq("memory_id", relatedMemoryId)
-                .ne("status", MemoryHelper.STATUS_DELETED)
-                .last("LIMIT 1"));
+                .eq("status", MemoryHelper.STATUS_ACTIVE);
+        if (StringUtils.isNotBlank(scopeId)) {
+            wrapper.and(w -> w.eq("scope_type", MemoryHelper.SCOPE_DEVICE).eq("scope_id", scopeId)
+                    .or()
+                    .eq("scope_type", MemoryHelper.SCOPE_DEVICE).eq("scope_id", agentId));
+        }
+        return factDao.selectOne(wrapper.last("LIMIT 1"));
     }
 
     private void refreshFactEvidence(MemoryFactEntity fact, BigDecimal confidence, String actorType, String actorId, String reason) {

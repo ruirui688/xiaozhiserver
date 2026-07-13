@@ -282,6 +282,10 @@ request_params = {
 
 结论：主聊天模型看到的插件提示词通常不拼在 system prompt 里，而是作为 `tools` 字段进入模型请求。
 
+基础 system prompt 不再无条件宣称 `web_search`、`get_weather`、`play_music` 等可选工具存在。`PromptManager` 从 `UnifiedToolHandler.get_functions()` 返回的同一份真实 schema 提取工具名，写入 `<available_tools>` 动态索引；每轮请求前会再次同步该索引，以覆盖 MCP、设备 IoT 或设备 MCP 在连接建立后动态注册工具的情况。工具的用途、参数和限制仍以原生 `tools` schema 为唯一事实来源，动态索引只用于明确能力边界，未注册工具不得出现在该索引中。
+
+如果模型仍因历史上下文或 provider 异常返回未注册工具调用，`UnifiedToolHandler` 会先通过当前 `ToolManager` 注册表拒绝，再决定是否向设备展示工具状态；因此设备不会先看到 `% web_search` 之类并不存在的工具正在执行。
+
 ## 9. intent_llm 注入
 
 当使用 `intent_llm` 时，工具描述会被拼进意图识别系统提示词。

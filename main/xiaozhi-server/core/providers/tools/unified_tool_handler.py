@@ -184,6 +184,15 @@ class UnifiedToolHandler:
 
             self.logger.debug(f"调用函数: {function_name}, 参数: {arguments}")
 
+            # 当前注册表是执行权限的事实来源。先拒绝幻觉或过期调用，
+            # 避免设备先显示一个实际上不存在的工具正在执行。
+            if not self.has_tool(function_name):
+                self.logger.warning(f"拒绝未注册工具调用: {function_name}")
+                return ActionResponse(
+                    action=Action.NOTFOUND,
+                    response=f"工具 {function_name} 不存在",
+                )
+
             # 发送工具调用显示消息到设备
             if self._should_display_tool_call(function_name):
                 try:
