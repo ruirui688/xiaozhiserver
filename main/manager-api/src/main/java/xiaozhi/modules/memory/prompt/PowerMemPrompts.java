@@ -76,8 +76,10 @@ public final class PowerMemPrompts {
             原始对话证据：
             {evidence_context}
 
-            当前作用域内已有的生效文本记忆（共 {existing_count} 条）：
+            当前智能体全部生效文本记忆（共 {existing_count} 条）：
             {existing_memories}
+
+            当前 active 记忆容量：已使用 {current_memory_chars} / {max_memory_chars} 字。
 
             决策要求：
             1. 只根据原始证据和已有文本记忆判断，不使用固定关键词或预设业务分类。
@@ -90,11 +92,15 @@ public final class PowerMemPrompts {
             8. memory_type、category、canonical_text、confidence、importance、memory_tier、sensitivity 由你按语义确定。
             9. importance 代表未来可复用价值，confidence 代表证据确定性；低价值或低确定性内容返回 NONE。
             10. 隐私事实按其真实敏感程度标记 sensitivity；不要因为示例或固定词表强行分类。
+            11. max_memory_chars 是整个智能体的 active 记忆总上限，不是单设备或单作用域上限。容量不足时，低价值、临时、含糊或无法复用的新事实应返回 NONE。
+            12. 如果新事实明显比部分旧事实更值得长期保留，可以在 ADD/UPDATE 中填写 evict_memory_ids；只能选择已有列表中的真实 ID。它们会被归档而不是物理删除。
+            13. evict_memory_ids 应选择尽可能少且相对不重要的旧事实；不要驱逐本次 UPDATE 的 related_memory_id，也不要为了腾空间删除高价值稳定事实。
 
             JSON 格式：
             {
               "action": "ADD|UPDATE|ARCHIVE|DELETE|NONE",
               "related_memory_id": "仅 UPDATE/ARCHIVE/DELETE 时填写已有记忆 ID，否则为空",
+              "evict_memory_ids": ["容量不足时需要归档的已有记忆 ID"],
               "memory_type": "最终确定的记忆类型",
               "category": "最终确定的分类",
               "canonical_text": "可直接写入记忆的中文事实，不带语气词",

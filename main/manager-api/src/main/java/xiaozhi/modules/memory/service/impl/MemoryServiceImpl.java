@@ -9,8 +9,6 @@ import java.util.List;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 
@@ -29,6 +27,7 @@ import xiaozhi.modules.memory.dao.MemoryFactDao;
 import xiaozhi.modules.memory.dao.MemoryForgetTombstoneDao;
 import xiaozhi.modules.memory.dao.MemoryProfileDao;
 import xiaozhi.modules.memory.dao.MemoryRevisionDao;
+import xiaozhi.modules.memory.dao.MemorySessionStateDao;
 import xiaozhi.modules.memory.dao.MemorySourceEventDao;
 import xiaozhi.modules.memory.dao.MemoryToolBehaviorDao;
 import xiaozhi.modules.memory.dto.MemoryEventDTO;
@@ -67,6 +66,7 @@ public class MemoryServiceImpl implements MemoryService {
     private final MemoryProfileDao profileDao;
     private final MemoryToolBehaviorDao toolBehaviorDao;
     private final MemoryForgetTombstoneDao tombstoneDao;
+    private final MemorySessionStateDao sessionStateDao;
     private final DeviceDao deviceDao;
     private final AgentDao agentDao;
 
@@ -106,12 +106,11 @@ public class MemoryServiceImpl implements MemoryService {
         event.setCreatedAt(new Date());
         sourceEventDao.insert(event);
 
-        if (StringUtils.isBlank(content)) {
-            return;
-        }
-        if (shouldRunMaintenanceExtraction(dto, content)) {
-            runAfterCommit(() -> memoryMaintenanceService
-                    .createCandidatesWithMaintenanceModel(scope.agent, scope.scopeId, event.getEventId(), content));
+        if (StringUtils.isNotBlank(content)
+                && StringUtils.isNotBlank(event.getSessionId())
+                && event.getId() != null) {
+            sessionStateDao.touchSession(scope.agent.getId(), event.getSessionId(), event.getId(),
+                    event.getCreatedAt(), Integer.valueOf(1).equals(dto.getChatType()));
         }
     }
 
@@ -187,7 +186,11 @@ public class MemoryServiceImpl implements MemoryService {
         MemoryFactEntity fact = getFact(agentId, memoryId);
         String before = JsonUtils.toJsonString(fact);
         if (StringUtils.isNotBlank(dto.getCanonicalText())) {
-            fact.setCanonicalText(dto.getCanonicalText().trim());
+            String canonical = dto.getCanonicalText().trim();
+            if (MemoryHelper.STATUS_ACTIVE.equals(fact.getStatus())) {
+                ensureActiveMemoryCapacity(agentId, fact, canonical);
+            }
+            fact.setCanonicalText(canonical);
         }
         if (StringUtils.isNotBlank(dto.getMemoryType())) {
             fact.setMemoryType(dto.getMemoryType());
@@ -341,33 +344,6 @@ public class MemoryServiceImpl implements MemoryService {
         revisionDao.insert(revision);
     }
 
-    private void runAfterCommit(Runnable task) {
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            safeRunMaintenanceTask(task);
-            return;
-        }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                safeRunMaintenanceTask(task);
-            }
-        });
-    }
-
-    private void safeRunMaintenanceTask(Runnable task) {
-        try {
-            task.run();
-        } catch (Exception e) {
-            log.warn("长期记忆维护模型抽取失败: {}", e.getMessage());
-        }
-    }
-
-    private boolean shouldRunMaintenanceExtraction(MemoryEventDTO dto, String content) {
-        return dto != null
-                && Integer.valueOf(1).equals(dto.getChatType())
-                && StringUtils.isNotBlank(content);
-    }
-
     private String applyCandidateToFact(AgentScope scope, MemoryCandidateEntity candidate, String actorType, String actorId) {
         JSONObject payload = MemoryHelper.parsePayload(candidate.getPayload());
         String action = MemoryHelper.normalizeCandidateAction(payload.getStr("action"));
@@ -390,10 +366,12 @@ public class MemoryServiceImpl implements MemoryService {
             return relatedFact.getMemoryId();
         }
         if ("UPDATE".equals(action) && relatedFact != null) {
+            String canonical = MemoryHelper.cleanupMemoryText(candidate.getCanonicalText());
+            ensureActiveMemoryCapacity(scope.agent.getId(), relatedFact, canonical);
             String before = JsonUtils.toJsonString(relatedFact);
             relatedFact.setMemoryType(MemoryHelper.normalizeMemoryLabel(candidate.getMemoryType(), "长期记忆"));
             relatedFact.setCategory(MemoryHelper.normalizeMemoryLabel(candidate.getCategory(), "未分类"));
-            relatedFact.setCanonicalText(MemoryHelper.cleanupMemoryText(candidate.getCanonicalText()));
+            relatedFact.setCanonicalText(canonical);
             relatedFact.setConfidence(MemoryHelper.max(relatedFact.getConfidence(), candidate.getConfidence()));
             relatedFact.setImportance(MemoryHelper.max(relatedFact.getImportance(), candidate.getImportance()));
             relatedFact.setSensitivity(MemoryHelper.normalizeSensitivity(candidate.getSensitivity()));
@@ -435,9 +413,13 @@ public class MemoryServiceImpl implements MemoryService {
                 .last("LIMIT 1");
         MemoryFactEntity existing = factDao.selectOne(wrapper);
         if (existing != null) {
+            if (!MemoryHelper.STATUS_ACTIVE.equals(existing.getStatus())) {
+                ensureActiveMemoryCapacity(scope.agent.getId(), existing, existing.getCanonicalText());
+            }
             refreshFactEvidence(existing, MemoryHelper.DEFAULT_SCORE, actorType, actorId, "重复证据刷新");
             return existing.getMemoryId();
         }
+        ensureActiveMemoryCapacity(scope.agent.getId(), null, canonical);
         MemoryFactEntity fact = new MemoryFactEntity();
         fact.setMemoryId(MemoryHelper.uuid());
         fact.setAgentId(scope.agent.getId());
@@ -516,6 +498,26 @@ public class MemoryServiceImpl implements MemoryService {
                 .eq("memory_id", relatedMemoryId)
                 .ne("status", MemoryHelper.STATUS_DELETED)
                 .last("LIMIT 1"));
+    }
+
+    private void ensureActiveMemoryCapacity(String agentId, MemoryFactEntity replacedFact, String canonicalText) {
+        // 人工新增/编辑/候选确认与自动维护共用同一智能体行锁。
+        agentDao.selectOne(new QueryWrapper<AgentEntity>()
+                .eq("id", agentId)
+                .last("FOR UPDATE"));
+        int currentChars = factDao.selectList(new QueryWrapper<MemoryFactEntity>()
+                        .eq("agent_id", agentId)
+                        .eq("status", MemoryHelper.STATUS_ACTIVE))
+                .stream()
+                .filter(fact -> fact != null && StringUtils.isNotEmpty(fact.getCanonicalText()))
+                .mapToInt(fact -> MemoryHelper.characterCount(fact.getCanonicalText()))
+                .sum();
+        int replacedChars = replacedFact != null && MemoryHelper.STATUS_ACTIVE.equals(replacedFact.getStatus())
+                ? MemoryHelper.characterCount(replacedFact.getCanonicalText()) : 0;
+        int projectedChars = currentChars - replacedChars + MemoryHelper.characterCount(canonicalText);
+        if (projectedChars > MemoryHelper.MAX_ACTIVE_MEMORY_CHARS) {
+            throw new IllegalArgumentException("单个智能体的生效记忆总量不能超过 2000 字符");
+        }
     }
 
     private void refreshFactEvidence(MemoryFactEntity fact, BigDecimal confidence, String actorType, String actorId, String reason) {
