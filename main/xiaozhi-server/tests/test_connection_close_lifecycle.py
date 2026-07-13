@@ -9,7 +9,10 @@ from config import settings
 
 settings.config_file_valid = True
 
+import core.connection as connection_module
+import core.handle.reportThreadManager as report_manager_module
 from core.connection import ConnectionHandler
+from core.handle.reportThreadManager import ReportQueue, ReportThreadManager
 
 
 class _Logger:
@@ -231,6 +234,61 @@ async def _component_created_during_close_is_not_assigned_or_opened():
     assert conn._modules_ready.is_set() is False
 
 
+async def _close_does_not_trigger_session_memory_processing(monkeypatch):
+    trigger_calls = []
+
+    async def fake_title(*args, **kwargs):
+        return None
+
+    async def forbidden_trigger(*args, **kwargs):
+        trigger_calls.append((args, kwargs))
+        return 0
+
+    monkeypatch.setattr(connection_module, "generate_and_save_chat_title", fake_title)
+    monkeypatch.setattr(
+        connection_module,
+        "trigger_session_memory_processing",
+        forbidden_trigger,
+        raising=False,
+    )
+
+    conn = _connection()
+    conn.session_id = "session-id"
+    conn.config = {"agent_id": "agent-id"}
+    conn.read_config_from_api = True
+    await conn._save_and_close(_WebSocket())
+
+    assert trigger_calls == []
+
+
+async def _close_flushes_pending_reports_before_releasing_resources(monkeypatch):
+    processed = []
+
+    async def fake_report(conn, report_type, text, audio_data, report_time):
+        processed.append((report_type, text, report_time))
+
+    monkeypatch.setattr(report_manager_module, "report", fake_report)
+    conn = _connection()
+    conn.read_config_from_api = True
+    conn.need_bind = False
+    conn.chat_history_conf = 1
+    conn.report_queue = ReportQueue()
+    conn.report_manager = ReportThreadManager()
+    conn.report_manager.start(conn)
+    expected = [
+        (1, "user", 1),
+        (2, "assistant", 2),
+    ]
+    for report_type, text, report_time in expected:
+        conn.report_queue.put((report_type, text, None, report_time))
+
+    await conn.close(_WebSocket())
+
+    assert sorted(processed, key=lambda item: item[2]) == expected
+    assert conn.report_queue.unfinished_tasks == 0
+    assert conn.report_queue.put((1, "late", None, 3)) is False
+
+
 def test_save_and_close_does_not_block_event_loop_during_joins_and_report_stop():
     asyncio.run(
         _save_and_close_does_not_block_event_loop_during_joins_and_report_stop()
@@ -247,3 +305,11 @@ def test_cancelled_background_initialize_cannot_start_component_thread():
 
 def test_component_created_during_close_is_not_assigned_or_opened():
     asyncio.run(_component_created_during_close_is_not_assigned_or_opened())
+
+
+def test_close_does_not_trigger_session_memory_processing(monkeypatch):
+    asyncio.run(_close_does_not_trigger_session_memory_processing(monkeypatch))
+
+
+def test_close_flushes_pending_reports_before_releasing_resources(monkeypatch):
+    asyncio.run(_close_flushes_pending_reports_before_releasing_resources(monkeypatch))

@@ -45,7 +45,6 @@ from config.manage_api_client import (
     generate_and_save_chat_title,
     get_managed_memory_query_timeout,
     query_managed_memory,
-    trigger_session_memory_processing,
 )
 from core.utils.model_config import has_runtime_config, normalize_runtime_config
 from core.utils.prompt_manager import PromptManager
@@ -56,7 +55,7 @@ from core.handle.audioInitializer import (
     initialize_asr as _ext_init_asr,
     initialize_voiceprint as _ext_init_voiceprint,
 )
-from core.handle.reportThreadManager import ReportThreadManager
+from core.handle.reportThreadManager import ReportQueue, ReportThreadManager
 from core.utils import textUtils
 from core.utils.correct_words import parse_correct_words
 from core.game import GameSessionManager
@@ -201,7 +200,7 @@ class ConnectionHandler:
         self._abort_lock = threading.Lock()
 
         # 添加上报线程池
-        self.report_queue = queue.Queue()
+        self.report_queue = ReportQueue()
         self.report_thread = None
         # 未来可以通过修改此处，调节asr的上报和tts的上报，目前默认都开启
         self.report_asr_enable = self.read_config_from_api
@@ -436,15 +435,6 @@ class ConnectionHandler:
                     )
                 )
 
-            # 守护线程3：PowerMem-style 会话记忆处理（全量对话分析）
-            agent_id = self.config.get("agent_id") if self.config else None
-            if self.session_id and agent_id and self.read_config_from_api:
-                threads.append(
-                    self._run_async_in_daemon_thread(
-                        trigger_session_memory_processing(self.session_id, agent_id),
-                        "session-memory",
-                    )
-                )
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"保存记忆失败: {e}")
         finally:
@@ -1945,7 +1935,6 @@ class ConnectionHandler:
             for q in [
                 self.tts.tts_text_queue,
                 self.tts.tts_audio_queue,
-                self.report_queue,
             ]:
                 if not q:
                     continue

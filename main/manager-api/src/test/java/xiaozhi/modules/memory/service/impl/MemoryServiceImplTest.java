@@ -3,6 +3,7 @@ package xiaozhi.modules.memory.service.impl;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -13,11 +14,15 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.util.Date;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 
@@ -35,6 +40,7 @@ import xiaozhi.modules.memory.dao.MemoryFactDao;
 import xiaozhi.modules.memory.dao.MemoryForgetTombstoneDao;
 import xiaozhi.modules.memory.dao.MemoryProfileDao;
 import xiaozhi.modules.memory.dao.MemoryRevisionDao;
+import xiaozhi.modules.memory.dao.MemorySessionStateDao;
 import xiaozhi.modules.memory.dao.MemorySourceEventDao;
 import xiaozhi.modules.memory.dao.MemoryToolBehaviorDao;
 import xiaozhi.modules.memory.dto.MemoryEventDTO;
@@ -44,6 +50,8 @@ import xiaozhi.modules.memory.dto.MemoryRememberDTO;
 import xiaozhi.modules.memory.dto.MemoryRebuildRequestDTO;
 import xiaozhi.modules.memory.entity.MemoryFactEntity;
 import xiaozhi.modules.memory.entity.MemoryForgetTombstoneEntity;
+import xiaozhi.modules.memory.entity.MemorySessionStateEntity;
+import xiaozhi.modules.memory.entity.MemorySourceEventEntity;
 import xiaozhi.modules.memory.service.impl.maintenance.MemoryMaintenanceOutputParser;
 import xiaozhi.modules.memory.vo.MemoryQueryVO;
 import xiaozhi.modules.memory.vo.MemoryRebuildResultVO;
@@ -65,14 +73,17 @@ class MemoryServiceImplTest {
     private final MemoryProfileDao profileDao = mock(MemoryProfileDao.class);
     private final MemoryToolBehaviorDao toolBehaviorDao = mock(MemoryToolBehaviorDao.class);
     private final MemoryForgetTombstoneDao tombstoneDao = mock(MemoryForgetTombstoneDao.class);
+    private final MemorySessionStateDao sessionStateDao = mock(MemorySessionStateDao.class);
     private final DeviceDao deviceDao = mock(DeviceDao.class);
     private final AgentDao agentDao = mock(AgentDao.class);
     private final LLMService llmService = mock(LLMService.class);
     private final ModelConfigService modelConfigService = mock(ModelConfigService.class);
     private final ModelRuntimeAssembler modelRuntimeAssembler = mock(ModelRuntimeAssembler.class);
     private final AgentChatHistoryService agentChatHistoryService = mock(AgentChatHistoryService.class);
+    private final TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
 
     private MemoryServiceImpl memoryService;
+    private MemoryMaintenanceServiceImpl memoryMaintenanceService;
 
     @BeforeEach
     void setUp() {
@@ -86,19 +97,21 @@ class MemoryServiceImplTest {
                 llmService,
                 modelConfigService,
                 modelRuntimeAssembler);
-        MemoryMaintenanceServiceImpl memoryMaintenanceService = new MemoryMaintenanceServiceImpl(
+        memoryMaintenanceService = new MemoryMaintenanceServiceImpl(
                 sourceEventDao,
                 candidateDao,
                 factDao,
                 revisionDao,
                 tombstoneDao,
+                sessionStateDao,
                 deviceDao,
                 agentDao,
                 llmService,
                 modelConfigService,
                 modelRuntimeAssembler,
                 agentChatHistoryService,
-                new MemoryMaintenanceOutputParser());
+                new MemoryMaintenanceOutputParser(),
+                transactionTemplate);
         memoryService = new MemoryServiceImpl(
                 sourceEventDao,
                 candidateDao,
@@ -107,6 +120,7 @@ class MemoryServiceImplTest {
                 profileDao,
                 toolBehaviorDao,
                 tombstoneDao,
+                sessionStateDao,
                 deviceDao,
                 agentDao,
                 memoryQueryService,
@@ -133,6 +147,16 @@ class MemoryServiceImplTest {
         when(candidateDao.selectList(any(Wrapper.class))).thenReturn(List.of());
         when(factDao.selectCount(any(Wrapper.class))).thenReturn(0L);
         when(llmService.generateEmbedding(any(), eq(MAINTENANCE_MODEL_ID))).thenReturn(null);
+        when(sourceEventDao.insert(any())).thenAnswer(invocation -> {
+            xiaozhi.modules.memory.entity.MemorySourceEventEntity event = invocation.getArgument(0);
+            event.setId(100L);
+            return 1;
+        });
+        when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            TransactionCallback<Object> callback = invocation.getArgument(0);
+            return callback.doInTransaction(mock(TransactionStatus.class));
+        });
     }
 
     @Test
@@ -587,37 +611,7 @@ class MemoryServiceImplTest {
     }
 
     @Test
-    void recordEventMaintenanceAddPreservesSourceEventId() {
-        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of());
-        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID)))
-                .thenReturn("""
-                        {
-                          "facts": [
-                            {
-                              "text": "用户喜欢自己熬番茄酱配饺子",
-                              "category": "饮食偏好",
-                              "memory_type": "用户偏好",
-                              "confidence": 0.92,
-                              "importance": 0.72,
-                              "memory_tier": "long_term"
-                            }
-                          ]
-                        }
-                        """)
-                .thenReturn("""
-                        {
-                          "action": "ADD",
-                          "related_memory_id": "",
-                          "memory_type": "用户偏好",
-                          "category": "饮食偏好",
-                          "canonical_text": "用户喜欢自己熬番茄酱配饺子",
-                          "confidence": 0.92,
-                          "importance": 0.72,
-                          "memory_tier": "long_term",
-                          "sensitivity": "normal",
-                          "reason": "用户明确说明"
-                        }
-                        """);
+    void recordEventStoresEvidenceAndSchedulesIdleSessionWithoutCallingLlm() {
 
         MemoryEventDTO dto = new MemoryEventDTO();
         dto.setAgentId(AGENT_ID);
@@ -628,12 +622,66 @@ class MemoryServiceImplTest {
         dto.setContentText("我喜欢自己熬番茄酱配饺子");
         memoryService.recordEvent(dto);
 
-        ArgumentCaptor<MemoryFactEntity> factCaptor = ArgumentCaptor.forClass(MemoryFactEntity.class);
-        verify(factDao).insert(factCaptor.capture());
-        MemoryFactEntity inserted = factCaptor.getValue();
-        assertEquals("用户喜欢自己熬番茄酱配饺子", inserted.getCanonicalText());
-        assertEquals("evt-1", inserted.getSourceEventId());
-        assertTrue(inserted.getPayload().contains(MAINTENANCE_MODEL_ID));
+        verify(sessionStateDao).touchSession(eq(AGENT_ID), eq("session-1"), eq(100L), any(), eq(true));
+        verify(llmService, never()).generateJson(any(), any());
+        verify(factDao, never()).insert(any(MemoryFactEntity.class));
+    }
+
+    @Test
+    void idleSessionProcessingClaimsWatermarkAndDoesNotRepeatSameGeneration() {
+        MemorySessionStateEntity state = new MemorySessionStateEntity();
+        state.setId(7L);
+        state.setAgentId(AGENT_ID);
+        state.setSessionId("session-idle");
+        state.setLastEventId(100L);
+        state.setLastEventAt(new Date(System.currentTimeMillis() - 61_000L));
+        MemorySourceEventEntity event = new MemorySourceEventEntity();
+        event.setId(100L);
+        event.setAgentId(AGENT_ID);
+        event.setSessionId("session-idle");
+        event.setChatType(1);
+        event.setContentText("用户说了一段完整上下文");
+        when(sessionStateDao.selectOne(any(Wrapper.class))).thenReturn(state);
+        when(sessionStateDao.claimNow(eq(7L), eq(100L), any())).thenReturn(1, 0);
+        when(sourceEventDao.selectList(any(Wrapper.class))).thenReturn(List.of(event));
+        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID))).thenReturn("{\"facts\":[]}");
+
+        assertEquals(0, memoryService.processSessionMemories("session-idle", AGENT_ID));
+        assertEquals(0, memoryService.processSessionMemories("session-idle", AGENT_ID));
+
+        verify(llmService, times(1)).generateJson(any(), eq(MAINTENANCE_MODEL_ID));
+        verify(sessionStateDao).complete(7L, 100L);
+        verify(sessionStateDao, never()).release(any(), any());
+    }
+
+    @Test
+    void idleSchedulerProcessesOnlySuccessfullyClaimedSessions() {
+        MemorySessionStateEntity state = new MemorySessionStateEntity();
+        state.setId(8L);
+        state.setAgentId(AGENT_ID);
+        state.setSessionId("session-scheduled");
+        state.setLastEventId(101L);
+        state.setLastUserEventId(100L);
+        MemorySourceEventEntity userEvent = new MemorySourceEventEntity();
+        userEvent.setId(100L);
+        userEvent.setChatType(1);
+        userEvent.setContentText("我喜欢黑色自行车");
+        MemorySourceEventEntity assistantEvent = new MemorySourceEventEntity();
+        assistantEvent.setId(101L);
+        assistantEvent.setChatType(2);
+        assistantEvent.setContentText("我记住了你喜欢黑色自行车");
+        when(sessionStateDao.findIdleSessions(any(), any(), eq(20))).thenReturn(List.of(state));
+        when(sessionStateDao.claimIdle(eq(8L), eq(101L), any(), any())).thenReturn(1);
+        when(sourceEventDao.selectList(any(Wrapper.class))).thenReturn(List.of(userEvent, assistantEvent));
+        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID))).thenReturn("{\"facts\":[]}");
+
+        memoryMaintenanceService.processIdleSessionMemories();
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(llmService).generateJson(promptCaptor.capture(), eq(MAINTENANCE_MODEL_ID));
+        assertTrue(promptCaptor.getValue().contains("用户：我喜欢黑色自行车"));
+        assertTrue(promptCaptor.getValue().contains("助手：我记住了你喜欢黑色自行车"));
+        verify(sessionStateDao).complete(8L, 101L);
     }
 
     @Test
@@ -769,6 +817,122 @@ class MemoryServiceImplTest {
         verify(factDao, never()).insert(any());
         verify(factDao, never()).updateById(any());
         verify(llmService, never()).generateEmbedding(any(), any());
+    }
+
+    @Test
+    void maintenanceRejectsAddWhenAgentCapacityWouldExceed2000WithoutEviction() {
+        MemoryFactEntity existing = activeFact("memory-full", "旧".repeat(1990));
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(existing));
+        stubEventMaintenanceDecision(addDecision("新".repeat(20), ""));
+
+        runMaintenanceForEvent("请记住这条新信息");
+
+        verify(factDao, never()).insert(any(MemoryFactEntity.class));
+        verify(factDao, never()).updateById(any());
+    }
+
+    @Test
+    void maintenanceArchivesModelSelectedFactBeforeAddingWithinAgentCapacity() {
+        MemoryFactEntity important = activeFact("memory-important", "重".repeat(1500));
+        MemoryFactEntity expendable = activeFact("memory-expendable", "旧".repeat(490));
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(important, expendable));
+        stubEventMaintenanceDecision(addDecision("新".repeat(100), "\"memory-expendable\""));
+
+        runMaintenanceForEvent("请记住更重要的新信息");
+
+        ArgumentCaptor<MemoryFactEntity> updatedCaptor = ArgumentCaptor.forClass(MemoryFactEntity.class);
+        verify(factDao).updateById(updatedCaptor.capture());
+        assertEquals("memory-expendable", updatedCaptor.getValue().getMemoryId());
+        assertEquals("archived", updatedCaptor.getValue().getStatus());
+        assertNotNull(updatedCaptor.getValue().getArchivedAt());
+        verify(factDao).insert(any(MemoryFactEntity.class));
+    }
+
+    @Test
+    void maintenanceRejectsHallucinatedCapacityEvictionWithoutPartialArchive() {
+        MemoryFactEntity existing = activeFact("memory-real", "旧".repeat(1990));
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(existing));
+        stubEventMaintenanceDecision(addDecision("新".repeat(20), "\"memory-invented\""));
+
+        runMaintenanceForEvent("请记住新信息");
+
+        verify(factDao, never()).insert(any(MemoryFactEntity.class));
+        verify(factDao, never()).updateById(any());
+    }
+
+    @Test
+    void maintenanceRejectsInsufficientCapacityEvictionWithoutPartialArchive() {
+        MemoryFactEntity large = activeFact("memory-large", "旧".repeat(1985));
+        MemoryFactEntity tooSmall = activeFact("memory-small", "小".repeat(5));
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(large, tooSmall));
+        stubEventMaintenanceDecision(addDecision("新".repeat(20), "\"memory-small\""));
+
+        runMaintenanceForEvent("这条驱逐方案释放空间不足");
+
+        verify(factDao, never()).insert(any(MemoryFactEntity.class));
+        verify(factDao, never()).updateById(any());
+        assertEquals("active", tooSmall.getStatus());
+    }
+
+    @Test
+    void maintenanceUpdateCanEvictAnotherFactButNeverItsOwnTarget() {
+        MemoryFactEntity target = activeFact("memory-target", "目".repeat(1000));
+        MemoryFactEntity expendable = activeFact("memory-expendable", "旧".repeat(990));
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(target, expendable));
+        when(factDao.selectOne(any(Wrapper.class))).thenReturn(target, (MemoryFactEntity) null);
+        String decision = """
+                {"action":"UPDATE","related_memory_id":"memory-target",
+                "evict_memory_ids":["memory-expendable"],"memory_type":"长期记忆",
+                "category":"动态分类","canonical_text":"%s","confidence":0.9,
+                "importance":0.9,"memory_tier":"long_term","sensitivity":"normal",
+                "reason":"新事实更完整"}
+                """.formatted("新".repeat(1100));
+        stubEventMaintenanceDecision(decision);
+
+        runMaintenanceForEvent("更新旧记忆并选择性遗忘");
+
+        assertEquals("active", target.getStatus());
+        assertEquals(1100, target.getCanonicalText().length());
+        assertEquals("archived", expendable.getStatus());
+        verify(factDao, times(2)).updateById(any(MemoryFactEntity.class));
+    }
+
+    @Test
+    void manualCreateAlsoRejectsAgentCapacityOver2000() {
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(
+                List.of(activeFact("memory-full", "旧".repeat(1995))));
+        xiaozhi.modules.memory.dto.MemoryFactDTO dto = new xiaozhi.modules.memory.dto.MemoryFactDTO();
+        dto.setCanonicalText("新".repeat(10));
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> memoryService.createFact(AGENT_ID, dto, "user", "tester"));
+        assertTrue(error.getMessage().contains("2000"));
+
+        verify(factDao, never()).insert(any(MemoryFactEntity.class));
+    }
+
+    private void stubEventMaintenanceDecision(String decision) {
+        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID)))
+                .thenReturn("""
+                        {"facts":[{"text":"新信息","category":"动态分类","memory_type":"长期记忆",\
+                        "confidence":0.9,"importance":0.9,"memory_tier":"long_term"}]}
+                        """)
+                .thenReturn(decision);
+    }
+
+    private String addDecision(String canonicalText, String evictionIds) {
+        return """
+                {"action":"ADD","related_memory_id":"","evict_memory_ids":[%s],
+                "memory_type":"长期记忆","category":"动态分类","canonical_text":"%s",
+                "confidence":0.9,"importance":0.9,"memory_tier":"long_term",
+                "sensitivity":"normal","reason":"语义价值更高"}
+                """.formatted(evictionIds, canonicalText);
+    }
+
+    private void runMaintenanceForEvent(String content) {
+        AgentEntity agent = agentDao.selectById(AGENT_ID);
+        memoryMaintenanceService.createCandidatesWithMaintenanceModel(
+                agent, SCOPE_ID, "evt-maintenance", content);
     }
 
     private MemoryRebuildRequestDTO rebuildRequest(boolean dryRun) {

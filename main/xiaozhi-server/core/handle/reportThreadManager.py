@@ -13,6 +13,31 @@ from core.handle.reportHandle import report
 TAG = __name__
 
 
+class ReportQueue(queue.Queue):
+    """A report queue that can atomically reject new items and enqueue EOF."""
+
+    def __init__(self):
+        super().__init__()
+        self._input_lock = threading.Lock()
+        self._sealed = False
+
+    def put(self, item, block=True, timeout=None):
+        with self._input_lock:
+            if self._sealed:
+                return False
+            super().put(item, block=block, timeout=timeout)
+            return True
+
+    def seal(self, enqueue_sentinel=True):
+        with self._input_lock:
+            if self._sealed:
+                return False
+            self._sealed = True
+            if enqueue_sentinel:
+                super().put(None)
+            return True
+
+
 class ReportThreadManager:
     """Manages report worker thread for a connection."""
 
@@ -31,9 +56,10 @@ class ReportThreadManager:
 
     def _report_worker(self, conn: "ConnectionHandler"):
         """聊天记录上报工作线程"""
-        while not conn.stop_event.is_set():
+        while True:
             try:
-                # 从队列获取数据，设置超时以便定期检查停止事件
+                # 关闭时依靠 FIFO 队尾的毒丸退出，不能因 stop_event
+                # 提前退出，否则会丢失尚未上报的最后几条会话事件。
                 item = conn.report_queue.get(timeout=1)
                 if item is None:  # 检测毒丸对象
                     conn.report_queue.task_done()
@@ -74,23 +100,17 @@ class ReportThreadManager:
         server event loop.
         """
         deadline = time.monotonic() + max(0.0, float(timeout))
-        if conn.report_thread and conn.report_thread.is_alive():
+        worker_alive = bool(conn.report_thread and conn.report_thread.is_alive())
+        seal = getattr(conn.report_queue, "seal", None)
+        if callable(seal):
+            seal(enqueue_sentinel=worker_alive)
+        elif worker_alive:
             conn.report_queue.put(None)
+
+        if worker_alive:
             remaining = max(0.0, deadline - time.monotonic())
             if remaining > 0:
-                conn.report_thread.join(timeout=min(2.0, remaining))
-
-        # stop_event is set before this cleanup starts. If the worker observed
-        # it before consuming the poison pill, drain items it can no longer
-        # process and balance Queue.unfinished_tasks.
-        if not conn.report_thread or not conn.report_thread.is_alive():
-            while True:
-                try:
-                    conn.report_queue.get_nowait()
-                except queue.Empty:
-                    break
-                else:
-                    conn.report_queue.task_done()
+                conn.report_thread.join(timeout=remaining)
 
         while (
             getattr(conn.report_queue, "unfinished_tasks", 0) > 0

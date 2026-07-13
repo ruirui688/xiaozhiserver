@@ -347,46 +347,6 @@ def get_managed_memory_query_timeout() -> float:
     return timeout
 
 
-async def trigger_session_memory_processing(
-    session_id: str, agent_id: str
-) -> Optional[int]:
-    """会话关闭时触发 PowerMem-style 记忆处理。失败不影响主链路。
-
-    使用指数退避重试（1s / 2s / 4s，最多 3 次）应对瞬态 HTTP 故障。
-    """
-    if not session_id or not agent_id or not ManageApiClient._instance:
-        return None
-    if not ManageApiClient._instance:
-        return None
-    max_attempts = 3
-    for attempt in range(max_attempts):
-        try:
-            result = await ManageApiClient._instance._async_request(
-                "POST",
-                "/config/memory/process-session",
-                json={"sessionId": session_id, "agentId": agent_id},
-            )
-            if isinstance(result, int):
-                return result
-            if isinstance(result, dict):
-                return result.get("data") if isinstance(result.get("data"), int) else 0
-            return 0
-        except Exception as e:
-            if attempt < max_attempts - 1 and ManageApiClient._instance._should_retry(e):
-                delay = 2 ** attempt  # 1s, 2s, 4s
-                logger.bind(tag="manage_api").debug(
-                    f"POST /config/memory/process-session 失败（{attempt+1}/{max_attempts}），"
-                    f"{delay}s 后重试: {e}"
-                )
-                import asyncio
-                await asyncio.sleep(delay)
-            else:
-                logger.bind(tag="manage_api").warning(
-                    f"POST /config/memory/process-session 最终失败（{attempt+1}/{max_attempts}）: {e}"
-                )
-                return None
-
-
 async def lookup_address_book(caller_mac: str, nickname: str) -> Optional[Dict]:
     """根据昵称查找目标设备"""
     if not ManageApiClient._instance:

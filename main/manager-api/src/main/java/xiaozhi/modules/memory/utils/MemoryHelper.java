@@ -38,6 +38,11 @@ public class MemoryHelper {
     public static final BigDecimal MIN_AUTO_IMPORTANCE = new BigDecimal("0.350");
     public static final BigDecimal MIN_AUTO_CONFIDENCE = new BigDecimal("0.500");
     public static final int MAX_MAINTENANCE_INPUT_CHARS = 2000;
+    public static final int MAX_ACTIVE_MEMORY_CHARS = 2000;
+    public static final int MAX_RUNTIME_MEMORY_CONTEXT_CHARS = 2000;
+    public static final int SESSION_MEMORY_IDLE_SECONDS = 60;
+    public static final int SESSION_MEMORY_PROCESSING_STALE_MINUTES = 5;
+    public static final int SESSION_MEMORY_IDLE_BATCH_SIZE = 20;
     public static final String MAINTENANCE_LLM_FIELD = "maintenance_llm";
     public static final String MAINTENANCE_EXTRACTOR_VERSION = "maintenance-llm-v3-powerMem";
     public static final int SESSION_MAX_CHARS = 8000;
@@ -87,6 +92,26 @@ public class MemoryHelper {
             return "";
         }
         return text.replaceAll("^[：:，,。\\s]+", "").replaceAll("[。！!\\s]+$", "").trim();
+    }
+
+    /**
+     * 按 Unicode 码点计算用户可见字符数，避免 emoji 等辅助平面字符被重复计数。
+     */
+    public static int characterCount(String text) {
+        return text == null ? 0 : text.codePointCount(0, text.length());
+    }
+
+    /**
+     * 按 Unicode 码点截断，不切断代理项对。
+     */
+    public static String truncateToCharacters(String text, int maxCharacters) {
+        if (text == null || maxCharacters <= 0) {
+            return "";
+        }
+        if (characterCount(text) <= maxCharacters) {
+            return text;
+        }
+        return text.substring(0, text.offsetByCodePoints(0, maxCharacters));
     }
 
     /**

@@ -143,6 +143,17 @@ class MemoryQueryServiceImplTest {
         verify(llmService, never()).generateEmbedding(any(), any());
     }
 
+    @Test
+    void runtimeMemoryContextNeverExceeds2000Characters() {
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(
+                fact("memory-large", "记".repeat(2500))));
+
+        MemoryQueryVO result = service.query(query("", 8));
+
+        assertTrue(result.getContext().length() <= 2000);
+        assertTrue(result.getContext().endsWith("【记忆上下文已截断】"));
+    }
+
     private MemoryQueryDTO query(String text, int limit) {
         MemoryQueryDTO dto = new MemoryQueryDTO();
         dto.setAgentId(AGENT_ID);

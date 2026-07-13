@@ -104,6 +104,7 @@ handle/reportThreadManager.py  ReportThreadManager
 | 表 | 实体 | 用途 |
 |----|------|------|
 | `ai_memory_source_event` | `MemorySourceEventEntity` | 原始对话事件 |
+| `ai_memory_session_state` | `MemorySessionStateEntity` | 会话空闲整理水位与多实例抢占 |
 | `ai_memory_candidate` | `MemoryCandidateEntity` | 未确认候选事实 |
 | `ai_memory_fact` | `MemoryFactEntity` | 确认长期文本事实（importance + tier + evidence） |
 | `ai_memory_revision` | `MemoryRevisionEntity` | 变更审计日志 |
@@ -118,24 +119,30 @@ Stage 1: 事实提取
   对话内容 → EXTRACTION_PROMPT + LLM → {"facts": [{text, category, memory_type, ...}]}
 
 Stage 2: 文本事实对比 + 决策
-  每个事实 → 加载当前设备作用域 + 智能体通用作用域的 active 文本事实（有界）
+  每个事实 → 加载当前智能体的全部 active 文本事实
     → DECISION_PROMPT + LLM → {"action": "ADD|UPDATE|DELETE|NONE", ...}
     → applyMaintenanceDecision()
       - ADD: 插入 + 去重 (SHA256 hash)
       - UPDATE: related_memory_id 必须属于候选事实和当前作用域；无效 ID 直接拒绝，不降级为 ADD
+      - 容量门控: 整个智能体的 active 事实正文合计最多 2000 字符
+      - 容量不足: 低价值信息返回 NONE；更重要的新事实可返回 evict_memory_ids
+      - 选择性遗忘: 服务端校验驱逐 ID 的归属、状态和释放容量，全部通过后才归档旧事实
       - DELETE: 软删除
       - NONE: 跳过
 
-`managed_memory` 不调用 embeddings API，也不要求向量数据库。主体、对象、指代、事实方向、分类和语义等价关系由维护 LLM 根据原始证据与已有文本事实判断；服务端只执行作用域、ID、状态、质量和审计门控。
+`managed_memory` 不调用 embeddings API，也不要求向量数据库。主体、对象、指代、事实方向、分类、语义等价和记忆取舍由维护 LLM 根据原始证据与已有文本事实判断，不使用业务关键词驱逐规则；服务端只执行作用域、ID、状态、容量、质量和审计门控。容量驱逐仅归档旧事实，不物理删除，归档证据不计入 2000 字符 active 容量。
 ```
 
-### 4.4 三种触发场景
+### 4.4 记忆触发场景
 
 | 触发 | 时机 | 方法 |
 |------|------|------|
-| 增量提取 | 每条用户消息 (chatType=1) | `createCandidatesWithMaintenanceModel()` (runAfterCommit) |
-| 会话分析 | 断开连接时 | `processSessionMemories()` (全量事件重处理) |
+| 原始事件入库 | 每条用户/助手/工具对话事件 | `recordEvent()`，只保存证据和更新会话水位，不调用 LLM |
+| 空闲整理 | 存在未处理用户发言，且会话 60 秒没有新对话事件 | `processIdleSessionMemories()` 批量执行 `processSessionMemories()` |
+| 显式指令 | 用户明确记住/忘记 | `applyRememberInstruction()` / `applyForgetInstruction()` 立即执行 |
 | 手动重建 | 管理 UI | `rebuildFromRecentChatHistory()` (多会话 + review) |
+
+`ai_memory_session_state` 保存每个智能体会话的最后事件、已处理水位和正在处理的边界。调度器先原子抢占固定事件边界，成功后才推进水位；新事件在本轮处理期间到达时，会在下一次空闲窗口处理。这样可避免重启、多实例或重试造成同一轮对话重复整理。
 
 ### 4.5 记忆查询
 
@@ -147,6 +154,8 @@ MemoryQueryServiceImpl.query()
   4. maintenance_llm 根据问题返回候选列表中真实的 memory_id
   5. 服务端丢弃越界/伪造 ID，并按真实事实构建 context
   6. 获取 tool behaviors (top 5) + forget tombstones (top 10)
+
+最终注入语音对话的记忆 context 也有 2000 字符硬上限，作为历史超限数据和其他记忆区块的防御性保护。
 
 Python 通过 `manager-api.memory_query_timeout` 控制运行时等待预算，默认 12 秒；日志区分有上下文、空结果、失败和超时，只记录状态、耗时和字符数，不记录记忆正文。
 ```

@@ -146,7 +146,13 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
                 builder.append("- 不要再主动记住或使用：").append(pattern).append("\n");
             }
         }
-        return builder.toString().trim();
+        String context = builder.toString().trim();
+        if (MemoryHelper.characterCount(context) <= MemoryHelper.MAX_RUNTIME_MEMORY_CONTEXT_CHARS) {
+            return context;
+        }
+        String marker = "\n【记忆上下文已截断】";
+        int contentLimit = MemoryHelper.MAX_RUNTIME_MEMORY_CONTEXT_CHARS - MemoryHelper.characterCount(marker);
+        return MemoryHelper.truncateToCharacters(context, Math.max(0, contentLimit)).stripTrailing() + marker;
     }
 
     /**
