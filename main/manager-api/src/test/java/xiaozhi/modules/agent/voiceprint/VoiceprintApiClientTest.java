@@ -113,8 +113,48 @@ class VoiceprintApiClientTest {
 
         RenException error = assertThrows(
                 RenException.class,
-                () -> client.registerVoiceprint("agent-a", "voice-6", audioResource()));
+                () -> client.registerVoiceprint(
+                        "agent-a",
+                        "voice-6",
+                        "用户A",
+                        "描述",
+                        List.of(audioResource(), audioResource())));
         assertEquals(ErrorCode.AGENT_VOICEPRINT_LIMIT_REACHED, error.getCode());
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void registerSendsMultipleFilesAndSpeakerMetadata() {
+        RestTemplate restTemplate = mock(RestTemplate.class);
+        VoiceprintApiClient client = new VoiceprintApiClient(restTemplate, configuredParams());
+
+        when(restTemplate.exchange(
+                any(URI.class),
+                eq(HttpMethod.POST),
+                any(HttpEntity.class),
+                eq(String.class)))
+                .thenReturn(ResponseEntity.ok("{\"success\":true}"));
+
+        client.registerVoiceprint(
+                "agent-a",
+                "voice-1",
+                "用户A",
+                "你的主人",
+                List.of(audioResource(), audioResource()));
+
+        ArgumentCaptor<HttpEntity> entityCaptor = ArgumentCaptor.forClass(HttpEntity.class);
+        org.mockito.Mockito.verify(restTemplate).exchange(
+                eq(URI.create("https://8.8.8.8:8005/voiceprint/register")),
+                eq(HttpMethod.POST),
+                entityCaptor.capture(),
+                eq(String.class));
+        MultiValueMap<String, Object> body = (MultiValueMap<String, Object>) entityCaptor.getValue().getBody();
+        assertEquals("agent-a", body.getFirst("user_id"));
+        assertEquals("agent-a", body.getFirst("user_name"));
+        assertEquals("voice-1", body.getFirst("speaker_id"));
+        assertEquals("用户A", body.getFirst("speaker_name"));
+        assertEquals("你的主人", body.getFirst("speaker_description"));
+        assertEquals(2, body.get("files").size());
     }
 
     private SysParamsService configuredParams() {

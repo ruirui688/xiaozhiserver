@@ -18,8 +18,8 @@ import xiaozhi.common.exception.ErrorCode;
 import xiaozhi.common.exception.RenException;
 import xiaozhi.common.utils.MessageUtils;
 import xiaozhi.modules.agent.dao.AgentVoicePrintDao;
+import xiaozhi.modules.agent.dao.AgentVoicePrintSampleDao;
 import xiaozhi.modules.agent.dto.AgentVoicePrintSaveDTO;
-import xiaozhi.modules.agent.entity.AgentVoicePrintEntity;
 import xiaozhi.modules.agent.service.AgentChatAudioService;
 import xiaozhi.modules.agent.service.AgentChatHistoryService;
 import xiaozhi.modules.agent.voiceprint.VoiceprintApiClient;
@@ -42,6 +42,7 @@ class AgentVoicePrintServiceImplTest {
         AgentVoicePrintServiceImpl service = new AgentVoicePrintServiceImpl(
                 mock(AgentChatAudioService.class),
                 mock(AgentChatHistoryService.class),
+                mock(AgentVoicePrintSampleDao.class),
                 mock(TransactionTemplate.class),
                 mock(VoiceprintApiClient.class));
         ReflectionTestUtils.setField(service, "baseMapper", dao);

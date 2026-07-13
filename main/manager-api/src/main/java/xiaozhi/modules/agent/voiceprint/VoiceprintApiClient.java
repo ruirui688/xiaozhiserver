@@ -107,12 +107,21 @@ public class VoiceprintApiClient {
     public void registerVoiceprint(
             String remoteUserId,
             String speakerId,
-            ByteArrayResource resource) {
+            String speakerName,
+            String speakerDescription,
+            List<ByteArrayResource> resources) {
         Endpoint endpoint = getConfiguredEndpoint();
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
         body.add("user_id", remoteUserId);
+        body.add("user_name", remoteUserId);
         body.add("speaker_id", speakerId);
-        body.add("file", resource);
+        body.add("speaker_name", speakerName);
+        if (StringUtils.isNotBlank(speakerDescription)) {
+            body.add("speaker_description", speakerDescription);
+        }
+        for (ByteArrayResource resource : resources) {
+            body.add("files", resource);
+        }
 
         HttpHeaders headers = bearerHeaders(endpoint.token());
         headers.setContentType(MediaType.MULTIPART_FORM_DATA);

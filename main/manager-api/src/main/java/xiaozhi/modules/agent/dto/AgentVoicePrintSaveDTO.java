@@ -1,5 +1,7 @@
 package xiaozhi.modules.agent.dto;
 
+import java.util.List;
+
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
@@ -19,8 +21,11 @@ public class AgentVoicePrintSaveDTO {
     /**
      * 音频文件id
      */
-    @NotBlank
     private String audioId;
+    /**
+     * 多段注册音频ID。新版 voiceprint-api 要求一次上传 2-5 段样本。
+     */
+    private List<String> audioIds;
     /**
      * 声纹来源的人姓名
      */
