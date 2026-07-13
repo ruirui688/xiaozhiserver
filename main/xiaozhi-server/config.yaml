@@ -210,16 +210,27 @@ plugins:
     api_key: "mk-xxx"
 # 声纹识别配置
 voiceprint:
-  # 声纹接口地址
-  url: 
-  # 说话人配置：speaker_id,名称,描述
-  speakers:
-    - "test1,张三,张三是一个程序员"
-    - "test2,李四,李四是一个产品经理"
-    - "test3,王五,王五是一个设计师"
+  # 独立部署的 voiceprint-api 地址，不要在URL中携带Token
+  url:
+  # Bearer Token，仅写入 data/.config.yaml 等私有配置
+  token:
+  # 单模块部署时使用的业务作用域；全模块部署会自动使用智能体ID
+  user_id: default
+  # 说话人配置。全模块部署由 manager-api 下发结构化列表；单模块可参考：
+  # - speaker_id: voice-1
+  #   name: 示例用户
+  #   description: 示例描述
+  #   user_id: default
+  speakers: []
   # 声纹识别相似度阈值，范围0.0-1.0，默认0.4
   # 数值越高越严格，减少误识别但可能增加拒识率
   similarity_threshold: 0.4
+  # 远程识别总超时，避免外部服务拖住主语音链路
+  timeout_seconds: 5
+  # 每句话只取前N秒有效人声做声纹；不足该时长时跳过声纹识别
+  sample_seconds: 1.0
+  # 句末等待预取结果的最大毫秒数；超时后直接以无身份继续对话
+  result_wait_ms: 300
 
 # #####################################################################################
 # ################################以下是角色模型配置######################################

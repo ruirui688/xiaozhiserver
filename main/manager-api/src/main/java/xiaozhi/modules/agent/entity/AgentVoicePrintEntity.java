@@ -32,6 +32,10 @@ public class AgentVoicePrintEntity {
      */
     private String audioId;
     /**
+     * 远程 voiceprint-api 的 user_id。历史数据统一为 default，新数据使用 agentId。
+     */
+    private String remoteUserId;
+    /**
      * 声纹来源的人姓名
      */
     private String sourceName;

@@ -3,7 +3,10 @@
         <HeaderBar />
 
         <div class="operation-bar">
-            <h2 class="page-title">{{ $t('voicePrint.pageTitle') }}</h2>
+            <h2 class="page-title">
+                {{ $t('voicePrint.pageTitle') }}
+                <span class="voiceprint-count">{{ voicePrintList.length }}/{{ maxVoiceprints }}</span>
+            </h2>
         </div>
 
         <div class="main-wrapper">
@@ -27,7 +30,9 @@
 
                         <div class="table_bottom">
                             <div class="ctrl_btn">
-                                <el-button size="mini" type="success" @click="showAddDialog">{{ $t('voicePrint.add') }}</el-button>
+                                <el-button size="mini" type="success" :disabled="atLimit" @click="showAddDialog">
+                                    {{ atLimit ? $t('voicePrint.limitReached') : $t('voicePrint.add') }}
+                                </el-button>
                             </div>
                         </div>
                     </el-card>
@@ -64,8 +69,14 @@ export default {
                 sourceName: '',
                 introduce: ''
             },
-            agentId: "1"
+            agentId: "1",
+            maxVoiceprints: 5
         };
+    },
+    computed: {
+        atLimit() {
+            return this.voicePrintList.length >= this.maxVoiceprints;
+        }
     },
     mounted() {
         const agentId = this.$route.query.agentId;
@@ -95,6 +106,10 @@ export default {
             );
         },
         showAddDialog() {
+            if (this.atLimit) {
+                this.$message.warning(this.$t('voicePrint.limitHint'));
+                return;
+            }
             this.dialogTitle = this.$t('voicePrint.addSpeaker');
             this.paramForm = {
                 id: null,
@@ -222,6 +237,13 @@ export default {
 .page-title {
     font-size: 24px;
     margin: 0;
+}
+
+.voiceprint-count {
+    margin-left: 10px;
+    color: #64748b;
+    font-size: 14px;
+    font-weight: 500;
 }
 
 .right-operations {

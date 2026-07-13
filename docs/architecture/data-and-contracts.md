@@ -1,11 +1,12 @@
 ---
 status: canonical
 owner: data-contracts
-last_verified: 2026-07-12
+last_verified: 2026-07-13
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/config
   - main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelRuntimeAssembler.java
   - main/xiaozhi-server/core/utils/model_config.py
+  - main/xiaozhi-server/core/utils/voiceprint_provider.py
 ---
 
 # 数据与契约
@@ -70,7 +71,7 @@ Java 向 Python 下发的标准结构：
 | `plugins` | 当前智能体启用的插件及参数 |
 | `mcp_endpoint` | 外部 MCP 地址，Python 使用前必须 SSRF 校验 |
 | `context_providers` | 动态上下文源配置 |
-| `voiceprint` | 声纹说话人上下文 |
+| `voiceprint` | 外置声纹服务 URL/脱敏 Token、`user_id=agentId`、最多 5 条结构化说话人上下文 |
 
 配置请求必须从已认证设备身份推导 agent 与 workspace，不能信任请求体传入的资源归属。
 

@@ -293,6 +293,8 @@ export default {
   'voiceprint.editSpeaker': '编辑说话人',
   'voiceprint.selectVector': '选择声纹向量',
   'voiceprint.voiceprintInterfaceNotConfigured': '声纹接口未配置',
+  'voiceprint.limitReached': '已达到 5 个声纹上限',
+  'voiceprint.limitHint': '每个智能体最多只能绑定 5 个声纹，请先删除不再使用的声纹',
 
   // 设置页面
   'settings.pageTitle': '设置',

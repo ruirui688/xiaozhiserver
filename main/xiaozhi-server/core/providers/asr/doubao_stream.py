@@ -306,7 +306,7 @@ class ASRProvider(ASRProviderBase):
                                 self.text = ""
                                 if len(audio_data) > 0:
                                     audio_snapshot = list(audio_data)
-                                    conn.reset_audio_states()
+                                    conn.reset_audio_states(preserve_voiceprint=True)
                                     audio_state_released = True
                                     await self.handle_voice_stop(
                                         conn, audio_snapshot
@@ -324,7 +324,7 @@ class ASRProvider(ASRProviderBase):
                                         "消息结束收到停止信号，触发处理"
                                     )
                                     audio_snapshot = list(audio_data)
-                                    conn.reset_audio_states()
+                                    conn.reset_audio_states(preserve_voiceprint=True)
                                     audio_state_released = True
                                     await self.handle_voice_stop(
                                         conn, audio_snapshot
@@ -351,7 +351,7 @@ class ASRProvider(ASRProviderBase):
                                                 "消息中途收到停止信号，触发处理"
                                             )
                                             audio_snapshot = list(audio_data)
-                                            conn.reset_audio_states()
+                                            conn.reset_audio_states(preserve_voiceprint=True)
                                             audio_state_released = True
                                             await self.handle_voice_stop(
                                                 conn, audio_snapshot
@@ -363,7 +363,7 @@ class ASRProvider(ASRProviderBase):
                                         self.text = current_text
                                         if len(audio_data) > 0:
                                             audio_snapshot = list(audio_data)
-                                            conn.reset_audio_states()
+                                            conn.reset_audio_states(preserve_voiceprint=True)
                                             audio_state_released = True
                                             await self.handle_voice_stop(
                                                 conn, audio_snapshot

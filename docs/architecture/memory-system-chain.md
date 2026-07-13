@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: memory
-last_verified: 2026-07-12
+last_verified: 2026-07-13
 source_paths:
   - main/xiaozhi-server/core/providers/memory
   - main/manager-api/src/main/java/xiaozhi/modules/memory
@@ -61,10 +61,10 @@ connection.py:_query_memory_context(query)
 ```
 
 ```text
-dialogue.py:get_llm_dialogue_with_memory(memory_str, voiceprint_config)
+dialogue.py:get_llm_dialogue_with_memory(memory_str, voiceprint_config, current_speaker)
   1. 静态 system prompt（缓存前缀）
   2. 少量示例（is_temporary 消息）
-  3. 动态上下文 + <memory>{memory_str}</memory> + 声纹信息
+  3. 动态上下文 + <memory>{memory_str}</memory> + 当前说话人首次声纹信息
   4. 对话历史（截断到 max_history_turns）
 ```
 

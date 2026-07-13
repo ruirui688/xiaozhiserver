@@ -99,7 +99,10 @@ class Dialogue:
         return result
 
     def get_llm_dialogue_with_memory(
-            self, memory_str: str = None, voiceprint_config: dict = None
+            self,
+            memory_str: str = None,
+            voiceprint_config: dict = None,
+            current_speaker: str = None,
     ) -> List[Dict[str, str]]:
         with self._lock:
             # 构建对话
@@ -152,17 +155,31 @@ class Dialogue:
 
                 # 追加说话人信息
                 try:
-                    speakers = voiceprint_config.get("speakers", [])
-                    if speakers:
+                    current_speaker_name = (current_speaker or "").strip()
+                    speakers = (voiceprint_config or {}).get("speakers", [])
+                    if current_speaker_name and current_speaker_name != "未知说话人":
                         dynamic_part += "\n<speakers_info>"
-                        for speaker_str in speakers:
+                        dynamic_part += f"\n当前说话人：{current_speaker_name}"
+                        for speaker in speakers:
                             try:
-                                parts = speaker_str.split(",", 2)
-                                if len(parts) >= 2:
-                                    name = parts[1].strip()
+                                if isinstance(speaker, dict):
+                                    name = str(
+                                        speaker.get("name")
+                                        or speaker.get("source_name")
+                                        or ""
+                                    ).strip()
+                                    description = str(
+                                        speaker.get("description")
+                                        or speaker.get("introduce")
+                                        or ""
+                                    ).strip()
+                                else:
+                                    parts = str(speaker).split(",", 2)
+                                    name = parts[1].strip() if len(parts) >= 2 else ""
                                     description = (
                                         parts[2].strip() if len(parts) >= 3 else ""
                                     )
+                                if name:
                                     dynamic_part += f"\n- {name}：{description}"
                             except Exception:
                                 pass

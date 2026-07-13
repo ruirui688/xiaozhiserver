@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: runtime
-last_verified: 2026-07-12
+last_verified: 2026-07-13
 source_paths:
   - main/xiaozhi-server
   - main/manager-api/src/main/java/xiaozhi/modules/config
@@ -130,7 +130,9 @@ manager-web 模型配置弹窗
 ```text
 WebSocket / MQTT 收到音频
   -> VAD 判断语音段和结束点
-  -> ASR 转文字
+  ├-> 完整音频持续交给 ASR 转文字
+  └-> 已绑定声纹时，仅累计前 1 秒有效人声并提前异步识别
+  -> 句末合并 ASR 文本与声纹结果（声纹最多追加等待 300ms）
   -> 语义控制中枢处理高频控制、状态上下文和拒识
   -> 未处理时进入 Intent 或 function_call 判断工具
   -> LLM 生成或工具执行
@@ -151,6 +153,8 @@ tool results
 ```
 
 模型不是只收到用户一句话，而是收到服务端组装后的完整请求。
+
+未绑定声纹的智能体不下发声纹运行配置，也不会创建远程声纹请求。声纹短句跳过、超时或失败都只表示本轮没有身份，不影响 ASR 文本继续进入主链路。
 
 ## 5. 智能体能力组成
 
@@ -182,7 +186,7 @@ Java 后台负责选择和保存这些模块，Python 在设备连接时按配�
 | 全局基础模板 | system message 规则部分 | `main/xiaozhi-server/agent-base-prompt.txt` |
 | 动态上下文 | system message 中的上下文段 | 时间、日期、农历、位置、天气、上下文源 |
 | 记忆 | `<memory>` 段落 | `summaryMemory` / Python Memory |
-| 声纹说话人信息 | `<speakers_info>` 段落 | `voiceprint.speakers` |
+| 声纹说话人信息 | 仅首次识别当前说话人时写入 `<speakers_info>` | `voiceprint.user_id` + 结构化 `voiceprint.speakers` |
 | 插件和 IoT 工具 schema | OpenAI tools 或文本工具提示 | 内置插件函数描述、设备 IoT descriptors |
 | 服务器侧 MCP 工具 schema | OpenAI tools 或文本工具提示 | MCP `tools/list` |
 | 设备端 MCP 工具 schema | OpenAI tools 或文本工具提示 | 设备 MCP `tools/list` |

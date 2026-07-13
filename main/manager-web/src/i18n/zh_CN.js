@@ -276,6 +276,8 @@ export default {
   'voicePrint.cancelDelete': '已取消删除操作',
   'voicePrint.closeOperation': '操作已关闭',
   'voicePrint.loading': '拼命加载中',
+  'voicePrint.limitReached': '已达上限',
+  'voicePrint.limitHint': '每个智能体最多只能绑定 5 个声纹，请先删除不再使用的声纹',
 
   // 手動添加設備對話框相關
   'manualAddDeviceDialog.title': '手动添加设备',

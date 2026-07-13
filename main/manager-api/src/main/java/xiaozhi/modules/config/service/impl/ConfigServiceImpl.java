@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import xiaozhi.common.constant.Constant;
 import xiaozhi.common.exception.ErrorCode;
 import xiaozhi.common.exception.RenException;
@@ -32,8 +33,8 @@ import xiaozhi.modules.agent.service.AgentMcpAccessPointService;
 import xiaozhi.modules.agent.service.AgentPluginMappingService;
 import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.agent.service.AgentTemplateService;
+import xiaozhi.modules.agent.voiceprint.VoiceprintApiClient;
 import xiaozhi.modules.correctword.service.CorrectWordFileService;
-import xiaozhi.modules.agent.vo.AgentVoicePrintVO;
 import xiaozhi.modules.correctword.vo.CorrectWordSimpleVO;
 import xiaozhi.modules.config.service.ConfigService;
 import xiaozhi.modules.device.entity.DeviceEntity;
@@ -50,6 +51,7 @@ import xiaozhi.modules.voiceclone.service.VoiceCloneService;
 
 @Service
 @AllArgsConstructor
+@Slf4j
 public class ConfigServiceImpl implements ConfigService {
     private final SysParamsService sysParamsService;
     private final DeviceService deviceService;
@@ -64,6 +66,7 @@ public class ConfigServiceImpl implements ConfigService {
     private final AgentContextProviderService agentContextProviderService;
     private final VoiceCloneService cloneVoiceService;
     private final AgentVoicePrintDao agentVoicePrintDao;
+    private final VoiceprintApiClient voiceprintApiClient;
     private final CorrectWordFileService correctWordFileService;
 
     @Override
@@ -339,32 +342,36 @@ public class ConfigServiceImpl implements ConfigService {
      */
     private void buildVoiceprintConfig(String agentId, Map<String, Object> result) {
         try {
-            // 获取声纹接口地址
-            String voiceprintUrl = sysParamsService.getValue(Constant.SERVER_VOICE_PRINT, true);
-            if (StringUtils.isBlank(voiceprintUrl) || "null".equals(voiceprintUrl)) {
-                return;
-            }
-
             // 获取智能体关联的声纹信息（不需要用户权限验证）
-            List<AgentVoicePrintVO> voiceprints = getVoiceprintsByAgentId(agentId);
+            List<AgentVoicePrintEntity> voiceprints = getVoiceprintsByAgentId(agentId);
             if (voiceprints == null || voiceprints.isEmpty()) {
                 return;
             }
+            VoiceprintApiClient.Endpoint endpoint = voiceprintApiClient.getConfiguredEndpoint();
 
-            // 构建speakers列表
-            List<String> speakers = new ArrayList<>();
-            for (AgentVoicePrintVO voiceprint : voiceprints) {
-                String speakerStr = String.format("%s,%s,%s",
-                        voiceprint.getId(),
-                        voiceprint.getSourceName(),
-                        voiceprint.getIntroduce() != null ? voiceprint.getIntroduce() : "");
-                speakers.add(speakerStr);
+            // 使用结构化字段，避免姓名或描述中的逗号破坏运行时解析。
+            List<Map<String, String>> speakers = new ArrayList<>();
+            for (AgentVoicePrintEntity voiceprint : voiceprints) {
+                Map<String, String> speaker = new HashMap<>();
+                speaker.put("speaker_id", voiceprint.getId());
+                speaker.put("name", voiceprint.getSourceName());
+                speaker.put("description", StringUtils.defaultString(voiceprint.getIntroduce()));
+                speaker.put(
+                        "user_id",
+                        StringUtils.defaultIfBlank(
+                                voiceprint.getRemoteUserId(), VoiceprintApiClient.LEGACY_USER_ID));
+                speakers.add(speaker);
             }
 
             // 构建声纹配置
             Map<String, Object> voiceprintConfig = new HashMap<>();
-            voiceprintConfig.put("url", voiceprintUrl);
+            voiceprintConfig.put("url", endpoint.apiRoot().toString());
+            voiceprintConfig.put("token", endpoint.token());
+            voiceprintConfig.put("user_id", agentId);
             voiceprintConfig.put("speakers", speakers);
+            voiceprintConfig.put("timeout_seconds", 5);
+            voiceprintConfig.put("sample_seconds", 1.0);
+            voiceprintConfig.put("result_wait_ms", 300);
 
             // 获取声纹识别相似度阈值，默认0.4
             String thresholdStr = sysParamsService.getValue("server.voiceprint_similarity_threshold", true);
@@ -383,7 +390,7 @@ public class ConfigServiceImpl implements ConfigService {
             result.put("voiceprint", voiceprintConfig);
         } catch (Exception e) {
             // 声纹配置获取失败时不影响其他功能
-            System.err.println("获取声纹配置失败: " + e.getMessage());
+            log.warn("获取声纹配置失败: agentId={}, errorType={}", agentId, e.getClass().getSimpleName());
         }
     }
 
@@ -393,12 +400,11 @@ public class ConfigServiceImpl implements ConfigService {
      * @param agentId 智能体ID
      * @return 声纹信息列表
      */
-    private List<AgentVoicePrintVO> getVoiceprintsByAgentId(String agentId) {
+    private List<AgentVoicePrintEntity> getVoiceprintsByAgentId(String agentId) {
         LambdaQueryWrapper<AgentVoicePrintEntity> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(AgentVoicePrintEntity::getAgentId, agentId);
         queryWrapper.orderByAsc(AgentVoicePrintEntity::getCreateDate);
-        List<AgentVoicePrintEntity> entities = agentVoicePrintDao.selectList(queryWrapper);
-        return ConvertUtils.sourceToTarget(entities, AgentVoicePrintVO.class);
+        return agentVoicePrintDao.selectList(queryWrapper);
     }
 
     /**

@@ -1,235 +1,237 @@
-# 声纹识别启用指南
+---
+status: canonical
+owner: voiceprint
+last_verified: 2026-07-13
+source_paths:
+  - main/xiaozhi-server/core/utils/voiceprint_provider.py
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/voiceprint/
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/service/impl/AgentVoicePrintServiceImpl.java
+---
 
-本教程包含3个部分
-- 1、如何部署声纹识别这个服务
-- 2、全模块部署时，怎么配置声纹识别接口
-- 3、最简化部署时，怎么配置声纹识别
+# 外置声纹识别服务接入
 
-## 1、如何部署声纹识别这个服务
+本项目使用独立部署的 `voiceprint-api` 完成声纹注册、识别和删除。声纹模型不运行在小智主服务器上，避免和 ASR、LLM、TTS 抢占 CPU 与内存。
 
-## 第一步，下载声纹识别项目源码
+当前要求：
 
-浏览器打开[声纹识别项目地址](https://github.com/xinnan-tech/voiceprint-api)
+- `voiceprint-api` 版本至少为 `0.1.0`，接口必须支持必填 `user_id`。
+- 小智使用智能体 ID 作为远程 `user_id`，不同智能体的声纹完全隔离。
+- 每个智能体最多绑定 5 个声纹；manager-api 和远程服务都会校验。
+- API Token 只能通过 `Authorization: Bearer ...` 传输，禁止放在 URL 查询参数中。
+- 生产环境使用 HTTPS，并把声纹服务限制为仅允许小智服务器访问。
 
-打开完，找到页面中一个绿色的按钮，写着`Code`的按钮，点开它，然后你就看到`Download ZIP`的按钮。
+## 1. 完整接口文档
 
-点击它，下载本项目源码压缩包。下载到你电脑后，解压它，此时它的名字可能叫`voiceprint-api-main`
-你需要把它重命名成`voiceprint-api`。
+Swagger：
 
-## 第二步， 创建数据库和表
-
-声纹识别需要依赖`mysql`数据库。如果你之前已经部署`智控台`，说明你已经安装了`mysql`。你可以共用它。
-
-你可以你试一下在宿主机使用`telnet`命令，看看能不能正常访问`mysql`的`3306`端口。
-```
-telnet 127.0.0.1 3306
-```
-如果能访问到3306端口，请忽略以下的内容，直接进入第三步。
-
-如果不能访问，你需要回忆一下，你的`mysql`是怎么安装的。
-
-如果你的mysql是通过自己使用安装包安装的，说明你的`mysql`做了网络隔离。你可能先解决访问`mysql`的`3306`端口这个问题。
-
-如果你`mysql`是通过本项目的`docker-compose_all.yml`安装的。你需要找一下你当时创建数据库的`docker-compose_all.yml`文件，修改以下的内容
-
-修改前
-```
-  xiaozhi-esp32-server-db:
-    ...
-    networks:
-      - default
-    expose:
-      - "3306:3306"
+```text
+http://声纹服务器IP:8005/voiceprint/docs
 ```
 
-修改后
-```
-  xiaozhi-esp32-server-db:
-    ...
-    networks:
-      - default
-    ports:
-      - "3306:3306"
+OpenAPI JSON：
+
+```text
+http://声纹服务器IP:8005/voiceprint/openapi.json
 ```
 
-注意是将`xiaozhi-esp32-server-db`下面的`expose`改成`ports`。改完后，需要重新启动。以下是重启mysql的命令：
+声纹项目内的文字文档：
 
-```
-# 进入你docker-compose_all.yml所在的文件夹，例如我的是xiaozhi-server
-cd xiaozhi-server
-docker compose -f docker-compose_all.yml down
-docker compose -f docker-compose.yml up -d
+```text
+docs/reference/api.md
 ```
 
-启动完后，在宿主机再使用`telnet`命令，看看能不能正常访问`mysql`的`3306`端口。
-```
-telnet 127.0.0.1 3306
-```
-正常来说这样就可以访问的了。
+主要接口：
 
-## 第三步， 创建数据库和表
-如果你的宿主机，能正常访问mysql数据库，那就在mysql上创建一个名字为`voiceprint_db`的数据库和`voiceprints`表。
+| 用途 | 接口 |
+| --- | --- |
+| 就绪检查 | `GET /voiceprint/health` |
+| 存活检查 | `GET /voiceprint/health/live` |
+| 注册或更新 | `POST /voiceprint/register` |
+| 识别 | `POST /voiceprint/identify` |
+| 删除 | `DELETE /voiceprint/{speaker_id}?user_id=...` |
 
-```
-CREATE DATABASE voiceprint_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+## 2. 部署拓扑
 
-USE voiceprint_db;
+```text
+ESP32
+  -> xiaozhi-server
+       -> HTTPS /voiceprint/identify
+            -> 独立 voiceprint-api
+                 -> 独立或同机 MySQL
 
-CREATE TABLE voiceprints (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    speaker_id VARCHAR(255) NOT NULL UNIQUE,
-    feature_vector LONGBLOB NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_speaker_id (speaker_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-```
-
-## 第四步， 配置数据库连接
-
-进入`voiceprint-api`文件夹，创建名字为`data`的文件夹。
-
-把`voiceprint-api`根目录里的`voiceprint.yaml`，复制到`data`的文件夹，将它重命名为`.voiceprint.yaml`
-
-接下来，你需要重点配置一下`.voiceprint.yaml`里的数据库连接。
-
-```
-mysql:
-  host: "127.0.0.1"
-  port: 3306
-  user: "root"
-  password: "your_password"
-  database: "voiceprint_db"
+manager-web / manager-mobile
+  -> manager-api
+       -> HTTPS /voiceprint/register|delete|health
 ```
 
-注意！由于你的声纹识别服务是使用docker部署，`host`需要填写成你`mysql所在机器的局域网ip`。
+浏览器、微信小程序和 ESP32 不直接持有声纹服务 Token。所有远程请求都由可信服务端发起。
 
-注意！由于你的声纹识别服务是使用docker部署，`host`需要填写成你`mysql所在机器的局域网ip`。
+按本项目安全策略，后台参数中的声纹地址不能解析到私有、回环、链路本地或云元数据地址。跨服务器部署应使用可验证的公网 HTTPS 域名，并通过安全组或防火墙只允许小智服务器出口 IP 访问。
 
-注意！由于你的声纹识别服务是使用docker部署，`host`需要填写成你`mysql所在机器的局域网ip`。
+## 3. 全模块部署配置
 
-## 第五步，启动程序
-这个项目是一个很简单的项目，建议使用docker运行。不过如果你不想使用docker运行，你可以参考[这个页面](https://github.com/xinnan-tech/voiceprint-api/blob/main/README.md)使用源码运行。以下是docker运行的方法
+先部署并验证 `voiceprint-api`，然后在智控台完成以下配置。
 
-```
-# 进入本项目源码根目录
-cd voiceprint-api
+### 3.1 开启功能入口
 
-# 清除缓存
-docker compose -f docker-compose.yml down
-docker stop voiceprint-api
-docker rm voiceprint-api
-docker rmi ghcr.nju.edu.cn/xinnan-tech/voiceprint-api:latest
+进入“参数字典 → 系统功能配置”，启用“声纹识别”。
 
-# 启动docker容器
-docker compose -f docker-compose.yml up -d
-# 查看日志
-docker logs -f voiceprint-api
+### 3.2 配置服务地址
+
+在“参数管理”中设置：
+
+```text
+server.voice_print = https://voiceprint.example.com:8005
 ```
 
-此时，日志里会输出类似以下的日志
-```
-250711 INFO-🚀 开始: 生产环境服务启动（Uvicorn），监听地址: 0.0.0.0:8005
-250711 INFO-============================================================
-250711 INFO-声纹接口地址: http://127.0.0.1:8005/voiceprint/health?key=abcd
-250711 INFO-============================================================
+也可以填写标准 API 根路径：
+
+```text
+https://voiceprint.example.com:8005/voiceprint
 ```
 
-请你把声纹接口地址复制出来：
+不要填写：
 
-由于你是docker部署，切不可直接使用上面的地址！
-
-由于你是docker部署，切不可直接使用上面的地址！
-
-由于你是docker部署，切不可直接使用上面的地址！
-
-你先把地址复制出来，放在一个草稿里，你要知道你的电脑的局域网ip是什么，例如我的电脑局域网ip是`192.168.1.25`，那么
-原来我的接口地址
-```
-http://127.0.0.1:8005/voiceprint/health?key=abcd
-
-```
-就要改成
-```
-http://192.168.1.25:8005/voiceprint/health?key=abcd
+```text
+https://voiceprint.example.com:8005/voiceprint/health?key=真实Token
 ```
 
-改好后，请使用浏览器直接访问`声纹接口地址`。当浏览器出现类似这样的代码，说明是成功了。
+旧版带 `?key=` 的地址仍可临时读取，但保存新配置时应完成拆分。
+
+### 3.3 配置 Bearer Token
+
+设置：
+
+```text
+server.voiceprint_token = 声纹服务配置中的 server.authorization
 ```
-{"total_voiceprints":0,"status":"healthy"}
+
+参数页面会按敏感字段遮罩显示。Token 不得写入 Git、文档、截图、日志或 URL。
+
+### 3.4 配置相似度阈值
+
+```text
+server.voiceprint_similarity_threshold = 0.4
 ```
 
-请你保留好修改后的`声纹接口地址`，下一步要用到。
+值越高越严格。修改后应使用真实设备分别验证本人、相似声音和陌生人，不能只依赖接口健康检查。
 
-## 2、全模块部署时，怎么配置声纹识别
+## 4. 智能体绑定规则
 
-## 第一步 配置接口
-首先，你要开启声纹识别功能。在智控台，点击顶部`参数字典`，在下拉菜单中，点击`系统功能配置`页面。在页面上勾选`声纹识别`，点击`保存配置`。即可在新建智能体的卡片上看到`声纹识别`按钮。
+在智能体的“声纹识别”页面，从该智能体自己的聊天音频中选择 WAV 来源，填写姓名和描述后保存。
 
-如果你是全模块部署，使用管理员账号，登录智控台，点击顶部`参数字典`，选择`参数管理`功能。
+服务端规则：
 
-然后搜索参数`server.voice_print`，此时，它的值应该是`null`值。
-点击修改按钮，把上一步得来的`声纹接口地址`粘贴到`参数值`里。然后保存。
+1. 创建前确认音频属于当前智能体。
+2. 当前智能体已有 5 条时直接拒绝第 6 条。
+3. 使用 `user_id=agentId` 调用远程注册接口。
+4. `speaker_id` 使用本地声纹记录 UUID。
+5. 同一智能体内先做重复声纹检测，避免同一个人重复占用名额。
+6. 删除时同时删除本地记录和远程特征；远程失败会回滚本地删除，避免孤儿声纹占用额度。
 
-如果能保存成功，说明一切顺利，你可以去智能体查看效果了。如果不成功，说明智控台无法访问声纹识别，很大概率是网络防火墙，或者没有填写正确的局域网ip。
+Web 和 Mobile 页面均显示 `已绑定数/5`。前端限制只用于交互提示，最终约束由 manager-api 和 voiceprint-api 共同保证。
 
-## 第二步 设置智能体记忆模式
+## 5. 实时识别链路
 
-进入你的智能体的角色配置里，将记忆设置成`本地短期记忆`，一定要开启`上报文字+语音`。
+xiaozhi-server 假设一句话内只有一个说话人。音频到达后，完整语音持续进入 ASR；声纹链路只累计 VAD 判定为有效人声的前 1 秒：
 
-## 第三步 和你的智能体聊天
+```text
+设备持续上传音频
+  ├─ 完整音频持续进入 ASR
+  └─ 仅累计前 1.0 秒有效人声
+       ├─ 不足 1.0 秒：句末直接跳过声纹
+       └─ 达到 1.0 秒：立即异步调用一次 /voiceprint/identify
+            └─ 后续音频不再进入本句声纹请求
 
-将你的设备通电，然后和他用正常的语速和音调聊天。
-
-## 第四步 设置声纹
-
-在智控台，`智能体管理`页面，在智能体的面板里，有一个`声纹识别`按钮，点击它。在底部有一个`新增按钮`。就可以对某个人说的话进行声纹注册。
-在弹出的框里，`描述`这个属性建议填写上，可以是这个人的职业、性格、爱好。方便智能体对说话人进行分析和了解。
-
-## 第三步 和你的智能体聊天
-
-将你的设备通电，问它，你知道我是谁吗？如果他能回答得出，说明声纹识别功能正常。
-
-## 3、最简化部署时，怎么配置声纹识别
-
-## 第一步 配置接口
-打开 `xiaozhi-server/data/.config.yaml` 文件（如果没有需要创建），然后添加/修改以下内容：
-
+ASR 得到最终文本
+  -> 消费已提前启动的声纹结果
+  -> 若尚未完成，句末最多再等 300ms
+  -> 超时或失败则以无身份继续进入语义中心和 LLM
 ```
-# 声纹识别配置
+
+因此长句不会在句末重新转换并上传整段音频，声纹网络耗时大部分与用户继续说话、豆包流式 ASR 识别过程重叠。每句话最多产生一次声纹请求。
+
+如果智能体没有绑定任何声纹，manager-api 不下发 `voiceprint` 私有配置，Python 不创建声纹 provider，也不会调用远程服务。
+
+manager-api 下发的声纹私有配置包含：
+
+```yaml
 voiceprint:
-  # 声纹接口地址
-  url: 你的声纹接口地址
-  # 说话人配置：speaker_id,名称,描述
+  url: https://voiceprint.example.com:8005/voiceprint
+  token: "***"
+  user_id: agent-id
+  timeout_seconds: 5
+  sample_seconds: 1.0
+  result_wait_ms: 300
+  similarity_threshold: 0.4
   speakers:
-    - "test1,张三,张三是一个程序员"
-    - "test2,李四,李四是一个产品经理"
-    - "test3,王五,王五是一个设计师"
+    - speaker_id: voiceprint-record-id
+      name: 用户显示名
+      description: 用户描述
+      user_id: agent-id
 ```
 
-把上一步得来的 `声纹接口地址` 粘贴到 `url` 里。然后保存。
+Token 会在 Python 配置日志中脱敏。`timeout_seconds` 是远程请求自身的保护上限；实时对话真正追加的句末等待由更短的 `result_wait_ms` 控制，默认最多 300ms。
 
-`speakers` 参数依据需求添加。这里需要注意这个 `speaker_id` 参数，后面注册声纹会用到。
+识别出的身份只在本会话首次进入 LLM 的用户消息和 system 上下文；后续轮次依赖对话历史，不再每轮重复姓名，避免模型机械地反复称呼用户。
 
-## 第二步 注册声纹
-如果你已经启动了声纹服务，本地浏览器里访问 `http://localhost:8005/voiceprint/docs` 即可查看 API 文档，这里只说明注册声纹的 API 如何使用。
+## 6. 历史数据升级
 
-注册声纹的 API 地址为 `http://localhost:8005/voiceprint/register`，请求方式为 POST。
+`voiceprint-api` 从旧版本升级到 `0.1.0` 后，历史远程数据会归入：
 
-请求头需要包含 Bearer Token 认证，token 为 `声纹接口地址` 中 `?key=` 后的部分，比如如果我的声纹注册地址为 `http://127.0.0.1:8005/voiceprint/health?key=abcd`，那么我的 token 就是`abcd`。
-
-请求体包含说话人 ID（speaker_id），和 WAV 音频文件（file），请求示例如下：
-
-```
-curl -X POST \
-  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
-  -F "speaker_id=your_speaker_id_here" \
-  -F "file=@/path/to/your/file" \
-  http://localhost:8005/voiceprint/register
+```text
+user_id = default
 ```
 
- 这里的 `file` 是要注册的说话人说话的音频文件， `speaker_id` 需要和第一步配置接口的 `speaker_id` 保持一致。比如说我需要注册张三的声纹，在 `.config.yaml` 中填的张三的 `speaker_id` 为 `test1`，那么我注册张三声纹的时候，请求体里填的 `speaker_id` 就是 `test1`， `file` 填的就是张三说一段话的音频文件。
+本项目迁移会给现有 `ai_agent_voice_print` 记录写入 `remote_user_id=default`。运行时按每条记录的远程作用域分组识别，因此历史声纹仍可继续使用。
 
- ## 第三步 启动服务
+- 新增声纹：直接写入 `user_id=agentId`。
+- 重新选择音频并保存旧声纹：先注册到 `user_id=agentId`，再删除旧 `default` 特征，完成单条迁移。
+- 只修改姓名或描述：不重复调用远程模型，保留原远程作用域。
 
-启动小智服务器和声纹服务，即可正常使用。
+升级前应分别备份小智 MySQL 和声纹服务 MySQL。
+
+## 7. 单模块 Python 配置
+
+只运行 `xiaozhi-server` 时，在不提交 Git 的 `main/xiaozhi-server/data/.config.yaml` 中配置：
+
+```yaml
+voiceprint:
+  url: https://voiceprint.example.com:8005
+  token: 你的真实BearerToken
+  user_id: local-agent-001
+  similarity_threshold: 0.4
+  timeout_seconds: 5
+  sample_seconds: 1.0
+  result_wait_ms: 300
+  speakers:
+    - speaker_id: voice-1
+      name: 示例用户
+      description: 示例描述
+      user_id: local-agent-001
+```
+
+单模块模式没有 manager-api 替你校验 5 条上限和资源所有权，运维人员必须自行保证同一 `user_id` 不超过 5 条，并通过声纹服务 API 注册对应 `speaker_id`。
+
+## 8. 最小验证
+
+就绪检查：
+
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "https://voiceprint.example.com:8005/voiceprint/health"
+```
+
+预期返回 `status=healthy`。随后至少验证：
+
+1. 智能体 0 条时可新增。
+2. 第 5 条可新增，第 6 条被拒绝。
+3. 两个智能体可使用相同显示名，但远程数据互不可见。
+4. 删除后可以重新新增。
+5. 真实设备能识别本人，陌生人返回未知说话人。
+6. 声纹服务器断开或超时时，ASR/LLM 对话仍能继续。
+7. 日志中没有原始 Authorization、Token 或带密钥 URL。
+8. 不足 1 秒的短句不调用声纹，长句只上传前 1 秒有效人声。
+9. 智能体未绑定声纹时，声纹服务没有识别请求。
+
+不要把真实外部调用、长期服务启动或生产部署作为默认自动化验证；生产联调需在发布和备份后单独执行。
