@@ -53,11 +53,14 @@ async def report(conn: "ConnectionHandler", type, text, opus_data, report_time):
     try:
         event_type = "tool" if type == 3 else "chat"
         agent_id = conn.config.get("agent_id") if getattr(conn, "config", None) else None
+        memory_text, memory_json, speaker_id = _memory_event_content(type, text)
         await report_memory_event(
             mac_address=conn.device_id,
             session_id=conn.session_id,
             chat_type=type,
-            content=text,
+            content=memory_text,
+            content_json=memory_json,
+            speaker_id=speaker_id,
             event_type=event_type,
             report_time=report_time,
             agent_id=agent_id,
@@ -72,6 +75,21 @@ async def report(conn: "ConnectionHandler", type, text, opus_data, report_time):
         )
     except Exception as e:
         conn.logger.bind(tag=TAG).error(f"长期记忆事件上报失败: {e}")
+
+
+def _memory_event_content(chat_type, text):
+    """从声纹增强消息中拆出可维护文本和稳定说话人ID。"""
+    if chat_type != 1 or not isinstance(text, str):
+        return text, None, None
+    try:
+        payload = json.loads(text)
+    except (TypeError, json.JSONDecodeError):
+        return text, None, None
+    if not isinstance(payload, dict) or "content" not in payload:
+        return text, None, None
+    content = str(payload.get("content") or "").strip()
+    speaker_id = str(payload.get("speaker_id") or "").strip() or None
+    return content, payload, speaker_id
 
 
 def opus_to_wav(conn: "ConnectionHandler", opus_data):

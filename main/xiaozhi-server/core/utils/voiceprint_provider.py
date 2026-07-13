@@ -6,6 +6,7 @@ import socket
 import time
 import wave
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse, urlunparse
 
@@ -16,6 +17,15 @@ from config.logger import setup_logging
 
 TAG = __name__
 logger = setup_logging()
+
+
+@dataclass(frozen=True)
+class VoiceprintMatch:
+    """一次可信声纹识别结果。"""
+
+    speaker_id: Optional[str]
+    name: str
+    score: float
 
 
 class VoiceprintProvider:
@@ -242,7 +252,7 @@ class VoiceprintProvider:
             f"声纹预取已启动: sample_seconds={self.sample_seconds:.2f}"
         )
 
-    async def resolve_utterance_result(self) -> Optional[str]:
+    async def resolve_utterance_result(self) -> Optional[VoiceprintMatch]:
         """句末消费预取结果；短句跳过，未完成时只等待有限预算。"""
         task = self._prefetch_task
         if task is None:
@@ -331,7 +341,9 @@ class VoiceprintProvider:
             )
         return self._http_session
 
-    async def identify_speaker(self, audio_data: bytes, session_id: str) -> Optional[str]:
+    async def identify_speaker(
+        self, audio_data: bytes, session_id: str
+    ) -> Optional[VoiceprintMatch]:
         """在当前智能体的远程 user_id 作用域中识别说话人。"""
         if not self.enabled or not audio_data:
             return None
@@ -366,17 +378,17 @@ class VoiceprintProvider:
                 logger.bind(tag=TAG).info(
                     f"声纹识别未达到阈值: score={score:.3f}, threshold={self.similarity_threshold}"
                 )
-                return "未知说话人"
+                return VoiceprintMatch(None, "未知说话人", score)
 
             speaker = self.speaker_map.get(speaker_id)
             if not speaker:
                 logger.bind(tag=TAG).warning("声纹服务返回了当前智能体候选集之外的说话人")
-                return "未知说话人"
+                return VoiceprintMatch(None, "未知说话人", score)
 
             logger.bind(tag=TAG).info(
                 f"声纹识别成功: {speaker['name']} (相似度: {score:.3f})"
             )
-            return speaker["name"]
+            return VoiceprintMatch(speaker_id, speaker["name"], score)
         except asyncio.TimeoutError:
             elapsed = time.monotonic() - request_started_at
             logger.bind(tag=TAG).warning(f"声纹识别超时: {elapsed:.3f}s")

@@ -1,5 +1,6 @@
 import asyncio
 import io
+import json
 import wave
 
 from aiohttp import web
@@ -9,7 +10,9 @@ from config import settings
 settings.config_file_valid = True
 
 from core.utils.dialogue import Dialogue, Message
-from core.utils.voiceprint_provider import VoiceprintProvider
+from core.handle.reportHandle import _memory_event_content
+from core.providers.asr.base import ASRProviderBase
+from core.utils.voiceprint_provider import VoiceprintMatch, VoiceprintProvider
 
 
 async def _identify_across_agent_and_legacy_scopes(monkeypatch):
@@ -71,7 +74,10 @@ async def _identify_across_agent_and_legacy_scopes(monkeypatch):
         await provider.close()
         await runner.cleanup()
 
-    assert result == "新用户"
+    assert result is not None
+    assert result.speaker_id == "voice-new"
+    assert result.name == "新用户"
+    assert result.score == 0.91
     assert {call["user_id"] for call in calls} == {"agent-a", "default"}
     assert all(call["authorization"] == "Bearer secret-token" for call in calls)
 
@@ -129,7 +135,7 @@ async def _prefetches_only_first_second_once(monkeypatch):
 
     async def identify(audio_data, session_id):
         requests.append((audio_data, session_id))
-        return "用户A"
+        return VoiceprintMatch("voice-1", "用户A", 0.88)
 
     monkeypatch.setattr(provider, "identify_speaker", identify)
 
@@ -149,7 +155,8 @@ async def _prefetches_only_first_second_once(monkeypatch):
         assert wav_file.getnframes() == 16000
         assert wav_file.readframes(16000) == b"1" * 16000 + b"2" * 16000
 
-    assert await provider.resolve_utterance_result() == "用户A"
+    result = await provider.resolve_utterance_result()
+    assert result == VoiceprintMatch("voice-1", "用户A", 0.88)
     await provider.close()
 
 
@@ -223,6 +230,24 @@ def test_voiceprint_without_bound_speakers_never_enables(monkeypatch):
     assert provider.enabled is False
     provider.feed_audio_frame(b"1" * 32000, True, "pcm", "session-a")
     assert provider._prefetch_task is None
+
+
+def test_voiceprint_identity_is_preserved_for_chat_history_and_memory_event():
+    enhanced = ASRProviderBase._build_enhanced_text(
+        None, "我喜欢骑车", "用户A", "voice-1", 0.91234
+    )
+
+    payload = json.loads(enhanced)
+    assert payload == {
+        "speaker": "用户A",
+        "content": "我喜欢骑车",
+        "speaker_id": "voice-1",
+        "speaker_score": 0.9123,
+    }
+    memory_text, memory_json, speaker_id = _memory_event_content(1, enhanced)
+    assert memory_text == "我喜欢骑车"
+    assert memory_json == payload
+    assert speaker_id == "voice-1"
 
 
 def test_speaker_context_is_injected_only_for_current_recognized_speaker():

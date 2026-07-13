@@ -36,12 +36,14 @@ public final class PowerMemPrompts {
             11. 必须根据发言角色解析“我、你、他”等指代；“用户:”后的“我”指用户，“你”通常指助手。
             12. 主体、对象、所属关系、欠款方向、时间起止等不得交换或自行补全；证据不足时不要提取。
             13. 一次性的请求、设备控制、临时计划、玩笑和助手承诺不等于用户的长期事实，通常不要保存。
+            14. 用户角色如果包含 speaker_id，每条事实必须原样返回其来源 speaker_id；多位用户时不得混淆、遗漏或编造 ID。
 
             JSON 格式：
             {
               "facts": [
                 {
                   "text": "可直接写入记忆的中文事实",
+                  "speaker_id": "来源用户角色中的真实speaker_id；未识别时为空",
                   "category": "中文分类名",
                   "memory_type": "中文记忆类型",
                   "confidence": 0.0,
@@ -229,6 +231,7 @@ public final class PowerMemPrompts {
             6. canonical_text 必须是单条自然中文事实，不要把互不相关的信息硬合并到同一句。
             7. 没有需要应用的动作时返回 {"actions":[]}。
             8. 只返回 JSON，不要解释，不要 Markdown。
+            9. 用户角色包含 speaker_id 时，每条动作必须原样保留事实来源 speaker_id；不得把一位用户的事实归给另一位用户。
 
             JSON 格式：
             {
@@ -236,6 +239,7 @@ public final class PowerMemPrompts {
                 {
                   "action": "ADD|UPDATE|ARCHIVE|DELETE|NONE",
                   "related_memory_id": "仅 UPDATE/ARCHIVE/DELETE 时填写已有记忆 ID，否则为空",
+                  "speaker_id": "事实来源用户的真实speaker_id；共享或未识别事实为空",
                   "memory_type": "最终确定的记忆类型",
                   "category": "最终确定的分类",
                   "canonical_text": "可直接写入记忆的中文事实",
@@ -259,7 +263,7 @@ public final class PowerMemPrompts {
 
     public static final String JSON_REPAIR_PROMPT = """
             你是 JSON 修复器。下面是同一个记忆维护模型刚刚返回的内容，但它不是合法 JSON。
-            请只做格式修复：保留原有 action、related_memory_id、memory_type、category、canonical_text、confidence、importance、memory_tier、importance_dimensions、sensitivity、reason 的语义，不新增、不删除、不改写记忆判断。
+            请只做格式修复：保留原有 action、related_memory_id、speaker_id、memory_type、category、canonical_text、confidence、importance、memory_tier、importance_dimensions、sensitivity、reason 的语义，不新增、不删除、不改写记忆判断。
 
             原始输出：
             {raw_output}
@@ -270,6 +274,7 @@ public final class PowerMemPrompts {
                 {
                   "action": "ADD|UPDATE|ARCHIVE|DELETE|NONE",
                   "related_memory_id": "",
+                  "speaker_id": "原输出中的speaker_id",
                   "memory_type": "",
                   "category": "",
                   "canonical_text": "",
@@ -310,6 +315,7 @@ public final class PowerMemPrompts {
             8. clear_then_rebuild 模式下不要输出 UPDATE、ARCHIVE 或 DELETE 动作；最终事实库只需要 ADD 或 NONE 动作。
             9. sensitivity 必须根据证据中的真实隐私程度判断，不使用固定人物、事件或关键词规则；敏感事实不应主动泛化注入。
             10. 只返回合法 JSON，不要解释，不要 Markdown。
+            11. speaker_id 是可信身份边界，只能保留待审校动作中的原值，不得修改、删除、交换或编造。
 
             重建模式：
             {mode}
@@ -323,6 +329,7 @@ public final class PowerMemPrompts {
                 {
                   "action": "ADD|UPDATE|ARCHIVE|DELETE|NONE",
                   "related_memory_id": "",
+                  "speaker_id": "原动作中的speaker_id",
                   "memory_type": "中文记忆类型",
                   "category": "中文分类",
                   "canonical_text": "可直接写入记忆的中文事实",
@@ -360,6 +367,7 @@ public final class PowerMemPrompts {
             6. 不要新增与现有记忆无关的事实。
             7. importance 代表未来可复用价值，confidence 代表事实可信度；memory_tier 可调整为 working、short_term 或 long_term。
             8. 只返回 JSON，不要解释，不要 Markdown。
+            9. speaker_id 是事实的可信归属，输出动作时必须原样保留对应记忆的 speaker_id，不得修改或交换。
 
             返回格式：
             {
@@ -367,6 +375,7 @@ public final class PowerMemPrompts {
                 {
                   "action": "UPDATE|ARCHIVE|DELETE|NONE",
                   "related_memory_id": "当前记忆 ID",
+                  "speaker_id": "当前记忆的speaker_id",
                   "memory_type": "中文记忆类型",
                   "category": "中文分类",
                   "canonical_text": "UPDATE 时填写改写后的事实；其他动作可填原文",

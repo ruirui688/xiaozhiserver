@@ -58,6 +58,9 @@ public class MemoryMaintenanceOutputParser {
         if (StringUtils.isBlank(decision.getStr("memory_type"))) {
             decision.set("memory_type", extraction.getStr("memory_type"));
         }
+        if (StringUtils.isBlank(decision.getStr("speaker_id"))) {
+            decision.set("speaker_id", extraction.getStr("speaker_id"));
+        }
         if (decision.get("importance_dimensions") == null && extraction.get("importance_dimensions") != null) {
             decision.set("importance_dimensions", extraction.get("importance_dimensions"));
         }

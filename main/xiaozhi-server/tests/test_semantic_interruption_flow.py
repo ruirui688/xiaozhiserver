@@ -179,7 +179,7 @@ def test_recognized_speaker_json_is_only_submitted_on_first_turn(monkeypatch):
     conn = _Conn({"decision": "new_turn", "reason": "unused"})
     conn.client_is_speaking = False
     payload = json.dumps(
-        {"speaker": "user-a", "content": "你好"},
+        {"speaker": "user-a", "speaker_id": "voice-a", "content": "你好"},
         ensure_ascii=False,
     )
 
@@ -188,6 +188,8 @@ def test_recognized_speaker_json_is_only_submitted_on_first_turn(monkeypatch):
 
     assert conn.executor.submitted[0][1] == (payload,)
     assert conn.executor.submitted[1][1] == ("你好",)
+    assert conn.current_speaker == "user-a"
+    assert conn.current_speaker_id == "voice-a"
 
 
 def test_overlap_new_turn_aborts_then_submits_new_chat(monkeypatch):

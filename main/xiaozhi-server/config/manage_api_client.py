@@ -258,6 +258,8 @@ async def report_memory_event(
     report_time: Optional[int] = None,
     event_id: Optional[str] = None,
     agent_id: Optional[str] = None,
+    speaker_id: Optional[str] = None,
+    content_json: Optional[Dict] = None,
 ) -> Optional[Dict]:
     """上报长期记忆原始事件。失败不影响实时对话和聊天记录。"""
     if not content or not ManageApiClient._instance:
@@ -274,6 +276,8 @@ async def report_memory_event(
                 "chatType": chat_type,
                 "eventType": event_type,
                 "contentText": content,
+                "contentJson": content_json,
+                "speakerId": speaker_id,
                 "sourceTimestamp": report_time,
             },
         )
@@ -304,7 +308,12 @@ def build_memory_event_id(
 
 
 async def query_managed_memory(
-    mac_address: str, query: str, limit: int = 8, agent_id: Optional[str] = None
+    mac_address: str,
+    query: str,
+    limit: int = 8,
+    agent_id: Optional[str] = None,
+    speaker_id: Optional[str] = None,
+    speaker_name: Optional[str] = None,
 ) -> Optional[str]:
     """查询 manager-api 维护的长期记忆上下文。"""
     if not query or not ManageApiClient._instance:
@@ -316,6 +325,8 @@ async def query_managed_memory(
             json={
                 "macAddress": mac_address,
                 "agentId": agent_id,
+                "speakerId": speaker_id,
+                "speakerName": speaker_name,
                 "query": query,
                 "limit": limit,
             },

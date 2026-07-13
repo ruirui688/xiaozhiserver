@@ -34,7 +34,18 @@
                         <div v-else class="message-item" :class="{ 'user-message': message.chatType === 1, 'tool-message': message.chatType === 3 }">
                             <img :src="message.chatType === 1 ? getUserAvatar(currentSessionId) : require('@/assets/xiaozhi-logo.png')"
                                 class="avatar" />
-                            <div class="message-content">
+                            <div class="message-bubble">
+                              <div v-if="message.chatType === 1 && message.voiceprintStatus" class="speaker-label">
+                                <i class="el-icon-user-solid"></i>
+                                <span>{{ $t('chatHistory.voiceprint') }} · {{ message.speakerDisplay }}</span>
+                                <span v-if="message.speakerScore !== null" class="speaker-score">
+                                  {{ formatSpeakerScore(message.speakerScore) }}
+                                </span>
+                                <el-tooltip v-if="message.speakerId" :content="message.speakerId" placement="top" effect="light">
+                                  <i class="el-icon-info speaker-id-info"></i>
+                                </el-tooltip>
+                              </div>
+                              <div class="message-content">
                                 <template v-if="Array.isArray(message.parsedContent)">
                                     <div class="content-wrapper">
                                         <div v-for="(item, idx) in message.parsedContent" :key="idx">
@@ -97,6 +108,7 @@
                                 </template>
                                 <i v-if="message.audioId" :class="getAudioIconClass(message)"
                                     @click="playAudio(message)" class="audio-icon"></i>
+                              </div>
                             </div>
                             <el-button class="message-delete" type="text" icon="el-icon-delete"
                                 @click="deleteMessage(message)"></el-button>
@@ -233,9 +245,9 @@ export default {
          * @param {string} content 原始内容
          * @returns {string} 提取的聊天内容
          */
-        extractContentFromString(content) {
+        parseMessageContent(content) {
             if (!content || content.trim() === '') {
-                return content;
+                return { content, speakerName: '', speakerId: '', speakerScore: null };
             }
 
             // 尝试解析为 JSON
@@ -244,25 +256,45 @@ export default {
 
                 // 如果是数组格式（包含 text 和 tool）
                 if (Array.isArray(jsonObj)) {
-                    return jsonObj;
+                    return { content: jsonObj, speakerName: '', speakerId: '', speakerScore: null };
                 }
 
                 // 如果是对象且有 content 字段
                 if (jsonObj && typeof jsonObj === 'object' && jsonObj.content) {
-                    return jsonObj.content;
+                    return {
+                        content: jsonObj.content,
+                        speakerName: String(jsonObj.speaker || ''),
+                        speakerId: String(jsonObj.speaker_id || ''),
+                        speakerScore: Number.isFinite(Number(jsonObj.speaker_score))
+                            ? Number(jsonObj.speaker_score)
+                            : null
+                    };
                 }
             } catch (e) {
                 // 如果不是有效的 JSON，直接返回原内容
             }
 
             // 如果不是 JSON 格式或没有 content 字段，直接返回原内容
-            return content;
+            return { content, speakerName: '', speakerId: '', speakerScore: null };
         },
         normalizeMessage(message) {
+            const parsed = this.parseMessageContent(message.content);
+            const hasVoiceprint = message.chatType === 1 && Boolean(parsed.speakerName || parsed.speakerId);
             return {
                 ...message,
-                parsedContent: this.extractContentFromString(message.content)
+                parsedContent: parsed.content,
+                speakerName: parsed.speakerName,
+                speakerId: parsed.speakerId,
+                speakerScore: parsed.speakerScore,
+                speakerDisplay: parsed.speakerName === '未知说话人'
+                    ? this.$t('chatHistory.unknownSpeaker')
+                    : (parsed.speakerName || this.$t('chatHistory.recognizedSpeaker')),
+                voiceprintStatus: hasVoiceprint
             };
+        },
+        formatSpeakerScore(score) {
+            const value = Math.max(0, Math.min(1, Number(score) || 0));
+            return `${Math.round(value * 100)}%`;
         },
         isImageContentItem(item) {
             return !!this.getImageSrc(item);
@@ -710,8 +742,45 @@ export default {
     flex-direction: row-reverse;
 }
 
-.message-content {
+.message-bubble {
     max-width: 60%;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+.user-message .message-bubble {
+    align-items: flex-end;
+}
+
+.speaker-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 20px;
+    margin: 0 10px 5px;
+    padding: 0 7px;
+    border: 1px solid #cfe1ff;
+    border-radius: 4px;
+    color: #4770b5;
+    background: #f3f7ff;
+    font-size: 11px;
+    line-height: 18px;
+    white-space: nowrap;
+}
+
+.speaker-id-info {
+    cursor: help;
+    color: #8ba4ce;
+}
+
+.speaker-score {
+    color: #6682ae;
+    font-variant-numeric: tabular-nums;
+}
+
+.message-content {
+    max-width: 100%;
     padding: 10px 15px;
     border-radius: 8px;
     background-color: #f0f0f0;

@@ -50,6 +50,7 @@ async def startToChat(conn: "ConnectionHandler", text):
     """
     # 检查输入是否是JSON格式（包含说话人信息）
     speaker_name = None
+    speaker_id = None
     actual_text = text
     interruption_text = text
 
@@ -59,6 +60,7 @@ async def startToChat(conn: "ConnectionHandler", text):
             data = json.loads(text)
             if "speaker" in data and "content" in data:
                 speaker_name = data["speaker"]
+                speaker_id = data.get("speaker_id") or None
                 actual_content = data.get("content") or ""
                 interruption_text = actual_content or text
                 conn.logger.bind(tag=TAG).info(f"解析到说话人信息: {speaker_name}")
@@ -67,18 +69,19 @@ async def startToChat(conn: "ConnectionHandler", text):
                 if introduced_speakers is None:
                     introduced_speakers = set()
                     conn.introduced_speakers = introduced_speakers
+                speaker_identity = speaker_id or speaker_name
 
                 # 已识别身份只在首次作为JSON交给LLM；后续使用纯文本，避免反复点名。
                 if (
                     speaker_name
                     and speaker_name != "未知说话人"
-                    and speaker_name in introduced_speakers
+                    and speaker_identity in introduced_speakers
                 ):
                     actual_text = actual_content
                 else:
                     actual_text = text
                     if speaker_name and speaker_name != "未知说话人":
-                        introduced_speakers.add(speaker_name)
+                        introduced_speakers.add(speaker_identity)
     except (json.JSONDecodeError, KeyError):
         # 如果解析失败，继续使用原始文本
         pass
@@ -91,6 +94,7 @@ async def startToChat(conn: "ConnectionHandler", text):
                 data = json.loads(actual_text)
                 if "speaker" in data and "content" in data:
                     speaker_name = data["speaker"]
+                    speaker_id = data.get("speaker_id") or speaker_id
                     interruption_text = data.get("content") or interruption_text
         except (json.JSONDecodeError, KeyError):
             pass
@@ -100,8 +104,10 @@ async def startToChat(conn: "ConnectionHandler", text):
     # 保存说话人信息到连接对象
     if speaker_name:
         conn.current_speaker = speaker_name
+        conn.current_speaker_id = speaker_id
     else:
         conn.current_speaker = None
+        conn.current_speaker_id = None
 
     if conn.need_bind:
         await check_bind_device(conn)

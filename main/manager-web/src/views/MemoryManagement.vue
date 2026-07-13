@@ -282,7 +282,8 @@ export default {
       return [...new Set(this.activeFacts.map(f => f.memoryType).filter(Boolean))]
     },
     previewCandidates() {
-      return (this.rebuildPreviewResult && this.rebuildPreviewResult.candidates) || []
+      return ((this.rebuildPreviewResult && this.rebuildPreviewResult.candidates) || [])
+        .map(this.decorateMemoryIdentity)
     },
     previewDialogTitle() {
       return this.previewMode === 'review' ? '重审预览' : '重建预览'
@@ -302,7 +303,12 @@ export default {
     fetch() {
       this.loading = true
       Api.memory.dashboard(this.agentId, (res) => {
-        this.dashboard = (res && res.data && res.data.data) ? res.data.data : (res && res.data) || this.dashboard
+        const data = (res && res.data && res.data.data) ? res.data.data : (res && res.data) || this.dashboard
+        this.dashboard = {
+          ...data,
+          facts: (data.facts || []).map(this.decorateMemoryIdentity),
+          candidates: (data.candidates || []).map(this.decorateMemoryIdentity)
+        }
         this.loading = false
       }, () => {
         this.loading = false
@@ -311,6 +317,23 @@ export default {
 
     unwrapResult(res) {
       return (res && res.data && res.data.data) ? res.data.data : (res && res.data) || {}
+    },
+
+    decorateMemoryIdentity(item) {
+      let payload = {}
+      try {
+        payload = typeof item.payload === 'string' ? JSON.parse(item.payload || '{}') : (item.payload || {})
+      } catch (_) {
+        payload = {}
+      }
+      const speakerId = String(payload.speaker_id || '')
+      const speakerName = String(payload.speaker_name || '')
+      return {
+        ...item,
+        speakerId,
+        speakerName,
+        speakerDisplay: speakerId ? (speakerName || '已录入声纹') : '共享记忆'
+      }
     },
 
     handleTabClick() {

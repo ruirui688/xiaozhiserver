@@ -30,6 +30,8 @@
             <h4 class="section-title">分类与属性</h4>
             <div class="detail-grid">
               <div class="detail-field"><label>分类</label><span>{{ categoryLabel(memory.category) }}</span></div>
+              <div class="detail-field"><label>关联人物</label><span>{{ memory.speakerDisplay || '共享记忆' }}</span></div>
+              <div class="detail-field" v-if="memory.speakerId"><label>声纹ID</label><span class="speaker-id">{{ memory.speakerId }}</span></div>
               <div class="detail-field"><label>类型</label><span>{{ memoryTypeLabel(memory.memoryType) }}</span></div>
               <div class="detail-field"><label>来源</label><el-tag size="mini" :type="memory.confirmationState==='auto'?'success':'warning'">{{ memory.confirmationState==='auto'?'自动抽取':'手动创建' }}</el-tag></div>
               <div class="detail-field"><label>层级</label><el-tag size="mini" :type="tierTagType">{{ tierLabel }}</el-tag></div>
@@ -216,6 +218,7 @@ export default {
 .detail-field { display: flex; flex-direction: column; gap: 2px; }
 .detail-field label { font-size: 11px; color: #a0aec0; }
 .detail-field span { font-size: 13px; color: #2f3548; font-weight: 500; }
+.detail-field .speaker-id { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; word-break: break-all; }
 .detail-score-row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
 .detail-score-row label { font-size: 12px; color: #718096; width: 40px; flex-shrink: 0; }
 .detail-score-row .el-progress { flex: 1; }

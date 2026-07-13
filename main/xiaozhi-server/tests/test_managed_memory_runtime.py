@@ -70,6 +70,8 @@ def _managed_connection(loop):
     conn.device_id = "sensitive-device-id"
     conn.loop = loop
     conn.memory = None
+    conn.current_speaker = "用户A"
+    conn.current_speaker_id = "voice-1"
     return conn
 
 
@@ -104,7 +106,10 @@ def test_managed_memory_query_timeout_defaults_and_private_override(monkeypatch)
 
 
 def test_managed_memory_query_logs_success_with_context_without_content(monkeypatch):
+    captured = {}
+
     async def query_memory(*args, **kwargs):
+        captured.update(kwargs)
         return "private memory text"
 
     monkeypatch.setattr(connection_module, "query_managed_memory", query_memory)
@@ -115,6 +120,8 @@ def test_managed_memory_query_logs_success_with_context_without_content(monkeypa
         assert conn._query_memory_context("private question") == "private memory text"
 
     _assert_safe_record(conn, "success_with_context", len("private memory text"))
+    assert captured["speaker_id"] == "voice-1"
+    assert captured["speaker_name"] == "用户A"
 
 
 def test_managed_memory_query_distinguishes_empty_and_failed(monkeypatch):
