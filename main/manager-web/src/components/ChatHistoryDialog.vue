@@ -333,7 +333,8 @@ export default {
             }
 
             add('LLM', this.getNested(metrics, ['latency_ms', 'llm', 'total_ms']));
-            add('TTS', this.getNested(metrics, ['latency_ms', 'tts', 'total_ms']));
+            add('TTS首包', this.getNested(metrics, ['latency_ms', 'tts', 'first_audio_ms']));
+            add('TTS生成', this.getNested(metrics, ['latency_ms', 'tts', 'total_ms']));
             const tokenSource = this.getNested(metrics, ['tokens', 'source']);
             const tokenSuffix = tokenSource && String(tokenSource).startsWith('estimated') ? '估' : '';
             const promptTokens = this.getNested(metrics, ['tokens', 'prompt_tokens']);
@@ -894,6 +895,7 @@ export default {
     flex-wrap: wrap;
     gap: 4px 8px;
     margin-top: 6px;
+    padding: 0 10px;
     font-size: 11px;
     line-height: 1.4;
     color: #606266;
@@ -908,11 +910,11 @@ export default {
 
 .user-message .metrics-strip {
     justify-content: flex-end;
-    color: #e6f7ff;
+    color: #606266;
 }
 
 .user-message .metrics-strip span {
-    background: rgba(255, 255, 255, 0.18);
+    background: #f2f6fc;
 }
 
 .content-wrapper {
