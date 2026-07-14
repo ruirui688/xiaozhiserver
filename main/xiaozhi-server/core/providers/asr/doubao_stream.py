@@ -88,6 +88,14 @@ class ASRProvider(ASRProviderBase):
         # 如果本次有声音，且之前没有建立连接
         if audio_have_voice and self.asr_ws is None and not self.is_processing:
             try:
+                if (
+                    conn.client_voice_stop
+                    and conn.client_listen_mode != "manual"
+                ):
+                    logger.bind(tag=TAG).warning(
+                        "新ASR会话开始前发现残留停止标志，已清除以避免立即发送LAST"
+                    )
+                    conn.client_voice_stop = False
                 self.is_processing = True
                 self._is_stopping = False
                 self._stop_sent_event = asyncio.Event()
@@ -268,6 +276,14 @@ class ASRProvider(ASRProviderBase):
             raise TimeoutError("等待ASR最终结果超过总时限")
         return remaining
 
+    @staticmethod
+    def _connection_close_details(exc):
+        close_frame = getattr(exc, "rcvd", None) or getattr(exc, "sent", None)
+        return (
+            getattr(close_frame, "code", None),
+            getattr(close_frame, "reason", ""),
+        )
+
     async def _forward_asr_results(
         self, conn: "ConnectionHandler", session_ws=None, stop_sent_event=None
     ):
@@ -386,8 +402,14 @@ class ASRProvider(ASRProviderBase):
                             logger.bind(tag=TAG).error(f"ASR服务返回错误: {error_msg}")
                             break
 
-                except websockets.ConnectionClosed:
-                    logger.bind(tag=TAG).info("ASR服务连接已关闭")
+                except websockets.ConnectionClosed as exc:
+                    close_code, close_reason = self._connection_close_details(exc)
+                    logger.bind(tag=TAG).info(
+                        "ASR服务连接已关闭: "
+                        f"code={close_code}, "
+                        f"reason={close_reason}, "
+                        f"stop_sent={stop_sent_event.is_set()}"
+                    )
                     self.is_processing = False
                     break
                 except (asyncio.TimeoutError, TimeoutError) as exc:
@@ -428,6 +450,7 @@ class ASRProvider(ASRProviderBase):
                 # handle_voice_stop() 会通过 stop_ws_connection() 先清空 asr_ws，
                 # 因此用每轮独立事件判断当前会话身份，避免漏清理当前轮或误清理新轮。
                 if self._stop_sent_event is stop_sent_event:
+                    stop_was_sent = stop_sent_event.is_set()
                     self.asr_ws = None
                     self.is_processing = False
                     self._is_stopping = False
@@ -437,8 +460,13 @@ class ASRProvider(ASRProviderBase):
                     self.utterances = []
                     self.forward_task = None
                     # 只允许当前会话清理连接状态，避免旧任务影响重连后的新会话。
-                    if not audio_state_released:
+                    # 未发送 LAST 的断链/超时属于异常结束，保留本轮音频给后续重连回放。
+                    if not audio_state_released and stop_was_sent:
                         conn.reset_audio_states()
+                    elif not audio_state_released:
+                        logger.bind(tag=TAG).warning(
+                            "ASR会话在未发送LAST前结束，保留音频缓存用于重连重放"
+                        )
 
     def stop_ws_connection(self):
         if self.asr_ws:
