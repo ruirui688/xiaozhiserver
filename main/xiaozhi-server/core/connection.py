@@ -2037,11 +2037,7 @@ class ConnectionHandler:
         self.notify_voiceprint_enrollment_event(
             "started",
             status,
-            (
-                "声纹注册已开始，请保持安静环境，按以下文字分段朗读。"
-                "每段连续三秒以上，读完一段后停顿一下，我会自动记录一段。"
-                f"朗读文本：{status.get('promptText') or ''}"
-            ),
+            "声纹注册开始，请朗读屏幕上的文字，读完后保持安静。",
         )
         return status
 

@@ -40,7 +40,7 @@ import xiaozhi.modules.agent.vo.AgentVoicePrintVO;
 public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, AgentVoicePrintEntity>
         implements AgentVoicePrintService {
     public static final int MAX_VOICEPRINTS_PER_AGENT = 5;
-    public static final int MIN_REGISTER_SAMPLES = 2;
+    public static final int MIN_REGISTER_SAMPLES = 1;
     public static final int MAX_REGISTER_SAMPLES = 5;
     public static final long MIN_SAMPLE_DURATION_MS = 3_000L;
     public static final long MAX_SAMPLE_DURATION_MS = 30_000L;

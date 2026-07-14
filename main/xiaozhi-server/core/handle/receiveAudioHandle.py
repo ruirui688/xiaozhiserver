@@ -55,6 +55,11 @@ async def startToChat(conn: "ConnectionHandler", text):
     Returns False when overlap speech is classified as continue/echo and should
     not be persisted as a standalone chat-history turn.
     """
+    enrollment = getattr(conn, "voiceprint_enrollment", None)
+    if enrollment is not None and enrollment.status.active:
+        conn.logger.bind(tag=TAG).info("声纹采集模式忽略普通对话文本，跳过语义/LLM")
+        return False
+
     # 检查输入是否是JSON格式（包含说话人信息）
     speaker_name = None
     speaker_id = None

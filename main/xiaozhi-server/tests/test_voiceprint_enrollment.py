@@ -10,6 +10,7 @@ settings.config_file_valid = True
 
 import core.utils.voiceprint_enrollment as enrollment_module
 from core.api.voiceprint_enrollment_handler import VoiceprintEnrollmentHandler
+from core.handle.receiveAudioHandle import startToChat
 from core.providers.asr.base import ASRProviderBase
 from core.utils.voiceprint_enrollment import VoiceprintEnrollmentCollector
 
@@ -172,6 +173,20 @@ async def _handle_voice_stop_bypasses_asr_when_enrolling(monkeypatch):
 
 def test_handle_voice_stop_bypasses_asr_when_enrolling(monkeypatch):
     asyncio.run(_handle_voice_stop_bypasses_asr_when_enrolling(monkeypatch))
+
+
+async def _start_to_chat_ignores_text_when_enrolling():
+    collector = VoiceprintEnrollmentCollector()
+    collector.start({"targetSamples": 1, "minDurationSeconds": 0.1})
+    conn = _conn(voiceprint_enrollment=collector)
+
+    accepted = await startToChat(conn, "这句话不应该进入普通对话")
+
+    assert accepted is False
+
+
+def test_start_to_chat_ignores_text_when_enrolling():
+    asyncio.run(_start_to_chat_ignores_text_when_enrolling())
 
 
 def test_voiceprint_enrollment_handler_starts_runtime_connection(monkeypatch):

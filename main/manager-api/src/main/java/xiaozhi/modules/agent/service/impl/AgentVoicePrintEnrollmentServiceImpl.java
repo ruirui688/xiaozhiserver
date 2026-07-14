@@ -55,7 +55,7 @@ public class AgentVoicePrintEnrollmentServiceImpl
     public static final String STATUS_COMPLETED = "COMPLETED";
     public static final String STATUS_CANCELLED = "CANCELLED";
     private static final String DEFAULT_PROMPT_TEXT =
-            "小智服务器正在采集我的声纹样本。今天的天气不错，我会用正常音量连续朗读这段文字，帮助系统更稳定地识别我的声音。";
+            "我正在录入声纹，请用正常音量读完这段话。今天天气不错，我会自然地说完，然后保持安静，等待系统完成检测。";
 
     private final AgentVoicePrintEnrollmentSampleDao sampleDao;
     private final AgentVoicePrintService agentVoicePrintService;
@@ -69,7 +69,7 @@ public class AgentVoicePrintEnrollmentServiceImpl
     public AgentVoicePrintEnrollmentVO create(AgentVoicePrintEnrollmentCreateDTO dto) {
         AgentVoicePrintEnrollmentEntity entity = ConvertUtils.sourceToTarget(
                 dto, AgentVoicePrintEnrollmentEntity.class);
-        entity.setRequiredSamples(normalizeRequiredSamples(dto.getRequiredSamples()));
+        entity.setRequiredSamples(1);
         entity.setStatus(STATUS_COLLECTING);
         baseMapper.insert(entity);
         startDeviceEnrollment(entity);
@@ -270,7 +270,7 @@ public class AgentVoicePrintEnrollmentServiceImpl
         payload.set("agentId", entity.getAgentId());
         payload.set("sourceName", entity.getSourceName());
         payload.set("introduce", entity.getIntroduce());
-        payload.set("targetSamples", normalizeRequiredSamples(entity.getRequiredSamples()));
+        payload.set("targetSamples", 1);
         payload.set("promptText", DEFAULT_PROMPT_TEXT);
         payload.set("minDurationSeconds", 3.0);
         payload.set("maxDurationSeconds", 30.0);
@@ -309,7 +309,7 @@ public class AgentVoicePrintEnrollmentServiceImpl
 
     private int normalizeRequiredSamples(Integer value) {
         if (value == null) {
-            return 3;
+            return 1;
         }
         return Math.min(
                 AgentVoicePrintServiceImpl.MAX_REGISTER_SAMPLES,

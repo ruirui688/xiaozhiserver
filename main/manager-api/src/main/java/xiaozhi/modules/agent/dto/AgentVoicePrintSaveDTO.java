@@ -23,7 +23,7 @@ public class AgentVoicePrintSaveDTO {
      */
     private String audioId;
     /**
-     * 多段注册音频ID。新版 voiceprint-api 要求一次上传 2-5 段样本。
+     * 注册音频ID。设备采集流程默认 1 段，也兼容手动选择多段样本。
      */
     private List<String> audioIds;
     /**

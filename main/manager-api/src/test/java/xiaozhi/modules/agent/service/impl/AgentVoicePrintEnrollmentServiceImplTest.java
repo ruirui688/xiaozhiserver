@@ -88,6 +88,26 @@ class AgentVoicePrintEnrollmentServiceImplTest {
     }
 
     @Test
+    void completeRegistersVoicePrintWithSingleCollectedAudioId() {
+        AgentVoicePrintEnrollmentEntity collecting = enrollment("enroll-a", "agent-a",
+                AgentVoicePrintEnrollmentServiceImpl.STATUS_COLLECTING);
+        collecting.setRequiredSamples(1);
+        AgentVoicePrintEnrollmentEntity completed = enrollment("enroll-a", "agent-a",
+                AgentVoicePrintEnrollmentServiceImpl.STATUS_COMPLETED);
+        completed.setVoicePrintId("voice-a");
+        when(enrollmentDao.selectById("enroll-a")).thenReturn(collecting, completed);
+        when(sampleDao.selectList(any(Wrapper.class))).thenReturn(List.of(sample("audio-a")));
+        when(enrollmentDao.update(any(), any(Wrapper.class))).thenReturn(1);
+        when(voicePrintService.insertAndReturnId(any(AgentVoicePrintSaveDTO.class))).thenReturn("voice-a");
+
+        service.complete("enroll-a");
+
+        ArgumentCaptor<AgentVoicePrintSaveDTO> captor = ArgumentCaptor.forClass(AgentVoicePrintSaveDTO.class);
+        verify(voicePrintService).insertAndReturnId(captor.capture());
+        assertEquals(List.of("audio-a"), captor.getValue().getAudioIds());
+    }
+
+    @Test
     void completeRejectsInsufficientSamplesBeforeRegistering() {
         when(enrollmentDao.selectById("enroll-a")).thenReturn(enrollment("enroll-a", "agent-a",
                 AgentVoicePrintEnrollmentServiceImpl.STATUS_COLLECTING));

@@ -217,7 +217,7 @@ Authorization: Bearer <server.secret>
   "requestId": "采集任务ID",
   "agentId": "智能体ID",
   "sourceName": "说话人姓名",
-  "targetSamples": 3,
+  "targetSamples": 1,
   "minDurationSeconds": 3.0,
   "maxDurationSeconds": 30.0,
   "reportEndpoint": "/agent/voice-print/enrollments/{id}/device-samples"
@@ -226,6 +226,8 @@ Authorization: Bearer <server.secret>
 
 采集模式 active 时，设备继续按原 WebSocket 协议上传音频。服务端在 VAD 句末把该段音频转成
 16k 单声道 WAV 并上报到 `manager-api`，不会进入普通 ASR、语义、LLM 或工具调用链路。
+当前设备采集流程只要求朗读 1 段文本：用户读完后保持安静，服务端 VAD 检测到句末静音后自动检查并上报样本。
+`startToChat()` 也会兜底检查采集状态，防止流式 ASR 或其他入口漏过采集分支后继续触发普通对话。
 
 为了提升设备端体验，服务端会额外下发状态事件：
 
@@ -238,9 +240,9 @@ Authorization: Bearer <server.secret>
   "state": "collecting",
   "active": true,
   "sampleCount": 1,
-  "targetSamples": 3,
+  "targetSamples": 1,
   "reason": "",
-  "prompt": "已采集第 1 段，还需要 2 段。"
+  "prompt": "已采集完成，请在后台完成注册。"
 }
 ```
 
