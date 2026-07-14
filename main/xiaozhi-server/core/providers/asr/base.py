@@ -254,6 +254,17 @@ class ASRProviderBase(ABC):
             return timed_result
         return timed_result, None
 
+    def record_first_text_metric(self, conn: "ConnectionHandler", text):
+        if not text:
+            return
+        turn_metrics = getattr(conn, "turn_metrics", None)
+        if turn_metrics is None:
+            return
+        try:
+            turn_metrics.record_asr_first_text(len(str(text)))
+        except Exception as exc:
+            logger.bind(tag=TAG).debug(f"记录ASR首段指标失败: {exc}")
+
     def _build_enhanced_text(
         self,
         text: str,

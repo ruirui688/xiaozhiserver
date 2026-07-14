@@ -196,6 +196,8 @@ class ASRProvider(ASRProviderBase):
                         text = sentence.get("text", "")
                         sentence_end = sentence.get("sentence_end", False)
                         end_time = sentence.get("end_time")
+                        if text:
+                            self.record_first_text_metric(conn, text)
 
                         # 判断是否为最终结果(sentence_end为True且end_time不为null)
                         is_final = sentence_end and end_time is not None

@@ -226,6 +226,8 @@ class ASRProvider(ASRProviderBase):
                             for i in text_ws:
                                 for j in i.get("cw", []):
                                     w = j.get("w", "")
+                                    if w:
+                                        self.record_first_text_metric(conn, w)
                                     self.text += w
 
                     if status == 2:
@@ -350,4 +352,3 @@ class ASRProvider(ASRProviderBase):
                 logger.bind(tag=TAG).debug("Xunfei decoder resources released")
             except Exception as e:
                 logger.bind(tag=TAG).debug(f"释放Xunfei decoder资源时出错: {e}")
-

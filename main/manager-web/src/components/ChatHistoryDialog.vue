@@ -322,14 +322,26 @@ export default {
                 if (value === null || value === undefined || value === '') return;
                 items.push({ label, value: `${value}${suffix}` });
             };
+            add('音频', this.getNested(metrics, ['input', 'estimated_audio_duration_ms']));
             add('VAD', this.getNested(metrics, ['latency_ms', 'vad', 'inference_total_ms']));
-            add('ASR', this.getNested(metrics, ['latency_ms', 'asr', 'total_ms']));
+            add('ASR首段', this.getNested(metrics, ['latency_ms', 'asr', 'first_text_ms']));
+            add('ASR尾段', this.getNested(metrics, ['latency_ms', 'asr', 'tail_latency_ms']));
             add('声纹', this.getNested(metrics, ['latency_ms', 'voiceprint', 'total_ms']));
             add('LLM', this.getNested(metrics, ['latency_ms', 'llm', 'total_ms']));
             add('TTS', this.getNested(metrics, ['latency_ms', 'tts', 'total_ms']));
+            const tokenSource = this.getNested(metrics, ['tokens', 'source']);
+            const tokenSuffix = tokenSource && String(tokenSource).startsWith('estimated') ? '估' : '';
+            const promptTokens = this.getNested(metrics, ['tokens', 'prompt_tokens']);
+            const completionTokens = this.getNested(metrics, ['tokens', 'completion_tokens']);
             const totalTokens = this.getNested(metrics, ['tokens', 'total_tokens']);
+            if (promptTokens !== null && promptTokens !== undefined && promptTokens !== '') {
+                items.push({ label: 'Token入', value: `${promptTokens}${tokenSuffix}` });
+            }
+            if (completionTokens !== null && completionTokens !== undefined && completionTokens !== '') {
+                items.push({ label: 'Token出', value: `${completionTokens}${tokenSuffix}` });
+            }
             if (totalTokens !== null && totalTokens !== undefined && totalTokens !== '') {
-                items.push({ label: 'Token', value: totalTokens });
+                items.push({ label: 'Token总', value: `${totalTokens}${tokenSuffix}` });
             }
             return items;
         },
