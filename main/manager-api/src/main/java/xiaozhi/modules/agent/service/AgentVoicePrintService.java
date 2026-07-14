@@ -21,6 +21,14 @@ public interface AgentVoicePrintService {
     boolean insert(AgentVoicePrintSaveDTO dto);
 
     /**
+     * 添加智能体新的声纹并返回本地声纹ID。
+     *
+     * @param dto 保存智能体声纹的数据
+     * @return 新声纹ID
+     */
+    String insertAndReturnId(AgentVoicePrintSaveDTO dto);
+
+    /**
      * 删除智能体的指的声纹
      *
      * @param userId       当前登录的用户id

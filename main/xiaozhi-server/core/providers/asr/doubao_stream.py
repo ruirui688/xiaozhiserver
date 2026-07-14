@@ -9,7 +9,7 @@ import opuslib_next
 from core.providers.asr.base import ASRProviderBase
 from config.logger import setup_logging
 from core.providers.asr.dto.dto import InterfaceType
-from typing import TYPE_CHECKING
+from typing import Any, Dict, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from core.connection import ConnectionHandler
@@ -24,6 +24,7 @@ class ASRProvider(ASRProviderBase):
         self.interface_type = InterfaceType.STREAM
         self.config = config
         self.text = ""
+        self.utterances = []
         self.decoder = opuslib_next.Decoder(16000, 1)
         self.asr_ws = None
         self.forward_task = None
@@ -92,6 +93,7 @@ class ASRProvider(ASRProviderBase):
                 self._stop_sent_event = asyncio.Event()
                 self._stop_sent_at = None
                 self.text = ""
+                self.utterances = []
                 # 建立新的WebSocket连接
                 headers = self.token_auth()
                 safe_headers = {
@@ -334,12 +336,16 @@ class ASRProvider(ASRProviderBase):
                             for utterance in utterances:
                                 if utterance.get("definite", False):
                                     current_text = utterance["text"]
+                                    normalized_utterance = _normalize_utterance(
+                                        utterance
+                                    )
                                     logger.bind(tag=TAG).info(
                                         f"识别到文本: {current_text}"
                                     )
 
                                     # 手动模式下累积识别结果
                                     if conn.client_listen_mode == "manual":
+                                        self.utterances.append(normalized_utterance)
                                         if self.text:
                                             self.text += current_text
                                         else:
@@ -361,6 +367,7 @@ class ASRProvider(ASRProviderBase):
                                     else:
                                         # 自动模式下直接覆盖
                                         self.text = current_text
+                                        self.utterances = [normalized_utterance]
                                         if len(audio_data) > 0:
                                             audio_snapshot = list(audio_data)
                                             conn.reset_audio_states(preserve_voiceprint=True)
@@ -422,6 +429,7 @@ class ASRProvider(ASRProviderBase):
                     stop_sent_event.clear()
                     self._stop_sent_at = None
                     self.text = ""
+                    self.utterances = []
                     self.forward_task = None
                     # 只允许当前会话清理连接状态，避免旧任务影响重连后的新会话。
                     if not audio_state_released:
@@ -436,6 +444,7 @@ class ASRProvider(ASRProviderBase):
         self._stop_sent_event.clear()
         self._stop_sent_at = None
         self.text = ""
+        self.utterances = []
 
     async def _send_stop_request(self):
         """发送最后一个音频帧以通知服务器结束"""
@@ -586,7 +595,22 @@ class ASRProvider(ASRProviderBase):
 
     async def speech_to_text(self, opus_data, session_id, audio_format, artifacts=None):
         result = self.text
+        utterances = [
+            _normalize_utterance(item)
+            for item in self.utterances
+            if isinstance(item, dict)
+        ]
         self.text = ""  # 清空text
+        self.utterances = []
+        if result and _has_structured_utterance_data(utterances):
+            return {
+                "content": result,
+                "utterances": utterances,
+                "provider_metadata": {
+                    "provider": "doubao_stream",
+                    "show_utterances": True,
+                },
+            }, None
         return result, None
 
     async def close(self):
@@ -607,6 +631,7 @@ class ASRProvider(ASRProviderBase):
         self._stop_sent_at = None
         self._stop_sent_times.clear()
         self.text = ""
+        self.utterances = []
 
         # 显式释放decoder资源
         if hasattr(self, "decoder") and self.decoder is not None:
@@ -616,3 +641,58 @@ class ASRProvider(ASRProviderBase):
                 logger.bind(tag=TAG).debug("Doubao decoder resources released")
             except Exception as e:
                 logger.bind(tag=TAG).debug(f"释放Doubao decoder资源时出错: {e}")
+
+
+def _normalize_utterance(item: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(item)
+    normalized["text"] = str(normalized.get("text") or "").strip()
+    provider_speaker = _first_present(
+        normalized,
+        "speaker",
+        "speaker_id",
+        "speakerId",
+        "speaker_label",
+        "speakerLabel",
+        "role",
+    )
+    if provider_speaker is not None:
+        normalized["provider_speaker"] = str(provider_speaker)
+    return normalized
+
+
+def _has_structured_utterance_data(utterances) -> bool:
+    if not utterances:
+        return False
+    structured_keys = {
+        "provider_speaker",
+        "speaker",
+        "speaker_id",
+        "speakerId",
+        "speaker_label",
+        "speakerLabel",
+        "role",
+        "start_time",
+        "startTime",
+        "start_ms",
+        "startMs",
+        "begin_time",
+        "beginTime",
+        "end_time",
+        "endTime",
+        "end_ms",
+        "endMs",
+        "stop_time",
+        "stopTime",
+    }
+    return any(
+        isinstance(item, dict) and any(key in item for key in structured_keys)
+        for item in utterances
+    )
+
+
+def _first_present(payload: Dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = payload.get(key)
+        if value is not None:
+            return value
+    return None

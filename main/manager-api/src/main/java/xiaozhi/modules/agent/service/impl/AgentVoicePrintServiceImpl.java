@@ -67,6 +67,11 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
 
     @Override
     public boolean insert(AgentVoicePrintSaveDTO dto) {
+        return StringUtils.isNotBlank(insertAndReturnId(dto));
+    }
+
+    @Override
+    public String insertAndReturnId(AgentVoicePrintSaveDTO dto) {
         ensureVoiceprintCapacity(dto.getAgentId());
 
         List<VoicePrintAudioSample> samples = getVoicePrintAudioSamples(
@@ -78,13 +83,13 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
         entity.setAudioId(samples.get(0).audioId());
         entity.setRemoteUserId(dto.getAgentId());
 
-        return Boolean.TRUE.equals(transactionTemplate.execute(status -> {
+        return transactionTemplate.execute(status -> {
             try {
                 // 并发创建时在事务内再检查一次；远程服务还会原子执行最终的 5 条上限。
                 ensureVoiceprintCapacity(dto.getAgentId());
                 if (baseMapper.insert(entity) != 1) {
                     status.setRollbackOnly();
-                    return false;
+                    return null;
                 }
                 saveSamples(entity, samples);
                 voiceprintApiClient.registerVoiceprint(
@@ -93,7 +98,7 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
                         entity.getSourceName(),
                         entity.getIntroduce(),
                         samples.stream().map(VoicePrintAudioSample::resource).toList());
-                return true;
+                return entity.getId();
             } catch (RenException e) {
                 status.setRollbackOnly();
                 throw e;
@@ -102,7 +107,7 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
                 log.error("保存声纹失败: agentId={}, errorType={}", dto.getAgentId(), e.getClass().getSimpleName());
                 throw new RenException(ErrorCode.VOICE_PRINT_SAVE_ERROR, e);
             }
-        }));
+        });
     }
 
     @Override

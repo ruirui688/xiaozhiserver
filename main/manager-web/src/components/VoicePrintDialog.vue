@@ -1,5 +1,5 @@
 <template>
-  <el-dialog :title="title" :visible.sync="visible" width="520px" class="param-dialog-wrapper" :append-to-body="true"
+  <el-dialog :title="title" :visible.sync="visible" width="680px" class="param-dialog-wrapper" :append-to-body="true"
     :close-on-click-modal="false" :key="dialogKey" custom-class="custom-param-dialog" :show-close="false">
     <div class="dialog-container">
       <div class="dialog-header">
@@ -11,25 +11,7 @@
         </button>
       </div>
 
-      <el-form :model="form" :rules="rules" ref="form" label-width="auto" label-position="left" class="param-form">
-        <el-form-item :label="$t('voicePrintDialog.voicePrintVector')" prop="audioIds" class="form-item">
-          <el-select
-            v-model="form.audioIds"
-            multiple
-            collapse-tags
-            :multiple-limit="5"
-            :placeholder="$t('voicePrintDialog.selectVoiceMessage')"
-            class="custom-select">
-            <el-option v-for="item in valueTypeOptions" :key="item.audioId" :label="item.content" :value="item.audioId">
-              <span style="float: left">{{ item.content }}</span>
-              <span style="float: right; color: #8492a6; font-size: 13px">
-                <i :class="getAudioIconClass(item.audioId)" @click.stop="playAudio(item.audioId)"
-                  class="audio-icon"></i>
-              </span>
-            </el-option>
-          </el-select>
-        </el-form-item>
-
+      <el-form :model="form" :rules="rules" ref="form" label-width="96px" label-position="left" class="param-form">
         <el-form-item :label="$t('voicePrintDialog.name')" prop="sourceName" class="form-item">
           <el-input v-model="form.sourceName" :placeholder="$t('voicePrintDialog.enterName')" class="custom-input"></el-input>
         </el-form-item>
@@ -38,11 +20,115 @@
           <el-input type="textarea" v-model="form.introduce" :placeholder="$t('voicePrintDialog.enterDescription')" :rows="3" class="custom-textarea"
             maxlength="100" show-word-limit></el-input>
         </el-form-item>
+
+        <el-form-item v-if="!form.id" :label="$t('voicePrintDialog.collectMethod')" class="form-item">
+          <el-radio-group v-model="collectMethod" class="method-group">
+            <el-radio-button label="device">{{ $t('voicePrintDialog.deviceCollect') }}</el-radio-button>
+            <el-radio-button label="history">{{ $t('voicePrintDialog.historyCollect') }}</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+
+        <el-form-item v-if="!form.id && collectMethod === 'device'" :label="$t('voicePrintDialog.device')" class="form-item">
+          <el-select v-model="deviceId" :placeholder="$t('voicePrintDialog.selectDevice')" class="custom-select">
+            <el-option
+              v-for="device in devices"
+              :key="device.deviceId"
+              :label="device.label"
+              :value="device.deviceId">
+              <span style="float: left">{{ device.label }}</span>
+              <span style="float: right; color: #8492a6; font-size: 13px">{{ device.deviceId }}</span>
+            </el-option>
+          </el-select>
+        </el-form-item>
+
+        <el-form-item v-if="!form.id && collectMethod === 'device'" :label="$t('voicePrintDialog.requiredSamples')" class="form-item">
+          <el-input-number v-model="requiredSamples" :min="minSamples" :max="maxSamples" size="mini"></el-input-number>
+        </el-form-item>
+
+        <div v-if="!form.id && collectMethod === 'device'" class="enrollment-panel">
+          <div class="task-head">
+            <div>
+              <div class="task-title">{{ $t('voicePrintDialog.enrollmentTask') }}</div>
+              <div class="task-subtitle">{{ enrollmentHint }}</div>
+            </div>
+            <el-tag size="mini" :type="enrollmentTagType">{{ enrollmentStatusText }}</el-tag>
+          </div>
+
+          <el-progress :percentage="enrollmentProgress" :status="enrollmentProgressStatus"></el-progress>
+
+          <div class="sample-row">
+            <span>{{ $t('voicePrintDialog.collectedSamples', { count: collectedCount, min: requiredSamples, max: maxSamples }) }}</span>
+            <span v-if="enrollmentId" class="task-id">{{ $t('voicePrintDialog.taskId') }} {{ enrollmentId }}</span>
+          </div>
+
+          <el-alert
+            v-if="enrollmentUnsupported"
+            type="warning"
+            :closable="false"
+            class="fallback-alert"
+            :title="$t('voicePrintDialog.enrollmentUnavailable')"
+            :description="$t('voicePrintDialog.enrollmentUnavailableDesc')">
+          </el-alert>
+
+          <div class="device-actions">
+            <el-button
+              type="primary"
+              size="mini"
+              :loading="creatingEnrollment"
+              :disabled="creatingEnrollment || completingEnrollment"
+              @click="startEnrollment">
+              {{ enrollmentId ? $t('voicePrintDialog.restartEnrollment') : $t('voicePrintDialog.startEnrollment') }}
+            </el-button>
+            <el-button
+              size="mini"
+              :loading="completingEnrollment"
+              :disabled="!canCompleteEnrollment"
+              @click="completeEnrollment">
+              {{ $t('voicePrintDialog.completeEnrollment') }}
+            </el-button>
+            <el-button size="mini" type="text" @click="collectMethod = 'history'">
+              {{ $t('voicePrintDialog.useHistoryFallback') }}
+            </el-button>
+          </div>
+        </div>
+
+        <div v-if="showHistorySamples" class="history-panel">
+          <div class="history-head">
+            <span>{{ form.id ? $t('voicePrintDialog.replaceSamples') : $t('voicePrintDialog.historyAdvanced') }}</span>
+            <el-tag v-if="!form.id && collectMethod === 'device'" size="mini" type="info">{{ $t('voicePrintDialog.optional') }}</el-tag>
+          </div>
+          <el-form-item :label="$t('voicePrintDialog.voicePrintVector')" prop="audioIds" class="form-item sample-item">
+            <el-select
+              v-model="form.audioIds"
+              multiple
+              collapse-tags
+              :multiple-limit="5"
+              :placeholder="$t('voicePrintDialog.selectVoiceMessage')"
+              class="custom-select">
+              <el-option v-for="item in valueTypeOptions" :key="item.audioId" :label="item.content" :value="item.audioId">
+                <span style="float: left">{{ item.content }}</span>
+                <span style="float: right; color: #8492a6; font-size: 13px">
+                  <i :class="getAudioIconClass(item.audioId)" @click.stop="playAudio(item.audioId)"
+                    class="audio-icon"></i>
+                </span>
+              </el-option>
+            </el-select>
+          </el-form-item>
+          <div v-if="!form.id && collectMethod === 'device'" class="append-row">
+            <el-button
+              size="mini"
+              :loading="appendingSamples"
+              :disabled="!canAppendSamples"
+              @click="appendHistorySamples">
+              {{ $t('voicePrintDialog.appendHistorySamples') }}
+            </el-button>
+          </div>
+        </div>
       </el-form>
 
       <div class="dialog-footer">
-        <el-button type="primary" @click="submit" class="save-btn" :loading="saving" :disabled="saving">
-          {{ $t('voicePrintDialog.save') }}
+        <el-button type="primary" @click="submit" class="save-btn" :loading="saving" :disabled="saving || primarySubmitDisabled">
+          {{ primarySubmitText }}
         </el-button>
         <el-button @click="cancel" class="cancel-btn">
           {{ $t('voicePrintDialog.cancel') }}
@@ -68,6 +154,10 @@ export default {
     agentId: {
       type: String
     },
+    devices: {
+      type: Array,
+      default: () => []
+    },
     form: {
       type: Object,
       default: () => ({
@@ -83,8 +173,22 @@ export default {
     return {
       dialogKey: Date.now(),
       saving: false,
+      collectMethod: 'device',
+      deviceId: '',
+      requiredSamples: 3,
+      enrollmentId: '',
+      enrollmentStatus: 'idle',
+      enrollmentProgress: 0,
+      collectedCount: 0,
+      creatingEnrollment: false,
+      appendingSamples: false,
+      completingEnrollment: false,
+      enrollmentUnsupported: false,
+      pollingTimer: null,
       playingAudioId: null,
       audioElement: null,
+      minSamples: 2,
+      maxSamples: 5,
       valueTypeOptions: [
         { audioId: '', content: '' }
       ],
@@ -101,10 +205,72 @@ export default {
       }
     };
   },
+  computed: {
+    showHistorySamples() {
+      return this.form.id || this.collectMethod === 'history' || this.enrollmentId || this.enrollmentUnsupported;
+    },
+    enrollmentHint() {
+      if (this.enrollmentUnsupported) {
+        return this.$t('voicePrintDialog.historyFallbackHint');
+      }
+      if (!this.enrollmentId) {
+        return this.$t('voicePrintDialog.deviceCollectHint');
+      }
+      if (this.enrollmentStatus === 'collecting') {
+        return this.$t('voicePrintDialog.collectingHint');
+      }
+      if (this.enrollmentStatus === 'ready') {
+        return this.$t('voicePrintDialog.readyHint');
+      }
+      if (this.enrollmentStatus === 'failed') {
+        return this.$t('voicePrintDialog.failedHint');
+      }
+      return this.$t('voicePrintDialog.createdHint');
+    },
+    enrollmentStatusText() {
+      const statusMap = {
+        idle: this.$t('voicePrintDialog.statusIdle'),
+        collecting: this.$t('voicePrintDialog.statusCollecting'),
+        ready: this.$t('voicePrintDialog.statusReady'),
+        failed: this.$t('voicePrintDialog.statusFailed')
+      };
+      return statusMap[this.enrollmentStatus] || statusMap.idle;
+    },
+    enrollmentTagType() {
+      if (this.enrollmentStatus === 'ready') return 'success';
+      if (this.enrollmentStatus === 'failed' || this.enrollmentUnsupported) return 'warning';
+      if (this.enrollmentStatus === 'collecting') return '';
+      return 'info';
+    },
+    enrollmentProgressStatus() {
+      if (this.enrollmentStatus === 'ready') return 'success';
+      if (this.enrollmentStatus === 'failed') return 'exception';
+      return undefined;
+    },
+    canCompleteEnrollment() {
+      return Boolean(this.enrollmentId) && this.collectedCount >= this.requiredSamples && !this.completingEnrollment;
+    },
+    canAppendSamples() {
+      return Boolean(this.enrollmentId) && Array.isArray(this.form.audioIds) && this.form.audioIds.length > 0 && !this.appendingSamples;
+    },
+    primarySubmitText() {
+      if (!this.form.id && this.collectMethod === 'device') {
+        return this.$t('voicePrintDialog.completeEnrollment');
+      }
+      return this.$t('voicePrintDialog.save');
+    },
+    primarySubmitDisabled() {
+      return !this.form.id && this.collectMethod === 'device' && !this.canCompleteEnrollment;
+    }
+  },
   methods: {
     validateAudioIds(value, callback) {
       const count = Array.isArray(value) ? value.length : 0;
       if (this.form.id && count === 0) {
+        callback();
+        return;
+      }
+      if (!this.form.id && this.collectMethod === 'device') {
         callback();
         return;
       }
@@ -113,6 +279,158 @@ export default {
         return;
       }
       callback();
+    },
+    validateBasicFields(done) {
+      const fields = ['sourceName', 'introduce'];
+      let pending = fields.length;
+      let hasError = false;
+      fields.forEach(prop => {
+        this.$refs.form.validateField(prop, (error) => {
+          if (error) {
+            hasError = true;
+          }
+          pending -= 1;
+          if (pending === 0 && !hasError) {
+            done();
+          }
+        });
+      });
+    },
+    normalizeEnrollment(data) {
+      const payload = data && data.data ? data.data : data;
+      const status = String(payload.status || payload.enrollmentStatus || this.enrollmentStatus || 'collecting').toLowerCase();
+      const count = Number(payload.collectedCount || payload.sampleCount || payload.samples || this.collectedCount || 0);
+      const requiredSamples = Number(payload.requiredSamples || this.requiredSamples || this.minSamples);
+      const progress = payload.progress != null
+        ? Number(payload.progress)
+        : Math.min(100, Math.round((count / requiredSamples) * 100));
+      this.enrollmentId = payload.id || payload.enrollmentId || this.enrollmentId;
+      this.requiredSamples = Math.max(this.minSamples, Math.min(this.maxSamples, requiredSamples));
+      this.enrollmentStatus = status === 'completed' ? 'ready' : status;
+      this.collectedCount = count;
+      this.enrollmentProgress = Math.max(0, Math.min(100, progress));
+      if (this.collectedCount >= this.requiredSamples && this.enrollmentStatus === 'collecting') {
+        this.enrollmentStatus = 'ready';
+      }
+    },
+    markEnrollmentUnsupported() {
+      this.enrollmentUnsupported = true;
+      this.enrollmentStatus = 'failed';
+      this.enrollmentProgress = 0;
+      this.stopPolling();
+    },
+    startEnrollment() {
+      this.validateBasicFields(() => {
+        if (!this.deviceId) {
+          this.$message.warning(this.$t('voicePrintDialog.requiredDevice'));
+          return;
+        }
+        this.creatingEnrollment = true;
+        this.enrollmentUnsupported = false;
+        const payload = {
+          agentId: this.agentId,
+          sourceName: this.form.sourceName,
+          introduce: this.form.introduce,
+          collectMethod: 'device',
+          deviceId: this.deviceId,
+          requiredSamples: this.requiredSamples
+        };
+        api.agent.createAgentVoicePrintEnrollment(payload, ({ data }) => {
+          this.creatingEnrollment = false;
+          if (data.code === 0 || data.code === undefined) {
+            this.normalizeEnrollment(data.data || {});
+            if (!this.enrollmentId) {
+              this.enrollmentStatus = 'collecting';
+            }
+            this.startPolling();
+          } else {
+            this.markEnrollmentUnsupported();
+          }
+        }, () => {
+          this.creatingEnrollment = false;
+          this.markEnrollmentUnsupported();
+        });
+      });
+    },
+    startPolling() {
+      this.stopPolling();
+      if (!this.enrollmentId) {
+        return;
+      }
+      this.pollingTimer = setInterval(() => {
+        api.agent.getAgentVoicePrintEnrollment(this.agentId, this.enrollmentId, ({ data }) => {
+          if (data.code === 0 || data.code === undefined) {
+            this.normalizeEnrollment(data.data || {});
+            if (this.enrollmentStatus === 'ready' || this.enrollmentStatus === 'failed') {
+              this.stopPolling();
+            }
+          }
+        }, () => {
+          this.stopPolling();
+        });
+      }, 3000);
+    },
+    stopPolling() {
+      if (this.pollingTimer) {
+        clearInterval(this.pollingTimer);
+        this.pollingTimer = null;
+      }
+    },
+    appendHistorySamples() {
+      if (!this.canAppendSamples) {
+        return;
+      }
+      this.appendingSamples = true;
+      api.agent.appendAgentVoicePrintEnrollmentSamples(this.enrollmentId, {
+        agentId: this.agentId,
+        audioIds: this.form.audioIds
+      }, ({ data }) => {
+        this.appendingSamples = false;
+        if (data.code === 0 || data.code === undefined) {
+          this.normalizeEnrollment(data.data || {
+            sampleCount: this.collectedCount + this.form.audioIds.length
+          });
+          this.$message.success(this.$t('voicePrintDialog.appendSuccess'));
+        } else {
+          this.$message.error(data.msg || this.$t('voicePrintDialog.appendFailed'));
+        }
+      }, () => {
+        this.appendingSamples = false;
+        this.$message.warning(this.$t('voicePrintDialog.enrollmentUnavailable'));
+      });
+    },
+    completeEnrollment() {
+      this.validateBasicFields(() => {
+        if (!this.canCompleteEnrollment) {
+          return;
+        }
+        this.completingEnrollment = true;
+        api.agent.completeAgentVoicePrintEnrollment(this.enrollmentId, {
+          agentId: this.agentId,
+          sourceName: this.form.sourceName,
+          introduce: this.form.introduce
+        }, ({ data }) => {
+          this.completingEnrollment = false;
+          if (data.code === 0 || data.code === undefined) {
+            this.stopPolling();
+            this.$message.success(this.$t('voicePrintDialog.completeSuccess'));
+            this.$emit('submit', {
+              form: {
+                ...this.form,
+                enrollmentId: this.enrollmentId,
+                collectMethod: 'device',
+                completedByEnrollment: true
+              },
+              done: () => {}
+            });
+          } else {
+            this.$message.error(data.msg || this.$t('voicePrintDialog.completeFailed'));
+          }
+        }, () => {
+          this.completingEnrollment = false;
+          this.$message.warning(this.$t('voicePrintDialog.enrollmentUnavailable'));
+        });
+      });
     },
     getAudioIconClass(audioId) {
       if (this.playingAudioId === audioId) {
@@ -154,6 +472,10 @@ export default {
       });
     },
     submit() {
+      if (!this.form.id && this.collectMethod === 'device') {
+        this.completeEnrollment();
+        return;
+      }
       this.$refs.form.validate((valid) => {
         if (valid) {
           this.saving = true; // 开始加载
@@ -172,18 +494,36 @@ export default {
     },
     cancel() {
       this.saving = false; // 取消时重置状态
+      this.stopPolling();
       this.dialogKey = Date.now();
       this.$emit('cancel');
+    },
+    resetEnrollmentState() {
+      this.collectMethod = this.form.id ? 'history' : 'device';
+      this.deviceId = this.devices.length === 1 ? this.devices[0].deviceId : '';
+      this.requiredSamples = 3;
+      this.enrollmentId = '';
+      this.enrollmentStatus = 'idle';
+      this.enrollmentProgress = 0;
+      this.collectedCount = 0;
+      this.creatingEnrollment = false;
+      this.appendingSamples = false;
+      this.completingEnrollment = false;
+      this.enrollmentUnsupported = false;
+      this.stopPolling();
     }
   },
   watch: {
     visible(newVal) {
       if (newVal) {
+        this.resetEnrollmentState();
         api.agent.getRecentlyFiftyByAgentId(this.agentId, ((data) => {
           this.valueTypeOptions = data.data.data.map(item => ({
             ...item
           }));
         }))
+      } else {
+        this.stopPolling();
       }
     },
     'form.audioIds': {
@@ -220,6 +560,9 @@ export default {
         })
       }))
     }
+  },
+  beforeDestroy() {
+    this.stopPolling();
   }
 };
 </script>
@@ -394,6 +737,91 @@ export default {
 
     .remark-item :deep(.el-form-item__label) {
       margin-top: -4px;
+    }
+
+    .method-group {
+      :deep(.el-radio-button__inner) {
+        min-width: 112px;
+      }
+    }
+
+    .enrollment-panel,
+    .history-panel {
+      margin: 0 0 18px 96px;
+      padding: 14px 16px;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .task-head,
+    .history-head,
+    .sample-row,
+    .device-actions,
+    .append-row {
+      display: flex;
+      align-items: center;
+    }
+
+    .task-head,
+    .history-head {
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .task-title,
+    .history-head {
+      color: #1e293b;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .task-subtitle {
+      color: #64748b;
+      font-size: 12px;
+      line-height: 1.5;
+      margin-top: 4px;
+    }
+
+    .sample-row {
+      justify-content: space-between;
+      margin-top: 10px;
+      color: #64748b;
+      font-size: 12px;
+    }
+
+    .task-id {
+      max-width: 260px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      text-align: right;
+    }
+
+    .fallback-alert {
+      margin-top: 12px;
+    }
+
+    .device-actions {
+      gap: 10px;
+      margin-top: 14px;
+      flex-wrap: wrap;
+    }
+
+    .history-head {
+      gap: 10px;
+    }
+
+    .sample-item {
+      margin-bottom: 10px;
+
+      :deep(.el-form-item__label) {
+        text-align: left;
+      }
+    }
+
+    .append-row {
+      justify-content: flex-end;
     }
   }
 

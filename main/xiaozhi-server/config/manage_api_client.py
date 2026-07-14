@@ -249,6 +249,49 @@ async def report(
         return None
 
 
+async def report_voiceprint_enrollment_sample(
+    endpoint: str,
+    mac_address: str,
+    session_id: str,
+    agent_id: Optional[str],
+    request_id: str,
+    source_name: str,
+    introduce: str,
+    sample_index: int,
+    duration_ms: int,
+    audio,
+) -> Optional[Dict]:
+    """上报设备端声纹采集样本到 manager-api 专用接口。
+
+    endpoint 是 manager-api base_url 下的相对路径，例如
+    /agent/voice-print/enrollment/sample。当前 manager-api 还没有该接口时，
+    调用方应回退到聊天历史音频上报链路。
+    """
+    if not endpoint or not audio or not ManageApiClient._instance:
+        return None
+    try:
+        return await ManageApiClient._instance._execute_async_request(
+            "POST",
+            endpoint,
+            json={
+                "macAddress": mac_address,
+                "sessionId": session_id,
+                "agentId": agent_id,
+                "requestId": request_id,
+                "sourceName": source_name,
+                "introduce": introduce,
+                "sampleIndex": sample_index,
+                "durationMs": duration_ms,
+                "audioBase64": base64.b64encode(audio).decode("utf-8"),
+            },
+        )
+    except Exception as e:
+        logger.bind(tag="manage_api").warning(
+            f"声纹采集样本专用上报失败: errorType={type(e).__name__}"
+        )
+        return None
+
+
 async def report_memory_event(
     mac_address: str,
     session_id: str,

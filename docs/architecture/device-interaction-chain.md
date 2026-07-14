@@ -178,7 +178,7 @@ POST submit (aiohttp, http_timeout_seconds)
 | 来源 | 位置 | 说明 |
 |------|------|------|
 | `conn.chat()` | connection.py:1050-1463 | LLM 流式 chunk → TTS |
-| `SemanticCenter._speak()` | semantic_center.py:162-187 | 确定性别回复 |
+| `SemanticCenter._speak()` | semantic_center.py:162-187 | 确定性回复 |
 | `intentHandler.speak_txt()` | intentHandler.py:253-272 | 意图处理回复 |
 | `handle_llm_function_result()` | connection.py:1622 | 工具调用结果 |
 
@@ -203,9 +203,64 @@ utils/audioRateController.py  AudioRateController
   - client_abort 时通过 CancelledError 取消
 ```
 
-## 5. 打断机制（Barge-in）
+## 5. 声纹注册采集模式
 
-### 5.1 两层打断
+声纹注册不再通过普通语音对话触发。智控台创建注册任务后，`manager-api` 调用
+`xiaozhi-server` 的 HTTP 控制端点，指定在线设备进入连接级采集模式：
+
+```text
+POST /device/voiceprint/enrollment/start
+Authorization: Bearer <server.secret>
+
+{
+  "deviceId": "设备MAC",
+  "requestId": "采集任务ID",
+  "agentId": "智能体ID",
+  "sourceName": "说话人姓名",
+  "targetSamples": 3,
+  "minDurationSeconds": 3.0,
+  "maxDurationSeconds": 30.0,
+  "reportEndpoint": "/agent/voice-print/enrollments/{id}/device-samples"
+}
+```
+
+采集模式 active 时，设备继续按原 WebSocket 协议上传音频。服务端在 VAD 句末把该段音频转成
+16k 单声道 WAV 并上报到 `manager-api`，不会进入普通 ASR、语义、LLM 或工具调用链路。
+
+为了提升设备端体验，服务端会额外下发状态事件：
+
+```json
+{
+  "type": "voiceprint_enrollment",
+  "event": "sample_collected",
+  "session_id": "当前会话ID",
+  "requestId": "采集任务ID",
+  "state": "collecting",
+  "active": true,
+  "sampleCount": 1,
+  "targetSamples": 3,
+  "reason": "",
+  "prompt": "已采集第 1 段，还需要 2 段。"
+}
+```
+
+设备端可选处理这些事件：
+
+| event | 建议设备表现 |
+|-------|--------------|
+| `started` | 进入声纹注册 UI/灯效，提示用户安静环境、正常音量说话 |
+| `sample_collected` | 显示进度，如 `1/3`，短提示音或屏幕反馈 |
+| `sample_rejected` | 显示失败原因，提示重新说一段 |
+| `sample_failed` | 显示上传失败，提示重新采集 |
+| `completed` | 显示采集完成，等待后台完成注册 |
+| `stopped` | 退出声纹注册 UI/灯效 |
+
+同时，服务端会通过现有 TTS 通道播报 `prompt` 文案。旧固件即使不识别
+`voiceprint_enrollment` JSON，也能听到语音提示；新固件可以识别该事件做屏幕、灯效和按键取消。
+
+## 6. 打断机制（Barge-in）
+
+### 6.1 两层打断
 
 ```text
 receiveAudioHandle.py:107-153  startToChat() 中断路径
@@ -221,7 +276,7 @@ receiveAudioHandle.py:107-153  startToChat() 中断路径
   - LLM 失败 → 回退到 new_turn（保守：中断并处理新输入）
 ```
 
-### 5.2 Abort 处理
+### 6.2 Abort 处理
 
 ```text
 handle/abortHandle.py:9-38  handleAbortMessage()
@@ -232,9 +287,9 @@ handle/abortHandle.py:9-38  handleAbortMessage()
   - 发送 stop TTS 消息（try/except 保护）
 ```
 
-## 6. IoT 描述符
+## 7. IoT 描述符
 
-### 6.1 设备上报
+### 7.1 设备上报
 
 ```text
 设备发送: {"type": "iot", "descriptors": [{"name": "light", "properties": {...}, "methods": [...]}]}
@@ -242,7 +297,7 @@ handle/abortHandle.py:9-38  handleAbortMessage()
   → providers/tools/device_iot/iot_handler.py:63-120  handleIotDescriptors()
 ```
 
-### 6.2 服务端门控
+### 7.2 服务端门控
 
 ```text
 iot_handler.py:36-61  SERVER_GATED_IOT_DEVICES
@@ -251,7 +306,7 @@ iot_handler.py:36-61  SERVER_GATED_IOT_DEVICES
   - 门控失败 → 静默丢弃（记录 info 日志）
 ```
 
-### 6.3 工具注册
+### 7.3 工具注册
 
 每个 IoT 描述符被转换为 `IotDescriptor` 对象，通过 `DeviceIoTExecutor` 注册为 LLM 工具。工具名格式：
 - 查询：`get_{devicename}_{property}`
@@ -259,9 +314,9 @@ iot_handler.py:36-61  SERVER_GATED_IOT_DEVICES
 
 **注意**：工具名解析存储了 `(device_name, property/method)` 到 `_tool_device_map` 的映射，不依赖 `split("_")` 分片。
 
-## 7. Device MCP
+## 8. Device MCP
 
-### 7.1 MCP 能力声明
+### 8.1 MCP 能力声明
 
 ```text
 helloHandle.py:54-66
@@ -270,7 +325,7 @@ helloHandle.py:54-66
   → send_mcp_initialize_message(conn)
 ```
 
-### 7.2 MCP 握手
+### 8.2 MCP 握手
 
 ```text
 mcp_handler.py:253-288  send_mcp_initialize_message()
@@ -279,14 +334,14 @@ mcp_handler.py:253-288  send_mcp_initialize_message()
   3. 设备回复工具列表 → name_mapping 清理 → MCPClient.set_ready(True)
 ```
 
-### 7.3 清理规则
+### 8.3 清理规则
 
 ```text
 util.py:573-576  sanitize_tool_name()
   点号 → 下划线：self.audio.speaker.set_volume → self_audio_speaker_set_volume
 ```
 
-### 7.4 工具调用
+### 8.4 工具调用
 
 ```text
 DeviceMCPExecutor.execute() → mcp_handler.py:317-426  call_mcp_tool()
@@ -295,9 +350,9 @@ DeviceMCPExecutor.execute() → mcp_handler.py:317-426  call_mcp_tool()
   - JSON-RPC 2.0 tools/call → 等待 Future → 返回结果
 ```
 
-## 8. OTA 固件升级
+## 9. OTA 固件升级
 
-### 8.1 版本检查
+### 9.1 版本检查
 
 ```text
 ota_handler.py:143-353  OTAHandler.handle_post()
@@ -307,7 +362,7 @@ ota_handler.py:143-353  OTAHandler.handle_post()
   - 返回：server_time, firmware.version, firmware.url
 ```
 
-### 8.2 固件下载
+### 9.2 固件下载
 
 ```text
 ota_handler.py:372-415  OTAHandler.handle_download()
@@ -316,13 +371,13 @@ ota_handler.py:372-415  OTAHandler.handle_download()
   - 返回 web.FileResponse 流式下载
 ```
 
-### 8.3 URL 构建
+### 9.3 URL 构建
 
 OTA 下载 URL 使用 `urllib.parse.urljoin` 从 `server.vision_url` 的基础 URL 构建，不再依赖字符串替换。
 
-## 9. 连接生命周期
+## 10. 连接生命周期
 
-### 9.1 注册
+### 10.1 注册
 
 ```text
 device_runtime_registry.py:59-81  register_connection()
@@ -332,7 +387,7 @@ device_runtime_registry.py:59-81  register_connection()
   - 注销时仅删除当前仍指向该连接对象的键；旧连接晚关闭不能删除新连接映射
 ```
 
-### 9.2 超时检测
+### 10.2 超时检测
 
 ```text
 connection.py:1855-1884  _timeout_checker()
@@ -340,7 +395,7 @@ connection.py:1855-1884  _timeout_checker()
   - 超时 (> timeout_ms) → close()
 ```
 
-### 9.3 关闭流程
+### 10.3 关闭流程
 
 ```text
 connection.py:1673-1786  close()
@@ -357,7 +412,7 @@ connection.py:1673-1786  close()
   11. 关闭 ThreadPoolExecutor
 ```
 
-### 9.4 保存与关闭
+### 10.4 保存与关闭
 
 ```text
 connection.py:325-360  _save_and_close()
@@ -368,7 +423,7 @@ connection.py:325-360  _save_and_close()
   5. await self.close(ws)
 ```
 
-## 10. 关键文件
+## 11. 关键文件
 
 | 文件 | 行数 | 职责 |
 |------|------|------|
@@ -395,7 +450,7 @@ connection.py:325-360  _save_and_close()
 | `core/semantic/interruption.py` | ~130 | 语义中断分类器 |
 | `core/utils/audioRateController.py` | ~265 | 音频发送流控 |
 
-## 11. 已知修复（2026-07）
+## 12. 已知修复（2026-07）
 
 | # | 问题 | 修复 |
 |---|------|------|
@@ -418,7 +473,7 @@ connection.py:325-360  _save_and_close()
 | 17 | SeedTTS2 不足 60ms 的 Opus 尾帧跨会话残留 | 正常结束冲刷尾帧，取消/失败/断链重置编码器 |
 | 18 | 句末上传完整语音做声纹会增加长尾延迟 | 仅累计前 N 秒有效人声并提前异步识别，默认 1 秒，短句跳过，句末最多等待 300ms |
 
-## 12. 排查方法
+## 13. 排查方法
 
 ```bash
 # 查看设备连接

@@ -332,6 +332,74 @@ export default {
                 });
             }).send();
     },
+    // 创建声纹注册采集任务。后端建议路径，未落地时前端会降级到历史语音注册。
+    createAgentVoicePrintEnrollment(enrollmentData, callback, failCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/voice-print/enrollments`)
+            .method('POST')
+            .data(enrollmentData)
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .fail((err) => {
+                failCallback && failCallback(err);
+            })
+            .networkFail((err) => {
+                failCallback && failCallback(err);
+            }).send();
+    },
+    // 查询声纹注册采集任务进度。
+    getAgentVoicePrintEnrollment(agentId, enrollmentId, callback, failCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/voice-print/enrollments/${enrollmentId}`)
+            .method('GET')
+            .data({ agentId })
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .fail((err) => {
+                failCallback && failCallback(err);
+            })
+            .networkFail((err) => {
+                failCallback && failCallback(err);
+            }).send();
+    },
+    // 向声纹注册采集任务追加历史语音样本。
+    appendAgentVoicePrintEnrollmentSamples(enrollmentId, sampleData, callback, failCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/voice-print/enrollments/${enrollmentId}/samples`)
+            .method('POST')
+            .data(sampleData)
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .fail((err) => {
+                failCallback && failCallback(err);
+            })
+            .networkFail((err) => {
+                failCallback && failCallback(err);
+            }).send();
+    },
+    // 完成声纹注册采集任务。
+    completeAgentVoicePrintEnrollment(enrollmentId, completeData, callback, failCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/voice-print/enrollments/${enrollmentId}/complete`)
+            .method('POST')
+            .data(completeData)
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .fail((err) => {
+                failCallback && failCallback(err);
+            })
+            .networkFail((err) => {
+                failCallback && failCallback(err);
+            }).send();
+    },
     // 获取指定智能体用户类型聊天记录
     getRecentlyFiftyByAgentId(id, callback) {
         RequestService.sendRequest()

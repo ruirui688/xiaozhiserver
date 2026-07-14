@@ -63,6 +63,8 @@ from core.semantic.semantic_center import SemanticCenter
 from core.device_runtime_registry import register_connection, unregister_connection
 from core.observability import SessionTelemetry
 from core.session import CloseCoordinator, SessionLifecycle
+from core.utils.voiceprint_enrollment import VoiceprintEnrollmentCollector
+from core.meeting import MeetingMinutesRuntime
 
 
 TAG = __name__
@@ -219,6 +221,7 @@ class ConnectionHandler:
 
         # 为每个连接单独管理声纹识别
         self.voiceprint_provider = None
+        self.voiceprint_enrollment = VoiceprintEnrollmentCollector()
 
         # 模块初始化完成事件，_route_message 在处理音频前检查此事件
         self._modules_ready = threading.Event()
@@ -278,6 +281,7 @@ class ConnectionHandler:
         self.prompt_manager = PromptManager(self.config, self.logger)
         self.game_session_manager = GameSessionManager()
         self.semantic_center = SemanticCenter()
+        self.meeting_minutes = MeetingMinutesRuntime()
 
         # 初始化通话状态
         self.calling = False
@@ -727,6 +731,7 @@ class ConnectionHandler:
             if self.closing:
                 return
             self._init_report_threads()
+            self._init_voiceprint_enrollment_from_config()
             """更新系统提示词"""
             self._init_prompt_enhancement()
             """注入工具调用few-shot示例（仅function_call模式）"""
@@ -820,6 +825,19 @@ class ConnectionHandler:
 
     def _init_report_threads(self):
         self.report_manager.start(self)
+
+    def _init_voiceprint_enrollment_from_config(self):
+        enrollment_config = self.config.get("voiceprint_enrollment")
+        if not isinstance(enrollment_config, dict):
+            return
+        if not enrollment_config.get("enabled"):
+            return
+        status = self.start_voiceprint_enrollment(enrollment_config)
+        self.logger.bind(tag=TAG).info(
+            "配置触发声纹采集模式: requestId={}, targetSamples={}".format(
+                status.get("requestId"), status.get("targetSamples")
+            )
+        )
 
     def _initialize_tts(self):
         return _ext_init_tts(self)
@@ -968,6 +986,7 @@ class ConnectionHandler:
         for key in (
             "prompt",
             "voiceprint",
+            "voiceprint_enrollment",
             "summaryMemory",
             "mcp_endpoint",
             "context_providers",
@@ -1337,17 +1356,15 @@ class ConnectionHandler:
             # 使用带记忆的对话
             memory_str = self._query_memory_context(query)
 
-            # 说话人身份只在本会话首次识别到该人时进入 system 上下文，避免模型每轮称呼名字。
+            # 当前轮说话人每次都作为 system 事实提供，避免模型把历史中提到的人误判为当前用户。
+            # 是否自然称呼用户由基础提示词约束，不能通过隐藏身份事实来实现。
             speaker_for_system = None
             current_speaker = (self.current_speaker or "").strip()
             current_speaker_key = self.current_speaker_id or current_speaker
-            if (
-                current_speaker
-                and current_speaker != "未知说话人"
-                and current_speaker_key not in self.system_introduced_speakers
-            ):
-                self.system_introduced_speakers.add(current_speaker_key)
+            if current_speaker and current_speaker != "未知说话人":
                 speaker_for_system = current_speaker
+                if current_speaker_key not in self.system_introduced_speakers:
+                    self.system_introduced_speakers.add(current_speaker_key)
 
             llm_dialogue = self.dialogue.get_llm_dialogue_with_memory(
                 memory_str,
@@ -2007,6 +2024,102 @@ class ConnectionHandler:
         self.asr_audio.clear()
 
         self.logger.bind(tag=TAG).debug("All audio states reset.")
+
+    def start_voiceprint_enrollment(self, options=None):
+        status = self.voiceprint_enrollment.start(options or {})
+        self.logger.bind(tag=TAG).info(
+            "声纹采集模式已开启: requestId={}, targetSamples={}, uploadMode={}".format(
+                status.get("requestId"),
+                status.get("targetSamples"),
+                getattr(self.voiceprint_enrollment, "upload_mode", "chat_history"),
+            )
+        )
+        self.notify_voiceprint_enrollment_event(
+            "started",
+            status,
+            "声纹注册已开始，请保持安静环境，用正常音量连续说三秒以上。",
+        )
+        return status
+
+    def stop_voiceprint_enrollment(self, reason="stopped"):
+        status = self.voiceprint_enrollment.stop(reason)
+        self.logger.bind(tag=TAG).info(
+            "声纹采集模式已停止: requestId={}, reason={}".format(
+                status.get("requestId"), reason
+            )
+        )
+        prompt = "声纹注册已取消。" if reason != "completed" else None
+        self.notify_voiceprint_enrollment_event("stopped", status, prompt)
+        return status
+
+    def get_voiceprint_enrollment_status(self):
+        return self.voiceprint_enrollment.get_status()
+
+    def notify_voiceprint_enrollment_event(self, event, status=None, prompt=None):
+        status = status or self.get_voiceprint_enrollment_status()
+        payload = {
+            "type": "voiceprint_enrollment",
+            "event": event,
+            "session_id": self.session_id,
+            "requestId": status.get("requestId"),
+            "state": status.get("state"),
+            "active": status.get("active"),
+            "sampleCount": status.get("sampleCount", 0),
+            "targetSamples": status.get("targetSamples", 0),
+            "reason": status.get("reason", ""),
+        }
+        if prompt:
+            payload["prompt"] = prompt
+        self._schedule_voiceprint_enrollment_event(payload)
+        if prompt:
+            self._enqueue_voiceprint_enrollment_prompt(prompt)
+
+    def _schedule_voiceprint_enrollment_event(self, payload):
+        if not self.websocket or not self.loop:
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(
+                self.websocket.send(json.dumps(payload, ensure_ascii=False)),
+                self.loop,
+            )
+        except Exception as error:
+            self.logger.bind(tag=TAG).warning(
+                "声纹采集状态事件发送失败: errorType={}".format(type(error).__name__)
+            )
+
+    def _enqueue_voiceprint_enrollment_prompt(self, text):
+        if not text or not self.tts:
+            return
+        try:
+            with self._abort_lock:
+                self.client_abort = False
+            sentence_id = str(uuid.uuid4().hex)
+            self.sentence_id = sentence_id
+            self.tts.store_tts_text(sentence_id, text)
+            self.tts.tts_text_queue.put(
+                TTSMessageDTO(
+                    sentence_id=sentence_id,
+                    sentence_type=SentenceType.FIRST,
+                    content_type=ContentType.ACTION,
+                )
+            )
+            self.tts.tts_one_sentence(
+                self,
+                ContentType.TEXT,
+                content_detail=text,
+                sentence_id=sentence_id,
+            )
+            self.tts.tts_text_queue.put(
+                TTSMessageDTO(
+                    sentence_id=sentence_id,
+                    sentence_type=SentenceType.LAST,
+                    content_type=ContentType.ACTION,
+                )
+            )
+        except Exception as error:
+            self.logger.bind(tag=TAG).warning(
+                "声纹采集提示语入队失败: errorType={}".format(type(error).__name__)
+            )
 
     def chat_and_close(self, text):
         """Chat with the user and then close the connection"""

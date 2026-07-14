@@ -159,7 +159,11 @@ class Dialogue:
                     speakers = (voiceprint_config or {}).get("speakers", [])
                     if current_speaker_name and current_speaker_name != "未知说话人":
                         dynamic_part += "\n<speakers_info>"
-                        dynamic_part += f"\n当前说话人：{current_speaker_name}"
+                        dynamic_part += f"\n当前轮声纹识别到的说话人：{current_speaker_name}"
+                        dynamic_part += (
+                            "\n约束：当前轮用户、刚刚说话的人、正在和你说话的人都优先指向上述说话人；"
+                            "不要把历史对话、记忆或描述中提到的其他人名当成当前说话人。"
+                        )
                         for speaker in speakers:
                             try:
                                 if isinstance(speaker, dict):

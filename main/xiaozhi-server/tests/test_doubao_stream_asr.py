@@ -109,6 +109,35 @@ def test_stream_timeout_configuration_defaults_and_overrides(tmp_path):
     assert configured.final_response_timeout_seconds == 0.75
 
 
+def test_stream_speech_to_text_preserves_structured_utterances(tmp_path):
+    provider = _provider(tmp_path)
+    provider.text = "先讨论计划。"
+    provider.utterances = [
+        {
+            "text": "先讨论计划。",
+            "speaker": "spk_1",
+            "start_time": 0,
+            "end_time": 1200,
+        }
+    ]
+
+    result, _ = asyncio.run(provider.speech_to_text([], "session", "opus"))
+
+    assert result["content"] == "先讨论计划。"
+    assert result["utterances"][0]["provider_speaker"] == "spk_1"
+    assert result["provider_metadata"]["provider"] == "doubao_stream"
+
+
+def test_stream_speech_to_text_keeps_plain_text_compatibility(tmp_path):
+    provider = _provider(tmp_path)
+    provider.text = "普通识别"
+    provider.utterances = [{"text": "普通识别", "definite": True}]
+
+    result, _ = asyncio.run(provider.speech_to_text([], "session", "opus"))
+
+    assert result == "普通识别"
+
+
 @pytest.mark.parametrize(
     "key,value",
     [

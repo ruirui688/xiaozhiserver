@@ -151,6 +151,35 @@ def test_submit_and_poll_are_async_and_return_text(monkeypatch, tmp_path):
     assert 0 < session.calls[1][1]["timeout"].total <= 0.2
 
 
+def test_extract_result_preserves_utterances_for_meeting_minutes():
+    result = doubao_recording.ASRProvider._extract_result(
+        {
+            "result": {
+                "text": "会被分段覆盖",
+                "utterances": [
+                    {
+                        "text": "先讨论计划。",
+                        "speaker": "spk_1",
+                        "start_time": 0,
+                        "end_time": 1200,
+                    },
+                    {
+                        "text": "我来负责验收。",
+                        "speaker_id": "spk_2",
+                        "start_time": 1300,
+                        "end_time": 2400,
+                    },
+                ],
+            }
+        }
+    )
+
+    assert result["content"] == "先讨论计划。我来负责验收。"
+    assert result["utterances"][0]["provider_speaker"] == "spk_1"
+    assert result["utterances"][1]["provider_speaker"] == "spk_2"
+    assert result["provider_metadata"]["provider"] == "doubao_recording"
+
+
 def test_query_timeout_is_bounded_without_external_request(monkeypatch, tmp_path):
     session = FakeSession(
         [FakeResponse({"code": 0})] + [FakeResponse({"code": 0}) for _ in range(20)]

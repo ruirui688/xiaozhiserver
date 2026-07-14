@@ -6,6 +6,7 @@ from core.api.ota_handler import OTAHandler
 from core.api.vision_handler import VisionHandler
 from core.api.device_mcp_handler import DeviceMcpHandler
 from core.api.benchmark_handler import BenchmarkHandler
+from core.api.voiceprint_enrollment_handler import VoiceprintEnrollmentHandler
 
 TAG = __name__
 
@@ -18,6 +19,7 @@ class SimpleHttpServer:
         self.vision_handler = VisionHandler(config)
         self.device_mcp_handler = DeviceMcpHandler(config)
         self.benchmark_handler = BenchmarkHandler(config)
+        self.voiceprint_enrollment_handler = VoiceprintEnrollmentHandler(config)
 
     def _get_websocket_url(self, local_ip: str, port: int) -> str:
         """获取websocket地址
@@ -102,6 +104,30 @@ class SimpleHttpServer:
                         ),
                         web.options(
                             "/device/mcp/call", self.device_mcp_handler.handle_options
+                        ),
+                        web.post(
+                            "/device/voiceprint/enrollment/start",
+                            self.voiceprint_enrollment_handler.handle_start,
+                        ),
+                        web.options(
+                            "/device/voiceprint/enrollment/start",
+                            self.voiceprint_enrollment_handler.handle_options,
+                        ),
+                        web.post(
+                            "/device/voiceprint/enrollment/stop",
+                            self.voiceprint_enrollment_handler.handle_stop,
+                        ),
+                        web.options(
+                            "/device/voiceprint/enrollment/stop",
+                            self.voiceprint_enrollment_handler.handle_options,
+                        ),
+                        web.get(
+                            "/device/voiceprint/enrollment/status",
+                            self.voiceprint_enrollment_handler.handle_status,
+                        ),
+                        web.options(
+                            "/device/voiceprint/enrollment/status",
+                            self.voiceprint_enrollment_handler.handle_options,
                         ),
                         web.post(
                             "/benchmark/models", self.benchmark_handler.handle_models
