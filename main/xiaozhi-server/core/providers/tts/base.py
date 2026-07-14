@@ -131,6 +131,11 @@ class TTSProviderBase(ABC):
 
     def handle_opus(self, opus_data: bytes):
         logger.bind(tag=TAG).debug(f"推送数据到队列里面帧数～～ {len(opus_data)}")
+        try:
+            if self.conn is not None:
+                self.conn.turn_metrics.record_tts_audio_frame(len(opus_data))
+        except Exception as e:
+            logger.bind(tag=TAG).debug(f"记录TTS音频指标失败: {e}")
         self.tts_audio_queue.put((
             SentenceType.MIDDLE,
             opus_data,
@@ -143,6 +148,11 @@ class TTSProviderBase(ABC):
         self.before_stop_play_files.append((file_audio, text))
 
     def to_tts_stream(self, text, opus_handler: Callable[[bytes], None] = None) -> None:
+        try:
+            if self.conn is not None:
+                self.conn.turn_metrics.record_tts_start(getattr(self, 'current_sentence_id', None))
+        except Exception as e:
+            logger.bind(tag=TAG).debug(f"记录TTS开始指标失败: {e}")
         # 保留原始文本用于显示/上报
         original_text = text
         text = MarkdownCleaner.clean_markdown(text)
@@ -487,13 +497,23 @@ class TTSProviderBase(ABC):
                         if text:
                             enqueue_text = text
                         if sentence_type == SentenceType.LAST:
-                            enqueue_tts_report(self.conn, enqueue_text, enqueue_audio)
+                            metrics = self.conn.turn_metrics.build_assistant_metrics(
+                                self.get_tts_text(sentence_id) or enqueue_text
+                            )
+                            enqueue_tts_report(self.conn, enqueue_text, enqueue_audio, metrics=metrics)
                             enqueue_audio = []
                             enqueue_text = None
                     else:
                         # 非累积模式：每个句子分别上报
                         if enqueue_text is not None:
-                            enqueue_tts_report(self.conn, enqueue_text, enqueue_audio)
+                            metrics = (
+                                self.conn.turn_metrics.build_assistant_metrics(
+                                    self.get_tts_text(sentence_id) or enqueue_text
+                                )
+                                if sentence_type == SentenceType.LAST
+                                else None
+                            )
+                            enqueue_tts_report(self.conn, enqueue_text, enqueue_audio, metrics=metrics)
                         enqueue_audio = []
                         enqueue_text = text
 

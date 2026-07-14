@@ -303,12 +303,15 @@ public class AgentChatHistoryController {
 
         Date previousMessageTime = null;
         int index = 1;
+        List<Map<String, Object>> latencyMessages = new ArrayList<>();
+        Map<String, Map<String, Object>> latencyTurns = new LinkedHashMap<>();
         for (AgentChatHistoryDTO message : messages) {
             String role = message.getChatType() == 1 ? MessageUtils.getMessage(ErrorCode.CHAT_ROLE_USER)
                     : MessageUtils.getMessage(ErrorCode.CHAT_ROLE_AGENT);
             String direction = message.getChatType() == 1 ? ">>" : "<<";
             String messageTimeStr = formatDate(message.getCreatedAt());
             MessageContent content = parseMessageContent(message.getContent());
+            Map<String, Object> metrics = parseMetrics(message.getMetricsJson());
             AudioExport audio = exportMessageAudio(agentId, sessionId, index, message, zip);
             long gapMs = previousMessageTime == null || message.getCreatedAt() == null
                     ? 0
@@ -335,11 +338,21 @@ public class AgentChatHistoryController {
             if (StringUtils.isNotBlank(audio.path())) {
                 text.append("  audio: ").append(audio.path()).append('\n');
             }
+            String latencySummary = buildLatencyText(metrics);
+            if (StringUtils.isNotBlank(latencySummary)) {
+                text.append("  latency: ").append(latencySummary).append('\n');
+            }
 
-            exportedMessages.add(buildMessageMetadata(index, role, message, content, audio, gapMs));
+            exportedMessages.add(buildMessageMetadata(index, role, message, content, audio, gapMs, metrics));
+            if (!metrics.isEmpty()) {
+                Map<String, Object> latencyMessage = buildLatencyMessage(sessionId, index, role, message, metrics);
+                latencyMessages.add(latencyMessage);
+                mergeTurnLatency(latencyTurns, latencyMessage);
+            }
             previousMessageTime = message.getCreatedAt();
             index++;
         }
+        addLatencyEntries(zip, sessionId, latencyMessages, new ArrayList<>(latencyTurns.values()));
 
         return session;
     }
@@ -350,7 +363,8 @@ public class AgentChatHistoryController {
             AgentChatHistoryDTO message,
             MessageContent content,
             AudioExport audio,
-            long gapMs) {
+            long gapMs,
+            Map<String, Object> metrics) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("index", index);
         metadata.put("role", role);
@@ -365,7 +379,7 @@ public class AgentChatHistoryController {
         metadata.put("audio_bytes", audio.bytes());
         metadata.put("audio_duration_ms", audio.durationMs());
         metadata.put("previous_message_gap_ms", gapMs);
-        metadata.put("latency_note", "历史表未持久化 ASR/LLM/TTS 分段耗时；这里只包含消息上报时间差和音频时长。");
+        metadata.put("metrics", metrics);
         return metadata;
     }
 
@@ -373,10 +387,195 @@ public class AgentChatHistoryController {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("agent_id", agentId);
         metadata.put("exported_at", formatDate(new Date()));
-        metadata.put("format", "chat-history-package-v1");
+        metadata.put("format", "chat-history-package-v2");
         metadata.put("sessions", sessions);
-        metadata.put("latency_coverage", "当前持久化数据只支持消息时间、相邻消息间隔、音频时长；完整 ASR/LLM/TTS 链路需后续新增上报字段。");
+        metadata.put("latency_coverage", "新记录包含 metrics_json 时可导出 VAD、ASR、声纹、LLM、TTS 和 token 链路；旧记录该字段为空时仅保留消息时间、相邻消息间隔和音频时长。");
         return metadata;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> parseMetrics(String rawMetrics) {
+        if (StringUtils.isBlank(rawMetrics)) {
+            return Map.of();
+        }
+        try {
+            Object parsed = JsonUtils.parseObject(rawMetrics, Object.class);
+            if (parsed instanceof Map<?, ?> map) {
+                Map<String, Object> metrics = new LinkedHashMap<>();
+                map.forEach((key, value) -> metrics.put(String.valueOf(key), value));
+                return metrics;
+            }
+        } catch (Exception ignored) {
+        }
+        return Map.of("parse_error", true, "raw_metrics", rawMetrics);
+    }
+
+    private String buildLatencyText(Map<String, Object> metrics) {
+        if (metrics == null || metrics.isEmpty()) {
+            return null;
+        }
+        List<String> parts = new ArrayList<>();
+        addPart(parts, "turn_id", metrics.get("turn_id"));
+        addPart(parts, "vad_ms", nested(metrics, "latency_ms", "vad", "inference_total_ms"));
+        addPart(parts, "asr_ms", nested(metrics, "latency_ms", "asr", "total_ms"));
+        addPart(parts, "voiceprint_ms", nested(metrics, "latency_ms", "voiceprint", "total_ms"));
+        addPart(parts, "llm_first_chunk_ms", nested(metrics, "latency_ms", "llm", "first_chunk_ms"));
+        addPart(parts, "llm_total_ms", nested(metrics, "latency_ms", "llm", "total_ms"));
+        addPart(parts, "tts_first_audio_ms", nested(metrics, "latency_ms", "tts", "first_audio_ms"));
+        addPart(parts, "tts_total_ms", nested(metrics, "latency_ms", "tts", "total_ms"));
+        addPart(parts, "tokens", nested(metrics, "tokens", "total_tokens"));
+        return String.join(", ", parts);
+    }
+
+    private void addPart(List<String> parts, String key, Object value) {
+        if (value != null && StringUtils.isNotBlank(String.valueOf(value))) {
+            parts.add(key + "=" + value);
+        }
+    }
+
+    private Map<String, Object> buildLatencyMessage(
+            String sessionId,
+            int index,
+            String role,
+            AgentChatHistoryDTO message,
+            Map<String, Object> metrics) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("session_id", sessionId);
+        item.put("message_index", index);
+        item.put("role", role);
+        item.put("chat_type", message.getChatType());
+        item.put("created_at", formatDate(message.getCreatedAt()));
+        item.put("turn_id", metrics.get("turn_id"));
+        item.put("message_role", metrics.get("message_role"));
+        item.put("latency_ms", metrics.get("latency_ms"));
+        item.put("tokens", metrics.get("tokens"));
+        item.put("input", metrics.get("input"));
+        item.put("llm", metrics.get("llm"));
+        item.put("tts", metrics.get("tts"));
+        item.put("routing", metrics.get("routing"));
+        item.put("raw_metrics", metrics);
+        return item;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void mergeTurnLatency(Map<String, Map<String, Object>> turns, Map<String, Object> message) {
+        Object turnIdValue = message.get("turn_id");
+        String turnId = turnIdValue == null ? "message-" + message.get("message_index") : String.valueOf(turnIdValue);
+        Map<String, Object> turn = turns.computeIfAbsent(turnId, key -> {
+            Map<String, Object> value = new LinkedHashMap<>();
+            value.put("turn_id", key);
+            value.put("messages", new ArrayList<Map<String, Object>>());
+            return value;
+        });
+        ((List<Map<String, Object>>) turn.get("messages")).add(message);
+        Object rawMetrics = message.get("raw_metrics");
+        if (rawMetrics instanceof Map<?, ?> metrics) {
+            Object messageRole = metrics.get("message_role");
+            if ("user".equals(messageRole)) {
+                turn.put("user_metrics", metrics);
+            } else if ("assistant".equals(messageRole)) {
+                turn.put("assistant_metrics", metrics);
+            }
+            turn.put("latency_summary", buildLatencySummary(turn));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> buildLatencySummary(Map<String, Object> turn) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        Map<String, Object> user = turn.get("user_metrics") instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
+        Map<String, Object> assistant = turn.get("assistant_metrics") instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
+        putIfNotNull(summary, "vad_inference_total_ms", nested(user, "latency_ms", "vad", "inference_total_ms"));
+        putIfNotNull(summary, "asr_total_ms", nested(user, "latency_ms", "asr", "total_ms"));
+        putIfNotNull(summary, "voiceprint_total_ms", nested(user, "latency_ms", "voiceprint", "total_ms"));
+        putIfNotNull(summary, "llm_first_chunk_ms", nested(assistant, "latency_ms", "llm", "first_chunk_ms"));
+        putIfNotNull(summary, "llm_total_ms", nested(assistant, "latency_ms", "llm", "total_ms"));
+        putIfNotNull(summary, "tts_first_audio_ms", nested(assistant, "latency_ms", "tts", "first_audio_ms"));
+        putIfNotNull(summary, "tts_total_ms", nested(assistant, "latency_ms", "tts", "total_ms"));
+        putIfNotNull(summary, "prompt_tokens", nested(assistant, "tokens", "prompt_tokens"));
+        putIfNotNull(summary, "completion_tokens", nested(assistant, "tokens", "completion_tokens"));
+        putIfNotNull(summary, "total_tokens", nested(assistant, "tokens", "total_tokens"));
+        putIfNotNull(summary, "token_source", nested(assistant, "tokens", "source"));
+        return summary;
+    }
+
+    private void putIfNotNull(Map<String, Object> map, String key, Object value) {
+        if (value != null) {
+            map.put(key, value);
+        }
+    }
+
+    private void addLatencyEntries(
+            ZipOutputStream zip,
+            String sessionId,
+            List<Map<String, Object>> latencyMessages,
+            List<Map<String, Object>> latencyTurns) throws IOException {
+        if (latencyMessages.isEmpty() && latencyTurns.isEmpty()) {
+            return;
+        }
+        String base = "latency/" + safeFileName(sessionId) + "/";
+        addZipEntry(zip, base + "messages.json",
+                JsonUtils.toJsonString(latencyMessages).getBytes(StandardCharsets.UTF_8));
+        addZipEntry(zip, base + "turns.json",
+                JsonUtils.toJsonString(latencyTurns).getBytes(StandardCharsets.UTF_8));
+        addZipEntry(zip, base + "summary.csv",
+                buildLatencyCsv(latencyMessages).getBytes(StandardCharsets.UTF_8));
+    }
+
+    private String buildLatencyCsv(List<Map<String, Object>> messages) {
+        StringBuilder csv = new StringBuilder();
+        csv.append("session_id,turn_id,message_index,role,created_at,vad_inference_total_ms,asr_total_ms,voiceprint_total_ms,llm_first_chunk_ms,llm_total_ms,tts_first_audio_ms,tts_total_ms,prompt_tokens,completion_tokens,total_tokens,token_source\n");
+        for (Map<String, Object> message : messages) {
+            Map<String, Object> metrics = message.get("raw_metrics") instanceof Map<?, ?> map
+                    ? toStringKeyMap(map)
+                    : Map.of();
+            csv.append(csv(message.get("session_id"))).append(',')
+                    .append(csv(message.get("turn_id"))).append(',')
+                    .append(csv(message.get("message_index"))).append(',')
+                    .append(csv(message.get("role"))).append(',')
+                    .append(csv(message.get("created_at"))).append(',')
+                    .append(csv(nested(metrics, "latency_ms", "vad", "inference_total_ms"))).append(',')
+                    .append(csv(nested(metrics, "latency_ms", "asr", "total_ms"))).append(',')
+                    .append(csv(nested(metrics, "latency_ms", "voiceprint", "total_ms"))).append(',')
+                    .append(csv(nested(metrics, "latency_ms", "llm", "first_chunk_ms"))).append(',')
+                    .append(csv(nested(metrics, "latency_ms", "llm", "total_ms"))).append(',')
+                    .append(csv(nested(metrics, "latency_ms", "tts", "first_audio_ms"))).append(',')
+                    .append(csv(nested(metrics, "latency_ms", "tts", "total_ms"))).append(',')
+                    .append(csv(nested(metrics, "tokens", "prompt_tokens"))).append(',')
+                    .append(csv(nested(metrics, "tokens", "completion_tokens"))).append(',')
+                    .append(csv(nested(metrics, "tokens", "total_tokens"))).append(',')
+                    .append(csv(nested(metrics, "tokens", "source"))).append('\n');
+        }
+        return csv.toString();
+    }
+
+    private String csv(Object value) {
+        if (value == null) {
+            return "";
+        }
+        String text = String.valueOf(value);
+        if (text.contains(",") || text.contains("\"") || text.contains("\n") || text.contains("\r")) {
+            return "\"" + text.replace("\"", "\"\"") + "\"";
+        }
+        return text;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Object nested(Map<String, Object> map, String... keys) {
+        Object current = map;
+        for (String key : keys) {
+            if (!(current instanceof Map<?, ?> currentMap)) {
+                return null;
+            }
+            current = currentMap.get(key);
+        }
+        return current;
+    }
+
+    private Map<String, Object> toStringKeyMap(Map<?, ?> source) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        source.forEach((key, value) -> result.put(String.valueOf(key), value));
+        return result;
     }
 
     private AudioExport exportMessageAudio(
@@ -505,10 +704,13 @@ public class AgentChatHistoryController {
                 chat-history-package.zip 内容说明
 
                 history.txt: 便于阅读的聊天文本，包含声纹识别摘要和音频文件路径。
-                metadata.json: 结构化原始数据，包含原始 content、声纹识别结果、音频时长和相邻消息间隔。
+                metadata.json: 结构化原始数据，包含原始 content、声纹识别结果、音频时长、相邻消息间隔和 metrics。
+                latency/<session_id>/messages.json: 按消息导出的完整链路指标。
+                latency/<session_id>/turns.json: 按 turn_id 聚合的用户输入、LLM、TTS 和 token 指标。
+                latency/<session_id>/summary.csv: 可直接导入表格的延时摘要。
                 audio/: 用户与智能体消息对应的 WAV 音频文件；只有历史记录中存在 audio_id 的消息才会导出。
 
-                注意：当前历史表没有持久化完整 ASR/LLM/TTS 分段延时链路。metadata.json 中的 latency_note 和 latency_coverage 只基于现有记录说明可用范围，完整链路需后续扩展上报字段。
+                注意：旧聊天记录没有 metrics_json 时，只能看到消息时间、相邻消息间隔和音频时长；新上报记录会包含 VAD、ASR、声纹、LLM、TTS 和 token 链路。
                 """;
     }
 

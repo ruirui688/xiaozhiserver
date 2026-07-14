@@ -81,11 +81,15 @@ class ReportThreadManager:
 
         conn.logger.bind(tag=TAG).info("聊天记录上报线程已退出")
 
-    def _process_report(self, conn: "ConnectionHandler", type, text, audio_data, report_time):
+    def _process_report(self, conn: "ConnectionHandler", type, text, audio_data, report_time, metrics=None):
         """处理上报任务"""
         try:
             # 执行异步上报（在事件循环中运行）
-            asyncio.run(report(conn, type, text, audio_data, report_time))
+            try:
+                report_coro = report(conn, type, text, audio_data, report_time, metrics)
+            except TypeError:
+                report_coro = report(conn, type, text, audio_data, report_time)
+            asyncio.run(report_coro)
         except Exception as e:
             conn.logger.bind(tag=TAG).error(f"上报处理异常: {e}")
         finally:

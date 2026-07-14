@@ -64,6 +64,7 @@ from core.device_runtime_registry import register_connection, unregister_connect
 from core.observability import SessionTelemetry
 from core.session import CloseCoordinator, SessionLifecycle
 from core.utils.voiceprint_enrollment import VoiceprintEnrollmentCollector
+from core.utils.turn_metrics import TurnMetrics
 from core.meeting import MeetingMinutesRuntime
 
 
@@ -153,6 +154,7 @@ class ConnectionHandler:
         self.session_id = str(uuid.uuid4())
         self.logger = setup_logging()
         self.session_telemetry = SessionTelemetry(self.session_id, self.logger, TAG)
+        self.turn_metrics = TurnMetrics()
         self.server = server  # 保存server实例的引用
 
         self.need_bind = False  # 是否需要绑定设备
@@ -1281,6 +1283,8 @@ class ConnectionHandler:
             )
 
     def chat(self, query, depth=0, allow_tools=True):
+        if depth == 0:
+            self.turn_metrics.ensure_text_turn()
         chat_started_at = time.monotonic()
         current_abort_generation = self.abort_generation
         # 保存当前任务的sentence_id到局部变量，避免被新任务覆盖
@@ -1391,6 +1395,7 @@ class ConnectionHandler:
                     self.session_id,
                     llm_dialogue,
                 )
+            self.turn_metrics.record_llm_started(tools_enabled, depth)
             self.logger.bind(tag=TAG).info(
                 f"LLM请求已发起 | depth={depth} | tools_enabled={tools_enabled} | "
                 f"elapsed={time.monotonic() - llm_started_at:.3f}s"
@@ -1421,6 +1426,7 @@ class ConnectionHandler:
                     self.session_telemetry.metrics.record_llm_first_chunk(
                         first_llm_chunk_at - llm_started_at
                     )
+                    self.turn_metrics.record_llm_first_chunk()
                     self.logger.bind(tag=TAG).info(
                         f"LLM首个响应分片 | depth={depth} | "
                         f"elapsed={first_llm_chunk_at - llm_started_at:.3f}s"
@@ -1531,6 +1537,14 @@ class ConnectionHandler:
             return
         self.session_telemetry.metrics.record_llm_complete(
             time.monotonic() - llm_started_at
+        )
+        llm_content_text = "".join(response_message) or content_arguments
+        usage = getattr(self.llm, "last_usage", None)
+        self.turn_metrics.record_llm_complete(
+            llm_content_text,
+            usage,
+            tool_call_flag,
+            len(tool_calls_list),
         )
         self.logger.bind(tag=TAG).info(
             f"LLM响应流完成 | depth={depth} | elapsed={time.monotonic() - llm_started_at:.3f}s | "

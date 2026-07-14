@@ -109,6 +109,11 @@
                                 <i v-if="message.audioId" :class="getAudioIconClass(message)"
                                     @click="playAudio(message)" class="audio-icon"></i>
                               </div>
+                              <div v-if="message.metricsSummary && message.metricsSummary.length" class="metrics-strip">
+                                <span v-for="item in message.metricsSummary" :key="item.label">
+                                  {{ item.label }} {{ item.value }}
+                                </span>
+                              </div>
                             </div>
                             <el-button class="message-delete" type="text" icon="el-icon-delete"
                                 @click="deleteMessage(message)"></el-button>
@@ -279,10 +284,13 @@ export default {
         },
         normalizeMessage(message) {
             const parsed = this.parseMessageContent(message.content);
+            const metrics = this.parseMetrics(message.metricsJson);
             const hasVoiceprint = message.chatType === 1 && Boolean(parsed.speakerName || parsed.speakerId);
             return {
                 ...message,
                 parsedContent: parsed.content,
+                metrics,
+                metricsSummary: this.buildMetricsSummary(metrics),
                 speakerName: parsed.speakerName,
                 speakerId: parsed.speakerId,
                 speakerScore: parsed.speakerScore,
@@ -291,6 +299,47 @@ export default {
                     : (parsed.speakerName || this.$t('chatHistory.recognizedSpeaker')),
                 voiceprintStatus: hasVoiceprint
             };
+        },
+        parseMetrics(metricsJson) {
+            if (!metricsJson) {
+                return null;
+            }
+            if (typeof metricsJson === 'object') {
+                return metricsJson;
+            }
+            try {
+                return JSON.parse(metricsJson);
+            } catch (e) {
+                return null;
+            }
+        },
+        buildMetricsSummary(metrics) {
+            if (!metrics || typeof metrics !== 'object') {
+                return [];
+            }
+            const items = [];
+            const add = (label, value, suffix = 'ms') => {
+                if (value === null || value === undefined || value === '') return;
+                items.push({ label, value: `${value}${suffix}` });
+            };
+            add('VAD', this.getNested(metrics, ['latency_ms', 'vad', 'inference_total_ms']));
+            add('ASR', this.getNested(metrics, ['latency_ms', 'asr', 'total_ms']));
+            add('声纹', this.getNested(metrics, ['latency_ms', 'voiceprint', 'total_ms']));
+            add('LLM', this.getNested(metrics, ['latency_ms', 'llm', 'total_ms']));
+            add('TTS', this.getNested(metrics, ['latency_ms', 'tts', 'total_ms']));
+            const totalTokens = this.getNested(metrics, ['tokens', 'total_tokens']);
+            if (totalTokens !== null && totalTokens !== undefined && totalTokens !== '') {
+                items.push({ label: 'Token', value: totalTokens });
+            }
+            return items;
+        },
+        getNested(value, keys) {
+            return keys.reduce((current, key) => {
+                if (!current || typeof current !== 'object') {
+                    return null;
+                }
+                return current[key];
+            }, value);
         },
         formatSpeakerScore(score) {
             const value = Math.max(0, Math.min(1, Number(score) || 0));
@@ -821,6 +870,32 @@ export default {
 
 .user-message .audio-icon {
     color: white;
+}
+
+.metrics-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    margin-top: 6px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: #606266;
+}
+
+.metrics-strip span {
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: #f2f6fc;
+    white-space: nowrap;
+}
+
+.user-message .metrics-strip {
+    justify-content: flex-end;
+    color: #e6f7ff;
+}
+
+.user-message .metrics-strip span {
+    background: rgba(255, 255, 255, 0.18);
 }
 
 .content-wrapper {
