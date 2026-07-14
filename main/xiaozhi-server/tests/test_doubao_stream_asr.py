@@ -5,6 +5,8 @@ import time
 from pathlib import Path
 
 import pytest
+from websockets.exceptions import ConnectionClosedOK
+from websockets.frames import Close
 
 
 SERVER_ROOT = Path(__file__).resolve().parents[1]
@@ -176,12 +178,13 @@ def test_initialization_timeout_closes_websocket_and_resets_state(
     assert conn.reset_count == 1
 
 
-def test_response_timeout_closes_websocket_and_resets_audio_state(tmp_path):
+def test_response_timeout_closes_websocket_and_preserves_audio_state(tmp_path):
     websocket = FakeWebSocket()
     provider = _provider(tmp_path, response_timeout_seconds=0.01)
     provider.asr_ws = websocket
     provider.is_processing = True
     conn = FakeConnection()
+    conn.asr_audio = [b"cached-frame"]
 
     asyncio.run(provider._forward_asr_results(conn))
 
@@ -189,7 +192,50 @@ def test_response_timeout_closes_websocket_and_resets_audio_state(tmp_path):
     assert provider.asr_ws is None
     assert provider.is_processing is False
     assert provider._is_stopping is False
-    assert conn.reset_count == 1
+    assert conn.reset_count == 0
+    assert conn.asr_audio == [b"cached-frame"]
+
+
+def test_stale_auto_voice_stop_does_not_send_last_for_new_session(
+    monkeypatch, tmp_path
+):
+    websocket = FakeWebSocket(
+        responses=[
+            b"init",
+            ConnectionClosedOK(Close(1000, "server finished"), None, None),
+        ]
+    )
+
+    async def fake_connect(*args, **kwargs):
+        return websocket
+
+    monkeypatch.setattr(doubao_stream.websockets, "connect", fake_connect)
+    provider = _provider(tmp_path)
+    provider.decoder = type("Decoder", (), {"decode": lambda _self, data, _size: data})()
+    provider.parse_response = lambda response: {"code": 1000}
+    conn = FakeConnection()
+    conn.asr = provider
+    conn.client_have_voice = True
+    conn.client_voice_stop = True
+
+    async def scenario():
+        await provider.receive_audio(conn, b"voice-frame", True)
+        await asyncio.wait_for(provider.forward_task, timeout=0.1)
+
+    asyncio.run(scenario())
+
+    audio_frames = [
+        payload for payload in websocket.sent if payload[1] >> 4 == 0x02
+    ]
+    regular_frames = [payload for payload in audio_frames if payload[1] & 0x0F == 0]
+    last_frames = [payload for payload in audio_frames if payload[1] & 0x0F == 0x02]
+
+    assert len(regular_frames) == 1
+    assert len(last_frames) == 0
+    assert conn.client_voice_stop is False
+    assert conn.asr_audio == [b"voice-frame"]
+    assert conn.reset_count == 0
+    assert provider.forward_task is None
 
 
 def test_initialization_half_open_keeps_heartbeat_and_next_connection_starts(
@@ -243,7 +289,7 @@ def test_initialization_half_open_keeps_heartbeat_and_next_connection_starts(
     assert second.closed is True
     assert provider.asr_ws is None
     assert provider.is_processing is False
-    assert conn.reset_count == 2
+    assert conn.reset_count == 1
 
 
 def test_result_half_open_keeps_heartbeat_and_next_forwarder_starts(tmp_path):
@@ -276,7 +322,7 @@ def test_result_half_open_keeps_heartbeat_and_next_forwarder_starts(tmp_path):
     assert second.closed is True
     assert provider.asr_ws is None
     assert provider.is_processing is False
-    assert conn.reset_count == 2
+    assert conn.reset_count == 0
 
 
 @pytest.mark.parametrize("recognized_text", ["是", "不是", "对", "退下", "停止"])
