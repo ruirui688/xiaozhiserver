@@ -184,7 +184,7 @@ class VoiceprintEnrollmentCollector:
                 self._notify(
                     conn,
                     "completed",
-                    "已采集完成，请点击结束录音并注册。",
+                    "已采集完成，正在注册声纹。",
                 )
             else:
                 remaining = self.status.target_samples - self.status.sample_count
