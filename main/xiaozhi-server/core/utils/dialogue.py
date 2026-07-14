@@ -103,6 +103,7 @@ class Dialogue:
             memory_str: str = None,
             voiceprint_config: dict = None,
             current_speaker: str = None,
+            current_speaker_id: str = None,
     ) -> List[Dict[str, str]]:
         with self._lock:
             # 构建对话
@@ -159,14 +160,19 @@ class Dialogue:
                     speakers = (voiceprint_config or {}).get("speakers", [])
                     if current_speaker_name and current_speaker_name != "未知说话人":
                         dynamic_part += "\n<speakers_info>"
-                        dynamic_part += f"\n当前轮声纹识别到的说话人：{current_speaker_name}"
+                        dynamic_part += f"\n当前说话人：{current_speaker_name}"
                         dynamic_part += (
-                            "\n约束：当前轮用户、刚刚说话的人、正在和你说话的人都优先指向上述说话人；"
-                            "不要把历史对话、记忆或描述中提到的其他人名当成当前说话人。"
+                            "\n约束：当前用户、刚刚说话的人、正在和你说话的人都指向上述说话人；"
+                            "这是当前轮内部身份事实，不要把历史对话、记忆或描述中的其他人名当成当前说话人；"
+                            "不要主动提及声纹识别过程、置信度或标签，也不要因为每轮收到身份信息就机械地称呼姓名；"
+                            "只有用户询问自己是谁或刚刚是谁在说话时，才直接按当前身份回答。"
                         )
                         for speaker in speakers:
                             try:
                                 if isinstance(speaker, dict):
+                                    speaker_id = str(
+                                        speaker.get("speaker_id") or ""
+                                    ).strip()
                                     name = str(
                                         speaker.get("name")
                                         or speaker.get("source_name")
@@ -179,12 +185,18 @@ class Dialogue:
                                     ).strip()
                                 else:
                                     parts = str(speaker).split(",", 2)
+                                    speaker_id = parts[0].strip() if parts else ""
                                     name = parts[1].strip() if len(parts) >= 2 else ""
                                     description = (
                                         parts[2].strip() if len(parts) >= 3 else ""
                                     )
-                                if name:
+                                if current_speaker_id:
+                                    is_current = speaker_id == current_speaker_id
+                                else:
+                                    is_current = name == current_speaker_name
+                                if is_current and name:
                                     dynamic_part += f"\n- {name}：{description}"
+                                    break
                             except Exception:
                                 pass
                         dynamic_part += "\n</speakers_info>"

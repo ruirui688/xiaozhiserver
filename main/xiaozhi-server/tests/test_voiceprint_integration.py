@@ -239,25 +239,34 @@ def test_speaker_context_marks_current_recognized_speaker_as_current_turn_user()
                 "name": "用户A",
                 "description": "喜欢科技",
                 "user_id": "agent-a",
-            }
+            },
+            {
+                "speaker_id": "voice-2",
+                "name": "用户A",
+                "description": "喜欢音乐",
+                "user_id": "agent-a",
+            },
         ]
     }
 
     first_turn = dialogue.get_llm_dialogue_with_memory(
-        "记忆内容", voiceprint_config, "用户A"
+        "记忆内容", voiceprint_config, "用户A", "voice-1"
     )
     first_system = "\n".join(
         message["content"] for message in first_turn if message["role"] == "system"
     )
-    assert "当前轮声纹识别到的说话人：用户A" in first_system
-    assert "刚刚说话的人、正在和你说话的人都优先指向上述说话人" in first_system
+    assert "当前说话人：用户A" in first_system
+    assert "刚刚说话的人、正在和你说话的人都指向上述说话人" in first_system
     assert "用户A：喜欢科技" in first_system
+    assert "用户A：喜欢音乐" not in first_system
+    assert "不要因为每轮收到身份信息就机械地称呼姓名" in first_system
 
     later_turn = dialogue.get_llm_dialogue_with_memory(
-        "记忆内容", voiceprint_config, "用户A"
+        "记忆内容", voiceprint_config, "用户A", "voice-1"
     )
     later_system = "\n".join(
         message["content"] for message in later_turn if message["role"] == "system"
     )
-    assert "当前轮声纹识别到的说话人：用户A" in later_system
-    assert "不要把历史对话、记忆或描述中提到的其他人名当成当前说话人" in later_system
+    assert "当前说话人：用户A" in later_system
+    assert "不要把历史对话、记忆或描述中的其他人名当成当前说话人" in later_system
+    assert "不要主动提及声纹识别过程、置信度或标签" in later_system

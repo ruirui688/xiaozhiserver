@@ -10,12 +10,11 @@ from ..base import ToolType, ToolDefinition, ToolExecutor
 from plugins_func.register import all_function_registry, Action, ActionResponse
 from plugins_func.register import ToolType as PluginBehavior
 from core.game import GameSessionManager
+from core.meeting.config import is_meeting_mode_enabled
 
 
 class ServerPluginExecutor(ToolExecutor):
     """服务端插件工具执行器"""
-
-    CONFIG_ONLY_PLUGINS = {"meeting_minutes"}
 
     def __init__(self, conn: "ConnectionHandler"):
         self.conn = conn
@@ -78,6 +77,8 @@ class ServerPluginExecutor(ToolExecutor):
 
         # 获取必要的函数
         necessary_functions = ["handle_exit_intent", "get_lunar"]
+        if is_meeting_mode_enabled(self.conn):
+            necessary_functions.append("meeting_minutes")
 
         # 获取配置中的函数
         selected_intent = self.config.get("selected_module", {}).get("Intent")
@@ -105,9 +106,11 @@ class ServerPluginExecutor(ToolExecutor):
         )
 
         for func_name in all_required_functions:
+            if func_name in GameSessionManager.FREEFORM_GAME_TOOLS:
+                continue
             if (
-                func_name in GameSessionManager.FREEFORM_GAME_TOOLS
-                or func_name in self.CONFIG_ONLY_PLUGINS
+                func_name == "meeting_minutes"
+                and getattr(self.conn, "intent_type", None) != "function_call"
             ):
                 continue
 

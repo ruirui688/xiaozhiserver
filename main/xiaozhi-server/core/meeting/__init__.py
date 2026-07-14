@@ -3,23 +3,19 @@
 from core.meeting.minutes import (
     MEETING_STARTED_PROMPT,
     MeetingMinutesRuntime,
-    extract_meeting_topic,
-    is_meeting_start_command,
 )
-from core.meeting.control import (
-    MeetingControlClassifier,
-    MeetingControlDecision,
+from core.meeting.config import (
+    MEETING_PLUGIN_NAME,
+    build_meeting_runtime_context,
     get_meeting_entry_prompt,
     is_meeting_mode_enabled,
 )
 
 __all__ = [
     "MEETING_STARTED_PROMPT",
-    "MeetingControlClassifier",
-    "MeetingControlDecision",
+    "MEETING_PLUGIN_NAME",
     "MeetingMinutesRuntime",
-    "extract_meeting_topic",
+    "build_meeting_runtime_context",
     "get_meeting_entry_prompt",
     "is_meeting_mode_enabled",
-    "is_meeting_start_command",
 ]

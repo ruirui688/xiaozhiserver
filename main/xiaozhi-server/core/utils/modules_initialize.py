@@ -22,7 +22,6 @@ def initialize_modules(
     init_tts=False,
     init_memory=False,
     init_intent=False,
-    init_slm=False,
 ) -> Dict[str, Any]:
     """
     初始化所有模块组件
@@ -50,16 +49,6 @@ def initialize_modules(
             get_runtime_config(config, "LLM", select_llm_module),
         )
         logger.bind(tag=TAG).info(f"初始化组件: llm成功 {select_llm_module}")
-
-    # SLM用于会议控制等低延迟语义裁决，不参与主对话生成。
-    if init_slm and has_selected_module(config, "SLM"):
-        select_slm_module = config["selected_module"]["SLM"]
-        slm_type = get_runtime_type(config, "SLM", select_slm_module)
-        modules["slm"] = llm.create_instance(
-            slm_type,
-            get_runtime_config(config, "SLM", select_slm_module),
-        )
-        logger.bind(tag=TAG).info(f"初始化组件: slm成功 {select_slm_module}")
 
     # 初始化Intent模块
     if init_intent and has_selected_module(config, "Intent"):

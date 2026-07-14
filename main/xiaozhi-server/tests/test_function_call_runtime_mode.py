@@ -1,6 +1,9 @@
+import asyncio
+import concurrent.futures
 import sys
 import queue
 from pathlib import Path
+from types import SimpleNamespace
 
 
 SERVER_ROOT = Path(__file__).resolve().parents[1]
@@ -255,3 +258,107 @@ def test_function_call_chat_blocks_dsml_protocol_text_from_tts_and_history():
     assert "DSML" not in stored_text
     assert "DSML" not in history_text
     assert tool_handler.calls == []
+
+
+def test_active_meeting_turn_uses_only_main_llm_meeting_tool_and_stays_silent():
+    tools = [_tool("meeting_minutes"), _tool("play_music")]
+    llm = CapturingFunctionCallLLM([("我已经结束会议。", None)])
+    conn = _chat_conn(llm, CapturingToolHandler(tools))
+    conn.meeting_minutes.start("发布评审")
+    conn.meeting_minutes.prepare_turn(None, "先完成回归测试。", "张敏")
+
+    assert conn.chat("先完成回归测试。") is True
+
+    function_names = [
+        item.get("function", {}).get("name") for item in llm.calls[0]["functions"]
+    ]
+    assert function_names == ["meeting_minutes"]
+    assert conn.tts.queued_text() == []
+    assert conn.tts.stored_text == []
+    assert conn.meeting_minutes.is_active() is True
+    assert [
+        item["text"] for item in conn.meeting_minutes.build_transcript()
+    ] == ["先完成回归测试。"]
+    meeting_context = next(
+        item["content"]
+        for item in llm.calls[0]["dialogue"]
+        if item.get("role") == "system"
+        and "<meeting_runtime>" in item.get("content", "")
+    )
+    assert "active=true" in meeting_context
+    assert "action=record" in meeting_context
+
+
+def test_active_meeting_executes_main_llm_record_tool(monkeypatch):
+    tool_call = SimpleNamespace(
+        index=0,
+        id="meeting-call-1",
+        function=SimpleNamespace(
+            name="meeting_minutes",
+            arguments='{"action":"record"}',
+        ),
+    )
+
+    class MeetingToolHandler(CapturingToolHandler):
+        async def handle_llm_function_call(self, conn, tool_call_data):
+            self.calls.append(tool_call_data)
+            appended = conn.meeting_minutes.record_pending_turn()
+            return ActionResponse(
+                action=Action.RECORD,
+                result=f"meeting_recorded:{appended}",
+                response="[会议内容已记录，继续保持静默]",
+            )
+
+    def run_immediately(coro, _loop):
+        future = concurrent.futures.Future()
+        try:
+            future.set_result(asyncio.run(coro))
+        except Exception as error:
+            future.set_exception(error)
+        return future
+
+    monkeypatch.setattr(
+        "core.connection.asyncio.run_coroutine_threadsafe",
+        run_immediately,
+    )
+    handler = MeetingToolHandler([_tool("meeting_minutes"), _tool("play_music")])
+    llm = CapturingFunctionCallLLM([(None, [tool_call])])
+    conn = _chat_conn(llm, handler)
+    conn.meeting_minutes.start("发布评审")
+    conn.meeting_minutes.prepare_turn(None, "先完成回归测试。", "张敏")
+
+    assert conn.chat("先完成回归测试。") is True
+
+    assert len(handler.calls) == 1
+    assert handler.calls[0]["name"] == "meeting_minutes"
+    assert conn.tts.queued_text() == []
+    assert conn.meeting_minutes.has_pending_turn() is False
+    assert [
+        item["text"] for item in conn.meeting_minutes.build_transcript()
+    ] == ["先完成回归测试。"]
+
+
+def test_active_meeting_discards_hallucinated_direct_answer_tool():
+    tool_call = SimpleNamespace(
+        index=0,
+        id="direct-answer-1",
+        function=SimpleNamespace(
+            name="direct_answer",
+            arguments='{"response":"会议已经结束。"}',
+        ),
+    )
+    handler = CapturingToolHandler([_tool("meeting_minutes")])
+    llm = CapturingFunctionCallLLM([(None, [tool_call])])
+    conn = _chat_conn(llm, handler)
+    conn.meeting_minutes.start("发布评审")
+    conn.meeting_minutes.prepare_turn(None, "继续讨论发布时间。", "张敏")
+
+    assert conn.chat("继续讨论发布时间。") is True
+
+    assert handler.calls == []
+    assert conn.tts.queued_text() == []
+    assert conn.tts.stored_text == []
+    assert conn.meeting_minutes.is_active() is True
+    assert [
+        item["text"] for item in conn.meeting_minutes.build_transcript()
+    ] == ["继续讨论发布时间。"]

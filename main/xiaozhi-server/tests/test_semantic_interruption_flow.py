@@ -93,7 +93,6 @@ class _Conn:
         self._abort_lock = threading.Lock()
         self.session_id = "s1"
         self.current_speaker = None
-        self.introduced_speakers = set()
         self.correct_word_replacements = {}
         self.semantic_center = None
         self._tts_started_at = 0
@@ -169,7 +168,7 @@ def test_overlap_json_content_is_used_for_llm_classification(monkeypatch):
     assert conn.executor.submitted == []
 
 
-def test_recognized_speaker_json_is_only_submitted_on_first_turn(monkeypatch):
+def test_recognized_speaker_json_is_submitted_on_every_turn(monkeypatch):
     import core.handle.receiveAudioHandle as receive_handle
 
     async def _no_intent(conn, actual_text):
@@ -187,7 +186,7 @@ def test_recognized_speaker_json_is_only_submitted_on_first_turn(monkeypatch):
     asyncio.run(startToChat(conn, payload))
 
     assert conn.executor.submitted[0][1] == (payload,)
-    assert conn.executor.submitted[1][1] == ("你好",)
+    assert conn.executor.submitted[1][1] == (payload,)
     assert conn.current_speaker == "user-a"
     assert conn.current_speaker_id == "voice-a"
 
