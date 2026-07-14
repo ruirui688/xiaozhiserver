@@ -416,18 +416,22 @@ public class AgentChatHistoryController {
         }
         List<String> parts = new ArrayList<>();
         addPart(parts, "turn_id", metrics.get("turn_id"));
-        addPart(parts, "audio_duration_ms", nested(metrics, "input", "estimated_audio_duration_ms"));
-        addPart(parts, "vad_ms", nested(metrics, "latency_ms", "vad", "inference_total_ms"));
-        addPart(parts, "asr_first_text_ms", nested(metrics, "latency_ms", "asr", "first_text_ms"));
-        addPart(parts, "asr_tail_ms", nested(metrics, "latency_ms", "asr", "tail_latency_ms"));
-        addPart(parts, "voiceprint_ms", nested(metrics, "latency_ms", "voiceprint", "total_ms"));
-        addPart(parts, "llm_first_chunk_ms", nested(metrics, "latency_ms", "llm", "first_chunk_ms"));
-        addPart(parts, "llm_total_ms", nested(metrics, "latency_ms", "llm", "total_ms"));
-        addPart(parts, "tts_first_audio_ms", nested(metrics, "latency_ms", "tts", "first_audio_ms"));
-        addPart(parts, "tts_total_ms", nested(metrics, "latency_ms", "tts", "total_ms"));
-        addPart(parts, "prompt_tokens", nested(metrics, "tokens", "prompt_tokens"));
-        addPart(parts, "completion_tokens", nested(metrics, "tokens", "completion_tokens"));
-        addPart(parts, "total_tokens", nested(metrics, "tokens", "total_tokens"));
+        Object messageRole = metrics.get("message_role");
+        if ("user".equals(messageRole)) {
+            addPart(parts, "audio_duration_ms", nested(metrics, "input", "estimated_audio_duration_ms"));
+            addPart(parts, "vad_ms", nested(metrics, "latency_ms", "vad", "inference_total_ms"));
+            addPart(parts, "asr_first_text_ms", nested(metrics, "latency_ms", "asr", "first_text_ms"));
+            addPart(parts, "asr_tail_ms", nested(metrics, "latency_ms", "asr", "tail_latency_ms"));
+            addPart(parts, "voiceprint_ms", nested(metrics, "latency_ms", "voiceprint", "total_ms"));
+        } else if ("assistant".equals(messageRole)) {
+            addPart(parts, "llm_first_chunk_ms", nested(metrics, "latency_ms", "llm", "first_chunk_ms"));
+            addPart(parts, "llm_total_ms", nested(metrics, "latency_ms", "llm", "total_ms"));
+            addPart(parts, "tts_first_audio_ms", nested(metrics, "latency_ms", "tts", "first_audio_ms"));
+            addPart(parts, "tts_total_ms", nested(metrics, "latency_ms", "tts", "total_ms"));
+            addPart(parts, "prompt_tokens", nested(metrics, "tokens", "prompt_tokens"));
+            addPart(parts, "completion_tokens", nested(metrics, "tokens", "completion_tokens"));
+            addPart(parts, "total_tokens", nested(metrics, "tokens", "total_tokens"));
+        }
         return String.join(", ", parts);
     }
 
@@ -535,25 +539,28 @@ public class AgentChatHistoryController {
             Map<String, Object> metrics = message.get("raw_metrics") instanceof Map<?, ?> map
                     ? toStringKeyMap(map)
                     : Map.of();
+            Object messageRole = metrics.get("message_role");
+            boolean userMetrics = "user".equals(messageRole);
+            boolean assistantMetrics = "assistant".equals(messageRole);
             csv.append(csv(message.get("session_id"))).append(',')
                     .append(csv(message.get("turn_id"))).append(',')
                     .append(csv(message.get("message_index"))).append(',')
                     .append(csv(message.get("role"))).append(',')
                     .append(csv(message.get("created_at"))).append(',')
-                    .append(csv(nested(metrics, "input", "estimated_audio_duration_ms"))).append(',')
-                    .append(csv(nested(metrics, "latency_ms", "vad", "inference_total_ms"))).append(',')
-                    .append(csv(nested(metrics, "latency_ms", "vad", "segment_ms"))).append(',')
-                    .append(csv(nested(metrics, "latency_ms", "asr", "first_text_ms"))).append(',')
-                    .append(csv(nested(metrics, "latency_ms", "asr", "tail_latency_ms"))).append(',')
-                    .append(csv(nested(metrics, "latency_ms", "voiceprint", "total_ms"))).append(',')
-                    .append(csv(nested(metrics, "latency_ms", "llm", "first_chunk_ms"))).append(',')
-                    .append(csv(nested(metrics, "latency_ms", "llm", "total_ms"))).append(',')
-                    .append(csv(nested(metrics, "latency_ms", "tts", "first_audio_ms"))).append(',')
-                    .append(csv(nested(metrics, "latency_ms", "tts", "total_ms"))).append(',')
-                    .append(csv(nested(metrics, "tokens", "prompt_tokens"))).append(',')
-                    .append(csv(nested(metrics, "tokens", "completion_tokens"))).append(',')
-                    .append(csv(nested(metrics, "tokens", "total_tokens"))).append(',')
-                    .append(csv(nested(metrics, "tokens", "source"))).append('\n');
+                    .append(csv(userMetrics ? nested(metrics, "input", "estimated_audio_duration_ms") : null)).append(',')
+                    .append(csv(userMetrics ? nested(metrics, "latency_ms", "vad", "inference_total_ms") : null)).append(',')
+                    .append(csv(userMetrics ? nested(metrics, "latency_ms", "vad", "segment_ms") : null)).append(',')
+                    .append(csv(userMetrics ? nested(metrics, "latency_ms", "asr", "first_text_ms") : null)).append(',')
+                    .append(csv(userMetrics ? nested(metrics, "latency_ms", "asr", "tail_latency_ms") : null)).append(',')
+                    .append(csv(userMetrics ? nested(metrics, "latency_ms", "voiceprint", "total_ms") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "latency_ms", "llm", "first_chunk_ms") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "latency_ms", "llm", "total_ms") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "latency_ms", "tts", "first_audio_ms") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "latency_ms", "tts", "total_ms") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "tokens", "prompt_tokens") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "tokens", "completion_tokens") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "tokens", "total_tokens") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "tokens", "source") : null)).append('\n');
         }
         return csv.toString();
     }
