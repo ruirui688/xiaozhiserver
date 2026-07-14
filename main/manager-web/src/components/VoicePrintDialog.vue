@@ -78,19 +78,12 @@
               @click="startEnrollment">
               {{ enrollmentId ? $t('voicePrintDialog.restartEnrollment') : $t('voicePrintDialog.startEnrollment') }}
             </el-button>
-            <el-button
-              size="mini"
-              :loading="completingEnrollment"
-              :disabled="!canCompleteEnrollment"
-              @click="completeEnrollment">
-              {{ $t('voicePrintDialog.completeEnrollment') }}
-            </el-button>
           </div>
         </div>
       </el-form>
 
       <div class="dialog-footer">
-        <el-button type="primary" @click="submit" class="save-btn" :loading="saving" :disabled="saving || primarySubmitDisabled">
+        <el-button v-if="form.id" type="primary" @click="submit" class="save-btn" :loading="saving" :disabled="saving || primarySubmitDisabled">
           {{ primarySubmitText }}
         </el-button>
         <el-button @click="cancel" class="cancel-btn">
@@ -144,6 +137,7 @@ export default {
       collectedCount: 0,
       creatingEnrollment: false,
       completingEnrollment: false,
+      registrationSubmitted: false,
       enrollmentUnsupported: false,
       pollingTimer: null,
       minSamples: 1,
@@ -169,6 +163,9 @@ export default {
       if (this.enrollmentStatus === 'collecting') {
         return this.$t('voicePrintDialog.collectingHint');
       }
+      if (this.completingEnrollment) {
+        return this.$t('voicePrintDialog.registeringHint');
+      }
       if (this.enrollmentStatus === 'ready') {
         return this.$t('voicePrintDialog.readyHint');
       }
@@ -181,9 +178,13 @@ export default {
       const statusMap = {
         idle: this.$t('voicePrintDialog.statusIdle'),
         collecting: this.$t('voicePrintDialog.statusCollecting'),
+        registering: this.$t('voicePrintDialog.statusRegistering'),
         ready: this.$t('voicePrintDialog.statusReady'),
         failed: this.$t('voicePrintDialog.statusFailed')
       };
+      if (this.completingEnrollment) {
+        return statusMap.registering;
+      }
       return statusMap[this.enrollmentStatus] || statusMap.idle;
     },
     enrollmentTagType() {
@@ -199,8 +200,9 @@ export default {
     },
     canCompleteEnrollment() {
       return Boolean(this.enrollmentId)
-        && ['collecting', 'ready'].includes(this.enrollmentStatus)
-        && !this.completingEnrollment;
+        && this.enrollmentStatus === 'ready'
+        && !this.completingEnrollment
+        && !this.registrationSubmitted;
     },
     primarySubmitText() {
       if (!this.form.id) {
@@ -250,6 +252,7 @@ export default {
       this.enrollmentUnsupported = true;
       this.enrollmentStatus = 'failed';
       this.enrollmentProgress = 0;
+      this.registrationSubmitted = false;
       this.stopPolling();
     },
     extractResponseMessage(error, fallback) {
@@ -283,7 +286,13 @@ export default {
           return;
         }
         this.creatingEnrollment = true;
+        this.stopPolling();
         this.enrollmentUnsupported = false;
+        this.registrationSubmitted = false;
+        this.enrollmentId = '';
+        this.enrollmentStatus = 'collecting';
+        this.enrollmentProgress = 0;
+        this.collectedCount = 0;
         const payload = {
           agentId: this.agentId,
           sourceName: this.form.sourceName,
@@ -317,7 +326,10 @@ export default {
         api.agent.getAgentVoicePrintEnrollment(this.agentId, this.enrollmentId, ({ data }) => {
           if (data.code === 0 || data.code === undefined) {
             this.normalizeEnrollment(data.data || {});
-            if (this.enrollmentStatus === 'ready' || this.enrollmentStatus === 'failed') {
+            if (this.enrollmentStatus === 'ready') {
+              this.stopPolling();
+              this.completeEnrollment();
+            } else if (this.enrollmentStatus === 'failed') {
               this.stopPolling();
             }
           }
@@ -338,6 +350,7 @@ export default {
           return;
         }
         this.completingEnrollment = true;
+        this.registrationSubmitted = true;
         api.agent.completeAgentVoicePrintEnrollment(this.enrollmentId, {
           agentId: this.agentId,
           sourceName: this.form.sourceName,
@@ -357,10 +370,13 @@ export default {
               done: () => {}
             });
           } else {
+            this.registrationSubmitted = false;
+            this.enrollmentStatus = 'failed';
             this.$message.error(data.msg || this.$t('voicePrintDialog.completeFailed'));
           }
         }, (err) => {
           this.completingEnrollment = false;
+          this.registrationSubmitted = false;
           this.enrollmentStatus = 'failed';
           this.$message.error(this.extractResponseMessage(err, this.$t('voicePrintDialog.completeFailed')));
         });
@@ -402,6 +418,7 @@ export default {
       this.collectedCount = 0;
       this.creatingEnrollment = false;
       this.completingEnrollment = false;
+      this.registrationSubmitted = false;
       this.enrollmentUnsupported = false;
       this.stopPolling();
     }
