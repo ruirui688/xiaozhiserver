@@ -77,7 +77,17 @@ class VoiceprintApiClientTest {
                 eq(HttpMethod.POST),
                 any(HttpEntity.class),
                 eq(String.class)))
-                .thenReturn(ResponseEntity.ok("{\"speaker_id\":\"voice-1\",\"score\":0.91}"));
+                .thenReturn(ResponseEntity.ok("""
+                        {
+                          "matched": true,
+                          "user_id": "agent-a",
+                          "user_name": "用户A",
+                          "speaker_id": "voice-1",
+                          "speaker_name": "声纹1",
+                          "speaker_description": "主人",
+                          "score": 0.91
+                        }
+                        """));
 
         IdentifyVoicePrintResponse result = client.identifyVoiceprint(
                 "agent-a", List.of("voice-1"), audioResource());
@@ -91,7 +101,44 @@ class VoiceprintApiClientTest {
         MultiValueMap<String, Object> body = (MultiValueMap<String, Object>) entityCaptor.getValue().getBody();
         assertEquals("agent-a", body.getFirst("user_id"));
         assertEquals("voice-1", body.getFirst("speaker_ids"));
+        assertEquals(true, result.getMatched());
+        assertEquals("agent-a", result.getUserId());
+        assertEquals("用户A", result.getUserName());
         assertEquals("voice-1", result.getSpeakerId());
+        assertEquals("声纹1", result.getSpeakerName());
+        assertEquals("主人", result.getSpeakerDescription());
+        assertEquals(0.91, result.getScore());
+    }
+
+    @Test
+    void identifyParsesUnmatchedNewProtocolResponse() {
+        RestTemplate restTemplate = mock(RestTemplate.class);
+        VoiceprintApiClient client = new VoiceprintApiClient(restTemplate, configuredParams());
+
+        when(restTemplate.exchange(
+                any(URI.class),
+                eq(HttpMethod.POST),
+                any(HttpEntity.class),
+                eq(String.class)))
+                .thenReturn(ResponseEntity.ok("""
+                        {
+                          "matched": false,
+                          "user_id": "agent-a",
+                          "user_name": null,
+                          "speaker_id": null,
+                          "speaker_name": null,
+                          "speaker_description": null,
+                          "score": 0.18
+                        }
+                        """));
+
+        IdentifyVoicePrintResponse result = client.identifyVoiceprint(
+                "agent-a", List.of("voice-1"), audioResource());
+
+        assertEquals(false, result.getMatched());
+        assertEquals("agent-a", result.getUserId());
+        assertEquals(null, result.getSpeakerId());
+        assertEquals(0.18, result.getScore());
     }
 
     @Test
