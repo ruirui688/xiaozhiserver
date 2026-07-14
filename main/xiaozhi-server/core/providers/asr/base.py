@@ -19,7 +19,7 @@ from core.handle.receiveAudioHandle import startToChat
 from core.handle.reportHandle import enqueue_asr_report
 from core.utils.util import remove_punctuation_and_length
 from core.handle.receiveAudioHandle import handleAudioMessage
-from typing import Optional, Tuple, List, NamedTuple, TYPE_CHECKING
+from typing import Any, Dict, Optional, Tuple, List, NamedTuple, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
@@ -31,7 +31,7 @@ logger = setup_logging()
 
 class ASRProviderBase(ABC):
     def __init__(self):
-        pass
+        self._current_artifacts = None
 
     # 打开音频通道
     async def open_audio_channels(self, conn: "ConnectionHandler"):
@@ -125,8 +125,10 @@ class ASRProviderBase(ABC):
             if isinstance(asr_result, Exception):
                 logger.bind(tag=TAG).error(f"ASR识别失败: {asr_result}")
                 raw_text = ""
+                audio_artifacts = None
             else:
                 raw_text, _ = asr_result
+                audio_artifacts = self.get_current_artifacts()
 
             if isinstance(voiceprint_result, Exception):
                 logger.bind(tag=TAG).error(f"声纹识别失败: {voiceprint_result}")
@@ -141,6 +143,14 @@ class ASRProviderBase(ABC):
             # 判断 ASR 结果类型
             if isinstance(raw_text, dict):
                 # FunASR 返回的 dict 格式
+                await self._resolve_meeting_utterance_speakers(
+                    conn,
+                    raw_text,
+                    audio_artifacts,
+                    speaker_name,
+                    speaker_id,
+                    speaker_score,
+                )
                 if speaker_name:
                     raw_text["speaker"] = speaker_name
                     if speaker_id:
@@ -157,6 +167,10 @@ class ASRProviderBase(ABC):
                     logger.bind(tag=TAG).info(f"识别文本: {raw_text['content']}")
                 if speaker_name:
                     logger.bind(tag=TAG).info(f"识别说话人: {speaker_name}")
+                if raw_text.get("utterances"):
+                    logger.bind(tag=TAG).debug(
+                        f"识别到分段数量: {len(raw_text.get('utterances') or [])}"
+                    )
 
                 # 转换为 JSON 字符串用于下游
                 enhanced_text = json.dumps(raw_text, ensure_ascii=False)
@@ -213,6 +227,128 @@ class ASRProviderBase(ABC):
             )
         else:
             return text
+
+    async def _resolve_meeting_utterance_speakers(
+        self,
+        conn: "ConnectionHandler",
+        payload: Dict[str, Any],
+        artifacts: Optional["ASRProviderBase.AudioArtifacts"],
+        fallback_speaker_name: str,
+        fallback_speaker_id: Optional[str],
+        fallback_speaker_score: Optional[float],
+    ) -> None:
+        """Resolve diarized utterance labels with voiceprint during meeting mode."""
+        meeting = getattr(conn, "meeting_minutes", None)
+        if meeting is None or not meeting.is_active():
+            return
+
+        utterances = payload.get("utterances")
+        if not isinstance(utterances, list) or not utterances:
+            return
+
+        if len(utterances) == 1 and fallback_speaker_name:
+            self._apply_resolved_speaker(
+                utterances[0],
+                fallback_speaker_name,
+                fallback_speaker_id,
+                fallback_speaker_score,
+            )
+            return
+
+        voiceprint_provider = getattr(conn, "voiceprint_provider", None)
+        if voiceprint_provider is None or artifacts is None or not artifacts.pcm_bytes:
+            return
+
+        for utterance in utterances:
+            if not isinstance(utterance, dict):
+                continue
+            start_ms, end_ms = self._extract_utterance_time_ms(utterance)
+            if start_ms is None or end_ms is None or end_ms - start_ms < 500:
+                continue
+            pcm_slice = self._slice_pcm_by_ms(artifacts.pcm_bytes, start_ms, end_ms)
+            wav_data = self._pcm_to_wav(pcm_slice)
+            if not wav_data:
+                continue
+            try:
+                match = await voiceprint_provider.identify_speaker(
+                    wav_data,
+                    conn.session_id,
+                )
+            except Exception as error:
+                logger.bind(tag=TAG).warning(
+                    "会议分段声纹识别失败: "
+                    f"errorType={type(error).__name__}"
+                )
+                continue
+            if match is None:
+                continue
+            speaker_name = getattr(match, "name", match) or ""
+            if not speaker_name:
+                continue
+            self._apply_resolved_speaker(
+                utterance,
+                speaker_name,
+                getattr(match, "speaker_id", None),
+                getattr(match, "score", None),
+            )
+
+    @staticmethod
+    def _apply_resolved_speaker(
+        utterance: Dict[str, Any],
+        speaker_name: str,
+        speaker_id: Optional[str],
+        speaker_score: Optional[float],
+    ) -> None:
+        utterance["resolved_speaker"] = speaker_name
+        if speaker_id:
+            utterance["resolved_speaker_id"] = speaker_id
+        if speaker_score is not None:
+            utterance["speaker_score"] = round(float(speaker_score), 4)
+
+    @staticmethod
+    def _extract_utterance_time_ms(
+        utterance: Dict[str, Any],
+    ) -> Tuple[Optional[float], Optional[float]]:
+        start = _first_present(
+            utterance,
+            "start_time",
+            "startTime",
+            "start_ms",
+            "startMs",
+            "begin_time",
+            "beginTime",
+            "start",
+        )
+        end = _first_present(
+            utterance,
+            "end_time",
+            "endTime",
+            "end_ms",
+            "endMs",
+            "stop_time",
+            "stopTime",
+            "end",
+        )
+        start_ms = _coerce_time_ms(start)
+        end_ms = _coerce_time_ms(end)
+        if (
+            start_ms is not None
+            and end_ms is not None
+            and 0 <= start_ms < end_ms <= 300
+            and end_ms - start_ms <= 60
+        ):
+            start_ms *= 1000
+            end_ms *= 1000
+        return start_ms, end_ms
+
+    @staticmethod
+    def _slice_pcm_by_ms(pcm_bytes: bytes, start_ms: float, end_ms: float) -> bytes:
+        bytes_per_second = 16000 * 2
+        start_byte = max(0, int(start_ms / 1000 * bytes_per_second))
+        end_byte = max(start_byte, int(end_ms / 1000 * bytes_per_second))
+        start_byte -= start_byte % 2
+        end_byte -= end_byte % 2
+        return pcm_bytes[start_byte:end_byte]
 
     def _pcm_to_wav(self, pcm_data: bytes) -> bytes:
         """将PCM数据转换为WAV格式"""
@@ -298,7 +434,7 @@ class ASRProviderBase(ABC):
 
     async def speech_to_text_wrapper(
         self, opus_data: List[bytes], session_id: str, audio_format="opus"
-    ) -> Tuple[Optional[str], Optional[str]]:
+    ) -> Tuple[Optional[Any], Optional[str]]:
         file_path = None
         temp_path = None
         try:
@@ -329,6 +465,7 @@ class ASRProviderBase(ABC):
                     file_path=file_path,
                     temp_path=temp_path,
                 )
+            self._current_artifacts = artifacts
 
             text, _ = await self.speech_to_text(
                 opus_data, session_id, audio_format, artifacts
@@ -406,3 +543,23 @@ class ASRProviderBase(ABC):
                     del decoder
                 except Exception as e:
                     logger.bind(tag=TAG).debug(f"释放decoder资源时出错: {e}")
+
+
+def _first_present(payload: Dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = payload.get(key)
+        if value is not None:
+            return value
+    return None
+
+
+def _coerce_time_ms(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number < 0:
+        return None
+    return number

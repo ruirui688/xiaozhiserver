@@ -4,7 +4,7 @@ import math
 import os
 import time
 import uuid
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import aiohttp
 
@@ -163,10 +163,15 @@ class ASRProvider(ASRProviderBase):
                     f"录音识别提交完成: elapsed={submit_elapsed:.3f}s"
                 )
 
-                text = self._extract_text(submit_payload)
-                if text:
-                    self._log_success(start_time, submit_elapsed, query_count, text)
-                    return text, artifacts.file_path
+                asr_result = self._extract_result(submit_payload)
+                if asr_result:
+                    self._log_success(
+                        start_time,
+                        submit_elapsed,
+                        query_count,
+                        _result_content(asr_result),
+                    )
+                    return asr_result, artifacts.file_path
 
                 stage = "query"
                 deadline = time.monotonic() + self.query_timeout_seconds
@@ -188,10 +193,15 @@ class ASRProvider(ASRProviderBase):
                         timeout_seconds=min(self.http_timeout_seconds, remaining),
                         stage="查询录音识别结果",
                     )
-                    text = self._extract_text(query_payload)
-                    if text:
-                        self._log_success(start_time, submit_elapsed, query_count, text)
-                        return text, artifacts.file_path
+                    asr_result = self._extract_result(query_payload)
+                    if asr_result:
+                        self._log_success(
+                            start_time,
+                            submit_elapsed,
+                            query_count,
+                            _result_content(asr_result),
+                        )
+                        return asr_result, artifacts.file_path
                     if self._is_failed(query_payload):
                         provider_code = query_payload.get("code")
                         provider_status = str(
@@ -234,21 +244,34 @@ class ASRProvider(ASRProviderBase):
         )
 
     @staticmethod
-    def _extract_text(payload: dict) -> str:
+    def _extract_result(payload: dict) -> Any:
         if not isinstance(payload, dict):
             return ""
         result = payload.get("result") or {}
         if isinstance(result, dict):
+            utterances = result.get("utterances") or []
+            if isinstance(utterances, list):
+                normalized_utterances = [
+                    _normalize_utterance(item)
+                    for item in utterances
+                    if isinstance(item, dict)
+                ]
+                content = "".join(
+                    str(item.get("text") or "")
+                    for item in normalized_utterances
+                ).strip()
+                if content:
+                    return {
+                        "content": content,
+                        "utterances": normalized_utterances,
+                        "provider_metadata": {
+                            "provider": "doubao_recording",
+                            "show_utterances": True,
+                        },
+                    }
             text = result.get("text")
             if text:
                 return str(text)
-            utterances = result.get("utterances") or []
-            if isinstance(utterances, list):
-                return "".join(
-                    str(item.get("text") or "")
-                    for item in utterances
-                    if isinstance(item, dict)
-                ).strip()
         text = payload.get("text")
         return str(text).strip() if text else ""
 
@@ -261,3 +284,35 @@ class ASRProvider(ASRProviderBase):
             return True
         status = str(payload.get("status") or payload.get("message") or "").lower()
         return status in {"failed", "failure", "error"}
+
+
+def _normalize_utterance(item: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(item)
+    text = str(normalized.get("text") or "").strip()
+    normalized["text"] = text
+    provider_speaker = _first_present(
+        normalized,
+        "speaker",
+        "speaker_id",
+        "speakerId",
+        "speaker_label",
+        "speakerLabel",
+        "role",
+    )
+    if provider_speaker is not None:
+        normalized["provider_speaker"] = str(provider_speaker)
+    return normalized
+
+
+def _first_present(payload: Dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = payload.get(key)
+        if value is not None:
+            return value
+    return None
+
+
+def _result_content(result: Any) -> str:
+    if isinstance(result, dict):
+        return str(result.get("content") or "")
+    return str(result or "")

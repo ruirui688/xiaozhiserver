@@ -64,6 +64,7 @@ from core.device_runtime_registry import register_connection, unregister_connect
 from core.observability import SessionTelemetry
 from core.session import CloseCoordinator, SessionLifecycle
 from core.utils.voiceprint_enrollment import VoiceprintEnrollmentCollector
+from core.meeting import MeetingMinutesRuntime
 
 
 TAG = __name__
@@ -280,6 +281,7 @@ class ConnectionHandler:
         self.prompt_manager = PromptManager(self.config, self.logger)
         self.game_session_manager = GameSessionManager()
         self.semantic_center = SemanticCenter()
+        self.meeting_minutes = MeetingMinutesRuntime()
 
         # 初始化通话状态
         self.calling = False
