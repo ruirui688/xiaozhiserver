@@ -1,5 +1,7 @@
 package xiaozhi.modules.agent.dto;
 
+import java.util.Map;
+
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -30,4 +32,6 @@ public class AgentChatHistoryReportDTO {
     private String audioBase64;
     @Schema(description = "上报时间，十位时间戳，空时默认使用当前时间", example = "1745657732")
     private Long reportTime;
+    @Schema(description = "本条消息关联的链路延时、token 和运行指标")
+    private Map<String, Object> metrics;
 }

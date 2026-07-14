@@ -25,4 +25,7 @@ public class AgentChatHistoryDTO {
 
     @Schema(description = "MAC地址")
     private String macAddress;
+
+    @Schema(description = "链路延时、token 和运行指标 JSON")
+    private String metricsJson;
 }

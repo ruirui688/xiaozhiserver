@@ -224,7 +224,13 @@ async def generate_and_save_chat_title(session_id: str) -> Optional[Dict]:
 
 
 async def report(
-    mac_address: str, session_id: str, chat_type: int, content: str, audio, report_time
+    mac_address: str,
+    session_id: str,
+    chat_type: int,
+    content: str,
+    audio,
+    report_time,
+    metrics: Optional[Dict] = None,
 ) -> Optional[Dict]:
     """异步聊天记录上报"""
     if not content or not ManageApiClient._instance:
@@ -242,6 +248,7 @@ async def report(
                 "audioBase64": (
                     base64.b64encode(audio).decode("utf-8") if audio else None
                 ),
+                "metrics": metrics,
             },
         )
     except Exception as e:

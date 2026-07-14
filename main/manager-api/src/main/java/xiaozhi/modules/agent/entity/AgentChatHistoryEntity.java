@@ -68,6 +68,12 @@ public class AgentChatHistoryEntity {
     private String audioId;
 
     /**
+     * 链路延时、token 和运行指标 JSON
+     */
+    @TableField(value = "metrics_json")
+    private String metricsJson;
+
+    /**
      * 创建时间
      */
     @TableField(value = "created_at")

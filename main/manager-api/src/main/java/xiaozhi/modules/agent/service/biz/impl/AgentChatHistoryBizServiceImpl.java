@@ -12,6 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import xiaozhi.common.constant.Constant;
 import xiaozhi.common.redis.RedisKeys;
 import xiaozhi.common.redis.RedisUtils;
+import xiaozhi.common.utils.JsonUtils;
 import xiaozhi.modules.agent.dto.AgentChatHistoryReportDTO;
 import xiaozhi.modules.agent.entity.AgentChatHistoryEntity;
 import xiaozhi.modules.agent.entity.AgentEntity;
@@ -118,6 +119,7 @@ public class AgentChatHistoryBizServiceImpl implements AgentChatHistoryBizServic
                 .chatType(report.getChatType())
                 .content(report.getContent())
                 .audioId(audioId)
+                .metricsJson(report.getMetrics() == null ? null : JsonUtils.toJsonString(report.getMetrics()))
                 .createdAt(new Date(reportTime))
                 // NOTE(haotian): 2025/5/26 updateAt可以不设置，重点是createAt，而且这样可以看到上报延迟
                 .build();

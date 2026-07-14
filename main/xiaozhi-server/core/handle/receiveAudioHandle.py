@@ -34,7 +34,20 @@ async def handleAudioMessage(conn: "ConnectionHandler", audio):
     if should_ignore_wakeup_audio(conn):
         return
     # 当前片段是否有人说话
+    vad_started_at = time.monotonic()
     have_voice = conn.vad.is_vad(conn, audio)
+    turn_metrics = getattr(conn, "turn_metrics", None)
+    if turn_metrics is not None:
+        try:
+            turn_metrics.record_vad_frame(
+                have_voice,
+                int((time.monotonic() - vad_started_at) * 1000),
+                len(audio) if audio else 0,
+            )
+        except Exception as e:
+            logger = conn.logger.bind(tag=TAG)
+            if hasattr(logger, "debug"):
+                logger.debug(f"记录VAD指标失败: {e}")
     update_voice_activity(conn, have_voice)
     voiceprint_provider = getattr(conn, "voiceprint_provider", None)
     if voiceprint_provider is not None:

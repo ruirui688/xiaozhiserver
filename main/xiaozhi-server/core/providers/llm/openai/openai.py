@@ -82,6 +82,8 @@ class LLMProvider(LLMProviderBase):
             except (ValueError, TypeError):
                 setattr(self, param, None)
 
+        self.last_usage = None
+
         logger.debug(
             f"意图识别参数初始化: {self.temperature}, {self.max_tokens}, {self.top_p}, {self.frequency_penalty}"
         )
@@ -211,6 +213,7 @@ class LLMProvider(LLMProviderBase):
 
     def response(self, session_id, dialogue, **kwargs):
         dialogue = self.normalize_dialogue(dialogue)
+        self.last_usage = None
 
         request_params = {
             "model": self.model_name,
@@ -243,6 +246,19 @@ class LLMProvider(LLMProviderBase):
         is_active = True
         try:            
             for chunk in self._iter_stream_with_deadline(responses):
+                usage_info = getattr(chunk, "usage", None)
+                if isinstance(usage_info, CompletionUsage):
+                    self.last_usage = {
+                        "prompt_tokens": getattr(usage_info, "prompt_tokens", None),
+                        "completion_tokens": getattr(usage_info, "completion_tokens", None),
+                        "total_tokens": getattr(usage_info, "total_tokens", None),
+                    }
+                    logger.bind(tag=TAG).info(
+                        f"Token 消耗：输入 {self.last_usage.get('prompt_tokens', '未知')}，"
+                        f"输出 {self.last_usage.get('completion_tokens', '未知')}，"
+                        f"共计 {self.last_usage.get('total_tokens', '未知')}"
+                    )
+                    continue
                 try:
                     delta = chunk.choices[0].delta if getattr(chunk, "choices", None) else None
                     content = getattr(delta, "content", "") if delta else ""
@@ -262,6 +278,7 @@ class LLMProvider(LLMProviderBase):
 
     def response_with_functions(self, session_id, dialogue, functions=None, **kwargs):
         dialogue = self.normalize_dialogue(dialogue)
+        self.last_usage = None
 
         request_params = {
             "model": self.model_name,
@@ -300,10 +317,15 @@ class LLMProvider(LLMProviderBase):
                     yield content, tool_calls
                 elif isinstance(getattr(chunk, "usage", None), CompletionUsage):
                     usage_info = getattr(chunk, "usage", None)
+                    self.last_usage = {
+                        "prompt_tokens": getattr(usage_info, "prompt_tokens", None),
+                        "completion_tokens": getattr(usage_info, "completion_tokens", None),
+                        "total_tokens": getattr(usage_info, "total_tokens", None),
+                    }
                     logger.bind(tag=TAG).info(
-                        f"Token 消耗：输入 {getattr(usage_info, 'prompt_tokens', '未知')}，"
-                        f"输出 {getattr(usage_info, 'completion_tokens', '未知')}，"
-                        f"共计 {getattr(usage_info, 'total_tokens', '未知')}"
+                        f"Token 消耗：输入 {self.last_usage.get('prompt_tokens', '未知')}，"
+                        f"输出 {self.last_usage.get('completion_tokens', '未知')}，"
+                        f"共计 {self.last_usage.get('total_tokens', '未知')}"
                     )
         finally:
             stream.close()

@@ -103,23 +103,32 @@ class ASRProviderBase(ABC):
                     )
                     if conn.voiceprint_provider is not None:
                         conn.voiceprint_provider.reset_utterance()
+                    conn.turn_metrics.discard_vad_segment()
                     return
 
+            conn.turn_metrics.begin_turn(asr_audio_task, conn.audio_format)
+
             # 定义ASR任务
-            asr_task = self.speech_to_text_wrapper(
-                asr_audio_task, conn.session_id, conn.audio_format
+            asr_task = self._timed_awaitable(
+                self.speech_to_text_wrapper(
+                    asr_audio_task, conn.session_id, conn.audio_format
+                )
             )
 
             if conn.voiceprint_provider is not None:
-                voiceprint_task = (
+                voiceprint_task = self._timed_awaitable(
                     conn.voiceprint_provider.resolve_utterance_result()
                 )
-                asr_result, voiceprint_result = await asyncio.gather(
+                asr_timed, voiceprint_timed = await asyncio.gather(
                     asr_task, voiceprint_task, return_exceptions=True
                 )
+                asr_result, asr_elapsed_ms = self._unwrap_timed_result(asr_timed)
+                voiceprint_result, voiceprint_elapsed_ms = self._unwrap_timed_result(voiceprint_timed)
             else:
-                asr_result = await asr_task
+                asr_timed = await asr_task
+                asr_result, asr_elapsed_ms = self._unwrap_timed_result(asr_timed)
                 voiceprint_result = None
+                voiceprint_elapsed_ms = None
 
             # 记录识别结果 - 检查是否为异常
             if isinstance(asr_result, Exception):
@@ -129,6 +138,11 @@ class ASRProviderBase(ABC):
             else:
                 raw_text, _ = asr_result
                 audio_artifacts = self.get_current_artifacts()
+            conn.turn_metrics.record_asr(
+                asr_elapsed_ms,
+                not isinstance(asr_result, Exception),
+                len(str(raw_text or "")),
+            )
 
             if isinstance(voiceprint_result, Exception):
                 logger.bind(tag=TAG).error(f"声纹识别失败: {voiceprint_result}")
@@ -139,6 +153,13 @@ class ASRProviderBase(ABC):
                 speaker_name = getattr(voiceprint_result, "name", voiceprint_result) or ""
                 speaker_id = getattr(voiceprint_result, "speaker_id", None)
                 speaker_score = getattr(voiceprint_result, "score", None)
+            conn.turn_metrics.record_voiceprint(
+                voiceprint_elapsed_ms,
+                conn.voiceprint_provider is not None,
+                speaker_name,
+                speaker_id,
+                speaker_score,
+            )
 
             # 判断 ASR 结果类型
             if isinstance(raw_text, dict):
@@ -200,13 +221,38 @@ class ASRProviderBase(ABC):
                 audio_snapshot = asr_audio_task.copy()
                 # 使用自定义模块进行上报
                 accepted = await startToChat(conn, enhanced_text)
+                conn.turn_metrics.record_routing(accepted)
                 if accepted:
-                    enqueue_asr_report(conn, enhanced_text, audio_snapshot)
+                    enqueue_asr_report(
+                        conn,
+                        enhanced_text,
+                        audio_snapshot,
+                        metrics=conn.turn_metrics.build_user_metrics(),
+                    )
         except Exception as e:
             logger.bind(tag=TAG).error(f"处理语音停止失败: {e}")
             import traceback
 
             logger.bind(tag=TAG).debug(f"异常详情: {traceback.format_exc()}")
+
+    async def _timed_awaitable(self, awaitable):
+        started_at = time.monotonic()
+        try:
+            result = await awaitable
+            return result, int((time.monotonic() - started_at) * 1000)
+        except Exception as exc:
+            return exc, int((time.monotonic() - started_at) * 1000)
+
+    def _unwrap_timed_result(self, timed_result):
+        if isinstance(timed_result, Exception):
+            return timed_result, None
+        if (
+            isinstance(timed_result, tuple)
+            and len(timed_result) == 2
+            and isinstance(timed_result[1], int)
+        ):
+            return timed_result
+        return timed_result, None
 
     def _build_enhanced_text(
         self,
