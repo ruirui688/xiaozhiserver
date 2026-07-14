@@ -215,3 +215,37 @@ def test_voiceprint_enrollment_handler_starts_runtime_connection(monkeypatch):
     payload = json.loads(response.text)
     assert payload["success"] is True
     assert payload["data"]["requestId"] == "req-a"
+
+
+def test_voiceprint_enrollment_handler_finishes_runtime_connection(monkeypatch):
+    calls = []
+
+    async def finish_voiceprint_enrollment(reason):
+        calls.append(reason)
+        return {"active": False, "requestId": "req-a", "reason": reason}
+
+    conn = SimpleNamespace(finish_voiceprint_enrollment=finish_voiceprint_enrollment)
+    monkeypatch.setattr(
+        "core.api.voiceprint_enrollment_handler.get_connection",
+        lambda device_id: conn if device_id == "device-a" else None,
+    )
+    handler = VoiceprintEnrollmentHandler(
+        {
+            "server": {"auth_key": "secret"},
+            "manager-api": {"secret": "manager-secret"},
+        }
+    )
+
+    class _Request:
+        headers = {"Authorization": "Bearer secret"}
+        query = {}
+
+        async def json(self):
+            return {"deviceId": "device-a", "reason": "manual_stop"}
+
+    response = asyncio.run(handler.handle_stop(_Request()))
+    assert response.status == 200
+    payload = json.loads(response.text)
+    assert payload["success"] is True
+    assert payload["data"]["reason"] == "manual_stop"
+    assert calls == ["manual_stop"]

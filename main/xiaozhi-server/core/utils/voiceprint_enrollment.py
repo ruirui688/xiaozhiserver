@@ -15,7 +15,7 @@ from config.manage_api_client import (
 )
 
 DEFAULT_VOICEPRINT_SAMPLE_TEXT = (
-    "我正在录入声纹，请用正常音量读完这段话。今天天气不错，我会自然地说完，然后保持安静，等待系统完成检测。"
+    "今天天气不错，我正在用正常音量录入声纹。读完这句话后，我会保持安静，等待系统完成检测。"
 )
 
 if TYPE_CHECKING:
@@ -184,7 +184,7 @@ class VoiceprintEnrollmentCollector:
                 self._notify(
                     conn,
                     "completed",
-                    "已采集完成，请在后台完成注册。",
+                    "已采集完成，请点击结束录音并注册。",
                 )
             else:
                 remaining = self.status.target_samples - self.status.sample_count

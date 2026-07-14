@@ -23,6 +23,7 @@ import xiaozhi.modules.agent.dao.AgentVoicePrintDao;
 import xiaozhi.modules.agent.dao.AgentVoicePrintSampleDao;
 import xiaozhi.modules.agent.dto.AgentVoicePrintSaveDTO;
 import xiaozhi.modules.agent.dto.AgentVoicePrintUpdateDTO;
+import xiaozhi.modules.agent.dto.AgentVoicePrintRegistrationResult;
 import xiaozhi.modules.agent.dto.IdentifyVoicePrintResponse;
 import xiaozhi.modules.agent.entity.AgentVoicePrintEntity;
 import xiaozhi.modules.agent.entity.AgentVoicePrintSampleEntity;
@@ -42,7 +43,7 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
     public static final int MAX_VOICEPRINTS_PER_AGENT = 5;
     public static final int MIN_REGISTER_SAMPLES = 1;
     public static final int MAX_REGISTER_SAMPLES = 5;
-    public static final long MIN_SAMPLE_DURATION_MS = 3_000L;
+    public static final long MIN_SAMPLE_DURATION_MS = 500L;
     public static final long MAX_SAMPLE_DURATION_MS = 30_000L;
     private static final double DUPLICATE_RECOGNITION_THRESHOLD = 0.5;
 
@@ -72,6 +73,12 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
 
     @Override
     public String insertAndReturnId(AgentVoicePrintSaveDTO dto) {
+        AgentVoicePrintRegistrationResult result = insertAndReturnRegistration(dto);
+        return result == null ? null : result.getVoicePrintId();
+    }
+
+    @Override
+    public AgentVoicePrintRegistrationResult insertAndReturnRegistration(AgentVoicePrintSaveDTO dto) {
         ensureVoiceprintCapacity(dto.getAgentId());
 
         List<VoicePrintAudioSample> samples = getVoicePrintAudioSamples(
@@ -92,13 +99,13 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
                     return null;
                 }
                 saveSamples(entity, samples);
-                voiceprintApiClient.registerVoiceprint(
+                Map<String, Object> registrationResult = voiceprintApiClient.registerVoiceprint(
                         entity.getRemoteUserId(),
                         entity.getId(),
                         entity.getSourceName(),
                         entity.getIntroduce(),
-                        samples.stream().map(VoicePrintAudioSample::resource).toList());
-                return entity.getId();
+                        samples.get(0).resource());
+                return new AgentVoicePrintRegistrationResult(entity.getId(), registrationResult);
             } catch (RenException e) {
                 status.setRollbackOnly();
                 throw e;
@@ -190,7 +197,7 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
                             entity.getId(),
                             entity.getSourceName(),
                             entity.getIntroduce(),
-                            updatedSamples.stream().map(VoicePrintAudioSample::resource).toList());
+                            updatedSamples.get(0).resource());
                     String previousRemoteUserId = remoteUserId(existing);
                     if (!previousRemoteUserId.equals(entity.getRemoteUserId())) {
                         voiceprintApiClient.deleteVoiceprint(previousRemoteUserId, entity.getId());

@@ -104,12 +104,12 @@ public class VoiceprintApiClient {
         }
     }
 
-    public void registerVoiceprint(
+    public Map<String, Object> registerVoiceprint(
             String remoteUserId,
             String speakerId,
             String speakerName,
             String speakerDescription,
-            List<ByteArrayResource> resources) {
+            ByteArrayResource resource) {
         Endpoint endpoint = getConfiguredEndpoint();
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
         body.add("user_id", remoteUserId);
@@ -119,9 +119,7 @@ public class VoiceprintApiClient {
         if (StringUtils.isNotBlank(speakerDescription)) {
             body.add("speaker_description", speakerDescription);
         }
-        for (ByteArrayResource resource : resources) {
-            body.add("files", resource);
-        }
+        body.add("file", resource);
 
         HttpHeaders headers = bearerHeaders(endpoint.token());
         headers.setContentType(MediaType.MULTIPART_FORM_DATA);
@@ -131,9 +129,15 @@ public class VoiceprintApiClient {
                     HttpMethod.POST,
                     new HttpEntity<>(body, headers),
                     String.class);
-            if (response.getStatusCode() != HttpStatus.OK || !isSuccess(response.getBody())) {
-                throw new RenException(ErrorCode.VOICEPRINT_REGISTER_PROCESS_ERROR);
+            Map<String, Object> parsed = parseBody(response.getBody());
+            if (response.getStatusCode() != HttpStatus.OK || !isSuccess(parsed)) {
+                throw remoteFailure(
+                        ErrorCode.VOICEPRINT_REGISTER_PROCESS_ERROR,
+                        null,
+                        parsed,
+                        "声纹注册处理失败");
             }
+            return parsed;
         } catch (RestClientResponseException e) {
             throw mapRemoteError("register", e, ErrorCode.VOICEPRINT_REGISTER_REQUEST_ERROR);
         } catch (RestClientException e) {
@@ -320,7 +324,10 @@ public class VoiceprintApiClient {
     }
 
     private static boolean isSuccess(String body) {
-        Map<String, Object> parsed = parseBody(body);
+        return isSuccess(parseBody(body));
+    }
+
+    private static boolean isSuccess(Map<String, Object> parsed) {
         return parsed != null && Boolean.TRUE.equals(parsed.get("success"));
     }
 
@@ -347,7 +354,46 @@ public class VoiceprintApiClient {
         if ("voiceprint_limit_reached".equals(remoteCode)) {
             return new RenException(ErrorCode.AGENT_VOICEPRINT_LIMIT_REACHED, error);
         }
-        return new RenException(fallbackCode, error);
+        return remoteFailure(fallbackCode, error, parsed, "声纹服务请求失败");
+    }
+
+    @SuppressWarnings("unchecked")
+    private RenException remoteFailure(
+            int code,
+            Throwable cause,
+            Map<String, Object> parsed,
+            String fallbackMessage) {
+        Object detailValue = parsed == null ? null : parsed.get("detail");
+        String detail = detailValue == null ? null : String.valueOf(detailValue);
+        if ("null".equalsIgnoreCase(StringUtils.trimToEmpty(detail))) {
+            detail = null;
+        }
+        Object quality = parsed == null ? null : parsed.get("quality");
+        StringBuilder message = new StringBuilder(StringUtils.defaultIfBlank(detail, fallbackMessage));
+        if (quality instanceof Map<?, ?> qualityMap) {
+            Object score = qualityMap.get("score");
+            Object level = qualityMap.get("level");
+            Object warnings = qualityMap.get("warnings");
+            if (score != null || level != null) {
+                message.append("（质量");
+                if (score != null) {
+                    message.append("分=").append(score);
+                }
+                if (level != null) {
+                    if (score != null) {
+                        message.append("，");
+                    }
+                    message.append("等级=").append(level);
+                }
+                message.append("）");
+            }
+            if (warnings instanceof List<?> warningList && !warningList.isEmpty()) {
+                message.append("：").append(StringUtils.join(warningList, "；"));
+            }
+        }
+        RenException exception = cause == null ? new RenException(code) : new RenException(code, cause);
+        exception.setMsg(message.toString());
+        return exception;
     }
 
     private static boolean isMissing(String value) {

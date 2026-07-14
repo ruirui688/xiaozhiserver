@@ -198,7 +198,9 @@ export default {
       return undefined;
     },
     canCompleteEnrollment() {
-      return Boolean(this.enrollmentId) && this.collectedCount >= this.requiredSamples && !this.completingEnrollment;
+      return Boolean(this.enrollmentId)
+        && ['collecting', 'ready'].includes(this.enrollmentStatus)
+        && !this.completingEnrollment;
     },
     primarySubmitText() {
       if (!this.form.id) {
@@ -249,6 +251,30 @@ export default {
       this.enrollmentStatus = 'failed';
       this.enrollmentProgress = 0;
       this.stopPolling();
+    },
+    extractResponseMessage(error, fallback) {
+      return (error && error.data && (error.data.msg || error.data.message))
+        || (error && (error.msg || error.message))
+        || fallback;
+    },
+    formatRegistrationResult(result) {
+      const quality = result && result.quality;
+      if (!quality) {
+        return this.$t('voicePrintDialog.completeSuccess');
+      }
+      const parts = [];
+      if (quality.score !== undefined && quality.score !== null) {
+        parts.push(`质量分 ${quality.score}`);
+      }
+      if (quality.level) {
+        parts.push(`等级 ${quality.level}`);
+      }
+      if (quality.effective_speech_seconds !== undefined && quality.effective_speech_seconds !== null) {
+        parts.push(`有效语音 ${quality.effective_speech_seconds}s`);
+      }
+      return parts.length
+        ? `${this.$t('voicePrintDialog.completeSuccess')}，${parts.join('，')}`
+        : this.$t('voicePrintDialog.completeSuccess');
     },
     startEnrollment() {
       this.validateBasicFields(() => {
@@ -320,7 +346,8 @@ export default {
           this.completingEnrollment = false;
           if (data.code === 0 || data.code === undefined) {
             this.stopPolling();
-            this.$message.success(this.$t('voicePrintDialog.completeSuccess'));
+            const result = data.data && data.data.registrationResult;
+            this.$message.success(this.formatRegistrationResult(result));
             this.$emit('submit', {
               form: {
                 ...this.form,
@@ -332,9 +359,10 @@ export default {
           } else {
             this.$message.error(data.msg || this.$t('voicePrintDialog.completeFailed'));
           }
-        }, () => {
+        }, (err) => {
           this.completingEnrollment = false;
-          this.$message.warning(this.$t('voicePrintDialog.enrollmentUnavailable'));
+          this.enrollmentStatus = 'failed';
+          this.$message.error(this.extractResponseMessage(err, this.$t('voicePrintDialog.completeFailed')));
         });
       });
     },

@@ -33,6 +33,7 @@ import xiaozhi.modules.agent.dao.AgentVoicePrintEnrollmentDao;
 import xiaozhi.modules.agent.dao.AgentVoicePrintEnrollmentSampleDao;
 import xiaozhi.modules.agent.dto.AgentVoicePrintEnrollmentCreateDTO;
 import xiaozhi.modules.agent.dto.AgentVoicePrintEnrollmentSampleDTO;
+import xiaozhi.modules.agent.dto.AgentVoicePrintRegistrationResult;
 import xiaozhi.modules.agent.dto.AgentVoicePrintSaveDTO;
 import xiaozhi.modules.agent.entity.AgentChatHistoryEntity;
 import xiaozhi.modules.agent.entity.AgentVoicePrintEnrollmentEntity;
@@ -55,7 +56,7 @@ public class AgentVoicePrintEnrollmentServiceImpl
     public static final String STATUS_COMPLETED = "COMPLETED";
     public static final String STATUS_CANCELLED = "CANCELLED";
     private static final String DEFAULT_PROMPT_TEXT =
-            "我正在录入声纹，请用正常音量读完这段话。今天天气不错，我会自然地说完，然后保持安静，等待系统完成检测。";
+            "今天天气不错，我正在用正常音量录入声纹。读完这句话后，我会保持安静，等待系统完成检测。";
 
     private final AgentVoicePrintEnrollmentSampleDao sampleDao;
     private final AgentVoicePrintService agentVoicePrintService;
@@ -147,6 +148,10 @@ public class AgentVoicePrintEnrollmentServiceImpl
         AgentVoicePrintEnrollmentEntity entity = getExisting(id);
         requireCollecting(entity);
         List<AgentVoicePrintEnrollmentSampleEntity> samples = listSamples(id);
+        if (samples.size() < normalizeRequiredSamples(entity.getRequiredSamples())) {
+            stopDeviceEnrollment(entity);
+            samples = listSamples(id);
+        }
         if (samples.size() < normalizeRequiredSamples(entity.getRequiredSamples())
                 || samples.size() > AgentVoicePrintServiceImpl.MAX_REGISTER_SAMPLES) {
             throw new RenException(ErrorCode.VOICEPRINT_SAMPLE_COUNT_INVALID);
@@ -167,13 +172,17 @@ public class AgentVoicePrintEnrollmentServiceImpl
         saveDTO.setAudioIds(samples.stream()
                 .map(AgentVoicePrintEnrollmentSampleEntity::getAudioId)
                 .toList());
-        String voicePrintId = agentVoicePrintService.insertAndReturnId(saveDTO);
+        AgentVoicePrintRegistrationResult registrationResult =
+                agentVoicePrintService.insertAndReturnRegistration(saveDTO);
+        String voicePrintId = registrationResult.getVoicePrintId();
 
         baseMapper.update(null, new UpdateWrapper<AgentVoicePrintEnrollmentEntity>()
                 .eq("id", id)
                 .set("status", STATUS_COMPLETED)
                 .set("voice_print_id", voicePrintId));
-        return get(id);
+        AgentVoicePrintEnrollmentVO vo = get(id);
+        vo.setRegistrationResult(registrationResult.getRegistrationResult());
+        return vo;
     }
 
     @Override
@@ -272,7 +281,7 @@ public class AgentVoicePrintEnrollmentServiceImpl
         payload.set("introduce", entity.getIntroduce());
         payload.set("targetSamples", 1);
         payload.set("promptText", DEFAULT_PROMPT_TEXT);
-        payload.set("minDurationSeconds", 3.0);
+        payload.set("minDurationSeconds", 0.5);
         payload.set("maxDurationSeconds", 30.0);
         payload.set("uploadMode", "server");
         payload.set("reportEndpoint", "/agent/voice-print/enrollments/" + entity.getId() + "/device-samples");
@@ -294,6 +303,40 @@ public class AgentVoicePrintEnrollmentServiceImpl
             }
         } catch (RestClientException e) {
             throw new RenException("无法让设备进入声纹采集模式，请确认设备在线且 xiaozhi-server HTTP 端口可访问", e);
+        }
+    }
+
+    private void stopDeviceEnrollment(AgentVoicePrintEnrollmentEntity entity) {
+        if (StringUtils.isBlank(entity.getDeviceId())) {
+            return;
+        }
+        String baseUrl = resolveXiaozhiServerHttpBaseUrl();
+        String serverSecret = sysParamsService.getValue(Constant.SERVER_SECRET, true);
+        if (StringUtils.isBlank(serverSecret) || StringUtils.equalsIgnoreCase(serverSecret, "null")) {
+            throw new RenException("server.secret 未配置，无法停止设备声纹采集");
+        }
+
+        JSONObject payload = new JSONObject();
+        payload.set("deviceId", entity.getDeviceId());
+        payload.set("reason", "manual_stop");
+
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory();
+        factory.setReadTimeout(Duration.ofSeconds(15));
+        RestTemplate client = new RestTemplate(factory);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setBearerAuth(serverSecret);
+        try {
+            ResponseEntity<String> response = client.exchange(
+                    baseUrl + "/device/voiceprint/enrollment/stop",
+                    HttpMethod.POST,
+                    new HttpEntity<>(payload.toString(), headers),
+                    String.class);
+            if (!response.getStatusCode().is2xxSuccessful()) {
+                throw new RenException("设备声纹采集停止失败：" + response.getStatusCode());
+            }
+        } catch (RestClientException e) {
+            throw new RenException("无法停止设备声纹采集，请确认设备在线且 xiaozhi-server HTTP 端口可访问", e);
         }
     }
 
