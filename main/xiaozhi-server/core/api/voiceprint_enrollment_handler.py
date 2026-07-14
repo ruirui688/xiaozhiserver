@@ -68,7 +68,7 @@ class VoiceprintEnrollmentHandler(BaseHandler):
         conn = self._connection(device_id)
         if conn is None:
             return self._json_response({"success": False, "message": "设备未连接到当前运行时"}, 404, request)
-        status = conn.stop_voiceprint_enrollment(body.get("reason") or "http_stop")
+        status = await conn.finish_voiceprint_enrollment(body.get("reason") or "http_stop")
         return self._json_response({"success": True, "data": status}, request=request)
 
     async def handle_status(self, request):

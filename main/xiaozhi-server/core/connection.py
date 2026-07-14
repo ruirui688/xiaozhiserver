@@ -2045,6 +2045,7 @@ class ConnectionHandler:
         self.logger.bind(tag=TAG).debug("All audio states reset.")
 
     def start_voiceprint_enrollment(self, options=None):
+        self.reset_audio_states(preserve_voiceprint=True)
         status = self.voiceprint_enrollment.start(options or {})
         self.logger.bind(tag=TAG).info(
             "声纹采集模式已开启: requestId={}, targetSamples={}, uploadMode={}".format(
@@ -2056,11 +2057,7 @@ class ConnectionHandler:
         self.notify_voiceprint_enrollment_event(
             "started",
             status,
-            (
-                "声纹注册已开始，请保持安静环境，按以下文字分段朗读。"
-                "每段连续三秒以上，读完一段后停顿一下，我会自动记录一段。"
-                f"朗读文本：{status.get('promptText') or ''}"
-            ),
+            "声纹注册开始，请朗读屏幕上的文字，读完后保持安静。",
         )
         return status
 
@@ -2074,6 +2071,23 @@ class ConnectionHandler:
         prompt = "声纹注册已取消。" if reason != "completed" else None
         self.notify_voiceprint_enrollment_event("stopped", status, prompt)
         return status
+
+    async def finish_voiceprint_enrollment(self, reason="manual_stop"):
+        enrollment = self.voiceprint_enrollment
+        if enrollment.status.active and self.asr_audio:
+            audio_snapshot = self.asr_audio.copy()
+            self.reset_audio_states(preserve_voiceprint=True)
+            consumed = await enrollment.collect_utterance(
+                self,
+                audio_snapshot,
+                self.audio_format,
+            )
+            if consumed and self.voiceprint_provider is not None:
+                self.voiceprint_provider.reset_utterance()
+
+        if enrollment.status.active:
+            return self.stop_voiceprint_enrollment(reason)
+        return enrollment.get_status()
 
     def get_voiceprint_enrollment_status(self):
         return self.voiceprint_enrollment.get_status()

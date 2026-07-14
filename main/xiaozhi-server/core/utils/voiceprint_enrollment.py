@@ -15,7 +15,7 @@ from config.manage_api_client import (
 )
 
 DEFAULT_VOICEPRINT_SAMPLE_TEXT = (
-    "小智服务器正在采集我的声纹样本。今天的天气不错，我会用正常音量连续朗读这段文字，帮助系统更稳定地识别我的声音。"
+    "今天天气不错，我正在用正常音量录入声纹。读完这句话后，我会保持安静，等待系统完成检测。"
 )
 
 if TYPE_CHECKING:
@@ -135,11 +135,7 @@ class VoiceprintEnrollmentCollector:
             duration_ms = self._wav_duration_ms(wav_data)
             if duration_ms <= 0:
                 self._append_sample(sample_index, 0, len(wav_data), False, error="invalid_wav")
-                self._notify(
-                    conn,
-                    "sample_rejected",
-                    "没有采集到有效语音，请重新说一段。",
-                )
+                self._notify(conn, "sample_rejected", "没有听到有效语音，请重新读一遍。")
                 return True
 
             duration_seconds = duration_ms / 1000.0
@@ -154,7 +150,7 @@ class VoiceprintEnrollmentCollector:
                 self._notify(
                     conn,
                     "sample_rejected",
-                    "这段语音太短了，请连续说三秒以上。",
+                    "这段语音太短了，请重新读一遍。",
                 )
                 return True
             if duration_seconds > self.max_duration_seconds:
@@ -168,7 +164,7 @@ class VoiceprintEnrollmentCollector:
                 self._notify(
                     conn,
                     "sample_rejected",
-                    "这段语音太长了，请控制在三十秒以内。",
+                    "这段语音太长了，请重新读一遍。",
                 )
                 return True
 
@@ -188,21 +184,21 @@ class VoiceprintEnrollmentCollector:
                 self._notify(
                     conn,
                     "completed",
-                    "声纹样本采集完成，请在后台点击完成注册。",
+                    "已采集完成，请点击结束录音并注册。",
                 )
             else:
                 remaining = self.status.target_samples - self.status.sample_count
                 self._notify(
                     conn,
                     "sample_collected",
-                    f"已采集第 {self.status.sample_count} 段，还需要 {remaining} 段。",
+                    f"已采集 {self.status.sample_count} 段，还需要 {remaining} 段。",
                 )
         except Exception as error:
             conn.logger.bind(tag=__name__).warning(
                 "声纹采集样本处理失败: errorType={}".format(type(error).__name__)
             )
             self._append_sample(sample_index, 0, 0, False, error=type(error).__name__)
-            self._notify(conn, "sample_failed", "声纹样本上传失败，请重新说一段。")
+            self._notify(conn, "sample_failed", "声纹样本上传失败，请重新读一遍。")
         return True
 
     async def _upload_sample(

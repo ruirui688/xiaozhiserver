@@ -205,7 +205,7 @@ utils/audioRateController.py  AudioRateController
 
 ## 5. 声纹注册采集模式
 
-声纹注册不再通过普通语音对话触发。智控台创建注册任务后，`manager-api` 调用
+声纹注册不再通过普通语音对话触发。智控台点击“开始录音”后，`manager-api` 调用
 `xiaozhi-server` 的 HTTP 控制端点，指定在线设备进入连接级采集模式：
 
 ```text
@@ -217,8 +217,8 @@ Authorization: Bearer <server.secret>
   "requestId": "采集任务ID",
   "agentId": "智能体ID",
   "sourceName": "说话人姓名",
-  "targetSamples": 3,
-  "minDurationSeconds": 3.0,
+  "targetSamples": 1,
+  "minDurationSeconds": 0.5,
   "maxDurationSeconds": 30.0,
   "reportEndpoint": "/agent/voice-print/enrollments/{id}/device-samples"
 }
@@ -226,6 +226,9 @@ Authorization: Bearer <server.secret>
 
 采集模式 active 时，设备继续按原 WebSocket 协议上传音频。服务端在 VAD 句末把该段音频转成
 16k 单声道 WAV 并上报到 `manager-api`，不会进入普通 ASR、语义、LLM 或工具调用链路。
+当前设备采集流程只要求朗读 1 段文本：用户点击“结束录音并注册”后，`manager-api` 会先调用
+`POST /device/voiceprint/enrollment/stop`，Python 运行时会尽量消费当前音频缓冲并上报样本；若 VAD 已经提前检测到句末静音，也会自动上报样本。
+`startToChat()` 也会兜底检查采集状态，防止流式 ASR 或其他入口漏过采集分支后继续触发普通对话。
 
 为了提升设备端体验，服务端会额外下发状态事件：
 
@@ -238,9 +241,9 @@ Authorization: Bearer <server.secret>
   "state": "collecting",
   "active": true,
   "sampleCount": 1,
-  "targetSamples": 3,
+  "targetSamples": 1,
   "reason": "",
-  "prompt": "已采集第 1 段，还需要 2 段。"
+  "prompt": "已采集完成，请点击结束录音并注册。"
 }
 ```
 
@@ -252,7 +255,7 @@ Authorization: Bearer <server.secret>
 | `sample_collected` | 显示进度，如 `1/3`，短提示音或屏幕反馈 |
 | `sample_rejected` | 显示失败原因，提示重新说一段 |
 | `sample_failed` | 显示上传失败，提示重新采集 |
-| `completed` | 显示采集完成，等待后台完成注册 |
+| `completed` | 显示采集完成，等待用户点击结束录音并注册 |
 | `stopped` | 退出声纹注册 UI/灯效 |
 
 同时，服务端会通过现有 TTS 通道播报 `prompt` 文案。旧固件即使不识别
