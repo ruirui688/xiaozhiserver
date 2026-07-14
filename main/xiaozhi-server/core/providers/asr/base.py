@@ -87,7 +87,7 @@ class ASRProviderBase(ABC):
 
     # 处理语音停止
     async def handle_voice_stop(self, conn: "ConnectionHandler", asr_audio_task: List[bytes]):
-        """并行等待ASR与提前启动的句级声纹预取。"""
+        """VAD句末后并行处理ASR与整句声纹识别。"""
         try:
             total_start_time = time.monotonic()
             enrollment = getattr(conn, "voiceprint_enrollment", None)
@@ -108,6 +108,13 @@ class ASRProviderBase(ABC):
 
             conn.turn_metrics.begin_turn(asr_audio_task, conn.audio_format)
 
+            wav_data = None
+            if conn.voiceprint_provider is not None:
+                wav_data = self._audio_frames_to_wav(
+                    asr_audio_task,
+                    conn.audio_format,
+                )
+
             # 定义ASR任务
             asr_task = self._timed_awaitable(
                 self.speech_to_text_wrapper(
@@ -115,9 +122,12 @@ class ASRProviderBase(ABC):
                 )
             )
 
-            if conn.voiceprint_provider is not None:
+            if conn.voiceprint_provider is not None and wav_data:
                 voiceprint_task = self._timed_awaitable(
-                    conn.voiceprint_provider.resolve_utterance_result()
+                    conn.voiceprint_provider.identify_speaker(
+                        wav_data,
+                        conn.session_id,
+                    )
                 )
                 asr_timed, voiceprint_timed = await asyncio.gather(
                     asr_task, voiceprint_task, return_exceptions=True
@@ -264,6 +274,15 @@ class ASRProviderBase(ABC):
             turn_metrics.record_asr_first_text(len(str(text)))
         except Exception as exc:
             logger.bind(tag=TAG).debug(f"记录ASR首段指标失败: {exc}")
+
+    def _audio_frames_to_wav(self, audio_frames: List[bytes], audio_format: str) -> bytes:
+        if not audio_frames:
+            return b""
+        if audio_format == "pcm":
+            pcm_frames = audio_frames
+        else:
+            pcm_frames = self.decode_opus(audio_frames)
+        return self._pcm_to_wav(b"".join(pcm_frames))
 
     def _build_enhanced_text(
         self,

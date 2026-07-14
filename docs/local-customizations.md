@@ -471,7 +471,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 
 ```text
 定制模块：manager-api 声纹远程客户端与业务约束、xiaozhi-server 实时声纹 provider、Web/Mobile 声纹管理页
-改动原因：声纹模型独立部署在另一台服务器，voiceprint-api 0.1.0 起要求必填 user_id 并按用户隔离。小智侧必须从可信智能体绑定关系派生 user_id，不能信任浏览器或设备传入；每个智能体最多绑定 5 个声纹；API Token 必须从 URL 查询参数拆出，只通过 Bearer Header 传输。历史声纹在远程服务中属于 default 作用域，需要保留兼容并允许重新录音后迁移到 agentId 作用域。实时识别假设一句话只有一个说话人，只累计前 N 秒有效人声，默认 1 秒，可由参数管理 `server.voiceprint_sample_seconds` 调整，达到时长立即与 ASR 并行预取，短句跳过、长句后段不再上传，句末最多追加等待 300ms；没有绑定声纹时必须零调用。可信 `speaker_id` 继续进入聊天记录和长期记忆事件，新事实按人物关联，运行时只召回当前人物专属事实与共享事实；聊天记录和记忆图谱必须展示人物归属。官方上游 2026-07-13 的声纹对话修复同时表明，身份不应在每轮 system 和用户消息中重复注入，否则模型会机械地反复称呼名字。
+改动原因：声纹模型独立部署在另一台服务器，voiceprint-api 0.1.0 起要求必填 user_id 并按用户隔离。小智侧必须从可信智能体绑定关系派生 user_id，不能信任浏览器或设备传入；每个智能体最多绑定 5 个声纹；API Token 必须从 URL 查询参数拆出，只通过 Bearer Header 传输。历史声纹在远程服务中属于 default 作用域，需要保留兼容并允许重新录音后迁移到 agentId 作用域。实时识别假设一句话只有一个说话人，VAD 句末后把当前整段语音转 WAV 并与 ASR 并行识别，对齐官方上游逻辑；历史参数 `server.voiceprint_sample_seconds` 不再下发也不再影响运行时。没有绑定声纹时必须零调用。可信 `speaker_id` 继续进入聊天记录和长期记忆事件，新事实按人物关联，运行时只召回当前人物专属事实与共享事实；聊天记录和记忆图谱必须展示人物归属。官方上游 2026-07-13 的声纹对话修复同时表明，身份不应在每轮 system 和用户消息中重复注入，否则模型会机械地反复称呼名字。
 关键文件：
   - main/manager-api/src/main/java/xiaozhi/modules/agent/voiceprint/VoiceprintApiClient.java
   - main/manager-api/src/main/java/xiaozhi/modules/agent/service/impl/AgentVoicePrintServiceImpl.java
@@ -491,5 +491,5 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/manager-mobile/src/pages/voiceprint/index.vue
   - docs/models/voiceprint-integration.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改声纹注册/识别/删除、配置下发、音频状态重置、ASR并行识别、聊天记录展示、长期记忆事件/召回、对话身份注入或声纹页面，必须保留 `user_id=agentId` 的可信服务端派生、每智能体最多5条的后端与远程双重校验、`remote_user_id=default` 历史兼容、Token仅通过Bearer Header传输、私有/回环/链路本地目标拦截、结构化 speakers 配置、“前 N 秒有效人声达到后立即且每句只请求一次、不足 N 秒跳过、采样时长默认1秒且可由 `server.voiceprint_sample_seconds` 调整、句末最多等待300ms、无绑定声纹零调用”、可信 `speaker_id` 贯穿聊天记录与记忆、人物专属记忆不跨声纹召回，以及“每个已识别身份只在本会话首次进入system和JSON用户消息”的行为。前端上限提示不能替代后端校验；删除远程失败时不得静默留下占用额度的孤儿声纹；日志不得输出Token、Authorization或带密钥URL。
+官方同步时的处理规则：如果官方修改声纹注册/识别/删除、配置下发、音频状态重置、ASR并行识别、聊天记录展示、长期记忆事件/召回、对话身份注入或声纹页面，必须保留 `user_id=agentId` 的可信服务端派生、每智能体最多5条的后端与远程双重校验、`remote_user_id=default` 历史兼容、Token仅通过Bearer Header传输、私有/回环/链路本地目标拦截、结构化 speakers 配置、“VAD句末整段语音WAV与ASR并发识别、`server.voiceprint_sample_seconds` 不再驱动截断采样、无绑定声纹零调用”、可信 `speaker_id` 贯穿聊天记录与记忆、人物专属记忆不跨声纹召回，以及“每个已识别身份只在本会话首次进入system和JSON用户消息”的行为。前端上限提示不能替代后端校验；删除远程失败时不得静默留下占用额度的孤儿声纹；日志不得输出Token、Authorization或带密钥URL。
 ```
