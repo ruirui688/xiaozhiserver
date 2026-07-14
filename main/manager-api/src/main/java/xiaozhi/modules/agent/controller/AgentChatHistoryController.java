@@ -427,7 +427,7 @@ public class AgentChatHistoryController {
             addPart(parts, "llm_first_chunk_ms", nested(metrics, "latency_ms", "llm", "first_chunk_ms"));
             addPart(parts, "llm_total_ms", nested(metrics, "latency_ms", "llm", "total_ms"));
             addPart(parts, "tts_first_audio_ms", nested(metrics, "latency_ms", "tts", "first_audio_ms"));
-            addPart(parts, "tts_total_ms", nested(metrics, "latency_ms", "tts", "total_ms"));
+            addPart(parts, "tts_generation_ms", nested(metrics, "latency_ms", "tts", "total_ms"));
             addPart(parts, "prompt_tokens", nested(metrics, "tokens", "prompt_tokens"));
             addPart(parts, "completion_tokens", nested(metrics, "tokens", "completion_tokens"));
             addPart(parts, "total_tokens", nested(metrics, "tokens", "total_tokens"));
@@ -501,7 +501,7 @@ public class AgentChatHistoryController {
         putIfNotNull(summary, "llm_first_chunk_ms", nested(assistant, "latency_ms", "llm", "first_chunk_ms"));
         putIfNotNull(summary, "llm_total_ms", nested(assistant, "latency_ms", "llm", "total_ms"));
         putIfNotNull(summary, "tts_first_audio_ms", nested(assistant, "latency_ms", "tts", "first_audio_ms"));
-        putIfNotNull(summary, "tts_total_ms", nested(assistant, "latency_ms", "tts", "total_ms"));
+        putIfNotNull(summary, "tts_generation_ms", nested(assistant, "latency_ms", "tts", "total_ms"));
         putIfNotNull(summary, "prompt_tokens", nested(assistant, "tokens", "prompt_tokens"));
         putIfNotNull(summary, "completion_tokens", nested(assistant, "tokens", "completion_tokens"));
         putIfNotNull(summary, "total_tokens", nested(assistant, "tokens", "total_tokens"));
@@ -534,7 +534,7 @@ public class AgentChatHistoryController {
 
     private String buildLatencyCsv(List<Map<String, Object>> messages) {
         StringBuilder csv = new StringBuilder();
-        csv.append("session_id,turn_id,message_index,role,created_at,input_audio_duration_ms,vad_inference_total_ms,vad_segment_ms,asr_first_text_ms,asr_tail_latency_ms,voiceprint_total_ms,llm_first_chunk_ms,llm_total_ms,tts_first_audio_ms,tts_total_ms,prompt_tokens,completion_tokens,total_tokens,token_source\n");
+        csv.append("session_id,turn_id,message_index,role,created_at,input_audio_duration_ms,vad_inference_total_ms,vad_segment_ms,asr_first_text_ms,asr_tail_latency_ms,voiceprint_total_ms,llm_first_chunk_ms,llm_total_ms,tts_first_audio_ms,tts_generation_ms,prompt_tokens,completion_tokens,total_tokens,token_source\n");
         for (Map<String, Object> message : messages) {
             Map<String, Object> metrics = message.get("raw_metrics") instanceof Map<?, ?> map
                     ? toStringKeyMap(map)

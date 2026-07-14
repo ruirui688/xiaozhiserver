@@ -333,7 +333,8 @@ export default {
             }
 
             add('LLM', this.getNested(metrics, ['latency_ms', 'llm', 'total_ms']));
-            add('TTS', this.getNested(metrics, ['latency_ms', 'tts', 'total_ms']));
+            add('TTS首包', this.getNested(metrics, ['latency_ms', 'tts', 'first_audio_ms']));
+            add('TTS生成', this.getNested(metrics, ['latency_ms', 'tts', 'total_ms']));
             const tokenSource = this.getNested(metrics, ['tokens', 'source']);
             const tokenSuffix = tokenSource && String(tokenSource).startsWith('estimated') ? '估' : '';
             const promptTokens = this.getNested(metrics, ['tokens', 'prompt_tokens']);
