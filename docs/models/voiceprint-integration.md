@@ -1,9 +1,11 @@
 ---
 status: canonical
 owner: voiceprint
-last_verified: 2026-07-13
+last_verified: 2026-07-14
 source_paths:
   - main/xiaozhi-server/core/utils/voiceprint_provider.py
+  - main/xiaozhi-server/core/handle/receiveAudioHandle.py
+  - main/xiaozhi-server/core/utils/dialogue.py
   - main/manager-api/src/main/java/xiaozhi/modules/agent/voiceprint/
   - main/manager-api/src/main/java/xiaozhi/modules/agent/service/impl/AgentVoicePrintServiceImpl.java
 ---
@@ -168,7 +170,7 @@ voiceprint:
 
 Token 会在 Python 配置日志中脱敏。`timeout_seconds` 是远程请求自身的保护上限。`sample_seconds` 和 `result_wait_ms` 是旧版本地采样预取链路参数，新版整句识别链路不再使用。
 
-识别出的身份只在本会话首次进入 LLM 的用户消息和 system 上下文；后续轮次依赖对话历史，不再每轮重复姓名，避免模型机械地反复称呼用户。
+识别出的身份在每个成功识别轮次都进入 LLM：当前 user message 保留结构化 `speaker` / `speaker_id`，动态 system 上下文同步写入当前说话人及其描述。这样“你知道我是谁吗”“刚刚是谁在说话”等问题不再依赖旧对话历史。提示词同时明确身份只是内部事实，模型不得主动播报声纹过程、置信度或标签，也不得因为每轮收到身份信息就机械地重复称呼姓名。
 
 声纹身份还会以结构化字段进入聊天记录和长期记忆事件：
 

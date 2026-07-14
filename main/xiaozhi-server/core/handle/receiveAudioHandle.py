@@ -1,6 +1,6 @@
+import asyncio
 import json
 import time
-import uuid
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -15,14 +15,6 @@ from core.semantic.normalizer import TextNormalizer
 from core.utils.output_counter import check_device_output_limit
 from core.handle.sendAudioHandle import send_stt_message, SentenceType
 from core.handle.wakeupHandle import should_ignore_wakeup_audio
-from core.meeting import (
-    MeetingControlClassifier,
-    extract_meeting_topic,
-    get_meeting_entry_prompt,
-    is_meeting_mode_enabled,
-    is_meeting_start_command,
-)
-from core.providers.tts.dto.dto import ContentType, TTSMessageDTO
 
 TAG = __name__
 
@@ -87,25 +79,9 @@ async def startToChat(conn: "ConnectionHandler", text):
                 if speaker_name:
                     conn.logger.bind(tag=TAG).info(f"解析到说话人信息: {speaker_name}")
 
-                introduced_speakers = getattr(conn, "introduced_speakers", None)
-                if introduced_speakers is None:
-                    introduced_speakers = set()
-                    conn.introduced_speakers = introduced_speakers
-                speaker_identity = speaker_id or speaker_name
-
-                # 已识别身份只在首次作为JSON交给LLM；后续使用纯文本，避免反复点名。
-                if (
-                    speaker_name
-                    and speaker_name != "未知说话人"
-                    and speaker_identity in introduced_speakers
-                ):
-                    actual_text = actual_content
-                else:
-                    actual_text = text
-                    if speaker_name and speaker_name != "未知说话人":
-                        introduced_speakers.add(speaker_identity)
-                if not speaker_name:
-                    actual_text = actual_content
+                # 声纹身份必须和当前用户消息绑定并在每轮传给LLM；避免重复称呼
+                # 应由提示词约束，不能通过丢弃本轮身份事实实现。
+                actual_text = text if speaker_name else actual_content
     except (json.JSONDecodeError, KeyError):
         # 如果解析失败，继续使用原始文本
         pass
@@ -134,39 +110,30 @@ async def startToChat(conn: "ConnectionHandler", text):
         conn.current_speaker_id = None
 
     meeting = getattr(conn, "meeting_minutes", None)
-    if meeting is not None:
-        if is_meeting_start_command(
-            interruption_text
-        ) and is_meeting_mode_enabled(conn):
-            meeting.start(extract_meeting_topic(interruption_text))
-            conn.logger.bind(tag=TAG).info("已进入会议模式，后续语音将静默记录")
-            _enqueue_tts_text(conn, get_meeting_entry_prompt(conn))
-            return True
-
-        if meeting.is_active():
-            control = await MeetingControlClassifier().classify(
-                conn,
-                interruption_text,
-                meeting,
-            )
-            conn.logger.bind(tag=TAG).info(
-                "会议控制语义裁决: "
-                f"decision={control.decision}, "
-                f"confidence={control.confidence:.2f}, "
-                f"model={control.model_source}, "
-                f"reason={control.reason}"
-            )
-            if control.should_end:
-                _finish_meeting(conn, meeting)
+    if meeting is not None and meeting.is_active():
+        async with conn._meeting_turn_lock:
+            meeting.prepare_turn(parsed_payload, interruption_text, speaker_name)
+            await send_stt_message(conn, actual_text)
+            if conn.llm is None:
+                appended = meeting.record_pending_turn()
+                conn.logger.bind(tag=TAG).warning(
+                    "会议已激活但主LLM未配置，按安全规则继续记录当前发言: "
+                    f"utteranceCount={appended}"
+                )
                 return True
-            _append_meeting_utterances(
-                conn,
-                meeting,
-                parsed_payload,
-                interruption_text,
-                speaker_name,
-            )
-            return True
+
+            with conn._abort_lock:
+                conn.client_abort = False
+            try:
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(conn.executor, conn.chat, actual_text)
+            except Exception as error:
+                appended = meeting.record_pending_turn()
+                conn.logger.bind(tag=TAG).error(
+                    "会议主LLM工具处理异常，继续记录当前发言: "
+                    f"errorType={type(error).__name__}, utteranceCount={appended}"
+                )
+        return True
 
     if conn.need_bind:
         await check_bind_device(conn)
@@ -270,178 +237,6 @@ async def startToChat(conn: "ConnectionHandler", text):
     future = conn.executor.submit(conn.chat, actual_text)
     future.add_done_callback(lambda f: conn.logger.bind(tag=__name__).error(f"chat() failed: {f.exception()}") if f.exception() else None)
     return True
-
-
-def _finish_meeting(conn: "ConnectionHandler", meeting) -> None:
-    meeting.end()
-    conn.logger.bind(tag=TAG).info("会议模式已结束，开始生成会议纪要")
-    summary_prompt = meeting.build_summary_prompt()
-    transcript = meeting.build_transcript()
-    future = conn.executor.submit(
-        _generate_meeting_minutes,
-        conn,
-        summary_prompt,
-        transcript,
-    )
-    future.add_done_callback(
-        lambda f: conn.logger.bind(tag=TAG).error(
-            f"会议纪要生成失败: {f.exception()}"
-        )
-        if f.exception()
-        else None
-    )
-
-
-def _append_meeting_utterances(
-    conn: "ConnectionHandler",
-    meeting,
-    payload,
-    fallback_text,
-    fallback_speaker,
-) -> None:
-    if isinstance(payload, dict) and isinstance(payload.get("utterances"), list):
-        appended = 0
-        utterances = payload["utterances"]
-        for item in payload["utterances"]:
-            if not isinstance(item, dict):
-                continue
-            text = str(item.get("text") or "").strip()
-            if not text:
-                continue
-            meeting.append_utterance(
-                text,
-                speaker_label=_meeting_speaker_label(item),
-                resolved_speaker=item.get("resolved_speaker")
-                or (fallback_speaker if len(utterances) == 1 else None),
-                timestamp=_meeting_timestamp(item),
-                duration_ms=_meeting_duration_ms(item),
-            )
-            appended += 1
-        if appended:
-            conn.logger.bind(tag=TAG).debug(f"会议模式记录分段数量: {appended}")
-            return
-
-    text = str(fallback_text or "").strip()
-    if not text:
-        return
-    meeting.append_utterance(
-        text,
-        speaker_label=None,
-        resolved_speaker=fallback_speaker,
-    )
-    conn.logger.bind(tag=TAG).debug("会议模式记录普通语音分段")
-
-
-def _meeting_speaker_label(item) -> str:
-    for key in (
-        "provider_speaker",
-        "speaker_label",
-        "speakerLabel",
-        "speaker",
-        "speaker_id",
-        "speakerId",
-        "role",
-    ):
-        value = item.get(key)
-        if value is not None:
-            return str(value)
-    return ""
-
-
-def _meeting_timestamp(item):
-    for key in ("start_time", "startTime", "start_ms", "startMs", "begin_time", "beginTime"):
-        value = item.get(key)
-        if value is not None:
-            return value
-    return None
-
-
-def _meeting_duration_ms(item):
-    start = _coerce_float(
-        _first_present(item, "start_time", "startTime", "start_ms", "startMs", "start")
-    )
-    end = _coerce_float(
-        _first_present(item, "end_time", "endTime", "end_ms", "endMs", "end")
-    )
-    if start is None or end is None or end < start:
-        return None
-    return end - start
-
-
-def _first_present(payload, *keys):
-    for key in keys:
-        value = payload.get(key)
-        if value is not None:
-            return value
-    return None
-
-
-def _coerce_float(value):
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _generate_meeting_minutes(
-    conn: "ConnectionHandler",
-    prompt: str,
-    transcript,
-) -> None:
-    if not transcript:
-        _enqueue_tts_text(conn, "本次会议没有记录到有效发言，无法生成会议纪要。")
-        return
-    if conn.llm is None:
-        _enqueue_tts_text(conn, "会议已结束，但当前没有配置大模型，无法生成会议纪要。")
-        return
-
-    system_prompt = (
-        "你是专业的会议纪要助手。只基于用户提供的逐句记录整理会议纪要，"
-        "不得编造没有出现的信息。"
-    )
-    try:
-        summary = conn.llm.response_no_stream(system_prompt, prompt)
-    except Exception as error:
-        conn.logger.bind(tag=TAG).error(
-            "会议纪要LLM生成失败: errorType={}".format(type(error).__name__)
-        )
-        _enqueue_tts_text(conn, "会议纪要生成失败，请稍后重试。")
-        return
-
-    summary = str(summary or "").strip()
-    if not summary:
-        summary = "会议已结束，但大模型没有返回有效会议纪要。"
-    _enqueue_tts_text(conn, summary)
-
-
-def _enqueue_tts_text(conn: "ConnectionHandler", text: str) -> None:
-    if not text or conn.tts is None:
-        return
-    with conn._abort_lock:
-        conn.client_abort = False
-    sentence_id = str(uuid.uuid4().hex)
-    conn.sentence_id = sentence_id
-    conn.tts.store_tts_text(sentence_id, text)
-    conn.tts.tts_text_queue.put(
-        TTSMessageDTO(
-            sentence_id=sentence_id,
-            sentence_type=SentenceType.FIRST,
-            content_type=ContentType.ACTION,
-        )
-    )
-    conn.tts.tts_one_sentence(
-        conn,
-        ContentType.TEXT,
-        content_detail=text,
-        sentence_id=sentence_id,
-    )
-    conn.tts.tts_text_queue.put(
-        TTSMessageDTO(
-            sentence_id=sentence_id,
-            sentence_type=SentenceType.LAST,
-            content_type=ContentType.ACTION,
-        )
-    )
 
 
 def update_voice_activity(conn: "ConnectionHandler", have_voice):

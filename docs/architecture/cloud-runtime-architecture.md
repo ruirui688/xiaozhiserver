@@ -156,7 +156,7 @@ tool results
 
 未绑定声纹的智能体不下发声纹运行配置，也不会创建远程声纹请求。声纹超时或失败只表示本轮没有身份，不影响 ASR 文本继续进入主链路。历史参数 `server.voiceprint_sample_seconds` 不再下发到 Python，也不再影响实时识别音频长度。
 
-会议模式是实时链路中的连接级状态：全模块运行时先由智能体是否绑定 `SYSTEM_PLUGIN_MEETING_MINUTES` 决定能否进入，单模块运行则读取 `meeting.enabled`。进入后先播报一次确认，随后每个 ASR 完整句优先交给所选 SLM 做轻量控制语义裁决，而不是进入主聊天生成回复。只有高置信度的明确结束意图才冻结会议；低置信度、模型超时或异常均继续记录。冻结后由主 LLM 基于完整结构化转写统一生成会议纪要。所选 SLM 通过标准 `selected_module.SLM + model_config.<id>.typed_config` 契约初始化，不复制模型密钥。
+会议模式是实时链路中的连接级状态：全模块运行时先由智能体是否绑定 `SYSTEM_PLUGIN_MEETING_MINUTES` 决定工具是否可用，单模块运行则读取 `meeting.enabled`。会议能力以真实 `meeting_minutes` function tool 提供给主 LLM，进入、记录当前发言和退出全部由主 LLM 结合上下文选择 `start/record/end`；服务端不使用固定口令、关键词、独立语义分类器或 SLM 裁决，只校验插件权限与状态合法性并执行动作。会议激活后普通模型文本不会播报，模型未调用工具、超时或协议异常时按安全规则继续记录当前原始 ASR，不能误结束会议。冻结后仍由主 LLM 基于完整结构化转写统一生成会议纪要。
 
 ## 5. 智能体能力组成
 
@@ -188,7 +188,7 @@ Java 后台负责选择和保存这些模块，Python 在设备连接时按配�
 | 全局基础模板 | system message 规则部分 | `main/xiaozhi-server/agent-base-prompt.txt` |
 | 动态上下文 | system message 中的上下文段 | 时间、日期、农历、位置、天气、上下文源 |
 | 记忆 | `<memory>` 段落 | `summaryMemory` / Python Memory |
-| 声纹说话人信息 | 仅首次识别当前说话人时写入 `<speakers_info>` | `voiceprint.user_id` + 结构化 `voiceprint.speakers` |
+| 声纹说话人信息 | 每个成功识别轮次写入当前 user JSON 和 `<speakers_info>`，称呼克制由提示词约束 | `voiceprint.user_id` + 结构化 `voiceprint.speakers` |
 | 插件和 IoT 工具 schema | OpenAI tools 或文本工具提示 | 内置插件函数描述、设备 IoT descriptors |
 | 服务器侧 MCP 工具 schema | OpenAI tools 或文本工具提示 | MCP `tools/list` |
 | 设备端 MCP 工具 schema | OpenAI tools 或文本工具提示 | 设备 MCP `tools/list` |

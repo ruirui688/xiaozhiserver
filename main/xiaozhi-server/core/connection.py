@@ -65,7 +65,11 @@ from core.observability import SessionTelemetry
 from core.session import CloseCoordinator, SessionLifecycle
 from core.utils.voiceprint_enrollment import VoiceprintEnrollmentCollector
 from core.utils.turn_metrics import TurnMetrics
-from core.meeting import MeetingMinutesRuntime
+from core.meeting import (
+    MEETING_PLUGIN_NAME,
+    MeetingMinutesRuntime,
+    build_meeting_runtime_context,
+)
 
 
 TAG = __name__
@@ -148,7 +152,6 @@ class ConnectionHandler:
             _memory,
             _intent,
             server=None,
-            _slm=None,
     ):
         self.common_config = config
         self.config = copy.deepcopy(config)
@@ -203,6 +206,8 @@ class ConnectionHandler:
 
         # client_abort 跨线程读写锁（event loop / TTS text / TTS audio 线程）
         self._abort_lock = threading.Lock()
+        # 会议激活后每句都要等待主LLM工具结果，必须按ASR顺序串行处理。
+        self._meeting_turn_lock = asyncio.Lock()
 
         # 添加上报线程池
         self.report_queue = ReportQueue()
@@ -219,7 +224,6 @@ class ConnectionHandler:
         self._asr = _asr
         self._vad = _vad
         self.llm = _llm
-        self.slm = _slm
         self.memory = _memory
         self.intent = _intent
 
@@ -247,8 +251,6 @@ class ConnectionHandler:
         self.asr_audio_queue = queue.Queue()
         self.current_speaker = None  # 存储当前说话人
         self.current_speaker_id = None  # 当前说话人的稳定声纹记录ID
-        self.introduced_speakers = set()  # 已通过用户消息向LLM引入过的说话人
-        self.system_introduced_speakers = set()  # 已通过system上下文引入过的说话人
 
         # llm相关变量
         self.dialogue = Dialogue()
@@ -920,7 +922,7 @@ class ConnectionHandler:
             return False
         init_vad = check_vad_update(self.common_config, private_config)
         init_asr = check_asr_update(self.common_config, private_config)
-        init_llm, init_tts, init_memory, init_intent, init_slm = (
+        init_llm, init_tts, init_memory, init_intent = (
             self._apply_private_runtime_config(private_config)
         )
 
@@ -937,14 +939,13 @@ class ConnectionHandler:
                 init_tts,
                 init_memory,
                 init_intent,
-                init_slm,
             )
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"初始化组件失败: {e}")
             modules = {}
         if self.closing:
             return False
-        for name in ("tts", "vad", "asr", "llm", "slm", "intent", "memory"):
+        for name in ("tts", "vad", "asr", "llm", "intent", "memory"):
             value = modules.get(name)
             if value is not None and not self._assign_initialized_component(name, value):
                 return False
@@ -965,7 +966,6 @@ class ConnectionHandler:
             "TTS": False,
             "Memory": False,
             "Intent": False,
-            "SLM": False,
         }
         for module_type in (
             "VAD",
@@ -1014,7 +1014,6 @@ class ConnectionHandler:
             init_flags["TTS"],
             init_flags["Memory"],
             init_flags["Intent"],
-            init_flags["SLM"],
         )
 
     def _apply_private_plugins(self, private_config):
@@ -1104,6 +1103,11 @@ class ConnectionHandler:
             return
         self.configured_intent_type = self.config["Intent"][selected_intent]["type"]
         self.intent_type = self._resolve_runtime_intent_type(self.configured_intent_type)
+        if self.intent_type == "intent_llm":
+            selected_config = self.config["Intent"].get(selected_intent, {})
+            selected_config["functions"] = self._without_meeting_function(
+                selected_config.get("functions", [])
+            )
         if self.configured_intent_type == "function_call" and self.intent_type == "intent_llm":
             self._switch_to_intent_llm_provider()
         if self.intent_type == "function_call" or self.intent_type == "intent_llm":
@@ -1268,7 +1272,28 @@ class ConnectionHandler:
             else None
         )
         if selected_functions is not None:
-            intent_llm_config["functions"] = selected_functions
+            intent_llm_config["functions"] = self._without_meeting_function(
+                selected_functions
+            )
+
+    @staticmethod
+    def _without_meeting_function(functions):
+        if isinstance(functions, dict):
+            return {
+                name: value
+                for name, value in functions.items()
+                if name != MEETING_PLUGIN_NAME
+            }
+        if isinstance(functions, str):
+            return ";".join(
+                name
+                for name in functions.split(";")
+                if name and name != MEETING_PLUGIN_NAME
+            )
+        try:
+            return [name for name in functions if name != MEETING_PLUGIN_NAME]
+        except TypeError:
+            return []
 
     def change_system_prompt(self, prompt):
         self.prompt = prompt
@@ -1292,6 +1317,10 @@ class ConnectionHandler:
             self.turn_metrics.ensure_text_turn()
         chat_started_at = time.monotonic()
         current_abort_generation = self.abort_generation
+        meeting = getattr(self, "meeting_minutes", None)
+        meeting_tool_turn = bool(
+            depth == 0 and meeting is not None and meeting.is_active()
+        )
         # 保存当前任务的sentence_id到局部变量，避免被新任务覆盖
         current_sentence_id = None
         freeform_game_prompt = None
@@ -1310,13 +1339,14 @@ class ConnectionHandler:
             )
             if freeform_game_prompt:
                 self.logger.bind(tag=TAG).info("已注入纯语言游戏提示词")
-            self.tts.tts_text_queue.put(
-                TTSMessageDTO(
-                    sentence_id=current_sentence_id,
-                    sentence_type=SentenceType.FIRST,
-                    content_type=ContentType.ACTION,
+            if not meeting_tool_turn:
+                self.tts.tts_text_queue.put(
+                    TTSMessageDTO(
+                        sentence_id=current_sentence_id,
+                        sentence_type=SentenceType.FIRST,
+                        content_type=ContentType.ACTION,
+                    )
                 )
-            )
         else:
             # 递归调用时，使用当前的sentence_id
             current_sentence_id = self.sentence_id
@@ -1342,6 +1372,16 @@ class ConnectionHandler:
         functions = None
         # 达到最大深度时，禁用工具调用，强制 LLM 直接回答
         if (
+            meeting_tool_turn
+            and hasattr(self, "func_handler")
+            and self._llm_supports_native_function_call()
+        ):
+            functions = [
+                item
+                for item in self.func_handler.get_functions()
+                if item.get("function", {}).get("name") == MEETING_PLUGIN_NAME
+            ]
+        elif (
                 self.intent_type == "function_call"
                 and hasattr(self, "func_handler")
                 and not force_final_answer
@@ -1352,6 +1392,14 @@ class ConnectionHandler:
             # 递归调用（depth>0）不注入，避免模型在生成文本回复时再次调 direct_answer 导致循环
             if functions is not None and depth == 0:
                 functions.append(DIRECT_ANSWER_TOOL)
+
+        if meeting_tool_turn and not functions:
+            appended = self._record_pending_meeting_turn("meeting_tool_unavailable")
+            self.logger.bind(tag=TAG).warning(
+                "会议已激活但主LLM不支持可用的会议function tool，"
+                f"按安全规则继续记录: utteranceCount={appended}"
+            )
+            return True
 
         # Mirror the schema actually attached to this main-LLM request. Intent-LLM
         # mode owns a separate tool prompt, and recursive final-answer turns may
@@ -1369,25 +1417,26 @@ class ConnectionHandler:
             # 是否自然称呼用户由基础提示词约束，不能通过隐藏身份事实来实现。
             speaker_for_system = None
             current_speaker = (self.current_speaker or "").strip()
-            current_speaker_key = self.current_speaker_id or current_speaker
             if current_speaker and current_speaker != "未知说话人":
                 speaker_for_system = current_speaker
-                if current_speaker_key not in self.system_introduced_speakers:
-                    self.system_introduced_speakers.add(current_speaker_key)
 
             llm_dialogue = self.dialogue.get_llm_dialogue_with_memory(
                 memory_str,
                 self.config.get("voiceprint", {}),
                 speaker_for_system,
+                self.current_speaker_id,
             )
             llm_dialogue = self._with_freeform_game_prompt(
                 llm_dialogue, freeform_game_prompt
             )
             llm_dialogue = self._with_music_library_context(llm_dialogue)
+            llm_dialogue = self._with_meeting_runtime_context(llm_dialogue)
 
             llm_started_at = time.monotonic()
             self.session_telemetry.metrics.record_llm_started()
-            tools_enabled = self.intent_type == "function_call" and functions is not None
+            tools_enabled = functions is not None and (
+                self.intent_type == "function_call" or meeting_tool_turn
+            )
             if tools_enabled:
                 # 使用支持functions的streaming接口
                 llm_responses = self.llm.response_with_functions(
@@ -1416,6 +1465,9 @@ class ConnectionHandler:
                     time.monotonic() - llm_started_at
                 )
             self.logger.bind(tag=TAG).error(f"LLM 处理出错 {query}: {e}")
+            if meeting_tool_turn:
+                self._record_pending_meeting_turn("meeting_llm_request_error")
+                return True
             return None
 
         # 处理流式响应
@@ -1424,7 +1476,7 @@ class ConnectionHandler:
         tool_calls_list = []  # 格式: [{"id": "", "name": "", "arguments": ""}]
         content_arguments = ""
         unhandled_tool_protocol = False
-        emotion_flag = True
+        emotion_flag = not meeting_tool_turn
         defer_plain_content_for_tools = (
             self.intent_type == "function_call" and functions is not None
         )
@@ -1483,7 +1535,11 @@ class ConnectionHandler:
 
                     # 流式提取 direct_answer 的 response 参数，实时送 TTS
                     for tc in tool_calls_list:
-                        if tc["name"] == "direct_answer" and tc.get("arguments"):
+                        if (
+                            not meeting_tool_turn
+                            and tc["name"] == "direct_answer"
+                            and tc.get("arguments")
+                        ):
                             da_text = self._extract_direct_answer_response(tc["arguments"])
                             sent_len = tc.get("_da_sent", 0)
                             if da_text and len(da_text) > sent_len:
@@ -1528,6 +1584,9 @@ class ConnectionHandler:
                 time.monotonic() - llm_started_at
             )
             self.logger.bind(tag=TAG).error(f"LLM stream processing error: {e}")
+            if meeting_tool_turn:
+                self._record_pending_meeting_turn("meeting_llm_stream_error")
+                return True
             self.tts.tts_text_queue.put(
                 TTSMessageDTO(
                     sentence_id=current_sentence_id,
@@ -1570,6 +1629,8 @@ class ConnectionHandler:
                         f"LLM流式响应被打断，丢弃部分文本(不写入对话历史): "
                         f"{interrupted_text[:80]}..."
                     )
+            if meeting_tool_turn:
+                self._record_pending_meeting_turn("meeting_turn_aborted")
             return
         # 处理function call
         if tool_call_flag:
@@ -1578,14 +1639,15 @@ class ConnectionHandler:
             if unhandled_tool_protocol:
                 bHasError = True
                 response_message.clear()
-                self.tts.tts_text_queue.put(
-                    TTSMessageDTO(
-                        sentence_id=current_sentence_id,
-                        sentence_type=SentenceType.MIDDLE,
-                        content_type=ContentType.TEXT,
-                        content_detail="这个工具调用没有按正确格式返回，我先不执行。",
+                if not meeting_tool_turn:
+                    self.tts.tts_text_queue.put(
+                        TTSMessageDTO(
+                            sentence_id=current_sentence_id,
+                            sentence_type=SentenceType.MIDDLE,
+                            content_type=ContentType.TEXT,
+                            content_detail="这个工具调用没有按正确格式返回，我先不执行。",
+                        )
                     )
-                )
                 self.logger.bind(tag=TAG).error(
                     f"unsupported tool protocol from LLM: {_sanitize_log_text(content_arguments)}"
                 )
@@ -1610,14 +1672,15 @@ class ConnectionHandler:
                     bHasError = True
                 if bHasError:
                     response_message.clear()
-                    self.tts.tts_text_queue.put(
-                        TTSMessageDTO(
-                            sentence_id=current_sentence_id,
-                            sentence_type=SentenceType.MIDDLE,
-                            content_type=ContentType.TEXT,
-                            content_detail="这个工具调用没有按正确格式返回，我先不执行。",
+                    if not meeting_tool_turn:
+                        self.tts.tts_text_queue.put(
+                            TTSMessageDTO(
+                                sentence_id=current_sentence_id,
+                                sentence_type=SentenceType.MIDDLE,
+                                content_type=ContentType.TEXT,
+                                content_detail="这个工具调用没有按正确格式返回，我先不执行。",
+                            )
                         )
-                    )
                     self.logger.bind(tag=TAG).error(
                         f"function call error: {_sanitize_log_text(content_arguments)}"
                     )
@@ -1626,6 +1689,13 @@ class ConnectionHandler:
                 # 处理 direct_answer 虚拟工具
                 direct_answer_calls = [tc for tc in tool_calls_list if tc["name"] == "direct_answer"]
                 real_tool_calls = [tc for tc in tool_calls_list if tc["name"] != "direct_answer"]
+
+                if meeting_tool_turn and direct_answer_calls:
+                    self.logger.bind(tag=TAG).warning(
+                        "会议激活期间主LLM返回了未提供的 direct_answer，已丢弃并继续记录"
+                    )
+                    direct_answer_calls = []
+                    tool_calls_list = real_tool_calls
 
                 if direct_answer_calls:
                     self.logger.bind(tag=TAG).debug(
@@ -1739,7 +1809,16 @@ class ConnectionHandler:
                         streamed_text=streamed_text,
                         sentence_id=current_sentence_id,
                         abort_generation=current_abort_generation,
+                        suppress_tts=meeting_tool_turn,
                     )
+
+        if meeting_tool_turn:
+            if response_message or content_arguments:
+                self.logger.bind(tag=TAG).warning(
+                    "会议激活期间主LLM未返回有效会议工具调用，丢弃普通文本并继续记录"
+                )
+            self._record_pending_meeting_turn("meeting_tool_not_called")
+            return True
 
         # 存储对话内容
         if len(response_message) > 0:
@@ -1821,6 +1900,28 @@ class ConnectionHandler:
         messages.insert(insert_at, {"role": "system", "content": context})
         return messages
 
+    def _with_meeting_runtime_context(self, llm_dialogue):
+        context = build_meeting_runtime_context(self)
+        messages = list(llm_dialogue)
+        insert_at = len(messages)
+        for index in range(len(messages) - 1, -1, -1):
+            if messages[index].get("role") == "user":
+                insert_at = index
+                break
+        messages.insert(insert_at, {"role": "system", "content": context})
+        return messages
+
+    def _record_pending_meeting_turn(self, reason):
+        meeting = getattr(self, "meeting_minutes", None)
+        if meeting is None or not meeting.has_pending_turn():
+            return 0
+        appended = meeting.record_pending_turn()
+        self.logger.bind(tag=TAG).info(
+            f"会议主LLM工具安全回退继续记录: reason={reason}, "
+            f"utteranceCount={appended}"
+        )
+        return appended
+
     def _get_enabled_plugin_configs(self):
         plugins = self.config.get("plugins", {})
         if not isinstance(plugins, dict):
@@ -1895,6 +1996,7 @@ class ConnectionHandler:
         streamed_text="",
         sentence_id=None,
         abort_generation=None,
+        suppress_tts=False,
     ):
         if abort_generation is None:
             abort_generation = self.abort_generation
@@ -1916,7 +2018,9 @@ class ConnectionHandler:
                 Action.ERROR,
             ]:
                 text = result.response if result.response else result.result
-                if streamed_text and text in streamed_text:
+                if suppress_tts:
+                    self.dialogue.put(Message(role="assistant", content=text))
+                elif streamed_text and text in streamed_text:
                     self.logger.bind(tag=TAG).debug(
                         f"Skipping duplicate TTS for tool {tool_call_data['name']}, already streamed"
                     )
@@ -1928,7 +2032,8 @@ class ConnectionHandler:
                         sentence_id=sentence_id,
                     )
                     self.tts.store_tts_text(sentence_id, text)
-                self.dialogue.put(Message(role="assistant", content=text))
+                if not suppress_tts:
+                    self.dialogue.put(Message(role="assistant", content=text))
             elif result.action == Action.REQLLM:
                 need_llm_tools.append((result, tool_call_data))
             elif result.action == Action.RECORD:
