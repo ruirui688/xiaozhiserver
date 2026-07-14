@@ -55,6 +55,7 @@ import xiaozhi.modules.memory.entity.MemorySessionStateEntity;
 import xiaozhi.modules.memory.entity.MemorySourceEventEntity;
 import xiaozhi.modules.memory.service.impl.maintenance.MemoryMaintenanceOutputParser;
 import xiaozhi.modules.memory.service.impl.maintenance.MemorySpeakerConversationBuilder;
+import xiaozhi.modules.memory.service.MemorySettingsService;
 import xiaozhi.modules.memory.vo.MemoryQueryVO;
 import xiaozhi.modules.memory.vo.MemoryRebuildResultVO;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
@@ -83,6 +84,7 @@ class MemoryServiceImplTest {
     private final ModelRuntimeAssembler modelRuntimeAssembler = mock(ModelRuntimeAssembler.class);
     private final AgentChatHistoryService agentChatHistoryService = mock(AgentChatHistoryService.class);
     private final TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
+    private final MemorySettingsService memorySettingsService = mock(MemorySettingsService.class);
 
     private MemoryServiceImpl memoryService;
     private MemoryMaintenanceServiceImpl memoryMaintenanceService;
@@ -96,9 +98,7 @@ class MemoryServiceImplTest {
                 tombstoneDao,
                 deviceDao,
                 agentDao,
-                llmService,
-                modelConfigService,
-                modelRuntimeAssembler);
+                memorySettingsService);
         memoryMaintenanceService = new MemoryMaintenanceServiceImpl(
                 sourceEventDao,
                 candidateDao,
@@ -114,7 +114,8 @@ class MemoryServiceImplTest {
                 agentChatHistoryService,
                 new MemoryMaintenanceOutputParser(),
                 new MemorySpeakerConversationBuilder(),
-                transactionTemplate);
+                transactionTemplate,
+                memorySettingsService);
         memoryService = new MemoryServiceImpl(
                 sourceEventDao,
                 candidateDao,
@@ -127,7 +128,8 @@ class MemoryServiceImplTest {
                 deviceDao,
                 agentDao,
                 memoryQueryService,
-                memoryMaintenanceService);
+                memoryMaintenanceService,
+                memorySettingsService);
 
         AgentEntity agent = new AgentEntity();
         agent.setId(AGENT_ID);
@@ -141,6 +143,7 @@ class MemoryServiceImplTest {
         JSONObject memoryConfig = new JSONObject();
         memoryConfig.set("maintenance_llm", MAINTENANCE_MODEL_ID);
         when(modelRuntimeAssembler.buildTypedConfig(memoryModel)).thenReturn(memoryConfig);
+        when(memorySettingsService.activeContextMaxChars()).thenReturn(1000);
 
         when(agentChatHistoryService.getSessionListByAgentId(any())).thenReturn(new PageData<>(List.of(session("s1")), 1));
         when(agentChatHistoryService.getChatHistoryBySessionId(eq(AGENT_ID), eq("s1"))).thenReturn(List.of(
@@ -862,8 +865,8 @@ class MemoryServiceImplTest {
     }
 
     @Test
-    void maintenanceRejectsAddWhenAgentCapacityWouldExceed2000WithoutEviction() {
-        MemoryFactEntity existing = activeFact("memory-full", "旧".repeat(1990));
+    void maintenanceRejectsAddWhenAgentCapacityWouldExceedLimitWithoutEviction() {
+        MemoryFactEntity existing = activeFact("memory-full", "旧".repeat(990));
         when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(existing));
         stubEventMaintenanceDecision(addDecision("新".repeat(20), ""));
 
@@ -875,8 +878,8 @@ class MemoryServiceImplTest {
 
     @Test
     void maintenanceArchivesModelSelectedFactBeforeAddingWithinAgentCapacity() {
-        MemoryFactEntity important = activeFact("memory-important", "重".repeat(1500));
-        MemoryFactEntity expendable = activeFact("memory-expendable", "旧".repeat(490));
+        MemoryFactEntity important = activeFact("memory-important", "重".repeat(750));
+        MemoryFactEntity expendable = activeFact("memory-expendable", "旧".repeat(240));
         when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(important, expendable));
         stubEventMaintenanceDecision(addDecision("新".repeat(100), "\"memory-expendable\""));
 
@@ -892,7 +895,7 @@ class MemoryServiceImplTest {
 
     @Test
     void maintenanceRejectsHallucinatedCapacityEvictionWithoutPartialArchive() {
-        MemoryFactEntity existing = activeFact("memory-real", "旧".repeat(1990));
+        MemoryFactEntity existing = activeFact("memory-real", "旧".repeat(990));
         when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(existing));
         stubEventMaintenanceDecision(addDecision("新".repeat(20), "\"memory-invented\""));
 
@@ -904,7 +907,7 @@ class MemoryServiceImplTest {
 
     @Test
     void maintenanceRejectsInsufficientCapacityEvictionWithoutPartialArchive() {
-        MemoryFactEntity large = activeFact("memory-large", "旧".repeat(1985));
+        MemoryFactEntity large = activeFact("memory-large", "旧".repeat(985));
         MemoryFactEntity tooSmall = activeFact("memory-small", "小".repeat(5));
         when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(large, tooSmall));
         stubEventMaintenanceDecision(addDecision("新".repeat(20), "\"memory-small\""));
@@ -918,8 +921,8 @@ class MemoryServiceImplTest {
 
     @Test
     void maintenanceUpdateCanEvictAnotherFactButNeverItsOwnTarget() {
-        MemoryFactEntity target = activeFact("memory-target", "目".repeat(1000));
-        MemoryFactEntity expendable = activeFact("memory-expendable", "旧".repeat(990));
+        MemoryFactEntity target = activeFact("memory-target", "目".repeat(500));
+        MemoryFactEntity expendable = activeFact("memory-expendable", "旧".repeat(490));
         when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(target, expendable));
         when(factDao.selectOne(any(Wrapper.class))).thenReturn(target, (MemoryFactEntity) null);
         String decision = """
@@ -928,27 +931,27 @@ class MemoryServiceImplTest {
                 "category":"动态分类","canonical_text":"%s","confidence":0.9,
                 "importance":0.9,"memory_tier":"long_term","sensitivity":"normal",
                 "reason":"新事实更完整"}
-                """.formatted("新".repeat(1100));
+                """.formatted("新".repeat(600));
         stubEventMaintenanceDecision(decision);
 
         runMaintenanceForEvent("更新旧记忆并选择性遗忘");
 
         assertEquals("active", target.getStatus());
-        assertEquals(1100, target.getCanonicalText().length());
+        assertEquals(600, target.getCanonicalText().length());
         assertEquals("archived", expendable.getStatus());
         verify(factDao, times(2)).updateById(any(MemoryFactEntity.class));
     }
 
     @Test
-    void manualCreateAlsoRejectsAgentCapacityOver2000() {
+    void manualCreateAlsoRejectsAgentCapacityOverLimit() {
         when(factDao.selectList(any(Wrapper.class))).thenReturn(
-                List.of(activeFact("memory-full", "旧".repeat(1995))));
+                List.of(activeFact("memory-full", "旧".repeat(995))));
         xiaozhi.modules.memory.dto.MemoryFactDTO dto = new xiaozhi.modules.memory.dto.MemoryFactDTO();
         dto.setCanonicalText("新".repeat(10));
 
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
                 () -> memoryService.createFact(AGENT_ID, dto, "user", "tester"));
-        assertTrue(error.getMessage().contains("2000"));
+        assertTrue(error.getMessage().contains("1000"));
 
         verify(factDao, never()).insert(any(MemoryFactEntity.class));
     }

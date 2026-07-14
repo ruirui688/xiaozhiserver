@@ -192,6 +192,11 @@ public interface Constant {
     String MEMORY_MANAGED_MEMORY = "Memory_managed_memory";
 
     /**
+     * 托管记忆 active 总容量和运行时注入上下文上限
+     */
+    String MEMORY_ACTIVE_CONTEXT_MAX_CHARS = "memory.active_context_max_chars";
+
+    /**
      * 火山引擎双声道语音克隆
      */
     String VOICE_CLONE_HUOSHAN_DOUBLE_STREAM = "huoshan_double_stream";
