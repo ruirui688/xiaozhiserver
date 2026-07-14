@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
@@ -118,13 +119,13 @@ class VoiceprintApiClientTest {
                         "voice-6",
                         "用户A",
                         "描述",
-                        List.of(audioResource(), audioResource())));
+                        audioResource()));
         assertEquals(ErrorCode.AGENT_VOICEPRINT_LIMIT_REACHED, error.getCode());
     }
 
     @Test
     @SuppressWarnings({"rawtypes", "unchecked"})
-    void registerSendsMultipleFilesAndSpeakerMetadata() {
+    void registerSendsSingleFileAndReturnsQualityReport() {
         RestTemplate restTemplate = mock(RestTemplate.class);
         VoiceprintApiClient client = new VoiceprintApiClient(restTemplate, configuredParams());
 
@@ -133,14 +134,15 @@ class VoiceprintApiClientTest {
                 eq(HttpMethod.POST),
                 any(HttpEntity.class),
                 eq(String.class)))
-                .thenReturn(ResponseEntity.ok("{\"success\":true}"));
+                .thenReturn(ResponseEntity.ok(
+                        "{\"success\":true,\"quality\":{\"score\":0.86,\"level\":\"good\"}}"));
 
-        client.registerVoiceprint(
+        Map<String, Object> result = client.registerVoiceprint(
                 "agent-a",
                 "voice-1",
                 "用户A",
                 "你的主人",
-                List.of(audioResource(), audioResource()));
+                audioResource());
 
         ArgumentCaptor<HttpEntity> entityCaptor = ArgumentCaptor.forClass(HttpEntity.class);
         org.mockito.Mockito.verify(restTemplate).exchange(
@@ -154,7 +156,10 @@ class VoiceprintApiClientTest {
         assertEquals("voice-1", body.getFirst("speaker_id"));
         assertEquals("用户A", body.getFirst("speaker_name"));
         assertEquals("你的主人", body.getFirst("speaker_description"));
-        assertEquals(2, body.get("files").size());
+        assertEquals("voiceprint.wav", ((ByteArrayResource) body.getFirst("file")).getFilename());
+        assertEquals(null, body.get("files"));
+        assertEquals(true, result.get("success"));
+        assertEquals("good", ((Map<String, Object>) result.get("quality")).get("level"));
     }
 
     private SysParamsService configuredParams() {

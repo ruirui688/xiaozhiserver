@@ -35,7 +35,7 @@
         </el-form-item>
 
         <el-form-item v-if="!form.id" :label="$t('voicePrintDialog.requiredSamples')" class="form-item">
-          <el-input-number v-model="requiredSamples" :min="minSamples" :max="maxSamples" size="mini"></el-input-number>
+          <div class="single-sample-value">{{ $t('voicePrintDialog.singleSampleValue') }}</div>
         </el-form-item>
 
         <div v-if="!form.id" class="sample-text-panel">
@@ -56,7 +56,7 @@
           <el-progress :percentage="enrollmentProgress" :status="enrollmentProgressStatus"></el-progress>
 
           <div class="sample-row">
-            <span>{{ $t('voicePrintDialog.collectedSamples', { count: collectedCount, min: requiredSamples, max: maxSamples }) }}</span>
+            <span>{{ $t('voicePrintDialog.collectedSamples', { count: collectedCount, total: requiredSamples }) }}</span>
             <span v-if="enrollmentId" class="task-id">{{ $t('voicePrintDialog.taskId') }} {{ enrollmentId }}</span>
           </div>
 
@@ -137,7 +137,7 @@ export default {
       dialogKey: Date.now(),
       saving: false,
       deviceId: '',
-      requiredSamples: 3,
+      requiredSamples: 1,
       enrollmentId: '',
       enrollmentStatus: 'idle',
       enrollmentProgress: 0,
@@ -146,8 +146,8 @@ export default {
       completingEnrollment: false,
       enrollmentUnsupported: false,
       pollingTimer: null,
-      minSamples: 2,
-      maxSamples: 5,
+      minSamples: 1,
+      maxSamples: 1,
       rules: {
         introduce: [
           { required: true, message: '请输入描述', trigger: "blur" }
@@ -198,7 +198,9 @@ export default {
       return undefined;
     },
     canCompleteEnrollment() {
-      return Boolean(this.enrollmentId) && this.collectedCount >= this.requiredSamples && !this.completingEnrollment;
+      return Boolean(this.enrollmentId)
+        && ['collecting', 'ready'].includes(this.enrollmentStatus)
+        && !this.completingEnrollment;
     },
     primarySubmitText() {
       if (!this.form.id) {
@@ -249,6 +251,30 @@ export default {
       this.enrollmentStatus = 'failed';
       this.enrollmentProgress = 0;
       this.stopPolling();
+    },
+    extractResponseMessage(error, fallback) {
+      return (error && error.data && (error.data.msg || error.data.message))
+        || (error && (error.msg || error.message))
+        || fallback;
+    },
+    formatRegistrationResult(result) {
+      const quality = result && result.quality;
+      if (!quality) {
+        return this.$t('voicePrintDialog.completeSuccess');
+      }
+      const parts = [];
+      if (quality.score !== undefined && quality.score !== null) {
+        parts.push(`质量分 ${quality.score}`);
+      }
+      if (quality.level) {
+        parts.push(`等级 ${quality.level}`);
+      }
+      if (quality.effective_speech_seconds !== undefined && quality.effective_speech_seconds !== null) {
+        parts.push(`有效语音 ${quality.effective_speech_seconds}s`);
+      }
+      return parts.length
+        ? `${this.$t('voicePrintDialog.completeSuccess')}，${parts.join('，')}`
+        : this.$t('voicePrintDialog.completeSuccess');
     },
     startEnrollment() {
       this.validateBasicFields(() => {
@@ -320,7 +346,8 @@ export default {
           this.completingEnrollment = false;
           if (data.code === 0 || data.code === undefined) {
             this.stopPolling();
-            this.$message.success(this.$t('voicePrintDialog.completeSuccess'));
+            const result = data.data && data.data.registrationResult;
+            this.$message.success(this.formatRegistrationResult(result));
             this.$emit('submit', {
               form: {
                 ...this.form,
@@ -332,9 +359,10 @@ export default {
           } else {
             this.$message.error(data.msg || this.$t('voicePrintDialog.completeFailed'));
           }
-        }, () => {
+        }, (err) => {
           this.completingEnrollment = false;
-          this.$message.warning(this.$t('voicePrintDialog.enrollmentUnavailable'));
+          this.enrollmentStatus = 'failed';
+          this.$message.error(this.extractResponseMessage(err, this.$t('voicePrintDialog.completeFailed')));
         });
       });
     },
@@ -367,7 +395,7 @@ export default {
     },
     resetEnrollmentState() {
       this.deviceId = this.devices.length === 1 ? this.devices[0].deviceId : '';
-      this.requiredSamples = 3;
+      this.requiredSamples = 1;
       this.enrollmentId = '';
       this.enrollmentStatus = 'idle';
       this.enrollmentProgress = 0;
@@ -527,6 +555,14 @@ export default {
           font-weight: 400;
         }
       }
+    }
+
+    .single-sample-value {
+      height: 42px;
+      display: flex;
+      align-items: center;
+      color: #334155;
+      font-size: 14px;
     }
 
     .custom-textarea {

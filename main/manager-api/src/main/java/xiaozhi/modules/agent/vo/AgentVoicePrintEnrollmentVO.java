@@ -2,6 +2,7 @@ package xiaozhi.modules.agent.vo;
 
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 
 import lombok.Data;
 
@@ -18,6 +19,7 @@ public class AgentVoicePrintEnrollmentVO {
     private Integer sampleCount;
     private Integer collectedCount;
     private Integer progress;
+    private Map<String, Object> registrationResult;
     private Date createDate;
     private Date updateDate;
     private List<AgentVoicePrintEnrollmentSampleVO> samples;

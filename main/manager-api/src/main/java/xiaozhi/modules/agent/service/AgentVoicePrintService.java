@@ -2,6 +2,7 @@ package xiaozhi.modules.agent.service;
 
 import java.util.List;
 
+import xiaozhi.modules.agent.dto.AgentVoicePrintRegistrationResult;
 import xiaozhi.modules.agent.dto.AgentVoicePrintSaveDTO;
 import xiaozhi.modules.agent.dto.AgentVoicePrintUpdateDTO;
 import xiaozhi.modules.agent.vo.AgentVoicePrintVO;
@@ -27,6 +28,14 @@ public interface AgentVoicePrintService {
      * @return 新声纹ID
      */
     String insertAndReturnId(AgentVoicePrintSaveDTO dto);
+
+    /**
+     * 添加声纹并返回本地ID与远端注册质量报告。
+     *
+     * @param dto 保存智能体声纹的数据
+     * @return 注册结果
+     */
+    AgentVoicePrintRegistrationResult insertAndReturnRegistration(AgentVoicePrintSaveDTO dto);
 
     /**
      * 删除智能体的指的声纹

@@ -24,6 +24,7 @@ import xiaozhi.common.utils.MessageUtils;
 import xiaozhi.modules.agent.dao.AgentVoicePrintEnrollmentDao;
 import xiaozhi.modules.agent.dao.AgentVoicePrintEnrollmentSampleDao;
 import xiaozhi.modules.agent.dto.AgentVoicePrintEnrollmentSampleDTO;
+import xiaozhi.modules.agent.dto.AgentVoicePrintRegistrationResult;
 import xiaozhi.modules.agent.dto.AgentVoicePrintSaveDTO;
 import xiaozhi.modules.agent.entity.AgentVoicePrintEnrollmentEntity;
 import xiaozhi.modules.agent.entity.AgentVoicePrintEnrollmentSampleEntity;
@@ -76,15 +77,41 @@ class AgentVoicePrintEnrollmentServiceImplTest {
         when(enrollmentDao.selectById("enroll-a")).thenReturn(collecting, completed);
         when(sampleDao.selectList(any(Wrapper.class))).thenReturn(List.of(sample("audio-a"), sample("audio-b")));
         when(enrollmentDao.update(any(), any(Wrapper.class))).thenReturn(1);
-        when(voicePrintService.insertAndReturnId(any(AgentVoicePrintSaveDTO.class))).thenReturn("voice-a");
+        when(voicePrintService.insertAndReturnRegistration(any(AgentVoicePrintSaveDTO.class)))
+                .thenReturn(new AgentVoicePrintRegistrationResult("voice-a", java.util.Map.of("success", true)));
 
-        service.complete("enroll-a");
+        var result = service.complete("enroll-a");
 
         ArgumentCaptor<AgentVoicePrintSaveDTO> captor = ArgumentCaptor.forClass(AgentVoicePrintSaveDTO.class);
-        verify(voicePrintService).insertAndReturnId(captor.capture());
+        verify(voicePrintService).insertAndReturnRegistration(captor.capture());
         assertEquals("agent-a", captor.getValue().getAgentId());
         assertEquals("用户A", captor.getValue().getSourceName());
         assertEquals(List.of("audio-a", "audio-b"), captor.getValue().getAudioIds());
+        assertEquals(true, result.getRegistrationResult().get("success"));
+    }
+
+    @Test
+    void completeRegistersVoicePrintWithSingleCollectedAudioId() {
+        AgentVoicePrintEnrollmentEntity collecting = enrollment("enroll-a", "agent-a",
+                AgentVoicePrintEnrollmentServiceImpl.STATUS_COLLECTING);
+        collecting.setRequiredSamples(1);
+        AgentVoicePrintEnrollmentEntity completed = enrollment("enroll-a", "agent-a",
+                AgentVoicePrintEnrollmentServiceImpl.STATUS_COMPLETED);
+        completed.setVoicePrintId("voice-a");
+        when(enrollmentDao.selectById("enroll-a")).thenReturn(collecting, completed);
+        when(sampleDao.selectList(any(Wrapper.class))).thenReturn(List.of(sample("audio-a")));
+        when(enrollmentDao.update(any(), any(Wrapper.class))).thenReturn(1);
+        when(voicePrintService.insertAndReturnRegistration(any(AgentVoicePrintSaveDTO.class)))
+                .thenReturn(new AgentVoicePrintRegistrationResult(
+                        "voice-a",
+                        java.util.Map.of("quality", java.util.Map.of("score", 0.86, "level", "good"))));
+
+        var result = service.complete("enroll-a");
+
+        ArgumentCaptor<AgentVoicePrintSaveDTO> captor = ArgumentCaptor.forClass(AgentVoicePrintSaveDTO.class);
+        verify(voicePrintService).insertAndReturnRegistration(captor.capture());
+        assertEquals(List.of("audio-a"), captor.getValue().getAudioIds());
+        assertEquals("good", ((java.util.Map<?, ?>) result.getRegistrationResult().get("quality")).get("level"));
     }
 
     @Test
