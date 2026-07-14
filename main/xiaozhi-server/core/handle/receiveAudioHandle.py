@@ -49,14 +49,6 @@ async def handleAudioMessage(conn: "ConnectionHandler", audio):
             if hasattr(logger, "debug"):
                 logger.debug(f"记录VAD指标失败: {e}")
     update_voice_activity(conn, have_voice)
-    voiceprint_provider = getattr(conn, "voiceprint_provider", None)
-    if voiceprint_provider is not None:
-        voiceprint_provider.feed_audio_frame(
-            audio,
-            have_voice,
-            conn.audio_format,
-            conn.session_id,
-        )
     # 接收音频
     await conn.asr.receive_audio(conn, audio, have_voice)
 

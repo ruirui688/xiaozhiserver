@@ -147,11 +147,6 @@ public interface Constant {
     String SERVER_VOICEPRINT_TOKEN = "server.voiceprint_token";
 
     /**
-     * 声纹识别采样时长
-     */
-    String SERVER_VOICEPRINT_SAMPLE_SECONDS = "server.voiceprint_sample_seconds";
-
-    /**
      * Silero VAD 语音开始阈值
      */
     String SERVER_VAD_THRESHOLD = "server.vad_threshold";

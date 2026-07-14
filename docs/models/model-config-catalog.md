@@ -435,7 +435,6 @@ voiceprint
 server.voice_print
 server.voiceprint_token
 server.voiceprint_similarity_threshold
-server.voiceprint_sample_seconds
 ai_agent_voice_print
 ```
 
@@ -447,16 +446,16 @@ token
 user_id
 speakers
 similarity_threshold
-sample_seconds
 timeout_seconds
 ```
 
 标准归类原则：
 
 - 声纹不是 ASR；它依赖音频输入，但输出说话人身份。
-- 声纹服务地址、阈值和采样时长属于系统能力配置；说话人注册数据属于业务数据，不进入模型配置表。
+- 声纹服务地址和阈值属于系统能力配置；说话人注册数据属于业务数据，不进入模型配置表。
 - `server.voiceprint_token` 是敏感系统参数，只通过 Bearer Header 下发和调用，禁止进入 URL 或日志。
 - 全模块部署以智能体 ID 作为远程 `user_id`，每个智能体最多 5 条；历史数据用 `remote_user_id=default` 兼容。
+- `server.voiceprint_sample_seconds` 是旧版“前 N 秒采样”链路的历史参数；新版实时识别对齐官方上游，VAD 句末上传整段语音 WAV，该参数不再下发也不再影响运行时。
 - 如果后续纳入模型配置，建议新增 `model_type = Voiceprint`，不要复用 `ASR`。
 - `speakers` 是环境或业务配置，不能把真实人员身份、描述和私有声纹数据写入默认配置。
 
@@ -753,7 +752,6 @@ server.vision_explain
 server.voice_print
 server.voiceprint_token
 server.voiceprint_similarity_threshold
-server.voiceprint_sample_seconds
 manager-api.url
 manager-api.secret
 ```

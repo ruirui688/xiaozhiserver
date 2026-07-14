@@ -1,17 +1,14 @@
 import asyncio
-import io
 import ipaddress
 import math
 import socket
 import time
-import wave
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse, urlunparse
 
 import aiohttp
-import opuslib_next
 
 from config.logger import setup_logging
 
@@ -40,19 +37,6 @@ class VoiceprintProvider:
         self.timeout_seconds = self._bounded_float(
             config.get("timeout_seconds", 5), 0.5, 30.0, 5.0
         )
-        self.sample_seconds = self._bounded_float(
-            config.get("sample_seconds", 1.0), 0.5, 5.0, 1.0
-        )
-        result_wait_ms = self._bounded_float(
-            config.get("result_wait_ms", 300), 0.0, 5000.0, 300.0
-        )
-        self.result_wait_seconds = result_wait_ms / 1000.0
-        self._sample_target_bytes = int(self.sample_seconds * 16000 * 2)
-        self._sample_target_bytes -= self._sample_target_bytes % 2
-        self._sample_pcm = bytearray()
-        self._sample_decoder = None
-        self._prefetch_task: Optional[asyncio.Task] = None
-        self._prefetch_started_at = 0.0
         self._http_session: Optional[aiohttp.ClientSession] = None
 
         self.api_key = str(config.get("token") or config.get("api_key") or "").strip()
@@ -78,8 +62,7 @@ class VoiceprintProvider:
                 f"API={self.api_url}, 说话人={len(self.speaker_map)}个, "
                 f"作用域={len(self.candidates_by_user)}个, "
                 f"相似度阈值={self.similarity_threshold}, "
-                f"采样时长={self.sample_seconds:.2f}s, "
-                f"句末等待={self.result_wait_seconds:.3f}s"
+                f"超时={self.timeout_seconds:.2f}s"
             )
         else:
             logger.bind(tag=TAG).warning(
@@ -198,133 +181,9 @@ class VoiceprintProvider:
             )
             return None
 
-    def feed_audio_frame(
-        self,
-        audio_data: bytes,
-        audio_have_voice: bool,
-        audio_format: str,
-        session_id: str,
-    ) -> None:
-        """累计一句话前段的有效人声，达到目标时长后立即预取身份。"""
-        if not self.enabled or not audio_data or self._prefetch_task is not None:
-            return
-
-        try:
-            if audio_format == "pcm":
-                pcm_frame = bytes(audio_data)
-            else:
-                if self._sample_decoder is None:
-                    self._sample_decoder = opuslib_next.Decoder(16000, 1)
-                pcm_frame = self._sample_decoder.decode(audio_data, 960)
-        except opuslib_next.OpusError as error:
-            logger.bind(tag=TAG).debug(
-                f"声纹预取Opus解码失败: errorType={type(error).__name__}"
-            )
-            return
-        except Exception as error:
-            logger.bind(tag=TAG).warning(
-                f"声纹预取音频处理失败: errorType={type(error).__name__}"
-            )
-            return
-
-        if not audio_have_voice or not pcm_frame:
-            return
-
-        remaining = self._sample_target_bytes - len(self._sample_pcm)
-        if remaining <= 0:
-            return
-        self._sample_pcm.extend(pcm_frame[:remaining])
-        if len(self._sample_pcm) < self._sample_target_bytes:
-            return
-
-        wav_data = self._pcm_to_wav(bytes(self._sample_pcm))
-        if not wav_data:
-            self.reset_utterance(cancel_task=False)
-            return
-
-        self._sample_decoder = None
-        self._prefetch_started_at = time.monotonic()
-        self._prefetch_task = asyncio.get_running_loop().create_task(
-            self.identify_speaker(wav_data, session_id),
-            name=f"voiceprint-prefetch-{session_id}",
-        )
-        logger.bind(tag=TAG).debug(
-            f"声纹预取已启动: sample_seconds={self.sample_seconds:.2f}"
-        )
-
-    async def resolve_utterance_result(self) -> Optional[VoiceprintMatch]:
-        """句末消费预取结果；短句跳过，未完成时只等待有限预算。"""
-        task = self._prefetch_task
-        if task is None:
-            sampled_seconds = len(self._sample_pcm) / (16000 * 2)
-            if sampled_seconds > 0:
-                logger.bind(tag=TAG).debug(
-                    "有效语音不足，跳过声纹识别: "
-                    f"sampled={sampled_seconds:.3f}s, required={self.sample_seconds:.3f}s"
-                )
-            self.reset_utterance(cancel_task=False)
-            return None
-
-        try:
-            if task.done():
-                result = task.result()
-            elif self.result_wait_seconds <= 0:
-                task.cancel()
-                result = None
-            else:
-                result = await asyncio.wait_for(
-                    task, timeout=self.result_wait_seconds
-                )
-            elapsed = time.monotonic() - self._prefetch_started_at
-            logger.bind(tag=TAG).debug(
-                f"声纹预取消费完成: elapsed={elapsed:.3f}s, matched={bool(result)}"
-            )
-            return result
-        except asyncio.TimeoutError:
-            logger.bind(tag=TAG).warning(
-                "声纹预取超过句末等待预算，当前轮降级为无身份: "
-                f"wait={self.result_wait_seconds:.3f}s"
-            )
-            return None
-        except asyncio.CancelledError:
-            return None
-        except Exception as error:
-            logger.bind(tag=TAG).warning(
-                f"读取声纹预取结果失败: errorType={type(error).__name__}"
-            )
-            return None
-        finally:
-            self.reset_utterance(cancel_task=not task.done())
-
     def reset_utterance(self, cancel_task: bool = True) -> None:
-        """清理当前句的采样器和预取任务。"""
-        task = self._prefetch_task
-        if cancel_task and task is not None and not task.done():
-            task.cancel()
-        self._prefetch_task = None
-        self._prefetch_started_at = 0.0
-        self._sample_pcm.clear()
-        self._sample_decoder = None
-
-    @staticmethod
-    def _pcm_to_wav(pcm_data: bytes) -> bytes:
-        if not pcm_data:
-            return b""
-        if len(pcm_data) % 2 != 0:
-            pcm_data = pcm_data[:-1]
-        wav_buffer = io.BytesIO()
-        try:
-            with wave.open(wav_buffer, "wb") as wav_file:
-                wav_file.setnchannels(1)
-                wav_file.setsampwidth(2)
-                wav_file.setframerate(16000)
-                wav_file.writeframes(pcm_data)
-            return wav_buffer.getvalue()
-        except Exception as error:
-            logger.bind(tag=TAG).warning(
-                f"声纹预取WAV转换失败: errorType={type(error).__name__}"
-            )
-            return b""
+        """兼容旧调用；声纹识别不再维护句内采样状态。"""
+        return None
 
     async def _get_http_session(self) -> aiohttp.ClientSession:
         if self._http_session is None or self._http_session.closed:
@@ -400,7 +259,6 @@ class VoiceprintProvider:
             return None
 
     async def close(self) -> None:
-        self.reset_utterance()
         if self._http_session is not None and not self._http_session.closed:
             await self._http_session.close()
         self._http_session = None
