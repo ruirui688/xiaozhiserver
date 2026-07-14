@@ -240,9 +240,13 @@ class ASRProvider(ASRProviderBase):
                                     logger.bind(tag=TAG).warning(f"发送缓存音频失败: {e}")
                                     break
                         continue
-                    elif message_name == "SentenceEnd":
+                    elif message_name in ("TranscriptionResultChanged", "SentenceEnd"):
                         # 句子结束（每个句子都会触发）
                         text = payload.get("result", "")
+                        if text:
+                            self.record_first_text_metric(conn, text)
+                        if message_name != "SentenceEnd":
+                            continue
                         if text:
                             logger.bind(tag=TAG).info(f"识别到文本: {text}")
 

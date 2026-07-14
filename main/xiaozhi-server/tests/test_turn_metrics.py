@@ -7,6 +7,8 @@ def test_asr_metrics_separate_response_tail_and_finalize_latency():
     metrics = TurnMetrics()
     for _ in range(26):
         metrics.record_vad_frame(True, 1, 20)
+    time.sleep(0.01)
+    metrics.record_asr_first_text(2)
     metrics.begin_turn([b"x"] * 26, "opus")
     time.sleep(0.01)
 
@@ -18,6 +20,9 @@ def test_asr_metrics_separate_response_tail_and_finalize_latency():
     assert asr["response_ms"] >= 10
     assert asr["total_ms"] == asr["response_ms"]
     assert asr["audio_duration_ms"] == payload["input"]["estimated_audio_duration_ms"]
+    assert asr["first_text_ms"] >= 10
+    assert asr["first_text_ms"] < asr["response_ms"]
+    assert asr["first_text_length"] == 2
     assert asr["tail_latency_ms"] == max(
         0,
         asr["response_ms"] - payload["input"]["estimated_audio_duration_ms"],

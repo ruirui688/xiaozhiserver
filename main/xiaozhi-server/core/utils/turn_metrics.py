@@ -16,6 +16,12 @@ def _elapsed_ms(started_at):
     return max(0, int((time.monotonic() - started_at) * 1000))
 
 
+def _elapsed_between_ms(started_at, ended_at):
+    if not started_at or not ended_at:
+        return None
+    return max(0, int((ended_at - started_at) * 1000))
+
+
 def _audio_duration_ms(audio_frames, audio_format):
     if not audio_frames:
         return 0
@@ -91,6 +97,7 @@ class TurnMetrics:
             estimated_audio_duration_ms = _audio_duration_ms(audio_frames, audio_format)
             speech_started_at = vad.get("speech_started_at_monotonic") or now_monotonic
             last_voice_at = vad.get("last_voice_at_monotonic")
+            first_text_at = vad.get("asr_first_text_at_monotonic")
             self._active_turn = {
                 "schema_version": 1,
                 "turn_id": turn_id,
@@ -119,6 +126,11 @@ class TurnMetrics:
                 "_runtime": {
                     "speech_started_at": speech_started_at,
                     "audio_duration_ms": estimated_audio_duration_ms,
+                    "asr_first_text_ms": _elapsed_between_ms(
+                        speech_started_at,
+                        first_text_at,
+                    ),
+                    "asr_first_text_length": vad.get("asr_first_text_length"),
                 },
                 "tokens": {},
             }
@@ -138,8 +150,28 @@ class TurnMetrics:
                     "input": {"audio_format": "text"},
                     "latency_ms": {},
                     "tokens": {},
-                }
+            }
             return self._active_turn["turn_id"]
+
+    def record_asr_first_text(self, text_length=None):
+        with self._lock:
+            now_monotonic = time.monotonic()
+            if self._active_turn is not None:
+                runtime = self._active_turn.setdefault("_runtime", {})
+                if runtime.get("asr_first_text_ms") is None:
+                    runtime["asr_first_text_ms"] = _elapsed_between_ms(
+                        runtime.get("speech_started_at"),
+                        now_monotonic,
+                    )
+                    runtime["asr_first_text_length"] = int(text_length or 0)
+                return
+
+            if self._vad_segment is None:
+                return
+            if self._vad_segment.get("asr_first_text_at_monotonic") is not None:
+                return
+            self._vad_segment["asr_first_text_at_monotonic"] = now_monotonic
+            self._vad_segment["asr_first_text_length"] = int(text_length or 0)
 
     def record_asr(self, finalize_ms, success, text_length, first_text_ms=None):
         with self._lock:
@@ -148,6 +180,11 @@ class TurnMetrics:
             runtime = self._active_turn.setdefault("_runtime", {})
             response_ms = _elapsed_ms(runtime.get("speech_started_at"))
             audio_duration_ms = runtime.get("audio_duration_ms")
+            recorded_first_text_ms = runtime.get("asr_first_text_ms")
+            if first_text_ms is None:
+                first_text_ms = recorded_first_text_ms
+            if first_text_ms is None and success:
+                first_text_ms = response_ms
             tail_latency_ms = (
                 max(0, int(response_ms) - int(audio_duration_ms or 0))
                 if response_ms is not None and audio_duration_ms is not None
@@ -160,6 +197,7 @@ class TurnMetrics:
                 "tail_latency_ms": tail_latency_ms,
                 "finalize_ms": max(0, int(finalize_ms or 0)),
                 "first_text_ms": first_text_ms,
+                "first_text_length": runtime.get("asr_first_text_length"),
                 "first_text_unavailable_reason": (
                     "chat runtime does not expose provider first partial text"
                     if first_text_ms is None

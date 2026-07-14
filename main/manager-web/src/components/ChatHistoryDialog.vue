@@ -324,9 +324,8 @@ export default {
             };
             add('音频', this.getNested(metrics, ['input', 'estimated_audio_duration_ms']));
             add('VAD', this.getNested(metrics, ['latency_ms', 'vad', 'inference_total_ms']));
-            add('ASR响应', this.getNested(metrics, ['latency_ms', 'asr', 'response_ms']));
-            add('ASR尾', this.getNested(metrics, ['latency_ms', 'asr', 'tail_latency_ms']));
-            add('ASR处理', this.getNested(metrics, ['latency_ms', 'asr', 'finalize_ms']));
+            add('ASR首段', this.getNested(metrics, ['latency_ms', 'asr', 'first_text_ms']));
+            add('ASR尾段', this.getNested(metrics, ['latency_ms', 'asr', 'tail_latency_ms']));
             add('声纹', this.getNested(metrics, ['latency_ms', 'voiceprint', 'total_ms']));
             add('LLM', this.getNested(metrics, ['latency_ms', 'llm', 'total_ms']));
             add('TTS', this.getNested(metrics, ['latency_ms', 'tts', 'total_ms']));

@@ -295,6 +295,10 @@ class ASRProvider(ASRProviderBase):
                             continue
 
                         if "result" in payload:
+                            result_body = payload["result"]
+                            partial_text = result_body.get("text")
+                            if partial_text:
+                                self.record_first_text_metric(conn, partial_text)
                             utterances = payload["result"].get("utterances", [])
                             # 检查duration和空文本的情况
                             if (
@@ -336,6 +340,7 @@ class ASRProvider(ASRProviderBase):
                             for utterance in utterances:
                                 if utterance.get("definite", False):
                                     current_text = utterance["text"]
+                                    self.record_first_text_metric(conn, current_text)
                                     normalized_utterance = _normalize_utterance(
                                         utterance
                                     )

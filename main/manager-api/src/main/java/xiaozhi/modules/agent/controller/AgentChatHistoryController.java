@@ -418,9 +418,8 @@ public class AgentChatHistoryController {
         addPart(parts, "turn_id", metrics.get("turn_id"));
         addPart(parts, "audio_duration_ms", nested(metrics, "input", "estimated_audio_duration_ms"));
         addPart(parts, "vad_ms", nested(metrics, "latency_ms", "vad", "inference_total_ms"));
-        addPart(parts, "asr_response_ms", nested(metrics, "latency_ms", "asr", "response_ms"));
+        addPart(parts, "asr_first_text_ms", nested(metrics, "latency_ms", "asr", "first_text_ms"));
         addPart(parts, "asr_tail_ms", nested(metrics, "latency_ms", "asr", "tail_latency_ms"));
-        addPart(parts, "asr_finalize_ms", nested(metrics, "latency_ms", "asr", "finalize_ms"));
         addPart(parts, "voiceprint_ms", nested(metrics, "latency_ms", "voiceprint", "total_ms"));
         addPart(parts, "llm_first_chunk_ms", nested(metrics, "latency_ms", "llm", "first_chunk_ms"));
         addPart(parts, "llm_total_ms", nested(metrics, "latency_ms", "llm", "total_ms"));
@@ -492,10 +491,8 @@ public class AgentChatHistoryController {
         Map<String, Object> assistant = turn.get("assistant_metrics") instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
         putIfNotNull(summary, "input_audio_duration_ms", nested(user, "input", "estimated_audio_duration_ms"));
         putIfNotNull(summary, "vad_inference_total_ms", nested(user, "latency_ms", "vad", "inference_total_ms"));
-        putIfNotNull(summary, "asr_response_ms", nested(user, "latency_ms", "asr", "response_ms"));
-        putIfNotNull(summary, "asr_tail_latency_ms", nested(user, "latency_ms", "asr", "tail_latency_ms"));
-        putIfNotNull(summary, "asr_finalize_ms", nested(user, "latency_ms", "asr", "finalize_ms"));
         putIfNotNull(summary, "asr_first_text_ms", nested(user, "latency_ms", "asr", "first_text_ms"));
+        putIfNotNull(summary, "asr_tail_latency_ms", nested(user, "latency_ms", "asr", "tail_latency_ms"));
         putIfNotNull(summary, "voiceprint_total_ms", nested(user, "latency_ms", "voiceprint", "total_ms"));
         putIfNotNull(summary, "llm_first_chunk_ms", nested(assistant, "latency_ms", "llm", "first_chunk_ms"));
         putIfNotNull(summary, "llm_total_ms", nested(assistant, "latency_ms", "llm", "total_ms"));
@@ -533,7 +530,7 @@ public class AgentChatHistoryController {
 
     private String buildLatencyCsv(List<Map<String, Object>> messages) {
         StringBuilder csv = new StringBuilder();
-        csv.append("session_id,turn_id,message_index,role,created_at,input_audio_duration_ms,vad_inference_total_ms,vad_segment_ms,asr_response_ms,asr_tail_latency_ms,asr_finalize_ms,asr_first_text_ms,voiceprint_total_ms,llm_first_chunk_ms,llm_total_ms,tts_first_audio_ms,tts_total_ms,prompt_tokens,completion_tokens,total_tokens,token_source\n");
+        csv.append("session_id,turn_id,message_index,role,created_at,input_audio_duration_ms,vad_inference_total_ms,vad_segment_ms,asr_first_text_ms,asr_tail_latency_ms,voiceprint_total_ms,llm_first_chunk_ms,llm_total_ms,tts_first_audio_ms,tts_total_ms,prompt_tokens,completion_tokens,total_tokens,token_source\n");
         for (Map<String, Object> message : messages) {
             Map<String, Object> metrics = message.get("raw_metrics") instanceof Map<?, ?> map
                     ? toStringKeyMap(map)
@@ -546,10 +543,8 @@ public class AgentChatHistoryController {
                     .append(csv(nested(metrics, "input", "estimated_audio_duration_ms"))).append(',')
                     .append(csv(nested(metrics, "latency_ms", "vad", "inference_total_ms"))).append(',')
                     .append(csv(nested(metrics, "latency_ms", "vad", "segment_ms"))).append(',')
-                    .append(csv(nested(metrics, "latency_ms", "asr", "response_ms"))).append(',')
-                    .append(csv(nested(metrics, "latency_ms", "asr", "tail_latency_ms"))).append(',')
-                    .append(csv(nested(metrics, "latency_ms", "asr", "finalize_ms"))).append(',')
                     .append(csv(nested(metrics, "latency_ms", "asr", "first_text_ms"))).append(',')
+                    .append(csv(nested(metrics, "latency_ms", "asr", "tail_latency_ms"))).append(',')
                     .append(csv(nested(metrics, "latency_ms", "voiceprint", "total_ms"))).append(',')
                     .append(csv(nested(metrics, "latency_ms", "llm", "first_chunk_ms"))).append(',')
                     .append(csv(nested(metrics, "latency_ms", "llm", "total_ms"))).append(',')
