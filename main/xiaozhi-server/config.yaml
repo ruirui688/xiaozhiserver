@@ -98,6 +98,15 @@ tts_audio_completion_timeout_seconds: 20
 semantic_interruption:
   timeout_seconds: 1.5
 
+# 会议模式控制语义裁决。优先使用智能体配置的 SLM，未配置时回退主 LLM。
+# 裁决失败、超时或置信度不足时继续记录，避免误结束会议。
+meeting:
+  # 单模块运行默认启用；使用智控台时由智能体是否勾选“会议纪要”功能决定。
+  enabled: true
+  entry_prompt: 已进入会议模式，我会静默记录。需要结束时，直接告诉我即可。
+  control_timeout_seconds: 1.5
+  end_confidence_threshold: 0.9
+
 # 对话历史管理
 dialogue:
   # 最大对话轮次数，0 表示不限制。超过时删除最旧的轮次

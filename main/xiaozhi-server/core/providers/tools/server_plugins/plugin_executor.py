@@ -15,6 +15,8 @@ from core.game import GameSessionManager
 class ServerPluginExecutor(ToolExecutor):
     """服务端插件工具执行器"""
 
+    CONFIG_ONLY_PLUGINS = {"meeting_minutes"}
+
     def __init__(self, conn: "ConnectionHandler"):
         self.conn = conn
         self.config = conn.config
@@ -103,7 +105,10 @@ class ServerPluginExecutor(ToolExecutor):
         )
 
         for func_name in all_required_functions:
-            if func_name in GameSessionManager.FREEFORM_GAME_TOOLS:
+            if (
+                func_name in GameSessionManager.FREEFORM_GAME_TOOLS
+                or func_name in self.CONFIG_ONLY_PLUGINS
+            ):
                 continue
 
             func_item = all_function_registry.get(func_name)

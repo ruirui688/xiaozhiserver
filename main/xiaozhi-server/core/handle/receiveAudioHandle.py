@@ -16,8 +16,10 @@ from core.utils.output_counter import check_device_output_limit
 from core.handle.sendAudioHandle import send_stt_message, SentenceType
 from core.handle.wakeupHandle import should_ignore_wakeup_audio
 from core.meeting import (
+    MeetingControlClassifier,
     extract_meeting_topic,
-    is_meeting_end_command,
+    get_meeting_entry_prompt,
+    is_meeting_mode_enabled,
     is_meeting_start_command,
 )
 from core.providers.tts.dto.dto import ContentType, TTSMessageDTO
@@ -133,32 +135,30 @@ async def startToChat(conn: "ConnectionHandler", text):
 
     meeting = getattr(conn, "meeting_minutes", None)
     if meeting is not None:
-        if is_meeting_start_command(interruption_text):
+        if is_meeting_start_command(
+            interruption_text
+        ) and is_meeting_mode_enabled(conn):
             meeting.start(extract_meeting_topic(interruption_text))
             conn.logger.bind(tag=TAG).info("已进入会议模式，后续语音将静默记录")
-            return True
-
-        if meeting.is_active() and is_meeting_end_command(interruption_text):
-            meeting.end()
-            conn.logger.bind(tag=TAG).info("会议模式已结束，开始生成会议纪要")
-            summary_prompt = meeting.build_summary_prompt()
-            transcript = meeting.build_transcript()
-            future = conn.executor.submit(
-                _generate_meeting_minutes,
-                conn,
-                summary_prompt,
-                transcript,
-            )
-            future.add_done_callback(
-                lambda f: conn.logger.bind(tag=TAG).error(
-                    f"会议纪要生成失败: {f.exception()}"
-                )
-                if f.exception()
-                else None
-            )
+            _enqueue_tts_text(conn, get_meeting_entry_prompt(conn))
             return True
 
         if meeting.is_active():
+            control = await MeetingControlClassifier().classify(
+                conn,
+                interruption_text,
+                meeting,
+            )
+            conn.logger.bind(tag=TAG).info(
+                "会议控制语义裁决: "
+                f"decision={control.decision}, "
+                f"confidence={control.confidence:.2f}, "
+                f"model={control.model_source}, "
+                f"reason={control.reason}"
+            )
+            if control.should_end:
+                _finish_meeting(conn, meeting)
+                return True
             _append_meeting_utterances(
                 conn,
                 meeting,
@@ -270,6 +270,26 @@ async def startToChat(conn: "ConnectionHandler", text):
     future = conn.executor.submit(conn.chat, actual_text)
     future.add_done_callback(lambda f: conn.logger.bind(tag=__name__).error(f"chat() failed: {f.exception()}") if f.exception() else None)
     return True
+
+
+def _finish_meeting(conn: "ConnectionHandler", meeting) -> None:
+    meeting.end()
+    conn.logger.bind(tag=TAG).info("会议模式已结束，开始生成会议纪要")
+    summary_prompt = meeting.build_summary_prompt()
+    transcript = meeting.build_transcript()
+    future = conn.executor.submit(
+        _generate_meeting_minutes,
+        conn,
+        summary_prompt,
+        transcript,
+    )
+    future.add_done_callback(
+        lambda f: conn.logger.bind(tag=TAG).error(
+            f"会议纪要生成失败: {f.exception()}"
+        )
+        if f.exception()
+        else None
+    )
 
 
 def _append_meeting_utterances(

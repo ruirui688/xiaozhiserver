@@ -15,15 +15,7 @@ START_COMMANDS = (
     "开始记录会议",
 )
 
-END_COMMANDS = (
-    "结束会议模式",
-    "退出会议模式",
-    "关闭会议模式",
-    "结束会议纪要",
-    "生成会议纪要",
-    "结束会议记录",
-    "停止会议记录",
-)
+MEETING_STARTED_PROMPT = "已进入会议模式，我会静默记录。需要结束时，直接告诉我即可。"
 
 
 @dataclass
@@ -194,11 +186,6 @@ class MeetingMinutesRuntime:
 def is_meeting_start_command(text: str) -> bool:
     normalized = _normalize_command_text(text)
     return any(command in normalized for command in START_COMMANDS)
-
-
-def is_meeting_end_command(text: str) -> bool:
-    normalized = _normalize_command_text(text)
-    return any(command in normalized for command in END_COMMANDS)
 
 
 def extract_meeting_topic(text: str) -> str:

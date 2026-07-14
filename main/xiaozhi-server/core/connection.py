@@ -148,6 +148,7 @@ class ConnectionHandler:
             _memory,
             _intent,
             server=None,
+            _slm=None,
     ):
         self.common_config = config
         self.config = copy.deepcopy(config)
@@ -218,6 +219,7 @@ class ConnectionHandler:
         self._asr = _asr
         self._vad = _vad
         self.llm = _llm
+        self.slm = _slm
         self.memory = _memory
         self.intent = _intent
 
@@ -918,7 +920,7 @@ class ConnectionHandler:
             return False
         init_vad = check_vad_update(self.common_config, private_config)
         init_asr = check_asr_update(self.common_config, private_config)
-        init_llm, init_tts, init_memory, init_intent = (
+        init_llm, init_tts, init_memory, init_intent, init_slm = (
             self._apply_private_runtime_config(private_config)
         )
 
@@ -935,13 +937,14 @@ class ConnectionHandler:
                 init_tts,
                 init_memory,
                 init_intent,
+                init_slm,
             )
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"初始化组件失败: {e}")
             modules = {}
         if self.closing:
             return False
-        for name in ("tts", "vad", "asr", "llm", "intent", "memory"):
+        for name in ("tts", "vad", "asr", "llm", "slm", "intent", "memory"):
             value = modules.get(name)
             if value is not None and not self._assign_initialized_component(name, value):
                 return False
@@ -962,6 +965,7 @@ class ConnectionHandler:
             "TTS": False,
             "Memory": False,
             "Intent": False,
+            "SLM": False,
         }
         for module_type in (
             "VAD",
@@ -1010,6 +1014,7 @@ class ConnectionHandler:
             init_flags["TTS"],
             init_flags["Memory"],
             init_flags["Intent"],
+            init_flags["SLM"],
         )
 
     def _apply_private_plugins(self, private_config):
