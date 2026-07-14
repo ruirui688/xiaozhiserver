@@ -894,6 +894,7 @@ export default {
     flex-wrap: wrap;
     gap: 4px 8px;
     margin-top: 6px;
+    padding: 0 10px;
     font-size: 11px;
     line-height: 1.4;
     color: #606266;
@@ -908,11 +909,11 @@ export default {
 
 .user-message .metrics-strip {
     justify-content: flex-end;
-    color: #e6f7ff;
+    color: #606266;
 }
 
 .user-message .metrics-strip span {
-    background: rgba(255, 255, 255, 0.18);
+    background: #f2f6fc;
 }
 
 .content-wrapper {
