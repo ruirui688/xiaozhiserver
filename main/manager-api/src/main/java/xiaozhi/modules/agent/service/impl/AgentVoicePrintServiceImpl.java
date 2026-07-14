@@ -231,6 +231,7 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
 
     private void rejectDuplicateVoiceprint(IdentifyVoicePrintResponse response, String allowedVoiceprintId) {
         if (response == null
+                || Boolean.FALSE.equals(response.getMatched())
                 || response.getScore() == null
                 || !Double.isFinite(response.getScore())
                 || response.getScore() <= DUPLICATE_RECOGNITION_THRESHOLD
