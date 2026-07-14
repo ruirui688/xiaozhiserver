@@ -45,6 +45,7 @@ import xiaozhi.modules.memory.entity.MemorySourceEventEntity;
 import xiaozhi.modules.memory.entity.MemoryToolBehaviorEntity;
 import xiaozhi.modules.memory.service.MemoryMaintenanceService;
 import xiaozhi.modules.memory.service.MemoryQueryService;
+import xiaozhi.modules.memory.service.MemorySettingsService;
 import xiaozhi.modules.memory.service.MemoryService;
 import xiaozhi.modules.memory.utils.MemoryHelper;
 import xiaozhi.modules.memory.utils.MemoryTierHelper;
@@ -72,6 +73,7 @@ public class MemoryServiceImpl implements MemoryService {
 
     private final MemoryQueryService memoryQueryService;
     private final MemoryMaintenanceService memoryMaintenanceService;
+    private final MemorySettingsService memorySettingsService;
 
     // ===================== 公开方法 — 直接实现 =====================
 
@@ -515,8 +517,10 @@ public class MemoryServiceImpl implements MemoryService {
         int replacedChars = replacedFact != null && MemoryHelper.STATUS_ACTIVE.equals(replacedFact.getStatus())
                 ? MemoryHelper.characterCount(replacedFact.getCanonicalText()) : 0;
         int projectedChars = currentChars - replacedChars + MemoryHelper.characterCount(canonicalText);
-        if (projectedChars > MemoryHelper.MAX_ACTIVE_MEMORY_CHARS) {
-            throw new IllegalArgumentException("单个智能体的生效记忆总量不能超过 2000 字符");
+        int maxActiveMemoryChars = memorySettingsService.activeContextMaxChars();
+        if (projectedChars > maxActiveMemoryChars) {
+            throw new IllegalArgumentException("单个智能体的生效记忆总量不能超过 "
+                    + maxActiveMemoryChars + " 字符，请先执行记忆审查/蒸馏或归档低价值记忆");
         }
     }
 

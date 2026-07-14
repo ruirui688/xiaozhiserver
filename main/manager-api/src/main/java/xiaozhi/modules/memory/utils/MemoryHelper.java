@@ -38,8 +38,7 @@ public class MemoryHelper {
     public static final BigDecimal MIN_AUTO_IMPORTANCE = new BigDecimal("0.350");
     public static final BigDecimal MIN_AUTO_CONFIDENCE = new BigDecimal("0.500");
     public static final int MAX_MAINTENANCE_INPUT_CHARS = 2000;
-    public static final int MAX_ACTIVE_MEMORY_CHARS = 2000;
-    public static final int MAX_RUNTIME_MEMORY_CONTEXT_CHARS = 2000;
+    public static final int DEFAULT_ACTIVE_CONTEXT_MAX_CHARS = 1000;
     public static final int SESSION_MEMORY_IDLE_SECONDS = 60;
     public static final int SESSION_MEMORY_PROCESSING_STALE_MINUTES = 5;
     public static final int SESSION_MEMORY_IDLE_BATCH_SIZE = 20;

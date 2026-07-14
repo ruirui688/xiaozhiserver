@@ -53,6 +53,7 @@ import xiaozhi.modules.memory.entity.MemorySessionStateEntity;
 import xiaozhi.modules.memory.entity.MemorySourceEventEntity;
 import xiaozhi.modules.memory.prompt.PowerMemPrompts;
 import xiaozhi.modules.memory.service.MemoryMaintenanceService;
+import xiaozhi.modules.memory.service.MemorySettingsService;
 import xiaozhi.modules.memory.service.impl.maintenance.MemoryMaintenanceOutputParser;
 import xiaozhi.modules.memory.service.impl.maintenance.MemorySpeakerConversationBuilder;
 import xiaozhi.modules.memory.service.impl.maintenance.MemorySpeakerConversationBuilder.Conversation;
@@ -88,6 +89,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
     private final MemoryMaintenanceOutputParser outputParser;
     private final MemorySpeakerConversationBuilder conversationBuilder;
     private final TransactionTemplate transactionTemplate;
+    private final MemorySettingsService memorySettingsService;
 
     // ===================== 公开方法 =====================
 
@@ -610,7 +612,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                 .replace("{existing_count}", String.valueOf(existingFacts == null ? 0 : existingFacts.size()))
                 .replace("{existing_memories}", existingBlock.toString())
                 .replace("{current_memory_chars}", String.valueOf(currentMemoryChars))
-                .replace("{max_memory_chars}", String.valueOf(MemoryHelper.MAX_ACTIVE_MEMORY_CHARS))
+                .replace("{max_memory_chars}", String.valueOf(memorySettingsService.activeContextMaxChars()))
                 .replace("{evidence_context}", StringUtils.defaultIfBlank(evidenceContext, "无可用对话证据"));
     }
 
@@ -949,10 +951,11 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                                                             String protectedMemoryId, int contentDelta,
                                                             String speakerId) {
         int projectedChars = totalMemoryChars(activeFacts) + contentDelta;
-        if (projectedChars <= MemoryHelper.MAX_ACTIVE_MEMORY_CHARS) {
+        int maxActiveMemoryChars = memorySettingsService.activeContextMaxChars();
+        if (projectedChars <= maxActiveMemoryChars) {
             return List.of();
         }
-        if (contentDelta > MemoryHelper.MAX_ACTIVE_MEMORY_CHARS) {
+        if (contentDelta > maxActiveMemoryChars) {
             return null;
         }
 
@@ -985,7 +988,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
             evictions.add(fact);
             freedChars += MemoryHelper.characterCount(fact.getCanonicalText());
         }
-        return projectedChars - freedChars <= MemoryHelper.MAX_ACTIVE_MEMORY_CHARS ? evictions : null;
+        return projectedChars - freedChars <= maxActiveMemoryChars ? evictions : null;
     }
 
     private List<MemoryFactEntity> loadActiveFactsForCapacity(String agentId) {
@@ -1009,7 +1012,8 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                 result.setFactsArchived(result.getFactsArchived() + 1);
             }
             writeRevision(fact.getAgentId(), fact.getMemoryId(), "archive_for_capacity", before,
-                    JsonUtils.toJsonString(fact), "system", modelId, "智能体 active 记忆容量超过 2000 字符");
+                    JsonUtils.toJsonString(fact), "system", modelId,
+                    "智能体 active 记忆容量超过 " + memorySettingsService.activeContextMaxChars() + " 字符");
         }
     }
 

@@ -125,13 +125,13 @@ Stage 2: 文本事实对比 + 决策
     → applyMaintenanceDecision()
       - ADD: 插入 + 去重 (SHA256 hash)
       - UPDATE: related_memory_id 必须属于候选事实和当前作用域；无效 ID 直接拒绝，不降级为 ADD
-      - 容量门控: 整个智能体的 active 事实正文合计最多 2000 字符
+      - 容量门控: 整个智能体的 active 事实正文合计默认最多 1000 字符，可通过后台参数 `memory.active_context_max_chars` 调整
       - 容量不足: 低价值信息返回 NONE；更重要的新事实可返回 evict_memory_ids
       - 选择性遗忘: 服务端校验驱逐 ID 的归属、状态和释放容量，全部通过后才归档旧事实
       - DELETE: 软删除
       - NONE: 跳过
 
-`managed_memory` 不调用 embeddings API，也不要求向量数据库。主体、对象、指代、事实方向、分类、语义等价和记忆取舍由维护 LLM 根据原始证据与已有文本事实判断，不使用业务关键词驱逐规则；服务端只执行作用域、ID、状态、容量、质量和审计门控。容量驱逐仅归档旧事实，不物理删除，归档证据不计入 2000 字符 active 容量。
+`managed_memory` 不调用 embeddings API，也不要求向量数据库。主体、对象、指代、事实方向、分类、语义等价和记忆取舍由维护 LLM 根据原始证据与已有文本事实判断，不使用业务关键词驱逐规则；服务端只执行作用域、ID、状态、容量、质量和审计门控。容量驱逐仅归档旧事实，不物理删除，归档证据不计入 active 容量。
 ```
 
 ### 4.4 记忆触发场景
@@ -151,12 +151,12 @@ Stage 2: 文本事实对比 + 决策
 MemoryQueryServiceImpl.query()
   1. 解析 scope (agent device / agent-level) 和当前声纹 speaker_id
   2. 获取用户画像
-  3. 加载当前作用域内有界的 active 文本事实，并只保留当前人物专属事实与共享事实
-  4. maintenance_llm 根据问题返回候选列表中真实的 memory_id
-  5. 服务端丢弃越界/伪造 ID，并按真实事实构建 context
+  3. 加载当前作用域内全部 active 文本事实，并只保留当前人物专属事实与共享事实
+  4. 按忘记名单过滤事实，不再调用维护 LLM 做运行时召回
+  5. 按真实事实全量构建 context
   6. 获取 tool behaviors (top 5) + forget tombstones (top 10)
 
-最终注入语音对话的记忆 context 也有 2000 字符硬上限，作为历史超限数据和其他记忆区块的防御性保护。
+最终注入语音对话的记忆 context 使用同一个 `memory.active_context_max_chars` 上限，默认 1000 字符。正常情况下 active 事实总量不会超过该值；如果历史数据或手工改参造成超限，运行时会截断并提示先在记忆管理中执行记忆审查/蒸馏，归档或合并低价值记忆。
 
 事实人物归属保存在 `ai_memory_fact.payload`：
 
