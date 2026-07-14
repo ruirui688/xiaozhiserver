@@ -332,7 +332,7 @@ export default {
                 });
             }).send();
     },
-    // 创建声纹注册采集任务。后端建议路径，未落地时前端会降级到历史语音注册。
+    // 创建设备声纹注册采集任务。
     createAgentVoicePrintEnrollment(enrollmentData, callback, failCallback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/voice-print/enrollments`)
@@ -366,7 +366,7 @@ export default {
                 failCallback && failCallback(err);
             }).send();
     },
-    // 向声纹注册采集任务追加历史语音样本。
+    // 向声纹注册采集任务追加已有语音样本。当前新增弹窗不再暴露该入口，保留接口兼容旧调用。
     appendAgentVoicePrintEnrollmentSamples(enrollmentId, sampleData, callback, failCallback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/voice-print/enrollments/${enrollmentId}/samples`)

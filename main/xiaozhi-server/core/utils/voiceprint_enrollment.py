@@ -14,6 +14,10 @@ from config.manage_api_client import (
     report_voiceprint_enrollment_sample,
 )
 
+DEFAULT_VOICEPRINT_SAMPLE_TEXT = (
+    "小智服务器正在采集我的声纹样本。今天的天气不错，我会用正常音量连续朗读这段文字，帮助系统更稳定地识别我的声音。"
+)
+
 if TYPE_CHECKING:
     from core.connection import ConnectionHandler
 
@@ -37,6 +41,7 @@ class VoiceprintEnrollmentStatus:
     introduce: str = ""
     sample_count: int = 0
     target_samples: int = 3
+    prompt_text: str = DEFAULT_VOICEPRINT_SAMPLE_TEXT
     state: str = "idle"
     reason: str = ""
     samples: List[VoiceprintEnrollmentSample] = field(default_factory=list)
@@ -50,6 +55,7 @@ class VoiceprintEnrollmentStatus:
             "introduce": self.introduce,
             "sampleCount": self.sample_count,
             "targetSamples": self.target_samples,
+            "promptText": self.prompt_text,
             "state": self.state,
             "reason": self.reason,
             "samples": [sample.__dict__ for sample in self.samples],
@@ -95,6 +101,11 @@ class VoiceprintEnrollmentCollector:
             source_name=str(options.get("source_name") or options.get("sourceName") or "").strip(),
             introduce=str(options.get("introduce") or options.get("description") or "").strip(),
             target_samples=target_samples,
+            prompt_text=str(
+                options.get("prompt_text")
+                or options.get("promptText")
+                or DEFAULT_VOICEPRINT_SAMPLE_TEXT
+            ).strip() or DEFAULT_VOICEPRINT_SAMPLE_TEXT,
             state="collecting",
         )
         return self.status.as_dict()

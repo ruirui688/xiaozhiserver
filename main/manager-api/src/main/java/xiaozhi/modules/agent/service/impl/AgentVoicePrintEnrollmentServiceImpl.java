@@ -54,6 +54,8 @@ public class AgentVoicePrintEnrollmentServiceImpl
     public static final String STATUS_COMPLETING = "COMPLETING";
     public static final String STATUS_COMPLETED = "COMPLETED";
     public static final String STATUS_CANCELLED = "CANCELLED";
+    private static final String DEFAULT_PROMPT_TEXT =
+            "小智服务器正在采集我的声纹样本。今天的天气不错，我会用正常音量连续朗读这段文字，帮助系统更稳定地识别我的声音。";
 
     private final AgentVoicePrintEnrollmentSampleDao sampleDao;
     private final AgentVoicePrintService agentVoicePrintService;
@@ -269,6 +271,7 @@ public class AgentVoicePrintEnrollmentServiceImpl
         payload.set("sourceName", entity.getSourceName());
         payload.set("introduce", entity.getIntroduce());
         payload.set("targetSamples", normalizeRequiredSamples(entity.getRequiredSamples()));
+        payload.set("promptText", DEFAULT_PROMPT_TEXT);
         payload.set("minDurationSeconds", 3.0);
         payload.set("maxDurationSeconds", 30.0);
         payload.set("uploadMode", "server");
