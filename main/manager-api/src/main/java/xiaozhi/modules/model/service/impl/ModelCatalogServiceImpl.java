@@ -1558,8 +1558,9 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         if (isSecretKey(key)) {
             return "password";
         }
-        if (Stream.of("threshold", "temperature", "top_p", "top_k", "max_tokens", "port", "sample_rate",
-                "volume", "speed", "pitch", "rate", "speech_rate", "loudness_rate", "end_window_size", "max_sentence_silence")
+        if (Stream.of("threshold", "threshold_low", "temperature", "top_p", "top_k", "max_tokens", "port", "sample_rate",
+                "volume", "speed", "pitch", "rate", "speech_rate", "loudness_rate", "end_window_size",
+                "max_sentence_silence", "min_silence_duration_ms")
                 .anyMatch(key::equals)) {
             return "number";
         }

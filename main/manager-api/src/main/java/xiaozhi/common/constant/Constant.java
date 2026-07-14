@@ -152,6 +152,21 @@ public interface Constant {
     String SERVER_VOICEPRINT_SAMPLE_SECONDS = "server.voiceprint_sample_seconds";
 
     /**
+     * Silero VAD 语音开始阈值
+     */
+    String SERVER_VAD_THRESHOLD = "server.vad_threshold";
+
+    /**
+     * Silero VAD 语音结束阈值
+     */
+    String SERVER_VAD_THRESHOLD_LOW = "server.vad_threshold_low";
+
+    /**
+     * Silero VAD 最小静音持续时间
+     */
+    String SERVER_VAD_MIN_SILENCE_DURATION_MS = "server.vad_min_silence_duration_ms";
+
+    /**
      * mqtt密钥
      */
     String SERVER_MQTT_SECRET = "server.mqtt_signature_key";

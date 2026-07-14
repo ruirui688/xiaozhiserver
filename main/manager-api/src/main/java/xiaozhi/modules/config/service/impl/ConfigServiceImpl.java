@@ -422,6 +422,28 @@ public class ConfigServiceImpl implements ConfigService {
         }
     }
 
+    private int readBoundedIntParam(String paramCode, int defaultValue, int minimum, int maximum) {
+        String value = sysParamsService.getValue(paramCode, true);
+        if (StringUtils.isBlank(value) || "null".equals(value)) {
+            return defaultValue;
+        }
+        try {
+            int parsed = (int) Math.round(Double.parseDouble(value));
+            return Math.min(maximum, Math.max(minimum, parsed));
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
+    }
+
+    void applyManagedVadParams(Map<String, Object> runtimeConfig) {
+        runtimeConfig.put("threshold",
+                readBoundedDoubleParam(Constant.SERVER_VAD_THRESHOLD, 0.5, 0.0, 1.0));
+        runtimeConfig.put("threshold_low",
+                readBoundedDoubleParam(Constant.SERVER_VAD_THRESHOLD_LOW, 0.3, 0.0, 1.0));
+        runtimeConfig.put("min_silence_duration_ms",
+                readBoundedIntParam(Constant.SERVER_VAD_MIN_SILENCE_DURATION_MS, 200, 100, 5000));
+    }
+
     /**
      * 构建模块配置
      * 
@@ -500,6 +522,9 @@ public class ConfigServiceImpl implements ConfigService {
                             runtimeConfig.put("resource_id", "seed-icl-1.0");
                         }
                     }
+                }
+                if ("VAD".equals(modelTypes[i]) && "silero".equals(runtimeConfig.get("type"))) {
+                    applyManagedVadParams(runtimeConfig);
                 }
                 // 如果是Intent类型，且type=intent_llm，则给他添加附加模型
                 if ("Intent".equals(modelTypes[i])) {
