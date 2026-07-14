@@ -147,11 +147,6 @@ public interface Constant {
     String SERVER_VOICEPRINT_TOKEN = "server.voiceprint_token";
 
     /**
-     * 声纹识别采样时长
-     */
-    String SERVER_VOICEPRINT_SAMPLE_SECONDS = "server.voiceprint_sample_seconds";
-
-    /**
      * mqtt密钥
      */
     String SERVER_MQTT_SECRET = "server.mqtt_signature_key";

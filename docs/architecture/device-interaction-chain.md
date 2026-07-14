@@ -132,15 +132,13 @@ providers/asr/base.py:44-59  asr_text_priority_thread（守护线程）
 ```text
 handle/receiveAudioHandle.py  handleAudioMessage()
   - 完整音频继续进入 ASR
-  - VAD 有效人声同步喂给 voiceprint provider
-  - 累计到配置的前 N 秒后立即启动一次远程识别
 providers/asr/base.py  handle_voice_stop()
-  - asyncio.gather(speech_to_text(), voiceprint.resolve_utterance_result())
-  - 句末仅给未完成的声纹结果 300ms 等待预算
+  - VAD 句末后把当前整段语音转成 16k 单声道 WAV
+  - asyncio.gather(speech_to_text(), voiceprint.identify_speaker())
   → receiveAudioHandle.py:45-179  startToChat(conn, text)
 ```
 
-声纹识别调用独立部署的 `voiceprint-api`：全模块部署以智能体 ID 作为远程 `user_id`，每个智能体最多 5 条；历史数据可保留 `user_id=default`，Python 按结构化说话人记录的作用域分组识别并选择最高分。每句话假设只有一个说话人，只截取前 N 秒有效 PCM，默认 1 秒，可由参数管理 `server.voiceprint_sample_seconds` 调整，运行时限制为 0.5 到 5.0 秒；达到时长便提前请求，后续音频不再参与；不足该时长直接跳过。Token 只通过 Bearer Header 传输，默认远程总超时 5 秒、句末追加等待最多 300ms；失败或超时只降级为无身份。智能体没有绑定声纹时不初始化 provider，也不发送识别请求。
+声纹识别调用独立部署的 `voiceprint-api`：全模块部署以智能体 ID 作为远程 `user_id`，每个智能体最多 5 条；历史数据可保留 `user_id=default`，Python 按结构化说话人记录的作用域分组识别并选择最高分。每句话假设只有一个说话人，VAD 检测到句末后上传当前整段语音 WAV 做识别，和官方上游声纹识别链路保持一致，不再截取前 N 秒，也不再使用 `server.voiceprint_sample_seconds`。Token 只通过 Bearer Header 传输，默认远程总超时 5 秒；失败或超时只降级为无身份。智能体没有绑定声纹时不初始化 provider，也不发送识别请求。
 
 ASR 基类仍通过工作线程桥接异步 provider；provider 内部不能再使用同步 HTTP 或 `time.sleep()`，否则慢请求会阻塞共享事件循环并放大队列积压。
 
@@ -475,7 +473,7 @@ connection.py:325-360  _save_and_close()
 | 15 | 旧连接注销误删新连接映射风险 | 注销前校验注册表中的对象身份，并增加覆盖重连测试 |
 | 16 | 豆包流式 ASR 判停、等待边界和重连清理不完整 | 本地 VAD 判停发送 LAST，增加 10s 初始化、15s 中间结果和 5s 最终结果预算，并按会话身份清理状态 |
 | 17 | SeedTTS2 不足 60ms 的 Opus 尾帧跨会话残留 | 正常结束冲刷尾帧，取消/失败/断链重置编码器 |
-| 18 | 句末上传完整语音做声纹会增加长尾延迟 | 仅累计前 N 秒有效人声并提前异步识别，默认 1 秒，短句跳过，句末最多等待 300ms |
+| 18 | 声纹采样截断导致长句后半段身份特征丢失 | 对齐官方上游：VAD 句末上传当前整段语音 WAV，与 ASR 并发识别；`server.voiceprint_sample_seconds` 保留为历史参数但运行时不再使用 |
 
 ## 13. 排查方法
 

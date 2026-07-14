@@ -370,10 +370,6 @@ public class ConfigServiceImpl implements ConfigService {
             voiceprintConfig.put("user_id", agentId);
             voiceprintConfig.put("speakers", speakers);
             voiceprintConfig.put("timeout_seconds", 5);
-            voiceprintConfig.put(
-                    "sample_seconds",
-                    readBoundedDoubleParam(Constant.SERVER_VOICEPRINT_SAMPLE_SECONDS, 1.0, 0.5, 5.0));
-            voiceprintConfig.put("result_wait_ms", 300);
 
             // 获取声纹识别相似度阈值，默认0.4
             String thresholdStr = sysParamsService.getValue("server.voiceprint_similarity_threshold", true);
@@ -407,19 +403,6 @@ public class ConfigServiceImpl implements ConfigService {
         queryWrapper.eq(AgentVoicePrintEntity::getAgentId, agentId);
         queryWrapper.orderByAsc(AgentVoicePrintEntity::getCreateDate);
         return agentVoicePrintDao.selectList(queryWrapper);
-    }
-
-    private double readBoundedDoubleParam(String paramCode, double defaultValue, double minimum, double maximum) {
-        String value = sysParamsService.getValue(paramCode, true);
-        if (StringUtils.isBlank(value) || "null".equals(value)) {
-            return defaultValue;
-        }
-        try {
-            double parsed = Double.parseDouble(value);
-            return Math.min(maximum, Math.max(minimum, parsed));
-        } catch (NumberFormatException e) {
-            return defaultValue;
-        }
     }
 
     /**
