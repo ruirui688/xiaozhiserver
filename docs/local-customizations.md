@@ -493,3 +493,24 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方修改声纹注册/识别/删除、配置下发、音频状态重置、ASR并行识别、聊天记录展示、长期记忆事件/召回、对话身份注入或声纹页面，必须保留 `user_id=agentId` 的可信服务端派生、每智能体最多5条的后端与远程双重校验、`remote_user_id=default` 历史兼容、Token仅通过Bearer Header传输、私有/回环/链路本地目标拦截、结构化 speakers 配置、“VAD句末整段语音WAV与ASR并发识别、`server.voiceprint_sample_seconds` 不再驱动截断采样、无绑定声纹零调用”、可信 `speaker_id` 贯穿聊天记录与记忆、人物专属记忆不跨声纹召回，以及“每个已识别身份只在本会话首次进入system和JSON用户消息”的行为。前端上限提示不能替代后端校验；删除远程失败时不得静默留下占用额度的孤儿声纹；日志不得输出Token、Authorization或带密钥URL。
 ```
+
+## 27. 会议模式语义控制与完整纪要
+
+```text
+定制模块：xiaozhi-server 会议记录状态、SLM 控制裁决、会议纪要生成
+改动原因：固定字符串退出无法容忍 ASR 近音误识别，也可能把会议正文中引用的“结束会议模式”误判成控制命令。会议能力现在登记为 `SYSTEM_PLUGIN_MEETING_MINUTES`，全模块运行时只有智能体在功能管理中启用后才能进入；单模块运行由 `meeting.enabled` 控制。进入时先做简短 TTS 确认；会议中的每个完整 ASR 句子由独立语义裁决器优先使用智能体所选 SLM 判断 continue/end，SLM 不可用时才回退主 LLM。只有高置信度的明确即时结束请求才停止记录；低置信度、超时、异常和非法输出全部继续记录，避免误结束。退出后主 LLM 使用冻结的完整结构化转写统一生成纪要，结束控制句不混入会议正文。
+关键文件：
+  - main/xiaozhi-server/core/meeting/control.py
+  - main/xiaozhi-server/core/meeting/minutes.py
+  - main/xiaozhi-server/core/handle/receiveAudioHandle.py
+  - main/xiaozhi-server/core/utils/modules_initialize.py
+  - main/xiaozhi-server/core/connection.py
+  - main/xiaozhi-server/core/websocket_server.py
+  - main/xiaozhi-server/tests/test_meeting_control.py
+  - main/xiaozhi-server/tests/test_meeting_minutes.py
+  - main/manager-api/src/main/resources/db/changelog/202607141735.sql
+  - main/manager-api/src/main/resources/db/changelog/db.changelog-master.yaml
+  - docs/architecture/device-interaction-chain.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：如果官方修改插件配置下发、ASR 句末处理、SLM 初始化、语义控制、TTS 入队或连接生命周期，必须保留“全模块按智能体插件门控、进入会议有一次简短确认、会议正文静默记录、每句控制语义优先使用 SLM、非高置信度和异常默认继续、结束控制句不进入正文、最终纪要使用完整冻结转写”的行为；不得退回固定字符串或模糊关键词直接退出，也不得让会议控制裁决调用打印模型密钥或原始凭据。会议插件迁移必须继续登记在 `db.changelog-master.yaml`，不得修改已发布 changeSet。
+```

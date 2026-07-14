@@ -54,10 +54,12 @@ class WebSocketServer:
             False,
             "Memory" in selected_module,
             "Intent" in selected_module,
+            "SLM" in selected_module,
         )
         self._vad = modules["vad"] if "vad" in modules else None
         self._asr = modules["asr"] if "asr" in modules else None
         self._llm = modules["llm"] if "llm" in modules else None
+        self._slm = modules["slm"] if "slm" in modules else None
         self._intent = modules["intent"] if "intent" in modules else None
         self._memory = modules["memory"] if "memory" in modules else None
 
@@ -140,6 +142,7 @@ class WebSocketServer:
             self._memory,
             self._intent,
             self,  # 传入server实例
+            _slm=self._slm,
         )
         self.active_handlers.add(handler)
         try:
@@ -205,6 +208,7 @@ class WebSocketServer:
                     False,
                     "Memory" in selected_module,
                     "Intent" in selected_module,
+                    "SLM" in selected_module,
                 )
 
                 # 更新组件实例
@@ -214,6 +218,8 @@ class WebSocketServer:
                     self._asr = modules["asr"]
                 if "llm" in modules:
                     self._llm = modules["llm"]
+                if "slm" in modules:
+                    self._slm = modules["slm"]
                 if "intent" in modules:
                     self._intent = modules["intent"]
                 if "memory" in modules:

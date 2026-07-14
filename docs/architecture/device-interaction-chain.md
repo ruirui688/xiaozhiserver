@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: xiaozhi-server
-last_verified: 2026-07-13
+last_verified: 2026-07-14
 source_paths:
   - main/xiaozhi-server/core
 ---
@@ -166,6 +166,23 @@ POST submit (aiohttp, http_timeout_seconds)
 - 初始化、中间结果或最终结果超时，以及 401、断链和初始化失败，都会关闭对应 WebSocket 并复位该会话状态。
 
 真实标准音频测试中，录音 ASR 4/4 成功，流式 ASR 修复前后共 5/5 成功；无效凭据分别在 298ms、195ms 返回 401，没有出现无限等待。
+
+### 3.4 会议记录模式
+
+会议模式保持普通 VAD/ASR 分段，但不把每段发言送入主聊天生成回复：
+
+```text
+进入会议模式
+  -> 管理模式先确认智能体已启用“会议纪要”功能插件
+  -> TTS 简短确认后开始静默记录
+每个完整 ASR 句子
+  -> MeetingControlClassifier 优先使用智能体 SLM 做 continue/end 语义裁决
+  -> SLM 未配置时回退主 LLM
+  -> end 且置信度达到阈值：冻结完整转写并生成纪要
+  -> 其他结果、超时或异常：继续记录当前发言
+```
+
+退出判断不依赖固定字符串或模糊关键词。裁决器结合最近会议上下文理解近音字、错别字和缺少标点，只在说话人明确要求助手现在停止记录或生成纪要时结束；“会议结束后再发布”等讨论内容必须继续记录。最终纪要使用从进入到退出之间的完整结构化转写，保留顺序、时间和说话人；用于结束控制的当前句不写入会议正文。智控台角色配置通过 `SYSTEM_PLUGIN_MEETING_MINUTES` 启用该能力；单模块配置通过 `meeting.enabled` 控制。
 
 ## 4. 音频下行链路（TTS）
 

@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: runtime
-last_verified: 2026-07-13
+last_verified: 2026-07-14
 source_paths:
   - main/xiaozhi-server
   - main/manager-api/src/main/java/xiaozhi/modules/config
@@ -155,6 +155,8 @@ tool results
 模型不是只收到用户一句话，而是收到服务端组装后的完整请求。
 
 未绑定声纹的智能体不下发声纹运行配置，也不会创建远程声纹请求。声纹超时或失败只表示本轮没有身份，不影响 ASR 文本继续进入主链路。历史参数 `server.voiceprint_sample_seconds` 不再下发到 Python，也不再影响实时识别音频长度。
+
+会议模式是实时链路中的连接级状态：全模块运行时先由智能体是否绑定 `SYSTEM_PLUGIN_MEETING_MINUTES` 决定能否进入，单模块运行则读取 `meeting.enabled`。进入后先播报一次确认，随后每个 ASR 完整句优先交给所选 SLM 做轻量控制语义裁决，而不是进入主聊天生成回复。只有高置信度的明确结束意图才冻结会议；低置信度、模型超时或异常均继续记录。冻结后由主 LLM 基于完整结构化转写统一生成会议纪要。所选 SLM 通过标准 `selected_module.SLM + model_config.<id>.typed_config` 契约初始化，不复制模型密钥。
 
 ## 5. 智能体能力组成
 

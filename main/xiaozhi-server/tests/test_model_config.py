@@ -156,7 +156,7 @@ def test_connection_private_config_merge_accepts_lowercase_model_config_payload(
         }
     )
 
-    assert flags == (True, True, False, False)
+    assert flags == (True, True, False, False, False)
     assert conn.config["selected_module"]["ASR"] == "asr-openai"
     assert conn.config["ASR"]["asr-openai"]["api_key"] == "asr-key"
     assert conn.config["TTS"]["tts-edge"]["voice"] == "zh-CN-XiaoxiaoNeural"
@@ -181,7 +181,7 @@ def test_connection_empty_private_config_keeps_existing_runtime_config():
 
     flags = conn._apply_private_runtime_config({})
 
-    assert flags == (False, False, False, False)
+    assert flags == (False, False, False, False, False)
     assert conn.config["selected_module"]["ASR"] == "asr-common"
     assert conn.config["ASR"]["asr-common"]["api_key"] == "common-key"
 
@@ -214,8 +214,35 @@ def test_connection_private_model_config_merges_without_dropping_common_models()
         }
     )
 
-    assert flags == (True, False, False, False)
+    assert flags == (True, False, False, False, False)
     assert conn.config["selected_module"]["ASR"] == "asr-common"
     assert conn.config["selected_module"]["LLM"] == "llm-private"
     assert conn.config["ASR"]["asr-common"]["api_key"] == "common-key"
     assert conn.config["LLM"]["llm-private"]["model_name"] == "private"
+
+
+def test_connection_private_config_marks_selected_slm_for_initialization():
+    conn = ConnectionHandler.__new__(ConnectionHandler)
+    conn.config = {"selected_module": {}, "model_config": {}}
+    conn.correct_word_replacements = {}
+    conn.max_output_size = 0
+    conn.chat_history_conf = 0
+
+    flags = conn._apply_private_runtime_config(
+        {
+            "selected_module": {"slm": "slm-control"},
+            "model_config": {
+                "slm-control": {
+                    "model_type": "slm",
+                    "typed_config": {
+                        "type": "openai",
+                        "model_name": "small-control-model",
+                    },
+                }
+            },
+        }
+    )
+
+    assert flags == (False, False, False, False, True)
+    assert conn.config["selected_module"]["SLM"] == "slm-control"
+    assert conn.config["SLM"]["slm-control"]["model_name"] == "small-control-model"

@@ -19,8 +19,8 @@ settings.config_file_valid = True
 
 from core.handle.receiveAudioHandle import startToChat
 from core.meeting import (
+    MEETING_STARTED_PROMPT,
     MeetingMinutesRuntime,
-    is_meeting_end_command,
     is_meeting_start_command,
 )
 from core.providers.asr.base import ASRProviderBase
@@ -103,8 +103,6 @@ def test_summary_prompt_contains_meeting_fields_and_transcript_text():
 def test_meeting_command_detection():
     assert is_meeting_start_command("小智，开始会议纪要")
     assert is_meeting_start_command("进入会议模式，主题是产品评审")
-    assert is_meeting_end_command("生成会议纪要")
-    assert is_meeting_end_command("结束会议模式")
 
 
 def test_provider_speaker_labels_are_normalized():
@@ -122,12 +120,18 @@ def test_provider_speaker_labels_are_normalized():
 
 
 def test_start_to_chat_records_meeting_until_end_only():
-    conn = _fake_conn()
+    conn = _fake_conn(
+        control_responses=[
+            '{"decision":"continue","confidence":0.98,"reason":"会议内容"}',
+            '{"decision":"end","confidence":0.97,"reason":"明确结束"}',
+        ]
+    )
 
     asyncio.run(startToChat(conn, "开始会议纪要，主题是周会"))
     assert conn.meeting_minutes.is_active() is True
     assert conn.llm.calls == []
-    assert conn.tts.spoken == []
+    assert conn.slm.control_calls == []
+    assert conn.tts.spoken == [MEETING_STARTED_PROMPT]
 
     payload = {
         "content": "先看发布计划。我负责验收。",
@@ -150,16 +154,52 @@ def test_start_to_chat_records_meeting_until_end_only():
     asyncio.run(startToChat(conn, json.dumps(payload, ensure_ascii=False)))
 
     assert conn.llm.calls == []
-    assert conn.tts.spoken == []
+    assert len(conn.slm.control_calls) == 1
+    assert conn.tts.spoken == [MEETING_STARTED_PROMPT]
     transcript = conn.meeting_minutes.build_transcript()
     assert [item["displaySpeaker"] for item in transcript] == ["说话人1", "高瑞瑞"]
 
-    asyncio.run(startToChat(conn, "结束会议模式"))
+    asyncio.run(startToChat(conn, "好了，今天先到这里，帮我整理一下"))
 
     assert conn.meeting_minutes.is_active() is False
     assert len(conn.llm.calls) == 1
+    assert len(conn.slm.control_calls) == 2
     assert "先看发布计划。" in conn.llm.calls[0][1]
-    assert conn.tts.spoken == ["整理后的会议纪要"]
+    assert "我负责验收。" in conn.llm.calls[0][1]
+    assert "好了，今天先到这里" not in conn.llm.calls[0][1]
+    assert conn.tts.spoken == [MEETING_STARTED_PROMPT, "整理后的会议纪要"]
+
+
+def test_low_confidence_end_decision_keeps_full_meeting_context():
+    conn = _fake_conn(
+        control_responses=[
+            '{"decision":"end","confidence":0.62,"reason":"含糊提到结束"}',
+        ]
+    )
+
+    asyncio.run(startToChat(conn, "进入会议模式"))
+    asyncio.run(startToChat(conn, "会议结束后我们再安排发布"))
+
+    assert conn.meeting_minutes.is_active() is True
+    transcript = conn.meeting_minutes.build_transcript()
+    assert [item["text"] for item in transcript] == ["会议结束后我们再安排发布"]
+    assert conn.llm.calls == []
+
+
+def test_meeting_control_falls_back_to_main_llm_when_slm_is_missing():
+    conn = _fake_conn(
+        control_responses=[
+            '{"decision":"continue","confidence":0.99,"reason":"继续讨论"}',
+        ],
+        use_slm=False,
+    )
+
+    asyncio.run(startToChat(conn, "进入会议模式"))
+    asyncio.run(startToChat(conn, "继续讨论发布计划"))
+
+    assert conn.meeting_minutes.is_active() is True
+    assert len(conn.llm.control_calls) == 1
+    assert conn.meeting_minutes.build_transcript()[0]["text"] == "继续讨论发布计划"
 
 
 def test_asr_segment_time_supports_seconds_and_milliseconds():
@@ -199,12 +239,20 @@ class _ImmediateExecutor:
 
 
 class _FakeLLM:
-    def __init__(self):
+    def __init__(self, control_responses=None, summary_response="整理后的会议纪要"):
         self.calls = []
+        self.control_calls = []
+        self.control_responses = list(control_responses or [])
+        self.summary_response = summary_response
 
     def response_no_stream(self, system_prompt, user_prompt, **_kwargs):
+        if "会议记录模式的控制意图裁决器" in system_prompt:
+            self.control_calls.append((system_prompt, user_prompt))
+            if self.control_responses:
+                return self.control_responses.pop(0)
+            return '{"decision":"continue","confidence":1.0,"reason":"默认继续"}'
         self.calls.append((system_prompt, user_prompt))
-        return "整理后的会议纪要"
+        return self.summary_response
 
 
 class _FakeTTS:
@@ -219,16 +267,29 @@ class _FakeTTS:
         pass
 
 
-def _fake_conn():
+def _fake_conn(control_responses=None, use_slm=True):
+    main_llm = _FakeLLM(control_responses=None)
+    slm = _FakeLLM(control_responses=control_responses) if use_slm else None
+    if not use_slm:
+        main_llm.control_responses = list(control_responses or [])
     return SimpleNamespace(
         logger=_NoopLogger(),
+        config={
+            "meeting": {
+                "enabled": True,
+                "control_timeout_seconds": 1.0,
+                "end_confidence_threshold": 0.9,
+            }
+        },
+        read_config_from_api=False,
         correct_word_replacements={},
         introduced_speakers=set(),
         current_speaker=None,
         current_speaker_id=None,
         meeting_minutes=MeetingMinutesRuntime(),
         executor=_ImmediateExecutor(),
-        llm=_FakeLLM(),
+        llm=main_llm,
+        slm=slm,
         tts=_FakeTTS(),
         sentence_id=None,
         client_abort=False,
