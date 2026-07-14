@@ -148,10 +148,6 @@ public class AgentVoicePrintEnrollmentServiceImpl
         AgentVoicePrintEnrollmentEntity entity = getExisting(id);
         requireCollecting(entity);
         List<AgentVoicePrintEnrollmentSampleEntity> samples = listSamples(id);
-        if (samples.size() < normalizeRequiredSamples(entity.getRequiredSamples())) {
-            stopDeviceEnrollment(entity);
-            samples = listSamples(id);
-        }
         if (samples.size() < normalizeRequiredSamples(entity.getRequiredSamples())
                 || samples.size() > AgentVoicePrintServiceImpl.MAX_REGISTER_SAMPLES) {
             throw new RenException(ErrorCode.VOICEPRINT_SAMPLE_COUNT_INVALID);
@@ -303,40 +299,6 @@ public class AgentVoicePrintEnrollmentServiceImpl
             }
         } catch (RestClientException e) {
             throw new RenException("无法让设备进入声纹采集模式，请确认设备在线且 xiaozhi-server HTTP 端口可访问", e);
-        }
-    }
-
-    private void stopDeviceEnrollment(AgentVoicePrintEnrollmentEntity entity) {
-        if (StringUtils.isBlank(entity.getDeviceId())) {
-            return;
-        }
-        String baseUrl = resolveXiaozhiServerHttpBaseUrl();
-        String serverSecret = sysParamsService.getValue(Constant.SERVER_SECRET, true);
-        if (StringUtils.isBlank(serverSecret) || StringUtils.equalsIgnoreCase(serverSecret, "null")) {
-            throw new RenException("server.secret 未配置，无法停止设备声纹采集");
-        }
-
-        JSONObject payload = new JSONObject();
-        payload.set("deviceId", entity.getDeviceId());
-        payload.set("reason", "manual_stop");
-
-        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory();
-        factory.setReadTimeout(Duration.ofSeconds(15));
-        RestTemplate client = new RestTemplate(factory);
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.setBearerAuth(serverSecret);
-        try {
-            ResponseEntity<String> response = client.exchange(
-                    baseUrl + "/device/voiceprint/enrollment/stop",
-                    HttpMethod.POST,
-                    new HttpEntity<>(payload.toString(), headers),
-                    String.class);
-            if (!response.getStatusCode().is2xxSuccessful()) {
-                throw new RenException("设备声纹采集停止失败：" + response.getStatusCode());
-            }
-        } catch (RestClientException e) {
-            throw new RenException("无法停止设备声纹采集，请确认设备在线且 xiaozhi-server HTTP 端口可访问", e);
         }
     }
 

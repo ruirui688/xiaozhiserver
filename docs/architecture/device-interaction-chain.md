@@ -224,10 +224,11 @@ Authorization: Bearer <server.secret>
 }
 ```
 
-采集模式 active 时，设备继续按原 WebSocket 协议上传音频。服务端在 VAD 句末把该段音频转成
+采集模式 active 时，设备继续按原 WebSocket 协议上传音频。服务端只在 VAD 句末把该段音频转成
 16k 单声道 WAV 并上报到 `manager-api`，不会进入普通 ASR、语义、LLM 或工具调用链路。
-当前设备采集流程只要求朗读 1 段文本：用户点击“结束录音并注册”后，`manager-api` 会先调用
-`POST /device/voiceprint/enrollment/stop`，Python 运行时会尽量消费当前音频缓冲并上报样本；若 VAD 已经提前检测到句末静音，也会自动上报样本。
+当前设备采集流程只要求朗读 1 段文本：用户点击“开始录音”后朗读屏幕文本，读完保持安静；
+VAD 检测到句末静音后自动上报样本。`manager-web` 轮询到样本落库后自动调用完成接口注册声纹，
+不再提供人工“停止录音”入口，也不再依赖 `/device/voiceprint/enrollment/stop` 截断当前音频缓冲。
 `startToChat()` 也会兜底检查采集状态，防止流式 ASR 或其他入口漏过采集分支后继续触发普通对话。
 
 为了提升设备端体验，服务端会额外下发状态事件：
@@ -243,7 +244,7 @@ Authorization: Bearer <server.secret>
   "sampleCount": 1,
   "targetSamples": 1,
   "reason": "",
-  "prompt": "已采集完成，请点击结束录音并注册。"
+  "prompt": "已采集完成，正在注册声纹。"
 }
 ```
 
@@ -255,7 +256,7 @@ Authorization: Bearer <server.secret>
 | `sample_collected` | 显示进度，如 `1/3`，短提示音或屏幕反馈 |
 | `sample_rejected` | 显示失败原因，提示重新说一段 |
 | `sample_failed` | 显示上传失败，提示重新采集 |
-| `completed` | 显示采集完成，等待用户点击结束录音并注册 |
+| `completed` | 显示采集完成，等待管理端自动提交注册 |
 | `stopped` | 退出声纹注册 UI/灯效 |
 
 同时，服务端会通过现有 TTS 通道播报 `prompt` 文案。旧固件即使不识别
