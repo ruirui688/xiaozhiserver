@@ -1395,7 +1395,12 @@ class ConnectionHandler:
                     self.session_id,
                     llm_dialogue,
                 )
-            self.turn_metrics.record_llm_started(tools_enabled, depth)
+            self.turn_metrics.record_llm_started(
+                tools_enabled,
+                depth,
+                dialogue=llm_dialogue,
+                functions=functions,
+            )
             self.logger.bind(tag=TAG).info(
                 f"LLM请求已发起 | depth={depth} | tools_enabled={tools_enabled} | "
                 f"elapsed={time.monotonic() - llm_started_at:.3f}s"
