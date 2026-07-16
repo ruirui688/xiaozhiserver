@@ -1,5 +1,6 @@
 import time
 
+from core.utils import turn_metrics as turn_metrics_module
 from core.utils.turn_metrics import TurnMetrics
 
 
@@ -27,6 +28,35 @@ def test_asr_metrics_separate_response_tail_and_finalize_latency():
         0,
         asr["response_ms"] - payload["input"]["estimated_audio_duration_ms"],
     )
+
+
+def test_asr_response_ms_uses_final_text_time_not_later_wait(monkeypatch):
+    current = {"monotonic": 100.0}
+    monkeypatch.setattr(
+        turn_metrics_module.time,
+        "monotonic",
+        lambda: current["monotonic"],
+    )
+    monkeypatch.setattr(turn_metrics_module.time, "time", lambda: 1000.0)
+
+    metrics = TurnMetrics()
+    for _ in range(10):
+        metrics.record_vad_frame(True, 1, 20)
+    current["monotonic"] = 101.0
+    metrics.record_asr_first_text(2)
+    current["monotonic"] = 103.0
+    metrics.record_asr_final_text(5)
+    metrics.begin_turn([b"x"] * 10, "opus")
+
+    current["monotonic"] = 110.0
+    metrics.record_asr(7, True, 5)
+
+    asr = metrics.build_user_metrics()["latency_ms"]["asr"]
+    assert asr["first_text_ms"] == 1000
+    assert asr["response_ms"] == 3000
+    assert asr["total_ms"] == 3000
+    assert asr["finalize_ms"] == 7
+    assert asr["tail_latency_ms"] == 2400
 
 
 def test_llm_estimated_tokens_include_input_and_output():

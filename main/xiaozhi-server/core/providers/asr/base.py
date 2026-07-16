@@ -122,23 +122,19 @@ class ASRProviderBase(ABC):
                 )
             )
 
+            voiceprint_task = None
             if conn.voiceprint_provider is not None and wav_data:
-                voiceprint_task = self._timed_awaitable(
-                    conn.voiceprint_provider.identify_speaker(
-                        wav_data,
-                        conn.session_id,
+                voiceprint_task = asyncio.create_task(
+                    self._timed_awaitable(
+                        conn.voiceprint_provider.identify_speaker(
+                            wav_data,
+                            conn.session_id,
+                        )
                     )
                 )
-                asr_timed, voiceprint_timed = await asyncio.gather(
-                    asr_task, voiceprint_task, return_exceptions=True
-                )
-                asr_result, asr_elapsed_ms = self._unwrap_timed_result(asr_timed)
-                voiceprint_result, voiceprint_elapsed_ms = self._unwrap_timed_result(voiceprint_timed)
-            else:
-                asr_timed = await asr_task
-                asr_result, asr_elapsed_ms = self._unwrap_timed_result(asr_timed)
-                voiceprint_result = None
-                voiceprint_elapsed_ms = None
+
+            asr_timed = await asr_task
+            asr_result, asr_elapsed_ms = self._unwrap_timed_result(asr_timed)
 
             # 记录识别结果 - 检查是否为异常
             if isinstance(asr_result, Exception):
@@ -153,6 +149,15 @@ class ASRProviderBase(ABC):
                 not isinstance(asr_result, Exception),
                 len(str(raw_text or "")),
             )
+
+            if voiceprint_task is not None:
+                voiceprint_timed = await voiceprint_task
+                voiceprint_result, voiceprint_elapsed_ms = self._unwrap_timed_result(
+                    voiceprint_timed
+                )
+            else:
+                voiceprint_result = None
+                voiceprint_elapsed_ms = None
 
             if isinstance(voiceprint_result, Exception):
                 logger.bind(tag=TAG).error(f"声纹识别失败: {voiceprint_result}")
@@ -239,6 +244,8 @@ class ASRProviderBase(ABC):
                         audio_snapshot,
                         metrics=conn.turn_metrics.build_user_metrics(),
                     )
+            else:
+                conn.turn_metrics.discard_active_turn()
         except Exception as e:
             logger.bind(tag=TAG).error(f"处理语音停止失败: {e}")
             import traceback
@@ -274,6 +281,17 @@ class ASRProviderBase(ABC):
             turn_metrics.record_asr_first_text(len(str(text)))
         except Exception as exc:
             logger.bind(tag=TAG).debug(f"记录ASR首段指标失败: {exc}")
+
+    def record_final_text_metric(self, conn: "ConnectionHandler", text):
+        if not text:
+            return
+        turn_metrics = getattr(conn, "turn_metrics", None)
+        if turn_metrics is None:
+            return
+        try:
+            turn_metrics.record_asr_final_text(len(str(text)))
+        except Exception as exc:
+            logger.bind(tag=TAG).debug(f"记录ASR最终文本指标失败: {exc}")
 
     def _audio_frames_to_wav(self, audio_frames: List[bytes], audio_format: str) -> bytes:
         if not audio_frames:

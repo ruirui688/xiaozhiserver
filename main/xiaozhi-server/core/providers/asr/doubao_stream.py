@@ -326,13 +326,11 @@ class ASRProvider(ASRProviderBase):
                             ):
                                 logger.bind(tag=TAG).error(f"识别文本：空")
                                 self.text = ""
-                                if len(audio_data) > 0:
-                                    audio_snapshot = list(audio_data)
-                                    conn.reset_audio_states(preserve_voiceprint=True)
-                                    audio_state_released = True
-                                    await self.handle_voice_stop(
-                                        conn, audio_snapshot
-                                    )
+                                turn_metrics = getattr(conn, "turn_metrics", None)
+                                if turn_metrics is not None:
+                                    turn_metrics.discard_vad_segment()
+                                conn.reset_audio_states()
+                                audio_state_released = True
                                 break
 
                             # 专门处理没有文本的识别结果（手动模式下可能已经识别完成但是没松按键）
@@ -357,6 +355,7 @@ class ASRProvider(ASRProviderBase):
                                 if utterance.get("definite", False):
                                     current_text = utterance["text"]
                                     self.record_first_text_metric(conn, current_text)
+                                    self.record_final_text_metric(conn, current_text)
                                     normalized_utterance = _normalize_utterance(
                                         utterance
                                     )

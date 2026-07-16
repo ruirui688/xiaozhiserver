@@ -196,6 +196,38 @@ def test_response_timeout_closes_websocket_and_preserves_audio_state(tmp_path):
     assert conn.asr_audio == [b"cached-frame"]
 
 
+def test_empty_auto_result_drops_segment_without_handle_voice_stop(tmp_path):
+    websocket = FakeWebSocket(responses=[b"empty-result"])
+    provider = _provider(tmp_path)
+    provider.parse_response = lambda _response: {
+        "payload_msg": {
+            "audio_info": {"duration": 2400},
+            "result": {"text": "", "utterances": []},
+        }
+    }
+    provider.asr_ws = websocket
+    provider.is_processing = True
+    conn = FakeConnection()
+    conn.asr_audio = [b"cached-frame"]
+    handled = []
+
+    async def fake_handle_voice_stop(_conn, audio_data):
+        handled.append(list(audio_data))
+
+    provider.handle_voice_stop = fake_handle_voice_stop
+
+    asyncio.run(provider._forward_asr_results(conn))
+
+    assert handled == []
+    assert websocket.closed is True
+    assert provider.asr_ws is None
+    assert provider.is_processing is False
+    assert conn.reset_count == 1
+    assert conn.reset_preserve_voiceprint == [False]
+    assert conn.asr_audio == []
+    assert conn.client_voice_stop is False
+
+
 def test_stale_auto_voice_stop_does_not_send_last_for_new_session(
     monkeypatch, tmp_path
 ):
