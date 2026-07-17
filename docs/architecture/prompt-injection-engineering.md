@@ -160,6 +160,10 @@ self.config.get("voiceprint", {})
 
 `Dialogue.get_llm_dialogue_with_memory()` 会在每个成功识别轮次把当前身份写入动态 system 上下文，同时当前 user message 保留结构化 `speaker` / `speaker_id`。system 只包含当前匹配说话人的描述，不暴露其他已绑定人员；未知说话人不会获得人员列表。身份事实每轮可用，避免依赖可能被截断或被模型忽略的旧对话历史；“不要机械地重复称呼姓名、不要主动播报声纹识别结果”由明确提示词约束，而不是通过丢弃本轮身份实现。
 
+选择 `managed_memory` 时，记忆写入不由 system prompt 中的关键词规则触发，也不由 manager-api 扫描聊天。主聊天模型会收到真实 `manage_memory` function schema，并自主决定是否调用、记住或忘记、正文、分类以及 `private/shared` 可见性。工具描述不包含固定人物、业务场景、条件任务或关键词列表。
+
+查询注入只按结构化人物归属选择 private/shared 事实。忘记意图作为普通上下文交给主模型理解；后端不做字符串相似度过滤。已注入记忆在当前轮是否相关、是否需要行动，继续由主模型根据完整上下文判断。
+
 ## 6. 工具描述统一出口
 
 所有工具描述的统一出口：

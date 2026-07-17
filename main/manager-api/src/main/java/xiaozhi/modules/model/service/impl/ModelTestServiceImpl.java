@@ -316,7 +316,7 @@ public class ModelTestServiceImpl implements ModelTestService {
         if (StringUtils.isBlank(maintenanceModelId)) {
             result.setSuccess(false);
             result.setMessage("智控台治理记忆必须配置维护模型，请选择已启用且测试通过的 LLM/SLM。");
-            result.setTestOutput("managed_memory 依赖维护模型执行自动抽取、显式记住、显式忘记和 tombstone 治理。");
+            result.setTestOutput("managed_memory 由主对话模型主动调用记忆工具，维护模型只负责去重、更新和结构化治理。");
             return result;
         }
 

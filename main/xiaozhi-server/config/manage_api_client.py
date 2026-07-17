@@ -388,6 +388,74 @@ async def query_managed_memory(
         return None
 
 
+async def remember_managed_memory(
+    mac_address: str,
+    agent_id: Optional[str],
+    text: str,
+    category: Optional[str] = None,
+    speaker_id: Optional[str] = None,
+    speaker_name: Optional[str] = None,
+    shared: bool = False,
+) -> bool:
+    """执行由主 LLM 主动发起的记忆写入。"""
+    if not text or not ManageApiClient._instance:
+        return False
+    try:
+        await ManageApiClient._instance._execute_async_request(
+            "POST",
+            "/config/memory/remember",
+            json={
+                "macAddress": mac_address,
+                "agentId": agent_id,
+                "text": text,
+                "category": category,
+                "speakerId": speaker_id,
+                "speakerName": speaker_name,
+                "shared": shared,
+            },
+        )
+        return True
+    except Exception as e:
+        logger.bind(tag="manage_api").warning(
+            f"LLM主动记忆写入失败: errorType={type(e).__name__}"
+        )
+        return False
+
+
+async def forget_managed_memory(
+    mac_address: str,
+    agent_id: Optional[str],
+    text: str,
+    reason: Optional[str] = None,
+    speaker_id: Optional[str] = None,
+    speaker_name: Optional[str] = None,
+    shared: bool = False,
+) -> bool:
+    """执行由主 LLM 主动发起的记忆忘记。"""
+    if not text or not ManageApiClient._instance:
+        return False
+    try:
+        await ManageApiClient._instance._execute_async_request(
+            "POST",
+            "/config/memory/forget",
+            json={
+                "macAddress": mac_address,
+                "agentId": agent_id,
+                "text": text,
+                "reason": reason,
+                "speakerId": speaker_id,
+                "speakerName": speaker_name,
+                "shared": shared,
+            },
+        )
+        return True
+    except Exception as e:
+        logger.bind(tag="manage_api").warning(
+            f"LLM主动记忆忘记失败: errorType={type(e).__name__}"
+        )
+        return False
+
+
 def get_managed_memory_query_timeout() -> float:
     """返回托管记忆查询的独立等待预算。
 

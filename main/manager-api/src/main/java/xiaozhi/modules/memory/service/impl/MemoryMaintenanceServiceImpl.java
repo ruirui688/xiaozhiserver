@@ -1,8 +1,6 @@
 package xiaozhi.modules.memory.service.impl;
 
 import java.math.BigDecimal;
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
@@ -13,7 +11,6 @@ import java.util.Map;
 import java.util.Set;
 
 import org.apache.commons.lang3.StringUtils;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -42,27 +39,20 @@ import xiaozhi.modules.memory.dao.MemoryCandidateDao;
 import xiaozhi.modules.memory.dao.MemoryFactDao;
 import xiaozhi.modules.memory.dao.MemoryForgetTombstoneDao;
 import xiaozhi.modules.memory.dao.MemoryRevisionDao;
-import xiaozhi.modules.memory.dao.MemorySessionStateDao;
-import xiaozhi.modules.memory.dao.MemorySourceEventDao;
 import xiaozhi.modules.memory.dto.MemoryRebuildRequestDTO;
 import xiaozhi.modules.memory.entity.MemoryCandidateEntity;
 import xiaozhi.modules.memory.entity.MemoryFactEntity;
 import xiaozhi.modules.memory.entity.MemoryForgetTombstoneEntity;
 import xiaozhi.modules.memory.entity.MemoryRevisionEntity;
-import xiaozhi.modules.memory.entity.MemorySessionStateEntity;
-import xiaozhi.modules.memory.entity.MemorySourceEventEntity;
 import xiaozhi.modules.memory.prompt.PowerMemPrompts;
 import xiaozhi.modules.memory.service.MemoryMaintenanceService;
 import xiaozhi.modules.memory.service.MemorySettingsService;
 import xiaozhi.modules.memory.service.impl.maintenance.MemoryMaintenanceOutputParser;
 import xiaozhi.modules.memory.service.impl.maintenance.MemorySpeakerConversationBuilder;
-import xiaozhi.modules.memory.service.impl.maintenance.MemorySpeakerConversationBuilder.Conversation;
-import xiaozhi.modules.memory.utils.MemoryAutoWriteGate;
 import xiaozhi.modules.memory.utils.MemoryHelper;
 import xiaozhi.modules.memory.utils.MemorySpeakerUtils;
 import xiaozhi.modules.memory.utils.MemorySpeakerUtils.Registry;
 import xiaozhi.modules.memory.utils.MemorySpeakerUtils.SpeakerIdentity;
-import xiaozhi.modules.memory.utils.MemoryTierHelper;
 import xiaozhi.modules.memory.vo.MemoryRebuildResultVO;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
@@ -75,12 +65,10 @@ import xiaozhi.modules.workspace.service.WorkspaceService;
 @Slf4j
 public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
 
-    private final MemorySourceEventDao sourceEventDao;
     private final MemoryCandidateDao candidateDao;
     private final MemoryFactDao factDao;
     private final MemoryRevisionDao revisionDao;
     private final MemoryForgetTombstoneDao tombstoneDao;
-    private final MemorySessionStateDao sessionStateDao;
     private final DeviceDao deviceDao;
     private final AgentDao agentDao;
     private final LLMService llmService;
@@ -93,130 +81,6 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
     private final MemorySettingsService memorySettingsService;
 
     // ===================== 公开方法 =====================
-
-    @Override
-    public int processSessionMemories(String sessionId, String agentId) {
-        if (StringUtils.isBlank(sessionId) || StringUtils.isBlank(agentId)) {
-            return 0;
-        }
-        MemorySessionStateEntity state = sessionStateDao.selectOne(
-                new QueryWrapper<MemorySessionStateEntity>()
-                        .eq("agent_id", agentId)
-                        .eq("session_id", sessionId)
-                        .last("LIMIT 1"));
-        if (state == null || state.getLastEventId() == null) {
-            return 0;
-        }
-        Date staleBefore = Date.from(Instant.now().minus(
-                MemoryHelper.SESSION_MEMORY_PROCESSING_STALE_MINUTES, ChronoUnit.MINUTES));
-        if (sessionStateDao.claimNow(state.getId(), state.getLastEventId(), staleBefore) != 1) {
-            return 0;
-        }
-        return processClaimedSession(state);
-    }
-
-    @Scheduled(fixedDelay = 10_000L, initialDelay = 10_000L)
-    public void processIdleSessionMemories() {
-        Date idleBefore = Date.from(Instant.now().minus(
-                MemoryHelper.SESSION_MEMORY_IDLE_SECONDS, ChronoUnit.SECONDS));
-        Date staleBefore = Date.from(Instant.now().minus(
-                MemoryHelper.SESSION_MEMORY_PROCESSING_STALE_MINUTES, ChronoUnit.MINUTES));
-        List<MemorySessionStateEntity> states = sessionStateDao.findIdleSessions(
-                idleBefore, staleBefore, MemoryHelper.SESSION_MEMORY_IDLE_BATCH_SIZE);
-        for (MemorySessionStateEntity state : states) {
-            if (state == null || state.getId() == null || state.getLastEventId() == null) {
-                continue;
-            }
-            if (sessionStateDao.claimIdle(state.getId(), state.getLastEventId(), idleBefore, staleBefore) != 1) {
-                continue;
-            }
-            try {
-                processClaimedSession(state);
-            } catch (Exception e) {
-                log.warn("空闲会话记忆整理失败, agentId={}, sessionId={}, error={}",
-                        state.getAgentId(), state.getSessionId(), e.getMessage());
-            }
-        }
-    }
-
-    private int processClaimedSession(MemorySessionStateEntity state) {
-        try {
-            int count = processSessionMemoriesThrough(
-                    state.getSessionId(), state.getAgentId(), state.getLastEventId());
-            sessionStateDao.complete(state.getId(), state.getLastEventId());
-            return count;
-        } catch (Exception e) {
-            sessionStateDao.release(state.getId(), state.getLastEventId());
-            throw e;
-        }
-    }
-
-    private int processSessionMemoriesThrough(String sessionId, String agentId, Long throughEventId) {
-        AgentEntity agent = agentDao.selectById(agentId);
-        if (agent == null) {
-            log.warn("processSessionMemories: 智能体不存在, agentId={}", agentId);
-            return 0;
-        }
-        String maintenanceModelId = getMaintenanceLlmModelId(agent);
-        if (StringUtils.isBlank(maintenanceModelId)) {
-            log.info("processSessionMemories: 未配置维护模型, agentId={}", agentId);
-            return 0;
-        }
-        Conversation sessionConversation = conversationBuilder.fromEvents(sourceEventDao.selectList(
-                new QueryWrapper<MemorySourceEventEntity>()
-                        .eq("agent_id", agentId)
-                        .eq("session_id", sessionId)
-                        .le(throughEventId != null, "id", throughEventId)
-                        .orderByAsc("created_at")));
-        String conversation = sessionConversation.text();
-        if (StringUtils.isBlank(conversation)) {
-            return 0;
-        }
-
-        // Stage 1: 提取事实
-        String extractionPrompt = PowerMemPrompts.EXTRACTION_PROMPT.replace("{conversation}",
-                StringUtils.abbreviate(conversation, MemoryHelper.SESSION_MAX_CHARS));
-        String extractionOutput = llmService.generateJson(extractionPrompt, maintenanceModelId);
-        if (StringUtils.isBlank(extractionOutput)) {
-            log.warn("processSessionMemories: Stage 1 提取失败, agentId={}", agentId);
-            return 0;
-        }
-        JSONArray facts = outputParser.parseExtractionResult(extractionOutput);
-        if (facts == null || facts.isEmpty()) {
-            return 0;
-        }
-
-        int count = 0;
-        for (Object item : facts) {
-            JSONObject factJson = MemoryHelper.toJsonObject(item);
-            if (factJson == null) continue;
-
-            SpeakerIdentity speaker = sessionConversation.speakers().resolve(factJson);
-            if (speaker == null) {
-                log.warn("会话记忆缺少可验证的speaker_id或人物归属不明确，已跳过: agentId={}, sessionId={}",
-                        agentId, sessionId);
-                continue;
-            }
-            MemorySpeakerUtils.applyInternalIdentity(factJson, speaker);
-
-            // Stage 2: 将当前作用域内有界的文本事实交给维护 LLM 直接决策。
-            List<MemoryFactEntity> existingFacts = loadMaintenanceFactsForSpeaker(
-                    agentId, speaker.id());
-            String decisionPrompt = buildDecisionPrompt(
-                    factJson, existingFacts, conversation, totalMemoryChars(loadMaintenanceFacts(agentId)));
-            String decisionOutput = llmService.generateJson(decisionPrompt, maintenanceModelId);
-            if (StringUtils.isBlank(decisionOutput)) continue;
-
-            JSONObject decision = outputParser.parseDecisionResult(decisionOutput);
-            if (decision == null) continue;
-            outputParser.mergeExtractionIntoDecision(factJson, decision);
-            MemorySpeakerUtils.applyInternalIdentity(decision, speaker);
-            attachUserEvidence(decision, conversation);
-            if (applyMaintenanceDecision(agent, agentId, null, decision, maintenanceModelId, false, null)) count++;
-        }
-        log.info("processSessionMemories: agentId={}, sessionId={}, factsChanged={}", agentId, sessionId, count);
-        return count;
-    }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -383,56 +247,9 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         return result;
     }
 
-    /**
-     * PowerMem 两阶段管线：Stage 1 提取事实 → Stage 2 语义搜索 + 决策执行。
-     */
-    @Override
-    public void createCandidatesWithMaintenanceModel(AgentEntity agent, String scopeId, String sourceEventId, String content) {
-        String maintenanceModelId = getMaintenanceLlmModelId(agent);
-        if (StringUtils.isBlank(maintenanceModelId)) {
-            return;
-        }
-        String promptInput = "用户: " + StringUtils.abbreviate(content, MemoryHelper.MAX_MAINTENANCE_INPUT_CHARS);
-
-        // Stage 1: 提取事实
-        String extractionPrompt = PowerMemPrompts.EXTRACTION_PROMPT.replace("{conversation}", promptInput);
-        String extractionOutput = llmService.generateJson(extractionPrompt, maintenanceModelId);
-        if (StringUtils.isBlank(extractionOutput)) {
-            log.warn("Stage 1 事实提取失败，agentId: {}", agent.getId());
-            return;
-        }
-        JSONArray facts = outputParser.parseExtractionResult(extractionOutput);
-        if (facts == null || facts.isEmpty()) {
-            return;
-        }
-
-        int saved = 0;
-        for (Object item : facts) {
-            JSONObject factJson = MemoryHelper.toJsonObject(item);
-            if (factJson == null) continue;
-
-            // Stage 2: 维护 LLM 直接对比当前作用域内的文本事实并决策。
-            List<MemoryFactEntity> existingFacts = loadMaintenanceFacts(agent.getId());
-            String decisionPrompt = buildDecisionPrompt(
-                    factJson, existingFacts, promptInput, totalMemoryChars(loadMaintenanceFacts(agent.getId())));
-            String decisionOutput = llmService.generateJson(decisionPrompt, maintenanceModelId);
-            if (StringUtils.isBlank(decisionOutput)) {
-                continue;
-            }
-            JSONObject decision = outputParser.parseDecisionResult(decisionOutput);
-            if (decision == null) continue;
-
-            outputParser.mergeExtractionIntoDecision(factJson, decision);
-            attachUserEvidence(decision, promptInput);
-
-            if (applyMaintenanceDecision(agent, scopeId, sourceEventId, decision, maintenanceModelId, false, null)) {
-                saved++;
-            }
-        }
-    }
-
     @Override
     public boolean applyRememberInstruction(AgentEntity agent, String scopeId, String text, String category,
+                                            String speakerId, String speakerName, boolean shared,
                                             String actorType, String actorId) {
         String maintenanceModelId = getMaintenanceLlmModelId(agent);
         if (StringUtils.isBlank(text)) {
@@ -441,7 +258,8 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         if (StringUtils.isBlank(maintenanceModelId)) {
             throw new IllegalStateException("未配置记忆维护模型");
         }
-        String existingMemories = buildMaintenanceMemoryContext(agent.getId(), scopeId);
+        SpeakerIdentity speaker = instructionSpeaker(speakerId, speakerName, shared);
+        String existingMemories = buildInstructionMemoryContext(agent.getId(), scopeId, speaker);
         String prompt = PowerMemPrompts.REMEMBER_COMMAND_PROMPT
                 .replace("{text}", text)
                 .replace("{category}", StringUtils.defaultString(category))
@@ -452,27 +270,21 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
             throw new IllegalStateException("记忆维护模型未返回有效决策");
         }
         decision.set("_manual_instruction", true);
-        JSONArray instructionActions = new JSONArray();
-        instructionActions.add(decision);
-        String evidenceContext = "显式记住：\n" + text + "\n\n已有记忆：\n" + existingMemories;
-        JSONArray reviewed = reviewRebuildActions(instructionActions, "merge", evidenceContext, maintenanceModelId);
-        if (reviewed != null && !reviewed.isEmpty()) {
-            JSONObject reviewedDecision = MemoryHelper.toJsonObject(reviewed.get(0));
-            if (reviewedDecision != null) {
-                decision = reviewedDecision;
-                decision.set("_manual_instruction", true);
-            }
-        }
+        MemorySpeakerUtils.applyInternalIdentity(decision, speaker);
         boolean changed = applyMaintenanceDecision(agent, scopeId, null, decision, maintenanceModelId, false, null);
         writeRevision(agent.getId(), null, "remember_instruction",
                 JsonUtils.toJsonString(Map.of("text", text, "category", StringUtils.defaultString(category))),
                 JsonUtils.toJsonString(decision), actorType, actorId, "维护模型处理显式记住");
+        if (!changed) {
+            throw new IllegalStateException("记忆维护模型未执行主模型的保存决定");
+        }
         return changed;
     }
 
     @Override
     public boolean applyForgetInstruction(AgentEntity agent, String scopeId, String text, String patternType,
-                                          String reason, String actorType, String actorId) {
+                                          String reason, String speakerId, String speakerName, boolean shared,
+                                          String actorType, String actorId) {
         String maintenanceModelId = getMaintenanceLlmModelId(agent);
         if (StringUtils.isBlank(text)) {
             return false;
@@ -480,7 +292,8 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         if (StringUtils.isBlank(maintenanceModelId)) {
             throw new IllegalStateException("未配置记忆维护模型");
         }
-        String existingMemories = buildMaintenanceMemoryContext(agent.getId(), scopeId);
+        SpeakerIdentity speaker = instructionSpeaker(speakerId, speakerName, shared);
+        String existingMemories = buildInstructionMemoryContext(agent.getId(), scopeId, speaker);
         String prompt = PowerMemPrompts.FORGET_COMMAND_PROMPT
                 .replace("{text}", text)
                 .replace("{reason}", StringUtils.defaultString(reason))
@@ -497,18 +310,16 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         decision.set("pattern_type", StringUtils.defaultIfBlank(decision.getStr("pattern_type"),
                 StringUtils.defaultIfBlank(patternType, "semantic")));
         decision.set("reason", StringUtils.defaultIfBlank(decision.getStr("reason"), reason));
+        MemorySpeakerUtils.applyInternalIdentity(decision, speaker);
 
         String action = MemoryHelper.normalizeAction(decision.getStr("action"));
         boolean changed = applyMaintenanceDecision(agent, scopeId, null, decision, maintenanceModelId, false, null);
-        if ("NONE".equals(action) || !changed) {
+        if (("NONE".equals(action) || !changed) && !speaker.recognized()) {
             MemoryForgetTombstoneEntity tombstone = createForgetTombstone(agent, scopeId,
                     StringUtils.defaultIfBlank(decision.getStr("tombstone_pattern"), text),
                     StringUtils.defaultIfBlank(decision.getStr("reason"), "显式忘记"),
                     null, actorType, actorId);
             changed = tombstone != null || changed;
-        }
-        if (!changed) {
-            changed = archiveFactsMatchingPattern(agent, scopeId, text, maintenanceModelId, actorType, actorId) > 0;
         }
         writeRevision(agent.getId(), null, "forget_instruction",
                 JsonUtils.toJsonString(Map.of("text", text,
@@ -518,108 +329,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         return changed;
     }
 
-    /**
-     * 每日定时（凌晨 3:00）对激活记忆执行艾宾浩斯衰减。
-     * 计算 retention = initialRetention * exp(-decayRate * days_since_last_seen)，
-     * 低于 {@link MemoryTierHelper#FORGET_THRESHOLD} 的记忆自动归档。
-     *
-     * <p>参见 {@link MemoryTierHelper} 中各层级的衰减率与半衰期。</p>
-     */
-    @Scheduled(cron = "0 0 3 * * ?")
-    public void applyDecayToActiveFacts() {
-        List<MemoryFactEntity> facts = factDao.selectList(
-                new QueryWrapper<MemoryFactEntity>()
-                        .eq("status", MemoryHelper.STATUS_ACTIVE)
-                        .and(w -> w.isNotNull("memory_tier").or().isNotNull("expires_at"))
-        );
-        if (facts.isEmpty()) {
-            return;
-        }
-        long now = System.currentTimeMillis();
-        int archived = 0;
-        for (MemoryFactEntity fact : facts) {
-            try {
-                boolean expired = fact.getExpiresAt() != null && fact.getExpiresAt().getTime() <= now;
-                if (expired) {
-                    String before = JsonUtils.toJsonString(fact);
-                    fact.setStatus(MemoryHelper.STATUS_ARCHIVED);
-                    fact.setValidTo(new Date(now));
-                    fact.setArchivedAt(new Date(now));
-                    fact.setUpdatedAt(new Date(now));
-                    factDao.updateById(fact);
-                    writeRevision(fact.getAgentId(), fact.getMemoryId(), "decay_archive", before,
-                            JsonUtils.toJsonString(fact), "system", "scheduler",
-                            "记忆到达生命周期过期时间，自动归档");
-                    archived++;
-                    continue;
-                }
-                String tierName = fact.getMemoryTier();
-                if (StringUtils.isBlank(tierName)) continue;
-                MemoryTierHelper.Tier tier = MemoryTierHelper.Tier.valueOf(tierName.toUpperCase());
-                double decayRate = MemoryTierHelper.getDecayRate(tier);
-                double initialRetention = MemoryTierHelper.getInitialRetention(tier);
-
-                Date lastSeen = fact.getLastSeenAt();
-                if (lastSeen == null) lastSeen = fact.getCreatedAt();
-                if (lastSeen == null) continue;
-
-                double daysSinceLastSeen = (now - lastSeen.getTime()) / (1000.0 * 60 * 60 * 24);
-                double retention = initialRetention * Math.exp(-decayRate * daysSinceLastSeen);
-
-                if (retention < MemoryTierHelper.FORGET_THRESHOLD) {
-                    String before = JsonUtils.toJsonString(fact);
-                    fact.setStatus(MemoryHelper.STATUS_ARCHIVED);
-                    fact.setValidTo(new Date(now));
-                    fact.setArchivedAt(new Date(now));
-                    fact.setUpdatedAt(new Date(now));
-                    factDao.updateById(fact);
-                    writeRevision(fact.getAgentId(), fact.getMemoryId(), "decay_archive", before,
-                            JsonUtils.toJsonString(fact), "system", "scheduler",
-                            "艾宾浩斯衰减至阈值以下，自动归档: retention=" + String.format("%.4f", retention));
-                    archived++;
-                }
-            } catch (Exception e) {
-                log.warn("applyDecayToActiveFacts: 处理事实 {} 时异常: {}", fact.getMemoryId(), e.getMessage());
-            }
-        }
-        if (archived > 0) {
-            log.info("applyDecayToActiveFacts: 已归档 {} 条记忆", archived);
-        }
-    }
-
     // ===================== 管线私有方法 =====================
-
-    private String buildDecisionPrompt(JSONObject factJson, List<MemoryFactEntity> existingFacts,
-                                       String evidenceContext, int currentMemoryChars) {
-        StringBuilder existingBlock = new StringBuilder();
-        if (existingFacts == null || existingFacts.isEmpty()) {
-            existingBlock.append("（当前作用域无已有长期记忆）");
-        } else {
-            for (int i = 0; i < existingFacts.size(); i++) {
-                MemoryFactEntity f = existingFacts.get(i);
-                existingBlock.append(i + 1).append(". id=").append(f.getMemoryId())
-                        .append(" importance=").append(f.getImportance())
-                        .append(" confidence=").append(f.getConfidence())
-                        .append(" category=").append(f.getCategory())
-                        .append(" text=").append(f.getCanonicalText())
-                        .append("\n");
-            }
-        }
-
-        return PowerMemPrompts.DECISION_PROMPT
-                .replace("{fact_text}", factJson.getStr("text", factJson.getStr("canonical_text")))
-                .replace("{fact_category}", StringUtils.defaultString(factJson.getStr("category"), "未分类"))
-                .replace("{fact_memory_type}", StringUtils.defaultString(factJson.getStr("memory_type"), "长期记忆"))
-                .replace("{fact_confidence}", String.valueOf(factJson.get("confidence") != null
-                        ? factJson.get("confidence") : 0.7))
-                .replace("{fact_importance}", String.valueOf(factJson.get("importance") != null
-                        ? factJson.get("importance") : 0.7))
-                .replace("{existing_count}", String.valueOf(existingFacts == null ? 0 : existingFacts.size()))
-                .replace("{existing_memories}", existingBlock.toString())
-                .replace("{current_memory_chars}", String.valueOf(currentMemoryChars))
-                .replace("{max_memory_chars}", String.valueOf(memorySettingsService.activeContextMaxChars()))
-                .replace("{evidence_context}", StringUtils.defaultIfBlank(evidenceContext, "无可用对话证据"));
-    }
 
     private List<MemoryFactEntity> loadMaintenanceFacts(String agentId) {
         QueryWrapper<MemoryFactEntity> wrapper = new QueryWrapper<MemoryFactEntity>()
@@ -705,27 +415,6 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         if ("NONE".equals(action)) {
             return false;
         }
-        MemoryAutoWriteGate.Result writeGate = "ADD".equals(action)
-                ? MemoryAutoWriteGate.evaluate(json)
-                : new MemoryAutoWriteGate.Result(true, "not_add");
-        if ("ADD".equals(action) && !writeGate.allowed()) {
-            log.info("维护模型 ADD 未通过自动写入门控，跳过写入: reason={}, text={}, importance={}, confidence={}",
-                    writeGate.reason(),
-                    MemoryHelper.cleanupMemoryText(json.getStr("canonical_text")),
-                    json.get("importance"), json.get("confidence"));
-            if (result != null) {
-                result.setSkippedLowQuality(result.getSkippedLowQuality() + 1);
-            }
-            return false;
-        }
-        if ("ADD".equals(action) && isBlockedByTombstone(agent.getId(), scopeId, json.getStr("canonical_text"))) {
-            log.info("维护模型 ADD 命中忘记规则，跳过写入: text={}",
-                    MemoryHelper.cleanupMemoryText(json.getStr("canonical_text")));
-            if (result != null) {
-                result.setSkippedLowQuality(result.getSkippedLowQuality() + 1);
-            }
-            return false;
-        }
         if (dryRun) {
             MemoryCandidateEntity preview = buildCandidate(agent, scopeId, sourceEventId, json, modelId, action);
             if (preview != null && result != null) {
@@ -751,7 +440,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         payload.set("reason", StringUtils.defaultString(json.getStr("reason")));
         payload.set("source", MemoryHelper.MAINTENANCE_EXTRACTOR_VERSION);
         payload.set("maintenance_llm", modelId);
-        payload.set("memory_tier", resolveMemoryTier(json.getStr("memory_tier"), importance));
+        payload.set("memory_tier", resolveMemoryTier(json.getStr("memory_tier")));
         payload.set("importance_dimensions", json.get("importance_dimensions"));
         MemorySpeakerUtils.applyPayloadIdentity(payload, json);
 
@@ -840,7 +529,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         BigDecimal importance = MemoryHelper.score(json.get("importance"), MemoryHelper.DEFAULT_SCORE);
         String relatedId = StringUtils.trimToEmpty(json.getStr("related_memory_id"));
         String sensitivity = resolveSensitivity(json, canonical);
-        String tier = resolveMemoryTier(json.getStr("memory_tier"), importance);
+        String tier = resolveMemoryTier(json.getStr("memory_tier"));
         String dimensionsJson = extractDimensionsJson(json);
 
         if ("UPDATE".equals(action) && StringUtils.isNotBlank(relatedId)) {
@@ -865,7 +554,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                     existingDuplicate.setImportance(MemoryHelper.max(existingDuplicate.getImportance(), importance));
                     existingDuplicate.setConfidence(MemoryHelper.max(existingDuplicate.getConfidence(), confidence));
                     existingDuplicate.setMemoryTier(tier);
-                    existingDuplicate.setExpiresAt(resolveExpiresAt(tier));
+                    existingDuplicate.setExpiresAt(null);
                     existingDuplicate.setLastSeenAt(new Date());
                     existingDuplicate.setUpdatedAt(new Date());
                     factDao.updateById(existingDuplicate);
@@ -905,7 +594,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                 fact.setSensitivity(sensitivity);
                 if (StringUtils.isNotBlank(dimensionsJson)) fact.setImportanceDimensions(dimensionsJson);
                 fact.setMemoryTier(tier);
-                fact.setExpiresAt(resolveExpiresAt(tier));
+                fact.setExpiresAt(null);
                 fact.setPayload(mergeFactPayload(fact.getPayload(), json, modelId));
                 fact.setStatus(MemoryHelper.STATUS_ACTIVE);
                 fact.setLastSeenAt(new Date());
@@ -931,13 +620,6 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         // ADD
         String hash = MemoryHelper.sha256(
                 agent.getId() + "|" + scopeId + "|" + speakerHashKey(json) + "|" + canonical);
-        if (isBlockedByTombstone(agent.getId(), scopeId, canonical)) {
-            log.info("维护模型创建事实命中忘记规则，已跳过: text={}", canonical);
-            if (result != null) {
-                result.setSkippedLowQuality(result.getSkippedLowQuality() + 1);
-            }
-            return false;
-        }
         if (factDao.selectCount(new QueryWrapper<MemoryFactEntity>()
                 .eq("agent_id", agent.getId()).eq("scope_type", MemoryHelper.SCOPE_DEVICE)
                 .eq("scope_id", scopeId).eq("source_hash", hash)
@@ -970,7 +652,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         fact.setConfirmationState("auto");
         fact.setStatus(MemoryHelper.STATUS_ACTIVE);
         fact.setMemoryTier(tier);
-        fact.setExpiresAt(resolveExpiresAt(tier));
+        fact.setExpiresAt(null);
         if (StringUtils.isNotBlank(dimensionsJson)) fact.setImportanceDimensions(dimensionsJson);
         fact.setValidFrom(new Date());
         fact.setFirstSeenAt(new Date());
@@ -1102,74 +784,6 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         return tombstone;
     }
 
-    private boolean isBlockedByTombstone(String agentId, String scopeId, String text) {
-        String canonical = compactForTombstoneMatch(text);
-        if (StringUtils.isBlank(canonical)) {
-            return false;
-        }
-        List<MemoryForgetTombstoneEntity> tombstones = tombstoneDao.selectList(
-                new QueryWrapper<MemoryForgetTombstoneEntity>()
-                        .eq("agent_id", agentId)
-                        .eq("scope_type", MemoryHelper.SCOPE_DEVICE)
-                        .and(w -> w.eq("scope_id", scopeId).or().eq("scope_id", agentId))
-                        .eq("status", MemoryHelper.STATUS_ACTIVE)
-                        .orderByDesc("created_at")
-                        .last("LIMIT 100"));
-        for (MemoryForgetTombstoneEntity tombstone : tombstones) {
-            if (matchesTombstone(canonical, tombstone)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private int archiveFactsMatchingPattern(AgentEntity agent, String scopeId, String pattern, String modelId,
-                                            String actorType, String actorId) {
-        String compactPattern = compactForTombstoneMatch(pattern);
-        if (StringUtils.isBlank(compactPattern)) {
-            return 0;
-        }
-        List<MemoryFactEntity> facts = factDao.selectList(new QueryWrapper<MemoryFactEntity>()
-                .eq("agent_id", agent.getId())
-                .eq("scope_type", MemoryHelper.SCOPE_DEVICE)
-                .and(w -> w.eq("scope_id", scopeId).or().eq("scope_id", agent.getId()))
-                .eq("status", MemoryHelper.STATUS_ACTIVE)
-                .orderByDesc("importance", "last_seen_at")
-                .last("LIMIT 100"));
-        int changed = 0;
-        for (MemoryFactEntity fact : facts) {
-            String factText = compactForTombstoneMatch(fact.getCanonicalText());
-            if (!factText.contains(compactPattern) && !compactPattern.contains(factText)) {
-                continue;
-            }
-            String before = JsonUtils.toJsonString(fact);
-            fact.setStatus(MemoryHelper.STATUS_DELETED);
-            fact.setValidTo(new Date());
-            fact.setUpdatedAt(new Date());
-            factDao.updateById(fact);
-            writeRevision(agent.getId(), fact.getMemoryId(), "delete_from_forget_instruction", before,
-                    JsonUtils.toJsonString(fact), actorType, StringUtils.defaultIfBlank(actorId, modelId),
-                    "显式忘记匹配事实");
-            changed++;
-        }
-        return changed;
-    }
-
-    private boolean matchesTombstone(String compactText, MemoryForgetTombstoneEntity tombstone) {
-        if (tombstone == null) {
-            return false;
-        }
-        String pattern = compactForTombstoneMatch(tombstone.getPatternText());
-        return StringUtils.isNotBlank(pattern)
-                && (compactText.contains(pattern) || pattern.contains(compactText));
-    }
-
-    private String compactForTombstoneMatch(String text) {
-        return MemoryHelper.cleanupMemoryText(text)
-                .replaceAll("[\\p{Punct}\\s，。！？、；：]+", "")
-                .toLowerCase();
-    }
-
     private String resolveSensitivity(JSONObject json, String canonicalText) {
         return MemoryHelper.normalizeSensitivity(json == null ? null : json.getStr("sensitivity"));
     }
@@ -1184,25 +798,9 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         }
     }
 
-    private String resolveMemoryTier(String rawTier, BigDecimal importance) {
+    private String resolveMemoryTier(String rawTier) {
         String tier = MemoryHelper.normalizeMemoryTier(rawTier);
-        if (StringUtils.isNotBlank(tier)) {
-            return tier;
-        }
-        MemoryTierHelper.Tier classified = MemoryTierHelper.classifyTier(
-                importance == null ? MemoryHelper.DEFAULT_SCORE.doubleValue() : importance.doubleValue());
-        return classified.name().toLowerCase();
-    }
-
-    private Date resolveExpiresAt(String tier) {
-        String normalized = MemoryHelper.normalizeMemoryTier(tier);
-        if ("working".equals(normalized)) {
-            return Date.from(Instant.now().plus(MemoryHelper.WORKING_MEMORY_TTL_HOURS, ChronoUnit.HOURS));
-        }
-        if ("short_term".equals(normalized)) {
-            return Date.from(Instant.now().plus(MemoryHelper.SHORT_TERM_MEMORY_TTL_DAYS, ChronoUnit.DAYS));
-        }
-        return null;
+        return StringUtils.defaultIfBlank(tier, "long_term");
     }
 
     private String buildActiveFactsReviewContext(List<MemoryFactEntity> facts) {
@@ -1316,40 +914,6 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         return defaultScopeId;
     }
 
-    private void rebuildConversation(AgentEntity agent, String scopeId, String conversation, boolean dryRun,
-                                     MemoryRebuildResultVO result) {
-        String maintenanceModelId = getMaintenanceLlmModelId(agent);
-        if (StringUtils.isBlank(maintenanceModelId)) {
-            return;
-        }
-        String extractionPrompt = PowerMemPrompts.EXTRACTION_PROMPT.replace("{conversation}", conversation);
-        String extractionOutput = llmService.generateJson(extractionPrompt, maintenanceModelId);
-        JSONArray facts = outputParser.parseExtractionResult(extractionOutput);
-        if (facts == null || facts.isEmpty()) {
-            return;
-        }
-        for (Object item : facts) {
-            JSONObject factJson = MemoryHelper.toJsonObject(item);
-            if (factJson == null) continue;
-            List<MemoryFactEntity> existingFacts = loadMaintenanceFacts(agent.getId());
-            String decisionOutput = llmService.generateJson(
-                    buildDecisionPrompt(factJson, existingFacts, conversation,
-                            totalMemoryChars(loadMaintenanceFacts(agent.getId()))), maintenanceModelId);
-            JSONObject decision = outputParser.parseDecisionResult(decisionOutput);
-            if (decision == null) continue;
-            outputParser.mergeExtractionIntoDecision(factJson, decision);
-            attachUserEvidence(decision, conversation);
-            String action = MemoryHelper.normalizeAction(decision.getStr("action"));
-            if (applyMaintenanceDecision(agent, scopeId, null, decision, maintenanceModelId, dryRun, result)) {
-                if ("UPDATE".equals(action) || "DELETE".equals(action)) {
-                    result.setFactsChanged(result.getFactsChanged() + 1);
-                } else if ("ADD".equals(action)) {
-                    result.setCandidatesCreated(result.getCandidatesCreated() + 1);
-                }
-            }
-        }
-    }
-
     // ===================== 共享辅助方法 =====================
 
     private String buildMaintenanceMemoryContext(String agentId, String scopeId) {
@@ -1361,9 +925,28 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                     .or()
                     .eq("scope_type", MemoryHelper.SCOPE_DEVICE).eq("scope_id", agentId));
         }
-        List<MemoryFactEntity> facts = factDao.selectList(wrapper
+        return formatMaintenanceMemoryContext(factDao.selectList(wrapper
                 .orderByDesc("importance", "last_seen_at")
-                .last("LIMIT 30"));
+                .last("LIMIT 30")));
+    }
+
+    private String buildInstructionMemoryContext(String agentId, String scopeId, SpeakerIdentity speaker) {
+        List<MemoryFactEntity> visibleFacts = speaker.recognized()
+                ? loadMaintenanceFactsForSpeaker(agentId, speaker.id())
+                : loadMaintenanceFacts(agentId).stream()
+                        .filter(fact -> StringUtils.isBlank(MemorySpeakerUtils.payloadSpeakerId(fact)))
+                        .toList();
+        List<MemoryFactEntity> facts = visibleFacts.stream()
+                .filter(fact -> StringUtils.isBlank(scopeId)
+                        || agentId.equals(scopeId)
+                        || scopeId.equals(fact.getScopeId())
+                        || agentId.equals(fact.getScopeId()))
+                .limit(30)
+                .toList();
+        return formatMaintenanceMemoryContext(facts);
+    }
+
+    private String formatMaintenanceMemoryContext(List<MemoryFactEntity> facts) {
         if (facts.isEmpty()) {
             return "无已有长期记忆";
         }
@@ -1376,6 +959,17 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                     .append("\n");
         }
         return builder.toString();
+    }
+
+    private SpeakerIdentity instructionSpeaker(String speakerId, String speakerName, boolean shared) {
+        if (shared) {
+            return SpeakerIdentity.shared();
+        }
+        String normalizedId = StringUtils.trimToEmpty(speakerId);
+        if (StringUtils.isBlank(normalizedId)) {
+            throw new IllegalArgumentException("私有记忆缺少可信说话人身份");
+        }
+        return new SpeakerIdentity(normalizedId, StringUtils.trimToEmpty(speakerName));
     }
 
     private String getMaintenanceLlmModelId(AgentEntity agent) {

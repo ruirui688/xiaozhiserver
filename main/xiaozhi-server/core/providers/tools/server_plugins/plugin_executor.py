@@ -79,6 +79,8 @@ class ServerPluginExecutor(ToolExecutor):
         necessary_functions = ["handle_exit_intent", "get_lunar"]
         if is_meeting_mode_enabled(self.conn):
             necessary_functions.append("meeting_minutes")
+        if self._is_managed_memory_enabled():
+            necessary_functions.append("manage_memory")
 
         # 获取配置中的函数
         selected_intent = self.config.get("selected_module", {}).get("Intent")
@@ -110,6 +112,11 @@ class ServerPluginExecutor(ToolExecutor):
                 continue
             if (
                 func_name == "meeting_minutes"
+                and getattr(self.conn, "intent_type", None) != "function_call"
+            ):
+                continue
+            if (
+                func_name == "manage_memory"
                 and getattr(self.conn, "intent_type", None) != "function_call"
             ):
                 continue
@@ -152,6 +159,13 @@ class ServerPluginExecutor(ToolExecutor):
                 tools[func_name] = declarative_tool
 
         return tools
+
+    def _is_managed_memory_enabled(self) -> bool:
+        selected_memory = self.config.get("selected_module", {}).get("Memory")
+        if not selected_memory:
+            return False
+        memory_config = self.config.get("Memory", {}).get(selected_memory, {})
+        return memory_config.get("type") == "managed_memory"
 
     def has_tool(self, tool_name: str) -> bool:
         """检查是否有指定的服务端插件工具"""

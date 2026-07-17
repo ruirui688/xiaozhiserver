@@ -101,6 +101,17 @@ LLM / intent_llm 选择 play_music
 
 其中 `MIDDLE/TEXT` 是“即将为您播放/正在为您播放 具体歌曲”这类选曲提示语，必须按普通 TTS 播出；不要只发屏幕状态消息。`MIDDLE/FILE` 是真实本地音乐文件，流式 TTS provider 会依赖后续 `LAST/ACTION` 把暂存音频 flush 到设备。播放、唱某首歌、随机播放和曲库查询不应再由旧意图入口硬编码派发；模型应根据 `play_music` 工具描述、`<music_library>` 曲库上下文和用户表达决定是否调用工具。
 
+托管长期记忆的 `manage_memory` 也是内置执行型工具，但不是后台可配置的业务插件。选择 `managed_memory` 且主聊天支持原生 function call 时，运行时把它作为系统能力注册给主 LLM：
+
+```text
+主 LLM 自主决定调用 manage_memory
+  -> remember | forget
+  -> private | shared
+  -> manager-api 维护模型做结构化、去重和真实 ID 选择
+```
+
+工具注册只检查记忆 provider 和 function-call 能力，不检查用户说了什么。工具描述及执行链路不得加入固定人物、关键词、条件任务、场景黑白名单、TTL 或相似度规则。
+
 ### 声明式互动型
 
 适用于不需要服务端代码执行、主要靠 LLM 维持规则的轻量互动玩法，例如：

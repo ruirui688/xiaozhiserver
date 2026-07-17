@@ -28,7 +28,7 @@
 | `mem_local_short` | 本地短摘要 | 可通过原有总结链路 | 兼容 `summaryMemory`，不是可审计长期事实层 |
 | `powermem` | PowerMem provider 接入 | PowerMem 自身使用 LLM 和向量检索 | 运行时 provider 私有存储，适合独立 PowerMem 部署 |
 | `mem0ai` | 第三方记忆服务 | 由第三方服务决定 | 外部服务存储和检索 |
-| `managed_memory` | 智控台治理记忆 | 通过 `maintenance_llm` 抽取候选 | manager-api 事实层、候选确认、审计、忘记名单和运行时查询 |
+| `managed_memory` | 智控台治理记忆 | 主对话 LLM 主动调用工具，`maintenance_llm` 结构化维护 | manager-api 事实层、候选确认、审计、忘记名单和运行时查询 |
 
 `managed_memory` 不替代 PowerMem provider。它吸收 PowerMem 的长期检索、用户画像、经验沉淀和异步维护方向，但把状态和权限收束到本项目已有的 `manager-api`、MySQL、Web 管理端和设备/智能体作用域里。
 
@@ -46,10 +46,10 @@ PowerMem 的原生记忆系统优势包括：
 
 - 不在 Python provider 里继续堆私有长期状态。
 - 不要求用户在记忆配置页重复填写模型密钥。
-- 不让维护模型直接写入 active fact，默认只生成 `pending` 候选。
+- 实时对话只有主模型调用 `manage_memory` 后才允许维护 active fact；历史重建预览仍使用 `pending` 候选。
 - 不绕过管理端确认、删除墓碑和 revision 审计。
 - 不因为记忆查询、维护模型失败或超时阻塞语音主链路。
-- 后续引入向量、全文、图谱或时间衰减时，应优先扩展 manager-api 检索层和事实层投影。
+- 后续引入向量、全文或图谱时，应优先扩展 manager-api 检索层和事实层投影；不得恢复固定时间衰减或自动归档。
 
 ## LLM 辅助记忆保证
 
@@ -66,16 +66,18 @@ PowerMem 的原生记忆系统优势包括：
 
 - `maintenance_llm` 不得保存 `api_key`、`base_url`、`model_name`。
 - 模型调用前必须从模型管理配置读取真实连接参数。
-- `managed_memory` 必须配置维护模型；显式记住、显式忘记、自动抽取和历史重建都通过维护模型输出结构化动作。
-- 维护模型只从用户发言抽取长期稳定事实，不能抽取助手回复、工具结果、临时天气、一次性请求或敏感凭据。
-- 模型输出必须进入 `ai_memory_candidate`，默认 `pending`，由管理端确认后才能进入 `ai_memory_fact`。
+- `managed_memory` 必须配置维护模型；实时写入由主对话 LLM 调用 `manage_memory` 发起，维护模型只做 ADD/UPDATE、真实 ID 选择和结构化治理。
+- 是否记忆、记忆正文、分类、私有/共享可见性以及后续是否使用，全部由主对话 LLM 根据完整语义决定。
+- 提示词和后端不得内置人物、关键词、条件任务、场景黑白名单、置信度阈值、固定 TTL、时间衰减或字符串相似度规则。
+- 原始聊天事件只写证据层，不创建候选或事实；只有管理端历史重建预览继续使用 `pending` 候选。
 
 运行时要求：
 
 - `/config/memory/events` 和 `/config/memory/query` 继续使用 `server.secret`。
 - 记忆查询必须有超时保护，失败时降级为空记忆。
 - `nomem` 模式必须阻断长期记忆注入。
-- 显式忘记必须写 tombstone，并阻止同类内容继续主动使用。
+- 忘记意图可以写 tombstone 并注入主模型；后端不得通过字符串匹配自动过滤事实或阻断未来模型调用。
+- `private` 事实只对当前可信 `speaker_id` 可见，`shared` 事实可供后续任意说话人的对话使用；该选择由主模型调用工具时给出。
 - `managed_memory` 的“保存并测试”应按本地运行时配置处理：必须选择维护模型，并确认被引用的 LLM/SLM 已启用且测试通过。
 
 ## 知识库 LLM 辅助保证

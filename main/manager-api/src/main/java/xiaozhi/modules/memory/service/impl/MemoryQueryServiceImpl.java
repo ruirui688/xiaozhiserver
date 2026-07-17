@@ -1,6 +1,5 @@
 package xiaozhi.modules.memory.service.impl;
 
-import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
@@ -69,7 +68,6 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
         List<MemoryFactEntity> facts = loadActiveFacts(scope, now, dto.getSpeakerId()).stream()
                 .filter(fact -> MemorySpeakerUtils.isVisibleToSpeaker(fact, dto.getSpeakerId()))
                 .toList();
-        facts = filterBlockedFacts(facts, activeTombstones, vo);
         if (facts.isEmpty()) {
             vo.getDebugSignals().add("memory_full_context_no_active_facts");
         } else {
@@ -185,46 +183,6 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
                 .orderByDesc("created_at")
                 .last("LIMIT 50");
         return tombstoneDao.selectList(tombstoneWrapper);
-    }
-
-    private List<MemoryFactEntity> filterBlockedFacts(List<MemoryFactEntity> facts,
-                                                      List<MemoryForgetTombstoneEntity> tombstones,
-                                                      MemoryQueryVO vo) {
-        if (facts == null || facts.isEmpty() || tombstones == null || tombstones.isEmpty()) {
-            return facts == null ? List.of() : facts;
-        }
-        List<MemoryFactEntity> filtered = new ArrayList<>();
-        for (MemoryFactEntity fact : facts) {
-            MemoryForgetTombstoneEntity matched = findMatchedTombstone(fact, tombstones);
-            if (matched == null) {
-                filtered.add(fact);
-            } else {
-                vo.getMatchedTombstones().add(matched);
-                vo.getDebugSignals().add("fact_blocked_by_tombstone:" + fact.getMemoryId());
-            }
-        }
-        return filtered;
-    }
-
-    private MemoryForgetTombstoneEntity findMatchedTombstone(MemoryFactEntity fact,
-                                                            List<MemoryForgetTombstoneEntity> tombstones) {
-        String text = compactForTombstoneMatch(fact == null ? null : fact.getCanonicalText());
-        if (StringUtils.isBlank(text)) {
-            return null;
-        }
-        for (MemoryForgetTombstoneEntity tombstone : tombstones) {
-            String pattern = compactForTombstoneMatch(tombstone.getPatternText());
-            if (StringUtils.isNotBlank(pattern) && (text.contains(pattern) || pattern.contains(text))) {
-                return tombstone;
-            }
-        }
-        return null;
-    }
-
-    private String compactForTombstoneMatch(String text) {
-        return MemoryHelper.cleanupMemoryText(text)
-                .replaceAll("[\\p{Punct}\\s，。！？、；：]+", "")
-                .toLowerCase();
     }
 
     /**

@@ -11,7 +11,7 @@
           <el-option v-for="s in speakers" :key="s.value" :label="s.label" :value="s.value" />
         </el-select>
         <el-select v-model="filterState" placeholder="来源" clearable size="small" style="width:110px">
-          <el-option label="自动抽取" value="auto" />
+          <el-option label="模型调用" value="auto" />
           <el-option label="手动创建" value="manual" />
         </el-select>
         <el-select v-model="filterTier" placeholder="层级" clearable size="small" style="width:110px">
@@ -40,7 +40,7 @@
       class="transparent-table"
       @row-click="handleRowClick"
       @selection-change="handleSelectionChange"
-      empty-text="暂无记忆数据。开始与智能体对话后，系统将自动抽取记忆。">
+      empty-text="暂无记忆数据。主对话模型调用记忆工具后会在这里显示。">
       <el-table-column type="selection" width="40" />
       <el-table-column label="记忆内容" min-width="240" show-overflow-tooltip>
         <template slot-scope="{row}">

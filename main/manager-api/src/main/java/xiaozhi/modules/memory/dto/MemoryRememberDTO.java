@@ -8,4 +8,7 @@ public class MemoryRememberDTO {
     private String agentId;
     private String text;
     private String category;
+    private String speakerId;
+    private String speakerName;
+    private Boolean shared;
 }

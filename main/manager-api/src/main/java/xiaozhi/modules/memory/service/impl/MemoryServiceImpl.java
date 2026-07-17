@@ -1,8 +1,6 @@
 package xiaozhi.modules.memory.service.impl;
 
 import java.math.BigDecimal;
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.Date;
 import java.util.List;
 
@@ -27,7 +25,6 @@ import xiaozhi.modules.memory.dao.MemoryFactDao;
 import xiaozhi.modules.memory.dao.MemoryForgetTombstoneDao;
 import xiaozhi.modules.memory.dao.MemoryProfileDao;
 import xiaozhi.modules.memory.dao.MemoryRevisionDao;
-import xiaozhi.modules.memory.dao.MemorySessionStateDao;
 import xiaozhi.modules.memory.dao.MemorySourceEventDao;
 import xiaozhi.modules.memory.dao.MemoryToolBehaviorDao;
 import xiaozhi.modules.memory.dto.MemoryEventDTO;
@@ -48,7 +45,6 @@ import xiaozhi.modules.memory.service.MemoryQueryService;
 import xiaozhi.modules.memory.service.MemorySettingsService;
 import xiaozhi.modules.memory.service.MemoryService;
 import xiaozhi.modules.memory.utils.MemoryHelper;
-import xiaozhi.modules.memory.utils.MemoryTierHelper;
 import xiaozhi.modules.memory.vo.MemoryDashboardVO;
 import xiaozhi.modules.memory.vo.MemoryQueryVO;
 import xiaozhi.modules.memory.vo.MemoryRebuildResultVO;
@@ -67,7 +63,6 @@ public class MemoryServiceImpl implements MemoryService {
     private final MemoryProfileDao profileDao;
     private final MemoryToolBehaviorDao toolBehaviorDao;
     private final MemoryForgetTombstoneDao tombstoneDao;
-    private final MemorySessionStateDao sessionStateDao;
     private final DeviceDao deviceDao;
     private final AgentDao agentDao;
 
@@ -108,12 +103,6 @@ public class MemoryServiceImpl implements MemoryService {
         event.setCreatedAt(new Date());
         sourceEventDao.insert(event);
 
-        if (StringUtils.isNotBlank(content)
-                && StringUtils.isNotBlank(event.getSessionId())
-                && event.getId() != null) {
-            sessionStateDao.touchSession(scope.agent.getId(), event.getSessionId(), event.getId(),
-                    event.getCreatedAt(), Integer.valueOf(1).equals(dto.getChatType()));
-        }
     }
 
     @Override
@@ -123,8 +112,11 @@ public class MemoryServiceImpl implements MemoryService {
         if (scope.agent == null || StringUtils.isBlank(dto.getText())) {
             return;
         }
+        boolean shared = dto.getShared() != null
+                ? dto.getShared()
+                : StringUtils.isBlank(dto.getSpeakerId());
         memoryMaintenanceService.applyRememberInstruction(scope.agent, scope.scopeId, dto.getText(),
-                dto.getCategory(), actorType, actorId);
+                dto.getCategory(), dto.getSpeakerId(), dto.getSpeakerName(), shared, actorType, actorId);
     }
 
     @Override
@@ -134,8 +126,12 @@ public class MemoryServiceImpl implements MemoryService {
         if (scope.agent == null || StringUtils.isBlank(dto.getText())) {
             return;
         }
+        boolean shared = dto.getShared() != null
+                ? dto.getShared()
+                : StringUtils.isBlank(dto.getSpeakerId());
         memoryMaintenanceService.applyForgetInstruction(scope.agent, scope.scopeId, dto.getText(),
-                dto.getPatternType(), dto.getReason(), actorType, actorId);
+                dto.getPatternType(), dto.getReason(), dto.getSpeakerId(), dto.getSpeakerName(), shared,
+                actorType, actorId);
     }
 
     @Override
@@ -266,11 +262,6 @@ public class MemoryServiceImpl implements MemoryService {
     }
 
     @Override
-    public int processSessionMemories(String sessionId, String agentId) {
-        return memoryMaintenanceService.processSessionMemories(sessionId, agentId);
-    }
-
-    @Override
     @Transactional(rollbackFor = Exception.class)
     public MemoryRebuildResultVO clearMemories(String agentId, String actorType, String actorId) {
         return memoryMaintenanceService.clearMemories(agentId, actorType, actorId);
@@ -350,7 +341,7 @@ public class MemoryServiceImpl implements MemoryService {
         JSONObject payload = MemoryHelper.parsePayload(candidate.getPayload());
         String action = MemoryHelper.normalizeCandidateAction(payload.getStr("action"));
         String relatedMemoryId = payload.getStr("related_memory_id");
-        String tier = resolveMemoryTier(payload.getStr("memory_tier"), candidate.getImportance());
+        String tier = resolveMemoryTier(payload.getStr("memory_tier"));
         MemoryFactEntity relatedFact = findRelatedFact(scope.agent.getId(), relatedMemoryId);
         if (("ARCHIVE".equals(action) || "DELETE".equals(action)) && relatedFact != null) {
             String before = JsonUtils.toJsonString(relatedFact);
@@ -378,7 +369,7 @@ public class MemoryServiceImpl implements MemoryService {
             relatedFact.setImportance(MemoryHelper.max(relatedFact.getImportance(), candidate.getImportance()));
             relatedFact.setSensitivity(MemoryHelper.normalizeSensitivity(candidate.getSensitivity()));
             relatedFact.setMemoryTier(tier);
-            relatedFact.setExpiresAt(resolveExpiresAt(tier));
+            relatedFact.setExpiresAt(null);
             relatedFact.setStatus(MemoryHelper.STATUS_ACTIVE);
             relatedFact.setLastSeenAt(new Date());
             relatedFact.setUpdatedAt(new Date());
@@ -441,7 +432,7 @@ public class MemoryServiceImpl implements MemoryService {
         fact.setStatus(MemoryHelper.STATUS_ACTIVE);
         if (StringUtils.isNotBlank(memoryTier)) {
             fact.setMemoryTier(memoryTier);
-            fact.setExpiresAt(resolveExpiresAt(memoryTier));
+            fact.setExpiresAt(null);
         }
         fact.setValidFrom(new Date());
         fact.setFirstSeenAt(new Date());
@@ -543,25 +534,9 @@ public class MemoryServiceImpl implements MemoryService {
         return merged.toString();
     }
 
-    private String resolveMemoryTier(String rawTier, BigDecimal importance) {
+    private String resolveMemoryTier(String rawTier) {
         String tier = MemoryHelper.normalizeMemoryTier(rawTier);
-        if (StringUtils.isNotBlank(tier)) {
-            return tier;
-        }
-        MemoryTierHelper.Tier classified = MemoryTierHelper.classifyTier(
-                importance == null ? MemoryHelper.DEFAULT_SCORE.doubleValue() : importance.doubleValue());
-        return classified.name().toLowerCase();
-    }
-
-    private Date resolveExpiresAt(String tier) {
-        String normalized = MemoryHelper.normalizeMemoryTier(tier);
-        if ("working".equals(normalized)) {
-            return Date.from(Instant.now().plus(MemoryHelper.WORKING_MEMORY_TTL_HOURS, ChronoUnit.HOURS));
-        }
-        if ("short_term".equals(normalized)) {
-            return Date.from(Instant.now().plus(MemoryHelper.SHORT_TERM_MEMORY_TTL_DAYS, ChronoUnit.DAYS));
-        }
-        return null;
+        return StringUtils.defaultIfBlank(tier, "long_term");
     }
 
     private record AgentScope(AgentEntity agent, String scopeId) {

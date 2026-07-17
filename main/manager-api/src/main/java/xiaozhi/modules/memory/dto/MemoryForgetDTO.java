@@ -9,4 +9,7 @@ public class MemoryForgetDTO {
     private String text;
     private String patternType;
     private String reason;
+    private String speakerId;
+    private String speakerName;
+    private Boolean shared;
 }
