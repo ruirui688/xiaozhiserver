@@ -11,6 +11,7 @@ from core.utils.dialogue import Message
 from core.utils.util import audio_to_data
 from core.providers.tts.dto.dto import SentenceType
 from core.utils.wakeup_word import WakeupWordsConfig
+from core.handle.reportHandle import enqueue_tts_report
 from core.handle.sendAudioHandle import sendAudioMessage, send_tts_message
 from core.utils.util import remove_punctuation_and_length, opus_datas_to_wav_bytes
 from core.providers.tools.device_mcp import MCPClient, send_mcp_initialize_message
@@ -121,6 +122,12 @@ async def checkWakeupWords(conn: "ConnectionHandler", text):
     conn.logger.bind(tag=TAG).info(f"播放唤醒词回复: {response.get('text')}")
     await sendAudioMessage(conn, SentenceType.FIRST, opus_packets, response.get("text"))
     await sendAudioMessage(conn, SentenceType.LAST, [], None)
+
+    # 唤醒加速直接发送缓存音频，不经过 TTS provider 的统一上报点。
+    # 设备已经真实播放的助手回复仍应如实进入聊天记录。
+    response_text = str(response.get("text") or "").strip()
+    if response_text:
+        enqueue_tts_report(conn, response_text, opus_packets)
 
     # 补充对话
     conn.dialogue.put(Message(role="assistant", content=response.get("text")))

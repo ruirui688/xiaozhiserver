@@ -96,15 +96,16 @@ class ListenTextMessageHandler(TextMessageHandler):
                 if is_wakeup_words and not enable_greeting:
                     # 如果是唤醒词，且关闭了唤醒词回复，就不用回答
                     arm_wakeup_vad_ignore(conn)
+                    enqueue_asr_report(conn, original_text, [])
                     await send_stt_message(conn, original_text)
                     await send_tts_message(conn, "stop", None)
                     conn.client_is_speaking = False
                 elif is_wakeup_words:
                     arm_wakeup_vad_ignore(conn)
-                    accepted = await startToChat(conn, "嘿，你好呀")
-                    if accepted:
-                        # 上报纯文字数据（复用ASR上报功能，但不提供音频数据）
-                        enqueue_asr_report(conn, "嘿，你好呀", [])
+                    # 聊天记录保存设备真实检测到的唤醒词，不用内部问候语替代证据。
+                    # 先上报用户侧，确保同步播放的缓存回复之后仍按 user -> assistant 排序。
+                    enqueue_asr_report(conn, original_text, [])
+                    await startToChat(conn, "嘿，你好呀")
                 else:
                     arm_wakeup_vad_ignore(conn)
                     # 否则需要LLM对文字内容进行答复
