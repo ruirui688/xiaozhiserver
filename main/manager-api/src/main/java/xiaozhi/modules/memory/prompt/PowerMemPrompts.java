@@ -17,15 +17,15 @@ public final class PowerMemPrompts {
      * <p>不携带已有记忆上下文，仅聚焦当前对话。输出简洁 JSON，降低 LLM Token 消耗。</p>
      */
     public static final String EXTRACTION_PROMPT = """
-            你是小智服务器的长期记忆提取助手。你的任务是从对话中提取**有长期价值的原子事实**。
+            你是小智服务器的长期记忆审计型提取助手。你的任务是从对话中主动发现**有用户侧证据支撑、未来可复用的长期事实和稳定偏好**。
 
             本次对话内容：
             {conversation}
 
             提取要求：
             1. 每条事实必须是一句完整、独立、可验证的中文陈述。
-            2. 只抽取用户提供或用户确认的信息；不要把助手自己的表达写成用户记忆。
-            3. 用户修正旧信息时，只输出修正后的事实。
+            2. 用户不需要说“记住”；你应主动识别用户直接陈述、反复反馈、纠错、否定和交互偏好。
+            3. 助手回复和工具结果只能作为上下文，不能作为 ADD 的唯一事实来源；不要把助手自己的猜测、道歉、总结写成用户记忆。
             4. category、memory_type、importance、memory_tier 由你根据语义自行判断。
             5. confidence 表示事实可信度，importance 表示长期保存价值，取值范围均为 0 到 1。
             6. 只抽取未来对话可能复用的信息；没有可复用记忆价值时返回 {"facts":[]}。
@@ -35,8 +35,11 @@ public final class PowerMemPrompts {
             10. 只返回 JSON，不要解释，不要 Markdown。
             11. 必须根据发言角色解析“我、你、他”等指代；“用户:”后的“我”指用户，“你”通常指助手。
             12. 主体、对象、所属关系、欠款方向、时间起止等不得交换或自行补全；证据不足时不要提取。
-            13. 一次性的请求、设备控制、临时计划、玩笑和助手承诺不等于用户的长期事实，通常不要保存。
-            14. 用户角色如果包含 speaker_id，每条事实必须原样返回其来源 speaker_id；多位用户时不得混淆、遗漏或编造 ID。
+            13. 一次性的请求、设备控制、播放/游戏/会议当前状态、临时计划、故事上下文、玩笑和助手承诺不等于用户的长期事实，通常不要保存。
+            14. “进入会议模式、会议模式来了、正在记录会议、要不要听故事、刚才/这次/现在的状态”等短期表达不得提取为长期事实。
+            15. 用户负反馈可以沉淀为交互偏好，例如“用户偏好直接具体的问题分析”；不得沉淀为助手刚才说错的事实内容。
+            16. 用户角色如果包含 speaker_id，每条事实必须原样返回其来源 speaker_id；多位用户时不得混淆、遗漏或编造 ID。
+            17. 未识别说话人的共享事实必须更严格：只有明确团队、设备、所有人共享的长期事实才可输出空 speaker_id。
 
             JSON 格式：
             {
@@ -44,6 +47,8 @@ public final class PowerMemPrompts {
                 {
                   "text": "可直接写入记忆的中文事实",
                   "speaker_id": "来源用户角色中的真实speaker_id；未识别时为空",
+                  "source_role": "user|assistant|tool；ADD 的事实来源必须是 user",
+                  "evidence_quote": "支持该事实的最短用户原话",
                   "category": "中文分类名",
                   "memory_type": "中文记忆类型",
                   "confidence": 0.0,
@@ -89,7 +94,7 @@ public final class PowerMemPrompts {
             3. 必须核对事实主体、对象、指代、所属关系、数值和时间方向；候选事实与证据不一致时返回 NONE。
             4. 新事实与已有事实等价时返回 NONE；修正或补充同一事实时返回 UPDATE，不能重复 ADD。
             5. UPDATE/ARCHIVE/DELETE 必须填写候选列表中真实存在的 related_memory_id；不得编造 ID。
-            6. 需要新增记忆时，填写可由原始证据直接支持的 canonical_text。
+            6. 需要新增记忆时，填写可由原始用户证据直接支持的 canonical_text。
             7. 不需要写入、更新、归档或删除时返回 NONE；NONE 是常见且合理的结果。
             8. memory_type、category、canonical_text、confidence、importance、memory_tier、sensitivity 由你按语义确定。
             9. importance 代表未来可复用价值，confidence 代表证据确定性；低价值或低确定性内容返回 NONE。
@@ -97,12 +102,19 @@ public final class PowerMemPrompts {
             11. max_memory_chars 是整个智能体的 active 记忆总上限，不是单设备或单作用域上限。容量不足时，低价值、临时、含糊或无法复用的新事实应返回 NONE。
             12. 如果新事实明显比部分旧事实更值得长期保留，可以在 ADD/UPDATE 中填写 evict_memory_ids；只能选择已有列表中的真实 ID。它们会被归档而不是物理删除。
             13. evict_memory_ids 应选择尽可能少且相对不重要的旧事实；不要驱逐本次 UPDATE 的 related_memory_id，也不要为了腾空间删除高价值稳定事实。
+            14. ADD 必须有用户侧证据：用户陈述、重复反馈、纠错、否定或评价。助手回复、工具结果、模型猜测不能单独支撑 ADD。
+            15. 允许主动沉淀隐式偏好，例如用户多次要求“说重点、别抽象、先看日志”，但应写成稳定交互偏好。
+            16. 用户负反馈只可沉淀为交互偏好，不能把助手错误内容沉淀为事实。
+            17. 会议/游戏/播放状态、故事上下文、刚才/这次/现在的短期状态不得 ADD。
+            18. 没有 speaker_id 的 ADD 只有在明确是团队、设备或所有人共享长期事实时才允许。
 
             JSON 格式：
             {
               "action": "ADD|UPDATE|ARCHIVE|DELETE|NONE",
               "related_memory_id": "仅 UPDATE/ARCHIVE/DELETE 时填写已有记忆 ID，否则为空",
               "evict_memory_ids": ["容量不足时需要归档的已有记忆 ID"],
+              "source_role": "user|assistant|tool；ADD 的事实来源必须是 user",
+              "evidence_quote": "支持该动作的最短用户原话",
               "memory_type": "最终确定的记忆类型",
               "category": "最终确定的分类",
               "canonical_text": "可直接写入记忆的中文事实，不带语气词",
@@ -223,7 +235,7 @@ public final class PowerMemPrompts {
             {conversation}
 
             要求：
-            1. 所有是否值得记住、如何分类、如何更新、是否删除，都由你根据对话语义和已有记忆决定。
+            1. 所有是否值得记住、如何分类、如何更新、是否删除，都由你根据对话语义和已有记忆决定；你应主动发现用户偏好，不要求用户显式说“记住”。
             2. clear_then_rebuild 表示用本次 actions 重建最终事实库；请输出最终应该生效的 ADD 动作列表，不要依赖旧 memory_id。
             3. merge 表示合并到已有事实；需要修正旧事实时使用 UPDATE，需要降级不可主动注入的事实时使用 ARCHIVE，需要显式删除旧事实时使用 DELETE，并填写 related_memory_id。
             4. 不要输出重复动作；用户纠正旧信息时保留修正后的最终事实。
@@ -232,6 +244,10 @@ public final class PowerMemPrompts {
             7. 没有需要应用的动作时返回 {"actions":[]}。
             8. 只返回 JSON，不要解释，不要 Markdown。
             9. 用户角色包含 speaker_id 时，每条动作必须原样保留事实来源 speaker_id；不得把一位用户的事实归给另一位用户。
+            10. ADD 必须有用户侧证据；助手回复和工具结果只能作为上下文，不能作为唯一事实来源。
+            11. 会议/游戏/播放状态、故事上下文、刚才/这次/现在的短期状态不得 ADD。
+            12. 用户负反馈可以更新交互偏好，但不能沉淀助手刚才说错的事实。
+            13. 空 speaker_id 只允许明确团队、设备或所有人共享的长期事实。
 
             JSON 格式：
             {
@@ -240,6 +256,8 @@ public final class PowerMemPrompts {
                   "action": "ADD|UPDATE|ARCHIVE|DELETE|NONE",
                   "related_memory_id": "仅 UPDATE/ARCHIVE/DELETE 时填写已有记忆 ID，否则为空",
                   "speaker_id": "事实来源用户的真实speaker_id；共享或未识别事实为空",
+                  "source_role": "user|assistant|tool；ADD 的事实来源必须是 user",
+                  "evidence_quote": "支持该动作的最短用户原话",
                   "memory_type": "最终确定的记忆类型",
                   "category": "最终确定的分类",
                   "canonical_text": "可直接写入记忆的中文事实",
@@ -263,7 +281,7 @@ public final class PowerMemPrompts {
 
     public static final String JSON_REPAIR_PROMPT = """
             你是 JSON 修复器。下面是同一个记忆维护模型刚刚返回的内容，但它不是合法 JSON。
-            请只做格式修复：保留原有 action、related_memory_id、speaker_id、memory_type、category、canonical_text、confidence、importance、memory_tier、importance_dimensions、sensitivity、reason 的语义，不新增、不删除、不改写记忆判断。
+            请只做格式修复：保留原有 action、related_memory_id、speaker_id、source_role、evidence_quote、memory_type、category、canonical_text、confidence、importance、memory_tier、importance_dimensions、sensitivity、reason 的语义，不新增、不删除、不改写记忆判断。
 
             原始输出：
             {raw_output}
@@ -275,6 +293,8 @@ public final class PowerMemPrompts {
                   "action": "ADD|UPDATE|ARCHIVE|DELETE|NONE",
                   "related_memory_id": "",
                   "speaker_id": "原输出中的speaker_id",
+                  "source_role": "原输出中的source_role",
+                  "evidence_quote": "原输出中的evidence_quote",
                   "memory_type": "",
                   "category": "",
                   "canonical_text": "",
@@ -316,6 +336,9 @@ public final class PowerMemPrompts {
             9. sensitivity 必须根据证据中的真实隐私程度判断，不使用固定人物、事件或关键词规则；敏感事实不应主动泛化注入。
             10. 只返回合法 JSON，不要解释，不要 Markdown。
             11. speaker_id 是可信身份边界，只能保留待审校动作中的原值，不得修改、删除、交换或编造。
+            12. ADD 必须能追溯到用户侧证据；助手回复和工具结果不能作为唯一事实来源。
+            13. 会议/游戏/播放状态、故事上下文和刚才/这次/现在的短期状态应改为 NONE。
+            14. 用户负反馈只可沉淀为交互偏好，不能沉淀助手错误事实。
 
             重建模式：
             {mode}
@@ -330,6 +353,8 @@ public final class PowerMemPrompts {
                   "action": "ADD|UPDATE|ARCHIVE|DELETE|NONE",
                   "related_memory_id": "",
                   "speaker_id": "原动作中的speaker_id",
+                  "source_role": "原动作中的source_role",
+                  "evidence_quote": "支持该动作的最短用户原话",
                   "memory_type": "中文记忆类型",
                   "category": "中文分类",
                   "canonical_text": "可直接写入记忆的中文事实",
@@ -368,6 +393,8 @@ public final class PowerMemPrompts {
             7. importance 代表未来可复用价值，confidence 代表事实可信度；memory_tier 可调整为 working、short_term 或 long_term。
             8. 只返回 JSON，不要解释，不要 Markdown。
             9. speaker_id 是事实的可信归属，输出动作时必须原样保留对应记忆的 speaker_id，不得修改或交换。
+            10. 像助手回复、会议/游戏/播放状态、故事上下文、刚才/这次/现在短期状态的记忆应 ARCHIVE 或 DELETE。
+            11. 有价值的用户交互偏好应保留或改写为稳定偏好，不要保留具体冲突话术。
 
             返回格式：
             {

@@ -23,6 +23,12 @@ class StateManager:
             if active_game_tool:
                 state = "game"
                 current_skill = active_game_tool
+            elif (
+                getattr(conn, "meeting_minutes", None) is not None
+                and conn.meeting_minutes.is_active()
+            ):
+                state = "meeting"
+                current_skill = "meeting"
             elif getattr(conn, "client_is_speaking", False):
                 state = "speaking"
                 current_skill = self.current_skill
@@ -53,4 +59,3 @@ class StateManager:
                 self.state = next_state
             if current_skill is not None:
                 self.current_skill = current_skill
-

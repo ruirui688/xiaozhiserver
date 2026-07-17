@@ -12,6 +12,7 @@ TTS上报功能由 ReportThreadManager 管理。
 import time
 import json
 import opuslib_next
+import threading
 from typing import TYPE_CHECKING
 from core.game import GameSessionManager
 
@@ -52,6 +53,9 @@ async def report(conn: "ConnectionHandler", type, text, opus_data, report_time, 
         conn.logger.bind(tag=TAG).error(f"聊天记录上报失败: {e}")
 
     try:
+        if _consume_skip_memory_event(conn, type, text):
+            conn.logger.bind(tag=TAG).debug("长期记忆事件已按运行时标记跳过")
+            return
         event_type = "tool" if type == 3 else "chat"
         agent_id = conn.config.get("agent_id") if getattr(conn, "config", None) else None
         memory_text, memory_json, speaker_id = _memory_event_content(type, text)
@@ -91,6 +95,77 @@ def _memory_event_content(chat_type, text):
     content = str(payload.get("content") or "").strip()
     speaker_id = str(payload.get("speaker_id") or "").strip() or None
     return content, payload, speaker_id
+
+
+def mark_asr_report_text_override(conn: "ConnectionHandler", original_text, report_text) -> None:
+    if original_text == report_text:
+        return
+    _append_report_marker(
+        conn,
+        "_asr_report_text_overrides",
+        {
+            "original": str(original_text),
+            "replacement": str(report_text),
+        },
+    )
+
+
+def mark_skip_memory_event(conn: "ConnectionHandler", chat_type, text, reason: str = "") -> None:
+    content, _payload, _speaker_id = _memory_event_content(chat_type, text)
+    _append_report_marker(
+        conn,
+        "_skip_memory_events",
+        {
+            "chat_type": chat_type,
+            "text": str(text),
+            "content": str(content),
+            "reason": reason,
+        },
+    )
+
+
+def _append_report_marker(conn, attr: str, marker: dict) -> None:
+    lock = _report_marker_lock(conn)
+    with lock:
+        values = list(getattr(conn, attr, []) or [])
+        values.append(marker)
+        setattr(conn, attr, values[-100:])
+
+
+def _report_marker_lock(conn):
+    lock = getattr(conn, "_report_marker_lock", None)
+    if lock is None:
+        lock = threading.Lock()
+        setattr(conn, "_report_marker_lock", lock)
+    return lock
+
+
+def _consume_asr_report_text_override(conn, text):
+    lock = _report_marker_lock(conn)
+    with lock:
+        values = list(getattr(conn, "_asr_report_text_overrides", []) or [])
+        for index, item in enumerate(values):
+            if item.get("original") == str(text):
+                replacement = item.get("replacement") or text
+                del values[index]
+                setattr(conn, "_asr_report_text_overrides", values)
+                return replacement
+    return text
+
+
+def _consume_skip_memory_event(conn, chat_type, text) -> bool:
+    content, _payload, _speaker_id = _memory_event_content(chat_type, text)
+    lock = _report_marker_lock(conn)
+    with lock:
+        values = list(getattr(conn, "_skip_memory_events", []) or [])
+        for index, item in enumerate(values):
+            if item.get("chat_type") != chat_type:
+                continue
+            if item.get("text") == str(text) or item.get("content") == str(content):
+                del values[index]
+                setattr(conn, "_skip_memory_events", values)
+                return True
+    return False
 
 
 def opus_to_wav(conn: "ConnectionHandler", opus_data):
@@ -206,6 +281,8 @@ def enqueue_tool_report(conn: "ConnectionHandler", tool_name: str, tool_input: d
                     }
                 ]
             )
+            if _is_meeting_tool(tool_name):
+                mark_skip_memory_event(conn, 3, tool_text, "meeting_tool_call")
             conn.report_queue.put((3, tool_text, None, timestamp, metrics))
 
         # 构建工具结果内容
@@ -216,6 +293,8 @@ def enqueue_tool_report(conn: "ConnectionHandler", tool_name: str, tool_input: d
                 result_display_value = {"result": str(tool_result)}
             result_display = json.dumps(result_display_value, ensure_ascii=False)
             result_content = json.dumps([{"type": "tool_result", "text": result_display}], ensure_ascii=False)
+            if _is_meeting_tool(tool_name):
+                mark_skip_memory_event(conn, 3, result_content, "meeting_tool_result")
             conn.report_queue.put((3, result_content, None, timestamp + 1, metrics))
     except Exception as e:
         conn.logger.bind(tag=TAG).error(f"加入工具上报队列失败: {e}")
@@ -227,6 +306,10 @@ def _is_stateful_game_tool(tool_name):
         or tool_name in GameSessionManager.USER_DESCRIBES_TOOLS
         or tool_name in GameSessionManager.IDIOM_CHAIN_TOOLS
     )
+
+
+def _is_meeting_tool(tool_name):
+    return str(tool_name or "") == "meeting_minutes"
 
 
 def enqueue_asr_report(conn: "ConnectionHandler", text, opus_data, metrics=None):
@@ -242,6 +325,7 @@ def enqueue_asr_report(conn: "ConnectionHandler", text, opus_data, metrics=None)
         opus_data: opus音频数据
     """
     try:
+        text = _consume_asr_report_text_override(conn, text)
         # 使用连接对象的队列，传入文本和二进制数据而非文件路径
         if conn.chat_history_conf == 2:
             conn.report_queue.put((1, text, opus_data, int(time.time() * 1000), metrics))

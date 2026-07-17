@@ -64,6 +64,18 @@ public class MemoryMaintenanceOutputParser {
         if (decision.get("importance_dimensions") == null && extraction.get("importance_dimensions") != null) {
             decision.set("importance_dimensions", extraction.get("importance_dimensions"));
         }
+        copyIfBlank(extraction, decision, "source_role");
+        copyIfBlank(extraction, decision, "evidence_source_role");
+        copyIfBlank(extraction, decision, "evidence_quote");
+        if (decision.get("evidence") == null && extraction.get("evidence") != null) {
+            decision.set("evidence", extraction.get("evidence"));
+        }
+    }
+
+    private void copyIfBlank(JSONObject source, JSONObject target, String key) {
+        if (StringUtils.isBlank(target.getStr(key)) && StringUtils.isNotBlank(source.getStr(key))) {
+            target.set(key, source.getStr(key));
+        }
     }
 
     private JSONObject parseObject(String output, String resultType) {

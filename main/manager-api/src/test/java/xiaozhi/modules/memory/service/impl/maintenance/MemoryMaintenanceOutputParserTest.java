@@ -49,6 +49,8 @@ class MemoryMaintenanceOutputParserTest {
                 .set("text", "用户喜欢喝茶")
                 .set("category", "偏好")
                 .set("memory_type", "用户偏好")
+                .set("source_role", "user")
+                .set("evidence_quote", "我喜欢喝茶")
                 .set("importance_dimensions", dimensions);
         JSONObject decision = new JSONObject()
                 .set("action", "ADD")
@@ -59,6 +61,8 @@ class MemoryMaintenanceOutputParserTest {
         assertEquals("用户喜欢喝茶", decision.getStr("canonical_text"));
         assertEquals("饮食偏好", decision.getStr("category"));
         assertEquals("用户偏好", decision.getStr("memory_type"));
+        assertEquals("user", decision.getStr("source_role"));
+        assertEquals("我喜欢喝茶", decision.getStr("evidence_quote"));
         assertEquals(0.9, decision.getJSONObject("importance_dimensions").getDouble("relevance"));
     }
 }

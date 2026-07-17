@@ -57,6 +57,7 @@ import xiaozhi.modules.memory.service.MemorySettingsService;
 import xiaozhi.modules.memory.service.impl.maintenance.MemoryMaintenanceOutputParser;
 import xiaozhi.modules.memory.service.impl.maintenance.MemorySpeakerConversationBuilder;
 import xiaozhi.modules.memory.service.impl.maintenance.MemorySpeakerConversationBuilder.Conversation;
+import xiaozhi.modules.memory.utils.MemoryAutoWriteGate;
 import xiaozhi.modules.memory.utils.MemoryHelper;
 import xiaozhi.modules.memory.utils.MemorySpeakerUtils;
 import xiaozhi.modules.memory.utils.MemorySpeakerUtils.Registry;
@@ -210,6 +211,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
             if (decision == null) continue;
             outputParser.mergeExtractionIntoDecision(factJson, decision);
             MemorySpeakerUtils.applyInternalIdentity(decision, speaker);
+            attachUserEvidence(decision, conversation);
             if (applyMaintenanceDecision(agent, agentId, null, decision, maintenanceModelId, false, null)) count++;
         }
         log.info("processSessionMemories: agentId={}, sessionId={}, factsChanged={}", agentId, sessionId, count);
@@ -421,6 +423,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
             if (decision == null) continue;
 
             outputParser.mergeExtractionIntoDecision(factJson, decision);
+            attachUserEvidence(decision, promptInput);
 
             if (applyMaintenanceDecision(agent, scopeId, sourceEventId, decision, maintenanceModelId, false, null)) {
                 saved++;
@@ -448,6 +451,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         if (decision == null) {
             throw new IllegalStateException("记忆维护模型未返回有效决策");
         }
+        decision.set("_manual_instruction", true);
         JSONArray instructionActions = new JSONArray();
         instructionActions.add(decision);
         String evidenceContext = "显式记住：\n" + text + "\n\n已有记忆：\n" + existingMemories;
@@ -456,6 +460,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
             JSONObject reviewedDecision = MemoryHelper.toJsonObject(reviewed.get(0));
             if (reviewedDecision != null) {
                 decision = reviewedDecision;
+                decision.set("_manual_instruction", true);
             }
         }
         boolean changed = applyMaintenanceDecision(agent, scopeId, null, decision, maintenanceModelId, false, null);
@@ -643,6 +648,45 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         return StringUtils.defaultIfBlank(MemorySpeakerUtils.actionSpeakerId(action), "shared");
     }
 
+    private void attachUserEvidence(JSONObject action, String evidenceContext) {
+        if (action == null || StringUtils.isBlank(evidenceContext)) {
+            return;
+        }
+        String userEvidence = extractUserEvidenceText(evidenceContext);
+        if (StringUtils.isNotBlank(userEvidence)) {
+            action.set("_user_evidence_text", userEvidence);
+        }
+    }
+
+    private String extractUserEvidenceText(String evidenceContext) {
+        if (StringUtils.isBlank(evidenceContext)) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        for (String line : evidenceContext.split("\\R")) {
+            String trimmed = StringUtils.trimToEmpty(line);
+            if (trimmed.startsWith("用户")) {
+                int colon = firstColonIndex(trimmed);
+                if (colon >= 0 && colon + 1 < trimmed.length()) {
+                    builder.append(trimmed.substring(colon + 1).trim()).append("\n");
+                }
+            }
+        }
+        return StringUtils.abbreviate(builder.toString(), MemoryHelper.SESSION_MAX_CHARS);
+    }
+
+    private int firstColonIndex(String line) {
+        int ascii = line.indexOf(':');
+        int full = line.indexOf('：');
+        if (ascii < 0) {
+            return full;
+        }
+        if (full < 0) {
+            return ascii;
+        }
+        return Math.min(ascii, full);
+    }
+
     private int totalMemoryChars(List<MemoryFactEntity> facts) {
         if (facts == null || facts.isEmpty()) {
             return 0;
@@ -661,8 +705,12 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         if ("NONE".equals(action)) {
             return false;
         }
-        if ("ADD".equals(action) && !passesAutoWriteGate(json)) {
-            log.info("维护模型输出低质量 ADD，跳过写入: text={}, importance={}, confidence={}",
+        MemoryAutoWriteGate.Result writeGate = "ADD".equals(action)
+                ? MemoryAutoWriteGate.evaluate(json)
+                : new MemoryAutoWriteGate.Result(true, "not_add");
+        if ("ADD".equals(action) && !writeGate.allowed()) {
+            log.info("维护模型 ADD 未通过自动写入门控，跳过写入: reason={}, text={}, importance={}, confidence={}",
+                    writeGate.reason(),
                     MemoryHelper.cleanupMemoryText(json.getStr("canonical_text")),
                     json.get("importance"), json.get("confidence"));
             if (result != null) {
@@ -1136,13 +1184,6 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         }
     }
 
-    private boolean passesAutoWriteGate(JSONObject json) {
-        BigDecimal importance = MemoryHelper.score(json.get("importance"), MemoryHelper.DEFAULT_SCORE);
-        BigDecimal confidence = MemoryHelper.score(json.get("confidence"), MemoryHelper.DEFAULT_SCORE);
-        return importance.compareTo(MemoryHelper.MIN_AUTO_IMPORTANCE) >= 0
-                && confidence.compareTo(MemoryHelper.MIN_AUTO_CONFIDENCE) >= 0;
-    }
-
     private String resolveMemoryTier(String rawTier, BigDecimal importance) {
         String tier = MemoryHelper.normalizeMemoryTier(rawTier);
         if (StringUtils.isNotBlank(tier)) {
@@ -1218,6 +1259,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
             if (action == null || "NONE".equals(MemoryHelper.normalizeAction(action.getStr("action")))) {
                 continue;
             }
+            attachUserEvidence(action, conversation);
             SpeakerIdentity speaker = speakers.resolve(action);
             if (speaker == null) {
                 log.warn("历史重建动作缺少可验证的speaker_id或人物归属不明确，已跳过: agentId={}",
@@ -1296,6 +1338,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
             JSONObject decision = outputParser.parseDecisionResult(decisionOutput);
             if (decision == null) continue;
             outputParser.mergeExtractionIntoDecision(factJson, decision);
+            attachUserEvidence(decision, conversation);
             String action = MemoryHelper.normalizeAction(decision.getStr("action"));
             if (applyMaintenanceDecision(agent, scopeId, null, decision, maintenanceModelId, dryRun, result)) {
                 if ("UPDATE".equals(action) || "DELETE".equals(action)) {

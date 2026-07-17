@@ -5,6 +5,7 @@ import logging
 from core.semantic.frames import ASRResult, IntentFrame, RobotContext
 
 logger = logging.getLogger(__name__)
+from core.meeting.control import MeetingControlParser
 from core.semantic.music_intent import parse_music_intent
 from core.semantic.normalizer import TextNormalizer
 
@@ -57,6 +58,7 @@ class SemanticRouter:
 
     def __init__(self, normalizer: TextNormalizer | None = None):
         self.normalizer = normalizer or TextNormalizer()
+        self.meeting_control = MeetingControlParser(self.normalizer)
 
     def route(self, asr_result: ASRResult, context: RobotContext) -> IntentFrame:
         key = self.normalizer.route_key(asr_result.normalized_text)
@@ -95,6 +97,21 @@ class SemanticRouter:
             logger.debug("route matched GAME_EXIT: %s tool=%s", intent.full_name, context.active_game_tool)
             return intent
 
+        meeting_match = self.meeting_control.parse(
+            asr_result.normalized_text,
+            active=context.current_skill == "meeting",
+        )
+        if meeting_match:
+            intent = IntentFrame(
+                "meeting",
+                meeting_match.action,
+                meeting_match.confidence,
+                {"topic": meeting_match.topic},
+                source="meeting_rule",
+            )
+            logger.debug("route matched meeting control: %s", intent.full_name)
+            return intent
+
         if context.active_game_tool:
             source = "state_rule" if key in self.CONTINUE or key in self.GAME_HINT else "game_context"
             # Escape hatch: if input looks like a non-game query, let it fall through to LLM
@@ -127,7 +144,7 @@ class SemanticRouter:
         return intent
 
     def _strip_wake_name(self, key: str) -> str:
-        for prefix in ("小智", "你好小智", "小智你好"):
+        for prefix in ("你好小智", "小智你好", "小智"):
             if key.startswith(prefix.lower()):
                 return key[len(prefix):]
             if key.startswith(prefix):

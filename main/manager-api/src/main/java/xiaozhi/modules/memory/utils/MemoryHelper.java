@@ -35,8 +35,9 @@ public class MemoryHelper {
     public static final BigDecimal DEFAULT_SCORE = new BigDecimal("0.700");
     public static final BigDecimal MIN_SCORE = new BigDecimal("0.000");
     public static final BigDecimal MAX_SCORE = new BigDecimal("1.000");
-    public static final BigDecimal MIN_AUTO_IMPORTANCE = new BigDecimal("0.350");
-    public static final BigDecimal MIN_AUTO_CONFIDENCE = new BigDecimal("0.500");
+    public static final BigDecimal MIN_AUTO_IMPORTANCE = new BigDecimal("0.700");
+    public static final BigDecimal MIN_AUTO_CONFIDENCE = new BigDecimal("0.850");
+    public static final int MAX_AUTO_FACT_CHARS = 80;
     public static final int MAX_MAINTENANCE_INPUT_CHARS = 2000;
     public static final int DEFAULT_ACTIVE_CONTEXT_MAX_CHARS = 1000;
     public static final int SESSION_MEMORY_IDLE_SECONDS = 60;

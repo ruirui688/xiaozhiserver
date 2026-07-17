@@ -494,13 +494,14 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 官方同步时的处理规则：如果官方修改声纹注册/识别/删除、配置下发、音频状态重置、ASR并行识别、聊天记录展示、长期记忆事件/召回、对话身份注入或声纹页面，必须保留 `user_id=agentId` 的可信服务端派生、每智能体最多5条的后端与远程双重校验、`remote_user_id=default` 历史兼容、Token仅通过Bearer Header传输、私有/回环/链路本地目标拦截、结构化 speakers 配置、“VAD句末整段语音WAV与ASR并发识别、`server.voiceprint_sample_seconds` 不再驱动截断采样、无绑定声纹零调用”、可信 `speaker_id` 贯穿聊天记录与记忆、人物专属记忆不跨声纹召回，以及“每个成功识别轮次都在当前 user JSON 和 system 上下文保留身份，但不得机械称呼姓名或主动播报识别过程”的行为。前端上限提示不能替代后端校验；删除远程失败时不得静默留下占用额度的孤儿声纹；日志不得输出Token、Authorization或带密钥URL。
 ```
 
-## 27. 主 LLM 工具驱动的会议模式与完整纪要
+## 27. 语义控制中枢门控的会议模式与完整纪要
 
 ```text
-定制模块：xiaozhi-server 主 LLM 会议工具、连接级会议记录状态、完整会议纪要生成
-改动原因：固定字符串无法容忍 ASR 近音误识别，独立 SLM/分类器又会形成第二套语义标准，普通聊天 LLM还可能只用文字模拟“已经开启”。会议能力登记为 `SYSTEM_PLUGIN_MEETING_MINUTES`，启用后注册真实 `meeting_minutes` function tool；进入、记录和退出全部由主 LLM结合当前发言、会议状态和上下文选择 `start/record/end`。服务端不做会议关键词、固定口令、模糊匹配、置信度判断或独立语义裁决，只校验插件权限和状态合法性并执行。会议激活后每个完整 ASR 都进入主 LLM 工具调用，普通模型文本被丢弃且不播报；模型未调用工具、超时或协议异常时继续保存当前原始 ASR。退出控制句不进入正文，最终纪要继续使用冻结的全部结构化转写。
+定制模块：xiaozhi-server 语义控制中枢会议控制、主 LLM 会议工具、连接级会议记录状态、完整会议纪要生成
+改动原因：完全依赖主 LLM function calling 时，模型可能只用自然语言回复“会议模式来了”而不执行真实状态切换。会议能力登记为 `SYSTEM_PLUGIN_MEETING_MINUTES`，启用后仍注册真实 `meeting_minutes` function tool；同时语义控制中枢确定性处理少量高置信进入/退出控制，并排除讨论、引用、否定和未来计划类表达。会议激活后普通 ASR 由服务端直接静默记录，明确结束控制句不进入正文，最终纪要继续使用冻结的全部结构化转写并由主 LLM生成。会议状态、会议控制句和会议正文不进入长期记忆事件。
 关键文件：
   - main/xiaozhi-server/core/meeting/config.py
+  - main/xiaozhi-server/core/meeting/control.py
   - main/xiaozhi-server/core/meeting/executor.py
   - main/xiaozhi-server/core/meeting/minutes.py
   - main/xiaozhi-server/plugins_func/functions/meeting_minutes.py
@@ -509,11 +510,12 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/xiaozhi-server/core/connection.py
   - main/xiaozhi-server/core/websocket_server.py
   - main/xiaozhi-server/tests/test_meeting_control.py
+  - main/xiaozhi-server/tests/test_meeting_stable_control.py
   - main/xiaozhi-server/tests/test_meeting_minutes.py
   - main/manager-api/src/main/resources/db/changelog/202607141735.sql
   - main/manager-api/src/main/resources/db/changelog/202607141910.sql
   - main/manager-api/src/main/resources/db/changelog/db.changelog-master.yaml
   - docs/architecture/device-interaction-chain.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改插件配置下发、主 LLM function calling、ASR 句末处理、TTS 入队或连接生命周期，必须保留“全模块按智能体插件门控、主 LLM通过真实工具选择 start/record/end、只有服务端执行结果能改变状态、进入会议有一次简短确认、会议正文静默记录、模型异常默认继续记录、结束控制句不进入正文、最终纪要使用完整冻结转写”的行为；不得重新加入会议固定字符串、模糊关键词、独立语义分类器或 SLM 裁决，也不得允许普通模型文字模拟状态切换。会议插件后续修正必须新增迁移并登记到 `db.changelog-master.yaml`，不得修改已发布 changeSet。
+官方同步时的处理规则：如果官方修改插件配置下发、语义控制中枢、主 LLM function calling、ASR 句末处理、TTS 入队或连接生命周期，必须保留“全模块按智能体插件门控、高置信会议 start/end 由语义控制中枢真实改变状态、讨论/引用/否定表达不误触发、主 LLM仍可通过真实工具处理复杂启动语义、进入会议有一次简短确认、会议正文静默记录、结束控制句不进入正文、最终纪要使用完整冻结转写、会议内容不污染长期记忆”的行为；不得允许普通模型文字模拟状态切换，也不得引入独立 SLM 裁决。会议插件后续修正必须新增迁移并登记到 `db.changelog-master.yaml`，不得修改已发布 changeSet。
 ```

@@ -192,6 +192,8 @@ class MemoryServiceImplTest {
                     {
                       "action": "ADD",
                       "related_memory_id": "",
+                      "source_role": "user",
+                      "evidence_quote": "我的老板是钟文杰",
                       "memory_type": "人物关系",
                       "category": "工作关系",
                       "canonical_text": "用户的老板是钟文杰",
@@ -245,6 +247,8 @@ class MemoryServiceImplTest {
                     {
                       "action": "ADD",
                       "related_memory_id": "",
+                      "source_role": "user",
+                      "evidence_quote": "我的老板是钟文杰",
                       "memory_type": "普通事实",
                       "category": "普通事实",
                       "canonical_text": "用户刚才随口说了一句话",
@@ -279,11 +283,13 @@ class MemoryServiceImplTest {
                     {
                       "action": "ADD",
                       "related_memory_id": "",
+                      "source_role": "user",
+                      "evidence_quote": "我的老板是钟文杰",
                       "memory_type": "阶段性事项",
                       "category": "近期安排",
                       "canonical_text": "用户近期正在准备一次演示",
                       "confidence": 0.88,
-                      "importance": 0.62,
+                      "importance": 0.72,
                       "memory_tier": "short_term",
                       "sensitivity": "normal",
                       "reason": "阶段性有用"
@@ -351,6 +357,8 @@ class MemoryServiceImplTest {
                             {
                               "action": "ADD",
                               "related_memory_id": "",
+                              "source_role": "user",
+                              "evidence_quote": "我的老板是钟文杰",
                               "memory_type": "人物关系",
                               "category": "工作关系",
                               "canonical_text": "用户的老板是钟文杰",
@@ -377,6 +385,8 @@ class MemoryServiceImplTest {
                             {
                               "action": "ADD",
                               "related_memory_id": "",
+                              "source_role": "user",
+                              "evidence_quote": "我的老板是钟文杰",
                               "memory_type": "人物关系",
                               "category": "工作关系",
                               "canonical_text": "用户的老板是钟文杰",
@@ -417,6 +427,8 @@ class MemoryServiceImplTest {
                         {
                           "action": "ADD",
                           "related_memory_id": "",
+                          "source_role": "user",
+                          "evidence_quote": "我的老板是钟文杰",
                           "memory_type": "factual",
                           "category": "relationship",
                           "canonical_text": "我的老板是钟文杰",
@@ -441,6 +453,8 @@ class MemoryServiceImplTest {
                             {
                               "action": "ADD",
                               "related_memory_id": "",
+                              "source_role": "user",
+                              "evidence_quote": "我的老板是钟文杰",
                               "memory_type": "人物关系",
                               "category": "工作关系",
                               "canonical_text": "我的老板是钟文杰",
@@ -560,6 +574,8 @@ class MemoryServiceImplTest {
                         {
                           "action": "ADD",
                           "related_memory_id": "",
+                          "source_role": "user",
+                          "evidence_quote": "我的老板是钟文杰",
                           "memory_type": "事实",
                           "category": "个人",
                           "canonical_text": "钟文杰是用户的老板",
@@ -691,6 +707,44 @@ class MemoryServiceImplTest {
     }
 
     @Test
+    void idleSessionRejectsAssistantOnlyFactEvenWhenModelClaimsUserSource() {
+        MemorySessionStateEntity state = new MemorySessionStateEntity();
+        state.setId(18L);
+        state.setAgentId(AGENT_ID);
+        state.setSessionId("session-assistant-pollution");
+        state.setLastEventId(181L);
+        MemorySourceEventEntity userEvent = new MemorySourceEventEntity();
+        userEvent.setId(180L);
+        userEvent.setChatType(1);
+        userEvent.setSpeakerId("voice-1");
+        userEvent.setContentText("你好");
+        userEvent.setContentJson("{\"speaker\":\"用户A\",\"speaker_id\":\"voice-1\",\"content\":\"你好\"}");
+        MemorySourceEventEntity assistantEvent = new MemorySourceEventEntity();
+        assistantEvent.setId(181L);
+        assistantEvent.setChatType(2);
+        assistantEvent.setContentText("我记住了你喜欢黑色自行车");
+        when(sessionStateDao.selectOne(any(Wrapper.class))).thenReturn(state);
+        when(sessionStateDao.claimNow(eq(18L), eq(181L), any())).thenReturn(1);
+        when(sourceEventDao.selectList(any(Wrapper.class))).thenReturn(List.of(userEvent, assistantEvent));
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID)))
+                .thenReturn("""
+                        {"facts":[{"text":"用户A喜欢黑色自行车","category":"兴趣","memory_type":"偏好",
+                        "source_role":"user","evidence_quote":"我喜欢黑色自行车",
+                        "confidence":0.95,"importance":0.8,"memory_tier":"long_term"}]}
+                        """)
+                .thenReturn("""
+                        {"action":"ADD","canonical_text":"用户A喜欢黑色自行车","category":"兴趣",
+                        "memory_type":"偏好","source_role":"user","evidence_quote":"我喜欢黑色自行车",
+                        "confidence":0.95,"importance":0.8,"memory_tier":"long_term"}
+                        """);
+
+        assertEquals(0, memoryService.processSessionMemories("session-assistant-pollution", AGENT_ID));
+
+        verify(factDao, never()).insert(any());
+    }
+
+    @Test
     void idleSessionMemoryKeepsTrustedVoiceprintIdentityInFactPayload() {
         MemorySessionStateEntity state = new MemorySessionStateEntity();
         state.setId(9L);
@@ -710,6 +764,7 @@ class MemoryServiceImplTest {
         when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID)))
                 .thenReturn("""
                         {"facts":[{"text":"用户A喜欢黑色自行车","category":"兴趣","memory_type":"偏好",
+                        "source_role":"user","evidence_quote":"我喜欢黑色自行车",
                         "confidence":0.95,"importance":0.8,"memory_tier":"long_term"}]}
                         """)
                 .thenReturn("""
@@ -794,6 +849,8 @@ class MemoryServiceImplTest {
                 {
                   "action": "ADD",
                   "related_memory_id": "",
+                  "source_role": "user",
+                  "evidence_quote": "我驾照科目二第6次才通过",
                   "memory_type": "个人经历",
                   "category": "驾考经历",
                   "canonical_text": "用户驾照科目二第6次才通过",
@@ -809,6 +866,8 @@ class MemoryServiceImplTest {
                     {
                       "action": "ADD",
                       "related_memory_id": "",
+                      "source_role": "user",
+                      "evidence_quote": "我驾照科目二第6次才通过",
                       "memory_type": "个人经历",
                       "category": "驾考经历",
                       "canonical_text": "用户驾照科目二第6次才通过",
@@ -881,7 +940,7 @@ class MemoryServiceImplTest {
         MemoryFactEntity important = activeFact("memory-important", "重".repeat(750));
         MemoryFactEntity expendable = activeFact("memory-expendable", "旧".repeat(240));
         when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(important, expendable));
-        stubEventMaintenanceDecision(addDecision("新".repeat(100), "\"memory-expendable\""));
+        stubEventMaintenanceDecision(addDecision("新".repeat(80), "\"memory-expendable\""));
 
         runMaintenanceForEvent("请记住更重要的新信息");
 
@@ -960,6 +1019,7 @@ class MemoryServiceImplTest {
         when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID)))
                 .thenReturn("""
                         {"facts":[{"text":"新信息","category":"动态分类","memory_type":"长期记忆",\
+                        "source_role":"user","evidence_quote":"新信息",
                         "confidence":0.9,"importance":0.9,"memory_tier":"long_term"}]}
                         """)
                 .thenReturn(decision);
@@ -967,8 +1027,8 @@ class MemoryServiceImplTest {
 
     private String addDecision(String canonicalText, String evictionIds) {
         return """
-                {"action":"ADD","related_memory_id":"","evict_memory_ids":[%s],
-                "memory_type":"长期记忆","category":"动态分类","canonical_text":"%s",
+                {"action":"ADD","related_memory_id":"","evict_memory_ids":[%s],"shared":true,
+                "source_role":"user",                "memory_type":"长期记忆","category":"动态分类","canonical_text":"%s",
                 "confidence":0.9,"importance":0.9,"memory_tier":"long_term",
                 "sensitivity":"normal","reason":"语义价值更高"}
                 """.formatted(evictionIds, canonicalText);
@@ -998,7 +1058,13 @@ class MemoryServiceImplTest {
         AgentChatHistoryDTO history = new AgentChatHistoryDTO();
         history.setChatType(chatType);
         history.setMacAddress(SCOPE_ID);
-        history.setContent(content);
+        if (chatType == 1) {
+            history.setContent("""
+                    {"speaker":"用户A","speaker_id":"voice-history","content":"%s"}
+                    """.formatted(content));
+        } else {
+            history.setContent(content);
+        }
         return history;
     }
 

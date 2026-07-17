@@ -5,6 +5,8 @@ import uuid
 from typing import Optional
 
 from core.providers.tts.dto.dto import ContentType, TTSMessageDTO, SentenceType
+from core.meeting import get_meeting_entry_prompt, is_meeting_mode_enabled
+from core.meeting.executor import finish_meeting
 from core.semantic.frames import Decision
 from core.semantic.normalizer import TextNormalizer
 from core.semantic.policy_engine import PolicyEngine
@@ -94,6 +96,16 @@ class SemanticCenter:
             self.state_manager.transition(decision.next_state, None)
             return True
 
+        if intent.full_name in {"meeting.start", "meeting.end"}:
+            handled = await self._handle_meeting_control(
+                conn,
+                intent.full_name,
+                intent.slots,
+            )
+            if handled:
+                self.state_manager.transition(decision.next_state, None)
+            return handled
+
         if decision.executor:
             conn.logger.bind(tag=__name__).debug(
                 "handle_user_text handled executor=%s arguments=%s",
@@ -104,6 +116,41 @@ class SemanticCenter:
             return True
 
         return False
+
+    async def _handle_meeting_control(self, conn, intent_name: str, slots: dict) -> bool:
+        meeting = getattr(conn, "meeting_minutes", None)
+        if meeting is None:
+            await self._speak(conn, "会议运行状态未初始化，暂时无法执行。")
+            return True
+        if not is_meeting_mode_enabled(conn):
+            await self._speak(conn, "当前智能体没有启用会议纪要功能，请先在功能管理中开启。")
+            return True
+
+        if intent_name == "meeting.start":
+            if meeting.is_active():
+                await self._speak(conn, "会议已在记录，继续保持静默。")
+                return True
+            meeting.start(str((slots or {}).get("topic") or "").strip())
+            self._refresh_tools(conn)
+            conn.logger.bind(tag=__name__).info("确定性语义控制已进入会议模式")
+            await self._speak(conn, get_meeting_entry_prompt(conn))
+            return True
+
+        if intent_name == "meeting.end":
+            if not meeting.is_active():
+                await self._speak(conn, "会议尚未开始，不能生成会议纪要。")
+                return True
+            meeting.discard_pending_turn()
+            finish_meeting(conn)
+            self._refresh_tools(conn)
+            return True
+
+        return False
+
+    def _refresh_tools(self, conn) -> None:
+        handler = getattr(conn, "func_handler", None)
+        if handler is not None:
+            handler.upload_functions_desc()
 
     async def _invoke_tool(self, conn, decision: Decision):
         from plugins_func.register import Action, ActionResponse
