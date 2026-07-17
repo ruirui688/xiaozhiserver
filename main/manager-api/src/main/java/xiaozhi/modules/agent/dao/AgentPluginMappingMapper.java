@@ -15,8 +15,11 @@ import java.util.List;
 @Mapper
 public interface AgentPluginMappingMapper extends BaseMapper<AgentPluginMapping> {
     List<AgentPluginMapping> selectPluginsByAgentId(@Param("agentId") String agentId);
-}
 
+    List<AgentPluginMapping> selectUserPluginMappings(
+            @Param("userId") Long userId,
+            @Param("pluginId") String pluginId);
+}
 
 
 

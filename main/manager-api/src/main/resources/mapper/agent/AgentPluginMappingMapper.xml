@@ -44,5 +44,13 @@
         WHERE m.agent_id = #{agentId}
     </select>
 
+    <select id="selectUserPluginMappings" resultMap="BaseResultMap">
+        SELECT m.id, m.agent_id, m.plugin_id, m.param_info
+        FROM ai_agent_plugin_mapping m
+        INNER JOIN ai_agent a ON a.id = m.agent_id
+        WHERE a.user_id = #{userId}
+          AND m.plugin_id = #{pluginId}
+    </select>
+
 
 </mapper>

@@ -261,7 +261,7 @@ sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
 1. 判断使用 docker 还是 sudo docker
 2. 拉取 xiaozhi-server、xiaozhi-manager-api、xiaozhi-manager-web、mysql、redis 镜像
 3. 创建 ~/xiaozhi-data
-4. 生成 ~/xiaozhi-data/.env 和 docker-compose.yml
+4. 生成 ~/xiaozhi-data/.env 和 docker-compose.yml，并持久化第三方凭据加密密钥
 5. 初始化 data/.config.yaml
 6. 修正 bind mount 目录属主，让非 root 容器可写
 7. 启动 MySQL、Redis、manager-api/web、xiaozhi-server
@@ -296,6 +296,9 @@ git pull --ff-only origin <当前分支>
 ```
 
 然后复用 `~/xiaozhi-data/.env`，默认拉取 `latest` 镜像并重启服务。
+
+`XIAOZHI_CREDENTIAL_ENCRYPTION_KEY` 用于解密智能体级飞书等第三方凭据。升级必须保留原值；
+直接更换会导致历史密文无法解密。
 
 回滚或固定版本：
 

@@ -29,6 +29,7 @@ import xiaozhi.modules.agent.entity.AgentPluginMapping;
 import xiaozhi.modules.agent.entity.AgentTemplateEntity;
 import xiaozhi.modules.agent.entity.AgentVoicePrintEntity;
 import xiaozhi.modules.agent.service.AgentContextProviderService;
+import xiaozhi.modules.agent.service.AgentFeishuService;
 import xiaozhi.modules.agent.service.AgentMcpAccessPointService;
 import xiaozhi.modules.agent.service.AgentPluginMappingService;
 import xiaozhi.modules.agent.service.AgentService;
@@ -46,6 +47,7 @@ import xiaozhi.modules.sys.dto.SysParamsDTO;
 import xiaozhi.modules.sys.service.SysParamsService;
 import xiaozhi.modules.timbre.service.TimbreService;
 import xiaozhi.modules.timbre.vo.TimbreDetailsVO;
+import xiaozhi.modules.userplugin.service.UserPluginConfigService;
 import xiaozhi.modules.voiceclone.entity.VoiceCloneEntity;
 import xiaozhi.modules.voiceclone.service.VoiceCloneService;
 
@@ -64,10 +66,12 @@ public class ConfigServiceImpl implements ConfigService {
     private final AgentPluginMappingService agentPluginMappingService;
     private final AgentMcpAccessPointService agentMcpAccessPointService;
     private final AgentContextProviderService agentContextProviderService;
+    private final AgentFeishuService agentFeishuService;
     private final VoiceCloneService cloneVoiceService;
     private final AgentVoicePrintDao agentVoicePrintDao;
     private final VoiceprintApiClient voiceprintApiClient;
     private final CorrectWordFileService correctWordFileService;
+    private final UserPluginConfigService userPluginConfigService;
 
     @Override
     public Object getConfig(Boolean isCache) {
@@ -217,11 +221,22 @@ public class ConfigServiceImpl implements ConfigService {
 
         if (!Objects.equals(agent.getIntentModelId(), "Intent_nointent")) {
             List<AgentPluginMapping> pluginMappings = agentPluginMappingService.agentPluginParamsByAgentId(agent.getId());
-            if (pluginMappings != null && !pluginMappings.isEmpty()) {
-                Map<String, Object> pluginParams = new HashMap<>();
+            Map<String, Object> pluginParams = new HashMap<>();
+            if (pluginMappings != null) {
                 for (AgentPluginMapping pluginMapping : pluginMappings) {
-                    pluginParams.put(pluginMapping.getProviderCode(), pluginMapping.getParamInfo());
+                    pluginParams.put(
+                            pluginMapping.getProviderCode(),
+                            userPluginConfigService.mergeRuntimeConfig(
+                                    agent.getUserId(),
+                                    pluginMapping.getProviderCode(),
+                                    pluginMapping.getParamInfo()));
                 }
+            }
+            Map<String, Object> feishuPlugin = agentFeishuService.getRuntimePluginConfig(agent.getId());
+            if (!feishuPlugin.isEmpty()) {
+                pluginParams.put("feishu_assistant", feishuPlugin);
+            }
+            if (!pluginParams.isEmpty()) {
                 result.put("plugins", pluginParams);
             }
         }

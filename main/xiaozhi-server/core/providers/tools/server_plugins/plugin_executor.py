@@ -143,6 +143,8 @@ class ServerPluginExecutor(ToolExecutor):
                     self._init_music_description(tool_description)
                 elif func_name == "web_search":
                     self._init_web_search_description(tool_description)
+                elif func_name == "feishu_assistant":
+                    self._init_feishu_description(tool_description)
 
                 tools[func_name] = ToolDefinition(
                     name=func_name,
@@ -246,6 +248,28 @@ class ServerPluginExecutor(ToolExecutor):
             base_desc = str(function_desc.get("description") or "")
             if guidance not in base_desc:
                 function_desc["description"] = base_desc + guidance
+        except (KeyError, TypeError):
+            pass
+
+    def _init_feishu_description(self, tool_description):
+        plugin_config = self._get_plugin_config("feishu_assistant")
+        allowed_actions = [
+            action
+            for action in (
+                "send_message",
+                "list_messages",
+                "list_tasks",
+                "create_task",
+                "create_calendar_event",
+            )
+            if plugin_config.get(action) is True
+        ]
+        try:
+            action_schema = tool_description["function"]["parameters"]["properties"]["action"]
+            action_schema["enum"] = allowed_actions
+            action_schema["description"] = (
+                "当前智能体允许的飞书动作：" + "、".join(allowed_actions)
+            )
         except (KeyError, TypeError):
             pass
 

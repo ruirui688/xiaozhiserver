@@ -1,0 +1,22 @@
+CREATE TABLE IF NOT EXISTS `ai_agent_feishu_config` (
+  `id` varchar(64) NOT NULL COMMENT '主键',
+  `agent_id` varchar(64) NOT NULL COMMENT '智能体ID',
+  `app_id` varchar(128) NOT NULL COMMENT '飞书应用App ID',
+  `app_secret_ciphertext` text NOT NULL COMMENT '使用部署级密钥加密的App Secret',
+  `default_chat_id` varchar(128) DEFAULT NULL COMMENT '默认群聊ID',
+  `calendar_id` varchar(255) DEFAULT NULL COMMENT '默认日历ID',
+  `task_assignee_open_id` varchar(128) DEFAULT NULL COMMENT '默认任务负责人open_id',
+  `enabled` tinyint(1) NOT NULL DEFAULT 1 COMMENT '是否启用飞书集成',
+  `meeting_report_enabled` tinyint(1) NOT NULL DEFAULT 1 COMMENT '是否自动发送会议纪要',
+  `message_send_enabled` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否允许主动发送群消息',
+  `message_read_enabled` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否允许读取默认群消息',
+  `task_read_enabled` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否允许读取应用可见任务',
+  `task_create_enabled` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否允许创建飞书任务',
+  `calendar_create_enabled` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否允许创建飞书日程',
+  `creator` bigint DEFAULT NULL COMMENT '创建者',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updater` bigint DEFAULT NULL COMMENT '更新者',
+  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_agent_feishu_config_agent_id` (`agent_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='智能体飞书集成配置';

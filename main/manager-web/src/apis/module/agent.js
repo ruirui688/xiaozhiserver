@@ -270,6 +270,56 @@ export default {
                 });
             }).send();
     },
+    getAgentFeishuConfig(agentId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/${agentId}/feishu`)
+            .method('GET')
+            .success((res) => callback(res))
+            .networkFail((err) => callback(err))
+            .send();
+    },
+    saveAgentFeishuConfig(agentId, config, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/${agentId}/feishu`)
+            .method('PUT')
+            .data(config)
+            .success((res) => callback(res))
+            .networkFail((err) => callback(err))
+            .send();
+    },
+    deleteAgentFeishuConfig(agentId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/${agentId}/feishu`)
+            .method('DELETE')
+            .success((res) => callback(res))
+            .networkFail((err) => callback(err))
+            .send();
+    },
+    testAgentFeishuConfig(agentId, config, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/${agentId}/feishu/test`)
+            .method('POST')
+            .data(config)
+            .success((res) => callback(res))
+            .networkFail((err) => callback(err))
+            .send();
+    },
+    getAgentFeishuChats(agentId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/${agentId}/feishu/chats`)
+            .method('GET')
+            .success((res) => callback(res))
+            .networkFail((err) => callback(err))
+            .send();
+    },
+    sendAgentFeishuTestMessage(agentId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/${agentId}/feishu/test-message`)
+            .method('POST')
+            .success((res) => callback(res))
+            .networkFail((err) => callback(err))
+            .send();
+    },
     // 添加智能体的声纹
     addAgentVoicePrint(voicePrintData, callback) {
         RequestService.sendRequest()

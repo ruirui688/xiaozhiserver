@@ -118,6 +118,39 @@ export default {
                 })
             }).send()
     },
+    getPluginConfigs(callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/user/plugin-configs`)
+            .method('GET')
+            .success((res) => callback(res))
+            .networkFail((err) => callback(err))
+            .send()
+    },
+    getPluginConfig(providerCode, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/user/plugin-configs/${encodeURIComponent(providerCode)}`)
+            .method('GET')
+            .success((res) => callback(res))
+            .networkFail((err) => callback(err))
+            .send()
+    },
+    savePluginConfig(providerCode, config, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/user/plugin-configs/${encodeURIComponent(providerCode)}`)
+            .method('PUT')
+            .data({ config })
+            .success((res) => callback(res))
+            .networkFail((err) => callback(err))
+            .send()
+    },
+    deletePluginConfig(providerCode, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/user/plugin-configs/${encodeURIComponent(providerCode)}`)
+            .method('DELETE')
+            .success((res) => callback(res))
+            .networkFail((err) => callback(err))
+            .send()
+    },
     // 修改用户密码
     changePassword(oldPassword, newPassword, successCallback, errorCallback) {
         RequestService.sendRequest()

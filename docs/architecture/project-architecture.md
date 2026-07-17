@@ -144,10 +144,11 @@ Java 的 `ModelRuntimeAssembler` 负责从通用字段、普通参数和密钥�
 | --- | --- |
 | `prompt` | 智能体角色与基础系统提示词输入 |
 | `summaryMemory` | 兼容记忆摘要上下文 |
-| `plugins` | 已启用插件及智能体级参数 |
+| `plugins` | 已启用插件及运行时参数；天气/联网搜索会合并智能体所有者的用户级共享配置 |
 | `mcp_endpoint` | 外部 MCP Endpoint |
 | `context_providers` | 动态上下文源 |
 | `voiceprint` | 外置声纹服务配置、`user_id=agentId` 和最多 5 条说话人信息 |
+| `plugins.feishu_assistant` | 智能体级飞书能力开关，不包含 App Secret |
 
 完整时序见 [运行时链路](./runtime-flows.md)，字段责任见 [数据与契约](./data-and-contracts.md)。
 
@@ -166,6 +167,7 @@ Java 的 `ModelRuntimeAssembler` 负责从通用字段、普通参数和密钥�
 ## 6. 数据所有权
 
 - `manager-api + MySQL` 是用户、智能体、设备绑定、模型、知识库、长期记忆和 Workspace 的事实来源。
+- 天气和联网搜索的外部服务凭据属于用户级事实；智能体映射只决定是否启用插件并保存非共享行为参数。
 - `xiaozhi-server` 拥有连接级会话状态、音频队列、当前对话和工具客户端生命周期。
 - Redis 是加速层；缓存失效不能改变 MySQL 的事实语义。
 - 设备拥有固件、NVS 中的连接入口和设备侧能力描述，但设备上报不能绕过服务端工具门控。

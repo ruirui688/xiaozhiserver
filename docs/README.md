@@ -53,7 +53,7 @@ source_paths:
 ## 专项能力
 
 - **设备与固件**：从[固件编译](./device/firmware-build.md)或[设备交互链路](./architecture/device-interaction-chain.md)进入固件、OTA、MQTT 和设备互呼专题。
-- **第三方集成**：从[Home Assistant](./integrations/homeassistant-integration.md)进入短信、新闻、天气等外部能力接入。
+- **第三方集成**：从[飞书智能体集成](./integrations/feishu-integration.md)、[Home Assistant](./integrations/homeassistant-integration.md)进入协作平台、短信、新闻、天气等外部能力接入。
 - **MCP**：从[MCP 三类链路](./architecture/mcp-chains.md)或[MCP Endpoint 启用](./mcp/mcp-endpoint-enable.md)进入设备上下文、视觉和无代码工具专题。
 - **模型**：从[模型管理](./models/model-management.md)进入 ASR、TTS、LLM、声纹、记忆、RAG 和性能专题。
 - **分析报告**：[reports/README.md](./reports/README.md) 汇总阶段性评测与问题分析；当前可直接查看 [FunASR / SenseVoice 资源基准](./models/funasr-sensevoice-resource-benchmark.md)。

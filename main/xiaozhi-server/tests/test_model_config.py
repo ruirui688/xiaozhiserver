@@ -6,6 +6,10 @@ SERVER_ROOT = Path(__file__).resolve().parents[1]
 if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 
+from config import settings
+
+settings.config_file_valid = True
+
 from core.utils.model_config import (
     apply_legacy_runtime_view,
     get_runtime_config,
@@ -134,6 +138,8 @@ def test_connection_private_config_merge_accepts_lowercase_model_config_payload(
 
     flags = conn._apply_private_runtime_config(
         {
+            "agent_id": "agent-a",
+            "agent_name": "会议助手",
             "selected_module": {
                 "asr": "asr-openai",
                 "tts": "tts-edge",
@@ -161,6 +167,8 @@ def test_connection_private_config_merge_accepts_lowercase_model_config_payload(
     assert conn.config["ASR"]["asr-openai"]["api_key"] == "asr-key"
     assert conn.config["TTS"]["tts-edge"]["voice"] == "zh-CN-XiaoxiaoNeural"
     assert conn.config["LLM"]["llm-openai"]["model_name"] == "qwen"
+    assert conn.config["agent_id"] == "agent-a"
+    assert conn.config["agent_name"] == "会议助手"
 
 
 def test_connection_empty_private_config_keeps_existing_runtime_config():

@@ -456,6 +456,25 @@ async def forget_managed_memory(
         return False
 
 
+async def execute_feishu_action(
+    agent_id: str,
+    action: str,
+    **payload,
+) -> Optional[Dict]:
+    """通过受服务密钥保护的 manager-api 执行智能体级飞书动作。"""
+    if not agent_id or not action:
+        raise ValueError("agent_id and action are required")
+    if not ManageApiClient._instance:
+        raise RuntimeError("manager-api client is not initialized")
+    body = {"action": action}
+    body.update({key: value for key, value in payload.items() if value is not None})
+    return await ManageApiClient._instance._execute_async_request(
+        "POST",
+        f"/config/feishu/{agent_id}/actions",
+        json=body,
+    )
+
+
 def get_managed_memory_query_timeout() -> float:
     """返回托管记忆查询的独立等待预算。
 

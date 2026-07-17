@@ -110,3 +110,31 @@ def test_get_weather_warning_branch_uses_warning_api(monkeypatch):
     assert result.response == "广州当前未查到生效天气预警。"
     assert captured["city_lookup"] == ("广州", "test-key", "test.qweather.example")
     assert captured["warning_lookup"] == ("101280101", "test-key", "test.qweather.example")
+
+
+def test_qweather_custom_host_is_allowed_but_lookalike_is_rejected():
+    assert get_weather._validate_weather_api_host("abc123.qweatherapi.com")
+    assert not get_weather._validate_weather_api_host("qweatherapi.com.attacker.example")
+
+
+def test_city_lookup_sends_api_key_in_header(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        def json(self):
+            return {"location": [{"id": "101280101", "name": "广州"}]}
+
+    def fake_get(url, params, headers, timeout):
+        captured.update(url=url, params=params, headers=headers, timeout=timeout)
+        return FakeResponse()
+
+    monkeypatch.setattr(get_weather.requests, "get", fake_get)
+
+    city = get_weather.fetch_city_info(
+        "广州", "secret-weather-key", "abc123.qweatherapi.com"
+    )
+
+    assert city["id"] == "101280101"
+    assert "key" not in captured["params"]
+    assert "secret-weather-key" not in captured["url"]
+    assert captured["headers"]["X-QW-Api-Key"] == "secret-weather-key"

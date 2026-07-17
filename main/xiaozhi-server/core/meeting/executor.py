@@ -1,7 +1,9 @@
 """Execute authoritative meeting state changes selected by the main LLM."""
 
+import asyncio
 import uuid
 
+from config.manage_api_client import execute_feishu_action
 from core.providers.tts.dto.dto import ContentType, SentenceType, TTSMessageDTO
 
 
@@ -15,11 +17,13 @@ def finish_meeting(conn) -> None:
     conn.logger.bind(tag=__name__).info("会议模式已结束，开始生成完整会议纪要")
     summary_prompt = meeting.build_summary_prompt()
     transcript = meeting.build_transcript()
+    topic = meeting.get_status().get("topic", "")
     future = conn.executor.submit(
         generate_meeting_minutes,
         conn,
         summary_prompt,
         transcript,
+        topic,
     )
     future.add_done_callback(
         lambda item: conn.logger.bind(tag=__name__).error(
@@ -30,7 +34,7 @@ def finish_meeting(conn) -> None:
     )
 
 
-def generate_meeting_minutes(conn, prompt: str, transcript) -> None:
+def generate_meeting_minutes(conn, prompt: str, transcript, topic: str = "") -> None:
     if not transcript:
         enqueue_tts_text(conn, "本次会议没有记录到有效发言，无法生成会议纪要。")
         return
@@ -55,6 +59,44 @@ def generate_meeting_minutes(conn, prompt: str, transcript) -> None:
     if not summary:
         summary = "会议已结束，但大模型没有返回有效会议纪要。"
     enqueue_tts_text(conn, summary)
+    enqueue_feishu_report(conn, summary, topic)
+
+
+def enqueue_feishu_report(conn, summary: str, topic: str = "") -> None:
+    if not getattr(conn, "read_config_from_api", False):
+        return
+    agent_id = (getattr(conn, "config", None) or {}).get("agent_id")
+    loop = getattr(conn, "loop", None)
+    if not agent_id or loop is None or loop.is_closed():
+        return
+    coroutine = execute_feishu_action(
+        agent_id,
+        "publish_meeting_report",
+        title=f"会议纪要：{topic}" if topic else "会议纪要",
+        content=summary,
+        macAddress=getattr(conn, "device_id", None),
+    )
+    try:
+        future = asyncio.run_coroutine_threadsafe(coroutine, loop)
+    except Exception as error:
+        coroutine.close()
+        conn.logger.bind(tag=__name__).warning(
+            "提交飞书会议纪要失败: errorType={}".format(type(error).__name__)
+        )
+        return
+
+    def log_result(item):
+        try:
+            item.result()
+            conn.logger.bind(tag=__name__).info("飞书会议纪要投递完成")
+        except Exception as error:
+            conn.logger.bind(tag=__name__).warning(
+                "飞书会议纪要投递失败: errorType={}".format(
+                    type(error).__name__
+                )
+            )
+
+    future.add_done_callback(log_result)
 
 
 def enqueue_tts_text(conn, text: str) -> None:

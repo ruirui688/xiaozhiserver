@@ -67,12 +67,26 @@
           {{ $t('functionDialog.paramConfig') }} - {{ currentFunction.name }}
         </h4>
         <div v-if="currentFunction" class="params-container">
+          <div v-if="isSharedConfigPlugin(currentFunction)" class="shared-config-row">
+            <div>
+              <div class="shared-config-title">{{ $t('functionDialog.userSharedConfig') }}</div>
+              <div class="shared-config-status">
+                {{ sharedConfigConfigured(currentFunction.providerCode)
+                  ? $t('functionDialog.sharedConfigReady')
+                  : $t('functionDialog.sharedConfigMissing') }}
+              </div>
+            </div>
+            <el-button
+              size="small"
+              icon="el-icon-setting"
+              @click="openSharedConfig(currentFunction)"
+            >{{ $t('functionDialog.configure') }}</el-button>
+          </div>
           <el-form :model="currentFunction" class="param-form">
-            <!-- 遍历 fieldsMeta，而不是 params 的 keys -->
-            <div v-if="currentFunction.fieldsMeta.length == 0">
+            <div v-if="agentConfigFields(currentFunction).length === 0 && !isSharedConfigPlugin(currentFunction)">
               <el-empty :description="currentFunction.name + $t('functionDialog.noNeedToConfig')" />
             </div>
-            <el-form-item v-for="field in currentFunction.fieldsMeta" :key="field.key" :label="field.label"
+            <el-form-item v-for="field in agentConfigFields(currentFunction)" :key="field.key" :label="field.label"
               class="param-item" :class="{ 'textarea-field': field.type === 'array' || field.type === 'json' || field.type === 'textarea' }">
               <template #label>
                 <span style="font-size: 16px; margin-right: 6px;">{{ field.label }}</span>
@@ -254,6 +268,13 @@
       </span>
     </el-dialog>
 
+    <user-plugin-config-dialog
+      :visible.sync="sharedConfigDialogVisible"
+      :provider-code="sharedConfigProviderCode"
+      :plugin-name="sharedConfigPluginName"
+      @saved="loadSharedConfigStatus"
+    />
+
     <div class="drawer-footer">
       <el-button @click="closeDialog">{{ $t('functionDialog.cancel') }}</el-button>
       <el-button type="primary" @click="saveSelection">{{ $t('functionDialog.saveConfig') }}</el-button>
@@ -265,9 +286,16 @@
 import Api from '@/apis/api';
 import i18n from '@/i18n';
 import featureManager from '@/utils/featureManager';
+import UserPluginConfigDialog from '@/components/UserPluginConfigDialog.vue';
+
+const SHARED_FIELDS = {
+  get_weather: ['api_host', 'api_key', 'default_location'],
+  web_search: ['provider', 'api_key'],
+};
 
 export default {
   i18n,
+  components: { UserPluginConfigDialog },
 
   props: {
     value: Boolean,
@@ -302,6 +330,10 @@ export default {
       noCodeTools: [],
       noCodeToolsDirty: false,
       savingNoCodeTools: false,
+      sharedConfigDialogVisible: false,
+      sharedConfigProviderCode: '',
+      sharedConfigPluginName: '',
+      sharedConfigStatuses: {},
       mcpToolEditorVisible: false,
       editingMcpToolIndex: -1,
       editingMcpTool: {
@@ -394,6 +426,7 @@ export default {
         this.loadMcpAddress();
         this.loadMcpTools();
         this.loadNoCodeTools();
+        this.loadSharedConfigStatus();
       }
     },
     dialogVisible(newVal) {
@@ -413,6 +446,38 @@ export default {
         mcpAccessPoint: config.mcpAccessPoint || false,
         addressBook: config.addressBook || false
       };
+    },
+    loadSharedConfigStatus() {
+      Api.user.getPluginConfigs(({ data }) => {
+        if (!data || data.code !== 0) return;
+        const statuses = {};
+        (data.data || []).forEach(item => {
+          statuses[item.providerCode] = Boolean(item.configured && item.secretConfigured);
+        });
+        this.sharedConfigStatuses = statuses;
+      });
+    },
+    isSharedConfigPlugin(func) {
+      return Boolean(func && SHARED_FIELDS[func.providerCode]);
+    },
+    sharedConfigConfigured(providerCode) {
+      return Boolean(this.sharedConfigStatuses[providerCode]);
+    },
+    openSharedConfig(func) {
+      this.sharedConfigProviderCode = func.providerCode;
+      this.sharedConfigPluginName = func.name;
+      this.sharedConfigDialogVisible = true;
+    },
+    agentConfigFields(func) {
+      const fields = Array.isArray(func && func.fieldsMeta) ? func.fieldsMeta : [];
+      const shared = SHARED_FIELDS[func && func.providerCode] || [];
+      return fields.filter(field => !shared.includes(field.key));
+    },
+    sanitizeFunctionParams(func, params) {
+      const sanitized = { ...(params || {}) };
+      const shared = SHARED_FIELDS[func && func.providerCode] || [];
+      shared.forEach(key => delete sanitized[key]);
+      return sanitized;
     },
     
     copyUrl() {
@@ -680,9 +745,10 @@ export default {
           name: f.name,
           providerCode: f.providerCode,
           fieldsMeta: f.fieldsMeta,
-          params: modified
-            ? { ...modified.params }
-            : { ...f.params }
+          params: this.sanitizeFunctionParams(
+            f,
+            modified ? modified.params : f.params
+          )
         }
       });
 
@@ -914,6 +980,28 @@ export default {
   padding: 16px;
   border-radius: 4px;
   min-width: 280px;
+}
+
+.shared-config-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  margin-bottom: 14px;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.shared-config-title {
+  color: #303133;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.shared-config-status {
+  margin-top: 4px;
+  color: #909399;
+  font-size: 12px;
 }
 
 .empty-tip {

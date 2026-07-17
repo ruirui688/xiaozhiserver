@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.fasterxml.jackson.core.type.TypeReference;
 
 import cn.hutool.json.JSONObject;
 import lombok.AllArgsConstructor;
@@ -61,6 +62,7 @@ import xiaozhi.modules.model.service.ModelProviderService;
 import xiaozhi.modules.security.user.SecurityUser;
 import xiaozhi.modules.sys.enums.SuperAdminEnum;
 import xiaozhi.modules.timbre.service.TimbreService;
+import xiaozhi.modules.userplugin.SharedPluginConfigRegistry;
 import xiaozhi.modules.workspace.entity.WorkspaceEntity;
 import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 import xiaozhi.modules.workspace.service.WorkspaceService;
@@ -117,6 +119,10 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
         // 查询替换词文件ID列表
         List<String> correctWordFileIds = correctWordFileService.getAgentCorrectWordFileIds(id);
         agent.setCorrectWordFileIds(correctWordFileIds);
+
+        if (agent.getFunctions() != null) {
+            agent.getFunctions().forEach(this::stripSharedPluginFields);
+        }
 
         // 无需额外查询插件列表，已通过SQL查询出来
         return agent;
@@ -451,7 +457,9 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
                 AgentPluginMapping m = new AgentPluginMapping();
                 m.setAgentId(agentId);
                 m.setPluginId(info.getPluginId());
-                m.setParamInfo(JsonUtils.toJsonString(info.getParamInfo()));
+                m.setParamInfo(JsonUtils.toJsonString(
+                        SharedPluginConfigRegistry.stripSharedAgentFields(
+                                info.getPluginId(), info.getParamInfo())));
                 AgentPluginMapping old = existMap.get(info.getPluginId());
                 if (old != null) {
                     // 已存在，设置id表示更新
@@ -663,7 +671,8 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
                     paramInfo.put((String) field.get("key"), field.get("default"));
                 }
             }
-            mapping.setParamInfo(JsonUtils.toJsonString(paramInfo));
+            mapping.setParamInfo(JsonUtils.toJsonString(
+                    SharedPluginConfigRegistry.stripSharedAgentFields(provider.getId(), paramInfo)));
             mapping.setAgentId(entity.getId());
             toInsert.add(mapping);
         }
@@ -731,6 +740,22 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
             return modelConfigs.get(0).getId();
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    private void stripSharedPluginFields(AgentPluginMapping mapping) {
+        if (mapping == null || StringUtils.isBlank(mapping.getParamInfo())) {
+            return;
+        }
+        try {
+            Map<String, Object> params = JsonUtils.parseObject(
+                    mapping.getParamInfo(), new TypeReference<Map<String, Object>>() {
+                    });
+            mapping.setParamInfo(JsonUtils.toJsonString(
+                    SharedPluginConfigRegistry.stripSharedAgentFields(mapping.getPluginId(), params)));
+        } catch (RuntimeException e) {
+            log.warn("智能体插件参数格式无效，无法应用共享字段脱敏: pluginId={}", mapping.getPluginId());
+            mapping.setParamInfo("{}");
         }
     }
 

@@ -136,7 +136,7 @@
   - main/xiaozhi-server/plugins_func/functions/get_weather.py
   - main/xiaozhi-server/config.yaml
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改 get_weather 插件，必须保留以下约定：和风接口异常、认证失败、Host 无效、城市查询失败或页面抓取失败时，先使用 Open-Meteo 兜底查询；`南京市玄武区`、`南京市江宁区` 等区县输入需要规范化为城市候选；工具结果必须以 Action.RESPONSE 直接返回给用户，不能再交给 LLM 把接口错误改写成地点不存在。
+官方同步时的处理规则：如果官方修改 get_weather 插件，必须保留以下约定：和风接口异常、认证失败、Host 无效、城市查询失败或页面抓取失败时，先使用 Open-Meteo 兜底查询；`南京市玄武区`、`南京市江宁区` 等区县输入需要规范化为城市候选；工具结果必须以 Action.RESPONSE 直接返回给用户，不能再交给 LLM 把接口错误改写成地点不存在；API Key 通过 `X-QW-Api-Key` 请求头传递，不得进入 URL 查询参数。
 ```
 
 ## 10. 视觉解释接口后台参数化
@@ -519,4 +519,39 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - docs/architecture/device-interaction-chain.md
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方修改插件配置下发、语义控制中枢、主 LLM function calling、ASR 句末处理、TTS 入队或连接生命周期，必须保留“全模块按智能体插件门控、高置信会议 start/end 由语义控制中枢真实改变状态、讨论/引用/否定表达不误触发、主 LLM仍可通过真实工具处理复杂启动语义、进入会议有一次简短确认、会议正文静默记录、结束控制句不进入正文、最终纪要使用完整冻结转写、会议内容不污染长期记忆”的行为；不得允许普通模型文字模拟状态切换，也不得引入独立 SLM 裁决。会议插件后续修正必须新增迁移并登记到 `db.changelog-master.yaml`，不得修改已发布 changeSet。
+```
+
+## 28. 智能体级飞书协作集成
+
+```text
+定制模块：manager-api 飞书配置与开放平台客户端、manager-web 智能体绑定、xiaozhi-server 飞书工具与会议纪要投递
+改动原因：会议模式生成完整纪要后，需要按智能体绑定关系自动发送到指定飞书群，并允许主 LLM 在显式授权范围内发送/读取默认群消息、创建任务和安排日程。绑定不是用户级 OAuth；每个智能体独立保存应用、默认群、负责人、日历和动作权限。
+关键文件：
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/feishu/FeishuOpenApiClient.java
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/service/impl/AgentFeishuServiceImpl.java
+  - main/manager-api/src/main/java/xiaozhi/modules/config/controller/FeishuRuntimeController.java
+  - main/manager-api/src/main/resources/db/changelog/202607171130.sql
+  - main/manager-web/src/components/role/FeishuIntegrationDialog.vue
+  - main/xiaozhi-server/plugins_func/functions/feishu_assistant.py
+  - main/xiaozhi-server/core/meeting/executor.py
+  - docs/integrations/feishu-integration.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：必须保留智能体级所有权、App Secret 仅在 manager-api 使用部署级 AES-GCM 密钥加密保存、前端不回显、Python 不接收凭据、`/config/feishu/**` 同时校验服务密钥和设备到智能体绑定关系、默认群/负责人/日历服务端固定门控、各动作独立授权和群消息不可信内容包裹。会议纪要投递失败不得阻塞设备端纪要播报；日志不得输出 App Secret、tenant_access_token、Authorization 或原始凭据响应。
+```
+
+## 29. 用户级天气与联网搜索共享配置
+
+```text
+定制模块：manager-api 用户插件共享配置、manager-web 功能配置、xiaozhi-server 天气请求
+改动原因：天气和联网搜索的外部服务密钥属于用户可复用凭据，不应在每个新智能体的插件映射中重复填写和明文保存。现在用户只配置一次 API Key、天气默认城市/API Host 或搜索源；智能体仍独立决定是否启用插件，并保留描述、返回数量等行为参数。
+关键文件：
+  - main/manager-api/src/main/java/xiaozhi/modules/userplugin/
+  - main/manager-api/src/main/java/xiaozhi/modules/config/service/impl/ConfigServiceImpl.java
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/service/impl/AgentServiceImpl.java
+  - main/manager-api/src/main/resources/db/changelog/202607171630.sql
+  - main/manager-web/src/components/UserPluginConfigDialog.vue
+  - main/manager-web/src/components/FunctionDialog.vue
+  - main/xiaozhi-server/plugins_func/functions/get_weather.py
+是否允许被官方覆盖：否
+官方同步时的处理规则：必须保留“用户级凭据、智能体级启用”的双层边界。共享配置只能支持白名单插件和字段，使用部署级 AES-GCM 密钥加密，API 只返回非敏感字段和已配置状态；智能体保存、默认创建和读取接口不得继续暴露或写入共享密钥。运行时只能为已绑定插件按 agent.user_id 合并共享配置，不能因用户保存密钥自动注册工具。和风 API Key 必须放在 X-QW-Api-Key 请求头中，不得放入 URL 或日志；自定义 Host 仅允许受校验的 *.qweatherapi.com 或明确公共 Host。
 ```

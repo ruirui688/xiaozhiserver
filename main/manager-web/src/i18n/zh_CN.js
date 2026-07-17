@@ -948,6 +948,10 @@ export default {
   'functionDialog.copyFailed': '复制失败，请手动复制',
   'functionDialog.jsonFormatError': '的字段格式错误：JSON格式有误',
   'functionDialog.defaultValue': '默认值',
+  'functionDialog.userSharedConfig': '用户级共享配置',
+  'functionDialog.sharedConfigReady': '已配置，当前用户的智能体可复用',
+  'functionDialog.sharedConfigMissing': '未配置，启用后暂时无法调用',
+  'functionDialog.configure': '配置',
 
   // 模型配置页面文本
   'modelConfig.searchPlaceholder': '请输入模型名称查询',

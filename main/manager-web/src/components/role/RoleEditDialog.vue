@@ -53,6 +53,17 @@
                 </el-button>
               </div>
             </el-form-item>
+            <el-form-item label="飞书：">
+              <div class="integration-row">
+                <span>智能体级绑定</span>
+                <el-button
+                  class="edit-function-btn"
+                  size="small"
+                  icon="el-icon-connection"
+                  @click="showFeishuDialog = true"
+                >配置</el-button>
+              </div>
+            </el-form-item>
             <el-form-item>
               <template #label>
                 <el-tooltip :content="$t('roleConfig.tooltip.roleIntroduction')" placement="top" effect="light" popper-class="custom-tooltip">
@@ -442,6 +453,10 @@
       :checked-replacement-word-ids="checkedReplacementWordIds"
       @save="handleTtsSettingsSave"
     />
+    <feishu-integration-dialog
+      :visible.sync="showFeishuDialog"
+      :agent-id="effectiveAgentId"
+    />
   </div>
 </template>
 
@@ -452,11 +467,17 @@ import RequestService from "@/apis/httpRequest";
 import FunctionDialog from "@/components/FunctionDialog.vue";
 import KnowledgeBaseSelectorDialog from "@/components/KnowledgeBaseSelectorDialog.vue";
 import TtsAdvancedSettings from "@/components/TtsAdvancedSettings.vue";
+import FeishuIntegrationDialog from "@/components/role/FeishuIntegrationDialog.vue";
 import i18n from "@/i18n";
 
 export default {
   name: "RoleEditForm",
-  components: { FunctionDialog, KnowledgeBaseSelectorDialog, TtsAdvancedSettings },
+  components: {
+    FunctionDialog,
+    KnowledgeBaseSelectorDialog,
+    TtsAdvancedSettings,
+    FeishuIntegrationDialog,
+  },
   props: {
     initialForm: { type: Object, default: () => null },
     models: { type: Array, default: () => [] },
@@ -481,6 +502,7 @@ export default {
       showFunctionDialog: false,
       showKnowledgeBaseDialog: false,
       showTtsAdvancedDialog: false,
+      showFeishuDialog: false,
       ttsSettings: { volume: 0, speed: 0, pitch: 0 },
       tempSummaryMemory: "",
       allFunctions: [],
@@ -1036,6 +1058,15 @@ export default {
 
 .form-input {
   width: 100%;
+}
+
+.integration-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  color: #606266;
+  font-size: 13px;
 }
 
 .form-select {

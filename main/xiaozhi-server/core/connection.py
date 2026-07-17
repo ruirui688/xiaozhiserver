@@ -990,6 +990,8 @@ class ConnectionHandler:
         normalize_runtime_config(self.config)
 
         for key in (
+            "agent_id",
+            "agent_name",
             "prompt",
             "voiceprint",
             "voiceprint_enrollment",

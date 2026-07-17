@@ -180,15 +180,27 @@ def _validate_weather_api_host(api_host: str) -> bool:
     """验证天气API主机名是否在允许列表中"""
     if not api_host:
         return False
-    return api_host in ALLOWED_WEATHER_API_HOSTS
+    normalized_host = api_host.strip().lower()
+    return normalized_host in ALLOWED_WEATHER_API_HOSTS or bool(
+        re.fullmatch(r"(?:[a-z0-9-]+\.)+qweatherapi\.com", normalized_host)
+    )
+
+
+def _weather_api_headers(api_key: str) -> dict:
+    return {**HEADERS, "X-QW-Api-Key": api_key}
 
 
 def fetch_city_info(location, api_key, api_host):
     if not _validate_weather_api_host(api_host):
         logger.bind(tag=TAG).error(f"不允许的天气API主机: {api_host}")
         return None
-    url = f"https://{api_host}/geo/v2/city/lookup?key={api_key}&location={location}&lang=zh"
-    response = requests.get(url, headers=HEADERS, timeout=10).json()
+    url = f"https://{api_host}/geo/v2/city/lookup"
+    response = requests.get(
+        url,
+        params={"location": location, "lang": "zh"},
+        headers=_weather_api_headers(api_key),
+        timeout=10,
+    ).json()
     if response.get("error") is not None:
         logger.bind(tag=TAG).error(
             f"获取天气失败，原因：{response.get('error', {}).get('detail')}"
@@ -204,8 +216,8 @@ def fetch_weather_warning(location_id, api_key, api_host):
     url = f"https://{api_host}/v7/warning/now"
     response = requests.get(
         url,
-        params={"key": api_key, "location": location_id, "lang": "zh"},
-        headers=HEADERS,
+        params={"location": location_id, "lang": "zh"},
+        headers=_weather_api_headers(api_key),
         timeout=10,
     )
     data = response.json()

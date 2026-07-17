@@ -77,6 +77,7 @@ config/examples/manager-web.local.env.example
 
 ```text
 API Key、Access Token、签名密钥、私钥证书、设备密钥
+飞书 App Secret、XIAOZHI_CREDENTIAL_ENCRYPTION_KEY
 数据库密码、Redis 密码、云服务凭据
 生产、测试、客户或私有网络真实地址
 main/xiaozhi-server/data/.config.yaml
@@ -92,6 +93,14 @@ main/xiaozhi-server/data/.config.yaml
 3. 真实值从被忽略的私有配置或部署密钥读取。
 4. 生成文件默认写入 runtime/；只有兼容旧实现时才继续写旧路径。
 ```
+
+智能体级或用户级第三方凭据在数据库中必须使用部署级 `XIAOZHI_CREDENTIAL_ENCRYPTION_KEY`
+加密。生产安装脚本首次安装时生成该值并保存在 `~/xiaozhi-data/.env`；升级时必须保留原值。
+更换密钥前必须先完成凭据重加密，否则历史密文无法解密。
+
+天气和联网搜索的 API Key 属于用户级共享配置，保存于 `ai_user_plugin_config.config_ciphertext`；
+不得继续写入 `ai_agent_plugin_mapping.param_info`，也不得通过管理接口回显。智能体映射只负责启用门控和非共享行为参数。
+运行时仅在智能体已经启用对应插件时按 `agent.user_id` 合并共享配置，禁止用户级配置绕过智能体工具白名单。
 
 ## 4. 迁移原则
 

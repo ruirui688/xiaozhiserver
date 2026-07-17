@@ -44,6 +44,9 @@ renren:
     exclude-urls:
 
 xiaozhi:
+  security:
+    # 用于加密智能体级第三方凭据。生产安装脚本会生成并持久化该值。
+    credential-encryption-key: ${XIAOZHI_CREDENTIAL_ENCRYPTION_KEY:}
   server:
     # manager-api 调用 xiaozhi-server HTTP/OTA 服务的内部地址。
     # 本机源码开发默认用 127.0.0.1；Docker/多机部署请用环境变量覆盖：

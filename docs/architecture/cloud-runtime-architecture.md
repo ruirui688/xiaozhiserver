@@ -85,9 +85,11 @@ model_config
 prompt
 summaryMemory
 plugins
+plugins.get_weather / plugins.web_search（用户共享凭据 + 智能体行为参数）
 mcp_endpoint
 context_providers
 voiceprint
+plugins.feishu_assistant（仅能力门控，不下发飞书凭据）
 TTS 私有音色、语速、音量、语言
 ```
 
@@ -157,6 +159,11 @@ tool results
 未绑定声纹的智能体不下发声纹运行配置，也不会创建远程声纹请求。声纹超时或失败只表示本轮没有身份，不影响 ASR 文本继续进入主链路。历史参数 `server.voiceprint_sample_seconds` 不再下发到 Python，也不再影响实时识别音频长度。
 
 会议模式是实时链路中的连接级状态：全模块运行时先由智能体是否绑定 `SYSTEM_PLUGIN_MEETING_MINUTES` 决定工具是否可用，单模块运行则读取 `meeting.enabled`。高置信“进入会议模式 / 开始记录会议 / 结束会议 / 生成会议纪要”等控制先由语义控制中枢确定性执行；服务端会排除讨论、引用、否定和未来计划类表达，未命中的复杂语义仍可由主 LLM 通过真实 `meeting_minutes` function tool 启动。会议激活后普通 ASR 由服务端直接静默记录，只有明确结束控制才冻结转写并生成纪要；会议状态、会议控制句和会议正文不作为长期记忆事件上报。冻结后仍由主 LLM 基于完整结构化转写统一生成会议纪要。
+
+飞书集成是智能体级配置，不是用户级 OAuth 绑定。`manager-api` 保存加密后的 App Secret，
+只向 Python 下发 `feishu_assistant` 动作开关。会议纪要生成成功后，Python 通过
+`/config/feishu/{agentId}/actions` 服务密钥接口提交纪要；群消息、任务和日程也走同一受控入口。
+Python、设备和浏览器读取配置时都拿不到 App Secret，工具只能操作该智能体配置的默认群、负责人和日历。
 
 ## 5. 智能体能力组成
 
@@ -374,13 +381,19 @@ Python 向设备发 initialize / tools/list
 | 维度 | 内置天气插件 `get_weather` | MCP |
 | --- | --- | --- |
 | 来源 | Python 内置插件函数 | 外部 MCP 服务、服务器侧 MCP 或设备端 MCP |
-| 配置位置 | 智能体功能配置 / `plugins.get_weather` | `server.mcp_endpoint`、`.mcp_server_settings.json`、设备 `features.mcp` |
+| 配置位置 | 全模块：用户共享配置；单模块：`plugins.get_weather` | `server.mcp_endpoint`、`.mcp_server_settings.json`、设备 `features.mcp` |
 | 模型看到的提示 | `GET_WEATHER_FUNCTION_DESC` | MCP `tools/list` 的 description/inputSchema |
 | 是否自动调用 | 否，由模型判断 | 否，由模型判断 |
 | 当前本地天气 | 基础提示词可能要求直接用上下文 | 与 MCP 无关 |
 | 适合场景 | 查询城市天气 | 扩展任意工具、外部系统、设备能力 |
 
 如果用户问本地天气，而系统上下文已经提供本地天气，模型可能直接回答而不调用 `get_weather`。如果用户明确说其他城市，工具描述和基础提示词应要求调用天气工具。
+
+全模块部署中，天气和联网搜索采用两层配置：`ai_user_plugin_config` 保存加密后的用户级共享凭据和默认参数，
+`ai_agent_plugin_mapping` 只保存智能体是否启用该插件以及 `description`、`max_results` 等行为参数。
+`ConfigServiceImpl` 仅遍历当前智能体已经绑定的插件，再按 `agent.user_id` 合并共享配置，因此保存用户密钥不会自动给所有智能体注册工具。
+浏览器读取接口只返回非敏感字段和 `secretConfigured`，不回显 API Key；保存共享配置后会清理该用户历史智能体映射中的同类明文字段。
+和风天气 API Key 通过 `X-QW-Api-Key` 请求头传递，不进入 URL 查询参数。
 
 ## 14. OTA 与设备连接入口
 

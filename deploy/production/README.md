@@ -261,6 +261,10 @@ are preserved during upgrade; if an older deployment still has
 `XIAOZHI_SERVER_MEM_LIMIT=768m`, raise it to at least `2048m` before enabling
 FunASR.
 
+`install` also generates `XIAOZHI_CREDENTIAL_ENCRYPTION_KEY` for encrypted
+agent-scoped third-party credentials. Upgrades preserve this value. Do not
+rotate it until stored credentials have been re-encrypted with the new key.
+
 ## Pull cache behavior
 
 Production hosts do not build images and do not install Python, Java, Node.js,
