@@ -121,7 +121,9 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
         agent.setCorrectWordFileIds(correctWordFileIds);
 
         if (agent.getFunctions() != null) {
-            agent.getFunctions().forEach(this::stripSharedPluginFields);
+            for (Object functionItem : agent.getFunctions()) {
+                stripSharedPluginFields(functionItem);
+            }
         }
 
         // 无需额外查询插件列表，已通过SQL查询出来
@@ -743,6 +745,14 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
         }
     }
 
+    private void stripSharedPluginFields(Object mapping) {
+        if (mapping instanceof AgentPluginMapping pluginMapping) {
+            stripSharedPluginFields(pluginMapping);
+        } else if (mapping instanceof Map<?, ?> map) {
+            stripSharedPluginFields(map);
+        }
+    }
+
     private void stripSharedPluginFields(AgentPluginMapping mapping) {
         if (mapping == null || StringUtils.isBlank(mapping.getParamInfo())) {
             return;
@@ -757,6 +767,30 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
             log.warn("智能体插件参数格式无效，无法应用共享字段脱敏: pluginId={}", mapping.getPluginId());
             mapping.setParamInfo("{}");
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void stripSharedPluginFields(Map<?, ?> mapping) {
+        String pluginId = stringValue(mapping.get("pluginId"));
+        String paramInfo = stringValue(mapping.get("paramInfo"));
+        if (StringUtils.isBlank(pluginId) || StringUtils.isBlank(paramInfo)) {
+            return;
+        }
+        try {
+            Map<String, Object> params = JsonUtils.parseObject(
+                    paramInfo, new TypeReference<Map<String, Object>>() {
+                    });
+            ((Map<String, Object>) mapping).put(
+                    "paramInfo",
+                    JsonUtils.toJsonString(SharedPluginConfigRegistry.stripSharedAgentFields(pluginId, params)));
+        } catch (RuntimeException e) {
+            log.warn("智能体插件参数格式无效，无法应用共享字段脱敏: pluginId={}", pluginId);
+            ((Map<String, Object>) mapping).put("paramInfo", "{}");
+        }
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? "" : StringUtils.trim(String.valueOf(value));
     }
 
 }
