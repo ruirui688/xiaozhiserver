@@ -219,6 +219,9 @@ utils/audioRateController.py  AudioRateController
   - client_abort 时通过 CancelledError 取消
 ```
 
+- 整轮 TTS 不设置固定播放时长上限；收到 `LAST` 后，等待预算按队列中剩余音频帧的真实播放时长动态计算，并额外保留单包发送超时与收尾容差。
+- WebSocket 半开保护作用于单个音频包发送。单包超过 `audio_send_timeout_seconds` 仍未完成时，后台发送任务失败并清理队列，避免异常连接永久占用会话；正常的长语音不会因为总时长超过 20 秒被截断。
+
 ## 5. 声纹注册采集模式
 
 声纹注册不再通过普通语音对话触发。智控台点击“开始录音”后，`manager-api` 调用

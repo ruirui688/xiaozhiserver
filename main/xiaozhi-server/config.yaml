@@ -89,8 +89,9 @@ enable_websocket_ping: false
 #   0: 使用精确时间控制，严格匹配音频帧率（默认，运行时按音频帧率计算）
 #   > 0: 使用固定延迟（毫秒）发送，例如: 60
 tts_audio_send_delay: 0
-# 等待流控队列完成的绝对上限（秒），上游发送半开时清理队列并失败返回。
-tts_audio_completion_timeout_seconds: 20
+# 音频队列按真实剩余播放时长等待，不限制整段语音的总播放时长。
+# grace 只用于队列收尾和调度抖动，不作为播放时长上限。
+tts_audio_completion_grace_seconds: 5
 
 # 语义打断配置
 # 当设备在 TTS 播放期间识别到用户说话时，先让当前 LLM 基于少量上下文裁决：

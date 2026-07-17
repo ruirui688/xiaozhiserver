@@ -183,11 +183,16 @@ def test_last_audio_message_wait_budget_includes_queue_drain_timeout():
         True,
     )
     provider.conn = SimpleNamespace(
-        config={"tts_audio_completion_timeout_seconds": 20}
+        config={"tts_audio_completion_grace_seconds": 5},
+        tts=provider,
+        audio_rate_controller=SimpleNamespace(
+            queue=[("audio", b"opus")] * 1000,
+            frame_duration=60,
+        ),
     )
 
     assert provider._audio_message_timeout(SentenceType.MIDDLE) == 5
-    assert provider._audio_message_timeout(SentenceType.LAST) == 25
+    assert provider._audio_message_timeout(SentenceType.LAST) == 75
 
 
 @pytest.mark.parametrize(

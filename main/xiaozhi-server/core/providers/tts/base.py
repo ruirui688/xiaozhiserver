@@ -18,7 +18,7 @@ from core.utils import opus_encoder_utils
 from core.utils.tts import MarkdownCleaner, convert_percentage_to_range
 from core.utils.output_counter import add_device_output
 from core.handle.reportHandle import enqueue_tts_report
-from core.handle.sendAudioHandle import sendAudioMessage
+from core.handle.sendAudioHandle import sendAudioMessage, _audio_completion_timeout
 from core.utils.util import audio_bytes_to_data_stream, audio_to_data_stream
 from core.providers.tts.dto.dto import (
     TTSMessageDTO,
@@ -396,12 +396,9 @@ class TTSProviderBase(ABC):
         guard must not expire first and cancel an otherwise healthy playback.
         """
         if sentence_type == SentenceType.LAST:
-            completion_timeout = self.conn.config.get(
-                "tts_audio_completion_timeout_seconds", 20
-            )
-            completion_timeout = self._positive_timeout(
-                completion_timeout,
-                "tts_audio_completion_timeout_seconds",
+            completion_timeout = _audio_completion_timeout(
+                self.conn,
+                getattr(self.conn, "audio_rate_controller", None),
             )
             return completion_timeout + self.audio_send_timeout_seconds
         return self.audio_send_timeout_seconds

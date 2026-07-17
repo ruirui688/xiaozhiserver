@@ -45,13 +45,14 @@ class FakeWebSocket:
             await asyncio.Event().wait()
 
 
-def _connection(websocket, timeout=0.03):
+def _connection(websocket, send_timeout=0.03, completion_grace=0.03):
     return SimpleNamespace(
         websocket=websocket,
         client_abort=False,
         conn_from_mqtt_gateway=False,
         last_activity_time=0,
-        config={"tts_audio_completion_timeout_seconds": timeout},
+        config={"tts_audio_completion_grace_seconds": completion_grace},
+        tts=SimpleNamespace(audio_send_timeout_seconds=send_timeout),
         logger=FakeLogger(),
     )
 
@@ -101,7 +102,7 @@ def test_websocket_send_error_releases_waiter_and_next_sender_recovers():
 
 def test_half_open_websocket_send_times_out_without_blocking_heartbeat():
     async def scenario():
-        conn = _connection(FakeWebSocket("hang"), timeout=0.03)
+        conn = _connection(FakeWebSocket("hang"), send_timeout=0.03)
         controller = AudioRateController(frame_duration=1)
         await _run_sender(conn, controller)
 
@@ -115,7 +116,7 @@ def test_half_open_websocket_send_times_out_without_blocking_heartbeat():
 
         heartbeat_task = asyncio.create_task(heartbeat())
         started = time.monotonic()
-        with pytest.raises(TimeoutError, match="等待音频发送完成超时"):
+        with pytest.raises(RuntimeError, match="音频发送失败"):
             await sendAudioHandle._wait_for_audio_completion(conn)
         elapsed = time.monotonic() - started
         await heartbeat_task
@@ -129,19 +130,23 @@ def test_half_open_websocket_send_times_out_without_blocking_heartbeat():
     asyncio.run(scenario())
 
 
-def test_audio_completion_timeout_uses_queue_duration_with_absolute_cap():
-    conn = _connection(FakeWebSocket("success"), timeout=20)
+def test_audio_completion_timeout_tracks_queue_duration_without_absolute_cap():
+    conn = _connection(
+        FakeWebSocket("success"),
+        send_timeout=5,
+        completion_grace=5,
+    )
     controller = AudioRateController(frame_duration=60)
 
     controller.queue.extend(("audio", b"opus") for _ in range(50))
-    assert sendAudioHandle._audio_completion_timeout(conn, controller) == 8.0
+    assert sendAudioHandle._audio_completion_timeout(conn, controller) == 13.0
 
-    controller.queue.extend(("audio", b"opus") for _ in range(300))
-    assert sendAudioHandle._audio_completion_timeout(conn, controller) == 20.0
+    controller.queue.extend(("audio", b"opus") for _ in range(950))
+    assert sendAudioHandle._audio_completion_timeout(conn, controller) == 70.0
 
     controller.queue.clear()
     controller.queue.append(("audio", b"opus"))
-    assert sendAudioHandle._audio_completion_timeout(conn, controller) == pytest.approx(5.06)
+    assert sendAudioHandle._audio_completion_timeout(conn, controller) == pytest.approx(10.06)
 
 
 def test_first_audio_sets_speaking_and_preserves_protocol_order(monkeypatch):

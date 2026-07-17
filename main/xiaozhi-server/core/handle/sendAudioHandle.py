@@ -122,25 +122,42 @@ async def _wait_for_audio_completion(conn: "ConnectionHandler"):
         conn.logger.bind(tag=TAG).debug("音频发送完成")
 
 
-def _audio_completion_timeout(conn: "ConnectionHandler", rate_controller):
+def _positive_timeout(value, field_name):
     try:
-        absolute_limit = float(
-            conn.config.get("tts_audio_completion_timeout_seconds", 20)
-        )
+        timeout = float(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(
-            "tts_audio_completion_timeout_seconds 必须是大于 0 的数字"
-        ) from exc
-    if not math.isfinite(absolute_limit) or absolute_limit <= 0:
-        raise ValueError(
-            "tts_audio_completion_timeout_seconds 必须是大于 0 的数字"
-        )
+        raise ValueError(f"{field_name} 必须是大于 0 的数字") from exc
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError(f"{field_name} 必须是大于 0 的数字")
+    return timeout
 
-    queued_playback_seconds = (
-        len(rate_controller.queue) * rate_controller.frame_duration / 1000.0
+
+def _audio_send_timeout(conn: "ConnectionHandler"):
+    tts = getattr(conn, "tts", None)
+    configured_timeout = getattr(tts, "audio_send_timeout_seconds", None)
+    if configured_timeout is None:
+        configured_timeout = conn.config.get("tts_audio_send_timeout_seconds", 5)
+    return _positive_timeout(
+        configured_timeout,
+        "tts_audio_send_timeout_seconds",
     )
-    dynamic_budget = max(5.0, queued_playback_seconds + 5.0)
-    return min(absolute_limit, dynamic_budget)
+
+
+def _audio_completion_timeout(conn: "ConnectionHandler", rate_controller=None):
+    """Return a duration-aware queue drain budget without a playback cap."""
+    completion_grace = _positive_timeout(
+        conn.config.get("tts_audio_completion_grace_seconds", 5),
+        "tts_audio_completion_grace_seconds",
+    )
+    audio_send_timeout = _audio_send_timeout(conn)
+    queued_playback_seconds = 0.0
+    if rate_controller is not None:
+        queued_playback_seconds = (
+            len(rate_controller.queue) * rate_controller.frame_duration / 1000.0
+        )
+    # The queue excludes a packet that is already being sent, so reserve one
+    # per-packet send timeout in addition to the remaining playback duration.
+    return queued_playback_seconds + audio_send_timeout + completion_grace
 
 
 async def _send_to_mqtt_gateway(
@@ -272,7 +289,16 @@ def _start_background_sender(conn: "ConnectionHandler", rate_controller, flow_co
             raise asyncio.CancelledError("客户端已中止")
 
         conn.last_activity_time = time.time() * 1000
-        await _do_send_audio(conn, packet, flow_control)
+        timeout_seconds = _audio_send_timeout(conn)
+        try:
+            await asyncio.wait_for(
+                _do_send_audio(conn, packet, flow_control),
+                timeout=timeout_seconds,
+            )
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(
+                f"发送单个音频包超时（{timeout_seconds:.1f}s）"
+            ) from exc
 
     # 使用 start_sending 启动后台循环
     rate_controller.start_sending(send_callback)
