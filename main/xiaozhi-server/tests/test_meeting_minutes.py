@@ -117,7 +117,7 @@ def test_end_discards_control_utterance_from_full_transcript():
     assert runtime.has_pending_turn() is False
 
 
-def test_active_meeting_turn_records_without_main_llm_tool_execution(monkeypatch):
+def test_active_meeting_turn_waits_for_main_llm_tool_decision(monkeypatch):
     async def fake_send_stt(_conn, _text):
         return None
 
@@ -157,10 +157,9 @@ def test_active_meeting_turn_records_without_main_llm_tool_execution(monkeypatch
 
     asyncio.run(run_turn())
 
-    assert chat_calls == []
-    assert [item["text"] for item in runtime.build_transcript()] == [
-        "先完成回归测试。"
-    ]
+    assert chat_calls == ["先完成回归测试。"]
+    assert runtime.has_pending_turn() is True
+    assert runtime.build_transcript() == []
 
 
 def test_summary_prompt_contains_complete_meeting_transcript():

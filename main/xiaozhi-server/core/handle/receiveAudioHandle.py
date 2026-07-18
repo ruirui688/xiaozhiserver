@@ -13,8 +13,6 @@ from core.handle.reportHandle import (
     mark_asr_report_text_override,
     mark_skip_memory_event,
 )
-from core.meeting.control import MeetingControlParser
-from core.meeting.executor import finish_meeting
 from core.semantic.interruption import SemanticInterruptionClassifier
 from core.semantic.router import SemanticRouter
 from core.semantic.normalizer import TextNormalizer
@@ -24,7 +22,6 @@ from core.handle.wakeupHandle import should_ignore_wakeup_audio
 
 TAG = __name__
 NORMALIZER = TextNormalizer()
-MEETING_CONTROL = MeetingControlParser(NORMALIZER)
 
 
 async def handleAudioMessage(conn: "ConnectionHandler", audio):
@@ -141,21 +138,30 @@ async def startToChat(conn: "ConnectionHandler", text):
     if meeting is not None and meeting.is_active():
         async with conn._meeting_turn_lock:
             mark_skip_memory_event(conn, 1, actual_text, "meeting_active")
-            control = MEETING_CONTROL.parse(actual_text, active=True)
             await send_stt_message(conn, actual_text)
-            if control and control.action == "end":
-                meeting.discard_pending_turn()
-                finish_meeting(conn)
-                _refresh_tool_descriptions(conn)
-                return True
             meeting.prepare_turn(parsed_payload, interruption_text, speaker_name)
-            appended = meeting.record_pending_turn()
             logger = getattr(conn, "logger", None)
             if logger is not None:
                 logger.bind(tag=TAG).info(
-                    "会议已激活，当前ASR按确定性规则静默记录: "
-                    f"utteranceCount={appended}"
+                    "会议已激活，当前ASR提交主LLM决定record或end"
                 )
+        if conn.llm is None:
+            appended = meeting.record_pending_turn()
+            conn.logger.bind(tag=TAG).warning(
+                "会议已激活但LLM未配置，安全回退继续记录: "
+                f"utteranceCount={appended}"
+            )
+            return True
+        with conn._abort_lock:
+            conn.client_abort = False
+        future = conn.executor.submit(conn.chat, actual_text)
+        future.add_done_callback(
+            lambda item: conn.logger.bind(tag=__name__).error(
+                f"meeting chat() failed: {item.exception()}"
+            )
+            if item.exception()
+            else None
+        )
         return True
 
     if conn.need_bind:
@@ -169,10 +175,6 @@ async def startToChat(conn: "ConnectionHandler", text):
         ):
             await max_out_size(conn)
             return True
-
-    meeting_control = MEETING_CONTROL.parse(actual_text, active=False)
-    if meeting_control:
-        mark_skip_memory_event(conn, 1, actual_text, "meeting_control")
 
     # manual 模式下不打断正在播放的内容；auto 模式交给当前 LLM 做语义裁决。
     semantic_checked_after_interrupt = False
@@ -264,13 +266,6 @@ async def startToChat(conn: "ConnectionHandler", text):
     future = conn.executor.submit(conn.chat, actual_text)
     future.add_done_callback(lambda f: conn.logger.bind(tag=__name__).error(f"chat() failed: {f.exception()}") if f.exception() else None)
     return True
-
-
-def _refresh_tool_descriptions(conn: "ConnectionHandler") -> None:
-    handler = getattr(conn, "func_handler", None)
-    if handler is not None:
-        handler.upload_functions_desc()
-
 
 def update_voice_activity(conn: "ConnectionHandler", have_voice):
     if have_voice:

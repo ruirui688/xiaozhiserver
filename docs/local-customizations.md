@@ -498,11 +498,10 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 ## 27. 语义控制中枢门控的会议模式与完整纪要
 
 ```text
-定制模块：xiaozhi-server 语义控制中枢会议控制、主 LLM 会议工具、连接级会议记录状态、完整会议纪要生成
-改动原因：完全依赖主 LLM function calling 时，模型可能只用自然语言回复“会议模式来了”而不执行真实状态切换。会议能力登记为 `SYSTEM_PLUGIN_MEETING_MINUTES`，启用后仍注册真实 `meeting_minutes` function tool；同时语义控制中枢确定性处理少量高置信进入/退出控制，并排除讨论、引用、否定和未来计划类表达。会议激活后普通 ASR 由服务端直接静默记录，明确结束控制句不进入正文，最终纪要继续使用冻结的全部结构化转写并由主 LLM生成。会议状态、会议控制句和会议正文不进入长期记忆事件。
+定制模块：xiaozhi-server 主 LLM 会议工具、连接级会议记录状态、完整会议纪要生成
+改动原因：会议能力登记为 `SYSTEM_PLUGIN_MEETING_MINUTES`，启用后注册真实 `meeting_minutes` function tool。会议开始、记录和结束全部由主 LLM 根据上下文主动调用 `start / record / end`；服务端不维护进入/退出关键词或确定性规则。会议激活后每条 ASR 都作为 pending turn 交给主 LLM，该轮只暴露会议工具；只有工具调用成功才改变状态，模型未调用或异常时安全回退为继续记录。最终纪要使用冻结的全部结构化转写并由主 LLM生成。会议状态、工具审计和会议正文不进入长期记忆事件。
 关键文件：
   - main/xiaozhi-server/core/meeting/config.py
-  - main/xiaozhi-server/core/meeting/control.py
   - main/xiaozhi-server/core/meeting/executor.py
   - main/xiaozhi-server/core/meeting/minutes.py
   - main/xiaozhi-server/plugins_func/functions/meeting_minutes.py
@@ -511,14 +510,14 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/xiaozhi-server/core/connection.py
   - main/xiaozhi-server/core/websocket_server.py
   - main/xiaozhi-server/tests/test_meeting_control.py
-  - main/xiaozhi-server/tests/test_meeting_stable_control.py
+  - main/xiaozhi-server/tests/test_meeting_llm_control.py
   - main/xiaozhi-server/tests/test_meeting_minutes.py
   - main/manager-api/src/main/resources/db/changelog/202607141735.sql
   - main/manager-api/src/main/resources/db/changelog/202607141910.sql
   - main/manager-api/src/main/resources/db/changelog/db.changelog-master.yaml
   - docs/architecture/device-interaction-chain.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改插件配置下发、语义控制中枢、主 LLM function calling、ASR 句末处理、TTS 入队或连接生命周期，必须保留“全模块按智能体插件门控、高置信会议 start/end 由语义控制中枢真实改变状态、讨论/引用/否定表达不误触发、主 LLM仍可通过真实工具处理复杂启动语义、进入会议有一次简短确认、会议正文静默记录、结束控制句不进入正文、最终纪要使用完整冻结转写、会议内容不污染长期记忆”的行为；不得允许普通模型文字模拟状态切换，也不得引入独立 SLM 裁决。会议插件后续修正必须新增迁移并登记到 `db.changelog-master.yaml`，不得修改已发布 changeSet。
+官方同步时的处理规则：如果官方修改插件配置下发、语义控制中枢、主 LLM function calling、ASR 句末处理、TTS 入队或连接生命周期，必须保留“全模块按智能体插件门控、会议 start/record/end 只由主 LLM真实工具调用决定、服务端不维护会议话术词表或确定性进入/退出规则、会议激活时每条 ASR 只交给主 LLM会议工具判断、模型未调用或异常时仅继续记录、进入会议有一次简短确认、最终纪要使用完整冻结转写、会议内容不污染长期记忆”的行为；不得允许普通模型文字模拟状态切换，也不得引入独立 SLM 裁决。会议插件后续修正必须新增迁移并登记到 `db.changelog-master.yaml`，不得修改已发布 changeSet。
 ```
 
 ## 28. 智能体级飞书协作集成

@@ -37,20 +37,6 @@ class PolicyEngine:
                 next_state="idle",
             )
 
-        if intent.full_name == "meeting.start":
-            return Decision(
-                decision="execute",
-                priority=96,
-                next_state="meeting",
-            )
-
-        if intent.full_name == "meeting.end":
-            return Decision(
-                decision="execute",
-                priority=96,
-                next_state="idle",
-            )
-
         if intent.full_name == "game.answer":
             tool_name = intent.slots.get("tool") or context.active_game_tool
             if tool_name:

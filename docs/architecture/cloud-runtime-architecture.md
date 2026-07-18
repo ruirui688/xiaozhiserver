@@ -158,7 +158,7 @@ tool results
 
 未绑定声纹的智能体不下发声纹运行配置，也不会创建远程声纹请求。声纹超时或失败只表示本轮没有身份，不影响 ASR 文本继续进入主链路。历史参数 `server.voiceprint_sample_seconds` 不再下发到 Python，也不再影响实时识别音频长度。
 
-会议模式是实时链路中的连接级状态：全模块运行时先由智能体是否绑定 `SYSTEM_PLUGIN_MEETING_MINUTES` 决定工具是否可用，单模块运行则读取 `meeting.enabled`。高置信“进入会议模式 / 开始记录会议 / 结束会议 / 生成会议纪要”等控制先由语义控制中枢确定性执行；服务端会排除讨论、引用、否定和未来计划类表达，未命中的复杂语义仍可由主 LLM 通过真实 `meeting_minutes` function tool 启动。会议激活后普通 ASR 由服务端直接静默记录，只有明确结束控制才冻结转写并生成纪要；会议状态、会议控制句和会议正文不作为长期记忆事件上报。冻结后仍由主 LLM 基于完整结构化转写统一生成会议纪要。
+会议模式是实时链路中的连接级状态：全模块运行时先由智能体是否绑定 `SYSTEM_PLUGIN_MEETING_MINUTES` 决定工具是否可用，单模块运行则读取 `meeting.enabled`。服务端不设置会议进入或退出词表；未激活时由主 LLM决定是否调用 `meeting_minutes(start)`，激活后每条 ASR 都作为 pending turn 交给主 LLM，并且只暴露 `meeting_minutes`，由模型选择 `record` 或 `end`。只有真实工具调用能改变会议状态；模型没有调用、调用异常或请求失败时只安全回退为继续记录，不猜测退出意图。结束后冻结完整结构化转写并由主 LLM统一生成纪要，会议状态、工具审计和正文不作为长期记忆事件上报。
 
 飞书集成是智能体级配置，不是用户级 OAuth 绑定。`manager-api` 保存加密后的 App Secret，
 只向 Python 下发 `feishu_assistant` 动作开关。会议纪要生成成功后，Python 通过

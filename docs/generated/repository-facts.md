@@ -32,7 +32,7 @@ source_paths:
 
 | 模块 | 源码文件 | 测试文件 | 统计口径 |
 | --- | ---: | ---: | --- |
-| xiaozhi-server | 230 | 47 | 源码为非 `tests/` 的 `*.py`；测试为 `test_*.py` |
+| xiaozhi-server | 229 | 47 | 源码为非 `tests/` 的 `*.py`；测试为 `test_*.py` |
 | manager-api | 478 | 27 | `src/main/**/*.java`；`src/test/**/*Test.java` |
 | manager-web | 112 | 0 | `src/` 下 `*.vue/*.js/*.ts`；`*.spec.*/*.test.*` |
 | manager-mobile | 69 | 0 | `src/` 下 `*.vue/*.js/*.ts`；`*.spec.*/*.test.*` |
