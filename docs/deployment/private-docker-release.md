@@ -29,10 +29,11 @@ xiaozhi-deploy-assets:<version>
   └── release-contract.env
 ```
 
-生产服务器 Git 中的 `deploy/production/install` 和 `upgrade` 只作为引导入口。
-`VERSION=<version> ./upgrade` 会从 ACR 拉取同版本 deploy-assets，校验 manifest
-与环境变量契约，再执行其中的 Compose 和安装逻辑。因此业务镜像不再与服务器
-当前 Git 分支中的旧部署资产混用。
+生产服务器 Git 中的 `deploy/production/install` 只作为首次引导或故障恢复入口。
+首次部署成功后，发布资产会自动安装并持续更新唯一的日常生产命令
+`~/xiaozhi-upgrade`。`VERSION=<version> ~/xiaozhi-upgrade` 会从 ACR 拉取同版本
+deploy-assets，校验 manifest 与环境变量契约，再执行其中的 Compose 和安装逻辑。
+因此业务镜像不再与服务器当前 Git 分支中的旧部署资产混用。
 
 正确顺序：
 
@@ -44,9 +45,8 @@ git pull --ff-only origin main
 scripts/acr-login
 scripts/acr-build-push
 
-# 生产服务器只执行安装或升级
-cd ~/work/xiaozhi-deploy/deploy/production
-./upgrade
+# 生产服务器日常只使用固定入口
+VERSION=<git短哈希> ~/xiaozhi-upgrade
 ```
 
 ### 1.2 默认部署 latest
@@ -64,18 +64,17 @@ xiaozhi-deploy-assets:latest
 xiaozhi-deploy-assets:<git短哈希>
 ```
 
-生产 `./install` 和 `./upgrade` 默认使用 `VERSION=latest`。升级器先读取
+生产固定入口默认使用 `VERSION=latest`。升级器先读取
 `xiaozhi-deploy-assets:latest` 中记录的不可变版本，再部署对应短哈希业务镜像：
 
 ```bash
-./install
-./upgrade
+~/xiaozhi-upgrade
 ```
 
 只有要固定版本或回滚时才使用：
 
 ```bash
-VERSION=<git短哈希> ./upgrade
+VERSION=<git短哈希> ~/xiaozhi-upgrade
 ```
 
 ### 1.3 默认数据在部署用户家目录
@@ -101,8 +100,11 @@ VERSION=<git短哈希> ./upgrade
 旧部署如果仍要使用 `/opt/xiaozhi-data`，必须显式指定：
 
 ```bash
-DATA_DIR=/opt/xiaozhi-data ./upgrade
+DATA_DIR=/opt/xiaozhi-data ./install
 ```
+
+首次安装会把该数据目录写入固定升级命令；后续直接运行 `~/xiaozhi-upgrade` 即可，
+不需要重复指定 `DATA_DIR`。临时覆盖时仍可显式传入。
 
 ---
 
@@ -202,10 +204,10 @@ PUSH=false BUILD_BASE=false scripts/acr-build-push-lite
 ```
 
 这只会更新当前 Docker daemon 里的本地标签。`deploy/production/install` 和
-`deploy/production/upgrade` 是生产拉取入口，会先从 ACR `docker pull` 对应
+`~/xiaozhi-upgrade` 是生产日常拉取入口，会先从 ACR `docker pull` 对应
 `VERSION`，因此会覆盖同名本地标签。没有把修复后的
 `xiaozhi-server`、`xiaozhi-manager-api`、`xiaozhi-manager-web`、
-对应的 manager-api / manager-web 镜像推送到 ACR 前，不要用 `./upgrade` 验证本地镜像。
+对应的 manager-api / manager-web 镜像推送到 ACR 前，不要用生产升级命令验证本地镜像。
 需要临时验证本地镜像时，只能在确认 `~/xiaozhi-data/.env` 指向同名本地标签后，
 用 Docker Compose 直接重建目标服务，且不要先执行 pull：
 
@@ -286,6 +288,7 @@ sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
 7. 启动 MySQL、Redis、manager-api/web、xiaozhi-server
 8. 从数据库读取 manager-api 的 server.secret，写回 .config.yaml
 9. 重启 xiaozhi-server
+10. 安装或更新唯一的日常生产命令 ~/xiaozhi-upgrade
 ```
 
 首次安装成功后会输出类似：
@@ -295,6 +298,7 @@ sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
 Version: latest
 manager-web: http://<服务器IP>:8002
 websocket:   ws://<服务器IP>:8000/xiaozhi/v1/
+upgrade:     VERSION=<version> ~/xiaozhi-upgrade
 ```
 
 ---
@@ -304,14 +308,14 @@ websocket:   ws://<服务器IP>:8000/xiaozhi/v1/
 标准升级：
 
 ```bash
-cd ~/work/xiaozhi-deploy/deploy/production
-./upgrade
+VERSION=<git短哈希> ~/xiaozhi-upgrade
 ```
 
-`./upgrade` 会先拉取 `xiaozhi-deploy-assets:<VERSION>`，校验其中的
+`~/xiaozhi-upgrade` 会先拉取 `xiaozhi-deploy-assets:<VERSION>`，校验其中的
 `release-manifest.env` 和 `release-contract.env`，再使用 manifest 记录的镜像仓库
 和解析出的不可变版本执行安装。`~/xiaozhi-data/.env` 会记录资产仓库、实际版本、
-源码 commit 和契约版本，后续升级继续复用。
+源码 commit 和契约版本，后续升级继续复用。每次部署还会原子刷新固定入口及其
+数据目录内的解析器，因此日常升级不依赖生产服务器 Git 分支。
 
 `XIAOZHI_CREDENTIAL_ENCRYPTION_KEY` 用于解密智能体级飞书等第三方凭据。升级必须保留原值；
 直接更换会导致历史密文无法解密。
@@ -319,7 +323,7 @@ cd ~/work/xiaozhi-deploy/deploy/production
 回滚或固定版本：
 
 ```bash
-VERSION=<git短哈希> ./upgrade
+VERSION=<git短哈希> ~/xiaozhi-upgrade
 ```
 
 升级不会删除：
@@ -355,7 +359,7 @@ manager-api 容器访问 Python 容器的内网地址。
 
 ### 6.2 manager-api.secret 自动同步
 
-`./install` / `./upgrade` 会在 manager-api 启动后自动读取数据库中的 `server.secret`，写入：
+首次引导安装和后续 `~/xiaozhi-upgrade` 都会在 manager-api 启动后自动读取数据库中的 `server.secret`，写入：
 
 ```text
 ~/xiaozhi-data/data/.config.yaml
@@ -392,7 +396,7 @@ XIAOZHI_PUBLIC_BASE_URL=https://yh.wejoy.link
 XIAOZHI_CORS_ORIGINS=https://yh.wejoy.link
 ```
 
-然后执行 `./upgrade`。HTTPS 打通后，在微信公众平台把
+然后执行 `~/xiaozhi-upgrade`。HTTPS 打通后，在微信公众平台把
 `https://yh.wejoy.link` 加入小程序 request 合法域名；上线版小程序不能依赖
 开发者工具里的“关闭合法域名校验”。
 
@@ -578,7 +582,7 @@ manager-api 容器访问 Python 容器使用。
 重新部署：
 
 ```bash
-VERSION=latest ./deploy/production/upgrade
+VERSION=latest ~/xiaozhi-upgrade
 ```
 
 #### 6.4.6 验证 HTTPS/WSS 入口
@@ -779,8 +783,7 @@ docker restart xiaozhi-esp32-manager-api
 调整 `~/xiaozhi-data/.env` 后执行：
 
 ```bash
-cd ~/work/xiaozhi-deploy/deploy/production
-./upgrade
+~/xiaozhi-upgrade
 ```
 
 常用变量：
@@ -828,7 +831,7 @@ scripts/acr-build-push
 
 ```bash
 DEPLOY_ASSETS_IMAGE_REPOSITORY=你的仓库/xiaozhi-deploy-assets \
-VERSION=<版本> ./upgrade
+VERSION=<版本> ~/xiaozhi-upgrade
 ```
 
 `.env` 中 `XIAOZHI_DEPLOY_MODE=pull` 不要改成源码构建模式。生产服务器没有构建工具链。
@@ -864,7 +867,7 @@ sudo docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihu
 sudo docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/redis:8.0
 ```
 
-如果手工 `docker pull` 成功但 `./install` 失败，通常是普通用户和 `sudo` 使用了不同的 Docker config。按脚本打印的 `docker:` 行重新登录。
+如果手工 `docker pull` 成功但首次引导安装失败，通常是普通用户和 `sudo` 使用了不同的 Docker config。按脚本打印的 `docker:` 行重新登录。
 
 如果提示 repository does not exist，常见原因是：
 
@@ -927,8 +930,7 @@ ls -ld ~/xiaozhi-data/uploadfile ~/xiaozhi-data/music
 修复方式是重新运行安装脚本，让它通过容器修正 bind mount 权限：
 
 ```bash
-cd ~/work/xiaozhi-deploy/deploy/production
-./install
+~/xiaozhi-upgrade
 ```
 
 不要手工把目录改成全局可写。
@@ -960,7 +962,7 @@ ACR 中存在三个业务镜像、xiaozhi-deploy-assets、mysql/8.4、redis/8.0 
 ```text
 服务器已完成一次新版 install/upgrade 引导脚本更新
 docker 或 sudo docker 已登录 ACR
-./upgrade 成功
+`~/xiaozhi-upgrade` 成功
 docker ps 显示 server、manager-api、manager-web、MySQL、Redis 等容器运行
 manager-web 可访问
 设备 WebSocket/OTA 地址已配置为设备可达地址

@@ -85,7 +85,7 @@ tag 并推送，不删除本地或 ACR 中已有缓存。
 
 > `acr-build-push` 会把三个业务镜像和 `xiaozhi-deploy-assets` 作为同一个
 > 版本发布。部署资产镜像包含 Compose、install/upgrade、release manifest
-> 和环境变量契约，因此 `VERSION=<sha> ./upgrade` 不再混用服务器 Git 分支
+> 和环境变量契约，因此 `VERSION=<sha> ~/xiaozhi-upgrade` 不再混用服务器 Git 分支
 > 中的旧 Compose。生产仍应优先发布经过评审的提交；`PUSH=true` 时默认拒绝
 > 脏工作区，本地未提交内容只能使用 `PUSH=false` 验证。
 
@@ -196,6 +196,8 @@ sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
 ./install
 ```
 
+首次引导成功后会自动安装并更新固定生产入口 `~/xiaozhi-upgrade`。
+
 安装脚本主体按当前部署用户运行，默认数据目录是 `~/xiaozhi-data`。
 如果当前用户能直接访问 Docker daemon，脚本使用普通 `docker`；如果不能，
 脚本只对 Docker 命令使用 `sudo docker`，因此这种主机上需要先执行
@@ -204,17 +206,17 @@ sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
 生产服务器升级：
 
 ```bash
-cd deploy/production
-./upgrade
+VERSION=<git短哈希> ~/xiaozhi-upgrade
 ```
 
-需要固定部署或回滚时，使用 `VERSION=<git短哈希> ./upgrade`。升级器先拉取
+升级器先拉取
 同版本 `xiaozhi-deploy-assets`，再按 manifest 拉取匹配的业务镜像。
 
 首次部署后，`~/xiaozhi-data/.env` 会记录 `XIAOZHI_DEPLOY_MODE=pull`、
 `XIAOZHI_DEPLOY_ASSETS_IMAGE_REPOSITORY`、release source/contract、三个业务镜像
-仓库和运行参数。后续 `deploy/production/upgrade` 会复用资产仓库配置。旧部署
-如需继续使用 `/opt/xiaozhi-data`，执行时显式传入 `DATA_DIR=/opt/xiaozhi-data`。
+仓库和运行参数。后续 `~/xiaozhi-upgrade` 会复用资产仓库配置。旧部署如需继续
+使用 `/opt/xiaozhi-data`，首次引导时显式传入 `DATA_DIR=/opt/xiaozhi-data`，固定
+入口会记住该目录。
 
 ## 脚本分组
 

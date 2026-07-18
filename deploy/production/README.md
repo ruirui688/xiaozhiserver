@@ -23,7 +23,7 @@ xiaozhi release <version>
        └─ release-contract.env
 ```
 
-`VERSION=<version> ./upgrade` first pulls the matching deploy-assets image,
+`VERSION=<version> ~/xiaozhi-upgrade` first pulls the matching deploy-assets image,
 validates its manifest and environment contract, then runs the bundled install
 logic and pulls the three business images recorded by that manifest. The Git
 checkout on the production server is only a bootstrap entry; its current branch
@@ -36,8 +36,7 @@ does not select the runtime Compose or installation logic.
 scripts/acr-build-push
 
 # 2. On the production server, deploy the immutable release
-cd ~/work/xiaozhi-deploy/deploy/production
-VERSION=<git-short-sha> ./upgrade
+VERSION=<git-short-sha> ~/xiaozhi-upgrade
 ```
 
 Publishing from a feature branch is technically supported because deploy assets
@@ -48,9 +47,10 @@ the build is changed to `PUSH=false` for local validation.
 The ACR namespace must contain, or permit creation of, the
 `xiaozhi-deploy-assets` repository before the first complete release is pushed.
 
-Existing servers need one bootstrap update that contains the new `upgrade`
-resolver. After that, later pinned upgrades no longer depend on the server Git
-branch being updated for each release.
+Existing servers need one bootstrap deployment that installs `~/xiaozhi-upgrade`.
+Every successful deployment atomically refreshes that command and its resolver
+under the persistent data directory. Later pinned upgrades no longer depend on
+the server Git branch being updated for each release.
 
 ## Runtime data
 
@@ -79,12 +79,17 @@ uploadfile 100:101  manager-api writes OTA firmware uploads
 music      100:101  manager-api writes uploaded music; xiaozhi-server reads it
 ```
 
-Standard production commands:
+First bootstrap command:
 
 ```bash
 sudo docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
 ./install
-./upgrade
+```
+
+The bootstrap installs the only day-to-day production command:
+
+```bash
+VERSION=<git-short-sha> ~/xiaozhi-upgrade
 ```
 
 `install` no longer runs the whole script as root. It keeps deploy files,
@@ -105,13 +110,15 @@ For legacy deployments that intentionally keep data under `/opt/xiaozhi-data`,
 run with an explicit data directory:
 
 ```bash
-DATA_DIR=/opt/xiaozhi-data ./upgrade
+DATA_DIR=/opt/xiaozhi-data ./install
 ```
 
-`./install` and `./upgrade` default to `VERSION=latest`. The resolver reads the
+The generated `~/xiaozhi-upgrade` remembers that data directory for later runs.
+
+The fixed upgrade command defaults to `VERSION=latest`. The resolver reads the
 immutable version from `xiaozhi-deploy-assets:latest` and deploys the matching
 version tags rather than independently pulling mutable business-image tags.
-Use `VERSION=<git-short-sha> ./upgrade` for an explicit release or rollback.
+Use `VERSION=<git-short-sha> ~/xiaozhi-upgrade` for an explicit release or rollback.
 
 `./install` waits for manager-api startup, reads the generated `server.secret`
 from the MySQL container, writes it into
@@ -172,7 +179,7 @@ XIAOZHI_PUBLIC_BASE_URL=https://yh.wejoy.link
 XIAOZHI_CORS_ORIGINS=https://yh.wejoy.link
 ```
 
-Then run `./upgrade`. The install output will include both local test URLs and
+Then run `~/xiaozhi-upgrade`. The install output will include both local test URLs and
 public HTTPS/WSS URLs when the public variables are set.
 
 For the WeChat mini program, add `https://yh.wejoy.link` to the mini program
@@ -215,7 +222,7 @@ Redis (healthy) ──┘
 
 Redis runs with AOF (`--appendonly yes`) and stores its data at
 `~/xiaozhi-data/redis/data`. User sessions survive container restarts and
-`./upgrade` runs.
+`~/xiaozhi-upgrade` runs.
 
 ## Server image profiles
 
@@ -229,7 +236,7 @@ funasr   scripts/acr-build-push-funasr  local FunASR/SenseVoiceSmall enabled
 Use the lite profile when ASR is provided by remote vendors or a separate
 FunASR server. Use the FunASR profile only when the selected ASR adapter is
 `fun_local`. Switching profiles means publishing a new `xiaozhi-server` image
-and running `./upgrade`; Docker Compose itself does not need a different file.
+and running `~/xiaozhi-upgrade`; Docker Compose itself does not need a different file.
 
 ## Resource limits
 
