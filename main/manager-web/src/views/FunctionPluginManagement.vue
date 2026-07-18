@@ -4,8 +4,8 @@
 
     <div class="operation-bar">
       <div class="page-heading">
-        <h2 class="page-title">{{ $t("header.functionPluginManagement") }}</h2>
-        <p class="page-subtitle">管理小智能调用的系统能力和互动玩法，在角色配置中统一启用。</p>
+        <h2 class="page-title">角色可选工具库</h2>
+        <p class="page-subtitle">这里维护可进入大模型工具列表的能力，不是当前角色的启用状态。</p>
       </div>
       <div class="right-operations">
         <el-input
@@ -27,8 +27,8 @@
             <div class="plugin-toolbar">
               <div class="filter-groups">
                 <el-radio-group v-model="activeType" size="small" @change="handleTypeChange">
-                  <el-radio-button label="all">全部功能 {{ pluginCounts.all }}</el-radio-button>
-                  <el-radio-button label="builtin">系统能力 {{ pluginCounts.builtin }}</el-radio-button>
+                  <el-radio-button label="all">全部工具 {{ pluginCounts.all }}</el-radio-button>
+                  <el-radio-button label="builtin">内置工具 {{ pluginCounts.builtin }}</el-radio-button>
                   <el-radio-button label="interaction">互动玩法 {{ pluginCounts.interaction }}</el-radio-button>
                 </el-radio-group>
                 <el-radio-group
@@ -47,8 +47,22 @@
                 </el-radio-group>
               </div>
               <span class="toolbar-summary">
-                互动玩法会和系统能力一起出现在角色配置的功能管理里
+                工具目录，不是全局开关
               </span>
+            </div>
+            <div class="scope-guide">
+              <div class="scope-guide-item">
+                <div class="scope-guide-label">这里管理</div>
+                <div class="scope-guide-value">可被角色勾选的工具和玩法</div>
+              </div>
+              <div class="scope-guide-item">
+                <div class="scope-guide-label">启用位置</div>
+                <div class="scope-guide-value">智能体管理 -> 编辑角色 -> 功能</div>
+              </div>
+              <div class="scope-guide-item">
+                <div class="scope-guide-label">独立配置</div>
+                <div class="scope-guide-value">飞书、知识库、MCP 在角色编辑页绑定</div>
+              </div>
             </div>
             <el-table
               :data="visiblePlugins"
@@ -58,7 +72,7 @@
               element-loading-spinner="el-icon-loading"
               element-loading-background="rgba(255, 255, 255, 0.7)"
             >
-              <el-table-column label="功能" min-width="190">
+              <el-table-column label="工具" min-width="190">
                 <template slot-scope="scope">
                   <div class="function-name">{{ scope.row.name }}</div>
                   <div class="function-code">{{ scope.row.providerCode }}</div>
@@ -69,23 +83,23 @@
                   {{ getFunctionCategory(scope.row) }}
                 </template>
               </el-table-column>
-              <el-table-column label="类型" align="center" width="110">
+              <el-table-column label="运行方式" align="center" width="110">
                 <template slot-scope="scope">
-                  <el-tag v-if="isDeclarativeInteractionPlugin(scope.row.fieldsMeta)" type="success" size="small">互动玩法</el-tag>
-                  <el-tag v-else size="small">系统能力</el-tag>
+                  <el-tag v-if="isDeclarativeInteractionPlugin(scope.row.fieldsMeta)" type="success" size="small">对话玩法</el-tag>
+                  <el-tag v-else size="small">工具调用</el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="用户会怎么说" min-width="190">
+              <el-table-column label="触发示例" min-width="190">
                 <template slot-scope="scope">
                   <span class="description-text">{{ getExampleUtterance(scope.row) }}</span>
                 </template>
               </el-table-column>
-              <el-table-column label="智能体会做什么" min-width="260">
+              <el-table-column label="执行效果" min-width="260">
                 <template slot-scope="scope">
                   <span class="description-text">{{ getPluginDescription(scope.row) }}</span>
                 </template>
               </el-table-column>
-              <el-table-column label="配置" align="center" width="110">
+              <el-table-column label="启用/配置" align="center" width="130">
                 <template slot-scope="scope">
                   {{ getConfigText(scope.row) }}
                 </template>
@@ -452,7 +466,20 @@ export default {
       if (this.isDeclarativeInteractionPlugin(plugin.fieldsMeta)) {
         return this.getFieldDefault(plugin.fieldsMeta, "instructions", "互动玩法，智能体按规则对话。");
       }
-      return "系统能力，可在角色配置中启用。";
+      const descriptions = {
+        get_weather: "查询指定城市天气，返回当前天气和预报信息。",
+        play_music: "从服务器音乐库选择歌曲并播放。",
+        meeting_minutes: "进入会议记录流程，结束后生成会议纪要。",
+        get_news: "获取新闻摘要，适合普通新闻查询。",
+        get_news_from_chinanews: "获取中新网新闻内容。",
+        get_news_from_newsnow: "获取 NewsNow 热点新闻和热榜内容。",
+        hass_get_state: "读取 Home Assistant 中设备或实体的当前状态。",
+        hass_set_state: "向 Home Assistant 下发设备状态修改指令。",
+        hass_play_music: "通过 Home Assistant 媒体播放器播放音乐。",
+        web_search: "联网搜索问题并把结果交给智能体整理回答。",
+        call_device: "通过通讯录呼叫另一个已绑定设备。"
+      };
+      return descriptions[plugin.providerCode] || "作为工具暴露给大模型，由模型按用户意图决定是否调用。";
     },
     getFunctionCategory(plugin) {
       return this.getCategoryMeta(plugin).label;
@@ -484,7 +511,9 @@ export default {
       const examples = {
         get_weather: "今天上海天气怎么样",
         play_music: "播放一首歌",
+        meeting_minutes: "开始记录会议",
         get_news: "今天有什么新闻",
+        get_news_from_chinanews: "看看中新网新闻",
         get_news_from_newsnow: "看看今天热搜",
         hass_get_state: "客厅灯现在开着吗",
         hass_set_state: "把客厅灯打开",
@@ -496,9 +525,9 @@ export default {
     },
     getConfigText(plugin) {
       if (this.isDeclarativeInteractionPlugin(plugin.fieldsMeta)) {
-        return "玩法规则";
+        return "编写玩法规则";
       }
-      return plugin.fieldsMeta && plugin.fieldsMeta.length > 0 ? "可配置" : "无需配置";
+      return plugin.fieldsMeta && plugin.fieldsMeta.length > 0 ? "角色中配置参数" : "角色中勾选";
     },
     openDetailDialog(row) {
       this.currentPlugin = row;
@@ -947,6 +976,34 @@ export default {
   font-size: 14px;
   line-height: 32px;
   white-space: nowrap;
+}
+
+.scope-guide {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.scope-guide-item {
+  padding: 10px 12px;
+  border: 1px solid #d8e5ff;
+  border-radius: 6px;
+  background: #f7faff;
+}
+
+.scope-guide-label {
+  color: #3a63c7;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.scope-guide-value {
+  margin-top: 3px;
+  color: #3d4566;
+  font-size: 13px;
+  line-height: 20px;
 }
 
 .function-name {

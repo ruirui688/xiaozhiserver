@@ -53,9 +53,12 @@
                 </el-button>
               </div>
             </el-form-item>
-            <el-form-item label="飞书：">
+            <el-form-item label="集成：">
               <div class="integration-row">
-                <span>智能体级绑定</span>
+                <div class="integration-main">
+                  <span class="integration-title">飞书协作</span>
+                  <span class="integration-desc">独立保存 App Secret 和群聊权限，不属于功能库勾选项</span>
+                </div>
                 <el-button
                   class="edit-function-btn"
                   size="small"
@@ -1064,9 +1067,28 @@ export default {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   width: 100%;
   color: #606266;
   font-size: 13px;
+}
+
+.integration-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.integration-title {
+  color: #303133;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.integration-desc {
+  color: #909399;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .form-select {

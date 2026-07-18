@@ -3,7 +3,10 @@
     <!-- 自定义标题区域 -->
     <div class="custom-header">
       <div class="header-left">
-        <h3 class="bold-title">{{ $t('functionDialog.title') }}</h3>
+        <div>
+          <h3 class="bold-title">{{ $t('functionDialog.title') }}</h3>
+          <div class="drawer-subtitle">选择进入大模型工具列表的系统能力和互动玩法；飞书等第三方集成请回到角色编辑页单独绑定。</div>
+        </div>
       </div>
       <button class="custom-close-btn" @click="closeDialog">×</button>
     </div>
@@ -810,6 +813,13 @@ export default {
     font-size: 18px;
     font-weight: bold;
     margin: 0;
+  }
+
+  .drawer-subtitle {
+    margin-top: 6px;
+    color: #606266;
+    font-size: 13px;
+    line-height: 1.5;
   }
 
   .select-all-btn {
