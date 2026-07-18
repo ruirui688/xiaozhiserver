@@ -10,6 +10,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -22,6 +23,7 @@ import xiaozhi.modules.agent.dto.AgentFeishuConfigSaveDTO;
 import xiaozhi.modules.agent.dto.FeishuRuntimeActionDTO;
 import xiaozhi.modules.agent.entity.AgentFeishuConfigEntity;
 import xiaozhi.modules.agent.feishu.FeishuOpenApiClient;
+import xiaozhi.modules.agent.vo.FeishuChatVO;
 import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.device.service.DeviceService;
 
@@ -117,6 +119,38 @@ class AgentFeishuServiceImplTest {
     void disabledBindingDoesNotRegisterRuntimeTool() {
         config.setEnabled(false);
         assertFalse(service.getRuntimePluginConfig("agent-a").containsKey("enabled"));
+    }
+
+    @Test
+    void disabledBindingCanStillListChatsForConfiguration() {
+        config.setEnabled(false);
+        when(client.listChats("cli_test", "app-secret"))
+                .thenReturn(List.of(new FeishuChatVO("oc_1", "小智测试")));
+
+        assertEquals(List.of(new FeishuChatVO("oc_1", "小智测试")), service.listChats("agent-a"));
+        verify(client).listChats("cli_test", "app-secret");
+    }
+
+    @Test
+    void disabledBindingCanStillSendConfigurationTestMessage() {
+        config.setEnabled(false);
+        when(client.sendText("cli_test", "app-secret", "oc_1", "小智智能体飞书连接测试成功。"))
+                .thenReturn(Map.of("message_id", "om_1"));
+
+        assertEquals("om_1", service.sendTestMessage("agent-a").get("message_id"));
+        verify(client).sendText("cli_test", "app-secret", "oc_1", "小智智能体飞书连接测试成功。");
+    }
+
+    @Test
+    void disabledBindingStillRejectsRuntimeActions() {
+        config.setEnabled(false);
+        FeishuRuntimeActionDTO dto = new FeishuRuntimeActionDTO();
+        dto.setAction("publish_meeting_report");
+        dto.setMacAddress("AA:BB:CC:DD:EE:FF");
+        dto.setContent("不应发送");
+
+        assertThrows(RenException.class, () -> service.executeRuntimeAction("agent-a", dto));
+        verify(client, never()).sendMeetingReport(any(), any(), any(), any(), any());
     }
 
     @Test

@@ -111,13 +111,13 @@ public class AgentFeishuServiceImpl implements AgentFeishuService {
 
     @Override
     public List<FeishuChatVO> listChats(String agentId) {
-        ConfigContext context = requireEnabled(agentId);
+        ConfigContext context = requireConfigured(agentId);
         return feishuClient.listChats(context.entity().getAppId(), context.appSecret());
     }
 
     @Override
     public Map<String, Object> sendTestMessage(String agentId) {
-        ConfigContext context = requireEnabled(agentId);
+        ConfigContext context = requireConfigured(agentId);
         return feishuClient.sendText(
                 context.entity().getAppId(),
                 context.appSecret(),
@@ -253,9 +253,17 @@ public class AgentFeishuServiceImpl implements AgentFeishuService {
     }
 
     private ConfigContext requireEnabled(String agentId) {
-        AgentFeishuConfigEntity entity = find(agentId);
-        if (entity == null || !Boolean.TRUE.equals(entity.getEnabled())) {
+        ConfigContext context = requireConfigured(agentId);
+        if (!Boolean.TRUE.equals(context.entity().getEnabled())) {
             throw new RenException("当前智能体尚未启用飞书集成");
+        }
+        return context;
+    }
+
+    private ConfigContext requireConfigured(String agentId) {
+        AgentFeishuConfigEntity entity = find(agentId);
+        if (entity == null) {
+            throw new RenException("当前智能体尚未配置飞书集成");
         }
         return new ConfigContext(entity, decrypt(entity));
     }

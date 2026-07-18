@@ -536,7 +536,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/xiaozhi-server/core/meeting/executor.py
   - docs/integrations/feishu-integration.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：必须保留智能体级所有权、App Secret 仅在 manager-api 使用部署级 AES-GCM 密钥加密保存、前端不回显、Python 不接收凭据、`/config/feishu/**` 同时校验服务密钥和设备到智能体绑定关系、默认群/负责人/日历服务端固定门控、各动作独立授权和群消息不可信内容包裹。会议纪要投递失败不得阻塞设备端纪要播报；日志不得输出 App Secret、tenant_access_token、Authorization 或原始凭据响应。
+官方同步时的处理规则：必须保留智能体级所有权、App Secret 仅在 manager-api 使用部署级 AES-GCM 密钥加密保存、前端不回显、Python 不接收凭据、`/config/feishu/**` 同时校验服务密钥和设备到智能体绑定关系、默认群/负责人/日历服务端固定门控、各动作独立授权和群消息不可信内容包裹。配置页连接测试、默认群读取和测试消息只能要求凭据已配置，不能被运行时 enabled 开关阻断；设备运行时动作、会议纪要投递和工具注册仍必须要求集成已启用。会议纪要投递失败不得阻塞设备端纪要播报；日志不得输出 App Secret、tenant_access_token、Authorization 或原始凭据响应。
 ```
 
 ## 29. 用户级天气与联网搜索共享配置
