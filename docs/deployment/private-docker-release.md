@@ -4,7 +4,7 @@
 
 ```text
 开发/构建机：完整源码 -> 构建镜像 -> 推送阿里云 ACR
-生产服务器：最小部署资产 -> docker pull ACR 镜像 -> Docker Compose 启动
+生产服务器：引导脚本 -> 拉取版本化 deploy-assets -> 拉取匹配镜像 -> Docker Compose 启动
 ```
 
 生产服务器不编译源码，不安装 Maven、Node.js、Conda、Python 依赖或 FunASR 模型。所有运行代码、模型依赖和 CPU FunASR 运行时都必须已经在镜像里。
@@ -13,16 +13,26 @@
 
 ## 1. 先确认三件事
 
-### 1.1 生产只认两个来源
+### 1.1 生产使用完整版本包
 
-生产升级同时读取两个来源：
+每次发布同时写入 ACR：
 
 ```text
-Git origin/main                  deploy/production/install、upgrade、docker-compose.yml
-阿里云 ACR :latest 或短哈希 tag   xiaozhi-server、xiaozhi-manager-api、xiaozhi-manager-web、mysql、redis 镜像
+xiaozhi-server:<version>
+xiaozhi-manager-api:<version>
+xiaozhi-manager-web:<version>
+xiaozhi-deploy-assets:<version>
+  ├── docker-compose.yml
+  ├── install / upgrade
+  ├── config_from_api.yaml
+  ├── release-manifest.env
+  └── release-contract.env
 ```
 
-这两个来源必须来自同一次 `main` 发布。不要在 feature 分支构建并推送 `latest`，然后让生产服务器从 `main` 拉部署脚本；那会造成镜像代码和 compose/install 逻辑不匹配。
+生产服务器 Git 中的 `deploy/production/install` 和 `upgrade` 只作为引导入口。
+`VERSION=<version> ./upgrade` 会从 ACR 拉取同版本 deploy-assets，校验 manifest
+与环境变量契约，再执行其中的 Compose 和安装逻辑。因此业务镜像不再与服务器
+当前 Git 分支中的旧部署资产混用。
 
 正确顺序：
 
@@ -30,7 +40,7 @@ Git origin/main                  deploy/production/install、upgrade、docker-co
 git checkout main
 git pull --ff-only origin main
 
-# 确认你的改动已经合并进 main 后，再构建推送镜像
+# 生产仍建议从已评审提交发布；技术上版本包可来自任意干净 commit
 scripts/acr-login
 scripts/acr-build-push
 
@@ -50,9 +60,12 @@ xiaozhi-manager-api:latest
 xiaozhi-manager-api:<git短哈希>
 xiaozhi-manager-web:latest
 xiaozhi-manager-web:<git短哈希>
+xiaozhi-deploy-assets:latest
+xiaozhi-deploy-assets:<git短哈希>
 ```
 
-生产 `./install` 和 `./upgrade` 默认使用 `VERSION=latest`，所以日常发布后不需要手写版本号：
+生产 `./install` 和 `./upgrade` 默认使用 `VERSION=latest`。升级器先读取
+`xiaozhi-deploy-assets:latest` 中记录的不可变版本，再部署对应短哈希业务镜像：
 
 ```bash
 ./install
@@ -107,9 +120,13 @@ crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/
 xiaozhi-server:latest    Python 实时语音服务，可发布为轻量 profile 或 FunASR profile
 xiaozhi-manager-api:latest     Java manager-api
 xiaozhi-manager-web:latest     Nginx + Vue manager-web dist，统一暴露 8002
+xiaozhi-deploy-assets:latest   版本化 Compose、安装脚本、manifest 与环境变量契约
 mysql:8.4                MySQL 运行时镜像
 redis:8.0                Redis 运行时镜像
 ```
+
+首次启用完整版本发布前，确认 ACR 命名空间允许创建或已经创建
+`xiaozhi-deploy-assets` 仓库，并使用与其他业务镜像相同的访问权限。
 
 构建缓存镜像：
 
@@ -148,6 +165,8 @@ SERVER_INSTALL_PROFILE=lite 不安装本地 FunASR，ASR 使用远程 provider
 基础镜像默认使用 docker.m.daocloud.io 前缀，避免失效 Docker daemon mirror
 BUILD_BASE=auto 只复用精确依赖 hash 的 base 缓存，不默认用 latest 冒充
 manager-api / manager-web 分别复用 api-/web-<内容哈希>，未变化组件不重跑构建
+同时发布 xiaozhi-deploy-assets:latest 和 :<短哈希>，与三个业务镜像组成完整版本
+PUSH=true 时拒绝脏工作区，避免 commit 标签与实际发布内容不一致
 ```
 
 两种服务端 profile：
@@ -289,13 +308,10 @@ cd ~/work/xiaozhi-deploy/deploy/production
 ./upgrade
 ```
 
-`./upgrade` 会先对最小部署资产执行：
-
-```text
-git pull --ff-only origin <当前分支>
-```
-
-然后复用 `~/xiaozhi-data/.env`，默认拉取 `latest` 镜像并重启服务。
+`./upgrade` 会先拉取 `xiaozhi-deploy-assets:<VERSION>`，校验其中的
+`release-manifest.env` 和 `release-contract.env`，再使用 manifest 记录的镜像仓库
+和解析出的不可变版本执行安装。`~/xiaozhi-data/.env` 会记录资产仓库、实际版本、
+源码 commit 和契约版本，后续升级继续复用。
 
 `XIAOZHI_CREDENTIAL_ENCRYPTION_KEY` 用于解密智能体级飞书等第三方凭据。升级必须保留原值；
 直接更换会导致历史密文无法解密。
@@ -796,21 +812,23 @@ ACR_NAMESPACE=你的namespace \
 scripts/acr-build-push
 ```
 
-生产安装使用其他业务镜像仓库：
+使用其他 ACR 仓库时，在构建发布阶段统一指定业务镜像和部署资产仓库：
 
 ```bash
 SERVER_IMAGE_REPOSITORY=你的仓库/xiaozhi-server \
 MANAGER_API_IMAGE_REPOSITORY=你的仓库/xiaozhi-manager-api \
 MANAGER_WEB_IMAGE_REPOSITORY=你的仓库/xiaozhi-manager-web \
-./install
+DEPLOY_ASSETS_IMAGE_REPOSITORY=你的仓库/xiaozhi-deploy-assets \
+MYSQL_IMAGE_REPOSITORY=你的仓库/mysql \
+REDIS_IMAGE_REPOSITORY=你的仓库/redis \
+scripts/acr-build-push
 ```
 
-生产安装使用其他运行时镜像：
+生产服务器只需要指定部署资产仓库，业务镜像和运行时镜像从 manifest 读取：
 
 ```bash
-MYSQL_IMAGE=你的仓库/mysql:8.4 \
-REDIS_IMAGE=你的仓库/redis:8.0 \
-./install
+DEPLOY_ASSETS_IMAGE_REPOSITORY=你的仓库/xiaozhi-deploy-assets \
+VERSION=<版本> ./upgrade
 ```
 
 `.env` 中 `XIAOZHI_DEPLOY_MODE=pull` 不要改成源码构建模式。生产服务器没有构建工具链。
@@ -834,12 +852,14 @@ docker: sudo docker (config: /root/.docker)
 docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-server:latest
 docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-manager-api:latest
 docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-manager-web:latest
+docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-deploy-assets:latest
 docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/mysql:8.4
 docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/redis:8.0
 
 sudo docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-server:latest
 sudo docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-manager-api:latest
 sudo docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-manager-web:latest
+sudo docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-deploy-assets:latest
 sudo docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/mysql:8.4
 sudo docker pull crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/redis:8.0
 ```
@@ -930,19 +950,18 @@ server.websocket 是设备可访问的公网或局域网地址
 构建机：
 
 ```text
-代码已合并到 main
-git pull --ff-only origin main 已完成
+发布 commit 已完成评审且工作区干净
 scripts/acr-build-push 成功
-ACR 中存在 xiaozhi-server/latest、xiaozhi-manager-api/latest、xiaozhi-manager-web/latest、mysql/8.4、redis/8.0
+ACR 中存在三个业务镜像、xiaozhi-deploy-assets、mysql/8.4、redis/8.0 的目标版本
 ```
 
 生产服务器：
 
 ```text
-deploy/production 来自 origin/main
+服务器已完成一次新版 install/upgrade 引导脚本更新
 docker 或 sudo docker 已登录 ACR
 ./upgrade 成功
-docker ps 显示四个容器运行
+docker ps 显示 server、manager-api、manager-web、MySQL、Redis 等容器运行
 manager-web 可访问
 设备 WebSocket/OTA 地址已配置为设备可达地址
 ```

@@ -8,6 +8,7 @@ ACR_NAMESPACE="${ACR_NAMESPACE:-yihuixiaozhi}"
 SERVER_IMAGE_REPOSITORY="${SERVER_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/xiaozhi-server}"
 MANAGER_API_IMAGE_REPOSITORY="${MANAGER_API_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/xiaozhi-manager-api}"
 MANAGER_WEB_IMAGE_REPOSITORY="${MANAGER_WEB_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/xiaozhi-manager-web}"
+DEPLOY_ASSETS_IMAGE_REPOSITORY="${DEPLOY_ASSETS_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/xiaozhi-deploy-assets}"
 SERVER_COMMON_BASE_IMAGE_REPOSITORY="${SERVER_COMMON_BASE_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/xiaozhi-server-base-common}"
 SERVER_LITE_BASE_IMAGE_REPOSITORY="${SERVER_LITE_BASE_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/xiaozhi-server-base-lite}"
 SERVER_FUNASR_BASE_IMAGE_REPOSITORY="${SERVER_FUNASR_BASE_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/xiaozhi-server-base-funasr}"
@@ -25,6 +26,7 @@ MAVEN_BASE_IMAGE="${MAVEN_BASE_IMAGE:-docker.m.daocloud.io/library/maven:3.9.4-e
 WEB_RUNTIME_BASE_IMAGE="${WEB_RUNTIME_BASE_IMAGE:-docker.m.daocloud.io/bellsoft/liberica-runtime-container:jre-21-glibc}"
 API_RUNTIME_BASE_IMAGE="${API_RUNTIME_BASE_IMAGE:-$WEB_RUNTIME_BASE_IMAGE}"
 MANAGER_WEB_RUNTIME_BASE_IMAGE="${MANAGER_WEB_RUNTIME_BASE_IMAGE:-docker.m.daocloud.io/library/alpine:3.20}"
+RELEASE_ASSETS_BASE_IMAGE="${RELEASE_ASSETS_BASE_IMAGE:-docker.m.daocloud.io/library/alpine:3.20}"
 SERVER_INSTALL_PROFILE="${SERVER_INSTALL_PROFILE:-lite}"
 case "$SERVER_INSTALL_PROFILE" in
   standard | lite)
@@ -69,6 +71,7 @@ PARALLEL_RELEASE_STEPS_CONFIGURED="${PARALLEL_RELEASE_STEPS+x}"
 PARALLEL_IMAGE_BUILDS_CONFIGURED="${PARALLEL_IMAGE_BUILDS+x}"
 PARALLEL_RELEASE_STEPS="${PARALLEL_RELEASE_STEPS:-true}"
 PARALLEL_IMAGE_BUILDS="${PARALLEL_IMAGE_BUILDS:-true}"
+RELEASE_CONTRACT_VERSION="${RELEASE_CONTRACT_VERSION:-1}"
 
 is_quiet() {
   [[ "$VERBOSE" != "true" && "$XIAOZHI_DOCKER_QUIET" == "true" ]]
@@ -89,6 +92,19 @@ if [[ -z "${VERSION:-}" ]]; then
   fi
 fi
 IMAGE_VERSION_TAG="${VERSION}${IMAGE_TAG_SUFFIX}"
+SOURCE_COMMIT="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || printf unknown)"
+
+if [[ "$PUSH" == "true" && "$PRINT_BUILD_CONFIG_ONLY" != "true" && ! "$SOURCE_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]]; then
+  echo "A versioned release must be built from a Git commit." >&2
+  exit 1
+fi
+
+if [[ "$PUSH" == "true" && "$PRINT_BUILD_CONFIG_ONLY" != "true" ]] \
+  && [[ -n "$(git -C "$ROOT_DIR" status --short 2>/dev/null)" ]]; then
+  echo "Refusing to publish a versioned release from a dirty worktree." >&2
+  echo "Commit the release inputs first; use PUSH=false for local validation builds." >&2
+  exit 1
+fi
 
 image_tag() {
   local image="$1"
@@ -170,6 +186,7 @@ ACR release
   tags:      $CHANNEL_TAG, $IMAGE_VERSION_TAG
   images:    $(short_image_name "$SERVER_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG")
   manager:   $(short_image_name "$MANAGER_API_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"), $(short_image_name "$MANAGER_WEB_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG")
+  assets:    $(short_image_name "$DEPLOY_ASSETS_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG") contract=v$RELEASE_CONTRACT_VERSION
   runtime:   mysql:$MYSQL_TARGET_TAG, redis:$REDIS_TARGET_TAG
   options:   profile=$SERVER_INSTALL_PROFILE engine=$BUILD_ENGINE base=$BUILD_BASE seed_latest=$SERVER_BASE_SEED_LATEST runtime=$MIRROR_RUNTIME_IMAGES parallel=$PARALLEL_RELEASE_STEPS/$PARALLEL_IMAGE_BUILDS
   funasr:    local=$([[ "$SERVER_INSTALL_PROFILE" == "funasr" ]] && echo true || echo false) model=$INSTALL_FUNASR_MODEL
@@ -192,6 +209,7 @@ Image repositories:
   server:      $SERVER_IMAGE_REPOSITORY
   manager-api: $MANAGER_API_IMAGE_REPOSITORY
   manager-web: $MANAGER_WEB_IMAGE_REPOSITORY
+  deploy:      $DEPLOY_ASSETS_IMAGE_REPOSITORY
   base-common: $SERVER_COMMON_BASE_IMAGE_REPOSITORY
   base-lite:   $SERVER_LITE_BASE_IMAGE_REPOSITORY
   base-funasr: $SERVER_FUNASR_BASE_IMAGE_REPOSITORY
@@ -213,6 +231,8 @@ Build options:
   server_base_seed_latest=$SERVER_BASE_SEED_LATEST
   manager_api_cache_version=$MANAGER_API_CACHE_VERSION
   manager_web_cache_version=$MANAGER_WEB_CACHE_VERSION
+  release_contract_version=$RELEASE_CONTRACT_VERSION
+  release_assets_base_image=$RELEASE_ASSETS_BASE_IMAGE
   build_base=$BUILD_BASE server_base_image=${SERVER_BASE_IMAGE:-auto}
   mirror_runtime_images=$MIRROR_RUNTIME_IMAGES
   install_funasr_model=$INSTALL_FUNASR_MODEL
@@ -324,6 +344,56 @@ build_business_images() {
   bash "$ROOT_DIR/scripts/docker-build-private.sh"
 }
 
+build_release_assets_image() {
+  local version_image="$DEPLOY_ASSETS_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"
+  local channel_image="$DEPLOY_ASSETS_IMAGE_REPOSITORY:$CHANNEL_TAG"
+  local quiet_args=()
+  if is_quiet; then
+    quiet_args=(--quiet)
+  fi
+  local common_args=(
+    --build-arg "RELEASE_ASSETS_BASE_IMAGE=$RELEASE_ASSETS_BASE_IMAGE"
+    --build-arg "RELEASE_VERSION=$IMAGE_VERSION_TAG"
+    --build-arg "RELEASE_SOURCE_COMMIT=$SOURCE_COMMIT"
+    --build-arg "RELEASE_CONTRACT_VERSION=$RELEASE_CONTRACT_VERSION"
+    --build-arg "SERVER_IMAGE_REPOSITORY=$SERVER_IMAGE_REPOSITORY"
+    --build-arg "MANAGER_API_IMAGE_REPOSITORY=$MANAGER_API_IMAGE_REPOSITORY"
+    --build-arg "MANAGER_WEB_IMAGE_REPOSITORY=$MANAGER_WEB_IMAGE_REPOSITORY"
+    --build-arg "MYSQL_IMAGE=$MYSQL_IMAGE_REPOSITORY:$MYSQL_TARGET_TAG"
+    --build-arg "REDIS_IMAGE=$REDIS_IMAGE_REPOSITORY:$REDIS_TARGET_TAG"
+    -f "$ROOT_DIR/deploy/production/Dockerfile.release-assets"
+    -t "$version_image"
+    -t "$channel_image"
+  )
+
+  if [[ "$BUILD_ENGINE" == "buildx" ]]; then
+    local output_args=(--load)
+    if [[ "$PUSH" == "true" ]]; then
+      output_args=(--push)
+    elif [[ "$PLATFORMS" == *,* ]]; then
+      echo "PUSH=false cannot load a multi-platform release-assets image; choose one platform." >&2
+      return 1
+    fi
+    docker buildx build "${quiet_args[@]}" --platform "$PLATFORMS" "${output_args[@]}" \
+      "${common_args[@]}" "$ROOT_DIR"
+    if is_quiet; then
+      echo "Release assets OK: $(short_image_name "$version_image")"
+    fi
+    return
+  fi
+
+  docker build "${quiet_args[@]}" "${common_args[@]}" "$ROOT_DIR"
+  if [[ "$PUSH" == "true" ]]; then
+    docker push "${quiet_args[@]}" "$version_image"
+    if [[ "$channel_image" != "$version_image" ]]; then
+      docker push "${quiet_args[@]}" "$channel_image"
+    fi
+  fi
+  if is_quiet; then
+    echo "Release assets OK: $(short_image_name "$version_image")"
+  fi
+}
+
 wait_for_release_step() {
   local label="$1"
   local pid="$2"
@@ -350,14 +420,16 @@ if [[ "$RUNTIME_MIRROR_NEEDED" == "true" && "$PARALLEL_RELEASE_STEPS" == "true" 
   RELEASE_STATUS=0
   wait_for_release_step "Runtime image mirror" "$MIRROR_PID" || RELEASE_STATUS=1
   wait_for_release_step "Business image build" "$BUILD_PID" || RELEASE_STATUS=1
-  exit "$RELEASE_STATUS"
-fi
+  if [[ "$RELEASE_STATUS" -ne 0 ]]; then
+    exit "$RELEASE_STATUS"
+  fi
+else
+  if [[ "$RUNTIME_MIRROR_NEEDED" == "true" ]]; then
+    mirror_runtime_images
+  fi
 
-if [[ "$RUNTIME_MIRROR_NEEDED" == "true" ]]; then
-  mirror_runtime_images
+  build_business_images
 fi
-
-build_business_images
 
 if [[ "$PRINT_BUILD_CONFIG_ONLY" == "true" ]]; then
   echo ""
@@ -367,10 +439,13 @@ if [[ "$PRINT_BUILD_CONFIG_ONLY" == "true" ]]; then
   exit 0
 fi
 
+build_release_assets_image
+
 echo ""
 echo "=== Build complete ==="
 echo "Version: $VERSION"
 echo "Image tags: $CHANNEL_TAG, $IMAGE_VERSION_TAG"
+echo "Release assets: $DEPLOY_ASSETS_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"
 echo "Deploy channel: VERSION=$CHANNEL_TAG ./deploy/production/upgrade"
 echo "Deploy pinned: VERSION=$IMAGE_VERSION_TAG ./deploy/production/upgrade"
 echo ""

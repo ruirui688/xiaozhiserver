@@ -555,3 +555,21 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 是否允许被官方覆盖：否
 官方同步时的处理规则：必须保留“用户级凭据、智能体级启用”的双层边界。共享配置只能支持白名单插件和字段，使用部署级 AES-GCM 密钥加密，API 只返回非敏感字段和已配置状态；智能体保存、默认创建和读取接口不得继续暴露或写入共享密钥。运行时只能为已绑定插件按 agent.user_id 合并共享配置，不能因用户保存密钥自动注册工具。和风 API Key 必须放在 X-QW-Api-Key 请求头中，不得放入 URL 或日志；自定义 Host 仅允许受校验的 *.qweatherapi.com 或明确公共 Host。
 ```
+
+## 30. ACR 完整版本绑定与部署资产镜像
+
+```text
+定制模块：ACR 发布脚本、生产 install/upgrade、版本化部署资产
+改动原因：旧流程中 VERSION 只固定三个业务镜像，生产服务器仍从当前 Git 分支读取 docker-compose.yml 和 install；当镜像新增环境变量、卷或启动依赖而服务器部署资产未同步时，会形成“新镜像 + 旧部署契约”。现在每次发布同时生成 `xiaozhi-deploy-assets:<version>`，包含 Compose、install/upgrade、默认配置、release manifest 和环境变量契约。生产 upgrade 先解析同版本资产镜像，再部署 manifest 指定的三个业务镜像；`latest` 也先解析为资产镜像记录的不可变版本。
+关键文件：
+  - scripts/acr-build-push
+  - deploy/production/Dockerfile.release-assets
+  - deploy/production/release-contract.env
+  - deploy/production/install
+  - deploy/production/upgrade
+  - deploy/production/docker-compose.yml
+  - deploy/production/README.md
+  - docs/deployment/private-docker-release.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：必须保留“一个版本同时绑定业务镜像和部署资产”的契约；`VERSION=<sha> ./upgrade` 不得回退为从服务器当前 Git 分支读取 Compose 后只固定镜像标签。deploy-assets manifest 不得包含密钥，只能保存版本、源码 commit、契约版本、镜像仓库和运行时镜像；`~/xiaozhi-data/.env` 中的真实密码和凭据加密密钥必须继续由 install 生成并跨升级保留。生产服务器只需保留一次性引导脚本和 Docker/ACR 登录，不构建源码；版本或契约不匹配时 upgrade 必须在启动服务前失败。
+```

@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+if [[ "${XIAOZHI_RELEASE_ASSETS_RESOLVED:-false}" != "true" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  exec "$SCRIPT_DIR/upgrade" "$@"
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_USER="${XIAOZHI_DEPLOY_USER:-${SUDO_USER:-${USER:-$(id -un)}}}"
 DEPLOY_HOME="${XIAOZHI_DEPLOY_HOME:-}"
@@ -101,10 +106,20 @@ read_existing_env() {
   awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$env_file"
 }
 
+DEPLOY_ASSETS_IMAGE_REPOSITORY="${DEPLOY_ASSETS_IMAGE_REPOSITORY:-$(read_existing_env XIAOZHI_DEPLOY_ASSETS_IMAGE_REPOSITORY)}"
+DEPLOY_ASSETS_IMAGE_REPOSITORY="${DEPLOY_ASSETS_IMAGE_REPOSITORY:-crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-deploy-assets}"
+RELEASE_ASSETS_IMAGE="${RELEASE_ASSETS_IMAGE:-$DEPLOY_ASSETS_IMAGE_REPOSITORY:$VERSION}"
+RELEASE_SOURCE_COMMIT="${RELEASE_SOURCE_COMMIT:-unknown}"
+RELEASE_CONTRACT_VERSION="${RELEASE_CONTRACT_VERSION:-unknown}"
+
 write_runtime_env() {
   cat >"$DATA_DIR/.env" <<EOF
 XIAOZHI_DEPLOY_MODE=$DEPLOY_MODE
 XIAOZHI_DEPLOY_VERSION=$VERSION
+XIAOZHI_DEPLOY_ASSETS_IMAGE_REPOSITORY=$DEPLOY_ASSETS_IMAGE_REPOSITORY
+XIAOZHI_DEPLOY_ASSETS_IMAGE=$RELEASE_ASSETS_IMAGE
+XIAOZHI_DEPLOY_SOURCE_COMMIT=$RELEASE_SOURCE_COMMIT
+XIAOZHI_RELEASE_CONTRACT_VERSION=$RELEASE_CONTRACT_VERSION
 XIAOZHI_SERVER_IMAGE_REPOSITORY=$SERVER_IMAGE_REPOSITORY
 XIAOZHI_MANAGER_API_IMAGE_REPOSITORY=$MANAGER_API_IMAGE_REPOSITORY
 XIAOZHI_MANAGER_WEB_IMAGE_REPOSITORY=$MANAGER_WEB_IMAGE_REPOSITORY
@@ -427,9 +442,7 @@ fi
 echo "Production deploy"
 printf "  %-10s %s\n" "version:" "$VERSION_LABEL"
 printf "  %-10s %s\n" "current:" "$CURRENT_DEPLOY_VERSION"
-if [[ -n "${DEPLOY_GIT_BRANCH:-}" ]]; then
-  printf "  %-10s %s %s -> %s\n" "assets:" "$DEPLOY_GIT_BRANCH" "${DEPLOY_GIT_BEFORE:-unknown}" "${DEPLOY_GIT_AFTER:-unknown}"
-fi
+printf "  %-10s %s contract=v%s source=%s\n" "assets:" "$(short_image_name "$RELEASE_ASSETS_IMAGE")" "$RELEASE_CONTRACT_VERSION" "${RELEASE_SOURCE_COMMIT:0:8}"
 printf "  %-10s %s\n" "server:" "$(short_image_name "$SERVER_IMAGE")"
 printf "  %-10s %s, %s\n" "manager:" "$(short_image_name "$MANAGER_API_IMAGE")" "$(short_image_name "$MANAGER_WEB_IMAGE")"
 printf "  %-10s %s, %s\n" "runtime:" "$(short_image_name "$MYSQL_IMAGE")" "$(short_image_name "$REDIS_IMAGE")"

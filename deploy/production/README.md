@@ -8,51 +8,49 @@ build and push Docker images.
 
 ## Release workflow (critical)
 
-A production upgrade pulls from **two independent sources** that must stay in
-sync:
+Each release is now published as one immutable ACR bundle:
 
-```
-./upgrade
-  ├─ git pull origin main          → deploy scripts (docker-compose.yml, install)
-  └─ ./install
-       └─ docker pull ... :latest  → Docker images (from Aliyun ACR)
+```text
+xiaozhi release <version>
+  ├─ xiaozhi-server:<version>
+  ├─ xiaozhi-manager-api:<version>
+  ├─ xiaozhi-manager-web:<version>
+  └─ xiaozhi-deploy-assets:<version>
+       ├─ docker-compose.yml
+       ├─ install / upgrade
+       ├─ config_from_api.yaml
+       ├─ release-manifest.env
+       └─ release-contract.env
 ```
 
-**Both sources must originate from the `main` branch.** If you build and push
-images from a feature branch while production's deploy scripts come from
-`main`, the two will be out of sync — new compose file features (container
-dependencies, volume mounts) won't be present, and the image code may not
-match the deploy configuration.
+`VERSION=<version> ./upgrade` first pulls the matching deploy-assets image,
+validates its manifest and environment contract, then runs the bundled install
+logic and pulls the three business images recorded by that manifest. The Git
+checkout on the production server is only a bootstrap entry; its current branch
+does not select the runtime Compose or installation logic.
 
 ### Correct release procedure
 
 ```bash
-# 1. Merge your changes to main
-git checkout main
-git merge feature/your-branch
-git push origin main
-
-# 2. Build and push images FROM main (images now contain main's code)
+# 1. Build and publish one complete versioned release
 scripts/acr-build-push
 
-# 3. On the production server — both sources are now from main
+# 2. On the production server, deploy the immutable release
 cd ~/work/xiaozhi-deploy/deploy/production
-./upgrade
+VERSION=<git-short-sha> ./upgrade
 ```
 
-**Never run `acr-build-push` from a feature branch and then upgrade production
-before merging.** The `:latest` tag would carry feature-branch code to
-production while deploy scripts remain on `main`.
+Publishing from a feature branch is technically supported because deploy assets
+and images share the same immutable version. Production policy should still
+prefer reviewed commits. A dirty worktree is rejected when `PUSH=true` unless
+the build is changed to `PUSH=false` for local validation.
 
-If the production server does not have a Git checkout (deploy files were
-copied manually), update the deploy files first before pulling new images:
+The ACR namespace must contain, or permit creation of, the
+`xiaozhi-deploy-assets` repository before the first complete release is pushed.
 
-```bash
-# Manual deploy file update (non-git production server)
-scp deploy/production/docker-compose.yml production:~/xiaozhi-data/
-scp deploy/production/install production:~/xiaozhi-data/
-scp deploy/production/nginx-https.conf.example production:~/xiaozhi-data/
-```
+Existing servers need one bootstrap update that contains the new `upgrade`
+resolver. After that, later pinned upgrades no longer depend on the server Git
+branch being updated for each release.
 
 ## Runtime data
 
@@ -110,10 +108,10 @@ run with an explicit data directory:
 DATA_DIR=/opt/xiaozhi-data ./upgrade
 ```
 
-`./install` and `./upgrade` default to `VERSION=latest`, so the normal path is:
-build and push from the build machine, then run `./upgrade` on production. Use
-`VERSION=<git-short-sha> ./upgrade` only when you need a pinned deployment or
-rollback.
+`./install` and `./upgrade` default to `VERSION=latest`. The resolver reads the
+immutable version from `xiaozhi-deploy-assets:latest` and deploys the matching
+version tags rather than independently pulling mutable business-image tags.
+Use `VERSION=<git-short-sha> ./upgrade` for an explicit release or rollback.
 
 `./install` waits for manager-api startup, reads the generated `server.secret`
 from the MySQL container, writes it into
@@ -127,7 +125,7 @@ Upgrade output is intentionally compact:
 Production deploy
   version   image tag requested for this deployment
   current   version stored in DATA_DIR/.env from the previous run
-  assets    Git branch and deploy script commit before/after pull
+  assets    versioned deploy-assets image, contract version and source commit
   images    business image tags to pull and run
 
 === Deploy complete ===

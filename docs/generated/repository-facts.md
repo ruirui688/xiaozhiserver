@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: architecture
-last_verified: 2026-07-13
+last_verified: 2026-07-18
 source_paths:
   - Dockerfile-server-base
   - main/xiaozhi-server/
@@ -15,7 +15,7 @@ source_paths:
 
 > 本页由 `scripts/docs-facts` 生成，请勿手工编辑。运行 `scripts/docs-facts` 更新，运行 `scripts/docs-facts --check` 检查漂移。
 
-生成日期：`2026-07-13`（UTC）
+生成日期：`2026-07-18`（UTC）
 
 ## 技术栈版本
 
@@ -32,9 +32,9 @@ source_paths:
 
 | 模块 | 源码文件 | 测试文件 | 统计口径 |
 | --- | ---: | ---: | --- |
-| xiaozhi-server | 219 | 40 | 源码为非 `tests/` 的 `*.py`；测试为 `test_*.py` |
-| manager-api | 444 | 19 | `src/main/**/*.java`；`src/test/**/*Test.java` |
-| manager-web | 110 | 0 | `src/` 下 `*.vue/*.js/*.ts`；`*.spec.*/*.test.*` |
+| xiaozhi-server | 230 | 47 | 源码为非 `tests/` 的 `*.py`；测试为 `test_*.py` |
+| manager-api | 478 | 27 | `src/main/**/*.java`；`src/test/**/*Test.java` |
+| manager-web | 112 | 0 | `src/` 下 `*.vue/*.js/*.ts`；`*.spec.*/*.test.*` |
 | manager-mobile | 69 | 0 | `src/` 下 `*.vue/*.js/*.ts`；`*.spec.*/*.test.*` |
 
 统计排除依赖和构建产物，不表示代码行数或测试覆盖率。
@@ -57,9 +57,9 @@ source_paths:
 
 | 事实 | 数量 |
 | --- | ---: |
-| Liquibase SQL 文件 | 160 |
-| master.yaml changeSet | 160 |
-| master.yaml 唯一 SQL 登记 | 160 |
+| Liquibase SQL 文件 | 170 |
+| master.yaml changeSet | 170 |
+| master.yaml 唯一 SQL 登记 | 170 |
 
 数量相等不代表迁移内容正确；`scripts/docs-check` 还会检查遗漏登记、重复登记和失效路径。
 
@@ -67,11 +67,11 @@ source_paths:
 
 | 文件 | 行数 |
 | --- | ---: |
-| `main/xiaozhi-server/core/connection.py` | 2081 |
-| `main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelCatalogServiceImpl.java` | 1656 |
+| `main/xiaozhi-server/core/connection.py` | 2343 |
+| `main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelCatalogServiceImpl.java` | 1657 |
 | `main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelTestServiceImpl.java` | 1325 |
 | `main/manager-api/src/main/java/xiaozhi/modules/knowledge/rag/impl/LocalKnowledgeAdapter.java` | 1562 |
-| `main/manager-api/src/main/java/xiaozhi/modules/memory/service/impl/MemoryMaintenanceServiceImpl.java` | 1444 |
+| `main/manager-api/src/main/java/xiaozhi/modules/memory/service/impl/MemoryMaintenanceServiceImpl.java` | 1085 |
 | `main/manager-web/src/views/ModelConfig.vue` | 1889 |
 | `main/manager-web/src/components/BenchmarkResultPanel.vue` | 1587 |
 | `main/manager-web/src/views/KnowledgeFileUpload.vue` | 1260 |

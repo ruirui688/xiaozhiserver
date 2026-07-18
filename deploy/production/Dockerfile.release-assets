@@ -1,0 +1,36 @@
+ARG RELEASE_ASSETS_BASE_IMAGE=docker.m.daocloud.io/library/alpine:3.20
+FROM ${RELEASE_ASSETS_BASE_IMAGE}
+
+ARG RELEASE_VERSION
+ARG RELEASE_SOURCE_COMMIT
+ARG RELEASE_CONTRACT_VERSION
+ARG SERVER_IMAGE_REPOSITORY
+ARG MANAGER_API_IMAGE_REPOSITORY
+ARG MANAGER_WEB_IMAGE_REPOSITORY
+ARG MYSQL_IMAGE
+ARG REDIS_IMAGE
+
+LABEL org.opencontainers.image.title="xiaozhi production release assets" \
+      org.opencontainers.image.revision="${RELEASE_SOURCE_COMMIT}" \
+      xiaozhi.release.version="${RELEASE_VERSION}" \
+      xiaozhi.release.contract-version="${RELEASE_CONTRACT_VERSION}"
+
+WORKDIR /release
+COPY deploy/production/ /release/
+
+RUN printf '%s\n' \
+      "XIAOZHI_RELEASE_VERSION=${RELEASE_VERSION}" \
+      "XIAOZHI_RELEASE_SOURCE_COMMIT=${RELEASE_SOURCE_COMMIT}" \
+      "XIAOZHI_RELEASE_CONTRACT_VERSION=${RELEASE_CONTRACT_VERSION}" \
+      "XIAOZHI_RELEASE_SERVER_IMAGE_REPOSITORY=${SERVER_IMAGE_REPOSITORY}" \
+      "XIAOZHI_RELEASE_MANAGER_API_IMAGE_REPOSITORY=${MANAGER_API_IMAGE_REPOSITORY}" \
+      "XIAOZHI_RELEASE_MANAGER_WEB_IMAGE_REPOSITORY=${MANAGER_WEB_IMAGE_REPOSITORY}" \
+      "XIAOZHI_RELEASE_MYSQL_IMAGE=${MYSQL_IMAGE}" \
+      "XIAOZHI_RELEASE_REDIS_IMAGE=${REDIS_IMAGE}" \
+      > /release/release-manifest.env \
+    && chmod 755 /release/install /release/upgrade \
+    && chmod 644 /release/release-manifest.env /release/release-contract.env
+
+USER 65532:65532
+HEALTHCHECK CMD test -f /release/release-manifest.env || exit 1
+CMD ["sh", "-c", "test -f /release/release-manifest.env"]

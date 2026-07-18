@@ -1,34 +1,169 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-VERSION="${VERSION:-latest}"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REQUESTED_VERSION="${VERSION:-latest}"
+RESOLVE_RELEASE_ONLY="${RESOLVE_RELEASE_ONLY:-false}"
+SKIP_RELEASE_ASSETS_PULL="${SKIP_RELEASE_ASSETS_PULL:-false}"
+SUPPORTED_CONTRACT_VERSION="1"
+DEFAULT_DEPLOY_ASSETS_IMAGE_REPOSITORY="crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-deploy-assets"
 
-short_commit() {
-  local repo="$1"
-  git -C "$repo" rev-parse --short HEAD 2>/dev/null || printf "unknown"
+DEPLOY_USER="${XIAOZHI_DEPLOY_USER:-${SUDO_USER:-${USER:-$(id -un)}}}"
+DEPLOY_HOME="${XIAOZHI_DEPLOY_HOME:-}"
+if [[ -z "$DEPLOY_HOME" && "$DEPLOY_USER" != "root" ]]; then
+  DEPLOY_HOME="$(getent passwd "$DEPLOY_USER" 2>/dev/null | cut -d: -f6 || true)"
+fi
+DEPLOY_HOME="${DEPLOY_HOME:-${HOME:-/root}}"
+DATA_DIR="${DATA_DIR:-${INSTALL_DIR:-$DEPLOY_HOME/xiaozhi-data}}"
+
+read_existing_env() {
+  local key="$1"
+  local env_file="$DATA_DIR/.env"
+  [[ -f "$env_file" ]] || return 0
+  awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$env_file"
 }
 
-DEPLOY_GIT_BRANCH=""
-DEPLOY_GIT_BEFORE=""
-DEPLOY_GIT_AFTER=""
+manifest_value() {
+  local manifest="$1"
+  local key="$2"
+  awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$manifest"
+}
 
-if REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)"; then
-  BRANCH="$(git -C "$REPO_ROOT" symbolic-ref --short HEAD 2>/dev/null || true)"
-  if [[ -n "$BRANCH" ]]; then
-    REMOTE="${REMOTE:-origin}"
-    DEPLOY_GIT_BRANCH="$BRANCH"
-    DEPLOY_GIT_BEFORE="$(short_commit "$REPO_ROOT")"
-    if ! git -C "$REPO_ROOT" pull --ff-only "$REMOTE" "$BRANCH" >/dev/null 2>&1; then
-      echo "Pull deploy assets failed: $REMOTE/$BRANCH" >&2
-      exit 1
-    fi
-    DEPLOY_GIT_AFTER="$(short_commit "$REPO_ROOT")"
+case "$REQUESTED_VERSION" in
+  *[!A-Za-z0-9_.-]* | "")
+    echo "VERSION contains unsupported characters: $REQUESTED_VERSION" >&2
+    exit 1
+    ;;
+esac
+
+if [[ "$RESOLVE_RELEASE_ONLY" != "true" && "$RESOLVE_RELEASE_ONLY" != "false" ]]; then
+  echo "RESOLVE_RELEASE_ONLY must be true or false" >&2
+  exit 1
+fi
+if [[ "$SKIP_RELEASE_ASSETS_PULL" != "true" && "$SKIP_RELEASE_ASSETS_PULL" != "false" ]]; then
+  echo "SKIP_RELEASE_ASSETS_PULL must be true or false" >&2
+  exit 1
+fi
+
+DOCKER_CMD=(docker)
+DOCKER_CONFIG_DISPLAY="${DOCKER_CONFIG:-${HOME:-$DEPLOY_HOME}/.docker}"
+if ! docker info >/dev/null 2>&1; then
+  if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+    DOCKER_CMD=(docker)
+    DOCKER_CONFIG_DISPLAY="${DOCKER_CONFIG:-${HOME:-/root}/.docker}"
+  elif command -v sudo >/dev/null 2>&1; then
+    DOCKER_CMD=(sudo docker)
+    DOCKER_CONFIG_DISPLAY="/root/.docker"
+  else
+    echo "Docker daemon is not reachable by the current user, and sudo is not available." >&2
+    exit 1
   fi
 fi
 
-DEPLOY_GIT_BRANCH="$DEPLOY_GIT_BRANCH" \
-DEPLOY_GIT_BEFORE="$DEPLOY_GIT_BEFORE" \
-DEPLOY_GIT_AFTER="$DEPLOY_GIT_AFTER" \
-VERSION="$VERSION" \
-exec "$SCRIPT_DIR/install"
+docker_cmd() {
+  "${DOCKER_CMD[@]}" "$@"
+}
+
+DEPLOY_ASSETS_IMAGE_REPOSITORY="${DEPLOY_ASSETS_IMAGE_REPOSITORY:-$(read_existing_env XIAOZHI_DEPLOY_ASSETS_IMAGE_REPOSITORY)}"
+DEPLOY_ASSETS_IMAGE_REPOSITORY="${DEPLOY_ASSETS_IMAGE_REPOSITORY:-$DEFAULT_DEPLOY_ASSETS_IMAGE_REPOSITORY}"
+REQUESTED_ASSETS_IMAGE="$DEPLOY_ASSETS_IMAGE_REPOSITORY:$REQUESTED_VERSION"
+
+echo "Resolve production release"
+printf "  %-10s %s\n" "requested:" "$REQUESTED_VERSION"
+printf "  %-10s %s\n" "assets:" "$REQUESTED_ASSETS_IMAGE"
+printf "  %-10s %s (config: %s)\n" "docker:" "${DOCKER_CMD[*]}" "$DOCKER_CONFIG_DISPLAY"
+
+if [[ "$SKIP_RELEASE_ASSETS_PULL" != "true" ]]; then
+  docker_cmd pull --quiet "$REQUESTED_ASSETS_IMAGE" >/dev/null
+fi
+
+RELEASE_DIR="$(mktemp -d -t xiaozhi-release.XXXXXX)"
+cleanup() {
+  rm -rf "$RELEASE_DIR"
+}
+trap cleanup EXIT
+
+docker_cmd run --rm \
+  --user "$(id -u):$(id -g)" \
+  --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  --entrypoint sh \
+  -v "$RELEASE_DIR:/out" \
+  "$REQUESTED_ASSETS_IMAGE" \
+  -c 'cp -R /release/. /out/' >/dev/null
+
+for required_file in install upgrade docker-compose.yml config_from_api.yaml release-manifest.env release-contract.env; do
+  if [[ ! -f "$RELEASE_DIR/$required_file" ]]; then
+    echo "Release assets are incomplete: missing $required_file" >&2
+    exit 1
+  fi
+done
+
+RESOLVED_VERSION="$(manifest_value "$RELEASE_DIR/release-manifest.env" XIAOZHI_RELEASE_VERSION)"
+RELEASE_SOURCE_COMMIT="$(manifest_value "$RELEASE_DIR/release-manifest.env" XIAOZHI_RELEASE_SOURCE_COMMIT)"
+RELEASE_CONTRACT_VERSION="$(manifest_value "$RELEASE_DIR/release-manifest.env" XIAOZHI_RELEASE_CONTRACT_VERSION)"
+CONTRACT_FILE_VERSION="$(manifest_value "$RELEASE_DIR/release-contract.env" XIAOZHI_RELEASE_CONTRACT_VERSION)"
+
+if [[ -z "$RESOLVED_VERSION" || -z "$RELEASE_SOURCE_COMMIT" ]]; then
+  echo "Release manifest is missing version or source commit." >&2
+  exit 1
+fi
+if [[ ! "$RELEASE_SOURCE_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]]; then
+  echo "Release manifest contains an invalid source commit." >&2
+  exit 1
+fi
+case "$RESOLVED_VERSION" in
+  *[!A-Za-z0-9_.-]* | "")
+    echo "Release manifest contains an invalid version: $RESOLVED_VERSION" >&2
+    exit 1
+    ;;
+esac
+if [[ "$RELEASE_CONTRACT_VERSION" != "$CONTRACT_FILE_VERSION" ]]; then
+  echo "Release contract mismatch: manifest=$RELEASE_CONTRACT_VERSION file=$CONTRACT_FILE_VERSION" >&2
+  exit 1
+fi
+if [[ "$RELEASE_CONTRACT_VERSION" != "$SUPPORTED_CONTRACT_VERSION" ]]; then
+  echo "Unsupported release contract version: $RELEASE_CONTRACT_VERSION" >&2
+  exit 1
+fi
+if [[ "$REQUESTED_VERSION" != "latest" && "$REQUESTED_VERSION" != "$RESOLVED_VERSION" ]]; then
+  echo "Release version mismatch: requested=$REQUESTED_VERSION manifest=$RESOLVED_VERSION" >&2
+  exit 1
+fi
+RESOLVED_ASSETS_IMAGE="$DEPLOY_ASSETS_IMAGE_REPOSITORY:$RESOLVED_VERSION"
+
+SERVER_IMAGE_REPOSITORY="$(manifest_value "$RELEASE_DIR/release-manifest.env" XIAOZHI_RELEASE_SERVER_IMAGE_REPOSITORY)"
+MANAGER_API_IMAGE_REPOSITORY="$(manifest_value "$RELEASE_DIR/release-manifest.env" XIAOZHI_RELEASE_MANAGER_API_IMAGE_REPOSITORY)"
+MANAGER_WEB_IMAGE_REPOSITORY="$(manifest_value "$RELEASE_DIR/release-manifest.env" XIAOZHI_RELEASE_MANAGER_WEB_IMAGE_REPOSITORY)"
+MYSQL_IMAGE="$(manifest_value "$RELEASE_DIR/release-manifest.env" XIAOZHI_RELEASE_MYSQL_IMAGE)"
+REDIS_IMAGE="$(manifest_value "$RELEASE_DIR/release-manifest.env" XIAOZHI_RELEASE_REDIS_IMAGE)"
+
+for value in "$SERVER_IMAGE_REPOSITORY" "$MANAGER_API_IMAGE_REPOSITORY" "$MANAGER_WEB_IMAGE_REPOSITORY" "$MYSQL_IMAGE" "$REDIS_IMAGE"; do
+  if [[ -z "$value" || "$value" == *[[:space:]]* ]]; then
+    echo "Release manifest contains an invalid image reference." >&2
+    exit 1
+  fi
+done
+
+printf "  %-10s %s\n" "resolved:" "$RESOLVED_VERSION"
+printf "  %-10s %s\n" "pinned:" "$RESOLVED_ASSETS_IMAGE"
+printf "  %-10s %s\n" "source:" "${RELEASE_SOURCE_COMMIT:0:8}"
+printf "  %-10s v%s\n" "contract:" "$RELEASE_CONTRACT_VERSION"
+echo ""
+
+if [[ "$RESOLVE_RELEASE_ONLY" == "true" ]]; then
+  echo "Release resolved successfully; service deployment was skipped."
+  exit 0
+fi
+
+XIAOZHI_RELEASE_ASSETS_RESOLVED=true \
+VERSION="$RESOLVED_VERSION" \
+DEPLOY_ASSETS_IMAGE_REPOSITORY="$DEPLOY_ASSETS_IMAGE_REPOSITORY" \
+RELEASE_ASSETS_IMAGE="$RESOLVED_ASSETS_IMAGE" \
+RELEASE_SOURCE_COMMIT="$RELEASE_SOURCE_COMMIT" \
+RELEASE_CONTRACT_VERSION="$RELEASE_CONTRACT_VERSION" \
+SERVER_IMAGE_REPOSITORY="$SERVER_IMAGE_REPOSITORY" \
+MANAGER_API_IMAGE_REPOSITORY="$MANAGER_API_IMAGE_REPOSITORY" \
+MANAGER_WEB_IMAGE_REPOSITORY="$MANAGER_WEB_IMAGE_REPOSITORY" \
+MYSQL_IMAGE="$MYSQL_IMAGE" \
+REDIS_IMAGE="$REDIS_IMAGE" \
+bash "$RELEASE_DIR/install"

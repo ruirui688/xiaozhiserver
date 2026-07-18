@@ -64,6 +64,7 @@ MAVEN_BASE_IMAGE=maven:3.9.4-eclipse-temurin-21 \
 API_RUNTIME_BASE_IMAGE=bellsoft/liberica-runtime-container:jre-21-glibc \
 MANAGER_WEB_RUNTIME_BASE_IMAGE=alpine:3.20 \
 ASSETS_RUNTIME_BASE_IMAGE=alpine:3.20 \
+RELEASE_ASSETS_BASE_IMAGE=alpine:3.20 \
 scripts/acr-build-push-lite
 ```
 
@@ -82,18 +83,11 @@ base 当成通用缓存，避免 lite 镜像混入 FunASR。
 base 缓存。脚本仍会探测旧版路径相关 cache tag，命中时只给旧镜像追加新的稳定
 tag 并推送，不删除本地或 ACR 中已有缓存。
 
-> ⚠️ **发布前必须先合并到 `main` 分支。**
->
-> `acr-build-push` 将当前分支的代码构建为 Docker 镜像并推送到 ACR 的
-> `:latest` 标签。生产服务器 `./upgrade` 始终从 `main` 拉取部署脚本
-> （docker-compose.yml, install），同时从 ACR 拉取 `:latest` 镜像。
->
-> 如果从 feature 分支推送镜像而部署脚本还在 `main`，两边的
-> docker-compose.yml 不一致（容器依赖、卷挂载等可能缺失），
-> 镜像代码也与部署配置不匹配。
->
-> **正确流程：先 `git checkout main && git merge <feature>`，再从 `main`
-> 执行 `acr-build-push`。** 详见 `deploy/production/README.md`。
+> `acr-build-push` 会把三个业务镜像和 `xiaozhi-deploy-assets` 作为同一个
+> 版本发布。部署资产镜像包含 Compose、install/upgrade、release manifest
+> 和环境变量契约，因此 `VERSION=<sha> ./upgrade` 不再混用服务器 Git 分支
+> 中的旧 Compose。生产仍应优先发布经过评审的提交；`PUSH=true` 时默认拒绝
+> 脏工作区，本地未提交内容只能使用 `PUSH=false` 验证。
 
 `scripts/acr-build-push` 是日常一键发布入口。它默认自动复用已有基础镜像和运行时镜像，只在缓存不存在时补齐：
 
@@ -101,6 +95,7 @@ tag 并推送，不删除本地或 ACR 中已有缓存。
 xiaozhi-server:latest
 xiaozhi-manager-api:latest
 xiaozhi-manager-web:latest
+xiaozhi-deploy-assets:latest
 xiaozhi-server-base-common/lite/funasr:latest
 xiaozhi-server-base-common/lite/funasr:base-<依赖哈希>
 xiaozhi-manager-api:api-<内容哈希>
@@ -213,9 +208,13 @@ cd deploy/production
 ./upgrade
 ```
 
-需要固定部署或回滚时，才使用 `VERSION=<git短哈希> ./upgrade`。
+需要固定部署或回滚时，使用 `VERSION=<git短哈希> ./upgrade`。升级器先拉取
+同版本 `xiaozhi-deploy-assets`，再按 manifest 拉取匹配的业务镜像。
 
-首次部署后，`~/xiaozhi-data/.env` 会记录 `XIAOZHI_DEPLOY_MODE=pull`、`XIAOZHI_SERVER_IMAGE_REPOSITORY`、`XIAOZHI_MANAGER_API_IMAGE_REPOSITORY` 和 `XIAOZHI_MANAGER_WEB_IMAGE_REPOSITORY`。后续 `deploy/production/upgrade` 会复用该配置。旧部署如需继续使用 `/opt/xiaozhi-data`，执行时显式传入 `DATA_DIR=/opt/xiaozhi-data`。
+首次部署后，`~/xiaozhi-data/.env` 会记录 `XIAOZHI_DEPLOY_MODE=pull`、
+`XIAOZHI_DEPLOY_ASSETS_IMAGE_REPOSITORY`、release source/contract、三个业务镜像
+仓库和运行参数。后续 `deploy/production/upgrade` 会复用资产仓库配置。旧部署
+如需继续使用 `/opt/xiaozhi-data`，执行时显式传入 `DATA_DIR=/opt/xiaozhi-data`。
 
 ## 脚本分组
 
