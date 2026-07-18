@@ -1,10 +1,12 @@
 """Execute authoritative meeting state changes selected by the main LLM."""
 
 import asyncio
-import uuid
+import json
+import re
 
 from config.manage_api_client import execute_feishu_action
-from core.providers.tts.dto.dto import ContentType, SentenceType, TTSMessageDTO
+from core.spoken_notifications import enqueue_spoken_notification
+from core.utils.util import extract_json_from_string
 
 
 def finish_meeting(conn) -> None:
@@ -43,8 +45,8 @@ def generate_meeting_minutes(conn, prompt: str, transcript, topic: str = "") -> 
         return
 
     system_prompt = (
-        "你是专业的会议纪要助手。只基于用户提供的完整逐句记录整理会议纪要，"
-        "不得编造没有出现的信息。"
+        "你是一位克制、清晰的会议整理助手。忠实保留原意，优先提炼真正有用的信息，"
+        "不要把模糊表达包装成正式成果，也不要为了凑模板制造结论或待办。"
     )
     try:
         summary = conn.llm.response_no_stream(system_prompt, prompt)
@@ -55,11 +57,48 @@ def generate_meeting_minutes(conn, prompt: str, transcript, topic: str = "") -> 
         enqueue_tts_text(conn, "会议纪要生成失败，请稍后重试。")
         return
 
-    summary = str(summary or "").strip()
-    if not summary:
-        summary = "会议已结束，但大模型没有返回有效会议纪要。"
-    enqueue_tts_text(conn, summary)
-    enqueue_feishu_report(conn, summary, topic)
+    spoken_summary, written_minutes = parse_meeting_summary(summary)
+    enqueue_tts_text(conn, spoken_summary)
+    enqueue_feishu_report(conn, written_minutes, topic)
+
+
+def parse_meeting_summary(raw_summary) -> tuple[str, str]:
+    raw_text = str(raw_summary or "").strip()
+    payload = None
+    json_text = extract_json_from_string(raw_text)
+    if json_text:
+        try:
+            parsed = json.loads(json_text)
+            if isinstance(parsed, dict):
+                payload = parsed
+        except (TypeError, ValueError, json.JSONDecodeError):
+            payload = None
+
+    if payload is not None:
+        spoken = str(payload.get("spoken_summary") or "").strip()
+        written = str(payload.get("written_minutes") or "").strip()
+    else:
+        spoken = ""
+        written = raw_text
+
+    if not written:
+        written = "会议已结束，但没有生成有效的书面纪要。"
+    if not spoken:
+        spoken = _plain_spoken_summary(written)
+    if not spoken:
+        spoken = "会议已结束，但没有生成有效的口头总结。"
+    return spoken, written
+
+
+def _plain_spoken_summary(text: str) -> str:
+    lines = []
+    for raw_line in str(text or "").splitlines():
+        line = re.sub(r"^[#>*\s\-\d.、]+", "", raw_line).strip()
+        line = line.replace("**", "").replace("__", "")
+        if not line or line.endswith("："):
+            continue
+        lines.append(line)
+    return "。".join(lines[:4])[:500].strip("。 ")
 
 
 def enqueue_feishu_report(conn, summary: str, topic: str = "") -> None:
@@ -100,30 +139,4 @@ def enqueue_feishu_report(conn, summary: str, topic: str = "") -> None:
 
 
 def enqueue_tts_text(conn, text: str) -> None:
-    if not text or conn.tts is None:
-        return
-    with conn._abort_lock:
-        conn.client_abort = False
-    sentence_id = str(uuid.uuid4().hex)
-    conn.sentence_id = sentence_id
-    conn.tts.store_tts_text(sentence_id, text)
-    conn.tts.tts_text_queue.put(
-        TTSMessageDTO(
-            sentence_id=sentence_id,
-            sentence_type=SentenceType.FIRST,
-            content_type=ContentType.ACTION,
-        )
-    )
-    conn.tts.tts_one_sentence(
-        conn,
-        ContentType.TEXT,
-        content_detail=text,
-        sentence_id=sentence_id,
-    )
-    conn.tts.tts_text_queue.put(
-        TTSMessageDTO(
-            sentence_id=sentence_id,
-            sentence_type=SentenceType.LAST,
-            content_type=ContentType.ACTION,
-        )
-    )
+    enqueue_spoken_notification(conn, text, require_idle=False)

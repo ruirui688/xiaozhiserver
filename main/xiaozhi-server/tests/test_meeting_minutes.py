@@ -187,10 +187,10 @@ def test_summary_prompt_contains_complete_meeting_transcript():
         "参会人：张敏、李明",
         "本周五前完成回归测试。",
         "公告由我负责。",
-        "议题总结",
-        "关键结论",
-        "待办事项",
-        "风险与待确认",
+        '"spoken_summary"',
+        '"written_minutes"',
+        "个人随口表达的打算不得升级成正式待办",
+        "控制话语不得写进纪要正文",
     ):
         assert expected in prompt
 

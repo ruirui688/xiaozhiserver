@@ -26,17 +26,19 @@ class TextOnlyLLM:
 
 class CapturingFunctionCallLLM:
     supports_native_function_call = True
+    supports_tool_choice = True
 
     def __init__(self, responses):
         self.responses = responses
         self.calls = []
 
-    def response_with_functions(self, session_id, dialogue, functions):
+    def response_with_functions(self, session_id, dialogue, functions, **kwargs):
         self.calls.append(
             {
                 "session_id": session_id,
                 "dialogue": dialogue,
                 "functions": functions,
+                "options": kwargs,
             }
         )
         return iter(self.responses)
@@ -235,6 +237,21 @@ def test_function_call_chat_passes_full_tool_schema_to_main_llm():
     ]
     assert conn.tts.queued_text() == ["直接回复"]
     assert conn.tts.stored_text == ["直接回复"]
+    assert llm.calls[0]["options"] == {}
+
+
+def test_active_meeting_forces_main_llm_to_choose_meeting_tool():
+    llm = CapturingFunctionCallLLM([("", None)])
+    conn = _chat_conn(llm, CapturingToolHandler([_tool("meeting_minutes")]))
+    conn.meeting_minutes.start("发布评审")
+    conn.meeting_minutes.prepare_turn(None, "退出会议模式。", "张敏")
+
+    assert conn.chat("退出会议模式。") is True
+
+    assert llm.calls[0]["options"] == {
+        "tool_choice": "required"
+    }
+    assert conn.meeting_minutes.build_transcript()[0]["text"] == "退出会议模式。"
 
 
 def test_function_call_chat_blocks_dsml_protocol_text_from_tts_and_history():

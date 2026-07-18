@@ -1,7 +1,7 @@
 ---
 status: canonical
 owner: integrations
-last_verified: 2026-07-17
+last_verified: 2026-07-18
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/agent/feishu
   - main/manager-api/src/main/java/xiaozhi/modules/agent/service/impl/AgentFeishuServiceImpl.java
@@ -22,6 +22,7 @@ source_paths:
 3. 发布应用版本，把机器人加入需要接收纪要和消息的群聊。
 4. 在智能体配置页打开“飞书”，填写新的 App ID 和 App Secret，先测试连接，从飞书返回的机器人群聊列表中明确选择默认群聊，再保存。
 5. 发送测试消息，确认机器人对目标群具有发消息权限。
+6. 如果需要群消息主动播报，在“群聊与播报”页开启自动化，先填写并保存 Verification Token，再把页面给出的事件回调地址填入飞书事件订阅，然后订阅 `im.message.receive_v1`。当前实现使用明文事件体加 Verification Token 校验，不启用 Encrypt Key 加密。
 
 权限应按开关最小化申请：群列表需要群信息读取权限；发送消息需要机器人发消息权限；读取群消息需要
 消息读取权限；任务读取/写入和日程分别需要对应的任务、日历与日程权限。飞书权限名称可能随开放平台版本调整，
@@ -54,6 +55,12 @@ xiaozhi-server
 `publish_meeting_report`。未开启自动发送、没有默认群、飞书异常或权限不足时，只记录脱敏错误，
 不会影响设备端纪要。
 
+“按用户要求查询群消息”和“群消息到达时主动播报”是两条不同链路：前者是主 LLM 在用户询问时调用
+`list_messages`；后者由飞书 `im.message.receive_v1` 事件回调触发，不经过主 LLM，manager-api 校验每智能体
+Verification Token、App ID、目标 chat_id、事件类型和 event_id 去重后，通过带服务端密钥的
+`/device/notifications/broadcast` 内部接口投递到当前智能体所有在线设备。只播报文本消息，机器人自己发送的消息、
+其他群消息和非文本消息会忽略；设备正在说话、用户正在说话、会议模式或声纹采集期间不会插播。
+
 `feishu_assistant` 只有在智能体启用飞书且至少开启一个工具动作时才进入该连接的 function list。
 群消息读取结果使用不可信外部内容边界包裹，模型只能把它当作待总结的数据，不能执行群消息中的命令。
 
@@ -65,7 +72,7 @@ xiaozhi-server
 最新查询结果把该 ID 映射为实时群名称。会议纪要自动发送、主动发送群消息、读取默认群消息任一开启时，
 必须先选择默认群聊。测试消息始终使用已经保存的凭据和默认群聊，页面存在未保存变更时应先保存再测试。
 
-配置页按三个明确步骤组织：连接飞书应用、选择机器人工作的群、选择机器人可以做什么。“自动发送会议纪要”
+配置页按三个页签组织：应用连接、群聊与播报、能力权限。“自动发送会议纪要”
 只负责会议结束后的自动投递；“按用户要求发送群消息”决定主 LLM 是否能获得 `send_message` 工具。只开启前者时，
 会议纪要可以自动投递，但用户临时说“给群里发一条消息”不会获得发送工具。顶部“允许设备使用飞书”是总开关，
 关闭后仍可测试连接和测试目标群，但设备运行时不会执行任何飞书能力。
@@ -73,7 +80,8 @@ xiaozhi-server
 ## 凭据与部署
 
 App Secret 不回显、不下发 Python、不进入插件参数和日志。数据库保存的是带智能体作用域认证的
-AES-GCM 密文。生产部署使用 `~/xiaozhi-data/.env` 中的：
+AES-GCM 密文；事件 Verification Token 使用独立智能体作用域加密，同样不回显、不下发设备。匿名事件回调必须
+先通过 Verification Token 常量时间比较，并有每智能体分钟级请求限流。生产部署使用 `~/xiaozhi-data/.env` 中的：
 
 ```text
 XIAOZHI_CREDENTIAL_ENCRYPTION_KEY=<至少32字符的随机值>

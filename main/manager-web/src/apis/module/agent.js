@@ -320,6 +320,9 @@ export default {
             .networkFail((err) => callback(err))
             .send();
     },
+    getAgentFeishuEventCallbackUrl(agentId) {
+        return `${window.location.origin}${getServiceUrl()}/agent/${agentId}/feishu/events`;
+    },
     // 添加智能体的声纹
     addAgentVoicePrint(voicePrintData, callback) {
         RequestService.sendRequest()

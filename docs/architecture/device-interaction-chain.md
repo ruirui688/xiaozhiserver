@@ -170,7 +170,7 @@ POST submit (aiohttp, http_timeout_seconds)
 
 ### 3.4 会议记录模式
 
-会议模式保持普通 VAD/ASR 分段，但不设置任何进入或退出固定话术。未激活时，用户发言进入主 LLM，由模型决定是否调用 `meeting_minutes(action=start)`；会议激活后，每条 ASR 都进入主 LLM，并且该轮只暴露 `meeting_minutes`，由模型结合上下文决定 `record` 或 `end`。
+会议模式保持普通 VAD/ASR 分段，但不设置任何进入或退出固定话术。未激活时，用户发言进入主 LLM，由模型决定是否调用 `meeting_minutes(action=start)`；会议激活后，每条 ASR 串行等待上一轮裁决完成，该轮只暴露 `meeting_minutes` 并设置 `tool_choice=required`，由模型结合上下文决定 `record` 或 `end`。
 
 ```text
 未激活会议
@@ -179,12 +179,12 @@ POST submit (aiohttp, http_timeout_seconds)
   -> 工具成功后服务端切换真实状态并 TTS 简短确认
 每个完整 ASR 句子
   -> 会议激活时作为 pending turn 进入主 LLM
-  -> 当前轮只暴露 meeting_minutes 工具
+  -> 当前轮只暴露 meeting_minutes 工具，并要求主 LLM 必须真实调用一次
   -> 主 LLM 调用 record 时写入正文，调用 end 时丢弃当前控制发言并生成纪要
   -> 模型未调用或异常时只安全回退为继续记录
 ```
 
-服务端不维护会议关键词分类器或预设 start/end 规则，只向主 LLM 提供真实 `meeting_minutes` 工具、当前会议状态和待处理 ASR。模型未调用工具、调用格式异常或请求失败时，服务端只做“继续记录当前发言”的安全兜底，不得自行猜测用户是否要退出。最终纪要继续由主 LLM 基于完整结构化转写生成。会议状态、工具审计和会议正文默认不进入长期记忆事件。智控台角色配置通过 `SYSTEM_PLUGIN_MEETING_MINUTES` 启用该能力；单模块配置通过 `meeting.enabled` 控制。
+服务端不维护会议关键词分类器或预设 start/end 规则，只向主 LLM 提供真实 `meeting_minutes` 工具、当前会议状态和待处理 ASR。支持 `tool_choice` 的主模型必须在 `record/end` 中真实选择；不支持、调用格式异常或请求失败时，服务端只做“继续记录当前发言”的安全兜底，不得自行猜测用户是否要退出。会议轮持有连接级串行锁直到主 LLM 和工具执行结束，避免下一条 ASR 覆盖 pending turn。最终生成两种结果：设备播报 2-4 句自然口语总结，飞书接收只包含有实际信息的分段纯文本书面纪要；不得把控制话语、个人随口计划或空的“待确认”章节硬塞进纪要。会议状态、工具审计和会议正文默认不进入长期记忆事件。智控台角色配置通过 `SYSTEM_PLUGIN_MEETING_MINUTES` 启用该能力；单模块配置通过 `meeting.enabled` 控制。
 
 ## 4. 音频下行链路（TTS）
 

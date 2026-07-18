@@ -24,4 +24,6 @@ public interface AgentFeishuService {
     Map<String, Object> executeRuntimeAction(String agentId, FeishuRuntimeActionDTO dto);
 
     Map<String, Object> getRuntimePluginConfig(String agentId);
+
+    Map<String, Object> handleEvent(String agentId, Map<String, Object> payload);
 }

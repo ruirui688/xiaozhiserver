@@ -61,7 +61,7 @@
                                                     </div>
                                                 </el-image>
                                             </div>
-                                            <div v-else-if="item.type === 'tool'" class="tool-call-text">{{ item.text }}</div>
+                                            <div v-else-if="item.type === 'tool'" class="tool-call-text">{{ formatToolItem(item) }}</div>
                                             <div v-else-if="item.type === 'tool_result'" class="tool-call-text">
                                                 <div v-if="getToolResultImageSrc(item)" class="image-content">
                                                     <el-image
@@ -76,16 +76,16 @@
                                                 </div>
                                                 <div v-else-if="item.text && item.text.length > 80" class="tool-result-wrapper">
                                                     <div v-if="isToolResultCollapsed(index, idx)" class="tool-result-collapsed">
-                                                        {{ getFirstLineText(item.text) }}
+                                                        {{ getFirstLineText(formatToolItem(item)) }}
                                                     </div>
                                                     <div v-else class="tool-result-expanded">
-                                                        {{ item.text }}
+                                                        {{ formatToolItem(item) }}
                                                     </div>
                                                     <span class="tool-toggle-btn" @click="toggleToolResult(index, idx)">
                                                         <i :class="isToolResultCollapsed(index, idx) ? 'el-icon-arrow-down' : 'el-icon-arrow-up'"></i>
                                                     </span>
                                                 </div>
-                                                <div v-else>{{ item.text }}</div>
+                                                <div v-else>{{ formatToolItem(item) }}</div>
                                             </div>
                                         </div>
                                     </div>
@@ -281,6 +281,24 @@ export default {
 
             // 如果不是 JSON 格式或没有 content 字段，直接返回原内容
             return { content, speakerName: '', speakerId: '', speakerScore: null };
+        },
+        formatToolItem(item) {
+            const text = String((item && item.text) || '');
+            if (text.startsWith('meeting_minutes(')) {
+                if (text.includes('"action": "start"') || text.includes('"action":"start"')) {
+                    return '主 LLM 决定开始会议记录';
+                }
+                if (text.includes('"action": "record"') || text.includes('"action":"record"')) {
+                    return '主 LLM 决定记录本段发言';
+                }
+                if (text.includes('"action": "end"') || text.includes('"action":"end"')) {
+                    return '主 LLM 决定结束会议并生成纪要';
+                }
+            }
+            if (text.includes('meeting_started')) return '会议记录已开始';
+            if (text.includes('meeting_recorded')) return '本段会议内容已记录';
+            if (text.includes('meeting_ended_summary_pending')) return '会议已结束，正在整理纪要';
+            return text;
         },
         normalizeMessage(message) {
             const parsed = this.parseMessageContent(message.content);

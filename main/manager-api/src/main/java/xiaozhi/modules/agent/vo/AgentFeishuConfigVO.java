@@ -15,6 +15,8 @@ public class AgentFeishuConfigVO {
     private boolean meetingReportEnabled;
     private boolean messageSendEnabled;
     private boolean messageReadEnabled;
+    private boolean messageBroadcastEnabled;
+    private boolean eventVerificationTokenConfigured;
     private boolean taskReadEnabled;
     private boolean taskCreateEnabled;
     private boolean calendarCreateEnabled;

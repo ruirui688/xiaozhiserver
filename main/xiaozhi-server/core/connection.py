@@ -1441,10 +1441,16 @@ class ConnectionHandler:
             )
             if tools_enabled:
                 # 使用支持functions的streaming接口
+                function_options = {}
+                if meeting_tool_turn and getattr(
+                    self.llm, "supports_tool_choice", False
+                ):
+                    function_options["tool_choice"] = "required"
                 llm_responses = self.llm.response_with_functions(
                     self.session_id,
                     llm_dialogue,
                     functions=functions,
+                    **function_options,
                 )
             else:
                 llm_responses = self.llm.response(
@@ -1815,7 +1821,10 @@ class ConnectionHandler:
                     )
 
         if meeting_tool_turn:
-            if response_message or content_arguments:
+            pending_meeting_turn = bool(
+                meeting is not None and meeting.has_pending_turn()
+            )
+            if pending_meeting_turn and (response_message or content_arguments):
                 self.logger.bind(tag=TAG).warning(
                     "会议激活期间主LLM未返回有效会议工具调用，丢弃普通文本并继续记录"
                 )

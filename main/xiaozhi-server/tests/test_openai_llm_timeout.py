@@ -158,6 +158,21 @@ def test_function_stream_uses_same_total_budget(monkeypatch):
     assert stream.closed is True
 
 
+def test_function_stream_forwards_required_tool_choice(monkeypatch):
+    provider, captured = _provider(monkeypatch, FakeStream())
+
+    assert list(
+        provider.response_with_functions(
+            "session",
+            _dialogue(),
+            functions=[{"type": "function", "function": {"name": "meeting_minutes"}}],
+            tool_choice="required",
+        )
+    ) == []
+
+    assert captured["request"]["tool_choice"] == "required"
+
+
 def test_normal_stream_finishes_within_total_budget(monkeypatch):
     stream = FakeStream([_chunk("你"), _chunk("好")])
     provider, _ = _provider(

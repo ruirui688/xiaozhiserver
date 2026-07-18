@@ -1,6 +1,6 @@
 """Runtime registry for active device connections."""
 
-from typing import Dict, Optional, Set, TYPE_CHECKING
+from typing import Dict, List, Optional, Set, TYPE_CHECKING
 
 from config.logger import setup_logging
 
@@ -98,6 +98,23 @@ def get_connection(device_id: str) -> Optional["ConnectionHandler"]:
         if conn:
             return conn
     return None
+
+
+def get_connections_for_agent(agent_id: str) -> List["ConnectionHandler"]:
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
+        return []
+    result = []
+    seen = set()
+    for conn in _connections.values():
+        identity = id(conn)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        config = getattr(conn, "config", {}) or {}
+        if str(config.get("agent_id") or "").strip() == normalized_agent_id:
+            result.append(conn)
+    return result
 
 
 def registered_keys() -> Set[str]:

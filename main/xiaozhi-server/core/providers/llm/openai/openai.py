@@ -23,6 +23,7 @@ THINKING_DISABLED_DOMAINS = {
 
 class LLMProvider(LLMProviderBase):
     supports_native_function_call = True
+    supports_tool_choice = True
 
     def __init__(self, config):
         self.model_name = config.get("model_name")
@@ -286,6 +287,9 @@ class LLMProvider(LLMProviderBase):
             "stream": True,
             "tools": functions,
         }
+        tool_choice = kwargs.get("tool_choice")
+        if tool_choice is not None:
+            request_params["tool_choice"] = tool_choice
 
         optional_params = {
             "max_tokens": kwargs.get("max_tokens", self.max_tokens),

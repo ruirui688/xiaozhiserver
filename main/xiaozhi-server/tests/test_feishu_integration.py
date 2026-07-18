@@ -12,7 +12,7 @@ from config import settings
 
 settings.config_file_valid = True
 
-from core.meeting.executor import enqueue_feishu_report
+from core.meeting.executor import enqueue_feishu_report, parse_meeting_summary
 from core.providers.tools.server_plugins.plugin_executor import ServerPluginExecutor
 from plugins_func.functions.feishu_assistant import feishu_assistant
 from plugins_func.register import Action
@@ -178,3 +178,25 @@ def test_feishu_tool_schema_only_exposes_enabled_agent_actions():
     ]["action"]
 
     assert action_schema["enum"] == ["send_message", "list_tasks"]
+
+
+def test_meeting_summary_separates_spoken_and_written_outputs():
+    spoken, written = parse_meeting_summary(
+        '{"spoken_summary":"今天主要确认了发布安排，回归测试由张敏跟进。",'
+        '"written_minutes":"讨论摘要\\n确认发布安排。\\n\\n后续安排\\n张敏跟进回归测试。"}'
+    )
+
+    assert spoken == "今天主要确认了发布安排，回归测试由张敏跟进。"
+    assert written.startswith("讨论摘要")
+    assert "张敏跟进回归测试" in written
+
+
+def test_meeting_summary_fallback_removes_markdown_for_device_speech():
+    spoken, written = parse_meeting_summary(
+        "## 讨论摘要\n- 确认先完成回归测试。\n## 后续安排\n- 张敏负责验证。"
+    )
+
+    assert written.startswith("## 讨论摘要")
+    assert "#" not in spoken
+    assert "-" not in spoken
+    assert "确认先完成回归测试" in spoken

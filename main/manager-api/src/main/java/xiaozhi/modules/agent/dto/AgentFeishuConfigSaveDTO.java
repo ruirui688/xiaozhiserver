@@ -24,10 +24,14 @@ public class AgentFeishuConfigSaveDTO {
     @Size(max = 128)
     private String taskAssigneeOpenId;
 
+    @Size(max = 512)
+    private String eventVerificationToken;
+
     private Boolean enabled = false;
     private Boolean meetingReportEnabled = false;
     private Boolean messageSendEnabled = false;
     private Boolean messageReadEnabled = false;
+    private Boolean messageBroadcastEnabled = false;
     private Boolean taskReadEnabled = false;
     private Boolean taskCreateEnabled = false;
     private Boolean calendarCreateEnabled = false;

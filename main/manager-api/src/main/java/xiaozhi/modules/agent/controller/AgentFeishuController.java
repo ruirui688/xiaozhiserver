@@ -83,6 +83,13 @@ public class AgentFeishuController {
         return new Result<Map<String, Object>>().ok(feishuService.sendTestMessage(agentId));
     }
 
+    @PostMapping("/events")
+    public Map<String, Object> receiveEvent(
+            @PathVariable String agentId,
+            @Valid @RequestBody Map<String, Object> payload) {
+        return feishuService.handleEvent(agentId, payload);
+    }
+
     private void requireAgentAccess(String agentId, boolean write) {
         UserDetail user = SecurityUser.getUser();
         if (!agentService.checkAgentPermission(agentId, user.getId())) {

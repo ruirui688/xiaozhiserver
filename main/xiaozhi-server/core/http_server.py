@@ -7,6 +7,7 @@ from core.api.vision_handler import VisionHandler
 from core.api.device_mcp_handler import DeviceMcpHandler
 from core.api.benchmark_handler import BenchmarkHandler
 from core.api.voiceprint_enrollment_handler import VoiceprintEnrollmentHandler
+from core.api.device_notification_handler import DeviceNotificationHandler
 
 TAG = __name__
 
@@ -20,6 +21,7 @@ class SimpleHttpServer:
         self.device_mcp_handler = DeviceMcpHandler(config)
         self.benchmark_handler = BenchmarkHandler(config)
         self.voiceprint_enrollment_handler = VoiceprintEnrollmentHandler(config)
+        self.device_notification_handler = DeviceNotificationHandler(config)
 
     def _get_websocket_url(self, local_ip: str, port: int) -> str:
         """获取websocket地址
@@ -128,6 +130,14 @@ class SimpleHttpServer:
                         web.options(
                             "/device/voiceprint/enrollment/status",
                             self.voiceprint_enrollment_handler.handle_options,
+                        ),
+                        web.post(
+                            "/device/notifications/broadcast",
+                            self.device_notification_handler.handle_broadcast,
+                        ),
+                        web.options(
+                            "/device/notifications/broadcast",
+                            self.device_notification_handler.handle_options,
                         ),
                         web.post(
                             "/benchmark/models", self.benchmark_handler.handle_models

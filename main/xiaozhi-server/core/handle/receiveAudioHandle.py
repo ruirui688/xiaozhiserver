@@ -145,23 +145,24 @@ async def startToChat(conn: "ConnectionHandler", text):
                 logger.bind(tag=TAG).info(
                     "会议已激活，当前ASR提交主LLM决定record或end"
                 )
-        if conn.llm is None:
-            appended = meeting.record_pending_turn()
-            conn.logger.bind(tag=TAG).warning(
-                "会议已激活但LLM未配置，安全回退继续记录: "
-                f"utteranceCount={appended}"
-            )
-            return True
-        with conn._abort_lock:
-            conn.client_abort = False
-        future = conn.executor.submit(conn.chat, actual_text)
-        future.add_done_callback(
-            lambda item: conn.logger.bind(tag=__name__).error(
-                f"meeting chat() failed: {item.exception()}"
-            )
-            if item.exception()
-            else None
-        )
+            if conn.llm is None:
+                appended = meeting.record_pending_turn()
+                conn.logger.bind(tag=TAG).warning(
+                    "会议已激活但LLM未配置，安全回退继续记录: "
+                    f"utteranceCount={appended}"
+                )
+                return True
+            with conn._abort_lock:
+                conn.client_abort = False
+            try:
+                future = conn.executor.submit(conn.chat, actual_text)
+                await asyncio.wrap_future(future)
+            except Exception as error:
+                appended = meeting.record_pending_turn()
+                conn.logger.bind(tag=TAG).error(
+                    "会议主LLM轮次执行失败，安全回退继续记录: "
+                    f"errorType={type(error).__name__}, utteranceCount={appended}"
+                )
         return True
 
     if conn.need_bind:

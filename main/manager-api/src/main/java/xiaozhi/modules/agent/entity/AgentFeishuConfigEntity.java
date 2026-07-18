@@ -23,6 +23,8 @@ public class AgentFeishuConfigEntity {
     private Boolean meetingReportEnabled;
     private Boolean messageSendEnabled;
     private Boolean messageReadEnabled;
+    private Boolean messageBroadcastEnabled;
+    private String eventVerificationTokenCiphertext;
     private Boolean taskReadEnabled;
     private Boolean taskCreateEnabled;
     private Boolean calendarCreateEnabled;

@@ -192,6 +192,48 @@ def test_exit_phrase_does_not_end_meeting_without_main_llm_tool_call(monkeypatch
     assert conn.meeting_minutes.has_pending_turn() is True
 
 
+def test_active_meeting_turns_are_serialized_until_main_llm_decides(monkeypatch):
+    async def fake_send_stt(_conn, _text):
+        return None
+
+    monkeypatch.setattr("core.handle.receiveAudioHandle.send_stt_message", fake_send_stt)
+    first_started = threading.Event()
+    release_first = threading.Event()
+    chat_calls = []
+    conn = _conn()
+
+    def chat(query):
+        chat_calls.append(query)
+        if len(chat_calls) == 1:
+            first_started.set()
+            assert release_first.wait(timeout=2)
+        conn.meeting_minutes.record_pending_turn()
+        return True
+
+    conn.chat = chat
+    conn.meeting_minutes.start("发布评审")
+
+    async def scenario():
+        first = asyncio.create_task(startToChat(conn, "第一段。"))
+        assert await asyncio.to_thread(first_started.wait, 1)
+        second = asyncio.create_task(startToChat(conn, "第二段。"))
+        await asyncio.sleep(0.05)
+        assert chat_calls == ["第一段。"]
+        release_first.set()
+        await asyncio.gather(first, second)
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        conn.executor.shutdown(wait=True)
+
+    assert chat_calls == ["第一段。", "第二段。"]
+    assert [item["text"] for item in conn.meeting_minutes.build_transcript()] == [
+        "第一段。",
+        "第二段。",
+    ]
+
+
 def test_meeting_tool_reports_skip_memory_event_but_keep_report_queue():
     conn = _conn()
     conn.read_config_from_api = True

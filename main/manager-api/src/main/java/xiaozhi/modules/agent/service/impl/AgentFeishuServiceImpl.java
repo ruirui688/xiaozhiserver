@@ -4,12 +4,15 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import lombok.RequiredArgsConstructor;
 import xiaozhi.common.exception.RenException;
@@ -19,6 +22,7 @@ import xiaozhi.modules.agent.dto.AgentFeishuConfigSaveDTO;
 import xiaozhi.modules.agent.dto.FeishuRuntimeActionDTO;
 import xiaozhi.modules.agent.entity.AgentFeishuConfigEntity;
 import xiaozhi.modules.agent.feishu.FeishuOpenApiClient;
+import xiaozhi.modules.agent.feishu.FeishuDeviceAnnouncementClient;
 import xiaozhi.modules.agent.service.AgentFeishuService;
 import xiaozhi.modules.agent.vo.AgentFeishuConfigVO;
 import xiaozhi.modules.agent.vo.FeishuChatVO;
@@ -29,11 +33,18 @@ import xiaozhi.modules.device.service.DeviceService;
 @RequiredArgsConstructor
 public class AgentFeishuServiceImpl implements AgentFeishuService {
     private static final String CIPHER_SCOPE_PREFIX = "agent-feishu:";
+    private static final String EVENT_TOKEN_SCOPE_PREFIX = "agent-feishu-event:";
+    private static final long EVENT_DEDUP_TTL_MILLIS = 10 * 60 * 1000L;
+    private static final int EVENT_RATE_LIMIT_PER_MINUTE = 120;
 
     private final AgentFeishuConfigDao configDao;
     private final CredentialCipher credentialCipher;
     private final FeishuOpenApiClient feishuClient;
+    private final FeishuDeviceAnnouncementClient announcementClient;
     private final DeviceService deviceService;
+    private final ObjectMapper objectMapper;
+    private final Map<String, Long> handledEventIds = new ConcurrentHashMap<>();
+    private final Map<String, EventRateWindow> eventRateWindows = new ConcurrentHashMap<>();
 
     @Override
     public AgentFeishuConfigVO getConfig(String agentId) {
@@ -51,6 +62,9 @@ public class AgentFeishuServiceImpl implements AgentFeishuService {
                 .meetingReportEnabled(Boolean.TRUE.equals(entity.getMeetingReportEnabled()))
                 .messageSendEnabled(Boolean.TRUE.equals(entity.getMessageSendEnabled()))
                 .messageReadEnabled(Boolean.TRUE.equals(entity.getMessageReadEnabled()))
+                .messageBroadcastEnabled(Boolean.TRUE.equals(entity.getMessageBroadcastEnabled()))
+                .eventVerificationTokenConfigured(
+                        StringUtils.isNotBlank(entity.getEventVerificationTokenCiphertext()))
                 .taskReadEnabled(Boolean.TRUE.equals(entity.getTaskReadEnabled()))
                 .taskCreateEnabled(Boolean.TRUE.equals(entity.getTaskCreateEnabled()))
                 .calendarCreateEnabled(Boolean.TRUE.equals(entity.getCalendarCreateEnabled()))
@@ -71,11 +85,12 @@ public class AgentFeishuServiceImpl implements AgentFeishuService {
 
         String appId = StringUtils.trim(dto.getAppId());
         String appSecret = StringUtils.trimToNull(dto.getAppSecret());
+        boolean appChanged = !creating && !StringUtils.equals(appId, entity.getAppId());
         if (appSecret != null) {
             entity.setAppSecretCiphertext(credentialCipher.encrypt(scope(agentId), appSecret));
         } else if (creating || StringUtils.isBlank(entity.getAppSecretCiphertext())) {
             throw new RenException("首次绑定飞书时必须填写App Secret");
-        } else if (!StringUtils.equals(appId, entity.getAppId())) {
+        } else if (appChanged) {
             throw new RenException("修改App ID时必须同时填写对应的App Secret");
         }
 
@@ -87,6 +102,17 @@ public class AgentFeishuServiceImpl implements AgentFeishuService {
         entity.setMeetingReportEnabled(Boolean.TRUE.equals(dto.getMeetingReportEnabled()));
         entity.setMessageSendEnabled(Boolean.TRUE.equals(dto.getMessageSendEnabled()));
         entity.setMessageReadEnabled(Boolean.TRUE.equals(dto.getMessageReadEnabled()));
+        entity.setMessageBroadcastEnabled(Boolean.TRUE.equals(dto.getMessageBroadcastEnabled()));
+        String eventToken = StringUtils.trimToNull(dto.getEventVerificationToken());
+        if (eventToken != null) {
+            entity.setEventVerificationTokenCiphertext(
+                    credentialCipher.encrypt(eventScope(agentId), eventToken));
+        } else if (Boolean.TRUE.equals(dto.getMessageBroadcastEnabled())
+                && (appChanged || StringUtils.isBlank(entity.getEventVerificationTokenCiphertext()))) {
+            throw new RenException("开启群消息到达播报或修改App ID时，必须填写飞书事件订阅Verification Token");
+        } else if (appChanged) {
+            entity.setEventVerificationTokenCiphertext(null);
+        }
         entity.setTaskReadEnabled(Boolean.TRUE.equals(dto.getTaskReadEnabled()));
         entity.setTaskCreateEnabled(Boolean.TRUE.equals(dto.getTaskCreateEnabled()));
         entity.setCalendarCreateEnabled(Boolean.TRUE.equals(dto.getCalendarCreateEnabled()));
@@ -165,6 +191,62 @@ public class AgentFeishuServiceImpl implements AgentFeishuService {
         result.put("create_task", createTask);
         result.put("create_calendar_event", createCalendarEvent);
         return result;
+    }
+
+    @Override
+    public Map<String, Object> handleEvent(String agentId, Map<String, Object> payload) {
+        enforceEventRateLimit(agentId);
+        AgentFeishuConfigEntity config = find(agentId);
+        if (config == null || StringUtils.isBlank(config.getEventVerificationTokenCiphertext())) {
+            throw new RenException("飞书事件订阅尚未配置");
+        }
+        Map<String, Object> header = map(payload.get("header"));
+        String receivedToken = StringUtils.defaultIfBlank(
+                text(payload.get("token")), text(header.get("token")));
+        String expectedToken = credentialCipher.decrypt(
+                eventScope(agentId), config.getEventVerificationTokenCiphertext());
+        if (!constantTimeEquals(receivedToken, expectedToken)) {
+            throw new RenException("飞书事件订阅Verification Token校验失败");
+        }
+
+        String challenge = text(payload.get("challenge"));
+        if (StringUtils.isNotBlank(challenge)) {
+            return Map.of("challenge", challenge);
+        }
+        if (!Boolean.TRUE.equals(config.getEnabled())
+                || !Boolean.TRUE.equals(config.getMessageBroadcastEnabled())) {
+            return Map.of("code", 0, "ignored", true, "reason", "broadcast_disabled");
+        }
+        if (!StringUtils.equals("im.message.receive_v1", text(header.get("event_type")))) {
+            return Map.of("code", 0, "ignored", true, "reason", "unsupported_event");
+        }
+        String eventAppId = text(header.get("app_id"));
+        if (StringUtils.isNotBlank(eventAppId) && !StringUtils.equals(eventAppId, config.getAppId())) {
+            throw new RenException("飞书事件App ID与当前智能体绑定不一致");
+        }
+
+        String eventId = text(header.get("event_id"));
+        if (alreadyHandled(eventId)) {
+            return Map.of("code", 0, "duplicate", true);
+        }
+        Map<String, Object> event = map(payload.get("event"));
+        Map<String, Object> sender = map(event.get("sender"));
+        if (StringUtils.equalsIgnoreCase("app", text(sender.get("sender_type")))) {
+            return Map.of("code", 0, "ignored", true, "reason", "bot_message");
+        }
+        Map<String, Object> message = map(event.get("message"));
+        if (!StringUtils.equals(config.getDefaultChatId(), text(message.get("chat_id")))) {
+            return Map.of("code", 0, "ignored", true, "reason", "other_chat");
+        }
+        if (!StringUtils.equals("text", text(message.get("message_type")))) {
+            return Map.of("code", 0, "ignored", true, "reason", "non_text_message");
+        }
+        String content = extractTextMessage(text(message.get("content")));
+        if (StringUtils.isBlank(content)) {
+            return Map.of("code", 0, "ignored", true, "reason", "empty_message");
+        }
+        announcementClient.broadcast(agentId, content);
+        return Map.of("code", 0, "accepted", true);
     }
 
     private Map<String, Object> publishMeetingReport(ConfigContext context, FeishuRuntimeActionDTO dto) {
@@ -293,15 +375,90 @@ public class AgentFeishuServiceImpl implements AgentFeishuService {
     private void validateGroupConfiguration(AgentFeishuConfigSaveDTO dto) {
         boolean groupActionEnabled = Boolean.TRUE.equals(dto.getMeetingReportEnabled())
                 || Boolean.TRUE.equals(dto.getMessageSendEnabled())
-                || Boolean.TRUE.equals(dto.getMessageReadEnabled());
+                || Boolean.TRUE.equals(dto.getMessageReadEnabled())
+                || Boolean.TRUE.equals(dto.getMessageBroadcastEnabled());
         if (groupActionEnabled && StringUtils.isBlank(dto.getDefaultChatId())) {
             throw new RenException("开启会议纪要或群消息能力前，请明确选择默认飞书群聊");
         }
+    }
+
+    private String eventScope(String agentId) {
+        return EVENT_TOKEN_SCOPE_PREFIX + agentId;
+    }
+
+    private String extractTextMessage(String rawContent) {
+        try {
+            Map<String, Object> content = objectMapper.readValue(
+                    rawContent, new TypeReference<Map<String, Object>>() {});
+            String text = text(content.get("text"));
+            text = text.replaceAll("[\\p{Cntrl}&&[^\\r\\n\\t]]", " ")
+                    .replaceAll("\\s+", " ")
+                    .trim();
+            return StringUtils.abbreviate(text, 301);
+        } catch (Exception error) {
+            return "";
+        }
+    }
+
+    private boolean alreadyHandled(String eventId) {
+        if (StringUtils.isBlank(eventId)) {
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        if (handledEventIds.size() > 1000) {
+            handledEventIds.entrySet().removeIf(
+                    entry -> now - entry.getValue() > EVENT_DEDUP_TTL_MILLIS);
+        }
+        return handledEventIds.putIfAbsent(eventId, now) != null;
+    }
+
+    private boolean constantTimeEquals(String left, String right) {
+        return java.security.MessageDigest.isEqual(
+                StringUtils.defaultString(left).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                StringUtils.defaultString(right).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    private void enforceEventRateLimit(String agentId) {
+        long now = System.currentTimeMillis();
+        EventRateWindow window = eventRateWindows.computeIfAbsent(
+                agentId, ignored -> new EventRateWindow(now));
+        synchronized (window) {
+            if (now - window.startedAt >= 60_000L) {
+                window.startedAt = now;
+                window.count = 0;
+            }
+            window.count += 1;
+            if (window.count > EVENT_RATE_LIMIT_PER_MINUTE) {
+                throw new RenException("飞书事件回调请求过于频繁");
+            }
+        }
+    }
+
+    private Map<String, Object> map(Object value) {
+        if (!(value instanceof Map<?, ?> source)) {
+            return Map.of();
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        source.forEach((key, item) -> result.put(String.valueOf(key), item));
+        return result;
+    }
+
+    private String text(Object value) {
+        return value == null ? "" : String.valueOf(value);
     }
 
     private record Credentials(String appId, String appSecret) {
     }
 
     private record ConfigContext(AgentFeishuConfigEntity entity, String appSecret) {
+    }
+
+    private static final class EventRateWindow {
+        private long startedAt;
+        private int count;
+
+        private EventRateWindow(long startedAt) {
+            this.startedAt = startedAt;
+        }
     }
 }

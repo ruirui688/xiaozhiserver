@@ -499,7 +499,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 
 ```text
 定制模块：xiaozhi-server 主 LLM 会议工具、连接级会议记录状态、完整会议纪要生成
-改动原因：会议能力登记为 `SYSTEM_PLUGIN_MEETING_MINUTES`，启用后注册真实 `meeting_minutes` function tool。会议开始、记录和结束全部由主 LLM 根据上下文主动调用 `start / record / end`；服务端不维护进入/退出关键词或确定性规则。会议激活后每条 ASR 都作为 pending turn 交给主 LLM，该轮只暴露会议工具；只有工具调用成功才改变状态，模型未调用或异常时安全回退为继续记录。最终纪要使用冻结的全部结构化转写并由主 LLM生成。会议状态、工具审计和会议正文不进入长期记忆事件。
+改动原因：会议能力登记为 `SYSTEM_PLUGIN_MEETING_MINUTES`，启用后注册真实 `meeting_minutes` function tool。会议开始、记录和结束全部由主 LLM 根据上下文主动调用 `start / record / end`；服务端不维护进入/退出关键词或确定性规则。会议激活后每条 ASR 都作为 pending turn 串行交给主 LLM，该轮只暴露会议工具；provider 支持时使用 `tool_choice=required`，具体 `record/end` 仍由模型决定。只有工具调用成功才改变状态，异常时安全回退为继续记录。最终使用冻结的全部结构化转写同时生成自然口语播报和书面飞书纪要。会议状态、工具审计和会议正文不进入长期记忆事件。
 关键文件：
   - main/xiaozhi-server/core/meeting/config.py
   - main/xiaozhi-server/core/meeting/executor.py
@@ -508,6 +508,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/xiaozhi-server/core/handle/receiveAudioHandle.py
   - main/xiaozhi-server/core/utils/modules_initialize.py
   - main/xiaozhi-server/core/connection.py
+  - main/xiaozhi-server/core/providers/llm/openai/openai.py
   - main/xiaozhi-server/core/websocket_server.py
   - main/xiaozhi-server/tests/test_meeting_control.py
   - main/xiaozhi-server/tests/test_meeting_llm_control.py
@@ -524,18 +525,22 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 
 ```text
 定制模块：manager-api 飞书配置与开放平台客户端、manager-web 智能体绑定、xiaozhi-server 飞书工具与会议纪要投递
-改动原因：会议模式生成完整纪要后，需要按智能体绑定关系自动发送到指定飞书群，并允许主 LLM 在显式授权范围内发送/读取默认群消息、创建任务和安排日程。绑定不是用户级 OAuth；每个智能体独立保存应用、默认群、负责人、日历和动作权限。
+改动原因：会议模式生成完整纪要后，需要按智能体绑定关系自动发送到指定飞书群，并允许主 LLM 在显式授权范围内发送/读取默认群消息、创建任务和安排日程；还支持通过飞书事件订阅把目标群新文本消息主动播报到当前智能体的在线空闲设备。绑定不是用户级 OAuth；每个智能体独立保存应用、默认群、负责人、日历、事件 Verification Token 和动作权限。
 关键文件：
   - main/manager-api/src/main/java/xiaozhi/modules/agent/feishu/FeishuOpenApiClient.java
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/feishu/FeishuDeviceAnnouncementClient.java
   - main/manager-api/src/main/java/xiaozhi/modules/agent/service/impl/AgentFeishuServiceImpl.java
   - main/manager-api/src/main/java/xiaozhi/modules/config/controller/FeishuRuntimeController.java
   - main/manager-api/src/main/resources/db/changelog/202607171130.sql
+  - main/manager-api/src/main/resources/db/changelog/202607181705.sql
   - main/manager-web/src/components/role/FeishuIntegrationDialog.vue
   - main/xiaozhi-server/plugins_func/functions/feishu_assistant.py
   - main/xiaozhi-server/core/meeting/executor.py
+  - main/xiaozhi-server/core/api/device_notification_handler.py
+  - main/xiaozhi-server/core/spoken_notifications.py
   - docs/integrations/feishu-integration.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：必须保留智能体级所有权、App Secret 仅在 manager-api 使用部署级 AES-GCM 密钥加密保存、前端不回显、Python 不接收凭据、`/config/feishu/**` 同时校验服务密钥和设备到智能体绑定关系、默认群/负责人/日历服务端固定门控、各动作独立授权和群消息不可信内容包裹。配置页连接测试、默认群读取和测试消息只能要求凭据已配置，不能被运行时 enabled 开关阻断；设备运行时动作、会议纪要投递和工具注册仍必须要求集成已启用。会议纪要投递失败不得阻塞设备端纪要播报；日志不得输出 App Secret、tenant_access_token、Authorization 或原始凭据响应。
+官方同步时的处理规则：必须保留智能体级所有权、App Secret 与事件 Verification Token 仅在 manager-api 使用部署级 AES-GCM 密钥分作用域加密保存、前端不回显、Python 不接收凭据、`/config/feishu/**` 同时校验服务密钥和设备到智能体绑定关系、默认群/负责人/日历服务端固定门控、各动作独立授权和群消息不可信内容包裹。飞书事件回调虽然匿名放行，但必须校验 Verification Token、App ID、目标群、事件类型，执行 event_id 去重和请求限流；主动播报只走带服务密钥的内部设备接口，会议和设备忙碌时不得插播。配置页连接测试、默认群读取和测试消息只能要求凭据已配置，不能被运行时 enabled 开关阻断；设备运行时动作、会议纪要投递和工具注册仍必须要求集成已启用。会议纪要投递失败不得阻塞设备端纪要播报；日志不得输出 App Secret、Verification Token、tenant_access_token、Authorization 或原始凭据响应。
 ```
 
 ## 29. 用户级天气与联网搜索共享配置

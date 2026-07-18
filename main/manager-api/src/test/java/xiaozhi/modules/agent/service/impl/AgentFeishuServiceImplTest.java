@@ -18,6 +18,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import xiaozhi.common.exception.RenException;
 import xiaozhi.common.security.CredentialCipher;
 import xiaozhi.modules.agent.dao.AgentFeishuConfigDao;
@@ -25,6 +27,7 @@ import xiaozhi.modules.agent.dto.AgentFeishuConfigSaveDTO;
 import xiaozhi.modules.agent.dto.FeishuRuntimeActionDTO;
 import xiaozhi.modules.agent.entity.AgentFeishuConfigEntity;
 import xiaozhi.modules.agent.feishu.FeishuOpenApiClient;
+import xiaozhi.modules.agent.feishu.FeishuDeviceAnnouncementClient;
 import xiaozhi.modules.agent.vo.FeishuChatVO;
 import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.device.service.DeviceService;
@@ -33,6 +36,7 @@ class AgentFeishuServiceImplTest {
     private AgentFeishuConfigDao configDao;
     private CredentialCipher cipher;
     private FeishuOpenApiClient client;
+    private FeishuDeviceAnnouncementClient announcementClient;
     private DeviceService deviceService;
     private AgentFeishuServiceImpl service;
     private AgentFeishuConfigEntity config;
@@ -42,8 +46,15 @@ class AgentFeishuServiceImplTest {
         configDao = mock(AgentFeishuConfigDao.class);
         cipher = mock(CredentialCipher.class);
         client = mock(FeishuOpenApiClient.class);
+        announcementClient = mock(FeishuDeviceAnnouncementClient.class);
         deviceService = mock(DeviceService.class);
-        service = new AgentFeishuServiceImpl(configDao, cipher, client, deviceService);
+        service = new AgentFeishuServiceImpl(
+                configDao,
+                cipher,
+                client,
+                announcementClient,
+                deviceService,
+                new ObjectMapper());
         config = new AgentFeishuConfigEntity();
         config.setId("config-1");
         config.setAgentId("agent-a");
@@ -54,6 +65,7 @@ class AgentFeishuServiceImplTest {
         config.setMeetingReportEnabled(true);
         config.setMessageSendEnabled(false);
         config.setMessageReadEnabled(false);
+        config.setMessageBroadcastEnabled(false);
         config.setTaskReadEnabled(false);
         config.setTaskCreateEnabled(false);
         config.setCalendarCreateEnabled(false);
@@ -119,6 +131,21 @@ class AgentFeishuServiceImplTest {
 
         verify(configDao).updateById(config);
         assertTrue(config.getTaskCreateEnabled());
+    }
+
+    @Test
+    void rejectsBroadcastWithoutVerificationToken() {
+        AgentFeishuConfigSaveDTO dto = new AgentFeishuConfigSaveDTO();
+        dto.setAppId("cli_test");
+        dto.setDefaultChatId("oc_1");
+        dto.setMessageBroadcastEnabled(true);
+
+        RenException error = assertThrows(
+                RenException.class,
+                () -> service.saveConfig("agent-a", dto, 7L));
+
+        assertTrue(error.getMessage().contains("Verification Token"));
+        verify(configDao, never()).updateById(any());
     }
 
     @Test
@@ -212,5 +239,43 @@ class AgentFeishuServiceImplTest {
 
         assertThrows(RenException.class, () -> service.executeRuntimeAction("agent-a", dto));
         verify(client, never()).sendMeetingReport(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void validatesFeishuChallengeWithEncryptedVerificationToken() {
+        config.setEventVerificationTokenCiphertext("event-ciphertext");
+        when(cipher.decrypt("agent-feishu-event:agent-a", "event-ciphertext"))
+                .thenReturn("verify-token");
+
+        Map<String, Object> result = service.handleEvent(
+                "agent-a",
+                Map.of("type", "url_verification", "token", "verify-token", "challenge", "challenge-1"));
+
+        assertEquals(Map.of("challenge", "challenge-1"), result);
+    }
+
+    @Test
+    void broadcastsNewTextMessageFromConfiguredChat() {
+        config.setMessageBroadcastEnabled(true);
+        config.setEventVerificationTokenCiphertext("event-ciphertext");
+        when(cipher.decrypt("agent-feishu-event:agent-a", "event-ciphertext"))
+                .thenReturn("verify-token");
+        Map<String, Object> payload = Map.of(
+                "header", Map.of(
+                        "token", "verify-token",
+                        "event_type", "im.message.receive_v1",
+                        "event_id", "event-1",
+                        "app_id", "cli_test"),
+                "event", Map.of(
+                        "sender", Map.of("sender_type", "user"),
+                        "message", Map.of(
+                                "chat_id", "oc_1",
+                                "message_type", "text",
+                                "content", "{\"text\":\"发布已经完成\"}")));
+
+        Map<String, Object> result = service.handleEvent("agent-a", payload);
+
+        assertEquals(true, result.get("accepted"));
+        verify(announcementClient).broadcast("agent-a", "发布已经完成");
     }
 }
