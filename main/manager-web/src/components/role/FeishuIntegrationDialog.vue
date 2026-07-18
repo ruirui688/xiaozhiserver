@@ -8,14 +8,26 @@
   >
     <el-form
       ref="form"
+      v-loading="configLoading"
       :model="form"
       :rules="rules"
-      label-width="130px"
+      label-width="160px"
       class="feishu-form"
     >
-      <el-form-item label="启用状态">
+      <el-form-item label="启用飞书运行时">
         <el-switch v-model="form.enabled" />
+        <div class="field-help">关闭时只保存配置，设备运行时不会执行飞书动作或自动发送会议纪要。</div>
       </el-form-item>
+
+      <el-alert
+        v-if="secretConfigured && !form.enabled"
+        class="runtime-alert"
+        title="飞书配置已保存，但运行时尚未启用"
+        description="你仍可查询群聊、修改配置和发送测试消息；设备运行时不会向飞书发送消息。"
+        type="info"
+        :closable="false"
+        show-icon
+      />
 
       <el-form-item label="App ID" prop="appId">
         <el-input
@@ -36,13 +48,15 @@
         />
       </el-form-item>
 
-      <el-form-item label="默认群聊" prop="defaultChatId">
+      <el-form-item label="默认群聊（飞书查询）" prop="defaultChatId">
         <div class="field-with-action">
           <el-select
             v-model="form.defaultChatId"
             filterable
             clearable
-            placeholder="选择机器人所在群聊"
+            :loading="chatLoading"
+            placeholder="从飞书查询机器人所在群聊"
+            no-data-text="暂无查询结果，请先测试连接或刷新"
           >
             <el-option
               v-for="chat in chats"
@@ -54,13 +68,16 @@
           <el-button
             icon="el-icon-refresh"
             :loading="chatLoading"
-            title="刷新群聊"
+            :disabled="!secretConfigured"
+            title="从飞书重新查询群聊"
             @click="loadChats"
           />
         </div>
+        <div class="field-help">列表来自飞书开放平台，系统不预置群聊，也不会自动选择；仅保存你明确选择的 chat_id。</div>
+        <div v-if="chatSelectionDirty" class="field-warning">群聊选择尚未保存，保存后才能向该群发送测试消息。</div>
       </el-form-item>
 
-      <el-divider content-position="left">自动化与权限</el-divider>
+      <el-divider content-position="left">运行时动作权限</el-divider>
 
       <div class="permission-grid">
         <label class="permission-item">
@@ -122,10 +139,11 @@
       >测试连接</el-button>
       <el-button
         icon="el-icon-message"
-        :disabled="!secretConfigured || !form.defaultChatId"
+        :disabled="testMessageDisabled"
         :loading="messageTesting"
+        title="使用已保存的飞书配置发送"
         @click="sendTestMessage"
-      >发送测试消息</el-button>
+      >发送测试消息（已保存配置）</el-button>
       <el-button type="primary" :loading="saving" @click="saveConfig">保存</el-button>
     </div>
   </el-dialog>
@@ -140,8 +158,8 @@ const emptyForm = () => ({
   defaultChatId: "",
   calendarId: "",
   taskAssigneeOpenId: "",
-  enabled: true,
-  meetingReportEnabled: true,
+  enabled: false,
+  meetingReportEnabled: false,
   messageSendEnabled: false,
   messageReadEnabled: false,
   taskReadEnabled: false,
@@ -157,8 +175,21 @@ export default {
   },
   data() {
     const validateSecret = (rule, value, callback) => {
-      if (!this.secretConfigured && !String(value || "").trim()) {
-        callback(new Error("请输入App Secret"));
+      const secretMissing = !String(value || "").trim();
+      const appChanged = Boolean(
+        this.secretConfigured &&
+        this.savedAppId &&
+        this.form.appId !== this.savedAppId
+      );
+      if ((!this.secretConfigured || appChanged) && secretMissing) {
+        callback(new Error(appChanged ? "修改App ID时必须填写对应的App Secret" : "请输入App Secret"));
+        return;
+      }
+      callback();
+    };
+    const validateDefaultChat = (rule, value, callback) => {
+      if (this.groupActionEnabled && !String(value || "").trim()) {
+        callback(new Error("开启会议纪要或群消息能力前，请明确选择默认群聊"));
         return;
       }
       callback();
@@ -167,6 +198,9 @@ export default {
       form: emptyForm(),
       chats: [],
       secretConfigured: false,
+      savedAppId: "",
+      savedDefaultChatId: "",
+      configLoading: false,
       saving: false,
       testing: false,
       chatLoading: false,
@@ -177,6 +211,7 @@ export default {
           { pattern: /^cli_[A-Za-z0-9]+$/, message: "App ID格式无效", trigger: "blur" },
         ],
         appSecret: [{ validator: validateSecret, trigger: "blur" }],
+        defaultChatId: [{ validator: validateDefaultChat, trigger: "change" }],
       },
     };
   },
@@ -192,11 +227,47 @@ export default {
     secretPlaceholder() {
       return this.secretConfigured ? "已加密保存，留空表示不修改" : "请输入App Secret";
     },
+    groupActionEnabled() {
+      return Boolean(
+        this.form.meetingReportEnabled ||
+        this.form.messageSendEnabled ||
+        this.form.messageReadEnabled
+      );
+    },
+    chatSelectionDirty() {
+      return Boolean(
+        this.secretConfigured &&
+        this.form.defaultChatId !== this.savedDefaultChatId
+      );
+    },
+    savedConfigDirty() {
+      return Boolean(
+        this.form.appId !== this.savedAppId ||
+        String(this.form.appSecret || "").trim() ||
+        this.chatSelectionDirty
+      );
+    },
+    testMessageDisabled() {
+      return Boolean(
+        !this.secretConfigured ||
+        !this.savedDefaultChatId ||
+        this.savedConfigDirty
+      );
+    },
   },
   methods: {
     loadConfig() {
       if (!this.agentId) return;
-      Api.agent.getAgentFeishuConfig(this.agentId, ({ data }) => {
+      const agentId = this.agentId;
+      this.form = emptyForm();
+      this.chats = [];
+      this.secretConfigured = false;
+      this.savedAppId = "";
+      this.savedDefaultChatId = "";
+      this.configLoading = true;
+      Api.agent.getAgentFeishuConfig(agentId, ({ data }) => {
+        if (agentId !== this.agentId) return;
+        this.configLoading = false;
         if (!data || data.code !== 0) {
           this.$message.error((data && data.msg) || "读取飞书配置失败");
           return;
@@ -206,6 +277,8 @@ export default {
         delete editableConfig.secretConfigured;
         this.form = { ...emptyForm(), ...editableConfig, appSecret: "" };
         this.secretConfigured = Boolean(config.secretConfigured);
+        this.savedAppId = this.form.appId;
+        this.savedDefaultChatId = this.form.defaultChatId;
         if (this.secretConfigured) this.loadChats(false);
       });
     },
@@ -244,8 +317,16 @@ export default {
         if (valid) callback();
       });
     },
+    validateCredentials(callback) {
+      this.$refs.form.validateField("appId", (appIdError) => {
+        if (appIdError) return;
+        this.$refs.form.validateField("appSecret", (secretError) => {
+          if (!secretError) callback();
+        });
+      });
+    },
     testConnection() {
-      this.validate(() => {
+      this.validateCredentials(() => {
         this.testing = true;
         Api.agent.testAgentFeishuConfig(this.agentId, this.payload(), ({ data }) => {
           this.testing = false;
@@ -253,7 +334,7 @@ export default {
             this.$message.error((data && data.msg) || "飞书连接失败");
             return;
           }
-          this.chats = data.data || [];
+          this.applyChats(data.data || [], true);
           this.$message.success("飞书连接成功");
         });
       });
@@ -269,6 +350,8 @@ export default {
           }
           this.form.appSecret = "";
           this.secretConfigured = true;
+          this.savedAppId = this.form.appId;
+          this.savedDefaultChatId = this.form.defaultChatId;
           this.$message.success("飞书配置已保存");
           this.loadChats(false);
         });
@@ -279,16 +362,29 @@ export default {
         if (showMessage) this.$message.warning("请先保存飞书配置");
         return;
       }
+      const agentId = this.agentId;
       this.chatLoading = true;
-      Api.agent.getAgentFeishuChats(this.agentId, ({ data }) => {
+      Api.agent.getAgentFeishuChats(agentId, ({ data }) => {
+        if (agentId !== this.agentId) return;
         this.chatLoading = false;
         if (!data || data.code !== 0) {
           if (showMessage) this.$message.error((data && data.msg) || "读取群聊失败");
           return;
         }
-        this.chats = data.data || [];
+        this.applyChats(data.data || [], false);
         if (showMessage) this.$message.success("群聊列表已刷新");
       });
+    },
+    applyChats(chats, fromCurrentCredentials) {
+      this.chats = Array.isArray(chats) ? chats : [];
+      if (!this.form.defaultChatId) return;
+      const selectedExists = this.chats.some(
+        (chat) => chat.chatId === this.form.defaultChatId
+      );
+      if (selectedExists) return;
+      this.form.defaultChatId = "";
+      const source = fromCurrentCredentials ? "当前凭据" : "机器人当前";
+      this.$message.warning(`${source}可访问的群聊中不包含原选择，请重新选择并保存`);
     },
     sendTestMessage() {
       this.messageTesting = true;
@@ -312,6 +408,8 @@ export default {
             this.form = emptyForm();
             this.chats = [];
             this.secretConfigured = false;
+            this.savedAppId = "";
+            this.savedDefaultChatId = "";
             this.$message.success("飞书绑定已解除");
           });
         })
@@ -324,6 +422,26 @@ export default {
 <style lang="scss" scoped>
 .feishu-form {
   padding-right: 12px;
+}
+
+.runtime-alert {
+  margin: 0 0 20px 160px;
+  width: calc(100% - 160px);
+}
+
+.field-help,
+.field-warning {
+  margin-top: 6px;
+  line-height: 20px;
+  font-size: 12px;
+}
+
+.field-help {
+  color: #909399;
+}
+
+.field-warning {
+  color: #e6a23c;
 }
 
 .field-with-action {
@@ -340,7 +458,7 @@ export default {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px 24px;
-  margin: 0 0 20px 130px;
+  margin: 0 0 20px 160px;
 }
 
 .permission-item {
@@ -364,6 +482,11 @@ export default {
 @media (max-width: 760px) {
   .permission-grid {
     grid-template-columns: 1fr;
+  }
+
+  .runtime-alert {
+    margin-left: 0;
+    width: 100%;
   }
 }
 </style>

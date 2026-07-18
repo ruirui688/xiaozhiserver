@@ -60,6 +60,7 @@ public class AgentFeishuServiceImpl implements AgentFeishuService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void saveConfig(String agentId, AgentFeishuConfigSaveDTO dto, Long operatorId) {
+        validateGroupConfiguration(dto);
         AgentFeishuConfigEntity entity = find(agentId);
         boolean creating = entity == null;
         if (creating) {
@@ -82,8 +83,8 @@ public class AgentFeishuServiceImpl implements AgentFeishuService {
         entity.setDefaultChatId(StringUtils.trimToNull(dto.getDefaultChatId()));
         entity.setCalendarId(StringUtils.trimToNull(dto.getCalendarId()));
         entity.setTaskAssigneeOpenId(StringUtils.trimToNull(dto.getTaskAssigneeOpenId()));
-        entity.setEnabled(defaultTrue(dto.getEnabled()));
-        entity.setMeetingReportEnabled(defaultTrue(dto.getMeetingReportEnabled()));
+        entity.setEnabled(Boolean.TRUE.equals(dto.getEnabled()));
+        entity.setMeetingReportEnabled(Boolean.TRUE.equals(dto.getMeetingReportEnabled()));
         entity.setMessageSendEnabled(Boolean.TRUE.equals(dto.getMessageSendEnabled()));
         entity.setMessageReadEnabled(Boolean.TRUE.equals(dto.getMessageReadEnabled()));
         entity.setTaskReadEnabled(Boolean.TRUE.equals(dto.getTaskReadEnabled()));
@@ -289,8 +290,13 @@ public class AgentFeishuServiceImpl implements AgentFeishuService {
         return CIPHER_SCOPE_PREFIX + agentId;
     }
 
-    private boolean defaultTrue(Boolean value) {
-        return value == null || Boolean.TRUE.equals(value);
+    private void validateGroupConfiguration(AgentFeishuConfigSaveDTO dto) {
+        boolean groupActionEnabled = Boolean.TRUE.equals(dto.getMeetingReportEnabled())
+                || Boolean.TRUE.equals(dto.getMessageSendEnabled())
+                || Boolean.TRUE.equals(dto.getMessageReadEnabled());
+        if (groupActionEnabled && StringUtils.isBlank(dto.getDefaultChatId())) {
+            throw new RenException("开启会议纪要或群消息能力前，请明确选择默认飞书群聊");
+        }
     }
 
     private record Credentials(String appId, String appSecret) {

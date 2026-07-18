@@ -3,6 +3,7 @@ package xiaozhi.modules.agent.service.impl;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -15,6 +16,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import xiaozhi.common.exception.RenException;
 import xiaozhi.common.security.CredentialCipher;
@@ -74,6 +76,49 @@ class AgentFeishuServiceImplTest {
         verify(cipher, never()).encrypt(any(), any());
         verify(configDao).updateById(config);
         assertEquals("ciphertext", config.getAppSecretCiphertext());
+    }
+
+    @Test
+    void newBindingDoesNotPresetRuntimeOrMeetingActions() {
+        when(configDao.selectOne(any())).thenReturn(null);
+        when(cipher.encrypt("agent-feishu:agent-a", "app-secret")).thenReturn("new-ciphertext");
+        AgentFeishuConfigSaveDTO dto = new AgentFeishuConfigSaveDTO();
+        dto.setAppId("cli_test");
+        dto.setAppSecret("app-secret");
+
+        service.saveConfig("agent-a", dto, 7L);
+
+        ArgumentCaptor<AgentFeishuConfigEntity> captor = ArgumentCaptor.forClass(AgentFeishuConfigEntity.class);
+        verify(configDao).insert(captor.capture());
+        AgentFeishuConfigEntity saved = captor.getValue();
+        assertFalse(saved.getEnabled());
+        assertFalse(saved.getMeetingReportEnabled());
+    }
+
+    @Test
+    void rejectsGroupActionsWithoutExplicitDefaultChat() {
+        AgentFeishuConfigSaveDTO dto = new AgentFeishuConfigSaveDTO();
+        dto.setAppId("cli_test");
+        dto.setMessageSendEnabled(true);
+
+        RenException error = assertThrows(
+                RenException.class,
+                () -> service.saveConfig("agent-a", dto, 7L));
+
+        assertTrue(error.getMessage().contains("默认飞书群聊"));
+        verify(configDao, never()).updateById(any());
+    }
+
+    @Test
+    void taskOnlyConfigurationDoesNotRequireDefaultChat() {
+        AgentFeishuConfigSaveDTO dto = new AgentFeishuConfigSaveDTO();
+        dto.setAppId("cli_test");
+        dto.setTaskCreateEnabled(true);
+
+        service.saveConfig("agent-a", dto, 7L);
+
+        verify(configDao).updateById(config);
+        assertTrue(config.getTaskCreateEnabled());
     }
 
     @Test

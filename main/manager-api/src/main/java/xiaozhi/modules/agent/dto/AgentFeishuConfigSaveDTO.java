@@ -24,8 +24,8 @@ public class AgentFeishuConfigSaveDTO {
     @Size(max = 128)
     private String taskAssigneeOpenId;
 
-    private Boolean enabled = true;
-    private Boolean meetingReportEnabled = true;
+    private Boolean enabled = false;
+    private Boolean meetingReportEnabled = false;
     private Boolean messageSendEnabled = false;
     private Boolean messageReadEnabled = false;
     private Boolean taskReadEnabled = false;
