@@ -120,6 +120,7 @@ class TTSProvider(TTSProviderBase):
                 if message.sentence_type == SentenceType.LAST:
                     # 处理剩余的文本
                     self._process_remaining_text_stream(True)
+                    self._record_turn_metric("record_tts_generation_complete")
 
             except queue.Empty:
                 continue
@@ -147,6 +148,7 @@ class TTSProvider(TTSProviderBase):
 
     def to_tts_single_stream(self, text, is_last=False):
         try:
+            self._record_turn_metric("record_tts_start", self.conn.sentence_id)
             max_repeat_time = 5
             original_text = text
             text = MarkdownCleaner.clean_markdown(text)

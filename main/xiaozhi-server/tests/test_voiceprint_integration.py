@@ -174,7 +174,7 @@ async def _handle_voice_stop_identifies_with_full_utterance(monkeypatch):
         assert wav_file.getframerate() == 16000
         assert wav_file.readframes(wav_file.getnframes()) == b"".join(audio_frames)
 
-    voiceprint_metrics = conn.turn_metrics.build_user_metrics()["latency_ms"]["voiceprint"]
+    voiceprint_metrics = conn.turn_metrics.build_user_metrics()["stages"]["voiceprint"]
     assert voiceprint_metrics["enabled"] is True
     assert voiceprint_metrics["speaker_id"] == "voice-1"
     assert voiceprint_metrics["total_ms"] is not None

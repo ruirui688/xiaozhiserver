@@ -41,7 +41,9 @@ def _estimated_token_count(value):
 
 
 class TurnMetrics:
-    """Collects low-cost per-turn latency metrics for chat-history export."""
+    """Collect a single, explicit per-turn latency trace for chat history."""
+
+    SCHEMA_VERSION = 2
 
     def __init__(self):
         self._lock = threading.RLock()
@@ -74,7 +76,6 @@ class TurnMetrics:
             )
             if have_voice:
                 segment["vad_voice_frame_count"] += 1
-                segment["last_voice_at_epoch_ms"] = _now_epoch_ms()
                 segment["last_voice_at_monotonic"] = time.monotonic()
             else:
                 segment["vad_silence_frame_count"] += 1
@@ -82,7 +83,6 @@ class TurnMetrics:
     def begin_turn(self, audio_frames, audio_format):
         with self._lock:
             now_monotonic = time.monotonic()
-            turn_id = uuid.uuid4().hex
             vad = self._vad_segment or {
                 "speech_started_at_epoch_ms": _now_epoch_ms(),
                 "speech_started_at_monotonic": now_monotonic,
@@ -94,29 +94,29 @@ class TurnMetrics:
                 "vad_inference_ms_max": 0,
             }
             self._vad_segment = None
-            estimated_audio_duration_ms = _audio_duration_ms(audio_frames, audio_format)
+            audio_duration_ms = _audio_duration_ms(audio_frames, audio_format)
             speech_started_at = vad.get("speech_started_at_monotonic") or now_monotonic
             last_voice_at = vad.get("last_voice_at_monotonic")
-            first_text_at = vad.get("asr_first_text_at_monotonic")
-            final_text_at = vad.get("asr_final_text_at_monotonic")
             self._active_turn = {
-                "schema_version": 1,
-                "turn_id": turn_id,
+                "schema_version": self.SCHEMA_VERSION,
+                "turn_id": uuid.uuid4().hex,
                 "started_at_epoch_ms": vad.get("speech_started_at_epoch_ms") or _now_epoch_ms(),
                 "input": {
                     "audio_format": audio_format,
                     "audio_packet_count": len(audio_frames or []),
-                    "estimated_audio_duration_ms": estimated_audio_duration_ms,
+                    "audio_duration_ms": audio_duration_ms,
                 },
-                "latency_ms": {
+                "stages": {
                     "vad": {
                         "frame_count": vad.get("vad_frame_count", 0),
                         "voice_frame_count": vad.get("vad_voice_frame_count", 0),
                         "silence_frame_count": vad.get("vad_silence_frame_count", 0),
                         "audio_bytes": vad.get("vad_audio_bytes", 0),
-                        "inference_total_ms": vad.get("vad_inference_ms", 0),
-                        "inference_max_ms": vad.get("vad_inference_ms_max", 0),
-                        "segment_ms": max(0, int((now_monotonic - speech_started_at) * 1000)),
+                        "inference_ms": vad.get("vad_inference_ms", 0),
+                        "max_frame_inference_ms": vad.get("vad_inference_ms_max", 0),
+                        "speech_segment_ms": max(
+                            0, int((now_monotonic - speech_started_at) * 1000)
+                        ),
                         "silence_after_last_voice_ms": (
                             max(0, int((now_monotonic - last_voice_at) * 1000))
                             if last_voice_at
@@ -124,23 +124,23 @@ class TurnMetrics:
                         ),
                     }
                 },
+                "trace": {"steps": [], "totals": {}},
                 "_runtime": {
                     "speech_started_at": speech_started_at,
-                    "audio_duration_ms": estimated_audio_duration_ms,
+                    "audio_duration_ms": audio_duration_ms,
                     "asr_first_text_ms": _elapsed_between_ms(
                         speech_started_at,
-                        first_text_at,
+                        vad.get("asr_first_text_at_monotonic"),
                     ),
                     "asr_first_text_length": vad.get("asr_first_text_length"),
                     "asr_final_text_ms": _elapsed_between_ms(
                         speech_started_at,
-                        final_text_at,
+                        vad.get("asr_final_text_at_monotonic"),
                     ),
                     "asr_final_text_length": vad.get("asr_final_text_length"),
                 },
-                "tokens": {},
             }
-            return turn_id
+            return self._active_turn["turn_id"]
 
     def discard_vad_segment(self):
         with self._lock:
@@ -154,14 +154,86 @@ class TurnMetrics:
         with self._lock:
             if self._active_turn is None:
                 self._active_turn = {
-                    "schema_version": 1,
+                    "schema_version": self.SCHEMA_VERSION,
                     "turn_id": uuid.uuid4().hex,
                     "started_at_epoch_ms": _now_epoch_ms(),
                     "input": {"audio_format": "text"},
-                    "latency_ms": {},
-                    "tokens": {},
-            }
+                    "stages": {},
+                    "trace": {"steps": [], "totals": {}},
+                    "_runtime": {},
+                }
             return self._active_turn["turn_id"]
+
+    def _append_step(self, step_type, **values):
+        steps = self._active_turn.setdefault("trace", {}).setdefault("steps", [])
+        step = {"sequence": len(steps) + 1, "type": step_type, **values}
+        steps.append(step)
+        return step
+
+    def _refresh_trace_totals(self):
+        if not self._active_turn:
+            return
+        trace = self._active_turn.setdefault("trace", {})
+        steps = trace.setdefault("steps", [])
+        totals = {}
+        llm_steps = [step for step in steps if step.get("type") == "llm"]
+        completed_llm_steps = [
+            step for step in llm_steps if step.get("total_ms") is not None
+        ]
+        tool_steps = [step for step in steps if step.get("type") == "tool"]
+        tts_steps = [step for step in steps if step.get("type") == "tts"]
+        delivery_steps = [
+            step for step in steps if step.get("type") == "audio_delivery"
+        ]
+
+        totals["llm_call_count"] = len(llm_steps)
+        totals["llm_model_ms"] = sum(
+            int(step.get("total_ms") or 0) for step in completed_llm_steps
+        )
+        runtime = self._active_turn.setdefault("_runtime", {})
+        if (
+            completed_llm_steps
+            and runtime.get("llm_chain_started_at")
+            and runtime.get("model_tool_chain_completed_at")
+        ):
+            totals["model_tool_chain_ms"] = _elapsed_between_ms(
+                runtime["llm_chain_started_at"],
+                runtime["model_tool_chain_completed_at"],
+            )
+        totals["tool_call_count"] = len(tool_steps)
+        totals["tool_ms"] = sum(int(step.get("total_ms") or 0) for step in tool_steps)
+
+        token_rows = [step.get("tokens") for step in completed_llm_steps if step.get("tokens")]
+        if token_rows:
+            sources = {row.get("source") for row in token_rows if row.get("source")}
+            totals["tokens"] = {
+                "prompt_tokens": sum(int(row.get("prompt_tokens") or 0) for row in token_rows),
+                "completion_tokens": sum(
+                    int(row.get("completion_tokens") or 0) for row in token_rows
+                ),
+                "total_tokens": sum(int(row.get("total_tokens") or 0) for row in token_rows),
+                "source": next(iter(sources)) if len(sources) == 1 else "aggregate_mixed",
+            }
+
+        if tts_steps:
+            tts_step = tts_steps[-1]
+            totals["tts_request_to_first_audio_ms"] = tts_step.get(
+                "request_to_first_audio_ms"
+            )
+            totals["tts_provider_generation_ms"] = tts_step.get(
+                "provider_generation_ms"
+            )
+            totals["tts_report_ready_ms"] = tts_step.get("report_ready_ms")
+            totals["output_audio_duration_ms"] = tts_step.get("audio_duration_ms")
+        if delivery_steps:
+            delivery_step = delivery_steps[-1]
+            totals["server_delivery_from_first_audio_ms"] = delivery_step.get(
+                "from_first_audio_ms"
+            )
+            totals["server_send_complete_from_tts_request_ms"] = delivery_step.get(
+                "from_tts_request_ms"
+            )
+        trace["totals"] = totals
 
     def record_asr_first_text(self, text_length=None):
         with self._lock:
@@ -170,18 +242,15 @@ class TurnMetrics:
                 runtime = self._active_turn.setdefault("_runtime", {})
                 if runtime.get("asr_first_text_ms") is None:
                     runtime["asr_first_text_ms"] = _elapsed_between_ms(
-                        runtime.get("speech_started_at"),
-                        now_monotonic,
+                        runtime.get("speech_started_at"), now_monotonic
                     )
                     runtime["asr_first_text_length"] = int(text_length or 0)
                 return
-
             if self._vad_segment is None:
                 return
-            if self._vad_segment.get("asr_first_text_at_monotonic") is not None:
-                return
-            self._vad_segment["asr_first_text_at_monotonic"] = now_monotonic
-            self._vad_segment["asr_first_text_length"] = int(text_length or 0)
+            if self._vad_segment.get("asr_first_text_at_monotonic") is None:
+                self._vad_segment["asr_first_text_at_monotonic"] = now_monotonic
+                self._vad_segment["asr_first_text_length"] = int(text_length or 0)
 
     def record_asr_final_text(self, text_length=None):
         with self._lock:
@@ -190,17 +259,14 @@ class TurnMetrics:
                 runtime = self._active_turn.setdefault("_runtime", {})
                 if runtime.get("asr_first_text_ms") is None:
                     runtime["asr_first_text_ms"] = _elapsed_between_ms(
-                        runtime.get("speech_started_at"),
-                        now_monotonic,
+                        runtime.get("speech_started_at"), now_monotonic
                     )
                     runtime["asr_first_text_length"] = int(text_length or 0)
                 runtime["asr_final_text_ms"] = _elapsed_between_ms(
-                    runtime.get("speech_started_at"),
-                    now_monotonic,
+                    runtime.get("speech_started_at"), now_monotonic
                 )
                 runtime["asr_final_text_length"] = int(text_length or 0)
                 return
-
             if self._vad_segment is None:
                 return
             if self._vad_segment.get("asr_first_text_at_monotonic") is None:
@@ -214,103 +280,126 @@ class TurnMetrics:
             if self._active_turn is None:
                 self.ensure_text_turn()
             runtime = self._active_turn.setdefault("_runtime", {})
-            response_ms = runtime.get("asr_final_text_ms")
-            if response_ms is None:
-                response_ms = _elapsed_ms(runtime.get("speech_started_at"))
+            final_text_ms = runtime.get("asr_final_text_ms")
+            if final_text_ms is None:
+                final_text_ms = _elapsed_ms(runtime.get("speech_started_at"))
             audio_duration_ms = runtime.get("audio_duration_ms")
-            recorded_first_text_ms = runtime.get("asr_first_text_ms")
             if first_text_ms is None:
-                first_text_ms = recorded_first_text_ms
+                first_text_ms = runtime.get("asr_first_text_ms")
             if first_text_ms is None and success:
-                first_text_ms = response_ms
-            tail_latency_ms = (
-                max(0, int(response_ms) - int(audio_duration_ms or 0))
-                if response_ms is not None and audio_duration_ms is not None
-                else None
-            )
-            self._active_turn["latency_ms"]["asr"] = {
-                "total_ms": response_ms,
-                "response_ms": response_ms,
-                "audio_duration_ms": audio_duration_ms,
-                "tail_latency_ms": tail_latency_ms,
-                "finalize_ms": max(0, int(finalize_ms or 0)),
-                "first_text_ms": first_text_ms,
-                "first_text_length": runtime.get("asr_first_text_length"),
-                "first_text_unavailable_reason": (
-                    "chat runtime does not expose provider first partial text"
-                    if first_text_ms is None
+                first_text_ms = final_text_ms
+            self._active_turn.setdefault("stages", {})["asr"] = {
+                "first_text_from_speech_ms": first_text_ms,
+                "final_text_from_speech_ms": final_text_ms,
+                "tail_after_audio_ms": (
+                    max(0, int(final_text_ms) - int(audio_duration_ms or 0))
+                    if final_text_ms is not None and audio_duration_ms is not None
                     else None
                 ),
-                "success": bool(success),
+                "provider_finalize_ms": max(0, int(finalize_ms or 0)),
+                "first_text_length": runtime.get("asr_first_text_length"),
                 "text_length": int(text_length or 0),
+                "success": bool(success),
             }
 
     def record_voiceprint(self, elapsed_ms, enabled, speaker, speaker_id, score):
         with self._lock:
             if self._active_turn is None:
                 self.ensure_text_turn()
-            data = {
+            self._active_turn.setdefault("stages", {})["voiceprint"] = {
                 "enabled": bool(enabled),
                 "total_ms": max(0, int(elapsed_ms or 0)) if elapsed_ms is not None else None,
                 "speaker": speaker or None,
                 "speaker_id": speaker_id or None,
                 "score": score,
             }
-            self._active_turn["latency_ms"]["voiceprint"] = data
 
     def record_routing(self, accepted):
         with self._lock:
             if self._active_turn is not None:
-                self._active_turn["routing"] = {"accepted": bool(accepted)}
+                self._active_turn.setdefault("stages", {})["routing"] = {
+                    "accepted": bool(accepted)
+                }
 
     def record_llm_started(self, tools_enabled, depth, dialogue=None, functions=None):
         with self._lock:
             if self._active_turn is None:
                 self.ensure_text_turn()
-            self._active_turn.setdefault("_runtime", {})["llm_started_at"] = time.monotonic()
+            now_monotonic = time.monotonic()
+            runtime = self._active_turn.setdefault("_runtime", {})
+            runtime.setdefault("llm_chain_started_at", now_monotonic)
+            call_index = len(
+                [
+                    step
+                    for step in self._active_turn["trace"]["steps"]
+                    if step.get("type") == "llm"
+                ]
+            ) + 1
             prompt_tokens = _estimated_token_count(dialogue)
             tool_tokens = _estimated_token_count(functions)
-            estimated_input_tokens = prompt_tokens + tool_tokens
-            self._active_turn["llm"] = {
-                "depth": depth,
-                "tools_enabled": bool(tools_enabled),
-                "input_message_count": len(dialogue or []),
-                "tool_schema_count": len(functions or []),
+            step = self._append_step(
+                "llm",
+                call_index=call_index,
+                depth=depth,
+                tools_enabled=bool(tools_enabled),
+                input_message_count=len(dialogue or []),
+                tool_schema_count=len(functions or []),
+                tokens={
+                    "prompt_tokens": prompt_tokens + tool_tokens,
+                    "prompt_tokens_from_messages": prompt_tokens,
+                    "prompt_tokens_from_tools": tool_tokens,
+                    "completion_tokens": None,
+                    "total_tokens": prompt_tokens + tool_tokens,
+                    "source": "estimated_input_chars",
+                },
+            )
+            runtime.setdefault("llm_calls", {})[call_index] = {
+                "started_at": now_monotonic,
+                "step": step,
             }
-            self._active_turn["tokens"] = {
-                "prompt_tokens": estimated_input_tokens,
-                "prompt_tokens_from_messages": prompt_tokens,
-                "prompt_tokens_from_tools": tool_tokens,
-                "completion_tokens": None,
-                "total_tokens": estimated_input_tokens,
-                "source": "estimated_input_chars",
-            }
+            self._refresh_trace_totals()
 
-    def record_llm_first_chunk(self):
-        with self._lock:
-            turn = self._active_turn
-            if not turn:
-                return
-            started_at = turn.setdefault("_runtime", {}).get("llm_started_at")
-            if started_at and "first_chunk_ms" not in turn.setdefault("latency_ms", {}).setdefault("llm", {}):
-                turn["latency_ms"]["llm"]["first_chunk_ms"] = _elapsed_ms(started_at)
+    def _active_llm_call(self, depth=None):
+        runtime_calls = self._active_turn.setdefault("_runtime", {}).setdefault(
+            "llm_calls", {}
+        )
+        for call_index in sorted(runtime_calls, reverse=True):
+            call = runtime_calls[call_index]
+            step = call["step"]
+            if step.get("total_ms") is not None:
+                continue
+            if depth is None or step.get("depth") == depth:
+                return call
+        return None
 
-    def record_llm_complete(self, content_text, usage, tool_call, tool_count):
+    def record_llm_first_chunk(self, depth=None):
         with self._lock:
-            turn = self._active_turn
-            if not turn:
+            if not self._active_turn:
                 return
-            started_at = turn.setdefault("_runtime", {}).get("llm_started_at")
-            turn.setdefault("latency_ms", {}).setdefault("llm", {})["total_ms"] = _elapsed_ms(started_at)
-            turn.setdefault("llm", {}).update(
+            call = self._active_llm_call(depth)
+            if not call or call["step"].get("first_chunk_ms") is not None:
+                return
+            call["step"]["first_chunk_ms"] = _elapsed_ms(call["started_at"])
+            self._refresh_trace_totals()
+
+    def record_llm_complete(self, content_text, usage, tool_call, tool_count, depth=None):
+        with self._lock:
+            if not self._active_turn:
+                return
+            call = self._active_llm_call(depth)
+            if not call:
+                return
+            step = call["step"]
+            step.update(
                 {
+                    "total_ms": _elapsed_ms(call["started_at"]),
                     "tool_call": bool(tool_call),
                     "tool_count": int(tool_count or 0),
                     "output_chars": len(content_text or ""),
                 }
             )
             if isinstance(usage, dict) and usage:
-                turn["tokens"] = {
+                step["tokens"] = {
                     "prompt_tokens": usage.get("prompt_tokens"),
                     "completion_tokens": usage.get("completion_tokens"),
                     "total_tokens": usage.get("total_tokens"),
@@ -318,53 +407,125 @@ class TurnMetrics:
                 }
             elif content_text:
                 completion_tokens = _estimated_token_count(content_text)
-                prompt_tokens = turn.get("tokens", {}).get("prompt_tokens")
-                total_tokens = (
-                    prompt_tokens + completion_tokens
-                    if prompt_tokens is not None
-                    else completion_tokens
-                )
-                turn["tokens"] = {
-                    "prompt_tokens": prompt_tokens,
-                    "prompt_tokens_from_messages": turn.get("tokens", {}).get("prompt_tokens_from_messages"),
-                    "prompt_tokens_from_tools": turn.get("tokens", {}).get("prompt_tokens_from_tools"),
+                prompt_tokens = step.get("tokens", {}).get("prompt_tokens")
+                step["tokens"] = {
+                    **step.get("tokens", {}),
                     "completion_tokens": completion_tokens,
-                    "total_tokens": total_tokens,
+                    "total_tokens": int(prompt_tokens or 0) + completion_tokens,
                     "source": "estimated_input_output_chars",
                 }
+            self._active_turn.setdefault("_runtime", {})[
+                "model_tool_chain_completed_at"
+            ] = time.monotonic()
+            self._refresh_trace_totals()
+
+    def record_tool_call(self, name, elapsed_ms, action=None, success=True, depth=None):
+        with self._lock:
+            if not self._active_turn:
+                return
+            call_index = len(
+                [
+                    step
+                    for step in self._active_turn["trace"]["steps"]
+                    if step.get("type") == "tool"
+                ]
+            ) + 1
+            self._append_step(
+                "tool",
+                call_index=call_index,
+                depth=depth,
+                name=name,
+                total_ms=max(0, int(elapsed_ms or 0)),
+                action=action or None,
+                success=bool(success),
+            )
+            self._active_turn.setdefault("_runtime", {})[
+                "model_tool_chain_completed_at"
+            ] = time.monotonic()
+            self._refresh_trace_totals()
 
     def record_tts_start(self, sentence_id):
         with self._lock:
-            if self._active_turn is None:
+            if not self._active_turn:
                 return
             runtime = self._active_turn.setdefault("_runtime", {})
             if runtime.get("tts_started_at"):
                 return
             runtime["tts_started_at"] = time.monotonic()
-            runtime["tts_sentence_id"] = sentence_id
-            self._active_turn.setdefault("latency_ms", {}).setdefault("tts", {})
-            self._active_turn["tts"] = {
-                "sentence_id": sentence_id,
-                "audio_frame_count": 0,
-                "audio_bytes": 0,
-            }
+            runtime["tts_step"] = self._append_step(
+                "tts",
+                sentence_id=sentence_id,
+                audio_frame_count=0,
+                audio_bytes=0,
+                audio_duration_ms=0,
+            )
+            self._refresh_trace_totals()
 
     def record_tts_audio_frame(self, audio_bytes):
         with self._lock:
-            turn = self._active_turn
-            if not turn:
+            if not self._active_turn:
                 return
-            runtime = turn.setdefault("_runtime", {})
-            started_at = runtime.get("tts_started_at")
-            if not started_at:
+            runtime = self._active_turn.setdefault("_runtime", {})
+            step = runtime.get("tts_step")
+            if step is None:
                 runtime["tts_started_at"] = time.monotonic()
-                started_at = runtime["tts_started_at"]
-            latency = turn.setdefault("latency_ms", {}).setdefault("tts", {})
-            if started_at and "first_audio_ms" not in latency:
-                latency["first_audio_ms"] = _elapsed_ms(started_at)
-            tts = turn.setdefault("tts", {})
-            tts["audio_frame_count"] = int(tts.get("audio_frame_count") or 0) + 1
-            tts["audio_bytes"] = int(tts.get("audio_bytes") or 0) + int(audio_bytes or 0)
+                runtime["tts_start_missing"] = True
+                step = self._append_step(
+                    "tts",
+                    sentence_id=None,
+                    measurement_error="tts_request_start_missing",
+                    audio_frame_count=0,
+                    audio_bytes=0,
+                    audio_duration_ms=0,
+                )
+                runtime["tts_step"] = step
+            if "request_to_first_audio_ms" not in step:
+                runtime["tts_first_audio_at"] = time.monotonic()
+                step["request_to_first_audio_ms"] = (
+                    None
+                    if runtime.get("tts_start_missing")
+                    else _elapsed_ms(runtime.get("tts_started_at"))
+                )
+            step["audio_frame_count"] += 1
+            step["audio_bytes"] += int(audio_bytes or 0)
+            step["audio_duration_ms"] = step["audio_frame_count"] * 60
+            self._refresh_trace_totals()
+
+    def record_audio_delivery_complete(self):
+        with self._lock:
+            if not self._active_turn:
+                return
+            runtime = self._active_turn.setdefault("_runtime", {})
+            if runtime.get("audio_delivery_recorded"):
+                return
+            runtime["audio_delivery_recorded"] = True
+            self._append_step(
+                "audio_delivery",
+                boundary="server_websocket_send_complete",
+                from_first_audio_ms=_elapsed_ms(runtime.get("tts_first_audio_at")),
+                from_tts_request_ms=(
+                    None
+                    if runtime.get("tts_start_missing")
+                    else _elapsed_ms(runtime.get("tts_started_at"))
+                ),
+                device_playback_confirmed=False,
+            )
+            self._refresh_trace_totals()
+
+    def record_tts_generation_complete(self):
+        with self._lock:
+            if not self._active_turn:
+                return
+            runtime = self._active_turn.setdefault("_runtime", {})
+            step = runtime.get("tts_step")
+            if step is None:
+                return
+            step["provider_generation_ms"] = (
+                None
+                if runtime.get("tts_start_missing")
+                else _elapsed_ms(runtime.get("tts_started_at"))
+            )
+            self._refresh_trace_totals()
 
     def build_user_metrics(self):
         with self._lock:
@@ -380,12 +541,15 @@ class TurnMetrics:
             if not self._active_turn:
                 return None
             runtime = self._active_turn.setdefault("_runtime", {})
-            tts_started_at = runtime.get("tts_started_at")
-            if tts_started_at:
-                self._active_turn.setdefault("latency_ms", {}).setdefault("tts", {})[
-                    "total_ms"
-                ] = _elapsed_ms(tts_started_at)
-            self._active_turn.setdefault("tts", {})["text_chars"] = len(text or "")
+            step = runtime.get("tts_step")
+            if step is not None:
+                step["report_ready_ms"] = (
+                    None
+                    if runtime.get("tts_start_missing")
+                    else _elapsed_ms(runtime.get("tts_started_at"))
+                )
+                step["text_chars"] = len(text or "")
+            self._refresh_trace_totals()
             metrics = copy.deepcopy(self._active_turn)
             metrics.pop("_runtime", None)
             metrics["message_role"] = "assistant"

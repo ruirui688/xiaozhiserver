@@ -253,6 +253,9 @@ class TTSProvider(TTSProviderBase):
                 elif ContentType.TEXT == message.content_type:
                     if message.content_detail:
                         try:
+                            self._record_turn_metric(
+                                "record_tts_start", message.sentence_id
+                            )
                             logger.bind(tag=TAG).debug(
                                 f"开始发送TTS文本: {message.content_detail}"
                             )
@@ -280,6 +283,7 @@ class TTSProvider(TTSProviderBase):
                             loop=self.conn.loop,
                         )
                         future.result(timeout=self.tts_timeout)
+                        self._record_turn_metric("record_tts_generation_complete")
                     except Exception as e:
                         logger.bind(tag=TAG).error(f"结束TTS会话失败: {str(e)}")
                         continue

@@ -223,6 +223,47 @@ utils/audioRateController.py  AudioRateController
 - 整轮 TTS 不设置固定播放时长上限；收到 `LAST` 后，等待预算按队列中剩余音频帧的真实播放时长动态计算，并额外保留单包发送超时与收尾容差。
 - WebSocket 半开保护作用于单个音频包发送。单包超过 `audio_send_timeout_seconds` 仍未完成时，后台发送任务失败并清理队列，避免异常连接永久占用会话；正常的长语音不会因为总时长超过 20 秒被截断。
 
+### 4.4 对话延时链路协议
+
+聊天记录中的延时指标使用 `schema_version=2`，不兼容旧的单值 `latency_ms` 口径。
+新协议只有两个权威入口：
+
+```text
+stages       VAD / ASR / 声纹等输入阶段
+trace.steps  按实际发生顺序记录 LLM / 工具 / TTS / 音频发送步骤
+```
+
+典型工具调用轮次：
+
+```text
+LLM #1 depth=0
+  -> TOOL #1
+  -> LLM #2 depth=1
+  -> TTS
+  -> AUDIO_DELIVERY
+```
+
+`trace.totals.llm_model_ms` 只累计模型请求本身；
+`trace.totals.model_tool_chain_ms` 从第一次 LLM 请求开始计时，到最后一次 LLM 完成，包含中间工具等待；
+二者不得混用。
+
+TTS 必须区分以下边界：
+
+| 字段 | 含义 |
+| --- | --- |
+| `request_to_first_audio_ms` | 文本提交给 TTS provider 到首个音频帧 |
+| `provider_generation_ms` | 文本提交到 provider 明确完成整段生成 |
+| `audio_duration_ms` | 按 Opus 60ms 帧数估算的输出音频时长 |
+| `report_ready_ms` | 文本提交到聊天记录指标可上报 |
+| `audio_delivery.from_tts_request_ms` | 文本提交到服务端 WebSocket 音频发送队列排空 |
+
+`audio_delivery.boundary=server_websocket_send_complete` 只表示服务端发送完成。
+当前设备协议没有扬声器播放完成 ACK，因此必须同时记录
+`device_playback_confirmed=false`，不得把该字段解释为设备实际播放完成。
+
+聊天记录导出包含 `summary.csv` 和逐步骤 `trace.csv`。递归模型调用必须按
+`call_index` 和 `depth` 分行保存，禁止再次压缩成单个“LLM耗时”。
+
 ## 5. 声纹注册采集模式
 
 声纹注册不再通过普通语音对话触发。智控台点击“开始录音”后，`manager-api` 调用

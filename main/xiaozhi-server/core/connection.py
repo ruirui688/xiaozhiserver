@@ -1496,7 +1496,7 @@ class ConnectionHandler:
                     self.session_telemetry.metrics.record_llm_first_chunk(
                         first_llm_chunk_at - llm_started_at
                     )
-                    self.turn_metrics.record_llm_first_chunk()
+                    self.turn_metrics.record_llm_first_chunk(depth=depth)
                     self.logger.bind(tag=TAG).info(
                         f"LLM首个响应分片 | depth={depth} | "
                         f"elapsed={first_llm_chunk_at - llm_started_at:.3f}s"
@@ -1622,6 +1622,7 @@ class ConnectionHandler:
             usage,
             tool_call_flag,
             len(tool_calls_list),
+            depth=depth,
         )
         self.logger.bind(tag=TAG).info(
             f"LLM响应流完成 | depth={depth} | elapsed={time.monotonic() - llm_started_at:.3f}s | "
@@ -1792,12 +1793,26 @@ class ConnectionHandler:
                             f"工具调用完成 | name={tool_call_data.get('name')} | "
                             f"action={action_name} | elapsed={time.monotonic() - tool_started_at:.3f}s"
                         )
+                        self.turn_metrics.record_tool_call(
+                            tool_call_data.get("name"),
+                            (time.monotonic() - tool_started_at) * 1000,
+                            action=action_name,
+                            success=True,
+                            depth=depth,
+                        )
                         tool_results.append((result, tool_call_data))
                         # 使用公共方法上报工具调用结果
                         report_result = result.result if result.result else result.response
                         enqueue_tool_report(self, tool_call_data['name'], tool_input, str(report_result) if report_result else None, report_tool_call=False)
 
                     except Exception as e:
+                        self.turn_metrics.record_tool_call(
+                            tool_call_data.get("name"),
+                            (time.monotonic() - tool_started_at) * 1000,
+                            action="ERROR",
+                            success=False,
+                            depth=depth,
+                        )
                         self.logger.bind(tag=TAG).error(
                             f"工具调用超时或异常: {tool_call_data['name']}, 错误: {e}"
                         )

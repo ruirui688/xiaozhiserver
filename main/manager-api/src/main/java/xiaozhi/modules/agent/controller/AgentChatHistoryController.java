@@ -387,9 +387,9 @@ public class AgentChatHistoryController {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("agent_id", agentId);
         metadata.put("exported_at", formatDate(new Date()));
-        metadata.put("format", "chat-history-package-v2");
+        metadata.put("format", "chat-history-latency-trace-v2");
         metadata.put("sessions", sessions);
-        metadata.put("latency_coverage", "新记录包含 metrics_json 时可导出 VAD、ASR、声纹、LLM、TTS 和 token 链路；旧记录该字段为空时仅保留消息时间、相邻消息间隔和音频时长。");
+        metadata.put("latency_schema", "metrics.schema_version=2；trace.steps 是模型、工具和 TTS 调用链的唯一权威数据源。");
         return metadata;
     }
 
@@ -418,21 +418,45 @@ public class AgentChatHistoryController {
         addPart(parts, "turn_id", metrics.get("turn_id"));
         Object messageRole = metrics.get("message_role");
         if ("user".equals(messageRole)) {
-            addPart(parts, "audio_duration_ms", nested(metrics, "input", "estimated_audio_duration_ms"));
-            addPart(parts, "vad_ms", nested(metrics, "latency_ms", "vad", "inference_total_ms"));
-            addPart(parts, "asr_first_text_ms", nested(metrics, "latency_ms", "asr", "first_text_ms"));
-            addPart(parts, "asr_tail_ms", nested(metrics, "latency_ms", "asr", "tail_latency_ms"));
-            addPart(parts, "voiceprint_ms", nested(metrics, "latency_ms", "voiceprint", "total_ms"));
+            addPart(parts, "audio_duration_ms", nested(metrics, "input", "audio_duration_ms"));
+            addPart(parts, "vad_inference_ms", nested(metrics, "stages", "vad", "inference_ms"));
+            addPart(parts, "asr_first_text_from_speech_ms", nested(metrics, "stages", "asr", "first_text_from_speech_ms"));
+            addPart(parts, "asr_tail_after_audio_ms", nested(metrics, "stages", "asr", "tail_after_audio_ms"));
+            addPart(parts, "voiceprint_ms", nested(metrics, "stages", "voiceprint", "total_ms"));
         } else if ("assistant".equals(messageRole)) {
-            addPart(parts, "llm_first_chunk_ms", nested(metrics, "latency_ms", "llm", "first_chunk_ms"));
-            addPart(parts, "llm_total_ms", nested(metrics, "latency_ms", "llm", "total_ms"));
-            addPart(parts, "tts_first_audio_ms", nested(metrics, "latency_ms", "tts", "first_audio_ms"));
-            addPart(parts, "tts_generation_ms", nested(metrics, "latency_ms", "tts", "total_ms"));
-            addPart(parts, "prompt_tokens", nested(metrics, "tokens", "prompt_tokens"));
-            addPart(parts, "completion_tokens", nested(metrics, "tokens", "completion_tokens"));
-            addPart(parts, "total_tokens", nested(metrics, "tokens", "total_tokens"));
+            addPart(parts, "model_tool_chain_ms", nested(metrics, "trace", "totals", "model_tool_chain_ms"));
+            addPart(parts, "llm_call_count", nested(metrics, "trace", "totals", "llm_call_count"));
+            addPart(parts, "llm_model_ms", nested(metrics, "trace", "totals", "llm_model_ms"));
+            addPart(parts, "tool_call_count", nested(metrics, "trace", "totals", "tool_call_count"));
+            addPart(parts, "tool_ms", nested(metrics, "trace", "totals", "tool_ms"));
+            addPart(parts, "tts_request_to_first_audio_ms", nested(metrics, "trace", "totals", "tts_request_to_first_audio_ms"));
+            addPart(parts, "tts_provider_generation_ms", nested(metrics, "trace", "totals", "tts_provider_generation_ms"));
+            addPart(parts, "output_audio_duration_ms", nested(metrics, "trace", "totals", "output_audio_duration_ms"));
+            addPart(parts, "server_send_complete_from_tts_request_ms", nested(metrics, "trace", "totals", "server_send_complete_from_tts_request_ms"));
+            addPart(parts, "trace", buildTraceText(metrics));
         }
         return String.join(", ", parts);
+    }
+
+    private String buildTraceText(Map<String, Object> metrics) {
+        List<String> parts = new ArrayList<>();
+        for (Map<String, Object> step : traceSteps(metrics)) {
+            String type = String.valueOf(step.get("type"));
+            if ("llm".equals(type)) {
+                parts.add("LLM#" + step.get("call_index")
+                        + "(depth=" + step.get("depth") + ")=" + step.get("total_ms") + "ms");
+            } else if ("tool".equals(type)) {
+                parts.add("TOOL#" + step.get("call_index")
+                        + "(" + step.get("name") + ")=" + step.get("total_ms") + "ms");
+            } else if ("tts".equals(type)) {
+                parts.add("TTS(first=" + step.get("request_to_first_audio_ms")
+                        + "ms,generation=" + step.get("provider_generation_ms") + "ms)");
+            } else if ("audio_delivery".equals(type)) {
+                parts.add("AUDIO_DELIVERY(server_send_complete="
+                        + step.get("from_tts_request_ms") + "ms,device_playback_confirmed=false)");
+            }
+        }
+        return String.join(" -> ", parts);
     }
 
     private void addPart(List<String> parts, String key, Object value) {
@@ -455,12 +479,9 @@ public class AgentChatHistoryController {
         item.put("created_at", formatDate(message.getCreatedAt()));
         item.put("turn_id", metrics.get("turn_id"));
         item.put("message_role", metrics.get("message_role"));
-        item.put("latency_ms", metrics.get("latency_ms"));
-        item.put("tokens", metrics.get("tokens"));
         item.put("input", metrics.get("input"));
-        item.put("llm", metrics.get("llm"));
-        item.put("tts", metrics.get("tts"));
-        item.put("routing", metrics.get("routing"));
+        item.put("stages", metrics.get("stages"));
+        item.put("trace", metrics.get("trace"));
         item.put("raw_metrics", metrics);
         return item;
     }
@@ -493,19 +514,23 @@ public class AgentChatHistoryController {
         Map<String, Object> summary = new LinkedHashMap<>();
         Map<String, Object> user = turn.get("user_metrics") instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
         Map<String, Object> assistant = turn.get("assistant_metrics") instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
-        putIfNotNull(summary, "input_audio_duration_ms", nested(user, "input", "estimated_audio_duration_ms"));
-        putIfNotNull(summary, "vad_inference_total_ms", nested(user, "latency_ms", "vad", "inference_total_ms"));
-        putIfNotNull(summary, "asr_first_text_ms", nested(user, "latency_ms", "asr", "first_text_ms"));
-        putIfNotNull(summary, "asr_tail_latency_ms", nested(user, "latency_ms", "asr", "tail_latency_ms"));
-        putIfNotNull(summary, "voiceprint_total_ms", nested(user, "latency_ms", "voiceprint", "total_ms"));
-        putIfNotNull(summary, "llm_first_chunk_ms", nested(assistant, "latency_ms", "llm", "first_chunk_ms"));
-        putIfNotNull(summary, "llm_total_ms", nested(assistant, "latency_ms", "llm", "total_ms"));
-        putIfNotNull(summary, "tts_first_audio_ms", nested(assistant, "latency_ms", "tts", "first_audio_ms"));
-        putIfNotNull(summary, "tts_generation_ms", nested(assistant, "latency_ms", "tts", "total_ms"));
-        putIfNotNull(summary, "prompt_tokens", nested(assistant, "tokens", "prompt_tokens"));
-        putIfNotNull(summary, "completion_tokens", nested(assistant, "tokens", "completion_tokens"));
-        putIfNotNull(summary, "total_tokens", nested(assistant, "tokens", "total_tokens"));
-        putIfNotNull(summary, "token_source", nested(assistant, "tokens", "source"));
+        putIfNotNull(summary, "input_audio_duration_ms", nested(user, "input", "audio_duration_ms"));
+        putIfNotNull(summary, "vad_inference_ms", nested(user, "stages", "vad", "inference_ms"));
+        putIfNotNull(summary, "asr_first_text_from_speech_ms", nested(user, "stages", "asr", "first_text_from_speech_ms"));
+        putIfNotNull(summary, "asr_tail_after_audio_ms", nested(user, "stages", "asr", "tail_after_audio_ms"));
+        putIfNotNull(summary, "voiceprint_ms", nested(user, "stages", "voiceprint", "total_ms"));
+        putIfNotNull(summary, "model_tool_chain_ms", nested(assistant, "trace", "totals", "model_tool_chain_ms"));
+        putIfNotNull(summary, "llm_call_count", nested(assistant, "trace", "totals", "llm_call_count"));
+        putIfNotNull(summary, "llm_model_ms", nested(assistant, "trace", "totals", "llm_model_ms"));
+        putIfNotNull(summary, "tool_call_count", nested(assistant, "trace", "totals", "tool_call_count"));
+        putIfNotNull(summary, "tool_ms", nested(assistant, "trace", "totals", "tool_ms"));
+        putIfNotNull(summary, "tts_request_to_first_audio_ms", nested(assistant, "trace", "totals", "tts_request_to_first_audio_ms"));
+        putIfNotNull(summary, "tts_provider_generation_ms", nested(assistant, "trace", "totals", "tts_provider_generation_ms"));
+        putIfNotNull(summary, "tts_report_ready_ms", nested(assistant, "trace", "totals", "tts_report_ready_ms"));
+        putIfNotNull(summary, "output_audio_duration_ms", nested(assistant, "trace", "totals", "output_audio_duration_ms"));
+        putIfNotNull(summary, "server_delivery_from_first_audio_ms", nested(assistant, "trace", "totals", "server_delivery_from_first_audio_ms"));
+        putIfNotNull(summary, "server_send_complete_from_tts_request_ms", nested(assistant, "trace", "totals", "server_send_complete_from_tts_request_ms"));
+        putIfNotNull(summary, "tokens", nested(assistant, "trace", "totals", "tokens"));
         return summary;
     }
 
@@ -530,11 +555,13 @@ public class AgentChatHistoryController {
                 JsonUtils.toJsonString(latencyTurns).getBytes(StandardCharsets.UTF_8));
         addZipEntry(zip, base + "summary.csv",
                 buildLatencyCsv(latencyMessages).getBytes(StandardCharsets.UTF_8));
+        addZipEntry(zip, base + "trace.csv",
+                buildTraceCsv(latencyMessages).getBytes(StandardCharsets.UTF_8));
     }
 
     private String buildLatencyCsv(List<Map<String, Object>> messages) {
         StringBuilder csv = new StringBuilder();
-        csv.append("session_id,turn_id,message_index,role,created_at,input_audio_duration_ms,vad_inference_total_ms,vad_segment_ms,asr_first_text_ms,asr_tail_latency_ms,voiceprint_total_ms,llm_first_chunk_ms,llm_total_ms,tts_first_audio_ms,tts_generation_ms,prompt_tokens,completion_tokens,total_tokens,token_source\n");
+        csv.append("session_id,turn_id,message_index,role,created_at,input_audio_duration_ms,vad_inference_ms,vad_speech_segment_ms,asr_first_text_from_speech_ms,asr_tail_after_audio_ms,voiceprint_ms,model_tool_chain_ms,llm_call_count,llm_model_ms,tool_call_count,tool_ms,tts_request_to_first_audio_ms,tts_provider_generation_ms,tts_report_ready_ms,output_audio_duration_ms,server_delivery_from_first_audio_ms,server_send_complete_from_tts_request_ms,prompt_tokens,completion_tokens,total_tokens,token_source\n");
         for (Map<String, Object> message : messages) {
             Map<String, Object> metrics = message.get("raw_metrics") instanceof Map<?, ?> map
                     ? toStringKeyMap(map)
@@ -547,22 +574,83 @@ public class AgentChatHistoryController {
                     .append(csv(message.get("message_index"))).append(',')
                     .append(csv(message.get("role"))).append(',')
                     .append(csv(message.get("created_at"))).append(',')
-                    .append(csv(userMetrics ? nested(metrics, "input", "estimated_audio_duration_ms") : null)).append(',')
-                    .append(csv(userMetrics ? nested(metrics, "latency_ms", "vad", "inference_total_ms") : null)).append(',')
-                    .append(csv(userMetrics ? nested(metrics, "latency_ms", "vad", "segment_ms") : null)).append(',')
-                    .append(csv(userMetrics ? nested(metrics, "latency_ms", "asr", "first_text_ms") : null)).append(',')
-                    .append(csv(userMetrics ? nested(metrics, "latency_ms", "asr", "tail_latency_ms") : null)).append(',')
-                    .append(csv(userMetrics ? nested(metrics, "latency_ms", "voiceprint", "total_ms") : null)).append(',')
-                    .append(csv(assistantMetrics ? nested(metrics, "latency_ms", "llm", "first_chunk_ms") : null)).append(',')
-                    .append(csv(assistantMetrics ? nested(metrics, "latency_ms", "llm", "total_ms") : null)).append(',')
-                    .append(csv(assistantMetrics ? nested(metrics, "latency_ms", "tts", "first_audio_ms") : null)).append(',')
-                    .append(csv(assistantMetrics ? nested(metrics, "latency_ms", "tts", "total_ms") : null)).append(',')
-                    .append(csv(assistantMetrics ? nested(metrics, "tokens", "prompt_tokens") : null)).append(',')
-                    .append(csv(assistantMetrics ? nested(metrics, "tokens", "completion_tokens") : null)).append(',')
-                    .append(csv(assistantMetrics ? nested(metrics, "tokens", "total_tokens") : null)).append(',')
-                    .append(csv(assistantMetrics ? nested(metrics, "tokens", "source") : null)).append('\n');
+                    .append(csv(userMetrics ? nested(metrics, "input", "audio_duration_ms") : null)).append(',')
+                    .append(csv(userMetrics ? nested(metrics, "stages", "vad", "inference_ms") : null)).append(',')
+                    .append(csv(userMetrics ? nested(metrics, "stages", "vad", "speech_segment_ms") : null)).append(',')
+                    .append(csv(userMetrics ? nested(metrics, "stages", "asr", "first_text_from_speech_ms") : null)).append(',')
+                    .append(csv(userMetrics ? nested(metrics, "stages", "asr", "tail_after_audio_ms") : null)).append(',')
+                    .append(csv(userMetrics ? nested(metrics, "stages", "voiceprint", "total_ms") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "trace", "totals", "model_tool_chain_ms") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "trace", "totals", "llm_call_count") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "trace", "totals", "llm_model_ms") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "trace", "totals", "tool_call_count") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "trace", "totals", "tool_ms") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "trace", "totals", "tts_request_to_first_audio_ms") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "trace", "totals", "tts_provider_generation_ms") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "trace", "totals", "tts_report_ready_ms") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "trace", "totals", "output_audio_duration_ms") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "trace", "totals", "server_delivery_from_first_audio_ms") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "trace", "totals", "server_send_complete_from_tts_request_ms") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "trace", "totals", "tokens", "prompt_tokens") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "trace", "totals", "tokens", "completion_tokens") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "trace", "totals", "tokens", "total_tokens") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "trace", "totals", "tokens", "source") : null)).append('\n');
         }
         return csv.toString();
+    }
+
+    private String buildTraceCsv(List<Map<String, Object>> messages) {
+        StringBuilder csv = new StringBuilder();
+        csv.append("session_id,turn_id,message_index,sequence,type,call_index,depth,name,action,success,tools_enabled,first_chunk_ms,total_ms,tool_call,tool_count,request_to_first_audio_ms,provider_generation_ms,report_ready_ms,audio_duration_ms,boundary,from_first_audio_ms,from_tts_request_ms,device_playback_confirmed,prompt_tokens,completion_tokens,total_tokens,token_source\n");
+        for (Map<String, Object> message : messages) {
+            Map<String, Object> metrics = message.get("raw_metrics") instanceof Map<?, ?> map
+                    ? toStringKeyMap(map)
+                    : Map.of();
+            for (Map<String, Object> step : traceSteps(metrics)) {
+                csv.append(csv(message.get("session_id"))).append(',')
+                        .append(csv(message.get("turn_id"))).append(',')
+                        .append(csv(message.get("message_index"))).append(',')
+                        .append(csv(step.get("sequence"))).append(',')
+                        .append(csv(step.get("type"))).append(',')
+                        .append(csv(step.get("call_index"))).append(',')
+                        .append(csv(step.get("depth"))).append(',')
+                        .append(csv(step.get("name"))).append(',')
+                        .append(csv(step.get("action"))).append(',')
+                        .append(csv(step.get("success"))).append(',')
+                        .append(csv(step.get("tools_enabled"))).append(',')
+                        .append(csv(step.get("first_chunk_ms"))).append(',')
+                        .append(csv(step.get("total_ms"))).append(',')
+                        .append(csv(step.get("tool_call"))).append(',')
+                        .append(csv(step.get("tool_count"))).append(',')
+                        .append(csv(step.get("request_to_first_audio_ms"))).append(',')
+                        .append(csv(step.get("provider_generation_ms"))).append(',')
+                        .append(csv(step.get("report_ready_ms"))).append(',')
+                        .append(csv(step.get("audio_duration_ms"))).append(',')
+                        .append(csv(step.get("boundary"))).append(',')
+                        .append(csv(step.get("from_first_audio_ms"))).append(',')
+                        .append(csv(step.get("from_tts_request_ms"))).append(',')
+                        .append(csv(step.get("device_playback_confirmed"))).append(',')
+                        .append(csv(nested(step, "tokens", "prompt_tokens"))).append(',')
+                        .append(csv(nested(step, "tokens", "completion_tokens"))).append(',')
+                        .append(csv(nested(step, "tokens", "total_tokens"))).append(',')
+                        .append(csv(nested(step, "tokens", "source"))).append('\n');
+            }
+        }
+        return csv.toString();
+    }
+
+    private List<Map<String, Object>> traceSteps(Map<String, Object> metrics) {
+        Object value = nested(metrics, "trace", "steps");
+        if (!(value instanceof List<?> list)) {
+            return List.of();
+        }
+        List<Map<String, Object>> steps = new ArrayList<>();
+        for (Object item : list) {
+            if (item instanceof Map<?, ?> map) {
+                steps.add(toStringKeyMap(map));
+            }
+        }
+        return steps;
     }
 
     private String csv(Object value) {
@@ -721,12 +809,13 @@ public class AgentChatHistoryController {
 
                 history.txt: 便于阅读的聊天文本，包含声纹识别摘要和音频文件路径。
                 metadata.json: 结构化原始数据，包含原始 content、声纹识别结果、音频时长、相邻消息间隔和 metrics。
-                latency/<session_id>/messages.json: 按消息导出的完整链路指标。
-                latency/<session_id>/turns.json: 按 turn_id 聚合的用户输入、LLM、TTS 和 token 指标。
-                latency/<session_id>/summary.csv: 可直接导入表格的延时摘要。
+                latency/<session_id>/messages.json: 按消息导出的 schema_version=2 完整指标。
+                latency/<session_id>/turns.json: 按 turn_id 聚合的输入阶段和 trace.steps 调用链。
+                latency/<session_id>/summary.csv: 每轮聚合延时，区分模型纯调用、工具链、TTS 首包和厂商生成。
+                latency/<session_id>/trace.csv: 每一步 LLM、工具和 TTS 调用单独一行，保留 depth 和调用序号。
                 audio/: 用户与智能体消息对应的 WAV 音频文件；只有历史记录中存在 audio_id 的消息才会导出。
 
-                注意：旧聊天记录没有 metrics_json 时，只能看到消息时间、相邻消息间隔和音频时长；新上报记录会包含 VAD、ASR、声纹、LLM、TTS 和 token 链路。
+                注意：延时分析只认 schema_version=2 的 stages、trace.steps 和 trace.totals；旧指标结构不再兼容。
                 """;
     }
 

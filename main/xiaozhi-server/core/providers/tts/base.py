@@ -129,11 +129,23 @@ class TTSProviderBase(ABC):
             f"tts-{datetime.now().date()}@{uuid.uuid4().hex}{extension}",
         )
 
+    def _record_turn_metric(self, method_name, *args):
+        metrics = getattr(getattr(self, "conn", None), "turn_metrics", None)
+        method = getattr(metrics, method_name, None)
+        if method is None:
+            return
+        try:
+            method(*args)
+        except Exception as exc:
+            logger.bind(tag=TAG).debug(
+                f"记录TTS链路指标失败: method={method_name}, error={type(exc).__name__}"
+            )
+
     def handle_opus(self, opus_data: bytes):
         logger.bind(tag=TAG).debug(f"推送数据到队列里面帧数～～ {len(opus_data)}")
         try:
             if self.conn is not None:
-                self.conn.turn_metrics.record_tts_audio_frame(len(opus_data))
+                self._record_turn_metric("record_tts_audio_frame", len(opus_data))
         except Exception as e:
             logger.bind(tag=TAG).debug(f"记录TTS音频指标失败: {e}")
         self.tts_audio_queue.put((
@@ -150,7 +162,9 @@ class TTSProviderBase(ABC):
     def to_tts_stream(self, text, opus_handler: Callable[[bytes], None] = None) -> None:
         try:
             if self.conn is not None:
-                self.conn.turn_metrics.record_tts_start(getattr(self, 'current_sentence_id', None))
+                self._record_turn_metric(
+                    "record_tts_start", getattr(self, 'current_sentence_id', None)
+                )
         except Exception as e:
             logger.bind(tag=TAG).debug(f"记录TTS开始指标失败: {e}")
         # 保留原始文本用于显示/上报
@@ -445,6 +459,7 @@ class TTSProviderBase(ABC):
                         )
                 if message.sentence_type == SentenceType.LAST:
                     self._process_remaining_text_stream(opus_handler=self.handle_opus)
+                    self._record_turn_metric("record_tts_generation_complete")
                     self.tts_audio_queue.put(
                         (message.sentence_type, [], message.content_detail, message.sentence_id)
                     )
@@ -486,7 +501,9 @@ class TTSProviderBase(ABC):
                     enqueue_text, enqueue_audio = None, []
                     continue
 
-                # 收到下一个文本开始或会话结束时进行上报
+                pending_report = None
+                # 收到下一个文本开始或会话结束时准备上报；LAST 的最终指标
+                # 必须等服务端音频发送队列排空后再构建。
                 if sentence_type is not SentenceType.MIDDLE:
                     if self.report_on_last:
                         # 累积模式：适用于全程只有一个语音流的TTS（如seed-tts-2.0）
@@ -494,23 +511,19 @@ class TTSProviderBase(ABC):
                         if text:
                             enqueue_text = text
                         if sentence_type == SentenceType.LAST:
-                            metrics = self.conn.turn_metrics.build_assistant_metrics(
-                                self.get_tts_text(sentence_id) or enqueue_text
+                            pending_report = (
+                                enqueue_text,
+                                list(enqueue_audio),
+                                True,
                             )
-                            enqueue_tts_report(self.conn, enqueue_text, enqueue_audio, metrics=metrics)
-                            enqueue_audio = []
-                            enqueue_text = None
                     else:
                         # 非累积模式：每个句子分别上报
                         if enqueue_text is not None:
-                            metrics = (
-                                self.conn.turn_metrics.build_assistant_metrics(
-                                    self.get_tts_text(sentence_id) or enqueue_text
-                                )
-                                if sentence_type == SentenceType.LAST
-                                else None
+                            pending_report = (
+                                enqueue_text,
+                                list(enqueue_audio),
+                                sentence_type == SentenceType.LAST,
                             )
-                            enqueue_tts_report(self.conn, enqueue_text, enqueue_audio, metrics=metrics)
                         enqueue_audio = []
                         enqueue_text = text
 
@@ -552,6 +565,28 @@ class TTSProviderBase(ABC):
                         logger.bind(tag=TAG).debug("会话取消，音频发送任务已终止")
                         continue
                     raise
+
+                if sentence_type == SentenceType.LAST:
+                    self._record_turn_metric("record_audio_delivery_complete")
+
+                if pending_report is not None:
+                    report_text, report_audio, final_report = pending_report
+                    metrics = (
+                        self.conn.turn_metrics.build_assistant_metrics(
+                            self.get_tts_text(sentence_id) or report_text
+                        )
+                        if final_report
+                        else None
+                    )
+                    enqueue_tts_report(
+                        self.conn,
+                        report_text,
+                        report_audio,
+                        metrics=metrics,
+                    )
+                    if self.report_on_last and final_report:
+                        enqueue_audio = []
+                        enqueue_text = None
 
                 # 记录输出和报告
                 if self.conn.max_output_size > 0 and text:

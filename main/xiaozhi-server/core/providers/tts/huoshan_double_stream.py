@@ -508,6 +508,9 @@ class TTSProvider(TTSProviderBase):
                 elif ContentType.TEXT == message.content_type:
                     if message.content_detail:
                         try:
+                            self._record_turn_metric(
+                                "record_tts_start", message.sentence_id
+                            )
                             logger.bind(tag=TAG).debug(
                                 f"开始发送TTS文本: {message.content_detail}"
                             )
@@ -771,6 +774,7 @@ class TTSProvider(TTSProviderBase):
                     elif res.optional.event == EVENT_SessionFinished:
                         logger.bind(tag=TAG).debug(f"会话结束～～")
                         self._flush_opus_audio_stream()
+                        self._record_turn_metric("record_tts_generation_complete")
                         self.activate_session = False
                         self._process_before_stop_play_files()
                         if self._session_finished_event is not None:

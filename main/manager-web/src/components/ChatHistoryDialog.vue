@@ -114,6 +114,14 @@
                                   {{ item.label }} {{ item.value }}
                                 </span>
                               </div>
+                              <details v-if="message.metricsTrace && message.metricsTrace.length" class="metrics-trace">
+                                <summary>延时链路 · {{ message.metricsTrace.length }} 步</summary>
+                                <div v-for="step in message.metricsTrace" :key="step.sequence" class="metrics-trace-step">
+                                  <span class="metrics-trace-index">{{ step.sequence }}</span>
+                                  <span class="metrics-trace-label">{{ step.label }}</span>
+                                  <span class="metrics-trace-detail">{{ step.detail }}</span>
+                                </div>
+                              </details>
                             </div>
                             <el-button class="message-delete" type="text" icon="el-icon-delete"
                                 @click="deleteMessage(message)"></el-button>
@@ -309,6 +317,7 @@ export default {
                 parsedContent: parsed.content,
                 metrics,
                 metricsSummary: this.buildMetricsSummary(metrics, message.chatType),
+                metricsTrace: this.buildMetricsTrace(metrics),
                 speakerName: parsed.speakerName,
                 speakerId: parsed.speakerId,
                 speakerScore: parsed.speakerScore,
@@ -342,22 +351,31 @@ export default {
             };
 
             if (chatType === 1) {
-                add('音频', this.getNested(metrics, ['input', 'estimated_audio_duration_ms']));
-                add('VAD', this.getNested(metrics, ['latency_ms', 'vad', 'inference_total_ms']));
-                add('ASR首段', this.getNested(metrics, ['latency_ms', 'asr', 'first_text_ms']));
-                add('ASR尾段', this.getNested(metrics, ['latency_ms', 'asr', 'tail_latency_ms']));
-                add('声纹', this.getNested(metrics, ['latency_ms', 'voiceprint', 'total_ms']));
+                add('音频', this.getNested(metrics, ['input', 'audio_duration_ms']));
+                add('VAD推理', this.getNested(metrics, ['stages', 'vad', 'inference_ms']));
+                add('ASR首字', this.getNested(metrics, ['stages', 'asr', 'first_text_from_speech_ms']));
+                add('ASR尾延时', this.getNested(metrics, ['stages', 'asr', 'tail_after_audio_ms']));
+                add('声纹', this.getNested(metrics, ['stages', 'voiceprint', 'total_ms']));
                 return items;
             }
 
-            add('LLM', this.getNested(metrics, ['latency_ms', 'llm', 'total_ms']));
-            add('TTS首包', this.getNested(metrics, ['latency_ms', 'tts', 'first_audio_ms']));
-            add('TTS生成', this.getNested(metrics, ['latency_ms', 'tts', 'total_ms']));
-            const tokenSource = this.getNested(metrics, ['tokens', 'source']);
+            const totals = this.getNested(metrics, ['trace', 'totals']) || {};
+            add('模型工具链', totals.model_tool_chain_ms);
+            if (totals.llm_call_count !== null && totals.llm_call_count !== undefined) {
+                items.push({ label: 'LLM', value: `${totals.llm_call_count}次/${totals.llm_model_ms || 0}ms` });
+            }
+            if (totals.tool_call_count) {
+                items.push({ label: '工具', value: `${totals.tool_call_count}次/${totals.tool_ms || 0}ms` });
+            }
+            add('TTS首包', totals.tts_request_to_first_audio_ms);
+            add('TTS厂商生成', totals.tts_provider_generation_ms);
+            add('音频时长', totals.output_audio_duration_ms);
+            add('服务端发送完成', totals.server_send_complete_from_tts_request_ms);
+            const tokenSource = this.getNested(totals, ['tokens', 'source']);
             const tokenSuffix = tokenSource && String(tokenSource).startsWith('estimated') ? '估' : '';
-            const promptTokens = this.getNested(metrics, ['tokens', 'prompt_tokens']);
-            const completionTokens = this.getNested(metrics, ['tokens', 'completion_tokens']);
-            const totalTokens = this.getNested(metrics, ['tokens', 'total_tokens']);
+            const promptTokens = this.getNested(totals, ['tokens', 'prompt_tokens']);
+            const completionTokens = this.getNested(totals, ['tokens', 'completion_tokens']);
+            const totalTokens = this.getNested(totals, ['tokens', 'total_tokens']);
             if (promptTokens !== null && promptTokens !== undefined && promptTokens !== '') {
                 items.push({ label: 'Token入', value: `${promptTokens}${tokenSuffix}` });
             }
@@ -368,6 +386,55 @@ export default {
                 items.push({ label: 'Token总', value: `${totalTokens}${tokenSuffix}` });
             }
             return items;
+        },
+        buildMetricsTrace(metrics) {
+            const steps = this.getNested(metrics, ['trace', 'steps']);
+            if (!Array.isArray(steps)) {
+                return [];
+            }
+            return steps.map((step) => {
+                if (step.type === 'llm') {
+                    const details = [
+                        `首字 ${this.metricValue(step.first_chunk_ms)}ms`,
+                        `总计 ${this.metricValue(step.total_ms)}ms`,
+                        step.tool_call ? `调用工具 ${step.tool_count || 0}个` : '直接回答'
+                    ];
+                    return {
+                        sequence: step.sequence,
+                        label: `LLM #${step.call_index} · depth ${step.depth}`,
+                        detail: details.join(' · ')
+                    };
+                }
+                if (step.type === 'tool') {
+                    return {
+                        sequence: step.sequence,
+                        label: `工具 #${step.call_index} · ${step.name || 'unknown'}`,
+                        detail: `${this.metricValue(step.total_ms)}ms · ${step.action || (step.success ? 'SUCCESS' : 'ERROR')}`
+                    };
+                }
+                if (step.type === 'tts') {
+                    return {
+                        sequence: step.sequence,
+                        label: 'TTS',
+                        detail: `首包 ${this.metricValue(step.request_to_first_audio_ms)}ms · 厂商生成 ${this.metricValue(step.provider_generation_ms)}ms · 音频 ${this.metricValue(step.audio_duration_ms)}ms · 上报就绪 ${this.metricValue(step.report_ready_ms)}ms`
+                    };
+                }
+                if (step.type === 'audio_delivery') {
+                    return {
+                        sequence: step.sequence,
+                        label: '音频发送',
+                        detail: `首音频后 ${this.metricValue(step.from_first_audio_ms)}ms · TTS请求后 ${this.metricValue(step.from_tts_request_ms)}ms · 边界：服务端WebSocket发送完成 · 不代表设备扬声器播放完成`
+                    };
+                }
+                return {
+                    sequence: step.sequence,
+                    label: step.type || 'unknown',
+                    detail: JSON.stringify(step)
+                };
+            });
+        },
+        metricValue(value) {
+            return value === null || value === undefined || value === '' ? '-' : value;
         },
         getNested(value, keys) {
             return keys.reduce((current, key) => {
@@ -933,6 +1000,43 @@ export default {
 
 .user-message .metrics-strip span {
     background: #f2f6fc;
+}
+
+.metrics-trace {
+    margin: 6px 10px 0;
+    padding: 4px 7px;
+    border: 1px solid #e4e7ed;
+    border-radius: 5px;
+    color: #606266;
+    font-size: 11px;
+    background: #fafafa;
+}
+
+.metrics-trace summary {
+    cursor: pointer;
+    user-select: none;
+}
+
+.metrics-trace-step {
+    display: grid;
+    grid-template-columns: 20px minmax(120px, auto) 1fr;
+    gap: 6px;
+    align-items: baseline;
+    padding: 3px 0;
+    border-top: 1px dashed #ebeef5;
+}
+
+.metrics-trace-index {
+    color: #909399;
+}
+
+.metrics-trace-label {
+    color: #303133;
+    font-weight: 500;
+}
+
+.metrics-trace-detail {
+    color: #606266;
 }
 
 .content-wrapper {
