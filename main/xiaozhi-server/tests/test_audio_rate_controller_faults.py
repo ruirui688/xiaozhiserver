@@ -190,6 +190,53 @@ def test_first_audio_sets_speaking_and_preserves_protocol_order(monkeypatch):
     asyncio.run(scenario())
 
 
+def test_duplicate_first_and_last_emit_single_tts_start_and_stop(monkeypatch):
+    async def scenario():
+        states = []
+        audio_calls = 0
+
+        async def fake_send_tts_message(_conn, state, _text=None):
+            states.append(state)
+
+        async def fake_send_audio(_conn, _audios, frame_duration=60):
+            nonlocal audio_calls
+            audio_calls += 1
+
+        conn = SimpleNamespace(
+            client_is_speaking=False,
+            config={},
+            logger=FakeLogger(),
+            tts=SimpleNamespace(tts_audio_first_sentence=True),
+            sentence_id="turn-1",
+            calling=False,
+            close_after_chat=False,
+            _tts_started_at=0,
+            _tts_protocol_sentence_id=None,
+            _tts_protocol_start_sent=False,
+            _tts_protocol_stop_sent=False,
+        )
+        monkeypatch.setattr(sendAudioHandle, "send_tts_message", fake_send_tts_message)
+        monkeypatch.setattr(sendAudioHandle, "sendAudio", fake_send_audio)
+
+        await sendAudioHandle.sendAudioMessage(
+            conn, SentenceType.FIRST, b"opus-1", "长回复", "turn-1"
+        )
+        await sendAudioHandle.sendAudioMessage(
+            conn, SentenceType.FIRST, b"opus-2", "长回复", "turn-1"
+        )
+        await sendAudioHandle.sendAudioMessage(
+            conn, SentenceType.LAST, [], None, "turn-1"
+        )
+        await sendAudioHandle.sendAudioMessage(
+            conn, SentenceType.LAST, [], None, "turn-1"
+        )
+
+        assert states == ["start", "sentence_start", "stop"]
+        assert audio_calls == 4
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize(
     ("features", "expected_close_calls", "expected_reset_calls"),
     [

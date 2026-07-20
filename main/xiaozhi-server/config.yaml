@@ -794,11 +794,12 @@ TTS:
     speech_rate: 0
     loudness_rate: 0
     pitch: 0
-    # WebSocket 建连、会话事件、会话内下行和单次发送的超时预算（秒）
-    connection_timeout_seconds: 5
-    session_timeout_seconds: 5
-    response_timeout_seconds: 5
-    send_timeout_seconds: 3
+    # WebSocket 建连、会话启动/结束、会话内下行和单次发送的超时预算（秒）
+    connection_timeout_seconds: 10
+    session_start_timeout_seconds: 10
+    session_finish_timeout_seconds: 30
+    response_timeout_seconds: 15
+    send_timeout_seconds: 5
     # 服务端向设备发送单批音频时的等待上限（秒）
     audio_send_timeout_seconds: 5
 
@@ -812,8 +813,9 @@ TTS:
     speech_rate: 0
     loudness_rate: 0
     pitch: 0
-    connection_timeout_seconds: 5
-    session_timeout_seconds: 5
-    response_timeout_seconds: 5
-    send_timeout_seconds: 3
+    connection_timeout_seconds: 10
+    session_start_timeout_seconds: 10
+    session_finish_timeout_seconds: 30
+    response_timeout_seconds: 15
+    send_timeout_seconds: 5
     audio_send_timeout_seconds: 5

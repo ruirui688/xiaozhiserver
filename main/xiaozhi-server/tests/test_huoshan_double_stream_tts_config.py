@@ -153,16 +153,19 @@ def test_doubao_tts_resets_opus_encoder_after_aborted_session():
 def test_doubao_tts_timeout_configuration_defaults_and_overrides():
     provider = TTSProvider(_base_config(), True)
 
-    assert provider.connection_timeout_seconds == 5
-    assert provider.session_timeout_seconds == 5
-    assert provider.response_timeout_seconds == 5
-    assert provider.send_timeout_seconds == 3
+    assert provider.connection_timeout_seconds == 10
+    assert provider.session_start_timeout_seconds == 10
+    assert provider.session_finish_timeout_seconds == 30
+    assert provider.session_timeout_seconds == 10
+    assert provider.response_timeout_seconds == 15
+    assert provider.send_timeout_seconds == 5
     assert provider.audio_send_timeout_seconds == 5
 
     configured = TTSProvider(
         _base_config(
             connection_timeout_seconds="0.1",
-            session_timeout_seconds="0.2",
+            session_start_timeout_seconds="0.2",
+            session_finish_timeout_seconds="0.6",
             response_timeout_seconds="0.3",
             send_timeout_seconds="0.4",
             audio_send_timeout_seconds="0.5",
@@ -171,10 +174,19 @@ def test_doubao_tts_timeout_configuration_defaults_and_overrides():
     )
 
     assert configured.connection_timeout_seconds == 0.1
+    assert configured.session_start_timeout_seconds == 0.2
+    assert configured.session_finish_timeout_seconds == 0.6
     assert configured.session_timeout_seconds == 0.2
     assert configured.response_timeout_seconds == 0.3
     assert configured.send_timeout_seconds == 0.4
     assert configured.audio_send_timeout_seconds == 0.5
+
+
+def test_legacy_short_session_timeout_keeps_start_budget_but_not_finish_budget():
+    provider = TTSProvider(_base_config(session_timeout_seconds="0.2"), True)
+
+    assert provider.session_start_timeout_seconds == 0.2
+    assert provider.session_finish_timeout_seconds == 30
 
 
 def test_last_audio_message_wait_budget_includes_queue_drain_timeout():
@@ -200,6 +212,8 @@ def test_last_audio_message_wait_budget_includes_queue_drain_timeout():
     [
         ("connection_timeout_seconds", 0),
         ("session_timeout_seconds", -1),
+        ("session_start_timeout_seconds", 0),
+        ("session_finish_timeout_seconds", "invalid"),
         ("response_timeout_seconds", "invalid"),
         ("send_timeout_seconds", float("inf")),
         ("audio_send_timeout_seconds", None),
@@ -250,7 +264,8 @@ def _tts_response(event, session_id=None):
 def _fault_provider(**overrides):
     config = {
         "connection_timeout_seconds": 0.04,
-        "session_timeout_seconds": 0.04,
+        "session_start_timeout_seconds": 0.04,
+        "session_finish_timeout_seconds": 0.04,
         "response_timeout_seconds": 0.04,
         "send_timeout_seconds": 0.04,
         "audio_send_timeout_seconds": 0.04,
@@ -265,6 +280,39 @@ def _fault_provider(**overrides):
     provider.opus_encoder = SimpleNamespace(reset_state=lambda: None)
     provider.parser_response = lambda response: response
     return provider
+
+
+def test_tts_failure_finalizer_enqueues_last_exactly_once_after_first():
+    provider = _fault_provider()
+    provider._prepare_session_audio_state("session-1")
+    assert provider._enqueue_session_first_once("session-1", "长回复") is True
+    provider.before_stop_play_files.append((b"file-opus", "背景音乐"))
+
+    assert provider._finalize_session_audio_once(
+        "session-1", normal=False, reason="test_timeout"
+    ) is True
+    assert provider._finalize_session_audio_once(
+        "session-1", normal=True, reason="late_session_finished"
+    ) is False
+
+    items = [provider.tts_audio_queue.get_nowait() for _ in range(3)]
+    assert [item[0] for item in items] == [
+        SentenceType.FIRST,
+        SentenceType.MIDDLE,
+        SentenceType.LAST,
+    ]
+    assert all(item[3] == "session-1" for item in items)
+    assert provider.tts_audio_queue.empty()
+
+
+def test_tts_failure_finalizer_does_not_publish_last_without_audio_start():
+    provider = _fault_provider()
+    provider._prepare_session_audio_state("session-1")
+
+    assert provider._finalize_session_audio_once(
+        "session-1", normal=False, reason="start_failed"
+    ) is False
+    assert provider.tts_audio_queue.empty()
 
 
 async def _heartbeat(duration=0.08, interval=0.005):
@@ -326,6 +374,18 @@ def test_tts_finish_half_open_cleans_state_and_next_session_recovers(monkeypatch
         [
             _tts_response(huoshan_double_stream.EVENT_ConnectionStarted),
             _tts_response(huoshan_double_stream.EVENT_SessionStarted, "session-1"),
+            SimpleNamespace(
+                header=SimpleNamespace(
+                    message_type=huoshan_double_stream.AUDIO_ONLY_RESPONSE
+                ),
+                optional=SimpleNamespace(
+                    event=huoshan_double_stream.EVENT_TTSResponse,
+                    sessionId="session-1",
+                    response_meta_json=None,
+                    errorCode=0,
+                ),
+                payload=b"pcm",
+            ),
         ]
     )
     second = FakeTTSWebSocket(
@@ -342,6 +402,12 @@ def test_tts_finish_half_open_cleans_state_and_next_session_recovers(monkeypatch
 
     monkeypatch.setattr(huoshan_double_stream.websockets, "connect", fake_connect)
     provider = _fault_provider()
+    provider.store_tts_text("session-1", "这是一段很长的回复")
+    provider.wav_to_opus_data_audio_raw_stream = (
+        lambda _payload, is_end=False, callback=None: callback(b"opus")
+        if callback and not is_end
+        else None
+    )
 
     async def scenario():
         await provider.start_session("session-1")
@@ -357,6 +423,15 @@ def test_tts_finish_half_open_cleans_state_and_next_session_recovers(monkeypatch
         assert first.closed is True
         assert provider.ws is None
         assert provider.activate_session is False
+        audio_items = [provider.tts_audio_queue.get_nowait() for _ in range(3)]
+        assert [item[0] for item in audio_items] == [
+            SentenceType.FIRST,
+            SentenceType.MIDDLE,
+            SentenceType.LAST,
+        ]
+        assert sum(
+            item[0] == SentenceType.LAST for item in audio_items
+        ) == 1
 
         provider.conn.sentence_id = "session-2"
         await provider.start_session("session-2")

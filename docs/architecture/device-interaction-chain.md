@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: xiaozhi-server
-last_verified: 2026-07-14
+last_verified: 2026-07-20
 source_paths:
   - main/xiaozhi-server/core
 ---
@@ -209,7 +209,11 @@ providers/tts/base.py:375-416  tts_text_priority_thread（守护线程）
     - Opus 编码 → run_coroutine_threadsafe → WebSocket 发送
 ```
 
-SeedTTS2 双流 provider 在 `EVENT_SessionFinished` 后先用 `is_end=True` 冲刷不足 60ms 的 PCM 尾帧，再发布 `SentenceType.LAST`。取消、失败或异常断链时调用 `OpusEncoderUtils.reset_state()`，防止上一轮残留样本进入下一轮。真实连续 5 会话的 PCM/Opus 均可解码，修复后每轮编码缓冲均为 0。
+SeedTTS2 双流 provider 为每个 `sentence_id` 维护独立的 `FIRST/LAST` 音频边界状态。正常收到 `EVENT_SessionFinished` 时先用 `is_end=True` 冲刷不足 60ms 的 PCM 尾帧；结束等待超时、下行空闲超时、WebSocket 断开、`EVENT_SessionFailed` 或监听任务异常退出时丢弃不完整 PCM 尾帧。只要本轮已经发布 `FIRST`，所有这些路径都会通过同一幂等收尾函数发布且只发布一次 `SentenceType.LAST`；迟到的结束事件不得重复产生 `LAST`，非当前会话的残余事件不得重置当前活跃会话。
+
+设备控制协议在连接级额外记录当前 `sentence_id` 的 `tts start/stop` 发送状态，同一轮重复的 `FIRST/LAST` 不得形成第二个 `start/stop`。因此 provider 异常不能再让设备永久停留在 `speaking`。用户主动 abort 仍由打断链路直接发送 `tts stop`，provider 异常收尾检测到 abort 后不重复发送。
+
+SeedTTS2 超时按阶段拆分：建连默认 10 秒、会话启动默认 10 秒、会话结束默认 30 秒、会话内连续无下行默认 15 秒、单次事件发送默认 5 秒。旧 `session_timeout_seconds` 仅兼容映射启动预算；结束预算最低保持 30 秒。线程侧等待预算必须覆盖对应协程阶段，不能由更短的外层 `tts_timeout` 提前取消健康长语音。
 
 ### 4.3 流控
 

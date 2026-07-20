@@ -257,6 +257,11 @@ class ConnectionHandler:
 
         # tts相关变量
         self.sentence_id = None
+        # 设备 TTS 控制协议的轮次状态，用于抑制同一轮重复 start/stop。
+        # 具体 provider 负责生成音频边界，连接只维护跨 provider 的协议事实。
+        self._tts_protocol_sentence_id = None
+        self._tts_protocol_start_sent = False
+        self._tts_protocol_stop_sent = False
         # 处理TTS响应没有文本返回
         self.tts_MessageText = ""
 

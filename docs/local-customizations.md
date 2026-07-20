@@ -428,8 +428,8 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 ## 25. 真机语音链路低延迟、ASR 长尾与连接日志安全
 
 ```text
-定制模块：xiaozhi-server 豆包录音 ASR、唤醒首轮收音、WebSocket 请求头日志、运行时设备注册表
-改动原因：2026-07-11 ESP32 真机与腾讯云日志联调确认，正常轮 ASR 到 LLM 请求约 121.5ms、LLM 首响应约 114.6ms、ASR 到整句 TTS 音频生成约 1.321s；实际严重卡顿来自豆包录音 ASR 约 60 秒查询超时、约 15 秒 HTTPS 读超时，以及唤醒后固定丢弃 2 秒上行音频和默认 2.4-2.7 秒欢迎语。豆包 provider 原先在 async 方法中调用 requests.post 和 time.sleep，会阻塞事件循环并放大音频队列积压。连接日志还可能输出原始 Authorization，旧连接晚注销也必须保证不能删除重连后新对象的注册映射。
+定制模块：xiaozhi-server 豆包录音 ASR、SeedTTS2 会话收尾、唤醒首轮收音、WebSocket 请求头日志、运行时设备注册表
+改动原因：2026-07-11 ESP32 真机与腾讯云日志联调确认，正常轮 ASR 到 LLM 请求约 121.5ms、LLM 首响应约 114.6ms、ASR 到整句 TTS 音频生成约 1.321s；实际严重卡顿来自豆包录音 ASR 约 60 秒查询超时、约 15 秒 HTTPS 读超时，以及唤醒后固定丢弃 2 秒上行音频和默认 2.4-2.7 秒欢迎语。豆包 provider 原先在 async 方法中调用 requests.post 和 time.sleep，会阻塞事件循环并放大音频队列积压。2026-07-20 又确认 SeedTTS2 长回复在 `FinishSession` 后 5 秒内未收到结束事件时，异常分支会跳过 `SentenceType.LAST`，设备因收不到 `tts stop` 永久停在 speaking。连接日志还可能输出原始 Authorization，旧连接晚注销也必须保证不能删除重连后新对象的注册映射。
 关键行为：
   - 豆包录音 ASR 使用 aiohttp 异步提交/查询；http_timeout_seconds 默认10秒、query_interval_seconds 默认0.2秒、query_timeout_seconds 默认15秒。
   - 豆包流式 ASR 自动/实时模式由本地 Silero VAD 判停：发送当前静音尾帧后只发送一次 LAST，并继续等待最终 definite 结果。
@@ -441,6 +441,9 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - 唤醒词缓存仅在开关开启且文本命中后等待TTS，普通文本不再被额外阻塞最多3秒。
   - 唤醒词聊天记录保留设备实际检测文本，不再用内部的“嘿，你好呀”替代；缓存欢迎音成功播放后必须上报实际助手文本和音频，保证后台按 user -> assistant 显示完整唤醒交互。
   - SeedTTS2 正常结束必须冲刷不足60ms的Opus尾帧，取消、失败或异常断链必须重置编码器，禁止残留样本跨会话。
+  - SeedTTS2 按 sentence_id 维护 FIRST/LAST 状态；正常结束、结束超时、下行超时、WebSocket 断开、SessionFailed 和监听异常都必须走同一幂等收尾。只要已经发布 FIRST，就必须最终发布且只发布一次 LAST；迟到事件不能重复 LAST，残余旧会话事件不能重置当前会话。
+  - 设备 TTS 协议层同一 sentence_id 的 start/stop 最多发送一次；主动 abort 已直接发送 stop 时，provider 不得再次补发。
+  - SeedTTS2 默认使用10秒建连、10秒会话启动、30秒会话结束、15秒下行空闲和5秒单次发送预算；线程外层等待必须覆盖内层阶段预算，旧 session_timeout_seconds 不得把结束预算降到30秒以下。
   - 请求头日志按键名屏蔽 Authorization、Proxy-Authorization、Cookie、Set-Cookie、token、api-key、apikey、secret。
   - unregister_connection 只删除仍指向当前关闭对象的键，旧连接不能误删新连接。
 关键文件：
@@ -448,6 +451,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/xiaozhi-server/core/providers/asr/doubao_recording.py
   - main/xiaozhi-server/core/providers/asr/doubao_stream.py
   - main/xiaozhi-server/core/providers/tts/huoshan_double_stream.py
+  - main/xiaozhi-server/core/handle/sendAudioHandle.py
   - main/xiaozhi-server/core/handle/wakeupHandle.py
   - main/xiaozhi-server/core/handle/helloHandle.py
   - main/xiaozhi-server/core/handle/receiveAudioHandle.py
@@ -457,6 +461,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/xiaozhi-server/tests/test_doubao_recording_asr.py
   - main/xiaozhi-server/tests/test_doubao_stream_asr.py
   - main/xiaozhi-server/tests/test_huoshan_double_stream_tts_config.py
+  - main/xiaozhi-server/tests/test_audio_rate_controller_faults.py
   - main/xiaozhi-server/tests/test_wakeup_vad_ignore.py
   - main/xiaozhi-server/tests/test_connection_log_sanitization.py
   - main/xiaozhi-server/tests/test_device_runtime_registry.py
@@ -465,7 +470,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 是否允许被官方覆盖：否
 本次发布状态：只修改并验证源码；未构建镜像、未部署、未重启腾讯云生产服务。用户手动发布后才进行真实服务端回归。
 真实外部回归：豆包录音ASR 4/4、流式ASR修复前后5/5、SeedTTS2连续5会话、DeepSeek v4-pro/v4-flash原生与仓库provider均成功；当前provider完整ASR→LLM→TTS链路连续3/3成功，平均约3.753秒。真实凭据只用于进程内测试且未落盘；测试完成后应轮换在会话或截图中暴露过的凭据。
-官方同步时的处理规则：如果官方修改豆包录音/流式 ASR、SeedTTS2、唤醒词处理、欢迎语、连接日志或设备注册表，必须保留异步 HTTP 与总预算超时、流式 WebSocket 分阶段等待保护、本地 VAD 判停发送唯一 LAST、缓存首帧去重、短词识别和按会话身份清理、Opus尾帧冲刷、默认零毫秒首轮音频丢弃、欢迎语显式开启、唤醒词实际检测文本与实际播放回复双向上报、按请求头键名脱敏和对象身份注销校验。不得重新在 async provider 中引入 requests/time.sleep，不得把 Authorization、token、API key、Cookie 或 secret 写入日志；调整 ASR 超时、TTS编码边界和唤醒回声窗口时必须同步更新默认配置、专项测试、语音延迟文档，并在真实设备上验证首句不丢、短词可识别、无多句聚合、连续TTS无串音和重连映射稳定。
+官方同步时的处理规则：如果官方修改豆包录音/流式 ASR、SeedTTS2、TTS 音频发送、唤醒词处理、欢迎语、连接日志或设备注册表，必须保留异步 HTTP 与总预算超时、流式 WebSocket 分阶段等待保护、本地 VAD 判停发送唯一 LAST、缓存首帧去重、短词识别和按会话身份清理、SeedTTS2 任意非主动打断结束路径在已发 FIRST 后幂等补发唯一 LAST、连接级同轮 start/stop 去重、Opus尾帧冲刷、默认零毫秒首轮音频丢弃、欢迎语显式开启、唤醒词实际检测文本与实际播放回复双向上报、按请求头键名脱敏和对象身份注销校验。不得重新在 async provider 中引入 requests/time.sleep，不得让更短外层超时覆盖会话结束预算，不得把 Authorization、token、API key、Cookie 或 secret 写入日志；调整 ASR 超时、TTS编码边界和唤醒回声窗口时必须同步更新默认配置、专项测试、语音延迟文档，并在真实设备上验证首句不丢、短词可识别、长回复异常后设备恢复监听、无多句聚合、连续TTS无串音和重连映射稳定。
 ```
 
 ## 26. 外置声纹服务、智能体隔离与五条上限
