@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -14,10 +16,12 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.mockito.ArgumentCaptor;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
@@ -52,6 +56,7 @@ import xiaozhi.modules.memory.entity.MemoryForgetTombstoneEntity;
 import xiaozhi.modules.memory.service.impl.maintenance.MemoryMaintenanceOutputParser;
 import xiaozhi.modules.memory.service.impl.maintenance.MemorySpeakerConversationBuilder;
 import xiaozhi.modules.memory.service.MemorySettingsService;
+import xiaozhi.modules.memory.utils.MemoryHelper;
 import xiaozhi.modules.memory.vo.MemoryQueryVO;
 import xiaozhi.modules.memory.vo.MemoryRebuildResultVO;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
@@ -176,6 +181,192 @@ class MemoryServiceImplTest {
     }
 
     @Test
+    void clearThenRebuildRejectsNonAddActionBeforeClearingExistingFacts() {
+        MemoryFactEntity existing = activeFact("old-1", "用户的旧记忆");
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(existing));
+        String updateAction = """
+                {
+                  "actions": [
+                    {
+                      "action": "UPDATE",
+                      "related_memory_id": "old-1",
+                      "source_role": "user",
+                      "evidence_quote": "我的老板是钟文杰",
+                      "memory_type": "人物关系",
+                      "category": "工作关系",
+                      "canonical_text": "用户的老板是钟文杰",
+                      "confidence": 0.92,
+                      "importance": 0.86,
+                      "memory_tier": "long_term",
+                      "sensitivity": "normal",
+                      "reason": "错误地引用旧事实"
+                    }
+                  ]
+                }
+                """;
+        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID)))
+                .thenReturn(updateAction, updateAction);
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> memoryService.rebuildFromRecentChatHistory(
+                        AGENT_ID, rebuildRequest(false), "user", "tester"));
+
+        assertTrue(error.getMessage().contains("仅允许 ADD 或 NONE"));
+        assertEquals("active", existing.getStatus());
+        verify(transactionTemplate, never()).execute(any());
+        verify(factDao, never()).updateById(any());
+        verify(factDao, never()).insert(any());
+    }
+
+    @Test
+    void clearThenRebuildRejectsUnknownActionBeforeApplyingValidAdd() {
+        MemoryFactEntity existing = activeFact("old-1", "用户的旧记忆");
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(existing));
+        String mixedActions = """
+                {
+                  "actions": [
+                    {
+                      "action": "ADD",
+                      "source_role": "user",
+                      "evidence_quote": "我的老板是钟文杰",
+                      "canonical_text": "用户的老板是钟文杰"
+                    },
+                    {
+                      "action": "UPSERT",
+                      "source_role": "user",
+                      "evidence_quote": "我是高瑞瑞",
+                      "canonical_text": "用户是高瑞瑞"
+                    }
+                  ]
+                }
+                """;
+        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID)))
+                .thenReturn(mixedActions, mixedActions);
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> memoryService.rebuildFromRecentChatHistory(
+                        AGENT_ID, rebuildRequest(false), "user", "tester"));
+
+        assertTrue(error.getMessage().contains("UPSERT"));
+        assertEquals("active", existing.getStatus());
+        verify(transactionTemplate, never()).execute(any());
+        verify(factDao, never()).updateById(any());
+        verify(factDao, never()).insert(any());
+    }
+
+    @Test
+    void clearThenRebuildThrowsWhenValidatedAddCannotBeApplied() {
+        MemoryFactEntity existing = activeFact("old-1", "旧记忆");
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(existing));
+        when(memorySettingsService.activeContextMaxChars()).thenReturn(5);
+        doAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            TransactionCallback<Object> callback = invocation.getArgument(0);
+            try {
+                return callback.doInTransaction(mock(TransactionStatus.class));
+            } catch (RuntimeException e) {
+                existing.setStatus(MemoryHelper.STATUS_ACTIVE);
+                throw e;
+            }
+        }).when(transactionTemplate).execute(any());
+        String oversizedAdd = """
+                {
+                  "actions": [
+                    {
+                      "action": "ADD",
+                      "related_memory_id": "",
+                      "source_role": "user",
+                      "evidence_quote": "我的老板是钟文杰",
+                      "memory_type": "人物关系",
+                      "category": "工作关系",
+                      "canonical_text": "这是一条超过容量上限的记忆",
+                      "confidence": 0.92,
+                      "importance": 0.86,
+                      "memory_tier": "long_term",
+                      "sensitivity": "normal",
+                      "reason": "用户明确说明"
+                    }
+                  ]
+                }
+                """;
+        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID)))
+                .thenReturn(oversizedAdd, oversizedAdd);
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> memoryService.rebuildFromRecentChatHistory(
+                        AGENT_ID, rebuildRequest(false), "user", "tester"));
+
+        assertTrue(error.getMessage().contains("已回滚并保留事务开始前的记忆"));
+        assertEquals("active", existing.getStatus());
+        verify(transactionTemplate, times(1)).execute(any());
+        verify(factDao, never()).insert(any());
+    }
+
+    @Test
+    void clearThenRebuildRollsBackFirstAddWhenSecondAddFails() {
+        MemoryFactEntity existing = activeFact("old-1", "旧记忆");
+        List<MemoryFactEntity> persistedFacts = new ArrayList<>();
+        persistedFacts.add(existing);
+        List<Object> persistedRevisions = new ArrayList<>();
+        when(factDao.selectList(any(Wrapper.class))).thenAnswer(invocation -> persistedFacts.stream()
+                .filter(fact -> MemoryHelper.STATUS_ACTIVE.equals(fact.getStatus()))
+                .toList());
+        when(factDao.insert(any())).thenAnswer(invocation -> {
+            persistedFacts.add(invocation.getArgument(0));
+            return 1;
+        });
+        when(revisionDao.insert(any())).thenAnswer(invocation -> {
+            persistedRevisions.add(invocation.getArgument(0));
+            return 1;
+        });
+        when(memorySettingsService.activeContextMaxChars()).thenReturn(12);
+        doAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            TransactionCallback<Object> callback = invocation.getArgument(0);
+            try {
+                return callback.doInTransaction(mock(TransactionStatus.class));
+            } catch (RuntimeException e) {
+                persistedFacts.removeIf(fact -> fact != existing);
+                existing.setStatus(MemoryHelper.STATUS_ACTIVE);
+                persistedRevisions.clear();
+                throw e;
+            }
+        }).when(transactionTemplate).execute(any());
+        String twoAdds = """
+                {
+                  "actions": [
+                    {
+                      "action": "ADD",
+                      "source_role": "user",
+                      "evidence_quote": "我喜欢骑车",
+                      "canonical_text": "用户喜欢骑车"
+                    },
+                    {
+                      "action": "ADD",
+                      "source_role": "user",
+                      "evidence_quote": "我的老板是钟文杰",
+                      "canonical_text": "这是一条必然超过容量上限的第二条记忆"
+                    }
+                  ]
+                }
+                """;
+        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID)))
+                .thenReturn(twoAdds, twoAdds);
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> memoryService.rebuildFromRecentChatHistory(
+                        AGENT_ID, rebuildRequest(false), "user", "tester"));
+
+        assertTrue(error.getMessage().contains("已回滚并保留事务开始前的记忆"));
+        assertEquals(1, persistedFacts.size());
+        assertEquals(existing, persistedFacts.get(0));
+        assertEquals(MemoryHelper.STATUS_ACTIVE, existing.getStatus());
+        assertTrue(persistedRevisions.isEmpty());
+        verify(factDao, times(1)).insert(any());
+        verify(transactionTemplate, times(1)).execute(any());
+    }
+
+    @Test
     void clearThenRebuildAppliesLlmAddActionAsActiveFact() {
         MemoryFactEntity existing = activeFact("old-1", "用户的旧记忆");
         when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(existing));
@@ -216,6 +407,11 @@ class MemoryServiceImplTest {
         assertEquals(1, result.getActionsProposed());
         assertEquals(1, result.getFactsCleared());
         assertEquals(1, result.getFactsChanged());
+        assertEquals(1, result.getFactsAdded());
+
+        InOrder transactionOrder = inOrder(llmService, transactionTemplate);
+        transactionOrder.verify(llmService, times(2)).generateJson(any(), eq(MAINTENANCE_MODEL_ID));
+        transactionOrder.verify(transactionTemplate).execute(any());
 
         verify(factDao).updateById(existing);
         ArgumentCaptor<MemoryFactEntity> factCaptor = ArgumentCaptor.forClass(MemoryFactEntity.class);

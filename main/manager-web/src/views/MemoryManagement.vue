@@ -15,19 +15,29 @@
           :min="1"
           :max="50"
           :controls="false"
+          :disabled="maintenanceBusy"
           class="session-limit-input"
         />
-        <el-button size="small" icon="el-icon-view" :loading="rebuildLoading" @click="handleRebuildPreview">预览重建</el-button>
-        <el-button size="small" type="primary" icon="el-icon-magic-stick" :loading="rebuildLoading" @click="handleRebuild">重建记忆</el-button>
-        <el-button size="small" icon="el-icon-view" :loading="reviewLoading" @click="handleReviewPreview">预览重审</el-button>
-        <el-button size="small" type="primary" icon="el-icon-refresh" :loading="reviewLoading" @click="handleReview">重审记忆</el-button>
-        <el-button size="small" type="danger" icon="el-icon-delete" :loading="clearLoading" @click="handleClear">清空记忆</el-button>
+        <el-button size="small" icon="el-icon-view" :loading="rebuildLoading && maintenanceOperation === '预览重建'" :disabled="maintenanceBusy" @click="handleRebuildPreview">预览重建</el-button>
+        <el-button size="small" type="primary" icon="el-icon-magic-stick" :loading="rebuildLoading && maintenanceOperation === '重建记忆'" :disabled="maintenanceBusy" @click="handleRebuild">重建记忆</el-button>
+        <el-button size="small" icon="el-icon-view" :loading="reviewLoading && maintenanceOperation === '预览重审'" :disabled="maintenanceBusy" @click="handleReviewPreview">预览重审</el-button>
+        <el-button size="small" type="primary" icon="el-icon-refresh" :loading="reviewLoading && maintenanceOperation === '重审记忆'" :disabled="maintenanceBusy" @click="handleReview">重审记忆</el-button>
+        <el-button size="small" type="danger" icon="el-icon-delete" :loading="clearLoading" :disabled="maintenanceBusy" @click="handleClear">清空记忆</el-button>
         <el-button size="small" icon="el-icon-edit" @click="showRemember = !showRemember">记住</el-button>
         <el-button size="small" icon="el-icon-delete" @click="showForget = !showForget">忘记</el-button>
         <el-button size="small" icon="el-icon-refresh" @click="fetch" :loading="loading">刷新</el-button>
         <el-button size="small" icon="el-icon-back" @click="$router.push('/')">返回</el-button>
       </div>
     </div>
+
+    <el-alert
+      v-if="maintenanceBusy"
+      class="maintenance-alert"
+      :title="maintenanceStatusText"
+      :type="maintenanceRecoveryPending ? 'warning' : 'info'"
+      :closable="false"
+      show-icon
+    />
 
     <!-- Quick remember/forget panel -->
     <transition name="slide-down">
@@ -168,10 +178,12 @@
       :visible.sync="rebuildPreviewVisible"
       width="860px"
       append-to-body
+      :close-on-click-modal="!maintenanceBusy"
+      :close-on-press-escape="!maintenanceBusy"
     >
       <div class="rebuild-summary" v-if="rebuildPreviewResult">
         <el-tag size="mini" type="info">会话 {{ rebuildPreviewResult.sessionsRead || 0 }}</el-tag>
-        <el-tag size="mini" type="warning">动作 {{ previewCandidates.length }}</el-tag>
+        <el-tag size="mini" type="warning">动作 {{ previewActionsProposed }}</el-tag>
         <el-tag v-if="previewMode === 'rebuild'" size="mini">最近 {{ rebuildPreviewResult.sessionLimit || rebuildSessionLimit }} 个</el-tag>
         <el-tag v-else size="mini">通用生命周期</el-tag>
       </div>
@@ -200,8 +212,8 @@
       </el-table>
       <span slot="footer">
         <el-button size="small" @click="rebuildPreviewVisible = false">关闭</el-button>
-        <el-button v-if="previewMode === 'rebuild'" size="small" type="primary" :loading="rebuildLoading" @click="handleRebuild">按此配置重建</el-button>
-        <el-button v-else size="small" type="primary" :loading="reviewLoading" @click="handleReview">执行重审</el-button>
+        <el-button v-if="previewMode === 'rebuild'" size="small" type="primary" :loading="rebuildLoading && maintenanceOperation === '重建记忆'" :disabled="maintenanceBusy" @click="handleRebuild">按此配置重建</el-button>
+        <el-button v-else size="small" type="primary" :loading="reviewLoading && maintenanceOperation === '重审记忆'" :disabled="maintenanceBusy" @click="handleReview">执行重审</el-button>
       </span>
     </el-dialog>
 
@@ -262,7 +274,10 @@ export default {
       clearLoading: false,
       rebuildPreviewVisible: false,
       rebuildPreviewResult: null,
-      previewMode: 'rebuild'
+      previewMode: 'rebuild',
+      maintenanceOperation: '',
+      maintenanceRecoveryPending: false,
+      maintenanceRecoveryTimer: null
     }
   },
   computed: {
@@ -287,6 +302,25 @@ export default {
     },
     previewDialogTitle() {
       return this.previewMode === 'review' ? '重审预览' : '重建预览'
+    },
+    previewActionsProposed() {
+      const result = this.rebuildPreviewResult || {}
+      if (result.actionsProposed !== undefined && result.actionsProposed !== null) {
+        return this.toCount(result.actionsProposed)
+      }
+      return this.previewCandidates.length
+    },
+    maintenanceBusy() {
+      return this.rebuildLoading || this.reviewLoading || this.clearLoading || this.maintenanceRecoveryPending
+    },
+    maintenanceStatusText() {
+      if (this.maintenanceRecoveryPending) {
+        return '请求结果尚未确认，后台可能仍在执行。维护操作已暂时锁定，页面将在稍后自动刷新；也可点击“刷新”确认最新状态。'
+      }
+      if (this.maintenanceOperation === '重建记忆' || this.maintenanceOperation === '重审记忆') {
+        return `${this.maintenanceOperation}：维护模型处理中，完成前不会替换旧记忆，请勿重复提交。`
+      }
+      return `${this.maintenanceOperation || '记忆维护'}处理中，请勿重复提交。`
     }
   },
   mounted() {
@@ -299,6 +333,12 @@ export default {
     }
     this.fetch()
   },
+  beforeDestroy() {
+    if (this.maintenanceRecoveryTimer) {
+      clearTimeout(this.maintenanceRecoveryTimer)
+      this.maintenanceRecoveryTimer = null
+    }
+  },
   methods: {
     fetch() {
       this.loading = true
@@ -310,8 +350,13 @@ export default {
           candidates: (data.candidates || []).map(this.decorateMemoryIdentity)
         }
         this.loading = false
-      }, () => {
+        this.completeMaintenanceRecovery()
+      }, (error) => {
         this.loading = false
+        this.$message.error(this.requestErrorMessage(error, '刷新记忆列表失败，请稍后重试'))
+      }, (error) => {
+        this.loading = false
+        this.$message.error(this.requestErrorMessage(error, '刷新记忆列表失败，请稍后重试'))
       })
     },
 
@@ -434,37 +479,122 @@ export default {
         dryRun
       }
     },
+    toCount(value) {
+      const number = Number(value)
+      return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0
+    },
+    requestErrorMessage(error, fallback) {
+      return (error && error.data && error.data.msg) ||
+        (error && error.message) || fallback
+    },
+    beginMaintenance(operation, loadingKey) {
+      if (this.maintenanceBusy) {
+        this.$message.warning('已有记忆维护任务正在处理，请等待完成或刷新确认状态')
+        return false
+      }
+      this.maintenanceOperation = operation
+      this[loadingKey] = true
+      return true
+    },
+    finishMaintenance(loadingKey) {
+      this[loadingKey] = false
+      if (!this.maintenanceRecoveryPending) {
+        this.maintenanceOperation = ''
+      }
+    },
+    handlePreviewFailure(operation, loadingKey, error) {
+      this.finishMaintenance(loadingKey)
+      this.$message.error(this.requestErrorMessage(error, `${operation}失败，请稍后重试`))
+    },
+    handleMaintenanceFailure(operation, loadingKey, error) {
+      this.finishMaintenance(loadingKey)
+      this.$message.error(this.requestErrorMessage(error, `${operation}失败，原有记忆未被替换`))
+      this.fetch()
+    },
+    handleUncertainMaintenanceFailure(operation, loadingKey, error) {
+      this[loadingKey] = false
+      this.maintenanceOperation = operation
+      this.maintenanceRecoveryPending = true
+      const reason = this.requestErrorMessage(error, '网络中断或请求超时')
+      this.$message({
+        type: 'warning',
+        duration: 10000,
+        message: `${operation}未取得可确认结果：${reason}。后台可能仍在执行，请勿立即重复提交；页面将在 30 秒后自动刷新。`
+      })
+      if (this.maintenanceRecoveryTimer) {
+        clearTimeout(this.maintenanceRecoveryTimer)
+      }
+      this.maintenanceRecoveryTimer = setTimeout(() => {
+        this.maintenanceRecoveryTimer = null
+        this.fetch()
+      }, 30000)
+    },
+    completeMaintenanceRecovery() {
+      if (!this.maintenanceRecoveryPending) return
+      this.maintenanceRecoveryPending = false
+      this.maintenanceOperation = ''
+      if (this.maintenanceRecoveryTimer) {
+        clearTimeout(this.maintenanceRecoveryTimer)
+        this.maintenanceRecoveryTimer = null
+      }
+      this.$message.info('已刷新记忆列表，请根据当前数据确认维护结果')
+    },
+    showRebuildOutcome(data) {
+      const sessionsRead = this.toCount(data.sessionsRead)
+      const actionsProposed = this.toCount(data.actionsProposed)
+      const factsChanged = this.toCount(data.factsChanged)
+      if (sessionsRead === 0) {
+        this.$message.warning('重建结束：未读取到可处理会话，当前记忆未变更')
+      } else if (actionsProposed === 0) {
+        this.$message.warning(`重建结束：读取 ${sessionsRead} 个会话，维护模型未提出记忆动作，当前记忆未变更`)
+      } else if (factsChanged === 0) {
+        this.$message.warning(`重建结束：读取 ${sessionsRead} 个会话，提出 ${actionsProposed} 条动作，但未产生事实变更`)
+      } else {
+        this.$message.success(`重建完成：读取 ${sessionsRead} 个会话，提出 ${actionsProposed} 条动作，实际变更 ${factsChanged} 条事实`)
+      }
+    },
+    showReviewOutcome(data) {
+      const actionsProposed = this.toCount(data.actionsProposed)
+      const factsChanged = this.toCount(data.factsChanged)
+      if (actionsProposed === 0) {
+        this.$message.warning('重审结束：维护模型未提出记忆动作，当前记忆未变更')
+      } else if (factsChanged === 0) {
+        this.$message.warning(`重审结束：提出 ${actionsProposed} 条动作，但未产生事实变更`)
+      } else {
+        this.$message.success(`重审完成：提出 ${actionsProposed} 条动作，实际变更 ${factsChanged} 条事实`)
+      }
+    },
     handleClear() {
       this.$confirm('确定清空当前智能体的事实记忆、候选记忆和忘记项吗？此操作会写入删除状态。', '清空记忆', {
         type: 'warning',
         confirmButtonClass: 'el-button--danger'
       }).then(() => {
-        this.clearLoading = true
+        if (!this.beginMaintenance('清空记忆', 'clearLoading')) return
         Api.memory.clear(this.agentId, (res) => {
           const data = this.unwrapResult(res)
           this.$message.success(`已清空 ${data.factsCleared || 0} 条事实记忆`)
-          this.clearLoading = false
+          this.finishMaintenance('clearLoading')
           this.fetch()
-        }, () => {
-          this.clearLoading = false
-        }, () => {
-          this.clearLoading = false
+        }, (error) => {
+          this.handleUncertainMaintenanceFailure('清空记忆', 'clearLoading', error)
+        }, (error) => {
+          this.handleMaintenanceFailure('清空记忆', 'clearLoading', error)
         })
       }).catch(() => {
         this.clearLoading = false
       })
     },
     handleRebuildPreview() {
-      this.rebuildLoading = true
+      if (!this.beginMaintenance('预览重建', 'rebuildLoading')) return
       this.previewMode = 'rebuild'
       Api.memory.rebuildPreview(this.agentId, this.rebuildPayload(true), (res) => {
         this.rebuildPreviewResult = this.unwrapResult(res)
         this.rebuildPreviewVisible = true
-        this.rebuildLoading = false
-      }, () => {
-        this.rebuildLoading = false
-      }, () => {
-        this.rebuildLoading = false
+        this.finishMaintenance('rebuildLoading')
+      }, (error) => {
+        this.handlePreviewFailure('预览重建', 'rebuildLoading', error)
+      }, (error) => {
+        this.handlePreviewFailure('预览重建', 'rebuildLoading', error)
       })
     },
     handleRebuild() {
@@ -472,33 +602,33 @@ export default {
         type: 'warning',
         confirmButtonClass: 'el-button--primary'
       }).then(() => {
-        this.rebuildLoading = true
+        if (!this.beginMaintenance('重建记忆', 'rebuildLoading')) return
         Api.memory.rebuild(this.agentId, this.rebuildPayload(false), (res) => {
           const data = this.unwrapResult(res)
-          this.$message.success(`重建完成：读取 ${data.sessionsRead || 0} 个会话，应用 ${data.factsChanged || 0} 条记忆动作`)
-          this.rebuildLoading = false
+          this.showRebuildOutcome(data)
+          this.finishMaintenance('rebuildLoading')
           this.rebuildPreviewVisible = false
           this.fetch()
-        }, () => {
-          this.rebuildLoading = false
-        }, () => {
-          this.rebuildLoading = false
+        }, (error) => {
+          this.handleUncertainMaintenanceFailure('重建记忆', 'rebuildLoading', error)
+        }, (error) => {
+          this.handleMaintenanceFailure('重建记忆', 'rebuildLoading', error)
         })
       }).catch(() => {
         this.rebuildLoading = false
       })
     },
     handleReviewPreview() {
-      this.reviewLoading = true
+      if (!this.beginMaintenance('预览重审', 'reviewLoading')) return
       this.previewMode = 'review'
       Api.memory.reviewPreview(this.agentId, (res) => {
         this.rebuildPreviewResult = this.unwrapResult(res)
         this.rebuildPreviewVisible = true
-        this.reviewLoading = false
-      }, () => {
-        this.reviewLoading = false
-      }, () => {
-        this.reviewLoading = false
+        this.finishMaintenance('reviewLoading')
+      }, (error) => {
+        this.handlePreviewFailure('预览重审', 'reviewLoading', error)
+      }, (error) => {
+        this.handlePreviewFailure('预览重审', 'reviewLoading', error)
       })
     },
     handleReview() {
@@ -506,17 +636,17 @@ export default {
         type: 'warning',
         confirmButtonClass: 'el-button--primary'
       }).then(() => {
-        this.reviewLoading = true
+        if (!this.beginMaintenance('重审记忆', 'reviewLoading')) return
         Api.memory.review(this.agentId, (res) => {
           const data = this.unwrapResult(res)
-          this.$message.success(`重审完成：应用 ${data.factsChanged || 0} 条记忆动作`)
-          this.reviewLoading = false
+          this.showReviewOutcome(data)
+          this.finishMaintenance('reviewLoading')
           this.rebuildPreviewVisible = false
           this.fetch()
-        }, () => {
-          this.reviewLoading = false
-        }, () => {
-          this.reviewLoading = false
+        }, (error) => {
+          this.handleUncertainMaintenanceFailure('重审记忆', 'reviewLoading', error)
+        }, (error) => {
+          this.handleMaintenanceFailure('重审记忆', 'reviewLoading', error)
         })
       }).catch(() => {
         this.reviewLoading = false
@@ -600,6 +730,12 @@ export default {
   padding: 10px 24px;
   background: #f7f8fc;
   border-bottom: 1px solid #e8ecf4;
+  flex-shrink: 0;
+}
+
+.maintenance-alert {
+  margin: 10px 24px 0;
+  width: auto;
   flex-shrink: 0;
 }
 

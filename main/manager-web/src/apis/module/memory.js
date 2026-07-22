@@ -29,8 +29,8 @@ function request(method, url, data, callback, networkFail, fail, timeout) {
 }
 
 export default {
-  dashboard(agentId, callback, networkFail) {
-    request('GET', `/agent/${agentId}/memories`, null, callback, networkFail);
+  dashboard(agentId, callback, networkFail, fail) {
+    request('GET', `/agent/${agentId}/memories`, null, callback, networkFail, fail);
   },
   createFact(agentId, data, callback) {
     request('POST', `/agent/${agentId}/memories/facts`, data, callback);

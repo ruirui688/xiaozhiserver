@@ -86,6 +86,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
     @Transactional(rollbackFor = Exception.class)
     public MemoryRebuildResultVO clearMemories(String agentId, String actorType, String actorId) {
         AgentEntity agent = assertAgentOwner(agentId);
+        lockAgentForMemoryUpdate(agent.getId());
         MemoryRebuildResultVO result = new MemoryRebuildResultVO();
         result.setMode("clear");
 
@@ -126,7 +127,6 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public MemoryRebuildResultVO rebuildFromRecentChatHistory(String agentId, MemoryRebuildRequestDTO dto,
                                                               String actorType, String actorId) {
         AgentEntity agent = assertAgentOwner(agentId);
@@ -169,26 +169,37 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
             return result;
         }
 
-        if ("clear_then_rebuild".equalsIgnoreCase(mode)) {
-            MemoryRebuildResultVO cleared = clearMemories(agentId, actorType, actorId);
-            result.setFactsCleared(cleared.getFactsCleared());
-            result.setCandidatesCleared(cleared.getCandidatesCleared());
-            result.setTombstonesCleared(cleared.getTombstonesCleared());
-        }
-
         String maintenanceModelId = getMaintenanceLlmModelId(agent);
-        int applied = 0;
-        for (JSONObject action : applicableActions) {
-            if (applyMaintenanceDecision(agent, scopeId, null, action, maintenanceModelId, false, null)) {
+        boolean clearThenRebuild = "clear_then_rebuild".equalsIgnoreCase(mode);
+        String targetScopeId = scopeId;
+        MemoryRebuildResultVO appliedResult = transactionTemplate.execute(status -> {
+            lockAgentForMemoryUpdate(agent.getId());
+            if (clearThenRebuild) {
+                MemoryRebuildResultVO cleared = clearMemories(agentId, actorType, actorId);
+                result.setFactsCleared(cleared.getFactsCleared());
+                result.setCandidatesCleared(cleared.getCandidatesCleared());
+                result.setTombstonesCleared(cleared.getTombstonesCleared());
+            }
+
+            int applied = 0;
+            for (JSONObject action : applicableActions) {
+                boolean changed = executeMemoryAction(
+                        agent, targetScopeId, null, action, maintenanceModelId, result);
+                if (!changed) {
+                    throw new IllegalStateException(
+                            "重建动作应用失败，已回滚并保留事务开始前的记忆");
+                }
                 applied++;
             }
-        }
-        result.setFactsChanged(applied);
-        if (!dryRun) {
+            result.setFactsChanged(applied);
             writeRevision(agent.getId(), null, "rebuild_memory", null, JsonUtils.toJsonString(result),
                     actorType, actorId, "从聊天记录重建记忆");
+            return result;
+        });
+        if (appliedResult == null) {
+            throw new IllegalStateException("重建事务未返回结果");
         }
-        return result;
+        return appliedResult;
     }
 
     @Override
@@ -315,10 +326,13 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         String action = MemoryHelper.normalizeAction(decision.getStr("action"));
         boolean changed = applyMaintenanceDecision(agent, scopeId, null, decision, maintenanceModelId, false, null);
         if (("NONE".equals(action) || !changed) && !speaker.recognized()) {
-            MemoryForgetTombstoneEntity tombstone = createForgetTombstone(agent, scopeId,
-                    StringUtils.defaultIfBlank(decision.getStr("tombstone_pattern"), text),
-                    StringUtils.defaultIfBlank(decision.getStr("reason"), "显式忘记"),
-                    null, actorType, actorId);
+            String tombstonePattern = StringUtils.defaultIfBlank(decision.getStr("tombstone_pattern"), text);
+            String tombstoneReason = StringUtils.defaultIfBlank(decision.getStr("reason"), "显式忘记");
+            MemoryForgetTombstoneEntity tombstone = transactionTemplate.execute(status -> {
+                lockAgentForMemoryUpdate(agent.getId());
+                return createForgetTombstone(agent, scopeId, tombstonePattern, tombstoneReason,
+                        null, actorType, actorId);
+            });
             changed = tombstone != null || changed;
         }
         writeRevision(agent.getId(), null, "forget_instruction",
@@ -470,6 +484,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                                         String modelId, MemoryRebuildResultVO result) {
         String action = MemoryHelper.normalizeAction(json.getStr("action"));
         if ("NONE".equals(action)) return false;
+        lockAgentForMemoryUpdate(agent.getId());
         String actionSpeakerId = MemorySpeakerUtils.actionSpeakerId(json);
 
         String canonical = MemoryHelper.cleanupMemoryText(json.getStr("canonical_text"));
@@ -719,10 +734,14 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
 
     private List<MemoryFactEntity> loadActiveFactsForCapacity(String agentId) {
         // 锁定智能体行，使同一智能体的并发记忆写入串行化，防止分别校验后合计超限。
+        lockAgentForMemoryUpdate(agentId);
+        return loadMaintenanceFacts(agentId);
+    }
+
+    private void lockAgentForMemoryUpdate(String agentId) {
         agentDao.selectOne(new QueryWrapper<AgentEntity>()
                 .eq("id", agentId)
                 .last("FOR UPDATE"));
-        return loadMaintenanceFacts(agentId);
     }
 
     private void archiveFactsForCapacity(List<MemoryFactEntity> facts, String modelId, MemoryRebuildResultVO result) {
@@ -846,9 +865,25 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
             arr = reviewed;
         }
         List<JSONObject> actions = new ArrayList<>();
+        boolean clearThenRebuild = "clear_then_rebuild".equalsIgnoreCase(mode);
         for (Object item : arr) {
             JSONObject action = MemoryHelper.toJsonObject(item);
-            if (action == null || "NONE".equals(MemoryHelper.normalizeAction(action.getStr("action")))) {
+            if (action == null) {
+                continue;
+            }
+            String rawAction = StringUtils.trimToEmpty(action.getStr("action"));
+            String actionType;
+            if (clearThenRebuild) {
+                actionType = rawAction.toUpperCase(java.util.Locale.ROOT);
+                if (!"ADD".equals(actionType) && !"NONE".equals(actionType)) {
+                    throw new IllegalStateException(
+                            "清空重建仅允许 ADD 或 NONE 动作，维护模型返回了 "
+                                    + StringUtils.defaultIfBlank(rawAction, "<缺失>"));
+                }
+            } else {
+                actionType = MemoryHelper.normalizeAction(rawAction);
+            }
+            if ("NONE".equals(actionType)) {
                 continue;
             }
             attachUserEvidence(action, conversation);

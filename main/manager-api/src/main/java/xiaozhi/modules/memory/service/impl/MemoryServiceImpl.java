@@ -169,6 +169,7 @@ public class MemoryServiceImpl implements MemoryService {
     @Transactional(rollbackFor = Exception.class)
     public String createFact(String agentId, MemoryFactDTO dto, String actorType, String actorId) {
         AgentEntity agent = assertAgentOwner(agentId);
+        lockAgentForMemoryUpdate(agentId);
         AgentScope scope = new AgentScope(agent, agentId);
         return createFactInternal(scope,
                 dto.getCanonicalText(),
@@ -181,6 +182,7 @@ public class MemoryServiceImpl implements MemoryService {
     @Transactional(rollbackFor = Exception.class)
     public void updateFact(String agentId, String memoryId, MemoryFactDTO dto, String actorType, String actorId) {
         assertAgentOwner(agentId);
+        lockAgentForMemoryUpdate(agentId);
         MemoryFactEntity fact = getFact(agentId, memoryId);
         String before = JsonUtils.toJsonString(fact);
         if (StringUtils.isNotBlank(dto.getCanonicalText())) {
@@ -215,11 +217,13 @@ public class MemoryServiceImpl implements MemoryService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void archiveFact(String agentId, String memoryId, String actorType, String actorId) {
         updateStatus(agentId, memoryId, MemoryHelper.STATUS_ARCHIVED, actorType, actorId, "归档记忆");
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void deleteFact(String agentId, String memoryId, String actorType, String actorId) {
         updateStatus(agentId, memoryId, MemoryHelper.STATUS_DELETED, actorType, actorId, "删除记忆");
     }
@@ -228,6 +232,7 @@ public class MemoryServiceImpl implements MemoryService {
     @Transactional(rollbackFor = Exception.class)
     public void confirmCandidate(String agentId, String candidateId, String actorType, String actorId) {
         assertAgentOwner(agentId);
+        lockAgentForMemoryUpdate(agentId);
         MemoryCandidateEntity candidate = getCandidate(agentId, candidateId);
         if (!MemoryHelper.STATUS_PENDING.equals(candidate.getStatus())) {
             return;
@@ -246,6 +251,7 @@ public class MemoryServiceImpl implements MemoryService {
     @Transactional(rollbackFor = Exception.class)
     public void rejectCandidate(String agentId, String candidateId, String actorType, String actorId) {
         assertAgentOwner(agentId);
+        lockAgentForMemoryUpdate(agentId);
         MemoryCandidateEntity candidate = getCandidate(agentId, candidateId);
         candidate.setStatus(MemoryHelper.STATUS_REJECTED);
         candidate.setUpdatedAt(new Date());
@@ -268,7 +274,6 @@ public class MemoryServiceImpl implements MemoryService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public MemoryRebuildResultVO rebuildFromRecentChatHistory(String agentId, MemoryRebuildRequestDTO dto,
                                                               String actorType, String actorId) {
         return memoryMaintenanceService.rebuildFromRecentChatHistory(agentId, dto, actorType, actorId);
@@ -450,6 +455,7 @@ public class MemoryServiceImpl implements MemoryService {
 
     private void updateStatus(String agentId, String memoryId, String status, String actorType, String actorId, String reason) {
         assertAgentOwner(agentId);
+        lockAgentForMemoryUpdate(agentId);
         MemoryFactEntity fact = getFact(agentId, memoryId);
         String before = JsonUtils.toJsonString(fact);
         fact.setStatus(status);
@@ -495,9 +501,7 @@ public class MemoryServiceImpl implements MemoryService {
 
     private void ensureActiveMemoryCapacity(String agentId, MemoryFactEntity replacedFact, String canonicalText) {
         // 人工新增/编辑/候选确认与自动维护共用同一智能体行锁。
-        agentDao.selectOne(new QueryWrapper<AgentEntity>()
-                .eq("id", agentId)
-                .last("FOR UPDATE"));
+        lockAgentForMemoryUpdate(agentId);
         int currentChars = factDao.selectList(new QueryWrapper<MemoryFactEntity>()
                         .eq("agent_id", agentId)
                         .eq("status", MemoryHelper.STATUS_ACTIVE))
@@ -513,6 +517,12 @@ public class MemoryServiceImpl implements MemoryService {
             throw new IllegalArgumentException("单个智能体的生效记忆总量不能超过 "
                     + maxActiveMemoryChars + " 字符，请先执行记忆审查/蒸馏或归档低价值记忆");
         }
+    }
+
+    private void lockAgentForMemoryUpdate(String agentId) {
+        agentDao.selectOne(new QueryWrapper<AgentEntity>()
+                .eq("id", agentId)
+                .last("FOR UPDATE"));
     }
 
     private void refreshFactEvidence(MemoryFactEntity fact, BigDecimal confidence, String actorType, String actorId, String reason) {
