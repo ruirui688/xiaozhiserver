@@ -47,6 +47,7 @@ import xiaozhi.modules.memory.dao.MemoryRevisionDao;
 import xiaozhi.modules.memory.dao.MemorySourceEventDao;
 import xiaozhi.modules.memory.dao.MemoryToolBehaviorDao;
 import xiaozhi.modules.memory.dto.MemoryEventDTO;
+import xiaozhi.modules.memory.dto.MemoryFactDTO;
 import xiaozhi.modules.memory.dto.MemoryForgetDTO;
 import xiaozhi.modules.memory.dto.MemoryQueryDTO;
 import xiaozhi.modules.memory.dto.MemoryRememberDTO;
@@ -659,6 +660,24 @@ class MemoryServiceImplTest {
     }
 
     @Test
+    void modelRequestedRememberSurvivesMaintenanceNoneDecision() {
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID)))
+                .thenReturn("{\"action\":\"NONE\",\"reason\":\"模型误判为无需保存\"}");
+
+        MemoryRememberDTO dto = new MemoryRememberDTO();
+        dto.setAgentId(AGENT_ID);
+        dto.setText("用户每周三晚上学习法语");
+        dto.setShared(true);
+        memoryService.remember(dto, "system", null);
+
+        ArgumentCaptor<MemoryFactEntity> factCaptor = ArgumentCaptor.forClass(MemoryFactEntity.class);
+        verify(factDao).insert(factCaptor.capture());
+        assertEquals("用户每周三晚上学习法语", factCaptor.getValue().getCanonicalText());
+        verify(llmService, times(1)).generateJson(any(), eq(MAINTENANCE_MODEL_ID));
+    }
+
+    @Test
     void modelSelectedSharedMemoryDoesNotKeepPrivateSpeakerOwnership() {
         when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of());
         when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID)))
@@ -1035,6 +1054,24 @@ class MemoryServiceImplTest {
         assertTrue(error.getMessage().contains("1000"));
 
         verify(factDao, never()).insert(any(MemoryFactEntity.class));
+    }
+
+    @Test
+    void manualCreateIsStoredWithoutMaintenanceModelAndMarkedManual() {
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of());
+        MemoryFactDTO dto = new MemoryFactDTO();
+        dto.setCanonicalText("用户每周三晚上学习法语");
+        dto.setCategory("手动记录");
+        dto.setMemoryType("长期记忆");
+
+        memoryService.createFact(AGENT_ID, dto, "user", "tester");
+
+        ArgumentCaptor<MemoryFactEntity> factCaptor = ArgumentCaptor.forClass(MemoryFactEntity.class);
+        verify(factDao).insert(factCaptor.capture());
+        MemoryFactEntity fact = factCaptor.getValue();
+        assertEquals("用户每周三晚上学习法语", fact.getCanonicalText());
+        assertEquals("manual", fact.getConfirmationState());
+        verify(llmService, never()).generateJson(any(), any());
     }
 
     private void stubToolMaintenanceDecision(String decision) {

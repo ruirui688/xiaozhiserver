@@ -1,5 +1,7 @@
 import asyncio
+import concurrent.futures
 import sys
+import threading
 import time
 from types import SimpleNamespace
 from pathlib import Path
@@ -17,7 +19,11 @@ settings.config_file_valid = True
 
 from core.providers.tts import huoshan_double_stream
 from core.providers.tts.huoshan_double_stream import TTSProvider
-from core.providers.tts.dto.dto import SentenceType
+from core.providers.tts.dto.dto import (
+    ContentType,
+    SentenceType,
+    TTSMessageDTO,
+)
 
 
 def _base_config(**overrides):
@@ -282,6 +288,352 @@ def _fault_provider(**overrides):
     return provider
 
 
+def _wait_until(predicate, timeout=0.5):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.005)
+    return predicate()
+
+
+def _wait_until_stable(predicate, timeout=0.5, stable_for=0.03):
+    deadline = time.monotonic() + timeout
+    stable_since = None
+    while time.monotonic() < deadline:
+        if predicate():
+            stable_since = stable_since or time.monotonic()
+            if time.monotonic() - stable_since >= stable_for:
+                return True
+        else:
+            stable_since = None
+        time.sleep(0.005)
+    return False
+
+
+def _run_tts_text_thread(provider):
+    worker = threading.Thread(target=provider.tts_text_priority_thread, daemon=True)
+    worker.start()
+    return worker
+
+
+def _stop_tts_text_thread(provider, worker):
+    provider.conn.stop_event.set()
+    provider.tts_text_queue.put(
+        TTSMessageDTO(
+            sentence_id="wake-worker",
+            sentence_type=SentenceType.LAST,
+            content_type=ContentType.ACTION,
+        )
+    )
+    worker.join(timeout=1)
+    assert worker.is_alive() is False
+
+
+def _run_coroutine_immediately(coro, _loop=None, **_kwargs):
+    future = concurrent.futures.Future()
+    try:
+        future.set_result(asyncio.run(coro))
+    except BaseException as exc:
+        future.set_exception(exc)
+    return future
+
+
+def _lazy_session_provider(monkeypatch):
+    provider = TTSProvider(_base_config(tts_timeout=1), True)
+    provider.conn = SimpleNamespace(
+        stop_event=threading.Event(),
+        client_abort=False,
+        sentence_id="session-lazy",
+        loop=object(),
+    )
+    monkeypatch.setattr(
+        huoshan_double_stream.asyncio,
+        "run_coroutine_threadsafe",
+        _run_coroutine_immediately,
+    )
+    return provider
+
+
+def test_tts_text_thread_lazily_starts_session_on_first_text(monkeypatch):
+    provider = _lazy_session_provider(monkeypatch)
+    calls = []
+
+    async def fake_start_session(session_id):
+        calls.append(("start", session_id))
+        provider.activate_session = True
+
+    async def fake_text_to_speak(text, session_id):
+        calls.append(("text", session_id, text))
+
+    async def fake_finish_session(session_id):
+        calls.append(("finish", session_id))
+        provider.activate_session = False
+
+    monkeypatch.setattr(provider, "start_session", fake_start_session)
+    monkeypatch.setattr(provider, "text_to_speak", fake_text_to_speak)
+    monkeypatch.setattr(provider, "finish_session", fake_finish_session)
+
+    worker = _run_tts_text_thread(provider)
+    try:
+        provider.tts_text_queue.put(
+            TTSMessageDTO(
+                sentence_id="session-lazy",
+                sentence_type=SentenceType.FIRST,
+                content_type=ContentType.ACTION,
+            )
+        )
+        assert _wait_until(
+            lambda: getattr(provider, "current_sentence_id", None)
+            == "session-lazy"
+        )
+
+        # Simulate a slow LLM: FIRST must not consume the upstream idle window.
+        time.sleep(0.08)
+        assert calls == []
+        assert provider.activate_session is False
+
+        provider.tts_text_queue.put(
+            TTSMessageDTO(
+                sentence_id="session-lazy",
+                sentence_type=SentenceType.MIDDLE,
+                content_type=ContentType.TEXT,
+                content_detail="第一段回复",
+            )
+        )
+        provider.tts_text_queue.put(
+            TTSMessageDTO(
+                sentence_id="session-lazy",
+                sentence_type=SentenceType.MIDDLE,
+                content_type=ContentType.TEXT,
+                content_detail="第二段回复",
+            )
+        )
+        provider.tts_text_queue.put(
+            TTSMessageDTO(
+                sentence_id="session-lazy",
+                sentence_type=SentenceType.LAST,
+                content_type=ContentType.ACTION,
+            )
+        )
+
+        assert _wait_until(lambda: len(calls) == 4)
+        assert calls == [
+            ("start", "session-lazy"),
+            ("text", "session-lazy", "第一段回复"),
+            ("text", "session-lazy", "第二段回复"),
+            ("finish", "session-lazy"),
+        ]
+    finally:
+        _stop_tts_text_thread(provider, worker)
+
+
+def test_tts_text_thread_skips_upstream_session_for_empty_turn(monkeypatch):
+    provider = _lazy_session_provider(monkeypatch)
+    calls = []
+
+    async def record_call(*args):
+        calls.append(args)
+
+    monkeypatch.setattr(provider, "start_session", record_call)
+    monkeypatch.setattr(provider, "finish_session", record_call)
+
+    worker = _run_tts_text_thread(provider)
+    try:
+        provider.tts_text_queue.put(
+            TTSMessageDTO(
+                sentence_id="session-lazy",
+                sentence_type=SentenceType.FIRST,
+                content_type=ContentType.ACTION,
+            )
+        )
+        provider.tts_text_queue.put(
+            TTSMessageDTO(
+                sentence_id="session-lazy",
+                sentence_type=SentenceType.LAST,
+                content_type=ContentType.ACTION,
+            )
+        )
+
+        assert _wait_until_stable(
+            lambda: provider.tts_text_queue.empty()
+            and calls == []
+            and provider.tts_audio_queue.empty()
+            and provider.activate_session is False
+        )
+    finally:
+        _stop_tts_text_thread(provider, worker)
+
+
+def test_tts_text_thread_lazily_starts_session_on_first_file(monkeypatch):
+    provider = _lazy_session_provider(monkeypatch)
+    calls = []
+
+    async def fake_start_session(session_id):
+        calls.append(("start", session_id))
+        provider.activate_session = True
+
+    async def fake_finish_session(session_id):
+        calls.append(("finish", session_id))
+        provider.activate_session = False
+
+    def fake_process_file(path, callback):
+        calls.append(("file", path))
+
+    monkeypatch.setattr(provider, "start_session", fake_start_session)
+    monkeypatch.setattr(provider, "finish_session", fake_finish_session)
+    monkeypatch.setattr(provider, "_process_audio_file_stream", fake_process_file)
+    monkeypatch.setattr(huoshan_double_stream.os.path, "exists", lambda _path: True)
+
+    worker = _run_tts_text_thread(provider)
+    try:
+        provider.tts_text_queue.put(
+            TTSMessageDTO(
+                sentence_id="session-lazy",
+                sentence_type=SentenceType.FIRST,
+                content_type=ContentType.ACTION,
+            )
+        )
+        assert _wait_until(
+            lambda: getattr(provider, "current_sentence_id", None)
+            == "session-lazy"
+        )
+        assert calls == []
+
+        provider.tts_text_queue.put(
+            TTSMessageDTO(
+                sentence_id="session-lazy",
+                sentence_type=SentenceType.MIDDLE,
+                content_type=ContentType.FILE,
+                content_detail="背景音乐",
+                content_file="/fake/music.opus",
+            )
+        )
+        provider.tts_text_queue.put(
+            TTSMessageDTO(
+                sentence_id="session-lazy",
+                sentence_type=SentenceType.LAST,
+                content_type=ContentType.ACTION,
+            )
+        )
+
+        assert _wait_until(lambda: len(calls) == 3)
+        assert calls == [
+            ("start", "session-lazy"),
+            ("file", "/fake/music.opus"),
+            ("finish", "session-lazy"),
+        ]
+    finally:
+        _stop_tts_text_thread(provider, worker)
+
+
+def test_tts_text_thread_abort_before_text_creates_no_upstream_boundary(monkeypatch):
+    provider = _lazy_session_provider(monkeypatch)
+    calls = []
+
+    async def fake_start_session(session_id):
+        calls.append(("start", session_id))
+
+    async def fake_finish_session(session_id):
+        calls.append(("finish", session_id))
+
+    async def fake_cancel_session(session_id):
+        calls.append(("cancel", session_id))
+
+    monkeypatch.setattr(provider, "start_session", fake_start_session)
+    monkeypatch.setattr(provider, "finish_session", fake_finish_session)
+    monkeypatch.setattr(provider, "cancel_session", fake_cancel_session)
+
+    worker = _run_tts_text_thread(provider)
+    try:
+        provider.tts_text_queue.put(
+            TTSMessageDTO(
+                sentence_id="session-lazy",
+                sentence_type=SentenceType.FIRST,
+                content_type=ContentType.ACTION,
+            )
+        )
+        assert _wait_until(
+            lambda: getattr(provider, "current_sentence_id", None)
+            == "session-lazy"
+        )
+
+        provider.conn.client_abort = True
+        for _ in range(2):
+            provider.tts_text_queue.put(
+                TTSMessageDTO(
+                    sentence_id="session-lazy",
+                    sentence_type=SentenceType.LAST,
+                    content_type=ContentType.ACTION,
+                )
+            )
+
+        assert _wait_until_stable(
+            lambda: provider.tts_text_queue.empty()
+            and calls == []
+            and provider.tts_audio_queue.empty()
+        )
+    finally:
+        _stop_tts_text_thread(provider, worker)
+
+
+def test_tts_text_thread_abort_during_lazy_start_cancels_once(monkeypatch):
+    provider = _lazy_session_provider(monkeypatch)
+    calls = []
+
+    async def fake_start_session(session_id):
+        calls.append(("start", session_id))
+        provider.activate_session = True
+        provider.conn.client_abort = True
+
+    async def fake_text_to_speak(text, session_id):
+        calls.append(("text", session_id, text))
+
+    async def fake_cancel_session(session_id):
+        calls.append(("cancel", session_id))
+
+    monkeypatch.setattr(provider, "start_session", fake_start_session)
+    monkeypatch.setattr(provider, "text_to_speak", fake_text_to_speak)
+    monkeypatch.setattr(provider, "cancel_session", fake_cancel_session)
+
+    worker = _run_tts_text_thread(provider)
+    try:
+        provider.tts_text_queue.put(
+            TTSMessageDTO(
+                sentence_id="session-lazy",
+                sentence_type=SentenceType.FIRST,
+                content_type=ContentType.ACTION,
+            )
+        )
+        provider.tts_text_queue.put(
+            TTSMessageDTO(
+                sentence_id="session-lazy",
+                sentence_type=SentenceType.MIDDLE,
+                content_type=ContentType.TEXT,
+                content_detail="不应在打断后发送",
+            )
+        )
+        provider.tts_text_queue.put(
+            TTSMessageDTO(
+                sentence_id="session-lazy",
+                sentence_type=SentenceType.LAST,
+                content_type=ContentType.ACTION,
+            )
+        )
+
+        assert _wait_until_stable(
+            lambda: provider.tts_text_queue.empty()
+            and calls
+            == [
+                ("start", "session-lazy"),
+                ("cancel", "session-lazy"),
+            ]
+        )
+        assert provider.tts_audio_queue.empty()
+    finally:
+        _stop_tts_text_thread(provider, worker)
+
+
 def test_tts_failure_finalizer_enqueues_last_exactly_once_after_first():
     provider = _fault_provider()
     provider._prepare_session_audio_state("session-1")
@@ -313,6 +665,128 @@ def test_tts_failure_finalizer_does_not_publish_last_without_audio_start():
         "session-1", normal=False, reason="start_failed"
     ) is False
     assert provider.tts_audio_queue.empty()
+
+
+def test_tts_file_still_publishes_boundaries_when_upstream_start_fails(
+    monkeypatch,
+):
+    provider = _lazy_session_provider(monkeypatch)
+
+    async def fail_start_session(_session_id):
+        raise RuntimeError("simulated upstream start failure")
+
+    def fake_process_file(_path, callback):
+        callback(b"file-opus")
+
+    monkeypatch.setattr(provider, "start_session", fail_start_session)
+    monkeypatch.setattr(provider, "_process_audio_file_stream", fake_process_file)
+    monkeypatch.setattr(huoshan_double_stream.os.path, "exists", lambda _path: True)
+
+    worker = _run_tts_text_thread(provider)
+    try:
+        provider.tts_text_queue.put(
+            TTSMessageDTO(
+                sentence_id="session-lazy",
+                sentence_type=SentenceType.FIRST,
+                content_type=ContentType.ACTION,
+            )
+        )
+        provider.tts_text_queue.put(
+            TTSMessageDTO(
+                sentence_id="session-lazy",
+                sentence_type=SentenceType.MIDDLE,
+                content_type=ContentType.FILE,
+                content_detail="背景音乐",
+                content_file="/fake/music.opus",
+            )
+        )
+        provider.tts_text_queue.put(
+            TTSMessageDTO(
+                sentence_id="session-lazy",
+                sentence_type=SentenceType.LAST,
+                content_type=ContentType.ACTION,
+            )
+        )
+
+        assert _wait_until(lambda: provider.tts_audio_queue.qsize() == 3)
+        items = [provider.tts_audio_queue.get_nowait() for _ in range(3)]
+        assert [item[0] for item in items] == [
+            SentenceType.FIRST,
+            SentenceType.MIDDLE,
+            SentenceType.LAST,
+        ]
+        assert items[1][1] == b"file-opus"
+        assert all(item[3] == "session-lazy" for item in items)
+    finally:
+        _stop_tts_text_thread(provider, worker)
+
+
+def test_tts_zero_audio_session_finish_raises_and_closes_connection():
+    provider = _fault_provider(response_timeout_seconds=1)
+    websocket = FakeTTSWebSocket(
+        [_tts_response(huoshan_double_stream.EVENT_SessionFinished, "session-1")]
+    )
+    reset_calls = []
+    provider.ws = websocket
+    provider.activate_session = True
+    provider._active_session_id = "session-1"
+    provider._upstream_session_id = "session-1"
+    provider._prepare_session_audio_state("session-1")
+    provider._mark_session_content_requested("session-1")
+    provider._reset_session_waiters()
+    provider.opus_encoder = SimpleNamespace(
+        reset_state=lambda: reset_calls.append("reset")
+    )
+
+    async def scenario():
+        provider._monitor_task = asyncio.create_task(
+            provider._start_monitor_tts_response()
+        )
+        with pytest.raises(RuntimeError, match="未返回任何音频"):
+            await provider.finish_session("session-1")
+
+        assert websocket.closed is True
+        assert provider.ws is None
+        assert provider.activate_session is False
+        assert provider._active_session_id is None
+        assert reset_calls == ["reset"]
+        assert provider.tts_audio_queue.empty()
+
+    asyncio.run(scenario())
+
+
+def test_tts_late_old_session_event_does_not_reset_new_session():
+    provider = _fault_provider(response_timeout_seconds=1)
+    provider.ws = FakeTTSWebSocket(
+        [
+            _tts_response(
+                huoshan_double_stream.EVENT_SessionFinished,
+                "session-old",
+            ),
+            _tts_response(
+                huoshan_double_stream.EVENT_SessionStarted,
+                "session-new",
+            ),
+        ]
+    )
+    provider.activate_session = True
+    provider._active_session_id = "session-new"
+    provider._reset_session_waiters()
+
+    async def scenario():
+        monitor_task = asyncio.create_task(provider._start_monitor_tts_response())
+        provider._monitor_task = monitor_task
+        await asyncio.wait_for(provider._session_started_event.wait(), timeout=0.2)
+
+        assert provider.activate_session is True
+        assert provider._active_session_id == "session-new"
+        assert provider._session_error is None
+
+        monitor_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await monitor_task
+
+    asyncio.run(scenario())
 
 
 async def _heartbeat(duration=0.08, interval=0.005):

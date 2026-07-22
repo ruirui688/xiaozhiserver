@@ -194,7 +194,6 @@ export default {
       url: `${getServiceUrl()}/datasets/${datasetId}/documents`,
       method: 'POST',
       data: formData,
-      headers: { 'Content-Type': 'multipart/form-data' },
       callback: callback,
       errorCallback: errorCallback,
       errorMessage: '上传文档失败',

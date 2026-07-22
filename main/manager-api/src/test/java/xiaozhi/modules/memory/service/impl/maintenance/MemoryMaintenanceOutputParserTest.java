@@ -65,4 +65,28 @@ class MemoryMaintenanceOutputParserTest {
         assertEquals("我喜欢喝茶", decision.getStr("evidence_quote"));
         assertEquals(0.9, decision.getJSONObject("importance_dimensions").getDouble("relevance"));
     }
+
+    @Test
+    void rememberDecisionAcceptsSingleActionWrapper() {
+        JSONObject decision = parser.parseRememberDecision("""
+                {"actions":[{"action":"UPDATE","related_memory_id":"fact-1",
+                "canonical_text":"用户喜欢喝乌龙茶"}]}
+                """, "用户喜欢喝茶");
+
+        assertEquals("UPDATE", decision.getStr("action"));
+        assertEquals("fact-1", decision.getStr("related_memory_id"));
+        assertEquals("用户喜欢喝乌龙茶", decision.getStr("canonical_text"));
+    }
+
+    @Test
+    void rememberDecisionCannotBeCancelledByInvalidMaintenanceOutput() {
+        JSONObject none = parser.parseRememberDecision(
+                "{\"action\":\"NONE\",\"reason\":\"不建议保存\"}", "用户喜欢喝茶");
+        JSONObject invalid = parser.parseRememberDecision("not-json", "用户住在上海");
+
+        assertEquals("ADD", none.getStr("action"));
+        assertEquals("用户喜欢喝茶", none.getStr("canonical_text"));
+        assertEquals("ADD", invalid.getStr("action"));
+        assertEquals("用户住在上海", invalid.getStr("canonical_text"));
+    }
 }

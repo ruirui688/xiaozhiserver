@@ -19,6 +19,13 @@ import java.util.function.Consumer;
 public abstract class KnowledgeBaseAdapter {
 
         /**
+         * Local adapters may finish chunking in the request thread; remote adapters are asynchronous.
+         */
+        public boolean isDocumentParsingSynchronous() {
+                return false;
+        }
+
+        /**
          * 获取适配器类型标识
          * 
          * @return 适配器类型（如：ragflow, milvus, pinecone等）

@@ -685,16 +685,17 @@ public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, Docu
             boolean result = adapter.parseDocuments(datasetId, documentIds);
 
             if (result) {
-                log.info("文档解析命令发送成功，准备同步本地影子库状态，datasetId: {}, documentIds: {}", datasetId, documentIds);
-                // 指令成功后立即更新本地影子状态为 RUNNING 和 解析中(1)，确保 Local-First 列表能立即反馈
+                String runStatus = adapter.isDocumentParsingSynchronous() ? "DONE" : "RUNNING";
+                double progress = adapter.isDocumentParsingSynchronous() ? 1.0 : 0.0;
                 documentDao.update(null, new UpdateWrapper<DocumentEntity>()
-                        .set("run", "RUNNING")
+                        .set("run", runStatus)
                         .set("status", "1")
+                        .set("progress", progress)
                         .set("updated_at", new Date())
                         .eq("dataset_id", datasetId)
                         .in("document_id", documentIds));
 
-                log.info("文档本地状态已更新为 RUNNING");
+                log.info("文档解析状态已更新: datasetId={}, run={}", datasetId, runStatus);
             } else {
                 log.error("文档解析失败，datasetId: {}, documentIds: {}", datasetId, documentIds);
                 throw new RenException(ErrorCode.RAG_API_ERROR, "文档解析失败");

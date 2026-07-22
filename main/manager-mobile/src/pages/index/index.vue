@@ -18,6 +18,7 @@ import useZPaging from 'z-paging/components/z-paging/js/hooks/useZPaging.js'
 import { createAgent, deleteAgent, getAgentList } from '@/api/agent/agent'
 import { t } from '@/i18n'
 import { parseDateTime } from '@/utils'
+import { getStoredAccessToken } from '@/utils/auth'
 import { getSafeAreaInsets } from '@/utils/system'
 import { toast } from '@/utils/toast'
 
@@ -73,16 +74,22 @@ const quickActions = computed(() => [
     icon: 'add',
     action: openCreateDialog,
   },
+  {
+    label: '知识库',
+    desc: '管理文档、切片和召回测试',
+    icon: 'books',
+    action: () => uni.navigateTo({ url: '/pages/knowledge/index' }),
+  },
+  {
+    label: '长期记忆',
+    desc: '查看和维护智能体记忆',
+    icon: 'view',
+    action: () => uni.navigateTo({ url: '/pages/memory/index' }),
+  },
 ])
 
 function hasToken() {
-  try {
-    const authInfo = JSON.parse(uni.getStorageSync('token') || '{}')
-    return Boolean(authInfo?.token)
-  }
-  catch {
-    return false
-  }
+  return Boolean(getStoredAccessToken())
 }
 
 function goToLogin() {
@@ -190,7 +197,7 @@ function openCreateDialog() {
       msg: '',
       inputPlaceholder: t('home.inputPlaceholder'),
       inputValue: '',
-      inputPattern: /^.{1,64}$/i,
+      inputPattern: /^.{1,64}$/,
       inputError: t('home.createError'),
       confirmButtonText: t('home.createNow'),
       cancelButtonText: t('common.cancel'),

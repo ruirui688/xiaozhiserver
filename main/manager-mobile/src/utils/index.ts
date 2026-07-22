@@ -10,7 +10,7 @@ export const SERVER_BASE_URL_OVERRIDE_KEY = 'server_base_url_override'
  * 设置/清除/获取 运行时覆盖的服务端地址
  */
 export function setServerBaseUrlOverride(url: string) {
-  uni.setStorageSync(SERVER_BASE_URL_OVERRIDE_KEY, url)
+  uni.setStorageSync(SERVER_BASE_URL_OVERRIDE_KEY, normalizeServerBaseUrl(url))
 }
 
 export function clearServerBaseUrlOverride() {
@@ -132,9 +132,13 @@ export function getEnvBaseUrl() {
   // 若存在用户设置的覆盖地址，优先返回
   const override = getServerBaseUrlOverride()
   if (override)
-    return override
+    return normalizeServerBaseUrl(override)
 
-  return import.meta.env.VITE_SERVER_BASEURL
+  return normalizeServerBaseUrl(import.meta.env.VITE_SERVER_BASEURL)
+}
+
+function normalizeServerBaseUrl(url: string) {
+  return String(url || '').trim().replace(/\/+$/, '')
 }
 
 export function parseDateTime(value: string | number | Date | null | undefined): Date {
@@ -201,7 +205,7 @@ export function getEnvBaseUploadUrl() {
 
 /**
  * 生成SM2密钥对（十六进制格式）
- * @returns {Object} 包含公钥和私钥的对象
+ * @returns {object} 包含公钥和私钥的对象
  */
 export function generateSm2KeyPairHex() {
   // 使用sm-crypto库生成SM2密钥对

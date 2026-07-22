@@ -32,8 +32,8 @@ export default {
   dashboard(agentId, callback, networkFail, fail) {
     request('GET', `/agent/${agentId}/memories`, null, callback, networkFail, fail);
   },
-  createFact(agentId, data, callback) {
-    request('POST', `/agent/${agentId}/memories/facts`, data, callback);
+  createFact(agentId, data, callback, networkFail, fail) {
+    request('POST', `/agent/${agentId}/memories/facts`, data, callback, networkFail, fail);
   },
   updateFact(agentId, memoryId, data, callback) {
     request('PUT', `/agent/${agentId}/memories/facts/${memoryId}`, data, callback);
@@ -59,11 +59,11 @@ export default {
   review(agentId, callback, networkFail, fail) {
     request('POST', `/agent/${agentId}/memories/review`, {}, callback, networkFail, fail, 300000);
   },
-  remember(agentId, data, callback) {
-    request('POST', `/agent/${agentId}/memories/remember`, data, callback);
+  remember(agentId, data, callback, networkFail, fail) {
+    request('POST', `/agent/${agentId}/memories/remember`, data, callback, networkFail, fail, 300000);
   },
-  forget(agentId, data, callback) {
-    request('POST', `/agent/${agentId}/memories/forget`, data, callback);
+  forget(agentId, data, callback, networkFail, fail) {
+    request('POST', `/agent/${agentId}/memories/forget`, data, callback, networkFail, fail, 300000);
   },
   confirmCandidate(agentId, candidateId, callback) {
     request('POST', `/agent/${agentId}/memories/candidates/${candidateId}/confirm`, {}, callback);

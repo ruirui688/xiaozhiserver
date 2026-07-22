@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: memory
-last_verified: 2026-07-17
+last_verified: 2026-07-22
 source_paths:
   - main/xiaozhi-server/core/providers/memory
   - main/xiaozhi-server/plugins_func/functions/manage_memory.py
@@ -144,6 +144,11 @@ UPDATE  更新已有真实 memory_id
 ## 7. 管理端操作
 
 管理端仍保留查看、编辑、归档、删除、手工记住、手工忘记、历史重建和主动审查。这些是用户明确触发的维护操作，不属于实时对话自动抽取。
+
+管理端和移动端的手工“记住”直接调用 `/agent/{agentId}/memories/facts` 写入共享事实，
+不依赖维护模型，写入记录标记为 `confirmation_state=manual`。设备主模型调用
+`manage_memory` 时仍经过维护模型做结构化；即使维护模型返回非法 JSON 或 `NONE`，
+也不能撤销主模型已经作出的保存决定，正文会回退为原工具指令。
 
 清空后重建不会边调用模型边删除事实。系统先生成并验证仅含 `ADD` / `NONE` 的重建动作，再用一个短事务原子替换旧事实；任何写入失败都会回滚并保留事务开始前的记忆。管理页面在重建、重审或清空期间禁止重复维护操作，长任务代理超时必须覆盖前端请求预算，网络中断时不得静默显示空列表或泛化成功。
 

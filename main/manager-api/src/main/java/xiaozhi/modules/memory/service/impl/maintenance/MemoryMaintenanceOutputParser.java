@@ -36,6 +36,28 @@ public class MemoryMaintenanceOutputParser {
         return parseObject(output, "Stage 2 决策结果");
     }
 
+    /**
+     * The remember decision is authoritative upstream: maintenance may structure it
+     * as ADD/UPDATE, but must not turn it into a no-op. Some providers also wrap a
+     * single decision in the actions array used by the batch prompts.
+     */
+    public JSONObject parseRememberDecision(String output, String instructionText) {
+        JSONObject root = parseObject(output, "显式记住决策");
+        JSONObject decision = unwrapSingleAction(root);
+        if (decision == null) {
+            decision = new JSONObject();
+        }
+        String action = MemoryHelper.normalizeAction(decision.getStr("action"));
+        if (!"ADD".equals(action) && !"UPDATE".equals(action)) {
+            decision.set("action", "ADD");
+            decision.remove("related_memory_id");
+        }
+        if (StringUtils.isBlank(decision.getStr("canonical_text"))) {
+            decision.set("canonical_text", StringUtils.trimToEmpty(instructionText));
+        }
+        return decision;
+    }
+
     public JSONArray parseActionsResult(String output) {
         JSONObject root = parseObject(output, "维护动作列表");
         if (root == null) {
@@ -89,6 +111,20 @@ public class MemoryMaintenanceOutputParser {
             log.warn("解析{}失败: {}", resultType, e.getMessage());
             return null;
         }
+    }
+
+    private JSONObject unwrapSingleAction(JSONObject root) {
+        if (root == null) {
+            return null;
+        }
+        if (StringUtils.isNotBlank(root.getStr("action"))) {
+            return root;
+        }
+        JSONArray actions = root.getJSONArray("actions");
+        if (actions == null || actions.size() != 1) {
+            return root;
+        }
+        return MemoryHelper.toJsonObject(actions.get(0));
     }
 
     private JSONArray singleton(JSONObject value) {

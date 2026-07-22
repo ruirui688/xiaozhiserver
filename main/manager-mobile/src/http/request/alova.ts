@@ -5,7 +5,9 @@ import { createAlova } from 'alova'
 import { createServerTokenAuthentication } from 'alova/client'
 import VueHook from 'alova/vue'
 import { getEnvBaseUrl } from '@/utils'
+import { getStoredAccessToken } from '@/utils/auth'
 import { toast } from '@/utils/toast'
+import { clearCurrentWorkspaceId, getCurrentWorkspaceId } from '@/utils/workspace'
 import { ContentTypeEnum, ResultEnum, ShowMessage } from './enum'
 
 const isDebug = import.meta.env.DEV
@@ -74,14 +76,18 @@ const alovaInstance = createAlova({
 
     // 处理认证信息
     if (!ignoreAuth) {
-      const authInfo = JSON.parse(uni.getStorageSync('token') || '{}')
-      if (!authInfo.token) {
+      const token = getStoredAccessToken()
+      if (!token) {
         // 跳转到登录页
         uni.reLaunch({ url: '/pages/login/index' })
         throw new Error('[请求错误]：未登录')
       }
       // 添加 Authorization 头
-      method.config.headers.Authorization = `Bearer ${authInfo.token}`
+      method.config.headers.Authorization = `Bearer ${token}`
+
+      const workspaceId = getCurrentWorkspaceId()
+      if (workspaceId)
+        method.config.headers['X-Workspace-Id'] = workspaceId
     }
 
     // 处理动态域名
@@ -127,6 +133,7 @@ const alovaInstance = createAlova({
         // 清除token并跳转到登录页
         uni.removeStorageSync('token')
         uni.removeStorageSync('userInfo')
+        clearCurrentWorkspaceId()
         uni.reLaunch({ url: '/pages/login/index' })
         throw new Error(`请求错误[${code}]：${msg}`)
       }

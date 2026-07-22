@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: xiaozhi-server
-last_verified: 2026-07-20
+last_verified: 2026-07-22
 source_paths:
   - main/xiaozhi-server/core
 ---
@@ -235,6 +235,17 @@ providers/tts/base.py:375-416  tts_text_priority_thread（守护线程）
 ```
 
 SeedTTS2 双流 provider 为每个 `sentence_id` 维护独立的 `FIRST/LAST` 音频边界状态。正常收到 `EVENT_SessionFinished` 时先用 `is_end=True` 冲刷不足 60ms 的 PCM 尾帧；结束等待超时、下行空闲超时、WebSocket 断开、`EVENT_SessionFailed` 或监听任务异常退出时丢弃不完整 PCM 尾帧。只要本轮已经发布 `FIRST`，所有这些路径都会通过同一幂等收尾函数发布且只发布一次 `SentenceType.LAST`；迟到的结束事件不得重复产生 `LAST`，非当前会话的残余事件不得重置当前活跃会话。
+
+`tts_text_queue` 中的 `SentenceType.FIRST` 是本地逻辑轮次边界，不等同于火山上游的
+`EVENT_StartSession`。在 `function_call` 模式下，主 LLM 的普通文本可能需要等完整响应结束、确认没有
+工具调用后才进入 TTS；如果 provider 在逻辑 `FIRST` 到达时就启动上游会话，会在尚无真实文本的阶段
+空等，长回复可能让上游会话先因空闲失效，随后提交文本却得到零音频。
+
+因此 SeedTTS2 使用懒启动约定：逻辑 `FIRST` 只重置本轮流状态、登记 `sentence_id` 并准备幂等边界；
+第一段经清洗后非空的 `ContentType.TEXT` 或路径有效的 `ContentType.FILE` 到达时，才为该轮启动一次上游会话。后续文本
+和文件复用同一会话，逻辑 `LAST` 只结束已经实际启动的上游会话；整轮没有真实内容时不得为了收尾再
+创建空会话。该变化只调整厂商会话的启动时点，设备侧仍以实际音频对应的 `FIRST/LAST` 建立
+`tts start/stop`，并继续保证同一 `sentence_id` 最多各发送一次。
 
 设备控制协议在连接级额外记录当前 `sentence_id` 的 `tts start/stop` 发送状态，同一轮重复的 `FIRST/LAST` 不得形成第二个 `start/stop`。因此 provider 异常不能再让设备永久停留在 `speaking`。用户主动 abort 仍由打断链路直接发送 `tts stop`，provider 异常收尾检测到 abort 后不重复发送。
 
@@ -566,6 +577,7 @@ connection.py:325-360  _save_and_close()
 | 16 | 豆包流式 ASR 判停、等待边界和重连清理不完整 | 本地 VAD 判停发送 LAST，增加 10s 初始化、15s 中间结果和 5s 最终结果预算，并按会话身份清理状态 |
 | 17 | SeedTTS2 不足 60ms 的 Opus 尾帧跨会话残留 | 正常结束冲刷尾帧，取消/失败/断链重置编码器 |
 | 18 | 声纹采样截断导致长句后半段身份特征丢失 | 对齐官方上游：VAD 句末上传当前整段语音 WAV，与 ASR 并发识别；`server.voiceprint_sample_seconds` 保留为历史参数但运行时不再使用 |
+| 19 | function-call 普通文本延后入队时，SeedTTS2 上游会话因提前启动而空闲失效 | 逻辑 `FIRST` 只建立轮次状态，首段有效 `TEXT/FILE` 到达时才懒启动上游会话，并保持设备 `FIRST/LAST` 幂等 |
 
 ## 13. 排查方法
 

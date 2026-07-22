@@ -16,6 +16,7 @@ source_paths:
 2. [云端运行与配置链路](./architecture/cloud-runtime-architecture.md) - 后台配置如何进入 Python 实时服务并影响设备行为。
 3. [当前代码地图](./architecture/current-code-map.md) - 源码入口、关键目录和验证矩阵。
 4. [仓库事实](./generated/repository-facts.md) - 自动生成的技术版本、模块规模、迁移登记和热点文件数据。
+5. [当前仓库与官方上游能力审计](./reports/current-vs-upstream-capability-audit.md) - 按提交基线说明能力差异、必要性和同步策略。
 
 模块开发入口：
 
@@ -56,7 +57,7 @@ source_paths:
 - **第三方集成**：从[飞书智能体集成](./integrations/feishu-integration.md)、[Home Assistant](./integrations/homeassistant-integration.md)进入协作平台、短信、新闻、天气等外部能力接入。
 - **MCP**：从[MCP 三类链路](./architecture/mcp-chains.md)或[MCP Endpoint 启用](./mcp/mcp-endpoint-enable.md)进入设备上下文、视觉和无代码工具专题。
 - **模型**：从[模型管理](./models/model-management.md)进入 ASR、TTS、LLM、声纹、记忆、RAG 和性能专题。
-- **分析报告**：[reports/README.md](./reports/README.md) 汇总阶段性评测与问题分析；当前可直接查看 [FunASR / SenseVoice 资源基准](./models/funasr-sensevoice-resource-benchmark.md)。
+- **分析报告**：[reports/README.md](./reports/README.md) 汇总阶段性评测与问题分析；当前可直接查看[仓库与官方上游能力审计](./reports/current-vs-upstream-capability-audit.md)和 [FunASR / SenseVoice 资源基准](./models/funasr-sensevoice-resource-benchmark.md)。
 
 专项文档只解释所属能力。跨模块的当前事实应回写架构文档，强制约束应回写规范文档，避免在多个教程中各自维护一套架构描述。
 

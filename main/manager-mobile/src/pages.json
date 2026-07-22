@@ -125,6 +125,36 @@
       }
     },
     {
+      "path": "pages/knowledge/config",
+      "type": "page",
+      "needLogin": true,
+      "layout": "default",
+      "style": {
+        "navigationBarTitleText": "切片配置",
+        "backgroundColor": "#f5f7fa"
+      }
+    },
+    {
+      "path": "pages/knowledge/documents",
+      "type": "page",
+      "needLogin": true,
+      "layout": "default",
+      "style": {
+        "navigationBarTitleText": "知识库文档",
+        "backgroundColor": "#f5f7fa"
+      }
+    },
+    {
+      "path": "pages/knowledge/index",
+      "type": "page",
+      "needLogin": true,
+      "layout": "default",
+      "style": {
+        "navigationBarTitleText": "知识库",
+        "backgroundColor": "#f5f7fa"
+      }
+    },
+    {
       "path": "pages/login/privacy-policy-zh",
       "type": "page",
       "layout": "default",
@@ -140,6 +170,16 @@
       "style": {
         "navigationStyle": "custom",
         "navigationBarTitleText": "用户协议"
+      }
+    },
+    {
+      "path": "pages/memory/index",
+      "type": "page",
+      "needLogin": true,
+      "layout": "default",
+      "style": {
+        "navigationBarTitleText": "长期记忆",
+        "backgroundColor": "#f5f7fa"
       }
     },
     {

@@ -23,6 +23,7 @@ import {
 } from '@/api/workspace'
 import { useUserStore } from '@/store'
 import { parseDateTime } from '@/utils'
+import { clearCurrentWorkspaceId, getCurrentWorkspaceId, setCurrentWorkspaceId } from '@/utils/workspace'
 
 defineOptions({
   name: 'OrganizationPage',
@@ -36,7 +37,7 @@ const loading = ref(false)
 const memberLoading = ref(false)
 const loadError = ref('')
 const workspaceList = ref<Workspace[]>([])
-const currentWorkspaceId = ref(uni.getStorageSync('currentWorkspaceId') || '')
+const currentWorkspaceId = ref(getCurrentWorkspaceId())
 const members = ref<WorkspaceMember[]>([])
 const inviteCode = ref('')
 const lastInviteCode = ref('')
@@ -126,7 +127,7 @@ async function loadWorkspaces(preferredWorkspaceId = currentWorkspaceId.value) {
     else {
       currentWorkspaceId.value = ''
       members.value = []
-      uni.removeStorageSync('currentWorkspaceId')
+      clearCurrentWorkspaceId()
     }
   }
   catch (error) {
@@ -140,7 +141,7 @@ async function loadWorkspaces(preferredWorkspaceId = currentWorkspaceId.value) {
 
 async function selectWorkspace(workspaceId: string) {
   currentWorkspaceId.value = workspaceId
-  uni.setStorageSync('currentWorkspaceId', workspaceId)
+  setCurrentWorkspaceId(workspaceId)
   await loadMembers()
 }
 
@@ -267,7 +268,7 @@ function confirmLeaveWorkspace() {
         await leaveWorkspace(currentWorkspaceId.value)
         toast.success('已退出工作空间')
         currentWorkspaceId.value = ''
-        uni.removeStorageSync('currentWorkspaceId')
+        clearCurrentWorkspaceId()
         await loadWorkspaces('')
       }
       catch (error) {

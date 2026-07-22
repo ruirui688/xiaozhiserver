@@ -433,7 +433,7 @@ public class MemoryServiceImpl implements MemoryService {
         fact.setImportance(MemoryHelper.DEFAULT_SCORE);
         fact.setConfidence(MemoryHelper.DEFAULT_SCORE);
         fact.setSensitivity("normal");
-        fact.setConfirmationState("auto");
+        fact.setConfirmationState("user".equalsIgnoreCase(actorType) ? "manual" : "auto");
         fact.setStatus(MemoryHelper.STATUS_ACTIVE);
         if (StringUtils.isNotBlank(memoryTier)) {
             fact.setMemoryTier(memoryTier);

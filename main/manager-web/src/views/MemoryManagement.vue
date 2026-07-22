@@ -23,8 +23,8 @@
         <el-button size="small" icon="el-icon-view" :loading="reviewLoading && maintenanceOperation === '预览重审'" :disabled="maintenanceBusy" @click="handleReviewPreview">预览重审</el-button>
         <el-button size="small" type="primary" icon="el-icon-refresh" :loading="reviewLoading && maintenanceOperation === '重审记忆'" :disabled="maintenanceBusy" @click="handleReview">重审记忆</el-button>
         <el-button size="small" type="danger" icon="el-icon-delete" :loading="clearLoading" :disabled="maintenanceBusy" @click="handleClear">清空记忆</el-button>
-        <el-button size="small" icon="el-icon-edit" @click="showRemember = !showRemember">记住</el-button>
-        <el-button size="small" icon="el-icon-delete" @click="showForget = !showForget">忘记</el-button>
+        <el-button size="small" icon="el-icon-edit" :disabled="maintenanceBusy" @click="showRemember = !showRemember">记住</el-button>
+        <el-button size="small" icon="el-icon-delete" :disabled="maintenanceBusy" @click="showForget = !showForget">忘记</el-button>
         <el-button size="small" icon="el-icon-refresh" @click="fetch" :loading="loading">刷新</el-button>
         <el-button size="small" icon="el-icon-back" @click="$router.push('/')">返回</el-button>
       </div>
@@ -43,12 +43,12 @@
     <transition name="slide-down">
       <div class="quick-action-bar" v-if="showRemember || showForget">
         <template v-if="showRemember">
-          <el-input v-model="rememberText" placeholder="输入需要记住的内容…" size="small" clearable @keyup.enter.native="handleRemember" style="width:320px" />
-          <el-button type="primary" size="small" icon="el-icon-plus" @click="handleRemember">记住</el-button>
+          <el-input v-model="rememberText" placeholder="输入需要记住的内容…" size="small" clearable :disabled="maintenanceBusy" @keyup.enter.native="handleRemember" style="width:320px" />
+          <el-button type="primary" size="small" icon="el-icon-plus" :loading="rememberLoading" :disabled="maintenanceBusy && !rememberLoading" @click="handleRemember">记住</el-button>
         </template>
         <template v-if="showForget">
-          <el-input v-model="forgetText" placeholder="输入需要忘记的内容…" size="small" clearable @keyup.enter.native="handleForget" style="width:320px;margin-left:16px" />
-          <el-button type="danger" size="small" icon="el-icon-delete" @click="handleForget">忘记</el-button>
+          <el-input v-model="forgetText" placeholder="输入需要忘记的内容…" size="small" clearable :disabled="maintenanceBusy" @keyup.enter.native="handleForget" style="width:320px;margin-left:16px" />
+          <el-button type="danger" size="small" icon="el-icon-delete" :loading="forgetLoading" :disabled="maintenanceBusy && !forgetLoading" @click="handleForget">忘记</el-button>
         </template>
       </div>
     </transition>
@@ -258,6 +258,8 @@ export default {
       showForget: false,
       rememberText: '',
       forgetText: '',
+      rememberLoading: false,
+      forgetLoading: false,
       // Detail panel
       detailVisible: false,
       detailItem: {},
@@ -311,7 +313,8 @@ export default {
       return this.previewCandidates.length
     },
     maintenanceBusy() {
-      return this.rebuildLoading || this.reviewLoading || this.clearLoading || this.maintenanceRecoveryPending
+      return this.rebuildLoading || this.reviewLoading || this.clearLoading ||
+        this.rememberLoading || this.forgetLoading || this.maintenanceRecoveryPending
     },
     maintenanceStatusText() {
       if (this.maintenanceRecoveryPending) {
@@ -667,20 +670,36 @@ export default {
     // --- Quick remember/forget ---
     handleRemember() {
       if (!this.rememberText.trim()) return
-      Api.memory.remember(this.agentId, { text: this.rememberText.trim(), category: 'manual' }, () => {
-        this.$message.success('已交给维护模型处理')
+      if (!this.beginMaintenance('记住', 'rememberLoading')) return
+      Api.memory.createFact(this.agentId, {
+        canonicalText: this.rememberText.trim(),
+        category: '手动记录',
+        memoryType: '长期记忆'
+      }, () => {
+        this.finishMaintenance('rememberLoading')
+        this.$message.success('记忆已保存')
         this.rememberText = ''
         this.showRemember = false
         this.fetch()
+      }, (error) => {
+        this.handleUncertainMaintenanceFailure('记住', 'rememberLoading', error)
+      }, (error) => {
+        this.handlePreviewFailure('记住', 'rememberLoading', error)
       })
     },
     handleForget() {
       if (!this.forgetText.trim()) return
+      if (!this.beginMaintenance('忘记', 'forgetLoading')) return
       Api.memory.forget(this.agentId, { text: this.forgetText.trim(), reason: '管理端手动忘记' }, () => {
-        this.$message.success('已交给维护模型处理')
+        this.finishMaintenance('forgetLoading')
+        this.$message.success('忘记操作已完成')
         this.forgetText = ''
         this.showForget = false
         this.fetch()
+      }, (error) => {
+        this.handleUncertainMaintenanceFailure('忘记', 'forgetLoading', error)
+      }, (error) => {
+        this.handlePreviewFailure('忘记', 'forgetLoading', error)
       })
     }
   }

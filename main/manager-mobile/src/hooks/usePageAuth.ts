@@ -1,19 +1,13 @@
 import { onLoad } from '@dcloudio/uni-app'
 import { useUserStore } from '@/store'
 import { needLoginPages as _needLoginPages, getNeedLoginPages } from '@/utils'
+import { getStoredAccessToken } from '@/utils/auth'
 
 const loginRoute = import.meta.env.VITE_LOGIN_URL
 const isDev = import.meta.env.DEV
 function isLogined() {
-  try {
-    const authInfo = JSON.parse(uni.getStorageSync('token') || '{}')
-    if (authInfo?.token) {
-      return true
-    }
-  }
-  catch {
-    return false
-  }
+  if (getStoredAccessToken())
+    return true
   const userStore = useUserStore()
   return !!userStore.userInfo.username
 }

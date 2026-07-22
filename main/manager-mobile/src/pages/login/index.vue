@@ -11,11 +11,12 @@
 <script lang="ts" setup>
 import type { LoginData } from '@/api/auth'
 import { computed, ref } from 'vue'
-import { login } from '@/api/auth'
+import { login, wxBind, wxLogin } from '@/api/auth'
 import { initI18n, t } from '@/i18n'
 import { useConfigStore, useUserStore } from '@/store'
 // 导入SM2加密工具
 import { getEnvBaseUrl, sm2Encrypt } from '@/utils'
+import { storeLoginToken } from '@/utils/auth'
 import { getSafeAreaInsets } from '@/utils/system'
 import { toast } from '@/utils/toast'
 
@@ -33,6 +34,7 @@ const formData = ref({
 // 验证码图片
 const captchaImage = ref('')
 const loading = ref(false)
+const wxLoading = ref(false)
 
 // 登录方式：'username' | 'mobile'
 const loginType = ref<'username' | 'mobile'>('username')
@@ -119,6 +121,51 @@ async function enterHome() {
   uni.reLaunch({
     url: '/pages/index/index',
   })
+}
+
+async function bindCurrentWechatAccount() {
+  // #ifdef MP-WEIXIN
+  try {
+    const result = await uni.login({ provider: 'weixin' })
+    if (result.code)
+      await wxBind({ code: result.code })
+  }
+  catch {
+    toast.warning(t('login.wxBindFailed'))
+  }
+  // #endif
+}
+
+function loginErrorMessage(error: unknown, fallback: string) {
+  if (typeof error === 'string')
+    return error
+  if (error instanceof Error)
+    return error.message || fallback
+  if (error && typeof error === 'object' && 'errMsg' in error)
+    return String((error as { errMsg?: string }).errMsg || fallback)
+  return fallback
+}
+
+async function handleWxLogin() {
+  // #ifdef MP-WEIXIN
+  try {
+    wxLoading.value = true
+    const result = await uni.login({ provider: 'weixin' })
+    if (!result.code)
+      throw new Error(t('login.wxCodeMissing'))
+
+    const response = await wxLogin({ code: result.code })
+    storeLoginToken(response)
+    await enterHome()
+    toast.success(t('message.loginSuccess'))
+  }
+  catch (error) {
+    toast.warning(loginErrorMessage(error, t('login.wxLoginFailed')))
+  }
+  finally {
+    wxLoading.value = false
+  }
+  // #endif
 }
 
 // 生成UUID
@@ -270,7 +317,8 @@ async function handleLogin() {
 
     const response = await login(loginData)
     // 存储token
-    uni.setStorageSync('token', JSON.stringify(response))
+    storeLoginToken(response)
+    await bindCurrentWechatAccount()
 
     toast.success(t('message.loginSuccess'))
 
@@ -300,7 +348,6 @@ async function handleLogin() {
 
 // 初始化国际化
 initI18n()
-
 </script>
 
 <template>
@@ -327,126 +374,139 @@ initI18n()
 
     <view class="form-container">
       <view class="form">
+        <!-- #ifdef MP-WEIXIN -->
+        <view class="wechat-entry" :class="{ disabled: wxLoading }" @click="handleWxLogin">
+          <wd-icon name="wechat" custom-class="wechat-icon" />
+          <text>{{ wxLoading ? t('login.loggingIn') : t('login.wechatLoginButton') }}</text>
+        </view>
+        <view class="login-divider">
+          <view class="divider-line" />
+          <text>{{ t('login.passwordLogin') }}</text>
+          <view class="divider-line" />
+        </view>
+        <!-- #endif -->
         <view class="password-form">
-            <!-- 手机号登录 -->
-            <template v-if="loginType === 'mobile'">
-              <view class="input-group">
-                <view class="input-wrapper mobile-wrapper">
-                  <view class="area-code-selector" @click="openAreaCodeSheet">
-                    <text class="area-code-text">
-                      {{ selectedAreaCode }}
-                    </text>
-                    <wd-icon name="arrow-down" custom-class="area-code-arrow" />
-                  </view>
-                  <view class="mobile-input-wrapper">
-                    <wd-input
-                      v-model="formData.mobile"
-                      custom-class="styled-input"
-                      no-border
-                      :placeholder="t('login.enterPhone')"
-                      type="number"
-                      :maxlength="11"
-                    />
-                  </view>
+          <!-- 手机号登录 -->
+          <template v-if="loginType === 'mobile'">
+            <view class="input-group">
+              <view class="input-wrapper mobile-wrapper">
+                <view class="area-code-selector" @click="openAreaCodeSheet">
+                  <text class="area-code-text">
+                    {{ selectedAreaCode }}
+                  </text>
+                  <wd-icon name="arrow-down" custom-class="area-code-arrow" />
                 </view>
-              </view>
-            </template>
-
-            <!-- 用户名登录 -->
-            <template v-else>
-              <view class="input-group">
-                <view class="input-wrapper">
+                <view class="mobile-input-wrapper">
                   <wd-input
-                    v-model="formData.username"
+                    v-model="formData.mobile"
                     custom-class="styled-input"
                     no-border
-                    :placeholder="t('login.enterUsername')"
+                    :placeholder="t('login.enterPhone')"
+                    type="number"
+                    :maxlength="11"
                   />
                 </view>
               </view>
-            </template>
+            </view>
+          </template>
 
+          <!-- 用户名登录 -->
+          <template v-else>
             <view class="input-group">
               <view class="input-wrapper">
                 <wd-input
-                  v-model="formData.password"
+                  v-model="formData.username"
                   custom-class="styled-input"
                   no-border
-                  :placeholder="t('login.enterPassword')"
-                  clearable
-                  show-password
-                  :maxlength="20"
+                  :placeholder="t('login.enterUsername')"
                 />
               </view>
             </view>
+          </template>
 
-            <view class="input-group">
-              <view class="input-wrapper captcha-wrapper">
-                <wd-input
-                  v-model="formData.captcha"
-                  custom-class="styled-input"
-                  no-border
-                  :placeholder="t('login.enterCaptcha')"
-                  :maxlength="6"
-                />
-                <view class="captcha-image" @click="refreshCaptcha">
-                  <image v-if="captchaImage" :src="captchaImage" class="captcha-img" />
-                  <text v-else class="captcha-placeholder">
-                    {{ t('login.loadCaptcha') }}
-                  </text>
-                </view>
-              </view>
+          <view class="input-group">
+            <view class="input-wrapper">
+              <wd-input
+                v-model="formData.password"
+                custom-class="styled-input"
+                no-border
+                :placeholder="t('login.enterPassword')"
+                clearable
+                show-password
+                :maxlength="20"
+              />
             </view>
-            <view
-              class="login-btn"
-              @click="handleLogin"
-            >
-              {{ loading ? t('login.loggingIn') : t('login.loginButton') }}
-            </view>
+          </view>
 
-            <view class="hint-row">
-              <view class="register-hint">
-                <text class="register-link" @click="goToRegister">
-                  {{ t('login.noAccount') }}
-                </text>
-              </view>
-
-              <view class="forgot-password">
-                <text class="forgot-text" @click="goToForgotPassword">
-                  {{ t('login.forgotPassword') }}
+          <view class="input-group">
+            <view class="input-wrapper captcha-wrapper">
+              <wd-input
+                v-model="formData.captcha"
+                custom-class="styled-input"
+                no-border
+                :placeholder="t('login.enterCaptcha')"
+                :maxlength="6"
+              />
+              <view class="captcha-image" @click="refreshCaptcha">
+                <image v-if="captchaImage" :src="captchaImage" class="captcha-img" />
+                <text v-else class="captcha-placeholder">
+                  {{ t('login.loadCaptcha') }}
                 </text>
               </view>
             </view>
+          </view>
+          <view
+            class="login-btn"
+            @click="handleLogin"
+          >
+            {{ loading ? t('login.loggingIn') : t('login.loginButton') }}
+          </view>
 
-            <view class="policy-links">
-              <text class="policy-link" @click="goToUserAgreement">
-                {{ t('login.userAgreement') }}
-              </text>
-              <text class="policy-divider">|</text>
-              <text class="policy-link" @click="goToPrivacyPolicy">
-                {{ t('login.privacyPolicy') }}
+          <view class="hint-row">
+            <view class="register-hint">
+              <text class="register-link" @click="goToRegister">
+                {{ t('login.noAccount') }}
               </text>
             </view>
 
-            <!-- 登录方式切换 -->
-            <view v-if="enableMobileLogin" class="login-type-switch">
-              <view class="switch-tabs">
-                <view
-                  class="switch-tab"
-                  :class="{ active: loginType === 'username' }"
-                  @click="toggleLoginType"
-                >
-                  <wd-icon name="user" />
-                </view>
-                <view
-                  class="switch-tab"
-                  :class="{ active: loginType === 'mobile' }"
-                  @click="toggleLoginType"
-                >
-                  <wd-icon name="phone" />
-                </view>
+            <view class="forgot-password">
+              <text class="forgot-text" @click="goToForgotPassword">
+                {{ t('login.forgotPassword') }}
+              </text>
+            </view>
+          </view>
+
+          <view class="policy-links">
+            <text class="policy-link" @click="goToUserAgreement">
+              {{ t('login.userAgreement') }}
+            </text>
+            <text class="policy-divider">
+              |
+            </text>
+            <text class="policy-link" @click="goToPrivacyPolicy">
+              {{ t('login.privacyPolicy') }}
+            </text>
+          </view>
+
+          <!-- 登录方式切换 -->
+          <view v-if="enableMobileLogin" class="login-type-switch">
+            <view class="switch-tabs">
+              <view
+                class="switch-tab"
+                :class="{ active: loginType === 'username' }"
+                @click="toggleLoginType"
+              >
+                <wd-icon name="user" />
+              </view>
+              <view
+                class="switch-tab"
+                :class="{ active: loginType === 'mobile' }"
+                @click="toggleLoginType"
+              >
+                <wd-icon name="phone" />
               </view>
             </view>
+          </view>
         </view>
       </view>
     </view>
@@ -493,7 +553,6 @@ initI18n()
         </view>
       </view>
     </wd-action-sheet>
-
   </view>
 </template>
 
@@ -569,7 +628,10 @@ initI18n()
         padding: 15rpx 16rpx;
         border: 1rpx solid #dce4f0;
         background: #f8fafc;
-        transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+        transition:
+          border-color 0.2s ease,
+          box-shadow 0.2s ease,
+          background 0.2s ease;
         display: flex;
         align-items: center;
         min-height: 58rpx;
@@ -625,7 +687,10 @@ initI18n()
             align-items: center;
             justify-content: space-between;
             cursor: pointer;
-            transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+            transition:
+              border-color 0.2s ease,
+              box-shadow 0.2s ease,
+              background 0.2s ease;
 
             &:hover {
               border-color: #4d80f0;
@@ -652,7 +717,10 @@ initI18n()
             border-radius: 12rpx;
             padding: 15rpx 16rpx;
             border: 1rpx solid #dce4f0;
-            transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+            transition:
+              border-color 0.2s ease,
+              box-shadow 0.2s ease,
+              background 0.2s ease;
 
             &:focus-within {
               border-color: #4d80f0;
@@ -730,7 +798,9 @@ initI18n()
       color: #ffffff;
       margin-bottom: 22rpx;
       box-shadow: 0 8rpx 18rpx rgba(77, 128, 240, 0.24);
-      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      transition:
+        transform 0.2s ease,
+        box-shadow 0.2s ease;
       background-color: var(--wot-button-primary-bg-color, var(--wot-color-theme, #4d80f0));
       text-align: center;
       line-height: 76rpx;
@@ -803,6 +873,46 @@ initI18n()
 
 .password-form {
   display: block;
+}
+
+.wechat-entry {
+  height: 76rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12rpx;
+  border-radius: 12rpx;
+  background: #07c160;
+  color: #ffffff;
+  font-size: 29rpx;
+  font-weight: 600;
+
+  &:active {
+    background: #06ad56;
+  }
+
+  &.disabled {
+    opacity: 0.6;
+  }
+}
+
+:deep(.wechat-icon) {
+  font-size: 34rpx;
+}
+
+.login-divider {
+  margin: 24rpx 0;
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  color: #8993a3;
+  font-size: 23rpx;
+}
+
+.divider-line {
+  height: 1rpx;
+  flex: 1;
+  background: #e4e9f1;
 }
 
 // 区号选择弹窗样式
@@ -936,5 +1046,4 @@ initI18n()
     background: rgba(255, 255, 255, 0.25);
   }
 }
-
 </style>

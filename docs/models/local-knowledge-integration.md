@@ -65,6 +65,11 @@
 
 上传文档后，`LocalKnowledgeAdapter` 会按文件类型解析并写入 `ai_rag_knowledge_chunk`。大模型切片只发生在文档解析阶段，不发生在每次对话检索阶段。
 
+本地知识库的解析是同步流程：上传接口返回成功时切片已经写入，文档状态应为
+`DONE`、进度为 100%。页面上的“解析”操作只验证上传阶段的切片是否存在，不会从
+数据库切片还原原文件后再次切分。RAGFlow 知识库的解析仍是异步流程，会先显示
+`RUNNING`。
+
 当前切片流程：
 
 1. `xlsx/xls/csv/json/jsonl` 会先按表格行或问答 JSON 解析成候选切片；如果开启大模型切片，会再调用模型对每个候选切片做清洗和补全。
@@ -100,11 +105,12 @@
 
 切片逻辑只在文档解析时执行。已经上传并解析过的旧文档不会自动重切片。
 
-修改切片模型配置或模型管理中的 LLM 配置后，需要：
+本地适配器不保存可用于无损重切片的原文件。修改切片模型配置或模型管理中的 LLM
+配置后，需要：
 
 1. 重启 `manager-api`。
 2. 进入对应知识库。
-3. 对已有文档重新点击 `解析`。
+3. 删除旧文档并重新上传原文件；仅点击 `解析` 不会重建切片。
 4. 打开 `查看切片` 确认新切片质量。
 5. 使用 `召回测试` 验证问题能否命中。
 
@@ -147,6 +153,8 @@
 
 ```text
 main/manager-api/src/main/java/xiaozhi/modules/knowledge/rag/impl/LocalKnowledgeAdapter.java
+main/manager-api/src/main/java/xiaozhi/modules/knowledge/rag/impl/local/LocalKnowledgeTextSplitter.java
+main/manager-api/src/main/java/xiaozhi/modules/knowledge/rag/impl/local/KnowledgeBaseParserConfigCodec.java
 main/manager-api/src/main/java/xiaozhi/modules/knowledge/dao/KnowledgeChunkDao.java
 main/manager-api/src/main/resources/mapper/knowledge/KnowledgeChunkDao.xml
 main/manager-api/src/main/java/xiaozhi/modules/knowledge/service/impl/KnowledgeBaseServiceImpl.java

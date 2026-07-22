@@ -9,6 +9,9 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.beans.BeanUtils;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import xiaozhi.common.constant.Constant;
 import xiaozhi.common.exception.ErrorCode;
 import xiaozhi.common.exception.RenException;
@@ -28,6 +31,7 @@ import xiaozhi.modules.knowledge.dto.dataset.DatasetDTO;
 import xiaozhi.modules.knowledge.entity.KnowledgeBaseEntity;
 import xiaozhi.modules.knowledge.rag.KnowledgeBaseAdapter;
 import xiaozhi.modules.knowledge.rag.KnowledgeBaseAdapterFactory;
+import xiaozhi.modules.knowledge.rag.impl.local.KnowledgeBaseParserConfigCodec;
 import xiaozhi.modules.knowledge.service.KnowledgeBaseService;
 import xiaozhi.modules.model.dao.ModelConfigDao;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
@@ -59,6 +63,7 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
     private final RedisUtils redisUtils;
     private final WorkspaceService workspaceService;
     private final WorkspacePermissionService workspacePermissionService;
+    private final ObjectMapper objectMapper;
 
     @Override
     public PageData<KnowledgeBaseDTO> getPageList(KnowledgeBaseDTO knowledgeBaseDTO, Integer page, Integer limit) {
@@ -250,6 +255,8 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
 
             DatasetDTO.CreateReq createReq = ConvertUtils.sourceToTarget(dto, DatasetDTO.CreateReq.class);
             createReq.setName(SecurityUser.getUser().getUsername() + "_" + dto.getName());
+            createReq.setParserConfig(
+                    KnowledgeBaseParserConfigCodec.decodeDatasetConfig(dto.getParserConfig(), objectMapper));
 
             DatasetDTO.InfoVO ragResponse = adapter.createDataset(createReq);
             if (ragResponse == null || StringUtils.isBlank(ragResponse.getId())) {
@@ -279,7 +286,7 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
             }
 
             // Parse Config (JSON)
-            if (ragResponse.getParserConfig() != null) {
+            if (StringUtils.isBlank(entity.getParserConfig()) && ragResponse.getParserConfig() != null) {
                 entity.setParserConfig(JsonUtils.toJsonString(ragResponse.getParserConfig()));
             }
 
@@ -367,13 +374,8 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
 
                     // 2. 解析器配置支持 (如果 DTO 里有字符串形式的配置，尝试转换，但优先建议 DTO 化)
                     if (StringUtils.isNotBlank(dto.getParserConfig())) {
-                        try {
-                            DatasetDTO.ParserConfig parserConfig = JsonUtils.parseObject(dto.getParserConfig(),
-                                    DatasetDTO.ParserConfig.class);
-                            updateReq.setParserConfig(parserConfig);
-                        } catch (Exception e) {
-                            log.warn("解析 parser_config 失败，跳过同步", e);
-                        }
+                        updateReq.setParserConfig(
+                                KnowledgeBaseParserConfigCodec.decodeDatasetConfig(dto.getParserConfig(), objectMapper));
                     }
 
                     adapter.updateDataset(entity.getDatasetId(), updateReq);

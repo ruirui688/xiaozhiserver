@@ -276,10 +276,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                 .replace("{category}", StringUtils.defaultString(category))
                 .replace("{existing_memories}", existingMemories);
         String output = llmService.generateJson(prompt, maintenanceModelId);
-        JSONObject decision = outputParser.parseDecisionResult(output);
-        if (decision == null) {
-            throw new IllegalStateException("记忆维护模型未返回有效决策");
-        }
+        JSONObject decision = outputParser.parseRememberDecision(output, text);
         decision.set("_manual_instruction", true);
         MemorySpeakerUtils.applyInternalIdentity(decision, speaker);
         boolean changed = applyMaintenanceDecision(agent, scopeId, null, decision, maintenanceModelId, false, null);

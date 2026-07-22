@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: knowledge
-last_verified: 2026-07-12
+last_verified: 2026-07-22
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/knowledge
   - main/xiaozhi-server/plugins_func/functions/search_from_local_knowledge.py
@@ -94,6 +94,15 @@ LocalKnowledgeAdapter.parseFile()  (1658 行)
     → 每 chunk 清理/提取 question+answer
     → 失败 → 保留原始 chunk（graceful degradation）
 ```
+
+本地适配器在上传请求内同步完成解析、切片和入库，上传成功时文档状态直接为
+`DONE`。`POST /chunks` 对本地文档只校验上传阶段生成的切片是否仍然存在，
+不会把已有切片反向拼接成有损原文后重新切片；缺少切片时必须重新上传原文件。
+RAGFlow 适配器仍通过 `POST /chunks` 异步启动解析，状态先进入 `RUNNING`。
+
+知识库新增和更新时，`parserConfig` 字符串在 manager-api 边界显式解码为
+RAG 请求 DTO；数据库继续保存用户提交的完整 JSON。远端响应仅在用户未提交配置时
+用于补全，不能覆盖本地切片、模型和召回扩展字段。
 
 ### 3.2 向量嵌入（新增）
 
@@ -215,6 +224,7 @@ LLM 调用 search_from_local_knowledge / search_from_ragflow
 | FileUploadPanel | `components/knowledge/FileUploadPanel.vue` | 拖拽上传面板 |
 | FilePreviewDialog | `components/knowledge/FilePreviewDialog.vue` | 分块预览 |
 | KnowledgeBaseSelectorDialog | `components/KnowledgeBaseSelectorDialog.vue` | 智能体选择 KB |
+| manager-mobile knowledge pages | `manager-mobile/src/pages/knowledge/` | 小程序知识库、文档、切片与召回测试 |
 
 ### 6.2 上传限制
 
@@ -267,6 +277,8 @@ LLM 调用 search_from_local_knowledge / search_from_ragflow
 | 11 | embeddingModel 字段 UI 误导 | 添加 Javadoc 说明 |
 | 12 | dataset 删除孤儿 chunk | 添加 chunk 级联清理 |
 | 13 | Knowledge-Memory 无编排 | 添加 TODO 注释 |
+| 14 | 新增/更新时 parserConfig 被转换丢失或被远端响应覆盖 | 边界显式解码，原始完整 JSON 优先持久化 |
+| 15 | 本地文档已同步切片却被标记为 RUNNING | 适配器声明同步解析，服务写入 DONE/100% |
 
 ## 9. 排查方法
 

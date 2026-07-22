@@ -64,6 +64,8 @@ import xiaozhi.modules.knowledge.entity.KnowledgeBaseEntity;
 import xiaozhi.modules.knowledge.entity.KnowledgeChunkEntity;
 import xiaozhi.modules.knowledge.rag.KnowledgeBaseAdapter;
 import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeConfigParser;
+import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeDocumentFormats;
+import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeTextSplitter;
 import xiaozhi.modules.llm.service.EmbeddingService;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
@@ -104,7 +106,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private String embeddingBaseUrl;
     private String embeddingApiKey;
     private String embeddingModel;
-    private boolean llmChunkingFailed;
+    private final ThreadLocal<Boolean> llmChunkingFailed = ThreadLocal.withInitial(() -> false);
     private boolean hasRetrievalConfig;
     private String retrievalMode = "normal";
     private String searchType = "semantic";
@@ -117,6 +119,11 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     @Override
     public String getAdapterType() {
         return ADAPTER_TYPE;
+    }
+
+    @Override
+    public boolean isDocumentParsingSynchronous() {
+        return true;
     }
 
     @Override
@@ -211,10 +218,17 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     public KnowledgeFilesDTO uploadDocument(DocumentDTO.UploadReq req) {
         String documentId = newId();
         String filename = StringUtils.defaultIfBlank(req.getName(), req.getFile().getOriginalFilename());
+        if (!LocalKnowledgeDocumentFormats.supports(filename)) {
+            throw new RenException(ErrorCode.UPLOAD_FILE_ERROR,
+                    "本地知识库不支持该文件格式，请上传 txt/md/mdx/csv/xls/xlsx/json/jsonl/qa 文件");
+        }
         // [Issue #8] 重置 LLM 切片失败标记
-        llmChunkingFailed = false;
+        llmChunkingFailed.set(false);
         try {
             List<LocalChunk> chunks = parseFile(filename, req.getFile().getInputStream());
+            if (chunks.isEmpty()) {
+                throw new RenException(ErrorCode.UPLOAD_FILE_ERROR, "文件中没有可用于知识库切片的有效内容");
+            }
             replaceChunks(req.getDatasetId(), documentId, chunks);
 
             KnowledgeFilesDTO dto = new KnowledgeFilesDTO();
@@ -233,7 +247,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             dto.setUpdatedAt(new Date());
             dto.setMetaFields(req.getMetaFields());
             // [Issue #8] 若 LLM 切片失败降级为规则切片，在元数据中记录质量降级提示
-            if (llmChunkingFailed) {
+            if (llmChunkingFailed.get()) {
                 Map<String, Object> qualityNote = new HashMap<>();
                 qualityNote.put("quality_degraded", true);
                 qualityNote.put("note", "LLM切片失败降级为规则切片，切片质量可能低于预期");
@@ -247,7 +261,12 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             return dto;
         } catch (Exception e) {
             log.error("本地知识库文件解析失败: {}", filename, e);
+            if (e instanceof RenException renException) {
+                throw renException;
+            }
             throw new RenException(ErrorCode.RAG_API_ERROR, "本地知识库文件解析失败: " + e.getMessage());
+        } finally {
+            llmChunkingFailed.remove();
         }
     }
 
@@ -269,6 +288,20 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
 
     @Override
     public boolean parseDocuments(String datasetId, List<String> documentIds) {
+        if (StringUtils.isBlank(datasetId) || documentIds == null || documentIds.isEmpty()) {
+            return false;
+        }
+        for (String documentId : documentIds) {
+            DocumentEntity document = documentDao.selectOne(new QueryWrapper<DocumentEntity>()
+                    .eq("dataset_id", datasetId)
+                    .eq("document_id", documentId));
+            Long chunkCount = chunkDao.selectCount(new QueryWrapper<KnowledgeChunkEntity>()
+                    .eq("dataset_id", datasetId)
+                    .eq("document_id", documentId));
+            if (document == null || chunkCount == null || chunkCount == 0) {
+                throw new RenException("本地知识库在上传时同步切片，当前文档没有可用切片，请重新上传原文件");
+            }
+        }
         return true;
     }
 
@@ -512,6 +545,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         vo.setChunkCount(0L);
         vo.setDocumentCount(0L);
         vo.setTokenNum(0L);
+        vo.setParserConfig(req.getParserConfig());
         return vo;
     }
 
@@ -792,7 +826,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
                 refined.add(refineChunkWithLlm(original));
             } catch (Exception e) {
                 log.warn("本地知识库第 {} 个切片大模型精修失败，已回退规则切片: {}", i + 1, e.getMessage());
-                llmChunkingFailed = true;
+                llmChunkingFailed.set(true);
                 refined.add(original);
             }
         }
@@ -808,7 +842,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             return List.of();
         }
         List<LocalChunk> chunks = new ArrayList<>();
-        List<String> sections = splitLlmInputSections(text);
+        List<String> sections = textSplitter().splitLlmSections(text);
         for (int i = 0; i < sections.size(); i++) {
             String section = sections.get(i);
             boolean success = false;
@@ -829,7 +863,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             }
             if (!success) {
                 // 记录 LLM 切片失败标记，用于 uploadDocument() 中标记质量降级
-                llmChunkingFailed = true;
+                llmChunkingFailed.set(true);
                 // 回退到规则切片
                 chunks.addAll(splitByParagraphs(section));
             }
@@ -842,25 +876,6 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private boolean llmAvailable() {
         return llmEnabled && StringUtils.isNoneBlank(llmBaseUrl, llmApiKey, llmModel)
                 && !LocalKnowledgeConfigParser.isPlaceholderSecret(llmApiKey);
-    }
-
-    private List<String> splitLlmInputSections(String text) {
-        String normalized = StringUtils.defaultString(text).trim();
-        if (StringUtils.isBlank(normalized)) {
-            return List.of();
-        }
-        List<String> sections = new ArrayList<>();
-        int start = 0;
-        while (start < normalized.length()) {
-            int hardEnd = Math.min(start + llmMaxInputChars, normalized.length());
-            int end = findSplitEnd(normalized, start, hardEnd);
-            String section = normalized.substring(start, end).trim();
-            if (StringUtils.isNotBlank(section)) {
-                sections.add(section);
-            }
-            start = end;
-        }
-        return sections;
     }
 
     private List<LocalChunk> chunkSectionWithLlm(String filename, String section, int sectionIndex, int totalSections)
@@ -1100,70 +1115,17 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     }
 
     private List<LocalChunk> splitText(String text) {
-        return splitByParagraphs(StringUtils.defaultString(text).trim());
+        return splitByParagraphs(text);
     }
 
     private List<LocalChunk> splitByParagraphs(String text) {
-        List<LocalChunk> chunks = new ArrayList<>();
-        String normalized = StringUtils.defaultString(text).trim();
-        if (StringUtils.isBlank(normalized)) {
-            return chunks;
-        }
-        StringBuilder current = new StringBuilder();
-        for (String paragraph : normalized.split("(\\R\\s*\\R)+")) {
-            String part = paragraph.trim();
-            if (StringUtils.isBlank(part)) {
-                continue;
-            }
-            if (part.length() > maxChunkChars) {
-                flushChunk(chunks, current);
-                splitLongParagraph(chunks, part);
-                continue;
-            }
-            int nextLength = current.length() == 0 ? part.length() : current.length() + 2 + part.length();
-            if (nextLength > maxChunkChars) {
-                flushChunk(chunks, current);
-            }
-            if (current.length() > 0) {
-                current.append("\n\n");
-            }
-            current.append(part);
-        }
-        flushChunk(chunks, current);
-        return chunks;
+        return textSplitter().splitChunks(text).stream()
+                .map(content -> new LocalChunk(null, null, content))
+                .collect(Collectors.toList());
     }
 
-    private void splitLongParagraph(List<LocalChunk> chunks, String text) {
-        int start = 0;
-        while (start < text.length()) {
-            int end = findSplitEnd(text, start, Math.min(start + maxChunkChars, text.length()));
-            String content = text.substring(start, end).trim();
-            if (StringUtils.isNotBlank(content)) {
-                chunks.add(new LocalChunk(null, null, content));
-            }
-            start = end;
-        }
-    }
-
-    private int findSplitEnd(String text, int start, int hardEnd) {
-        if (hardEnd >= text.length()) {
-            return text.length();
-        }
-        int best = -1;
-        for (String separator : List.of("\n", "。", "！", "？", "；", ";", ".", "!", "?")) {
-            int index = text.lastIndexOf(separator, hardEnd - 1);
-            if (index >= start + Math.min(80, maxChunkChars / 4)) {
-                best = Math.max(best, index + separator.length());
-            }
-        }
-        return best > start ? best : hardEnd;
-    }
-
-    private void flushChunk(List<LocalChunk> chunks, StringBuilder current) {
-        if (StringUtils.isNotBlank(current.toString())) {
-            chunks.add(new LocalChunk(null, null, current.toString().trim()));
-            current.setLength(0);
-        }
+    private LocalKnowledgeTextSplitter textSplitter() {
+        return new LocalKnowledgeTextSplitter(maxChunkChars, llmMaxInputChars);
     }
 
     private int resolveResultLimit(RetrievalDTO.TestReq req, int pageSize) {
