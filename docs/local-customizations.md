@@ -582,3 +582,21 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 是否允许被官方覆盖：否
 官方同步时的处理规则：必须保留“一个版本同时绑定业务镜像和部署资产”的契约；`VERSION=<sha> ~/xiaozhi-upgrade` 不得回退为从服务器当前 Git 分支读取 Compose 后只固定镜像标签。deploy-assets manifest 不得包含密钥，只能保存版本、源码 commit、契约版本、镜像仓库和运行时镜像；`~/xiaozhi-data/.env` 中的真实密码和凭据加密密钥必须继续由 install 生成并跨升级保留。生产服务器只需保留一次性引导脚本、固定升级命令和 Docker/ACR 登录，不构建源码；版本或契约不匹配时 upgrade 必须在启动服务前失败。
 ```
+
+## 31. 设备单轮语音背景上下文
+
+```text
+定制模块：xiaozhi-server listen 协议、单轮会话状态、对话与聊天记录注入、manager-web 聊天记录展示
+改动原因：设备在用户开始一轮语音交互时，需要选择性上传文本或结构化背景；背景必须和本轮 STT 一起交给主 LLM，但不能独立触发回复，也不能进入长期记忆。
+关键文件：
+  - main/xiaozhi-server/core/session/turn_context.py
+  - main/xiaozhi-server/core/handle/textHandler/listenMessageHandler.py
+  - main/xiaozhi-server/core/providers/asr/base.py
+  - main/xiaozhi-server/core/utils/dialogue.py
+  - main/xiaozhi-server/core/handle/reportHandle.py
+  - main/manager-web/src/components/ChatHistoryDialog.vue
+  - docs/architecture/device-interaction-chain.md
+  - docs/architecture/prompt-injection-engineering.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：必须保留 listen/start.context 的可选兼容协议、8 KiB 输入上限、单轮一次性消费、空 ASR/打断不触发且不串轮、日志不记录背景正文、SemanticCenter 与 intent_llm 只读 STT、主 LLM user message 才读取 context、后台聊天记录保留背景而长期记忆事件和 Python Memory provider 排除背景的边界。旧设备不发送 context 时行为必须完全不变。
+```

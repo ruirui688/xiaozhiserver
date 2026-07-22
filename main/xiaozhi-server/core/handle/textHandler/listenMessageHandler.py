@@ -36,10 +36,28 @@ class ListenTextMessageHandler(TextMessageHandler):
         if msg_json["state"] == "start":
             # 设备从播放模式切回录音模式,清除所有音频状态和缓冲区
             conn.reset_audio_states()
+            turn_context = getattr(conn, "turn_context", None)
+            if turn_context is None:
+                return
+            update = turn_context.replace(msg_json.get("context"))
+            if update.accepted:
+                conn.logger.bind(tag=TAG).info(
+                    "已接收本轮语音背景: "
+                    f"type={update.context_type}, size_bytes={update.size_bytes}"
+                )
+            elif "context" in msg_json and update.reason not in {"", "empty"}:
+                conn.logger.bind(tag=TAG).warning(
+                    "忽略无效本轮语音背景: "
+                    f"type={update.context_type}, size_bytes={update.size_bytes}, "
+                    f"reason={update.reason}"
+                )
         elif msg_json["state"] == "stop":
             conn.client_voice_stop = True
             if conn.asr is None:
                 conn.logger.bind(tag=TAG).warning("ASR未配置，忽略本次语音识别")
+                turn_context = getattr(conn, "turn_context", None)
+                if turn_context is not None:
+                    turn_context.clear()
                 conn.reset_audio_states()
                 return
             if conn.asr.interface_type == InterfaceType.STREAM:
@@ -53,8 +71,15 @@ class ListenTextMessageHandler(TextMessageHandler):
 
                     if len(asr_audio_task) > 0:
                         await conn.asr.handle_voice_stop(conn, asr_audio_task)
+                else:
+                    turn_context = getattr(conn, "turn_context", None)
+                    if turn_context is not None:
+                        turn_context.clear()
         elif msg_json["state"] == "detect":
             conn.client_have_voice = False
+            turn_context = getattr(conn, "turn_context", None)
+            if turn_context is not None:
+                turn_context.clear()
             conn.reset_audio_states()
             if "text" in msg_json:
                 conn.last_activity_time = time.time() * 1000

@@ -18,7 +18,7 @@ from core.providers.tts.dto.dto import TTSMessageDTO, SentenceType
 TAG = __name__
 
 
-async def handle_user_intent(conn: "ConnectionHandler", text):
+async def handle_user_intent(conn: "ConnectionHandler", text, turn_context=None):
     text = apply_correct_words(conn, text)
     # 预处理输入文本，处理可能的JSON格式
     try:
@@ -57,7 +57,12 @@ async def handle_user_intent(conn: "ConnectionHandler", text):
             ensure_ascii=False,
         )
         conn.sentence_id = str(uuid.uuid4().hex)
-        return await process_intent_result(conn, intent_result, text)
+        return await process_intent_result(
+            conn,
+            intent_result,
+            text,
+            turn_context=turn_context,
+        )
 
     if active_game_tool and conn.func_handler and conn.func_handler.has_tool(active_game_tool):
         function_name = active_game_tool
@@ -71,7 +76,12 @@ async def handle_user_intent(conn: "ConnectionHandler", text):
             ensure_ascii=False,
         )
         conn.sentence_id = str(uuid.uuid4().hex)
-        return await process_intent_result(conn, intent_result, text)
+        return await process_intent_result(
+            conn,
+            intent_result,
+            text,
+            turn_context=turn_context,
+        )
 
     if conn.intent_type == "function_call":
         # 使用支持function calling的聊天方法,不再进行意图分析
@@ -83,7 +93,12 @@ async def handle_user_intent(conn: "ConnectionHandler", text):
     # 会话开始时生成sentence_id
     conn.sentence_id = str(uuid.uuid4().hex)
     # 处理各种意图
-    return await process_intent_result(conn, intent_result, text)
+    return await process_intent_result(
+        conn,
+        intent_result,
+        text,
+        turn_context=turn_context,
+    )
 
 
 async def check_direct_exit(conn: "ConnectionHandler", text):
@@ -117,7 +132,7 @@ async def analyze_intent_with_llm(conn: "ConnectionHandler", text):
 
 
 async def process_intent_result(
-    conn: "ConnectionHandler", intent_result, original_text
+    conn: "ConnectionHandler", intent_result, original_text, turn_context=None
 ):
     """处理意图识别结果"""
     try:
@@ -139,7 +154,13 @@ async def process_intent_result(
                 conn.client_abort = False
 
                 def process_context_result():
-                    conn.dialogue.put(Message(role="user", content=original_text))
+                    conn.dialogue.put(
+                        Message(
+                            role="user",
+                            content=original_text,
+                            turn_context=turn_context,
+                        )
+                    )
 
                     from core.utils.current_time import get_current_time_info
 
@@ -191,7 +212,13 @@ async def process_intent_result(
 
             # 使用executor执行函数调用和结果处理
             def process_function_call():
-                conn.dialogue.put(Message(role="user", content=original_text))
+                conn.dialogue.put(
+                    Message(
+                        role="user",
+                        content=original_text,
+                        turn_context=turn_context,
+                    )
+                )
                 
                 # 工具调用超时时间
                 tool_call_timeout = int(conn.config.get("tool_call_timeout", 30))

@@ -52,7 +52,7 @@ async def handleAudioMessage(conn: "ConnectionHandler", audio):
     await conn.asr.receive_audio(conn, audio, have_voice)
 
 
-async def startToChat(conn: "ConnectionHandler", text):
+async def startToChat(conn: "ConnectionHandler", text, turn_context=None):
     """Handle recognized user text.
 
     Returns True when the text should be treated as an accepted user turn.
@@ -155,7 +155,16 @@ async def startToChat(conn: "ConnectionHandler", text):
             with conn._abort_lock:
                 conn.client_abort = False
             try:
-                future = conn.executor.submit(conn.chat, actual_text)
+                if turn_context is None:
+                    future = conn.executor.submit(conn.chat, actual_text)
+                else:
+                    future = conn.executor.submit(
+                        conn.chat,
+                        actual_text,
+                        0,
+                        True,
+                        turn_context,
+                    )
                 await asyncio.wrap_future(future)
             except Exception as error:
                 appended = meeting.record_pending_turn()
@@ -202,7 +211,16 @@ async def startToChat(conn: "ConnectionHandler", text):
             if not handled_by_semantic and getattr(conn, "semantic_center", None):
                 with conn._abort_lock:
                     conn.client_abort = False
-                conn.executor.submit(conn.chat, interruption_text)
+                if turn_context is None:
+                    conn.executor.submit(conn.chat, interruption_text)
+                else:
+                    conn.executor.submit(
+                        conn.chat,
+                        interruption_text,
+                        0,
+                        True,
+                        turn_context,
+                    )
             return True
         classifier = SemanticInterruptionClassifier()
         classification = await classifier.classify(
@@ -248,7 +266,14 @@ async def startToChat(conn: "ConnectionHandler", text):
             return True
 
     # 首先进行意图分析，使用实际文本内容
-    intent_handled = await handle_user_intent(conn, actual_text)
+    if turn_context is None:
+        intent_handled = await handle_user_intent(conn, actual_text)
+    else:
+        intent_handled = await handle_user_intent(
+            conn,
+            actual_text,
+            turn_context=turn_context,
+        )
 
     if intent_handled:
         # 如果意图已被处理，不再进行聊天
@@ -264,7 +289,16 @@ async def startToChat(conn: "ConnectionHandler", text):
     with conn._abort_lock:
         conn.client_abort = False
 
-    future = conn.executor.submit(conn.chat, actual_text)
+    if turn_context is None:
+        future = conn.executor.submit(conn.chat, actual_text)
+    else:
+        future = conn.executor.submit(
+            conn.chat,
+            actual_text,
+            0,
+            True,
+            turn_context,
+        )
     future.add_done_callback(lambda f: conn.logger.bind(tag=__name__).error(f"chat() failed: {f.exception()}") if f.exception() else None)
     return True
 

@@ -582,6 +582,7 @@ export default {
   'chatHistory.voiceprint': '声纹识别',
   'chatHistory.unknownSpeaker': '未识别',
   'chatHistory.recognizedSpeaker': '已识别',
+  'chatHistory.turnContext': '本轮背景',
   'cache.status': '缓存状态',
   'cache.cdnEnabled': 'CDN模式已启用',
   'cache.cdnDisabled': 'CDN模式已禁用',

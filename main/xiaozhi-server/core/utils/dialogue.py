@@ -4,6 +4,7 @@ import threading
 from typing import List, Dict
 from datetime import datetime
 from core.utils.current_time import get_current_datetime
+from core.session.turn_context import build_contextual_user_content
 
 
 class Message:
@@ -15,6 +16,7 @@ class Message:
             tool_calls=None,
             tool_call_id=None,
             is_temporary=False,
+            turn_context=None,
     ):
         self.uniq_id = uniq_id if uniq_id is not None else str(uuid.uuid4())
         self.role = role
@@ -22,6 +24,7 @@ class Message:
         self.tool_calls = tool_calls
         self.tool_call_id = tool_call_id
         self.is_temporary = is_temporary  # 标记临时消息（如工具调用提醒）
+        self.turn_context = turn_context
 
 
 class Dialogue:
@@ -51,7 +54,10 @@ class Dialogue:
                 }
             )
         else:
-            dialogue.append({"role": m.role, "content": m.content})
+            content = m.content
+            if m.role == "user" and m.turn_context is not None:
+                content = build_contextual_user_content(content, m.turn_context)
+            dialogue.append({"role": m.role, "content": content})
 
     def get_llm_dialogue(self) -> List[Dict[str, str]]:
         # 直接调用get_llm_dialogue_with_memory，传入None作为memory_str

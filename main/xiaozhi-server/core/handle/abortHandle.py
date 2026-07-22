@@ -14,6 +14,9 @@ async def handleAbortMessage(conn: "ConnectionHandler"):
         conn.client_abort = True
     conn.abort_generation += 1
     conn.clear_queues()
+    turn_context = getattr(conn, "turn_context", None)
+    if turn_context is not None:
+        turn_context.clear()
     # 清理 VAD/ASR 音频状态，防止打断后残留的 client_voice_stop
     # 导致下一帧音频立即触发新的 ASR 识别
     conn.reset_audio_states()

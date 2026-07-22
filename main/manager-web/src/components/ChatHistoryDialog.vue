@@ -109,6 +109,10 @@
                                 <i v-if="message.audioId" :class="getAudioIconClass(message)"
                                     @click="playAudio(message)" class="audio-icon"></i>
                               </div>
+                              <details v-if="message.hasTurnContext" class="turn-context-detail">
+                                <summary>{{ $t('chatHistory.turnContext') }}</summary>
+                                <pre>{{ formatTurnContext(message.turnContext) }}</pre>
+                              </details>
                               <div v-if="message.metricsSummary && message.metricsSummary.length" class="metrics-strip">
                                 <span v-for="item in message.metricsSummary" :key="item.label">
                                   {{ item.label }} {{ item.value }}
@@ -260,7 +264,7 @@ export default {
          */
         parseMessageContent(content) {
             if (!content || content.trim() === '') {
-                return { content, speakerName: '', speakerId: '', speakerScore: null };
+                return { content, speakerName: '', speakerId: '', speakerScore: null, turnContext: undefined };
             }
 
             // 尝试解析为 JSON
@@ -269,7 +273,7 @@ export default {
 
                 // 如果是数组格式（包含 text 和 tool）
                 if (Array.isArray(jsonObj)) {
-                    return { content: jsonObj, speakerName: '', speakerId: '', speakerScore: null };
+                    return { content: jsonObj, speakerName: '', speakerId: '', speakerScore: null, turnContext: undefined };
                 }
 
                 // 如果是对象且有 content 字段
@@ -280,7 +284,10 @@ export default {
                         speakerId: String(jsonObj.speaker_id || ''),
                         speakerScore: Number.isFinite(Number(jsonObj.speaker_score))
                             ? Number(jsonObj.speaker_score)
-                            : null
+                            : null,
+                        turnContext: Object.prototype.hasOwnProperty.call(jsonObj, 'context')
+                            ? jsonObj.context
+                            : undefined
                     };
                 }
             } catch (e) {
@@ -288,7 +295,17 @@ export default {
             }
 
             // 如果不是 JSON 格式或没有 content 字段，直接返回原内容
-            return { content, speakerName: '', speakerId: '', speakerScore: null };
+            return { content, speakerName: '', speakerId: '', speakerScore: null, turnContext: undefined };
+        },
+        formatTurnContext(context) {
+            if (typeof context === 'string') {
+                return context;
+            }
+            try {
+                return JSON.stringify(context, null, 2);
+            } catch (e) {
+                return String(context);
+            }
         },
         formatToolItem(item) {
             const text = String((item && item.text) || '');
@@ -321,6 +338,8 @@ export default {
                 speakerName: parsed.speakerName,
                 speakerId: parsed.speakerId,
                 speakerScore: parsed.speakerScore,
+                turnContext: parsed.turnContext,
+                hasTurnContext: parsed.turnContext !== undefined,
                 speakerDisplay: parsed.speakerName === '未知说话人'
                     ? this.$t('chatHistory.unknownSpeaker')
                     : (parsed.speakerName || this.$t('chatHistory.recognizedSpeaker')),
@@ -973,6 +992,28 @@ export default {
 
 .user-message .audio-icon {
     color: white;
+}
+
+.turn-context-detail {
+    margin: 6px 10px 0;
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: #f5f7fa;
+    color: #606266;
+    font-size: 12px;
+    text-align: left;
+}
+
+.turn-context-detail summary {
+    cursor: pointer;
+    color: #409eff;
+}
+
+.turn-context-detail pre {
+    margin: 6px 0 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-family: inherit;
 }
 
 .metrics-strip {

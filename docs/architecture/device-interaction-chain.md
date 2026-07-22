@@ -103,6 +103,31 @@ connection.py:227-298  handle_connection()
 - 无 AEC 或扬声器回声会回采进麦克风的设备，可在私有配置中把 `wakeup_vad_ignore_ms` 设为 500-2000ms；设为 `2000` 可恢复旧版兼容行为。
 - 忽略窗口使用 `time.monotonic()` 判断，不创建延迟任务；配置非法、负数或非有限值时安全回退为 0。
 
+### 2.6 单轮语音背景上下文
+
+设备可在一轮录音开始时，通过现有 `listen/start` 消息选择性上传背景：
+
+```json
+{
+  "type": "listen",
+  "state": "start",
+  "mode": "auto",
+  "context": {
+    "page": "商品详情",
+    "productId": "123"
+  }
+}
+```
+
+`context` 支持字符串、JSON 对象或数组，序列化后最多 8 KiB。服务端按连接保存一个待消费值；新的
+`listen/start` 会替换或清空旧值，下一次有效 ASR 一次性消费。背景本身不会调用语义、Intent、LLM
+或 TTS；空语音、识别失败、打断和无 ASR 配置时不得把背景带入下一轮。
+
+确定性语义控制和 `intent_llm` 只读取 STT。主 LLM 收到的 user message 沿用现有结构化格式并增加
+`context`，例如 `{"content":"帮我介绍一下","context":{"productId":"123"}}`。该消息保留在当前
+会话历史并进入后台聊天记录；长期记忆事件和旧 Memory provider 只使用原始 `content`，不接收背景。
+服务端日志只记录背景类型和字节数，不记录背景正文。
+
 ## 3. 音频上行链路（ASR）
 
 ### 3.1 音频帧接收

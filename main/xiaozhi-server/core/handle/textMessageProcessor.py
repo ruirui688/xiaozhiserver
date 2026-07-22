@@ -25,7 +25,18 @@ class TextMessageProcessor:
                 message_type = msg_json.get("type")
 
                 # 记录日志
-                conn.logger.bind(tag=TAG).info(f"收到{message_type}消息：{message}")
+                log_message = message
+                if message_type == "listen" and "context" in msg_json:
+                    redacted = dict(msg_json)
+                    context = redacted.get("context")
+                    context_type = (
+                        "string" if isinstance(context, str) else type(context).__name__
+                    )
+                    redacted["context"] = f"<redacted:{context_type}>"
+                    log_message = json.dumps(redacted, ensure_ascii=False)
+                conn.logger.bind(tag=TAG).info(
+                    f"收到{message_type}消息：{log_message}"
+                )
 
                 # 获取并执行处理器
                 handler = self.registry.get_handler(message_type)

@@ -17,6 +17,7 @@ from config.logger import setup_logging
 from core.providers.asr.dto.dto import InterfaceType
 from core.handle.receiveAudioHandle import startToChat
 from core.handle.reportHandle import enqueue_asr_report
+from core.session.turn_context import build_contextual_user_content
 from core.utils.util import remove_punctuation_and_length
 from core.handle.receiveAudioHandle import handleAudioMessage
 from typing import Any, Dict, Optional, Tuple, List, NamedTuple, TYPE_CHECKING
@@ -88,6 +89,10 @@ class ASRProviderBase(ABC):
     # 处理语音停止
     async def handle_voice_stop(self, conn: "ConnectionHandler", asr_audio_task: List[bytes]):
         """VAD句末后并行处理ASR与整句声纹识别。"""
+        turn_context_buffer = getattr(conn, "turn_context", None)
+        turn_context = (
+            turn_context_buffer.take() if turn_context_buffer is not None else None
+        )
         try:
             total_start_time = time.monotonic()
             enrollment = getattr(conn, "voiceprint_enrollment", None)
@@ -235,12 +240,19 @@ class ASRProviderBase(ABC):
             if text_len > 0:
                 audio_snapshot = asr_audio_task.copy()
                 # 使用自定义模块进行上报
-                accepted = await startToChat(conn, enhanced_text)
+                accepted = await startToChat(
+                    conn,
+                    enhanced_text,
+                    turn_context=turn_context,
+                )
                 conn.turn_metrics.record_routing(accepted)
                 if accepted:
                     enqueue_asr_report(
                         conn,
-                        enhanced_text,
+                        build_contextual_user_content(
+                            enhanced_text,
+                            turn_context,
+                        ),
                         audio_snapshot,
                         metrics=conn.turn_metrics.build_user_metrics(),
                     )

@@ -62,7 +62,12 @@ from core.game import GameSessionManager
 from core.semantic.semantic_center import SemanticCenter
 from core.device_runtime_registry import register_connection, unregister_connection
 from core.observability import SessionTelemetry
-from core.session import CloseCoordinator, SessionLifecycle
+from core.session import (
+    CloseCoordinator,
+    SessionLifecycle,
+    TurnContextBuffer,
+    redact_dialogue_contexts_for_log,
+)
 from core.utils.voiceprint_enrollment import VoiceprintEnrollmentCollector
 from core.utils.turn_metrics import TurnMetrics
 from core.meeting import (
@@ -251,6 +256,7 @@ class ConnectionHandler:
         self.asr_audio_queue = queue.Queue()
         self.current_speaker = None  # 存储当前说话人
         self.current_speaker_id = None  # 当前说话人的稳定声纹记录ID
+        self.turn_context = TurnContextBuffer()
 
         # llm相关变量
         self.dialogue = Dialogue()
@@ -1319,7 +1325,7 @@ class ConnectionHandler:
                 f"系统提示词工具索引已同步: {tool_names}"
             )
 
-    def chat(self, query, depth=0, allow_tools=True):
+    def chat(self, query, depth=0, allow_tools=True, turn_context=None):
         if depth == 0:
             self.turn_metrics.ensure_text_turn()
         chat_started_at = time.monotonic()
@@ -1339,7 +1345,9 @@ class ConnectionHandler:
         if depth == 0:
             current_sentence_id = str(uuid.uuid4().hex)
             self.sentence_id = current_sentence_id  # 更新共享属性
-            self.dialogue.put(Message(role="user", content=query))
+            self.dialogue.put(
+                Message(role="user", content=query, turn_context=turn_context)
+            )
             freeform_game_prompt = self.game_session_manager.build_freeform_game_prompt(
                 query,
                 self._get_enabled_plugin_configs(),
@@ -1881,7 +1889,11 @@ class ConnectionHandler:
             # 使用lambda延迟计算，只有在DEBUG级别时才执行get_llm_dialogue()
             self.logger.bind(tag=TAG).debug(
                 lambda: json.dumps(
-                    self.dialogue.get_llm_dialogue(), indent=4, ensure_ascii=False
+                    redact_dialogue_contexts_for_log(
+                        self.dialogue.get_llm_dialogue()
+                    ),
+                    indent=4,
+                    ensure_ascii=False,
                 )
             )
 

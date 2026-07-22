@@ -81,6 +81,7 @@ main/xiaozhi-server/core/connection.py
 | 动态上下文 | 可见 | system message 上下文段 | 时间、日期、农历、位置、天气、上下文源 |
 | 记忆 | 可见 | messages 中的记忆段 | `summaryMemory` / Python Memory |
 | 声纹说话人 | 可见 | messages 中的 speakers 段 | `voiceprint.speakers` |
+| 设备单轮背景 | 可见 | 当前 user message 的 `context` 字段 | `listen/start.context` |
 | 服务端插件工具描述 | 可见 | `tools` schema 或 intent prompt | `plugins_func` 注册表、后台插件配置 |
 | 声明式插件玩法说明 | 部分可见 | 工具结果二次交给 LLM | 后台 `instructions` / `opening_message` |
 | MCP 工具描述 | 可见 | `tools` schema 或 intent prompt | MCP `tools/list` |
@@ -159,6 +160,13 @@ self.config.get("voiceprint", {})
 ```
 
 `Dialogue.get_llm_dialogue_with_memory()` 会在每个成功识别轮次把当前身份写入动态 system 上下文，同时当前 user message 保留结构化 `speaker` / `speaker_id`。system 只包含当前匹配说话人的描述，不暴露其他已绑定人员；未知说话人不会获得人员列表。身份事实每轮可用，避免依赖可能被截断或被模型忽略的旧对话历史；“不要机械地重复称呼姓名、不要主动播报声纹识别结果”由明确提示词约束，而不是通过丢弃本轮身份实现。
+
+设备通过 `listen/start.context` 上传的单轮背景由连接会话暂存，只有本轮产生有效 STT 后才附加到主
+LLM 的结构化 user message。`content` 是唯一的用户请求和回复触发源，`context` 只用于解释
+`content`；SemanticCenter、打断裁决和 `intent_llm` 不读取该字段。`Message` 将背景与原始文本分开
+保存，生成 LLM messages 和聊天记录上报时才合并，因此后续会话轮次可继续看到背景，而 Python
+Memory provider 和长期记忆事件仍只读取原始 STT。基础提示词同时禁止仅依据 `context` 调用
+`manage_memory`。
 
 选择 `managed_memory` 时，记忆写入不由 system prompt 中的关键词规则触发，也不由 manager-api 扫描聊天。主聊天模型会收到真实 `manage_memory` function schema，并自主决定是否调用、记住或忘记、正文、分类以及 `private/shared` 可见性。工具描述不包含固定人物、业务场景、条件任务或关键词列表。
 

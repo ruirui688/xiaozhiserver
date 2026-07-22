@@ -94,7 +94,9 @@ def _memory_event_content(chat_type, text):
         return text, None, None
     content = str(payload.get("content") or "").strip()
     speaker_id = str(payload.get("speaker_id") or "").strip() or None
-    return content, payload, speaker_id
+    memory_payload = dict(payload)
+    memory_payload.pop("context", None)
+    return content, memory_payload, speaker_id
 
 
 def mark_asr_report_text_override(conn: "ConnectionHandler", original_text, report_text) -> None:
@@ -338,4 +340,7 @@ def enqueue_asr_report(conn: "ConnectionHandler", text, opus_data, metrics=None)
                 f"ASR数据已加入上报队列: {conn.device_id}, 不上报音频"
             )
     except Exception as e:
-        conn.logger.bind(tag=TAG).debug(f"加入ASR上报队列失败: {text}, {e}")
+        conn.logger.bind(tag=TAG).debug(
+            "加入ASR上报队列失败: "
+            f"text_length={len(str(text or ''))}, error={e}"
+        )
