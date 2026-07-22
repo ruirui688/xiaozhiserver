@@ -62,6 +62,7 @@ class MemoryServiceImplTest {
 
     private static final String AGENT_ID = "agent-1";
     private static final String SCOPE_ID = "AA:BB:CC:DD";
+    private static final String NEW_SCOPE_ID = "11:22:33:44";
     private static final String MEMORY_MODEL_ID = "memory-model-1";
     private static final String MAINTENANCE_MODEL_ID = "llm-memory-1";
 
@@ -489,7 +490,7 @@ class MemoryServiceImplTest {
     }
 
     @Test
-    void rememberCanUpdateExistingDeviceScopedFactWithoutMacAddress() {
+    void rememberFromNewDeviceCanUpdateExistingFactFromOldDevice() {
         MemoryFactEntity existing = activeFact("fact-1", "高瑞瑞的领导是钟文杰");
         existing.setCategory("人际关系");
         existing.setMemoryType("领导信息");
@@ -547,6 +548,7 @@ class MemoryServiceImplTest {
 
         MemoryRememberDTO dto = new MemoryRememberDTO();
         dto.setAgentId(AGENT_ID);
+        dto.setMacAddress(NEW_SCOPE_ID);
         dto.setText("我的老板是钟文杰");
         memoryService.remember(dto, "user", "tester");
 
@@ -561,6 +563,31 @@ class MemoryServiceImplTest {
         verify(llmService, times(1)).generateJson(promptCaptor.capture(), eq(MAINTENANCE_MODEL_ID));
         assertTrue(promptCaptor.getAllValues().get(0).contains("id=fact-1"));
         assertTrue(promptCaptor.getAllValues().get(0).contains("高瑞瑞的领导是钟文杰"));
+    }
+
+    @Test
+    void rememberFromNewDeviceRefreshesExactOldDeviceFactInsteadOfAddingDuplicate() {
+        MemoryFactEntity existing = activeFact("fact-existing", "用户喜欢骑自行车");
+        existing.setPayload("{}");
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(existing));
+        when(factDao.selectOne(any(Wrapper.class))).thenReturn(existing);
+        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID))).thenReturn("""
+                {"action":"ADD","memory_type":"长期记忆","category":"兴趣偏好",
+                "canonical_text":"用户喜欢骑自行车","confidence":0.9,"importance":0.8,
+                "memory_tier":"long_term"}
+                """);
+
+        MemoryRememberDTO dto = new MemoryRememberDTO();
+        dto.setAgentId(AGENT_ID);
+        dto.setMacAddress(NEW_SCOPE_ID);
+        dto.setText("用户喜欢骑自行车");
+        dto.setShared(true);
+        memoryService.remember(dto, "system", null);
+
+        verify(factDao, never()).insert(any());
+        verify(factDao).updateById(existing);
+        assertEquals(SCOPE_ID, existing.getScopeId());
+        assertEquals("active", existing.getStatus());
     }
 
     @Test

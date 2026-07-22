@@ -49,7 +49,7 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
             return vo;
         }
         Date now = new Date();
-        List<MemoryForgetTombstoneEntity> activeTombstones = loadActiveTombstones(scope.agent.getId(), scope.scopeId);
+        List<MemoryForgetTombstoneEntity> activeTombstones = loadActiveTombstones(scope.agent.getId());
         vo.setBlockedPatterns(activeTombstones.stream()
                 .map(MemoryForgetTombstoneEntity::getPatternText)
                 .toList());
@@ -65,7 +65,7 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
             vo.setProfile(StringUtils.defaultIfBlank(profile.getProfileSummary(), profile.getProfileJson()));
         }
 
-        List<MemoryFactEntity> facts = loadActiveFacts(scope, now, dto.getSpeakerId()).stream()
+        List<MemoryFactEntity> facts = loadActiveFacts(scope.agent.getId(), now, dto.getSpeakerId()).stream()
                 .filter(fact -> MemorySpeakerUtils.isVisibleToSpeaker(fact, dto.getSpeakerId()))
                 .toList();
         if (facts.isEmpty()) {
@@ -155,11 +155,9 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
         return new AgentScope(agent, scopeId);
     }
 
-    private List<MemoryFactEntity> loadActiveFacts(AgentScope scope, Date now, String speakerId) {
+    private List<MemoryFactEntity> loadActiveFacts(String agentId, Date now, String speakerId) {
         QueryWrapper<MemoryFactEntity> wrapper = new QueryWrapper<>();
-        wrapper.eq("agent_id", scope.agent.getId())
-                .eq("scope_type", MemoryHelper.SCOPE_DEVICE)
-                .and(w -> w.eq("scope_id", scope.scopeId).or().eq("scope_id", scope.agent.getId()))
+        wrapper.eq("agent_id", agentId)
                 .eq("status", MemoryHelper.STATUS_ACTIVE)
                 .and(w -> w.isNull("expires_at").or().gt("expires_at", now))
                 .and(w -> {
@@ -174,11 +172,9 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
         return factDao.selectList(wrapper);
     }
 
-    private List<MemoryForgetTombstoneEntity> loadActiveTombstones(String agentId, String scopeId) {
+    private List<MemoryForgetTombstoneEntity> loadActiveTombstones(String agentId) {
         QueryWrapper<MemoryForgetTombstoneEntity> tombstoneWrapper = new QueryWrapper<>();
         tombstoneWrapper.eq("agent_id", agentId)
-                .eq("scope_type", MemoryHelper.SCOPE_DEVICE)
-                .and(w -> w.eq("scope_id", scopeId).or().eq("scope_id", agentId))
                 .eq("status", MemoryHelper.STATUS_ACTIVE)
                 .orderByDesc("created_at")
                 .last("LIMIT 50");

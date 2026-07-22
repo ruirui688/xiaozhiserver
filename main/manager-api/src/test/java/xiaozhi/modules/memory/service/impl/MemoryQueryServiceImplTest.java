@@ -1,6 +1,7 @@
 package xiaozhi.modules.memory.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -11,18 +12,22 @@ import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 
 import xiaozhi.modules.agent.dao.AgentDao;
 import xiaozhi.modules.agent.entity.AgentEntity;
 import xiaozhi.modules.device.dao.DeviceDao;
+import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.memory.dao.MemoryFactDao;
 import xiaozhi.modules.memory.dao.MemoryForgetTombstoneDao;
 import xiaozhi.modules.memory.dao.MemoryProfileDao;
 import xiaozhi.modules.memory.dao.MemoryToolBehaviorDao;
 import xiaozhi.modules.memory.dto.MemoryQueryDTO;
 import xiaozhi.modules.memory.entity.MemoryFactEntity;
+import xiaozhi.modules.memory.entity.MemoryForgetTombstoneEntity;
 import xiaozhi.modules.memory.service.MemorySettingsService;
 import xiaozhi.modules.memory.vo.MemoryQueryVO;
 
@@ -135,6 +140,43 @@ class MemoryQueryServiceImplTest {
                 result.getFacts().stream().map(MemoryFactEntity::getMemoryId).toList());
         assertTrue(result.getContext().contains("【用户A的长期记忆】"));
         assertTrue(!result.getContext().contains("用户B喜欢游泳"));
+    }
+
+    @Test
+    void newDeviceCanReadLegacyFactsAndTombstonesFromSameAgent() {
+        DeviceEntity currentDevice = new DeviceEntity();
+        currentDevice.setAgentId(AGENT_ID);
+        when(deviceDao.selectOne(any(Wrapper.class))).thenReturn(currentDevice);
+
+        MemoryFactEntity shared = fact("memory-shared", "旧设备产生的共享事实");
+        shared.setScopeId("old-device");
+        MemoryFactEntity sameSpeaker = fact("memory-private-a", "旧设备产生的用户A私有事实");
+        sameSpeaker.setScopeId("old-device");
+        sameSpeaker.setPayload("{\"speaker_id\":\"voice-a\"}");
+        MemoryFactEntity otherSpeaker = fact("memory-private-b", "其他人的私有事实");
+        otherSpeaker.setScopeId("old-device");
+        otherSpeaker.setPayload("{\"speaker_id\":\"voice-b\"}");
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(shared, sameSpeaker, otherSpeaker));
+
+        MemoryForgetTombstoneEntity tombstone = new MemoryForgetTombstoneEntity();
+        tombstone.setPatternText("旧设备产生的忘记意图");
+        tombstone.setStatus("active");
+        when(tombstoneDao.selectList(any(Wrapper.class))).thenReturn(List.of(tombstone));
+
+        MemoryQueryDTO dto = query("", 8);
+        dto.setMacAddress("new-device");
+        dto.setSpeakerId("voice-a");
+        MemoryQueryVO result = service.query(dto);
+
+        assertEquals(List.of("memory-shared", "memory-private-a"),
+                result.getFacts().stream().map(MemoryFactEntity::getMemoryId).toList());
+        assertEquals(List.of("旧设备产生的忘记意图"), result.getBlockedPatterns());
+
+        ArgumentCaptor<Wrapper<MemoryFactEntity>> factWrapper = ArgumentCaptor.forClass(Wrapper.class);
+        verify(factDao).selectList(factWrapper.capture());
+        String sql = ((QueryWrapper<MemoryFactEntity>) factWrapper.getValue()).getSqlSegment();
+        assertTrue(sql.contains("agent_id"));
+        assertFalse(sql.contains("scope_id"));
     }
 
     private MemoryQueryDTO query(String text, int limit) {

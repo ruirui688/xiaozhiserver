@@ -259,7 +259,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
             throw new IllegalStateException("未配置记忆维护模型");
         }
         SpeakerIdentity speaker = instructionSpeaker(speakerId, speakerName, shared);
-        String existingMemories = buildInstructionMemoryContext(agent.getId(), scopeId, speaker);
+        String existingMemories = buildInstructionMemoryContext(agent.getId(), speaker);
         String prompt = PowerMemPrompts.REMEMBER_COMMAND_PROMPT
                 .replace("{text}", text)
                 .replace("{category}", StringUtils.defaultString(category))
@@ -293,7 +293,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
             throw new IllegalStateException("未配置记忆维护模型");
         }
         SpeakerIdentity speaker = instructionSpeaker(speakerId, speakerName, shared);
-        String existingMemories = buildInstructionMemoryContext(agent.getId(), scopeId, speaker);
+        String existingMemories = buildInstructionMemoryContext(agent.getId(), speaker);
         String prompt = PowerMemPrompts.FORGET_COMMAND_PROMPT
                 .replace("{text}", text)
                 .replace("{reason}", StringUtils.defaultString(reason))
@@ -533,18 +533,12 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         String dimensionsJson = extractDimensionsJson(json);
 
         if ("UPDATE".equals(action) && StringUtils.isNotBlank(relatedId)) {
-            MemoryFactEntity fact = findRelatedFact(agent.getId(), scopeId, relatedId);
+            MemoryFactEntity fact = findRelatedFact(agent.getId(), relatedId);
             if (fact != null && MemorySpeakerUtils.isVisibleToSpeaker(fact, actionSpeakerId)) {
                 // Check if the new canonical_text already exists as a different fact
                 // (i.e. the LLM is trying to update this fact to match another one).
-                String newHash = MemoryHelper.sha256(
-                        agent.getId() + "|" + scopeId + "|" + speakerHashKey(json) + "|" + canonical);
-                MemoryFactEntity existingDuplicate = factDao.selectOne(new QueryWrapper<MemoryFactEntity>()
-                        .eq("agent_id", agent.getId()).eq("scope_type", MemoryHelper.SCOPE_DEVICE)
-                        .eq("scope_id", scopeId).eq("source_hash", newHash)
-                        .ne("status", MemoryHelper.STATUS_DELETED)
-                        .ne("memory_id", relatedId) // exclude the fact being updated
-                        .last("LIMIT 1"));
+                MemoryFactEntity existingDuplicate = findExactFact(
+                        agent.getId(), canonical, actionSpeakerId, relatedId);
                 if (existingDuplicate != null) {
                     // Merge: boost the existing fact's importance and confidence,
                     // then delete the one being updated (it's a duplicate).
@@ -619,11 +613,13 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
 
         // ADD
         String hash = MemoryHelper.sha256(
-                agent.getId() + "|" + scopeId + "|" + speakerHashKey(json) + "|" + canonical);
-        if (factDao.selectCount(new QueryWrapper<MemoryFactEntity>()
-                .eq("agent_id", agent.getId()).eq("scope_type", MemoryHelper.SCOPE_DEVICE)
-                .eq("scope_id", scopeId).eq("source_hash", hash)
-                .ne("status", MemoryHelper.STATUS_DELETED)) > 0) return false;
+                agent.getId() + "|" + speakerHashKey(json) + "|" + canonical);
+        MemoryFactEntity existingExact = findExactFact(agent.getId(), canonical, actionSpeakerId, null);
+        if (existingExact != null) {
+            existingExact.setImportance(MemoryHelper.max(existingExact.getImportance(), importance));
+            refreshFactEvidence(existingExact, confidence, "system", modelId, "跨设备重复事实刷新");
+            return true;
+        }
 
         List<MemoryFactEntity> capacityEvictions = resolveCapacityEvictions(
                 agent.getId(), json, loadActiveFactsForCapacity(agent.getId()), null,
@@ -756,8 +752,6 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         }
         QueryWrapper<MemoryForgetTombstoneEntity> existingWrapper = new QueryWrapper<>();
         existingWrapper.eq("agent_id", agent.getId())
-                .eq("scope_type", MemoryHelper.SCOPE_DEVICE)
-                .eq("scope_id", scopeId)
                 .eq("pattern_text", pattern)
                 .eq("status", MemoryHelper.STATUS_ACTIVE)
                 .last("LIMIT 1");
@@ -834,7 +828,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         }
         String prompt = PowerMemPrompts.REBUILD_ACTIONS_PROMPT
                 .replace("{mode}", StringUtils.defaultIfBlank(mode, "merge"))
-                .replace("{existing_memories}", buildRebuildExistingMemoryContext(agent.getId(), scopeId, mode))
+                .replace("{existing_memories}", buildRebuildExistingMemoryContext(agent.getId(), mode))
                 .replace("{conversation}", conversation);
         String output = llmService.generateJson(prompt, maintenanceModelId);
         JSONArray arr = outputParser.parseActionsResult(output);
@@ -870,11 +864,11 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         return actions;
     }
 
-    private String buildRebuildExistingMemoryContext(String agentId, String scopeId, String mode) {
+    private String buildRebuildExistingMemoryContext(String agentId, String mode) {
         if ("clear_then_rebuild".equalsIgnoreCase(mode)) {
             return "本次是清空后重建，不使用旧 memory_id；请只输出最终应生效的 ADD 事实。";
         }
-        return buildMaintenanceMemoryContext(agentId, scopeId);
+        return buildMaintenanceMemoryContext(agentId);
     }
 
     private JSONArray reviewRebuildActions(JSONArray actions, String mode, String evidenceContext,
@@ -916,33 +910,22 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
 
     // ===================== 共享辅助方法 =====================
 
-    private String buildMaintenanceMemoryContext(String agentId, String scopeId) {
+    private String buildMaintenanceMemoryContext(String agentId) {
         QueryWrapper<MemoryFactEntity> wrapper = new QueryWrapper<MemoryFactEntity>()
                 .eq("agent_id", agentId)
                 .eq("status", MemoryHelper.STATUS_ACTIVE);
-        if (StringUtils.isNotBlank(scopeId)) {
-            wrapper.and(w -> w.eq("scope_type", MemoryHelper.SCOPE_DEVICE).eq("scope_id", scopeId)
-                    .or()
-                    .eq("scope_type", MemoryHelper.SCOPE_DEVICE).eq("scope_id", agentId));
-        }
         return formatMaintenanceMemoryContext(factDao.selectList(wrapper
                 .orderByDesc("importance", "last_seen_at")
                 .last("LIMIT 30")));
     }
 
-    private String buildInstructionMemoryContext(String agentId, String scopeId, SpeakerIdentity speaker) {
+    private String buildInstructionMemoryContext(String agentId, SpeakerIdentity speaker) {
         List<MemoryFactEntity> visibleFacts = speaker.recognized()
                 ? loadMaintenanceFactsForSpeaker(agentId, speaker.id())
                 : loadMaintenanceFacts(agentId).stream()
                         .filter(fact -> StringUtils.isBlank(MemorySpeakerUtils.payloadSpeakerId(fact)))
                         .toList();
-        List<MemoryFactEntity> facts = visibleFacts.stream()
-                .filter(fact -> StringUtils.isBlank(scopeId)
-                        || agentId.equals(scopeId)
-                        || scopeId.equals(fact.getScopeId())
-                        || agentId.equals(fact.getScopeId()))
-                .limit(30)
-                .toList();
+        List<MemoryFactEntity> facts = visibleFacts.stream().limit(30).toList();
         return formatMaintenanceMemoryContext(facts);
     }
 
@@ -1011,7 +994,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         revisionDao.insert(revision);
     }
 
-    private MemoryFactEntity findRelatedFact(String agentId, String scopeId, String relatedMemoryId) {
+    private MemoryFactEntity findRelatedFact(String agentId, String relatedMemoryId) {
         if (StringUtils.isBlank(relatedMemoryId)) {
             return null;
         }
@@ -1019,10 +1002,26 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                 .eq("agent_id", agentId)
                 .eq("memory_id", relatedMemoryId)
                 .eq("status", MemoryHelper.STATUS_ACTIVE);
-        if (StringUtils.isNotBlank(scopeId)) {
-            wrapper.and(w -> w.eq("scope_type", MemoryHelper.SCOPE_DEVICE).eq("scope_id", scopeId)
-                    .or()
-                    .eq("scope_type", MemoryHelper.SCOPE_DEVICE).eq("scope_id", agentId));
+        return factDao.selectOne(wrapper.last("LIMIT 1"));
+    }
+
+    private MemoryFactEntity findExactFact(String agentId, String canonical, String speakerId,
+                                           String excludedMemoryId) {
+        QueryWrapper<MemoryFactEntity> wrapper = new QueryWrapper<MemoryFactEntity>()
+                .eq("agent_id", agentId)
+                .eq("canonical_text", canonical)
+                .ne("status", MemoryHelper.STATUS_DELETED)
+                .and(w -> {
+                    if (StringUtils.isBlank(speakerId)) {
+                        w.isNull("payload")
+                                .or().apply("JSON_EXTRACT(payload, '$.speaker_id') IS NULL")
+                                .or().apply("JSON_UNQUOTE(JSON_EXTRACT(payload, '$.speaker_id')) = ''");
+                    } else {
+                        w.apply("JSON_UNQUOTE(JSON_EXTRACT(payload, '$.speaker_id')) = {0}", speakerId);
+                    }
+                });
+        if (StringUtils.isNotBlank(excludedMemoryId)) {
+            wrapper.ne("memory_id", excludedMemoryId);
         }
         return factDao.selectOne(wrapper.last("LIMIT 1"));
     }

@@ -66,13 +66,16 @@ def test_manage_memory_tool_is_exposed_only_for_managed_memory():
     assert "manage_memory" not in ServerPluginExecutor(disabled).get_tools()
 
 
-def test_tool_description_has_no_business_specific_example_or_keyword_trigger():
+def test_tool_description_requires_proactive_cross_session_judgment_without_business_rules():
     description = memory_tool_module.MANAGE_MEMORY_FUNCTION_DESC["function"]["description"]
 
     assert "周文杰" not in description
     assert "高瑞瑞" not in description
     assert "空调" not in description
-    assert "只有你调用本工具" in description
+    assert "每轮对话都先判断" in description
+    assert "不需要等待用户明确要求记住" in description
+    assert "一次性请求" in description
+    assert "服务端不会扫描聊天" in description
 
 
 def test_main_llm_tool_forwards_private_model_decision_and_current_speaker(monkeypatch):

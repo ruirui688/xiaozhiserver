@@ -67,7 +67,7 @@
       <el-table-column label="来源" width="90">
         <template slot-scope="{row}">
           <el-tag size="mini" :type="row.confirmationState==='auto'?'success':'warning'">
-            {{ row.confirmationState === 'auto' ? '自动' : '手动' }}
+            {{ row.confirmationState === 'auto' ? '模型调用' : '手动创建' }}
           </el-tag>
         </template>
       </el-table-column>
