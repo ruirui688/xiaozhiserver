@@ -32,6 +32,7 @@ export interface KnowledgeDocument {
   fileType?: string
   fileSize?: number
   run?: 'UNSTART' | 'RUNNING' | 'CANCEL' | 'DONE' | 'FAIL' | string
+  progress?: number
   status?: string
   chunkCount?: number
   tokenCount?: number

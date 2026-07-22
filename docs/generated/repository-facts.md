@@ -32,10 +32,10 @@ source_paths:
 
 | 模块 | 源码文件 | 测试文件 | 统计口径 |
 | --- | ---: | ---: | --- |
-| xiaozhi-server | 232 | 49 | 源码为非 `tests/` 的 `*.py`；测试为 `test_*.py` |
-| manager-api | 482 | 33 | `src/main/**/*.java`；`src/test/**/*Test.java` |
-| manager-web | 112 | 0 | `src/` 下 `*.vue/*.js/*.ts`；`*.spec.*/*.test.*` |
-| manager-mobile | 77 | 0 | `src/` 下 `*.vue/*.js/*.ts`；`*.spec.*/*.test.*` |
+| xiaozhi-server | 233 | 50 | 源码为非 `tests/` 的 `*.py`；测试为 `test_*.py` |
+| manager-api | 491 | 38 | `src/main/**/*.java`；`src/test/**/*Test.java` |
+| manager-web | 115 | 4 | `src/` 下 `*.vue/*.js/*.ts/*.mjs`；`*.spec.*/*.test.*` |
+| manager-mobile | 79 | 1 | `src/` 下 `*.vue/*.js/*.ts/*.mjs`；`*.spec.*/*.test.*` |
 
 统计排除依赖和构建产物，不表示代码行数或测试覆盖率。
 
@@ -71,7 +71,7 @@ source_paths:
 | `main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelCatalogServiceImpl.java` | 1657 |
 | `main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelTestServiceImpl.java` | 1325 |
 | `main/manager-api/src/main/java/xiaozhi/modules/knowledge/rag/impl/LocalKnowledgeAdapter.java` | 1524 |
-| `main/manager-api/src/main/java/xiaozhi/modules/memory/service/impl/MemoryMaintenanceServiceImpl.java` | 1116 |
+| `main/manager-api/src/main/java/xiaozhi/modules/memory/service/impl/MemoryMaintenanceServiceImpl.java` | 1141 |
 | `main/manager-web/src/views/ModelConfig.vue` | 1889 |
 | `main/manager-web/src/components/BenchmarkResultPanel.vue` | 1587 |
 | `main/manager-web/src/views/KnowledgeFileUpload.vue` | 1260 |

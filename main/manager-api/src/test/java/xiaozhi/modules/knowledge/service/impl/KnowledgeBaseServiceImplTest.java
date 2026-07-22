@@ -95,5 +95,6 @@ class KnowledgeBaseServiceImplTest {
         assertEquals(parserConfig, persisted);
         assertTrue(persisted.contains("llm_model_id"));
         assertTrue(persisted.contains("retrieval_config"));
+        verify(permissionService).requireWrite("workspace-1");
     }
 }

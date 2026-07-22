@@ -2,6 +2,7 @@ package xiaozhi.modules.knowledge.service.impl;
 
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -48,6 +49,8 @@ import org.springframework.beans.factory.annotation.Value;
 @Slf4j
 public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, DocumentEntity>
         implements KnowledgeFilesService {
+    private static final long FULL_SYNC_COOLDOWN_SECONDS = 60L;
+    private static final String FULL_SYNC_COOLDOWN_KEY_PREFIX = "knowledge:documents:full-sync:";
 
     private final KnowledgeBaseService knowledgeBaseService;
     private final DocumentDao documentDao;
@@ -84,11 +87,13 @@ public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, Docu
             throw new RenException(ErrorCode.RAG_DATASET_ID_AND_MODEL_ID_NOT_NULL);
         }
 
-        // 全量对账同步: 从RAGFlow拉取远端文档，实时同步确保立即感知远端变更
-        try {
-            self.syncDocumentsFromRAG(datasetId);
-        } catch (Exception e) {
-            log.warn("从RAGFlow全量同步文档失败(不影响本地查询): datasetId={}, error={}", datasetId, e.getMessage());
+        // 全量对账是高成本远程操作，按数据集跨实例冷却；活跃文档仍在下方单独同步。
+        if (acquireFullSyncWindow(datasetId)) {
+            try {
+                self.syncDocumentsFromRAG(datasetId);
+            } catch (Exception e) {
+                log.warn("从RAGFlow全量同步文档失败(不影响本地查询): datasetId={}, error={}", datasetId, e.getMessage());
+            }
         }
 
         // 1. 获取本地影子表数据 (MyBatis-Plus 分页)
@@ -168,6 +173,20 @@ public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, Docu
 
         log.info("获取文档列表成功，总数: {}", pageData.getTotal());
         return pageData;
+    }
+
+    private boolean acquireFullSyncWindow(String datasetId) {
+        try {
+            String existing = redisUtils.getKeyOrCreate(
+                    FULL_SYNC_COOLDOWN_KEY_PREFIX + datasetId,
+                    "1",
+                    FULL_SYNC_COOLDOWN_SECONDS);
+            return existing == null;
+        } catch (Exception e) {
+            log.warn("知识库全量对账冷却状态不可用，跳过本次远程全量同步: datasetId={}, error={}",
+                    datasetId, e.getMessage());
+            return false;
+        }
     }
 
     /**
@@ -425,7 +444,16 @@ public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, Docu
 
         // 2. 本地持久化 (通过 self 调用以激活 @Transactional 代理)
         log.info("2. 同步保存本地影子记录: documentId={}", result.getDocumentId());
-        self.saveDocumentShadow(datasetId, result, fileName, chunkMethod, parserConfig);
+        try {
+            self.saveDocumentShadow(datasetId, result, fileName, chunkMethod, parserConfig);
+        } catch (Exception persistenceError) {
+            compensateUploadedDocument(adapter, datasetId, result.getDocumentId());
+            if (persistenceError instanceof RenException renException) {
+                throw renException;
+            }
+            throw new RenException(ErrorCode.RAG_API_ERROR,
+                    "文档上传后保存本地记录失败: " + persistenceError.getMessage());
+        }
         if ("local_knowledge".equals(result.getSourceType())) {
             long chunkDelta = result.getChunkCount() != null ? result.getChunkCount().longValue() : 0L;
             long tokenDelta = result.getTokenCount() != null ? result.getTokenCount() : 0L;
@@ -515,19 +543,12 @@ public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, Docu
             throw new RenException(ErrorCode.RAG_DATASET_ID_AND_MODEL_ID_NOT_NULL);
         }
 
-        List<String> documentIds = req.getIds();
+        List<String> documentIds = validateDocumentIdsBelongToDataset(datasetId, req.getIds());
+        req.setIds(documentIds);
         log.info("=== 开始批量删除文档: datasetId={}, count={} ===", datasetId, documentIds.size());
 
         // 1. 批量权限与状态预审
-        List<DocumentEntity> entities = documentDao.selectList(
-                new QueryWrapper<DocumentEntity>()
-                        .eq("dataset_id", datasetId)
-                        .in("document_id", documentIds));
-
-        if (entities.size() != documentIds.size()) {
-            log.warn("部分文档不存在或归属权异常: 预期={}, 实际={}", documentIds.size(), entities.size());
-            throw new RenException(ErrorCode.NO_PERMISSION);
-        }
+        List<DocumentEntity> entities = findDocuments(datasetId, documentIds);
 
         long totalChunkDelta = 0;
         long totalTokenDelta = 0;
@@ -666,6 +687,8 @@ public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, Docu
             throw new RenException(ErrorCode.RAG_DATASET_ID_AND_MODEL_ID_NOT_NULL);
         }
 
+        List<String> validatedDocumentIds = validateDocumentIdsBelongToDataset(datasetId, documentIds);
+
         log.info("=== 开始解析文档（切块） ===");
         log.info("datasetId: {}, documentIds: {}", datasetId, documentIds);
 
@@ -679,10 +702,10 @@ public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, Docu
             // 获取知识库适配器
             KnowledgeBaseAdapter adapter = KnowledgeBaseAdapterFactory.getAdapter(adapterType, ragConfig);
 
-            log.debug("解析文档参数: documentIds: {}", documentIds);
+            log.debug("解析文档参数: documentIds: {}", validatedDocumentIds);
 
             // 调用适配器解析文档
-            boolean result = adapter.parseDocuments(datasetId, documentIds);
+            boolean result = adapter.parseDocuments(datasetId, validatedDocumentIds);
 
             if (result) {
                 String runStatus = adapter.isDocumentParsingSynchronous() ? "DONE" : "RUNNING";
@@ -693,11 +716,11 @@ public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, Docu
                         .set("progress", progress)
                         .set("updated_at", new Date())
                         .eq("dataset_id", datasetId)
-                        .in("document_id", documentIds));
+                        .in("document_id", validatedDocumentIds));
 
                 log.info("文档解析状态已更新: datasetId={}, run={}", datasetId, runStatus);
             } else {
-                log.error("文档解析失败，datasetId: {}, documentIds: {}", datasetId, documentIds);
+                log.error("文档解析失败，datasetId: {}, documentIds: {}", datasetId, validatedDocumentIds);
                 throw new RenException(ErrorCode.RAG_API_ERROR, "文档解析失败");
             }
 
@@ -712,6 +735,45 @@ public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, Docu
             throw new RenException(ErrorCode.RAG_API_ERROR, errorMessage);
         } finally {
             log.info("=== 解析文档操作结束 ===");
+        }
+    }
+
+    private List<String> validateDocumentIdsBelongToDataset(String datasetId, List<String> requestedIds) {
+        LinkedHashSet<String> uniqueIds = new LinkedHashSet<>();
+        for (String documentId : requestedIds) {
+            if (StringUtils.isBlank(documentId)) {
+                throw new RenException(ErrorCode.PARAMS_GET_ERROR);
+            }
+            uniqueIds.add(documentId);
+        }
+
+        List<String> documentIds = new ArrayList<>(uniqueIds);
+        List<DocumentEntity> documents = findDocuments(datasetId, documentIds);
+        Set<String> existingIds = documents.stream()
+                .map(DocumentEntity::getDocumentId)
+                .collect(Collectors.toSet());
+        if (existingIds.size() != documentIds.size() || !existingIds.containsAll(documentIds)) {
+            log.warn("部分文档不存在或不属于指定知识库: datasetId={}, expected={}, actual={}",
+                    datasetId, documentIds.size(), existingIds.size());
+            throw new RenException(ErrorCode.NO_PERMISSION);
+        }
+        return documentIds;
+    }
+
+    private List<DocumentEntity> findDocuments(String datasetId, List<String> documentIds) {
+        return documentDao.selectList(new QueryWrapper<DocumentEntity>()
+                .eq("dataset_id", datasetId)
+                .in("document_id", documentIds));
+    }
+
+    private void compensateUploadedDocument(KnowledgeBaseAdapter adapter, String datasetId, String documentId) {
+        try {
+            adapter.deleteDocument(datasetId,
+                    DocumentDTO.BatchIdReq.builder().ids(List.of(documentId)).build());
+            log.info("影子记录保存失败，已补偿删除上传结果: datasetId={}, documentId={}", datasetId, documentId);
+        } catch (Exception cleanupError) {
+            log.error("影子记录保存失败且补偿删除上传结果失败: datasetId={}, documentId={}, error={}",
+                    datasetId, documentId, cleanupError.getMessage());
         }
     }
 

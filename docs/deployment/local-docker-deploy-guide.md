@@ -708,4 +708,4 @@ sudo ufw allow 8003/tcp
 
 ---
 
-> 📄 关联文档：[model-management-architecture-analysis](../models/model-management-architecture-analysis.md) | [semantic-interruption-and-e2e-voice-model-analysis](../architecture/semantic-interruption-and-e2e-voice-model-analysis.md)
+> 关联文档：[模型管理存储与保存架构](../models/model-management.md) | [语义打断与端到端语音模型演进分析](../architecture/semantic-interruption-and-e2e-voice-model-analysis.md)

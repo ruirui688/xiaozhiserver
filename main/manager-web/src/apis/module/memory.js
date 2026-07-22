@@ -51,7 +51,13 @@ export default {
     request('POST', `/agent/${agentId}/memories/rebuild-preview`, data, callback, networkFail, fail, 300000);
   },
   rebuild(agentId, data, callback, networkFail, fail) {
-    request('POST', `/agent/${agentId}/memories/rebuild`, data, callback, networkFail, fail, 300000);
+    request('POST', `/agent/${agentId}/memories/rebuild`, data, callback, networkFail, fail, 30000);
+  },
+  latestRebuildTask(agentId, callback, networkFail, fail) {
+    request('GET', `/agent/${agentId}/memories/rebuild-task`, null, callback, networkFail, fail);
+  },
+  rebuildTask(agentId, taskId, callback, networkFail, fail) {
+    request('GET', `/agent/${agentId}/memories/rebuild-task/${taskId}`, null, callback, networkFail, fail);
   },
   reviewPreview(agentId, callback, networkFail, fail) {
     request('POST', `/agent/${agentId}/memories/review-preview`, {}, callback, networkFail, fail, 300000);

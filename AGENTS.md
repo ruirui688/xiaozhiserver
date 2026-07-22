@@ -374,7 +374,9 @@ pass  # TODO         (占位代码)
 | Python 语法 | `cd main/xiaozhi-server && conda run -n xiaozhi-esp32-server python -m compileall .` | 必须 |
 | Python 测试 | `conda run -n xiaozhi-esp32-server pytest` | 如果测试存在 |
 | Java 测试 | `cd main/manager-api && mvn test` | 必须（修改 Java 时） |
+| Web 功能测试 | `cd main/manager-web && npm run test:unit` | 必须（修改 Web 时，构建前执行） |
 | Web 构建 | `cd main/manager-web && npm run build` | 必须（修改 Web 时） |
+| Mobile 功能测试 | `cd main/manager-mobile && pnpm test:unit` | 必须（修改 Mobile 时，构建前执行） |
 | Mobile 构建 | `cd main/manager-mobile && pnpm build:h5` | 必须（修改 Mobile 时） |
 | Shell 语法 | `bash -n scripts/dev scripts/start-dev.sh docker-setup.sh` | 修改脚本时 |
 | Docker 语法 | `docker compose -f deploy/production/docker-compose.yml config --quiet` | 修改 compose 时 |
@@ -383,7 +385,8 @@ pass  # TODO         (占位代码)
 **验证规则**：
 - 修改 Python → 必须 Conda 验证，未验证就说"未在项目 Conda 运行时验证"
 - 修改 Java → 至少 `mvn test`，如果 POM 跳过测试要说清楚
-- 修改 Web → 至少 `npm run build`
+- 修改 Web → 必须先运行 `npm run test:unit`，再运行 `npm run build`
+- 修改 Mobile → 必须先运行 `pnpm test:unit`，再运行 `pnpm type-check` 和目标平台构建
 - 修改数据库 → 检查 changelog 和 master.yaml
 - 修改 Docker/部署 → 检查 compose 文件语法 + bash -n 所有脚本
 - 禁止把外部模型真实调用、长期服务启动、生产部署当作默认验证
@@ -536,10 +539,16 @@ conda run -n xiaozhi-esp32-server pytest
 cd main/manager-api && mvn test
 
 # Web
-cd main/manager-web && npm run build
+cd main/manager-web
+npm run test:unit
+npm run build
 
 # Mobile
-cd main/manager-mobile && pnpm build:h5
+cd main/manager-mobile
+pnpm test:unit
+pnpm type-check
+pnpm build:h5
+pnpm build:mp-weixin
 
 # Shell
 bash -n scripts/dev scripts/start-dev.sh docker-setup.sh

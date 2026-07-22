@@ -1,11 +1,12 @@
 ---
 status: supporting
 owner: memory
-last_verified: 2026-07-17
+last_verified: 2026-07-23
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/memory
   - main/xiaozhi-server/plugins_func/functions/manage_memory.py
   - main/xiaozhi-server/core/providers/memory
+  - main/manager-web/src/views/MemoryManagement.vue
 ---
 
 # 长期记忆维护架构
@@ -117,6 +118,32 @@ source_paths:
 
 `clear_then_rebuild` 使用两阶段原子替换：先在数据库事务外读取历史、调用维护模型、审校并验证动作；该模式只接受 `ADD` / `NONE`。只有存在可应用的 `ADD` 时，才在一个短事务内锁定智能体、清理旧事实并写入全部新事实。任一动作写入失败会回滚整个替换事务，旧记忆不会处于“已清空但新记忆未写入”的状态。
 
+### 异步重建任务
+
+执行重建不再让浏览器持有最长 300 秒的同步 HTTP 请求。`POST /agent/{agentId}/memories/rebuild`
+只在完成智能体所有权和 workspace 写权限检查后创建任务，页面通过最近任务或指定任务端点恢复和轮询状态：
+
+```text
+PENDING / QUEUED
+  -> RUNNING / STARTING
+  -> LOADING_SESSIONS
+  -> EXTRACTING
+  -> REVIEWING
+  -> VALIDATING
+  -> APPLYING
+  -> FINALIZING
+  -> SUCCEEDED | FAILED | TIMED_OUT
+```
+
+任务状态、最近任务指针和每智能体活动锁保存在 Redis。活动锁保证同一智能体重复点击返回同一个未结束任务；
+状态对象保存 owner、workspace、进度、截止时间和最终结果。默认执行上限为 10 分钟，调度器到期后取消 worker
+并把状态固定为 `TIMED_OUT`；维护流程在读取会话、模型修复、复核和应用前设置检查点，已经进入终态的任务不能被迟到成功结果覆盖。
+锁释放使用“值仍等于当前 taskId 才删除”的 Redis 脚本，避免旧任务释放新任务的锁。
+
+任务读取仍先检查当前用户对 agent 的所有权，不能使用另一个 agentId 读取已知 taskId。任务状态依赖 Redis；
+Redis 无法持久化初始状态时不启动重建。线程中断对已经进入的第三方模型或数据库阻塞调用只能尽力取消，
+因此超时后的底层调用仍需通过目标环境联调观察，但终态和原子替换边界可以防止迟到结果改写任务状态。
+
 ## 查询
 
 事实查询按结构化人物归属执行：
@@ -134,7 +161,10 @@ current speaker 未识别 -> shared
 
 管理端支持查看、编辑、归档、删除、手工记住、手工忘记、候选确认、历史重建和主动审查。所有操作写 revision。
 
-历史重建和重审是同步维护模型请求。manager-web 只对这些端点使用略大于前端 300 秒请求预算的代理超时；页面在请求期间互斥锁定重建、重审和清空操作，并区分“无会话”“无动作”“无事实变更”和网络结果不确定，不能把所有返回都显示成成功。
+重建预览和重审仍是同步维护模型请求；正式历史重建是 Redis 持久化的异步任务。manager-web 创建任务后按
+2 秒起步轮询，失败时逐步退避且最长 10 秒；刷新或重新进入页面会查询最近任务并恢复进度，启动响应中断时也会先查询
+服务端任务再决定是否报错。服务端任务处于 `PENDING` / `RUNNING` 时，页面互斥锁定重建、重审、清空、手工记住和忘记，
+并分别展示完成、失败和超时。同步维护请求仍必须区分“无会话”“无动作”“无事实变更”和网络结果不确定，不能把所有返回都显示成成功。
 
 界面中的 `confirmation_state=auto` 显示为“模型调用”，不能描述为“自动抽取”。空列表也不能承诺开始聊天后系统会自动生成记忆。
 
@@ -159,8 +189,21 @@ PYTHONNOUSERSITE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
   tests/test_model_managed_memory_tool.py \
   tests/test_unified_tool_handler_gating.py
 
-cd main/manager-web && npm run build
+cd main/manager-web
+npm run test:unit
+npm run build
 ```
+
+新增可靠性测试分层：
+
+- `MemoryRebuildTaskServiceImplTest`：重复启动复用、成功释放锁、失败可观测与脱敏、超时不可被迟到完成覆盖、调度失败和跨智能体读取拒绝；
+- `MemoryManagementControllerTest`：所有权、workspace 写权限和 `sys:role:normal` 权限声明；
+- `memoryRebuildTaskState.test.mjs`：页面重建后的任务恢复、终态展示、超时展示和轮询退避。
+
+截至 2026-07-23，主集成复跑 Java 全量 `mvn test` 188 通过、5 跳过，Web 功能测试 17 通过且
+`npm run build` 通过。临时真实 Redis 已验证 Lua 锁归属、条件释放、CAS 和 TTL；这些仍不是 Spring 序列化、
+多进程重启、MySQL 或浏览器端到端验收，仍需在真实服务组合和外部维护
+模型上验证任务恢复、锁过期、事务回滚与超时行为。
 
 检查残留：
 

@@ -191,22 +191,28 @@
 
 ```text
 定制模块：manager-api 本地知识库适配器、manager-web 知识库配置弹窗、xiaozhi-server 本地知识库工具
-改动原因：本地知识库原先对 md/txt 文档主要按固定字符数硬切，容易把标题、适用问题、正文或一句话切开；召回也只按空格/标点切词，中文整句没有空格时容易查不到。现在知识库新增/编辑界面可以为每个知识库选择模型管理中已配置的 LLM 作为切片模型，parser_config 只保存 llm_model_id 和切片参数，API Key、接口地址和上游模型名由模型管理统一维护；文档解析时优先由大模型按语义结构生成 JSON 切片；召回同时匹配 content/question/answer，并使用中文 n-gram 增强自然句检索。为避免大知识库检索时全量加载 chunk 和 O(n*m) 字符串匹配打爆 CPU，本地召回必须先在数据库中按 dataset/document 做有界候选召回，再在 Java 内存中对有限候选精排；知识库高级设置保存在 parser_config.retrieval_config 中，用于控制常规/展会模式、语义/混合检索、召回级别、最大召回数、阈值和重排开关。
+改动原因：本地知识库原先对 md/txt 文档主要按固定字符数硬切，容易把标题、适用问题、正文或一句话切开；召回也只按空格/标点切词，中文整句没有空格时容易查不到。现在知识库新增/编辑界面可以为每个知识库选择模型管理中已配置的 LLM 作为切片模型，parser_config 只保存 llm_model_id 和切片参数，API Key、接口地址和上游模型名由模型管理统一维护；文档解析时优先由大模型按语义结构生成 JSON 切片；召回同时匹配 content/question/answer，并使用中文 n-gram 增强自然句检索。为避免大知识库检索时全量加载 chunk 和 O(n*m) 字符串匹配打爆 CPU，本地召回必须先在数据库中按 dataset/document 做有界候选召回，再在 Java 内存中对有限候选精排；知识库高级设置保存在 parser_config.retrieval_config 中，用于控制常规/展会模式、语义/混合检索、召回级别、最大召回数、阈值和重排开关。2026-07 进一步固定 parserConfig 字符串/DTO 边界、本地同步解析状态、零切片失败和中文句界 splitter；智能体编辑通过显式 hydration 恢复知识库绑定和 queryPolicy，禁止旧 prop、乱序列表或程序化 clearSelection 抹掉选择；知识结果、工具历史和工具描述使用分域预算，且知识工具说明不得硬编码酒类等客户领域规则。
 关键文件：
   - main/manager-api/src/main/java/xiaozhi/modules/knowledge/rag/impl/LocalKnowledgeAdapter.java
   - main/manager-api/src/main/java/xiaozhi/modules/knowledge/dao/KnowledgeChunkDao.java
   - main/manager-api/src/main/resources/mapper/knowledge/KnowledgeChunkDao.xml
   - main/manager-api/src/main/java/xiaozhi/modules/knowledge/service/impl/KnowledgeBaseServiceImpl.java
+  - main/manager-api/src/main/java/xiaozhi/modules/knowledge/rag/impl/local/
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/service/impl/KnowledgeToolDescriptionBuilder.java
   - main/manager-api/src/main/resources/db/changelog/202606111650.sql
   - main/manager-api/src/main/resources/db/changelog/202606291030.sql
   - main/manager-api/src/main/resources/db/changelog/db.changelog-master.yaml
   - main/manager-web/src/components/KnowledgeBaseDialog.vue
+  - main/manager-web/src/components/KnowledgeBaseSelectorDialog.vue
+  - main/manager-web/src/components/role/RoleEditDialog.vue
+  - main/manager-web/src/utils/roleConfigDraft.js
   - main/manager-web/src/views/KnowledgeBaseManagement.vue
   - main/manager-web/src/i18n/zh_CN.js
   - main/xiaozhi-server/plugins_func/functions/search_from_local_knowledge.py
+  - main/xiaozhi-server/core/utils/prompt_budget.py
   - docs/models/local-knowledge-integration.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改本地知识库、RAG 模型配置、知识库弹窗、文档解析、本地知识库工具、知识库数据库迁移或切片查询 DAO，必须保留知识库级 parser_config 覆盖 RAG_LocalKnowledge 默认配置的约定；知识库切片模型应通过 llm_model_id 复用模型管理中的 LLM 配置，知识库配置不得再次要求用户填写真实 API Key；文档解析优先走大模型切片，失败时才回退段落切分；旧文档必须重新解析才应用新切片；召回必须同时匹配 content/question/answer，并保留中文自然句 n-gram 检索增强；检索链路禁止退回全量 selectList 后逐条 contains 的实现，必须保留 SQL LIMIT 候选召回、候选 term 数量上限、最终返回数量上限和 parser_config.retrieval_config 的兼容读取；新增全文索引迁移必须登记到 db.changelog-master.yaml。
+官方同步时的处理规则：如果官方修改本地知识库、RAG 模型配置、知识库弹窗、文档解析、本地知识库工具、知识库数据库迁移或切片查询 DAO，必须保留知识库级 parser_config 覆盖 RAG_LocalKnowledge 默认配置的约定；知识库切片模型应通过 llm_model_id 复用模型管理中的 LLM 配置，知识库配置不得再次要求用户填写真实 API Key；文档解析优先走大模型切片，失败时才回退段落切分；旧文档必须重新解析才应用新切片；召回必须同时匹配 content/question/answer，并保留中文自然句 n-gram 检索增强；检索链路禁止退回全量 selectList 后逐条 contains 的实现，必须保留 SQL LIMIT 候选召回、候选 term 数量上限、最终返回数量上限和 parser_config.retrieval_config 的兼容读取；新增全文索引迁移必须登记到 db.changelog-master.yaml。同步还必须保护以下可靠性契约：parserConfig 原始完整 JSON 优先持久化，本地 adapter 上传同步产出切片时状态直接为 DONE，零切片或不支持格式明确失败；智能体详情中的普通插件和知识库映射必须在元数据加载后规范化拆分，保存失败保留草稿，关闭重进可恢复模型、知识库和 queryPolicy；程序化恢复选择不能触发空选择覆盖；知识工具说明必须领域中立且有界，动态知识与工具历史预算不能修改参数 schema。
 ```
 
 ## 14. 图片识别自然表达优化
@@ -362,22 +368,24 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 
 ```text
 定制模块：manager-api 长期记忆事实层、manager-web 记忆管理页、xiaozhi-server 记忆事件上报和查询注入
-改动原因：原有 summaryMemory、mem_local_short、PowerMem 等能力偏运行时摘要或 provider 接入，缺少统一的长期维护底座。现在新增 source_event -> candidate -> fact -> revision/profile/tool_behavior/tombstone 的 MySQL 事实层，支持主模型主动记住/忘记、管理端查看编辑删除归档、忘记意图、审计轨迹和运行时记忆上下文查询。普通聊天只写原始证据，不再按会话结束、空闲时间或定时任务自动抽取。`managed_memory` 模式通过真实 `manage_memory` function tool 让主对话 LLM 自主决定是否修改记忆、正文、分类以及 private/shared 可见性；维护模型只负责去重、更新、结构化和真实 ID 选择。后端不使用固定人物、关键词、条件任务、场景黑白名单、分数阈值、TTL、衰减或字符串相似度判断，只保留所有权、可信声纹隔离、容量、ID、事务和审计边界。Memory 配置只引用已配置的 `maintenance_llm` modelId，不保存 API Key、Base URL 或上游模型名。
+改动原因：原有 summaryMemory、mem_local_short、PowerMem 等能力偏运行时摘要或 provider 接入，缺少统一的长期维护底座。现在新增 source_event -> candidate -> fact -> revision/profile/tool_behavior/tombstone 的 MySQL 事实层，支持主模型主动记住/忘记、管理端查看编辑删除归档、忘记意图、审计轨迹和运行时记忆上下文查询。普通聊天只写原始证据，不再按会话结束、空闲时间或定时任务自动抽取。`managed_memory` 模式通过真实 `manage_memory` function tool 让主对话 LLM 自主决定是否修改记忆、正文、分类以及 private/shared 可见性；维护模型只负责去重、更新、结构化和真实 ID 选择。后端不使用固定人物、关键词、条件任务、场景黑白名单、分数阈值、TTL、衰减或字符串相似度判断，只保留所有权、可信声纹隔离、容量、ID、事务和审计边界。Memory 配置只引用已配置的 `maintenance_llm` modelId，不保存 API Key、Base URL 或上游模型名。管理端正式重建不再绑定浏览器长请求，而是创建 Redis 持久化异步任务：每智能体互斥、状态和最近任务可查询、10 分钟终态超时、worker 分阶段报告进度，页面关闭重进或启动响应中断后可以恢复轮询；迟到完成不能覆盖 FAILED/TIMED_OUT。动态 memory 注入只裁剪 `<memory>` 内容，不能裁剪静态角色与安全规则。
 关键文件：
   - main/manager-api/src/main/java/xiaozhi/modules/memory/
   - main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelCatalogServiceImpl.java
   - main/manager-api/src/main/resources/db/changelog/202606291520.sql
   - main/manager-api/src/main/resources/db/changelog/db.changelog-master.yaml
   - main/manager-web/src/views/MemoryManagement.vue
+  - main/manager-web/src/views/memory/memoryRebuildTaskState.mjs
   - main/manager-web/src/apis/module/memory.js
   - main/manager-web/src/components/DeviceItem.vue
   - main/xiaozhi-server/config/manage_api_client.py
   - main/xiaozhi-server/core/handle/reportHandle.py
   - main/xiaozhi-server/core/connection.py
+  - main/xiaozhi-server/core/utils/prompt_budget.py
   - docs/architecture/long-term-memory-maintenance.md
   - docs/models/memory-and-knowledge-governance.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改 Memory provider、聊天记录上报、ConfigController、AgentController、Shiro config、角色首页、模型配置目录、知识库切片配置或数据库迁移，必须保留长期记忆事实层、`managed_memory` 入口、真实 `manage_memory` 工具和 `/config/memory/**` server-secret 入口；运行时查询失败或超时时必须降级为空记忆，不能阻塞语音回复；`nomem` 模式不得注入长期记忆；实时对话不得恢复自动抽取、固定人物/关键词/场景门控、条件任务特殊类型、TTL、衰减或字符串相似度判断；private/shared 必须由主模型调用工具时选择，后端只校验可信声纹隔离；`maintenance_llm` 只能引用已配置的 LLM/SLM modelId，不能复制模型密钥；知识库 LLM 辅助必须通过模型管理选择 `parser_config.llm_model_id`；管理端删除、归档、确认、拒绝和模型工具写入必须写 revision 审计；删除 `summary_memory` 前必须完成 Java、Vue、Python、文档和迁移的完整兼容替代。
+官方同步时的处理规则：如果官方修改 Memory provider、聊天记录上报、ConfigController、AgentController、Shiro config、角色首页、模型配置目录、知识库切片配置或数据库迁移，必须保留长期记忆事实层、`managed_memory` 入口、真实 `manage_memory` 工具和 `/config/memory/**` server-secret 入口；运行时查询失败或超时时必须降级为空记忆，不能阻塞语音回复；`nomem` 模式不得注入长期记忆；实时对话不得恢复自动抽取、固定人物/关键词/场景门控、条件任务特殊类型、TTL、衰减或字符串相似度判断；private/shared 必须由主模型调用工具时选择，后端只校验可信声纹隔离；`maintenance_llm` 只能引用已配置的 LLM/SLM modelId，不能复制模型密钥；知识库 LLM 辅助必须通过模型管理选择 `parser_config.llm_model_id`；管理端删除、归档、确认、拒绝和模型工具写入必须写 revision 审计；删除 `summary_memory` 前必须完成 Java、Vue、Python、文档和迁移的完整兼容替代。正式重建必须继续采用服务端任务与短事务原子替换：Redis 初始状态保存失败时禁止启动、同一智能体只能有一个活动任务、锁只能由相同 taskId 释放、任务读取校验 agent 所有权、失败信息脱敏、超时或失败终态不能被迟到 worker 覆盖；页面必须恢复最近任务并在活动期间互斥其他维护操作。同步不能退回单个 300 秒 HTTP 请求或仅靠浏览器 loading 状态维持互斥。
 ```
 
 ## 22. 设备对话调试已移除

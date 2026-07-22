@@ -23,6 +23,7 @@ function getAuthToken() {
 function makeApiRequest(config) {
   const token = getAuthToken();
   const { url, method, data, headers, callback, errorCallback, retryFunction } = config;
+  const canRetry = method === 'GET' && typeof retryFunction === 'function';
 
   const requestBuilder = RequestService.sendRequest()
     .url(url)
@@ -46,11 +47,13 @@ function makeApiRequest(config) {
         errorCallback(err);
       }
     })
-    .networkFail(() => {
-      if (retryFunction) {
+    .networkFail((err) => {
+      if (canRetry) {
         RequestService.reAjaxFun(() => {
           retryFunction();
         });
+      } else if (errorCallback) {
+        errorCallback(err);
       }
     }).send();
 }
@@ -76,9 +79,7 @@ export default {
       url: `${getServiceUrl()}/datasets?${queryParams}`,
       method: 'GET',
       callback: callback,
-      errorCallback: errorCallback,
-      errorMessage: '获取知识库列表失败',
-      retryFunction: () => this.getKnowledgeBaseList(params, callback, errorCallback)
+      errorCallback: errorCallback
     });
   },
 
@@ -96,8 +97,7 @@ export default {
       headers: { 'Content-Type': 'application/json' },
       callback: callback,
       errorCallback: errorCallback,
-      errorMessage: '创建知识库失败',
-      retryFunction: () => this.createKnowledgeBase(data, callback, errorCallback)
+      errorMessage: '创建知识库失败'
     });
   },
 
@@ -116,8 +116,7 @@ export default {
       headers: { 'Content-Type': 'application/json' },
       callback: callback,
       errorCallback: errorCallback,
-      errorMessage: '更新知识库失败',
-      retryFunction: () => this.updateKnowledgeBase(datasetId, data, callback, errorCallback)
+      errorMessage: '更新知识库失败'
     });
   },
 
@@ -133,8 +132,7 @@ export default {
       method: 'DELETE',
       callback: callback,
       errorCallback: errorCallback,
-      errorMessage: '删除知识库失败',
-      retryFunction: () => this.deleteKnowledgeBase(datasetId, callback, errorCallback)
+      errorMessage: '删除知识库失败'
     });
   },
 
@@ -153,8 +151,7 @@ export default {
       method: 'DELETE',
       callback: callback,
       errorCallback: errorCallback,
-      errorMessage: '批量删除知识库失败',
-      retryFunction: () => this.deleteKnowledgeBases(ids, callback, errorCallback)
+      errorMessage: '批量删除知识库失败'
     });
   },
 
@@ -196,8 +193,7 @@ export default {
       data: formData,
       callback: callback,
       errorCallback: errorCallback,
-      errorMessage: '上传文档失败',
-      retryFunction: () => this.uploadDocument(datasetId, formData, callback, errorCallback)
+      errorMessage: '上传文档失败'
     });
   },
 
@@ -220,8 +216,7 @@ export default {
       headers: { 'Content-Type': 'application/json' },
       callback: callback,
       errorCallback: errorCallback,
-      errorMessage: '解析文档失败',
-      retryFunction: () => this.parseDocument(datasetId, documentId, callback, errorCallback)
+      errorMessage: '解析文档失败'
     });
   },
 
@@ -238,8 +233,7 @@ export default {
       method: 'DELETE',
       callback: callback,
       errorCallback: errorCallback,
-      errorMessage: '删除文档失败',
-      retryFunction: () => this.deleteDocument(datasetId, documentId, callback, errorCallback)
+      errorMessage: '删除文档失败'
     });
   },
 
@@ -287,8 +281,7 @@ export default {
       headers: { 'Content-Type': 'application/json' },
       callback: callback,
       errorCallback: errorCallback,
-      errorMessage: '召回测试失败',
-      retryFunction: () => this.retrievalTest(datasetId, data, callback, errorCallback)
+      errorMessage: '召回测试失败'
     });
   }
 

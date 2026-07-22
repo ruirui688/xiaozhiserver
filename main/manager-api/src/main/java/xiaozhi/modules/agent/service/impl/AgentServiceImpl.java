@@ -52,6 +52,8 @@ import xiaozhi.modules.agent.service.AgentTagService;
 import xiaozhi.modules.agent.service.AgentTemplateService;
 import xiaozhi.modules.agent.vo.AgentInfoVO;
 import xiaozhi.modules.correctword.service.CorrectWordFileService;
+import xiaozhi.modules.knowledge.entity.KnowledgeBaseEntity;
+import xiaozhi.modules.knowledge.service.KnowledgeBaseService;
 import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.device.service.DeviceService;
 import xiaozhi.modules.model.dto.ModelProviderDTO;
@@ -86,6 +88,7 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
     private final CorrectWordFileService correctWordFileService;
     private final WorkspaceService workspaceService;
     private final WorkspacePermissionService workspacePermissionService;
+    private final KnowledgeBaseService knowledgeBaseService;
 
     @Override
     public PageData<AgentEntity> adminAgentList(Map<String, Object> params) {
@@ -442,6 +445,8 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
         // 更新函数插件信息
         List<AgentUpdateDTO.FunctionInfo> functions = dto.getFunctions();
         if (functions != null) {
+            validateKnowledgeBaseBindings(functions, existingEntity.getWorkspaceId());
+
             // 1. 收集本次提交的 pluginId
             List<String> newPluginIds = functions.stream()
                     .map(AgentUpdateDTO.FunctionInfo::getPluginId)
@@ -530,6 +535,21 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
             throw new RenException(ErrorCode.LLM_INTENT_PARAMS_MISMATCH);
         }
         this.updateById(existingEntity);
+    }
+
+    private void validateKnowledgeBaseBindings(List<AgentUpdateDTO.FunctionInfo> functions, String agentWorkspaceId) {
+        for (AgentUpdateDTO.FunctionInfo function : functions) {
+            if (function == null || StringUtils.isBlank(function.getPluginId())) {
+                throw new RenException(ErrorCode.PARAMS_GET_ERROR);
+            }
+            KnowledgeBaseEntity knowledgeBase = knowledgeBaseService.selectById(function.getPluginId());
+            if (knowledgeBase != null
+                    && !StringUtils.equals(agentWorkspaceId, knowledgeBase.getWorkspaceId())) {
+                log.warn("拒绝跨工作空间绑定知识库: agentWorkspaceId={}, knowledgeBaseId={}",
+                        agentWorkspaceId, function.getPluginId());
+                throw new RenException(ErrorCode.NO_PERMISSION);
+            }
+        }
     }
 
     /**

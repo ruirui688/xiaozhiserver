@@ -1,6 +1,7 @@
 import httpx
 from typing import Dict, Any, List
 from config.logger import setup_logging
+from core.utils.prompt_budget import compact_dynamic_context
 
 TAG = __name__
 
@@ -58,7 +59,9 @@ class ContextDataProvider:
                 self.logger.bind(tag=TAG).error(f"获取上下文数据 {url} 失败: {e}")
         
         # 将所有格式化后的行拼接成一个字符串
-        self.context_data = "\n".join(formatted_lines)
+        self.context_data = compact_dynamic_context("\n".join(formatted_lines))
         if self.context_data:
-            self.logger.bind(tag=TAG).debug(f"已注入动态上下文数据:\n{self.context_data}")
+            self.logger.bind(tag=TAG).debug(
+                f"已注入动态上下文数据: context_chars={len(self.context_data)}"
+            )
         return self.context_data

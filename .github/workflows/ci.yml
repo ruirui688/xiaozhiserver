@@ -67,7 +67,7 @@ jobs:
         run: mvn test
 
   web-check:
-    name: Web Frontend Build
+    name: Web Frontend Test & Build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -82,9 +82,10 @@ jobs:
           cache: "npm"
           cache-dependency-path: main/manager-web/package-lock.json
 
-      - name: Install & Build
+      - name: Install, Test & Build
         run: |
           npm ci
+          npm run test:unit
           npm run build
 
   mobile-check:
@@ -115,8 +116,14 @@ jobs:
       - name: Type check
         run: pnpm type-check
 
+      - name: Functional workflow tests
+        run: pnpm test:unit
+
       - name: Build H5
         run: pnpm build:h5
+
+      - name: Build Weixin Mini Program
+        run: pnpm build:mp-weixin
 
       - name: Build WeChat Mini Program
         run: pnpm build:mp-weixin

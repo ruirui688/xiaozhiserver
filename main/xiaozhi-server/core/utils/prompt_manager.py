@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from core.connection import ConnectionHandler
 from config.logger import setup_logging
 from jinja2 import Template
+from core.utils.prompt_budget import compact_dynamic_context
 
 TAG = __name__
 
@@ -286,7 +287,7 @@ class PromptManager:
                 emojiList=EMOJI_List,
                 device_id=device_id,
                 client_ip=client_ip,
-                dynamic_context=self.context_data,
+                dynamic_context=compact_dynamic_context(self.context_data),
                 language=language,
                 available_tools_prompt=available_tools_prompt,
                 *args,

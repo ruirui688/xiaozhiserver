@@ -9,10 +9,12 @@
 <script lang="ts" setup>
 import type { ModelOption } from '@/api/agent/types'
 import type { KnowledgeBase } from '@/api/knowledge'
+import { onLoad, onUnload } from '@dcloudio/uni-app'
 import { ref } from 'vue'
 import { getModelOptions } from '@/api/agent/agent'
-import { getKnowledgeBase, updateKnowledgeBase } from '@/api/knowledge'
+import { getDocuments, getKnowledgeBase, updateKnowledgeBase } from '@/api/knowledge'
 import { toast } from '@/utils/toast'
+import { createLatestRequestGate } from './documentWorkflow'
 
 const datasetId = ref('')
 const knowledgeBase = ref<KnowledgeBase | null>(null)
@@ -22,16 +24,28 @@ const enabled = ref(false)
 const maxInputChars = ref(12000)
 const maxTokens = ref(4000)
 const parserConfigValue = ref<Record<string, any>>({})
+const loading = ref(false)
 const saving = ref(false)
+const loadError = ref('')
+const documentCount = ref(0)
+const loadGate = createLatestRequestGate()
+let pageAlive = true
 
 async function load() {
+  const requestId = loadGate.next()
+  loading.value = true
+  loadError.value = ''
   try {
-    const [base, modelList] = await Promise.all([
+    const [base, modelList, documentPage] = await Promise.all([
       getKnowledgeBase(datasetId.value),
       getModelOptions('LLM'),
+      getDocuments(datasetId.value, { pageSize: 1 }),
     ])
+    if (!pageAlive || !loadGate.isLatest(requestId))
+      return
     knowledgeBase.value = base
     models.value = modelList || []
+    documentCount.value = Number(documentPage.total) || documentPage.list?.length || 0
     try {
       parserConfigValue.value = base.parserConfig ? JSON.parse(base.parserConfig) : {}
     }
@@ -46,12 +60,19 @@ async function load() {
     modelIndex.value = index >= 0 ? index : 0
   }
   catch (error) {
-    toast.error(error instanceof Error ? error.message : '配置加载失败')
+    if (!pageAlive || !loadGate.isLatest(requestId))
+      return
+    loadError.value = error instanceof Error ? error.message : '配置加载失败'
+    toast.error(loadError.value)
+  }
+  finally {
+    if (loadGate.isLatest(requestId))
+      loading.value = false
   }
 }
 
 async function save() {
-  if (!knowledgeBase.value)
+  if (!knowledgeBase.value || loading.value || saving.value)
     return
   if (enabled.value && !models.value.length) {
     toast.warning('没有可用的 LLM 模型')
@@ -81,8 +102,21 @@ async function save() {
       },
     })
     await updateKnowledgeBase(datasetId.value, { ...knowledgeBase.value, parserConfig })
+    if (!pageAlive)
+      return
     parserConfigValue.value = JSON.parse(parserConfig)
     toast.success('切片配置已保存')
+    if (documentCount.value > 0) {
+      uni.showModal({
+        title: '重新切片现有文档',
+        content: `当前有 ${documentCount.value} 个文档。新配置不会自动改写旧切片，是否现在逐个选择原文件重新切片？`,
+        confirmText: '前往处理',
+        success: (result) => {
+          if (result.confirm)
+            openReuploadDocuments()
+        },
+      })
+    }
   }
   catch (error) {
     toast.error(error instanceof Error ? error.message : '保存失败')
@@ -92,14 +126,30 @@ async function save() {
   }
 }
 
+function openReuploadDocuments() {
+  if (!knowledgeBase.value)
+    return
+  uni.redirectTo({
+    url: `/pages/knowledge/documents?datasetId=${encodeURIComponent(datasetId.value)}&name=${encodeURIComponent(knowledgeBase.value.name)}&reupload=1`,
+  })
+}
+
 onLoad((options) => {
   datasetId.value = String(options?.datasetId || '')
   load()
+})
+
+onUnload(() => {
+  pageAlive = false
+  loadGate.invalidate()
 })
 </script>
 
 <template>
   <view class="page">
+    <view v-if="loadError" class="error-banner">
+      {{ loadError }}
+    </view>
     <view class="form">
       <view class="row">
         <view>
@@ -109,10 +159,10 @@ onLoad((options) => {
             保存后重新上传原文件时生效
           </text>
         </view>
-        <switch :checked="enabled" color="#3977d6" @change="enabled = $event.detail.value" />
+        <switch :checked="enabled" :disabled="loading || saving" color="#3977d6" @change="enabled = $event.detail.value" />
       </view>
 
-      <picker v-if="enabled" mode="selector" :range="models" range-key="modelName" :value="modelIndex" @change="modelIndex = Number($event.detail.value)">
+      <picker v-if="enabled" mode="selector" :disabled="loading || saving" :range="models" range-key="modelName" :value="modelIndex" @change="modelIndex = Number($event.detail.value)">
         <view class="field picker-field">
           <text class="field-label">
             切片模型
@@ -128,17 +178,23 @@ onLoad((options) => {
         <text class="field-label">
           输入字符数
         </text>
-        <input v-model.number="maxInputChars" class="number-input" type="number">
+        <input v-model.number="maxInputChars" class="number-input" type="number" :disabled="loading || saving">
       </view>
       <view v-if="enabled" class="field">
         <text class="field-label">
           输出 Token 数
         </text>
-        <input v-model.number="maxTokens" class="number-input" type="number">
+        <input v-model.number="maxTokens" class="number-input" type="number" :disabled="loading || saving">
       </view>
 
-      <button class="save" :disabled="saving" @click="save">
-        {{ saving ? '保存中...' : '保存' }}
+      <button class="save" :disabled="loading || saving" @click="save">
+        {{ loading ? '加载中...' : saving ? '保存中...' : '保存' }}
+      </button>
+    </view>
+    <view v-if="documentCount > 0" class="reupload-panel">
+      <text>现有 {{ documentCount }} 个文档不会自动应用新配置。</text>
+      <button class="reupload" :disabled="saving" @click="openReuploadDocuments">
+        前往逐个重新切片
       </button>
     </view>
   </view>
@@ -156,6 +212,23 @@ onLoad((options) => {
   border: 1rpx solid #e3e8ef;
   border-radius: 12rpx;
   background: #fff;
+}
+.error-banner,
+.reupload-panel {
+  margin-bottom: 18rpx;
+  padding: 20rpx 22rpx;
+  border: 1rpx solid #ffd5d2;
+  border-radius: 10rpx;
+  background: #fff3f2;
+  color: #b42318;
+  font-size: 24rpx;
+  line-height: 1.55;
+}
+.reupload-panel {
+  margin: 18rpx 0 0;
+  border-color: #cddcf3;
+  background: #f3f7fd;
+  color: #42516a;
 }
 .row,
 .field {
@@ -214,5 +287,22 @@ onLoad((options) => {
 }
 .save::after {
   border: 0;
+}
+.reupload {
+  width: 100%;
+  height: 66rpx;
+  margin: 16rpx 0 0;
+  border: 1rpx solid #3977d6;
+  border-radius: 10rpx;
+  background: #fff;
+  color: #235fae;
+  font-size: 25rpx;
+  line-height: 66rpx;
+}
+.reupload::after {
+  border: 0;
+}
+button[disabled] {
+  opacity: 0.55;
 }
 </style>

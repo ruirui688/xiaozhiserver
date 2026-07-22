@@ -1,3 +1,13 @@
+---
+status: report
+owner: xiaozhi-server
+last_verified: 2026-07-11
+source_paths:
+  - main/xiaozhi-server/core/connection.py
+  - main/xiaozhi-server/core/handle
+  - main/xiaozhi-server/core/providers
+---
+
 # 语音管道延迟分析
 
 > 初始分析：2026-06-25 | 真机复测：2026-07-11 | 当前分支：feature/mini-program-development

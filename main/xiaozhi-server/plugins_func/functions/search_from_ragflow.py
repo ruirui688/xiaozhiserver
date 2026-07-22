@@ -1,6 +1,7 @@
 import requests
 import sys
 from config.logger import setup_logging
+from core.utils.prompt_budget import build_bounded_knowledge_context
 from plugins_func.register import register_function, ToolType, ActionResponse, Action
 from typing import TYPE_CHECKING
 
@@ -107,10 +108,10 @@ def search_from_ragflow(conn: "ConnectionHandler", question=None):
                     contents.append(str(content))
 
         if contents:
-            # 组织知识库内容为引用模式
-            context_text = f"# 关于问题【{question}】查到知识库如下\n"
-            context_text += "```\n\n\n".join(contents[:5])
-            context_text += "\n```"
+            context_text = build_bounded_knowledge_context(
+                f"# 关于问题【{question}】查到知识库如下",
+                contents,
+            )
         else:
             context_text = "根据知识库查询结果，没有相关信息。"
         return ActionResponse(Action.REQLLM, context_text, None)

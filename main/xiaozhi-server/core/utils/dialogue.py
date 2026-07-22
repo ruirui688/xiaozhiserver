@@ -5,6 +5,12 @@ from typing import List, Dict
 from datetime import datetime
 from core.utils.current_time import get_current_datetime
 from core.session.turn_context import build_contextual_user_content
+from core.utils.prompt_budget import (
+    SPEAKER_DESCRIPTION_MAX_CHARS,
+    compact_memory_context,
+    compact_tool_history,
+    truncate_context_text,
+)
 
 
 class Message:
@@ -153,9 +159,10 @@ class Dialogue:
 
                 # 填充记忆
                 if memory_str is not None:
+                    bounded_memory = compact_memory_context(memory_str)
                     dynamic_part = re.sub(
                         r"<memory>.*?</memory>",
-                        f"<memory>\n{memory_str}\n</memory>",
+                        f"<memory>\n{bounded_memory}\n</memory>",
                         dynamic_part,
                         flags=re.DOTALL,
                     )
@@ -196,6 +203,9 @@ class Dialogue:
                                     description = (
                                         parts[2].strip() if len(parts) >= 3 else ""
                                     )
+                                description = truncate_context_text(
+                                    description, SPEAKER_DESCRIPTION_MAX_CHARS
+                                )
                                 if current_speaker_id:
                                     is_current = speaker_id == current_speaker_id
                                 else:
@@ -215,8 +225,10 @@ class Dialogue:
             actual_messages = [m for m in non_system_messages if not m.is_temporary]
             actual_messages = self._truncate_history(actual_messages)
             complete_actual = self._ensure_tool_calls_complete(actual_messages)
+            actual_dialogue = []
             for m in complete_actual:
-                self.getMessages(m, dialogue)
+                self.getMessages(m, actual_dialogue)
+            dialogue.extend(compact_tool_history(actual_dialogue))
 
             return dialogue
 

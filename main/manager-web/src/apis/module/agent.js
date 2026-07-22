@@ -50,7 +50,7 @@ export default {
             }).send();
     },
     // 获取智能体配置
-    getDeviceConfig(agentId, callback) {
+    getDeviceConfig(agentId, callback, failCallback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/${agentId}`)
             .method('GET')
@@ -58,24 +58,32 @@ export default {
                 RequestService.clearRequestTime();
                 callback(res);
             })
+            .fail((err) => {
+                failCallback && failCallback(err);
+            })
             .networkFail((err) => {
-                console.error('获取配置失败:', err);
-                RequestService.reAjaxFun(() => {
-                    this.getDeviceConfig(agentId, callback);
-                });
+                failCallback && failCallback(err);
             }).send();
     },
     // 配置智能体
-    updateAgentConfig(agentId, configData, callback) {
-        RequestService.sendRequest()
+    updateAgentConfig(agentId, configData, callback, failCallback) {
+        const request = RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/${agentId}`)
             .method('PUT')
             .data(configData)
             .success((res) => {
                 RequestService.clearRequestTime();
                 callback(res);
-            })
-            .networkFail(() => {
+            });
+        if (failCallback) {
+            request.fail(failCallback);
+        }
+        request
+            .networkFail((err) => {
+                if (failCallback) {
+                    failCallback(err);
+                    return;
+                }
                 RequestService.reAjaxFun(() => {
                     this.updateAgentConfig(agentId, configData, callback);
                 });
@@ -599,7 +607,7 @@ export default {
             }).send();
     },
     // 获取智能体标签
-    getAgentTags(agentId, callback) {
+    getAgentTags(agentId, callback, failCallback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/${agentId}/tags`)
             .method('GET')
@@ -607,14 +615,15 @@ export default {
                 RequestService.clearRequestTime();
                 callback(res);
             })
-            .networkFail(() => {
-                RequestService.reAjaxFun(() => {
-                    this.getAgentTags(agentId, callback);
-                });
+            .fail((err) => {
+                failCallback && failCallback(err);
+            })
+            .networkFail((err) => {
+                failCallback && failCallback(err);
             }).send();
     },
     // 保存智能体标签
-    saveAgentTags(agentId, tags, callback) {
+    saveAgentTags(agentId, tags, callback, failCallback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/${agentId}/tags`)
             .method('PUT')
@@ -623,10 +632,11 @@ export default {
                 RequestService.clearRequestTime();
                 callback(res);
             })
-            .networkFail(() => {
-                RequestService.reAjaxFun(() => {
-                    this.saveAgentTags(agentId, tags, callback);
-                });
+            .fail((err) => {
+                failCallback && failCallback(err);
+            })
+            .networkFail((err) => {
+                failCallback && failCallback(err);
             }).send();
     },
 }

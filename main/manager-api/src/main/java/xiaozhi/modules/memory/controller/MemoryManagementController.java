@@ -24,8 +24,10 @@ import xiaozhi.modules.memory.dto.MemoryForgetDTO;
 import xiaozhi.modules.memory.dto.MemoryRememberDTO;
 import xiaozhi.modules.memory.dto.MemoryRebuildRequestDTO;
 import xiaozhi.modules.memory.service.MemoryService;
+import xiaozhi.modules.memory.service.MemoryRebuildTaskService;
 import xiaozhi.modules.memory.vo.MemoryDashboardVO;
 import xiaozhi.modules.memory.vo.MemoryRebuildResultVO;
+import xiaozhi.modules.memory.vo.MemoryRebuildTaskVO;
 import xiaozhi.modules.security.user.SecurityUser;
 import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 
@@ -35,6 +37,7 @@ import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 @AllArgsConstructor
 public class MemoryManagementController {
     private final MemoryService memoryService;
+    private final MemoryRebuildTaskService memoryRebuildTaskService;
     private final AgentService agentService;
     private final WorkspacePermissionService workspacePermissionService;
 
@@ -149,10 +152,10 @@ public class MemoryManagementController {
     }
 
     @PostMapping("rebuild")
-    @Operation(summary = "从最近聊天记录重建长期记忆")
+    @Operation(summary = "启动最近聊天记录长期记忆重建任务")
     @RequiresPermissions("sys:role:normal")
-    public Result<MemoryRebuildResultVO> rebuild(@PathVariable String agentId,
-                                                 @RequestBody(required = false) MemoryRebuildRequestDTO dto) {
+    public Result<MemoryRebuildTaskVO> rebuild(@PathVariable String agentId,
+                                               @RequestBody(required = false) MemoryRebuildRequestDTO dto) {
         if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
             throw new RenException(ErrorCode.NO_PERMISSION);
         }
@@ -161,8 +164,28 @@ public class MemoryManagementController {
             dto = new MemoryRebuildRequestDTO();
         }
         dto.setDryRun(false);
-        return new Result<MemoryRebuildResultVO>().ok(
-                memoryService.rebuildFromRecentChatHistory(agentId, dto, "user", currentUserId()));
+        return new Result<MemoryRebuildTaskVO>().ok(
+                memoryRebuildTaskService.startRebuild(agentId, dto, "user", currentUserId()));
+    }
+
+    @GetMapping("rebuild-task")
+    @Operation(summary = "查询当前智能体最近一次记忆重建任务")
+    @RequiresPermissions("sys:role:normal")
+    public Result<MemoryRebuildTaskVO> latestRebuildTask(@PathVariable String agentId) {
+        if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
+            throw new RenException(ErrorCode.NO_PERMISSION);
+        }
+        return new Result<MemoryRebuildTaskVO>().ok(memoryRebuildTaskService.getLatestTask(agentId));
+    }
+
+    @GetMapping("rebuild-task/{taskId}")
+    @Operation(summary = "查询指定记忆重建任务")
+    @RequiresPermissions("sys:role:normal")
+    public Result<MemoryRebuildTaskVO> rebuildTask(@PathVariable String agentId, @PathVariable String taskId) {
+        if (!agentService.checkAgentPermission(agentId, SecurityUser.getUserId())) {
+            throw new RenException(ErrorCode.NO_PERMISSION);
+        }
+        return new Result<MemoryRebuildTaskVO>().ok(memoryRebuildTaskService.getTask(agentId, taskId));
     }
 
     @PostMapping("review-preview")

@@ -3,6 +3,7 @@ import requests
 from typing import TYPE_CHECKING
 
 from config.logger import setup_logging
+from core.utils.prompt_budget import build_bounded_knowledge_context
 from plugins_func.register import register_function, ToolType, ActionResponse, Action
 
 if TYPE_CHECKING:
@@ -91,8 +92,10 @@ def search_from_local_knowledge(conn: "ConnectionHandler", question=None):
                     contents.append(str(content))
 
         if contents:
-            context_text = f"# 关于问题【{question}】查到本地知识库如下\n"
-            context_text += "\n\n---\n\n".join(contents[:5])
+            context_text = build_bounded_knowledge_context(
+                f"# 关于问题【{question}】查到本地知识库如下",
+                contents,
+            )
         else:
             context_text = "根据本地知识库查询结果，没有相关信息。"
         return ActionResponse(Action.REQLLM, context_text, None)

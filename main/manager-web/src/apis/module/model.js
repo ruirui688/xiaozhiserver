@@ -690,7 +690,7 @@ export default {
       }).send()
   },
   // 获取插件列表
-  getPluginFunctionList(params, callback) {
+  getPluginFunctionList(params, callback, failCallback) {
     RequestService.sendRequest()
       .url(`${getServiceUrl()}/models/provider/plugin/names`)
       .method('GET')
@@ -698,11 +698,11 @@ export default {
         RequestService.clearRequestTime()
         callback(res)
       })
+      .fail((err) => {
+        failCallback && failCallback(err)
+      })
       .networkFail((err) => {
-        this.$message.error(err.msg || '获取插件列表失败')
-        RequestService.reAjaxFun(() => {
-          this.getPluginFunctionList(params, callback)
-        })
+        failCallback && failCallback(err)
       }).send()
   },
 

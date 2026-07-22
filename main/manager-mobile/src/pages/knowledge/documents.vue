@@ -7,171 +7,70 @@
 </route>
 
 <script lang="ts" setup>
-import type { KnowledgeChunk, KnowledgeDocument, RetrievalHit } from '@/api/knowledge'
-import { ref } from 'vue'
-import { deleteDocument, getChunks, getDocuments, parseDocuments, runRetrievalTest, uploadKnowledgeDocument } from '@/api/knowledge'
-import { toast } from '@/utils/toast'
+import { onHide, onLoad, onShow, onUnload } from '@dcloudio/uni-app'
+import { useKnowledgeDocuments } from './useKnowledgeDocuments'
 
-const allowedExtensions = ['doc', 'docx', 'pdf', 'txt', 'md', 'mdx', 'csv', 'xls', 'xlsx', 'ppt', 'pptx', 'json', 'jsonl', 'qa']
-const datasetId = ref('')
-const documents = ref<KnowledgeDocument[]>([])
-const loading = ref(false)
-const busyId = ref('')
-const selectedDocument = ref<KnowledgeDocument | null>(null)
-const chunks = ref<KnowledgeChunk[]>([])
-const retrievalQuestion = ref('')
-const retrievalHits = ref<RetrievalHit[]>([])
-const retrievalLoading = ref(false)
+const {
+  documents,
+  loading,
+  uploading,
+  selectedDocument,
+  chunks,
+  retrievalQuestion,
+  retrievalHits,
+  retrievalLoading,
+  loadError,
+  workflowError,
+  reuploadMode,
+  processingCount,
+  loadDocuments,
+  chooseFile,
+  parse,
+  viewChunks,
+  remove,
+  retrievalTest,
+  isBusy,
+  isDocumentProcessing,
+  documentProgressPercent,
+  documentStatusText,
+  normalizeDocumentStatus,
+  initialize,
+  activate,
+  deactivate,
+} = useKnowledgeDocuments()
 
-async function loadDocuments() {
-  if (!datasetId.value)
-    return
-  loading.value = true
-  try {
-    const data = await getDocuments(datasetId.value, { pageSize: 100 })
-    documents.value = data.list || []
-  }
-  catch (error) {
-    toast.error(error instanceof Error ? error.message : '文档加载失败')
-  }
-  finally {
-    loading.value = false
-  }
-}
-
-function chooseFile() {
-  const chooser = (uni as any).chooseMessageFile
-  if (!chooser) {
-    toast.warning('当前平台不支持选择文档')
-    return
-  }
-  chooser({
-    count: 1,
-    type: 'file',
-    success: async (result: { tempFiles: Array<{ path: string, name: string, size: number }> }) => {
-      const file = result.tempFiles[0]
-      const extension = file.name.split('.').pop()?.toLowerCase() || ''
-      if (!allowedExtensions.includes(extension)) {
-        toast.warning('不支持此文件类型')
-        return
-      }
-      if (file.size > 10 * 1024 * 1024) {
-        toast.warning('文件不能超过 10MB')
-        return
-      }
-      try {
-        uni.showLoading({ title: '上传中', mask: true })
-        const document = await uploadKnowledgeDocument(datasetId.value, file.path, file.name)
-        toast.success('上传成功')
-        await loadDocuments()
-        if (document?.id)
-          await parse(document)
-      }
-      catch (error) {
-        toast.error(error instanceof Error ? error.message : '上传失败')
-      }
-      finally {
-        uni.hideLoading()
-      }
-    },
-  })
-}
-
-async function parse(document: KnowledgeDocument) {
-  busyId.value = document.id
-  try {
-    await parseDocuments(datasetId.value, [document.id])
-    toast.success('已提交解析')
-    await loadDocuments()
-  }
-  catch (error) {
-    toast.error(error instanceof Error ? error.message : '解析失败')
-  }
-  finally {
-    busyId.value = ''
-  }
-}
-
-async function viewChunks(document: KnowledgeDocument) {
-  busyId.value = document.id
-  try {
-    const data = await getChunks(datasetId.value, document.id, { pageSize: 100 })
-    selectedDocument.value = document
-    chunks.value = data.chunks || []
-  }
-  catch (error) {
-    toast.error(error instanceof Error ? error.message : '切片加载失败')
-  }
-  finally {
-    busyId.value = ''
-  }
-}
-
-function remove(document: KnowledgeDocument) {
-  uni.showModal({
-    title: '删除文档',
-    content: `确定删除“${document.name}”及其切片？`,
-    confirmColor: '#d93025',
-    success: async (result) => {
-      if (!result.confirm)
-        return
-      try {
-        await deleteDocument(datasetId.value, document.id)
-        if (selectedDocument.value?.id === document.id) {
-          selectedDocument.value = null
-          chunks.value = []
-        }
-        await loadDocuments()
-      }
-      catch (error) {
-        toast.error(error instanceof Error ? error.message : '删除失败')
-      }
-    },
-  })
-}
-
-async function retrievalTest() {
-  const question = retrievalQuestion.value.trim()
-  if (!question) {
-    toast.warning('请输入召回问题')
-    return
-  }
-  retrievalLoading.value = true
-  try {
-    const data = await runRetrievalTest(datasetId.value, question)
-    retrievalHits.value = data.chunks || []
-    if (!retrievalHits.value.length)
-      toast.info('没有召回切片')
-  }
-  catch (error) {
-    toast.error(error instanceof Error ? error.message : '召回测试失败')
-  }
-  finally {
-    retrievalLoading.value = false
-  }
-}
-
-function statusText(document: KnowledgeDocument) {
-  return ({ UNSTART: '未解析', RUNNING: '解析中', DONE: '已完成', FAIL: '失败', CANCEL: '已取消' } as Record<string, string>)[document.run || ''] || document.run || '未解析'
-}
-
-onLoad((options) => {
-  datasetId.value = String(options?.datasetId || '')
-  if (options?.name)
-    uni.setNavigationBarTitle({ title: decodeURIComponent(String(options.name)) })
-  loadDocuments()
-})
+onLoad(options => initialize(options))
+onShow(activate)
+onHide(deactivate)
+onUnload(deactivate)
 </script>
 
 <template>
   <view class="page">
     <view class="actions">
-      <button class="primary" @click="chooseFile">
+      <button class="primary" :disabled="uploading" @click="chooseFile()">
         <wd-icon name="upload" /> 上传文档
       </button>
-      <button class="secondary" @click="loadDocuments">
+      <button class="secondary" :disabled="loading" @click="loadDocuments()">
         <wd-icon name="refresh" /> 刷新
       </button>
+    </view>
+
+    <view v-if="reuploadMode" class="workflow-notice">
+      <text class="workflow-title">
+        重新切片现有文档
+      </text>
+      <text>逐个点击“重新切片”并选择原文件。新文档解析完成后才会删除旧文档。</text>
+    </view>
+
+    <view v-if="processingCount" class="processing-notice">
+      {{ processingCount }} 个文档正在解析，状态会自动更新
+    </view>
+    <view v-if="loadError" class="error-banner">
+      状态更新失败：{{ loadError }}
+    </view>
+    <view v-if="workflowError" class="error-banner">
+      {{ workflowError }}
     </view>
 
     <view v-if="loading" class="state">
@@ -186,24 +85,30 @@ onLoad((options) => {
           <text class="document-name">
             {{ document.name }}
           </text>
-          <text class="status" :class="document.run?.toLowerCase()">
-            {{ statusText(document) }}
+          <text class="status" :class="normalizeDocumentStatus(document.run).toLowerCase()">
+            {{ documentStatusText(document) }}
           </text>
         </view>
         <view class="meta">
           <text>{{ document.chunkCount || 0 }} 个切片</text><text>{{ document.tokenCount || 0 }} tokens</text>
         </view>
+        <view v-if="isDocumentProcessing(document)" class="progress-track">
+          <view class="progress-value" :style="{ width: `${documentProgressPercent(document)}%` }" />
+        </view>
         <text v-if="document.error" class="error">
           {{ document.error }}
         </text>
         <view class="row-actions">
-          <button :disabled="busyId === document.id" @click="parse(document)">
-            解析
+          <button :disabled="isBusy(document.id) || isDocumentProcessing(document)" @click="parse(document)">
+            {{ isDocumentProcessing(document) ? '解析中' : '解析' }}
           </button>
-          <button :disabled="busyId === document.id" @click="viewChunks(document)">
+          <button :disabled="isBusy(document.id)" @click="viewChunks(document)">
             查看切片
           </button>
-          <button class="danger" @click="remove(document)">
+          <button v-if="reuploadMode" :disabled="isBusy(document.id) || uploading" @click="chooseFile(document)">
+            重新切片
+          </button>
+          <button class="danger" :disabled="isBusy(document.id)" @click="remove(document)">
             <wd-icon name="delete" />
           </button>
         </view>
@@ -274,6 +179,9 @@ button {
 button::after {
   border: 0;
 }
+button[disabled] {
+  opacity: 0.55;
+}
 .primary {
   background: #3977d6;
   border-color: #3977d6;
@@ -292,6 +200,33 @@ button::after {
 .full {
   width: 100%;
   margin-top: 16rpx;
+}
+.workflow-notice,
+.processing-notice,
+.error-banner {
+  margin-top: 18rpx;
+  padding: 20rpx 22rpx;
+  border: 1rpx solid #cddcf3;
+  border-radius: 10rpx;
+  background: #f3f7fd;
+  color: #42516a;
+  font-size: 24rpx;
+  line-height: 1.55;
+}
+.workflow-title {
+  display: block;
+  margin-bottom: 4rpx;
+  color: #235fae;
+  font-size: 26rpx;
+  font-weight: 650;
+}
+.processing-notice {
+  color: #235fae;
+}
+.error-banner {
+  border-color: #ffd5d2;
+  background: #fff3f2;
+  color: #b42318;
 }
 .documents {
   display: flex;
@@ -343,6 +278,20 @@ button::after {
   margin: 14rpx 0 18rpx;
   font-size: 23rpx;
   color: #687386;
+}
+.progress-track {
+  height: 8rpx;
+  margin: -6rpx 0 18rpx;
+  overflow: hidden;
+  border-radius: 4rpx;
+  background: #e5eaf1;
+}
+.progress-value {
+  height: 100%;
+  min-width: 4rpx;
+  border-radius: inherit;
+  background: #3977d6;
+  transition: width 0.2s ease;
 }
 .error {
   display: block;

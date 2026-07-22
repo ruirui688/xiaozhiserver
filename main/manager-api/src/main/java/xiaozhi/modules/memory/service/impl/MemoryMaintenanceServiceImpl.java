@@ -2,6 +2,7 @@ package xiaozhi.modules.memory.service.impl;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -49,6 +50,7 @@ import xiaozhi.modules.memory.service.MemoryMaintenanceService;
 import xiaozhi.modules.memory.service.MemorySettingsService;
 import xiaozhi.modules.memory.service.impl.maintenance.MemoryMaintenanceOutputParser;
 import xiaozhi.modules.memory.service.impl.maintenance.MemorySpeakerConversationBuilder;
+import xiaozhi.modules.memory.service.impl.task.MemoryRebuildTaskContext;
 import xiaozhi.modules.memory.utils.MemoryHelper;
 import xiaozhi.modules.memory.utils.MemorySpeakerUtils;
 import xiaozhi.modules.memory.utils.MemorySpeakerUtils.Registry;
@@ -140,22 +142,38 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         result.setDryRun(dryRun);
         result.setMode(mode);
 
+        MemoryRebuildTaskContext.checkpoint(10, "LOADING_SESSIONS", "正在读取最近聊天会话");
         List<AgentChatSessionDTO> sessions = recentSessions(agent.getId(), limit);
-        result.setSessionsRead(sessions.size());
         List<List<AgentChatHistoryDTO>> histories = new ArrayList<>();
+        List<String> sessionIds = new ArrayList<>();
         String scopeId = agent.getId();
-        for (int i = sessions.size() - 1; i >= 0; i--) {
+        boolean scopeResolved = false;
+        int promptChars = 0;
+        for (int i = 0; i < sessions.size(); i++) {
             AgentChatSessionDTO session = sessions.get(i);
-            result.getSessionIds().add(session.getSessionId());
             List<AgentChatHistoryDTO> history = agentChatHistoryService.getChatHistoryBySessionId(
                     agent.getId(), session.getSessionId());
             histories.add(history);
-            String sessionScopeId = firstScopeId(history, "");
-            if (StringUtils.isNotBlank(sessionScopeId)) {
+            sessionIds.add(session.getSessionId());
+            promptChars += conversationBuilder.combineHistories(List.of(history)).length();
+            String sessionScopeId = scopeResolved ? "" : firstScopeId(history, "");
+            if (!scopeResolved && StringUtils.isNotBlank(sessionScopeId)) {
                 scopeId = sessionScopeId;
+                scopeResolved = true;
+            }
+            int progress = 10 + (int) Math.round((i + 1) * 15.0 / Math.max(1, sessions.size()));
+            MemoryRebuildTaskContext.checkpoint(progress, "LOADING_SESSIONS",
+                    "正在读取聊天会话 " + (i + 1) + "/" + sessions.size());
+            if (promptChars >= MemoryHelper.REBUILD_MAX_TOTAL_CHARS) {
+                break;
             }
         }
+        Collections.reverse(histories);
+        Collections.reverse(sessionIds);
+        result.setSessionsRead(histories.size());
+        result.getSessionIds().addAll(sessionIds);
 
+        MemoryRebuildTaskContext.checkpoint(30, "EXTRACTING", "维护模型正在生成重建动作");
         List<JSONObject> actions = buildRebuildActions(agent, scopeId, histories, mode);
         List<JSONObject> applicableActions = new ArrayList<>();
         for (JSONObject action : actions) {
@@ -169,6 +187,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
             return result;
         }
 
+        MemoryRebuildTaskContext.checkpoint(90, "APPLYING", "正在原子替换长期记忆");
         String maintenanceModelId = getMaintenanceLlmModelId(agent);
         boolean clearThenRebuild = "clear_then_rebuild".equalsIgnoreCase(mode);
         String targetScopeId = scopeId;
@@ -199,6 +218,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         if (appliedResult == null) {
             throw new IllegalStateException("重建事务未返回结果");
         }
+        MemoryRebuildTaskContext.checkpoint(98, "FINALIZING", "正在整理重建结果");
         return appliedResult;
     }
 
@@ -528,7 +548,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                             "ARCHIVE".equals(action) ? "archive_from_maintenance" : "delete_from_maintenance", before,
                             JsonUtils.toJsonString(fact), "system", modelId,
                             "维护模型生命周期动作: " + StringUtils.defaultString(json.getStr("reason")));
-                    log.info("维护模型{}事实, memoryId={}, text={}", action, fact.getMemoryId(), fact.getCanonicalText());
+                    log.info("维护模型{}事实, agentId={}, memoryId={}", action, agent.getId(), fact.getMemoryId());
                     return true;
                 }
             }
@@ -611,7 +631,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                 }
                 writeRevision(agent.getId(), fact.getMemoryId(), "update_from_maintenance", before,
                         JsonUtils.toJsonString(fact), "system", modelId, "维护模型更新事实");
-                log.info("维护模型更新事实, memoryId={}, text={}", fact.getMemoryId(), canonical);
+                log.info("维护模型更新事实, agentId={}, memoryId={}", agent.getId(), fact.getMemoryId());
                 return true;
             }
             log.warn("维护模型 UPDATE 指向无效或越界的 related_memory_id，已拒绝执行: agentId={}, relatedMemoryId={}",
@@ -676,7 +696,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         }
         writeRevision(agent.getId(), fact.getMemoryId(), "create_from_maintenance", null,
                 JsonUtils.toJsonString(fact), "system", modelId, "维护模型创建事实");
-        log.info("维护模型创建事实, memoryId={}, text={}", fact.getMemoryId(), canonical);
+        log.info("维护模型创建事实, agentId={}, memoryId={}", agent.getId(), fact.getMemoryId());
         return true;
     }
 
@@ -847,16 +867,19 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                 .replace("{existing_memories}", buildRebuildExistingMemoryContext(agent.getId(), mode))
                 .replace("{conversation}", conversation);
         String output = llmService.generateJson(prompt, maintenanceModelId);
+        MemoryRebuildTaskContext.checkpoint(50, "EXTRACTING", "维护模型已返回初步动作");
         JSONArray arr = outputParser.parseActionsResult(output);
         if ((arr == null || arr.isEmpty()) && StringUtils.isNotBlank(output)) {
             String repaired = llmService.generateJson(
                     PowerMemPrompts.JSON_REPAIR_PROMPT.replace("{raw_output}", output),
                     maintenanceModelId);
+            MemoryRebuildTaskContext.checkActive();
             arr = outputParser.parseActionsResult(repaired);
         }
         if (arr == null || arr.isEmpty()) {
             return List.of();
         }
+        MemoryRebuildTaskContext.checkpoint(65, "REVIEWING", "维护模型正在复核重建动作");
         JSONArray reviewed = reviewRebuildActions(arr, mode, conversation, maintenanceModelId);
         if (reviewed != null && !reviewed.isEmpty()) {
             arr = reviewed;
@@ -910,11 +933,13 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                 .replace("{evidence_context}", StringUtils.defaultIfBlank(evidenceContext, "无额外证据"))
                 .replace("{actions_json}", JSONUtil.toJsonStr(Map.of("actions", actions)));
         String output = llmService.generateJson(prompt, maintenanceModelId);
+        MemoryRebuildTaskContext.checkpoint(80, "VALIDATING", "正在校验重建动作与人物归属");
         JSONArray reviewed = outputParser.parseActionsResult(output);
         if ((reviewed == null || reviewed.isEmpty()) && StringUtils.isNotBlank(output)) {
             String repaired = llmService.generateJson(
                     PowerMemPrompts.JSON_REPAIR_PROMPT.replace("{raw_output}", output),
                     maintenanceModelId);
+            MemoryRebuildTaskContext.checkActive();
             reviewed = outputParser.parseActionsResult(repaired);
         }
         return reviewed;

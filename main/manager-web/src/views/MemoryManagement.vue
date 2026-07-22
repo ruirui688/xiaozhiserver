@@ -19,7 +19,7 @@
           class="session-limit-input"
         />
         <el-button size="small" icon="el-icon-view" :loading="rebuildLoading && maintenanceOperation === '预览重建'" :disabled="maintenanceBusy" @click="handleRebuildPreview">预览重建</el-button>
-        <el-button size="small" type="primary" icon="el-icon-magic-stick" :loading="rebuildLoading && maintenanceOperation === '重建记忆'" :disabled="maintenanceBusy" @click="handleRebuild">重建记忆</el-button>
+        <el-button size="small" type="primary" icon="el-icon-magic-stick" :loading="rebuildLoading || serverRebuildActive" :disabled="maintenanceBusy" @click="handleRebuild">重建记忆</el-button>
         <el-button size="small" icon="el-icon-view" :loading="reviewLoading && maintenanceOperation === '预览重审'" :disabled="maintenanceBusy" @click="handleReviewPreview">预览重审</el-button>
         <el-button size="small" type="primary" icon="el-icon-refresh" :loading="reviewLoading && maintenanceOperation === '重审记忆'" :disabled="maintenanceBusy" @click="handleReview">重审记忆</el-button>
         <el-button size="small" type="danger" icon="el-icon-delete" :loading="clearLoading" :disabled="maintenanceBusy" @click="handleClear">清空记忆</el-button>
@@ -31,12 +31,19 @@
     </div>
 
     <el-alert
-      v-if="maintenanceBusy"
+      v-if="maintenanceBusy || rebuildTask"
       class="maintenance-alert"
       :title="maintenanceStatusText"
-      :type="maintenanceRecoveryPending ? 'warning' : 'info'"
+      :type="maintenanceAlertType"
       :closable="false"
       show-icon
+    />
+    <el-progress
+      v-if="serverRebuildActive"
+      class="maintenance-progress"
+      :percentage="rebuildTask.progress"
+      :stroke-width="8"
+      :show-text="false"
     />
 
     <!-- Quick remember/forget panel -->
@@ -232,6 +239,14 @@ import MemoryCandidates from './memory/MemoryCandidates.vue'
 import MemoryDetailPanel from './memory/MemoryDetailPanel.vue'
 import MemoryEditDialog from './memory/MemoryEditDialog.vue'
 import Api from '@/apis/api'
+import {
+  canRecoverRebuildTask,
+  isActiveRebuildTask,
+  normalizeRebuildTask,
+  rebuildTaskAlertType,
+  rebuildTaskPollDelay,
+  rebuildTaskStatusText
+} from './memory/memoryRebuildTaskState.mjs'
 
 export default {
   name: 'MemoryManagement',
@@ -279,7 +294,11 @@ export default {
       previewMode: 'rebuild',
       maintenanceOperation: '',
       maintenanceRecoveryPending: false,
-      maintenanceRecoveryTimer: null
+      maintenanceRecoveryTimer: null,
+      rebuildTask: null,
+      rebuildTaskPollTimer: null,
+      rebuildTaskPollFailures: 0,
+      notifiedRebuildTaskId: ''
     }
   },
   computed: {
@@ -314,9 +333,20 @@ export default {
     },
     maintenanceBusy() {
       return this.rebuildLoading || this.reviewLoading || this.clearLoading ||
-        this.rememberLoading || this.forgetLoading || this.maintenanceRecoveryPending
+        this.rememberLoading || this.forgetLoading || this.maintenanceRecoveryPending ||
+        this.serverRebuildActive
+    },
+    serverRebuildActive() {
+      return isActiveRebuildTask(this.rebuildTask)
+    },
+    maintenanceAlertType() {
+      if (this.maintenanceRecoveryPending) return 'warning'
+      return this.rebuildTask ? rebuildTaskAlertType(this.rebuildTask) : 'info'
     },
     maintenanceStatusText() {
+      if (this.rebuildTask) {
+        return rebuildTaskStatusText(this.rebuildTask)
+      }
       if (this.maintenanceRecoveryPending) {
         return '请求结果尚未确认，后台可能仍在执行。维护操作已暂时锁定，页面将在稍后自动刷新；也可点击“刷新”确认最新状态。'
       }
@@ -335,12 +365,14 @@ export default {
       return
     }
     this.fetch()
+    this.restoreRebuildTask()
   },
   beforeDestroy() {
     if (this.maintenanceRecoveryTimer) {
       clearTimeout(this.maintenanceRecoveryTimer)
       this.maintenanceRecoveryTimer = null
     }
+    this.stopRebuildTaskPolling()
   },
   methods: {
     fetch() {
@@ -490,6 +522,78 @@ export default {
       return (error && error.data && error.data.msg) ||
         (error && error.message) || fallback
     },
+    restoreRebuildTask() {
+      Api.memory.latestRebuildTask(this.agentId, (res) => {
+        const task = this.unwrapResult(res)
+        if (task && task.taskId) {
+          this.applyRebuildTask(task, false)
+        }
+      }, () => {}, () => {})
+    },
+    applyRebuildTask(task, notifyCompletion) {
+      const normalized = normalizeRebuildTask(task)
+      if (!normalized) return
+      this.rebuildTask = normalized
+      this.rebuildLoading = false
+      if (isActiveRebuildTask(normalized)) {
+        this.maintenanceOperation = '重建记忆'
+        this.scheduleRebuildTaskPoll(2000)
+        return
+      }
+      this.stopRebuildTaskPolling()
+      this.maintenanceOperation = ''
+      this.rebuildPreviewVisible = false
+      if (notifyCompletion && this.notifiedRebuildTaskId !== normalized.taskId) {
+        this.notifiedRebuildTaskId = normalized.taskId
+        if (normalized.status === 'SUCCEEDED') {
+          this.showRebuildOutcome(normalized.result || {})
+        } else {
+          this.$message.error(rebuildTaskStatusText(normalized))
+        }
+      }
+      this.fetch()
+    },
+    scheduleRebuildTaskPoll(delay) {
+      if (!this.serverRebuildActive || this.rebuildTaskPollTimer) return
+      this.rebuildTaskPollTimer = setTimeout(() => {
+        this.rebuildTaskPollTimer = null
+        this.pollRebuildTask()
+      }, delay)
+    },
+    pollRebuildTask() {
+      if (!this.serverRebuildActive || !this.rebuildTask.taskId) return
+      Api.memory.rebuildTask(this.agentId, this.rebuildTask.taskId, (res) => {
+        this.rebuildTaskPollFailures = 0
+        this.applyRebuildTask(this.unwrapResult(res), true)
+      }, () => {
+        this.rebuildTaskPollFailures += 1
+        this.scheduleRebuildTaskPoll(rebuildTaskPollDelay(this.rebuildTaskPollFailures))
+      }, () => {
+        this.rebuildTaskPollFailures += 1
+        this.scheduleRebuildTaskPoll(rebuildTaskPollDelay(this.rebuildTaskPollFailures))
+      })
+    },
+    stopRebuildTaskPolling() {
+      if (this.rebuildTaskPollTimer) {
+        clearTimeout(this.rebuildTaskPollTimer)
+        this.rebuildTaskPollTimer = null
+      }
+    },
+    recoverRebuildStart(error) {
+      Api.memory.latestRebuildTask(this.agentId, (res) => {
+        const task = this.unwrapResult(res)
+        if (canRecoverRebuildTask(task)) {
+          this.applyRebuildTask(task, false)
+          this.$message.warning('启动响应中断，但服务端重建任务仍在执行，已恢复任务状态')
+          return
+        }
+        this.handleMaintenanceFailure('重建记忆', 'rebuildLoading', error)
+      }, () => {
+        this.handleUncertainMaintenanceFailure('重建记忆', 'rebuildLoading', error)
+      }, () => {
+        this.handleMaintenanceFailure('重建记忆', 'rebuildLoading', error)
+      })
+    },
     beginMaintenance(operation, loadingKey) {
       if (this.maintenanceBusy) {
         this.$message.warning('已有记忆维护任务正在处理，请等待完成或刷新确认状态')
@@ -607,13 +711,9 @@ export default {
       }).then(() => {
         if (!this.beginMaintenance('重建记忆', 'rebuildLoading')) return
         Api.memory.rebuild(this.agentId, this.rebuildPayload(false), (res) => {
-          const data = this.unwrapResult(res)
-          this.showRebuildOutcome(data)
-          this.finishMaintenance('rebuildLoading')
-          this.rebuildPreviewVisible = false
-          this.fetch()
+          this.applyRebuildTask(this.unwrapResult(res), false)
         }, (error) => {
-          this.handleUncertainMaintenanceFailure('重建记忆', 'rebuildLoading', error)
+          this.recoverRebuildStart(error)
         }, (error) => {
           this.handleMaintenanceFailure('重建记忆', 'rebuildLoading', error)
         })
@@ -755,6 +855,11 @@ export default {
 .maintenance-alert {
   margin: 10px 24px 0;
   width: auto;
+  flex-shrink: 0;
+}
+
+.maintenance-progress {
+  margin: 4px 24px 0;
   flex-shrink: 0;
 }
 

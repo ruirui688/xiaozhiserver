@@ -2,9 +2,11 @@ package xiaozhi.modules.agent.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -22,6 +24,7 @@ import xiaozhi.common.redis.RedisUtils;
 import xiaozhi.modules.agent.dao.AgentDao;
 import xiaozhi.modules.agent.dao.AgentTagDao;
 import xiaozhi.modules.agent.dto.AgentDTO;
+import xiaozhi.modules.agent.dto.AgentUpdateDTO;
 import xiaozhi.modules.agent.entity.AgentEntity;
 import xiaozhi.modules.agent.entity.AgentPluginMapping;
 import xiaozhi.modules.agent.vo.AgentInfoVO;
@@ -32,6 +35,8 @@ import xiaozhi.modules.agent.service.AgentTagService;
 import xiaozhi.modules.agent.service.AgentTemplateService;
 import xiaozhi.modules.correctword.service.CorrectWordFileService;
 import xiaozhi.modules.device.service.DeviceService;
+import xiaozhi.modules.knowledge.entity.KnowledgeBaseEntity;
+import xiaozhi.modules.knowledge.service.KnowledgeBaseService;
 import xiaozhi.modules.model.service.ModelConfigService;
 import xiaozhi.modules.model.service.ModelProviderService;
 import xiaozhi.modules.timbre.service.TimbreService;
@@ -73,7 +78,8 @@ class AgentWorkspaceIsolationTest {
                 mock(AgentTagService.class),
                 mock(CorrectWordFileService.class),
                 workspaceService,
-                mock(WorkspacePermissionService.class));
+                mock(WorkspacePermissionService.class),
+                mock(KnowledgeBaseService.class));
         ReflectionTestUtils.setField(service, "baseDao", agentDao);
 
         List<AgentDTO> result = service.getUserAgents(1001L, null, null);
@@ -126,6 +132,55 @@ class AgentWorkspaceIsolationTest {
         assertEquals("{}", ((Map<?, ?>) ((List<?>) result.getFunctions()).get(0)).get("paramInfo"));
     }
 
+    @Test
+    void updateRejectsKnowledgeBaseFromAnotherWorkspaceBeforeChangingMappings() {
+        AgentDao agentDao = mock(AgentDao.class);
+        AgentPluginMappingService mappingService = mock(AgentPluginMappingService.class);
+        WorkspacePermissionService permissionService = mock(WorkspacePermissionService.class);
+        KnowledgeBaseService knowledgeBaseService = mock(KnowledgeBaseService.class);
+
+        AgentInfoVO agent = new AgentInfoVO();
+        agent.setId("agent-a");
+        agent.setWorkspaceId("workspace-a");
+        when(agentDao.selectAgentInfoById("agent-a")).thenReturn(agent);
+
+        KnowledgeBaseEntity foreignKnowledgeBase = new KnowledgeBaseEntity();
+        foreignKnowledgeBase.setId("knowledge-b");
+        foreignKnowledgeBase.setWorkspaceId("workspace-b");
+        when(knowledgeBaseService.selectById("knowledge-b")).thenReturn(foreignKnowledgeBase);
+
+        AgentServiceImpl service = new AgentServiceImpl(
+                agentDao,
+                mock(AgentTagDao.class),
+                mock(TimbreService.class),
+                mock(ModelConfigService.class),
+                mock(RedisUtils.class),
+                mock(DeviceService.class),
+                mappingService,
+                mock(AgentChatHistoryService.class),
+                mock(AgentTemplateService.class),
+                mock(ModelProviderService.class),
+                mock(AgentContextProviderService.class),
+                mock(AgentTagService.class),
+                mock(CorrectWordFileService.class),
+                mock(WorkspaceService.class),
+                permissionService,
+                knowledgeBaseService);
+        ReflectionTestUtils.setField(service, "baseDao", agentDao);
+
+        AgentUpdateDTO.FunctionInfo function = new AgentUpdateDTO.FunctionInfo();
+        function.setPluginId("knowledge-b");
+        AgentUpdateDTO update = new AgentUpdateDTO();
+        update.setFunctions(List.of(function));
+
+        assertThrows(RuntimeException.class, () -> service.updateAgentById("agent-a", update));
+
+        verify(permissionService).requireWrite("workspace-a");
+        verify(mappingService, never()).saveBatch(any());
+        verify(mappingService, never()).updateBatchById(any());
+        verify(mappingService, never()).removeBatchByIds(any());
+    }
+
     private AgentInfoVO getAgentByIdWithFunctions(List<AgentPluginMapping> functions) {
         AgentDao agentDao = mock(AgentDao.class);
         AgentTagDao agentTagDao = mock(AgentTagDao.class);
@@ -152,7 +207,8 @@ class AgentWorkspaceIsolationTest {
                 mock(AgentTagService.class),
                 correctWordFileService,
                 mock(WorkspaceService.class),
-                mock(WorkspacePermissionService.class));
+                mock(WorkspacePermissionService.class),
+                mock(KnowledgeBaseService.class));
         ReflectionTestUtils.setField(service, "baseDao", agentDao);
 
         return service.getAgentById("agent-a");

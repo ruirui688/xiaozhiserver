@@ -472,6 +472,15 @@ import KnowledgeBaseSelectorDialog from "@/components/KnowledgeBaseSelectorDialo
 import TtsAdvancedSettings from "@/components/TtsAdvancedSettings.vue";
 import FeishuIntegrationDialog from "@/components/role/FeishuIntegrationDialog.vue";
 import i18n from "@/i18n";
+import {
+  buildRoleForm,
+  changedRolePaths,
+  cloneRoleValue,
+  emptyRoleForm,
+  mergeRoleDraft,
+  normalizeMappingParams,
+  splitCapabilityMappings,
+} from "@/utils/roleConfigDraft";
 
 export default {
   name: "RoleEditForm",
@@ -500,8 +509,9 @@ export default {
     llmModeTypeMap: { type: Map, default: () => new Map() },
   },
   data() {
+    const form = this.buildFormFromProp(this.initialForm);
     return {
-      form: this.buildFormFromProp(this.initialForm),
+      form,
       showFunctionDialog: false,
       showKnowledgeBaseDialog: false,
       showTtsAdvancedDialog: false,
@@ -514,6 +524,12 @@ export default {
       currentAudio: null,
       noAvailableModelTypes: [],
       noAvailableModelWarningTimer: null,
+      lastFormSnapshot: cloneRoleValue(form),
+      dirtyFormPaths: [],
+      suppressFormTracking: false,
+      capabilityLoadSeq: 0,
+      capabilityRevision: 0,
+      capabilityMappingsReady: false,
     };
   },
   computed: {
@@ -523,46 +539,71 @@ export default {
   },
   methods: {
     buildFormFromProp(initial) {
-      if (!initial) {
-        return this.getEmptyForm();
-      }
-      return {
-        agentCode: initial.agentCode || "",
-        agentName: initial.agentName || "",
-        ttsVoiceId: initial.ttsVoiceId || "",
-        ttsVolume: initial.ttsVolume !== undefined ? initial.ttsVolume : null,
-        ttsRate: initial.ttsRate !== undefined ? initial.ttsRate : null,
-        ttsPitch: initial.ttsPitch !== undefined ? initial.ttsPitch : null,
-        chatHistoryConf: initial.chatHistoryConf || 0,
-        systemPrompt: initial.systemPrompt || "",
-        summaryMemory: initial.summaryMemory || "",
-        langCode: initial.langCode || "",
-        language: initial.language || "",
-        sort: initial.sort || "",
-        model: {
-          ttsModelId: (initial.model && initial.model.ttsModelId) || "",
-          vadModelId: (initial.model && initial.model.vadModelId) || "",
-          asrModelId: (initial.model && initial.model.asrModelId) || "",
-          llmModelId: (initial.model && initial.model.llmModelId) || "",
-          slmModelId: (initial.model && initial.model.slmModelId) || "",
-          vllmModelId: (initial.model && initial.model.vllmModelId) || "",
-          memModelId: (initial.model && initial.model.memModelId) || "",
-          intentModelId: (initial.model && initial.model.intentModelId) || "",
-        }
-      };
+      return buildRoleForm(initial);
     },
     getEmptyForm() {
-      return {
-        agentCode: "", agentName: "", ttsVoiceId: "", ttsVolume: null, ttsRate: null, ttsPitch: null,
-        chatHistoryConf: 0, systemPrompt: "", summaryMemory: "", langCode: "", language: "", sort: "",
-        model: { ttsModelId: "", vadModelId: "", asrModelId: "", llmModelId: "", slmModelId: "", vllmModelId: "", memModelId: "", intentModelId: "" }
+      return emptyRoleForm();
+    },
+    async hydrateAgentConfig(agentData) {
+      const requestSeq = ++this.capabilityLoadSeq;
+      const capabilityRevision = this.capabilityRevision;
+      const mergedForm = mergeRoleDraft(agentData, this.form, this.dirtyFormPaths);
+      this.replaceFormWithoutTracking(mergedForm);
+      this.ttsSettings = {
+        volume: mergedForm.ttsVolume ?? 0,
+        speed: mergedForm.ttsRate ?? 0,
+        pitch: mergedForm.ttsPitch ?? 0,
       };
+      this.$emit('update:checkedReplacementWordIds', agentData.correctWordFileIds || []);
+      this.$emit('update:currentContextProviders', agentData.contextProviders || []);
+
+      const metadataReady = await Promise.all([
+        this.fetchAllFunctions(),
+        this.fetchAllKnowledgeBases(),
+      ]);
+      if (requestSeq !== this.capabilityLoadSeq) return false;
+      if (!metadataReady.every(Boolean)) {
+        this.capabilityMappingsReady = false;
+        return false;
+      }
+      if (capabilityRevision === this.capabilityRevision) {
+        this.applyFunctionMappings(agentData.functions || []);
+      }
+      this.capabilityMappingsReady = true;
+      return true;
+    },
+    replaceFormWithoutTracking(form) {
+      this.suppressFormTracking = true;
+      this.form = cloneRoleValue(form);
+      this.lastFormSnapshot = cloneRoleValue(form);
+      this.$nextTick(() => {
+        this.suppressFormTracking = false;
+        this.lastFormSnapshot = cloneRoleValue(this.form);
+      });
+    },
+    isReadyToSave() {
+      return this.capabilityMappingsReady;
+    },
+    markSaved() {
+      this.dirtyFormPaths = [];
+      this.lastFormSnapshot = cloneRoleValue(this.form);
+    },
+    trackFormChanges() {
+      if (this.suppressFormTracking) {
+        this.lastFormSnapshot = cloneRoleValue(this.form);
+        return;
+      }
+      const changed = changedRolePaths(this.lastFormSnapshot || emptyRoleForm(), this.form);
+      this.dirtyFormPaths = Array.from(new Set([...this.dirtyFormPaths, ...changed]));
+      this.lastFormSnapshot = cloneRoleValue(this.form);
+      this.$emit('form-change', cloneRoleValue(this.form));
     },
     saveConfig() {
       this.$emit('save', { ...this.form });
     },
     resetConfig() {
-      this.form = this.getEmptyForm();
+      this.dirtyFormPaths = [];
+      this.replaceFormWithoutTracking(this.getEmptyForm());
       this.$emit('reset');
     },
     submitSaveConfig(agentId) {
@@ -708,20 +749,27 @@ export default {
       }
     },
     fetchAllFunctions() {
-      return new Promise((resolve, reject) => {
+      return new Promise((resolve) => {
         Api.model.getPluginFunctionList(null, ({ data }) => {
           if (data.code === 0) {
-            this.allFunctions = data.data.map((item) => {
-              const meta = JSON.parse(item.fields || "[]");
+            const functions = Array.isArray(data.data) ? data.data : [];
+            this.allFunctions = functions.map((item) => {
+              let meta = [];
+              try {
+                meta = Array.isArray(item.fields)
+                  ? item.fields
+                  : JSON.parse(item.fields || "[]");
+              } catch (error) {
+                meta = [];
+              }
               const params = meta.reduce((m, f) => { m[f.key] = f.default; return m; }, {});
               return { ...item, fieldsMeta: meta, params };
             });
-            resolve();
+            resolve(true);
           } else {
-            console.error(data.msg || "获取插件失败");
-            reject();
+            resolve(false);
           }
-        });
+        }, () => resolve(false));
       });
     },
     fetchAllKnowledgeBases() {
@@ -731,55 +779,33 @@ export default {
           (res) => {
             if (res.data && res.data.code === 0) {
               const pageData = res.data.data || {};
-              this.allKnowledgeBases = (pageData.list || []).filter((item) => item.status === 1);
+              this.allKnowledgeBases = pageData.list || [];
+              resolve(true);
             } else {
-              this.allKnowledgeBases = [];
+              resolve(false);
             }
-            resolve();
           },
           () => {
-            this.allKnowledgeBases = [];
-            resolve();
+            resolve(false);
           }
         );
       });
     },
     applyFunctionMappings(savedMappings) {
-      const knowledgeMap = new Map(this.allKnowledgeBases.map((item) => [item.id, item]));
-      const functions = [];
-      const knowledgeBases = [];
-      savedMappings.forEach((mapping) => {
-        const knowledge = knowledgeMap.get(mapping.pluginId);
-        if (knowledge) {
-          knowledgeBases.push({
-            id: knowledge.id,
-            name: knowledge.name,
-            description: knowledge.description,
-            documentCount: knowledge.documentCount || 0,
-            queryPolicy: mapping.paramInfo?.queryPolicy || this.defaultKnowledgeQueryPolicy(),
-          });
-          return;
-        }
-        const meta = this.allFunctions.find((f) => f.id === mapping.pluginId);
-        if (!meta) {
-          functions.push({ id: mapping.pluginId, name: mapping.pluginId, params: {} });
-          return;
-        }
-        functions.push({
-          id: mapping.pluginId,
-          name: meta.name,
-          providerCode: meta.providerCode,
-          params: mapping.paramInfo || { ...meta.params },
-          fieldsMeta: meta.fieldsMeta,
-        });
-      });
-      this.$emit('update:currentFunctions', functions);
-      this.$emit('update:currentKnowledgeBases', knowledgeBases);
+      const mappings = splitCapabilityMappings(
+        savedMappings,
+        this.allFunctions,
+        this.allKnowledgeBases,
+        this.defaultKnowledgeQueryPolicy()
+      );
+      this.$emit('update:currentFunctions', mappings.functions);
+      this.$emit('update:currentKnowledgeBases', mappings.knowledgeBases);
+      this.originalFunctions = cloneRoleValue(mappings.functions);
     },
     buildFunctionMappings() {
       const pluginMappings = (this.currentFunctions || []).map((item) => ({
         pluginId: item.id,
-        paramInfo: item.params,
+        paramInfo: normalizeMappingParams(item.params),
       }));
       const knowledgeMappings = (this.currentKnowledgeBases || []).map((item) => ({
         pluginId: item.id,
@@ -788,9 +814,13 @@ export default {
       return [...pluginMappings, ...knowledgeMappings];
     },
     defaultKnowledgeQueryPolicy() {
-      return "优先使用用户原话和对话中已经明确的酒类、产区、风味、价格、餐酒搭配等信息生成查询词；不要擅自扩写成酒杯、酒具、器皿或其他用户没有提到的对象。";
+      return "仅依据用户当前问题和已明确的上下文生成查询词，不得补充用户未提及的对象、品类或场景。";
     },
     openFunctionDialog() {
+      if (!this.capabilityMappingsReady) {
+        this.$message.warning(this.$t("roleConfig.configNotReady"));
+        return;
+      }
       if (this.allFunctions.length === 0) {
         this.fetchAllFunctions().then(() => (this.showFunctionDialog = true));
       } else {
@@ -798,8 +828,16 @@ export default {
       }
     },
     openKnowledgeBaseDialog() {
-      this.fetchAllKnowledgeBases().then(() => {
-        this.showKnowledgeBaseDialog = true;
+      if (!this.capabilityMappingsReady) {
+        this.$message.warning(this.$t("roleConfig.configNotReady"));
+        return;
+      }
+      this.fetchAllKnowledgeBases().then((ready) => {
+        if (ready) {
+          this.showKnowledgeBaseDialog = true;
+        } else {
+          this.$message.error(this.$t("knowledgeBaseSelector.fetchFailed"));
+        }
       });
     },
     openContextProviderDialog() {
@@ -817,9 +855,11 @@ export default {
       this.form.ttsPitch = ttsSettings.pitch;
     },
     handleUpdateFunctions(selected) {
+      this.capabilityRevision += 1;
       this.$emit('update:currentFunctions', selected);
     },
     handleUpdateKnowledgeBases(selected) {
+      this.capabilityRevision += 1;
       const updated = (selected || []).map((item) => ({
         ...item,
         queryPolicy: item.queryPolicy || this.defaultKnowledgeQueryPolicy(),
@@ -827,6 +867,7 @@ export default {
       this.$emit('update:currentKnowledgeBases', updated);
     },
     removeKnowledgeBase(id) {
+      this.capabilityRevision += 1;
       const updated = (this.currentKnowledgeBases || []).filter((item) => item.id !== id);
       this.$emit('update:currentKnowledgeBases', updated);
     },
@@ -1007,14 +1048,6 @@ export default {
     },
   },
   watch: {
-    initialForm: {
-      handler(newVal) {
-        if (newVal) {
-          this.form = this.buildFormFromProp(newVal);
-        }
-      },
-      deep: true,
-    },
     'form.model.ttsModelId': {
       handler(newVal, oldVal) {
         if (newVal) {
@@ -1024,10 +1057,16 @@ export default {
     },
     form: {
       handler() {
-        this.$emit('form-change', { ...this.form });
+        this.trackFormChanges();
       },
       deep: true,
     },
+  },
+  beforeDestroy() {
+    this.capabilityLoadSeq += 1;
+    if (this.noAvailableModelWarningTimer) {
+      clearTimeout(this.noAvailableModelWarningTimer);
+    }
   },
 };
 </script>

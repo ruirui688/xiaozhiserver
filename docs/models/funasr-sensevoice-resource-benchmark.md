@@ -1,3 +1,12 @@
+---
+status: report
+owner: xiaozhi-server
+last_verified: 2026-07-03
+source_paths:
+  - main/xiaozhi-server/core/providers/asr
+  - main/xiaozhi-server/models/SenseVoiceSmall
+---
+
 # FunASR / SenseVoiceSmall 语音识别资源与并发测试报告
 
 测试日期：2026-07-03

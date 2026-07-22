@@ -198,10 +198,9 @@ public class KnowledgeFilesController {
         // 验证知识库权限
         validateKnowledgeBaseReadPermission(datasetId);
 
-        // 业务下沉逻辑：如果未指定知识库ID，则设为当前路径中的 datasetId
-        if (req.getDatasetIds() == null || req.getDatasetIds().isEmpty()) {
-            req.setDatasetIds(java.util.Arrays.asList(datasetId));
-        }
+        // 该端点是单知识库路径，路径参数是经过鉴权的唯一数据集来源。
+        // 禁止请求体覆盖 dataset_id，否则可借有权限的路径查询其他知识库。
+        req.setDatasetIds(java.util.Collections.singletonList(datasetId));
 
         // [Reinforce] 强管控分页参数，防止 RAGFlow 端出现 Negative Slicing 报错
         if (req.getPage() == null || req.getPage() < 1) {

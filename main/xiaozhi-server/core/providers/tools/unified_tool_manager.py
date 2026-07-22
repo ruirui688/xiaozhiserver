@@ -4,6 +4,7 @@ from typing import Dict, List, Optional, Any
 from config.logger import setup_logging
 from plugins_func.register import Action, ActionResponse
 from .base import ToolType, ToolDefinition, ToolExecutor
+from core.utils.prompt_budget import compact_tool_schemas
 
 
 class ToolManager:
@@ -62,6 +63,7 @@ class ToolManager:
         for tool_definition in tools.values():
             descriptions.append(tool_definition.description)
 
+        descriptions = compact_tool_schemas(descriptions)
         self._cached_function_descriptions = descriptions
         return descriptions
 

@@ -90,7 +90,8 @@ public class AgentPluginMappingServiceImpl extends ServiceImpl<AgentPluginMappin
                 paramInfo.put("dataset_ids",
                         knowledgeBaseList.stream().map(KnowledgeBaseEntity::getDatasetId).toList());
 
-                String description = buildKnowledgeToolDescription(knowledgeInstructionMap, knowledgeBaseList);
+                String description = KnowledgeToolDescriptionBuilder.build(
+                        knowledgeInstructionMap, knowledgeBaseList);
                 paramInfo.put("description", description);
                 agentPluginMapping.setParamInfo(JsonUtils.toJsonString(paramInfo));
                 list.add(agentPluginMapping);
@@ -149,30 +150,6 @@ public class AgentPluginMappingServiceImpl extends ServiceImpl<AgentPluginMappin
         }
 
         knowledgeInstructionMap.put(datasetId, instructions);
-    }
-
-    private String buildKnowledgeToolDescription(Map<String, List<String>> knowledgeInstructionMap,
-            List<KnowledgeBaseEntity> knowledgeBaseList) {
-        List<String> names = knowledgeBaseList.stream().map(KnowledgeBaseEntity::getName).toList();
-        List<String> instructionParts = new ArrayList<>();
-
-        for (KnowledgeBaseEntity knowledgeBase : knowledgeBaseList) {
-            List<String> instructions = knowledgeInstructionMap.get(knowledgeBase.getDatasetId());
-            if (instructions == null || instructions.isEmpty()) {
-                continue;
-            }
-            instructionParts.add("【" + knowledgeBase.getName() + "】" + String.join("；", instructions));
-        }
-
-        String description = "当用户的问题明确涉及以下知识库范围时，调用本方法查询本地知识库：【"
-                + String.join("、", names)
-                + "】。";
-        if (!instructionParts.isEmpty()) {
-            description += "知识库说明：" + String.join("；", instructionParts) + "。";
-        }
-        description += "调用时 question 参数必须围绕用户当前问题和已明确上下文生成；不要擅自引入用户没有提到的对象、品类或场景。"
-                + "如果用户只表达偏好或确认，请围绕已明确的酒类、产区、风味、价格、搭配等信息查询，不要扩写成酒杯、酒具或其他未提及物品。";
-        return description;
     }
 
 }

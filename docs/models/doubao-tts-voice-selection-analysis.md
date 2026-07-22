@@ -1,3 +1,13 @@
+---
+status: report
+owner: models
+last_verified: 2026-06-25
+source_paths:
+  - main/manager-api/src/main/resources/db/changelog
+  - main/manager-api/src/main/java/xiaozhi/modules/timbre
+  - main/xiaozhi-server/core/providers/tts/huoshan_double_stream.py
+---
+
 # 豆包 TTS 只有一个音色可选 — 问题分析
 
 > 分析日期：2026-06-25 | 分支：feature/model-performance-benchmark | 状态：仅记录，不修复

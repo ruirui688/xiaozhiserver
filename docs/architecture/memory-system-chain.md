@@ -1,11 +1,13 @@
 ---
 status: supporting
 owner: memory
-last_verified: 2026-07-22
+last_verified: 2026-07-23
 source_paths:
   - main/xiaozhi-server/core/providers/memory
+  - main/xiaozhi-server/core/utils/prompt_budget.py
   - main/xiaozhi-server/plugins_func/functions/manage_memory.py
   - main/manager-api/src/main/java/xiaozhi/modules/memory
+  - main/manager-web/src/views/MemoryManagement.vue
 ---
 
 # 记忆系统完整链路
@@ -141,6 +143,11 @@ UPDATE  更新已有真实 memory_id
 
 忘记名单作为文本上下文提供给主模型，不再由 Java 使用字符串规则过滤事实。这样既保留模型可理解的遗忘意图，又避免后端预设语义。
 
+当前工作区在 Python 注入前对动态记忆执行去重和字符预算控制，`<memory>` 内容最多保留 4000 字符和
+30 个列表项；静态角色规则与安全提示不参与裁剪。JSON 记忆被包装为可解析的截断预览，重复多轮注入会从原始
+system 模板重建而不是累计。该预算是字符级保护，不等同于具体模型 tokenizer 的 token 上限；真实模型仍需验证
+截断后相关性和上下文窗口余量。
+
 ## 7. 管理端操作
 
 管理端仍保留查看、编辑、归档、删除、手工记住、手工忘记、历史重建和主动审查。这些是用户明确触发的维护操作，不属于实时对话自动抽取。
@@ -150,7 +157,13 @@ UPDATE  更新已有真实 memory_id
 `manage_memory` 时仍经过维护模型做结构化；即使维护模型返回非法 JSON 或 `NONE`，
 也不能撤销主模型已经作出的保存决定，正文会回退为原工具指令。
 
-清空后重建不会边调用模型边删除事实。系统先生成并验证仅含 `ADD` / `NONE` 的重建动作，再用一个短事务原子替换旧事实；任何写入失败都会回滚并保留事务开始前的记忆。管理页面在重建、重审或清空期间禁止重复维护操作，长任务代理超时必须覆盖前端请求预算，网络中断时不得静默显示空列表或泛化成功。
+清空后重建不会边调用模型边删除事实。系统先生成并验证仅含 `ADD` / `NONE` 的重建动作，再用一个短事务原子替换旧事实；任何写入失败都会回滚并保留事务开始前的记忆。
+
+正式重建现在是服务端异步任务：创建端点返回 taskId，Redis 保存任务、最近任务指针和每智能体活动锁，
+worker 依次报告读取会话、抽取、复核、校验、应用和收尾进度，最终进入 `SUCCEEDED`、`FAILED` 或
+`TIMED_OUT`。同一智能体的重复创建返回当前活动任务。页面通过 `GET /rebuild-task` 或
+`GET /rebuild-task/{taskId}` 轮询，刷新页面、关闭后重进或启动响应中断都可以恢复状态；活动任务期间禁止并发重建、
+重审、清空、手工记住和忘记。重建预览与重审仍保留同步请求和结果不确定保护。
 
 `confirmation_state=auto` 的界面显示名是“模型调用”，表示事实来自模型工具链路，不表示系统自动扫描聊天。
 
@@ -166,9 +179,13 @@ UPDATE  更新已有真实 memory_id
 | `MemoryConfigController.java` | server-to-server 记忆 API |
 | `MemoryServiceImpl.java` | 事件、CRUD 和工具请求编排 |
 | `MemoryMaintenanceServiceImpl.java` | 维护模型结构化治理 |
+| `MemoryRebuildTaskServiceImpl.java` | Redis 任务状态、每智能体互斥、超时和 worker 编排 |
+| `MemoryRebuildTaskContext.java` | 维护流程进度检查点和截止时间检查 |
 | `MemoryQueryServiceImpl.java` | 人物隔离查询与上下文构造 |
 | `PowerMemPrompts.java` | 工具调用后的维护提示词 |
 | `MemoryManagement.vue` | 管理端记忆页面 |
+| `memoryRebuildTaskState.mjs` | Web 轮询、页面恢复和终态显示规则 |
+| `prompt_budget.py` | 动态记忆、工具历史和知识上下文字符预算 |
 
 ## 9. 验证重点
 
@@ -180,3 +197,12 @@ UPDATE  更新已有真实 memory_id
 - tombstone 不做字符串匹配过滤；
 - 不存在固定 TTL、衰减任务和重要性阈值分类；
 - 越权 ID、私有记忆串读和容量越界仍被拒绝。
+- 同一智能体重复重建只创建一个 worker，任务终态不能被迟到结果覆盖；
+- 页面重建后能恢复 `PENDING` / `RUNNING`，失败轮询退避不超过 10 秒；
+- 超长记忆只裁剪动态 `<memory>`，不裁剪静态角色与安全规则。
+
+当前自动测试覆盖 service/controller 状态机、Web 状态纯函数和 Python 上下文预算。主集成复跑 Java 全量
+167 通过、5 跳过；使用项目 Conda 环境并隔离宿主插件后，Python 全量 344 通过且 `compileall` 通过；Web
+状态/组件测试 14 通过且构建通过。首次普通 pytest 被宿主 ROS/lark 插件和
+用户级 websockets 污染，不能作为项目运行时失败。真实 Redis 锁与过期、MySQL 事务隔离、浏览器刷新恢复以及
+外部维护模型超时均未联调。

@@ -45,7 +45,12 @@
                   <img loading="lazy" src="@/assets/home/info.png" alt="" />
                   <span>{{ $t("roleConfig.restartNotice") }}</span>
                 </div>
-                <el-button type="primary" class="save-btn" @click="handleSave">
+                <el-button
+                  type="primary"
+                  class="save-btn"
+                  :loading="saveInProgress"
+                  :disabled="agentConfigLoading || !agentConfigLoaded || saveInProgress"
+                  @click="handleSave">
                   {{ $t("roleConfig.saveConfig") }}
                 </el-button>
                 <el-button class="reset-btn" @click="handleReset">{{
@@ -79,6 +84,7 @@
               @update:currentFunctions="val => currentFunctions = val"
               @update:currentKnowledgeBases="val => currentKnowledgeBases = val"
               @update:checkedReplacementWordIds="val => checkedReplacementWordIds = val"
+              @update:currentContextProviders="val => currentContextProviders = val"
               @update:voiceOptions="val => voiceOptions = val"
               @tts-model-changed="handleTtsModelChanged"
               @form-change="handleFormChange"
@@ -163,6 +169,12 @@ export default {
       checkedReplacementWordIds: [],
       loadingVoices: false,
       voiceRequestSeq: 0,
+      agentConfigLoading: false,
+      agentConfigLoaded: false,
+      agentConfigRequestSeq: 0,
+      saveInProgress: false,
+      tagsRequestSeq: 0,
+      tagsDirty: false,
     };
   },
   methods: {
@@ -173,6 +185,7 @@ export default {
     // ===== Tag Management =====
     handleClose(id) {
       this.dynamicTags = this.dynamicTags.filter((item) => item.id !== id);
+      this.tagsDirty = true;
     },
     showInput() {
       this.inputVisible = true;
@@ -185,27 +198,31 @@ export default {
       if (inputValue) {
         const tag = { id: new Date().getTime(), tagName: inputValue };
         this.dynamicTags.push(tag);
+        this.tagsDirty = true;
       }
       this.inputVisible = false;
       this.inputValue = "";
     },
     getAgentTags(agentId) {
+      const requestSeq = ++this.tagsRequestSeq;
       Api.agent.getAgentTags(agentId, ({ data }) => {
-        if (data.code === 0) {
+        if (requestSeq === this.tagsRequestSeq && data.code === 0 && !this.tagsDirty) {
           this.dynamicTags = data.data || [];
         }
-      });
+      }, () => {});
     },
     handleSaveAgentTags(agentId) {
       return new Promise((resolve, reject) => {
         const tagNames = this.dynamicTags.map((tag) => tag.tagName);
+        const handleFailure = (error) => reject(error || new Error("保存标签失败"));
         Api.agent.saveAgentTags(agentId, { tagNames }, ({ data }) => {
           if (data.code === 0) {
+            this.tagsDirty = false;
             resolve();
           } else {
             reject(data.msg);
           }
-        });
+        }, handleFailure);
       });
     },
 
@@ -265,26 +282,53 @@ export default {
       });
     },
     fetchAgentConfig(agentId) {
-      Api.agent.getDeviceConfig(agentId, ({ data }) => {
-        if (data.code === 0) {
-          this.form = {
-            ...this.form,
-            ...data.data,
-            model: {
-              ttsModelId: data.data.ttsModelId || "",
-              vadModelId: data.data.vadModelId || "",
-              asrModelId: data.data.asrModelId || "",
-              llmModelId: data.data.llmModelId || "",
-              slmModelId: data.data.slmModelId || "",
-              vllmModelId: data.data.vllmModelId || "",
-              memModelId: data.data.memModelId || "",
-              intentModelId: data.data.intentModelId || "",
-            },
-          };
-          this.checkedReplacementWordIds = data.data.correctWordFileIds || [];
-          this.currentContextProviders = data.data.contextProviders || [];
-          this.loadVoicesForTtsModel(this.form.model.ttsModelId, this.form.ttsVoiceId);
-        }
+      const requestSeq = ++this.agentConfigRequestSeq;
+      this.agentConfigLoading = true;
+      this.agentConfigLoaded = false;
+      return new Promise((resolve) => {
+        const fail = (error) => {
+          if (requestSeq !== this.agentConfigRequestSeq) return resolve(false);
+          this.agentConfigLoading = false;
+          this.$message.error(error?.data?.msg || error?.msg || i18n.t("roleConfig.fetchConfigFailed"));
+          resolve(false);
+        };
+        Api.agent.getDeviceConfig(agentId, async ({ data }) => {
+          try {
+            if (requestSeq !== this.agentConfigRequestSeq) return resolve(false);
+            if (data?.code !== 0 || !data.data) {
+              fail(data);
+              return;
+            }
+            const agentData = data.data;
+            this.form = {
+              ...this.form,
+              ...agentData,
+              model: {
+                ttsModelId: agentData.ttsModelId || "",
+                vadModelId: agentData.vadModelId || "",
+                asrModelId: agentData.asrModelId || "",
+                llmModelId: agentData.llmModelId || "",
+                slmModelId: agentData.slmModelId || "",
+                vllmModelId: agentData.vllmModelId || "",
+                memModelId: agentData.memModelId || "",
+                intentModelId: agentData.intentModelId || "",
+              },
+            };
+            this.checkedReplacementWordIds = agentData.correctWordFileIds || [];
+            this.currentContextProviders = agentData.contextProviders || [];
+            await this.$nextTick();
+            const hydrated = await this.$refs.editDialog.hydrateAgentConfig(agentData);
+            if (requestSeq !== this.agentConfigRequestSeq) return resolve(false);
+            this.agentConfigLoading = false;
+            this.agentConfigLoaded = hydrated;
+            if (!hydrated) {
+              this.$message.error(i18n.t("roleConfig.fetchCapabilitiesFailed"));
+            }
+            resolve(hydrated);
+          } catch (error) {
+            fail(error);
+          }
+        }, fail);
       });
     },
     handleTtsModelChanged(ttsModelId) {
@@ -342,25 +386,48 @@ export default {
 
     // ===== Save / Reset Flow =====
     async handleSave() {
+      if (this.saveInProgress) return;
+      const editDialog = this.$refs.editDialog;
+      if (!this.agentConfigLoaded || !editDialog?.isReadyToSave()) {
+        this.$message.warning(i18n.t("roleConfig.configNotReady"));
+        return;
+      }
+      this.saveInProgress = true;
       try {
-        await this.handleSaveAgentTags(this.$route.query.agentId);
-        const configData = this.$refs.editDialog.submitSaveConfig(this.$route.query.agentId);
-        Api.agent.updateAgentConfig(this.$route.query.agentId, configData, ({ data }) => {
-          if (data.code === 0) {
-            this.$message.success({
-              message: i18n.t("roleConfig.saveSuccess"),
-              showClose: true,
-            });
-          } else {
-            this.$message.error({
-              message: data.msg || i18n.t("roleConfig.saveFailed"),
-              showClose: true,
-            });
-          }
+        const agentId = this.$route.query.agentId;
+        const configData = editDialog.submitSaveConfig(agentId);
+        await this.updateAgentConfig(agentId, configData);
+        editDialog.markSaved();
+        try {
+          await this.handleSaveAgentTags(agentId);
+        } catch (tagError) {
+          this.$message.warning({
+            message: tagError?.data?.msg || tagError?.message || i18n.t("roleConfig.configSavedTagsFailed"),
+            showClose: true,
+          });
+          return;
+        }
+        this.$message.success({
+          message: i18n.t("roleConfig.saveSuccess"),
+          showClose: true,
         });
       } catch (error) {
-        console.error("保存失败:", error);
+        this.$message.error({
+          message: error?.data?.msg || error?.message || error || i18n.t("roleConfig.saveFailed"),
+          showClose: true,
+        });
+      } finally {
+        this.saveInProgress = false;
       }
+    },
+    updateAgentConfig(agentId, configData) {
+      return new Promise((resolve, reject) => {
+        const fail = (error) => reject(error || new Error(i18n.t("roleConfig.saveFailed")));
+        Api.agent.updateAgentConfig(agentId, configData, ({ data }) => {
+          if (data?.code === 0) resolve(data.data);
+          else fail(new Error(data?.msg || i18n.t("roleConfig.saveFailed")));
+        }, fail);
+      });
     },
     handleReset() {
       this.$refs.editDialog.resetConfig();
@@ -406,6 +473,11 @@ export default {
     this.fetchModelOptions();
     this.fetchTemplates();
     await this.loadFeatureStatus();
+  },
+  beforeDestroy() {
+    this.agentConfigRequestSeq += 1;
+    this.tagsRequestSeq += 1;
+    this.voiceRequestSeq += 1;
   },
 };
 </script>

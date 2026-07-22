@@ -1,10 +1,14 @@
 ---
 status: supporting
 owner: knowledge
-last_verified: 2026-07-22
+last_verified: 2026-07-23
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/knowledge
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/service/impl/AgentPluginMappingServiceImpl.java
   - main/xiaozhi-server/plugins_func/functions/search_from_local_knowledge.py
+  - main/xiaozhi-server/core/utils/prompt_budget.py
+  - main/manager-web/src/components/role/RoleEditDialog.vue
+  - main/manager-mobile/src/pages/knowledge
 ---
 
 # 知识库完整链路
@@ -103,6 +107,13 @@ RAGFlow 适配器仍通过 `POST /chunks` 异步启动解析，状态先进入 `
 知识库新增和更新时，`parserConfig` 字符串在 manager-api 边界显式解码为
 RAG 请求 DTO；数据库继续保存用户提交的完整 JSON。远端响应仅在用户未提交配置时
 用于补全，不能覆盖本地切片、模型和召回扩展字段。
+
+本轮切片故障不是单点异常，而是三组契约不一致：`parserConfig` 曾在字符串、DTO 和远端响应之间转换时丢字段；
+本地上传已经同步产出切片，service 却仍按异步 adapter 写成 `RUNNING`；规则回退和 LLM 输入窗口各自维护边界，
+遇到长中文段落时可能硬切或丢失内容。当前实现用 `KnowledgeBaseParserConfigCodec` 显式解码配置，
+用 adapter 的同步能力声明决定 `DONE/100%` 状态，并把段落、中文句末和硬上限逻辑集中到
+`LocalKnowledgeTextSplitter`。本地适配器不支持的二进制格式必须明确失败，不能创建永久处理中记录；
+上传后零切片也必须失败，后续 `/chunks` 不伪造重解析结果。
 
 ### 3.2 向量嵌入（新增）
 
@@ -212,6 +223,17 @@ LLM 调用 search_from_local_knowledge / search_from_ragflow
 
 **注意**：知识检索结果作为 tool message 注入（不是 system prompt），与记忆注入（`<memory>` 标签在 system prompt 中）是不同的机制。LLM 需要自行交叉参考两个来源。
 
+### 5.3 上下文与工具描述预算
+
+当前工作区对本地知识库和 RAGFlow 检索结果使用相同预算：最多保留 5 个去重结果，单项最多 1600 字符，
+合计最多 4000 字符。历史 tool message 合计最多 8000 字符，单个结果最多 4000 字符，并优先保留最近结果。裁剪只作用于动态检索内容，
+不会修改工具参数类型、枚举或 required schema。
+
+manager-api 生成知识搜索工具描述时不再注入酒类、酒具等特定业务规则。描述最多列出 10 个知识库名称、
+4 组范围说明并限制为 640 字符；查询规则只要求依据用户当前问题和已明确上下文。Python 侧还会对全部工具的
+描述性文本设置共享预算，避免知识库数量、queryPolicy 或其他工具说明挤占主提示词。
+全部工具描述共享 6000 字符预算，单个工具的描述性文本合计最多 1000 字符。
+
 ## 6. Vue 前端
 
 ### 6.1 页面与组件
@@ -231,6 +253,24 @@ LLM 调用 search_from_local_knowledge / search_from_ragflow
 - 前端: 10MB 硬编码限制 → 后端同步 enforce `knowledge.max-upload-size` 配置 (默认 10MB)
 - 支持格式: .doc, .docx, .pdf, .txt, .md, .mdx, .csv, .xls, .xlsx, .ppt, .pptx, .json, .jsonl, .qa
 - 批量上传: 逐个文件 Promise.all
+
+### 6.3 智能体知识库绑定
+
+智能体详情的 `functions` 同时承载普通插件映射和知识库映射，后端数据库中的 `paramInfo` 在详情响应中可能是
+JSON 字符串，而编辑组件内部使用对象。此前 `RoleEditDialog` 深度监听 `initialForm`：任一字段编辑触发
+`form-change` 后，父组件只同步智能体名称并改动 prop，子组件随即用父组件的旧快照重建整个表单，模型选择、
+提示词和绑定映射因此被清空。知识库列表异步返回后调用表格 `clearSelection()`，还可能通过 selection-change
+把正在恢复的选择覆盖为空。
+
+当前工作区改为显式 `hydrateAgentConfig()`：先合并服务端详情与本地 dirty 字段，再并行加载插件和知识库元数据，
+统一解析字符串/对象 `paramInfo`，最后确定性拆分两类映射并恢复 `queryPolicy`。元数据未完成或失败时禁止保存，
+用户已修改能力后迟到响应不能覆盖当前选择。知识库选择器使用请求序号丢弃旧响应，并在程序化恢复选择期间屏蔽
+空 change 事件。父页面还增加配置加载状态、重复保存锁和显式失败回调；保存失败保留草稿，关闭后重新进入会从
+详情响应恢复模型、知识库 ID 与查询策略。
+
+Web 上传不再手工指定 `multipart/form-data`，由浏览器为 `FormData` 生成包含 boundary 的请求头。微信小程序
+使用 `uni.uploadFile` 并显式透传 Bearer token 与 `X-Workspace-Id`；知识库页面覆盖 CRUD、上传、解析、切片查看
+和召回测试。小程序源码已进入当前 `HEAD`，但本轮仍需完成最终 Mobile 构建和真实微信开发者工具/真机验证。
 
 ## 7. 关键文件
 
@@ -259,8 +299,27 @@ LLM 调用 search_from_local_knowledge / search_from_ragflow
 | `views/KnowledgeFileUpload.vue` | 1260 | 文档管理页面 |
 | `components/knowledge/FileUploadPanel.vue` | 299 | 上传面板 |
 | `components/knowledge/FilePreviewDialog.vue` | 561 | 分块预览 |
+| `components/role/RoleEditDialog.vue` | — | 智能体配置 hydration 与插件/知识库映射恢复 |
+| `utils/roleConfigDraft.js` | — | dirty 字段合并和 capability 映射规范化 |
+| `core/utils/prompt_budget.py` | — | 记忆、知识、工具历史和 schema 字符预算 |
 
-## 8. 已知修复（2026-07）
+## 8. 测试层与验证边界
+
+| 层 | 当前覆盖 |
+|---|---|
+| Java 切片契约 | parserConfig 完整保存、格式白名单、中文句界切分、LLM 窗口不丢字、本地同步状态、零切片拒绝 |
+| Java 工具描述 | 领域中立、知识库数量与说明长度上限、空元数据确定性输出 |
+| Web 组件状态 | 晚到详情不覆盖 dirty 字段、保存后销毁并重建组件仍恢复知识绑定、保存失败保留草稿、重复提交门控、选择器乱序与恢复保护 |
+| Python 上下文 | 本地/RAGFlow 结果去重与预算、tool history 总预算、schema 保真、动态 context 和 memory 预算 |
+| Mobile | API 与页面源码覆盖 CRUD、上传、解析、切片和召回；最终构建与微信端联调仍待完成 |
+
+截至 2026-07-23，主集成复跑 Java 全量 `mvn test` 188 通过、5 跳过；在项目 Conda 环境隔离宿主插件后
+运行 Python 全量测试 344 通过且 `compileall` 通过；Web 功能测试 17 通过且构建通过。真实 MySQL 数据、
+Redis、浏览器关闭重开、RAGFlow、外部切片/embedding
+模型和微信 `uploadFile` 尚未端到端验证；字符预算也不等于模型 token 预算，正式发布前必须用目标模型与业务长文档
+检查召回相关性。
+
+## 9. 已知修复（2026-07）
 
 | # | 问题 | 修复 |
 |---|------|------|
@@ -279,8 +338,12 @@ LLM 调用 search_from_local_knowledge / search_from_ragflow
 | 13 | Knowledge-Memory 无编排 | 添加 TODO 注释 |
 | 14 | 新增/更新时 parserConfig 被转换丢失或被远端响应覆盖 | 边界显式解码，原始完整 JSON 优先持久化 |
 | 15 | 本地文档已同步切片却被标记为 RUNNING | 适配器声明同步解析，服务写入 DONE/100% |
+| 16 | 智能体编辑时旧 prop 回灌导致模型和知识库绑定丢失 | 显式 hydration、dirty 字段合并、映射规范化和保存门控 |
+| 17 | 选择器恢复与乱序请求把已选知识库清空 | 请求序号和 selection 恢复保护 |
+| 18 | 知识工具描述包含固定酒类规则且可无限增长 | 领域中立的有界描述构建器 |
+| 19 | 记忆、知识检索和工具历史挤占 LLM 上下文 | 动态上下文分域预算，保留静态规则与 schema |
 
-## 9. 排查方法
+## 10. 排查方法
 
 ```bash
 # 查看知识库检索请求

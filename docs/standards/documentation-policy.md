@@ -1,7 +1,7 @@
 ---
 status: canonical
 owner: docs
-last_verified: 2026-07-12
+last_verified: 2026-07-23
 source_paths:
   - docs/
 ---
@@ -17,15 +17,17 @@ source_paths:
 ```text
 README.md                         项目总入口，只保留项目概览、常用入口和关键规范链接
 AGENTS.md                         AI 编程工具的最短开工规则
-docs/README.md                    文档任务门户，按开发、部署和排障任务提供入口
-docs/architecture/project-architecture.md  当前系统架构的总入口
+docs/README.md                    文档门户，只保留角色导航、任务导航和事实边界
+docs/architecture/README.md       架构索引，只维护架构领域的阅读路径
+docs/architecture/project-architecture.md  当前系统架构的唯一总览
 docs/standards/README.md          规范目录入口，只解释 standards 下各规范职责
+docs/reports/README.md            报告目录入口，只索引带日期和验证边界的阶段结论
 docs/standards/*.md               强制规范，是具体规则来源
 main/README.md                    main 模块目录入口，只说明模块职责和文档去向
 main/<module>/README.md           模块开发入口，只说明该模块构建、启动、验证和本地约定
 ```
 
-避免在多个入口重复大段规则。规则变更应优先修改对应 `docs/standards/*.md`，入口文档只链接到规则来源。
+避免在多个入口重复大段规则。规则变更应优先修改对应 `docs/standards/*.md`，入口文档只链接到规则来源。根门户不得复制架构专题目录、规范全文或报告清单；这些分别由三个目录入口维护。
 
 ## 2. 分类规则
 

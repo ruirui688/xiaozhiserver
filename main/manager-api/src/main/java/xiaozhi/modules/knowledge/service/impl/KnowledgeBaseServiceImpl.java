@@ -39,6 +39,7 @@ import xiaozhi.modules.model.service.ModelConfigService;
 import xiaozhi.modules.security.user.SecurityUser;
 import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 import xiaozhi.modules.workspace.service.WorkspaceService;
+import xiaozhi.modules.workspace.entity.WorkspaceEntity;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -233,6 +234,8 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
     @Transactional(rollbackFor = Exception.class)
     public KnowledgeBaseDTO save(KnowledgeBaseDTO dto) {
         // 1. Validation
+        WorkspaceEntity workspace = workspaceService.getCurrentWorkspaceEntity();
+        workspacePermissionService.requireWrite(workspace.getId());
         checkDuplicateName(dto.getName(), null);
         KnowledgeBaseAdapter adapter = null;
 
@@ -266,7 +269,7 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
 
             // 3. Local Save (Shadow)
             KnowledgeBaseEntity entity = ConvertUtils.sourceToTarget(dto, KnowledgeBaseEntity.class);
-            entity.setWorkspaceId(workspaceService.getCurrentWorkspaceEntity().getId());
+            entity.setWorkspaceId(workspace.getId());
 
             // [Production Fix] 统一本地 ID 与 RAGFlow ID，防止前端调用 /delete 或 /update 时因 ID 混淆（本地
             // UUID vs RAG UUID）导致 10163 错误

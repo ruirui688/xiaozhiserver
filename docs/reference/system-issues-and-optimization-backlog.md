@@ -1,6 +1,18 @@
-# 系统问题与优化清单
+---
+status: report
+owner: architecture
+last_verified: 2026-06-25
+source_paths:
+  - main/xiaozhi-server/core
+  - main/manager-api/src/main/java/xiaozhi/modules
+  - main/manager-web/src
+---
+
+# 2026-06 系统问题与优化审计
 
 > 分析日期：2026-06-25 | 分支：feature/model-performance-benchmark | 状态：仅记录，不修复
+
+本页是历史问题快照，不是当前 backlog 或架构事实源。问题可能已经修复、改写或失效；开始实现前应回到对应 canonical 架构文档和当前源码重新确认。
 
 ---
 
@@ -454,7 +466,7 @@ public Result<PageData<AgentChatSessionDTO>> getAgentSessions(
 
 ## 六、模型管理与配置体系混乱
 
-> 📄 完整分析见 [model-management-architecture-analysis](../models/model-management-architecture-analysis.md)
+> 当前模型配置事实见[模型管理存储与保存架构](../models/model-management.md)和[标准模型配置目录](../models/model-config-catalog.md)。
 
 ### 概述
 

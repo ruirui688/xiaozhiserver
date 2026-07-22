@@ -59,7 +59,7 @@
 
     <span slot="footer" class="dialog-footer">
       <el-button @click="dialogVisible = false">{{ $t('knowledgeBaseSelector.cancel') }}</el-button>
-      <el-button type="primary" @click="saveSelection">{{ $t('knowledgeBaseSelector.save') }}</el-button>
+      <el-button type="primary" :disabled="loading" @click="saveSelection">{{ $t('knowledgeBaseSelector.save') }}</el-button>
     </span>
   </el-dialog>
 </template>
@@ -84,7 +84,9 @@ export default {
       selectedRows: [],
       currentPage: 1,
       pageSize: 10,
-      total: 0
+      total: 0,
+      requestSeq: 0,
+      restoringSelection: false,
     };
   },
   watch: {
@@ -102,6 +104,7 @@ export default {
   },
   methods: {
     fetchKnowledgeBases() {
+      const requestSeq = ++this.requestSeq;
       this.loading = true;
       Api.knowledgeBase.getKnowledgeBaseList(
         {
@@ -110,6 +113,7 @@ export default {
           name: this.searchName
         },
         (res) => {
+          if (requestSeq !== this.requestSeq || !this.dialogVisible) return;
           this.loading = false;
           if (res.data && res.data.code === 0) {
             const pageData = res.data.data || {};
@@ -121,6 +125,7 @@ export default {
           }
         },
         () => {
+          if (requestSeq !== this.requestSeq || !this.dialogVisible) return;
           this.loading = false;
           this.$message.error(this.$t('knowledgeBaseSelector.fetchFailed'));
         }
@@ -130,6 +135,7 @@ export default {
       if (!this.$refs.knowledgeTable) {
         return;
       }
+      this.restoringSelection = true;
       this.$refs.knowledgeTable.clearSelection();
       const selectedIds = new Set(this.selectedRows.map(item => item.id));
       this.knowledgeBases.forEach(row => {
@@ -137,8 +143,12 @@ export default {
           this.$refs.knowledgeTable.toggleRowSelection(row, true);
         }
       });
+      this.$nextTick(() => {
+        this.restoringSelection = false;
+      });
     },
     handleSelectionChange(rows) {
+      if (this.restoringSelection) return;
       const pageIds = new Set(this.knowledgeBases.map(item => item.id));
       const offPageRows = this.selectedRows.filter(item => !pageIds.has(item.id));
       const merged = [...offPageRows, ...rows];
@@ -167,11 +177,16 @@ export default {
       this.dialogVisible = false;
     },
     handleClosed() {
+      this.requestSeq += 1;
+      this.loading = false;
       this.selectedRows = JSON.parse(JSON.stringify(this.selected || []));
     }
   },
   mounted() {
     this.selectedRows = JSON.parse(JSON.stringify(this.selected || []));
+  },
+  beforeDestroy() {
+    this.requestSeq += 1;
   }
 };
 </script>

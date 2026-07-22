@@ -319,8 +319,11 @@ Web 管理后台：
 ```bash
 cd main/manager-web
 npm ci
+npm run test:unit
 npm run build
 ```
+
+Web 功能测试必须在生产构建前执行；测试失败时不得用构建成功替代测试结论。
 
 如果 `package-lock.json` 不存在，AI 必须说明无法使用 `npm ci`，不得无说明执行可能更新锁文件的安装命令。
 
@@ -329,9 +332,13 @@ npm run build
 ```bash
 cd main/manager-mobile
 pnpm install --frozen-lockfile
+pnpm test:unit
 pnpm type-check
 pnpm build:h5
+pnpm build:mp-weixin
 ```
+
+Mobile 功能测试必须先于类型检查和目标平台构建执行；微信相关变更不能只用 H5 构建代替微信小程序构建。
 
 只有在明确需要修改依赖时，才能执行可能更新锁文件的安装命令。
 

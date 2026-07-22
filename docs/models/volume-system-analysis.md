@@ -1,3 +1,13 @@
+---
+status: report
+owner: runtime
+last_verified: 2026-06-25
+source_paths:
+  - main/xiaozhi-server/core/providers/tts
+  - main/xiaozhi-server/core/providers/tools/device_mcp
+  - main/manager-api/src/main/java/xiaozhi/modules/agent
+---
+
 # 音量系统混乱分析
 
 > 分析日期：2026-06-25 | 分支：feature/model-performance-benchmark | 状态：仅记录，不修复

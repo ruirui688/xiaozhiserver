@@ -109,10 +109,10 @@ render_facts() {
   python_test_count=$(count_files main/xiaozhi-server -name 'test_*.py')
   java_source_count=$(count_files main/manager-api/src/main -name '*.java')
   java_test_count=$(count_files main/manager-api/src/test -name '*Test.java')
-  web_source_count=$(count_files main/manager-web/src \( -name '*.vue' -o -name '*.js' -o -name '*.ts' \))
-  web_test_count=$(count_files main/manager-web \( -name '*.spec.js' -o -name '*.spec.ts' -o -name '*.test.js' -o -name '*.test.ts' \) -not -path '*/node_modules/*' -not -path '*/dist/*')
-  mobile_source_count=$(count_files main/manager-mobile/src \( -name '*.vue' -o -name '*.js' -o -name '*.ts' \))
-  mobile_test_count=$(count_files main/manager-mobile \( -name '*.spec.js' -o -name '*.spec.ts' -o -name '*.test.js' -o -name '*.test.ts' \) -not -path '*/node_modules/*' -not -path '*/dist/*')
+  web_source_count=$(count_files main/manager-web/src \( -name '*.vue' -o -name '*.js' -o -name '*.ts' -o -name '*.mjs' \))
+  web_test_count=$(count_files main/manager-web \( -name '*.spec.js' -o -name '*.spec.ts' -o -name '*.spec.cjs' -o -name '*.spec.mjs' -o -name '*.test.js' -o -name '*.test.ts' -o -name '*.test.cjs' -o -name '*.test.mjs' \) -not -path '*/node_modules/*' -not -path '*/dist/*')
+  mobile_source_count=$(count_files main/manager-mobile/src \( -name '*.vue' -o -name '*.js' -o -name '*.ts' -o -name '*.mjs' \))
+  mobile_test_count=$(count_files main/manager-mobile \( -name '*.spec.js' -o -name '*.spec.ts' -o -name '*.spec.cjs' -o -name '*.spec.mjs' -o -name '*.test.js' -o -name '*.test.ts' -o -name '*.test.cjs' -o -name '*.test.mjs' \) -not -path '*/node_modules/*' -not -path '*/dist/*')
 
   liquibase_sql_count=$(find main/manager-api/src/main/resources/db/changelog -type f -name '*.sql' -print | wc -l | tr -d ' ')
   liquibase_changeset_count=$(grep -Ec '^[[:space:]]*- changeSet:' main/manager-api/src/main/resources/db/changelog/db.changelog-master.yaml)
@@ -155,8 +155,8 @@ source_paths:
 | --- | ---: | ---: | --- |
 | xiaozhi-server | ${python_source_count} | ${python_test_count} | 源码为非 \`tests/\` 的 \`*.py\`；测试为 \`test_*.py\` |
 | manager-api | ${java_source_count} | ${java_test_count} | \`src/main/**/*.java\`；\`src/test/**/*Test.java\` |
-| manager-web | ${web_source_count} | ${web_test_count} | \`src/\` 下 \`*.vue/*.js/*.ts\`；\`*.spec.*/*.test.*\` |
-| manager-mobile | ${mobile_source_count} | ${mobile_test_count} | \`src/\` 下 \`*.vue/*.js/*.ts\`；\`*.spec.*/*.test.*\` |
+| manager-web | ${web_source_count} | ${web_test_count} | \`src/\` 下 \`*.vue/*.js/*.ts/*.mjs\`；\`*.spec.*/*.test.*\` |
+| manager-mobile | ${mobile_source_count} | ${mobile_test_count} | \`src/\` 下 \`*.vue/*.js/*.ts/*.mjs\`；\`*.spec.*/*.test.*\` |
 
 统计排除依赖和构建产物，不表示代码行数或测试覆盖率。
 
