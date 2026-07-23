@@ -74,6 +74,9 @@ public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, Docu
     @Autowired
     private KnowledgeFilesService self;
 
+    @Autowired
+    private LocalKnowledgeUploadTaskService localKnowledgeUploadTaskService;
+
     @Override
     public Map<String, Object> getRAGConfig(String ragModelId) {
         return knowledgeBaseService.getRAGConfig(ragModelId);
@@ -407,11 +410,17 @@ public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, Docu
             throw new RenException(ErrorCode.RAG_FILE_NAME_NOT_NULL);
         }
 
-        log.info("1. 发起远程上传: datasetId={}, fileName={}", datasetId, fileName);
+        log.info("1. 发起文档上传: datasetId={}, fileName={}", datasetId, fileName);
 
         // 获取适配器 (非事务性)
         Map<String, Object> ragConfig = knowledgeBaseService.getRAGConfigByDatasetId(datasetId);
-        KnowledgeBaseAdapter adapter = KnowledgeBaseAdapterFactory.getAdapter(extractAdapterType(ragConfig), ragConfig);
+        String adapterType = extractAdapterType(ragConfig);
+        KnowledgeBaseAdapter adapter = KnowledgeBaseAdapterFactory.getAdapter(adapterType, ragConfig);
+
+        if ("local_knowledge".equals(adapterType)) {
+            return localKnowledgeUploadTaskService.submit(
+                    datasetId, file, fileName, metaFields, chunkMethod, parserConfig, adapter);
+        }
 
         // 构造强类型请求 DTO
         DocumentDTO.UploadReq uploadReq = DocumentDTO.UploadReq.builder()

@@ -212,7 +212,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
 
     @Override
     public KnowledgeFilesDTO uploadDocument(DocumentDTO.UploadReq req) {
-        String documentId = newId();
+        String documentId = StringUtils.defaultIfBlank(req.getDocumentId(), newId());
         String filename = StringUtils.defaultIfBlank(req.getName(), req.getFile().getOriginalFilename());
         if (!LocalKnowledgeDocumentFormats.supports(filename)) {
             throw new RenException(ErrorCode.UPLOAD_FILE_ERROR,
@@ -221,7 +221,9 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         try {
             // 适配器实例会被缓存；每次上传重新解析托管模型，避免继续使用已修改或停用的旧凭据。
             applyManagedLlmConfig();
-            List<LocalChunk> chunks = parseFile(filename, req.getFile().getInputStream());
+            notifyProgress(req.getProgressListener(), 0.10D);
+            List<LocalChunk> chunks = parseFile(
+                    filename, req.getFile().getInputStream(), req.getProgressListener());
             if (chunks.isEmpty()) {
                 throw new RenException(ErrorCode.UPLOAD_FILE_ERROR, "文件中没有可用于知识库切片的有效内容");
             }
@@ -652,7 +654,8 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         generateAndStoreEmbeddings(datasetId, documentId);
     }
 
-    private List<LocalChunk> parseFile(String filename, InputStream inputStream) throws Exception {
+    private List<LocalChunk> parseFile(String filename, InputStream inputStream,
+            Consumer<Double> progressListener) throws Exception {
         String extension = getExtension(filename);
         String text;
         if ("xlsx".equals(extension) || "xls".equals(extension)) {
@@ -662,7 +665,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
                     .lines()
                     .collect(Collectors.joining("\n"));
         }
-        return chunkDocumentWithLlm(filename, text);
+        return chunkDocumentWithLlm(filename, text, progressListener);
     }
 
     private String parseExcelAsModelInput(InputStream inputStream) throws Exception {
@@ -723,7 +726,8 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         return inputBlocks;
     }
 
-    private List<LocalChunk> chunkDocumentWithLlm(String filename, String text) {
+    private List<LocalChunk> chunkDocumentWithLlm(String filename, String text,
+            Consumer<Double> progressListener) {
         requireLlmAvailable();
         if (StringUtils.isBlank(text)) {
             throw new RenException("文件中没有可用于大模型语义切片的有效内容");
@@ -751,10 +755,27 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
                         "大模型语义切片失败（分段%d/%d），未生成规则切片: %s",
                         i + 1, sections.size(), lastError.getMessage()), lastError);
             }
+            notifyProgress(progressListener, 0.10D + (0.80D * (i + 1) / sections.size()));
         }
         return chunks.stream()
                 .filter(chunk -> StringUtils.isNotBlank(chunk.getContent()))
                 .collect(Collectors.toList());
+    }
+
+    @SuppressWarnings("unused")
+    private List<LocalChunk> chunkDocumentWithLlm(String filename, String text) {
+        return chunkDocumentWithLlm(filename, text, null);
+    }
+
+    private void notifyProgress(Consumer<Double> progressListener, double progress) {
+        if (progressListener == null) {
+            return;
+        }
+        try {
+            progressListener.accept(Math.max(0D, Math.min(0.90D, progress)));
+        } catch (Exception e) {
+            log.warn("更新本地知识库切片进度失败，不中断切片: {}", e.getMessage());
+        }
     }
 
     private void requireLlmAvailable() {

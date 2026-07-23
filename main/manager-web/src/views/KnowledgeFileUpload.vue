@@ -25,7 +25,8 @@
                 element-loading-text="Loading" element-loading-spinner="el-icon-loading"
                 element-loading-background="rgba(255, 255, 255, 0.7)" :header-cell-class-name="headerCellClassName"
                 @selection-change="handleSelectionChange">
-                <el-table-column type="selection" width="55" align="center"></el-table-column>
+                <el-table-column type="selection" width="55" align="center"
+                  :selectable="canSelectDocument"></el-table-column>
                 <el-table-column :label="$t('knowledgeFileUpload.documentName')" prop="name" align="left">
                   <template slot-scope="scope">
                     <span class="document-name">{{ scope.row.name }}</span>
@@ -37,11 +38,22 @@
                     <span>{{ formatDate(scope.row.createdAt) }}</span>
                   </template>
                 </el-table-column>
-                <el-table-column :label="$t('knowledgeFileUpload.status')" align="center" width="120">
+                <el-table-column :label="$t('knowledgeFileUpload.status')" align="center" width="240">
                   <template slot-scope="scope">
-                    <el-tag :type="getParseStatusType(scope.row.parseStatusCode)" size="small">
-                      {{ getParseStatusText(scope.row.parseStatusCode) }}
-                    </el-tag>
+                    <div class="document-status-cell">
+                      <el-tag :type="getParseStatusType(scope.row.parseStatusCode)" size="small">
+                        {{ getParseStatusText(scope.row.parseStatusCode) }}
+                      </el-tag>
+                      <template v-if="scope.row.parseStatusCode === 1">
+                        <span class="status-detail">{{ getProcessingStage(scope.row) }}</span>
+                        <el-progress :percentage="getProgressPercent(scope.row.progress)" :show-text="false"
+                          :stroke-width="5"></el-progress>
+                      </template>
+                      <el-tooltip v-else-if="scope.row.parseStatusCode === 4 && scope.row.error"
+                        :content="scope.row.error" placement="top" effect="dark">
+                        <span class="status-detail status-error">{{ scope.row.error }}</span>
+                      </el-tooltip>
+                    </div>
                   </template>
                 </el-table-column>
                 <el-table-column :label="$t('knowledgeFileUpload.sliceCount')" align="center" width="100">
@@ -52,14 +64,20 @@
                 <el-table-column :label="$t('knowledgeFileUpload.operation')" align="center" width="200">
                   <template slot-scope="scope">
                     <el-button size="mini" type="text" @click="handleParse(scope.row)"
-                      :disabled="scope.row.parseStatusCode === 1 || scope.row.parseStatusCode === 3 || scope.row.parseStatusCode === 4" v-if="!scope.row.sliceCount || scope.row.sliceCount <= 0">
+                      :disabled="scope.row.parseStatusCode === 1 || scope.row.parseStatusCode === 3 || scope.row.parseStatusCode === 4"
+                      v-if="scope.row.sourceType !== 'local_knowledge' && (!scope.row.sliceCount || scope.row.sliceCount <= 0)">
                       {{ $t('knowledgeFileUpload.parse') }}
+                    </el-button>
+                    <el-button size="mini" type="text" @click="handleRetryUpload(scope.row)"
+                      v-if="scope.row.sourceType === 'local_knowledge' && scope.row.parseStatusCode === 4">
+                      {{ $t('knowledgeFileUpload.reupload') }}
                     </el-button>
                     <el-button size="mini" type="text" @click="handleViewSlices(scope.row)"
                       v-if="scope.row.sliceCount && scope.row.sliceCount > 0">
                       {{ $t('knowledgeFileUpload.viewSlices') }}
                     </el-button>
-                    <el-button size="mini" type="text" @click="handleDelete(scope.row)">
+                    <el-button size="mini" type="text" @click="handleDelete(scope.row)"
+                      :disabled="scope.row.parseStatusCode === 1">
                       {{ $t('knowledgeFileUpload.delete') }}
                     </el-button>
                   </template>
@@ -218,9 +236,7 @@ export default {
 
       // 状态轮询相关数据
       statusPollingTimer: null,
-      statusPollingInterval: 5000,
-      maxStatusPollingTime: 300000,
-      statusPollingStartTime: null
+      statusPollingInterval: 3000
     };
   },
   created() {
@@ -316,7 +332,6 @@ export default {
         return;
       }
 
-      this.statusPollingStartTime = Date.now();
       this.pollDocumentStatus();
 
       this.statusPollingTimer = setInterval(() => {
@@ -332,11 +347,6 @@ export default {
     },
 
     pollDocumentStatus: async function () {
-      if (Date.now() - this.statusPollingStartTime > this.maxStatusPollingTime) {
-        this.stopStatusPolling();
-        return;
-      }
-
       try {
         const params = {
           page: this.currentPage,
@@ -373,12 +383,29 @@ export default {
 
       updatedFileList.forEach(updatedDoc => {
         const existingDoc = this.fileList.find(doc => doc.id === updatedDoc.id);
-        if (existingDoc && existingDoc.parseStatusCode !== updatedDoc.parseStatusCode) {
+        if (existingDoc) {
+          const previousStatus = existingDoc.parseStatusCode;
           Object.assign(existingDoc, updatedDoc);
           hasChanges = true;
 
-          if (updatedDoc.parseStatusCode === 3) {
+          if (previousStatus !== updatedDoc.parseStatusCode && updatedDoc.parseStatusCode === 3) {
             this.fetchSliceCountForSingleDocument(updatedDoc.id);
+            this.$notify({
+              title: this.$t('knowledgeFileUpload.chunkingCompletedTitle'),
+              message: this.$t('knowledgeFileUpload.chunkingCompletedDescription', {
+                name: updatedDoc.name,
+                count: updatedDoc.chunkCount || 0
+              }),
+              type: 'success',
+              duration: 8000
+            });
+          } else if (previousStatus !== updatedDoc.parseStatusCode && updatedDoc.parseStatusCode === 4) {
+            this.$notify({
+              title: this.$t('knowledgeFileUpload.chunkingFailedTitle'),
+              message: `${updatedDoc.name}：${updatedDoc.error || this.$t('knowledgeFileUpload.uploadFailed')}`,
+              type: 'error',
+              duration: 0
+            });
           }
         }
       });
@@ -449,8 +476,12 @@ export default {
     },
 
     handleUploadComplete: function () {
-      this.uploadDialogVisible = false;
       this.fetchFileList();
+    },
+
+    handleRetryUpload: function () {
+      this.uploadDialogVisible = true;
+      this.$message.info(this.$t('knowledgeFileUpload.reuploadHint'));
     },
 
     handleParse: function (row) {
@@ -525,6 +556,9 @@ export default {
     handleSelectionChange: function (selection) {
       this.selectedFiles = selection;
     },
+    canSelectDocument: function (document) {
+      return document.parseStatusCode !== 1;
+    },
     handleSelectAll: function () {
       if (this.isAllSelected) {
         this.$refs.fileTable.clearSelection();
@@ -532,7 +566,9 @@ export default {
       } else {
         this.$refs.fileTable.clearSelection();
         this.fileList.forEach(row => {
-          this.$refs.fileTable.toggleRowSelection(row, true);
+          if (this.canSelectDocument(row)) {
+            this.$refs.fileTable.toggleRowSelection(row, true);
+          }
         });
         this.isAllSelected = true;
       }
@@ -602,6 +638,21 @@ export default {
         case 4: return this.$t('knowledgeFileUpload.statusFailed');
         default: return this.$t('knowledgeFileUpload.statusNotStarted');
       }
+    },
+    getProgressPercent: function (progress) {
+      const value = Number(progress);
+      if (!Number.isFinite(value)) return 0;
+      return Math.max(0, Math.min(100, Math.round(value * 100)));
+    },
+    getProcessingStage: function (document) {
+      const percent = this.getProgressPercent(document.progress);
+      if (percent <= 5) {
+        return this.$t('knowledgeFileUpload.statusQueued');
+      }
+      if (document.sourceType !== 'local_knowledge') {
+        return this.$t('knowledgeFileUpload.statusRemoteParsing', { percent });
+      }
+      return this.$t('knowledgeFileUpload.statusSemanticChunking', { percent });
     },
     goToPage: function (page) {
       if (page !== this.currentPage) {
@@ -951,6 +1002,28 @@ export default {
     position: relative;
     transform: rotate(0deg);
     transition: transform 0.3s;
+  }
+}
+
+.document-status-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 200px;
+  margin: 0 auto;
+
+  .status-detail {
+    color: #909399;
+    font-size: 12px;
+    line-height: 16px;
+  }
+
+  .status-error {
+    color: #f56c6c;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: help;
   }
 }
 

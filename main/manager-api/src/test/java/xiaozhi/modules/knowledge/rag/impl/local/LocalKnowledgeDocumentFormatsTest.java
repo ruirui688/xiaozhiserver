@@ -19,4 +19,12 @@ class LocalKnowledgeDocumentFormatsTest {
         assertFalse(LocalKnowledgeDocumentFormats.supports("manual.docx"));
         assertFalse(LocalKnowledgeDocumentFormats.supports("no-extension"));
     }
+
+    @Test
+    void validatesMimeTypeTogetherWithTheExtension() {
+        assertTrue(LocalKnowledgeDocumentFormats.supportsContentType("manual.md", "text/markdown"));
+        assertTrue(LocalKnowledgeDocumentFormats.supportsContentType(
+                "manual.xlsx", "application/octet-stream"));
+        assertFalse(LocalKnowledgeDocumentFormats.supportsContentType("manual.xlsx", "text/plain"));
+    }
 }

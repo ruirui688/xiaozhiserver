@@ -1,7 +1,16 @@
 <template>
-  <el-dialog :title="$t('knowledgeFileUpload.uploadDocument')" :visible.sync="internalVisible" width="800px" @close="handleClose">
+  <el-dialog :title="$t('knowledgeFileUpload.uploadDocument')" :visible.sync="internalVisible" width="800px"
+    @close="handleClose">
+    <el-alert :title="$t('knowledgeFileUpload.semanticChunkingNoticeTitle')"
+      :description="$t('knowledgeFileUpload.semanticChunkingNoticeDescription')" type="info" show-icon
+      :closable="false" class="upload-state-alert"></el-alert>
+
+    <el-alert v-if="submitResult" :title="submitResult.title" :description="submitResult.description"
+      :type="submitResult.type" show-icon :closable="false" class="upload-state-alert"></el-alert>
+
     <el-upload class="document-uploader" drag :action="uploadUrl" :auto-upload="false" :on-change="handleFileChange"
-      :multiple="true" :show-file-list="false" accept=".doc,.docx,.pdf,.txt,.md,.mdx,.csv,.xls,.xlsx,.ppt,.pptx,.json,.jsonl,.qa">
+      :multiple="true" :show-file-list="false" :disabled="uploading"
+      accept=".doc,.docx,.pdf,.txt,.md,.mdx,.csv,.xls,.xlsx,.ppt,.pptx,.json,.jsonl,.qa">
       <i class="el-icon-upload"></i>
       <div class="el-upload__text">{{ $t('knowledgeFileUpload.dragOrClick') }}</div>
       <div class="el-upload__tip">{{ $t('knowledgeFileUpload.uploadTip') }}</div>
@@ -17,7 +26,7 @@
             <span class="file-name">{{ file.name }}</span>
             <span class="file-size">{{ formatFileSize(file.size) }}</span>
           </div>
-          <el-button type="text" class="remove-btn" @click="removeSelectedFile(index)">
+          <el-button type="text" class="remove-btn" :disabled="uploading" @click="removeSelectedFile(index)">
             <i class="el-icon-close"></i>
           </el-button>
         </div>
@@ -25,10 +34,11 @@
     </div>
 
     <div slot="footer" class="dialog-footer">
-      <el-button @click="closeDialog">{{ $t('knowledgeFileUpload.cancel') }}</el-button>
+      <el-button @click="closeDialog">{{ $t('knowledgeFileUpload.close') }}</el-button>
       <el-button type="primary" @click="handleBatchUploadSubmit" :loading="uploading"
-        :disabled="selectedFilesList.length === 0">
-        {{ $t('knowledgeFileUpload.confirm') }} {{ selectedFilesList.length > 0 ?
+        :disabled="selectedFilesList.length === 0 || uploading">
+        {{ uploading ? $t('knowledgeFileUpload.submitting') : $t('knowledgeFileUpload.submitForChunking') }}
+        {{ selectedFilesList.length > 0 ?
           `(${selectedFilesList.length}${$t('knowledgeFileUpload.itemsPerPage').replace('条/页', '个文件')})` : '' }}
       </el-button>
     </div>
@@ -57,7 +67,8 @@ export default {
     return {
       internalVisible: false,
       selectedFilesList: [],
-      uploading: false
+      uploading: false,
+      submitResult: null
     };
   },
   watch: {
@@ -66,6 +77,7 @@ export default {
       if (val) {
         this.selectedFilesList = [];
         this.uploading = false;
+        this.submitResult = null;
       }
     },
     internalVisible(val) {
@@ -86,6 +98,7 @@ export default {
       }
 
       // 添加到已选择文件列表
+      this.submitResult = null;
       this.selectedFilesList.push({
         name: file.name,
         size: file.size,
@@ -112,6 +125,7 @@ export default {
       }
 
       this.uploading = true;
+      this.submitResult = null;
 
       const uploadPromises = this.selectedFilesList.map(file => {
         return new Promise((resolve, reject) => {
@@ -121,7 +135,11 @@ export default {
           KnowledgeBaseAPI.uploadDocument(this.datasetId, formData,
             ({ data }) => {
               if (data && data.code === 0) {
-                resolve({ success: true, fileName: file.name });
+                resolve({
+                  success: true,
+                  fileName: file.name,
+                  document: data.data || null
+                });
               } else {
                 reject({ success: false, fileName: file.name, error: data?.msg || this.$t('knowledgeFileUpload.uploadFailed') });
               }
@@ -144,19 +162,53 @@ export default {
 
           const successCount = results.filter(r => r.success).length;
           const failedCount = results.filter(r => !r.success).length;
+          const failedResults = results.filter(r => !r.success);
 
           if (successCount > 0) {
-            this.$message.success(`成功上传 ${successCount} 个文件`);
+            this.$emit('upload-complete', {
+              acceptedCount: successCount,
+              documents: results.filter(r => r.success).map(r => r.document).filter(Boolean)
+            });
           }
 
           if (failedCount > 0) {
-            const failedFiles = results.filter(r => !r.success).map(r => r.fileName);
-            this.$message.error(`上传失败 ${failedCount} 个文件: ${failedFiles.join(', ')}`);
+            const failedFiles = failedResults.map(r => `${r.fileName}：${r.error}`);
+            this.submitResult = {
+              type: successCount > 0 ? 'warning' : 'error',
+              title: successCount > 0
+                ? this.$t('knowledgeFileUpload.partialSubmitTitle')
+                : this.$t('knowledgeFileUpload.submitFailedTitle'),
+              description: failedFiles.join('；')
+            };
+            const failedNames = new Set(failedResults.map(r => r.fileName));
+            this.selectedFilesList = this.selectedFilesList.filter(file => failedNames.has(file.name));
           }
 
-          if (successCount > 0) {
+          if (successCount > 0 && failedCount === 0) {
             this.internalVisible = false;
-            this.$emit('upload-complete');
+            this.$notify({
+              title: this.$t('knowledgeFileUpload.submittedTitle'),
+              message: this.$t('knowledgeFileUpload.submittedDescription', { count: successCount }),
+              type: 'success',
+              duration: 8000
+            });
+          } else if (successCount > 0) {
+            this.$notify({
+              title: this.$t('knowledgeFileUpload.partialSubmitTitle'),
+              message: this.$t('knowledgeFileUpload.partialSubmitDescription', {
+                success: successCount,
+                failed: failedCount
+              }),
+              type: 'warning',
+              duration: 8000
+            });
+          } else if (failedCount > 0) {
+            this.$notify({
+              title: this.$t('knowledgeFileUpload.submitFailedTitle'),
+              message: failedResults.map(r => `${r.fileName}：${r.error}`).join('；'),
+              type: 'error',
+              duration: 0
+            });
           }
         })
         .catch(error => {
@@ -173,6 +225,7 @@ export default {
     handleClose() {
       this.selectedFilesList = [];
       this.uploading = false;
+      this.submitResult = null;
     }
   }
 };
@@ -180,6 +233,10 @@ export default {
 
 <style lang="scss" scoped>
 /* 拖拽上传区域样式 */
+.upload-state-alert {
+  margin-bottom: 16px;
+}
+
 .document-uploader {
   :deep(.el-upload-dragger) {
     width: 600px;

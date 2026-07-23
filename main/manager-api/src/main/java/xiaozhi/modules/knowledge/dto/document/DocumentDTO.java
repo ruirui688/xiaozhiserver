@@ -5,6 +5,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import java.io.Serializable;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -34,6 +36,10 @@ public class DocumentDTO {
         @NotBlank(message = "知识库ID不能为空")
         private String datasetId;
 
+        @Schema(description = "服务端预分配的文档 ID")
+        @JsonProperty("document_id")
+        private String documentId;
+
         @Schema(description = "文件名 (如果指定，则覆盖原始文件名)")
         private String name;
 
@@ -56,6 +62,9 @@ public class DocumentDTO {
         @Schema(description = "文件二进制流 (支持 PDF, DOCX, TXT, MD 等多种格式)", requiredMode = Schema.RequiredMode.REQUIRED)
         @NotNull(message = "上传文件不能为空")
         private org.springframework.web.multipart.MultipartFile file;
+
+        @JsonIgnore
+        private transient Consumer<Double> progressListener;
     }
 
     /**

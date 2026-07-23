@@ -46,6 +46,8 @@ class KnowledgeFilesServiceImplTest {
     private final KnowledgeBaseService knowledgeBaseService = mock(KnowledgeBaseService.class);
     private final DocumentDao documentDao = mock(DocumentDao.class);
     private final RedisUtils redisUtils = mock(RedisUtils.class);
+    private final LocalKnowledgeUploadTaskService localKnowledgeUploadTaskService =
+            mock(LocalKnowledgeUploadTaskService.class);
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private KnowledgeFilesServiceImpl service;
@@ -55,6 +57,7 @@ class KnowledgeFilesServiceImplTest {
         service = new KnowledgeFilesServiceImpl(knowledgeBaseService, documentDao, objectMapper, redisUtils);
         ReflectionTestUtils.setField(service, "maxUploadSize", 1024L * 1024L);
         ReflectionTestUtils.setField(service, "self", service);
+        ReflectionTestUtils.setField(service, "localKnowledgeUploadTaskService", localKnowledgeUploadTaskService);
         when(knowledgeBaseService.getRAGConfigByDatasetId(DATASET_ID)).thenReturn(RAG_CONFIG);
     }
 
@@ -112,6 +115,7 @@ class KnowledgeFilesServiceImplTest {
 
     @Test
     void uploadCompensatesAdapterWhenShadowPersistenceFails() {
+        when(knowledgeBaseService.getRAGConfigByDatasetId(DATASET_ID)).thenReturn(Map.of("type", "ragflow"));
         KnowledgeBaseAdapter adapter = mock(KnowledgeBaseAdapter.class);
         KnowledgeFilesService self = mock(KnowledgeFilesService.class);
         ReflectionTestUtils.setField(service, "self", self);
@@ -121,9 +125,9 @@ class KnowledgeFilesServiceImplTest {
                 .thenThrow(new IllegalStateException("database unavailable"));
 
         try (MockedStatic<KnowledgeBaseAdapterFactory> factory = mockStatic(KnowledgeBaseAdapterFactory.class)) {
-            factory.when(() -> KnowledgeBaseAdapterFactory.isAdapterTypeRegistered("local_knowledge"))
+            factory.when(() -> KnowledgeBaseAdapterFactory.isAdapterTypeRegistered("ragflow"))
                     .thenReturn(true);
-            factory.when(() -> KnowledgeBaseAdapterFactory.getAdapter("local_knowledge", RAG_CONFIG))
+            factory.when(() -> KnowledgeBaseAdapterFactory.getAdapter("ragflow", Map.of("type", "ragflow")))
                     .thenReturn(adapter);
 
             assertThrows(RuntimeException.class, () -> service.uploadDocument(
@@ -135,6 +139,34 @@ class KnowledgeFilesServiceImplTest {
         ArgumentCaptor<DocumentDTO.BatchIdReq> cleanup = ArgumentCaptor.forClass(DocumentDTO.BatchIdReq.class);
         verify(adapter).deleteDocument(eq(DATASET_ID), cleanup.capture());
         assertEquals(List.of(DOCUMENT_ID), cleanup.getValue().getIds());
+    }
+
+    @Test
+    void localUploadReturnsQueuedTaskWithoutCallingAdapterInRequestThread() {
+        KnowledgeBaseAdapter adapter = mock(KnowledgeBaseAdapter.class);
+        KnowledgeFilesDTO queued = uploadedDocument(DOCUMENT_ID, "manual.md");
+        queued.setRun("RUNNING");
+        queued.setProgress(0.02D);
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "manual.md", "text/markdown", "content".getBytes());
+        when(localKnowledgeUploadTaskService.submit(
+                DATASET_ID, file, "manual.md", null, null, null, adapter))
+                .thenReturn(queued);
+
+        try (MockedStatic<KnowledgeBaseAdapterFactory> factory = mockStatic(KnowledgeBaseAdapterFactory.class)) {
+            factory.when(() -> KnowledgeBaseAdapterFactory.isAdapterTypeRegistered("local_knowledge"))
+                    .thenReturn(true);
+            factory.when(() -> KnowledgeBaseAdapterFactory.getAdapter("local_knowledge", RAG_CONFIG))
+                    .thenReturn(adapter);
+
+            KnowledgeFilesDTO result = service.uploadDocument(
+                    DATASET_ID, file, null, null, null, null);
+
+            assertEquals("RUNNING", result.getRun());
+            assertEquals(0.02D, result.getProgress());
+        }
+
+        verify(adapter, never()).uploadDocument(any());
     }
 
     @Test
