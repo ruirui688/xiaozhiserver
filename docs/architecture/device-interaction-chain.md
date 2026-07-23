@@ -377,19 +377,17 @@ Authorization: Bearer <server.secret>
 
 ## 6. 打断机制（Barge-in）
 
-### 6.1 两层打断
+### 6.1 单一语义打断裁决
 
 ```text
 receiveAudioHandle.py:107-153  startToChat() 中断路径
 
-第1层：确定性 STOP_ALL 快速路径
-  - TextNormalizer.route_key(text) → SemanticRouter.STOP_ALL 集合 O(1) 查找
-  - 命中 → handleAbortMessage(conn), 完全跳过 LLM
-
-第2层：LLM 语义中断分类器
-  - SemanticInterruptionClassifier.classify()  → conn.llm.response_no_stream()
+SemanticInterruptionClassifier.classify() → conn.llm.response_no_stream()
+  - 当前 LLM 结合最近对话与重叠语音裁决，不使用停止词表、关键词或正则
   - 超时 1.5 秒 (configurable)
-  - 3 类决策：continue / interrupt / new_turn
+  - continue：保留当前播报，不进入主聊天
+  - interrupt：handleAbortMessage(conn) 后结束本轮，不再回复
+  - new_turn：handleAbortMessage(conn) 后继续处理用户的新请求
   - LLM 失败 → 回退到 new_turn（保守：中断并处理新输入）
 ```
 

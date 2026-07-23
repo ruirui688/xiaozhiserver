@@ -40,7 +40,7 @@ LLM 是复杂语义处理器和兜底生成器
 MCP / 插件 / IoT 是工具执行层
 ```
 
-“停”“别说了”“退出游戏”“继续”等高频语音操作不能先交给 LLM 猜，而应由服务端规则、状态和策略直接处理。
+TTS 播放期间的“停”“别说了”及其自然语言变体必须由当前 LLM 结合上下文裁决；退出游戏、继续等具有明确会话状态约束的操作，仍可由服务端状态和策略直接处理。
 
 ## 2. 当前落地范围
 
@@ -49,15 +49,14 @@ MCP / 插件 / IoT 是工具执行层
 新增代码位置：
 
 ```text
-main/xiaozhi-server/core/semantic/  (8 文件, ~800 行)
+main/xiaozhi-server/core/semantic/
   frames.py            语义数据结构 (ASRResult, RobotContext, IntentFrame, Decision)
   interruption.py      TTS 播放期间重叠语音的大模型打断裁决
   normalizer.py        文本标准化 (route_key, 标点/空格/唤醒词移除)
-  router.py            高置信度规则路由 (STOP_ALL/音乐/游戏/继续/兜底)
+  router.py            高置信度状态路由 (游戏/继续/兜底，不判断自然语言停止意图)
   state_manager.py     连接级状态投影 (RLock 线程安全)
   policy_engine.py     状态与策略判断 (execute/reject/fallback_chat)
   semantic_center.py   编排执行 (4 阶段管道: normalize→route→decide→execute)
-  music_intent.py      音乐领域命令解析器
 ```
 
 接入点：
@@ -102,7 +101,7 @@ ASR 文本
   -> SemanticInterruptionClassifier
   -> 当前 LLM response_no_stream 裁决 continue / interrupt / new_turn
   -> continue：不打断、不进入主聊天，当前 TTS 继续
-  -> interrupt：复用 handleAbortMessage()，只停止当前播报；如果语义中枢未把文本识别为停止/退出等高置信控制指令，则继续按新用户轮次处理，避免把“停止并提出新要求”的话吞掉
+  -> interrupt：复用 handleAbortMessage()，只停止当前播报并结束本轮，不进入语义中枢或主聊天
   -> new_turn：复用 handleAbortMessage()，再进入现有 SemanticCenter / Intent / Chat 链路
 ```
 
@@ -114,7 +113,7 @@ recent_dialogue 最近最多 4 条 user/assistant 文本
 overlap_user_text 当前重叠语音文本
 ```
 
-服务端不维护附和词表、停止词表或长度阈值来替代判断；只负责请求 LLM、解析 JSON 结果和执行结果。LLM 裁决失败或返回非法 JSON 时，为避免真实打断请求被吞掉，回退为 `new_turn` 并走旧打断流程。LLM 裁决为 `interrupt` 但文本未被语义中枢确认为控制类指令时，也按 `new_turn` 继续进入旧聊天链路，避免类似“要你自己唱”这种新请求只停止播报、不再回复。
+服务端不维护附和词表、停止词表、关键词、正则或长度阈值来替代判断；只负责请求 LLM、解析 JSON 结果和确定性执行结果。LLM 裁决失败或返回非法 JSON 时，为避免真实新请求被吞掉，回退为 `new_turn` 并走旧打断流程。`interrupt` 是终态，服务端不得再次用规则复核，也不得进入主 LLM 生成“好的，我不说了”之类的额外回复。像“别唱这首了，换一首”或“要你自己唱”这类带有后续任务的输入，必须由裁决模型直接判为 `new_turn`。
 
 ## 3. 核心数据结构
 
@@ -169,33 +168,9 @@ reason
 
 ## 4. 第一阶段行为
 
-### 停止类
+### 播报停止
 
-这些说法会直接路由到 `interrupt.stop_all`（共 48 个条目）：
-
-```text
-停 / 停止 / 暂停 / 停下 / 别动 / 闭嘴 / 别吵了
-别说了 / 你不要说了 / 不要说了 / 你先别说了 / 你别说了
-取消 / 算了 / 没事了 / 没什么
-停止表演 / 你先别演了 / 小智你先别演了
-够了 / 别tm说了 / 你给老子闭嘴 / 能不能安静点
-行了行了 / 够了够了 / 好了好了 / 得得得
-嘘 / 静音 / 别吵 / 安静 / 别说话
-shut up / stop / silence / quiet / enough
-```
-
-处理方式：
-
-```text
-SemanticRouter -> interrupt.stop_all
-PolicyEngine -> execute
-SemanticCenter -> handleAbortMessage()
-              -> 尝试调用配置或默认动作停止工具
-              -> TTS 回复“好的，已停止。”
-              -> 状态回到 idle
-```
-
-当前硬停止复用已有 `handleAbortMessage()`，它会设置 `client_abort`、增加 `abort_generation`、清理 TTS 队列并向设备发送 `tts stop`。动作停止第一阶段只做候选工具尝试；具体机器人动作 MCP 名称应通过 `semantic_control.stop_motion_tools` 配置补齐。
+泛化停止意图不进入 `SemanticRouter`，也没有固定停止词集合。仅当 TTS 正在播放时，由 `SemanticInterruptionClassifier` 使用当前 LLM 和最近对话判断。模型返回 `interrupt` 后，服务端复用 `handleAbortMessage()` 设置 `client_abort`、增加 `abort_generation`、清理 TTS 队列并向设备发送 `tts stop`，随后立即结束本轮；不追加 TTS 确认语，也不调用主 LLM。
 
 ### 游戏上下文
 

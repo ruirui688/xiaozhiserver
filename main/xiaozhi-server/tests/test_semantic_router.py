@@ -25,13 +25,20 @@ def _context(state="idle", active_game_tool=None, current_skill=None, last_inten
     )
 
 
-def test_stop_phrases_route_to_interrupt_stop_all():
+def test_stop_like_text_does_not_use_server_phrase_rules():
     router = SemanticRouter()
 
-    for text in ["停", "别说了", "停止表演", "你先别演啦"]:
-        frame = router.route(_asr(text), _context(state="speaking"))
-        assert frame.full_name == "interrupt.stop_all"
-        assert frame.confidence >= 0.99
+    for text in [
+        "停",
+        "别说了",
+        "闭嘴，小子",
+        "你先别演啦",
+        "别放了",
+        "停止播放",
+    ]:
+        frame = router.route(_asr(text), _context(state="idle"))
+        assert frame.full_name == "chat.normal"
+        assert frame.source == "fallback"
 
 
 def test_continue_in_idle_routes_to_context_continue():

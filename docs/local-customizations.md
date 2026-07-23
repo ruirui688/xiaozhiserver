@@ -157,7 +157,7 @@
 
 ```text
 定制模块：xiaozhi-server 语义前置控制链路
-改动原因：把小智从“ASR 后直接交给 LLM/function-call”的聊天机器人链路，演进为“TextNormalizer -> SemanticRouter -> StateManager -> PolicyEngine -> SemanticCenter”的语音控制中枢。停止、退出游戏、游戏续局、低置信度拒识等高频控制必须优先由服务端规则和状态处理，LLM 只作为复杂语义和普通聊天兜底。
+改动原因：把小智从“ASR 后直接交给 LLM/function-call”的聊天机器人链路，演进为“TextNormalizer -> SemanticRouter -> StateManager -> PolicyEngine -> SemanticCenter”的语音控制中枢。退出游戏、游戏续局、低置信度拒识等具有明确状态约束的控制可优先由服务端规则和状态处理；TTS 播放期间的泛化停止意图由当前 LLM 主动结合上下文裁决，服务端只执行裁决结果。
 关键文件：
   - main/xiaozhi-server/core/semantic/
   - main/xiaozhi-server/core/connection.py
@@ -168,7 +168,7 @@
   - main/xiaozhi-server/tests/test_semantic_policy.py
   - docs/architecture/semantic-control-center.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改 startToChat、ConnectionHandler 初始化、handle_user_intent、GameSessionManager、UnifiedToolHandler、ToolManager、abortHandle、TTS 入队或 function-call 主链路，必须保留语义控制中枢在旧意图/LLM 之前的前置拦截位置；TTS 播放期间识别到用户重叠说话时，是否打断必须由当前 LLM 基于少量上下文裁决 continue / interrupt / new_turn，服务端不得用附和词表、停止词表或长度阈值替代语义打断判断；语义打断裁决器调用 LLM 时必须有短超时，超时、解析失败或模型异常必须降级为 new_turn 并继续处理用户新输入，不能让异常冒泡关闭 WebSocket；LLM 裁决为 continue 时不得清空 TTS 队列、不得进入主聊天；裁决为 interrupt 时先复用 handleAbortMessage 停止当前播报，随后必须交给语义中枢确认是否为停止/退出等高置信控制指令，若未命中控制指令则继续按 new_turn 进入旧 handle_user_intent 和 conn.chat，避免“要你自己唱”这类带新任务的打断被吞掉；裁决为 new_turn 或裁决失败时复用 handleAbortMessage 后继续处理新输入；未命中高置信度规则时必须继续兜底到旧 handle_user_intent 和 conn.chat；停止类指令必须复用 handleAbortMessage 并允许配置动作停止工具；纯语言游戏不得优先回到 active_game_tool，应交给主 LLM 对话，并只从已启用功能插件读取可编辑软规则；退出游戏不得关闭 websocket；语义模块顶层导入应尽量轻量，避免引入 opus/loguru 等运行依赖导致纯单元测试无法导入。
+官方同步时的处理规则：如果官方修改 startToChat、ConnectionHandler 初始化、handle_user_intent、GameSessionManager、UnifiedToolHandler、ToolManager、abortHandle、TTS 入队或 function-call 主链路，必须保留语义控制中枢在旧意图/LLM 之前的前置拦截位置；TTS 播放期间识别到用户重叠说话时，是否打断必须由当前 LLM 基于少量上下文裁决 continue / interrupt / new_turn，服务端不得用附和词表、停止词表、关键词、正则或长度阈值替代语义打断判断；语义打断裁决器调用 LLM 时必须有短超时，超时、解析失败或模型异常必须降级为 new_turn 并继续处理用户新输入，不能让异常冒泡关闭 WebSocket；LLM 裁决为 continue 时不得清空 TTS 队列、不得进入主聊天；裁决为 interrupt 时必须复用 handleAbortMessage 停止当前播报并立即结束本轮，不得交给语义中枢二次复核，也不得进入主 LLM 生成确认回复；“停止并提出新任务”的复合输入必须由模型裁决为 new_turn；裁决为 new_turn 或裁决失败时复用 handleAbortMessage 后继续处理新输入；未命中高置信度规则时必须继续兜底到旧 handle_user_intent 和 conn.chat；纯语言游戏不得优先回到 active_game_tool，应交给主 LLM 对话，并只从已启用功能插件读取可编辑软规则；退出游戏不得关闭 websocket；语义模块顶层导入应尽量轻量，避免引入 opus/loguru 等运行依赖导致纯单元测试无法导入。
 ```
 
 ## 12. 管理后台模型测试详情字段补全
@@ -256,9 +256,8 @@
 
 ```text
 定制模块：xiaozhi-server 服务器音乐播放插件
-改动原因：`play_music` 在 function_call 模式下原先只异步提交音乐播放任务，同步工具结果只显示“指令已接收”；管理后台聊天记录看不到实际选中的歌曲，容易误判为卡住。选曲提示语（例如“即将为您播放 具体歌曲”）必须作为普通 TTS 文本真实播报，不能只通过 `send_tts_message` 做屏幕状态。另一个问题是火山双流等 TTS provider 收到 `ContentType.FILE` 音乐文件后会先暂存到 `before_stop_play_files`，如果没有 `SentenceType.LAST` 播放边界就不会 flush 到 WebSocket，表现为后台显示已选中歌曲但设备不播放。后续为避免客户歌曲语义被写死在服务端规则里，播放、唱某首歌、随机播放和曲库查询不再由旧意图入口直接派发，必须通过主 LLM 或 intent LLM 根据工具描述和曲库上下文决定是否调用 `play_music`；服务端仅保留音乐停止类确定性控制，先于播放触发词处理“我不听了/别放了/停止播放”等否定或停止语义，并直接复用 `handleAbortMessage` 清队列和清音乐上下文。TTS 音频发送不得设置整轮固定播放时长上限；`LAST` 收尾必须按剩余音频帧时长动态等待，网络半开保护应限制单个 WebSocket 音频包发送，不能通过 20 秒总上限清空正常长语音。
+改动原因：`play_music` 在 function_call 模式下原先只异步提交音乐播放任务，同步工具结果只显示“指令已接收”；管理后台聊天记录看不到实际选中的歌曲，容易误判为卡住。选曲提示语（例如“即将为您播放 具体歌曲”）必须作为普通 TTS 文本真实播报，不能只通过 `send_tts_message` 做屏幕状态。另一个问题是火山双流等 TTS provider 收到 `ContentType.FILE` 音乐文件后会先暂存到 `before_stop_play_files`，如果没有 `SentenceType.LAST` 播放边界就不会 flush 到 WebSocket，表现为后台显示已选中歌曲但设备不播放。后续为避免客户歌曲语义被写死在服务端规则里，播放、唱某首歌、随机播放、曲库查询和播放期间的停止请求都不再由旧意图入口或关键词解析器直接派发；播放选择由主 LLM 或 intent LLM 根据工具描述和曲库上下文决定，播放期间是否停止则由 `SemanticInterruptionClassifier` 结合上下文裁决。TTS 音频发送不得设置整轮固定播放时长上限；`LAST` 收尾必须按剩余音频帧时长动态等待，网络半开保护应限制单个 WebSocket 音频包发送，不能通过 20 秒总上限清空正常长语音。
 关键文件：
-  - main/xiaozhi-server/core/semantic/music_intent.py
   - main/xiaozhi-server/core/semantic/router.py
   - main/xiaozhi-server/core/semantic/policy_engine.py
   - main/xiaozhi-server/core/semantic/semantic_center.py
@@ -267,7 +266,7 @@
   - main/xiaozhi-server/music/.xiaozhi-music-metadata.json
   - main/xiaozhi-server/tests/test_music_intent.py
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改 `handle_user_intent`、语义控制中枢、`play_music`、TTS 队列、`Action.RECORD`、`ContentType.FILE` 或流式 TTS provider，必须保留以下约定：播放、唱某首歌、随机播放、换一首、曲库查询和音乐上下文续播应由大模型根据 `play_music` 工具描述、`<music_library>` 曲库上下文和用户表达调度，不得在旧意图入口里硬编码直接调用播放工具；“我不听了/别放了/停止播放”等停止命令可以由语义控制中枢确定性处理，且 `stop` 必须先于播放触发词处理，并直接走 `handleAbortMessage`，不得被抽成歌名；工具同步结果应使用用户可读的“正在为您播放音乐”，不要只返回“指令已接收”；“此刻为您献上/正在播放/即将为您播放 具体歌曲”这类选曲提示语必须按普通 `ContentType.TEXT` 进入 TTS 播报和 assistant 聊天记录，不得只作为屏幕状态；音乐播放入队必须按 `FIRST/ACTION -> MIDDLE/TEXT -> MIDDLE/FILE -> LAST/ACTION` 发送播放边界，确保提示语播完后再播放文件，并确保火山双流、阿里云流式、讯飞流式、Minimax 等 provider 能把暂存文件音频 flush 到设备；整轮 TTS 播放不得设置固定总时长上限，`LAST` 收尾应按剩余队列时长动态等待，并以单包发送超时处理 WebSocket 半开；曲库 `.xiaozhi-music-metadata.json` 支持 `aliases` 和 `description`，用于后台配置 ASR 近音、歌曲别名、用户俗称和模型可见背景说明，源码不得写入客户或歌曲专属语义。聊天记录中的 `play_music({...})` 和 `{"result": "正在为您播放音乐"}` 是工具调用审计记录，不应被当作播放失败错误。
+官方同步时的处理规则：如果官方修改 `handle_user_intent`、语义控制中枢、`play_music`、TTS 队列、`Action.RECORD`、`ContentType.FILE` 或流式 TTS provider，必须保留以下约定：播放、唱某首歌、随机播放、换一首、曲库查询和音乐上下文续播应由大模型根据 `play_music` 工具描述、`<music_library>` 曲库上下文和用户表达调度，不得在旧意图入口里硬编码直接调用播放工具；“我不听了/别放了/停止播放”等自然语言停止请求不得由服务端关键词或正则解析，播放期间统一交给当前 LLM 的语义打断裁决，并按 `interrupt` 终态或 `new_turn` 新任务确定性执行；工具同步结果应使用用户可读的“正在为您播放音乐”，不要只返回“指令已接收”；“此刻为您献上/正在播放/即将为您播放 具体歌曲”这类选曲提示语必须按普通 `ContentType.TEXT` 进入 TTS 播报和 assistant 聊天记录，不得只作为屏幕状态；音乐播放入队必须按 `FIRST/ACTION -> MIDDLE/TEXT -> MIDDLE/FILE -> LAST/ACTION` 发送播放边界，确保提示语播完后再播放文件，并确保火山双流、阿里云流式、讯飞流式、Minimax 等 provider 能把暂存文件音频 flush 到设备；整轮 TTS 播放不得设置固定总时长上限，`LAST` 收尾应按剩余队列时长动态等待，并以单包发送超时处理 WebSocket 半开；曲库 `.xiaozhi-music-metadata.json` 支持 `aliases` 和 `description`，用于后台配置 ASR 近音、歌曲别名、用户俗称和模型可见背景说明，源码不得写入客户或歌曲专属语义。聊天记录中的 `play_music({...})` 和 `{"result": "正在为您播放音乐"}` 是工具调用审计记录，不应被当作播放失败错误。
 ```
 
 ## 17. ACR 镜像生产部署、模型可空与 CPU FunASR

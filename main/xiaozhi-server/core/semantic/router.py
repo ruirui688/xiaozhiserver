@@ -5,52 +5,12 @@ import logging
 from core.semantic.frames import ASRResult, IntentFrame, RobotContext
 
 logger = logging.getLogger(__name__)
-from core.semantic.music_intent import parse_music_intent
 from core.semantic.normalizer import TextNormalizer
 
 
 class SemanticRouter:
     """Route only high-confidence commands; leave the rest to legacy flow."""
 
-    STOP_ALL = {
-        "停",
-        "停止",
-        "停一下",
-        "暂停",
-        "别动",
-        "别说了",
-        "不要说了",
-        "闭嘴",
-        "行了",
-        "行了行了",
-        "停止表演",
-        "停止动作",
-        "你先停一下",
-        "你先别说了",
-        "你先别演了",
-        # Added: common missing stop variants
-        "住口",
-        "住嘴",
-        "够了",
-        "够了够了",
-        "别再说了",
-        "不要再说了",
-        "安静",
-        "歇会吧",
-        "打住",
-        "到此为止",
-        "不用说了",
-        "停停停",
-        "可以了",
-        "收声",
-        "取消",
-        "算了",
-        "没事了",
-        "没什么",
-        "你别说了",
-        "停下",
-        "别吵了",
-    }
     CONTINUE = {"继续", "接着", "接着说", "继续说", "往下说", "下一段"}
     GAME_EXIT = {"退出游戏", "结束游戏", "不玩了", "游戏结束", "结束", "不猜了", "换游戏", "换个游戏", "停"}
     GAME_HINT = {"提示", "给个提示", "我不会", "不会", "换一个"}
@@ -62,27 +22,6 @@ class SemanticRouter:
         key = self.normalizer.route_key(asr_result.normalized_text)
         key = self._strip_wake_name(key)
         logger.debug("route key=%s normalized=%s", key, asr_result.normalized_text)
-
-        if key in self.STOP_ALL:
-            intent = IntentFrame("interrupt", "stop_all", 0.99, source="rule")
-            logger.debug("route matched STOP_ALL: %s", intent.full_name)
-            return intent
-
-        music_intent = parse_music_intent(
-            key,
-            is_music_context=context.current_skill == "music"
-            or context.last_intent in {"music.play", "music.stop", "music.library"},
-        )
-        if music_intent and music_intent.action == "stop":
-            intent = IntentFrame(
-                "music",
-                "stop",
-                0.99,
-                {"reason": music_intent.reason},
-                source="music_rule",
-            )
-            logger.debug("route matched music.stop: %s", intent.full_name)
-            return intent
 
         if context.active_game_tool and key in self.GAME_EXIT:
             intent = IntentFrame(

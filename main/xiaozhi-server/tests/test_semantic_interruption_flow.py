@@ -244,7 +244,7 @@ def test_overlap_interrupt_aborts_without_submitting_chat(monkeypatch):
     assert conn.websocket.messages[0]["state"] == "stop"
 
 
-def test_overlap_interrupt_control_stops_after_semantic_center(monkeypatch):
+def test_overlap_interrupt_is_terminal_without_semantic_reclassification(monkeypatch):
     import core.handle.receiveAudioHandle as receive_handle
 
     class _SemanticCenter:
@@ -266,15 +266,16 @@ def test_overlap_interrupt_control_stops_after_semantic_center(monkeypatch):
     conn = _Conn({"decision": "interrupt", "reason": "停止播报"})
     conn.semantic_center = _SemanticCenter()
 
-    accepted = asyncio.run(startToChat(conn, "先停一下"))
+    accepted = asyncio.run(startToChat(conn, "闭嘴，小子"))
 
     assert accepted is True
     assert conn.abort_generation == 1
-    assert conn.semantic_center.calls == 1
+    assert conn.semantic_center.calls == 0
     assert conn.executor.submitted == []
+    assert any(message.get("type") == "stt" for message in conn.websocket.messages)
 
 
-def test_overlap_interrupt_with_new_request_falls_through_to_chat(monkeypatch):
+def test_overlap_new_turn_with_request_falls_through_to_chat(monkeypatch):
     import core.handle.receiveAudioHandle as receive_handle
 
     class _SemanticCenter:
@@ -293,7 +294,7 @@ def test_overlap_interrupt_with_new_request_falls_through_to_chat(monkeypatch):
         return False
 
     monkeypatch.setattr(receive_handle, "handle_user_intent", _no_intent)
-    conn = _Conn({"decision": "interrupt", "reason": "用户明确要求自己唱"})
+    conn = _Conn({"decision": "new_turn", "reason": "用户提出新的演唱要求"})
     conn.semantic_center = _SemanticCenter()
 
     accepted = asyncio.run(startToChat(conn, "要你自己唱"))

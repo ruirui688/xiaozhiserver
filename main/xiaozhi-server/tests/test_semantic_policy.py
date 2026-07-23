@@ -19,17 +19,6 @@ def _context(state="idle", active_game_tool=None):
     )
 
 
-def test_interrupt_stop_all_is_always_executable():
-    decision = PolicyEngine().decide(
-        IntentFrame("interrupt", "stop_all", 0.99),
-        _context(state="game", active_game_tool="idiom_chain"),
-    )
-
-    assert decision.decision == "execute"
-    assert decision.priority == 100
-    assert decision.next_state == "idle"
-
-
 def test_game_answer_executes_active_game_tool():
     decision = PolicyEngine().decide(
         IntentFrame(

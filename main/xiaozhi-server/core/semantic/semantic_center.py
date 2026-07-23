@@ -61,31 +61,6 @@ class SemanticCenter:
             conn.logger.bind(tag=__name__).debug("handle_user_text fallthrough decision=%s", decision.decision)
             return False
 
-        if intent.full_name in {"interrupt.stop_all", "music.stop"}:
-            conn.logger.bind(tag=__name__).debug(
-                "handle_user_text handled %s reply=%s", intent.full_name, decision.reply,
-            )
-            from core.handle.abortHandle import handleAbortMessage
-
-            await handleAbortMessage(conn)
-            conn.last_tool_context = None
-            conn.last_music_song_name = None
-            # handleAbortMessage sets client_abort=True; for music.stop
-            # (which has no decision.reply → _speak is never called to
-            # reset it), we must clear it here so the TTS pipeline can
-            # resume for subsequent interactions.
-            # NOTE: handleAbortMessage sets client_abort=True.
-            # For music.stop, no _speak() call follows (decision.reply triggers _speak below),
-            # so we must manually reset client_abort to allow the TTS pipeline to resume.
-            # TODO: Move this reset into handleAbortMessage as a proper post-abort state.
-            conn.client_abort = False
-            if intent.full_name == "interrupt.stop_all":
-                await self._try_stop_motion(conn)
-            if decision.reply:
-                await self._speak(conn, decision.reply)
-            self.state_manager.transition(decision.next_state, None)
-            return True
-
         if intent.full_name == "game.exit":
             conn.logger.bind(tag=__name__).debug("handle_user_text handled game.exit")
             if hasattr(conn, "game_session_manager") and conn.game_session_manager:
@@ -155,33 +130,6 @@ class SemanticCenter:
                 await self._speak(conn, str(text))
                 conn.dialogue.put(Message(role="assistant", content=str(text)))
         self.state_manager.transition(decision.next_state, decision.executor)
-
-    async def _try_stop_motion(self, conn) -> None:
-        if not getattr(conn, "func_handler", None):
-            return
-        for tool_name in self._candidate_stop_tools(conn):
-            if not conn.func_handler.has_tool(tool_name):
-                continue
-            try:
-                await conn.func_handler.invoke(
-                    tool_name,
-                    {"response_success": "动作已停止", "response_failure": "动作停止失败"},
-                    source="semantic_interrupt",
-                )
-                return
-            except Exception as e:
-                conn.logger.bind(tag=__name__).warning(f"停止动作工具调用失败: {e}")
-
-    def _candidate_stop_tools(self, conn):
-        configured = conn.config.get("semantic_control", {}).get("stop_motion_tools", [])
-        defaults = [
-            "robot_stop",
-            "motion_stop",
-            "self_motion_stop",
-            "self_robot_stop",
-            "stop",
-        ]
-        return list(configured) + defaults
 
     async def _speak(self, conn, text: str) -> None:
         if not text or not getattr(conn, "tts", None):

@@ -13,22 +13,6 @@ class PolicyEngine:
                 reason="low_confidence",
             )
 
-        if intent.full_name == "interrupt.stop_all":
-            return Decision(
-                decision="execute",
-                priority=100,
-                reply="好的，已停止。",
-                next_state="idle",
-            )
-
-        if intent.full_name == "music.stop":
-            return Decision(
-                decision="execute",
-                priority=95,
-                reply="好的，已停止播放。",
-                next_state="idle",
-            )
-
         if intent.full_name == "game.exit":
             return Decision(
                 decision="execute",

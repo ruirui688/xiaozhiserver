@@ -14,7 +14,6 @@ from core.handle.reportHandle import (
     mark_skip_memory_event,
 )
 from core.semantic.interruption import SemanticInterruptionClassifier
-from core.semantic.router import SemanticRouter
 from core.semantic.normalizer import TextNormalizer
 from core.utils.output_counter import check_device_output_limit
 from core.handle.sendAudioHandle import send_stt_message, SentenceType
@@ -199,9 +198,8 @@ async def startToChat(
             await max_out_size(conn)
             return True
 
-    # manual 模式下不打断正在播放的内容；auto 模式交给当前 LLM 做语义裁决。
-    semantic_checked_after_interrupt = False
-
+    # manual 模式下不打断正在播放的内容；auto 模式只以当前 LLM 的语义裁决为准。
+    # 服务端不再维护停止词快速路径，也不在 LLM 裁决后用词表二次复核。
     if conn.client_is_speaking and conn.client_listen_mode != "manual":
         context = None
         if getattr(conn, "semantic_center", None):
@@ -212,20 +210,6 @@ async def startToChat(
                 (),
                 {"active_game_tool": None},
             )()
-        # Fast-path: check against deterministic stop words before firing LLM
-        normalizer = TextNormalizer()
-        route_key = normalizer.route_key(interruption_text)
-        if route_key in SemanticRouter.STOP_ALL:
-            # Deterministic stop — skip LLM call, abort immediately
-            await handleAbortMessage(conn)
-            handled_by_semantic = False
-            if getattr(conn, "semantic_center", None):
-                handled_by_semantic = await conn.semantic_center.handle_user_text(conn, interruption_text)
-            if not handled_by_semantic and getattr(conn, "semantic_center", None):
-                with conn._abort_lock:
-                    conn.client_abort = False
-                submit_chat(interruption_text)
-            return True
         classifier = SemanticInterruptionClassifier()
         classification = await classifier.classify(
             conn, interruption_text, context
@@ -244,27 +228,25 @@ async def startToChat(
             )
             return False
         conn.logger.bind(tag=TAG).info(
-            "语义打断裁决进入新轮: "
+            "语义打断裁决要求停止当前播报: "
             f"category={classification.category}, "
             f"reason={classification.reason}, "
             f"text={interruption_text[:50]}"
         )
         await handleAbortMessage(conn)
         if classification.category == "interrupt":
-            if getattr(conn, "semantic_center", None):
-                semantic_checked_after_interrupt = True
-                handled_by_semantic = await conn.semantic_center.handle_user_text(conn, actual_text)
-                if handled_by_semantic:
-                    return True
-                conn.logger.bind(tag=TAG).info(
-                    "语义打断interrupt未命中控制指令，按新用户轮次处理: "
-                    f"text={interruption_text[:50]}"
-                )
-            else:
-                return True
+            # interrupt 表示模型确认用户只要求停止当前播报，是终态决策。
+            # 不再交给词表或主聊天二次判断，避免“闭嘴，小子”之类表达
+            # 因未命中精确规则而生成额外回复。
+            await send_stt_message(conn, actual_text)
+            conn.logger.bind(tag=TAG).info(
+                "语义打断裁决已执行停止，本轮不进入主聊天: "
+                f"reason={classification.reason}"
+            )
+            return True
 
     # 语义控制中枢优先处理高置信度控制类指令，未处理再进入旧流程
-    if getattr(conn, "semantic_center", None) and not semantic_checked_after_interrupt:
+    if getattr(conn, "semantic_center", None):
         semantic_handled = await conn.semantic_center.handle_user_text(conn, actual_text)
         if semantic_handled:
             return True

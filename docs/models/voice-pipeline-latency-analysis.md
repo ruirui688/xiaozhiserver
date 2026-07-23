@@ -128,7 +128,7 @@ Opus 音频帧 → VAD 分段 → ASR 文字识别 → SemanticControl 路由
     │    → semantic_center.py 路由判断
     │    → connection.py:1024 chat()
     │
-    │  "你开心吗" 不匹配任何快速路由关键词 (STOP_ALL/CONTINUE/GAME_EXIT/...)
+    │  "你开心吗" 不匹配任何快速路由语义 (CONTINUE/GAME_EXIT/...)
     │  以 confidence 0.5 回退为 chat.normal，进入 LLM 流程
     │
     ├─ [阶段2] ~150ms   Memory 向量检索（同步阻塞）
