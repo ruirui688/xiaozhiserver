@@ -1051,9 +1051,11 @@ class TTSProvider(TTSProviderBase):
                         self._wake_session_waiters()
                     elif res.optional.event == EVENT_SessionFinished:
                         logger.bind(tag=TAG).debug(f"会话结束～～")
-                        self._record_turn_metric("record_tts_generation_complete")
                         self.activate_session = False
                         session_id = response_session_id or active_session_id
+                        self._record_turn_metric(
+                            "record_tts_generation_complete", session_id
+                        )
                         self._active_session_id = None
                         state = self._session_audio_state(session_id)
                         has_audio = bool(

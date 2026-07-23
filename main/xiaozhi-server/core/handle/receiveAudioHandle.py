@@ -52,13 +52,35 @@ async def handleAudioMessage(conn: "ConnectionHandler", audio):
     await conn.asr.receive_audio(conn, audio, have_voice)
 
 
-async def startToChat(conn: "ConnectionHandler", text, turn_context=None):
+async def startToChat(
+    conn: "ConnectionHandler", text, turn_context=None, turn_id=None
+):
     """Handle recognized user text.
 
     Returns True when the text should be treated as an accepted user turn.
     Returns False when overlap speech is classified as continue/echo and should
     not be persisted as a standalone chat-history turn.
     """
+    def submit_chat(chat_text):
+        if turn_id is not None:
+            return conn.executor.submit(
+                conn.chat,
+                chat_text,
+                0,
+                True,
+                turn_context,
+                turn_id,
+            )
+        if turn_context is not None:
+            return conn.executor.submit(
+                conn.chat,
+                chat_text,
+                0,
+                True,
+                turn_context,
+            )
+        return conn.executor.submit(conn.chat, chat_text)
+
     enrollment = getattr(conn, "voiceprint_enrollment", None)
     if enrollment is not None and enrollment.status.active:
         conn.logger.bind(tag=TAG).info("声纹采集模式忽略普通对话文本，跳过语义/LLM")
@@ -155,16 +177,7 @@ async def startToChat(conn: "ConnectionHandler", text, turn_context=None):
             with conn._abort_lock:
                 conn.client_abort = False
             try:
-                if turn_context is None:
-                    future = conn.executor.submit(conn.chat, actual_text)
-                else:
-                    future = conn.executor.submit(
-                        conn.chat,
-                        actual_text,
-                        0,
-                        True,
-                        turn_context,
-                    )
+                future = submit_chat(actual_text)
                 await asyncio.wrap_future(future)
             except Exception as error:
                 appended = meeting.record_pending_turn()
@@ -211,16 +224,7 @@ async def startToChat(conn: "ConnectionHandler", text, turn_context=None):
             if not handled_by_semantic and getattr(conn, "semantic_center", None):
                 with conn._abort_lock:
                     conn.client_abort = False
-                if turn_context is None:
-                    conn.executor.submit(conn.chat, interruption_text)
-                else:
-                    conn.executor.submit(
-                        conn.chat,
-                        interruption_text,
-                        0,
-                        True,
-                        turn_context,
-                    )
+                submit_chat(interruption_text)
             return True
         classifier = SemanticInterruptionClassifier()
         classification = await classifier.classify(
@@ -289,16 +293,7 @@ async def startToChat(conn: "ConnectionHandler", text, turn_context=None):
     with conn._abort_lock:
         conn.client_abort = False
 
-    if turn_context is None:
-        future = conn.executor.submit(conn.chat, actual_text)
-    else:
-        future = conn.executor.submit(
-            conn.chat,
-            actual_text,
-            0,
-            True,
-            turn_context,
-        )
+    future = submit_chat(actual_text)
     future.add_done_callback(lambda f: conn.logger.bind(tag=__name__).error(f"chat() failed: {f.exception()}") if f.exception() else None)
     return True
 

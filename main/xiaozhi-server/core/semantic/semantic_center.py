@@ -188,6 +188,9 @@ class SemanticCenter:
             return
         conn.client_abort = False
         conn.sentence_id = str(uuid.uuid4().hex)
+        turn_metrics = getattr(conn, "turn_metrics", None)
+        if turn_metrics is not None:
+            turn_metrics.bind_sentence(conn.sentence_id)
         conn.tts.store_tts_text(conn.sentence_id, text)
         conn.tts.tts_text_queue.put(
             TTSMessageDTO(

@@ -1325,9 +1325,18 @@ class ConnectionHandler:
                 f"系统提示词工具索引已同步: {tool_names}"
             )
 
-    def chat(self, query, depth=0, allow_tools=True, turn_context=None):
+    def chat(
+        self,
+        query,
+        depth=0,
+        allow_tools=True,
+        turn_context=None,
+        turn_id=None,
+    ):
         if depth == 0:
-            self.turn_metrics.ensure_text_turn()
+            turn_id = self.turn_metrics.ensure_text_turn(turn_id)
+        elif turn_id is None:
+            turn_id = self.turn_metrics.ensure_text_turn()
         chat_started_at = time.monotonic()
         current_abort_generation = self.abort_generation
         meeting = getattr(self, "meeting_minutes", None)
@@ -1345,6 +1354,7 @@ class ConnectionHandler:
         if depth == 0:
             current_sentence_id = str(uuid.uuid4().hex)
             self.sentence_id = current_sentence_id  # 更新共享属性
+            self.turn_metrics.bind_sentence(current_sentence_id, turn_id)
             self.dialogue.put(
                 Message(role="user", content=query, turn_context=turn_context)
             )
@@ -1475,6 +1485,7 @@ class ConnectionHandler:
                 depth,
                 dialogue=llm_dialogue,
                 functions=functions,
+                turn_id=turn_id,
             )
             self.logger.bind(tag=TAG).info(
                 f"LLM请求已发起 | depth={depth} | tools_enabled={tools_enabled} | "
@@ -1509,7 +1520,9 @@ class ConnectionHandler:
                     self.session_telemetry.metrics.record_llm_first_chunk(
                         first_llm_chunk_at - llm_started_at
                     )
-                    self.turn_metrics.record_llm_first_chunk(depth=depth)
+                    self.turn_metrics.record_llm_first_chunk(
+                        depth=depth, turn_id=turn_id
+                    )
                     self.logger.bind(tag=TAG).info(
                         f"LLM首个响应分片 | depth={depth} | "
                         f"elapsed={first_llm_chunk_at - llm_started_at:.3f}s"
@@ -1636,6 +1649,7 @@ class ConnectionHandler:
             tool_call_flag,
             len(tool_calls_list),
             depth=depth,
+            turn_id=turn_id,
         )
         self.logger.bind(tag=TAG).info(
             f"LLM响应流完成 | depth={depth} | elapsed={time.monotonic() - llm_started_at:.3f}s | "
@@ -1812,6 +1826,7 @@ class ConnectionHandler:
                             action=action_name,
                             success=True,
                             depth=depth,
+                            turn_id=turn_id,
                         )
                         tool_results.append((result, tool_call_data))
                         # 使用公共方法上报工具调用结果
@@ -1825,6 +1840,7 @@ class ConnectionHandler:
                             action="ERROR",
                             success=False,
                             depth=depth,
+                            turn_id=turn_id,
                         )
                         self.logger.bind(tag=TAG).error(
                             f"工具调用超时或异常: {tool_call_data['name']}, 错误: {e}"
@@ -1846,6 +1862,7 @@ class ConnectionHandler:
                         sentence_id=current_sentence_id,
                         abort_generation=current_abort_generation,
                         suppress_tts=meeting_tool_turn,
+                        turn_id=turn_id,
                     )
 
         if meeting_tool_turn:
@@ -2040,6 +2057,7 @@ class ConnectionHandler:
         sentence_id=None,
         abort_generation=None,
         suppress_tts=False,
+        turn_id=None,
     ):
         if abort_generation is None:
             abort_generation = self.abort_generation
@@ -2107,7 +2125,15 @@ class ConnectionHandler:
             self._build_tool_call_messages(need_llm_tools)
 
             if not is_aborted():
-                self.chat(None, depth=depth + 1, allow_tools=True)
+                if turn_id is None:
+                    self.chat(None, depth=depth + 1, allow_tools=True)
+                else:
+                    self.chat(
+                        None,
+                        depth=depth + 1,
+                        allow_tools=True,
+                        turn_id=turn_id,
+                    )
 
     def _report_worker(self):
         self.report_manager._report_worker(self)

@@ -18,6 +18,12 @@ from core.providers.tts.dto.dto import TTSMessageDTO, SentenceType
 TAG = __name__
 
 
+def _bind_current_sentence_metrics(conn):
+    turn_metrics = getattr(conn, "turn_metrics", None)
+    if turn_metrics is not None:
+        turn_metrics.bind_sentence(getattr(conn, "sentence_id", None))
+
+
 async def handle_user_intent(conn: "ConnectionHandler", text, turn_context=None):
     text = apply_correct_words(conn, text)
     # 预处理输入文本，处理可能的JSON格式
@@ -57,6 +63,7 @@ async def handle_user_intent(conn: "ConnectionHandler", text, turn_context=None)
             ensure_ascii=False,
         )
         conn.sentence_id = str(uuid.uuid4().hex)
+        _bind_current_sentence_metrics(conn)
         return await process_intent_result(
             conn,
             intent_result,
@@ -76,6 +83,7 @@ async def handle_user_intent(conn: "ConnectionHandler", text, turn_context=None)
             ensure_ascii=False,
         )
         conn.sentence_id = str(uuid.uuid4().hex)
+        _bind_current_sentence_metrics(conn)
         return await process_intent_result(
             conn,
             intent_result,
@@ -92,6 +100,7 @@ async def handle_user_intent(conn: "ConnectionHandler", text, turn_context=None)
         return False
     # 会话开始时生成sentence_id
     conn.sentence_id = str(uuid.uuid4().hex)
+    _bind_current_sentence_metrics(conn)
     # 处理各种意图
     return await process_intent_result(
         conn,

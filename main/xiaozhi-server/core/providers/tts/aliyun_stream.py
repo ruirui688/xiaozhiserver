@@ -235,6 +235,7 @@ class TTSProvider(TTSProviderBase):
                 if message.sentence_type == SentenceType.FIRST:
                     # 重置流式处理状态
                     self.reset_stream_state()
+                    self.current_sentence_id = message.sentence_id
                     # 初始化参数
                     try:
                         logger.bind(tag=TAG).debug("开始启动TTS会话...")
@@ -283,7 +284,9 @@ class TTSProvider(TTSProviderBase):
                             loop=self.conn.loop,
                         )
                         future.result(timeout=self.tts_timeout)
-                        self._record_turn_metric("record_tts_generation_complete")
+                        self._record_turn_metric(
+                            "record_tts_generation_complete", message.sentence_id
+                        )
                     except Exception as e:
                         logger.bind(tag=TAG).error(f"结束TTS会话失败: {str(e)}")
                         continue
@@ -448,19 +451,31 @@ class TTSProvider(TTSProviderBase):
                             if event_name == "SynthesisStarted":
                                 logger.bind(tag=TAG).debug("TTS合成已启动")
                                 self.tts_audio_queue.put(
-                                    (SentenceType.FIRST, [], None)
+                                    (
+                                        SentenceType.FIRST,
+                                        [],
+                                        None,
+                                        self.current_sentence_id,
+                                    )
                                 )
                             elif event_name == "SentenceEnd":
                                 # 发送缓存的数据
-                                tts_text = self.get_tts_text(self.conn.sentence_id)
+                                tts_text = self.get_tts_text(
+                                    self.current_sentence_id
+                                )
                                 if tts_text:
                                     logger.bind(tag=TAG).info(
                                         f"句子语音生成成功： {tts_text}"
                                     )
                                     self.tts_audio_queue.put(
-                                        (SentenceType.FIRST, [], tts_text)
+                                        (
+                                            SentenceType.FIRST,
+                                            [],
+                                            tts_text,
+                                            self.current_sentence_id,
+                                        )
                                     )
-                                    self.clear_tts_text(self.conn.sentence_id)
+                                    self.clear_tts_text(self.current_sentence_id)
                             elif event_name == "SynthesisCompleted":
                                 logger.bind(tag=TAG).debug(f"会话结束～～")
                                 self.activate_session = False

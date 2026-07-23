@@ -8,6 +8,9 @@ TAG = __name__
 
 async def handleAbortMessage(conn: "ConnectionHandler"):
     conn.logger.bind(tag=TAG).info("Abort message received")
+    turn_metrics = getattr(conn, "turn_metrics", None)
+    if turn_metrics is not None:
+        turn_metrics.discard_sentence(getattr(conn, "sentence_id", None))
     # 设置成打断状态，会自动打断llm、tts任务
     conn.close_after_chat = False
     with conn._abort_lock:

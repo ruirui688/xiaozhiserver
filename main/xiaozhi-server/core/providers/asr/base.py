@@ -111,7 +111,9 @@ class ASRProviderBase(ABC):
                     conn.turn_metrics.discard_vad_segment()
                     return
 
-            conn.turn_metrics.begin_turn(asr_audio_task, conn.audio_format)
+            turn_id = conn.turn_metrics.begin_turn(
+                asr_audio_task, conn.audio_format
+            )
 
             wav_data = None
             if conn.voiceprint_provider is not None:
@@ -153,6 +155,7 @@ class ASRProviderBase(ABC):
                 asr_elapsed_ms,
                 not isinstance(asr_result, Exception),
                 len(str(raw_text or "")),
+                turn_id=turn_id,
             )
 
             if voiceprint_task is not None:
@@ -179,6 +182,7 @@ class ASRProviderBase(ABC):
                 speaker_name,
                 speaker_id,
                 speaker_score,
+                turn_id=turn_id,
             )
 
             # 判断 ASR 结果类型
@@ -244,8 +248,9 @@ class ASRProviderBase(ABC):
                     conn,
                     enhanced_text,
                     turn_context=turn_context,
+                    turn_id=turn_id,
                 )
-                conn.turn_metrics.record_routing(accepted)
+                conn.turn_metrics.record_routing(accepted, turn_id=turn_id)
                 if accepted:
                     enqueue_asr_report(
                         conn,
@@ -254,10 +259,12 @@ class ASRProviderBase(ABC):
                             turn_context,
                         ),
                         audio_snapshot,
-                        metrics=conn.turn_metrics.build_user_metrics(),
+                        metrics=conn.turn_metrics.build_user_metrics(turn_id),
                     )
+                else:
+                    conn.turn_metrics.discard_active_turn(turn_id)
             else:
-                conn.turn_metrics.discard_active_turn()
+                conn.turn_metrics.discard_active_turn(turn_id)
         except Exception as e:
             logger.bind(tag=TAG).error(f"处理语音停止失败: {e}")
             import traceback

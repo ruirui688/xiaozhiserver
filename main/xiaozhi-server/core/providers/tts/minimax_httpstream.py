@@ -100,6 +100,7 @@ class TTSProvider(TTSProviderBase):
                 message = self.tts_text_queue.get(timeout=1)
                 if message.sentence_type == SentenceType.FIRST:
                     # 初始化参数
+                    self.current_sentence_id = message.sentence_id
                     self.tts_stop_request = False
                     self.processed_chars = 0
                     self.tts_text_buff = []
@@ -120,7 +121,9 @@ class TTSProvider(TTSProviderBase):
                 if message.sentence_type == SentenceType.LAST:
                     # 处理剩余的文本
                     self._process_remaining_text_stream(True)
-                    self._record_turn_metric("record_tts_generation_complete")
+                    self._record_turn_metric(
+                        "record_tts_generation_complete", message.sentence_id
+                    )
 
             except queue.Empty:
                 continue
@@ -148,7 +151,9 @@ class TTSProvider(TTSProviderBase):
 
     def to_tts_single_stream(self, text, is_last=False):
         try:
-            self._record_turn_metric("record_tts_start", self.conn.sentence_id)
+            self._record_turn_metric(
+                "record_tts_start", self.current_sentence_id
+            )
             max_repeat_time = 5
             original_text = text
             text = MarkdownCleaner.clean_markdown(text)
@@ -210,11 +215,15 @@ class TTSProvider(TTSProviderBase):
                         logger.bind(tag=TAG).error(
                             f"TTS请求失败: {resp.status}, {await resp.text()}"
                         )
-                        self.tts_audio_queue.put((SentenceType.LAST, [], None))
+                        self.tts_audio_queue.put(
+                            (SentenceType.LAST, [], None, self.current_sentence_id)
+                        )
                         return
 
                     self.pcm_buffer.clear()
-                    self.tts_audio_queue.put((SentenceType.FIRST, [], text))
+                    self.tts_audio_queue.put(
+                        (SentenceType.FIRST, [], text, self.current_sentence_id)
+                    )
 
                     # 处理音频流数据
                     buffer = b""
@@ -248,7 +257,14 @@ class TTSProvider(TTSProviderBase):
                                     logger.bind(tag=TAG).error(
                                         f"TTS请求失败, 错误码:{status_code}, 错误消息:{status_msg}"
                                     )
-                                    self.tts_audio_queue.put((SentenceType.LAST, [], None))
+                                    self.tts_audio_queue.put(
+                                        (
+                                            SentenceType.LAST,
+                                            [],
+                                            None,
+                                            self.current_sentence_id,
+                                        )
+                                    )
                                     return
 
                                 status = data.get("data", {}).get("status", 1)
@@ -286,7 +302,9 @@ class TTSProvider(TTSProviderBase):
 
         except Exception as e:
             logger.bind(tag=TAG).error(f"TTS请求异常: {e}")
-            self.tts_audio_queue.put((SentenceType.LAST, [], None))
+            self.tts_audio_queue.put(
+                (SentenceType.LAST, [], None, self.current_sentence_id)
+            )
 
     async def close(self):
         """资源清理"""

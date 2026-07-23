@@ -135,7 +135,8 @@ def test_tts_trace_separates_first_audio_generation_and_report_ready(monkeypatch
     )
 
     metrics = TurnMetrics()
-    metrics.ensure_text_turn()
+    turn_id = metrics.ensure_text_turn()
+    metrics.bind_sentence("sentence-1", turn_id)
     metrics.record_tts_start("sentence-1")
     current["monotonic"] = 200.191
     metrics.record_tts_audio_frame(20)
@@ -157,3 +158,83 @@ def test_tts_trace_separates_first_audio_generation_and_report_ready(monkeypatch
     assert delivery["boundary"] == "server_websocket_send_complete"
     assert delivery["from_first_audio_ms"] == 3056
     assert delivery["device_playback_confirmed"] is False
+
+
+def test_late_previous_tts_completion_does_not_clear_current_turn_metrics():
+    metrics = TurnMetrics()
+
+    previous_turn_id = metrics.ensure_text_turn()
+    metrics.bind_sentence("sentence-previous", previous_turn_id)
+    metrics.record_llm_started(False, 0, turn_id=previous_turn_id)
+    metrics.record_llm_complete(
+        "上一轮回复", None, False, 0, depth=0, turn_id=previous_turn_id
+    )
+    metrics.record_tts_start("sentence-previous")
+    metrics.record_tts_audio_frame(20, "sentence-previous")
+
+    current_turn_id = metrics.begin_turn([b"x"] * 10, "opus")
+    metrics.record_asr(3, True, 5, turn_id=current_turn_id)
+    metrics.bind_sentence("sentence-current", current_turn_id)
+    metrics.record_llm_started(False, 0, turn_id=current_turn_id)
+    metrics.record_llm_complete(
+        "当前轮回复", None, False, 0, depth=0, turn_id=current_turn_id
+    )
+    metrics.record_tts_start("sentence-current")
+    metrics.record_tts_audio_frame(21, "sentence-current")
+
+    metrics.record_tts_generation_complete("sentence-previous")
+    metrics.record_audio_delivery_complete("sentence-previous")
+    previous_payload = metrics.build_assistant_metrics(
+        "上一轮回复", sentence_id="sentence-previous"
+    )
+
+    metrics.record_tts_generation_complete("sentence-current")
+    metrics.record_audio_delivery_complete("sentence-current")
+    current_payload = metrics.build_assistant_metrics(
+        "当前轮回复", sentence_id="sentence-current"
+    )
+
+    assert previous_payload["turn_id"] == previous_turn_id
+    assert current_payload["turn_id"] == current_turn_id
+    assert [step["type"] for step in previous_payload["trace"]["steps"]] == [
+        "llm",
+        "tts",
+        "audio_delivery",
+    ]
+    assert [step["type"] for step in current_payload["trace"]["steps"]] == [
+        "llm",
+        "tts",
+        "audio_delivery",
+    ]
+    assert current_payload["trace"]["totals"]["llm_call_count"] == 1
+
+
+def test_discarded_sentence_late_tts_events_do_not_attach_to_new_turn():
+    metrics = TurnMetrics()
+    previous_turn_id = metrics.ensure_text_turn()
+    metrics.bind_sentence("sentence-previous", previous_turn_id)
+    metrics.discard_sentence("sentence-previous")
+
+    current_turn_id = metrics.begin_turn([b"x"], "opus")
+    metrics.bind_sentence("sentence-current", current_turn_id)
+    metrics.record_tts_start("sentence-previous")
+    metrics.record_audio_delivery_complete("sentence-previous")
+
+    current_payload = metrics.build_user_metrics(current_turn_id)
+    assert current_payload["trace"]["steps"] == []
+
+
+def test_streaming_asr_partial_is_kept_for_next_turn_while_previous_turn_pending():
+    metrics = TurnMetrics()
+    previous_turn_id = metrics.ensure_text_turn()
+    metrics.bind_sentence("sentence-previous", previous_turn_id)
+
+    metrics.record_vad_frame(True, 1, 20)
+    metrics.record_asr_first_text(2)
+    current_turn_id = metrics.begin_turn([b"x"] * 2, "opus")
+    metrics.record_asr(3, True, 4, turn_id=current_turn_id)
+
+    previous_payload = metrics.build_user_metrics(previous_turn_id)
+    current_payload = metrics.build_user_metrics(current_turn_id)
+    assert "asr" not in previous_payload["stages"]
+    assert current_payload["stages"]["asr"]["first_text_length"] == 2

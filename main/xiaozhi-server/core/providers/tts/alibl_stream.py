@@ -126,6 +126,7 @@ class TTSProvider(TTSProviderBase):
                 if message.sentence_type == SentenceType.FIRST:
                     # 重置流式处理状态
                     self.reset_stream_state()
+                    self.current_sentence_id = message.sentence_id
                     # 初始化会话
                     try:
                         if not getattr(self.conn, "sentence_id", None): 
@@ -134,7 +135,7 @@ class TTSProvider(TTSProviderBase):
 
                         logger.bind(tag=TAG).debug("开始启动TTS会话...")
                         future = asyncio.run_coroutine_threadsafe(
-                            self.start_session(self.conn.sentence_id),
+                            self.start_session(message.sentence_id),
                             loop=self.conn.loop,
                         )
                         future.result(timeout=self.tts_timeout)
@@ -174,11 +175,13 @@ class TTSProvider(TTSProviderBase):
                     try:
                         logger.bind(tag=TAG).debug("开始结束TTS会话...")
                         future = asyncio.run_coroutine_threadsafe(
-                            self.finish_session(self.conn.sentence_id),
+                            self.finish_session(message.sentence_id),
                             loop=self.conn.loop,
                         )
                         future.result()
-                        self._record_turn_metric("record_tts_generation_complete")
+                        self._record_turn_metric(
+                            "record_tts_generation_complete", message.sentence_id
+                        )
                     except Exception as e:
                         logger.bind(tag=TAG).error(f"结束TTS会话失败: {str(e)}")
                         continue
@@ -354,18 +357,31 @@ class TTSProvider(TTSProviderBase):
 
                             if event == "task-started":
                                 logger.bind(tag=TAG).debug("TTS任务启动成功~")
-                                self.tts_audio_queue.put((SentenceType.FIRST, [], None))
+                                self.tts_audio_queue.put(
+                                    (
+                                        SentenceType.FIRST,
+                                        [],
+                                        None,
+                                        task_id or self.current_sentence_id,
+                                    )
+                                )
                             elif event == "result-generated":
                                 # 发送缓存的数据
-                                tts_text = self.get_tts_text(self.conn.sentence_id)
+                                sentence_id = task_id or self.current_sentence_id
+                                tts_text = self.get_tts_text(sentence_id)
                                 if tts_text:
                                     logger.bind(tag=TAG).info(
                                         f"句子语音生成成功： {tts_text}"
                                     )
                                     self.tts_audio_queue.put(
-                                        (SentenceType.FIRST, [], tts_text)
+                                        (
+                                            SentenceType.FIRST,
+                                            [],
+                                            tts_text,
+                                            sentence_id,
+                                        )
                                     )
-                                    self.clear_tts_text(self.conn.sentence_id)
+                                    self.clear_tts_text(sentence_id)
                             elif event == "task-finished":
                                 logger.bind(tag=TAG).debug("TTS任务完成~")
                                 self.activate_session = False

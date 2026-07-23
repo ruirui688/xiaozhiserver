@@ -170,6 +170,7 @@ class TTSProvider(TTSProviderBase):
                 if message.sentence_type == SentenceType.FIRST:
                     # 重置流式处理状态
                     self.reset_stream_state()
+                    self.current_sentence_id = message.sentence_id
                     # 重置序列号
                     self.text_seq = 0
                 # 增加序列号
@@ -184,7 +185,7 @@ class TTSProvider(TTSProviderBase):
 
                         logger.bind(tag=TAG).debug("开始启动TTS会话...")
                         future = asyncio.run_coroutine_threadsafe(
-                            self.start_session(self.conn.sentence_id),
+                            self.start_session(message.sentence_id),
                             loop=self.conn.loop,
                         )
                         future.result(timeout=self.tts_timeout)
@@ -228,11 +229,13 @@ class TTSProvider(TTSProviderBase):
                     try:
                         logger.bind(tag=TAG).debug("开始结束TTS会话...")
                         future = asyncio.run_coroutine_threadsafe(
-                            self.finish_session(self.conn.sentence_id),
+                            self.finish_session(message.sentence_id),
                             loop=self.conn.loop,
                         )
                         future.result(timeout=self.tts_timeout)
-                        self._record_turn_metric("record_tts_generation_complete")
+                        self._record_turn_metric(
+                            "record_tts_generation_complete", message.sentence_id
+                        )
                     except Exception as e:
                         logger.bind(tag=TAG).error(f"结束TTS会话失败: {str(e)}")
                         continue
@@ -373,7 +376,12 @@ class TTSProvider(TTSProviderBase):
                                 if status == 0:
                                     logger.bind(tag=TAG).debug("TTS合成已启动")
                                     self.tts_audio_queue.put(
-                                        (SentenceType.FIRST, [], None)
+                                        (
+                                            SentenceType.FIRST,
+                                            [],
+                                            None,
+                                            self.current_sentence_id,
+                                        )
                                     )
                                 elif status == 2:
                                     logger.bind(tag=TAG).debug("收到结束状态的音频数据，TTS合成完成")
@@ -381,15 +389,24 @@ class TTSProvider(TTSProviderBase):
                                     self._process_before_stop_play_files()
                                     break
                                 else:
-                                    tts_text = self.get_tts_text(self.conn.sentence_id)
+                                    tts_text = self.get_tts_text(
+                                        self.current_sentence_id
+                                    )
                                     if tts_text:
                                         logger.bind(tag=TAG).info(
                                             f"句子语音生成成功： {tts_text}"
                                         )
                                         self.tts_audio_queue.put(
-                                            (SentenceType.FIRST, [], tts_text)
+                                            (
+                                                SentenceType.FIRST,
+                                                [],
+                                                tts_text,
+                                                self.current_sentence_id,
+                                            )
                                         )
-                                        self.clear_tts_text(self.conn.sentence_id)
+                                        self.clear_tts_text(
+                                            self.current_sentence_id
+                                        )
                                     try:
                                         audio_bytes = base64.b64decode(audio_data)
                                         self.opus_encoder.encode_pcm_to_opus_stream(

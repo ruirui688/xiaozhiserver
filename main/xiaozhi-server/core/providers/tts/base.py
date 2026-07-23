@@ -145,7 +145,11 @@ class TTSProviderBase(ABC):
         logger.bind(tag=TAG).debug(f"推送数据到队列里面帧数～～ {len(opus_data)}")
         try:
             if self.conn is not None:
-                self._record_turn_metric("record_tts_audio_frame", len(opus_data))
+                self._record_turn_metric(
+                    "record_tts_audio_frame",
+                    len(opus_data),
+                    getattr(self, "current_sentence_id", None),
+                )
         except Exception as e:
             logger.bind(tag=TAG).debug(f"记录TTS音频指标失败: {e}")
         self.tts_audio_queue.put((
@@ -459,7 +463,9 @@ class TTSProviderBase(ABC):
                         )
                 if message.sentence_type == SentenceType.LAST:
                     self._process_remaining_text_stream(opus_handler=self.handle_opus)
-                    self._record_turn_metric("record_tts_generation_complete")
+                    self._record_turn_metric(
+                        "record_tts_generation_complete", message.sentence_id
+                    )
                     self.tts_audio_queue.put(
                         (message.sentence_type, [], message.content_detail, message.sentence_id)
                     )
@@ -567,13 +573,16 @@ class TTSProviderBase(ABC):
                     raise
 
                 if sentence_type == SentenceType.LAST:
-                    self._record_turn_metric("record_audio_delivery_complete")
+                    self._record_turn_metric(
+                        "record_audio_delivery_complete", sentence_id
+                    )
 
                 if pending_report is not None:
                     report_text, report_audio, final_report = pending_report
                     metrics = (
                         self.conn.turn_metrics.build_assistant_metrics(
-                            self.get_tts_text(sentence_id) or report_text
+                            self.get_tts_text(sentence_id) or report_text,
+                            sentence_id=sentence_id,
                         )
                         if final_report
                         else None
