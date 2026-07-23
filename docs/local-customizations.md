@@ -492,6 +492,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/manager-api/src/main/java/xiaozhi/modules/config/service/impl/ConfigServiceImpl.java
   - main/manager-api/src/main/resources/db/changelog/202607131430.sql
   - main/xiaozhi-server/core/utils/voiceprint_provider.py
+  - main/xiaozhi-server/core/utils/voiceprint_runtime.py
   - main/xiaozhi-server/core/providers/asr/base.py
   - main/xiaozhi-server/core/providers/asr/doubao_stream.py
   - main/xiaozhi-server/core/handle/receiveAudioHandle.py
@@ -505,7 +506,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/manager-mobile/src/pages/voiceprint/index.vue
   - docs/models/voiceprint-integration.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改声纹注册/识别/删除、配置下发、音频状态重置、ASR并行识别、聊天记录展示、长期记忆事件/召回、对话身份注入或声纹页面，必须保留 `user_id=agentId` 的可信服务端派生、每智能体最多5条的后端与远程双重校验、`remote_user_id=default` 历史兼容、Token仅通过Bearer Header传输、私有/回环/链路本地目标拦截、结构化 speakers 配置、“VAD句末整段语音WAV与ASR并发识别、`server.voiceprint_sample_seconds` 不再驱动截断采样、无绑定声纹零调用”、可信 `speaker_id` 贯穿聊天记录与记忆、private 事实不跨声纹召回、shared 由主模型明确选择，以及“每个成功识别轮次都在当前 user JSON 和 system 上下文保留身份，但不得机械称呼姓名或主动播报识别过程”的行为。前端上限提示不能替代后端校验；删除远程失败时不得静默留下占用额度的孤儿声纹；日志不得输出Token、Authorization或带密钥URL。
+官方同步时的处理规则：如果官方修改声纹注册/识别/删除、配置下发、音频状态重置、ASR并行识别、聊天记录展示、长期记忆事件/召回、对话身份注入或声纹页面，必须保留 `user_id=agentId` 的可信服务端派生、每智能体最多5条的后端与远程双重校验、`remote_user_id=default` 历史兼容、Token仅通过Bearer Header传输、私有/回环/链路本地目标拦截、结构化 speakers 配置、“VAD句末整段语音WAV与ASR并发识别、`server.voiceprint_sample_seconds` 不再驱动截断采样、无绑定声纹零调用”、设备采集期间连续静音至少2秒才完成、注册事务提交后热刷新在线连接 provider、可信 `speaker_id` 贯穿聊天记录与记忆、private 事实不跨声纹召回、shared 由主模型明确选择，以及“每个成功识别轮次都在当前 user JSON 和 system 上下文保留身份，但不得机械称呼姓名或主动播报识别过程”的行为。前端上限提示不能替代后端校验；删除远程失败时不得静默留下占用额度的孤儿声纹；日志不得输出Token、Authorization或带密钥URL。
 ```
 
 ## 27. 语义控制中枢门控的会议模式与完整纪要

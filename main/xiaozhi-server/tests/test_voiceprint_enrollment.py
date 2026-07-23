@@ -1,6 +1,7 @@
 import asyncio
 import io
 import json
+import time
 import wave
 from types import SimpleNamespace
 
@@ -9,10 +10,13 @@ from config import settings
 settings.config_file_valid = True
 
 import core.utils.voiceprint_enrollment as enrollment_module
+import core.utils.voiceprint_runtime as voiceprint_runtime_module
 from core.api.voiceprint_enrollment_handler import VoiceprintEnrollmentHandler
 from core.handle.receiveAudioHandle import startToChat
 from core.providers.asr.base import ASRProviderBase
+from core.providers.vad.silero import VADProvider
 from core.utils.voiceprint_enrollment import VoiceprintEnrollmentCollector
+from core.utils.voiceprint_runtime import refresh_voiceprint_provider
 
 
 class _Logger:
@@ -109,6 +113,49 @@ async def _collector_rejects_short_sample(monkeypatch):
 
 def test_voiceprint_enrollment_rejects_short_sample(monkeypatch):
     asyncio.run(_collector_rejects_short_sample(monkeypatch))
+
+
+def test_voiceprint_enrollment_requires_at_least_two_seconds_of_silence():
+    collector = VoiceprintEnrollmentCollector()
+
+    status = collector.start({"completionSilenceSeconds": 0.2})
+
+    assert status["completionSilenceSeconds"] == 2.0
+
+
+def test_silero_vad_uses_enrollment_specific_silence_threshold():
+    provider = object.__new__(VADProvider)
+    provider.silence_threshold_ms = 200
+    collector = VoiceprintEnrollmentCollector()
+    collector.start({"completionSilenceSeconds": 2.0})
+    conn = _conn(voiceprint_enrollment=collector)
+
+    assert provider._effective_silence_threshold_ms(conn) == 2000
+
+    collector.stop()
+    assert provider._effective_silence_threshold_ms(conn) == 200
+
+
+async def _collector_rejects_sample_before_two_seconds_of_silence(monkeypatch):
+    calls = []
+
+    async def fake_report(**kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setattr(enrollment_module, "report_chat_history", fake_report)
+    collector = VoiceprintEnrollmentCollector()
+    collector.start({"targetSamples": 1, "minDurationSeconds": 0.5})
+    conn = _conn(vad_last_voice_time=time.time() * 1000 - 1000)
+
+    assert await collector.collect_utterance(conn, [b"\x01\x02" * 16000], "pcm")
+    assert calls == []
+    assert collector.status.active is True
+    assert collector.status.sample_count == 0
+    assert collector.status.samples[0].error == "completion_silence_too_short"
+
+
+def test_collector_rejects_sample_before_two_seconds_of_silence(monkeypatch):
+    asyncio.run(_collector_rejects_sample_before_two_seconds_of_silence(monkeypatch))
 
 
 async def _collector_notifies_device_experience_events(monkeypatch):
@@ -249,3 +296,83 @@ def test_voiceprint_enrollment_handler_finishes_runtime_connection(monkeypatch):
     assert payload["success"] is True
     assert payload["data"]["reason"] == "manual_stop"
     assert calls == ["manual_stop"]
+
+
+async def _refresh_replaces_online_voiceprint_provider(monkeypatch):
+    class _Provider:
+        def __init__(self, config):
+            self.enabled = True
+            self.speaker_map = {item["speaker_id"]: item for item in config["speakers"]}
+            self.closed = False
+
+        async def close(self):
+            self.closed = True
+
+    async def get_agent_models(device_id, client_id, selected_module):
+        assert device_id == "device-a"
+        assert client_id == "client-a"
+        return {
+            "voiceprint": {
+                "url": "https://voiceprint.example.com/voiceprint",
+                "token": "test-token",
+                "user_id": "agent-a",
+                "speakers": [{"speaker_id": "voice-new", "name": "用户A"}],
+            }
+        }
+
+    monkeypatch.setattr(voiceprint_runtime_module, "get_agent_models", get_agent_models)
+    monkeypatch.setattr(voiceprint_runtime_module, "VoiceprintProvider", _Provider)
+    old_provider = _Provider({"speakers": [{"speaker_id": "voice-old", "name": "旧用户"}]})
+    conn = _conn(
+        read_config_from_api=True,
+        closing=False,
+        headers={"device-id": "device-a", "client-id": "client-a"},
+        config={"agent_id": "agent-a", "selected_module": {}},
+        voiceprint_provider=old_provider,
+    )
+
+    result = await refresh_voiceprint_provider(conn)
+
+    assert result == {"enabled": True, "speakerCount": 1}
+    assert conn.voiceprint_provider is not old_provider
+    assert "voice-new" in conn.voiceprint_provider.speaker_map
+    assert old_provider.closed is True
+
+
+def test_refresh_replaces_online_voiceprint_provider(monkeypatch):
+    asyncio.run(_refresh_replaces_online_voiceprint_provider(monkeypatch))
+
+
+def test_voiceprint_enrollment_handler_refreshes_runtime_provider(monkeypatch):
+    conn = SimpleNamespace()
+
+    async def refresh(_conn):
+        assert _conn is conn
+        return {"enabled": True, "speakerCount": 1}
+
+    monkeypatch.setattr(
+        "core.api.voiceprint_enrollment_handler.get_connection",
+        lambda device_id: conn if device_id == "device-a" else None,
+    )
+    monkeypatch.setattr(
+        "core.api.voiceprint_enrollment_handler.refresh_voiceprint_provider",
+        refresh,
+    )
+    handler = VoiceprintEnrollmentHandler(
+        {
+            "server": {"auth_key": "secret"},
+            "manager-api": {"secret": "manager-secret"},
+        }
+    )
+
+    class _Request:
+        headers = {"Authorization": "Bearer secret"}
+
+        async def json(self):
+            return {"deviceId": "device-a"}
+
+    response = asyncio.run(handler.handle_refresh(_Request()))
+    payload = json.loads(response.text)
+
+    assert response.status == 200
+    assert payload["data"] == {"enabled": True, "speakerCount": 1}

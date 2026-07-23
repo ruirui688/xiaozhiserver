@@ -319,16 +319,18 @@ Authorization: Bearer <server.secret>
   "agentId": "智能体ID",
   "sourceName": "说话人姓名",
   "targetSamples": 1,
-  "minDurationSeconds": 0.5,
+  "minDurationSeconds": 3.0,
   "maxDurationSeconds": 30.0,
+  "completionSilenceSeconds": 2.0,
   "reportEndpoint": "/agent/voice-print/enrollments/{id}/device-samples"
 }
 ```
 
 采集模式 active 时，设备继续按原 WebSocket 协议上传音频。服务端只在 VAD 句末把该段音频转成
 16k 单声道 WAV 并上报到 `manager-api`，不会进入普通 ASR、语义、LLM 或工具调用链路。
-当前设备采集流程只要求朗读 1 段文本：用户点击“开始录音”后朗读屏幕文本，读完保持安静；
-VAD 检测到句末静音后自动上报样本。`manager-web` 轮询到样本落库后自动调用完成接口注册声纹，
+当前设备采集流程只要求朗读 1 段文本：用户点击“开始录音”后朗读屏幕文本，读完持续安静至少 2 秒；
+声纹采集状态会把句末静音下限提高到 2 秒，普通对话仍使用原 VAD 配置。达到连续静音下限后才上报样本。
+`manager-web` 轮询到样本落库后自动调用完成接口注册声纹，
 不再提供人工“停止录音”入口，也不再依赖 `/device/voiceprint/enrollment/stop` 截断当前音频缓冲。
 `startToChat()` 也会兜底检查采集状态，防止流式 ASR 或其他入口漏过采集分支后继续触发普通对话。
 
@@ -362,6 +364,10 @@ VAD 检测到句末静音后自动上报样本。`manager-web` 轮询到样本�
 
 同时，服务端会通过现有 TTS 通道播报 `prompt` 文案。旧固件即使不识别
 `voiceprint_enrollment` JSON，也能听到语音提示；新固件可以识别该事件做屏幕、灯效和按键取消。
+
+注册事务提交后，`manager-api` 会调用受 `server.secret` 保护的
+`POST /device/voiceprint/refresh`。`xiaozhi-server` 为目标在线连接重新拉取运行时配置，先构造并校验
+新的声纹 provider，再原子替换旧 provider；刷新失败不回滚已经成功的注册，设备下次重连仍会读取最新配置。
 
 ## 6. 打断机制（Barge-in）
 

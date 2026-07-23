@@ -55,6 +55,24 @@ class VADProvider(VADProviderBase):
                 except Exception:
                     pass
 
+    def _effective_silence_threshold_ms(self, conn):
+        """Use a stricter end-of-speech threshold only during voiceprint enrollment."""
+        threshold_ms = self.silence_threshold_ms
+        enrollment = getattr(conn, "voiceprint_enrollment", None)
+        status = getattr(enrollment, "status", None)
+        if status is not None and getattr(status, "active", False):
+            required_seconds = getattr(
+                status,
+                "completion_silence_seconds",
+                2.0,
+            )
+            try:
+                required_ms = max(2000, int(float(required_seconds) * 1000))
+            except (TypeError, ValueError):
+                required_ms = 2000
+            threshold_ms = max(threshold_ms, required_ms)
+        return threshold_ms
+
     def is_vad(self, conn, opus_packet):
         # 手动模式：直接返回True，不进行实时VAD检测，所有音频都缓存
         if conn.client_listen_mode == "manual":
@@ -108,7 +126,7 @@ class VADProvider(VADProviderBase):
                 # 如果之前有声音，但本次没有声音，且与上次有声音的时间差已经超过了静默阈值，则认为已经说完一句话
                 if conn.client_have_voice and not client_have_voice:
                     stop_duration = time.time() * 1000 - conn.vad_last_voice_time
-                    if stop_duration >= self.silence_threshold_ms:
+                    if stop_duration >= self._effective_silence_threshold_ms(conn):
                         conn.client_voice_stop = True
                 if client_have_voice:
                     conn.client_have_voice = True

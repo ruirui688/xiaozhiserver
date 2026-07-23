@@ -132,6 +132,14 @@ class SimpleHttpServer:
                             self.voiceprint_enrollment_handler.handle_options,
                         ),
                         web.post(
+                            "/device/voiceprint/refresh",
+                            self.voiceprint_enrollment_handler.handle_refresh,
+                        ),
+                        web.options(
+                            "/device/voiceprint/refresh",
+                            self.voiceprint_enrollment_handler.handle_options,
+                        ),
+                        web.post(
                             "/device/notifications/broadcast",
                             self.device_notification_handler.handle_broadcast,
                         ),

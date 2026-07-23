@@ -13,6 +13,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.MessageSource;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -35,6 +36,7 @@ import xiaozhi.modules.agent.service.AgentChatHistoryService;
 import xiaozhi.modules.agent.service.AgentChatAudioService;
 import xiaozhi.modules.agent.service.AgentVoicePrintService;
 import xiaozhi.modules.sys.service.SysParamsService;
+import xiaozhi.modules.agent.voiceprint.VoiceprintRegisteredEvent;
 
 class AgentVoicePrintEnrollmentServiceImplTest {
     private AgentVoicePrintEnrollmentDao enrollmentDao;
@@ -44,6 +46,7 @@ class AgentVoicePrintEnrollmentServiceImplTest {
     private AgentChatAudioService chatAudioService;
     private SysParamsService sysParamsService;
     private Environment environment;
+    private ApplicationEventPublisher eventPublisher;
     private AgentVoicePrintEnrollmentServiceImpl service;
 
     @BeforeEach
@@ -60,13 +63,15 @@ class AgentVoicePrintEnrollmentServiceImplTest {
         chatAudioService = mock(AgentChatAudioService.class);
         sysParamsService = mock(SysParamsService.class);
         environment = mock(Environment.class);
+        eventPublisher = mock(ApplicationEventPublisher.class);
         service = new AgentVoicePrintEnrollmentServiceImpl(
                 sampleDao,
                 voicePrintService,
                 chatHistoryService,
                 chatAudioService,
                 sysParamsService,
-                environment);
+                environment,
+                eventPublisher);
         ReflectionTestUtils.setField(service, "baseMapper", enrollmentDao);
     }
 
@@ -87,9 +92,12 @@ class AgentVoicePrintEnrollmentServiceImplTest {
 
         ArgumentCaptor<AgentVoicePrintSaveDTO> captor = ArgumentCaptor.forClass(AgentVoicePrintSaveDTO.class);
         verify(voicePrintService).insertAndReturnRegistration(captor.capture());
+        ArgumentCaptor<VoiceprintRegisteredEvent> eventCaptor = ArgumentCaptor.forClass(VoiceprintRegisteredEvent.class);
+        verify(eventPublisher).publishEvent(eventCaptor.capture());
         assertEquals("agent-a", captor.getValue().getAgentId());
         assertEquals("用户A", captor.getValue().getSourceName());
         assertEquals(List.of("audio-a", "audio-b"), captor.getValue().getAudioIds());
+        assertEquals("voice-a", eventCaptor.getValue().voicePrintId());
         assertEquals(true, result.getRegistrationResult().get("success"));
     }
 

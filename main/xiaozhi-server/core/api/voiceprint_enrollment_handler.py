@@ -4,6 +4,7 @@ from aiohttp import web
 
 from core.api.base_handler import BaseHandler
 from core.device_runtime_registry import get_connection, registered_keys
+from core.utils.voiceprint_runtime import refresh_voiceprint_provider
 
 TAG = __name__
 
@@ -84,3 +85,32 @@ class VoiceprintEnrollmentHandler(BaseHandler):
             {"success": True, "data": conn.get_voiceprint_enrollment_status()},
             request=request,
         )
+
+    async def handle_refresh(self, request):
+        if not self._is_authorized(request):
+            return self._json_response({"success": False, "message": "未授权"}, 401, request)
+        try:
+            body = await request.json()
+        except Exception:
+            return self._json_response({"success": False, "message": "请求体不是有效JSON"}, 400, request)
+
+        device_id = body.get("deviceId") or body.get("device-id")
+        if not device_id:
+            return self._json_response({"success": False, "message": "缺少deviceId"}, 400, request)
+        conn = self._connection(device_id)
+        if conn is None:
+            return self._json_response({"success": False, "message": "设备未连接到当前运行时"}, 404, request)
+        try:
+            result = await refresh_voiceprint_provider(conn)
+        except Exception as error:
+            self.logger.bind(tag=TAG).warning(
+                "在线声纹配置刷新失败: deviceId={}, errorType={}",
+                device_id,
+                type(error).__name__,
+            )
+            return self._json_response(
+                {"success": False, "message": "在线声纹配置刷新失败"},
+                503,
+                request,
+            )
+        return self._json_response({"success": True, "data": result}, request=request)

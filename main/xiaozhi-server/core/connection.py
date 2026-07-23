@@ -2210,7 +2210,7 @@ class ConnectionHandler:
         self.notify_voiceprint_enrollment_event(
             "started",
             status,
-            "声纹注册开始，请朗读屏幕上的文字，读完后保持安静。",
+            "声纹注册开始，请朗读屏幕上的文字，读完后保持安静至少两秒。",
         )
         return status
 

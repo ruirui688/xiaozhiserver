@@ -15,8 +15,9 @@ from config.manage_api_client import (
 )
 
 DEFAULT_VOICEPRINT_SAMPLE_TEXT = (
-    "今天天气不错，我正在用正常音量录入声纹。读完这句话后，我会保持安静，等待系统完成检测。"
+    "今天天气不错，我正在用正常音量录入声纹。读完这句话后，我会保持安静至少两秒，等待系统完成检测。"
 )
+DEFAULT_COMPLETION_SILENCE_SECONDS = 2.0
 
 if TYPE_CHECKING:
     from core.connection import ConnectionHandler
@@ -41,6 +42,7 @@ class VoiceprintEnrollmentStatus:
     introduce: str = ""
     sample_count: int = 0
     target_samples: int = 3
+    completion_silence_seconds: float = DEFAULT_COMPLETION_SILENCE_SECONDS
     prompt_text: str = DEFAULT_VOICEPRINT_SAMPLE_TEXT
     state: str = "idle"
     reason: str = ""
@@ -55,6 +57,7 @@ class VoiceprintEnrollmentStatus:
             "introduce": self.introduce,
             "sampleCount": self.sample_count,
             "targetSamples": self.target_samples,
+            "completionSilenceSeconds": self.completion_silence_seconds,
             "promptText": self.prompt_text,
             "state": self.state,
             "reason": self.reason,
@@ -74,6 +77,7 @@ class VoiceprintEnrollmentCollector:
         self.status = VoiceprintEnrollmentStatus()
         self.min_duration_seconds = 3.0
         self.max_duration_seconds = 30.0
+        self.completion_silence_seconds = DEFAULT_COMPLETION_SILENCE_SECONDS
         self.upload_mode = "chat_history"
         self.report_endpoint = ""
 
@@ -92,6 +96,15 @@ class VoiceprintEnrollmentCollector:
             60.0,
             30.0,
         )
+        # 声纹采集必须比普通对话使用更稳健的句末判定。外部请求即使传入
+        # 更小的值也不能绕过 2 秒连续静音下限。
+        self.completion_silence_seconds = self._bounded_float(
+            options.get("completion_silence_seconds")
+            or options.get("completionSilenceSeconds"),
+            DEFAULT_COMPLETION_SILENCE_SECONDS,
+            10.0,
+            DEFAULT_COMPLETION_SILENCE_SECONDS,
+        )
         self.upload_mode = str(options.get("upload_mode") or options.get("uploadMode") or "chat_history").strip() or "chat_history"
         self.report_endpoint = str(options.get("report_endpoint") or options.get("reportEndpoint") or "").strip()
         self.status = VoiceprintEnrollmentStatus(
@@ -101,6 +114,7 @@ class VoiceprintEnrollmentCollector:
             source_name=str(options.get("source_name") or options.get("sourceName") or "").strip(),
             introduce=str(options.get("introduce") or options.get("description") or "").strip(),
             target_samples=target_samples,
+            completion_silence_seconds=self.completion_silence_seconds,
             prompt_text=str(
                 options.get("prompt_text")
                 or options.get("promptText")
@@ -131,6 +145,26 @@ class VoiceprintEnrollmentCollector:
 
         sample_index = self.status.sample_count + 1
         try:
+            required_silence_ms = int(
+                self.status.completion_silence_seconds * 1000
+            )
+            last_voice_time = float(getattr(conn, "vad_last_voice_time", 0) or 0)
+            silence_ms = time.time() * 1000 - last_voice_time
+            if last_voice_time > 0 and silence_ms < required_silence_ms:
+                self._append_sample(
+                    sample_index,
+                    0,
+                    0,
+                    False,
+                    error="completion_silence_too_short",
+                )
+                self._notify(
+                    conn,
+                    "sample_rejected",
+                    "请在读完后持续保持安静至少两秒。",
+                )
+                return True
+
             wav_data = self._frames_to_wav(audio_frames, audio_format)
             duration_ms = self._wav_duration_ms(wav_data)
             if duration_ms <= 0:

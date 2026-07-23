@@ -7,6 +7,7 @@ import java.util.List;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.core.env.Environment;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -46,6 +47,7 @@ import xiaozhi.modules.agent.service.AgentVoicePrintEnrollmentService;
 import xiaozhi.modules.agent.service.AgentVoicePrintService;
 import xiaozhi.modules.agent.vo.AgentVoicePrintEnrollmentSampleVO;
 import xiaozhi.modules.agent.vo.AgentVoicePrintEnrollmentVO;
+import xiaozhi.modules.agent.voiceprint.VoiceprintRegisteredEvent;
 import xiaozhi.modules.sys.service.SysParamsService;
 
 @Service
@@ -58,7 +60,7 @@ public class AgentVoicePrintEnrollmentServiceImpl
     public static final String STATUS_COMPLETED = "COMPLETED";
     public static final String STATUS_CANCELLED = "CANCELLED";
     private static final String DEFAULT_PROMPT_TEXT =
-            "今天天气不错，我正在用正常音量录入声纹。读完这句话后，我会保持安静，等待系统完成检测。";
+            "今天天气不错，我正在用正常音量录入声纹。读完这句话后，我会保持安静至少两秒，等待系统完成检测。";
 
     private final AgentVoicePrintEnrollmentSampleDao sampleDao;
     private final AgentVoicePrintService agentVoicePrintService;
@@ -66,6 +68,7 @@ public class AgentVoicePrintEnrollmentServiceImpl
     private final AgentChatAudioService agentChatAudioService;
     private final SysParamsService sysParamsService;
     private final Environment environment;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -178,6 +181,8 @@ public class AgentVoicePrintEnrollmentServiceImpl
                 .eq("id", id)
                 .set("status", STATUS_COMPLETED)
                 .set("voice_print_id", voicePrintId));
+        eventPublisher.publishEvent(new VoiceprintRegisteredEvent(
+                entity.getAgentId(), entity.getDeviceId(), voicePrintId));
         AgentVoicePrintEnrollmentVO vo = get(id);
         vo.setRegistrationResult(registrationResult.getRegistrationResult());
         return vo;
@@ -279,8 +284,9 @@ public class AgentVoicePrintEnrollmentServiceImpl
         payload.set("introduce", entity.getIntroduce());
         payload.set("targetSamples", 1);
         payload.set("promptText", DEFAULT_PROMPT_TEXT);
-        payload.set("minDurationSeconds", 0.5);
+        payload.set("minDurationSeconds", 3.0);
         payload.set("maxDurationSeconds", 30.0);
+        payload.set("completionSilenceSeconds", 2.0);
         payload.set("uploadMode", "server");
         payload.set("reportEndpoint", "/agent/voice-print/enrollments/" + entity.getId() + "/device-samples");
 
