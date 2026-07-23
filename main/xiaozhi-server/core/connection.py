@@ -1798,7 +1798,12 @@ class ConnectionHandler:
 
                     # 使用公共方法上报工具调用
                     tool_input = json.loads(tool_call_data.get("arguments") or "{}")
-                    enqueue_tool_report(self, tool_call_data['name'], tool_input)
+                    enqueue_tool_report(
+                        self,
+                        tool_call_data['name'],
+                        tool_input,
+                        turn_id=turn_id,
+                    )
 
                     future = asyncio.run_coroutine_threadsafe(
                         self.func_handler.handle_llm_function_call(
@@ -1832,7 +1837,14 @@ class ConnectionHandler:
                         tool_results.append((result, tool_call_data))
                         # 使用公共方法上报工具调用结果
                         report_result = result.result if result.result else result.response
-                        enqueue_tool_report(self, tool_call_data['name'], tool_input, str(report_result) if report_result else None, report_tool_call=False)
+                        enqueue_tool_report(
+                            self,
+                            tool_call_data['name'],
+                            tool_input,
+                            str(report_result) if report_result else None,
+                            report_tool_call=False,
+                            turn_id=turn_id,
+                        )
 
                     except Exception as e:
                         self.turn_metrics.record_tool_call(
@@ -1852,7 +1864,14 @@ class ConnectionHandler:
                             tool_call_data
                         ))
                         # 上报工具调用错误
-                        enqueue_tool_report(self, tool_call_data['name'], tool_input, str(e), report_tool_call=False)
+                        enqueue_tool_report(
+                            self,
+                            tool_call_data['name'],
+                            tool_input,
+                            str(e),
+                            report_tool_call=False,
+                            turn_id=turn_id,
+                        )
 
                 # 统一处理工具调用结果
                 if tool_results:

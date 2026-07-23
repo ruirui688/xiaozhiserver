@@ -454,6 +454,9 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - SeedTTS2 正常结束必须冲刷不足60ms的Opus尾帧，取消、失败或异常断链必须重置编码器，禁止残留样本跨会话。
   - SeedTTS2 按 sentence_id 维护 FIRST/LAST 状态；正常结束、结束超时、下行超时、WebSocket 断开、SessionFailed 和监听异常都必须走同一幂等收尾。只要已经发布 FIRST，就必须最终发布且只发布一次 LAST；迟到事件不能重复 LAST，残余旧会话事件不能重置当前会话。
   - 设备 TTS 协议层同一 sentence_id 的 start/stop 最多发送一次；主动 abort 已直接发送 stop 时，provider 不得再次补发。
+  - 与官方 upstream/main 一致，STT 后立即发送 `tts:start` 并把回复标记为可打断；这里的 `client_is_speaking` 包含尚未产生首音频的等待阶段，不新增 `response_pending`。真实播放边界由 `_tts_started_at` 单独投影。
+  - STT pending start、真实 FIRST、Abort stop 和迟到 LAST 共用连接级协议去重；迟到旧 LAST 不得停止下一轮 pending 回复。
+  - Abort 保留 interruption 延时链路，并对已有文本的部分助手回复执行一次性收口；聊天消息使用 `turn_id + message_sequence` 还原 user/tool/assistant 顺序，manager-api 的统一排序同时供历史重建和记忆可视化使用。
   - SeedTTS2 默认使用10秒建连、10秒会话启动、30秒会话结束、15秒下行空闲和5秒单次发送预算；线程外层等待必须覆盖内层阶段预算，旧 session_timeout_seconds 不得把结束预算降到30秒以下。
   - 请求头日志按键名屏蔽 Authorization、Proxy-Authorization、Cookie、Set-Cookie、token、api-key、apikey、secret。
   - unregister_connection 只删除仍指向当前关闭对象的键，旧连接不能误删新连接。
@@ -466,6 +469,10 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/xiaozhi-server/core/handle/wakeupHandle.py
   - main/xiaozhi-server/core/handle/helloHandle.py
   - main/xiaozhi-server/core/handle/receiveAudioHandle.py
+  - main/xiaozhi-server/core/handle/abortHandle.py
+  - main/xiaozhi-server/core/utils/turn_metrics.py
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/service/support/AgentChatHistoryOrder.java
+  - main/manager-web/src/components/ChatHistoryDialog.vue
   - main/xiaozhi-server/core/handle/textHandler/listenMessageHandler.py
   - main/xiaozhi-server/core/connection.py
   - main/xiaozhi-server/core/device_runtime_registry.py
@@ -481,7 +488,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 是否允许被官方覆盖：否
 本次发布状态：只修改并验证源码；未构建镜像、未部署、未重启腾讯云生产服务。用户手动发布后才进行真实服务端回归。
 真实外部回归：豆包录音ASR 4/4、流式ASR修复前后5/5、SeedTTS2连续5会话、DeepSeek v4-pro/v4-flash原生与仓库provider均成功；当前provider完整ASR→LLM→TTS链路连续3/3成功，平均约3.753秒。真实凭据只用于进程内测试且未落盘；测试完成后应轮换在会话或截图中暴露过的凭据。
-官方同步时的处理规则：如果官方修改豆包录音/流式 ASR、SeedTTS2、TTS 音频发送、唤醒词处理、欢迎语、连接日志或设备注册表，必须保留异步 HTTP 与总预算超时、流式 WebSocket 分阶段等待保护、本地 VAD 判停发送唯一 LAST、缓存首帧去重、短词识别和按会话身份清理、SeedTTS2 逻辑 `FIRST` 不提前启动上游会话且首段真实 `TEXT/FILE` 只启动一次、空轮 `LAST` 不创建厂商会话、任意非主动打断结束路径在已发设备 `FIRST` 后幂等补发唯一 `LAST`、连接级同轮 start/stop 去重、Opus尾帧冲刷、默认零毫秒首轮音频丢弃、欢迎语显式开启、唤醒词实际检测文本与实际播放回复双向上报、按请求头键名脱敏和对象身份注销校验。不得重新在 async provider 中引入 requests/time.sleep，不得让更短外层超时覆盖会话结束预算，不得把 Authorization、token、API key、Cookie 或 secret 写入日志；调整 ASR 超时、TTS 会话启动或编码边界和唤醒回声窗口时必须同步更新默认配置、专项测试、语音延迟文档，并在真实设备上验证 function-call 长回复不再零音频、首句不丢、短词可识别、长回复异常后设备恢复监听、无多句聚合、连续TTS无串音和重连映射稳定。
+官方同步时的处理规则：如果官方修改豆包录音/流式 ASR、SeedTTS2、TTS 音频发送、唤醒词处理、欢迎语、连接日志或设备注册表，必须保留异步 HTTP 与总预算超时、流式 WebSocket 分阶段等待保护、本地 VAD 判停发送唯一 LAST、缓存首帧去重、短词识别和按会话身份清理、SeedTTS2 逻辑 `FIRST` 不提前启动上游会话且首段真实 `TEXT/FILE` 只启动一次、空轮 `LAST` 不创建厂商会话、任意非主动打断结束路径在已发设备 `FIRST` 后幂等补发唯一 `LAST`、连接级同轮 start/stop 去重、官方 STT 后立即进入可打断语义（不得另造 `response_pending`）、Abort 部分回复与 interruption 指标幂等收口、聊天和记忆重建按 `turn_id + message_sequence` 还原逻辑顺序、Opus尾帧冲刷、默认零毫秒首轮音频丢弃、欢迎语显式开启、唤醒词实际检测文本与实际播放回复双向上报、按请求头键名脱敏和对象身份注销校验。不得重新在 async provider 中引入 requests/time.sleep，不得让更短外层超时覆盖会话结束预算，不得把 Authorization、token、API key、Cookie 或 secret 写入日志；调整 ASR 超时、TTS 会话启动或编码边界和唤醒回声窗口时必须同步更新默认配置、专项测试、语音延迟文档，并在真实设备上验证 function-call 长回复不再零音频、首句不丢、短词可识别、长回复异常后设备恢复监听、无多句聚合、连续TTS无串音和重连映射稳定。
 ```
 
 ## 26. 外置声纹服务、智能体隔离与五条上限

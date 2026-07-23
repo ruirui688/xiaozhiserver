@@ -195,27 +195,33 @@ def test_duplicate_first_and_last_emit_single_tts_start_and_stop(monkeypatch):
         states = []
         audio_calls = 0
 
-        async def fake_send_tts_message(_conn, state, _text=None):
-            states.append(state)
+        class RecordingWebSocket:
+            async def send(self, payload):
+                states.append(json.loads(payload)["state"])
 
         async def fake_send_audio(_conn, _audios, frame_duration=60):
             nonlocal audio_calls
             audio_calls += 1
 
         conn = SimpleNamespace(
+            websocket=RecordingWebSocket(),
             client_is_speaking=False,
+            client_abort=False,
+            conn_from_mqtt_gateway=False,
+            last_activity_time=0,
             config={},
             logger=FakeLogger(),
             tts=SimpleNamespace(tts_audio_first_sentence=True),
             sentence_id="turn-1",
+            session_id="session-1",
             calling=False,
             close_after_chat=False,
             _tts_started_at=0,
             _tts_protocol_sentence_id=None,
             _tts_protocol_start_sent=False,
             _tts_protocol_stop_sent=False,
+            clearSpeakStatus=lambda: None,
         )
-        monkeypatch.setattr(sendAudioHandle, "send_tts_message", fake_send_tts_message)
         monkeypatch.setattr(sendAudioHandle, "sendAudio", fake_send_audio)
 
         await sendAudioHandle.sendAudioMessage(
@@ -237,6 +243,97 @@ def test_duplicate_first_and_last_emit_single_tts_start_and_stop(monkeypatch):
     asyncio.run(scenario())
 
 
+def test_stt_start_is_not_repeated_when_first_audio_arrives(monkeypatch):
+    async def scenario():
+        states = []
+
+        class RecordingWebSocket:
+            async def send(self, payload):
+                states.append(json.loads(payload)["state"])
+
+        async def fake_send_audio(_conn, _audios, frame_duration=60):
+            return None
+
+        conn = SimpleNamespace(
+            websocket=RecordingWebSocket(),
+            client_is_speaking=True,
+            client_abort=False,
+            conn_from_mqtt_gateway=False,
+            last_activity_time=0,
+            config={},
+            logger=FakeLogger(),
+            tts=SimpleNamespace(tts_audio_first_sentence=True),
+            sentence_id="turn-1",
+            session_id="session-1",
+            calling=False,
+            close_after_chat=False,
+            _tts_started_at=0,
+            _tts_protocol_sentence_id=None,
+            _tts_protocol_start_sent=True,
+            _tts_protocol_stop_sent=False,
+        )
+        monkeypatch.setattr(sendAudioHandle, "sendAudio", fake_send_audio)
+
+        await sendAudioHandle.sendAudioMessage(
+            conn, SentenceType.FIRST, b"opus", "你好", "turn-1"
+        )
+
+        assert states == ["sentence_start"]
+        assert conn._tts_protocol_sentence_id == "turn-1"
+
+    asyncio.run(scenario())
+
+
+def test_delayed_last_after_abort_does_not_stop_new_pending_reply():
+    async def scenario():
+        states = []
+
+        class RecordingWebSocket:
+            async def send(self, payload):
+                message = json.loads(payload)
+                states.append((message["state"], message.get("reason")))
+
+        conn = SimpleNamespace(
+            websocket=RecordingWebSocket(),
+            client_is_speaking=True,
+            client_abort=False,
+            conn_from_mqtt_gateway=False,
+            last_activity_time=0,
+            config={},
+            logger=FakeLogger(),
+            sentence_id="old-sentence",
+            session_id="session-1",
+            _tts_started_at=1,
+            _tts_protocol_sentence_id="old-sentence",
+            _tts_protocol_start_sent=True,
+            _tts_protocol_stop_sent=False,
+        )
+
+        def clear_speak_status():
+            conn.client_is_speaking = False
+            conn._tts_started_at = 0
+
+        conn.clearSpeakStatus = clear_speak_status
+
+        assert await sendAudioHandle.send_tts_message(
+            conn,
+            "stop",
+            protocol_sentence_id="old-sentence",
+            drain_audio=False,
+            reason="abort",
+        ) is True
+        assert await sendAudioHandle.send_tts_message(
+            conn, "start", protocol_sentence_id=None
+        ) is True
+        assert await sendAudioHandle.send_tts_message(
+            conn, "stop", protocol_sentence_id="old-sentence"
+        ) is False
+
+        assert states == [("stop", "abort"), ("start", None)]
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize(
     ("features", "expected_close_calls", "expected_reset_calls"),
     [
@@ -253,7 +350,7 @@ def test_exit_after_last_respects_persistent_websocket_capability(
         close_calls = 0
         reset_calls = 0
 
-        async def fake_send_tts_message(_conn, _state, _text=None):
+        async def fake_send_tts_message(_conn, _state, _text=None, **_kwargs):
             return None
 
         async def fake_send_audio(_conn, _audios, frame_duration=60):

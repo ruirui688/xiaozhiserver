@@ -154,6 +154,11 @@ providers/asr/base.py:44-59  asr_text_priority_thread（守护线程）
 - 句尾静音检测统一使用 VAD 模型的 `min_silence_duration_ms`
 - AEC 设备的播报打断依据句首语音检测，不等待该句尾阈值
 
+`client_is_speaking` 沿用官方语义，表示当前回复（包括 LLM/TTS 尚未产生首包的等待阶段）可以被用户打断，
+不等同于扬声器已经开始播放。服务端发送 STT 后立即发送一次 `tts:start` 并置为可打断；AEC 设备下一次
+VAD 确认开口时立即 Abort，非 AEC 设备仍在完整 ASR 后 Abort。真实首音频边界只由
+`_tts_started_at > 0` 表示，语义控制上下文的 `tts_playing` 不得直接复用 `client_is_speaking`。
+
 ### 3.3 ASR 语音转文字
 
 ```text
@@ -248,7 +253,12 @@ SeedTTS2 双流 provider 为每个 `sentence_id` 维护独立的 `FIRST/LAST` �
 创建空会话。该变化只调整厂商会话的启动时点，设备侧仍以实际音频对应的 `FIRST/LAST` 建立
 `tts start/stop`，并继续保证同一 `sentence_id` 最多各发送一次。
 
-设备控制协议在连接级额外记录当前 `sentence_id` 的 `tts start/stop` 发送状态，同一轮重复的 `FIRST/LAST` 不得形成第二个 `start/stop`。因此 provider 异常不能再让设备永久停留在 `speaking`。用户主动 abort 仍由打断链路直接发送 `tts stop`，provider 异常收尾检测到 abort 后不重复发送。
+设备控制协议在连接级额外记录当前 `sentence_id` 的 `tts start/stop` 发送状态，同一轮重复的 `FIRST/LAST` 不得形成第二个 `start/stop`。STT 后已经发送的 pending `start` 在真实 `FIRST` 到达时只绑定 `sentence_id`，不重复发送；Abort 已发送 `stop` 后，旧 provider 迟到的 `LAST` 也不得停止新一轮 pending 回复。因此 provider 异常不能再让设备永久停留在 `speaking`，也不能形成重复 start/stop。
+
+Abort 会先给当前 `TurnMetrics` 记录 `outcome.status=aborted` 和 interruption 步骤，再清理生成队列。已经形成
+文本的部分助手回复由 Abort 与正常 `LAST` 竞争同一个幂等收口权，只允许一方消费指标并上报一次；这样
+聊天记录不会因为打断而丢失已听到的回复或整条延时链路。仅在等待阶段生成、但从未跨过真实 TTS
+`FIRST` 边界的文本不会伪装成用户已经听到的助手回答。
 
 SeedTTS2 超时按阶段拆分：建连默认 10 秒、会话启动默认 10 秒、会话结束默认 30 秒、会话内连续无下行默认 15 秒、单次事件发送默认 5 秒。旧 `session_timeout_seconds` 仅兼容映射启动预算；结束预算最低保持 30 秒。线程侧等待预算必须覆盖对应协程阶段，不能由更短的外层 `tts_timeout` 提前取消健康长语音。
 
@@ -307,6 +317,11 @@ TTS 必须区分以下边界：
 用户打断或快速进入下一轮时，上一轮迟到的 `LAST` 只能完成或丢弃上一轮指标，
 不得清空当前轮次，也不得产生“LLM 0 次、只剩音频发送一步”的串轮记录。
 该约束只作用于新产生的聊天记录，不回写或推断历史 `metrics_json`。
+
+每条新消息还携带 `message_role` 和同轮递增的 `message_sequence`。ASR 在进入同步语义/意图工具前先
+预留用户序号，因此即使工具调用更早完成数据库写入，manager-api 和 manager-web 仍统一按
+`started_at_epoch_ms -> message_sequence` 还原为“用户 -> 工具调用 -> 工具结果 -> 助手”；缺少这些字段
+的旧记录继续回退到 `createdAt`。数据库中的真实创建时间仍保留用于审计。
 
 聊天记录导出包含 `summary.csv` 和逐步骤 `trace.csv`。递归模型调用必须按
 `call_index` 和 `depth` 分行保存，禁止再次压缩成单个“LLM耗时”。

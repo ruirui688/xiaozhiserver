@@ -104,6 +104,34 @@ class TurnMetrics:
             turn = self._resolve_turn(sentence_id=sentence_id)
             self._remove_turn(turn)
 
+    def record_interruption(self, sentence_id, reason):
+        """Record an interrupted assistant reply without dropping its trace."""
+        if not sentence_id:
+            return
+        with self._lock:
+            turn = self._resolve_turn(sentence_id=sentence_id)
+            if not turn:
+                return
+            runtime = turn.setdefault("_runtime", {})
+            if runtime.get("interruption_step") is not None:
+                return
+            tts_step = runtime.get("tts_step") or {}
+            turn["outcome"] = {
+                "status": "aborted",
+                "reason": reason or "user_interrupt",
+                "interrupted_at_epoch_ms": _now_epoch_ms(),
+            }
+            runtime["interruption_step"] = self._append_step(
+                turn,
+                "interruption",
+                reason=reason or "user_interrupt",
+                response_audio_started=bool(runtime.get("tts_first_audio_at")),
+                generated_audio_duration_ms=int(
+                    tts_step.get("audio_duration_ms") or 0
+                ),
+            )
+            self._refresh_trace_totals(turn)
+
     def record_vad_frame(self, have_voice, elapsed_ms, audio_bytes):
         with self._lock:
             if self._vad_segment is None:
@@ -225,6 +253,40 @@ class TurnMetrics:
         step = {"sequence": len(steps) + 1, "type": step_type, **values}
         steps.append(step)
         return step
+
+    def _message_identity(self, turn, message_role):
+        runtime = turn.setdefault("_runtime", {})
+        runtime["message_sequence"] = int(runtime.get("message_sequence") or 0) + 1
+        return {
+            "schema_version": turn.get("schema_version", self.SCHEMA_VERSION),
+            "turn_id": turn.get("turn_id"),
+            "started_at_epoch_ms": turn.get("started_at_epoch_ms"),
+            "message_role": message_role,
+            "message_sequence": runtime["message_sequence"],
+        }
+
+    def reserve_user_message(self, turn_id=None):
+        """Reserve sequence 1 before synchronous intent/tool handling starts."""
+        with self._lock:
+            turn = self._resolve_turn(turn_id=turn_id)
+            if not turn:
+                return None
+            runtime = turn.setdefault("_runtime", {})
+            identity = runtime.get("user_message_identity")
+            if identity is None:
+                identity = self._message_identity(turn, "user")
+                runtime["user_message_identity"] = identity
+            return copy.deepcopy(identity)
+
+    def build_link_metrics(
+        self, message_role, turn_id=None, sentence_id=None
+    ):
+        """Build ordering metadata without consuming the turn trace."""
+        with self._lock:
+            turn = self._resolve_turn(turn_id=turn_id, sentence_id=sentence_id)
+            if not turn:
+                return None
+            return self._message_identity(turn, message_role)
 
     def _refresh_trace_totals(self, turn):
         if not turn:
@@ -660,9 +722,14 @@ class TurnMetrics:
             turn = self._resolve_turn(turn_id=turn_id)
             if not turn:
                 return None
+            runtime = turn.setdefault("_runtime", {})
+            identity = runtime.get("user_message_identity")
+            if identity is None:
+                identity = self._message_identity(turn, "user")
+                runtime["user_message_identity"] = identity
             metrics = copy.deepcopy(turn)
             metrics.pop("_runtime", None)
-            metrics["message_role"] = "user"
+            metrics.update(identity)
             return metrics
 
     def build_assistant_metrics(self, text, sentence_id=None, turn_id=None):
@@ -680,8 +747,9 @@ class TurnMetrics:
                 )
                 step["text_chars"] = len(text or "")
             self._refresh_trace_totals(turn)
+            identity = self._message_identity(turn, "assistant")
             metrics = copy.deepcopy(turn)
             metrics.pop("_runtime", None)
-            metrics["message_role"] = "assistant"
+            metrics.update(identity)
             self._remove_turn(turn)
             return metrics

@@ -18,13 +18,15 @@ from core.providers.tts.dto.dto import TTSMessageDTO, SentenceType
 TAG = __name__
 
 
-def _bind_current_sentence_metrics(conn):
+def _bind_current_sentence_metrics(conn, turn_id=None):
     turn_metrics = getattr(conn, "turn_metrics", None)
     if turn_metrics is not None:
-        turn_metrics.bind_sentence(getattr(conn, "sentence_id", None))
+        turn_metrics.bind_sentence(getattr(conn, "sentence_id", None), turn_id)
 
 
-async def handle_user_intent(conn: "ConnectionHandler", text, turn_context=None):
+async def handle_user_intent(
+    conn: "ConnectionHandler", text, turn_context=None, turn_id=None
+):
     text = apply_correct_words(conn, text)
     # 预处理输入文本，处理可能的JSON格式
     try:
@@ -63,12 +65,13 @@ async def handle_user_intent(conn: "ConnectionHandler", text, turn_context=None)
             ensure_ascii=False,
         )
         conn.sentence_id = str(uuid.uuid4().hex)
-        _bind_current_sentence_metrics(conn)
+        _bind_current_sentence_metrics(conn, turn_id)
         return await process_intent_result(
             conn,
             intent_result,
             text,
             turn_context=turn_context,
+            turn_id=turn_id,
         )
 
     if active_game_tool and conn.func_handler and conn.func_handler.has_tool(active_game_tool):
@@ -83,12 +86,13 @@ async def handle_user_intent(conn: "ConnectionHandler", text, turn_context=None)
             ensure_ascii=False,
         )
         conn.sentence_id = str(uuid.uuid4().hex)
-        _bind_current_sentence_metrics(conn)
+        _bind_current_sentence_metrics(conn, turn_id)
         return await process_intent_result(
             conn,
             intent_result,
             text,
             turn_context=turn_context,
+            turn_id=turn_id,
         )
 
     if conn.intent_type == "function_call":
@@ -100,13 +104,14 @@ async def handle_user_intent(conn: "ConnectionHandler", text, turn_context=None)
         return False
     # 会话开始时生成sentence_id
     conn.sentence_id = str(uuid.uuid4().hex)
-    _bind_current_sentence_metrics(conn)
+    _bind_current_sentence_metrics(conn, turn_id)
     # 处理各种意图
     return await process_intent_result(
         conn,
         intent_result,
         text,
         turn_context=turn_context,
+        turn_id=turn_id,
     )
 
 
@@ -141,7 +146,11 @@ async def analyze_intent_with_llm(conn: "ConnectionHandler", text):
 
 
 async def process_intent_result(
-    conn: "ConnectionHandler", intent_result, original_text, turn_context=None
+    conn: "ConnectionHandler",
+    intent_result,
+    original_text,
+    turn_context=None,
+    turn_id=None,
 ):
     """处理意图识别结果"""
     try:
@@ -217,7 +226,7 @@ async def process_intent_result(
                     tool_input = function_args
 
             # 上报工具调用
-            enqueue_tool_report(conn, function_name, tool_input)
+            enqueue_tool_report(conn, function_name, tool_input, turn_id=turn_id)
 
             # 使用executor执行函数调用和结果处理
             def process_function_call():
@@ -248,7 +257,14 @@ async def process_intent_result(
                 # 上报工具调用结果
                 if result:
                     report_result = result.result if result.result else result.response
-                    enqueue_tool_report(conn, function_name, tool_input, str(report_result) if report_result else None, report_tool_call=False)
+                    enqueue_tool_report(
+                        conn,
+                        function_name,
+                        tool_input,
+                        str(report_result) if report_result else None,
+                        report_tool_call=False,
+                        turn_id=turn_id,
+                    )
 
                     if result.action == Action.RESPONSE:  # 直接回复前端
                         text = result.response

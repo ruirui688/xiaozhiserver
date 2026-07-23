@@ -3,7 +3,7 @@ import json
 import threading
 from types import SimpleNamespace
 
-from core.handle.reportHandle import _memory_event_content
+from core.handle.reportHandle import _logical_event_time, _memory_event_content
 from core.session.turn_context import (
     MAX_TURN_CONTEXT_BYTES,
     TurnContextBuffer,
@@ -120,6 +120,14 @@ def test_chat_report_payload_keeps_context_but_memory_event_removes_it():
     assert speaker_id == "voice-1"
     assert "context" not in memory_json
     assert memory_json["speaker"] == "用户A"
+
+
+def test_memory_event_uses_turn_time_and_message_sequence_for_visual_order():
+    assert _logical_event_time(
+        999999,
+        {"started_at_epoch_ms": 1000, "message_sequence": 3},
+    ) == 1003
+    assert _logical_event_time(999999, None) == 999999
 
 
 def test_listen_start_only_stores_context_without_starting_chat(monkeypatch):

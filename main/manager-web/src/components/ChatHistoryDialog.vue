@@ -223,9 +223,10 @@ export default {
 
             // 添加第一条消息的时间标记
             if (this.messages[0]) {
+                const firstMessageTime = this.messageLogicalTime(this.messages[0]);
                 result.push({
                     type: 'time',
-                    content: this.formatTime(this.messages[this.messages.length - 1].createdAt),
+                    content: this.formatTime(firstMessageTime),
                     id: `time-first-${this.messages[0].id || this.messages[0].createdAt}`
                 });
             }
@@ -237,13 +238,13 @@ export default {
 
                 // 检查是否需要添加时间标记
                 if (i < this.messages.length - 1) {
-                    const currentTime = new Date(currentMessage.createdAt).getTime();
-                    const nextTime = new Date(this.messages[i + 1].createdAt).getTime();
+                    const currentTime = this.messageLogicalTime(currentMessage);
+                    const nextTime = this.messageLogicalTime(this.messages[i + 1]);
 
                     if (nextTime - currentTime > TIME_INTERVAL) {
                         result.push({
                             type: 'time',
-                            content: this.formatTime(this.messages[i + 1].createdAt),
+                            content: this.formatTime(nextTime),
                             id: `time-${currentMessage.id || currentMessage.createdAt}-${this.messages[i + 1].id || this.messages[i + 1].createdAt}`
                         });
                     }
@@ -329,10 +330,17 @@ export default {
             const parsed = this.parseMessageContent(message.content);
             const metrics = this.parseMetrics(message.metricsJson);
             const hasVoiceprint = message.chatType === 1 && Boolean(parsed.speakerName || parsed.speakerId);
+            const metricStartedAt = Number(metrics && metrics.started_at_epoch_ms);
+            const createdAt = new Date(message.createdAt).getTime();
             return {
                 ...message,
                 parsedContent: parsed.content,
                 metrics,
+                turnId: (metrics && metrics.turn_id) || '',
+                messageSequence: Number(metrics && metrics.message_sequence) || 0,
+                logicalStartedAt: Number.isFinite(metricStartedAt) && metricStartedAt > 0
+                    ? metricStartedAt
+                    : createdAt,
                 metricsSummary: this.buildMetricsSummary(metrics, message.chatType),
                 metricsTrace: this.buildMetricsTrace(metrics),
                 speakerName: parsed.speakerName,
@@ -345,6 +353,41 @@ export default {
                     : (parsed.speakerName || this.$t('chatHistory.recognizedSpeaker')),
                 voiceprintStatus: hasVoiceprint
             };
+        },
+        messageLogicalTime(message) {
+            const logicalTime = Number(message && message.logicalStartedAt);
+            if (Number.isFinite(logicalTime)) {
+                return logicalTime;
+            }
+            return new Date(message && message.createdAt).getTime();
+        },
+        messageRoleOrder(message) {
+            const metricsRole = this.getNested(message, ['metrics', 'message_role']);
+            if (metricsRole === 'user' || message.chatType === 1) return 1;
+            if (metricsRole === 'tool' || message.chatType === 3) return 2;
+            return 3;
+        },
+        sortMessagesByTurn(messages) {
+            return messages
+                .map((message, originalIndex) => ({ message, originalIndex }))
+                .sort((left, right) => {
+                    const timeDifference = this.messageLogicalTime(left.message)
+                        - this.messageLogicalTime(right.message);
+                    if (timeDifference !== 0) return timeDifference;
+
+                    const sameTurn = left.message.turnId
+                        && left.message.turnId === right.message.turnId;
+                    if (sameTurn) {
+                        const sequenceDifference = left.message.messageSequence
+                            - right.message.messageSequence;
+                        if (sequenceDifference !== 0) return sequenceDifference;
+                        const roleDifference = this.messageRoleOrder(left.message)
+                            - this.messageRoleOrder(right.message);
+                        if (roleDifference !== 0) return roleDifference;
+                    }
+                    return left.originalIndex - right.originalIndex;
+                })
+                .map(({ message }) => message);
         },
         parseMetrics(metricsJson) {
             if (!metricsJson) {
@@ -368,6 +411,10 @@ export default {
                 if (value === null || value === undefined || value === '') return;
                 items.push({ label, value: `${value}${suffix}` });
             };
+
+            if (this.getNested(metrics, ['outcome', 'status']) === 'aborted') {
+                items.push({ label: '状态', value: '已被打断' });
+            }
 
             if (chatType === 1) {
                 add('音频', this.getNested(metrics, ['input', 'audio_duration_ms']));
@@ -443,6 +490,19 @@ export default {
                         sequence: step.sequence,
                         label: '音频发送',
                         detail: `首音频后 ${this.metricValue(step.from_first_audio_ms)}ms · TTS请求后 ${this.metricValue(step.from_tts_request_ms)}ms · 边界：服务端WebSocket发送完成 · 不代表设备扬声器播放完成`
+                    };
+                }
+                if (step.type === 'interruption') {
+                    const reason = step.reason === 'aec_barge_in'
+                        ? 'AEC检测到开口'
+                        : '用户打断';
+                    const audio = step.response_audio_started
+                        ? `打断前已生成音频 ${this.metricValue(step.generated_audio_duration_ms)}ms`
+                        : '打断时TTS音频尚未开始';
+                    return {
+                        sequence: step.sequence,
+                        label: '回复已打断',
+                        detail: `${reason} · ${audio}`
                     };
                 }
                 return {
@@ -622,7 +682,9 @@ export default {
             this.currentSessionId = session.sessionId;
             Api.agent.getAgentChatHistory(this.agentId, session.sessionId, (res) => {
                 if (res.data && res.data.data) {
-                    this.messages = res.data.data.map(this.normalizeMessage);
+                    this.messages = this.sortMessagesByTurn(
+                        res.data.data.map(this.normalizeMessage)
+                    );
                     if (this.messages.length > 0 && this.messages[0].macAddress) {
                         this.currentMacAddress = this.messages[0].macAddress;
                     }

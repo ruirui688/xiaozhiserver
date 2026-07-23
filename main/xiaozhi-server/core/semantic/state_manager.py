@@ -16,6 +16,12 @@ class StateManager:
 
     def get_context(self, conn) -> RobotContext:
         with self._lock:
+            # upstream 的 client_is_speaking 也覆盖“已请求、尚未首包”的
+            # 可打断阶段；真实音频播放边界由 _tts_started_at 表示。
+            tts_playing = bool(
+                getattr(conn, "client_is_speaking", False)
+                and getattr(conn, "_tts_started_at", 0)
+            )
             active_game_tool = None
             if hasattr(conn, "game_session_manager") and conn.game_session_manager:
                 active_game_tool = conn.game_session_manager.get_active_tool()
@@ -41,7 +47,7 @@ class StateManager:
                 session_id=getattr(conn, "session_id", ""),
                 state=state,
                 current_skill=current_skill,
-                tts_playing=getattr(conn, "client_is_speaking", False),
+                tts_playing=tts_playing,
                 motion_running=False,
                 active_game_tool=active_game_tool,
                 client_is_speaking=getattr(conn, "client_is_speaking", False),

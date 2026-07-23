@@ -49,6 +49,9 @@ class TTSProviderBase(ABC):
         self.before_stop_play_files = []
         self.report_on_last = False
         self._suppress_report_audio = False
+        self._final_report_lock = threading.Lock()
+        self._finalized_report_sentence_ids = set()
+        self._finalized_report_sentence_order = []
         # sentence_id 到文本的映射，用于流式TTS获取正确的字幕文本
         self._sentence_text_map = {}
         # 加载替换词，用于一次性正则替换
@@ -406,6 +409,47 @@ class TTSProviderBase(ABC):
         if sentence_id in self._sentence_text_map:
             del self._sentence_text_map[sentence_id]
 
+    def _claim_final_report(self, sentence_id):
+        if not sentence_id:
+            return True
+        with self._final_report_lock:
+            if sentence_id in self._finalized_report_sentence_ids:
+                return False
+            self._finalized_report_sentence_ids.add(sentence_id)
+            self._finalized_report_sentence_order.append(sentence_id)
+            while len(self._finalized_report_sentence_order) > 128:
+                expired = self._finalized_report_sentence_order.pop(0)
+                self._finalized_report_sentence_ids.discard(expired)
+            return True
+
+    def finalize_interrupted_report(self, sentence_id):
+        """Persist a partial assistant turn even when abort removes its LAST."""
+        if not sentence_id or not self._claim_final_report(sentence_id):
+            return False
+        report_text = self.get_tts_text(sentence_id)
+        turn_metrics = getattr(self.conn, "turn_metrics", None)
+        # Pending replies are interruptible like upstream, but a generated text
+        # that never crossed the TTS FIRST boundary was not heard by the user.
+        if not report_text or not getattr(self.conn, "_tts_started_at", 0):
+            if turn_metrics is not None:
+                turn_metrics.discard_sentence(sentence_id)
+            return False
+        metrics = (
+            turn_metrics.build_assistant_metrics(
+                report_text,
+                sentence_id=sentence_id,
+            )
+            if turn_metrics is not None
+            else None
+        )
+        enqueue_tts_report(
+            self.conn,
+            report_text,
+            [],
+            metrics=metrics,
+        )
+        return True
+
     def _audio_message_timeout(self, sentence_type):
         """Return the thread-side wait budget for one audio message.
 
@@ -579,20 +623,29 @@ class TTSProviderBase(ABC):
 
                 if pending_report is not None:
                     report_text, report_audio, final_report = pending_report
-                    metrics = (
-                        self.conn.turn_metrics.build_assistant_metrics(
-                            self.get_tts_text(sentence_id) or report_text,
-                            sentence_id=sentence_id,
+                    # Claim before consuming TurnMetrics. Abort and LAST can race;
+                    # only the winner may remove and enqueue the final turn.
+                    if not final_report or self._claim_final_report(sentence_id):
+                        turn_metrics = getattr(self.conn, "turn_metrics", None)
+                        metrics = None
+                        if turn_metrics is not None:
+                            metrics = (
+                                turn_metrics.build_assistant_metrics(
+                                    self.get_tts_text(sentence_id) or report_text,
+                                    sentence_id=sentence_id,
+                                )
+                                if final_report
+                                else turn_metrics.build_link_metrics(
+                                    "assistant",
+                                    sentence_id=sentence_id,
+                                )
+                            )
+                        enqueue_tts_report(
+                            self.conn,
+                            report_text,
+                            report_audio,
+                            metrics=metrics,
                         )
-                        if final_report
-                        else None
-                    )
-                    enqueue_tts_report(
-                        self.conn,
-                        report_text,
-                        report_audio,
-                        metrics=metrics,
-                    )
                     if self.report_on_last and final_report:
                         enqueue_audio = []
                         enqueue_text = None
@@ -618,6 +671,9 @@ class TTSProviderBase(ABC):
     async def close(self):
         """资源清理方法"""
         self._sentence_text_map.clear()
+        with self._final_report_lock:
+            self._finalized_report_sentence_ids.clear()
+            self._finalized_report_sentence_order.clear()
         # 取消所有待处理的 run_coroutine_threadsafe futures，避免挂起的协程阻塞关闭
         pending = getattr(self, "_pending_futures", set())
         for fut in list(pending):

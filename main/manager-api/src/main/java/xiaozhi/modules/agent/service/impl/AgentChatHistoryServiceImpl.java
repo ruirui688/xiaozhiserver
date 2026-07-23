@@ -29,6 +29,7 @@ import xiaozhi.modules.agent.dto.AgentChatSessionDTO;
 import xiaozhi.modules.agent.entity.AgentChatHistoryEntity;
 import xiaozhi.modules.agent.entity.AgentChatTitleEntity;
 import xiaozhi.modules.agent.service.AgentChatHistoryService;
+import xiaozhi.modules.agent.service.support.AgentChatHistoryOrder;
 import xiaozhi.modules.agent.vo.AgentChatHistoryUserVO;
 
 /**
@@ -100,7 +101,8 @@ public class AgentChatHistoryServiceImpl extends ServiceImpl<AiAgentChatHistoryD
         List<AgentChatHistoryEntity> historyList = list(wrapper);
 
         // 转换为DTO
-        return ConvertUtils.sourceToTarget(historyList, AgentChatHistoryDTO.class);
+        return AgentChatHistoryOrder.sort(
+                ConvertUtils.sourceToTarget(historyList, AgentChatHistoryDTO.class));
     }
 
     @Override

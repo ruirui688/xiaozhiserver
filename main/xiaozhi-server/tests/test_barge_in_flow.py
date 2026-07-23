@@ -225,15 +225,16 @@ def test_manual_complete_asr_does_not_auto_stop(monkeypatch):
     assert conn.executor.submitted[0][1] == ("新的问题",)
 
 
-def test_stt_does_not_mark_speaking_before_tts_has_audio():
+def test_stt_marks_reply_pending_as_interruptible_like_upstream():
     conn = _Conn()
     conn.client_is_speaking = False
 
     asyncio.run(send_stt_message(conn, "第二个正常问题"))
 
-    assert conn.client_is_speaking is False
+    assert conn.client_is_speaking is True
     assert conn._tts_started_at == 0
-    assert [message["type"] for message in conn.websocket.messages] == ["stt"]
+    assert [message["type"] for message in conn.websocket.messages] == ["stt", "tts"]
+    assert conn.websocket.messages[-1]["state"] == "start"
 
 
 def test_recognized_speaker_json_is_submitted_on_every_turn(monkeypatch):

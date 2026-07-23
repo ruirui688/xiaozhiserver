@@ -212,18 +212,33 @@ async def startToChat(
 
     # 语义控制中枢优先处理高置信度控制类指令，未处理再进入旧流程
     if getattr(conn, "semantic_center", None):
-        semantic_handled = await conn.semantic_center.handle_user_text(conn, actual_text)
+        if turn_id is None:
+            semantic_handled = await conn.semantic_center.handle_user_text(
+                conn, actual_text
+            )
+        else:
+            semantic_handled = await conn.semantic_center.handle_user_text(
+                conn, actual_text, turn_id=turn_id
+            )
         if semantic_handled:
             return True
 
     # 首先进行意图分析，使用实际文本内容
-    if turn_context is None:
-        intent_handled = await handle_user_intent(conn, actual_text)
+    if turn_id is None:
+        if turn_context is None:
+            intent_handled = await handle_user_intent(conn, actual_text)
+        else:
+            intent_handled = await handle_user_intent(
+                conn,
+                actual_text,
+                turn_context=turn_context,
+            )
     else:
         intent_handled = await handle_user_intent(
             conn,
             actual_text,
             turn_context=turn_context,
+            turn_id=turn_id,
         )
 
     if intent_handled:

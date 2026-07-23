@@ -28,7 +28,7 @@ class SemanticCenter:
         self.state_manager = state_manager or StateManager()
         self.policy_engine = policy_engine or PolicyEngine()
 
-    async def handle_user_text(self, conn, text: str) -> bool:
+    async def handle_user_text(self, conn, text: str, turn_id=None) -> bool:
         asr_result = self.normalizer.normalize(conn, text)
         context = self.state_manager.get_context(conn)
         intent = self.router.route(asr_result, context)
@@ -53,7 +53,9 @@ class SemanticCenter:
 
         if decision.decision == "reject":
             conn.logger.bind(tag=__name__).debug("handle_user_text handled reject: %s", decision.reply)
-            await self._speak(conn, decision.reply or "这个指令现在不能执行。")
+            await self._speak(
+                conn, decision.reply or "这个指令现在不能执行。", turn_id
+            )
             self.state_manager.transition(decision.next_state)
             return True
 
@@ -65,7 +67,7 @@ class SemanticCenter:
             conn.logger.bind(tag=__name__).debug("handle_user_text handled game.exit")
             if hasattr(conn, "game_session_manager") and conn.game_session_manager:
                 conn.game_session_manager.clear_active_games()
-            await self._speak(conn, decision.reply or "好的，游戏先到这。")
+            await self._speak(conn, decision.reply or "好的，游戏先到这。", turn_id)
             self.state_manager.transition(decision.next_state, None)
             return True
 
@@ -74,13 +76,13 @@ class SemanticCenter:
                 "handle_user_text handled executor=%s arguments=%s",
                 decision.executor, decision.arguments,
             )
-            result = await self._invoke_tool(conn, decision)
-            await self._handle_tool_result(conn, result, decision)
+            result = await self._invoke_tool(conn, decision, turn_id)
+            await self._handle_tool_result(conn, result, decision, turn_id)
             return True
 
         return False
 
-    async def _invoke_tool(self, conn, decision: Decision):
+    async def _invoke_tool(self, conn, decision: Decision, turn_id=None):
         from plugins_func.register import Action, ActionResponse
 
         if not getattr(conn, "func_handler", None):
@@ -91,7 +93,9 @@ class SemanticCenter:
         tool_input = decision.arguments or {}
         from core.handle.reportHandle import enqueue_tool_report
 
-        enqueue_tool_report(conn, decision.executor, tool_input)
+        enqueue_tool_report(
+            conn, decision.executor, tool_input, turn_id=turn_id
+        )
         function_call_data = {
             "name": decision.executor,
             "id": str(uuid.uuid4().hex),
@@ -110,35 +114,40 @@ class SemanticCenter:
             tool_input,
             str(report_result) if report_result else None,
             report_tool_call=False,
+            turn_id=turn_id,
         )
         return result or ActionResponse(Action.ERROR, response="工具没有返回结果。")
 
-    async def _handle_tool_result(self, conn, result, decision: Decision) -> None:
+    async def _handle_tool_result(
+        self, conn, result, decision: Decision, turn_id=None
+    ) -> None:
         from plugins_func.register import Action
 
         if result.action in (Action.RESPONSE, Action.NOTFOUND, Action.ERROR):
             text = result.response or result.result or "已处理。"
-            await self._speak(conn, str(text))
+            await self._speak(conn, str(text), turn_id)
             conn.dialogue.put(Message(role="assistant", content=str(text)))
         elif result.action == Action.REQLLM:
             text = result.result or result.response or ""
             if text:
-                conn.executor.submit(conn.chat, str(text), 0, False)
+                conn.executor.submit(
+                    conn.chat, str(text), 0, False, None, turn_id
+                )
         elif result.action == Action.RECORD:
             text = result.response or result.result
             if text:
-                await self._speak(conn, str(text))
+                await self._speak(conn, str(text), turn_id)
                 conn.dialogue.put(Message(role="assistant", content=str(text)))
         self.state_manager.transition(decision.next_state, decision.executor)
 
-    async def _speak(self, conn, text: str) -> None:
+    async def _speak(self, conn, text: str, turn_id=None) -> None:
         if not text or not getattr(conn, "tts", None):
             return
         conn.client_abort = False
         conn.sentence_id = str(uuid.uuid4().hex)
         turn_metrics = getattr(conn, "turn_metrics", None)
         if turn_metrics is not None:
-            turn_metrics.bind_sentence(conn.sentence_id)
+            turn_metrics.bind_sentence(conn.sentence_id, turn_id)
         conn.tts.store_tts_text(conn.sentence_id, text)
         conn.tts.tts_text_queue.put(
             TTSMessageDTO(

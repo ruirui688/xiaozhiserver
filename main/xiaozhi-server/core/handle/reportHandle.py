@@ -59,6 +59,7 @@ async def report(conn: "ConnectionHandler", type, text, opus_data, report_time, 
         event_type = "tool" if type == 3 else "chat"
         agent_id = conn.config.get("agent_id") if getattr(conn, "config", None) else None
         memory_text, memory_json, speaker_id = _memory_event_content(type, text)
+        logical_event_time = _logical_event_time(report_time, metrics)
         await report_memory_event(
             mac_address=conn.device_id,
             session_id=conn.session_id,
@@ -67,7 +68,7 @@ async def report(conn: "ConnectionHandler", type, text, opus_data, report_time, 
             content_json=memory_json,
             speaker_id=speaker_id,
             event_type=event_type,
-            report_time=report_time,
+            report_time=logical_event_time,
             agent_id=agent_id,
             event_id=build_memory_event_id(
                 conn.device_id,
@@ -75,11 +76,24 @@ async def report(conn: "ConnectionHandler", type, text, opus_data, report_time, 
                 type,
                 event_type,
                 text,
-                report_time,
+                logical_event_time,
             ),
         )
     except Exception as e:
         conn.logger.bind(tag=TAG).error(f"长期记忆事件上报失败: {e}")
+
+
+def _logical_event_time(report_time, metrics):
+    if not isinstance(metrics, dict):
+        return report_time
+    try:
+        started_at = int(metrics.get("started_at_epoch_ms"))
+        sequence = max(0, int(metrics.get("message_sequence") or 0))
+    except (TypeError, ValueError):
+        return report_time
+    if started_at <= 0:
+        return report_time
+    return started_at + sequence
 
 
 def _memory_event_content(chat_type, text):
@@ -253,7 +267,15 @@ def enqueue_tts_report(conn: "ConnectionHandler", text, opus_data, metrics=None)
         conn.logger.bind(tag=TAG).error(f"加入TTS上报队列失败: {text}, {e}")
 
 
-def enqueue_tool_report(conn: "ConnectionHandler", tool_name: str, tool_input: dict, tool_result: str = None, report_tool_call: bool = True, metrics=None):
+def enqueue_tool_report(
+    conn: "ConnectionHandler",
+    tool_name: str,
+    tool_input: dict,
+    tool_result: str = None,
+    report_tool_call: bool = True,
+    metrics=None,
+    turn_id=None,
+):
     """将工具调用数据加入上报队列
 
     Args:
@@ -275,6 +297,9 @@ def enqueue_tool_report(conn: "ConnectionHandler", tool_name: str, tool_input: d
 
         # 构建工具调用内容
         if report_tool_call:
+            call_metrics = metrics or _build_link_metrics(
+                conn, "tool", turn_id=turn_id
+            )
             tool_text = json.dumps(
                 [
                     {
@@ -285,10 +310,13 @@ def enqueue_tool_report(conn: "ConnectionHandler", tool_name: str, tool_input: d
             )
             if _is_meeting_tool(tool_name):
                 mark_skip_memory_event(conn, 3, tool_text, "meeting_tool_call")
-            conn.report_queue.put((3, tool_text, None, timestamp, metrics))
+            conn.report_queue.put((3, tool_text, None, timestamp, call_metrics))
 
         # 构建工具结果内容
         if tool_result:
+            result_metrics = metrics or _build_link_metrics(
+                conn, "tool", turn_id=turn_id
+            )
             try:
                 result_display_value = json.loads(tool_result) if isinstance(tool_result, str) else tool_result
             except (TypeError, json.JSONDecodeError):
@@ -297,9 +325,22 @@ def enqueue_tool_report(conn: "ConnectionHandler", tool_name: str, tool_input: d
             result_content = json.dumps([{"type": "tool_result", "text": result_display}], ensure_ascii=False)
             if _is_meeting_tool(tool_name):
                 mark_skip_memory_event(conn, 3, result_content, "meeting_tool_result")
-            conn.report_queue.put((3, result_content, None, timestamp + 1, metrics))
+            conn.report_queue.put(
+                (3, result_content, None, timestamp + 1, result_metrics)
+            )
     except Exception as e:
         conn.logger.bind(tag=TAG).error(f"加入工具上报队列失败: {e}")
+
+
+def _build_link_metrics(conn, message_role, turn_id=None, sentence_id=None):
+    turn_metrics = getattr(conn, "turn_metrics", None)
+    if turn_metrics is None:
+        return None
+    return turn_metrics.build_link_metrics(
+        message_role,
+        turn_id=turn_id,
+        sentence_id=sentence_id,
+    )
 
 
 def _is_stateful_game_tool(tool_name):

@@ -243,6 +243,10 @@ class ASRProviderBase(ABC):
 
             if text_len > 0:
                 audio_snapshot = asr_audio_task.copy()
+                # Intent/semantic tools may report synchronously before this method
+                # returns. Reserve the user row first so logical order stays
+                # user -> tool -> assistant regardless of report completion time.
+                conn.turn_metrics.reserve_user_message(turn_id)
                 # 使用自定义模块进行上报
                 accepted = await startToChat(
                     conn,

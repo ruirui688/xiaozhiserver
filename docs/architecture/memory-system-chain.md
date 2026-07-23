@@ -58,6 +58,10 @@ source_paths:
 
 `reportHandle.py` 把用户、助手和工具事件上报到 `/config/memory/events`。事件包含会话、设备、角色、正文和可信声纹信息。
 
+新事件使用聊天轮次的 `started_at_epoch_ms + message_sequence` 作为 `source_timestamp`，同时保留数据库
+`created_at` 作为真实写入时间。这样异步 ASR、工具和被打断的助手报告即使乱序到达，原始证据时间仍按
+对话逻辑顺序展示；缺少轮次指标的旧事件继续使用原上报时间。
+
 `MemoryServiceImpl.recordEvent()` 只写 `ai_memory_source_event`：
 
 - 不调用维护模型；
@@ -174,6 +178,10 @@ system 模板重建而不是累计。该预算是字符级保护，不等同于�
 
 清空后重建不会边调用模型边删除事实。系统先生成并验证仅含 `ADD` / `NONE` 的重建动作，再用一个短事务原子替换旧事实；任何写入失败都会回滚并保留事务开始前的记忆。
 
+历史重建、会话总结、标题和聊天历史 API 共用 `AgentChatHistoryService.getChatHistoryBySessionId()`。
+该入口对新记录按 `started_at_epoch_ms`、同轮 `message_sequence` 排序，旧记录回退 `createdAt`；因此
+被打断后迟到落库的部分助手回答仍位于下一条用户消息之前，记忆重建不会把下一轮问题拼到上一轮回答前。
+
 正式重建现在是服务端异步任务：创建端点返回 taskId，Redis 保存任务、最近任务指针和每智能体活动锁，
 worker 依次报告读取会话、抽取、复核、校验、应用和收尾进度，最终进入 `SUCCEEDED`、`FAILED` 或
 `TIMED_OUT`。同一智能体的重复创建返回当前活动任务。页面通过 `GET /rebuild-task` 或
@@ -223,6 +231,7 @@ Liquibase 补偿迁移，不能直接修改已发布 changeSet 或只提交 `DRO
 - 同一智能体重复重建只创建一个 worker，任务终态不能被迟到结果覆盖；
 - 页面重建后能恢复 `PENDING` / `RUNNING`，失败轮询退避不超过 10 秒；
 - 超长记忆只裁剪动态 `<memory>`，不裁剪静态角色与安全规则。
+- 新聊天轮次按 user/tool/assistant 的 `message_sequence` 重建，被打断的助手片段不得落到下一轮用户消息之后；旧数据仍按 `createdAt`。
 
 自动测试应覆盖 service/controller 状态机、Web 轮询状态纯函数和 Python 上下文预算。真实 Redis Lua 序列化与 TTL、
 多进程重启、MySQL 事务隔离、浏览器刷新恢复以及忽略线程中断的真实外部模型仍需在集成环境验证。

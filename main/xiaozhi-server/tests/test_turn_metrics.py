@@ -224,6 +224,61 @@ def test_discarded_sentence_late_tts_events_do_not_attach_to_new_turn():
     assert current_payload["trace"]["steps"] == []
 
 
+def test_interrupted_sentence_keeps_partial_latency_trace_until_report():
+    metrics = TurnMetrics()
+    turn_id = metrics.ensure_text_turn()
+    metrics.bind_sentence("sentence-interrupted", turn_id)
+    metrics.record_llm_started(False, 0, turn_id=turn_id)
+    metrics.record_llm_first_chunk(turn_id=turn_id)
+    metrics.record_llm_complete(
+        "已经开始回答", None, False, 0, depth=0, turn_id=turn_id
+    )
+    metrics.record_tts_start("sentence-interrupted")
+    metrics.record_tts_audio_frame(20, "sentence-interrupted")
+
+    metrics.record_interruption("sentence-interrupted", "aec_barge_in")
+    metrics.record_interruption("sentence-interrupted", "aec_barge_in")
+    payload = metrics.build_assistant_metrics(
+        "已经开始回答", sentence_id="sentence-interrupted"
+    )
+
+    assert payload["turn_id"] == turn_id
+    assert payload["outcome"]["status"] == "aborted"
+    assert payload["outcome"]["reason"] == "aec_barge_in"
+    interruption_steps = [
+        step for step in payload["trace"]["steps"] if step["type"] == "interruption"
+    ]
+    assert len(interruption_steps) == 1
+    assert interruption_steps[0]["response_audio_started"] is True
+    assert interruption_steps[0]["generated_audio_duration_ms"] == 60
+    assert payload["trace"]["totals"]["llm_call_count"] == 1
+    assert payload["trace"]["totals"]["output_audio_duration_ms"] == 60
+
+
+def test_message_sequence_orders_user_tools_and_assistant_within_one_turn():
+    metrics = TurnMetrics()
+    turn_id = metrics.ensure_text_turn()
+    metrics.bind_sentence("sentence-sequence", turn_id)
+
+    metrics.reserve_user_message(turn_id)
+    tool_call = metrics.build_link_metrics("tool", turn_id=turn_id)
+    tool_result = metrics.build_link_metrics("tool", turn_id=turn_id)
+    user = metrics.build_user_metrics(turn_id)
+    assistant = metrics.build_assistant_metrics(
+        "完成", sentence_id="sentence-sequence"
+    )
+
+    assert [
+        (item["message_role"], item["message_sequence"])
+        for item in (user, tool_call, tool_result, assistant)
+    ] == [
+        ("user", 1),
+        ("tool", 2),
+        ("tool", 3),
+        ("assistant", 4),
+    ]
+
+
 def test_streaming_asr_partial_is_kept_for_next_turn_while_previous_turn_pending():
     metrics = TurnMetrics()
     previous_turn_id = metrics.ensure_text_turn()

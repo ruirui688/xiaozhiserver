@@ -1,5 +1,6 @@
-import json
 from typing import TYPE_CHECKING
+
+from core.handle.sendAudioHandle import send_tts_message
 
 if TYPE_CHECKING:
     from core.connection import ConnectionHandler
@@ -10,7 +11,13 @@ async def handleAbortMessage(conn: "ConnectionHandler", preserve_user_audio=Fals
     conn.logger.bind(tag=TAG).info("Abort message received")
     turn_metrics = getattr(conn, "turn_metrics", None)
     if turn_metrics is not None:
-        turn_metrics.discard_sentence(getattr(conn, "sentence_id", None))
+        turn_metrics.record_interruption(
+            getattr(conn, "sentence_id", None),
+            "aec_barge_in" if preserve_user_audio else "user_interrupt",
+        )
+    tts = getattr(conn, "tts", None)
+    if tts is not None and hasattr(tts, "finalize_interrupted_report"):
+        tts.finalize_interrupted_report(getattr(conn, "sentence_id", None))
     # 设置成打断状态，会自动打断llm、tts任务
     conn.close_after_chat = False
     with conn._abort_lock:
@@ -25,15 +32,12 @@ async def handleAbortMessage(conn: "ConnectionHandler", preserve_user_audio=Fals
         conn.reset_audio_states()
     # 打断客户端说话状态
     try:
-        await conn.websocket.send(
-            json.dumps(
-                {
-                    "type": "tts",
-                    "state": "stop",
-                    "reason": "abort",
-                    "session_id": conn.session_id,
-                }
-            )
+        await send_tts_message(
+            conn,
+            "stop",
+            protocol_sentence_id=getattr(conn, "sentence_id", None),
+            drain_audio=False,
+            reason="abort",
         )
     except Exception as e:
         conn.logger.bind(tag=TAG).error(f"发送打断消息失败: {e}")
