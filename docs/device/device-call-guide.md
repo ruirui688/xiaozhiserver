@@ -10,8 +10,8 @@
 ## 使用这个功能的前提条件
 1. 你必须要有至少两个设备，每个设备型号必须是`ESP32-S3`，因为只有`ESP32-S3`才支持远程唤醒功能。
 2. 你的设备必须要有`两个麦克风`。但是如果你的设备只有`单个麦克风`，你只是想体验一下这个功能，也是可以的，但是会有强烈的卡顿感。
-3. 你必须使用[全模块部署](../deployment/local-docker-deploy-guide.md)本项目，因为你需要`智控台`来管理设备的权限和通信。
-4. 你必须安装并配置好`2026年5月27日`以后的[MQTT网关服务](mqtt-gateway-integration.md)，如果你已经部署了MQTT网关服务，请确认代码的版本是`2026年5月27日`之后的版本。
+3. 你必须使用全模块部署，因为需要智控台管理设备权限和通信；生产环境按[生产部署唯一入口](../deployment/private-docker-release.md)操作。
+4. 你必须安装并配置好 2026 年 5 月 27 日以后的 MQTT 网关版本，具体步骤见本文“MQTT 网关”一节。
 
 以上是使用这个功能的硬性条件，接下来会详细介绍。
 
@@ -116,8 +116,85 @@
 
 ### 第五步：配置MQTT网关服务
 
-1. 部署MQTT网关服务，参考 [MQTT网关集成文档](mqtt-gateway-integration.md)
-2. 如果已经部署请确认代码的版本是2026年5月27日的版本
+1. 按下节部署 MQTT 网关。
+2. 如果已经部署，确认代码版本不早于 2026 年 5 月 27 日。
+
+## MQTT 网关
+
+网关把设备的 MQTT/UDP 通道桥接到 `xiaozhi-server` WebSocket。克隆并安装官方网关：
+
+```bash
+git clone https://github.com/xinnan-tech/xiaozhi-mqtt-gateway.git
+cd xiaozhi-mqtt-gateway
+npm install
+npm install -g pm2
+cp config/mqtt.json.example config/mqtt.json
+```
+
+在 `config/mqtt.json` 的 `production.chat_servers` 中填写桥接地址。本机源码部署可用：
+
+```json
+{
+  "production": {
+    "chat_servers": ["ws://127.0.0.1:8000/xiaozhi/v1/?from=mqtt_gateway"]
+  }
+}
+```
+
+跨主机或公网桥接必须改用 TLS 反向代理后的 `wss://` 地址。网关 `.env` 使用自行生成的强随机密钥：
+
+```dotenv
+PUBLIC_IP=你的设备可访问域名或地址
+MQTT_PORT=1883
+UDP_PORT=8884
+API_PORT=8007
+MQTT_SIGNATURE_KEY=生成的高强度随机签名密钥
+SERVER_SECRET=与服务端一致的共享密钥
+```
+
+`.env`、`MQTT_SIGNATURE_KEY` 和 `SERVER_SECRET` 禁止提交、截图或打印到日志。公网不要无条件开放管理 API；只向设备来源放行必需端口，优先为 MQTT 使用 TLS。启动并检查：
+
+```bash
+pm2 start ecosystem.config.js
+pm2 logs xz-mqtt
+```
+
+全模块部署在智控台参数管理填写：
+
+| 参数 | 值 |
+| --- | --- |
+| `server.mqtt_gateway` | `PUBLIC_IP:MQTT_PORT` |
+| `server.mqtt_signature_key` | 与网关一致的签名密钥 |
+| `server.udp_gateway` | `PUBLIC_IP:UDP_PORT` |
+| `server.mqtt_manager_api` | 网关管理 API 的受控地址 |
+
+单模块部署在私有 `data/.config.yaml` 的 `server` 下配置 `mqtt_gateway`、`mqtt_signature_key` 和 `udp_gateway`。设备通过 OTA 获得 MQTT 凭据；验证响应时只确认 `mqtt` 对象存在，`username`、`password`、token 等字段统一显示为 `***`，不得复制到工单或日志。
+
+## 开机 WebSocket 与 MCP 可见性
+
+支持常驻控制连接的固件在 OTA 成功后应主动连接 WebSocket，发送 `hello(features.mcp=true)`，再完成 MCP `initialize` 和 `tools/list`。控制连接与音频会话应分离：结束语音只关闭音频状态，网络中断才关闭底层连接并触发重连。
+
+如果设备必须先唤醒一次才出现在服务端，检查固件的 `WebsocketProtocol::Start()` 是否主动连接、是否有重连机制，以及 OTA 是否按下面结构下发配置：
+
+```json
+{
+  "websocket": {
+    "url": "wss://你的域名/xiaozhi/v1/",
+    "token": "***",
+    "version": 1
+  }
+}
+```
+
+`Device-Id` 和设备本地持久化的 `Client-Id` 必须在 OTA 请求、WebSocket 握手及 token 绑定中一致。验证步骤：
+
+1. 重启设备，不触发唤醒词或按键。
+2. 串口应出现 WebSocket 连接和收到 server hello 的日志。
+3. 服务端应依次记录认证成功、设备注册、`features.mcp=true`、`initialize` 和 `tools/list`。
+4. 断开网络后恢复，确认设备自动重连且仍可发起语音会话。
+5. 真机检查空闲功耗；常驻连接会影响深度休眠策略。
+
+固件改动位于外部 `xiaozhi-esp32` 仓库时，必须在对应 ESP-IDF 环境完成 `idf.py build` 和真机验证，本服务端仓库的静态检查不能替代它。
 
 ## 呼叫流程说明
 

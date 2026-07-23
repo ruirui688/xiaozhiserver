@@ -1,6 +1,18 @@
-# esp32固件编译
+# ESP32 固件配置、编译与 OTA
 
-## 第1步 准备你的ota地址
+本文覆盖两条首次接入路径和单模块固件升级：使用官方预编译固件时在配网页面填写 OTA 地址；需要定制板型或设备能力时自行编译。公网环境必须使用受信任证书的 `https://` OTA 与 `wss://` WebSocket 地址。
+
+## 使用预编译固件
+
+烧录 `xiaozhi-esp32` 1.6.1 或更高版本的[预编译固件](https://github.com/78/xiaozhi-esp32/releases)，让设备进入配网模式，在页面顶部“高级选项”填写自己的 OTA 地址并保存重启。
+
+![OTA 地址设置](../images/firmware-setting-ota.png)
+
+全模块部署先在智控台“参数管理”确认 `server.websocket`。刷新 OTA 地址后应显示接口正常和 WebSocket 集群数量；单模块部署则确认 `data/.config.yaml` 中的 `server.websocket`。设备重启后同时观察串口和服务端日志。
+
+## 自行编译固件
+
+### 第 1 步：准备 OTA 地址
 
 如果你，使用的是本项目0.3.12版本，不管是简单Server部署还是全模块部署，都会有ota地址。
 
@@ -41,17 +53,17 @@ ws://192.168.1.25:8000/xiaozhi/v1/
 
 配置完后，再使用浏览器刷新你的ota接口地址，看看是不是正常了。如果还不正常就，就再次确认一下Websocket是否正常启动，是否配置了Websocket地址。
 
-## 第2步 配置环境
+### 第 2 步：配置环境
 先按照这个教程配置项目环境[《Windows搭建 ESP IDF 5.3.2开发环境以及编译小智》](https://icnynnzcwou8.feishu.cn/wiki/JEYDwTTALi5s2zkGlFGcDiRknXf)
 
-## 第3步 打开配置文件
+### 第 3 步：打开配置文件
 配置好编译环境后，下载虾哥iaozhi-esp32项目源码，
 
 从这里下载虾哥[xiaozhi-esp32项目源码](https://github.com/78/xiaozhi-esp32)。
 
 下载后，打开`xiaozhi-esp32/main/Kconfig.projbuild`文件。
 
-## 第4步 修改OTA地址
+### 第 4 步：修改 OTA 地址
 
 找到`OTA_URL`的`default`的内容，把`https://api.tenclass.net/xiaozhi/ota/`
    改成你自己的地址，例如，我的接口地址是`http://192.168.1.25:8002/xiaozhi/ota/`，就把内容改成这个。
@@ -73,7 +85,7 @@ config OTA_URL
         The application will access this URL to check for new firmwares and server address.
 ```
 
-## 第4步 设置编译参数
+### 第 5 步：设置编译参数
 
 设置编译参数
 
@@ -89,13 +101,13 @@ idf.py menuconfig
 进入菜单配置后，再进入`Xiaozhi Assistant`，将`BOARD_TYPE`设置你板子的具体型号
 保存退出，回到终端命令行。
 
-## 第5步 编译固件
+### 第 6 步：编译固件
 
 ```
 idf.py build
 ```
 
-## 第6步 打包bin固件
+### 第 7 步：打包全量固件
 
 ```
 cd scripts
@@ -108,7 +120,7 @@ python release.py
 注意：如果执行到第二命令后，报了“zip”相关的错误，请忽略这个错误，只要`build`目录下生成固件文件`merged-binary.bin`
 ，对你没有太大影响，请继续。
 
-## 第7步 烧录固件
+### 第 8 步：烧录固件
    将esp32设备连接电脑，使用chrome浏览器，打开以下网址
 
 ```
@@ -120,19 +132,27 @@ https://espressif.github.io/esp-launchpad/
 
 烧录成功且联网成功后，通过唤醒词唤醒小智，留意server端输出的控制台信息。
 
+## 单模块 OTA 自动升级
+
+全模块部署通过智控台管理固件；以下只适用于单模块 `xiaozhi-server`。将升级分区生成的 `xiaozhi.bin` 放入 `main/xiaozhi-server/data/bin/`，不要使用首次烧录用的 `merged-binary.bin`。
+
+文件名必须是 `{设备型号}_{版本号}.bin`，版本号以数字开头，可包含字母、点、下划线和短横线。例如：
+
+```bash
+cd main/xiaozhi-server
+mkdir -p data/bin
+cp /可信路径/xiaozhi.bin data/bin/bread-compact-wifi_1.6.6.bin
+```
+
+设备型号必须与上报型号一致，新版本必须高于当前版本。固件缓存默认约 30 秒；更新文件后等待缓存失效或通过正常服务管理流程重启。
+
+公网下载地址必须是设备可访问的外部 TLS 地址，不能写 `127.0.0.1`、`localhost` 或 Docker 内部主机名。若当前版本仍从 `server.vision_explain` 推导下载基址，应在私有 `data/.config.yaml` 中填写反向代理后的外部地址；不要因此开放内部管理端口。
+
+验证时检查 OTA 日志中的设备型号、当前版本、匹配文件和最终下载 URL，并从设备所在网络实际下载一次。失败时依次检查文件名、版本比较、缓存、反向代理、证书和防火墙。
+
 ## 常见问题
-以下是一些常见问题，供参考：
 
-[1、为什么我说的话，小智识别出来很多韩文、日文、英文](../reference/FAQ.md)
-
-[2、为什么会出现“TTS 任务出错 文件不存在”？](../reference/FAQ.md)
-
-[3、TTS 经常失败，经常超时](../reference/FAQ.md)
-
-[4、使用Wifi能连接自建服务器，但是4G模式却接不上](../reference/FAQ.md)
-
-[5、如何提高小智对话响应速度？](../reference/FAQ.md)
-
-[6、我说话很慢，停顿时小智老是抢话](../reference/FAQ.md)
-
-[7、我想通过小智控制电灯、空调、远程开关机等操作](../reference/FAQ.md)
+- 能访问 OTA 但设备连不上：检查 OTA 返回的 WebSocket URL 是否从设备网络可达，公网是否使用 WSS 和受信任证书。
+- 烧录后板型异常：重新核对 `idf.py set-target`、`BOARD_TYPE` 与硬件型号，清理的是固件构建目录，不是服务端 Docker 缓存。
+- OTA 没有升级：核对上报型号、当前版本、`xiaozhi.bin` 文件名和下载 URL，不要上传 `merged-binary.bin`。
+- 需要设备互呼、MQTT 或常驻 MCP：继续阅读[设备通信与呼叫](device-call-guide.md)。

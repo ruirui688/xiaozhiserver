@@ -13,7 +13,7 @@ source_paths:
 
 本文档说明 xiaozhi-server 中“大模型能看到什么提示词、工具描述和上下文”，以及这些内容从后台配置到 Python 运行时再到模型请求的完整链路。
 
-先读整体架构：[云端运行架构与配置链路](../architecture/cloud-runtime-architecture.md)。
+先读[项目完整架构](./project-architecture.md)和[运行时链路](./runtime-flows.md)。
 
 ## 1. 总体模型
 

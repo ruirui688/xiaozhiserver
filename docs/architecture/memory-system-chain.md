@@ -1,5 +1,5 @@
 ---
-status: supporting
+status: canonical
 owner: memory
 last_verified: 2026-07-23
 source_paths:
@@ -14,7 +14,7 @@ source_paths:
 
 本文说明托管长期记忆的真实运行链路。核心原则是：普通聊天不会被后端自动抽取为记忆，记忆变更必须由主对话 LLM 主动调用 `manage_memory` 工具。
 
-先读：[提示词注入工程](prompt-injection-engineering.md)、[长期记忆维护架构](long-term-memory-maintenance.md)。
+相关运行时上下文见[提示词注入工程](prompt-injection-engineering.md)，跨模块身份与数据责任见[数据与契约](data-and-contracts.md)。
 
 ## 1. 总体链路
 
@@ -67,6 +67,17 @@ source_paths:
 
 旧库中的 `ai_memory_session_state` 表为已发布迁移遗留结构。为保持 Liquibase checksum 和历史库兼容，不修改旧迁移，但当前实时链路不再读取或写入该表。
 
+长期记忆数据层分工如下：
+
+| 数据 | 用途 |
+| --- | --- |
+| `ai_memory_source_event` | 原始对话证据，不触发抽取 |
+| `ai_memory_candidate` | 管理端预览和历史重建候选 |
+| `ai_memory_fact` | 生效、归档或删除的事实 |
+| `ai_memory_revision` | 所有维护动作的审计轨迹 |
+| `ai_memory_profile` / `ai_memory_tool_behavior` | 画像和工具行为投影 |
+| `ai_memory_forget_tombstone` | 供主模型理解的忘记意图 |
+
 ## 4. 主模型记忆工具
 
 工具定义位于 `plugins_func/functions/manage_memory.py`。
@@ -97,6 +108,10 @@ manage_memory(
 工具只在已选择 `managed_memory` 且运行时支持原生 function call 时注册。这是能力可用性检查，不分析用户语义，也不决定是否写入。
 
 ## 5. manager-api 维护
+
+`maintenance_llm` 只保存模型管理中的 LLM/SLM 配置 ID，不复制 API Key、Base URL 或上游模型名；调用时由
+manager-api 从标准模型配置组装真实参数。选择 `nomem` 时不得注入托管记忆，选择 `managed_memory` 时才展示并校验
+维护模型。PowerMem、mem0 和短摘要仍是独立 provider，不与 manager-api 事实层混存。
 
 `/config/memory/remember` 收到主模型决定后，维护模型只能在以下动作中整理：
 
@@ -165,7 +180,15 @@ worker 依次报告读取会话、抽取、复核、校验、应用和收尾进�
 `GET /rebuild-task/{taskId}` 轮询，刷新页面、关闭后重进或启动响应中断都可以恢复状态；活动任务期间禁止并发重建、
 重审、清空、手工记住和忘记。重建预览与重审仍保留同步请求和结果不确定保护。
 
+创建任务必须先保存并读回确认状态与最近任务指针，任一步失败都按 taskId 回滚状态、指针和活动锁，且不得提交 worker。
+活动锁 TTL 为任务超时再加清理宽限；状态更新使用 Redis compare-and-set，超时、成功和失败只能有一个终态。调度器先把
+`TIMED_OUT` 写入 Redis，再尽力中断 worker，因此第三方 SDK 即使忽略中断并迟到返回，也不能覆盖终态。进程重启后
+`PENDING` / `RUNNING` 仍可查询；读取已过截止时间的任务会收敛为 `TIMED_OUT`。
+
 `confirmation_state=auto` 的界面显示名是“模型调用”，表示事实来自模型工具链路，不表示系统自动扫描聊天。
+
+兼容字段 `summary_memory` 仍被短摘要和角色配置链路消费。删除前必须同时完成 Java、Web、Mobile、Python、文档和
+Liquibase 补偿迁移，不能直接修改已发布 changeSet 或只提交 `DROP COLUMN`。
 
 ## 8. 关键文件
 
@@ -201,8 +224,5 @@ worker 依次报告读取会话、抽取、复核、校验、应用和收尾进�
 - 页面重建后能恢复 `PENDING` / `RUNNING`，失败轮询退避不超过 10 秒；
 - 超长记忆只裁剪动态 `<memory>`，不裁剪静态角色与安全规则。
 
-当前自动测试覆盖 service/controller 状态机、Web 状态纯函数和 Python 上下文预算。主集成复跑 Java 全量
-167 通过、5 跳过；使用项目 Conda 环境并隔离宿主插件后，Python 全量 344 通过且 `compileall` 通过；Web
-状态/组件测试 14 通过且构建通过。首次普通 pytest 被宿主 ROS/lark 插件和
-用户级 websockets 污染，不能作为项目运行时失败。真实 Redis 锁与过期、MySQL 事务隔离、浏览器刷新恢复以及
-外部维护模型超时均未联调。
+自动测试应覆盖 service/controller 状态机、Web 轮询状态纯函数和 Python 上下文预算。真实 Redis Lua 序列化与 TTL、
+多进程重启、MySQL 事务隔离、浏览器刷新恢复以及忽略线程中断的真实外部模型仍需在集成环境验证。

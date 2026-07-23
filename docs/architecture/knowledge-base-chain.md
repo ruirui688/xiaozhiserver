@@ -15,7 +15,7 @@ source_paths:
 
 本文档说明 xiaozhi-esp32-server 知识库（Knowledge Base / RAG）的完整链路：从文件上传、分块、向量化，到检索注入 LLM 上下文的端到端流程。
 
-先读：[模型选择与厂商目录](model-selection-and-vendor-catalog.md)、[记忆系统与知识库治理](../models/memory-and-knowledge-governance.md)。
+模型配置与密钥边界见[模型管理](../models/model-management.md)。记忆保存用户长期事实，知识库保存业务资料和可检索文档；两者不得共用事实表、模型密钥或权限判断。
 
 ## 1. 总览
 
@@ -78,7 +78,7 @@ KnowledgeFilesController (/datasets/{id}/documents)
 ### 3.1 文件分块管道
 
 ```text
-LocalKnowledgeAdapter.parseFile()  (1658 行)
+LocalKnowledgeAdapter.parseFile()
 
 按文件类型分发:
   Excel (.xlsx/.xls) → Apache POI 行解析 → question/answer 检测
@@ -99,10 +99,14 @@ LocalKnowledgeAdapter.parseFile()  (1658 行)
     → 失败 → 保留原始 chunk（graceful degradation）
 ```
 
-本地适配器在上传请求内同步完成解析、切片和入库，上传成功时文档状态直接为
-`DONE`。`POST /chunks` 对本地文档只校验上传阶段生成的切片是否仍然存在，
-不会把已有切片反向拼接成有损原文后重新切片；缺少切片时必须重新上传原文件。
-RAGFlow 适配器仍通过 `POST /chunks` 异步启动解析，状态先进入 `RUNNING`。
+知识库页面只选择模型管理中已启用、测试通过的 LLM/SLM 配置 ID，保存到
+`parser_config.llm_model_id`；不得再次保存 API Key、Base URL 或上游模型名。大模型切片只发生在文档解析阶段，
+失败、超时、空输出或非 JSON 时回退规则切片，不在每次检索时调用 LLM。
+
+LocalKnowledge 在上传请求内同步完成解析、切片和入库；接口成功时文档状态为 `DONE`、进度为 100%。
+页面“解析”及 `POST /chunks` 只验证上传阶段生成的切片是否仍然存在，不能把数据库切片拼接成有损原文后重新切片。
+修改切片模型或参数、或发现切片缺失时，必须删除旧文档并重新上传原文件，再通过“查看切片”和“召回测试”验证。
+RAGFlow 仍通过 `POST /chunks` 异步启动远端解析，状态可先进入 `RUNNING`。
 
 知识库新增和更新时，`parserConfig` 字符串在 manager-api 边界显式解码为
 RAG 请求 DTO；数据库继续保存用户提交的完整 JSON。远端响应仅在用户未提交配置时
@@ -313,9 +317,8 @@ Web 上传不再手工指定 `multipart/form-data`，由浏览器为 `FormData` 
 | Python 上下文 | 本地/RAGFlow 结果去重与预算、tool history 总预算、schema 保真、动态 context 和 memory 预算 |
 | Mobile | API 与页面源码覆盖 CRUD、上传、解析、切片和召回；最终构建与微信端联调仍待完成 |
 
-截至 2026-07-23，主集成复跑 Java 全量 `mvn test` 188 通过、5 跳过；在项目 Conda 环境隔离宿主插件后
-运行 Python 全量测试 344 通过且 `compileall` 通过；Web 功能测试 17 通过且构建通过。真实 MySQL 数据、
-Redis、浏览器关闭重开、RAGFlow、外部切片/embedding
+自动验证应覆盖 Java 全量测试、项目 Conda 环境中的 Python 测试与 `compileall`、Web 功能测试和构建。
+真实 MySQL 数据、Redis、浏览器关闭重开、RAGFlow、外部切片/embedding
 模型和微信 `uploadFile` 尚未端到端验证；字符预算也不等于模型 token 预算，正式发布前必须用目标模型与业务长文档
 检查召回相关性。
 

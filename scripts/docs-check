@@ -22,7 +22,6 @@ check_required_entries() {
     docs/architecture/project-architecture.md
     docs/deployment/private-docker-release.md
     docs/standards/development-specification.md
-    docs/standards/ai-coding-agent-instructions.md
     docs/standards/documentation-policy.md
     docs/local-customizations.md
     scripts/README.md

@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: xiaozhi-server
-last_verified: 2026-07-12
+last_verified: 2026-07-23
 source_paths:
   - main/xiaozhi-server/core/semantic
   - main/xiaozhi-server/core/handle/receiveAudioHandle.py
@@ -216,7 +216,9 @@ game.exit
   → 不关闭 websocket
 ```
 
-游戏快捷启动（新增）：`GameSessionManager.get_requested_game_tool()` 现在检测用户文本是否包含游戏关键词（如”成语接龙””你说我猜”），命中时直接返回游戏工具名，跳过 intent LLM 调用。
+纯语言游戏 code 仅保留兼容标识；`ServerPluginExecutor` 跳过注册，
+`GameSessionManager.get_requested_game_tool()` 不得按关键词强制路由。相关用户输入继续回到主 LLM，
+由功能插件软提示词主持游戏流程。
 
 这和旧的 `exit_commands` 不同。旧退出命令仍用于关闭连接。
 
@@ -331,6 +333,9 @@ conda run -n xiaozhi-esp32-server pytest tests
 
 ## 9. 关联文档
 
-- [语义打断与端到端语音模型演进分析](./semantic-interruption-and-e2e-voice-model-analysis.md) — 语义打断方案设计与端到端模型演进路线
-- [云端运行架构与配置链路](./cloud-runtime-architecture.md) — 语义控制中枢在全链路中的位置
+- [项目完整架构](./project-architecture.md)和[运行时链路](./runtime-flows.md) — 语义控制中枢在全链路中的位置
 - [提示词注入工程](./prompt-injection-engineering.md) — LLM 兜底时的提示词和行为约束
+
+端到端语音模型、个性化 VAD、音频淡出和训练数据采集仍是研究方向，不是当前运行契约。引入前必须单独完成
+工具调用兼容、降级开关、设备资源、隐私同意、数据导出/删除和真实延迟评测；不得根据过时词表或固定文本长度
+替代当前 LLM 语义打断裁决。

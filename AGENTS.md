@@ -62,7 +62,6 @@ git remote -v
 README.md
 docs/README.md
 docs/standards/development-specification.md
-docs/standards/ai-coding-agent-instructions.md
 docs/local-customizations.md
 ```
 
@@ -85,7 +84,6 @@ docs/local-customizations.md
 所有任务
   → AGENTS.md + README.md + docs/README.md
   → docs/standards/development-specification.md
-  → docs/standards/ai-coding-agent-instructions.md
   → docs/local-customizations.md
 
 Python 核心服务
@@ -105,11 +103,10 @@ Web 管理后台
 
 模型评测 / 配置助手
   → docs/architecture/model-benchmark-and-assistant.md
-  → docs/models/performance_tester.md
 
 提示词注入 / 工具调用 / MCP / 语义控制
   → docs/architecture/project-architecture.md
-  → docs/architecture/cloud-runtime-architecture.md
+  → docs/architecture/runtime-flows.md
   → docs/architecture/semantic-control-center.md
   → docs/architecture/prompt-injection-engineering.md
   → docs/architecture/function-plugin-architecture.md
@@ -117,13 +114,12 @@ Web 管理后台
   → docs/architecture/mcp-chains.md
 
 长期记忆
-  → docs/architecture/long-term-memory-maintenance.md
   → docs/architecture/memory-system-chain.md
   → main/manager-api/.../modules/memory/ (25个文件)
 
 知识库 / RAG
   → docs/architecture/knowledge-base-chain.md
-  → docs/models/local-knowledge-integration.md
+  → docs/models/ragflow-integration.md（仅外部 RAGFlow）
   → main/manager-api/.../modules/knowledge/
 
 认证 / 授权 / 安全
@@ -133,7 +129,7 @@ Web 管理后台
   → main/xiaozhi-server/core/websocket_server.py
 
 配置 / 运行产物
-  → docs/standards/config-runtime-policy.md
+  → docs/standards/development-specification.md（§6 配置、§9 运行数据）
 
 数据库
   → main/manager-api/src/main/resources/db/changelog/

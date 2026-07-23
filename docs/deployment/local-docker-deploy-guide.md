@@ -1,6 +1,6 @@
 # 本地 Docker 部署指南
 
-> 编写日期：2026-06-26 | 适用环境：本地开发/测试 | 区别于：生产环境 ACR 镜像拉取部署
+> 适用环境：本地开发/集成测试。本文示例不得直接用于公网或生产；生产唯一入口是 [ACR 镜像生产部署](private-docker-release.md)。
 
 ---
 
@@ -39,7 +39,7 @@
                               │     ├── /          → Vue.js 前端静态文件
                               │     └── /xiaozhi/* → 反向代理到 Java
                               └── Java :8003 (内部)
-                                    ├── Spring Boot 3.4.3
+                                    ├── Spring Boot 3.4.4
                                     ├── Liquibase 自动迁移
                                     └── MyBatis-Plus + Redis
 
@@ -76,7 +76,7 @@ Dockerfile-web (多阶段构建)
 |---|---|---|
 | **镜像来源** | 本地 `docker build` 构建 | ACR `docker pull` 拉取 |
 | **镜像标签** | `*-local:latest` | `crpi-...aliyuncs.com/yihuixiaozhi/*:latest` |
-| **MySQL 镜像** | `mysql:latest`（官方） | ACR 镜像（`.../mysql:8.4`） |
+| **MySQL 镜像** | `mysql:8.4`（官方） | ACR 镜像（`.../mysql:8.4`） |
 | **Redis 镜像** | `redis:8.0`（官方） | ACR 镜像（`.../redis:8.0`） |
 | **配置文件** | `data/.config.yaml`（手动创建） | `data/.config.yaml`（install 脚本自动生成） |
 | **代码更新** | 重新 `docker build` | `docker compose pull` |
@@ -220,7 +220,7 @@ services:
     container_name: xiaozhi-esp32-server-db
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: "123456"
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?required}"
       MYSQL_DATABASE: "xiaozhi_esp32_server"
       MYSQL_INITDB_ARGS: "--character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci"
     volumes:
@@ -234,24 +234,40 @@ services:
       retries: 10
     networks:
       - xiaozhi-net
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
 
   # ==================== Redis 缓存 ====================
   xiaozhi-esp32-server-redis:
     image: redis:8.0
     container_name: xiaozhi-esp32-server-redis
     restart: unless-stopped
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --requirepass "${REDIS_PASSWORD:?required}"
     volumes:
       - ./redis/data:/data
     expose:
       - "6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep PONG"]
       interval: 10s
       timeout: 5s
       retries: 3
     networks:
       - xiaozhi-net
+    environment:
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?required}"
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
 
   # ==================== Web 服务（Java 后端 + Vue 前端） ====================
   xiaozhi-esp32-server-web:
@@ -264,11 +280,11 @@ services:
       # 数据库连接（Docker 内部 DNS）
       SPRING_DATASOURCE_DRUID_URL: "jdbc:mysql://xiaozhi-esp32-server-db:3306/xiaozhi_esp32_server?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&nullCatalogMeansCurrent=true&useSSL=false&allowPublicKeyRetrieval=true"
       SPRING_DATASOURCE_DRUID_USERNAME: "root"
-      SPRING_DATASOURCE_DRUID_PASSWORD: "123456"
+      SPRING_DATASOURCE_DRUID_PASSWORD: "${MYSQL_ROOT_PASSWORD:?required}"
       # Redis 连接
       SPRING_DATA_REDIS_HOST: "xiaozhi-esp32-server-redis"
       SPRING_DATA_REDIS_PORT: "6379"
-      SPRING_DATA_REDIS_PASSWORD: ""
+      SPRING_DATA_REDIS_PASSWORD: "${REDIS_PASSWORD:?required}"
       # Python server 地址（供 Java 回调）
       XIAOZHI_SERVER_HTTP_BASE_URL: "http://xiaozhi-esp32-server:8003"
       # 音乐文件目录
@@ -283,6 +299,8 @@ services:
         condition: service_healthy
     networks:
       - xiaozhi-net
+    cap_drop:
+      - ALL
 
   # ==================== Python 语音服务 ====================
   xiaozhi-esp32-server:
@@ -295,17 +313,19 @@ services:
     volumes:
       - ./server/data:/opt/xiaozhi-esp32-server/data
       - ./music:/opt/xiaozhi-esp32-server/music
-    security_opt:
-      - seccomp:unconfined
     depends_on:
       - xiaozhi-esp32-server-web
     networks:
       - xiaozhi-net
+    cap_drop:
+      - ALL
 
 networks:
   xiaozhi-net:
     driver: bridge
 ```
+
+在同目录创建不提交 Git 的 `.env`，为 `MYSQL_ROOT_PASSWORD` 和 `REDIS_PASSWORD` 分别生成高强度随机值。不要在命令历史、截图、日志或文档里记录真实值。生产环境还必须使用 TLS、最小暴露端口和 `deploy/production/` 的受审计模板。
 
 ### 4.3 配置文件准备
 
@@ -479,8 +499,7 @@ docker compose restart xiaozhi-esp32-server-web
 # 完全停止并删除容器（保留数据卷）
 docker compose down
 
-# 完全停止并删除容器 + 数据卷（⚠️ 数据全部丢失）
-docker compose down -v
+# 删除数据卷会造成不可恢复的数据丢失，不作为日常操作提供；先按 6.5 节备份并取得明确授权。
 ```
 
 ### 6.4 进入容器调试
@@ -492,11 +511,11 @@ docker exec -it xiaozhi-esp32-server bash
 # 进入 Web 容器
 docker exec -it xiaozhi-esp32-server-web bash
 
-# 进入 MySQL 容器
-docker exec -it xiaozhi-esp32-server-db mysql -uroot -p123456 xiaozhi_esp32_server
+# 进入 MySQL 容器，按提示输入密码
+docker exec -it xiaozhi-esp32-server-db mysql -uroot -p xiaozhi_esp32_server
 
-# 进入 Redis 容器
-docker exec -it xiaozhi-esp32-server-redis redis-cli
+# 进入 Redis 容器，按提示输入密码
+docker exec -it xiaozhi-esp32-server-redis redis-cli --askpass
 ```
 
 ### 6.5 数据备份
@@ -506,7 +525,7 @@ cd ~/xiaozhi-docker-data
 
 # 备份 MySQL 数据
 docker exec xiaozhi-esp32-server-db \
-  mysqldump -uroot -p123456 xiaozhi_esp32_server \
+  sh -c 'exec mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" xiaozhi_esp32_server' \
   > backup_$(date +%Y%m%d).sql
 
 # 备份整个数据目录
@@ -514,18 +533,9 @@ tar -czf xiaozhi-data-backup-$(date +%Y%m%d).tar.gz \
   mysql/data/ redis/data/ server/data/ uploadfile/ music/
 ```
 
-### 6.6 镜像清理
+### 6.6 缓存保护
 
-```bash
-# 清理构建缓存（释放磁盘空间）
-docker builder prune
-
-# 清理未使用的镜像
-docker image prune
-
-# 清理所有未使用的 Docker 资源（谨慎）
-docker system prune -a
-```
+Docker/BuildKit 缓存和项目基础镜像是重要构建资产。默认只查看磁盘占用，不执行 `builder prune`、`buildx prune`、`image prune` 或 `system prune`。确需释放空间时，先列出将删除的精确对象和重新下载成本，取得明确授权后再处理。
 
 ---
 
@@ -708,4 +718,4 @@ sudo ufw allow 8003/tcp
 
 ---
 
-> 关联文档：[模型管理存储与保存架构](../models/model-management.md) | [语义打断与端到端语音模型演进分析](../architecture/semantic-interruption-and-e2e-voice-model-analysis.md)
+> 关联文档：[项目完整架构](../architecture/project-architecture.md) | [模型管理存储与保存架构](../models/model-management.md)

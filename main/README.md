@@ -14,7 +14,7 @@ digital-human/     数字人相关模块
 
 项目总入口见 [../README.md](../README.md)。
 
-文档入口见 [../docs/README.md](../docs/README.md)，代码结构说明见 [../docs/architecture/current-code-map.md](../docs/architecture/current-code-map.md)。
+文档入口见 [../docs/README.md](../docs/README.md)，模块边界和代码入口见 [../docs/architecture/project-architecture.md](../docs/architecture/project-architecture.md)。
 
 模块开发入口：
 

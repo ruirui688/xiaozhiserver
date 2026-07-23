@@ -1,6 +1,62 @@
-# 本地开发工作流
+# 本地开发环境与工作流
 
 `scripts/dev` 是本项目的本地开发统一入口，用于启动、停止、查看状态、查看日志和做环境体检。旧的 `scripts/start-dev.sh` 只作为兼容包装器保留，会把旧参数转发到 `scripts/dev`，不再维护独立的 `.run/` 和 `logs/dev/` 运行环境。
+
+本文只面向 Ubuntu 22.04/24.04 的本地源码开发。服务器部署使用 `docs/deployment/`，不要把本文的开发账号、明文 HTTP 地址或本地服务配置复制到生产环境。
+
+## 首次准备环境
+
+本项目需要 JDK 21、Maven、Node.js 22 LTS、npm、pnpm 10.10.x、Conda、MySQL 8、Redis、FFmpeg 和 Opus。先安装系统依赖：
+
+```bash
+sudo apt update
+sudo apt install -y ca-certificates curl wget gnupg lsb-release \
+  software-properties-common build-essential pkg-config git git-lfs \
+  unzip ffmpeg libopus0 libopus-dev libsndfile1 portaudio19-dev \
+  libasound2-plugins openjdk-21-jdk maven mysql-server redis-server
+
+git lfs install
+sudo systemctl enable --now mysql redis-server
+```
+
+WSL2 不支持 `systemctl` 时，改用 `sudo service mysql start` 和 `sudo service redis-server start`。安装 Node.js 与 pnpm：
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt install -y nodejs
+sudo corepack enable
+corepack prepare pnpm@10.10.0 --activate
+```
+
+安装 Miniconda 后创建项目规定的 Python 3.10 环境。即使已经激活环境，项目命令仍统一写成 `conda run`，避免误用系统 Python：
+
+```bash
+conda create -n xiaozhi-esp32-server python=3.10 -y
+conda install -n xiaozhi-esp32-server -y -c conda-forge ffmpeg libopus libiconv
+cd main/xiaozhi-server
+conda run -n xiaozhi-esp32-server python -m pip install -r requirements.txt
+```
+
+CPU 开发机可先按 PyTorch 官方 CPU wheel 说明安装项目锁定的版本，再安装其余锁定依赖；GPU 环境必须根据驱动和 CUDA 版本选择官方 wheel，不要混装。
+
+安装前端依赖：
+
+```bash
+cd main/manager-web && npm install
+cd ../manager-mobile && pnpm install
+```
+
+创建仅供本机使用的 MySQL 数据库和低权限开发账号；账号、密码必须自行生成，不要使用本文档固定值，也不要提交到 Git。`manager-api` 启动时会通过 Liquibase 应用迁移。私有 Python 配置放在 `main/xiaozhi-server/data/.config.yaml`：
+
+```bash
+cd main/xiaozhi-server
+mkdir -p data
+cp config_from_api.yaml data/.config.yaml
+```
+
+确认其中 `manager-api.url` 指向本地 API，`manager-api.secret` 与智控台参数管理中的本地 `server.secret` 一致。默认 ASR 模型放在 `main/xiaozhi-server/models/SenseVoiceSmall/model.pt`；模型文件、私有配置、密钥和运行日志都禁止提交。
+
+首次完成后运行 `scripts/dev doctor`，再进入日常启动流程。
 
 ## 常用命令
 
@@ -19,6 +75,8 @@ scripts/dev logs api
 scripts/dev logs all -f
 scripts/dev stop
 ```
+
+推荐启动顺序是 MySQL、Redis、manager-api、manager-web、xiaozhi-server，最后按需启动 manager-mobile。通常直接执行 `scripts/dev start all`；只调试管理后台时执行 `scripts/dev start api` 和 `scripts/dev start web`。
 
 目标说明：
 
@@ -195,3 +253,19 @@ sudo systemctl start redis-server
 sudo service mysql start
 sudo service redis-server start
 ```
+
+## 变更验证
+
+按修改模块执行最小验证：
+
+```bash
+cd main/xiaozhi-server
+conda run -n xiaozhi-esp32-server python -m compileall .
+conda run -n xiaozhi-esp32-server pytest
+
+cd ../manager-api && mvn test
+cd ../manager-web && npm run build
+cd ../manager-mobile && pnpm build:h5
+```
+
+数据库结构变更必须新增 Liquibase 迁移并登记到 `db.changelog-master.yaml`。不要默认调用外部模型、启动长期服务或执行生产部署作为本地验证。

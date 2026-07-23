@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: xiaozhi-server
-last_verified: 2026-07-22
+last_verified: 2026-07-23
 source_paths:
   - main/xiaozhi-server/core
 ---
@@ -10,7 +10,7 @@ source_paths:
 
 本文档说明 ESP32 设备从 WebSocket 连接到音频上行/下行、IoT 描述符注册、Device MCP 工具发现、OTA 固件升级的完整链路，以及连接生命周期管理。
 
-先读：[云端运行架构与配置链路](cloud-runtime-architecture.md)、[提示词注入工程](prompt-injection-engineering.md)。
+先读：[项目完整架构](project-architecture.md)、[运行时链路](runtime-flows.md)、[提示词注入工程](prompt-injection-engineering.md)。
 
 ## 1. 链路人总览
 
@@ -420,6 +420,8 @@ iot_handler.py:36-61  SERVER_GATED_IOT_DEVICES
 **注意**：工具名解析存储了 `(device_name, property/method)` 到 `_tool_device_map` 的映射，不依赖 `split("_")` 分片。
 
 ## 8. Device MCP
+
+“音量”必须先区分对象：Device MCP 的扬声器音量控制 ESP32 硬件，智能体 `ttsVolume` 控制厂商合成参数，Web `<audio>` 音量只控制浏览器试听。`self_audio_speaker_set_volume` 等设备工具由设备运行时上报并受服务端门控，不是 Python 内置 TTS 配置；三层数值范围不能互相复用。
 
 ### 8.1 MCP 能力声明
 

@@ -1,6 +1,6 @@
 # 官方上游同步策略
 
-本文规定本项目从官方 `xiaozhi-esp32-server` 同步源码时的边界、检查清单和冲突处理规则。它与 [本地定制记录](../local-customizations.md)、[项目完整架构与文档导航](../architecture/project-architecture.md)、[云端运行架构与配置链路](../architecture/cloud-runtime-architecture.md)、[提示词注入工程](../architecture/prompt-injection-engineering.md) 一起使用。
+本文规定本项目从官方 `xiaozhi-esp32-server` 同步源码时的边界、检查清单和冲突处理规则。它与 [本地定制记录](../local-customizations.md)、[项目架构](../architecture/project-architecture.md)、[运行流程](../architecture/runtime-flows.md)、[提示词注入](../architecture/prompt-injection-engineering.md) 一起使用。
 
 ## 1. 边界定义
 
@@ -23,7 +23,7 @@
 2. 确认 remote：origin 是私有仓库，upstream 是官方仓库。
 3. 从最新 origin/main 创建 sync/upstream-YYYYMMDD 分支。
 4. 读取 docs/local-customizations.md，列出本次可能受影响的本地保护点。
-5. 读取 docs/architecture/project-architecture.md、cloud-runtime-architecture.md、prompt-injection-engineering.md，理解配置、提示词、工具和 MCP 链路。
+5. 读取 docs/architecture/project-architecture.md、runtime-flows.md、prompt-injection-engineering.md，理解配置、提示词、工具和 MCP 链路。
 6. 先查看 upstream diff，再决定合并范围；不要盲目执行大范围覆盖。
 7. 标记高风险区域：数据库、配置、Docker、OTA、WebSocket、设备协议、MCP、插件、PromptManager、Dialogue、UnifiedToolHandler、Intent、TTS、打断处理。
 8. 确认私有运行配置和生产数据不会被纳入 Git。
@@ -138,7 +138,7 @@ docs/local-customizations.md
 
 | 变化 | 需要更新 |
 | --- | --- |
-| 连接初始化、配置拉取、OTA、WebSocket、MQTT | `docs/architecture/cloud-runtime-architecture.md` 和本文相关检查项 |
+| 连接初始化、配置拉取、OTA、WebSocket、MQTT | `docs/architecture/runtime-flows.md`、`device-interaction-chain.md` 和本文相关检查项 |
 | PromptManager、Dialogue、Memory、voiceprint、context_providers | `docs/architecture/prompt-injection-engineering.md` |
 | 工具执行器、插件注册、MCP executor、Intent provider | `docs/architecture/prompt-injection-engineering.md` 和 `docs/local-customizations.md` |
 | 新增或调整本地长期定制 | `docs/local-customizations.md` |

@@ -1,13 +1,47 @@
-# 模型管理存储与保存架构
+---
+status: canonical
+owner: models
+last_verified: 2026-07-23
+source_paths:
+  - main/manager-api/src/main/java/xiaozhi/modules/model
+  - main/manager-web/src/views/ModelConfig.vue
+  - main/xiaozhi-server/core/utils/model_config.py
+---
+
+# 模型管理与选择契约
 
 本文用于解释智控台 `模型配置` 页面背后的模型管理方式：页面上每一列从哪里来，新增/编辑时提交什么，数据库怎么存，最后如何下发给 `xiaozhi-server` 初始化 provider。
 
 相关专题：
 
-- [标准模型配置目录](./model-config-catalog.md)：能力分类和字段分层的完整目录。
-- [模型选择与厂商目录架构](../architecture/model-selection-and-vendor-catalog.md)：厂商产品、模型系列、协议和适配状态。
 - [模型专业评测与配置智能助手架构](../architecture/model-benchmark-and-assistant.md)：批量评测、助手和草案治理。
-- [模型性能测试工具使用指南](./performance_tester.md)：性能测试弹窗和指标。
+
+专项文档只保留无法由模型管理契约替代的接入步骤或带日期的环境证据：
+
+| 文档 | 独立保留原因 |
+| --- | --- |
+| [豆包 Seed TTS 2.0](./huoshan-streamTTS-voice-cloning.md) | 当前唯一有效 Seed TTS 凭据、音色和验证步骤 |
+| [Fish Speech](./fish-speech-integration.md) / [IndexStreamTTS](./index-stream-integration.md) | 两套自部署 TTS 的外部服务安装与启动步骤不同 |
+| [PowerMem](./powermem-integration.md) | 独立第三方 Memory provider 的安装、存储和故障排查 |
+| [RAGFlow](./ragflow-integration.md) | 外部 RAGFlow 服务部署与智控台连接指南，本地知识库实现不覆盖它 |
+| [外置声纹](./voiceprint-integration.md) | 独立服务协议、可信 agent 作用域、迁移和五条上限 |
+| [FunASR 资源报告](./funasr-sensevoice-resource-benchmark.md) | 带环境和日期的容量/并发证据，不作为通用配置规则 |
+| [语音延迟报告](./voice-pipeline-latency-analysis.md) | 真机和生产日志的阶段性延迟证据 |
+
+模型目录和可运行配置不是同一事实。目录项描述厂商产品、协议和项目适配状态；配置实例保存当前环境的端点、
+上游模型 ID、普通参数和密钥。厂商列表、价格和具体版本会变化，页面目录必须来自 `ModelCatalogServiceImpl` 与模板数据，
+并带来源和核验时间，不能把一次调研的型号清单写死在文档或前端。
+
+目录项至少维护 `model_type`、厂商/产品、模型系列、`upstream_model_id`、`adapter_code`、协议、接入方式、
+`SUPPORTED | PARTIAL | NEEDS_ADAPTER | DEPRECATED`、推荐/避用场景、必填字段、密钥字段、真实测试契约、官方来源和
+最后核验时间。保存和启用必须遵守：
+
+- 同一厂商的 HTTP、普通 WebSocket、Realtime、OpenAI Compatible 和双向流式协议不能因为名称相近共用 adapter；
+- LLM/VLLM 的 `model`、语音服务的 `resource_id` / `cluster`、讯飞等产品参数不能互换；
+- 未适配项可以展示并输出接入任务，但不能保存为已启用；
+- 设备实时 ASR 优先已适配流式协议，会议/文件转写不能冒充设备短句 ASR；
+- TTS 推荐必须同时考虑首音频、稳定性、音色授权和设备格式；主 LLM 必须验证工具调用、延迟和安全边界；
+- 新厂商版本先更新目录事实和模板，再通过真实测试决定是否推荐，不在本文维护易漂移型号清单。
 
 ## 1. 页面字段对应关系
 
@@ -473,12 +507,19 @@ model_config:
 
 ## 9. 修改模型管理时必须守住的边界
 
+### TTS 音色与音量
+
+管理端可选音色来自 `ai_tts_voice`，不是 Python provider 的硬编码能力清单。某个 TTS 模型只显示一个音色，通常表示数据库只登记了一条已验证且有授权的 voice；新增音色应通过管理界面或新的 Liquibase 迁移登记有效厂商 voice ID，不能修改已发布迁移，也不能把“厂商 API 支持”直接当作“项目已验证可用”。
+
+`ttsVolume` 是厂商参数，不存在跨 provider 通用的数值范围。设备喇叭音量由 Device MCP 控制，浏览器试听音量由前端播放器控制，二者都不是 `ttsVolume`。页面和配置适配器必须展示或转换对应 provider 的范围，不能把同一个滑块值原样解释给所有厂商。
+
 - 不把模型配置、系统参数、智能体选择、插件参数、MCP 工具和知识库数据混在一张表里。
 - 不把真实密钥写入 `docs/`、迁移说明、日志或前端回显。
 - 不让 `config_json` 重新成为标准运行时来源。
 - 不把 `modelCode` 当成上游模型名，也不把 `upstreamModelId` 当成项目内部编码。
 - 不把同厂商不同协议强行套到同一个 adapter。
 - 不把未测试或只连通成功的 ASR/TTS/LLM 标记为可启用。
+- 声纹、TTS Voice、Knowledge Dataset、Plugin、MCP 和 No-code HTTP Tool 是关联资源或系统能力，不因使用模型而写入模型配置主表。
 
 ## 10. 快速定位
 

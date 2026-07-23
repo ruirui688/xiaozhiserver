@@ -18,16 +18,13 @@ source_paths:
 README.md                         项目总入口，只保留项目概览、常用入口和关键规范链接
 AGENTS.md                         AI 编程工具的最短开工规则
 docs/README.md                    文档门户，只保留角色导航、任务导航和事实边界
-docs/architecture/README.md       架构索引，只维护架构领域的阅读路径
 docs/architecture/project-architecture.md  当前系统架构的唯一总览
-docs/standards/README.md          规范目录入口，只解释 standards 下各规范职责
-docs/reports/README.md            报告目录入口，只索引带日期和验证边界的阶段结论
 docs/standards/*.md               强制规范，是具体规则来源
 main/README.md                    main 模块目录入口，只说明模块职责和文档去向
 main/<module>/README.md           模块开发入口，只说明该模块构建、启动、验证和本地约定
 ```
 
-避免在多个入口重复大段规则。规则变更应优先修改对应 `docs/standards/*.md`，入口文档只链接到规则来源。根门户不得复制架构专题目录、规范全文或报告清单；这些分别由三个目录入口维护。
+避免在多个入口重复大段规则。规则变更应优先修改对应 `docs/standards/*.md`，入口文档只链接到规则来源。`docs/README.md` 是唯一文档目录；不要再为子目录创建只重复链接的 README。
 
 ## 2. 分类规则
 
@@ -78,7 +75,6 @@ documentation-policy.md
 
 ```text
 docs/README.md
-docs/standards/README.md
 README.md
 相关专题文档中的相对链接
 ```
@@ -87,7 +83,6 @@ README.md
 
 ```text
 AGENTS.md
-docs/standards/ai-coding-agent-instructions.md
 docs/local-customizations.md
 ```
 
@@ -157,7 +152,7 @@ rg -n 'old-file-name|old/path' README.md AGENTS.md docs main deploy scripts .git
 
 同时验证：
 
-- Markdown 相对链接指向存在的文件，目录链接具有 README。
+- Markdown 相对链接指向存在的文件；入口直接链接到具体文档，不依赖子目录索引。
 - 页面只有一个 H1，标题层级不跳级。
 - 非报告文档能够从 `README.md` 或 `docs/README.md` 进入，不形成孤立页面。
 - canonical 文档之间不存在互相冲突的端口、配置优先级、认证或部署口径。

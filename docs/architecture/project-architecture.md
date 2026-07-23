@@ -1,7 +1,7 @@
 ---
 status: canonical
 owner: architecture
-last_verified: 2026-07-13
+last_verified: 2026-07-23
 source_paths:
   - main/xiaozhi-server
   - main/manager-api
@@ -12,7 +12,7 @@ source_paths:
 
 # 项目完整架构
 
-本文是项目级架构的唯一总览，回答系统由什么组成、边界在哪里、一次设备对话和一次配置变更如何流动。实现细节由 [架构中心](./README.md) 下的专题文档维护。
+本文是项目级架构的唯一总览，回答系统由什么组成、边界在哪里、一次设备对话和一次配置变更如何流动。按任务继续阅读时从[文档门户](../README.md)进入对应专题。
 
 ## 1. 系统定位
 
@@ -88,6 +88,18 @@ flowchart TB
 | `main/manager-mobile` | H5/iOS/Android/微信管理交互 | 复制一套独立后端业务规则 |
 | MySQL | 持久业务事实和 Liquibase 管理的结构 | 会话内高频状态 |
 | Redis | 缓存、短生命周期状态和配置加速 | 明文密钥的长期事实来源 |
+
+### 2.1 源码导航
+
+| 模块 | 稳定入口 | 主要分层 |
+| --- | --- | --- |
+| xiaozhi-server | `main/xiaozhi-server/app.py` | `core/handle/` 协议与音频，`core/providers/` 模型，`core/semantic/` 控制，`plugins_func/` 插件 |
+| manager-api | `main/manager-api/src/main/java/xiaozhi/AdminApplication.java` | `modules/config/` 配置装配，`modules/model/` 模型，`modules/knowledge/` 与 `modules/memory/` 数据能力，`modules/security/` 安全 |
+| manager-web | `main/manager-web/src/main.js` | `views/` 页面，`components/` 领域组件，`apis/` 请求封装 |
+| manager-mobile | `main/manager-mobile/src/main.ts` | `pages/` 页面，`api/` 与 `http/` 请求，`store/` 状态 |
+
+`core/connection.py` 只协调单设备会话；关闭生命周期继续下沉到 `core/session/`，会话观测进入
+`core/observability/`。数据库结构只能通过 `main/manager-api/src/main/resources/db/changelog/` 修改。
 
 ## 3. 设备实时主链路
 
@@ -192,7 +204,22 @@ Java 的 `ModelRuntimeAssembler` 负责从通用字段、普通参数和密钥�
 | 本地全模块 | 四个业务模块 + MySQL + Redis | 跨模块开发与配置联调 |
 | 生产容器 | 发布镜像 + MySQL + Redis + TLS 反向代理 | 多设备正式运行 |
 
-生产唯一操作入口是 [ACR 镜像生产部署](../deployment/private-docker-release.md)。网络、存储和恢复边界见 [部署架构](./deployment-architecture.md)。
+生产唯一操作入口是 [ACR 镜像生产部署](../deployment/private-docker-release.md)。推荐外部只暴露 TLS 入口：
+
+```text
+https://domain/                    -> manager-web :8002
+https://domain/xiaozhi/            -> manager-api
+wss://domain/xiaozhi/v1/           -> xiaozhi-server :8000
+https://domain/mcp/vision/explain  -> xiaozhi-server :8003
+```
+
+MySQL `3306` 和 Redis `6379` 只在容器网络开放。设备收到的 URL 必须是设备实际可达的域名或 LAN 地址，
+不能是容器名、WSL 私网地址或 `127.0.0.1`。私有配置、认证密钥、上传、音乐、数据库和 Redis 数据位于持久卷，
+不得烘焙进镜像或提交到 Git。
+
+启动和恢复边界：MySQL/Redis 健康后启动 manager-api，再启动 Web 与 xiaozhi-server；应用回滚切换到上一已验证
+镜像，数据库恢复使用发布前备份，已执行的 Liquibase changeSet 不通过修改旧 SQL 回退。资源预算优先保障 Python
+实时语音和本地 ASR，并对 Java、MySQL、Redis、PID 和日志设置明确上限。
 
 ## 9. 故障定位入口
 
@@ -205,4 +232,10 @@ Java 的 `ModelRuntimeAssembler` 负责从通用字段、普通参数和密钥�
 | 数据跨用户可见 | Workspace header 校验、资源实体归属、读写权限 |
 | 知识库或记忆未生效 | 智能体绑定、检索范围、超时降级和上下文注入 |
 
-开发前从 [架构中心](./README.md) 选择对应模块和领域文档，不应依赖临时分析报告或手写代码行数判断当前实现。
+开发前从[文档门户](../README.md)选择对应模块和领域文档，不应依赖临时分析报告或手写代码行数判断当前实现。
+
+## 10. 验证入口
+
+文档与自动事实执行 `scripts/docs-facts --check` 和 `scripts/docs-check`。代码按修改范围执行 Java `mvn test`、
+Web `npm run build`、Mobile `pnpm type-check && pnpm build:h5 && pnpm build:mp-weixin`；Python 必须使用项目
+Conda 环境运行 `compileall` 和测试。外部模型真实调用、长期服务和生产部署不属于默认验证。

@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: model
-last_verified: 2026-07-12
+last_verified: 2026-07-23
 source_paths:
   - main/xiaozhi-server/core/benchmark
   - main/manager-api/src/main/java/xiaozhi/modules/model
@@ -18,7 +18,7 @@ source_paths:
 
 配置助手可以提高接入效率，但它的输出不代表模型可用；专业评测可以证明某次配置在当前环境下的真实表现，但它不负责生成新 adapter 或修改源码。
 
-模型配置页还需要一层“模型选择目录”：提前整理厂商产品、模型系列、协议、适配状态和推荐场景，让用户先按业务目标选择目录项，而不是在 adapter 下拉框里猜。目录架构、讯飞/豆包口径和推荐规则见 [模型选择与厂商目录架构](./model-selection-and-vendor-catalog.md)。
+模型配置页的选择目录由[模型管理与选择契约](../models/model-management.md)统一定义。用户先按能力和场景选择带协议、适配状态的目录项，再填写配置；不能从 adapter 名称猜厂商产品。
 
 ## 1. 能力边界
 
@@ -151,6 +151,17 @@ manager-web 点击写入接入产物
 - 选择真实测试设备时，必须校验设备存在、MAC 地址存在、设备属于所选智能体，并能加载真实运行时配置。
 - 弹窗填写的业务测试问题必须作为评测样本进入 runner，不能只用内置通用问题替代真实场景。多行问题按同一业务场景的连续多轮对话执行。
 - 真实设备智能体评测必须显式应用后台 `runtime_config`，确保候选模型看到所选智能体的人设、记忆、插件、MCP 和上下文源；候选 LLM 覆盖只能发生在运行时配置校准之后。
+
+管理后台创建任务后轮询 `/models/benchmark/{taskId}`，历史结果长期保存并可级联删除 task/result/sample；运行中的任务
+不能删除。`测试轮数` 表示重复完整样本集，`并发模型数` 只控制不同候选模型并发；同一模型内部按轮次、case 和多轮
+user turn 串行，避免破坏对话上下文或瞬间打满 provider。
+
+报告至少区分 `success_rate`、`test_level`、端到端延迟及 P50/P90/P95、LLM `ttft_ms`、流式 TTS
+`first_audio_ms`、质量分、Judge 模式、安全 P0/P1 和样本明细。只有 `REAL_INFERENCE` 进入延迟统计；非流式模型
+不伪造首段指标。LLMJudge 按同一模型同一轮的完整多轮样本集批量评分，未选择或失败时记录启发式降级。
+
+运行前先确认 xiaozhi-server HTTP `8003` 可达且私有配置存在。跨主机或容器部署通过
+`XIAOZHI_SERVER_HTTP_BASE_URL` 指向实际服务地址；Judge 只引用标准模型配置 ID，不另存 API Key。
 
 ### 4.2 助手规则
 

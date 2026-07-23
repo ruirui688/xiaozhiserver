@@ -1,5 +1,17 @@
 # ACR 镜像生产部署
 
+本文是生产服务器安装、升级、回滚和恢复的唯一入口。部署文档与可执行资产的边界如下：
+
+仅做本机镜像构建和集成验证时使用[本地 Docker 部署指南](local-docker-deploy-guide.md)，不要把其中的本地拓扑当作生产方案。
+
+- `docs/deployment/` 只保存流程、决策、安全要求和排障说明。
+- `deploy/production/` 是生产服务器可直接消费的最小部署包；生产机无需完整源码。
+- `deploy/docker/`、`deploy/server/`、`deploy/release/` 分别承载镜像构建、服务器运维和发布资产。
+- `scripts/docker-build-private.sh`、`scripts/install-private-docker.sh`、`scripts/deploy`、`scripts/upgrade` 是兼容入口；迁移实现时必须先保留转发入口、更新引用并说明替代命令与回滚方法。
+- `main/xiaozhi-server/docker-compose_all.yml` 仅供源码内参考，不是生产入口。
+
+新增可执行资产应先明确所属部署域。数据目录、配置路径、镜像标签或恢复步骤的变化必须独立说明风险；不得在一次变更中同时搬迁资产并改变运行行为。
+
 这是本项目的唯一生产部署入口。
 
 ```text

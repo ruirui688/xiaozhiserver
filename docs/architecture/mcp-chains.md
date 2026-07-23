@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: tools
-last_verified: 2026-07-12
+last_verified: 2026-07-23
 source_paths:
   - main/xiaozhi-server/core/providers/tools
 ---
@@ -10,7 +10,7 @@ source_paths:
 
 本文档说明 xiaozhi-esp32-server 中三条 MCP (Model Context Protocol) 工具链路的工具发现、注册和调用完整流程。
 
-先读：[云端运行架构与配置链路](cloud-runtime-architecture.md)、[提示词注入工程](prompt-injection-engineering.md)。
+先读：[项目完整架构](project-architecture.md)、[运行时链路](runtime-flows.md)、[提示词注入工程](prompt-injection-engineering.md)。
 
 ## 1. 三类 MCP 总览
 
@@ -206,7 +206,7 @@ POST /device/mcp/call    → 远程调用工具
 ### 6.1 BaseMCPClient
 
 ```text
-base/mcp_client_base.py  BaseMCPClient (122 行)
+base/mcp_client_base.py  BaseMCPClient
   - tools: dict                工具存储 (sanitized_name → tool_info)
   - name_mapping: dict         原始名称映射
   - ready: bool                就绪状态

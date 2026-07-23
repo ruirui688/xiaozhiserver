@@ -54,10 +54,10 @@ deploy/               部署资产归档边界（[入口](./deploy/README.md)）
 本项目的本地开发、Git 管理、数据库变更、配置管理、阿里云部署和官方上游同步，必须遵守：
 
 - [小智服务器开发规范](./docs/standards/development-specification.md)
-- [AI 编程工具工作指令](./docs/standards/ai-coding-agent-instructions.md)
 - [文档任务门户](./docs/README.md)
 - [项目架构总览](./docs/architecture/project-architecture.md)
-- [配置与运行产物治理策略](./docs/standards/config-runtime-policy.md)
+
+AI 编程工具只以根目录 [AGENTS.md](./AGENTS.md) 为规则入口，不再维护第二份重复指令。
 
 本地开发统一入口：
 

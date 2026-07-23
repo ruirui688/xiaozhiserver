@@ -9,7 +9,7 @@
 改动原因：把天气、新闻、音乐播放、HomeAssistant 和讲段子、热梗、成语接龙、你说我猜等能力统一为 Function Plugin 顶层模型；声明式互动玩法不需要为每个玩法新增 Python 插件文件。
 关键文件：
   - main/xiaozhi-server/core/providers/tools/server_plugins/plugin_executor.py
-  - docs/architecture/cloud-runtime-architecture.md
+  - docs/architecture/runtime-flows.md
   - docs/architecture/function-plugin-architecture.md
   - docs/architecture/prompt-injection-engineering.md
 是否允许被官方覆盖：否
@@ -22,7 +22,7 @@
 定制模块：本地开发环境说明
 改动原因：记录本地 Ubuntu 开发机源码编译、依赖安装、服务启动和验证流程，区别于服务器部署文档。
 关键文件：
-  - docs/development/ubuntu-source-development-environment.md
+  - docs/development/local-dev-workflow.md
 是否允许被官方覆盖：否
 官方同步时的处理规则：官方部署文档更新时可以补充本文档，但不要用部署流程替换本地源码开发流程。
 ```
@@ -36,7 +36,6 @@
   - main/xiaozhi-server/app.py
   - scripts/dev
   - scripts/start-dev.sh
-  - docs/development/ubuntu-source-development-environment.md
   - docs/development/local-dev-workflow.md
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方修改 app.py 启动流程或本地开发脚本，必须保留“仅交互式终端启用 stdin 监听”和“后台启动时脱离调用者进程组并将 stdin 指向 /dev/null”的约定，确保 xiaozhi-server 可长期后台运行；同时必须保留 `scripts/dev` 作为唯一开发入口，旧 `scripts/start-dev.sh` 只能转发到 `scripts/dev`，不得重新写 `.run/` 或 `logs/dev/`。
@@ -51,9 +50,7 @@
   - main/xiaozhi-server/requirements.txt
   - scripts/dev
   - AGENTS.md
-  - docs/development/ubuntu-source-development-environment.md
   - docs/development/local-dev-workflow.md
-  - docs/standards/ai-coding-agent-instructions.md
 是否允许被官方覆盖：否
 官方同步时的处理规则：涉及 `main/xiaozhi-server` 的 Python 验证、单测、导入检查、脚本执行，必须使用 `conda run -n xiaozhi-esp32-server ...`，或先确认 shell 已 `conda activate xiaozhi-esp32-server`。`scripts/dev` 必须保留“缺少 Conda 环境时失败而不是退回系统 Python”的行为。禁止退回系统 Python 冒充验证；如果目标 Conda 环境不可用，必须在验证结果中明确说明“未在项目 Conda 运行时验证”。
 ```
@@ -87,7 +84,7 @@
 改动原因：把“小智云端服务器分析报告.docx”的调研结论整理为仓库内长期文档，补齐后台配置下发、Python 实时链路、提示词注入、工具 schema 注入、MCP 三类链路和状态机游戏规则的工程说明。
 关键文件：
   - docs/architecture/project-architecture.md
-  - docs/architecture/cloud-runtime-architecture.md
+  - docs/architecture/runtime-flows.md
   - docs/architecture/prompt-injection-engineering.md
   - docs/README.md
 是否允许被官方覆盖：否
@@ -102,9 +99,9 @@
 关键文件：
   - scripts/dev
   - docs/development/local-dev-workflow.md
-  - docs/standards/config-runtime-policy.md
+  - docs/standards/development-specification.md
   - docs/standards/upstream-sync-policy.md
-  - docs/deployment/deployment-asset-policy.md
+  - docs/deployment/private-docker-release.md
   - config/examples/
   - runtime/
   - deploy/
@@ -151,7 +148,7 @@
   - main/manager-api/src/main/resources/db/changelog/db.changelog-master.yaml
   - main/xiaozhi-server/config/config_loader.py
   - main/xiaozhi-server/core/utils/util.py
-  - docs/mcp/mcp-vision-integration.md
+  - docs/mcp/mcp-operation-guide.md
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方修改 server 配置下发、SysParamsController、ConfigServiceImpl、config_loader.py 或视觉接口逻辑，必须保留 `server.vision_explain` 作为后台参数；Python 从 manager-api 读取配置时，监听地址 `server.ip/port/http_port/auth_key` 可继续以本地文件为准，但下发给设备的 `server.vision_explain` 默认必须使用后台值，只有本地文件配置了非空、非 `null`、非 `你的...` 的真实值时才允许覆盖。修改参数后需要刷新 Redis `server:config` 和 `sys:params` 缓存或通过后台保存参数触发配置重建，并重启/通知 xiaozhi-server 重新读取配置。
 ```
@@ -210,7 +207,7 @@
   - main/manager-web/src/i18n/zh_CN.js
   - main/xiaozhi-server/plugins_func/functions/search_from_local_knowledge.py
   - main/xiaozhi-server/core/utils/prompt_budget.py
-  - docs/models/local-knowledge-integration.md
+  - docs/architecture/knowledge-base-chain.md
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方修改本地知识库、RAG 模型配置、知识库弹窗、文档解析、本地知识库工具、知识库数据库迁移或切片查询 DAO，必须保留知识库级 parser_config 覆盖 RAG_LocalKnowledge 默认配置的约定；知识库切片模型应通过 llm_model_id 复用模型管理中的 LLM 配置，知识库配置不得再次要求用户填写真实 API Key；文档解析优先走大模型切片，失败时才回退段落切分；旧文档必须重新解析才应用新切片；召回必须同时匹配 content/question/answer，并保留中文自然句 n-gram 检索增强；检索链路禁止退回全量 selectList 后逐条 contains 的实现，必须保留 SQL LIMIT 候选召回、候选 term 数量上限、最终返回数量上限和 parser_config.retrieval_config 的兼容读取；新增全文索引迁移必须登记到 db.changelog-master.yaml。同步还必须保护以下可靠性契约：parserConfig 原始完整 JSON 优先持久化，本地 adapter 上传同步产出切片时状态直接为 DONE，零切片或不支持格式明确失败；智能体详情中的普通插件和知识库映射必须在元数据加载后规范化拆分，保存失败保留草稿，关闭重进可恢复模型、知识库和 queryPolicy；程序化恢复选择不能触发空选择覆盖；知识工具说明必须领域中立且有界，动态知识与工具历史预算不能修改参数 schema。
 ```
@@ -244,7 +241,7 @@
   - main/manager-api/src/main/java/xiaozhi/modules/agent/entity/AgentMcpNoCodeToolEntity.java
   - main/manager-api/src/main/resources/db/changelog/202606161720.sql
   - main/xiaozhi-server/scripts/no_code_mcp_tools.py
-  - docs/mcp/no-code-http-tools.md
+  - docs/mcp/mcp-operation-guide.md
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方修改 MCP endpoint、智能体功能配置、ConfigController、AgentMcpAccessPointController 或工具 schema 下发链路，必须保留 no-code HTTP tool 的完整链路：Web 配置 JSON -> `ai_agent_mcp_no_code_tools` -> `/config/mcp/no-code-tools/{agentId}` -> `no_code_mcp_tools.py` -> MCP Endpoint tools/list/tools/call。该能力必须继续标注为高风险 HTTP 工具桥，生产环境应限制可信用户、保护 `MANAGER_API_SECRET`，并避免访问内网管理端口、云元数据地址和敏感服务。
 ```
@@ -323,7 +320,7 @@
   - main/manager-api/src/main/java/xiaozhi/modules/config/service/impl/ConfigServiceImpl.java
   - main/manager-web/src/components/ModelEditDialog.vue
   - main/manager-web/src/views/ModelConfig.vue
-  - docs/models/model-config-catalog.md
+  - docs/models/model-management.md
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方修改模型配置查询、编辑、列表 DTO 转换、模型配置弹窗、配置下发或 Python 初始化流程，必须保留标准模型存储边界：新增/编辑接口提交 `adapterCode`、`protocol`、`upstreamModelId`、`endpointUrl`、`params`、`secrets`；后端保存到通用字段、参数表和密钥表；前端密钥只回显脱敏值，未修改的脱敏值保存时保留原密钥；运行时只下发 `selected_module + model_config`。
 ```
@@ -342,7 +339,7 @@
   - main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelBenchmarkServiceImpl.java
   - main/manager-api/src/main/resources/db/changelog/202606171520.sql
   - main/manager-web/src/views/ModelConfig.vue
-  - docs/models/performance_tester.md
+  - docs/architecture/model-benchmark-and-assistant.md
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方修改 HTTP 服务路由、模型测试接口、模型配置页面、模型测试 DTO 或数据库迁移，必须保留 `xiaozhi-server` 的 `/benchmark/models` 和 `/benchmark/health` 路由、`core.benchmark.runner.run_benchmark` 真实 provider 执行链路、manager-api 异步任务轮询与结果入库、样本级 measured/latency/benchmark_level 口径、历史任务删除时级联清理结果和样本、Judge 复用已有 LLM/SLM 模型配置且不单独维护 API Key 的边界，以及 `scripts/dev doctor` 对 `main/xiaozhi-server/data/.config.yaml` 必需化检查。LLM/SLM 的 Judge 应按同一模型同一轮多轮样本集批量评分，并在明细中保留 case_id、完整 transcript、RAG/记忆上下文、assistant 输出、judge_mode 和安全 P0/P1 结果；`REAL_INFERENCE` 才能进入延时统计，`CONNECTIVITY`、`CONFIG_ONLY`、`UNSUPPORTED` 不能显示为 0ms；普通单模型测试也不能把单纯字段校验当成可启用的真实通过。官方同步时可以接受模型配置中的空 `selected_module` 和轻量 Docker/模型可空部署口径，但不能删除批量性能测试路由、runner、任务结果表和使用指南。
 ASR 专项规则：所有语音识别模型的“测试”都必须执行真实音频识别流程，包含 OpenAI/Groq/Qwen3 这类非流式上传模型、豆包/阿里云/讯飞这类流式模型，以及本地或自部署 ASR。测试详情必须能看到测试音频信息、识别文本和耗时；不能把初始化握手、接口连通、鉴权成功或必填字段完整显示为“已通过”。暂未实现真实音频测试的 ASR 供应器只能显示未通过或未实测，不能自动启用。ASR 单模型测试默认统一使用 `main/xiaozhi-server/config/assets/wakeup_words_short.wav`，不能因为 provider 实现路径或目录遍历顺序不同而使用不同音频；标准音频缺失时才允许降级到其他内置 wav。
@@ -382,7 +379,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/xiaozhi-server/core/handle/reportHandle.py
   - main/xiaozhi-server/core/connection.py
   - main/xiaozhi-server/core/utils/prompt_budget.py
-  - docs/architecture/long-term-memory-maintenance.md
+  - docs/architecture/memory-system-chain.md
   - docs/models/memory-and-knowledge-governance.md
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方修改 Memory provider、聊天记录上报、ConfigController、AgentController、Shiro config、角色首页、模型配置目录、知识库切片配置或数据库迁移，必须保留长期记忆事实层、`managed_memory` 入口、真实 `manage_memory` 工具和 `/config/memory/**` server-secret 入口；运行时查询失败或超时时必须降级为空记忆，不能阻塞语音回复；`nomem` 模式不得注入长期记忆；实时对话不得恢复自动抽取、固定人物/关键词/场景门控、条件任务特殊类型、TTL、衰减或字符串相似度判断；private/shared 必须由主模型调用工具时选择，后端只校验可信声纹隔离；`maintenance_llm` 只能引用已配置的 LLM/SLM modelId，不能复制模型密钥；知识库 LLM 辅助必须通过模型管理选择 `parser_config.llm_model_id`；管理端删除、归档、确认、拒绝和模型工具写入必须写 revision 审计；删除 `summary_memory` 前必须完成 Java、Vue、Python、文档和迁移的完整兼容替代。正式重建必须继续采用服务端任务与短事务原子替换：Redis 初始状态保存失败时禁止启动、同一智能体只能有一个活动任务、锁只能由相同 taskId 释放、任务读取校验 agent 所有权、失败信息脱敏、超时或失败终态不能被迟到 worker 覆盖；页面必须恢复最近任务并在活动期间互斥其他维护操作。同步不能退回单个 300 秒 HTTP 请求或仅靠浏览器 loading 状态维持互斥。
@@ -552,7 +549,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/xiaozhi-server/core/meeting/executor.py
   - main/xiaozhi-server/core/api/device_notification_handler.py
   - main/xiaozhi-server/core/spoken_notifications.py
-  - docs/integrations/feishu-integration.md
+  - docs/integrations/third-party-integrations.md
 是否允许被官方覆盖：否
 官方同步时的处理规则：必须保留智能体级所有权、App Secret 与事件 Verification Token 仅在 manager-api 使用部署级 AES-GCM 密钥分作用域加密保存、前端不回显、Python 不接收凭据、`/config/feishu/**` 同时校验服务密钥和设备到智能体绑定关系、默认群/负责人/日历服务端固定门控、各动作独立授权和群消息不可信内容包裹。飞书事件回调虽然匿名放行，但必须校验 Verification Token、App ID、目标群、事件类型，执行 event_id 去重和请求限流；主动播报只走带服务密钥的内部设备接口，会议和设备忙碌时不得插播。配置页连接测试、默认群读取和测试消息只能要求凭据已配置，不能被运行时 enabled 开关阻断；设备运行时动作、会议纪要投递和工具注册仍必须要求集成已启用。会议纪要投递失败不得阻塞设备端纪要播报；日志不得输出 App Secret、Verification Token、tenant_access_token、Authorization 或原始凭据响应。
 ```

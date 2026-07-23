@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: tools
-last_verified: 2026-07-12
+last_verified: 2026-07-23
 source_paths:
   - main/xiaozhi-server/core/providers/tools
   - main/xiaozhi-server/plugins_func
@@ -235,13 +235,11 @@ provider_code 命中真实服务端工具
   -> 返回 Action.RESPONSE 或 Action.REQLLM
 ```
 
-互动游戏边界见：
-
-```text
-docs/architecture/stateful-game-session.md
-```
-
 当前原则：纯语言游戏交给主 LLM 自由对话，但规则来源仍是功能插件。智能体勾选某个游戏插件后，`instructions` / `opening_message` 会作为临时软提示词注入主 LLM；不要用小候选库、关键词规则或固定问答状态机压过模型能力。
+
+旧游戏 code 只作为兼容标识保留在 `GameSessionManager.FREEFORM_GAME_TOOLS`，`ServerPluginExecutor` 跳过这些 code，
+`handle_user_intent()` 也不得提前路由。只有必须访问设备、MCP、数据库、外部接口或事务状态的玩法才适合真实服务端工具；
+成语接龙、猜谜、角色扮演、问答和讲故事等纯语言互动不新增状态机。
 
 ## 提示词注入位置
 
@@ -257,7 +255,8 @@ docs/architecture/stateful-game-session.md
 完整链路见：
 
 ```text
-docs/architecture/cloud-runtime-architecture.md
+docs/architecture/project-architecture.md
+docs/architecture/runtime-flows.md
 docs/architecture/prompt-injection-engineering.md
 ```
 
