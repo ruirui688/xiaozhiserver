@@ -7,8 +7,10 @@
 </route>
 
 <script lang="ts" setup>
+import type { ModelOption } from '@/api/agent/types'
 import type { KnowledgeBase } from '@/api/knowledge'
 import { computed, ref } from 'vue'
+import { getModelOptions } from '@/api/agent/agent'
 import { createKnowledgeBase, deleteKnowledgeBase, getKnowledgeBases, getRagModels, updateKnowledgeBase } from '@/api/knowledge'
 import { toast } from '@/utils/toast'
 
@@ -57,6 +59,29 @@ async function addKnowledgeBase() {
   if (selected == null)
     return
 
+  let llmModels: ModelOption[]
+  try {
+    const modelOptions = await getModelOptions('LLM')
+    llmModels = (modelOptions || []).filter(isOpenAiCompatibleModel)
+  }
+  catch (error) {
+    toast.error(error instanceof Error ? error.message : '切片模型加载失败')
+    return
+  }
+  if (!llmModels.length) {
+    toast.warning('请先配置并测试通过一个 OpenAI 兼容 LLM 切片模型')
+    return
+  }
+  const selectedLlm = await new Promise<number | null>((resolve) => {
+    uni.showActionSheet({
+      itemList: llmModels.map(item => item.modelName || item.id),
+      success: result => resolve(result.tapIndex),
+      fail: () => resolve(null),
+    })
+  })
+  if (selectedLlm == null)
+    return
+
   uni.showModal({
     title: '新建知识库',
     editable: true,
@@ -71,7 +96,13 @@ async function addKnowledgeBase() {
           description: '',
           status: 1,
           ragModelId: models[selected].id,
-          parserConfig: '',
+          parserConfig: JSON.stringify({
+            max_chunk_chars: 1200,
+            llm_enabled: true,
+            llm_model_id: llmModels[selectedLlm].id,
+            llm_max_input_chars: 12000,
+            llm_max_tokens: 4000,
+          }),
         })
         toast.success('知识库已创建')
         await load()
@@ -81,6 +112,11 @@ async function addKnowledgeBase() {
       }
     },
   })
+}
+
+function isOpenAiCompatibleModel(model: ModelOption) {
+  return String(model.adapterCode || '').toLowerCase() === 'openai'
+    || String(model.protocol || '').toLowerCase().includes('openai')
 }
 
 async function toggleStatus(item: KnowledgeBase, value: boolean) {

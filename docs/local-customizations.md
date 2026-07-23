@@ -188,7 +188,7 @@
 
 ```text
 定制模块：manager-api 本地知识库适配器、manager-web 知识库配置弹窗、xiaozhi-server 本地知识库工具
-改动原因：本地知识库原先对 md/txt 文档主要按固定字符数硬切，容易把标题、适用问题、正文或一句话切开；召回也只按空格/标点切词，中文整句没有空格时容易查不到。现在知识库新增/编辑界面可以为每个知识库选择模型管理中已配置的 LLM 作为切片模型，parser_config 只保存 llm_model_id 和切片参数，API Key、接口地址和上游模型名由模型管理统一维护；文档解析时优先由大模型按语义结构生成 JSON 切片；召回同时匹配 content/question/answer，并使用中文 n-gram 增强自然句检索。为避免大知识库检索时全量加载 chunk 和 O(n*m) 字符串匹配打爆 CPU，本地召回必须先在数据库中按 dataset/document 做有界候选召回，再在 Java 内存中对有限候选精排；知识库高级设置保存在 parser_config.retrieval_config 中，用于控制常规/展会模式、语义/混合检索、召回级别、最大召回数、阈值和重排开关。2026-07 进一步固定 parserConfig 字符串/DTO 边界、本地同步解析状态、零切片失败和中文句界 splitter；智能体编辑通过显式 hydration 恢复知识库绑定和 queryPolicy，禁止旧 prop、乱序列表或程序化 clearSelection 抹掉选择；知识结果、工具历史和工具描述使用分域预算，且知识工具说明不得硬编码酒类等客户领域规则。
+改动原因：本地知识库原先对 md/txt 文档主要按固定字符数硬切，容易把标题、适用问题、正文或一句话切开；召回也只按空格/标点切词，中文整句没有空格时容易查不到。现在本地知识库只允许大模型语义切片：新增/编辑时必须选择模型管理中已启用、测试通过且兼容 OpenAI Chat Completions 的 LLM，parser_config 只保存 llm_model_id 和切片参数，API Key、接口地址和上游模型名由模型管理统一维护；文档解析必须由模型生成 question/answer/content JSON 切片，模型不可用、调用失败或输出无效时整个上传失败，不再静默生成规则切片。召回同时匹配 content/question/answer，并使用中文 n-gram 增强自然句检索。为避免大知识库检索时全量加载 chunk 和 O(n*m) 字符串匹配打爆 CPU，本地召回必须先在数据库中按 dataset/document 做有界候选召回，再在 Java 内存中对有限候选精排；知识库高级设置保存在 parser_config.retrieval_config 中，用于控制常规/展会模式、语义/混合检索、召回级别、最大召回数、阈值和重排开关。2026-07 进一步固定 parserConfig 字符串/DTO 边界、本地同步解析状态、零切片失败和 LLM 输入窗口不丢字；智能体编辑通过显式 hydration 恢复知识库绑定和 queryPolicy，禁止旧 prop、乱序列表或程序化 clearSelection 抹掉选择；知识结果、工具历史和工具描述使用分域预算，且知识工具说明不得硬编码酒类等客户领域规则。
 关键文件：
   - main/manager-api/src/main/java/xiaozhi/modules/knowledge/rag/impl/LocalKnowledgeAdapter.java
   - main/manager-api/src/main/java/xiaozhi/modules/knowledge/dao/KnowledgeChunkDao.java
@@ -205,11 +205,13 @@
   - main/manager-web/src/utils/roleConfigDraft.js
   - main/manager-web/src/views/KnowledgeBaseManagement.vue
   - main/manager-web/src/i18n/zh_CN.js
+  - main/manager-mobile/src/pages/knowledge/config.vue
+  - main/manager-mobile/src/pages/knowledge/index.vue
   - main/xiaozhi-server/plugins_func/functions/search_from_local_knowledge.py
   - main/xiaozhi-server/core/utils/prompt_budget.py
   - docs/architecture/knowledge-base-chain.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改本地知识库、RAG 模型配置、知识库弹窗、文档解析、本地知识库工具、知识库数据库迁移或切片查询 DAO，必须保留知识库级 parser_config 覆盖 RAG_LocalKnowledge 默认配置的约定；知识库切片模型应通过 llm_model_id 复用模型管理中的 LLM 配置，知识库配置不得再次要求用户填写真实 API Key；文档解析优先走大模型切片，失败时才回退段落切分；旧文档必须重新解析才应用新切片；召回必须同时匹配 content/question/answer，并保留中文自然句 n-gram 检索增强；检索链路禁止退回全量 selectList 后逐条 contains 的实现，必须保留 SQL LIMIT 候选召回、候选 term 数量上限、最终返回数量上限和 parser_config.retrieval_config 的兼容读取；新增全文索引迁移必须登记到 db.changelog-master.yaml。同步还必须保护以下可靠性契约：parserConfig 原始完整 JSON 优先持久化，本地 adapter 上传同步产出切片时状态直接为 DONE，零切片或不支持格式明确失败；智能体详情中的普通插件和知识库映射必须在元数据加载后规范化拆分，保存失败保留草稿，关闭重进可恢复模型、知识库和 queryPolicy；程序化恢复选择不能触发空选择覆盖；知识工具说明必须领域中立且有界，动态知识与工具历史预算不能修改参数 schema。
+官方同步时的处理规则：如果官方修改本地知识库、RAG 模型配置、知识库弹窗、文档解析、本地知识库工具、知识库数据库迁移或切片查询 DAO，必须保留知识库级 parser_config 覆盖 RAG_LocalKnowledge 默认配置的约定；知识库切片模型必须通过 llm_model_id 复用模型管理中已启用、测试通过且兼容 OpenAI Chat Completions 的 LLM 配置，知识库配置不得再次要求用户填写真实 API Key；文档解析只有大模型语义切片一种方式，任何模型错误都必须使上传失败，禁止恢复规则切片、预切片直通或 quality_degraded 静默降级；旧文档必须重新上传原文件才应用新切片；召回必须同时匹配 content/question/answer，并保留中文自然句 n-gram 检索增强；检索链路禁止退回全量 selectList 后逐条 contains 的实现，必须保留 SQL LIMIT 候选召回、候选 term 数量上限、最终返回数量上限和 parser_config.retrieval_config 的兼容读取；新增全文索引迁移必须登记到 db.changelog-master.yaml。同步还必须保护以下可靠性契约：parserConfig 原始完整 JSON 优先持久化，本地 adapter 上传同步产出切片时状态直接为 DONE，零切片或不支持格式明确失败；智能体详情中的普通插件和知识库映射必须在元数据加载后规范化拆分，保存失败保留草稿，关闭重进可恢复模型、知识库和 queryPolicy；程序化恢复选择不能触发空选择覆盖；知识工具说明必须领域中立且有界，动态知识与工具历史预算不能修改参数 schema。
 ```
 
 ## 14. 图片识别自然表达优化

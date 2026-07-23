@@ -1,6 +1,7 @@
 package xiaozhi.modules.knowledge.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -13,10 +14,12 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import cn.hutool.json.JSONObject;
+import xiaozhi.common.exception.RenException;
 import xiaozhi.common.redis.RedisUtils;
 import xiaozhi.common.user.UserDetail;
 import xiaozhi.modules.knowledge.dao.DocumentDao;
@@ -37,7 +40,29 @@ import xiaozhi.modules.workspace.service.WorkspaceService;
 
 class KnowledgeBaseServiceImplTest {
     @Test
-    void saveForwardsRagFieldsAndPreservesFullLocalParserConfig() {
+    void rejectsLocalKnowledgeWithoutSemanticChunkingModel() {
+        KnowledgeBaseServiceImpl service = new KnowledgeBaseServiceImpl(
+                mock(KnowledgeBaseDao.class),
+                mock(KnowledgeChunkDao.class),
+                mock(DocumentDao.class),
+                mock(ModelConfigService.class),
+                mock(ModelConfigDao.class),
+                mock(RedisUtils.class),
+                mock(WorkspaceService.class),
+                mock(WorkspacePermissionService.class),
+                new ObjectMapper());
+        KnowledgeBaseDTO request = new KnowledgeBaseDTO();
+        request.setParserConfig("{}");
+
+        RenException error = assertThrows(RenException.class,
+                () -> ReflectionTestUtils.invokeMethod(service, "enforceLocalSemanticChunkingConfig",
+                        request, Map.of("type", "local_knowledge")));
+
+        assertTrue(error.getMessage().contains("必须选择大模型语义切片模型"));
+    }
+
+    @Test
+    void saveForwardsRagFieldsAndPreservesFullLocalParserConfig() throws Exception {
         KnowledgeBaseDao knowledgeBaseDao = mock(KnowledgeBaseDao.class);
         KnowledgeChunkDao chunkDao = mock(KnowledgeChunkDao.class);
         DocumentDao documentDao = mock(DocumentDao.class);
@@ -54,6 +79,17 @@ class KnowledgeBaseServiceImplTest {
         ModelConfigEntity ragModel = new ModelConfigEntity();
         ragModel.setConfigJson(new JSONObject(Map.of("type", "local_knowledge")));
         when(modelConfigService.getModelByIdFromCache("rag-local")).thenReturn(ragModel);
+        ModelConfigEntity llmModel = new ModelConfigEntity();
+        llmModel.setId("llm-1");
+        llmModel.setModelType("LLM");
+        llmModel.setAdapterCode("openai");
+        llmModel.setIsEnabled(1);
+        llmModel.setTestStatus(1);
+        llmModel.setConfigJson(new JSONObject(Map.of(
+                "type", "openai",
+                "base_url", "https://example.invalid/v1",
+                "model_name", "semantic-chunker")));
+        when(modelConfigService.getModelByIdFromCache("llm-1")).thenReturn(llmModel);
         WorkspaceEntity workspace = new WorkspaceEntity();
         workspace.setId("workspace-1");
         when(workspaceService.getCurrentWorkspaceEntity()).thenReturn(workspace);
@@ -92,7 +128,7 @@ class KnowledgeBaseServiceImplTest {
         ArgumentCaptor<KnowledgeBaseEntity> entityCaptor = ArgumentCaptor.forClass(KnowledgeBaseEntity.class);
         verify(knowledgeBaseDao).insert(entityCaptor.capture());
         String persisted = entityCaptor.getValue().getParserConfig();
-        assertEquals(parserConfig, persisted);
+        assertEquals(objectMapper.readTree(parserConfig), objectMapper.readTree(persisted));
         assertTrue(persisted.contains("llm_model_id"));
         assertTrue(persisted.contains("retrieval_config"));
         verify(permissionService).requireWrite("workspace-1");

@@ -253,6 +253,7 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
             }
 
             Map<String, Object> ragConfig = getValidatedRAGConfig(dto.getRagModelId());
+            enforceLocalSemanticChunkingConfig(dto, ragConfig);
             adapter = KnowledgeBaseAdapterFactory.getAdapter((String) ragConfig.get("type"),
                     ragConfig);
 
@@ -350,9 +351,8 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
         }
 
         // RAG Update if needed
-        if (StringUtils.isNotBlank(entity.getDatasetId()) && StringUtils.isNotBlank(dto.getRagModelId())) {
+        if (StringUtils.isNotBlank(entity.getDatasetId())) {
             try {
-                // 🤖 AUTO-FILL: 若 DTO 未传 ragModelId (极少情况)，尝试复用 Entity 中的
                 if (StringUtils.isBlank(dto.getRagModelId())) {
                     dto.setRagModelId(entity.getRagModelId());
                 }
@@ -365,8 +365,14 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
                 if (StringUtils.isBlank(dto.getChunkMethod())) {
                     dto.setChunkMethod(entity.getChunkMethod());
                 }
+                if (StringUtils.isBlank(dto.getParserConfig())) {
+                    dto.setParserConfig(entity.getParserConfig());
+                }
 
-                KnowledgeBaseAdapter adapter = getAdapterByModelId(dto.getRagModelId());
+                Map<String, Object> ragConfig = getValidatedRAGConfig(dto.getRagModelId());
+                enforceLocalSemanticChunkingConfig(dto, ragConfig);
+                KnowledgeBaseAdapter adapter = KnowledgeBaseAdapterFactory.getAdapter(
+                        (String) ragConfig.get("type"), ragConfig);
                 if (adapter != null) {
                     DatasetDTO.UpdateReq updateReq = ConvertUtils.sourceToTarget(dto, DatasetDTO.UpdateReq.class);
 
@@ -558,9 +564,6 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
                     "max_chunk_chars",
                     "llm_enabled",
                     "llm_model_id",
-                    "llm_base_url",
-                    "llm_api_key",
-                    "llm_model",
                     "llm_timeout_seconds",
                     "llm_max_input_chars",
                     "llm_max_tokens",
@@ -583,5 +586,50 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
         } catch (Exception e) {
             log.warn("解析知识库 parser_config 失败，使用RAG模型默认配置: {}", e.getMessage());
         }
+    }
+
+    private void enforceLocalSemanticChunkingConfig(KnowledgeBaseDTO dto, Map<String, Object> ragConfig) {
+        if (!"local_knowledge".equals(ragConfig.get("type"))) {
+            return;
+        }
+        Map<String, Object> parserConfig;
+        try {
+            parserConfig = StringUtils.isBlank(dto.getParserConfig())
+                    ? new HashMap<>()
+                    : new HashMap<>(JsonUtils.parseObject(dto.getParserConfig(), Map.class));
+        } catch (Exception e) {
+            throw new RenException("parserConfig不是有效的JSON对象", e);
+        }
+        String llmModelId = parserConfig.get("llm_model_id") == null
+                ? ""
+                : parserConfig.get("llm_model_id").toString().trim();
+        if (StringUtils.isBlank(llmModelId)) {
+            throw new RenException("本地知识库必须选择大模型语义切片模型");
+        }
+        ModelConfigEntity model = modelConfigService.getModelByIdFromCache(llmModelId);
+        if (model == null || !"LLM".equalsIgnoreCase(model.getModelType())) {
+            throw new RenException("切片模型不存在或不是LLM类型");
+        }
+        if (!Integer.valueOf(1).equals(model.getIsEnabled())
+                || !Integer.valueOf(1).equals(model.getTestStatus())) {
+            throw new RenException("切片模型必须已启用并通过真实模型测试");
+        }
+        String adapterCode = model.getAdapterCode();
+        if (StringUtils.isBlank(adapterCode) && model.getConfigJson() != null) {
+            adapterCode = model.getConfigJson().getStr("type");
+        }
+        boolean openAiCompatible = "openai".equalsIgnoreCase(adapterCode)
+                || StringUtils.containsIgnoreCase(model.getProtocol(), "openai");
+        if (!openAiCompatible) {
+            throw new RenException("切片模型必须兼容OpenAI Chat Completions协议");
+        }
+
+        // llm_enabled 仅为旧版本滚动升级兼容标记，新实现不再允许关闭语义切片。
+        parserConfig.put("llm_enabled", true);
+        parserConfig.put("llm_model_id", llmModelId);
+        parserConfig.remove("llm_base_url");
+        parserConfig.remove("llm_api_key");
+        parserConfig.remove("llm_model");
+        dto.setParserConfig(JsonUtils.toJsonString(parserConfig));
     }
 }

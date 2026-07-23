@@ -6,22 +6,17 @@ import java.util.List;
 import org.apache.commons.lang3.StringUtils;
 
 /**
- * Owns deterministic text boundaries for rule fallback and LLM input windows.
+ * Splits source text only to respect the LLM input window. These sections are
+ * never persisted as knowledge chunks; final chunks must come from the LLM.
  */
 public final class LocalKnowledgeTextSplitter {
     private static final List<String> SENTENCE_SEPARATORS =
             List.of("\n", "。", "！", "？", "；", ";", ".", "!", "?");
 
-    private final int maxChunkChars;
     private final int maxLlmInputChars;
 
-    public LocalKnowledgeTextSplitter(int maxChunkChars, int maxLlmInputChars) {
-        this.maxChunkChars = maxChunkChars;
+    public LocalKnowledgeTextSplitter(int maxLlmInputChars) {
         this.maxLlmInputChars = maxLlmInputChars;
-    }
-
-    public List<String> splitChunks(String text) {
-        return splitByParagraphs(text, maxChunkChars);
     }
 
     public List<String> splitLlmSections(String text) {
@@ -43,49 +38,6 @@ public final class LocalKnowledgeTextSplitter {
         return sections;
     }
 
-    private List<String> splitByParagraphs(String text, int limit) {
-        String normalized = StringUtils.trimToEmpty(text);
-        if (normalized.isEmpty()) {
-            return List.of();
-        }
-        List<String> chunks = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        for (String paragraph : normalized.split("(\\R\\s*\\R)+")) {
-            String part = paragraph.trim();
-            if (part.isEmpty()) {
-                continue;
-            }
-            if (part.length() > limit) {
-                flush(chunks, current);
-                splitLongParagraph(chunks, part, limit);
-                continue;
-            }
-            int nextLength = current.isEmpty() ? part.length() : current.length() + 2 + part.length();
-            if (nextLength > limit) {
-                flush(chunks, current);
-            }
-            if (!current.isEmpty()) {
-                current.append("\n\n");
-            }
-            current.append(part);
-        }
-        flush(chunks, current);
-        return chunks;
-    }
-
-    private void splitLongParagraph(List<String> chunks, String text, int limit) {
-        int start = 0;
-        while (start < text.length()) {
-            int hardEnd = Math.min(start + limit, text.length());
-            int end = findSplitEnd(text, start, hardEnd, limit);
-            String content = text.substring(start, end).trim();
-            if (!content.isEmpty()) {
-                chunks.add(content);
-            }
-            start = end;
-        }
-    }
-
     private int findSplitEnd(String text, int start, int hardEnd, int limit) {
         if (hardEnd >= text.length()) {
             return text.length();
@@ -100,11 +52,4 @@ public final class LocalKnowledgeTextSplitter {
         return best > start ? best : hardEnd;
     }
 
-    private void flush(List<String> chunks, StringBuilder current) {
-        String content = current.toString().trim();
-        if (!content.isEmpty()) {
-            chunks.add(content);
-            current.setLength(0);
-        }
-    }
 }

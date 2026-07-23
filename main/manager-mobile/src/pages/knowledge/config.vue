@@ -20,7 +20,6 @@ const datasetId = ref('')
 const knowledgeBase = ref<KnowledgeBase | null>(null)
 const models = ref<ModelOption[]>([])
 const modelIndex = ref(0)
-const enabled = ref(false)
 const maxInputChars = ref(12000)
 const maxTokens = ref(4000)
 const parserConfigValue = ref<Record<string, any>>({})
@@ -44,7 +43,7 @@ async function load() {
     if (!pageAlive || !loadGate.isLatest(requestId))
       return
     knowledgeBase.value = base
-    models.value = modelList || []
+    models.value = (modelList || []).filter(isOpenAiCompatibleModel)
     documentCount.value = Number(documentPage.total) || documentPage.list?.length || 0
     try {
       parserConfigValue.value = base.parserConfig ? JSON.parse(base.parserConfig) : {}
@@ -52,7 +51,6 @@ async function load() {
     catch {
       parserConfigValue.value = {}
     }
-    enabled.value = Boolean(parserConfigValue.value.llm_enabled)
     maxInputChars.value = Number(parserConfigValue.value.llm_max_input_chars) || 12000
     maxTokens.value = Number(parserConfigValue.value.llm_max_tokens) || 4000
     const currentId = String(parserConfigValue.value.llm_model_id || '')
@@ -74,8 +72,8 @@ async function load() {
 async function save() {
   if (!knowledgeBase.value || loading.value || saving.value)
     return
-  if (enabled.value && !models.value.length) {
-    toast.warning('没有可用的 LLM 模型')
+  if (!models.value.length || !models.value[modelIndex.value]?.id) {
+    toast.warning('没有可用的 OpenAI 兼容 LLM 切片模型')
     return
   }
   saving.value = true
@@ -87,8 +85,8 @@ async function save() {
     const parserConfig = JSON.stringify({
       ...config,
       max_chunk_chars: 1200,
-      llm_enabled: enabled.value,
-      llm_model_id: enabled.value ? models.value[modelIndex.value]?.id || '' : '',
+      llm_enabled: true,
+      llm_model_id: models.value[modelIndex.value].id,
       llm_max_input_chars: Math.min(20000, Math.max(500, Number(maxInputChars.value) || 12000)),
       llm_max_tokens: Math.min(8000, Math.max(200, Number(maxTokens.value) || 4000)),
       retrieval_config: config.retrieval_config || {
@@ -134,6 +132,11 @@ function openReuploadDocuments() {
   })
 }
 
+function isOpenAiCompatibleModel(model: ModelOption) {
+  return String(model.adapterCode || '').toLowerCase() === 'openai'
+    || String(model.protocol || '').toLowerCase().includes('openai')
+}
+
 onLoad((options) => {
   datasetId.value = String(options?.datasetId || '')
   load()
@@ -151,18 +154,16 @@ onUnload(() => {
       {{ loadError }}
     </view>
     <view class="form">
-      <view class="row">
-        <view>
-          <text class="label">
-            大模型切片
-          </text><text class="desc">
-            保存后重新上传原文件时生效
-          </text>
-        </view>
-        <switch :checked="enabled" :disabled="loading || saving" color="#3977d6" @change="enabled = $event.detail.value" />
+      <view class="semantic-only-banner">
+        <text class="label">
+          仅使用大模型语义切片
+        </text>
+        <text class="desc">
+          模型调用失败时文档上传会失败，不会降级为规则切片。保存后重新上传原文件时生效。
+        </text>
       </view>
 
-      <picker v-if="enabled" mode="selector" :disabled="loading || saving" :range="models" range-key="modelName" :value="modelIndex" @change="modelIndex = Number($event.detail.value)">
+      <picker mode="selector" :disabled="loading || saving" :range="models" range-key="modelName" :value="modelIndex" @change="modelIndex = Number($event.detail.value)">
         <view class="field picker-field">
           <text class="field-label">
             切片模型
@@ -174,13 +175,13 @@ onUnload(() => {
         </view>
       </picker>
 
-      <view v-if="enabled" class="field">
+      <view class="field">
         <text class="field-label">
           输入字符数
         </text>
         <input v-model.number="maxInputChars" class="number-input" type="number" :disabled="loading || saving">
       </view>
-      <view v-if="enabled" class="field">
+      <view class="field">
         <text class="field-label">
           输出 Token 数
         </text>
@@ -212,6 +213,13 @@ onUnload(() => {
   border: 1rpx solid #e3e8ef;
   border-radius: 12rpx;
   background: #fff;
+}
+.semantic-only-banner {
+  margin-bottom: 12rpx;
+  padding: 20rpx;
+  border: 1rpx solid #cddcf3;
+  border-radius: 10rpx;
+  background: #f3f7fd;
 }
 .error-banner,
 .reupload-panel {

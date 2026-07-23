@@ -96,6 +96,8 @@ export interface RoleTemplate {
 export interface ModelOption {
   id: string
   modelName: string
+  adapterCode?: string
+  protocol?: string
 }
 
 export interface PluginField {

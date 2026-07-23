@@ -26,9 +26,11 @@
       <div class="dialog-section">
         <div class="section-header">
           <div class="section-title">{{ $t('knowledgeBaseDialog.chunkModelConfig') }}</div>
-          <el-switch v-model="parserForm.llm_enabled"></el-switch>
+          <el-tag type="success" size="small">{{ $t('knowledgeBaseDialog.llmRequiredStatus') }}</el-tag>
         </div>
-        <div class="chunk-config-fields" v-if="parserForm.llm_enabled">
+        <el-alert :title="$t('knowledgeBaseDialog.llmRequiredDescription')" type="info" :closable="false"
+          show-icon class="chunk-mode-alert"></el-alert>
+        <div class="chunk-config-fields">
           <el-form-item :label="$t('knowledgeBaseDialog.llmModelConfig')">
             <el-select v-model="parserForm.llm_model_id" :placeholder="$t('knowledgeBaseDialog.llmModelConfigPlaceholder')"
               filterable clearable style="width: 100%" @focus="loadLLMModels">
@@ -49,7 +51,6 @@
             </div>
           </div>
         </div>
-        <el-empty v-else :image-size="48" description="未启用大模型切片，上传文档时使用规则切片"></el-empty>
       </div>
 
       <el-collapse v-model="advancedPanels" class="advanced-collapse">
@@ -221,11 +222,8 @@ export default {
   methods: {
     defaultParserForm() {
       return {
-        llm_enabled: false,
+        llm_enabled: true,
         llm_model_id: "",
-        llm_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        llm_api_key: "",
-        llm_model: "qwen-plus",
         llm_max_input_chars: 12000,
         llm_max_tokens: 4000
       };
@@ -318,7 +316,7 @@ export default {
       return JSON.stringify({
         ...config,
         max_chunk_chars: 1200,
-        llm_enabled: !!this.parserForm.llm_enabled,
+        llm_enabled: true,
         llm_model_id: this.parserForm.llm_model_id,
         llm_max_input_chars: this.parserForm.llm_max_input_chars,
         llm_max_tokens: this.parserForm.llm_max_tokens,
@@ -343,7 +341,7 @@ export default {
       this.$emit("update:visible", false);
     },
     handleSubmit() {
-      if (this.parserForm.llm_enabled && !this.parserForm.llm_model_id) {
+      if (!this.parserForm.llm_model_id) {
         this.$message.error(this.$t('knowledgeBaseDialog.llmModelConfigRequired'));
         return;
       }
@@ -377,20 +375,19 @@ export default {
       if (this.llmModels.length > 0) {
         return;
       }
-      const params = {
-        modelType: "LLM",
-        modelName: "",
-        page: 1,
-        limit: 100
-      };
-      Api.model.getModelList(params, ({ data }) => {
+      Api.model.getModelNames("LLM", "", ({ data }) => {
         if (data && data.code === 0) {
-          const list = data.data && data.data.list ? data.data.list : [];
-          this.llmModels = list.filter(model => Number(model.isEnabled) === 1 && Number(model.testStatus) === 1);
+          const list = Array.isArray(data.data) ? data.data : [];
+          this.llmModels = list.filter(model => this.isOpenAiCompatibleModel(model));
         } else {
           this.$message.error(data?.msg || this.$t('knowledgeBaseDialog.loadLLMModelsFailed'));
         }
       });
+    },
+    isOpenAiCompatibleModel(model) {
+      const adapterCode = String(model.adapterCode || model.type || '').toLowerCase();
+      const protocol = String(model.protocol || '').toLowerCase();
+      return adapterCode === 'openai' || protocol.includes('openai');
     },
     formatLLMModelLabel(model) {
       const name = model.modelName || model.displayName || model.id;

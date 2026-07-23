@@ -39,7 +39,6 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -92,7 +91,6 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private KnowledgeBaseDao knowledgeBaseDao;
     private ModelConfigService modelConfigService;
     private int maxChunkChars = DEFAULT_MAX_CHUNK_CHARS;
-    private boolean llmEnabled;
     private String llmModelId;
     private String llmBaseUrl = DEFAULT_LLM_BASE_URL;
     private String llmApiKey;
@@ -106,7 +104,6 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private String embeddingBaseUrl;
     private String embeddingApiKey;
     private String embeddingModel;
-    private final ThreadLocal<Boolean> llmChunkingFailed = ThreadLocal.withInitial(() -> false);
     private boolean hasRetrievalConfig;
     private String retrievalMode = "normal";
     private String searchType = "semantic";
@@ -135,11 +132,10 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         this.knowledgeBaseDao = SpringContextUtils.getBean(KnowledgeBaseDao.class);
         this.modelConfigService = SpringContextUtils.getBean(ModelConfigService.class);
         maxChunkChars = configParser.getInt("max_chunk_chars", DEFAULT_MAX_CHUNK_CHARS, 200, 20000);
-        llmEnabled = configParser.getBoolean("llm_enabled", false);
         llmModelId = configParser.getString("llm_model_id", "");
-        llmBaseUrl = configParser.getString("llm_base_url", DEFAULT_LLM_BASE_URL);
-        llmApiKey = configParser.getString("llm_api_key", "");
-        llmModel = configParser.getString("llm_model", DEFAULT_LLM_MODEL);
+        llmBaseUrl = "";
+        llmApiKey = "";
+        llmModel = "";
         applyManagedLlmConfig();
         llmTimeoutSeconds = configParser.getInt("llm_timeout_seconds", DEFAULT_LLM_TIMEOUT_SECONDS, 10, 600);
         llmMaxInputChars = configParser.getInt("llm_max_input_chars", DEFAULT_LLM_MAX_INPUT_CHARS, 500, 20000);
@@ -222,9 +218,9 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             throw new RenException(ErrorCode.UPLOAD_FILE_ERROR,
                     "本地知识库不支持该文件格式，请上传 txt/md/mdx/csv/xls/xlsx/json/jsonl/qa 文件");
         }
-        // [Issue #8] 重置 LLM 切片失败标记
-        llmChunkingFailed.set(false);
         try {
+            // 适配器实例会被缓存；每次上传重新解析托管模型，避免继续使用已修改或停用的旧凭据。
+            applyManagedLlmConfig();
             List<LocalChunk> chunks = parseFile(filename, req.getFile().getInputStream());
             if (chunks.isEmpty()) {
                 throw new RenException(ErrorCode.UPLOAD_FILE_ERROR, "文件中没有可用于知识库切片的有效内容");
@@ -246,18 +242,6 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             dto.setCreatedAt(new Date());
             dto.setUpdatedAt(new Date());
             dto.setMetaFields(req.getMetaFields());
-            // [Issue #8] 若 LLM 切片失败降级为规则切片，在元数据中记录质量降级提示
-            if (llmChunkingFailed.get()) {
-                Map<String, Object> qualityNote = new HashMap<>();
-                qualityNote.put("quality_degraded", true);
-                qualityNote.put("note", "LLM切片失败降级为规则切片，切片质量可能低于预期");
-                if (dto.getMetaFields() != null) {
-                    dto.getMetaFields().putAll(qualityNote);
-                } else {
-                    dto.setMetaFields(qualityNote);
-                }
-                log.warn("本地知识库文档 {} 切片质量降级: LLM切片失败，使用规则切片", filename);
-            }
             return dto;
         } catch (Exception e) {
             log.error("本地知识库文件解析失败: {}", filename, e);
@@ -265,8 +249,6 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
                 throw renException;
             }
             throw new RenException(ErrorCode.RAG_API_ERROR, "本地知识库文件解析失败: " + e.getMessage());
-        } finally {
-            llmChunkingFailed.remove();
         }
     }
 
@@ -450,12 +432,15 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     }
 
     private void applyManagedLlmConfig() {
+        llmBaseUrl = "";
+        llmApiKey = "";
+        llmModel = "";
         if (StringUtils.isBlank(llmModelId)) {
             return;
         }
         ModelConfigEntity model = modelConfigService.getModelByIdFromCache(llmModelId);
         if (model == null || model.getConfigJson() == null) {
-            log.warn("本地知识库切片模型配置不存在，modelId={}，将回退规则切片", llmModelId);
+            log.warn("本地知识库切片模型配置不存在，modelId={}", llmModelId);
             llmApiKey = "";
             return;
         }
@@ -466,11 +451,19 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         }
         if (!Integer.valueOf(1).equals(model.getIsEnabled())
                 || !Integer.valueOf(1).equals(model.getTestStatus())) {
-            log.warn("本地知识库切片模型未启用或未测试通过，modelId={}，将回退规则切片", llmModelId);
+            log.warn("本地知识库切片模型未启用或未测试通过，modelId={}", llmModelId);
             llmApiKey = "";
             return;
         }
         JSONObject modelConfig = model.getConfigJson();
+        String adapterCode = StringUtils.defaultIfBlank(model.getAdapterCode(), modelConfig.getStr("type"));
+        boolean openAiCompatible = "openai".equalsIgnoreCase(adapterCode)
+                || StringUtils.containsIgnoreCase(model.getProtocol(), "openai");
+        if (!openAiCompatible) {
+            log.warn("本地知识库切片模型不是OpenAI Chat Completions兼容协议，modelId={}, adapterCode={}",
+                    llmModelId, adapterCode);
+            return;
+        }
         llmBaseUrl = firstConfigString(modelConfig, llmBaseUrl, "base_url", "url", "api_url", "endpoint_url");
         llmApiKey = firstConfigString(modelConfig, llmApiKey, "api_key", "api_password", "access_token", "token");
         llmModel = firstConfigString(modelConfig, llmModel, "model_name", "model", "llm_model", "resource_id");
@@ -503,10 +496,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     public Map<String, Object> getSupportedConfig() {
         Map<String, String> configs = new LinkedHashMap<>();
         configs.put("max_chunk_chars", "单个切片的最大字符数");
-        configs.put("llm_enabled", "是否启用大模型切片精修");
-        configs.put("llm_base_url", "OpenAI兼容接口地址");
-        configs.put("llm_api_key", "OpenAI兼容接口密钥");
-        configs.put("llm_model", "切片精修模型");
+        configs.put("llm_model_id", "模型管理中已启用且测试通过的OpenAI兼容LLM配置ID");
         configs.put("llm_timeout_seconds", "单次模型请求超时时间");
         configs.put("llm_max_input_chars", "单次送入模型的最大字符数");
         configs.put("llm_max_tokens", "模型输出最大Token数");
@@ -521,10 +511,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     public Map<String, Object> getDefaultConfig() {
         Map<String, Object> defaults = new LinkedHashMap<>();
         defaults.put("max_chunk_chars", DEFAULT_MAX_CHUNK_CHARS);
-        defaults.put("llm_enabled", false);
-        defaults.put("llm_base_url", DEFAULT_LLM_BASE_URL);
-        defaults.put("llm_api_key", "");
-        defaults.put("llm_model", DEFAULT_LLM_MODEL);
+        defaults.put("llm_model_id", "");
         defaults.put("llm_timeout_seconds", DEFAULT_LLM_TIMEOUT_SECONDS);
         defaults.put("llm_max_input_chars", DEFAULT_LLM_MAX_INPUT_CHARS);
         defaults.put("llm_max_tokens", DEFAULT_LLM_MAX_TOKENS);
@@ -667,41 +654,19 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
 
     private List<LocalChunk> parseFile(String filename, InputStream inputStream) throws Exception {
         String extension = getExtension(filename);
-        List<LocalChunk> chunks;
+        String text;
         if ("xlsx".equals(extension) || "xls".equals(extension)) {
-            chunks = parseExcel(inputStream);
-            return refineChunksWithLlm(chunks);
-        }
-        String text = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))
-                .lines()
-                .collect(Collectors.joining("\n"));
-        if ("csv".equals(extension)) {
-            chunks = parseCsv(text);
-            return refineChunksWithLlm(chunks);
-        }
-        if ("json".equals(extension) || "jsonl".equals(extension)) {
-            chunks = parseJsonQa(text, "jsonl".equals(extension));
-            return refineChunksWithLlm(chunks);
-        }
-        List<LocalChunk> markdownChunks = parsePreChunkedMarkdown(text);
-        if (!markdownChunks.isEmpty()) {
-            return markdownChunks;
-        }
-        List<LocalChunk> llmChunks = chunkDocumentWithLlm(filename, text);
-        if (!llmChunks.isEmpty()) {
-            return llmChunks;
-        }
-        List<LocalChunk> qaChunks = parsePlainQa(text);
-        if (!qaChunks.isEmpty()) {
-            chunks = qaChunks;
+            text = parseExcelAsModelInput(inputStream);
         } else {
-            chunks = splitText(text);
+            text = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))
+                    .lines()
+                    .collect(Collectors.joining("\n"));
         }
-        return refineChunksWithLlm(chunks);
+        return chunkDocumentWithLlm(filename, text);
     }
 
-    private List<LocalChunk> parseExcel(InputStream inputStream) throws Exception {
-        List<LocalChunk> chunks = new ArrayList<>();
+    private String parseExcelAsModelInput(InputStream inputStream) throws Exception {
+        List<String> inputBlocks = new ArrayList<>();
         DataFormatter formatter = new DataFormatter();
         try (Workbook workbook = WorkbookFactory.create(inputStream)) {
             for (Sheet sheet : workbook) {
@@ -716,28 +681,20 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
                         rows.add(values);
                     }
                 }
-                chunks.addAll(rowsToChunks(rows));
+                inputBlocks.addAll(rowsToModelInputBlocks(rows));
             }
         }
-        return chunks;
+        return String.join("\n\n", inputBlocks);
     }
 
-    private List<LocalChunk> parseCsv(String text) {
-        List<List<String>> rows = text.lines()
-                .filter(StringUtils::isNotBlank)
-                .map(this::parseCsvLine)
-                .collect(Collectors.toList());
-        return rowsToChunks(rows);
-    }
-
-    private List<LocalChunk> rowsToChunks(List<List<String>> rows) {
+    private List<String> rowsToModelInputBlocks(List<List<String>> rows) {
         if (rows.isEmpty()) {
             return List.of();
         }
         List<String> header = rows.get(0);
         int questionIndex = findHeader(header, "question", "q", "问题", "问");
         int answerIndex = findHeader(header, "answer", "a", "答案", "答", "回复");
-        List<LocalChunk> chunks = new ArrayList<>();
+        List<String> inputBlocks = new ArrayList<>();
         for (int i = 1; i < rows.size(); i++) {
             List<String> row = rows.get(i);
             if (questionIndex >= 0 && answerIndex >= 0) {
@@ -746,7 +703,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
                 if (StringUtils.isAnyBlank(question, answer)) {
                     continue;
                 }
-                chunks.add(new LocalChunk(question, answer, "问题：" + question + "\n答案：" + answer));
+                inputBlocks.add("问题：" + question + "\n答案：" + answer);
                 continue;
             }
             Map<String, String> fields = new LinkedHashMap<>();
@@ -758,114 +715,41 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
                 }
             }
             if (!fields.isEmpty()) {
-                chunks.add(new LocalChunk(null, null, fields.entrySet().stream()
+                inputBlocks.add(fields.entrySet().stream()
                         .map(entry -> entry.getKey() + "：" + entry.getValue())
-                        .collect(Collectors.joining("\n"))));
+                        .collect(Collectors.joining("\n")));
             }
         }
-        return chunks;
+        return inputBlocks;
     }
 
-    private List<LocalChunk> parsePreChunkedMarkdown(String text) {
-        String normalized = StringUtils.defaultString(text).trim();
-        if (StringUtils.isBlank(normalized) || !normalized.contains("HY-KB-")) {
-            return List.of();
-        }
-
-        List<LocalChunk> chunks = new ArrayList<>();
-        for (String rawSection : normalized.split("(?m)^---\\s*$")) {
-            String section = rawSection.trim();
-            if (StringUtils.isBlank(section) || !section.matches("(?s).*^##\\s+HY-KB-\\d+.*")) {
-                continue;
-            }
-            chunks.add(new LocalChunk(
-                    extractMarkdownQuestions(section),
-                    extractMarkdownAnswer(section),
-                    section));
-        }
-        return chunks;
-    }
-
-    private String extractMarkdownQuestions(String section) {
-        int start = section.indexOf("**适用问题**");
-        if (start < 0) {
-            return null;
-        }
-        String questionBlock = section.substring(start);
-        List<String> questions = new ArrayList<>();
-        for (String line : questionBlock.split("\\R")) {
-            String trimmed = line.trim();
-            if (trimmed.startsWith("- ")) {
-                questions.add(trimmed.substring(2).trim());
-            }
-        }
-        return questions.isEmpty() ? null : String.join("；", questions);
-    }
-
-    private String extractMarkdownAnswer(String section) {
-        int bodyStart = section.indexOf("**正文**");
-        if (bodyStart < 0) {
-            return null;
-        }
-        String body = section.substring(bodyStart)
-                .replaceFirst("^\\*\\*正文\\*\\*[:：]?\\s*", "")
-                .replaceFirst("(?s)\\R\\s*\\*\\*适用问题\\*\\*[:：]?.*$", "")
-                .trim();
-        return StringUtils.isBlank(body) ? null : body;
-    }
-
-    private List<LocalChunk> refineChunksWithLlm(List<LocalChunk> chunks) {
-        if (!llmEnabled || StringUtils.isAnyBlank(llmBaseUrl, llmApiKey, llmModel)
-                || LocalKnowledgeConfigParser.isPlaceholderSecret(llmApiKey) || chunks.isEmpty()) {
-            return chunks;
-        }
-        List<LocalChunk> refined = new ArrayList<>();
-        for (int i = 0; i < chunks.size(); i++) {
-            LocalChunk original = chunks.get(i);
-            try {
-                refined.add(refineChunkWithLlm(original));
-            } catch (Exception e) {
-                log.warn("本地知识库第 {} 个切片大模型精修失败，已回退规则切片: {}", i + 1, e.getMessage());
-                llmChunkingFailed.set(true);
-                refined.add(original);
-            }
-        }
-        return refined;
-    }
-
-    /**
-     * [Issue #5] 对每个分段进行 LLM 切片。若首次失败则重试一次，重试失败后该分段
-     * 回退到规则切片，而非放弃整个文档。
-     */
     private List<LocalChunk> chunkDocumentWithLlm(String filename, String text) {
-        if (!llmAvailable() || StringUtils.isBlank(text)) {
-            return List.of();
+        requireLlmAvailable();
+        if (StringUtils.isBlank(text)) {
+            throw new RenException("文件中没有可用于大模型语义切片的有效内容");
         }
         List<LocalChunk> chunks = new ArrayList<>();
         List<String> sections = textSplitter().splitLlmSections(text);
         for (int i = 0; i < sections.size(); i++) {
             String section = sections.get(i);
-            boolean success = false;
+            Exception lastError = null;
             for (int attempt = 0; attempt <= 1; attempt++) {
                 try {
                     chunks.addAll(chunkSectionWithLlm(filename, section, i + 1, sections.size()));
-                    success = true;
+                    lastError = null;
                     break;
                 } catch (Exception e) {
+                    lastError = e;
                     if (attempt == 0) {
                         log.warn("本地知识库大模型切片分段{}/{}首次失败，即将重试: {}",
-                                i + 1, sections.size(), e.getMessage());
-                    } else {
-                        log.warn("本地知识库大模型切片分段{}/{}重试后仍失败，回退规则切片: {}",
                                 i + 1, sections.size(), e.getMessage());
                     }
                 }
             }
-            if (!success) {
-                // 记录 LLM 切片失败标记，用于 uploadDocument() 中标记质量降级
-                llmChunkingFailed.set(true);
-                // 回退到规则切片
-                chunks.addAll(splitByParagraphs(section));
+            if (lastError != null) {
+                throw new RenException(String.format(
+                        "大模型语义切片失败（分段%d/%d），未生成规则切片: %s",
+                        i + 1, sections.size(), lastError.getMessage()), lastError);
             }
         }
         return chunks.stream()
@@ -873,9 +757,14 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
                 .collect(Collectors.toList());
     }
 
-    private boolean llmAvailable() {
-        return llmEnabled && StringUtils.isNoneBlank(llmBaseUrl, llmApiKey, llmModel)
-                && !LocalKnowledgeConfigParser.isPlaceholderSecret(llmApiKey);
+    private void requireLlmAvailable() {
+        if (StringUtils.isBlank(llmModelId)) {
+            throw new RenException("本地知识库必须配置大模型语义切片模型");
+        }
+        if (StringUtils.isAnyBlank(llmBaseUrl, llmModel)
+                || LocalKnowledgeConfigParser.isPlaceholderSecret(llmApiKey)) {
+            throw new RenException("切片模型配置不可用，请确认模型已启用、测试通过并配置了接口地址和模型名");
+        }
     }
 
     private List<LocalChunk> chunkSectionWithLlm(String filename, String section, int sectionIndex, int totalSections)
@@ -921,25 +810,13 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
                 + objectMapper.writeValueAsString(payload);
     }
 
-    private LocalChunk refineChunkWithLlm(LocalChunk chunk) throws Exception {
-        Map<String, Object> requestBody = new LinkedHashMap<>();
-        requestBody.put("model", llmModel);
-        requestBody.put("temperature", 0.1);
-        requestBody.put("max_tokens", llmMaxTokens);
-        requestBody.put("messages", List.of(
-                Map.of("role", "system", "content", getLlmSystemPrompt()),
-                Map.of("role", "user", "content", buildLlmUserPrompt(chunk))));
-
-        String content = requestLlmMessageContent(requestBody);
-        LocalChunk refined = parseRefinedChunk(content, chunk);
-        return StringUtils.isBlank(refined.getContent()) ? chunk : refined;
-    }
-
     private String requestLlmMessageContent(Map<String, Object> requestBody) throws Exception {
         // TODO: migrate to LlmClient
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.setBearerAuth(llmApiKey);
+        if (StringUtils.isNotBlank(llmApiKey)) {
+            headers.setBearerAuth(llmApiKey);
+        }
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
         ResponseEntity<String> response = llmRestTemplate.exchange(
                 buildChatCompletionsUrl(llmBaseUrl), HttpMethod.POST, entity, String.class);
@@ -953,23 +830,6 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         return content;
     }
 
-    private String getLlmSystemPrompt() {
-        return "你是知识库切片清洗助手。你的任务是把输入切片整理成适合RAG检索的高精度知识片段。"
-                + "必须保留原始事实、数值、名称和约束，不得编造、扩写不存在的信息。"
-                + "如果输入是问答，保留明确的问题和答案；如果输入是表格行，把字段组织成自然、完整、可检索的内容。"
-                + "只输出JSON对象，不要Markdown，不要解释。JSON字段固定为question、answer、content。"
-                + "没有明确问题或答案时，对应字段输出空字符串。";
-    }
-
-    private String buildLlmUserPrompt(LocalChunk chunk) throws Exception {
-        Map<String, String> payload = new LinkedHashMap<>();
-        payload.put("question", StringUtils.defaultString(chunk.getQuestion()));
-        payload.put("answer", StringUtils.defaultString(chunk.getAnswer()));
-        payload.put("content", abbreviate(StringUtils.defaultString(chunk.getContent()), llmMaxInputChars));
-        return "请清洗下面这个知识库候选切片，并按指定JSON格式返回：\n"
-                + objectMapper.writeValueAsString(payload);
-    }
-
     private String extractMessageContent(String responseBody) throws Exception {
         JsonNode root = objectMapper.readTree(responseBody);
         JsonNode choices = root.path("choices");
@@ -977,24 +837,6 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             return choices.get(0).path("message").path("content").asText();
         }
         return null;
-    }
-
-    private LocalChunk parseRefinedChunk(String modelContent, LocalChunk fallback) throws Exception {
-        String json = stripJson(modelContent);
-        JsonNode node = objectMapper.readTree(json);
-        String question = StringUtils.trimToEmpty(node.path("question").asText());
-        String answer = StringUtils.trimToEmpty(node.path("answer").asText());
-        String content = StringUtils.trimToEmpty(node.path("content").asText());
-        if (StringUtils.isBlank(content) && StringUtils.isNoneBlank(question, answer)) {
-            content = "问题：" + question + "\n答案：" + answer;
-        }
-        if (StringUtils.isBlank(content)) {
-            content = fallback.getContent();
-        }
-        return new LocalChunk(
-                StringUtils.isBlank(question) ? fallback.getQuestion() : question,
-                StringUtils.isBlank(answer) ? fallback.getAnswer() : answer,
-                content);
     }
 
     private List<LocalChunk> parseChunkedDocument(String modelContent) throws Exception {
@@ -1006,18 +848,25 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         }
         List<LocalChunk> chunks = new ArrayList<>();
         for (JsonNode item : chunksNode) {
-            String question = StringUtils.trimToEmpty(item.path("question").asText());
-            String answer = StringUtils.trimToEmpty(item.path("answer").asText());
-            String content = StringUtils.trimToEmpty(item.path("content").asText());
-            if (StringUtils.isBlank(content) && StringUtils.isNoneBlank(question, answer)) {
-                content = "问题：" + question + "\n答案：" + answer;
+            JsonNode questionNode = item.get("question");
+            JsonNode answerNode = item.get("answer");
+            JsonNode contentNode = item.get("content");
+            if (!item.isObject()
+                    || questionNode == null || !questionNode.isTextual()
+                    || answerNode == null || !answerNode.isTextual()
+                    || contentNode == null || !contentNode.isTextual()) {
+                throw new RenException("模型切片JSON必须为每个切片提供question、answer、content字符串字段");
             }
-            if (StringUtils.isNotBlank(content)) {
-                chunks.add(new LocalChunk(
-                        StringUtils.isBlank(question) ? null : question,
-                        StringUtils.isBlank(answer) ? null : answer,
-                        content));
+            String question = StringUtils.trimToEmpty(questionNode.asText());
+            String answer = StringUtils.trimToEmpty(answerNode.asText());
+            String content = StringUtils.trimToEmpty(contentNode.asText());
+            if (StringUtils.isBlank(content)) {
+                throw new RenException("模型切片JSON中的content不能为空");
             }
+            chunks.add(new LocalChunk(
+                    StringUtils.isBlank(question) ? null : question,
+                    StringUtils.isBlank(answer) ? null : answer,
+                    content));
         }
         return chunks;
     }
@@ -1052,80 +901,8 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         return StringUtils.removeEnd(url, "/") + "/chat/completions";
     }
 
-    private String abbreviate(String text, int maxChars) {
-        String value = StringUtils.defaultString(text);
-        if (value.length() <= maxChars) {
-            return value;
-        }
-        return value.substring(0, maxChars) + "\n...[内容已截断，保持原文事实清洗]";
-    }
-
-    private List<LocalChunk> parseJsonQa(String text, boolean jsonLines) throws Exception {
-        List<LocalChunk> chunks = new ArrayList<>();
-        if (jsonLines) {
-            for (String line : text.split("\\R")) {
-                if (StringUtils.isNotBlank(line)) {
-                    addJsonNodeChunk(chunks, objectMapper.readTree(line));
-                }
-            }
-        } else {
-            JsonNode node = objectMapper.readTree(text);
-            if (node.isArray()) {
-                for (JsonNode item : node) {
-                    addJsonNodeChunk(chunks, item);
-                }
-            } else {
-                addJsonNodeChunk(chunks, node);
-            }
-        }
-        return chunks;
-    }
-
-    private void addJsonNodeChunk(List<LocalChunk> chunks, JsonNode node) throws Exception {
-        String question = firstText(node, "question", "q", "问题", "问");
-        String answer = firstText(node, "answer", "a", "答案", "答", "response", "回复");
-        if (StringUtils.isNoneBlank(question, answer)) {
-            chunks.add(new LocalChunk(question, answer, "问题：" + question + "\n答案：" + answer));
-        } else {
-            Map<String, Object> map = objectMapper.convertValue(node, new TypeReference<Map<String, Object>>() {
-            });
-            chunks.add(new LocalChunk(null, null, objectMapper.writeValueAsString(map)));
-        }
-    }
-
-    private List<LocalChunk> parsePlainQa(String text) {
-        List<LocalChunk> chunks = new ArrayList<>();
-        String[] blocks = text.split("(\\R\\s*\\R)+");
-        for (String block : blocks) {
-            String question = null;
-            String answer = null;
-            for (String line : block.split("\\R")) {
-                String trimmed = line.trim();
-                if (trimmed.matches("^(Q|q|问|问题)[:：].*")) {
-                    question = trimmed.replaceFirst("^(Q|q|问|问题)[:：]\\s*", "");
-                } else if (trimmed.matches("^(A|a|答|答案)[:：].*")) {
-                    answer = trimmed.replaceFirst("^(A|a|答|答案)[:：]\\s*", "");
-                }
-            }
-            if (StringUtils.isNoneBlank(question, answer)) {
-                chunks.add(new LocalChunk(question, answer, "问题：" + question + "\n答案：" + answer));
-            }
-        }
-        return chunks;
-    }
-
-    private List<LocalChunk> splitText(String text) {
-        return splitByParagraphs(text);
-    }
-
-    private List<LocalChunk> splitByParagraphs(String text) {
-        return textSplitter().splitChunks(text).stream()
-                .map(content -> new LocalChunk(null, null, content))
-                .collect(Collectors.toList());
-    }
-
     private LocalKnowledgeTextSplitter textSplitter() {
-        return new LocalKnowledgeTextSplitter(maxChunkChars, llmMaxInputChars);
+        return new LocalKnowledgeTextSplitter(llmMaxInputChars);
     }
 
     private int resolveResultLimit(RetrievalDTO.TestReq req, int pageSize) {
@@ -1323,25 +1100,6 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
                 .collect(Collectors.toMap(DocumentEntity::getDocumentId, item -> item, (a, b) -> a));
     }
 
-    private List<String> parseCsvLine(String line) {
-        List<String> cells = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        boolean quoted = false;
-        for (int i = 0; i < line.length(); i++) {
-            char c = line.charAt(i);
-            if (c == '"') {
-                quoted = !quoted;
-            } else if (c == ',' && !quoted) {
-                cells.add(current.toString().trim());
-                current.setLength(0);
-            } else {
-                current.append(c);
-            }
-        }
-        cells.add(current.toString().trim());
-        return cells;
-    }
-
     private int findHeader(List<String> headers, String... names) {
         for (int i = 0; i < headers.size(); i++) {
             String header = StringUtils.defaultString(headers.get(i)).trim().toLowerCase();
@@ -1352,16 +1110,6 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             }
         }
         return -1;
-    }
-
-    private String firstText(JsonNode node, String... names) {
-        for (String name : names) {
-            JsonNode value = node.get(name);
-            if (value != null && value.isValueNode() && StringUtils.isNotBlank(value.asText())) {
-                return value.asText();
-            }
-        }
-        return null;
     }
 
     private String getCell(List<String> row, int index) {

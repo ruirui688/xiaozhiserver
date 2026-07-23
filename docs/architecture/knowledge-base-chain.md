@@ -80,28 +80,21 @@ KnowledgeFilesController (/datasets/{id}/documents)
 ```text
 LocalKnowledgeAdapter.parseFile()
 
-按文件类型分发:
-  Excel (.xlsx/.xls) → Apache POI 行解析 → question/answer 检测
-  CSV               → 类似行解析
-  JSON/JSONL        → 结构化 Q&A 解析
-  HY-KB Markdown    → h2 标签检测 → "---" 分段
-  Plain QA          → "Q:"/"A:" 前缀检测
+源文件规范化:
+  Excel (.xlsx/.xls) → Apache POI 转成带字段名的模型输入文本
+  txt/md/mdx/csv/json/jsonl/qa → UTF-8 原文
 
-可选 LLM 分块 (llm_enabled=true):
+唯一切片路径:
   chunkDocumentWithLlm()
-    → 分段 (max llmMaxInputChars)
-    → LLM 提取结构化 chunks
-    → 失败 → per-section 重试 (1 次) → 回退规则分块
-
-可选 LLM 精炼:
-  refineChunksWithLlm()
-    → 每 chunk 清理/提取 question+answer
-    → 失败 → 保留原始 chunk（graceful degradation）
+    → 按 llm_max_input_chars 划分模型输入窗口（窗口不是最终切片）
+    → OpenAI Chat Completions 兼容 LLM 输出 question/answer/content JSON 数组
+    → 单个输入窗口失败时重试 1 次
+    → 任一窗口仍失败、超时、空输出或非 JSON：整个上传失败，不写入规则切片
 ```
 
-知识库页面只选择模型管理中已启用、测试通过的 LLM/SLM 配置 ID，保存到
-`parser_config.llm_model_id`；不得再次保存 API Key、Base URL 或上游模型名。大模型切片只发生在文档解析阶段，
-失败、超时、空输出或非 JSON 时回退规则切片，不在每次检索时调用 LLM。
+本地知识库必须选择模型管理中已启用、测试通过且兼容 OpenAI Chat Completions 的 LLM 配置 ID，保存到
+`parser_config.llm_model_id`；不得再次保存 API Key、Base URL 或上游模型名。`llm_enabled=true` 只作为旧版本
+滚动升级兼容字段，新实现没有关闭入口。大模型切片只发生在文档解析阶段，不在每次检索时调用 LLM。
 
 LocalKnowledge 在上传请求内同步完成解析、切片和入库；接口成功时文档状态为 `DONE`、进度为 100%。
 页面“解析”及 `POST /chunks` 只验证上传阶段生成的切片是否仍然存在，不能把数据库切片拼接成有损原文后重新切片。
@@ -112,12 +105,11 @@ RAGFlow 仍通过 `POST /chunks` 异步启动远端解析，状态可先进入 `
 RAG 请求 DTO；数据库继续保存用户提交的完整 JSON。远端响应仅在用户未提交配置时
 用于补全，不能覆盖本地切片、模型和召回扩展字段。
 
-本轮切片故障不是单点异常，而是三组契约不一致：`parserConfig` 曾在字符串、DTO 和远端响应之间转换时丢字段；
-本地上传已经同步产出切片，service 却仍按异步 adapter 写成 `RUNNING`；规则回退和 LLM 输入窗口各自维护边界，
-遇到长中文段落时可能硬切或丢失内容。当前实现用 `KnowledgeBaseParserConfigCodec` 显式解码配置，
-用 adapter 的同步能力声明决定 `DONE/100%` 状态，并把段落、中文句末和硬上限逻辑集中到
-`LocalKnowledgeTextSplitter`。本地适配器不支持的二进制格式必须明确失败，不能创建永久处理中记录；
-上传后零切片也必须失败，后续 `/chunks` 不伪造重解析结果。
+本轮切片契约固定为严格语义模式：`KnowledgeBaseServiceImpl` 在新增和更新时强制校验托管模型 ID、启用/测试状态及
+OpenAI 兼容协议；`LocalKnowledgeTextSplitter` 只负责划分不会丢字的模型输入窗口，不产生可持久化规则切片；
+`LocalKnowledgeAdapter` 每次上传重新解析托管模型配置，避免适配器缓存继续使用已修改或停用的旧配置。
+本地适配器不支持的格式、零切片、模型不可用或调用失败都必须明确失败，不能创建 DONE 记录；后续 `/chunks`
+只验证上传时已经生成的切片，不伪造重解析结果。
 
 ### 3.2 向量嵌入（新增）
 
@@ -311,7 +303,7 @@ Web 上传不再手工指定 `multipart/form-data`，由浏览器为 `FormData` 
 
 | 层 | 当前覆盖 |
 |---|---|
-| Java 切片契约 | parserConfig 完整保存、格式白名单、中文句界切分、LLM 窗口不丢字、本地同步状态、零切片拒绝 |
+| Java 切片契约 | 必选托管 LLM、OpenAI 兼容校验、无规则回退、LLM 窗口不丢字、本地同步状态、零切片拒绝 |
 | Java 工具描述 | 领域中立、知识库数量与说明长度上限、空元数据确定性输出 |
 | Web 组件状态 | 晚到详情不覆盖 dirty 字段、保存后销毁并重建组件仍恢复知识绑定、保存失败保留草稿、重复提交门控、选择器乱序与恢复保护 |
 | Python 上下文 | 本地/RAGFlow 结果去重与预算、tool history 总预算、schema 保真、动态 context 和 memory 预算 |
@@ -330,10 +322,10 @@ Web 上传不再手工指定 `multipart/form-data`，由浏览器为 `FormData` 
 | 2 | RAGFlow 删除失败后本地影子丢失 | 远程成功后才删本地 |
 | 3 | RAGFlowClient 连接池无效 | 优先使用 Spring RestTemplate |
 | 4 | Token 估算粗糙 (content.length()/2) | CJK-aware (1.5/0.75 per char) |
-| 5 | LLM 分块失败无重试 | per-section 重试 + 回退 |
+| 5 | LLM 分块失败无重试 | per-section 重试；重试失败则整个上传失败 |
 | 6 | 后端无上传大小限制 | knowledge.max-upload-size 配置 |
 | 7 | RAGFlow 名解析 indexOf('_') 脆 | 已知用户名前缀剥离 |
-| 8 | LLM 分块失败标记 DONE | 添加 quality_degraded 标记 |
+| 8 | LLM 分块失败仍标记 DONE | 严格失败，不持久化规则切片或 DONE 文档 |
 | 9 | chunk_id 重上传唯一冲突 | timestamp 后缀 + 删除计数检查 |
 | 10 | RAGFlowClient 日期格式硬编码 | 移除固定格式解析 |
 | 11 | embeddingModel 字段 UI 误导 | 添加 Javadoc 说明 |
