@@ -14,7 +14,10 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.MessageSource;
 import org.springframework.core.env.Environment;
+import org.springframework.http.HttpStatus;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.ResourceAccessException;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 
@@ -148,6 +151,31 @@ class AgentVoicePrintEnrollmentServiceImplTest {
         RenException error = assertThrows(RenException.class, () -> service.addSample("enroll-a", dto));
 
         assertEquals(ErrorCode.VOICEPRINT_AUDIO_NOT_BELONG_AGENT, error.getCode());
+    }
+
+    @Test
+    void enrollmentStartReportsOfflineDevicePrecisely() {
+        RenException error = ReflectionTestUtils.invokeMethod(
+                service,
+                "mapEnrollmentStartException",
+                HttpClientErrorException.create(HttpStatus.NOT_FOUND, "Not Found", null, null, null));
+
+        assertEquals("设备当前未在线，请先唤醒设备并等待连接后重试", error.getMsg());
+    }
+
+    @Test
+    void enrollmentStartSeparatesAuthenticationAndConnectivityFailures() {
+        RenException authenticationError = ReflectionTestUtils.invokeMethod(
+                service,
+                "mapEnrollmentStartException",
+                HttpClientErrorException.create(HttpStatus.UNAUTHORIZED, "Unauthorized", null, null, null));
+        RenException connectivityError = ReflectionTestUtils.invokeMethod(
+                service,
+                "mapEnrollmentStartException",
+                new ResourceAccessException("connection refused"));
+
+        assertEquals("xiaozhi-server 声纹采集接口认证失败，请检查 server.secret 配置", authenticationError.getMsg());
+        assertEquals("无法连接 xiaozhi-server 声纹采集接口，请检查内部 HTTP 地址和 8003 端口", connectivityError.getMsg());
     }
 
     private AgentVoicePrintEnrollmentEntity enrollment(String id, String agentId, String status) {

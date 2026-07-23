@@ -9,6 +9,7 @@ import { getStoredAccessToken } from '@/utils/auth'
 import { toast } from '@/utils/toast'
 import { clearCurrentWorkspaceId, getCurrentWorkspaceId } from '@/utils/workspace'
 import { ContentTypeEnum, ResultEnum, ShowMessage } from './enum'
+import { rethrowRequestError } from './responseError'
 
 const isDebug = import.meta.env.DEV
 
@@ -99,56 +100,59 @@ const alovaInstance = createAlova({
     }
   }),
 
-  responded: onResponseRefreshToken((response, method) => {
-    const { config } = method
-    const { requestType } = config
-    const {
-      statusCode,
-      data: rawData,
-      errMsg,
-    } = response as UniNamespace.RequestSuccessCallbackResult
+  responded: onResponseRefreshToken({
+    onSuccess: (response, method) => {
+      const { config } = method
+      const { requestType } = config
+      const {
+        statusCode,
+        data: rawData,
+        errMsg,
+      } = response as UniNamespace.RequestSuccessCallbackResult
 
-    if (isDebug) {
-      console.log(response)
-    }
+      if (isDebug) {
+        console.log(response)
+      }
 
-    // 处理特殊请求类型（上传/下载）
-    if (requestType === 'upload' || requestType === 'download') {
-      return response
-    }
+      // 处理特殊请求类型（上传/下载）
+      if (requestType === 'upload' || requestType === 'download') {
+        return response
+      }
 
-    // 处理 HTTP 状态码错误
-    if (statusCode !== 200) {
-      const errorMessage = ShowMessage(statusCode) || `HTTP请求错误[${statusCode}]`
-      console.error('errorMessage===>', errorMessage)
-      toast.error(errorMessage)
-      throw new Error(`${errorMessage}：${errMsg}`)
-    }
+      // 处理 HTTP 状态码错误
+      if (statusCode !== 200) {
+        const errorMessage = ShowMessage(statusCode) || `HTTP请求错误[${statusCode}]`
+        console.error('errorMessage===>', errorMessage)
+        toast.error(errorMessage)
+        throw new Error(`${errorMessage}：${errMsg}`)
+      }
 
-    // 处理业务逻辑错误
-    const { code, msg, data } = rawData as IResponse
-    if (code !== ResultEnum.Success) {
-      // 检查是否为token失效
-      if (code === ResultEnum.Unauthorized) {
-        // 清除token并跳转到登录页
-        uni.removeStorageSync('token')
-        uni.removeStorageSync('userInfo')
-        clearCurrentWorkspaceId()
-        uni.reLaunch({ url: '/pages/login/index' })
+      // 处理业务逻辑错误
+      const { code, msg, data } = rawData as IResponse
+      if (code !== ResultEnum.Success) {
+        // 检查是否为token失效
+        if (code === ResultEnum.Unauthorized) {
+          // 清除token并跳转到登录页
+          uni.removeStorageSync('token')
+          uni.removeStorageSync('userInfo')
+          clearCurrentWorkspaceId()
+          uni.reLaunch({ url: '/pages/login/index' })
+          throw new Error(`请求错误[${code}]：${msg}`)
+        }
+
+        if (config.meta?.isExposeError) {
+          return Promise.reject(msg)
+        }
+
+        if (config.meta?.toast !== false) {
+          toast.warning(msg)
+        }
         throw new Error(`请求错误[${code}]：${msg}`)
       }
-
-      if (config.meta?.isExposeError) {
-        return Promise.reject(msg)
-      }
-
-      if (config.meta?.toast !== false) {
-        toast.warning(msg)
-      }
-      throw new Error(`请求错误[${code}]：${msg}`)
-    }
-    // 处理成功响应，返回业务数据
-    return data
+      // 处理成功响应，返回业务数据
+      return data
+    },
+    onError: rethrowRequestError,
   }),
 })
 

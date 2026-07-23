@@ -10,11 +10,13 @@ import org.springframework.core.env.Environment;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
@@ -298,8 +300,23 @@ public class AgentVoicePrintEnrollmentServiceImpl
                 throw new RenException("设备声纹采集模式启动失败：" + response.getStatusCode());
             }
         } catch (RestClientException e) {
-            throw new RenException("无法让设备进入声纹采集模式，请确认设备在线且 xiaozhi-server HTTP 端口可访问", e);
+            throw mapEnrollmentStartException(e);
         }
+    }
+
+    private RenException mapEnrollmentStartException(RestClientException error) {
+        if (error instanceof HttpStatusCodeException statusError) {
+            if (statusError.getStatusCode() == HttpStatus.NOT_FOUND) {
+                return new RenException("设备当前未在线，请先唤醒设备并等待连接后重试", error);
+            }
+            if (statusError.getStatusCode() == HttpStatus.UNAUTHORIZED
+                    || statusError.getStatusCode() == HttpStatus.FORBIDDEN) {
+                return new RenException("xiaozhi-server 声纹采集接口认证失败，请检查 server.secret 配置", error);
+            }
+            return new RenException(
+                    "xiaozhi-server 声纹采集接口返回 HTTP " + statusError.getStatusCode().value(), error);
+        }
+        return new RenException("无法连接 xiaozhi-server 声纹采集接口，请检查内部 HTTP 地址和 8003 端口", error);
     }
 
     private String resolveXiaozhiServerHttpBaseUrl() {

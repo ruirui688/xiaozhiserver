@@ -1,20 +1,11 @@
 import type { PublicConfig } from '@/api/auth'
-import { getPublicConfig } from '@/api/auth'
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { getPublicConfig } from '@/api/auth'
+import { createInitialPublicConfig, deserializePublicConfig, normalizePublicConfig } from './configState'
 
-// 初始化状态
-const initialConfigState: PublicConfig = {
-  enableMobileRegister: false,
-  version: '',
-  year: '',
-  allowUserRegister: false,
-  mobileAreaList: [],
-  beianIcpNum: '',
-  beianGaNum: '',
-  sm2PublicKey: '',
-  name: import.meta.env.VITE_APP_TITLE,
-}
+const appTitle = import.meta.env.VITE_APP_TITLE
+const initialConfigState = createInitialPublicConfig(appTitle)
 
 export const useConfigStore = defineStore(
   'config',
@@ -24,22 +15,17 @@ export const useConfigStore = defineStore(
 
     // 设置配置信息
     const setConfig = (val: PublicConfig) => {
-      config.value = val
+      config.value = normalizePublicConfig(val, appTitle)
     }
 
     // 获取公共配置
     const fetchPublicConfig = async () => {
-      try {
-        const configData = await getPublicConfig()
-        console.log(configData)
+      const configData = await getPublicConfig()
+      if (!configData || typeof configData !== 'object')
+        throw new Error('公共配置响应为空')
 
-        setConfig(configData)
-        return configData
-      }
-      catch (error) {
-        console.error('获取公共配置失败:', error)
-        throw error
-      }
+      setConfig(configData)
+      return config.value
     }
 
     // 重置配置
@@ -59,7 +45,7 @@ export const useConfigStore = defineStore(
       key: 'config',
       serializer: {
         serialize: state => JSON.stringify(state.config),
-        deserialize: value => ({ config: JSON.parse(value) }),
+        deserialize: value => ({ config: deserializePublicConfig(value, appTitle) }),
       },
     },
   },

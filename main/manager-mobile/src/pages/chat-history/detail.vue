@@ -325,7 +325,7 @@ onUnload(() => {
           }"
         >
           <view
-            class="max-w-[80%] flex flex-col gap-[8rpx]"
+            class="message-column max-w-[80%] min-w-0 flex flex-col gap-[8rpx]"
             :class="{
               'items-end': message.chatType === 1,
               'items-start': message.chatType === 2,
@@ -334,7 +334,7 @@ onUnload(() => {
           >
             <!-- 消息气泡 -->
             <view
-              class="shadow-message break-words rounded-[20rpx] p-[24rpx] leading-[1.4]"
+              class="shadow-message message-bubble break-words rounded-[20rpx] p-[24rpx] leading-[1.4]"
               :class="{
                 'bg-[#336cff] text-white': message.chatType === 1,
                 'bg-white text-[#232338] border border-[#eeeeee]': [2, 3].includes(message.chatType),
@@ -369,7 +369,7 @@ onUnload(() => {
                 </div>
               </template>
               <!-- 内容区域 - 使用flex布局让图标和文本对齐 -->
-              <view v-else class="flex items-center gap-[12rpx]">
+              <view v-else class="message-body min-w-0 flex items-center gap-[12rpx]">
                 <!-- 音频播放图标 -->
                 <view
                   v-if="message.audioId"
@@ -393,7 +393,7 @@ onUnload(() => {
                 <!-- 消息内容容器 -->
                 <view class="min-w-0 flex-1">
                   <!-- 消息内容 -->
-                  <text class="block text-[28rpx]">
+                  <text class="message-text block text-[28rpx]">
                     {{ message.parsedContent }}
                   </text>
                 </view>
@@ -421,6 +421,33 @@ onUnload(() => {
 /* 自定义阴影和动画效果，无法用UnoCSS表示的样式 */
 .shadow-message {
   box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.06);
+}
+
+.message-column {
+  min-width: 0;
+}
+
+.message-bubble,
+.message-body,
+.content-wrapper {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.message-bubble {
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.message-text,
+.text-content,
+.tool-call-text,
+.tool-result-expanded {
+  display: block;
+  max-width: 100%;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 @keyframes pulse-audio {

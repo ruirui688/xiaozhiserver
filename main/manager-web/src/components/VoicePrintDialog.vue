@@ -62,11 +62,11 @@
 
           <el-alert
             v-if="enrollmentUnsupported"
-            type="warning"
-            :closable="false"
+              type="warning"
+              :closable="false"
               class="fallback-alert"
               :title="$t('voicePrintDialog.enrollmentUnavailable')"
-              :description="$t('voicePrintDialog.enrollmentUnavailableDesc')">
+              :description="enrollmentErrorMessage || $t('voicePrintDialog.enrollmentUnavailableDesc')">
           </el-alert>
 
           <div class="device-actions">
@@ -139,6 +139,7 @@ export default {
       completingEnrollment: false,
       registrationSubmitted: false,
       enrollmentUnsupported: false,
+      enrollmentErrorMessage: '',
       pollingTimer: null,
       minSamples: 1,
       maxSamples: 1,
@@ -248,8 +249,12 @@ export default {
         this.enrollmentStatus = 'ready';
       }
     },
-    markEnrollmentUnsupported() {
+    markEnrollmentUnsupported(error) {
       this.enrollmentUnsupported = true;
+      this.enrollmentErrorMessage = this.extractResponseMessage(
+        error,
+        this.$t('voicePrintDialog.enrollmentUnavailableDesc')
+      );
       this.enrollmentStatus = 'failed';
       this.enrollmentProgress = 0;
       this.registrationSubmitted = false;
@@ -288,6 +293,7 @@ export default {
         this.creatingEnrollment = true;
         this.stopPolling();
         this.enrollmentUnsupported = false;
+        this.enrollmentErrorMessage = '';
         this.registrationSubmitted = false;
         this.enrollmentId = '';
         this.enrollmentStatus = 'collecting';
@@ -309,11 +315,11 @@ export default {
             }
             this.startPolling();
           } else {
-            this.markEnrollmentUnsupported();
+            this.markEnrollmentUnsupported(data);
           }
-        }, () => {
+        }, (error) => {
           this.creatingEnrollment = false;
-          this.markEnrollmentUnsupported();
+          this.markEnrollmentUnsupported(error);
         });
       });
     },
@@ -420,6 +426,7 @@ export default {
       this.completingEnrollment = false;
       this.registrationSubmitted = false;
       this.enrollmentUnsupported = false;
+      this.enrollmentErrorMessage = '';
       this.stopPolling();
     }
   },
