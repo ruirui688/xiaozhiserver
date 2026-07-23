@@ -60,6 +60,9 @@ async def handleHelloMessage(conn: "ConnectionHandler", msg_json):
             f"client-id={conn.headers.get('client-id') if conn.headers else ''}, features={features}"
         )
         conn.features = features
+        conn.client_aec = bool(features.get("aec"))
+        if conn.client_aec:
+            conn.logger.bind(tag=TAG).info("客户端声明支持AEC，启用开口立即打断")
         if features.get("mcp"):
             conn.logger.bind(tag=TAG).info("客户端声明支持MCP，创建MCPClient并启动初始化")
             conn.mcp_client = MCPClient()

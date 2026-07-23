@@ -164,7 +164,7 @@ self.config.get("voiceprint", {})
 
 设备通过 `listen/start.context` 上传的单轮背景由连接会话暂存，只有本轮产生有效 STT 后才附加到主
 LLM 的结构化 user message。`content` 是唯一的用户请求和回复触发源，`context` 只用于解释
-`content`；SemanticCenter、打断裁决和 `intent_llm` 不读取该字段。`Message` 将背景与原始文本分开
+`content`；SemanticCenter、音频层 barge-in 和 `intent_llm` 不读取该字段。`Message` 将背景与原始文本分开
 保存，生成 LLM messages 和聊天记录上报时才合并，因此后续会话轮次可继续看到背景，而 Python
 Memory provider 和长期记忆事件仍只读取原始 STT。基础提示词同时禁止仅依据 `context` 调用
 `manage_memory`。

@@ -134,7 +134,7 @@ sequenceDiagram
 -> TTS -> 音频回传 -> 事件与聊天记录上报
 ```
 
-高置信度停止、退出等控制先进入语义控制中枢；未处理的输入才进入旧 Intent 和主 LLM。工具统一由服务端插件、Server MCP、Device IoT、Device MCP、MCP Endpoint 五类来源聚合，冲突时先注册者保留。
+播放打断在音频接收层按 AEC barge-in 处理；退出游戏等状态控制先进入语义控制中枢，未处理的输入再进入旧 Intent 和主 LLM。工具统一由服务端插件、Server MCP、Device IoT、Device MCP、MCP Endpoint 五类来源聚合，冲突时先注册者保留。
 
 ## 4. 配置控制链路
 

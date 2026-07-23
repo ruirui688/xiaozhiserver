@@ -61,13 +61,13 @@ If the Conda env is unavailable, state "not verified in project Conda runtime" �
 ### Voice Pipeline (per connection)
 ```
 Opus audio frames → VAD segmentation → ASR text → SemanticCenter (deterministic pre-check)
-  → SemanticInterruption (LLM-judged barge-in during TTS playback)
+  → AEC barge-in (voice start immediately stops active TTS playback)
   → Intent/LLM chat + tool calls → TTS synthesis → audio back to device
   → Memory event reporting → long-term memory injection on next turn
 ```
 
 ### Three tool invocation modes
-1. **SemanticControl** — Python Router + PolicyEngine for high-confidence commands (stop, game exit)
+1. **SemanticControl** — Python Router + PolicyEngine for high-confidence state commands (such as game exit)
 2. **function_call** — Native LLM tool calling (OpenAI-compatible tools field)
 3. **intent_llm** — Separate intent LLM (fallback when main LLM tool calling is unstable)
 

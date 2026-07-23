@@ -90,7 +90,7 @@ class ListenTextMessageHandler(TextMessageHandler):
                     original_text
                 )
 
-                # 特殊指令仍走原有专用入口；普通重叠文本交给 startToChat 的 LLM 语义打断裁决。
+                # 特殊指令仍走原有专用入口；普通文本交给 startToChat 处理。
 
                 # 检查是否是设备呼叫指令 [device_call]
                 if original_text.startswith("[device_call]"):

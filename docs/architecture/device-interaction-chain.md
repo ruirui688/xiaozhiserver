@@ -151,7 +151,8 @@ providers/asr/base.py:44-59  asr_text_priority_thread（守护线程）
 - Opus 解码 → PCM → 512 采样滑动窗口 → ONNX 推理
 - 双阈值：`vad_threshold`(0.5) / `vad_threshold_low`(0.2)
 - 3 帧窗口确认 (`frame_window_threshold`)
-- 静音检测：`silence_threshold_ms`(1000ms)
+- 句尾静音检测统一使用 VAD 模型的 `min_silence_duration_ms`
+- AEC 设备的播报打断依据句首语音检测，不等待该句尾阈值
 
 ### 3.3 ASR 语音转文字
 
@@ -377,18 +378,21 @@ Authorization: Bearer <server.secret>
 
 ## 6. 打断机制（Barge-in）
 
-### 6.1 单一语义打断裁决
+### 6.1 官方式即时打断
 
 ```text
-receiveAudioHandle.py:107-153  startToChat() 中断路径
+helloHandle.py
+  - features.aec=true -> conn.client_aec=true
 
-SemanticInterruptionClassifier.classify() → conn.llm.response_no_stream()
-  - 当前 LLM 结合最近对话与重叠语音裁决，不使用停止词表、关键词或正则
-  - 超时 1.5 秒 (configurable)
-  - continue：保留当前播报，不进入主聊天
-  - interrupt：handleAbortMessage(conn) 后结束本轮，不再回复
-  - new_turn：handleAbortMessage(conn) 后继续处理用户的新请求
-  - LLM 失败 → 回退到 new_turn（保守：中断并处理新输入）
+receiveAudioHandle.py:handleAudioMessage()
+  - AEC + VAD 确认开口 + 正在播报 + 非 manual
+  - 立即 handleAbortMessage(conn, preserve_user_audio=True)
+  - 不等待句尾、完整 ASR 或 LLM
+  - 用户音频继续进入 ASR
+
+receiveAudioHandle.py:startToChat()
+  - 非 AEC 路径取得完整 ASR 后，如果仍在播报则直接 abort
+  - ASR 文本继续进入 SemanticCenter / Intent / Chat
 ```
 
 ### 6.2 Abort 处理
@@ -397,8 +401,8 @@ SemanticInterruptionClassifier.classify() → conn.llm.response_no_stream()
 handle/abortHandle.py:9-38  handleAbortMessage()
   - conn.client_abort = True (加锁)
   - increment abort_generation
-  - 清空 TTS/ASR 队列
-  - 重置 audio 状态
+  - 清空 TTS 队列
+  - 普通 abort 清空 ASR/音频状态；AEC 开口打断保留当前用户音频
   - 发送 stop TTS 消息（try/except 保护）
 ```
 

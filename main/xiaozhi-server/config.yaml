@@ -93,12 +93,6 @@ tts_audio_send_delay: 0
 # grace 只用于队列收尾和调度抖动，不作为播放时长上限。
 tts_audio_completion_grace_seconds: 5
 
-# 语义打断配置
-# 当设备在 TTS 播放期间识别到用户说话时，先让当前 LLM 基于少量上下文裁决：
-# continue = 附和/反馈，继续播报；interrupt = 只停止播报；new_turn = 停止播报并处理用户输入。
-semantic_interruption:
-  timeout_seconds: 1.5
-
 # 会议模式由主 LLM 通过 meeting_minutes function tool 选择 start/record/end。
 # 服务端不做固定口令、关键词或独立语义分类，只执行合法状态动作。
 meeting:

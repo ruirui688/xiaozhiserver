@@ -40,7 +40,7 @@ LLM 是复杂语义处理器和兜底生成器
 MCP / 插件 / IoT 是工具执行层
 ```
 
-TTS 播放期间的“停”“别说了”及其自然语言变体必须由当前 LLM 结合上下文裁决；退出游戏、继续等具有明确会话状态约束的操作，仍可由服务端状态和策略直接处理。
+TTS 播放期间的打断采用官方的 barge-in 机制：支持 AEC 的设备一旦检测到用户开口就立即停止播报，非 AEC 设备在完整 ASR 到达后停止。退出游戏、继续等具有明确会话状态约束的操作，仍可由服务端状态和策略直接处理。
 
 ## 2. 当前落地范围
 
@@ -51,7 +51,6 @@ TTS 播放期间的“停”“别说了”及其自然语言变体必须由当�
 ```text
 main/xiaozhi-server/core/semantic/
   frames.py            语义数据结构 (ASRResult, RobotContext, IntentFrame, Decision)
-  interruption.py      TTS 播放期间重叠语音的大模型打断裁决
   normalizer.py        文本标准化 (route_key, 标点/空格/唤醒词移除)
   router.py            高置信度状态路由 (游戏/继续/兜底，不判断自然语言停止意图)
   state_manager.py     连接级状态投影 (RLock 线程安全)
@@ -66,7 +65,7 @@ ConnectionHandler.__init__
   -> self.semantic_center = SemanticCenter()
 
 startToChat()
-  -> 如果 TTS 正在播放，先调用 SemanticInterruptionClassifier 让当前 LLM 裁决是否打断
+  -> 非 AEC 设备如果仍在播放，完整 ASR 到达后直接停止当前播报
   -> conn.semantic_center.handle_user_text(conn, actual_text)
   -> 未处理时继续走 handle_user_intent()
   -> 再未处理时继续走 conn.chat()
@@ -90,30 +89,19 @@ UnifiedToolHandler.handle_llm_function_call()
 
 所以当前改造是“确定性控制前移”，不是删除 function-call。
 
-### 播报期间语义打断
+### 播报期间即时打断
 
-用户在 TTS 播放期间说话时，服务端不再仅因为 ASR 出了文本就立即 `handleAbortMessage()`。
+打断与句尾分段分开处理，只保留 VAD 模型的单一 `min_silence_duration_ms`。设备在 `hello.features.aec=true` 声明支持 AEC 后，VAD 连续确认用户开口即可调用 `handleAbortMessage()`，无需等待句尾、完整 ASR 或额外 LLM 请求。当前用户音频会保留并继续进入 ASR，避免打断时截掉首字。
 
 当前链路：
 
 ```text
-ASR 文本
-  -> SemanticInterruptionClassifier
-  -> 当前 LLM response_no_stream 裁决 continue / interrupt / new_turn
-  -> continue：不打断、不进入主聊天，当前 TTS 继续
-  -> interrupt：复用 handleAbortMessage()，只停止当前播报并结束本轮，不进入语义中枢或主聊天
-  -> new_turn：复用 handleAbortMessage()，再进入现有 SemanticCenter / Intent / Chat 链路
+AEC 设备：VAD 确认开口 -> 立即停止 TTS -> 用户音频继续进入 ASR
+非 AEC 设备：VAD 句尾 -> 完整 ASR -> 如果仍在播放则停止 TTS
+完整 ASR -> SemanticCenter -> Intent -> Chat
 ```
 
-裁决请求只携带少量上下文：
-
-```text
-assistant_state
-recent_dialogue 最近最多 4 条 user/assistant 文本
-overlap_user_text 当前重叠语音文本
-```
-
-服务端不维护附和词表、停止词表、关键词、正则或长度阈值来替代判断；只负责请求 LLM、解析 JSON 结果和确定性执行结果。LLM 裁决失败或返回非法 JSON 时，为避免真实新请求被吞掉，回退为 `new_turn` 并走旧打断流程。`interrupt` 是终态，服务端不得再次用规则复核，也不得进入主 LLM 生成“好的，我不说了”之类的额外回复。像“别唱这首了，换一首”或“要你自己唱”这类带有后续任务的输入，必须由裁决模型直接判为 `new_turn`。
+该机制不维护停止词表，也不区分附和、停止命令和新问题：任何有效的重叠发言都会停止当前播报。ASR 文本随后仍按普通用户轮次进入语义与聊天链路。
 
 ## 3. 核心数据结构
 
@@ -170,7 +158,7 @@ reason
 
 ### 播报停止
 
-泛化停止意图不进入 `SemanticRouter`，也没有固定停止词集合。仅当 TTS 正在播放时，由 `SemanticInterruptionClassifier` 使用当前 LLM 和最近对话判断。模型返回 `interrupt` 后，服务端复用 `handleAbortMessage()` 设置 `client_abort`、增加 `abort_generation`、清理 TTS 队列并向设备发送 `tts stop`，随后立即结束本轮；不追加 TTS 确认语，也不调用主 LLM。
+播报停止不依赖 `SemanticRouter` 或固定停止词集合。AEC 设备在用户开口时立即复用 `handleAbortMessage()` 设置 `client_abort`、增加 `abort_generation`、清理 TTS 队列并向设备发送 `tts stop`；非 AEC 设备在完整 ASR 到达后执行相同停止动作。用户文本随后按普通轮次继续处理。
 
 ### 游戏上下文
 
@@ -311,6 +299,4 @@ conda run -n xiaozhi-esp32-server pytest tests
 - [项目完整架构](./project-architecture.md)和[运行时链路](./runtime-flows.md) — 语义控制中枢在全链路中的位置
 - [提示词注入工程](./prompt-injection-engineering.md) — LLM 兜底时的提示词和行为约束
 
-端到端语音模型、个性化 VAD、音频淡出和训练数据采集仍是研究方向，不是当前运行契约。引入前必须单独完成
-工具调用兼容、降级开关、设备资源、隐私同意、数据导出/删除和真实延迟评测；不得根据过时词表或固定文本长度
-替代当前 LLM 语义打断裁决。
+端到端语音模型、个性化 VAD、音频淡出和训练数据采集仍是研究方向，不是当前运行契约。引入前必须单独完成工具调用兼容、降级开关、设备资源、隐私同意、数据导出/删除和真实延迟评测。

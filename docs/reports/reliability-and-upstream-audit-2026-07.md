@@ -120,7 +120,7 @@ Web 智能体表单改用显式 hydration、dirty path 合并和请求序号；�
 | 部署架构、部署资产策略 | [生产部署](../deployment/private-docker-release.md)、[本地 Docker](../deployment/local-docker-deploy-guide.md) |
 | 长期记忆维护、记忆与知识治理 | [记忆系统](../architecture/memory-system-chain.md)、[知识库链路](../architecture/knowledge-base-chain.md) |
 | 模型目录、模型管理分析、性能测试教程 | [模型管理](../models/model-management.md)、[模型评测与助手](../architecture/model-benchmark-and-assistant.md) |
-| 语义打断分析、状态机游戏说明 | [语义控制](../architecture/semantic-control-center.md)、[功能插件](../architecture/function-plugin-architecture.md) |
+| 播报打断链路、状态机游戏说明 | [语义控制](../architecture/semantic-control-center.md)、[功能插件](../architecture/function-plugin-architecture.md) |
 | 本地知识库专项 | [知识库链路](../architecture/knowledge-base-chain.md)；外部服务仍看 [RAGFlow](../models/ragflow-integration.md) |
 | 手动启动、Ubuntu 环境 | [本地开发](../development/local-dev-workflow.md) |
 | 固件设置、OTA | [固件与 OTA](../device/firmware-build.md) |
@@ -159,7 +159,7 @@ Web 智能体表单改用显式 hydration、dirty path 合并和请求序号；�
 | 豆包 TTS 音色 | 旧数据库快照已删除；当前 provider 与模型配置从[设备交互完整链路](../architecture/device-interaction-chain.md)和[模型管理](../models/model-management.md)复核 |
 | 短期记忆不显示 | 旧双路径分析已被托管记忆架构和本报告的记忆维护结论替代 |
 | 模型管理混乱 | 当前存储与运行契约以[模型管理](../models/model-management.md)为准，旧文件数和枚举快照删除 |
-| 语义打断与端到端路线 | 旧方案快照已删除；当前打断契约以[语义控制中枢](../architecture/semantic-control-center.md)为准 |
+| 播报打断与端到端路线 | 旧方案快照已删除；当前打断契约以[语义控制中枢](../architecture/semantic-control-center.md)为准 |
 | 问题总览与修复建议 | 多为上述章节重复或未经当前源码复核的方案，删除并由 Git 历史追溯 |
 
 仍有一项唯一观察被保留：截至 2026-07-23，`AgentChatSessionDTO` 仍没有设备字段，`getSessionListByAgentId()` 仍只按 `session_id` 聚合，`ChatHistoryDialog.vue` 仍要进入具体会话后才显示首条消息的 MAC，不能在会话列表按设备查看或筛选。这只是经只读源码复核的未解决候选，不是已批准需求；实施前还需确认产品交互、资源所有权和查询索引。

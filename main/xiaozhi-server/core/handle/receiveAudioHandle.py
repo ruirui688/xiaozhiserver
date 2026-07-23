@@ -13,7 +13,6 @@ from core.handle.reportHandle import (
     mark_asr_report_text_override,
     mark_skip_memory_event,
 )
-from core.semantic.interruption import SemanticInterruptionClassifier
 from core.semantic.normalizer import TextNormalizer
 from core.utils.output_counter import check_device_output_limit
 from core.handle.sendAudioHandle import send_stt_message, SentenceType
@@ -47,6 +46,15 @@ async def handleAudioMessage(conn: "ConnectionHandler", audio):
             if hasattr(logger, "debug"):
                 logger.debug(f"记录VAD指标失败: {e}")
     update_voice_activity(conn, have_voice)
+    # 与官方一致：支持 AEC 的设备只要确认用户已经开口，就立即停止当前播报。
+    # 这里不等待句尾、完整 ASR 或 LLM；当前用户音频继续进入 ASR。
+    if (
+        getattr(conn, "client_aec", False)
+        and have_voice
+        and conn.client_is_speaking
+        and conn.client_listen_mode != "manual"
+    ):
+        await handleAbortMessage(conn, preserve_user_audio=True)
     # 接收音频
     await conn.asr.receive_audio(conn, audio, have_voice)
 
@@ -57,8 +65,7 @@ async def startToChat(
     """Handle recognized user text.
 
     Returns True when the text should be treated as an accepted user turn.
-    Returns False when overlap speech is classified as continue/echo and should
-    not be persisted as a standalone chat-history turn.
+    Returns False only when another session mode consumes the text.
     """
     def submit_chat(chat_text):
         if turn_id is not None:
@@ -198,52 +205,10 @@ async def startToChat(
             await max_out_size(conn)
             return True
 
-    # manual 模式下不打断正在播放的内容；auto 模式只以当前 LLM 的语义裁决为准。
-    # 服务端不再维护停止词快速路径，也不在 LLM 裁决后用词表二次复核。
+    # 与官方一致：非 AEC 路径取得完整 ASR 后，只要仍在播报就直接停止。
+    # manual 模式由设备显式控制录音边界，不自动打断。
     if conn.client_is_speaking and conn.client_listen_mode != "manual":
-        context = None
-        if getattr(conn, "semantic_center", None):
-            context = conn.semantic_center.state_manager.get_context(conn)
-        if context is None:
-            context = type(
-                "RobotContext",
-                (),
-                {"active_game_tool": None},
-            )()
-        classifier = SemanticInterruptionClassifier()
-        classification = await classifier.classify(
-            conn, interruption_text, context
-        )
-        conn.logger.bind(tag=TAG).info(
-            "语义打断分类: "
-            f"category={classification.category}, "
-            f"reason={classification.reason}"
-        )
-        if not classification.should_abort:
-            conn.logger.bind(tag=TAG).info(
-                "语义打断裁决继续播报: "
-                f"category={classification.category}, "
-                f"reason={classification.reason}, "
-                f"text={interruption_text[:50]}"
-            )
-            return False
-        conn.logger.bind(tag=TAG).info(
-            "语义打断裁决要求停止当前播报: "
-            f"category={classification.category}, "
-            f"reason={classification.reason}, "
-            f"text={interruption_text[:50]}"
-        )
         await handleAbortMessage(conn)
-        if classification.category == "interrupt":
-            # interrupt 表示模型确认用户只要求停止当前播报，是终态决策。
-            # 不再交给词表或主聊天二次判断，避免“闭嘴，小子”之类表达
-            # 因未命中精确规则而生成额外回复。
-            await send_stt_message(conn, actual_text)
-            conn.logger.bind(tag=TAG).info(
-                "语义打断裁决已执行停止，本轮不进入主聊天: "
-                f"reason={classification.reason}"
-            )
-            return True
 
     # 语义控制中枢优先处理高置信度控制类指令，未处理再进入旧流程
     if getattr(conn, "semantic_center", None):

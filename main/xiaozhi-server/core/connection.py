@@ -193,6 +193,7 @@ class ConnectionHandler:
         self.abort_generation = 0
         self.client_is_speaking = False
         self.client_listen_mode = "auto"
+        self.client_aec = False
 
         # 线程任务相关
         self.loop = None  # 在 handle_connection 中获取运行中的事件循环
@@ -2165,7 +2166,7 @@ class ConnectionHandler:
         if self.closed and session_telemetry is not None:
             session_telemetry.emit_close_summary()
 
-    def clear_queues(self):
+    def clear_queues(self, preserve_asr=False):
         """清空所有任务队列"""
         if self.tts:
             self.logger.bind(tag=TAG).debug(
@@ -2190,13 +2191,14 @@ class ConnectionHandler:
                 self.audio_rate_controller.reset()
                 self.logger.bind(tag=TAG).debug("已重置音频流控器")
 
-        # 排空 ASR 音频输入队列，防止旧音频包在打断后继续触发识别
-        import queue as q_mod
-        while True:
-            try:
-                self.asr_audio_queue.get_nowait()
-            except q_mod.Empty:
-                break
+        if not preserve_asr:
+            # 排空 ASR 音频输入队列，防止旧音频包在打断后继续触发识别
+            import queue as q_mod
+            while True:
+                try:
+                    self.asr_audio_queue.get_nowait()
+                except q_mod.Empty:
+                    break
 
         if self.tts:
             self.logger.bind(tag=TAG).debug(
