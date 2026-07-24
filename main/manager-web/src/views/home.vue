@@ -33,7 +33,7 @@
         </div>
         <div class="device-list-container">
           <template v-if="!isLoading">
-            <DeviceItem v-for="(item, index) in devices" :key="index" :device="item" :feature-status="featureStatus" 
+            <DeviceItem v-for="item in devices" :key="item.agentId || item.id" :device="item" :feature-status="featureStatus"
               :can-write="canWrite"
               @configure="goToRoleConfig" @deviceManage="handleDeviceManage" @delete="handleDeleteAgent" 
               @chat-history="handleShowChatHistory" />
@@ -45,7 +45,8 @@
     <el-footer>
       <version-footer />
     </el-footer>
-    <chat-history-dialog :visible.sync="showChatHistory" :agent-id="currentAgentId" :agent-name="currentAgentName" />
+    <chat-history-dialog :visible.sync="showChatHistory" :agent-id="currentAgentId" :agent-name="currentAgentName"
+      @history-changed="handleChatHistoryChanged" />
   </div>
 
 </template>
@@ -67,6 +68,7 @@ export default {
       addDeviceDialogVisible: false,
       devices: [],
       originalDevices: [],
+      agentListRequestId: 0,
       isSearching: false,
       searchRegex: null,
       isLoading: true,
@@ -186,21 +188,44 @@ export default {
       this.devices = filteredList; // 更新设备列表
     },
     // 获取智能体列表
-    fetchAgentList() {
-      this.isLoading = true;
+    fetchAgentList({ preserveSearch = false, background = false } = {}) {
+      const requestId = ++this.agentListRequestId;
+      if (!background) {
+        this.isLoading = true;
+      }
       Api.agent.getAgentList(({ data }) => {
+        if (requestId !== this.agentListRequestId) {
+          return;
+        }
         if (data?.data) {
-          this.originalDevices = data.data.map(item => ({
+          const refreshedDevices = data.data.map(item => ({
             ...item,
             agentId: item.id
           }));
+          this.originalDevices = refreshedDevices;
 
-          this.handleSearchReset();
+          if (preserveSearch && this.isSearching) {
+            const refreshedById = new Map(
+              refreshedDevices.map(item => [item.agentId, item])
+            );
+            this.devices = this.devices
+              .map(item => refreshedById.get(item.agentId || item.id))
+              .filter(Boolean);
+          } else {
+            this.handleSearchReset();
+          }
         }
-        this.isLoading = false;
+        if (!background) {
+          this.isLoading = false;
+        }
       }, (error) => {
+        if (requestId !== this.agentListRequestId) {
+          return;
+        }
         console.error('Failed to fetch agent list:', error);
-        this.isLoading = false;
+        if (!background) {
+          this.isLoading = false;
+        }
       });
     },
     // 删除智能体
@@ -231,6 +256,9 @@ export default {
       this.currentAgentId = agentId;
       this.currentAgentName = agentName;
       this.showChatHistory = true;
+    },
+    handleChatHistoryChanged() {
+      this.fetchAgentList({ preserveSearch: true, background: true });
     }
   }
 }

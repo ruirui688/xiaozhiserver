@@ -205,16 +205,22 @@ Compose enforces the following dependency chain:
 
 ```
 MySQL (healthy) ──┐
-                   ├──→ Web/Java (started) ──→ Python server (started)
+                   ├──→ manager-api (port ready) ──→ manager-web ──→ Python server
 Redis (healthy) ──┘
 ```
 
-- `xiaozhi-esp32-server-web` waits for MySQL and Redis health checks, then
-  runs Liquibase migrations during Spring Boot startup.
-- `xiaozhi-esp32-server` waits for the web container to start before
-  launching, avoiding crash-restart loops while the Java API initializes.
-- `./install` verifies the web container logs for `Started AdminApplication
-  in` (timeout 180s) and exits non-zero if startup fails.
+- `xiaozhi-esp32-manager-api` waits for MySQL and Redis health checks, then
+  runs Liquibase migrations during Spring Boot startup. Liquibase uses a
+  dedicated JDBC connection with no socket read timeout; normal API queries
+  retain the 30-second timeout.
+- The manager API is healthy only after port 8003 accepts connections. A Java
+  process that is still waiting for Liquibase is not considered ready.
+- `xiaozhi-esp32-server-web` waits for the manager API health check, and the
+  Python server waits for the web container, avoiding crash-restart loops while
+  migrations are still running.
+- `./install` waits for the manager API health check for 900 seconds by default.
+  Override this with `XIAOZHI_MANAGER_API_STARTUP_TIMEOUT_SECONDS` for unusually
+  large databases.
 - After manager-api is ready, `./install` syncs `server.secret` into the Python
   private config and waits for `xiaozhi-esp32-server` to stay running.
 

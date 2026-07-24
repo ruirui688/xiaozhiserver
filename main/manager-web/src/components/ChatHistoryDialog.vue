@@ -726,6 +726,7 @@ export default {
                 this.deletingKey = '';
                 if (res && res.data && res.data.code === 0) {
                     this.$message.success(successMessage);
+                    this.$emit('history-changed', { agentId: this.agentId });
                     onSuccess();
                     return;
                 }

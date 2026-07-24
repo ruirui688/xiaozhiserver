@@ -174,6 +174,8 @@ XIAOZHI_MANAGER_API_MEM_LIMIT=$MANAGER_API_MEM_LIMIT
 XIAOZHI_MANAGER_API_MEMSWAP_LIMIT=$MANAGER_API_MEMSWAP_LIMIT
 XIAOZHI_MANAGER_API_PIDS_LIMIT=$MANAGER_API_PIDS_LIMIT
 XIAOZHI_MANAGER_API_JAVA_TOOL_OPTIONS=$MANAGER_API_JAVA_TOOL_OPTIONS
+XIAOZHI_LIQUIBASE_SOCKET_TIMEOUT_MS=$LIQUIBASE_SOCKET_TIMEOUT_MS
+XIAOZHI_MANAGER_API_STARTUP_TIMEOUT_SECONDS=$MANAGER_API_STARTUP_TIMEOUT_SECONDS
 XIAOZHI_MANAGER_WEB_CPUS=$MANAGER_WEB_CPUS
 XIAOZHI_MANAGER_WEB_MEM_LIMIT=$MANAGER_WEB_MEM_LIMIT
 XIAOZHI_MANAGER_WEB_MEMSWAP_LIMIT=$MANAGER_WEB_MEMSWAP_LIMIT
@@ -393,6 +395,10 @@ MANAGER_API_PIDS_LIMIT="${XIAOZHI_MANAGER_API_PIDS_LIMIT:-$(read_existing_env XI
 MANAGER_API_PIDS_LIMIT="${MANAGER_API_PIDS_LIMIT:-$WEB_PIDS_LIMIT}"
 MANAGER_API_JAVA_TOOL_OPTIONS="${XIAOZHI_MANAGER_API_JAVA_TOOL_OPTIONS:-$(read_existing_env XIAOZHI_MANAGER_API_JAVA_TOOL_OPTIONS)}"
 MANAGER_API_JAVA_TOOL_OPTIONS="${MANAGER_API_JAVA_TOOL_OPTIONS:-$WEB_JAVA_TOOL_OPTIONS}"
+LIQUIBASE_SOCKET_TIMEOUT_MS="${XIAOZHI_LIQUIBASE_SOCKET_TIMEOUT_MS:-$(read_existing_env XIAOZHI_LIQUIBASE_SOCKET_TIMEOUT_MS)}"
+LIQUIBASE_SOCKET_TIMEOUT_MS="${LIQUIBASE_SOCKET_TIMEOUT_MS:-0}"
+MANAGER_API_STARTUP_TIMEOUT_SECONDS="${XIAOZHI_MANAGER_API_STARTUP_TIMEOUT_SECONDS:-$(read_existing_env XIAOZHI_MANAGER_API_STARTUP_TIMEOUT_SECONDS)}"
+MANAGER_API_STARTUP_TIMEOUT_SECONDS="${MANAGER_API_STARTUP_TIMEOUT_SECONDS:-900}"
 MANAGER_WEB_CPUS="${XIAOZHI_MANAGER_WEB_CPUS:-$(read_existing_env XIAOZHI_MANAGER_WEB_CPUS)}"
 MANAGER_WEB_CPUS="${MANAGER_WEB_CPUS:-0.20}"
 MANAGER_WEB_MEM_LIMIT="${XIAOZHI_MANAGER_WEB_MEM_LIMIT:-$(read_existing_env XIAOZHI_MANAGER_WEB_MEM_LIMIT)}"
@@ -433,6 +439,22 @@ LOG_MAX_SIZE="${XIAOZHI_LOG_MAX_SIZE:-$(read_existing_env XIAOZHI_LOG_MAX_SIZE)}
 LOG_MAX_SIZE="${LOG_MAX_SIZE:-50m}"
 LOG_MAX_FILE="${XIAOZHI_LOG_MAX_FILE:-$(read_existing_env XIAOZHI_LOG_MAX_FILE)}"
 LOG_MAX_FILE="${LOG_MAX_FILE:-3}"
+case "$LIQUIBASE_SOCKET_TIMEOUT_MS" in
+  ''|*[!0-9]*)
+    echo "XIAOZHI_LIQUIBASE_SOCKET_TIMEOUT_MS must be a non-negative integer." >&2
+    exit 1
+    ;;
+esac
+case "$MANAGER_API_STARTUP_TIMEOUT_SECONDS" in
+  ''|*[!0-9]*)
+    echo "XIAOZHI_MANAGER_API_STARTUP_TIMEOUT_SECONDS must be a positive integer." >&2
+    exit 1
+    ;;
+esac
+if [[ "$MANAGER_API_STARTUP_TIMEOUT_SECONDS" -eq 0 ]]; then
+  echo "XIAOZHI_MANAGER_API_STARTUP_TIMEOUT_SECONDS must be a positive integer." >&2
+  exit 1
+fi
 case "$SERVER_HTTP_BASE_URL" in
   http://127.0.0.1:*|https://127.0.0.1:*|http://localhost:*|https://localhost:*)
     echo "Replacing loopback XIAOZHI_SERVER_HTTP_BASE_URL with Docker service URL: $DEFAULT_SERVER_HTTP_BASE_URL" >&2
@@ -495,44 +517,35 @@ run_step "Prepare runtime files" prepare_runtime_files
 run_step "Start services" start_services
 
 _wait_manager_api_startup() {
-  local timeout="${1:-180}"
-  local start_ts
+  local timeout="${1:-900}"
+  local start_ts health_status container_status
   start_ts="$(date +%s)"
 
   printf "  %-34s" "Wait manager-api startup"
   while true; do
-    if docker_cmd logs xiaozhi-esp32-manager-api 2>&1 | grep -q "Started AdminApplication in"; then
+    health_status="$(docker_cmd inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' xiaozhi-esp32-manager-api 2>/dev/null || echo "missing")"
+    if [[ "$health_status" == "healthy" ]]; then
       local elapsed=$(( $(date +%s) - start_ts ))
       printf "OK   %s\n" "$(format_duration "$elapsed")"
       return 0
     fi
+    container_status="$(docker_cmd inspect --format='{{.State.Status}}' xiaozhi-esp32-manager-api 2>/dev/null || echo "missing")"
     local elapsed=$(( $(date +%s) - start_ts ))
-    if [ "$elapsed" -gt "$timeout" ]; then
+    if [[ "$elapsed" -ge "$timeout" ]]; then
       printf "FAIL %s\n" "$(format_duration "$elapsed")"
-      echo "ERROR: manager-api did not start within ${timeout}s." >&2
-      echo "--- last 20 log lines ---" >&2
-      docker_cmd logs xiaozhi-esp32-manager-api --tail 20 >&2
+      echo "ERROR: manager-api did not become ready within ${timeout}s (container=$container_status, health=$health_status)." >&2
+      if docker_cmd logs xiaozhi-esp32-manager-api --tail 200 2>&1 | grep -q "Waiting for changelog lock"; then
+        echo "Liquibase is waiting for DATABASECHANGELOGLOCK; verify that no migration is active before releasing a stale lock." >&2
+      fi
+      echo "--- last 40 log lines ---" >&2
+      docker_cmd logs xiaozhi-esp32-manager-api --tail 40 >&2
       return 1
     fi
     sleep 1
   done
 }
 
-# Skip startup wait if container was already running before this deploy.
-CONTAINER_STATUS=$(docker_cmd inspect --format='{{.State.Status}}' xiaozhi-esp32-manager-api 2>/dev/null || echo "missing")
-CONTAINER_STARTED=$(docker_cmd inspect --format='{{.State.StartedAt}}' xiaozhi-esp32-manager-api 2>/dev/null || echo "")
-
-if [ "$CONTAINER_STATUS" = "running" ] && [ -n "$CONTAINER_STARTED" ]; then
-  STARTED_TS=$(date -d "$CONTAINER_STARTED" +%s 2>/dev/null || echo "0")
-  UPTIME=$(( $(date +%s) - STARTED_TS ))
-  if [ "$UPTIME" -gt 60 ]; then
-    printf "  %-34sOK   uptime %ss\n" "Wait manager-api startup" "$UPTIME"
-  else
-    _wait_manager_api_startup 180 || exit 1
-  fi
-else
-  _wait_manager_api_startup 180 || exit 1
-fi
+_wait_manager_api_startup "$MANAGER_API_STARTUP_TIMEOUT_SECONDS" || exit 1
 
 run_step "Sync manager-api secret" sync_manager_api_secret
 run_step "Restart xiaozhi-server" restart_server_service

@@ -811,7 +811,15 @@ XIAOZHI_MANAGER_WEB_CPUS=0.20
 XIAOZHI_MANAGER_WEB_MEM_LIMIT=192m
 XIAOZHI_MYSQL_MEM_LIMIT=768m
 XIAOZHI_REDIS_MEM_LIMIT=192m
+XIAOZHI_LIQUIBASE_SOCKET_TIMEOUT_MS=0
+XIAOZHI_MANAGER_API_STARTUP_TIMEOUT_SECONDS=900
 ```
+
+`XIAOZHI_LIQUIBASE_SOCKET_TIMEOUT_MS=0` 只作用于 Liquibase 专用连接，表示迁移 SQL
+不使用 JDBC 读超时；manager-api 普通业务连接仍保留 30 秒 `socketTimeout`。这是为了
+避免历史数据回填或大表 DDL 超过 30 秒后连接失效，进而连解锁 SQL 也无法执行。安装器
+仍有独立的 manager-api 启动等待上限，默认 900 秒，并以容器 8003 端口真实可用作为就绪
+条件，而不是只检查 Java 进程存在或搜索历史启动日志。
 
 旧部署如果 `.env` 里仍保留 `XIAOZHI_SERVER_MEM_LIMIT=768m`，升级脚本会尊重旧值。启用 FunASR 前必须手工调到至少 `2048m`。
 
@@ -900,6 +908,16 @@ docker logs --tail 120 xiaozhi-esp32-server-db
 ```
 
 重点检查 MySQL 是否启动、Liquibase 是否报错、数据库密码是否和 `.env` 一致。
+
+如果日志持续出现 `Waiting for changelog lock`，先区分正在执行的正常迁移和异常退出留下的
+遗留锁。处理遗留锁前必须备份生产数据库、停止所有 manager-api 实例，并通过 MySQL
+`SHOW PROCESSLIST` 确认没有迁移 SQL 仍在运行。不得在迁移仍活跃时修改
+`DATABASECHANGELOGLOCK`，也不得删除 `DATABASECHANGELOG`。如果同一 changeSet 已经部分
+执行，还要先核对其字段、数据回填和登记状态；只清锁但不修复原始超时会让重启再次失败。
+
+生产 Compose 为 Liquibase 使用独立的无读超时连接，并让升级器默认等待 900 秒。旧部署
+如果仍使用普通业务连接的 30 秒超时，应先发布包含该部署修复的新版本，再按上述流程恢复
+遗留锁；不要通过回改已经执行过的 changeSet 绕过问题。
 
 如果日志里出现类似：
 

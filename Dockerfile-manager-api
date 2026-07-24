@@ -20,8 +20,8 @@ RUN chmod +x /start-api.sh
 
 EXPOSE 8003
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD ps | grep -q "[x]iaozhi-esp32-api.jar" || exit 1
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=6 \
+  CMD bash -c 'exec 3<>/dev/tcp/127.0.0.1/8003' || exit 1
 
 USER xiaozhi
 

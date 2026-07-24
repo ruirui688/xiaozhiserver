@@ -79,6 +79,9 @@ services:
       - SPRING_DATASOURCE_DRUID_URL=jdbc:mysql://xiaozhi-esp32-server-db:3306/xiaozhi_esp32_server?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&nullCatalogMeansCurrent=true&connectTimeout=30000&socketTimeout=30000&autoReconnect=true&failOverReadOnly=false&maxReconnects=10
       - SPRING_DATASOURCE_DRUID_USERNAME=root
       - SPRING_DATASOURCE_DRUID_PASSWORD=${XIAOZHI_MYSQL_ROOT_PASSWORD:?Set XIAOZHI_MYSQL_ROOT_PASSWORD in DATA_DIR/.env}
+      - SPRING_LIQUIBASE_URL=jdbc:mysql://xiaozhi-esp32-server-db:3306/xiaozhi_esp32_server?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&nullCatalogMeansCurrent=true&connectTimeout=30000&socketTimeout=${XIAOZHI_LIQUIBASE_SOCKET_TIMEOUT_MS:-0}&autoReconnect=false
+      - SPRING_LIQUIBASE_USER=root
+      - SPRING_LIQUIBASE_PASSWORD=${XIAOZHI_MYSQL_ROOT_PASSWORD:?Set XIAOZHI_MYSQL_ROOT_PASSWORD in DATA_DIR/.env}
       - SPRING_DATA_REDIS_HOST=xiaozhi-esp32-server-redis
       - SPRING_DATA_REDIS_PASSWORD=${XIAOZHI_REDIS_PASSWORD:-}
       - SPRING_DATA_REDIS_PORT=6379
