@@ -1,4 +1,6 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const { afterEach, beforeEach, describe, test } = require("node:test");
 const Vue = require("vue/dist/vue.common.js");
 const { loadVueComponent } = require("./helpers/loadVueComponent.cjs");
@@ -178,6 +180,20 @@ describe("role configuration component state", () => {
     vm.form.model.asrModelId = "";
     assert.equal(vm.supportsAsrHotword, false);
     vm.$destroy();
+  });
+
+  test("hotword configuration links to the Volcengine console safely", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../src/components/role/RoleEditDialog.vue"),
+      "utf8"
+    );
+
+    assert.match(
+      source,
+      /href="https:\/\/console\.volcengine\.com\/speech\/new\/hot-word\?projectName=default"/
+    );
+    assert.match(source, /target="_blank"/);
+    assert.match(source, /rel="noopener noreferrer"/);
   });
 
   test("default knowledge query policy is concise and domain neutral", () => {

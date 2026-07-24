@@ -203,15 +203,26 @@
                   </el-select>
                   <div v-if="supportsAsrHotword" class="asr-hotword-field">
                     <div class="asr-hotword-label">
-                      <span>{{ $t('roleConfig.asrHotword') }}</span>
-                      <el-tooltip
-                        :content="$t('roleConfig.tooltip.asrHotword')"
-                        placement="top"
-                        effect="light"
-                        popper-class="custom-tooltip"
+                      <div class="asr-hotword-title">
+                        <span>{{ $t('roleConfig.asrHotword') }}</span>
+                        <el-tooltip
+                          :content="$t('roleConfig.tooltip.asrHotword')"
+                          placement="top"
+                          effect="light"
+                          popper-class="custom-tooltip"
+                        >
+                          <i class="el-icon-info"></i>
+                        </el-tooltip>
+                      </div>
+                      <a
+                        href="https://console.volcengine.com/speech/new/hot-word?projectName=default"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="asr-hotword-console-link"
                       >
-                        <i class="el-icon-info"></i>
-                      </el-tooltip>
+                        <span>{{ $t('roleConfig.asrHotwordConsole') }}</span>
+                        <i class="el-icon-top-right"></i>
+                      </a>
                     </div>
                     <el-input
                       v-model.trim="form.asrHotwordId"
@@ -1226,6 +1237,8 @@ export default {
 .asr-hotword-label {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
   gap: 5px;
   margin-bottom: 4px;
   color: #5f6680;
@@ -1233,9 +1246,30 @@ export default {
   line-height: 18px;
 }
 
-.asr-hotword-label i {
+.asr-hotword-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.asr-hotword-title i {
   color: #8791ad;
   cursor: help;
+}
+
+.asr-hotword-console-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #337ecc;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.asr-hotword-console-link:hover,
+.asr-hotword-console-link:focus {
+  color: #1d5fa7;
+  text-decoration: underline;
 }
 
 .model-row {
