@@ -51,6 +51,7 @@ class AgentWorkspaceIsolationTest {
         AgentDao agentDao = mock(AgentDao.class);
         AgentTagDao agentTagDao = mock(AgentTagDao.class);
         WorkspaceService workspaceService = mock(WorkspaceService.class);
+        WorkspaceAgentQuotaService quotaService = mock(WorkspaceAgentQuotaService.class);
         WorkspaceEntity workspace = new WorkspaceEntity();
         workspace.setId("workspace-a");
         when(workspaceService.getCurrentWorkspaceEntity()).thenReturn(workspace);
@@ -62,6 +63,8 @@ class AgentWorkspaceIsolationTest {
         when(agentDao.selectList(any(Wrapper.class))).thenReturn(List.of(agent));
         when(agentDao.getDeviceCountByAgentId("agent-a")).thenReturn(0);
         when(agentTagDao.selectByAgentId("agent-a")).thenReturn(List.of());
+        when(quotaService.getStorageUsageByAgentIds(List.of("agent-a"))).thenReturn(Map.of("agent-a", 1024L));
+        when(quotaService.getAgentStorageLimitBytes()).thenReturn(2048L);
 
         AgentServiceImpl service = new AgentServiceImpl(
                 agentDao,
@@ -79,7 +82,8 @@ class AgentWorkspaceIsolationTest {
                 mock(CorrectWordFileService.class),
                 workspaceService,
                 mock(WorkspacePermissionService.class),
-                mock(KnowledgeBaseService.class));
+                mock(KnowledgeBaseService.class),
+                quotaService);
         ReflectionTestUtils.setField(service, "baseDao", agentDao);
 
         List<AgentDTO> result = service.getUserAgents(1001L, null, null);
@@ -90,6 +94,8 @@ class AgentWorkspaceIsolationTest {
         verify(workspaceService).getCurrentWorkspaceEntity();
         assertEquals(1, result.size());
         assertEquals("agent-a", result.get(0).getId());
+        assertEquals(1024L, result.get(0).getStorageBytes());
+        assertEquals(2048L, result.get(0).getStorageLimitBytes());
     }
 
     @Test
@@ -165,7 +171,8 @@ class AgentWorkspaceIsolationTest {
                 mock(CorrectWordFileService.class),
                 mock(WorkspaceService.class),
                 permissionService,
-                knowledgeBaseService);
+                knowledgeBaseService,
+                mock(WorkspaceAgentQuotaService.class));
         ReflectionTestUtils.setField(service, "baseDao", agentDao);
 
         AgentUpdateDTO.FunctionInfo function = new AgentUpdateDTO.FunctionInfo();
@@ -208,7 +215,8 @@ class AgentWorkspaceIsolationTest {
                 correctWordFileService,
                 mock(WorkspaceService.class),
                 mock(WorkspacePermissionService.class),
-                mock(KnowledgeBaseService.class));
+                mock(KnowledgeBaseService.class),
+                mock(WorkspaceAgentQuotaService.class));
         ReflectionTestUtils.setField(service, "baseDao", agentDao);
 
         return service.getAgentById("agent-a");

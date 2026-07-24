@@ -90,6 +90,27 @@ def test_timeout_configuration_defaults_and_overrides(tmp_path):
     assert configured.query_timeout_seconds == 7
 
 
+def test_recording_request_sends_agent_hotword_table_in_corpus(tmp_path):
+    provider = _provider(
+        tmp_path,
+        boosting_table_id="example-hotword-table-id",
+        context_text='{"hotwords":[{"word":"示例专有词"}]}',
+    )
+
+    payload = provider._build_submit_payload(b"wav", "request-id")
+
+    assert payload["request"]["corpus"] == {
+        "boosting_table_id": "example-hotword-table-id"
+    }
+    assert payload["request"]["context"] == '{"hotwords":[{"word":"示例专有词"}]}'
+
+
+def test_recording_request_omits_empty_hotword_corpus(tmp_path):
+    provider = _provider(tmp_path, boosting_table_id="")
+
+    assert "corpus" not in provider._build_submit_payload(b"wav", "request-id")["request"]
+
+
 @pytest.mark.parametrize(
     "key,value",
     [

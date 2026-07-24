@@ -769,6 +769,10 @@ export default {
   'home.deleteSuccess': '删除成功',
   'home.deleteFailed': '删除失败',
   'home.enableMemory': '请先在“配置角色”界面开启记忆',
+  'home.workspaceAgentQuota': '当前工作空间智能体：{count}/{limit}',
+  'home.agentStorageQuota': '每个智能体聊天存储上限：{limit}',
+  'home.workspaceAgentLimitReached': '当前工作空间最多可创建{limit}个智能体',
+  'home.chatStorage': '聊天记录容量',
 
   // 参数管理页面文本
   'paramManagement.pageTitle': '参数管理',
@@ -851,6 +855,8 @@ export default {
   'roleConfig.interactionLanguage': '交互语种',
   'roleConfig.vad': '语音活动检测(VAD)',
   'roleConfig.asr': '语音识别(ASR)',
+  'roleConfig.asrHotword': '火山热词表 ID',
+  'roleConfig.asrHotwordPlaceholder': '粘贴火山引擎热词管理中的热词 ID',
   'roleConfig.llm': '主语言模型(LLM)',
   "roleConfig.slm": "小参数模型(SLM)",
   'roleConfig.vllm': '视觉大模型(VLLM)',
@@ -917,6 +923,7 @@ export default {
   'roleConfig.tooltip.interactionLanguage': '设置交互语言，指定AI助手使用的主要语言进行交流',
   'roleConfig.tooltip.vad': '语音活动检测（Voice Activity Detection）：检测用户何时开始或结束说话，用于判断对话的开始和结束，实现打断功能',
   'roleConfig.tooltip.asr': '自动语音识别（Automatic Speech Recognition）：将用户的语音转换为文字，是人机对话的第一步，支持多语言识别',
+  'roleConfig.tooltip.asrHotword': '仅豆包流式或录音识别模型2.0生效。ID来自火山引擎热词管理页面，留空表示当前角色不使用热词表。',
   'roleConfig.tooltip.llm': '主语言模型（Large Language Model）：AI助手的"大脑"，负责理解用户意图、生成回答和执行各种任务',
   "roleConfig.tooltip.slm": '小参数模型（Small Language Model）：用于智能体唤醒，生成记忆总结标题',
   'roleConfig.tooltip.vllm': '视觉大语言模型（Visual LLM）：处理图像和视频理解，使AI助手能够分析和描述摄像头捕获的画面内容',

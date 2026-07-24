@@ -163,10 +163,8 @@ export default {
                 RequestService.clearRequestTime();
                 callback(res);
             })
-            .networkFail(() => {
-                RequestService.reAjaxFun(() => {
-                    this.deleteAgentChatHistory(agentId, callback);
-                });
+            .networkFail((err) => {
+                callback(err);
             }).send();
     },
     // 删除指定会话聊天记录
@@ -178,10 +176,8 @@ export default {
                 RequestService.clearRequestTime();
                 callback(res);
             })
-            .networkFail(() => {
-                RequestService.reAjaxFun(() => {
-                    this.deleteAgentChatSession(agentId, sessionId, callback);
-                });
+            .networkFail((err) => {
+                callback(err);
             }).send();
     },
     // 删除单条聊天记录
@@ -193,10 +189,8 @@ export default {
                 RequestService.clearRequestTime();
                 callback(res);
             })
-            .networkFail(() => {
-                RequestService.reAjaxFun(() => {
-                    this.deleteAgentChatMessage(agentId, messageId, callback);
-                });
+            .networkFail((err) => {
+                callback(err);
             }).send();
     },
     // 获取音频下载ID

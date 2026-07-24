@@ -619,3 +619,22 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 是否允许被官方覆盖：否
 官方同步时的处理规则：必须保留 listen/start.context 的可选兼容协议、8 KiB 输入上限、单轮一次性消费、空 ASR/打断不触发且不串轮、日志不记录背景正文、SemanticCenter 与 intent_llm 只读 STT、主 LLM user message 才读取 context、后台聊天记录保留背景而长期记忆事件和 Python Memory provider 排除背景的边界。旧设备不发送 context 时行为必须完全不变。
 ```
+
+## 32. 智能体级豆包 Seed ASR 热词表
+
+```text
+定制模块：manager-web 角色配置、manager-api 智能体配置装配、xiaozhi-server 豆包 Seed ASR provider
+改动原因：火山引擎热词表由控制台独立创建，同一豆包 ASR 模型会被多个智能体共享，不能把热词表 ID 固定在模型级配置中。角色配置现在保存智能体级 asr_hotword_id；manager-api 只在该智能体选择 doubao_stream 或 doubao_recording 时注入运行时 boosting_table_id；Python 按官方 request.corpus.boosting_table_id 层级发送，同时保留独立的 request.context。
+关键文件：
+  - main/manager-web/src/components/role/RoleEditDialog.vue
+  - main/manager-web/src/utils/roleConfigDraft.js
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/entity/AgentEntity.java
+  - main/manager-api/src/main/java/xiaozhi/modules/config/service/impl/ConfigServiceImpl.java
+  - main/manager-api/src/main/resources/db/changelog/202607241445.sql
+  - main/xiaozhi-server/core/providers/asr/doubao_stream.py
+  - main/xiaozhi-server/core/providers/asr/doubao_recording.py
+  - docs/models/model-management.md
+  - docs/architecture/device-interaction-chain.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：必须保留“共享 ASR 模型、智能体级热词选择”的边界；热词表 ID 只能覆盖当前智能体的运行时 typed_config，不得写回共享模型配置。豆包 Seed ASR 2.0 必须发送 request.corpus.boosting_table_id，不能把 ID 当作 request.context；context_text 继续作为独立字段。非豆包 ASR 和留空角色不得发送热词表，初始化日志不得输出上下文正文或完整请求体。
+```

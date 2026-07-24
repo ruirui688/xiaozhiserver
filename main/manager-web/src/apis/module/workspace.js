@@ -16,6 +16,15 @@ export default {
       .success(callback)
       .send()
   },
+  quota(callback, failCallback) {
+    RequestService.sendRequest()
+      .url(`${getServiceUrl()}/workspace/current/quota`)
+      .method('GET')
+      .success(callback)
+      .fail(failCallback)
+      .networkFail(failCallback)
+      .send()
+  },
   create(data, callback) {
     RequestService.sendRequest()
       .url(`${getServiceUrl()}/workspace`)

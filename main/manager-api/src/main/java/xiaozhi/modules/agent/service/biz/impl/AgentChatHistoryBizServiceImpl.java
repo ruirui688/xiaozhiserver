@@ -3,6 +3,7 @@ package xiaozhi.modules.agent.service.biz.impl;
 import java.util.Base64;
 import java.util.Date;
 import java.util.Objects;
+import java.nio.charset.StandardCharsets;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,6 +22,7 @@ import xiaozhi.modules.agent.service.AgentChatHistoryService;
 import xiaozhi.modules.agent.service.AgentChatSummaryService;
 import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.agent.service.biz.AgentChatHistoryBizService;
+import xiaozhi.modules.agent.service.impl.WorkspaceAgentQuotaService;
 import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.device.service.DeviceService;
 
@@ -41,6 +43,7 @@ public class AgentChatHistoryBizServiceImpl implements AgentChatHistoryBizServic
     private final AgentChatSummaryService agentChatSummaryService;
     private final RedisUtils redisUtils;
     private final DeviceService deviceService;
+    private final WorkspaceAgentQuotaService workspaceAgentQuotaService;
 
     /**
      * 处理聊天记录上报，包括文件上传和相关信息记录
@@ -66,11 +69,10 @@ public class AgentChatHistoryBizServiceImpl implements AgentChatHistoryBizServic
         Integer chatHistoryConf = agentEntity.getChatHistoryConf();
         String agentId = agentEntity.getId();
 
-        if (Objects.equals(chatHistoryConf, Constant.ChatHistoryConfEnum.RECORD_TEXT.getCode())) {
-            saveChatText(report, agentId, macAddress, null, reportTimeMillis);
-        } else if (Objects.equals(chatHistoryConf, Constant.ChatHistoryConfEnum.RECORD_TEXT_AUDIO.getCode())) {
-            String audioId = saveChatAudio(report);
-            saveChatText(report, agentId, macAddress, audioId, reportTimeMillis);
+        if (Objects.equals(chatHistoryConf, Constant.ChatHistoryConfEnum.RECORD_TEXT.getCode())
+                || Objects.equals(chatHistoryConf, Constant.ChatHistoryConfEnum.RECORD_TEXT_AUDIO.getCode())) {
+            saveChatHistory(report, agentEntity, reportTimeMillis,
+                    Objects.equals(chatHistoryConf, Constant.ChatHistoryConfEnum.RECORD_TEXT_AUDIO.getCode()));
         }
 
         // 更新设备最后对话时间
@@ -87,39 +89,45 @@ public class AgentChatHistoryBizServiceImpl implements AgentChatHistoryBizServic
         return Boolean.TRUE;
     }
 
-    /**
-     * base64解码report.getOpusDataBase64(),存入ai_agent_chat_audio表
-     */
-    private String saveChatAudio(AgentChatHistoryReportDTO report) {
-        String audioId = null;
+    private void saveChatHistory(AgentChatHistoryReportDTO report, AgentEntity agent, Long reportTime,
+            boolean audioEnabled) {
+        String metricsJson = report.getMetrics() == null ? null : JsonUtils.toJsonString(report.getMetrics());
+        long baseBytes = utf8Length(report.getContent()) + utf8Length(metricsJson);
+        byte[] audioData = audioEnabled ? decodeAudio(report.getAudioBase64()) : null;
+        long audioBytes = audioData == null ? 0L : audioData.length;
+        WorkspaceAgentQuotaService.StorageDecision decision = workspaceAgentQuotaService.evaluateStorage(
+                agent.getId(), baseBytes, audioBytes);
 
-        if (report.getAudioBase64() != null && !report.getAudioBase64().isEmpty()) {
-            try {
-                byte[] audioData = Base64.getDecoder().decode(report.getAudioBase64());
-                audioId = agentChatAudioService.saveAudio(audioData);
-                log.info("音频数据保存成功，audioId={}", audioId);
-            } catch (Exception e) {
-                log.error("音频数据保存失败", e);
-                return null;
-            }
+        if (!decision.storeRecord()) {
+            log.warn("单条聊天文本超过智能体存储上限，无法完整保存: agentId={}, usedBytes={}, limitBytes={}",
+                    agent.getId(), decision.usedBytes(), decision.limitBytes());
+            return;
         }
-        return audioId;
-    }
 
-    /**
-     * 组装上报数据
-     */
-    private void saveChatText(AgentChatHistoryReportDTO report, String agentId, String macAddress, String audioId,
-            Long reportTime) {
+        String audioId = null;
+        if (decision.storeAudio()) {
+            try {
+                audioId = agentChatAudioService.saveAudio(audioData);
+            } catch (RuntimeException error) {
+                log.error("聊天记录音频保存失败，仅保存文本: agentId={}, errorType={}",
+                        agent.getId(), error.getClass().getSimpleName());
+            }
+        } else if (audioBytes > 0L) {
+            log.warn("智能体聊天记录音频超出存储上限，仅保存文本: agentId={}, usedBytes={}, limitBytes={}",
+                    agent.getId(), decision.usedBytes(), decision.limitBytes());
+        }
+
         // 构建聊天记录实体
         AgentChatHistoryEntity entity = AgentChatHistoryEntity.builder()
-                .macAddress(macAddress)
-                .agentId(agentId)
+                .macAddress(report.getMacAddress())
+                .agentId(agent.getId())
+                .workspaceId(agent.getWorkspaceId())
                 .sessionId(report.getSessionId())
                 .chatType(report.getChatType())
                 .content(report.getContent())
                 .audioId(audioId)
-                .metricsJson(report.getMetrics() == null ? null : JsonUtils.toJsonString(report.getMetrics()))
+                .metricsJson(metricsJson)
+                .storageBytes(baseBytes + (audioId == null ? 0L : audioBytes))
                 .createdAt(new Date(reportTime))
                 // NOTE(haotian): 2025/5/26 updateAt可以不设置，重点是createAt，而且这样可以看到上报延迟
                 .build();
@@ -127,6 +135,22 @@ public class AgentChatHistoryBizServiceImpl implements AgentChatHistoryBizServic
         // 保存数据
         agentChatHistoryService.save(entity);
 
-        log.info("设备 {} 对应智能体 {} 上报成功", macAddress, agentId);
+        log.info("设备 {} 对应智能体 {} 上报成功", report.getMacAddress(), agent.getId());
+    }
+
+    private byte[] decodeAudio(String audioBase64) {
+        if (audioBase64 == null || audioBase64.isEmpty()) {
+            return null;
+        }
+        try {
+            return Base64.getDecoder().decode(audioBase64);
+        } catch (IllegalArgumentException error) {
+            log.warn("聊天记录音频Base64格式无效，仅保存文本");
+            return null;
+        }
+    }
+
+    private long utf8Length(String value) {
+        return value == null ? 0L : value.getBytes(StandardCharsets.UTF_8).length;
     }
 }

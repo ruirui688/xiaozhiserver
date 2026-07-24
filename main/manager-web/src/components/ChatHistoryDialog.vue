@@ -20,6 +20,8 @@
                         <div class="message-count">{{ session.chatCount > 99 ? '99' : session.chatCount }}</div>
                     </div>
                     <el-button class="session-delete" type="text" icon="el-icon-delete"
+                        :loading="deletingKey === deleteKey('session', session.sessionId)"
+                        :disabled="deleteInProgress"
                         @click.stop="deleteSession(session)"></el-button>
                 </div>
                 <div v-if="loading" class="loading">{{ $t('chatHistory.loading') }}</div>
@@ -128,6 +130,8 @@
                               </details>
                             </div>
                             <el-button class="message-delete" type="text" icon="el-icon-delete"
+                                :loading="deletingKey === deleteKey('message', message.id)"
+                                :disabled="deleteInProgress"
                                 @click="deleteMessage(message)"></el-button>
                         </div>
                     </div>
@@ -144,10 +148,13 @@
             <el-button type="primary" plain size="small" @click="downloadCurrentSession">
                 {{ $t('chatHistory.downloadCurrentSession') }}
             </el-button>
-            <el-button type="danger" plain size="small" @click="deleteCurrentSession">
+            <el-button type="danger" plain size="small"
+                :loading="deletingKey === deleteKey('session', currentSessionId)"
+                :disabled="deleteInProgress" @click="deleteCurrentSession">
                 {{ $t('chatHistory.deleteCurrentSession') }}
             </el-button>
-            <el-button type="danger" size="small" @click="deleteAllHistory">
+            <el-button type="danger" size="small" :loading="deletingKey === deleteKey('all')"
+                :disabled="deleteInProgress" @click="deleteAllHistory">
                 {{ $t('chatHistory.deleteAllHistory') }}
             </el-button>
         </div>
@@ -190,6 +197,7 @@ export default {
             isFirstLoad: true,
             playingAudioId: null,
             audioElement: null,
+            deletingKey: '',
             expandedToolResults: {} // 跟踪工具结果的展开状态
         };
     },
@@ -215,6 +223,9 @@ export default {
         }
     },
     computed: {
+        deleteInProgress() {
+            return Boolean(this.deletingKey);
+        },
         messagesWithTime() {
             if (!this.messages || this.messages.length === 0) return [];
 
@@ -647,6 +658,7 @@ export default {
             this.hasMore = true;
             this.isFirstLoad = true;
             this.expandedToolResults = {};
+            this.deletingKey = '';
         },
         handleClose() {
             this.dialogVisible = false;
@@ -702,21 +714,46 @@ export default {
             this.resetData();
             this.loadSessions();
         },
+        deleteKey(type, id = '') {
+            return `${type}:${id}`;
+        },
+        runDelete(key, request, successMessage, onSuccess) {
+            if (this.deleteInProgress) {
+                return;
+            }
+            this.deletingKey = key;
+            const finish = (res) => {
+                this.deletingKey = '';
+                if (res && res.data && res.data.code === 0) {
+                    this.$message.success(successMessage);
+                    onSuccess();
+                    return;
+                }
+                this.$message.error((res && res.data && res.data.msg) || this.$t('chatHistory.deleteFailed'));
+            };
+            try {
+                request(finish);
+            } catch (error) {
+                this.deletingKey = '';
+                this.$message.error(this.$t('chatHistory.deleteFailed'));
+            }
+        },
         deleteSession(session) {
+            if (this.deleteInProgress) {
+                return;
+            }
             this.$confirm(this.$t('chatHistory.confirmDeleteSession'), this.$t('message.warning'), {
                 confirmButtonText: this.$t('button.ok'),
                 cancelButtonText: this.$t('button.cancel'),
                 type: 'warning'
             }).then(() => {
-                Api.agent.deleteAgentChatSession(this.agentId, session.sessionId, (res) => {
-                    if (res.data && res.data.code === 0) {
-                        this.$message.success(this.$t('chatHistory.sessionDeleted'));
-                        this.refreshAfterDelete();
-                    } else {
-                        this.$message.error((res.data && res.data.msg) || this.$t('chatHistory.deleteFailed'));
-                    }
-                });
-            });
+                this.runDelete(
+                    this.deleteKey('session', session.sessionId),
+                    callback => Api.agent.deleteAgentChatSession(this.agentId, session.sessionId, callback),
+                    this.$t('chatHistory.sessionDeleted'),
+                    () => this.refreshAfterDelete()
+                );
+            }).catch(() => {});
         },
         deleteCurrentSession() {
             const session = this.sessions.find(item => item.sessionId === this.currentSessionId);
@@ -725,14 +762,19 @@ export default {
             }
         },
         deleteMessage(message) {
+            if (this.deleteInProgress) {
+                return;
+            }
             this.$confirm(this.$t('chatHistory.confirmDeleteMessage'), this.$t('message.warning'), {
                 confirmButtonText: this.$t('button.ok'),
                 cancelButtonText: this.$t('button.cancel'),
                 type: 'warning'
             }).then(() => {
-                Api.agent.deleteAgentChatMessage(this.agentId, message.id, (res) => {
-                    if (res.data && res.data.code === 0) {
-                        this.$message.success(this.$t('chatHistory.messageDeleted'));
+                this.runDelete(
+                    this.deleteKey('message', message.id),
+                    callback => Api.agent.deleteAgentChatMessage(this.agentId, message.id, callback),
+                    this.$t('chatHistory.messageDeleted'),
+                    () => {
                         if (this.messages.length <= 1) {
                             this.refreshAfterDelete();
                             return;
@@ -741,27 +783,26 @@ export default {
                         if (current) {
                             this.selectSession(current);
                         }
-                    } else {
-                        this.$message.error((res.data && res.data.msg) || this.$t('chatHistory.deleteFailed'));
                     }
-                });
-            });
+                );
+            }).catch(() => {});
         },
         deleteAllHistory() {
+            if (this.deleteInProgress) {
+                return;
+            }
             this.$confirm(this.$t('chatHistory.confirmDeleteAll'), this.$t('message.warning'), {
                 confirmButtonText: this.$t('button.ok'),
                 cancelButtonText: this.$t('button.cancel'),
                 type: 'warning'
             }).then(() => {
-                Api.agent.deleteAgentChatHistory(this.agentId, (res) => {
-                    if (res.data && res.data.code === 0) {
-                        this.$message.success(this.$t('chatHistory.historyDeleted'));
-                        this.refreshAfterDelete();
-                    } else {
-                        this.$message.error((res.data && res.data.msg) || this.$t('chatHistory.deleteFailed'));
-                    }
-                });
-            });
+                this.runDelete(
+                    this.deleteKey('all'),
+                    callback => Api.agent.deleteAgentChatHistory(this.agentId, callback),
+                    this.$t('chatHistory.historyDeleted'),
+                    () => this.refreshAfterDelete()
+                );
+            }).catch(() => {});
         },
         handleScroll(e) {
             if (this.scrollTimer) {

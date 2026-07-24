@@ -21,6 +21,14 @@
     <div class="device-name">
       {{ $t('home.voiceModel') }}：{{ device.ttsModelName }} ({{ device.ttsVoiceName }})
     </div>
+    <div class="storage-usage">
+      <div class="storage-usage-label">
+        <span>{{ $t('home.chatStorage') }}</span>
+        <span>{{ formatBytes(device.storageBytes) }} / {{ formatBytes(device.storageLimitBytes) }}</span>
+      </div>
+      <el-progress :percentage="storagePercentage" :stroke-width="6" :show-text="false"
+        :color="storageProgressColor" />
+    </div>
     <div class="device-actions">
       <div v-if="canWrite" class="settings-btn" @click="handleConfigure">
         {{ $t('home.configureRole') }}
@@ -103,9 +111,27 @@ export default {
     },
     isGovernedMemory() {
       return this.device.memModelId === 'Memory_managed_memory';
+    },
+    storagePercentage() {
+      const used = Math.max(Number(this.device.storageBytes) || 0, 0);
+      const limit = Math.max(Number(this.device.storageLimitBytes) || 0, 0);
+      if (!limit) return 0;
+      return Math.min(Math.round((used / limit) * 100), 100);
+    },
+    storageProgressColor() {
+      if (this.storagePercentage >= 100) return '#f56c6c';
+      if (this.storagePercentage >= 80) return '#e6a23c';
+      return '#5778ff';
     }
   },
   methods: {
+    formatBytes(bytes) {
+      const value = Number(bytes) || 0;
+      if (value < 1024) return `${value} B`;
+      if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+      if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+      return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+    },
     handleDelete() {
       this.$emit('delete', this.device.agentId)
     },
@@ -158,6 +184,18 @@ export default {
   font-size: 11px;
   color: #3d4566;
   text-align: left;
+}
+
+.storage-usage {
+  margin: 7px 0 12px;
+}
+
+.storage-usage-label {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 5px;
+  color: #697592;
+  font-size: 11px;
 }
 
 .settings-btn {

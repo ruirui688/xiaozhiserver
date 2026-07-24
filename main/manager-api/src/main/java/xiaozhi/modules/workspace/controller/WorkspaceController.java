@@ -20,10 +20,12 @@ import xiaozhi.common.utils.Result;
 import xiaozhi.modules.workspace.dto.WorkspaceCreateDTO;
 import xiaozhi.modules.workspace.dto.WorkspaceInviteDTO;
 import xiaozhi.modules.workspace.dto.WorkspaceRoleUpdateDTO;
+import xiaozhi.modules.agent.service.impl.WorkspaceAgentQuotaService;
 import xiaozhi.modules.workspace.service.WorkspaceService;
 import xiaozhi.modules.workspace.vo.WorkspaceInvitationVO;
 import xiaozhi.modules.workspace.vo.WorkspaceMemberVO;
 import xiaozhi.modules.workspace.vo.WorkspaceVO;
+import xiaozhi.modules.workspace.vo.WorkspaceAgentQuotaVO;
 
 @RestController
 @RequestMapping("/workspace")
@@ -31,6 +33,7 @@ import xiaozhi.modules.workspace.vo.WorkspaceVO;
 @AllArgsConstructor
 public class WorkspaceController {
     private final WorkspaceService workspaceService;
+    private final WorkspaceAgentQuotaService workspaceAgentQuotaService;
 
     @GetMapping("/list")
     @Operation(summary = "当前用户工作空间列表")
@@ -44,6 +47,14 @@ public class WorkspaceController {
     @RequiresPermissions("sys:role:normal")
     public Result<WorkspaceVO> current() {
         return new Result<WorkspaceVO>().ok(workspaceService.getCurrentWorkspace());
+    }
+
+    @GetMapping("/current/quota")
+    @Operation(summary = "当前工作空间智能体配额")
+    @RequiresPermissions("sys:role:normal")
+    public Result<WorkspaceAgentQuotaVO> currentQuota() {
+        String workspaceId = workspaceService.getCurrentWorkspaceEntity().getId();
+        return new Result<WorkspaceAgentQuotaVO>().ok(workspaceAgentQuotaService.getWorkspaceQuota(workspaceId));
     }
 
     @PostMapping

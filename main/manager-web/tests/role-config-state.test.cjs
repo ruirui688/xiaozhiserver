@@ -144,6 +144,42 @@ describe("role configuration component state", () => {
     reopenedVm.$destroy();
   });
 
+  test("doubao ASR hotword selection is visible and survives save hydration", async () => {
+    const api = {
+      model: { getPluginFunctionList: (params, success) => success({ data: { code: 0, data: [] } }) },
+      knowledgeBase: {
+        getKnowledgeBaseList: (params, success) => success({ data: { code: 0, data: { list: [] } } }),
+      },
+    };
+    const component = loadVueComponent("src/components/role/RoleEditDialog.vue", {
+      "@/apis/api": { __esModule: true, default: api },
+      "@/apis/httpRequest": { __esModule: true, default: {} },
+      "@/i18n": { __esModule: true, default: { t: (key) => key } },
+    });
+    const vm = createVm(component, {
+      modelOptions: {
+        ASR: [{ value: "asr-doubao", type: "doubao_stream" }],
+      },
+      currentFunctions: [],
+      currentKnowledgeBases: [],
+    });
+
+    await vm.hydrateAgentConfig({
+      asrModelId: "asr-doubao",
+      asrHotwordId: "example-hotword-table-id",
+      functions: [],
+    });
+
+    assert.equal(vm.supportsAsrHotword, true);
+    assert.equal(
+      vm.submitSaveConfig("agent-1").asrHotwordId,
+      "example-hotword-table-id"
+    );
+    vm.form.model.asrModelId = "";
+    assert.equal(vm.supportsAsrHotword, false);
+    vm.$destroy();
+  });
+
   test("default knowledge query policy is concise and domain neutral", () => {
     const component = loadVueComponent("src/components/role/RoleEditDialog.vue", {
       "@/apis/api": { __esModule: true, default: {} },

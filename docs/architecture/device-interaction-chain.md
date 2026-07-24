@@ -1,9 +1,11 @@
 ---
 status: supporting
 owner: xiaozhi-server
-last_verified: 2026-07-23
+last_verified: 2026-07-24
 source_paths:
   - main/xiaozhi-server/core
+  - main/manager-api/src/main/java/xiaozhi/modules/config
+  - main/manager-web/src/components/role
 ---
 
 # 设备交互完整链路
@@ -173,6 +175,14 @@ providers/asr/base.py  handle_voice_stop()
 声纹识别调用独立部署的 `voiceprint-api`：全模块部署以智能体 ID 作为远程 `user_id`，每个智能体最多 5 条；历史数据可保留 `user_id=default`，Python 按结构化说话人记录的作用域分组识别并选择最高分。每句话假设只有一个说话人，VAD 检测到句末后上传当前整段语音 WAV 做识别，和官方上游声纹识别链路保持一致，不再截取前 N 秒，也不再使用 `server.voiceprint_sample_seconds`。Token 只通过 Bearer Header 传输，默认远程总超时 5 秒；失败或超时只降级为无身份。智能体没有绑定声纹时不初始化 provider，也不发送识别请求。
 
 ASR 基类仍通过工作线程桥接异步 provider；provider 内部不能再使用同步 HTTP 或 `time.sleep()`，否则慢请求会阻塞共享事件循环并放大队列积压。
+
+豆包 Seed ASR 2.0 支持智能体级火山热词表。角色配置保存 `asr_hotword_id`，manager-api 在设备私有
+配置装配阶段只对 `doubao_stream` / `doubao_recording` 的 `typed_config` 注入
+`boosting_table_id`，Python 再发送为 `request.corpus.boosting_table_id`。热词 ID 不写入共享模型配置，
+因此使用同一 ASR 模型的不同智能体可以分别选择不同热词表；留空或选择其他 ASR 时不发送。
+
+`context_text` 是独立的火山 `request.context` 字段，可用于直传热词或对话上下文。它与控制台热词表
+ID 不可混用，provider 必须保持两者各自的请求层级，日志只记录是否启用，不记录上下文正文。
 
 豆包录音识别 `providers/asr/doubao_recording.py` 使用原生异步提交与轮询：
 

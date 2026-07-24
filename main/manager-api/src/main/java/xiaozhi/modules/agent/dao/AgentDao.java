@@ -36,4 +36,8 @@ public interface AgentDao extends BaseDao<AgentEntity> {
      * @param agentId 智能体ID
      */
     AgentInfoVO selectAgentInfoById(@Param("agentId") String agentId);
+
+    /** 锁定智能体行，串行化同一智能体的存储额度检查。 */
+    @Select("SELECT id FROM ai_agent WHERE id = #{agentId} FOR UPDATE")
+    String lockByIdForStorageQuota(@Param("agentId") String agentId);
 }

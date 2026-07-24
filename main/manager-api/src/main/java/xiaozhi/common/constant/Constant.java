@@ -146,6 +146,12 @@ public interface Constant {
      */
     String SERVER_VOICEPRINT_TOKEN = "server.voiceprint_token";
 
+    /** 每个工作空间允许创建的智能体数量上限 */
+    String WORKSPACE_AGENT_MAX_COUNT = "workspace.agent_max_count";
+
+    /** 每个智能体的聊天记录存储上限（MB） */
+    String WORKSPACE_AGENT_STORAGE_LIMIT_MB = "workspace.agent_storage_limit_mb";
+
     /**
      * Silero VAD 语音开始阈值
      */

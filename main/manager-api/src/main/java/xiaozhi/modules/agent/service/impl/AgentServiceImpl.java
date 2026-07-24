@@ -89,6 +89,7 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
     private final WorkspaceService workspaceService;
     private final WorkspacePermissionService workspacePermissionService;
     private final KnowledgeBaseService knowledgeBaseService;
+    private final WorkspaceAgentQuotaService workspaceAgentQuotaService;
 
     @Override
     public PageData<AgentEntity> adminAgentList(Map<String, Object> params) {
@@ -192,7 +193,15 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
         }
 
         List<AgentEntity> agentEntities = baseDao.selectList(queryWrapper);
-        return agentEntities.stream().map(this::buildAgentDTO).collect(Collectors.toList());
+        List<String> agentIds = agentEntities.stream().map(AgentEntity::getId).collect(Collectors.toList());
+        Map<String, Long> storageUsage = workspaceAgentQuotaService.getStorageUsageByAgentIds(agentIds);
+        long storageLimitBytes = workspaceAgentQuotaService.getAgentStorageLimitBytes();
+        return agentEntities.stream().map(agent -> {
+            AgentDTO dto = buildAgentDTO(agent);
+            dto.setStorageBytes(storageUsage.getOrDefault(agent.getId(), 0L));
+            dto.setStorageLimitBytes(storageLimitBytes);
+            return dto;
+        }).collect(Collectors.toList());
     }
 
     /**
@@ -379,6 +388,9 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
         if (dto.getAsrModelId() != null) {
             existingEntity.setAsrModelId(resolveEnabledModelIdOrCurrent("ASR", dto.getAsrModelId(),
                     existingEntity.getAsrModelId()));
+        }
+        if (dto.getAsrHotwordId() != null) {
+            existingEntity.setAsrHotwordId(StringUtils.trimToNull(dto.getAsrHotwordId()));
         }
         if (dto.getVadModelId() != null) {
             existingEntity.setVadModelId(resolveEnabledModelIdOrCurrent("VAD", dto.getVadModelId(),
@@ -665,6 +677,7 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
         // 设置用户ID和创建者信息
         UserDetail user = SecurityUser.getUser();
         WorkspaceEntity workspace = workspaceService.getCurrentWorkspaceEntity();
+        workspaceAgentQuotaService.requireCanCreateAgent(workspace.getId());
         entity.setUserId(user.getId());
         entity.setWorkspaceId(workspace.getId());
         entity.setCreator(user.getId());

@@ -114,6 +114,7 @@ public class ConfigServiceImpl implements ConfigService {
                 null,
                 null,
                 null,
+                null,
                 result,
                 isCache);
 
@@ -266,6 +267,7 @@ public class ConfigServiceImpl implements ConfigService {
                 agent.getTtsPitch(),
                 agent.getVadModelId(),
                 agent.getAsrModelId(),
+                StringUtils.defaultString(agent.getAsrHotwordId()),
                 agent.getLlmModelId(),
                 agent.getVllmModelId(),
                 agent.getSlmModelId(),
@@ -464,6 +466,7 @@ public class ConfigServiceImpl implements ConfigService {
      * @param referenceText  参考文本
      * @param vadModelId     VAD模型ID
      * @param asrModelId     ASR模型ID
+     * @param asrHotwordId   智能体级火山ASR热词表ID；null表示不覆盖模型配置
      * @param llmModelId     LLM模型ID
      * @param ttsModelId     TTS模型ID
      * @param memModelId     记忆模型ID
@@ -483,6 +486,7 @@ public class ConfigServiceImpl implements ConfigService {
             Integer ttsPitch,
             String vadModelId,
             String asrModelId,
+            String asrHotwordId,
             String llmModelId,
             String vllmModelId,
             String slmModelId,
@@ -536,6 +540,9 @@ public class ConfigServiceImpl implements ConfigService {
                 }
                 if ("VAD".equals(modelTypes[i]) && "silero".equals(runtimeConfig.get("type"))) {
                     applyManagedVadParams(runtimeConfig);
+                }
+                if ("ASR".equals(modelTypes[i])) {
+                    applyAgentAsrHotword(runtimeConfig, asrHotwordId);
                 }
                 // 如果是Intent类型，且type=intent_llm，则给他添加附加模型
                 if ("Intent".equals(modelTypes[i])) {
@@ -602,6 +609,20 @@ public class ConfigServiceImpl implements ConfigService {
         }
         result.put("prompt", prompt);
         result.put("summaryMemory", summaryMemory);
+    }
+
+    static void applyAgentAsrHotword(Map<String, Object> runtimeConfig, String asrHotwordId) {
+        if (runtimeConfig == null || asrHotwordId == null) {
+            return;
+        }
+        String providerType = String.valueOf(runtimeConfig.getOrDefault("type", ""));
+        if (!"doubao_stream".equals(providerType) && !"doubao_recording".equals(providerType)) {
+            return;
+        }
+        runtimeConfig.remove("boosting_table_id");
+        if (StringUtils.isNotBlank(asrHotwordId)) {
+            runtimeConfig.put("boosting_table_id", asrHotwordId.trim());
+        }
     }
 
     private Map<String, Object> buildModelConfig(ModelConfigEntity model) {

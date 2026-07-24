@@ -67,6 +67,25 @@ class ConfigServiceImplTest {
     }
 
     @Test
+    void agentHotwordOverridesOnlyDoubaoSeedAsrRuntime() {
+        Map<String, Object> doubaoRuntime = new HashMap<>();
+        doubaoRuntime.put("type", "doubao_stream");
+        doubaoRuntime.put("boosting_table_id", "model-default");
+
+        ConfigServiceImpl.applyAgentAsrHotword(doubaoRuntime, " agent-hotword-id ");
+
+        assertEquals("agent-hotword-id", doubaoRuntime.get("boosting_table_id"));
+
+        ConfigServiceImpl.applyAgentAsrHotword(doubaoRuntime, "");
+        assertEquals(false, doubaoRuntime.containsKey("boosting_table_id"));
+
+        Map<String, Object> otherRuntime = new HashMap<>();
+        otherRuntime.put("type", "fun_local");
+        ConfigServiceImpl.applyAgentAsrHotword(otherRuntime, "agent-hotword-id");
+        assertEquals(false, otherRuntime.containsKey("boosting_table_id"));
+    }
+
+    @Test
     void applyManagedVadParamsReadsSysParamsAndClampsValues() throws Exception {
         SysParamsService sysParamsService = Mockito.mock(SysParamsService.class);
         when(sysParamsService.getValue(Constant.SERVER_VAD_THRESHOLD, true)).thenReturn(null);

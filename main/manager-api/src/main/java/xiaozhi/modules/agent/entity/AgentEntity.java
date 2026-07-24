@@ -34,6 +34,9 @@ public class AgentEntity {
     @Schema(description = "语音识别模型标识")
     private String asrModelId;
 
+    @Schema(description = "火山引擎ASR热词表ID")
+    private String asrHotwordId;
+
     @Schema(description = "语音活动检测标识")
     private String vadModelId;
 

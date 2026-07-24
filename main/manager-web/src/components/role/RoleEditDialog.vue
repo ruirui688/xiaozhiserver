@@ -201,6 +201,25 @@
                       </div>
                     </el-option>
                   </el-select>
+                  <div v-if="supportsAsrHotword" class="asr-hotword-field">
+                    <div class="asr-hotword-label">
+                      <span>{{ $t('roleConfig.asrHotword') }}</span>
+                      <el-tooltip
+                        :content="$t('roleConfig.tooltip.asrHotword')"
+                        placement="top"
+                        effect="light"
+                        popper-class="custom-tooltip"
+                      >
+                        <i class="el-icon-info"></i>
+                      </el-tooltip>
+                    </div>
+                    <el-input
+                      v-model.trim="form.asrHotwordId"
+                      clearable
+                      maxlength="128"
+                      :placeholder="$t('roleConfig.asrHotwordPlaceholder')"
+                    />
+                  </div>
                 </div>
               </el-form-item>
             </div>
@@ -535,6 +554,12 @@ export default {
   computed: {
     effectiveAgentId() {
       return this.$route.query.agentId || '';
+    },
+    supportsAsrHotword() {
+      const selectedId = this.form.model.asrModelId;
+      const selected = (this.modelOptions.ASR || []).find((item) => item.value === selectedId);
+      const adapter = String(selected?.type || selected?.raw?.adapterCode || "").toLowerCase();
+      return adapter === "doubao_stream" || adapter === "doubao_recording";
     }
   },
   methods: {
@@ -611,6 +636,7 @@ export default {
         agentCode: this.form.agentCode,
         agentName: this.form.agentName,
         asrModelId: this.form.model.asrModelId,
+        asrHotwordId: this.form.asrHotwordId,
         vadModelId: this.form.model.vadModelId,
         llmModelId: this.form.model.llmModelId,
         slmModelId: this.form.model.slmModelId,
@@ -1187,8 +1213,29 @@ export default {
 
 .model-select-wrapper {
   display: flex;
+  flex-direction: column;
   align-items: center;
   width: 100%;
+}
+
+.asr-hotword-field {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.asr-hotword-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 4px;
+  color: #5f6680;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.asr-hotword-label i {
+  color: #8791ad;
+  cursor: help;
 }
 
 .model-row {

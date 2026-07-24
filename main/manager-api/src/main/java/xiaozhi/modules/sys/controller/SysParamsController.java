@@ -35,6 +35,7 @@ import xiaozhi.common.validator.group.AddGroup;
 import xiaozhi.common.validator.group.DefaultGroup;
 import xiaozhi.common.validator.group.UpdateGroup;
 import xiaozhi.modules.agent.voiceprint.VoiceprintApiClient;
+import xiaozhi.modules.agent.service.impl.WorkspaceAgentQuotaService;
 import xiaozhi.modules.config.service.ConfigService;
 import xiaozhi.modules.memory.service.MemorySettingsService;
 import xiaozhi.modules.sys.dto.SysParamsDTO;
@@ -57,6 +58,7 @@ public class SysParamsController {
     private final RestTemplate restTemplate;
     private final VoiceprintApiClient voiceprintApiClient;
     private final MemorySettingsService memorySettingsService;
+    private final WorkspaceAgentQuotaService workspaceAgentQuotaService;
 
     @GetMapping("page")
     @Operation(summary = "分页")
@@ -94,6 +96,7 @@ public class SysParamsController {
         validateVoicePrint(dto.getParamCode(), dto.getParamValue());
 
         memorySettingsService.validateActiveContextMaxCharsChange(dto.getParamCode(), dto.getParamValue());
+        workspaceAgentQuotaService.validateParameterChange(dto.getParamCode(), dto.getParamValue());
 
         sysParamsService.save(dto);
         configService.getConfig(false);
@@ -125,6 +128,7 @@ public class SysParamsController {
 
         // 验证托管记忆容量，避免降低上限后无法保证全量注入
         memorySettingsService.validateActiveContextMaxCharsChange(dto.getParamCode(), dto.getParamValue());
+        workspaceAgentQuotaService.validateParameterChange(dto.getParamCode(), dto.getParamValue());
 
         // 校验mqtt密钥长度
         validateMqttSecretLength(dto.getParamCode(), dto.getParamValue());

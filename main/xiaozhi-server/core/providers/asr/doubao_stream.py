@@ -40,6 +40,7 @@ class ASRProvider(ASRProviderBase):
         self.resource_id = config.get("resource_id", "volc.seedasr.sauc.duration")
 
         self.context_text = config.get("context_text", "")
+        self.boosting_table_id = str(config.get("boosting_table_id") or "").strip()
         self.output_dir = config.get("output_dir", "tmp/")
         self.delete_audio_file = delete_audio_file
 
@@ -130,7 +131,11 @@ class ASRProvider(ASRProviderBase):
                     full_client_request.extend((len(payload_bytes)).to_bytes(4, "big"))
                     full_client_request.extend(payload_bytes)
 
-                    logger.bind(tag=TAG).info(f"发送初始化请求: {request_params}")
+                    logger.bind(tag=TAG).info(
+                        "发送ASR初始化请求: "
+                        f"hotword_enabled={bool(self.boosting_table_id)}, "
+                        f"context_enabled={bool(self.context_text)}"
+                    )
                     await self.asr_ws.send(full_client_request)
 
                     # 等待初始化响应
@@ -530,8 +535,15 @@ class ASRProvider(ASRProviderBase):
         if self.context_text:
             req["request"]["context"] = self.context_text
 
+        if self.boosting_table_id:
+            req["request"]["corpus"] = {
+                "boosting_table_id": self.boosting_table_id,
+            }
+
         logger.bind(tag=TAG).debug(
-            f"构造请求参数: {json.dumps(req, ensure_ascii=False)}"
+            "构造ASR请求参数完成: "
+            f"hotword_enabled={bool(self.boosting_table_id)}, "
+            f"context_enabled={bool(self.context_text)}"
         )
         return req
 

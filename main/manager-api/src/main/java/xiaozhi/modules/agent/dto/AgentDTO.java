@@ -50,4 +50,10 @@ public class AgentDTO {
 
     @Schema(description = "标签列表")
     private List<AgentTagDTO> tags;
+
+    @Schema(description = "当前聊天记录已用存储字节数")
+    private Long storageBytes;
+
+    @Schema(description = "单智能体聊天记录存储上限字节数")
+    private Long storageLimitBytes;
 }

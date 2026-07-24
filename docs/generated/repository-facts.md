@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: architecture
-last_verified: 2026-07-23
+last_verified: 2026-07-24
 source_paths:
   - Dockerfile-server-base
   - main/xiaozhi-server/
@@ -15,7 +15,7 @@ source_paths:
 
 > 本页由 `scripts/docs-facts` 生成，请勿手工编辑。运行 `scripts/docs-facts` 更新，运行 `scripts/docs-facts --check` 检查漂移。
 
-生成日期：`2026-07-23`（UTC）
+生成日期：`2026-07-24`（UTC）
 
 ## 技术栈版本
 
@@ -32,10 +32,10 @@ source_paths:
 
 | 模块 | 源码文件 | 测试文件 | 统计口径 |
 | --- | ---: | ---: | --- |
-| xiaozhi-server | 233 | 50 | 源码为非 `tests/` 的 `*.py`；测试为 `test_*.py` |
-| manager-api | 491 | 38 | `src/main/**/*.java`；`src/test/**/*Test.java` |
-| manager-web | 115 | 4 | `src/` 下 `*.vue/*.js/*.ts/*.mjs`；`*.spec.*/*.test.*` |
-| manager-mobile | 79 | 1 | `src/` 下 `*.vue/*.js/*.ts/*.mjs`；`*.spec.*/*.test.*` |
+| xiaozhi-server | 232 | 51 | 源码为非 `tests/` 的 `*.py`；测试为 `test_*.py` |
+| manager-api | 501 | 46 | `src/main/**/*.java`；`src/test/**/*Test.java` |
+| manager-web | 115 | 10 | `src/` 下 `*.vue/*.js/*.ts/*.mjs`；`*.spec.*/*.test.*` |
+| manager-mobile | 81 | 2 | `src/` 下 `*.vue/*.js/*.ts/*.mjs`；`*.spec.*/*.test.*` |
 
 统计排除依赖和构建产物，不表示代码行数或测试覆盖率。
 
@@ -57,9 +57,9 @@ source_paths:
 
 | 事实 | 数量 |
 | --- | ---: |
-| Liquibase SQL 文件 | 172 |
-| master.yaml changeSet | 172 |
-| master.yaml 唯一 SQL 登记 | 172 |
+| Liquibase SQL 文件 | 174 |
+| master.yaml changeSet | 174 |
+| master.yaml 唯一 SQL 登记 | 174 |
 
 数量相等不代表迁移内容正确；`scripts/docs-check` 还会检查遗漏登记、重复登记和失效路径。
 
@@ -67,14 +67,14 @@ source_paths:
 
 | 文件 | 行数 |
 | --- | ---: |
-| `main/xiaozhi-server/core/connection.py` | 2384 |
+| `main/xiaozhi-server/core/connection.py` | 2431 |
 | `main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelCatalogServiceImpl.java` | 1657 |
 | `main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelTestServiceImpl.java` | 1325 |
-| `main/manager-api/src/main/java/xiaozhi/modules/knowledge/rag/impl/LocalKnowledgeAdapter.java` | 1524 |
+| `main/manager-api/src/main/java/xiaozhi/modules/knowledge/rag/impl/LocalKnowledgeAdapter.java` | 1293 |
 | `main/manager-api/src/main/java/xiaozhi/modules/memory/service/impl/MemoryMaintenanceServiceImpl.java` | 1141 |
 | `main/manager-web/src/views/ModelConfig.vue` | 1889 |
 | `main/manager-web/src/components/BenchmarkResultPanel.vue` | 1587 |
-| `main/manager-web/src/views/KnowledgeFileUpload.vue` | 1260 |
+| `main/manager-web/src/views/KnowledgeFileUpload.vue` | 1333 |
 | `main/manager-mobile/src/pages/agent/edit.vue` | 1002 |
 
 这些行数用于识别架构热点，不是强制拆分阈值。重构判断仍应结合职责、依赖和测试风险。

@@ -111,6 +111,27 @@ def test_stream_timeout_configuration_defaults_and_overrides(tmp_path):
     assert configured.final_response_timeout_seconds == 0.75
 
 
+def test_stream_request_sends_agent_hotword_table_in_corpus(tmp_path):
+    provider = _provider(
+        tmp_path,
+        boosting_table_id="example-hotword-table-id",
+        context_text='{"context_type":"dialog_ctx"}',
+    )
+
+    request = provider.construct_request("request-id")
+
+    assert request["request"]["corpus"] == {
+        "boosting_table_id": "example-hotword-table-id"
+    }
+    assert request["request"]["context"] == '{"context_type":"dialog_ctx"}'
+
+
+def test_stream_request_omits_empty_hotword_corpus(tmp_path):
+    provider = _provider(tmp_path, boosting_table_id="  ")
+
+    assert "corpus" not in provider.construct_request("request-id")["request"]
+
+
 def test_stream_speech_to_text_preserves_structured_utterances(tmp_path):
     provider = _provider(tmp_path)
     provider.text = "先讨论计划。"

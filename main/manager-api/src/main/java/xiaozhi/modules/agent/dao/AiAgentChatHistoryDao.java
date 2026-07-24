@@ -8,6 +8,7 @@ import org.apache.ibatis.annotations.Param;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 
 import xiaozhi.modules.agent.entity.AgentChatHistoryEntity;
+import xiaozhi.modules.agent.dto.AgentStorageUsageDTO;
 
 /**
  * {@link AgentChatHistoryEntity} 智能体聊天历史记录Dao对象
@@ -53,5 +54,19 @@ public interface AiAgentChatHistoryDao extends BaseMapper<AgentChatHistoryEntity
      *
      * @param audioIds 音频ID列表
      */
-    void deleteUnreferencedAudioByIds(@Param("audioIds") List<String> audioIds);
+    int deleteUnreferencedAudioByIds(@Param("audioIds") List<String> audioIds);
+
+    /** 查询单个智能体的聊天记录存储用量 */
+    Long getStorageUsageBytes(@Param("agentId") String agentId);
+
+    /** 按创建时间查询最旧聊天记录，用于容量滚动淘汰。 */
+    List<AgentChatHistoryEntity> getOldestForStorageEviction(
+            @Param("agentId") String agentId,
+            @Param("limit") int limit);
+
+    /** 批量删除容量滚动淘汰选中的聊天记录。 */
+    int deleteByStorageEvictionIds(@Param("historyIds") List<Long> historyIds);
+
+    /** 批量查询智能体聊天记录存储用量 */
+    List<AgentStorageUsageDTO> getStorageUsageByAgentIds(@Param("agentIds") List<String> agentIds);
 }

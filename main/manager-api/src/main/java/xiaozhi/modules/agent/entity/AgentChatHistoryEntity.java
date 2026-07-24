@@ -74,6 +74,18 @@ public class AgentChatHistoryEntity {
     private String metricsJson;
 
     /**
+     * 本条聊天记录占用字节数（文本、指标和音频）
+     */
+    @TableField(value = "storage_bytes")
+    private Long storageBytes;
+
+    /**
+     * 所属工作空间ID
+     */
+    @TableField(value = "workspace_id")
+    private String workspaceId;
+
+    /**
      * 创建时间
      */
     @TableField(value = "created_at")

@@ -16,13 +16,17 @@
             <div class="hi-hint">
               let's have a wonderful day!
             </div>
-            <div v-if="canWrite" class="add-device-btn">
-              <div class="left-add" @click="showAddDialog">
+            <div v-if="workspaceQuota" class="workspace-quota">
+              <span>{{ $t('home.workspaceAgentQuota', { count: workspaceQuota.agentCount, limit: workspaceQuota.agentLimit }) }}</span>
+              <span>{{ $t('home.agentStorageQuota', { limit: formatBytes(workspaceQuota.agentStorageLimitBytes) }) }}</span>
+            </div>
+            <div v-if="canWrite" :class="['add-device-btn', { 'quota-full': isAgentLimitReached }]" @click="showAddDialog">
+              <div class="left-add">
                 {{ $t('home.addAgent') }}
               </div>
               <div style="width: 23px;height: 13px;background: #5778ff;margin-left: -10px;" />
               <div class="right-add">
-                <i class="el-icon-right" @click="showAddDialog" style="font-size: 20px;color: #fff;" />
+                <i class="el-icon-right" style="font-size: 20px;color: #fff;" />
               </div>
             </div>
           </div>
@@ -70,6 +74,7 @@ export default {
       currentAgentId: '',
       currentAgentName: '',
       canWrite: localStorage.getItem('currentWorkspaceCanWrite') !== 'false',
+      workspaceQuota: null,
       // 功能状态
       featureStatus: {
         voiceprintRecognition: false,
@@ -81,8 +86,15 @@ export default {
 
   async mounted() {
     this.loadWorkspacePermission();
+    this.loadWorkspaceQuota();
     this.fetchAgentList();
     await this.loadFeatureStatus();
+  },
+
+  computed: {
+    isAgentLimitReached() {
+      return Boolean(this.workspaceQuota && this.workspaceQuota.agentCount >= this.workspaceQuota.agentLimit);
+    }
   },
 
   methods: {
@@ -104,9 +116,29 @@ export default {
         }
       });
     },
+    loadWorkspaceQuota() {
+      Api.workspace.quota(({ data }) => {
+        if (data && data.code === 0 && data.data) {
+          this.workspaceQuota = data.data;
+        }
+      });
+    },
+    formatBytes(bytes) {
+      const value = Number(bytes) || 0;
+      if (value < 1024) return `${value} B`;
+      if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+      if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+      return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+    },
     
     showAddDialog() {
       if (!this.canWrite) {
+        return;
+      }
+      if (this.isAgentLimitReached) {
+        this.$message.warning(this.$t('home.workspaceAgentLimitReached', {
+          limit: this.workspaceQuota.agentLimit
+        }));
         return;
       }
       this.addDeviceDialogVisible = true
@@ -117,6 +149,7 @@ export default {
     },
     handleWisdomBodyAdded(res) {
       this.fetchAgentList();
+      this.loadWorkspaceQuota();
       this.addDeviceDialogVisible = false;
     },
     handleDeviceManage() {
@@ -184,6 +217,7 @@ export default {
               showClose: true
             });
             this.fetchAgentList(); // 刷新列表
+            this.loadWorkspaceQuota();
           } else {
             this.$message.error({
               message: res.data.msg || this.$t('home.deleteFailed'),
@@ -264,13 +298,22 @@ export default {
     margin-left: 75px;
     margin-top: 5px;
   }
+
+  .workspace-quota {
+    display: flex;
+    gap: 18px;
+    margin-left: 75px;
+    margin-top: 7px;
+    color: #596788;
+    font-size: 12px;
+  }
 }
 
 .add-device-btn {
   display: flex;
   align-items: center;
   margin-left: 75px;
-  margin-top: 15px;
+  margin-top: 10px;
   cursor: pointer;
 
   .left-add {
@@ -295,6 +338,11 @@ export default {
     justify-content: center;
     align-items: center;
   }
+}
+
+.add-device-btn.quota-full {
+  cursor: not-allowed;
+  opacity: 0.58;
 }
 
 .device-list-container {

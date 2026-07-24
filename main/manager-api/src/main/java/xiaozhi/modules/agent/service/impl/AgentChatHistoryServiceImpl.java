@@ -5,7 +5,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import cn.hutool.core.collection.ListUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,6 +44,7 @@ public class AgentChatHistoryServiceImpl extends ServiceImpl<AiAgentChatHistoryD
         implements AgentChatHistoryService {
 
     private final AgentChatTitleDao agentChatTitleDao;
+    private final AgentChatAudioCleanupService audioCleanupService;
 
     @Override
     public PageData<AgentChatSessionDTO> getSessionListByAgentId(Map<String, Object> params) {
@@ -131,9 +131,9 @@ public class AgentChatHistoryServiceImpl extends ServiceImpl<AiAgentChatHistoryD
         baseMapper.delete(new LambdaQueryWrapper<AgentChatHistoryEntity>()
                 .eq(AgentChatHistoryEntity::getAgentId, agentId)
                 .eq(AgentChatHistoryEntity::getSessionId, sessionId));
-        deleteUnreferencedAudioByIds(audioIds);
         agentChatTitleDao.delete(new LambdaQueryWrapper<AgentChatTitleEntity>()
                 .eq(AgentChatTitleEntity::getSessionId, sessionId));
+        audioCleanupService.scheduleAfterCommit(audioIds);
     }
 
     @Override
@@ -150,13 +150,13 @@ public class AgentChatHistoryServiceImpl extends ServiceImpl<AiAgentChatHistoryD
             return;
         }
         baseMapper.deleteById(messageId);
-        deleteUnreferencedAudioByIds(getAudioIds(List.of(history)));
+        audioCleanupService.scheduleAfterCommit(getAudioIds(List.of(history)));
     }
 
     private void deleteAudioOnlyByAgentId(String agentId) {
         List<String> audioIds = baseMapper.getAudioIdsByAgentId(agentId);
         baseMapper.deleteAudioIdByAgentId(agentId);
-        deleteUnreferencedAudioByIds(audioIds);
+        audioCleanupService.scheduleAfterCommit(audioIds);
     }
 
     private void deleteTextByAgentId(String agentId) {
@@ -169,8 +169,8 @@ public class AgentChatHistoryServiceImpl extends ServiceImpl<AiAgentChatHistoryD
                 .collect(Collectors.toList());
         List<String> audioIds = baseMapper.getAudioIdsByAgentId(agentId);
         baseMapper.deleteHistoryByAgentId(agentId);
-        deleteUnreferencedAudioByIds(audioIds);
         deleteTitlesBySessionIds(sessionIds);
+        audioCleanupService.scheduleAfterCommit(audioIds);
     }
 
     private List<String> getAudioIds(List<AgentChatHistoryEntity> historyList) {
@@ -182,13 +182,6 @@ public class AgentChatHistoryServiceImpl extends ServiceImpl<AiAgentChatHistoryD
                 .filter(audioId -> ToolUtil.isNotEmpty(audioId))
                 .distinct()
                 .toList();
-    }
-
-    private void deleteUnreferencedAudioByIds(List<String> audioIds) {
-        if (ToolUtil.isNotEmpty(audioIds)) {
-            List<List<String>> batch = ListUtil.split(audioIds, 1000);
-            batch.forEach(dataList -> baseMapper.deleteUnreferencedAudioByIds(dataList));
-        }
     }
 
     private void deleteTitlesBySessionIds(List<String> sessionIds) {

@@ -1,10 +1,12 @@
 ---
 status: canonical
 owner: models
-last_verified: 2026-07-23
+last_verified: 2026-07-24
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/model
+  - main/manager-api/src/main/java/xiaozhi/modules/config
   - main/manager-web/src/views/ModelConfig.vue
+  - main/manager-web/src/components/role/RoleEditDialog.vue
   - main/xiaozhi-server/core/utils/model_config.py
 ---
 
@@ -504,6 +506,21 @@ model_config:
 ```
 
 `xiaozhi-server` 根据 `typed_config.type=doubao_stream` 找到对应 ASR provider，再用 `resource_id` 和密钥调用火山服务。
+
+### 智能体级豆包 ASR 热词
+
+火山引擎控制台创建的热词表属于角色选择，不属于共享模型凭据。智控台角色配置在选择
+`doubao_stream` 或 `doubao_recording` 后可填写热词表 ID，保存到 `ai_agent.asr_hotword_id`。
+`ConfigServiceImpl` 只在该智能体的 ASR `typed_config` 中增加：
+
+```yaml
+boosting_table_id: example-hotword-table-id
+```
+
+Python provider 按火山 Seed ASR 2.0 协议映射为
+`request.corpus.boosting_table_id`。角色留空时不发送热词表；选择非豆包 ASR 时该字段不参与运行时配置。
+已有模型级 `context_text` 仍映射到 `request.context`，它可以承载直传热词或对话上下文，但不能用热词表
+ID 字符串替代。两者同时存在时遵循火山协议的优先级。
 
 ## 9. 修改模型管理时必须守住的边界
 

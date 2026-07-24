@@ -34,6 +34,7 @@ class ASRProvider(ASRProviderBase):
             "https://openspeech.bytedance.com/api/v3/auc/bigmodel/query",
         )
         self.context_text = config.get("context_text", "")
+        self.boosting_table_id = str(config.get("boosting_table_id") or "").strip()
         self.output_dir = config.get("output_dir", "tmp/")
         self.delete_audio_file = delete_audio_file
         self.http_timeout_seconds = self._positive_seconds(
@@ -93,6 +94,10 @@ class ASRProvider(ASRProviderBase):
         }
         if self.context_text:
             payload["request"]["context"] = self.context_text
+        if self.boosting_table_id:
+            payload["request"]["corpus"] = {
+                "boosting_table_id": self.boosting_table_id,
+            }
         return payload
 
     async def _post_json(

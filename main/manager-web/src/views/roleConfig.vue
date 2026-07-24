@@ -123,6 +123,7 @@ export default {
         chatHistoryConf: 0,
         systemPrompt: "",
         summaryMemory: "",
+        asrHotwordId: "",
         langCode: "",
         language: "",
         sort: "",

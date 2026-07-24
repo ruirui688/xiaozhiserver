@@ -37,15 +37,16 @@
   </delete>
 
   <delete id="deleteUnreferencedAudioByIds">
-    DELETE FROM ai_agent_chat_audio
-    WHERE id IN
+    DELETE audio
+    FROM ai_agent_chat_audio audio
+    WHERE audio.id IN
     <foreach collection="audioIds" item="id" open="(" separator="," close=")">
       #{id}
     </foreach>
-    AND id NOT IN (
-      SELECT DISTINCT audio_id
-      FROM ai_agent_chat_history
-      WHERE audio_id IS NOT NULL
+    AND NOT EXISTS (
+      SELECT 1
+      FROM ai_agent_chat_history history
+      WHERE history.audio_id = audio.id
     )
   </delete>
   
@@ -59,4 +60,39 @@
     DELETE FROM ai_agent_chat_history 
     WHERE agent_id = #{agentId}
   </delete>
+
+  <select id="getStorageUsageBytes" resultType="java.lang.Long">
+    SELECT COALESCE(SUM(storage_bytes), 0)
+    FROM ai_agent_chat_history
+    WHERE agent_id = #{agentId}
+  </select>
+
+  <select id="getOldestForStorageEviction" resultType="xiaozhi.modules.agent.entity.AgentChatHistoryEntity">
+    SELECT id,
+           audio_id AS audioId,
+           session_id AS sessionId,
+           storage_bytes AS storageBytes
+    FROM ai_agent_chat_history
+    WHERE agent_id = #{agentId}
+    ORDER BY created_at ASC, id ASC
+    LIMIT #{limit}
+  </select>
+
+  <delete id="deleteByStorageEvictionIds">
+    DELETE FROM ai_agent_chat_history
+    WHERE id IN
+    <foreach collection="historyIds" item="historyId" open="(" separator="," close=")">
+      #{historyId}
+    </foreach>
+  </delete>
+
+  <select id="getStorageUsageByAgentIds" resultType="xiaozhi.modules.agent.dto.AgentStorageUsageDTO">
+    SELECT agent_id AS agentId, COALESCE(SUM(storage_bytes), 0) AS storageBytes
+    FROM ai_agent_chat_history
+    WHERE agent_id IN
+    <foreach collection="agentIds" item="agentId" open="(" separator="," close=")">
+      #{agentId}
+    </foreach>
+    GROUP BY agent_id
+  </select>
 </mapper>

@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.List;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Pattern;
 import lombok.Data;
 
 /**
@@ -26,6 +27,10 @@ public class AgentUpdateDTO implements Serializable {
 
     @Schema(description = "语音识别模型标识", example = "asr_model_02", nullable = true)
     private String asrModelId;
+
+    @Schema(description = "火山引擎ASR热词表ID", example = "example-hotword-table-id", nullable = true)
+    @Pattern(regexp = "^[A-Za-z0-9_-]{0,128}$", message = "ASR热词表ID只能包含字母、数字、下划线和短横线")
+    private String asrHotwordId;
 
     @Schema(description = "语音活动检测标识", example = "vad_model_02", nullable = true)
     private String vadModelId;

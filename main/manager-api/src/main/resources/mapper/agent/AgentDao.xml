@@ -13,6 +13,7 @@
         <result column="agentCode" property="agentCode"/>
         <result column="agentName" property="agentName"/>
         <result column="asrModelId" property="asrModelId"/>
+        <result column="asrHotwordId" property="asrHotwordId"/>
         <result column="vadModelId" property="vadModelId"/>
         <result column="llmModelId" property="llmModelId"/>
         <result column="slmModelId" property="slmModelId"/>
@@ -48,6 +49,7 @@
                a.agent_code        AS agentCode,
                a.agent_name        AS agentName,
                a.asr_model_id      AS asrModelId,
+               a.asr_hotword_id    AS asrHotwordId,
                a.vad_model_id      AS vadModelId,
                a.llm_model_id      AS llmModelId,
                a.slm_model_id      AS slmModelId,
