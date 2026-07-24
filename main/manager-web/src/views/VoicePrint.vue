@@ -22,7 +22,8 @@
                         <el-table-column :label="$t('voicePrint.action')" align="center">
                                 <template slot-scope="scope">
                                     <el-button size="mini" type="text" @click="editVoicePrint(scope.row)">{{ $t('voicePrint.edit') }}</el-button>
-                                    <el-button size="mini" type="text"
+                                    <el-button size="mini" type="text" :loading="deletingVoicePrintId === scope.row.id"
+                                        :disabled="Boolean(deletingVoicePrintId)"
                                         @click="deleteVoicePrint(scope.row.id)">{{ $t('voicePrint.delete') }}</el-button>
                                 </template>
                             </el-table-column>
@@ -72,6 +73,7 @@ export default {
             },
             agentId: "1",
             maxVoiceprints: 5,
+            deletingVoicePrintId: '',
             deviceOptions: []
         };
     },
@@ -204,14 +206,20 @@ export default {
         },
         // 删除按钮
         deleteVoicePrint(id) {
+            if (this.deletingVoicePrintId) {
+                return;
+            }
             this.$confirm(this.$t('voicePrint.confirmDelete'), this.$t('voicePrint.warning'), {
                 confirmButtonText: this.$t('voicePrint.confirm'),
                 cancelButtonText: this.$t('voicePrint.cancel'),
                 type: 'warning',
                 distinguishCancelAndClose: true
             }).then(() => {
-                Api.agent.deleteAgentVoicePrint(id, ({ data }) => {
-                    if (data.code === 0) {
+                this.deletingVoicePrintId = id;
+                Api.agent.deleteAgentVoicePrint(id, (response) => {
+                    this.deletingVoicePrintId = '';
+                    const data = response && response.data;
+                    if (data && data.code === 0) {
                         this.$message.success({
                             message: this.$t('voicePrint.deleteSuccess'),
                             showClose: true
@@ -219,7 +227,7 @@ export default {
                         this.fetchVoicePrints();
                     } else {
                         this.$message.error({
-                            message: data.msg || this.$t('voicePrint.deleteFailed'),
+                            message: (data && data.msg) || this.$t('voicePrint.deleteFailed'),
                             showClose: true
                         });
                     }

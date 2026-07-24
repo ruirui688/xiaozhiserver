@@ -69,9 +69,13 @@ public class AgentVoicePrintController {
     @Operation(summary = "删除智能体对应声纹")
     @RequiresPermissions("sys:role:normal")
     public Result<Void> delete(@PathVariable String id) {
-        requireAgentWrite(agentVoicePrintService.getAgentIdByVoicePrintId(id));
+        String agentId = agentVoicePrintService.getAgentIdByVoicePrintId(id);
+        // DELETE 保持幂等：首次请求成功但响应丢失时，客户端再次确认删除仍返回成功。
+        if (StringUtils.isBlank(agentId)) {
+            return new Result<>();
+        }
+        requireAgentWrite(agentId);
         Long userId = SecurityUser.getUserId();
-        // 先删除关联的设备
         boolean delete = agentVoicePrintService.delete(userId, id);
         if (delete) {
             return new Result<>();

@@ -354,6 +354,9 @@ public class VoiceprintApiClient {
         if ("voiceprint_limit_reached".equals(remoteCode)) {
             return new RenException(ErrorCode.AGENT_VOICEPRINT_LIMIT_REACHED, error);
         }
+        if ("delete".equals(operation)) {
+            return new RenException(fallbackCode, error);
+        }
         return remoteFailure(fallbackCode, error, parsed, "声纹服务请求失败");
     }
 

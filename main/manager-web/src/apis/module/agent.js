@@ -371,11 +371,9 @@ export default {
                 RequestService.clearRequestTime();
                 callback(res);
             })
-            .networkFail(() => {
-                RequestService.reAjaxFun(() => {
-                    this.deleteAgentVoicePrint(id, callback);
-                });
-            }).send();
+            .fail((err) => callback(err))
+            .networkFail((err) => callback(err))
+            .send();
     },
     // 更新智能体声纹
     updateAgentVoicePrint(voicePrintData, callback) {
