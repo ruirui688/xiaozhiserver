@@ -1,5 +1,7 @@
 package xiaozhi.modules.device.dto;
 
+import java.util.List;
+
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import lombok.Getter;
@@ -22,6 +24,9 @@ public class DeviceReportRespDTO {
 
     @Schema(description = "WebSocket配置")
     private Websocket websocket;
+
+    @Schema(description = "设备绑定的智能体配置")
+    private DeviceConfig device_config;
 
     @Schema(description = "MQTT Gateway配置")
     private MQTT mqtt;
@@ -74,6 +79,19 @@ public class DeviceReportRespDTO {
         private String url;
         @Schema(description = "WebSocket 认证 token")
         private String token;
+    }
+
+    @Getter
+    @Setter
+    public static class DeviceConfig {
+        @Schema(description = "配置协议版本")
+        private Integer version;
+        @Schema(description = "配置修订时间戳，单位为毫秒")
+        private Long revision;
+        @Schema(description = "智控台配置的助手昵称")
+        private String assistant_name;
+        @Schema(description = "唤醒词列表，首项默认与助手昵称一致")
+        private List<String> wake_words;
     }
 
     @Getter

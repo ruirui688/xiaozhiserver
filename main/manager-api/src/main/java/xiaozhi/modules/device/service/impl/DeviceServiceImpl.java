@@ -216,6 +216,9 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         response.setServer_time(buildServerTime());
 
         DeviceEntity deviceById = getDeviceByMacAddress(macAddress);
+        if (deviceById != null) {
+            response.setDevice_config(buildDeviceConfig(deviceById));
+        }
 
         // 设备未绑定，则返回当前上传的固件信息（不更新）以此兼容旧固件版本
         if (deviceById == null) {
@@ -417,6 +420,25 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         serverTime.setTimeZone(tz.getID());
         serverTime.setTimezone_offset(tz.getOffset(System.currentTimeMillis()) / (60 * 1000));
         return serverTime;
+    }
+
+    private DeviceReportRespDTO.DeviceConfig buildDeviceConfig(DeviceEntity device) {
+        if (device == null || StringUtils.isBlank(device.getAgentId())) {
+            return null;
+        }
+
+        AgentEntity agent = agentDao.selectById(device.getAgentId());
+        if (agent == null || StringUtils.isBlank(agent.getAgentName())) {
+            return null;
+        }
+
+        Date revisionDate = agent.getUpdatedAt() != null ? agent.getUpdatedAt() : agent.getCreatedAt();
+        DeviceReportRespDTO.DeviceConfig deviceConfig = new DeviceReportRespDTO.DeviceConfig();
+        deviceConfig.setVersion(1);
+        deviceConfig.setRevision(revisionDate == null ? 0L : revisionDate.getTime());
+        deviceConfig.setAssistant_name(agent.getAgentName());
+        deviceConfig.setWake_words(List.of(agent.getAgentName()));
+        return deviceConfig;
     }
 
     @Override

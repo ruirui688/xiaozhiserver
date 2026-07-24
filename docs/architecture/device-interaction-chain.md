@@ -38,6 +38,10 @@ ESP32 设备
         └── POST /agent/chat-history/report  聊天记录上报
 ```
 
+OTA 响应在设备已经绑定智能体时额外包含 `device_config`：`assistant_name` 取智控台智能体昵称
+`ai_agent.agent_name`，`wake_words[0]` 默认与昵称完全一致，`revision` 取智能体更新时间的毫秒时间戳。
+设备未绑定智能体、智能体不存在或昵称为空时省略整个字段。该响应不包含 manager-api 服务端密钥。
+
 ## 2. WebSocket 连接建立
 
 ### 2.1 入口
