@@ -55,6 +55,9 @@ async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text
             conn.client_is_speaking = True
         # 这里是真实首音频边界；STT 后的 start 只表示回复可打断。
         conn._tts_started_at = time.time() * 1000
+        mark_report_started = getattr(conn.tts, "mark_report_started", None)
+        if callable(mark_report_started):
+            mark_report_started(protocol_sentence_id)
         if is_new_protocol_sentence or start_sent_with_first_audio:
             # 同一句子的后续消息加入流控队列，其他情况立即发送
             if (

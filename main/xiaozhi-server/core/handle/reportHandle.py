@@ -240,10 +240,6 @@ def opus_to_wav(conn: "ConnectionHandler", opus_data):
 
 
 def enqueue_tts_report(conn: "ConnectionHandler", text, opus_data, metrics=None):
-    if not conn.read_config_from_api or conn.need_bind or not conn.report_tts_enable:
-        return
-    if conn.chat_history_conf == 0:
-        return
     """将TTS数据加入上报队列
 
     Args:
@@ -251,20 +247,35 @@ def enqueue_tts_report(conn: "ConnectionHandler", text, opus_data, metrics=None)
         text: 合成文本
         opus_data: opus音频数据
     """
+    if not conn.read_config_from_api or conn.need_bind or not conn.report_tts_enable:
+        return False
+    if conn.chat_history_conf == 0:
+        return False
     try:
         # 使用连接对象的队列，传入文本和二进制数据而非文件路径
         if conn.chat_history_conf == 2:
-            conn.report_queue.put((2, text, opus_data, int(time.time() * 1000), metrics))
-            conn.logger.bind(tag=TAG).debug(
-                f"TTS数据已加入上报队列: {conn.device_id}, 音频大小: {len(opus_data)} "
+            queued = conn.report_queue.put(
+                (2, text, opus_data, int(time.time() * 1000), metrics)
             )
         else:
-            conn.report_queue.put((2, text, None, int(time.time() * 1000), metrics))
-            conn.logger.bind(tag=TAG).debug(
-                f"TTS数据已加入上报队列: {conn.device_id}, 不上报音频"
+            queued = conn.report_queue.put(
+                (2, text, None, int(time.time() * 1000), metrics)
             )
+        if queued is False:
+            conn.logger.bind(tag=TAG).warning("TTS上报队列已关闭，拒绝新的聊天记录")
+            return False
+        audio_description = (
+            f"音频大小: {len(opus_data)}"
+            if conn.chat_history_conf == 2
+            else "不上报音频"
+        )
+        conn.logger.bind(tag=TAG).debug(
+            f"TTS数据已加入上报队列: {conn.device_id}, {audio_description}"
+        )
+        return True
     except Exception as e:
         conn.logger.bind(tag=TAG).error(f"加入TTS上报队列失败: {text}, {e}")
+        return False
 
 
 def enqueue_tool_report(

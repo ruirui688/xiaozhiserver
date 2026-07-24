@@ -52,6 +52,7 @@ class TTSProviderBase(ABC):
         self._final_report_lock = threading.Lock()
         self._finalized_report_sentence_ids = set()
         self._finalized_report_sentence_order = []
+        self._report_states = {}
         # sentence_id 到文本的映射，用于流式TTS获取正确的字幕文本
         self._sentence_text_map = {}
         # 加载替换词，用于一次性正则替换
@@ -388,6 +389,17 @@ class TTSProviderBase(ABC):
             if len(self._sentence_text_map) > 5:
                 oldest = next(iter(self._sentence_text_map))
                 del self._sentence_text_map[oldest]
+            # 字幕文本可能在 provider 收到首包后立即清理；聊天记录文本
+            # 必须保留到正常 LAST 或 Abort 其中一路成功完成最终上报。
+            with self._final_report_lock:
+                state = self._report_states.pop(sentence_id, None) or {
+                    "started": False,
+                }
+                state["text"] = text
+                self._report_states[sentence_id] = state
+                while len(self._report_states) > 128:
+                    oldest = next(iter(self._report_states))
+                    del self._report_states[oldest]
 
     def get_tts_text(self, sentence_id):
         """获取指定 sentence_id 对应的文本
@@ -409,6 +421,49 @@ class TTSProviderBase(ABC):
         if sentence_id in self._sentence_text_map:
             del self._sentence_text_map[sentence_id]
 
+    def get_report_text(self, sentence_id):
+        if not sentence_id:
+            return None
+        with self._final_report_lock:
+            state = self._report_states.get(sentence_id) or {}
+            return state.get("text")
+
+    def _get_report_metrics(self, sentence_id):
+        if not sentence_id:
+            return None
+        with self._final_report_lock:
+            state = self._report_states.get(sentence_id) or {}
+            return state.get("metrics")
+
+    def _remember_report_metrics(self, sentence_id, metrics):
+        if not sentence_id or metrics is None:
+            return
+        with self._final_report_lock:
+            state = self._report_states.setdefault(sentence_id, {})
+            state["metrics"] = metrics
+
+    def mark_report_started(self, sentence_id):
+        """Record the real FIRST boundary independently for each sentence."""
+        if not sentence_id:
+            return
+        with self._final_report_lock:
+            state = self._report_states.pop(sentence_id, None) or {}
+            state["started"] = True
+            self._report_states[sentence_id] = state
+
+    def _report_started(self, sentence_id):
+        if not sentence_id:
+            return False
+        with self._final_report_lock:
+            state = self._report_states.get(sentence_id) or {}
+            return bool(state.get("started"))
+
+    def _clear_report_state(self, sentence_id):
+        if not sentence_id:
+            return
+        with self._final_report_lock:
+            self._report_states.pop(sentence_id, None)
+
     def _claim_final_report(self, sentence_id):
         if not sentence_id:
             return True
@@ -422,33 +477,85 @@ class TTSProviderBase(ABC):
                 self._finalized_report_sentence_ids.discard(expired)
             return True
 
+    def _release_final_report(self, sentence_id):
+        if not sentence_id:
+            return
+        with self._final_report_lock:
+            self._finalized_report_sentence_ids.discard(sentence_id)
+            try:
+                self._finalized_report_sentence_order.remove(sentence_id)
+            except ValueError:
+                pass
+
+    def _enqueue_final_report(
+        self, sentence_id, report_text, report_audio, metrics=None
+    ):
+        if not report_text or not self._claim_final_report(sentence_id):
+            return False
+        return self._enqueue_claimed_final_report(
+            sentence_id,
+            report_text,
+            report_audio,
+            metrics=metrics,
+        )
+
+    def _enqueue_claimed_final_report(
+        self, sentence_id, report_text, report_audio, metrics=None
+    ):
+        queued = enqueue_tts_report(
+            self.conn,
+            report_text,
+            report_audio,
+            metrics=metrics,
+        )
+        if queued:
+            self._clear_report_state(sentence_id)
+            return True
+        # build_assistant_metrics consumes the turn. Retain the resulting payload
+        # so a delayed LAST or retry does not lose the latency trace.
+        self._remember_report_metrics(sentence_id, metrics)
+        self._release_final_report(sentence_id)
+        return False
+
     def finalize_interrupted_report(self, sentence_id):
         """Persist a partial assistant turn even when abort removes its LAST."""
-        if not sentence_id or not self._claim_final_report(sentence_id):
+        if not sentence_id:
             return False
-        report_text = self.get_tts_text(sentence_id)
+        report_text = self.get_report_text(sentence_id) or self.get_tts_text(
+            sentence_id
+        )
         turn_metrics = getattr(self.conn, "turn_metrics", None)
         # Pending replies are interruptible like upstream, but a generated text
         # that never crossed the TTS FIRST boundary was not heard by the user.
-        if not report_text or not getattr(self.conn, "_tts_started_at", 0):
+        if not self._report_started(sentence_id):
             if turn_metrics is not None:
                 turn_metrics.discard_sentence(sentence_id)
+            self._clear_report_state(sentence_id)
             return False
-        metrics = (
-            turn_metrics.build_assistant_metrics(
-                report_text,
-                sentence_id=sentence_id,
+        # Do not consume the final-report claim when a provider has not supplied
+        # reportable text. A delayed normal LAST must still be allowed to report.
+        if not report_text:
+            return False
+        # Claim before consuming TurnMetrics. Abort and normal LAST can race;
+        # only the winner may build the final metrics and enqueue the record.
+        if not self._claim_final_report(sentence_id):
+            return False
+        metrics = self._get_report_metrics(sentence_id)
+        if metrics is None:
+            metrics = (
+                turn_metrics.build_assistant_metrics(
+                    report_text,
+                    sentence_id=sentence_id,
+                )
+                if turn_metrics is not None
+                else None
             )
-            if turn_metrics is not None
-            else None
-        )
-        enqueue_tts_report(
-            self.conn,
+        return self._enqueue_claimed_final_report(
+            sentence_id,
             report_text,
             [],
             metrics=metrics,
         )
-        return True
 
     def _audio_message_timeout(self, sentence_type):
         """Return the thread-side wait budget for one audio message.
@@ -623,23 +730,34 @@ class TTSProviderBase(ABC):
 
                 if pending_report is not None:
                     report_text, report_audio, final_report = pending_report
-                    # Claim before consuming TurnMetrics. Abort and LAST can race;
-                    # only the winner may remove and enqueue the final turn.
-                    if not final_report or self._claim_final_report(sentence_id):
-                        turn_metrics = getattr(self.conn, "turn_metrics", None)
-                        metrics = None
-                        if turn_metrics is not None:
-                            metrics = (
-                                turn_metrics.build_assistant_metrics(
-                                    self.get_tts_text(sentence_id) or report_text,
+                    if final_report:
+                        final_text = report_text or self.get_report_text(sentence_id)
+                        if final_text and self._claim_final_report(sentence_id):
+                            turn_metrics = getattr(self.conn, "turn_metrics", None)
+                            metrics = self._get_report_metrics(sentence_id)
+                            if metrics is None and turn_metrics is not None:
+                                metrics = turn_metrics.build_assistant_metrics(
+                                    self.get_report_text(sentence_id)
+                                    or self.get_tts_text(sentence_id)
+                                    or final_text,
                                     sentence_id=sentence_id,
                                 )
-                                if final_report
-                                else turn_metrics.build_link_metrics(
-                                    "assistant",
-                                    sentence_id=sentence_id,
-                                )
+                            self._enqueue_claimed_final_report(
+                                sentence_id,
+                                final_text,
+                                report_audio,
+                                metrics=metrics,
                             )
+                    else:
+                        turn_metrics = getattr(self.conn, "turn_metrics", None)
+                        metrics = (
+                            turn_metrics.build_link_metrics(
+                                "assistant",
+                                sentence_id=sentence_id,
+                            )
+                            if turn_metrics is not None
+                            else None
+                        )
                         enqueue_tts_report(
                             self.conn,
                             report_text,
@@ -672,6 +790,7 @@ class TTSProviderBase(ABC):
         """资源清理方法"""
         self._sentence_text_map.clear()
         with self._final_report_lock:
+            self._report_states.clear()
             self._finalized_report_sentence_ids.clear()
             self._finalized_report_sentence_order.clear()
         # 取消所有待处理的 run_coroutine_threadsafe futures，避免挂起的协程阻塞关闭
