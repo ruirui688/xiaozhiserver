@@ -26,7 +26,15 @@ from config.manage_api_client import build_memory_event_id
 TAG = __name__
 
 
-async def report(conn: "ConnectionHandler", type, text, opus_data, report_time, metrics=None):
+async def report(
+    conn: "ConnectionHandler",
+    type,
+    text,
+    opus_data,
+    report_time,
+    metrics=None,
+    skip_memory_event=False,
+):
     """执行聊天记录上报操作
 
     Args:
@@ -53,7 +61,7 @@ async def report(conn: "ConnectionHandler", type, text, opus_data, report_time, 
         conn.logger.bind(tag=TAG).error(f"聊天记录上报失败: {e}")
 
     try:
-        if _consume_skip_memory_event(conn, type, text):
+        if skip_memory_event or _consume_skip_memory_event(conn, type, text):
             conn.logger.bind(tag=TAG).debug("长期记忆事件已按运行时标记跳过")
             return
         event_type = "tool" if type == 3 else "chat"
@@ -239,7 +247,13 @@ def opus_to_wav(conn: "ConnectionHandler", opus_data):
                 conn.logger.bind(tag=TAG).debug(f"释放decoder资源时出错: {e}")
 
 
-def enqueue_tts_report(conn: "ConnectionHandler", text, opus_data, metrics=None):
+def enqueue_tts_report(
+    conn: "ConnectionHandler",
+    text,
+    opus_data,
+    metrics=None,
+    skip_memory_event=False,
+):
     """将TTS数据加入上报队列
 
     Args:
@@ -255,11 +269,25 @@ def enqueue_tts_report(conn: "ConnectionHandler", text, opus_data, metrics=None)
         # 使用连接对象的队列，传入文本和二进制数据而非文件路径
         if conn.chat_history_conf == 2:
             queued = conn.report_queue.put(
-                (2, text, opus_data, int(time.time() * 1000), metrics)
+                (
+                    2,
+                    text,
+                    opus_data,
+                    int(time.time() * 1000),
+                    metrics,
+                    skip_memory_event,
+                )
             )
         else:
             queued = conn.report_queue.put(
-                (2, text, None, int(time.time() * 1000), metrics)
+                (
+                    2,
+                    text,
+                    None,
+                    int(time.time() * 1000),
+                    metrics,
+                    skip_memory_event,
+                )
             )
         if queued is False:
             conn.logger.bind(tag=TAG).warning("TTS上报队列已关闭，拒绝新的聊天记录")

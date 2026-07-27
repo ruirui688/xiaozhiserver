@@ -31,6 +31,19 @@ TAG = __name__
 logger = setup_logging()
 
 
+class _TTSMessageQueue(queue.Queue):
+    """Notify the owning provider when a queued TTS turn actually starts."""
+
+    def __init__(self, owner):
+        super().__init__()
+        self._owner = owner
+
+    def get(self, block=True, timeout=None):
+        message = super().get(block=block, timeout=timeout)
+        self._owner._notify_tts_message_dequeued(message)
+        return message
+
+
 class TTSProviderBase(ABC):
     def __init__(self, config, delete_audio_file):
         self.interface_type = InterfaceType.NON_STREAM
@@ -43,7 +56,7 @@ class TTSProviderBase(ABC):
             config.get("audio_send_timeout_seconds", 5),
             "audio_send_timeout_seconds",
         )
-        self.tts_text_queue = queue.Queue()
+        self.tts_text_queue = _TTSMessageQueue(self)
         self.tts_audio_queue = queue.Queue()
         self.tts_audio_first_sentence = True
         self.before_stop_play_files = []
@@ -53,6 +66,7 @@ class TTSProviderBase(ABC):
         self._finalized_report_sentence_ids = set()
         self._finalized_report_sentence_order = []
         self._report_states = {}
+        self._exact_text_sentence_ids = set()
         # sentence_id 到文本的映射，用于流式TTS获取正确的字幕文本
         self._sentence_text_map = {}
         # 加载替换词，用于一次性正则替换
@@ -177,10 +191,8 @@ class TTSProviderBase(ABC):
             logger.bind(tag=TAG).debug(f"记录TTS开始指标失败: {e}")
         # 保留原始文本用于显示/上报
         original_text = text
-        text = MarkdownCleaner.clean_markdown(text)
-        # 使用正则一次性替换，避免重复遍历和部分匹配问题
-        if self._correct_words_pattern:
-            text = self._correct_words_pattern.sub(lambda m: self.correct_words[m.group(0)], text)
+        log_text = self._text_for_log(original_text)
+        text = self._prepare_synthesis_text(text)
         max_repeat_time = 5
         if self.delete_audio_file:
             # 需要删除文件的直接转为音频数据
@@ -203,16 +215,16 @@ class TTSProviderBase(ABC):
                         max_repeat_time -= 1
                 except Exception as e:
                     logger.bind(tag=TAG).warning(
-                        f"语音生成失败{5 - max_repeat_time + 1}次: {original_text}，错误: {e}"
+                        f"语音生成失败{5 - max_repeat_time + 1}次: {log_text}，错误: {e}"
                     )
                     max_repeat_time -= 1
             if max_repeat_time > 0:
                 logger.bind(tag=TAG).info(
-                    f"语音生成成功: {original_text}，重试{5 - max_repeat_time}次"
+                    f"语音生成成功: {log_text}，重试{5 - max_repeat_time}次"
                 )
             else:
                 logger.bind(tag=TAG).error(
-                    f"语音生成失败: {original_text}，请检查网络或服务是否正常"
+                    f"语音生成失败: {log_text}，请检查网络或服务是否正常"
                 )
             return None
         else:
@@ -223,7 +235,7 @@ class TTSProviderBase(ABC):
                         asyncio.run(self.text_to_speak(text, tmp_file))
                     except Exception as e:
                         logger.bind(tag=TAG).warning(
-                            f"语音生成失败{5 - max_repeat_time + 1}次: {original_text}，错误: {e}"
+                            f"语音生成失败{5 - max_repeat_time + 1}次: {log_text}，错误: {e}"
                         )
                         # 未执行成功，删除文件
                         if os.path.exists(tmp_file):
@@ -232,11 +244,11 @@ class TTSProviderBase(ABC):
 
                 if max_repeat_time > 0:
                     logger.bind(tag=TAG).info(
-                        f"语音生成成功: {original_text}:{tmp_file}，重试{5 - max_repeat_time}次"
+                        f"语音生成成功: {log_text}:{tmp_file}，重试{5 - max_repeat_time}次"
                     )
                 else:
                     logger.bind(tag=TAG).error(
-                        f"语音生成失败: {original_text}，请检查网络或服务是否正常"
+                        f"语音生成失败: {log_text}，请检查网络或服务是否正常"
                     )
                 self.tts_audio_queue.put((SentenceType.FIRST, None, original_text, getattr(self, 'current_sentence_id', None)))
                 self._process_audio_file_stream(tmp_file, callback=opus_handler)
@@ -247,9 +259,8 @@ class TTSProviderBase(ABC):
     def to_tts(self, text):
         # 保留原始文本用于日志/显示
         original_text = text
-        text = MarkdownCleaner.clean_markdown(text)
-        if self._correct_words_pattern:
-            text = self._correct_words_pattern.sub(lambda m: self.correct_words[m.group(0)], text)
+        log_text = self._text_for_log(original_text)
+        text = self._prepare_synthesis_text(text)
         max_repeat_time = 5
         if self.delete_audio_file:
             # 需要删除文件的直接转为音频数据
@@ -270,16 +281,16 @@ class TTSProviderBase(ABC):
                         max_repeat_time -= 1
                 except Exception as e:
                     logger.bind(tag=TAG).warning(
-                        f"语音生成失败{5 - max_repeat_time + 1}次: {original_text}，错误: {e}"
+                        f"语音生成失败{5 - max_repeat_time + 1}次: {log_text}，错误: {e}"
                     )
                     max_repeat_time -= 1
             if max_repeat_time > 0:
                 logger.bind(tag=TAG).info(
-                    f"语音生成成功: {original_text}，重试{5 - max_repeat_time}次"
+                    f"语音生成成功: {log_text}，重试{5 - max_repeat_time}次"
                 )
             else:
                 logger.bind(tag=TAG).error(
-                    f"语音生成失败: {original_text}，请检查网络或服务是否正常"
+                    f"语音生成失败: {log_text}，请检查网络或服务是否正常"
                 )
             return None
         else:
@@ -290,7 +301,7 @@ class TTSProviderBase(ABC):
                         asyncio.run(self.text_to_speak(text, tmp_file))
                     except Exception as e:
                         logger.bind(tag=TAG).warning(
-                            f"语音生成失败{5 - max_repeat_time + 1}次: {original_text}，错误: {e}"
+                            f"语音生成失败{5 - max_repeat_time + 1}次: {log_text}，错误: {e}"
                         )
                         # 未执行成功，删除文件
                         if os.path.exists(tmp_file):
@@ -299,11 +310,11 @@ class TTSProviderBase(ABC):
 
                 if max_repeat_time > 0:
                     logger.bind(tag=TAG).info(
-                        f"语音生成成功: {original_text}:{tmp_file}，重试{5 - max_repeat_time}次"
+                        f"语音生成成功: {log_text}:{tmp_file}，重试{5 - max_repeat_time}次"
                     )
                 else:
                     logger.bind(tag=TAG).error(
-                        f"语音生成失败: {original_text}，请检查网络或服务是否正常"
+                        f"语音生成失败: {log_text}，请检查网络或服务是否正常"
                     )
 
                 return tmp_file
@@ -400,6 +411,71 @@ class TTSProviderBase(ABC):
                 while len(self._report_states) > 128:
                     oldest = next(iter(self._report_states))
                     del self._report_states[oldest]
+
+    def mark_exact_text(self, sentence_id):
+        """Bypass server-side rewriting for an authenticated external TTS turn."""
+        if not sentence_id:
+            return
+        self._exact_text_sentence_ids.add(sentence_id)
+        while len(self._exact_text_sentence_ids) > 128:
+            self._exact_text_sentence_ids.pop()
+
+    def mark_skip_memory_event(self, sentence_id):
+        if not sentence_id:
+            return
+        with self._final_report_lock:
+            state = self._report_states.setdefault(sentence_id, {})
+            state["skip_memory_event"] = True
+
+    def clear_exact_text(self, sentence_id):
+        if sentence_id:
+            self._exact_text_sentence_ids.discard(sentence_id)
+
+    def _is_exact_text(self, sentence_id=None):
+        resolved = sentence_id or getattr(self, "current_sentence_id", None)
+        return bool(resolved and resolved in self._exact_text_sentence_ids)
+
+    def _prepare_synthesis_text(self, text):
+        if self._is_exact_text():
+            return text
+        prepared = MarkdownCleaner.clean_markdown(text)
+        if self._correct_words_pattern:
+            prepared = self._correct_words_pattern.sub(
+                lambda match: self.correct_words[match.group(0)], prepared
+            )
+        return prepared
+
+    def _clean_synthesis_text(self, text):
+        """Clean markup before streaming correction without applying it twice."""
+        if self._is_exact_text():
+            return text
+        return MarkdownCleaner.clean_markdown(text)
+
+    def _text_for_synthesis(self, text):
+        if self._is_exact_text():
+            return text
+        return textUtils.get_string_no_punctuation_or_emoji(text)
+
+    def _text_for_log(self, text, sentence_id=None):
+        if self._is_exact_text(sentence_id):
+            return f"<external_tts:{len(str(text or ''))} chars>"
+        return text
+
+    def _notify_tts_message_dequeued(self, message):
+        if getattr(message, "sentence_type", None) is not SentenceType.FIRST:
+            return
+        coordinator = getattr(getattr(self, "conn", None), "external_tts_coordinator", None)
+        if coordinator is not None:
+            coordinator.mark_synthesizing(self.conn, message.sentence_id)
+
+    def _mark_external_tts_failed(self, sentence_id=None):
+        coordinator = getattr(getattr(self, "conn", None), "external_tts_coordinator", None)
+        if coordinator is not None:
+            coordinator.mark_failed(
+                self.conn,
+                sentence_id or getattr(self, "current_sentence_id", None),
+                "TTS synthesis failed",
+            )
 
     def get_tts_text(self, sentence_id):
         """获取指定 sentence_id 对应的文本
@@ -502,12 +578,24 @@ class TTSProviderBase(ABC):
     def _enqueue_claimed_final_report(
         self, sentence_id, report_text, report_audio, metrics=None
     ):
-        queued = enqueue_tts_report(
-            self.conn,
-            report_text,
-            report_audio,
-            metrics=metrics,
-        )
+        with self._final_report_lock:
+            report_state = self._report_states.get(sentence_id) or {}
+            skip_memory_event = bool(report_state.get("skip_memory_event"))
+        if skip_memory_event:
+            queued = enqueue_tts_report(
+                self.conn,
+                report_text,
+                report_audio,
+                metrics=metrics,
+                skip_memory_event=True,
+            )
+        else:
+            queued = enqueue_tts_report(
+                self.conn,
+                report_text,
+                report_audio,
+                metrics=metrics,
+            )
         if queued:
             self._clear_report_state(sentence_id)
             return True
@@ -583,6 +671,7 @@ class TTSProviderBase(ABC):
     # 流式处理方式请在子类中重写
     def tts_text_priority_thread(self):
         while not self.conn.stop_event.is_set():
+            message = None
             try:
                 message = self.tts_text_queue.get(timeout=1)
                 with self.conn._abort_lock:
@@ -627,6 +716,13 @@ class TTSProviderBase(ABC):
                 logger.bind(tag=TAG).error(
                     f"处理TTS文本失败: {str(e)}, 类型: {type(e).__name__}, 堆栈: {traceback.format_exc()}"
                 )
+                coordinator = getattr(self.conn, "external_tts_coordinator", None)
+                if coordinator is not None:
+                    coordinator.mark_failed(
+                        self.conn,
+                        getattr(message, "sentence_id", None),
+                        "TTS synthesis failed",
+                    )
                 continue
 
     def _audio_play_priority_thread(self):
@@ -635,6 +731,7 @@ class TTSProviderBase(ABC):
         enqueue_audio = []
         while not self.conn.stop_event.is_set():
             text = None
+            sentence_id = None
             try:
                 try:
                     item = self.tts_audio_queue.get(timeout=0.1)
@@ -712,6 +809,15 @@ class TTSProviderBase(ABC):
                         "设备音频发送超时: "
                         f"timeout={message_timeout:.1f}s"
                     )
+                    coordinator = getattr(
+                        self.conn, "external_tts_coordinator", None
+                    )
+                    if coordinator is not None:
+                        coordinator.mark_failed(
+                            self.conn,
+                            sentence_id,
+                            "TTS audio delivery timed out",
+                        )
                     continue
                 except concurrent.futures.CancelledError:
                     if self.conn.stop_event.is_set():
@@ -768,6 +874,9 @@ class TTSProviderBase(ABC):
                         enqueue_audio = []
                         enqueue_text = None
 
+                if sentence_type == SentenceType.LAST:
+                    self.clear_exact_text(sentence_id)
+
                 # 记录输出和报告
                 if self.conn.max_output_size > 0 and text:
                     add_device_output(self.conn.headers.get("device-id"), len(text))
@@ -779,6 +888,13 @@ class TTSProviderBase(ABC):
                     f"audio_play_priority_thread: text_present={bool(text)}, "
                     f"error_type={type(e).__name__}, reason={e}"
                 )
+                coordinator = getattr(self.conn, "external_tts_coordinator", None)
+                if coordinator is not None:
+                    coordinator.mark_failed(
+                        self.conn,
+                        sentence_id,
+                        "TTS audio delivery failed",
+                    )
 
     async def start_session(self, session_id):
         pass
@@ -793,6 +909,7 @@ class TTSProviderBase(ABC):
             self._report_states.clear()
             self._finalized_report_sentence_ids.clear()
             self._finalized_report_sentence_order.clear()
+        self._exact_text_sentence_ids.clear()
         # 取消所有待处理的 run_coroutine_threadsafe futures，避免挂起的协程阻塞关闭
         pending = getattr(self, "_pending_futures", set())
         for fut in list(pending):
@@ -803,6 +920,10 @@ class TTSProviderBase(ABC):
             await self.ws.close()
 
     def _get_segment_text(self):
+        # An external TTS request must reach the provider as one unchanged text
+        # value. Wait for LAST instead of punctuation-based server segmentation.
+        if self._is_exact_text():
+            return None
         # 合并当前全部文本并处理未分割部分
         full_text = "".join(self.tts_text_buff)
         current_text = full_text[self.processed_chars :]  # 从未处理的位置开始
@@ -824,9 +945,7 @@ class TTSProviderBase(ABC):
 
         if last_punct_pos != -1:
             segment_text_raw = current_text[: last_punct_pos + 1]
-            segment_text = textUtils.get_string_no_punctuation_or_emoji(
-                segment_text_raw
-            )
+            segment_text = self._text_for_synthesis(segment_text_raw)
             self.processed_chars += len(segment_text_raw)  # 更新已处理字符位置
 
             # 如果是第一句话，在找到第一个逗号后，将标志设置为False
@@ -887,7 +1006,7 @@ class TTSProviderBase(ABC):
         full_text = "".join(self.tts_text_buff)
         remaining_text = full_text[self.processed_chars :]
         if remaining_text:
-            segment_text = textUtils.get_string_no_punctuation_or_emoji(remaining_text)
+            segment_text = self._text_for_synthesis(remaining_text)
             if segment_text:
                 self.to_tts_stream(segment_text, opus_handler=opus_handler)
                 self.processed_chars += len(full_text)
@@ -910,6 +1029,8 @@ class TTSProviderBase(ABC):
         Returns:
             tuple: (确定的文本列表, 剩余待匹配的前缀)
         """
+        if self._is_exact_text():
+            return [text] if text else [], ""
         if not self.correct_words or not text:
             return [text] if text else [], ""
 

@@ -10,7 +10,6 @@ import websockets
 from asyncio import Task
 from typing import Callable, Any
 from config.logger import setup_logging
-from core.utils.tts import MarkdownCleaner
 from core.providers.tts.base import TTSProviderBase
 from core.providers.tts.dto.dto import SentenceType, ContentType, InterfaceType
 
@@ -151,8 +150,11 @@ class TTSProvider(TTSProviderBase):
                             self._record_turn_metric(
                                 "record_tts_start", message.sentence_id
                             )
+                            log_text = self._text_for_log(
+                                message.content_detail, message.sentence_id
+                            )
                             logger.bind(tag=TAG).debug(
-                                f"开始发送TTS文本: {message.content_detail}"
+                                f"开始发送TTS文本: {log_text}"
                             )
                             future = asyncio.run_coroutine_threadsafe(
                                 self.text_to_speak(message.content_detail, None),
@@ -201,8 +203,7 @@ class TTSProvider(TTSProviderBase):
                 logger.bind(tag=TAG).warning("WebSocket连接不存在，终止发送文本")
                 return
 
-            # 过滤Markdown
-            filtered_text = MarkdownCleaner.clean_markdown(text)
+            filtered_text = self._clean_synthesis_text(text)
 
             if filtered_text:
                 # 使用滑动窗口匹配处理跨分片的替换词
@@ -370,8 +371,11 @@ class TTSProvider(TTSProviderBase):
                                 sentence_id = task_id or self.current_sentence_id
                                 tts_text = self.get_tts_text(sentence_id)
                                 if tts_text:
+                                    log_text = self._text_for_log(
+                                        tts_text, sentence_id
+                                    )
                                     logger.bind(tag=TAG).info(
-                                        f"句子语音生成成功： {tts_text}"
+                                        f"句子语音生成成功： {log_text}"
                                     )
                                     self.tts_audio_queue.put(
                                         (
@@ -391,6 +395,9 @@ class TTSProvider(TTSProviderBase):
                                 error_message = header.get("error_message", "未知错误")
                                 logger.bind(tag=TAG).error(
                                     f"TTS任务失败: {error_code} - {error_message}"
+                                )
+                                self._mark_external_tts_failed(
+                                    task_id or self.current_sentence_id
                                 )
                                 break
                         except json.JSONDecodeError:
@@ -505,9 +512,7 @@ class TTSProvider(TTSProviderBase):
                                 )
 
                     # 发送文本
-                    filtered_text = MarkdownCleaner.clean_markdown(text)
-                    if self._correct_words_pattern:
-                        filtered_text = self._correct_words_pattern.sub(lambda m: self.correct_words[m.group(0)], filtered_text)
+                    filtered_text = self._prepare_synthesis_text(text)
                     # 发送continue-task消息
                     continue_task_message = {
                         "header": {

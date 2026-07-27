@@ -655,3 +655,22 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 是否允许被官方覆盖：否
 官方同步时的处理规则：如果官方修改聊天记录删除入口、智能体列表加载或首页搜索，必须保留“删除接口成功后统一通知首页、容量从后端实时聚合结果重新读取、搜索状态不因后台刷新而被清空、乱序响应不能覆盖最新结果、卡片使用智能体 ID 稳定键”的契约；不得在浏览器端通过减去消息大小推算容量，因为会话批量删除、并发写入和服务端存储规则会造成累计偏差。
 ```
+
+## 34. 已认证设备 WebSocket 原文直读 TTS
+
+```text
+定制模块：xiaozhi-server WebSocket 文本协议、在线连接 TTS 队列、任务状态和聊天记录上报
+改动原因：已绑定机器人需要通过当前已认证 WebSocket 主动提交一段文字，并使用该连接已经初始化的智能体 TTS provider、音色和 Opus 下行链路原样播报。HTTP 请求中的 deviceId 不能证明调用者拥有该设备，因此设备直连场景不再新增无鉴权 HTTP 入口或额外共享密钥。
+关键文件：
+  - main/xiaozhi-server/core/external_tts.py
+  - main/xiaozhi-server/core/handle/textHandler/externalTtsMessageHandler.py
+  - main/xiaozhi-server/core/handle/textMessageProcessor.py
+  - main/xiaozhi-server/core/providers/tts/base.py
+  - main/xiaozhi-server/core/handle/sendAudioHandle.py
+  - main/xiaozhi-server/core/handle/abortHandle.py
+  - main/xiaozhi-server/core/handle/reportHandle.py
+  - main/xiaozhi-server/tests/test_external_tts.py
+  - docs/architecture/device-interaction-chain.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：必须保留 external_tts 只在完成 WebSocket 认证和设备绑定后处理、身份来自当前 ConnectionHandler 而不是消息中的 deviceId、直接复用 conn.tts 且不新建全局 provider、单个 TEXT 队列项保留原文、不经过 LLM/语义/MCP/表情/动作/Dialogue、assistant 聊天记录沿用 chat_history_conf（值为 2 时同时保存合成音频）而长期记忆事件跳过、deviceId+requestId 等价的设备级十分钟幂等、忙碌默认拒绝和 interrupt=true 走 abort_generation、通话/会议/声纹采集禁止插播、状态只声明 server_audio_sent 而不冒充物理播放完成，以及日志不记录 external_tts 正文的边界。不得重新开放通过任意 deviceId 控制在线设备的无鉴权 HTTP 接口。
+```

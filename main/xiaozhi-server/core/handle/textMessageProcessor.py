@@ -34,6 +34,12 @@ class TextMessageProcessor:
                     )
                     redacted["context"] = f"<redacted:{context_type}>"
                     log_message = json.dumps(redacted, ensure_ascii=False)
+                elif message_type == "external_tts" and "text" in msg_json:
+                    redacted = dict(msg_json)
+                    text = redacted.get("text")
+                    text_length = len(text) if isinstance(text, str) else 0
+                    redacted["text"] = f"<redacted:{text_length} chars>"
+                    log_message = json.dumps(redacted, ensure_ascii=False)
                 conn.logger.bind(tag=TAG).info(
                     f"收到{message_type}消息：{log_message}"
                 )

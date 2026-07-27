@@ -10,3 +10,4 @@ class TextMessageType(Enum):
     MCP = "mcp"
     SERVER = "server"
     PING = "ping"
+    EXTERNAL_TTS = "external_tts"

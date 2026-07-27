@@ -12,7 +12,7 @@ from config.logger import setup_logging
 from core.utils.util import parse_string_to_list
 from core.providers.tts.base import TTSProviderBase
 from core.providers.tts.dto.dto import SentenceType, ContentType
-from core.utils.tts import MarkdownCleaner, convert_percentage_to_range
+from core.utils.tts import convert_percentage_to_range
 
 
 TAG = __name__
@@ -140,7 +140,7 @@ class TTSProvider(TTSProviderBase):
         full_text = "".join(self.tts_text_buff)
         remaining_text = full_text[self.processed_chars :]
         if remaining_text:
-            segment_text = textUtils.get_string_no_punctuation_or_emoji(remaining_text)
+            segment_text = self._text_for_synthesis(remaining_text)
             if segment_text:
                 self.to_tts_single_stream(segment_text, is_last)
                 self.processed_chars += len(full_text)
@@ -156,24 +156,23 @@ class TTSProvider(TTSProviderBase):
             )
             max_repeat_time = 5
             original_text = text
-            text = MarkdownCleaner.clean_markdown(text)
-            if self._correct_words_pattern:
-                text = self._correct_words_pattern.sub(lambda m: self.correct_words[m.group(0)], text)
+            log_text = self._text_for_log(original_text)
+            text = self._prepare_synthesis_text(text)
             try:
                 asyncio.run(self.text_to_speak(text, is_last))
             except Exception as e:
                 logger.bind(tag=TAG).warning(
-                    f"语音生成失败{5 - max_repeat_time + 1}次: {original_text}，错误: {e}"
+                    f"语音生成失败{5 - max_repeat_time + 1}次: {log_text}，错误: {e}"
                 )
                 max_repeat_time -= 1
 
             if max_repeat_time > 0:
                 logger.bind(tag=TAG).info(
-                    f"语音生成成功: {original_text}，重试{5 - max_repeat_time}次"
+                    f"语音生成成功: {log_text}，重试{5 - max_repeat_time}次"
                 )
             else:
                 logger.bind(tag=TAG).error(
-                    f"语音生成失败: {original_text}，请检查网络或服务是否正常"
+                    f"语音生成失败: {log_text}，请检查网络或服务是否正常"
                 )
         except Exception as e:
             logger.bind(tag=TAG).error(f"Failed to generate TTS file: {e}")
@@ -320,9 +319,7 @@ class TTSProvider(TTSProviderBase):
             list: 返回opus编码后的音频数据列表
         """
         start_time = time.time()
-        text = MarkdownCleaner.clean_markdown(text)
-        if self._correct_words_pattern:
-            text = self._correct_words_pattern.sub(lambda m: self.correct_words[m.group(0)], text)
+        text = self._prepare_synthesis_text(text)
 
         payload = {
             "model": self.model,
@@ -352,7 +349,10 @@ class TTSProvider(TTSProviderBase):
                     )
                     return []
 
-                logger.info(f"TTS请求成功: {text}, 耗时: {time.time() - start_time}秒")
+                logger.info(
+                    f"TTS请求成功: {self._text_for_log(text)}, "
+                    f"耗时: {time.time() - start_time}秒"
+                )
 
                 # 使用opus编码器处理PCM数据
                 opus_datas = []

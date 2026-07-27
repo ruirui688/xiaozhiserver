@@ -15,7 +15,7 @@ from typing import Callable, Any
 from config.logger import setup_logging
 from core.utils.util import check_model_key
 from core.providers.tts.base import TTSProviderBase
-from core.utils.tts import MarkdownCleaner, convert_percentage_to_range
+from core.utils.tts import convert_percentage_to_range
 from core.providers.tts.dto.dto import SentenceType, ContentType, InterfaceType
 
 
@@ -516,7 +516,7 @@ class TTSProvider(TTSProviderBase):
     def _has_speakable_text(self, text):
         if not text:
             return False
-        filtered_text = MarkdownCleaner.clean_markdown(text)
+        filtered_text = self._clean_synthesis_text(text)
         return bool(filtered_text and filtered_text.strip())
 
     def _start_pending_session_once(self, session_id):
@@ -723,8 +723,11 @@ class TTSProvider(TTSProviderBase):
                             self._record_turn_metric(
                                 "record_tts_start", message.sentence_id
                             )
+                            log_text = self._text_for_log(
+                                message.content_detail, message.sentence_id
+                            )
                             logger.bind(tag=TAG).debug(
-                                f"开始发送TTS文本: {message.content_detail}"
+                                f"开始发送TTS文本: {log_text}"
                             )
                             tts_text_started_at = time.monotonic()
                             future = asyncio.run_coroutine_threadsafe(
@@ -820,8 +823,7 @@ class TTSProvider(TTSProviderBase):
                 logger.bind(tag=TAG).warning(f"WebSocket连接不存在，终止发送文本")
                 return
 
-            #  过滤Markdown
-            filtered_text = MarkdownCleaner.clean_markdown(text)
+            filtered_text = self._clean_synthesis_text(text)
 
             if filtered_text:
                 # 使用滑动窗口匹配处理跨分片的替换词
@@ -1019,13 +1021,15 @@ class TTSProvider(TTSProviderBase):
                         tts_text = self.get_tts_text(session_id)
                         if self._enqueue_session_first_once(session_id, tts_text):
                             if tts_text:
+                                log_text = self._text_for_log(tts_text, session_id)
                                 logger.bind(tag=TAG).info(
-                                    f"句子语音生成成功： {tts_text}"
+                                    f"句子语音生成成功： {log_text}"
                                 )
                                 self.clear_tts_text(session_id)
                         elif tts_text:
+                            log_text = self._text_for_log(tts_text, session_id)
                             logger.bind(tag=TAG).info(
-                                f"TTS会话继续生成音频： {tts_text}"
+                                f"TTS会话继续生成音频： {log_text}"
                             )
                         self.wav_to_opus_data_audio_raw_stream(res.payload, callback=self.handle_opus)
                     elif res.optional.event == EVENT_SessionFailed:
@@ -1041,6 +1045,9 @@ class TTSProvider(TTSProviderBase):
                             f"speaker={self.voice}）：{error_msg or '未知错误'}"
                         )
                         logger.bind(tag=TAG).error(self._session_error)
+                        self._mark_external_tts_failed(
+                            response_session_id or active_session_id
+                        )
                         self.activate_session = False
                         self._active_session_id = None
                         self._finalize_session_audio_once(

@@ -24,7 +24,10 @@ async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text
         return
 
     if conn.tts.tts_audio_first_sentence:
-        conn.logger.bind(tag=TAG).info(f"发送第一段语音: {text}")
+        log_text = getattr(conn.tts, "_text_for_log", lambda value, _sid: value)(
+            text, sentence_id
+        )
+        conn.logger.bind(tag=TAG).info(f"发送第一段语音: {log_text}")
         conn.tts.tts_audio_first_sentence = False
 
     protocol_sentence_id = sentence_id or conn.sentence_id
@@ -74,9 +77,18 @@ async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text
                 await send_tts_message(conn, "sentence_start", text)
 
     await sendAudio(conn, audios)
+    if audios:
+        external_tts = getattr(conn, "external_tts_coordinator", None)
+        if external_tts is not None:
+            external_tts.mark_streaming(conn, protocol_sentence_id)
     # 发送句子开始消息
     if sentenceType is not SentenceType.MIDDLE:
-        conn.logger.bind(tag=TAG).info(f"发送音频消息: {sentenceType}, {text}")
+        log_text = getattr(conn.tts, "_text_for_log", lambda value, _sid: value)(
+            text, sentence_id
+        )
+        conn.logger.bind(tag=TAG).info(
+            f"发送音频消息: {sentenceType}, {log_text}"
+        )
 
     # 发送结束消息（如果是最后一个文本）
     # 通话需要维持speaking状态
@@ -87,6 +99,9 @@ async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text
             None,
             protocol_sentence_id=protocol_sentence_id,
         )
+        external_tts = getattr(conn, "external_tts_coordinator", None)
+        if external_tts is not None:
+            external_tts.mark_completed(conn, protocol_sentence_id)
         if conn.close_after_chat:
             if (getattr(conn, "features", None) or {}).get(
                 "persistent_websocket"

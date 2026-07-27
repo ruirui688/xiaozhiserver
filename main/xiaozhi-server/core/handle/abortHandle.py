@@ -9,6 +9,9 @@ TAG = __name__
 
 async def handleAbortMessage(conn: "ConnectionHandler", preserve_user_audio=False):
     conn.logger.bind(tag=TAG).info("Abort message received")
+    external_tts = getattr(conn, "external_tts_coordinator", None)
+    if external_tts is not None:
+        external_tts.mark_interrupted(conn, getattr(conn, "sentence_id", None))
     turn_metrics = getattr(conn, "turn_metrics", None)
     if turn_metrics is not None:
         turn_metrics.record_interruption(
@@ -18,6 +21,8 @@ async def handleAbortMessage(conn: "ConnectionHandler", preserve_user_audio=Fals
     tts = getattr(conn, "tts", None)
     if tts is not None and hasattr(tts, "finalize_interrupted_report"):
         tts.finalize_interrupted_report(getattr(conn, "sentence_id", None))
+    if tts is not None and hasattr(tts, "clear_exact_text"):
+        tts.clear_exact_text(getattr(conn, "sentence_id", None))
     # 设置成打断状态，会自动打断llm、tts任务
     conn.close_after_chat = False
     with conn._abort_lock:

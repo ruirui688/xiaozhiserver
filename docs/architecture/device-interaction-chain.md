@@ -283,7 +283,61 @@ Abort 会先给当前 `TurnMetrics` 记录 `outcome.status=aborted` 和 interrup
 
 SeedTTS2 超时按阶段拆分：建连默认 10 秒、会话启动默认 10 秒、会话结束默认 30 秒、会话内连续无下行默认 15 秒、单次事件发送默认 5 秒。旧 `session_timeout_seconds` 仅兼容映射启动预算；结束预算最低保持 30 秒。线程侧等待预算必须覆盖对应协程阶段，不能由更短的外层 `tts_timeout` 提前取消健康长语音。
 
-### 4.3 流控
+### 4.3 已认证设备原文直读
+
+已经完成 WebSocket 认证和设备绑定的连接可以直接提交原文 TTS，不再使用额外 HTTP
+端点或共享密钥。设备发送：
+
+```json
+{
+  "type": "external_tts",
+  "requestId": "task-web-run-123-task-1",
+  "text": "需要机器人原样播报的文字。",
+  "interrupt": false
+}
+```
+
+- `requestId` 必填，长度 1–128；同一设备十分钟内重复提交只返回原任务，不重复播报。
+- `text` 必填，长度 1–1000；服务端以单个 `ContentType.TEXT` 队列项提交，不添加前缀，
+  不经过 LLM、语义控制、MCP、表情或动作，也不写入 `Dialogue`。
+- TTS 使用当前连接已初始化的 `conn.tts`，因此继续使用智能体绑定的 provider、音色、
+  语速和现有 Opus/WebSocket 下行链路。
+- 实际播报沿用智能体 `chat_history_conf`：值为 `1` 时保存 assistant 文本，值为 `2` 时
+  同时保存文本和合成音频，值为 `0` 时尊重现有隐私配置、不写聊天记录；无论哪种配置都显式
+  跳过长期记忆 source event。状态中的 `chatHistory` 和 `chatHistoryAudio` 会返回实际启用情况。
+- `interrupt=false` 时，设备正在收音、等待回复、合成或播放均返回 `busy`；
+  `interrupt=true` 通过既有 Abort 和 `abort_generation` 结束旧轮次后再提交。通话、会议和
+  声纹采集属于受保护模式，不允许强制插播。
+- `external_tts.text` 日志只记录长度，不记录正文。
+
+服务器通过同一 WebSocket 主动推送状态：
+
+```json
+{
+  "type": "external_tts",
+  "event": "status",
+  "success": true,
+  "jobId": "tts-job-...",
+  "sentenceId": "sentence-...",
+  "requestId": "task-web-run-123-task-1",
+  "status": "streaming",
+  "stage": "sending_audio",
+  "progressPercent": 60,
+  "voiceSource": "device_agent",
+  "exactText": true,
+  "chatHistory": true,
+  "chatHistoryAudio": true,
+  "completionBoundary": "server_audio_sent",
+  "devicePlaybackConfirmed": false
+}
+```
+
+状态包含 `queued / synthesizing / streaming / completed / failed / interrupted`。设备也可发送
+`{"type":"external_tts","action":"status","jobId":"tts-job-..."}` 查询当前状态；只能查询
+当前设备自己的任务。`completed` 仅表示服务端音频已经通过 WebSocket 发送完成，现有协议没有
+扬声器物理播放完成 ACK。
+
+### 4.4 流控
 
 ```text
 utils/audioRateController.py  AudioRateController
@@ -295,7 +349,7 @@ utils/audioRateController.py  AudioRateController
 - 整轮 TTS 不设置固定播放时长上限；收到 `LAST` 后，等待预算按队列中剩余音频帧的真实播放时长动态计算，并额外保留单包发送超时与收尾容差。
 - WebSocket 半开保护作用于单个音频包发送。单包超过 `audio_send_timeout_seconds` 仍未完成时，后台发送任务失败并清理队列，避免异常连接永久占用会话；正常的长语音不会因为总时长超过 20 秒被截断。
 
-### 4.4 对话延时链路协议
+### 4.5 对话延时链路协议
 
 聊天记录中的延时指标使用 `schema_version=2`，不兼容旧的单值 `latency_ms` 口径。
 新协议只有两个权威入口：
@@ -596,6 +650,7 @@ connection.py:325-360  _save_and_close()
 | `core/providers/vad/silero.py` | ~120 | Silero VAD |
 | `core/providers/asr/base.py` | ~180 | ASR 基类 |
 | `core/providers/tts/base.py` | ~500 | TTS 基类（文本+音频双线程） |
+| `core/external_tts.py` | — | 已认证设备原文 TTS、幂等、忙碌门控和状态任务 |
 | `core/providers/tools/device_iot/iot_handler.py` | ~150 | IoT 描述符处理 + 门控 |
 | `core/providers/tools/device_iot/iot_executor.py` | ~80 | IoT 工具执行 |
 | `core/providers/tools/device_mcp/mcp_handler.py` | ~430 | MCP 握手 + 工具调用 |

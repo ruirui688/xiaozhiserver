@@ -76,6 +76,9 @@ def register_connection(conn: "ConnectionHandler") -> None:
 
 
 def unregister_connection(conn: "ConnectionHandler") -> None:
+    external_tts = getattr(conn, "external_tts_coordinator", None)
+    if external_tts is not None:
+        external_tts.connection_closed(conn)
     keys = getattr(conn, "_runtime_registry_keys", set())
     if not keys:
         return
