@@ -1985,6 +1985,28 @@ class ConnectionHandler:
                 # 统一处理工具调用结果
                 if tool_results:
                     if terminal_turn_selected:
+                        terminal_result, terminal_call = tool_results[0]
+                        terminal_action = getattr(
+                            terminal_result.action,
+                            "name",
+                            terminal_result.action,
+                        )
+                        terminal_success = terminal_result.action not in {
+                            Action.ERROR,
+                            Action.NOTFOUND,
+                        }
+                        terminal_log = (
+                            self.logger.bind(tag=TAG).info
+                            if terminal_success
+                            else self.logger.bind(tag=TAG).warning
+                        )
+                        terminal_log(
+                            "终止型设备工具执行{} | name={} | action={}".format(
+                                "成功" if terminal_success else "失败",
+                                terminal_call.get("name"),
+                                terminal_action,
+                            )
+                        )
                         terminal_future = asyncio.run_coroutine_threadsafe(
                             finish_terminal_turn(
                                 self,
@@ -1992,9 +2014,13 @@ class ConnectionHandler:
                             ),
                             self.loop,
                         )
-                        terminal_future.result(timeout=tool_call_timeout)
+                        abort_applied = terminal_future.result(
+                            timeout=tool_call_timeout
+                        )
                         self.logger.bind(tag=TAG).info(
-                            "终止型工具已完成：本轮静默结束，不请求后续LLM或TTS"
+                            "云端本轮已静默终止，不请求后续LLM或TTS | "
+                            f"device_tool_success={terminal_success} | "
+                            f"abort_applied={bool(abort_applied)}"
                         )
                         return
                     else:

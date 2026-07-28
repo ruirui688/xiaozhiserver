@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sys
 import threading
 from types import ModuleType, SimpleNamespace
@@ -29,10 +30,8 @@ fake_logger_module.create_connection_logger = (
 )
 sys.modules.setdefault("config.logger", fake_logger_module)
 
-from core.providers.tools.device_mcp.mcp_handler import (
-    MCPClient,
-    handle_mcp_message,
-)
+from core.providers.tools.device_mcp.mcp_client import MCPClient
+from core.providers.tools.device_mcp.mcp_handler import call_mcp_tool, handle_mcp_message
 from core.providers.tools.terminal_turn import (
     TERMINAL_TURN_BEHAVIOR,
     finish_terminal_turn,
@@ -67,6 +66,7 @@ def test_device_tool_discovery_preserves_terminal_capability():
                     },
                     "annotations": {
                         "turnBehavior": TERMINAL_TURN_BEHAVIOR,
+                        "serverGenerated": ["request_id"],
                     },
                 }
             ]
@@ -77,7 +77,94 @@ def test_device_tool_discovery_preserves_terminal_capability():
 
     registered = client.tools["self_robot_stop_speaking"]
     assert registered["terminalTurn"] is True
+    assert registered["server_generated"] == ["request_id"]
+    assert registered["inputSchema"] == {
+        "type": "object",
+        "properties": {},
+        "required": [],
+    }
+    visible_schema = client.get_available_tools()[0]["function"]["parameters"]
+    assert "request_id" not in visible_schema["properties"]
+    assert "request_id" not in visible_schema["required"]
     assert asyncio.run(client.is_ready()) is True
+
+
+def test_server_managed_request_id_uses_json_rpc_id_and_ignores_model_args():
+    async def run_call():
+        client = MCPClient()
+        client.next_id = 123
+        await client.add_tool(
+            {
+                "name": "self.robot.stop_speaking",
+                "description": "Model-decided terminal control.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                },
+                "server_generated": ["request_id"],
+            }
+        )
+        await client.set_ready(True)
+
+        class ReplyingWebSocket:
+            def __init__(self):
+                self.messages = []
+
+            async def send(self, message):
+                self.messages.append(json.loads(message))
+                payload = self.messages[-1]["payload"]
+                await client.resolve_call_result(
+                    payload["id"],
+                    {"content": [{"type": "text", "text": "OK"}]},
+                )
+
+        websocket = ReplyingWebSocket()
+        conn = SimpleNamespace(features={"mcp": True}, websocket=websocket)
+        result = await call_mcp_tool(
+            conn,
+            client,
+            "self_robot_stop_speaking",
+            '{"request_id":"model-id","text":"hallucinated","content":"x"}',
+        )
+        return result, websocket.messages
+
+    result, messages = asyncio.run(run_call())
+
+    assert result == "OK"
+    payload = messages[0]["payload"]
+    assert payload["id"] == 123
+    assert payload["params"]["arguments"] == {"request_id": "mcp-123"}
+
+
+def test_unannotated_device_tool_keeps_model_visible_schema_and_arguments():
+    client = MCPClient()
+    conn = SimpleNamespace(headers={}, func_handler=None)
+    payload = {
+        "id": 2,
+        "result": {
+            "tools": [
+                {
+                    "name": "self.robot.perform_gesture",
+                    "description": "Perform a gesture.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {"motion": {"type": "string"}},
+                        "required": ["motion"],
+                    },
+                }
+            ]
+        },
+    }
+
+    asyncio.run(handle_mcp_message(conn, client, payload))
+
+    registered = client.tools["self_robot_perform_gesture"]
+    assert registered["server_generated"] == []
+    assert registered["inputSchema"]["properties"] == {
+        "motion": {"type": "string"}
+    }
+    assert registered["inputSchema"]["required"] == ["motion"]
 
 
 def test_terminal_selection_uses_registered_metadata_not_user_text():

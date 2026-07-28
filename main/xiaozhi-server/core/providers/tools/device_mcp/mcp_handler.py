@@ -15,6 +15,53 @@ if TYPE_CHECKING:
 
 TAG = __name__
 logger = setup_logging()
+SERVER_GENERATED_REQUEST_ID = "request_id"
+
+
+def _get_server_generated_fields(annotations) -> list[str]:
+    """Read only the explicit Device MCP server-managed argument marker."""
+    if not isinstance(annotations, dict):
+        return []
+
+    marker = annotations.get("serverGenerated")
+    if marker is None:
+        marker = annotations.get("server_generated")
+
+    if marker is True:
+        values = [SERVER_GENERATED_REQUEST_ID]
+    elif isinstance(marker, str):
+        values = [marker]
+    elif isinstance(marker, (list, tuple)):
+        values = marker
+    else:
+        return []
+
+    # request_id is the only server-generated Device MCP argument currently
+    # defined by this protocol. Unknown values must not change the model schema.
+    return (
+        [SERVER_GENERATED_REQUEST_ID]
+        if SERVER_GENERATED_REQUEST_ID in values
+        else []
+    )
+
+
+def _hide_server_generated_fields(input_schema: dict, fields: list[str]) -> dict:
+    """Build the model-visible schema without mutating the device payload."""
+    if not fields:
+        return input_schema
+
+    hidden = set(fields)
+    visible_schema = dict(input_schema)
+    properties = input_schema.get("properties", {})
+    visible_schema["properties"] = {
+        name: value
+        for name, value in properties.items()
+        if name not in hidden
+    }
+    visible_schema["required"] = [
+        name for name in input_schema.get("required", []) if name not in hidden
+    ]
+    return visible_schema
 
 
 class MCPClient:
@@ -199,10 +246,14 @@ async def handle_mcp_message(
                         ]
 
                     annotations = tool.get("annotations")
+                    server_generated = _get_server_generated_fields(annotations)
                     new_tool = {
                         "name": name,
                         "description": description,
-                        "inputSchema": input_schema,
+                        "inputSchema": _hide_server_generated_fields(
+                            input_schema, server_generated
+                        ),
+                        "server_generated": server_generated,
                         "terminalTurn": has_terminal_turn_annotation(
                             annotations
                         ),
@@ -340,12 +391,22 @@ async def call_mcp_tool(
         raise ValueError(f"工具 {tool_name} 不存在")
 
     tool_call_id = await mcp_client.get_next_id()
-    result_future = asyncio.Future()
-    await mcp_client.register_call_result_future(tool_call_id, result_future)
+    tool_data = mcp_client.tools.get(tool_name, {})
+    server_generated = tool_data.get("server_generated", [])
+    server_managed_request = (
+        isinstance(server_generated, (list, tuple))
+        and SERVER_GENERATED_REQUEST_ID in server_generated
+    )
 
     # 处理参数
     try:
-        if isinstance(args, str):
+        if server_managed_request:
+            # This capability declares the complete argument object as
+            # server-managed. Ignore any model-invented text/content/request_id.
+            arguments = {
+                SERVER_GENERATED_REQUEST_ID: f"mcp-{tool_call_id}",
+            }
+        elif isinstance(args, str):
             # 确保字符串是有效的JSON
             if not args.strip():
                 arguments = {}
@@ -393,6 +454,9 @@ async def call_mcp_tool(
             raise ValueError(f"参数处理失败: {str(e)}")
         raise e
 
+    result_future = asyncio.Future()
+    await mcp_client.register_call_result_future(tool_call_id, result_future)
+
     actual_name = mcp_client.name_mapping.get(tool_name, tool_name)
     payload = {
         "jsonrpc": "2.0",
@@ -401,7 +465,9 @@ async def call_mcp_tool(
         "params": {"name": actual_name, "arguments": arguments},
     }
 
-    logger.bind(tag=TAG).info(f"发送客户端mcp工具调用请求: {actual_name}，参数: {args}")
+    logger.bind(tag=TAG).info(
+        f"发送客户端mcp工具调用请求: {actual_name}，参数: {arguments}"
+    )
     if not await send_mcp_message(conn, payload):
         await mcp_client.cleanup_call_result(tool_call_id)
         raise ConnectionError("发送MCP工具调用请求失败")

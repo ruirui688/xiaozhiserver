@@ -2,6 +2,7 @@ import asyncio
 import concurrent.futures
 import queue
 import sys
+import pytest
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -26,6 +27,26 @@ class FakeLogger:
 
     def error(self, *_args, **_kwargs):
         return None
+
+
+class RecordingLogger(FakeLogger):
+    def __init__(self):
+        self.records = []
+
+    def _record(self, level, *args):
+        self.records.append((level, str(args[0]) if args else ""))
+
+    def debug(self, *args, **_kwargs):
+        self._record("debug", *args)
+
+    def info(self, *args, **_kwargs):
+        self._record("info", *args)
+
+    def warning(self, *args, **_kwargs):
+        self._record("warning", *args)
+
+    def error(self, *args, **_kwargs):
+        self._record("error", *args)
 
 
 fake_logger_module = ModuleType("config.logger")
@@ -91,10 +112,16 @@ class CapturingTTS:
 
 
 class CapturingToolHandler:
-    def __init__(self, functions, terminal_names=()):
+    def __init__(
+        self,
+        functions,
+        terminal_names=(),
+        result_action=Action.RESPONSE,
+    ):
         self.functions = functions
         self.calls = []
         self.terminal_names = set(terminal_names)
+        self.result_action = result_action
 
     def get_functions(self):
         return list(self.functions)
@@ -109,7 +136,7 @@ class CapturingToolHandler:
 
     async def handle_llm_function_call(self, conn, tool_call_data):
         self.calls.append(tool_call_data)
-        return ActionResponse(action=Action.RESPONSE, response="执行完成")
+        return ActionResponse(action=self.result_action, response="执行完成")
 
 
 def _config():
@@ -269,7 +296,19 @@ def test_function_call_chat_passes_full_tool_schema_to_main_llm():
     assert llm.calls[0]["options"] == {}
 
 
-def test_terminal_tool_preempts_direct_answer_and_other_tools(monkeypatch):
+@pytest.mark.parametrize(
+    ("result_action", "device_log_level", "device_log_text"),
+    [
+        (Action.RESPONSE, "info", "终止型设备工具执行成功"),
+        (Action.ERROR, "warning", "终止型设备工具执行失败"),
+    ],
+)
+def test_terminal_tool_preempts_direct_answer_and_other_tools(
+    monkeypatch,
+    result_action,
+    device_log_level,
+    device_log_text,
+):
     terminal_call = SimpleNamespace(
         index=0,
         id="stop-call-1",
@@ -325,11 +364,13 @@ def test_terminal_tool_preempts_direct_answer_and_other_tools(monkeypatch):
     handler = CapturingToolHandler(
         tools,
         terminal_names={"self_robot_stop_speaking"},
+        result_action=result_action,
     )
     llm = CapturingFunctionCallLLM(
         [(None, [terminal_call, direct_answer_call, gesture_call])]
     )
     conn = _chat_conn(llm, handler)
+    conn.logger = RecordingLogger()
 
     assert conn.chat("请停止当前输出") is None
 
@@ -339,6 +380,14 @@ def test_terminal_tool_preempts_direct_answer_and_other_tools(monkeypatch):
     assert conn.tts.queued_text() == []
     assert conn.tts.stored_text == []
     assert finished == [0]
+    assert (device_log_level, device_log_text) in [
+        (level, message.split(" | ", 1)[0])
+        for level, message in conn.logger.records
+    ]
+    assert any(
+        level == "info" and "云端本轮已静默终止" in message
+        for level, message in conn.logger.records
+    )
 
 
 def test_active_meeting_forces_main_llm_to_choose_meeting_tool():

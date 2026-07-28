@@ -195,16 +195,33 @@ DeviceMCPExecutor.execute():
 设备工具可以在 `tools/list` 中声明：
 
 ```json
-{"annotations": {"turnBehavior": "terminate_silently"}}
+{
+  "inputSchema": {
+    "type": "object",
+    "properties": {"request_id": {"type": "string"}},
+    "required": ["request_id"]
+  },
+  "annotations": {
+    "turnBehavior": "terminate_silently",
+    "serverGenerated": ["request_id"]
+  }
+}
 ```
 
 该标记描述工具执行后的协议行为，不描述任何自然语言短语。语言意图仍由主大模型结合完整输入和上下文
 判断；服务器不维护停止词表、正则或整句匹配。
 
-模型选择终止型工具后，`connection.py` 只调度该工具，丢弃同轮 `direct_answer` 和其他工具调用。工具完成
-后复用 `handleAbortMessage()` 递增 `abort_generation`、清空 TTS 队列并发送 `tts/stop`，随后静默返回，
-不再递归请求 LLM。emotion 任务携带 sentence 与 abort generation，旧结果不能越过终止边界。设备若已先发
-abort，服务器识别 generation 已变化，不会重复递增。
+`serverGenerated` 是 Device MCP 的显式参数所有权注解，目前只支持 `request_id`。云端发现该注解后，
+在连接内保存 `server_generated` 元数据，从模型可见 Schema 中移除 `request_id`；实际发送 `tools/call`
+时使用本次 JSON-RPC ID 生成 `mcp-<id>`，并把参数重建为 `{"request_id":"mcp-<id>"}`。因此该工具会
+忽略模型幻觉出的 `text`、`content` 或自造 `request_id`。未带注解的旧设备仍按原 Schema 和模型参数调用；
+该行为不扩展到其他 MCP 类型、普通设备工具或所有终止型工具。
+
+模型选择终止型工具后，`connection.py` 只调度该工具，丢弃同轮 `direct_answer` 和其他工具调用。无论设备
+返回成功还是失败，云端都复用 `handleAbortMessage()` 递增 `abort_generation`、清空 TTS 队列并发送
+`tts/stop`，随后静默返回，不再递归请求 LLM；日志分别记录设备工具成功/失败和云端本轮已静默终止。
+emotion 任务携带 sentence 与 abort generation，旧结果不能越过终止边界。设备若已先发 abort，服务器识别
+generation 已变化，不会重复递增。
 
 `direct_answer` 在完整模型输出确定前不进入 TTS，避免一个响应同时包含终止工具时抢先播出确认文字。
 
