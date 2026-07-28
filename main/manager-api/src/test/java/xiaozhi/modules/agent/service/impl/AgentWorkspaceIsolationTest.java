@@ -33,6 +33,7 @@ import xiaozhi.modules.agent.service.AgentContextProviderService;
 import xiaozhi.modules.agent.service.AgentPluginMappingService;
 import xiaozhi.modules.agent.service.AgentTagService;
 import xiaozhi.modules.agent.service.AgentTemplateService;
+import xiaozhi.modules.agent.skill.service.AgentSemanticSkillService;
 import xiaozhi.modules.correctword.service.CorrectWordFileService;
 import xiaozhi.modules.device.service.DeviceService;
 import xiaozhi.modules.knowledge.entity.KnowledgeBaseEntity;
@@ -83,7 +84,8 @@ class AgentWorkspaceIsolationTest {
                 workspaceService,
                 mock(WorkspacePermissionService.class),
                 mock(KnowledgeBaseService.class),
-                quotaService);
+                quotaService,
+                mock(AgentSemanticSkillService.class));
         ReflectionTestUtils.setField(service, "baseDao", agentDao);
 
         List<AgentDTO> result = service.getUserAgents(1001L, null, null);
@@ -172,7 +174,8 @@ class AgentWorkspaceIsolationTest {
                 mock(WorkspaceService.class),
                 permissionService,
                 knowledgeBaseService,
-                mock(WorkspaceAgentQuotaService.class));
+                mock(WorkspaceAgentQuotaService.class),
+                mock(AgentSemanticSkillService.class));
         ReflectionTestUtils.setField(service, "baseDao", agentDao);
 
         AgentUpdateDTO.FunctionInfo function = new AgentUpdateDTO.FunctionInfo();
@@ -216,7 +219,8 @@ class AgentWorkspaceIsolationTest {
                 mock(WorkspaceService.class),
                 mock(WorkspacePermissionService.class),
                 mock(KnowledgeBaseService.class),
-                mock(WorkspaceAgentQuotaService.class));
+                mock(WorkspaceAgentQuotaService.class),
+                mock(AgentSemanticSkillService.class));
         ReflectionTestUtils.setField(service, "baseDao", agentDao);
 
         return service.getAgentById("agent-a");

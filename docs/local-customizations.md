@@ -695,3 +695,23 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 是否允许被官方覆盖：否
 官方同步时的处理规则：必须保留 binding_ready、tts_ready、conversation_ready、audio_input_ready 的分能力门禁；TTS/ASR 通道成功打开前不得设置 ready；初始化异常不得伪装成功。listen.detect 在 conversation_ready 前按相同文本去重并进入最多 8 条、TTL 10 秒的连接队列，失败、过期或关闭后不得回放。STT 展示不得隐式创建不一定发声的回复；每个 tts/start 必须绑定一个 generation，并以 stop、abort 或 connection_closed 恰好一次收敛；client_is_speaking 只能从活跃生命周期派生。LLM 提交/执行、无语音工具结果和 TTS 合成/发送失败必须终止当前 generation。external_tts 默认继续使用 interrupt=false，只有用户明确抢占时使用 true；busy 响应保留稳定 busyReason 和无正文诊断日志，通话、会议与声纹采集继续禁止抢占。
 ```
+
+## 36. 智能体级固定播报技能
+
+```text
+定制模块：manager-web 技能配置、manager-api 智能体技能事实与运行配置下发、xiaozhi-server 确定性语义匹配与固定 TTS
+改动原因：展厅讲解和企业介绍需要由运营人员按智能体配置稳定话术；完整话术或一组关键词同时出现时直接播报固定文本，不消耗 LLM，未命中必须继续原有 Intent/主 LLM 链路。
+关键文件：
+  - main/manager-web/src/components/role/AgentSkillDialog.vue
+  - main/manager-web/src/utils/agentSkillMatcher.js
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/skill/
+  - main/manager-api/src/main/resources/db/changelog/202607281600.sql
+  - main/manager-api/src/main/java/xiaozhi/modules/config/service/impl/ConfigServiceImpl.java
+  - main/xiaozhi-server/core/semantic/skill_registry.py
+  - main/xiaozhi-server/core/semantic/skill_matcher.py
+  - main/xiaozhi-server/core/semantic/semantic_center.py
+  - main/xiaozhi-server/tests/test_semantic_skills.py
+  - docs/architecture/semantic-control-center.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：必须保留技能以 agent_id 为所有权边界、管理 CRUD 的智能体/Workspace 权限校验、只向当前设备绑定智能体下发已启用技能，以及 `phrase` 单话术包含匹配和 `all_keywords` 组内 AND/组间 OR 的确定性契约。多命中依次按 priority、term 数量、term 总长度、phrase、sort、id 决胜；Web 模拟结果必须与 Python 一致。技能只在空闲状态触发，会议、声纹采集、通话和游戏保持优先；命中后不得调用 Intent/LLM，必须复用当前连接的 TTS generation、FIRST/TEXT/LAST、AEC 打断和聊天记录上报，并跳过长期记忆。TTS 失败时不得回退 LLM；无配置、无效配置或未命中必须完全保持旧链路。当前配置保存后通过设备重连生效，后续热更新不得破坏连接级隔离。
+```

@@ -5,6 +5,8 @@ last_verified: 2026-07-28
 source_paths:
   - main/xiaozhi-server/core/semantic
   - main/xiaozhi-server/core/handle/receiveAudioHandle.py
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/skill
+  - main/manager-web/src/components/role/AgentSkillDialog.vue
 ---
 
 # 语义控制中枢架构
@@ -24,6 +26,7 @@ VAD -> ASR -> Intent / LLM function_call -> 工具 / MCP -> TTS
 ```text
 VAD / ASR / 文本输入
   -> TextNormalizer
+  -> SkillRegistry / SkillMatcher
   -> SemanticRouter
   -> StateManager
   -> PolicyEngine
@@ -52,6 +55,8 @@ TTS 播放期间的打断采用官方的 barge-in 机制：支持 AEC 的设备�
 main/xiaozhi-server/core/semantic/
   frames.py            语义数据结构 (ASRResult, RobotContext, IntentFrame, Decision)
   normalizer.py        文本标准化 (route_key, 标点/空格/唤醒词移除)
+  skill_matcher.py     固定播报技能规则匹配与稳定冲突决胜
+  skill_registry.py    当前连接的智能体技能配置编译与边界校验
   router.py            高置信度状态路由 (游戏/继续/兜底，不判断自然语言停止意图)
   state_manager.py     连接级状态投影 (RLock 线程安全)
   policy_engine.py     状态与策略判断 (execute/reject/fallback_chat)
@@ -67,6 +72,7 @@ ConnectionHandler.__init__
 startToChat()
   -> 非 AEC 设备如果仍在播放，完整 ASR 到达后直接停止当前播报
   -> conn.semantic_center.handle_user_text(conn, actual_text)
+     -> 空闲态固定播报技能命中时直接进入当前 TTS，不调用 Intent/LLM
   -> 未处理时继续走 handle_user_intent()
   -> 再未处理时继续走 conn.chat()
 ```
@@ -88,6 +94,14 @@ UnifiedToolHandler.handle_llm_function_call()
 ```
 
 所以当前改造是“确定性控制前移”，不是删除 function-call。
+
+### 智能体固定播报技能
+
+`manager-api` 把每个智能体启用的技能作为 `semantic_skills` 下发，新连接由 `SkillRegistry` 编译为连接级只读规则。一个技能可包含多条 OR 规则：`phrase` 对一条完整话术做规范化后的包含匹配，`all_keywords` 要求同组关键词全部出现且顺序不限。例如 `["惠易公司", "介绍"]` 可以命中“请介绍一下惠易公司”，但不会命中“惠易公司天气怎么样”或“介绍一号点位”。
+
+多个技能同时命中时依次比较技能优先级、命中 term 数量、term 总长度、完整话术优先、页面排序和技能 ID。该排序同时由 Web 模拟器和 Python 运行时实现，并通过相同样例回归。
+
+固定技能只允许在 `idle` 状态触发，不能抢占会议、声纹采集、通话或游戏状态。命中后通过现有 reply generation 和 `FIRST/TEXT/LAST` TTS 队列播报，继续支持 AEC 打断；用户文本和固定回复保留聊天记录与 Dialogue 上下文，但标记跳过长期记忆。TTS 不可用或入队失败时终止本轮，不得回退 LLM 生成另一份答案。未配置、配置无效或未命中时继续旧 Intent/主 LLM 链路。
 
 ### 播报期间即时打断
 
@@ -261,7 +275,7 @@ LLM function_call -> UnifiedToolHandler.handle_llm_function_call()
 
 推荐按以下顺序扩展，不要一次性拆成多个服务：
 
-1. 配置化 `SkillRegistry`：把高频技能的 aliases、allowed_states、executor、priority 从代码抽到 YAML/JSON 或后台配置。
+1. 在保持确定性边界的前提下扩展技能允许状态、命中统计和配置热更新。
 2. 完善 `RobotContext`：加入动作运行、TTS 播放、当前讲解段落、电量、网络、传感器安全状态。
 3. 扩展 `PolicyEngine`：加入动作安全、电量、地面安全、二次确认、低置信度确认。
 4. 把 RAGFlow/local knowledge 提升为知识类 skill，但保持旧插件名兼容。
@@ -275,6 +289,7 @@ LLM function_call -> UnifiedToolHandler.handle_llm_function_call()
 ```text
 main/xiaozhi-server/tests/test_semantic_router.py
 main/xiaozhi-server/tests/test_semantic_policy.py
+main/xiaozhi-server/tests/test_semantic_skills.py
 ```
 
 验证命令：

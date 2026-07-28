@@ -50,6 +50,7 @@ import xiaozhi.modules.agent.service.AgentPluginMappingService;
 import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.agent.service.AgentTagService;
 import xiaozhi.modules.agent.service.AgentTemplateService;
+import xiaozhi.modules.agent.skill.service.AgentSemanticSkillService;
 import xiaozhi.modules.agent.vo.AgentInfoVO;
 import xiaozhi.modules.correctword.service.CorrectWordFileService;
 import xiaozhi.modules.knowledge.entity.KnowledgeBaseEntity;
@@ -90,6 +91,7 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
     private final WorkspacePermissionService workspacePermissionService;
     private final KnowledgeBaseService knowledgeBaseService;
     private final WorkspaceAgentQuotaService workspaceAgentQuotaService;
+    private final AgentSemanticSkillService agentSemanticSkillService;
 
     @Override
     public PageData<AgentEntity> adminAgentList(Map<String, Object> params) {
@@ -155,7 +157,12 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void deleteAgentByUserId(Long userId) {
+        List<String> agentIds = baseDao.selectList(new QueryWrapper<AgentEntity>().eq("user_id", userId)).stream()
+                .map(AgentEntity::getId)
+                .toList();
+        agentSemanticSkillService.deleteByAgentIds(agentIds);
         UpdateWrapper<AgentEntity> wrapper = new UpdateWrapper<>();
         wrapper.eq("user_id", userId);
         baseDao.delete(wrapper);

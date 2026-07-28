@@ -34,6 +34,8 @@ import xiaozhi.modules.agent.service.AgentMcpAccessPointService;
 import xiaozhi.modules.agent.service.AgentPluginMappingService;
 import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.agent.service.AgentTemplateService;
+import xiaozhi.modules.agent.skill.service.AgentSemanticSkillService;
+import xiaozhi.modules.agent.skill.vo.AgentSemanticSkillVO;
 import xiaozhi.modules.agent.voiceprint.VoiceprintApiClient;
 import xiaozhi.modules.correctword.service.CorrectWordFileService;
 import xiaozhi.modules.correctword.vo.CorrectWordSimpleVO;
@@ -72,6 +74,7 @@ public class ConfigServiceImpl implements ConfigService {
     private final VoiceprintApiClient voiceprintApiClient;
     private final CorrectWordFileService correctWordFileService;
     private final UserPluginConfigService userPluginConfigService;
+    private final AgentSemanticSkillService agentSemanticSkillService;
 
     @Override
     public Object getConfig(Boolean isCache) {
@@ -220,6 +223,8 @@ public class ConfigServiceImpl implements ConfigService {
         }
         result.put("chat_history_conf", chatHistoryConf);
 
+        buildSemanticSkills(agent.getId(), result);
+
         if (!Objects.equals(agent.getIntentModelId(), "Intent_nointent")) {
             List<AgentPluginMapping> pluginMappings = agentPluginMappingService.agentPluginParamsByAgentId(agent.getId());
             Map<String, Object> pluginParams = new HashMap<>();
@@ -278,6 +283,21 @@ public class ConfigServiceImpl implements ConfigService {
                 result,
                 true);
         return result;
+    }
+
+    private void buildSemanticSkills(String agentId, Map<String, Object> result) {
+        List<Map<String, Object>> runtimeSkills = new ArrayList<>();
+        for (AgentSemanticSkillVO skill : agentSemanticSkillService.listEnabled(agentId)) {
+            Map<String, Object> runtimeSkill = new HashMap<>();
+            runtimeSkill.put("id", skill.getId());
+            runtimeSkill.put("name", skill.getSkillName());
+            runtimeSkill.put("trigger_rules", skill.getTriggerRules());
+            runtimeSkill.put("response_text", skill.getResponseText());
+            runtimeSkill.put("priority", skill.getPriority());
+            runtimeSkill.put("sort", skill.getSort());
+            runtimeSkills.add(runtimeSkill);
+        }
+        result.put("semantic_skills", runtimeSkills);
     }
 
     /**

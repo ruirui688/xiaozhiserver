@@ -1,7 +1,7 @@
 ---
 status: canonical
 owner: architecture
-last_verified: 2026-07-23
+last_verified: 2026-07-28
 source_paths:
   - main/xiaozhi-server
   - main/manager-api
@@ -130,7 +130,7 @@ sequenceDiagram
 
 ```text
 连接认证 -> 设备配置装配 -> 音频接收 -> VAD -> ASR
--> 语义控制中枢 -> Intent / 主 LLM -> 工具或 MCP
+-> 语义控制中枢（固定播报技能优先） -> Intent / 主 LLM -> 工具或 MCP
 -> TTS -> 音频回传 -> 事件与聊天记录上报
 ```
 
@@ -157,6 +157,7 @@ Java 的 `ModelRuntimeAssembler` 负责从通用字段、普通参数和密钥�
 | `prompt` | 智能体角色与基础系统提示词输入 |
 | `summaryMemory` | 兼容记忆摘要上下文 |
 | `plugins` | 已启用插件及运行时参数；天气/联网搜索会合并智能体所有者的用户级共享配置 |
+| `semantic_skills` | 已启用的智能体固定播报技能；命中后绕过 LLM 并复用当前 TTS |
 | `mcp_endpoint` | 外部 MCP Endpoint |
 | `context_providers` | 动态上下文源 |
 | `voiceprint` | 外置声纹服务配置、`user_id=agentId` 和最多 5 条说话人信息 |

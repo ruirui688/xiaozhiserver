@@ -631,4 +631,87 @@ export default {
                 failCallback && failCallback(err);
             }).send();
     },
+    // 获取智能体固定播报技能
+    getAgentSkills(agentId, callback, failCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/${agentId}/skills`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .fail((err) => {
+                failCallback && failCallback(err);
+            })
+            .networkFail((err) => {
+                failCallback && failCallback(err);
+            }).send();
+    },
+    // 新建智能体固定播报技能
+    createAgentSkill(agentId, skill, callback, failCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/${agentId}/skills`)
+            .method('POST')
+            .data(skill)
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .fail((err) => {
+                failCallback && failCallback(err);
+            })
+            .networkFail((err) => {
+                failCallback && failCallback(err);
+            }).send();
+    },
+    // 更新智能体固定播报技能
+    updateAgentSkill(agentId, skillId, skill, callback, failCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/${agentId}/skills/${skillId}`)
+            .method('PUT')
+            .data(skill)
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .fail((err) => {
+                failCallback && failCallback(err);
+            })
+            .networkFail((err) => {
+                failCallback && failCallback(err);
+            }).send();
+    },
+    // 删除智能体固定播报技能
+    deleteAgentSkill(agentId, skillId, callback, failCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/${agentId}/skills/${skillId}`)
+            .method('DELETE')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .fail((err) => {
+                failCallback && failCallback(err);
+            })
+            .networkFail((err) => {
+                failCallback && failCallback(err);
+            }).send();
+    },
+    // 批量保存技能排序
+    saveAgentSkillOrder(agentId, items, callback, failCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/${agentId}/skills/order`)
+            .method('PUT')
+            .data({ items })
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .fail((err) => {
+                failCallback && failCallback(err);
+            })
+            .networkFail((err) => {
+                failCallback && failCallback(err);
+            }).send();
+    },
 }

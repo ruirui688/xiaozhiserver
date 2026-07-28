@@ -53,6 +53,29 @@
                 </el-button>
               </div>
             </el-form-item>
+            <el-form-item>
+              <template #label>
+                <el-tooltip :content="$t('roleConfig.tooltip.agentSkill')" placement="top" effect="light" popper-class="custom-tooltip">
+                  <span>{{ $t('roleConfig.agentSkill') }}：</span>
+                </el-tooltip>
+              </template>
+              <div class="integration-row">
+                <div class="integration-main">
+                  <span class="integration-title">{{ $t('roleConfig.agentSkillTitle') }}</span>
+                  <span class="integration-desc">
+                    {{ skillCount === null
+                      ? $t('roleConfig.agentSkillSummaryUnknown')
+                      : $t('roleConfig.agentSkillSummary', { count: skillCount }) }}
+                  </span>
+                </div>
+                <el-button
+                  class="edit-function-btn"
+                  size="small"
+                  icon="el-icon-microphone"
+                  @click="openAgentSkillDialog"
+                >{{ $t('roleConfig.agentSkillConfigure') }}</el-button>
+              </div>
+            </el-form-item>
             <el-form-item label="集成：">
               <div class="integration-row">
                 <div class="integration-main">
@@ -490,6 +513,11 @@
       :visible.sync="showFeishuDialog"
       :agent-id="effectiveAgentId"
     />
+    <agent-skill-dialog
+      :visible.sync="showAgentSkillDialog"
+      :agent-id="effectiveAgentId"
+      @count-change="skillCount = $event"
+    />
   </div>
 </template>
 
@@ -501,6 +529,7 @@ import FunctionDialog from "@/components/FunctionDialog.vue";
 import KnowledgeBaseSelectorDialog from "@/components/KnowledgeBaseSelectorDialog.vue";
 import TtsAdvancedSettings from "@/components/TtsAdvancedSettings.vue";
 import FeishuIntegrationDialog from "@/components/role/FeishuIntegrationDialog.vue";
+import AgentSkillDialog from "@/components/role/AgentSkillDialog.vue";
 import i18n from "@/i18n";
 import {
   buildRoleForm,
@@ -519,6 +548,7 @@ export default {
     KnowledgeBaseSelectorDialog,
     TtsAdvancedSettings,
     FeishuIntegrationDialog,
+    AgentSkillDialog,
   },
   props: {
     initialForm: { type: Object, default: () => null },
@@ -546,6 +576,9 @@ export default {
       showKnowledgeBaseDialog: false,
       showTtsAdvancedDialog: false,
       showFeishuDialog: false,
+      showAgentSkillDialog: false,
+      skillCount: null,
+      skillCountLoadSeq: 0,
       ttsSettings: { volume: 0, speed: 0, pitch: 0 },
       tempSummaryMemory: "",
       allFunctions: [],
@@ -880,6 +913,25 @@ export default {
     openContextProviderDialog() {
       this.$emit('open-context-provider-dialog');
     },
+    openAgentSkillDialog() {
+      if (!this.effectiveAgentId) {
+        this.$message.warning(this.$t("roleConfig.agentSkillSaveAgentFirst"));
+        return;
+      }
+      this.showAgentSkillDialog = true;
+    },
+    fetchAgentSkillCount() {
+      if (!this.effectiveAgentId || typeof Api.agent.getAgentSkills !== "function") return;
+      const sequence = ++this.skillCountLoadSeq;
+      Api.agent.getAgentSkills(this.effectiveAgentId, (response) => {
+        if (sequence !== this.skillCountLoadSeq) return;
+        const body = response && response.data ? response.data : response;
+        if (!body || Number(body.code) !== 0) return;
+        const data = body.data;
+        const skills = Array.isArray(data) ? data : (data && Array.isArray(data.list) ? data.list : []);
+        this.skillCount = skills.length;
+      });
+    },
     openTtsAdvancedSettings() {
       this.showTtsAdvancedDialog = true;
     },
@@ -1101,9 +1153,13 @@ export default {
   },
   beforeDestroy() {
     this.capabilityLoadSeq += 1;
+    this.skillCountLoadSeq += 1;
     if (this.noAvailableModelWarningTimer) {
       clearTimeout(this.noAvailableModelWarningTimer);
     }
+  },
+  mounted() {
+    this.fetchAgentSkillCount();
   },
 };
 </script>

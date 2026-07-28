@@ -64,6 +64,7 @@ from core.utils import textUtils
 from core.utils.correct_words import parse_correct_words
 from core.game import GameSessionManager
 from core.semantic.semantic_center import SemanticCenter
+from core.semantic.skill_registry import SkillRegistry
 from core.device_runtime_registry import register_connection, unregister_connection
 from core.observability import SessionTelemetry
 from core.session import (
@@ -317,7 +318,9 @@ class ConnectionHandler:
         # 初始化提示词管理器
         self.prompt_manager = PromptManager(self.config, self.logger)
         self.game_session_manager = GameSessionManager()
-        self.semantic_center = SemanticCenter()
+        self.semantic_center = SemanticCenter(
+            skill_registry=SkillRegistry(self.config.get("semantic_skills"))
+        )
         self.meeting_minutes = MeetingMinutesRuntime()
 
         # 初始化通话状态
@@ -1086,9 +1089,16 @@ class ConnectionHandler:
             "summaryMemory",
             "mcp_endpoint",
             "context_providers",
+            "semantic_skills",
         ):
             if private_config.get(key) is not None:
                 self.config[key] = copy.deepcopy(private_config[key])
+
+        semantic_center = getattr(self, "semantic_center", None)
+        if semantic_center is not None:
+            semantic_center.skill_registry.replace(
+                self.config.get("semantic_skills")
+            )
 
         if private_config.get("device_max_output_size") is not None:
             self.max_output_size = int(private_config["device_max_output_size"])

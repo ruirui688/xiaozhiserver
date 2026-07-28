@@ -1,10 +1,12 @@
 ---
 status: canonical
 owner: data-contracts
-last_verified: 2026-07-13
+last_verified: 2026-07-28
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/config
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/skill
   - main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelRuntimeAssembler.java
+  - main/xiaozhi-server/core/semantic
   - main/xiaozhi-server/core/utils/model_config.py
   - main/xiaozhi-server/core/utils/voiceprint_provider.py
 ---
@@ -18,7 +20,7 @@ source_paths:
 | 数据 | 事实来源 | 消费者 |
 | --- | --- | --- |
 | 用户、Token、Workspace、成员角色 | `manager-api` + MySQL | Web、Mobile、Java 业务服务 |
-| 智能体、设备绑定、提示词、插件选择 | `manager-api` + MySQL | Python 会话配置 |
+| 智能体、设备绑定、提示词、固定播报技能、插件选择 | `manager-api` + MySQL | Python 会话配置 |
 | 模型定义、参数和密钥 | `manager-api` 模型管理 | Java 测试/评测、Python provider |
 | 知识库文档、分块和检索配置 | `manager-api` + MySQL/RAGFlow | Web、Python 知识工具 |
 | 长期记忆事实、候选、审计 | `manager-api` + MySQL | Web、Python 上下文查询 |
@@ -69,11 +71,34 @@ Java 向 Python 下发的标准结构：
 | `prompt` | 当前智能体角色提示词 |
 | `summaryMemory` | 兼容记忆摘要，不替代托管记忆事实 |
 | `plugins` | 当前智能体启用的插件及参数 |
+| `semantic_skills` | 当前智能体启用的固定播报技能；规则为 `phrase` 或 `all_keywords` |
 | `mcp_endpoint` | 外部 MCP 地址，Python 使用前必须 SSRF 校验 |
 | `context_providers` | 动态上下文源配置 |
 | `voiceprint` | 外置声纹服务 URL/脱敏 Token、`user_id=agentId`、最多 5 条结构化说话人上下文 |
 
 配置请求必须从已认证设备身份推导 agent 与 workspace，不能信任请求体传入的资源归属。
+
+`semantic_skills` 的稳定运行时结构为：
+
+```json
+{
+  "semantic_skills": [
+    {
+      "id": "skill-id",
+      "name": "惠易公司介绍",
+      "trigger_rules": [
+        {"type": "all_keywords", "terms": ["惠易公司", "介绍"]},
+        {"type": "phrase", "terms": ["介绍一下惠易公司"]}
+      ],
+      "response_text": "固定播报文本",
+      "priority": 100,
+      "sort": 0
+    }
+  ]
+}
+```
+
+规则之间为 OR；`phrase` 只能有一个 term，执行规范化后的包含匹配；`all_keywords` 要求同组 2 至 8 个 term 全部出现且不要求顺序。Java 只下发已启用技能，Python 未识别的规则必须忽略并安全回退旧对话链路。管理接口使用 camelCase 的 `triggerRules/responseText/skillName`，运行时下发使用 snake_case，转换责任属于 manager-api。
 
 ## 4. 工具契约
 

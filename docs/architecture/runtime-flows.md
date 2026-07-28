@@ -1,11 +1,13 @@
 ---
 status: canonical
 owner: runtime
-last_verified: 2026-07-12
+last_verified: 2026-07-28
 source_paths:
   - main/xiaozhi-server/app.py
   - main/xiaozhi-server/core/connection.py
+  - main/xiaozhi-server/core/semantic
   - main/manager-api/src/main/java/xiaozhi/modules/config
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/skill
 ---
 
 # 运行时链路
@@ -53,7 +55,7 @@ sequenceDiagram
     participant DB as MySQL / Redis
     participant PY as xiaozhi-server
     participant D as ESP32
-    UI->>API: 保存智能体、模型、插件或知识配置
+    UI->>API: 保存智能体、固定播报技能、模型、插件或知识配置
     API->>DB: 持久化事实并刷新相关缓存
     D->>PY: 新建或重建连接
     PY->>API: 携带设备身份请求运行配置
@@ -65,6 +67,8 @@ sequenceDiagram
 ```
 
 当前会话是否热更新取决于具体配置类型。排查“保存成功但设备未变化”时依次检查：数据库事实、Redis 缓存、设备绑定、Python 拉取结果、连接是否重建、provider 是否使用了新配置。
+
+智能体固定播报技能通过 `semantic_skills` 随设备私有配置下发，当前连接不会热替换这组规则；后台保存后需要设备重连，由新建连接重新拉取并编译规则。没有配置或没有命中时不得改变旧对话行为。
 
 连接初始化按能力发布 `binding_ready / tts_ready / conversation_ready / audio_input_ready`，不能再用一个
 完成标志推断所有 provider 和音频通道均可用。通道打开协程必须成功返回后才能设置对应 ready；初始化异常
@@ -85,8 +89,11 @@ sequenceDiagram
     D->>S: Opus 音频帧
     S->>ASR: 队列、VAD 分段、语音识别
     ASR-->>S: 用户文本
-    S->>SEM: 标准化、路由、状态与策略
-    alt 高置信控制命中
+    S->>SEM: 标准化、固定技能匹配、状态路由与策略
+    alt 空闲态固定播报技能命中
+        SEM->>TTS: 固定文本，不调用 Intent/LLM
+        TTS-->>D: 当前智能体音色播报
+    else 高置信控制命中
         SEM-->>S: 直接控制或回复
     else 普通对话
         S->>LLM: 对话历史、记忆、提示词与 tools
@@ -101,6 +108,8 @@ sequenceDiagram
 ```
 
 TTS 播放期间，支持 AEC 的设备检测到用户开口后立即停止旧 LLM/TTS 输出，用户音频继续进入 ASR；非 AEC 设备在完整 ASR 到达后停止播报。
+
+固定播报技能支持完整话术包含匹配和关键词组合匹配。关键词组内全部关键词必须出现、顺序不限，不同规则之间为 OR；冲突按优先级、命中关键词数量、关键词总长度、完整话术优先、排序和技能 ID 稳定决胜。技能只在空闲状态触发，会议、声纹采集、通话和游戏状态保持各自既有优先级。技能问答进入聊天记录但跳过长期记忆事件。
 
 回复轮次由 generation 级 `ReplyLifecycle` 管理。STT 显示本身不创建回复；只有确认本轮会产生语音时才发送
 `tts/start`。LLM 任务、工具或 TTS 异常统一终止当前 generation，清理队列并尽力发送 `tts/stop`；正常

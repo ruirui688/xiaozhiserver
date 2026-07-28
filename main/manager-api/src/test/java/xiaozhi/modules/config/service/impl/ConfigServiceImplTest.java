@@ -25,6 +25,9 @@ import xiaozhi.modules.agent.service.AgentMcpAccessPointService;
 import xiaozhi.modules.agent.service.AgentPluginMappingService;
 import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.agent.service.AgentTemplateService;
+import xiaozhi.modules.agent.skill.dto.SemanticSkillTriggerRuleDTO;
+import xiaozhi.modules.agent.skill.service.AgentSemanticSkillService;
+import xiaozhi.modules.agent.skill.vo.AgentSemanticSkillVO;
 import xiaozhi.modules.agent.voiceprint.VoiceprintApiClient;
 import xiaozhi.modules.agent.vo.AgentInfoVO;
 import xiaozhi.modules.correctword.service.CorrectWordFileService;
@@ -93,7 +96,7 @@ class ConfigServiceImplTest {
         when(sysParamsService.getValue(Constant.SERVER_VAD_MIN_SILENCE_DURATION_MS, true)).thenReturn("50");
 
         ConfigServiceImpl service = new ConfigServiceImpl(sysParamsService, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null);
         Map<String, Object> runtimeConfig = new HashMap<>();
 
         service.applyManagedVadParams(runtimeConfig);
@@ -112,6 +115,7 @@ class ConfigServiceImplTest {
         AgentFeishuService feishuService = mock(AgentFeishuService.class);
         AgentVoicePrintDao voicePrintDao = mock(AgentVoicePrintDao.class);
         UserPluginConfigService userPluginConfigService = mock(UserPluginConfigService.class);
+        AgentSemanticSkillService semanticSkillService = mock(AgentSemanticSkillService.class);
 
         AgentInfoVO agent = new AgentInfoVO();
         agent.setId("agent-a");
@@ -146,7 +150,8 @@ class ConfigServiceImplTest {
                 voicePrintDao,
                 mock(VoiceprintApiClient.class),
                 mock(CorrectWordFileService.class),
-                userPluginConfigService);
+                userPluginConfigService,
+                semanticSkillService);
 
         Map<String, Object> runtime = service.getAgentRuntimeConfig("agent-a");
         Map<String, Object> plugins = (Map<String, Object>) runtime.get("plugins");
@@ -156,5 +161,60 @@ class ConfigServiceImplTest {
                 plugins.get("web_search"));
         verify(userPluginConfigService).mergeRuntimeConfig(
                 eq(7L), eq("web_search"), eq("{\"max_results\":\"9\"}"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void semanticSkillsAreIncludedWhenIntentIsDisabled() {
+        AgentService agentService = mock(AgentService.class);
+        AgentSemanticSkillService semanticSkillService = mock(AgentSemanticSkillService.class);
+        AgentVoicePrintDao voicePrintDao = mock(AgentVoicePrintDao.class);
+
+        AgentInfoVO agent = new AgentInfoVO();
+        agent.setId("agent-skill");
+        agent.setIntentModelId("Intent_nointent");
+        when(agentService.getAgentById("agent-skill")).thenReturn(agent);
+        when(voicePrintDao.selectList(any())).thenReturn(List.of());
+
+        SemanticSkillTriggerRuleDTO rule = new SemanticSkillTriggerRuleDTO();
+        rule.setType("all_keywords");
+        rule.setTerms(List.of("惠易公司", "介绍"));
+        AgentSemanticSkillVO skill = new AgentSemanticSkillVO();
+        skill.setId("skill-1");
+        skill.setSkillName("惠易公司介绍");
+        skill.setTriggerRules(List.of(rule));
+        skill.setResponseText("固定播报");
+        skill.setPriority(100);
+        skill.setSort(1);
+        when(semanticSkillService.listEnabled("agent-skill")).thenReturn(List.of(skill));
+
+        ConfigServiceImpl service = new ConfigServiceImpl(
+                mock(SysParamsService.class),
+                mock(DeviceService.class),
+                mock(ModelConfigService.class),
+                mock(ModelRuntimeAssembler.class),
+                agentService,
+                mock(AgentTemplateService.class),
+                mock(RedisUtils.class),
+                mock(TimbreService.class),
+                mock(AgentPluginMappingService.class),
+                mock(AgentMcpAccessPointService.class),
+                mock(AgentContextProviderService.class),
+                mock(AgentFeishuService.class),
+                mock(VoiceCloneService.class),
+                voicePrintDao,
+                mock(VoiceprintApiClient.class),
+                mock(CorrectWordFileService.class),
+                mock(UserPluginConfigService.class),
+                semanticSkillService);
+
+        Map<String, Object> runtime = service.getAgentRuntimeConfig("agent-skill");
+        List<Map<String, Object>> skills = (List<Map<String, Object>>) runtime.get("semantic_skills");
+
+        assertEquals(1, skills.size());
+        assertEquals("惠易公司介绍", skills.get(0).get("name"));
+        assertEquals("固定播报", skills.get(0).get("response_text"));
+        assertEquals(List.of(rule), skills.get(0).get("trigger_rules"));
+        assertEquals(false, runtime.containsKey("plugins"));
     }
 }

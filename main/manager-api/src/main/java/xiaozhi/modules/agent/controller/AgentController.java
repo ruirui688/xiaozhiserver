@@ -54,6 +54,7 @@ import xiaozhi.modules.agent.service.AgentMcpNoCodeToolService;
 import xiaozhi.modules.agent.service.AgentPluginMappingService;
 import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.agent.service.AgentTemplateService;
+import xiaozhi.modules.agent.skill.service.AgentSemanticSkillService;
 import xiaozhi.modules.correctword.service.CorrectWordFileService;
 import xiaozhi.modules.agent.vo.AgentChatHistoryUserVO;
 import xiaozhi.modules.agent.vo.AgentInfoVO;
@@ -81,6 +82,7 @@ public class AgentController {
     private final AgentTagService agentTagService;
     private final CorrectWordFileService correctWordFileService;
     private final WorkspacePermissionService workspacePermissionService;
+    private final AgentSemanticSkillService agentSemanticSkillService;
 
     @GetMapping("/list")
     @Operation(summary = "获取用户智能体列表")
@@ -203,6 +205,8 @@ public class AgentController {
         agentFeishuService.deleteConfig(id);
         // 删除关联的替换词文件关联记录
         correctWordFileService.deleteMappingsByAgentId(id);
+        // 删除关联的固定播报技能
+        agentSemanticSkillService.deleteByAgentId(id);
         // 再删除智能体
         agentService.deleteById(id);
         return new Result<>();
