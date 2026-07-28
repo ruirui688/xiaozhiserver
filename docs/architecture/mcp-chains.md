@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: tools
-last_verified: 2026-07-23
+last_verified: 2026-07-28
 source_paths:
   - main/xiaozhi-server/core/providers/tools
 ---
@@ -190,7 +190,25 @@ DeviceMCPExecutor.execute():
   - 控制工具结果包含 transport_result_received 标志
 ```
 
-### 5.4 REST API
+### 5.4 模型决定的终止型工具
+
+设备工具可以在 `tools/list` 中声明：
+
+```json
+{"annotations": {"turnBehavior": "terminate_silently"}}
+```
+
+该标记描述工具执行后的协议行为，不描述任何自然语言短语。语言意图仍由主大模型结合完整输入和上下文
+判断；服务器不维护停止词表、正则或整句匹配。
+
+模型选择终止型工具后，`connection.py` 只调度该工具，丢弃同轮 `direct_answer` 和其他工具调用。工具完成
+后复用 `handleAbortMessage()` 递增 `abort_generation`、清空 TTS 队列并发送 `tts/stop`，随后静默返回，
+不再递归请求 LLM。emotion 任务携带 sentence 与 abort generation，旧结果不能越过终止边界。设备若已先发
+abort，服务器识别 generation 已变化，不会重复递增。
+
+`direct_answer` 在完整模型输出确定前不进入 TTS，避免一个响应同时包含终止工具时抢先播出确认文字。
+
+### 5.5 REST API
 
 ```text
 GET  /device/mcp/status  → 设备 MCP 连接状态

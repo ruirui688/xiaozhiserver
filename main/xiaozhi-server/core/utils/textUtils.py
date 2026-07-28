@@ -81,7 +81,13 @@ def is_punctuation_or_emoji(char):
     return is_emoji(char)
 
 
-async def get_emotion(conn: "ConnectionHandler", text):
+async def get_emotion(
+    conn: "ConnectionHandler",
+    text,
+    *,
+    abort_generation=None,
+    sentence_id=None,
+):
     """获取文本内的情绪消息"""
     emoji = "🙂"
     emotion = "happy"
@@ -90,6 +96,17 @@ async def get_emotion(conn: "ConnectionHandler", text):
             emoji = char
             emotion = EMOJI_MAP[char]
             break
+    if (
+        (abort_generation is not None and (
+            conn.client_abort
+            or int(abort_generation) != conn.abort_generation
+        ))
+        or (
+            sentence_id is not None
+            and str(sentence_id) != str(getattr(conn, "sentence_id", ""))
+        )
+    ):
+        return
     try:
         await conn.websocket.send(
             json.dumps(

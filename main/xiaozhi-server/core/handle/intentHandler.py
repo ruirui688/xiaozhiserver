@@ -65,11 +65,7 @@ async def handle_user_intent(
     except (json.JSONDecodeError, TypeError):
         pass
 
-    # 检查是否有明确的退出命令
     _, filtered_text = remove_punctuation_and_length(text)
-    if await check_direct_exit(conn, filtered_text):
-        return True
-
     # 检查是否是唤醒词
     if await checkWakeupWords(conn, filtered_text):
         return True
@@ -140,19 +136,6 @@ async def handle_user_intent(
         turn_context=turn_context,
         turn_id=turn_id,
     )
-
-
-async def check_direct_exit(conn: "ConnectionHandler", text):
-    """检查是否有明确的退出命令"""
-    _, text = remove_punctuation_and_length(text)
-    cmd_exit = conn.cmd_exit
-    for cmd in cmd_exit:
-        if text == cmd:
-            conn.logger.bind(tag=TAG).info(f"识别到明确的退出命令: {text}")
-            await send_stt_message(conn, text)
-            await conn.close()
-            return True
-    return False
 
 
 async def analyze_intent_with_llm(conn: "ConnectionHandler", text):

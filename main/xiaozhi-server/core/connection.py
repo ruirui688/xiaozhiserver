@@ -33,6 +33,10 @@ from core.providers.asr.dto.dto import InterfaceType
 from core.handle.textHandle import handleTextMessage
 from core.providers.tools.unified_tool_handler import UnifiedToolHandler
 from core.providers.tools.tool_protocol_guard import looks_like_unhandled_tool_protocol
+from core.providers.tools.terminal_turn import (
+    finish_terminal_turn,
+    select_terminal_tool_calls,
+)
 from plugins_func.loadplugins import auto_import_modules
 from plugins_func.register import Action, ActionResponse
 from core.auth import AuthenticationError
@@ -134,7 +138,10 @@ DIRECT_ANSWER_TOOL = {
     "type": "function",
     "function": {
         "name": "direct_answer",
-        "description": "当用户的请求不匹配其他任何工具时，可用此选项直接回复。将回复内容写在response参数里。",
+        "description": (
+            "仅当用户请求不匹配任何已注册工具时直接回复，并将回复内容写入response参数。"
+            "不得用自然语言声称已经完成本应由工具执行的控制；存在匹配工具时必须调用该工具。"
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -294,8 +301,6 @@ class ConnectionHandler:
         # iot相关变量
         self.iot_descriptors = {}
         self.func_handler = None
-
-        self.cmd_exit = self.config["exit_commands"]
 
         # 是否在聊天结束后关闭连接
         self.close_after_chat = False
@@ -1589,6 +1594,7 @@ class ConnectionHandler:
         tool_call_flag = False
         # 支持多个并行工具调用 - 使用列表存储
         tool_calls_list = []  # 格式: [{"id": "", "name": "", "arguments": ""}]
+        terminal_turn_selected = False
         content_arguments = ""
         unhandled_tool_protocol = False
         emotion_flag = not meeting_tool_turn
@@ -1650,35 +1656,24 @@ class ConnectionHandler:
                         tool_call_flag = True
                         self._merge_tool_calls(tool_calls_list, tools_call)
 
-                    # 流式提取 direct_answer 的 response 参数，实时送 TTS
-                    for tc in tool_calls_list:
-                        if (
-                            not meeting_tool_turn
-                            and tc["name"] == "direct_answer"
-                            and tc.get("arguments")
-                        ):
-                            da_text = self._extract_direct_answer_response(tc["arguments"])
-                            sent_len = tc.get("_da_sent", 0)
-                            if da_text and len(da_text) > sent_len:
-                                new_part = da_text[sent_len:]
-                                if new_part:
-                                    tc["_da_sent"] = len(da_text)
-                                    self.tts.tts_text_queue.put(
-                                        TTSMessageDTO(
-                                            sentence_id=current_sentence_id,
-                                            sentence_type=SentenceType.MIDDLE,
-                                            content_type=ContentType.TEXT,
-                                            content_detail=new_part,
-                                        )
-                                    )
                 else:
                     content = response
 
                 # 在llm回复中获取情绪表情，一轮对话只在开头获取一次
-                if emotion_flag and content is not None and content.strip():
+                if (
+                    emotion_flag
+                    and not tool_call_flag
+                    and content is not None
+                    and content.strip()
+                ):
                     if (self.features or {}).get("emoji", True):
                         emotion_future = asyncio.run_coroutine_threadsafe(
-                            textUtils.get_emotion(self, content),
+                            textUtils.get_emotion(
+                                self,
+                                content,
+                                abort_generation=current_abort_generation,
+                                sentence_id=current_sentence_id,
+                            ),
                             self.loop,
                         )
                         emotion_future.add_done_callback(lambda f: self.logger.bind(tag=TAG).warning(f"Emotion detection failed: {f.exception()}") if f.exception() else None)
@@ -1803,6 +1798,28 @@ class ConnectionHandler:
                     self.logger.bind(tag=TAG).error(
                         f"function call error: {_sanitize_log_text(content_arguments)}"
                     )
+
+            if not bHasError and len(tool_calls_list) > 0:
+                terminal_calls = select_terminal_tool_calls(
+                    self.func_handler,
+                    (
+                        call
+                        for call in tool_calls_list
+                        if call.get("name") != "direct_answer"
+                    ),
+                )
+                if terminal_calls:
+                    terminal_turn_selected = True
+                    selected_call = terminal_calls[0]
+                    discarded_count = len(tool_calls_list) - 1
+                    if discarded_count:
+                        self.logger.bind(tag=TAG).warning(
+                            "终止型工具已取得本轮唯一执行权，丢弃其他工具或直接回复: "
+                            f"count={discarded_count}"
+                        )
+                    tool_calls_list = [selected_call]
+                    response_message.clear()
+                    content_arguments = ""
 
             if not bHasError and len(tool_calls_list) > 0:
                 # 处理 direct_answer 虚拟工具
@@ -1957,15 +1974,29 @@ class ConnectionHandler:
 
                 # 统一处理工具调用结果
                 if tool_results:
-                    self._handle_function_result(
-                        tool_results,
-                        depth=depth,
-                        streamed_text=streamed_text,
-                        sentence_id=current_sentence_id,
-                        abort_generation=current_abort_generation,
-                        suppress_tts=meeting_tool_turn,
-                        turn_id=turn_id,
-                    )
+                    if terminal_turn_selected:
+                        terminal_future = asyncio.run_coroutine_threadsafe(
+                            finish_terminal_turn(
+                                self,
+                                current_abort_generation,
+                            ),
+                            self.loop,
+                        )
+                        terminal_future.result(timeout=tool_call_timeout)
+                        self.logger.bind(tag=TAG).info(
+                            "终止型工具已完成：本轮静默结束，不请求后续LLM或TTS"
+                        )
+                        return
+                    else:
+                        self._handle_function_result(
+                            tool_results,
+                            depth=depth,
+                            streamed_text=streamed_text,
+                            sentence_id=current_sentence_id,
+                            abort_generation=current_abort_generation,
+                            suppress_tts=meeting_tool_turn,
+                            turn_id=turn_id,
+                        )
 
         if meeting_tool_turn:
             pending_meeting_turn = bool(

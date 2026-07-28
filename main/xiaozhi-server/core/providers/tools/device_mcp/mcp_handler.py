@@ -6,6 +6,7 @@ import re
 from concurrent.futures import Future
 from core.utils.util import get_vision_url, sanitize_tool_name
 from core.utils.auth import AuthToken
+from core.providers.tools.terminal_turn import has_terminal_turn_annotation
 from config.logger import setup_logging
 from typing import TYPE_CHECKING
 
@@ -197,10 +198,14 @@ async def handle_mcp_message(
                             s for s in schema.get("required", []) if isinstance(s, str)
                         ]
 
+                    annotations = tool.get("annotations")
                     new_tool = {
                         "name": name,
                         "description": description,
                         "inputSchema": input_schema,
+                        "terminalTurn": has_terminal_turn_annotation(
+                            annotations
+                        ),
                     }
                     await mcp_client.add_tool(new_tool)
                     logger.bind(tag=TAG).debug(f"客户端工具 #{i+1}: {name}")

@@ -1,14 +1,40 @@
 import asyncio
 import concurrent.futures
-import sys
 import queue
+import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 
 SERVER_ROOT = Path(__file__).resolve().parents[1]
 if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
+
+
+class FakeLogger:
+    def bind(self, **_kwargs):
+        return self
+
+    def debug(self, *_args, **_kwargs):
+        return None
+
+    def info(self, *_args, **_kwargs):
+        return None
+
+    def warning(self, *_args, **_kwargs):
+        return None
+
+    def error(self, *_args, **_kwargs):
+        return None
+
+
+fake_logger_module = ModuleType("config.logger")
+fake_logger_module.setup_logging = lambda: FakeLogger()
+fake_logger_module.build_module_string = lambda *_args, **_kwargs: "test"
+fake_logger_module.create_connection_logger = (
+    lambda *_args, **_kwargs: FakeLogger()
+)
+sys.modules.setdefault("config.logger", fake_logger_module)
 
 from core.connection import ConnectionHandler
 from core.providers.intent.function_call.function_call import IntentProvider as FunctionCallIntent
@@ -65,9 +91,10 @@ class CapturingTTS:
 
 
 class CapturingToolHandler:
-    def __init__(self, functions):
+    def __init__(self, functions, terminal_names=()):
         self.functions = functions
         self.calls = []
+        self.terminal_names = set(terminal_names)
 
     def get_functions(self):
         return list(self.functions)
@@ -77,6 +104,9 @@ class CapturingToolHandler:
             item.get("function", {}).get("name") == name for item in self.functions
         )
 
+    def is_terminal_turn_tool(self, name):
+        return name in self.terminal_names
+
     async def handle_llm_function_call(self, conn, tool_call_data):
         self.calls.append(tool_call_data)
         return ActionResponse(action=Action.RESPONSE, response="执行完成")
@@ -84,7 +114,6 @@ class CapturingToolHandler:
 
 def _config():
     return {
-        "exit_commands": [],
         "Intent": {
             "function_call": {
                 "type": "function_call",
@@ -238,6 +267,78 @@ def test_function_call_chat_passes_full_tool_schema_to_main_llm():
     assert conn.tts.queued_text() == ["直接回复"]
     assert conn.tts.stored_text == ["直接回复"]
     assert llm.calls[0]["options"] == {}
+
+
+def test_terminal_tool_preempts_direct_answer_and_other_tools(monkeypatch):
+    terminal_call = SimpleNamespace(
+        index=0,
+        id="stop-call-1",
+        function=SimpleNamespace(
+            name="self_robot_stop_speaking",
+            arguments='{"request_id":"turn-1-stop-1"}',
+        ),
+    )
+    direct_answer_call = SimpleNamespace(
+        index=1,
+        id="direct-answer-1",
+        function=SimpleNamespace(
+            name="direct_answer",
+            arguments='{"response":"好的，我安静了。"}',
+        ),
+    )
+    gesture_call = SimpleNamespace(
+        index=2,
+        id="gesture-call-1",
+        function=SimpleNamespace(
+            name="perform_gesture",
+            arguments='{"motion_name":"wave"}',
+        ),
+    )
+    finished = []
+
+    async def fake_finish(conn, expected_abort_generation):
+        finished.append(expected_abort_generation)
+        conn.client_abort = True
+        conn.abort_generation += 1
+        return True
+
+    def run_immediately(coro, _loop):
+        future = concurrent.futures.Future()
+        try:
+            future.set_result(asyncio.run(coro))
+        except Exception as error:
+            future.set_exception(error)
+        return future
+
+    monkeypatch.setattr(
+        "core.connection.asyncio.run_coroutine_threadsafe",
+        run_immediately,
+    )
+    monkeypatch.setattr(
+        "core.connection.finish_terminal_turn",
+        fake_finish,
+    )
+    tools = [
+        _tool("self_robot_stop_speaking"),
+        _tool("perform_gesture"),
+    ]
+    handler = CapturingToolHandler(
+        tools,
+        terminal_names={"self_robot_stop_speaking"},
+    )
+    llm = CapturingFunctionCallLLM(
+        [(None, [terminal_call, direct_answer_call, gesture_call])]
+    )
+    conn = _chat_conn(llm, handler)
+
+    assert conn.chat("请停止当前输出") is None
+
+    assert [call["name"] for call in handler.calls] == [
+        "self_robot_stop_speaking"
+    ]
+    assert conn.tts.queued_text() == []
+    assert conn.tts.stored_text == []
+    assert finished == [0]
 
 
 def test_active_meeting_forces_main_llm_to_choose_meeting_tool():

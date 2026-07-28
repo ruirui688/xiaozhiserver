@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: xiaozhi-server
-last_verified: 2026-07-23
+last_verified: 2026-07-28
 source_paths:
   - main/xiaozhi-server/core/semantic
   - main/xiaozhi-server/core/handle/receiveAudioHandle.py
@@ -183,7 +183,7 @@ game.exit
 `GameSessionManager.get_requested_game_tool()` 不得按关键词强制路由。相关用户输入继续回到主 LLM，
 由功能插件软提示词主持游戏流程。
 
-这和旧的 `exit_commands` 不同。旧退出命令仍用于关闭连接。
+语言形式的退出意图同样由模型结合上下文选择退出工具；服务器不再维护 `exit_commands` 精确匹配旁路。
 
 ### 继续类
 

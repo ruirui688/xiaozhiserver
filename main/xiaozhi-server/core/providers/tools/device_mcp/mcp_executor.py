@@ -160,7 +160,16 @@ class DeviceMCPExecutor(ToolExecutor):
 
             if tool_name:
                 tools[tool_name] = ToolDefinition(
-                    name=tool_name, description=tool, tool_type=ToolType.DEVICE_MCP
+                    name=tool_name,
+                    description=tool,
+                    tool_type=ToolType.DEVICE_MCP,
+                    parameters={
+                        "terminal_turn": bool(
+                            self.conn.mcp_client.tools.get(tool_name, {}).get(
+                                "terminalTurn", False
+                            )
+                        )
+                    },
                 )
 
         return tools
