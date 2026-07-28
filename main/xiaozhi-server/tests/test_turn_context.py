@@ -93,6 +93,13 @@ def test_dialogue_exposes_context_to_llm_but_keeps_raw_content_for_memory():
 
     llm_message = dialogue.get_llm_dialogue()[-1]
     assert json.loads(llm_message["content"])["context"] == {"productId": "123"}
+    system_text = "\n".join(
+        item["content"]
+        for item in dialogue.get_llm_dialogue()
+        if item["role"] == "system"
+    )
+    assert "<turn_context_rules>" in system_text
+    assert "content 才是用户真正说出的请求" in system_text
     assert message.content == "帮我介绍一下"
     assert message.turn_context == {"productId": "123"}
 
@@ -100,6 +107,17 @@ def test_dialogue_exposes_context_to_llm_but_keeps_raw_content_for_memory():
     assert "productId" not in redacted[0]["content"]
     assert redacted[0]["content"].startswith("<redacted:")
     assert redacted[0]["content"].endswith(" chars>")
+
+
+def test_dialogue_without_context_does_not_expose_context_capability():
+    dialogue = Dialogue()
+    dialogue.put(Message(role="system", content="普通系统提示"))
+    dialogue.put(Message(role="user", content="你好"))
+
+    serialized = json.dumps(dialogue.get_llm_dialogue(), ensure_ascii=False)
+
+    assert "turn_context_rules" not in serialized
+    assert "context 字段" not in serialized
 
 
 def test_dialogue_log_redaction_hides_system_prompt_and_tool_arguments():

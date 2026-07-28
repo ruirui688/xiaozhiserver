@@ -499,7 +499,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 
 ```text
 定制模块：manager-api 声纹远程客户端与业务约束、xiaozhi-server 实时声纹 provider、Web/Mobile 声纹管理页
-改动原因：声纹模型独立部署在另一台服务器，voiceprint-api 0.1.0 起要求必填 user_id 并按用户隔离。小智侧必须从可信智能体绑定关系派生 user_id，不能信任浏览器或设备传入；每个智能体最多绑定 5 个声纹；API Token 必须从 URL 查询参数拆出，只通过 Bearer Header 传输。历史声纹在远程服务中属于 default 作用域，需要保留兼容并允许重新录音后迁移到 agentId 作用域。实时识别假设一句话只有一个说话人，VAD 句末后把当前整段语音转 WAV 并与 ASR 并行识别，对齐官方上游逻辑；历史参数 `server.voiceprint_sample_seconds` 不再下发也不再影响运行时。没有绑定声纹时必须零调用。可信 `speaker_id` 继续进入聊天记录和长期记忆事件；private 事实只召回给同一声纹，shared 事实可召回给任意说话人，选择权在主模型的 `manage_memory` 工具参数，后端不按正文姓名扩大范围。聊天记录和记忆图谱必须展示人物归属。身份必须在每个成功识别轮次同时进入结构化 user message 和动态 system 上下文，避免只靠旧对话历史导致模型否认本轮识别结果；避免重复称呼由提示词约束，不能通过丢弃本轮身份实现。
+改动原因：声纹模型独立部署在另一台服务器，voiceprint-api 0.1.0 起要求必填 user_id 并按用户隔离。小智侧必须从可信智能体绑定关系派生 user_id，不能信任浏览器或设备传入；每个智能体最多绑定 5 个声纹；API Token 必须从 URL 查询参数拆出，只通过 Bearer Header 传输。历史声纹在远程服务中属于 default 作用域，需要保留兼容并允许重新录音后迁移到 agentId 作用域。实时识别假设一句话只有一个说话人，VAD 句末后把当前整段语音转 WAV 并与 ASR 并行识别，对齐官方上游逻辑；历史参数 `server.voiceprint_sample_seconds` 不再下发也不再影响运行时。系统功能开关和智能体绑定声纹必须同时满足才允许下发；没有绑定或总开关关闭时必须零调用、零提示词。可信 `speaker_id` 继续进入聊天记录和长期记忆事件，`speaker_score` 仅保留在指标和聊天上报，不进入主 LLM；private 事实只召回给同一声纹，shared 事实可召回给任意说话人，选择权在主模型的 `manage_memory` 工具参数，后端不按正文姓名扩大范围。聊天记录和记忆图谱必须展示人物归属。身份必须在每个成功识别轮次同时进入结构化 user message 和动态 system 上下文，避免只靠旧对话历史导致模型否认本轮识别结果；说话人姓名和描述进入 system 前必须转义，避免重复称呼由提示词约束，不能通过丢弃本轮身份实现。
 关键文件：
   - main/manager-api/src/main/java/xiaozhi/modules/agent/voiceprint/VoiceprintApiClient.java
   - main/manager-api/src/main/java/xiaozhi/modules/agent/service/impl/AgentVoicePrintServiceImpl.java

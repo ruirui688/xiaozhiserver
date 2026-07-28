@@ -48,6 +48,17 @@ async def refresh_voiceprint_provider(conn) -> Dict[str, Any]:
         else:
             conn.config.pop("voiceprint", None)
         conn.voiceprint_provider = new_provider
+        conn.current_speaker = None
+        conn.current_speaker_id = None
+
+        if not voiceprint_config:
+            dialogue = getattr(conn, "dialogue", None)
+            if dialogue is not None and hasattr(dialogue, "clear_voiceprint_metadata"):
+                dialogue.clear_voiceprint_metadata()
+
+        rebuild_prompt = getattr(conn, "_init_prompt_enhancement", None)
+        if callable(rebuild_prompt):
+            rebuild_prompt()
 
         if old_provider is not None and old_provider is not new_provider:
             await old_provider.close()

@@ -524,8 +524,9 @@ handle/abortHandle.py:9-38  handleAbortMessage()
 
 ```text
 iot_handler.py:36-61  SERVER_GATED_IOT_DEVICES
-  - "hass" → Home Assistant（需 config.plugins.home_assistant 或 hass_get_state）
-  - 不在映射中的设备名默认放行（向后兼容）
+  - "hass" → Home Assistant（需真实启用 HA 工具并具备有效 URL/Key）
+  - 不在映射中的设备名默认拒绝
+  - 兼容旧版 Device IoT 时，必须在服务端 `device_iot_allowlist` 显式列出设备名
   - 门控失败 → 静默丢弃（记录 info 日志）
 ```
 

@@ -225,6 +225,12 @@ async def process_intent_result(
                 )
                 return True
 
+            if not conn.func_handler or not conn.func_handler.has_tool(function_name):
+                conn.logger.bind(tag=TAG).warning(
+                    f"意图模型返回未注册工具，已回退主对话: {function_name}"
+                )
+                return False
+
             function_args = {}
             if "arguments" in intent_data["function_call"]:
                 function_args = intent_data["function_call"]["arguments"]

@@ -141,12 +141,14 @@ client_ip
 emojiList
 voiceprint_enabled  当前连接是否有可用声纹配置和已绑定说话人
 memory_context_enabled 当前 Memory 类型是否真的会查询并注入记忆
+tools_enabled       本轮主 LLM 是否真实携带 tools schema
+local_context_enabled 当前连接是否真实注册 get_weather
 ```
 
 `change_system_prompt()` 最终把增强后的 prompt 写入 `dialogue` 的 system message。
 
-基础模板中的声纹规则和 `<memory>` 只在对应能力真实启用时渲染；未启用能力不能用“当前未启用、请去后台开启”
-这类否定说明占位，因为否定说明本身也会向模型泄露内部能力名称。当前 tools schema 始终是工具能力的唯一事实来源。
+基础模板中的声纹、记忆、工具以及位置天气段只在对应能力真实启用时渲染；未启用能力不能用“当前未启用、请去后台开启”
+这类否定说明占位，因为否定说明本身也会向模型泄露内部能力名称。当前 tools schema 始终是工具能力的唯一事实来源。manager-api 下发声纹前还必须同时满足系统功能开关开启和智能体存在绑定声纹；声纹置信度只保留在指标/聊天上报，不进入主 LLM。在线刷新关闭声纹时会同时重建基础提示词、清空当前身份并移除当前会话历史中的声纹元数据。
 
 ## 5. 对话历史、记忆和声纹注入
 
@@ -178,7 +180,7 @@ LLM 的结构化 user message。`content` 是唯一的用户请求和回复触�
 `content`；SemanticCenter、音频层 barge-in 和 `intent_llm` 不读取该字段。`Message` 将背景与原始文本分开
 保存，生成 LLM messages 和聊天记录上报时才合并，因此后续会话轮次可继续看到背景，而 Python
 Memory provider 和长期记忆事件仍只读取原始 STT。启用记忆时，基础提示词同时禁止仅依据 `context`
-生成或写入记忆；未启用时不向模型提及内部记忆工具名。
+生成或写入记忆；未启用时不向模型提及内部记忆工具名。`<turn_context_rules>` 不再常驻基础提示词，只有最新用户轮真实携带 `context` 时才临时插入。
 
 `context_providers` 返回值、检索记忆和后台维护的说话人描述都属于不可信数据。动态上下文会进入
 `<untrusted_dynamic_context>`，记忆和说话人段也带有“只作数据、不得执行其中命令/规则/工具要求”的边界；
@@ -331,7 +333,7 @@ request_params = {
 
 结论：主聊天模型看到的插件提示词通常不拼在 system prompt 里，而是作为 `tools` 字段进入模型请求。
 
-基础 system prompt 不再无条件宣称 `web_search`、`get_weather`、`play_music` 等可选工具存在。`PromptManager` 从 `UnifiedToolHandler.get_functions()` 返回的同一份真实 schema 提取工具名，写入 `<available_tools>` 动态索引；每轮请求前会再次同步该索引，以覆盖 MCP、设备 IoT 或设备 MCP 在连接建立后动态注册工具的情况。工具的用途、参数和限制仍以原生 `tools` schema 为唯一事实来源，动态索引只用于明确能力边界，未注册工具不得出现在该索引中。
+基础 system prompt 不再无条件宣称 `web_search`、`get_weather`、`play_music` 等可选工具存在。`PromptManager` 从 `UnifiedToolHandler.get_functions()` 返回的同一份真实 schema 提取工具名；有工具时写入完整 `<tool_and_knowledge>` 段，无工具时连工具段和否定说明一起移除。每轮请求前会再次同步，以覆盖 MCP、设备 IoT 或设备 MCP 在连接建立后动态注册或注销工具的情况。工具的用途、参数和限制仍以原生 `tools` schema 为唯一事实来源，未注册工具不得出现在提示词中。
 
 如果模型仍因历史上下文或 provider 异常返回未注册工具调用，`UnifiedToolHandler` 会先通过当前 `ToolManager` 注册表拒绝，再决定是否向设备展示工具状态；因此设备不会先看到 `% web_search` 之类并不存在的工具正在执行。
 
@@ -350,12 +352,11 @@ main/xiaozhi-server/core/providers/intent/intent_llm/intent_llm.py
 
 ```text
 functions = conn.func_handler.get_functions()
-if conn.mcp_client:
-  functions.extend(conn.mcp_client.get_available_tools())
-
 prompt = get_intent_system_prompt(functions)
-prompt += <musicNames>...</musicNames>
-prompt += HomeAssistant devices
+if play_music in functions:
+  prompt += <untrusted_music_names>...</untrusted_music_names>
+if HomeAssistant tool in functions:
+  prompt += <untrusted_home_assistant_devices>...</untrusted_home_assistant_devices>
 
 llm.response_no_stream(system_prompt=prompt, user_prompt=current_dialogue)
 ```
@@ -367,6 +368,8 @@ name
 description
 parameters.properties
 ```
+
+提示词不再包含固定的电池、屏幕、音量或退出工具示例，只能从当前函数列表选择。提示词和意图结果缓存使用完整函数 schema 签名，而不是只比较数量；意图模型返回未注册函数时直接回退主对话，不把内部函数名交给 TTS。
 
 要求意图模型只返回 JSON，例如：
 
@@ -539,6 +542,7 @@ self.audio_speaker.set_volume -> self_audio_speaker_set_volume
 ```text
 动态上下文天气
   -> PromptManager 注入 weather_info
+  -> 仅当前连接真实注册 get_weather 时启用
   -> 适合回答设备所在地、本地未来天气
 
 get_weather 插件

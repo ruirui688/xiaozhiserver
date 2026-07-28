@@ -94,6 +94,21 @@ class CapturingFunctionCallLLM:
         raise AssertionError("function_call mode must use response_with_functions")
 
 
+class CapturingNoToolLLM:
+    supports_native_function_call = True
+
+    def __init__(self, responses):
+        self.responses = responses
+        self.calls = []
+
+    def response(self, session_id, dialogue):
+        self.calls.append({"session_id": session_id, "dialogue": dialogue})
+        return iter(self.responses)
+
+    def response_with_functions(self, *_args, **_kwargs):
+        raise AssertionError("empty registry must not enable function calling")
+
+
 class CapturingTTS:
     def __init__(self):
         self.tts_text_queue = queue.Queue()
@@ -294,6 +309,16 @@ def test_function_call_chat_passes_full_tool_schema_to_main_llm():
     assert conn.tts.queued_text() == ["直接回复"]
     assert conn.tts.stored_text == ["直接回复"]
     assert llm.calls[0]["options"] == {}
+
+
+def test_function_call_mode_with_empty_registry_sends_no_internal_routing_tool():
+    llm = CapturingNoToolLLM(["普通回复"])
+    conn = _chat_conn(llm, CapturingToolHandler([]))
+
+    assert conn.chat("你好") is True
+
+    assert len(llm.calls) == 1
+    assert conn.tts.queued_text() == ["普通回复"]
 
 
 @pytest.mark.parametrize(

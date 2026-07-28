@@ -69,6 +69,9 @@ tool_call_timeout: 30
 device_mcp_tool_call_timeout: 10
 # 音量、亮度等设备控制类MCP短超时，避免设备端未回包时拖住对话
 device_mcp_control_timeout: 3
+# 旧版 Device IoT descriptor 的服务端显式允许列表。默认拒绝未知设备类型；
+# Device MCP 不使用此配置。示例：device_iot_allowlist: ["light", "speaker"]
+device_iot_allowlist: []
 # 开启唤醒词加速
 enable_wakeup_words_response_cache: true
 # 开场是否回复唤醒词

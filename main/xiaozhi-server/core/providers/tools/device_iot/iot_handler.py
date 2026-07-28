@@ -9,6 +9,9 @@ a device type that requires explicit server-side opt-in.
 import asyncio
 from config.logger import setup_logging
 from .iot_descriptor import IotDescriptor
+from core.providers.tools.home_assistant_config import (
+    is_home_assistant_runtime_enabled,
+)
 from typing import TYPE_CHECKING, Dict, Any
 
 if TYPE_CHECKING:
@@ -24,13 +27,12 @@ logger = setup_logging()
 # Keys are matched case-insensitively against the descriptor "name" field sent
 # by the device.  When a device name is listed here the corresponding
 # `config_check(conn)` must return True before the descriptor is registered.
-# Descriptors whose name is NOT listed here are allowed by default (backward
-# compatibility for un-gated IoT device types).
+# Descriptors whose name is NOT listed here require an exact entry in the
+# server-side `device_iot_allowlist`; unknown types are denied by default.
 # ---------------------------------------------------------------------------
 def _ha_configured(conn: "ConnectionHandler") -> bool:
     """Return True if Home Assistant is configured on the server."""
-    plugins = conn.config.get("plugins", {}) if hasattr(conn, "config") else {}
-    return bool(plugins.get("home_assistant") or plugins.get("hass_get_state"))
+    return is_home_assistant_runtime_enabled(conn)
 
 
 SERVER_GATED_IOT_DEVICES: Dict[str, Dict[str, Any]] = {
@@ -44,12 +46,31 @@ SERVER_GATED_IOT_DEVICES: Dict[str, Dict[str, Any]] = {
 def _is_iot_device_allowed(conn: "ConnectionHandler", device_name: str) -> bool:
     """Check whether an IoT device descriptor should be registered as tools.
 
-    Returns False only when the device name is listed in
-    SERVER_GATED_IOT_DEVICES and its config_check fails.
+    Known devices use their dedicated server-side gate. Other devices require
+    an exact, case-insensitive entry in ``device_iot_allowlist``.
     """
-    rule = SERVER_GATED_IOT_DEVICES.get(device_name.lower())
+    normalized_name = str(device_name or "").strip().lower()
+    if not normalized_name:
+        return False
+    rule = SERVER_GATED_IOT_DEVICES.get(normalized_name)
     if rule is None:
-        return True  # not gated – allow
+        config = getattr(conn, "config", {}) or {}
+        configured = config.get("device_iot_allowlist", [])
+        if isinstance(configured, str):
+            configured = [item.strip() for item in configured.split(",")]
+        try:
+            allowlist = {
+                str(item).strip().lower() for item in configured if str(item).strip()
+            }
+        except TypeError:
+            allowlist = set()
+        allowed = normalized_name in allowlist
+        if not allowed:
+            logger.bind(tag=TAG).info(
+                "IoT device %r ignored – not present in server allowlist",
+                device_name,
+            )
+        return allowed
     allowed = rule["config_check"](conn)
     if not allowed:
         logger.bind(tag=TAG).info(

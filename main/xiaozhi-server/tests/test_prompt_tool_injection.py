@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 from core.utils.context_provider import ContextDataProvider
 from core.utils.prompt_manager import PromptManager
@@ -41,16 +42,14 @@ def test_available_tools_prompt_uses_only_names_from_real_schema():
 
 
 def test_available_tools_prompt_explicitly_handles_empty_schema():
-    assert (
-        PromptManager.build_available_tools_prompt([])
-        == "当前会话未注册任何可调用工具。"
-    )
+    assert PromptManager.build_available_tools_prompt([]) == ""
 
 
 def test_replace_available_tools_prompt_preserves_other_dynamic_content():
     original = (
-        "before\n<available_tools>\n当前会话未注册任何可调用工具。\n"
-        "</available_tools>\nHome Assistant devices: light.living_room"
+        "before\n<tool_and_knowledge>\n<available_tools>\nold_tool\n"
+        "</available_tools>\n</tool_and_knowledge>\n"
+        "Home Assistant devices: light.living_room"
     )
 
     updated = PromptManager.replace_available_tools_prompt(
@@ -62,10 +61,37 @@ def test_replace_available_tools_prompt_preserves_other_dynamic_content():
     assert "Home Assistant devices: light.living_room" in updated
 
 
+def test_replace_available_tools_prompt_adds_and_removes_whole_section():
+    original = "before\n<safety_compliance>safe</safety_compliance>"
+
+    enabled = PromptManager.replace_available_tools_prompt(
+        original, [_tool("get_weather")]
+    )
+    assert "<tool_and_knowledge>" in enabled
+    assert "get_weather" in enabled
+
+    disabled = PromptManager.replace_available_tools_prompt(enabled, [])
+    assert "<tool_and_knowledge>" not in disabled
+    assert "get_weather" not in disabled
+    assert "<safety_compliance>safe</safety_compliance>" in disabled
+
+
 def test_tool_name_extraction_ignores_invalid_schema_entries():
     tools = [_tool("web_search"), {}, {"function": None}, {"function": {"name": " "}}]
 
     assert PromptManager.get_available_tool_names(tools) == ["web_search"]
+
+
+def test_local_context_requires_real_weather_tool_registration():
+    disabled = SimpleNamespace(
+        func_handler=SimpleNamespace(has_tool=lambda _name: False)
+    )
+    enabled = SimpleNamespace(
+        func_handler=SimpleNamespace(has_tool=lambda name: name == "get_weather")
+    )
+
+    assert PromptManager.is_local_context_enabled(disabled) is False
+    assert PromptManager.is_local_context_enabled(enabled) is True
 
 
 def test_disabled_capabilities_are_absent_from_rendered_system_prompt():
@@ -84,6 +110,16 @@ def test_disabled_capabilities_are_absent_from_rendered_system_prompt():
     assert "speaker_recognition" not in prompt
     assert "声纹识别" not in prompt
     assert "<memory>" not in prompt
+    assert "<tool_and_knowledge>" not in prompt
+    assert "available_tools" not in prompt
+    assert "未注册任何可调用工具" not in prompt
+    assert "tool_calls" not in prompt
+    assert "function calling" not in prompt
+    assert "工具结果" not in prompt
+    assert "工具" not in prompt
+    assert "turn_context_rules" not in prompt
+    assert "设备所在地" not in prompt
+    assert "本地未来天气" not in prompt
 
 
 def test_enabled_memory_and_voiceprint_sections_are_rendered():
@@ -103,6 +139,7 @@ def test_enabled_memory_and_voiceprint_sections_are_rendered():
     assert "<speaker_recognition>" in prompt
     assert "<memory>" in prompt
     assert "manage_memory" in prompt
+    assert "<tool_and_knowledge>" in prompt
 
 
 def test_external_context_is_marked_as_untrusted_data():

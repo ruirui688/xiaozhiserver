@@ -1,6 +1,8 @@
 package xiaozhi.modules.config.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -41,6 +43,22 @@ import xiaozhi.modules.userplugin.service.UserPluginConfigService;
 import xiaozhi.modules.voiceclone.service.VoiceCloneService;
 
 class ConfigServiceImplTest {
+
+    @Test
+    void systemWebFeatureGateFailsClosedForVoiceprint() {
+        assertTrue(ConfigServiceImpl.isSystemWebFeatureEnabled(
+                "{\"features\":{\"voiceprintRecognition\":{\"enabled\":true}}}",
+                "voiceprintRecognition"));
+        assertFalse(ConfigServiceImpl.isSystemWebFeatureEnabled(
+                "{\"features\":{\"voiceprintRecognition\":{\"enabled\":false}}}",
+                "voiceprintRecognition"));
+        assertFalse(ConfigServiceImpl.isSystemWebFeatureEnabled(
+                "{\"features\":{}}", "voiceprintRecognition"));
+        assertFalse(ConfigServiceImpl.isSystemWebFeatureEnabled(
+                "not-json", "voiceprintRecognition"));
+        assertFalse(ConfigServiceImpl.isSystemWebFeatureEnabled(
+                null, "voiceprintRecognition"));
+    }
 
     @Test
     void mergeRuntimeTypedConfigKeepsStandardRuntimeFieldsAheadOfLegacyJson() {

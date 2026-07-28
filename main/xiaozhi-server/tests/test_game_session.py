@@ -10,6 +10,10 @@ if str(SERVER_ROOT) not in sys.path:
 from core.game import GameSessionManager
 
 
+def _enabled_freeform_game(name="guess_what_i_say"):
+    return {name: {"custom_plugin": True}}
+
+
 def test_freeform_games_do_not_force_stateful_routing():
     manager = GameSessionManager()
 
@@ -67,21 +71,19 @@ def test_guess_what_i_say_legacy_description_rules_are_corrected_to_questions():
     assert "建议开场：你描述" not in prompt
 
 
-def test_explicit_freeform_game_uses_default_prompt_without_enabled_plugin():
+def test_explicit_freeform_game_is_absent_without_enabled_plugin():
     manager = GameSessionManager()
     prompt = manager.build_freeform_game_prompt("我们来猜人物t挑战", {})
 
-    assert prompt is not None
-    assert "guess_what_i_say" in prompt
-    assert "二十问/猜物模式" in prompt
-    assert "每轮只问一个是/否问题" in prompt
-    assert "禁止要求用户描述这个人的事迹" in prompt
-    assert "答案是什么" in prompt
+    assert prompt is None
+    assert manager.freeform_game_state is None
 
 
 def test_guess_what_i_say_prompt_keeps_assistant_as_questioner():
     manager = GameSessionManager()
-    prompt = manager.build_freeform_game_prompt("来你说我猜", {})
+    prompt = manager.build_freeform_game_prompt(
+        "来你说我猜", _enabled_freeform_game()
+    )
 
     assert prompt is not None
     assert "不是小智心里默想东西让用户来问" in prompt
@@ -93,7 +95,9 @@ def test_guess_what_i_say_prompt_keeps_assistant_as_questioner():
 
 def test_guess_what_i_say_accepts_asr_missing_you_alias():
     manager = GameSessionManager()
-    prompt = manager.build_freeform_game_prompt("我们来做个游戏，说我猜", {})
+    prompt = manager.build_freeform_game_prompt(
+        "我们来做个游戏，说我猜", _enabled_freeform_game()
+    )
 
     assert prompt is not None
     assert "guess_what_i_say" in prompt
@@ -103,7 +107,9 @@ def test_guess_what_i_say_accepts_asr_missing_you_alias():
 
 def test_guess_what_i_say_user_already_thought_object_starts_questions():
     manager = GameSessionManager()
-    prompt = manager.build_freeform_game_prompt("我已经想了一个物品", {})
+    prompt = manager.build_freeform_game_prompt(
+        "我已经想了一个物品", _enabled_freeform_game()
+    )
 
     assert prompt is not None
     assert "guess_what_i_say" in prompt
@@ -114,7 +120,8 @@ def test_guess_what_i_say_user_already_thought_object_starts_questions():
 
 def test_assistant_thinks_game_persists_hidden_answer_in_prompt():
     manager = GameSessionManager()
-    prompt = manager.build_freeform_game_prompt("你想一个词我来猜", {})
+    enabled = _enabled_freeform_game("xiaozhi_thinks_you_guess")
+    prompt = manager.build_freeform_game_prompt("你想一个词我来猜", enabled)
     state = manager.freeform_game_state
 
     assert prompt is not None
@@ -123,7 +130,7 @@ def test_assistant_thinks_game_persists_hidden_answer_in_prompt():
     assert f"固定答案：{state['target_word']}" in prompt
     assert "不要更换答案" in prompt
 
-    next_prompt = manager.build_freeform_game_prompt("是不是冰箱", {})
+    next_prompt = manager.build_freeform_game_prompt("是不是冰箱", enabled)
 
     assert f"固定答案：{state['target_word']}" in next_prompt
     assert manager.freeform_game_state["target_word"] == state["target_word"]
@@ -131,7 +138,9 @@ def test_assistant_thinks_game_persists_hidden_answer_in_prompt():
 
 def test_user_thinks_game_has_role_state_without_hidden_answer():
     manager = GameSessionManager()
-    prompt = manager.build_freeform_game_prompt("来你说我猜", {})
+    prompt = manager.build_freeform_game_prompt(
+        "来你说我猜", _enabled_freeform_game()
+    )
 
     assert prompt is not None
     assert manager.freeform_game_state["role_mode"] == "user_thinks_assistant_guesses"
@@ -141,9 +150,10 @@ def test_user_thinks_game_has_role_state_without_hidden_answer():
 
 def test_freeform_game_end_clears_state():
     manager = GameSessionManager()
-    assert manager.build_freeform_game_prompt("你想一个词我来猜", {}) is not None
+    enabled = _enabled_freeform_game("xiaozhi_thinks_you_guess")
+    assert manager.build_freeform_game_prompt("你想一个词我来猜", enabled) is not None
 
-    assert manager.build_freeform_game_prompt("不玩了", {}) is None
+    assert manager.build_freeform_game_prompt("不玩了", enabled) is None
     assert manager.active_freeform_game is None
     assert manager.freeform_game_state is None
 

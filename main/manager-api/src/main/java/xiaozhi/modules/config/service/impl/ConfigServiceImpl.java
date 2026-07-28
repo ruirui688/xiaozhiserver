@@ -380,6 +380,10 @@ public class ConfigServiceImpl implements ConfigService {
      */
     private void buildVoiceprintConfig(String agentId, Map<String, Object> result) {
         try {
+            String menuConfig = sysParamsService.getValue(Constant.SYSTEM_WEB_MENU, true);
+            if (!isSystemWebFeatureEnabled(menuConfig, "voiceprintRecognition")) {
+                return;
+            }
             // 获取智能体关联的声纹信息（不需要用户权限验证）
             List<AgentVoicePrintEntity> voiceprints = getVoiceprintsByAgentId(agentId);
             if (voiceprints == null || voiceprints.isEmpty()) {
@@ -427,6 +431,28 @@ public class ConfigServiceImpl implements ConfigService {
         } catch (Exception e) {
             // 声纹配置获取失败时不影响其他功能
             log.warn("获取声纹配置失败: agentId={}, errorType={}", agentId, e.getClass().getSimpleName());
+        }
+    }
+
+    static boolean isSystemWebFeatureEnabled(String menuConfig, String featureName) {
+        if (StringUtils.isBlank(menuConfig) || StringUtils.isBlank(featureName)) {
+            return false;
+        }
+        try {
+            Map<String, Object> root = JsonUtils.parseObject(menuConfig, Map.class);
+            Object featuresValue = root == null ? null : root.get("features");
+            if (!(featuresValue instanceof Map<?, ?> features)) {
+                return false;
+            }
+            Object featureValue = features.get(featureName);
+            if (!(featureValue instanceof Map<?, ?> feature)) {
+                return false;
+            }
+            return Boolean.TRUE.equals(feature.get("enabled"));
+        } catch (RuntimeException ignored) {
+            // Invalid or legacy menu configuration must fail closed so a hidden
+            // UI capability cannot remain active in the realtime model context.
+            return false;
         }
     }
 

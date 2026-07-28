@@ -343,6 +343,60 @@ def test_refresh_replaces_online_voiceprint_provider(monkeypatch):
     asyncio.run(_refresh_replaces_online_voiceprint_provider(monkeypatch))
 
 
+async def _refresh_disables_and_scrubs_online_voiceprint(monkeypatch):
+    class _Provider:
+        def __init__(self):
+            self.closed = False
+
+        async def close(self):
+            self.closed = True
+
+    async def get_agent_models(_device_id, _client_id, _selected_module):
+        return {}
+
+    class _Dialogue:
+        def __init__(self):
+            self.cleared = 0
+
+        def clear_voiceprint_metadata(self):
+            self.cleared += 1
+
+    monkeypatch.setattr(voiceprint_runtime_module, "get_agent_models", get_agent_models)
+    old_provider = _Provider()
+    dialogue = _Dialogue()
+    prompt_rebuilds = []
+    conn = _conn(
+        read_config_from_api=True,
+        closing=False,
+        headers={"device-id": "device-a", "client-id": "client-a"},
+        config={
+            "agent_id": "agent-a",
+            "selected_module": {},
+            "voiceprint": {"old": True},
+        },
+        voiceprint_provider=old_provider,
+        current_speaker="旧用户",
+        current_speaker_id="voice-old",
+        dialogue=dialogue,
+        _init_prompt_enhancement=lambda: prompt_rebuilds.append(True),
+    )
+
+    result = await refresh_voiceprint_provider(conn)
+
+    assert result == {"enabled": False, "speakerCount": 0}
+    assert "voiceprint" not in conn.config
+    assert conn.voiceprint_provider is None
+    assert conn.current_speaker is None
+    assert conn.current_speaker_id is None
+    assert dialogue.cleared == 1
+    assert prompt_rebuilds == [True]
+    assert old_provider.closed is True
+
+
+def test_refresh_disables_and_scrubs_online_voiceprint(monkeypatch):
+    asyncio.run(_refresh_disables_and_scrubs_online_voiceprint(monkeypatch))
+
+
 def test_voiceprint_enrollment_handler_refreshes_runtime_provider(monkeypatch):
     conn = SimpleNamespace()
 

@@ -1,5 +1,6 @@
 import os
 import io
+import copy
 import wave
 import uuid
 import json
@@ -217,8 +218,11 @@ class ASRProviderBase(ABC):
                         f"识别到分段数量: {len(raw_text.get('utterances') or [])}"
                     )
 
-                # 转换为 JSON 字符串用于下游
-                enhanced_text = json.dumps(raw_text, ensure_ascii=False)
+                # 报告保留声纹置信度用于诊断；主 LLM 只接收身份，不接收内部评分。
+                report_text = json.dumps(raw_text, ensure_ascii=False)
+                enhanced_text = json.dumps(
+                    self._without_speaker_scores(raw_text), ensure_ascii=False
+                )
                 content_for_length_check = raw_text.get("content", "")
             else:
                 # 其他 ASR 返回的纯文本
@@ -230,6 +234,13 @@ class ASRProviderBase(ABC):
                 # 构建包含说话人信息的JSON字符串
                 enhanced_text = self._build_enhanced_text(
                     raw_text, speaker_name, speaker_id, speaker_score
+                )
+                report_text = self._build_enhanced_text(
+                    raw_text,
+                    speaker_name,
+                    speaker_id,
+                    speaker_score,
+                    include_speaker_score=True,
                 )
                 content_for_length_check = raw_text
 
@@ -259,7 +270,7 @@ class ASRProviderBase(ABC):
                     enqueue_asr_report(
                         conn,
                         build_contextual_user_content(
-                            enhanced_text,
+                            report_text,
                             turn_context,
                         ),
                         audio_snapshot,
@@ -331,19 +342,37 @@ class ASRProviderBase(ABC):
         speaker_name: Optional[str],
         speaker_id: Optional[str] = None,
         speaker_score: Optional[float] = None,
+        include_speaker_score: bool = False,
     ) -> str:
-        """构建包含说话人信息的文本（仅用于纯文本ASR）"""
+        """构建说话人文本；内部置信度默认不进入主 LLM。"""
         if speaker_name and speaker_name.strip():
             payload = {"speaker": speaker_name, "content": text}
             if speaker_id:
                 payload["speaker_id"] = speaker_id
-            if speaker_score is not None:
+            if include_speaker_score and speaker_score is not None:
                 payload["speaker_score"] = round(float(speaker_score), 4)
             return json.dumps(
                 payload, ensure_ascii=False
             )
         else:
             return text
+
+    @staticmethod
+    def _without_speaker_scores(payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Copy an ASR payload while removing internal voiceprint confidence."""
+        sanitized = copy.deepcopy(payload)
+
+        def strip_scores(value):
+            if isinstance(value, dict):
+                value.pop("speaker_score", None)
+                for nested in value.values():
+                    strip_scores(nested)
+            elif isinstance(value, list):
+                for nested in value:
+                    strip_scores(nested)
+
+        strip_scores(sanitized)
+        return sanitized
 
     async def _resolve_meeting_utterance_speakers(
         self,

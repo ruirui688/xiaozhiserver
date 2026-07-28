@@ -111,7 +111,7 @@ class FreeformGameManager:
         return None
 
     def _merge_freeform_game_configs(self, enabled_plugins):
-        merged = dict(self.manager.DEFAULT_FREEFORM_GAME_CONFIGS)
+        merged = {}
         if not isinstance(enabled_plugins, dict):
             return merged
         for name, plugin_config in enabled_plugins.items():
@@ -119,10 +119,13 @@ class FreeformGameManager:
                 continue
             if not isinstance(plugin_config, dict):
                 continue
-            if isinstance(plugin_config, dict) and not self._is_enabled_game_config(plugin_config):
-                merged.pop(name, None)
+            if not self._is_enabled_game_config(plugin_config):
                 continue
-            merged[name] = plugin_config
+            effective_config = dict(
+                self.manager.DEFAULT_FREEFORM_GAME_CONFIGS.get(name, {})
+            )
+            effective_config.update(plugin_config)
+            merged[name] = effective_config
         return merged
 
     @staticmethod
