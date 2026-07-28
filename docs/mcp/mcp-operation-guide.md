@@ -189,6 +189,10 @@ server:
   vision_explain: https://可信域名/mcp/vision/explain
 ```
 
+生产反向代理必须同时转发 `/mcp/vision/explain` 和 `/mcp/vision/images/` 到
+xiaozhi-server 的 8003 端口；前者接收设备上传并执行视觉分析，后者供智控台加载已保存的原图。
+如果图片 URL 返回 `text/html`，说明请求落入了 manager-web 的根路径代理，而不是图片下载端点。
+
 用设备所在网络访问健康地址，确认返回的视觉解释地址与配置一致，再让设备执行一次摄像头工具。仍访问旧地址时检查 manager-api 配置、缓存更新和 xiaozhi-server 重启；不要直接清空生产 Redis。
 
 ## 排障顺序

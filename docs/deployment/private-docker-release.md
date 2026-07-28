@@ -397,6 +397,7 @@ https://yh.wejoy.link/                   -> 127.0.0.1:8002
 https://yh.wejoy.link/xiaozhi/           -> 127.0.0.1:8002/xiaozhi/
 https://yh.wejoy.link/xiaozhi/ota/       -> 127.0.0.1:8002/xiaozhi/ota/
 https://yh.wejoy.link/mcp/vision/explain -> 127.0.0.1:8003/mcp/vision/explain
+https://yh.wejoy.link/mcp/vision/images/ -> 127.0.0.1:8003/mcp/vision/images/
 wss://yh.wejoy.link/xiaozhi/v1/          -> 127.0.0.1:8000/xiaozhi/v1/
 ```
 

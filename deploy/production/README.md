@@ -154,6 +154,7 @@ manager-web          https://yh.wejoy.link/
 manager-api          https://yh.wejoy.link/xiaozhi/
 OTA                  https://yh.wejoy.link/xiaozhi/ota/
 vision explain       https://yh.wejoy.link/mcp/vision/explain
+vision images        https://yh.wejoy.link/mcp/vision/images/<filename>
 WebSocket            wss://yh.wejoy.link/xiaozhi/v1/
 mini program API     https://yh.wejoy.link/xiaozhi
 ```
@@ -168,6 +169,7 @@ https://domain/                  -> 127.0.0.1:8002
 https://domain/xiaozhi/          -> 127.0.0.1:8002/xiaozhi/
 https://domain/xiaozhi/ota/      -> 127.0.0.1:8002/xiaozhi/ota/
 https://domain/mcp/vision/explain -> 127.0.0.1:8003/mcp/vision/explain
+https://domain/mcp/vision/images/ -> 127.0.0.1:8003/mcp/vision/images/
 wss://domain/xiaozhi/v1/         -> 127.0.0.1:8000/xiaozhi/v1/
 ```
 

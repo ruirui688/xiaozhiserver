@@ -45,6 +45,11 @@ server {
         proxy_pass http://127.0.0.1:8002/xiaozhi/ota/;
     }
 
+    location ^~ /mcp/vision/images/ {
+        proxy_pass http://127.0.0.1:8003;
+        add_header X-Content-Type-Options nosniff always;
+    }
+
     location = /mcp/vision/explain {
         proxy_pass http://127.0.0.1:8003/mcp/vision/explain;
     }
