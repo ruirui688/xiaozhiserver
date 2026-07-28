@@ -215,6 +215,6 @@ class ConfigServiceImplTest {
         assertEquals("惠易公司介绍", skills.get(0).get("name"));
         assertEquals("固定播报", skills.get(0).get("response_text"));
         assertEquals(List.of(rule), skills.get(0).get("trigger_rules"));
-        assertEquals(false, runtime.containsKey("plugins"));
+        assertEquals(Map.of(), runtime.get("plugins"));
     }
 }

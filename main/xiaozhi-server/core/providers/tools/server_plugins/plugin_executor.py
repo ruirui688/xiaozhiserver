@@ -24,6 +24,11 @@ class ServerPluginExecutor(ToolExecutor):
         self, conn: "ConnectionHandler", tool_name: str, arguments: Dict[str, Any]
     ) -> ActionResponse:
         """执行服务端插件工具"""
+        if tool_name == "meeting_minutes" and not is_meeting_mode_enabled(conn):
+            return ActionResponse(action=Action.NOTFOUND, response="插件函数不存在")
+        if tool_name == "manage_memory" and not self._is_managed_memory_enabled():
+            return ActionResponse(action=Action.NOTFOUND, response="插件函数不存在")
+
         func_item = all_function_registry.get(tool_name)
         if not func_item:
             game_response = self._execute_stateful_game_plugin(tool_name, arguments)
@@ -110,6 +115,12 @@ class ServerPluginExecutor(ToolExecutor):
         for func_name in all_required_functions:
             if func_name in GameSessionManager.FREEFORM_GAME_TOOLS:
                 continue
+            if func_name == "meeting_minutes" and not is_meeting_mode_enabled(
+                self.conn
+            ):
+                continue
+            if func_name == "manage_memory" and not self._is_managed_memory_enabled():
+                continue
             if (
                 func_name == "meeting_minutes"
                 and getattr(self.conn, "intent_type", None) != "function_call"
@@ -172,6 +183,10 @@ class ServerPluginExecutor(ToolExecutor):
     def has_tool(self, tool_name: str) -> bool:
         """检查是否有指定的服务端插件工具"""
         if tool_name in GameSessionManager.FREEFORM_GAME_TOOLS:
+            return False
+        if tool_name == "meeting_minutes" and not is_meeting_mode_enabled(self.conn):
+            return False
+        if tool_name == "manage_memory" and not self._is_managed_memory_enabled():
             return False
         return (
             tool_name in all_function_registry

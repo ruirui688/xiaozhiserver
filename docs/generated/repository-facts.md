@@ -67,7 +67,7 @@ source_paths:
 
 | 文件 | 行数 |
 | --- | ---: |
-| `main/xiaozhi-server/core/connection.py` | 2588 |
+| `main/xiaozhi-server/core/connection.py` | 2600 |
 | `main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelCatalogServiceImpl.java` | 1657 |
 | `main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelTestServiceImpl.java` | 1325 |
 | `main/manager-api/src/main/java/xiaozhi/modules/knowledge/rag/impl/LocalKnowledgeAdapter.java` | 1293 |

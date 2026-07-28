@@ -35,21 +35,21 @@ def get_meeting_entry_prompt(conn) -> str:
 def build_meeting_runtime_context(conn) -> str:
     """Tell the main LLM the authoritative meeting capability and state."""
     enabled = is_meeting_mode_enabled(conn)
+    if not enabled:
+        # Disabled capabilities must be absent from the model-visible prompt.  A
+        # negative capability explanation still teaches the model that the
+        # internal meeting mode exists and can make it mention the feature
+        # without the operator enabling it.
+        return ""
+
     main_llm_tool_available = bool(
-        enabled
-        and getattr(getattr(conn, "llm", None), "supports_native_function_call", False)
+        getattr(getattr(conn, "llm", None), "supports_native_function_call", False)
         and getattr(conn, "intent_type", None) == "function_call"
     )
     meeting = getattr(conn, "meeting_minutes", None)
     active = bool(meeting and meeting.is_active())
 
-    if not enabled:
-        instruction = (
-            "当前智能体没有启用会议纪要功能，也没有可执行的会议工具。"
-            "如果用户要求开启、记录或结束会议，必须明确告知需要先在智能体功能管理中启用会议纪要；"
-            "不得声称已经开启、正在记录或已经结束会议。"
-        )
-    elif not main_llm_tool_available:
+    if not main_llm_tool_available:
         instruction = (
             "会议纪要功能已经配置，但当前主 LLM 没有可执行的原生 meeting_minutes function tool。"
             "如果用户要求开启会议，必须明确说明当前主模型工具调用模式不可用；"

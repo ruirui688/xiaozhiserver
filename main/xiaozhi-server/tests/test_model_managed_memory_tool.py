@@ -66,6 +66,27 @@ def test_manage_memory_tool_is_exposed_only_for_managed_memory():
     assert "manage_memory" not in ServerPluginExecutor(disabled).get_tools()
 
 
+def test_manage_memory_cannot_leak_from_stale_intent_functions():
+    disabled_config = managed_config("nomem")
+    disabled_config.update(
+        {
+            "selected_module": {
+                "Memory": "Memory_active",
+                "Intent": "Intent_function_call",
+            },
+            "Intent": {
+                "Intent_function_call": {"functions": ["manage_memory"]}
+            },
+        }
+    )
+    disabled = SimpleNamespace(config=disabled_config, intent_type="function_call")
+
+    executor = ServerPluginExecutor(disabled)
+
+    assert "manage_memory" not in executor.get_tools()
+    assert executor.has_tool("manage_memory") is False
+
+
 def test_tool_description_requires_proactive_cross_session_judgment_without_business_rules():
     description = memory_tool_module.MANAGE_MEMORY_FUNCTION_DESC["function"]["description"]
 

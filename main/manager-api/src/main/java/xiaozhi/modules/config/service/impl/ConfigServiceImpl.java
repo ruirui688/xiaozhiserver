@@ -225,9 +225,9 @@ public class ConfigServiceImpl implements ConfigService {
 
         buildSemanticSkills(agent.getId(), result);
 
+        Map<String, Object> pluginParams = new HashMap<>();
         if (!Objects.equals(agent.getIntentModelId(), "Intent_nointent")) {
             List<AgentPluginMapping> pluginMappings = agentPluginMappingService.agentPluginParamsByAgentId(agent.getId());
-            Map<String, Object> pluginParams = new HashMap<>();
             if (pluginMappings != null) {
                 for (AgentPluginMapping pluginMapping : pluginMappings) {
                     pluginParams.put(
@@ -242,10 +242,11 @@ public class ConfigServiceImpl implements ConfigService {
             if (!feishuPlugin.isEmpty()) {
                 pluginParams.put("feishu_assistant", feishuPlugin);
             }
-            if (!pluginParams.isEmpty()) {
-                result.put("plugins", pluginParams);
-            }
         }
+        // An explicit empty map is authoritative.  Omitting the field lets the
+        // realtime server retain common/default plugin functions and expose
+        // capabilities that this agent did not enable.
+        result.put("plugins", pluginParams);
 
         String mcpEndpoint = agentMcpAccessPointService.getAgentMcpAccessAddress(agent.getId());
         if (StringUtils.isNotBlank(mcpEndpoint) && mcpEndpoint.startsWith("ws")) {

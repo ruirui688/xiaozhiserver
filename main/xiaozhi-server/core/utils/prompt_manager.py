@@ -123,7 +123,9 @@ class PromptManager:
             self.cache_manager.set(self.CacheType.DEVICE_PROMPT, device_cache_key, user_prompt)
             self.logger.bind(tag=TAG).debug(f"设备 {device_id} 的提示词已缓存")
 
-        self.logger.bind(tag=TAG).info(f"使用快速提示词: {user_prompt[:50]}...")
+        self.logger.bind(tag=TAG).info(
+            f"使用快速提示词: chars={len(str(user_prompt or ''))}"
+        )
         return user_prompt
 
     def _get_current_time_info(self) -> tuple:
@@ -276,6 +278,21 @@ class PromptManager:
             # 替换模板变量
             template = Template(self.base_prompt_template)
             available_tools_prompt = self.build_available_tools_prompt(available_tools)
+            voiceprint_config = self.config.get("voiceprint") or {}
+            voiceprint_enabled = bool(
+                isinstance(voiceprint_config, dict)
+                and voiceprint_config.get("url")
+                and voiceprint_config.get("speakers")
+            )
+            selected_memory = self.config.get("selected_module", {}).get("Memory")
+            memory_type = (
+                self.config.get("Memory", {}).get(selected_memory, {}).get("type")
+                if selected_memory
+                else None
+            )
+            memory_context_enabled = bool(
+                selected_memory and memory_type not in {"nomem", "mem_report_only"}
+            )
             enhanced_prompt = template.render(
                 base_prompt=user_prompt,
                 current_time=current_time,
@@ -290,6 +307,8 @@ class PromptManager:
                 dynamic_context=compact_dynamic_context(self.context_data),
                 language=language,
                 available_tools_prompt=available_tools_prompt,
+                voiceprint_enabled=voiceprint_enabled,
+                memory_context_enabled=memory_context_enabled,
                 *args,
                 **kwargs,
             )

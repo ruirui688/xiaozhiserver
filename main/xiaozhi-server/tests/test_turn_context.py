@@ -98,7 +98,39 @@ def test_dialogue_exposes_context_to_llm_but_keeps_raw_content_for_memory():
 
     redacted = redact_dialogue_contexts_for_log([llm_message])
     assert "productId" not in redacted[0]["content"]
-    assert "<redacted:dict>" in redacted[0]["content"]
+    assert redacted[0]["content"].startswith("<redacted:")
+    assert redacted[0]["content"].endswith(" chars>")
+
+
+def test_dialogue_log_redaction_hides_system_prompt_and_tool_arguments():
+    messages = [
+        {"role": "system", "content": "INTERNAL_MEETING_PROMPT"},
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "private_tool",
+                        "arguments": '{"secret":"customer-data"}',
+                    },
+                }
+            ],
+        },
+        {"role": "tool", "content": "PRIVATE_MEMORY_RESULT"},
+    ]
+
+    redacted = redact_dialogue_contexts_for_log(messages)
+    serialized = json.dumps(redacted, ensure_ascii=False)
+
+    assert "INTERNAL_MEETING_PROMPT" not in serialized
+    assert "customer-data" not in serialized
+    assert "PRIVATE_MEMORY_RESULT" not in serialized
+    assert redacted[1]["tool_calls"][0]["function"] == {
+        "name": "private_tool",
+        "arguments": "<redacted>",
+    }
 
 
 def test_chat_report_payload_keeps_context_but_memory_event_removes_it():

@@ -90,8 +90,7 @@ def test_runtime_context_keeps_state_claims_authoritative():
     enabled.meeting_minutes.start("发布评审")
     active_context = build_meeting_runtime_context(enabled)
 
-    assert "plugin_enabled=false" in disabled_context
-    assert "不得声称已经开启" in disabled_context
+    assert disabled_context == ""
     assert "active=false" in enabled_context
     assert "只有成功调用工具才代表会议已开始" in enabled_context
     assert "active=true" in active_context
@@ -193,3 +192,23 @@ def test_meeting_tool_is_not_delegated_to_intent_llm():
     tools = ServerPluginExecutor(conn).get_tools()
 
     assert "meeting_minutes" not in tools
+
+
+def test_disabled_meeting_cannot_leak_from_stale_intent_functions():
+    conn = _conn(enabled=False)
+    conn.config.update(
+        {
+            "selected_module": {"Intent": "Intent_function_call"},
+            "Intent": {
+                "Intent_function_call": {
+                    "functions": ["meeting_minutes"],
+                }
+            },
+        }
+    )
+    conn.game_session_manager = GameSessionManager()
+
+    executor = ServerPluginExecutor(conn)
+
+    assert "meeting_minutes" not in executor.get_tools()
+    assert executor.has_tool("meeting_minutes") is False

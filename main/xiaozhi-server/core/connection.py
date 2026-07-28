@@ -16,7 +16,6 @@ from core.utils.util import (
     extract_json_from_string,
     check_vad_update,
     check_asr_update,
-    filter_sensitive_info,
 )
 from typing import Dict, Any
 from collections import deque
@@ -978,8 +977,15 @@ class ConnectionHandler:
                 return False
             private_config["delete_audio"] = bool(self.config.get("delete_audio", True))
             normalize_runtime_config(private_config)
+            selected_modules = sorted(
+                (private_config.get("selected_module") or {}).keys()
+            )
+            plugin_names = sorted((private_config.get("plugins") or {}).keys())
             self.logger.bind(tag=TAG).info(
-                f"{time.time() - begin_time} 秒，异步获取差异化配置成功: {json.dumps(filter_sensitive_info(private_config), ensure_ascii=False)}"
+                f"{time.time() - begin_time} 秒，异步获取差异化配置成功: "
+                f"selected_modules={selected_modules}, plugin_names={plugin_names}, "
+                f"context_provider_count={len(private_config.get('context_providers') or [])}, "
+                f"voiceprint_enabled={bool(private_config.get('voiceprint'))}"
             )
             self.need_bind = False
             self.bind_completed_event.set()
@@ -1117,13 +1123,12 @@ class ConnectionHandler:
         )
 
     def _apply_private_plugins(self, private_config):
-        plugin_from_server = private_config.get("plugins")
-        if plugin_from_server is None:
-            return
-
-        selected_intent = self.config.get("selected_module", {}).get("Intent")
-        if not selected_intent or selected_intent == "Intent_nointent":
-            return
+        # manager-api owns the complete enabled-plugin set.  Missing and empty
+        # payloads both mean "no plugins" so common/default Intent functions
+        # cannot survive as stale model-visible capabilities.
+        plugin_from_server = private_config.get("plugins") or {}
+        if not isinstance(plugin_from_server, dict):
+            plugin_from_server = {}
 
         normalized_plugins = {}
         for plugin, config_value in plugin_from_server.items():
@@ -1133,9 +1138,12 @@ class ConnectionHandler:
                 normalized_plugins[plugin] = copy.deepcopy(config_value)
         self.config["plugins"] = normalized_plugins
 
+        selected_intent = self.config.get("selected_module", {}).get("Intent")
+        if not selected_intent or selected_intent == "Intent_nointent":
+            return
         intent_config = self.config.get("Intent", {}).get(selected_intent)
         if isinstance(intent_config, dict):
-            intent_config["functions"] = normalized_plugins.keys()
+            intent_config["functions"] = list(normalized_plugins)
 
     def _apply_correct_words(self, correct_words):
         self.config["correct_words"] = copy.deepcopy(correct_words)
@@ -1438,7 +1446,9 @@ class ConnectionHandler:
         freeform_game_prompt = None
 
         if query is not None:
-            self.logger.bind(tag=TAG).info(f"大模型收到用户消息: {query}")
+            self.logger.bind(tag=TAG).info(
+                f"大模型收到用户消息: chars={len(str(query))}"
+            )
 
         # 为最顶层时新建会话ID和发送FIRST请求
         if depth == 0:
@@ -2131,6 +2141,8 @@ class ConnectionHandler:
 
     def _with_meeting_runtime_context(self, llm_dialogue):
         context = build_meeting_runtime_context(self)
+        if not context:
+            return llm_dialogue
         messages = list(llm_dialogue)
         insert_at = len(messages)
         for index in range(len(messages) - 1, -1, -1):

@@ -1,9 +1,13 @@
+import html
+from typing import Dict, Any
+
 import httpx
-from typing import Dict, Any, List
+
 from config.logger import setup_logging
 from core.utils.prompt_budget import compact_dynamic_context
 
 TAG = __name__
+
 
 class ContextDataProvider:
     """数据上下文填充，负责从配置的API获取数据"""
@@ -20,7 +24,9 @@ class ContextDataProvider:
             return ""
 
         formatted_lines = []
-        for provider in context_providers:
+        for provider_index, provider in enumerate(context_providers, start=1):
+            if not isinstance(provider, dict):
+                continue
             url = provider.get("url")
             headers = provider.get("headers", {})
 
@@ -43,21 +49,36 @@ class ContextDataProvider:
                             # 格式化数据
                             if isinstance(data, dict):
                                 for k, v in data.items():
-                                    formatted_lines.append(f"- **{k}：** {v}")
+                                    formatted_lines.append(
+                                        f"- {html.escape(str(k), quote=False)}："
+                                        f"{html.escape(str(v), quote=False)}"
+                                    )
                             elif isinstance(data, list):
                                 for item in data:
-                                    formatted_lines.append(f"- {item}")
+                                    formatted_lines.append(
+                                        f"- {html.escape(str(item), quote=False)}"
+                                    )
                             else:
-                                formatted_lines.append(f"- {data}")
+                                formatted_lines.append(
+                                    f"- {html.escape(str(data), quote=False)}"
+                                )
                         else:
-                            self.logger.bind(tag=TAG).warning(f"API {url} 返回错误码: {result.get('msg')}")
+                            self.logger.bind(tag=TAG).warning(
+                                f"上下文接口 #{provider_index} 返回业务错误"
+                            )
                     else:
-                        self.logger.bind(tag=TAG).warning(f"API {url} 返回的不是JSON字典")
+                        self.logger.bind(tag=TAG).warning(
+                            f"上下文接口 #{provider_index} 返回的不是JSON字典"
+                        )
                 else:
-                    self.logger.bind(tag=TAG).warning(f"API {url} 请求失败: {response.status_code}")
+                    self.logger.bind(tag=TAG).warning(
+                        f"上下文接口 #{provider_index} 请求失败: {response.status_code}"
+                    )
             except Exception as e:
-                self.logger.bind(tag=TAG).error(f"获取上下文数据 {url} 失败: {e}")
-        
+                self.logger.bind(tag=TAG).error(
+                    f"获取上下文数据 #{provider_index} 失败: {type(e).__name__}"
+                )
+
         # 将所有格式化后的行拼接成一个字符串
         self.context_data = compact_dynamic_context("\n".join(formatted_lines))
         if self.context_data:

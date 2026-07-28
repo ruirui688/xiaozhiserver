@@ -194,6 +194,44 @@ def test_connection_empty_private_config_keeps_existing_runtime_config():
     assert conn.config["ASR"]["asr-common"]["api_key"] == "common-key"
 
 
+def test_connection_empty_private_plugins_clear_common_tool_capabilities():
+    conn = ConnectionHandler.__new__(ConnectionHandler)
+    conn.config = {
+        "selected_module": {"Intent": "Intent_function_call"},
+        "plugins": {"meeting_minutes": {"enabled": True}},
+        "Intent": {
+            "Intent_function_call": {
+                "type": "function_call",
+                "functions": ["meeting_minutes"],
+            }
+        },
+    }
+
+    conn._apply_private_plugins({})
+
+    assert conn.config["plugins"] == {}
+    assert conn.config["Intent"]["Intent_function_call"]["functions"] == []
+
+
+def test_disabled_meeting_does_not_add_a_runtime_system_message():
+    conn = ConnectionHandler.__new__(ConnectionHandler)
+    conn.read_config_from_api = True
+    conn.config = {"plugins": {}}
+    conn.meeting_minutes = None
+    conn.llm = None
+    conn.intent_type = "function_call"
+    messages = [
+        {"role": "system", "content": "角色提示"},
+        {"role": "user", "content": "普通聊天"},
+    ]
+
+    result = conn._with_meeting_runtime_context(messages)
+
+    assert result == messages
+    assert "会议" not in str(result)
+    assert "meeting" not in str(result).lower()
+
+
 def test_connection_private_model_config_merges_without_dropping_common_models():
     conn = ConnectionHandler.__new__(ConnectionHandler)
     conn.config = {

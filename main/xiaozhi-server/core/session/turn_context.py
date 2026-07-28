@@ -120,10 +120,38 @@ def redact_contextual_user_content(content: Any) -> Any:
 
 
 def redact_dialogue_contexts_for_log(messages: list[dict]) -> list[dict]:
+    """Return metadata-only dialogue diagnostics.
+
+    System prompts, user utterances, memory, dynamic context and tool
+    arguments can all contain customer data or internal instructions.  Logs
+    need the message shape for troubleshooting, but must not retain those
+    payloads verbatim.
+    """
     redacted_messages = []
     for message in messages:
         item = dict(message)
-        if item.get("role") == "user" and "content" in item:
-            item["content"] = redact_contextual_user_content(item.get("content"))
+        if "content" in item:
+            content = item.get("content")
+            item["content"] = (
+                f"<redacted:{len(str(content))} chars>" if content is not None else None
+            )
+        if "tool_calls" in item:
+            safe_tool_calls = []
+            for call in item.get("tool_calls") or []:
+                if not isinstance(call, dict):
+                    safe_tool_calls.append({"type": type(call).__name__})
+                    continue
+                function = call.get("function") or {}
+                safe_tool_calls.append(
+                    {
+                        "id": call.get("id"),
+                        "type": call.get("type"),
+                        "function": {
+                            "name": function.get("name"),
+                            "arguments": "<redacted>",
+                        },
+                    }
+                )
+            item["tool_calls"] = safe_tool_calls
         redacted_messages.append(item)
     return redacted_messages

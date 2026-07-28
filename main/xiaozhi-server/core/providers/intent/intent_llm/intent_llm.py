@@ -189,7 +189,10 @@ class IntentProvider(IntentProviderBase):
 
         prompt_music += build_home_assistant_devices_prompt(conn)
 
-        logger.bind(tag=TAG).debug(f"User prompt: {prompt_music}")
+        logger.bind(tag=TAG).debug(
+            f"意图识别系统提示已构建: chars={len(prompt_music)}, "
+            f"tool_count={current_func_count}, music_count={len(music_file_names)}"
+        )
 
         # 构建用户对话历史的提示
         msgStr = ""
