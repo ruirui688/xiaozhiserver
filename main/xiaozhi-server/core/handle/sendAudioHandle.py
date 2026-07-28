@@ -31,7 +31,12 @@ async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text
         conn.tts.tts_audio_first_sentence = False
 
     protocol_sentence_id = sentence_id or conn.sentence_id
+    reply_lifecycle = getattr(conn, "reply_lifecycle", None)
     if sentenceType == SentenceType.FIRST:
+        if reply_lifecycle is not None:
+            generation = reply_lifecycle.ensure_started(protocol_sentence_id)
+            reply_lifecycle.bind_sentence(generation, protocol_sentence_id)
+            reply_lifecycle.mark_synthesizing(generation)
         is_new_protocol_sentence = (
             getattr(conn, "_tts_protocol_sentence_id", None) != protocol_sentence_id
         )
@@ -54,7 +59,7 @@ async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text
             "start",
             protocol_sentence_id=protocol_sentence_id,
         )
-        if start_sent_with_first_audio:
+        if start_sent_with_first_audio and reply_lifecycle is None:
             conn.client_is_speaking = True
         # 这里是真实首音频边界；STT 后的 start 只表示回复可打断。
         conn._tts_started_at = time.time() * 1000
@@ -78,6 +83,8 @@ async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text
 
     await sendAudio(conn, audios)
     if audios:
+        if reply_lifecycle is not None:
+            reply_lifecycle.mark_streaming()
         external_tts = getattr(conn, "external_tts_coordinator", None)
         if external_tts is not None:
             external_tts.mark_streaming(conn, protocol_sentence_id)
@@ -412,6 +419,8 @@ async def send_tts_message(
     reason=None,
 ):
     """发送 TTS 状态消息"""
+    reply_lifecycle = getattr(conn, "reply_lifecycle", None)
+    reply_generation = None
     if text is None and state == "sentence_start":
         return False
     if state == "start":
@@ -427,6 +436,14 @@ async def send_tts_message(
         )
         if start_sent and not stop_sent and same_pending_or_sentence:
             return False
+        if reply_lifecycle is not None:
+            reply_generation = reply_lifecycle.ensure_started(
+                protocol_sentence_id
+            )
+            if protocol_sentence_id:
+                reply_lifecycle.bind_sentence(
+                    reply_generation, protocol_sentence_id
+                )
         conn._tts_protocol_sentence_id = protocol_sentence_id
         conn._tts_protocol_start_sent = True
         conn._tts_protocol_stop_sent = False
@@ -454,6 +471,14 @@ async def send_tts_message(
             )
         ):
             return False
+        if reply_lifecycle is not None:
+            snapshot = reply_lifecycle.snapshot()
+            if snapshot.is_active and snapshot.sentence_id in {
+                None,
+                resolved_sentence_id,
+            }:
+                reply_generation = snapshot.generation
+                reply_lifecycle.mark_stopping(reply_generation)
         conn._tts_protocol_sentence_id = resolved_sentence_id
         conn._tts_protocol_stop_sent = True
     message = {"type": "tts", "state": state, "session_id": conn.session_id}
@@ -490,44 +515,168 @@ async def send_tts_message(
         # 停止音频发送循环（仅在流控器已初始化时调用）
         if hasattr(conn, "audio_rate_controller") and conn.audio_rate_controller:
             conn.audio_rate_controller.stop_sending()
+    # 发送消息到客户端，并让协议终态与同一 generation 一起收敛。
+    try:
+        await conn.websocket.send(json.dumps(message))
+    except Exception:
+        if reply_lifecycle is not None and reply_generation is not None:
+            reply_lifecycle.fail(reply_generation, "tts_protocol_send_failed")
+        raise
+    if state == "stop" and reply_lifecycle is not None and reply_generation is not None:
+        if reason == "abort":
+            reply_lifecycle.interrupt(reply_generation, reason)
+        elif reason:
+            reply_lifecycle.fail(reply_generation, reason)
+        else:
+            reply_lifecycle.complete(reply_generation, "tts_stop")
+    elif state == "stop" and reply_lifecycle is None:
         conn.clearSpeakStatus()
-
-    # 发送消息到客户端
-    await conn.websocket.send(json.dumps(message))
     if state == "stop" and completion_error is not None:
         raise completion_error
     return True
 
 
-async def send_stt_message(conn: "ConnectionHandler", text):
-    """发送 STT 状态消息"""
-    end_prompt_str = conn.config.get("end_prompt", {}).get("prompt")
-    if end_prompt_str and end_prompt_str == text:
-        await send_tts_message(conn, "start")
-        return
-
-    # 解析JSON格式，提取实际的用户说话内容
+async def send_stt_display(conn: "ConnectionHandler", text):
+    """Send only the user transcript display; never starts a reply."""
     display_text = text
     try:
-        # 尝试解析JSON格式
         if text.strip().startswith("{") and text.strip().endswith("}"):
             parsed_data = json.loads(text)
             if isinstance(parsed_data, dict) and "content" in parsed_data:
-                # 如果是包含说话人信息的JSON格式，只显示content部分
                 display_text = parsed_data["content"]
-                # 保存说话人信息到conn对象
                 if "speaker" in parsed_data:
                     conn.current_speaker = parsed_data["speaker"]
     except (json.JSONDecodeError, TypeError):
-        # 如果不是JSON格式，直接使用原始文本
         display_text = text
     stt_text = textUtils.get_string_no_punctuation_or_emoji(display_text)
     await conn.websocket.send(
         json.dumps({"type": "stt", "text": stt_text, "session_id": conn.session_id})
     )
-    # 与官方 upstream/main 保持一致：等待 LLM/TTS 回复时也允许新语音打断。
-    await send_tts_message(conn, "start", protocol_sentence_id=None)
-    conn.client_is_speaking = True
+
+
+async def begin_assistant_reply(
+    conn: "ConnectionHandler",
+    text,
+    *,
+    require_conversation=True,
+    kind="assistant",
+):
+    """Validate capabilities, display STT, and create one tracked reply."""
+    end_prompt_str = conn.config.get("end_prompt", {}).get("prompt")
+    if end_prompt_str and end_prompt_str == text:
+        await send_tts_message(conn, "start")
+        lifecycle = getattr(conn, "reply_lifecycle", None)
+        return lifecycle.generation if lifecycle is not None else None
+
+    if getattr(conn, "tts", None) is None:
+        conn.logger.bind(tag=TAG).warning("TTS未配置，拒绝启动回复轮次")
+        return None
+    if require_conversation:
+        conversation_ready = getattr(conn, "conversation_ready", None)
+        if conversation_ready is not None and not conversation_ready.is_set():
+            conn.logger.bind(tag=TAG).warning("对话能力尚未就绪，拒绝启动回复轮次")
+            return None
+        if getattr(conn, "llm", None) is None:
+            conn.logger.bind(tag=TAG).warning("LLM未配置，拒绝启动回复轮次")
+            return None
+    else:
+        tts_ready = getattr(conn, "tts_ready", None)
+        if tts_ready is not None and not tts_ready.is_set():
+            conn.logger.bind(tag=TAG).warning("TTS能力尚未就绪，拒绝启动回复轮次")
+            return None
+
+    lifecycle = getattr(conn, "reply_lifecycle", None)
+    generation = None
+    try:
+        if lifecycle is not None:
+            generation = lifecycle.begin(kind=kind)
+        await send_stt_display(conn, text)
+        await send_tts_message(conn, "start", protocol_sentence_id=None)
+        if lifecycle is None:
+            conn.client_is_speaking = True
+        return generation
+    except Exception:
+        if lifecycle is not None and generation is not None:
+            lifecycle.fail(generation, "reply_start_failed")
+        raise
+
+
+async def send_stt_message(conn: "ConnectionHandler", text):
+    """Compatibility wrapper for paths that immediately produce TTS."""
+    if getattr(conn, "reply_lifecycle", None) is None:
+        await send_stt_display(conn, text)
+        await send_tts_message(conn, "start", protocol_sentence_id=None)
+        conn.client_is_speaking = True
+        return None
+    return await begin_assistant_reply(
+        conn, text, require_conversation=False, kind="direct_tts"
+    )
+
+
+async def terminate_pending_reply(
+    conn: "ConnectionHandler", reason, *, generation=None
+):
+    """Converge one active generation after an async failure or silent branch."""
+    lifecycle = getattr(conn, "reply_lifecycle", None)
+    if lifecycle is not None:
+        snapshot = lifecycle.snapshot()
+        target_generation = generation or snapshot.generation
+        if not snapshot.is_active or snapshot.generation != target_generation:
+            return False
+        sentence_id = snapshot.sentence_id or getattr(conn, "sentence_id", None)
+    else:
+        if not getattr(conn, "client_is_speaking", False):
+            return False
+        target_generation = None
+        sentence_id = getattr(conn, "sentence_id", None)
+
+    try:
+        await send_tts_message(
+            conn,
+            "stop",
+            protocol_sentence_id=sentence_id,
+            drain_audio=False,
+            reason=reason,
+        )
+    finally:
+        if lifecycle is None or lifecycle.is_current(target_generation):
+            conn.clear_queues()
+            if lifecycle is not None:
+                lifecycle.fail(target_generation, reason)
+            else:
+                conn.clearSpeakStatus()
+    return True
+
+
+def schedule_reply_termination(conn, reason, *, generation=None):
+    """Schedule generation-scoped convergence from loop or worker threads."""
+    loop = getattr(conn, "loop", None)
+    if loop is None or loop.is_closed():
+        return None
+    coroutine = terminate_pending_reply(
+        conn, reason, generation=generation
+    )
+    try:
+        running_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        running_loop = None
+    try:
+        if running_loop is loop:
+            future = loop.create_task(coroutine)
+        else:
+            future = asyncio.run_coroutine_threadsafe(coroutine, loop)
+    except Exception:
+        coroutine.close()
+        return None
+
+    def consume_result(item):
+        try:
+            item.result()
+        except (asyncio.CancelledError, Exception):
+            return
+
+    future.add_done_callback(consume_result)
+    return future
 
 
 async def send_display_message(conn: "ConnectionHandler", text):

@@ -2,6 +2,13 @@
 
 from core.session.close_coordinator import CloseCoordinator
 from core.session.lifecycle import SessionLifecycle
+from core.session.reply_lifecycle import (
+    ACTIVE_REPLY_STATES,
+    ReplyLifecycle,
+    ReplySnapshot,
+    ReplyState,
+)
+from core.session.runtime_readiness import RuntimeReadiness
 from core.session.turn_context import (
     TurnContextBuffer,
     TurnContextUpdate,
@@ -12,6 +19,11 @@ from core.session.turn_context import (
 __all__ = [
     "CloseCoordinator",
     "SessionLifecycle",
+    "ACTIVE_REPLY_STATES",
+    "ReplyLifecycle",
+    "ReplySnapshot",
+    "ReplyState",
+    "RuntimeReadiness",
     "TurnContextBuffer",
     "TurnContextUpdate",
     "build_contextual_user_content",

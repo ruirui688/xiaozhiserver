@@ -160,6 +160,12 @@ class CloseCoordinator:
                     "停止上报线程",
                 )
 
+            reply_lifecycle = getattr(conn, "reply_lifecycle", None)
+            if reply_lifecycle is not None:
+                reply_lifecycle.interrupt(reason="connection_closed")
+            clear_deferred = getattr(conn, "_clear_deferred_listen_detects", None)
+            if callable(clear_deferred):
+                clear_deferred("connection_closed")
             conn.clear_queues()
 
             if hasattr(conn, "iot_descriptors"):

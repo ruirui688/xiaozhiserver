@@ -73,7 +73,8 @@ connection.py:96-226  ConnectionHandler.__init__()
   - 创建 ThreadPoolExecutor(max_workers=5)
   - 初始化 SemanticCenter、GameSessionManager
   - 初始化 ReportThreadManager
-  - 创建 _modules_ready threading.Event（同步模块初始化）
+  - 创建 binding_ready / tts_ready / conversation_ready / audio_input_ready 能力门禁
+  - 创建 ReplyLifecycle（generation 级回复状态）
   - 创建 _abort_lock threading.Lock（保护 client_abort）
 ```
 
@@ -90,7 +91,14 @@ connection.py:227-298  handle_connection()
     → 线程池中创建按设备实例: LLM, TTS, VAD, ASR, Memory, Intent
 ```
 
-**同步保护**：后台初始化通过 `_modules_ready` Event 与消息循环同步 — audio 处理在 Event.set() 之前被阻塞。
+**同步保护**：后台初始化不再用单个 `_modules_ready` 代表所有能力。设备绑定完成后设置
+`binding_ready`；TTS provider 和音频通道真实打开后设置 `tts_ready`；LLM、TTS、提示词和工具
+完成后设置 `conversation_ready`；VAD、ASR 和输入通道完成后设置 `audio_input_ready`。二进制麦克风
+音频只检查 `audio_input_ready`，`external_tts` 只检查 `tts_ready`，`listen/detect` 只检查
+`conversation_ready`。任何初始化异常都会记录 `initialization_error`，且不得发布 ready 状态。
+
+初始化期间到达的 `listen/detect` 不直接执行也不静默丢弃：连接按相同文本去重，最多保存 8 条，
+每条 TTL 10 秒；`conversation_ready` 后在原连接事件循环回放。过期消息、初始化失败和连接关闭均不回放。
 
 ### 2.5 唤醒后的首轮收音
 
@@ -160,10 +168,13 @@ providers/asr/base.py:44-59  asr_text_priority_thread（守护线程）
 - 句尾静音检测统一使用 VAD 模型的 `min_silence_duration_ms`
 - AEC 设备的播报打断依据句首语音检测，不等待该句尾阈值
 
-`client_is_speaking` 沿用官方语义，表示当前回复（包括 LLM/TTS 尚未产生首包的等待阶段）可以被用户打断，
-不等同于扬声器已经开始播放。服务端发送 STT 后立即发送一次 `tts:start` 并置为可打断；AEC 设备下一次
-VAD 确认开口时立即 Abort，非 AEC 设备仍在完整 ASR 后 Abort。真实首音频边界只由
-`_tts_started_at > 0` 表示，语义控制上下文的 `tts_playing` 不得直接复用 `client_is_speaking`。
+`client_is_speaking` 仍表示当前回复（包括 LLM/TTS 尚未产生首包的等待阶段）可以被用户打断，
+但现在是 `ReplyLifecycle` 活跃状态的派生值，不再是可被异常分支永久遗留的布尔变量。每轮回复使用单调
+递增的 generation，状态在 `PENDING_LLM / SYNTHESIZING / STREAMING / STOPPING` 间推进，并且每个
+`tts/start` 只能以 `COMPLETED / FAILED / INTERRUPTED / connection_closed` 之一终结。STT 展示与回复
+启动已拆开：会议只记录等静默分支只发 STT；普通对话先确认 `conversation_ready`、LLM 和 TTS，再创建
+generation 并发送 `tts/start`。AEC 设备下一次 VAD 确认开口时立即 Abort，非 AEC 设备仍在完整 ASR
+后 Abort。真实首音频边界只由 `_tts_started_at > 0` 表示。
 
 ### 3.3 ASR 语音转文字
 
@@ -309,6 +320,9 @@ SeedTTS2 超时按阶段拆分：建连默认 10 秒、会话启动默认 10 秒
   `interrupt=true` 通过既有 Abort 和 `abort_generation` 结束旧轮次后再提交。通话、会议和
   声纹采集属于受保护模式，不允许强制插播。
 - `external_tts.text` 日志只记录长度，不记录正文。
+- `busy` 响应额外返回稳定的 `busyReason`：`assistant_reply_active`、`user_voice_active`、
+  `tts_text_queue_pending`、`tts_audio_queue_pending` 或 `external_tts_job_active`。日志记录 requestId、
+  回复 generation/state/age、两类队列大小和外部任务状态，但不记录播报正文。
 
 服务器通过同一 WebSocket 主动推送状态：
 

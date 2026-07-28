@@ -674,3 +674,24 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 是否允许被官方覆盖：否
 官方同步时的处理规则：必须保留 external_tts 只在完成 WebSocket 认证和设备绑定后处理、身份来自当前 ConnectionHandler 而不是消息中的 deviceId、直接复用 conn.tts 且不新建全局 provider、单个 TEXT 队列项保留原文、不经过 LLM/语义/MCP/表情/动作/Dialogue、assistant 聊天记录沿用 chat_history_conf（值为 2 时同时保存合成音频）而长期记忆事件跳过、deviceId+requestId 等价的设备级十分钟幂等、忙碌默认拒绝和 interrupt=true 走 abort_generation、通话/会议/声纹采集禁止插播、状态只声明 server_audio_sent 而不冒充物理播放完成，以及日志不记录 external_tts 正文的边界。不得重新开放通过任意 deviceId 控制在线设备的无鉴权 HTTP 接口。
 ```
+
+## 35. 连接能力门禁与回复 generation 收敛
+
+```text
+定制模块：xiaozhi-server 连接初始化、listen 协议、LLM/TTS 回复生命周期、external_tts 忙碌诊断
+改动原因：初始化期间的 listen.detect 曾可在 LLM 尚未就绪时发送 tts/start，并把 client_is_speaking 永久遗留为 true，导致后续 interrupt=false 的 external_tts 一直被拒绝。单个 _modules_ready 也不能证明 TTS/ASR 音频通道已经成功打开。
+关键文件：
+  - main/xiaozhi-server/core/connection.py
+  - main/xiaozhi-server/core/session/runtime_readiness.py
+  - main/xiaozhi-server/core/session/reply_lifecycle.py
+  - main/xiaozhi-server/core/handle/receiveAudioHandle.py
+  - main/xiaozhi-server/core/handle/sendAudioHandle.py
+  - main/xiaozhi-server/core/handle/textHandler/listenMessageHandler.py
+  - main/xiaozhi-server/core/external_tts.py
+  - main/xiaozhi-server/core/providers/tts/base.py
+  - main/xiaozhi-server/tests/test_reply_lifecycle_readiness.py
+  - docs/architecture/device-interaction-chain.md
+  - docs/architecture/runtime-flows.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：必须保留 binding_ready、tts_ready、conversation_ready、audio_input_ready 的分能力门禁；TTS/ASR 通道成功打开前不得设置 ready；初始化异常不得伪装成功。listen.detect 在 conversation_ready 前按相同文本去重并进入最多 8 条、TTL 10 秒的连接队列，失败、过期或关闭后不得回放。STT 展示不得隐式创建不一定发声的回复；每个 tts/start 必须绑定一个 generation，并以 stop、abort 或 connection_closed 恰好一次收敛；client_is_speaking 只能从活跃生命周期派生。LLM 提交/执行、无语音工具结果和 TTS 合成/发送失败必须终止当前 generation。external_tts 默认继续使用 interrupt=false，只有用户明确抢占时使用 true；busy 响应保留稳定 busyReason 和无正文诊断日志，通话、会议与声纹采集继续禁止抢占。
+```

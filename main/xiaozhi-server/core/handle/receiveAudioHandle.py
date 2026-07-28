@@ -15,7 +15,14 @@ from core.handle.reportHandle import (
 )
 from core.semantic.normalizer import TextNormalizer
 from core.utils.output_counter import check_device_output_limit
-from core.handle.sendAudioHandle import send_stt_message, SentenceType
+from core.handle.sendAudioHandle import (
+    begin_assistant_reply,
+    send_stt_display,
+    send_stt_message,
+    schedule_reply_termination,
+    terminate_pending_reply,
+    SentenceType,
+)
 from core.handle.wakeupHandle import should_ignore_wakeup_audio
 
 TAG = __name__
@@ -67,8 +74,10 @@ async def startToChat(
     Returns True when the text should be treated as an accepted user turn.
     Returns False only when another session mode consumes the text.
     """
+    reply_generation = None
+
     def submit_chat(chat_text):
-        if turn_id is not None:
+        if reply_generation is not None:
             return conn.executor.submit(
                 conn.chat,
                 chat_text,
@@ -76,16 +85,46 @@ async def startToChat(
                 True,
                 turn_context,
                 turn_id,
+                reply_generation,
+            )
+        if turn_id is not None:
+            return conn.executor.submit(
+                conn.chat, chat_text, 0, True, turn_context, turn_id
             )
         if turn_context is not None:
             return conn.executor.submit(
-                conn.chat,
-                chat_text,
-                0,
-                True,
-                turn_context,
+                conn.chat, chat_text, 0, True, turn_context
             )
         return conn.executor.submit(conn.chat, chat_text)
+
+    def schedule_termination(reason):
+        schedule_reply_termination(
+            conn, reason, generation=reply_generation
+        )
+
+    def on_chat_done(future):
+        try:
+            error = future.exception()
+        except Exception as callback_error:
+            schedule_termination(
+                "llm_task_cancelled"
+                if "cancel" in type(callback_error).__name__.lower()
+                else "llm_task_failed"
+            )
+            return
+        if error is not None:
+            conn.logger.bind(tag=TAG).error(
+                f"chat() failed: errorType={type(error).__name__}"
+            )
+            schedule_termination("llm_task_failed")
+            return
+        try:
+            result = future.result()
+        except Exception:
+            schedule_termination("llm_task_failed")
+            return
+        if result is not True:
+            schedule_termination("llm_no_spoken_result")
 
     enrollment = getattr(conn, "voiceprint_enrollment", None)
     if enrollment is not None and enrollment.status.active:
@@ -166,7 +205,11 @@ async def startToChat(
     if meeting is not None and meeting.is_active():
         async with conn._meeting_turn_lock:
             mark_skip_memory_event(conn, 1, actual_text, "meeting_active")
-            await send_stt_message(conn, actual_text)
+            if getattr(conn, "reply_lifecycle", None) is not None:
+                await send_stt_display(conn, actual_text)
+            else:
+                # Compatibility for lightweight integrations without lifecycle.
+                await send_stt_message(conn, actual_text)
             meeting.prepare_turn(parsed_payload, interruption_text, speaker_name)
             logger = getattr(conn, "logger", None)
             if logger is not None:
@@ -245,18 +288,33 @@ async def startToChat(
         # 如果意图已被处理，不再进行聊天
         return True
 
-    # 意图未被处理，继续常规聊天流程，使用实际文本内容
-    await send_stt_message(conn, actual_text)
+    # 意图未被处理，先校验能力，再创建可追踪的回复 generation。
     if conn.llm is None:
-        conn.logger.bind(tag=TAG).warning("LLM未配置，无法生成回复")
+        conn.logger.bind(tag=TAG).warning("LLM未配置，拒绝启动回复轮次")
+        return True
+
+    if getattr(conn, "reply_lifecycle", None) is not None:
+        reply_generation = await begin_assistant_reply(conn, actual_text)
+    else:
+        reply_generation = await send_stt_message(conn, actual_text)
+    if getattr(conn, "reply_lifecycle", None) is not None and reply_generation is None:
         return True
 
     # 准备开始新会话
     with conn._abort_lock:
         conn.client_abort = False
 
-    future = submit_chat(actual_text)
-    future.add_done_callback(lambda f: conn.logger.bind(tag=__name__).error(f"chat() failed: {f.exception()}") if f.exception() else None)
+    try:
+        future = submit_chat(actual_text)
+    except Exception as error:
+        conn.logger.bind(tag=TAG).error(
+            f"提交LLM任务失败: errorType={type(error).__name__}"
+        )
+        await terminate_pending_reply(
+            conn, "llm_submit_failed", generation=reply_generation
+        )
+        return True
+    future.add_done_callback(on_chat_done)
     return True
 
 def update_voice_activity(conn: "ConnectionHandler", have_voice):

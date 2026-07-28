@@ -469,13 +469,42 @@ class TTSProviderBase(ABC):
             coordinator.mark_synthesizing(self.conn, message.sentence_id)
 
     def _mark_external_tts_failed(self, sentence_id=None):
-        coordinator = getattr(getattr(self, "conn", None), "external_tts_coordinator", None)
+        conn = getattr(self, "conn", None)
+        coordinator = getattr(conn, "external_tts_coordinator", None)
+        resolved_sentence_id = sentence_id or getattr(
+            self, "current_sentence_id", None
+        )
         if coordinator is not None:
             coordinator.mark_failed(
-                self.conn,
-                sentence_id or getattr(self, "current_sentence_id", None),
+                conn,
+                resolved_sentence_id,
                 "TTS synthesis failed",
             )
+        self._schedule_reply_failure(
+            "tts_synthesis_failed", resolved_sentence_id
+        )
+
+    def _schedule_reply_failure(self, reason, sentence_id=None):
+        """Converge normal and external generations after provider failures."""
+        conn = getattr(self, "conn", None)
+        lifecycle = getattr(conn, "reply_lifecycle", None)
+        loop = getattr(conn, "loop", None)
+        if lifecycle is None or loop is None or loop.is_closed():
+            return
+        snapshot = lifecycle.snapshot()
+        if not snapshot.is_active:
+            return
+        if sentence_id and snapshot.sentence_id not in {None, sentence_id}:
+            return
+        from core.handle.sendAudioHandle import terminate_pending_reply
+
+        coroutine = terminate_pending_reply(
+            conn, reason, generation=snapshot.generation
+        )
+        try:
+            asyncio.run_coroutine_threadsafe(coroutine, loop)
+        except Exception:
+            coroutine.close()
 
     def get_tts_text(self, sentence_id):
         """获取指定 sentence_id 对应的文本
@@ -716,13 +745,9 @@ class TTSProviderBase(ABC):
                 logger.bind(tag=TAG).error(
                     f"处理TTS文本失败: {str(e)}, 类型: {type(e).__name__}, 堆栈: {traceback.format_exc()}"
                 )
-                coordinator = getattr(self.conn, "external_tts_coordinator", None)
-                if coordinator is not None:
-                    coordinator.mark_failed(
-                        self.conn,
-                        getattr(message, "sentence_id", None),
-                        "TTS synthesis failed",
-                    )
+                self._mark_external_tts_failed(
+                    getattr(message, "sentence_id", None)
+                )
                 continue
 
     def _audio_play_priority_thread(self):
@@ -818,6 +843,9 @@ class TTSProviderBase(ABC):
                             sentence_id,
                             "TTS audio delivery timed out",
                         )
+                    self._schedule_reply_failure(
+                        "tts_audio_delivery_timeout", sentence_id
+                    )
                     continue
                 except concurrent.futures.CancelledError:
                     if self.conn.stop_event.is_set():
@@ -895,6 +923,9 @@ class TTSProviderBase(ABC):
                         sentence_id,
                         "TTS audio delivery failed",
                     )
+                self._schedule_reply_failure(
+                    "tts_audio_delivery_failed", sentence_id
+                )
 
     async def start_session(self, session_id):
         pass

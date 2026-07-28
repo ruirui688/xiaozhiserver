@@ -9,13 +9,40 @@ from core.utils.dialogue import Message
 from core.providers.tts.dto.dto import ContentType
 from core.handle.helloHandle import checkWakeupWords
 from plugins_func.register import Action, ActionResponse
-from core.handle.sendAudioHandle import send_stt_message
+from core.handle.sendAudioHandle import (
+    schedule_reply_termination,
+    send_stt_message,
+)
 from core.handle.reportHandle import enqueue_tool_report
 from core.utils.util import remove_punctuation_and_length
 from core.utils.correct_words import apply_correct_words
 from core.providers.tts.dto.dto import TTSMessageDTO, SentenceType
 
 TAG = __name__
+
+
+def _finish_intent_task(conn, future, generation, empty_reason):
+    try:
+        error = future.exception()
+    except Exception:
+        schedule_reply_termination(
+            conn, "intent_task_cancelled", generation=generation
+        )
+        return
+    if error is not None:
+        conn.logger.bind(tag=TAG).error(
+            f"意图任务执行失败: errorType={type(error).__name__}"
+        )
+        schedule_reply_termination(
+            conn, "intent_task_failed", generation=generation
+        )
+        return
+    try:
+        spoken = future.result()
+    except Exception:
+        spoken = False
+    if spoken is not True:
+        schedule_reply_termination(conn, empty_reason, generation=generation)
 
 
 def _bind_current_sentence_metrics(conn, turn_id=None):
@@ -168,7 +195,7 @@ async def process_intent_result(
                 return False
 
             if function_name == "result_for_context":
-                await send_stt_message(conn, original_text)
+                reply_generation = await send_stt_message(conn, original_text)
                 conn.client_abort = False
 
                 def process_context_result():
@@ -194,9 +221,25 @@ async def process_intent_result(
                                         请根据以上信息回答用户的问题：{original_text}"""
 
                     response = conn.intent.replyResult(context_prompt, original_text)
-                    speak_txt(conn, response)
+                    return speak_txt(conn, response)
 
-                conn.executor.submit(process_context_result)
+                try:
+                    future = conn.executor.submit(process_context_result)
+                except Exception:
+                    schedule_reply_termination(
+                        conn,
+                        "intent_submit_failed",
+                        generation=reply_generation,
+                    )
+                    return True
+                future.add_done_callback(
+                    lambda item: _finish_intent_task(
+                        conn,
+                        item,
+                        reply_generation,
+                        "intent_no_spoken_result",
+                    )
+                )
                 return True
 
             function_args = {}
@@ -214,7 +257,7 @@ async def process_intent_result(
                 "arguments": function_args,
             }
 
-            await send_stt_message(conn, original_text)
+            reply_generation = await send_stt_message(conn, original_text)
             conn.client_abort = False
 
             # 准备工具调用参数
@@ -255,6 +298,7 @@ async def process_intent_result(
                     )
 
                 # 上报工具调用结果
+                spoken = function_name == "play_music"
                 if result:
                     report_result = result.result if result.result else result.response
                     enqueue_tool_report(
@@ -269,21 +313,21 @@ async def process_intent_result(
                     if result.action == Action.RESPONSE:  # 直接回复前端
                         text = result.response
                         if text is not None:
-                            speak_txt(conn, text)
+                            spoken = speak_txt(conn, text)
                     elif result.action == Action.REQLLM:  # 调用函数后再请求llm生成回复
                         text = result.result
                         conn.dialogue.put(Message(role="tool", content=text))
                         llm_result = conn.intent.replyResult(text, original_text)
                         if llm_result is None:
                             llm_result = text
-                        speak_txt(conn, llm_result)
+                        spoken = speak_txt(conn, llm_result)
                     elif (
                         result.action == Action.NOTFOUND
                         or result.action == Action.ERROR
                     ):
                         text = result.response if result.response else result.result
                         if text is not None:
-                            speak_txt(conn, text)
+                            spoken = speak_txt(conn, text)
                     elif function_name != "play_music":
                         # For backward compatibility with original code
                         # 获取当前最新的文本索引
@@ -291,10 +335,27 @@ async def process_intent_result(
                         if text is None:
                             text = result.result
                         if text is not None:
-                            speak_txt(conn, text)
+                            spoken = speak_txt(conn, text)
+                return spoken
 
             # 将函数执行放在线程池中
-            conn.executor.submit(process_function_call)
+            try:
+                future = conn.executor.submit(process_function_call)
+            except Exception:
+                schedule_reply_termination(
+                    conn,
+                    "intent_submit_failed",
+                    generation=reply_generation,
+                )
+                return True
+            future.add_done_callback(
+                lambda item: _finish_intent_task(
+                    conn,
+                    item,
+                    reply_generation,
+                    "tool_no_spoken_result",
+                )
+            )
             return True
         return False
     except json.JSONDecodeError as e:
@@ -303,6 +364,8 @@ async def process_intent_result(
 
 
 def speak_txt(conn: "ConnectionHandler", text):
+    if text is None or not str(text).strip():
+        return False
     # 记录文本到 sentence_id 映射
     conn.tts.store_tts_text(conn.sentence_id, text)
 
@@ -322,3 +385,4 @@ def speak_txt(conn: "ConnectionHandler", text):
         )
     )
     conn.dialogue.put(Message(role="assistant", content=text))
+    return True

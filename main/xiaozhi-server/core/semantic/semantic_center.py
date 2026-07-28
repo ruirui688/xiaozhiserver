@@ -49,7 +49,7 @@ class SemanticCenter:
 
         from core.handle.sendAudioHandle import send_stt_message
 
-        await send_stt_message(conn, asr_result.display_text)
+        reply_generation = await send_stt_message(conn, asr_result.display_text)
 
         if decision.decision == "reject":
             conn.logger.bind(tag=__name__).debug("handle_user_text handled reject: %s", decision.reply)
@@ -77,7 +77,13 @@ class SemanticCenter:
                 decision.executor, decision.arguments,
             )
             result = await self._invoke_tool(conn, decision, turn_id)
-            await self._handle_tool_result(conn, result, decision, turn_id)
+            await self._handle_tool_result(
+                conn,
+                result,
+                decision,
+                turn_id,
+                reply_generation=reply_generation,
+            )
             return True
 
         return False
@@ -119,25 +125,76 @@ class SemanticCenter:
         return result or ActionResponse(Action.ERROR, response="工具没有返回结果。")
 
     async def _handle_tool_result(
-        self, conn, result, decision: Decision, turn_id=None
+        self,
+        conn,
+        result,
+        decision: Decision,
+        turn_id=None,
+        reply_generation=None,
     ) -> None:
         from plugins_func.register import Action
+        from core.handle.sendAudioHandle import schedule_reply_termination
 
+        spoken_or_submitted = False
         if result.action in (Action.RESPONSE, Action.NOTFOUND, Action.ERROR):
             text = result.response or result.result or "已处理。"
             await self._speak(conn, str(text), turn_id)
             conn.dialogue.put(Message(role="assistant", content=str(text)))
+            spoken_or_submitted = True
         elif result.action == Action.REQLLM:
             text = result.result or result.response or ""
             if text:
-                conn.executor.submit(
-                    conn.chat, str(text), 0, False, None, turn_id
-                )
+                try:
+                    if reply_generation is not None:
+                        future = conn.executor.submit(
+                            conn.chat,
+                            str(text),
+                            0,
+                            False,
+                            None,
+                            turn_id,
+                            reply_generation,
+                        )
+                    else:
+                        future = conn.executor.submit(
+                            conn.chat, str(text), 0, False, None, turn_id
+                        )
+                except Exception:
+                    schedule_reply_termination(
+                        conn,
+                        "semantic_llm_submit_failed",
+                        generation=reply_generation,
+                    )
+                else:
+                    spoken_or_submitted = True
+
+                    def finish_chat(item):
+                        try:
+                            failed = item.exception() is not None
+                            result_value = None if failed else item.result()
+                        except Exception:
+                            failed = True
+                            result_value = None
+                        if failed or result_value is not True:
+                            schedule_reply_termination(
+                                conn,
+                                "semantic_llm_task_failed",
+                                generation=reply_generation,
+                            )
+
+                    future.add_done_callback(finish_chat)
         elif result.action == Action.RECORD:
             text = result.response or result.result
             if text:
                 await self._speak(conn, str(text), turn_id)
                 conn.dialogue.put(Message(role="assistant", content=str(text)))
+                spoken_or_submitted = True
+        if not spoken_or_submitted:
+            schedule_reply_termination(
+                conn,
+                "semantic_tool_no_spoken_result",
+                generation=reply_generation,
+            )
         self.state_manager.transition(decision.next_state, decision.executor)
 
     async def _speak(self, conn, text: str, turn_id=None) -> None:

@@ -137,6 +137,7 @@ class ExternalTTSCoordinator:
                     "busy",
                     protected_busy,
                     request_id=request_id,
+                    busy_reason="protected_session_active",
                 )
                 return
 
@@ -149,13 +150,16 @@ class ExternalTTSCoordinator:
                 )
                 return
 
-            if self._is_busy(conn):
+            busy_reason = self._busy_reason(conn)
+            if busy_reason is not None:
                 if not interrupt:
+                    self._log_busy_rejection(conn, request_id, busy_reason)
                     await self._send_error(
                         conn,
                         "busy",
-                        "device is speaking or processing another turn",
+                        self._busy_message(busy_reason),
                         request_id=request_id,
+                        busy_reason=busy_reason,
                     )
                     return
                 await handleAbortMessage(conn)
@@ -164,7 +168,14 @@ class ExternalTTSCoordinator:
             with conn._abort_lock:
                 conn.client_abort = False
             conn.sentence_id = job.sentence_id
-            conn.client_is_speaking = True
+            reply_lifecycle = getattr(conn, "reply_lifecycle", None)
+            reply_generation = None
+            if reply_lifecycle is not None:
+                reply_generation = reply_lifecycle.begin(kind="external_tts")
+                reply_lifecycle.bind_sentence(reply_generation, job.sentence_id)
+                reply_lifecycle.mark_synthesizing(reply_generation)
+            else:
+                conn.client_is_speaking = True
 
             tts = conn.tts
             mark_exact_text = getattr(tts, "mark_exact_text", None)
@@ -206,7 +217,13 @@ class ExternalTTSCoordinator:
                 )
             except Exception:
                 self.mark_failed(conn, job.sentence_id, "TTS queue submission failed")
-                conn.clearSpeakStatus()
+                from core.handle.sendAudioHandle import terminate_pending_reply
+
+                await terminate_pending_reply(
+                    conn,
+                    "tts_queue_submission_failed",
+                    generation=reply_generation,
+                )
 
     async def _handle_status(self, conn, message: Dict[str, Any]) -> None:
         job_id = message.get("jobId")
@@ -245,7 +262,9 @@ class ExternalTTSCoordinator:
     def mark_failed(self, conn, sentence_id: Optional[str], error: str = "") -> None:
         self._transition(conn, sentence_id, "failed", error=error or "TTS failed")
         if sentence_id and sentence_id == getattr(conn, "sentence_id", None):
-            conn.clearSpeakStatus()
+            lifecycle = getattr(conn, "reply_lifecycle", None)
+            if lifecycle is None:
+                conn.clearSpeakStatus()
 
     def mark_interrupted(self, conn, sentence_id: Optional[str]) -> None:
         self._transition(conn, sentence_id, "interrupted")
@@ -366,11 +385,11 @@ class ExternalTTSCoordinator:
             return "device TTS is not initialized"
         if not ExternalTTSCoordinator._device_key(conn):
             return "device identity is unavailable"
-        modules_ready = getattr(conn, "_modules_ready", None)
-        if modules_ready is not None and not modules_ready.is_set():
-            return "device models are still initializing"
         if getattr(conn, "initialization_failed", False):
             return "device model initialization failed"
+        tts_ready = getattr(conn, "tts_ready", None)
+        if tts_ready is not None and not tts_ready.is_set():
+            return "device TTS is still initializing"
         if getattr(conn, "closing", False) or getattr(conn, "closed", False):
             return "device connection is closing"
         if getattr(conn, "loop", None) is None:
@@ -390,23 +409,69 @@ class ExternalTTSCoordinator:
             return "device voiceprint enrollment is active"
         return None
 
-    def _is_busy(self, conn) -> bool:
-        if getattr(conn, "client_is_speaking", False) or getattr(
-            conn, "client_have_voice", False
-        ):
-            return True
+    def _busy_reason(self, conn) -> Optional[str]:
+        reply_lifecycle = getattr(conn, "reply_lifecycle", None)
+        if reply_lifecycle is not None and reply_lifecycle.is_active:
+            return "assistant_reply_active"
+        if reply_lifecycle is None and getattr(conn, "client_is_speaking", False):
+            return "assistant_reply_active"
+        if getattr(conn, "client_have_voice", False):
+            return "user_voice_active"
         tts = getattr(conn, "tts", None)
         if tts is not None:
-            for queue_name in ("tts_text_queue", "tts_audio_queue"):
-                pending_queue = getattr(tts, queue_name, None)
-                if pending_queue is not None and pending_queue.qsize() > 0:
-                    return True
+            text_queue = getattr(tts, "tts_text_queue", None)
+            if text_queue is not None and text_queue.qsize() > 0:
+                return "tts_text_queue_pending"
+            audio_queue = getattr(tts, "tts_audio_queue", None)
+            if audio_queue is not None and audio_queue.qsize() > 0:
+                return "tts_audio_queue_pending"
         device_key = self._device_key(conn)
         with self._lock:
-            return any(
+            active_external_job = any(
                 job.device_key == device_key and job.status not in TERMINAL_STATUSES
                 for job in self._jobs.values()
             )
+        return "external_tts_job_active" if active_external_job else None
+
+    def _is_busy(self, conn) -> bool:
+        """Backward-compatible boolean view used by older integrations/tests."""
+        return self._busy_reason(conn) is not None
+
+    @staticmethod
+    def _busy_message(reason: str) -> str:
+        return {
+            "assistant_reply_active": "device assistant reply is active",
+            "user_voice_active": "device user voice is active",
+            "tts_text_queue_pending": "device TTS text queue is pending",
+            "tts_audio_queue_pending": "device TTS audio queue is pending",
+            "external_tts_job_active": "device external TTS job is active",
+        }.get(reason, "device is busy")
+
+    def _log_busy_rejection(self, conn, request_id: str, busy_reason: str) -> None:
+        lifecycle = getattr(conn, "reply_lifecycle", None)
+        snapshot = lifecycle.snapshot() if lifecycle is not None else None
+        tts = getattr(conn, "tts", None)
+        text_queue = getattr(tts, "tts_text_queue", None)
+        audio_queue = getattr(tts, "tts_audio_queue", None)
+        device_key = self._device_key(conn)
+        with self._lock:
+            active_external = any(
+                job.device_key == device_key and job.status not in TERMINAL_STATUSES
+                for job in self._jobs.values()
+            )
+        reply_age = snapshot.age_seconds if snapshot is not None else 0.0
+        conn.logger.bind(tag=__name__).warning(
+            "external_tts busy: "
+            f"requestId={json.dumps(request_id, ensure_ascii=True)}, "
+            f"busyReason={busy_reason}, "
+            f"replyGeneration={snapshot.generation if snapshot else 0}, "
+            f"replyState={snapshot.state.value if snapshot else 'UNKNOWN'}, "
+            f"replyAgeSeconds={reply_age:.3f}, "
+            f"textQueueSize={text_queue.qsize() if text_queue is not None else 0}, "
+            f"audioQueueSize={audio_queue.qsize() if audio_queue is not None else 0}, "
+            f"clientHaveVoice={bool(getattr(conn, 'client_have_voice', False))}, "
+            f"activeExternalJob={active_external}"
+        )
 
     async def _send_error(
         self,
@@ -415,6 +480,7 @@ class ExternalTTSCoordinator:
         message: str,
         *,
         request_id: Any = None,
+        busy_reason: Optional[str] = None,
     ) -> None:
         payload = {
             "type": "external_tts",
@@ -428,6 +494,8 @@ class ExternalTTSCoordinator:
         }
         if isinstance(request_id, str):
             payload["requestId"] = request_id
+        if busy_reason:
+            payload["busyReason"] = busy_reason
         await self._send_payload(conn, payload)
 
     async def _send_payload(self, conn, payload: Dict[str, Any]) -> None:

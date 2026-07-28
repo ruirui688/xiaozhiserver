@@ -76,6 +76,26 @@ class ListenTextMessageHandler(TextMessageHandler):
                     if turn_context is not None:
                         turn_context.clear()
         elif msg_json["state"] == "detect":
+            conversation_ready = getattr(conn, "conversation_ready", None)
+            if conversation_ready is not None and not conversation_ready.is_set():
+                if getattr(conn, "initialization_failed", False):
+                    clear_deferred = getattr(
+                        conn, "_clear_deferred_listen_detects", None
+                    )
+                    if callable(clear_deferred):
+                        clear_deferred("initialization_failed")
+                    conn.logger.bind(tag=TAG).warning(
+                        "初始化失败，拒绝listen.detect: "
+                        f"hasInitializationError={bool(getattr(conn, 'initialization_error', ''))}"
+                    )
+                    return
+                conn.defer_listen_detect(
+                    msg_json,
+                    ttl_seconds=getattr(
+                        conn, "_deferred_listen_detect_ttl_seconds", 10.0
+                    ),
+                )
+                return
             conn.client_have_voice = False
             turn_context = getattr(conn, "turn_context", None)
             if turn_context is not None:
@@ -124,7 +144,8 @@ class ListenTextMessageHandler(TextMessageHandler):
                     enqueue_asr_report(conn, original_text, [])
                     await send_stt_message(conn, original_text)
                     await send_tts_message(conn, "stop", None)
-                    conn.client_is_speaking = False
+                    if getattr(conn, "reply_lifecycle", None) is None:
+                        conn.client_is_speaking = False
                 elif is_wakeup_words:
                     arm_wakeup_vad_ignore(conn)
                     # 聊天记录保存设备真实检测到的唤醒词，不用内部问候语替代证据。

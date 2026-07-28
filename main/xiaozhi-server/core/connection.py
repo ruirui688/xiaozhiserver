@@ -64,6 +64,8 @@ from core.device_runtime_registry import register_connection, unregister_connect
 from core.observability import SessionTelemetry
 from core.session import (
     CloseCoordinator,
+    ReplyLifecycle,
+    RuntimeReadiness,
     SessionLifecycle,
     TurnContextBuffer,
     redact_dialogue_contexts_for_log,
@@ -168,6 +170,7 @@ class ConnectionHandler:
 
         self.need_bind = False  # 是否需要绑定设备
         self.initialization_failed = False  # 动态配置初始化是否失败
+        self.initialization_error = ""
         self.bind_completed_event = asyncio.Event()
         self.bind_code = None  # 绑定设备的验证码
         self.last_bind_prompt_time = 0  # 上次播放绑定提示的时间戳(秒)
@@ -191,9 +194,9 @@ class ConnectionHandler:
         # 客户端状态相关
         self.client_abort = False
         self.abort_generation = 0
-        self.client_is_speaking = False
         self.client_listen_mode = "auto"
         self.client_aec = False
+        self.reply_lifecycle = ReplyLifecycle()
 
         # 线程任务相关
         self.loop = None  # 在 handle_connection 中获取运行中的事件循环
@@ -237,8 +240,19 @@ class ConnectionHandler:
         self.voiceprint_provider = None
         self.voiceprint_enrollment = VoiceprintEnrollmentCollector()
 
-        # 模块初始化完成事件，_route_message 在处理音频前检查此事件
+        # 分能力就绪门禁。_modules_ready 仅保留给旧测试/扩展兼容，不再参与路由。
+        self.runtime_readiness = RuntimeReadiness(self)
+        self.binding_ready = self.runtime_readiness.binding_ready
+        self.tts_ready = self.runtime_readiness.tts_ready
+        self.conversation_ready = self.runtime_readiness.conversation_ready
+        self.audio_input_ready = self.runtime_readiness.audio_input_ready
         self._modules_ready = threading.Event()
+        self.deferred_listen_detects = (
+            self.runtime_readiness.deferred_listen_detects
+        )
+        self._deferred_listen_detect_ttl_seconds = (
+            self.runtime_readiness.detect_ttl_seconds
+        )
 
         # vad相关变量
         self.client_audio_buffer = bytearray()
@@ -527,6 +541,8 @@ class ConnectionHandler:
             return
 
         if self.initialization_failed:
+            if isinstance(message, str) and self._message_type(message) == "external_tts":
+                await handleTextMessage(self, message)
             return
 
         # 不需要绑定，继续处理消息
@@ -534,8 +550,8 @@ class ConnectionHandler:
         if isinstance(message, str):
             await handleTextMessage(self, message)
         elif isinstance(message, bytes):
-            # 等待模块初始化完成后再处理音频
-            if not self._modules_ready.is_set():
+            # 麦克风上行只依赖输入音频链路，不被 LLM/TTS 能力绑架。
+            if not self.audio_input_ready.is_set():
                 return
             if self.vad is None or self.asr is None:
                 return
@@ -548,6 +564,31 @@ class ConnectionHandler:
 
             # 不需要头部处理或没有头部时，直接处理原始消息
             self.asr_audio_queue.put(message)
+
+    @staticmethod
+    def _message_type(message: str):
+        try:
+            parsed = json.loads(message)
+        except (json.JSONDecodeError, TypeError):
+            return None
+        return parsed.get("type") if isinstance(parsed, dict) else None
+
+    def defer_listen_detect(self, message, ttl_seconds=10.0):
+        return self.runtime_readiness.defer_listen_detect(
+            message, ttl_seconds
+        )
+
+    async def flush_deferred_listen_detects(self):
+        return await self.runtime_readiness.flush_deferred_listen_detects()
+
+    def _clear_deferred_listen_detects(self, reason):
+        readiness = getattr(self, "runtime_readiness", None)
+        if readiness is None:
+            return
+        readiness.clear_deferred_listen_detects(reason)
+
+    def _mark_initialization_failed(self, error):
+        self.runtime_readiness.mark_initialization_failed(error)
 
     async def _process_mqtt_audio_message(self, message):
         """
@@ -683,13 +724,9 @@ class ConnectionHandler:
             tts_future = asyncio.run_coroutine_threadsafe(
                 self.tts.open_audio_channels(self), self.loop
             )
-            def _on_tts_open_done(f):
-                if f.exception():
-                    self.logger.bind(tag=TAG).warning(f"TTS channel open failed: {f.exception()}")
-                    self.client_is_speaking = False
-            tts_future.add_done_callback(_on_tts_open_done)
+            tts_future.result()
+            self.tts_ready.set()
             if self.need_bind:
-                self.bind_completed_event.set()
                 return
             self.selected_module_str = build_module_string(
                 self.config.get("selected_module", {})
@@ -737,7 +774,9 @@ class ConnectionHandler:
                 asr_future = asyncio.run_coroutine_threadsafe(
                     self.asr.open_audio_channels(self), self.loop
                 )
-                asr_future.add_done_callback(lambda f: self.logger.bind(tag=TAG).warning(f"ASR channel open failed: {f.exception()}") if f.exception() else None)
+                asr_future.result()
+                if self.vad is not None:
+                    self.audio_input_ready.set()
             else:
                 self.logger.bind(tag=TAG).warning("ASR未配置，语音识别暂不可用")
 
@@ -755,11 +794,36 @@ class ConnectionHandler:
             """注入工具调用few-shot示例（仅function_call模式）"""
             self._inject_tool_call_fewshot()
 
+            if self.llm is not None and self.tts_ready.is_set():
+                self.conversation_ready.set()
+                replay_future = asyncio.run_coroutine_threadsafe(
+                    self.flush_deferred_listen_detects(), self.loop
+                )
+                replay_future.add_done_callback(
+                    lambda future: self.logger.bind(tag=TAG).warning(
+                        f"回放延迟listen.detect失败: {future.exception()}"
+                    )
+                    if future.exception()
+                    else None
+                )
+            else:
+                self.logger.bind(tag=TAG).warning(
+                    "对话能力未就绪: LLM或TTS未配置，listen.detect保持门禁"
+                )
+
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"实例化组件失败: {e}")
+            self._mark_initialization_failed(e)
+            return False
 
-        if not self.closing:
+        if (
+            not self.closing
+            and self.tts_ready.is_set()
+            and self.conversation_ready.is_set()
+            and self.audio_input_ready.is_set()
+        ):
             self._modules_ready.set()
+        return True
 
     def _init_prompt_enhancement(self):
 
@@ -884,6 +948,7 @@ class ConnectionHandler:
             )
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"后台初始化失败: {e}")
+            self._mark_initialization_failed(e)
 
     async def _initialize_private_config_async(self):
         """从接口异步获取差异化配置（异步版本，不阻塞主循环）"""
@@ -892,6 +957,7 @@ class ConnectionHandler:
         if not self.read_config_from_api:
             self.need_bind = False
             self.bind_completed_event.set()
+            self.binding_ready.set()
             return True
         try:
             begin_time = time.time()
@@ -909,11 +975,13 @@ class ConnectionHandler:
             )
             self.need_bind = False
             self.bind_completed_event.set()
+            self.binding_ready.set()
         except DeviceNotFoundException as e:
             if self.closing:
                 return False
             self.need_bind = True
             self.bind_completed_event.set()
+            self.binding_ready.set()
             private_config = {}
         except DeviceBindException as e:
             if self.closing:
@@ -921,13 +989,15 @@ class ConnectionHandler:
             self.need_bind = True
             self.bind_code = e.bind_code
             self.bind_completed_event.set()
+            self.binding_ready.set()
             private_config = {}
         except Exception as e:
             if self.closing:
                 return False
             self.logger.bind(tag=TAG).error(f"异步获取差异化配置失败: {e}")
-            self.initialization_failed = True
+            self._mark_initialization_failed(e)
             self.bind_completed_event.set()
+            self.binding_ready.set()
             return False
 
         if self.closing:
@@ -954,7 +1024,8 @@ class ConnectionHandler:
             )
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"初始化组件失败: {e}")
-            modules = {}
+            self._mark_initialization_failed(e)
+            return False
         if self.closing:
             return False
         for name in ("tts", "vad", "asr", "llm", "intent", "memory"):
@@ -1160,8 +1231,10 @@ class ConnectionHandler:
 
         # 异步初始化工具处理器
         if hasattr(self, "loop") and self.loop:
-            handler_future = asyncio.run_coroutine_threadsafe(self.func_handler._initialize(), self.loop)
-            handler_future.add_done_callback(lambda f: self.logger.bind(tag=TAG).warning(f"Tool handler init failed: {f.exception()}") if f.exception() else None)
+            handler_future = asyncio.run_coroutine_threadsafe(
+                self.func_handler._initialize(), self.loop
+            )
+            handler_future.result()
 
     def _query_memory_context(self, query):
         if not query:
@@ -1333,6 +1406,7 @@ class ConnectionHandler:
         allow_tools=True,
         turn_context=None,
         turn_id=None,
+        reply_generation=None,
     ):
         if depth == 0:
             turn_id = self.turn_metrics.ensure_text_turn(turn_id)
@@ -1355,6 +1429,14 @@ class ConnectionHandler:
         if depth == 0:
             current_sentence_id = str(uuid.uuid4().hex)
             self.sentence_id = current_sentence_id  # 更新共享属性
+            if reply_generation is not None and not self.reply_lifecycle.bind_sentence(
+                reply_generation, current_sentence_id
+            ):
+                self.logger.bind(tag=TAG).warning(
+                    "忽略已失效的回复generation: "
+                    f"generation={reply_generation}"
+                )
+                return None
             self.turn_metrics.bind_sentence(current_sentence_id, turn_id)
             self.dialogue.put(
                 Message(role="user", content=query, turn_context=turn_context)
@@ -2161,8 +2243,16 @@ class ConnectionHandler:
     def _process_report(self, type, text, audio_data, report_time):
         self.report_manager._process_report(self, type, text, audio_data, report_time)
 
-    def clearSpeakStatus(self):
-        self.client_is_speaking = False
+    @property
+    def client_is_speaking(self):
+        """Derived compatibility view; the lifecycle is the source of truth."""
+        lifecycle = getattr(self, "reply_lifecycle", None)
+        return lifecycle.is_active if lifecycle is not None else False
+
+    def clearSpeakStatus(self, reason="legacy_clear"):
+        lifecycle = getattr(self, "reply_lifecycle", None)
+        if lifecycle is not None:
+            lifecycle.fail(reason=reason)
         self._tts_started_at = 0.0
         self.logger.bind(tag=TAG).debug(f"清除服务端讲话状态")
 
