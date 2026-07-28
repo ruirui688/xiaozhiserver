@@ -417,6 +417,7 @@ async def send_tts_message(
     protocol_sentence_id=None,
     drain_audio=True,
     reason=None,
+    allow_pending_stop=False,
 ):
     """发送 TTS 状态消息"""
     reply_lifecycle = getattr(conn, "reply_lifecycle", None)
@@ -455,12 +456,14 @@ async def send_tts_message(
             conn, "_tts_protocol_sentence_id", None
         )
         # STT start uses a pending (None) sentence id until the next FIRST binds it.
-        # A delayed LAST from the aborted sentence must not stop that new reply.
+        # A delayed provider LAST must not stop that new reply. Explicit abort or
+        # failure convergence is allowed to close the pending start itself.
         if (
             protocol_sentence_id is not None
             and current_protocol_sentence_id is None
             and getattr(conn, "_tts_protocol_start_sent", False)
             and not getattr(conn, "_tts_protocol_stop_sent", False)
+            and not allow_pending_stop
         ):
             return False
         if (
@@ -637,6 +640,7 @@ async def terminate_pending_reply(
             protocol_sentence_id=sentence_id,
             drain_audio=False,
             reason=reason,
+            allow_pending_stop=True,
         )
     finally:
         if lifecycle is None or lifecycle.is_current(target_generation):

@@ -12,8 +12,13 @@ settings.config_file_valid = True
 import core.handle.receiveAudioHandle as receive_handle
 from core.connection import ConnectionHandler
 from core.external_tts import ExternalTTSCoordinator
+from core.handle.abortHandle import handleAbortMessage
 from core.handle.receiveAudioHandle import startToChat
-from core.handle.sendAudioHandle import send_tts_message, terminate_pending_reply
+from core.handle.sendAudioHandle import (
+    send_stt_message,
+    send_tts_message,
+    terminate_pending_reply,
+)
 from core.handle.textHandler.listenMessageHandler import ListenTextMessageHandler
 from core.session import ReplyLifecycle, ReplyState, RuntimeReadiness
 
@@ -179,6 +184,124 @@ def test_tts_protocol_and_reply_generation_have_one_terminal_state():
     assert [item["state"] for item in conn.websocket.messages] == ["start", "stop"]
     assert lifecycle.state is ReplyState.COMPLETED
     assert lifecycle.is_active is False
+
+
+def _pending_reply_conn(sentence_id="sentence-stop"):
+    lifecycle = ReplyLifecycle()
+    conn = SimpleNamespace(
+        reply_lifecycle=lifecycle,
+        _tts_protocol_sentence_id=None,
+        _tts_protocol_start_sent=False,
+        _tts_protocol_stop_sent=False,
+        sentence_id=sentence_id,
+        session_id="session-1",
+        config={"enable_stop_tts_notify": False},
+        websocket=_WebSocket(),
+        audio_rate_controller=None,
+        external_tts_coordinator=None,
+        turn_metrics=None,
+        tts=SimpleNamespace(),
+        turn_context=None,
+        close_after_chat=False,
+        client_abort=False,
+        abort_generation=0,
+        _abort_lock=threading.Lock(),
+        logger=_Logger(),
+        clear_queues=lambda **_kwargs: None,
+        reset_audio_states=lambda: None,
+    )
+    conn.clearSpeakStatus = lambda _reason="legacy_clear": lifecycle.fail(
+        reason=_reason
+    )
+    return conn
+
+
+async def _start_and_bind_pending_reply(conn):
+    assert await send_tts_message(conn, "start") is True
+    generation = conn.reply_lifecycle.generation
+    assert conn.reply_lifecycle.bind_sentence(generation, conn.sentence_id) is True
+    return generation
+
+
+def test_abort_closes_pending_tts_start():
+    async def scenario():
+        conn = _pending_reply_conn()
+        generation = await _start_and_bind_pending_reply(conn)
+
+        await handleAbortMessage(conn)
+
+        assert [item["state"] for item in conn.websocket.messages] == [
+            "start",
+            "stop",
+        ]
+        assert conn.websocket.messages[-1]["reason"] == "abort"
+        assert conn.reply_lifecycle.generation == generation
+        assert conn.reply_lifecycle.state is ReplyState.INTERRUPTED
+        assert conn._tts_protocol_stop_sent is True
+
+    asyncio.run(scenario())
+
+
+def test_next_stt_sends_new_start_after_pending_abort():
+    async def scenario():
+        conn = _pending_reply_conn()
+        first_generation = await _start_and_bind_pending_reply(conn)
+        await handleAbortMessage(conn)
+        with conn._abort_lock:
+            conn.client_abort = False
+
+        next_generation = await send_stt_message(conn, "介绍一下冲压生产线")
+
+        assert next_generation == first_generation + 1
+        assert [item["type"] for item in conn.websocket.messages] == [
+            "tts",
+            "tts",
+            "stt",
+            "tts",
+        ]
+        assert [
+            item["state"]
+            for item in conn.websocket.messages
+            if item["type"] == "tts"
+        ] == ["start", "stop", "start"]
+        assert conn.reply_lifecycle.state is ReplyState.PENDING_LLM
+        assert conn._tts_protocol_sentence_id is None
+        assert conn._tts_protocol_start_sent is True
+        assert conn._tts_protocol_stop_sent is False
+
+    asyncio.run(scenario())
+
+
+def test_delayed_last_does_not_close_next_pending_reply():
+    async def scenario():
+        conn = _pending_reply_conn("sentence-old")
+        await _start_and_bind_pending_reply(conn)
+        await handleAbortMessage(conn)
+        with conn._abort_lock:
+            conn.client_abort = False
+        next_generation = await send_stt_message(conn, "下一轮")
+        conn.sentence_id = "sentence-new"
+        assert conn.reply_lifecycle.bind_sentence(
+            next_generation, conn.sentence_id
+        ) is True
+
+        assert await send_tts_message(
+            conn,
+            "stop",
+            protocol_sentence_id="sentence-old",
+            drain_audio=False,
+        ) is False
+
+        assert [
+            item["state"]
+            for item in conn.websocket.messages
+            if item["type"] == "tts"
+        ] == ["start", "stop", "start"]
+        assert conn.reply_lifecycle.state is ReplyState.PENDING_LLM
+        assert conn._tts_protocol_sentence_id is None
+        assert conn._tts_protocol_stop_sent is False
+
+    asyncio.run(scenario())
 
 
 def test_terminate_pending_reply_fails_only_current_generation():

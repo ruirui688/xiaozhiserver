@@ -43,6 +43,7 @@ async def handleAbortMessage(conn: "ConnectionHandler", preserve_user_audio=Fals
             protocol_sentence_id=getattr(conn, "sentence_id", None),
             drain_audio=False,
             reason="abort",
+            allow_pending_stop=True,
         )
     except Exception as e:
         conn.logger.bind(tag=TAG).error(f"发送打断消息失败: {e}")
