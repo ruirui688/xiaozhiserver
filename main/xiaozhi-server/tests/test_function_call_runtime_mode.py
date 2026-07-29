@@ -350,7 +350,8 @@ def test_direct_answer_streams_to_tts_before_llm_generator_finishes():
     assert conn.chat("给我讲一句话") is True
 
     assert observed_during_stream
-    assert observed_during_stream[:5] == [[], [], [], [], []]
+    assert observed_during_stream[:2] == [[], []]
+    assert observed_during_stream[2] == ["惠易新"]
     assert any(items for items in observed_during_stream[:-1])
     answer = (
         "惠易新能源专注于自动化冲压和智能物流整体解决方案，"
@@ -365,6 +366,29 @@ def test_direct_answer_streams_to_tts_before_llm_generator_finishes():
         "tool_choice": "required",
         "parallel_tool_calls": False,
     }
+
+
+def test_plain_content_streams_while_real_tools_are_attached():
+    conn_ref = {}
+    observed_during_stream = []
+
+    def responses():
+        for content in ["工具结果已经", "整理完成，", "现在直接回答你。"]:
+            yield content, None
+            observed_during_stream.append(conn_ref["conn"].tts.queued_text())
+
+    llm = CapturingFunctionCallLLM(responses())
+    conn = _chat_conn(llm, CapturingToolHandler([_tool("web_search")]))
+    conn_ref["conn"] = conn
+
+    assert conn.chat("世界杯支持谁") is True
+
+    assert observed_during_stream == [
+        ["工具结果已经"],
+        ["工具结果已经", "整理完成，"],
+        ["工具结果已经", "整理完成，", "现在直接回答你。"],
+    ]
+    assert conn.tts.stored_text == ["工具结果已经整理完成，现在直接回答你。"]
 
 
 def test_start_to_chat_keeps_successful_direct_answer_alive(monkeypatch):
@@ -411,10 +435,11 @@ def test_start_to_chat_keeps_successful_direct_answer_alive(monkeypatch):
 
     assert asyncio.run(startToChat(conn, "你好")) is True
     assert terminations == []
-    assert conn.tts.queued_text() == ["瑞瑞你好呀，小慧等你很久啦～"]
+    assert "".join(conn.tts.queued_text()) == "瑞瑞你好呀，小慧等你很久啦～"
     queued = list(conn.tts.tts_text_queue.queue)
     assert [item.sentence_type for item in queued] == [
         SentenceType.FIRST,
+        SentenceType.MIDDLE,
         SentenceType.MIDDLE,
         SentenceType.LAST,
     ]

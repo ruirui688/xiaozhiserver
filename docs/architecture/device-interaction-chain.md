@@ -270,11 +270,10 @@ SeedTTS2 双流 provider 为每个 `sentence_id` 维护独立的 `FIRST/LAST` �
 `tts_text_queue` 中的 `SentenceType.FIRST` 是本地逻辑轮次边界，不等同于火山上游的
 `EVENT_StartSession`。主 LLM 使用官方 `direct_answer` 虚拟工具表示“本轮直接回答”：同时支持
 `tool_choice=required` 和 `parallel_tool_calls=false` 的 OpenAI 兼容 provider 会先确定唯一分支，再从
-流式增长的 `direct_answer.response` 中保留 5 字 JSON 安全尾，并经过自然短句聚合后向 TTS 投递；
-首段默认至少 24 字，后续段默认至少 12 字，优先在完整标点处分段，禁止把 1～5 字模型 delta 直接送入
-双流 TTS。真实工具不会提前播报。缺少上述
-约束能力或违反工具协议的 provider 继续等完整响应确认后再提交普通文本，避免先播报
-过渡语、随后又调用设备工具。
+流式增长的 `direct_answer.response` 中只保留 5 字 JSON 安全尾，其余稳定增量立即向 TTS 投递，
+不再设置首段、后续段或自然标点聚合门槛。与官方链路一致，普通 content 即使在携带真实 tools 的
+请求和工具结果递归轮中也立即进入 TTS；会议静默裁决轮仍禁止提前出声。缺少单工具约束能力的
+provider 只对 `direct_answer` 保持完整响应确认回退。
 
 无论文本来自实时 `direct_answer` 还是兼容回退，SeedTTS2 都使用懒启动约定：逻辑 `FIRST` 只重置本轮流状态、登记 `sentence_id` 并准备幂等边界；
 第一段经清洗后非空的 `ContentType.TEXT` 或路径有效的 `ContentType.FILE` 到达时，才为该轮启动一次上游会话。后续文本
@@ -282,9 +281,9 @@ SeedTTS2 双流 provider 为每个 `sentence_id` 维护独立的 `FIRST/LAST` �
 创建空会话。该变化只调整厂商会话的启动时点，设备侧仍以实际音频对应的 `FIRST/LAST` 建立
 `tts start/stop`，并继续保证同一 `sentence_id` 最多各发送一次。
 
-SeedTTS2 收到首批 Opus 后先在 provider 内预缓冲约 600ms；短回复在 `SessionFinished` 时强制释放已有
-完整音频。只有存在非空首段字幕时才发布 `FIRST`，随后按 FIFO 发布预缓冲音频，因此设备不会再收到
-`FIRST, None`，HAL 也不会因约 0.2 秒极短首音频立即断粮。正常 `LAST` 只能在火山
+SeedTTS2 默认不再等待时间预缓冲；首个完整 Opus 帧到达后立即发布带非空首段字幕的 `FIRST`，随后
+按 FIFO 发布该帧和后续音频。`stream_prebuffer_ms` 仍可由私有配置显式设为正数恢复预缓冲。
+正常 `LAST` 只能在火山
 `SessionFinished`、Opus 尾帧冲刷完成并进入 provider FIFO 后发布；设备协议 `stop` 仍等待发送控制器
 排空。FIRST、音频、LAST 和 stop 同时携带同一 reply generation，旧 generation 的迟到边界会被丢弃。
 下行超时、断链、SessionFailed 或结束异常使用带 `tts_error:*` 原因的失败终态，关闭并废弃当前

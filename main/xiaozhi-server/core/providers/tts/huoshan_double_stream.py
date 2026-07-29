@@ -265,13 +265,20 @@ class TTSProvider(TTSProviderBase):
             config.get("send_timeout_seconds", 5),
             "send_timeout_seconds",
         )
-        self.stream_prebuffer_ms = self._positive_timeout(
-            config.get("stream_prebuffer_ms", 600),
-            "stream_prebuffer_ms",
-        )
-        self.stream_prebuffer_frames = max(
-            1, math.ceil(self.stream_prebuffer_ms / 60)
-        )
+        try:
+            self.stream_prebuffer_ms = float(
+                config.get("stream_prebuffer_ms", 0)
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "stream_prebuffer_ms 必须是大于或等于 0 的有限数字"
+            ) from exc
+        if (
+            not math.isfinite(self.stream_prebuffer_ms)
+            or self.stream_prebuffer_ms < 0
+        ):
+            raise ValueError("stream_prebuffer_ms 必须是大于或等于 0 的有限数字")
+        self.stream_prebuffer_frames = math.ceil(self.stream_prebuffer_ms / 60)
 
         model_key_msg = check_model_key("TTS", self.api_key)
         if model_key_msg:
@@ -635,7 +642,7 @@ class TTSProvider(TTSProviderBase):
             return True
 
     def _handle_session_opus(self, session_id, opus_data):
-        """Buffer initial Opus frames and publish one continuous device stream."""
+        """Publish Opus immediately; optional buffering remains configurable."""
         if not session_id or not opus_data:
             return False
         with self._session_audio_state_lock:

@@ -44,8 +44,8 @@ def test_doubao_tts_uses_seed_tts_2_default_protocol_defaults():
     assert provider.ws_url == "wss://openspeech.bytedance.com/api/v3/tts/bidirection"
     assert provider.audio_format == "pcm"
     assert provider.enable_ws_reuse is True
-    assert provider.stream_prebuffer_ms == 600
-    assert provider.stream_prebuffer_frames == 10
+    assert provider.stream_prebuffer_ms == 0
+    assert provider.stream_prebuffer_frames == 0
 
 
 def test_doubao_tts_accepts_biggtts_resource_id():
@@ -227,7 +227,7 @@ def test_last_audio_message_wait_budget_includes_queue_drain_timeout():
         ("response_timeout_seconds", "invalid"),
         ("send_timeout_seconds", float("inf")),
         ("audio_send_timeout_seconds", None),
-        ("stream_prebuffer_ms", 0),
+        ("stream_prebuffer_ms", -1),
     ],
 )
 def test_doubao_tts_rejects_invalid_timeout_configuration(key, value):
@@ -909,9 +909,16 @@ def test_tts_finish_half_open_cleans_state_and_next_session_recovers(monkeypatch
         assert first.closed is True
         assert provider.ws is None
         assert provider.activate_session is False
-        audio_items = [provider.tts_audio_queue.get_nowait()]
-        assert audio_items[0][0] is SentenceType.LAST
-        assert audio_items[0][6] == "tts_error:response_timeout"
+        audio_items = [
+            provider.tts_audio_queue.get_nowait()
+            for _ in range(provider.tts_audio_queue.qsize())
+        ]
+        assert [item[0] for item in audio_items] == [
+            SentenceType.FIRST,
+            SentenceType.MIDDLE,
+            SentenceType.LAST,
+        ]
+        assert audio_items[-1][6] == "tts_error:response_timeout"
 
         provider.conn.sentence_id = "session-2"
         await provider.start_session("session-2")
@@ -929,6 +936,26 @@ def test_tts_prebuffer_requires_non_empty_first_text():
     assert provider._enqueue_session_first_once("session-1", None) is False
     assert provider._enqueue_session_first_once("session-1", "   ") is False
     assert provider.tts_audio_queue.empty()
+
+
+def test_tts_default_releases_first_and_first_audio_immediately():
+    provider = _fault_provider()
+    provider._prepare_session_audio_state("session-1", generation=3)
+    provider._mark_session_content_requested(
+        "session-1", text="这是非空的首段字幕。", generation=3
+    )
+
+    assert provider._handle_session_opus("session-1", b"opus-0") is True
+
+    items = [provider.tts_audio_queue.get_nowait() for _ in range(2)]
+    assert [item[0] for item in items] == [
+        SentenceType.FIRST,
+        SentenceType.MIDDLE,
+    ]
+    assert items[0][2] == "这是非空的首段字幕。"
+    assert items[1][1] == b"opus-0"
+    assert all(item[3] == "session-1" for item in items)
+    assert all(item[5] == 3 for item in items)
 
 
 def test_tts_prebuffer_releases_first_and_audio_after_threshold():

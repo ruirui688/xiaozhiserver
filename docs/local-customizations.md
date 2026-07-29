@@ -74,7 +74,7 @@
   - main/manager-web/src/views/FunctionPluginManagement.vue
   - main/xiaozhi-server/config.yaml
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改聊天流式输出、function call、TTS 入队、打断处理、意图缓存、设备端 MCP 或 Function Plugin 预设，必须保留以下约定：句首口头禅在进入 TTS 和历史前清理；工具结果绑定本轮 sentence_id 和 abort_generation；REQLLM 工具结果二次生成时禁用继续调工具；声明式互动插件必须强制 user_message 参数并传递 context；多工具合并必须读取 ActionResponse.result/response；设备 MCP 发送失败必须立即返回，连接关闭时取消等待中的 MCP 调用，音量/亮度等控制类 MCP 使用短超时并直接回复；成语接龙、你说我猜、小智想词用户猜等纯语言游戏不得再由服务端状态机强制路由或注入为 tools，旧 provider_code 必须保留在 `GameSessionManager.FREEFORM_GAME_TOOLS` 并由 `ServerPluginExecutor` 跳过；当前智能体勾选对应功能插件时，只允许把插件里的 `instructions` / `opening_message` 作为临时软提示词注入主 LLM。
+官方同步时的处理规则：如果官方修改聊天流式输出、function call、TTS 入队、打断处理、意图缓存、设备端 MCP 或 Function Plugin 预设，必须保留以下约定：句首口头禅在进入 TTS 和历史前清理；工具结果绑定本轮 sentence_id 和 abort_generation；REQLLM 工具结果二次生成允许继续工具链，携带 tools 时的普通 content 按官方链路即时进入 TTS；声明式互动插件必须强制 user_message 参数并传递 context；多工具合并必须读取 ActionResponse.result/response；设备 MCP 发送失败必须立即返回，连接关闭时取消等待中的 MCP 调用，音量/亮度等控制类 MCP 使用短超时并直接回复；成语接龙、你说我猜、小智想词用户猜等纯语言游戏不得再由服务端状态机强制路由或注入为 tools，旧 provider_code 必须保留在 `GameSessionManager.FREEFORM_GAME_TOOLS` 并由 `ServerPluginExecutor` 跳过；当前智能体勾选对应功能插件时，只允许把插件里的 `instructions` / `opening_message` 作为临时软提示词注入主 LLM。
 ```
 
 ## 6. 云端运行架构与提示词注入文档
@@ -454,12 +454,12 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - enable_greeting 默认false，需要欢迎语时由私有配置显式覆盖。
   - 唤醒词缓存仅在开关开启且文本命中后等待TTS，普通文本不再被额外阻塞最多3秒。
   - 唤醒词聊天记录保留设备实际检测文本，不再用内部的“嘿，你好呀”替代；缓存欢迎音成功播放后必须上报实际助手文本和音频，保证后台按 user -> assistant 显示完整唤醒交互。
-  - 主 LLM 沿用官方 `direct_answer` 虚拟工具流播：仅当 provider 同时支持 `tool_choice=required` 和 `parallel_tool_calls=false` 时启用；增长中的 `response` 保留 5 字符 JSON 安全尾，并经过首段至少24字、后续至少12字的自然短句聚合后进入 TTS，禁止把1～5字 delta 直接送入双流 TTS；真实工具不播报过渡文本，不兼容端点通过 `supports_parallel_tool_calls: false` 回退到完整响应确认。
+  - 主 LLM 沿用官方 `direct_answer` 虚拟工具流播：仅当 provider 同时支持 `tool_choice=required` 和 `parallel_tool_calls=false` 时启用；增长中的 `response` 只保留 5 字符 JSON 安全尾，其余稳定增量立即进入 TTS，不再等待自然短句聚合。普通 content 即使携带真实 tools 也立即流播，工具结果递归轮继续保留 tools；会议静默裁决轮除外。不兼容端点的 `direct_answer` 仍在完整响应确认后提交。
   - `direct_answer` 与真实工具是本轮互斥出口；会议激活轮不启用普通回答流播。播报打断沿用官方 Abort/AEC 链路，不注册模型决定的停止说话工具，不维护停止词表或独立 LLM 打断分类器。
   - 纯 `direct_answer` 成功解析并提交非空 response 与 LAST 后，`ConnectionHandler.chat()` 必须返回 `True`；裸 `return` 会被 `startToChat.on_chat_done()` 解释为 `llm_no_spoken_result`，提前失败当前 generation 并清空尚未发送的 TTS 音频。空 response 才允许返回空结果，且不得伪造 LAST。
   - SeedTTS2 把本地逻辑轮次和上游厂商会话分开：`SentenceType.FIRST` 只重置流状态并登记本轮，第一段经清洗后非空的 `ContentType.TEXT` 或路径有效的 `ContentType.FILE` 到达时才启动一次上游会话；空轮 `LAST` 不得反向创建会话。
   - SeedTTS2 正常结束必须冲刷不足60ms的Opus尾帧，取消、失败或异常断链必须重置编码器，禁止残留样本跨会话。
-  - SeedTTS2 在设备 `FIRST` 前默认预缓冲600ms Opus，短回复在 `SessionFinished` 时强制释放；FIRST 必须携带非空首段字幕。provider 音频 FIFO、设备 FIRST/LAST/stop 必须绑定同一 reply generation，迟到旧 generation 不得结束新回复。
+  - SeedTTS2 默认不做首音频时间预缓冲：首个完整 Opus 帧到达即按 FIFO 发布非空字幕 `FIRST` 和音频。可选 `stream_prebuffer_ms` 仍允许显式恢复预缓冲；provider 音频 FIFO、设备 FIRST/LAST/stop 必须绑定同一 reply generation，迟到旧 generation 不得结束新回复。
   - SeedTTS2 只有在 `SessionFinished` 后才能发布正常 LAST；下行超时、断链、SessionFailed 和结束异常必须使用 `tts_error:*` 失败原因令 ReplyLifecycle 进入 FAILED，并关闭当前 WebSocket 供下一轮重建，不能伪装成正常播报完成。
   - SeedTTS2 按 sentence_id 维护 FIRST/LAST 状态；正常结束、结束超时、下行超时、WebSocket 断开、SessionFailed 和监听异常都必须走同一幂等收尾。只要已经发布 FIRST，就必须最终发布且只发布一次 LAST；迟到事件不能重复 LAST，残余旧会话事件不能重置当前会话。
   - 设备 TTS 协议层同一 sentence_id 的 start/stop 最多发送一次；主动 abort 已直接发送 stop 时，provider 不得再次补发。
@@ -500,7 +500,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 是否允许被官方覆盖：否
 本次发布状态：2026-07-29 的 function-call 流播仍只修改并验证源码；未构建镜像、未部署、未重启腾讯云生产服务。用户发布后才进行真实服务端回归，1.1-1.4s 仅为按既有阶段日志估算的可重叠窗口。
 真实外部回归：豆包录音ASR 4/4、流式ASR修复前后5/5、SeedTTS2连续5会话、DeepSeek v4-pro/v4-flash原生与仓库provider均成功；当前provider完整ASR→LLM→TTS链路连续3/3成功，平均约3.753秒。真实凭据只用于进程内测试且未落盘；测试完成后应轮换在会话或截图中暴露过的凭据。
-官方同步时的处理规则：如果官方修改聊天流式输出、OpenAI function-call、豆包录音/流式 ASR、SeedTTS2、TTS 音频发送、唤醒词处理、欢迎语、连接日志或设备注册表，保留官方 `direct_answer` 增量提取和5字符 JSON 安全尾，同时保留本地自然短句聚合、首段非空字幕预存、SeedTTS2 600ms音频预缓冲、reply generation 边界隔离、错误终态和 required/单工具能力门控及不兼容 provider 回退；还必须保留异步 HTTP 与总预算超时、流式 WebSocket 分阶段等待保护、本地 VAD 判停发送唯一 LAST、缓存首帧去重、短词识别和按会话身份清理、SeedTTS2 逻辑 `FIRST` 不提前启动上游会话且首段真实 `TEXT/FILE` 只启动一次、空轮 `LAST` 不创建厂商会话、任意非主动打断结束路径幂等收尾、连接级同轮 start/stop 去重、官方 STT 后立即进入可打断语义（不得另造 `response_pending`）、Abort 部分回复与 interruption 指标幂等收口、聊天和记忆重建按 `turn_id + message_sequence` 还原逻辑顺序、Opus尾帧冲刷、默认零毫秒首轮音频丢弃、欢迎语显式开启、唤醒词实际检测文本与实际播放回复双向上报、按请求头键名脱敏和对象身份注销校验。不得重新引入模型决定的停止说话工具、停止词表或独立 LLM 打断分类器；不得在 async provider 中引入 requests/time.sleep，不得让更短外层超时覆盖会话结束预算，不得把 Authorization、token、API key、Cookie 或 secret 写入日志；调整 ASR 超时、TTS 会话启动、分片/预缓冲或编码边界和唤醒回声窗口时必须同步更新默认配置、专项测试、语音延迟文档，并在真实设备上验证 function-call 长回复不断句丢音、FIRST字幕非空、异常后设备恢复监听、连续TTS无串音和重连映射稳定。
+官方同步时的处理规则：如果官方修改聊天流式输出、OpenAI function-call、豆包录音/流式 ASR、SeedTTS2、TTS 音频发送、唤醒词处理、欢迎语、连接日志或设备注册表，保留官方 `direct_answer` 增量提取和5字符 JSON 安全尾、携带 tools 时普通 content 即时流播、默认零毫秒 SeedTTS2 首音预缓冲，同时保留本地首段非空字幕预存、reply generation 边界隔离、错误终态和 required/单工具能力门控及不兼容 provider 回退；还必须保留异步 HTTP 与总预算超时、流式 WebSocket 分阶段等待保护、本地 VAD 判停发送唯一 LAST、缓存首帧去重、短词识别和按会话身份清理、SeedTTS2 逻辑 `FIRST` 不提前启动上游会话且首段真实 `TEXT/FILE` 只启动一次、空轮 `LAST` 不创建厂商会话、任意非主动打断结束路径幂等收尾、连接级同轮 start/stop 去重、官方 STT 后立即进入可打断语义（不得另造 `response_pending`）、Abort 部分回复与 interruption 指标幂等收口、聊天和记忆重建按 `turn_id + message_sequence` 还原逻辑顺序、Opus尾帧冲刷、默认零毫秒首轮音频丢弃、欢迎语显式开启、唤醒词实际检测文本与实际播放回复双向上报、按请求头键名脱敏和对象身份注销校验。不得重新引入模型决定的停止说话工具、停止词表或独立 LLM 打断分类器；不得在 async provider 中引入 requests/time.sleep，不得让更短外层超时覆盖会话结束预算，不得把 Authorization、token、API key、Cookie 或 secret 写入日志；调整 ASR 超时、TTS 会话启动、分片/预缓冲或编码边界和唤醒回声窗口时必须同步更新默认配置、专项测试、语音延迟文档，并在真实设备上验证 function-call 长回复不断句丢音、FIRST字幕非空、异常后设备恢复监听、连续TTS无串音和重连映射稳定。
 ```
 
 ## 26. 外置声纹服务、智能体隔离与五条上限

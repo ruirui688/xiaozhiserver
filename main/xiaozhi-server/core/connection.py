@@ -1655,11 +1655,9 @@ class ConnectionHandler:
         content_arguments = ""
         unhandled_tool_protocol = False
         emotion_flag = not meeting_tool_turn
-        # 官方主链路会流式播报 direct_answer 参数。普通 content 在携带
-        # tools 的请求中仍延迟到流结束：支持 required tool choice 的模型
-        # 应通过 direct_answer 返回普通回复；不兼容模型则安全回退，避免先
-        # 播报过渡文本、随后又选择真实工具。
-        defer_plain_content_for_tools = bool(tools_enabled)
+        # 跟随官方低延迟链路：普通 content 即使在携带 tools 的请求中也立即
+        # 进入 TTS。会议轮必须保持静默裁决，因此只保留会议专用延迟门控。
+        defer_plain_content_for_tools = bool(meeting_tool_turn)
         first_llm_chunk_at = None
         try:
             for response in llm_responses:
@@ -1715,9 +1713,8 @@ class ConnectionHandler:
                         tool_call_flag = True
                         self._merge_tool_calls(tool_calls_list, tools_call)
 
-                    # direct_answer.response 先经过自然短句聚合再进入 TTS。
-                    # 仅在 provider 支持 required + 单工具约束时启用；真实
-                    # 工具、会议轮和兼容回退路径均不提前出声。
+                    # direct_answer.response 跟随官方实现：除 JSON 末尾安全
+                    # 缓冲外，每个稳定增量立即进入 TTS。
                     if official_direct_answer_streaming:
                         real_tool_calls = [
                             call

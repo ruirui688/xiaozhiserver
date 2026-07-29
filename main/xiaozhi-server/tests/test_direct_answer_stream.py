@@ -12,7 +12,6 @@ if str(SERVER_ROOT) not in sys.path:
 from core.providers.tts.direct_answer_stream import (
     DirectAnswerStreamConfig,
     DirectAnswerTTSStream,
-    NaturalTextChunkBuffer,
 )
 
 
@@ -25,51 +24,23 @@ class CapturingTTS:
         self.previews.append((sentence_id, text))
 
 
-def test_small_deltas_are_aggregated_into_natural_chunks():
-    config = DirectAnswerStreamConfig(
-        json_tail_chars=5,
-        first_min_chars=12,
-        next_min_chars=6,
-        target_chars=16,
-        max_chars=24,
-    )
-    buffer = NaturalTextChunkBuffer(config)
-    text = ""
-    emitted = []
-
-    for delta in ["惠易", "公司", "专注", "新能源", "装备", "制造，", "并提供", "智能物流。"]:
-        text += delta
-        emitted.extend(buffer.update(text))
-
-    emitted.extend(buffer.update(text, final=True))
-
-    assert "".join(emitted) == text
-    assert emitted[0].endswith("，")
-    assert len(emitted[0]) >= config.first_min_chars
-    assert all(chunk for chunk in emitted)
-
-
 def test_stream_keeps_json_tail_and_stores_preview_before_first_queue_item():
     tts = CapturingTTS()
-    config = DirectAnswerStreamConfig(
-        json_tail_chars=5,
-        first_min_chars=8,
-        next_min_chars=6,
-        target_chars=12,
-        max_chars=20,
-    )
+    config = DirectAnswerStreamConfig(json_tail_chars=5)
     stream = DirectAnswerTTSStream(
         tts, "sentence-1", config, generation=7
     )
 
-    assert stream.update("这是第一段自然短句。尾部") == []
-    chunks = stream.update("这是第一段自然短句。后续内容还在生成")
+    assert stream.update("惠易") == []
+    assert stream.update("惠易新能源") == []
+    assert stream.update("惠易新能源专") == ["惠"]
+    chunks = stream.update("惠易新能源专注于")
 
-    assert chunks == ["这是第一段自然短句。"]
-    queued = tts.tts_text_queue.get_nowait()
-    assert tts.previews == [("sentence-1", chunks[0])]
-    assert queued.content_detail == chunks[0]
-    assert queued.generation == 7
+    assert chunks == ["易新"]
+    queued = list(tts.tts_text_queue.queue)
+    assert tts.previews == [("sentence-1", "惠")]
+    assert [item.content_detail for item in queued] == ["惠", "易新"]
+    assert all(item.generation == 7 for item in queued)
 
 
 def test_final_flush_preserves_complete_answer_without_json_suffix():
@@ -87,31 +58,39 @@ def test_final_flush_preserves_complete_answer_without_json_suffix():
 
 
 def test_emitted_prefix_cannot_be_rewritten_by_later_snapshot():
-    config = DirectAnswerStreamConfig(
-        first_min_chars=6,
-        next_min_chars=4,
-        target_chars=8,
-        max_chars=12,
+    stream = DirectAnswerTTSStream(
+        CapturingTTS(),
+        "sentence-1",
+        DirectAnswerStreamConfig(json_tail_chars=5),
     )
-    buffer = NaturalTextChunkBuffer(config)
-    buffer.update("已经确认的回答。后续内容")
+    stream.update("已经确认的回答。后续内容")
 
     with pytest.raises(ValueError, match="发送后发生变化"):
-        buffer.update("已经篡改的回答。后续内容")
+        stream.update("已经篡改的回答。后续内容")
 
 
 @pytest.mark.parametrize(
     "value,match",
     [
-        ({"first_min_chars": 0}, "first_min_chars"),
-        ({"first_min_chars": 30, "target_chars": 20}, "first_min_chars"),
-        (
-            {"first_min_chars": 10, "next_min_chars": 30, "target_chars": 20},
-            "next_min_chars",
-        ),
-        ({"target_chars": 80, "max_chars": 60}, "target_chars"),
+        ({"json_tail_chars": 0}, "json_tail_chars"),
+        ({"json_tail_chars": "invalid"}, "json_tail_chars"),
     ],
 )
 def test_invalid_stream_configuration_is_rejected(value, match):
     with pytest.raises(ValueError, match=match):
         DirectAnswerStreamConfig.from_mapping(value)
+
+
+def test_legacy_natural_chunk_settings_are_ignored():
+    config = DirectAnswerStreamConfig.from_mapping(
+        {
+            "enabled": True,
+            "json_tail_chars": 5,
+            "first_min_chars": 24,
+            "next_min_chars": 12,
+            "target_chars": 36,
+            "max_chars": 60,
+        }
+    )
+
+    assert config == DirectAnswerStreamConfig(enabled=True, json_tail_chars=5)
