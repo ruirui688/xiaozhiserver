@@ -4,7 +4,7 @@
     <div class="graph-toolbar">
       <el-input v-model="searchQuery" placeholder="搜索节点..." prefix-icon="el-icon-search" clearable size="small" style="width:220px" @input="onFuzzySearch" />
       <el-select v-model="filterState" placeholder="来源" clearable size="small" style="width:110px">
-        <el-option label="模型调用" value="auto" />
+        <el-option label="主动记忆" value="auto" />
         <el-option label="手动创建" value="manual" />
       </el-select>
       <el-select v-model="filterTier" placeholder="层级" clearable size="small" style="width:110px">
@@ -318,7 +318,7 @@ export default {
           const text = item.canonicalText || item.patternText || '?'
           nodes.push({
             id: fid, type: 'fact',
-            line1: text, sub: isAuto ? '模型调用' : '手动创建',
+            line1: text, sub: isAuto ? '主动记忆' : '手动创建',
             w: cardW, h: cardH, x, y,
             bg: isAuto ? '#f0faf5' : '#fef9f0',
             stroke: isAuto ? '#b8e0cc' : '#e8d8b8',

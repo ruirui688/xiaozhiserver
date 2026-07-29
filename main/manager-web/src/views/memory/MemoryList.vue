@@ -11,7 +11,7 @@
           <el-option v-for="s in speakers" :key="s.value" :label="s.label" :value="s.value" />
         </el-select>
         <el-select v-model="filterState" placeholder="来源" clearable size="small" style="width:110px">
-          <el-option label="模型调用" value="auto" />
+          <el-option label="主动记忆" value="auto" />
           <el-option label="手动创建" value="manual" />
         </el-select>
         <el-select v-model="filterTier" placeholder="层级" clearable size="small" style="width:110px">
@@ -40,7 +40,7 @@
       class="transparent-table"
       @row-click="handleRowClick"
       @selection-change="handleSelectionChange"
-      empty-text="暂无记忆数据。主对话模型调用记忆工具后会在这里显示。">
+      empty-text="暂无记忆数据。设备会话结束并由记忆模型完成整理后会在这里显示。">
       <el-table-column type="selection" width="40" />
       <el-table-column label="记忆内容" min-width="240" show-overflow-tooltip>
         <template slot-scope="{row}">
@@ -67,7 +67,7 @@
       <el-table-column label="来源" width="90">
         <template slot-scope="{row}">
           <el-tag size="mini" :type="row.confirmationState==='auto'?'success':'warning'">
-            {{ row.confirmationState === 'auto' ? '模型调用' : '手动创建' }}
+            {{ row.confirmationState === 'auto' ? '主动记忆' : '手动创建' }}
           </el-tag>
         </template>
       </el-table-column>

@@ -33,6 +33,7 @@ import xiaozhi.modules.memory.dto.MemoryForgetDTO;
 import xiaozhi.modules.memory.dto.MemoryQueryDTO;
 import xiaozhi.modules.memory.dto.MemoryRememberDTO;
 import xiaozhi.modules.memory.dto.MemoryRebuildRequestDTO;
+import xiaozhi.modules.memory.dto.MemorySessionProcessDTO;
 import xiaozhi.modules.memory.entity.MemoryCandidateEntity;
 import xiaozhi.modules.memory.entity.MemoryFactEntity;
 import xiaozhi.modules.memory.entity.MemoryForgetTombstoneEntity;
@@ -132,6 +133,16 @@ public class MemoryServiceImpl implements MemoryService {
         memoryMaintenanceService.applyForgetInstruction(scope.agent, scope.scopeId, dto.getText(),
                 dto.getPatternType(), dto.getReason(), dto.getSpeakerId(), dto.getSpeakerName(), shared,
                 actorType, actorId);
+    }
+
+    @Override
+    public int processSession(MemorySessionProcessDTO dto) {
+        AgentScope scope = resolveScope(dto.getAgentId(), dto.getMacAddress());
+        if (scope.agent == null) {
+            return 0;
+        }
+        return memoryMaintenanceService.processSessionConversation(
+                scope.agent, scope.scopeId, dto.getSessionId(), dto.getMessages());
     }
 
     @Override

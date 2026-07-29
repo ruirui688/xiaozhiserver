@@ -6,6 +6,7 @@ import xiaozhi.modules.memory.dto.MemoryForgetDTO;
 import xiaozhi.modules.memory.dto.MemoryQueryDTO;
 import xiaozhi.modules.memory.dto.MemoryRememberDTO;
 import xiaozhi.modules.memory.dto.MemoryRebuildRequestDTO;
+import xiaozhi.modules.memory.dto.MemorySessionProcessDTO;
 import xiaozhi.modules.memory.vo.MemoryDashboardVO;
 import xiaozhi.modules.memory.vo.MemoryQueryVO;
 import xiaozhi.modules.memory.vo.MemoryRebuildResultVO;
@@ -18,6 +19,8 @@ public interface MemoryService {
     void remember(MemoryRememberDTO dto, String actorType, String actorId);
 
     void forget(MemoryForgetDTO dto, String actorType, String actorId);
+
+    int processSession(MemorySessionProcessDTO dto);
 
     MemoryDashboardVO dashboard(String agentId);
 

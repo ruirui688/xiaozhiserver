@@ -33,7 +33,7 @@
               <div class="detail-field"><label>关联人物</label><span>{{ memory.speakerDisplay || '共享记忆' }}</span></div>
               <div class="detail-field" v-if="memory.speakerId"><label>声纹ID</label><span class="speaker-id">{{ memory.speakerId }}</span></div>
               <div class="detail-field"><label>类型</label><span>{{ memoryTypeLabel(memory.memoryType) }}</span></div>
-              <div class="detail-field"><label>来源</label><el-tag size="mini" :type="memory.confirmationState==='auto'?'success':'warning'">{{ memory.confirmationState==='auto'?'模型调用':'手动创建' }}</el-tag></div>
+              <div class="detail-field"><label>来源</label><el-tag size="mini" :type="memory.confirmationState==='auto'?'success':'warning'">{{ memory.confirmationState==='auto'?'主动记忆':'手动创建' }}</el-tag></div>
               <div class="detail-field"><label>层级</label><el-tag size="mini" :type="tierTagType">{{ tierLabel }}</el-tag></div>
               <div class="detail-field"><label>状态</label><el-tag size="mini" :type="memory.status==='active'?'success':'info'">{{ statusLabel(memory.status) }}</el-tag></div>
               <div class="detail-field"><label>敏感度</label><el-tag size="mini" :type="sensitivityTagType">{{ sensitivityLabel }}</el-tag></div>
@@ -138,7 +138,7 @@ export default {
       return s === 'sensitive' ? 'danger' : s === 'personal' ? 'warning' : ''
     },
     confirmationLabel() {
-      return this.memory.confirmationState === 'auto' ? '模型调用' : '手动创建'
+      return this.memory.confirmationState === 'auto' ? '主动记忆' : '手动创建'
     },
     confirmationTagType() {
       return this.memory.confirmationState === 'auto' ? 'success' : 'warning'

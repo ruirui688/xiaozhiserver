@@ -182,6 +182,43 @@ class ConfigServiceImplTest {
     }
 
     @Test
+    void runtimeConfigPreservesTextOnlyChatHistorySelectionWhenMemoryIsEnabled() {
+        AgentService agentService = mock(AgentService.class);
+        AgentVoicePrintDao voicePrintDao = mock(AgentVoicePrintDao.class);
+        AgentInfoVO agent = new AgentInfoVO();
+        agent.setId("agent-text-history");
+        agent.setMemModelId("Memory_managed_memory");
+        agent.setChatHistoryConf(Constant.ChatHistoryConfEnum.RECORD_TEXT.getCode());
+        agent.setIntentModelId("Intent_nointent");
+        when(agentService.getAgentById("agent-text-history")).thenReturn(agent);
+        when(voicePrintDao.selectList(any())).thenReturn(List.of());
+
+        ConfigServiceImpl service = new ConfigServiceImpl(
+                mock(SysParamsService.class),
+                mock(DeviceService.class),
+                mock(ModelConfigService.class),
+                mock(ModelRuntimeAssembler.class),
+                agentService,
+                mock(AgentTemplateService.class),
+                mock(RedisUtils.class),
+                mock(TimbreService.class),
+                mock(AgentPluginMappingService.class),
+                mock(AgentMcpAccessPointService.class),
+                mock(AgentContextProviderService.class),
+                mock(AgentFeishuService.class),
+                mock(VoiceCloneService.class),
+                voicePrintDao,
+                mock(VoiceprintApiClient.class),
+                mock(CorrectWordFileService.class),
+                mock(UserPluginConfigService.class),
+                mock(AgentSemanticSkillService.class));
+
+        Map<String, Object> runtime = service.getAgentRuntimeConfig("agent-text-history");
+
+        assertEquals(Constant.ChatHistoryConfEnum.RECORD_TEXT.getCode(), runtime.get("chat_history_conf"));
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     void semanticSkillsAreIncludedWhenIntentIsDisabled() {
         AgentService agentService = mock(AgentService.class);

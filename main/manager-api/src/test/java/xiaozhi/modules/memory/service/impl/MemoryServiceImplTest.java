@@ -52,6 +52,8 @@ import xiaozhi.modules.memory.dto.MemoryForgetDTO;
 import xiaozhi.modules.memory.dto.MemoryQueryDTO;
 import xiaozhi.modules.memory.dto.MemoryRememberDTO;
 import xiaozhi.modules.memory.dto.MemoryRebuildRequestDTO;
+import xiaozhi.modules.memory.dto.MemorySessionMessageDTO;
+import xiaozhi.modules.memory.dto.MemorySessionProcessDTO;
 import xiaozhi.modules.memory.entity.MemoryFactEntity;
 import xiaozhi.modules.memory.entity.MemoryForgetTombstoneEntity;
 import xiaozhi.modules.memory.service.impl.maintenance.MemoryMaintenanceOutputParser;
@@ -162,6 +164,107 @@ class MemoryServiceImplTest {
             TransactionCallback<Object> callback = invocation.getArgument(0);
             return callback.doInTransaction(mock(TransactionStatus.class));
         });
+    }
+
+    @Test
+    void managedMemoryProcessesCompleteSessionWithoutMainLlmToolCall() {
+        JSONObject managedConfig = new JSONObject();
+        managedConfig.set("type", "managed_memory");
+        managedConfig.set("maintenance_llm", MAINTENANCE_MODEL_ID);
+        ModelConfigEntity memoryModel = modelConfigService.getModelByIdFromCache(MEMORY_MODEL_ID);
+        when(modelRuntimeAssembler.buildTypedConfig(memoryModel)).thenReturn(managedConfig);
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of());
+        String action = """
+                {
+                  "actions": [
+                    {
+                      "action": "ADD",
+                      "source_role": "user",
+                      "evidence_quote": "我喜欢跑步",
+                      "memory_type": "个人偏好",
+                      "category": "运动爱好",
+                      "canonical_text": "用户喜欢跑步",
+                      "confidence": 0.95,
+                      "importance": 0.8,
+                      "memory_tier": "long_term",
+                      "sensitivity": "normal",
+                      "reason": "稳定的跨会话偏好"
+                    }
+                  ]
+                }
+                """;
+        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID)))
+                .thenReturn(action, action);
+
+        MemorySessionProcessDTO dto = new MemorySessionProcessDTO();
+        dto.setAgentId(AGENT_ID);
+        dto.setSessionId("session-active-memory");
+        MemorySessionMessageDTO user = new MemorySessionMessageDTO();
+        user.setRole("user");
+        user.setContent("我喜欢跑步");
+        MemorySessionMessageDTO assistant = new MemorySessionMessageDTO();
+        assistant.setRole("assistant");
+        assistant.setContent("跑步是很好的运动。");
+        dto.setMessages(List.of(user, assistant));
+
+        int changed = memoryService.processSession(dto);
+
+        assertEquals(1, changed);
+        verify(factDao).insert(any(MemoryFactEntity.class));
+        verify(llmService).generateJson(any(), eq(MAINTENANCE_MODEL_ID));
+    }
+
+    @Test
+    void managedMemoryDoesNotApplyAnAlreadyProcessedSessionAgain() {
+        JSONObject managedConfig = new JSONObject();
+        managedConfig.set("type", "managed_memory");
+        managedConfig.set("maintenance_llm", MAINTENANCE_MODEL_ID);
+        ModelConfigEntity memoryModel = modelConfigService.getModelByIdFromCache(MEMORY_MODEL_ID);
+        when(modelRuntimeAssembler.buildTypedConfig(memoryModel)).thenReturn(managedConfig);
+        when(revisionDao.selectCount(any(Wrapper.class))).thenReturn(0L, 1L);
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(llmService.generateJson(any(), eq(MAINTENANCE_MODEL_ID))).thenReturn("""
+                {
+                  "actions": [
+                    {
+                      "action": "ADD",
+                      "source_role": "user",
+                      "evidence_quote": "我喜欢跑步",
+                      "canonical_text": "用户喜欢跑步"
+                    }
+                  ]
+                }
+                """);
+
+        MemorySessionProcessDTO dto = new MemorySessionProcessDTO();
+        dto.setAgentId(AGENT_ID);
+        dto.setSessionId("session-already-processed");
+        MemorySessionMessageDTO user = new MemorySessionMessageDTO();
+        user.setRole("user");
+        user.setContent("我喜欢跑步");
+        dto.setMessages(List.of(user));
+
+        assertEquals(0, memoryService.processSession(dto));
+        verify(factDao, never()).insert(any(MemoryFactEntity.class));
+    }
+
+    @Test
+    void nonManagedMemoryDoesNotProcessSession() {
+        JSONObject shortMemoryConfig = new JSONObject();
+        shortMemoryConfig.set("type", "mem_local_short");
+        ModelConfigEntity memoryModel = modelConfigService.getModelByIdFromCache(MEMORY_MODEL_ID);
+        when(modelRuntimeAssembler.buildTypedConfig(memoryModel)).thenReturn(shortMemoryConfig);
+
+        MemorySessionProcessDTO dto = new MemorySessionProcessDTO();
+        dto.setAgentId(AGENT_ID);
+        dto.setSessionId("session-short-memory");
+        MemorySessionMessageDTO user = new MemorySessionMessageDTO();
+        user.setRole("user");
+        user.setContent("我喜欢跑步");
+        dto.setMessages(List.of(user));
+
+        assertEquals(0, memoryService.processSession(dto));
+        verify(llmService, never()).generateJson(any(), any());
     }
 
     @Test

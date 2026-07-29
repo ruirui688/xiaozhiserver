@@ -148,6 +148,59 @@ public final class PowerMemPrompts {
             }
             """;
 
+    /**
+     * 会话结束后的主动记忆提示词。行为参考官方 Memory provider：完整对话交给
+     * 记忆模型自动提取，不要求主对话模型调用任何记忆工具。
+     */
+    public static final String SESSION_ACTIONS_PROMPT = """
+            你是小智服务器的主动长期记忆模型。当前会话已经结束，请阅读完整对话，结合已有记忆，主动决定本次是否需要新增、修正、归档或删除长期记忆。
+
+            已有生效记忆：
+            {existing_memories}
+
+            本次完整对话：
+            {conversation}
+
+            要求：
+            1. 用户不需要明确说“记住”；只要用户实际说出或确认了值得跨会话使用的稳定信息，就应主动形成 ADD 或 UPDATE。
+            2. 一次性请求、当前播报状态、临时情绪、助手推测、工具输出和设备背景不能单独成为长期记忆。
+            3. 用户纠正旧信息时使用 UPDATE；明确撤销或否定旧信息时使用 ARCHIVE 或 DELETE，并填写真实 related_memory_id。
+            4. 不要使用固定关键词、预设业务分类或场景黑白名单替代语义判断。
+            5. 每条 ADD 必须能追溯到用户原话，source_role 必须是 user，evidence_quote 填最短证据。
+            6. 对话中的用户角色如果包含 speaker_id，动作必须保留对应 speaker_id；不得编造或交换身份。
+            7. canonical_text 是可直接用于后续对话的单条自然中文事实；没有值得长期保存的内容时返回 {"actions":[]}。
+            8. 只返回 JSON，不要解释，不要 Markdown。
+
+            JSON 格式：
+            {
+              "actions": [
+                {
+                  "action": "ADD|UPDATE|ARCHIVE|DELETE|NONE",
+                  "related_memory_id": "仅 UPDATE/ARCHIVE/DELETE 时填写已有记忆 ID，否则为空",
+                  "speaker_id": "事实来源用户的真实speaker_id；共享或未识别事实为空",
+                  "source_role": "user|assistant|tool",
+                  "evidence_quote": "支持该动作的最短用户原话",
+                  "memory_type": "最终确定的中文记忆类型",
+                  "category": "最终确定的中文分类",
+                  "canonical_text": "可直接写入记忆的中文事实",
+                  "confidence": 0.0,
+                  "importance": 0.0,
+                  "memory_tier": "working|short_term|long_term",
+                  "importance_dimensions": {
+                    "relevance": 0.0,
+                    "novelty": 0.0,
+                    "emotional_weight": 0.0,
+                    "factual_density": 0.0,
+                    "actionability": 0.0,
+                    "personal_nature": 0.0
+                  },
+                  "sensitivity": "normal|personal|sensitive",
+                  "reason": "决策原因，少于30字"
+                }
+              ]
+            }
+            """;
+
     public static final String JSON_REPAIR_PROMPT = """
             你是 JSON 修复器。下面是同一个记忆维护模型刚刚返回的内容，但它不是合法 JSON。
             请只做格式修复：保留原有 action、related_memory_id、speaker_id、source_role、evidence_quote、memory_type、category、canonical_text、confidence、importance、memory_tier、importance_dimensions、sensitivity、reason 的语义，不新增、不删除、不改写记忆判断。

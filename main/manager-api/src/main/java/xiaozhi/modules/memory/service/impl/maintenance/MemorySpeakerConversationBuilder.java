@@ -6,6 +6,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
 
 import xiaozhi.modules.agent.dto.AgentChatHistoryDTO;
+import xiaozhi.modules.memory.dto.MemorySessionMessageDTO;
 import xiaozhi.modules.memory.entity.MemorySourceEventEntity;
 import xiaozhi.modules.memory.utils.MemoryHelper;
 import xiaozhi.modules.memory.utils.MemorySpeakerUtils;
@@ -43,6 +44,39 @@ public class MemorySpeakerConversationBuilder {
                 default -> "事件";
             };
             builder.append(role).append("：").append(text).append("\n");
+        }
+        return new Conversation(
+                StringUtils.abbreviate(builder.toString(), MemoryHelper.SESSION_MAX_CHARS), speakers);
+    }
+
+    public Conversation fromMessages(List<MemorySessionMessageDTO> messages) {
+        Registry speakers = new Registry();
+        if (messages == null || messages.isEmpty()) {
+            return new Conversation("", speakers);
+        }
+        StringBuilder builder = new StringBuilder();
+        for (MemorySessionMessageDTO message : messages) {
+            if (message == null || StringUtils.isBlank(message.getContent())) {
+                continue;
+            }
+            String role = StringUtils.lowerCase(StringUtils.trimToEmpty(message.getRole()));
+            String content = MemorySpeakerUtils.contentFromChatPayload(message.getContent());
+            if (StringUtils.isBlank(content)) {
+                continue;
+            }
+            String displayRole = switch (role) {
+                case "user" -> {
+                    SpeakerIdentity speaker = MemorySpeakerUtils.fromChatContent(message.getContent());
+                    speakers.observe(speaker);
+                    yield MemorySpeakerUtils.userRole(speaker);
+                }
+                case "assistant" -> "助手";
+                case "tool" -> "工具";
+                default -> null;
+            };
+            if (displayRole != null) {
+                builder.append(displayRole).append("：").append(content).append("\n");
+            }
         }
         return new Conversation(
                 StringUtils.abbreviate(builder.toString(), MemoryHelper.SESSION_MAX_CHARS), speakers);

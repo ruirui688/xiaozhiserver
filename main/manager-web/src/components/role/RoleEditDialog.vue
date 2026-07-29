@@ -358,6 +358,9 @@
                   "
                   class="chat-history-options"
                 >
+                  <span class="chat-history-label">{{
+                    $t("roleConfig.chatHistoryStorage")
+                  }}</span>
                   <el-radio-group
                     v-model="form.chatHistoryConf"
                     @change="updateChatHistoryConf"
@@ -581,6 +584,9 @@ export default {
       skillCountLoadSeq: 0,
       ttsSettings: { volume: 0, speed: 0, pitch: 0 },
       tempSummaryMemory: "",
+      lastEnabledChatHistoryConf: [1, 2].includes(Number(form.chatHistoryConf))
+        ? Number(form.chatHistoryConf)
+        : 2,
       allFunctions: [],
       allKnowledgeBases: [],
       originalFunctions: [],
@@ -643,8 +649,14 @@ export default {
     },
     replaceFormWithoutTracking(form) {
       this.suppressFormTracking = true;
-      this.form = cloneRoleValue(form);
-      this.lastFormSnapshot = cloneRoleValue(form);
+      const nextForm = cloneRoleValue(form);
+      this.form = nextForm;
+      this.lastEnabledChatHistoryConf = [1, 2].includes(
+        Number(nextForm.chatHistoryConf)
+      )
+        ? Number(nextForm.chatHistoryConf)
+        : 2;
+      this.lastFormSnapshot = cloneRoleValue(nextForm);
       this.$nextTick(() => {
         this.suppressFormTracking = false;
         this.lastFormSnapshot = cloneRoleValue(this.form);
@@ -802,9 +814,12 @@ export default {
       }
       if (type === "Memory") {
         if (!this.isMemoryModelEnabled(value)) {
+          if ([1, 2].includes(Number(this.form.chatHistoryConf))) {
+            this.lastEnabledChatHistoryConf = Number(this.form.chatHistoryConf);
+          }
           this.form.chatHistoryConf = 0;
-        } else {
-          this.form.chatHistoryConf = 2;
+        } else if (![1, 2].includes(Number(this.form.chatHistoryConf))) {
+          this.form.chatHistoryConf = this.lastEnabledChatHistoryConf;
         }
         if (this.isSummaryMemoryDisabled(value)) {
           this.tempSummaryMemory = this.form.summaryMemory;
@@ -1127,6 +1142,10 @@ export default {
     updateChatHistoryConf() {
       if (!this.isMemoryModelEnabled(this.form.model.memModelId)) {
         this.form.chatHistoryConf = 0;
+        return;
+      }
+      if ([1, 2].includes(Number(this.form.chatHistoryConf))) {
+        this.lastEnabledChatHistoryConf = Number(this.form.chatHistoryConf);
       }
     },
     isMemoryModelEnabled(modelId) {
@@ -1469,9 +1488,17 @@ export default {
 
 .chat-history-options {
   display: flex;
+  align-items: center;
   gap: 10px;
   min-width: 250px;
   justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.chat-history-label {
+  color: #606266;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .chat-history-options ::v-deep .el-radio-button {

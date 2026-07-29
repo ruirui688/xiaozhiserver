@@ -887,6 +887,7 @@ export default {
   'roleConfig.knowledgeBases': '知识库',
   'roleConfig.noFunctionsSelected': '未配置功能',
   'roleConfig.noKnowledgeBaseSelected': '未配置知识库',
+  'roleConfig.chatHistoryStorage': '聊天记录保存',
   'roleConfig.reportText': '上报文字',
   'roleConfig.reportTextVoice': '上报文字+语音',
   'roleConfig.saveSuccess': '配置保存成功',

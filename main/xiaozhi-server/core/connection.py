@@ -1171,6 +1171,7 @@ class ConnectionHandler:
         self.memory.init_memory(
             role_id=self.device_id,
             llm=self.llm,
+            agent_id=self.config.get("agent_id"),
             summary_memory=self.config.get("summaryMemory", None),
             save_to_file=not self.read_config_from_api,
         )

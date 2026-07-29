@@ -388,72 +388,38 @@ async def query_managed_memory(
         return None
 
 
-async def remember_managed_memory(
+async def process_managed_memory_session(
     mac_address: str,
     agent_id: Optional[str],
-    text: str,
-    category: Optional[str] = None,
-    speaker_id: Optional[str] = None,
-    speaker_name: Optional[str] = None,
-    shared: bool = False,
-) -> bool:
-    """执行由主 LLM 主动发起的记忆写入。"""
-    if not text or not ManageApiClient._instance:
-        return False
+    session_id: str,
+    messages: list,
+) -> int:
+    """会话结束后把完整对话交给 manager-api 的记忆模型主动整理。"""
+    if not agent_id or not session_id or not messages or not ManageApiClient._instance:
+        return 0
     try:
-        await ManageApiClient._instance._execute_async_request(
+        config = getattr(ManageApiClient, "config", None) or {}
+        try:
+            timeout = max(30.0, float(config.get("memory_process_timeout", 120)))
+        except (TypeError, ValueError):
+            timeout = 120.0
+        result = await ManageApiClient._instance._execute_async_request(
             "POST",
-            "/config/memory/remember",
+            "/config/memory/process-session",
             json={
                 "macAddress": mac_address,
                 "agentId": agent_id,
-                "text": text,
-                "category": category,
-                "speakerId": speaker_id,
-                "speakerName": speaker_name,
-                "shared": shared,
+                "sessionId": session_id,
+                "messages": messages,
             },
+            timeout=timeout,
         )
-        return True
+        return int(result or 0)
     except Exception as e:
         logger.bind(tag="manage_api").warning(
-            f"LLM主动记忆写入失败: errorType={type(e).__name__}"
+            f"主动记忆会话处理失败: errorType={type(e).__name__}"
         )
-        return False
-
-
-async def forget_managed_memory(
-    mac_address: str,
-    agent_id: Optional[str],
-    text: str,
-    reason: Optional[str] = None,
-    speaker_id: Optional[str] = None,
-    speaker_name: Optional[str] = None,
-    shared: bool = False,
-) -> bool:
-    """执行由主 LLM 主动发起的记忆忘记。"""
-    if not text or not ManageApiClient._instance:
-        return False
-    try:
-        await ManageApiClient._instance._execute_async_request(
-            "POST",
-            "/config/memory/forget",
-            json={
-                "macAddress": mac_address,
-                "agentId": agent_id,
-                "text": text,
-                "reason": reason,
-                "speakerId": speaker_id,
-                "speakerName": speaker_name,
-                "shared": shared,
-            },
-        )
-        return True
-    except Exception as e:
-        logger.bind(tag="manage_api").warning(
-            f"LLM主动记忆忘记失败: errorType={type(e).__name__}"
-        )
-        return False
+        return 0
 
 
 async def execute_feishu_action(

@@ -41,6 +41,7 @@ import xiaozhi.modules.memory.dao.MemoryFactDao;
 import xiaozhi.modules.memory.dao.MemoryForgetTombstoneDao;
 import xiaozhi.modules.memory.dao.MemoryRevisionDao;
 import xiaozhi.modules.memory.dto.MemoryRebuildRequestDTO;
+import xiaozhi.modules.memory.dto.MemorySessionMessageDTO;
 import xiaozhi.modules.memory.entity.MemoryCandidateEntity;
 import xiaozhi.modules.memory.entity.MemoryFactEntity;
 import xiaozhi.modules.memory.entity.MemoryForgetTombstoneEntity;
@@ -50,6 +51,7 @@ import xiaozhi.modules.memory.service.MemoryMaintenanceService;
 import xiaozhi.modules.memory.service.MemorySettingsService;
 import xiaozhi.modules.memory.service.impl.maintenance.MemoryMaintenanceOutputParser;
 import xiaozhi.modules.memory.service.impl.maintenance.MemorySpeakerConversationBuilder;
+import xiaozhi.modules.memory.service.impl.maintenance.MemorySpeakerConversationBuilder.Conversation;
 import xiaozhi.modules.memory.service.impl.task.MemoryRebuildTaskContext;
 import xiaozhi.modules.memory.utils.MemoryHelper;
 import xiaozhi.modules.memory.utils.MemorySpeakerUtils;
@@ -83,6 +85,88 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
     private final MemorySettingsService memorySettingsService;
 
     // ===================== 公开方法 =====================
+
+    @Override
+    public int processSessionConversation(AgentEntity agent, String scopeId, String sessionId,
+                                          List<MemorySessionMessageDTO> messages) {
+        if (agent == null || StringUtils.isBlank(sessionId) || messages == null || messages.isEmpty()) {
+            return 0;
+        }
+        JSONObject memoryConfig = getMemoryRuntimeConfig(agent);
+        if (!"managed_memory".equalsIgnoreCase(memoryConfig.getStr("type"))) {
+            return 0;
+        }
+        String maintenanceModelId = StringUtils.defaultIfBlank(
+                memoryConfig.getStr(MemoryHelper.MAINTENANCE_LLM_FIELD),
+                memoryConfig.getStr("memory_maintenance_llm"));
+        if (StringUtils.isBlank(maintenanceModelId)) {
+            log.warn("主动记忆未配置维护模型, agentId={}", agent.getId());
+            return 0;
+        }
+        if (revisionDao.selectCount(new QueryWrapper<MemoryRevisionEntity>()
+                .eq("agent_id", agent.getId())
+                .eq("revision_action", "session_memory_processed")
+                .eq("actor_id", sessionId)) > 0) {
+            return 0;
+        }
+
+        Conversation conversation = conversationBuilder.fromMessages(messages);
+        if (StringUtils.isBlank(conversation.text())) {
+            return 0;
+        }
+        String prompt = PowerMemPrompts.SESSION_ACTIONS_PROMPT
+                .replace("{existing_memories}", buildMaintenanceMemoryContext(agent.getId()))
+                .replace("{conversation}", conversation.text());
+        String output = llmService.generateJson(prompt, maintenanceModelId);
+        JSONArray actions = outputParser.parseActionsResult(output);
+        if (actions == null && StringUtils.isNotBlank(output)) {
+            String repaired = llmService.generateJson(
+                    PowerMemPrompts.JSON_REPAIR_PROMPT.replace("{raw_output}", output),
+                    maintenanceModelId);
+            actions = outputParser.parseActionsResult(repaired);
+        }
+        if (actions == null) {
+            log.warn("主动记忆模型未返回可解析动作, agentId={}, sessionId={}", agent.getId(), sessionId);
+            return 0;
+        }
+
+        List<JSONObject> applicableActions = new ArrayList<>();
+        for (Object item : actions) {
+            JSONObject action = MemoryHelper.toJsonObject(item);
+            if (action == null || "NONE".equals(MemoryHelper.normalizeAction(action.getStr("action")))) {
+                continue;
+            }
+            attachUserEvidence(action, conversation.text());
+            SpeakerIdentity speaker = conversation.speakers().resolve(action);
+            if (speaker == null) {
+                log.warn("主动记忆动作人物归属不明确，已跳过: agentId={}, sessionId={}",
+                        agent.getId(), sessionId);
+                continue;
+            }
+            MemorySpeakerUtils.applyInternalIdentity(action, speaker);
+            applicableActions.add(action);
+        }
+        Integer applied = transactionTemplate.execute(status -> {
+            lockAgentForMemoryUpdate(agent.getId());
+            if (isSessionProcessed(agent.getId(), sessionId)) {
+                return 0;
+            }
+            int changed = 0;
+            for (JSONObject action : applicableActions) {
+                if (executeMemoryAction(agent, scopeId, null, action, maintenanceModelId, null)) {
+                    changed++;
+                }
+            }
+            writeRevision(agent.getId(), null, "session_memory_processed", null,
+                    JsonUtils.toJsonString(Map.of("sessionId", sessionId, "factsChanged", changed)),
+                    "system", sessionId, "会话结束后由记忆模型主动整理");
+            return changed;
+        });
+        int changed = applied == null ? 0 : applied;
+        log.info("主动记忆会话处理完成, agentId={}, sessionId={}, factsChanged={}",
+                agent.getId(), sessionId, changed);
+        return changed;
+    }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -761,6 +845,13 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                 .last("FOR UPDATE"));
     }
 
+    private boolean isSessionProcessed(String agentId, String sessionId) {
+        return revisionDao.selectCount(new QueryWrapper<MemoryRevisionEntity>()
+                .eq("agent_id", agentId)
+                .eq("revision_action", "session_memory_processed")
+                .eq("actor_id", sessionId)) > 0;
+    }
+
     private void archiveFactsForCapacity(List<MemoryFactEntity> facts, String modelId, MemoryRebuildResultVO result) {
         for (MemoryFactEntity fact : facts) {
             String before = JsonUtils.toJsonString(fact);
@@ -1013,21 +1104,26 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
     }
 
     private String getMaintenanceLlmModelId(AgentEntity agent) {
+        JSONObject config = getMemoryRuntimeConfig(agent);
+        return StringUtils.defaultIfBlank(config.getStr(MemoryHelper.MAINTENANCE_LLM_FIELD),
+                config.getStr("memory_maintenance_llm"));
+    }
+
+    private JSONObject getMemoryRuntimeConfig(AgentEntity agent) {
         if (agent == null || StringUtils.isBlank(agent.getMemModelId())) {
-            return null;
+            return new JSONObject();
         }
         try {
             ModelConfigEntity memoryConfig = modelConfigService.getModelByIdFromCache(agent.getMemModelId());
             if (memoryConfig == null) {
-                return null;
+                return new JSONObject();
             }
             JSONObject config = modelRuntimeAssembler.buildTypedConfig(memoryConfig);
-            return StringUtils.defaultIfBlank(config.getStr(MemoryHelper.MAINTENANCE_LLM_FIELD),
-                    config.getStr("memory_maintenance_llm"));
+            return config == null ? new JSONObject() : config;
         } catch (Exception e) {
             log.warn("读取记忆维护模型配置失败，agentId: {}, memModelId: {}, error: {}",
                     agent.getId(), agent.getMemModelId(), e.getMessage());
-            return null;
+            return new JSONObject();
         }
     }
 

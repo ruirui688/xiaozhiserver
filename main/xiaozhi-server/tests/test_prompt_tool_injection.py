@@ -5,6 +5,23 @@ from core.utils.context_provider import ContextDataProvider
 from core.utils.prompt_manager import PromptManager
 
 
+class NullLogger:
+    def bind(self, **kwargs):
+        return self
+
+    def debug(self, *args, **kwargs):
+        return None
+
+    def info(self, *args, **kwargs):
+        return None
+
+    def warning(self, *args, **kwargs):
+        return None
+
+    def error(self, *args, **kwargs):
+        return None
+
+
 def _tool(name):
     return {
         "type": "function",
@@ -17,7 +34,7 @@ def _tool(name):
 
 
 def _render_prompt(config, tools=None, dynamic_context=""):
-    manager = PromptManager(config)
+    manager = PromptManager(config, logger=NullLogger())
     manager.base_prompt_template = (
         Path(__file__).resolve().parents[1] / "agent-base-prompt.txt"
     ).read_text(encoding="utf-8")
@@ -133,13 +150,11 @@ def test_enabled_memory_and_voiceprint_sections_are_rendered():
             },
             "TTS": {},
         },
-        [_tool("manage_memory")],
     )
 
     assert "<speaker_recognition>" in prompt
     assert "<memory>" in prompt
-    assert "manage_memory" in prompt
-    assert "<tool_and_knowledge>" in prompt
+    assert "manage_memory" not in prompt
 
 
 def test_external_context_is_marked_as_untrusted_data():
@@ -170,7 +185,8 @@ def test_external_context_escapes_forged_prompt_boundaries(monkeypatch):
         "core.utils.context_provider.httpx.get", lambda *args, **kwargs: Response()
     )
     provider = ContextDataProvider(
-        {"context_providers": [{"url": "https://context.example/data"}]}
+        {"context_providers": [{"url": "https://context.example/data"}]},
+        logger=NullLogger(),
     )
 
     context = provider.fetch_all("device-test")

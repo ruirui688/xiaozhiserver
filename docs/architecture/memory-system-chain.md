@@ -1,237 +1,161 @@
 ---
 status: canonical
 owner: memory
-last_verified: 2026-07-23
+last_verified: 2026-07-29
 source_paths:
   - main/xiaozhi-server/core/providers/memory
-  - main/xiaozhi-server/core/utils/prompt_budget.py
-  - main/xiaozhi-server/plugins_func/functions/manage_memory.py
+  - main/xiaozhi-server/config/manage_api_client.py
   - main/manager-api/src/main/java/xiaozhi/modules/memory
   - main/manager-web/src/views/MemoryManagement.vue
 ---
 
 # 记忆系统完整链路
 
-本文说明托管长期记忆的真实运行链路。核心原则是：普通聊天不会被后端自动抽取为记忆，记忆变更必须由主对话 LLM 主动调用 `manage_memory` 工具。
-
-相关运行时上下文见[提示词注入工程](prompt-injection-engineering.md)，跨模块身份与数据责任见[数据与契约](data-and-contracts.md)。
+本文说明托管长期记忆的真实运行链路。`managed_memory` 参考官方 Memory provider 的保存方式：设备会话结束后，把完整对话交给已配置的记忆 LLM/SLM，由该模型主动提取、合并、修正或撤销长期记忆。主对话模型不需要调用 `manage_memory` 工具，用户也不需要明确说“记住”。
 
 ## 1. 总体链路
 
 ```text
-普通对话
-  -> /config/memory/events
-  -> ai_memory_source_event
-  -> 只保存原始证据和审计数据，不触发记忆提取
+智能体配置
+  -> 选择“大模型主动记忆”
+  -> 选择已配置并测试通过的主动记忆 LLM/SLM
+  -> 选择聊天记录只保存文字，或保存文字+音频
 
-主对话 LLM
-  -> 根据完整对话语义自主决定是否调用 manage_memory
-  -> operation=remember|forget
-  -> visibility=private|shared
-  -> /config/memory/remember 或 /config/memory/forget
-  -> maintenance_llm 只做去重、更新、结构化和真实 ID 选择
-  -> ai_memory_fact / ai_memory_forget_tombstone / ai_memory_revision
+实时对话
+  -> 用户/助手/工具事件继续写入 ai_memory_source_event，作为原始证据和审计记录
+  -> 主对话正常使用 LLM、TTS 和其他工具，不暴露 manage_memory
 
-下一轮对话
-  -> /config/memory/query
-  -> 当前说话人的私有事实 + 共享事实 + 忘记意图
-  -> 注入主对话 LLM
-  -> 主对话 LLM 根据当前语义决定是否使用
+设备会话结束
+  -> managed_memory.save_memory()
+  -> POST /config/memory/process-session
+  -> 记忆模型读取完整会话 + 当前生效记忆
+  -> 输出 ADD | UPDATE | ARCHIVE | DELETE | NONE
+  -> manager-api 校验人物归属、真实 memory_id、容量和事务边界
+  -> 写入 ai_memory_fact / ai_memory_revision / ai_memory_forget_tombstone
+
+下一次对话
+  -> POST /config/memory/query
+  -> 查询当前说话人可见的 private/shared 事实
+  -> 通过 <memory> 注入主对话 LLM
 ```
 
-系统没有姓名名单、业务关键词、条件任务类型、目标人物匹配、场景黑白名单或字符串相似度门控。
+## 2. 与官方实现的对应关系
 
-## 2. Python Memory Provider
+官方 `mem_local_short`、Mem0 和 PowerMem provider 都在 `save_memory()` 中接收完整会话，再由记忆模型或记忆服务自动保存。本项目的 `managed_memory` 保留相同触发时机，但把事实存储、人物隔离、审计和管理页面放在 manager-api/MySQL 中。
 
-| Provider | 查询方式 | 存储方式 |
-|----------|----------|----------|
+```text
+官方 provider: ConnectionHandler._save_and_close -> provider.save_memory(dialogue)
+本地 managed:  ConnectionHandler._save_and_close -> managed_memory.save_memory(dialogue)
+                 -> manager-api process-session -> maintenance_llm -> fact/revision
+```
+
+这条链路不依赖 Intent 是否为 `function_call`，也不会向主聊天模型注册额外记忆工具。
+
+## 3. 聊天记录与音频配置
+
+`AgentEntity.chatHistoryConf` 的含义保持不变：
+
+| 值 | 行为 |
+| --- | --- |
+| `0` | 不上报聊天记录；选择无记忆时使用 |
+| `1` | 保存文字，不保存聊天音频 |
+| `2` | 保存文字和聊天音频 |
+
+智能体配置页在启用记忆后显示“上报文字 / 上报文字+语音”。用户的选择会持久化，切换不同记忆模型时不得强制改回 `2`；临时切换到无记忆再切回时恢复上次启用状态的选择。
+
+主动记忆处理使用会话文本，不依赖音频文件。因此选择 `1` 仍可正常生成长期记忆，只是不保存聊天音频。
+
+## 4. Python Memory Provider
+
+| Provider | 查询方式 | 保存方式 |
+| --- | --- | --- |
 | `nomem` | 返回空 | No-op |
 | `mem_report_only` | 返回空 | 只上报聊天记录 |
-| `mem_local_short` | 本地短摘要 | YAML |
-| `mem0ai` | mem0 SDK | 第三方服务 |
-| `powermem` | PowerMem SDK | PowerMem 私有存储 |
-| `managed_memory` | HTTP 查询 manager-api | 主模型工具调用后委托 manager-api |
+| `mem_local_short` | 本地短摘要 | 会话结束后 LLM 摘要 |
+| `mem0ai` | mem0 SDK | 会话结束后 mem0 add |
+| `powermem` | PowerMem SDK | 会话结束后 PowerMem add |
+| `managed_memory` | HTTP 查询 manager-api | 会话结束后 POST 完整对话给 manager-api 主动整理 |
 
-`managed_memory` 的查询结果通过 `<memory>` 注入动态 system 上下文。查询失败或超时降级为空记忆，不阻塞语音回复。
+`managed_memory.save_memory()` 只提交非临时的 user/assistant/tool 消息，单条正文和消息数量均有上限。system prompt、临时 few-shot 和密钥不会进入请求。
 
-## 3. 原始事件
+## 5. manager-api 主动整理
 
-`reportHandle.py` 把用户、助手和工具事件上报到 `/config/memory/events`。事件包含会话、设备、角色、正文和可信声纹信息。
+`/config/memory/process-session` 位于 `/config/**`，由 `ServerSecretFilter` 校验服务端共享密钥。请求同时携带 `agentId` 和设备 MAC；服务端优先从可信设备绑定关系解析智能体，不能靠请求体把记忆写到其他智能体。
 
-新事件使用聊天轮次的 `started_at_epoch_ms + message_sequence` 作为 `source_timestamp`，同时保留数据库
-`created_at` 作为真实写入时间。这样异步 ASR、工具和被打断的助手报告即使乱序到达，原始证据时间仍按
-对话逻辑顺序展示；缺少轮次指标的旧事件继续使用原上报时间。
+处理步骤：
 
-`MemoryServiceImpl.recordEvent()` 只写 `ai_memory_source_event`：
+1. 确认所选 Memory 配置的 `type=managed_memory`。
+2. 读取 `maintenance_llm` 模型 ID，不复制 API Key、Base URL 或上游模型名。
+3. 将完整会话、可信 `speaker_id` 和当前生效事实交给记忆模型。
+4. 模型自主决定是否值得长期保存，以及 ADD/UPDATE/ARCHIVE/DELETE/NONE、正文、分类和层级。
+5. 第二次审校只检查证据、人物归属、结构和真实 ID，不使用关键词或业务场景规则替代模型判断。
+6. manager-api 在事务内校验容量、事实归属、状态和 ID 后写入，并记录 revision。
+7. 用 `session_memory_processed + sessionId` 记录已完成会话，避免同一关闭流程重复整理。
 
-- 不调用维护模型；
-- 不更新会话抽取水位；
-- 不创建候选或事实；
-- 不按空闲时间处理对话。
+合法的自动 ADD 必须有用户侧证据。助手回复和工具结果可以帮助理解上下文，但不能单独生成用户长期事实。
 
-旧库中的 `ai_memory_session_state` 表为已发布迁移遗留结构。为保持 Liquibase checksum 和历史库兼容，不修改旧迁移，但当前实时链路不再读取或写入该表。
-
-长期记忆数据层分工如下：
-
-| 数据 | 用途 |
-| --- | --- |
-| `ai_memory_source_event` | 原始对话证据，不触发抽取 |
-| `ai_memory_candidate` | 管理端预览和历史重建候选 |
-| `ai_memory_fact` | 生效、归档或删除的事实 |
-| `ai_memory_revision` | 所有维护动作的审计轨迹 |
-| `ai_memory_profile` / `ai_memory_tool_behavior` | 画像和工具行为投影 |
-| `ai_memory_forget_tombstone` | 供主模型理解的忘记意图 |
-
-## 4. 主模型记忆工具
-
-工具定义位于 `plugins_func/functions/manage_memory.py`。
+## 6. 人物隔离
 
 ```text
-manage_memory(
-  operation: remember | forget,
-  text: string,
-  visibility: private | shared,
-  category?: string,
-  reason?: string
-)
+会话只有一个可信 speaker_id -> 自动事实绑定该 speaker_id，作为 private 事实
+会话没有可信 speaker_id     -> 自动事实作为 shared 事实
+多人或已识别/未识别混合会话  -> 模型必须在动作中给出可验证 speaker_id，否则跳过该动作
 ```
-
-所有业务语义都由主对话 LLM 决定：
-
-- 每轮主动判断用户实际说出或确认的信息是否形成、修正或撤销了值得跨会话使用的稳定事实；
-- 是否需要修改记忆；
-- 使用 `remember` 还是 `forget`；
-- 记忆正文和分类；
-- 使用 `private` 还是 `shared`；
-- 以后在什么对话中使用已经注入的记忆。
-
-`private` 表示事实绑定当前可信 `speaker_id`，只对该说话人可见。`shared` 表示事实不绑定人物，可在该智能体后续与任何说话人的对话中注入。跨人物需求不使用后端姓名匹配；主模型在调用工具时直接选择 `shared`，后续仍由主模型根据记忆正文和当前对话判断是否行动。
-
-主动判断不等于后台自动抽取。主模型无需等待用户明确说“记住”，但只能依据用户实际说出或确认的内容；一次性请求、临时状态、助手推测、工具输出和设备上传的单轮背景不能写入长期记忆。
-
-工具只在已选择 `managed_memory` 且运行时支持原生 function call 时注册。这是能力可用性检查，不分析用户语义，也不决定是否写入。
-
-## 5. manager-api 维护
-
-`maintenance_llm` 只保存模型管理中的 LLM/SLM 配置 ID，不复制 API Key、Base URL 或上游模型名；调用时由
-manager-api 从标准模型配置组装真实参数。选择 `nomem` 时不得注入托管记忆，选择 `managed_memory` 时才展示并校验
-维护模型。PowerMem、mem0 和短摘要仍是独立 provider，不与 manager-api 事实层混存。
-
-`/config/memory/remember` 收到主模型决定后，维护模型只能在以下动作中整理：
-
-```text
-ADD     新建事实
-UPDATE  更新已有真实 memory_id
-```
-
-主模型的保存决定不能被维护提示词改成 `NONE`。维护模型负责正文规范化、分类、层级、重要性以及去重/更新选择。
-
-`/config/memory/forget` 由维护模型根据完整语义选择 `DELETE`、`ARCHIVE` 或 `NONE`，并且只能引用当前可见事实列表中的真实 ID。忘记意图可保存在 tombstone 中并注入主模型，但后端不再用字符串包含关系自动删除、过滤或阻断未来写入。
-
-后端只保留下列非业务边界：
-
-- 智能体和工作区所有权；
-- 可信 `speaker_id` 与私有事实隔离；
-- `private` 请求必须存在可信说话人；
-- UPDATE/DELETE/ARCHIVE/容量驱逐必须引用真实且可见的 ID；
-- 单智能体 active 正文容量上限；
-- 事务、幂等、状态和 revision 审计；
-- 输入长度、JSON 格式和敏感信息日志保护。
-
-后端不再执行：
-
-- 聊天结束或空闲后的自动抽取；
-- 固定重要性阈值和固定层级分类；
-- working/short-term 的固定 TTL；
-- 每日衰减或自动归档；
-- 关键词、姓名、场景、字符串包含或相似度判断；
-- 预设的条件任务和跨人物特殊可见性。
-
-## 6. 查询与人物隔离
 
 查询只按结构化归属过滤：
 
 ```text
-已识别说话人 -> shared 事实 + speaker_id 相同的 private 事实
-未识别说话人 -> shared 事实
+已识别说话人 -> shared + speaker_id 相同的 private
+未识别说话人 -> shared
 ```
 
-事实和忘记意图按智能体共享，不按来源设备 MAC 隔离。同一智能体切换设备后仍能召回已有事实；事实中的 `scope_id` / `mac_address` 仅用于来源审计。不同智能体仍由 `agent_id` 严格隔离。
+正文中出现另一个人的姓名不会扩大 private 事实的可见范围。
 
-共享事实对所有说话人可见，但主模型是否采用、何时采用、对谁采取动作，仍由主模型结合当前对话语义决定。私有事实不会因为正文中出现另一个人的姓名而扩大可见范围。
+## 7. 原始事件与管理端
 
-忘记名单作为文本上下文提供给主模型，不再由 Java 使用字符串规则过滤事实。这样既保留模型可理解的遗忘意图，又避免后端预设语义。
+`reportHandle.py` 仍把聊天和工具事件写入 `/config/memory/events`。这些事件用于证据、时间线和历史重建，不在单条事件到达时调用 LLM，避免每句话产生一次额外模型请求。
 
-当前工作区在 Python 注入前对动态记忆执行去重和字符预算控制，`<memory>` 内容最多保留 4000 字符和
-30 个列表项；静态角色规则与安全提示不参与裁剪。JSON 记忆被包装为可解析的截断预览，重复多轮注入会从原始
-system 模板重建而不是累计。该预算是字符级保护，不等同于具体模型 tokenizer 的 token 上限；真实模型仍需验证
-截断后相关性和上下文窗口余量。
+管理端保留：
 
-## 7. 管理端操作
+- 查看、编辑、归档和删除事实；
+- 手工记住与手工忘记；
+- 候选预览；
+- 从历史聊天异步重建；
+- 主动审查和 revision 时间线。
 
-管理端仍保留查看、编辑、归档、删除、手工记住、手工忘记、历史重建和主动审查。这些是用户明确触发的维护操作，不属于实时对话自动抽取。
+`confirmation_state=auto` 在页面显示为“主动记忆”，表示事实来自会话结束后的记忆模型处理；`manual` 显示为“手动创建”。
 
-管理端和移动端的手工“记住”直接调用 `/agent/{agentId}/memories/facts` 写入共享事实，
-不依赖维护模型，写入记录标记为 `confirmation_state=manual`。设备主模型调用
-`manage_memory` 时仍经过维护模型做结构化；即使维护模型返回非法 JSON 或 `NONE`，
-也不能撤销主模型已经作出的保存决定，正文会回退为原工具指令。
+## 8. 查询注入与降级
 
-清空后重建不会边调用模型边删除事实。系统先生成并验证仅含 `ADD` / `NONE` 的重建动作，再用一个短事务原子替换旧事实；任何写入失败都会回滚并保留事务开始前的记忆。
+`connection.py` 在新一轮用户问题到达时查询 manager-api。查询结果经 `prompt_budget.py` 去重和裁剪后放入 `<memory>` 数据段，最多保留 4000 字符和 30 个列表项。
 
-历史重建、会话总结、标题和聊天历史 API 共用 `AgentChatHistoryService.getChatHistoryBySessionId()`。
-该入口对新记录按 `started_at_epoch_ms`、同轮 `message_sequence` 排序，旧记录回退 `createdAt`；因此
-被打断后迟到落库的部分助手回答仍位于下一条用户消息之前，记忆重建不会把下一轮问题拼到上一轮回答前。
+manager-api 查询失败或超时时降级为空记忆，不阻塞实时语音回复。`nomem` 不查询、不注入；其他第三方 provider 继续使用各自实现，不能与 `managed_memory` 混写同一事实层。
 
-正式重建现在是服务端异步任务：创建端点返回 taskId，Redis 保存任务、最近任务指针和每智能体活动锁，
-worker 依次报告读取会话、抽取、复核、校验、应用和收尾进度，最终进入 `SUCCEEDED`、`FAILED` 或
-`TIMED_OUT`。同一智能体的重复创建返回当前活动任务。页面通过 `GET /rebuild-task` 或
-`GET /rebuild-task/{taskId}` 轮询，刷新页面、关闭后重进或启动响应中断都可以恢复状态；活动任务期间禁止并发重建、
-重审、清空、手工记住和忘记。重建预览与重审仍保留同步请求和结果不确定保护。
-
-创建任务必须先保存并读回确认状态与最近任务指针，任一步失败都按 taskId 回滚状态、指针和活动锁，且不得提交 worker。
-活动锁 TTL 为任务超时再加清理宽限；状态更新使用 Redis compare-and-set，超时、成功和失败只能有一个终态。调度器先把
-`TIMED_OUT` 写入 Redis，再尽力中断 worker，因此第三方 SDK 即使忽略中断并迟到返回，也不能覆盖终态。进程重启后
-`PENDING` / `RUNNING` 仍可查询；读取已过截止时间的任务会收敛为 `TIMED_OUT`。
-
-`confirmation_state=auto` 的界面显示名是“模型调用”，表示事实来自模型工具链路，不表示系统自动扫描聊天。
-
-兼容字段 `summary_memory` 仍被短摘要和角色配置链路消费。删除前必须同时完成 Java、Web、Mobile、Python、文档和
-Liquibase 补偿迁移，不能直接修改已发布 changeSet 或只提交 `DROP COLUMN`。
-
-## 8. 关键文件
+## 9. 关键文件
 
 | 文件 | 职责 |
-|------|------|
-| `plugins_func/functions/manage_memory.py` | 主 LLM 记忆工具 |
-| `core/providers/tools/server_plugins/plugin_executor.py` | 工具能力注册 |
-| `config/manage_api_client.py` | 记忆 HTTP 客户端 |
-| `core/handle/reportHandle.py` | 原始事件上报 |
-| `core/utils/dialogue.py` | 记忆与当前说话人注入 |
+| --- | --- |
+| `core/providers/memory/managed_memory/managed_memory.py` | 会话结束后提交完整对话、运行时查询 |
+| `config/manage_api_client.py` | `/config/memory/process-session` 和 query 客户端 |
+| `core/handle/reportHandle.py` | 原始聊天/工具事件上报 |
 | `MemoryConfigController.java` | server-to-server 记忆 API |
-| `MemoryServiceImpl.java` | 事件、CRUD 和工具请求编排 |
-| `MemoryMaintenanceServiceImpl.java` | 维护模型结构化治理 |
-| `MemoryRebuildTaskServiceImpl.java` | Redis 任务状态、每智能体互斥、超时和 worker 编排 |
-| `MemoryRebuildTaskContext.java` | 维护流程进度检查点和截止时间检查 |
-| `MemoryQueryServiceImpl.java` | 人物隔离查询与上下文构造 |
-| `PowerMemPrompts.java` | 工具调用后的维护提示词 |
-| `MemoryManagement.vue` | 管理端记忆页面 |
-| `memoryRebuildTaskState.mjs` | Web 轮询、页面恢复和终态显示规则 |
-| `prompt_budget.py` | 动态记忆、工具历史和知识上下文字符预算 |
+| `MemoryServiceImpl.java` | 可信智能体/设备作用域解析 |
+| `MemoryMaintenanceServiceImpl.java` | 主动抽取、审校、动作应用和审计 |
+| `MemorySpeakerConversationBuilder.java` | 对话正文和可信声纹人物构造 |
+| `PowerMemPrompts.java` | 会话主动记忆与历史重建提示词 |
+| `MemoryQueryServiceImpl.java` | private/shared 查询隔离 |
+| `RoleEditDialog.vue` | 记忆模式与文字/音频保存选择 |
+| `MemoryManagement.vue` | 长期记忆管理页面 |
 
-## 9. 验证重点
+## 10. 验证重点
 
-- 普通 `recordEvent()` 不调用 LLM、不创建事实；
-- 仓库不存在会话自动处理端点和定时抽取；
-- `manage_memory` 描述不含固定人物、业务场景或关键词；
-- 主模型选择 `private` 时保留可信人物归属；
-- 主模型选择 `shared` 时事实可被后续其他说话人查询；
-- tombstone 不做字符串匹配过滤；
-- 不存在固定 TTL、衰减任务和重要性阈值分类；
-- 越权 ID、私有记忆串读和容量越界仍被拒绝。
-- 同一智能体重复重建只创建一个 worker，任务终态不能被迟到结果覆盖；
-- 页面重建后能恢复 `PENDING` / `RUNNING`，失败轮询退避不超过 10 秒；
-- 超长记忆只裁剪动态 `<memory>`，不裁剪静态角色与安全规则。
-- 新聊天轮次按 user/tool/assistant 的 `message_sequence` 重建，被打断的助手片段不得落到下一轮用户消息之后；旧数据仍按 `createdAt`。
-
-自动测试应覆盖 service/controller 状态机、Web 轮询状态纯函数和 Python 上下文预算。真实 Redis Lua 序列化与 TTL、
-多进程重启、MySQL 事务隔离、浏览器刷新恢复以及忽略线程中断的真实外部模型仍需在集成环境验证。
+- `tools/list` 和主 LLM tools 中不存在 `manage_memory`；
+- 启用 `managed_memory` 时，不要求 Intent 为 function_call；
+- 会话结束后只提交非临时对话消息，并调用 `/config/memory/process-session`；
+- 未配置主动记忆模型时明确失败或跳过，不伪造成功；
+- 同一 session 不重复整理；
+- 自动 ADD 有用户证据，可信 speaker_id 不串写；
+- 文字模式和文字+音频模式都能生成记忆；
+- 用户选择的 `chatHistoryConf=1|2` 不被模型切换覆盖；
+- 查询失败降级为空，不阻塞语音回复；
+- 新迁移已登记到 `db.changelog-master.yaml`，不修改已发布 changeSet。

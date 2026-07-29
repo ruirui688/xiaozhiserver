@@ -214,6 +214,52 @@ describe("role configuration component state", () => {
     vm.$destroy();
   });
 
+  test("memory model changes preserve the user's text or text-and-audio choice", () => {
+    const component = loadVueComponent("src/components/role/RoleEditDialog.vue", {
+      "@/apis/api": { __esModule: true, default: {} },
+      "@/apis/httpRequest": { __esModule: true, default: {} },
+      "@/i18n": { __esModule: true, default: { t: (key) => key } },
+    });
+    const vm = createVm(component, {
+      initialForm: {
+        memModelId: "Memory_managed_memory",
+        chatHistoryConf: 1,
+      },
+      currentFunctions: [],
+      currentKnowledgeBases: [],
+    });
+
+    vm.handleModelChange("Memory", "Memory_managed_memory");
+    assert.equal(vm.form.chatHistoryConf, 1);
+
+    vm.handleModelChange("Memory", "Memory_nomem");
+    assert.equal(vm.form.chatHistoryConf, 0);
+
+    vm.form.model.memModelId = "Memory_managed_memory";
+    vm.handleModelChange("Memory", "Memory_managed_memory");
+    assert.equal(vm.form.chatHistoryConf, 1);
+
+    vm.form.chatHistoryConf = 2;
+    vm.updateChatHistoryConf();
+    vm.handleModelChange("Memory", "Memory_mem_local_short");
+    assert.equal(vm.form.chatHistoryConf, 2);
+    assert.equal(vm.submitSaveConfig("agent-1").chatHistoryConf, 2);
+
+    vm.replaceFormWithoutTracking({
+      ...vm.form,
+      chatHistoryConf: 1,
+      model: {
+        ...vm.form.model,
+        memModelId: "Memory_managed_memory",
+      },
+    });
+    vm.handleModelChange("Memory", "Memory_nomem");
+    vm.form.model.memModelId = "Memory_managed_memory";
+    vm.handleModelChange("Memory", "Memory_managed_memory");
+    assert.equal(vm.form.chatHistoryConf, 1);
+    vm.$destroy();
+  });
+
   test("failed save keeps the draft, reports the error, and duplicate clicks are gated", async () => {
     const update = deferredCallbacks();
     const api = {

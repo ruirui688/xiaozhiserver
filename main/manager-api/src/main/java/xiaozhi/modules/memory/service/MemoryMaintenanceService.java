@@ -1,13 +1,23 @@
 package xiaozhi.modules.memory.service;
 
+import java.util.List;
+
 import xiaozhi.modules.memory.dto.MemoryRebuildRequestDTO;
 import xiaozhi.modules.agent.entity.AgentEntity;
+import xiaozhi.modules.memory.dto.MemorySessionMessageDTO;
 import xiaozhi.modules.memory.vo.MemoryRebuildResultVO;
 
 /**
  * 长期记忆维护服务：会话记忆处理、记忆清理与重建、维护模型提取与决策。
  */
 public interface MemoryMaintenanceService {
+
+    /**
+     * 参考官方 Memory provider 的会话结束保存方式，由维护大模型从完整对话中
+     * 主动提取、合并或撤销长期记忆，不依赖主对话模型调用工具。
+     */
+    int processSessionConversation(AgentEntity agent, String scopeId, String sessionId,
+                                   List<MemorySessionMessageDTO> messages);
 
     /**
      * 清空指定智能体的所有记忆。

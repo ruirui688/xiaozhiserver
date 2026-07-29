@@ -7,12 +7,14 @@ import org.springframework.web.bind.annotation.RestController;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
 import xiaozhi.common.utils.Result;
 import xiaozhi.modules.memory.dto.MemoryEventDTO;
 import xiaozhi.modules.memory.dto.MemoryForgetDTO;
 import xiaozhi.modules.memory.dto.MemoryQueryDTO;
 import xiaozhi.modules.memory.dto.MemoryRememberDTO;
+import xiaozhi.modules.memory.dto.MemorySessionProcessDTO;
 import xiaozhi.modules.memory.service.MemoryService;
 import xiaozhi.modules.memory.vo.MemoryQueryVO;
 
@@ -48,6 +50,12 @@ public class MemoryConfigController {
     public Result<Void> forget(@RequestBody MemoryForgetDTO dto) {
         memoryService.forget(dto, "system", null);
         return new Result<Void>().ok(null);
+    }
+
+    @PostMapping("process-session")
+    @Operation(summary = "会话结束后由记忆大模型主动抽取长期记忆")
+    public Result<Integer> processSession(@RequestBody @Valid MemorySessionProcessDTO dto) {
+        return new Result<Integer>().ok(memoryService.processSession(dto));
     }
 
 }

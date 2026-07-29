@@ -26,7 +26,7 @@ class ServerPluginExecutor(ToolExecutor):
         """执行服务端插件工具"""
         if tool_name == "meeting_minutes" and not is_meeting_mode_enabled(conn):
             return ActionResponse(action=Action.NOTFOUND, response="插件函数不存在")
-        if tool_name == "manage_memory" and not self._is_managed_memory_enabled():
+        if tool_name == "manage_memory":
             return ActionResponse(action=Action.NOTFOUND, response="插件函数不存在")
 
         func_item = all_function_registry.get(tool_name)
@@ -84,8 +84,6 @@ class ServerPluginExecutor(ToolExecutor):
         necessary_functions = ["handle_exit_intent", "get_lunar"]
         if is_meeting_mode_enabled(self.conn):
             necessary_functions.append("meeting_minutes")
-        if self._is_managed_memory_enabled():
-            necessary_functions.append("manage_memory")
 
         # 获取配置中的函数
         selected_intent = self.config.get("selected_module", {}).get("Intent")
@@ -119,19 +117,13 @@ class ServerPluginExecutor(ToolExecutor):
                 self.conn
             ):
                 continue
-            if func_name == "manage_memory" and not self._is_managed_memory_enabled():
+            if func_name == "manage_memory":
                 continue
             if (
                 func_name == "meeting_minutes"
                 and getattr(self.conn, "intent_type", None) != "function_call"
             ):
                 continue
-            if (
-                func_name == "manage_memory"
-                and getattr(self.conn, "intent_type", None) != "function_call"
-            ):
-                continue
-
             func_item = all_function_registry.get(func_name)
             if func_item:
                 tool_description = copy.deepcopy(func_item.description)
@@ -173,20 +165,13 @@ class ServerPluginExecutor(ToolExecutor):
 
         return tools
 
-    def _is_managed_memory_enabled(self) -> bool:
-        selected_memory = self.config.get("selected_module", {}).get("Memory")
-        if not selected_memory:
-            return False
-        memory_config = self.config.get("Memory", {}).get(selected_memory, {})
-        return memory_config.get("type") == "managed_memory"
-
     def has_tool(self, tool_name: str) -> bool:
         """检查是否有指定的服务端插件工具"""
         if tool_name in GameSessionManager.FREEFORM_GAME_TOOLS:
             return False
         if tool_name == "meeting_minutes" and not is_meeting_mode_enabled(self.conn):
             return False
-        if tool_name == "manage_memory" and not self._is_managed_memory_enabled():
+        if tool_name == "manage_memory":
             return False
         return (
             tool_name in all_function_registry

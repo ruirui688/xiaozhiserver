@@ -68,7 +68,7 @@
       </div>
       <div class="stat-card stat-card--auto">
         <em>{{ activeFacts.filter(f => f.confirmationState === 'auto').length }}</em>
-        <span>模型调用</span>
+        <span>主动记忆</span>
       </div>
       <div class="stat-card">
         <em>{{ categories.length }}</em>
