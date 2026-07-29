@@ -1906,11 +1906,14 @@ class ConnectionHandler:
                     self.logger.bind(tag=TAG).debug(
                         f"模型选择 direct_answer，流式已播报，写入对话历史"
                     )
+                    direct_answer_submitted = False
                     for tc in direct_answer_calls:
                         da_response = self._extract_direct_answer_response(tc.get("arguments", "{}"))
                         if da_response:
                             # 写入对话历史
                             da_response = self._clean_response_garbage(da_response)
+                            if not da_response:
+                                continue
                             stream = tc.get("_da_stream")
                             if stream is None:
                                 stream = DirectAnswerTTSStream(
@@ -1923,9 +1926,10 @@ class ConnectionHandler:
                             stream.finish(da_response)
                             self.tts.store_tts_text(current_sentence_id, da_response)
                             self.dialogue.put(Message(role="assistant", content=da_response))
+                            direct_answer_submitted = True
 
                     if not real_tool_calls:
-                        if depth == 0:
+                        if direct_answer_submitted and depth == 0:
                             self.tts.tts_text_queue.put(
                                 TTSMessageDTO(
                                     sentence_id=current_sentence_id,
@@ -1934,7 +1938,12 @@ class ConnectionHandler:
                                     generation=current_reply_generation,
                                 )
                             )
-                        return
+                        if direct_answer_submitted:
+                            return True
+                        self.logger.bind(tag=TAG).warning(
+                            "direct_answer 未解析到有效 response，未提交TTS"
+                        )
+                        return None
 
                     tool_calls_list = real_tool_calls
 

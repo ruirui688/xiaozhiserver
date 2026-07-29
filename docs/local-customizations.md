@@ -456,6 +456,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - 唤醒词聊天记录保留设备实际检测文本，不再用内部的“嘿，你好呀”替代；缓存欢迎音成功播放后必须上报实际助手文本和音频，保证后台按 user -> assistant 显示完整唤醒交互。
   - 主 LLM 沿用官方 `direct_answer` 虚拟工具流播：仅当 provider 同时支持 `tool_choice=required` 和 `parallel_tool_calls=false` 时启用；增长中的 `response` 保留 5 字符 JSON 安全尾，并经过首段至少24字、后续至少12字的自然短句聚合后进入 TTS，禁止把1～5字 delta 直接送入双流 TTS；真实工具不播报过渡文本，不兼容端点通过 `supports_parallel_tool_calls: false` 回退到完整响应确认。
   - `direct_answer` 与真实工具是本轮互斥出口；会议激活轮不启用普通回答流播。播报打断沿用官方 Abort/AEC 链路，不注册模型决定的停止说话工具，不维护停止词表或独立 LLM 打断分类器。
+  - 纯 `direct_answer` 成功解析并提交非空 response 与 LAST 后，`ConnectionHandler.chat()` 必须返回 `True`；裸 `return` 会被 `startToChat.on_chat_done()` 解释为 `llm_no_spoken_result`，提前失败当前 generation 并清空尚未发送的 TTS 音频。空 response 才允许返回空结果，且不得伪造 LAST。
   - SeedTTS2 把本地逻辑轮次和上游厂商会话分开：`SentenceType.FIRST` 只重置流状态并登记本轮，第一段经清洗后非空的 `ContentType.TEXT` 或路径有效的 `ContentType.FILE` 到达时才启动一次上游会话；空轮 `LAST` 不得反向创建会话。
   - SeedTTS2 正常结束必须冲刷不足60ms的Opus尾帧，取消、失败或异常断链必须重置编码器，禁止残留样本跨会话。
   - SeedTTS2 在设备 `FIRST` 前默认预缓冲600ms Opus，短回复在 `SessionFinished` 时强制释放；FIRST 必须携带非空首段字幕。provider 音频 FIFO、设备 FIRST/LAST/stop 必须绑定同一 reply generation，迟到旧 generation 不得结束新回复。

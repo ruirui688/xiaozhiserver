@@ -58,8 +58,9 @@ fake_logger_module.create_connection_logger = (
 sys.modules.setdefault("config.logger", fake_logger_module)
 
 from core.connection import ConnectionHandler
+from core.handle.receiveAudioHandle import startToChat
 from core.providers.intent.function_call.function_call import IntentProvider as FunctionCallIntent
-from core.providers.tts.dto.dto import ContentType
+from core.providers.tts.dto.dto import ContentType, SentenceType
 from plugins_func.register import Action, ActionResponse
 
 
@@ -346,7 +347,7 @@ def test_direct_answer_streams_to_tts_before_llm_generator_finishes():
     conn = _chat_conn(llm, CapturingToolHandler([_tool("play_music")]))
     conn_ref["conn"] = conn
 
-    assert conn.chat("给我讲一句话") is None
+    assert conn.chat("给我讲一句话") is True
 
     assert observed_during_stream
     assert observed_during_stream[:5] == [[], [], [], [], []]
@@ -364,6 +365,59 @@ def test_direct_answer_streams_to_tts_before_llm_generator_finishes():
         "tool_choice": "required",
         "parallel_tool_calls": False,
     }
+
+
+def test_start_to_chat_keeps_successful_direct_answer_alive(monkeypatch):
+    import core.handle.receiveAudioHandle as receive_handle
+
+    direct_answer = SimpleNamespace(
+        index=0,
+        id="direct-answer-success",
+        function=SimpleNamespace(
+            name="direct_answer",
+            arguments='{"response":"瑞瑞你好呀，小慧等你很久啦～"}',
+        ),
+    )
+    llm = CapturingFunctionCallLLM([(None, [direct_answer])])
+    conn = _chat_conn(llm, CapturingToolHandler([_tool("play_music")]))
+    terminations = []
+
+    class ImmediateExecutor:
+        def submit(self, function, *args):
+            future = concurrent.futures.Future()
+            try:
+                future.set_result(function(*args))
+            except BaseException as exc:
+                future.set_exception(exc)
+            return future
+
+    async def no_intent(*_args, **_kwargs):
+        return False
+
+    async def begin_reply(target, _text):
+        return target.reply_lifecycle.begin()
+
+    monkeypatch.setattr(receive_handle, "handle_user_intent", no_intent)
+    monkeypatch.setattr(receive_handle, "begin_assistant_reply", begin_reply)
+    monkeypatch.setattr(
+        receive_handle,
+        "schedule_reply_termination",
+        lambda _conn, reason, **_kwargs: terminations.append(reason),
+    )
+    conn.executor = ImmediateExecutor()
+    conn.semantic_center = None
+    conn.need_bind = False
+    conn.max_output_size = 0
+
+    assert asyncio.run(startToChat(conn, "你好")) is True
+    assert terminations == []
+    assert conn.tts.queued_text() == ["瑞瑞你好呀，小慧等你很久啦～"]
+    queued = list(conn.tts.tts_text_queue.queue)
+    assert [item.sentence_type for item in queued] == [
+        SentenceType.FIRST,
+        SentenceType.MIDDLE,
+        SentenceType.LAST,
+    ]
 
 
 def test_direct_answer_falls_back_without_single_tool_constraint():
@@ -399,7 +453,7 @@ def test_direct_answer_falls_back_without_single_tool_constraint():
     conn = _chat_conn(llm, CapturingToolHandler([_tool("play_music")]))
     conn_ref["conn"] = conn
 
-    assert conn.chat("说句话") is None
+    assert conn.chat("说句话") is True
 
     assert observed_during_stream == [[]]
     assert conn.tts.queued_text() == ["兼容模式仍在生成，现在结束。"]
@@ -413,6 +467,24 @@ def test_direct_answer_helpers_preserve_text_and_remove_json_tail():
         '第一行\n第二行，对话说："你好"。'
     )
     assert ConnectionHandler._clean_response_garbage("回答完成。\n\"}}") == "回答完成。"
+
+
+def test_empty_direct_answer_returns_none_without_publishing_last():
+    direct_answer = SimpleNamespace(
+        index=0,
+        id="direct-answer-empty",
+        function=SimpleNamespace(
+            name="direct_answer",
+            arguments='{"response":""}',
+        ),
+    )
+    llm = CapturingFunctionCallLLM([(None, [direct_answer])])
+    conn = _chat_conn(llm, CapturingToolHandler([_tool("play_music")]))
+
+    assert conn.chat("不要返回有效内容") is None
+    assert conn.tts.queued_text() == []
+    queued = list(conn.tts.tts_text_queue.queue)
+    assert all(item.sentence_type is not SentenceType.LAST for item in queued)
 
 
 def test_function_call_mode_with_empty_registry_sends_no_internal_routing_tool():

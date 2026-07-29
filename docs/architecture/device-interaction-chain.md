@@ -290,6 +290,11 @@ SeedTTS2 收到首批 Opus 后先在 provider 内预缓冲约 600ms；短回复�
 下行超时、断链、SessionFailed 或结束异常使用带 `tts_error:*` 原因的失败终态，关闭并废弃当前
 WebSocket，由下一轮重新建连，不再按正常播报完成收敛。
 
+`ConnectionHandler.chat()` 的返回值也是回复生命周期契约的一部分：纯 `direct_answer` 只有在解析、
+提交非空 response 并入队 `LAST` 后才能返回 `True`。`startToChat()` 会把其他返回值解释为
+`llm_no_spoken_result` 并终止当前 generation，因此成功分支禁止使用裸 `return`；解析不到有效 response
+时则不得伪造 `LAST`，应返回空结果让失败路径收敛。
+
 设备控制协议在连接级额外记录当前 `sentence_id` 的 `tts start/stop` 发送状态，同一轮重复的 `FIRST/LAST` 不得形成第二个 `start/stop`。STT 后已经发送的 pending `start` 在真实 `FIRST` 到达时只绑定 `sentence_id`，不重复发送；Abort 已发送 `stop` 后，旧 provider 迟到的 `LAST` 也不得停止新一轮 pending 回复。因此 provider 异常不能再让设备永久停留在 `speaking`，也不能形成重复 start/stop。
 
 Abort 会先给当前 `TurnMetrics` 记录 `outcome.status=aborted` 和 interruption 步骤，再清理生成队列。已经形成
