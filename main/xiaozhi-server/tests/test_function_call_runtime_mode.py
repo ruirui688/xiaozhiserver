@@ -114,9 +114,13 @@ class CapturingTTS:
     def __init__(self):
         self.tts_text_queue = queue.Queue()
         self.stored_text = []
+        self.previews = []
 
     def store_tts_text(self, sentence_id, text):
         self.stored_text.append(text)
+
+    def store_tts_preview(self, sentence_id, text):
+        self.previews.append((sentence_id, text))
 
     def queued_text(self):
         items = list(self.tts_text_queue.queue)
@@ -313,27 +317,30 @@ def test_function_call_chat_passes_full_tool_schema_to_main_llm():
 def test_direct_answer_streams_to_tts_before_llm_generator_finishes():
     conn_ref = {}
     observed_during_stream = []
-    first_delta = SimpleNamespace(
-        index=0,
-        id="direct-answer-1",
-        function=SimpleNamespace(
-            name="direct_answer",
-            arguments='{"response":"流式回答第一段，仍在生成',
-        ),
-    )
-    second_delta = SimpleNamespace(
-        index=0,
-        id="",
-        function=SimpleNamespace(
-            name=None,
-            arguments='，这是结尾。"}',
-        ),
-    )
+    deltas = [
+        ('direct-answer-1', 'direct_answer', '{"response":"惠易'),
+        ('', None, '新能源'),
+        ('', None, '专注于'),
+        ('', None, '自动化'),
+        ('', None, '冲压和'),
+        ('', None, '智能物流'),
+        ('', None, '整体解决方案，'),
+        ('', None, '覆盖生产线规划'),
+        ('', None, '设备集成和运维'),
+        ('', None, '服务保障完善'),
+        ('', None, '并建设了A12焊接生产线，这是结尾。"}'),
+    ]
 
     def responses():
-        yield None, [first_delta]
-        observed_during_stream.append(conn_ref["conn"].tts.queued_text())
-        yield None, [second_delta]
+        for delta_id, name, arguments in deltas:
+            yield None, [
+                SimpleNamespace(
+                    index=0,
+                    id=delta_id,
+                    function=SimpleNamespace(name=name, arguments=arguments),
+                )
+            ]
+            observed_during_stream.append(conn_ref["conn"].tts.queued_text())
 
     llm = CapturingFunctionCallLLM(responses())
     conn = _chat_conn(llm, CapturingToolHandler([_tool("play_music")]))
@@ -342,9 +349,17 @@ def test_direct_answer_streams_to_tts_before_llm_generator_finishes():
     assert conn.chat("给我讲一句话") is None
 
     assert observed_during_stream
-    assert "".join(observed_during_stream[0])
-    assert "".join(conn.tts.queued_text()) == "流式回答第一段，仍在生成，这是结尾。"
-    assert conn.tts.stored_text == ["流式回答第一段，仍在生成，这是结尾。"]
+    assert observed_during_stream[:5] == [[], [], [], [], []]
+    assert any(items for items in observed_during_stream[:-1])
+    answer = (
+        "惠易新能源专注于自动化冲压和智能物流整体解决方案，"
+        "覆盖生产线规划设备集成和运维服务保障完善"
+        "并建设了A12焊接生产线，这是结尾。"
+    )
+    assert "".join(conn.tts.queued_text()) == answer
+    assert conn.tts.stored_text == [answer]
+    assert conn.tts.previews
+    assert conn.tts.previews[0][1] == conn.tts.queued_text()[0]
     assert llm.calls[0]["options"] == {
         "tool_choice": "required",
         "parallel_tool_calls": False,

@@ -44,6 +44,8 @@ def test_doubao_tts_uses_seed_tts_2_default_protocol_defaults():
     assert provider.ws_url == "wss://openspeech.bytedance.com/api/v3/tts/bidirection"
     assert provider.audio_format == "pcm"
     assert provider.enable_ws_reuse is True
+    assert provider.stream_prebuffer_ms == 600
+    assert provider.stream_prebuffer_frames == 10
 
 
 def test_doubao_tts_accepts_biggtts_resource_id():
@@ -136,7 +138,9 @@ def test_doubao_tts_flushes_partial_opus_frame_at_session_end(monkeypatch):
 
     provider._flush_opus_audio_stream()
 
-    assert calls == [(b"", True, provider.handle_opus)]
+    assert len(calls) == 1
+    assert calls[0][:2] == (b"", True)
+    assert callable(calls[0][2])
 
 
 def test_doubao_tts_resets_opus_encoder_after_aborted_session():
@@ -223,6 +227,7 @@ def test_last_audio_message_wait_budget_includes_queue_drain_timeout():
         ("response_timeout_seconds", "invalid"),
         ("send_timeout_seconds", float("inf")),
         ("audio_send_timeout_seconds", None),
+        ("stream_prebuffer_ms", 0),
     ],
 )
 def test_doubao_tts_rejects_invalid_timeout_configuration(key, value):
@@ -654,17 +659,21 @@ def test_tts_failure_finalizer_enqueues_last_exactly_once_after_first():
         SentenceType.LAST,
     ]
     assert all(item[3] == "session-1" for item in items)
+    assert items[-1][6] == "tts_error:test_timeout"
     assert provider.tts_audio_queue.empty()
 
 
-def test_tts_failure_finalizer_does_not_publish_last_without_audio_start():
+def test_tts_failure_finalizer_publishes_error_last_without_audio_start():
     provider = _fault_provider()
     provider._prepare_session_audio_state("session-1")
 
     assert provider._finalize_session_audio_once(
         "session-1", normal=False, reason="start_failed"
-    ) is False
-    assert provider.tts_audio_queue.empty()
+    ) is True
+    item = provider.tts_audio_queue.get_nowait()
+    assert item[0] is SentenceType.LAST
+    assert item[3] == "session-1"
+    assert item[6] == "tts_error:start_failed"
 
 
 def test_tts_file_still_publishes_boundaries_when_upstream_start_fails(
@@ -750,6 +759,9 @@ def test_tts_zero_audio_session_finish_raises_and_closes_connection():
         assert provider.activate_session is False
         assert provider._active_session_id is None
         assert reset_calls == ["reset"]
+        terminal = provider.tts_audio_queue.get_nowait()
+        assert terminal[0] is SentenceType.LAST
+        assert terminal[6] == "tts_error:zero_audio"
         assert provider.tts_audio_queue.empty()
 
     asyncio.run(scenario())
@@ -897,15 +909,9 @@ def test_tts_finish_half_open_cleans_state_and_next_session_recovers(monkeypatch
         assert first.closed is True
         assert provider.ws is None
         assert provider.activate_session is False
-        audio_items = [provider.tts_audio_queue.get_nowait() for _ in range(3)]
-        assert [item[0] for item in audio_items] == [
-            SentenceType.FIRST,
-            SentenceType.MIDDLE,
-            SentenceType.LAST,
-        ]
-        assert sum(
-            item[0] == SentenceType.LAST for item in audio_items
-        ) == 1
+        audio_items = [provider.tts_audio_queue.get_nowait()]
+        assert audio_items[0][0] is SentenceType.LAST
+        assert audio_items[0][6] == "tts_error:response_timeout"
 
         provider.conn.sentence_id = "session-2"
         await provider.start_session("session-2")
@@ -914,6 +920,67 @@ def test_tts_finish_half_open_cleans_state_and_next_session_recovers(monkeypatch
         await provider.close()
 
     asyncio.run(scenario())
+
+
+def test_tts_prebuffer_requires_non_empty_first_text():
+    provider = _fault_provider(stream_prebuffer_ms=120)
+    provider._prepare_session_audio_state("session-1", generation=3)
+
+    assert provider._enqueue_session_first_once("session-1", None) is False
+    assert provider._enqueue_session_first_once("session-1", "   ") is False
+    assert provider.tts_audio_queue.empty()
+
+
+def test_tts_prebuffer_releases_first_and_audio_after_threshold():
+    provider = _fault_provider(stream_prebuffer_ms=600)
+    provider._prepare_session_audio_state("session-1", generation=3)
+    provider._mark_session_content_requested(
+        "session-1", text="这是非空的首段字幕。", generation=3
+    )
+
+    for index in range(9):
+        assert provider._handle_session_opus(
+            "session-1", f"opus-{index}".encode()
+        ) is True
+    assert provider.tts_audio_queue.empty()
+
+    assert provider._handle_session_opus("session-1", b"opus-9") is True
+    items = [provider.tts_audio_queue.get_nowait() for _ in range(11)]
+    assert items[0][0] is SentenceType.FIRST
+    assert items[0][2] == "这是非空的首段字幕。"
+    assert [item[0] for item in items[1:]] == [SentenceType.MIDDLE] * 10
+    assert [item[1] for item in items[1:]] == [
+        f"opus-{index}".encode() for index in range(10)
+    ]
+    assert all(item[3] == "session-1" for item in items)
+    assert all(item[5] == 3 for item in items)
+
+
+def test_short_tts_session_releases_prebuffer_before_normal_last(monkeypatch):
+    provider = _fault_provider(stream_prebuffer_ms=600)
+    provider._prepare_session_audio_state("session-1", generation=4)
+    provider._mark_session_content_requested(
+        "session-1", text="短回复也必须连续播放。", generation=4
+    )
+    monkeypatch.setattr(provider, "_flush_opus_audio_stream", lambda _sid: None)
+    for index in range(3):
+        provider._handle_session_opus(
+            "session-1", f"short-{index}".encode()
+        )
+
+    assert provider._finalize_session_audio_once(
+        "session-1", normal=True, reason="session_finished"
+    ) is True
+    items = [provider.tts_audio_queue.get_nowait() for _ in range(5)]
+    assert [item[0] for item in items] == [
+        SentenceType.FIRST,
+        SentenceType.MIDDLE,
+        SentenceType.MIDDLE,
+        SentenceType.MIDDLE,
+        SentenceType.LAST,
+    ]
+    assert all(item[5] == 4 for item in items)
+    assert items[-1][6] is None
 
 
 @pytest.mark.parametrize("hang_on_send_number", [2, 3])

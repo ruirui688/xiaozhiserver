@@ -1,6 +1,7 @@
 import os
 import uuid
 import json
+import math
 import queue
 import time
 import asyncio
@@ -264,6 +265,13 @@ class TTSProvider(TTSProviderBase):
             config.get("send_timeout_seconds", 5),
             "send_timeout_seconds",
         )
+        self.stream_prebuffer_ms = self._positive_timeout(
+            config.get("stream_prebuffer_ms", 600),
+            "stream_prebuffer_ms",
+        )
+        self.stream_prebuffer_frames = max(
+            1, math.ceil(self.stream_prebuffer_ms / 60)
+        )
 
         model_key_msg = check_model_key("TTS", self.api_key)
         if model_key_msg:
@@ -462,14 +470,27 @@ class TTSProvider(TTSProviderBase):
                 f"{stage}超时（{wait_timeout:.1f}s），已取消并清理TTS连接"
             ) from exc
 
-    def _prepare_session_audio_state(self, session_id):
+    @staticmethod
+    def _new_session_audio_state(generation=None):
+        return {
+            "first_enqueued": False,
+            "last_enqueued": False,
+            "content_requested": False,
+            "generation": generation,
+            "first_text": None,
+            "prebuffer_frames": [],
+            "prebuffer_released": False,
+            "terminal_error": None,
+        }
+
+    def _prepare_session_audio_state(self, session_id, generation=None):
         with self._session_audio_state_lock:
             if session_id not in self._session_audio_states:
-                self._session_audio_states[session_id] = {
-                    "first_enqueued": False,
-                    "last_enqueued": False,
-                    "content_requested": False,
-                }
+                self._session_audio_states[session_id] = (
+                    self._new_session_audio_state(generation)
+                )
+            elif generation is not None:
+                self._session_audio_states[session_id]["generation"] = generation
             self._session_audio_states.move_to_end(session_id)
             while len(self._session_audio_states) > 32:
                 self._session_audio_states.popitem(last=False)
@@ -479,21 +500,27 @@ class TTSProvider(TTSProviderBase):
             state = self._session_audio_states.get(session_id)
             return dict(state) if state is not None else None
 
-    def _mark_session_content_requested(self, session_id):
+    def _mark_session_content_requested(
+        self, session_id, *, text=None, generation=None
+    ):
         with self._session_audio_state_lock:
             state = self._session_audio_states.setdefault(
                 session_id,
-                {
-                    "first_enqueued": False,
-                    "last_enqueued": False,
-                    "content_requested": False,
-                },
+                self._new_session_audio_state(generation),
             )
             state["content_requested"] = True
+            if generation is not None:
+                state["generation"] = generation
+            if text and not state["first_text"]:
+                state["first_text"] = text
             self._session_audio_states.move_to_end(session_id)
 
-    def _prepare_pending_session(self, session_id):
+        if text:
+            self.store_tts_preview(session_id, text)
+
+    def _prepare_pending_session(self, session_id, generation=None):
         if self._pending_session_id == session_id:
+            self._prepare_session_audio_state(session_id, generation)
             return True
 
         state = self._session_audio_state(session_id)
@@ -510,7 +537,7 @@ class TTSProvider(TTSProviderBase):
         self._pending_session_id = session_id
         self._session_start_attempted_id = None
         self.before_stop_play_files.clear()
-        self._prepare_session_audio_state(session_id)
+        self._prepare_session_audio_state(session_id, generation)
         return True
 
     def _has_speakable_text(self, text):
@@ -582,25 +609,107 @@ class TTSProvider(TTSProviderBase):
             )
 
     def _enqueue_session_first_once(self, session_id, text=None):
-        if not session_id:
+        if not session_id or not self._has_speakable_text(text):
             return False
         with self._session_audio_state_lock:
             state = self._session_audio_states.setdefault(
                 session_id,
-                {
-                    "first_enqueued": False,
-                    "last_enqueued": False,
-                    "content_requested": False,
-                },
+                self._new_session_audio_state(),
             )
             if state["first_enqueued"] or state["last_enqueued"]:
                 return False
             self.tts_audio_queue.put(
-                (SentenceType.FIRST, [], text, session_id)
+                (
+                    SentenceType.FIRST,
+                    [],
+                    text,
+                    session_id,
+                    False,
+                    state["generation"],
+                    None,
+                )
             )
             state["first_enqueued"] = True
+            state["prebuffer_released"] = True
             self._session_audio_states.move_to_end(session_id)
             return True
+
+    def _handle_session_opus(self, session_id, opus_data):
+        """Buffer initial Opus frames and publish one continuous device stream."""
+        if not session_id or not opus_data:
+            return False
+        with self._session_audio_state_lock:
+            state = self._session_audio_states.get(session_id)
+            if state is None or state["last_enqueued"]:
+                return False
+            self._record_turn_metric(
+                "record_tts_audio_frame", len(opus_data), session_id
+            )
+            if state["prebuffer_released"]:
+                self.tts_audio_queue.put(
+                    (
+                        SentenceType.MIDDLE,
+                        opus_data,
+                        None,
+                        session_id,
+                        False,
+                        state["generation"],
+                        None,
+                    )
+                )
+                return True
+
+            state["prebuffer_frames"].append(opus_data)
+            if len(state["prebuffer_frames"]) < self.stream_prebuffer_frames:
+                return True
+            return self._release_session_prebuffer_locked(session_id, state)
+
+    def _release_session_prebuffer(self, session_id, *, force=False):
+        with self._session_audio_state_lock:
+            state = self._session_audio_states.get(session_id)
+            if state is None or state["last_enqueued"]:
+                return False
+            if state["prebuffer_released"]:
+                return state["first_enqueued"]
+            if not force and (
+                len(state["prebuffer_frames"]) < self.stream_prebuffer_frames
+            ):
+                return False
+            return self._release_session_prebuffer_locked(session_id, state)
+
+    def _release_session_prebuffer_locked(self, session_id, state):
+        text = state["first_text"] or self.get_tts_text(session_id)
+        if not self._has_speakable_text(text) or not state["prebuffer_frames"]:
+            return False
+        generation = state["generation"]
+        self.tts_audio_queue.put(
+            (
+                SentenceType.FIRST,
+                [],
+                text,
+                session_id,
+                False,
+                generation,
+                None,
+            )
+        )
+        for frame in state["prebuffer_frames"]:
+            self.tts_audio_queue.put(
+                (
+                    SentenceType.MIDDLE,
+                    frame,
+                    None,
+                    session_id,
+                    False,
+                    generation,
+                    None,
+                )
+            )
+        state["prebuffer_frames"].clear()
+        state["first_enqueued"] = True
+        state["prebuffer_released"] = True
+        self._session_audio_states.move_to_end(session_id)
+        return True
 
     def _finalize_session_audio_once(self, session_id, *, normal, reason):
         """Publish the provider audio boundary exactly once for one TTS turn."""
@@ -614,42 +723,68 @@ class TTSProvider(TTSProviderBase):
             if getattr(conn, "client_abort", False):
                 return False
 
+        if normal:
+            self._flush_opus_audio_stream(session_id)
+            self._release_session_prebuffer(session_id, force=True)
+        else:
+            self._reset_opus_audio_stream()
+
         with self._session_audio_state_lock:
             state = self._session_audio_states.setdefault(
                 session_id,
-                {
-                    "first_enqueued": False,
-                    "last_enqueued": False,
-                    "content_requested": False,
-                },
+                self._new_session_audio_state(),
             )
             if state["last_enqueued"]:
                 return False
-
-            if normal:
-                self._flush_opus_audio_stream()
-            else:
-                self._reset_opus_audio_stream()
+            terminal_error = None if normal else f"tts_error:{reason}"
+            state["terminal_error"] = terminal_error
+            if not normal:
+                state["prebuffer_frames"].clear()
 
             # FILE 音频已经完整编码，可以在 TTS 异常收尾时继续播放；如果
             # 本轮没有厂商 TTS 音频，则用第一个文件建立设备 speaking 边界。
             if self.before_stop_play_files and not state["first_enqueued"]:
                 first_text = self.before_stop_play_files[0][1]
-                self.tts_audio_queue.put(
-                    (SentenceType.FIRST, [], first_text, session_id)
-                )
-                state["first_enqueued"] = True
+                if self._has_speakable_text(first_text):
+                    self.tts_audio_queue.put(
+                        (
+                            SentenceType.FIRST,
+                            [],
+                            first_text,
+                            session_id,
+                            False,
+                            state["generation"],
+                            None,
+                        )
+                    )
+                    state["first_enqueued"] = True
 
-            if not state["first_enqueued"]:
+            if normal and not state["first_enqueued"]:
                 return False
 
             for audio_datas, text in self.before_stop_play_files:
                 self.tts_audio_queue.put(
-                    (SentenceType.MIDDLE, audio_datas, text, session_id)
+                    (
+                        SentenceType.MIDDLE,
+                        audio_datas,
+                        text,
+                        session_id,
+                        False,
+                        state["generation"],
+                        None,
+                    )
                 )
             self.before_stop_play_files.clear()
             self.tts_audio_queue.put(
-                (SentenceType.LAST, [], None, session_id)
+                (
+                    SentenceType.LAST,
+                    [],
+                    None,
+                    session_id,
+                    False,
+                    state["generation"],
+                    terminal_error,
+                )
             )
             state["last_enqueued"] = True
             self._session_audio_states.move_to_end(session_id)
@@ -704,12 +839,19 @@ class TTSProvider(TTSProviderBase):
                 )
 
                 if message.sentence_type == SentenceType.FIRST:
-                    if not self._prepare_pending_session(message.sentence_id):
+                    if not self._prepare_pending_session(
+                        message.sentence_id, message.generation
+                    ):
                         continue
 
                 elif ContentType.TEXT == message.content_type:
                     if self._has_speakable_text(message.content_detail):
                         try:
+                            self._mark_session_content_requested(
+                                message.sentence_id,
+                                text=message.content_detail,
+                                generation=message.generation,
+                            )
                             if not self._start_pending_session_once(
                                 message.sentence_id
                             ):
@@ -717,9 +859,6 @@ class TTSProvider(TTSProviderBase):
                             if self.conn.client_abort:
                                 self._cancel_current_session_for_abort()
                                 continue
-                            self._mark_session_content_requested(
-                                message.sentence_id
-                            )
                             self._record_turn_metric(
                                 "record_tts_start", message.sentence_id
                             )
@@ -747,6 +886,12 @@ class TTSProvider(TTSProviderBase):
                             )
                         except Exception as e:
                             logger.bind(tag=TAG).error(f"发送TTS文本失败: {str(e)}")
+                            self._finalize_session_audio_once(
+                                message.sentence_id,
+                                normal=False,
+                                reason=f"text_send_error:{type(e).__name__}",
+                            )
+                            self._clear_pending_session(message.sentence_id)
                             continue
 
                 elif ContentType.FILE == message.content_type:
@@ -768,6 +913,9 @@ class TTSProvider(TTSProviderBase):
                         # 先处理文件音频数据
                         self._process_audio_file_stream(message.content_file, callback=lambda audio_data: self.handle_audio_file(audio_data, message.content_detail))
                 if message.sentence_type == SentenceType.LAST:
+                    self._prepare_session_audio_state(
+                        message.sentence_id, message.generation
+                    )
                     if self._upstream_session_id != message.sentence_id:
                         if self.before_stop_play_files:
                             self._finalize_session_audio_once(
@@ -1019,19 +1167,17 @@ class TTSProvider(TTSProviderBase):
                     ):
                         session_id = response_session_id or active_session_id
                         tts_text = self.get_tts_text(session_id)
-                        if self._enqueue_session_first_once(session_id, tts_text):
-                            if tts_text:
-                                log_text = self._text_for_log(tts_text, session_id)
-                                logger.bind(tag=TAG).info(
-                                    f"句子语音生成成功： {log_text}"
-                                )
-                                self.clear_tts_text(session_id)
-                        elif tts_text:
+                        if tts_text:
                             log_text = self._text_for_log(tts_text, session_id)
                             logger.bind(tag=TAG).info(
                                 f"TTS会话继续生成音频： {log_text}"
                             )
-                        self.wav_to_opus_data_audio_raw_stream(res.payload, callback=self.handle_opus)
+                        self.wav_to_opus_data_audio_raw_stream(
+                            res.payload,
+                            callback=lambda frame: self._handle_session_opus(
+                                session_id, frame
+                            ),
+                        )
                     elif res.optional.event == EVENT_SessionFailed:
                         error_msg = ""
                         try:
@@ -1065,29 +1211,25 @@ class TTSProvider(TTSProviderBase):
                         )
                         self._active_session_id = None
                         state = self._session_audio_state(session_id)
-                        has_audio = bool(
-                            state is not None and state["first_enqueued"]
-                        )
                         content_requested = bool(
                             state is not None and state["content_requested"]
                         )
-                        if (
-                            content_requested
-                            and not has_audio
-                            and not self.before_stop_play_files
-                        ):
+                        finalized = self._finalize_session_audio_once(
+                            session_id,
+                            normal=True,
+                            reason="session_finished",
+                        )
+                        if content_requested and not finalized:
                             self._session_error = (
                                 "TTS会话已结束但未返回任何音频"
                             )
-                            self._reset_opus_audio_stream()
                             logger.bind(tag=TAG).error(
                                 f"{self._session_error} | session_id={session_id}"
                             )
-                        else:
                             self._finalize_session_audio_once(
                                 session_id,
-                                normal=True,
-                                reason="session_finished",
+                                normal=False,
+                                reason="zero_audio",
                             )
                         if self._session_finished_event is not None:
                             self._session_finished_event.set()
@@ -1158,13 +1300,18 @@ class TTSProvider(TTSProviderBase):
             self._wake_session_waiters()
             self._monitor_task = None
 
-    def _flush_opus_audio_stream(self):
+    def _flush_opus_audio_stream(self, session_id=None):
         """Flush the final partial PCM frame before publishing the session LAST marker."""
         if not getattr(self, "opus_encoder", None):
             return
+        resolved_session_id = session_id or self._active_session_id
         try:
             self.wav_to_opus_data_audio_raw_stream(
-                b"", is_end=True, callback=self.handle_opus
+                b"",
+                is_end=True,
+                callback=lambda frame: self._handle_session_opus(
+                    resolved_session_id, frame
+                ),
             )
         except Exception as exc:
             logger.bind(tag=TAG).warning(f"冲刷TTS Opus尾帧失败: {exc}")

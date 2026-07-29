@@ -41,9 +41,9 @@ Opus 音频帧 → VAD 分段 → ASR 文字识别 → SemanticControl 路由
 
 本轮日志显示 LLM 首个响应分片约 217ms、完整响应约 1.593s，但 TTS 文本在完整响应后才提交，二者之间约 1.376s 的生成窗口没有与 TTS 重叠。根因不是 LLM provider 未开启流式请求，而是携带 tools 的普通文本为避免“先播报、后调工具”而整轮缓存。
 
-源码现在以官方 `direct_answer` 流播为主路径：对同时支持强制工具选择和单工具约束的 OpenAI 兼容 provider，请求使用 `tool_choice=required`、`parallel_tool_calls=false`；普通回答由模型选择 `direct_answer`，服务端使用官方 5 字符安全尾缓冲从增长中的 `response` 参数增量投递 TTS。真实工具不提前出声；不具备约束能力的 provider 保持完整响应后投递的安全回退。播报中的用户打断继续走官方 Abort 链路，不等待 LLM 选择工具。
+源码以 `direct_answer` 流播为主路径：对同时支持强制工具选择和单工具约束的 OpenAI 兼容 provider，请求使用 `tool_choice=required`、`parallel_tool_calls=false`；普通回答由模型选择 `direct_answer`。服务端仍保留 5 字符 JSON 安全尾，但新增自然短句聚合层，首段默认至少 24 字、后续默认至少 12 字，并优先在标点处分段，禁止将 1～5 字 delta 直接投递 TTS。SeedTTS2 在向设备发布 `FIRST` 前再预缓冲约 600ms Opus，短回复由 `SessionFinished` 强制释放；`FIRST` 必须携带首段非空字幕。真实工具不提前出声；不具备约束能力的 provider 保持完整响应后投递的安全回退。播报中的用户打断继续走官方 Abort 链路，不等待 LLM 选择工具。
 
-按本轮 217ms 首分片和约 224ms TTS 首音生成估算，健康长回答可把约 1.1-1.4s 的 LLM 生成时间与 TTS 重叠。该数值是基于既有日志的源码预期，不是部署后的真机结果；必须在发布后重新采集 `LLM首个响应分片 → TTS文本发送 → 首音频 → HAL PLAYING` 才能作为实测结论。
+按本轮 217ms 首分片估算，健康长回答仍可让 LLM 后续生成与 TTS 合成重叠，但首段聚合和 600ms 音频预缓冲会增加可控首响等待，以换取连续播放。具体数值是源码预期，不是部署后的真机结果；必须在发布后重新采集 `LLM首个响应分片 → 首个自然短句 → TTS文本发送 → 预缓冲释放 → HAL PLAYING` 才能作为实测结论。
 
 ## 2026-07-11 真机与生产日志复测
 

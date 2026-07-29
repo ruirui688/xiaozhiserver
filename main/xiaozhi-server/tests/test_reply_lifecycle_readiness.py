@@ -304,6 +304,49 @@ def test_delayed_last_does_not_close_next_pending_reply():
     asyncio.run(scenario())
 
 
+def test_provider_terminal_generation_cannot_close_new_reply():
+    async def scenario():
+        conn = _pending_reply_conn("sentence-old")
+        old_generation = await _start_and_bind_pending_reply(conn)
+        assert conn.reply_lifecycle.interrupt(old_generation, "abort") is True
+
+        conn._tts_protocol_sentence_id = None
+        conn._tts_protocol_start_sent = True
+        conn._tts_protocol_stop_sent = False
+        conn.sentence_id = "sentence-new"
+        new_generation = conn.reply_lifecycle.begin()
+        assert conn.reply_lifecycle.bind_sentence(
+            new_generation, conn.sentence_id
+        ) is True
+
+        assert await send_tts_message(
+            conn,
+            "stop",
+            protocol_sentence_id=conn.sentence_id,
+            protocol_generation=old_generation,
+            drain_audio=False,
+            reason="tts_error:response_timeout",
+            allow_pending_stop=True,
+        ) is False
+        assert conn.reply_lifecycle.state is ReplyState.PENDING_LLM
+
+        assert await send_tts_message(
+            conn,
+            "stop",
+            protocol_sentence_id=conn.sentence_id,
+            protocol_generation=new_generation,
+            drain_audio=False,
+            reason="tts_error:response_timeout",
+            allow_pending_stop=True,
+        ) is True
+        assert conn.reply_lifecycle.state is ReplyState.FAILED
+        assert conn.websocket.messages[-1]["reason"] == (
+            "tts_error:response_timeout"
+        )
+
+    asyncio.run(scenario())
+
+
 def test_terminate_pending_reply_fails_only_current_generation():
     lifecycle = ReplyLifecycle()
     generation = lifecycle.begin()

@@ -270,7 +270,9 @@ SeedTTS2 双流 provider 为每个 `sentence_id` 维护独立的 `FIRST/LAST` �
 `tts_text_queue` 中的 `SentenceType.FIRST` 是本地逻辑轮次边界，不等同于火山上游的
 `EVENT_StartSession`。主 LLM 使用官方 `direct_answer` 虚拟工具表示“本轮直接回答”：同时支持
 `tool_choice=required` 和 `parallel_tool_calls=false` 的 OpenAI 兼容 provider 会先确定唯一分支，再从
-流式增长的 `direct_answer.response` 中持续向 TTS 投递已确认文本；真实工具不会提前播报。缺少上述
+流式增长的 `direct_answer.response` 中保留 5 字 JSON 安全尾，并经过自然短句聚合后向 TTS 投递；
+首段默认至少 24 字，后续段默认至少 12 字，优先在完整标点处分段，禁止把 1～5 字模型 delta 直接送入
+双流 TTS。真实工具不会提前播报。缺少上述
 约束能力或违反工具协议的 provider 继续等完整响应确认后再提交普通文本，避免先播报
 过渡语、随后又调用设备工具。
 
@@ -279,6 +281,14 @@ SeedTTS2 双流 provider 为每个 `sentence_id` 维护独立的 `FIRST/LAST` �
 和文件复用同一会话，逻辑 `LAST` 只结束已经实际启动的上游会话；整轮没有真实内容时不得为了收尾再
 创建空会话。该变化只调整厂商会话的启动时点，设备侧仍以实际音频对应的 `FIRST/LAST` 建立
 `tts start/stop`，并继续保证同一 `sentence_id` 最多各发送一次。
+
+SeedTTS2 收到首批 Opus 后先在 provider 内预缓冲约 600ms；短回复在 `SessionFinished` 时强制释放已有
+完整音频。只有存在非空首段字幕时才发布 `FIRST`，随后按 FIFO 发布预缓冲音频，因此设备不会再收到
+`FIRST, None`，HAL 也不会因约 0.2 秒极短首音频立即断粮。正常 `LAST` 只能在火山
+`SessionFinished`、Opus 尾帧冲刷完成并进入 provider FIFO 后发布；设备协议 `stop` 仍等待发送控制器
+排空。FIRST、音频、LAST 和 stop 同时携带同一 reply generation，旧 generation 的迟到边界会被丢弃。
+下行超时、断链、SessionFailed 或结束异常使用带 `tts_error:*` 原因的失败终态，关闭并废弃当前
+WebSocket，由下一轮重新建连，不再按正常播报完成收敛。
 
 设备控制协议在连接级额外记录当前 `sentence_id` 的 `tts start/stop` 发送状态，同一轮重复的 `FIRST/LAST` 不得形成第二个 `start/stop`。STT 后已经发送的 pending `start` 在真实 `FIRST` 到达时只绑定 `sentence_id`，不重复发送；Abort 已发送 `stop` 后，旧 provider 迟到的 `LAST` 也不得停止新一轮 pending 回复。因此 provider 异常不能再让设备永久停留在 `speaking`，也不能形成重复 start/stop。
 

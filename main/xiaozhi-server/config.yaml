@@ -96,6 +96,16 @@ tts_audio_send_delay: 0
 # grace 只用于队列收尾和调度抖动，不作为播放时长上限。
 tts_audio_completion_grace_seconds: 5
 
+# direct_answer 的 JSON 参数仍保留末尾安全缓冲，但不会把模型的 1～5 字 delta
+# 直接送入 TTS。首段和后续段按自然短句聚合，兼顾首响和连续播放。
+direct_answer_streaming:
+  enabled: true
+  json_tail_chars: 5
+  first_min_chars: 24
+  next_min_chars: 12
+  target_chars: 36
+  max_chars: 60
+
 # 已认证设备可通过现有 WebSocket 发送 external_tts 原文直读任务。
 # 该协议不需要额外密钥；设备身份来自当前已认证、已绑定的连接。
 external_tts:
@@ -805,6 +815,8 @@ TTS:
     send_timeout_seconds: 5
     # 服务端向设备发送单批音频时的等待上限（秒）
     audio_send_timeout_seconds: 5
+    # 首音频至少预缓冲约 600ms，再向设备发布 FIRST，避免 HAL 短暂断粮
+    stream_prebuffer_ms: 600
 
   # 语音合成大模型，resource_id 固定为 volc.service_type.10029
   DoubaoBigTTSStream:
@@ -822,3 +834,4 @@ TTS:
     response_timeout_seconds: 15
     send_timeout_seconds: 5
     audio_send_timeout_seconds: 5
+    stream_prebuffer_ms: 600

@@ -412,6 +412,15 @@ class TTSProviderBase(ABC):
                     oldest = next(iter(self._report_states))
                     del self._report_states[oldest]
 
+    def store_tts_preview(self, sentence_id, text):
+        """Store an early non-empty subtitle without finalizing report text."""
+        if not sentence_id or not text:
+            return
+        self._sentence_text_map[sentence_id] = text
+        if len(self._sentence_text_map) > 5:
+            oldest = next(iter(self._sentence_text_map))
+            del self._sentence_text_map[oldest]
+
     def mark_exact_text(self, sentence_id):
         """Bypass server-side rewriting for an authenticated external TTS turn."""
         if not sentence_id:
@@ -761,13 +770,48 @@ class TTSProviderBase(ABC):
                 try:
                     item = self.tts_audio_queue.get(timeout=0.1)
                     skip_report_audio = False
-                    if len(item) == 5:
+                    generation = None
+                    terminal_reason = None
+                    if len(item) == 7:
+                        (
+                            sentence_type,
+                            audio_datas,
+                            text,
+                            sentence_id,
+                            skip_report_audio,
+                            generation,
+                            terminal_reason,
+                        ) = item
+                    elif len(item) == 6:
+                        (
+                            sentence_type,
+                            audio_datas,
+                            text,
+                            sentence_id,
+                            skip_report_audio,
+                            generation,
+                        ) = item
+                    elif len(item) == 5:
                         sentence_type, audio_datas, text, sentence_id, skip_report_audio = item
                     elif len(item) == 4:
                         sentence_type, audio_datas, text, sentence_id = item
                     else:
                         sentence_type, audio_datas, text = item
                         sentence_id = None
+
+                    lifecycle = getattr(self.conn, "reply_lifecycle", None)
+                    if generation is not None and lifecycle is not None:
+                        snapshot = lifecycle.snapshot()
+                        if (
+                            not snapshot.is_active
+                            or snapshot.generation != generation
+                            or snapshot.sentence_id not in {None, sentence_id}
+                        ):
+                            logger.bind(tag=TAG).debug(
+                                "跳过失效generation的TTS音频边界 | "
+                                f"generation={generation} | sentence_id={sentence_id}"
+                            )
+                            continue
                 except queue.Empty:
                     if self.conn.stop_event.is_set():
                         break
@@ -812,7 +856,15 @@ class TTSProviderBase(ABC):
 
                 # 发送音频
                 future = asyncio.run_coroutine_threadsafe(
-                    sendAudioMessage(self.conn, sentence_type, audio_datas, text, sentence_id),
+                    sendAudioMessage(
+                        self.conn,
+                        sentence_type,
+                        audio_datas,
+                        text,
+                        sentence_id,
+                        generation=generation,
+                        terminal_reason=terminal_reason,
+                    ),
                     self.conn.loop,
                 )
                 # 追踪待处理的 future，供 close() 取消

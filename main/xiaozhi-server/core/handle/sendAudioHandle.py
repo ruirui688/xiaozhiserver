@@ -18,10 +18,29 @@ AUDIO_FRAME_DURATION = 60
 PRE_BUFFER_COUNT = 5
 
 
-async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text, sentence_id=None):
+async def sendAudioMessage(
+    conn: "ConnectionHandler",
+    sentenceType,
+    audios,
+    text,
+    sentence_id=None,
+    *,
+    generation=None,
+    terminal_reason=None,
+):
     # 跳过旧句子残留音频
     if sentence_id is not None and sentence_id != conn.sentence_id:
-        return
+        return False
+
+    reply_lifecycle = getattr(conn, "reply_lifecycle", None)
+    if generation is not None and reply_lifecycle is not None:
+        snapshot = reply_lifecycle.snapshot()
+        if (
+            not snapshot.is_active
+            or snapshot.generation != generation
+            or snapshot.sentence_id not in {None, sentence_id}
+        ):
+            return False
 
     if conn.tts.tts_audio_first_sentence:
         log_text = getattr(conn.tts, "_text_for_log", lambda value, _sid: value)(
@@ -31,12 +50,19 @@ async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text
         conn.tts.tts_audio_first_sentence = False
 
     protocol_sentence_id = sentence_id or conn.sentence_id
-    reply_lifecycle = getattr(conn, "reply_lifecycle", None)
     if sentenceType == SentenceType.FIRST:
         if reply_lifecycle is not None:
-            generation = reply_lifecycle.ensure_started(protocol_sentence_id)
-            reply_lifecycle.bind_sentence(generation, protocol_sentence_id)
-            reply_lifecycle.mark_synthesizing(generation)
+            if generation is None:
+                active_generation = reply_lifecycle.ensure_started(
+                    protocol_sentence_id
+                )
+            else:
+                active_generation = generation
+            if not reply_lifecycle.bind_sentence(
+                active_generation, protocol_sentence_id
+            ):
+                return False
+            reply_lifecycle.mark_synthesizing(active_generation)
         is_new_protocol_sentence = (
             getattr(conn, "_tts_protocol_sentence_id", None) != protocol_sentence_id
         )
@@ -58,6 +84,7 @@ async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text
             conn,
             "start",
             protocol_sentence_id=protocol_sentence_id,
+            protocol_generation=generation,
         )
         if start_sent_with_first_audio and reply_lifecycle is None:
             conn.client_is_speaking = True
@@ -84,7 +111,7 @@ async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text
     await sendAudio(conn, audios)
     if audios:
         if reply_lifecycle is not None:
-            reply_lifecycle.mark_streaming()
+            reply_lifecycle.mark_streaming(generation)
         external_tts = getattr(conn, "external_tts_coordinator", None)
         if external_tts is not None:
             external_tts.mark_streaming(conn, protocol_sentence_id)
@@ -105,10 +132,18 @@ async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text
             "stop",
             None,
             protocol_sentence_id=protocol_sentence_id,
+            protocol_generation=generation,
+            reason=terminal_reason,
+            allow_pending_stop=bool(terminal_reason),
         )
         external_tts = getattr(conn, "external_tts_coordinator", None)
         if external_tts is not None:
-            external_tts.mark_completed(conn, protocol_sentence_id)
+            if terminal_reason:
+                external_tts.mark_failed(
+                    conn, protocol_sentence_id, terminal_reason
+                )
+            else:
+                external_tts.mark_completed(conn, protocol_sentence_id)
         if conn.close_after_chat:
             if (getattr(conn, "features", None) or {}).get(
                 "persistent_websocket"
@@ -124,6 +159,7 @@ async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text
                 )
             else:
                 await conn.close()
+    return True
 
 
 async def _wait_for_audio_completion(conn: "ConnectionHandler"):
@@ -415,6 +451,7 @@ async def send_tts_message(
     text=None,
     *,
     protocol_sentence_id=None,
+    protocol_generation=None,
     drain_audio=True,
     reason=None,
     allow_pending_stop=False,
@@ -425,6 +462,17 @@ async def send_tts_message(
     if text is None and state == "sentence_start":
         return False
     if state == "start":
+        if protocol_generation is not None and reply_lifecycle is not None:
+            snapshot = reply_lifecycle.snapshot()
+            if (
+                not snapshot.is_active
+                or snapshot.generation != protocol_generation
+                or snapshot.sentence_id not in {
+                    None,
+                    protocol_sentence_id,
+                }
+            ):
+                return False
         current_protocol_sentence_id = getattr(
             conn, "_tts_protocol_sentence_id", None
         )
@@ -438,13 +486,16 @@ async def send_tts_message(
         if start_sent and not stop_sent and same_pending_or_sentence:
             return False
         if reply_lifecycle is not None:
-            reply_generation = reply_lifecycle.ensure_started(
-                protocol_sentence_id
-            )
-            if protocol_sentence_id:
-                reply_lifecycle.bind_sentence(
-                    reply_generation, protocol_sentence_id
+            reply_generation = protocol_generation
+            if reply_generation is None:
+                reply_generation = reply_lifecycle.ensure_started(
+                    protocol_sentence_id
                 )
+            if protocol_sentence_id:
+                if not reply_lifecycle.bind_sentence(
+                    reply_generation, protocol_sentence_id
+                ):
+                    return False
         conn._tts_protocol_sentence_id = protocol_sentence_id
         conn._tts_protocol_start_sent = True
         conn._tts_protocol_stop_sent = False
@@ -476,10 +527,13 @@ async def send_tts_message(
             return False
         if reply_lifecycle is not None:
             snapshot = reply_lifecycle.snapshot()
-            if snapshot.is_active and snapshot.sentence_id in {
-                None,
-                resolved_sentence_id,
-            }:
+            if protocol_generation is not None and (
+                not snapshot.is_active
+                or snapshot.generation != protocol_generation
+                or snapshot.sentence_id not in {None, resolved_sentence_id}
+            ):
+                return False
+            if snapshot.is_active and snapshot.sentence_id in {None, resolved_sentence_id}:
                 reply_generation = snapshot.generation
                 reply_lifecycle.mark_stopping(reply_generation)
         conn._tts_protocol_sentence_id = resolved_sentence_id

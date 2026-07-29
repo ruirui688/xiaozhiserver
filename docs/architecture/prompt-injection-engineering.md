@@ -332,7 +332,7 @@ request_params = {
 
 结论：主聊天模型看到的插件提示词通常不拼在 system prompt 里，而是作为 `tools` 字段进入模型请求。
 
-顶层普通回答沿用官方 `direct_answer` 虚拟工具，不代表设备或服务端真实能力。对同时支持强制工具选择和单工具约束的 OpenAI 兼容 provider，服务端发送 `tool_choice=required`、`parallel_tool_calls=false`，因此模型必须在两个出口中选择一个：`direct_answer(response=...)` 流式回答或真实工具调用。服务端使用官方安全尾缓冲增量提取 `direct_answer.response` 进入 TTS；真实工具不播报模型过渡文本。若端点不支持单工具约束，可在模型参数中设置 `supports_parallel_tool_calls: false`，服务端将停用该快速路径并等完整响应确认。用户打断播报属于设备/AEC 驱动的 Abort 控制面，不进入 LLM tools schema。
+顶层普通回答沿用官方 `direct_answer` 虚拟工具，不代表设备或服务端真实能力。对同时支持强制工具选择和单工具约束的 OpenAI 兼容 provider，服务端发送 `tool_choice=required`、`parallel_tool_calls=false`，因此模型必须在两个出口中选择一个：`direct_answer(response=...)` 流式回答或真实工具调用。服务端保留 5 字 JSON 安全尾，再以首段至少 24 字、后续至少 12 字的自然短句聚合器增量提取 `direct_answer.response` 进入 TTS；不会把模型的 1～5 字 delta 直接交给双流 TTS。真实工具不播报模型过渡文本。若端点不支持单工具约束，可在模型参数中设置 `supports_parallel_tool_calls: false`，服务端将停用该快速路径并等完整响应确认。用户打断播报属于设备/AEC 驱动的 Abort 控制面，不进入 LLM tools schema。
 
 基础 system prompt 不再无条件宣称 `web_search`、`get_weather`、`play_music` 等可选工具存在。`PromptManager` 从 `UnifiedToolHandler.get_functions()` 返回的同一份真实 schema 提取工具名；有工具时写入完整 `<tool_and_knowledge>` 段，无工具时连工具段和否定说明一起移除。每轮请求前会再次同步，以覆盖 MCP、设备 IoT 或设备 MCP 在连接建立后动态注册或注销工具的情况。工具的用途、参数和限制仍以原生 `tools` schema 为唯一事实来源，未注册工具不得出现在提示词中。
 

@@ -38,6 +38,10 @@ from plugins_func.register import Action, ActionResponse
 from core.auth import AuthenticationError
 from config.config_loader import get_private_config_from_api
 from core.providers.tts.dto.dto import ContentType, TTSMessageDTO, SentenceType
+from core.providers.tts.direct_answer_stream import (
+    DirectAnswerStreamConfig,
+    DirectAnswerTTSStream,
+)
 from config.logger import setup_logging, build_module_string, create_connection_logger
 from config.manage_api_client import (
     DeviceNotFoundException,
@@ -1443,6 +1447,7 @@ class ConnectionHandler:
         )
         # 保存当前任务的sentence_id到局部变量，避免被新任务覆盖
         current_sentence_id = None
+        current_reply_generation = reply_generation
         freeform_game_prompt = None
 
         if query is not None:
@@ -1462,6 +1467,16 @@ class ConnectionHandler:
                     f"generation={reply_generation}"
                 )
                 return None
+            if current_reply_generation is None:
+                snapshot = self.reply_lifecycle.snapshot()
+                if snapshot.is_active and snapshot.sentence_id in {
+                    None,
+                    current_sentence_id,
+                }:
+                    current_reply_generation = snapshot.generation
+                    self.reply_lifecycle.bind_sentence(
+                        current_reply_generation, current_sentence_id
+                    )
             self.turn_metrics.bind_sentence(current_sentence_id, turn_id)
             self.dialogue.put(
                 Message(role="user", content=query, turn_context=turn_context)
@@ -1478,11 +1493,15 @@ class ConnectionHandler:
                         sentence_id=current_sentence_id,
                         sentence_type=SentenceType.FIRST,
                         content_type=ContentType.ACTION,
+                        generation=current_reply_generation,
                     )
                 )
         else:
             # 递归调用时，使用当前的sentence_id
             current_sentence_id = self.sentence_id
+            snapshot = self.reply_lifecycle.snapshot()
+            if snapshot.is_active and snapshot.sentence_id == current_sentence_id:
+                current_reply_generation = snapshot.generation
 
         # 设置最大递归深度，避免无限循环，可根据实际需求调整
         MAX_DEPTH = 5
@@ -1571,8 +1590,12 @@ class ConnectionHandler:
             tools_enabled = functions is not None and (
                 self.intent_type == "function_call" or meeting_tool_turn
             )
+            direct_answer_stream_config = DirectAnswerStreamConfig.from_mapping(
+                self.config.get("direct_answer_streaming")
+            )
             official_direct_answer_streaming = bool(
-                tools_enabled
+                direct_answer_stream_config.enabled
+                and tools_enabled
                 and depth == 0
                 and not meeting_tool_turn
                 and getattr(self.llm, "supports_tool_choice", False)
@@ -1692,9 +1715,9 @@ class ConnectionHandler:
                         tool_call_flag = True
                         self._merge_tool_calls(tool_calls_list, tools_call)
 
-                    # 与官方 upstream 一致，流式提取 direct_answer.response
-                    # 并实时送入 TTS。仅在 provider 支持 required + 单工具约束
-                    # 时启用；真实工具、会议轮和兼容回退路径均不提前出声。
+                    # direct_answer.response 先经过自然短句聚合再进入 TTS。
+                    # 仅在 provider 支持 required + 单工具约束时启用；真实
+                    # 工具、会议轮和兼容回退路径均不提前出声。
                     if official_direct_answer_streaming:
                         real_tool_calls = [
                             call
@@ -1703,7 +1726,6 @@ class ConnectionHandler:
                             and call.get("name") != "direct_answer"
                         ]
                         if not real_tool_calls:
-                            direct_answer_stream_buffer = 5
                             for tool_call in tool_calls_list:
                                 if (
                                     tool_call.get("name") == "direct_answer"
@@ -1714,30 +1736,16 @@ class ConnectionHandler:
                                             tool_call["arguments"]
                                         )
                                     )
-                                    sent_len = tool_call.get("_da_sent", 0)
-                                    if (
-                                        direct_answer_text
-                                        and len(direct_answer_text) > sent_len
-                                    ):
-                                        safe_end = max(
-                                            sent_len,
-                                            len(direct_answer_text)
-                                            - direct_answer_stream_buffer,
+                                    stream = tool_call.get("_da_stream")
+                                    if stream is None:
+                                        stream = DirectAnswerTTSStream(
+                                            self.tts,
+                                            current_sentence_id,
+                                            direct_answer_stream_config,
+                                            generation=current_reply_generation,
                                         )
-                                        if safe_end > sent_len:
-                                            new_part = self._clean_response_garbage(
-                                                direct_answer_text[sent_len:safe_end]
-                                            )
-                                            if new_part:
-                                                tool_call["_da_sent"] = safe_end
-                                                self.tts.tts_text_queue.put(
-                                                    TTSMessageDTO(
-                                                        sentence_id=current_sentence_id,
-                                                        sentence_type=SentenceType.MIDDLE,
-                                                        content_type=ContentType.TEXT,
-                                                        content_detail=new_part,
-                                                    )
-                                                )
+                                        tool_call["_da_stream"] = stream
+                                    stream.update(direct_answer_text)
 
                 else:
                     content = response
@@ -1901,22 +1909,18 @@ class ConnectionHandler:
                     for tc in direct_answer_calls:
                         da_response = self._extract_direct_answer_response(tc.get("arguments", "{}"))
                         if da_response:
-                            # 刷新流式缓冲区中未发送的部分
-                            sent_len = tc.get("_da_sent", 0)
-                            remaining = da_response[sent_len:]
-                            if remaining:
-                                remaining = self._clean_response_garbage(remaining)
-                                if remaining:
-                                    self.tts.tts_text_queue.put(
-                                        TTSMessageDTO(
-                                            sentence_id=current_sentence_id,
-                                            sentence_type=SentenceType.MIDDLE,
-                                            content_type=ContentType.TEXT,
-                                            content_detail=remaining,
-                                        )
-                                    )
                             # 写入对话历史
                             da_response = self._clean_response_garbage(da_response)
+                            stream = tc.get("_da_stream")
+                            if stream is None:
+                                stream = DirectAnswerTTSStream(
+                                    self.tts,
+                                    current_sentence_id,
+                                    direct_answer_stream_config,
+                                    generation=current_reply_generation,
+                                )
+                                tc["_da_stream"] = stream
+                            stream.finish(da_response)
                             self.tts.store_tts_text(current_sentence_id, da_response)
                             self.dialogue.put(Message(role="assistant", content=da_response))
 
@@ -1927,6 +1931,7 @@ class ConnectionHandler:
                                     sentence_id=current_sentence_id,
                                     sentence_type=SentenceType.LAST,
                                     content_type=ContentType.ACTION,
+                                    generation=current_reply_generation,
                                 )
                             )
                         return
@@ -2085,6 +2090,7 @@ class ConnectionHandler:
                     sentence_id=current_sentence_id,
                     sentence_type=SentenceType.LAST,
                     content_type=ContentType.ACTION,
+                    generation=current_reply_generation,
                 )
             )
             self.logger.bind(tag=TAG).info(
