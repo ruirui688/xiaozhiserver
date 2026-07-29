@@ -95,3 +95,54 @@ def test_stop_without_started_worker_seals_queue_without_orphan_sentinel():
     assert conn.report_queue.unfinished_tasks == 0
     assert conn.report_queue.empty()
     assert conn.report_queue.put((1, "late", None, 1)) is False
+
+
+def test_hot_reload_enables_reporting_without_reconnecting():
+    conn = _connection()
+    conn.chat_history_conf = 0
+    conn.config = {"chat_history_conf": 0}
+    conn.closing = False
+    conn.closed = False
+    manager = ReportThreadManager()
+
+    assert manager.update_chat_history_config(conn, 2) is True
+    assert conn.chat_history_conf == 2
+    assert conn.config["chat_history_conf"] == 2
+    assert conn.report_thread.is_alive() is True
+
+    manager.stop(conn, timeout=1)
+    conn.executor.shutdown(wait=True)
+
+
+def test_hot_reload_disables_new_reports_without_sealing_worker_queue():
+    conn = _connection()
+    conn.config = {"chat_history_conf": 1}
+    conn.closing = False
+    conn.closed = False
+    manager = ReportThreadManager()
+    manager.start(conn)
+
+    assert manager.update_chat_history_config(conn, 0) is True
+    assert conn.chat_history_conf == 0
+    assert conn.config["chat_history_conf"] == 0
+    assert conn.report_thread.is_alive() is True
+    assert conn.report_queue.put((1, "already accepted boundary", None, 1)) is True
+
+    manager.stop(conn, timeout=1)
+    conn.executor.shutdown(wait=True)
+
+
+def test_hot_reload_cannot_restart_reporting_after_connection_stop():
+    conn = _connection()
+    conn.chat_history_conf = 0
+    conn.config = {"chat_history_conf": 0}
+    conn.closing = False
+    conn.closed = False
+    manager = ReportThreadManager()
+    manager.stop(conn, timeout=0.1)
+
+    assert manager.update_chat_history_config(conn, 2) is False
+    assert conn.report_thread is None
+    assert conn.report_queue.put((1, "late", None, 1)) is False
+
+    conn.executor.shutdown(wait=True)

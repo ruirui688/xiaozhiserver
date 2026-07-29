@@ -85,7 +85,8 @@ class AgentWorkspaceIsolationTest {
                 mock(WorkspacePermissionService.class),
                 mock(KnowledgeBaseService.class),
                 quotaService,
-                mock(AgentSemanticSkillService.class));
+                mock(AgentSemanticSkillService.class),
+                mock(org.springframework.context.ApplicationEventPublisher.class));
         ReflectionTestUtils.setField(service, "baseDao", agentDao);
 
         List<AgentDTO> result = service.getUserAgents(1001L, null, null);
@@ -175,7 +176,8 @@ class AgentWorkspaceIsolationTest {
                 permissionService,
                 knowledgeBaseService,
                 mock(WorkspaceAgentQuotaService.class),
-                mock(AgentSemanticSkillService.class));
+                mock(AgentSemanticSkillService.class),
+                mock(org.springframework.context.ApplicationEventPublisher.class));
         ReflectionTestUtils.setField(service, "baseDao", agentDao);
 
         AgentUpdateDTO.FunctionInfo function = new AgentUpdateDTO.FunctionInfo();
@@ -220,7 +222,8 @@ class AgentWorkspaceIsolationTest {
                 mock(WorkspacePermissionService.class),
                 mock(KnowledgeBaseService.class),
                 mock(WorkspaceAgentQuotaService.class),
-                mock(AgentSemanticSkillService.class));
+                mock(AgentSemanticSkillService.class),
+                mock(org.springframework.context.ApplicationEventPublisher.class));
         ReflectionTestUtils.setField(service, "baseDao", agentDao);
 
         return service.getAgentById("agent-a");

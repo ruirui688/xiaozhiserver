@@ -41,18 +41,63 @@ class ReportQueue(queue.Queue):
 class ReportThreadManager:
     """Manages report worker thread for a connection."""
 
+    def __init__(self):
+        self._lifecycle_lock = threading.Lock()
+        self._stopped = False
+
+    def update_chat_history_config(self, conn: "ConnectionHandler", value: int) -> bool:
+        """Apply a chat-history mode change to an active connection.
+
+        Disabling keeps an already-started worker alive so reports accepted before
+        the boundary can drain and the same connection can be enabled again later.
+        New enqueue operations observe ``chat_history_conf == 0`` immediately.
+        """
+        if value not in (0, 1, 2):
+            raise ValueError("chat_history_conf must be 0, 1, or 2")
+        with self._lifecycle_lock:
+            if self._stopped or not conn.read_config_from_api or conn.need_bind:
+                return False
+            if getattr(conn, "closing", False) or getattr(conn, "closed", False):
+                return False
+
+            previous = conn.chat_history_conf
+            conn.chat_history_conf = value
+            config = getattr(conn, "config", None)
+            if isinstance(config, dict):
+                config["chat_history_conf"] = value
+
+            if value != 0 and not self._start_locked(conn):
+                return False
+
+        conn.logger.bind(tag=TAG).info(
+            "聊天记录配置已热更新: deviceId={}, previous={}, current={}",
+            getattr(conn, "device_id", None),
+            previous,
+            value,
+        )
+        return True
+
     def start(self, conn: "ConnectionHandler"):
         """初始化ASR和TTS上报线程"""
+        with self._lifecycle_lock:
+            return self._start_locked(conn)
+
+    def _start_locked(self, conn: "ConnectionHandler") -> bool:
+        if self._stopped:
+            return False
         if not conn.read_config_from_api or conn.need_bind:
-            return
+            return False
         if conn.chat_history_conf == 0:
-            return
+            return False
+        if getattr(conn, "closing", False) or getattr(conn, "closed", False):
+            return False
         if conn.report_thread is None or not conn.report_thread.is_alive():
             conn.report_thread = threading.Thread(
                 target=self._report_worker, args=(conn,), daemon=True
             )
             conn.report_thread.start()
             conn.logger.bind(tag=TAG).info("TTS上报线程已启动")
+        return True
 
     def _report_worker(self, conn: "ConnectionHandler"):
         """聊天记录上报工作线程"""
@@ -126,12 +171,14 @@ class ReportThreadManager:
         server event loop.
         """
         deadline = time.monotonic() + max(0.0, float(timeout))
-        worker_alive = bool(conn.report_thread and conn.report_thread.is_alive())
-        seal = getattr(conn.report_queue, "seal", None)
-        if callable(seal):
-            seal(enqueue_sentinel=worker_alive)
-        elif worker_alive:
-            conn.report_queue.put(None)
+        with self._lifecycle_lock:
+            self._stopped = True
+            worker_alive = bool(conn.report_thread and conn.report_thread.is_alive())
+            seal = getattr(conn.report_queue, "seal", None)
+            if callable(seal):
+                seal(enqueue_sentinel=worker_alive)
+            elif worker_alive:
+                conn.report_queue.put(None)
 
         if worker_alive:
             remaining = max(0.0, deadline - time.monotonic())

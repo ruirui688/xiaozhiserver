@@ -68,6 +68,8 @@ sequenceDiagram
 
 当前会话是否热更新取决于具体配置类型。排查“保存成功但设备未变化”时依次检查：数据库事实、Redis 缓存、设备绑定、Python 拉取结果、连接是否重建、provider 是否使用了新配置。
 
+聊天记录配置是连接级可热更新状态。智能体保存 `chatHistoryConf` 或切换记忆模型后，manager-api 在事务提交后通过受保护的内部 HTTP 接口按 `agentId` 通知 xiaozhi-server；所有在线连接立即采用有效的 `chat_history_conf`。开启记录时按需启动上报线程，文本/音频模式从下一条新消息生效；关闭记录时停止接收新上报，但已进入队列的记录仍会排空。内部通知失败不回滚已经提交的智能体配置，设备下次重连会重新读取数据库状态。
+
 智能体固定播报技能通过 `semantic_skills` 随设备私有配置下发，当前连接不会热替换这组规则；后台保存后需要设备重连，由新建连接重新拉取并编译规则。没有配置或没有命中时不得改变旧对话行为。
 
 连接初始化按能力发布 `binding_ready / tts_ready / conversation_ready / audio_input_ready`，不能再用一个
