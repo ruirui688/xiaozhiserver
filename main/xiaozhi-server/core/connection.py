@@ -33,10 +33,6 @@ from core.providers.asr.dto.dto import InterfaceType
 from core.handle.textHandle import handleTextMessage
 from core.providers.tools.unified_tool_handler import UnifiedToolHandler
 from core.providers.tools.tool_protocol_guard import looks_like_unhandled_tool_protocol
-from core.providers.tools.terminal_turn import (
-    finish_terminal_turn,
-    select_terminal_tool_calls,
-)
 from plugins_func.loadplugins import auto_import_modules
 from plugins_func.register import Action, ActionResponse
 from core.auth import AuthenticationError
@@ -1574,13 +1570,26 @@ class ConnectionHandler:
             tools_enabled = functions is not None and (
                 self.intent_type == "function_call" or meeting_tool_turn
             )
+            official_direct_answer_streaming = bool(
+                tools_enabled
+                and depth == 0
+                and not meeting_tool_turn
+                and getattr(self.llm, "supports_tool_choice", False)
+                and getattr(self.llm, "supports_parallel_tool_calls", False)
+                and any(
+                    item.get("function", {}).get("name") == "direct_answer"
+                    for item in functions
+                )
+            )
             if tools_enabled:
                 # 使用支持functions的streaming接口
                 function_options = {}
-                if meeting_tool_turn and getattr(
-                    self.llm, "supports_tool_choice", False
-                ):
+                if (
+                    meeting_tool_turn or official_direct_answer_streaming
+                ) and getattr(self.llm, "supports_tool_choice", False):
                     function_options["tool_choice"] = "required"
+                if official_direct_answer_streaming:
+                    function_options["parallel_tool_calls"] = False
                 llm_responses = self.llm.response_with_functions(
                     self.session_id,
                     llm_dialogue,
@@ -1601,6 +1610,7 @@ class ConnectionHandler:
             )
             self.logger.bind(tag=TAG).info(
                 f"LLM请求已发起 | depth={depth} | tools_enabled={tools_enabled} | "
+                f"direct_answer_streaming={official_direct_answer_streaming} | "
                 f"elapsed={time.monotonic() - llm_started_at:.3f}s"
             )
         except Exception as e:
@@ -1618,13 +1628,14 @@ class ConnectionHandler:
         tool_call_flag = False
         # 支持多个并行工具调用 - 使用列表存储
         tool_calls_list = []  # 格式: [{"id": "", "name": "", "arguments": ""}]
-        terminal_turn_selected = False
         content_arguments = ""
         unhandled_tool_protocol = False
         emotion_flag = not meeting_tool_turn
-        defer_plain_content_for_tools = (
-            self.intent_type == "function_call" and functions is not None
-        )
+        # 官方主链路会流式播报 direct_answer 参数。普通 content 在携带
+        # tools 的请求中仍延迟到流结束：支持 required tool choice 的模型
+        # 应通过 direct_answer 返回普通回复；不兼容模型则安全回退，避免先
+        # 播报过渡文本、随后又选择真实工具。
+        defer_plain_content_for_tools = bool(tools_enabled)
         first_llm_chunk_at = None
         try:
             for response in llm_responses:
@@ -1679,6 +1690,53 @@ class ConnectionHandler:
                     if tools_call is not None and len(tools_call) > 0:
                         tool_call_flag = True
                         self._merge_tool_calls(tool_calls_list, tools_call)
+
+                    # 与官方 upstream 一致，流式提取 direct_answer.response
+                    # 并实时送入 TTS。仅在 provider 支持 required + 单工具约束
+                    # 时启用；真实工具、会议轮和兼容回退路径均不提前出声。
+                    if official_direct_answer_streaming:
+                        real_tool_calls = [
+                            call
+                            for call in tool_calls_list
+                            if call.get("name")
+                            and call.get("name") != "direct_answer"
+                        ]
+                        if not real_tool_calls:
+                            direct_answer_stream_buffer = 5
+                            for tool_call in tool_calls_list:
+                                if (
+                                    tool_call.get("name") == "direct_answer"
+                                    and tool_call.get("arguments")
+                                ):
+                                    direct_answer_text = (
+                                        self._extract_direct_answer_response(
+                                            tool_call["arguments"]
+                                        )
+                                    )
+                                    sent_len = tool_call.get("_da_sent", 0)
+                                    if (
+                                        direct_answer_text
+                                        and len(direct_answer_text) > sent_len
+                                    ):
+                                        safe_end = max(
+                                            sent_len,
+                                            len(direct_answer_text)
+                                            - direct_answer_stream_buffer,
+                                        )
+                                        if safe_end > sent_len:
+                                            new_part = self._clean_response_garbage(
+                                                direct_answer_text[sent_len:safe_end]
+                                            )
+                                            if new_part:
+                                                tool_call["_da_sent"] = safe_end
+                                                self.tts.tts_text_queue.put(
+                                                    TTSMessageDTO(
+                                                        sentence_id=current_sentence_id,
+                                                        sentence_type=SentenceType.MIDDLE,
+                                                        content_type=ContentType.TEXT,
+                                                        content_detail=new_part,
+                                                    )
+                                                )
 
                 else:
                     content = response
@@ -1824,28 +1882,6 @@ class ConnectionHandler:
                     )
 
             if not bHasError and len(tool_calls_list) > 0:
-                terminal_calls = select_terminal_tool_calls(
-                    self.func_handler,
-                    (
-                        call
-                        for call in tool_calls_list
-                        if call.get("name") != "direct_answer"
-                    ),
-                )
-                if terminal_calls:
-                    terminal_turn_selected = True
-                    selected_call = terminal_calls[0]
-                    discarded_count = len(tool_calls_list) - 1
-                    if discarded_count:
-                        self.logger.bind(tag=TAG).warning(
-                            "终止型工具已取得本轮唯一执行权，丢弃其他工具或直接回复: "
-                            f"count={discarded_count}"
-                        )
-                    tool_calls_list = [selected_call]
-                    response_message.clear()
-                    content_arguments = ""
-
-            if not bHasError and len(tool_calls_list) > 0:
                 # 处理 direct_answer 虚拟工具
                 direct_answer_calls = [tc for tc in tool_calls_list if tc["name"] == "direct_answer"]
                 real_tool_calls = [tc for tc in tool_calls_list if tc["name"] != "direct_answer"]
@@ -1868,15 +1904,18 @@ class ConnectionHandler:
                             sent_len = tc.get("_da_sent", 0)
                             remaining = da_response[sent_len:]
                             if remaining:
-                                self.tts.tts_text_queue.put(
-                                    TTSMessageDTO(
-                                        sentence_id=current_sentence_id,
-                                        sentence_type=SentenceType.MIDDLE,
-                                        content_type=ContentType.TEXT,
-                                        content_detail=remaining,
+                                remaining = self._clean_response_garbage(remaining)
+                                if remaining:
+                                    self.tts.tts_text_queue.put(
+                                        TTSMessageDTO(
+                                            sentence_id=current_sentence_id,
+                                            sentence_type=SentenceType.MIDDLE,
+                                            content_type=ContentType.TEXT,
+                                            content_detail=remaining,
+                                        )
                                     )
-                                )
                             # 写入对话历史
+                            da_response = self._clean_response_garbage(da_response)
                             self.tts.store_tts_text(current_sentence_id, da_response)
                             self.dialogue.put(Message(role="assistant", content=da_response))
 
@@ -1998,55 +2037,15 @@ class ConnectionHandler:
 
                 # 统一处理工具调用结果
                 if tool_results:
-                    if terminal_turn_selected:
-                        terminal_result, terminal_call = tool_results[0]
-                        terminal_action = getattr(
-                            terminal_result.action,
-                            "name",
-                            terminal_result.action,
-                        )
-                        terminal_success = terminal_result.action not in {
-                            Action.ERROR,
-                            Action.NOTFOUND,
-                        }
-                        terminal_log = (
-                            self.logger.bind(tag=TAG).info
-                            if terminal_success
-                            else self.logger.bind(tag=TAG).warning
-                        )
-                        terminal_log(
-                            "终止型设备工具执行{} | name={} | action={}".format(
-                                "成功" if terminal_success else "失败",
-                                terminal_call.get("name"),
-                                terminal_action,
-                            )
-                        )
-                        terminal_future = asyncio.run_coroutine_threadsafe(
-                            finish_terminal_turn(
-                                self,
-                                current_abort_generation,
-                            ),
-                            self.loop,
-                        )
-                        abort_applied = terminal_future.result(
-                            timeout=tool_call_timeout
-                        )
-                        self.logger.bind(tag=TAG).info(
-                            "云端本轮已静默终止，不请求后续LLM或TTS | "
-                            f"device_tool_success={terminal_success} | "
-                            f"abort_applied={bool(abort_applied)}"
-                        )
-                        return
-                    else:
-                        self._handle_function_result(
-                            tool_results,
-                            depth=depth,
-                            streamed_text=streamed_text,
-                            sentence_id=current_sentence_id,
-                            abort_generation=current_abort_generation,
-                            suppress_tts=meeting_tool_turn,
-                            turn_id=turn_id,
-                        )
+                    self._handle_function_result(
+                        tool_results,
+                        depth=depth,
+                        streamed_text=streamed_text,
+                        sentence_id=current_sentence_id,
+                        abort_generation=current_abort_generation,
+                        suppress_tts=meeting_tool_turn,
+                        turn_id=turn_id,
+                    )
 
         if meeting_tool_turn:
             pending_meeting_turn = bool(
@@ -2063,6 +2062,11 @@ class ConnectionHandler:
         if len(response_message) > 0:
             text_buff = "".join(response_message)
             if defer_plain_content_for_tools:
+                if official_direct_answer_streaming:
+                    self.logger.bind(tag=TAG).warning(
+                        "模型未按 required tool choice 返回 direct_answer，"
+                        "普通文本已在完整响应确认后安全播报"
+                    )
                 self.tts.tts_text_queue.put(
                     TTSMessageDTO(
                         sentence_id=current_sentence_id,
@@ -2582,6 +2586,27 @@ class ConnectionHandler:
         # 处理 JSON 转义
         raw = raw.replace('\\"', '"').replace('\\n', '\n').replace('\\\\', '\\')
         return raw
+
+    @staticmethod
+    def _clean_response_garbage(text):
+        """清理 direct_answer 流中可能泄漏的 JSON 闭合符号。"""
+        if not text:
+            return text
+
+        garbage_chars = frozenset('\")\'}）')
+        cleaned_lines = []
+        for line in text.split("\n"):
+            stripped = line.strip()
+            if (
+                stripped
+                and len(stripped) <= 8
+                and all(char in garbage_chars for char in stripped)
+            ):
+                continue
+            cleaned_lines.append(line)
+
+        result = "\n".join(cleaned_lines)
+        return re.sub(r'["\'}\]]+$', "", result.rstrip()).rstrip()
 
     def _merge_tool_calls(self, tool_calls_list, tools_call):
         """合并工具调用列表

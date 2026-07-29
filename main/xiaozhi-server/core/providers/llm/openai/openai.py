@@ -24,8 +24,16 @@ THINKING_DISABLED_DOMAINS = {
 class LLMProvider(LLMProviderBase):
     supports_native_function_call = True
     supports_tool_choice = True
+    supports_parallel_tool_calls = True
 
     def __init__(self, config):
+        parallel_tool_support = config.get("supports_parallel_tool_calls", True)
+        self.supports_parallel_tool_calls = str(parallel_tool_support).strip().lower() not in {
+            "0",
+            "false",
+            "no",
+            "off",
+        }
         self.model_name = config.get("model_name")
         self.api_key = config.get("api_key")
         if "base_url" in config:
@@ -290,6 +298,9 @@ class LLMProvider(LLMProviderBase):
         tool_choice = kwargs.get("tool_choice")
         if tool_choice is not None:
             request_params["tool_choice"] = tool_choice
+        parallel_tool_calls = kwargs.get("parallel_tool_calls")
+        if parallel_tool_calls is not None:
+            request_params["parallel_tool_calls"] = bool(parallel_tool_calls)
 
         optional_params = {
             "max_tokens": kwargs.get("max_tokens", self.max_tokens),

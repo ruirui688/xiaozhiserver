@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: architecture
-last_verified: 2026-07-28
+last_verified: 2026-07-29
 source_paths:
   - Dockerfile-server-base
   - main/xiaozhi-server/
@@ -15,7 +15,7 @@ source_paths:
 
 > 本页由 `scripts/docs-facts` 生成，请勿手工编辑。运行 `scripts/docs-facts` 更新，运行 `scripts/docs-facts --check` 检查漂移。
 
-生成日期：`2026-07-28`（UTC）
+生成日期：`2026-07-29`（UTC）
 
 ## 技术栈版本
 
@@ -32,7 +32,7 @@ source_paths:
 
 | 模块 | 源码文件 | 测试文件 | 统计口径 |
 | --- | ---: | ---: | --- |
-| xiaozhi-server | 239 | 57 | 源码为非 `tests/` 的 `*.py`；测试为 `test_*.py` |
+| xiaozhi-server | 238 | 57 | 源码为非 `tests/` 的 `*.py`；测试为 `test_*.py` |
 | manager-api | 511 | 49 | `src/main/**/*.java`；`src/test/**/*Test.java` |
 | manager-web | 117 | 11 | `src/` 下 `*.vue/*.js/*.ts/*.mjs`；`*.spec.*/*.test.*` |
 | manager-mobile | 81 | 2 | `src/` 下 `*.vue/*.js/*.ts/*.mjs`；`*.spec.*/*.test.*` |
@@ -67,7 +67,7 @@ source_paths:
 
 | 文件 | 行数 |
 | --- | ---: |
-| `main/xiaozhi-server/core/connection.py` | 2612 |
+| `main/xiaozhi-server/core/connection.py` | 2637 |
 | `main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelCatalogServiceImpl.java` | 1657 |
 | `main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelTestServiceImpl.java` | 1325 |
 | `main/manager-api/src/main/java/xiaozhi/modules/knowledge/rag/impl/LocalKnowledgeAdapter.java` | 1293 |

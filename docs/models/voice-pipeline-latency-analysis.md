@@ -1,7 +1,7 @@
 ---
 status: report
 owner: xiaozhi-server
-last_verified: 2026-07-11
+last_verified: 2026-07-29
 source_paths:
   - main/xiaozhi-server/core/connection.py
   - main/xiaozhi-server/core/handle
@@ -10,7 +10,7 @@ source_paths:
 
 # 语音管道延迟分析
 
-> 初始分析：2026-06-25 | 真机复测：2026-07-11 | 当前分支：feature/mini-program-development
+> 初始分析：2026-06-25 | 真机复测：2026-07-11 | function-call 流播源码复核：2026-07-29
 
 ---
 
@@ -36,6 +36,14 @@ source_paths:
 Opus 音频帧 → VAD 分段 → ASR 文字识别 → SemanticControl 路由
   → Intent/LLM 对话 + 工具调用 → TTS 合成 → Opus 音频回传设备
 ```
+
+## 2026-07-29 function-call 流播源码修正
+
+本轮日志显示 LLM 首个响应分片约 217ms、完整响应约 1.593s，但 TTS 文本在完整响应后才提交，二者之间约 1.376s 的生成窗口没有与 TTS 重叠。根因不是 LLM provider 未开启流式请求，而是携带 tools 的普通文本为避免“先播报、后调工具”而整轮缓存。
+
+源码现在以官方 `direct_answer` 流播为主路径：对同时支持强制工具选择和单工具约束的 OpenAI 兼容 provider，请求使用 `tool_choice=required`、`parallel_tool_calls=false`；普通回答由模型选择 `direct_answer`，服务端使用官方 5 字符安全尾缓冲从增长中的 `response` 参数增量投递 TTS。真实工具不提前出声；不具备约束能力的 provider 保持完整响应后投递的安全回退。播报中的用户打断继续走官方 Abort 链路，不等待 LLM 选择工具。
+
+按本轮 217ms 首分片和约 224ms TTS 首音生成估算，健康长回答可把约 1.1-1.4s 的 LLM 生成时间与 TTS 重叠。该数值是基于既有日志的源码预期，不是部署后的真机结果；必须在发布后重新采集 `LLM首个响应分片 → TTS文本发送 → 首音频 → HAL PLAYING` 才能作为实测结论。
 
 ## 2026-07-11 真机与生产日志复测
 

@@ -78,14 +78,6 @@ class ToolManager:
         tool_def = tools.get(tool_name)
         return tool_def.tool_type if tool_def else None
 
-    def is_terminal_turn_tool(self, tool_name: str) -> bool:
-        """Return the registered protocol behavior, never infer it from text."""
-        tool_def = self.get_all_tools().get(tool_name)
-        metadata = tool_def.parameters if tool_def is not None else None
-        return bool(
-            isinstance(metadata, dict) and metadata.get("terminal_turn") is True
-        )
-
     async def execute_tool(
         self, tool_name: str, arguments: Dict[str, Any]
     ) -> ActionResponse:

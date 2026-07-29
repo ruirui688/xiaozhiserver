@@ -144,10 +144,6 @@ class UnifiedToolHandler:
         """检查是否有指定工具"""
         return self.tool_manager.has_tool(tool_name)
 
-    def is_terminal_turn_tool(self, tool_name: str) -> bool:
-        """Read terminal behavior from the registered tool capability."""
-        return self.tool_manager.is_terminal_turn_tool(tool_name)
-
     @staticmethod
     def _should_display_tool_call(tool_name: str) -> bool:
         return not (

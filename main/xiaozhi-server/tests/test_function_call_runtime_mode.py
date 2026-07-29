@@ -74,6 +74,7 @@ class TextOnlyLLM:
 class CapturingFunctionCallLLM:
     supports_native_function_call = True
     supports_tool_choice = True
+    supports_parallel_tool_calls = True
 
     def __init__(self, responses):
         self.responses = responses
@@ -130,12 +131,10 @@ class CapturingToolHandler:
     def __init__(
         self,
         functions,
-        terminal_names=(),
         result_action=Action.RESPONSE,
     ):
         self.functions = functions
         self.calls = []
-        self.terminal_names = set(terminal_names)
         self.result_action = result_action
 
     def get_functions(self):
@@ -145,9 +144,6 @@ class CapturingToolHandler:
         return any(
             item.get("function", {}).get("name") == name for item in self.functions
         )
-
-    def is_terminal_turn_tool(self, name):
-        return name in self.terminal_names
 
     async def handle_llm_function_call(self, conn, tool_call_data):
         self.calls.append(tool_call_data)
@@ -308,7 +304,100 @@ def test_function_call_chat_passes_full_tool_schema_to_main_llm():
     ]
     assert conn.tts.queued_text() == ["直接回复"]
     assert conn.tts.stored_text == ["直接回复"]
+    assert llm.calls[0]["options"] == {
+        "tool_choice": "required",
+        "parallel_tool_calls": False,
+    }
+
+
+def test_direct_answer_streams_to_tts_before_llm_generator_finishes():
+    conn_ref = {}
+    observed_during_stream = []
+    first_delta = SimpleNamespace(
+        index=0,
+        id="direct-answer-1",
+        function=SimpleNamespace(
+            name="direct_answer",
+            arguments='{"response":"流式回答第一段，仍在生成',
+        ),
+    )
+    second_delta = SimpleNamespace(
+        index=0,
+        id="",
+        function=SimpleNamespace(
+            name=None,
+            arguments='，这是结尾。"}',
+        ),
+    )
+
+    def responses():
+        yield None, [first_delta]
+        observed_during_stream.append(conn_ref["conn"].tts.queued_text())
+        yield None, [second_delta]
+
+    llm = CapturingFunctionCallLLM(responses())
+    conn = _chat_conn(llm, CapturingToolHandler([_tool("play_music")]))
+    conn_ref["conn"] = conn
+
+    assert conn.chat("给我讲一句话") is None
+
+    assert observed_during_stream
+    assert "".join(observed_during_stream[0])
+    assert "".join(conn.tts.queued_text()) == "流式回答第一段，仍在生成，这是结尾。"
+    assert conn.tts.stored_text == ["流式回答第一段，仍在生成，这是结尾。"]
+    assert llm.calls[0]["options"] == {
+        "tool_choice": "required",
+        "parallel_tool_calls": False,
+    }
+
+
+def test_direct_answer_falls_back_without_single_tool_constraint():
+    class UnconstrainedFunctionCallLLM(CapturingFunctionCallLLM):
+        supports_tool_choice = True
+        supports_parallel_tool_calls = False
+
+    conn_ref = {}
+    observed_during_stream = []
+    first_delta = SimpleNamespace(
+        index=0,
+        id="direct-answer-1",
+        function=SimpleNamespace(
+            name="direct_answer",
+            arguments='{"response":"兼容模式仍在生成',
+        ),
+    )
+    second_delta = SimpleNamespace(
+        index=0,
+        id="",
+        function=SimpleNamespace(
+            name=None,
+            arguments='，现在结束。"}',
+        ),
+    )
+
+    def responses():
+        yield None, [first_delta]
+        observed_during_stream.append(conn_ref["conn"].tts.queued_text())
+        yield None, [second_delta]
+
+    llm = UnconstrainedFunctionCallLLM(responses())
+    conn = _chat_conn(llm, CapturingToolHandler([_tool("play_music")]))
+    conn_ref["conn"] = conn
+
+    assert conn.chat("说句话") is None
+
+    assert observed_during_stream == [[]]
+    assert conn.tts.queued_text() == ["兼容模式仍在生成，现在结束。"]
     assert llm.calls[0]["options"] == {}
+
+
+def test_direct_answer_helpers_preserve_text_and_remove_json_tail():
+    arguments = '{"response":"第一行\\n第二行，对话说：\\"你好\\"。"}'
+
+    assert ConnectionHandler._extract_direct_answer_response(arguments) == (
+        '第一行\n第二行，对话说："你好"。'
+    )
+    assert ConnectionHandler._clean_response_garbage("回答完成。\n\"}}") == "回答完成。"
 
 
 def test_function_call_mode_with_empty_registry_sends_no_internal_routing_tool():
@@ -319,100 +408,6 @@ def test_function_call_mode_with_empty_registry_sends_no_internal_routing_tool()
 
     assert len(llm.calls) == 1
     assert conn.tts.queued_text() == ["普通回复"]
-
-
-@pytest.mark.parametrize(
-    ("result_action", "device_log_level", "device_log_text"),
-    [
-        (Action.RESPONSE, "info", "终止型设备工具执行成功"),
-        (Action.ERROR, "warning", "终止型设备工具执行失败"),
-    ],
-)
-def test_terminal_tool_preempts_direct_answer_and_other_tools(
-    monkeypatch,
-    result_action,
-    device_log_level,
-    device_log_text,
-):
-    terminal_call = SimpleNamespace(
-        index=0,
-        id="stop-call-1",
-        function=SimpleNamespace(
-            name="self_robot_stop_speaking",
-            arguments='{"request_id":"turn-1-stop-1"}',
-        ),
-    )
-    direct_answer_call = SimpleNamespace(
-        index=1,
-        id="direct-answer-1",
-        function=SimpleNamespace(
-            name="direct_answer",
-            arguments='{"response":"好的，我安静了。"}',
-        ),
-    )
-    gesture_call = SimpleNamespace(
-        index=2,
-        id="gesture-call-1",
-        function=SimpleNamespace(
-            name="perform_gesture",
-            arguments='{"motion_name":"wave"}',
-        ),
-    )
-    finished = []
-
-    async def fake_finish(conn, expected_abort_generation):
-        finished.append(expected_abort_generation)
-        conn.client_abort = True
-        conn.abort_generation += 1
-        return True
-
-    def run_immediately(coro, _loop):
-        future = concurrent.futures.Future()
-        try:
-            future.set_result(asyncio.run(coro))
-        except Exception as error:
-            future.set_exception(error)
-        return future
-
-    monkeypatch.setattr(
-        "core.connection.asyncio.run_coroutine_threadsafe",
-        run_immediately,
-    )
-    monkeypatch.setattr(
-        "core.connection.finish_terminal_turn",
-        fake_finish,
-    )
-    tools = [
-        _tool("self_robot_stop_speaking"),
-        _tool("perform_gesture"),
-    ]
-    handler = CapturingToolHandler(
-        tools,
-        terminal_names={"self_robot_stop_speaking"},
-        result_action=result_action,
-    )
-    llm = CapturingFunctionCallLLM(
-        [(None, [terminal_call, direct_answer_call, gesture_call])]
-    )
-    conn = _chat_conn(llm, handler)
-    conn.logger = RecordingLogger()
-
-    assert conn.chat("请停止当前输出") is None
-
-    assert [call["name"] for call in handler.calls] == [
-        "self_robot_stop_speaking"
-    ]
-    assert conn.tts.queued_text() == []
-    assert conn.tts.stored_text == []
-    assert finished == [0]
-    assert (device_log_level, device_log_text) in [
-        (level, message.split(" | ", 1)[0])
-        for level, message in conn.logger.records
-    ]
-    assert any(
-        level == "info" and "云端本轮已静默终止" in message
-        for level, message in conn.logger.records
-    )
 
 
 def test_active_meeting_forces_main_llm_to_choose_meeting_tool():

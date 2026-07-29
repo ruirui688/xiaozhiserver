@@ -268,11 +268,13 @@ providers/tts/base.py:375-416  tts_text_priority_thread（守护线程）
 SeedTTS2 双流 provider 为每个 `sentence_id` 维护独立的 `FIRST/LAST` 音频边界状态。正常收到 `EVENT_SessionFinished` 时先用 `is_end=True` 冲刷不足 60ms 的 PCM 尾帧；结束等待超时、下行空闲超时、WebSocket 断开、`EVENT_SessionFailed` 或监听任务异常退出时丢弃不完整 PCM 尾帧。只要本轮已经发布 `FIRST`，所有这些路径都会通过同一幂等收尾函数发布且只发布一次 `SentenceType.LAST`；迟到的结束事件不得重复产生 `LAST`，非当前会话的残余事件不得重置当前活跃会话。
 
 `tts_text_queue` 中的 `SentenceType.FIRST` 是本地逻辑轮次边界，不等同于火山上游的
-`EVENT_StartSession`。在 `function_call` 模式下，主 LLM 的普通文本可能需要等完整响应结束、确认没有
-工具调用后才进入 TTS；如果 provider 在逻辑 `FIRST` 到达时就启动上游会话，会在尚无真实文本的阶段
-空等，长回复可能让上游会话先因空闲失效，随后提交文本却得到零音频。
+`EVENT_StartSession`。主 LLM 使用官方 `direct_answer` 虚拟工具表示“本轮直接回答”：同时支持
+`tool_choice=required` 和 `parallel_tool_calls=false` 的 OpenAI 兼容 provider 会先确定唯一分支，再从
+流式增长的 `direct_answer.response` 中持续向 TTS 投递已确认文本；真实工具不会提前播报。缺少上述
+约束能力或违反工具协议的 provider 继续等完整响应确认后再提交普通文本，避免先播报
+过渡语、随后又调用设备工具。
 
-因此 SeedTTS2 使用懒启动约定：逻辑 `FIRST` 只重置本轮流状态、登记 `sentence_id` 并准备幂等边界；
+无论文本来自实时 `direct_answer` 还是兼容回退，SeedTTS2 都使用懒启动约定：逻辑 `FIRST` 只重置本轮流状态、登记 `sentence_id` 并准备幂等边界；
 第一段经清洗后非空的 `ContentType.TEXT` 或路径有效的 `ContentType.FILE` 到达时，才为该轮启动一次上游会话。后续文本
 和文件复用同一会话，逻辑 `LAST` 只结束已经实际启动的上游会话；整轮没有真实内容时不得为了收尾再
 创建空会话。该变化只调整厂商会话的启动时点，设备侧仍以实际音频对应的 `FIRST/LAST` 建立

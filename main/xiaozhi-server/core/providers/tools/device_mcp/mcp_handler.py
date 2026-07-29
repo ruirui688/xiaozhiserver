@@ -6,7 +6,6 @@ import re
 from concurrent.futures import Future
 from core.utils.util import get_vision_url, sanitize_tool_name
 from core.utils.auth import AuthToken
-from core.providers.tools.terminal_turn import has_terminal_turn_annotation
 from config.logger import setup_logging
 from typing import TYPE_CHECKING
 
@@ -15,53 +14,6 @@ if TYPE_CHECKING:
 
 TAG = __name__
 logger = setup_logging()
-SERVER_GENERATED_REQUEST_ID = "request_id"
-
-
-def _get_server_generated_fields(annotations) -> list[str]:
-    """Read only the explicit Device MCP server-managed argument marker."""
-    if not isinstance(annotations, dict):
-        return []
-
-    marker = annotations.get("serverGenerated")
-    if marker is None:
-        marker = annotations.get("server_generated")
-
-    if marker is True:
-        values = [SERVER_GENERATED_REQUEST_ID]
-    elif isinstance(marker, str):
-        values = [marker]
-    elif isinstance(marker, (list, tuple)):
-        values = marker
-    else:
-        return []
-
-    # request_id is the only server-generated Device MCP argument currently
-    # defined by this protocol. Unknown values must not change the model schema.
-    return (
-        [SERVER_GENERATED_REQUEST_ID]
-        if SERVER_GENERATED_REQUEST_ID in values
-        else []
-    )
-
-
-def _hide_server_generated_fields(input_schema: dict, fields: list[str]) -> dict:
-    """Build the model-visible schema without mutating the device payload."""
-    if not fields:
-        return input_schema
-
-    hidden = set(fields)
-    visible_schema = dict(input_schema)
-    properties = input_schema.get("properties", {})
-    visible_schema["properties"] = {
-        name: value
-        for name, value in properties.items()
-        if name not in hidden
-    }
-    visible_schema["required"] = [
-        name for name in input_schema.get("required", []) if name not in hidden
-    ]
-    return visible_schema
 
 
 class MCPClient:
@@ -245,18 +197,10 @@ async def handle_mcp_message(
                             s for s in schema.get("required", []) if isinstance(s, str)
                         ]
 
-                    annotations = tool.get("annotations")
-                    server_generated = _get_server_generated_fields(annotations)
                     new_tool = {
                         "name": name,
                         "description": description,
-                        "inputSchema": _hide_server_generated_fields(
-                            input_schema, server_generated
-                        ),
-                        "server_generated": server_generated,
-                        "terminalTurn": has_terminal_turn_annotation(
-                            annotations
-                        ),
+                        "inputSchema": input_schema,
                     }
                     await mcp_client.add_tool(new_tool)
                     logger.bind(tag=TAG).debug(f"客户端工具 #{i+1}: {name}")
@@ -391,22 +335,10 @@ async def call_mcp_tool(
         raise ValueError(f"工具 {tool_name} 不存在")
 
     tool_call_id = await mcp_client.get_next_id()
-    tool_data = mcp_client.tools.get(tool_name, {})
-    server_generated = tool_data.get("server_generated", [])
-    server_managed_request = (
-        isinstance(server_generated, (list, tuple))
-        and SERVER_GENERATED_REQUEST_ID in server_generated
-    )
 
     # 处理参数
     try:
-        if server_managed_request:
-            # This capability declares the complete argument object as
-            # server-managed. Ignore any model-invented text/content/request_id.
-            arguments = {
-                SERVER_GENERATED_REQUEST_ID: f"mcp-{tool_call_id}",
-            }
-        elif isinstance(args, str):
+        if isinstance(args, str):
             # 确保字符串是有效的JSON
             if not args.strip():
                 arguments = {}

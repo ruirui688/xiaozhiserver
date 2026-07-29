@@ -111,6 +111,16 @@ def test_timeout_configuration_can_override_each_budget(monkeypatch):
     assert provider.stream_total_timeout_seconds == 5.5
 
 
+def test_parallel_tool_capability_can_be_disabled_for_compatible_endpoint(monkeypatch):
+    provider, _ = _provider(
+        monkeypatch,
+        FakeStream(),
+        supports_parallel_tool_calls="false",
+    )
+
+    assert provider.supports_parallel_tool_calls is False
+
+
 def test_continuous_text_stream_exceeding_total_budget_is_closed(monkeypatch):
     stream = FakeStream([_chunk("第一段"), _chunk("第二段")])
     provider, _ = _provider(
@@ -171,6 +181,23 @@ def test_function_stream_forwards_required_tool_choice(monkeypatch):
     ) == []
 
     assert captured["request"]["tool_choice"] == "required"
+
+
+def test_function_stream_forwards_parallel_tool_constraint(monkeypatch):
+    provider, captured = _provider(monkeypatch, FakeStream())
+
+    assert list(
+        provider.response_with_functions(
+            "session",
+            _dialogue(),
+            functions=[{"type": "function", "function": {"name": "direct_answer"}}],
+            tool_choice="required",
+            parallel_tool_calls=False,
+        )
+    ) == []
+
+    assert captured["request"]["tool_choice"] == "required"
+    assert captured["request"]["parallel_tool_calls"] is False
 
 
 def test_normal_stream_finishes_within_total_budget(monkeypatch):
