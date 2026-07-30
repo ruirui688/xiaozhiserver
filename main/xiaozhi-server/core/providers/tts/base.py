@@ -917,7 +917,10 @@ class TTSProviderBase(ABC):
                 if pending_report is not None:
                     report_text, report_audio, final_report = pending_report
                     if final_report:
-                        final_text = report_text or self.get_report_text(sentence_id)
+                        # FIRST may carry only the earliest streaming subtitle.  The
+                        # complete answer stored by the LLM must own the final chat
+                        # record; use the FIRST text only when no final text exists.
+                        final_text = self.get_report_text(sentence_id) or report_text
                         if final_text and self._claim_final_report(sentence_id):
                             turn_metrics = getattr(self.conn, "turn_metrics", None)
                             metrics = self._get_report_metrics(sentence_id)

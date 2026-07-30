@@ -1,7 +1,12 @@
+import asyncio
+import threading
 from types import SimpleNamespace
+
+import pytest
 
 from core.providers.tts import base as tts_base
 from core.providers.tts.base import TTSProviderBase
+from core.providers.tts.dto.dto import SentenceType
 from core.utils.turn_metrics import TurnMetrics
 
 
@@ -173,3 +178,70 @@ def test_normal_last_and_late_abort_share_one_final_report(monkeypatch):
     ) is True
     assert provider.finalize_interrupted_report("sentence-complete") is False
     assert reports == ["已经正常结束的回答"]
+
+
+@pytest.mark.parametrize("first_preview", ['"', "这个"])
+def test_normal_last_prefers_complete_report_text_over_first_preview(
+    monkeypatch, first_preview
+):
+    reports = []
+    report_ready = threading.Event()
+
+    def fake_enqueue(conn, text, audio, metrics=None):
+        reports.append((text, audio, metrics))
+        report_ready.set()
+        return True
+
+    async def fake_send_audio_message(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(tts_base, "enqueue_tts_report", fake_enqueue)
+    monkeypatch.setattr(tts_base, "sendAudioMessage", fake_send_audio_message)
+
+    loop = asyncio.new_event_loop()
+    loop_thread = threading.Thread(target=loop.run_forever, daemon=True)
+    loop_thread.start()
+
+    stop_event = threading.Event()
+    provider = _TestTTSProvider({}, delete_audio_file=True)
+    provider.report_on_last = True
+    provider.conn = SimpleNamespace(
+        stop_event=stop_event,
+        _abort_lock=threading.Lock(),
+        client_abort=False,
+        loop=loop,
+        turn_metrics=None,
+        max_output_size=0,
+    )
+    provider._audio_message_timeout = lambda sentence_type: 2.0
+    provider.store_tts_text("sentence-stream", "这是模型生成并实际播报的完整回答。")
+
+    audio_thread = threading.Thread(
+        target=provider._audio_play_priority_thread, daemon=True
+    )
+    audio_thread.start()
+    try:
+        provider.tts_audio_queue.put(
+            (SentenceType.FIRST, None, first_preview, "sentence-stream")
+        )
+        provider.tts_audio_queue.put(
+            (SentenceType.MIDDLE, b"audio-frame-1", None, "sentence-stream")
+        )
+        provider.tts_audio_queue.put(
+            (SentenceType.MIDDLE, b"audio-frame-2", None, "sentence-stream")
+        )
+        provider.tts_audio_queue.put(
+            (SentenceType.LAST, [], None, "sentence-stream")
+        )
+
+        assert report_ready.wait(timeout=2)
+    finally:
+        stop_event.set()
+        audio_thread.join(timeout=1)
+        loop.call_soon_threadsafe(loop.stop)
+        loop_thread.join(timeout=1)
+        loop.close()
+
+    assert len(reports) == 1
+    assert reports[0][0] == "这是模型生成并实际播报的完整回答。"
+    assert reports[0][1] == [b"audio-frame-1", b"audio-frame-2"]
