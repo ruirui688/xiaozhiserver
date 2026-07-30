@@ -61,6 +61,7 @@ from core.connection import ConnectionHandler
 from core.handle.receiveAudioHandle import startToChat
 from core.providers.intent.function_call.function_call import IntentProvider as FunctionCallIntent
 from core.providers.tts.dto.dto import ContentType, SentenceType
+from core.utils.dialogue import Message
 from plugins_func.register import Action, ActionResponse
 
 
@@ -263,8 +264,20 @@ def test_reqlm_tool_result_can_continue_tool_chain():
     conn = _conn(NativeFunctionCallLLM())
     calls = []
 
-    def fake_chat(query, depth=0, allow_tools=True):
-        calls.append({"query": query, "depth": depth, "allow_tools": allow_tools})
+    def fake_chat(
+        query,
+        depth=0,
+        allow_tools=True,
+        trusted_follow_up_system_prompt=None,
+    ):
+        calls.append(
+            {
+                "query": query,
+                "depth": depth,
+                "allow_tools": allow_tools,
+                "trusted_follow_up_system_prompt": trusted_follow_up_system_prompt,
+            }
+        )
 
     conn.chat = fake_chat
     conn.client_abort = False
@@ -288,7 +301,67 @@ def test_reqlm_tool_result_can_continue_tool_chain():
         abort_generation=0,
     )
 
-    assert calls == [{"query": None, "depth": 1, "allow_tools": True}]
+    assert calls == [
+        {
+            "query": None,
+            "depth": 1,
+            "allow_tools": True,
+            "trusted_follow_up_system_prompt": None,
+        }
+    ]
+
+
+def test_reqlm_tool_result_can_disable_tools_and_add_one_request_instruction():
+    conn = _conn(NativeFunctionCallLLM())
+    calls = []
+
+    def fake_chat(
+        query,
+        depth=0,
+        allow_tools=True,
+        trusted_follow_up_system_prompt=None,
+    ):
+        calls.append(
+            {
+                "query": query,
+                "depth": depth,
+                "allow_tools": allow_tools,
+                "trusted_follow_up_system_prompt": trusted_follow_up_system_prompt,
+            }
+        )
+
+    conn.chat = fake_chat
+    conn.client_abort = False
+    conn.abort_generation = 0
+    conn.sentence_id = "sentence-1"
+
+    result = ActionResponse(
+        action=Action.REQLLM,
+        result="本地知识库未检索到相关内容。",
+        next_llm_tools_enabled=False,
+        next_llm_system_prompt="公开知识可回答，私有事实不能猜测。",
+    )
+    tool_call_data = {
+        "id": "call-1",
+        "name": "search_from_local_knowledge",
+        "arguments": '{"question":"左宗棠收复新疆"}',
+    }
+
+    conn._handle_function_result(
+        [(result, tool_call_data)],
+        depth=0,
+        sentence_id="sentence-1",
+        abort_generation=0,
+    )
+
+    assert calls == [
+        {
+            "query": None,
+            "depth": 1,
+            "allow_tools": False,
+            "trusted_follow_up_system_prompt": "公开知识可回答，私有事实不能猜测。",
+        }
+    ]
 
 
 def test_function_call_chat_passes_full_tool_schema_to_main_llm():
@@ -309,10 +382,7 @@ def test_function_call_chat_passes_full_tool_schema_to_main_llm():
     ]
     assert conn.tts.queued_text() == ["直接回复"]
     assert conn.tts.stored_text == ["直接回复"]
-    assert llm.calls[0]["options"] == {
-        "tool_choice": "required",
-        "parallel_tool_calls": False,
-    }
+    assert llm.calls[0]["options"] == {"parallel_tool_calls": False}
 
 
 def test_direct_answer_streams_to_tts_before_llm_generator_finishes():
@@ -362,10 +432,46 @@ def test_direct_answer_streams_to_tts_before_llm_generator_finishes():
     assert conn.tts.stored_text == [answer]
     assert conn.tts.previews
     assert conn.tts.previews[0][1] == conn.tts.queued_text()[0]
-    assert llm.calls[0]["options"] == {
-        "tool_choice": "required",
-        "parallel_tool_calls": False,
-    }
+    assert llm.calls[0]["options"] == {"parallel_tool_calls": False}
+
+
+def test_direct_answer_streaming_does_not_require_forced_tool_choice():
+    class FreeRoutingFunctionCallLLM(CapturingFunctionCallLLM):
+        supports_tool_choice = False
+
+    conn_ref = {}
+    observed_during_stream = []
+    first_delta = SimpleNamespace(
+        index=0,
+        id="direct-answer-free-routing",
+        function=SimpleNamespace(
+            name="direct_answer",
+            arguments='{"response":"公开历史故事正在生成',
+        ),
+    )
+    second_delta = SimpleNamespace(
+        index=0,
+        id="",
+        function=SimpleNamespace(
+            name=None,
+            arguments='，现在讲完。"}',
+        ),
+    )
+
+    def responses():
+        yield None, [first_delta]
+        observed_during_stream.append(conn_ref["conn"].tts.queued_text())
+        yield None, [second_delta]
+
+    llm = FreeRoutingFunctionCallLLM(responses())
+    conn = _chat_conn(llm, CapturingToolHandler([_tool("search_from_local_knowledge")]))
+    conn_ref["conn"] = conn
+
+    assert conn.chat("讲一个历史故事") is True
+
+    assert observed_during_stream == [["公开历史故"]]
+    assert "".join(conn.tts.queued_text()) == "公开历史故事正在生成，现在讲完。"
+    assert llm.calls[0]["options"] == {"parallel_tool_calls": False}
 
 
 def test_plain_content_streams_while_real_tools_are_attached():
@@ -522,6 +628,30 @@ def test_function_call_mode_with_empty_registry_sends_no_internal_routing_tool()
     assert conn.tts.queued_text() == ["普通回复"]
 
 
+def test_trusted_follow_up_prompt_is_request_scoped_and_tools_stay_disabled():
+    llm = CapturingNoToolLLM(["根据通用知识回答。"])
+    conn = _chat_conn(llm, CapturingToolHandler([_tool("web_search")]))
+    conn.sentence_id = "sentence-1"
+    conn.dialogue.put(Message(role="user", content="讲一个历史故事"))
+    prompt = "公开知识可以回答；私有事实不得猜测。"
+
+    assert conn.chat(
+        None,
+        depth=1,
+        allow_tools=False,
+        trusted_follow_up_system_prompt=prompt,
+    ) is True
+
+    assert len(llm.calls) == 1
+    assert any(
+        item.get("role") == "system" and item.get("content") == prompt
+        for item in llm.calls[0]["dialogue"]
+    )
+    assert all(
+        message.content != prompt for message in conn.dialogue.dialogue
+    )
+
+
 def test_active_meeting_forces_main_llm_to_choose_meeting_tool():
     llm = CapturingFunctionCallLLM([("", None)])
     conn = _chat_conn(llm, CapturingToolHandler([_tool("meeting_minutes")]))
@@ -531,7 +661,8 @@ def test_active_meeting_forces_main_llm_to_choose_meeting_tool():
     assert conn.chat("退出会议模式。") is True
 
     assert llm.calls[0]["options"] == {
-        "tool_choice": "required"
+        "tool_choice": "required",
+        "parallel_tool_calls": False,
     }
     assert conn.meeting_minutes.build_transcript()[0]["text"] == "退出会议模式。"
 

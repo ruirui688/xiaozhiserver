@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: xiaozhi-server
-last_verified: 2026-07-24
+last_verified: 2026-07-30
 source_paths:
   - main/xiaozhi-server/core
   - main/manager-api/src/main/java/xiaozhi/modules/config
@@ -268,12 +268,13 @@ providers/tts/base.py:375-416  tts_text_priority_thread（守护线程）
 SeedTTS2 双流 provider 为每个 `sentence_id` 维护独立的 `FIRST/LAST` 音频边界状态。正常收到 `EVENT_SessionFinished` 时先用 `is_end=True` 冲刷不足 60ms 的 PCM 尾帧；结束等待超时、下行空闲超时、WebSocket 断开、`EVENT_SessionFailed` 或监听任务异常退出时丢弃不完整 PCM 尾帧。只要本轮已经发布 `FIRST`，所有这些路径都会通过同一幂等收尾函数发布且只发布一次 `SentenceType.LAST`；迟到的结束事件不得重复产生 `LAST`，非当前会话的残余事件不得重置当前活跃会话。
 
 `tts_text_queue` 中的 `SentenceType.FIRST` 是本地逻辑轮次边界，不等同于火山上游的
-`EVENT_StartSession`。主 LLM 使用官方 `direct_answer` 虚拟工具表示“本轮直接回答”：同时支持
-`tool_choice=required` 和 `parallel_tool_calls=false` 的 OpenAI 兼容 provider 会先确定唯一分支，再从
-流式增长的 `direct_answer.response` 中只保留 5 字 JSON 安全尾，其余稳定增量立即向 TTS 投递，
-不再设置首段、后续段或自然标点聚合门槛。与官方链路一致，普通 content 即使在携带真实 tools 的
-请求和工具结果递归轮中也立即进入 TTS；会议静默裁决轮仍禁止提前出声。缺少单工具约束能力的
-provider 只对 `direct_answer` 保持完整响应确认回退。
+`EVENT_StartSession`。主 LLM 使用官方 `direct_answer` 虚拟工具表示“本轮直接回答”。普通 function-call
+轮不发送 `tool_choice=required`，由模型自由选择普通 content、`direct_answer` 或真实工具；provider 支持时
+仍发送 `parallel_tool_calls=false` 保证单出口。模型选择 `direct_answer` 后，服务端从流式增长的
+`response` 中只保留 5 字 JSON 安全尾，其余稳定增量立即向 TTS 投递，不再设置首段、后续段或自然标点
+聚合门槛；普通 content 即使在携带真实 tools 的请求和工具结果递归轮中也立即进入 TTS。会议静默裁决轮
+仍禁止提前出声，并在 provider 支持时保留 `tool_choice=required`。缺少单工具约束能力的 provider 只对
+`direct_answer` 保持完整响应确认回退。
 
 无论文本来自实时 `direct_answer` 还是兼容回退，SeedTTS2 都使用懒启动约定：逻辑 `FIRST` 只重置本轮流状态、登记 `sentence_id` 并准备幂等边界；
 第一段经清洗后非空的 `ContentType.TEXT` 或路径有效的 `ContentType.FILE` 到达时，才为该轮启动一次上游会话。后续文本

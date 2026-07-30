@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: knowledge
-last_verified: 2026-07-23
+last_verified: 2026-07-30
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/knowledge
   - main/manager-api/src/main/java/xiaozhi/modules/agent/service/impl/AgentPluginMappingServiceImpl.java
@@ -221,6 +221,12 @@ LLM 调用 search_from_local_knowledge / search_from_ragflow
 ```
 
 **注意**：知识检索结果作为 tool message 注入（不是 system prompt），与记忆注入（`<memory>` 标签在 system prompt 中）是不同的机制。LLM 需要自行交叉参考两个来源。
+
+本地知识库请求成功但没有返回切片时，工具结果固定为“本地知识库未检索到相关内容”，并通过
+`ActionResponse` 只对下一次递归回答关闭 tools、增加临时可信 system 指令。主 LLM 应自行按完整语义区分：
+公开历史、文化、科普和故事可使用通用知识直接回答；企业资料、人员身份和其他私有事实必须说明暂无记录，
+不能猜测。该指令不持久化到 Dialogue，下一轮新的用户问题会恢复正常工具发现；服务端不增加关键词路由或
+独立分类器。接口失败、配置缺失和鉴权错误仍走原有明确错误回复，不能伪装成空检索。
 
 ### 5.3 上下文与工具描述预算
 

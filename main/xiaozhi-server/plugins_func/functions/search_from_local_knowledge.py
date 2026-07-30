@@ -12,6 +12,14 @@ if TYPE_CHECKING:
 TAG = __name__
 logger = setup_logging()
 
+LOCAL_KNOWLEDGE_EMPTY_RESULT = "本地知识库未检索到相关内容。"
+LOCAL_KNOWLEDGE_EMPTY_FOLLOW_UP_PROMPT = (
+    "本地知识库没有检索到相关内容。请根据问题类型处理："
+    "公开历史、文化、科普或故事可以使用模型已有通用知识直接回答；"
+    "企业资料、人员身份或其他依赖私有知识库的事实必须说明暂无记录，不能猜测。"
+    "不要再次调用知识库。"
+)
+
 SEARCH_FROM_LOCAL_KNOWLEDGE_FUNCTION_DESC = {
     "type": "function",
     "function": {
@@ -96,9 +104,15 @@ def search_from_local_knowledge(conn: "ConnectionHandler", question=None):
                 f"# 关于问题【{question}】查到本地知识库如下",
                 contents,
             )
-        else:
-            context_text = "根据本地知识库查询结果，没有相关信息。"
-        return ActionResponse(Action.REQLLM, context_text, None)
+            return ActionResponse(Action.REQLLM, context_text, None)
+
+        return ActionResponse(
+            Action.REQLLM,
+            LOCAL_KNOWLEDGE_EMPTY_RESULT,
+            None,
+            next_llm_tools_enabled=False,
+            next_llm_system_prompt=LOCAL_KNOWLEDGE_EMPTY_FOLLOW_UP_PROMPT,
+        )
 
     except requests.exceptions.RequestException as e:
         logger.bind(tag=TAG).error(f"本地知识库请求失败：{str(e)}")

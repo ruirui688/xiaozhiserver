@@ -148,6 +148,51 @@ def test_local_knowledge_context_is_deduplicated_and_bounded(monkeypatch):
     assert "测试问题" in result.result
 
 
+def test_empty_local_knowledge_disables_follow_up_tools_and_sets_fact_boundary(
+    monkeypatch,
+):
+    response_payload = {"code": 0, "data": {"chunks": []}}
+
+    class _Response:
+        encoding = "utf-8"
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return response_payload
+
+    monkeypatch.setattr(
+        local_knowledge_module.requests,
+        "post",
+        lambda *args, **kwargs: _Response(),
+    )
+    conn = type(
+        "Connection",
+        (),
+        {
+            "config": {
+                "plugins": {
+                    "search_from_local_knowledge": {"dataset_ids": ["dataset-1"]}
+                },
+                "manager-api": {"url": "http://manager-api", "secret": "secret"},
+            }
+        },
+    )()
+
+    result = local_knowledge_module.search_from_local_knowledge(
+        conn,
+        question="讲讲左宗棠收复新疆",
+    )
+
+    assert result.result == local_knowledge_module.LOCAL_KNOWLEDGE_EMPTY_RESULT
+    assert result.next_llm_tools_enabled is False
+    assert "公开历史、文化、科普或故事" in result.next_llm_system_prompt
+    assert "企业资料、人员身份" in result.next_llm_system_prompt
+    assert "不能猜测" in result.next_llm_system_prompt
+    assert "不要再次调用知识库" in result.next_llm_system_prompt
+
+
 def test_tool_index_does_not_repeat_schema_descriptions():
     description = "很长的工具描述" * 200
     tool = {

@@ -1,5 +1,6 @@
 from config.logger import setup_logging
 from enum import Enum
+from typing import Optional
 
 TAG = __name__
 
@@ -41,10 +42,20 @@ class Action(Enum):
 
 
 class ActionResponse:
-    def __init__(self, action: Action, result=None, response=None):
+    def __init__(
+        self,
+        action: Action,
+        result=None,
+        response=None,
+        next_llm_tools_enabled: Optional[bool] = None,
+        next_llm_system_prompt: Optional[str] = None,
+    ):
         self.action = action  # 动作类型
         self.result = result  # 动作产生的结果
         self.response = response  # 直接回复的内容
+        # 仅供 Action.REQLLM 的当前递归轮使用；None 保持原有工具链行为。
+        self.next_llm_tools_enabled = next_llm_tools_enabled
+        self.next_llm_system_prompt = next_llm_system_prompt
 
 
 class FunctionItem:

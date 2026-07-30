@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: runtime
-last_verified: 2026-07-28
+last_verified: 2026-07-30
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/config/service/impl/ConfigServiceImpl.java
   - main/xiaozhi-server/agent-base-prompt.txt
@@ -332,7 +332,7 @@ request_params = {
 
 结论：主聊天模型看到的插件提示词通常不拼在 system prompt 里，而是作为 `tools` 字段进入模型请求。
 
-顶层普通回答沿用官方 `direct_answer` 虚拟工具，不代表设备或服务端真实能力。对同时支持强制工具选择和单工具约束的 OpenAI 兼容 provider，服务端发送 `tool_choice=required`、`parallel_tool_calls=false`，因此模型必须在两个出口中选择一个：`direct_answer(response=...)` 流式回答或真实工具调用。服务端只保留 5 字 JSON 安全尾，其余稳定的 `direct_answer.response` 增量立即进入 TTS，不再等待自然短句聚合。普通 content 即使在携带真实 tools 的请求和工具结果递归轮中也即时流播；会议静默裁决轮除外。若端点不支持单工具约束，可在模型参数中设置 `supports_parallel_tool_calls: false`，服务端只对 `direct_answer` 停用快速路径并等完整响应确认。用户打断播报属于设备/AEC 驱动的 Abort 控制面，不进入 LLM tools schema。
+顶层普通回答沿用官方 `direct_answer` 虚拟工具，不代表设备或服务端真实能力。普通 function-call 轮由模型在普通 content、`direct_answer(response=...)` 和真实工具之间自由选择，不发送 `tool_choice=required`；支持单工具约束的 OpenAI 兼容 provider 仍发送 `parallel_tool_calls=false`，避免同一轮同时出现直接回答和真实工具。模型选择 `direct_answer` 时，服务端只保留 5 字 JSON 安全尾，其余稳定增量立即进入 TTS，不再等待自然短句聚合；模型选择普通 content 时同样即时流播。只有会议激活后的静默控制轮继续在 provider 支持时发送 `tool_choice=required`，并且只暴露会议工具。若端点不支持 `parallel_tool_calls` 参数，可在模型参数中设置 `supports_parallel_tool_calls: false`，服务端只对 `direct_answer` 停用快速路径并等完整 response 确认。用户打断播报属于设备/AEC 驱动的 Abort 控制面，不进入 LLM tools schema。
 
 基础 system prompt 不再无条件宣称 `web_search`、`get_weather`、`play_music` 等可选工具存在。`PromptManager` 从 `UnifiedToolHandler.get_functions()` 返回的同一份真实 schema 提取工具名；有工具时写入完整 `<tool_and_knowledge>` 段，无工具时连工具段和否定说明一起移除。每轮请求前会再次同步，以覆盖 MCP、设备 IoT 或设备 MCP 在连接建立后动态注册或注销工具的情况。工具的用途、参数和限制仍以原生 `tools` schema 为唯一事实来源，未注册工具不得出现在提示词中。
 
@@ -571,6 +571,12 @@ Action.REQLLM
   -> 延迟更高
   -> 适合搜索结果总结、声明式互动插件、复杂工具结果解释
 ```
+
+`ActionResponse` 可以为当前递归轮声明 `next_llm_tools_enabled` 和
+`next_llm_system_prompt`，两者都不会写入永久系统提示词。当前本地知识库只在“检索成功但切片为空”时使用该能力：
+下一轮关闭全部工具并注入可信边界，让模型对公开历史、文化、科普和故事使用通用知识回答；企业资料、人员身份和
+其他依赖私有知识库的事实只能说明暂无记录，禁止猜测，也不得再次调用知识库。问题类型继续由主 LLM 根据完整语义
+判断，服务端不维护关键词表或独立分类器。
 
 处理位置：
 

@@ -32,6 +32,10 @@ from core.utils.dialogue import Message, Dialogue
 from core.providers.asr.dto.dto import InterfaceType
 from core.handle.textHandle import handleTextMessage
 from core.providers.tools.unified_tool_handler import UnifiedToolHandler
+from core.providers.tools.follow_up_policy import (
+    inject_trusted_follow_up_system_prompt,
+    resolve_tool_follow_up_policy,
+)
 from core.providers.tools.tool_protocol_guard import looks_like_unhandled_tool_protocol
 from plugins_func.loadplugins import auto_import_modules
 from plugins_func.register import Action, ActionResponse
@@ -1434,6 +1438,7 @@ class ConnectionHandler:
         turn_context=None,
         turn_id=None,
         reply_generation=None,
+        trusted_follow_up_system_prompt=None,
     ):
         if depth == 0:
             turn_id = self.turn_metrics.ensure_text_turn(turn_id)
@@ -1584,6 +1589,10 @@ class ConnectionHandler:
             )
             llm_dialogue = self._with_music_library_context(llm_dialogue)
             llm_dialogue = self._with_meeting_runtime_context(llm_dialogue)
+            llm_dialogue = inject_trusted_follow_up_system_prompt(
+                llm_dialogue,
+                trusted_follow_up_system_prompt,
+            )
 
             llm_started_at = time.monotonic()
             self.session_telemetry.metrics.record_llm_started()
@@ -1593,12 +1602,11 @@ class ConnectionHandler:
             direct_answer_stream_config = DirectAnswerStreamConfig.from_mapping(
                 self.config.get("direct_answer_streaming")
             )
-            official_direct_answer_streaming = bool(
+            direct_answer_streaming = bool(
                 direct_answer_stream_config.enabled
                 and tools_enabled
                 and depth == 0
                 and not meeting_tool_turn
-                and getattr(self.llm, "supports_tool_choice", False)
                 and getattr(self.llm, "supports_parallel_tool_calls", False)
                 and any(
                     item.get("function", {}).get("name") == "direct_answer"
@@ -1608,11 +1616,11 @@ class ConnectionHandler:
             if tools_enabled:
                 # 使用支持functions的streaming接口
                 function_options = {}
-                if (
-                    meeting_tool_turn or official_direct_answer_streaming
-                ) and getattr(self.llm, "supports_tool_choice", False):
+                if meeting_tool_turn and getattr(
+                    self.llm, "supports_tool_choice", False
+                ):
                     function_options["tool_choice"] = "required"
-                if official_direct_answer_streaming:
+                if getattr(self.llm, "supports_parallel_tool_calls", False):
                     function_options["parallel_tool_calls"] = False
                 llm_responses = self.llm.response_with_functions(
                     self.session_id,
@@ -1634,7 +1642,7 @@ class ConnectionHandler:
             )
             self.logger.bind(tag=TAG).info(
                 f"LLM请求已发起 | depth={depth} | tools_enabled={tools_enabled} | "
-                f"direct_answer_streaming={official_direct_answer_streaming} | "
+                f"direct_answer_streaming={direct_answer_streaming} | "
                 f"elapsed={time.monotonic() - llm_started_at:.3f}s"
             )
         except Exception as e:
@@ -1715,7 +1723,7 @@ class ConnectionHandler:
 
                     # direct_answer.response 跟随官方实现：除 JSON 末尾安全
                     # 缓冲外，每个稳定增量立即进入 TTS。
-                    if official_direct_answer_streaming:
+                    if direct_answer_streaming:
                         real_tool_calls = [
                             call
                             for call in tool_calls_list
@@ -2074,11 +2082,6 @@ class ConnectionHandler:
         if len(response_message) > 0:
             text_buff = "".join(response_message)
             if defer_plain_content_for_tools:
-                if official_direct_answer_streaming:
-                    self.logger.bind(tag=TAG).warning(
-                        "模型未按 required tool choice 返回 direct_answer，"
-                        "普通文本已在完整响应确认后安全播报"
-                    )
                 self.tts.tts_text_queue.put(
                     TTSMessageDTO(
                         sentence_id=current_sentence_id,
@@ -2335,13 +2338,20 @@ class ConnectionHandler:
             self._build_tool_call_messages(need_llm_tools)
 
             if not is_aborted():
+                follow_up_policy = resolve_tool_follow_up_policy(need_llm_tools)
                 if turn_id is None:
-                    self.chat(None, depth=depth + 1, allow_tools=True)
+                    self.chat(
+                        None,
+                        depth=depth + 1,
+                        allow_tools=follow_up_policy.allow_tools,
+                        trusted_follow_up_system_prompt=follow_up_policy.system_prompt,
+                    )
                 else:
                     self.chat(
                         None,
                         depth=depth + 1,
-                        allow_tools=True,
+                        allow_tools=follow_up_policy.allow_tools,
+                        trusted_follow_up_system_prompt=follow_up_policy.system_prompt,
                         turn_id=turn_id,
                     )
 
