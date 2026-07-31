@@ -33,6 +33,20 @@ export default {
                 if (callback) callback(networkErrorResponse('获取设备列表失败'));
             }).send();
     },
+    // 获取设备真实音频预览短期票据
+    createAudioPreviewTicket(deviceId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/device/${deviceId}/audio-preview-ticket`)
+            .method('POST')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                console.error('获取真实音频预览票据失败:', networkErrorSummary(err));
+                if (callback) callback(networkErrorResponse('获取真实音频预览票据失败'));
+            }).send();
+    },
     // 解绑设备
     unbindDevice(device_id, callback) {
         RequestService.sendRequest()

@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import xiaozhi.common.exception.ErrorCode;
 import xiaozhi.common.redis.RedisKeys;
@@ -24,12 +25,14 @@ import xiaozhi.common.user.UserDetail;
 import xiaozhi.common.utils.Result;
 import xiaozhi.modules.device.dto.DeviceAddressBookAliasDTO;
 import xiaozhi.modules.device.dto.DeviceAddressBookPermissionDTO;
+import xiaozhi.modules.device.dto.DeviceAudioPreviewTicketDTO;
 import xiaozhi.modules.device.dto.DeviceManualAddDTO;
 import xiaozhi.modules.device.dto.DeviceRegisterDTO;
 import xiaozhi.modules.device.dto.DeviceUnBindDTO;
 import xiaozhi.modules.device.dto.DeviceUpdateDTO;
 import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.device.service.DeviceAddressBookService;
+import xiaozhi.modules.device.service.DeviceAudioPreviewTicketService;
 import xiaozhi.modules.device.service.DeviceService;
 import xiaozhi.modules.device.vo.UserShowDeviceListVO;
 import xiaozhi.modules.security.user.SecurityUser;
@@ -45,15 +48,18 @@ public class DeviceController {
     private final RedisUtils redisUtils;
     private final SysParamsService sysParamsService;
     private final WorkspacePermissionService workspacePermissionService;
+    private final DeviceAudioPreviewTicketService audioPreviewTicketService;
 
     public DeviceController(DeviceService deviceService, DeviceAddressBookService deviceAddressBookService,
             RedisUtils redisUtils, SysParamsService sysParamsService,
-            WorkspacePermissionService workspacePermissionService) {
+            WorkspacePermissionService workspacePermissionService,
+            DeviceAudioPreviewTicketService audioPreviewTicketService) {
         this.deviceService = deviceService;
         this.deviceAddressBookService = deviceAddressBookService;
         this.redisUtils = redisUtils;
         this.sysParamsService = sysParamsService;
         this.workspacePermissionService = workspacePermissionService;
+        this.audioPreviewTicketService = audioPreviewTicketService;
     }
 
     @PostMapping("/bind/{agentId}/{deviceCode}")
@@ -92,6 +98,17 @@ public class DeviceController {
         UserDetail user = SecurityUser.getUser();
         List<UserShowDeviceListVO> devices = deviceService.getUserDeviceList(user.getId(), agentId);
         return new Result<List<UserShowDeviceListVO>>().ok(devices);
+    }
+
+    @PostMapping("/{id}/audio-preview-ticket")
+    @Operation(summary = "获取设备真实音频预览短期票据")
+    @RequiresPermissions("sys:role:normal")
+    public Result<DeviceAudioPreviewTicketDTO> createAudioPreviewTicket(
+            @PathVariable String id,
+            HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-store");
+        response.setHeader("Pragma", "no-cache");
+        return new Result<DeviceAudioPreviewTicketDTO>().ok(audioPreviewTicketService.issue(id));
     }
 
     @PostMapping("/bind/{agentId}")

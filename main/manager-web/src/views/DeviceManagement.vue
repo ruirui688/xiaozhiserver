@@ -65,6 +65,9 @@
               </el-table-column>
               <el-table-column :label="$t('device.operation')" align="center">
                 <template slot-scope="scope">
+                  <el-button size="mini" type="text" @click="handleAudioPreview(scope.row)">
+                    {{ $t('deviceAudioPreview.button') }}
+                  </el-button>
                   <el-button size="mini" type="text" @click="handleUnbind(scope.row.device_id)">
                     {{ $t('device.unbind') }}
                   </el-button>
@@ -120,6 +123,7 @@
       @refresh="fetchBindDevices(currentAgentId)" />
     <ManualAddDeviceDialog :visible.sync="manualAddDeviceDialogVisible" :agent-id="currentAgentId"
       @refresh="fetchBindDevices(currentAgentId)" />
+    <DeviceAudioPreviewDialog ref="audioPreviewDialog" />
     <el-footer>
       <version-footer />
     </el-footer>
@@ -130,6 +134,7 @@
 import Api from '@/apis/api';
 import AddDeviceDialog from "@/components/AddDeviceDialog.vue";
 import HeaderBar from "@/components/HeaderBar.vue";
+import DeviceAudioPreviewDialog from "@/components/DeviceAudioPreviewDialog.vue";
 import ManualAddDeviceDialog from "@/components/ManualAddDeviceDialog.vue";
 import VersionFooter from "@/components/VersionFooter.vue";
 import MacAddressMask from "@/components/MacAddressMask.vue";
@@ -141,6 +146,7 @@ export default {
     ManualAddDeviceDialog,
     VersionFooter,
     MacAddressMask,
+    DeviceAudioPreviewDialog,
   },
   data() {
     return {
@@ -286,6 +292,9 @@ export default {
     },
     handleManualAddDevice() {
       this.manualAddDeviceDialogVisible = true;
+    },
+    handleAudioPreview(row) {
+      this.$refs.audioPreviewDialog.open(row);
     },
     submitRemark(row) {
       if (row._submitting) return;

@@ -368,7 +368,21 @@ SeedTTS2 超时按阶段拆分：建连默认 10 秒、会话启动默认 10 秒
 当前设备自己的任务。`completed` 仅表示服务端音频已经通过 WebSocket 发送完成，现有协议没有
 扬声器物理播放完成 ACK。
 
-### 4.4 流控
+### 4.4 智控台真实音频旁路监听
+
+设备管理页通过 manager-api 的 `POST /device/{id}/audio-preview-ticket` 获取 60 秒短期票据，
+再连接 `wss://host/xiaozhi/audio-preview/`。票据必须经过当前用户的设备 workspace 读取权限校验，
+并在 WebSocket 建立后的首条 JSON 消息中提交；Token 不进入 URL 或日志。
+
+`sendAudioHandle._do_send_audio()` 只在设备 WebSocket 成功发送原始 Opus 包后，才通过有限内存队列
+复制同一字节帧给预览连接。复制使用非阻塞入队：监听页变慢、断线或队列溢出只会丢弃预览积压并发送
+`discontinuity`，不得等待、取消或改变设备下行发送。每台设备同时只允许一个预览连接；预览只包含
+下行音频，不包含麦克风上行，也不在服务端保存录音。
+
+预览控制帧包含 `ready / stream_start / stream_stop / discontinuity / listener_busy / error`，二进制帧为
+裸 Opus 单帧。Web 端使用项目内置 `opus-decoder` 解码，并按 `stream_start` 提供的采样率播放和绘制波形。
+
+### 4.5 流控
 
 ```text
 utils/audioRateController.py  AudioRateController
@@ -380,7 +394,7 @@ utils/audioRateController.py  AudioRateController
 - 整轮 TTS 不设置固定播放时长上限；收到 `LAST` 后，等待预算按队列中剩余音频帧的真实播放时长动态计算，并额外保留单包发送超时与收尾容差。
 - WebSocket 半开保护作用于单个音频包发送。单包超过 `audio_send_timeout_seconds` 仍未完成时，后台发送任务失败并清理队列，避免异常连接永久占用会话；正常的长语音不会因为总时长超过 20 秒被截断。
 
-### 4.5 对话延时链路协议
+### 4.6 对话延时链路协议
 
 聊天记录中的延时指标使用 `schema_version=2`，不兼容旧的单值 `latency_ms` 口径。
 新协议只有两个权威入口：

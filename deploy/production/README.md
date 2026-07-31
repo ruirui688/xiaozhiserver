@@ -171,6 +171,7 @@ https://domain/xiaozhi/ota/      -> 127.0.0.1:8002/xiaozhi/ota/
 https://domain/mcp/vision/explain -> 127.0.0.1:8003/mcp/vision/explain
 https://domain/mcp/vision/images/ -> 127.0.0.1:8003/mcp/vision/images/
 wss://domain/xiaozhi/v1/         -> 127.0.0.1:8000/xiaozhi/v1/
+wss://domain/xiaozhi/audio-preview/ -> 127.0.0.1:8000/xiaozhi/audio-preview/
 ```
 
 Set these values in `~/xiaozhi-data/.env` after HTTPS is available:

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from urllib.parse import urlparse
 
 import websockets
 from config.logger import setup_logging
@@ -33,6 +34,7 @@ _setup_websockets_logger()
 from core.connection import ConnectionHandler
 from config.config_loader import get_config_from_api_async
 from core.auth import AuthManager, AuthenticationError
+from core.observability import AUDIO_PREVIEW_PATH, AudioPreviewHub
 from core.utils.modules_initialize import initialize_modules
 from core.utils.util import check_vad_update, check_asr_update
 
@@ -71,6 +73,7 @@ class WebSocketServer:
         secret_key = self.config["server"]["auth_key"]
         expire_seconds = auth_config.get("expire_seconds", None)
         self.auth = AuthManager(secret_key=secret_key, expire_seconds=expire_seconds)
+        self.audio_preview_hub = AudioPreviewHub(self.auth, self.logger)
 
     async def start(self):
         server_config = self.config["server"]
@@ -83,10 +86,15 @@ class WebSocketServer:
             await asyncio.Future()
 
     async def _handle_connection(self, websocket: websockets.ServerConnection):
+        request_path = urlparse(websocket.request.path or "").path.rstrip("/")
+        if request_path == AUDIO_PREVIEW_PATH:
+            await self.audio_preview_hub.handle_connection(websocket)
+            return
+
         headers = dict(websocket.request.headers)
         if headers.get("device-id", None) is None:
             # 尝试从 URL 的查询参数中获取 device-id
-            from urllib.parse import parse_qs, urlparse
+            from urllib.parse import parse_qs
 
             # 从 WebSocket 请求中获取路径
             request_path = websocket.request.path

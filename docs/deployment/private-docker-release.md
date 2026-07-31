@@ -399,6 +399,7 @@ https://yh.wejoy.link/xiaozhi/ota/       -> 127.0.0.1:8002/xiaozhi/ota/
 https://yh.wejoy.link/mcp/vision/explain -> 127.0.0.1:8003/mcp/vision/explain
 https://yh.wejoy.link/mcp/vision/images/ -> 127.0.0.1:8003/mcp/vision/images/
 wss://yh.wejoy.link/xiaozhi/v1/          -> 127.0.0.1:8000/xiaozhi/v1/
+wss://yh.wejoy.link/xiaozhi/audio-preview/ -> 127.0.0.1:8000/xiaozhi/audio-preview/
 ```
 
 在服务器 `~/xiaozhi-data/.env` 中设置：
@@ -542,6 +543,7 @@ https://yh.wejoy.link/xiaozhi/           -> http://127.0.0.1:8002/xiaozhi/
 https://yh.wejoy.link/xiaozhi/ota/       -> http://127.0.0.1:8002/xiaozhi/ota/
 https://yh.wejoy.link/mcp/vision/explain -> http://127.0.0.1:8003/mcp/vision/explain
 wss://yh.wejoy.link/xiaozhi/v1/          -> ws://127.0.0.1:8000/xiaozhi/v1/
+wss://yh.wejoy.link/xiaozhi/audio-preview/ -> ws://127.0.0.1:8000/xiaozhi/audio-preview/
 ```
 
 全模块生产部署中，`/xiaozhi/ota/` 必须反代到 `manager-api / manager-web`

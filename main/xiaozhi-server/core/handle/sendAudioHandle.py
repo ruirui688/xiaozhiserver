@@ -18,6 +18,52 @@ AUDIO_FRAME_DURATION = 60
 PRE_BUFFER_COUNT = 5
 
 
+def _audio_preview_hub(conn):
+    server = getattr(conn, "server", None)
+    return getattr(server, "audio_preview_hub", None)
+
+
+def _publish_preview_start(conn, sentence_id):
+    hub = _audio_preview_hub(conn)
+    if hub is None or not getattr(conn, "device_id", None):
+        return
+    try:
+        hub.publish_stream_start(
+            conn.device_id,
+            sentence_id,
+            getattr(conn, "sample_rate", 16000),
+            AUDIO_FRAME_DURATION,
+        )
+    except Exception as exc:
+        conn.logger.bind(tag=TAG).warning(
+            f"真实音频预览开始通知失败: {type(exc).__name__}"
+        )
+
+
+def _publish_preview_audio(conn, opus_packet):
+    hub = _audio_preview_hub(conn)
+    if hub is None or not getattr(conn, "device_id", None):
+        return
+    try:
+        hub.publish_audio(conn.device_id, opus_packet)
+    except Exception as exc:
+        conn.logger.bind(tag=TAG).warning(
+            f"真实音频预览帧复制失败: {type(exc).__name__}"
+        )
+
+
+def _publish_preview_stop(conn, sentence_id, reason=None):
+    hub = _audio_preview_hub(conn)
+    if hub is None or not getattr(conn, "device_id", None):
+        return
+    try:
+        hub.publish_stream_stop(conn.device_id, sentence_id, reason)
+    except Exception as exc:
+        conn.logger.bind(tag=TAG).warning(
+            f"真实音频预览结束通知失败: {type(exc).__name__}"
+        )
+
+
 async def sendAudioMessage(
     conn: "ConnectionHandler",
     sentenceType,
@@ -90,6 +136,8 @@ async def sendAudioMessage(
             conn.client_is_speaking = True
         # 这里是真实首音频边界；STT 后的 start 只表示回复可打断。
         conn._tts_started_at = time.time() * 1000
+        if is_new_protocol_sentence:
+            _publish_preview_start(conn, protocol_sentence_id)
         mark_report_started = getattr(conn.tts, "mark_report_started", None)
         if callable(mark_report_started):
             mark_report_started(protocol_sentence_id)
@@ -440,6 +488,9 @@ async def _do_send_audio(conn: "ConnectionHandler", opus_packet, flow_control):
         # 直接发送opus数据包
         await conn.websocket.send(opus_packet)
 
+    # 只复制已经成功发给设备的原始 Opus 帧，且绝不等待预览消费者。
+    _publish_preview_audio(conn, opus_packet)
+
     # 更新流控状态
     flow_control["packet_count"] = packet_index + 1
     flow_control["sequence"] = sequence + 1
@@ -579,6 +630,12 @@ async def send_tts_message(
         if reply_lifecycle is not None and reply_generation is not None:
             reply_lifecycle.fail(reply_generation, "tts_protocol_send_failed")
         raise
+    if state == "stop":
+        _publish_preview_stop(
+            conn,
+            protocol_sentence_id or getattr(conn, "sentence_id", None),
+            reason,
+        )
     if state == "stop" and reply_lifecycle is not None and reply_generation is not None:
         if reason == "abort":
             reply_lifecycle.interrupt(reply_generation, reason)
