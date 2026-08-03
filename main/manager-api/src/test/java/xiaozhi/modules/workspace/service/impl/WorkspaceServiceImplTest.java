@@ -6,9 +6,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.Date;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -38,8 +40,10 @@ import xiaozhi.modules.workspace.dto.WorkspaceCreateDTO;
 import xiaozhi.modules.workspace.dto.WorkspaceInviteDTO;
 import xiaozhi.modules.workspace.dto.WorkspaceRoleUpdateDTO;
 import xiaozhi.modules.workspace.entity.WorkspaceEntity;
+import xiaozhi.modules.workspace.entity.WorkspaceInvitationEntity;
 import xiaozhi.modules.workspace.entity.WorkspaceMemberEntity;
 import xiaozhi.modules.workspace.service.WorkspaceService;
+import xiaozhi.modules.workspace.vo.WorkspaceVO;
 
 class WorkspaceServiceImplTest {
 
@@ -210,6 +214,48 @@ class WorkspaceServiceImplTest {
         try (MockedStatic<SecurityUser> ignored = mockSecurityUser(USER_ID, false)) {
             assertThrows(RenException.class, () -> workspaceService.invite("workspace-a", dto));
         }
+    }
+
+    @Test
+    void acceptInvitationReactivatesDisabledMemberInsteadOfInsertingDuplicate() {
+        WorkspaceInvitationEntity invitation = new WorkspaceInvitationEntity();
+        invitation.setId("invitation-a");
+        invitation.setWorkspaceId("workspace-a");
+        invitation.setInviteeUsername("alice");
+        invitation.setInviteeUserId(USER_ID);
+        invitation.setRole(WorkspaceService.ROLE_ADMIN);
+        invitation.setCode("invite-code");
+        invitation.setStatus("PENDING");
+        invitation.setExpiresAt(new Date(System.currentTimeMillis() + 60_000));
+        invitation.setCreator(2002L);
+
+        WorkspaceMemberEntity disabledMember = member(
+                "workspace-a", USER_ID, WorkspaceService.ROLE_MEMBER);
+        disabledMember.setStatus(0);
+        SysUserEntity user = new SysUserEntity();
+        user.setId(USER_ID);
+        user.setUsername("alice");
+        WorkspaceEntity workspace = workspace("workspace-a", 2002L);
+
+        when(invitationDao.selectOne(any(Wrapper.class))).thenReturn(invitation);
+        when(sysUserDao.selectById(USER_ID)).thenReturn(user);
+        when(memberDao.selectOne(any(Wrapper.class))).thenReturn(disabledMember);
+        when(memberDao.selectCount(any(Wrapper.class))).thenReturn(1L);
+        when(workspaceDao.selectById("workspace-a")).thenReturn(workspace);
+
+        WorkspaceVO result;
+        try (MockedStatic<SecurityUser> ignored = mockSecurityUser(USER_ID, false)) {
+            result = workspaceService.acceptInvitation("invite-code");
+        }
+
+        ArgumentCaptor<WorkspaceMemberEntity> memberCaptor = ArgumentCaptor.forClass(WorkspaceMemberEntity.class);
+        verify(memberDao).updateById(memberCaptor.capture());
+        verify(memberDao, never()).insert(any(WorkspaceMemberEntity.class));
+        assertEquals(disabledMember.getId(), memberCaptor.getValue().getId());
+        assertEquals(1, memberCaptor.getValue().getStatus());
+        assertEquals(WorkspaceService.ROLE_ADMIN, memberCaptor.getValue().getRole());
+        assertEquals("ACCEPTED", invitation.getStatus());
+        assertEquals(WorkspaceService.ROLE_ADMIN, result.getCurrentUserRole());
     }
 
     @Test

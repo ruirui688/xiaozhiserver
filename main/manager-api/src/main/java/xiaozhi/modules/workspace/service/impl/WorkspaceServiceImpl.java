@@ -199,10 +199,11 @@ public class WorkspaceServiceImpl extends BaseServiceImpl<WorkspaceDao, Workspac
         if (user == null || !user.getUsername().equals(invitation.getInviteeUsername())) {
             throw new RenException(ErrorCode.NO_PERMISSION);
         }
-        WorkspaceMemberEntity member = getActiveMember(invitation.getWorkspaceId(), userId);
-        if (member == null) {
+        WorkspaceMemberEntity member = getMember(invitation.getWorkspaceId(), userId);
+        if (member == null || !Integer.valueOf(ACTIVE).equals(member.getStatus())) {
             ensureWorkspaceHasCapacityForAccept(invitation.getWorkspaceId());
-            member = createMember(invitation.getWorkspaceId(), userId, invitation.getRole(), invitation.getCreator());
+            member = activateOrCreateMember(member, invitation.getWorkspaceId(), userId,
+                    invitation.getRole(), invitation.getCreator());
         }
         invitation.setStatus(INVITE_ACCEPTED);
         invitation.setAcceptedAt(new Date());
@@ -280,13 +281,17 @@ public class WorkspaceServiceImpl extends BaseServiceImpl<WorkspaceDao, Workspac
 
     @Override
     public WorkspaceMemberEntity getActiveMember(String workspaceId, Long userId) {
+        WorkspaceMemberEntity member = getMember(workspaceId, userId);
+        return member != null && Integer.valueOf(ACTIVE).equals(member.getStatus()) ? member : null;
+    }
+
+    private WorkspaceMemberEntity getMember(String workspaceId, Long userId) {
         if (StringUtils.isBlank(workspaceId) || userId == null) {
             return null;
         }
         return memberDao.selectOne(new QueryWrapper<WorkspaceMemberEntity>()
                 .eq("workspace_id", workspaceId)
                 .eq("user_id", userId)
-                .eq("status", ACTIVE)
                 .last("LIMIT 1"));
     }
 
@@ -347,6 +352,19 @@ public class WorkspaceServiceImpl extends BaseServiceImpl<WorkspaceDao, Workspac
         return member;
     }
 
+    private WorkspaceMemberEntity activateOrCreateMember(WorkspaceMemberEntity member, String workspaceId,
+            Long userId, String role, Long updater) {
+        if (member == null) {
+            return createMember(workspaceId, userId, role, updater);
+        }
+        member.setRole(role);
+        member.setStatus(ACTIVE);
+        member.setUpdater(updater);
+        member.setUpdatedAt(new Date());
+        memberDao.updateById(member);
+        return member;
+    }
+
     private void disableMember(String workspaceId, Long userId) {
         memberDao.update(null, new UpdateWrapper<WorkspaceMemberEntity>()
                 .eq("workspace_id", workspaceId)
@@ -355,8 +373,10 @@ public class WorkspaceServiceImpl extends BaseServiceImpl<WorkspaceDao, Workspac
     }
 
     private void ensureOwnerMember(WorkspaceEntity workspace, Long userId) {
-        if (getActiveMember(workspace.getId(), userId) == null) {
-            createMember(workspace.getId(), userId, ROLE_OWNER, userId);
+        WorkspaceMemberEntity member = getMember(workspace.getId(), userId);
+        if (member == null || !Integer.valueOf(ACTIVE).equals(member.getStatus())
+                || !ROLE_OWNER.equals(member.getRole())) {
+            activateOrCreateMember(member, workspace.getId(), userId, ROLE_OWNER, userId);
         }
     }
 
