@@ -60,8 +60,12 @@ export default new Vuex.Store({
     // 添加 logout action
     logout({ commit }) {
       return new Promise((resolve) => {
-        commit('clearAuth')
-        goToPage(Constant.PAGE.LOGIN, true);
+        const finish = () => {
+          commit('clearAuth')
+          goToPage(Constant.PAGE.LOGIN, true);
+          resolve()
+        }
+        Api.user.logout(finish, finish)
       })
     },
     // 添加获取公共配置的 action

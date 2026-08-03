@@ -168,15 +168,18 @@ describe("role configuration component state", () => {
 
     await vm.hydrateAgentConfig({
       asrModelId: "asr-doubao",
-      asrHotwordId: "example-hotword-table-id",
+      asrHotwordId: "example-hotword-table-b",
+      asrHotwordIds: ["example-hotword-table-a", "example-hotword-table-b"],
       functions: [],
     });
 
     assert.equal(vm.supportsAsrHotword, true);
-    assert.equal(
-      vm.submitSaveConfig("agent-1").asrHotwordId,
-      "example-hotword-table-id"
-    );
+    const saved = vm.submitSaveConfig("agent-1");
+    assert.equal(saved.asrHotwordId, "example-hotword-table-b");
+    assert.deepEqual(saved.asrHotwordIds, [
+      "example-hotword-table-a",
+      "example-hotword-table-b",
+    ]);
     vm.form.model.asrModelId = "";
     assert.equal(vm.supportsAsrHotword, false);
     vm.$destroy();
@@ -184,7 +187,7 @@ describe("role configuration component state", () => {
 
   test("hotword configuration links to the Volcengine console safely", () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, "../src/components/role/RoleEditDialog.vue"),
+      path.resolve(__dirname, "../src/components/role/AsrHotwordField.vue"),
       "utf8"
     );
 
@@ -194,6 +197,53 @@ describe("role configuration component state", () => {
     );
     assert.match(source, /target="_blank"/);
     assert.match(source, /rel="noopener noreferrer"/);
+  });
+
+  test("legacy single hotword id is promoted to the candidate list", async () => {
+    const component = loadVueComponent("src/components/role/RoleEditDialog.vue", {
+      "@/apis/api": {
+        __esModule: true,
+        default: {
+          model: {
+            getPluginFunctionList: (params, success) => success({ data: { code: 0, data: [] } }),
+          },
+          knowledgeBase: {
+            getKnowledgeBaseList: (params, success) => success({ data: { code: 0, data: { list: [] } } }),
+          },
+        },
+      },
+      "@/apis/httpRequest": { __esModule: true, default: {} },
+      "@/i18n": { __esModule: true, default: { t: (key) => key } },
+    });
+    const vm = createVm(component, {
+      currentFunctions: [],
+      currentKnowledgeBases: [],
+    });
+
+    await vm.hydrateAgentConfig({
+      asrHotwordId: "legacy-table-id",
+      functions: [],
+    });
+
+    const saved = vm.submitSaveConfig("agent-1");
+    assert.equal(saved.asrHotwordId, "legacy-table-id");
+    assert.deepEqual(saved.asrHotwordIds, ["legacy-table-id"]);
+    vm.$destroy();
+  });
+
+  test("removing the active candidate selects the next available hotword table", () => {
+    const component = loadVueComponent("src/components/role/AsrHotwordField.vue");
+    const vm = createVm(component, {
+      ids: ["table-a", "table-b"],
+      activeId: "table-b",
+    });
+    let selection = null;
+    vm.$on("change", (value) => { selection = value; });
+
+    vm.removeId(1);
+
+    assert.deepEqual(selection, { ids: ["table-a"], activeId: "table-a" });
+    vm.$destroy();
   });
 
   test("default knowledge query policy is concise and domain neutral", () => {

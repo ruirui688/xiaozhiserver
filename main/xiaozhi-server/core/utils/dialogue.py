@@ -118,6 +118,27 @@ class Dialogue:
                 scrubbed += 1
         return scrubbed
 
+    def clear_temporary_messages(self) -> int:
+        """Remove runtime-generated few-shot messages before rebuilding tools."""
+        with self._lock:
+            before = len(self.dialogue)
+            self.dialogue = [
+                message for message in self.dialogue if not message.is_temporary
+            ]
+            return before - len(self.dialogue)
+
+    def clear_conversation_history(self, preserve_system: bool = True) -> int:
+        """Clear user/assistant/tool history while optionally retaining system state."""
+        with self._lock:
+            before = len(self.dialogue)
+            if preserve_system:
+                self.dialogue = [
+                    message for message in self.dialogue if message.role == "system"
+                ]
+            else:
+                self.dialogue = []
+            return before - len(self.dialogue)
+
     def _ensure_tool_calls_complete(self, messages: List[Message]) -> List[Message]:
         """
         确保所有 tool_calls 都有对应的 tool 响应

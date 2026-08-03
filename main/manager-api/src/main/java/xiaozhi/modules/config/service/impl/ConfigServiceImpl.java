@@ -48,6 +48,7 @@ import xiaozhi.modules.model.service.impl.ModelRuntimeAssembler;
 import xiaozhi.modules.sys.dto.SysParamsDTO;
 import xiaozhi.modules.sys.service.SysParamsService;
 import xiaozhi.modules.timbre.service.TimbreService;
+import xiaozhi.modules.timbre.entity.TimbreEntity;
 import xiaozhi.modules.timbre.vo.TimbreDetailsVO;
 import xiaozhi.modules.userplugin.service.UserPluginConfigService;
 import xiaozhi.modules.voiceclone.entity.VoiceCloneEntity;
@@ -224,6 +225,7 @@ public class ConfigServiceImpl implements ConfigService {
         result.put("chat_history_conf", chatHistoryConf);
 
         buildSemanticSkills(agent.getId(), result);
+        buildTtsVoiceCatalog(agent.getTtsModelId(), voice, result);
 
         Map<String, Object> pluginParams = new HashMap<>();
         if (!Objects.equals(agent.getIntentModelId(), "Intent_nointent")) {
@@ -284,6 +286,39 @@ public class ConfigServiceImpl implements ConfigService {
                 result,
                 true);
         return result;
+    }
+
+    private void buildTtsVoiceCatalog(
+            String ttsModelId,
+            String currentVoice,
+            Map<String, Object> result) {
+        if (StringUtils.isBlank(ttsModelId)) {
+            return;
+        }
+        List<TimbreEntity> timbres = timbreService.listRuntimeVoices(ttsModelId);
+        List<Map<String, String>> catalog = new ArrayList<>();
+        if (timbres != null) {
+            for (TimbreEntity timbre : timbres) {
+                if (StringUtils.isBlank(timbre.getTtsVoice())) {
+                    continue;
+                }
+                Map<String, String> item = new HashMap<>();
+                item.put("id", timbre.getTtsVoice());
+                item.put("name", StringUtils.defaultIfBlank(timbre.getName(), timbre.getTtsVoice()));
+                item.put("languages", StringUtils.defaultString(timbre.getLanguages()));
+                catalog.add(item);
+            }
+        }
+        if (StringUtils.isNotBlank(currentVoice)
+                && catalog.stream().noneMatch(item -> currentVoice.equals(item.get("id")))) {
+            catalog.add(Map.of(
+                    "id", currentVoice,
+                    "name", "当前音色",
+                    "languages", ""));
+        }
+        if (!catalog.isEmpty()) {
+            result.put("tts_voice_catalog", catalog);
+        }
     }
 
     private void buildSemanticSkills(String agentId, Map<String, Object> result) {

@@ -26,9 +26,16 @@ public interface SysUserTokenService extends BaseService<SysUserTokenEntity> {
     /**
      * 退出
      *
+     * @param token 当前会话Token
+     */
+    void logout(String token);
+
+    /**
+     * 使用户的全部登录会话失效。
+     *
      * @param userId 用户ID
      */
-    void logout(Long userId);
+    void logoutAll(Long userId);
 
     /**
      * 修改密码

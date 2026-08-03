@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: tools
-last_verified: 2026-07-30
+last_verified: 2026-08-02
 source_paths:
   - main/xiaozhi-server/core/providers/tools
   - main/xiaozhi-server/plugins_func
@@ -111,6 +111,8 @@ managed_memory.save_memory(dialogue)
 ```
 
 旧 Intent 配置即使残留 `manage_memory` 也必须跳过。主动记忆不依赖 function-call 能力，记忆提示词及执行链路不得加入固定人物、关键词、条件任务、场景黑白名单或字符串相似度规则。
+
+`set_session_voice` 与 `reset_conversation_context` 是连接级必要内置工具，不依赖角色插件勾选。前者只修改当前 `ConnectionHandler` 的 TTS override，使用与后台高级设置一致的 `-100..100` 语速、音量、音调语义；不支持的 provider 参数必须拒绝，不能伪装成功。manager-api 同时下发当前 TTS 模型的公共音色目录，并在当前选择为克隆音色时至少保留当前真实音色 ID，工具 schema 只暴露真实可用 ID。后者只清除当前连接的短期 Dialogue、游戏和语义软状态，保留 system prompt，不删除后台聊天记录、长期记忆或智能体配置；会议、设备通话和声纹采集期间拒绝清空。
 
 ### 声明式互动型
 

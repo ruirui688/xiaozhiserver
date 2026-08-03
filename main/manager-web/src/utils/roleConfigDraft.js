@@ -9,6 +9,7 @@ const FORM_PATHS = [
   "systemPrompt",
   "summaryMemory",
   "asrHotwordId",
+  "asrHotwordIds",
   "langCode",
   "language",
   "sort",
@@ -39,6 +40,7 @@ export function emptyRoleForm() {
     systemPrompt: "",
     summaryMemory: "",
     asrHotwordId: "",
+    asrHotwordIds: [],
     langCode: "",
     language: "",
     sort: "",
@@ -62,6 +64,10 @@ function valueOrFallback(value, fallback) {
 export function buildRoleForm(initial) {
   if (!initial) return emptyRoleForm();
   const sourceModel = initial.model || initial;
+  const hotwordSelection = normalizeAsrHotwordConfig(
+    initial.asrHotwordIds,
+    initial.asrHotwordId
+  );
   return {
     agentCode: valueOrFallback(initial.agentCode, ""),
     agentName: valueOrFallback(initial.agentName, ""),
@@ -72,7 +78,8 @@ export function buildRoleForm(initial) {
     chatHistoryConf: valueOrFallback(initial.chatHistoryConf, 0),
     systemPrompt: valueOrFallback(initial.systemPrompt, ""),
     summaryMemory: valueOrFallback(initial.summaryMemory, ""),
-    asrHotwordId: valueOrFallback(initial.asrHotwordId, ""),
+    asrHotwordId: hotwordSelection.activeId,
+    asrHotwordIds: hotwordSelection.ids,
     langCode: valueOrFallback(initial.langCode, ""),
     language: valueOrFallback(initial.language, ""),
     sort: valueOrFallback(initial.sort, ""),
@@ -101,7 +108,40 @@ function setPath(target, path, value) {
 }
 
 export function changedRolePaths(previous, current) {
-  return FORM_PATHS.filter((path) => getPath(previous, path) !== getPath(current, path));
+  return FORM_PATHS.filter((path) => !sameRoleValue(getPath(previous, path), getPath(current, path)));
+}
+
+function sameRoleValue(left, right) {
+  if (left === right) return true;
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return left.length === right.length
+      && left.every((value, index) => sameRoleValue(value, right[index]));
+  }
+  return false;
+}
+
+export const MAX_ASR_HOTWORD_IDS = 10;
+
+export function normalizeAsrHotwordConfig(candidateIds, activeId) {
+  const sourceIds = Array.isArray(candidateIds) ? candidateIds : [];
+  const normalizedIds = [];
+  sourceIds.forEach((value) => {
+    const id = String(value ?? "").trim();
+    if (id && !normalizedIds.includes(id) && normalizedIds.length < MAX_ASR_HOTWORD_IDS) {
+      normalizedIds.push(id);
+    }
+  });
+
+  let normalizedActiveId = String(activeId ?? "").trim();
+  if (normalizedActiveId && !normalizedIds.includes(normalizedActiveId)) {
+    normalizedIds.unshift(normalizedActiveId);
+    if (normalizedIds.length > MAX_ASR_HOTWORD_IDS) normalizedIds.pop();
+  }
+  if (!normalizedActiveId || !normalizedIds.includes(normalizedActiveId)) {
+    normalizedActiveId = normalizedIds[0] || "";
+  }
+
+  return { ids: normalizedIds, activeId: normalizedActiveId };
 }
 
 export function mergeRoleDraft(serverForm, currentDraft, dirtyPaths) {

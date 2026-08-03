@@ -18,4 +18,6 @@ public interface AgentCorrectWordMappingDao extends BaseDao<AgentCorrectWordMapp
     int batchInsertMapping(@Param("list") List<AgentCorrectWordMappingEntity> mappings);
 
     List<AgentCorrectWordMappingEntity> selectByAgentId(@Param("agentId") String agentId);
+
+    List<String> selectAgentIdsByFileId(@Param("fileId") String fileId);
 }

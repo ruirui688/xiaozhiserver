@@ -33,39 +33,20 @@ public class SysUserTokenServiceImpl extends BaseServiceImpl<SysUserTokenDao, Sy
 
     @Override
     public Result<TokenDTO> createToken(Long userId) {
-        // 用户token
-        String token;
-
         // 当前时间
         Date now = new Date();
         // 过期时间
         Date expireTime = new Date(now.getTime() + EXPIRE * 1000);
+        String token = TokenGenerator.generateValue();
 
-        // 判断是否生成过token
-        SysUserTokenEntity tokenEntity = baseDao.getByUserId(userId);
-        if (tokenEntity == null) {
-            // 生成一个token
-            token = TokenGenerator.generateValue();
-
-            tokenEntity = new SysUserTokenEntity();
-            tokenEntity.setUserId(userId);
-            tokenEntity.setToken(token);
-            tokenEntity.setUpdateDate(now);
-            tokenEntity.setExpireDate(expireTime);
-
-            // 保存token
-            this.insert(tokenEntity);
-        } else {
-            // Always generate a new token on login (don't reuse old tokens)
-            token = TokenGenerator.generateValue();
-
-            tokenEntity.setToken(token);
-            tokenEntity.setUpdateDate(now);
-            tokenEntity.setExpireDate(expireTime);
-
-            // 更新token
-            this.updateById(tokenEntity);
-        }
+        // 多端登录：每次登录创建独立会话，不覆盖同一用户的其他有效Token。
+        baseDao.deleteExpiredByUserId(userId, now);
+        SysUserTokenEntity tokenEntity = new SysUserTokenEntity();
+        tokenEntity.setUserId(userId);
+        tokenEntity.setToken(token);
+        tokenEntity.setUpdateDate(now);
+        tokenEntity.setExpireDate(expireTime);
+        this.insert(tokenEntity);
 
         String clientHash = HttpContextUtils.getClientCode();
 
@@ -94,9 +75,15 @@ public class SysUserTokenServiceImpl extends BaseServiceImpl<SysUserTokenDao, Sy
     }
 
     @Override
-    public void logout(Long userId) {
+    public void logout(String token) {
         Date expireDate = DateUtil.offsetMinute(new Date(), -1);
-        baseDao.logout(userId, expireDate);
+        baseDao.expireByToken(token, expireDate);
+    }
+
+    @Override
+    public void logoutAll(Long userId) {
+        Date expireDate = DateUtil.offsetMinute(new Date(), -1);
+        baseDao.expireByUserId(userId, expireDate);
     }
 
     @Override
@@ -106,6 +93,6 @@ public class SysUserTokenServiceImpl extends BaseServiceImpl<SysUserTokenDao, Sy
 
         // 使 token 失效，后需要重新登录
         Date expireDate = DateUtil.offsetMinute(new Date(), -1);
-        baseDao.logout(userId, expireDate);
+        baseDao.expireByUserId(userId, expireDate);
     }
 }

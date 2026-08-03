@@ -638,19 +638,22 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 
 ```text
 定制模块：manager-web 角色配置、manager-api 智能体配置装配、xiaozhi-server 豆包 Seed ASR provider
-改动原因：火山引擎热词表由控制台独立创建，同一豆包 ASR 模型会被多个智能体共享，不能把热词表 ID 固定在模型级配置中。角色配置现在保存智能体级 asr_hotword_id；manager-api 只在该智能体选择 doubao_stream 或 doubao_recording 时注入运行时 boosting_table_id；Python 按官方 request.corpus.boosting_table_id 层级发送，同时保留独立的 request.context。
+改动原因：火山引擎热词表由控制台独立创建，同一豆包 ASR 模型会被多个智能体共享，不能把热词表 ID 固定在模型级配置中。角色配置用 asr_hotword_ids 保存最多 10 个候选 ID，并用 asr_hotword_id 标记当前生效项；官方限制一个识别请求只支持一张词表，所以 manager-api 只把当前生效项注入 doubao_stream 或 doubao_recording 的运行时 boosting_table_id。Python 按官方 request.corpus.boosting_table_id 层级发送，同时保留独立的 request.context。切换当前生效项后通过运行配置刷新链路在线生效。
 关键文件：
   - main/manager-web/src/components/role/RoleEditDialog.vue
+  - main/manager-web/src/components/role/AsrHotwordField.vue
   - main/manager-web/src/utils/roleConfigDraft.js
   - main/manager-api/src/main/java/xiaozhi/modules/agent/entity/AgentEntity.java
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/support/AgentAsrHotwordSelection.java
   - main/manager-api/src/main/java/xiaozhi/modules/config/service/impl/ConfigServiceImpl.java
   - main/manager-api/src/main/resources/db/changelog/202607241445.sql
+  - main/manager-api/src/main/resources/db/changelog/202608021500.sql
   - main/xiaozhi-server/core/providers/asr/doubao_stream.py
   - main/xiaozhi-server/core/providers/asr/doubao_recording.py
   - docs/models/model-management.md
   - docs/architecture/device-interaction-chain.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：必须保留“共享 ASR 模型、智能体级热词选择”的边界；热词表 ID 只能覆盖当前智能体的运行时 typed_config，不得写回共享模型配置。豆包 Seed ASR 2.0 必须发送 request.corpus.boosting_table_id，不能把 ID 当作 request.context；context_text 继续作为独立字段。非豆包 ASR 和留空角色不得发送热词表，初始化日志不得输出上下文正文或完整请求体。
+官方同步时的处理规则：必须保留“共享 ASR 模型、智能体级热词选择”的边界；候选 ID 只能存放在智能体配置，只有当前生效 ID 可以覆盖运行时 typed_config，不得写回共享模型配置，也不得把多个 ID 拼接或作为数组伪装下发。豆包 Seed ASR 2.0 必须发送 request.corpus.boosting_table_id，不能把 ID 当作 request.context；context_text 继续作为独立字段。非豆包 ASR 和留空角色不得发送热词表，初始化日志不得输出上下文正文或完整请求体。
 ```
 
 ## 33. 聊天记录删除后的容量同步
@@ -723,5 +726,40 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/xiaozhi-server/tests/test_semantic_skills.py
   - docs/architecture/semantic-control-center.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：必须保留技能以 agent_id 为所有权边界、管理 CRUD 的智能体/Workspace 权限校验、只向当前设备绑定智能体下发已启用技能，以及 `phrase` 单话术包含匹配和 `all_keywords` 组内 AND/组间 OR 的确定性契约。多命中依次按 priority、term 数量、term 总长度、phrase、sort、id 决胜；Web 模拟结果必须与 Python 一致。技能只在空闲状态触发，会议、声纹采集、通话和游戏保持优先；命中后不得调用 Intent/LLM，必须复用当前连接的 TTS generation、FIRST/TEXT/LAST、AEC 打断和聊天记录上报，并跳过长期记忆。TTS 失败时不得回退 LLM；无配置、无效配置或未命中必须完全保持旧链路。当前配置保存后通过设备重连生效，后续热更新不得破坏连接级隔离。
+官方同步时的处理规则：必须保留技能以 agent_id 为所有权边界、管理 CRUD 的智能体/Workspace 权限校验、只向当前设备绑定智能体下发已启用技能，以及 `phrase` 单话术包含匹配和 `all_keywords` 组内 AND/组间 OR 的确定性契约。多命中依次按 priority、term 数量、term 总长度、phrase、sort、id 决胜；Web 模拟结果必须与 Python 一致。技能只在空闲状态触发，会议、声纹采集、通话和游戏保持优先；命中后不得调用 Intent/LLM，必须复用当前连接的 TTS generation、FIRST/TEXT/LAST、AEC 打断和聊天记录上报，并跳过长期记忆。TTS 失败时不得回退 LLM；无配置、无效配置或未命中必须完全保持旧链路。配置保存后通过受保护的运行时通知和下一轮配置指纹检查热更新，不得要求设备重连，也不得破坏连接级隔离。
+```
+
+## 37. 多端登录会话与智能体运行配置热更新
+
+```text
+定制模块：manager-api 登录 Token、智能体/模型配置事件、xiaozhi-server 在线连接运行时
+改动原因：原 sys_user_token 对 user_id 使用唯一约束，每次登录覆盖旧 Token，导致同一账号在第二个浏览器或设备登录后第一端被强制退出；同时音色、提示词、模型、插件和固定播报技能只在设备连接时装配，后台保存后必须重连设备。
+关键文件：
+  - main/manager-api/src/main/java/xiaozhi/modules/security/
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/runtime/
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/service/impl/AgentServiceImpl.java
+  - main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelConfigServiceImpl.java
+  - main/manager-api/src/main/resources/db/changelog/202608011030.sql
+  - main/xiaozhi-server/core/api/runtime_config_refresh_handler.py
+  - main/xiaozhi-server/core/session/runtime_config.py
+  - main/xiaozhi-server/core/session/runtime_config_reloader.py
+是否允许被官方覆盖：否
+官方同步时的处理规则：必须保留同一用户多条独立 Token、当前会话退出与全会话密码失效的边界；不得恢复登录覆盖旧 Token。必须保留智能体配置事务提交后的受保护内部刷新通知、下一轮 `listen/start` 配置指纹兜底、空闲轮次边界 provider 热替换、失败恢复旧配置和正常路径设备 WebSocket 不重连的约定。刷新通知只能标记待更新，不能在用户录音、ASR 消费或 TTS 播放中途直接替换工作线程；旧线程退出超时时必须关闭异常连接，避免重复消费者。运行时日志只能记录 agent/device、原因和模块摘要，不能记录模型密钥、Token 或完整私有配置。
+```
+
+## 38. 大模型会话级语音控制与上下文重置
+
+```text
+定制模块：manager-api 运行时音色目录、xiaozhi-server 会话级 TTS override、必要内置 Function Plugin、Dialogue/语义软状态
+改动原因：用户需要让主 LLM 在不修改后台智能体配置、不影响其他设备连接的前提下，主动切换当前会话音色、语速、音量和音调，并能明确清空当前短期上下文重新对话。
+关键文件：
+  - main/manager-api/src/main/java/xiaozhi/modules/config/service/impl/ConfigServiceImpl.java
+  - main/manager-api/src/main/java/xiaozhi/modules/timbre/service/
+  - main/xiaozhi-server/core/session/tts_session_options.py
+  - main/xiaozhi-server/plugins_func/functions/session_controls.py
+  - main/xiaozhi-server/core/providers/tools/server_plugins/plugin_executor.py
+  - main/xiaozhi-server/core/utils/dialogue.py
+  - main/xiaozhi-server/tests/test_session_controls.py
+是否允许被官方覆盖：否
+官方同步时的处理规则：必须保留 set_session_voice/reset_conversation_context 作为连接级必要工具且不写回后台配置；语速、音量、音调继续使用 -100..100 公共百分比并按 provider 能力映射，不支持参数明确拒绝。音色工具只能使用当前 TTS 模型下发的公共音色 ID；当前配置若使用克隆音色，目录至少保留当前真实 ID，名称只是不可信匹配标签。相同 TTS 模型热更新后重放当前会话 override，模型切换时清除；双向流不得在当前播放 session 中途重建，下一轮安全生效。上下文重置只清 Dialogue 和连接软状态，保留 system prompt，不删除后台聊天记录、长期记忆或配置；会议、设备通话和声纹采集期间必须拒绝。
 ```

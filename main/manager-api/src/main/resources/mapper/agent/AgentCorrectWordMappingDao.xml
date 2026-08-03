@@ -24,4 +24,10 @@
         WHERE agent_id = #{agentId}
     </select>
 
+    <select id="selectAgentIdsByFileId" resultType="java.lang.String">
+        SELECT DISTINCT agent_id
+        FROM ai_agent_correct_word_mapping
+        WHERE file_id = #{fileId}
+    </select>
+
 </mapper>

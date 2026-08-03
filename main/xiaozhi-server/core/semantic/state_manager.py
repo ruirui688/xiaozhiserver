@@ -65,3 +65,10 @@ class StateManager:
                 self.state = next_state
             if current_skill is not None:
                 self.current_skill = current_skill
+
+    def reset(self) -> None:
+        """Return connection-scoped semantic routing state to idle."""
+        with self._lock:
+            self.state = "idle"
+            self.current_skill = None
+            self.last_intent = None

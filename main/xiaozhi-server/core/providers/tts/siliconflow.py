@@ -33,6 +33,10 @@ class TTSProvider(TTSProviderBase):
             "voice": self.voice,
             "response_format": self.audio_file_type,
         }
+        if self.speed is not None:
+            request_json["speed"] = self.speed
+        if self.gain is not None:
+            request_json["gain"] = self.gain
         headers = {
             "Authorization": f"Bearer {self.access_token}",
             "Content-Type": "application/json",

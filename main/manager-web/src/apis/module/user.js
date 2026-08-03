@@ -3,6 +3,21 @@ import RequestService from '../httpRequest'
 
 
 export default {
+    // 注销当前登录会话
+    logout(callback, failCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/user/logout`)
+            .method('POST')
+            .success((res) => {
+                if (callback) callback(res)
+            })
+            .fail((err) => {
+                if (failCallback) failCallback(err)
+            })
+            .networkFail((err) => {
+                if (failCallback) failCallback(err)
+            }).send()
+    },
     // 登录
     login(loginForm, callback, failCallback) {
         RequestService.sendRequest()

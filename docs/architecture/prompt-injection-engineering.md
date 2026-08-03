@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: runtime
-last_verified: 2026-07-30
+last_verified: 2026-08-02
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/config/service/impl/ConfigServiceImpl.java
   - main/xiaozhi-server/agent-base-prompt.txt
@@ -252,6 +252,8 @@ main/xiaozhi-server/core/providers/tools/server_plugins/plugin_executor.py
 必要内置函数
   handle_exit_intent
   get_lunar
+  set_session_voice
+  reset_conversation_context
 
 后台 Intent 配置 functions
   config["Intent"][selected]["functions"]
@@ -265,6 +267,8 @@ main/xiaozhi-server/core/providers/tools/server_plugins/plugin_executor.py
 ```
 
 内置插件如果命中 `all_function_registry`，优先使用插件 Python 函数注册的 description。后台 `plugins[func_name].description` 可以覆盖工具描述。
+
+`set_session_voice` 的 schema 在连接初始化时按当前 provider 能力裁剪，不支持的 `voice/speed/volume/pitch` 字段不会暴露。manager-api 下发的 `tts_voice_catalog` 会转换为 `voice.enum`，音色名称只作为不可信匹配标签，真实执行只接受目录中的音色 ID；目录为空时仍允许用户明确提供 provider 音色 ID，但模型不得把人物称呼或自然语言风格猜成 ID。`reset_conversation_context` 不携带用户正文参数，也不会把被清理的历史内容写入日志。
 
 `meeting_minutes` 有独立的能力门控；即使旧 Intent 配置残留同名 function，会议插件未启用时也不得注册、报告存在或执行。历史配置中即使残留 `manage_memory`，运行时也必须跳过，不能把它暴露给主 LLM。会议插件未启用时，本轮不会插入
 `<meeting_runtime>`；启用后才按未开始/已激活状态插入权威运行上下文。

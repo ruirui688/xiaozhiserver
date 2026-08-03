@@ -14,6 +14,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEventPublisher;
 import org.mockito.ArgumentCaptor;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -37,7 +38,8 @@ class UserPluginConfigServiceImplTest {
         configDao = mock(UserPluginConfigDao.class);
         mappingMapper = mock(AgentPluginMappingMapper.class);
         cipher = mock(CredentialCipher.class);
-        service = new UserPluginConfigServiceImpl(configDao, mappingMapper, cipher);
+        service = new UserPluginConfigServiceImpl(
+                configDao, mappingMapper, cipher, mock(ApplicationEventPublisher.class));
         when(mappingMapper.selectUserPluginMappings(any(), any())).thenReturn(List.of());
     }
 

@@ -158,6 +158,18 @@ public class TimbreServiceImpl extends BaseServiceImpl<TimbreDao, TimbreEntity> 
         return CollectionUtil.isEmpty(voiceDTOs) ? null : voiceDTOs;
     }
 
+    @Override
+    public List<TimbreEntity> listRuntimeVoices(String ttsModelId) {
+        if (StringUtils.isBlank(ttsModelId)) {
+            return Collections.emptyList();
+        }
+        QueryWrapper<TimbreEntity> queryWrapper = new QueryWrapper<>();
+        queryWrapper.eq("tts_model_id", ttsModelId);
+        queryWrapper.orderByAsc("sort");
+        return Optional.ofNullable(timbreDao.selectList(queryWrapper))
+                .orElseGet(ArrayList::new);
+    }
+
     /**
      * 处理是不是tts模型的id
      */

@@ -9,6 +9,11 @@ from core.session.reply_lifecycle import (
     ReplyState,
 )
 from core.session.runtime_readiness import RuntimeReadiness
+from core.session.tts_session_options import (
+    SessionTTSOptions,
+    TTSOptionError,
+    TTSOptionResult,
+)
 from core.session.turn_context import (
     TurnContextBuffer,
     TurnContextUpdate,
@@ -24,6 +29,9 @@ __all__ = [
     "ReplySnapshot",
     "ReplyState",
     "RuntimeReadiness",
+    "SessionTTSOptions",
+    "TTSOptionError",
+    "TTSOptionResult",
     "TurnContextBuffer",
     "TurnContextUpdate",
     "build_contextual_user_content",

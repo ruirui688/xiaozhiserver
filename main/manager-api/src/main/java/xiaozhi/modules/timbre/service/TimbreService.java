@@ -58,6 +58,11 @@ public interface TimbreService extends BaseService<TimbreEntity> {
     List<VoiceDTO> getVoiceNames(String ttsModelId, String voiceName);
 
     /**
+     * 获取设备运行时可切换的公共音色，不依赖当前登录用户上下文。
+     */
+    List<TimbreEntity> listRuntimeVoices(String ttsModelId);
+
+    /**
      * 根据ID获取音色名称
      * 
      * @param id 音色ID

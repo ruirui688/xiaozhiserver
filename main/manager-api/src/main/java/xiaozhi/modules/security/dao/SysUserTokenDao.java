@@ -18,7 +18,9 @@ public interface SysUserTokenDao extends BaseDao<SysUserTokenEntity> {
 
     SysUserTokenEntity getByToken(String token);
 
-    SysUserTokenEntity getByUserId(Long userId);
+    void expireByToken(@Param("token") String token, @Param("expireDate") Date expireDate);
 
-    void logout(@Param("userId") Long userId, @Param("expireDate") Date expireDate);
+    void expireByUserId(@Param("userId") Long userId, @Param("expireDate") Date expireDate);
+
+    void deleteExpiredByUserId(@Param("userId") Long userId, @Param("now") Date now);
 }

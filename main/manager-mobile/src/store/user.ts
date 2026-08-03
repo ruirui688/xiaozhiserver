@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import {
   getUserInfo as _getUserInfo,
+  logoutCurrentSession,
 } from '@/api/auth'
 import { clearCurrentWorkspaceId } from '@/utils/workspace'
 
@@ -57,7 +58,12 @@ export const useUserStore = defineStore(
      * 退出登录 并 删除用户信息
      */
     const logout = async () => {
-      removeUserInfo()
+      try {
+        await logoutCurrentSession()
+      }
+      finally {
+        removeUserInfo()
+      }
     }
 
     return {

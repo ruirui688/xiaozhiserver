@@ -8,6 +8,7 @@ import java.util.Map;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.context.ApplicationEventPublisher;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -18,6 +19,7 @@ import xiaozhi.common.security.CredentialCipher;
 import xiaozhi.common.utils.JsonUtils;
 import xiaozhi.modules.agent.dao.AgentPluginMappingMapper;
 import xiaozhi.modules.agent.entity.AgentPluginMapping;
+import xiaozhi.modules.agent.runtime.AgentRuntimeConfigRefreshEvent;
 import xiaozhi.modules.userplugin.SharedPluginConfigRegistry;
 import xiaozhi.modules.userplugin.SharedPluginConfigRegistry.Definition;
 import xiaozhi.modules.userplugin.dao.UserPluginConfigDao;
@@ -34,6 +36,7 @@ public class UserPluginConfigServiceImpl implements UserPluginConfigService {
     private final UserPluginConfigDao configDao;
     private final AgentPluginMappingMapper agentPluginMappingMapper;
     private final CredentialCipher credentialCipher;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     public List<UserPluginConfigVO> listConfigs(Long userId) {
@@ -83,16 +86,23 @@ public class UserPluginConfigServiceImpl implements UserPluginConfigService {
         } else {
             configDao.updateById(entity);
         }
-        removeLegacyAgentFields(userId, definition);
+        publishRefresh(removeLegacyAgentFields(userId, definition),
+                "user_plugin_config_updated");
     }
 
     @Override
     public void deleteConfig(Long userId, String providerCode) {
         requireUser(userId);
         Definition definition = SharedPluginConfigRegistry.requireByProviderCode(providerCode);
+        List<String> agentIds = agentPluginMappingMapper.selectUserPluginMappings(
+                userId, definition.pluginId()).stream()
+                .map(AgentPluginMapping::getAgentId)
+                .distinct()
+                .toList();
         configDao.delete(new LambdaQueryWrapper<UserPluginConfigEntity>()
                 .eq(UserPluginConfigEntity::getUserId, userId)
                 .eq(UserPluginConfigEntity::getProviderCode, definition.providerCode()));
+        publishRefresh(agentIds, "user_plugin_config_deleted");
     }
 
     @Override
@@ -112,7 +122,7 @@ public class UserPluginConfigServiceImpl implements UserPluginConfigService {
         return JsonUtils.toJsonString(merged);
     }
 
-    private void removeLegacyAgentFields(Long userId, Definition definition) {
+    private List<String> removeLegacyAgentFields(Long userId, Definition definition) {
         List<AgentPluginMapping> mappings = agentPluginMappingMapper.selectUserPluginMappings(
                 userId, definition.pluginId());
         for (AgentPluginMapping mapping : mappings) {
@@ -121,6 +131,10 @@ public class UserPluginConfigServiceImpl implements UserPluginConfigService {
             mapping.setParamInfo(JsonUtils.toJsonString(params));
             agentPluginMappingMapper.updateById(mapping);
         }
+        return mappings.stream()
+                .map(AgentPluginMapping::getAgentId)
+                .distinct()
+                .toList();
     }
 
     private Map<String, Object> decrypt(UserPluginConfigEntity entity) {
@@ -159,5 +173,12 @@ public class UserPluginConfigServiceImpl implements UserPluginConfigService {
 
     private String scope(Long userId, String providerCode) {
         return CIPHER_SCOPE_PREFIX + userId + ":" + providerCode;
+    }
+
+    private void publishRefresh(List<String> agentIds, String reason) {
+        if (agentIds == null || agentIds.isEmpty()) {
+            return;
+        }
+        eventPublisher.publishEvent(new AgentRuntimeConfigRefreshEvent(agentIds, reason));
     }
 }

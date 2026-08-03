@@ -45,7 +45,8 @@ import xiaozhi.modules.agent.entity.AgentEntity;
 import xiaozhi.modules.agent.entity.AgentPluginMapping;
 import xiaozhi.modules.agent.entity.AgentTagEntity;
 import xiaozhi.modules.agent.entity.AgentTemplateEntity;
-import xiaozhi.modules.agent.runtime.ChatHistoryRuntimeRefreshEvent;
+import xiaozhi.modules.agent.runtime.AgentRuntimeConfigRefreshEvent;
+import xiaozhi.modules.agent.support.AgentAsrHotwordSelection;
 import xiaozhi.modules.agent.service.AgentChatHistoryService;
 import xiaozhi.modules.agent.service.AgentContextProviderService;
 import xiaozhi.modules.agent.service.AgentPluginMappingService;
@@ -387,7 +388,6 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
             throw new RenException(ErrorCode.AGENT_NOT_FOUND);
         }
         workspacePermissionService.requireWrite(existingEntity.getWorkspaceId());
-        boolean chatHistoryRuntimeChanged = dto.getChatHistoryConf() != null || dto.getMemModelId() != null;
 
         // 只更新提供的非空字段
         if (dto.getAgentName() != null) {
@@ -400,9 +400,10 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
             existingEntity.setAsrModelId(resolveEnabledModelIdOrCurrent("ASR", dto.getAsrModelId(),
                     existingEntity.getAsrModelId()));
         }
-        if (dto.getAsrHotwordId() != null) {
-            existingEntity.setAsrHotwordId(StringUtils.trimToNull(dto.getAsrHotwordId()));
-        }
+        AgentAsrHotwordSelection.apply(
+                existingEntity,
+                dto.getAsrHotwordId(),
+                dto.getAsrHotwordIds());
         if (dto.getVadModelId() != null) {
             existingEntity.setVadModelId(resolveEnabledModelIdOrCurrent("VAD", dto.getVadModelId(),
                     existingEntity.getVadModelId()));
@@ -558,20 +559,8 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
             throw new RenException(ErrorCode.LLM_INTENT_PARAMS_MISMATCH);
         }
         this.updateById(existingEntity);
-        if (chatHistoryRuntimeChanged) {
-            eventPublisher.publishEvent(new ChatHistoryRuntimeRefreshEvent(
-                    existingEntity.getId(), effectiveChatHistoryConf(existingEntity)));
-        }
-    }
-
-    private int effectiveChatHistoryConf(AgentEntity agent) {
-        if (Constant.MEMORY_NO_MEM.equals(agent.getMemModelId())) {
-            return Constant.ChatHistoryConfEnum.IGNORE.getCode();
-        }
-        Integer configured = agent.getChatHistoryConf();
-        return configured == null
-                ? Constant.ChatHistoryConfEnum.RECORD_TEXT_AUDIO.getCode()
-                : configured;
+        eventPublisher.publishEvent(AgentRuntimeConfigRefreshEvent.forAgent(
+                existingEntity.getId(), "agent_updated"));
     }
 
     private void validateKnowledgeBaseBindings(List<AgentUpdateDTO.FunctionInfo> functions, String agentWorkspaceId) {

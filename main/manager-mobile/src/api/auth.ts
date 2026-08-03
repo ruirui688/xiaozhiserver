@@ -67,6 +67,10 @@ export function wxBind(data: WxLoginData) {
   })
 }
 
+export function logoutCurrentSession() {
+  return http.Post<void>('/user/logout')
+}
+
 // 用户信息响应数据类型
 export interface UserInfo {
   id: number

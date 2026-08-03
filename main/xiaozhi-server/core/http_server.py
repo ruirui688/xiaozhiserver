@@ -9,6 +9,7 @@ from core.api.benchmark_handler import BenchmarkHandler
 from core.api.voiceprint_enrollment_handler import VoiceprintEnrollmentHandler
 from core.api.device_notification_handler import DeviceNotificationHandler
 from core.api.chat_history_runtime_handler import ChatHistoryRuntimeHandler
+from core.api.runtime_config_refresh_handler import RuntimeConfigRefreshHandler
 
 TAG = __name__
 
@@ -24,6 +25,7 @@ class SimpleHttpServer:
         self.voiceprint_enrollment_handler = VoiceprintEnrollmentHandler(config)
         self.device_notification_handler = DeviceNotificationHandler(config)
         self.chat_history_runtime_handler = ChatHistoryRuntimeHandler(config)
+        self.runtime_config_refresh_handler = RuntimeConfigRefreshHandler(config)
 
     def _get_websocket_url(self, local_ip: str, port: int) -> str:
         """获取websocket地址
@@ -156,6 +158,14 @@ class SimpleHttpServer:
                         web.options(
                             "/device/chat-history/refresh",
                             self.chat_history_runtime_handler.handle_options,
+                        ),
+                        web.post(
+                            "/device/runtime-config/refresh",
+                            self.runtime_config_refresh_handler.handle_refresh,
+                        ),
+                        web.options(
+                            "/device/runtime-config/refresh",
+                            self.runtime_config_refresh_handler.handle_options,
                         ),
                         web.post(
                             "/benchmark/models", self.benchmark_handler.handle_models

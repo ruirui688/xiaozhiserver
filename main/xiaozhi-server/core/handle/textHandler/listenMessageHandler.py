@@ -34,6 +34,15 @@ class ListenTextMessageHandler(TextMessageHandler):
                 f"客户端拾音模式：{conn.client_listen_mode}"
             )
         if msg_json["state"] == "start":
+            reloader = getattr(conn, "runtime_config_reloader", None)
+            if reloader is not None:
+                try:
+                    await reloader.refresh_if_due(reason="listen_start")
+                except Exception as error:
+                    conn.logger.bind(tag=TAG).warning(
+                        "本轮开始前配置热更新失败，继续使用旧配置: errorType={}",
+                        type(error).__name__,
+                    )
             # 设备从播放模式切回录音模式,清除所有音频状态和缓冲区
             conn.reset_audio_states()
             turn_context = getattr(conn, "turn_context", None)

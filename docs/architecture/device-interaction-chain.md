@@ -191,10 +191,13 @@ providers/asr/base.py  handle_voice_stop()
 
 ASR 基类仍通过工作线程桥接异步 provider；provider 内部不能再使用同步 HTTP 或 `time.sleep()`，否则慢请求会阻塞共享事件循环并放大队列积压。
 
-豆包 Seed ASR 2.0 支持智能体级火山热词表。角色配置保存 `asr_hotword_id`，manager-api 在设备私有
+豆包 Seed ASR 2.0 支持智能体级火山热词表。角色配置用 `asr_hotword_ids` 保存最多 10 个候选表，
+用 `asr_hotword_id` 保存当前生效表；manager-api 在设备私有
 配置装配阶段只对 `doubao_stream` / `doubao_recording` 的 `typed_config` 注入
 `boosting_table_id`，Python 再发送为 `request.corpus.boosting_table_id`。热词 ID 不写入共享模型配置，
 因此使用同一 ASR 模型的不同智能体可以分别选择不同热词表；留空或选择其他 ASR 时不发送。
+火山协议规定一个识别请求只支持生效一张词表，候选列表仅用于管理和快速切换，不能整体作为数组下发。
+保存新的当前生效项会触发在线运行配置刷新，下一轮识别直接使用新表。
 
 `context_text` 是独立的火山 `request.context` 字段，可用于直传热词或对话上下文。它与控制台热词表
 ID 不可混用，provider 必须保持两者各自的请求层级，日志只记录是否启用，不记录上下文正文。

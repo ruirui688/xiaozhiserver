@@ -186,6 +186,13 @@ public class LoginController {
         return result;
     }
 
+    @PostMapping("/logout")
+    @Operation(summary = "退出当前登录会话")
+    public Result<Void> logout() {
+        sysUserTokenService.logout(SecurityUser.getUser().getToken());
+        return new Result<>();
+    }
+
     @PutMapping("/change-password")
     @Operation(summary = "修改用户密码")
     public Result<?> changePassword(@RequestBody PasswordDTO passwordDTO) {
@@ -234,6 +241,7 @@ public class LoginController {
         dto.setPassword(actualPassword);
 
         sysUserService.changePasswordDirectly(userDTO.getId(), dto.getPassword());
+        sysUserTokenService.logoutAll(userDTO.getId());
         return new Result<>();
     }
 

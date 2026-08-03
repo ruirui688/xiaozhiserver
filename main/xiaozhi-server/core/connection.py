@@ -76,10 +76,13 @@ from core.session import (
     CloseCoordinator,
     ReplyLifecycle,
     RuntimeReadiness,
+    SessionTTSOptions,
     SessionLifecycle,
     TurnContextBuffer,
     redact_dialogue_contexts_for_log,
 )
+from core.session.runtime_config import build_managed_runtime_config
+from core.session.runtime_config_reloader import RuntimeConfigReloader
 from core.utils.voiceprint_enrollment import VoiceprintEnrollmentCollector
 from core.utils.turn_metrics import TurnMetrics
 from core.meeting import (
@@ -225,6 +228,8 @@ class ConnectionHandler:
         self._close_coordinator = CloseCoordinator(
             self, CLOSE_TIMEOUT_SECONDS, log_tag=TAG
         )
+        self.runtime_config_reloader = RuntimeConfigReloader(self)
+        self.tts_session_options = SessionTTSOptions()
 
         # client_abort 跨线程读写锁（event loop / TTS text / TTS audio 线程）
         self._abort_lock = threading.Lock()
@@ -733,6 +738,14 @@ class ConnectionHandler:
                     return
             if self.closing:
                 return
+            tts_session_options = getattr(self, "tts_session_options", None)
+            if tts_session_options is None:
+                tts_session_options = SessionTTSOptions()
+                self.tts_session_options = tts_session_options
+            tts_session_options.reapply(
+                self.tts,
+                provider_identity=tts_session_options.provider_identity(self),
+            )
             # 打开语音合成通道
             tts_future = asyncio.run_coroutine_threadsafe(
                 self.tts.open_audio_channels(self), self.loop
@@ -924,9 +937,22 @@ class ConnectionHandler:
 
     def _init_voiceprint_enrollment_from_config(self):
         enrollment_config = self.config.get("voiceprint_enrollment")
-        if not isinstance(enrollment_config, dict):
+        enrollment = getattr(self, "voiceprint_enrollment", None)
+        if not isinstance(enrollment_config, dict) or not enrollment_config.get("enabled"):
+            if enrollment is not None and enrollment.status.active:
+                enrollment.stop("runtime_config_disabled")
             return
-        if not enrollment_config.get("enabled"):
+        request_id = str(
+            enrollment_config.get("request_id")
+            or enrollment_config.get("requestId")
+            or ""
+        ).strip()
+        if (
+            enrollment is not None
+            and enrollment.status.active
+            and request_id
+            and enrollment.status.request_id == request_id
+        ):
             return
         status = self.start_voiceprint_enrollment(enrollment_config)
         self.logger.bind(tag=TAG).info(
@@ -1053,17 +1079,11 @@ class ConnectionHandler:
             value = modules.get(name)
             if value is not None and not self._assign_initialized_component(name, value):
                 return False
+        self.runtime_config_reloader.mark_applied(private_config)
         return True
 
     def _apply_private_runtime_config(self, private_config):
         normalize_runtime_config(private_config)
-        self.config.setdefault("selected_module", {})
-
-        private_model_config = private_config.get("model_config")
-        if isinstance(private_model_config, dict):
-            self.config.setdefault("model_config", {})
-            self.config["model_config"].update(copy.deepcopy(private_model_config))
-
         selected_module = private_config.get("selected_module", {})
         init_flags = {
             "LLM": False,
@@ -1087,25 +1107,12 @@ class ConnectionHandler:
                 private_config, module_type, selected_name
             ):
                 continue
-            self.config["selected_module"][module_type] = selected_name
             if module_type in init_flags:
                 init_flags[module_type] = True
 
-        normalize_runtime_config(self.config)
-
-        for key in (
-            "agent_id",
-            "agent_name",
-            "prompt",
-            "voiceprint",
-            "voiceprint_enrollment",
-            "summaryMemory",
-            "mcp_endpoint",
-            "context_providers",
-            "semantic_skills",
-        ):
-            if private_config.get(key) is not None:
-                self.config[key] = copy.deepcopy(private_config[key])
+        self.config = build_managed_runtime_config(
+            getattr(self, "common_config", self.config), private_config
+        )
 
         semantic_center = getattr(self, "semantic_center", None)
         if semantic_center is not None:
@@ -1118,9 +1125,9 @@ class ConnectionHandler:
         if private_config.get("chat_history_conf") is not None:
             self.chat_history_conf = int(private_config["chat_history_conf"])
 
-        self._apply_private_plugins(private_config)
-        if private_config.get("correct_words") is not None:
-            self._apply_correct_words(private_config["correct_words"])
+        self.correct_word_replacements = parse_correct_words(
+            self.config.get("correct_words")
+        )
 
         return (
             init_flags["LLM"],

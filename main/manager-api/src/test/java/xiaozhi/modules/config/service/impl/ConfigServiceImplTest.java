@@ -39,10 +39,48 @@ import xiaozhi.modules.model.service.ModelConfigService;
 import xiaozhi.modules.model.service.impl.ModelRuntimeAssembler;
 import xiaozhi.modules.sys.service.SysParamsService;
 import xiaozhi.modules.timbre.service.TimbreService;
+import xiaozhi.modules.timbre.entity.TimbreEntity;
 import xiaozhi.modules.userplugin.service.UserPluginConfigService;
 import xiaozhi.modules.voiceclone.service.VoiceCloneService;
 
 class ConfigServiceImplTest {
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void runtimeConfigIncludesAvailableTtsVoiceCatalog() {
+        AgentService agentService = mock(AgentService.class);
+        TimbreService timbreService = mock(TimbreService.class);
+        AgentVoicePrintDao voicePrintDao = mock(AgentVoicePrintDao.class);
+        AgentInfoVO agent = new AgentInfoVO();
+        agent.setId("agent-voice-catalog");
+        agent.setTtsModelId("TTS_demo");
+        agent.setIntentModelId("Intent_nointent");
+        when(agentService.getAgentById("agent-voice-catalog")).thenReturn(agent);
+        when(voicePrintDao.selectList(any())).thenReturn(List.of());
+
+        TimbreEntity voice = new TimbreEntity();
+        voice.setTtsModelId("TTS_demo");
+        voice.setTtsVoice("voice-demo");
+        voice.setName("演示音色");
+        voice.setLanguages("普通话");
+        when(timbreService.listRuntimeVoices("TTS_demo")).thenReturn(List.of(voice));
+
+        ConfigServiceImpl service = new ConfigServiceImpl(
+                mock(SysParamsService.class), mock(DeviceService.class), mock(ModelConfigService.class),
+                mock(ModelRuntimeAssembler.class), agentService, mock(AgentTemplateService.class),
+                mock(RedisUtils.class), timbreService, mock(AgentPluginMappingService.class),
+                mock(AgentMcpAccessPointService.class), mock(AgentContextProviderService.class),
+                mock(AgentFeishuService.class), mock(VoiceCloneService.class), voicePrintDao,
+                mock(VoiceprintApiClient.class), mock(CorrectWordFileService.class),
+                mock(UserPluginConfigService.class), mock(AgentSemanticSkillService.class));
+
+        Map<String, Object> runtime = service.getAgentRuntimeConfig("agent-voice-catalog");
+        List<Map<String, String>> catalog = (List<Map<String, String>>) runtime.get("tts_voice_catalog");
+
+        assertEquals(1, catalog.size());
+        assertEquals("voice-demo", catalog.get(0).get("id"));
+        assertEquals("演示音色", catalog.get(0).get("name"));
+    }
 
     @Test
     void systemWebFeatureGateFailsClosedForVoiceprint() {

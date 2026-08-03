@@ -510,7 +510,9 @@ model_config:
 ### 智能体级豆包 ASR 热词
 
 火山引擎控制台创建的热词表属于角色选择，不属于共享模型凭据。智控台角色配置在选择
-`doubao_stream` 或 `doubao_recording` 后可填写热词表 ID，保存到 `ai_agent.asr_hotword_id`。
+`doubao_stream` 或 `doubao_recording` 后可维护最多 10 个候选热词表 ID，并选择一个当前生效项。
+候选列表保存到 `ai_agent.asr_hotword_ids`，当前生效项继续保存到兼容字段
+`ai_agent.asr_hotword_id`。
 `ConfigServiceImpl` 只在该智能体的 ASR `typed_config` 中增加：
 
 ```yaml
@@ -519,6 +521,8 @@ boosting_table_id: example-hotword-table-id
 
 Python provider 按火山 Seed ASR 2.0 协议映射为
 `request.corpus.boosting_table_id`。角色留空时不发送热词表；选择非豆包 ASR 时该字段不参与运行时配置。
+火山官方限制一个识别请求只支持生效一张词表，因此候选列表不能作为数组下发；切换当前生效项并保存后，
+manager-api 通过运行配置刷新事件在线更新会话，下一轮识别使用新词表，无需设备重连。
 已有模型级 `context_text` 仍映射到 `request.context`，它可以承载直传热词或对话上下文，但不能用热词表
 ID 字符串替代。两者同时存在时遵循火山协议的优先级。
 

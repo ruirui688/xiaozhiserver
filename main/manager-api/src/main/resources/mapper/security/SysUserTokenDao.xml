@@ -7,11 +7,15 @@
 		select * from sys_user_token where token = #{token}
 	</select>
 
-	<select id="getByUserId" resultType="xiaozhi.modules.security.entity.SysUserTokenEntity">
-		select * from sys_user_token where user_id = #{userId}
-	</select>
+	<update id="expireByToken">
+		update sys_user_token set expire_date = #{expireDate} where token = #{token}
+	</update>
 
-	<update id="logout">
+	<update id="expireByUserId">
 		update sys_user_token set expire_date = #{expireDate} where user_id = #{userId}
 	</update>
+
+	<delete id="deleteExpiredByUserId">
+		delete from sys_user_token where user_id = #{userId} and expire_date &lt; #{now}
+	</delete>
 </mapper>

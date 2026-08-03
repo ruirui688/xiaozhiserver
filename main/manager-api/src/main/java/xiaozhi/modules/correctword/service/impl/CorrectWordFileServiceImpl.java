@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.context.ApplicationEventPublisher;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -20,6 +21,7 @@ import xiaozhi.common.page.PageData;
 import xiaozhi.common.service.impl.BaseServiceImpl;
 import xiaozhi.common.utils.ConvertUtils;
 import xiaozhi.modules.agent.dao.AgentCorrectWordMappingDao;
+import xiaozhi.modules.agent.runtime.AgentRuntimeConfigRefreshEvent;
 import xiaozhi.modules.correctword.dao.CorrectWordFileDao;
 import xiaozhi.modules.correctword.dao.CorrectWordItemDao;
 import xiaozhi.modules.correctword.dto.CorrectWordFileCreateDTO;
@@ -39,6 +41,7 @@ public class CorrectWordFileServiceImpl extends BaseServiceImpl<CorrectWordFileD
     private final CorrectWordFileDao correctWordFileDao;
     private final CorrectWordItemDao correctWordItemDao;
     private final AgentCorrectWordMappingDao agentCorrectWordMappingDao;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -83,7 +86,7 @@ public class CorrectWordFileServiceImpl extends BaseServiceImpl<CorrectWordFileD
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateFile(String fileId, CorrectWordFileCreateDTO dto) {
-        CorrectWordFileEntity fileEntity = correctWordFileDao.selectById(fileId);
+        CorrectWordFileEntity fileEntity = getOwnedFile(fileId);
         if (fileEntity == null) {
             return;
         }
@@ -119,6 +122,8 @@ public class CorrectWordFileServiceImpl extends BaseServiceImpl<CorrectWordFileD
         fileEntity.setUpdater(SecurityUser.getUserId());
         fileEntity.setUpdatedAt(new Date());
         correctWordFileDao.updateById(fileEntity);
+        publishRefresh(agentCorrectWordMappingDao.selectAgentIdsByFileId(fileId),
+                "correct_word_file_updated");
     }
 
     @Override
@@ -145,7 +150,7 @@ public class CorrectWordFileServiceImpl extends BaseServiceImpl<CorrectWordFileD
 
     @Override
     public CorrectWordFileVO getFileContent(String fileId) {
-        CorrectWordFileEntity entity = correctWordFileDao.selectById(fileId);
+        CorrectWordFileEntity entity = getOwnedFile(fileId);
         return toVO(entity);
     }
 
@@ -155,6 +160,10 @@ public class CorrectWordFileServiceImpl extends BaseServiceImpl<CorrectWordFileD
         if (fileId == null || fileId.trim().isEmpty()) {
             return;
         }
+        if (getOwnedFile(fileId) == null) {
+            return;
+        }
+        List<String> affectedAgentIds = agentCorrectWordMappingDao.selectAgentIdsByFileId(fileId);
         // 先删除关联表记录
         agentCorrectWordMappingDao.deleteByFileId(fileId);
         // 删除词条
@@ -163,6 +172,7 @@ public class CorrectWordFileServiceImpl extends BaseServiceImpl<CorrectWordFileD
         correctWordItemDao.delete(wrapper);
         // 删除文件
         correctWordFileDao.deleteById(fileId);
+        publishRefresh(affectedAgentIds, "correct_word_file_deleted");
     }
 
     @Override
@@ -292,5 +302,23 @@ public class CorrectWordFileServiceImpl extends BaseServiceImpl<CorrectWordFileD
             return new ArrayList<>();
         }
         return entities.stream().map(this::toVO).collect(Collectors.toList());
+    }
+
+    private void publishRefresh(List<String> agentIds, String reason) {
+        if (agentIds == null || agentIds.isEmpty()) {
+            return;
+        }
+        eventPublisher.publishEvent(new AgentRuntimeConfigRefreshEvent(agentIds, reason));
+    }
+
+    private CorrectWordFileEntity getOwnedFile(String fileId) {
+        Long userId = SecurityUser.getUserId();
+        if (fileId == null || fileId.isBlank() || userId == null) {
+            return null;
+        }
+        return correctWordFileDao.selectOne(
+                new LambdaQueryWrapper<CorrectWordFileEntity>()
+                        .eq(CorrectWordFileEntity::getId, fileId)
+                        .eq(CorrectWordFileEntity::getCreator, userId));
     }
 }

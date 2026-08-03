@@ -72,6 +72,7 @@ Java 向 Python 下发的标准结构：
 | `summaryMemory` | 兼容记忆摘要，不替代托管记忆事实 |
 | `plugins` | 当前智能体启用的插件及参数 |
 | `semantic_skills` | 当前智能体启用的固定播报技能；规则为 `phrase` 或 `all_keywords` |
+| `tts_voice_catalog` | 当前 TTS 模型可供本连接临时切换的音色目录，元素包含 `id/name/languages`；`id` 是上游真实音色编码 |
 | `mcp_endpoint` | 外部 MCP 地址，Python 使用前必须 SSRF 校验 |
 | `context_providers` | 动态上下文源配置 |
 | `voiceprint` | 外置声纹服务 URL/脱敏 Token、`user_id=agentId`、最多 5 条结构化说话人上下文 |
@@ -122,13 +123,15 @@ Java 向 Python 下发的标准结构：
 
 `X-Workspace-Id` 只是选择器，不是授权凭据。服务端必须查询成员关系，并从资源实体读取 `workspace_id` 后执行读写权限校验。
 
+同一用户允许存在多个独立登录 Token。普通登录新增会话而不覆盖其他终端；主动退出只使当前 Token 失效；修改密码和找回密码使该用户全部 Token 失效。`sys_user_token.user_id` 是普通索引，`token` 继续保持唯一约束。
+
 ## 6. 数据库与兼容
 
 - 所有结构变化通过 Liquibase 新 changeSet 实施，并立即登记到 master YAML。
 - 已执行 changeSet 的 id、author、内容和路径不可修改；修正效果必须新增补偿迁移。
 - API 和运行时契约优先向后兼容；删除旧字段前必须确认所有 Java、Python、Web、Mobile 和部署消费者已迁移。
 - Redis 缓存必须可由数据库重建；缓存键变化需有失效或版本策略。
-- 配置更新后是否要求重连、重启或仅刷新缓存，必须在对应接口或专题文档中明确。
+- 智能体运行配置通过内部通知和下一轮指纹检查热更新；只有设备协议、固件能力或服务启动级配置变化才要求重连或重启。
 
 ## 7. 契约验证
 

@@ -1,7 +1,7 @@
 ---
 status: canonical
 owner: runtime
-last_verified: 2026-07-28
+last_verified: 2026-08-02
 source_paths:
   - main/xiaozhi-server/app.py
   - main/xiaozhi-server/core/connection.py
@@ -61,16 +61,18 @@ sequenceDiagram
     PY->>API: 携带设备身份请求运行配置
     API->>API: 校验设备与智能体归属
     API->>DB: 装配当前配置
-    API-->>PY: selected_module + model_config + 上下文配置
+    API-->>PY: selected_module + model_config + 音色目录 + 上下文配置
     PY->>PY: normalize_runtime_config()
     PY->>PY: 初始化当前连接 provider
 ```
 
-当前会话是否热更新取决于具体配置类型。排查“保存成功但设备未变化”时依次检查：数据库事实、Redis 缓存、设备绑定、Python 拉取结果、连接是否重建、provider 是否使用了新配置。
+智能体运行配置支持在线热更新。保存智能体音色、提示词、模型选择、模型参数、插件、替换词、上下文源、聊天记录模式或固定播报技能后，manager-api 在事务提交后通过受保护的 `/device/runtime-config/refresh` 内部接口按 `agentId` 通知 xiaozhi-server。Python 会重新拉取完整私有配置并在空闲轮次边界重建 VAD、ASR、LLM、TTS、Memory、Intent、工具和提示词运行时，设备 WebSocket 保持连接；正在生成或播报的一轮不会被配置更新中途替换。
 
-聊天记录配置是连接级可热更新状态。智能体保存 `chatHistoryConf` 或切换记忆模型后，manager-api 在事务提交后通过受保护的内部 HTTP 接口按 `agentId` 通知 xiaozhi-server；所有在线连接立即采用有效的 `chat_history_conf`。开启记录时按需启动上报线程，文本/音频模式从下一条新消息生效；关闭记录时停止接收新上报，但已进入队列的记录仍会排空。内部通知失败不回滚已经提交的智能体配置，设备下次重连会重新读取数据库状态。
+内部通知失败不回滚已经提交的数据库事实。每个在线连接会在新一轮 `listen/start` 执行有最短间隔的配置指纹检查；配置未变化时不重建 provider，变化时再执行热替换。刷新通知只标记连接待更新，不会在用户录音、ASR 消费或 TTS 播放中途直接拆换线程。热替换初始化失败会尝试恢复旧运行配置并继续保留设备连接；若旧音频工作线程无法在安全时限内退出，则关闭异常连接以避免重复消费者，由设备正常重连恢复。聊天记录关闭时停止接收新上报，但已进入队列的记录仍会排空。
 
-智能体固定播报技能通过 `semantic_skills` 随设备私有配置下发，当前连接不会热替换这组规则；后台保存后需要设备重连，由新建连接重新拉取并编译规则。没有配置或没有命中时不得改变旧对话行为。
+大模型通过 `set_session_voice` 调整音色、语速、音量或音调时，参数只保存在当前连接，不写回 manager-api。当前 TTS 模型不变的配置热更新会把会话 override 重新应用到新 provider；TTS 模型切换时清除旧 override，避免把旧供应商的音色 ID 带到新模型。双向流 provider 在当前轮开始时已经建立上游 session，因此调整从下一轮回复安全生效，不在播放中途拆换音频通道。
+
+排查“保存成功但设备未变化”时依次检查：数据库事实、Redis 缓存、manager-api 内部刷新日志、Python `/device/runtime-config/refresh` 日志、下一轮配置指纹检查和 provider 热替换结果。只有连接协议、设备固件能力或服务端启动级配置变化仍可能需要设备重连或服务重启。
 
 连接初始化按能力发布 `binding_ready / tts_ready / conversation_ready / audio_input_ready`，不能再用一个
 完成标志推断所有 provider 和音频通道均可用。通道打开协程必须成功返回后才能设置对应 ready；初始化异常
@@ -130,6 +132,8 @@ LAST、Abort 或连接关闭负责其他终态，因此 `client_is_speaking` 只
 ```
 
 完整实现见 [功能插件](./function-plugin-architecture.md) 和 [MCP 链路](./mcp-chains.md)。
+
+`reset_conversation_context` 成功后只保留当前 system prompt，并重新注入必要工具 few-shot；工具确认语成为新上下文的第一条 assistant 消息。会议、通话和声纹采集属于受保护状态，不能通过该工具破坏正在执行的事务状态。
 
 ## 6. 记忆与知识库
 

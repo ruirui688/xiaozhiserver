@@ -224,36 +224,12 @@
                       </div>
                     </el-option>
                   </el-select>
-                  <div v-if="supportsAsrHotword" class="asr-hotword-field">
-                    <div class="asr-hotword-label">
-                      <div class="asr-hotword-title">
-                        <span>{{ $t('roleConfig.asrHotword') }}</span>
-                        <el-tooltip
-                          :content="$t('roleConfig.tooltip.asrHotword')"
-                          placement="top"
-                          effect="light"
-                          popper-class="custom-tooltip"
-                        >
-                          <i class="el-icon-info"></i>
-                        </el-tooltip>
-                      </div>
-                      <a
-                        href="https://console.volcengine.com/speech/new/hot-word?projectName=default"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="asr-hotword-console-link"
-                      >
-                        <span>{{ $t('roleConfig.asrHotwordConsole') }}</span>
-                        <i class="el-icon-top-right"></i>
-                      </a>
-                    </div>
-                    <el-input
-                      v-model.trim="form.asrHotwordId"
-                      clearable
-                      maxlength="128"
-                      :placeholder="$t('roleConfig.asrHotwordPlaceholder')"
-                    />
-                  </div>
+                  <asr-hotword-field
+                    v-if="supportsAsrHotword"
+                    :ids="form.asrHotwordIds"
+                    :active-id="form.asrHotwordId"
+                    @change="handleAsrHotwordChange"
+                  />
                 </div>
               </el-form-item>
             </div>
@@ -533,6 +509,7 @@ import KnowledgeBaseSelectorDialog from "@/components/KnowledgeBaseSelectorDialo
 import TtsAdvancedSettings from "@/components/TtsAdvancedSettings.vue";
 import FeishuIntegrationDialog from "@/components/role/FeishuIntegrationDialog.vue";
 import AgentSkillDialog from "@/components/role/AgentSkillDialog.vue";
+import AsrHotwordField from "@/components/role/AsrHotwordField.vue";
 import i18n from "@/i18n";
 import {
   buildRoleForm,
@@ -540,6 +517,7 @@ import {
   cloneRoleValue,
   emptyRoleForm,
   mergeRoleDraft,
+  normalizeAsrHotwordConfig,
   normalizeMappingParams,
   splitCapabilityMappings,
 } from "@/utils/roleConfigDraft";
@@ -552,6 +530,7 @@ export default {
     TtsAdvancedSettings,
     FeishuIntegrationDialog,
     AgentSkillDialog,
+    AsrHotwordField,
   },
   props: {
     initialForm: { type: Object, default: () => null },
@@ -688,11 +667,16 @@ export default {
       this.$emit('reset');
     },
     submitSaveConfig(agentId) {
+      const hotwordSelection = normalizeAsrHotwordConfig(
+        this.form.asrHotwordIds,
+        this.form.asrHotwordId
+      );
       const configData = {
         agentCode: this.form.agentCode,
         agentName: this.form.agentName,
         asrModelId: this.form.model.asrModelId,
-        asrHotwordId: this.form.asrHotwordId,
+        asrHotwordId: hotwordSelection.activeId,
+        asrHotwordIds: hotwordSelection.ids,
         vadModelId: this.form.model.vadModelId,
         llmModelId: this.form.model.llmModelId,
         slmModelId: this.form.model.slmModelId,
@@ -721,6 +705,10 @@ export default {
         configData.ttsPitch = this.form.ttsPitch;
       }
       return configData;
+    },
+    handleAsrHotwordChange({ ids, activeId }) {
+      this.form.asrHotwordIds = ids;
+      this.form.asrHotwordId = activeId;
     },
     fetchTemplates() {
       Api.agent.getAgentTemplate(({ data }) => {
@@ -1302,49 +1290,6 @@ export default {
   flex-direction: column;
   align-items: center;
   width: 100%;
-}
-
-.asr-hotword-field {
-  width: 100%;
-  margin-top: 8px;
-}
-
-.asr-hotword-label {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-bottom: 4px;
-  color: #5f6680;
-  font-size: 12px;
-  line-height: 18px;
-}
-
-.asr-hotword-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.asr-hotword-title i {
-  color: #8791ad;
-  cursor: help;
-}
-
-.asr-hotword-console-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  color: #337ecc;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.asr-hotword-console-link:hover,
-.asr-hotword-console-link:focus {
-  color: #1d5fa7;
-  text-decoration: underline;
 }
 
 .model-row {

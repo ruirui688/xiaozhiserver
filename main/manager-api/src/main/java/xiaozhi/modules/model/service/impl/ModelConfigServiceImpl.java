@@ -11,6 +11,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -34,6 +35,7 @@ import xiaozhi.common.service.impl.BaseServiceImpl;
 import xiaozhi.common.utils.ConvertUtils;
 import xiaozhi.modules.agent.dao.AgentDao;
 import xiaozhi.modules.agent.entity.AgentEntity;
+import xiaozhi.modules.agent.runtime.AgentRuntimeConfigRefreshEvent;
 import xiaozhi.modules.model.dao.ModelConfigDao;
 import xiaozhi.modules.model.dto.LlmModelBasicInfoDTO;
 import xiaozhi.modules.model.dto.ModelBasicInfoDTO;
@@ -61,6 +63,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     private final RedisUtils redisUtils;
     private final AgentDao agentDao;
     private final ModelTestService modelTestService;
+    private final ApplicationEventPublisher eventPublisher;
 
     private static final int MODEL_TEST_UNTESTED = 0;
     private static final int MODEL_TEST_PASSED = 1;
@@ -162,6 +165,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
 
         // 7. 清除缓存
         clearModelCache(id);
+        publishRuntimeRefreshForModel(id, "model_config_updated");
 
         // 8. 返回更新后的数据
         return buildResponseDTO(modelConfigEntity);
@@ -245,6 +249,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         updateEntity.setIsEnabled(verified ? 1 : 0);
         modelConfigDao.updateById(updateEntity);
         clearModelCache(id);
+        publishRuntimeRefreshForModel(id, "model_status_updated");
         return result;
     }
 
@@ -896,6 +901,28 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                     .map(AgentEntity::getAgentName)
                     .collect(Collectors.joining("、"));
             throw new RenException(ErrorCode.MODEL_REFERENCED_BY_AGENT, agentNames);
+        }
+    }
+
+    private void publishRuntimeRefreshForModel(String modelId, String reason) {
+        List<AgentEntity> agents = agentDao.selectList(
+                new QueryWrapper<AgentEntity>()
+                        .select("id")
+                        .and(query -> query.eq("vad_model_id", modelId)
+                                .or().eq("asr_model_id", modelId)
+                                .or().eq("llm_model_id", modelId)
+                                .or().eq("slm_model_id", modelId)
+                                .or().eq("tts_model_id", modelId)
+                                .or().eq("mem_model_id", modelId)
+                                .or().eq("vllm_model_id", modelId)
+                                .or().eq("intent_model_id", modelId)));
+        List<String> agentIds = agents.stream()
+                .map(AgentEntity::getId)
+                .filter(StringUtils::isNotBlank)
+                .distinct()
+                .toList();
+        if (!agentIds.isEmpty()) {
+            eventPublisher.publishEvent(new AgentRuntimeConfigRefreshEvent(agentIds, reason));
         }
     }
 

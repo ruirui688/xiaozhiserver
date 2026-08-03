@@ -8,6 +8,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 import xiaozhi.common.exception.ErrorCode;
 import xiaozhi.common.exception.RenException;
 import xiaozhi.modules.agent.skill.dao.AgentSemanticSkillDao;
+import xiaozhi.modules.agent.runtime.AgentRuntimeConfigRefreshEvent;
 import xiaozhi.modules.agent.skill.dto.AgentSemanticSkillOrderDTO;
 import xiaozhi.modules.agent.skill.dto.AgentSemanticSkillSaveDTO;
 import xiaozhi.modules.agent.skill.entity.AgentSemanticSkillEntity;
@@ -30,6 +32,7 @@ public class AgentSemanticSkillServiceImpl implements AgentSemanticSkillService 
     private static final int MAX_SKILLS_PER_AGENT = 50;
 
     private final AgentSemanticSkillDao skillDao;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     public List<AgentSemanticSkillVO> list(String agentId) {
@@ -72,6 +75,7 @@ public class AgentSemanticSkillServiceImpl implements AgentSemanticSkillService 
         entity.setUpdater(operatorId);
         entity.setUpdatedAt(now);
         skillDao.insert(entity);
+        publishRefresh(agentId, "semantic_skill_created");
         return toVO(entity);
     }
 
@@ -87,6 +91,7 @@ public class AgentSemanticSkillServiceImpl implements AgentSemanticSkillService 
         entity.setUpdater(operatorId);
         entity.setUpdatedAt(new Date());
         skillDao.updateById(entity);
+        publishRefresh(agentId, "semantic_skill_updated");
         return toVO(entity);
     }
 
@@ -99,6 +104,7 @@ public class AgentSemanticSkillServiceImpl implements AgentSemanticSkillService 
         if (deleted == 0) {
             throw new RenException(ErrorCode.RESOURCE_NOT_FOUND);
         }
+        publishRefresh(agentId, "semantic_skill_deleted");
     }
 
     @Override
@@ -134,6 +140,7 @@ public class AgentSemanticSkillServiceImpl implements AgentSemanticSkillService 
             entity.setUpdatedAt(now);
             skillDao.updateById(entity);
         }
+        publishRefresh(agentId, "semantic_skill_reordered");
     }
 
     @Override
@@ -194,5 +201,9 @@ public class AgentSemanticSkillServiceImpl implements AgentSemanticSkillService 
         vo.setPriority(entity.getPriority());
         vo.setSort(entity.getSort());
         return vo;
+    }
+
+    private void publishRefresh(String agentId, String reason) {
+        eventPublisher.publishEvent(AgentRuntimeConfigRefreshEvent.forAgent(agentId, reason));
     }
 }
