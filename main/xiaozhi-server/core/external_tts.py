@@ -164,6 +164,17 @@ class ExternalTTSCoordinator:
                     return
                 await handleAbortMessage(conn)
 
+            await self._refresh_runtime_config(conn)
+            unavailable = self._unavailable_reason(conn)
+            if unavailable is not None:
+                await self._send_error(
+                    conn,
+                    "unavailable",
+                    unavailable,
+                    request_id=request_id,
+                )
+                return
+
             job = self._create_job(device_key, request_id, conn)
             with conn._abort_lock:
                 conn.client_abort = False
@@ -436,6 +447,23 @@ class ExternalTTSCoordinator:
     def _is_busy(self, conn) -> bool:
         """Backward-compatible boolean view used by older integrations/tests."""
         return self._busy_reason(conn) is not None
+
+    @staticmethod
+    async def _refresh_runtime_config(conn) -> bool:
+        reloader = getattr(conn, "runtime_config_reloader", None)
+        if reloader is None:
+            return False
+        try:
+            return bool(
+                await reloader.refresh_if_due(reason="external_tts_start")
+            )
+        except Exception as error:
+            conn.logger.bind(tag=__name__).warning(
+                "external TTS开始前配置热更新失败，继续使用旧配置: "
+                "errorType={}",
+                type(error).__name__,
+            )
+            return False
 
     @staticmethod
     def _busy_message(reason: str) -> str:

@@ -177,6 +177,72 @@ def test_submit_preserves_exact_text_and_queues_one_device_tts_turn():
     asyncio.run(scenario())
 
 
+def test_submit_refreshes_runtime_config_before_using_tts_queue():
+    async def scenario():
+        coordinator = ExternalTTSCoordinator()
+        conn = _connection(device_id="AA:BB:CC:DD:EE:10")
+        conn.loop = asyncio.get_running_loop()
+        old_tts = conn.tts
+        new_tts = _TTS()
+
+        class _Reloader:
+            async def refresh_if_due(self, *, reason):
+                assert reason == "external_tts_start"
+                conn.tts = new_tts
+                return True
+
+        conn.runtime_config_reloader = _Reloader()
+        await coordinator.handle_message(
+            conn,
+            {
+                "type": "external_tts",
+                "requestId": "refresh-before-submit",
+                "text": "使用新音色播报",
+            },
+        )
+
+        response = _external_messages(conn)[-1]
+        assert response["status"] == "queued"
+        assert old_tts.tts_text_queue.empty()
+        assert new_tts.tts_text_queue.qsize() == 3
+        assert new_tts.stored == [(response["sentenceId"], "使用新音色播报")]
+
+    asyncio.run(scenario())
+
+
+def test_submit_keeps_old_tts_when_runtime_refresh_fails():
+    async def scenario():
+        coordinator = ExternalTTSCoordinator()
+        conn = _connection(device_id="AA:BB:CC:DD:EE:11")
+        conn.loop = asyncio.get_running_loop()
+        old_tts = conn.tts
+
+        class _FailingReloader:
+            async def refresh_if_due(self, *, reason):
+                assert reason == "external_tts_start"
+                raise RuntimeError("refresh failed")
+
+        conn.runtime_config_reloader = _FailingReloader()
+        await coordinator.handle_message(
+            conn,
+            {
+                "type": "external_tts",
+                "requestId": "refresh-failure-fallback",
+                "text": "刷新失败也不能丢失",
+            },
+        )
+
+        response = _external_messages(conn)[-1]
+        assert response["status"] == "queued"
+        assert conn.tts is old_tts
+        assert old_tts.tts_text_queue.qsize() == 3
+        assert old_tts.stored == [
+            (response["sentenceId"], "刷新失败也不能丢失")
+        ]
+
+    asyncio.run(scenario())
+
+
 def test_duplicate_request_returns_original_job_without_requeueing():
     async def scenario():
         coordinator = ExternalTTSCoordinator()
