@@ -763,3 +763,19 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 是否允许被官方覆盖：否
 官方同步时的处理规则：必须保留 set_session_voice/reset_conversation_context 作为连接级必要工具且不写回后台配置；语速、音量、音调继续使用 -100..100 公共百分比并按 provider 能力映射，不支持参数明确拒绝。音色工具只能使用当前 TTS 模型下发的公共音色 ID；当前配置若使用克隆音色，目录至少保留当前真实 ID，名称只是不可信匹配标签。相同 TTS 模型热更新后重放当前会话 override，模型切换时清除；双向流不得在当前播放 session 中途重建，下一轮安全生效。上下文重置只清 Dialogue 和连接软状态，保留 system prompt，不删除后台聊天记录、长期记忆或配置；会议、设备通话和声纹采集期间必须拒绝。
 ```
+
+## 39. 管理后台音色真实合成测试
+
+```text
+定制模块：manager-web 音色管理弹窗、manager-api 音色测试服务
+改动原因：手动登记的音色 ID 可能与其关联 TTS 模型的产品、resource_id 或协议不兼容；只保存字段无法发现“握手成功但没有下行音频”的问题。现在已保存音色可按行执行真实测试，后端复制关联模型运行配置并用 private_voice 覆盖当前音色，通过 xiaozhi-server benchmark API 调用真实 Python provider。只有返回可播放音频才通过，页面展示试听、首音频和总耗时以及真实错误；测试不修改共享模型配置、模型启用状态或模型总体测试状态。
+关键文件：
+  - main/manager-web/src/components/TtsModel.vue
+  - main/manager-web/src/apis/module/timbre.js
+  - main/manager-api/src/main/java/xiaozhi/modules/timbre/service/TimbreTestService.java
+  - main/manager-api/src/main/java/xiaozhi/modules/timbre/service/impl/TimbreTestServiceImpl.java
+  - main/manager-api/src/main/java/xiaozhi/modules/timbre/controller/TimbreController.java
+  - docs/models/model-management.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：必须保留“音色测试调用真实运行时 provider、private_voice 仅覆盖测试副本、产生浏览器可播放音频才算通过”的契约；不得退回字段校验、握手检查或伪造音频，不得让单个音色测试更新/禁用整个 TTS 模型。火山 mars/moon BigTTS 音色必须与 volc.service_type.10029 模型对应，不能错误绑定到 seed-tts-2.0。
+```

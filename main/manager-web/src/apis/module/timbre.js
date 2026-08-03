@@ -92,5 +92,30 @@ export default {
                     this.updateVoice(params, callback);
                 });
             }).send();
+    },
+    // 使用当前模型配置和指定音色执行真实 TTS 合成
+    testVoice(id, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/ttsVoice/${id}/test`)
+            .method('POST')
+            .timeout(130000)
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .fail((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                console.error('测试音色失败:', err);
+                RequestService.clearRequestTime();
+                callback({
+                    data: {
+                        code: -1,
+                        msg: err?.msg || '测试音色失败，请检查后台服务或网络连接'
+                    }
+                });
+            }).send();
     }
 }

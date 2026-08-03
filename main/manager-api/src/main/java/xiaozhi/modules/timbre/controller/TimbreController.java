@@ -21,9 +21,11 @@ import xiaozhi.common.constant.Constant;
 import xiaozhi.common.page.PageData;
 import xiaozhi.common.utils.Result;
 import xiaozhi.common.validator.ValidatorUtils;
+import xiaozhi.modules.model.dto.ModelTestResultDTO;
 import xiaozhi.modules.timbre.dto.TimbreDataDTO;
 import xiaozhi.modules.timbre.dto.TimbrePageDTO;
 import xiaozhi.modules.timbre.service.TimbreService;
+import xiaozhi.modules.timbre.service.TimbreTestService;
 import xiaozhi.modules.timbre.vo.TimbreDetailsVO;
 
 /**
@@ -38,6 +40,7 @@ import xiaozhi.modules.timbre.vo.TimbreDetailsVO;
 @Tag(name = "音色管理")
 public class TimbreController {
     private final TimbreService timbreService;
+    private final TimbreTestService timbreTestService;
 
     @GetMapping
     @Operation(summary = "分页查找")
@@ -79,6 +82,19 @@ public class TimbreController {
         ValidatorUtils.validateEntity(dto);
         timbreService.update(id, dto);
         return new Result<>();
+    }
+
+    @PostMapping("/{id}/test")
+    @Operation(summary = "真实测试音色")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<ModelTestResultDTO> test(@PathVariable String id) {
+        ModelTestResultDTO testResult = timbreTestService.test(id);
+        if (Boolean.TRUE.equals(testResult.getSuccess()) && Boolean.TRUE.equals(testResult.getVerified())) {
+            return new Result<ModelTestResultDTO>().ok(testResult);
+        }
+        Result<ModelTestResultDTO> result = new Result<ModelTestResultDTO>().error(testResult.getMessage());
+        result.setData(testResult);
+        return result;
     }
 
     @PostMapping("/delete")

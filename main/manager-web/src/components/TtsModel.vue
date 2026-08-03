@@ -32,13 +32,30 @@
               <span v-else>{{ scope.row.languageType }}</span>
             </template>
           </el-table-column>
-          <el-table-column v-if="!showReferenceColumns" :label="$t('ttsModel.preview')" align="center" class-name="audio-column">
+          <el-table-column :label="$t('ttsModel.preview')" align="center" min-width="230" class-name="audio-column">
             <template slot-scope="scope">
               <div class="custom-audio-container">
-                <el-input v-if="scope.row.editing" v-model="scope.row.voiceDemo" :placeholder="$t('ttsModel.enterMp3Url')"
+                <el-input v-if="scope.row.editing && !showReferenceColumns" v-model="scope.row.voiceDemo" :placeholder="$t('ttsModel.enterMp3Url')"
                   class="audio-input">
                 </el-input>
-                <AudioPlayer v-else-if="isValidAudioUrl(scope.row.voiceDemo)" :audioUrl="scope.row.voiceDemo" />
+                <template v-else>
+                  <AudioPlayer v-if="isValidAudioUrl(scope.row.testAudioUrl || scope.row.voiceDemo)"
+                    :audioUrl="scope.row.testAudioUrl || scope.row.voiceDemo" />
+                  <span v-else class="audio-empty">{{ $t('ttsModel.noTestAudio') }}</span>
+                  <div v-if="scope.row.testMessage" class="voice-test-result"
+                    :class="scope.row.testSuccess ? 'is-success' : 'is-failed'">
+                    <span>{{ scope.row.testMessage }}</span>
+                    <span v-if="scope.row.testSuccess && hasLatency(scope.row)" class="voice-test-latency">
+                      <span v-if="scope.row.firstAudioMs !== null">
+                        {{ $t('ttsModel.firstAudioLatency', { value: scope.row.firstAudioMs }) }}
+                      </span>
+                      <span v-if="scope.row.firstAudioMs !== null && scope.row.responseTimeMs !== null"> · </span>
+                      <span v-if="scope.row.responseTimeMs !== null">
+                        {{ $t('ttsModel.totalLatency', { value: scope.row.responseTimeMs }) }}
+                      </span>
+                    </span>
+                  </div>
+                </template>
               </div>
             </template>
           </el-table-column>
@@ -61,9 +78,13 @@
               <span v-else>{{ scope.row.referenceText }}</span>
             </template>
           </el-table-column>
-          <el-table-column :label="$t('ttsModel.operation')" align="center" width="150">
+          <el-table-column :label="$t('ttsModel.operation')" align="center" width="210">
             <template slot-scope="scope">
               <template v-if="!scope.row.editing">
+                <el-button type="text" size="mini" @click="testVoice(scope.row)" class="test-btn"
+                  :loading="testingVoiceId === scope.row.id" :disabled="!!testingVoiceId && testingVoiceId !== scope.row.id">
+                  {{ testingVoiceId === scope.row.id ? $t('ttsModel.testing') : $t('ttsModel.test') }}
+                </el-button>
                 <el-button type="text" size="mini" @click="startEdit(scope.row)" class="edit-btn">
                     {{ $t('ttsModel.edit') }}
                   </el-button>
@@ -141,6 +162,7 @@ export default {
       selectAll: false,
       selectedRows: [],
       loading: false,
+      testingVoiceId: '',
       showReferenceColumns: false, // 控制是否显示参考列
     };
   },
@@ -217,6 +239,11 @@ export default {
               referenceAudio: item.referenceAudio || '',
               referenceText: item.referenceText || '',
               voiceDemo: item.voiceDemo || '',
+              testAudioUrl: '',
+              testMessage: '',
+              testSuccess: null,
+              firstAudioMs: null,
+              responseTimeMs: null,
               selected: false,
               editing: false,
               sort: Number(item.sort)
@@ -247,6 +274,7 @@ export default {
       this.total = 0;
       this.selectAll = false;
       this.searchQuery = '';
+      this.testingVoiceId = '';
       this.showReferenceColumns = false;
 
       this.localVisible = false;
@@ -436,6 +464,49 @@ export default {
       }
     },
 
+    testVoice(row) {
+      if (!row.id || row.editing) {
+        this.$message.warning(this.$t('ttsModel.saveBeforeTest'));
+        return;
+      }
+
+      this.testingVoiceId = row.id;
+      this.$set(row, 'testAudioUrl', '');
+      this.$set(row, 'testMessage', '');
+      this.$set(row, 'testSuccess', null);
+      this.$set(row, 'firstAudioMs', null);
+      this.$set(row, 'responseTimeMs', null);
+
+      Api.timbre.testVoice(row.id, (response) => {
+        const envelope = response && response.data ? response.data : response || {};
+        const result = envelope.data || {};
+        const playableAudio = this.isValidAudioUrl(result.testAudioDataUrl);
+        const success = envelope.code === 0
+          && result.success === true
+          && result.verified === true
+          && playableAudio;
+
+        this.$set(row, 'testSuccess', success);
+        this.$set(row, 'testAudioUrl', success ? result.testAudioDataUrl : '');
+        this.$set(row, 'firstAudioMs', Number.isFinite(result.firstAudioMs) ? result.firstAudioMs : null);
+        this.$set(row, 'responseTimeMs', Number.isFinite(result.responseTimeMs) ? result.responseTimeMs : null);
+        this.$set(row, 'testMessage', success
+          ? (result.message || this.$t('ttsModel.testSuccess'))
+          : (result.message || envelope.msg || this.$t('ttsModel.testFailed')));
+
+        if (success) {
+          this.$message.success(this.$t('ttsModel.testSuccess'));
+        } else {
+          this.$message.error(row.testMessage);
+        }
+        this.testingVoiceId = '';
+      });
+    },
+
+    hasLatency(row) {
+      return row.firstAudioMs !== null || row.responseTimeMs !== null;
+    },
+
     toggleSelectAll() {
       this.selectAll = !this.selectAll;
       this.filteredTtsModels.forEach(row => {
@@ -462,6 +533,11 @@ export default {
         remark: '',
         referenceAudio: '',
         referenceText: '',
+        testAudioUrl: '',
+        testMessage: '',
+        testSuccess: null,
+        firstAudioMs: null,
+        responseTimeMs: null,
         selected: false,
         editing: true,
         sort: 0 // 新增数据默认排序在顶部
@@ -525,7 +601,10 @@ export default {
     },
 
     isValidAudioUrl(url) {
-      return url && (url.endsWith('.mp3') || url.endsWith('.ogg') || url.endsWith('.wav'));
+      if (!url || typeof url !== 'string') return false;
+      const normalized = url.trim();
+      return /^data:audio\/[a-z0-9.+-]+(?:;[^,]*)?,/i.test(normalized)
+        || /\.(mp3|ogg|wav)(?:[?#].*)?$/i.test(normalized);
     }
   }
 };
@@ -696,6 +775,7 @@ export default {
   font-size: 11px;
 }
 
+.test-btn,
 .edit-btn,
 .delete-btn,
 .save-btn {
@@ -704,6 +784,7 @@ export default {
   transition: all 0.3s;
 }
 
+.test-btn:hover,
 .edit-btn:hover,
 .delete-btn:hover,
 .save-btn:hover {
@@ -713,6 +794,31 @@ export default {
 
 .save-btn {
   color: #5cca8e !important;
+}
+
+.voice-test-result {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.voice-test-result.is-success {
+  color: #36a269;
+}
+
+.voice-test-result.is-failed {
+  color: #e65c5c;
+}
+
+.voice-test-latency {
+  display: block;
+  color: #7a8299;
+}
+
+.audio-empty {
+  color: #a4a9b8;
+  font-size: 12px;
 }
 
 /* 表格单元格自适应 */
