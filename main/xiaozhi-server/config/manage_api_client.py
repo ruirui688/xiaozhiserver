@@ -112,6 +112,20 @@ class ManageApiClient:
                 await response.aclose()
 
     @classmethod
+    async def _async_request_bytes(cls, method: str, endpoint: str, **kwargs) -> bytes:
+        """读取受服务密钥保护的二进制资源，不记录响应正文。"""
+        client = await cls._ensure_async_client()
+        endpoint = endpoint.lstrip("/")
+        response = None
+        try:
+            response = await client.request(method, endpoint, **kwargs)
+            response.raise_for_status()
+            return bytes(response.content)
+        finally:
+            if response is not None:
+                await response.aclose()
+
+    @classmethod
     def _should_retry(cls, exception: Exception) -> bool:
         """判断异常是否应该重试"""
         # 网络连接相关错误
@@ -206,6 +220,33 @@ async def get_correct_words(mac_address: str) -> Optional[Dict]:
     except Exception as e:
         logger.bind(tag="manage_api").error(f"获取替换词失败: {e}")
         return None
+
+
+async def get_device_face_profiles(mac_address: str) -> Optional[Dict]:
+    """获取只属于当前已绑定设备的人脸资源清单。"""
+    if not ManageApiClient._instance:
+        return None
+    return await ManageApiClient._instance._execute_async_request(
+        "GET", f"/config/device-face-profiles/{mac_address}"
+    )
+
+
+async def download_device_face_profile(mac_address: str, person_id: str) -> bytes:
+    """下载 manager-api 已完成设备归属校验的人脸图片。"""
+    if not ManageApiClient._instance:
+        return b""
+    return await ManageApiClient._instance._async_request_bytes(
+        "GET", f"/config/device-face-profiles/{mac_address}/{person_id}/image"
+    )
+
+
+async def report_device_face_recognition(payload: Dict) -> Optional[Dict]:
+    """上报设备本地识别结果；payload 不包含照片或生物特征。"""
+    if not ManageApiClient._instance:
+        return None
+    return await ManageApiClient._instance._execute_async_request(
+        "POST", "/config/device-face-profiles/recognition-events", json=payload
+    )
 
 
 async def generate_and_save_chat_summary(session_id: str) -> Optional[Dict]:

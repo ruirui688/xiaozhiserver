@@ -1,11 +1,12 @@
 <template>
   <div class="welcome">
     <HeaderBar />
+    <ResourceCenterNav />
 
     <div class="operation-bar">
       <div class="page-heading">
-        <h2 class="page-title">角色可选工具库</h2>
-        <p class="page-subtitle">这里维护可进入大模型工具列表的能力，不是当前角色的启用状态。</p>
+        <h2 class="page-title">插件中心</h2>
+        <p class="page-subtitle">像逛能力商店一样查看系统工具与互动玩法，在角色配置中一键启用。</p>
       </div>
       <div class="right-operations">
         <el-input
@@ -16,7 +17,7 @@
           @keyup.enter.native="handleSearch"
         />
         <el-button class="btn-search" @click="handleSearch">搜索</el-button>
-        <el-button type="primary" @click="openCreateDialog()">新建互动玩法</el-button>
+        <el-button v-if="canManagePlugins" type="primary" @click="openCreateDialog()">新建互动玩法</el-button>
       </div>
     </div>
 
@@ -64,63 +65,24 @@
                 <div class="scope-guide-value">飞书、知识库、MCP 在角色编辑页绑定</div>
               </div>
             </div>
-            <el-table
-              :data="visiblePlugins"
-              class="transparent-table"
-              v-loading="loading"
-              element-loading-text="拼命加载中"
-              element-loading-spinner="el-icon-loading"
-              element-loading-background="rgba(255, 255, 255, 0.7)"
-            >
-              <el-table-column label="工具" min-width="190">
-                <template slot-scope="scope">
-                  <div class="function-name">{{ scope.row.name }}</div>
-                  <div class="function-code">{{ scope.row.providerCode }}</div>
-                </template>
-              </el-table-column>
-              <el-table-column label="分类" align="center" width="110">
-                <template slot-scope="scope">
-                  {{ getFunctionCategory(scope.row) }}
-                </template>
-              </el-table-column>
-              <el-table-column label="运行方式" align="center" width="110">
-                <template slot-scope="scope">
-                  <el-tag v-if="isDeclarativeInteractionPlugin(scope.row.fieldsMeta)" type="success" size="small">对话玩法</el-tag>
-                  <el-tag v-else size="small">工具调用</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="触发示例" min-width="190">
-                <template slot-scope="scope">
-                  <span class="description-text">{{ getExampleUtterance(scope.row) }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="执行效果" min-width="260">
-                <template slot-scope="scope">
-                  <span class="description-text">{{ getPluginDescription(scope.row) }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="启用/配置" align="center" width="130">
-                <template slot-scope="scope">
-                  {{ getConfigText(scope.row) }}
-                </template>
-              </el-table-column>
-              <el-table-column label="排序" prop="sort" align="center" width="80" />
-              <el-table-column label="操作" align="center" width="140">
-                <template slot-scope="scope">
-                  <template v-if="isDeclarativeInteractionPlugin(scope.row.fieldsMeta)">
-                    <el-button size="mini" type="text" @click="openEditDialog(scope.row)">编辑玩法</el-button>
-                    <el-dropdown trigger="click" @command="handleRowCommand(scope.row, $event)">
-                      <el-button size="mini" type="text">更多</el-button>
-                      <el-dropdown-menu slot="dropdown">
-                        <el-dropdown-item command="duplicate">复制玩法</el-dropdown-item>
-                        <el-dropdown-item command="delete" class="danger-action">删除</el-dropdown-item>
-                      </el-dropdown-menu>
-                    </el-dropdown>
-                  </template>
-                  <el-button v-else size="mini" type="text" @click="openDetailDialog(scope.row)">查看</el-button>
-                </template>
-              </el-table-column>
-            </el-table>
+            <el-empty v-if="!loading && visiblePlugins.length === 0" description="没有找到匹配的插件" />
+            <div v-else class="plugin-grid" v-loading="loading">
+              <PluginResourceCard
+                v-for="plugin in visiblePlugins"
+                :key="plugin.id"
+                :plugin="plugin"
+                :interaction="isDeclarativeInteractionPlugin(plugin.fieldsMeta)"
+                :can-manage="canManagePlugins"
+                :category="getFunctionCategory(plugin)"
+                :category-key="getCategoryMeta(plugin).key"
+                :description="getPluginDescription(plugin)"
+                :example="getExampleUtterance(plugin)"
+                :config-text="getConfigText(plugin)"
+                @detail="openDetailDialog"
+                @edit="openEditDialog"
+                @command="handleRowCommand"
+              />
+            </div>
 
             <div class="table-bottom">
               <span class="total-text">
@@ -257,6 +219,8 @@
 import Api from "@/apis/api";
 import HeaderBar from "@/components/HeaderBar.vue";
 import VersionFooter from "@/components/VersionFooter.vue";
+import ResourceCenterNav from "@/components/resource/ResourceCenterNav.vue";
+import PluginResourceCard from "@/components/resource/PluginResourceCard.vue";
 
 const DEFAULT_PARAMETERS_SCHEMA = {
   type: "object",
@@ -277,7 +241,9 @@ export default {
   name: "FunctionPluginManagement",
   components: {
     HeaderBar,
-    VersionFooter
+    VersionFooter,
+    ResourceCenterNav,
+    PluginResourceCard
   },
   data() {
     return {
@@ -403,27 +369,35 @@ export default {
     },
     fetchPlugins() {
       this.loading = true;
+      const handleResponse = ({ data }) => {
+        this.loading = false;
+        if (data.code !== 0) {
+          this.$message.error(data.msg || "获取插件列表失败");
+          return;
+        }
+        const source = Array.isArray(data.data) ? data.data : (data.data.list || []);
+        this.allPluginProviders = source.map((item) => ({
+          ...item,
+          fieldsMeta: this.parseFields(item.fields)
+        }));
+        this.plugins = this.allPluginProviders
+          .filter((item) => item.modelType === "Plugin")
+          .sort((a, b) => Number(a.sort || 0) - Number(b.sort || 0));
+      };
+      if (!this.canManagePlugins) {
+        Api.model.getPluginFunctionList(null, handleResponse, () => {
+          this.loading = false;
+          this.$message.error("获取插件列表失败");
+        });
+        return;
+      }
       Api.model.getModelProvidersPage(
         {
           page: 1,
           limit: 1000,
           modelType: "Plugin"
         },
-        ({ data }) => {
-          this.loading = false;
-          if (data.code !== 0) {
-            this.$message.error(data.msg || "获取插件列表失败");
-            return;
-          }
-
-          this.allPluginProviders = (data.data.list || []).map((item) => ({
-            ...item,
-            fieldsMeta: this.parseFields(item.fields)
-          }));
-          this.plugins = this.allPluginProviders
-            .filter((item) => item.modelType === "Plugin")
-            .sort((a, b) => Number(a.sort || 0) - Number(b.sort || 0));
-        }
+        handleResponse
       );
     },
     handleSearch() {
@@ -778,6 +752,9 @@ export default {
     }
   },
   computed: {
+    canManagePlugins() {
+      return Boolean(this.$store.state.userInfo && this.$store.state.userInfo.superAdmin);
+    },
     rules() {
       return {
         name: [{ required: true, message: "请输入玩法名称", trigger: "blur" }],
@@ -913,7 +890,9 @@ export default {
 }
 
 .main-wrapper {
-  height: calc(100vh - 63px - 35px - 72px);
+  flex: 1;
+  min-height: 0;
+  height: auto;
   margin: 0 22px;
   border-radius: 15px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
@@ -946,6 +925,12 @@ export default {
   width: 100%;
   border: none;
   border-radius: 0;
+}
+
+.plugin-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
 }
 
 .plugin-toolbar {
@@ -1022,6 +1007,12 @@ export default {
   display: block;
   line-height: 1.5;
   color: #3d4566;
+}
+
+@media (max-width: 1280px) {
+  .plugin-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .danger-action {

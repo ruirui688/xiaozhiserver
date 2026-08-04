@@ -835,3 +835,20 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 是否允许被官方覆盖：否
 官方同步时的处理规则：必须保留系统模板与工作空间模板的隔离、来源和目标智能体的 workspace 写权限校验、版本检查及事务应用。声纹必须以 `workspace_id` 固化资源归属，通过独立绑定表在同工作空间角色间复用，模板只保存 ID 引用且不得保存音频样本或生物特征；飞书 App Secret 与 Verification Token 必须从来源 agentId 作用域解密后立即以模板 ID 为 AAD 重新加密，应用时再重加密到目标 agentId，任何模板 API、日志或 Python 配置不得暴露明文或密文。设备绑定、聊天记录、长期记忆事实和上下文源认证请求头不得进入模板。模型、音色、插件、知识库、替换词和声纹引用应用前必须重新验证；失效模型保留目标当前值，失效关联跳过并向页面返回明确警告。模板应用完成后只按事务提交后的权威角色配置刷新页面和在线设备，不能由前端伪造最终配置。
 ```
+
+## 43. 资源中心人物档案与设备本地人脸识别
+
+```text
+定制模块：manager-web 资源中心、manager-api 人物档案与设备绑定、xiaozhi-server 人脸资源同步协议
+改动原因：运营人员需要在统一资源中心维护知识库、机器人可识别人物和插件；带本地算力的设备需要按授权接收归一化人脸照片，在本地识别后上报稳定人物 ID 并获取确定性动作，同时为未来服务端识别保留明确但默认关闭的能力接口。
+关键文件：
+  - main/manager-web/src/components/resource/ResourceCenterNav.vue
+  - main/manager-web/src/views/PersonProfileManagement.vue
+  - main/manager-web/src/views/FunctionPluginManagement.vue
+  - main/manager-api/src/main/java/xiaozhi/modules/person/
+  - main/manager-api/src/main/resources/db/changelog/202608041730.sql
+  - main/xiaozhi-server/core/device_face_profiles.py
+  - docs/architecture/person-resource-and-face-sync.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：必须保留人物档案与后台登录用户的概念隔离、workspace 所有权、显式人物-设备绑定、/config 服务密钥之后的 per-device 再鉴权和设备识别事件幂等。设备身份必须来自当前已认证 WebSocket，不得信任消息体 macAddress；旧设备只有声明 features.face_profiles 才能收到图片。照片上传必须继续校验扩展名/MIME/实际图片/大小/像素和路径边界，只保存归一化运行文件，不把照片、特征向量或事件样本带入角色模板。服务端识别 capability 默认必须返回不支持，预留 POST 不读取或保存图片；正式启用前必须单独完成模型、加密、留存、限流、评测与合规设计。插件继续使用 Function Plugin 唯一模型，知识库继续使用现有 dataset/document 链路，资源中心不能复制两套事实。
+```

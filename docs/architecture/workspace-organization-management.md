@@ -24,6 +24,7 @@ source_paths:
 - 工作空间成员共享业务资源，包括智能体、角色模板、设备、记忆、聊天历史、知识库、声纹、上下文源、替换词、智能体 MCP HTTP 工具等。
 - 设备仍只能绑定到一个用户/一条设备记录，但同一工作空间内的成员可共同查看和管理该工作空间内的设备。
 - 系统级资源不纳入工作空间隔离，例如模型配置、系统参数、OTA、全局音乐、管理员用户管理。
+- 资源中心人物档案、人脸照片下发绑定与设备识别事件属于工作空间资源；人物档案不是后台登录用户。
 
 ## 2. 数据模型
 
@@ -75,6 +76,9 @@ ai_memory_profile
 ai_memory_tool_behavior
 ai_memory_forget_tombstone
 ai_memory_revision
+ai_person_profile
+ai_person_device_binding
+ai_person_recognition_event
 ```
 
 迁移文件：
@@ -188,6 +192,16 @@ WHERE workspace_id = 当前工作空间
 2. 设备列表按当前 workspace_id 和 agent_id 查询
 3. 设备工具列表是读操作，调用 requireRead(device.workspace_id)
 4. 设备工具调用、解绑、调试、更新配置是写操作，调用 requireWrite(device.workspace_id)
+```
+
+人物人脸资源规则：
+
+```text
+1. 人物档案按 workspace_id 列表和授权
+2. 人脸图片只允许下发给 ai_person_device_binding 中显式绑定的同工作空间设备
+3. /config/** 使用服务密钥后仍必须从设备记录读取 workspace_id 并重新校验人物归属
+4. 识别事件的设备身份来自已认证连接，不能信任设备消息中的 macAddress
+5. 服务端识别未开放时不得读取、留存或转发用户提交的识别图片
 ```
 
 记忆、聊天历史、知识库和声纹等资源必须跟随所属智能体或知识库的工作空间，不允许只用当前用户 ID 过滤。

@@ -116,6 +116,17 @@ const routes = [
       title: '文档上传管理'
     }
   },
+  {
+    path: '/person-profile-management',
+    name: 'PersonProfileManagement',
+    component: function () {
+      return import(/* webpackChunkName: "view-person-profile-management" */ '../views/PersonProfileManagement.vue')
+    },
+    meta: {
+      requiresAuth: true,
+      title: '用户信息管理'
+    }
+  },
 
   {
     path: '/server-side-management',
@@ -283,7 +294,7 @@ VueRouter.prototype.push = function push(location) {
 }
 
 // 需要登录才能访问的路由
-const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'ModelConfig', 'KnowledgeBaseManagement', 'KnowledgeFileUpload', 'AddressBookManagement', 'FunctionPluginManagement', 'MusicManagement', 'MemoryManagement']
+const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'ModelConfig', 'KnowledgeBaseManagement', 'KnowledgeFileUpload', 'PersonProfileManagement', 'AddressBookManagement', 'FunctionPluginManagement', 'MusicManagement', 'MemoryManagement']
 
 // 路由守卫
 router.beforeEach((to, from, next) => {

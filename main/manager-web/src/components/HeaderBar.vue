@@ -74,14 +74,14 @@
           }" />
           <span class="nav-text">{{ $t("header.modelConfig") }}</span>
         </div>
-        <div v-if="featureStatus.knowledgeBase" class="equipment-management"
-          :class="{ 'active-tab': $route.path === '/knowledge-base-management' || $route.path === '/knowledge-file-upload' }"
-          @click="handleRouter('knowledgeBaseManagement')">
+        <div class="equipment-management"
+          :class="{ 'active-tab': resourceCenterActive }"
+          @click="handleRouter('resourceCenter')">
           <img loading="lazy" alt="" src="@/assets/header/knowledge_base.png" :style="{
             filter:
-              $route.path === '/knowledge-base-management' || $route.path === '/knowledge-file-upload' ? 'brightness(0) invert(1)' : 'None',
+              resourceCenterActive ? 'brightness(0) invert(1)' : 'None',
           }" />
-          <span class="nav-text">{{ $t("header.knowledgeBase") }}</span>
+          <span class="nav-text">资源中心</span>
         </div>
         <div v-if="featureStatus.addressBook" class="equipment-management"
           :class="{ 'active-tab': $route.path === '/address-book-management' }"
@@ -259,6 +259,7 @@ export default {
       routerPaths: {
         home: "/home",
         modelConfig: "/model-config",
+        resourceCenter: "/knowledge-base-management",
         knowledgeBaseManagement: "/knowledge-base-management",
         addressBookManagement: "/address-book-management",
         organizationManagement: "/organization-management",
@@ -289,6 +290,14 @@ export default {
     }),
     xiaozhiAiIcon() {
       return require("@/assets/xiaozhi-ai.png");
+    },
+    resourceCenterActive() {
+      return [
+        "/knowledge-base-management",
+        "/knowledge-file-upload",
+        "/person-profile-management",
+        "/function-plugin-management"
+      ].includes(this.$route.path);
     },
     // 用户菜单选项
     userMenuOptions() {

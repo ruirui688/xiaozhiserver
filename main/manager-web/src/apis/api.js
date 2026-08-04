@@ -15,6 +15,7 @@ import addressBook from './module/addressBook.js'
 import music from './module/music.js'
 import memory from './module/memory.js'
 import workspace from './module/workspace.js'
+import person from './module/person.js'
 
 
 
@@ -60,5 +61,6 @@ export default {
     addressBook,
     music,
     memory,
-    workspace
+    workspace,
+    person
   }

@@ -1,6 +1,7 @@
 <template>
   <div class="welcome">
     <HeaderBar />
+    <ResourceCenterNav />
 
     <div class="operation-bar">
       <div>
@@ -117,11 +118,12 @@
 <script>
 import Api from "@/apis/api";
 import HeaderBar from "@/components/HeaderBar.vue";
+import ResourceCenterNav from "@/components/resource/ResourceCenterNav.vue";
 import VersionFooter from "@/components/VersionFooter.vue";
 import KnowledgeBaseDialog from "@/components/KnowledgeBaseDialog.vue";
 
 export default {
-  components: { HeaderBar, VersionFooter, KnowledgeBaseDialog },
+  components: { HeaderBar, ResourceCenterNav, VersionFooter, KnowledgeBaseDialog },
   data() {
     return {
       searchName: "",
@@ -397,7 +399,9 @@ export default {
 }
 
 .main-wrapper {
-    height: calc(100vh - 63px - 35px - 72px);
+    flex: 1;
+    min-height: 0;
+    height: auto;
     margin: 0 22px;
     border-radius: 8px;
     position: relative;

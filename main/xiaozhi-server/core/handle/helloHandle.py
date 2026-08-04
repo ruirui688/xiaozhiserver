@@ -16,6 +16,7 @@ from core.handle.sendAudioHandle import sendAudioMessage, send_tts_message
 from core.utils.util import remove_punctuation_and_length, opus_datas_to_wav_bytes
 from core.providers.tools.device_mcp import MCPClient, send_mcp_initialize_message
 from core.handle.wakeupHandle import arm_wakeup_vad_ignore
+from core.device_face_profiles import schedule_face_profile_sync
 
 TAG = __name__
 
@@ -68,12 +69,13 @@ async def handleHelloMessage(conn: "ConnectionHandler", msg_json):
             conn.mcp_client = MCPClient()
             # 发送初始化
             asyncio.create_task(send_mcp_initialize_message(conn))
-
     conn.logger.bind(tag=TAG).info(
         f"发送hello消息，客户端输入音频参数: {conn.welcome_msg.get('audio_params')}, "
         f"服务端输出音频采样率: {conn.sample_rate}"
     )
     await conn.websocket.send(json.dumps(conn.welcome_msg))
+    if (conn.features or {}).get("face_profiles"):
+        schedule_face_profile_sync(conn)
 
 
 async def checkWakeupWords(conn: "ConnectionHandler", text):

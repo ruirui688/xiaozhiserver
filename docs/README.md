@@ -18,6 +18,7 @@ source_paths:
 | 本地启动与排障 | [本地开发](./development/local-dev-workflow.md) | 根目录 `scripts/dev doctor` |
 | 生产发布 | [ACR 生产部署](./deployment/private-docker-release.md) | [本地 Docker](./deployment/local-docker-deploy-guide.md) |
 | 实时语音、设备、OTA | [设备交互链路](./architecture/device-interaction-chain.md) | [设备多场景](./architecture/device-scene-management.md)、[固件与 OTA](./device/firmware-build.md) |
+| 人物资料与本地人脸识别 | [人物资源与设备人脸同步](./architecture/person-resource-and-face-sync.md) | [安全架构](./architecture/security-architecture.md)、[工作空间与组织](./architecture/workspace-organization-management.md) |
 | LLM、ASR、TTS 模型 | [模型管理](./models/model-management.md) | [模型评测与配置助手](./architecture/model-benchmark-and-assistant.md) |
 | 记忆 | [记忆系统](./architecture/memory-system-chain.md) | [PowerMem](./models/powermem-integration.md) |
 | 知识库与切片 | [知识库链路](./architecture/knowledge-base-chain.md) | [RAGFlow](./models/ragflow-integration.md) |
