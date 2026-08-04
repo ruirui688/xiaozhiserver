@@ -30,25 +30,20 @@ export default {
 
 <style lang="scss" scoped>
 .role-task-tabs {
-  position: sticky;
-  top: 74px;
-  z-index: 6;
   display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
   align-items: center;
   gap: 4px;
-  margin: 10px 0 0;
-  padding: 5px;
-  border: 1px solid #e8ebf5;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 4px 12px rgba(53, 66, 110, 0.06);
-  backdrop-filter: blur(8px);
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
 }
 
 .role-task-tabs button {
   display: inline-flex;
-  min-width: 112px;
-  height: 34px;
+  min-width: 104px;
+  height: 32px;
   align-items: center;
   justify-content: center;
   gap: 5px;
@@ -76,11 +71,6 @@ export default {
 }
 
 @media (max-width: 1250px) {
-  .role-task-tabs {
-    position: static;
-    overflow-x: auto;
-  }
-
   .role-task-tabs button {
     flex-shrink: 0;
   }

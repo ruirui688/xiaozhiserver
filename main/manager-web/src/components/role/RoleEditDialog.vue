@@ -1,15 +1,16 @@
 <template>
   <div class="role-edit-form">
-    <role-template-switcher
-      ref="templateSection"
-      :templates="templates"
-      :loading="loadingTemplate"
-      :workspace-can-write="workspaceCanWrite"
-      @select="selectTemplate"
-      @delete="deleteTemplate"
-    />
-
-    <role-config-task-tabs v-model="activePanel" />
+    <div class="role-control-bar">
+      <role-config-task-tabs v-model="activePanel" />
+      <role-template-switcher
+        ref="templateSection"
+        :templates="templates"
+        :loading="loadingTemplate"
+        :workspace-can-write="workspaceCanWrite"
+        @select="selectTemplate"
+        @delete="deleteTemplate"
+      />
+    </div>
 
     <el-form ref="form" :model="form" label-width="72px">
       <div class="form-content">
@@ -26,18 +27,11 @@
                 <p>{{ activePanelMeta.description }}</p>
               </div>
             </div>
-            <el-form-item v-show="activePanel === 'basic'">
-              <template #label>
-                <el-tooltip :content="$t('roleConfig.tooltip.agentName')" placement="top" effect="light" popper-class="custom-tooltip">
-                  <span>{{ $t('roleConfig.agentName') }}：</span>
-                </el-tooltip>
-              </template>
-              <el-input
-                v-model="form.agentName"
-                class="form-input"
-                maxlength="64"
-              />
-            </el-form-item>
+            <role-basic-settings-panel
+              v-show="activePanel === 'basic'"
+              :agent-name.sync="form.agentName"
+              :system-prompt.sync="form.systemPrompt"
+            />
             <div v-show="activePanel === 'integrations'" class="subsection-title">
               <i class="el-icon-link" />
               <span>资源与集成</span>
@@ -100,29 +94,6 @@
                 >管理飞书配置</el-button>
               </div>
             </el-form-item>
-            <div v-show="activePanel === 'basic'" class="subsection-title role-content-subsection">
-              <i class="el-icon-chat-line-square" />
-              <span>角色内容</span>
-              <small>决定角色身份、表达方式和回复边界</small>
-            </div>
-            <el-form-item v-show="activePanel === 'basic'">
-              <template #label>
-                <el-tooltip :content="$t('roleConfig.tooltip.roleIntroduction')" placement="top" effect="light" popper-class="custom-tooltip">
-                  <span>{{ $t('roleConfig.roleIntroduction') }}：</span>
-                </el-tooltip>
-              </template>
-              <el-input
-                type="textarea"
-                rows="8"
-                resize="none"
-                :placeholder="$t('roleConfig.pleaseEnterContent')"
-                v-model="form.systemPrompt"
-                maxlength="2000"
-                show-word-limit
-                class="form-textarea"
-              />
-            </el-form-item>
-
             <el-form-item
               style="display: none"
             >
@@ -574,6 +545,7 @@ import TtsAdvancedSettings from "@/components/TtsAdvancedSettings.vue";
 import FeishuIntegrationDialog from "@/components/role/FeishuIntegrationDialog.vue";
 import AgentSkillDialog from "@/components/role/AgentSkillDialog.vue";
 import AsrHotwordField from "@/components/role/AsrHotwordField.vue";
+import RoleBasicSettingsPanel from "@/components/role/RoleBasicSettingsPanel.vue";
 import RoleTemplateSwitcher from "@/components/role/RoleTemplateSwitcher.vue";
 import RoleConfigTaskTabs from "@/components/role/RoleConfigTaskTabs.vue";
 import RealtimeModelNotice from "@/components/model/RealtimeModelNotice.vue";
@@ -602,6 +574,7 @@ export default {
     FeishuIntegrationDialog,
     AgentSkillDialog,
     AsrHotwordField,
+    RoleBasicSettingsPanel,
     RoleTemplateSwitcher,
     RoleConfigTaskTabs,
     RealtimeModelNotice,
@@ -1284,7 +1257,25 @@ export default {
 }
 
 .form-content {
-  padding: 14px 0 30px;
+  padding: 10px 0 30px;
+}
+
+.role-control-bar {
+  position: sticky;
+  top: 74px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  margin: 0;
+  padding: 5px 8px;
+  border: 1px solid #e8ebf5;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 4px 12px rgba(53, 66, 110, 0.06);
+  backdrop-filter: blur(8px);
+  box-sizing: border-box;
 }
 
 .form-grid {
@@ -1417,12 +1408,6 @@ export default {
   border: 1px solid #e8ebf3;
   border-radius: 9px;
   background: #fafbfe;
-}
-
-.role-content-subsection {
-  margin-top: 5px;
-  padding-top: 12px;
-  border-top: 1px solid #edf0f6;
 }
 
 .form-select {
@@ -1602,6 +1587,13 @@ export default {
 .knowledge-chip ::v-deep .el-tag__close:hover {
   color: #fff;
   background: #9aa0ad;
+}
+
+@media (max-width: 1250px) {
+  .role-control-bar {
+    position: static;
+    flex-wrap: wrap;
+  }
 }
 
 ::v-deep .el-form-item__label {

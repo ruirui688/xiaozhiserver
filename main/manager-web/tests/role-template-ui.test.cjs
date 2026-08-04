@@ -22,6 +22,10 @@ const presentationSource = fs.readFileSync(
   path.join(root, 'src/utils/roleConfigPresentation.js'),
   'utf8'
 );
+const basicSettingsSource = fs.readFileSync(
+  path.join(root, 'src/components/role/RoleBasicSettingsPanel.vue'),
+  'utf8'
+);
 
 test('workspace role template UI', async (t) => {
   await t.test('write APIs use dedicated endpoints and do not retry uncertain mutations', () => {
@@ -67,9 +71,15 @@ test('workspace role template UI', async (t) => {
   });
 
   await t.test('role editor explains template impact and groups long settings', () => {
-    assert.match(switcherSource, /一次切换模型、音色、热词、知识库、声纹和飞书配置/);
-    assert.doesNotMatch(switcherSource, /template-list|template-card/);
+    assert.match(switcherSource, /aria-label="角色模板切换"/);
+    assert.doesNotMatch(switcherSource, /template-list|template-card|template-copy|一次切换模型/);
+    assert.match(dialogSource, /class="role-control-bar"/);
     assert.match(dialogSource, /<role-config-task-tabs v-model="activePanel"/);
+    assert.match(dialogSource, /<role-basic-settings-panel/);
+    assert.match(basicSettingsSource, /class="basic-config-grid"/);
+    assert.match(basicSettingsSource, /grid-template-columns: minmax\(190px, 260px\) minmax\(0, 1fr\)/);
+    assert.match(basicSettingsSource, /:rows="12"/);
+    assert.match(basicSettingsSource, /resize="vertical"/);
     assert.match(tabsSource, /aria-label="角色配置任务导航"/);
     assert.match(tabsSource, /ROLE_CONFIG_PANELS/);
     assert.match(presentationSource, /基础设定/);

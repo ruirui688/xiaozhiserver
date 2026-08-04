@@ -1,22 +1,18 @@
 <template>
-  <section class="template-switcher" aria-labelledby="role-template-title">
-    <div class="template-copy">
-      <span class="template-icon"><i class="el-icon-s-operation" /></span>
-      <div>
-        <div class="template-title-row">
-          <h3 id="role-template-title">角色模板</h3>
-          <span class="template-count">{{ templates.length }}</span>
-        </div>
-        <p>一次切换模型、音色、热词、知识库、声纹和飞书配置</p>
-      </div>
+  <section class="template-switcher" aria-label="角色模板切换">
+    <div class="template-label">
+      <i class="el-icon-s-operation" />
+      <span>模板</span>
+      <span class="template-count">{{ templates.length }}</span>
     </div>
 
     <div v-if="templates.length" class="template-actions">
       <el-select
         v-model="selectedTemplateId"
         filterable
+        size="small"
         class="template-select"
-        placeholder="选择要应用的角色模板"
+        placeholder="选择角色模板"
         aria-label="选择角色模板"
       >
         <el-option
@@ -39,13 +35,14 @@
       </el-select>
       <el-button
         type="primary"
+        size="small"
         icon="el-icon-refresh"
         :loading="loading"
         :disabled="!selectedTemplate || !workspaceCanWrite"
         class="template-apply"
         @click="applySelected"
       >
-        应用模板
+        应用
       </el-button>
       <el-button
         v-if="selectedTemplate && selectedTemplate.deletable"
@@ -54,9 +51,7 @@
         class="template-delete"
         aria-label="删除选中的角色模板"
         @click="$emit('delete', selectedTemplate)"
-      >
-        删除
-      </el-button>
+      />
       <span v-if="!workspaceCanWrite" class="template-readonly">当前工作空间只读</span>
     </div>
 
@@ -110,59 +105,36 @@ export default {
 <style lang="scss" scoped>
 .template-switcher {
   display: flex;
-  min-height: 68px;
+  flex: 0 1 500px;
+  min-width: 390px;
+  height: 34px;
   align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 11px 14px;
-  border: 1px solid #e4e9f4;
-  border-radius: 11px;
-  background: #f8faff;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-left: auto;
+  padding-left: 12px;
+  border-left: 1px solid #e8ebf5;
   box-sizing: border-box;
 }
 
-.template-copy,
-.template-title-row,
+.template-label,
 .template-actions,
 .template-option {
   display: flex;
   align-items: center;
 }
 
-.template-copy {
-  min-width: 260px;
-  gap: 10px;
+.template-label {
+  flex-shrink: 0;
+  gap: 5px;
+  color: #5f6881;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
-.template-title-row {
-  gap: 7px;
-}
-
-.template-title-row h3 {
-  margin: 0;
-  color: #27324b;
-  font-size: 14px;
-  line-height: 20px;
-}
-
-.template-copy p {
-  margin: 2px 0 0;
-  color: #7b849d;
-  font-size: 11px;
-  line-height: 16px;
-}
-
-.template-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 30px;
-  width: 30px;
-  height: 30px;
-  border-radius: 7px;
-  background: #5778ff;
-  color: #fff;
-  font-size: 13px;
+.template-label i {
+  color: #6d89ff;
 }
 
 .template-count {
@@ -176,18 +148,21 @@ export default {
 }
 
 .template-actions {
-  flex: 1;
+  flex: 0 1 auto;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 
 .template-select {
-  width: min(360px, 42vw);
+  width: min(260px, 24vw);
 }
 
 .template-apply {
   flex-shrink: 0;
+  height: 30px;
+  padding: 7px 11px;
+  border-radius: 7px;
 }
 
 .template-option {
@@ -230,7 +205,10 @@ export default {
 }
 
 .template-delete {
+  width: 28px;
+  height: 28px;
   margin: 0;
+  padding: 0;
   color: #9aa2b3;
 }
 
@@ -240,9 +218,12 @@ export default {
 }
 
 .template-empty {
+  overflow: hidden;
   color: #929bad;
-  font-size: 12px;
+  font-size: 11px;
   text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .template-readonly {
@@ -253,9 +234,15 @@ export default {
 
 @media (max-width: 1100px) {
   .template-switcher {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 8px;
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+    height: 39px;
+    justify-content: flex-start;
+    margin-left: 0;
+    padding: 5px 0 0;
+    border-top: 1px solid #edf0f6;
+    border-left: 0;
   }
 
   .template-actions {
