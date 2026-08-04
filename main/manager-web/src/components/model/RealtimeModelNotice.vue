@@ -2,12 +2,12 @@
   <el-alert
     v-if="realtime"
     class="realtime-model-notice"
-    type="warning"
+    :type="adapterMismatch ? 'error' : 'warning'"
     :closable="false"
     show-icon
   >
     <template slot="title">
-      <strong>{{ $t("realtimeModel.title") }}</strong>
+      <strong>{{ $t(adapterMismatch ? "realtimeModel.mismatchTitle" : "realtimeModel.title") }}</strong>
       <el-tag size="mini" type="warning">{{ $t("realtimeModel.badge") }}</el-tag>
     </template>
     <div class="realtime-model-notice__body">
@@ -21,7 +21,11 @@
 </template>
 
 <script>
-import { isDoubaoRealtimeModel, isRealtimeModel } from "@/utils/realtimeModel";
+import {
+  hasRealtimeAdapterMismatch,
+  isDoubaoRealtimeModel,
+  isRealtimeModel,
+} from "@/utils/realtimeModel";
 
 export default {
   name: "RealtimeModelNotice",
@@ -40,7 +44,13 @@ export default {
     realtime() {
       return isRealtimeModel(this.model);
     },
+    adapterMismatch() {
+      return hasRealtimeAdapterMismatch(this.model);
+    },
     message() {
+      if (this.adapterMismatch) {
+        return this.$t("realtimeModel.mismatchDescription");
+      }
       if (isDoubaoRealtimeModel(this.model)) {
         return this.context === "agent"
           ? this.$t("realtimeModel.doubaoAgentDescription")

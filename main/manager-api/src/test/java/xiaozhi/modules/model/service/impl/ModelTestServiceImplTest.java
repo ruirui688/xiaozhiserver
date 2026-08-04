@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -252,6 +253,29 @@ class ModelTestServiceImplTest {
     }
 
     @Test
+    void realtimeConversationWithOpenAiAdapterIsRejectedBeforeHttpRequest() {
+        ModelConfigEntity model = new ModelConfigEntity();
+        model.setId("LLM_QwenOmniRealtime");
+        model.setModelType("LLM");
+        model.setTemplateCode("LLM_ALI_QWEN_OPENAI");
+        model.setConfigJson(new JSONObject()
+                .set("type", "openai")
+                .set("api_key", "credential-must-not-leave")
+                .set("base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+                .set("model_name", "qwen3.5-omni-flash-realtime")
+                .set("conversation_mode", "realtime"));
+
+        ModelTestResultDTO result = service.testModel(model);
+
+        assertFalse(result.getSuccess());
+        assertFalse(result.getVerified());
+        assertEquals("REAL_INFERENCE", result.getTestLevel());
+        assertTrue(result.getMessage().contains("Realtime 配置不一致"));
+        assertFalse(result.getTestInput().contains("credential-must-not-leave"));
+        verifyNoInteractions(restTemplate);
+    }
+
+    @Test
     void qwenOmniRealtimeDoesNotTreatHandshakeOnlySampleAsPassed() {
         JSONObject response = new JSONObject().set("results", List.of(
                 new JSONObject().set("samples", List.of(
@@ -338,6 +362,8 @@ class ModelTestServiceImplTest {
         ModelConfigEntity model = new ModelConfigEntity();
         model.setId("LLM_QwenOmniRealtime");
         model.setModelType("LLM");
+        model.setAdapterCode("qwen_omni_realtime");
+        model.setTemplateCode("LLM_ALI_QWEN_OMNI_REALTIME");
         model.setConfigJson(new JSONObject()
                 .set("type", "qwen_omni_realtime")
                 .set("api_key", "sk-test")

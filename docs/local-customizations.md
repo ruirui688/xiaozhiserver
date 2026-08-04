@@ -791,14 +791,16 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/xiaozhi-server/core/benchmark/runner.py
   - main/xiaozhi-server/core/api/vision_handler.py
   - main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelCatalogServiceImpl.java
+  - main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/RealtimeModelConfigGuard.java
   - main/manager-api/src/main/resources/db/changelog/
+  - main/manager-web/src/components/ModelEditDialog.vue
   - main/manager-web/src/components/model/RealtimeModelNotice.vue
   - main/manager-web/src/components/role/RoleEditDialog.vue
   - docs/architecture/project-architecture.md
   - docs/architecture/runtime-flows.md
   - docs/models/model-management.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：必须保留 selected_module.LLM + model_config.<id>.typed_config 的单一选择契约；conversation_mode=realtime 使用独立 Realtime adapter，缺省继续走传统拼接。实时模式接管当前会话音频；图片和工具协议仅由声明支持的 adapter 启用，工具仍执行统一服务端门控；传统 VAD/ASR/TTS/VLLM 配置保留供手动切回。实时建连、响应、图片或工具失败不得静默切换为传统半轮；端点必须使用受支持的 wss 官方主机并防止 API Key 外发。Realtime 可以注入建立会话时的静态摘要并上报事件，但不等同于传统逐轮动态记忆查询，也不能隐式承担知识库切片、Judge、短期总结或主动记忆维护的同步文本 LLM。单模型测试必须建立真实 Realtime 会话并记录首文本/首音频/总耗时；自动测试必须按 adapter 覆盖路由、音频转换、能力拒绝、Abort、关闭和模式切换。
+官方同步时的处理规则：必须保留 selected_module.LLM + model_config.<id>.typed_config 的单一选择契约；conversation_mode=realtime 使用独立 Realtime adapter，缺省继续走传统拼接。编辑已有模型时，明确模板必须优先于厂商名/模型名推断；模板、adapter、conversation_mode、请求路径 provider 和端点协议必须在前端提示并由 manager-api 保存/测试入口强制校验，禁止再形成 `realtime + openai + HTTP Chat Completions` 的矛盾配置，且必须在外部请求前拒绝以防 API Key 外发。补偿迁移只修复 Realtime 元数据、普通参数和测试状态，保留密钥表中的 api_key 原文且不回显。实时模式接管当前会话音频；图片和工具协议仅由声明支持的 adapter 启用，工具仍执行统一服务端门控；传统 VAD/ASR/TTS/VLLM 配置保留供手动切回。实时建连、响应、图片或工具失败不得静默切换为传统半轮；端点必须使用受支持的 wss 官方主机并防止 API Key 外发。Realtime 可以注入建立会话时的静态摘要并上报事件，但不等同于传统逐轮动态记忆查询，也不能隐式承担知识库切片、Judge、短期总结或主动记忆维护的同步文本 LLM。单模型测试必须建立真实 Realtime 会话并记录首文本/首音频/总耗时；自动测试必须按 adapter 覆盖路由、音频转换、能力拒绝、Abort、关闭和模式切换。
 ```
 
 ## 41. 设备多场景与按设备在线切换

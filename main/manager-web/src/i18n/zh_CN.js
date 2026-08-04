@@ -1180,6 +1180,8 @@ export default {
   'modelConfig.performanceTestFinished': '模型性能测试已完成',
   'modelConfig.performanceTestFailed': '模型性能测试失败',
   'realtimeModel.title': '当前为端到端实时会话模式',
+  'realtimeModel.mismatchTitle': 'Realtime 配置不一致，禁止测试和启用',
+  'realtimeModel.mismatchDescription': '当前 conversation_mode、模型模板与 adapter 不匹配。Realtime 不能使用 openai/Chat Completions adapter；请重新选择 Qwen Omni Realtime 或豆包端到端实时语音模板后保存。',
   'realtimeModel.badge': '实时多模态',
   'realtimeModel.agentDescription': '该主模型会直接接收设备音频，并统一处理输入转写和回复音频；图片与工具能力取决于所选 Realtime adapter。当前智能体选择的 VAD、ASR、TTS 不参与这条实时会话主链路。',
   'realtimeModel.doubaoAgentDescription': '豆包端到端实时语音会直接接收设备音频，并统一处理 ASR、回复生成和语音输出；当前不支持图片输入，也不向上游暴露项目本地 Function Calling 工具。智能体选择的 VAD、ASR、TTS 与独立 VLLM 不参与这条主链路。',

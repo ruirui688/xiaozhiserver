@@ -14,6 +14,16 @@ describe("realtime multimodal model UI", () => {
     assert.equal(realtime.isDoubaoRealtimeModel({ adapterCode: "doubao-realtime" }), true);
     assert.equal(realtime.isRealtimeModel({ templateCode: "LLM_ALI_QWEN_OMNI_REALTIME" }), true);
     assert.equal(realtime.isRealtimeModel({ adapterCode: "openai", params: { conversation_mode: "pipeline" } }), false);
+    assert.equal(realtime.hasRealtimeAdapterMismatch({
+      adapterCode: "openai",
+      templateCode: "LLM_ALI_QWEN_OPENAI",
+      params: { conversation_mode: "realtime" },
+    }), true);
+    assert.equal(realtime.hasRealtimeAdapterMismatch({
+      adapterCode: "qwen_omni_realtime",
+      templateCode: "LLM_ALI_QWEN_OMNI_REALTIME",
+      params: { conversation_mode: "realtime" },
+    }), false);
     assert.equal(realtime.getConversationModeBadge({ adapterCode: "openai" }), "传统拼接");
   });
 
@@ -75,7 +85,44 @@ describe("realtime multimodal model UI", () => {
     assert.equal(doubaoVm.realtime, true);
     assert.equal(doubaoVm.message, "realtimeModel.doubaoAgentDescription");
     doubaoVm.$destroy();
+
+    const mismatchVm = new Ctor({
+      propsData: {
+        model: { adapterCode: "openai", params: { conversation_mode: "realtime" } },
+        context: "test",
+      },
+    });
+    assert.equal(mismatchVm.realtime, true);
+    assert.equal(mismatchVm.adapterMismatch, true);
+    assert.equal(mismatchVm.message, "realtimeModel.mismatchDescription");
+    mismatchVm.$destroy();
     delete Vue.prototype.$t;
+  });
+
+  test("edit dialog preserves an explicit realtime template before generic Qwen inference", () => {
+    const component = loadVueComponent("src/components/ModelEditDialog.vue", {
+      "@/apis/api": { __esModule: true, default: {} },
+    });
+    const templates = [
+      { templateCode: "LLM_ALI_QWEN_OPENAI", providerCode: "openai" },
+      { templateCode: "LLM_ALI_QWEN_OMNI_REALTIME", providerCode: "qwen_omni_realtime" },
+    ];
+    const context = {
+      allProvidersData: templates,
+      findTemplate(code) {
+        return templates.find((item) => item.templateCode === code);
+      },
+      isAliBailianQwenModel: component.methods.isAliBailianQwenModel,
+    };
+
+    assert.equal(
+      component.methods.resolveTemplateCode.call(
+        context,
+        "LLM_ALI_QWEN_OMNI_REALTIME",
+        { modelName: "Qwen3.5 Omni Flash Realtime" }
+      ),
+      "LLM_ALI_QWEN_OMNI_REALTIME"
+    );
   });
 
   test("model test details expose realtime first-text and first-audio metrics", () => {

@@ -302,6 +302,8 @@ PUT  /models/{modelType}/{adapterCode}/{id}
 4. 编辑保存会重置 `test_status=0`、`test_message=null`、`test_time=null`、`is_enabled=0`。
 5. 标准保存后 `config_json=null`，避免继续维护旧 JSON 配置。
 6. 保存后 `ConfigServiceImpl` 会刷新运行时配置缓存，使 `xiaozhi-server` 后续拉取到新配置。
+7. 编辑已有配置时，数据库中明确存在的 `templateCode` 优先于厂商名、产品名或模型名推断；名称推断只兼容没有模板标识的旧配置，不能把 Realtime 模板改成普通 OpenAI Compatible 模板。
+8. Realtime 配置保存前必须同时校验 `templateCode`、`adapterCode/type`、`conversation_mode`、请求路径 provider 和 WebSocket 端点；任一字段不一致都拒绝保存。
 
 后端保存时还会兼容旧字段：
 
@@ -433,6 +435,8 @@ model_config:
 - 只做字段校验、鉴权握手、HTTP 200 或 WebSocket close 1000，不能等同测试通过。
 - Realtime LLM 必须真实建立 Realtime WebSocket，会话配置成功后发起真实响应，记录连接耗时、首文本、首音频和总耗时；只有握手或普通 Chat Completions 成功不能启用。
 - Realtime 测试必须验证取消/超时/错误可以结束当前会话且不泄漏连接；没有真实 API Key 时明确未通过，不能生成伪造结果。
+- 单模型测试会在任何外部请求之前重复执行 Realtime 一致性守卫；例如 `conversation_mode=realtime + adapter=openai` 会直接失败，API Key 不会被发送到 HTTP Chat Completions 地址。
+- 历史错误保存记录通过后续 Liquibase 补偿迁移修复模板、adapter、协议和普通参数，并重置为禁用/未测试。无法安全推断的 HTTP 端点会被清空，管理员需重新填写官方 `wss://` 地址；迁移保留密钥表中已有 `api_key` 原文，不在 SQL、日志或前端回显。
 
 ## 7. 配置名称、编码、领域和协议怎么理解
 

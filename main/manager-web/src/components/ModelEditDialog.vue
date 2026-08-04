@@ -139,11 +139,11 @@
         @click="handleSaveAndTest"
         class="test-btn"
         :loading="testing"
-        :disabled="saving || testing || selectedTemplateBlocked"
+        :disabled="saving || testing || selectedTemplateBlocked || realtimeAdapterMismatch"
       >
         {{ $t("modelConfigDialog.saveAndTest") }}
       </el-button>
-      <el-button type="primary" @click="handleSave" class="save-btn" :loading="saving" :disabled="saving || testing || selectedTemplateBlocked">
+      <el-button type="primary" @click="handleSave" class="save-btn" :loading="saving" :disabled="saving || testing || selectedTemplateBlocked || realtimeAdapterMismatch">
         {{ $t("modelConfigDialog.save") }}
       </el-button>
     </div>
@@ -154,6 +154,7 @@
 import Api from "@/apis/api";
 import ModelConfigForm from "@/components/model/ModelConfigForm.vue";
 import RealtimeModelNotice from "@/components/model/RealtimeModelNotice.vue";
+import { hasRealtimeAdapterMismatch } from "@/utils/realtimeModel";
 
 export default {
   name: "ModelEditDialog",
@@ -243,6 +244,9 @@ export default {
     },
     selectedTemplateBlocked() {
       return this.isBlockedTemplateStatus(this.currentTemplate);
+    },
+    realtimeAdapterMismatch() {
+      return hasRealtimeAdapterMismatch(this.realtimeNoticeModel);
     },
     modelNameOptions() {
       const field = this.getModelNameTemplateField(this.currentTemplate);
@@ -382,6 +386,10 @@ export default {
       }
     },
     handleSave() {
+      if (this.realtimeAdapterMismatch) {
+        this.$message.error(this.$t("realtimeModel.mismatchDescription"));
+        return;
+      }
       if (this.selectedTemplateBlocked) {
         this.$message.warning(this.$t("modelConfigDialog.catalogNotSelectable"));
         return;
@@ -404,6 +412,10 @@ export default {
       }, 3000);
     },
     handleSaveAndTest() {
+      if (this.realtimeAdapterMismatch) {
+        this.$message.error(this.$t("realtimeModel.mismatchDescription"));
+        return;
+      }
       if (this.selectedTemplateBlocked) {
         this.$message.warning(this.$t("modelConfigDialog.catalogNotSelectable"));
         return;
@@ -508,14 +520,14 @@ export default {
       return (this.allProvidersData || []).find((item) => item.templateCode === templateCode);
     },
     resolveTemplateCode(templateCode, model = {}) {
+      if (templateCode && this.findTemplate(templateCode)) {
+        return templateCode;
+      }
       if (this.isAliBailianQwenModel(model)) {
         const template = this.findTemplate("LLM_ALI_QWEN_OPENAI");
         if (template) {
           return template.templateCode;
         }
-      }
-      if (templateCode && this.findTemplate(templateCode)) {
-        return templateCode;
       }
       return templateCode;
     },

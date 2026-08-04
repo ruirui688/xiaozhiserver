@@ -113,6 +113,23 @@ public class ModelTestServiceImpl implements ModelTestService {
         String modelType = StringUtils.defaultString(modelConfig.getModelType()).toUpperCase();
         try {
             String testLevel = getModelTestLevel(modelConfig);
+            String realtimeContractError = RealtimeModelConfigGuard.validationError(
+                    modelType,
+                    modelConfig.getTemplateCode(),
+                    type,
+                    configJson.getStr("conversation_mode"),
+                    firstNonBlank(configJson, "base_url", "ws_url", "endpoint_url"));
+            if (StringUtils.isNotBlank(realtimeContractError)) {
+                result.setSuccess(false);
+                result.setMessage(realtimeContractError);
+                result.setTestInput("模型类型：" + modelType
+                        + "\n供应器类型：" + type
+                        + "\n模板：" + StringUtils.defaultIfBlank(modelConfig.getTemplateCode(), "未配置")
+                        + "\n会话模式：" + StringUtils.defaultIfBlank(
+                                configJson.getStr("conversation_mode"), "未配置"));
+                result.setTestOutput(realtimeContractError);
+                return applyModelTestSemantics(result, testLevel);
+            }
             ModelTestExecutor executor = findModelTestExecutor(modelType, type);
             if (executor != null) {
                 result = executor.test(configJson, type);

@@ -5,6 +5,11 @@ const REALTIME_ADAPTERS = new Set([
   "doubao-realtime",
 ]);
 
+const REALTIME_TEMPLATE_ADAPTERS = new Map([
+  ["llm_ali_qwen_omni_realtime", "qwen_omni_realtime"],
+  ["llm_doubao_realtime", "doubao_realtime"],
+]);
+
 function normalize(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -36,7 +41,7 @@ export function getConversationMode(model = {}) {
   return "";
 }
 
-export function getRealtimeAdapter(model = {}) {
+export function getModelAdapter(model = {}) {
   for (const source of modelSources(model)) {
     const adapter = normalize(
       source.adapterCode
@@ -44,7 +49,22 @@ export function getRealtimeAdapter(model = {}) {
       || source.adapter_code
       || source.type
     );
-    if (REALTIME_ADAPTERS.has(adapter)) return adapter;
+    if (adapter) return adapter;
+  }
+  return "";
+}
+
+export function getRealtimeAdapter(model = {}) {
+  const adapter = getModelAdapter(model);
+  return REALTIME_ADAPTERS.has(adapter) ? adapter : "";
+}
+
+export function getRealtimeTemplateAdapter(model = {}) {
+  for (const source of modelSources(model)) {
+    const templateCode = normalize(source.templateCode || source.template_code);
+    if (REALTIME_TEMPLATE_ADAPTERS.has(templateCode)) {
+      return REALTIME_TEMPLATE_ADAPTERS.get(templateCode);
+    }
   }
   return "";
 }
@@ -62,6 +82,19 @@ export function isRealtimeModel(model = {}) {
 
 export function isDoubaoRealtimeModel(model = {}) {
   return getRealtimeAdapter(model).startsWith("doubao");
+}
+
+export function hasRealtimeAdapterMismatch(model = {}) {
+  const mode = getConversationMode(model);
+  const adapter = getModelAdapter(model);
+  const expectedAdapter = getRealtimeTemplateAdapter(model);
+  if (expectedAdapter) {
+    return (!!adapter && adapter !== expectedAdapter) || (!!mode && mode !== "realtime");
+  }
+  if (mode === "realtime") {
+    return !!adapter && !REALTIME_ADAPTERS.has(adapter);
+  }
+  return REALTIME_ADAPTERS.has(adapter) && !!mode && mode !== "realtime";
 }
 
 export function getConversationModeBadge(model = {}) {

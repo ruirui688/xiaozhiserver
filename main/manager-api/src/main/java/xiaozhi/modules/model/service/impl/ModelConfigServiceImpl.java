@@ -160,6 +160,15 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
 
         JSONObject runtimeConfig = buildStandardRuntimeConfig(modelConfigBodyDTO, provideCode);
 
+        RealtimeModelConfigGuard.validateForSave(
+                modelType,
+                provideCode,
+                firstNonBlank(modelConfigBodyDTO.getTemplateCode(), originalEntity.getTemplateCode()),
+                firstNonBlank(modelConfigBodyDTO.getAdapterCode(), modelConfigBodyDTO.getProviderCode(),
+                        originalEntity.getAdapterCode()),
+                runtimeConfig,
+                originalEntity.getEndpointUrl());
+
         // 4. 验证LLM配置
         validateLlmConfiguration(runtimeConfig);
 
@@ -186,6 +195,14 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
 
         ModelConfigEntity modelConfigEntity = prepareAddEntity(modelConfigBodyDTO, modelType);
         JSONObject runtimeConfig = buildStandardRuntimeConfig(modelConfigBodyDTO, provideCode);
+
+        RealtimeModelConfigGuard.validateForSave(
+                modelType,
+                provideCode,
+                modelConfigBodyDTO.getTemplateCode(),
+                firstNonBlank(modelConfigBodyDTO.getAdapterCode(), modelConfigBodyDTO.getProviderCode()),
+                runtimeConfig,
+                modelConfigBodyDTO.getEndpointUrl());
 
         modelConfigDao.insert(modelConfigEntity);
         modelRuntimeAssembler.saveRuntimeConfig(modelConfigEntity, runtimeConfig);
