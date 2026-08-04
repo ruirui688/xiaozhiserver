@@ -1,78 +1,99 @@
 <template>
   <section class="hotword-panel">
     <div class="hotword-panel__header">
-      <div>
-        <div class="hotword-panel__title">{{ $t('roleConfig.asrHotword') }}</div>
-        <div class="hotword-panel__subtitle">{{ $t('roleConfig.asrHotwordSubtitle') }}</div>
-      </div>
-      <a
-        href="https://console.volcengine.com/speech/new/hot-word?projectName=default"
-        target="_blank"
-        rel="noopener noreferrer"
-        class="hotword-panel__console-link"
-      >
-        <span>{{ $t('roleConfig.asrHotwordConsole') }}</span>
-        <i class="el-icon-top-right"></i>
-      </a>
-    </div>
-
-    <div class="hotword-list">
-      <div
-        v-for="(id, index) in rows"
-        :key="`hotword-${index}`"
-        class="hotword-row"
-      >
-        <div class="hotword-row__input">
-          <el-input
-            :value="id"
-            clearable
-            maxlength="128"
-            :placeholder="$t('roleConfig.asrHotwordPlaceholder')"
-            @input="updateId(index, $event)"
-            @blur="normalizeRows"
-          />
-          <div v-if="id && !isValidId(id)" class="hotword-row__error">
-            {{ $t('roleConfig.asrHotwordInvalid') }}
+      <div class="hotword-panel__heading">
+        <span class="hotword-panel__icon"><i class="el-icon-s-order" /></span>
+        <div>
+          <div class="hotword-panel__title">{{ $t('roleConfig.asrHotword') }}</div>
+          <div class="hotword-panel__subtitle">
+            {{ configuredCount ? `已保存 ${configuredCount} 个候选，当前生效：${activeId || '未选择'}` : '未配置火山热词表' }}
           </div>
         </div>
-        <el-button
-          size="mini"
-          :type="isActive(id) ? 'primary' : 'text'"
-          :plain="isActive(id)"
-          :disabled="!isValidId(id)"
-          class="hotword-row__active"
-          @click="selectActive(index)"
-        >
-          {{ isActive(id)
-            ? $t('roleConfig.asrHotwordActive')
-            : $t('roleConfig.asrHotwordSetActive') }}
-        </el-button>
-        <el-button
-          type="text"
-          icon="el-icon-delete"
-          class="hotword-row__remove"
-          :aria-label="$t('roleConfig.asrHotwordRemove')"
-          @click="removeId(index)"
-        />
       </div>
-    </div>
-
-    <div class="hotword-panel__footer">
       <el-button
         type="text"
-        icon="el-icon-plus"
-        :disabled="rows.length >= maxItems"
-        @click="addId"
+        :icon="expanded ? 'el-icon-arrow-up' : 'el-icon-setting'"
+        class="hotword-panel__manage"
+        @click="expanded = !expanded"
       >
-        {{ $t('roleConfig.asrHotwordAdd') }}
+        {{ expanded ? '收起' : '管理热词' }}
       </el-button>
-      <span>{{ $t('roleConfig.asrHotwordCount', { count: configuredCount, max: maxItems }) }}</span>
     </div>
 
-    <div class="hotword-panel__notice">
-      <i class="el-icon-info"></i>
-      <span>{{ $t('roleConfig.asrHotwordNotice') }}</span>
-    </div>
+    <el-collapse-transition>
+      <div v-show="expanded" class="hotword-panel__body">
+        <div class="hotword-panel__body-head">
+          <span>火山控制台创建词表后，将词表 ID 填写到这里。</span>
+          <a
+            href="https://console.volcengine.com/speech/new/hot-word?projectName=default"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="hotword-panel__console-link"
+          >
+            <span>{{ $t('roleConfig.asrHotwordConsole') }}</span>
+            <i class="el-icon-top-right"></i>
+          </a>
+        </div>
+
+        <div class="hotword-list">
+          <div
+            v-for="(id, index) in rows"
+            :key="`hotword-${index}`"
+            class="hotword-row"
+          >
+            <div class="hotword-row__input">
+              <el-input
+                :value="id"
+                clearable
+                maxlength="128"
+                :placeholder="$t('roleConfig.asrHotwordPlaceholder')"
+                @input="updateId(index, $event)"
+                @blur="normalizeRows"
+              />
+              <div v-if="id && !isValidId(id)" class="hotword-row__error">
+                {{ $t('roleConfig.asrHotwordInvalid') }}
+              </div>
+            </div>
+            <el-button
+              size="mini"
+              :type="isActive(id) ? 'primary' : 'default'"
+              :plain="isActive(id)"
+              :disabled="!isValidId(id)"
+              class="hotword-row__active"
+              @click="selectActive(index)"
+            >
+              {{ isActive(id)
+                ? $t('roleConfig.asrHotwordActive')
+                : $t('roleConfig.asrHotwordSetActive') }}
+            </el-button>
+            <el-button
+              type="text"
+              icon="el-icon-delete"
+              class="hotword-row__remove"
+              :aria-label="$t('roleConfig.asrHotwordRemove')"
+              @click="removeId(index)"
+            />
+          </div>
+        </div>
+
+        <div class="hotword-panel__footer">
+          <el-button
+            type="text"
+            icon="el-icon-plus"
+            :disabled="rows.length >= maxItems"
+            @click="addId"
+          >
+            {{ $t('roleConfig.asrHotwordAdd') }}
+          </el-button>
+          <span>{{ $t('roleConfig.asrHotwordCount', { count: configuredCount, max: maxItems }) }}</span>
+        </div>
+
+        <div class="hotword-panel__notice">
+          <i class="el-icon-info"></i>
+          <span>{{ $t('roleConfig.asrHotwordNotice') }}</span>
+        </div>
+      </div>
+    </el-collapse-transition>
   </section>
 </template>
 
@@ -88,6 +109,11 @@ export default {
     ids: { type: Array, default: () => [] },
     activeId: { type: String, default: "" },
     maxItems: { type: Number, default: MAX_ASR_HOTWORD_IDS },
+  },
+  data() {
+    return {
+      expanded: false,
+    };
   },
   computed: {
     rows() {
@@ -148,8 +174,8 @@ export default {
 <style lang="scss" scoped>
 .hotword-panel {
   width: 100%;
-  margin-top: 10px;
-  padding: 12px;
+  margin: 2px 0 12px;
+  padding: 10px 12px;
   border: 1px solid #e5e9f2;
   border-radius: 8px;
   background: #fafbfe;
@@ -157,6 +183,8 @@ export default {
 }
 
 .hotword-panel__header,
+.hotword-panel__heading,
+.hotword-panel__body-head,
 .hotword-panel__footer,
 .hotword-row {
   display: flex;
@@ -166,7 +194,23 @@ export default {
 .hotword-panel__header {
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 10px;
+}
+
+.hotword-panel__heading {
+  min-width: 0;
+  gap: 9px;
+}
+
+.hotword-panel__icon {
+  display: inline-flex;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #edf2ff;
+  color: #5f7fe8;
 }
 
 .hotword-panel__title {
@@ -177,9 +221,31 @@ export default {
 }
 
 .hotword-panel__subtitle {
+  overflow: hidden;
   color: #8a93a8;
   font-size: 11px;
   line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hotword-panel__manage {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.hotword-panel__body {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #e7ebf3;
+}
+
+.hotword-panel__body-head {
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 9px;
+  color: #8a93a8;
+  font-size: 11px;
 }
 
 .hotword-panel__console-link {

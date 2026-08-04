@@ -1,10 +1,5 @@
 <template>
   <nav class="resource-nav" aria-label="资源中心导航">
-    <div class="resource-nav__intro">
-      <span class="resource-nav__eyebrow">RESOURCE CENTER</span>
-      <strong>资源中心</strong>
-      <span>统一维护可复用的知识、人物和插件能力</span>
-    </div>
     <div class="resource-nav__tabs">
       <button
         v-for="item in items"
@@ -15,7 +10,6 @@
       >
         <i :class="item.icon" />
         <span>{{ item.label }}</span>
-        <small>{{ item.hint }}</small>
       </button>
     </div>
   </nav>
@@ -28,22 +22,19 @@ export default {
     return {
       items: [
         {
-          label: "知识库管理",
-          hint: "资料与文档",
+          label: "知识库",
           path: "/knowledge-base-management",
           related: ["/knowledge-file-upload"],
           icon: "el-icon-reading"
         },
         {
-          label: "用户信息管理",
-          hint: "人物与人脸",
+          label: "人物与人脸",
           path: "/person-profile-management",
           related: [],
           icon: "el-icon-user"
         },
         {
-          label: "插件管理",
-          hint: "工具与玩法",
+          label: "插件",
           path: "/function-plugin-management",
           related: [],
           icon: "el-icon-connection"
@@ -68,49 +59,30 @@ export default {
 .resource-nav {
   display: flex;
   align-items: center;
-  gap: 28px;
-  padding: 14px 24px;
-  background: rgba(255, 255, 255, 0.86);
+  min-height: 48px;
+  padding: 0 24px;
+  background: rgba(255, 255, 255, 0.94);
   border-bottom: 1px solid #e8edf8;
-  box-shadow: 0 6px 24px rgba(55, 76, 126, 0.06);
-}
-
-.resource-nav__intro {
-  min-width: 250px;
-  display: grid;
-  gap: 2px;
-  color: #79829a;
-  font-size: 12px;
-}
-
-.resource-nav__intro strong {
-  color: #20263a;
-  font-size: 20px;
-}
-
-.resource-nav__eyebrow {
-  color: #d38f13;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 1.5px;
+  box-shadow: 0 4px 14px rgba(55, 76, 126, 0.04);
 }
 
 .resource-nav__tabs {
   display: flex;
-  align-items: stretch;
-  gap: 10px;
+  align-items: center;
+  gap: 4px;
   min-width: 0;
 }
 
 .resource-tab {
-  display: grid;
-  grid-template-columns: 28px auto;
-  grid-template-rows: auto auto;
-  column-gap: 8px;
-  min-width: 150px;
-  padding: 9px 14px;
-  border: 1px solid transparent;
-  border-radius: 13px;
+  display: inline-flex;
+  min-width: 112px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
   background: transparent;
   color: #667085;
   text-align: left;
@@ -119,21 +91,14 @@ export default {
 }
 
 .resource-tab i {
-  grid-row: 1 / 3;
-  align-self: center;
   color: #8d96aa;
-  font-size: 21px;
+  font-size: 16px;
 }
 
 .resource-tab span {
   color: #30374b;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
-}
-
-.resource-tab small {
-  color: #98a0b3;
-  font-size: 11px;
 }
 
 .resource-tab:hover {
@@ -141,21 +106,16 @@ export default {
 }
 
 .resource-tab.active {
-  border-color: #f2c463;
-  background: linear-gradient(135deg, #fff8e6, #fff);
-  box-shadow: 0 5px 16px rgba(213, 153, 37, 0.12);
+  background: #edf3ff;
+  box-shadow: inset 0 0 0 1px #dbe6ff;
 }
 
 .resource-tab.active i,
 .resource-tab.active span {
-  color: #b87800;
+  color: #3675d8;
 }
 
 @media (max-width: 1120px) {
-  .resource-nav__intro {
-    display: none;
-  }
-
   .resource-nav {
     overflow-x: auto;
   }

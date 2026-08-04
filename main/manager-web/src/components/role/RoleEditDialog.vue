@@ -9,31 +9,24 @@
       @delete="deleteTemplate"
     />
 
-    <nav class="section-nav" aria-label="角色配置分区导航">
-      <span class="section-nav-title">快速定位</span>
-      <button type="button" @click="scrollToSection('templateSection')">
-        <i class="el-icon-s-operation" />模板切换
-      </button>
-      <button type="button" @click="scrollToSection('personaSection')">
-        <i class="el-icon-user" />角色与集成
-      </button>
-      <button type="button" @click="scrollToSection('modelSection')">
-        <i class="el-icon-set-up" />模型与能力
-      </button>
-    </nav>
+    <role-config-task-tabs v-model="activePanel" />
 
     <el-form ref="form" :model="form" label-width="72px">
       <div class="form-content">
         <div class="form-grid">
-          <section ref="personaSection" class="form-column config-section">
+          <section
+            v-show="activePanel === 'basic' || activePanel === 'integrations'"
+            ref="personaSection"
+            class="form-column config-section"
+          >
             <div class="section-heading">
-              <span class="section-number">01</span>
+              <span class="section-number"><i :class="activePanelMeta.icon" /></span>
               <div>
-                <h3>角色设定与外部集成</h3>
-                <p>定义角色身份、回复方式，以及上下文、技能和飞书协作。</p>
+                <h3>{{ activePanelMeta.title }}</h3>
+                <p>{{ activePanelMeta.description }}</p>
               </div>
             </div>
-            <el-form-item>
+            <el-form-item v-show="activePanel === 'basic'">
               <template #label>
                 <el-tooltip :content="$t('roleConfig.tooltip.agentName')" placement="top" effect="light" popper-class="custom-tooltip">
                   <span>{{ $t('roleConfig.agentName') }}：</span>
@@ -45,12 +38,12 @@
                 maxlength="64"
               />
             </el-form-item>
-            <div class="subsection-title">
+            <div v-show="activePanel === 'integrations'" class="subsection-title">
               <i class="el-icon-link" />
               <span>资源与集成</span>
               <small>按需连接上下文、技能和协作平台</small>
             </div>
-            <el-form-item class="context-provider-item integration-config-item">
+            <el-form-item v-show="activePanel === 'integrations'" class="context-provider-item integration-config-item">
               <template #label>
                 <el-tooltip :content="$t('roleConfig.tooltip.contextProvider')" placement="top" effect="light" popper-class="custom-tooltip">
                   <span>{{ $t('roleConfig.contextProvider') }}：</span>
@@ -70,7 +63,7 @@
                 </el-button>
               </div>
             </el-form-item>
-            <el-form-item class="integration-config-item">
+            <el-form-item v-show="activePanel === 'integrations'" class="integration-config-item">
               <template #label>
                 <el-tooltip :content="$t('roleConfig.tooltip.agentSkill')" placement="top" effect="light" popper-class="custom-tooltip">
                   <span>{{ $t('roleConfig.agentSkill') }}：</span>
@@ -93,7 +86,7 @@
                 >{{ $t('roleConfig.agentSkillConfigure') }}</el-button>
               </div>
             </el-form-item>
-            <el-form-item class="integration-config-item" label="集成：">
+            <el-form-item v-show="activePanel === 'integrations'" class="integration-config-item" label="集成：">
               <div class="integration-row">
                 <div class="integration-main">
                   <span class="integration-title">飞书协作</span>
@@ -107,12 +100,12 @@
                 >管理飞书配置</el-button>
               </div>
             </el-form-item>
-            <div class="subsection-title role-content-subsection">
+            <div v-show="activePanel === 'basic'" class="subsection-title role-content-subsection">
               <i class="el-icon-chat-line-square" />
               <span>角色内容</span>
-              <small>决定角色身份、表达方式和短期记忆</small>
+              <small>决定角色身份、表达方式和回复边界</small>
             </div>
-            <el-form-item>
+            <el-form-item v-show="activePanel === 'basic'">
               <template #label>
                 <el-tooltip :content="$t('roleConfig.tooltip.roleIntroduction')" placement="top" effect="light" popper-class="custom-tooltip">
                   <span>{{ $t('roleConfig.roleIntroduction') }}：</span>
@@ -130,23 +123,6 @@
               />
             </el-form-item>
 
-            <el-form-item>
-              <template #label>
-                <el-tooltip :content="$t('roleConfig.tooltip.memoryHis')" placement="top" effect="light" popper-class="custom-tooltip">
-                  <span>{{ $t('roleConfig.memoryHis') }}：</span>
-                </el-tooltip>
-              </template>
-              <el-input
-                type="textarea"
-                rows="4"
-                resize="none"
-                v-model="form.summaryMemory"
-                maxlength="2000"
-                show-word-limit
-                class="form-textarea"
-                :disabled="form.model.memModelId !== 'Memory_mem_local_short'"
-              />
-            </el-form-item>
             <el-form-item
               style="display: none"
             >
@@ -180,20 +156,24 @@
               />
             </el-form-item>
           </section>
-          <section ref="modelSection" class="form-column config-section">
+          <section
+            v-show="activePanel === 'voice' || activePanel === 'intelligence' || activePanel === 'memory'"
+            ref="modelSection"
+            class="form-column config-section"
+          >
             <div class="section-heading">
-              <span class="section-number">02</span>
+              <span class="section-number"><i :class="activePanelMeta.icon" /></span>
               <div>
-                <h3>语音、模型与能力</h3>
-                <p>配置识别、思考、记忆、知识库、功能和最终发声效果。</p>
+                <h3>{{ activePanelMeta.title }}</h3>
+                <p>{{ activePanelMeta.description }}</p>
               </div>
             </div>
-            <div class="subsection-title">
+            <div v-show="activePanel === 'voice'" class="subsection-title">
               <i class="el-icon-microphone" />
               <span>语音输入</span>
               <small>检测用户开口并将语音转成文字</small>
             </div>
-            <div class="model-row">
+            <div v-show="activePanel === 'voice'" class="model-row">
               <el-form-item
                 v-if="featureStatus.vad"
                 class="model-item"
@@ -258,21 +238,21 @@
                       </div>
                     </el-option>
                   </el-select>
-                  <asr-hotword-field
-                    v-if="supportsAsrHotword"
-                    :ids="form.asrHotwordIds"
-                    :active-id="form.asrHotwordId"
-                    @change="handleAsrHotwordChange"
-                  />
                 </div>
               </el-form-item>
             </div>
-            <div class="subsection-title">
+            <asr-hotword-field
+              v-if="activePanel === 'voice' && supportsAsrHotword"
+              :ids="form.asrHotwordIds"
+              :active-id="form.asrHotwordId"
+              @change="handleAsrHotwordChange"
+            />
+            <div v-show="activePanel === 'intelligence'" class="subsection-title">
               <i class="el-icon-cpu" />
               <span>智能模型与能力</span>
               <small>控制角色如何思考、调用功能和使用记忆</small>
             </div>
-            <div class="model-row">
+            <div v-show="activePanel === 'intelligence'" class="model-row">
               <el-form-item class="model-item">
                 <template #label>
                   <el-tooltip :content="$t('roleConfig.tooltip.llm')" placement="top" effect="light" popper-class="custom-tooltip">
@@ -339,11 +319,18 @@
               </el-form-item>
             </div>
             <realtime-model-notice
+              v-show="activePanel === 'intelligence'"
               :model="selectedLlmModel"
               context="agent"
             />
+            <div v-show="activePanel === 'voice'" class="subsection-title voice-subsection">
+              <i class="el-icon-headset" />
+              <span>语音输出</span>
+              <small>选择语音合成模型、角色音色和发声参数</small>
+            </div>
             <el-form-item
               v-for="(model, index) in models.slice(4)"
+              v-show="isModelVisibleInPanel(model.type)"
               :key="`model-${index}`"
               class="model-item"
             >
@@ -396,6 +383,22 @@
                       $t("roleConfig.reportTextVoice")
                     }}</el-radio-button>
                   </el-radio-group>
+                </div>
+                <div v-if="model.type === 'Memory'" class="memory-mode-note">
+                  <i class="el-icon-info" />
+                  <span>{{ memoryModeHint }}</span>
+                </div>
+                <div v-if="model.type === 'Memory' && showLegacySummaryMemory" class="legacy-memory-editor">
+                  <div class="legacy-memory-editor__title">本地短记忆摘要（兼容模式）</div>
+                  <el-input
+                    v-model="form.summaryMemory"
+                    type="textarea"
+                    :rows="3"
+                    resize="vertical"
+                    maxlength="2000"
+                    show-word-limit
+                    placeholder="仅旧的本地短摘要模式使用"
+                  />
                 </div>
               </div>
               <div v-if="showFunctionIcons(model.type)" class="capability-config-panel">
@@ -462,12 +465,12 @@
                 </div>
               </div>
             </el-form-item>
-            <div class="subsection-title voice-subsection">
-              <i class="el-icon-headset" />
-              <span>发声效果</span>
-              <small>选择角色最终使用的音色和语速参数</small>
+            <div v-show="activePanel === 'voice'" class="subsection-title voice-subsection">
+              <i class="el-icon-service" />
+              <span>角色音色</span>
+              <small>选择最终音色并调整音量、语速和音调</small>
             </div>
-            <div class="model-row">
+            <div v-show="activePanel === 'voice'" class="model-row">
               <el-form-item class="model-item">
                 <template #label>
                   <el-tooltip :content="$t('roleConfig.tooltip.voiceType')" placement="top" effect="light" popper-class="custom-tooltip">
@@ -572,8 +575,13 @@ import FeishuIntegrationDialog from "@/components/role/FeishuIntegrationDialog.v
 import AgentSkillDialog from "@/components/role/AgentSkillDialog.vue";
 import AsrHotwordField from "@/components/role/AsrHotwordField.vue";
 import RoleTemplateSwitcher from "@/components/role/RoleTemplateSwitcher.vue";
+import RoleConfigTaskTabs from "@/components/role/RoleConfigTaskTabs.vue";
 import RealtimeModelNotice from "@/components/model/RealtimeModelNotice.vue";
 import i18n from "@/i18n";
+import {
+  roleMemoryModeHint,
+  rolePanelMeta,
+} from "@/utils/roleConfigPresentation";
 import {
   buildRoleForm,
   changedRolePaths,
@@ -595,6 +603,7 @@ export default {
     AgentSkillDialog,
     AsrHotwordField,
     RoleTemplateSwitcher,
+    RoleConfigTaskTabs,
     RealtimeModelNotice,
   },
   props: {
@@ -620,6 +629,7 @@ export default {
     const form = this.buildFormFromProp(this.initialForm);
     return {
       form,
+      activePanel: "basic",
       showFunctionDialog: false,
       showKnowledgeBaseDialog: false,
       showTtsAdvancedDialog: false,
@@ -659,14 +669,22 @@ export default {
     selectedLlmModel() {
       const selectedId = this.form.model.llmModelId;
       return (this.modelOptions.LLM || []).find((item) => item.value === selectedId) || {};
-    }
+    },
+    activePanelMeta() {
+      return rolePanelMeta(this.activePanel);
+    },
+    showLegacySummaryMemory() {
+      return this.form.model.memModelId === "Memory_mem_local_short";
+    },
+    memoryModeHint() {
+      return roleMemoryModeHint(this.form.model.memModelId);
+    },
   },
   methods: {
-    scrollToSection(refName) {
-      const target = this.$refs[refName];
-      const element = target && (target.$el || target);
-      if (!element || typeof element.scrollIntoView !== "function") return;
-      element.scrollIntoView({ behavior: "smooth", block: "start" });
+    isModelVisibleInPanel(type) {
+      if (type === "TTS") return this.activePanel === "voice";
+      if (type === "Memory") return this.activePanel === "memory";
+      return this.activePanel === "intelligence";
     },
     buildFormFromProp(initial) {
       return buildRoleForm(initial);
@@ -1269,55 +1287,8 @@ export default {
   padding: 14px 0 30px;
 }
 
-.section-nav {
-  position: sticky;
-  top: 74px;
-  z-index: 6;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin: 12px 0 0;
-  padding: 8px 10px;
-  border: 1px solid #e8ebf5;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 4px 12px rgba(53, 66, 110, 0.06);
-  backdrop-filter: blur(8px);
-}
-
-.section-nav-title {
-  margin: 0 3px 0 2px;
-  color: #9aa1b4;
-  font-size: 12px;
-}
-
-.section-nav button {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 30px;
-  padding: 0 11px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: #5f6881;
-  cursor: pointer;
-  font-size: 12px;
-  transition: background-color 0.2s ease, color 0.2s ease;
-}
-
-.section-nav button:hover,
-.section-nav button:focus {
-  background: #edf1ff;
-  color: #5778ff;
-  outline: none;
-}
-
 .form-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  align-items: start;
-  gap: 14px;
+  display: block;
 }
 
 .form-column {
@@ -1328,7 +1299,8 @@ export default {
 
 .config-section {
   scroll-margin-top: 122px;
-  padding: 18px 18px 8px;
+  min-height: 430px;
+  padding: 18px 20px 12px;
   border: 1px solid #e5e9f4;
   border-radius: 14px;
   background: #fff;
@@ -1355,6 +1327,10 @@ export default {
   color: #5778ff;
   font-size: 11px;
   font-weight: 700;
+}
+
+.section-number i {
+  font-size: 14px;
 }
 
 .section-heading h3 {
@@ -1693,6 +1669,38 @@ export default {
   color: #5778ff;
 }
 
+.memory-mode-note {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  gap: 7px;
+  margin-top: 10px;
+  padding: 10px 11px;
+  border-radius: 8px;
+  background: #f7f9fc;
+  color: #747e92;
+  box-sizing: border-box;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.memory-mode-note i {
+  margin-top: 2px;
+  color: #6686eb;
+}
+
+.legacy-memory-editor {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.legacy-memory-editor__title {
+  margin-bottom: 7px;
+  color: #4b566d;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .context-provider-item ::v-deep .el-form-item__label {
   line-height: 42px !important;
 }
@@ -1733,21 +1741,6 @@ export default {
   padding: 0 8px;
 }
 
-@media (max-width: 1250px) {
-  .form-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .section-nav {
-    position: static;
-    overflow-x: auto;
-  }
-
-  .section-nav-title,
-  .section-nav button {
-    flex-shrink: 0;
-  }
-}
 </style>
 
 <style>

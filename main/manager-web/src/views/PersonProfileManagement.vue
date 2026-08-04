@@ -6,90 +6,106 @@
     <main class="person-main">
       <section class="page-hero">
         <div>
-          <div class="hero-kicker">人物资源</div>
-          <h1>用户信息管理</h1>
-          <p>统一维护人物资料、人脸照片、下发设备与识别后动作。</p>
+          <h1>人物与人脸</h1>
+          <p>管理设备能够识别的人物，以及识别成功后要执行的动作。</p>
         </div>
         <div class="hero-actions">
-          <el-input
-            v-model="keyword"
-            clearable
-            prefix-icon="el-icon-search"
-            placeholder="搜索姓名、分组或介绍"
-            @keyup.enter.native="loadProfiles"
-          />
-          <el-select v-model="activeGroup" placeholder="全部分组">
-            <el-option label="全部分组" value="all" />
-            <el-option v-for="group in groups" :key="group" :label="group" :value="group" />
-          </el-select>
           <el-button type="primary" icon="el-icon-plus" :disabled="!canWrite" @click="openCreate">
-            添加用户信息
+            新增人物
           </el-button>
         </div>
       </section>
 
-      <section class="pipeline-notice">
-        <div class="notice-icon"><i class="el-icon-cpu" /></div>
-        <div>
-          <strong>当前识别链路：设备本地计算</strong>
-          <p>服务器只向你明确绑定的设备下发归一化照片；设备识别成功后，上报人物 ID 和置信度，再获取配置好的动作。</p>
-        </div>
-        <el-tag type="warning" effect="plain">服务端识别暂未开放</el-tag>
+      <section class="recognition-summary">
+        <span class="recognition-mode"><i class="el-icon-cpu" />设备本地识别</span>
+        <span>照片只下发到选中的设备；识别后可记录事件或让设备说一句话。</span>
+        <el-tooltip content="服务端当前不接收识别图片，也不会生成或保存人脸特征。" placement="bottom">
+          <button type="button" class="learn-more">了解工作原理</button>
+        </el-tooltip>
+        <el-tag size="small" type="info" effect="plain">服务端识别未启用</el-tag>
       </section>
 
       <section class="content-shell" v-loading="loading">
-        <div class="list-summary">
-          <span><strong>{{ filteredProfiles.length }}</strong> 位人物</span>
-          <span>照片不会进入角色模板，也不会生成服务端人脸特征</span>
+        <div class="list-toolbar">
+          <div class="list-summary">
+            <strong>{{ filteredProfiles.length }}</strong>
+            <span>位人物</span>
+          </div>
+          <div class="list-filters">
+            <el-input
+              v-model="keyword"
+              clearable
+              prefix-icon="el-icon-search"
+              placeholder="搜索姓名、分组或介绍"
+              @keyup.enter.native="loadProfiles"
+              @clear="loadProfiles"
+            />
+            <el-select v-model="activeGroup" placeholder="全部分组">
+              <el-option label="全部分组" value="all" />
+              <el-option v-for="group in groups" :key="group" :label="group" :value="group" />
+            </el-select>
+            <el-button icon="el-icon-search" @click="loadProfiles">搜索</el-button>
+          </div>
         </div>
 
-        <el-empty v-if="!loading && filteredProfiles.length === 0" description="还没有人物档案">
-          <el-button v-if="canWrite" type="primary" @click="openCreate">创建第一位人物</el-button>
-        </el-empty>
+        <div v-if="!loading && filteredProfiles.length === 0" class="empty-state">
+          <i class="el-icon-user" />
+          <h3>还没有人物</h3>
+          <p>完成下面三步，设备就能开始识别人脸。</p>
+          <div class="empty-steps">
+            <span><b>1</b>新增人物</span>
+            <i class="el-icon-arrow-right" />
+            <span><b>2</b>上传正面照片</span>
+            <i class="el-icon-arrow-right" />
+            <span><b>3</b>选择设备和动作</span>
+          </div>
+          <el-button v-if="canWrite" type="primary" icon="el-icon-plus" @click="openCreate">新增第一位人物</el-button>
+        </div>
 
-        <div v-else class="person-grid">
+        <div v-else class="person-list">
           <article v-for="profile in filteredProfiles" :key="profile.id" class="person-card">
             <div class="person-photo">
               <img v-if="faceUrls[profile.id]" :src="faceUrls[profile.id]" :alt="`${profile.name}的人脸照片`" />
               <div v-else class="photo-placeholder">
                 <i class="el-icon-user" />
-                <span>未上传照片</span>
               </div>
-              <span :class="['status-dot', { disabled: profile.status !== 1 }]">
-                {{ profile.status === 1 ? "已启用" : "已停用" }}
+            </div>
+            <div class="person-identity">
+              <h3>{{ profile.name }}</h3>
+              <span>{{ genderLabel(profile.gender) }}<template v-if="profile.groupName"> · {{ profile.groupName }}</template></span>
+              <p>{{ profile.description || "暂无介绍" }}</p>
+            </div>
+            <div class="person-state">
+              <span class="column-label">人脸状态</span>
+              <el-tag size="mini" :type="profile.faceReady ? 'success' : 'warning'">
+                {{ profile.faceReady ? `已上传 · v${profile.faceVersion}` : "待上传照片" }}
+              </el-tag>
+            </div>
+            <div class="person-devices">
+              <span class="column-label">下发设备</span>
+              <strong>{{ profile.deviceNames && profile.deviceNames.length ? `${profile.deviceNames.length} 台设备` : "未选择设备" }}</strong>
+              <small v-if="profile.deviceNames && profile.deviceNames.length" :title="profile.deviceNames.join('、')">
+                {{ profile.deviceNames.join("、") }}
+              </small>
+            </div>
+            <div class="person-action">
+              <span class="column-label">识别后动作</span>
+              <strong>{{ actionLabel(profile.recognitionAction) }}</strong>
+              <small v-if="profile.recognitionAction === 'SPEAK_TEXT'">{{ profile.greetingText || "未填写播报内容" }}</small>
+            </div>
+            <div class="person-enabled">
+              <span :class="['enabled-badge', { disabled: profile.status !== 1 }]">
+                {{ profile.status === 1 ? "启用" : "停用" }}
               </span>
             </div>
-            <div class="person-content">
-              <div class="person-title-row">
-                <div>
-                  <h3>{{ profile.name }}</h3>
-                  <span>{{ genderLabel(profile.gender) }}<template v-if="profile.groupName"> · {{ profile.groupName }}</template></span>
-                </div>
-                <el-dropdown v-if="canWrite" trigger="click" @command="handleCommand(profile, $event)">
-                  <el-button type="text" icon="el-icon-more" aria-label="人物操作" />
-                  <el-dropdown-menu slot="dropdown">
-                    <el-dropdown-item command="edit">编辑资料</el-dropdown-item>
-                    <el-dropdown-item command="delete" class="danger-item">删除人物</el-dropdown-item>
-                  </el-dropdown-menu>
-                </el-dropdown>
-              </div>
-              <p class="person-description">{{ profile.description || "暂无介绍" }}</p>
-              <div class="profile-meta">
-                <div>
-                  <span>下发设备</span>
-                  <strong>{{ profile.deviceNames && profile.deviceNames.length ? profile.deviceNames.join("、") : "尚未绑定" }}</strong>
-                </div>
-                <div>
-                  <span>识别后动作</span>
-                  <strong>{{ actionLabel(profile.recognitionAction) }}</strong>
-                </div>
-              </div>
-              <div class="card-footer">
-                <el-tag size="mini" :type="profile.faceReady ? 'success' : 'info'">
-                  {{ profile.faceReady ? `人脸版本 ${profile.faceVersion}` : "待上传人脸" }}
-                </el-tag>
-                <el-button v-if="canWrite" type="text" icon="el-icon-edit" @click="openEdit(profile)">编辑</el-button>
-              </div>
+            <div v-if="canWrite" class="person-actions">
+              <el-button type="text" icon="el-icon-edit" @click="openEdit(profile)">编辑</el-button>
+              <el-dropdown trigger="click" @command="handleCommand(profile, $event)">
+                <el-button type="text" icon="el-icon-more" aria-label="更多人物操作" />
+                <el-dropdown-menu slot="dropdown">
+                  <el-dropdown-item command="delete" class="danger-item">删除人物</el-dropdown-item>
+                </el-dropdown-menu>
+              </el-dropdown>
             </div>
           </article>
         </div>
@@ -97,7 +113,7 @@
     </main>
 
     <el-dialog
-      :title="editingId ? '编辑用户信息' : '添加用户信息'"
+      :title="editingId ? '编辑人物' : '新增人物'"
       :visible.sync="dialogVisible"
       width="900px"
       :close-on-click-modal="false"
@@ -157,13 +173,13 @@
                   :value="device.id"
                 />
               </el-select>
-              <div class="field-help">只有选中的设备能够获取这张人脸照片并上报该人物的识别事件。</div>
+              <div class="field-help">只有选中的设备会收到这张照片。设备同步状态需要固件上报后才能展示。</div>
             </el-form-item>
 
             <el-form-item label="识别后动作" prop="recognitionAction">
               <el-radio-group v-model="form.recognitionAction">
-                <el-radio-button label="NONE">仅记录识别</el-radio-button>
-                <el-radio-button label="SPEAK_TEXT">返回设备播报</el-radio-button>
+                <el-radio-button label="NONE">只记录</el-radio-button>
+                <el-radio-button label="SPEAK_TEXT">识别后说一句话</el-radio-button>
               </el-radio-group>
             </el-form-item>
 
@@ -188,7 +204,7 @@
       </el-form>
       <div slot="footer">
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="saveProfile">保存用户信息</el-button>
+        <el-button type="primary" :loading="saving" @click="saveProfile">保存人物</el-button>
       </div>
     </el-dialog>
 
@@ -405,7 +421,7 @@ export default {
     finishSave() {
       this.saving = false;
       this.dialogVisible = false;
-      this.$message.success("用户信息已保存");
+      this.$message.success("人物已保存");
       this.loadProfiles();
     },
     deleteProfile(profile) {
@@ -441,7 +457,7 @@ export default {
       return gender === "MALE" ? "男" : gender === "FEMALE" ? "女" : "未填写性别";
     },
     actionLabel(action) {
-      return action === "SPEAK_TEXT" ? "返回设备播报" : "仅记录识别";
+      return action === "SPEAK_TEXT" ? "识别后说一句话" : "只记录";
     }
   }
 };
@@ -455,33 +471,31 @@ export default {
 }
 
 .person-main {
-  padding: 24px;
+  width: calc(100% - 48px);
+  max-width: 1680px;
+  margin: 0 auto;
+  padding: 20px 0 28px;
+  box-sizing: border-box;
 }
 
 .page-hero {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   gap: 24px;
-  margin-bottom: 18px;
-}
-
-.hero-kicker {
-  color: #c37e00;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 1px;
+  margin-bottom: 14px;
 }
 
 .page-hero h1 {
-  margin: 5px 0 6px;
+  margin: 0 0 5px;
   color: #20263a;
-  font-size: 28px;
+  font-size: 25px;
 }
 
 .page-hero p {
   margin: 0;
   color: #747d93;
+  font-size: 13px;
 }
 
 .hero-actions {
@@ -489,55 +503,69 @@ export default {
   gap: 10px;
 }
 
-.hero-actions .el-input {
-  width: 250px;
-}
-
-.pipeline-notice {
+.recognition-summary {
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin-bottom: 18px;
-  padding: 14px 18px;
-  border: 1px solid #f1d99c;
-  border-radius: 14px;
-  background: rgba(255, 251, 238, 0.88);
-  color: #5e4a20;
-}
-
-.pipeline-notice p {
-  margin: 4px 0 0;
-  color: #7c6d4c;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 9px 12px;
+  border: 1px solid #e4e9f3;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #7b8496;
   font-size: 13px;
 }
 
-.pipeline-notice .el-tag {
+.recognition-summary .el-tag {
   margin-left: auto;
 }
 
-.notice-icon {
-  display: grid;
-  width: 38px;
-  height: 38px;
-  place-items: center;
-  border-radius: 12px;
-  background: #f7cf70;
-  font-size: 20px;
+.recognition-mode {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  color: #3f5f94;
+  font-weight: 600;
+}
+
+.recognition-mode i {
+  color: #4f83df;
+}
+
+.learn-more {
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #3f79d2;
+  cursor: help;
+  font: inherit;
 }
 
 .content-shell {
-  min-height: 420px;
-  padding: 20px;
+  min-height: 360px;
+  padding: 18px;
   border: 1px solid rgba(255, 255, 255, 0.94);
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.82);
   box-shadow: 0 14px 38px rgba(56, 73, 113, 0.09);
 }
 
+.list-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #edf0f5;
+}
+
 .list-summary {
   display: flex;
-  justify-content: space-between;
-  margin-bottom: 16px;
+  align-items: baseline;
+  gap: 5px;
   color: #8790a4;
   font-size: 13px;
 }
@@ -547,30 +575,112 @@ export default {
   font-size: 18px;
 }
 
-.person-grid {
+.list-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.list-filters .el-input {
+  width: 240px;
+}
+
+.list-filters .el-select {
+  width: 150px;
+}
+
+.empty-state {
+  display: flex;
+  min-height: 285px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  color: #929bad;
+  text-align: center;
+}
+
+.empty-state > i {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  border-radius: 16px;
+  background: #eef3ff;
+  color: #5c83dd;
+  font-size: 25px;
+}
+
+.empty-state h3 {
+  margin: 12px 0 3px;
+  color: #414c62;
+  font-size: 16px;
+}
+
+.empty-state p {
+  margin: 0 0 14px;
+  font-size: 12px;
+}
+
+.empty-steps {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 18px;
+}
+
+.empty-steps span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #68758c;
+  font-size: 12px;
+}
+
+.empty-steps b {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 50%;
+  background: #eef3ff;
+  color: #4f7dde;
+  font-size: 11px;
+}
+
+.empty-steps > i {
+  color: #bcc4d2;
+}
+
+.person-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .person-card {
-  overflow: hidden;
+  display: grid;
+  grid-template-columns: 66px minmax(190px, 1.3fr) minmax(120px, 0.7fr) minmax(150px, 0.9fr) minmax(170px, 1fr) 58px 86px;
+  min-height: 88px;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 14px;
   border: 1px solid #e8ecf4;
-  border-radius: 17px;
+  border-radius: 11px;
   background: #fff;
-  box-shadow: 0 8px 25px rgba(53, 67, 99, 0.07);
+  box-shadow: 0 3px 10px rgba(53, 67, 99, 0.04);
   transition: 0.2s ease;
 }
 
 .person-card:hover {
-  transform: translateY(-2px);
-  border-color: #efc35f;
-  box-shadow: 0 13px 32px rgba(172, 122, 27, 0.13);
+  border-color: #abc2ef;
+  box-shadow: 0 7px 18px rgba(65, 96, 151, 0.1);
 }
 
 .person-photo {
-  position: relative;
-  height: 190px;
+  width: 62px;
+  height: 62px;
+  overflow: hidden;
+  border-radius: 10px;
   background: #f2f4f8;
 }
 
@@ -584,91 +694,89 @@ export default {
   display: grid;
   height: 100%;
   place-content: center;
-  gap: 8px;
   color: #a4acbb;
-  text-align: center;
 }
 
 .photo-placeholder i {
-  font-size: 42px;
+  font-size: 25px;
 }
 
-.status-dot {
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
-  padding: 5px 9px;
-  border-radius: 99px;
-  background: rgba(32, 146, 99, 0.9);
-  color: #fff;
+.person-identity,
+.person-state,
+.person-devices,
+.person-action {
+  min-width: 0;
+}
+
+.person-identity h3 {
+  margin: 0 0 2px;
+  color: #242a3c;
+  font-size: 15px;
+}
+
+.person-identity > span,
+.column-label {
+  color: #9299aa;
   font-size: 11px;
 }
 
-.status-dot.disabled {
-  background: rgba(112, 120, 137, 0.9);
-}
-
-.person-content {
-  padding: 16px;
-}
-
-.person-title-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.person-title-row h3 {
-  margin: 0 0 3px;
-  color: #242a3c;
-  font-size: 20px;
-}
-
-.person-title-row span {
-  color: #9299aa;
-  font-size: 12px;
-}
-
-.person-description {
-  min-height: 40px;
-  margin: 13px 0;
-  color: #697187;
-  font-size: 13px;
-  line-height: 20px;
-}
-
-.profile-meta {
-  display: grid;
-  gap: 9px;
-  padding: 12px;
-  border-radius: 11px;
-  background: #f7f9fc;
-}
-
-.profile-meta div {
-  display: grid;
-  grid-template-columns: 78px minmax(0, 1fr);
-  gap: 8px;
-  font-size: 12px;
-}
-
-.profile-meta span {
-  color: #9aa1b1;
-}
-
-.profile-meta strong {
+.person-identity p {
   overflow: hidden;
-  color: #555e73;
-  font-weight: 500;
+  margin: 5px 0 0;
+  color: #697187;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.card-footer {
+.person-state,
+.person-devices,
+.person-action {
+  display: grid;
+  gap: 4px;
+}
+
+.person-state .el-tag {
+  width: max-content;
+}
+
+.person-devices strong,
+.person-action strong {
+  overflow: hidden;
+  color: #555e73;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.person-devices small,
+.person-action small {
+  overflow: hidden;
+  color: #9aa2b3;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.enabled-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 9px;
+  background: #e9f8f1;
+  color: #2d9a6b;
+  font-size: 11px;
+}
+
+.enabled-badge.disabled {
+  background: #f0f2f5;
+  color: #8d95a4;
+}
+
+.person-actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-top: 14px;
+  justify-content: flex-end;
 }
 
 .dialog-grid {
@@ -759,13 +867,19 @@ export default {
 }
 
 @media (max-width: 1200px) {
-  .person-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .person-card {
+    grid-template-columns: 66px minmax(170px, 1.2fr) minmax(110px, 0.7fr) minmax(130px, 0.8fr) minmax(140px, 0.9fr) 54px 76px;
   }
 
-  .page-hero {
-    align-items: flex-start;
-    flex-direction: column;
+  .person-devices small,
+  .person-action small {
+    display: none;
+  }
+
+  .recognition-summary > span:nth-child(2) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 </style>

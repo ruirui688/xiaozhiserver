@@ -197,6 +197,9 @@ describe("role configuration component state", () => {
     );
     assert.match(source, /target="_blank"/);
     assert.match(source, /rel="noopener noreferrer"/);
+    assert.match(source, /expanded: false/);
+    assert.match(source, /v-show="expanded"/);
+    assert.match(source, /管理热词/);
   });
 
   test("legacy single hotword id is promoted to the candidate list", async () => {
@@ -281,6 +284,7 @@ describe("role configuration component state", () => {
 
     vm.handleModelChange("Memory", "Memory_managed_memory");
     assert.equal(vm.form.chatHistoryConf, 1);
+    assert.equal(vm.showLegacySummaryMemory, false);
 
     vm.handleModelChange("Memory", "Memory_nomem");
     assert.equal(vm.form.chatHistoryConf, 0);
@@ -291,8 +295,10 @@ describe("role configuration component state", () => {
 
     vm.form.chatHistoryConf = 2;
     vm.updateChatHistoryConf();
+    vm.form.model.memModelId = "Memory_mem_local_short";
     vm.handleModelChange("Memory", "Memory_mem_local_short");
     assert.equal(vm.form.chatHistoryConf, 2);
+    assert.equal(vm.showLegacySummaryMemory, true);
     assert.equal(vm.submitSaveConfig("agent-1").chatHistoryConf, 2);
 
     vm.replaceFormWithoutTracking({

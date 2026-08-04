@@ -1,73 +1,67 @@
 <template>
   <section class="template-switcher" aria-labelledby="role-template-title">
-    <div class="template-heading">
+    <div class="template-copy">
+      <span class="template-icon"><i class="el-icon-s-operation" /></span>
       <div>
         <div class="template-title-row">
-          <span class="template-icon"><i class="el-icon-s-operation" /></span>
-          <h3 id="role-template-title">一键切换角色模板</h3>
-          <span class="template-count">{{ templates.length }} 个</span>
+          <h3 id="role-template-title">角色模板</h3>
+          <span class="template-count">{{ templates.length }}</span>
         </div>
-        <p>选择模板后，模型、音色、热词、知识库、声纹和飞书配置将一起切换。</p>
-      </div>
-      <div class="template-tip">
-        <i class="el-icon-warning-outline" />
-        <span>点击模板后会先进行确认</span>
+        <p>一次切换模型、音色、热词、知识库、声纹和飞书配置</p>
       </div>
     </div>
 
-    <div v-if="templates.length" class="template-list">
-      <div
-        v-for="(template, index) in templates"
-        :key="template.id || `template-${index}`"
-        class="template-card"
-        :class="{
-          'template-loading': loading,
-          'template-disabled': !workspaceCanWrite,
-        }"
-        role="button"
-        :tabindex="loading ? -1 : 0"
-        :aria-disabled="loading || !workspaceCanWrite ? 'true' : 'false'"
-        @click="selectTemplate(template)"
-        @keyup.enter="selectTemplate(template)"
+    <div v-if="templates.length" class="template-actions">
+      <el-select
+        v-model="selectedTemplateId"
+        filterable
+        class="template-select"
+        placeholder="选择要应用的角色模板"
+        aria-label="选择角色模板"
       >
-        <div class="template-avatar">
-          {{ templateInitial(template) }}
-        </div>
-        <div class="template-info">
-          <div class="template-name-row">
-            <strong>{{ template.templateName || template.agentName }}</strong>
+        <el-option
+          v-for="(template, index) in templates"
+          :key="template.id || `template-${index}`"
+          :value="template.id"
+          :label="template.templateName || template.agentName"
+        >
+          <div class="template-option">
+            <span class="template-option__avatar">{{ templateInitial(template) }}</span>
+            <span class="template-option__name">{{ template.templateName || template.agentName }}</span>
             <span
               class="template-scope"
               :class="template.scope === 'WORKSPACE' ? 'is-workspace' : 'is-system'"
             >
-              {{ template.scope === 'WORKSPACE' ? '工作空间' : '系统预设' }}
+              {{ template.scope === 'WORKSPACE' ? '工作空间' : '系统' }}
             </span>
           </div>
-          <span class="template-description">整套角色配置 · 一键应用</span>
-        </div>
-        <span class="template-use">
-          {{ loading ? '切换中' : '使用' }}
-          <i :class="loading ? 'el-icon-loading' : 'el-icon-arrow-right'" />
-        </span>
-        <button
-          v-if="template.deletable"
-          type="button"
-          class="template-delete"
-          title="删除此模板"
-          aria-label="删除此模板"
-          @click.stop="$emit('delete', template)"
-        >
-          <i class="el-icon-delete" />
-        </button>
-      </div>
+        </el-option>
+      </el-select>
+      <el-button
+        type="primary"
+        icon="el-icon-refresh"
+        :loading="loading"
+        :disabled="!selectedTemplate || !workspaceCanWrite"
+        class="template-apply"
+        @click="applySelected"
+      >
+        应用模板
+      </el-button>
+      <el-button
+        v-if="selectedTemplate && selectedTemplate.deletable"
+        type="text"
+        icon="el-icon-delete"
+        class="template-delete"
+        aria-label="删除选中的角色模板"
+        @click="$emit('delete', selectedTemplate)"
+      >
+        删除
+      </el-button>
+      <span v-if="!workspaceCanWrite" class="template-readonly">当前工作空间只读</span>
     </div>
 
     <div v-else class="template-empty">
-      <i class="el-icon-folder-opened" />
-      <div>
-        <strong>还没有可用模板</strong>
-        <span>完成当前角色配置后，可在页面右上角保存为模板。</span>
-      </div>
+      暂无模板，可使用右上角“另存为角色模板”创建
     </div>
   </section>
 </template>
@@ -80,14 +74,34 @@ export default {
     loading: { type: Boolean, default: false },
     workspaceCanWrite: { type: Boolean, default: true },
   },
+  data() {
+    return {
+      selectedTemplateId: "",
+    };
+  },
+  computed: {
+    selectedTemplate() {
+      return this.templates.find((template) => template.id === this.selectedTemplateId) || null;
+    },
+  },
+  watch: {
+    templates: {
+      immediate: true,
+      handler(templates) {
+        if (!templates.some((template) => template.id === this.selectedTemplateId)) {
+          this.selectedTemplateId = templates.length === 1 ? templates[0].id : "";
+        }
+      },
+    },
+  },
   methods: {
     templateInitial(template) {
       const name = String(template.templateName || template.agentName || "角").trim();
       return name.charAt(0) || "角";
     },
-    selectTemplate(template) {
-      if (this.loading) return;
-      this.$emit("select", template);
+    applySelected() {
+      if (this.loading || !this.workspaceCanWrite || !this.selectedTemplate) return;
+      this.$emit("select", this.selectedTemplate);
     },
   },
 };
@@ -95,52 +109,56 @@ export default {
 
 <style lang="scss" scoped>
 .template-switcher {
-  padding: 20px;
-  border: 1px solid #dfe6ff;
-  border-radius: 14px;
-  background: linear-gradient(135deg, #f8faff 0%, #f4f6ff 100%);
+  display: flex;
+  min-height: 68px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 11px 14px;
+  border: 1px solid #e4e9f4;
+  border-radius: 11px;
+  background: #f8faff;
+  box-sizing: border-box;
 }
 
-.template-heading,
+.template-copy,
 .template-title-row,
-.template-tip,
-.template-card,
-.template-name-row,
-.template-empty {
+.template-actions,
+.template-option {
   display: flex;
   align-items: center;
 }
 
-.template-heading {
-  justify-content: space-between;
-  gap: 20px;
-  margin-bottom: 14px;
+.template-copy {
+  min-width: 260px;
+  gap: 10px;
 }
 
 .template-title-row {
-  gap: 9px;
+  gap: 7px;
 }
 
 .template-title-row h3 {
   margin: 0;
   color: #27324b;
-  font-size: 16px;
-  line-height: 24px;
+  font-size: 14px;
+  line-height: 20px;
 }
 
-.template-heading p {
-  margin: 5px 0 0 33px;
+.template-copy p {
+  margin: 2px 0 0;
   color: #7b849d;
-  font-size: 12px;
-  line-height: 18px;
+  font-size: 11px;
+  line-height: 16px;
 }
 
 .template-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
   border-radius: 7px;
   background: #5778ff;
   color: #fff;
@@ -148,81 +166,51 @@ export default {
 }
 
 .template-count {
-  padding: 2px 7px;
+  min-width: 20px;
+  padding: 1px 5px;
   border-radius: 10px;
   background: #e7ecff;
   color: #5778ff;
-  font-size: 11px;
+  font-size: 10px;
+  text-align: center;
 }
 
-.template-tip {
-  flex-shrink: 0;
-  gap: 5px;
-  color: #8b94aa;
-  font-size: 12px;
-}
-
-.template-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-  gap: 10px;
-}
-
-.template-card {
-  position: relative;
+.template-actions {
+  flex: 1;
+  justify-content: flex-end;
+  gap: 8px;
   min-width: 0;
-  min-height: 64px;
-  padding: 10px 42px 10px 11px;
-  border: 1px solid #e0e5f5;
-  border-radius: 10px;
-  background: #fff;
-  box-shadow: 0 2px 8px rgba(74, 96, 170, 0.04);
-  cursor: pointer;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 }
 
-.template-card:hover,
-.template-card:focus {
-  border-color: #9db0ff;
-  box-shadow: 0 6px 16px rgba(87, 120, 255, 0.12);
-  outline: none;
-  transform: translateY(-1px);
+.template-select {
+  width: min(360px, 42vw);
 }
 
-.template-card.template-disabled {
-  opacity: 0.72;
-  cursor: not-allowed;
+.template-apply {
+  flex-shrink: 0;
 }
 
-.template-avatar {
-  display: flex;
-  flex: 0 0 38px;
+.template-option {
+  gap: 8px;
+}
+
+.template-option__avatar {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
-  margin-right: 10px;
-  border-radius: 10px;
+  border-radius: 7px;
   background: #edf1ff;
   color: #5778ff;
-  font-size: 16px;
+  font-size: 12px;
   font-weight: 700;
 }
 
-.template-info {
+.template-option__name {
   min-width: 0;
   flex: 1;
-}
-
-.template-name-row {
-  min-width: 0;
-  gap: 7px;
-}
-
-.template-name-row strong {
   overflow: hidden;
-  color: #30384f;
-  font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -241,35 +229,9 @@ export default {
   color: #3f9b78;
 }
 
-.template-description {
-  display: block;
-  margin-top: 4px;
-  color: #9aa2b5;
-  font-size: 11px;
-}
-
-.template-use {
-  display: flex;
-  flex-shrink: 0;
-  align-items: center;
-  gap: 2px;
-  margin-left: 10px;
-  color: #5778ff;
-  font-size: 12px;
-}
-
 .template-delete {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: #b2b8c8;
-  cursor: pointer;
+  margin: 0;
+  color: #9aa2b3;
 }
 
 .template-delete:hover {
@@ -278,42 +240,32 @@ export default {
 }
 
 .template-empty {
-  justify-content: center;
-  gap: 12px;
-  min-height: 74px;
-  border: 1px dashed #ccd5f3;
-  border-radius: 10px;
+  color: #929bad;
+  font-size: 12px;
+  text-align: right;
+}
+
+.template-readonly {
+  flex-shrink: 0;
   color: #9aa3b8;
-}
-
-.template-empty > i {
-  font-size: 25px;
-}
-
-.template-empty strong,
-.template-empty span {
-  display: block;
-}
-
-.template-empty strong {
-  margin-bottom: 3px;
-  color: #69738c;
-  font-size: 13px;
-}
-
-.template-empty span {
   font-size: 11px;
 }
 
 @media (max-width: 1100px) {
-  .template-heading {
+  .template-switcher {
     align-items: flex-start;
     flex-direction: column;
     gap: 8px;
   }
 
-  .template-tip {
-    margin-left: 33px;
+  .template-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .template-select {
+    flex: 1;
+    width: auto;
   }
 }
 </style>

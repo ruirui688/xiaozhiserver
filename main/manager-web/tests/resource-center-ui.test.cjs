@@ -17,17 +17,23 @@ const pluginCard = read('src/components/resource/PluginResourceCard.vue');
 test('resource center groups knowledge, people and plugins', () => {
   assert.match(router, /person-profile-management/);
   assert.match(header, />资源中心</);
-  assert.match(nav, /知识库管理/);
-  assert.match(nav, /用户信息管理/);
-  assert.match(nav, /插件管理/);
+  assert.match(nav, /label: "知识库"/);
+  assert.match(nav, /label: "人物与人脸"/);
+  assert.match(nav, /label: "插件"/);
+  assert.doesNotMatch(nav, /RESOURCE CENTER|resource-nav__intro|统一维护可复用/);
 });
 
 test('person UI makes device-local biometric boundary explicit', () => {
-  assert.match(people, /当前识别链路：设备本地计算/);
-  assert.match(people, /服务端识别暂未开放/);
-  assert.match(people, /下发到设备/);
+  assert.match(people, /设备本地识别/);
+  assert.match(people, /服务端识别未启用/);
+  assert.match(people, /新增人物/);
+  assert.match(people, /上传正面照片/);
+  assert.match(people, /选择设备和动作/);
+  assert.match(people, /下发设备/);
   assert.match(people, /识别后动作/);
-  assert.match(people, /返回设备播报/);
+  assert.match(people, /识别后说一句话/);
+  assert.match(people, /person-list/);
+  assert.doesNotMatch(people, /用户信息管理|pipeline-notice|person-grid/);
   assert.match(personApi, /resource\/persons\/\$\{encodeURIComponent\(id\)\}\/face/);
   assert.doesNotMatch(personApi, /api[_-]?key|access[_-]?token/i);
 });
