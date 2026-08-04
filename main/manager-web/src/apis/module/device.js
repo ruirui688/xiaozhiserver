@@ -124,4 +124,42 @@ export default {
                 callback(networkErrorResponse('获取设备状态失败'));
             }).send();
     },
+    getDeviceScenes(deviceId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/devices/${encodeURIComponent(deviceId)}/scenes`)
+            .method('GET')
+            .success(callback)
+            .networkFail(() => callback(networkErrorResponse('获取设备场景失败')))
+            .send();
+    },
+    createDeviceScene(deviceId, payload, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/devices/${encodeURIComponent(deviceId)}/scenes`)
+            .method('POST').data(payload).success(callback)
+            .networkFail(() => callback(networkErrorResponse('创建设备场景失败')))
+            .send();
+    },
+    updateDeviceScene(deviceId, bindingId, payload, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/devices/${encodeURIComponent(deviceId)}/scenes/${bindingId}`)
+            .method('PUT').data(payload).success(callback)
+            .networkFail(() => callback(networkErrorResponse('更新设备场景失败')))
+            .send();
+    },
+    deleteDeviceScene(deviceId, bindingId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/devices/${encodeURIComponent(deviceId)}/scenes/${bindingId}`)
+            .method('DELETE').success(callback)
+            .networkFail(() => callback(networkErrorResponse('删除设备场景失败')))
+            .send();
+    },
+    switchDeviceScene(deviceId, bindingId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/devices/${encodeURIComponent(deviceId)}/active-scene`)
+            .method('PUT')
+            .data({ bindingId, switchRequestId: `web-${Date.now()}-${Math.random().toString(16).slice(2)}` })
+            .success(callback)
+            .networkFail(() => callback(networkErrorResponse('切换设备场景失败')))
+            .send();
+    },
 }

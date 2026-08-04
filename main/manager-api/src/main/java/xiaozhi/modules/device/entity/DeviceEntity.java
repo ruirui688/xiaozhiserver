@@ -46,6 +46,9 @@ public class DeviceEntity {
     @Schema(description = "智能体ID")
     private String agentId;
 
+    @Schema(description = "设备运行配置版本")
+    private Long configVersion;
+
     @Schema(description = "固件版本号")
     private String appVersion;
 

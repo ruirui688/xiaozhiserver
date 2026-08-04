@@ -3,11 +3,13 @@ package xiaozhi.modules.agent.entity;
 import java.io.Serializable;
 import java.math.BigDecimal;
 import java.util.Date;
+import java.util.List;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
 
 import lombok.Data;
 
@@ -16,7 +18,7 @@ import lombok.Data;
  * 
  * @TableName ai_agent_template
  */
-@TableName(value = "ai_agent_template")
+@TableName(value = "ai_agent_template", autoResultMap = true)
 @Data
 public class AgentTemplateEntity implements Serializable {
     /**
@@ -24,6 +26,9 @@ public class AgentTemplateEntity implements Serializable {
      */
     @TableId(type = IdType.ASSIGN_UUID)
     private String id;
+
+    /** 模板快照版本。 */
+    private Integer version;
 
     /**
      * 智能体编码
@@ -39,6 +44,13 @@ public class AgentTemplateEntity implements Serializable {
      * 语音识别模型标识
      */
     private String asrModelId;
+
+    /** 当前生效的 ASR 热词表。 */
+    private String asrHotwordId;
+
+    /** 可选 ASR 热词表，模板仅保存引用。 */
+    @TableField(typeHandler = JacksonTypeHandler.class)
+    private List<String> asrHotwordIds;
 
     /**
      * 语音活动检测标识

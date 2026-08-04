@@ -7,6 +7,7 @@ import threading
 import time
 
 from config.config_loader import get_private_config_from_api
+from config.manage_api_client import report_device_scene_switch_result
 from config.logger import build_module_string, create_connection_logger
 from core.providers.tts.default import DefaultTTS
 from core.session.runtime_config import (
@@ -14,6 +15,7 @@ from core.session.runtime_config import (
     build_managed_runtime_config,
     runtime_config_fingerprint,
 )
+from core.session.scene_switch import SceneSwitchIsolation
 from core.utils.modules_initialize import initialize_modules
 from core.utils.prompt_manager import PromptManager
 from core.conversation import ConversationRouter
@@ -31,6 +33,7 @@ class RuntimeConfigReloader:
         self._lock = asyncio.Lock()
         self._pending = False
         self._pending_reason = ""
+        self._pending_scene_switch = None
         self._fingerprint = None
         self._last_checked_at = 0.0
 
@@ -40,9 +43,14 @@ class RuntimeConfigReloader:
         self._pending_reason = ""
         self._last_checked_at = time.monotonic()
 
-    def request_refresh(self, reason="manager_update"):
+    def request_refresh(self, reason="manager_update", scene_switch=None):
         self._pending = True
         self._pending_reason = str(reason or "manager_update")[:64]
+        normalized = self._normalize_scene_switch(scene_switch)
+        if normalized is not None:
+            current = self._pending_scene_switch
+            if current is None or normalized["configVersion"] >= current["configVersion"]:
+                self._pending_scene_switch = normalized
 
     async def refresh_if_due(self, force=False, reason="turn_boundary"):
         conn = self.conn
@@ -74,6 +82,7 @@ class RuntimeConfigReloader:
             ):
                 return False
             self._last_checked_at = now
+            scene_switch = self._pending_scene_switch
 
             headers = getattr(conn, "headers", {}) or {}
             device_id = headers.get("device-id") or getattr(conn, "device_id", None)
@@ -81,40 +90,63 @@ class RuntimeConfigReloader:
             if not device_id:
                 return False
 
-            private_config = await get_private_config_from_api(
-                conn.config, device_id, client_id
-            )
-            if not isinstance(private_config, dict):
-                raise RuntimeError("智控台未返回有效运行时配置")
-            private_config["delete_audio"] = bool(
-                conn.common_config.get("delete_audio", True)
-            )
-            fingerprint = runtime_config_fingerprint(private_config)
-            if fingerprint == self._fingerprint:
-                self._pending = False
-                self._pending_reason = ""
-                return False
+            try:
+                private_config = await get_private_config_from_api(
+                    conn.config, device_id, client_id
+                )
+                if not isinstance(private_config, dict):
+                    raise RuntimeError("智控台未返回有效运行时配置")
+                private_config["delete_audio"] = bool(
+                    conn.common_config.get("delete_audio", True)
+                )
+                fingerprint = runtime_config_fingerprint(private_config)
+                if scene_switch is not None and str(
+                    private_config.get("agent_id") or ""
+                ) != scene_switch["toAgentId"]:
+                    raise RuntimeError("场景切换目标已被更新请求替代")
+                if fingerprint == self._fingerprint:
+                    self._clear_completed_request(scene_switch)
+                    if scene_switch is not None:
+                        await self._report_scene_status(scene_switch, "APPLIED")
+                    return False
 
-            candidate_config = build_managed_runtime_config(
-                conn.common_config, private_config
-            )
-            refresh_reason = self._pending_reason or reason
-            await self._replace_pipeline(candidate_config)
-            self._fingerprint = fingerprint
-            self._pending = False
-            self._pending_reason = ""
-            conn.logger.bind(tag=__name__).info(
-                "智能体运行配置已热更新: deviceId={}, agentId={}, reason={}, modules={}",
-                getattr(conn, "device_id", None),
-                candidate_config.get("agent_id"),
-                refresh_reason,
-                build_module_string(candidate_config.get("selected_module", {})),
-            )
-            return True
+                candidate_config = build_managed_runtime_config(
+                    conn.common_config, private_config
+                )
+                refresh_reason = self._pending_reason or reason
+                old_agent_id = str(conn.config.get("agent_id") or "")
+                new_agent_id = str(candidate_config.get("agent_id") or "")
+                scene_changed = bool(old_agent_id and new_agent_id != old_agent_id)
+                await self._replace_pipeline(
+                    candidate_config, isolate_scene=scene_changed
+                )
+                self._fingerprint = fingerprint
+                self._clear_completed_request(scene_switch)
+                if scene_switch is not None:
+                    await self._report_scene_status(scene_switch, "APPLIED")
+                conn.logger.bind(tag=__name__).info(
+                    "智能体运行配置已热更新: deviceId={}, agentId={}, reason={}, sceneChanged={}, modules={}",
+                    getattr(conn, "device_id", None),
+                    candidate_config.get("agent_id"),
+                    refresh_reason,
+                    scene_changed,
+                    build_module_string(candidate_config.get("selected_module", {})),
+                )
+                return True
+            except Exception as error:
+                if scene_switch is not None:
+                    self._clear_completed_request(scene_switch)
+                    await self._report_scene_status(
+                        scene_switch,
+                        "FAILED",
+                        failure_code=type(error).__name__,
+                    )
+                raise
 
-    async def _replace_pipeline(self, candidate_config):
+    async def _replace_pipeline(self, candidate_config, isolate_scene=False):
         conn = self.conn
         old_config = copy.deepcopy(conn.config)
+        scene_snapshot = None
         new_modules = await self._build_modules(candidate_config)
         if getattr(conn, "closing", False) or getattr(conn, "closed", False):
             await self._close_unactivated_modules(new_modules)
@@ -125,6 +157,8 @@ class RuntimeConfigReloader:
             await self._close_unactivated_modules(new_modules)
             raise
         try:
+            if isolate_scene:
+                scene_snapshot = SceneSwitchIsolation.begin(conn)
             await self._activate_pipeline(candidate_config, new_modules)
         except Exception as error:
             conn.logger.bind(tag=__name__).error(
@@ -132,9 +166,63 @@ class RuntimeConfigReloader:
                 type(error).__name__,
             )
             await self._deactivate_pipeline()
+            if scene_snapshot is not None:
+                SceneSwitchIsolation.rollback(conn, scene_snapshot)
             rollback_modules = await self._build_modules(old_config)
             await self._activate_pipeline(old_config, rollback_modules)
             raise
+
+    def _clear_completed_request(self, scene_switch):
+        if (
+            scene_switch is None
+            and self._pending_scene_switch is None
+        ) or self._pending_scene_switch is scene_switch:
+            self._pending = False
+            self._pending_reason = ""
+            self._pending_scene_switch = None
+
+    async def _report_scene_status(
+        self, scene_switch, status, failure_code=None
+    ):
+        payload = {
+            "deviceId": scene_switch["deviceId"],
+            "switchRequestId": scene_switch["switchRequestId"],
+            "agentId": scene_switch["toAgentId"],
+            "configVersion": scene_switch["configVersion"],
+            "status": status,
+        }
+        if failure_code:
+            payload["failureCode"] = str(failure_code)[:64]
+        try:
+            await report_device_scene_switch_result(payload)
+        except Exception as error:
+            self.conn.logger.bind(tag=__name__).warning(
+                "场景切换状态回传失败: requestId={}, status={}, errorType={}",
+                scene_switch["switchRequestId"],
+                status,
+                type(error).__name__,
+            )
+
+    @staticmethod
+    def _normalize_scene_switch(value):
+        if not isinstance(value, dict):
+            return None
+        normalized = {
+            "deviceId": str(value.get("deviceId") or "").strip(),
+            "fromAgentId": str(value.get("fromAgentId") or "").strip(),
+            "toAgentId": str(value.get("toAgentId") or "").strip(),
+            "switchRequestId": str(value.get("switchRequestId") or "").strip(),
+        }
+        try:
+            normalized["configVersion"] = int(value.get("configVersion"))
+        except (TypeError, ValueError):
+            return None
+        if not all(
+            normalized[key]
+            for key in ("deviceId", "toAgentId", "switchRequestId")
+        ) or normalized["configVersion"] < 0:
+            return None
+        return normalized
 
     async def _build_modules(self, config):
         modules = await asyncio.to_thread(

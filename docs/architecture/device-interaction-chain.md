@@ -14,6 +14,8 @@ source_paths:
 
 先读：[项目完整架构](project-architecture.md)、[运行时链路](runtime-flows.md)、[提示词注入工程](prompt-injection-engineering.md)。
 
+一台设备关联多个智能体及在线无重连切换的契约见[设备多场景管理](device-scene-management.md)。
+
 ## 1. 链路人总览
 
 ```text

@@ -17,7 +17,7 @@ source_paths:
 | 了解系统 | [项目架构](./architecture/project-architecture.md) | [运行流程](./architecture/runtime-flows.md)、[数据与契约](./architecture/data-and-contracts.md) |
 | 本地启动与排障 | [本地开发](./development/local-dev-workflow.md) | 根目录 `scripts/dev doctor` |
 | 生产发布 | [ACR 生产部署](./deployment/private-docker-release.md) | [本地 Docker](./deployment/local-docker-deploy-guide.md) |
-| 实时语音、设备、OTA | [设备交互链路](./architecture/device-interaction-chain.md) | [固件与 OTA](./device/firmware-build.md) |
+| 实时语音、设备、OTA | [设备交互链路](./architecture/device-interaction-chain.md) | [设备多场景](./architecture/device-scene-management.md)、[固件与 OTA](./device/firmware-build.md) |
 | LLM、ASR、TTS 模型 | [模型管理](./models/model-management.md) | [模型评测与配置助手](./architecture/model-benchmark-and-assistant.md) |
 | 记忆 | [记忆系统](./architecture/memory-system-chain.md) | [PowerMem](./models/powermem-integration.md) |
 | 知识库与切片 | [知识库链路](./architecture/knowledge-base-chain.md) | [RAGFlow](./models/ragflow-integration.md) |

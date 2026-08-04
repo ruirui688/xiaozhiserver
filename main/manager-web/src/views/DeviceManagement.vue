@@ -68,6 +68,7 @@
                   <el-button size="mini" type="text" @click="handleAudioPreview(scope.row)">
                     {{ $t('deviceAudioPreview.button') }}
                   </el-button>
+                  <el-button size="mini" type="text" @click="handleScenes(scope.row)">场景</el-button>
                   <el-button size="mini" type="text" @click="handleUnbind(scope.row.device_id)">
                     {{ $t('device.unbind') }}
                   </el-button>
@@ -124,6 +125,7 @@
     <ManualAddDeviceDialog :visible.sync="manualAddDeviceDialogVisible" :agent-id="currentAgentId"
       @refresh="fetchBindDevices(currentAgentId)" />
     <DeviceAudioPreviewDialog ref="audioPreviewDialog" />
+    <DeviceSceneDialog ref="sceneDialog" @switched="fetchBindDevices(currentAgentId)" />
     <el-footer>
       <version-footer />
     </el-footer>
@@ -138,6 +140,7 @@ import DeviceAudioPreviewDialog from "@/components/DeviceAudioPreviewDialog.vue"
 import ManualAddDeviceDialog from "@/components/ManualAddDeviceDialog.vue";
 import VersionFooter from "@/components/VersionFooter.vue";
 import MacAddressMask from "@/components/MacAddressMask.vue";
+import DeviceSceneDialog from "@/components/scene/DeviceSceneDialog.vue";
 
 export default {
   components: {
@@ -147,6 +150,7 @@ export default {
     VersionFooter,
     MacAddressMask,
     DeviceAudioPreviewDialog,
+    DeviceSceneDialog,
   },
   data() {
     return {
@@ -295,6 +299,9 @@ export default {
     },
     handleAudioPreview(row) {
       this.$refs.audioPreviewDialog.open(row);
+    },
+    handleScenes(row) {
+      this.$refs.sceneDialog.open(row);
     },
     submitRemark(row) {
       if (row._submitting) return;

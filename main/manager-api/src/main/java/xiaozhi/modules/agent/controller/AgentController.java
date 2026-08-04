@@ -60,6 +60,7 @@ import xiaozhi.modules.agent.vo.AgentChatHistoryUserVO;
 import xiaozhi.modules.agent.vo.AgentInfoVO;
 import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.device.service.DeviceService;
+import xiaozhi.modules.device.service.DeviceSceneService;
 import xiaozhi.modules.security.user.SecurityUser;
 import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 
@@ -83,6 +84,7 @@ public class AgentController {
     private final CorrectWordFileService correctWordFileService;
     private final WorkspacePermissionService workspacePermissionService;
     private final AgentSemanticSkillService agentSemanticSkillService;
+    private final DeviceSceneService deviceSceneService;
 
     @GetMapping("/list")
     @Operation(summary = "获取用户智能体列表")
@@ -191,6 +193,7 @@ public class AgentController {
     public Result<Void> delete(@PathVariable String id) {
         AgentInfoVO agent = agentService.getAgentById(id);
         workspacePermissionService.requireWrite(agent.getWorkspaceId());
+        deviceSceneService.assertAgentNotBound(id);
         // 先删除关联的设备
         deviceService.deleteByAgentId(id);
         // 删除关联的聊天记录

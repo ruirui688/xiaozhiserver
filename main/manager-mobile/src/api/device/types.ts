@@ -19,3 +19,19 @@ export interface Device {
   creator: string
   createDate: string
 }
+
+export interface DeviceScene {
+  id: string
+  deviceId: string
+  agentId: string
+  agentName: string
+  sceneName: string
+  switchAliases: string[]
+  enabled: number
+  sort: number
+  current: boolean
+  configVersion: number
+  switchRequestId?: string
+  switchStatus?: 'REQUESTED' | 'SCHEDULED' | 'APPLIED' | 'FAILED' | 'ROLLED_BACK'
+  failureCode?: string
+}

@@ -98,6 +98,7 @@ class DeviceOtaConfigTest {
                 mock(OtaService.class),
                 agentDao,
                 mock(WorkspaceService.class),
-                mock(WorkspacePermissionService.class));
+                mock(WorkspacePermissionService.class),
+                mock(xiaozhi.modules.device.service.DeviceSceneService.class));
     }
 }

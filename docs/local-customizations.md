@@ -800,3 +800,20 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 是否允许被官方覆盖：否
 官方同步时的处理规则：必须保留 selected_module.LLM + model_config.<id>.typed_config 的单一选择契约；conversation_mode=realtime 使用独立 Realtime adapter，缺省继续走传统拼接。实时模式接管当前会话音频、图片和工具协议，但工具仍执行统一服务端门控；传统 VAD/ASR/TTS/VLLM 配置保留供手动切回。实时建连、响应、图片或工具失败不得静默切换为传统半轮；端点必须使用受支持的 wss 官方主机并防止 API Key 外发。Realtime 可以注入建立会话时的静态摘要并上报事件，但不等同于传统逐轮动态记忆查询，也不能隐式承担知识库切片、Judge、短期总结或主动记忆维护的同步文本 LLM。单模型测试必须建立真实 Realtime 会话并记录首文本/首音频/总耗时；自动测试必须覆盖路由、音频转换、工具回注、图片、Abort、关闭和模式切换。
 ```
+
+## 41. 设备多场景与按设备在线切换
+
+```text
+定制模块：manager-api 设备场景关系/切换审计、xiaozhi-server 按设备热更新与会话隔离、Web/Mobile 场景管理
+改动原因：一台物理设备需要在日常助手、英语老师、儿童陪伴等已有智能体之间切换，但不能复制模型、插件、知识库、密钥和长期记忆运行架构。
+关键文件：
+  - main/manager-api/src/main/java/xiaozhi/modules/device/
+  - main/manager-api/src/main/resources/db/changelog/202608040930.sql
+  - main/xiaozhi-server/core/session/scene_switch.py
+  - main/xiaozhi-server/core/session/runtime_config_reloader.py
+  - main/manager-web/src/components/scene/DeviceSceneDialog.vue
+  - main/manager-mobile/src/pages/device/components/DeviceScenePanel.vue
+  - docs/architecture/device-scene-management.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：必须保留 ai_device.agent_id 作为当前生效智能体唯一事实源、device_id+agent_id 唯一场景关系、同工作空间与资源所有权校验、每设备最多20个场景、switch_request_id 幂等和 config_version 单调防旧请求覆盖。在线切换必须在安全轮次边界先初始化候选管线，失败恢复旧管线并仅在版本仍匹配时回滚数据库；同智能体热更新保留会话，跨智能体必须更换 session_id 并隔离对话、工具、游戏、会议、声纹元数据和临时 TTS override。模板和场景只能引用已授权资源，禁止复制 API Key、Token、第三方凭据、聊天历史、长期记忆事实或声纹样本。服务端状态回传除共享密钥外还必须匹配已登记的 device/request/agent/version 事实，日志不得记录提示词、热词正文或凭据。
+```

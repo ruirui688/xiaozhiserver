@@ -172,6 +172,15 @@ async def get_server_config() -> Optional[Dict]:
     )
 
 
+async def report_device_scene_switch_result(payload: Dict) -> Optional[Dict]:
+    """Report only bounded scene-switch metadata; never include provider errors."""
+    if not ManageApiClient._instance:
+        return None
+    return await ManageApiClient._instance._execute_async_request(
+        "POST", "/config/device-scenes/switch-result", json=payload
+    )
+
+
 async def get_agent_models(
     mac_address: str, client_id: str, selected_module: Dict
 ) -> Optional[Dict]:

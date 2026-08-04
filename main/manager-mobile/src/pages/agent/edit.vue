@@ -456,7 +456,7 @@ function selectRoleTemplate(templateId: string) {
       llmModelId: template.llmModelId || formData.value.llmModelId,
       slmModelId: isRealtimeModel(templateLlm)
         ? formData.value.slmModelId
-        : (template.llmModelId || formData.value.slmModelId),
+        : (template.slmModelId || formData.value.slmModelId),
       vllmModelId: template.vllmModelId || formData.value.vllmModelId,
       intentModelId: template.intentModelId || formData.value.intentModelId,
       memModelId: template.memModelId || formData.value.memModelId,

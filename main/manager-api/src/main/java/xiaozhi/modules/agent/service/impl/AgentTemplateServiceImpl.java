@@ -4,6 +4,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 
@@ -94,13 +95,20 @@ public class AgentTemplateServiceImpl extends ServiceImpl<AgentTemplateDao, Agen
     @Override
     public boolean save(AgentTemplateEntity entity) {
         sanitizeTemplateModelIds(entity);
+        entity.setVersion(1);
         return super.save(entity);
     }
 
     @Override
     public boolean updateById(AgentTemplateEntity entity) {
         sanitizeTemplateModelIds(entity);
-        return super.updateById(entity);
+        if (entity == null || StringUtils.isBlank(entity.getId())) {
+            return false;
+        }
+        entity.setVersion(null);
+        return baseMapper.update(entity, new LambdaUpdateWrapper<AgentTemplateEntity>()
+                .eq(AgentTemplateEntity::getId, entity.getId())
+                .setSql("version = version + 1")) == 1;
     }
 
     @Override
@@ -154,6 +162,7 @@ public class AgentTemplateServiceImpl extends ServiceImpl<AgentTemplateDao, Agen
         entity.setAsrModelId(resolveEnabledModelId("ASR", entity.getAsrModelId()));
         entity.setVadModelId(resolveEnabledModelId("VAD", entity.getVadModelId()));
         entity.setLlmModelId(resolveEnabledModelId("LLM", entity.getLlmModelId()));
+        entity.setSlmModelId(resolveEnabledModelId("SLM", entity.getSlmModelId()));
         entity.setVllmModelId(resolveEnabledModelId("VLLM", entity.getVllmModelId()));
         entity.setTtsModelId(resolveEnabledModelId("TTS", entity.getTtsModelId()));
         entity.setMemModelId(resolveEnabledModelId("Memory", entity.getMemModelId()));

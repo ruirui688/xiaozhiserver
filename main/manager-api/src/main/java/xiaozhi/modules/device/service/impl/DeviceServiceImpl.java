@@ -23,6 +23,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.aop.framework.AopContext;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -62,6 +63,7 @@ import xiaozhi.modules.device.dto.DeviceReportRespDTO;
 import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.device.entity.OtaEntity;
 import xiaozhi.modules.device.service.DeviceService;
+import xiaozhi.modules.device.service.DeviceSceneService;
 import xiaozhi.modules.device.service.OtaService;
 import xiaozhi.modules.device.vo.UserShowDeviceListVO;
 import xiaozhi.modules.agent.dao.AgentDao;
@@ -84,6 +86,7 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
     private final AgentDao agentDao;
     private final WorkspaceService workspaceService;
     private final WorkspacePermissionService workspacePermissionService;
+    private final DeviceSceneService deviceSceneService;
 
     @Async
     public void updateDeviceConnectionInfo(String agentId, String deviceId, String appVersion) {
@@ -104,6 +107,7 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public Boolean deviceActivation(String agentId, String activationCode) {
         if (StringUtils.isBlank(activationCode)) {
             throw new RenException(ErrorCode.ACTIVATION_CODE_EMPTY);
@@ -158,6 +162,7 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         deviceEntity.setUpdateDate(currentTime);
         deviceEntity.setLastConnectedAt(currentTime);
         deviceDao.insert(deviceEntity);
+        deviceSceneService.ensureCurrentBinding(deviceEntity, agent, user.getId());
 
         // 清理redis缓存、清除智能体设备数量缓存
         redisUtils.delete(List.of(cacheDeviceKey, deviceKey, RedisKeys.getAgentDeviceCountById(agentId)));
@@ -334,6 +339,7 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void unbindDevice(Long userId, String deviceId) {
         // 先查询设备信息，获取agentId
         DeviceEntity device = baseDao.selectById(deviceId);
@@ -346,6 +352,7 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
             redisUtils.delete(RedisKeys.getAgentDeviceCountById(device.getAgentId()));
         }
 
+        deviceSceneService.deleteByDeviceId(deviceId);
         UpdateWrapper<DeviceEntity> wrapper = new UpdateWrapper<>();
         wrapper.eq("workspace_id", device.getWorkspaceId());
         wrapper.eq("id", deviceId);
@@ -580,6 +587,7 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void manualAddDevice(Long userId, DeviceManualAddDTO dto) {
         AgentEntity agent = agentDao.selectById(dto.getAgentId());
         if (agent == null) {
@@ -609,6 +617,7 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         entity.setUpdater(userId);
         entity.setAutoUpdate(1);
         baseDao.insert(entity);
+        deviceSceneService.ensureCurrentBinding(entity, agent, userId);
 
         // 添加：清除智能体设备数量缓存
         redisUtils.delete(RedisKeys.getAgentDeviceCountById(dto.getAgentId()));

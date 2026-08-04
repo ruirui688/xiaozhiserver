@@ -12,6 +12,9 @@ config.settings.config_file_valid = True
 import core.session.runtime_config_reloader as reloader_module
 from core.session.runtime_config import build_managed_runtime_config
 from core.session.runtime_config_reloader import RuntimeConfigReloader
+from core.session.scene_switch import SceneSwitchIsolation
+from core.session.tts_session_options import SessionTTSOptions
+from core.utils.dialogue import Dialogue, Message
 
 
 def _model(model_type, model_id, **typed_config):
@@ -233,3 +236,45 @@ def test_activate_realtime_pipeline_publishes_readiness_after_router(monkeypatch
     assert conn.tts_ready.is_set()
     assert conn.conversation_ready.is_set()
     assert conn.audio_input_ready.is_set()
+
+
+def test_scene_switch_isolation_resets_and_can_restore_session_state():
+    dialogue = Dialogue()
+    dialogue.put(Message(role="user", content="old scene secret"))
+    options = SessionTTSOptions()
+    options.restore({"voice": "old-voice"})
+    conn = SimpleNamespace(
+        session_id="old-session",
+        dialogue=dialogue,
+        game_session_manager=object(),
+        meeting_minutes=object(),
+        turn_context=object(),
+        reply_lifecycle=object(),
+        voiceprint_enrollment=object(),
+        tts_session_options=options,
+        current_speaker="Alice",
+        current_speaker_id="speaker-a",
+        last_tool_context={"tool": "old"},
+        sentence_id="sentence-a",
+        calling=True,
+        _tts_protocol_sentence_id="sentence-a",
+        _tts_protocol_start_sent=True,
+        _tts_protocol_stop_sent=False,
+    )
+
+    snapshot = SceneSwitchIsolation.begin(conn)
+
+    assert conn.session_id != "old-session"
+    assert conn.dialogue.dialogue == []
+    assert conn.current_speaker is None
+    assert conn.last_tool_context is None
+    assert conn.tts_session_options.snapshot() == {}
+
+    SceneSwitchIsolation.rollback(conn, snapshot)
+    assert conn.session_id == "old-session"
+    assert conn.dialogue.dialogue[0].content == "old scene secret"
+    assert conn.current_speaker == "Alice"
+    assert conn.tts_session_options.snapshot() == {"voice": "old-voice"}
+    assert conn._tts_protocol_sentence_id == "sentence-a"
+    assert conn._tts_protocol_start_sent is True
+    assert conn._tts_protocol_stop_sent is False

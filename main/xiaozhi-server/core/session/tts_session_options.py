@@ -116,6 +116,18 @@ class SessionTTSOptions:
         with self._lock:
             return dict(self._overrides)
 
+    def reset(self) -> None:
+        """Forget all connection-scoped overrides during a scene transition."""
+        with self._lock:
+            self._provider_identity = None
+            self._overrides.clear()
+
+    def restore(self, overrides: Dict[str, Any]) -> None:
+        """Restore override intent after a failed scene transition."""
+        with self._lock:
+            self._provider_identity = None
+            self._overrides = dict(overrides or {})
+
     @staticmethod
     def _normalize_requested(requested: Dict[str, Any]) -> Dict[str, Any]:
         normalized: Dict[str, Any] = {}

@@ -63,3 +63,45 @@ def test_refresh_rejects_wrong_secret():
         _Request({"agentIds": ["agent-a"]}, token="wrong")
     ))
     assert response.status == 401
+
+
+def test_scene_refresh_targets_device_and_preserves_switch_context(monkeypatch):
+    captured = {}
+    reloader = SimpleNamespace()
+
+    def request_refresh(reason, scene_switch=None):
+        captured.update(reason=reason, scene_switch=scene_switch)
+
+    reloader.request_refresh = request_refresh
+    conn = SimpleNamespace(
+        runtime_config_reloader=reloader,
+        client_is_speaking=True,
+        device_id="device-a",
+    )
+    report_result = AsyncMock(return_value=None)
+    monkeypatch.setattr(handler_module, "get_connection", lambda value: conn if value == "device-a" else None)
+    monkeypatch.setattr(handler_module, "report_device_scene_switch_result", report_result)
+    handler = RuntimeConfigRefreshHandler(
+        {"server": {"auth_key": "server-secret"}, "manager-api": {"secret": "manager-secret"}}
+    )
+    scene_switch = {
+        "deviceId": "device-a",
+        "fromAgentId": "agent-a",
+        "toAgentId": "agent-b",
+        "switchRequestId": "request-a",
+        "configVersion": 2,
+    }
+
+    response = asyncio.run(handler.handle_refresh(_Request({
+        "deviceIds": ["device-a"],
+        "reason": "device_scene_switched",
+        "sceneSwitch": scene_switch,
+    })))
+    payload = json.loads(response.text)
+
+    assert response.status == 200
+    assert payload["data"]["deviceCount"] == 1
+    assert payload["data"]["scheduled"] == 1
+    assert captured == {"reason": "device_scene_switched", "scene_switch": scene_switch}
+    report_result.assert_awaited_once()
+    assert report_result.await_args.args[0]["status"] == "SCHEDULED"

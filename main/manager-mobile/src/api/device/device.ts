@@ -1,4 +1,4 @@
-import type { Device, FirmwareType } from './types'
+import type { Device, DeviceScene, FirmwareType } from './types'
 import { http } from '@/http/request/alova'
 
 /**
@@ -67,5 +67,28 @@ export function updateDeviceAutoUpdate(deviceId: string, autoUpdate: number) {
 export function unbindDevice(deviceId: string) {
   return http.Post('/device/unbind', {
     deviceId,
+  })
+}
+
+export function getDeviceScenes(deviceId: string) {
+  return http.Get<DeviceScene[]>(`/devices/${encodeURIComponent(deviceId)}/scenes`, {
+    cacheFor: { expire: 0 },
+  })
+}
+
+export function createDeviceScene(deviceId: string, data: {
+  agentId: string
+  sceneName: string
+  switchAliases?: string[]
+  enabled?: number
+  sort?: number
+}) {
+  return http.Post<DeviceScene>(`/devices/${encodeURIComponent(deviceId)}/scenes`, data)
+}
+
+export function switchDeviceScene(deviceId: string, bindingId: string) {
+  return http.Put<DeviceScene>(`/devices/${encodeURIComponent(deviceId)}/active-scene`, {
+    bindingId,
+    switchRequestId: `mobile-${Date.now()}-${Math.random().toString(16).slice(2)}`,
   })
 }

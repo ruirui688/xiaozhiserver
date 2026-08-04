@@ -75,6 +75,7 @@ export interface RoleTemplate {
   asrModelId: string
   vadModelId: string
   llmModelId: string
+  slmModelId: string
   vllmModelId: string
   ttsModelId: string
   ttsVoiceId: string
