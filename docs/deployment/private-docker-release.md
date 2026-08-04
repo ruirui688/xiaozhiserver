@@ -935,6 +935,43 @@ changeSet 被改过。处理原则是：不要清数据库、不要删 `DATABASE
 已执行过的迁移文件、changeSet id、author 和 sqlFile 路径都不能当作普通代码
 继续修改。
 
+#### 12.2.1 Spring 循环依赖事故复盘（2026-08-04）
+
+版本 `44a9b00e` 在生产更新时，MySQL、Redis 和 Liquibase 均正常，但
+`xiaozhi-esp32-manager-api` 始终不能通过健康检查。表面现象是 Compose 等待服务端口超时，
+真实原因是新增 Realtime 模型评测组件在 Spring 启动阶段被完整实例化，形成了以下依赖闭环：
+
+```text
+SysParamsService
+-> AgentPluginMappingService
+-> KnowledgeBaseService
+-> ModelConfigService
+-> ModelTestService
+-> Realtime ModelTester
+-> PythonBenchmarkClient / BenchmarkRequestAuth
+-> SysParamsService
+```
+
+修复分成两个提交：
+
+- `713692c7`：为 `BenchmarkRequestAuth` 构造参数中的 `SysParamsService` 增加 `@Lazy`。
+- `254aa2b5`：继续为 `PythonBenchmarkClient` 构造参数中的另一处 `SysParamsService` 增加 `@Lazy`。
+
+第一处修复后仍失败，是因为同一功能链上存在两条直接回到 `SysParamsService` 的依赖边；Spring 每次只报告
+当前无法打破的 Bean cycle，第一条延迟后第二条才成为新的闭环出口。单元测试此前没有发现问题，是因为相关测试使用
+Mockito 或手工构造 tester/client，没有启动完整 Spring ApplicationContext，也没有覆盖所有 tester 在容器启动阶段
+被扫描和实例化的真实顺序。Compose 只报告 dependent container unhealthy，因此如果只看端口、数据库和 Liquibase，
+很容易把 Bean 装配失败误判为部署网络或健康检查问题。
+
+后续规则：
+
+- 新增 `ModelTestExecutor` 只能依赖最小的运行时调用客户端；不得直接依赖 `SysParamsService`、模型配置服务、知识库服务或安全过滤器。
+- 启动关键链路需要系统参数时，在最靠近实际 HTTP 调用的位置延迟解析；不得为了启动成功开启 `spring.main.allow-circular-references`。
+- 对同一个依赖图要检查所有返回边，不能看到第一处 `@Lazy` 后就假定闭环已经完全消失。
+- 发布前除 `mvn test` 外，必须增加一次 manager-api 完整 Spring 启动冒烟检查，并等待健康端口真实可用后再制作生产版本。
+- 健康检查失败时先读取 manager-api 完整日志中的 `BeanCurrentlyInCreationException` / dependency cycle，再检查数据库、Liquibase 和网络；Compose 最后一行不是根因。
+- 回归测试既要保留构造参数 `@Lazy` 反射断言，也要补完整 ApplicationContext 启动覆盖，防止 Lombok 构造器改写或新依赖再次把闭环接回去。
+
 ### 12.3 xiaozhi-server 反复重启
 
 查看日志：
