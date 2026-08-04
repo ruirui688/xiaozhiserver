@@ -98,6 +98,9 @@ export interface ModelOption {
   modelName: string
   adapterCode?: string
   protocol?: string
+  type?: string
+  conversationMode?: string
+  realtime?: boolean
 }
 
 export interface PluginField {

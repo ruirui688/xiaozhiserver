@@ -90,7 +90,12 @@
                 min-width="180"
               >
                 <template slot-scope="scope">
-                  <div class="model-primary">{{ scope.row.modelName }}</div>
+                  <div class="model-primary">
+                    {{ scope.row.modelName }}
+                    <el-tag v-if="isRealtimeModel(scope.row)" size="mini" type="warning">
+                      {{ $t("realtimeModel.badge") }}
+                    </el-tag>
+                  </div>
                 </template>
               </el-table-column>
               <el-table-column
@@ -315,6 +320,10 @@
         class="test-result-dialog"
       >
         <div v-if="currentTestResult" class="test-result-content">
+          <realtime-model-notice
+            :model="currentTestModel"
+            context="test"
+          />
           <div class="test-result-row">
             <span class="test-result-label">{{ $t("modelConfig.testResult") }}</span>
             <el-tag size="mini" :type="isModelTestVerified(currentTestResult) ? 'success' : 'danger'">
@@ -331,7 +340,7 @@
             <span>{{ formatResponseTime(currentTestResult.responseTimeMs) }}</span>
           </div>
           <div v-if="shouldShowFirstTextMetric(currentTestResult)" class="test-result-row">
-            <span class="test-result-label">{{ $t("modelConfig.firstAsrText") }}</span>
+            <span class="test-result-label">{{ getFirstTextMetricLabel() }}</span>
             <span>{{ formatResponseTime(currentTestResult.firstTextMs) }}</span>
           </div>
           <div v-if="shouldShowFirstAudioMetric(currentTestResult)" class="test-result-row">
@@ -384,8 +393,10 @@ import HeaderBar from "@/components/HeaderBar.vue";
 import ModelBenchmarkDialog from "@/components/ModelBenchmarkDialog.vue";
 import ModelConfigAssistant from "@/components/ModelConfigAssistant.vue";
 import ModelEditDialog from "@/components/ModelEditDialog.vue";
+import RealtimeModelNotice from "@/components/model/RealtimeModelNotice.vue";
 import TtsModel from "@/components/TtsModel.vue";
 import VersionFooter from "@/components/VersionFooter.vue";
+import { isRealtimeModel as isRealtimeConversationModel } from "@/utils/realtimeModel";
 
 export default {
   components: {
@@ -393,6 +404,7 @@ export default {
     ModelBenchmarkDialog,
     ModelEditDialog,
     ModelConfigAssistant,
+    RealtimeModelNotice,
     TtsModel,
     VersionFooter,
   },
@@ -416,6 +428,7 @@ export default {
       testingModelId: "",
       testResultDialogVisible: false,
       currentTestResult: null,
+      currentTestModel: null,
       benchmarkDialogVisible: false,
       performanceTesting: false,
       catalogItems: [],
@@ -501,6 +514,9 @@ export default {
   },
 
   methods: {
+    isRealtimeModel(model) {
+      return isRealtimeConversationModel(model);
+    },
     // 更新选择列表头翻译文本
     updateSelectionHeaderText() {
       const thElement = document.querySelector(`.el-table__header th:nth-child(1) .cell`);
@@ -709,10 +725,17 @@ export default {
       return !!(result && result.testAudioDataUrl && this.isTtsTestResult(result));
     },
     shouldShowFirstTextMetric(result) {
-      return !!(result && this.activeTab === "asr" && result.firstTextMs !== null && result.firstTextMs !== undefined && result.firstTextMs !== "");
+      const supportedType = this.activeTab === "asr" || this.isRealtimeModel(this.currentTestModel);
+      return !!(result && supportedType && result.firstTextMs !== null && result.firstTextMs !== undefined && result.firstTextMs !== "");
     },
     shouldShowFirstAudioMetric(result) {
-      return !!(result && this.activeTab === "tts" && result.firstAudioMs !== null && result.firstAudioMs !== undefined && result.firstAudioMs !== "");
+      const supportedType = this.activeTab === "tts" || this.isRealtimeModel(this.currentTestModel);
+      return !!(result && supportedType && result.firstAudioMs !== null && result.firstAudioMs !== undefined && result.firstAudioMs !== "");
+    },
+    getFirstTextMetricLabel() {
+      return this.isRealtimeModel(this.currentTestModel)
+        ? this.$t("modelConfig.realtimeFirstText")
+        : this.$t("modelConfig.firstAsrText");
     },
     getTestInputLabel(result) {
       return this.isTtsTestResult(result)
@@ -862,6 +885,7 @@ export default {
         }
         return;
       }
+      this.currentTestModel = model;
       this.testingModelId = model.id;
       Api.model.testModel(model.id, ({ data }) => {
         this.clearTestingModelState();
@@ -981,6 +1005,7 @@ export default {
           return;
         }
 
+        this.currentTestModel = { ...formData, id };
         this.testingModelId = id;
         Api.model.testModel(id, ({ data }) => {
           this.clearTestingModelState();
@@ -1813,6 +1838,9 @@ export default {
 }
 
 .model-primary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   color: #303133;
   font-weight: 600;
   line-height: 22px;

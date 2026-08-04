@@ -1,5 +1,7 @@
 """统一工具管理器"""
 
+import asyncio
+
 from typing import Dict, List, Optional, Any
 from config.logger import setup_logging
 from plugins_func.register import Action, ActionResponse
@@ -118,6 +120,32 @@ class ToolManager:
         """刷新工具缓存"""
         self._invalidate_cache()
         self.logger.debug("工具缓存已刷新")
+        router = getattr(self.conn, "conversation_router", None)
+        loop = getattr(self.conn, "loop", None)
+        if (
+            router is None
+            or not router.is_realtime
+            or router.session is None
+            or loop is None
+        ):
+            return
+
+        async def sync_realtime_tools():
+            try:
+                await router.refresh_tools()
+            except Exception as error:
+                self.logger.warning(
+                    f"同步Realtime工具描述失败: errorType={type(error).__name__}"
+                )
+
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+        if running_loop is loop:
+            loop.create_task(sync_realtime_tools())
+        else:
+            asyncio.run_coroutine_threadsafe(sync_realtime_tools(), loop)
 
     def get_tool_statistics(self) -> Dict[str, int]:
         """获取工具统计信息"""

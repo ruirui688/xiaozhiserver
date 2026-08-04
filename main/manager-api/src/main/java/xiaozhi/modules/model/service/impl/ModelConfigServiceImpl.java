@@ -109,6 +109,12 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             dto.setUpstreamModelId(item.getUpstreamModelId());
             String type = item.getConfigJson() == null ? "" : item.getConfigJson().getOrDefault("type", "").toString();
             dto.setType(type);
+            String conversationMode = item.getConfigJson() == null
+                    ? ""
+                    : StringUtils.defaultString(item.getConfigJson().getStr("conversation_mode"));
+            dto.setConversationMode(conversationMode);
+            dto.setRealtime("realtime".equalsIgnoreCase(conversationMode)
+                    || "qwen_omni_realtime".equalsIgnoreCase(type));
             return dto;
         }).toList();
     }

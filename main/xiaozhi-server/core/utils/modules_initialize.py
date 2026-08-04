@@ -1,7 +1,12 @@
 from typing import Dict, Any
 from config.logger import setup_logging
 from core.utils import tts, llm, intent, memory, vad, asr
-from core.utils.model_config import get_runtime_config, get_runtime_type, has_runtime_config
+from core.utils.model_config import (
+    get_runtime_config,
+    get_runtime_type,
+    has_runtime_config,
+    is_realtime_model_config,
+)
 
 TAG = __name__
 logger = setup_logging()
@@ -35,13 +40,15 @@ def initialize_modules(
     modules = {}
 
     # 初始化TTS模块
-    if init_tts and has_selected_module(config, "TTS"):
+    realtime_conversation = is_realtime_model_config(config)
+
+    if init_tts and not realtime_conversation and has_selected_module(config, "TTS"):
         select_tts_module = config["selected_module"]["TTS"]
         modules["tts"] = initialize_tts(config)
         logger.bind(tag=TAG).info(f"初始化组件: tts成功 {select_tts_module}")
 
     # 初始化LLM模块
-    if init_llm and has_selected_module(config, "LLM"):
+    if init_llm and not realtime_conversation and has_selected_module(config, "LLM"):
         select_llm_module = config["selected_module"]["LLM"]
         llm_type = get_runtime_type(config, "LLM", select_llm_module)
         modules["llm"] = llm.create_instance(
@@ -72,7 +79,7 @@ def initialize_modules(
         logger.bind(tag=TAG).info(f"初始化组件: memory成功 {select_memory_module}")
 
     # 初始化VAD模块
-    if init_vad and has_selected_module(config, "VAD"):
+    if init_vad and not realtime_conversation and has_selected_module(config, "VAD"):
         select_vad_module = config["selected_module"]["VAD"]
         vad_type = get_runtime_type(config, "VAD", select_vad_module)
         modules["vad"] = vad.create_instance(
@@ -82,7 +89,7 @@ def initialize_modules(
         logger.bind(tag=TAG).info(f"初始化组件: vad成功 {select_vad_module}")
 
     # 初始化ASR模块
-    if init_asr and has_selected_module(config, "ASR"):
+    if init_asr and not realtime_conversation and has_selected_module(config, "ASR"):
         select_asr_module = config["selected_module"]["ASR"]
         modules["asr"] = initialize_asr(config)
         logger.bind(tag=TAG).info(f"初始化组件: asr成功 {select_asr_module}")

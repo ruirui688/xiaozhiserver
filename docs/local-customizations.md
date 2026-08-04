@@ -779,3 +779,24 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 是否允许被官方覆盖：否
 官方同步时的处理规则：必须保留“音色测试调用真实运行时 provider、private_voice 仅覆盖测试副本、产生浏览器可播放音频才算通过”的契约；不得退回字段校验、握手检查或伪造音频，不得让单个音色测试更新/禁用整个 TTS 模型。火山 mars/moon BigTTS 音色必须与 volc.service_type.10029 模型对应，不能错误绑定到 seed-tts-2.0。
 ```
+
+## 40. 传统拼接与端到端 Realtime 双轨会话
+
+```text
+定制模块：xiaozhi-server 会话路由与 Realtime provider、manager-api 模型目录/配置/评测、manager-web 模式提示
+改动原因：智能体既要保留 VAD -> ASR -> LLM -> TTS 的传统可组合链路，也要支持 Qwen Omni Realtime 一类直接处理音频、图片、文本和工具调用的端到端多模态模型。两种模式需要复用一个 llmModelId、设备认证、工具门控和聊天上报，但不能把不同协议强行塞进普通 LLM provider，也不能在实时链路失败时静默改变本轮语义。
+关键文件：
+  - main/xiaozhi-server/core/conversation/
+  - main/xiaozhi-server/core/providers/realtime/
+  - main/xiaozhi-server/core/benchmark/runner.py
+  - main/xiaozhi-server/core/api/vision_handler.py
+  - main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelCatalogServiceImpl.java
+  - main/manager-api/src/main/resources/db/changelog/
+  - main/manager-web/src/components/model/RealtimeModelNotice.vue
+  - main/manager-web/src/components/role/RoleEditDialog.vue
+  - docs/architecture/project-architecture.md
+  - docs/architecture/runtime-flows.md
+  - docs/models/model-management.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：必须保留 selected_module.LLM + model_config.<id>.typed_config 的单一选择契约；conversation_mode=realtime 使用独立 Realtime adapter，缺省继续走传统拼接。实时模式接管当前会话音频、图片和工具协议，但工具仍执行统一服务端门控；传统 VAD/ASR/TTS/VLLM 配置保留供手动切回。实时建连、响应、图片或工具失败不得静默切换为传统半轮；端点必须使用受支持的 wss 官方主机并防止 API Key 外发。Realtime 可以注入建立会话时的静态摘要并上报事件，但不等同于传统逐轮动态记忆查询，也不能隐式承担知识库切片、Judge、短期总结或主动记忆维护的同步文本 LLM。单模型测试必须建立真实 Realtime 会话并记录首文本/首音频/总耗时；自动测试必须覆盖路由、音频转换、工具回注、图片、Abort、关闭和模式切换。
+```

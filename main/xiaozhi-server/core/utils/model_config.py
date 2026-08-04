@@ -77,6 +77,15 @@ def get_selected_runtime_config(config: Dict[str, Any], module_type: str) -> Dic
     return get_runtime_config(config, module_type, module_id)
 
 
+def is_realtime_model_config(config: Dict[str, Any], module_type: str = "LLM") -> bool:
+    """Return whether the selected model opts into the realtime conversation path."""
+    try:
+        typed_config = get_selected_runtime_config(config, module_type)
+    except ModelConfigError:
+        return False
+    return str(typed_config.get("conversation_mode") or "").strip().lower() == "realtime"
+
+
 def normalize_selected_module(config: Dict[str, Any]) -> Dict[str, Any]:
     selected = config.get("selected_module")
     if not isinstance(selected, dict):

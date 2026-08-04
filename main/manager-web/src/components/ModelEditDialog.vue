@@ -119,6 +119,11 @@
         </el-collapse>
       </el-form>
 
+      <realtime-model-notice
+        :model="realtimeNoticeModel"
+        context="config"
+      />
+
       <model-config-form
         :form="form"
         :dynamic-call-info-fields="dynamicCallInfoFields"
@@ -148,11 +153,13 @@
 <script>
 import Api from "@/apis/api";
 import ModelConfigForm from "@/components/model/ModelConfigForm.vue";
+import RealtimeModelNotice from "@/components/model/RealtimeModelNotice.vue";
 
 export default {
   name: "ModelEditDialog",
   components: {
     ModelConfigForm,
+    RealtimeModelNotice,
   },
   props: {
     visible: { type: Boolean, default: false },
@@ -225,6 +232,14 @@ export default {
       return this.findTemplate(this.form.templateCode)
         || this.findTemplate(this.resolveTemplateCode(this.form.templateCode, this.form))
         || {};
+    },
+    realtimeNoticeModel() {
+      return {
+        ...this.currentTemplate,
+        ...this.form,
+        params: { ...(this.form.params || {}) },
+        secrets: {},
+      };
     },
     selectedTemplateBlocked() {
       return this.isBlockedTemplateStatus(this.currentTemplate);

@@ -3,6 +3,7 @@ package xiaozhi.modules.model.service.impl;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -31,6 +32,55 @@ class ModelCatalogServiceImplTest {
         assertNotNull(modelNameField.getOptions());
         assertFalse(modelNameField.getOptions().isEmpty());
         assertEquals("qwen3.7-max", modelNameField.getDefaultValue());
+    }
+
+    @Test
+    void qwenOmniRealtimeIsSelectableWithCompleteRealtimeContract() throws Exception {
+        ModelCatalogDTO template = staticCatalog().stream()
+                .filter(item -> "LLM_ALI_QWEN_OMNI_REALTIME".equals(item.getTemplateCode()))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals("qwen_omni_realtime", template.getProviderCode());
+        assertEquals("SUPPORTED", template.getSupportedStatus());
+        assertTrue(template.getSelectable());
+        assertTrue(template.getSetupHints().stream().anyMatch(item -> item.contains("绕过传统 ASR、VAD、LLM、TTS")));
+        assertTrue(template.getTestContract().contains("真实 DashScope Realtime WebSocket"));
+
+        List<String> fieldKeys = template.getFieldSchemas().stream()
+                .map(ModelFieldSchemaDTO::getKey)
+                .toList();
+        assertEquals(List.of(
+                "api_key", "base_url", "model_name", "conversation_mode", "input_sample_rate",
+                "output_sample_rate", "voice", "turn_detection_type", "turn_detection_threshold",
+                "prefix_padding_ms", "silence_duration_ms", "enable_input_audio_transcription",
+                "input_audio_transcription_model", "connect_timeout_seconds", "response_timeout_seconds",
+                "max_event_bytes"), fieldKeys);
+
+        ModelFieldSchemaDTO apiKey = field(template, "api_key");
+        assertTrue(apiKey.getSecret());
+        assertEquals("password", apiKey.getInputType());
+        assertEquals("", apiKey.getDefaultValue());
+
+        ModelFieldSchemaDTO baseUrl = field(template, "base_url");
+        assertEquals("text", baseUrl.getInputType());
+        assertEquals("", baseUrl.getDefaultValue());
+        assertEquals(List.of(), baseUrl.getOptions());
+
+        ModelFieldSchemaDTO modelName = field(template, "model_name");
+        assertEquals("qwen3.5-omni-flash-realtime", modelName.getDefaultValue());
+        assertEquals(List.of(
+                "qwen3.5-omni-plus-realtime",
+                "qwen3.5-omni-flash-realtime",
+                "qwen3-omni-flash-realtime"), modelName.getOptions());
+
+        assertEquals("realtime", field(template, "conversation_mode").getDefaultValue());
+        assertEquals(16000, field(template, "input_sample_rate").getDefaultValue());
+        assertEquals(24000, field(template, "output_sample_rate").getDefaultValue());
+        assertEquals("Ethan", field(template, "voice").getDefaultValue());
+        assertEquals(List.of("server_vad", "manual"), field(template, "turn_detection_type").getOptions());
+        assertEquals(120, field(template, "response_timeout_seconds").getDefaultValue());
+        assertEquals(10485760, field(template, "max_event_bytes").getDefaultValue());
     }
 
     @Test
@@ -126,5 +176,12 @@ class ModelCatalogServiceImplTest {
         Method method = ModelCatalogServiceImpl.class.getDeclaredMethod("toSlmCatalogView", ModelCatalogDTO.class);
         method.setAccessible(true);
         return (ModelCatalogDTO) method.invoke(service, llmTemplate);
+    }
+
+    private ModelFieldSchemaDTO field(ModelCatalogDTO template, String key) {
+        return template.getFieldSchemas().stream()
+                .filter(item -> key.equals(item.getKey()))
+                .findFirst()
+                .orElseThrow();
     }
 }

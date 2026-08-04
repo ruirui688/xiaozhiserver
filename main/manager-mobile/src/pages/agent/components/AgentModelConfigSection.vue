@@ -6,6 +6,7 @@ type ModelConfigKey = 'vad' | 'asr' | 'llm' | 'slm' | 'vllm' | 'intent' | 'memor
 interface Props {
   displayNames: Record<ModelConfigKey, string>
   showReport: boolean
+  realtime: boolean
 }
 
 defineOptions({
@@ -54,6 +55,13 @@ const configItems: Array<{ type: ModelConfigKey, labelKey: string }> = [
           </text>
           <wd-icon name="arrow-right" custom-class="text-[20rpx] text-[#9d9ea3]" />
         </view>
+      </view>
+      <view v-if="realtime" class="mt-[20rpx] border border-[#f3c969] rounded-[12rpx] bg-[#fff8e6] p-[20rpx] text-[24rpx] text-[#8a5b00] leading-[1.6]">
+        <view class="mb-[8rpx] font-semibold">
+          {{ t('agent.realtimeModelTitle') }}
+        </view>
+        <view>{{ t('agent.realtimeModelDescription') }}</view>
+        <view class="mt-[8rpx]">{{ t('agent.realtimeModelFallback') }}</view>
       </view>
     </view>
   </view>

@@ -82,6 +82,10 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             "qwen-omni-turbo",
             "qwen2.5-omni-7b",
             "qwq-plus");
+    private static final List<String> ALI_QWEN_OMNI_REALTIME_MODELS = List.of(
+            "qwen3.5-omni-plus-realtime",
+            "qwen3.5-omni-flash-realtime",
+            "qwen3-omni-flash-realtime");
     private static final List<String> DOUBAO_SEED_TEXT_MODELS = List.of(
             "doubao-seed-evolving",
             "doubao-seed-2-1-turbo-260628",
@@ -372,6 +376,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
     private void addSlmCatalogViews(Map<String, ModelCatalogDTO> catalog) {
         List<ModelCatalogDTO> llmTemplates = new ArrayList<>(catalog.values()).stream()
                 .filter(item -> "LLM".equalsIgnoreCase(item.getModelType()))
+                .filter(item -> !"LLM_ALI_QWEN_OMNI_REALTIME".equals(item.getTemplateCode()))
                 .filter(item -> !Boolean.TRUE.equals(item.getHidden()))
                 .filter(item -> !Boolean.TRUE.equals(item.getDeprecated()))
                 .filter(item -> Boolean.TRUE.equals(item.getSelectable()))
@@ -1003,12 +1008,33 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 "Qwen Audio、Omni Realtime 和视觉专用模型需要独立目录或 adapter，不套用普通文本 Chat 模板。"));
         qwenLlm.setSourceCheckedAt("2026-06-24");
         items.add(qwenLlm);
-        items.add(unavailable("LLM_ALI_QWEN_OMNI_REALTIME", "LLM", "阿里云百炼",
-                "Qwen Omni Realtime", "llm", "Realtime WebSocket 音频/文本多模态", "DashScope Realtime WebSocket",
-                "浏览器实时语音、多模态输入输出、Function Calling 探针验证场景。",
-                "当前项目没有独立 Realtime provider；连接形态是 wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=qwen3.5-omni-plus-realtime，事件协议包含 session.update、input_audio_buffer.append/commit、response.create、response.audio.delta、response.text.delta 和 response.function_call_arguments.delta/done，不能套用普通 OpenAI Chat 或百炼 Application adapter。",
-                "https://help.aliyun.com/zh/model-studio",
-                List.of("qwen3.5-omni-plus-realtime", "qwen3.5-omni-flash-realtime", "qwen3-omni-flash-realtime")));
+        ModelCatalogDTO qwenOmniRealtime = item(
+                "LLM_ALI_QWEN_OMNI_REALTIME", "LLM", "qwen_omni_realtime", "Qwen Omni Realtime",
+                "阿里云百炼", "Qwen Omni Realtime", "llm", "实时多模态大语言模型",
+                "realtime-websocket", "Realtime WebSocket 音频/文本多模态", "cloud", "云平台",
+                "DashScope Realtime WebSocket", "模型", "model_name",
+                List.of("api_key"),
+                List.of("api_key", "base_url", "model_name", "conversation_mode", "input_sample_rate",
+                        "output_sample_rate"),
+                List.of("voice", "turn_detection_type", "turn_detection_threshold", "prefix_padding_ms",
+                        "silence_duration_ms", "enable_input_audio_transcription",
+                        "input_audio_transcription_model", "connect_timeout_seconds", "response_timeout_seconds",
+                        "max_event_bytes"),
+                List.of(
+                        "选择该主模型后，会切换为端到端 Realtime 会话并绕过传统 ASR、VAD、LLM、TTS 拼接链路。",
+                        "base_url 必须填写阿里云百炼官方 DashScope 地址，或北京/新加坡地域的业务空间 Realtime 地址；禁止把 API Key 发送到其他主机。",
+                        "切回普通 LLM 后，智能体继续使用原有 ASR、VAD 和 TTS 配置。"),
+                List.of(
+                        "仅用于主对话实时会话，不作为 SLM 轻量文本模型候选。",
+                        "必须由 xiaozhi-server Realtime provider 执行真实 WebSocket 推理，配置校验或握手成功不能标记测试通过。"),
+                List.of("QwenOmniRealtime", "qwen omni realtime", "qwen3.5-omni-plus-realtime",
+                        "qwen3.5-omni-flash-realtime", "qwen3-omni-flash-realtime"),
+                "https://help.aliyun.com/zh/model-studio");
+        qwenOmniRealtime.setRecommendedFor("实时语音对话、图片帧理解、音频/文本多模态输出和 Function Calling。");
+        qwenOmniRealtime.setAvoidWhen("需要独立替换 ASR、LLM 或 TTS、需要离线运行，或上游网络无法稳定维持 WebSocket 长连接时。");
+        qwenOmniRealtime.setTestContract("必须通过 xiaozhi-server 建立真实 DashScope Realtime WebSocket，完成至少一轮响应并记录首文本、首音频和总耗时；不得以配置校验或握手冒充通过。");
+        qwenOmniRealtime.setSourceCheckedAt("2026-08-03");
+        items.add(qwenOmniRealtime);
         ModelCatalogDTO doubaoSeed = openAiLlm("LLM_DOUBAO_SEED_OPENAI", "火山引擎", "豆包 Seed 系列",
                 "OpenAI 兼容聊天",
                 "Doubao-Seed-Evolving / Doubao-Seed-2.1-turbo / Doubao-Seed-2.1-pro / Doubao-Seed-2.0 系列",
@@ -1303,6 +1329,26 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 setFieldDefault(dto, "model_name", "qwen3.7-max");
                 setFieldOptions(dto, "model_name", ALI_QWEN_TEXT_MODELS);
             }
+            case "LLM_ALI_QWEN_OMNI_REALTIME" -> {
+                setFieldDefault(dto, "base_url", "");
+                setFieldDefault(dto, "model_name", "qwen3.5-omni-flash-realtime");
+                setFieldOptions(dto, "model_name", ALI_QWEN_OMNI_REALTIME_MODELS);
+                setFieldDefault(dto, "voice", "Ethan");
+                setFieldDefault(dto, "conversation_mode", "realtime");
+                setFieldOptions(dto, "conversation_mode", List.of("realtime"));
+                setFieldDefault(dto, "input_sample_rate", 16000);
+                setFieldDefault(dto, "output_sample_rate", 24000);
+                setFieldDefault(dto, "turn_detection_type", "server_vad");
+                setFieldOptions(dto, "turn_detection_type", List.of("server_vad", "manual"));
+                setFieldDefault(dto, "turn_detection_threshold", 0.2);
+                setFieldDefault(dto, "prefix_padding_ms", 300);
+                setFieldDefault(dto, "silence_duration_ms", 800);
+                setFieldDefault(dto, "enable_input_audio_transcription", true);
+                setFieldDefault(dto, "input_audio_transcription_model", "");
+                setFieldDefault(dto, "connect_timeout_seconds", 10);
+                setFieldDefault(dto, "response_timeout_seconds", 120);
+                setFieldDefault(dto, "max_event_bytes", 10485760);
+            }
             case "LLM_DOUBAO_SEED_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "https://ark.cn-beijing.volces.com/api/v3");
                 setFieldDefault(dto, "model_name", "doubao-seed-2-1-turbo-260628");
@@ -1550,6 +1596,18 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             case "language" -> "语言";
             case "context_text" -> "上下文文本";
             case "dev_pid" -> "语言模型";
+            case "conversation_mode" -> "会话模式";
+            case "input_sample_rate" -> "输入采样率";
+            case "output_sample_rate" -> "输出采样率";
+            case "turn_detection_type" -> "轮次检测";
+            case "turn_detection_threshold" -> "VAD 阈值";
+            case "prefix_padding_ms" -> "语音前缀保留(ms)";
+            case "silence_duration_ms" -> "断句静音时长(ms)";
+            case "enable_input_audio_transcription" -> "输入音频转写";
+            case "input_audio_transcription_model" -> "输入转写模型";
+            case "connect_timeout_seconds" -> "连接超时(秒)";
+            case "response_timeout_seconds" -> "响应超时(秒)";
+            case "max_event_bytes" -> "最大事件字节数";
             default -> key;
         };
     }
@@ -1560,7 +1618,9 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         }
         if (Stream.of("threshold", "threshold_low", "temperature", "top_p", "top_k", "max_tokens", "port", "sample_rate",
                 "volume", "speed", "pitch", "rate", "speech_rate", "loudness_rate", "end_window_size",
-                "max_sentence_silence", "min_silence_duration_ms")
+                "max_sentence_silence", "min_silence_duration_ms", "input_sample_rate", "output_sample_rate",
+                "turn_detection_threshold", "prefix_padding_ms", "silence_duration_ms", "connect_timeout_seconds",
+                "response_timeout_seconds", "max_event_bytes")
                 .anyMatch(key::equals)) {
             return "number";
         }
@@ -1608,7 +1668,8 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             case "maintenance_llm" -> "用于长期记忆候选抽取的 LLM 模型配置 ID，例如模型管理中已配置的 DeepSeek/OpenAI 兼容模型；密钥仍保存在对应 LLM 配置中。";
             case "voice", "speaker", "voice_id" -> "上游平台音色 ID。";
             case "private_voice" -> "智能体私有音色覆盖字段；为空时使用当前模型默认音色。";
-            case "base_url", "api_url", "ws_url" -> "接口地址，注意是否需要包含具体 path。";
+            case "base_url" -> "接口地址；Realtime 模型需填写控制台业务空间对应地域的官方 WebSocket 地址。";
+            case "api_url", "ws_url" -> "接口地址，注意是否需要包含具体 path。";
             case "host" -> "服务域名或主机名；NLS 类服务会由运行时拼接协议和路径。";
             case "port" -> "自部署服务端口。";
             case "appkey" -> "阿里云 NLS 项目 AppKey，不是 API Key。";
@@ -1621,6 +1682,18 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             case "end_window_size", "max_sentence_silence" -> "流式识别断句静音窗口，数值越大越不容易提前断句。";
             case "thinking" -> "是否开启模型思考模式，语音场景通常关闭以降低延迟。";
             case "reasoning_effort" -> "思考强度，仅在 thinking 启用时生效。";
+            case "conversation_mode" -> "固定为 realtime。选择该模型后由端到端实时会话接管音频输入与输出。";
+            case "input_sample_rate" -> "设备音频解码后发送给上游的 PCM16 单声道采样率，当前固定 16000 Hz。";
+            case "output_sample_rate" -> "上游返回 PCM16 单声道音频的采样率，当前固定 24000 Hz。";
+            case "turn_detection_type" -> "server_vad 由上游自动断句；manual 在设备 listen.stop 时提交音频并创建响应，适合按键拾音。";
+            case "turn_detection_threshold" -> "上游 server_vad 阈值，默认 0.2；噪声环境可适当提高。";
+            case "prefix_padding_ms" -> "VAD 检测到语音前额外保留的音频长度，默认 300 ms。";
+            case "silence_duration_ms" -> "判定用户说完所需的连续静音时长，默认 800 ms。";
+            case "enable_input_audio_transcription" -> "开启后接收上游输入音频转写，用于字幕、对话记录和评测。";
+            case "input_audio_transcription_model" -> "可选的上游输入音频转写模型；留空时使用服务默认能力。";
+            case "connect_timeout_seconds" -> "建立 DashScope Realtime WebSocket 的超时时间。";
+            case "response_timeout_seconds" -> "等待一轮 Realtime 响应完成的最长时间。";
+            case "max_event_bytes" -> "单个上游 WebSocket 事件允许的最大字节数，用于限制异常大消息。";
             default -> "";
         };
     }

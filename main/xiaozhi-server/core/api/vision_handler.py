@@ -10,11 +10,13 @@ from core.api.base_handler import BaseHandler
 from core.utils.util import get_vision_url, is_valid_image_file
 from core.utils.vllm import create_instance
 from core.utils.model_config import get_runtime_config, get_runtime_type
+from core.conversation.mode import is_realtime_conversation
 from config.config_loader import get_private_config_from_api
 from core.utils.auth import AuthToken
 import base64
 from typing import Tuple, Optional
 from plugins_func.register import Action
+from core.device_runtime_registry import get_connection
 
 TAG = __name__
 
@@ -149,6 +151,40 @@ class VisionHandler(BaseHandler):
             # 将图片转换为base64编码
             image_base64 = base64.b64encode(image_data).decode("utf-8")
 
+            active_connection = get_connection(device_id)
+            conversation_router = getattr(active_connection, "conversation_router", None)
+            if conversation_router is not None and conversation_router.is_realtime:
+                if conversation_router.session is None:
+                    response = web.json_response(
+                        self._create_error_response(
+                            "Realtime 多模态会话尚未就绪，请稍后重试"
+                        ),
+                        status=503,
+                    )
+                    return response
+                try:
+                    result = await conversation_router.handle_image(question, image_data)
+                except RuntimeError as error:
+                    response = web.json_response(
+                        self._create_error_response(str(error)), status=409
+                    )
+                    return response
+                image_filename, image_url = self._save_image(
+                    device_id, image_data, image_extension
+                )
+                return_json = {
+                    "success": True,
+                    "action": Action.RESPONSE.name,
+                    "response": result,
+                    "image_url": image_url,
+                    "image_id": image_filename,
+                }
+                response = web.Response(
+                    text=json.dumps(return_json, separators=(",", ":")),
+                    content_type="application/json",
+                )
+                return response
+
             # 如果开启了智控台，则从智控台获取模型配置
             current_config = copy.deepcopy(self.config)
             read_config_from_api = current_config.get("read_config_from_api", False)
@@ -158,6 +194,15 @@ class VisionHandler(BaseHandler):
                     device_id,
                     client_id,
                 )
+
+            if is_realtime_conversation(current_config):
+                response = web.json_response(
+                    self._create_error_response(
+                        "Realtime 多模态会话当前不在线或尚未就绪"
+                    ),
+                    status=503,
+                )
+                return response
 
             select_vllm_module = current_config["selected_module"].get("VLLM")
             if not select_vllm_module:

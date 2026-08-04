@@ -35,9 +35,11 @@ export function getRoleTemplates() {
 
 // 获取模型选项
 export function getModelOptions(modelType: string, modelName: string = '') {
-  return http.Get<ModelOption[]>('/models/names', {
+  const normalizedType = String(modelType || '').trim().toUpperCase()
+  const path = normalizedType === 'LLM' ? '/models/llm/names' : '/models/names'
+  return http.Get<ModelOption[]>(path, {
     params: {
-      modelType,
+      ...(normalizedType === 'LLM' ? {} : { modelType }),
       modelName,
     },
     meta: {

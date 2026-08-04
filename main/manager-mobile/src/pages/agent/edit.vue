@@ -4,6 +4,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { getAgentDetail, getAgentTags, getAllLanguage, getModelOptions, getPluginFunctions, getRoleTemplates, updateAgent, updateAgentTags } from '@/api/agent/agent'
 import { t } from '@/i18n'
 import { usePluginStore, useProvider, useSpeedPitch } from '@/store'
+import { filterTraditionalTextModels, isRealtimeModel } from '@/utils/realtimeModel'
 import { toast } from '@/utils/toast'
 import AgentModelConfigSection from './components/AgentModelConfigSection.vue'
 
@@ -77,6 +78,20 @@ const modelOptions = ref<{
   Intent: [],
   Memory: [],
   TTS: [],
+})
+
+const realtimeModelBadge = computed(() => t('agent.realtimeModelBadge'))
+const llmPickerActions = computed(() => (modelOptions.value.LLM || []).map(item => ({
+  name: isRealtimeModel(item) ? `${item.modelName} · ${realtimeModelBadge.value}` : item.modelName,
+  value: item.id,
+})))
+const slmPickerActions = computed(() => filterTraditionalTextModels(modelOptions.value.LLM || []).map(item => ({
+  name: item.modelName,
+  value: item.id,
+})))
+const selectedLlmIsRealtime = computed(() => {
+  const selected = (modelOptions.value.LLM || []).find(item => item.id === formData.value.llmModelId)
+  return isRealtimeModel(selected)
 })
 
 // 音色选项数据
@@ -432,13 +447,16 @@ function selectRoleTemplate(templateId: string) {
   selectedTemplateId.value = templateId
   const template = roleTemplates.value.find(t => t.id === templateId)
   if (template) {
+    const templateLlm = modelOptions.value.LLM.find(item => item.id === template.llmModelId)
     formData.value = {
       ...formData.value,
       systemPrompt: template.systemPrompt || formData.value.systemPrompt,
       vadModelId: template.vadModelId || formData.value.vadModelId,
       asrModelId: template.asrModelId || formData.value.asrModelId,
       llmModelId: template.llmModelId || formData.value.llmModelId,
-      slmModelId: template.llmModelId || formData.value.slmModelId,
+      slmModelId: isRealtimeModel(templateLlm)
+        ? formData.value.slmModelId
+        : (template.llmModelId || formData.value.slmModelId),
       vllmModelId: template.vllmModelId || formData.value.vllmModelId,
       intentModelId: template.intentModelId || formData.value.intentModelId,
       memModelId: template.memModelId || formData.value.memModelId,
@@ -591,7 +609,9 @@ function getModelDisplayName(modelType: string, modelId: string) {
 
   const option = options.find(opt => opt.id === modelId)
   if (option) {
-    return option.modelName
+    return modelType === 'LLM' && isRealtimeModel(option)
+      ? `${option.modelName} · ${realtimeModelBadge.value}`
+      : option.modelName
   }
   return modelId
 }
@@ -807,6 +827,7 @@ onMounted(async () => {
 
     <AgentModelConfigSection
       :display-names="displayNames"
+      :realtime="selectedLlmIsRealtime"
       :show-report="isVisibleReport"
       @select="openPicker"
     />
@@ -900,14 +921,14 @@ onMounted(async () => {
 
     <wd-action-sheet
       v-model="pickerShow.llm"
-      :actions="modelOptions.LLM && modelOptions.LLM.map(item => ({ name: item.modelName, value: item.id }))"
+      :actions="llmPickerActions"
       @close="onPickerCancel('llm')"
       @select="({ item }) => onPickerConfirm('llm', item.value, item.name)"
     />
 
     <wd-action-sheet
       v-model="pickerShow.slm"
-      :actions="modelOptions.LLM && modelOptions.LLM.map(item => ({ name: item.modelName, value: item.id }))"
+      :actions="slmPickerActions"
       @close="onPickerCancel('slm')"
       @select="({ item }) => onPickerConfirm('slm', item.value, item.name)"
     />

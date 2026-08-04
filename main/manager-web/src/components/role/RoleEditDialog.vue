@@ -257,7 +257,12 @@
                       :value="item.value"
                     >
                       <div class="model-option-content">
-                        <div class="model-option-title">{{ item.title || item.label }}</div>
+                        <div class="model-option-title">
+                          {{ item.title || item.label }}
+                          <el-tag v-if="item.conversationMode === 'realtime'" size="mini" type="warning">
+                            {{ $t("realtimeModel.badge") }}
+                          </el-tag>
+                        </div>
                         <div v-if="item.meta" class="model-option-meta">{{ item.meta }}</div>
                       </div>
                     </el-option>
@@ -294,6 +299,10 @@
                 </div>
               </el-form-item>
             </div>
+            <realtime-model-notice
+              :model="selectedLlmModel"
+              context="agent"
+            />
             <el-form-item
               v-for="(model, index) in models.slice(4)"
               :key="`model-${index}`"
@@ -510,6 +519,7 @@ import TtsAdvancedSettings from "@/components/TtsAdvancedSettings.vue";
 import FeishuIntegrationDialog from "@/components/role/FeishuIntegrationDialog.vue";
 import AgentSkillDialog from "@/components/role/AgentSkillDialog.vue";
 import AsrHotwordField from "@/components/role/AsrHotwordField.vue";
+import RealtimeModelNotice from "@/components/model/RealtimeModelNotice.vue";
 import i18n from "@/i18n";
 import {
   buildRoleForm,
@@ -531,6 +541,7 @@ export default {
     FeishuIntegrationDialog,
     AgentSkillDialog,
     AsrHotwordField,
+    RealtimeModelNotice,
   },
   props: {
     initialForm: { type: Object, default: () => null },
@@ -589,6 +600,10 @@ export default {
       const selected = (this.modelOptions.ASR || []).find((item) => item.value === selectedId);
       const adapter = String(selected?.type || selected?.raw?.adapterCode || "").toLowerCase();
       return adapter === "doubao_stream" || adapter === "doubao_recording";
+    },
+    selectedLlmModel() {
+      const selectedId = this.form.model.llmModelId;
+      return (this.modelOptions.LLM || []).find((item) => item.value === selectedId) || {};
     }
   },
   methods: {

@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: model
-last_verified: 2026-07-23
+last_verified: 2026-08-03
 source_paths:
   - main/xiaozhi-server/core/benchmark
   - main/manager-api/src/main/java/xiaozhi/modules/model
@@ -82,6 +82,23 @@ LLM/SLM 的两种运行方式：
   -> 走 startToChat、Prompt、Memory、Intent、工具、MCP、TTS 文本捕获链路
 ```
 
+Realtime LLM 的单模型/批量测试链路：
+
+```text
+runner 读取 typed_config.conversation_mode=realtime
+  -> 建立真实 Realtime WebSocket
+  -> session.update
+  -> 临时切换 manual turn_detection，把测试问题放入本轮受限 instructions
+  -> 发送非空 PCM、input_audio_buffer.commit、response.create
+  -> 收集 response.text.delta / audio_transcript.delta / audio.delta
+  -> response.done 或明确错误终态
+  -> 输出连接耗时、首文本、首音频、总耗时和完整文本
+```
+
+该模型级 benchmark 证明 provider 与协议可用，不等于已经完成真实设备音频、图片、工具和打断的全链路验收。选择真实设备
+时，运行时评测还必须确认该智能体进入 Realtime 管线；依赖普通同步 LLM 的 Judge 继续使用独立传统 LLM/SLM，不能复用
+候选 Realtime 长连接会话。
+
 ### 2.2 配置智能助手
 
 ```text
@@ -148,9 +165,13 @@ manager-web 点击写入接入产物
 - 单模型普通“测试”和批量“专业评测”口径要一致：字段校验不是可启用依据。
 - 评测任务可以失败，但失败原因必须写入任务或样本详情，便于区分服务不可达、provider 初始化失败、模型调用失败和结果持久化失败。
 - LLM/SLM Judge 不保存独立密钥，只引用已有模型配置；未选择或调用失败时降级为启发式评分，并在 `judge_mode` 中标记。
+- `conversation_mode=realtime` 的 LLM 必须走 Realtime benchmark transport；不能调用普通 `llm.create_instance()` 或 Chat Completions 冒充实时模型测试。
+- Qwen 3.5 Realtime 不接受用 `conversation.item.create` 创建普通 user 文本项；文本评测必须走手动音频提交回合，`conversation.item.create` 只用于回注 `function_call_output`。
 - 选择真实测试设备时，必须校验设备存在、MAC 地址存在、设备属于所选智能体，并能加载真实运行时配置。
 - 弹窗填写的业务测试问题必须作为评测样本进入 runner，不能只用内置通用问题替代真实场景。多行问题按同一业务场景的连续多轮对话执行。
 - 真实设备智能体评测必须显式应用后台 `runtime_config`，确保候选模型看到所选智能体的人设、记忆、插件、MCP 和上下文源；候选 LLM 覆盖只能发生在运行时配置校准之后。
+- Realtime 测试只有在会话更新成功且收到真实文本或音频响应后才能标记 `REAL_INFERENCE`；仅 WebSocket 握手成功仍是连通性证据。
+- Realtime 测试必须有连接、响应和单事件大小预算，异常时取消响应并关闭上游连接；结果与日志不得包含 Authorization、API Key、图片 base64 或原始音频。
 
 管理后台创建任务后轮询 `/models/benchmark/{taskId}`，历史结果长期保存并可级联删除 task/result/sample；运行中的任务
 不能删除。`测试轮数` 表示重复完整样本集，`并发模型数` 只控制不同候选模型并发；同一模型内部按轮次、case 和多轮
@@ -201,7 +222,8 @@ main/xiaozhi-server/tests/test_<adapter>_asr.py
 | 改助手提示词、脱敏或写入规则 | Java 单测或针对 `ModelAssistantServiceImpl` 的服务测试；检查路径白名单和敏感字段脱敏 |
 | 改专业评测管理层 | `mvn test`，并检查任务创建、轮询、历史删除和失败路径 |
 | 改 xiaozhi-server benchmark runner | `conda run -n xiaozhi-esp32-server python -m compileall .` 和相关 benchmark/LLMJudge/ASR 测试 |
-| 改前端交互 | `npm run build`，并人工检查弹窗、轮询、历史记录和助手侧栏 |
+| 改前端交互 | `npm run test:unit && npm run build`，并人工检查弹窗、轮询、历史记录和助手侧栏 |
+| 改 Realtime 模型前端提示 | 检查目录/编辑/测试/智能体选择标签、绕过说明、手动切回和记忆边界 |
 | 改数据库结构 | 新增 changelog、登记 master、检查回滚/重复执行风险 |
 
 生产治理要求：

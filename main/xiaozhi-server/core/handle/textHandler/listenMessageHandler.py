@@ -33,7 +33,7 @@ class ListenTextMessageHandler(TextMessageHandler):
             conn.logger.bind(tag=TAG).debug(
                 f"客户端拾音模式：{conn.client_listen_mode}"
             )
-        if msg_json["state"] == "start":
+        if msg_json.get("state") == "start":
             reloader = getattr(conn, "runtime_config_reloader", None)
             if reloader is not None:
                 try:
@@ -43,6 +43,24 @@ class ListenTextMessageHandler(TextMessageHandler):
                         "本轮开始前配置热更新失败，继续使用旧配置: errorType={}",
                         type(error).__name__,
                     )
+        conversation_router = getattr(conn, "conversation_router", None)
+        if conversation_router is not None and conversation_router.is_realtime:
+            conversation_ready = getattr(conn, "conversation_ready", None)
+            if conversation_ready is not None and not conversation_ready.is_set():
+                if msg_json.get("state") == "detect":
+                    conn.defer_listen_detect(
+                        msg_json,
+                        ttl_seconds=getattr(
+                            conn, "_deferred_listen_detect_ttl_seconds", 10.0
+                        ),
+                    )
+                return
+            if msg_json.get("state") == "detect" and "text" in msg_json:
+                await conversation_router.handle_text(msg_json["text"])
+            else:
+                await conversation_router.handle_listen(msg_json)
+            return
+        if msg_json["state"] == "start":
             # 设备从播放模式切回录音模式,清除所有音频状态和缓冲区
             conn.reset_audio_states()
             turn_context = getattr(conn, "turn_context", None)

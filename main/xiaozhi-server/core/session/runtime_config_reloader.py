@@ -16,6 +16,8 @@ from core.session.runtime_config import (
 )
 from core.utils.modules_initialize import initialize_modules
 from core.utils.prompt_manager import PromptManager
+from core.conversation import ConversationRouter
+from core.conversation.mode import is_realtime_conversation
 
 
 class RuntimeConfigReloader:
@@ -146,15 +148,16 @@ class RuntimeConfigReloader:
             True,
             True,
         )
-        selected = config.get("selected_module", {})
-        for module_type, name in (
-            ("VAD", "vad"),
-            ("ASR", "asr"),
-            ("LLM", "llm"),
-            ("TTS", "tts"),
-        ):
-            if selected.get(module_type) and modules.get(name) is None:
-                raise RuntimeError(f"{module_type}热更新初始化失败")
+        if not is_realtime_conversation(config):
+            selected = config.get("selected_module", {})
+            for module_type, name in (
+                ("VAD", "vad"),
+                ("ASR", "asr"),
+                ("LLM", "llm"),
+                ("TTS", "tts"),
+            ):
+                if selected.get(module_type) and modules.get(name) is None:
+                    raise RuntimeError(f"{module_type}热更新初始化失败")
         return modules
 
     async def _deactivate_pipeline(self):
@@ -180,6 +183,10 @@ class RuntimeConfigReloader:
             conn.func_handler = None
             if hasattr(conn, "mcp_endpoint_client"):
                 conn.mcp_endpoint_client = None
+
+            conversation_router = getattr(conn, "conversation_router", None)
+            if conversation_router is not None:
+                await conversation_router.close()
 
             if old_tts is not None:
                 await old_tts.close()
@@ -219,30 +226,34 @@ class RuntimeConfigReloader:
         conn.load_function_plugin = False
         conn.configured_intent_type = "nointent"
         conn.intent_type = "nointent"
+        realtime_conversation = is_realtime_conversation(conn.config)
 
-        conn.vad = modules.get("vad")
-        conn.asr = modules.get("asr")
-        conn.llm = modules.get("llm")
-        conn.tts = modules.get("tts") or DefaultTTS(
-            conn.config, delete_audio_file=True
+        conn.vad = None if realtime_conversation else modules.get("vad")
+        conn.asr = None if realtime_conversation else modules.get("asr")
+        conn.llm = None if realtime_conversation else modules.get("llm")
+        conn.tts = None if realtime_conversation else (
+            modules.get("tts") or DefaultTTS(conn.config, delete_audio_file=True)
         )
         conn.memory = modules.get("memory")
         conn.intent = modules.get("intent")
+        conn.conversation_router = ConversationRouter(conn)
 
-        conn.tts_session_options.reapply(
-            conn.tts,
-            provider_identity=conn.tts_session_options.provider_identity(conn),
-        )
-        await conn.tts.open_audio_channels(conn)
-        conn.tts_ready.set()
-        if conn.asr is not None:
-            await conn.asr.open_audio_channels(conn)
-            if conn.vad is not None:
-                conn.audio_input_ready.set()
+        if not realtime_conversation:
+            conn.tts_session_options.reapply(
+                conn.tts,
+                provider_identity=conn.tts_session_options.provider_identity(conn),
+            )
+            await conn.tts.open_audio_channels(conn)
+            conn.tts_ready.set()
+            if conn.asr is not None:
+                await conn.asr.open_audio_channels(conn)
+                if conn.vad is not None:
+                    conn.audio_input_ready.set()
 
         await asyncio.to_thread(conn._initialize_memory)
         await asyncio.to_thread(conn._initialize_intent)
-        await asyncio.to_thread(conn._initialize_voiceprint)
+        if not realtime_conversation:
+            await asyncio.to_thread(conn._initialize_voiceprint)
 
         apply_connection_runtime_state(conn)
         if not conn.config.get("voiceprint"):
@@ -259,7 +270,12 @@ class RuntimeConfigReloader:
         )
         conn.logger = create_connection_logger(conn.selected_module_str)
 
-        if conn.llm is not None and conn.tts_ready.is_set():
+        if realtime_conversation:
+            await conn.conversation_router.initialize()
+            conn.audio_input_ready.set()
+            conn.tts_ready.set()
+            conn.conversation_ready.set()
+        elif conn.llm is not None and conn.tts_ready.is_set():
             conn.conversation_ready.set()
         if (
             conn.tts_ready.is_set()

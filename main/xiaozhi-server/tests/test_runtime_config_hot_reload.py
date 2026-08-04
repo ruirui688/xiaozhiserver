@@ -113,3 +113,123 @@ def test_deactivate_closes_connection_when_old_pipeline_cleanup_fails():
     asyncio.run(run())
     assert conn.stop_event.is_set()
     conn.close.assert_awaited_once()
+
+
+def test_reloader_allows_realtime_pipeline_without_legacy_audio_modules(monkeypatch):
+    config = {
+        "selected_module": {"LLM": "rt"},
+        "model_config": {
+            "rt": {
+                "model_type": "LLM",
+                "typed_config": {
+                    "type": "qwen_omni_realtime",
+                    "conversation_mode": "realtime",
+                },
+            }
+        },
+    }
+    monkeypatch.setattr(
+        reloader_module,
+        "initialize_modules",
+        lambda *_args, **_kwargs: {"memory": object()},
+    )
+    conn = SimpleNamespace(logger=SimpleNamespace())
+    modules = asyncio.run(RuntimeConfigReloader(conn)._build_modules(config))
+    assert set(modules) == {"memory"}
+
+
+def test_deactivate_closes_realtime_router():
+    router = SimpleNamespace(close=AsyncMock())
+    conn = SimpleNamespace(
+        stop_event=threading.Event(),
+        func_handler=None,
+        conversation_router=router,
+        tts=None,
+        asr=None,
+        voiceprint_provider=None,
+        vad=None,
+        asr_priority_thread=None,
+        closing=False,
+        closed=False,
+        asr_audio_queue=None,
+        reset_audio_states=lambda: None,
+        tts_ready=threading.Event(),
+        conversation_ready=threading.Event(),
+        audio_input_ready=threading.Event(),
+        _modules_ready=threading.Event(),
+        logger=SimpleNamespace(
+            bind=lambda **kwargs: SimpleNamespace(error=lambda *args: None)
+        ),
+    )
+    asyncio.run(RuntimeConfigReloader(conn)._deactivate_pipeline())
+    router.close.assert_awaited_once()
+
+
+def test_activate_realtime_pipeline_publishes_readiness_after_router(monkeypatch):
+    calls = []
+
+    class Router:
+        def __init__(self, conn):
+            self.conn = conn
+
+        async def initialize(self):
+            calls.append("router_ready")
+            return True
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(reloader_module, "ConversationRouter", Router)
+    config = {
+        "prompt": "test",
+        "selected_module": {"LLM": "rt"},
+        "model_config": {
+            "rt": {
+                "model_type": "LLM",
+                "typed_config": {
+                    "type": "qwen_omni_realtime",
+                    "conversation_mode": "realtime",
+                },
+            }
+        },
+        "dialogue": {},
+    }
+    dialogue = SimpleNamespace(
+        clear_voiceprint_metadata=lambda: None,
+        clear_temporary_messages=lambda: None,
+        max_history_turns=0,
+    )
+    conn = SimpleNamespace(
+        config={},
+        logger=SimpleNamespace(
+            bind=lambda **_kwargs: SimpleNamespace(
+                debug=lambda *_args: None,
+                info=lambda *_args: None,
+                warning=lambda *_args: None,
+                error=lambda *_args: None,
+            )
+        ),
+        func_handler=None,
+        mcp_endpoint_client=None,
+        prompt_manager=None,
+        dialogue=dialogue,
+        semantic_center=None,
+        report_manager=None,
+        correct_word_replacements={},
+        tts_session_options=SimpleNamespace(),
+        tts_ready=threading.Event(),
+        conversation_ready=threading.Event(),
+        audio_input_ready=threading.Event(),
+        _modules_ready=threading.Event(),
+        _initialize_memory=lambda: None,
+        _initialize_intent=lambda: None,
+        _init_prompt_enhancement=lambda: None,
+        _inject_tool_call_fewshot=lambda: None,
+        _init_voiceprint_enrollment_from_config=lambda: None,
+    )
+    asyncio.run(RuntimeConfigReloader(conn)._activate_pipeline(config, {}))
+    assert calls == ["router_ready"]
+    assert conn.tts is None and conn.asr is None and conn.llm is None
+    assert conn.tts_ready.is_set()
+    assert conn.conversation_ready.is_set()
+    assert conn.audio_input_ready.is_set()

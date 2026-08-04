@@ -6,20 +6,33 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+
+import java.util.List;
+import java.time.Duration;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
 
 import cn.hutool.json.JSONObject;
+import org.mockito.ArgumentCaptor;
+import xiaozhi.common.constant.Constant;
 import xiaozhi.modules.model.dao.ModelConfigDao;
 import xiaozhi.modules.model.dto.ModelTestResultDTO;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
+import xiaozhi.modules.model.service.impl.benchmark.BenchmarkRequestAuth;
+import xiaozhi.modules.model.service.impl.benchmark.PythonBenchmarkClient;
 import xiaozhi.modules.model.service.impl.tester.IntentModelTester;
+import xiaozhi.modules.model.service.impl.tester.QwenOmniRealtimeModelTester;
+import xiaozhi.modules.sys.service.SysParamsService;
 
 class ModelTestServiceImplTest {
 
@@ -35,6 +48,7 @@ class ModelTestServiceImplTest {
             modelRuntimeAssembler,
             restTemplate,
             mock(Environment.class),
+            mock(BenchmarkRequestAuth.class),
             java.util.List.of(intentModelTester));
 
     @Test
@@ -188,6 +202,121 @@ class ModelTestServiceImplTest {
                 result.getMessage());
     }
 
+    @Test
+    void qwenOmniRealtimeUsesRuntimeBenchmarkAndRequiresRealOutput() {
+        AtomicReference<JSONObject> capturedPayload = new AtomicReference<>();
+        JSONObject response = new JSONObject().set("results", List.of(
+                new JSONObject().set("samples", List.of(
+                        new JSONObject()
+                                .set("success", true)
+                                .set("measured", true)
+                                .set("latency_ms", 321)
+                                .set("ttft_ms", 95)
+                                .set("first_audio_ms", 143)
+                                .set("output_detail", new JSONObject()
+                                        .set("assistant_text", "OK")
+                                        .set("audio_bytes", 4096))))));
+        ModelTestServiceImpl runtimeService = runtimeBenchmarkService(response, capturedPayload);
+
+        ModelTestResultDTO result = runtimeService.testModel(qwenOmniRealtimeModel(
+                "wss://workspace-a.cn-beijing.maas.aliyuncs.com:443/api-ws/v1/realtime"));
+
+        assertTrue(result.getSuccess());
+        assertTrue(result.getVerified());
+        assertEquals("REAL_INFERENCE", result.getTestLevel());
+        assertEquals(321L, result.getResponseTimeMs());
+        assertEquals(95L, result.getFirstTextMs());
+        assertEquals(143L, result.getFirstAudioMs());
+        assertEquals("OK", result.getTestOutput());
+        assertEquals("qwen_omni_realtime",
+                capturedPayload.get().getJSONArray("models").getJSONObject(0).getStr("provider_type"));
+        assertEquals("请只回复 OK",
+                capturedPayload.get().getJSONArray("benchmark_cases").getJSONObject(0)
+                        .getJSONArray("turns").getStr(0));
+    }
+
+    @Test
+    void qwenOmniRealtimeRejectsNonDashScopeEndpointBeforeSendingSecret() {
+        AtomicReference<JSONObject> capturedPayload = new AtomicReference<>();
+        ModelTestServiceImpl runtimeService = runtimeBenchmarkService(new JSONObject(), capturedPayload);
+
+        ModelTestResultDTO result = runtimeService.testModel(
+                qwenOmniRealtimeModel("wss://attacker.example/api-ws/v1/realtime"));
+
+        assertFalse(result.getSuccess());
+        assertFalse(result.getVerified());
+        assertEquals("REAL_INFERENCE", result.getTestLevel());
+        assertTrue(result.getMessage().contains("仅允许阿里云百炼官方 DashScope 地址"));
+        assertEquals(null, capturedPayload.get());
+        assertFalse(result.getTestOutput().contains("sk-test"));
+    }
+
+    @Test
+    void qwenOmniRealtimeDoesNotTreatHandshakeOnlySampleAsPassed() {
+        JSONObject response = new JSONObject().set("results", List.of(
+                new JSONObject().set("samples", List.of(
+                        new JSONObject()
+                                .set("success", true)
+                                .set("measured", false)
+                                .set("message", "仅建立连接")))));
+
+        ModelTestResultDTO result = runtimeBenchmarkService(response, new AtomicReference<>())
+                .testModel(qwenOmniRealtimeModel("wss://dashscope.aliyuncs.com/api-ws/v1/realtime"));
+
+        assertFalse(result.getSuccess());
+        assertFalse(result.getVerified());
+        assertEquals("REAL_INFERENCE", result.getTestLevel());
+        assertEquals("仅建立连接", result.getMessage());
+    }
+
+    @Test
+    void realtimeRuntimeBenchmarkTimeoutIncludesConnectResponseAndGrace() {
+        JSONObject config = qwenOmniRealtimeModel("wss://dashscope.aliyuncs.com/api-ws/v1/realtime")
+                .getConfigJson();
+        assertEquals(140, QwenOmniRealtimeModelTester.resolveTimeoutSeconds(config));
+
+        config.set("connect_timeout_seconds", 60);
+        config.set("response_timeout_seconds", 300);
+        assertEquals(330, QwenOmniRealtimeModelTester.resolveTimeoutSeconds(config));
+    }
+
+    @Test
+    void runtimeBenchmarkSendsServerSecretBearerHeader() {
+        SysParamsService sysParamsService = mock(SysParamsService.class);
+        when(sysParamsService.getValue(Constant.SERVER_SECRET, true)).thenReturn("server-test-secret");
+        BenchmarkRequestAuth auth = new BenchmarkRequestAuth(sysParamsService);
+        RestTemplate benchmarkRestTemplate = mock(RestTemplate.class);
+        when(benchmarkRestTemplate.exchange(
+                eq("http://127.0.0.1:8003/benchmark/models"),
+                eq(HttpMethod.POST),
+                any(HttpEntity.class),
+                eq(String.class)))
+                .thenReturn(ResponseEntity.ok("{\"results\":[]}"));
+        ModelTestServiceImpl runtimeService = new ModelTestServiceImpl(
+                modelConfigDao,
+                modelRuntimeAssembler,
+                restTemplate,
+                mock(Environment.class),
+                auth,
+                java.util.List.of(intentModelTester)) {
+            @Override
+            protected RestTemplate createRuntimeBenchmarkRestTemplate(JdkClientHttpRequestFactory factory) {
+                return benchmarkRestTemplate;
+            }
+        };
+
+        runtimeService.callRuntimeBenchmark(new JSONObject().set("models", List.of()));
+
+        ArgumentCaptor<HttpEntity> entityCaptor = ArgumentCaptor.forClass(HttpEntity.class);
+        verify(benchmarkRestTemplate).exchange(
+                eq("http://127.0.0.1:8003/benchmark/models"),
+                eq(HttpMethod.POST),
+                entityCaptor.capture(),
+                eq(String.class));
+        assertEquals("Bearer server-test-secret",
+                entityCaptor.getValue().getHeaders().getFirst(HttpHeaders.AUTHORIZATION));
+    }
+
     private ModelConfigEntity intentModel(String id, String type) {
         ModelConfigEntity model = new ModelConfigEntity();
         model.setId(id);
@@ -203,5 +332,38 @@ class ModelTestServiceImplTest {
         when(modelConfigDao.selectById(llmId)).thenReturn(llm);
         when(modelRuntimeAssembler.buildTypedConfig(llm)).thenReturn(runtimeConfig);
         return llm;
+    }
+
+    private ModelConfigEntity qwenOmniRealtimeModel(String baseUrl) {
+        ModelConfigEntity model = new ModelConfigEntity();
+        model.setId("LLM_QwenOmniRealtime");
+        model.setModelType("LLM");
+        model.setConfigJson(new JSONObject()
+                .set("type", "qwen_omni_realtime")
+                .set("api_key", "sk-test")
+                .set("base_url", baseUrl)
+                .set("model_name", "qwen3.5-omni-flash-realtime")
+                .set("conversation_mode", "realtime")
+                .set("connect_timeout_seconds", 10)
+                .set("response_timeout_seconds", 120));
+        return model;
+    }
+
+    private ModelTestServiceImpl runtimeBenchmarkService(JSONObject response,
+            AtomicReference<JSONObject> capturedPayload) {
+        PythonBenchmarkClient benchmarkClient = mock(PythonBenchmarkClient.class);
+        when(benchmarkClient.runRuntimeTest(any(JSONObject.class), any(Duration.class)))
+                .thenAnswer(invocation -> {
+                    capturedPayload.set(invocation.getArgument(0));
+                    return response;
+                });
+        QwenOmniRealtimeModelTester realtimeTester = new QwenOmniRealtimeModelTester(benchmarkClient);
+        return new ModelTestServiceImpl(
+                modelConfigDao,
+                modelRuntimeAssembler,
+                restTemplate,
+                mock(Environment.class),
+                mock(BenchmarkRequestAuth.class),
+                java.util.List.of(intentModelTester, realtimeTester));
     }
 }

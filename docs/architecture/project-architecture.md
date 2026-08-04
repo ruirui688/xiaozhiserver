@@ -1,9 +1,11 @@
 ---
 status: canonical
 owner: architecture
-last_verified: 2026-07-28
+last_verified: 2026-08-03
 source_paths:
   - main/xiaozhi-server
+  - main/xiaozhi-server/core/conversation
+  - main/xiaozhi-server/core/providers/realtime
   - main/manager-api
   - main/manager-web
   - main/manager-mobile
@@ -33,7 +35,7 @@ flowchart LR
     Realtime -->|服务密钥 HTTP| Control
     Control --> MySQL[(MySQL)]
     Control --> Redis[(Redis)]
-    Realtime --> Providers[ASR / LLM / TTS / 外部服务]
+    Realtime --> Providers[传统 ASR / LLM / TTS 或 Realtime 多模态模型]
     Realtime --> Tools[插件 / MCP / IoT]
 ```
 
@@ -101,7 +103,18 @@ flowchart TB
 `core/connection.py` 只协调单设备会话；关闭生命周期继续下沉到 `core/session/`，会话观测进入
 `core/observability/`。数据库结构只能通过 `main/manager-api/src/main/resources/db/changelog/` 修改。
 
-## 3. 设备实时主链路
+## 3. 设备实时双轨主链路
+
+设备连接只有一套认证、配置、工具、聊天记录和关闭生命周期，但会话执行分成两条互斥管线。智能体仍只选择一个
+`llmModelId`；Python 根据该模型 `typed_config.conversation_mode` 路由，不新增第二个智能体主模型字段。
+
+| 会话模式 | 选择条件 | 音频主链路 | 图片与工具 |
+| --- | --- | --- | --- |
+| 传统拼接 `pipeline` | 未配置 `conversation_mode`，或值不是 `realtime` | VAD -> ASR -> SemanticCenter -> Intent/LLM -> TTS | 图片走独立 VLLM；工具按统一工具运行时回注 LLM |
+| 端到端实时 `realtime` | 所选 LLM 的 `typed_config.conversation_mode=realtime` | 设备音频直接进入 Realtime provider，由上游统一完成判停、转写、生成和音频输出 | 活动连接上的图片帧进入同一实时会话；工具仍由本地统一工具运行时执行，再把结果回注上游会话 |
+
+传统 VAD、ASR、TTS 和 VLLM 选择在实时模式下保留为智能体配置事实，但不参与当前实时会话主链路。切回普通 LLM 后
+这些配置重新生效；实时上游连接或响应失败时不允许静默切到传统链路，因为这会改变本轮音频、工具、上下文和审计语义。
 
 ```mermaid
 sequenceDiagram
@@ -118,15 +131,18 @@ sequenceDiagram
     W->>C: 创建独立连接会话
     C->>A: 按设备身份拉取私有运行配置
     A-->>C: selected_module + model_config + prompt + plugins...
-    C->>C: 初始化 VAD / ASR / LLM / TTS / Memory / Intent
+    C->>C: 根据 LLM conversation_mode 初始化传统或 Realtime 管线
     D->>C: 上传 Opus 音频帧
-    C->>M: VAD -> ASR -> 语义控制 -> Intent/LLM -> 工具
+    alt 传统拼接模式
+        C->>M: VAD -> ASR -> 语义控制 -> Intent/LLM -> 工具 -> TTS
+    else 端到端实时模式
+        C->>M: 音频/图片 -> Realtime 会话 -> 工具回注 -> 实时音频
+    end
     M-->>C: 文本或工具结果
-    C->>M: TTS 合成
     C-->>D: 下发 Opus 音频与控制消息
 ```
 
-实时链路的稳定顺序是：
+传统链路的稳定顺序是：
 
 ```text
 连接认证 -> 设备配置装配 -> 音频接收 -> VAD -> ASR
@@ -135,6 +151,15 @@ sequenceDiagram
 ```
 
 播放打断在音频接收层按 AEC barge-in 处理；退出游戏等状态控制先进入语义控制中枢，未处理的输入再进入旧 Intent 和主 LLM。工具统一由服务端插件、Server MCP、Device IoT、Device MCP、MCP Endpoint 五类来源聚合，冲突时先注册者保留。
+
+Realtime 链路复用同一连接认证、运行配置、工具门控、聊天记录、记忆事件和设备音频协议，但不创建传统 ASR/TTS
+provider。上游输入转写完成事件负责 STT 展示与 user 上报，回复文本/音频增量负责 assistant 文本累积与设备音频下发，
+`response.done`、取消或异常必须收敛当前回复状态。图片 HTTP 入口只能把图片交给已认证且已绑定的活动设备连接，不能凭
+请求中的任意 deviceId 新建或控制会话。
+
+这里的“记忆复用”只保证会话事件上报和建立会话时可注入的静态摘要，不表示 Realtime 自动拥有传统
+`Connection.chat()` 的逐轮动态记忆查询。server VAD 自动响应模式下，基于每轮 query 的托管召回暂不等同于传统链路；
+需要动态记忆维护或离线总结时应配置独立传统文本 LLM，或采用托管/仅上报记忆模式。
 
 ## 4. 配置控制链路
 
@@ -147,6 +172,23 @@ selected_module.<moduleType> = modelId
 model_config.<modelId>.model_type = moduleType
 model_config.<modelId>.typed_config = provider 初始化配置
 ```
+
+主 LLM 会话模式是 `typed_config` 的运行时能力字段：
+
+```yaml
+selected_module:
+  LLM: LLM_QwenOmniRealtime
+model_config:
+  LLM_QwenOmniRealtime:
+    model_type: LLM
+    adapter_code: qwen_omni_realtime
+    typed_config:
+      type: qwen_omni_realtime
+      conversation_mode: realtime
+```
+
+`conversation_mode` 缺省即保持传统拼接行为。控制面不得仅凭厂商名或模型名猜测实时模式；Realtime、普通 WebSocket、
+OpenAI Compatible 和 Chat Completions 是不同协议，必须绑定对应 adapter 和真实测试契约。
 
 Java 的 `ModelRuntimeAssembler` 负责从通用字段、普通参数和密钥参数组装 `typed_config`；Python 的 `normalize_runtime_config()` 负责标准化并为旧调用点构造兼容视图。新增模型配置能力必须保持这条契约，不能让前端字段或 Java 实体直接泄漏到 provider。
 
@@ -169,8 +211,8 @@ Java 的 `ModelRuntimeAssembler` 负责从通用字段、普通参数和密钥�
 
 | 领域 | 控制面 | 实时面 | 权威专题 |
 | --- | --- | --- | --- |
-| 模型 | 配置、目录、测试、评测任务 | 真实 provider 初始化与调用 | [模型评测与助手](./model-benchmark-and-assistant.md) |
-| 语音 | 模型和音色配置 | VAD、ASR、TTS、打断 | [设备交互链路](./device-interaction-chain.md) |
+| 模型 | 配置、目录、测试、评测任务、会话模式标签 | 传统 provider 或 Realtime 会话初始化与真实调用 | [模型评测与助手](./model-benchmark-and-assistant.md) |
+| 语音 | 模型和音色配置 | 传统 VAD/ASR/TTS 或端到端 Realtime、打断 | [设备交互链路](./device-interaction-chain.md) |
 | 工具 | 插件启用与参数 | 统一工具注册、冲突和执行 | [功能插件](./function-plugin-architecture.md) |
 | MCP | Endpoint 和工具配置 | Server/Device/Endpoint 三类 MCP | [MCP 链路](./mcp-chains.md) |
 | 记忆 | 事实、候选、审计、查询 | 事件上报与上下文注入 | [记忆系统](./memory-system-chain.md) |
@@ -193,6 +235,8 @@ Java 的 `ModelRuntimeAssembler` 负责从通用字段、普通参数和密钥�
 - Java 管理接口默认进入 Shiro OAuth2 过滤器；匿名和服务端接口必须显式登记。
 - `/config/**` 由 `ServerSecretFilter` 校验共享密钥，但资源型接口仍必须校验 agent、device 或 workspace 归属。
 - 用户输入 URL 必须经过 SSRF 校验；文件路径必须防止路径穿越；日志不得记录原始凭据。
+- Realtime 上游只允许受支持 adapter 的 HTTPS/WSS 官方端点白名单；API Key 只放 Authorization 请求头，不进入 URL、事件正文或日志。自定义端点必须先通过协议级 allowlist/SSRF 校验，避免把凭据发往任意主机。
+- 图片帧属于用户输入，不写入日志；大小、格式和单事件字节数必须有上限。工具调用继续执行现有服务端白名单、资源所有权和同名冲突规则，Realtime 模型不能绕过门控直接调用设备描述符。
 - 生产入口必须通过 TLS 反向代理提供 HTTPS/WSS，数据库和缓存不应暴露到公网。
 
 详细控制见 [安全架构](./security-architecture.md)。
@@ -228,7 +272,9 @@ MySQL `3306` 和 Redis `6379` 只在容器网络开放。设备收到的 URL 必
 | --- | --- |
 | 后台保存后设备未变化 | 配置缓存、设备绑定、Python 拉取和重连时机 |
 | 设备无法连接 | OTA 地址、TLS/WSS、WebSocket Token、设备白名单 |
-| ASR/LLM/TTS 无输出 | 当前 `selected_module`、`typed_config`、provider 初始化和超时 |
+| ASR/LLM/TTS 无输出 | 当前 `selected_module`、`typed_config`、conversation_mode、对应管线初始化和超时 |
+| 实时模型连接成功但设备无声 | `session.update`、输入/输出采样率、首音频事件、PCM/Opus 转换、回复终态；不得自动切到传统 TTS 掩盖故障 |
+| 图片没有进入实时会话 | 活动连接注册、设备/智能体归属、当前 conversation_mode、图片大小格式与上游事件结果 |
 | 工具没有出现 | Intent 白名单、工具源连接、服务端门控和同名冲突 |
 | 数据跨用户可见 | Workspace header 校验、资源实体归属、读写权限 |
 | 知识库或记忆未生效 | 智能体绑定、检索范围、超时降级和上下文注入 |
@@ -238,5 +284,6 @@ MySQL `3306` 和 Redis `6379` 只在容器网络开放。设备收到的 URL 必
 ## 10. 验证入口
 
 文档与自动事实执行 `scripts/docs-facts --check` 和 `scripts/docs-check`。代码按修改范围执行 Java `mvn test`、
-Web `npm run build`、Mobile `pnpm type-check && pnpm build:h5 && pnpm build:mp-weixin`；Python 必须使用项目
-Conda 环境运行 `compileall` 和测试。外部模型真实调用、长期服务和生产部署不属于默认验证。
+Web `npm run test:unit && npm run build`、Mobile `pnpm test:unit && pnpm type-check && pnpm build:h5 && pnpm build:mp-weixin`；
+Python 必须使用项目 Conda 环境运行 `compileall` 和测试。Realtime 改动至少覆盖模式路由、音频编解码、事件解析、
+工具回注、图片入口、取消/关闭和 benchmark mock 测试；真实外部模型调用、长期服务和生产部署不属于默认验证。

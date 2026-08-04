@@ -133,6 +133,12 @@ class CloseCoordinator:
             if components_future is not None and not components_future.done():
                 components_future.cancel()
 
+            conversation_router = getattr(conn, "conversation_router", None)
+            if conversation_router is not None:
+                await self.run_async_cleanup(
+                    conversation_router.close, deadline, "关闭Realtime会话"
+                )
+
             if (
                 hasattr(conn, "vad")
                 and conn.vad

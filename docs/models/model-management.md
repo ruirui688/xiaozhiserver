@@ -1,13 +1,15 @@
 ---
 status: canonical
 owner: models
-last_verified: 2026-07-24
+last_verified: 2026-08-03
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/model
   - main/manager-api/src/main/java/xiaozhi/modules/config
   - main/manager-web/src/views/ModelConfig.vue
   - main/manager-web/src/components/role/RoleEditDialog.vue
+  - main/manager-web/src/components/model/RealtimeModelNotice.vue
   - main/xiaozhi-server/core/utils/model_config.py
+  - main/xiaozhi-server/core/providers/realtime
 ---
 
 # 模型管理与选择契约
@@ -44,6 +46,39 @@ source_paths:
 - 设备实时 ASR 优先已适配流式协议，会议/文件转写不能冒充设备短句 ASR；
 - TTS 推荐必须同时考虑首音频、稳定性、音色授权和设备格式；主 LLM 必须验证工具调用、延迟和安全边界；
 - 新厂商版本先更新目录事实和模板，再通过真实测试决定是否推荐，不在本文维护易漂移型号清单。
+
+## 会话模式契约
+
+主模型继续使用智能体已有的一个 `llmModelId`，不新增“Realtime 模型 ID”字段。运行时根据所选 LLM 的
+`typed_config.conversation_mode` 选择互斥管线：
+
+```text
+conversation_mode 缺省或 pipeline
+  -> VAD -> ASR -> SemanticCenter -> Intent/LLM -> TTS
+
+conversation_mode = realtime
+  -> 设备音频/图片 -> Realtime 多模态会话 -> 工具回注 -> 实时音频
+```
+
+Realtime 目录项必须使用独立 adapter，例如 `qwen_omni_realtime`。不能把普通阿里云百炼 OpenAI Compatible adapter、
+普通 DashScope HTTP adapter 或名称中含 Qwen/Omni 的模型配置推断成实时会话。目录、保存和下发必须显式包含：
+
+| 字段 | 契约 |
+| --- | --- |
+| `adapter_code` / `typed_config.type` | 对应已实现的 Realtime provider，不能复用普通 Chat Completions adapter |
+| `conversation_mode` | 固定为 `realtime`；缺省保持传统拼接兼容 |
+| `base_url` | 受支持的 `wss://` 官方 Realtime 端点；不得允许把 API Key 发往任意主机 |
+| `model_name` | 厂商真实 Realtime 模型 ID |
+| `api_key` | 密钥表保存、只在运行时下发、只进入 Authorization header |
+| 音频参数 | 输入 PCM16 16 kHz 单声道、输出 PCM16 24 kHz 单声道等 adapter 已验证格式 |
+| `turn_detection_*` | server VAD/manual 判停配置，范围必须由模板限制 |
+| 超时/事件大小 | 建连、响应和单事件字节上限，防止连接永久占用或超大事件耗尽内存 |
+
+智控台模型列表、编辑/测试弹窗和智能体主模型下拉必须显示“实时多模态”标签，并明确：
+
+- 选中后当前传统 VAD、ASR、TTS 和独立 VLLM 不参与实时主链路，但配置仍保留供切回普通 LLM。
+- Realtime 失败不自动静默改走传统链路；管理员修复配置或手动切回普通 LLM。
+- Realtime 主模型是会话型 provider。它可以在会话建立时接收已有静态摘要并继续上报对话事件，但不自动获得传统主链路的逐轮动态记忆查询，也不充当知识库切片、Judge、短期总结或主动记忆维护所需的同步文本 LLM；这些任务应选择独立且测试通过的传统 LLM/SLM，或使用托管/仅上报模式。
 
 ## 1. 页面字段对应关系
 
@@ -348,11 +383,31 @@ model_config:
       max_tokens: 1024
 ```
 
+Realtime LLM 使用同一外层契约，仅 `typed_config` 表示不同会话能力：
+
+```yaml
+selected_module:
+  LLM: LLM_QwenOmniRealtime
+model_config:
+  LLM_QwenOmniRealtime:
+    model_type: LLM
+    adapter_code: qwen_omni_realtime
+    typed_config:
+      type: qwen_omni_realtime
+      conversation_mode: realtime
+      base_url: wss://<WorkspaceId>.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime
+      model_name: qwen3.5-omni-flash-realtime
+      api_key: "<运行时密钥>"
+```
+
 规则：
 
 - `selected_module` 只表示每类能力选中了哪个模型 ID。
 - `model_config.<modelId>.typed_config` 是 Python provider 初始化的唯一配置来源。
 - `typed_config.type` 来自 `adapter_code`，必须对应 `xiaozhi-server` provider 支持的类型。
+- Qwen 3.5 Realtime 的 `base_url` 应使用百炼控制台业务空间对应地域的官方地址；服务端仅放行北京、新加坡业务空间域名及旧版官方 DashScope 域名，防止 API Key 外发。
+- Qwen 3.5 Realtime 的普通用户输入以音频缓冲区提交；`conversation.item.create` 只用于 `function_call_output`。后台文本测试使用受限的本轮 instructions 加非空 PCM 手动提交，不能伪造普通 user 文本 item。
+- Qwen 3.5 Realtime 图片仅接受 JPG/JPEG，Base64 后不得超过 256 KiB；发送图片前必须至少追加一次音频，并通过音频 commit 一起提交。
 - 密钥原文只在运行时下发给服务端使用，不应回显给前端。
 - `config.yaml` 仍可作为默认或兼容配置，但标准后台配置应走 `model_config`。
 
@@ -372,6 +427,8 @@ model_config:
 - TTS 必须生成真实可播放音频。
 - LLM/VLLM 必须真实调用 provider。
 - 只做字段校验、鉴权握手、HTTP 200 或 WebSocket close 1000，不能等同测试通过。
+- Realtime LLM 必须真实建立 Realtime WebSocket，会话配置成功后发起真实响应，记录连接耗时、首文本、首音频和总耗时；只有握手或普通 Chat Completions 成功不能启用。
+- Realtime 测试必须验证取消/超时/错误可以结束当前会话且不泄漏连接；没有真实 API Key 时明确未通过，不能生成伪造结果。
 
 ## 7. 配置名称、编码、领域和协议怎么理解
 
@@ -543,6 +600,7 @@ ID 字符串替代。两者同时存在时遵循火山协议的优先级。
 - 不让 `config_json` 重新成为标准运行时来源。
 - 不把 `modelCode` 当成上游模型名，也不把 `upstreamModelId` 当成项目内部编码。
 - 不把同厂商不同协议强行套到同一个 adapter。
+- 不把 Realtime 会话型主模型当成所有后台同步文本任务的隐式 LLM。
 - 不把未测试或只连通成功的 ASR/TTS/LLM 标记为可启用。
 - 声纹、TTS Voice、Knowledge Dataset、Plugin、MCP 和 No-code HTTP Tool 是关联资源或系统能力，不因使用模型而写入模型配置主表。
 
@@ -586,6 +644,7 @@ cd main/manager-api
 mvn test
 
 cd main/manager-web
+npm run test:unit
 npm run build
 
 cd main/xiaozhi-server

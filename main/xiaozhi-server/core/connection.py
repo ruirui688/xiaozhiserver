@@ -90,6 +90,7 @@ from core.meeting import (
     MeetingMinutesRuntime,
     build_meeting_runtime_context,
 )
+from core.conversation import ConversationRouter
 
 
 TAG = __name__
@@ -335,6 +336,7 @@ class ConnectionHandler:
 
         # 初始化通话状态
         self.calling = False
+        self.conversation_router = ConversationRouter(self)
 
     async def handle_connection(self, ws: websockets.ServerConnection):
         try:
@@ -443,6 +445,13 @@ class ConnectionHandler:
             coordinator = CloseCoordinator(self, CLOSE_TIMEOUT_SECONDS, log_tag=TAG)
             self._close_coordinator = coordinator
         return coordinator
+
+    def _get_conversation_router(self):
+        router = getattr(self, "conversation_router", None)
+        if router is None:
+            router = ConversationRouter(self)
+            self.conversation_router = router
+        return router
 
     def _begin_closing(self):
         """Publish shutdown intent before any slow cleanup starts."""
@@ -571,14 +580,18 @@ class ConnectionHandler:
             # 麦克风上行只依赖输入音频链路，不被 LLM/TTS 能力绑架。
             if not self.audio_input_ready.is_set():
                 return
-            if self.vad is None or self.asr is None:
-                return
 
             # 处理来自MQTT网关的音频包
             if self.conn_from_mqtt_gateway and len(message) >= 16:
                 handled = await self._process_mqtt_audio_message(message)
                 if handled:
                     return
+
+            if self.conversation_router.is_realtime:
+                await self.conversation_router.handle_audio(message)
+                return
+            if self.vad is None or self.asr is None:
+                return
 
             # 不需要头部处理或没有头部时，直接处理原始消息
             self.asr_audio_queue.put(message)
@@ -628,12 +641,18 @@ class ConnectionHandler:
                 # 有指定长度，提取精确的音频数据
                 audio_data = message[16 : 16 + audio_length]
                 # 基于时间戳进行排序处理
-                self._process_websocket_audio(audio_data, timestamp)
+                if self.conversation_router.is_realtime:
+                    await self.conversation_router.handle_audio(audio_data)
+                else:
+                    self._process_websocket_audio(audio_data, timestamp)
                 return True
             elif len(message) > 16:
                 # 没有指定长度或长度无效，去掉头部后处理剩余数据
                 audio_data = message[16:]
-                self.asr_audio_queue.put(audio_data)
+                if self.conversation_router.is_realtime:
+                    await self.conversation_router.handle_audio(audio_data)
+                else:
+                    self.asr_audio_queue.put(audio_data)
                 return True
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"解析WebSocket音频包失败: {e}")
@@ -732,26 +751,31 @@ class ConnectionHandler:
         try:
             if self.closing:
                 return
-            if self.tts is None:
-                initialized_tts = self._initialize_tts()
-                if not self._assign_initialized_component("tts", initialized_tts):
+            realtime_conversation = bool(
+                hasattr(self, "config")
+                and self._get_conversation_router().is_realtime
+            )
+            if not realtime_conversation:
+                if self.tts is None:
+                    initialized_tts = self._initialize_tts()
+                    if not self._assign_initialized_component("tts", initialized_tts):
+                        return
+                if self.closing:
                     return
-            if self.closing:
-                return
-            tts_session_options = getattr(self, "tts_session_options", None)
-            if tts_session_options is None:
-                tts_session_options = SessionTTSOptions()
-                self.tts_session_options = tts_session_options
-            tts_session_options.reapply(
-                self.tts,
-                provider_identity=tts_session_options.provider_identity(self),
-            )
-            # 打开语音合成通道
-            tts_future = asyncio.run_coroutine_threadsafe(
-                self.tts.open_audio_channels(self), self.loop
-            )
-            tts_future.result()
-            self.tts_ready.set()
+                tts_session_options = getattr(self, "tts_session_options", None)
+                if tts_session_options is None:
+                    tts_session_options = SessionTTSOptions()
+                    self.tts_session_options = tts_session_options
+                tts_session_options.reapply(
+                    self.tts,
+                    provider_identity=tts_session_options.provider_identity(self),
+                )
+                # 打开语音合成通道
+                tts_future = asyncio.run_coroutine_threadsafe(
+                    self.tts.open_audio_channels(self), self.loop
+                )
+                tts_future.result()
+                self.tts_ready.set()
             if self.need_bind:
                 return
             self.selected_module_str = build_module_string(
@@ -778,10 +802,10 @@ class ConnectionHandler:
             """初始化本地组件"""
             if self.closing:
                 return
-            if self.vad is None and self._vad is not None:
+            if not realtime_conversation and self.vad is None and self._vad is not None:
                 if not self._assign_initialized_component("vad", self._vad):
                     return
-            if self.asr is None:
+            if not realtime_conversation and self.asr is None:
                 initialized_asr = self._initialize_asr()
                 if initialized_asr is not None and not self._assign_initialized_component(
                     "asr", initialized_asr
@@ -791,19 +815,20 @@ class ConnectionHandler:
             # 初始化声纹识别
             if self.closing:
                 return
-            self._initialize_voiceprint()
+            if not realtime_conversation:
+                self._initialize_voiceprint()
             if self.closing:
                 self.voiceprint_provider = None
                 return
             # 打开语音识别通道
-            if self.asr is not None:
+            if not realtime_conversation and self.asr is not None:
                 asr_future = asyncio.run_coroutine_threadsafe(
                     self.asr.open_audio_channels(self), self.loop
                 )
                 asr_future.result()
                 if self.vad is not None:
                     self.audio_input_ready.set()
-            else:
+            elif not realtime_conversation:
                 self.logger.bind(tag=TAG).warning("ASR未配置，语音识别暂不可用")
 
             """加载记忆"""
@@ -820,8 +845,19 @@ class ConnectionHandler:
             """注入工具调用few-shot示例（仅function_call模式）"""
             self._inject_tool_call_fewshot()
 
-            if self.llm is not None and self.tts_ready.is_set():
+            if realtime_conversation:
+                realtime_future = asyncio.run_coroutine_threadsafe(
+                    self._get_conversation_router().initialize(), self.loop
+                )
+                realtime_future.result()
+                if self.closing:
+                    return
+                self.audio_input_ready.set()
+                self.tts_ready.set()
                 self.conversation_ready.set()
+            elif self.llm is not None and self.tts_ready.is_set():
+                self.conversation_ready.set()
+            if self.conversation_ready.is_set():
                 replay_future = asyncio.run_coroutine_threadsafe(
                     self.flush_deferred_listen_detects(), self.loop
                 )
@@ -1200,7 +1236,16 @@ class ConnectionHandler:
         # 使用 mem_local_short 模式
         elif memory_type == "mem_local_short":
             memory_llm_name = memory_config[selected_memory]["llm"]
-            if memory_llm_name and memory_llm_name in self.config["LLM"]:
+            memory_llm_config = self.config["LLM"].get(memory_llm_name, {})
+            memory_llm_is_realtime = (
+                str(memory_llm_config.get("conversation_mode") or "").lower()
+                == "realtime"
+            )
+            if (
+                memory_llm_name
+                and memory_llm_name in self.config["LLM"]
+                and not memory_llm_is_realtime
+            ):
                 # 如果配置了专用LLM，则创建独立的LLM实例
                 from core.utils import llm as llm_utils
 
@@ -1214,6 +1259,13 @@ class ConnectionHandler:
                 )
                 self.memory.set_llm(memory_llm)
             else:
+                if self._get_conversation_router().is_realtime or memory_llm_is_realtime:
+                    self.logger.bind(tag=TAG).warning(
+                        "Realtime 主模型不能用于本地短期记忆总结；请配置独立文本LLM，"
+                        "本连接将跳过本地短期记忆保存"
+                    )
+                    self.memory = None
+                    return
                 # 否则使用主LLM
                 self.memory.set_llm(self.llm)
                 self.logger.bind(tag=TAG).info("使用主LLM作为意图识别模型")
@@ -1245,8 +1297,17 @@ class ConnectionHandler:
         # 使用 intent_llm 模式
         elif self.intent_type == "intent_llm":
             intent_llm_name = intent_config.get(selected_intent, {}).get("llm")
+            intent_llm_config = self.config["LLM"].get(intent_llm_name, {})
+            intent_llm_is_realtime = (
+                str(intent_llm_config.get("conversation_mode") or "").lower()
+                == "realtime"
+            )
 
-            if intent_llm_name and intent_llm_name in self.config["LLM"]:
+            if (
+                intent_llm_name
+                and intent_llm_name in self.config["LLM"]
+                and not intent_llm_is_realtime
+            ):
                 # 如果配置了专用LLM，则创建独立的LLM实例
                 from core.utils import llm as llm_utils
 
@@ -1260,6 +1321,21 @@ class ConnectionHandler:
                 )
                 self.intent.set_llm(intent_llm)
             else:
+                if self._get_conversation_router().is_realtime or intent_llm_is_realtime:
+                    self.logger.bind(tag=TAG).warning(
+                        "Realtime 主模型不能作为 intent_llm 文本分类器；"
+                        "未配置独立文本LLM，本连接跳过独立意图分类并由Realtime工具调用处理"
+                    )
+                    self.intent = None
+                    self.intent_type = "function_call"
+                    self.load_function_plugin = True
+                    self.func_handler = UnifiedToolHandler(self)
+                    if hasattr(self, "loop") and self.loop:
+                        handler_future = asyncio.run_coroutine_threadsafe(
+                            self.func_handler._initialize(), self.loop
+                        )
+                        handler_future.result()
+                    return
                 # 否则使用主LLM
                 self.intent.set_llm(self.llm)
                 self.logger.bind(tag=TAG).info("使用主LLM作为意图识别模型")

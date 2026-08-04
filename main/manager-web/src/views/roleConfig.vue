@@ -107,6 +107,7 @@ import VersionFooter from "@/components/VersionFooter.vue";
 import RoleEditDialog from "@/components/role/RoleEditDialog.vue";
 import i18n from "@/i18n";
 import featureManager from "@/utils/featureManager";
+import { isRealtimeModel } from "@/utils/realtimeModel";
 
 export default {
   name: "RoleConfigPage",
@@ -266,12 +267,14 @@ export default {
       const title = item.modelName || item.id || "";
       const provider = [item.vendorName, item.productName].filter(Boolean).join(" / ");
       const meta = provider || item.vendorName || item.productName || "";
+      const realtime = isRealtimeModel(item);
       return {
         value: item.id,
-        label: meta ? `${title} · ${meta}` : title,
+        label: `${realtime ? "[实时多模态] " : ""}${meta ? `${title} · ${meta}` : title}`,
         title,
         meta,
         type: item.type || item.adapterCode || "",
+        conversationMode: realtime ? "realtime" : "pipeline",
         isHidden: false,
         raw: item,
       };

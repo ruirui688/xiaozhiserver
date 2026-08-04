@@ -19,6 +19,8 @@ from core.benchmark.llm_judge import (
 )
 from core.benchmark.runtime_agent import BenchmarkRuntimeAgent
 from core.utils.llm import create_instance as create_llm_instance
+from core.providers.realtime.qwen_omni_realtime import QwenRealtimeTextProbe
+from core.benchmark.security import sanitize_benchmark_error
 
 
 BENCHMARK_RUNTIME_DIR = os.path.join(tempfile.gettempdir(), "xiaozhi-benchmark")
@@ -104,6 +106,15 @@ async def _run_llm(
     benchmark_cases=None,
 ):
     benchmark_cases = benchmark_cases or LLM_BENCHMARK_CASES
+    if str(config.get("conversation_mode") or "").strip().lower() == "realtime":
+        return await _run_realtime_llm(
+            model,
+            config,
+            iterations,
+            judge_config or {},
+            agent_context or {},
+            benchmark_cases,
+        )
     device_context = (agent_context or {}).get("device_context") or {}
     if device_context.get("mac_address") and base_config:
         return await _run_llm_with_agent_runtime(
@@ -175,6 +186,110 @@ async def _run_llm(
                 sample["error_type"] = "EMPTY_OR_ERROR"
             samples.append(sample)
     return _summarize(model, "REAL_INFERENCE", "真实推理", samples)
+
+
+async def _run_realtime_llm(
+    model,
+    config,
+    iterations,
+    judge_config=None,
+    agent_context=None,
+    benchmark_cases=None,
+):
+    """Benchmark realtime models with an actual response, never a handshake-only pass."""
+    samples = []
+    case_iteration = 0
+    for _repeat in range(iterations):
+        batch_inputs = []
+        for case in benchmark_cases or LLM_BENCHMARK_CASES:
+            case_iteration += 1
+            conversation = []
+            total_latency_ms = 0
+            first_text_ms = None
+            first_audio_ms = None
+            connect_ms = 0
+            audio_bytes = 0
+            final_output = ""
+            message = "OK"
+            probe_session = QwenRealtimeTextProbe(config)
+            try:
+                turns = get_case_turns(case)
+                if not turns:
+                    raise RuntimeError("Realtime LLM评测样本缺少用户输入")
+                connect_ms = await probe_session.connect()
+                for turn in turns:
+                    conversation.append({"role": "user", "content": turn})
+                    probe = await probe_session.turn(turn)
+                    turn_output = str(probe.get("output") or "")
+                    final_output = turn_output
+                    conversation.append({"role": "assistant", "content": turn_output})
+                    total_latency_ms += int(probe.get("latency_ms") or 0)
+                    audio_bytes += int(probe.get("audio_bytes") or 0)
+                    if first_text_ms is None:
+                        first_text_ms = probe.get("ttft_ms")
+                    if first_audio_ms is None:
+                        first_audio_ms = probe.get("first_audio_ms")
+                    if not turn_output.strip() and int(probe.get("audio_bytes") or 0) <= 0:
+                        message = "Realtime 模型未返回文本或音频"
+                        break
+            except Exception as exc:
+                message = sanitize_benchmark_error(exc)
+            finally:
+                await probe_session.close()
+            batch_inputs.append(
+                {
+                    "case": case,
+                    "output": final_output,
+                    "conversation": conversation,
+                    "latency_ms": total_latency_ms,
+                    "ttft_ms": first_text_ms,
+                    "tokens_per_second": None,
+                    "iteration": case_iteration,
+                    "message": message,
+                    "first_audio_ms": first_audio_ms,
+                    "connect_ms": connect_ms,
+                    "realtime_metrics": {
+                        "connect_ms": connect_ms,
+                        "first_audio_ms": first_audio_ms,
+                        "audio_bytes": audio_bytes,
+                    },
+                }
+            )
+        judged_samples = evaluate_llm_case_batch(
+            batch_inputs, judge_config or {}, agent_context or {}
+        )
+        for item, sample in zip(batch_inputs, judged_samples):
+            sample["iteration"] = item["iteration"]
+            sample["sample_type"] = (
+                f"realtime_llm_judge_batch:{item.get('case', {}).get('scenario')}"
+            )
+            sample.setdefault("output_detail", {})["realtime_metrics"] = item[
+                "realtime_metrics"
+            ]
+            sample["first_audio_ms"] = item["first_audio_ms"]
+            sample["connect_ms"] = item["connect_ms"]
+            sample["latency_ms"] = item["latency_ms"]
+            sample["output_detail"].update(
+                {
+                    "assistant_text": item["output"],
+                    "audio_bytes": item["realtime_metrics"]["audio_bytes"],
+                    "first_audio_ms": item["first_audio_ms"],
+                    "connect_ms": item["connect_ms"],
+                }
+            )
+            has_real_output = bool(item["output"].strip()) or (
+                item["realtime_metrics"]["audio_bytes"] > 0
+            )
+            if item["message"] == "OK" and has_real_output:
+                sample["success"] = True
+                sample["measured"] = True
+                sample["message"] = "OK"
+                sample.pop("error_type", None)
+            elif item["message"] != "OK" and not has_real_output:
+                sample["message"] = item["message"]
+                sample["error_type"] = "EMPTY_OR_ERROR"
+            samples.append(sample)
+    return _summarize(model, "REAL_INFERENCE", "Realtime真实推理", samples)
 
 
 async def _run_llm_with_agent_runtime(

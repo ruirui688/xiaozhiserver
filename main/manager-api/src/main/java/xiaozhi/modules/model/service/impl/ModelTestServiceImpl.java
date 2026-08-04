@@ -50,6 +50,7 @@ import xiaozhi.modules.model.dao.ModelConfigDao;
 import xiaozhi.modules.model.dto.ModelTestResultDTO;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelTestService;
+import xiaozhi.modules.model.service.impl.benchmark.BenchmarkRequestAuth;
 import xiaozhi.modules.model.service.impl.tester.ModelTestExecutor;
 
 @Slf4j
@@ -61,6 +62,7 @@ public class ModelTestServiceImpl implements ModelTestService {
     private final ModelRuntimeAssembler modelRuntimeAssembler;
     private final RestTemplate restTemplate;
     private final Environment environment;
+    private final BenchmarkRequestAuth benchmarkRequestAuth;
     private final List<ModelTestExecutor> modelTestExecutors;
 
     private static final int MODEL_TEST_UNTESTED = 0;
@@ -73,7 +75,7 @@ public class ModelTestServiceImpl implements ModelTestService {
     private static final String TTS_TEST_TEXT = "你好，我是小智，语音合成测试成功。";
     private static final String VLLM_TEST_QUESTION = "请用一句话描述这张图片。";
     private static final String STANDARD_ASR_TEST_AUDIO = "wakeup_words_short.wav";
-    private static final int SINGLE_ASR_BENCHMARK_TIMEOUT_SECONDS = 120;
+    private static final int DEFAULT_RUNTIME_BENCHMARK_TIMEOUT_SECONDS = 120;
     private static final String TEST_LEVEL_REAL_INFERENCE = "REAL_INFERENCE";
     private static final String TEST_LEVEL_CONNECTIVITY = "CONNECTIVITY";
     private static final String TEST_LEVEL_RUNTIME_CONFIG = "RUNTIME_CONFIG";
@@ -221,7 +223,7 @@ public class ModelTestServiceImpl implements ModelTestService {
             return TEST_LEVEL_UNSUPPORTED;
         }
         if (("LLM".equals(modelType) || "SLM".equals(modelType))
-                && ("openai".equals(type) || "ollama".equals(type))) {
+                && ("openai".equals(type) || "ollama".equals(type) || "qwen_omni_realtime".equals(type))) {
             return TEST_LEVEL_REAL_INFERENCE;
         }
         if ("VLLM".equals(modelType) && "openai".equals(type)) {
@@ -402,7 +404,6 @@ public class ModelTestServiceImpl implements ModelTestService {
         if ("ollama".equals(type)) {
             return testOllamaModel(configJson);
         }
-        ModelTestResultDTO result = new ModelTestResultDTO();
         return validateBasicModelConfig(configJson, type, "LLM");
     }
 
@@ -661,14 +662,15 @@ public class ModelTestServiceImpl implements ModelTestService {
         }
     }
 
-    private JSONObject callRuntimeBenchmark(JSONObject payload) {
+    protected JSONObject callRuntimeBenchmark(JSONObject payload) {
         String baseUrl = resolveXiaozhiServerHttpBaseUrl();
         String url = baseUrl + "/benchmark/models";
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory();
-        factory.setReadTimeout(Duration.ofSeconds(SINGLE_ASR_BENCHMARK_TIMEOUT_SECONDS));
-        RestTemplate benchmarkRestTemplate = new RestTemplate(factory);
+        factory.setReadTimeout(Duration.ofSeconds(DEFAULT_RUNTIME_BENCHMARK_TIMEOUT_SECONDS));
+        RestTemplate benchmarkRestTemplate = createRuntimeBenchmarkRestTemplate(factory);
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
+        benchmarkRequestAuth.apply(headers);
         try {
             ResponseEntity<String> response = benchmarkRestTemplate.exchange(
                     url, HttpMethod.POST, new HttpEntity<>(payload.toString(), headers), String.class);
@@ -681,6 +683,10 @@ public class ModelTestServiceImpl implements ModelTestService {
                     + "。请先确认 xiaozhi-server 已启动且 HTTP 端口可访问；源码开发可执行 `scripts/dev status server`。原始错误："
                     + e.getMessage(), e);
         }
+    }
+
+    protected RestTemplate createRuntimeBenchmarkRestTemplate(JdkClientHttpRequestFactory factory) {
+        return new RestTemplate(factory);
     }
 
     private String resolveXiaozhiServerHttpBaseUrl() {
@@ -1163,6 +1169,7 @@ public class ModelTestServiceImpl implements ModelTestService {
         }
         if ("LLM".equals(normalizedModelType)) {
             return switch (normalizedType) {
+                case "qwen_omni_realtime" -> List.of("api_key", "base_url", "model_name", "conversation_mode");
                 case "alibl" -> List.of("base_url", "app_id", "api_key");
                 case "dify", "fastgpt" -> List.of("base_url", "api_key");
                 case "gemini" -> List.of("api_key", "model_name");
