@@ -7,7 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.lang.reflect.Constructor;
+
 import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.http.HttpHeaders;
 
 import xiaozhi.common.constant.Constant;
@@ -15,6 +18,13 @@ import xiaozhi.common.exception.RenException;
 import xiaozhi.modules.sys.service.SysParamsService;
 
 class BenchmarkRequestAuthTest {
+
+    @Test
+    void sysParamsDependencyIsLazyToAvoidApplicationBootstrapCycle() {
+        Constructor<?> constructor = BenchmarkRequestAuth.class.getDeclaredConstructors()[0];
+
+        assertTrue(constructor.getParameters()[0].isAnnotationPresent(Lazy.class));
+    }
 
     @Test
     void appliesBearerServerSecretWithoutExposingItElsewhere() {
