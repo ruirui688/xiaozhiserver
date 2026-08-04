@@ -34,8 +34,18 @@ test('person UI makes device-local biometric boundary explicit', () => {
 
 test('plugin catalog uses task-oriented cards and keeps admin mutations gated', () => {
   assert.match(plugins, /<PluginResourceCard/);
-  assert.match(plugins, /v-if="canManagePlugins" type="primary"/);
+  assert.match(plugins, /v-if="canManagePlugins"/);
   assert.match(plugins, /getPluginFunctionList/);
+  assert.match(plugins, /插件类型/);
+  assert.match(plugins, /列表视图/);
+  assert.match(plugins, /卡片视图/);
+  assert.match(plugins, /按后台排序/);
+  assert.match(plugins, /overflow-y: auto/);
+  assert.doesNotMatch(plugins, /\.welcome\s*\{[^}]*overflow:\s*hidden/s);
   assert.match(pluginCard, /用户可以说/);
-  assert.match(pluginCard, /查看能力说明/);
+  assert.match(pluginCard, /查看说明/);
+  assert.match(pluginCard, /plugin-resource-card--list/);
+  assert.match(pluginCard, /编辑/);
+  assert.match(pluginCard, /复制玩法/);
+  assert.match(pluginCard, /删除/);
 });

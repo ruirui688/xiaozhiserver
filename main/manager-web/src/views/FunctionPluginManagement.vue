@@ -3,96 +3,171 @@
     <HeaderBar />
     <ResourceCenterNav />
 
-    <div class="operation-bar">
-      <div class="page-heading">
-        <h2 class="page-title">插件中心</h2>
-        <p class="page-subtitle">像逛能力商店一样查看系统工具与互动玩法，在角色配置中一键启用。</p>
-      </div>
-      <div class="right-operations">
-        <el-input
-          v-model="searchName"
-          placeholder="搜索功能名称、用户说法或功能编码"
-          clearable
-          class="search-input"
-          @keyup.enter.native="handleSearch"
-        />
-        <el-button class="btn-search" @click="handleSearch">搜索</el-button>
-        <el-button v-if="canManagePlugins" type="primary" @click="openCreateDialog()">新建互动玩法</el-button>
-      </div>
-    </div>
-
-    <div class="main-wrapper">
-      <div class="content-panel">
-        <div class="content-area">
-          <el-card class="plugin-card" shadow="never">
-            <div class="plugin-toolbar">
-              <div class="filter-groups">
-                <el-radio-group v-model="activeType" size="small" @change="handleTypeChange">
-                  <el-radio-button label="all">全部工具 {{ pluginCounts.all }}</el-radio-button>
-                  <el-radio-button label="builtin">内置工具 {{ pluginCounts.builtin }}</el-radio-button>
-                  <el-radio-button label="interaction">互动玩法 {{ pluginCounts.interaction }}</el-radio-button>
-                </el-radio-group>
-                <el-radio-group
-                  v-if="showCategoryFilter"
-                  v-model="activeCategory"
-                  size="small"
-                  class="category-tabs"
-                >
-                  <el-radio-button
-                    v-for="category in categoryFilters"
-                    :key="category.key"
-                    :label="category.key"
-                  >
-                    {{ category.label }} {{ category.count }}
-                  </el-radio-button>
-                </el-radio-group>
-              </div>
-              <span class="toolbar-summary">
-                工具目录，不是全局开关
-              </span>
-            </div>
-            <div class="scope-guide">
-              <div class="scope-guide-item">
-                <div class="scope-guide-label">这里管理</div>
-                <div class="scope-guide-value">可被角色勾选的工具和玩法</div>
-              </div>
-              <div class="scope-guide-item">
-                <div class="scope-guide-label">启用位置</div>
-                <div class="scope-guide-value">智能体管理 -> 编辑角色 -> 功能</div>
-              </div>
-              <div class="scope-guide-item">
-                <div class="scope-guide-label">独立配置</div>
-                <div class="scope-guide-value">飞书、知识库、MCP 在角色编辑页绑定</div>
-              </div>
-            </div>
-            <el-empty v-if="!loading && visiblePlugins.length === 0" description="没有找到匹配的插件" />
-            <div v-else class="plugin-grid" v-loading="loading">
-              <PluginResourceCard
-                v-for="plugin in visiblePlugins"
-                :key="plugin.id"
-                :plugin="plugin"
-                :interaction="isDeclarativeInteractionPlugin(plugin.fieldsMeta)"
-                :can-manage="canManagePlugins"
-                :category="getFunctionCategory(plugin)"
-                :category-key="getCategoryMeta(plugin).key"
-                :description="getPluginDescription(plugin)"
-                :example="getExampleUtterance(plugin)"
-                :config-text="getConfigText(plugin)"
-                @detail="openDetailDialog"
-                @edit="openEditDialog"
-                @command="handleRowCommand"
-              />
-            </div>
-
-            <div class="table-bottom">
-              <span class="total-text">
-                当前显示{{ visiblePlugins.length }}个功能，共{{ pluginCounts.all }}个
-              </span>
-            </div>
-          </el-card>
+    <main class="plugin-page">
+      <section class="page-hero">
+        <div class="page-heading">
+          <div class="page-kicker">资源中心 / 插件管理</div>
+          <h1 class="page-title">插件管理</h1>
+          <p class="page-subtitle">统一查看可分配给角色的系统能力与互动玩法。</p>
         </div>
-      </div>
-    </div>
+        <div class="hero-stats" aria-label="插件统计">
+          <div class="stat-item">
+            <strong>{{ pluginCounts.all }}</strong>
+            <span>全部插件</span>
+          </div>
+          <div class="stat-item">
+            <strong>{{ pluginCounts.builtin }}</strong>
+            <span>系统能力</span>
+          </div>
+          <div class="stat-item">
+            <strong>{{ pluginCounts.interaction }}</strong>
+            <span>互动玩法</span>
+          </div>
+        </div>
+        <div class="hero-actions">
+          <el-button icon="el-icon-refresh" :loading="loading" @click="fetchPlugins">刷新</el-button>
+          <el-button
+            v-if="canManagePlugins"
+            type="primary"
+            icon="el-icon-plus"
+            @click="openCreateDialog()"
+          >
+            新建互动玩法
+          </el-button>
+        </div>
+      </section>
+
+      <section class="management-shell">
+        <aside class="filter-panel">
+          <el-input
+            v-model="searchName"
+            prefix-icon="el-icon-search"
+            placeholder="搜索名称、编码或用户说法"
+            clearable
+            class="search-input"
+            @keyup.enter.native="handleSearch"
+          />
+
+          <div class="filter-section">
+            <div class="filter-title">插件类型</div>
+            <button
+              type="button"
+              :class="['filter-item', { active: activeType === 'all' }]"
+              @click="setActiveType('all')"
+            >
+              <span><i class="el-icon-menu" />全部插件</span>
+              <strong>{{ pluginCounts.all }}</strong>
+            </button>
+            <button
+              type="button"
+              :class="['filter-item', { active: activeType === 'builtin' }]"
+              @click="setActiveType('builtin')"
+            >
+              <span><i class="el-icon-cpu" />系统能力</span>
+              <strong>{{ pluginCounts.builtin }}</strong>
+            </button>
+            <button
+              type="button"
+              :class="['filter-item', { active: activeType === 'interaction' }]"
+              @click="setActiveType('interaction')"
+            >
+              <span><i class="el-icon-chat-dot-round" />互动玩法</span>
+              <strong>{{ pluginCounts.interaction }}</strong>
+            </button>
+          </div>
+
+          <div v-if="showCategoryFilter" class="filter-section category-section">
+            <div class="filter-title">能力分类</div>
+            <button
+              v-for="category in categoryFilters"
+              :key="category.key"
+              type="button"
+              :class="['filter-item', { active: activeCategory === category.key }]"
+              @click="activeCategory = category.key"
+            >
+              <span>{{ category.label }}</span>
+              <strong>{{ category.count }}</strong>
+            </button>
+          </div>
+
+          <div class="usage-tip">
+            <i class="el-icon-info" />
+            <div>
+              <strong>这里维护插件目录</strong>
+              <span>启用插件请进入“智能体管理 → 编辑角色 → 功能”。</span>
+            </div>
+          </div>
+        </aside>
+
+        <div class="catalog-panel">
+          <div class="catalog-toolbar">
+            <div>
+              <h2>{{ currentFilterTitle }}</h2>
+              <p>找到 {{ visiblePlugins.length }} 个插件</p>
+            </div>
+            <div class="catalog-controls">
+              <el-select v-model="sortMode" size="small" class="sort-select" aria-label="插件排序">
+                <el-option label="按后台排序" value="sort" />
+                <el-option label="按名称排序" value="name" />
+              </el-select>
+              <el-button-group class="view-switch">
+                <el-tooltip content="列表视图" placement="top">
+                  <el-button
+                    size="small"
+                    icon="el-icon-s-unfold"
+                    :type="viewMode === 'list' ? 'primary' : 'default'"
+                    aria-label="列表视图"
+                    @click="viewMode = 'list'"
+                  />
+                </el-tooltip>
+                <el-tooltip content="卡片视图" placement="top">
+                  <el-button
+                    size="small"
+                    icon="el-icon-menu"
+                    :type="viewMode === 'grid' ? 'primary' : 'default'"
+                    aria-label="卡片视图"
+                    @click="viewMode = 'grid'"
+                  />
+                </el-tooltip>
+              </el-button-group>
+            </div>
+          </div>
+
+          <div class="catalog-note">
+            <i class="el-icon-warning-outline" />
+            系统能力由服务器提供，只能查看说明；互动玩法支持新建、编辑、复制和删除。
+          </div>
+
+          <el-empty v-if="!loading && visiblePlugins.length === 0" description="没有找到匹配的插件" />
+          <div
+            v-else
+            v-loading="loading"
+            :class="viewMode === 'grid' ? 'plugin-grid' : 'plugin-list'"
+          >
+            <PluginResourceCard
+              v-for="plugin in visiblePlugins"
+              :key="plugin.id"
+              :plugin="plugin"
+              :layout="viewMode"
+              :interaction="isDeclarativeInteractionPlugin(plugin.fieldsMeta)"
+              :can-manage="canManagePlugins"
+              :category="getFunctionCategory(plugin)"
+              :category-key="getCategoryMeta(plugin).key"
+              :description="getPluginDescription(plugin)"
+              :example="getExampleUtterance(plugin)"
+              :config-text="getConfigText(plugin)"
+              @detail="openDetailDialog"
+              @edit="openEditDialog"
+              @command="handleRowCommand"
+            />
+          </div>
+
+          <div class="table-bottom">
+            <span class="total-text">已显示 {{ visiblePlugins.length }} / {{ pluginCounts.all }}</span>
+          </div>
+        </div>
+      </section>
+    </main>
 
     <el-dialog
       :title="editingId ? '编辑互动玩法' : '新建互动玩法'"
@@ -252,6 +327,8 @@ export default {
       searchName: "",
       activeType: "all",
       activeCategory: "all",
+      sortMode: "sort",
+      viewMode: "list",
       plugins: [],
       allPluginProviders: [],
       formDialogVisible: false,
@@ -407,6 +484,10 @@ export default {
       if (type !== "builtin") {
         this.activeCategory = "all";
       }
+    },
+    setActiveType(type) {
+      this.activeType = type;
+      this.handleTypeChange(type);
     },
     parseFields(fields) {
       if (Array.isArray(fields)) {
@@ -777,7 +858,7 @@ export default {
       });
     },
     visiblePlugins() {
-      let list = this.searchedPlugins;
+      let list = [...this.searchedPlugins];
       if (this.activeType === "builtin") {
         list = list.filter((item) => !this.isDeclarativeInteractionPlugin(item.fieldsMeta));
       }
@@ -791,7 +872,10 @@ export default {
             this.getCategoryMeta(item).key === this.activeCategory;
         });
       }
-      return list;
+      if (this.sortMode === "name") {
+        return list.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "zh-CN"));
+      }
+      return list.sort((a, b) => Number(a.sort || 0) - Number(b.sort || 0));
     },
     pluginCounts() {
       const interaction = this.plugins.filter((item) => this.isDeclarativeInteractionPlugin(item.fieldsMeta)).length;
@@ -803,6 +887,16 @@ export default {
     },
     showCategoryFilter() {
       return this.activeType === "builtin";
+    },
+    currentFilterTitle() {
+      if (this.activeType === "interaction") {
+        return "互动玩法";
+      }
+      if (this.activeType === "builtin") {
+        const category = this.categoryFilters.find((item) => item.key === this.activeCategory);
+        return category ? category.label : "系统能力";
+      }
+      return "全部插件";
     },
     builtinPluginsForCategory() {
       return this.searchedPlugins.filter((item) => !this.isDeclarativeInteractionPlugin(item.fieldsMeta));
@@ -840,195 +934,333 @@ export default {
 
 <style lang="scss" scoped>
 .welcome {
-  min-width: 900px;
-  min-height: 506px;
+  min-width: 960px;
+  min-height: 100vh;
   height: 100vh;
   display: flex;
   position: relative;
   flex-direction: column;
-  background-size: cover;
-  background: linear-gradient(to bottom right, #dce8ff, #e4eeff, #e6cbfd) center;
-  overflow: hidden;
+  background: #f4f7fb;
+  overflow-x: hidden;
+  overflow-y: auto;
+  text-align: left;
+  scrollbar-gutter: stable;
 }
 
-.operation-bar {
-  display: flex;
-  justify-content: space-between;
+.plugin-page {
+  width: calc(100% - 48px);
+  max-width: 1680px;
+  margin: 0 auto;
+  padding: 22px 0 28px;
+  box-sizing: border-box;
+}
+
+.page-hero {
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) auto auto;
   align-items: center;
-  padding: 16px 24px;
-}
-
-.page-heading {
-  min-width: 320px;
+  gap: 28px;
+  padding: 22px 24px;
+  border: 1px solid #e5eaf2;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 8px 26px rgba(37, 51, 77, 0.06);
 }
 
 .page-title {
-  font-size: 24px;
-  margin: 0 0 6px;
+  margin: 3px 0 5px;
+  color: #182230;
+  font-size: 25px;
+  line-height: 34px;
+}
+
+.page-kicker {
+  color: #7b8799;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .page-subtitle {
   margin: 0;
-  color: #606266;
-  font-size: 14px;
-}
-
-.right-operations {
-  display: flex;
-  gap: 10px;
-  margin-left: auto;
-}
-
-.search-input {
-  width: 240px;
-}
-
-.btn-search {
-  background: linear-gradient(135deg, #6b8cff, #a966ff);
-  border: none;
-  color: white;
-}
-
-.main-wrapper {
-  flex: 1;
-  min-height: 0;
-  height: auto;
-  margin: 0 22px;
-  border-radius: 15px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
-  position: relative;
-  background: rgba(237, 242, 255, 0.5);
-  display: flex;
-  flex-direction: column;
-}
-
-.content-panel {
-  flex: 1;
-  display: flex;
-  overflow: hidden;
-  height: 100%;
-  border-radius: 15px;
-  background: transparent;
-  border: 1px solid #fff;
-}
-
-.content-area {
-  flex: 1;
-  height: 100%;
-  min-width: 600px;
-  overflow: auto;
-  background-color: white;
-  display: flex;
-}
-
-.plugin-card {
-  width: 100%;
-  border: none;
-  border-radius: 0;
-}
-
-.plugin-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px;
-}
-
-.plugin-toolbar {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 4px 0 16px;
-}
-
-.filter-groups {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-}
-
-.category-tabs {
-  display: block;
-}
-
-::v-deep .category-tabs .el-radio-button__inner {
-  font-size: 13px;
-}
-
-.toolbar-summary {
-  color: #606266;
-  font-size: 14px;
-  line-height: 32px;
-  white-space: nowrap;
-}
-
-.scope-guide {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 14px;
-}
-
-.scope-guide-item {
-  padding: 10px 12px;
-  border: 1px solid #d8e5ff;
-  border-radius: 6px;
-  background: #f7faff;
-}
-
-.scope-guide-label {
-  color: #3a63c7;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 18px;
-}
-
-.scope-guide-value {
-  margin-top: 3px;
-  color: #3d4566;
+  color: #687386;
   font-size: 13px;
   line-height: 20px;
 }
 
-.function-name {
-  color: #303133;
+.hero-stats {
+  display: flex;
+  align-items: center;
+  border: 1px solid #e8edf4;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.stat-item {
+  display: grid;
+  min-width: 92px;
+  gap: 1px;
+  padding: 10px 16px;
+  text-align: center;
+}
+
+.stat-item + .stat-item {
+  border-left: 1px solid #e2e8f0;
+}
+
+.stat-item strong {
+  color: #26364d;
+  font-size: 20px;
+  line-height: 25px;
+}
+
+.stat-item span {
+  color: #8a94a6;
+  font-size: 11px;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+.management-shell {
+  display: grid;
+  grid-template-columns: 238px minmax(0, 1fr);
+  align-items: start;
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.filter-panel,
+.catalog-panel {
+  border: 1px solid #e5eaf2;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 8px 26px rgba(37, 51, 77, 0.05);
+}
+
+.filter-panel {
+  position: sticky;
+  top: 16px;
+  padding: 16px;
+}
+
+.search-input {
+  width: 100%;
+}
+
+.filter-section {
+  margin-top: 20px;
+}
+
+.filter-title {
+  margin: 0 8px 7px;
+  color: #98a2b3;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+
+.filter-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #4f5d73;
+  font: inherit;
+  cursor: pointer;
+  transition: 0.18s ease;
+}
+
+.filter-item:hover {
+  background: #f5f7fb;
+}
+
+.filter-item.active {
+  background: #ecf3ff;
+  color: #2f6fdd;
   font-weight: 600;
-  line-height: 1.5;
 }
 
-.function-code {
-  color: #909399;
+.filter-item span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.filter-item strong {
+  min-width: 24px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: #edf0f5;
+  color: #7b8799;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.filter-item.active strong {
+  background: #fff;
+  color: #2f6fdd;
+}
+
+.category-section {
+  padding-top: 16px;
+  border-top: 1px solid #edf0f4;
+}
+
+.usage-tip {
+  display: flex;
+  gap: 8px;
+  margin-top: 20px;
+  padding: 11px;
+  border-radius: 10px;
+  background: #f7f9fc;
+  color: #7c8799;
+}
+
+.usage-tip i {
+  margin-top: 2px;
+  color: #5b8def;
+}
+
+.usage-tip div {
+  display: grid;
+  gap: 3px;
+}
+
+.usage-tip strong {
+  color: #4a586e;
   font-size: 12px;
-  line-height: 1.4;
 }
 
-.description-text {
-  display: block;
-  line-height: 1.5;
-  color: #3d4566;
+.usage-tip span {
+  font-size: 11px;
+  line-height: 17px;
+}
+
+.catalog-panel {
+  min-height: 560px;
+  padding: 20px;
+}
+
+.catalog-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #edf0f4;
+}
+
+.catalog-toolbar h2 {
+  margin: 0;
+  color: #26364d;
+  font-size: 18px;
+}
+
+.catalog-toolbar p {
+  margin: 4px 0 0;
+  color: #98a2b3;
+  font-size: 12px;
+}
+
+.catalog-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sort-select {
+  width: 132px;
+}
+
+.catalog-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 14px 0;
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #758196;
+  font-size: 12px;
+}
+
+.catalog-note i {
+  color: #5d8ee8;
+}
+
+.plugin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 14px;
+}
+
+.plugin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 @media (max-width: 1280px) {
-  .plugin-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .page-hero {
+    grid-template-columns: 1fr auto;
+  }
+
+  .hero-stats {
+    display: none;
+  }
+
+  .management-shell {
+    grid-template-columns: 210px minmax(0, 1fr);
   }
 }
 
-.danger-action {
-  color: #f56c6c;
+@media (max-width: 1050px) {
+  .management-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .filter-panel {
+    position: static;
+  }
+
+  .filter-section:not(.category-section) {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .filter-title {
+    grid-column: 1 / -1;
+  }
+
+  .usage-tip,
+  .category-section {
+    display: none;
+  }
 }
 
 .table-bottom {
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  padding-top: 16px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #edf0f4;
 }
 
 .total-text {
-  color: #606266;
-  font-size: 14px;
+  color: #98a2b3;
+  font-size: 12px;
 }
 
 .form-row {

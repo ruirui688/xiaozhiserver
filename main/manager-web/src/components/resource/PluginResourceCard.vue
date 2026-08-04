@@ -1,8 +1,15 @@
 <template>
-  <article class="plugin-resource-card" tabindex="0" @click="$emit('detail', plugin)">
+  <article
+    :class="['plugin-resource-card', `plugin-resource-card--${layout}`]"
+    tabindex="0"
+    @click="$emit('detail', plugin)"
+    @keyup.enter="$emit('detail', plugin)"
+  >
     <div class="card-topline">
       <div class="plugin-type">
-        <span class="type-badge">{{ interaction ? "互动" : "工具" }}</span>
+        <span :class="['type-badge', { 'type-badge--interaction': interaction }]">
+          {{ interaction ? "互动" : "工具" }}
+        </span>
         <span>{{ category }}</span>
       </div>
       <span class="config-badge">{{ configText }}</span>
@@ -25,8 +32,11 @@
     </div>
 
     <div class="card-actions" @click.stop>
+      <el-button size="mini" type="text" @click="$emit('detail', plugin)">
+        查看说明
+      </el-button>
       <template v-if="interaction && canManage">
-        <el-button size="mini" type="primary" plain @click="$emit('edit', plugin)">编辑玩法</el-button>
+        <el-button size="mini" type="primary" plain @click="$emit('edit', plugin)">编辑</el-button>
         <el-dropdown trigger="click" @command="$emit('command', plugin, $event)">
           <el-button size="mini">更多 <i class="el-icon-arrow-down" /></el-button>
           <el-dropdown-menu slot="dropdown">
@@ -35,9 +45,6 @@
           </el-dropdown-menu>
         </el-dropdown>
       </template>
-      <el-button v-else size="mini" type="text" @click="$emit('detail', plugin)">
-        查看能力说明 <i class="el-icon-arrow-right" />
-      </el-button>
     </div>
   </article>
 </template>
@@ -47,6 +54,7 @@ export default {
   name: "PluginResourceCard",
   props: {
     plugin: { type: Object, required: true },
+    layout: { type: String, default: "grid" },
     interaction: { type: Boolean, default: false },
     canManage: { type: Boolean, default: false },
     category: { type: String, default: "工具能力" },
@@ -74,12 +82,12 @@ export default {
 <style lang="scss" scoped>
 .plugin-resource-card {
   display: flex;
-  min-height: 270px;
-  padding: 20px;
+  min-height: 236px;
+  padding: 17px;
   border: 1px solid #e6eaf2;
-  border-radius: 17px;
+  border-radius: 13px;
   background: #fff;
-  box-shadow: 0 8px 22px rgba(48, 63, 96, 0.06);
+  box-shadow: 0 4px 14px rgba(48, 63, 96, 0.04);
   box-sizing: border-box;
   cursor: pointer;
   flex-direction: column;
@@ -89,9 +97,9 @@ export default {
 
 .plugin-resource-card:hover,
 .plugin-resource-card:focus {
-  transform: translateY(-2px);
-  border-color: #efbd4f;
-  box-shadow: 0 14px 34px rgba(181, 126, 22, 0.14);
+  transform: translateY(-1px);
+  border-color: #9dbcf5;
+  box-shadow: 0 10px 24px rgba(65, 105, 180, 0.1);
 }
 
 .card-topline,
@@ -115,9 +123,13 @@ export default {
 .type-badge {
   padding: 3px 8px;
   border-radius: 99px;
-  background: #f8b72f;
+  background: #4f86e8;
   color: #fff;
   font-weight: 700;
+}
+
+.type-badge--interaction {
+  background: #9a6be8;
 }
 
 .config-badge {
@@ -129,7 +141,7 @@ export default {
 
 .plugin-heading {
   gap: 12px;
-  margin-top: 18px;
+  margin-top: 15px;
 }
 
 .plugin-icon {
@@ -151,7 +163,7 @@ export default {
 .plugin-heading h3 {
   margin: 0 0 4px;
   color: #242a3a;
-  font-size: 20px;
+  font-size: 17px;
 }
 
 .plugin-heading code {
@@ -160,11 +172,15 @@ export default {
 }
 
 .description {
-  min-height: 44px;
-  margin: 16px 0 12px;
+  display: -webkit-box;
+  min-height: 42px;
+  margin: 14px 0 11px;
+  overflow: hidden;
   color: #697187;
   font-size: 13px;
-  line-height: 22px;
+  line-height: 21px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .example {
@@ -193,7 +209,58 @@ export default {
   justify-content: flex-end;
   gap: 8px;
   margin-top: auto;
-  padding-top: 16px;
+  padding-top: 13px;
+}
+
+.plugin-resource-card--list {
+  display: grid;
+  grid-template-columns: 128px minmax(210px, 0.8fr) minmax(240px, 1.2fr) minmax(210px, 0.9fr) auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 104px;
+  padding: 14px 16px;
+}
+
+.plugin-resource-card--list .card-topline {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.plugin-resource-card--list .plugin-heading {
+  margin-top: 0;
+}
+
+.plugin-resource-card--list .plugin-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  font-size: 19px;
+}
+
+.plugin-resource-card--list .description {
+  min-height: auto;
+  margin: 0;
+}
+
+.plugin-resource-card--list .example {
+  min-width: 0;
+}
+
+.plugin-resource-card--list .card-actions {
+  margin: 0;
+  padding: 0;
+  white-space: nowrap;
+}
+
+@media (max-width: 1350px) {
+  .plugin-resource-card--list {
+    grid-template-columns: 120px minmax(190px, 0.8fr) minmax(220px, 1.2fr) auto;
+  }
+
+  .plugin-resource-card--list .example {
+    display: none;
+  }
 }
 
 .danger-action {

@@ -151,6 +151,9 @@ public class AgentTemplateController {
         if (template.getWorkspaceId() != null) {
             return ResultUtils.error("工作空间模板请在角色配置页删除");
         }
+        if (systemTemplateCount() <= 1) {
+            return ResultUtils.error("至少保留一个系统模板，不能删除最后一个系统模板");
+        }
         
         Integer deletedSort = template.getSort();
         
@@ -171,6 +174,9 @@ public class AgentTemplateController {
     @Operation(summary = "批量删除模板")
     @RequiresPermissions("sys:role:superAdmin")
     public Result<String> batchRemoveAgentTemplates(@RequestBody List<String> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return ResultUtils.error("请选择要删除的模板");
+        }
         long workspaceTemplateCount = agentTemplateService.count(
                 new QueryWrapper<AgentTemplateEntity>()
                         .in("id", ids)
@@ -178,11 +184,23 @@ public class AgentTemplateController {
         if (workspaceTemplateCount > 0) {
             return ResultUtils.error("批量删除中包含工作空间模板");
         }
+        long selectedSystemTemplateCount = agentTemplateService.count(
+                new QueryWrapper<AgentTemplateEntity>()
+                        .in("id", ids)
+                        .isNull("workspace_id"));
+        if (systemTemplateCount() - selectedSystemTemplateCount < 1) {
+            return ResultUtils.error("至少保留一个系统模板，不能删除全部系统模板");
+        }
         boolean deleted = agentTemplateService.removeByIds(ids);
         if (deleted) {
             return ResultUtils.success("批量删除成功");
         } else {
             return ResultUtils.error("批量删除模板失败");
         }
+    }
+
+    private long systemTemplateCount() {
+        return agentTemplateService.count(
+                new QueryWrapper<AgentTemplateEntity>().isNull("workspace_id"));
     }
 }

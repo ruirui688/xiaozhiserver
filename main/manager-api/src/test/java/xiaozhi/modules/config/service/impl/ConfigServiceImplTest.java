@@ -47,6 +47,42 @@ class ConfigServiceImplTest {
 
     @Test
     @SuppressWarnings("unchecked")
+    void baseConfigRemainsAvailableWhenSystemTemplateIsMissing() {
+        SysParamsService sysParamsService = mock(SysParamsService.class);
+        AgentTemplateService agentTemplateService = mock(AgentTemplateService.class);
+        RedisUtils redisUtils = mock(RedisUtils.class);
+        when(sysParamsService.list(any())).thenReturn(List.of());
+        when(agentTemplateService.getDefaultTemplate()).thenReturn(null);
+
+        ConfigServiceImpl service = new ConfigServiceImpl(
+                sysParamsService,
+                mock(DeviceService.class),
+                mock(ModelConfigService.class),
+                mock(ModelRuntimeAssembler.class),
+                mock(AgentService.class),
+                agentTemplateService,
+                redisUtils,
+                mock(TimbreService.class),
+                mock(AgentPluginMappingService.class),
+                mock(AgentMcpAccessPointService.class),
+                mock(AgentContextProviderService.class),
+                mock(AgentFeishuService.class),
+                mock(VoiceCloneService.class),
+                mock(AgentVoicePrintDao.class),
+                mock(VoiceprintApiClient.class),
+                mock(CorrectWordFileService.class),
+                mock(UserPluginConfigService.class),
+                mock(AgentSemanticSkillService.class));
+
+        Map<String, Object> config = (Map<String, Object>) service.getConfig(false);
+
+        assertEquals(Map.of(), config.get("selected_module"));
+        assertEquals(Map.of(), config.get("model_config"));
+        verify(redisUtils).set(eq("server:config"), eq(config));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void runtimeConfigIncludesAvailableTtsVoiceCatalog() {
         AgentService agentService = mock(AgentService.class);
         TimbreService timbreService = mock(TimbreService.class);

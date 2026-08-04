@@ -94,7 +94,9 @@ public class ConfigServiceImpl implements ConfigService {
         // 查询默认智能体
         AgentTemplateEntity agent = agentTemplateService.getDefaultTemplate();
         if (agent == null) {
-            throw new RenException(ErrorCode.AGENT_TEMPLATE_NOT_FOUND);
+            // 系统模板属于可修复的管理数据，缺失时不能阻止 manager-api 启动。
+            // 返回基础配置，让管理员仍可登录并恢复模板；Liquibase 也会为历史库补种保底模板。
+            log.error("未找到系统智能体模板，将仅返回基础服务配置");
         }
 
         // 构建模块配置
@@ -109,8 +111,8 @@ public class ConfigServiceImpl implements ConfigService {
                 null,
                 null,
                 null,
-                agent.getVadModelId(),
-                agent.getAsrModelId(),
+                agent == null ? null : agent.getVadModelId(),
+                agent == null ? null : agent.getAsrModelId(),
                 null,
                 null,
                 null,
