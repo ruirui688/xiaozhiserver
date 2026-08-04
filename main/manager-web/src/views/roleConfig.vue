@@ -10,64 +10,73 @@
       <div class="content-panel">
         <div class="content-area">
           <el-card class="config-card" shadow="never">
-            <div class="config-header">
-              <div class="header-left">
-                <div class="header-icon">
-                  <img loading="lazy" src="@/assets/home/setting-user.png" alt="" />
+            <div class="config-toolbar">
+              <div class="config-summary">
+                <div class="header-left">
+                  <div class="header-icon">
+                    <img loading="lazy" src="@/assets/home/setting-user.png" alt="" />
+                  </div>
+                  <div class="header-copy">
+                    <span class="header-title">{{ form.agentName || '未命名角色' }}</span>
+                    <span class="header-subtitle">
+                      <i class="el-icon-refresh" />保存后自动更新在线设备，无需重连
+                    </span>
+                  </div>
                 </div>
-                <span class="header-title">{{ form.agentName }}</span>
-              </div>
-              <div class="header-tags">
-                <el-tag
-                  v-for="tag in dynamicTags"
-                  :key="tag.id"
-                  class="custom-tag"
-                  closable
-                  :disable-transitions="false"
-                  @close="handleClose(tag.id)">
-                  {{tag.tagName}}
-                </el-tag>
-                <el-input
-                  class="input-new-tag"
-                  v-if="inputVisible"
-                  v-model="inputValue"
-                  ref="saveTagInput"
-                  size="small"
-                  maxLength="20"
-                  @keyup.enter.native="handleInputConfirm"
-                  @blur="handleInputConfirm"
-                >
-                </el-input>
-                <el-button class="custom-tag-btn" v-else size="small" @click="showInput">+ {{ $t("roleConfig.addTag") }}</el-button>
+                <div class="header-tags">
+                  <span class="tags-label">标签</span>
+                  <el-tag
+                    v-for="tag in dynamicTags"
+                    :key="tag.id"
+                    class="custom-tag"
+                    closable
+                    :disable-transitions="false"
+                    @close="handleClose(tag.id)">
+                    {{tag.tagName}}
+                  </el-tag>
+                  <el-input
+                    class="input-new-tag"
+                    v-if="inputVisible"
+                    v-model="inputValue"
+                    ref="saveTagInput"
+                    size="small"
+                    maxLength="20"
+                    @keyup.enter.native="handleInputConfirm"
+                    @blur="handleInputConfirm"
+                  >
+                  </el-input>
+                  <el-button class="custom-tag-btn" v-else size="small" @click="showInput">
+                    <i class="el-icon-plus" />{{ $t("roleConfig.addTag") }}
+                  </el-button>
+                </div>
               </div>
               <div class="header-actions">
-                <div class="hint-text">
-                  <img loading="lazy" src="@/assets/home/info.png" alt="" />
-                  <span>{{ $t("roleConfig.restartNotice") }}</span>
-                </div>
-                <el-button
-                  type="primary"
-                  class="save-btn"
-                  :loading="saveInProgress"
-                  :disabled="agentConfigLoading || !agentConfigLoaded || saveInProgress"
-                  @click="handleSave">
-                  {{ $t("roleConfig.saveConfig") }}
+                <el-button class="reset-btn" icon="el-icon-refresh-left" @click="handleReset">
+                  {{ $t("roleConfig.reset") }}
                 </el-button>
                 <el-button
                   v-if="workspaceCanWrite"
                   class="save-template-btn"
+                  icon="el-icon-folder-add"
                   :loading="templateSaveInProgress"
                   :disabled="agentConfigLoading || !agentConfigLoaded || saveInProgress || templateSaveInProgress"
                   @click="handleSaveAsTemplate">
                   另存为角色模板
                 </el-button>
-                <el-button class="reset-btn" @click="handleReset">{{
-                  $t("roleConfig.reset")
-                }}</el-button>
-                <button class="custom-close-btn" @click="goToHome">&times;</button>
+                <el-button
+                  type="primary"
+                  class="save-btn"
+                  icon="el-icon-check"
+                  :loading="saveInProgress"
+                  :disabled="agentConfigLoading || !agentConfigLoaded || saveInProgress"
+                  @click="handleSave">
+                  {{ $t("roleConfig.saveConfig") }}
+                </el-button>
+                <button class="custom-close-btn" title="关闭角色配置" @click="goToHome">
+                  <i class="el-icon-close" />
+                </button>
               </div>
             </div>
-            <div class="divider"></div>
 
             <role-edit-dialog
               ref="editDialog"
@@ -698,7 +707,8 @@ export default {
 }
 
 .main-wrapper {
-  height: calc(100vh - 63px - 35px - 60px);
+  flex: 1;
+  min-height: 0;
   margin: 0 22px;
   border-radius: 15px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
@@ -722,7 +732,7 @@ export default {
   flex: 1;
   height: 100%;
   min-width: 600px;
-  overflow: auto;
+  overflow: hidden;
   background-color: white;
   display: flex;
   flex-direction: column;
@@ -736,18 +746,39 @@ export default {
   flex-direction: column;
   flex: 1;
   overflow-y: auto;
+  scrollbar-color: #b7c4f8 #f1f4ff;
 }
 
-.config-header {
-  position: relative;
+.config-card::v-deep .el-card__body {
+  padding: 0 20px 26px;
+}
+
+.config-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   display: flex;
   align-items: center;
-  gap: 13px;
-  padding: 0 0 5px 0;
+  gap: 18px;
+  min-height: 68px;
+  margin: 0 -2px 16px;
+  padding: 10px 2px 10px;
+  border-bottom: 1px solid #e8edf8;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 5px 14px rgba(49, 61, 103, 0.04);
+  backdrop-filter: blur(10px);
   font-weight: 700;
   font-size: 19px;
   color: #3d4566;
   justify-content: space-between;
+}
+
+.config-summary {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
 }
 
 .header-left {
@@ -757,6 +788,32 @@ export default {
   flex-shrink: 0;
 }
 
+.header-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.header-title {
+  overflow: hidden;
+  color: #2f3952;
+  font-size: 17px;
+  line-height: 23px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header-subtitle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  color: #9299ac;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 16px;
+}
+
 .header-tags {
   display: flex;
   align-items: center;
@@ -764,7 +821,7 @@ export default {
   flex: 1;
   min-width: 0;
   overflow-x: auto;
-  padding-bottom: 4px;
+  padding: 3px 0;
   &::-webkit-scrollbar {
     height: 6px;
     background: #e6ebff;
@@ -773,6 +830,13 @@ export default {
     background: #5778ff;
     border-radius: 8px;
   }
+}
+
+.tags-label {
+  flex-shrink: 0;
+  color: #a1a8b8;
+  font-size: 11px;
+  font-weight: 400;
 }
 
 .header-tags .el-tag {
@@ -806,30 +870,20 @@ export default {
   height: 19px;
 }
 
-.divider {
-  height: 1px;
-  background: #e8f0ff;
-}
-
 .custom-close-btn {
-  position: absolute;
-  top: 25%;
-  right: 0;
-  transform: translateY(-50%);
-  width: 35px;
-  height: 35px;
-  border-radius: 50%;
-  border: 2px solid #cfcfcf;
-  background: none;
-  font-size: 30px;
-  font-weight: lighter;
-  color: #cfcfcf;
-  cursor: pointer;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  z-index: 1;
+  width: 32px;
+  height: 32px;
+  margin-left: 2px;
   padding: 0;
+  border: 1px solid #dfe3ed;
+  border-radius: 9px;
+  background: #fff;
+  color: #9299ab;
+  cursor: pointer;
+  font-size: 16px;
   outline: none;
 }
 
@@ -843,27 +897,14 @@ export default {
   align-items: center;
   gap: 8px;
   margin-left: auto;
-}
-
-.header-actions .hint-text {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  color: #979db1;
-  font-size: 12px;
-  margin-right: 8px;
-}
-
-.header-actions .hint-text img {
-  width: 16px;
-  height: 16px;
+  flex-shrink: 0;
 }
 
 .header-actions .save-btn {
   background: #5778ff;
   color: white;
   border: none;
-  border-radius: 18px;
+  border-radius: 9px;
   padding: 8px 16px;
   height: 32px;
   font-size: 14px;
@@ -873,26 +914,18 @@ export default {
   background: #fff;
   color: #5778ff;
   border: 1px solid #9eb0ff;
-  border-radius: 18px;
+  border-radius: 9px;
   padding: 8px 16px;
   height: 32px;
 }
 
 .header-actions .reset-btn {
-  background: #e6ebff;
-  color: #5778ff;
-  border: 1px solid #adbdff;
-  border-radius: 18px;
+  background: #f6f7fa;
+  color: #7b8294;
+  border: 1px solid #e1e4ec;
+  border-radius: 9px;
   padding: 8px 16px;
   height: 32px;
-}
-
-.header-actions .custom-close-btn {
-  position: static;
-  transform: none;
-  width: 32px;
-  height: 32px;
-  margin-left: 8px;
 }
 
 .custom-tag {
@@ -917,6 +950,23 @@ export default {
   width: 90px;
   &::v-deep(.el-input__inner) {
     width: 90px !important;
+  }
+}
+
+@media (max-width: 1250px) {
+  .config-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .config-summary {
+    width: 100%;
+  }
+
+  .header-actions {
+    width: 100%;
+    justify-content: flex-end;
   }
 }
 </style>

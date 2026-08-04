@@ -10,6 +10,10 @@ const dialogSource = fs.readFileSync(
   path.join(root, 'src/components/role/RoleEditDialog.vue'),
   'utf8'
 );
+const switcherSource = fs.readFileSync(
+  path.join(root, 'src/components/role/RoleTemplateSwitcher.vue'),
+  'utf8'
+);
 
 test('workspace role template UI', async (t) => {
   await t.test('write APIs use dedicated endpoints and do not retry uncertain mutations', () => {
@@ -41,15 +45,26 @@ test('workspace role template UI', async (t) => {
     assert.match(pageSource, /applyAgentTemplate\(template\)/);
     assert.match(pageSource, /hydrateAgentConfig\(agentData\)/);
     assert.match(pageSource, /skippedItems/);
-    assert.match(dialogSource, /template\.scope === 'WORKSPACE'/);
-    assert.match(dialogSource, /@click\.stop="deleteTemplate\(template\)"/);
+    assert.match(switcherSource, /template\.scope === 'WORKSPACE'/);
+    assert.match(switcherSource, /@click\.stop="\$emit\('delete', template\)"/);
   });
 
   await t.test('read-only workspace members cannot create or apply templates', () => {
     assert.match(pageSource, /Api\.workspace\.current/);
     assert.match(pageSource, /v-if="workspaceCanWrite"/);
     assert.match(pageSource, /当前工作空间为只读，不能创建角色模板/);
-    assert.match(dialogSource, /'template-disabled': !workspaceCanWrite/);
+    assert.match(switcherSource, /'template-disabled': !workspaceCanWrite/);
     assert.match(dialogSource, /当前工作空间为只读，不能切换角色模板/);
+  });
+
+  await t.test('role editor explains template impact and groups long settings', () => {
+    assert.match(switcherSource, /一键切换角色模板/);
+    assert.match(switcherSource, /模型、音色、热词、知识库、声纹和飞书配置将一起切换/);
+    assert.match(dialogSource, /aria-label="角色配置分区导航"/);
+    assert.match(dialogSource, /角色设定与外部集成/);
+    assert.match(dialogSource, /语音、模型与能力/);
+    assert.match(dialogSource, /管理上下文源/);
+    assert.match(dialogSource, /管理飞书配置/);
+    assert.match(pageSource, /class="config-toolbar"/);
   });
 });

@@ -1,9 +1,38 @@
 <template>
   <div class="role-edit-form">
+    <role-template-switcher
+      ref="templateSection"
+      :templates="templates"
+      :loading="loadingTemplate"
+      :workspace-can-write="workspaceCanWrite"
+      @select="selectTemplate"
+      @delete="deleteTemplate"
+    />
+
+    <nav class="section-nav" aria-label="角色配置分区导航">
+      <span class="section-nav-title">快速定位</span>
+      <button type="button" @click="scrollToSection('templateSection')">
+        <i class="el-icon-s-operation" />模板切换
+      </button>
+      <button type="button" @click="scrollToSection('personaSection')">
+        <i class="el-icon-user" />角色与集成
+      </button>
+      <button type="button" @click="scrollToSection('modelSection')">
+        <i class="el-icon-set-up" />模型与能力
+      </button>
+    </nav>
+
     <el-form ref="form" :model="form" label-width="72px">
       <div class="form-content">
         <div class="form-grid">
-          <div class="form-column">
+          <section ref="personaSection" class="form-column config-section">
+            <div class="section-heading">
+              <span class="section-number">01</span>
+              <div>
+                <h3>角色设定与外部集成</h3>
+                <p>定义角色身份、回复方式，以及上下文、技能和飞书协作。</p>
+              </div>
+            </div>
             <el-form-item>
               <template #label>
                 <el-tooltip :content="$t('roleConfig.tooltip.agentName')" placement="top" effect="light" popper-class="custom-tooltip">
@@ -16,55 +45,32 @@
                 maxlength="64"
               />
             </el-form-item>
-            <el-form-item>
-              <template #label>
-                <el-tooltip :content="$t('roleConfig.tooltip.roleTemplate')" placement="top" effect="light" popper-class="custom-tooltip">
-                  <span>{{ $t('roleConfig.roleTemplate') }}：</span>
-                </el-tooltip>
-              </template>
-              <div class="template-container">
-                <div
-                  v-for="(template, index) in templates"
-                  :key="template.id || `template-${index}`"
-                  class="template-item"
-                  :class="{
-                    'template-loading': loadingTemplate,
-                    'template-disabled': !workspaceCanWrite,
-                  }"
-                  @click="selectTemplate(template)"
-                >
-                  <span>{{ template.templateName || template.agentName }}</span>
-                  <span class="template-scope">{{ template.scope === 'WORKSPACE' ? '共享' : '系统' }}</span>
-                  <button
-                    v-if="template.deletable"
-                    type="button"
-                    class="template-delete"
-                    title="删除模板"
-                    @click.stop="deleteTemplate(template)"
-                  >×</button>
-                </div>
-              </div>
-            </el-form-item>
-            <el-form-item class="context-provider-item">
+            <div class="subsection-title">
+              <i class="el-icon-link" />
+              <span>资源与集成</span>
+              <small>按需连接上下文、技能和协作平台</small>
+            </div>
+            <el-form-item class="context-provider-item integration-config-item">
               <template #label>
                 <el-tooltip :content="$t('roleConfig.tooltip.contextProvider')" placement="top" effect="light" popper-class="custom-tooltip">
                   <span>{{ $t('roleConfig.contextProvider') }}：</span>
                 </el-tooltip>
               </template>
-              <div style="display: flex; align-items: center; justify-content: space-between;">
-                <span style="color: #606266; font-size: 13px;">
+              <div class="integration-row">
+                <span class="integration-title">
                   {{ $t('roleConfig.contextProviderSuccess', { count: currentContextProviders.length }) }}<a href="https://github.com/xinnan-tech/xiaozhi-esp32-server/blob/main/docs/context-provider-integration.md" target="_blank" class="doc-link">{{ $t('roleConfig.contextProviderDocLink') }}</a>
                 </span>
                 <el-button
                   class="edit-function-btn"
                   size="small"
+                  icon="el-icon-setting"
                   @click="openContextProviderDialog"
                 >
-                  {{ $t('roleConfig.editContextProvider') }}
+                  管理上下文源
                 </el-button>
               </div>
             </el-form-item>
-            <el-form-item>
+            <el-form-item class="integration-config-item">
               <template #label>
                 <el-tooltip :content="$t('roleConfig.tooltip.agentSkill')" placement="top" effect="light" popper-class="custom-tooltip">
                   <span>{{ $t('roleConfig.agentSkill') }}：</span>
@@ -87,7 +93,7 @@
                 >{{ $t('roleConfig.agentSkillConfigure') }}</el-button>
               </div>
             </el-form-item>
-            <el-form-item label="集成：">
+            <el-form-item class="integration-config-item" label="集成：">
               <div class="integration-row">
                 <div class="integration-main">
                   <span class="integration-title">飞书协作</span>
@@ -98,9 +104,14 @@
                   size="small"
                   icon="el-icon-connection"
                   @click="showFeishuDialog = true"
-                >配置</el-button>
+                >管理飞书配置</el-button>
               </div>
             </el-form-item>
+            <div class="subsection-title role-content-subsection">
+              <i class="el-icon-chat-line-square" />
+              <span>角色内容</span>
+              <small>决定角色身份、表达方式和短期记忆</small>
+            </div>
             <el-form-item>
               <template #label>
                 <el-tooltip :content="$t('roleConfig.tooltip.roleIntroduction')" placement="top" effect="light" popper-class="custom-tooltip">
@@ -168,8 +179,20 @@
                 class="form-input"
               />
             </el-form-item>
-          </div>
-          <div class="form-column">
+          </section>
+          <section ref="modelSection" class="form-column config-section">
+            <div class="section-heading">
+              <span class="section-number">02</span>
+              <div>
+                <h3>语音、模型与能力</h3>
+                <p>配置识别、思考、记忆、知识库、功能和最终发声效果。</p>
+              </div>
+            </div>
+            <div class="subsection-title">
+              <i class="el-icon-microphone" />
+              <span>语音输入</span>
+              <small>检测用户开口并将语音转成文字</small>
+            </div>
             <div class="model-row">
               <el-form-item
                 v-if="featureStatus.vad"
@@ -243,6 +266,11 @@
                   />
                 </div>
               </el-form-item>
+            </div>
+            <div class="subsection-title">
+              <i class="el-icon-cpu" />
+              <span>智能模型与能力</span>
+              <small>控制角色如何思考、调用功能和使用记忆</small>
             </div>
             <div class="model-row">
               <el-form-item class="model-item">
@@ -371,37 +399,45 @@
                 </div>
               </div>
               <div v-if="showFunctionIcons(model.type)" class="capability-config-panel">
-                <div class="capability-row">
-                  <div class="capability-label">{{ $t("roleConfig.functionPlugins") }}</div>
-                  <div class="function-summary">
-                    <el-tooltip
+                <div class="capability-card">
+                  <div class="capability-card-heading">
+                    <span class="capability-icon"><i class="el-icon-s-grid" /></span>
+                    <div>
+                      <strong>{{ $t("roleConfig.functionPlugins") }}</strong>
+                      <span>让角色可以查询信息、控制设备或执行任务</span>
+                    </div>
+                  </div>
+                  <div class="function-summary capability-selection">
+                    <el-tag
                       v-for="func in currentFunctions"
                       :key="func.name"
-                      effect="light"
-                      placement="top"
+                      size="small"
+                      class="function-chip"
                     >
-                      <div slot="content">
-                        <div><strong>功能名称:</strong> {{ func.name }}</div>
-                      </div>
-                      <div class="icon-dot">
-                        {{ getFunctionDisplayChar(func.name) }}
-                      </div>
-                    </el-tooltip>
+                      {{ func.name }}
+                    </el-tag>
                     <span v-if="currentFunctions.length === 0" class="capability-empty">
                       {{ $t("roleConfig.noFunctionsSelected") }}
                     </span>
                   </div>
                   <el-button
                     class="edit-function-btn"
+                    icon="el-icon-setting"
                     @click="openFunctionDialog"
                     :class="{ 'active-btn': showFunctionDialog }"
                   >
                     {{ $t("roleConfig.editFunctions") }}
                   </el-button>
                 </div>
-                <div class="capability-row knowledge-row">
-                  <div class="capability-label">{{ $t("roleConfig.knowledgeBases") }}</div>
-                  <div class="knowledge-chip-list">
+                <div class="capability-card">
+                  <div class="capability-card-heading">
+                    <span class="capability-icon knowledge-icon"><i class="el-icon-collection" /></span>
+                    <div>
+                      <strong>{{ $t("roleConfig.knowledgeBases") }}</strong>
+                      <span>为角色提供可检索的专属资料</span>
+                    </div>
+                  </div>
+                  <div class="knowledge-chip-list capability-selection">
                     <el-tag
                       v-for="knowledge in currentKnowledgeBases"
                       :key="knowledge.id"
@@ -417,15 +453,20 @@
                     </span>
                   </div>
                   <el-button
-                    class="knowledge-add-btn"
+                    class="edit-function-btn"
+                    icon="el-icon-plus"
                     @click="openKnowledgeBaseDialog"
-                    :title="$t('roleConfig.editKnowledgeBases')"
                   >
-                    +
+                    {{ $t('roleConfig.editKnowledgeBases') }}
                   </el-button>
                 </div>
               </div>
             </el-form-item>
+            <div class="subsection-title voice-subsection">
+              <i class="el-icon-headset" />
+              <span>发声效果</span>
+              <small>选择角色最终使用的音色和语速参数</small>
+            </div>
             <div class="model-row">
               <el-form-item class="model-item">
                 <template #label>
@@ -433,7 +474,7 @@
                     <span>{{ $t('roleConfig.voiceType') }}</span>
                   </el-tooltip>
                 </template>
-                <div class="model-select-wrapper">
+                <div class="model-select-wrapper voice-model-config">
                   <el-select
                     v-model="form.ttsVoiceId"
                     filterable
@@ -474,16 +515,16 @@
                     </el-option>
                   </el-select>
                   <el-button
-                    class="edit-function-btn"
-                    style="margin-left: 10px;"
+                    class="edit-function-btn voice-settings-btn"
+                    icon="el-icon-s-tools"
                     @click="openTtsAdvancedSettings"
                   >
-                    {{ $t('roleConfig.advancedSettings') }}
+                    音色参数设置
                   </el-button>
                 </div>
               </el-form-item>
             </div>
-          </div>
+          </section>
         </div>
       </div>
     </el-form>
@@ -530,6 +571,7 @@ import TtsAdvancedSettings from "@/components/TtsAdvancedSettings.vue";
 import FeishuIntegrationDialog from "@/components/role/FeishuIntegrationDialog.vue";
 import AgentSkillDialog from "@/components/role/AgentSkillDialog.vue";
 import AsrHotwordField from "@/components/role/AsrHotwordField.vue";
+import RoleTemplateSwitcher from "@/components/role/RoleTemplateSwitcher.vue";
 import RealtimeModelNotice from "@/components/model/RealtimeModelNotice.vue";
 import i18n from "@/i18n";
 import {
@@ -552,6 +594,7 @@ export default {
     FeishuIntegrationDialog,
     AgentSkillDialog,
     AsrHotwordField,
+    RoleTemplateSwitcher,
     RealtimeModelNotice,
   },
   props: {
@@ -619,6 +662,12 @@ export default {
     }
   },
   methods: {
+    scrollToSection(refName) {
+      const target = this.$refs[refName];
+      const element = target && (target.$el || target);
+      if (!element || typeof element.scrollIntoView !== "function") return;
+      element.scrollIntoView({ behavior: "smooth", block: "start" });
+    },
     buildFormFromProp(initial) {
       return buildRoleForm(initial);
     },
@@ -1217,19 +1266,137 @@ export default {
 }
 
 .form-content {
-  padding: 2vh 0;
+  padding: 14px 0 30px;
+}
+
+.section-nav {
+  position: sticky;
+  top: 74px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 12px 0 0;
+  padding: 8px 10px;
+  border: 1px solid #e8ebf5;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 4px 12px rgba(53, 66, 110, 0.06);
+  backdrop-filter: blur(8px);
+}
+
+.section-nav-title {
+  margin: 0 3px 0 2px;
+  color: #9aa1b4;
+  font-size: 12px;
+}
+
+.section-nav button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #5f6881;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.section-nav button:hover,
+.section-nav button:focus {
+  background: #edf1ff;
+  color: #5778ff;
+  outline: none;
 }
 
 .form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 20px;
+  align-items: start;
+  gap: 14px;
 }
 
 .form-column {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.config-section {
+  scroll-margin-top: 122px;
+  padding: 18px 18px 8px;
+  border: 1px solid #e5e9f4;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 4px 18px rgba(48, 59, 97, 0.05);
+}
+
+.section-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 17px;
+  padding-bottom: 13px;
+  border-bottom: 1px solid #edf0f6;
+}
+
+.section-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 29px;
+  height: 29px;
+  border-radius: 9px;
+  background: #edf1ff;
+  color: #5778ff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.section-heading h3 {
+  margin: 0;
+  color: #2e374f;
+  font-size: 15px;
+  line-height: 20px;
+}
+
+.section-heading p {
+  margin: 3px 0 0;
+  color: #9299aa;
+  font-size: 11px;
+  line-height: 17px;
+}
+
+.subsection-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 3px 0 8px;
+  color: #56617b;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.subsection-title i {
+  color: #6d89ff;
+  font-size: 14px;
+}
+
+.subsection-title small {
+  margin-left: auto;
+  color: #a1a7b7;
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.voice-subsection {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid #edf0f6;
 }
 
 .form-input {
@@ -1264,6 +1431,24 @@ export default {
   line-height: 18px;
 }
 
+.integration-config-item {
+  margin-bottom: 10px;
+}
+
+.integration-config-item ::v-deep .el-form-item__content {
+  min-height: 48px;
+  padding: 7px 9px;
+  border: 1px solid #e8ebf3;
+  border-radius: 9px;
+  background: #fafbfe;
+}
+
+.role-content-subsection {
+  margin-top: 5px;
+  padding-top: 12px;
+  border-top: 1px solid #edf0f6;
+}
+
 .form-select {
   flex: 1;
   width: 100%;
@@ -1293,63 +1478,21 @@ export default {
   gap: 10px;
 }
 
-.template-container {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.template-item {
-  height: 4vh;
-  min-width: 60px;
-  padding: 0 12px;
-  border-radius: 8px;
-  background: #e6ebff;
-  line-height: 4vh;
-  font-weight: 400;
-  font-size: 11px;
-  text-align: center;
-  color: #5778ff;
-  cursor: pointer;
-  transition: background-color 0.3s ease;
-  white-space: nowrap;
-}
-
-.template-scope {
-  margin-left: 6px;
-  font-size: 10px;
-  color: #8392b5;
-}
-
-.template-delete {
-  margin-left: 5px;
-  border: 0;
-  background: transparent;
-  color: #a7b0c8;
-  cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
-  padding: 0;
-}
-
-.template-delete:hover {
-  color: #f56c6c;
-}
-
-.template-item:hover {
-  background-color: #d0d8ff;
-}
-
-.template-item.template-disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
-}
-
 .model-select-wrapper {
   display: flex;
   flex-direction: column;
   align-items: center;
   width: 100%;
+}
+
+.voice-model-config {
+  flex-direction: row;
+  gap: 9px;
+}
+
+.voice-settings-btn {
+  flex-shrink: 0;
+  margin: 0;
 }
 
 .model-row {
@@ -1372,42 +1515,100 @@ export default {
 }
 
 .capability-config-panel {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
   width: 100%;
-  margin-top: 10px;
-  padding: 6px 0 0;
+  margin-top: 12px;
 }
 
-.capability-row {
+.capability-card {
   display: grid;
-  grid-template-columns: 64px 1fr auto;
+  grid-template-columns: 1fr auto;
   align-items: center;
   gap: 10px;
-  min-height: 34px;
-  padding: 4px 0;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #e5e9f3;
+  border-radius: 10px;
+  background: #fafbfe;
 }
 
-.capability-row + .capability-row {
-  margin-top: 2px;
+.capability-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
-.capability-label {
-  color: #5f6680;
-  font-size: 13px;
-  line-height: 20px;
+.capability-card-heading > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
-.function-summary,
-.knowledge-chip-list {
+.capability-card-heading strong {
+  color: #3b445c;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.capability-card-heading span:not(.capability-icon) {
+  overflow: hidden;
+  color: #9aa1b2;
+  font-size: 10px;
+  line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.capability-icon {
+  display: inline-flex;
+  flex: 0 0 28px;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: #e9eeff;
+  color: #5778ff;
+}
+
+.capability-icon.knowledge-icon {
+  background: #e8f7f1;
+  color: #43a37d;
+}
+
+.capability-selection {
+  grid-row: 2;
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
+  min-height: 24px;
+}
+
+.capability-card > .edit-function-btn {
+  grid-row: 1;
+  grid-column: 2;
+  padding: 7px 10px;
+  font-size: 11px;
 }
 
 .capability-empty {
   color: #a3a8b8;
-  font-size: 13px;
+  font-size: 11px;
+}
+
+.function-chip {
+  max-width: 160px;
+  overflow: hidden;
+  border-color: #d9e1ff;
+  background: #edf1ff;
+  color: #5778ff;
+  text-overflow: ellipsis;
 }
 
 .knowledge-chip {
@@ -1425,40 +1626,6 @@ export default {
 .knowledge-chip ::v-deep .el-tag__close:hover {
   color: #fff;
   background: #9aa0ad;
-}
-
-.knowledge-add-btn {
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 1px dashed #c7cbd6;
-  border-radius: 4px;
-  background: #f6f7fa;
-  color: #777d8c;
-  font-size: 22px;
-  line-height: 24px;
-  font-weight: 400;
-}
-
-.knowledge-add-btn:hover {
-  color: #5778ff;
-  background: #eef2ff;
-  border-color: #adbdff;
-}
-
-.icon-dot {
-  width: 25px;
-  height: 25px;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #5778ff;
-  font-weight: bold;
-  font-size: 12px;
-  margin-right: 8px;
-  position: relative;
-  background-color: #e6ebff;
 }
 
 ::v-deep .el-form-item__label {
@@ -1564,6 +1731,22 @@ export default {
 .tts-slider ::v-deep .el-input__inner {
   text-align: center;
   padding: 0 8px;
+}
+
+@media (max-width: 1250px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .section-nav {
+    position: static;
+    overflow-x: auto;
+  }
+
+  .section-nav-title,
+  .section-nav button {
+    flex-shrink: 0;
+  }
 }
 </style>
 
