@@ -10,6 +10,7 @@ import java.util.Set;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -29,6 +30,7 @@ import xiaozhi.modules.agent.entity.AgentVoicePrintEntity;
 import xiaozhi.modules.agent.entity.AgentVoicePrintSampleEntity;
 import xiaozhi.modules.agent.service.AgentChatAudioService;
 import xiaozhi.modules.agent.service.AgentChatHistoryService;
+import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.agent.service.AgentVoicePrintService;
 import xiaozhi.modules.agent.voiceprint.VoiceprintApiClient;
 import xiaozhi.modules.agent.vo.AgentVoicePrintVO;
@@ -52,18 +54,21 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
     private final AgentVoicePrintSampleDao voicePrintSampleDao;
     private final TransactionTemplate transactionTemplate;
     private final VoiceprintApiClient voiceprintApiClient;
+    private final AgentService agentService;
 
     public AgentVoicePrintServiceImpl(
             AgentChatAudioService agentChatAudioService,
             AgentChatHistoryService agentChatHistoryService,
             AgentVoicePrintSampleDao voicePrintSampleDao,
             TransactionTemplate transactionTemplate,
-            VoiceprintApiClient voiceprintApiClient) {
+            VoiceprintApiClient voiceprintApiClient,
+            AgentService agentService) {
         this.agentChatAudioService = agentChatAudioService;
         this.agentChatHistoryService = agentChatHistoryService;
         this.voicePrintSampleDao = voicePrintSampleDao;
         this.transactionTemplate = transactionTemplate;
         this.voiceprintApiClient = voiceprintApiClient;
+        this.agentService = agentService;
     }
 
     @Override
@@ -89,6 +94,7 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
         AgentVoicePrintEntity entity = ConvertUtils.sourceToTarget(dto, AgentVoicePrintEntity.class);
         entity.setAudioId(samples.get(0).audioId());
         entity.setRemoteUserId(dto.getAgentId());
+        entity.setWorkspaceId(agentService.getAgentById(dto.getAgentId()).getWorkspaceId());
 
         return transactionTemplate.execute(status -> {
             try {
@@ -98,6 +104,7 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
                     status.setRollbackOnly();
                     return null;
                 }
+                baseMapper.insertBinding(entity.getAgentId(), entity.getId(), entity.getCreator());
                 saveSamples(entity, samples);
                 Map<String, Object> registrationResult = voiceprintApiClient.registerVoiceprint(
                         entity.getRemoteUserId(),
@@ -126,6 +133,7 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
 
         return Boolean.TRUE.equals(transactionTemplate.execute(status -> {
             try {
+                baseMapper.deleteBindingsByVoicePrintId(voicePrintId);
                 int row = baseMapper.delete(new LambdaQueryWrapper<AgentVoicePrintEntity>()
                         .eq(AgentVoicePrintEntity::getId, voicePrintId)
                         .eq(AgentVoicePrintEntity::getAgentId, existing.getAgentId()));
@@ -152,10 +160,7 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
 
     @Override
     public List<AgentVoicePrintVO> list(Long userId, String agentId) {
-        List<AgentVoicePrintEntity> list = baseMapper.selectList(
-                new LambdaQueryWrapper<AgentVoicePrintEntity>()
-                        .eq(AgentVoicePrintEntity::getAgentId, agentId)
-                        .orderByAsc(AgentVoicePrintEntity::getCreateDate));
+        List<AgentVoicePrintEntity> list = baseMapper.selectBoundByAgentId(agentId);
         return ConvertUtils.sourceToTarget(list, AgentVoicePrintVO.class);
     }
 
@@ -221,9 +226,34 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
         return entity == null ? null : entity.getAgentId();
     }
 
+    @Override
+    public String getWorkspaceIdByVoicePrintId(String voicePrintId) {
+        AgentVoicePrintEntity entity = baseMapper.selectById(voicePrintId);
+        return entity == null ? null : entity.getWorkspaceId();
+    }
+
+    @Override
+    public List<String> getBoundVoicePrintIds(String agentId) {
+        return baseMapper.selectBoundIdsByAgentId(agentId);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void replaceBindings(String agentId, List<String> voicePrintIds, Long operatorId) {
+        List<String> normalized = voicePrintIds == null
+                ? List.of()
+                : new ArrayList<>(new LinkedHashSet<>(voicePrintIds));
+        if (normalized.size() > MAX_VOICEPRINTS_PER_AGENT) {
+            throw new RenException(ErrorCode.AGENT_VOICEPRINT_LIMIT_REACHED);
+        }
+        baseMapper.deleteBindingsByAgentId(agentId);
+        for (String voicePrintId : normalized) {
+            baseMapper.insertBinding(agentId, voicePrintId, operatorId);
+        }
+    }
+
     private void ensureVoiceprintCapacity(String agentId) {
-        Long count = baseMapper.selectCount(new LambdaQueryWrapper<AgentVoicePrintEntity>()
-                .eq(AgentVoicePrintEntity::getAgentId, agentId));
+        Long count = baseMapper.countBindingsByAgentId(agentId);
         if (count != null && count >= MAX_VOICEPRINTS_PER_AGENT) {
             throw new RenException(ErrorCode.AGENT_VOICEPRINT_LIMIT_REACHED);
         }
@@ -251,10 +281,7 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
     }
 
     private IdentifyVoicePrintResponse identifyVoicePrint(String agentId, List<VoicePrintAudioSample> samples) {
-        List<AgentVoicePrintEntity> voiceprints = baseMapper.selectList(
-                new LambdaQueryWrapper<AgentVoicePrintEntity>()
-                        .select(AgentVoicePrintEntity::getId, AgentVoicePrintEntity::getRemoteUserId)
-                        .eq(AgentVoicePrintEntity::getAgentId, agentId));
+        List<AgentVoicePrintEntity> voiceprints = baseMapper.selectBoundByAgentId(agentId);
         if (voiceprints.isEmpty()) {
             return null;
         }

@@ -24,6 +24,7 @@ import xiaozhi.common.exception.RenException;
 import xiaozhi.common.security.CredentialCipher;
 import xiaozhi.modules.agent.dao.AgentFeishuConfigDao;
 import xiaozhi.modules.agent.dto.AgentFeishuConfigSaveDTO;
+import xiaozhi.modules.agent.dto.AgentFeishuTemplateDTO;
 import xiaozhi.modules.agent.dto.FeishuRuntimeActionDTO;
 import xiaozhi.modules.agent.entity.AgentFeishuConfigEntity;
 import xiaozhi.modules.agent.feishu.FeishuOpenApiClient;
@@ -105,6 +106,38 @@ class AgentFeishuServiceImplTest {
         AgentFeishuConfigEntity saved = captor.getValue();
         assertFalse(saved.getEnabled());
         assertFalse(saved.getMeetingReportEnabled());
+    }
+
+    @Test
+    void templateExportReencryptsSecretUnderTemplateScope() {
+        when(cipher.encrypt("agent-template-feishu:template-a", "app-secret"))
+                .thenReturn("template-ciphertext");
+
+        AgentFeishuTemplateDTO template = service.exportForTemplate("agent-a", "template-a");
+
+        assertEquals("cli_test", template.getAppId());
+        assertEquals("template-ciphertext", template.getAppSecretCiphertext());
+        verify(cipher).decrypt("agent-feishu:agent-a", "ciphertext");
+        verify(cipher).encrypt("agent-template-feishu:template-a", "app-secret");
+    }
+
+    @Test
+    void templateApplyDecryptsAndReencryptsSecretForTargetAgent() {
+        when(configDao.selectOne(any())).thenReturn(null);
+        when(cipher.decrypt("agent-template-feishu:template-a", "template-ciphertext"))
+                .thenReturn("app-secret");
+        when(cipher.encrypt("agent-feishu:agent-b", "app-secret"))
+                .thenReturn("target-ciphertext");
+        AgentFeishuTemplateDTO template = new AgentFeishuTemplateDTO();
+        template.setAppId("cli_test");
+        template.setAppSecretCiphertext("template-ciphertext");
+
+        service.replaceFromTemplate("agent-b", "template-a", template, 7L);
+
+        ArgumentCaptor<AgentFeishuConfigEntity> captor = ArgumentCaptor.forClass(AgentFeishuConfigEntity.class);
+        verify(configDao).insert(captor.capture());
+        assertEquals("target-ciphertext", captor.getValue().getAppSecretCiphertext());
+        verify(cipher).decrypt("agent-template-feishu:template-a", "template-ciphertext");
     }
 
     @Test

@@ -7,6 +7,10 @@ import java.util.List;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
@@ -21,9 +25,11 @@ public class AgentUpdateDTO implements Serializable {
     private static final long serialVersionUID = 1L;
 
     @Schema(description = "智能体编码", example = "AGT_1234567890", nullable = true)
+    @Size(max = 36)
     private String agentCode;
 
     @Schema(description = "智能体名称", example = "客服助手", nullable = true)
+    @Size(max = 64)
     private String agentName;
 
     @Schema(description = "语音识别模型标识", example = "asr_model_02", nullable = true)
@@ -61,12 +67,18 @@ public class AgentUpdateDTO implements Serializable {
     private String ttsLanguage;
 
     @Schema(description = "TTS音量", example = "50", nullable = true)
+    @Min(-100)
+    @Max(100)
     private Integer ttsVolume;
 
     @Schema(description = "TTS语速", example = "50", nullable = true)
+    @Min(-100)
+    @Max(100)
     private Integer ttsRate;
 
     @Schema(description = "TTS音调", example = "50", nullable = true)
+    @Min(-100)
+    @Max(100)
     private Integer ttsPitch;
 
     @Schema(description = "记忆模型标识", example = "mem_model_02", nullable = true)
@@ -76,40 +88,52 @@ public class AgentUpdateDTO implements Serializable {
     private String intentModelId;
 
     @Schema(description = "插件函数信息", nullable = true)
+    @Valid
+    @Size(max = 100)
     private List<FunctionInfo> functions;
 
     @Schema(description = "角色设定参数", example = "你是一个专业的客服助手，负责回答用户问题并提供帮助", nullable = true)
+    @Size(max = 2000)
     private String systemPrompt;
 
     @Schema(description = "总结记忆", example = "构建可生长的动态记忆网络，在有限空间内保留关键信息的同时，智能维护信息演变轨迹\n"
             + "根据对话记录，总结user的重要信息，以便在未来的对话中提供更个性化的服务", nullable = true)
+    @Size(max = 2000)
     private String summaryMemory;
 
     @Schema(description = "聊天记录配置（0不记录 1仅记录文本 2记录文本和语音）", example = "3", nullable = true)
     private Integer chatHistoryConf;
 
     @Schema(description = "语言编码", example = "zh_CN", nullable = true)
+    @Size(max = 10)
     private String langCode;
 
     @Schema(description = "交互语种", example = "中文", nullable = true)
+    @Size(max = 10)
     private String language;
 
     @Schema(description = "排序", example = "1", nullable = true)
     private Integer sort;
 
     @Schema(description = "上下文源配置", nullable = true)
+    @Valid
+    @Size(max = 20)
     private List<ContextProviderDTO> contextProviders;
 
     @Schema(description = "替换词文件ID列表", nullable = true)
+    @Size(max = 50)
     private List<String> correctWordFileIds;
 
     @Data
     @Schema(description = "插件函数信息")
     public static class FunctionInfo implements Serializable {
         @Schema(description = "插件ID", example = "plugin_01")
+        @NotBlank
+        @Size(max = 64)
         private String pluginId;
 
         @Schema(description = "函数参数信息", nullable = true)
+        @Size(max = 100)
         private HashMap<String, Object> paramInfo;
 
         private static final long serialVersionUID = 1L;

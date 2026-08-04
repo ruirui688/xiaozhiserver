@@ -28,6 +28,10 @@ public class AgentVoicePrintEntity {
      */
     private String agentId;
     /**
+     * 声纹资源所属工作空间；绑定只能发生在同一工作空间内。
+     */
+    private String workspaceId;
+    /**
      * 关联的音频id
      */
     private String audioId;

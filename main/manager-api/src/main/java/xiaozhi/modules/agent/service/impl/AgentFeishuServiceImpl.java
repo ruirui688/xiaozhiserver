@@ -19,6 +19,7 @@ import xiaozhi.common.exception.RenException;
 import xiaozhi.common.security.CredentialCipher;
 import xiaozhi.modules.agent.dao.AgentFeishuConfigDao;
 import xiaozhi.modules.agent.dto.AgentFeishuConfigSaveDTO;
+import xiaozhi.modules.agent.dto.AgentFeishuTemplateDTO;
 import xiaozhi.modules.agent.dto.FeishuRuntimeActionDTO;
 import xiaozhi.modules.agent.entity.AgentFeishuConfigEntity;
 import xiaozhi.modules.agent.feishu.FeishuOpenApiClient;
@@ -34,6 +35,8 @@ import xiaozhi.modules.device.service.DeviceService;
 public class AgentFeishuServiceImpl implements AgentFeishuService {
     private static final String CIPHER_SCOPE_PREFIX = "agent-feishu:";
     private static final String EVENT_TOKEN_SCOPE_PREFIX = "agent-feishu-event:";
+    private static final String TEMPLATE_SCOPE_PREFIX = "agent-template-feishu:";
+    private static final String TEMPLATE_EVENT_TOKEN_SCOPE_PREFIX = "agent-template-feishu-event:";
     private static final long EVENT_DEDUP_TTL_MILLIS = 10 * 60 * 1000L;
     private static final int EVENT_RATE_LIMIT_PER_MINUTE = 120;
 
@@ -128,6 +131,67 @@ public class AgentFeishuServiceImpl implements AgentFeishuService {
     public void deleteConfig(String agentId) {
         configDao.delete(new LambdaQueryWrapper<AgentFeishuConfigEntity>()
                 .eq(AgentFeishuConfigEntity::getAgentId, agentId));
+    }
+
+    @Override
+    public AgentFeishuTemplateDTO exportForTemplate(String agentId, String templateId) {
+        AgentFeishuConfigEntity entity = find(agentId);
+        if (entity == null) {
+            return null;
+        }
+        AgentFeishuTemplateDTO template = new AgentFeishuTemplateDTO();
+        template.setAppId(entity.getAppId());
+        template.setAppSecretCiphertext(credentialCipher.encrypt(
+                templateScope(templateId), decrypt(entity)));
+        template.setDefaultChatId(entity.getDefaultChatId());
+        template.setCalendarId(entity.getCalendarId());
+        template.setTaskAssigneeOpenId(entity.getTaskAssigneeOpenId());
+        template.setEnabled(entity.getEnabled());
+        template.setMeetingReportEnabled(entity.getMeetingReportEnabled());
+        template.setMessageSendEnabled(entity.getMessageSendEnabled());
+        template.setMessageReadEnabled(entity.getMessageReadEnabled());
+        template.setMessageBroadcastEnabled(entity.getMessageBroadcastEnabled());
+        if (StringUtils.isNotBlank(entity.getEventVerificationTokenCiphertext())) {
+            String eventToken = credentialCipher.decrypt(
+                    eventScope(agentId), entity.getEventVerificationTokenCiphertext());
+            template.setEventVerificationTokenCiphertext(credentialCipher.encrypt(
+                    templateEventScope(templateId), eventToken));
+        }
+        template.setTaskReadEnabled(entity.getTaskReadEnabled());
+        template.setTaskCreateEnabled(entity.getTaskCreateEnabled());
+        template.setCalendarCreateEnabled(entity.getCalendarCreateEnabled());
+        return template;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void replaceFromTemplate(
+            String agentId, String templateId, AgentFeishuTemplateDTO template, Long operatorId) {
+        if (template == null) {
+            deleteConfig(agentId);
+            return;
+        }
+        AgentFeishuConfigSaveDTO dto = new AgentFeishuConfigSaveDTO();
+        dto.setAppId(template.getAppId());
+        dto.setAppSecret(credentialCipher.decrypt(
+                templateScope(templateId), template.getAppSecretCiphertext()));
+        dto.setDefaultChatId(template.getDefaultChatId());
+        dto.setCalendarId(template.getCalendarId());
+        dto.setTaskAssigneeOpenId(template.getTaskAssigneeOpenId());
+        dto.setEnabled(Boolean.TRUE.equals(template.getEnabled()));
+        dto.setMeetingReportEnabled(Boolean.TRUE.equals(template.getMeetingReportEnabled()));
+        dto.setMessageSendEnabled(Boolean.TRUE.equals(template.getMessageSendEnabled()));
+        dto.setMessageReadEnabled(Boolean.TRUE.equals(template.getMessageReadEnabled()));
+        dto.setMessageBroadcastEnabled(Boolean.TRUE.equals(template.getMessageBroadcastEnabled()));
+        if (StringUtils.isNotBlank(template.getEventVerificationTokenCiphertext())) {
+            dto.setEventVerificationToken(credentialCipher.decrypt(
+                    templateEventScope(templateId), template.getEventVerificationTokenCiphertext()));
+        }
+        dto.setTaskReadEnabled(Boolean.TRUE.equals(template.getTaskReadEnabled()));
+        dto.setTaskCreateEnabled(Boolean.TRUE.equals(template.getTaskCreateEnabled()));
+        dto.setCalendarCreateEnabled(Boolean.TRUE.equals(template.getCalendarCreateEnabled()));
+        deleteConfig(agentId);
+        saveConfig(agentId, dto, operatorId);
     }
 
     @Override
@@ -384,6 +448,14 @@ public class AgentFeishuServiceImpl implements AgentFeishuService {
 
     private String eventScope(String agentId) {
         return EVENT_TOKEN_SCOPE_PREFIX + agentId;
+    }
+
+    private String templateScope(String templateId) {
+        return TEMPLATE_SCOPE_PREFIX + templateId;
+    }
+
+    private String templateEventScope(String templateId) {
+        return TEMPLATE_EVENT_TOKEN_SCOPE_PREFIX + templateId;
     }
 
     private String extractTextMessage(String rawContent) {

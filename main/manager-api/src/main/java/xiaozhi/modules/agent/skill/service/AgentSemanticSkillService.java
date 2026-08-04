@@ -19,6 +19,12 @@ public interface AgentSemanticSkillService {
 
     void updateOrder(String agentId, AgentSemanticSkillOrderDTO dto, Long operatorId);
 
+    void replaceAll(
+            String agentId,
+            List<AgentSemanticSkillSaveDTO> skills,
+            Long operatorId,
+            boolean publishRefresh);
+
     void deleteByAgentId(String agentId);
 
     void deleteByAgentIds(List<String> agentIds);

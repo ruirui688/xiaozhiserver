@@ -23,6 +23,7 @@ import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import xiaozhi.common.redis.RedisUtils;
 import xiaozhi.modules.agent.dao.AgentDao;
 import xiaozhi.modules.agent.dao.AgentTagDao;
+import xiaozhi.modules.agent.dao.AgentVoicePrintDao;
 import xiaozhi.modules.agent.dto.AgentDTO;
 import xiaozhi.modules.agent.dto.AgentUpdateDTO;
 import xiaozhi.modules.agent.entity.AgentEntity;
@@ -70,6 +71,7 @@ class AgentWorkspaceIsolationTest {
         AgentServiceImpl service = new AgentServiceImpl(
                 agentDao,
                 agentTagDao,
+                mock(AgentVoicePrintDao.class),
                 mock(TimbreService.class),
                 mock(ModelConfigService.class),
                 mock(RedisUtils.class),
@@ -161,6 +163,7 @@ class AgentWorkspaceIsolationTest {
         AgentServiceImpl service = new AgentServiceImpl(
                 agentDao,
                 mock(AgentTagDao.class),
+                mock(AgentVoicePrintDao.class),
                 mock(TimbreService.class),
                 mock(ModelConfigService.class),
                 mock(RedisUtils.class),
@@ -207,6 +210,7 @@ class AgentWorkspaceIsolationTest {
         AgentServiceImpl service = new AgentServiceImpl(
                 agentDao,
                 agentTagDao,
+                mock(AgentVoicePrintDao.class),
                 mock(TimbreService.class),
                 mock(ModelConfigService.class),
                 mock(RedisUtils.class),

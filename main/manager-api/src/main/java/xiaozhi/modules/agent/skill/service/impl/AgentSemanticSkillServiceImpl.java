@@ -144,6 +144,39 @@ public class AgentSemanticSkillServiceImpl implements AgentSemanticSkillService 
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void replaceAll(
+            String agentId,
+            List<AgentSemanticSkillSaveDTO> skills,
+            Long operatorId,
+            boolean publishRefresh) {
+        List<AgentSemanticSkillSaveDTO> requested = skills == null ? List.of() : skills;
+        if (requested.size() > MAX_SKILLS_PER_AGENT) {
+            throw new RenException("固定播报技能数量不能超过 " + MAX_SKILLS_PER_AGENT);
+        }
+        skillDao.delete(new LambdaQueryWrapper<AgentSemanticSkillEntity>()
+                .eq(AgentSemanticSkillEntity::getAgentId, agentId));
+        Date now = new Date();
+        for (AgentSemanticSkillSaveDTO dto : requested) {
+            if (dto == null) {
+                throw new RenException(ErrorCode.PARAMS_GET_ERROR);
+            }
+            AgentSemanticSkillEntity entity = new AgentSemanticSkillEntity();
+            entity.setId(UUID.randomUUID().toString().replace("-", ""));
+            entity.setAgentId(agentId);
+            apply(dto, entity);
+            entity.setCreator(operatorId);
+            entity.setCreatedAt(now);
+            entity.setUpdater(operatorId);
+            entity.setUpdatedAt(now);
+            skillDao.insert(entity);
+        }
+        if (publishRefresh) {
+            publishRefresh(agentId, "semantic_skills_replaced");
+        }
+    }
+
+    @Override
     public void deleteByAgentId(String agentId) {
         skillDao.delete(new LambdaQueryWrapper<AgentSemanticSkillEntity>()
                 .eq(AgentSemanticSkillEntity::getAgentId, agentId));

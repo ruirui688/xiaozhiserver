@@ -59,6 +59,7 @@ public class AgentTemplateController {
         
         // 创建查询条件
         QueryWrapper<AgentTemplateEntity> wrapper = new QueryWrapper<>();
+        wrapper.isNull("workspace_id");
         String agentName = (String) params.get("agentName");
         if (agentName != null && !agentName.isEmpty()) {
             wrapper.like("agent_name", agentName);
@@ -85,6 +86,9 @@ public class AgentTemplateController {
         if (template == null) {
             return ResultUtils.error("模板不存在");
         }
+        if (template.getWorkspaceId() != null) {
+            return ResultUtils.error("工作空间模板请在角色配置页管理");
+        }
         
         // 使用ConvertUtils转换为VO
         AgentTemplateVO vo = ConvertUtils.sourceToTarget(template, AgentTemplateVO.class);
@@ -96,6 +100,12 @@ public class AgentTemplateController {
     @Operation(summary = "创建模板")
     @RequiresPermissions("sys:role:superAdmin")
     public Result<AgentTemplateEntity> createAgentTemplate(@Valid @RequestBody AgentTemplateEntity template) {
+        template.setWorkspaceId(null);
+        template.setSnapshotJson(null);
+        template.setSourceAgentId(null);
+        if (template.getTemplateName() == null || template.getTemplateName().isBlank()) {
+            template.setTemplateName(template.getAgentName());
+        }
         // 设置排序值为下一个可用的序号
         template.setSort(agentTemplateService.getNextAvailableSort());
         
@@ -111,6 +121,16 @@ public class AgentTemplateController {
     @Operation(summary = "更新模板")
     @RequiresPermissions("sys:role:superAdmin")
     public Result<AgentTemplateEntity> updateAgentTemplate(@Valid @RequestBody AgentTemplateEntity template) {
+        AgentTemplateEntity existing = agentTemplateService.getById(template.getId());
+        if (existing == null || existing.getWorkspaceId() != null) {
+            return ResultUtils.error("只能在此处更新系统模板");
+        }
+        template.setWorkspaceId(null);
+        template.setSnapshotJson(null);
+        template.setSourceAgentId(null);
+        if (template.getTemplateName() == null || template.getTemplateName().isBlank()) {
+            template.setTemplateName(template.getAgentName());
+        }
         boolean updated = agentTemplateService.updateById(template);
         if (updated) {
             return ResultUtils.success(template);
@@ -127,6 +147,9 @@ public class AgentTemplateController {
         AgentTemplateEntity template = agentTemplateService.getById(id);
         if (template == null) {
             return ResultUtils.error("模板不存在");
+        }
+        if (template.getWorkspaceId() != null) {
+            return ResultUtils.error("工作空间模板请在角色配置页删除");
         }
         
         Integer deletedSort = template.getSort();
@@ -148,6 +171,13 @@ public class AgentTemplateController {
     @Operation(summary = "批量删除模板")
     @RequiresPermissions("sys:role:superAdmin")
     public Result<String> batchRemoveAgentTemplates(@RequestBody List<String> ids) {
+        long workspaceTemplateCount = agentTemplateService.count(
+                new QueryWrapper<AgentTemplateEntity>()
+                        .in("id", ids)
+                        .isNotNull("workspace_id"));
+        if (workspaceTemplateCount > 0) {
+            return ResultUtils.error("批量删除中包含工作空间模板");
+        }
         boolean deleted = agentTemplateService.removeByIds(ids);
         if (deleted) {
             return ResultUtils.success("批量删除成功");

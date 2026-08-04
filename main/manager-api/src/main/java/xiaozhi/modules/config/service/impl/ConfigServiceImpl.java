@@ -498,10 +498,7 @@ public class ConfigServiceImpl implements ConfigService {
      * @return 声纹信息列表
      */
     private List<AgentVoicePrintEntity> getVoiceprintsByAgentId(String agentId) {
-        LambdaQueryWrapper<AgentVoicePrintEntity> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.eq(AgentVoicePrintEntity::getAgentId, agentId);
-        queryWrapper.orderByAsc(AgentVoicePrintEntity::getCreateDate);
-        return agentVoicePrintDao.selectList(queryWrapper);
+        return agentVoicePrintDao.selectBoundByAgentId(agentId);
     }
 
     private double readBoundedDoubleParam(String paramCode, double defaultValue, double minimum, double maximum) {

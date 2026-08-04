@@ -90,6 +90,10 @@ public class ShiroConfig {
         // 将config路径使用server服务过滤器
         filterMap.put("/config/**", "server");
         filterMap.put("/user/plugin-configs/**", "oauth2");
+        filterMap.put("/agent/templates", "oauth2");
+        filterMap.put("/agent/templates/**", "oauth2");
+        filterMap.put("/agent/*/templates", "oauth2");
+        filterMap.put("/agent/*/templates/**", "oauth2");
         filterMap.put("/agent/*/skills", "oauth2");
         filterMap.put("/agent/*/skills/**", "oauth2");
         filterMap.put("/agent/*/feishu/events", "anon");

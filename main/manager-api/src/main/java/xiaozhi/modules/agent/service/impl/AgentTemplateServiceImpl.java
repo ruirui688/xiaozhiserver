@@ -40,7 +40,8 @@ public class AgentTemplateServiceImpl extends ServiceImpl<AgentTemplateDao, Agen
      */
     public AgentTemplateEntity getDefaultTemplate() {
         LambdaQueryWrapper<AgentTemplateEntity> wrapper = new LambdaQueryWrapper<>();
-        wrapper.orderByAsc(AgentTemplateEntity::getSort)
+        wrapper.isNull(AgentTemplateEntity::getWorkspaceId)
+                .orderByAsc(AgentTemplateEntity::getSort)
                 .last("LIMIT 1");
         return this.getOne(wrapper);
     }
@@ -88,7 +89,7 @@ public class AgentTemplateServiceImpl extends ServiceImpl<AgentTemplateDao, Agen
                 wrapper.set("intent_model_id", resolvedModelId);
                 break;
         }
-        wrapper.ge("sort", 0);
+        wrapper.isNull("workspace_id").ge("sort", 0);
         update(wrapper);
     }
 
@@ -129,7 +130,8 @@ public class AgentTemplateServiceImpl extends ServiceImpl<AgentTemplateDao, Agen
     @Override
     public Integer getNextAvailableSort() {
         // 查询所有已存在的排序值并按升序排序
-        List<Integer> sortValues = baseMapper.selectList(new QueryWrapper<AgentTemplateEntity>())
+        List<Integer> sortValues = baseMapper.selectList(
+                        new QueryWrapper<AgentTemplateEntity>().isNull("workspace_id"))
                 .stream()
                 .map(AgentTemplateEntity::getSort)
                 .filter(Objects::nonNull)

@@ -44,7 +44,7 @@ class AgentVoicePrintControllerTest {
 
     @Test
     void deleteRemovesExistingVoiceprintAfterWorkspaceWriteCheck() {
-        when(voicePrintService.getAgentIdByVoicePrintId(VOICEPRINT_ID)).thenReturn(AGENT_ID);
+        when(voicePrintService.getWorkspaceIdByVoicePrintId(VOICEPRINT_ID)).thenReturn(WORKSPACE_ID);
         when(voicePrintService.delete(any(), org.mockito.ArgumentMatchers.eq(VOICEPRINT_ID))).thenReturn(true);
 
         Result<Void> result = controller.delete(VOICEPRINT_ID);
@@ -56,7 +56,7 @@ class AgentVoicePrintControllerTest {
 
     @Test
     void repeatedDeleteIsIdempotentWhenVoiceprintNoLongerExists() {
-        when(voicePrintService.getAgentIdByVoicePrintId(VOICEPRINT_ID)).thenReturn(null);
+        when(voicePrintService.getWorkspaceIdByVoicePrintId(VOICEPRINT_ID)).thenReturn(null);
 
         Result<Void> result = controller.delete(VOICEPRINT_ID);
 
@@ -67,7 +67,7 @@ class AgentVoicePrintControllerTest {
 
     @Test
     void workspaceWriteDenialPreventsVoiceprintDeletion() {
-        when(voicePrintService.getAgentIdByVoicePrintId(VOICEPRINT_ID)).thenReturn(AGENT_ID);
+        when(voicePrintService.getWorkspaceIdByVoicePrintId(VOICEPRINT_ID)).thenReturn(WORKSPACE_ID);
         doThrow(new RenException("无工作空间写权限"))
                 .when(workspacePermissionService).requireWrite(WORKSPACE_ID);
 

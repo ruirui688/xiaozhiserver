@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="xiaozhi.modules.agent.dao.AgentVoicePrintDao">
+
+    <select id="selectBoundByAgentId"
+            resultType="xiaozhi.modules.agent.entity.AgentVoicePrintEntity">
+        SELECT vp.*
+        FROM ai_agent_voice_print vp
+        INNER JOIN ai_agent_voice_print_binding b
+            ON b.voice_print_id = vp.id
+        WHERE b.agent_id = #{agentId}
+        ORDER BY vp.create_date ASC
+    </select>
+
+    <select id="selectBoundIdsByAgentId" resultType="java.lang.String">
+        SELECT voice_print_id
+        FROM ai_agent_voice_print_binding
+        WHERE agent_id = #{agentId}
+        ORDER BY created_at ASC, id ASC
+    </select>
+
+    <select id="countBindingsByAgentId" resultType="java.lang.Long">
+        SELECT COUNT(*)
+        FROM ai_agent_voice_print_binding
+        WHERE agent_id = #{agentId}
+    </select>
+
+    <insert id="insertBinding">
+        INSERT IGNORE INTO ai_agent_voice_print_binding
+            (id, agent_id, voice_print_id, creator, created_at)
+        VALUES
+            (REPLACE(UUID(), '-', ''), #{agentId}, #{voicePrintId}, #{creator}, NOW())
+    </insert>
+
+    <delete id="deleteBindingsByAgentId">
+        DELETE FROM ai_agent_voice_print_binding
+        WHERE agent_id = #{agentId}
+    </delete>
+
+    <delete id="deleteBindingsByVoicePrintId">
+        DELETE FROM ai_agent_voice_print_binding
+        WHERE voice_print_id = #{voicePrintId}
+    </delete>
+</mapper>

@@ -13,8 +13,6 @@ import org.springframework.context.MessageSource;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import com.baomidou.mybatisplus.core.conditions.Wrapper;
-
 import xiaozhi.common.exception.ErrorCode;
 import xiaozhi.common.exception.RenException;
 import xiaozhi.common.utils.MessageUtils;
@@ -24,6 +22,7 @@ import xiaozhi.modules.agent.dto.AgentVoicePrintSaveDTO;
 import xiaozhi.modules.agent.dto.IdentifyVoicePrintResponse;
 import xiaozhi.modules.agent.service.AgentChatAudioService;
 import xiaozhi.modules.agent.service.AgentChatHistoryService;
+import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.agent.voiceprint.VoiceprintApiClient;
 
 class AgentVoicePrintServiceImplTest {
@@ -39,7 +38,7 @@ class AgentVoicePrintServiceImplTest {
     @Test
     void rejectsSixthVoiceprintBeforeReadingAudioOrCallingRemoteService() {
         AgentVoicePrintDao dao = mock(AgentVoicePrintDao.class);
-        when(dao.selectCount(any(Wrapper.class))).thenReturn(5L);
+        when(dao.countBindingsByAgentId("agent-a")).thenReturn(5L);
 
         AgentVoicePrintServiceImpl service = service();
         ReflectionTestUtils.setField(service, "baseMapper", dao);
@@ -73,6 +72,7 @@ class AgentVoicePrintServiceImplTest {
                 mock(AgentChatHistoryService.class),
                 mock(AgentVoicePrintSampleDao.class),
                 mock(TransactionTemplate.class),
-                mock(VoiceprintApiClient.class));
+                mock(VoiceprintApiClient.class),
+                mock(AgentService.class));
     }
 }

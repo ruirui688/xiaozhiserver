@@ -94,6 +94,11 @@ public interface AgentService extends BaseService<AgentEntity> {
     void updateAgentById(String agentId, AgentUpdateDTO dto);
 
     /**
+     * 更新智能体，并允许聚合编排器把运行时刷新合并到事务末尾统一发送。
+     */
+    void updateAgentById(String agentId, AgentUpdateDTO dto, boolean publishRefresh);
+
+    /**
      * 创建智能体
      *
      * @param dto 创建智能体所需的信息

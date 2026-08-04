@@ -21,7 +21,7 @@ source_paths:
 - 每个用户只能拥有注册时自动创建的默认工作空间，不能再手动创建额外工作空间。
 - 用户可以加入他人的工作空间，也可以邀请别人加入自己的默认工作空间。
 - 每个工作空间最多 5 名 active 成员；发起邀请时会同时统计未过期的待接受邀请，避免超额邀请。
-- 工作空间成员共享业务资源，包括智能体、设备、记忆、聊天历史、知识库、声纹、上下文源、替换词、智能体 MCP HTTP 工具等。
+- 工作空间成员共享业务资源，包括智能体、角色模板、设备、记忆、聊天历史、知识库、声纹、上下文源、替换词、智能体 MCP HTTP 工具等。
 - 设备仍只能绑定到一个用户/一条设备记录，但同一工作空间内的成员可共同查看和管理该工作空间内的设备。
 - 系统级资源不纳入工作空间隔离，例如模型配置、系统参数、OTA、全局音乐、管理员用户管理。
 
@@ -62,6 +62,7 @@ sys_workspace_invitation.expires_at
 
 ```text
 ai_agent
+ai_agent_template（`workspace_id IS NULL` 的记录为系统模板）
 ai_device
 ai_rag_dataset
 ai_rag_knowledge_document
@@ -167,6 +168,10 @@ WHERE workspace_id = 当前工作空间
 4. 写操作调用 requireWrite(workspace_id)
 5. 不允许直接相信请求体中的 agentId / deviceId / workspaceId
 ```
+
+工作空间角色模板遵循同一边界：列表只返回系统模板和当前工作空间模板；OWNER/ADMIN 可以从本工作空间智能体创建、应用和删除模板，MEMBER 只能读取。创建接口从来源智能体读取真实 workspace，应用接口同时校验目标智能体和模板 workspace，不能通过请求体把知识库或替换词引用带入其他工作空间。系统模板继续由超级管理员入口管理，不得被工作空间模板接口删除。
+
+模板中的声纹是工作空间级资源绑定：`ai_agent_voice_print.workspace_id` 固化资源归属，`ai_agent_voice_print_binding` 表示哪些智能体当前使用该声纹。同一声纹可被同工作空间角色复用，但不能跨工作空间绑定，模板也不保存音频或远端特征。飞书配置随模板切换时，App Secret 和事件 Verification Token 只以模板作用域 AES-GCM 密文进入数据库快照；保存和应用过程只在 manager-api 内存中短暂解密，不通过 Web API、Python 配置或日志暴露。应用无飞书配置的新版本模板会清除目标飞书绑定，旧版本模板和系统模板则保持目标声纹、飞书配置不变。
 
 智能体权限兼容规则：
 

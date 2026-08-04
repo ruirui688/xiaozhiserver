@@ -66,4 +66,10 @@ public interface AgentVoicePrintService {
 
     String getAgentIdByVoicePrintId(String voicePrintId);
 
+    String getWorkspaceIdByVoicePrintId(String voicePrintId);
+
+    List<String> getBoundVoicePrintIds(String agentId);
+
+    void replaceBindings(String agentId, List<String> voicePrintIds, Long operatorId);
+
 }

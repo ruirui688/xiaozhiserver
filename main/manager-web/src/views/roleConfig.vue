@@ -53,6 +53,14 @@
                   @click="handleSave">
                   {{ $t("roleConfig.saveConfig") }}
                 </el-button>
+                <el-button
+                  v-if="workspaceCanWrite"
+                  class="save-template-btn"
+                  :loading="templateSaveInProgress"
+                  :disabled="agentConfigLoading || !agentConfigLoaded || saveInProgress || templateSaveInProgress"
+                  @click="handleSaveAsTemplate">
+                  另存为角色模板
+                </el-button>
                 <el-button class="reset-btn" @click="handleReset">{{
                   $t("roleConfig.reset")
                 }}</el-button>
@@ -78,8 +86,10 @@
               :current-playing-voice-id="currentPlayingVoiceId"
               :is-paused="isPaused"
               :loading-template="loadingTemplate"
+              :workspace-can-write="workspaceCanWrite"
               :checked-replacement-word-ids="checkedReplacementWordIds"
               @select-template="handleTemplateSelect"
+              @delete-template="handleTemplateDelete"
               @open-context-provider-dialog="handleOpenContextProvider"
               @update:currentFunctions="val => currentFunctions = val"
               @update:currentKnowledgeBases="val => currentKnowledgeBases = val"
@@ -176,6 +186,9 @@ export default {
       agentConfigLoaded: false,
       agentConfigRequestSeq: 0,
       saveInProgress: false,
+      templateSaveInProgress: false,
+      workspaceCanWrite: typeof localStorage === "undefined"
+        || localStorage.getItem("currentWorkspaceCanWrite") !== "false",
       tagsRequestSeq: 0,
       tagsDirty: false,
     };
@@ -183,6 +196,19 @@ export default {
   methods: {
     goToHome() {
       this.$router.push("/home");
+    },
+    loadWorkspacePermission() {
+      Api.workspace.current(({ data }) => {
+        if (data?.code === 0 && data.data) {
+          this.workspaceCanWrite = Boolean(data.data.canWrite);
+          if (typeof localStorage !== "undefined") {
+            localStorage.setItem(
+              "currentWorkspaceCanWrite",
+              this.workspaceCanWrite ? "true" : "false"
+            );
+          }
+        }
+      });
     },
 
     // ===== Tag Management =====
@@ -280,10 +306,12 @@ export default {
       };
     },
     fetchTemplates() {
-      Api.agent.getAgentTemplate(({ data }) => {
+      Api.agent.getAccessibleAgentTemplates(({ data }) => {
         if (data.code === 0) {
           this.templates = data.data;
         }
+      }, () => {
+        this.$message.error("角色模板加载失败");
       });
     },
     fetchAgentConfig(agentId) {
@@ -442,22 +470,167 @@ export default {
         showClose: true,
       });
     },
-    handleTemplateSelect(template) {
-      if (this.loadingTemplate) return;
-      this.loadingTemplate = true;
+    async handleSaveAsTemplate() {
+      if (this.templateSaveInProgress) return;
+      if (!this.workspaceCanWrite) {
+        this.$message.warning("当前工作空间为只读，不能创建角色模板");
+        return;
+      }
+      const editDialog = this.$refs.editDialog;
+      if (!this.agentConfigLoaded || !editDialog?.isReadyToSave()) {
+        this.$message.warning(i18n.t("roleConfig.configNotReady"));
+        return;
+      }
       try {
-        this.$refs.editDialog.applyTemplateData(template);
-        this.$message.success({
-          message: `${template.agentName}${i18n.t("roleConfig.templateApplied")}`,
-          showClose: true,
+        const promptResult = await this.$prompt(
+          "模板将在当前工作空间共享；声纹绑定和飞书配置会随模板切换，飞书密钥只加密保存。设备绑定和敏感请求头不会保存。",
+          "另存为角色模板",
+          {
+            confirmButtonText: "保存模板",
+            cancelButtonText: this.$t("common.cancel"),
+            inputValue: `${editDialog.form.agentName || "角色"}模板`,
+            inputPlaceholder: "请输入模板名称",
+            inputValidator: (value) => {
+              const name = String(value || "").trim();
+              if (!name) return "请输入模板名称";
+              if (name.length > 64) return "模板名称不能超过64个字符";
+              return true;
+            },
+          }
+        );
+        this.templateSaveInProgress = true;
+        const agentId = this.$route.query.agentId;
+        const config = editDialog.submitSaveConfig(agentId);
+        const payload = {
+          templateName: String(promptResult.value).trim(),
+          config,
+          tagNames: this.dynamicTags.map((tag) => tag.tagName),
+        };
+        const result = await this.saveAgentAsTemplate(agentId, payload);
+        await this.fetchTemplatesAsync();
+        const warnings = result?.warnings || [];
+        this.$message.success("角色模板已保存");
+        warnings.forEach((warning) => this.$message.warning({ message: warning, showClose: true }));
+      } catch (error) {
+        if (error !== "cancel" && error !== "close") {
+          this.$message.error(error?.data?.msg || error?.message || "角色模板保存失败");
+        }
+      } finally {
+        this.templateSaveInProgress = false;
+      }
+    },
+    saveAgentAsTemplate(agentId, payload) {
+      return new Promise((resolve, reject) => {
+        Api.agent.saveAgentAsTemplate(agentId, payload, ({ data }) => {
+          if (data?.code === 0) resolve(data.data);
+          else reject(new Error(data?.msg || "角色模板保存失败"));
+        }, reject);
+      });
+    },
+    fetchTemplatesAsync() {
+      return new Promise((resolve, reject) => {
+        Api.agent.getAccessibleAgentTemplates(({ data }) => {
+          if (data?.code === 0) {
+            this.templates = data.data || [];
+            resolve(this.templates);
+          } else {
+            reject(new Error(data?.msg || "角色模板加载失败"));
+          }
+        }, reject);
+      });
+    },
+    async handleTemplateSelect(template) {
+      if (this.loadingTemplate) return;
+      try {
+        await this.$confirm(
+          `确认将“${template.templateName || template.agentName}”立即应用到当前角色吗？角色配置、声纹绑定和飞书集成会一起替换并在线生效；失效引用会被跳过。`,
+          "切换角色模板",
+          {
+            confirmButtonText: "确认切换",
+            cancelButtonText: this.$t("common.cancel"),
+            type: "warning",
+          }
+        );
+        this.loadingTemplate = true;
+        const result = await this.applyAgentTemplate(template);
+        await this.hydrateAppliedTemplate(result);
+        this.$message.success({ message: "角色模板已切换并在线生效", showClose: true });
+        (result.skippedItems || []).forEach((item) => {
+          this.$message.warning({ message: item, showClose: true, duration: 8000 });
         });
       } catch (error) {
-        this.$message.error({
-          message: i18n.t("roleConfig.applyTemplateFailed"),
-          showClose: true,
-        });
+        if (error !== "cancel" && error !== "close") {
+          this.$message.error({
+            message: error?.data?.msg || error?.message || i18n.t("roleConfig.applyTemplateFailed"),
+            showClose: true,
+          });
+        }
       } finally {
         this.loadingTemplate = false;
+      }
+    },
+    applyAgentTemplate(template) {
+      return new Promise((resolve, reject) => {
+        const agentId = this.$route.query.agentId;
+        Api.agent.applyAgentTemplate(agentId, template.id, template.version, ({ data }) => {
+          if (data?.code === 0) resolve(data.data);
+          else reject(new Error(data?.msg || "角色模板切换失败"));
+        }, reject);
+      });
+    },
+    async hydrateAppliedTemplate(result) {
+      const agentData = result?.agent;
+      if (!agentData) throw new Error("模板应用成功，但未返回最新角色配置");
+      this.form = {
+        ...this.form,
+        ...agentData,
+        model: {
+          ttsModelId: agentData.ttsModelId || "",
+          vadModelId: agentData.vadModelId || "",
+          asrModelId: agentData.asrModelId || "",
+          llmModelId: agentData.llmModelId || "",
+          slmModelId: agentData.slmModelId || "",
+          vllmModelId: agentData.vllmModelId || "",
+          memModelId: agentData.memModelId || "",
+          intentModelId: agentData.intentModelId || "",
+        },
+      };
+      this.checkedReplacementWordIds = agentData.correctWordFileIds || [];
+      this.currentContextProviders = agentData.contextProviders || [];
+      this.dynamicTags = (result.tagNames || []).map((tagName, index) => ({
+        id: `template-tag-${index}`,
+        tagName,
+      }));
+      this.tagsDirty = false;
+      await this.$nextTick();
+      const hydrated = await this.$refs.editDialog.hydrateAgentConfig(agentData);
+      this.agentConfigLoaded = hydrated;
+      this.$refs.editDialog.markSaved();
+      this.$refs.editDialog.fetchAgentSkillCount();
+    },
+    async handleTemplateDelete(template) {
+      try {
+        await this.$confirm(
+          `确认删除工作空间模板“${template.templateName}”吗？`,
+          "删除角色模板",
+          {
+            confirmButtonText: this.$t("common.confirm"),
+            cancelButtonText: this.$t("common.cancel"),
+            type: "warning",
+          }
+        );
+        await new Promise((resolve, reject) => {
+          Api.agent.deleteWorkspaceAgentTemplate(template.id, ({ data }) => {
+            if (data?.code === 0) resolve();
+            else reject(new Error(data?.msg || "角色模板删除失败"));
+          }, reject);
+        });
+        await this.fetchTemplatesAsync();
+        this.$message.success("角色模板已删除");
+      } catch (error) {
+        if (error !== "cancel" && error !== "close") {
+          this.$message.error(error?.data?.msg || error?.message || "角色模板删除失败");
+        }
       }
     },
     handleOpenContextProvider() {
@@ -470,6 +643,7 @@ export default {
     },
   },
   async mounted() {
+    this.loadWorkspacePermission();
     const agentId = this.$route.query.agentId;
     if (agentId) {
       this.fetchAgentConfig(agentId);
@@ -693,6 +867,15 @@ export default {
   padding: 8px 16px;
   height: 32px;
   font-size: 14px;
+}
+
+.header-actions .save-template-btn {
+  background: #fff;
+  color: #5778ff;
+  border: 1px solid #9eb0ff;
+  border-radius: 18px;
+  padding: 8px 16px;
+  height: 32px;
 }
 
 .header-actions .reset-btn {

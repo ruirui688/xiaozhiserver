@@ -25,12 +25,23 @@
               <div class="template-container">
                 <div
                   v-for="(template, index) in templates"
-                  :key="`template-${index}`"
+                  :key="template.id || `template-${index}`"
                   class="template-item"
-                  :class="{ 'template-loading': loadingTemplate }"
+                  :class="{
+                    'template-loading': loadingTemplate,
+                    'template-disabled': !workspaceCanWrite,
+                  }"
                   @click="selectTemplate(template)"
                 >
-                  {{ template.agentName }}
+                  <span>{{ template.templateName || template.agentName }}</span>
+                  <span class="template-scope">{{ template.scope === 'WORKSPACE' ? '共享' : '系统' }}</span>
+                  <button
+                    v-if="template.deletable"
+                    type="button"
+                    class="template-delete"
+                    title="删除模板"
+                    @click.stop="deleteTemplate(template)"
+                  >×</button>
                 </div>
               </div>
             </el-form-item>
@@ -558,6 +569,7 @@ export default {
     currentPlayingVoiceId: { type: String, default: '' },
     isPaused: { type: Boolean, default: false },
     loadingTemplate: { type: Boolean, default: false },
+    workspaceCanWrite: { type: Boolean, default: true },
     checkedReplacementWordIds: { type: Array, default: () => [] },
     llmModeTypeMap: { type: Map, default: () => new Map() },
   },
@@ -733,7 +745,14 @@ export default {
       });
     },
     selectTemplate(template) {
+      if (!this.workspaceCanWrite) {
+        this.$message.warning("当前工作空间为只读，不能切换角色模板");
+        return;
+      }
       this.$emit('select-template', template);
+    },
+    deleteTemplate(template) {
+      this.$emit('delete-template', template);
     },
     applyTemplateData(templateData) {
       this.form = {
@@ -1296,8 +1315,34 @@ export default {
   white-space: nowrap;
 }
 
+.template-scope {
+  margin-left: 6px;
+  font-size: 10px;
+  color: #8392b5;
+}
+
+.template-delete {
+  margin-left: 5px;
+  border: 0;
+  background: transparent;
+  color: #a7b0c8;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0;
+}
+
+.template-delete:hover {
+  color: #f56c6c;
+}
+
 .template-item:hover {
   background-color: #d0d8ff;
+}
+
+.template-item.template-disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
 }
 
 .model-select-wrapper {

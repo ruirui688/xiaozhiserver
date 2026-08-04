@@ -54,6 +54,7 @@ import xiaozhi.modules.agent.service.AgentMcpNoCodeToolService;
 import xiaozhi.modules.agent.service.AgentPluginMappingService;
 import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.agent.service.AgentTemplateService;
+import xiaozhi.modules.agent.service.AgentVoicePrintService;
 import xiaozhi.modules.agent.skill.service.AgentSemanticSkillService;
 import xiaozhi.modules.correctword.service.CorrectWordFileService;
 import xiaozhi.modules.agent.vo.AgentChatHistoryUserVO;
@@ -77,6 +78,7 @@ public class AgentController {
     private final AgentPluginMappingService agentPluginMappingService;
     private final AgentContextProviderService agentContextProviderService;
     private final AgentFeishuService agentFeishuService;
+    private final AgentVoicePrintService agentVoicePrintService;
     private final AgentMcpNoCodeToolService agentMcpNoCodeToolService;
     private final AgentChatSummaryService agentChatSummaryService;
     private final RedisUtils redisUtils;
@@ -206,6 +208,8 @@ public class AgentController {
         agentMcpNoCodeToolService.deleteByAgentId(id);
         // 删除关联的飞书配置
         agentFeishuService.deleteConfig(id);
+        // 删除该智能体当前使用的声纹绑定；声纹资源仍归工作空间管理。
+        agentVoicePrintService.replaceBindings(id, List.of(), SecurityUser.getUserId());
         // 删除关联的替换词文件关联记录
         correctWordFileService.deleteMappingsByAgentId(id);
         // 删除关联的固定播报技能
@@ -220,7 +224,9 @@ public class AgentController {
     @RequiresPermissions("sys:role:normal")
     public Result<List<AgentTemplateEntity>> templateList() {
         List<AgentTemplateEntity> list = agentTemplateService
-                .list(new QueryWrapper<AgentTemplateEntity>().orderByAsc("sort"));
+                .list(new QueryWrapper<AgentTemplateEntity>()
+                        .isNull("workspace_id")
+                        .orderByAsc("sort"));
         return new Result<List<AgentTemplateEntity>>().ok(list);
     }
 

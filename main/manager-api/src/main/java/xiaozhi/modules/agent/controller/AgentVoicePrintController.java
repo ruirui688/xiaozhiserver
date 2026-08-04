@@ -56,7 +56,7 @@ public class AgentVoicePrintController {
     @Operation(summary = "更新智能体的对应声纹")
     @RequiresPermissions("sys:role:normal")
     public Result<Void> update(@RequestBody @Valid AgentVoicePrintUpdateDTO dto) {
-        requireAgentWrite(agentVoicePrintService.getAgentIdByVoicePrintId(dto.getId()));
+        requireVoicePrintWrite(dto.getId());
         Long userId = SecurityUser.getUserId();
         boolean b = agentVoicePrintService.update(userId, dto);
         if (b) {
@@ -69,12 +69,12 @@ public class AgentVoicePrintController {
     @Operation(summary = "删除智能体对应声纹")
     @RequiresPermissions("sys:role:normal")
     public Result<Void> delete(@PathVariable String id) {
-        String agentId = agentVoicePrintService.getAgentIdByVoicePrintId(id);
+        String workspaceId = agentVoicePrintService.getWorkspaceIdByVoicePrintId(id);
         // DELETE 保持幂等：首次请求成功但响应丢失时，客户端再次确认删除仍返回成功。
-        if (StringUtils.isBlank(agentId)) {
+        if (StringUtils.isBlank(workspaceId)) {
             return new Result<>();
         }
-        requireAgentWrite(agentId);
+        workspacePermissionService.requireWrite(workspaceId);
         Long userId = SecurityUser.getUserId();
         boolean delete = agentVoicePrintService.delete(userId, id);
         if (delete) {
@@ -107,6 +107,14 @@ public class AgentVoicePrintController {
             throw new RenException(ErrorCode.AGENT_NOT_FOUND);
         }
         workspacePermissionService.requireWrite(agent.getWorkspaceId());
+    }
+
+    private void requireVoicePrintWrite(String voicePrintId) {
+        String workspaceId = agentVoicePrintService.getWorkspaceIdByVoicePrintId(voicePrintId);
+        if (StringUtils.isBlank(workspaceId)) {
+            throw new RenException(ErrorCode.NO_PERMISSION);
+        }
+        workspacePermissionService.requireWrite(workspaceId);
     }
 
 }

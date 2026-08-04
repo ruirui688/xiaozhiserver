@@ -36,6 +36,7 @@ import xiaozhi.common.utils.JsonUtils;
 import xiaozhi.common.utils.ToolUtil;
 import xiaozhi.modules.agent.dao.AgentDao;
 import xiaozhi.modules.agent.dao.AgentTagDao;
+import xiaozhi.modules.agent.dao.AgentVoicePrintDao;
 import xiaozhi.modules.agent.dto.AgentCreateDTO;
 import xiaozhi.modules.agent.dto.AgentDTO;
 import xiaozhi.modules.agent.dto.AgentTagDTO;
@@ -79,6 +80,7 @@ import xiaozhi.modules.workspace.service.WorkspaceService;
 public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> implements AgentService {
     private final AgentDao agentDao;
     private final AgentTagDao agentTagDao;
+    private final AgentVoicePrintDao agentVoicePrintDao;
     private final TimbreService timbreModelService;
     private final ModelConfigService modelConfigService;
     private final RedisUtils redisUtils;
@@ -167,6 +169,7 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
                 .map(AgentEntity::getId)
                 .toList();
         agentSemanticSkillService.deleteByAgentIds(agentIds);
+        agentIds.forEach(agentVoicePrintDao::deleteBindingsByAgentId);
         UpdateWrapper<AgentEntity> wrapper = new UpdateWrapper<>();
         wrapper.eq("user_id", userId);
         baseDao.delete(wrapper);
@@ -382,6 +385,12 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateAgentById(String agentId, AgentUpdateDTO dto) {
+        updateAgentById(agentId, dto, true);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateAgentById(String agentId, AgentUpdateDTO dto, boolean publishRefresh) {
         // 先查询现有实体
         AgentEntity existingEntity = this.getAgentById(agentId);
         if (existingEntity == null) {
@@ -559,8 +568,10 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
             throw new RenException(ErrorCode.LLM_INTENT_PARAMS_MISMATCH);
         }
         this.updateById(existingEntity);
-        eventPublisher.publishEvent(AgentRuntimeConfigRefreshEvent.forAgent(
-                existingEntity.getId(), "agent_updated"));
+        if (publishRefresh) {
+            eventPublisher.publishEvent(AgentRuntimeConfigRefreshEvent.forAgent(
+                    existingEntity.getId(), "agent_updated"));
+        }
     }
 
     private void validateKnowledgeBaseBindings(List<AgentUpdateDTO.FunctionInfo> functions, String agentWorkspaceId) {

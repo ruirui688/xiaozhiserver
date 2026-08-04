@@ -578,7 +578,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/xiaozhi-server/core/spoken_notifications.py
   - docs/integrations/third-party-integrations.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：必须保留智能体级所有权、App Secret 与事件 Verification Token 仅在 manager-api 使用部署级 AES-GCM 密钥分作用域加密保存、前端不回显、Python 不接收凭据、`/config/feishu/**` 同时校验服务密钥和设备到智能体绑定关系、默认群/负责人/日历服务端固定门控、各动作独立授权和群消息不可信内容包裹。飞书事件回调虽然匿名放行，但必须校验 Verification Token、App ID、目标群、事件类型，执行 event_id 去重和请求限流；主动播报只走带服务密钥的内部设备接口，会议和设备忙碌时不得插播。配置页连接测试、默认群读取和测试消息只能要求凭据已配置，不能被运行时 enabled 开关阻断；设备运行时动作、会议纪要投递和工具注册仍必须要求集成已启用。会议纪要投递失败不得阻塞设备端纪要播报；日志不得输出 App Secret、Verification Token、tenant_access_token、Authorization 或原始凭据响应。
+官方同步时的处理规则：必须保留智能体级所有权、App Secret 与事件 Verification Token 仅在 manager-api 使用部署级 AES-GCM 密钥分作用域加密保存、前端不回显、Python 不接收凭据、`/config/feishu/**` 同时校验服务密钥和设备到智能体绑定关系、默认群/负责人/日历服务端固定门控、各动作独立授权和群消息不可信内容包裹。工作空间角色模板保存飞书配置时，密钥必须以模板 ID 为 AAD 重新加密，应用时再重加密到目标 agentId 作用域；模板接口、日志和 Python 均不得收到明文或密文。飞书事件回调虽然匿名放行，但必须校验 Verification Token、App ID、目标群、事件类型，执行 event_id 去重和请求限流；主动播报只走带服务密钥的内部设备接口，会议和设备忙碌时不得插播。配置页连接测试、默认群读取和测试消息只能要求凭据已配置，不能被运行时 enabled 开关阻断；设备运行时动作、会议纪要投递和工具注册仍必须要求集成已启用。会议纪要投递失败不得阻塞设备端纪要播报；日志不得输出 App Secret、Verification Token、tenant_access_token、Authorization 或原始凭据响应。
 ```
 
 ## 29. 用户级天气与联网搜索共享配置
@@ -817,5 +817,21 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/manager-mobile/src/pages/device/components/DeviceScenePanel.vue
   - docs/architecture/device-scene-management.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：必须保留 ai_device.agent_id 作为当前生效智能体唯一事实源、device_id+agent_id 唯一场景关系、同工作空间与资源所有权校验、每设备最多20个场景、switch_request_id 幂等和 config_version 单调防旧请求覆盖。在线切换必须在安全轮次边界先初始化候选管线，失败恢复旧管线并仅在版本仍匹配时回滚数据库；同智能体热更新保留会话，跨智能体必须更换 session_id 并隔离对话、工具、游戏、会议、声纹元数据和临时 TTS override。模板和场景只能引用已授权资源，禁止复制 API Key、Token、第三方凭据、聊天历史、长期记忆事实或声纹样本。服务端状态回传除共享密钥外还必须匹配已登记的 device/request/agent/version 事实，日志不得记录提示词、热词正文或凭据。
+官方同步时的处理规则：必须保留 ai_device.agent_id 作为当前生效智能体唯一事实源、device_id+agent_id 唯一场景关系、同工作空间与资源所有权校验、每设备最多20个场景、switch_request_id 幂等和 config_version 单调防旧请求覆盖。在线切换必须在安全轮次边界先初始化候选管线，失败恢复旧管线并仅在版本仍匹配时回滚数据库；同智能体热更新保留会话，跨智能体必须更换 session_id 并隔离对话、工具、游戏、会议、声纹元数据和临时 TTS override。场景和模板只能引用已授权资源，禁止保存聊天历史、长期记忆事实或声纹样本；角色模板中的飞书凭据只能使用模板作用域 AES-GCM 密文，不得把明文、密文或解密能力下发给 Web/Python，设备场景仍不得复制第三方凭据。服务端状态回传除共享密钥外还必须匹配已登记的 device/request/agent/version 事实，日志不得记录提示词、热词正文或凭据。
+```
+
+## 42. 工作空间共享角色模板快照
+
+```text
+定制模块：manager-web 角色配置页、manager-api 工作空间模板编排与 ai_agent_template 快照
+改动原因：运营人员需要把当前角色页面中的模型、热词、音色、插件、知识库、上下文源、固定技能、标签、替换词、声纹绑定和飞书集成保存成可复用模板，并在确认后立即切换其他角色，而不是只使用只能保存昵称和提示词的系统默认模板。
+关键文件：
+  - main/manager-web/src/views/roleConfig.vue
+  - main/manager-web/src/components/role/RoleEditDialog.vue
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/service/impl/AgentWorkspaceTemplateServiceImpl.java
+  - main/manager-api/src/main/resources/db/changelog/202608041610.sql
+  - main/manager-api/src/main/resources/db/changelog/202608041650.sql
+  - docs/architecture/workspace-organization-management.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：必须保留系统模板与工作空间模板的隔离、来源和目标智能体的 workspace 写权限校验、版本检查及事务应用。声纹必须以 `workspace_id` 固化资源归属，通过独立绑定表在同工作空间角色间复用，模板只保存 ID 引用且不得保存音频样本或生物特征；飞书 App Secret 与 Verification Token 必须从来源 agentId 作用域解密后立即以模板 ID 为 AAD 重新加密，应用时再重加密到目标 agentId，任何模板 API、日志或 Python 配置不得暴露明文或密文。设备绑定、聊天记录、长期记忆事实和上下文源认证请求头不得进入模板。模型、音色、插件、知识库、替换词和声纹引用应用前必须重新验证；失效模型保留目标当前值，失效关联跳过并向页面返回明确警告。模板应用完成后只按事务提交后的权威角色配置刷新页面和在线设备，不能由前端伪造最终配置。
 ```

@@ -106,6 +106,48 @@ export default {
             }).send();
     },
 
+    getAccessibleAgentTemplates(callback, failCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/templates`)
+            .method('GET')
+            .success((res) => callback(res))
+            .fail((err) => failCallback && failCallback(err))
+            .networkFail((err) => failCallback && failCallback(err))
+            .send();
+    },
+
+    saveAgentAsTemplate(agentId, payload, callback, failCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/${agentId}/templates`)
+            .method('POST')
+            .data(payload)
+            .success((res) => callback(res))
+            .fail((err) => failCallback && failCallback(err))
+            .networkFail((err) => failCallback && failCallback(err))
+            .send();
+    },
+
+    applyAgentTemplate(agentId, templateId, expectedVersion, callback, failCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/${agentId}/templates/${templateId}/apply`)
+            .method('POST')
+            .data({ expectedVersion })
+            .success((res) => callback(res))
+            .fail((err) => failCallback && failCallback(err))
+            .networkFail((err) => failCallback && failCallback(err))
+            .send();
+    },
+
+    deleteWorkspaceAgentTemplate(templateId, callback, failCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/templates/${templateId}`)
+            .method('DELETE')
+            .success((res) => callback(res))
+            .fail((err) => failCallback && failCallback(err))
+            .networkFail((err) => failCallback && failCallback(err))
+            .send();
+    },
+
     // 新增：获取智能体模板分页列表
     getAgentTemplatesPage(params, callback) {
         RequestService.sendRequest()

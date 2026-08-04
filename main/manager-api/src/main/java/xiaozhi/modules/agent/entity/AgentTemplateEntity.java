@@ -12,6 +12,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
 
 import lombok.Data;
+import xiaozhi.modules.agent.dto.AgentTemplateSnapshotDTO;
 
 /**
  * 智能体配置模板表
@@ -29,6 +30,19 @@ public class AgentTemplateEntity implements Serializable {
 
     /** 模板快照版本。 */
     private Integer version;
+
+    /** NULL 表示系统模板，否则归属于指定工作空间。 */
+    private String workspaceId;
+
+    /** 与角色昵称分离的模板显示名称。 */
+    private String templateName;
+
+    /** 创建快照时的来源智能体，仅用于审计。 */
+    private String sourceAgentId;
+
+    /** 工作空间模板的完整安全快照；系统模板继续兼容原有列。 */
+    @TableField(typeHandler = JacksonTypeHandler.class)
+    private AgentTemplateSnapshotDTO snapshotJson;
 
     /**
      * 智能体编码
