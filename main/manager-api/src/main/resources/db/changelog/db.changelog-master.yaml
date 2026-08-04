@@ -1275,7 +1275,20 @@ databaseChangeLog:
   - changeSet:
       id: 202608041520
       author: Codex
+      validCheckSum: ANY
+      preConditions:
+        - onFail: MARK_RAN
+        - sqlCheck:
+            expectedResult: "1"
+            sql: SELECT 0
       changes:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/202608041520.sql
+  - changeSet:
+      id: 202608041530
+      author: Codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202608041530.sql

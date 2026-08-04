@@ -15,10 +15,17 @@ class QwenOmniRealtimeContractRepairMigrationTest {
     @Test
     void migrationRepairsPollutedRealtimeMetadataWithoutReplacingApiKey() throws IOException {
         String master = readResource("db/changelog/db.changelog-master.yaml");
-        String migration = readResource("db/changelog/202608041520.sql");
+        String migration = readResource("db/changelog/202608041530.sql");
 
         assertTrue(master.contains("id: 202608041520"));
         assertTrue(master.contains("classpath:db/changelog/202608041520.sql"));
+        assertTrue(master.contains("validCheckSum: ANY"));
+        assertTrue(master.contains("onFail: MARK_RAN"));
+        assertTrue(master.contains("id: 202608041530"));
+        assertTrue(master.contains("classpath:db/changelog/202608041530.sql"));
+        assertTrue(migration.contains("AS\nSELECT `c`.`id` AS `model_id`"));
+        assertTrue(migration.contains("WHERE 1 = 0"));
+        assertTrue(migration.contains("ALTER TABLE `tmp_qwen_omni_realtime_repair_ids`"));
         assertTrue(migration.contains("`c`.`adapter_code` = 'qwen_omni_realtime'"));
         assertTrue(migration.contains("`c`.`template_code` = 'LLM_ALI_QWEN_OMNI_REALTIME'"));
         assertTrue(migration.contains("'DashScope Realtime WebSocket'"));
@@ -32,7 +39,8 @@ class QwenOmniRealtimeContractRepairMigrationTest {
         assertTrue(migration.contains("JSON_EXTRACT(`c`.`config_json`, '$.api_key')"));
         assertTrue(migration.contains("WHEN NULLIF(TRIM(`secret_value`), '') IS NULL"));
         assertTrue(migration.contains("WHERE `s`.`secret_key` <> 'api_key'"));
-        assertTrue(migration.contains("WHEN `param_key` = 'conversation_mode' THEN 'realtime'"));
+        assertTrue(migration.contains("INSERT IGNORE INTO `ai_model_config_param`"));
+        assertTrue(migration.contains("SET `p`.`param_value` = 'realtime'"));
         assertFalse(migration.contains("compatible-mode/v1/chat/completions"));
         assertFalse(migration.contains("sk-"));
     }

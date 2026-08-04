@@ -57,9 +57,9 @@ source_paths:
 
 | 事实 | 数量 |
 | --- | ---: |
-| Liquibase SQL 文件 | 182 |
-| master.yaml changeSet | 182 |
-| master.yaml 唯一 SQL 登记 | 182 |
+| Liquibase SQL 文件 | 183 |
+| master.yaml changeSet | 183 |
+| master.yaml 唯一 SQL 登记 | 183 |
 
 数量相等不代表迁移内容正确；`scripts/docs-check` 还会检查遗漏登记、重复登记和失效路径。
 

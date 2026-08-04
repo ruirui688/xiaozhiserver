@@ -972,6 +972,28 @@ Mockito 或手工构造 tester/client，没有启动完整 Spring ApplicationCon
 - 健康检查失败时先读取 manager-api 完整日志中的 `BeanCurrentlyInCreationException` / dependency cycle，再检查数据库、Liquibase 和网络；Compose 最后一行不是根因。
 - 回归测试既要保留构造参数 `@Lazy` 反射断言，也要补完整 ApplicationContext 启动覆盖，防止 Lombok 构造器改写或新依赖再次把闭环接回去。
 
+#### 12.2.2 Liquibase 排序规则事故复盘（2026-08-04）
+
+版本 `c19ccd45` 在生产更新时，`xiaozhi-esp32-manager-api` 因 Liquibase 执行
+`202608041520` 失败而无法启动。生产数据库默认排序规则是 `utf8mb4_unicode_ci`，模型配置相关表
+使用 `utf8mb4_0900_ai_ci`；迁移创建的临时表继承数据库默认排序规则，随后用字符串主键与业务表
+执行 JOIN，MySQL 报 `Illegal mix of collations`。Spring 后续的 Bean 创建错误和 Compose 的
+`dependency failed to start` 都是迁移失败的级联现象，不是新的根因。
+
+这次事故也暴露了静态 SQL 断言和 H2/Mock 测试的边界：它们能确认迁移文本存在，却不能验证 MySQL
+对 `INSERT ... SELECT ... ON DUPLICATE KEY UPDATE` 的真实解析规则、同名列的解析歧义，以及不同
+collation 字符列之间的比较行为。因此，包含临时表、JSON、JOIN、UPSERT 或数据修复的迁移，不能只靠
+字符串测试后直接发布。
+
+修复原则：
+
+- 已发布的 `202608041520.sql` 保持不变；旧 changeSet 通过兼容 checksum 和 `MARK_RAN` 停止执行，实际修复放入新的 `202608041530.sql`。
+- 临时表通过目标业务表的空结果集创建，使字符串列继承相同字符集和排序规则，不再手写容易漂移的列定义。
+- 数据补齐拆成 `INSERT IGNORE` 和独立 `UPDATE`，避免 MySQL UPSERT 解析差异和来源列/目标列歧义。
+- 发布前使用 MySQL 8.4 一次性容器，显式制造“数据库默认 collation 与业务表 collation 不同”的生产同构状态，运行真实 manager-api JAR，等待 Liquibase 完成且 Tomcat 端口真实启动。
+- 迁移验收既检查 `DATABASECHANGELOG` 的 `MARK_RAN` / `EXECUTED` 状态，也检查修复后的业务数据；密钥只验证“存在、未被覆盖”，禁止输出原文。
+- 生产排障先只读核对 changeSet 是否登记、数据库和相关列的 collation、Liquibase 锁与完整异常链；确认没有活跃迁移后再发布补偿迁移，不删除 changelog、不手工改业务数据、不回滚数据库。
+
 ### 12.3 xiaozhi-server 反复重启
 
 查看日志：
