@@ -3,6 +3,7 @@ package xiaozhi.modules.model.service.impl.benchmark;
 import java.time.Duration;
 
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -16,17 +17,24 @@ import org.springframework.web.client.RestTemplate;
 
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
-import lombok.AllArgsConstructor;
 import xiaozhi.common.exception.RenException;
 import xiaozhi.modules.sys.service.SysParamsService;
 
 @Component
-@AllArgsConstructor
 public class PythonBenchmarkClient {
 
     private final SysParamsService sysParamsService;
     private final Environment environment;
     private final BenchmarkRequestAuth benchmarkRequestAuth;
+
+    public PythonBenchmarkClient(
+            @Lazy SysParamsService sysParamsService,
+            Environment environment,
+            BenchmarkRequestAuth benchmarkRequestAuth) {
+        this.sysParamsService = sysParamsService;
+        this.environment = environment;
+        this.benchmarkRequestAuth = benchmarkRequestAuth;
+    }
 
     public JSONObject runBenchmark(JSONObject payload) {
         return execute(payload, Duration.ofMinutes(10), "专业评测");

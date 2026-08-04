@@ -1,14 +1,18 @@
 package xiaozhi.modules.model.service.impl.benchmark;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.lang.reflect.Constructor;
+
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -22,6 +26,13 @@ import xiaozhi.common.constant.Constant;
 import xiaozhi.modules.sys.service.SysParamsService;
 
 class PythonBenchmarkClientTest {
+
+    @Test
+    void sysParamsDependencyIsLazyToAvoidApplicationBootstrapCycle() {
+        Constructor<?> constructor = PythonBenchmarkClient.class.getDeclaredConstructors()[0];
+
+        assertTrue(constructor.getParameters()[0].isAnnotationPresent(Lazy.class));
+    }
 
     @Test
     void professionalBenchmarkSendsServerSecretBearerHeader() {
