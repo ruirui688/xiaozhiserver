@@ -86,6 +86,9 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             "qwen3.5-omni-plus-realtime",
             "qwen3.5-omni-flash-realtime",
             "qwen3-omni-flash-realtime");
+    private static final List<String> DOUBAO_REALTIME_MODELS = List.of(
+            "1.2.1.1",
+            "2.2.0.0");
     private static final List<String> DOUBAO_SEED_TEXT_MODELS = List.of(
             "doubao-seed-evolving",
             "doubao-seed-2-1-turbo-260628",
@@ -133,6 +136,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             "LLM_OPENAI_COMPATIBLE",
             "LLM_ALI_QWEN_OPENAI",
             "LLM_ALI_QWEN_OMNI_REALTIME",
+            "LLM_DOUBAO_REALTIME",
             "LLM_DOUBAO_SEED_OPENAI",
             "LLM_DEEPSEEK_OPENAI",
             "LLM_ZHIPU_GLM_OPENAI",
@@ -377,6 +381,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         List<ModelCatalogDTO> llmTemplates = new ArrayList<>(catalog.values()).stream()
                 .filter(item -> "LLM".equalsIgnoreCase(item.getModelType()))
                 .filter(item -> !"LLM_ALI_QWEN_OMNI_REALTIME".equals(item.getTemplateCode()))
+                .filter(item -> !"LLM_DOUBAO_REALTIME".equals(item.getTemplateCode()))
                 .filter(item -> !Boolean.TRUE.equals(item.getHidden()))
                 .filter(item -> !Boolean.TRUE.equals(item.getDeprecated()))
                 .filter(item -> Boolean.TRUE.equals(item.getSelectable()))
@@ -1035,6 +1040,32 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         qwenOmniRealtime.setTestContract("必须通过 xiaozhi-server 建立真实 DashScope Realtime WebSocket，完成至少一轮响应并记录首文本、首音频和总耗时；不得以配置校验或握手冒充通过。");
         qwenOmniRealtime.setSourceCheckedAt("2026-08-03");
         items.add(qwenOmniRealtime);
+        ModelCatalogDTO doubaoRealtime = item(
+                "LLM_DOUBAO_REALTIME", "LLM", "doubao_realtime", "豆包端到端实时语音",
+                "火山引擎", "豆包端到端实时语音", "llm", "端到端实时语音大模型",
+                "realtime-websocket", "Realtime WebSocket 音频/文本", "cloud", "云平台",
+                "火山引擎二进制 Realtime WebSocket", "模型版本", "model_name",
+                List.of("api_key"),
+                List.of("app_id", "api_key", "base_url", "model_name", "conversation_mode",
+                        "input_sample_rate", "output_sample_rate"),
+                List.of("voice", "bot_name", "speaking_style", "input_mode", "end_smooth_window_ms",
+                        "speech_rate", "loudness_rate", "strict_audit", "connect_timeout_seconds",
+                        "response_timeout_seconds", "max_event_bytes"),
+                List.of(
+                        "选择该主模型后，豆包端到端会话直接接管设备音频输入、ASR、对话生成和语音输出。",
+                        "base_url 固定为火山引擎官方 openspeech.bytedance.com 地址，凭据只通过 WebSocket Header 发送。",
+                        "API Key 只保存到密钥表；App ID 是应用标识，不应填写 Access Key。"),
+                List.of(
+                        "当前官方端到端协议未提供项目本地 Function Calling 结果回注能力，因此不会向上游暴露本地工具。",
+                        "当前不支持图片输入，不会静默改走独立 VLLM；仅用于主对话，不作为 SLM 候选。",
+                        "必须由 xiaozhi-server 完成真实 WebSocket 推理，配置校验或握手成功不能标记测试通过。"),
+                List.of("DoubaoRealtime", "doubao realtime", "doubao_realtime", "豆包端到端", "豆包实时语音"),
+                "https://www.volcengine.com/docs/6561/1594356");
+        doubaoRealtime.setRecommendedFor("低延迟中文语音对话、上游统一 ASR/LLM/TTS 的端到端会话。");
+        doubaoRealtime.setAvoidWhen("需要图片输入、本地 Function Calling 工具回注、离线运行，或需要独立替换 ASR/LLM/TTS 时。");
+        doubaoRealtime.setTestContract("必须通过 xiaozhi-server 建立真实火山引擎二进制 Realtime WebSocket，完成至少一轮响应并记录首文本、首音频和总耗时；不得以握手冒充通过。");
+        doubaoRealtime.setSourceCheckedAt("2026-08-04");
+        items.add(doubaoRealtime);
         ModelCatalogDTO doubaoSeed = openAiLlm("LLM_DOUBAO_SEED_OPENAI", "火山引擎", "豆包 Seed 系列",
                 "OpenAI 兼容聊天",
                 "Doubao-Seed-Evolving / Doubao-Seed-2.1-turbo / Doubao-Seed-2.1-pro / Doubao-Seed-2.0 系列",
@@ -1349,6 +1380,27 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 setFieldDefault(dto, "response_timeout_seconds", 120);
                 setFieldDefault(dto, "max_event_bytes", 10485760);
             }
+            case "LLM_DOUBAO_REALTIME" -> {
+                setFieldDefault(dto, "base_url", "wss://openspeech.bytedance.com/api/v3/realtime/dialogue");
+                setFieldDefault(dto, "model_name", "1.2.1.1");
+                setFieldOptions(dto, "model_name", DOUBAO_REALTIME_MODELS);
+                setFieldDefault(dto, "conversation_mode", "realtime");
+                setFieldOptions(dto, "conversation_mode", List.of("realtime"));
+                setFieldDefault(dto, "input_sample_rate", 16000);
+                setFieldDefault(dto, "output_sample_rate", 24000);
+                setFieldDefault(dto, "voice", "zh_female_vv_jupiter_bigtts");
+                setFieldDefault(dto, "bot_name", "小智");
+                setFieldDefault(dto, "speaking_style", "回复简洁自然，适合实时语音对话。");
+                setFieldDefault(dto, "input_mode", "audio");
+                setFieldOptions(dto, "input_mode", List.of("audio", "push_to_talk"));
+                setFieldDefault(dto, "end_smooth_window_ms", 1500);
+                setFieldDefault(dto, "speech_rate", 0);
+                setFieldDefault(dto, "loudness_rate", 0);
+                setFieldDefault(dto, "strict_audit", true);
+                setFieldDefault(dto, "connect_timeout_seconds", 10);
+                setFieldDefault(dto, "response_timeout_seconds", 120);
+                setFieldDefault(dto, "max_event_bytes", 10485760);
+            }
             case "LLM_DOUBAO_SEED_OPENAI" -> {
                 setFieldDefault(dto, "base_url", "https://ark.cn-beijing.volces.com/api/v3");
                 setFieldDefault(dto, "model_name", "doubao-seed-2-1-turbo-260628");
@@ -1608,6 +1660,11 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             case "connect_timeout_seconds" -> "连接超时(秒)";
             case "response_timeout_seconds" -> "响应超时(秒)";
             case "max_event_bytes" -> "最大事件字节数";
+            case "bot_name" -> "助手名称";
+            case "speaking_style" -> "说话风格";
+            case "input_mode" -> "输入模式";
+            case "end_smooth_window_ms" -> "断句平滑窗口(ms)";
+            case "strict_audit" -> "严格内容审核";
             default -> key;
         };
     }
@@ -1620,11 +1677,12 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 "volume", "speed", "pitch", "rate", "speech_rate", "loudness_rate", "end_window_size",
                 "max_sentence_silence", "min_silence_duration_ms", "input_sample_rate", "output_sample_rate",
                 "turn_detection_threshold", "prefix_padding_ms", "silence_duration_ms", "connect_timeout_seconds",
-                "response_timeout_seconds", "max_event_bytes")
+                "response_timeout_seconds", "max_event_bytes", "end_smooth_window_ms")
                 .anyMatch(key::equals)) {
             return "number";
         }
-        if (key.startsWith("enable_") || key.startsWith("is_") || key.equals("streaming")) {
+        if (key.startsWith("enable_") || key.startsWith("is_") || key.equals("streaming")
+                || key.equals("strict_audit")) {
             return "boolean";
         }
         if (key.equals("audio_params") || key.equals("additions") || key.equals("params") || key.equals("headers")
@@ -1694,6 +1752,11 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             case "connect_timeout_seconds" -> "建立 DashScope Realtime WebSocket 的超时时间。";
             case "response_timeout_seconds" -> "等待一轮 Realtime 响应完成的最长时间。";
             case "max_event_bytes" -> "单个上游 WebSocket 事件允许的最大字节数，用于限制异常大消息。";
+            case "bot_name" -> "豆包端到端会话中展示给上游的助手名称，最长 20 个字符。";
+            case "speaking_style" -> "O2.0 模型的说话风格说明；SC2.0 使用完整角色设定，不读取此字段。";
+            case "input_mode" -> "audio 由上游自动断句；push_to_talk 在设备 listen.stop 时发送结束识别事件。";
+            case "end_smooth_window_ms" -> "豆包端到端 ASR 断句平滑窗口，默认 1500 ms。";
+            case "strict_audit" -> "是否启用火山引擎严格内容审核，生产默认开启。";
             default -> "";
         };
     }
@@ -1705,6 +1768,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             case "model_type" -> List.of("sense_voice", "paraformer");
             case "thinking" -> List.of("disabled", "enabled");
             case "reasoning_effort" -> List.of("high", "max");
+            case "input_mode" -> List.of("audio", "push_to_talk");
             default -> List.of();
         };
     }

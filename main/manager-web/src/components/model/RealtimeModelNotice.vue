@@ -21,7 +21,7 @@
 </template>
 
 <script>
-import { isRealtimeModel } from "@/utils/realtimeModel";
+import { isDoubaoRealtimeModel, isRealtimeModel } from "@/utils/realtimeModel";
 
 export default {
   name: "RealtimeModelNotice",
@@ -41,6 +41,11 @@ export default {
       return isRealtimeModel(this.model);
     },
     message() {
+      if (isDoubaoRealtimeModel(this.model)) {
+        return this.context === "agent"
+          ? this.$t("realtimeModel.doubaoAgentDescription")
+          : this.$t("realtimeModel.doubaoConfigDescription");
+      }
       return this.context === "agent"
         ? this.$t("realtimeModel.agentDescription")
         : this.$t("realtimeModel.configDescription");

@@ -8,6 +8,8 @@ export interface RealtimeModelLike {
 const REALTIME_ADAPTERS = new Set([
   'qwen_omni_realtime',
   'qwen-omni-realtime',
+  'doubao_realtime',
+  'doubao-realtime',
 ])
 
 export function isRealtimeModel(model?: RealtimeModelLike | null): boolean {

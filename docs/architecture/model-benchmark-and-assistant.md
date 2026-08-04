@@ -167,6 +167,7 @@ manager-web 点击写入接入产物
 - LLM/SLM Judge 不保存独立密钥，只引用已有模型配置；未选择或调用失败时降级为启发式评分，并在 `judge_mode` 中标记。
 - `conversation_mode=realtime` 的 LLM 必须走 Realtime benchmark transport；不能调用普通 `llm.create_instance()` 或 Chat Completions 冒充实时模型测试。
 - Qwen 3.5 Realtime 不接受用 `conversation.item.create` 创建普通 user 文本项；文本评测必须走手动音频提交回合，`conversation.item.create` 只用于回注 `function_call_output`。
+- 豆包端到端 Realtime 文本评测必须使用官方 `ChatTextQuery(501)` 事件，并等待真实 `ChatResponse(550)`、`TTSResponse(352)` 与 `TTSEnded(359)`；不得用普通 Chat Completions 或只完成 `StartSession` 冒充通过。
 - 选择真实测试设备时，必须校验设备存在、MAC 地址存在、设备属于所选智能体，并能加载真实运行时配置。
 - 弹窗填写的业务测试问题必须作为评测样本进入 runner，不能只用内置通用问题替代真实场景。多行问题按同一业务场景的连续多轮对话执行。
 - 真实设备智能体评测必须显式应用后台 `runtime_config`，确保候选模型看到所选智能体的人设、记忆、插件、MCP 和上下文源；候选 LLM 覆盖只能发生在运行时配置校准之后。

@@ -3,16 +3,17 @@
 from typing import Any, Dict
 
 from core.conversation.mode import get_selected_llm_config, is_realtime_conversation
-from core.providers.realtime.qwen_omni_realtime import (
-    QwenOmniRealtimeSession,
-    SUPPORTED_ADAPTERS,
+from core.providers.realtime.registry import (
+    create_realtime_session,
+    normalize_realtime_adapter,
+    supported_realtime_adapters,
 )
 
 
 class ConversationRouter:
     def __init__(self, conn, session_factory=None):
         self.conn = conn
-        self.session_factory = session_factory or QwenOmniRealtimeSession
+        self.session_factory = session_factory
         self.session = None
 
     @property
@@ -23,10 +24,14 @@ class ConversationRouter:
         if not self.is_realtime:
             return False
         config = get_selected_llm_config(self.conn.config) or {}
-        adapter = str(config.get("type") or config.get("adapter_code") or "").lower()
-        if adapter not in SUPPORTED_ADAPTERS:
+        adapter = normalize_realtime_adapter(config)
+        if adapter not in supported_realtime_adapters():
             raise ValueError(f"不支持的 Realtime adapter: {adapter or '<empty>'}")
-        self.session = self.session_factory(self.conn, config)
+        self.session = (
+            self.session_factory(self.conn, config)
+            if self.session_factory is not None
+            else create_realtime_session(self.conn, config)
+        )
         await self.session.initialize()
         return True
 

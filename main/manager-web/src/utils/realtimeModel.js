@@ -1,6 +1,8 @@
 const REALTIME_ADAPTERS = new Set([
   "qwen_omni_realtime",
   "qwen-omni-realtime",
+  "doubao_realtime",
+  "doubao-realtime",
 ]);
 
 function normalize(value) {
@@ -54,8 +56,12 @@ export function isRealtimeModel(model = {}) {
 
   return modelSources(model).some((source) => {
     const templateCode = normalize(source.templateCode || source.template_code);
-    return templateCode.includes("omni_realtime");
+    return templateCode.includes("omni_realtime") || templateCode.includes("doubao_realtime");
   });
+}
+
+export function isDoubaoRealtimeModel(model = {}) {
+  return getRealtimeAdapter(model).startsWith("doubao");
 }
 
 export function getConversationModeBadge(model = {}) {

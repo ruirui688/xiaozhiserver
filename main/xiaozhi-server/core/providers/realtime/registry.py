@@ -1,0 +1,51 @@
+"""Realtime provider registry shared by device routing and benchmarks."""
+
+from core.providers.realtime.doubao_realtime import (
+    DoubaoRealtimeSession,
+    DoubaoRealtimeTextProbe,
+    SUPPORTED_ADAPTERS as DOUBAO_ADAPTERS,
+)
+from core.providers.realtime.qwen_omni_realtime import (
+    QwenOmniRealtimeSession,
+    QwenRealtimeTextProbe,
+    SUPPORTED_ADAPTERS as QWEN_ADAPTERS,
+)
+
+
+SESSION_FACTORIES = {
+    **{adapter: QwenOmniRealtimeSession for adapter in QWEN_ADAPTERS},
+    **{adapter: DoubaoRealtimeSession for adapter in DOUBAO_ADAPTERS},
+}
+PROBE_FACTORIES = {
+    **{adapter: QwenRealtimeTextProbe for adapter in QWEN_ADAPTERS},
+    **{adapter: DoubaoRealtimeTextProbe for adapter in DOUBAO_ADAPTERS},
+}
+
+
+def normalize_realtime_adapter(config, fallback="") -> str:
+    return str(
+        (config or {}).get("type")
+        or (config or {}).get("adapter_code")
+        or fallback
+        or ""
+    ).strip().lower()
+
+
+def supported_realtime_adapters():
+    return frozenset(SESSION_FACTORIES)
+
+
+def create_realtime_session(conn, config):
+    adapter = normalize_realtime_adapter(config)
+    factory = SESSION_FACTORIES.get(adapter)
+    if factory is None:
+        raise ValueError(f"不支持的 Realtime adapter: {adapter or '<empty>'}")
+    return factory(conn, config)
+
+
+def create_realtime_probe(config, fallback_adapter=""):
+    adapter = normalize_realtime_adapter(config, fallback_adapter)
+    factory = PROBE_FACTORIES.get(adapter)
+    if factory is None:
+        raise ValueError(f"不支持的 Realtime adapter: {adapter or '<empty>'}")
+    return factory(config)

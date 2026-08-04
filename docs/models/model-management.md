@@ -1,7 +1,7 @@
 ---
 status: canonical
 owner: models
-last_verified: 2026-08-03
+last_verified: 2026-08-04
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/model
   - main/manager-api/src/main/java/xiaozhi/modules/config
@@ -57,10 +57,11 @@ conversation_mode 缺省或 pipeline
   -> VAD -> ASR -> SemanticCenter -> Intent/LLM -> TTS
 
 conversation_mode = realtime
-  -> 设备音频/图片 -> Realtime 多模态会话 -> 工具回注 -> 实时音频
+  -> 设备音频 -> Realtime 会话 -> 实时音频
+     图片与工具回注能力由具体 adapter 声明，不能假设所有 Realtime 模型都支持
 ```
 
-Realtime 目录项必须使用独立 adapter，例如 `qwen_omni_realtime`。不能把普通阿里云百炼 OpenAI Compatible adapter、
+Realtime 目录项必须使用独立 adapter，例如 `qwen_omni_realtime`、`doubao_realtime`。不能把普通阿里云百炼 OpenAI Compatible adapter、
 普通 DashScope HTTP adapter 或名称中含 Qwen/Omni 的模型配置推断成实时会话。目录、保存和下发必须显式包含：
 
 | 字段 | 契约 |
@@ -69,9 +70,9 @@ Realtime 目录项必须使用独立 adapter，例如 `qwen_omni_realtime`。不
 | `conversation_mode` | 固定为 `realtime`；缺省保持传统拼接兼容 |
 | `base_url` | 受支持的 `wss://` 官方 Realtime 端点；不得允许把 API Key 发往任意主机 |
 | `model_name` | 厂商真实 Realtime 模型 ID |
-| `api_key` | 密钥表保存、只在运行时下发、只进入 Authorization header |
+| `api_key` | 密钥表保存、只在运行时下发、只进入厂商规定的鉴权 Header |
 | 音频参数 | 输入 PCM16 16 kHz 单声道、输出 PCM16 24 kHz 单声道等 adapter 已验证格式 |
-| `turn_detection_*` | server VAD/manual 判停配置，范围必须由模板限制 |
+| 判停参数 | 字段名和范围按 adapter 协议限制，例如 Qwen `turn_detection_*`、豆包 `input_mode/end_smooth_window_ms` |
 | 超时/事件大小 | 建连、响应和单事件字节上限，防止连接永久占用或超大事件耗尽内存 |
 
 智控台模型列表、编辑/测试弹窗和智能体主模型下拉必须显示“实时多模态”标签，并明确：
@@ -408,6 +409,9 @@ model_config:
 - Qwen 3.5 Realtime 的 `base_url` 应使用百炼控制台业务空间对应地域的官方地址；服务端仅放行北京、新加坡业务空间域名及旧版官方 DashScope 域名，防止 API Key 外发。
 - Qwen 3.5 Realtime 的普通用户输入以音频缓冲区提交；`conversation.item.create` 只用于 `function_call_output`。后台文本测试使用受限的本轮 instructions 加非空 PCM 手动提交，不能伪造普通 user 文本 item。
 - Qwen 3.5 Realtime 图片仅接受 JPG/JPEG，Base64 后不得超过 256 KiB；发送图片前必须至少追加一次音频，并通过音频 commit 一起提交。
+- 豆包端到端实时语音使用 `doubao_realtime` adapter，固定连接 `wss://openspeech.bytedance.com/api/v3/realtime/dialogue`；服务端拒绝其他主机、路径、查询参数、凭据 URL 和非标准端口。
+- 豆包鉴权使用 `X-Api-App-ID` 与 `X-Api-Access-Key` Header；`app_id` 保存为普通参数，`api_key` 只进入密钥表。输入固定为 16 kHz PCM16 单声道，输出固定为 24 kHz `pcm_s16le`。
+- 豆包模型版本当前支持 O2.0 `1.2.1.1` 与 SC2.0 `2.2.0.0`。当前官方协议没有项目本地 Function Calling 结果回注契约，也不支持本项目图片输入，因此工具不向上游暴露，图片请求明确失败而不静默转 VLLM。
 - 密钥原文只在运行时下发给服务端使用，不应回显给前端。
 - `config.yaml` 仍可作为默认或兼容配置，但标准后台配置应走 `model_config`。
 

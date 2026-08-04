@@ -111,7 +111,7 @@ flowchart TB
 | 会话模式 | 选择条件 | 音频主链路 | 图片与工具 |
 | --- | --- | --- | --- |
 | 传统拼接 `pipeline` | 未配置 `conversation_mode`，或值不是 `realtime` | VAD -> ASR -> SemanticCenter -> Intent/LLM -> TTS | 图片走独立 VLLM；工具按统一工具运行时回注 LLM |
-| 端到端实时 `realtime` | 所选 LLM 的 `typed_config.conversation_mode=realtime` | 设备音频直接进入 Realtime provider，由上游统一完成判停、转写、生成和音频输出 | 活动连接上的图片帧进入同一实时会话；工具仍由本地统一工具运行时执行，再把结果回注上游会话 |
+| 端到端实时 `realtime` | 所选 LLM 的 `typed_config.conversation_mode=realtime` | 设备音频直接进入 Realtime provider，由上游统一完成判停、转写、生成和音频输出 | 图片和工具能力按 adapter 声明；Qwen 支持图片/本地工具回注，豆包当前均不支持 |
 
 传统 VAD、ASR、TTS 和 VLLM 选择在实时模式下保留为智能体配置事实，但不参与当前实时会话主链路。切回普通 LLM 后
 这些配置重新生效；实时上游连接或响应失败时不允许静默切到传统链路，因为这会改变本轮音频、工具、上下文和审计语义。
@@ -136,7 +136,10 @@ sequenceDiagram
     alt 传统拼接模式
         C->>M: VAD -> ASR -> 语义控制 -> Intent/LLM -> 工具 -> TTS
     else 端到端实时模式
-        C->>M: 音频/图片 -> Realtime 会话 -> 工具回注 -> 实时音频
+        C->>M: 音频 -> Realtime 会话 -> 实时音频
+        opt adapter 支持图片/工具
+            C->>M: 图片输入 / 本地工具结果回注
+        end
     end
     M-->>C: 文本或工具结果
     C-->>D: 下发 Opus 音频与控制消息
@@ -156,6 +159,9 @@ Realtime 链路复用同一连接认证、运行配置、工具门控、聊天�
 provider。上游输入转写完成事件负责 STT 展示与 user 上报，回复文本/音频增量负责 assistant 文本累积与设备音频下发，
 `response.done`、取消或异常必须收敛当前回复状态。图片 HTTP 入口只能把图片交给已认证且已绑定的活动设备连接，不能凭
 请求中的任意 deviceId 新建或控制会话。
+
+具体能力不能由 `conversation_mode` 推断。`qwen_omni_realtime` 支持受限 JPG/JPEG 图片和本地 Function Calling
+结果回注；`doubao_realtime` 当前只接入音频/文本轮次，图片请求明确失败，本地工具保持服务端门控但不向豆包暴露。
 
 这里的“记忆复用”只保证会话事件上报和建立会话时可注入的静态摘要，不表示 Realtime 自动拥有传统
 `Connection.chat()` 的逐轮动态记忆查询。server VAD 自动响应模式下，基于每轮 query 的托管召回暂不等同于传统链路；
@@ -235,7 +241,7 @@ Java 的 `ModelRuntimeAssembler` 负责从通用字段、普通参数和密钥�
 - Java 管理接口默认进入 Shiro OAuth2 过滤器；匿名和服务端接口必须显式登记。
 - `/config/**` 由 `ServerSecretFilter` 校验共享密钥，但资源型接口仍必须校验 agent、device 或 workspace 归属。
 - 用户输入 URL 必须经过 SSRF 校验；文件路径必须防止路径穿越；日志不得记录原始凭据。
-- Realtime 上游只允许受支持 adapter 的 HTTPS/WSS 官方端点白名单；API Key 只放 Authorization 请求头，不进入 URL、事件正文或日志。自定义端点必须先通过协议级 allowlist/SSRF 校验，避免把凭据发往任意主机。
+- Realtime 上游只允许受支持 adapter 的 HTTPS/WSS 官方端点白名单；API Key 只放厂商规定的鉴权请求头，不进入 URL、事件正文或日志。自定义端点必须先通过协议级 allowlist/SSRF 校验，避免把凭据发往任意主机。
 - 图片帧属于用户输入，不写入日志；大小、格式和单事件字节数必须有上限。工具调用继续执行现有服务端白名单、资源所有权和同名冲突规则，Realtime 模型不能绕过门控直接调用设备描述符。
 - 生产入口必须通过 TLS 反向代理提供 HTTPS/WSS，数据库和缓存不应暴露到公网。
 

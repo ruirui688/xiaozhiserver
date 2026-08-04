@@ -165,12 +165,12 @@ sequenceDiagram
 - server VAD 模式持续 append，由上游判停；manual 模式在 `listen/stop` 执行 commit 和 `response.create`。同一轮不得重复 commit。
 - 上游输入转写完成后才写 user 对话和聊天记录；回复文本增量只累积，`response.done` 或错误终态负责一次性写 assistant 记录并结束设备 TTS 状态。
 - Abort 发送 `response.cancel` 和输入缓冲清理，停止当前设备音频并使回复生命周期只收敛一次；迟到旧事件不得结束新回复。
-- Realtime 上游 function call 只负责提出调用。工具清单仍来自 `UnifiedToolHandler`，执行仍走本地门控和 executor；工具结果以 `function_call_output` 回注，随后显式创建后续响应。
+- 对支持 Function Calling 的 Realtime adapter（当前 Qwen），上游只负责提出调用。工具清单仍来自 `UnifiedToolHandler`，执行仍走本地门控和 executor；工具结果以 `function_call_output` 回注，随后显式创建后续响应。豆包当前协议没有本地工具结果回注契约，因此不向上游暴露工具。
 
 ### 4.3 图片入口
 
-传统模式继续由独立 VLLM 处理视觉 HTTP 请求。Realtime 模式下，视觉入口先按认证信息和设备绑定找到活动连接，再把
-图片帧与问题交给该连接的 Realtime 会话；Qwen 3.5 图片必须是 Base64 后不超过 256 KiB 的 JPG/JPEG，并在图片前先发送非空 PCM，随后与音频缓冲区一起提交。文本结果保持原 HTTP JSON 契约，回复音频可同时从设备 WebSocket 播放。
+传统模式继续由独立 VLLM 处理视觉 HTTP 请求。Realtime 模式下，视觉入口先按认证信息和设备绑定找到活动连接，再按
+adapter 能力处理；Qwen 3.5 图片必须是 Base64 后不超过 256 KiB 的 JPG/JPEG，并在图片前先发送非空 PCM，随后与音频缓冲区一起提交。豆包端到端当前不支持图片，必须明确返回错误。文本结果保持原 HTTP JSON 契约，回复音频可同时从设备 WebSocket 播放。
 
 没有活动 Realtime 连接时保持原有传统 VLLM 图片链路。活动连接已经选择 Realtime 时，则必须把图片交给该会话；若其实时
 session 未就绪、图片超限/格式不支持、上游响应超时或连接已关闭，应明确失败，不自动改调独立 VLLM 伪装成功。任何模式
@@ -192,7 +192,7 @@ session 未就绪、图片超限/格式不支持、上游响应超时或连接�
 
 `reset_conversation_context` 成功后只保留当前 system prompt，并重新注入必要工具 few-shot；工具确认语成为新上下文的第一条 assistant 消息。会议、通话和声纹采集属于受保护状态，不能通过该工具破坏正在执行的事务状态。
 
-Realtime provider 保留厂商当前协议要求的 OpenAI 风格嵌套 `function` schema，来源、优先级、参数 JSON Schema 和执行器不变。转换不能扩张工具白名单。设备 IoT/MCP 描述仍不能绕过服务端显式门控。
+支持工具的 Realtime provider 保留厂商当前协议要求的 OpenAI 风格嵌套 `function` schema，来源、优先级、参数 JSON Schema 和执行器不变。转换不能扩张工具白名单。设备 IoT/MCP 描述仍不能绕过服务端显式门控；不支持工具回注的 adapter 不得把工具描述发送给上游。
 
 ## 6. 记忆与知识库
 

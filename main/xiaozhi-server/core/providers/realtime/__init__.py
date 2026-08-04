@@ -6,10 +6,18 @@ from .qwen_omni_realtime import (
     QwenRealtimeTextProbe,
     run_qwen_realtime_text_probe,
 )
+from .doubao_realtime import (
+    DoubaoRealtimeSession,
+    DoubaoRealtimeTextProbe,
+    DoubaoRealtimeTransport,
+)
 
 __all__ = [
     "QwenOmniRealtimeSession",
     "QwenOmniRealtimeTransport",
     "QwenRealtimeTextProbe",
     "run_qwen_realtime_text_probe",
+    "DoubaoRealtimeSession",
+    "DoubaoRealtimeTextProbe",
+    "DoubaoRealtimeTransport",
 ]

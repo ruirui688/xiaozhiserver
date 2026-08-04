@@ -9,6 +9,9 @@ describe("realtime multimodal model UI", () => {
 
     assert.equal(realtime.isRealtimeModel({ params: { conversation_mode: "realtime" } }), true);
     assert.equal(realtime.isRealtimeModel({ raw: { adapterCode: "qwen_omni_realtime" } }), true);
+    assert.equal(realtime.isRealtimeModel({ raw: { adapterCode: "doubao_realtime" } }), true);
+    assert.equal(realtime.isRealtimeModel({ templateCode: "LLM_DOUBAO_REALTIME" }), true);
+    assert.equal(realtime.isDoubaoRealtimeModel({ adapterCode: "doubao-realtime" }), true);
     assert.equal(realtime.isRealtimeModel({ templateCode: "LLM_ALI_QWEN_OMNI_REALTIME" }), true);
     assert.equal(realtime.isRealtimeModel({ adapterCode: "openai", params: { conversation_mode: "pipeline" } }), false);
     assert.equal(realtime.getConversationModeBadge({ adapterCode: "openai" }), "传统拼接");
@@ -62,6 +65,16 @@ describe("realtime multimodal model UI", () => {
     assert.equal(testVm.realtime, true);
     assert.equal(testVm.message, "realtimeModel.configDescription");
     testVm.$destroy();
+
+    const doubaoVm = new Ctor({
+      propsData: {
+        model: { adapterCode: "doubao_realtime" },
+        context: "agent",
+      },
+    });
+    assert.equal(doubaoVm.realtime, true);
+    assert.equal(doubaoVm.message, "realtimeModel.doubaoAgentDescription");
+    doubaoVm.$destroy();
     delete Vue.prototype.$t;
   });
 

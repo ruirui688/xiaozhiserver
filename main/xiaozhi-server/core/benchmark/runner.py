@@ -19,7 +19,7 @@ from core.benchmark.llm_judge import (
 )
 from core.benchmark.runtime_agent import BenchmarkRuntimeAgent
 from core.utils.llm import create_instance as create_llm_instance
-from core.providers.realtime.qwen_omni_realtime import QwenRealtimeTextProbe
+from core.providers.realtime.registry import create_realtime_probe
 from core.benchmark.security import sanitize_benchmark_error
 
 
@@ -109,6 +109,7 @@ async def _run_llm(
     if str(config.get("conversation_mode") or "").strip().lower() == "realtime":
         return await _run_realtime_llm(
             model,
+            provider_type,
             config,
             iterations,
             judge_config or {},
@@ -190,6 +191,7 @@ async def _run_llm(
 
 async def _run_realtime_llm(
     model,
+    provider_type,
     config,
     iterations,
     judge_config=None,
@@ -211,7 +213,7 @@ async def _run_realtime_llm(
             audio_bytes = 0
             final_output = ""
             message = "OK"
-            probe_session = QwenRealtimeTextProbe(config)
+            probe_session = create_realtime_probe(config, provider_type)
             try:
                 turns = get_case_turns(case)
                 if not turns:

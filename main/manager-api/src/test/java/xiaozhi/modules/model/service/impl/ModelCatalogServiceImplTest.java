@@ -84,6 +84,40 @@ class ModelCatalogServiceImplTest {
     }
 
     @Test
+    void doubaoRealtimeIsSelectableWithCredentialAndAudioContract() throws Exception {
+        ModelCatalogDTO template = staticCatalog().stream()
+                .filter(item -> "LLM_DOUBAO_REALTIME".equals(item.getTemplateCode()))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals("doubao_realtime", template.getProviderCode());
+        assertEquals("SUPPORTED", template.getSupportedStatus());
+        assertTrue(template.getSelectable());
+        assertTrue(template.getTestContract().contains("真实火山引擎二进制 Realtime WebSocket"));
+        assertTrue(template.getKnownLimitations().stream().anyMatch(item -> item.contains("Function Calling")));
+
+        List<String> fieldKeys = template.getFieldSchemas().stream()
+                .map(ModelFieldSchemaDTO::getKey)
+                .toList();
+        assertEquals(List.of(
+                "app_id", "api_key", "base_url", "model_name", "conversation_mode",
+                "input_sample_rate", "output_sample_rate", "voice", "bot_name", "speaking_style",
+                "input_mode", "end_smooth_window_ms", "speech_rate", "loudness_rate", "strict_audit",
+                "connect_timeout_seconds", "response_timeout_seconds", "max_event_bytes"), fieldKeys);
+
+        assertFalse(field(template, "app_id").getSecret());
+        assertTrue(field(template, "api_key").getSecret());
+        assertEquals("wss://openspeech.bytedance.com/api/v3/realtime/dialogue",
+                field(template, "base_url").getDefaultValue());
+        assertEquals("1.2.1.1", field(template, "model_name").getDefaultValue());
+        assertEquals(List.of("1.2.1.1", "2.2.0.0"), field(template, "model_name").getOptions());
+        assertEquals(16000, field(template, "input_sample_rate").getDefaultValue());
+        assertEquals(24000, field(template, "output_sample_rate").getDefaultValue());
+        assertEquals("audio", field(template, "input_mode").getDefaultValue());
+        assertEquals(true, field(template, "strict_audit").getDefaultValue());
+    }
+
+    @Test
     void doubaoSeedTtsExposesOnlyUserEditableFields() throws Exception {
         ModelCatalogDTO ttsTemplate = staticCatalog().stream()
                 .filter(item -> "TTS_DOUBAO_SEED_TTS_2_STREAM".equals(item.getTemplateCode()))

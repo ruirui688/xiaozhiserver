@@ -114,7 +114,8 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                     : StringUtils.defaultString(item.getConfigJson().getStr("conversation_mode"));
             dto.setConversationMode(conversationMode);
             dto.setRealtime("realtime".equalsIgnoreCase(conversationMode)
-                    || "qwen_omni_realtime".equalsIgnoreCase(type));
+                    || "qwen_omni_realtime".equalsIgnoreCase(type)
+                    || "doubao_realtime".equalsIgnoreCase(type));
             return dto;
         }).toList();
     }

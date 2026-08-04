@@ -623,7 +623,7 @@ def test_benchmark_routes_realtime_without_legacy_llm(monkeypatch):
             for item in inputs
         ]
 
-    monkeypatch.setattr(runner, "QwenRealtimeTextProbe", FakeProbe)
+    monkeypatch.setattr(runner, "create_realtime_probe", lambda *_args: FakeProbe({}))
     monkeypatch.setattr(runner, "evaluate_llm_case_batch", fake_judge)
     monkeypatch.setattr(
         runner,
@@ -661,7 +661,7 @@ def test_realtime_benchmark_sample_redacts_provider_credentials(monkeypatch):
         async def close(self):
             pass
 
-    monkeypatch.setattr(runner, "QwenRealtimeTextProbe", ErrorProbe)
+    monkeypatch.setattr(runner, "create_realtime_probe", lambda *_args: ErrorProbe({}))
     monkeypatch.setattr(
         runner,
         "evaluate_llm_case_batch",
@@ -678,6 +678,7 @@ def test_realtime_benchmark_sample_redacts_provider_credentials(monkeypatch):
     result = asyncio.run(
         runner._run_realtime_llm(
             {"id": "rt", "model_type": "LLM"},
+            "qwen_omni_realtime",
             {"conversation_mode": "realtime"},
             1,
             benchmark_cases=[{"scenario": "test", "turns": ["hello"]}],
