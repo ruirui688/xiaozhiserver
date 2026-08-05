@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: runtime
-last_verified: 2026-08-02
+last_verified: 2026-08-05
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/config/service/impl/ConfigServiceImpl.java
   - main/xiaozhi-server/agent-base-prompt.txt
@@ -336,7 +336,7 @@ request_params = {
 
 结论：主聊天模型看到的插件提示词通常不拼在 system prompt 里，而是作为 `tools` 字段进入模型请求。
 
-顶层普通回答沿用官方 `direct_answer` 虚拟工具，不代表设备或服务端真实能力。普通 function-call 轮由模型在普通 content、`direct_answer(response=...)` 和真实工具之间自由选择，不发送 `tool_choice=required`；支持单工具约束的 OpenAI 兼容 provider 仍发送 `parallel_tool_calls=false`，避免同一轮同时出现直接回答和真实工具。模型选择 `direct_answer` 时，服务端只保留 5 字 JSON 安全尾，其余稳定增量立即进入 TTS，不再等待自然短句聚合；模型选择普通 content 时同样即时流播。只有会议激活后的静默控制轮继续在 provider 支持时发送 `tool_choice=required`，并且只暴露会议工具。若端点不支持 `parallel_tool_calls` 参数，可在模型参数中设置 `supports_parallel_tool_calls: false`，服务端只对 `direct_answer` 停用快速路径并等完整 response 确认。用户打断播报属于设备/AEC 驱动的 Abort 控制面，不进入 LLM tools schema。
+顶层普通回答沿用官方 `direct_answer` 虚拟工具，不代表设备或服务端真实能力。普通 function-call 轮不使用关键词、正则或服务端预设意图选择工具；支持 `tool_choice` 的 provider 发送 `tool_choice=required`，由模型根据完整语义在 `direct_answer(response=...)` 与真实工具之间自主选择。这样普通问答仍选择 `direct_answer`，匹配真实能力时选择对应工具，同时不允许模型绕开结构化选择后用普通文本声称操作成功。支持单出口约束的 OpenAI 兼容 provider 还发送 `parallel_tool_calls=false`，避免同一轮同时出现直接回答和真实工具。模型选择 `direct_answer` 时，服务端只保留 5 字 JSON 安全尾，其余稳定增量立即进入 TTS，不再等待自然短句聚合。会议激活后的静默控制轮同样发送 `tool_choice=required`，但只暴露会议工具。兼容端点不支持这些参数时，可分别设置 `supports_tool_choice: false` 或 `supports_parallel_tool_calls: false`；前者退回 provider 自由返回 content/tool_calls，后者停用 `direct_answer` 快速路径并等完整 response 确认。用户打断播报属于设备/AEC 驱动的 Abort 控制面，不进入 LLM tools schema。
 
 基础 system prompt 不再无条件宣称 `web_search`、`get_weather`、`play_music` 等可选工具存在。`PromptManager` 从 `UnifiedToolHandler.get_functions()` 返回的同一份真实 schema 提取工具名；有工具时写入完整 `<tool_and_knowledge>` 段，无工具时连工具段和否定说明一起移除。每轮请求前会再次同步，以覆盖 MCP、设备 IoT 或设备 MCP 在连接建立后动态注册或注销工具的情况。工具的用途、参数和限制仍以原生 `tools` schema 为唯一事实来源，未注册工具不得出现在提示词中。
 

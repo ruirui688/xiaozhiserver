@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: tools
-last_verified: 2026-08-02
+last_verified: 2026-08-05
 source_paths:
   - main/xiaozhi-server/core/providers/tools
   - main/xiaozhi-server/plugins_func
@@ -218,9 +218,12 @@ provider_code 未命中 all_function_registry
 
 会议纪要属于服务端状态型插件。启用后注册真实 `meeting_minutes` function tool，会议开始、正文记录和结束全部由主 LLM 根据当前发言主动选择 `start / record / end`，服务端不维护进入或退出话术词表，也不通过语义控制中枢预判会议意图。会议激活期间每条 ASR 都串行等待上一轮工具执行完成，只向主 LLM 暴露会议工具，并在 provider 支持时要求本轮必须调用工具；具体选择 `record` 还是 `end` 仍由模型理解上下文。只有真实工具调用成功才改变状态，普通文字不能模拟开始或结束。结束后由主 LLM 基于冻结的完整结构化转写同时生成设备口语总结和飞书书面纪要，不引入独立 SLM 裁决。未启用时既不注册工具，也不插入否定式会议说明；即使 Intent functions 有旧残留，执行器仍会再次按当前智能体插件集合拒绝暴露。
 
-普通 function-call 对话不强制模型调用工具；服务端保留 `parallel_tool_calls=false` 的单出口约束，让模型根据
-完整语义自由选择直接回答或一个真实工具。`tool_choice=required` 只用于会议已经激活后的静默控制轮，不能
-扩散到讲故事、历史文化问答或其他普通对话。
+普通 function-call 对话不通过关键词、正则或服务端预设意图选择工具。provider 支持时发送
+`tool_choice=required`，由模型根据完整语义自主选择 `direct_answer` 或一个真实工具；这里要求的是结构化选择，
+不是强制某个真实工具。服务端同时保留 `parallel_tool_calls=false` 的单出口约束。普通问答通过
+`direct_answer(response=...)` 返回，真实控制只有模型选择并成功执行对应工具后才能确认完成。会议激活后的静默控制轮
+继续只暴露会议工具。兼容端点不支持单工具约束时显式配置 `supports_tool_choice: false`，退回自由
+content/tool_calls 响应。
 
 不再强制注入的旧游戏 code：
 

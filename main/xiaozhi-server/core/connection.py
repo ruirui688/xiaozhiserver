@@ -1699,8 +1699,8 @@ class ConnectionHandler:
             if tools_enabled:
                 # 使用支持functions的streaming接口
                 function_options = {}
-                if meeting_tool_turn and getattr(
-                    self.llm, "supports_tool_choice", False
+                if getattr(self.llm, "supports_tool_choice", False) and (
+                    meeting_tool_turn or DIRECT_ANSWER_TOOL in functions
                 ):
                     function_options["tool_choice"] = "required"
                 if getattr(self.llm, "supports_parallel_tool_calls", False):

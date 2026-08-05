@@ -382,7 +382,10 @@ def test_function_call_chat_passes_full_tool_schema_to_main_llm():
     ]
     assert conn.tts.queued_text() == ["直接回复"]
     assert conn.tts.stored_text == ["直接回复"]
-    assert llm.calls[0]["options"] == {"parallel_tool_calls": False}
+    assert llm.calls[0]["options"] == {
+        "tool_choice": "required",
+        "parallel_tool_calls": False,
+    }
 
 
 def test_direct_answer_streams_to_tts_before_llm_generator_finishes():
@@ -432,10 +435,13 @@ def test_direct_answer_streams_to_tts_before_llm_generator_finishes():
     assert conn.tts.stored_text == [answer]
     assert conn.tts.previews
     assert conn.tts.previews[0][1] == conn.tts.queued_text()[0]
-    assert llm.calls[0]["options"] == {"parallel_tool_calls": False}
+    assert llm.calls[0]["options"] == {
+        "tool_choice": "required",
+        "parallel_tool_calls": False,
+    }
 
 
-def test_direct_answer_streaming_does_not_require_forced_tool_choice():
+def test_direct_answer_streaming_falls_back_without_tool_choice_support():
     class FreeRoutingFunctionCallLLM(CapturingFunctionCallLLM):
         supports_tool_choice = False
 
@@ -551,7 +557,7 @@ def test_start_to_chat_keeps_successful_direct_answer_alive(monkeypatch):
     ]
 
 
-def test_direct_answer_falls_back_without_single_tool_constraint():
+def test_direct_answer_buffers_when_parallel_tools_are_not_supported():
     class UnconstrainedFunctionCallLLM(CapturingFunctionCallLLM):
         supports_tool_choice = True
         supports_parallel_tool_calls = False
@@ -588,7 +594,7 @@ def test_direct_answer_falls_back_without_single_tool_constraint():
 
     assert observed_during_stream == [[]]
     assert conn.tts.queued_text() == ["兼容模式仍在生成，现在结束。"]
-    assert llm.calls[0]["options"] == {}
+    assert llm.calls[0]["options"] == {"tool_choice": "required"}
 
 
 def test_direct_answer_helpers_preserve_text_and_remove_json_tail():

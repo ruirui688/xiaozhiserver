@@ -1,7 +1,7 @@
 ---
 status: report
 owner: xiaozhi-server
-last_verified: 2026-07-30
+last_verified: 2026-08-05
 source_paths:
   - main/xiaozhi-server/core/connection.py
   - main/xiaozhi-server/core/handle
@@ -41,7 +41,7 @@ Opus 音频帧 → VAD 分段 → ASR 文字识别 → SemanticControl 路由
 
 本轮日志显示 LLM 首个响应分片约 217ms、完整响应约 1.593s，但 TTS 文本在完整响应后才提交，二者之间约 1.376s 的生成窗口没有与 TTS 重叠。根因不是 LLM provider 未开启流式请求，而是携带 tools 的普通文本为避免“先播报、后调工具”而整轮缓存。
 
-源码保留 `direct_answer` 的激进流播，但普通 function-call 请求不再使用 `tool_choice=required`：模型可以自由选择普通 content、`direct_answer` 或真实工具，provider 支持时仅发送 `parallel_tool_calls=false` 保证单出口。服务端对增长中的 `direct_answer.response` 只保留 5 字符 JSON 安全尾，其余稳定增量立即投递 TTS，不再经过自然短句聚合。SeedTTS2 默认在首个完整 Opus 帧到达时立即发布带非空字幕的 `FIRST` 和音频，不再增加 600ms 固定等待。普通 content 在携带真实 tools 和工具结果递归轮中同样即时流播；只有会议激活后的静默控制轮继续要求调用会议工具。不具备单工具约束能力的 provider 只对 `direct_answer` 保持完整响应确认回退。播报中的用户打断继续走官方 Abort 链路，不等待 LLM 选择工具。
+源码保留 `direct_answer` 的激进流播。普通 function-call 请求不使用关键词或服务端预设意图选工具；provider 支持时发送 `tool_choice=required` 和 `parallel_tool_calls=false`，由模型自主选择 `direct_answer` 或一个真实工具。服务端对增长中的 `direct_answer.response` 只保留 5 字符 JSON 安全尾，其余稳定增量立即投递 TTS，不再经过自然短句聚合。SeedTTS2 默认在首个完整 Opus 帧到达时立即发布带非空字幕的 `FIRST` 和音频，不再增加 600ms 固定等待。会议激活后的静默控制轮继续只暴露会议工具。不具备单工具约束能力的 provider 可显式关闭 `supports_tool_choice`，退回自由 content/tool_calls；不支持并行工具参数时关闭 `supports_parallel_tool_calls`，并对 `direct_answer` 保持完整响应确认回退。播报中的用户打断继续走官方 Abort 链路，不等待 LLM 选择工具。
 
 按本轮 217ms 首分片估算，健康回答可以从第一个超过 5 字安全尾的稳定增量开始与 TTS 合成重叠，且不再叠加 600ms 固定预缓冲。具体数值是源码预期，不是部署后的真机结果；必须在发布后重新采集 `LLM首个响应分片 → 首个稳定 direct_answer 增量 → TTS文本发送 → 首个 Opus → HAL PLAYING` 才能作为实测结论。
 

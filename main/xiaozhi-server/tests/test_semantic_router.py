@@ -47,6 +47,16 @@ def test_continue_in_idle_routes_to_context_continue():
     assert frame.full_name == "context.continue"
 
 
+def test_context_reset_request_is_left_to_main_llm_tool_selection():
+    frame = SemanticRouter().route(
+        _asr("小艺，清空当前上下文记忆。"),
+        _context(state="idle"),
+    )
+
+    assert frame.full_name == "chat.normal"
+    assert frame.source == "fallback"
+
+
 def test_active_game_routes_user_message_to_game_answer():
     frame = SemanticRouter().route(
         _asr("是不是冰箱"),

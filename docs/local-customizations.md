@@ -455,7 +455,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - enable_greeting 默认false，需要欢迎语时由私有配置显式覆盖。
   - 唤醒词缓存仅在开关开启且文本命中后等待TTS，普通文本不再被额外阻塞最多3秒。
   - 唤醒词聊天记录保留设备实际检测文本，不再用内部的“嘿，你好呀”替代；缓存欢迎音成功播放后必须上报实际助手文本和音频，保证后台按 user -> assistant 显示完整唤醒交互。
-  - 主 LLM 沿用官方 `direct_answer` 虚拟工具流播：普通 function-call 轮不再发送 `tool_choice=required`，由模型自由选择普通 content、`direct_answer` 或真实工具；provider 支持时仍发送 `parallel_tool_calls=false` 保证单出口。增长中的 `direct_answer.response` 只保留 5 字符 JSON 安全尾，其余稳定增量立即进入 TTS，不再等待自然短句聚合；普通 content 即使携带真实 tools 也立即流播。会议激活后的静默控制轮继续只暴露会议工具并保留 `tool_choice=required`。不兼容单工具约束的端点对 `direct_answer` 仍在完整响应确认后提交。
+  - 主 LLM 沿用官方 `direct_answer` 虚拟工具流播：普通 function-call 轮不使用关键词、正则或服务端预设意图选择工具；provider 支持时发送 `tool_choice=required`，由模型在 `direct_answer` 与真实工具之间自主选择，并发送 `parallel_tool_calls=false` 保证单出口。增长中的 `direct_answer.response` 只保留 5 字符 JSON 安全尾，其余稳定增量立即进入 TTS，不再等待自然短句聚合。会议激活后的静默控制轮继续只暴露会议工具并保留 `tool_choice=required`。兼容端点不支持结构化必选或并行工具参数时，分别用 `supports_tool_choice: false`、`supports_parallel_tool_calls: false` 显式降级；后者对 `direct_answer` 在完整响应确认后提交。
   - 本地知识库成功检索但结果为空时，工具结果递归轮临时关闭全部 tools，并注入一次性可信边界：公开历史、文化、科普和故事允许使用模型通用知识回答，企业资料、人员身份和其他私有事实必须说明暂无记录且不能猜测。该边界不写入 Dialogue，不新增关键词路由或独立分类器，下一条用户消息恢复正常工具集合。
   - `direct_answer` 与真实工具通过 `parallel_tool_calls=false` 保持本轮单出口；会议激活轮不启用普通回答流播。播报打断沿用官方 Abort/AEC 链路，不注册模型决定的停止说话工具，不维护停止词表或独立 LLM 打断分类器。
   - 纯 `direct_answer` 成功解析并提交非空 response 与 LAST 后，`ConnectionHandler.chat()` 必须返回 `True`；裸 `return` 会被 `startToChat.on_chat_done()` 解释为 `llm_no_spoken_result`，提前失败当前 generation 并清空尚未发送的 TTS 音频。空 response 才允许返回空结果，且不得伪造 LAST。

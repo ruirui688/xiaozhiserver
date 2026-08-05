@@ -27,6 +27,13 @@ class LLMProvider(LLMProviderBase):
     supports_parallel_tool_calls = True
 
     def __init__(self, config):
+        tool_choice_support = config.get("supports_tool_choice", True)
+        self.supports_tool_choice = str(tool_choice_support).strip().lower() not in {
+            "0",
+            "false",
+            "no",
+            "off",
+        }
         parallel_tool_support = config.get("supports_parallel_tool_calls", True)
         self.supports_parallel_tool_calls = str(parallel_tool_support).strip().lower() not in {
             "0",

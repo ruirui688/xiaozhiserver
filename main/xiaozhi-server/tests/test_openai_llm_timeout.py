@@ -121,6 +121,16 @@ def test_parallel_tool_capability_can_be_disabled_for_compatible_endpoint(monkey
     assert provider.supports_parallel_tool_calls is False
 
 
+def test_tool_choice_capability_can_be_disabled_for_compatible_endpoint(monkeypatch):
+    provider, _ = _provider(
+        monkeypatch,
+        FakeStream(),
+        supports_tool_choice="false",
+    )
+
+    assert provider.supports_tool_choice is False
+
+
 def test_continuous_text_stream_exceeding_total_budget_is_closed(monkeypatch):
     stream = FakeStream([_chunk("第一段"), _chunk("第二段")])
     provider, _ = _provider(
