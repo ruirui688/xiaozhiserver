@@ -484,7 +484,6 @@ class TTSProvider(TTSProviderBase):
             "last_enqueued": False,
             "content_requested": False,
             "generation": generation,
-            "first_text": None,
             "prebuffer_frames": [],
             "prebuffer_released": False,
             "terminal_error": None,
@@ -507,9 +506,7 @@ class TTSProvider(TTSProviderBase):
             state = self._session_audio_states.get(session_id)
             return dict(state) if state is not None else None
 
-    def _mark_session_content_requested(
-        self, session_id, *, text=None, generation=None
-    ):
+    def _mark_session_content_requested(self, session_id, *, generation=None):
         with self._session_audio_state_lock:
             state = self._session_audio_states.setdefault(
                 session_id,
@@ -518,12 +515,10 @@ class TTSProvider(TTSProviderBase):
             state["content_requested"] = True
             if generation is not None:
                 state["generation"] = generation
-            if text and not state["first_text"]:
-                state["first_text"] = text
             self._session_audio_states.move_to_end(session_id)
 
-        if text:
-            self.store_tts_preview(session_id, text)
+        # 流式增量继续立即送往上游 TTS，但不能把第一个增量当成设备字幕。
+        # 官方 SeedTTS2 链路只在完整回答经 store_tts_text() 落盘后发布 FIRST。
 
     def _prepare_pending_session(self, session_id, generation=None):
         if self._pending_session_id == session_id:
@@ -616,6 +611,8 @@ class TTSProvider(TTSProviderBase):
             )
 
     def _enqueue_session_first_once(self, session_id, text=None):
+        if text is None:
+            text = self.get_report_text(session_id)
         if not session_id or not self._has_speakable_text(text):
             return False
         with self._session_audio_state_lock:
@@ -641,6 +638,26 @@ class TTSProvider(TTSProviderBase):
             self._session_audio_states.move_to_end(session_id)
             return True
 
+    def _enqueue_complete_subtitle_locked(self, session_id, state):
+        if state["first_enqueued"]:
+            return True
+        complete_text = self.get_report_text(session_id)
+        if not self._has_speakable_text(complete_text):
+            return False
+        self.tts_audio_queue.put(
+            (
+                SentenceType.FIRST,
+                [],
+                complete_text,
+                session_id,
+                False,
+                state["generation"],
+                None,
+            )
+        )
+        state["first_enqueued"] = True
+        return True
+
     def _handle_session_opus(self, session_id, opus_data):
         """Publish Opus immediately; optional buffering remains configurable."""
         if not session_id or not opus_data:
@@ -652,6 +669,7 @@ class TTSProvider(TTSProviderBase):
             self._record_turn_metric(
                 "record_tts_audio_frame", len(opus_data), session_id
             )
+            self._enqueue_complete_subtitle_locked(session_id, state)
             if state["prebuffer_released"]:
                 self.tts_audio_queue.put(
                     (
@@ -677,7 +695,11 @@ class TTSProvider(TTSProviderBase):
             if state is None or state["last_enqueued"]:
                 return False
             if state["prebuffer_released"]:
-                return state["first_enqueued"]
+                if state["first_enqueued"]:
+                    return True
+                # 音频可能已按零预缓冲策略发出；完整文本稍后就绪时仍需
+                # 在正常收尾前发布官方 FIRST 字幕边界。
+                return self._release_session_prebuffer_locked(session_id, state)
             if not force and (
                 len(state["prebuffer_frames"]) < self.stream_prebuffer_frames
             ):
@@ -685,21 +707,12 @@ class TTSProvider(TTSProviderBase):
             return self._release_session_prebuffer_locked(session_id, state)
 
     def _release_session_prebuffer_locked(self, session_id, state):
-        text = state["first_text"] or self.get_tts_text(session_id)
-        if not self._has_speakable_text(text) or not state["prebuffer_frames"]:
-            return False
         generation = state["generation"]
-        self.tts_audio_queue.put(
-            (
-                SentenceType.FIRST,
-                [],
-                text,
-                session_id,
-                False,
-                generation,
-                None,
-            )
-        )
+        self._enqueue_complete_subtitle_locked(session_id, state)
+
+        if not state["prebuffer_frames"]:
+            return state["first_enqueued"]
+
         for frame in state["prebuffer_frames"]:
             self.tts_audio_queue.put(
                 (
@@ -713,7 +726,6 @@ class TTSProvider(TTSProviderBase):
                 )
             )
         state["prebuffer_frames"].clear()
-        state["first_enqueued"] = True
         state["prebuffer_released"] = True
         self._session_audio_states.move_to_end(session_id)
         return True
@@ -856,7 +868,6 @@ class TTSProvider(TTSProviderBase):
                         try:
                             self._mark_session_content_requested(
                                 message.sentence_id,
-                                text=message.content_detail,
                                 generation=message.generation,
                             )
                             if not self._start_pending_session_once(

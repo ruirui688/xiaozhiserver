@@ -288,8 +288,10 @@ SeedTTS2 双流 provider 为每个 `sentence_id` 维护独立的 `FIRST/LAST` �
 创建空会话。该变化只调整厂商会话的启动时点，设备侧仍以实际音频对应的 `FIRST/LAST` 建立
 `tts start/stop`，并继续保证同一 `sentence_id` 最多各发送一次。
 
-SeedTTS2 默认不再等待时间预缓冲；首个完整 Opus 帧到达后立即发布带非空首段字幕的 `FIRST`，随后
-按 FIFO 发布该帧和后续音频。`stream_prebuffer_ms` 仍可由私有配置显式设为正数恢复预缓冲。
+SeedTTS2 默认不再等待时间预缓冲；完整 Opus 帧到达后立即按 FIFO 发布，不因等待字幕而阻塞音频流。
+设备字幕遵循官方契约，只能由 `store_tts_text()` 保存的完整回答产生 `FIRST`，不得把首个 LLM 增量
+当作正式字幕；完整文本在首音频后才就绪时，provider 在后续音频或正常收尾边界补发 `FIRST`。
+`stream_prebuffer_ms` 仍可由私有配置显式设为正数恢复音频预缓冲。
 正常 `LAST` 只能在火山
 `SessionFinished`、Opus 尾帧冲刷完成并进入 provider FIFO 后发布；设备协议 `stop` 仍等待发送控制器
 排空。FIRST、音频、LAST 和 stop 同时携带同一 reply generation，旧 generation 的迟到边界会被丢弃。
@@ -308,7 +310,7 @@ Abort 会先给当前 `TurnMetrics` 记录 `outcome.status=aborted` 和 interrup
 聊天记录不会因为打断而丢失已听到的回复或整条延时链路。仅在等待阶段生成、但从未跨过真实 TTS
 `FIRST` 边界的文本不会伪装成用户已经听到的助手回答。
 
-字幕生命周期与聊天记录上报生命周期必须分离。流式 provider 可以在首个音频包后清理字幕映射，但完整
+字幕生命周期与聊天记录上报生命周期必须分离。流式 provider 只能在完整字幕 `FIRST` 发布后清理字幕映射，但完整
 助手文本必须按 `sentence_id` 保留到正常 `LAST` 或 Abort 成功进入上报队列。真实音频 `FIRST` 到达时按句
 标记“已经开始播放”；Abort 必须先确认该句已经播放且存在可上报文本，再与正常 `LAST` 原子竞争最终上报权，
 不得用连接级旧时间戳推断当前句已播放，也不得在文本缺失时提前占用上报权。只有上报队列确认接收后才清理

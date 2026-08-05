@@ -459,10 +459,10 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - 本地知识库成功检索但结果为空时，工具结果递归轮临时关闭全部 tools，并注入一次性可信边界：公开历史、文化、科普和故事允许使用模型通用知识回答，企业资料、人员身份和其他私有事实必须说明暂无记录且不能猜测。该边界不写入 Dialogue，不新增关键词路由或独立分类器，下一条用户消息恢复正常工具集合。
   - `direct_answer` 与真实工具通过 `parallel_tool_calls=false` 保持本轮单出口；会议激活轮不启用普通回答流播。播报打断沿用官方 Abort/AEC 链路，不注册模型决定的停止说话工具，不维护停止词表或独立 LLM 打断分类器。
   - 纯 `direct_answer` 成功解析并提交非空 response 与 LAST 后，`ConnectionHandler.chat()` 必须返回 `True`；裸 `return` 会被 `startToChat.on_chat_done()` 解释为 `llm_no_spoken_result`，提前失败当前 generation 并清空尚未发送的 TTS 音频。空 response 才允许返回空结果，且不得伪造 LAST。
-  - 流式 TTS 的 `FIRST` 文本只是首包字幕预览，可能仅有一个字符或短语；正常 `LAST` 上报聊天记录时必须优先使用按 `sentence_id` 保存的完整回答，只有完整文本不存在时才允许用 `FIRST` 预览兜底，并继续把整轮音频与完整正文关联保存。
+  - 流式 TTS 的音频增量不得被字幕等待阻塞；但设备 `FIRST` 字幕必须来自按 `sentence_id` 保存的完整回答，禁止把首个 LLM 字符或短语当作正式字幕。正常 `LAST` 上报聊天记录时继续优先使用完整回答，并把整轮音频与完整正文关联保存。
   - SeedTTS2 把本地逻辑轮次和上游厂商会话分开：`SentenceType.FIRST` 只重置流状态并登记本轮，第一段经清洗后非空的 `ContentType.TEXT` 或路径有效的 `ContentType.FILE` 到达时才启动一次上游会话；空轮 `LAST` 不得反向创建会话。
   - SeedTTS2 正常结束必须冲刷不足60ms的Opus尾帧，取消、失败或异常断链必须重置编码器，禁止残留样本跨会话。
-  - SeedTTS2 默认不做首音频时间预缓冲：首个完整 Opus 帧到达即按 FIFO 发布非空字幕 `FIRST` 和音频。可选 `stream_prebuffer_ms` 仍允许显式恢复预缓冲；provider 音频 FIFO、设备 FIRST/LAST/stop 必须绑定同一 reply generation，迟到旧 generation 不得结束新回复。
+  - SeedTTS2 默认不做首音频时间预缓冲：完整 Opus 帧到达即按 FIFO 发布，即使完整字幕尚未就绪也不得阻塞音频；完整回答写入后，再在后续音频或正常收尾边界发布非空 `FIRST`。可选 `stream_prebuffer_ms` 仍允许显式恢复预缓冲；provider 音频 FIFO、设备 FIRST/LAST/stop 必须绑定同一 reply generation，迟到旧 generation 不得结束新回复。
   - SeedTTS2 只有在 `SessionFinished` 后才能发布正常 LAST；下行超时、断链、SessionFailed 和结束异常必须使用 `tts_error:*` 失败原因令 ReplyLifecycle 进入 FAILED，并关闭当前 WebSocket 供下一轮重建，不能伪装成正常播报完成。
   - SeedTTS2 按 sentence_id 维护 FIRST/LAST 状态；正常结束、结束超时、下行超时、WebSocket 断开、SessionFailed 和监听异常都必须走同一幂等收尾。只要已经发布 FIRST，就必须最终发布且只发布一次 LAST；迟到事件不能重复 LAST，残余旧会话事件不能重置当前会话。
   - 设备 TTS 协议层同一 sentence_id 的 start/stop 最多发送一次；主动 abort 已直接发送 stop 时，provider 不得再次补发。
@@ -503,7 +503,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 是否允许被官方覆盖：否
 本次发布状态：2026-07-29 的 function-call 流播仍只修改并验证源码；未构建镜像、未部署、未重启腾讯云生产服务。用户发布后才进行真实服务端回归，1.1-1.4s 仅为按既有阶段日志估算的可重叠窗口。
 真实外部回归：豆包录音ASR 4/4、流式ASR修复前后5/5、SeedTTS2连续5会话、DeepSeek v4-pro/v4-flash原生与仓库provider均成功；当前provider完整ASR→LLM→TTS链路连续3/3成功，平均约3.753秒。真实凭据只用于进程内测试且未落盘；测试完成后应轮换在会话或截图中暴露过的凭据。
-官方同步时的处理规则：如果官方修改聊天流式输出、OpenAI function-call、豆包录音/流式 ASR、SeedTTS2、TTS 音频发送、唤醒词处理、欢迎语、连接日志或设备注册表，保留官方 `direct_answer` 增量提取和5字符 JSON 安全尾、携带 tools 时普通 content 即时流播、默认零毫秒 SeedTTS2 首音预缓冲，同时保留本地首段非空字幕预存、正常 `LAST` 优先完整回答且仅以 `FIRST` 预览兜底的聊天记录上报、reply generation 边界隔离、错误终态和 required/单工具能力门控及不兼容 provider 回退；还必须保留异步 HTTP 与总预算超时、流式 WebSocket 分阶段等待保护、本地 VAD 判停发送唯一 LAST、缓存首帧去重、短词识别和按会话身份清理、SeedTTS2 逻辑 `FIRST` 不提前启动上游会话且首段真实 `TEXT/FILE` 只启动一次、空轮 `LAST` 不创建厂商会话、任意非主动打断结束路径幂等收尾、连接级同轮 start/stop 去重、官方 STT 后立即进入可打断语义（不得另造 `response_pending`）、Abort 部分回复与 interruption 指标幂等收口、聊天和记忆重建按 `turn_id + message_sequence` 还原逻辑顺序、Opus尾帧冲刷、默认零毫秒首轮音频丢弃、欢迎语显式开启、唤醒词实际检测文本与实际播放回复双向上报、按请求头键名脱敏和对象身份注销校验。不得重新引入模型决定的停止说话工具、停止词表或独立 LLM 打断分类器；不得在 async provider 中引入 requests/time.sleep，不得让更短外层超时覆盖会话结束预算，不得把 Authorization、token、API key、Cookie 或 secret 写入日志；调整 ASR 超时、TTS 会话启动、分片/预缓冲或编码边界和唤醒回声窗口时必须同步更新默认配置、专项测试、语音延迟文档，并在真实设备上验证 function-call 长回复不断句丢音、FIRST字幕非空、异常后设备恢复监听、连续TTS无串音和重连映射稳定。
+官方同步时的处理规则：如果官方修改聊天流式输出、OpenAI function-call、豆包录音/流式 ASR、SeedTTS2、TTS 音频发送、唤醒词处理、欢迎语、连接日志或设备注册表，保留官方 `direct_answer` 增量提取和5字符 JSON 安全尾、携带 tools 时普通 content 即时流播、默认零毫秒 SeedTTS2 首音预缓冲，同时保留官方式完整回答字幕来源、音频不等待字幕、每个 provider `FIRST` 都映射为 `sentence_start`、正常 `LAST` 优先完整回答的聊天记录上报、reply generation 边界隔离、错误终态和 required/单工具能力门控及不兼容 provider 回退；还必须保留异步 HTTP 与总预算超时、流式 WebSocket 分阶段等待保护、本地 VAD 判停发送唯一 LAST、缓存首帧去重、短词识别和按会话身份清理、SeedTTS2 逻辑 `FIRST` 不提前启动上游会话且首段真实 `TEXT/FILE` 只启动一次、空轮 `LAST` 不创建厂商会话、任意非主动打断结束路径幂等收尾、连接级同轮 start/stop 去重、官方 STT 后立即进入可打断语义（不得另造 `response_pending`）、Abort 部分回复与 interruption 指标幂等收口、聊天和记忆重建按 `turn_id + message_sequence` 还原逻辑顺序、Opus尾帧冲刷、默认零毫秒首轮音频丢弃、欢迎语显式开启、唤醒词实际检测文本与实际播放回复双向上报、按请求头键名脱敏和对象身份注销校验。不得重新引入模型决定的停止说话工具、停止词表或独立 LLM 打断分类器；不得在 async provider 中引入 requests/time.sleep，不得让更短外层超时覆盖会话结束预算，不得把 Authorization、token、API key、Cookie 或 secret 写入日志；调整 ASR 超时、TTS 会话启动、分片/预缓冲或编码边界和唤醒回声窗口时必须同步更新默认配置、专项测试、语音延迟文档，并在真实设备上验证 function-call 长回复不断句丢音、FIRST字幕为完整回答、异常后设备恢复监听、连续TTS无串音和重连映射稳定。
 ```
 
 ## 26. 外置声纹服务、智能体隔离与五条上限

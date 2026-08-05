@@ -938,45 +938,80 @@ def test_tts_prebuffer_requires_non_empty_first_text():
     assert provider.tts_audio_queue.empty()
 
 
-def test_tts_default_releases_first_and_first_audio_immediately():
+def test_tts_default_streams_audio_until_complete_subtitle_is_available():
     provider = _fault_provider()
     provider._prepare_session_audio_state("session-1", generation=3)
-    provider._mark_session_content_requested(
-        "session-1", text="这是非空的首段字幕。", generation=3
-    )
+    provider.store_tts_preview("session-1", "您")
+    provider._mark_session_content_requested("session-1", generation=3)
 
     assert provider._handle_session_opus("session-1", b"opus-0") is True
+    first_item = provider.tts_audio_queue.get_nowait()
+    assert first_item[0] is SentenceType.MIDDLE
+    assert first_item[1] == b"opus-0"
+
+    provider.store_tts_text("session-1", "您好，这是完整回答。")
+    assert provider._handle_session_opus("session-1", b"opus-1") is True
 
     items = [provider.tts_audio_queue.get_nowait() for _ in range(2)]
     assert [item[0] for item in items] == [
         SentenceType.FIRST,
         SentenceType.MIDDLE,
     ]
-    assert items[0][2] == "这是非空的首段字幕。"
-    assert items[1][1] == b"opus-0"
+    assert items[0][2] == "您好，这是完整回答。"
+    assert items[1][1] == b"opus-1"
     assert all(item[3] == "session-1" for item in items)
     assert all(item[5] == 3 for item in items)
+
+
+def test_tts_normal_finish_publishes_complete_subtitle_without_more_audio(
+    monkeypatch,
+):
+    provider = _fault_provider()
+    provider._prepare_session_audio_state("session-1", generation=5)
+    provider.store_tts_preview("session-1", "我")
+    provider._mark_session_content_requested("session-1", generation=5)
+
+    assert provider._handle_session_opus("session-1", b"opus-0") is True
+    streamed_audio = provider.tts_audio_queue.get_nowait()
+    assert streamed_audio[0] is SentenceType.MIDDLE
+    assert streamed_audio[1] == b"opus-0"
+
+    provider.store_tts_text("session-1", "我是完整回答。")
+    monkeypatch.setattr(provider, "_flush_opus_audio_stream", lambda _sid: None)
+
+    assert provider._finalize_session_audio_once(
+        "session-1", normal=True, reason="session_finished"
+    ) is True
+    items = [provider.tts_audio_queue.get_nowait() for _ in range(2)]
+    assert [item[0] for item in items] == [
+        SentenceType.FIRST,
+        SentenceType.LAST,
+    ]
+    assert items[0][2] == "我是完整回答。"
+    assert all(item[3] == "session-1" for item in items)
+    assert all(item[5] == 5 for item in items)
 
 
 def test_tts_prebuffer_releases_first_and_audio_after_threshold():
     provider = _fault_provider(stream_prebuffer_ms=600)
     provider._prepare_session_audio_state("session-1", generation=3)
-    provider._mark_session_content_requested(
-        "session-1", text="这是非空的首段字幕。", generation=3
-    )
+    provider.store_tts_preview("session-1", "这")
+    provider._mark_session_content_requested("session-1", generation=3)
+    provider.store_tts_text("session-1", "这是完整的设备字幕。")
 
     for index in range(9):
         assert provider._handle_session_opus(
             "session-1", f"opus-{index}".encode()
         ) is True
+    first_item = provider.tts_audio_queue.get_nowait()
+    assert first_item[0] is SentenceType.FIRST
+    assert first_item[2] == "这是完整的设备字幕。"
     assert provider.tts_audio_queue.empty()
 
     assert provider._handle_session_opus("session-1", b"opus-9") is True
-    items = [provider.tts_audio_queue.get_nowait() for _ in range(11)]
-    assert items[0][0] is SentenceType.FIRST
-    assert items[0][2] == "这是非空的首段字幕。"
-    assert [item[0] for item in items[1:]] == [SentenceType.MIDDLE] * 10
-    assert [item[1] for item in items[1:]] == [
+    items = [provider.tts_audio_queue.get_nowait() for _ in range(10)]
+    assert [item[0] for item in items] == [SentenceType.MIDDLE] * 10
+    assert [item[1] for item in items] == [
         f"opus-{index}".encode() for index in range(10)
     ]
     assert all(item[3] == "session-1" for item in items)
@@ -986,9 +1021,9 @@ def test_tts_prebuffer_releases_first_and_audio_after_threshold():
 def test_short_tts_session_releases_prebuffer_before_normal_last(monkeypatch):
     provider = _fault_provider(stream_prebuffer_ms=600)
     provider._prepare_session_audio_state("session-1", generation=4)
-    provider._mark_session_content_requested(
-        "session-1", text="短回复也必须连续播放。", generation=4
-    )
+    provider.store_tts_preview("session-1", "短")
+    provider._mark_session_content_requested("session-1", generation=4)
+    provider.store_tts_text("session-1", "短回复也必须连续播放。")
     monkeypatch.setattr(provider, "_flush_opus_audio_stream", lambda _sid: None)
     for index in range(3):
         provider._handle_session_opus(

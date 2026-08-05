@@ -190,14 +190,14 @@ def test_first_audio_sets_speaking_and_preserves_protocol_order(monkeypatch):
     asyncio.run(scenario())
 
 
-def test_duplicate_first_and_last_emit_single_tts_start_and_stop(monkeypatch):
+def test_repeated_first_keeps_subtitles_but_deduplicates_start_and_stop(monkeypatch):
     async def scenario():
-        states = []
+        messages = []
         audio_calls = 0
 
         class RecordingWebSocket:
             async def send(self, payload):
-                states.append(json.loads(payload)["state"])
+                messages.append(json.loads(payload))
 
         async def fake_send_audio(_conn, _audios, frame_duration=60):
             nonlocal audio_calls
@@ -237,7 +237,17 @@ def test_duplicate_first_and_last_emit_single_tts_start_and_stop(monkeypatch):
             conn, SentenceType.LAST, [], None, "turn-1"
         )
 
-        assert states == ["start", "sentence_start", "stop"]
+        assert [message["state"] for message in messages] == [
+            "start",
+            "sentence_start",
+            "sentence_start",
+            "stop",
+        ]
+        assert [
+            message["text"]
+            for message in messages
+            if message["state"] == "sentence_start"
+        ] == ["长回复", "长回复"]
         assert audio_calls == 4
 
     asyncio.run(scenario())

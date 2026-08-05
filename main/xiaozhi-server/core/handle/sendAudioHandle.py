@@ -141,20 +141,20 @@ async def sendAudioMessage(
         mark_report_started = getattr(conn.tts, "mark_report_started", None)
         if callable(mark_report_started):
             mark_report_started(protocol_sentence_id)
-        if is_new_protocol_sentence or start_sent_with_first_audio:
-            # 同一句子的后续消息加入流控队列，其他情况立即发送
-            if (
-                hasattr(conn, "audio_rate_controller")
-                and conn.audio_rate_controller
-                and getattr(conn, "audio_flow_control", {}).get("sentence_id")
-                == conn.sentence_id
-            ):
-                conn.audio_rate_controller.add_message(
-                    lambda: send_tts_message(conn, "sentence_start", text)
-                )
-            else:
-                # 新句子或流控器未初始化，立即发送
-                await send_tts_message(conn, "sentence_start", text)
+        # 与官方协议保持一致：每个 provider FIRST 都代表一条真实字幕边界。
+        # start/stop 仍按 reply 去重，但不能因 sentence_id 相同而吞掉后续字幕。
+        if (
+            hasattr(conn, "audio_rate_controller")
+            and conn.audio_rate_controller
+            and getattr(conn, "audio_flow_control", {}).get("sentence_id")
+            == conn.sentence_id
+        ):
+            conn.audio_rate_controller.add_message(
+                lambda: send_tts_message(conn, "sentence_start", text)
+            )
+        else:
+            # 新句子或流控器未初始化，立即发送
+            await send_tts_message(conn, "sentence_start", text)
 
     await sendAudio(conn, audios)
     if audios:
