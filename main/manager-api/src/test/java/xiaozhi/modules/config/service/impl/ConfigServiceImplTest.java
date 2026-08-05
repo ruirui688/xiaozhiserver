@@ -181,6 +181,28 @@ class ConfigServiceImplTest {
     }
 
     @Test
+    void agentRealtimeVoiceOverridesOnlyCompatibleRealtimeAdapter() {
+        Map<String, Object> qwenRuntime = new HashMap<>();
+        qwenRuntime.put("type", "qwen_omni_realtime");
+        qwenRuntime.put("voice", "Ethan");
+        ConfigServiceImpl.applyAgentRealtimeVoice(qwenRuntime, " Serena ");
+        assertEquals("Serena", qwenRuntime.get("voice"));
+
+        ConfigServiceImpl.applyAgentRealtimeVoice(qwenRuntime, "unknown");
+        assertEquals("Serena", qwenRuntime.get("voice"));
+
+        Map<String, Object> doubaoRuntime = new HashMap<>();
+        doubaoRuntime.put("type", "doubao_realtime");
+        ConfigServiceImpl.applyAgentRealtimeVoice(doubaoRuntime, "account_voice_id");
+        assertEquals("account_voice_id", doubaoRuntime.get("voice"));
+
+        Map<String, Object> pipelineRuntime = new HashMap<>();
+        pipelineRuntime.put("type", "openai");
+        ConfigServiceImpl.applyAgentRealtimeVoice(pipelineRuntime, "Serena");
+        assertFalse(pipelineRuntime.containsKey("voice"));
+    }
+
+    @Test
     void applyManagedVadParamsReadsSysParamsAndClampsValues() throws Exception {
         SysParamsService sysParamsService = Mockito.mock(SysParamsService.class);
         when(sysParamsService.getValue(Constant.SERVER_VAD_THRESHOLD, true)).thenReturn(null);

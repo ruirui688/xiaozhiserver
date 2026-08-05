@@ -35,6 +35,7 @@ class ConversationRouter:
         adapter = normalize_realtime_adapter(config)
         if adapter not in supported_realtime_adapters():
             raise ValueError(f"不支持的 Realtime adapter: {adapter or '<empty>'}")
+        await self._ensure_tool_runtime(config)
         self.session = (
             self.session_factory(self.conn, config)
             if self.session_factory is not None
@@ -42,6 +43,28 @@ class ConversationRouter:
         )
         await self.session.initialize()
         return True
+
+    async def _ensure_tool_runtime(self, config: Dict[str, Any]) -> None:
+        capabilities = realtime_adapter_capabilities(config)
+        if capabilities is None or not capabilities.native_function_calling:
+            return
+        if getattr(self.conn, "func_handler", None) is None:
+            from core.providers.tools.unified_tool_handler import UnifiedToolHandler
+
+            handler = UnifiedToolHandler(self.conn)
+            await handler._initialize()
+            self.conn.func_handler = handler
+        statistics_getter = getattr(self.conn.func_handler, "get_tool_statistics", None)
+        statistics = statistics_getter() if callable(statistics_getter) else {}
+        total = sum(statistics.values())
+        logger = getattr(self.conn, "logger", None)
+        if logger is not None:
+            logger.bind(tag=__name__).info(
+                "Realtime工具运行时已就绪: adapter={}, total={}, sources={}",
+                normalize_realtime_adapter(config),
+                total,
+                statistics,
+            )
 
     async def handle_audio(self, audio: bytes) -> bool:
         return bool(self.session and await self.session.handle_audio(audio))

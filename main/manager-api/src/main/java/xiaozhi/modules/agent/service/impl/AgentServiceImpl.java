@@ -67,6 +67,7 @@ import xiaozhi.modules.model.dto.VoiceDTO;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
 import xiaozhi.modules.model.service.ModelProviderService;
+import xiaozhi.modules.model.support.RealtimeAdapterCapabilityRegistry;
 import xiaozhi.modules.security.user.SecurityUser;
 import xiaozhi.modules.sys.enums.SuperAdminEnum;
 import xiaozhi.modules.timbre.service.TimbreService;
@@ -436,6 +437,16 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
         }
         if (dto.getTtsVoiceId() != null) {
             existingEntity.setTtsVoiceId(dto.getTtsVoiceId());
+        }
+        if (dto.getRealtimeVoiceId() != null) {
+            String realtimeVoiceId = dto.getRealtimeVoiceId().trim();
+            ModelConfigEntity selectedLlm = modelConfigService.getModelByIdFromCache(existingEntity.getLlmModelId());
+            String adapterCode = resolveLLMProviderType(selectedLlm);
+            if (StringUtils.isNotBlank(realtimeVoiceId)
+                    && !RealtimeAdapterCapabilityRegistry.isVoiceAllowed(adapterCode, realtimeVoiceId)) {
+                throw new RenException("所选实时模型不支持该音色");
+            }
+            existingEntity.setRealtimeVoiceId(realtimeVoiceId);
         }
         if (dto.getTtsLanguage() != null) {
             existingEntity.setTtsLanguage(dto.getTtsLanguage());

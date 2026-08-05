@@ -80,7 +80,9 @@ class UnifiedToolHandler:
             self.current_support_functions()
 
         except Exception as e:
-            self.logger.error(f"统一工具处理器初始化失败: {e}")
+            self.logger.error(
+                f"统一工具处理器初始化失败: errorType={type(e).__name__}"
+            )
 
     async def _initialize_mcp_endpoint(self):
         """初始化MCP接入点"""
@@ -95,7 +97,7 @@ class UnifiedToolHandler:
                 and not is_placeholder_value(mcp_endpoint_url)
                 and mcp_endpoint_url != "null"
             ):
-                self.logger.info(f"正在初始化MCP接入点: {mcp_endpoint_url}")
+                self.logger.info("正在初始化MCP接入点（地址已脱敏）")
                 mcp_endpoint_client = await connect_mcp_endpoint(
                     mcp_endpoint_url, self.conn
                 )
@@ -108,7 +110,9 @@ class UnifiedToolHandler:
                     self.logger.warning("MCP接入点初始化失败")
 
         except Exception as e:
-            self.logger.error(f"初始化MCP接入点失败: {e}")
+            self.logger.error(
+                f"初始化MCP接入点失败: errorType={type(e).__name__}"
+            )
 
     def _is_home_assistant_configured(self) -> bool:
         """Return True only when Home Assistant is explicitly configured."""
@@ -175,14 +179,16 @@ class UnifiedToolHandler:
             if isinstance(arguments, str):
                 try:
                     arguments = json.loads(arguments) if arguments else {}
-                except json.JSONDecodeError:
-                    self.logger.error(f"无法解析函数参数: {arguments}")
+                except json.JSONDecodeError as error:
+                    self.logger.error(
+                        f"无法解析函数参数: errorType={type(error).__name__}"
+                    )
                     return ActionResponse(
                         action=Action.ERROR,
                         response="无法解析函数参数",
                     )
 
-            self.logger.debug(f"调用函数: {function_name}, 参数: {arguments}")
+            self.logger.debug(f"调用函数: {function_name}")
 
             # 当前注册表是执行权限的事实来源。先拒绝幻觉或过期调用，
             # 避免设备先显示一个实际上不存在的工具正在执行。
@@ -205,7 +211,9 @@ class UnifiedToolHandler:
             return result
 
         except Exception as e:
-            self.logger.error(f"处理function call错误: {e}")
+            self.logger.error(
+                f"处理function call错误: errorType={type(e).__name__}"
+            )
             return ActionResponse(action=Action.ERROR, response=str(e))
 
     async def invoke(
@@ -213,7 +221,7 @@ class UnifiedToolHandler:
     ) -> ActionResponse:
         """Direct tool invocation for router/policy controlled paths."""
         arguments = arguments or {}
-        self.logger.debug(f"直接调用工具: {tool_name}, source={source}, 参数: {arguments}")
+        self.logger.debug(f"直接调用工具: {tool_name}, source={source}")
         if self._should_display_tool_call(tool_name):
             try:
                 await send_display_message(self.conn, f"% {tool_name}")

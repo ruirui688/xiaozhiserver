@@ -39,7 +39,9 @@ async def connect_mcp_endpoint(mcp_endpoint_url: str, conn=None) -> MCPEndpointC
         return mcp_client
 
     except Exception as e:
-        logger.bind(tag=TAG).error(f"连接MCP接入点失败: {e}")
+        logger.bind(tag=TAG).error(
+            f"连接MCP接入点失败: errorType={type(e).__name__}"
+        )
         return None
 
 
@@ -61,7 +63,9 @@ async def _message_listener(mcp_client: MCPEndpointClient, max_retries: int = 3,
         except websockets.exceptions.ConnectionClosed:
             logger.bind(tag=TAG).info("MCP接入点连接已关闭")
         except Exception as e:
-            logger.bind(tag=TAG).error(f"MCP接入点消息监听器错误: {e}")
+            logger.bind(tag=TAG).error(
+                f"MCP接入点消息监听器错误: errorType={type(e).__name__}"
+            )
         finally:
             await mcp_client.set_ready(False)
 
@@ -85,7 +89,8 @@ async def _message_listener(mcp_client: MCPEndpointClient, max_retries: int = 3,
             logger.bind(tag=TAG).info("MCP接入点重连成功")
         except Exception as e:
             logger.bind(tag=TAG).error(
-                f"MCP接入点重连失败 (第{retry_count}/{max_retries}次): {e}"
+                f"MCP接入点重连失败 (第{retry_count}/{max_retries}次): "
+                f"errorType={type(e).__name__}"
             )
             await asyncio.sleep(retry_delay)
 
@@ -94,7 +99,7 @@ async def handle_mcp_endpoint_message(mcp_client: MCPEndpointClient, message: st
     """处理MCP接入点消息"""
     try:
         payload = json.loads(message)
-        logger.bind(tag=TAG).debug(f"收到MCP接入点消息: {payload}")
+        logger.bind(tag=TAG).debug("收到MCP接入点消息")
 
         if not isinstance(payload, dict):
             logger.bind(tag=TAG).error("MCP接入点消息格式错误")
@@ -109,9 +114,7 @@ async def handle_mcp_endpoint_message(mcp_client: MCPEndpointClient, message: st
 
             # Check for tool call response first
             if msg_id in mcp_client.call_results:
-                logger.bind(tag=TAG).debug(
-                    f"收到工具调用响应，ID: {msg_id}, 结果: {result}"
-                )
+                logger.bind(tag=TAG).debug(f"收到工具调用响应，ID: {msg_id}")
                 await mcp_client.resolve_call_result(msg_id, result)
                 return
 
@@ -186,9 +189,7 @@ async def handle_mcp_endpoint_message(mcp_client: MCPEndpointClient, message: st
                         result.get("nextCursor", "") if result is not None else ""
                     )
                     if next_cursor:
-                        logger.bind(tag=TAG).info(
-                            f"有更多工具，nextCursor: {next_cursor}"
-                        )
+                        logger.bind(tag=TAG).info("MCP接入点存在更多工具，继续分页获取")
                         await send_mcp_endpoint_tools_list_continue(
                             mcp_client, next_cursor
                         )
@@ -225,7 +226,7 @@ async def handle_mcp_endpoint_message(mcp_client: MCPEndpointClient, message: st
         elif "error" in payload:
             error_data = payload["error"]
             error_msg = error_data.get("message", "未知错误")
-            logger.bind(tag=TAG).error(f"收到MCP接入点错误响应: {error_msg}")
+            logger.bind(tag=TAG).error("收到MCP接入点错误响应")
 
             # 安全地获取消息ID，如果为None则使用0
             msg_id_raw = payload.get("id")
@@ -237,12 +238,13 @@ async def handle_mcp_endpoint_message(mcp_client: MCPEndpointClient, message: st
                 )
 
     except json.JSONDecodeError as e:
-        logger.bind(tag=TAG).error(f"MCP接入点消息JSON解析失败: {e}")
+        logger.bind(tag=TAG).error(
+            f"MCP接入点消息JSON解析失败: errorType={type(e).__name__}"
+        )
     except Exception as e:
-        logger.bind(tag=TAG).error(f"处理MCP接入点消息时出错: {e}")
-        import traceback
-
-        logger.bind(tag=TAG).error(f"错误详情: {traceback.format_exc()}")
+        logger.bind(tag=TAG).error(
+            f"处理MCP接入点消息时出错: errorType={type(e).__name__}"
+        )
 
 
 async def send_mcp_endpoint_initialize(mcp_client: MCPEndpointClient):
@@ -303,7 +305,7 @@ async def send_mcp_endpoint_tools_list_continue(
         "params": {"cursor": cursor},
     }
     message = json.dumps(payload)
-    logger.bind(tag=TAG).info(f"发送带cursor的MCP接入点工具列表请求: {cursor}")
+    logger.bind(tag=TAG).info("发送带cursor的MCP接入点工具列表请求")
     await mcp_client.send_message(message)
 
 
@@ -351,14 +353,14 @@ async def call_mcp_endpoint_tool(
                             if merged_dict:
                                 arguments = merged_dict
                             else:
-                                raise ValueError(f"无法解析任何有效的JSON对象: {args}")
+                                raise ValueError("无法解析任何有效的JSON对象")
                         else:
-                            raise ValueError(f"参数JSON解析失败: {args}")
+                            raise ValueError("参数JSON解析失败")
                     except Exception as e:
                         logger.bind(tag=TAG).error(
-                            f"参数JSON解析失败: {str(e)}, 原始参数: {args}"
+                            f"参数JSON解析失败: errorType={type(e).__name__}"
                         )
-                        raise ValueError(f"参数JSON解析失败: {str(e)}")
+                        raise ValueError("参数JSON解析失败")
         elif isinstance(args, dict):
             arguments = args
         else:
@@ -382,17 +384,13 @@ async def call_mcp_endpoint_tool(
     }
 
     message = json.dumps(payload)
-    logger.bind(tag=TAG).info(
-        f"发送MCP接入点工具调用请求: {actual_name}，参数: {json.dumps(arguments, ensure_ascii=False)}"
-    )
+    logger.bind(tag=TAG).info(f"发送MCP接入点工具调用请求: {actual_name}")
     await mcp_client.send_message(message)
 
     try:
         # Wait for response or timeout
         raw_result = await asyncio.wait_for(result_future, timeout=timeout)
-        logger.bind(tag=TAG).info(
-            f"MCP接入点工具调用 {actual_name} 成功，原始结果: {raw_result}"
-        )
+        logger.bind(tag=TAG).info(f"MCP接入点工具调用 {actual_name} 成功")
 
         if isinstance(raw_result, dict):
             if raw_result.get("isError") is True:

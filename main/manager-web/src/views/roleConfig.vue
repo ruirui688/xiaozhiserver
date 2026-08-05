@@ -137,6 +137,7 @@ export default {
         agentCode: "",
         agentName: "",
         ttsVoiceId: "",
+        realtimeVoiceId: "",
         ttsVolume: null,
         ttsRate: null,
         ttsPitch: null,

@@ -49,6 +49,7 @@ import xiaozhi.modules.model.service.ModelCatalogService;
 import xiaozhi.modules.model.service.ModelConfigService;
 import xiaozhi.modules.model.service.ModelProviderService;
 import xiaozhi.modules.model.service.ModelTestService;
+import xiaozhi.modules.model.support.RealtimeAdapterCapabilityRegistry;
 
 @Service
 @AllArgsConstructor
@@ -109,13 +110,25 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             dto.setUpstreamModelId(item.getUpstreamModelId());
             String type = item.getConfigJson() == null ? "" : item.getConfigJson().getOrDefault("type", "").toString();
             dto.setType(type);
+            String realtimeAdapter = StringUtils.defaultIfBlank(type, item.getAdapterCode());
             String conversationMode = item.getConfigJson() == null
                     ? ""
                     : StringUtils.defaultString(item.getConfigJson().getStr("conversation_mode"));
             dto.setConversationMode(conversationMode);
             dto.setRealtime("realtime".equalsIgnoreCase(conversationMode)
-                    || "qwen_omni_realtime".equalsIgnoreCase(type)
-                    || "doubao_realtime".equalsIgnoreCase(type));
+                    || RealtimeAdapterCapabilityRegistry.find(realtimeAdapter).isPresent());
+            RealtimeAdapterCapabilityRegistry.find(realtimeAdapter).ifPresent(capabilities -> {
+                dto.setNativeFunctionCalling(capabilities.nativeFunctionCalling());
+                dto.setNaturalBargeIn(capabilities.naturalBargeIn());
+                dto.setContextReset(capabilities.contextReset());
+                dto.setSessionVoice(capabilities.sessionVoice());
+                dto.setCustomVoiceIds(capabilities.customVoiceIds());
+                dto.setRealtimeVoice(item.getConfigJson() == null
+                        ? capabilities.defaultVoice()
+                        : StringUtils.defaultIfBlank(
+                                item.getConfigJson().getStr("voice"), capabilities.defaultVoice()));
+                dto.setRealtimeVoiceOptions(capabilities.voiceOptions());
+            });
             return dto;
         }).toList();
     }

@@ -43,6 +43,7 @@ describe("realtime multimodal model UI", () => {
 
     assert.equal(option.value, "LLM_QwenOmniRealtime");
     assert.equal(option.conversationMode, "realtime");
+    assert.equal(option.raw.adapterCode, "qwen_omni_realtime");
     assert.match(option.label, /^\[实时多模态\]/);
   });
 

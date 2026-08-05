@@ -45,6 +45,7 @@ import xiaozhi.modules.device.service.DeviceService;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
 import xiaozhi.modules.model.service.impl.ModelRuntimeAssembler;
+import xiaozhi.modules.model.support.RealtimeAdapterCapabilityRegistry;
 import xiaozhi.modules.sys.dto.SysParamsDTO;
 import xiaozhi.modules.sys.service.SysParamsService;
 import xiaozhi.modules.timbre.service.TimbreService;
@@ -113,6 +114,7 @@ public class ConfigServiceImpl implements ConfigService {
                 null,
                 agent == null ? null : agent.getVadModelId(),
                 agent == null ? null : agent.getAsrModelId(),
+                null,
                 null,
                 null,
                 null,
@@ -278,6 +280,7 @@ public class ConfigServiceImpl implements ConfigService {
                 agent.getVadModelId(),
                 agent.getAsrModelId(),
                 StringUtils.defaultString(agent.getAsrHotwordId()),
+                agent.getRealtimeVoiceId(),
                 agent.getLlmModelId(),
                 agent.getVllmModelId(),
                 agent.getSlmModelId(),
@@ -568,6 +571,7 @@ public class ConfigServiceImpl implements ConfigService {
             String vadModelId,
             String asrModelId,
             String asrHotwordId,
+            String realtimeVoiceId,
             String llmModelId,
             String vllmModelId,
             String slmModelId,
@@ -624,6 +628,9 @@ public class ConfigServiceImpl implements ConfigService {
                 }
                 if ("ASR".equals(modelTypes[i])) {
                     applyAgentAsrHotword(runtimeConfig, asrHotwordId);
+                }
+                if ("LLM".equals(modelTypes[i])) {
+                    applyAgentRealtimeVoice(runtimeConfig, realtimeVoiceId);
                 }
                 // 如果是Intent类型，且type=intent_llm，则给他添加附加模型
                 if ("Intent".equals(modelTypes[i])) {
@@ -703,6 +710,17 @@ public class ConfigServiceImpl implements ConfigService {
         runtimeConfig.remove("boosting_table_id");
         if (StringUtils.isNotBlank(asrHotwordId)) {
             runtimeConfig.put("boosting_table_id", asrHotwordId.trim());
+        }
+    }
+
+    static void applyAgentRealtimeVoice(Map<String, Object> runtimeConfig, String realtimeVoiceId) {
+        if (runtimeConfig == null || StringUtils.isBlank(realtimeVoiceId)) {
+            return;
+        }
+        String adapterCode = String.valueOf(runtimeConfig.getOrDefault("type", ""));
+        if (RealtimeAdapterCapabilityRegistry.supportsSessionVoice(adapterCode)
+                && RealtimeAdapterCapabilityRegistry.isVoiceAllowed(adapterCode, realtimeVoiceId)) {
+            runtimeConfig.put("voice", realtimeVoiceId.trim());
         }
     }
 

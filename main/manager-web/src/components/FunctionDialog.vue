@@ -159,6 +159,13 @@
               <h4>本地 HTTP 工具</h4>
               <el-button size="mini" type="primary" icon="el-icon-plus" @click="openMcpToolEditor()">新增工具</el-button>
             </div>
+            <el-alert
+              class="no-code-tools-runtime-tip"
+              type="warning"
+              :closable="false"
+              show-icon
+              title="保存只会写入工具配置；必须启动 HTTP 工具桥，并在右侧看到“已连接”和具体工具名后，Realtime 模型才能调用。"
+            />
             <div v-if="noCodeTools.length > 0" class="no-code-tools-list">
               <div v-for="(tool, index) in noCodeTools" :key="tool.name || index" class="no-code-tool-row">
                 <el-switch v-model="tool.enabled" size="mini" @change="markNoCodeToolsDirty" />
@@ -194,6 +201,14 @@
               <span>{{ $t('functionDialog.refresh') }}</span>
             </button>
           </div>
+          <el-alert
+            v-if="mcpStatus !== 'connected' || mcpTools.length === 0"
+            class="mcp-status-tip"
+            type="error"
+            :closable="false"
+            show-icon
+            title="当前没有可下发给大模型的 MCP 工具。请先连接工具进程；仅生成接入地址或保存 HTTP 工具并不代表注册成功。"
+          />
           <div class="mcp-tools-list">
             <div v-if="mcpTools.length > 0" class="tools-grid">
               <el-button v-for="tool in mcpTools" :key="tool" size="small" class="tool-btn" plain>

@@ -73,6 +73,11 @@ sequenceDiagram
 
 智能体运行配置支持在线热更新。保存智能体音色、提示词、模型选择、模型参数、插件、替换词、上下文源、聊天记录模式或固定播报技能后，manager-api 在事务提交后通过受保护的 `/device/runtime-config/refresh` 内部接口按 `agentId` 通知 xiaozhi-server。Python 会重新拉取完整私有配置并在空闲轮次边界重建会话管线、Memory、Intent、工具和提示词运行时。普通 LLM 重建 VAD、ASR、LLM、TTS；`conversation_mode=realtime` 重建端到端 Realtime 会话而不初始化传统 ASR/TTS。设备 WebSocket 保持连接；正在生成或播报的一轮不会被配置更新中途替换。
 
+角色配置中的 `realtimeVoiceId` 是智能体级 Realtime 音色覆盖：manager-api 只在所选 adapter 声明
+`sessionVoice` 且音色通过该 adapter 校验时，覆盖当前 LLM `typed_config.voice`。留空继续使用共享模型的默认音色；
+它与传统链路的 `ttsVoiceId` 相互独立，也不会修改其他角色共用的模型配置。固定目录和自定义音色 ID 是否可用均由
+`RealtimeAdapterCapabilityRegistry` 声明，页面不按千问、豆包厂商名称写死判断。
+
 内部通知失败不回滚已经提交的数据库事实。每个在线连接会在新一轮 `listen/start` 执行有最短间隔的配置指纹检查；网页真实音频使用 `external_tts`，不会产生 `listen/start`，因此也会在接受新的外部 TTS 任务前、连接空闲边界执行同一配置检查。配置未变化时不重建 provider，变化时再执行热替换，随后新任务才读取 `conn.tts` 并进入队列。刷新通知只标记连接待更新，不会在用户录音、ASR 消费或 TTS 播放中途直接拆换线程。热替换初始化失败会尝试恢复旧运行配置并继续保留设备连接；若旧音频工作线程无法在安全时限内退出，则关闭异常连接以避免重复消费者，由设备正常重连恢复。聊天记录关闭时停止接收新上报，但已进入队列的记录仍会排空。
 
 大模型通过 `set_session_voice` 调整音色、语速、音量或音调时，参数只保存在当前连接，不写回 manager-api。当前 TTS 模型不变的配置热更新会把会话 override 重新应用到新 provider；TTS 模型切换时清除旧 override，避免把旧供应商的音色 ID 带到新模型。双向流 provider 在当前轮开始时已经建立上游 session，因此调整从下一轮回复安全生效，不在播放中途拆换音频通道。
@@ -165,7 +170,10 @@ sequenceDiagram
 - server VAD 模式持续 append，由上游判停；manual 模式在 `listen/stop` 执行 commit 和 `response.create`。同一轮不得重复 commit。
 - 上游输入转写完成后才写 user 对话和聊天记录；回复文本增量同时用于 Realtime 字幕预览，但不提前形成 assistant 记录。首片音频发送时若已有文本，先发一次 `tts/sentence_start` 预览；完整文本事件或 `response.done` 在 `tts/stop` 前再次发送完整回答，避免旧固件永久停留在首字。`response.done` 或错误终态负责一次性写 assistant 记录并结束设备 TTS 状态。
 - Abort 发送 `response.cancel` 和输入缓冲清理，停止当前设备音频并使回复生命周期只收敛一次；迟到旧事件不得结束新回复。
-- 对支持 Function Calling 的 Realtime adapter（当前 Qwen），上游只负责提出调用。工具清单仍来自 `UnifiedToolHandler`，执行仍走本地门控和 executor；工具结果以 `function_call_output` 回注，随后显式创建后续响应。豆包当前协议没有本地工具结果回注契约，因此不向上游暴露工具。
+- 对支持 Function Calling 的 Realtime adapter（当前 Qwen），上游只负责提出调用。会话初始化会按 adapter 能力确保
+  `UnifiedToolHandler` 已就绪，不依赖传统 Intent provider 是否存在，因此 `Intent_nointent` 不会再导致 Realtime 工具列表为空。
+  工具清单仍来自统一注册表，执行仍走本地门控和 executor；工具结果以 `function_call_output` 回注，随后显式创建后续响应。
+  豆包当前协议没有本地工具结果回注契约，因此不向上游暴露工具。
 
 ### 4.3 图片入口
 

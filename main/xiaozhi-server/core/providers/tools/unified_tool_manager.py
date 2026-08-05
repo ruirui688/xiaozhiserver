@@ -50,7 +50,9 @@ class ToolManager:
                         continue  # 保留先注册的工具（SERVER_PLUGIN优先）
                     all_tools[name] = definition
             except Exception as e:
-                self.logger.error(f"获取{tool_type.value}工具时出错: {e}")
+                self.logger.error(
+                    f"获取{tool_type.value}工具时出错: errorType={type(e).__name__}"
+                )
 
         self._cached_tools = all_tools
         return all_tools
@@ -102,13 +104,15 @@ class ToolManager:
                 )
 
             # 执行工具
-            self.logger.info(f"执行工具: {tool_name}，参数: {arguments}")
+            self.logger.info(f"执行工具: {tool_name}")
             result = await executor.execute(self.conn, tool_name, arguments)
-            self.logger.debug(f"工具执行结果: {result}")
+            self.logger.debug(f"工具执行完成: {tool_name}")
             return result
 
         except Exception as e:
-            self.logger.error(f"执行工具 {tool_name} 时出错: {e}")
+            self.logger.error(
+                f"执行工具 {tool_name} 时出错: errorType={type(e).__name__}"
+            )
             return ActionResponse(action=Action.ERROR, response=str(e))
 
     def get_supported_tool_names(self) -> List[str]:

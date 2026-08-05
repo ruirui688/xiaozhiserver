@@ -30,6 +30,7 @@ import xiaozhi.modules.agent.dto.AgentUpdateDTO;
 import xiaozhi.modules.agent.dto.ContextProviderDTO;
 import xiaozhi.modules.agent.entity.AgentTemplateEntity;
 import xiaozhi.modules.agent.runtime.AgentRuntimeConfigRefreshEvent;
+import xiaozhi.modules.agent.support.AgentLlmIntentCompatibility;
 import xiaozhi.modules.agent.service.AgentFeishuService;
 import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.agent.service.AgentTagService;
@@ -455,7 +456,7 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
         if (StringUtils.isBlank(type) && model != null) {
             type = model.getAdapterCode();
         }
-        return StringUtils.equalsAnyIgnoreCase(type, "openai", "ollama");
+        return AgentLlmIntentCompatibility.supportsIntent(type, intentId);
     }
 
     private AgentTemplateSnapshotDTO legacySnapshot(AgentTemplateEntity template) {

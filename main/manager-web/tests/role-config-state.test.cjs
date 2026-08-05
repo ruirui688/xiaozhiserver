@@ -185,6 +185,47 @@ describe("role configuration component state", () => {
     vm.$destroy();
   });
 
+  test("realtime voice override is agent scoped and native tools stay selectable", async () => {
+    const component = loadVueComponent("src/components/role/RoleEditDialog.vue", {
+      "@/apis/api": { __esModule: true, default: {} },
+      "@/apis/httpRequest": { __esModule: true, default: {} },
+      "@/i18n": { __esModule: true, default: { t: (key) => key } },
+    });
+    const vm = createVm(component, {
+      modelOptions: {
+        LLM: [{
+          value: "qwen-rt",
+          type: "qwen_omni_realtime",
+          raw: {
+            nativeFunctionCalling: true,
+            sessionVoice: true,
+            customVoiceIds: false,
+            realtimeVoice: "Ethan",
+            realtimeVoiceOptions: ["Cherry", "Serena", "Ethan", "Chelsie"],
+          },
+        }],
+        Intent: [
+          { value: "Intent_nointent", isHidden: false },
+          { value: "Intent_function_call", isHidden: false },
+        ],
+      },
+      llmModeTypeMap: new Map([["qwen-rt", "qwen_omni_realtime"]]),
+      currentFunctions: [],
+      currentKnowledgeBases: [],
+    });
+
+    vm.form.model.llmModelId = "qwen-rt";
+    vm.form.model.intentModelId = "Intent_function_call";
+    vm.handleModelChange("LLM", "qwen-rt");
+
+    assert.equal(vm.realtimeSessionVoiceSupported, true);
+    assert.equal(vm.form.realtimeVoiceId, "Ethan");
+    assert.equal(vm.modelOptions.Intent[1].isHidden, false);
+    vm.form.realtimeVoiceId = "Serena";
+    assert.equal(vm.submitSaveConfig("agent-1").realtimeVoiceId, "Serena");
+    vm.$destroy();
+  });
+
   test("hotword configuration links to the Volcengine console safely", () => {
     const source = fs.readFileSync(
       path.resolve(__dirname, "../src/components/role/AsrHotwordField.vue"),

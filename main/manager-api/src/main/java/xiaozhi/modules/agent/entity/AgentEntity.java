@@ -62,6 +62,9 @@ public class AgentEntity {
     @Schema(description = "音色标识")
     private String ttsVoiceId;
 
+    @Schema(description = "端到端实时会话音色覆盖；为空时使用所选模型默认音色")
+    private String realtimeVoiceId;
+
     @Schema(description = "音色语言")
     private String ttsLanguage;
 

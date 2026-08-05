@@ -239,7 +239,10 @@ def test_transport_registers_waiters_before_fast_events():
         socket = _FakeSocket()
 
         async def factory(_url, **kwargs):
-            assert kwargs["extra_headers"] == {"Authorization": "Bearer test-key"}
+            assert kwargs["extra_headers"] == {
+                "Authorization": "Bearer test-key",
+                "X-DashScope-OmniRealtime": "true",
+            }
             await socket.queue.put(json.dumps({"type": "session.created"}))
             return socket
 
@@ -263,7 +266,10 @@ def test_transport_supports_websockets_14_additional_headers_signature():
         async def factory(
             _url, *, additional_headers=None, max_size=None, open_timeout=None
         ):
-            assert additional_headers == {"Authorization": "Bearer test-key"}
+            assert additional_headers == {
+                "Authorization": "Bearer test-key",
+                "X-DashScope-OmniRealtime": "true",
+            }
             assert max_size == 10 * 1024 * 1024
             await socket.queue.put(json.dumps({"type": "session.created"}))
             return socket
@@ -377,7 +383,10 @@ def test_router_only_consumes_messages_in_realtime_mode():
             events.append("close")
 
     async def scenario():
-        conn = SimpleNamespace(config=_runtime_config())
+        conn = SimpleNamespace(
+            config=_runtime_config(),
+            func_handler=SimpleNamespace(get_tool_statistics=lambda: {}),
+        )
         router = ConversationRouter(conn, session_factory=FakeSession)
         assert await router.initialize() is True
         assert await router.handle_audio(b"opus") is True
@@ -393,6 +402,41 @@ def test_router_only_consumes_messages_in_realtime_mode():
 
     asyncio.run(scenario())
     assert events == ["initialize", ("audio", b"opus"), ("text", "hello"), "close"]
+
+
+def test_router_initializes_native_realtime_tool_runtime_without_legacy_intent(monkeypatch):
+    initialized = []
+
+    class FakeToolHandler:
+        def __init__(self, conn):
+            self.conn = conn
+
+        async def _initialize(self):
+            initialized.append("tools")
+
+        def get_tool_statistics(self):
+            return {"mcp_endpoint": 1}
+
+    class FakeSession:
+        def __init__(self, _conn, _config):
+            pass
+
+        async def initialize(self):
+            initialized.append("session")
+
+    monkeypatch.setattr(
+        "core.providers.tools.unified_tool_handler.UnifiedToolHandler",
+        FakeToolHandler,
+    )
+
+    async def scenario():
+        conn = SimpleNamespace(config=_runtime_config(), func_handler=None, logger=_Logger())
+        router = ConversationRouter(conn, session_factory=FakeSession)
+        assert await router.initialize() is True
+        assert isinstance(conn.func_handler, FakeToolHandler)
+
+    asyncio.run(scenario())
+    assert initialized == ["tools", "session"]
 
 
 def test_function_call_completion_is_deduplicated():

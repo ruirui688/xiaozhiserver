@@ -296,6 +296,33 @@
               :model="selectedLlmModel"
               context="agent"
             />
+            <el-form-item
+              v-if="activePanel === 'intelligence' && realtimeSessionVoiceSupported"
+              class="model-item realtime-voice-item"
+              label="实时音色"
+            >
+              <div class="model-select-wrapper">
+                <el-select
+                  v-model="form.realtimeVoiceId"
+                  filterable
+                  clearable
+                  :allow-create="realtimeVoiceAllowCreate"
+                  default-first-option
+                  placeholder="留空则使用模型配置中的默认音色"
+                  class="form-select"
+                >
+                  <el-option
+                    v-for="voice in realtimeVoiceOptions"
+                    :key="voice"
+                    :label="voice"
+                    :value="voice"
+                  />
+                </el-select>
+                <div class="realtime-voice-help">
+                  当前角色单独生效，不会修改其他角色共用的模型配置。
+                </div>
+              </div>
+            </el-form-item>
             <div v-show="activePanel === 'voice'" class="subsection-title voice-subsection">
               <i class="el-icon-headset" />
               <span>语音输出</span>
@@ -646,6 +673,16 @@ export default {
       const selectedId = this.form.model.llmModelId;
       return (this.modelOptions.LLM || []).find((item) => item.value === selectedId) || {};
     },
+    realtimeSessionVoiceSupported() {
+      return Boolean(this.selectedLlmModel?.raw?.sessionVoice);
+    },
+    realtimeVoiceAllowCreate() {
+      return Boolean(this.selectedLlmModel?.raw?.customVoiceIds);
+    },
+    realtimeVoiceOptions() {
+      const options = this.selectedLlmModel?.raw?.realtimeVoiceOptions;
+      return Array.isArray(options) ? options : [];
+    },
     activePanelMeta() {
       return rolePanelMeta(this.activePanel);
     },
@@ -753,6 +790,7 @@ export default {
         vllmModelId: this.form.model.vllmModelId,
         ttsModelId: this.form.model.ttsModelId,
         ttsVoiceId: this.form.ttsVoiceId,
+        realtimeVoiceId: this.form.realtimeVoiceId,
         chatHistoryConf: this.form.chatHistoryConf,
         memModelId: this.form.model.memModelId,
         intentModelId: this.form.model.intentModelId,
@@ -802,6 +840,11 @@ export default {
         ...this.form,
         agentName: templateData.agentName || this.form.agentName,
         ttsVoiceId: templateData.ttsVoiceId || this.form.ttsVoiceId,
+        realtimeVoiceId: this.templateValue(
+          templateData,
+          "realtimeVoiceId",
+          this.form.realtimeVoiceId
+        ),
         chatHistoryConf: templateData.chatHistoryConf || this.form.chatHistoryConf,
         systemPrompt: templateData.systemPrompt || this.form.systemPrompt,
         summaryMemory: templateData.summaryMemory || this.form.summaryMemory,
@@ -871,7 +914,10 @@ export default {
       return name.charAt(0);
     },
     showFunctionIcons(type) {
-      return type === "Intent" && this.form.model.intentModelId !== "Intent_nointent";
+      return type === "Intent" && (
+        this.form.model.intentModelId !== "Intent_nointent"
+        || Boolean(this.selectedLlmModel?.raw?.nativeFunctionCalling)
+      );
     },
     handleModelChange(type, value) {
       if (type === "Intent" && value !== "Intent_nointent") {
@@ -896,6 +942,7 @@ export default {
       }
       if (type === "LLM") {
         this.updateIntentOptionsVisibility();
+        this.syncRealtimeVoiceForModel();
       }
     },
     fetchAllFunctions() {
@@ -1053,20 +1100,35 @@ export default {
       if (!currentLlmId || !this.modelOptions["Intent"]) return;
       const llmType = this.llmModeTypeMap ? this.llmModeTypeMap.get(currentLlmId) : null;
       if (!llmType) return;
+      const nativeFunctionCalling = Boolean(this.selectedLlmModel?.raw?.nativeFunctionCalling)
+        || llmType === "openai"
+        || llmType === "ollama";
       this.modelOptions["Intent"].forEach((item) => {
         if (item.value === "Intent_function_call") {
-          item.isHidden = !(llmType === "openai" || llmType === "ollama");
+          item.isHidden = !nativeFunctionCalling;
         } else {
           item.isHidden = false;
         }
       });
       if (
         this.form.model.intentModelId === "Intent_function_call" &&
-        llmType !== "openai" && llmType !== "ollama"
+        !nativeFunctionCalling
       ) {
         const firstVisibleOption = this.modelOptions["Intent"].find((item) => !item.isHidden);
         this.form.model.intentModelId = firstVisibleOption ? firstVisibleOption.value : "Intent_nointent";
       }
+    },
+    syncRealtimeVoiceForModel() {
+      if (!this.realtimeSessionVoiceSupported) {
+        this.form.realtimeVoiceId = "";
+        return;
+      }
+      if (this.form.realtimeVoiceId) {
+        if (this.realtimeVoiceAllowCreate || this.realtimeVoiceOptions.includes(this.form.realtimeVoiceId)) {
+          return;
+        }
+      }
+      this.form.realtimeVoiceId = this.selectedLlmModel?.raw?.realtimeVoice || "";
     },
     hasAudioPreview(item) {
       const isCloneAudio = Boolean(item.isClone);

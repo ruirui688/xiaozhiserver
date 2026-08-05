@@ -194,7 +194,10 @@ class QwenOmniRealtimeTransport:
             else "extra_headers"
         )
         connect_kwargs = {
-            header_argument: {"Authorization": f"Bearer {api_key}"},
+            header_argument: {
+                "Authorization": f"Bearer {api_key}",
+                "X-DashScope-OmniRealtime": "true",
+            },
             "max_size": int(self.config.get("max_event_bytes", 10 * 1024 * 1024)),
             "open_timeout": timeout,
         }
@@ -470,6 +473,13 @@ class QwenOmniRealtimeSession:
         if self._instruction_turn_active:
             return
         tools = self.conn.func_handler.get_functions() if self.conn.func_handler else []
+        statistics_getter = getattr(self.conn.func_handler, "get_tool_statistics", None)
+        statistics = statistics_getter() if callable(statistics_getter) else {}
+        self.conn.logger.bind(tag=__name__).info(
+            "同步Qwen Realtime工具描述: total={}, sources={}",
+            len(tools),
+            statistics,
+        )
         prompt = self._session_prompt()
         selected_memory = self.conn.config.get("selected_module", {}).get("Memory")
         memory_type = (
@@ -802,6 +812,11 @@ class QwenOmniRealtimeSession:
         arguments = payload.get("arguments") or item.get("arguments") or call.get("arguments") or "{}"
         if not call_id or not name or self.conn.func_handler is None:
             return
+        logger = getattr(self.conn, "logger", None)
+        if logger is not None:
+            logger.bind(tag=__name__).info(
+                "收到Qwen Realtime工具调用: name={}, callId={}", name, call_id
+            )
         self.function_calls[call_id] = {"name": name, "arguments": arguments}
 
     async def _execute_function_calls(self) -> bool:
