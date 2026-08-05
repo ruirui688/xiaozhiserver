@@ -131,6 +131,7 @@
             v-show="activePanel === 'voice' || activePanel === 'intelligence' || activePanel === 'memory'"
             ref="modelSection"
             class="form-column config-section"
+            :class="{ 'voice-config-section': activePanel === 'voice' }"
           >
             <div class="section-heading">
               <span class="section-number"><i :class="activePanelMeta.icon" /></span>
@@ -144,7 +145,7 @@
               <span>语音输入</span>
               <small>检测用户开口并将语音转成文字</small>
             </div>
-            <div v-show="activePanel === 'voice'" class="model-row">
+            <div v-show="activePanel === 'voice'" class="model-row voice-input-grid">
               <el-form-item
                 v-if="featureStatus.vad"
                 class="model-item"
@@ -214,6 +215,7 @@
             </div>
             <asr-hotword-field
               v-if="activePanel === 'voice' && supportsAsrHotword"
+              class="voice-hotword-panel"
               :ids="form.asrHotwordIds"
               :active-id="form.asrHotwordId"
               @change="handleAsrHotwordChange"
@@ -304,6 +306,7 @@
               v-show="isModelVisibleInPanel(model.type)"
               :key="`model-${index}`"
               class="model-item"
+              :class="{ 'voice-model-item': model.type === 'TTS' }"
             >
               <template #label>
                 <el-tooltip :content="$t('roleConfig.tooltip.' + model.type.toLowerCase())" placement="top" effect="light" popper-class="custom-tooltip">
@@ -441,7 +444,7 @@
               <span>角色音色</span>
               <small>选择最终音色并调整音量、语速和音调</small>
             </div>
-            <div v-show="activePanel === 'voice'" class="model-row">
+            <div v-show="activePanel === 'voice'" class="model-row voice-tone-row">
               <el-form-item class="model-item">
                 <template #label>
                   <el-tooltip :content="$t('roleConfig.tooltip.voiceType')" placement="top" effect="light" popper-class="custom-tooltip">
@@ -1246,6 +1249,8 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+@import "./roleVoiceSettingsLayout.scss";
+
 ::v-deep .el-radio-group {
   .is-active {
     .el-radio-button__inner {

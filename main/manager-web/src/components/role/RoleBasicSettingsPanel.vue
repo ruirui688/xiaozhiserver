@@ -1,5 +1,5 @@
 <template>
-  <div class="basic-config-grid">
+  <div class="basic-config-stack">
     <div class="basic-name-block">
       <div class="basic-field-heading">
         <el-tooltip :content="$t('roleConfig.tooltip.agentName')" placement="top" effect="light" popper-class="custom-tooltip">
@@ -28,7 +28,7 @@
         <el-input
           :value="systemPrompt"
           type="textarea"
-          :rows="12"
+          :rows="8"
           resize="vertical"
           :placeholder="$t('roleConfig.pleaseEnterContent')"
           maxlength="2000"
@@ -51,16 +51,19 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-.basic-config-grid {
-  display: grid;
-  grid-template-columns: minmax(190px, 260px) minmax(0, 1fr);
-  align-items: start;
-  gap: 18px;
+.basic-config-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
 .basic-name-block,
 .basic-prompt-block {
   min-width: 0;
+}
+
+.basic-name-block {
+  width: min(100%, 360px);
 }
 
 .basic-field-heading {
@@ -93,19 +96,13 @@ export default {
 }
 
 .basic-prompt-item ::v-deep .el-textarea__inner {
-  min-height: 322px !important;
+  min-height: 220px !important;
   line-height: 1.75;
 }
 
-@media (max-width: 1250px) {
-  .basic-config-grid {
-    grid-template-columns: minmax(180px, 230px) minmax(0, 1fr);
-  }
-}
-
 @media (max-width: 800px) {
-  .basic-config-grid {
-    grid-template-columns: 1fr;
+  .basic-name-block {
+    width: 100%;
   }
 }
 </style>

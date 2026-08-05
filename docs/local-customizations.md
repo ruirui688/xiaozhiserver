@@ -23,8 +23,9 @@
 改动原因：记录本地 Ubuntu 开发机源码编译、依赖安装、服务启动和验证流程，区别于服务器部署文档。
 关键文件：
   - docs/development/local-dev-workflow.md
+  - scripts/ui-audit-wsl-chrome
 是否允许被官方覆盖：否
-官方同步时的处理规则：官方部署文档更新时可以补充本文档，但不要用部署流程替换本地源码开发流程。
+官方同步时的处理规则：官方部署文档更新时可以补充本文档，但不要用部署流程替换本地源码开发流程。WSL Web UI 自检继续优先复用 Windows 已安装 Chrome，保留 2048、1366、1024 三档检查、CDP 控制台与尺寸读取、国内网络下禁止无必要浏览器下载、临时审查入口和截图必须清理的约定。
 ```
 
 ## 3. xiaozhi-server 本地后台启动稳定性
@@ -828,12 +829,14 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 关键文件：
   - main/manager-web/src/views/roleConfig.vue
   - main/manager-web/src/components/role/RoleEditDialog.vue
+  - main/manager-web/src/components/role/RoleBasicSettingsPanel.vue
+  - main/manager-web/src/components/role/roleVoiceSettingsLayout.scss
   - main/manager-api/src/main/java/xiaozhi/modules/agent/service/impl/AgentWorkspaceTemplateServiceImpl.java
   - main/manager-api/src/main/resources/db/changelog/202608041610.sql
   - main/manager-api/src/main/resources/db/changelog/202608041650.sql
   - docs/architecture/workspace-organization-management.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：必须保留系统模板与工作空间模板的隔离、来源和目标智能体的 workspace 写权限校验、版本检查及事务应用。系统模板管理必须至少保留一条记录，历史空表通过后续 Liquibase 补种不含 workspace 快照或凭据的基础模板；默认模板数据异常时 manager-api 仍须以基础配置启动，禁止因初始化失败进入健康检查重启循环。声纹必须以 `workspace_id` 固化资源归属，通过独立绑定表在同工作空间角色间复用，模板只保存 ID 引用且不得保存音频样本或生物特征；飞书 App Secret 与 Verification Token 必须从来源 agentId 作用域解密后立即以模板 ID 为 AAD 重新加密，应用时再重加密到目标 agentId，任何模板 API、日志或 Python 配置不得暴露明文或密文。设备绑定、聊天记录、长期记忆事实和上下文源认证请求头不得进入模板。模型、音色、插件、知识库、替换词和声纹引用应用前必须重新验证；失效模型保留目标当前值，失效关联跳过并向页面返回明确警告。模板应用完成后只按事务提交后的权威角色配置刷新页面和在线设备，不能由前端伪造最终配置。角色配置 UI 必须把紧凑模板选择器与任务页签放在同一控制栏，基础设定的短名称使用窄列、角色介绍占据主要编辑空间，热词候选默认折叠；`summaryMemory` 只在旧本地短摘要模式显示，不能在主动记忆模式渲染禁用空框。
+官方同步时的处理规则：必须保留系统模板与工作空间模板的隔离、来源和目标智能体的 workspace 写权限校验、版本检查及事务应用。系统模板管理必须至少保留一条记录，历史空表通过后续 Liquibase 补种不含 workspace 快照或凭据的基础模板；默认模板数据异常时 manager-api 仍须以基础配置启动，禁止因初始化失败进入健康检查重启循环。声纹必须以 `workspace_id` 固化资源归属，通过独立绑定表在同工作空间角色间复用，模板只保存 ID 引用且不得保存音频样本或生物特征；飞书 App Secret 与 Verification Token 必须从来源 agentId 作用域解密后立即以模板 ID 为 AAD 重新加密，应用时再重加密到目标 agentId，任何模板 API、日志或 Python 配置不得暴露明文或密文。设备绑定、聊天记录、长期记忆事实和上下文源认证请求头不得进入模板。模型、音色、插件、知识库、替换词和声纹引用应用前必须重新验证；失效模型保留目标当前值，失效关联跳过并向页面返回明确警告。模板应用完成后只按事务提交后的权威角色配置刷新页面和在线设备，不能由前端伪造最终配置。角色配置 UI 必须把紧凑模板选择器与任务页签放在同一控制栏；基础设定的短名称使用有限宽度紧凑行，角色介绍在其下方占据完整编辑宽度，禁止左右高矮列造成空白；语音链路的短选项必须限制宽度和分区间距，热词候选默认折叠；`summaryMemory` 只在旧本地短摘要模式显示，不能在主动记忆模式渲染禁用空框。
 ```
 
 ## 43. 资源中心人物档案与设备本地人脸识别

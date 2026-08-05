@@ -26,6 +26,10 @@ const basicSettingsSource = fs.readFileSync(
   path.join(root, 'src/components/role/RoleBasicSettingsPanel.vue'),
   'utf8'
 );
+const voiceLayoutSource = fs.readFileSync(
+  path.join(root, 'src/components/role/roleVoiceSettingsLayout.scss'),
+  'utf8'
+);
 
 test('workspace role template UI', async (t) => {
   await t.test('write APIs use dedicated endpoints and do not retry uncertain mutations', () => {
@@ -76,10 +80,17 @@ test('workspace role template UI', async (t) => {
     assert.match(dialogSource, /class="role-control-bar"/);
     assert.match(dialogSource, /<role-config-task-tabs v-model="activePanel"/);
     assert.match(dialogSource, /<role-basic-settings-panel/);
-    assert.match(basicSettingsSource, /class="basic-config-grid"/);
-    assert.match(basicSettingsSource, /grid-template-columns: minmax\(190px, 260px\) minmax\(0, 1fr\)/);
-    assert.match(basicSettingsSource, /:rows="12"/);
+    assert.match(basicSettingsSource, /class="basic-config-stack"/);
+    assert.match(basicSettingsSource, /width: min\(100%, 360px\)/);
+    assert.doesNotMatch(basicSettingsSource, /grid-template-columns/);
+    assert.match(basicSettingsSource, /:rows="8"/);
     assert.match(basicSettingsSource, /resize="vertical"/);
+    assert.match(dialogSource, /class="model-row voice-input-grid"/);
+    assert.match(dialogSource, /'voice-model-item': model\.type === 'TTS'/);
+    assert.match(dialogSource, /@import "\.\/roleVoiceSettingsLayout\.scss"/);
+    assert.match(voiceLayoutSource, /width: min\(100%, 1240px\)/);
+    assert.match(voiceLayoutSource, /width: min\(100%, 880px\)/);
+    assert.match(voiceLayoutSource, /width: min\(100%, 1080px\)/);
     assert.match(tabsSource, /aria-label="角色配置任务导航"/);
     assert.match(tabsSource, /ROLE_CONFIG_PANELS/);
     assert.match(presentationSource, /基础设定/);

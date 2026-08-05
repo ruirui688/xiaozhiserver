@@ -224,6 +224,7 @@ VERSION=<git短哈希> ~/xiaozhi-upgrade
 
 ```text
 dev                  本地源码开发统一入口
+ui-audit-wsl-chrome  WSL 复用 Windows Chrome 做三档 Web UI 截图检查
 acr-login            登录阿里云 ACR
 acr-build-push       构建并推送业务镜像，并同步 MySQL/Redis 到 ACR
 acr-build-push-lite  构建并推送不含本地 FunASR 的轻量业务镜像
@@ -242,6 +243,8 @@ upgrade-git-docker.sh       旧源码目录升级入口，不作为生产主入�
 docker-config-mirror        Docker daemon 镜像加速器配置工具
 start-dev.sh                旧开发入口，仅转发到 scripts/dev
 ```
+
+`ui-audit-wsl-chrome` 不安装浏览器或 npm 包，默认复用 Windows Chrome，并输出 `2048x960`、`1366x768`、`1024x768` 三档截图。完整的临时组件预览、CDP 控制台检查和清理流程见 `docs/development/local-dev-workflow.md`。
 
 ## 生产约束
 

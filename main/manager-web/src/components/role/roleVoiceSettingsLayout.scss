@@ -1,0 +1,52 @@
+.voice-config-section {
+  min-height: 0;
+  gap: 4px;
+  padding: 14px 16px 10px;
+}
+
+.voice-config-section .section-heading {
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+}
+
+.voice-config-section .subsection-title {
+  width: min(100%, 1240px);
+  margin: 0 0 6px;
+}
+
+.voice-config-section .voice-subsection {
+  margin-top: 3px;
+  padding-top: 9px;
+}
+
+.voice-input-grid,
+.voice-hotword-panel {
+  width: min(100%, 1240px);
+}
+
+.voice-input-grid {
+  gap: 14px;
+}
+
+.voice-hotword-panel {
+  margin-bottom: 4px;
+}
+
+.voice-model-item {
+  width: min(100%, 880px);
+  margin-bottom: 2px;
+}
+
+.voice-tone-row {
+  width: min(100%, 1080px);
+  margin-bottom: 0;
+}
+
+.voice-config-section ::v-deep .el-input__inner {
+  height: 36px;
+  line-height: 36px;
+}
+
+.voice-config-section ::v-deep .el-form-item__content {
+  line-height: 36px;
+}

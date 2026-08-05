@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+AUDIT_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+AUDIT_DEFAULT_SIZES="2048x960 1366x768 1024x768"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  scripts/ui-audit-wsl-chrome <url>
+
+Example:
+  scripts/ui-audit-wsl-chrome 'http://localhost:8001/?panel=voice'
+
+Environment:
+  UI_AUDIT_CHROME=/mnt/c/.../chrome.exe
+      Override the Windows Chrome executable.
+  UI_AUDIT_OUTPUT_DIR=/mnt/c/.../audit-output
+      Keep screenshots in a specific WSL-visible directory.
+  UI_AUDIT_SIZES='2048x960 1366x768 1024x768'
+      Override the viewport list.
+  UI_AUDIT_WAIT_MS=3000
+      Allow more time for the Vue page to settle before capture.
+  UI_AUDIT_TIMEOUT_SECONDS=20
+      Stop a Windows Chrome capture that does not exit on its own.
+
+The script reuses Windows Chrome from WSL and does not install Playwright,
+Puppeteer, Chromium, or npm packages. Output is temporary and must not be
+committed to Git.
+USAGE
+}
+
+die() {
+  printf 'ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+AUDIT_URL="${1:-}"
+[[ -n "$AUDIT_URL" ]] || {
+  usage >&2
+  exit 2
+}
+
+command -v curl >/dev/null 2>&1 || die "Missing required command: curl"
+command -v timeout >/dev/null 2>&1 || die "Missing required command: timeout"
+command -v wslpath >/dev/null 2>&1 || die "This helper must run inside WSL"
+
+if [[ -n "${UI_AUDIT_CHROME:-}" ]]; then
+  AUDIT_CHROME="$UI_AUDIT_CHROME"
+else
+  AUDIT_CHROME=""
+  for AUDIT_CANDIDATE in \
+    "/mnt/c/Program Files/Google/Chrome/Application/chrome.exe" \
+    "/mnt/c/Program Files (x86)/Google/Chrome/Application/chrome.exe"; do
+    if [[ -x "$AUDIT_CANDIDATE" ]]; then
+      AUDIT_CHROME="$AUDIT_CANDIDATE"
+      break
+    fi
+  done
+fi
+
+[[ -x "$AUDIT_CHROME" ]] || die "Windows Chrome was not found; set UI_AUDIT_CHROME to its WSL path"
+
+if [[ -n "${UI_AUDIT_OUTPUT_DIR:-}" ]]; then
+  AUDIT_OUTPUT_DIR="$UI_AUDIT_OUTPUT_DIR"
+  mkdir -p "$AUDIT_OUTPUT_DIR"
+else
+  AUDIT_CMD_EXE="/mnt/c/Windows/System32/cmd.exe"
+  [[ -x "$AUDIT_CMD_EXE" ]] || die "Windows cmd.exe was not found"
+  AUDIT_WINDOWS_TEMP="$("$AUDIT_CMD_EXE" /d /c 'echo %TEMP%' 2>/dev/null | tr -d '\r')"
+  [[ -n "$AUDIT_WINDOWS_TEMP" ]] || die "Unable to resolve the Windows temporary directory"
+  AUDIT_WINDOWS_TEMP_WSL="$(wslpath -u "$AUDIT_WINDOWS_TEMP")"
+  AUDIT_OUTPUT_DIR="$(mktemp -d "$AUDIT_WINDOWS_TEMP_WSL/xiaozhi-ui-audit.XXXXXX")"
+fi
+
+AUDIT_OUTPUT_DIR="$(cd "$AUDIT_OUTPUT_DIR" && pwd)"
+AUDIT_OUTPUT_WINDOWS="$(wslpath -w "$AUDIT_OUTPUT_DIR")"
+AUDIT_WAIT_MS="${UI_AUDIT_WAIT_MS:-3000}"
+AUDIT_TIMEOUT_SECONDS="${UI_AUDIT_TIMEOUT_SECONDS:-20}"
+AUDIT_SIZES="${UI_AUDIT_SIZES:-$AUDIT_DEFAULT_SIZES}"
+
+[[ "$AUDIT_WAIT_MS" =~ ^[0-9]+$ ]] || die "UI_AUDIT_WAIT_MS must be an integer"
+[[ "$AUDIT_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || die "UI_AUDIT_TIMEOUT_SECONDS must be a positive integer"
+curl -fsS --max-time 8 "$AUDIT_URL" >/dev/null || die "The audit URL is not reachable from WSL: $AUDIT_URL"
+
+printf 'Windows Chrome UI audit\n'
+printf '  url:    %s\n' "$AUDIT_URL"
+printf '  chrome: %s\n' "$AUDIT_CHROME"
+printf '  output: %s\n' "$AUDIT_OUTPUT_DIR"
+
+for AUDIT_SIZE in $AUDIT_SIZES; do
+  [[ "$AUDIT_SIZE" =~ ^([0-9]+)x([0-9]+)$ ]] || die "Invalid viewport: $AUDIT_SIZE"
+  AUDIT_WIDTH="${BASH_REMATCH[1]}"
+  AUDIT_HEIGHT="${BASH_REMATCH[2]}"
+  AUDIT_SCREENSHOT_NAME="ui-${AUDIT_WIDTH}x${AUDIT_HEIGHT}.png"
+  AUDIT_SCREENSHOT_WSL="$AUDIT_OUTPUT_DIR/$AUDIT_SCREENSHOT_NAME"
+  AUDIT_SCREENSHOT_WINDOWS="$AUDIT_OUTPUT_WINDOWS\\$AUDIT_SCREENSHOT_NAME"
+  AUDIT_PROFILE_DIR="$AUDIT_OUTPUT_DIR/chrome-profile-${AUDIT_WIDTH}x${AUDIT_HEIGHT}"
+  mkdir -p "$AUDIT_PROFILE_DIR"
+  AUDIT_PROFILE_WINDOWS="$(wslpath -w "$AUDIT_PROFILE_DIR")"
+
+  set +e
+  timeout --signal=TERM --kill-after=3s "${AUDIT_TIMEOUT_SECONDS}s" "$AUDIT_CHROME" \
+    --headless=new \
+    --disable-gpu \
+    --no-sandbox \
+    --disable-extensions \
+    --disable-background-networking \
+    --disable-component-update \
+    --disable-sync \
+    --no-first-run \
+    --no-default-browser-check \
+    --user-data-dir="$AUDIT_PROFILE_WINDOWS" \
+    --window-size="$AUDIT_WIDTH,$AUDIT_HEIGHT" \
+    --timeout="$AUDIT_WAIT_MS" \
+    --screenshot="$AUDIT_SCREENSHOT_WINDOWS" \
+    "$AUDIT_URL" >/dev/null 2>&1
+  AUDIT_CHROME_STATUS=$?
+  set -e
+
+  [[ -s "$AUDIT_SCREENSHOT_WSL" ]] || die "Chrome did not create $AUDIT_SCREENSHOT_NAME (exit $AUDIT_CHROME_STATUS)"
+  printf '  captured: %s\n' "$AUDIT_SCREENSHOT_WSL"
+done
+
+printf '\nInspect every screenshot, then move the exact output directory to trash when finished.\n'
+printf 'Repository: %s\n' "$AUDIT_ROOT_DIR"

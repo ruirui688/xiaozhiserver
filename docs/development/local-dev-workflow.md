@@ -104,6 +104,80 @@ DEV_API_FORCE_COMPILE=1 scripts/dev start api
 DEV_API_MAVEN_RUN=1 scripts/dev start api
 ```
 
+## WSL 复用 Windows Chrome 做 UI 自检
+
+在 WSL 中修改 `manager-web` 时，优先复用 Windows 已安装的 Chrome 做真实渲染检查，不为截图额外下载 Playwright、Puppeteer、Chromium 或浏览器 npm 包。这一方式减少中国大陆网络环境下的海外下载依赖，也能直接验证 Windows 用户实际使用的 Chromium 渲染结果。
+
+先只启动 Web。普通页面使用统一入口：
+
+```bash
+scripts/dev start web
+```
+
+复杂编辑页如果依赖登录、后端数据或外部模型，可在 `main/manager-web/src/` 下临时创建一个不含真实凭据的审查入口：只挂载待检查的真实 Vue 组件，传入脱敏模拟数据，并通过查询参数切换待检查面板。临时入口不是产品代码，文件名建议固定为 `ui-audit-preview.js`，完成检查后必须删除。启动方式：
+
+```bash
+cd main/manager-web
+VUE_APP_USE_CDN=false ./node_modules/.bin/vue-cli-service serve \
+  --host 0.0.0.0 --port 8001 src/ui-audit-preview.js
+```
+
+`VUE_APP_USE_CDN=false` 确保页面只使用项目本地依赖，不受境外 CDN 速度或可用性影响。WSL2 的 localhost 转发正常时，Windows Chrome 可以直接访问 `http://localhost:8001/`。
+
+在项目根目录执行三档截图：
+
+```bash
+scripts/ui-audit-wsl-chrome 'http://localhost:8001/?panel=basic'
+scripts/ui-audit-wsl-chrome 'http://localhost:8001/?panel=voice'
+```
+
+脚本默认检查：
+
+| 尺寸 | 用途 |
+| --- | --- |
+| `2048x960` | 宽屏桌面，检查控件是否被无意义拉满、信息是否过散 |
+| `1366x768` | 常见笔记本，检查主要操作是否能在首屏完成 |
+| `1024x768` | 较窄后台窗口，检查响应式换行和横向溢出 |
+
+截图默认写入 Windows `%TEMP%/xiaozhi-ui-audit.*`，脚本同时输出 WSL 可访问路径，并为每个尺寸创建隔离的临时 Chrome profile。隔离 profile 可以避免命令被正在运行的日常 Chrome 接管，也不会读取个人 Cookie 和登录状态；单次 Chrome 若未正常退出，脚本会按 `UI_AUDIT_TIMEOUT_SECONDS` 限时结束。可通过 `UI_AUDIT_OUTPUT_DIR`、`UI_AUDIT_SIZES`、`UI_AUDIT_WAIT_MS` 和 `UI_AUDIT_TIMEOUT_SECONDS` 覆盖输出目录、尺寸、页面稳定等待时间和单次超时；这些截图和浏览器临时配置都属于运行产物，禁止提交。
+
+视觉检查至少覆盖：
+
+- 页面不能横向溢出，主要容器的 `scrollWidth` 不应大于视口宽度。
+- 页签、下拉框、折叠区、滚动区和主要按钮必须实际点击一次，不能只看静态截图。
+- 短字段不能占据整行或在高字段旁制造大块空白；宽屏下选择器应按内容密度限制最大宽度。
+- 1366 和 1024 宽度下不能依赖鼠标横向滚动才能完成核心配置。
+- 浏览器控制台不得出现本次修改引入的异常；既有警告也要区分来源并记录。
+
+需要读取控制台异常和精确尺寸时，可启动 Chrome DevTools Protocol：
+
+```bash
+AUDIT_WINDOWS_TEMP="$(wslpath -u "$(/mnt/c/Windows/System32/cmd.exe /d /c 'echo %TEMP%' | tr -d '\r')")"
+AUDIT_PROFILE_DIR="$(mktemp -d "$AUDIT_WINDOWS_TEMP/xiaozhi-ui-audit-cdp.XXXXXX")"
+
+"/mnt/c/Program Files/Google/Chrome/Application/chrome.exe" \
+  --headless=new --disable-gpu --no-sandbox \
+  --remote-debugging-port=9222 --remote-allow-origins='*' \
+  --user-data-dir="$(wslpath -w "$AUDIT_PROFILE_DIR")" \
+  'http://localhost:8001/'
+
+curl -s http://127.0.0.1:9222/json/list
+```
+
+使用 Node.js 22 自带的 `fetch` 和 `WebSocket` 连接返回的 `webSocketDebuggerUrl`，订阅 `Runtime.exceptionThrown`、`Runtime.consoleAPICalled`，并用 `Runtime.evaluate` 读取 `getBoundingClientRect()`、`document.documentElement.scrollWidth` 和 `window.innerWidth`。不要连接个人日常 Chrome profile，也不要读取或输出 Cookie、Authorization、API Key 或页面中的真实客户数据。
+
+完成后的固定清理与验证顺序：
+
+```text
+1. 停止临时 Vue 服务和远程调试 Chrome。
+2. 删除临时 ui-audit-preview.js，不得把模拟数据带入提交。
+3. 只清理本次生成的 xiaozhi-ui-audit.* 临时目录，不使用宽泛删除命令。
+4. 检查 git status，确认没有截图、浏览器 profile、DOM dump 或私有数据残留。
+5. 重新执行 npm run test:unit，再执行 npm run build。
+```
+
+这类组件预览用于 UI 布局和浏览器交互自检，不能替代真实 manager-api、权限、保存接口和生产数据链路验收。
+
 ## Python 运行时约束
 
 `main/xiaozhi-server` 的运行时依赖必须安装在 Conda 环境 `xiaozhi-esp32-server` 中。开发脚本和 AI 编程工具不得直接使用系统 `python`、`python3`、`pip` 或 `pytest` 来启动、验证或排查该模块。
