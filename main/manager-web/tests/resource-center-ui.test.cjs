@@ -9,10 +9,13 @@ const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
 const router = read('src/router/index.js');
 const header = read('src/components/HeaderBar.vue');
 const nav = read('src/components/resource/ResourceCenterNav.vue');
+const knowledge = read('src/views/KnowledgeBaseManagement.vue');
 const people = read('src/views/PersonProfileManagement.vue');
 const personApi = read('src/apis/module/person.js');
 const plugins = read('src/views/FunctionPluginManagement.vue');
 const pluginCard = read('src/components/resource/PluginResourceCard.vue');
+const pluginConfigDialog = read('src/components/UserPluginConfigDialog.vue');
+const userApi = read('src/apis/module/user.js');
 
 test('resource center groups knowledge, people and plugins', () => {
   assert.match(router, /person-profile-management/);
@@ -21,6 +24,9 @@ test('resource center groups knowledge, people and plugins', () => {
   assert.match(nav, /label: "人物与人脸"/);
   assert.match(nav, /label: "插件"/);
   assert.doesNotMatch(nav, /RESOURCE CENTER|resource-nav__intro|统一维护可复用/);
+  assert.doesNotMatch(knowledge, /<h2 class="page-title">/);
+  assert.doesNotMatch(people, /<h1>人物与人脸<\/h1>/);
+  assert.doesNotMatch(plugins, /资源中心 \/ 插件管理|<h1 class="page-title">插件管理<\/h1>/);
 });
 
 test('person UI makes device-local biometric boundary explicit', () => {
@@ -54,4 +60,14 @@ test('plugin catalog uses task-oriented cards and keeps admin mutations gated', 
   assert.match(pluginCard, /编辑/);
   assert.match(pluginCard, /复制玩法/);
   assert.match(pluginCard, /删除/);
+  assert.match(pluginCard, /待配置密钥/);
+  assert.match(pluginCard, /密钥已配置/);
+  assert.match(pluginCard, /\$emit\('configure', plugin\)/);
+  assert.match(pluginCard, /\$emit\('test', plugin\)/);
+  assert.match(plugins, /<UserPluginConfigDialog/);
+  assert.match(plugins, /fetchSharedConfigStatuses/);
+  assert.match(plugins, /testSharedConfig/);
+  assert.match(pluginConfigDialog, /测试连接/);
+  assert.match(userApi, /plugin-configs\/\$\{encodeURIComponent\(providerCode\)\}\/test/);
+  assert.doesNotMatch(pluginConfigDialog, /console\.(log|info|debug).*api_key/i);
 });

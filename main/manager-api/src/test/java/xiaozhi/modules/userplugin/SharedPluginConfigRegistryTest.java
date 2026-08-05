@@ -50,4 +50,38 @@ class SharedPluginConfigRegistryTest {
                         "default_location", "广州"),
                 Map.of()));
     }
+
+    @Test
+    void keepsStoredFieldsWhenTestRequestOnlyOverridesSubmittedValues() {
+        SharedPluginConfigRegistry.Definition definition =
+                SharedPluginConfigRegistry.requireByProviderCode("get_weather");
+
+        Map<String, Object> normalized = SharedPluginConfigRegistry.normalize(
+                definition,
+                Map.of(),
+                Map.of(
+                        "api_host", "abc123.qweatherapi.com",
+                        "api_key", "stored-secret",
+                        "default_location", "广州"));
+
+        assertEquals("abc123.qweatherapi.com", normalized.get("api_host"));
+        assertEquals("stored-secret", normalized.get("api_key"));
+        assertEquals("广州", normalized.get("default_location"));
+    }
+
+    @Test
+    void rejectsExplicitlyClearedRequiredNonSecretField() {
+        SharedPluginConfigRegistry.Definition definition =
+                SharedPluginConfigRegistry.requireByProviderCode("get_weather");
+
+        RenException error = assertThrows(RenException.class, () -> SharedPluginConfigRegistry.normalize(
+                definition,
+                Map.of("api_host", ""),
+                Map.of(
+                        "api_host", "abc123.qweatherapi.com",
+                        "api_key", "stored-secret",
+                        "default_location", "广州")));
+
+        assertEquals("天气API Host不在允许范围内", error.getMessage());
+    }
 }

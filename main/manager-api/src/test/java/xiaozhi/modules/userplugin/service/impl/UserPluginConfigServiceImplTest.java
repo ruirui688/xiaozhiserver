@@ -26,11 +26,13 @@ import xiaozhi.modules.userplugin.dao.UserPluginConfigDao;
 import xiaozhi.modules.userplugin.dto.UserPluginConfigSaveDTO;
 import xiaozhi.modules.userplugin.entity.UserPluginConfigEntity;
 import xiaozhi.modules.userplugin.vo.UserPluginConfigVO;
+import xiaozhi.modules.userplugin.vo.UserPluginTestVO;
 
 class UserPluginConfigServiceImplTest {
     private UserPluginConfigDao configDao;
     private AgentPluginMappingMapper mappingMapper;
     private CredentialCipher cipher;
+    private UserPluginRuntimeTestClient runtimeTestClient;
     private UserPluginConfigServiceImpl service;
 
     @BeforeEach
@@ -38,8 +40,13 @@ class UserPluginConfigServiceImplTest {
         configDao = mock(UserPluginConfigDao.class);
         mappingMapper = mock(AgentPluginMappingMapper.class);
         cipher = mock(CredentialCipher.class);
+        runtimeTestClient = mock(UserPluginRuntimeTestClient.class);
         service = new UserPluginConfigServiceImpl(
-                configDao, mappingMapper, cipher, mock(ApplicationEventPublisher.class));
+                configDao,
+                mappingMapper,
+                cipher,
+                mock(ApplicationEventPublisher.class),
+                runtimeTestClient);
         when(mappingMapper.selectUserPluginMappings(any(), any())).thenReturn(List.of());
     }
 
@@ -119,6 +126,32 @@ class UserPluginConfigServiceImplTest {
         String value = "{\"enabled\":true}";
         assertEquals(value, service.mergeRuntimeConfig(7L, "other_plugin", value));
         verify(configDao, never()).selectOne(any());
+    }
+
+    @Test
+    void runtimeTestUsesDecryptedStoredSecretWithoutPersistingChanges() {
+        UserPluginConfigEntity entity = entity("get_weather", "v1:cipher");
+        when(configDao.selectOne(any())).thenReturn(entity);
+        when(cipher.decrypt("user-plugin:7:get_weather", "v1:cipher"))
+                .thenReturn("{\"api_host\":\"tenant.qweatherapi.com\","
+                        + "\"api_key\":\"weather-secret\",\"default_location\":\"广州\"}");
+        when(runtimeTestClient.test(eq("get_weather"), any())).thenReturn(
+                UserPluginTestVO.builder()
+                        .providerCode("get_weather")
+                        .success(true)
+                        .message("连接成功")
+                        .build());
+        UserPluginConfigSaveDTO dto = new UserPluginConfigSaveDTO();
+        dto.setConfig(Map.of());
+
+        UserPluginTestVO result = service.testConfig(7L, "get_weather", dto);
+
+        assertEquals("连接成功", result.getMessage());
+        ArgumentCaptor<Map<String, Object>> configCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(runtimeTestClient).test(eq("get_weather"), configCaptor.capture());
+        assertEquals("weather-secret", configCaptor.getValue().get("api_key"));
+        verify(configDao, never()).insert(any());
+        verify(configDao, never()).updateById(any());
     }
 
     private UserPluginConfigEntity entity(String providerCode, String ciphertext) {

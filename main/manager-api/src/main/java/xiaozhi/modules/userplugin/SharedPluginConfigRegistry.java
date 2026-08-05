@@ -92,6 +92,9 @@ public final class SharedPluginConfigRegistry {
         }
         if (submitted != null) {
             for (String key : definition.sharedKeys()) {
+                if (!submitted.containsKey(key)) {
+                    continue;
+                }
                 String value = stringValue(submitted.get(key));
                 if (definition.secretKeys().contains(key) && StringUtils.isBlank(value)) {
                     continue;

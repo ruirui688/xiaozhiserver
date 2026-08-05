@@ -594,9 +594,11 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/manager-api/src/main/resources/db/changelog/202607171630.sql
   - main/manager-web/src/components/UserPluginConfigDialog.vue
   - main/manager-web/src/components/FunctionDialog.vue
+  - main/manager-web/src/views/FunctionPluginManagement.vue
+  - main/xiaozhi-server/core/api/plugin_test_handler.py
   - main/xiaozhi-server/plugins_func/functions/get_weather.py
 是否允许被官方覆盖：否
-官方同步时的处理规则：必须保留“用户级凭据、智能体级启用”的双层边界。共享配置只能支持白名单插件和字段，使用部署级 AES-GCM 密钥加密，API 只返回非敏感字段和已配置状态；智能体保存、默认创建和读取接口不得继续暴露或写入共享密钥。运行时只能为已绑定插件按 agent.user_id 合并共享配置，不能因用户保存密钥自动注册工具。和风 API Key 必须放在 X-QW-Api-Key 请求头中，不得放入 URL 或日志；自定义 Host 仅允许受校验的 *.qweatherapi.com 或明确公共 Host。
+官方同步时的处理规则：必须保留“用户级凭据、智能体级启用”的双层边界。资源中心插件目录必须为白名单共享能力提供配置状态、配置入口和真实测试，但不能因此自动启用角色插件。共享配置只能支持白名单插件和字段，使用部署级 AES-GCM 密钥加密，API 只返回非敏感字段和已配置状态；智能体保存、默认创建和读取接口不得继续暴露或写入共享密钥。运行时只能为已绑定插件按 agent.user_id 合并共享配置。测试由 manager-api 解密后通过内部 Bearer 服务密钥调用 xiaozhi-server，凭据不得进入 URL、日志或响应；天气测试必须验证和风城市接口，不得用 Open-Meteo 兜底伪造通过。和风 API Key 必须放在 X-QW-Api-Key 请求头中；自定义 Host 仅允许受校验的 *.qweatherapi.com 或明确公共 Host。
 ```
 
 ## 30. ACR 完整版本绑定与部署资产镜像
@@ -853,5 +855,5 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/xiaozhi-server/core/device_face_profiles.py
   - docs/architecture/person-resource-and-face-sync.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：必须保留人物档案与后台登录用户的概念隔离、workspace 所有权、显式人物-设备绑定、/config 服务密钥之后的 per-device 再鉴权和设备识别事件幂等。设备身份必须来自当前已认证 WebSocket，不得信任消息体 macAddress；旧设备只有声明 features.face_profiles 才能收到图片。照片上传必须继续校验扩展名/MIME/实际图片/大小/像素和路径边界，只保存归一化运行文件，不把照片、特征向量或事件样本带入角色模板。服务端识别 capability 默认必须返回不支持，预留 POST 不读取或保存图片；正式启用前必须单独完成模型、加密、留存、限流、评测与合规设计。插件继续使用 Function Plugin 唯一模型，知识库继续使用现有 dataset/document 链路，资源中心不能复制两套事实。资源中心顶部不得重复渲染英文标题、中文标题和页面级说明；人物 UI 使用“人物与人脸”并按建档、上传照片、选择设备和动作组织。设备在线、固件支持、人脸同步和最近识别状态在 API 提供真实事实前不得由前端猜测。
+官方同步时的处理规则：必须保留人物档案与后台登录用户的概念隔离、workspace 所有权、显式人物-设备绑定、/config 服务密钥之后的 per-device 再鉴权和设备识别事件幂等。设备身份必须来自当前已认证 WebSocket，不得信任消息体 macAddress；旧设备只有声明 features.face_profiles 才能收到图片。照片上传必须继续校验扩展名/MIME/实际图片/大小/像素和路径边界，只保存归一化运行文件，不把照片、特征向量或事件样本带入角色模板。服务端识别 capability 默认必须返回不支持，预留 POST 不读取或保存图片；正式启用前必须单独完成模型、加密、留存、限流、评测与合规设计。插件继续使用 Function Plugin 唯一模型，知识库继续使用现有 dataset/document 链路，资源中心不能复制两套事实。资源中心次级导航已经表达当前位置时，知识库、人物与人脸和插件正文不得再重复同名页面标题；只保留任务说明、状态和操作。人物 UI 按建档、上传照片、选择设备和动作组织。设备在线、固件支持、人脸同步和最近识别状态在 API 提供真实事实前不得由前端猜测。
 ```

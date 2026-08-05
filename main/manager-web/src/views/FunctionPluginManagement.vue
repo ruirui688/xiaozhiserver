@@ -6,9 +6,7 @@
     <main class="plugin-page">
       <section class="page-hero">
         <div class="page-heading">
-          <div class="page-kicker">资源中心 / 插件管理</div>
-          <h1 class="page-title">插件管理</h1>
-          <p class="page-subtitle">统一查看可分配给角色的系统能力与互动玩法。</p>
+          <p class="page-subtitle">查看系统能力、维护互动玩法，并集中配置需要密钥的共享服务。</p>
         </div>
         <div class="hero-stats" aria-label="插件统计">
           <div class="stat-item">
@@ -135,7 +133,7 @@
 
           <div class="catalog-note">
             <i class="el-icon-warning-outline" />
-            系统能力由服务器提供，只能查看说明；互动玩法支持新建、编辑、复制和删除。
+            需要共享凭据的系统能力可在这里配置和测试；启用范围及角色参数仍在角色配置中管理。
           </div>
 
           <el-empty v-if="!loading && visiblePlugins.length === 0" description="没有找到匹配的插件" />
@@ -156,7 +154,12 @@
               :description="getPluginDescription(plugin)"
               :example="getExampleUtterance(plugin)"
               :config-text="getConfigText(plugin)"
+              :configurable="isSharedConfigPlugin(plugin)"
+              :configured="sharedConfigConfigured(plugin.providerCode)"
+              :testing="Boolean(pluginTesting[plugin.providerCode])"
               @detail="openDetailDialog"
+              @configure="openSharedConfig"
+              @test="testSharedConfig"
               @edit="openEditDialog"
               @command="handleRowCommand"
             />
@@ -284,6 +287,13 @@
       </div>
     </el-dialog>
 
+    <UserPluginConfigDialog
+      :visible.sync="sharedConfigDialogVisible"
+      :provider-code="sharedConfigProviderCode"
+      :plugin-name="sharedConfigPluginName"
+      @saved="handleSharedConfigSaved"
+    />
+
     <el-footer>
       <VersionFooter />
     </el-footer>
@@ -296,6 +306,9 @@ import HeaderBar from "@/components/HeaderBar.vue";
 import VersionFooter from "@/components/VersionFooter.vue";
 import ResourceCenterNav from "@/components/resource/ResourceCenterNav.vue";
 import PluginResourceCard from "@/components/resource/PluginResourceCard.vue";
+import UserPluginConfigDialog from "@/components/UserPluginConfigDialog.vue";
+
+const SHARED_CONFIG_PROVIDERS = new Set(["get_weather", "web_search"]);
 
 const DEFAULT_PARAMETERS_SCHEMA = {
   type: "object",
@@ -318,7 +331,8 @@ export default {
     HeaderBar,
     VersionFooter,
     ResourceCenterNav,
-    PluginResourceCard
+    PluginResourceCard,
+    UserPluginConfigDialog
   },
   data() {
     return {
@@ -334,6 +348,11 @@ export default {
       formDialogVisible: false,
       detailDialogVisible: false,
       currentPlugin: null,
+      sharedConfigDialogVisible: false,
+      sharedConfigProviderCode: "",
+      sharedConfigPluginName: "",
+      sharedConfigStatuses: {},
+      pluginTesting: {},
       editingId: "",
       selectedPresetCode: "blank",
       activeAdvancedPanels: [],
@@ -431,6 +450,7 @@ export default {
   },
   created() {
     this.fetchPlugins();
+    this.fetchSharedConfigStatuses();
   },
   methods: {
     createEmptyForm() {
@@ -476,6 +496,54 @@ export default {
         },
         handleResponse
       );
+    },
+    fetchSharedConfigStatuses() {
+      Api.user.getPluginConfigs(({ data }) => {
+        if (!data || data.code !== 0) {
+          return;
+        }
+        const statuses = {};
+        (data.data || []).forEach((item) => {
+          statuses[item.providerCode] = Boolean(item.configured && item.secretConfigured);
+        });
+        this.sharedConfigStatuses = statuses;
+      });
+    },
+    isSharedConfigPlugin(plugin) {
+      return SHARED_CONFIG_PROVIDERS.has(plugin && plugin.providerCode);
+    },
+    sharedConfigConfigured(providerCode) {
+      return Boolean(this.sharedConfigStatuses[providerCode]);
+    },
+    openSharedConfig(plugin) {
+      this.sharedConfigProviderCode = plugin.providerCode;
+      this.sharedConfigPluginName = plugin.name;
+      this.sharedConfigDialogVisible = true;
+    },
+    handleSharedConfigSaved() {
+      this.fetchSharedConfigStatuses();
+    },
+    testSharedConfig(plugin) {
+      const providerCode = plugin.providerCode;
+      if (!this.sharedConfigConfigured(providerCode)) {
+        this.$message.warning("请先完成密钥配置");
+        this.openSharedConfig(plugin);
+        return;
+      }
+      this.$set(this.pluginTesting, providerCode, true);
+      Api.user.testPluginConfig(providerCode, {}, ({ data }) => {
+        this.$set(this.pluginTesting, providerCode, false);
+        if (!data || data.code !== 0) {
+          this.$message.error((data && data.msg) || "插件测试失败");
+          return;
+        }
+        const result = data.data || {};
+        if (!result.success) {
+          this.$message.error(result.message || "插件测试失败");
+          return;
+        }
+        this.$message.success(result.message || "插件测试通过");
+      });
     },
     handleSearch() {
       this.searchName = this.searchName.trim();
@@ -960,24 +1028,11 @@ export default {
   grid-template-columns: minmax(300px, 1fr) auto auto;
   align-items: center;
   gap: 28px;
-  padding: 22px 24px;
+  padding: 14px 20px;
   border: 1px solid #e5eaf2;
   border-radius: 16px;
   background: #fff;
   box-shadow: 0 8px 26px rgba(37, 51, 77, 0.06);
-}
-
-.page-title {
-  margin: 3px 0 5px;
-  color: #182230;
-  font-size: 25px;
-  line-height: 34px;
-}
-
-.page-kicker {
-  color: #7b8799;
-  font-size: 12px;
-  font-weight: 600;
 }
 
 .page-subtitle {

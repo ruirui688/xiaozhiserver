@@ -27,6 +27,7 @@ import xiaozhi.modules.userplugin.dto.UserPluginConfigSaveDTO;
 import xiaozhi.modules.userplugin.entity.UserPluginConfigEntity;
 import xiaozhi.modules.userplugin.service.UserPluginConfigService;
 import xiaozhi.modules.userplugin.vo.UserPluginConfigVO;
+import xiaozhi.modules.userplugin.vo.UserPluginTestVO;
 
 @Service
 @RequiredArgsConstructor
@@ -37,6 +38,7 @@ public class UserPluginConfigServiceImpl implements UserPluginConfigService {
     private final AgentPluginMappingMapper agentPluginMappingMapper;
     private final CredentialCipher credentialCipher;
     private final ApplicationEventPublisher eventPublisher;
+    private final UserPluginRuntimeTestClient runtimeTestClient;
 
     @Override
     public List<UserPluginConfigVO> listConfigs(Long userId) {
@@ -103,6 +105,20 @@ public class UserPluginConfigServiceImpl implements UserPluginConfigService {
                 .eq(UserPluginConfigEntity::getUserId, userId)
                 .eq(UserPluginConfigEntity::getProviderCode, definition.providerCode()));
         publishRefresh(agentIds, "user_plugin_config_deleted");
+    }
+
+    @Override
+    public UserPluginTestVO testConfig(
+            Long userId,
+            String providerCode,
+            UserPluginConfigSaveDTO dto) {
+        requireUser(userId);
+        Definition definition = SharedPluginConfigRegistry.requireByProviderCode(providerCode);
+        UserPluginConfigEntity entity = find(userId, definition.providerCode());
+        Map<String, Object> existing = entity == null ? Map.of() : decrypt(entity);
+        Map<String, Object> normalized = SharedPluginConfigRegistry.normalize(
+                definition, dto.getConfig(), existing);
+        return runtimeTestClient.test(definition.providerCode(), normalized);
     }
 
     @Override

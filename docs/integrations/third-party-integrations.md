@@ -117,7 +117,7 @@ XIAOZHI_CREDENTIAL_ENCRYPTION_KEY=生成的至少32字符随机值
 
 ## 天气插件
 
-在[和风天气控制台](https://console.qweather.com/)创建项目和 API Key，并复制该项目专属 API Host。智控台中启用“天气查询”，分别填写 Key 和 Host；单模块配置为：
+在[和风天气控制台](https://console.qweather.com/)创建项目和 API Key，并复制该项目专属 API Host。在智控台“资源中心 → 插件”找到“天气查询”，配置 API Host、API Key 和默认城市，先执行真实连接测试，再到角色配置中启用该能力；单模块配置为：
 
 ```yaml
 plugins:
@@ -127,7 +127,7 @@ plugins:
     default_location: "广州"
 ```
 
-`Authentication failed` 通常表示 Key 错误或未授权；`Invalid Host` 表示 Host 与 Key 不属于同一项目。Open-Meteo 兜底只保证基础查询，不替代正确的和风配置。
+`Authentication failed` 通常表示 Key 错误或未授权；`Invalid Host` 表示 Host 与 Key 不属于同一项目。资源中心测试直接验证和风城市接口；Open-Meteo 兜底只保证设备运行时的基础查询，不替代正确的和风配置，也不会让错误凭据通过测试。
 
 ## NewsNow 新闻插件
 

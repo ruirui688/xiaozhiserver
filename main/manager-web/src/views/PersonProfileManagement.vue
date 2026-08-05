@@ -6,7 +6,6 @@
     <main class="person-main">
       <section class="page-hero">
         <div>
-          <h1>人物与人脸</h1>
           <p>管理设备能够识别的人物，以及识别成功后要执行的动作。</p>
         </div>
         <div class="hero-actions">
@@ -484,12 +483,6 @@ export default {
   justify-content: space-between;
   gap: 24px;
   margin-bottom: 14px;
-}
-
-.page-hero h1 {
-  margin: 0 0 5px;
-  color: #20263a;
-  font-size: 25px;
 }
 
 .page-hero p {

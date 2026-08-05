@@ -12,7 +12,9 @@
         </span>
         <span>{{ category }}</span>
       </div>
-      <span class="config-badge">{{ configText }}</span>
+      <span :class="['config-badge', { 'config-badge--ready': configurable && configured }]">
+        {{ configurable ? (configured ? "密钥已配置" : "待配置密钥") : configText }}
+      </span>
     </div>
 
     <div class="plugin-heading">
@@ -32,6 +34,17 @@
     </div>
 
     <div class="card-actions" @click.stop>
+      <template v-if="configurable">
+        <el-button size="mini" type="primary" plain @click="$emit('configure', plugin)">
+          配置
+        </el-button>
+        <el-button
+          size="mini"
+          :loading="testing"
+          :disabled="!configured"
+          @click="$emit('test', plugin)"
+        >测试</el-button>
+      </template>
       <el-button size="mini" type="text" @click="$emit('detail', plugin)">
         查看说明
       </el-button>
@@ -61,7 +74,10 @@ export default {
     categoryKey: { type: String, default: "tool" },
     description: { type: String, default: "" },
     example: { type: String, default: "" },
-    configText: { type: String, default: "角色中启用" }
+    configText: { type: String, default: "角色中启用" },
+    configurable: { type: Boolean, default: false },
+    configured: { type: Boolean, default: false },
+    testing: { type: Boolean, default: false }
   },
   computed: {
     iconClass() {
@@ -137,6 +153,12 @@ export default {
   border: 1px solid #e2e6ee;
   border-radius: 99px;
   color: #7b8395;
+}
+
+.config-badge--ready {
+  border-color: #b9e4d1;
+  background: #effaf5;
+  color: #27835f;
 }
 
 .plugin-heading {
@@ -253,7 +275,7 @@ export default {
   white-space: nowrap;
 }
 
-@media (max-width: 1350px) {
+@media (max-width: 1450px) {
   .plugin-resource-card--list {
     grid-template-columns: 120px minmax(190px, 0.8fr) minmax(220px, 1.2fr) auto;
   }

@@ -158,6 +158,15 @@ export default {
             .networkFail((err) => callback(err))
             .send()
     },
+    testPluginConfig(providerCode, config, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/user/plugin-configs/${encodeURIComponent(providerCode)}/test`)
+            .method('POST')
+            .data({ config })
+            .success((res) => callback(res))
+            .networkFail((err) => callback(err))
+            .send()
+    },
     deletePluginConfig(providerCode, callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/user/plugin-configs/${encodeURIComponent(providerCode)}`)

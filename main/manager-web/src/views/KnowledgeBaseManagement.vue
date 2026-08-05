@@ -4,10 +4,7 @@
     <ResourceCenterNav />
 
     <div class="operation-bar">
-      <div>
-        <h2 class="page-title">{{ $t('knowledgeBaseManagement.title') }}</h2>
-        <div class="page-subtitle">管理业务资料、FAQ 和本地文档检索配置</div>
-      </div>
+      <div class="page-subtitle">管理业务资料、FAQ 和本地文档检索配置</div>
       <div class="right-operations">
         <el-input :placeholder="$t('knowledgeBaseManagement.searchPlaceholder')" v-model="searchName" class="search-input"
           @keyup.enter.native="handleSearch" clearable />
@@ -418,14 +415,8 @@ export default {
     padding: 16px 24px;
 }
 
-.page-title {
-    font-size: 24px;
-    margin: 0;
-    color: #2f3548;
-}
-
 .page-subtitle {
-    margin-top: 6px;
+    margin: 0;
     font-size: 13px;
     color: #737b91;
 }

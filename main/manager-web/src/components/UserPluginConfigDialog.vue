@@ -58,6 +58,7 @@
         @click="removeConfig"
       >删除共享配置</el-button>
       <el-button @click="dialogVisible = false">取消</el-button>
+      <el-button plain :loading="testing" @click="testConfig">测试连接</el-button>
       <el-button type="primary" :loading="saving" @click="saveConfig">保存</el-button>
     </span>
   </el-dialog>
@@ -90,6 +91,7 @@ export default {
       configured: false,
       secretConfigured: false,
       saving: false,
+      testing: false,
       rules: {
         api_host: [{ required: true, message: "请输入API Host", trigger: "blur" }],
         api_key: [{ validator: validateSecret, trigger: "blur" }],
@@ -145,6 +147,25 @@ export default {
           this.$message.success("共享配置已保存，将应用到当前用户的智能体");
           this.$emit("saved", this.providerCode);
           this.dialogVisible = false;
+        });
+      });
+    },
+    testConfig() {
+      this.$refs.form.validate((valid) => {
+        if (!valid) return;
+        this.testing = true;
+        Api.user.testPluginConfig(this.providerCode, this.form, ({ data }) => {
+          this.testing = false;
+          if (!data || data.code !== 0) {
+            this.$message.error((data && data.msg) || "插件测试失败");
+            return;
+          }
+          const result = data.data || {};
+          if (!result.success) {
+            this.$message.error(result.message || "插件测试失败");
+            return;
+          }
+          this.$message.success(result.message || "插件测试通过");
         });
       });
     },
