@@ -70,7 +70,7 @@
     "build:quickapp-webview-huawei": "uni build -p quickapp-webview-huawei",
     "build:quickapp-webview-union": "uni build -p quickapp-webview-union",
     "type-check": "vue-tsc --noEmit",
-    "test:unit": "tsx --test tests/knowledge-document-workflow.test.ts tests/config-state.test.ts tests/realtime-model.test.ts",
+    "test:unit": "tsx --test tests/knowledge-document-workflow.test.ts tests/config-state.test.ts tests/realtime-model.test.ts tests/workspace-invitation.test.ts",
     "openapi-ts-request": "openapi-ts",
     "prepare": "git init && husky",
     "lint": "eslint",

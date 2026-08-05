@@ -21,6 +21,7 @@ import javax.crypto.spec.SecretKeySpec;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.aop.framework.AopContext;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -65,6 +66,7 @@ import xiaozhi.modules.device.entity.OtaEntity;
 import xiaozhi.modules.device.service.DeviceService;
 import xiaozhi.modules.device.service.DeviceSceneService;
 import xiaozhi.modules.device.service.OtaService;
+import xiaozhi.modules.device.runtime.DeviceRuntimeConfigRefreshEvent;
 import xiaozhi.modules.device.vo.UserShowDeviceListVO;
 import xiaozhi.modules.agent.dao.AgentDao;
 import xiaozhi.modules.agent.entity.AgentEntity;
@@ -87,6 +89,7 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
     private final WorkspaceService workspaceService;
     private final WorkspacePermissionService workspacePermissionService;
     private final DeviceSceneService deviceSceneService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Async
     public void updateDeviceConnectionInfo(String agentId, String deviceId, String appVersion) {
@@ -163,6 +166,7 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         deviceEntity.setLastConnectedAt(currentTime);
         deviceDao.insert(deviceEntity);
         deviceSceneService.ensureCurrentBinding(deviceEntity, agent, user.getId());
+        eventPublisher.publishEvent(DeviceRuntimeConfigRefreshEvent.forActivation(deviceId, agentId));
 
         // 清理redis缓存、清除智能体设备数量缓存
         redisUtils.delete(List.of(cacheDeviceKey, deviceKey, RedisKeys.getAgentDeviceCountById(agentId)));

@@ -207,13 +207,57 @@ class WorkspaceServiceImplTest {
         dto.setUsername("bob");
         dto.setRole(WorkspaceService.ROLE_MEMBER);
         when(memberDao.selectOne(any(Wrapper.class)))
-                .thenReturn(member("workspace-a", USER_ID, WorkspaceService.ROLE_OWNER));
+                .thenReturn(member("workspace-a", USER_ID, WorkspaceService.ROLE_OWNER),
+                        (WorkspaceMemberEntity) null);
+        SysUserEntity invitee = new SysUserEntity();
+        invitee.setId(2002L);
+        invitee.setUsername("bob");
+        when(sysUserDao.selectOne(any(Wrapper.class))).thenReturn(invitee);
         when(memberDao.selectCount(any(Wrapper.class))).thenReturn(4L);
-        when(invitationDao.selectCount(any(Wrapper.class))).thenReturn(1L);
+        when(memberDao.selectList(any(Wrapper.class))).thenReturn(List.of(
+                member("workspace-a", USER_ID, WorkspaceService.ROLE_OWNER)));
+        WorkspaceInvitationEntity pending = new WorkspaceInvitationEntity();
+        pending.setInviteeUserId(3003L);
+        when(invitationDao.selectList(any(Wrapper.class))).thenReturn(List.of(pending));
 
         try (MockedStatic<SecurityUser> ignored = mockSecurityUser(USER_ID, false)) {
             assertThrows(RenException.class, () -> workspaceService.invite("workspace-a", dto));
         }
+    }
+
+    @Test
+    void repeatedInviteReusesPendingSlotInsteadOfCreatingDuplicate() {
+        WorkspaceInviteDTO dto = new WorkspaceInviteDTO();
+        dto.setUsername("bob");
+        dto.setRole(WorkspaceService.ROLE_ADMIN);
+        SysUserEntity invitee = new SysUserEntity();
+        invitee.setId(2002L);
+        invitee.setUsername("bob");
+        WorkspaceInvitationEntity existing = new WorkspaceInvitationEntity();
+        existing.setId("invitation-a");
+        existing.setWorkspaceId("workspace-a");
+        existing.setInviteeUserId(2002L);
+        existing.setInviteeUsername("bob");
+        existing.setRole(WorkspaceService.ROLE_MEMBER);
+        existing.setCode("existing-code");
+        existing.setStatus("PENDING");
+        existing.setExpiresAt(new Date(System.currentTimeMillis() + 60_000));
+
+        when(memberDao.selectOne(any(Wrapper.class)))
+                .thenReturn(member("workspace-a", USER_ID, WorkspaceService.ROLE_OWNER),
+                        (WorkspaceMemberEntity) null);
+        when(sysUserDao.selectOne(any(Wrapper.class))).thenReturn(invitee);
+        when(invitationDao.selectOne(any(Wrapper.class))).thenReturn(existing);
+        when(workspaceDao.selectById("workspace-a")).thenReturn(workspace("workspace-a", USER_ID));
+
+        try (MockedStatic<SecurityUser> ignored = mockSecurityUser(USER_ID, false)) {
+            var result = workspaceService.invite("workspace-a", dto);
+            assertEquals("existing-code", result.getCode());
+        }
+
+        verify(invitationDao).updateById(existing);
+        verify(invitationDao, never()).insert(any(WorkspaceInvitationEntity.class));
+        assertEquals(WorkspaceService.ROLE_ADMIN, existing.getRole());
     }
 
     @Test

@@ -17,10 +17,12 @@ export interface WorkspaceMember {
 }
 
 export interface WorkspaceInvitation {
+  id: string
   code: string
   workspaceId: string
-  username: string
+  inviteeUsername: string
   role: WorkspaceRole
+  status: string
   expiresAt?: string
 }
 
@@ -52,6 +54,29 @@ export function getWorkspaceMembers(workspaceId: string) {
 
 export function inviteWorkspaceMember(workspaceId: string, data: { username: string, role: WorkspaceRole }) {
   return http.Post<WorkspaceInvitation>(`/workspace/${workspaceId}/invitations`, data, {
+    timeout: 15000,
+    meta: {
+      ignoreAuth: false,
+      toast: false,
+    },
+  })
+}
+
+export function getWorkspaceInvitations(workspaceId: string) {
+  return http.Get<WorkspaceInvitation[]>(`/workspace/${workspaceId}/invitations`, {
+    timeout: 15000,
+    meta: {
+      ignoreAuth: false,
+      toast: false,
+    },
+    cacheFor: {
+      expire: 0,
+    },
+  })
+}
+
+export function revokeWorkspaceInvitation(workspaceId: string, invitationId: string) {
+  return http.Delete<void>(`/workspace/${workspaceId}/invitations/${invitationId}`, {
     timeout: 15000,
     meta: {
       ignoreAuth: false,

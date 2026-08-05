@@ -109,7 +109,9 @@ main/manager-api/src/main/resources/db/changelog/db.changelog-master.yaml
 - OWNER 可以调整其他成员角色或移除其他成员，但不能修改自己的角色，也不能让工作空间失去最后一个 OWNER。
 - 邀请不能直接邀请为 OWNER，只能邀请为 ADMIN 或 MEMBER；OWNER 需要由现有 OWNER 后续授予。
 - 邀请时确定新成员初始角色；被邀请人接受后不能自行修改自己的角色。
-- 工作空间成员上限为 5 人。邀请创建时按 active 成员 + 未过期待接受邀请计数；接受邀请时再次按 active 成员计数。
+- 工作空间成员上限为 5 人。邀请创建时按 active 成员 + 未过期待接受邀请计数；Web 和 Mobile 必须同时展示两部分占用，OWNER/ADMIN 可以查看并撤销待邀请。
+- 同一工作空间、同一用户只能保留一个有效待邀请；重复生成时复用原邀请并刷新角色和有效期。用户接受后，其余历史待邀请统一撤销；已是 active 成员的邀请不得继续占用名额。
+- 接受邀请时再次按 active 成员计数，避免邀请生成后成员变化导致超额。
 
 权限入口：
 
@@ -288,6 +290,15 @@ PUT /workspace/{workspaceId}/members/{userId}/role
 3. 操作者不能修改自己的角色
 4. 不能撤销最后一个 OWNER
 ```
+
+### 7.4 待邀请管理
+
+```text
+GET    /workspace/{workspaceId}/invitations
+DELETE /workspace/{workspaceId}/invitations/{invitationId}
+```
+
+只有 OWNER/ADMIN 可以查看或撤销待邀请。页面名额口径固定为“正式成员 + 有效且未成为成员的唯一待邀请”；不得再只显示正式成员数量，却使用包含待邀请的后端额度。
 
 ### 7.4 主动退出工作空间
 

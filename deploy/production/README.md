@@ -67,7 +67,7 @@ Important persistent subdirectories:
 ~/xiaozhi-data/data        xiaozhi-server private config
 ~/xiaozhi-data/mysql/data  MySQL data (InnoDB)
 ~/xiaozhi-data/redis/data  Redis AOF persistence data
-~/xiaozhi-data/uploadfile  manager-api uploads
+~/xiaozhi-data/uploadfile  manager-api OTA and person-face uploads
 ~/xiaozhi-data/music       uploaded server music library
 ```
 
@@ -75,7 +75,7 @@ The install script fixes bind-mount ownership for the non-root containers:
 
 ```text
 data       999:999  xiaozhi-server writes .auth_key and reads .config.yaml
-uploadfile 100:101  manager-api writes OTA firmware uploads
+uploadfile 100:101  manager-api writes OTA firmware and `/uploadfile/person-faces` images
 music      100:101  manager-api writes uploaded music; xiaozhi-server reads it
 ```
 

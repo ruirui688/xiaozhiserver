@@ -18,10 +18,12 @@ source_paths:
 ai_person_profile              工作空间人物资料与归一化照片元数据
 ai_person_device_binding       人物照片允许下发到哪些设备
 ai_person_recognition_event    设备本地识别事件审计
-uploadfile/person-faces/       归一化 JPEG 文件（运行数据，不进入 Git）
+/uploadfile/person-faces/      生产容器内归一化 JPEG 文件（运行数据，不进入 Git）
 ```
 
 人物档案、目标设备和识别事件必须属于同一工作空间。OWNER/ADMIN 可以修改，MEMBER 只读。照片上传同时校验扩展名、MIME、大小、实际图片内容和像素数量，再缩放到最长边 640 像素并转为 JPEG。数据库和接口不保存或返回服务端人脸特征向量。
+
+人物资料与照片是两个连续保存步骤，设备下发绑定可以为空；未选择设备只影响 `ai_person_device_binding`，不得跳过或删除照片。生产通过 `PERSON_FACE_STORAGE_ROOT=/uploadfile/person-faces` 写入持久化挂载，manager-api 启动时会检查目录可创建且可写，避免资料保存成功后才暴露照片目录错误。照片上传失败时管理端保留当前人物 ID 和本地预览，后续保存只重试同一人物，不能重复创建档案。
 
 ## 当前运行链路
 

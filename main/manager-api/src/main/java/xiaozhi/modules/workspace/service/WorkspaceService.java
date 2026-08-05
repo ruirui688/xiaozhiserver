@@ -32,7 +32,11 @@ public interface WorkspaceService {
 
     List<WorkspaceMemberVO> listMembers(String workspaceId);
 
+    List<WorkspaceInvitationVO> listPendingInvitations(String workspaceId);
+
     WorkspaceInvitationVO invite(String workspaceId, WorkspaceInviteDTO dto);
+
+    void revokeInvitation(String workspaceId, String invitationId);
 
     WorkspaceVO acceptInvitation(String code);
 

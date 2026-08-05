@@ -30,7 +30,9 @@
           <div class="member-header">
             <div>
               <h3>{{ currentWorkspace ? currentWorkspace.name : '工作空间' }}</h3>
-              <span class="member-hint">成员 {{ members.length }}/5，共享智能体、设备、记忆、聊天记录、知识库和声纹等业务资源</span>
+              <span class="member-hint">
+                名额 {{ occupiedSlots }}/5（正式成员 {{ members.length }}，待接受 {{ pendingInvitations.length }}），共享智能体、设备、记忆、聊天记录、知识库和声纹等业务资源
+              </span>
             </div>
             <div class="member-actions">
               <el-button v-if="canLeaveWorkspace" size="small" @click="leaveWorkspace">退出工作空间</el-button>
@@ -38,7 +40,7 @@
                 v-if="canWrite"
                 size="small"
                 type="primary"
-                :disabled="members.length >= maxMembers"
+                :disabled="occupiedSlots >= maxMembers"
                 @click="showInviteDialog = true"
               >
                 邀请成员
@@ -79,6 +81,22 @@
               </template>
             </el-table-column>
           </el-table>
+
+          <div v-if="pendingInvitations.length" class="invitation-panel">
+            <h4>待接受邀请</h4>
+            <el-table :data="pendingInvitations" size="mini">
+              <el-table-column prop="inviteeUsername" label="用户" />
+              <el-table-column label="角色" width="120">
+                <template slot-scope="scope">{{ roleLabel(scope.row.role) }}</template>
+              </el-table-column>
+              <el-table-column prop="expiresAt" label="有效期至" width="220" />
+              <el-table-column v-if="canWrite" label="操作" width="90">
+                <template slot-scope="scope">
+                  <el-button type="text" size="mini" @click="revokeInvitation(scope.row)">撤销</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
         </section>
       </div>
     </el-main>
@@ -118,6 +136,7 @@ export default {
       workspaceList: [],
       currentWorkspaceId: localStorage.getItem("currentWorkspaceId") || "",
       members: [],
+      pendingInvitations: [],
       maxMembers: 5,
       loading: false,
       showInviteDialog: false,
@@ -145,6 +164,9 @@ export default {
     currentUserId() {
       const userInfo = this.$store.state.userInfo || {};
       return userInfo.id || userInfo.userid || userInfo.userId;
+    },
+    occupiedSlots() {
+      return this.members.length + this.pendingInvitations.length;
     },
   },
   mounted() {
@@ -178,22 +200,42 @@ export default {
           this.members = data.data || [];
         }
       });
+      if (!this.canWrite) {
+        this.pendingInvitations = [];
+        return;
+      }
+      Api.workspace.invitations(this.currentWorkspaceId, ({ data }) => {
+        if (data.code === 0) {
+          this.pendingInvitations = data.data || [];
+        }
+      });
     },
     inviteMember() {
       if (!this.inviteForm.username.trim()) {
         this.$message.warning("请输入用户名");
         return;
       }
-      if (this.members.length >= this.maxMembers) {
-        this.$message.warning("工作空间成员上限为5人");
+      if (this.occupiedSlots >= this.maxMembers) {
+        this.$message.warning("工作空间名额已满，请先撤销待接受邀请或移除成员");
         return;
       }
       Api.workspace.invite(this.currentWorkspaceId, this.inviteForm, ({ data }) => {
         if (data.code === 0) {
           this.lastInviteCode = data.data.code;
           this.$message.success("邀请已生成");
+          this.loadMembers();
         }
       });
+    },
+    revokeInvitation(invitation) {
+      this.$confirm(`确定撤销对 ${invitation.inviteeUsername} 的邀请吗？`, "提示", { type: "warning" }).then(() => {
+        Api.workspace.revokeInvitation(this.currentWorkspaceId, invitation.id, ({ data }) => {
+          if (data.code === 0) {
+            this.$message.success("邀请已撤销");
+            this.loadMembers();
+          }
+        });
+      }).catch(() => {});
     },
     acceptInvitation() {
       if (!this.inviteCode.trim()) {
@@ -351,6 +393,15 @@ export default {
   background: #f5f7fb;
   border-radius: 6px;
   padding: 10px;
+  color: #30364a;
+}
+
+.invitation-panel {
+  margin-top: 20px;
+}
+
+.invitation-panel h4 {
+  margin: 0 0 10px;
   color: #30364a;
 }
 </style>

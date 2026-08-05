@@ -89,6 +89,7 @@ services:
       - XIAOZHI_CREDENTIAL_ENCRYPTION_KEY=${XIAOZHI_CREDENTIAL_ENCRYPTION_KEY:?Set XIAOZHI_CREDENTIAL_ENCRYPTION_KEY in DATA_DIR/.env}
       - CORS_ORIGINS=${XIAOZHI_CORS_ORIGINS:-http://localhost:8002,http://127.0.0.1:8002,http://*:8002}
       - XIAOZHI_MUSIC_DIR=/music
+      - PERSON_FACE_STORAGE_ROOT=/uploadfile/person-faces
     logging: *default-logging
     cap_drop:
       - ALL

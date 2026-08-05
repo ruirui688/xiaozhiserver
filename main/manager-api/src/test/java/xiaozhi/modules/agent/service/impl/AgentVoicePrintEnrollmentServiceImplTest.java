@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.Date;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -184,6 +185,20 @@ class AgentVoicePrintEnrollmentServiceImplTest {
 
         assertEquals("xiaozhi-server 声纹采集接口认证失败，请检查 server.secret 配置", authenticationError.getMsg());
         assertEquals("无法连接 xiaozhi-server 声纹采集接口，请检查内部 HTTP 地址和 8003 端口", connectivityError.getMsg());
+    }
+
+    @Test
+    void staleCollectingEnrollmentIsMarkedExpired() {
+        AgentVoicePrintEnrollmentEntity stale = enrollment(
+                "enroll-stale", "agent-a", AgentVoicePrintEnrollmentServiceImpl.STATUS_COLLECTING);
+        stale.setCreateDate(new Date(System.currentTimeMillis() - 5 * 60_000L));
+        when(enrollmentDao.selectList(any(Wrapper.class))).thenReturn(List.of(stale));
+        when(enrollmentDao.update(any(), any(Wrapper.class))).thenReturn(1);
+
+        service.expireStaleEnrollments();
+
+        assertEquals(AgentVoicePrintEnrollmentServiceImpl.STATUS_EXPIRED, stale.getStatus());
+        verify(enrollmentDao).update(any(), any(Wrapper.class));
     }
 
     private AgentVoicePrintEnrollmentEntity enrollment(String id, String agentId, String status) {

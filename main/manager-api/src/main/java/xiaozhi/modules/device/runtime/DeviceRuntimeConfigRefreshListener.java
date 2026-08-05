@@ -47,23 +47,30 @@ public class DeviceRuntimeConfigRefreshListener {
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.setBearerAuth(serverSecret);
 
-            JSONObject switchRequest = new JSONObject();
-            switchRequest.set("deviceId", event.deviceId());
-            switchRequest.set("fromAgentId", event.fromAgentId());
-            switchRequest.set("toAgentId", event.toAgentId());
-            switchRequest.set("switchRequestId", event.switchRequestId());
-            switchRequest.set("configVersion", event.configVersion());
             JSONObject payload = new JSONObject();
             payload.set("deviceIds", java.util.List.of(event.deviceId()));
             payload.set("reason", event.reason());
-            payload.set("sceneSwitch", switchRequest);
+            boolean sceneSwitch = StringUtils.isNotBlank(event.switchRequestId())
+                    && StringUtils.isNotBlank(event.toAgentId());
+            if (sceneSwitch) {
+                JSONObject switchRequest = new JSONObject();
+                switchRequest.set("deviceId", event.deviceId());
+                switchRequest.set("fromAgentId", event.fromAgentId());
+                switchRequest.set("toAgentId", event.toAgentId());
+                switchRequest.set("switchRequestId", event.switchRequestId());
+                switchRequest.set("configVersion", event.configVersion());
+                payload.set("sceneSwitch", switchRequest);
+            } else {
+                // 首次绑定时设备通常仍保持未绑定 WebSocket；立即热加载即可免重启。
+                payload.set("refreshNow", true);
+            }
             client.exchange(resolveXiaozhiServerHttpBaseUrl() + "/device/runtime-config/refresh",
                     HttpMethod.POST, new HttpEntity<>(payload.toString(), headers), String.class);
-            log.info("设备场景刷新已提交: deviceId={}, requestId={}, configVersion={}",
-                    event.deviceId(), event.switchRequestId(), event.configVersion());
+            log.info("设备运行配置刷新已提交: deviceId={}, reason={}, sceneSwitch={}",
+                    event.deviceId(), event.reason(), sceneSwitch);
         } catch (Exception error) {
-            log.warn("设备场景刷新通知失败: deviceId={}, requestId={}, errorType={}",
-                    event.deviceId(), event.switchRequestId(), error.getClass().getSimpleName());
+            log.warn("设备运行配置刷新通知失败: deviceId={}, reason={}, errorType={}",
+                    event.deviceId(), event.reason(), error.getClass().getSimpleName());
         }
     }
 

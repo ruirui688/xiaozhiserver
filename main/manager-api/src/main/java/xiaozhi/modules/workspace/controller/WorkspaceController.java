@@ -78,12 +78,29 @@ public class WorkspaceController {
         return new Result<List<WorkspaceMemberVO>>().ok(workspaceService.listMembers(workspaceId));
     }
 
+    @GetMapping("/{workspaceId}/invitations")
+    @Operation(summary = "工作空间待接受邀请列表")
+    @RequiresPermissions("sys:role:normal")
+    public Result<List<WorkspaceInvitationVO>> invitations(@PathVariable String workspaceId) {
+        return new Result<List<WorkspaceInvitationVO>>().ok(
+                workspaceService.listPendingInvitations(workspaceId));
+    }
+
     @PostMapping("/{workspaceId}/invitations")
     @Operation(summary = "邀请成员")
     @RequiresPermissions("sys:role:normal")
     public Result<WorkspaceInvitationVO> invite(@PathVariable String workspaceId,
             @RequestBody @Validated WorkspaceInviteDTO dto) {
         return new Result<WorkspaceInvitationVO>().ok(workspaceService.invite(workspaceId, dto));
+    }
+
+    @DeleteMapping("/{workspaceId}/invitations/{invitationId}")
+    @Operation(summary = "撤销待接受邀请")
+    @RequiresPermissions("sys:role:normal")
+    public Result<Void> revokeInvitation(@PathVariable String workspaceId,
+            @PathVariable String invitationId) {
+        workspaceService.revokeInvitation(workspaceId, invitationId);
+        return new Result<Void>().ok(null);
     }
 
     @PostMapping("/invitations/{code}/accept")

@@ -99,6 +99,7 @@ class DeviceOtaConfigTest {
                 agentDao,
                 mock(WorkspaceService.class),
                 mock(WorkspacePermissionService.class),
-                mock(xiaozhi.modules.device.service.DeviceSceneService.class));
+                mock(xiaozhi.modules.device.service.DeviceSceneService.class),
+                mock(org.springframework.context.ApplicationEventPublisher.class));
     }
 }

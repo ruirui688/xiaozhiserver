@@ -58,7 +58,7 @@ class RuntimeConfigReloader:
             getattr(conn, "closing", False)
             or getattr(conn, "closed", False)
             or not getattr(conn, "read_config_from_api", False)
-            or getattr(conn, "need_bind", False)
+            or (getattr(conn, "need_bind", False) and not force)
         ):
             return False
         if getattr(conn, "client_is_speaking", False):
@@ -120,6 +120,11 @@ class RuntimeConfigReloader:
                 await self._replace_pipeline(
                     candidate_config, isolate_scene=scene_changed
                 )
+                if getattr(conn, "need_bind", False):
+                    conn.need_bind = False
+                    conn.bind_code = None
+                    conn.bind_completed_event.set()
+                    conn.binding_ready.set()
                 self._fingerprint = fingerprint
                 self._clear_completed_request(scene_switch)
                 if scene_switch is not None:

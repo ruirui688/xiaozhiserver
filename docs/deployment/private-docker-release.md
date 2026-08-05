@@ -105,7 +105,7 @@ VERSION=<git短哈希> ~/xiaozhi-upgrade
 ~/xiaozhi-data/data          xiaozhi-server 私有配置
 ~/xiaozhi-data/mysql/data    MySQL 数据
 ~/xiaozhi-data/redis/data    Redis 数据
-~/xiaozhi-data/uploadfile    OTA 固件上传
+~/xiaozhi-data/uploadfile    OTA 固件与人物人脸照片
 ~/xiaozhi-data/music         音乐文件
 ```
 
@@ -347,6 +347,157 @@ VERSION=<git短哈希> ~/xiaozhi-upgrade
 ~/xiaozhi-data/uploadfile
 ~/xiaozhi-data/music
 ```
+
+### 5.1 当前升级的中断边界
+
+> 状态说明（2026-08-05）：下面记录的是当前实现事实和后续优化目标。现有
+> `~/xiaozhi-upgrade` 仍是单实例原地替换，不具备滚动发布或蓝绿切流能力；在蓝绿部署资产
+> 和排空逻辑真正实现、验证并发布前，不得把标准升级描述为“零停机”。
+
+当前脚本会先完成发布资产解析和镜像拉取，再执行生产 Compose 的 `up -d`。拉取镜像阶段
+不会影响正在运行的服务，但三个应用容器使用固定容器名和固定宿主机端口：
+
+```text
+xiaozhi-server       8000 / 8003
+manager-web          8002
+manager-api          Docker 内部 8003
+```
+
+镜像或 Compose 配置变化时，新旧应用容器无法同时绑定同一端口，Compose 必须替换旧容器。
+因此当前升级可能出现以下中断：
+
+| 链路 | 当前中断来源 | 影响 |
+|------|--------------|------|
+| manager API / Web | manager-api 冷启动、Liquibase 迁移、manager-web 容器替换 | 页面请求可能失败或短暂不可访问 |
+| 设备 WebSocket | xiaozhi-server 容器替换 | 已建立的设备连接和正在进行的语音轮次会断开 |
+| Python HTTP | xiaozhi-server 8003 端口替换 | 视觉、MCP、评测等 HTTP 请求可能失败 |
+| 回滚 | 目标 Compose 和 `.env` 已写入后新服务启动失败 | 需要人工固定旧版本重新执行升级；数据库变化不随镜像自动回滚 |
+
+manager-api 当前以容器健康状态等待 8003 端口就绪，等待预算默认 900 秒；这能避免脚本过早
+报告成功，但不能消除等待期间的单实例中断。xiaozhi-server 的升级后检查目前只确认容器处于
+`running` 且重启计数稳定，没有验证完整应用 readiness。`sync_manager_api_secret` 之后的
+“重启”步骤使用 `compose up -d`，配置未触发 Compose 重建时不保证进程真的重启；首装或
+`server.secret` 变化时必须额外确认 Python 已重新加载私有配置。
+
+现有宿主机 Nginx 示例也只代理固定的 `127.0.0.1:8000/8002/8003`，没有第二组 upstream、
+原子切流和旧连接排空能力。仅增加健康检查或加快镜像拉取可以缩短中断，但无法让固定端口的
+单实例替换变成无中断发布。
+
+### 5.2 无痕升级的目标定义
+
+本项目的目标应分成两类：
+
+- HTTP、页面和新建 WebSocket：新版本完全 ready 后才切流；新版本失败时旧版本继续服务，
+  切流过程不产生可感知空窗。
+- 已建立的设备 WebSocket：连接不能跨 Python 进程迁移。切流后必须让旧版本继续承载存量
+  连接，等待当前语音轮次结束或设备空闲后再通知重连，不能直接停止旧容器。
+
+目标拓扑为只复制应用层、继续共享持久化基础设施：
+
+```text
+设备 / 浏览器
+      |
+宿主机 Nginx 或云 SLB（80/443 稳定入口）
+      |
+      +-- active:   Green server + manager-api + manager-web
+      +-- draining: Blue  server + manager-api + manager-web
+                         |
+                  共享 MySQL + Redis
+```
+
+Blue/Green 必须使用不同的 Compose project、容器名和仅绑定回环地址的宿主机端口，例如：
+
+```text
+Blue   18000 / 18002 / 18003
+Green  28000 / 28002 / 28003
+```
+
+端口只是示例，实际实现必须通过生成的环境变量或 Compose override 管理，不能把颜色和端口
+散落硬编码到多个脚本中。MySQL、Redis 不随颜色复制；应用容器通过独立颜色网络和稳定网络
+别名访问共享基础设施。同一颜色的 manager-web、manager-api、xiaozhi-server 必须互相调用
+同色实例，避免 Green manager-api 错误调用仍处于 draining 的 Blue Python。
+
+### 5.3 蓝绿升级顺序
+
+后续实现蓝绿部署时，升级器必须遵守以下顺序：
+
+1. 使用 `flock` 或等效机制获取部署互斥锁，禁止两个升级进程同时修改运行状态。
+2. 解析发布资产，拉取不可变版本镜像并记录镜像 digest；保留当前 active 和 last-good 版本。
+3. 在非活动颜色启动候选应用，不修改 Nginx 当前 upstream，也不停止旧版本。
+4. 完成候选版本数据库迁移和应用级 readiness 检查。健康检查不得真实调用外部模型，但至少覆盖：
+   manager-api 应用就绪、manager-web 页面与 API 代理、Python 8003 健康接口和 WebSocket 握手。
+5. readiness 全部通过后，生成新的 Nginx upstream；先执行 `nginx -t`，再原子替换 include
+   或软链接并 reload。reload 失败时保持旧 upstream。
+6. 新 HTTP 请求和新 WebSocket 进入候选版本；旧版本进入 draining，不再接收新连接。
+7. 旧 Python 按活动连接数和语音轮次状态排空。空闲设备可使用 WebSocket
+   `1012 Service Restart` 通知重连；不得在正在播报、识别或工具调用时强制切断。
+8. 等待已有 HTTP 请求和 WebSocket 会话结束；达到明确的最大排空时间后，记录仍未排空的
+   设备，再按发布策略终止旧版本。
+9. 切流和排空验证成功后才写入 active、previous、last-good、版本、digest 和发布时间，
+   然后停止旧应用。不得在候选版本 ready 前覆盖最后可用状态。
+
+候选版本在切流前失败时，只清理候选应用，旧版本继续运行。切流后出现问题时，可以原子把
+Nginx upstream 切回 previous，但仅当数据库仍兼容旧版本时才允许回切。镜像回滚不等于
+数据库回滚，升级器不得自动执行反向 DDL 或恢复数据库备份。
+
+### 5.4 蓝绿发布的兼容性门禁
+
+#### 数据库
+
+蓝绿期间新旧 manager-api 会短暂共享同一个数据库，所有迁移必须采用 expand/contract：
+
+```text
+Release N      只新增兼容表、可空字段、默认值和兼容索引，新旧代码均可运行
+Release N+1    新代码完成读写切换，保留旧字段兼容
+Release N+2    确认没有旧实例和回滚需求后，才允许清理旧字段
+```
+
+同一版本升级中禁止删除或重命名旧版本仍会访问的表、列、索引，不得立即改变字段语义或收紧
+约束。可能长时间锁表的数据回填和 DDL 必须先在生产同构数据量上验证，并与应用切流解耦。
+无法满足双版本兼容的迁移必须明确进入维护窗口，不能标记为无痕升级。
+
+#### 定时任务与运行状态
+
+manager-api 存在定时任务，Blue/Green 重叠期间可能重复执行。进入蓝绿前必须为定时任务增加
+Redis/MySQL 分布式锁，或拆成独立的单实例 worker。Python 的在线设备注册表属于进程内状态，
+不能在两个实例之间直接共享或迁移；发布期间必须保证同一个 WebSocket 始终固定在建立它的
+实例上。
+
+`data`、`music`、`uploadfile` 等共享目录也要逐项确认并发读写边界。`.auth_key` 和私有配置
+必须在启动候选实例前准备好，避免候选启动后再次改配置并重启；会被多个实例写入的缓存、
+元数据或临时文件必须改为原子写入、单写者或实例隔离目录。
+
+#### 优雅关闭
+
+- xiaozhi-server 需要 drain 状态、活动连接指标和最大排空时间；收到 SIGTERM 后先停止接入，
+  再等待连接清理，不能立即取消 WebSocket 主任务。
+- manager-api 必须启用 Spring graceful shutdown，并给正在处理的 HTTP 请求和后台事务合理的
+  完成预算。
+- manager-web Nginx 容器应使用优雅退出信号，宿主机 Nginx reload 必须保留已有 worker，
+  让旧 WebSocket upstream 连接继续存活。
+
+### 5.5 资源和实施顺序
+
+当前默认资源上限按 2 核 4G 且 CPU FunASR 设计，五个容器的内存上限合计约 4G；仅再复制
+server、manager-api、manager-web 就会增加约 3.1G 上限。在 2 核 4G 主机上直接运行完整
+Blue/Green 不安全，可能因 FunASR 或 Java 冷启动触发 OOM。
+
+可选生产方案：
+
+| 方案 | 能力 | 资源与限制 |
+|------|------|------------|
+| 当前单实例优化 | 只更新实际变化的组件、完善 readiness、部署锁和失败恢复 | 能缩短中断，不能消除固定端口替换空窗 |
+| 同机 Blue/Green | HTTP 接近零中断，WebSocket 可排空 | 建议至少 4 核 8G；或使用 lite profile 和远程 ASR |
+| 双机应用层 + SLB | 升级无空窗并可承受单机故障 | 最稳妥；MySQL、Redis 应独立或使用托管高可用服务 |
+
+建议按以下顺序实施，不把所有行为一次性塞进现有 `install` 巨型脚本：
+
+1. 发布 manifest 记录每个组件的不可变 tag/digest，只替换实际变化的组件。
+2. 增加部署锁、应用级 readiness、previous/last-good 状态和失败恢复。
+3. 增加 Spring、Python、Nginx 优雅关闭及 WebSocket drain 能力。
+4. 将蓝绿编排、健康检查、Nginx 切流、排空和状态提交拆成独立部署组件，由固定升级入口编排。
+5. 增加 expand/contract 迁移审查和新旧两个版本的兼容测试。
+6. 资源满足后启用同机蓝绿；需要主机级高可用时迁移到双机和 SLB。
 
 ---
 
@@ -728,7 +879,7 @@ docker login crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com
 
 ```text
 data        999:999   xiaozhi-server 写 .auth_key 和 .config.yaml
-uploadfile  100:101   manager-api 写 OTA 固件
+uploadfile  100:101   manager-api 写 OTA 固件与人物人脸照片（容器内 `/uploadfile/person-faces`）
 music       100:101   manager-api 写音乐，xiaozhi-server 读取
 ```
 

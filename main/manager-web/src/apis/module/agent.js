@@ -495,6 +495,22 @@ export default {
                 failCallback && failCallback(err);
             }).send();
     },
+    // 取消尚未完成的设备声纹采集任务。
+    cancelAgentVoicePrintEnrollment(enrollmentId, callback, failCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/voice-print/enrollments/${enrollmentId}/cancel`)
+            .method('POST')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback && callback(res);
+            })
+            .fail((err) => {
+                failCallback && failCallback(err);
+            })
+            .networkFail((err) => {
+                failCallback && failCallback(err);
+            }).send();
+    },
     // 获取指定智能体用户类型聊天记录
     getRecentlyFiftyByAgentId(id, callback) {
         RequestService.sendRequest()

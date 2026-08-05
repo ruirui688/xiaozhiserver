@@ -48,6 +48,13 @@ export default {
       .success(callback)
       .send()
   },
+  invitations(workspaceId, callback) {
+    RequestService.sendRequest()
+      .url(`${getServiceUrl()}/workspace/${workspaceId}/invitations`)
+      .method('GET')
+      .success(callback)
+      .send()
+  },
   invite(workspaceId, data, callback) {
     RequestService.sendRequest()
       .url(`${getServiceUrl()}/workspace/${workspaceId}/invitations`)
@@ -60,6 +67,13 @@ export default {
     RequestService.sendRequest()
       .url(`${getServiceUrl()}/workspace/invitations/${code}/accept`)
       .method('POST')
+      .success(callback)
+      .send()
+  },
+  revokeInvitation(workspaceId, invitationId, callback) {
+    RequestService.sendRequest()
+      .url(`${getServiceUrl()}/workspace/${workspaceId}/invitations/${invitationId}`)
+      .method('DELETE')
       .success(callback)
       .send()
   },

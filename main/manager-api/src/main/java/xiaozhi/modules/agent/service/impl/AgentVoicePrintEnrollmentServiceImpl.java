@@ -15,6 +15,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.HttpStatusCodeException;
@@ -59,6 +60,8 @@ public class AgentVoicePrintEnrollmentServiceImpl
     public static final String STATUS_COMPLETING = "COMPLETING";
     public static final String STATUS_COMPLETED = "COMPLETED";
     public static final String STATUS_CANCELLED = "CANCELLED";
+    public static final String STATUS_EXPIRED = "EXPIRED";
+    private static final long ENROLLMENT_TIMEOUT_MILLIS = 2L * 60 * 1000;
     private static final String DEFAULT_PROMPT_TEXT =
             "今天天气不错，我正在用正常音量录入声纹。读完这句话后，我会保持安静至少两秒，等待系统完成检测。";
 
@@ -73,6 +76,10 @@ public class AgentVoicePrintEnrollmentServiceImpl
     @Override
     @Transactional(rollbackFor = Exception.class)
     public AgentVoicePrintEnrollmentVO create(AgentVoicePrintEnrollmentCreateDTO dto) {
+        baseMapper.update(null, new UpdateWrapper<AgentVoicePrintEnrollmentEntity>()
+                .eq("device_id", dto.getDeviceId())
+                .eq("status", STATUS_COLLECTING)
+                .set("status", STATUS_CANCELLED));
         AgentVoicePrintEnrollmentEntity entity = ConvertUtils.sourceToTarget(
                 dto, AgentVoicePrintEnrollmentEntity.class);
         entity.setRequiredSamples(1);
@@ -85,6 +92,7 @@ public class AgentVoicePrintEnrollmentServiceImpl
     @Override
     public AgentVoicePrintEnrollmentVO get(String id) {
         AgentVoicePrintEnrollmentEntity entity = getExisting(id);
+        expireIfStale(entity);
         return toVO(entity, listSamples(id));
     }
 
@@ -197,7 +205,30 @@ public class AgentVoicePrintEnrollmentServiceImpl
                 .eq("status", STATUS_COLLECTING)
                 .set("status", STATUS_CANCELLED));
         entity.setStatus(STATUS_CANCELLED);
+        stopDeviceEnrollment(entity, "manager_cancelled");
         return toVO(entity, listSamples(id));
+    }
+
+    @Scheduled(fixedDelayString = "${voiceprint.enrollment-cleanup-interval-ms:60000}")
+    public void expireStaleEnrollments() {
+        Date cutoff = new Date(System.currentTimeMillis() - ENROLLMENT_TIMEOUT_MILLIS);
+        List<AgentVoicePrintEnrollmentEntity> stale = baseMapper.selectList(
+                new QueryWrapper<AgentVoicePrintEnrollmentEntity>()
+                        .eq("status", STATUS_COLLECTING)
+                        .lt("create_date", cutoff));
+        if (stale == null || stale.isEmpty()) {
+            return;
+        }
+        for (AgentVoicePrintEnrollmentEntity entity : stale) {
+            int updated = baseMapper.update(null, new UpdateWrapper<AgentVoicePrintEnrollmentEntity>()
+                    .eq("id", entity.getId())
+                    .eq("status", STATUS_COLLECTING)
+                    .set("status", STATUS_EXPIRED));
+            if (updated == 1) {
+                entity.setStatus(STATUS_EXPIRED);
+                stopDeviceEnrollment(entity, "manager_timeout");
+            }
+        }
     }
 
     @Override
@@ -217,6 +248,21 @@ public class AgentVoicePrintEnrollmentServiceImpl
     private void requireCollecting(AgentVoicePrintEnrollmentEntity entity) {
         if (!STATUS_COLLECTING.equals(entity.getStatus())) {
             throw new RenException(ErrorCode.INVALID_SERVER_ACTION, "声纹采集任务状态不允许执行该操作");
+        }
+    }
+
+    private void expireIfStale(AgentVoicePrintEnrollmentEntity entity) {
+        if (!STATUS_COLLECTING.equals(entity.getStatus()) || entity.getCreateDate() == null
+                || entity.getCreateDate().getTime() >= System.currentTimeMillis() - ENROLLMENT_TIMEOUT_MILLIS) {
+            return;
+        }
+        int updated = baseMapper.update(null, new UpdateWrapper<AgentVoicePrintEnrollmentEntity>()
+                .eq("id", entity.getId())
+                .eq("status", STATUS_COLLECTING)
+                .set("status", STATUS_EXPIRED));
+        if (updated == 1) {
+            entity.setStatus(STATUS_EXPIRED);
+            stopDeviceEnrollment(entity, "manager_timeout");
         }
     }
 
@@ -323,6 +369,32 @@ public class AgentVoicePrintEnrollmentServiceImpl
                     "xiaozhi-server 声纹采集接口返回 HTTP " + statusError.getStatusCode().value(), error);
         }
         return new RenException("无法连接 xiaozhi-server 声纹采集接口，请检查内部 HTTP 地址和 8003 端口", error);
+    }
+
+    private void stopDeviceEnrollment(AgentVoicePrintEnrollmentEntity entity, String reason) {
+        String serverSecret = sysParamsService.getValue(Constant.SERVER_SECRET, true);
+        if (StringUtils.isBlank(serverSecret) || StringUtils.equalsIgnoreCase(serverSecret, "null")) {
+            return;
+        }
+        JSONObject payload = new JSONObject();
+        payload.set("deviceId", entity.getDeviceId());
+        payload.set("requestId", entity.getId());
+        payload.set("reason", reason);
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory();
+        factory.setReadTimeout(Duration.ofSeconds(5));
+        RestTemplate client = new RestTemplate(factory);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setBearerAuth(serverSecret);
+        try {
+            client.exchange(
+                    resolveXiaozhiServerHttpBaseUrl() + "/device/voiceprint/enrollment/stop",
+                    HttpMethod.POST,
+                    new HttpEntity<>(payload.toString(), headers),
+                    String.class);
+        } catch (RestClientException ignored) {
+            // 数据库任务已进入终态；离线连接没有需要继续保留的运行时采集状态。
+        }
     }
 
     private String resolveXiaozhiServerHttpBaseUrl() {

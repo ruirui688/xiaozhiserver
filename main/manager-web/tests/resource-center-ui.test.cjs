@@ -49,6 +49,8 @@ test('person UI makes device-local biometric boundary explicit', () => {
   assert.match(personDeviceSelector, /不把它冒充为实时在线或已同步/);
   assert.doesNotMatch(people, /用户信息管理|pipeline-notice|person-grid/);
   assert.match(personApi, /resource\/persons\/\$\{encodeURIComponent\(id\)\}\/face/);
+  assert.match(people, /this\.editingId = profile\.id/);
+  assert.match(people, /人物资料已保存，但照片上传失败，请重试/);
   assert.doesNotMatch(personApi, /api[_-]?key|access[_-]?token/i);
 });
 

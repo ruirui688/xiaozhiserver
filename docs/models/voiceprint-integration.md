@@ -136,6 +136,8 @@ server.voiceprint_similarity_threshold = 0.4
 
 Web 和 Mobile 页面均显示 `已绑定数/5`。前端限制只用于交互提示，最终约束由 manager-api 和 voiceprint-api 共同保证。
 
+首次设备绑定提交后，manager-api 会按设备 ID 立即触发运行配置热加载，使仍保持激活 WebSocket 的设备从 `need_bind` 切换到完整运行配置，无需重启后再开始声纹采集。设备已经物理断线时仍需等待其正常重连。设备采集任务关闭、重试或超过 2 分钟未完成时分别进入 `CANCELLED` / `EXPIRED`，并以任务 ID 清理匹配的运行时采集状态。
+
 ## 5. 实时识别链路
 
 xiaozhi-server 假设一句话内只有一个说话人。音频到达后，完整语音持续进入 ASR；VAD 检测到句末后，服务端把当前整段语音转换成 16k 单声道 WAV，并与 ASR 并发调用远程 `/voiceprint/identify`。这与官方上游声纹识别链路保持一致，不再截取前 N 秒有效人声。

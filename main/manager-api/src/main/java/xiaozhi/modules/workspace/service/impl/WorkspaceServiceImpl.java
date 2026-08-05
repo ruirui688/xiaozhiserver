@@ -2,9 +2,12 @@ package xiaozhi.modules.workspace.service.impl;
 
 import java.security.SecureRandom;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
@@ -44,6 +47,7 @@ public class WorkspaceServiceImpl extends BaseServiceImpl<WorkspaceDao, Workspac
     private static final String HEADER_WORKSPACE_ID = "X-Workspace-Id";
     private static final String INVITE_PENDING = "PENDING";
     private static final String INVITE_ACCEPTED = "ACCEPTED";
+    private static final String INVITE_REVOKED = "REVOKED";
     private static final int MAX_WORKSPACE_MEMBERS = 5;
     private static final SecureRandom RANDOM = new SecureRandom();
 
@@ -157,13 +161,21 @@ public class WorkspaceServiceImpl extends BaseServiceImpl<WorkspaceDao, Workspac
     }
 
     @Override
+    public List<WorkspaceInvitationVO> listPendingInvitations(String workspaceId) {
+        requireWrite(workspaceId);
+        return effectivePendingInvitations(workspaceId).stream()
+                .map(this::toInvitationVO)
+                .toList();
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public WorkspaceInvitationVO invite(String workspaceId, WorkspaceInviteDTO dto) {
         requireWrite(workspaceId);
-        ensureWorkspaceHasCapacityForInvite(workspaceId);
         String role = normalizeInviteRole(dto.getRole());
+        String username = dto.getUsername().trim();
         SysUserEntity invitee = sysUserDao.selectOne(new QueryWrapper<SysUserEntity>()
-                .eq("username", dto.getUsername())
+                .eq("username", username)
                 .last("LIMIT 1"));
         if (invitee == null) {
             throw new RenException("被邀请用户不存在");
@@ -171,15 +183,31 @@ public class WorkspaceServiceImpl extends BaseServiceImpl<WorkspaceDao, Workspac
         if (getActiveMember(workspaceId, invitee.getId()) != null) {
             throw new RenException("该用户已在工作空间中");
         }
+        WorkspaceInvitationEntity existing = invitationDao.selectOne(
+                new QueryWrapper<WorkspaceInvitationEntity>()
+                        .eq("workspace_id", workspaceId)
+                        .eq("invitee_user_id", invitee.getId())
+                        .eq("status", INVITE_PENDING)
+                        .gt("expires_at", new Date())
+                        .orderByDesc("created_at")
+                        .last("LIMIT 1"));
+        if (existing != null) {
+            existing.setInviteeUsername(username);
+            existing.setRole(role);
+            existing.setExpiresAt(invitationExpiry());
+            invitationDao.updateById(existing);
+            return toInvitationVO(existing);
+        }
+        ensureWorkspaceHasCapacityForInvite(workspaceId);
         WorkspaceInvitationEntity invitation = new WorkspaceInvitationEntity();
         invitation.setId(uuid());
         invitation.setWorkspaceId(workspaceId);
-        invitation.setInviteeUsername(dto.getUsername());
+        invitation.setInviteeUsername(username);
         invitation.setInviteeUserId(invitee.getId());
         invitation.setRole(role);
         invitation.setCode(generateCode());
         invitation.setStatus(INVITE_PENDING);
-        invitation.setExpiresAt(new Date(System.currentTimeMillis() + 7L * 24 * 60 * 60 * 1000));
+        invitation.setExpiresAt(invitationExpiry());
         invitationDao.insert(invitation);
         return toInvitationVO(invitation);
     }
@@ -208,7 +236,23 @@ public class WorkspaceServiceImpl extends BaseServiceImpl<WorkspaceDao, Workspac
         invitation.setStatus(INVITE_ACCEPTED);
         invitation.setAcceptedAt(new Date());
         invitationDao.updateById(invitation);
+        invitationDao.update(null, new UpdateWrapper<WorkspaceInvitationEntity>()
+                .eq("workspace_id", invitation.getWorkspaceId())
+                .eq("invitee_user_id", userId)
+                .eq("status", INVITE_PENDING)
+                .ne("id", invitation.getId())
+                .set("status", INVITE_REVOKED));
         return toVO(workspaceDao.selectById(invitation.getWorkspaceId()), member);
+    }
+
+    @Override
+    public void revokeInvitation(String workspaceId, String invitationId) {
+        requireWrite(workspaceId);
+        invitationDao.update(null, new UpdateWrapper<WorkspaceInvitationEntity>()
+                .eq("id", invitationId)
+                .eq("workspace_id", workspaceId)
+                .eq("status", INVITE_PENDING)
+                .set("status", INVITE_REVOKED));
     }
 
     @Override
@@ -409,6 +453,7 @@ public class WorkspaceServiceImpl extends BaseServiceImpl<WorkspaceDao, Workspac
     private WorkspaceInvitationVO toInvitationVO(WorkspaceInvitationEntity invitation) {
         WorkspaceInvitationVO vo = new WorkspaceInvitationVO();
         WorkspaceEntity workspace = workspaceDao.selectById(invitation.getWorkspaceId());
+        vo.setId(invitation.getId());
         vo.setCode(invitation.getCode());
         vo.setWorkspaceId(invitation.getWorkspaceId());
         vo.setWorkspaceName(workspace == null ? "" : workspace.getName());
@@ -433,10 +478,43 @@ public class WorkspaceServiceImpl extends BaseServiceImpl<WorkspaceDao, Workspac
     }
 
     private int countPendingInvitations(String workspaceId) {
-        return Math.toIntExact(invitationDao.selectCount(new QueryWrapper<WorkspaceInvitationEntity>()
+        return effectivePendingInvitations(workspaceId).size();
+    }
+
+    private List<WorkspaceInvitationEntity> effectivePendingInvitations(String workspaceId) {
+        Set<Long> activeUserIds = activeMemberUserIds(workspaceId);
+        return new java.util.ArrayList<>(pendingInvitations(workspaceId).stream()
+                .filter(invitation -> invitation.getInviteeUserId() == null
+                        || !activeUserIds.contains(invitation.getInviteeUserId()))
+                .collect(Collectors.toMap(
+                        invitation -> invitation.getInviteeUserId() == null
+                                ? "invitation:" + invitation.getId()
+                                : "user:" + invitation.getInviteeUserId(),
+                        invitation -> invitation,
+                        (older, newer) -> newer,
+                        LinkedHashMap::new))
+                .values());
+    }
+
+    private List<WorkspaceInvitationEntity> pendingInvitations(String workspaceId) {
+        return invitationDao.selectList(new QueryWrapper<WorkspaceInvitationEntity>()
                 .eq("workspace_id", workspaceId)
                 .eq("status", INVITE_PENDING)
-                .gt("expires_at", new Date())));
+                .gt("expires_at", new Date())
+                .orderByAsc("created_at"));
+    }
+
+    private Set<Long> activeMemberUserIds(String workspaceId) {
+        return memberDao.selectList(new QueryWrapper<WorkspaceMemberEntity>()
+                .eq("workspace_id", workspaceId)
+                .eq("status", ACTIVE))
+                .stream()
+                .map(WorkspaceMemberEntity::getUserId)
+                .collect(Collectors.toSet());
+    }
+
+    private Date invitationExpiry() {
+        return new Date(System.currentTimeMillis() + 7L * 24 * 60 * 60 * 1000);
     }
 
     private void ensureWorkspaceHasCapacityForInvite(String workspaceId) {

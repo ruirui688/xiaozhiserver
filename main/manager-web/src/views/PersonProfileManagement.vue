@@ -385,15 +385,15 @@ export default {
             Api.person.uploadFace(profile.id, this.faceFile, ({ data: uploadData }) => {
               this.saving = false;
               if (!uploadData || uploadData.code !== 0) {
-                this.$message.warning((uploadData && uploadData.msg) || "资料已保存，但照片上传失败");
-                this.loadProfiles();
+                this.handleFaceUploadFailure(
+                  profile,
+                  (uploadData && uploadData.msg) || "人物资料已保存，但照片上传失败，请重试"
+                );
                 return;
               }
               this.finishSave();
             }, () => {
-              this.saving = false;
-              this.$message.warning("资料已保存，但照片上传失败");
-              this.loadProfiles();
+              this.handleFaceUploadFailure(profile, "人物资料已保存，但照片上传失败，请重试");
             });
           } else {
             this.finishSave();
@@ -409,6 +409,13 @@ export default {
           Api.person.create(payload, onSaved, onFailed);
         }
       });
+    },
+    handleFaceUploadFailure(profile, message) {
+      this.saving = false;
+      // 创建资料已经成功，后续重试必须更新同一条记录，不能重复创建人物。
+      this.editingId = profile.id;
+      this.$message.error(message);
+      this.loadProfiles();
     },
     finishSave() {
       this.saving = false;

@@ -6,6 +6,7 @@ import lombok.Data;
 
 @Data
 public class WorkspaceInvitationVO {
+    private String id;
     private String code;
     private String workspaceId;
     private String workspaceName;

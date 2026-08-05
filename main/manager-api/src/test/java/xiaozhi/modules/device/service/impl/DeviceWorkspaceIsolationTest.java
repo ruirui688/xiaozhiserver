@@ -51,7 +51,8 @@ class DeviceWorkspaceIsolationTest {
                 mock(AgentDao.class),
                 workspaceService,
                 mock(WorkspacePermissionService.class),
-                mock(xiaozhi.modules.device.service.DeviceSceneService.class));
+                mock(xiaozhi.modules.device.service.DeviceSceneService.class),
+                mock(org.springframework.context.ApplicationEventPublisher.class));
         ReflectionTestUtils.setField(service, "baseDao", deviceDao);
 
         List<DeviceEntity> result = service.getUserDevices(1001L, "agent-a");

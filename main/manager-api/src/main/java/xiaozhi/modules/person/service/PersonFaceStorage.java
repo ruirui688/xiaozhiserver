@@ -22,6 +22,8 @@ import javax.imageio.ImageWriteParam;
 import javax.imageio.ImageWriter;
 import javax.imageio.stream.ImageOutputStream;
 
+import jakarta.annotation.PostConstruct;
+
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -43,6 +45,18 @@ public class PersonFaceStorage {
                 ? configured
                 : Paths.get(System.getProperty("user.dir")).resolve(configured))
                 .toAbsolutePath().normalize();
+    }
+
+    @PostConstruct
+    void ensureStorageReady() {
+        try {
+            Files.createDirectories(storageRoot);
+            if (!Files.isDirectory(storageRoot) || !Files.isWritable(storageRoot)) {
+                throw new IllegalStateException("人物人脸存储目录不可写: " + storageRoot);
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("无法初始化人物人脸存储目录: " + storageRoot, e);
+        }
     }
 
     public StoredFace store(String workspaceId, String personId, MultipartFile file) {

@@ -7,4 +7,8 @@ public record DeviceRuntimeConfigRefreshEvent(
         String switchRequestId,
         long configVersion,
         String reason) {
+    public static DeviceRuntimeConfigRefreshEvent forActivation(String deviceId, String agentId) {
+        return new DeviceRuntimeConfigRefreshEvent(
+                deviceId, null, agentId, null, 0L, "device_activated");
+    }
 }

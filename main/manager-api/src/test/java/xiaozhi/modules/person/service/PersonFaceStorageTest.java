@@ -24,6 +24,7 @@ class PersonFaceStorageTest {
     @Test
     void storesNormalizedJpegInsidePersonScope() throws Exception {
         PersonFaceStorage storage = new PersonFaceStorage(tempDir.toString());
+        storage.ensureStorageReady();
         BufferedImage image = new BufferedImage(1200, 800, BufferedImage.TYPE_INT_RGB);
         image.setRGB(0, 0, Color.BLUE.getRGB());
         ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -45,6 +46,7 @@ class PersonFaceStorageTest {
     @Test
     void rejectsMismatchedMimeAndTraversal() {
         PersonFaceStorage storage = new PersonFaceStorage(tempDir.toString());
+        storage.ensureStorageReady();
         MockMultipartFile text = new MockMultipartFile(
                 "file", "portrait.jpg", "text/plain", "not-an-image".getBytes());
 

@@ -9,16 +9,18 @@
 </route>
 
 <script lang="ts" setup>
-import type { Workspace, WorkspaceMember, WorkspaceRole } from '@/api/workspace'
+import type { Workspace, WorkspaceInvitation, WorkspaceMember, WorkspaceRole } from '@/api/workspace'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useToast } from 'wot-design-uni'
 import {
   acceptWorkspaceInvitation,
+  getWorkspaceInvitations,
   getWorkspaceList,
   getWorkspaceMembers,
   inviteWorkspaceMember,
   leaveWorkspace,
   removeWorkspaceMember,
+  revokeWorkspaceInvitation,
   updateWorkspaceMemberRole,
 } from '@/api/workspace'
 import { useUserStore } from '@/store'
@@ -39,6 +41,7 @@ const loadError = ref('')
 const workspaceList = ref<Workspace[]>([])
 const currentWorkspaceId = ref(getCurrentWorkspaceId())
 const members = ref<WorkspaceMember[]>([])
+const pendingInvitations = ref<WorkspaceInvitation[]>([])
 const inviteCode = ref('')
 const lastInviteCode = ref('')
 const showInvitePanel = ref(false)
@@ -55,6 +58,7 @@ const canWrite = computed(() => !!currentWorkspace.value?.canWrite)
 const isOwner = computed(() => currentWorkspace.value?.currentUserRole === 'OWNER')
 const canLeaveWorkspace = computed(() => !!currentWorkspace.value && currentWorkspace.value.currentUserRole !== 'OWNER')
 const currentUserId = computed(() => userStore.userInfo.id)
+const occupiedSlots = computed(() => members.value.length + pendingInvitations.value.length)
 
 function roleLabel(role: WorkspaceRole | string) {
   const labels: Record<string, string> = { OWNER: '所有者', ADMIN: '管理员', MEMBER: '普通成员' }
@@ -127,6 +131,7 @@ async function loadWorkspaces(preferredWorkspaceId = currentWorkspaceId.value) {
     else {
       currentWorkspaceId.value = ''
       members.value = []
+      pendingInvitations.value = []
       clearCurrentWorkspaceId()
     }
   }
@@ -151,9 +156,13 @@ async function loadMembers() {
   memberLoading.value = true
   try {
     members.value = await getWorkspaceMembers(currentWorkspaceId.value)
+    pendingInvitations.value = canWrite.value
+      ? await getWorkspaceInvitations(currentWorkspaceId.value)
+      : []
   }
   catch (error) {
     members.value = []
+    pendingInvitations.value = []
     toast.warning(getErrorMessage(error, '成员加载失败'))
   }
   finally {
@@ -182,8 +191,8 @@ async function inviteMember() {
   const username = inviteForm.username.trim()
   if (!currentWorkspaceId.value || !username)
     return toast.warning('请输入用户名')
-  if (members.value.length >= maxMembers)
-    return toast.warning('工作空间成员上限为5人')
+  if (occupiedSlots.value >= maxMembers)
+    return toast.warning('工作空间名额已满，请先撤销待接受邀请或移除成员')
 
   try {
     const invitation = await inviteWorkspaceMember(currentWorkspaceId.value, {
@@ -192,10 +201,34 @@ async function inviteMember() {
     })
     lastInviteCode.value = invitation.code
     toast.success('邀请已生成')
+    await loadMembers()
   }
   catch (error) {
     toast.warning(getErrorMessage(error, '邀请生成失败'))
   }
+}
+
+function confirmRevokeInvitation(invitation: WorkspaceInvitation) {
+  if (!currentWorkspaceId.value || !canWrite.value)
+    return
+  uni.showModal({
+    title: '撤销邀请',
+    content: `确定撤销对 ${invitation.inviteeUsername} 的邀请吗？`,
+    confirmText: '撤销',
+    confirmColor: '#e5484d',
+    success: async (res) => {
+      if (!res.confirm)
+        return
+      try {
+        await revokeWorkspaceInvitation(currentWorkspaceId.value, invitation.id)
+        toast.success('邀请已撤销')
+        await loadMembers()
+      }
+      catch (error) {
+        toast.warning(getErrorMessage(error, '撤销邀请失败'))
+      }
+    },
+  })
 }
 
 function closeInvitePanel() {
@@ -362,7 +395,7 @@ onMounted(async () => {
                   {{ currentWorkspace.name }}
                 </text>
                 <text class="mt-[8rpx] block text-[24rpx] text-[#8b8f9b]">
-                  成员 {{ members.length }}/{{ maxMembers }}
+                  名额 {{ occupiedSlots }}/{{ maxMembers }}（成员 {{ members.length }}，待接受 {{ pendingInvitations.length }}）
                 </text>
               </view>
               <text class="shrink-0 rounded-full px-[16rpx] py-[6rpx] text-[22rpx]" :class="roleClass(currentWorkspace.currentUserRole)">
@@ -375,7 +408,7 @@ onMounted(async () => {
                 v-if="canWrite"
                 type="primary"
                 size="small"
-                :disabled="members.length >= maxMembers"
+                :disabled="occupiedSlots >= maxMembers"
                 custom-class="flex-1 h-[68rpx] rounded-[14rpx] bg-[#336cff] border-none"
                 @click="showInvitePanel = true"
               >
@@ -450,6 +483,34 @@ onMounted(async () => {
                   @click="confirmRemoveMember(member)"
                 >
                   移除
+                </wd-button>
+              </view>
+            </view>
+
+            <view v-if="pendingInvitations.length" class="mt-[24rpx] border-t border-[#eceef3] pt-[22rpx]">
+              <text class="mb-[14rpx] block text-[27rpx] font-semibold text-[#232338]">
+                待接受邀请
+              </text>
+              <view
+                v-for="invitation in pendingInvitations"
+                :key="invitation.id"
+                class="mb-[12rpx] flex items-center justify-between gap-[16rpx] rounded-[16rpx] bg-[#fff8e8] p-[20rpx]"
+              >
+                <view class="min-w-0 flex-1">
+                  <text class="block truncate text-[27rpx] font-semibold text-[#232338]">
+                    {{ invitation.inviteeUsername }} · {{ roleLabel(invitation.role) }}
+                  </text>
+                  <text v-if="invitation.expiresAt" class="mt-[4rpx] block text-[22rpx] text-[#8b8f9b]">
+                    有效期至 {{ formatJoinedAt(invitation.expiresAt) }}
+                  </text>
+                </view>
+                <wd-button
+                  type="error"
+                  size="small"
+                  custom-class="h-[56rpx] rounded-[12rpx] px-[22rpx]"
+                  @click="confirmRevokeInvitation(invitation)"
+                >
+                  撤销
                 </wd-button>
               </view>
             </view>

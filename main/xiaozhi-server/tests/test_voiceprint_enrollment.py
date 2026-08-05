@@ -298,6 +298,37 @@ def test_voiceprint_enrollment_handler_finishes_runtime_connection(monkeypatch):
     assert calls == ["manual_stop"]
 
 
+def test_voiceprint_enrollment_stop_rejects_stale_request(monkeypatch):
+    conn = SimpleNamespace(
+        get_voiceprint_enrollment_status=lambda: {
+            "active": True,
+            "requestId": "req-new",
+        },
+        finish_voiceprint_enrollment=lambda reason: None,
+    )
+    monkeypatch.setattr(
+        "core.api.voiceprint_enrollment_handler.get_connection",
+        lambda device_id: conn if device_id == "device-a" else None,
+    )
+    handler = VoiceprintEnrollmentHandler(
+        {
+            "server": {"auth_key": "secret"},
+            "manager-api": {"secret": "manager-secret"},
+        }
+    )
+
+    class _Request:
+        headers = {"Authorization": "Bearer secret"}
+        query = {}
+
+        async def json(self):
+            return {"deviceId": "device-a", "requestId": "req-old"}
+
+    response = asyncio.run(handler.handle_stop(_Request()))
+    assert response.status == 409
+    assert json.loads(response.text)["message"] == "声纹采集任务已被更新"
+
+
 async def _refresh_replaces_online_voiceprint_provider(monkeypatch):
     class _Provider:
         def __init__(self, config):

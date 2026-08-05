@@ -67,6 +67,7 @@ class RuntimeConfigRefreshHandler(BaseHandler):
             )
 
         reason = str(body.get("reason") or "manager_update")[:64]
+        refresh_now = body.get("refreshNow") is True
         scene_switch = self._normalize_scene_switch(body.get("sceneSwitch"))
         if body.get("sceneSwitch") is not None and scene_switch is None:
             return self._json_response(
@@ -104,13 +105,15 @@ class RuntimeConfigRefreshHandler(BaseHandler):
             else:
                 reloader.request_refresh(reason)
             scheduled += 1
-            if scene_switch is not None and not getattr(
+            if (scene_switch is not None or refresh_now) and not getattr(
                 conn, "client_is_speaking", False
             ):
                 asyncio.create_task(
-                    self._run_scene_refresh(reloader),
-                    name="scene-switch-{}".format(
-                        scene_switch["switchRequestId"][:32]
+                    self._run_config_refresh(reloader, reason),
+                    name=(
+                        "scene-switch-{}".format(scene_switch["switchRequestId"][:32])
+                        if scene_switch is not None
+                        else "runtime-refresh-{}".format(str(conn.device_id)[:32])
                     ),
                 )
 
@@ -140,12 +143,12 @@ class RuntimeConfigRefreshHandler(BaseHandler):
             request=request,
         )
 
-    async def _run_scene_refresh(self, reloader):
+    async def _run_config_refresh(self, reloader, reason):
         try:
-            await reloader.refresh_if_due(force=True, reason="scene_switch")
+            await reloader.refresh_if_due(force=True, reason=reason)
         except Exception as error:
             self.logger.bind(tag=__name__).warning(
-                "在线设备场景刷新失败: errorType={}", type(error).__name__
+                "在线设备配置刷新失败: errorType={}", type(error).__name__
             )
 
     async def _report_scene_status(self, scene_switch, status):

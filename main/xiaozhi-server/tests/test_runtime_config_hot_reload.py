@@ -94,6 +94,41 @@ def test_reloader_rebuilds_only_when_manager_config_changes(monkeypatch):
     reloader._replace_pipeline.assert_not_awaited()
 
 
+def test_forced_refresh_activates_newly_bound_connection(monkeypatch):
+    common = {"delete_audio": True, "selected_module": {}, "model_config": {}}
+    private = {"agent_id": "agent-a", "prompt": "bound", "plugins": {}}
+    conn = SimpleNamespace(
+        closing=False,
+        closed=False,
+        read_config_from_api=True,
+        need_bind=True,
+        bind_code="123456",
+        bind_completed_event=threading.Event(),
+        binding_ready=threading.Event(),
+        client_is_speaking=False,
+        headers={"device-id": "device-a", "client-id": "client-a"},
+        device_id="device-a",
+        common_config=common,
+        config=build_managed_runtime_config(common, {}),
+        logger=SimpleNamespace(bind=lambda **kwargs: SimpleNamespace(info=lambda *args: None)),
+    )
+    reloader = RuntimeConfigReloader(conn)
+    reloader.mark_applied({})
+    reloader._replace_pipeline = AsyncMock()
+    monkeypatch.setattr(
+        reloader_module,
+        "get_private_config_from_api",
+        AsyncMock(return_value=private),
+    )
+
+    changed = asyncio.run(reloader.refresh_if_due(force=True, reason="device_activated"))
+
+    assert changed is True
+    assert conn.need_bind is False
+    assert conn.bind_code is None
+    assert conn.binding_ready.is_set()
+
+
 def test_deactivate_closes_connection_when_old_pipeline_cleanup_fails():
     conn = SimpleNamespace(
         stop_event=threading.Event(),

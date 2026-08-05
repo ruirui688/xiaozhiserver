@@ -242,7 +242,9 @@ export default {
         : Math.min(100, Math.round((count / requiredSamples) * 100));
       this.enrollmentId = payload.id || payload.enrollmentId || this.enrollmentId;
       this.requiredSamples = Math.max(this.minSamples, Math.min(this.maxSamples, requiredSamples));
-      this.enrollmentStatus = status === 'completed' ? 'ready' : status;
+      this.enrollmentStatus = status === 'completed'
+        ? 'ready'
+        : (['cancelled', 'expired'].includes(status) ? 'failed' : status);
       this.collectedCount = count;
       this.enrollmentProgress = Math.max(0, Math.min(100, progress));
       if (this.collectedCount >= this.requiredSamples && this.enrollmentStatus === 'collecting') {
@@ -290,6 +292,26 @@ export default {
           this.$message.warning(this.$t('voicePrintDialog.requiredDevice'));
           return;
         }
+        const payload = {
+          agentId: this.agentId,
+          sourceName: this.form.sourceName,
+          introduce: this.form.introduce,
+          deviceId: this.deviceId,
+          requiredSamples: this.requiredSamples
+        };
+        if (this.enrollmentId && ['collecting', 'ready'].includes(this.enrollmentStatus)) {
+          const previousId = this.enrollmentId;
+          api.agent.cancelAgentVoicePrintEnrollment(previousId, () => {
+            this.createEnrollment(payload);
+          }, () => {
+            this.createEnrollment(payload);
+          });
+          return;
+        }
+        this.createEnrollment(payload);
+      });
+    },
+    createEnrollment(payload) {
         this.creatingEnrollment = true;
         this.stopPolling();
         this.enrollmentUnsupported = false;
@@ -299,13 +321,6 @@ export default {
         this.enrollmentStatus = 'collecting';
         this.enrollmentProgress = 0;
         this.collectedCount = 0;
-        const payload = {
-          agentId: this.agentId,
-          sourceName: this.form.sourceName,
-          introduce: this.form.introduce,
-          deviceId: this.deviceId,
-          requiredSamples: this.requiredSamples
-        };
         api.agent.createAgentVoicePrintEnrollment(payload, ({ data }) => {
           this.creatingEnrollment = false;
           if (data.code === 0 || data.code === undefined) {
@@ -321,7 +336,6 @@ export default {
           this.creatingEnrollment = false;
           this.markEnrollmentUnsupported(error);
         });
-      });
     },
     startPolling() {
       this.stopPolling();
@@ -412,6 +426,9 @@ export default {
     cancel() {
       this.saving = false; // 取消时重置状态
       this.stopPolling();
+      if (this.enrollmentId && ['collecting', 'ready'].includes(this.enrollmentStatus)) {
+        api.agent.cancelAgentVoicePrintEnrollment(this.enrollmentId, () => {}, () => {});
+      }
       this.dialogKey = Date.now();
       this.$emit('cancel');
     },
