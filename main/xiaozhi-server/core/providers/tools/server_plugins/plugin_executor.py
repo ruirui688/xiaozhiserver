@@ -182,11 +182,7 @@ class ServerPluginExecutor(ToolExecutor):
         if tool_name == "manage_memory":
             return False
         if tool_name == "set_session_voice":
-            options = getattr(self.conn, "tts_session_options", None)
-            return bool(
-                options is not None
-                and options.capabilities(getattr(self.conn, "tts", None))
-            )
+            return bool(self._session_voice_capabilities())
         return (
             tool_name in all_function_registry
             or self._is_declarative_interaction_plugin(tool_name)
@@ -194,10 +190,7 @@ class ServerPluginExecutor(ToolExecutor):
         )
 
     def _init_session_voice_description(self, tool_description):
-        options = getattr(self.conn, "tts_session_options", None)
-        if options is None:
-            return False
-        capabilities = options.capabilities(getattr(self.conn, "tts", None))
+        capabilities = self._session_voice_capabilities()
         if not capabilities:
             return False
         try:
@@ -210,7 +203,7 @@ class ServerPluginExecutor(ToolExecutor):
             if name not in capabilities:
                 properties.pop(name, None)
 
-        catalog = self.config.get("tts_voice_catalog") or []
+        catalog = self._session_voice_catalog()
         allowed_voices = []
         voice_labels = []
         for item in catalog[:50] if isinstance(catalog, list) else []:
@@ -229,12 +222,41 @@ class ServerPluginExecutor(ToolExecutor):
                 "当前可用音色（名称=ID）：" + "；".join(voice_labels)
             )
 
-        current_voice = getattr(getattr(self.conn, "tts", None), "voice", None)
+        current_voice = self._current_session_voice()
         current_hint = f"当前音色 ID 为 {current_voice}。" if current_voice is not None else ""
         function_desc["description"] += (
             f" 当前服务支持：{', '.join(capabilities)}。{current_hint}"
         )
         return bool(properties)
+
+    def _session_voice_capabilities(self):
+        router = getattr(self.conn, "conversation_router", None)
+        realtime_capabilities = getattr(router, "capabilities", None)
+        if (
+            router is not None
+            and getattr(router, "is_realtime", False)
+            and realtime_capabilities is not None
+            and realtime_capabilities.session_voice
+        ):
+            return ("voice",)
+        options = getattr(self.conn, "tts_session_options", None)
+        if options is None:
+            return ()
+        return options.capabilities(getattr(self.conn, "tts", None))
+
+    def _session_voice_catalog(self):
+        router = getattr(self.conn, "conversation_router", None)
+        if router is not None and getattr(router, "is_realtime", False):
+            catalog = router.voice_catalog()
+            if catalog:
+                return catalog
+        return self.config.get("tts_voice_catalog") or []
+
+    def _current_session_voice(self):
+        router = getattr(self.conn, "conversation_router", None)
+        if router is not None and getattr(router, "is_realtime", False):
+            return router.current_voice()
+        return getattr(getattr(self.conn, "tts", None), "voice", None)
 
     def _init_news_source_description(self, tool_description, func_name):
         """根据连接配置初始化新闻工具的参数描述"""

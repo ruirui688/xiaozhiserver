@@ -787,14 +787,18 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 
 ```text
 定制模块：xiaozhi-server 会话路由与 Realtime provider、manager-api 模型目录/配置/评测、manager-web 模式提示
-改动原因：智能体既要保留 VAD -> ASR -> LLM -> TTS 的传统可组合链路，也要支持 Qwen Omni Realtime、豆包端到端实时语音等直接处理音频输入和音频输出的 Realtime 模型。两种模式需要复用一个 llmModelId、设备认证、工具门控和聊天上报，但不能把不同协议强行塞进普通 LLM provider，也不能在实时链路失败时静默改变本轮语义。图片和工具能力属于 adapter 能力：Qwen 当前支持，豆包当前明确不支持。
+改动原因：智能体既要保留 VAD -> ASR -> LLM -> TTS 的传统可组合链路，也要支持 Qwen Omni Realtime、豆包端到端实时语音等直接处理音频输入和音频输出的 Realtime 模型。两种模式需要复用一个 llmModelId、设备认证、工具门控和聊天上报，但不能把不同协议强行塞进普通 LLM provider，也不能在实时链路失败时静默改变本轮语义。自然打断、上游上下文重建、会话音色和原生工具调用统一由 adapter 能力声明：Qwen 支持工具 schema 与结果回注；豆包当前协议支持中断、重建和音色，但没有本地工具结果回注契约，不能伪装为工具可用。
 关键文件：
   - main/xiaozhi-server/core/conversation/
   - main/xiaozhi-server/core/providers/realtime/
+  - main/xiaozhi-server/core/api/session_context_handler.py
+  - main/xiaozhi-server/core/session/conversation_context.py
   - main/xiaozhi-server/core/benchmark/runner.py
   - main/xiaozhi-server/core/api/vision_handler.py
   - main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelCatalogServiceImpl.java
   - main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/RealtimeModelConfigGuard.java
+  - main/manager-api/src/main/java/xiaozhi/modules/model/support/RealtimeAdapterCapabilityRegistry.java
+  - main/manager-api/src/main/java/xiaozhi/modules/device/service/DeviceConversationContextService.java
   - main/manager-api/src/main/resources/db/changelog/
   - main/manager-web/src/components/ModelEditDialog.vue
   - main/manager-web/src/components/model/RealtimeModelNotice.vue
@@ -803,7 +807,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - docs/architecture/runtime-flows.md
   - docs/models/model-management.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：必须保留 selected_module.LLM + model_config.<id>.typed_config 的单一选择契约；conversation_mode=realtime 使用独立 Realtime adapter，缺省继续走传统拼接。编辑已有模型时，明确模板必须优先于厂商名/模型名推断；模板、adapter、conversation_mode、请求路径 provider 和端点协议必须在前端提示并由 manager-api 保存/测试入口强制校验，禁止再形成 `realtime + openai + HTTP Chat Completions` 的矛盾配置，且必须在外部请求前拒绝以防 API Key 外发。补偿迁移只修复 Realtime 元数据、普通参数和测试状态，保留密钥表中的 api_key 原文且不回显。实时模式接管当前会话音频；图片和工具协议仅由声明支持的 adapter 启用，工具仍执行统一服务端门控；传统 VAD/ASR/TTS/VLLM 配置保留供手动切回。实时建连、响应、图片或工具失败不得静默切换为传统半轮；端点必须使用受支持的 wss 官方主机并防止 API Key 外发。Realtime 可以注入建立会话时的静态摘要并上报事件，但不等同于传统逐轮动态记忆查询，也不能隐式承担知识库切片、Judge、短期总结或主动记忆维护的同步文本 LLM。单模型测试必须建立真实 Realtime 会话并记录首文本/首音频/总耗时；自动测试必须按 adapter 覆盖路由、音频转换、能力拒绝、Abort、关闭和模式切换。
+官方同步时的处理规则：必须保留 selected_module.LLM + model_config.<id>.typed_config 的单一选择契约；conversation_mode=realtime 使用独立 Realtime adapter，缺省继续走传统拼接。编辑已有模型时，明确模板必须优先于厂商名/模型名推断；模板、adapter、conversation_mode、请求路径 provider 和端点协议必须在前端提示并由 manager-api 保存/测试入口强制校验，禁止再形成 `realtime + openai + HTTP Chat Completions` 的矛盾配置，且必须在外部请求前拒绝以防 API Key 外发。补偿迁移只修复 Realtime 元数据、普通参数和测试状态，保留密钥表中的 api_key 原文且不回显。实时模式接管当前会话音频；自然打断、上下文重建、会话音色、图片和工具协议只能按 adapter 能力启用，工具仍执行统一服务端门控；打断必须保留刚开始的用户音频，上下文清空必须创建新的上游 session，临时音色不得回写共享模型配置。Realtime 首片音频有可用增量文本时先发送预览字幕，完整文本生成后必须在 `tts/stop` 前再次发送完整回答，不能让旧固件只停留在首字。没有工具结果回注协议的 adapter 必须拒绝主 LLM function_call，不能靠提示词 JSON 伪装。传统 VAD/ASR/TTS/VLLM 配置保留供手动切回。实时建连、响应、图片或工具失败不得静默切换为传统半轮；端点必须使用受支持的 wss 官方主机并防止 API Key 外发。Realtime 可以注入建立会话时的静态摘要并上报事件，但不等同于传统逐轮动态记忆查询，也不能隐式承担知识库切片、Judge、短期总结或主动记忆维护的同步文本 LLM。单模型测试必须建立真实 Realtime 会话并记录首文本/首音频/总耗时；自动测试必须按 adapter 覆盖路由、音频转换、能力拒绝、自然/显式 Abort、上下文重建、会话音色、关闭和模式切换。
 ```
 
 ## 41. 设备多场景与按设备在线切换

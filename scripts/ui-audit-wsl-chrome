@@ -117,7 +117,7 @@ for AUDIT_SIZE in $AUDIT_SIZES; do
     --no-default-browser-check \
     --user-data-dir="$AUDIT_PROFILE_WINDOWS" \
     --window-size="$AUDIT_WIDTH,$AUDIT_HEIGHT" \
-    --timeout="$AUDIT_WAIT_MS" \
+    --virtual-time-budget="$AUDIT_WAIT_MS" \
     --screenshot="$AUDIT_SCREENSHOT_WINDOWS" \
     "$AUDIT_URL" >/dev/null 2>&1
   AUDIT_CHROME_STATUS=$?

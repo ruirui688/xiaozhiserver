@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: architecture
-last_verified: 2026-08-04
+last_verified: 2026-08-05
 source_paths:
   - Dockerfile-server-base
   - main/xiaozhi-server/
@@ -15,7 +15,7 @@ source_paths:
 
 > 本页由 `scripts/docs-facts` 生成，请勿手工编辑。运行 `scripts/docs-facts` 更新，运行 `scripts/docs-facts --check` 检查漂移。
 
-生成日期：`2026-08-04`（UTC）
+生成日期：`2026-08-05`（UTC）
 
 ## 技术栈版本
 
@@ -32,9 +32,9 @@ source_paths:
 
 | 模块 | 源码文件 | 测试文件 | 统计口径 |
 | --- | ---: | ---: | --- |
-| xiaozhi-server | 256 | 67 | 源码为非 `tests/` 的 `*.py`；测试为 `test_*.py` |
-| manager-api | 541 | 64 | `src/main/**/*.java`；`src/test/**/*Test.java` |
-| manager-web | 122 | 14 | `src/` 下 `*.vue/*.js/*.ts/*.mjs`；`*.spec.*/*.test.*` |
+| xiaozhi-server | 261 | 70 | 源码为非 `tests/` 的 `*.py`；测试为 `test_*.py` |
+| manager-api | 577 | 73 | `src/main/**/*.java`；`src/test/**/*Test.java` |
+| manager-web | 132 | 18 | `src/` 下 `*.vue/*.js/*.ts/*.mjs`；`*.spec.*/*.test.*` |
 | manager-mobile | 83 | 3 | `src/` 下 `*.vue/*.js/*.ts/*.mjs`；`*.spec.*/*.test.*` |
 
 统计排除依赖和构建产物，不表示代码行数或测试覆盖率。
@@ -57,9 +57,9 @@ source_paths:
 
 | 事实 | 数量 |
 | --- | ---: |
-| Liquibase SQL 文件 | 183 |
-| master.yaml changeSet | 183 |
-| master.yaml 唯一 SQL 登记 | 183 |
+| Liquibase SQL 文件 | 188 |
+| master.yaml changeSet | 188 |
+| master.yaml 唯一 SQL 登记 | 188 |
 
 数量相等不代表迁移内容正确；`scripts/docs-check` 还会检查遗漏登记、重复登记和失效路径。
 
@@ -67,8 +67,8 @@ source_paths:
 
 | 文件 | 行数 |
 | --- | ---: |
-| `main/xiaozhi-server/core/connection.py` | 2743 |
-| `main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelCatalogServiceImpl.java` | 1794 |
+| `main/xiaozhi-server/core/connection.py` | 2750 |
+| `main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelCatalogServiceImpl.java` | 1808 |
 | `main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelTestServiceImpl.java` | 1351 |
 | `main/manager-api/src/main/java/xiaozhi/modules/knowledge/rag/impl/LocalKnowledgeAdapter.java` | 1293 |
 | `main/manager-api/src/main/java/xiaozhi/modules/memory/service/impl/MemoryMaintenanceServiceImpl.java` | 1237 |

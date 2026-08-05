@@ -248,6 +248,22 @@ def test_function_call_mode_degrades_to_intent_llm_for_text_only_provider():
     ]
 
 
+def test_realtime_function_call_mode_uses_adapter_capability_not_legacy_llm_slot():
+    qwen = _conn(None)
+    qwen.conversation_router = SimpleNamespace(
+        is_realtime=True,
+        capabilities=SimpleNamespace(native_function_calling=True),
+    )
+    doubao = _conn(None)
+    doubao.conversation_router = SimpleNamespace(
+        is_realtime=True,
+        capabilities=SimpleNamespace(native_function_calling=False),
+    )
+
+    assert qwen._resolve_runtime_intent_type("function_call") == "function_call"
+    assert doubao._resolve_runtime_intent_type("function_call") == "intent_llm"
+
+
 def test_function_call_degrade_creates_default_intent_llm_config():
     conn = _conn_without_intent_llm_config(TextOnlyLLM())
 

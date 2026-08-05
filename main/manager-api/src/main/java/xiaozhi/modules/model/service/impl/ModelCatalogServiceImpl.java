@@ -28,6 +28,7 @@ import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.entity.ModelTemplateEntity;
 import xiaozhi.modules.model.entity.ModelTemplateFieldEntity;
 import xiaozhi.modules.model.service.ModelCatalogService;
+import xiaozhi.modules.model.support.RealtimeAdapterCapabilityRegistry;
 
 @Service
 @RequiredArgsConstructor
@@ -86,6 +87,8 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             "qwen3.5-omni-plus-realtime",
             "qwen3.5-omni-flash-realtime",
             "qwen3-omni-flash-realtime");
+    private static final List<String> ALI_QWEN_OMNI_REALTIME_VOICES = List.of(
+            "Cherry", "Serena", "Ethan", "Chelsie");
     private static final List<String> DOUBAO_REALTIME_MODELS = List.of(
             "1.2.1.1",
             "2.2.0.0");
@@ -1365,6 +1368,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 setFieldDefault(dto, "model_name", "qwen3.5-omni-flash-realtime");
                 setFieldOptions(dto, "model_name", ALI_QWEN_OMNI_REALTIME_MODELS);
                 setFieldDefault(dto, "voice", "Ethan");
+                setFieldOptions(dto, "voice", ALI_QWEN_OMNI_REALTIME_VOICES);
                 setFieldDefault(dto, "conversation_mode", "realtime");
                 setFieldOptions(dto, "conversation_mode", List.of("realtime"));
                 setFieldDefault(dto, "input_sample_rate", 16000);
@@ -1389,6 +1393,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 setFieldDefault(dto, "input_sample_rate", 16000);
                 setFieldDefault(dto, "output_sample_rate", 24000);
                 setFieldDefault(dto, "voice", "zh_female_vv_jupiter_bigtts");
+                setFieldOptions(dto, "voice", List.of("zh_female_vv_jupiter_bigtts"));
                 setFieldDefault(dto, "bot_name", "小智");
                 setFieldDefault(dto, "speaking_style", "回复简洁自然，适合实时语音对话。");
                 setFieldDefault(dto, "input_mode", "audio");
@@ -1509,6 +1514,8 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             default -> {
             }
         }
+        RealtimeAdapterCapabilityRegistry.find(dto.getProviderCode()).ifPresent(
+                capabilities -> setFieldAllowCreate(dto, "voice", capabilities.customVoiceIds()));
     }
 
     private static void setFieldDefault(ModelCatalogDTO dto, String key, Object value) {
@@ -1526,6 +1533,13 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                     field.setOptions(options == null ? List.of() : options);
                     field.setInputType("select");
                 });
+    }
+
+    private static void setFieldAllowCreate(ModelCatalogDTO dto, String key, boolean allowCreate) {
+        dto.getFieldSchemas().stream()
+                .filter(field -> key.equals(field.getKey()))
+                .findFirst()
+                .ifPresent(field -> field.setAllowCreate(allowCreate));
     }
 
     private static void applyDoubaoTtsFieldText(ModelCatalogDTO dto) {

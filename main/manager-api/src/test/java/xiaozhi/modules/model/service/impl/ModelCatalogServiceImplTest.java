@@ -77,7 +77,11 @@ class ModelCatalogServiceImplTest {
         assertEquals("realtime", field(template, "conversation_mode").getDefaultValue());
         assertEquals(16000, field(template, "input_sample_rate").getDefaultValue());
         assertEquals(24000, field(template, "output_sample_rate").getDefaultValue());
-        assertEquals("Ethan", field(template, "voice").getDefaultValue());
+        ModelFieldSchemaDTO voice = field(template, "voice");
+        assertEquals("select", voice.getInputType());
+        assertEquals("Ethan", voice.getDefaultValue());
+        assertEquals(List.of("Cherry", "Serena", "Ethan", "Chelsie"), voice.getOptions());
+        assertFalse(Boolean.TRUE.equals(voice.getAllowCreate()));
         assertEquals(List.of("server_vad", "manual"), field(template, "turn_detection_type").getOptions());
         assertEquals(120, field(template, "response_timeout_seconds").getDefaultValue());
         assertEquals(10485760, field(template, "max_event_bytes").getDefaultValue());
@@ -107,6 +111,9 @@ class ModelCatalogServiceImplTest {
 
         assertFalse(field(template, "app_id").getSecret());
         assertTrue(field(template, "api_key").getSecret());
+        assertEquals("select", field(template, "voice").getInputType());
+        assertEquals(List.of("zh_female_vv_jupiter_bigtts"), field(template, "voice").getOptions());
+        assertTrue(Boolean.TRUE.equals(field(template, "voice").getAllowCreate()));
         assertEquals("wss://openspeech.bytedance.com/api/v3/realtime/dialogue",
                 field(template, "base_url").getDefaultValue());
         assertEquals("1.2.1.1", field(template, "model_name").getDefaultValue());

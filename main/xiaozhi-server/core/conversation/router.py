@@ -6,6 +6,7 @@ from core.conversation.mode import get_selected_llm_config, is_realtime_conversa
 from core.providers.realtime.registry import (
     create_realtime_session,
     normalize_realtime_adapter,
+    realtime_adapter_capabilities,
     supported_realtime_adapters,
 )
 
@@ -19,6 +20,13 @@ class ConversationRouter:
     @property
     def is_realtime(self) -> bool:
         return is_realtime_conversation(self.conn.config)
+
+    @property
+    def capabilities(self):
+        if self.session is not None:
+            return getattr(self.session, "capabilities", None)
+        config = get_selected_llm_config(self.conn.config) or {}
+        return realtime_adapter_capabilities(config)
 
     async def initialize(self) -> bool:
         if not self.is_realtime:
@@ -55,6 +63,38 @@ class ConversationRouter:
     async def refresh_tools(self) -> None:
         if self.session is not None:
             await self.session.refresh_tools()
+
+    def voice_catalog(self):
+        if self.session is None:
+            return []
+        getter = getattr(self.session, "voice_catalog", None)
+        return list(getter() if callable(getter) else [])
+
+    def current_voice(self):
+        if self.session is None:
+            return None
+        getter = getattr(self.session, "current_voice", None)
+        return getter() if callable(getter) else None
+
+    def request_voice_change(self, voice: str) -> bool:
+        if self.session is None:
+            return False
+        requester = getattr(self.session, "request_voice_change", None)
+        return bool(requester and requester(voice))
+
+    def request_context_reset(self) -> bool:
+        if self.session is None:
+            return False
+        requester = getattr(self.session, "request_context_reset", None)
+        return bool(requester and requester())
+
+    async def reset_context_now(self) -> bool:
+        if self.session is None:
+            return False
+        resetter = getattr(self.session, "reset_context_now", None)
+        if resetter is None:
+            return False
+        return bool(await resetter())
 
     async def close(self) -> None:
         if self.session is not None:

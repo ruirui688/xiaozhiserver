@@ -163,7 +163,7 @@ sequenceDiagram
 
 - 输入使用设备 Opus 解码为 PCM16 16 kHz 单声道；输出 PCM16 24 kHz 单声道编码为设备 Opus。采样率来自受支持 adapter 的固定契约或受校验配置，不能任意互换。
 - server VAD 模式持续 append，由上游判停；manual 模式在 `listen/stop` 执行 commit 和 `response.create`。同一轮不得重复 commit。
-- 上游输入转写完成后才写 user 对话和聊天记录；回复文本增量只累积，`response.done` 或错误终态负责一次性写 assistant 记录并结束设备 TTS 状态。
+- 上游输入转写完成后才写 user 对话和聊天记录；回复文本增量同时用于 Realtime 字幕预览，但不提前形成 assistant 记录。首片音频发送时若已有文本，先发一次 `tts/sentence_start` 预览；完整文本事件或 `response.done` 在 `tts/stop` 前再次发送完整回答，避免旧固件永久停留在首字。`response.done` 或错误终态负责一次性写 assistant 记录并结束设备 TTS 状态。
 - Abort 发送 `response.cancel` 和输入缓冲清理，停止当前设备音频并使回复生命周期只收敛一次；迟到旧事件不得结束新回复。
 - 对支持 Function Calling 的 Realtime adapter（当前 Qwen），上游只负责提出调用。工具清单仍来自 `UnifiedToolHandler`，执行仍走本地门控和 executor；工具结果以 `function_call_output` 回注，随后显式创建后续响应。豆包当前协议没有本地工具结果回注契约，因此不向上游暴露工具。
 
@@ -192,6 +192,12 @@ session 未就绪、图片超限/格式不支持、上游响应超时或连接�
 
 `reset_conversation_context` 成功后只保留当前 system prompt，并重新注入必要工具 few-shot；工具确认语成为新上下文的第一条 assistant 消息。会议、通话和声纹采集属于受保护状态，不能通过该工具破坏正在执行的事务状态。
 
+不支持原生工具回注的 Realtime adapter 仍可由管理员手动清空。设备管理页按设备记录调用
+`POST /device/{id}/conversation-context/reset`；manager-api 先校验 Workspace 写权限，从数据库绑定关系派生
+`deviceId + agentId`，再用服务密钥调用 Python 的 `/device/session/context/reset`。Python 二次校验在线连接与
+agent 绑定，并只在设备空闲时清理本地短期状态；Realtime 模式同时按 adapter 能力重建上游 session。该操作
+不删除聊天记录、长期记忆或共享模型配置，设备离线、正在收音/播报、会议、通话或声纹采集时明确拒绝。
+
 支持工具的 Realtime provider 保留厂商当前协议要求的 OpenAI 风格嵌套 `function` schema，来源、优先级、参数 JSON Schema 和执行器不变。转换不能扩张工具白名单。设备 IoT/MCP 描述仍不能绕过服务端显式门控；不支持工具回注的 adapter 不得把工具描述发送给上游。
 
 ## 6. 记忆与知识库
@@ -208,6 +214,9 @@ session 未就绪、图片超限/格式不支持、上游响应超时或连接�
 | Realtime 建连/鉴权/session.update 失败 | 对话能力保持未就绪并记录脱敏错误 | 不自动创建传统 ASR/LLM/TTS |
 | 当前响应超时、协议错误或上游断开 | 取消当前回复、发送一次 stop、关闭或重建上游会话 | 不把半轮音频重新送入传统链路 |
 | 工具执行失败 | 结构化错误回注 Realtime 模型，由模型生成用户可读回复 | 不跳过工具权限或伪造成功结果 |
+| 用户在播报中开口 | adapter 使用上游语音开始/ASR 开始事件取消当前响应，本地立即发送无等待 stop，并保留新用户音频 | 不清空打断语句的输入缓冲；设备仍需 AEC 和持续上行 |
+| 清空短期上下文 | 当前确认回复结束后重建上游 Realtime session，再恢复 system prompt、工具和当前会话音色 | 不删除后台聊天记录或长期记忆，不在旧上游 session 中假装已清空 |
+| 运行中切换音色 | 由 adapter 能力应用到下一轮；Qwen 更新 session，豆包重建 session | 不改写 manager-api 保存的共享模型配置 |
 | 已选 Realtime 但会话未就绪 | HTTP 明确失败 | 不按任意 deviceId 新建会话，不静默转 VLLM；非 Realtime 请求仍走传统 VLLM |
 | 管理员切回普通 LLM | 下一安全轮次热更新为传统管线 | 保留原 VAD/ASR/TTS/VLLM 配置并重新启用 |
 
@@ -227,9 +236,9 @@ session 未就绪、图片超限/格式不支持、上游响应超时或连接�
 | 会话路由 | 普通 LLM 保持传统路径；`conversation_mode=realtime` 消费音频/listen/text/image/abort；未知模式安全回到传统路径 |
 | Realtime transport | 建连 header 脱敏、session.update、事件大小上限、正常/错误/超时/关闭、文本 benchmark |
 | 音频 | Opus -> PCM16 16k、PCM16 24k -> Opus、尾帧冲刷、乱序/迟到事件、取消后不串轮 |
-| 工具 | schema 转换、统一门控、function_call 参数增量、结果回注、失败结果和二次 response.create |
+| 工具 | 按 adapter 能力启用；Qwen 覆盖 schema 转换、统一门控、function_call 参数增量、结果回注、失败结果和二次 response.create；无回注协议的 adapter 必须明确拒绝 |
 | 图片 | 活动连接与归属、Realtime/传统分流、大小/格式限制、超时和连接关闭 |
-| 生命周期 | readiness、回复 start/stop 幂等、Abort、热更新切换模式、连接关闭资源释放 |
+| 生命周期 | readiness、回复 start/stop 幂等、显式 Abort、自然打断不丢新音频、上下文重建、会话音色切换、热更新切换模式、连接关闭资源释放 |
 | 控制面/Web | Realtime 目录可选择且需真实测试；模型与智能体页面显示模式标签、绕过项、手动切回和记忆边界 |
 
 自动测试使用 fake Realtime WebSocket 和固定 PCM/图片样本，不调用真实外部模型。合入前统一运行 Python Conda 测试、Java

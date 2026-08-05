@@ -94,6 +94,50 @@ def test_session_voice_rejects_unknown_catalog_entry():
     assert conn.tts.voice == "voice-a"
 
 
+def test_realtime_session_voice_routes_to_active_adapter():
+    requested = []
+
+    class Router:
+        is_realtime = True
+        capabilities = SimpleNamespace(
+            session_voice=True,
+            native_function_calling=True,
+            custom_voice_ids=False,
+        )
+
+        def voice_catalog(self):
+            return [{"id": "Serena", "name": "Serena"}]
+
+        def request_voice_change(self, voice):
+            requested.append(voice)
+            return True
+
+    conn = _voice_conn()
+    conn.conversation_router = Router()
+
+    result = set_session_voice(conn, voice="Serena")
+
+    assert result.action == Action.RESPONSE
+    assert requested == ["Serena"]
+    assert conn.tts.voice == "voice-a"
+
+
+def test_realtime_session_voice_rejects_unsupported_parameters():
+    conn = _voice_conn()
+    conn.conversation_router = SimpleNamespace(
+        is_realtime=True,
+        capabilities=SimpleNamespace(
+            session_voice=True,
+            native_function_calling=True,
+            custom_voice_ids=False,
+        ),
+    )
+
+    result = set_session_voice(conn, voice="Serena", speed=10)
+
+    assert "只支持切换音色" in result.response
+
+
 def test_session_tts_options_reapply_only_for_same_model():
     options = SessionTTSOptions()
     first = AdjustableTTS()
@@ -207,6 +251,22 @@ def test_reset_conversation_context_preserves_system_and_resets_soft_state():
     assert state.state == "idle"
     assert state.current_skill is None
     assert state.last_intent is None
+
+
+def test_reset_conversation_context_requests_realtime_upstream_rebuild():
+    conn = _reset_conn()
+    requested = []
+    conn.conversation_router = SimpleNamespace(
+        is_realtime=True,
+        capabilities=SimpleNamespace(context_reset=True),
+        request_context_reset=lambda: requested.append("reset") or True,
+    )
+
+    result = reset_conversation_context(conn)
+
+    assert result.action == Action.RESPONSE
+    assert requested == ["reset"]
+    assert not any(message.content == "old user" for message in conn.dialogue.dialogue)
 
 
 @pytest.mark.parametrize("protected", ["meeting", "voiceprint", "calling"])

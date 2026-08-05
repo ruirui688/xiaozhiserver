@@ -15,6 +15,7 @@ from core.connection import ConnectionHandler
 from core.conversation.mode import ConversationMode, get_conversation_mode
 from core.conversation.router import ConversationRouter
 from core.providers.realtime.base import realtime_tools
+from core.providers.realtime.registry import realtime_adapter_capabilities
 from core.providers.realtime.qwen_omni_realtime import (
     QwenOmniRealtimeSession,
     QwenOmniRealtimeTransport,
@@ -86,6 +87,18 @@ def test_conversation_mode_uses_selected_llm_typed_config():
         get_conversation_mode(_runtime_config(mode="pipeline"))
         is ConversationMode.PIPELINE
     )
+
+
+def test_realtime_capabilities_are_adapter_driven():
+    qwen = realtime_adapter_capabilities({"type": "qwen-omni-realtime"})
+    doubao = realtime_adapter_capabilities({"type": "doubao-realtime"})
+
+    assert qwen.native_function_calling is True
+    assert qwen.natural_barge_in is True
+    assert doubao.native_function_calling is False
+    assert doubao.natural_barge_in is True
+    assert doubao.context_reset is True
+    assert doubao.session_voice is True
 
 
 def test_realtime_protocol_events_and_audio_contract():
@@ -471,7 +484,7 @@ def test_finish_response_releases_untranscribed_input_audio(monkeypatch):
     asyncio.run(scenario())
 
 
-def test_pcm24k_audio_response_has_single_start_and_stop(monkeypatch):
+def test_pcm24k_audio_response_updates_complete_subtitle_before_single_stop(monkeypatch):
     protocol = []
     packets = []
 
@@ -517,8 +530,72 @@ def test_pcm24k_audio_response_has_single_start_and_stop(monkeypatch):
         session.encoder.close()
 
     asyncio.run(scenario())
-    assert [state for state, _text in protocol] == ["start", "stop"]
+    assert [state for state, _text in protocol] == [
+        "start",
+        "sentence_start",
+        "stop",
+    ]
+    assert protocol[1][1] == "你好"
     assert len(packets) == 1
+
+
+def test_qwen_sends_stream_preview_then_complete_subtitle_before_stop(monkeypatch):
+    protocol = []
+
+    async def fake_tts(_conn, state, text=None, **_kwargs):
+        protocol.append((state, text))
+        return True
+
+    async def fake_audio(_conn, _packet):
+        return None
+
+    monkeypatch.setattr(
+        "core.providers.realtime.qwen_omni_realtime.send_tts_message", fake_tts
+    )
+    monkeypatch.setattr(
+        "core.providers.realtime.qwen_omni_realtime.sendAudio", fake_audio
+    )
+    monkeypatch.setattr(
+        "core.providers.realtime.qwen_omni_realtime.enqueue_tts_report",
+        lambda *_args, **_kwargs: True,
+    )
+
+    async def scenario():
+        conn = SimpleNamespace(
+            logger=_Logger(),
+            func_handler=None,
+            prompt="",
+            config={"prompt": {}, "selected_module": {}, "Memory": {}},
+            sentence_id=None,
+            dialogue=SimpleNamespace(put=lambda _message: None),
+        )
+        session = QwenOmniRealtimeSession(conn, {})
+        session._response_active = True
+        await session.handle_event(
+            {"type": "response.audio_transcript.delta", "delta": "您"}
+        )
+        await session.handle_event(
+            {
+                "type": "response.audio.delta",
+                "delta": base64.b64encode(b"\x00\x00" * 1440).decode("ascii"),
+            }
+        )
+        await session.handle_event(
+            {
+                "type": "response.audio_transcript.done",
+                "transcript": "您好，这是完整回答",
+            }
+        )
+        await session.handle_event({"type": "response.done", "response": {}})
+        session.encoder.close()
+
+    asyncio.run(scenario())
+    assert protocol == [
+        ("start", None),
+        ("sentence_start", "您"),
+        ("sentence_start", "您好，这是完整回答"),
+        ("stop", None),
+    ]
 
 
 def test_late_audio_after_response_done_is_ignored(monkeypatch):
@@ -777,6 +854,134 @@ def test_realtime_session_abort_clears_local_state_when_transport_fails():
         assert session.input_audio == []
         assert session._response_active is False
         assert session.response_done.is_set()
+
+    asyncio.run(scenario())
+
+
+def test_qwen_server_vad_speech_start_cancels_reply_without_clearing_new_audio(
+    monkeypatch,
+):
+    sent = []
+    aborted = []
+
+    class Transport:
+        async def send(self, payload):
+            sent.append(payload)
+
+    class Encoder:
+        def reset_state(self):
+            aborted.append("encoder_reset")
+
+    async def fake_abort(_conn, preserve_user_audio=False):
+        aborted.append(("local_abort", preserve_user_audio))
+
+    monkeypatch.setattr(
+        "core.providers.realtime.qwen_omni_realtime.handleAbortMessage", fake_abort
+    )
+
+    async def scenario():
+        session = object.__new__(QwenOmniRealtimeSession)
+        session.conn = SimpleNamespace(logger=_Logger())
+        session.transport = Transport()
+        session.encoder = Encoder()
+        session.response_text = "partial"
+        session.response_audio = [b"reply"]
+        session.input_audio = [b"new-user-audio"]
+        session.function_calls = {}
+        session._tool_followup_pending = False
+        session._cancel_generation = 2
+        session._barge_in_active = False
+        session._reply_started = True
+        session._response_active = True
+        session.response_done = asyncio.Event()
+
+        await session.handle_event({"type": "input_audio_buffer.speech_started"})
+
+        assert [item["type"] for item in sent] == ["response.cancel"]
+        assert session.input_audio == [b"new-user-audio"]
+        assert session._response_active is False
+        assert session.response_done.is_set()
+        assert aborted == ["encoder_reset", ("local_abort", True)]
+
+    asyncio.run(scenario())
+
+
+def test_qwen_context_reset_reconnects_with_current_prompt_tools_and_voice():
+    transports = []
+
+    class Transport:
+        def __init__(self, label):
+            self.label = label
+            self.closed = False
+            self.configured = []
+            transports.append(self)
+
+        async def connect(self, handler):
+            self.handler = handler
+
+        async def configure(self, prompt, tools, config_override=None):
+            self.configured.append((prompt, tools, config_override))
+
+        async def close(self):
+            self.closed = True
+
+    async def scenario():
+        old = Transport("old")
+        conn = SimpleNamespace(
+            logger=_Logger(),
+            prompt="system prompt",
+            config={"selected_module": {}, "Memory": {}},
+            func_handler=SimpleNamespace(get_functions=lambda: [{"type": "function"}]),
+            audio_input_ready=threading.Event(),
+            conversation_ready=threading.Event(),
+        )
+        conn.audio_input_ready.set()
+        conn.conversation_ready.set()
+        session = QwenOmniRealtimeSession(
+            conn,
+            {"voice": "Serena"},
+            transport=old,
+            transport_factory=lambda: Transport("new"),
+        )
+        assert await session.reset_context_now() is True
+
+        assert old.closed is True
+        assert session.transport.label == "new"
+        assert session.transport.configured[0][0] == "system prompt"
+        assert conn.audio_input_ready.is_set()
+        assert conn.conversation_ready.is_set()
+        assert session.current_voice() == "Serena"
+        await session.close()
+
+    asyncio.run(scenario())
+
+
+def test_qwen_runtime_voice_change_updates_next_upstream_session_config():
+    class Transport:
+        def __init__(self):
+            self.config = {"voice": "Ethan"}
+            self.configured = []
+
+        async def configure(self, prompt, tools, config_override=None):
+            self.configured.append((prompt, tools, config_override))
+
+    async def scenario():
+        transport = Transport()
+        conn = SimpleNamespace(
+            logger=_Logger(),
+            prompt="system prompt",
+            config={"selected_module": {}, "Memory": {}},
+            func_handler=None,
+        )
+        session = QwenOmniRealtimeSession(conn, {}, transport=transport)
+        session._response_active = True
+
+        assert session.request_voice_change("Serena") is True
+        await session._apply_pending_session_controls()
+
+        assert transport.configured[-1][2] == {"voice": "Serena"}
+        assert transport.config["voice"] == "Serena"
+        session.encoder.close()
 
     asyncio.run(scenario())
 

@@ -10,6 +10,7 @@ from core.api.voiceprint_enrollment_handler import VoiceprintEnrollmentHandler
 from core.api.device_notification_handler import DeviceNotificationHandler
 from core.api.chat_history_runtime_handler import ChatHistoryRuntimeHandler
 from core.api.runtime_config_refresh_handler import RuntimeConfigRefreshHandler
+from core.api.session_context_handler import SessionContextHandler
 from core.api.plugin_test_handler import PluginTestHandler
 
 TAG = __name__
@@ -27,6 +28,7 @@ class SimpleHttpServer:
         self.device_notification_handler = DeviceNotificationHandler(config)
         self.chat_history_runtime_handler = ChatHistoryRuntimeHandler(config)
         self.runtime_config_refresh_handler = RuntimeConfigRefreshHandler(config)
+        self.session_context_handler = SessionContextHandler(config)
         self.plugin_test_handler = PluginTestHandler(config)
 
     def _get_websocket_url(self, local_ip: str, port: int) -> str:
@@ -168,6 +170,14 @@ class SimpleHttpServer:
                         web.options(
                             "/device/runtime-config/refresh",
                             self.runtime_config_refresh_handler.handle_options,
+                        ),
+                        web.post(
+                            "/device/session/context/reset",
+                            self.session_context_handler.handle_reset,
+                        ),
+                        web.options(
+                            "/device/session/context/reset",
+                            self.session_context_handler.handle_options,
                         ),
                         web.post(
                             "/plugins/test", self.plugin_test_handler.handle_test

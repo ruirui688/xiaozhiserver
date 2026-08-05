@@ -101,6 +101,7 @@ public class ShiroConfig {
         filterMap.put("/device/address-book/lookup", "server");
         filterMap.put("/device/call/forward", "server");
         filterMap.put("/device/*/audio-preview-ticket", "oauth2");
+        filterMap.put("/device/*/conversation-context/reset", "oauth2");
         filterMap.put("/agent/chat-history/report", "server");
         filterMap.put("/agent/voice-print/enrollments/*/device-samples", "server");
         filterMap.put("/agent/chat-history/download/**", "anon");

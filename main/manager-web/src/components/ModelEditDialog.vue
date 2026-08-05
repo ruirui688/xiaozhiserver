@@ -584,6 +584,7 @@ export default {
                   options: inputType === "model-select"
                     ? (this.modelReferenceOptionsCache[modelReferenceKey] || [])
                     : this.normalizeFieldOptions(f),
+                  allowCreate: inputType === "select" && !!f.allowCreate,
                   placeholder: this.getFieldPlaceholder(f),
                   section: this.getFieldSection(f),
                   helpText: f.helpText || this.getFieldHelpText(f.key),

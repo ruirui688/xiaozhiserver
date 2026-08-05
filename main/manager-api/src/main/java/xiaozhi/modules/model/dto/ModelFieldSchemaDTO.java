@@ -50,6 +50,9 @@ public class ModelFieldSchemaDTO implements Serializable {
     @Schema(description = "可选项")
     private List<String> options = List.of();
 
+    @Schema(description = "下拉框是否允许录入目录外的值")
+    private Boolean allowCreate;
+
     @Schema(description = "帮助说明")
     private String helpText;
 

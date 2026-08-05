@@ -24,6 +24,8 @@
       :placeholder="field.placeholder"
       filterable
       clearable
+      :allow-create="!!field.allowCreate"
+      :default-first-option="!!field.allowCreate"
       :loading="!!field.loading"
       @input="updateValue"
     >

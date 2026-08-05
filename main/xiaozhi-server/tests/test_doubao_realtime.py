@@ -1,6 +1,8 @@
 import asyncio
 import gzip
 import json
+import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -12,6 +14,7 @@ from core.conversation.router import ConversationRouter
 from core.providers.realtime.doubao_realtime import (
     CHAT_RESPONSE,
     CHAT_TEXT_QUERY,
+    CLIENT_INTERRUPT,
     CONNECTION_STARTED,
     DOUBAO_APP_KEY,
     DOUBAO_RESOURCE_ID,
@@ -27,7 +30,9 @@ from core.providers.realtime.doubao_realtime import (
     TASK_REQUEST,
     TTS_ENDED,
     TTS_RESPONSE,
+    TTS_SENTENCE_START,
     DoubaoRealtimeTextProbe,
+    DoubaoRealtimeSession,
     DoubaoRealtimeTransport,
     build_client_frame,
     build_start_session,
@@ -243,6 +248,66 @@ def test_probe_collects_real_text_audio_and_terminal_event():
     asyncio.run(scenario())
 
 
+def test_doubao_sends_preview_then_complete_subtitle_before_stop(monkeypatch):
+    protocol = []
+
+    async def fake_tts(_conn, state, text=None, **_kwargs):
+        protocol.append((state, text))
+        return True
+
+    async def fake_audio(_conn, _packet):
+        return None
+
+    monkeypatch.setattr(
+        "core.providers.realtime.doubao_realtime.send_tts_message", fake_tts
+    )
+    monkeypatch.setattr(
+        "core.providers.realtime.doubao_realtime.sendAudio", fake_audio
+    )
+    monkeypatch.setattr(
+        "core.providers.realtime.doubao_realtime.enqueue_tts_report",
+        lambda *_args, **_kwargs: True,
+    )
+
+    class Encoder:
+        def encode_pcm_to_opus_stream(self, data, is_end, callback):
+            if data and not is_end:
+                callback(b"opus")
+
+    async def scenario():
+        conn = SimpleNamespace(
+            sentence_id=None,
+            dialogue=SimpleNamespace(put=lambda _message: None),
+        )
+        session = object.__new__(DoubaoRealtimeSession)
+        session.conn = conn
+        session.encoder = Encoder()
+        session.response_audio = []
+        session.response_text = ""
+        session.last_response_text = ""
+        session._subtitle_text_sent = ""
+        session._reply_started = False
+        session._response_active = True
+        session._context_reset_pending = False
+        session._pending_voice = None
+        session._session_maintenance_task = None
+        session.response_done = asyncio.Event()
+        await session.handle_event(
+            {"event": TTS_SENTENCE_START, "payload": {"text": "您"}}
+        )
+        await session.handle_event({"event": TTS_RESPONSE, "payload": b"pcm"})
+        session.response_text = "您好，这是完整回答"
+        await session.handle_event({"event": TTS_ENDED, "payload": {}})
+
+    asyncio.run(scenario())
+    assert protocol == [
+        ("start", None),
+        ("sentence_start", "您"),
+        ("sentence_start", "您好，这是完整回答"),
+        ("stop", None),
+    ]
+
+
 def test_registry_and_router_select_doubao_without_changing_model_id_contract():
     assert isinstance(
         create_realtime_probe({"type": "doubao_realtime"}),
@@ -278,3 +343,116 @@ def test_registry_and_router_select_doubao_without_changing_model_id_contract():
 
     asyncio.run(scenario())
     assert created == ["doubao_realtime"]
+
+
+def test_doubao_natural_barge_in_uses_interrupt_and_preserves_new_audio(monkeypatch):
+    sent = []
+    convergence = []
+
+    class Transport:
+        async def send_event(self, event_id, payload):
+            sent.append((event_id, payload))
+
+    class Encoder:
+        def reset_state(self):
+            convergence.append("encoder_reset")
+
+    class Logger:
+        def bind(self, **_kwargs):
+            return self
+
+        def warning(self, *_args, **_kwargs):
+            pass
+
+    async def fake_abort(_conn, preserve_user_audio=False):
+        convergence.append(("local_abort", preserve_user_audio))
+
+    monkeypatch.setattr(
+        "core.providers.realtime.doubao_realtime.handleAbortMessage", fake_abort
+    )
+
+    async def scenario():
+        session = object.__new__(DoubaoRealtimeSession)
+        session.conn = SimpleNamespace(logger=Logger())
+        session.transport = Transport()
+        session.encoder = Encoder()
+        session.response_text = "partial"
+        session.response_audio = [b"reply"]
+        session.input_audio = [b"new-user-audio"]
+        session._barge_in_active = False
+        session._reply_started = True
+        session._response_active = True
+        session.response_done = asyncio.Event()
+
+        await session._handle_natural_barge_in()
+
+        assert sent == [(CLIENT_INTERRUPT, {})]
+        assert session.input_audio == [b"new-user-audio"]
+        assert session._response_active is False
+        assert session.response_done.is_set()
+        assert convergence == ["encoder_reset", ("local_abort", True)]
+
+    asyncio.run(scenario())
+
+
+def test_doubao_context_reset_and_voice_change_rebuild_upstream_session():
+    transports = []
+
+    class Logger:
+        def bind(self, **_kwargs):
+            return self
+
+        def warning(self, *_args, **_kwargs):
+            pass
+
+    class Transport:
+        def __init__(self, label):
+            self.label = label
+            self.closed = False
+            self.configured = []
+            transports.append(self)
+
+        async def connect(self, handler):
+            self.handler = handler
+
+        async def configure(self, prompt, tools=None, config_override=None):
+            self.configured.append((prompt, tools, config_override))
+
+        async def close(self):
+            self.closed = True
+
+    async def scenario():
+        old = Transport("old")
+        conn = SimpleNamespace(
+            logger=Logger(),
+            prompt="system prompt",
+            prompt_manager=None,
+            config={"selected_module": {}},
+            func_handler=None,
+            audio_input_ready=threading.Event(),
+            conversation_ready=threading.Event(),
+        )
+        conn.audio_input_ready.set()
+        conn.conversation_ready.set()
+        session = DoubaoRealtimeSession(
+            conn,
+            {"voice": "old-voice"},
+            transport=old,
+            transport_factory=lambda: Transport("new"),
+        )
+        session._response_active = True
+        assert session.request_voice_change("account-enabled-voice") is True
+        assert session.request_context_reset() is True
+        session._response_active = False
+
+        assert await session.reset_context_now() is True
+
+        assert old.closed is True
+        assert session.transport.label == "new"
+        assert session.transport.configured[0][0] == "system prompt"
+        assert session.current_voice() == "account-enabled-voice"
+        assert conn.audio_input_ready.is_set()
+        assert conn.conversation_ready.is_set()
+        await session.close()
+
+    asyncio.run(scenario())

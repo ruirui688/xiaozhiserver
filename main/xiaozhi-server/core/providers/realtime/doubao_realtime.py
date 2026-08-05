@@ -13,8 +13,10 @@ from urllib.parse import urlsplit, urlunsplit
 import opuslib_next
 import websockets
 
+from core.handle.abortHandle import handleAbortMessage
 from core.handle.reportHandle import enqueue_asr_report, enqueue_tts_report
 from core.handle.sendAudioHandle import sendAudio, send_stt_display, send_tts_message
+from core.providers.realtime.base import RealtimeCapabilities
 from core.utils.dialogue import Message
 from core.utils.opus_encoder_utils import OpusEncoderUtils
 from core.utils.prompt_budget import compact_memory_context
@@ -25,6 +27,16 @@ DOUBAO_REALTIME_PATH = "/api/v3/realtime/dialogue"
 DOUBAO_RESOURCE_ID = "volc.speech.dialog"
 DOUBAO_APP_KEY = "PlgvMymc7f3tQnJ6"
 SUPPORTED_ADAPTERS = {"doubao_realtime", "doubao-realtime"}
+CAPABILITIES = RealtimeCapabilities(
+    native_function_calling=False,
+    natural_barge_in=True,
+    context_reset=True,
+    session_voice=True,
+    custom_voice_ids=True,
+)
+VOICE_CATALOG = (
+    {"id": "zh_female_vv_jupiter_bigtts", "name": "Vivi"},
+)
 SUPPORTED_MODELS = {"1.2.1.1", "2.2.0.0"}
 DEFAULT_MAX_EVENT_BYTES = 10 * 1024 * 1024
 MAX_EVENT_BYTES_LIMIT = 16 * 1024 * 1024
@@ -502,12 +514,19 @@ class DoubaoRealtimeTransport:
 class DoubaoRealtimeSession:
     """Bind one Doubao realtime session to one authenticated device connection."""
 
-    def __init__(self, conn, config: Dict[str, Any], transport=None):
+    def __init__(
+        self, conn, config: Dict[str, Any], transport=None, transport_factory=None
+    ):
         self.conn = conn
         self.config = dict(config or {})
-        self.transport = transport or DoubaoRealtimeTransport(
-            self.config, conn.logger.bind(tag=__name__)
-        )
+        bound_logger = conn.logger.bind(tag=__name__)
+        self._transport_factory = transport_factory
+        if transport is None:
+            self._transport_factory = self._transport_factory or (
+                lambda: DoubaoRealtimeTransport(self.config, bound_logger)
+            )
+            transport = self._transport_factory()
+        self.transport = transport
         self.decoder = opuslib_next.Decoder(16000, 1)
         self.encoder = OpusEncoderUtils(24000, 1, 60)
         self.input_audio = []
@@ -515,12 +534,102 @@ class DoubaoRealtimeSession:
         self.response_text = ""
         self.current_transcript = ""
         self.last_response_text = ""
+        self._subtitle_text_sent = ""
         self.response_done = asyncio.Event()
         self._reply_started = False
         self._response_active = False
         self._turn_lock = asyncio.Lock()
         self._closed = False
         self._warned_tools = False
+        self._barge_in_active = False
+        self._context_reset_pending = False
+        self._context_resetting = False
+        self._pending_voice = None
+        self._session_maintenance_task = None
+
+    @property
+    def capabilities(self):
+        return CAPABILITIES
+
+    def voice_catalog(self):
+        return [dict(item) for item in VOICE_CATALOG]
+
+    def current_voice(self):
+        return str(self.config.get("voice") or "zh_female_vv_jupiter_bigtts")
+
+    def request_voice_change(self, voice: str) -> bool:
+        voice_id = str(voice or "").strip()
+        if not CAPABILITIES.session_voice or not voice_id or len(voice_id) > 128:
+            return False
+        self.config["voice"] = voice_id
+        self._pending_voice = voice_id
+        if not self._response_active:
+            self._schedule_session_maintenance_threadsafe()
+        return True
+
+    def request_context_reset(self) -> bool:
+        if not CAPABILITIES.context_reset or self._transport_factory is None:
+            return False
+        self._context_reset_pending = True
+        if not self._response_active:
+            self._schedule_session_maintenance_threadsafe()
+        return True
+
+    async def reset_context_now(self) -> bool:
+        if (
+            not CAPABILITIES.context_reset
+            or self._transport_factory is None
+            or self._response_active
+        ):
+            return False
+        self._context_reset_pending = True
+        return await self._reconnect_for_session_controls()
+
+    def _schedule_session_maintenance_threadsafe(self) -> None:
+        loop = getattr(self.conn, "loop", None)
+        if loop is not None and loop.is_running():
+            loop.call_soon_threadsafe(self._schedule_session_maintenance)
+
+    def _schedule_session_maintenance(self) -> None:
+        task = getattr(self, "_session_maintenance_task", None)
+        if task is not None and not task.done():
+            return
+        if not getattr(self, "_context_reset_pending", False) and getattr(
+            self, "_pending_voice", None
+        ) is None:
+            return
+        self._session_maintenance_task = asyncio.create_task(
+            self._reconnect_for_session_controls(),
+            name="doubao-realtime-session-controls",
+        )
+
+    async def _reconnect_for_session_controls(self) -> bool:
+        self._context_resetting = True
+        self._context_reset_pending = False
+        self.conn.audio_input_ready.clear()
+        self.conn.conversation_ready.clear()
+        try:
+            old_transport = self.transport
+            await old_transport.close()
+            self.transport = self._transport_factory()
+            self.input_audio = []
+            self.current_transcript = ""
+            self.encoder.reset_state()
+            await self.transport.connect(self.handle_event)
+            await self.transport.configure(self._session_prompt(), [])
+            await self.refresh_tools()
+            self._pending_voice = None
+            self._context_resetting = False
+            if not self._closed:
+                self.conn.audio_input_ready.set()
+                self.conn.conversation_ready.set()
+            return not self._closed
+        except Exception as error:
+            self.conn.logger.bind(tag=__name__).warning(
+                "应用豆包Realtime会话控制失败: errorType={}",
+                type(error).__name__,
+            )
+            return False
 
     async def initialize(self) -> None:
         await self.transport.connect(self.handle_event)
@@ -546,6 +655,8 @@ class DoubaoRealtimeSession:
             )
 
     async def handle_audio(self, opus_packet: bytes) -> bool:
+        if getattr(self, "_context_resetting", False):
+            return True
         try:
             pcm = self.decoder.decode(opus_packet, 960)
         except opuslib_next.OpusError:
@@ -558,6 +669,8 @@ class DoubaoRealtimeSession:
         return True
 
     async def handle_listen(self, message: Dict[str, Any]) -> bool:
+        if getattr(self, "_context_resetting", False):
+            return True
         state = message.get("state")
         if state == "start":
             self.input_audio = []
@@ -573,6 +686,8 @@ class DoubaoRealtimeSession:
         clean_text = str(text or "").strip()
         if not clean_text:
             return True
+        if getattr(self, "_context_resetting", False):
+            raise RuntimeError("豆包 Realtime 正在重建上下文，请稍后再试")
         async with self._turn_lock:
             if self._response_active:
                 raise RuntimeError("豆包 Realtime 正在处理上一轮响应")
@@ -607,7 +722,7 @@ class DoubaoRealtimeSession:
         payload = event.get("payload") or {}
         if event_id == ASR_INFO:
             if self._reply_started or self._response_active:
-                await self._finish_response(reason="abort")
+                await self._handle_natural_barge_in()
             self.current_transcript = ""
         elif event_id == ASR_RESPONSE:
             results = payload.get("results") if isinstance(payload, dict) else []
@@ -626,11 +741,13 @@ class DoubaoRealtimeSession:
             self.current_transcript = ""
             self._response_active = True
             self.response_done.clear()
+            self._barge_in_active = False
             with self.conn._abort_lock:
                 self.conn.client_abort = False
         elif event_id == CHAT_RESPONSE:
             if self._response_active and isinstance(payload, dict):
                 self.response_text += str(payload.get("content") or "")
+                await self._send_subtitle_preview_if_ready()
         elif event_id == TTS_SENTENCE_START:
             if self._response_active and not self.response_text and isinstance(payload, dict):
                 self.response_text = str(payload.get("text") or "")
@@ -660,11 +777,44 @@ class DoubaoRealtimeSession:
                 self.conn, "start", protocol_sentence_id=self.conn.sentence_id
             )
             self._reply_started = True
+        await self._send_subtitle_preview_if_ready()
         packets = []
         self.encoder.encode_pcm_to_opus_stream(bytes(pcm), False, packets.append)
         for packet in packets:
             self.response_audio.append(packet)
             await sendAudio(self.conn, packet)
+
+    async def _send_subtitle_preview_if_ready(self) -> None:
+        preview = self.response_text.strip()
+        if not self._reply_started or not preview or self._subtitle_text_sent:
+            return
+        await send_tts_message(
+            self.conn,
+            "sentence_start",
+            preview,
+            protocol_sentence_id=self.conn.sentence_id,
+        )
+        self._subtitle_text_sent = preview
+
+    async def _handle_natural_barge_in(self) -> None:
+        if getattr(self, "_barge_in_active", False):
+            return
+        self._barge_in_active = True
+        try:
+            await self.transport.send_event(CLIENT_INTERRUPT, {})
+        except Exception as error:
+            self.conn.logger.bind(tag=__name__).warning(
+                "豆包Realtime自然打断上游取消失败: errorType={}",
+                type(error).__name__,
+            )
+        self.response_text = ""
+        self.response_audio = []
+        self._subtitle_text_sent = ""
+        self._response_active = False
+        self.encoder.reset_state()
+        await handleAbortMessage(self.conn, preserve_user_audio=True)
+        self._reply_started = False
+        self.response_done.set()
 
     async def _finish_response(self, reason=None) -> None:
         if self._reply_started:
@@ -679,6 +829,13 @@ class DoubaoRealtimeSession:
             enqueue_tts_report(self.conn, text, list(self.response_audio))
         self.last_response_text = text
         if self._reply_started:
+            if text and self._subtitle_text_sent != text:
+                await send_tts_message(
+                    self.conn,
+                    "sentence_start",
+                    text,
+                    protocol_sentence_id=self.conn.sentence_id,
+                )
             await send_tts_message(
                 self.conn,
                 "stop",
@@ -689,14 +846,20 @@ class DoubaoRealtimeSession:
             )
         self.response_text = ""
         self.response_audio = []
+        self._subtitle_text_sent = ""
         self._reply_started = False
         self._response_active = False
         self.response_done.set()
+        self._schedule_session_maintenance()
 
     async def close(self) -> None:
         if self._closed:
             return
         self._closed = True
+        maintenance_task = getattr(self, "_session_maintenance_task", None)
+        if maintenance_task is not None and not maintenance_task.done():
+            maintenance_task.cancel()
+            await asyncio.gather(maintenance_task, return_exceptions=True)
         await self.transport.close()
         self.encoder.close()
 

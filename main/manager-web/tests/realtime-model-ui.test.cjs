@@ -125,6 +125,16 @@ describe("realtime multimodal model UI", () => {
     );
   });
 
+  test("voice select creation follows backend field capability instead of the field name", () => {
+    const source = require("node:fs").readFileSync(
+      require("node:path").resolve(__dirname, "../src/components/ModelEditDialog.vue"),
+      "utf8"
+    );
+
+    assert.match(source, /allowCreate: inputType === "select" && !!f\.allowCreate/);
+    assert.doesNotMatch(source, /f\.key === "voice"/);
+  });
+
   test("model test details expose realtime first-text and first-audio metrics", () => {
     const component = loadVueComponent("src/views/ModelConfig.vue", {
       "@/apis/api": { __esModule: true, default: {} },

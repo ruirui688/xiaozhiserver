@@ -48,6 +48,7 @@ import xiaozhi.modules.agent.entity.AgentTagEntity;
 import xiaozhi.modules.agent.entity.AgentTemplateEntity;
 import xiaozhi.modules.agent.runtime.AgentRuntimeConfigRefreshEvent;
 import xiaozhi.modules.agent.support.AgentAsrHotwordSelection;
+import xiaozhi.modules.agent.support.AgentLlmIntentCompatibility;
 import xiaozhi.modules.agent.service.AgentChatHistoryService;
 import xiaozhi.modules.agent.service.AgentContextProviderService;
 import xiaozhi.modules.agent.service.AgentPluginMappingService;
@@ -606,12 +607,7 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
             log.warn("LLM model provider type is empty, skip intent parameter strict check. llmModelId={}", llmModelId);
             return true;
         }
-        // 如果查询大语言模型是openai或者ollama，意图识别选参数都可以
-        if (StringUtils.equalsAnyIgnoreCase(type, "openai", "ollama")) {
-            return true;
-        }
-        // 除了openai和ollama的类型，不可以选择id为Intent_function_call（函数调用）的意图识别
-        return !"Intent_function_call".equals(intentModelId);
+        return AgentLlmIntentCompatibility.supportsIntent(type, intentModelId);
     }
 
     private String resolveLLMProviderType(ModelConfigEntity model) {

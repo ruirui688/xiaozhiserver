@@ -1454,6 +1454,13 @@ class ConnectionHandler:
         return "intent_llm"
 
     def _llm_supports_native_function_call(self):
+        router = self._get_conversation_router()
+        if router.is_realtime:
+            capabilities = router.capabilities
+            return bool(
+                capabilities is not None
+                and capabilities.native_function_calling
+            )
         return bool(getattr(self.llm, "supports_native_function_call", False))
 
     def _switch_to_intent_llm_provider(self):

@@ -163,16 +163,8 @@
               </el-form-item>
             </div>
 
-            <el-form-item label="下发到设备">
-              <el-select v-model="form.deviceIds" multiple collapse-tags placeholder="请选择本地识别设备">
-                <el-option
-                  v-for="device in devices"
-                  :key="device.id"
-                  :label="`${device.name} · ${device.macAddress}`"
-                  :value="device.id"
-                />
-              </el-select>
-              <div class="field-help">只有选中的设备会收到这张照片。设备同步状态需要固件上报后才能展示。</div>
+            <el-form-item>
+              <PersonDeviceTargetSelector v-model="form.deviceIds" :devices="devices" :max-selection="50" />
             </el-form-item>
 
             <el-form-item label="识别后动作" prop="recognitionAction">
@@ -214,6 +206,7 @@
 <script>
 import Api from "@/apis/api";
 import HeaderBar from "@/components/HeaderBar.vue";
+import PersonDeviceTargetSelector from "@/components/person/PersonDeviceTargetSelector.vue";
 import ResourceCenterNav from "@/components/resource/ResourceCenterNav.vue";
 import VersionFooter from "@/components/VersionFooter.vue";
 
@@ -233,7 +226,7 @@ function emptyForm() {
 
 export default {
   name: "PersonProfileManagement",
-  components: { HeaderBar, ResourceCenterNav, VersionFooter },
+  components: { HeaderBar, PersonDeviceTargetSelector, ResourceCenterNav, VersionFooter },
   data() {
     return {
       loading: false,

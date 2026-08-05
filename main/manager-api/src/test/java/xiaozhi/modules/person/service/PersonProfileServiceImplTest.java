@@ -7,11 +7,14 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.util.Date;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
 import xiaozhi.common.exception.RenException;
+import xiaozhi.modules.agent.dao.AgentDao;
+import xiaozhi.modules.agent.entity.AgentEntity;
 import xiaozhi.modules.device.dao.DeviceDao;
 import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.person.dao.PersonDeviceBindingDao;
@@ -25,6 +28,34 @@ import xiaozhi.modules.person.vo.DeviceFaceRecognitionActionVO;
 import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 
 class PersonProfileServiceImplTest {
+    @Test
+    void workspaceDeviceOptionsExposeHumanReadableManagementFacts() {
+        Fixture fixture = new Fixture();
+        DeviceEntity device = fixture.device();
+        device.setAlias("展厅入口");
+        device.setBoard("esp32-s3");
+        device.setAppVersion("1.2.3");
+        Date lastConnectedAt = new Date(1785897000000L);
+        device.setLastConnectedAt(lastConnectedAt);
+        AgentEntity agent = new AgentEntity();
+        agent.setId("agent-a");
+        agent.setWorkspaceId("workspace-a");
+        agent.setAgentName("迎宾助手");
+        when(fixture.workspacePermissionService.currentWorkspaceId()).thenReturn("workspace-a");
+        when(fixture.deviceDao.selectList(any())).thenReturn(List.of(device));
+        when(fixture.agentDao.selectList(any())).thenReturn(List.of(agent));
+
+        var options = fixture.service.listWorkspaceDevices();
+
+        assertEquals(1, options.size());
+        assertEquals("展厅入口", options.get(0).getAlias());
+        assertEquals("迎宾助手", options.get(0).getAgentName());
+        assertEquals("agent-a", options.get(0).getAgentId());
+        assertEquals("esp32-s3", options.get(0).getBoard());
+        assertEquals("1.2.3", options.get(0).getAppVersion());
+        assertEquals(lastConnectedAt, options.get(0).getLastConnectedAt());
+    }
+
     @Test
     void deviceCanOnlyReadExplicitlyBoundFaceInSameWorkspace() {
         Fixture fixture = new Fixture();
@@ -78,14 +109,17 @@ class PersonProfileServiceImplTest {
         final PersonDeviceBindingDao bindingDao = mock(PersonDeviceBindingDao.class);
         final PersonRecognitionEventDao eventDao = mock(PersonRecognitionEventDao.class);
         final DeviceDao deviceDao = mock(DeviceDao.class);
+        final AgentDao agentDao = mock(AgentDao.class);
         final PersonFaceStorage storage = mock(PersonFaceStorage.class);
+        final WorkspacePermissionService workspacePermissionService = mock(WorkspacePermissionService.class);
         final PersonProfileServiceImpl service = new PersonProfileServiceImpl(
                 profileDao,
                 bindingDao,
                 eventDao,
                 deviceDao,
+                agentDao,
                 storage,
-                mock(WorkspacePermissionService.class));
+                workspacePermissionService);
 
         DeviceEntity device() {
             DeviceEntity entity = new DeviceEntity();

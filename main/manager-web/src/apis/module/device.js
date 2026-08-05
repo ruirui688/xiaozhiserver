@@ -47,6 +47,20 @@ export default {
                 if (callback) callback(networkErrorResponse('获取真实音频预览票据失败'));
             }).send();
     },
+    // 清空在线设备当前短期对话上下文
+    resetConversationContext(deviceId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/device/${deviceId}/conversation-context/reset`)
+            .method('POST')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                console.error('清空设备短期上下文失败:', networkErrorSummary(err));
+                if (callback) callback(networkErrorResponse('清空设备短期上下文失败'));
+            }).send();
+    },
     // 解绑设备
     unbindDevice(device_id, callback) {
         RequestService.sendRequest()

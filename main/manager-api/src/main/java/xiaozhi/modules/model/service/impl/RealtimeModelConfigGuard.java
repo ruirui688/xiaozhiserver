@@ -7,6 +7,7 @@ import org.apache.commons.lang3.StringUtils;
 
 import cn.hutool.json.JSONObject;
 import xiaozhi.common.exception.RenException;
+import xiaozhi.modules.model.support.RealtimeAdapterCapabilityRegistry;
 
 /** Enforces the one-to-one contract between a Realtime template and its adapter. */
 public final class RealtimeModelConfigGuard {
@@ -73,7 +74,7 @@ public final class RealtimeModelConfigGuard {
     }
 
     private static boolean isRealtimeAdapter(String adapter) {
-        return TEMPLATE_ADAPTERS.containsValue(StringUtils.lowerCase(StringUtils.trimToEmpty(adapter)));
+        return RealtimeAdapterCapabilityRegistry.find(adapter).isPresent();
     }
 
     private static boolean isWssUrl(String endpointUrl) {

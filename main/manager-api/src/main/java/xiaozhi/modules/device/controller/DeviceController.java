@@ -26,6 +26,7 @@ import xiaozhi.common.utils.Result;
 import xiaozhi.modules.device.dto.DeviceAddressBookAliasDTO;
 import xiaozhi.modules.device.dto.DeviceAddressBookPermissionDTO;
 import xiaozhi.modules.device.dto.DeviceAudioPreviewTicketDTO;
+import xiaozhi.modules.device.dto.DeviceConversationContextResetDTO;
 import xiaozhi.modules.device.dto.DeviceManualAddDTO;
 import xiaozhi.modules.device.dto.DeviceRegisterDTO;
 import xiaozhi.modules.device.dto.DeviceUnBindDTO;
@@ -33,6 +34,7 @@ import xiaozhi.modules.device.dto.DeviceUpdateDTO;
 import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.device.service.DeviceAddressBookService;
 import xiaozhi.modules.device.service.DeviceAudioPreviewTicketService;
+import xiaozhi.modules.device.service.DeviceConversationContextService;
 import xiaozhi.modules.device.service.DeviceService;
 import xiaozhi.modules.device.vo.UserShowDeviceListVO;
 import xiaozhi.modules.security.user.SecurityUser;
@@ -49,17 +51,20 @@ public class DeviceController {
     private final SysParamsService sysParamsService;
     private final WorkspacePermissionService workspacePermissionService;
     private final DeviceAudioPreviewTicketService audioPreviewTicketService;
+    private final DeviceConversationContextService conversationContextService;
 
     public DeviceController(DeviceService deviceService, DeviceAddressBookService deviceAddressBookService,
             RedisUtils redisUtils, SysParamsService sysParamsService,
             WorkspacePermissionService workspacePermissionService,
-            DeviceAudioPreviewTicketService audioPreviewTicketService) {
+            DeviceAudioPreviewTicketService audioPreviewTicketService,
+            DeviceConversationContextService conversationContextService) {
         this.deviceService = deviceService;
         this.deviceAddressBookService = deviceAddressBookService;
         this.redisUtils = redisUtils;
         this.sysParamsService = sysParamsService;
         this.workspacePermissionService = workspacePermissionService;
         this.audioPreviewTicketService = audioPreviewTicketService;
+        this.conversationContextService = conversationContextService;
     }
 
     @PostMapping("/bind/{agentId}/{deviceCode}")
@@ -109,6 +114,13 @@ public class DeviceController {
         response.setHeader("Cache-Control", "no-store");
         response.setHeader("Pragma", "no-cache");
         return new Result<DeviceAudioPreviewTicketDTO>().ok(audioPreviewTicketService.issue(id));
+    }
+
+    @PostMapping("/{id}/conversation-context/reset")
+    @Operation(summary = "清空在线设备当前短期对话上下文")
+    @RequiresPermissions("sys:role:normal")
+    public Result<DeviceConversationContextResetDTO> resetConversationContext(@PathVariable String id) {
+        return new Result<DeviceConversationContextResetDTO>().ok(conversationContextService.reset(id));
     }
 
     @PostMapping("/bind/{agentId}")

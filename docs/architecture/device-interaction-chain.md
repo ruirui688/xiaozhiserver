@@ -549,6 +549,17 @@ handle/abortHandle.py:9-38  handleAbortMessage()
   - 发送 stop TTS 消息（try/except 保护）
 ```
 
+### 6.3 手动清空短期上下文
+
+智控台设备管理页可对一台在线设备执行“清空上下文”。浏览器只提交设备数据库记录 ID；manager-api 校验当前
+用户对设备 Workspace 的写权限，并从数据库事实派生 MAC 与 agentId，再通过内部 Bearer 服务密钥调用
+xiaozhi-server。Python 必须同时匹配活动连接和 agent 绑定，禁止仅凭请求体控制其他智能体连接。
+
+传统拼接模式清除当前连接的 Dialogue 与游戏/语义软状态；Realtime 模式还按 adapter 能力创建新的上游
+session，重新注入 system prompt、工具和当前会话音色。清空不删除后台聊天记录或长期记忆。为了避免旧回复在
+清空后迟到写回，设备正在收音、生成或播报时返回忙碌，管理员应在本轮结束后重试；会议、通话和声纹采集期间
+同样拒绝。
+
 ## 7. IoT 描述符
 
 ### 7.1 设备上报

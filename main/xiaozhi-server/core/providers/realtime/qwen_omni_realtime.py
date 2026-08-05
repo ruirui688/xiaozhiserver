@@ -13,9 +13,15 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import opuslib_next
 import websockets
 
+from core.handle.abortHandle import handleAbortMessage
 from core.handle.reportHandle import enqueue_asr_report, enqueue_tts_report
 from core.handle.sendAudioHandle import sendAudio, send_stt_display, send_tts_message
-from core.providers.realtime.base import event, realtime_tools, tool_output_text
+from core.providers.realtime.base import (
+    RealtimeCapabilities,
+    event,
+    realtime_tools,
+    tool_output_text,
+)
 from core.utils.dialogue import Message
 from core.utils.opus_encoder_utils import OpusEncoderUtils
 from core.utils.prompt_budget import compact_memory_context
@@ -27,6 +33,18 @@ WORKSPACE_REALTIME_HOST = re.compile(
     r"(?:cn-beijing|ap-southeast-1)\.maas\.aliyuncs\.com$"
 )
 SUPPORTED_ADAPTERS = {"qwen_omni_realtime", "qwen-omni-realtime"}
+CAPABILITIES = RealtimeCapabilities(
+    native_function_calling=True,
+    natural_barge_in=True,
+    context_reset=True,
+    session_voice=True,
+)
+VOICE_CATALOG = (
+    {"id": "Cherry", "name": "Cherry"},
+    {"id": "Serena", "name": "Serena"},
+    {"id": "Ethan", "name": "Ethan"},
+    {"id": "Chelsie", "name": "Chelsie"},
+)
 MANUAL_TURN_PCM = b"\x00\x00" * 3200
 MAX_REALTIME_IMAGE_BASE64_BYTES = 256 * 1024
 
@@ -288,12 +306,19 @@ class QwenOmniRealtimeTransport:
 class QwenOmniRealtimeSession:
     """Bind one realtime transport to one authenticated device connection."""
 
-    def __init__(self, conn, config: Dict[str, Any], transport=None):
+    def __init__(
+        self, conn, config: Dict[str, Any], transport=None, transport_factory=None
+    ):
         self.conn = conn
         self.config = dict(config or {})
-        self.transport = transport or QwenOmniRealtimeTransport(
-            self.config, conn.logger.bind(tag=__name__)
-        )
+        bound_logger = conn.logger.bind(tag=__name__)
+        self._transport_factory = transport_factory
+        if transport is None:
+            self._transport_factory = self._transport_factory or (
+                lambda: QwenOmniRealtimeTransport(self.config, bound_logger)
+            )
+            transport = self._transport_factory()
+        self.transport = transport
         self.decoder = opuslib_next.Decoder(16000, 1)
         self.encoder = OpusEncoderUtils(24000, 1, 60)
         self.response_text = ""
@@ -304,13 +329,128 @@ class QwenOmniRealtimeSession:
         self._tool_followup_pending = False
         self.response_done = asyncio.Event()
         self.last_response_text = ""
+        self._final_subtitle_text = ""
         self._reply_started = False
         self._response_active = False
         self._turn_lock = asyncio.Lock()
         self._instruction_turn_active = False
         self._restore_task = None
         self._cancel_generation = 0
+        self._barge_in_active = False
+        self._context_reset_pending = False
+        self._context_resetting = False
+        self._pending_voice = None
+        self._session_maintenance_task = None
         self._closed = False
+
+    @property
+    def capabilities(self):
+        return CAPABILITIES
+
+    def voice_catalog(self):
+        return [dict(item) for item in VOICE_CATALOG]
+
+    def current_voice(self):
+        return str(self.config.get("voice") or "Ethan")
+
+    def request_voice_change(self, voice: str) -> bool:
+        voice_id = str(voice or "").strip()
+        allowed = {item["id"] for item in VOICE_CATALOG}
+        if not CAPABILITIES.session_voice or voice_id not in allowed:
+            return False
+        self.config["voice"] = voice_id
+        self._pending_voice = voice_id
+        if not self._response_active and not self._instruction_turn_active:
+            self._schedule_session_maintenance_threadsafe()
+        return True
+
+    def request_context_reset(self) -> bool:
+        if not CAPABILITIES.context_reset or self._transport_factory is None:
+            return False
+        self._context_reset_pending = True
+        if not self._response_active and not self._instruction_turn_active:
+            self._schedule_session_maintenance_threadsafe()
+        return True
+
+    async def reset_context_now(self) -> bool:
+        if (
+            not CAPABILITIES.context_reset
+            or self._transport_factory is None
+            or self._response_active
+            or self._instruction_turn_active
+        ):
+            return False
+        self._context_reset_pending = True
+        await self._reconnect_for_context_reset()
+        return bool(
+            not self._context_resetting
+            and not self._closed
+            and self.conn.conversation_ready.is_set()
+        )
+
+    def _schedule_session_maintenance_threadsafe(self) -> None:
+        loop = getattr(self.conn, "loop", None)
+        if loop is not None and loop.is_running():
+            loop.call_soon_threadsafe(self._schedule_session_maintenance)
+
+    def _schedule_session_maintenance(self) -> None:
+        task = getattr(self, "_session_maintenance_task", None)
+        if task is not None and not task.done():
+            return
+        if not getattr(self, "_context_reset_pending", False) and getattr(
+            self, "_pending_voice", None
+        ) is None:
+            return
+        self._session_maintenance_task = asyncio.create_task(
+            self._apply_pending_session_controls(),
+            name="qwen-realtime-session-controls",
+        )
+
+    async def _apply_pending_session_controls(self) -> None:
+        try:
+            if self._context_reset_pending:
+                await self._reconnect_for_context_reset()
+            elif self._pending_voice is not None:
+                voice = self._pending_voice
+                tools = (
+                    self.conn.func_handler.get_functions()
+                    if self.conn.func_handler
+                    else []
+                )
+                await self.transport.configure(
+                    self._session_prompt(), tools, {"voice": voice}
+                )
+                transport_config = getattr(self.transport, "config", None)
+                if isinstance(transport_config, dict):
+                    transport_config["voice"] = voice
+                self._pending_voice = None
+        except Exception as error:
+            self.conn.logger.bind(tag=__name__).warning(
+                "应用Qwen Realtime会话控制失败: errorType={}",
+                type(error).__name__,
+            )
+            self.conn.audio_input_ready.clear()
+            self.conn.conversation_ready.clear()
+
+    async def _reconnect_for_context_reset(self) -> None:
+        self._context_resetting = True
+        self._context_reset_pending = False
+        self.conn.audio_input_ready.clear()
+        self.conn.conversation_ready.clear()
+        old_transport = self.transport
+        await old_transport.close()
+        self.transport = self._transport_factory()
+        self.completed_function_calls.clear()
+        self.function_calls.clear()
+        self.input_audio = []
+        self.encoder.reset_state()
+        await self.transport.connect(self.handle_event)
+        await self.refresh_tools()
+        self._pending_voice = None
+        self._context_resetting = False
+        if not self._closed:
+            self.conn.audio_input_ready.set()
+            self.conn.conversation_ready.set()
 
     async def initialize(self) -> None:
         await self.transport.connect(self.handle_event)
@@ -345,6 +485,8 @@ class QwenOmniRealtimeSession:
         await self.transport.configure(prompt, tools)
 
     async def handle_audio(self, opus_packet: bytes) -> bool:
+        if getattr(self, "_context_resetting", False):
+            return True
         if getattr(self, "_instruction_turn_active", False):
             self.conn.logger.bind(tag=__name__).debug(
                 "忽略Realtime手动文字/图片回合期间的并发设备音频"
@@ -362,6 +504,8 @@ class QwenOmniRealtimeSession:
         return True
 
     async def handle_listen(self, message: Dict[str, Any]) -> bool:
+        if getattr(self, "_context_resetting", False):
+            return True
         if self._instruction_turn_active:
             return True
         state = message.get("state")
@@ -377,6 +521,8 @@ class QwenOmniRealtimeSession:
         clean_text = str(text or "").strip()
         if not clean_text:
             return True
+        if getattr(self, "_context_resetting", False):
+            raise RuntimeError("Realtime 正在重建上下文，请稍后再试")
         async with self._turn_lock:
             if self._response_active or self._instruction_turn_active:
                 raise RuntimeError("Realtime 正在处理上一轮响应")
@@ -415,8 +561,13 @@ class QwenOmniRealtimeSession:
         self.response_text = ""
         self.response_audio = []
         self.input_audio = []
+        self._final_subtitle_text = ""
         self._reply_started = False
         self._response_active = False
+        self._barge_in_active = False
+        encoder = getattr(self, "encoder", None)
+        if encoder is not None:
+            encoder.reset_state()
         self.response_done.set()
         if upstream_error is not None:
             raise upstream_error
@@ -462,7 +613,12 @@ class QwenOmniRealtimeSession:
         try:
             if not self._closed:
                 self._instruction_turn_active = False
-                await self.refresh_tools()
+                if self._context_reset_pending:
+                    await self._reconnect_for_context_reset()
+                elif self._pending_voice is not None:
+                    await self._apply_pending_session_controls()
+                else:
+                    await self.refresh_tools()
         except Exception as error:
             self.conn.logger.bind(tag=__name__).warning(
                 "恢复Realtime常规会话配置失败: errorType={}", type(error).__name__
@@ -476,10 +632,13 @@ class QwenOmniRealtimeSession:
         event_type = payload.get("type")
         if event_type == "response.created":
             self._response_active = True
+            self._barge_in_active = False
             if self._tool_followup_pending:
                 self._tool_followup_pending = False
             with self.conn._abort_lock:
                 self.conn.client_abort = False
+        elif event_type == "input_audio_buffer.speech_started":
+            await self._handle_speech_started_barge_in()
         elif event_type in {
             "conversation.item.input_audio_transcription.completed",
             "input_audio_transcription.completed",
@@ -494,6 +653,7 @@ class QwenOmniRealtimeSession:
             if not self._response_active:
                 return
             self.response_text += str(payload.get("delta") or "")
+            await self._send_subtitle_preview_if_ready()
         elif event_type in {"response.audio_transcript.done", "response.text.done"}:
             if not self._response_active:
                 return
@@ -502,13 +662,17 @@ class QwenOmniRealtimeSession:
             ).strip()
             if completed_text:
                 self.response_text = completed_text
-                if self._reply_started:
+                if (
+                    self._reply_started
+                    and self._final_subtitle_text != completed_text
+                ):
                     await send_tts_message(
                         self.conn,
                         "sentence_start",
                         completed_text,
                         protocol_sentence_id=self.conn.sentence_id,
                     )
+                    self._final_subtitle_text = completed_text
         elif event_type == "response.audio.delta":
             if not self._response_active:
                 self.conn.logger.bind(tag=__name__).debug(
@@ -578,12 +742,53 @@ class QwenOmniRealtimeSession:
                 self.conn, "start", protocol_sentence_id=self.conn.sentence_id
             )
             self._reply_started = True
+        await self._send_subtitle_preview_if_ready()
         pcm = base64.b64decode(delta)
         packets = []
         self.encoder.encode_pcm_to_opus_stream(pcm, False, packets.append)
         for packet in packets:
             self.response_audio.append(packet)
             await sendAudio(self.conn, packet)
+
+    async def _send_subtitle_preview_if_ready(self) -> None:
+        preview = self.response_text.strip()
+        if not self._reply_started or not preview or self._final_subtitle_text:
+            return
+        await send_tts_message(
+            self.conn,
+            "sentence_start",
+            preview,
+            protocol_sentence_id=self.conn.sentence_id,
+        )
+        self._final_subtitle_text = preview
+
+    async def _handle_speech_started_barge_in(self) -> None:
+        if getattr(self, "_barge_in_active", False) or not (
+            self._response_active
+            or self._reply_started
+            or self._tool_followup_pending
+            or self.function_calls
+        ):
+            return
+        self._barge_in_active = True
+        self._cancel_generation += 1
+        self.function_calls.clear()
+        self._tool_followup_pending = False
+        try:
+            await self.transport.send(event("response.cancel"))
+        except Exception as error:
+            self.conn.logger.bind(tag=__name__).warning(
+                "Qwen Realtime自然打断上游取消失败: errorType={}",
+                type(error).__name__,
+            )
+        self.response_text = ""
+        self.response_audio = []
+        self._final_subtitle_text = ""
+        self._response_active = False
+        self.encoder.reset_state()
+        await handleAbortMessage(self.conn, preserve_user_audio=True)
+        self._reply_started = False
+        self.response_done.set()
 
     async def _handle_function_call(self, payload: Dict[str, Any]) -> None:
         item = payload.get("item") if isinstance(payload.get("item"), dict) else {}
@@ -636,6 +841,13 @@ class QwenOmniRealtimeSession:
             enqueue_tts_report(self.conn, text, list(self.response_audio))
         self.last_response_text = text
         if self._reply_started:
+            if text and getattr(self, "_final_subtitle_text", "") != text:
+                await send_tts_message(
+                    self.conn,
+                    "sentence_start",
+                    text,
+                    protocol_sentence_id=self.conn.sentence_id,
+                )
             await send_tts_message(
                 self.conn,
                 "stop",
@@ -647,9 +859,12 @@ class QwenOmniRealtimeSession:
         self.response_text = ""
         self.response_audio = []
         self.input_audio = []
+        self._final_subtitle_text = ""
         self._reply_started = False
         self._response_active = False
         self.response_done.set()
+        if not getattr(self, "_instruction_turn_active", False):
+            self._schedule_session_maintenance()
 
     async def close(self) -> None:
         if self._closed:
@@ -658,6 +873,10 @@ class QwenOmniRealtimeSession:
         if self._restore_task is not None and not self._restore_task.done():
             self._restore_task.cancel()
             await asyncio.gather(self._restore_task, return_exceptions=True)
+        maintenance_task = getattr(self, "_session_maintenance_task", None)
+        if maintenance_task is not None and not maintenance_task.done():
+            maintenance_task.cancel()
+            await asyncio.gather(maintenance_task, return_exceptions=True)
         await self.transport.close()
         self.encoder.close()
 

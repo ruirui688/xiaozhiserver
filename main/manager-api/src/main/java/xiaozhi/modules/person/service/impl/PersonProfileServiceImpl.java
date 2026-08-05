@@ -21,6 +21,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 
 import lombok.RequiredArgsConstructor;
 import xiaozhi.common.exception.RenException;
+import xiaozhi.modules.agent.dao.AgentDao;
+import xiaozhi.modules.agent.entity.AgentEntity;
 import xiaozhi.modules.device.dao.DeviceDao;
 import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.person.dao.PersonDeviceBindingDao;
@@ -50,6 +52,7 @@ public class PersonProfileServiceImpl implements PersonProfileService {
     private final PersonDeviceBindingDao bindingDao;
     private final PersonRecognitionEventDao eventDao;
     private final DeviceDao deviceDao;
+    private final AgentDao agentDao;
     private final PersonFaceStorage faceStorage;
     private final WorkspacePermissionService workspacePermissionService;
 
@@ -78,12 +81,30 @@ public class PersonProfileServiceImpl implements PersonProfileService {
     public List<PersonDeviceOptionVO> listWorkspaceDevices() {
         String workspaceId = workspacePermissionService.currentWorkspaceId();
         workspacePermissionService.requireRead(workspaceId);
-        return workspaceDevices(workspaceId).stream()
+        List<DeviceEntity> devices = workspaceDevices(workspaceId);
+        Set<String> agentIds = devices.stream()
+                .map(DeviceEntity::getAgentId)
+                .filter(StringUtils::isNotBlank)
+                .collect(java.util.stream.Collectors.toSet());
+        Map<String, String> agentNames = new LinkedHashMap<>();
+        if (!agentIds.isEmpty()) {
+            for (AgentEntity agent : agentDao.selectList(new LambdaQueryWrapper<AgentEntity>()
+                    .eq(AgentEntity::getWorkspaceId, workspaceId)
+                    .in(AgentEntity::getId, agentIds))) {
+                agentNames.put(agent.getId(), agent.getAgentName());
+            }
+        }
+        return devices.stream()
                 .map(device -> PersonDeviceOptionVO.builder()
                         .id(device.getId())
                         .name(deviceName(device))
+                        .alias(StringUtils.trimToNull(device.getAlias()))
                         .macAddress(device.getMacAddress())
                         .board(device.getBoard())
+                        .appVersion(device.getAppVersion())
+                        .agentId(device.getAgentId())
+                        .agentName(agentNames.get(device.getAgentId()))
+                        .lastConnectedAt(device.getLastConnectedAt())
                         .build())
                 .toList();
     }

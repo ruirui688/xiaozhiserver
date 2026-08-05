@@ -1,7 +1,17 @@
 """Shared protocol helpers for realtime providers."""
 
 import json
+from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List
+
+
+@dataclass(frozen=True)
+class RealtimeCapabilities:
+    native_function_calling: bool = False
+    natural_barge_in: bool = False
+    context_reset: bool = False
+    session_voice: bool = False
+    custom_voice_ids: bool = False
 
 
 def event(event_type: str, **payload: Any) -> Dict[str, Any]:
