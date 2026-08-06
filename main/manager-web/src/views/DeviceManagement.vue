@@ -68,10 +68,6 @@
                   <el-button size="mini" type="text" @click="handleAudioPreview(scope.row)">
                     {{ $t('deviceAudioPreview.button') }}
                   </el-button>
-                  <el-button size="mini" type="text" :loading="scope.row._resettingContext"
-                    @click="handleResetConversationContext(scope.row)">
-                    清空上下文
-                  </el-button>
                   <el-button size="mini" type="text" @click="handleScenes(scope.row)">场景</el-button>
                   <el-button size="mini" type="text" @click="handleUnbind(scope.row.device_id)">
                     {{ $t('device.unbind') }}
@@ -303,28 +299,6 @@ export default {
     },
     handleAudioPreview(row) {
       this.$refs.audioPreviewDialog.open(row);
-    },
-    handleResetConversationContext(row) {
-      if (!row || row._resettingContext) return;
-      this.$confirm(
-        '只清空这台在线设备当前会话的短期上下文，不会删除聊天记录或长期记忆。是否继续？',
-        '清空上下文',
-        {
-          confirmButtonText: this.$t('button.ok'),
-          cancelButtonText: this.$t('button.cancel'),
-          type: 'warning'
-        }
-      ).then(() => {
-        this.$set(row, '_resettingContext', true);
-        Api.device.resetConversationContext(row.device_id, ({ data }) => {
-          this.$set(row, '_resettingContext', false);
-          if (data.code === 0) {
-            this.$message.success('当前设备的短期上下文已清空');
-          } else {
-            this.$message.error(data.msg || '清空上下文失败');
-          }
-        });
-      }).catch(() => {});
     },
     handleScenes(row) {
       this.$refs.sceneDialog.open(row);
