@@ -930,8 +930,8 @@ build_server_pipeline() {
     if [[ "$BUILD_BASE" == "auto" \
       && "$server_base_image" == "$SERVER_BASE_CACHE_IMAGE" \
       && "$LAST_DOCKER_LOG_FILE" == "${LOG_DIR}"/* \
-      && -f "$LAST_DOCKER_LOG_FILE" \
-      && grep -Eq 'failed to resolve source metadata|could not fetch content descriptor|failed to copy' "$LAST_DOCKER_LOG_FILE" ]]; then
+      && -f "$LAST_DOCKER_LOG_FILE" ]] \
+      && grep -Eq 'failed to resolve source metadata|could not fetch content descriptor|failed to copy' "$LAST_DOCKER_LOG_FILE"; then
       echo "Server base cache is not readable; rebuilding the selected base once and retrying." >&2
       local previous_build_base="$BUILD_BASE"
       local base_rebuild_status=0
