@@ -71,6 +71,23 @@ def test_session_control_tools_are_default_and_voice_schema_uses_catalog():
     assert "pitch" not in schema["properties"]
 
 
+def test_runtime_builtin_prompt_uses_resource_catalog_override():
+    conn = _voice_conn()
+    conn.config.update({
+        "Intent": {},
+        "tool_prompt_overrides": {
+            "reset_conversation_context": "仅在当前用户明确要求忘记此前聊天时调用。"
+        },
+    })
+    conn.intent_type = "function_call"
+
+    tools = ServerPluginExecutor(conn).get_tools()
+
+    assert tools["reset_conversation_context"].description["function"]["description"] == (
+        "仅在当前用户明确要求忘记此前聊天时调用。"
+    )
+
+
 def test_session_tts_options_validate_range_and_provider_capabilities_atomically():
     options = SessionTTSOptions()
     tts = AdjustableTTS()

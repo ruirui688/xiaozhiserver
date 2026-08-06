@@ -961,6 +961,10 @@ export default {
               }
               const params = meta.reduce((m, f) => { m[f.key] = f.default; return m; }, {});
               return { ...item, fieldsMeta: meta, params };
+            }).filter((item) => {
+              const catalogOnly = item.fieldsMeta.find((field) => field.key === "catalog_only");
+              const value = catalogOnly && catalogOnly.default;
+              return !(value === true || String(value).toLowerCase() === "true");
             });
             resolve(true);
           } else {

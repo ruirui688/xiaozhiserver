@@ -132,13 +132,10 @@ class ServerPluginExecutor(ToolExecutor):
             func_item = all_function_registry.get(func_name)
             if func_item:
                 tool_description = copy.deepcopy(func_item.description)
-                # 从函数注册中获取描述
-                fun_description = (
-                    self.config.get("plugins", {})
-                    .get(func_name, {})
-                    .get("description", "")
-                )
-                if fun_description is not None and len(fun_description) > 0:
+                # 资源中心目录提示词是全局覆盖；旧的角色插件 description
+                # 仅作为兼容回退。业务参数仍只从 plugins 读取。
+                fun_description = self._get_tool_prompt(func_name)
+                if fun_description:
                     if "function" in tool_description and isinstance(
                         tool_description["function"], dict
                     ):
@@ -354,8 +351,22 @@ class ServerPluginExecutor(ToolExecutor):
 
     def _get_plugin_config(self, func_name):
         """获取单个插件配置，兼容异常配置格式。"""
-        plugin_config = self.config.get("plugins", {}).get(func_name, {})
+        plugins = self.config.get("plugins", {}) or {}
+        plugin_config = plugins.get(func_name, {}) if isinstance(plugins, dict) else {}
         return plugin_config if isinstance(plugin_config, dict) else {}
+
+    def _get_tool_prompt(self, func_name):
+        """读取目录级工具提示词，并兼容旧的角色级 description。"""
+        overrides = self.config.get("tool_prompt_overrides", {}) or {}
+        if isinstance(overrides, dict):
+            prompt = overrides.get(func_name)
+            if isinstance(prompt, str) and prompt.strip():
+                return prompt.strip()
+
+        legacy_prompt = self._get_plugin_config(func_name).get("description")
+        if isinstance(legacy_prompt, str) and legacy_prompt.strip():
+            return legacy_prompt.strip()
+        return ""
 
     def _is_declarative_interaction_plugin(self, func_name):
         """判断是否为后台声明式互动插件。
@@ -391,9 +402,9 @@ class ServerPluginExecutor(ToolExecutor):
         if not self._is_declarative_interaction_plugin(func_name):
             return None
 
-        description = plugin_config.get("description") or plugin_config.get(
-            "instructions"
-        )
+        description = self._get_tool_prompt(func_name) or plugin_config.get(
+            "description"
+        ) or plugin_config.get("instructions")
         if not description:
             description = f"声明式互动功能插件：{func_name}"
 

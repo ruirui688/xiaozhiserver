@@ -48,8 +48,15 @@
       <el-button size="mini" type="text" @click="$emit('detail', plugin)">
         查看说明
       </el-button>
+      <el-button
+        v-if="canManage"
+        size="mini"
+        type="primary"
+        plain
+        @click="$emit('edit-prompt', plugin)"
+      >编辑提示词</el-button>
       <template v-if="interaction && canManage">
-        <el-button size="mini" type="primary" plain @click="$emit('edit', plugin)">编辑</el-button>
+        <el-button size="mini" @click="$emit('edit', plugin)">编辑玩法</el-button>
         <el-dropdown trigger="click" @command="$emit('command', plugin, $event)">
           <el-button size="mini">更多 <i class="el-icon-arrow-down" /></el-button>
           <el-dropdown-menu slot="dropdown">
@@ -86,6 +93,8 @@ export default {
         info: "el-icon-search",
         media: "el-icon-headset",
         device: "el-icon-cpu",
+        session: "el-icon-refresh",
+        time: "el-icon-time",
         chat: "el-icon-chat-dot-round",
         tool: "el-icon-connection"
       };
@@ -180,6 +189,8 @@ export default {
 .plugin-icon--info { background: #eaf2ff; color: #427bd7; }
 .plugin-icon--media { background: #f2eaff; color: #8b57d4; }
 .plugin-icon--device { background: #e8f7f1; color: #2e9d72; }
+.plugin-icon--session { background: #fff0e7; color: #d66b2c; }
+.plugin-icon--time { background: #edf7ff; color: #3386bd; }
 .plugin-icon--chat { background: #fff0f5; color: #d05b87; }
 
 .plugin-heading h3 {

@@ -253,6 +253,9 @@ public class ConfigServiceImpl implements ConfigService {
         // realtime server retain common/default plugin functions and expose
         // capabilities that this agent did not enable.
         result.put("plugins", pluginParams);
+        Map<String, String> toolPromptOverrides = agentPluginMappingService.getToolPromptOverrides();
+        result.put("tool_prompt_overrides",
+                toolPromptOverrides == null ? Collections.emptyMap() : toolPromptOverrides);
 
         String mcpEndpoint = agentMcpAccessPointService.getAgentMcpAccessAddress(agent.getId());
         if (StringUtils.isNotBlank(mcpEndpoint) && mcpEndpoint.startsWith("ws")) {

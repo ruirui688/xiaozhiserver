@@ -877,3 +877,22 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 是否允许被官方覆盖：否
 官方同步时的处理规则：必须保留北京时间作为相对时间和跨日事实的统一解释基准；空结果也要向主 LLM 提供模型提交查询、实际供应商查询、北京时间、搜索源和结构化状态，不能退回一句无上下文的“未找到”。服务端不得增加行业词表、命名实体特判或领域路由。同一用户请求只允许一次 `web_search`；首次查询必须补全已明确的上下文指代并保留对象、时间、地点和事实目标。工具完成后必须关闭当前递归轮的搜索能力；结果为空、跑偏、过旧、证据不足、冲突、配置错误、网络错误或超时时均不得重复搜索，也不得用模型旧知识、常识推断或预测补齐。网页正文和摘要始终属于不可信外部数据，不能覆盖系统规则或诱导工具调用。
 ```
+
+## 45. 资源中心统一工具提示词目录
+
+```text
+定制模块：manager-web 资源中心、manager-api Plugin 目录与配置热刷新、xiaozhi-server 统一工具 schema
+改动原因：连接级内置工具、路由工具以及由飞书、知识库或 Intent 白名单启用的 Server Plugin 过去可能真实进入模型 tools schema，却不在资源中心展示；运营人员也无法从统一入口查看和修正工具触发说明。
+关键文件：
+  - main/manager-web/src/views/FunctionPluginManagement.vue
+  - main/manager-web/src/components/resource/PluginResourceCard.vue
+  - main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelProviderServiceImpl.java
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/service/impl/AgentPluginMappingServiceImpl.java
+  - main/manager-api/src/main/java/xiaozhi/modules/config/service/impl/ConfigServiceImpl.java
+  - main/manager-api/src/main/resources/db/changelog/202608061600.sql
+  - main/xiaozhi-server/core/providers/tools/server_plugins/plugin_executor.py
+  - main/xiaozhi-server/core/providers/tools/unified_tool_manager.py
+  - main/xiaozhi-server/core/connection.py
+是否允许被官方覆盖：否
+官方同步时的处理规则：必须保留资源中心作为静态工具提示词唯一目录、catalog_only 工具不进入角色勾选、tool_prompt_overrides 与 plugins 业务配置分离、按工具名覆盖 function description、动态能力说明后追加以及在线会话安全轮次刷新。提示词编辑不得启用工具、绕过 Intent/设备/MCP 门控、改变参数 Schema、覆盖插件业务参数或削弱 MCP SSRF 与权限校验。外部动态工具没有同名目录覆盖时必须继续使用 tools/list 或 descriptor 原始说明。
+```

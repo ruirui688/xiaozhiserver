@@ -21,7 +21,9 @@ import xiaozhi.modules.agent.service.AgentPluginMappingService;
 import xiaozhi.modules.knowledge.entity.KnowledgeBaseEntity;
 import xiaozhi.modules.knowledge.service.KnowledgeBaseService;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
+import xiaozhi.modules.model.dto.ModelProviderDTO;
 import xiaozhi.modules.model.service.ModelConfigService;
+import xiaozhi.modules.model.service.ModelProviderService;
 
 /**
  * @description 针对表【ai_agent_plugin_mapping(Agent与插件的唯一映射表)】的数据库操作Service实现
@@ -35,6 +37,7 @@ public class AgentPluginMappingServiceImpl extends ServiceImpl<AgentPluginMappin
     private final AgentPluginMappingMapper agentPluginMappingMapper;
     private final KnowledgeBaseService knowledgeBaseService;
     private final ModelConfigService modelConfigService;
+    private final ModelProviderService modelProviderService;
 
     @Override
     public List<AgentPluginMapping> agentPluginParamsByAgentId(String agentId) {
@@ -101,6 +104,30 @@ public class AgentPluginMappingServiceImpl extends ServiceImpl<AgentPluginMappin
     }
 
     @Override
+    public Map<String, String> getToolPromptOverrides() {
+        Map<String, String> result = new HashMap<>();
+        List<ModelProviderDTO> providers = modelProviderService.getPluginList();
+        if (providers == null) {
+            return result;
+        }
+        for (ModelProviderDTO provider : providers) {
+            if (provider == null) {
+                continue;
+            }
+            Map<String, Object> defaults = parseProviderDefaults(provider.getFields());
+            String providerCode = StringUtils.trimToEmpty(provider.getProviderCode());
+            if (StringUtils.isBlank(providerCode)) {
+                continue;
+            }
+            Object description = defaults.get("description");
+            if (description instanceof String && StringUtils.isNotBlank((String) description)) {
+                result.put(providerCode, StringUtils.trim((String) description));
+            }
+        }
+        return result;
+    }
+
+    @Override
     public void deleteByAgentId(String agentId) {
         UpdateWrapper<AgentPluginMapping> updateWrapper = new UpdateWrapper<>();
         updateWrapper.eq("agent_id", agentId);
@@ -126,6 +153,30 @@ public class AgentPluginMappingServiceImpl extends ServiceImpl<AgentPluginMappin
             log.warn("解析智能体知识库参数失败: {}", e.getMessage());
             return new HashMap<>();
         }
+    }
+
+    private Map<String, Object> parseProviderDefaults(String fields) {
+        Map<String, Object> defaults = new HashMap<>();
+        if (StringUtils.isBlank(fields)) {
+            return defaults;
+        }
+        try {
+            List<Map<String, Object>> definitions = JsonUtils.parseObject(
+                    fields, new TypeReference<List<Map<String, Object>>>() {
+                    });
+            if (definitions == null) {
+                return defaults;
+            }
+            for (Map<String, Object> definition : definitions) {
+                Object key = definition.get("key");
+                if (key instanceof String && definition.containsKey("default")) {
+                    defaults.put((String) key, definition.get("default"));
+                }
+            }
+        } catch (Exception error) {
+            log.warn("解析工具目录字段失败: errorType={}", error.getClass().getSimpleName());
+        }
+        return defaults;
     }
 
     private void appendKnowledgeInstructions(Map<String, List<String>> knowledgeInstructionMap,

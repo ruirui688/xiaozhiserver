@@ -58,7 +58,7 @@ test('plugin catalog uses task-oriented cards and keeps admin mutations gated', 
   assert.match(plugins, /<PluginResourceCard/);
   assert.match(plugins, /v-if="canManagePlugins"/);
   assert.match(plugins, /getPluginFunctionList/);
-  assert.match(plugins, /插件类型/);
+  assert.match(plugins, /能力类型/);
   assert.match(plugins, /列表视图/);
   assert.match(plugins, /卡片视图/);
   assert.match(plugins, /按后台排序/);

@@ -266,7 +266,25 @@ main/xiaozhi-server/core/providers/tools/server_plugins/plugin_executor.py
   config["plugins"][provider_code]
 ```
 
-内置插件如果命中 `all_function_registry`，优先使用插件 Python 函数注册的 description。后台 `plugins[func_name].description` 可以覆盖工具描述。
+内置插件如果命中 `all_function_registry`，先复制 Python 函数注册的 schema，再按工具名应用资源中心下发的
+`tool_prompt_overrides[func_name]`。只有旧配置没有目录覆盖时，才兼容读取
+`plugins[func_name].description`。音乐曲库、新闻源、联网搜索当前时间、飞书动作和会话音色等动态能力说明在目录级
+description 之后追加；资源中心只能覆盖基础 description，不能修改参数 Schema、启用范围、权限或执行逻辑。
+
+统一覆盖链路：
+
+```text
+ai_model_provider(model_type=Plugin).fields[].description.default
+  -> manager-api ConfigServiceImpl
+  -> tool_prompt_overrides: {tool_name: description}
+  -> ServerPluginExecutor / ToolManager / direct_answer schema builder
+  -> 本轮真实 tools schema
+```
+
+`tool_prompt_overrides` 与 `plugins` 必须分离：前者只维护模型看到的工具用途，后者保存角色启用关系和业务参数。
+因此修改目录提示词不会意外启用工具，也不会覆盖飞书权限、新闻源、音乐目录或第三方连接参数。Server MCP、设备 IoT、
+设备 MCP 和 MCP Endpoint 的工具在统一 `ToolManager` 边界按同名目录项覆盖；没有同名目录项时继续使用各自
+`tools/list` 或 descriptor 原始说明。任何覆盖都发生在注册门控之后，不能让未注册工具进入 function list。
 
 `set_session_voice` 的 schema 在连接初始化时按当前 provider 能力裁剪，不支持的 `voice/speed/volume/pitch` 字段不会暴露。manager-api 下发的 `tts_voice_catalog` 会转换为 `voice.enum`，音色名称只作为不可信匹配标签，真实执行只接受目录中的音色 ID；目录为空时仍允许用户明确提供 provider 音色 ID，但模型不得把人物称呼或自然语言风格猜成 ID。`reset_conversation_context` 不携带用户正文参数，也不会把被清理的历史内容写入日志。
 
@@ -334,7 +352,8 @@ request_params = {
 }
 ```
 
-结论：主聊天模型看到的插件提示词通常不拼在 system prompt 里，而是作为 `tools` 字段进入模型请求。
+结论：主聊天模型看到的插件提示词通常不拼在 system prompt 里，而是作为 `tools` 字段进入模型请求。资源中心编辑的
+是这一 schema 的 function description，不是额外追加一份容易冲突的 system prompt。
 
 顶层普通回答沿用官方 `direct_answer` 虚拟工具，不代表设备或服务端真实能力。普通 function-call 轮不使用关键词、正则或服务端预设意图选择工具；支持 `tool_choice` 的 provider 发送 `tool_choice=required`，由模型根据完整语义在 `direct_answer(response=...)` 与真实工具之间自主选择。这样普通问答仍选择 `direct_answer`，匹配真实能力时选择对应工具，同时不允许模型绕开结构化选择后用普通文本声称操作成功。支持单出口约束的 OpenAI 兼容 provider 还发送 `parallel_tool_calls=false`，避免同一轮同时出现直接回答和真实工具。模型选择 `direct_answer` 时，服务端只保留 5 字 JSON 安全尾，其余稳定增量立即进入 TTS，不再等待自然短句聚合。会议激活后的静默控制轮同样发送 `tool_choice=required`，但只暴露会议工具。兼容端点不支持这些参数时，可分别设置 `supports_tool_choice: false` 或 `supports_parallel_tool_calls: false`；前者退回 provider 自由返回 content/tool_calls，后者停用 `direct_answer` 快速路径并等完整 response 确认。用户打断播报属于设备/AEC 驱动的 Abort 控制面，不进入 LLM tools schema。
 

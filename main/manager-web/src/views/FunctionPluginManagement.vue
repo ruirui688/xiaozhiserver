@@ -6,12 +6,12 @@
     <main class="plugin-page">
       <section class="page-hero">
         <div class="page-heading">
-          <p class="page-subtitle">查看系统能力、维护互动玩法，并集中配置需要密钥的共享服务。</p>
+          <p class="page-subtitle">查看并维护发送给大模型的全部服务器工具、功能插件和互动玩法提示词。</p>
         </div>
-        <div class="hero-stats" aria-label="插件统计">
+        <div class="hero-stats" aria-label="能力统计">
           <div class="stat-item">
             <strong>{{ pluginCounts.all }}</strong>
-            <span>全部插件</span>
+            <span>全部能力</span>
           </div>
           <div class="stat-item">
             <strong>{{ pluginCounts.builtin }}</strong>
@@ -47,13 +47,13 @@
           />
 
           <div class="filter-section">
-            <div class="filter-title">插件类型</div>
+            <div class="filter-title">能力类型</div>
             <button
               type="button"
               :class="['filter-item', { active: activeType === 'all' }]"
               @click="setActiveType('all')"
             >
-              <span><i class="el-icon-menu" />全部插件</span>
+              <span><i class="el-icon-menu" />全部能力</span>
               <strong>{{ pluginCounts.all }}</strong>
             </button>
             <button
@@ -91,8 +91,8 @@
           <div class="usage-tip">
             <i class="el-icon-info" />
             <div>
-              <strong>这里维护插件目录</strong>
-              <span>启用插件请进入“智能体管理 → 编辑角色 → 功能”。</span>
+              <strong>这里维护工具与插件目录</strong>
+              <span>每项能力会标明自己的启用入口；编辑提示词不会改变启用范围。</span>
             </div>
           </div>
         </aside>
@@ -101,7 +101,7 @@
           <div class="catalog-toolbar">
             <div>
               <h2>{{ currentFilterTitle }}</h2>
-              <p>找到 {{ visiblePlugins.length }} 个插件</p>
+              <p>找到 {{ visiblePlugins.length }} 项能力</p>
             </div>
             <div class="catalog-controls">
               <el-select v-model="sortMode" size="small" class="sort-select" aria-label="插件排序">
@@ -136,7 +136,7 @@
             需要共享凭据的系统能力可在这里配置和测试；启用范围及角色参数仍在角色配置中管理。
           </div>
 
-          <el-empty v-if="!loading && visiblePlugins.length === 0" description="没有找到匹配的插件" />
+          <el-empty v-if="!loading && visiblePlugins.length === 0" description="没有找到匹配的能力" />
           <div
             v-else
             v-loading="loading"
@@ -161,6 +161,7 @@
               @configure="openSharedConfig"
               @test="testSharedConfig"
               @edit="openEditDialog"
+              @edit-prompt="openPromptDialog"
               @command="handleRowCommand"
             />
           </div>
@@ -278,12 +279,52 @@
             {{ isDeclarativeInteractionPlugin(currentPlugin.fieldsMeta) ? "互动玩法" : "系统能力" }}
           </el-descriptions-item>
           <el-descriptions-item label="用户会怎么说">{{ getExampleUtterance(currentPlugin) }}</el-descriptions-item>
-          <el-descriptions-item label="智能体会做什么">{{ getPluginDescription(currentPlugin) }}</el-descriptions-item>
-          <el-descriptions-item label="如何启用">进入角色配置，打开功能管理后勾选这个功能。</el-descriptions-item>
+          <el-descriptions-item label="大模型工具提示词">{{ getPluginDescription(currentPlugin) }}</el-descriptions-item>
+          <el-descriptions-item label="工具来源">{{ getToolSourceLabel(currentPlugin) }}</el-descriptions-item>
+          <el-descriptions-item label="如何启用">
+            {{ getActivationHint(currentPlugin) }}
+          </el-descriptions-item>
         </el-descriptions>
       </div>
       <div slot="footer" class="dialog-footer">
+        <el-button v-if="canManagePlugins && currentPlugin" @click="openPromptDialog(currentPlugin)">编辑提示词</el-button>
         <el-button type="primary" @click="detailDialogVisible = false">知道了</el-button>
+      </div>
+    </el-dialog>
+
+    <el-dialog
+      title="编辑大模型工具提示词"
+      :visible.sync="promptDialogVisible"
+      width="720px"
+      :close-on-click-modal="false"
+    >
+      <el-form :model="promptForm" label-width="110px">
+        <el-form-item label="能力名称">
+          <el-input :value="promptForm.name" disabled />
+        </el-form-item>
+        <el-form-item label="工具编码">
+          <el-input :value="promptForm.providerCode" disabled />
+        </el-form-item>
+        <el-form-item label="工具提示词" required>
+          <el-input
+            v-model="promptForm.description"
+            type="textarea"
+            :rows="9"
+            maxlength="1000"
+            show-word-limit
+            placeholder="准确说明什么情况下调用这个工具，以及什么情况下不要调用"
+          />
+        </el-form-item>
+        <el-alert
+          type="warning"
+          :closable="false"
+          show-icon
+          title="保存后会覆盖发送给大模型的工具 description，并通知在线智能体刷新；不会改变工具权限、参数 Schema 或启用范围。"
+        />
+      </el-form>
+      <div slot="footer" class="dialog-footer">
+        <el-button @click="promptDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="promptSaving" @click="saveToolPrompt">保存提示词</el-button>
       </div>
     </el-dialog>
 
@@ -347,6 +388,14 @@ export default {
       allPluginProviders: [],
       formDialogVisible: false,
       detailDialogVisible: false,
+      promptDialogVisible: false,
+      promptSaving: false,
+      promptForm: {
+        id: "",
+        name: "",
+        providerCode: "",
+        description: ""
+      },
       currentPlugin: null,
       sharedConfigDialogVisible: false,
       sharedConfigProviderCode: "",
@@ -577,6 +626,34 @@ export default {
       }
       return String(customField.default).toLowerCase() === "true";
     },
+    fieldBoolean(plugin, key) {
+      const value = this.getFieldDefault(plugin.fieldsMeta || [], key, false);
+      return value === true || String(value).toLowerCase() === "true";
+    },
+    isRuntimeBuiltin(plugin) {
+      return this.fieldBoolean(plugin, "runtime_builtin");
+    },
+    getToolSourceLabel(plugin) {
+      const source = this.getFieldDefault(plugin.fieldsMeta || [], "tool_source", "server_plugin");
+      const labels = {
+        routing: "主模型路由工具",
+        server_plugin: "服务端工具/插件",
+        server_mcp: "服务器 MCP",
+        device_iot: "设备 IoT",
+        device_mcp: "设备 MCP",
+        mcp_endpoint: "MCP 接入点"
+      };
+      return labels[source] || source;
+    },
+    getActivationHint(plugin) {
+      const configuredHint = this.getFieldDefault(plugin.fieldsMeta || [], "activation_hint", "");
+      if (configuredHint) {
+        return configuredHint;
+      }
+      return this.isRuntimeBuiltin(plugin)
+        ? "连接建立后自动启用，无需角色勾选。"
+        : "进入角色配置，打开功能管理后勾选这个功能。";
+    },
     getFieldDefault(fields, key, fallback = "") {
       const field = fields.find((item) => item.key === key);
       return field && field.default !== undefined ? field.default : fallback;
@@ -612,6 +689,12 @@ export default {
       if (this.isDeclarativeInteractionPlugin(plugin.fieldsMeta)) {
         return { key: "chat", label: "聊天玩法" };
       }
+      if (["direct_answer", "handle_exit_intent", "set_session_voice", "reset_conversation_context"].includes(code)) {
+        return { key: "session", label: "会话控制" };
+      }
+      if (code === "get_lunar") {
+        return { key: "time", label: "日期时间" };
+      }
       if (code.includes("weather")) {
         return { key: "life", label: "生活服务" };
       }
@@ -642,7 +725,16 @@ export default {
         hass_set_state: "把客厅灯打开",
         hass_play_music: "用音箱播放音乐",
         web_search: "帮我查一下这个问题",
-        call_device: "呼叫客厅设备"
+        call_device: "呼叫客厅设备",
+        direct_answer: "直接回答我的问题",
+        handle_exit_intent: "结束这次聊天",
+        set_session_voice: "把这次聊天的语速调慢一点",
+        reset_conversation_context: "忘掉我们刚才聊的，重新开始",
+        get_lunar: "查一下今天的农历",
+        feishu_assistant: "在飞书群里发一条消息",
+        search_from_local_knowledge: "从公司的知识库里查一下",
+        search_from_ragflow: "从我绑定的资料里查一下",
+        change_role: "切换成英语老师"
       };
       return examples[plugin.providerCode] || this.getPluginDescription(plugin);
     },
@@ -650,11 +742,69 @@ export default {
       if (this.isDeclarativeInteractionPlugin(plugin.fieldsMeta)) {
         return "编写玩法规则";
       }
+      if (this.isRuntimeBuiltin(plugin)) {
+        return "连接级内置";
+      }
+      if (this.fieldBoolean(plugin, "catalog_only")) {
+        return "专用配置启用";
+      }
       return plugin.fieldsMeta && plugin.fieldsMeta.length > 0 ? "角色中配置参数" : "角色中勾选";
     },
     openDetailDialog(row) {
       this.currentPlugin = row;
       this.detailDialogVisible = true;
+    },
+    openPromptDialog(row) {
+      this.currentPlugin = row;
+      this.promptForm = {
+        id: row.id,
+        name: row.name,
+        providerCode: row.providerCode,
+        description: this.getPluginDescription(row)
+      };
+      this.detailDialogVisible = false;
+      this.promptDialogVisible = true;
+    },
+    saveToolPrompt() {
+      const description = String(this.promptForm.description || "").trim();
+      if (!description) {
+        this.$message.error("大模型工具提示词不能为空");
+        return;
+      }
+      const source = this.currentPlugin;
+      const fields = (source.fieldsMeta || []).map((field) => ({ ...field }));
+      const index = fields.findIndex((field) => field.key === "description");
+      const promptField = {
+        key: "description",
+        type: "textarea",
+        label: "大模型工具提示词",
+        default: description,
+        editing: false,
+        selected: false
+      };
+      if (index >= 0) {
+        fields.splice(index, 1, { ...fields[index], ...promptField });
+      } else {
+        fields.push(promptField);
+      }
+      this.promptSaving = true;
+      Api.model.updateModelProvider({
+        id: source.id,
+        modelType: source.modelType,
+        providerCode: source.providerCode,
+        name: source.name,
+        sort: Number(source.sort || 0),
+        fields
+      }, ({ data }) => {
+        this.promptSaving = false;
+        if (!data || data.code !== 0) {
+          this.$message.error((data && data.msg) || "保存工具提示词失败");
+          return;
+        }
+        this.$message.success("工具提示词已保存，在线会话将在安全轮次刷新");
+        this.promptDialogVisible = false;
+        this.fetchPlugins();
+      });
     },
     handleRowCommand(row, command) {
       if (command === "duplicate") {
@@ -964,7 +1114,7 @@ export default {
         const category = this.categoryFilters.find((item) => item.key === this.activeCategory);
         return category ? category.label : "系统能力";
       }
-      return "全部插件";
+      return "全部能力";
     },
     builtinPluginsForCategory() {
       return this.searchedPlugins.filter((item) => !this.isDeclarativeInteractionPlugin(item.fieldsMeta));
@@ -978,6 +1128,8 @@ export default {
     },
     categoryFilters() {
       const categories = [
+        { key: "session", label: "会话控制" },
+        { key: "time", label: "日期时间" },
         { key: "life", label: "生活服务" },
         { key: "info", label: "内容资讯" },
         { key: "media", label: "音乐音频" },

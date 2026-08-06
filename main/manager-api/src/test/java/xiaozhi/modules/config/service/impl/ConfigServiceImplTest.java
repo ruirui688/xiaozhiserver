@@ -87,6 +87,7 @@ class ConfigServiceImplTest {
         AgentService agentService = mock(AgentService.class);
         TimbreService timbreService = mock(TimbreService.class);
         AgentVoicePrintDao voicePrintDao = mock(AgentVoicePrintDao.class);
+        AgentPluginMappingService pluginMappingService = mock(AgentPluginMappingService.class);
         AgentInfoVO agent = new AgentInfoVO();
         agent.setId("agent-voice-catalog");
         agent.setTtsModelId("TTS_demo");
@@ -100,11 +101,13 @@ class ConfigServiceImplTest {
         voice.setName("演示音色");
         voice.setLanguages("普通话");
         when(timbreService.listRuntimeVoices("TTS_demo")).thenReturn(List.of(voice));
+        when(pluginMappingService.getToolPromptOverrides()).thenReturn(Map.of(
+                "reset_conversation_context", "仅在当前用户明确要求忘记此前聊天时调用。"));
 
         ConfigServiceImpl service = new ConfigServiceImpl(
                 mock(SysParamsService.class), mock(DeviceService.class), mock(ModelConfigService.class),
                 mock(ModelRuntimeAssembler.class), agentService, mock(AgentTemplateService.class),
-                mock(RedisUtils.class), timbreService, mock(AgentPluginMappingService.class),
+                mock(RedisUtils.class), timbreService, pluginMappingService,
                 mock(AgentMcpAccessPointService.class), mock(AgentContextProviderService.class),
                 mock(AgentFeishuService.class), mock(VoiceCloneService.class), voicePrintDao,
                 mock(VoiceprintApiClient.class), mock(CorrectWordFileService.class),
@@ -116,6 +119,9 @@ class ConfigServiceImplTest {
         assertEquals(1, catalog.size());
         assertEquals("voice-demo", catalog.get(0).get("id"));
         assertEquals("演示音色", catalog.get(0).get("name"));
+        assertEquals(
+                "仅在当前用户明确要求忘记此前聊天时调用。",
+                ((Map<String, String>) runtime.get("tool_prompt_overrides")).get("reset_conversation_context"));
     }
 
     @Test

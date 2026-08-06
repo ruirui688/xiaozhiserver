@@ -1,6 +1,7 @@
 """统一工具管理器"""
 
 import asyncio
+import copy
 
 from typing import Dict, List, Optional, Any
 from config.logger import setup_logging
@@ -65,7 +66,24 @@ class ToolManager:
         descriptions = []
         tools = self.get_all_tools()
         for tool_definition in tools.values():
-            descriptions.append(tool_definition.description)
+            description = tool_definition.description
+            # Server plugins apply catalog prompts before appending dynamic
+            # capability hints. Other tool sources use the same name-based
+            # catalog override at the unified schema boundary.
+            if tool_definition.tool_type != ToolType.SERVER_PLUGIN:
+                config = getattr(self.conn, "config", None) or {}
+                overrides = config.get("tool_prompt_overrides", {}) or {}
+                prompt = (
+                    overrides.get(tool_definition.name)
+                    if isinstance(overrides, dict)
+                    else None
+                )
+                if isinstance(prompt, str) and prompt.strip():
+                    description = copy.deepcopy(description)
+                    function = description.get("function")
+                    if isinstance(function, dict):
+                        function["description"] = prompt.strip()
+            descriptions.append(description)
 
         descriptions = compact_tool_schemas(descriptions)
         self._cached_function_descriptions = descriptions

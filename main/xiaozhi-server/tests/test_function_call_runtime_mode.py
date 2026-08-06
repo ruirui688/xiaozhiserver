@@ -57,7 +57,7 @@ fake_logger_module.create_connection_logger = (
 )
 sys.modules.setdefault("config.logger", fake_logger_module)
 
-from core.connection import ConnectionHandler
+from core.connection import ConnectionHandler, build_direct_answer_tool
 from core.handle.receiveAudioHandle import startToChat
 from core.providers.intent.function_call.function_call import IntentProvider as FunctionCallIntent
 from core.providers.tts.dto.dto import ContentType, SentenceType
@@ -175,6 +175,16 @@ def _config():
         },
         "LLM": {},
     }
+
+
+def test_direct_answer_prompt_uses_resource_catalog_override():
+    tool = build_direct_answer_tool({
+        "tool_prompt_overrides": {
+            "direct_answer": "没有匹配工具时直接回答。"
+        }
+    })
+
+    assert tool["function"]["description"] == "没有匹配工具时直接回答。"
 
 
 def _conn(llm):

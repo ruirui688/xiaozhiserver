@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -14,7 +15,11 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 
 import cn.hutool.json.JSONArray;
+import cn.hutool.json.JSONObject;
+import cn.hutool.json.JSONUtil;
 import lombok.AllArgsConstructor;
+import xiaozhi.modules.agent.dao.AgentDao;
+import xiaozhi.modules.agent.runtime.AgentRuntimeConfigRefreshEvent;
 import xiaozhi.common.constant.Constant;
 import xiaozhi.common.exception.ErrorCode;
 import xiaozhi.common.exception.RenException;
@@ -34,6 +39,8 @@ public class ModelProviderServiceImpl extends BaseServiceImpl<ModelProviderDao, 
         implements ModelProviderService {
 
     private final ModelProviderDao modelProviderDao;
+    private final AgentDao agentDao;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     public List<ModelProviderDTO> getPluginList() {
@@ -96,6 +103,7 @@ public class ModelProviderServiceImpl extends BaseServiceImpl<ModelProviderDao, 
 
     @Override
     public ModelProviderDTO add(ModelProviderDTO modelProviderDTO) {
+        validatePluginPrompt(modelProviderDTO);
         UserDetail user = SecurityUser.getUser();
         modelProviderDTO.setCreator(user.getId());
         modelProviderDTO.setUpdater(user.getId());
@@ -109,17 +117,26 @@ public class ModelProviderServiceImpl extends BaseServiceImpl<ModelProviderDao, 
             throw new RenException(ErrorCode.ADD_DATA_FAILED);
         }
 
+        publishToolPromptRefresh(modelProviderDTO, "tool_catalog_added");
+
         return ConvertUtils.sourceToTarget(modelProviderDTO, ModelProviderDTO.class);
     }
 
     @Override
     public ModelProviderDTO edit(ModelProviderDTO modelProviderDTO) {
+        validatePluginPrompt(modelProviderDTO);
+        ModelProviderEntity existing = modelProviderDao.selectById(modelProviderDTO.getId());
+        String previousDescription = extractDescription(existing == null ? null : existing.getFields());
         UserDetail user = SecurityUser.getUser();
         modelProviderDTO.setUpdater(user.getId());
         modelProviderDTO.setUpdateDate(new Date());
         if (modelProviderDao
                 .updateById(ConvertUtils.sourceToTarget(modelProviderDTO, ModelProviderEntity.class)) == 0) {
             throw new RenException(ErrorCode.UPDATE_DATA_FAILED);
+        }
+        String nextDescription = extractDescription(modelProviderDTO.getFields());
+        if (!StringUtils.equals(previousDescription, nextDescription)) {
+            publishToolPromptRefresh(modelProviderDTO, "tool_prompt_updated");
         }
         return ConvertUtils.sourceToTarget(modelProviderDTO, ModelProviderDTO.class);
     }
@@ -145,5 +162,58 @@ public class ModelProviderServiceImpl extends BaseServiceImpl<ModelProviderDao, 
         queryWrapper.eq("provider_code", StringUtils.isBlank(providerCode) ? "" : providerCode);
         List<ModelProviderEntity> providerEntities = modelProviderDao.selectList(queryWrapper);
         return ConvertUtils.sourceToTarget(providerEntities, ModelProviderDTO.class);
+    }
+
+    private void validatePluginPrompt(ModelProviderDTO provider) {
+        if (provider == null || !"Plugin".equals(provider.getModelType())) {
+            return;
+        }
+        try {
+            JSONArray fields = JSONUtil.parseArray(provider.getFields());
+            for (Object value : fields) {
+                if (!(value instanceof JSONObject field)
+                        || !"description".equals(field.getStr("key"))) {
+                    continue;
+                }
+                String description = StringUtils.trimToEmpty(field.getStr("default"));
+                if (StringUtils.isBlank(description)) {
+                    throw new RenException("大模型工具提示词不能为空");
+                }
+                if (description.length() > 1000) {
+                    throw new RenException("大模型工具提示词不能超过1000个字符");
+                }
+            }
+        } catch (RenException error) {
+            throw error;
+        } catch (Exception error) {
+            throw new RenException("插件字段必须是合法的JSON数组");
+        }
+    }
+
+    private String extractDescription(String fieldsJson) {
+        if (StringUtils.isBlank(fieldsJson)) {
+            return "";
+        }
+        try {
+            for (Object value : JSONUtil.parseArray(fieldsJson)) {
+                if (value instanceof JSONObject field
+                        && "description".equals(field.getStr("key"))) {
+                    return StringUtils.trimToEmpty(field.getStr("default"));
+                }
+            }
+        } catch (Exception ignored) {
+            return "";
+        }
+        return "";
+    }
+
+    private void publishToolPromptRefresh(ModelProviderDTO provider, String reason) {
+        if (provider == null || !"Plugin".equals(provider.getModelType())) {
+            return;
+        }
+        List<String> agentIds = agentDao.selectAllAgentIds();
+        if (agentIds != null && !agentIds.isEmpty()) {
+            eventPublisher.publishEvent(new AgentRuntimeConfigRefreshEvent(agentIds, reason));
+        }
     }
 }

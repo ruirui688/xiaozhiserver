@@ -1,6 +1,7 @@
 package xiaozhi.modules.agent.service;
 
 import java.util.List;
+import java.util.Map;
 
 import com.baomidou.mybatisplus.extension.service.IService;
 
@@ -19,6 +20,9 @@ public interface AgentPluginMappingService extends IService<AgentPluginMapping> 
      * @return
      */
     List<AgentPluginMapping> agentPluginParamsByAgentId(String agentId);
+
+    /** 获取资源中心维护的全局工具 description 覆盖。 */
+    Map<String, String> getToolPromptOverrides();
 
     /**
      * 根据智能体id删除插件参数

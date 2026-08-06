@@ -166,6 +166,16 @@ DIRECT_ANSWER_TOOL = {
 }
 
 
+def build_direct_answer_tool(config):
+    """Build the routing tool using the resource-center prompt override."""
+    tool = copy.deepcopy(DIRECT_ANSWER_TOOL)
+    overrides = (config or {}).get("tool_prompt_overrides", {}) or {}
+    description = overrides.get("direct_answer") if isinstance(overrides, dict) else None
+    if isinstance(description, str) and description.strip():
+        tool["function"]["description"] = description.strip()
+    return tool
+
+
 class ConnectionHandler:
     def __init__(
             self,
@@ -1639,7 +1649,7 @@ class ConnectionHandler:
             # 仅在第一层调用时注入 direct_answer 虚拟工具
             # 递归调用（depth>0）不注入，避免模型在生成文本回复时再次调 direct_answer 导致循环
             if functions and depth == 0:
-                functions.append(DIRECT_ANSWER_TOOL)
+                functions.append(build_direct_answer_tool(self.config))
 
         if meeting_tool_turn and not functions:
             appended = self._record_pending_meeting_turn("meeting_tool_unavailable")
@@ -1706,8 +1716,12 @@ class ConnectionHandler:
             if tools_enabled:
                 # 使用支持functions的streaming接口
                 function_options = {}
+                has_direct_answer = any(
+                    item.get("function", {}).get("name") == "direct_answer"
+                    for item in functions or []
+                )
                 if getattr(self.llm, "supports_tool_choice", False) and (
-                    meeting_tool_turn or DIRECT_ANSWER_TOOL in functions
+                    meeting_tool_turn or has_direct_answer
                 ):
                     function_options["tool_choice"] = "required"
                 if getattr(self.llm, "supports_parallel_tool_calls", False):

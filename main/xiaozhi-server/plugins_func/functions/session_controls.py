@@ -64,9 +64,8 @@ reset_conversation_context_desc = {
     "function": {
         "name": "reset_conversation_context",
         "description": (
-            "清空当前设备连接的短期对话上下文并重新开始聊天。"
-            "用户明确要求忘掉前面的对话、清空上下文、重新开始时调用。"
-            "不会删除后台聊天记录、长期记忆或智能体配置。"
+            "仅当当前用户消息直接要求忘记此前聊天内容时调用；"
+            "其他任何情况都不要调用。"
         ),
         "parameters": {
             "type": "object",

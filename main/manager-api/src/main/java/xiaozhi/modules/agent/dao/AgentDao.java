@@ -1,5 +1,7 @@
 package xiaozhi.modules.agent.dao;
 
+import java.util.List;
+
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -10,6 +12,9 @@ import xiaozhi.modules.agent.vo.AgentInfoVO;
 
 @Mapper
 public interface AgentDao extends BaseDao<AgentEntity> {
+    @Select("SELECT id FROM ai_agent")
+    List<String> selectAllAgentIds();
+
     /**
      * 获取智能体的设备数量
      * 

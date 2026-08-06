@@ -314,6 +314,42 @@ def test_external_dynamic_context_is_deduplicated_and_bounded():
     assert "field-30:" not in bounded
 
 
+def test_non_server_tool_prompt_uses_catalog_override_without_mutating_schema():
+    schema = {
+        "type": "function",
+        "function": {
+            "name": "device_lookup",
+            "description": "设备上报的原始说明",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+
+    class _Executor:
+        def get_tools(self):
+            return {
+                "device_lookup": ToolDefinition(
+                    name="device_lookup",
+                    description=schema,
+                    tool_type=ToolType.DEVICE_MCP,
+                )
+            }
+
+    class _Connection:
+        config = {
+            "tool_prompt_overrides": {
+                "device_lookup": "资源中心维护的设备查询提示词"
+            }
+        }
+
+    manager = ToolManager(_Connection())
+    manager.register_executor(ToolType.DEVICE_MCP, _Executor())
+
+    function = manager.get_function_descriptions()[0]["function"]
+
+    assert function["description"] == "资源中心维护的设备查询提示词"
+    assert schema["function"]["description"] == "设备上报的原始说明"
+
+
 def test_many_tools_share_one_description_budget_and_keep_contracts():
     tools = []
     for index in range(20):
