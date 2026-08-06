@@ -218,6 +218,30 @@ class ConfigServiceImplTest {
         assertEquals(0.5, runtimeConfig.get("threshold"));
         assertEquals(1.0, runtimeConfig.get("threshold_low"));
         assertEquals(100, runtimeConfig.get("min_silence_duration_ms"));
+        assertEquals("shadow", ((Map<?, ?>) runtimeConfig.get("speech_gate")).get("mode"));
+
+        runtimeConfig.put("speech_gate", new HashMap<>());
+        service.applyManagedVadParams(runtimeConfig);
+        assertEquals("shadow", ((Map<?, ?>) runtimeConfig.get("speech_gate")).get("mode"));
+    }
+
+    @Test
+    void applyManagedVadParamsDoesNotOverwriteExplicitModelValues() throws Exception {
+        SysParamsService sysParamsService = Mockito.mock(SysParamsService.class);
+        ConfigServiceImpl service = new ConfigServiceImpl(sysParamsService, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null);
+        Map<String, Object> runtimeConfig = new HashMap<>();
+        runtimeConfig.put("threshold", 0.82);
+        runtimeConfig.put("threshold_low", 0.18);
+        runtimeConfig.put("min_silence_duration_ms", 350);
+        runtimeConfig.put("speech_gate", Map.of("mode", "enforce", "start_snr_db", 10));
+
+        service.applyManagedVadParams(runtimeConfig);
+
+        assertEquals(0.82, runtimeConfig.get("threshold"));
+        assertEquals(0.18, runtimeConfig.get("threshold_low"));
+        assertEquals(350, runtimeConfig.get("min_silence_duration_ms"));
+        assertEquals("enforce", ((Map<?, ?>) runtimeConfig.get("speech_gate")).get("mode"));
     }
 
     @Test

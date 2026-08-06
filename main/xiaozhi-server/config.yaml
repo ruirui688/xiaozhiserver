@@ -603,6 +603,22 @@ VAD:
     threshold_low: 0.3
     model_dir: models/snakers4_silero-vad
     min_silence_duration_ms: 200  # 如果说话停顿比较长，可以把这个值设置大一些
+    # 轻量声学门控：先用 shadow 采集 RMS/SNR 数据，校准后再改为 enforce。
+    speech_gate:
+      mode: shadow  # disabled | shadow | enforce
+      start_probability: 0.8
+      continuation_probability: 0.5
+      start_snr_db: 8
+      barge_in_start_snr_db: 12
+      continuation_snr_db: 4
+      tail_grace_ms: 350
+      noise_floor_adaptation_ms: 5000
+      confirmation_frames: 3
+      confirmation_window: 5
+      preroll_ms: 320
+      # 可按设备标定后填写，例如 -35；也用于连接首帧正在讲话时的安全启动，
+      # 不应跨设备硬编码。未标定时首帧不会伪造 SNR。
+      min_rms_dbfs: null
 
 LLM:
   # 所有openai类型均可以修改超参，以AliLLM为例

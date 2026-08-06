@@ -5,6 +5,7 @@ import sys
 import threading
 from concurrent.futures import Future
 from pathlib import Path
+from types import SimpleNamespace
 
 
 SERVER_ROOT = Path(__file__).resolve().parents[1]
@@ -55,6 +56,18 @@ class _VAD:
 
     def is_vad(self, conn, audio):
         return self.have_voice
+
+
+class _GatedVAD(_VAD):
+    def __init__(self, have_voice, speech_started):
+        super().__init__(have_voice)
+        self.decision = SimpleNamespace(speech_started=speech_started)
+
+    def is_speech_gate_enforced(self, conn=None):
+        return True
+
+    def get_last_decision(self, conn):
+        return self.decision
 
 
 class _ASR:
@@ -148,6 +161,23 @@ def test_aec_voice_stops_tts_before_asr_and_preserves_user_audio():
     assert conn.reset_audio_calls == 0
     assert conn.turn_context.clear_calls == 0
     assert conn.asr.received == [(b"voice", True)]
+
+
+def test_aec_acoustic_gate_aborts_only_on_confirmed_start_edge():
+    conn = _Conn()
+    conn.client_aec = True
+    conn.vad = _GatedVAD(True, speech_started=False)
+
+    asyncio.run(handleAudioMessage(conn, b"continuation"))
+
+    assert conn.events == ["asr"]
+    assert conn.abort_generation == 0
+
+    conn.vad.decision = SimpleNamespace(speech_started=True)
+    asyncio.run(handleAudioMessage(conn, b"confirmed-start"))
+
+    assert conn.events == ["asr", "tts_stop", "asr"]
+    assert conn.abort_generation == 1
 
 
 def test_non_aec_voice_waits_for_complete_asr_before_stopping():

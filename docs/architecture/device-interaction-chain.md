@@ -408,7 +408,7 @@ utils/audioRateController.py  AudioRateController
 
 ### 4.6 对话延时链路协议
 
-聊天记录中的延时指标使用 `schema_version=2`，不兼容旧的单值 `latency_ms` 口径。
+聊天记录中的延时指标使用 `schema_version=3`，新增实际解码时长、RMS/SNR 声学门控和分离的 EOS/ASR 完成耗时；管理端导出与页面继续兼容 `schema_version=2`，不兼容更早的单值 `latency_ms` 口径。
 新协议只有两个权威入口：
 
 ```text

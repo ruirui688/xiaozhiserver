@@ -387,9 +387,9 @@ public class AgentChatHistoryController {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("agent_id", agentId);
         metadata.put("exported_at", formatDate(new Date()));
-        metadata.put("format", "chat-history-latency-trace-v2");
+        metadata.put("format", "chat-history-latency-trace-v3");
         metadata.put("sessions", sessions);
-        metadata.put("latency_schema", "metrics.schema_version=2；trace.steps 是模型、工具和 TTS 调用链的唯一权威数据源。");
+        metadata.put("latency_schema", "metrics.schema_version=3；兼容读取 v2，trace.steps 是模型、工具和 TTS 调用链的唯一权威数据源。");
         return metadata;
     }
 
@@ -421,6 +421,11 @@ public class AgentChatHistoryController {
             addPart(parts, "audio_duration_ms", nested(metrics, "input", "audio_duration_ms"));
             addPart(parts, "vad_inference_ms", nested(metrics, "stages", "vad", "inference_ms"));
             addPart(parts, "asr_first_text_from_speech_ms", nested(metrics, "stages", "asr", "first_text_from_speech_ms"));
+            addPart(parts, "speech_to_eos_ms", nested(metrics, "stages", "vad", "speech_to_eos_ms"));
+            addPart(parts, "asr_provider_finalize_ms", nested(metrics, "stages", "asr", "provider_finalize_ms"));
+            addPart(parts, "eos_to_final_text_ms", nested(metrics, "stages", "asr", "eos_to_final_text_ms"));
+            addPart(parts, "vad_rms_dbfs_avg", nested(metrics, "stages", "vad", "speech_gate", "rms_dbfs_avg"));
+            addPart(parts, "vad_snr_db_avg", nested(metrics, "stages", "vad", "speech_gate", "snr_db_avg"));
             addPart(parts, "asr_tail_after_audio_ms", nested(metrics, "stages", "asr", "tail_after_audio_ms"));
             addPart(parts, "voiceprint_ms", nested(metrics, "stages", "voiceprint", "total_ms"));
         } else if ("assistant".equals(messageRole)) {
@@ -517,6 +522,12 @@ public class AgentChatHistoryController {
         putIfNotNull(summary, "input_audio_duration_ms", nested(user, "input", "audio_duration_ms"));
         putIfNotNull(summary, "vad_inference_ms", nested(user, "stages", "vad", "inference_ms"));
         putIfNotNull(summary, "asr_first_text_from_speech_ms", nested(user, "stages", "asr", "first_text_from_speech_ms"));
+        putIfNotNull(summary, "speech_to_eos_ms", nested(user, "stages", "vad", "speech_to_eos_ms"));
+        putIfNotNull(summary, "asr_provider_finalize_ms", nested(user, "stages", "asr", "provider_finalize_ms"));
+        putIfNotNull(summary, "eos_to_final_text_ms", nested(user, "stages", "asr", "eos_to_final_text_ms"));
+        putIfNotNull(summary, "vad_rms_dbfs_avg", nested(user, "stages", "vad", "speech_gate", "rms_dbfs_avg"));
+        putIfNotNull(summary, "vad_snr_db_avg", nested(user, "stages", "vad", "speech_gate", "snr_db_avg"));
+        putIfNotNull(summary, "vad_noise_floor_dbfs", nested(user, "stages", "vad", "speech_gate", "noise_floor_dbfs"));
         putIfNotNull(summary, "asr_tail_after_audio_ms", nested(user, "stages", "asr", "tail_after_audio_ms"));
         putIfNotNull(summary, "voiceprint_ms", nested(user, "stages", "voiceprint", "total_ms"));
         putIfNotNull(summary, "model_tool_chain_ms", nested(assistant, "trace", "totals", "model_tool_chain_ms"));
@@ -561,7 +572,7 @@ public class AgentChatHistoryController {
 
     private String buildLatencyCsv(List<Map<String, Object>> messages) {
         StringBuilder csv = new StringBuilder();
-        csv.append("session_id,turn_id,message_index,role,created_at,input_audio_duration_ms,vad_inference_ms,vad_speech_segment_ms,asr_first_text_from_speech_ms,asr_tail_after_audio_ms,voiceprint_ms,model_tool_chain_ms,llm_call_count,llm_model_ms,tool_call_count,tool_ms,tts_request_to_first_audio_ms,tts_provider_generation_ms,tts_report_ready_ms,output_audio_duration_ms,server_delivery_from_first_audio_ms,server_send_complete_from_tts_request_ms,prompt_tokens,completion_tokens,total_tokens,token_source\n");
+        csv.append("session_id,turn_id,message_index,role,created_at,input_audio_duration_ms,vad_inference_ms,vad_speech_segment_ms,vad_decoded_duration_ms,gate_mode,vad_rms_dbfs_avg,vad_snr_db_avg,vad_noise_floor_dbfs,speech_to_eos_ms,asr_first_text_from_speech_ms,asr_provider_finalize_ms,eos_to_final_text_ms,asr_tail_after_audio_ms,voiceprint_ms,model_tool_chain_ms,llm_call_count,llm_model_ms,tool_call_count,tool_ms,tts_request_to_first_audio_ms,tts_provider_generation_ms,tts_report_ready_ms,output_audio_duration_ms,server_delivery_from_first_audio_ms,server_send_complete_from_tts_request_ms,prompt_tokens,completion_tokens,total_tokens,token_source\n");
         for (Map<String, Object> message : messages) {
             Map<String, Object> metrics = message.get("raw_metrics") instanceof Map<?, ?> map
                     ? toStringKeyMap(map)
@@ -577,7 +588,15 @@ public class AgentChatHistoryController {
                     .append(csv(userMetrics ? nested(metrics, "input", "audio_duration_ms") : null)).append(',')
                     .append(csv(userMetrics ? nested(metrics, "stages", "vad", "inference_ms") : null)).append(',')
                     .append(csv(userMetrics ? nested(metrics, "stages", "vad", "speech_segment_ms") : null)).append(',')
+                    .append(csv(userMetrics ? nested(metrics, "stages", "vad", "decoded_duration_ms") : null)).append(',')
+                    .append(csv(userMetrics ? nested(metrics, "stages", "vad", "speech_gate", "mode") : null)).append(',')
+                    .append(csv(userMetrics ? nested(metrics, "stages", "vad", "speech_gate", "rms_dbfs_avg") : null)).append(',')
+                    .append(csv(userMetrics ? nested(metrics, "stages", "vad", "speech_gate", "snr_db_avg") : null)).append(',')
+                    .append(csv(userMetrics ? nested(metrics, "stages", "vad", "speech_gate", "noise_floor_dbfs") : null)).append(',')
+                    .append(csv(userMetrics ? nested(metrics, "stages", "vad", "speech_to_eos_ms") : null)).append(',')
                     .append(csv(userMetrics ? nested(metrics, "stages", "asr", "first_text_from_speech_ms") : null)).append(',')
+                    .append(csv(userMetrics ? nested(metrics, "stages", "asr", "provider_finalize_ms") : null)).append(',')
+                    .append(csv(userMetrics ? nested(metrics, "stages", "asr", "eos_to_final_text_ms") : null)).append(',')
                     .append(csv(userMetrics ? nested(metrics, "stages", "asr", "tail_after_audio_ms") : null)).append(',')
                     .append(csv(userMetrics ? nested(metrics, "stages", "voiceprint", "total_ms") : null)).append(',')
                     .append(csv(assistantMetrics ? nested(metrics, "trace", "totals", "model_tool_chain_ms") : null)).append(',')
@@ -809,13 +828,13 @@ public class AgentChatHistoryController {
 
                 history.txt: 便于阅读的聊天文本，包含声纹识别摘要和音频文件路径。
                 metadata.json: 结构化原始数据，包含原始 content、声纹识别结果、音频时长、相邻消息间隔和 metrics。
-                latency/<session_id>/messages.json: 按消息导出的 schema_version=2 完整指标。
+                latency/<session_id>/messages.json: 按消息导出的 schema_version=2/3 完整指标。
                 latency/<session_id>/turns.json: 按 turn_id 聚合的输入阶段和 trace.steps 调用链。
                 latency/<session_id>/summary.csv: 每轮聚合延时，区分模型纯调用、工具链、TTS 首包和厂商生成。
                 latency/<session_id>/trace.csv: 每一步 LLM、工具和 TTS 调用单独一行，保留 depth 和调用序号。
                 audio/: 用户与智能体消息对应的 WAV 音频文件；只有历史记录中存在 audio_id 的消息才会导出。
 
-                注意：延时分析只认 schema_version=2 的 stages、trace.steps 和 trace.totals；旧指标结构不再兼容。
+                注意：新数据使用 schema_version=3；导出仍兼容 schema_version=2。trace.steps 和 trace.totals 是模型、工具和 TTS 调用链的权威数据源。
                 """;
     }
 

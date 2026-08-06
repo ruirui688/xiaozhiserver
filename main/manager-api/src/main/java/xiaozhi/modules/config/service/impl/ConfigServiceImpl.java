@@ -533,12 +533,36 @@ public class ConfigServiceImpl implements ConfigService {
     }
 
     void applyManagedVadParams(Map<String, Object> runtimeConfig) {
-        runtimeConfig.put("threshold",
-                readBoundedDoubleParam(Constant.SERVER_VAD_THRESHOLD, 0.5, 0.0, 1.0));
-        runtimeConfig.put("threshold_low",
-                readBoundedDoubleParam(Constant.SERVER_VAD_THRESHOLD_LOW, 0.3, 0.0, 1.0));
-        runtimeConfig.put("min_silence_duration_ms",
-                readBoundedIntParam(Constant.SERVER_VAD_MIN_SILENCE_DURATION_MS, 200, 100, 5000));
+        // Model typed_config is the selected VAD contract. Managed parameters
+        // provide defaults for legacy configurations but must not silently
+        // overwrite an explicit model value (including speech_gate tuning).
+        if (runtimeConfig.get("threshold") == null) {
+            runtimeConfig.put("threshold",
+                    readBoundedDoubleParam(Constant.SERVER_VAD_THRESHOLD, 0.5, 0.0, 1.0));
+        }
+        if (runtimeConfig.get("threshold_low") == null) {
+            runtimeConfig.put("threshold_low",
+                    readBoundedDoubleParam(Constant.SERVER_VAD_THRESHOLD_LOW, 0.3, 0.0, 1.0));
+        }
+        if (runtimeConfig.get("min_silence_duration_ms") == null) {
+            runtimeConfig.put("min_silence_duration_ms",
+                    readBoundedIntParam(Constant.SERVER_VAD_MIN_SILENCE_DURATION_MS, 200, 100, 5000));
+        }
+        Object speechGate = runtimeConfig.get("speech_gate");
+        if (speechGate == null || (speechGate instanceof Map<?, ?> map && map.isEmpty())) {
+            runtimeConfig.put("speech_gate", new HashMap<>(Map.ofEntries(
+                Map.entry("mode", "shadow"),
+                Map.entry("start_probability", 0.8),
+                Map.entry("continuation_probability", 0.5),
+                Map.entry("start_snr_db", 8),
+                Map.entry("barge_in_start_snr_db", 12),
+                Map.entry("continuation_snr_db", 4),
+                Map.entry("tail_grace_ms", 350),
+                Map.entry("noise_floor_adaptation_ms", 5000),
+                Map.entry("confirmation_frames", 3),
+                Map.entry("confirmation_window", 5),
+                Map.entry("preroll_ms", 320))));
+        }
     }
 
     /**

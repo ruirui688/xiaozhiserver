@@ -9,6 +9,7 @@ import queue
 import shutil
 import asyncio
 import tempfile
+import math
 import traceback
 import threading
 import opuslib_next
@@ -74,7 +75,35 @@ class ASRProviderBase(ABC):
 
             # 如果没有语音，且之前也没有声音，缓存部分音频
             if not audio_have_voice and not conn.client_have_voice:
-                conn.asr_audio = conn.asr_audio[-10:]
+                preroll_packets = 10
+                vad = getattr(conn, "vad", None)
+                if (
+                    vad is not None
+                    and hasattr(vad, "is_speech_gate_enforced")
+                    and vad.is_speech_gate_enforced(conn)
+                    and hasattr(vad, "get_preroll_ms")
+                ):
+                    preroll_ms = max(0, int(vad.get_preroll_ms(conn)))
+                    welcome_msg = getattr(conn, "welcome_msg", {}) or {}
+                    audio_params = (
+                        welcome_msg.get("audio_params") or {}
+                        if isinstance(welcome_msg, dict)
+                        else {}
+                    )
+                    try:
+                        packet_duration_ms = max(
+                            1, int(audio_params.get("frame_duration", 60))
+                        )
+                    except (TypeError, ValueError):
+                        packet_duration_ms = 60
+                    preroll_packets = int(
+                        math.ceil(preroll_ms / float(packet_duration_ms))
+                    )
+                conn.asr_audio = (
+                    conn.asr_audio[-preroll_packets:]
+                    if preroll_packets > 0
+                    else []
+                )
                 return
 
             # 自动模式下通过VAD检测到语音停止时触发识别

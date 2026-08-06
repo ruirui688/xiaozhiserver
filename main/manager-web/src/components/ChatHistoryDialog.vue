@@ -430,8 +430,21 @@ export default {
             if (chatType === 1) {
                 add('音频', this.getNested(metrics, ['input', 'audio_duration_ms']));
                 add('VAD推理', this.getNested(metrics, ['stages', 'vad', 'inference_ms']));
+                const speechGate = this.getNested(metrics, ['stages', 'vad', 'speech_gate']) || {};
+                if (Number(metrics.schema_version || 0) >= 3) {
+                    if (speechGate.mode) {
+                        items.push({ label: '声学门控', value: speechGate.mode });
+                    }
+                    add('平均RMS', speechGate.rms_dbfs_avg, 'dBFS');
+                    add('平均SNR', speechGate.snr_db_avg, 'dB');
+                    add('噪声底', speechGate.noise_floor_dbfs, 'dBFS');
+                    add('语音结束确认', this.getNested(metrics, ['stages', 'vad', 'speech_to_eos_ms']));
+                    add('ASR供应商完成', this.getNested(metrics, ['stages', 'asr', 'provider_finalize_ms']));
+                    add('EOS到最终文本', this.getNested(metrics, ['stages', 'asr', 'eos_to_final_text_ms']));
+                } else {
+                    add('ASR尾延时(旧口径)', this.getNested(metrics, ['stages', 'asr', 'tail_after_audio_ms']));
+                }
                 add('ASR首字', this.getNested(metrics, ['stages', 'asr', 'first_text_from_speech_ms']));
-                add('ASR尾延时', this.getNested(metrics, ['stages', 'asr', 'tail_after_audio_ms']));
                 add('声纹', this.getNested(metrics, ['stages', 'voiceprint', 'total_ms']));
                 return items;
             }

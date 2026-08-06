@@ -1,7 +1,88 @@
 import time
+from types import SimpleNamespace
 
 from core.utils import turn_metrics as turn_metrics_module
 from core.utils.turn_metrics import TurnMetrics
+
+
+def test_vad_metrics_include_acoustic_gate_and_eos_fields(monkeypatch):
+    clock = {"value": 100.0}
+    monkeypatch.setattr(turn_metrics_module.time, "monotonic", lambda: clock["value"])
+    monkeypatch.setattr(turn_metrics_module.time, "time", lambda: 1000.0)
+    metrics = TurnMetrics()
+    observation = SimpleNamespace(
+        speech_probability=0.92,
+        rms_dbfs=-38.0,
+        decoded_samples=512,
+    )
+    decision = SimpleNamespace(
+        noise_floor_dbfs=-50.0,
+        snr_db=12.0,
+        speech_started=True,
+        speech_ended=False,
+        rejection_reason=None,
+    )
+    metrics.record_vad_frame(
+        True,
+        1,
+        20,
+        observation=observation,
+        decision=decision,
+        gate_mode="enforce",
+        preroll_ms=320,
+    )
+    clock["value"] = 100.35
+    metrics.record_asr_final_text(2)
+    metrics.begin_turn([b"x"], "opus")
+    metrics.record_asr(7, True, 2)
+
+    payload = metrics.build_user_metrics()
+    vad = payload["stages"]["vad"]
+    assert vad["decoded_duration_ms"] == 32
+    assert vad["speech_gate"]["mode"] == "enforce"
+    assert vad["speech_gate"]["preroll_ms"] == 320
+    assert vad["speech_gate"]["snr_db_avg"] == 12.0
+    assert payload["stages"]["asr"]["provider_finalize_ms"] == 7
+    assert payload["stages"]["asr"]["eos_to_final_text_ms"] >= 0
+
+
+def test_shadow_gate_eos_does_not_replace_actual_segmentation_eos(monkeypatch):
+    clock = {"value": 100.0}
+    monkeypatch.setattr(turn_metrics_module.time, "monotonic", lambda: clock["value"])
+    monkeypatch.setattr(turn_metrics_module.time, "time", lambda: 1000.0)
+    metrics = TurnMetrics()
+    observation = SimpleNamespace(
+        speech_probability=0.92,
+        rms_dbfs=-38.0,
+        decoded_samples=512,
+    )
+    started = SimpleNamespace(
+        noise_floor_dbfs=-50.0,
+        snr_db=12.0,
+        speech_started=True,
+        speech_ended=False,
+        rejection_reason=None,
+    )
+    metrics.record_vad_frame(
+        True, 1, 20, observation=observation, decision=started, gate_mode="shadow"
+    )
+    clock["value"] = 100.35
+    ended = SimpleNamespace(
+        noise_floor_dbfs=-50.0,
+        snr_db=2.0,
+        speech_started=False,
+        speech_ended=True,
+        rejection_reason="silence",
+    )
+    metrics.record_vad_frame(
+        False, 1, 20, observation=observation, decision=ended, gate_mode="shadow"
+    )
+    clock["value"] = 101.0
+    metrics.begin_turn([b"x"], "opus")
+
+    vad = metrics.build_user_metrics()["stages"]["vad"]
+    assert vad["speech_to_eos_ms"] == 1000
+    assert vad["speech_gate"]["shadow_speech_to_eos_ms"] == 349
 
 
 def test_asr_metrics_separate_response_tail_and_finalize_latency():

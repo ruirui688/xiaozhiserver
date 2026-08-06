@@ -1181,7 +1181,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 "Silero", "语音活动检测", "vad", "语音活动检测", "local", "本地模型",
                 "local", "本地部署", "PyTorch/ONNX", "模型目录", "model_dir",
                 List.of(), List.of("model_dir", "threshold", "min_silence_duration_ms"),
-                List.of("threshold", "threshold_low", "min_silence_duration_ms"),
+                List.of("threshold", "threshold_low", "min_silence_duration_ms", "speech_gate"),
                 List.of("检测用户是否在说话，影响打断和断句。"), List.of(), List.of("SileroVAD"),
                 "https://github.com/snakers4/silero-vad"));
         items.add(item("MEMORY_NONE", "Memory", "nomem", "无记忆",
@@ -1627,6 +1627,18 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             case "model_name", "model", "resource_id", "voice", "speaker", "appkey", "cluster" -> "";
             case "temperature" -> "";
             case "top_p", "top_k", "max_tokens" -> "";
+            case "speech_gate" -> Map.ofEntries(
+                    Map.entry("mode", "shadow"),
+                    Map.entry("start_probability", 0.8),
+                    Map.entry("continuation_probability", 0.5),
+                    Map.entry("start_snr_db", 8),
+                    Map.entry("barge_in_start_snr_db", 12),
+                    Map.entry("continuation_snr_db", 4),
+                    Map.entry("tail_grace_ms", 350),
+                    Map.entry("noise_floor_adaptation_ms", 5000),
+                    Map.entry("confirmation_frames", 3),
+                    Map.entry("confirmation_window", 5),
+                    Map.entry("preroll_ms", 320));
             default -> "";
         };
     }
@@ -1678,6 +1690,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             case "speaking_style" -> "说话风格";
             case "input_mode" -> "输入模式";
             case "end_smooth_window_ms" -> "断句平滑窗口(ms)";
+            case "speech_gate" -> "RMS/SNR 声学门控";
             case "strict_audit" -> "严格内容审核";
             default -> key;
         };
@@ -1700,7 +1713,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             return "boolean";
         }
         if (key.equals("audio_params") || key.equals("additions") || key.equals("params") || key.equals("headers")
-                || key.equals("variables")) {
+                || key.equals("variables") || key.equals("speech_gate")) {
             return "json";
         }
         return "string";
@@ -1771,6 +1784,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             case "input_mode" -> "audio 由上游自动断句；push_to_talk 在设备 listen.stop 时发送结束识别事件。";
             case "end_smooth_window_ms" -> "豆包端到端 ASR 断句平滑窗口，默认 1500 ms。";
             case "strict_audit" -> "是否启用火山引擎严格内容审核，生产默认开启。";
+            case "speech_gate" -> "Silero 后的轻量 RMS/SNR 多帧门控。先使用 shadow 采集指标，校准后将 mode 改为 enforce；min_rms_dbfs 仅按设备标定，不要跨设备照搬。";
             default -> "";
         };
     }

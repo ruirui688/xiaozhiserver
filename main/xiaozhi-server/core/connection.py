@@ -2536,6 +2536,11 @@ class ConnectionHandler:
         self.client_voice_window.clear()
         self.last_is_voice = False
         self.vad_last_voice_time = 0.0
+        if self.vad is not None and hasattr(self.vad, "reset_conn_state"):
+            try:
+                self.vad.reset_conn_state(self)
+            except Exception as e:
+                self.logger.bind(tag=TAG).debug(f"重置声学门控状态失败: {e}")
 
         # Clear ASR buffers
         self.asr_audio.clear()

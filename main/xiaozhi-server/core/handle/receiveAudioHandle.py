@@ -40,6 +40,12 @@ async def handleAudioMessage(conn: "ConnectionHandler", audio):
     # 当前片段是否有人说话
     vad_started_at = time.monotonic()
     have_voice = conn.vad.is_vad(conn, audio)
+    vad_observation = None
+    vad_decision = None
+    if hasattr(conn.vad, "get_last_observation"):
+        vad_observation = conn.vad.get_last_observation(conn)
+    if hasattr(conn.vad, "get_last_decision"):
+        vad_decision = conn.vad.get_last_decision(conn)
     turn_metrics = getattr(conn, "turn_metrics", None)
     if turn_metrics is not None:
         try:
@@ -47,6 +53,18 @@ async def handleAudioMessage(conn: "ConnectionHandler", audio):
                 have_voice,
                 int((time.monotonic() - vad_started_at) * 1000),
                 len(audio) if audio else 0,
+                observation=vad_observation,
+                decision=vad_decision,
+                gate_mode=(
+                    conn.vad.get_speech_gate_mode(conn)
+                    if hasattr(conn.vad, "get_speech_gate_mode")
+                    else None
+                ),
+                preroll_ms=(
+                    conn.vad.get_preroll_ms(conn)
+                    if hasattr(conn.vad, "get_preroll_ms")
+                    else None
+                ),
             )
         except Exception as e:
             logger = conn.logger.bind(tag=TAG)
@@ -55,9 +73,15 @@ async def handleAudioMessage(conn: "ConnectionHandler", audio):
     update_voice_activity(conn, have_voice)
     # 与官方一致：支持 AEC 的设备只要确认用户已经开口，就立即停止当前播报。
     # 这里不等待句尾、完整 ASR 或 LLM；当前用户音频继续进入 ASR。
+    speech_started = have_voice
+    if (
+        getattr(conn.vad, "is_speech_gate_enforced", lambda _conn=None: False)(conn)
+        and vad_decision is not None
+    ):
+        speech_started = bool(vad_decision.speech_started)
     if (
         getattr(conn, "client_aec", False)
-        and have_voice
+        and speech_started
         and conn.client_is_speaking
         and conn.client_listen_mode != "manual"
     ):

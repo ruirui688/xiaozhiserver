@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
@@ -15,6 +16,20 @@ import xiaozhi.modules.model.dto.ModelCatalogDTO;
 import xiaozhi.modules.model.dto.ModelFieldSchemaDTO;
 
 class ModelCatalogServiceImplTest {
+
+    @Test
+    void sileroVadExposesEditableRmsSnrGateJson() throws Exception {
+        ModelCatalogDTO template = staticCatalog().stream()
+                .filter(item -> "VAD_SILERO".equals(item.getTemplateCode()))
+                .findFirst()
+                .orElseThrow();
+
+        ModelFieldSchemaDTO speechGate = field(template, "speech_gate");
+        assertEquals("json", speechGate.getType());
+        assertEquals("textarea", speechGate.getInputType());
+        assertEquals("shadow", ((Map<?, ?>) speechGate.getDefaultValue()).get("mode"));
+        assertTrue(speechGate.getHelpText().contains("enforce"));
+    }
 
     @Test
     void qwenTextModelOptionsAreInitializedInStaticCatalog() throws Exception {

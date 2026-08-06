@@ -157,9 +157,10 @@
 ## 11. 语义控制中枢与语音操作系统架构
 
 ```text
-定制模块：xiaozhi-server 语义前置控制链路
-改动原因：把小智从“ASR 后直接交给 LLM/function-call”的聊天机器人链路，演进为“TextNormalizer -> SemanticRouter -> StateManager -> PolicyEngine -> SemanticCenter”的语音控制中枢。退出游戏、游戏续局、低置信度拒识等具有明确状态约束的控制可优先由服务端规则和状态处理；播报打断则跟随官方 AEC barge-in 机制，与语义控制解耦。
+定制模块：xiaozhi-server 语义前置控制链路与声学活动门控
+改动原因：把小智从“ASR 后直接交给 LLM/function-call”的聊天机器人链路，演进为“TextNormalizer -> SemanticRouter -> StateManager -> PolicyEngine -> SemanticCenter”的语音控制中枢。退出游戏、游戏续局、低置信度拒识等具有明确状态约束的控制可优先由服务端规则和状态处理；播报打断仍与语义控制解耦，但在 Silero 后增加轻量 RMS、自适应噪声底和 SNR 多帧确认，避免低能量间歇噪声过早触发 AEC Abort 并拖长 ASR 音频段。选中 VAD 模型的显式 typed_config 是实际运行值，`server.vad_*` 管理参数只为缺失或 null 的旧模型字段提供缺省值，不再静默覆盖模型级调参。
 关键文件：
+  - main/xiaozhi-server/core/audio/speech_activity.py
   - main/xiaozhi-server/core/semantic/
   - main/xiaozhi-server/core/connection.py
   - main/xiaozhi-server/core/handle/receiveAudioHandle.py
@@ -169,7 +170,7 @@
   - main/xiaozhi-server/tests/test_semantic_policy.py
   - docs/architecture/semantic-control-center.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改 startToChat、ConnectionHandler 初始化、Silero VAD、hello features、handle_user_intent、GameSessionManager、UnifiedToolHandler、ToolManager、abortHandle、TTS 入队或 function-call 主链路，必须保留语义控制中枢在旧意图/LLM 之前的前置拦截位置；播报打断保持官方机制：只使用 VAD 模型的单一 `min_silence_duration_ms`，设备通过 `features.aec=true` 启用句首即时打断，VAD 确认用户开口后立即停止 TTS，不等待完整 ASR 或额外 LLM；本地 abort 清理输出时必须保留正在形成的用户音频，非 AEC 设备则在完整 ASR 后停止；不得重新引入停止词表或独立 LLM 打断分类器；未命中高置信度语义规则时必须继续兜底到旧 handle_user_intent 和 conn.chat；纯语言游戏不得优先回到 active_game_tool，应交给主 LLM 对话，并只从已启用功能插件读取可编辑软规则；退出游戏不得关闭 websocket；语义模块顶层导入应尽量轻量，避免引入 opus/loguru 等运行依赖导致纯单元测试无法导入。
+官方同步时的处理规则：如果官方修改 startToChat、ConnectionHandler 初始化、Silero VAD、hello features、handle_user_intent、GameSessionManager、UnifiedToolHandler、ToolManager、abortHandle、TTS 入队或 function-call 主链路，必须保留语义控制中枢在旧意图/LLM 之前的前置拦截位置；设备通过 `features.aec=true` 启用句首即时打断，`speech_gate` 在 Silero 概率后使用 RMS/SNR 与多帧状态机确认讲话开始，只有确认后的 `speech_started` 边沿能够停止 TTS，不等待完整 ASR 或额外 LLM；`disabled/shadow/enforce`、约 320ms pre-roll、严格开始/宽松继续、模糊尾帧有界宽限和声纹录入至少两秒静音的契约不得被官方单阈值实现覆盖；该门控仍是声学 VAD，不得扩张成停止词表或独立 LLM 打断分类器；本地 abort 清理输出时必须保留正在形成的用户音频，非 AEC 设备则在完整 ASR 后停止；未命中高置信度语义规则时必须继续兜底到旧 handle_user_intent 和 conn.chat；纯语言游戏不得优先回到 active_game_tool，应交给主 LLM 对话，并只从已启用功能插件读取可编辑软规则；退出游戏不得关闭 websocket；语义模块顶层导入应尽量轻量，避免引入 opus/loguru 等运行依赖导致纯单元测试无法导入。
 ```
 
 ## 12. 管理后台模型测试详情字段补全

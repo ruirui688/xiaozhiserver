@@ -43,7 +43,7 @@ def _estimated_token_count(value):
 class TurnMetrics:
     """Collect isolated per-turn latency traces for chat history."""
 
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 3
     MAX_PENDING_TURNS = 32
 
     def __init__(self):
@@ -132,7 +132,16 @@ class TurnMetrics:
             )
             self._refresh_trace_totals(turn)
 
-    def record_vad_frame(self, have_voice, elapsed_ms, audio_bytes):
+    def record_vad_frame(
+        self,
+        have_voice,
+        elapsed_ms,
+        audio_bytes,
+        observation=None,
+        decision=None,
+        gate_mode=None,
+        preroll_ms=None,
+    ):
         with self._lock:
             if self._vad_segment is None:
                 if not have_voice:
@@ -146,6 +155,10 @@ class TurnMetrics:
                     "vad_audio_bytes": 0,
                     "vad_inference_ms": 0,
                     "vad_inference_ms_max": 0,
+                    "vad_decoded_samples": 0,
+                    "gate_mode": gate_mode,
+                    "gate_preroll_ms": preroll_ms,
+                    "gate_rejection_counts": {},
                 }
 
             segment = self._vad_segment
@@ -156,6 +169,54 @@ class TurnMetrics:
             segment["vad_inference_ms_max"] = max(
                 segment["vad_inference_ms_max"], frame_elapsed
             )
+            if observation is not None:
+                probability = float(observation.speech_probability)
+                rms_dbfs = float(observation.rms_dbfs)
+                segment["vad_decoded_samples"] += int(
+                    observation.decoded_samples or 0
+                )
+                segment["speech_probability_sum"] = (
+                    segment.get("speech_probability_sum", 0.0) + probability
+                )
+                segment["speech_probability_min"] = min(
+                    segment.get("speech_probability_min", probability), probability
+                )
+                segment["speech_probability_max"] = max(
+                    segment.get("speech_probability_max", probability), probability
+                )
+                segment["rms_dbfs_sum"] = segment.get("rms_dbfs_sum", 0.0) + rms_dbfs
+                segment["rms_dbfs_min"] = min(
+                    segment.get("rms_dbfs_min", rms_dbfs), rms_dbfs
+                )
+                segment["rms_dbfs_max"] = max(
+                    segment.get("rms_dbfs_max", rms_dbfs), rms_dbfs
+                )
+            if decision is not None:
+                if decision.noise_floor_dbfs is not None:
+                    segment["noise_floor_dbfs"] = float(
+                        decision.noise_floor_dbfs
+                    )
+                if decision.snr_db is not None:
+                    snr_db = float(decision.snr_db)
+                    segment["snr_db_sum"] = segment.get("snr_db_sum", 0.0) + snr_db
+                    segment["snr_frame_count"] = segment.get("snr_frame_count", 0) + 1
+                    segment["snr_db_min"] = min(
+                        segment.get("snr_db_min", snr_db), snr_db
+                    )
+                    segment["snr_db_max"] = max(
+                        segment.get("snr_db_max", snr_db), snr_db
+                    )
+                if decision.speech_started:
+                    segment.setdefault("gate_speech_started_at", time.monotonic())
+                if decision.speech_ended:
+                    if gate_mode == "enforce":
+                        segment["gate_eos_at"] = time.monotonic()
+                    elif gate_mode == "shadow":
+                        segment["gate_shadow_eos_at"] = time.monotonic()
+                if decision.rejection_reason:
+                    counts = segment["gate_rejection_counts"]
+                    reason = str(decision.rejection_reason)
+                    counts[reason] = int(counts.get(reason, 0)) + 1
             if have_voice:
                 segment["vad_voice_frame_count"] += 1
                 segment["last_voice_at_monotonic"] = time.monotonic()
@@ -174,11 +235,22 @@ class TurnMetrics:
                 "vad_audio_bytes": 0,
                 "vad_inference_ms": 0,
                 "vad_inference_ms_max": 0,
+                "vad_decoded_samples": 0,
+                "gate_mode": None,
+                "gate_preroll_ms": None,
+                "gate_rejection_counts": {},
             }
             self._vad_segment = None
             audio_duration_ms = _audio_duration_ms(audio_frames, audio_format)
             speech_started_at = vad.get("speech_started_at_monotonic") or now_monotonic
             last_voice_at = vad.get("last_voice_at_monotonic")
+            eos_at = vad.get("gate_eos_at") or now_monotonic
+            gate_speech_started_at = (
+                vad.get("gate_speech_started_at") or speech_started_at
+            )
+            gate_shadow_eos_at = vad.get("gate_shadow_eos_at")
+            probability_frames = max(1, int(vad.get("vad_frame_count") or 0))
+            snr_frames = max(1, int(vad.get("snr_frame_count") or 0))
             turn = {
                 "schema_version": self.SCHEMA_VERSION,
                 "turn_id": uuid.uuid4().hex,
@@ -196,19 +268,72 @@ class TurnMetrics:
                         "audio_bytes": vad.get("vad_audio_bytes", 0),
                         "inference_ms": vad.get("vad_inference_ms", 0),
                         "max_frame_inference_ms": vad.get("vad_inference_ms_max", 0),
+                        "decoded_duration_ms": int(
+                            (vad.get("vad_decoded_samples", 0) or 0) / 16
+                        ),
                         "speech_segment_ms": max(
                             0, int((now_monotonic - speech_started_at) * 1000)
+                        ),
+                        "speech_to_eos_ms": max(
+                            0, int((eos_at - speech_started_at) * 1000)
                         ),
                         "silence_after_last_voice_ms": (
                             max(0, int((now_monotonic - last_voice_at) * 1000))
                             if last_voice_at
                             else None
                         ),
+                        "speech_gate": {
+                            "mode": vad.get("gate_mode"),
+                            "preroll_ms": vad.get("gate_preroll_ms"),
+                            "speech_probability_avg": round(
+                                vad.get("speech_probability_sum", 0.0)
+                                / probability_frames,
+                                4,
+                            ),
+                            "speech_probability_min": vad.get(
+                                "speech_probability_min"
+                            ),
+                            "speech_probability_max": vad.get(
+                                "speech_probability_max"
+                            ),
+                            "rms_dbfs_avg": round(
+                                vad.get("rms_dbfs_sum", 0.0) / probability_frames,
+                                3,
+                            ),
+                            "rms_dbfs_min": vad.get("rms_dbfs_min"),
+                            "rms_dbfs_max": vad.get("rms_dbfs_max"),
+                            "noise_floor_dbfs": vad.get("noise_floor_dbfs"),
+                            "shadow_speech_to_eos_ms": (
+                                max(
+                                    0,
+                                    int(
+                                        (
+                                            gate_shadow_eos_at
+                                            - gate_speech_started_at
+                                        )
+                                        * 1000
+                                    ),
+                                )
+                                if gate_shadow_eos_at is not None
+                                else None
+                            ),
+                            "snr_db_avg": (
+                                round(vad.get("snr_db_sum", 0.0) / snr_frames, 3)
+                                if vad.get("snr_frame_count")
+                                else None
+                            ),
+                            "snr_db_min": vad.get("snr_db_min"),
+                            "snr_db_max": vad.get("snr_db_max"),
+                            "rejection_counts": dict(
+                                vad.get("gate_rejection_counts") or {}
+                            ),
+                        },
                     }
                 },
                 "trace": {"steps": [], "totals": {}},
                 "_runtime": {
                     "speech_started_at": speech_started_at,
+                    "eos_at": eos_at,
                     "audio_duration_ms": audio_duration_ms,
                     "asr_first_text_ms": _elapsed_between_ms(
                         speech_started_at,
@@ -446,6 +571,19 @@ class TurnMetrics:
                     else None
                 ),
                 "provider_finalize_ms": max(0, int(finalize_ms or 0)),
+                "eos_to_final_text_ms": (
+                    max(
+                        0,
+                        int(final_text_ms)
+                        - int(
+                            turn.get("stages", {})
+                            .get("vad", {})
+                            .get("speech_to_eos_ms", 0)
+                        ),
+                    )
+                    if final_text_ms is not None
+                    else None
+                ),
                 "first_text_length": runtime.get("asr_first_text_length"),
                 "text_length": int(text_length or 0),
                 "success": bool(success),
