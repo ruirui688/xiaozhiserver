@@ -76,6 +76,7 @@ PARALLEL_IMAGE_BUILDS="${PARALLEL_IMAGE_BUILDS:-true}"
 PRINT_BUILD_CONFIG="${PRINT_BUILD_CONFIG:-true}"
 PRINT_BUILD_CONFIG_ONLY="${PRINT_BUILD_CONFIG_ONLY:-false}"
 LOG_DIR="${LOG_DIR:-$(mktemp -d -t xiaozhi-docker-build.XXXXXX)}"
+LAST_DOCKER_LOG_FILE=""
 SERVER_BASE_CACHE_VERSION="${SERVER_BASE_CACHE_VERSION:-v2}"
 SERVER_BASE_SEED_LATEST="${SERVER_BASE_SEED_LATEST:-false}"
 MANAGER_API_CACHE_VERSION="${MANAGER_API_CACHE_VERSION:-v1}"
@@ -436,6 +437,7 @@ run_docker_step() {
 
   local log_file="$LOG_DIR/$(printf '%s' "$label" | tr -cs '[:alnum:]_.-' '_' | sed 's/^_*//; s/_*$//').log"
   local cmd_pid
+  LAST_DOCKER_LOG_FILE="$log_file"
 
   if ! progress_enabled; then
     echo "$label"
@@ -887,6 +889,17 @@ build_funasr_base() {
 build_server_pipeline() {
   local server_base_image="${SERVER_BASE_IMAGE:-}"
 
+  build_server_image() {
+    build_image "Build xiaozhi-server image" Dockerfile-server \
+      --build-context "funasr_model=$FUNASR_MODEL_CONTEXT" \
+      --build-arg "SERVER_BASE_IMAGE=$1" \
+      --build-arg "INSTALL_FUNASR_MODEL=$INSTALL_FUNASR_MODEL" \
+      --build-arg "FUNASR_MODEL_URL=$FUNASR_MODEL_URL" \
+      --build-arg "FUNASR_MODEL_DIGEST=$FUNASR_MODEL_DIGEST" \
+      --tag "$SERVER_IMAGE_REPOSITORY:$CHANNEL_TAG" \
+      --tag "$SERVER_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"
+  }
+
   if [[ -n "$server_base_image" ]]; then
     print_base_image_status "Base image explicit" "$server_base_image"
   elif [[ "$BUILD_BASE" == "false" ]]; then
@@ -913,14 +926,31 @@ build_server_pipeline() {
     server_base_image="$SERVER_BASE_CACHE_IMAGE"
   fi
 
-  build_image "Build xiaozhi-server image" Dockerfile-server \
-    --build-context "funasr_model=$FUNASR_MODEL_CONTEXT" \
-    --build-arg "SERVER_BASE_IMAGE=$server_base_image" \
-    --build-arg "INSTALL_FUNASR_MODEL=$INSTALL_FUNASR_MODEL" \
-    --build-arg "FUNASR_MODEL_URL=$FUNASR_MODEL_URL" \
-    --build-arg "FUNASR_MODEL_DIGEST=$FUNASR_MODEL_DIGEST" \
-    --tag "$SERVER_IMAGE_REPOSITORY:$CHANNEL_TAG" \
-    --tag "$SERVER_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"
+  if ! build_server_image "$server_base_image"; then
+    if [[ "$BUILD_BASE" == "auto" \
+      && "$server_base_image" == "$SERVER_BASE_CACHE_IMAGE" \
+      && "$LAST_DOCKER_LOG_FILE" == "${LOG_DIR}"/* \
+      && -f "$LAST_DOCKER_LOG_FILE" \
+      && grep -Eq 'failed to resolve source metadata|could not fetch content descriptor|failed to copy' "$LAST_DOCKER_LOG_FILE" ]]; then
+      echo "Server base cache is not readable; rebuilding the selected base once and retrying." >&2
+      local previous_build_base="$BUILD_BASE"
+      local base_rebuild_status=0
+      BUILD_BASE=true
+      if [[ "$SERVER_INSTALL_PROFILE" == "funasr" ]]; then
+        build_funasr_base || base_rebuild_status=$?
+      else
+        build_lite_base || base_rebuild_status=$?
+      fi
+      BUILD_BASE="$previous_build_base"
+      if [[ "$base_rebuild_status" -ne 0 ]]; then
+        return "$base_rebuild_status"
+      fi
+      server_base_image="$SERVER_BASE_CACHE_IMAGE"
+      build_server_image "$server_base_image" || return $?
+    else
+      return 1
+    fi
+  fi
   push_image "$SERVER_IMAGE_REPOSITORY:$CHANNEL_TAG"
   push_image "$SERVER_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG"
 }

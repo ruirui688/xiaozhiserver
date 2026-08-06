@@ -872,6 +872,9 @@ retag 失败会直接停止，避免用本地 `pull/tag/push` 把 OCI index 降�
 `docker-build-private.sh` 独立运行仍默认 Docker engine；显式执行
 `BUILD_ENGINE=buildx PUSH=false` 时必须设置 `BUILD_BASE=false` 使用 registry-backed base，
 或显式传入 `SERVER_BASE_IMAGE`，否则脚本会拒绝不可消费的 daemon-only base 缓存组合。
+如果 ACR 的 base tag manifest 可见但引用的 config/layer blob 暂时不可读，服务镜像步骤会
+把该缓存视为 miss，强制重建对应 profile 的 base 并只重试一次；普通 Dockerfile 编译错误
+不会触发这个重建重试。
 
 以下情况即使源码改动不大，也可能重新下载依赖：
 
