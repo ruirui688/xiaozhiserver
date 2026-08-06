@@ -27,7 +27,7 @@ from core.utils.modules_initialize import (
 )
 from core.handle.reportHandle import report, enqueue_tool_report
 from core.providers.tts.default import DefaultTTS
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from concurrent.futures import TimeoutError
 from core.utils.dialogue import Message, Dialogue
 from core.providers.asr.dto.dto import InterfaceType
 from core.handle.textHandle import handleTextMessage
@@ -73,9 +73,11 @@ from core.semantic.skill_registry import SkillRegistry
 from core.device_runtime_registry import register_connection, unregister_connection
 from core.observability import SessionTelemetry
 from core.session import (
+    BoundedThreadPoolExecutor,
     CloseCoordinator,
     ReplyLifecycle,
     RuntimeReadiness,
+    build_connection_audio_buffers,
     SessionTTSOptions,
     SessionLifecycle,
     TurnContextBuffer,
@@ -229,7 +231,12 @@ class ConnectionHandler:
         # 线程任务相关
         self.loop = None  # 在 handle_connection 中获取运行中的事件循环
         self.stop_event = threading.Event()
-        self.executor = ThreadPoolExecutor(max_workers=5)
+        # 上报使用独立串行线程；连接业务线程池保留并发，但等待任务必须有界。
+        self.executor = BoundedThreadPoolExecutor(
+            max_workers=5,
+            max_pending_tasks=16,
+            thread_name_prefix="connection-task",
+        )
         self.closing = False
         self.closed = False
         self._close_lock = asyncio.Lock()
@@ -297,8 +304,7 @@ class ConnectionHandler:
         # asr相关变量
         # 因为实际部署时可能会用到公共的本地ASR，不能把变量暴露给公共ASR
         # 所以涉及到ASR的变量，需要在这里定义，属于connection的私有变量
-        self.asr_audio = []
-        self.asr_audio_queue = queue.Queue()
+        self.asr_audio, self.asr_audio_queue = build_connection_audio_buffers(self)
         self.current_speaker = None  # 存储当前说话人
         self.current_speaker_id = None  # 当前说话人的稳定声纹记录ID
         self.turn_context = TurnContextBuffer()
@@ -504,10 +510,18 @@ class ConnectionHandler:
 
             # 守护线程2：走老流程记忆保存（仅记忆，不含标题）
             if self.memory:
+                snapshot_for_memory = getattr(
+                    self.dialogue, "snapshot_for_memory", None
+                )
+                memory_messages = (
+                    snapshot_for_memory()
+                    if callable(snapshot_for_memory)
+                    else list(self.dialogue.dialogue)
+                )
                 threads.append(
                     self._run_async_in_daemon_thread(
                         self.memory.save_memory(
-                            self.dialogue.dialogue, self.session_id
+                            memory_messages, self.session_id
                         ),
                         "memory-save",
                     )
@@ -819,9 +833,14 @@ class ConnectionHandler:
                 )
 
             """设置对话历史截断"""
-            max_turns = int(self.config.get("dialogue", {}).get("max_history_turns", 0))
+            dialogue_config = self.config.get("dialogue", {})
+            max_turns = int(dialogue_config.get("max_history_turns", 0))
+            max_stored_messages = int(
+                dialogue_config.get("max_stored_messages", 200)
+            )
+            self.dialogue.set_max_stored_messages(max_stored_messages)
             if max_turns > 0:
-                self.dialogue.max_history_turns = max_turns
+                self.dialogue.set_max_history_turns(max_turns)
                 self.logger.bind(tag=TAG).info(f"对话历史截断已启用: max_history_turns={max_turns}")
 
             """初始化本地组件"""
@@ -2557,6 +2576,9 @@ class ConnectionHandler:
                 while True:
                     try:
                         q.get_nowait()
+                        task_done = getattr(q, "task_done", None)
+                        if callable(task_done):
+                            task_done()
                     except queue.Empty:
                         break
 
@@ -2571,6 +2593,9 @@ class ConnectionHandler:
             while True:
                 try:
                     self.asr_audio_queue.get_nowait()
+                    task_done = getattr(self.asr_audio_queue, "task_done", None)
+                    if callable(task_done):
+                        task_done()
                 except q_mod.Empty:
                     break
 

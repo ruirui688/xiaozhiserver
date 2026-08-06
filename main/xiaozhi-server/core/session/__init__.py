@@ -9,6 +9,11 @@ from core.session.reply_lifecycle import (
     ReplyState,
 )
 from core.session.runtime_readiness import RuntimeReadiness
+from core.session.runtime_memory import (
+    BoundedThreadPoolExecutor,
+    RejectedExecutionError,
+    build_connection_audio_buffers,
+)
 from core.session.tts_session_options import (
     SessionTTSOptions,
     TTSOptionError,
@@ -29,6 +34,9 @@ __all__ = [
     "ReplySnapshot",
     "ReplyState",
     "RuntimeReadiness",
+    "BoundedThreadPoolExecutor",
+    "RejectedExecutionError",
+    "build_connection_audio_buffers",
     "SessionTTSOptions",
     "TTSOptionError",
     "TTSOptionResult",

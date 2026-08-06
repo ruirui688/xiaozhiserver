@@ -392,8 +392,23 @@ class RuntimeConfigReloader:
         conn.dialogue.clear_temporary_messages()
         conn._inject_tool_call_fewshot()
         conn._init_voiceprint_enrollment_from_config()
-        max_turns = int(conn.config.get("dialogue", {}).get("max_history_turns", 0))
-        conn.dialogue.max_history_turns = max_turns
+        dialogue_config = conn.config.get("dialogue", {})
+        max_turns = int(dialogue_config.get("max_history_turns", 0))
+        max_stored_messages = int(
+            dialogue_config.get("max_stored_messages", 200)
+        )
+        set_max_stored_messages = getattr(
+            conn.dialogue, "set_max_stored_messages", None
+        )
+        if callable(set_max_stored_messages):
+            set_max_stored_messages(max_stored_messages)
+        set_max_history_turns = getattr(
+            conn.dialogue, "set_max_history_turns", None
+        )
+        if callable(set_max_history_turns):
+            set_max_history_turns(max_turns)
+        else:
+            conn.dialogue.max_history_turns = max_turns
         conn.selected_module_str = build_module_string(
             conn.config.get("selected_module", {})
         )
@@ -448,5 +463,8 @@ class RuntimeConfigReloader:
         while True:
             try:
                 target.get_nowait()
+                task_done = getattr(target, "task_done", None)
+                if callable(task_done):
+                    task_done()
             except queue.Empty:
                 return

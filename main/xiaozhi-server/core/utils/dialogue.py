@@ -36,17 +36,89 @@ class Message:
 
 
 class Dialogue:
-    def __init__(self, max_history_turns: int = 0):
+    DEFAULT_MAX_STORED_MESSAGES = 200
+    MIN_MAX_STORED_MESSAGES = 20
+    HARD_MAX_STORED_MESSAGES = 200
+
+    def __init__(
+            self,
+            max_history_turns: int = 0,
+            max_stored_messages: int = DEFAULT_MAX_STORED_MESSAGES,
+    ):
         self.dialogue: List[Message] = []
         # 获取当前时间
         self.current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         # 最大对话轮次数，0 表示不限制。每轮 = 1 user + 1 assistant (可能 + tool)
-        self.max_history_turns = max_history_turns
+        self.max_history_turns = max(0, int(max_history_turns))
+        # 长期记忆在会话结束时最多消费 200 条；同步限制实体历史，避免长连接无限增长。
+        self.max_stored_messages = min(
+            self.HARD_MAX_STORED_MESSAGES,
+            max(self.MIN_MAX_STORED_MESSAGES, int(max_stored_messages)),
+        )
         self._lock = threading.Lock()
 
     def put(self, message: Message):
         with self._lock:
             self.dialogue.append(message)
+            self._prune_stored_history_locked()
+
+    def set_max_history_turns(self, max_history_turns: int) -> int:
+        """Apply the LLM context turn limit and enforce the storage ceiling."""
+        with self._lock:
+            self.max_history_turns = max(0, int(max_history_turns))
+            return self._prune_stored_history_locked()
+
+    def set_max_stored_messages(self, max_stored_messages: int) -> int:
+        """Apply the physical history ceiling and release old messages."""
+        with self._lock:
+            self.max_stored_messages = min(
+                self.HARD_MAX_STORED_MESSAGES,
+                max(self.MIN_MAX_STORED_MESSAGES, int(max_stored_messages)),
+            )
+            return self._prune_stored_history_locked()
+
+    def snapshot_for_memory(self) -> List[Message]:
+        """Return a stable session snapshot for asynchronous close processing."""
+        with self._lock:
+            return list(self.dialogue)
+
+    def _prune_stored_history_locked(self) -> int:
+        """Physically retain only the configured recent conversation turns.
+
+        System and temporary few-shot messages aren't conversation history and
+        remain available for prompt construction.
+        """
+        actual_messages = [
+            message
+            for message in self.dialogue
+            if message.role != "system" and not message.is_temporary
+        ]
+        if len(actual_messages) <= self.max_stored_messages:
+            return 0
+
+        retained_actual = actual_messages[-self.max_stored_messages:]
+        # Avoid beginning retained history with an orphaned assistant/tool
+        # fragment when a user boundary exists inside the storage window.
+        first_user = next(
+            (
+                index
+                for index, message in enumerate(retained_actual)
+                if message.role == "user"
+            ),
+            None,
+        )
+        if first_user is not None:
+            retained_actual = retained_actual[first_user:]
+        retained_ids = {id(message) for message in retained_actual}
+        before = len(self.dialogue)
+        self.dialogue = [
+            message
+            for message in self.dialogue
+            if message.role == "system"
+            or message.is_temporary
+            or id(message) in retained_ids
+        ]
+        return before - len(self.dialogue)
 
     def getMessages(self, m, dialogue):
         if m.tool_calls is not None:

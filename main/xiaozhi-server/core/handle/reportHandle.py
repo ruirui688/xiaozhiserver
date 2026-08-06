@@ -353,7 +353,12 @@ def enqueue_tool_report(
             )
             if _is_meeting_tool(tool_name):
                 mark_skip_memory_event(conn, 3, tool_text, "meeting_tool_call")
-            conn.report_queue.put((3, tool_text, None, timestamp, call_metrics))
+            if conn.report_queue.put(
+                (3, tool_text, None, timestamp, call_metrics)
+            ) is False:
+                conn.logger.bind(tag=TAG).warning(
+                    "工具调用上报队列已满，已拒绝本条记录"
+                )
 
         # 构建工具结果内容
         if tool_result:
@@ -368,9 +373,12 @@ def enqueue_tool_report(
             result_content = json.dumps([{"type": "tool_result", "text": result_display}], ensure_ascii=False)
             if _is_meeting_tool(tool_name):
                 mark_skip_memory_event(conn, 3, result_content, "meeting_tool_result")
-            conn.report_queue.put(
+            if conn.report_queue.put(
                 (3, result_content, None, timestamp + 1, result_metrics)
-            )
+            ) is False:
+                conn.logger.bind(tag=TAG).warning(
+                    "工具结果上报队列已满，已拒绝本条记录"
+                )
     except Exception as e:
         conn.logger.bind(tag=TAG).error(f"加入工具上报队列失败: {e}")
 
@@ -414,12 +422,26 @@ def enqueue_asr_report(conn: "ConnectionHandler", text, opus_data, metrics=None)
         text = _consume_asr_report_text_override(conn, text)
         # 使用连接对象的队列，传入文本和二进制数据而非文件路径
         if conn.chat_history_conf == 2:
-            conn.report_queue.put((1, text, opus_data, int(time.time() * 1000), metrics))
+            queued = conn.report_queue.put(
+                (1, text, opus_data, int(time.time() * 1000), metrics)
+            )
+            if queued is False:
+                conn.logger.bind(tag=TAG).warning(
+                    "ASR上报队列已满，已拒绝本条记录"
+                )
+                return
             conn.logger.bind(tag=TAG).debug(
                 f"ASR数据已加入上报队列: {conn.device_id}, 音频大小: {len(opus_data)} "
             )
         else:
-            conn.report_queue.put((1, text, None, int(time.time() * 1000), metrics))
+            queued = conn.report_queue.put(
+                (1, text, None, int(time.time() * 1000), metrics)
+            )
+            if queued is False:
+                conn.logger.bind(tag=TAG).warning(
+                    "ASR上报队列已满，已拒绝本条记录"
+                )
+                return
             conn.logger.bind(tag=TAG).debug(
                 f"ASR数据已加入上报队列: {conn.device_id}, 不上报音频"
             )

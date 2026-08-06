@@ -3,6 +3,12 @@
 # Activate with: SPRING_PROFILES_ACTIVE=prod
 # ============================================================
 
+server:
+  tomcat:
+    threads:
+      max: 100
+      min-spare: 10
+
 knife4j:
   production: true
   enable: false

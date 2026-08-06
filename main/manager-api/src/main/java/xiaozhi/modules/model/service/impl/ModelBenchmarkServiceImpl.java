@@ -6,7 +6,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -39,6 +38,7 @@ import xiaozhi.modules.model.service.ModelBenchmarkService;
 import xiaozhi.modules.model.service.impl.benchmark.BenchmarkCaseGenerator;
 import xiaozhi.modules.model.service.impl.benchmark.BenchmarkContextBuilder;
 import xiaozhi.modules.model.service.impl.benchmark.BenchmarkResultPersistence;
+import xiaozhi.modules.model.service.impl.benchmark.BenchmarkTaskExecutor;
 import xiaozhi.modules.model.service.impl.benchmark.PythonBenchmarkClient;
 
 @Service
@@ -51,7 +51,6 @@ public class ModelBenchmarkServiceImpl implements ModelBenchmarkService {
     private static final int DEFAULT_CONCURRENCY = 3;
     private static final int MAX_CONCURRENCY = 8;
     private static final int MAX_MODELS = 50;
-    private static final Executor BENCHMARK_EXECUTOR = Executors.newFixedThreadPool(2);
     private static final Map<String, JSONObject> JUDGE_CONFIGS = new ConcurrentHashMap<>();
     private static final Map<String, JSONObject> AGENT_CONTEXTS = new ConcurrentHashMap<>();
     private static final List<String> METRIC_NOTES = List.of(
@@ -71,6 +70,7 @@ public class ModelBenchmarkServiceImpl implements ModelBenchmarkService {
     private final PythonBenchmarkClient pythonBenchmarkClient;
     private final BenchmarkResultPersistence resultPersistence;
     private final BenchmarkCaseGenerator benchmarkCaseGenerator;
+    private final BenchmarkTaskExecutor benchmarkTaskExecutor;
 
     @Override
     public ModelBenchmarkCreateResponseDTO createBenchmarkTask(ModelPerformanceTestRequestDTO request) {
@@ -110,7 +110,13 @@ public class ModelBenchmarkServiceImpl implements ModelBenchmarkService {
                 AGENT_CONTEXTS.put(task.getId(), agentContext);
             }
         }
-        CompletableFuture.runAsync(() -> runTask(task.getId()), BENCHMARK_EXECUTOR);
+        if (!benchmarkTaskExecutor.submit(() -> runTask(task.getId()))) {
+            JUDGE_CONFIGS.remove(task.getId());
+            AGENT_CONTEXTS.remove(task.getId());
+            updateTask(task.getId(), "FAILED", 100, "专业评测任务队列已满", "服务器评测队列已达到容量上限",
+                    null, new Date(), 0L);
+            throw new RenException("模型评测任务较多，请稍后重试");
+        }
 
         ModelBenchmarkCreateResponseDTO response = new ModelBenchmarkCreateResponseDTO();
         response.setTaskId(task.getId());

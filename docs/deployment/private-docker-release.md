@@ -150,9 +150,13 @@ xiaozhi-server-base-lite:latest / base-<依赖哈希>
 xiaozhi-server-base-funasr:latest / base-<依赖哈希>
 xiaozhi-manager-api:api-<内容哈希>
 xiaozhi-manager-web:web-<内容哈希>
+xiaozhi-manager-api:buildcache-v1
+xiaozhi-manager-web:buildcache-v1
 ```
 
 这些 base/cache 镜像只用于加速构建，不由生产 compose 直接启动。FunASR base 从 lite base 追加重依赖，lite 和 FunASR 共享 common/lite 缓存层；manager-api 和 manager-web 分别按内容哈希复用缓存。只改 Vue 页面时不会重建 Java API，只改 Java 时不会重建前端镜像。
+`buildcache-v1` 是 BuildKit 的跨构建机中间层缓存，只在 buildx 推送构建时读写，不能作为
+生产运行镜像启动。
 
 ---
 
@@ -175,6 +179,7 @@ BUILD_BASE=auto              自动复用或补齐 common/lite/funasr base
 MIRROR_RUNTIME_IMAGES=auto   ACR 已有 mysql/redis 时跳过同步
 BUILD_ENGINE=docker          单平台 linux/amd64 构建
 PUSH=true                    构建后推送 ACR
+BUILDKIT_REGISTRY_CACHE=auto buildx 推送时启用 manager-api / manager-web 的 ACR BuildKit 缓存
 SERVER_INSTALL_PROFILE=lite 不安装本地 FunASR，ASR 使用远程 provider
 基础镜像默认使用 docker.m.daocloud.io 前缀，避免失效 Docker daemon mirror
 BUILD_BASE=auto 只复用精确依赖 hash 的 base 缓存，不默认用 latest 冒充
@@ -207,6 +212,7 @@ SERVER_INSTALL_PROFILE=funasr scripts/acr-build-push
 | 改了 Python 依赖或 `Dockerfile-server-base` | `BUILD_BASE=true scripts/acr-build-push` |
 | 查看完整 Docker 输出 | `VERBOSE=true scripts/acr-build-push` |
 | 构建多架构镜像 | `BUILD_ENGINE=buildx PLATFORMS=linux/amd64,linux/arm64 scripts/acr-build-push` |
+| buildx 推送时禁用 ACR BuildKit 缓存 | `BUILDKIT_REGISTRY_CACHE=false scripts/acr-build-push` |
 | 降低构建机并发负载 | `PARALLEL_RELEASE_STEPS=false PARALLEL_IMAGE_BUILDS=false scripts/acr-build-push` |
 
 本地只验证镜像、不推送 ACR 时，可以显式关闭推送：
@@ -803,7 +809,7 @@ Nginx 或 Docker 内网访问。
 
 ### 7.1 构建机缓存
 
-构建慢主要来自三层：
+构建缓存分布在构建机和 ACR，作用不同：
 
 | 层 | 缓存方式 | 什么时候会重新构建或上传 |
 |----|----------|--------------------------|
@@ -811,9 +817,16 @@ Nginx 或 Docker 内网访问。
 | 普通 Python 依赖 | Docker layer + ACR `xiaozhi-server-base-lite:base-<依赖哈希>` | 改 `requirements-docker.txt` 或 lite base Dockerfile |
 | FunASR 追加依赖 | Docker layer + ACR `xiaozhi-server-base-funasr:base-<依赖哈希>` | 改 `requirements-docker-funasr-extra.txt` 或 FunASR base Dockerfile |
 | SenseVoiceSmall 模型 | 本地 `model.pt` + 镜像 layer | 第一次打包模型，或替换模型文件 |
-| manager-api | ACR `xiaozhi-manager-api:api-<内容哈希>` + channel/version tag | 改 Java 源码、`pom.xml`、API Dockerfile 或 API 启动脚本 |
-| manager-web | ACR `xiaozhi-manager-web:web-<内容哈希>` + channel/version tag | 改 Vue 源码、前端构建配置、Web Nginx 配置或前端基础镜像 |
+| manager-api 完整内容 | ACR `xiaozhi-manager-api:api-<内容哈希>` + channel/version tag | 改 Java 源码、`pom.xml`、API Dockerfile 或 API 启动脚本 |
+| manager-web 完整内容 | ACR `xiaozhi-manager-web:web-<内容哈希>` + channel/version tag | 改 Vue 源码、前端构建配置、Web Nginx 配置或前端基础镜像 |
+| manager-api 构建中间层 | buildx 本地缓存 + ACR `xiaozhi-manager-api:buildcache-v1` | Maven 依赖输入、基础镜像、Dockerfile 步骤、builder 或目标平台变化 |
+| manager-web 构建中间层 | buildx 本地缓存 + ACR `xiaozhi-manager-web:buildcache-v1` | npm 锁文件、基础镜像、Dockerfile 步骤、builder 或目标平台变化 |
 | 服务端业务代码 | Docker layer + `:<git短哈希>` / channel tag | 每次 Python 服务代码变化 |
+
+Docker engine 和每个 buildx builder 都有自己的本地 layer/cache 存储。Dockerfile 中的
+BuildKit cache mount 也留在对应 builder 内，例如 `/root/.npm`、`/root/.m2`、
+`/root/.cache/pip`、`/var/cache/apt` 和 `/var/lib/apt/lists`。这些 mount 能加速同一
+builder 的后续构建，但不能当作生产镜像内容，也不能假定换一台构建机后仍然存在。
 
 `base-<依赖哈希>` 按构建参数、逻辑文件路径和文件内容计算，不包含 Git worktree
 的绝对路径。多个 worktree 构建同一份内容时，会复用同一批
@@ -825,19 +838,74 @@ Nginx 或 Docker 内网访问。
 PRINT_BUILD_CONFIG_ONLY=true scripts/acr-build-push-lite
 ```
 
+该命令只打印解析后的构建配置和缓存 tag，在创建或重建 buildx builder 之前退出；它不会
+构建、推送、重打 tag 或删除镜像，也不会改动本地 builder。
+
+manager-api / manager-web 还有一层跨构建机 BuildKit registry cache。开关和目标如下：
+
+```text
+BUILDKIT_REGISTRY_CACHE=auto|true|false
+MANAGER_API_REGISTRY_CACHE_IMAGE=<manager-api仓库>:buildcache-v1
+MANAGER_WEB_REGISTRY_CACHE_IMAGE=<manager-web仓库>:buildcache-v1
+```
+
+默认 `auto`。只有同时满足 `BUILD_ENGINE=buildx`、`PUSH=true` 且开关不是 `false` 时，
+脚本才给 manager-api / manager-web 构建传入 registry `cache-from` 和 `cache-to mode=max`；
+`BUILD_ENGINE=docker` 或 `PUSH=false` 时不会读写 registry cache。`true` 用于显式要求启用，
+`false` 用于显式关闭；也可以覆盖两个 cache image 变量，把缓存放到有推拉权限的专用仓库。
+内容哈希镜像与 registry cache 是两层机制：`api-/web-<内容哈希>` 命中时直接复用完整组件
+镜像；组件必须重建时，`buildcache-v1` 才帮助复用 Maven/npm 等中间层。
+
+以下情况即使源码改动不大，也可能重新下载依赖：
+
+- 新建或显式重建 buildx builder；不同 builder 的本地缓存相互独立。
+- 在 `docker` 与 `buildx` 间切换，或改变 builder 名称、driver、目标平台。
+- 基础镜像、依赖锁文件、Dockerfile 步骤、构建参数或其他 cache key 输入发生变化。
+- registry cache 被关闭、尚未由成功构建写入，或指定了新的 cache image/version。
+- ACR 登录、仓库权限或网络异常，导致远端缓存无法导入或导出；脚本不会删除本地缓存来处理这类问题。
+
 日常只改业务逻辑时，直接运行：
 
 ```bash
 scripts/acr-build-push
 ```
 
-不要清理构建机 Docker cache，也不要删除：
+不要执行 `docker builder prune`、`docker buildx prune`、`docker system prune`、
+`docker image prune`，也不要删除 Docker/BuildKit/ACR 构建缓存或：
 
 ```text
 main/xiaozhi-server/models/SenseVoiceSmall/model.pt
 ```
 
-### 7.2 生产服务器 pull 缓存
+### 7.2 本地旧业务镜像维护
+
+需要评估构建机上的旧项目镜像时，先运行默认 dry-run：
+
+```bash
+scripts/docker-image-maintain
+```
+
+脚本只读取本地 Docker 状态并列出候选项，默认每个项目仓库保留最新 8 个不同镜像；dry-run
+不会删除、重打 tag 或推送任何镜像。它只管理本地的 xiaozhi server、manager-api、
+manager-web、deploy-assets 及其 `-local` 仓库，并保护：
+
+- `latest`、当前 Git 版本及其 profile tag、当前 `api-/web-<内容哈希>` 和 `buildcache-*`。
+- 任何已有容器引用的镜像，以及每个项目仓库最新 N 个不同镜像。
+- 所有 `xiaozhi-server-base-*`、非项目 tag、运行时镜像、卷和 ACR 远端镜像。
+
+确认 dry-run 的候选引用无误后，才可以显式应用同一套规则：
+
+```bash
+scripts/docker-image-maintain --keep 8 --apply
+```
+
+`--apply` 是有删除效果的操作：它会对当次重新计算出的候选执行 `docker image rm`，删除列出的
+本地项目镜像引用。它不会运行任何 prune，不会删除 BuildKit/Docker cache，不会删除 server
+base、MySQL/Redis、卷或 ACR 远端镜像，也不会重打 tag。候选镜像可能共享 layer，dry-run
+显示的 virtual size 是理论上限，不代表实际可回收空间。`--keep` 允许非负整数；减小它会扩大
+候选范围，执行前必须再次审阅完整列表。
+
+### 7.3 生产服务器 pull 缓存
 
 生产服务器不会构建，只会 `docker pull`。Docker 会自动复用本机已有镜像层：
 
@@ -945,6 +1013,25 @@ docker restart xiaozhi-esp32-manager-api
 | Redis | 0.10 | 192m |
 
 `memswap_limit` 默认等于 `mem_limit`，避免小机器进入长期 swap。Python 容器低于 2G 时，CPU FunASR/SenseVoiceSmall 更容易启动失败或被 OOM kill。
+
+生产 Compose 显式启用 `SPRING_PROFILES_ACTIVE=prod`：manager-api 使用生产连接池、关闭
+Knife4j，并把 Tomcat 工作线程限制为 100、最小空闲线程限制为 10。不要在生产环境改回
+`dev`；开发 profile 的 1000 个 Tomcat 工作线程会在突发流量下放大线程栈内存，绕过 JVM
+堆占比带来的保护。
+
+Python 服务默认限制同时在线设备 WebSocket 为 64 个。单模块配置可通过
+`server.max_device_connections` 调整；使用智控台时应在下发的服务配置中设置同名字段。扩容前
+先按实际 ASR/TTS provider 测量单连接峰值内存，达到上限的新连接会收到 1013 并稍后重试。
+`dialogue.max_history_turns` 限制发送给 LLM 的最近轮次；独立的
+`dialogue.max_stored_messages` 限制 Python 进程内实体会话历史，默认 200 条，与长期记忆整理
+当前最多消费的消息数一致。这样既不会把模型短上下文误当成完整会话缓存，也不会让长连接
+历史无限增长。
+
+每个连接还具有固定运行时预算：ASR 输入最多 300 帧/1 MiB、当前语句最多 2000 帧/2 MiB，
+聊天上报最多 32 条/4 MiB，业务线程池最多 5 个运行任务和 16 个等待任务。ASR 过载时会
+丢弃不连续的当前语音分段，避免把缺帧音频送去识别；上报或业务队列满载时拒绝新任务并
+记录告警。manager-api 的专业评测使用 2 个 worker 和 32 个等待槽，满载任务会明确失败，
+不会继续堆积在 JVM 中。
 
 调整 `~/xiaozhi-data/.env` 后执行：
 

@@ -194,7 +194,7 @@ class CloseCoordinator:
 
             if conn.executor:
                 try:
-                    conn.executor.shutdown(wait=False)
+                    conn.executor.shutdown(wait=False, cancel_futures=True)
                 except Exception as exc:
                     conn.logger.bind(tag=self.log_tag).error(f"关闭线程池时出错: {exc}")
                 conn.executor = None

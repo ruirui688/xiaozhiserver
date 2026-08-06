@@ -80,7 +80,10 @@ SERVER_BASE_CACHE_VERSION="${SERVER_BASE_CACHE_VERSION:-v2}"
 SERVER_BASE_SEED_LATEST="${SERVER_BASE_SEED_LATEST:-false}"
 MANAGER_API_CACHE_VERSION="${MANAGER_API_CACHE_VERSION:-v1}"
 MANAGER_WEB_CACHE_VERSION="${MANAGER_WEB_CACHE_VERSION:-v1}"
-RECREATE_BUILDER=false
+BUILDKIT_REGISTRY_CACHE="${BUILDKIT_REGISTRY_CACHE:-auto}"
+MANAGER_API_REGISTRY_CACHE_IMAGE="${MANAGER_API_REGISTRY_CACHE_IMAGE:-$MANAGER_API_IMAGE_REPOSITORY:buildcache-$MANAGER_API_CACHE_VERSION}"
+MANAGER_WEB_REGISTRY_CACHE_IMAGE="${MANAGER_WEB_REGISTRY_CACHE_IMAGE:-$MANAGER_WEB_IMAGE_REPOSITORY:buildcache-$MANAGER_WEB_CACHE_VERSION}"
+RECREATE_BUILDER="${RECREATE_BUILDER:-false}"
 
 if [[ -z "$FUNASR_MODEL_CONTEXT" ]]; then
   if [[ -s "$FUNASR_MODEL_LOCAL_PATH" ]]; then
@@ -93,7 +96,6 @@ fi
 
 if [[ "$BUILDKIT_REGISTRY_MIRROR" == "none" || "$BUILDKIT_REGISTRY_MIRROR" == "false" ]]; then
   BUILDKIT_REGISTRY_MIRROR=""
-  RECREATE_BUILDER=true
 elif [[ -z "$BUILDKIT_REGISTRY_MIRROR" ]]; then
   if command -v docker >/dev/null 2>&1; then
     BUILDKIT_REGISTRY_MIRROR="$(docker info --format '{{range .RegistryConfig.Mirrors}}{{println .}}{{end}}' 2>/dev/null | sed 's#/*$##' || true)"
@@ -116,12 +118,10 @@ BUILDX_DRIVER_OPTS=()
 if [[ -n "$BUILDKIT_HTTP_PROXY" ]]; then
   BUILDX_DRIVER_OPTS+=(--driver-opt "env.HTTP_PROXY=$BUILDKIT_HTTP_PROXY")
   BUILDX_DRIVER_OPTS+=(--driver-opt "env.http_proxy=$BUILDKIT_HTTP_PROXY")
-  RECREATE_BUILDER=true
 fi
 if [[ -n "$BUILDKIT_HTTPS_PROXY" ]]; then
   BUILDX_DRIVER_OPTS+=(--driver-opt "env.HTTPS_PROXY=$BUILDKIT_HTTPS_PROXY")
   BUILDX_DRIVER_OPTS+=(--driver-opt "env.https_proxy=$BUILDKIT_HTTPS_PROXY")
-  RECREATE_BUILDER=true
 fi
 
 if [[ -z "${VERSION:-}" ]]; then
@@ -180,6 +180,21 @@ if [[ "$PRINT_BUILD_CONFIG_ONLY" != "true" && "$PRINT_BUILD_CONFIG_ONLY" != "fal
   exit 1
 fi
 
+if [[ "$BUILDKIT_REGISTRY_CACHE" != "true" && "$BUILDKIT_REGISTRY_CACHE" != "false" && "$BUILDKIT_REGISTRY_CACHE" != "auto" ]]; then
+  echo "BUILDKIT_REGISTRY_CACHE must be true, false, or auto" >&2
+  exit 1
+fi
+
+if [[ "$RECREATE_BUILDER" != "true" && "$RECREATE_BUILDER" != "false" ]]; then
+  echo "RECREATE_BUILDER must be true or false" >&2
+  exit 1
+fi
+
+USE_BUILDKIT_REGISTRY_CACHE=false
+if [[ "$BUILD_ENGINE" == "buildx" && "$PUSH" == "true" && "$BUILDKIT_REGISTRY_CACHE" != "false" ]]; then
+  USE_BUILDKIT_REGISTRY_CACHE=true
+fi
+
 if [[ "$SERVER_BASE_SEED_LATEST" != "true" && "$SERVER_BASE_SEED_LATEST" != "false" ]]; then
   echo "SERVER_BASE_SEED_LATEST must be true or false" >&2
   exit 1
@@ -223,19 +238,6 @@ create_builder() {
     docker buildx create --name "$BUILDER_NAME" --use --driver docker-container "${BUILDX_DRIVER_OPTS[@]}" >/dev/null
   fi
 }
-
-if [[ "$BUILD_ENGINE" == "buildx" ]]; then
-  if ! docker buildx inspect "$BUILDER_NAME" >/dev/null 2>&1; then
-    create_builder
-  else
-    if [[ "$RECREATE_BUILDER" == "true" || -n "$BUILDKIT_REGISTRY_MIRROR" ]]; then
-      docker buildx rm "$BUILDER_NAME" >/dev/null
-      create_builder
-    else
-      docker buildx use "$BUILDER_NAME" >/dev/null
-    fi
-  fi
-fi
 
 OUTPUT_FLAG=(--push)
 if [[ "$PUSH" == "false" ]]; then
@@ -711,6 +713,7 @@ if [[ "$PRINT_BUILD_CONFIG" != "false" ]]; then
   echo "Platforms: $PLATFORMS"
   echo "Push: $PUSH"
   echo "Build engine: $BUILD_ENGINE"
+  echo "Recreate BuildKit builder: $RECREATE_BUILDER"
   echo "Python base image: $PYTHON_BASE_IMAGE"
   echo "Node base image: $NODE_BASE_IMAGE"
   echo "Maven base image: $MAVEN_BASE_IMAGE"
@@ -728,6 +731,9 @@ if [[ "$PRINT_BUILD_CONFIG" != "false" ]]; then
   echo "Server base seed latest: $SERVER_BASE_SEED_LATEST"
   echo "Manager API cache version: $MANAGER_API_CACHE_VERSION"
   echo "Manager Web cache version: $MANAGER_WEB_CACHE_VERSION"
+  echo "BuildKit registry cache: $USE_BUILDKIT_REGISTRY_CACHE (requested: $BUILDKIT_REGISTRY_CACHE)"
+  echo "Manager API registry cache: $MANAGER_API_REGISTRY_CACHE_IMAGE"
+  echo "Manager Web registry cache: $MANAGER_WEB_REGISTRY_CACHE_IMAGE"
   echo "Install FunASR model: $INSTALL_FUNASR_MODEL"
   echo "FunASR model context: $FUNASR_MODEL_CONTEXT"
   echo "FunASR model URL: $FUNASR_MODEL_URL"
@@ -761,6 +767,19 @@ fi
 
 if [[ "$PRINT_BUILD_CONFIG_ONLY" == "true" ]]; then
   exit 0
+fi
+
+if [[ "$BUILD_ENGINE" == "buildx" ]]; then
+  if ! docker buildx inspect "$BUILDER_NAME" >/dev/null 2>&1; then
+    create_builder
+  else
+    if [[ "$RECREATE_BUILDER" == "true" ]]; then
+      docker buildx rm "$BUILDER_NAME" >/dev/null
+      create_builder
+    else
+      docker buildx use "$BUILDER_NAME" >/dev/null
+    fi
+  fi
 fi
 
 print_base_image_status() {
@@ -900,6 +919,14 @@ retag_or_push_component() {
 }
 
 build_manager_api_pipeline() {
+  local registry_cache_args=()
+  if [[ "$USE_BUILDKIT_REGISTRY_CACHE" == "true" ]]; then
+    registry_cache_args=(
+      --cache-from "type=registry,ref=$MANAGER_API_REGISTRY_CACHE_IMAGE"
+      --cache-to "type=registry,ref=$MANAGER_API_REGISTRY_CACHE_IMAGE,mode=max"
+    )
+  fi
+
   if image_available_locally_or_remote "$MANAGER_API_CACHE_IMAGE"; then
     print_base_image_status "Manager API cached" "$MANAGER_API_CACHE_IMAGE"
     if [[ "$PUSH" == "true" ]] && ! image_exists_remote "$MANAGER_API_CACHE_IMAGE"; then
@@ -912,6 +939,7 @@ build_manager_api_pipeline() {
   build_image "Build manager API image" Dockerfile-manager-api \
     --build-arg "MAVEN_BASE_IMAGE=$MAVEN_BASE_IMAGE" \
     --build-arg "API_RUNTIME_BASE_IMAGE=$API_RUNTIME_BASE_IMAGE" \
+    "${registry_cache_args[@]}" \
     --tag "$MANAGER_API_IMAGE_REPOSITORY:$CHANNEL_TAG" \
     --tag "$MANAGER_API_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG" \
     --tag "$MANAGER_API_CACHE_IMAGE"
@@ -925,6 +953,14 @@ build_manager_api_pipeline() {
 }
 
 build_manager_web_pipeline() {
+  local registry_cache_args=()
+  if [[ "$USE_BUILDKIT_REGISTRY_CACHE" == "true" ]]; then
+    registry_cache_args=(
+      --cache-from "type=registry,ref=$MANAGER_WEB_REGISTRY_CACHE_IMAGE"
+      --cache-to "type=registry,ref=$MANAGER_WEB_REGISTRY_CACHE_IMAGE,mode=max"
+    )
+  fi
+
   if image_available_locally_or_remote "$MANAGER_WEB_CACHE_IMAGE"; then
     print_base_image_status "Manager Web cached" "$MANAGER_WEB_CACHE_IMAGE"
     if [[ "$PUSH" == "true" ]] && ! image_exists_remote "$MANAGER_WEB_CACHE_IMAGE"; then
@@ -937,6 +973,7 @@ build_manager_web_pipeline() {
   build_image "Build manager Web image" Dockerfile-manager-web \
     --build-arg "NODE_BASE_IMAGE=$NODE_BASE_IMAGE" \
     --build-arg "WEB_RUNTIME_BASE_IMAGE=$MANAGER_WEB_RUNTIME_BASE_IMAGE" \
+    "${registry_cache_args[@]}" \
     --tag "$MANAGER_WEB_IMAGE_REPOSITORY:$CHANNEL_TAG" \
     --tag "$MANAGER_WEB_IMAGE_REPOSITORY:$IMAGE_VERSION_TAG" \
     --tag "$MANAGER_WEB_CACHE_IMAGE"

@@ -3,16 +3,16 @@ ARG WEB_RUNTIME_BASE_IMAGE=alpine:3.20
 
 FROM ${NODE_BASE_IMAGE} AS web-builder
 WORKDIR /app
+COPY main/manager-web/package*.json ./
+COPY main/manager-web/.npmrc ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --prefer-offline --no-audit
 ARG VUE_APP_API_BASE_URL=/xiaozhi
 ARG VUE_APP_PUBLIC_PATH=/
 ARG VUE_APP_USE_CDN=false
 ENV VUE_APP_API_BASE_URL=${VUE_APP_API_BASE_URL}
 ENV VUE_APP_PUBLIC_PATH=${VUE_APP_PUBLIC_PATH}
 ENV VUE_APP_USE_CDN=${VUE_APP_USE_CDN}
-COPY main/manager-web/package*.json ./
-COPY main/manager-web/.npmrc ./
-RUN --mount=type=cache,target=/root/.npm \
-    npm install
 COPY main/manager-web/babel.config.js main/manager-web/jsconfig.json main/manager-web/vue.config.js ./
 COPY main/manager-web/src ./src
 COPY main/manager-web/public/favicon.ico main/manager-web/public/index.html main/manager-web/public/offline.html main/manager-web/public/privacy-policy.html main/manager-web/public/user-agreement.html ./public/

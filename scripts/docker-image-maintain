@@ -1,0 +1,202 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+APPLY=false
+KEEP_RECENT=8
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/docker-image-maintain [--keep N] [--apply]
+
+Report old local xiaozhi release images. The default is a dry run.
+
+  --keep N  Keep the newest N distinct images per project repository (default: 8)
+  --apply   Remove only the reported local image references; never runs prune
+  --help    Show this help
+
+Always protected:
+  latest, the current Git version/content-cache tags, container-referenced images,
+  the newest N images per repository, and every xiaozhi-server-base image.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --apply)
+      APPLY=true
+      shift
+      ;;
+    --keep)
+      [[ $# -ge 2 ]] || { echo "--keep requires a value" >&2; exit 2; }
+      KEEP_RECENT="$2"
+      shift 2
+      ;;
+    --help | -h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [[ ! "$KEEP_RECENT" =~ ^[0-9]+$ ]]; then
+  echo "--keep must be a non-negative integer" >&2
+  exit 2
+fi
+
+command -v docker >/dev/null 2>&1 || { echo "docker is required" >&2; exit 1; }
+docker info >/dev/null 2>&1 || { echo "Docker daemon is not available" >&2; exit 1; }
+
+is_managed_repository() {
+  local repository="$1"
+  local name="${repository##*/}"
+  case "$name" in
+    xiaozhi-server | xiaozhi-server-local | \
+      xiaozhi-manager-api | xiaozhi-manager-api-local | \
+      xiaozhi-manager-web | xiaozhi-manager-web-local | \
+      xiaozhi-deploy-assets | xiaozhi-deploy-assets-local)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+human_size() {
+  local bytes="$1"
+  if command -v numfmt >/dev/null 2>&1; then
+    numfmt --to=iec-i --suffix=B "$bytes"
+  else
+    printf '%s bytes' "$bytes"
+  fi
+}
+
+current_version="$(git -C "$ROOT_DIR" rev-parse --short=8 HEAD 2>/dev/null || true)"
+current_api_cache_tag=""
+current_web_cache_tag=""
+cache_config="$({
+  PUSH=false \
+    BUILD_ENGINE=docker \
+    BUILD_BASE=false \
+    PRINT_BUILD_CONFIG_ONLY=true \
+    XIAOZHI_PROGRESS=false \
+    bash "$ROOT_DIR/scripts/docker-build-private.sh"
+} 2>/dev/null || true)"
+current_api_cache_tag="$(sed -n 's/^Manager API cache image: .*:\(api-[[:alnum:]]*\)$/\1/p' <<<"$cache_config" | tail -n 1)"
+current_web_cache_tag="$(sed -n 's/^Manager Web cache image: .*:\(web-[[:alnum:]]*\)$/\1/p' <<<"$cache_config" | tail -n 1)"
+
+declare -A image_refs=()
+declare -A image_protected=()
+declare -A image_has_external_ref=()
+declare -A repository_seen=()
+declare -A repository_kept=()
+declare -A managed_ids=()
+
+while IFS=$'\t' read -r repository tag image_id; do
+  [[ -n "$repository" && "$repository" != "<none>" ]] || continue
+  [[ -n "$tag" && "$tag" != "<none>" ]] || continue
+  if ! is_managed_repository "$repository"; then
+    image_has_external_ref["$image_id"]=1
+    continue
+  fi
+
+  ref="$repository:$tag"
+  managed_ids["$image_id"]=1
+  image_refs["$image_id"]+="$ref"$'\n'
+
+  if [[ "$tag" == "latest" || \
+        -n "$current_version" && ( "$tag" == "$current_version" || "$tag" == "$current_version"-* ) || \
+        -n "$current_api_cache_tag" && "$tag" == "$current_api_cache_tag" || \
+        -n "$current_web_cache_tag" && "$tag" == "$current_web_cache_tag" || \
+        "$tag" == buildcache-* ]]; then
+    image_protected["$image_id"]=1
+  fi
+
+  repository_key="$repository|$image_id"
+  if [[ -z "${repository_seen[$repository_key]:-}" ]]; then
+    repository_seen["$repository_key"]=1
+    kept="${repository_kept[$repository]:-0}"
+    if (( kept < KEEP_RECENT )); then
+      image_protected["$image_id"]=1
+      repository_kept["$repository"]=$((kept + 1))
+    fi
+  fi
+done < <(docker image ls --no-trunc --format '{{.Repository}}\t{{.Tag}}\t{{.ID}}')
+
+while IFS= read -r container_id; do
+  [[ -n "$container_id" ]] || continue
+  running_image_id="$(docker container inspect --format '{{.Image}}' "$container_id" 2>/dev/null || true)"
+  [[ -n "$running_image_id" ]] && image_protected["$running_image_id"]=1
+done < <(docker ps -aq)
+
+for image_id in "${!managed_ids[@]}"; do
+  # If a managed image is also tagged outside this project, leave it alone.
+  [[ -z "${image_has_external_ref[$image_id]:-}" ]] || image_protected["$image_id"]=1
+done
+
+candidate_ids=()
+total_virtual_bytes=0
+for image_id in "${!managed_ids[@]}"; do
+  [[ -z "${image_protected[$image_id]:-}" ]] || continue
+  candidate_ids+=("$image_id")
+done
+
+declare -A image_sizes=()
+if [[ ${#candidate_ids[@]} -gt 0 ]]; then
+  while IFS=' ' read -r image_id size; do
+    [[ -n "$image_id" && -n "$size" ]] || continue
+    image_sizes["$image_id"]="$size"
+    total_virtual_bytes=$((total_virtual_bytes + size))
+  done < <(docker image inspect --format '{{.Id}} {{.Size}}' "${candidate_ids[@]}")
+fi
+
+echo "Xiaozhi local image maintenance"
+echo "  mode:          $([[ "$APPLY" == "true" ]] && echo apply || echo dry-run)"
+echo "  keep recent:   $KEEP_RECENT per repository"
+echo "  current:       ${current_version:-unknown}"
+echo "  API cache:     ${current_api_cache_tag:-unknown}"
+echo "  Web cache:     ${current_web_cache_tag:-unknown}"
+echo "  candidates:    ${#candidate_ids[@]} images"
+echo "  virtual size:  $(human_size "$total_virtual_bytes") (upper bound; shared layers reduce actual reclaimed space)"
+echo
+
+if [[ ${#candidate_ids[@]} -eq 0 ]]; then
+  echo "No removable project images found."
+  exit 0
+fi
+
+for image_id in "${candidate_ids[@]}"; do
+  short_id="${image_id#sha256:}"
+  short_id="${short_id:0:12}"
+  size="${image_sizes[$image_id]:-0}"
+  printf '%s  %9s\n' "$short_id" "$(human_size "$size")"
+  while IFS= read -r ref; do
+    [[ -n "$ref" ]] && printf '  %s\n' "$ref"
+  done <<<"${image_refs[$image_id]}"
+done
+
+if [[ "$APPLY" != "true" ]]; then
+  echo
+  echo "Dry run only. Review the list, then rerun with --apply to remove exactly these local project image references."
+  exit 0
+fi
+
+echo
+echo "Removing reported local project image references..."
+for image_id in "${candidate_ids[@]}"; do
+  refs=()
+  while IFS= read -r ref; do
+    [[ -n "$ref" ]] && refs+=("$ref")
+  done <<<"${image_refs[$image_id]}"
+  [[ ${#refs[@]} -gt 0 ]] || continue
+  docker image rm -- "${refs[@]}"
+done
+
+echo
+echo "Completed. Docker/BuildKit caches, server base images, runtime images, volumes, and ACR remote images were not touched."

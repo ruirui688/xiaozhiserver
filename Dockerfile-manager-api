@@ -4,9 +4,9 @@ ARG API_RUNTIME_BASE_IMAGE=bellsoft/liberica-runtime-container:jre-21-glibc
 FROM ${MAVEN_BASE_IMAGE} AS api-builder
 WORKDIR /app
 COPY main/manager-api/pom.xml .
+RUN mvn -B -ntp -Dmaven.test.skip=true dependency:go-offline
 COPY main/manager-api/src ./src
-RUN --mount=type=cache,target=/root/.m2,sharing=locked \
-    mvn clean package -Dmaven.test.skip=true
+RUN mvn -B -ntp -Dmaven.test.skip=true clean package
 
 FROM ${API_RUNTIME_BASE_IMAGE}
 WORKDIR /app

@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 import asyncio
+import queue
 import threading
 
 import pytest
@@ -15,6 +16,17 @@ from core.session.runtime_config_reloader import RuntimeConfigReloader
 from core.session.scene_switch import SceneSwitchIsolation
 from core.session.tts_session_options import SessionTTSOptions
 from core.utils.dialogue import Dialogue, Message
+
+
+def test_drain_queue_balances_unfinished_tasks():
+    target = queue.Queue()
+    target.put(b"one")
+    target.put(b"two")
+
+    RuntimeConfigReloader._drain_queue(target)
+
+    assert target.empty()
+    assert target.unfinished_tasks == 0
 
 
 def _model(model_type, model_id, **typed_config):

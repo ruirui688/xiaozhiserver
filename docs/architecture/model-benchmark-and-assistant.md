@@ -46,7 +46,7 @@ manager-web ModelConfig.vue
   -> ModelController.performanceTest()
   -> ModelBenchmarkService.createBenchmarkTask()
   -> ai_model_benchmark_task 写入 PENDING
-  -> 后台线程按模型并发执行
+  -> 有界后台队列按模型并发执行（2 个任务 worker，最多等待 32 个任务）
   -> manager-api POST xiaozhi-server /benchmark/models
   -> xiaozhi-server BenchmarkHandler.handle_models()
   -> core.benchmark.runner.run_benchmark()
@@ -164,6 +164,7 @@ manager-web 点击写入接入产物
 - `REAL_INFERENCE` 才能进入延时统计；`CONNECTIVITY`、`CONFIG_ONLY`、`UNSUPPORTED` 不能显示为 0ms。
 - 单模型普通“测试”和批量“专业评测”口径要一致：字段校验不是可启用依据。
 - 评测任务可以失败，但失败原因必须写入任务或样本详情，便于区分服务不可达、provider 初始化失败、模型调用失败和结果持久化失败。
+- 评测调度必须使用有界队列；worker 和等待队列都满时，新任务记录为 `FAILED` 并明确提示稍后重试，不能把请求无限堆在 JVM 内存中。
 - LLM/SLM Judge 不保存独立密钥，只引用已有模型配置；未选择或调用失败时降级为启发式评分，并在 `judge_mode` 中标记。
 - `conversation_mode=realtime` 的 LLM 必须走 Realtime benchmark transport；不能调用普通 `llm.create_instance()` 或 Chat Completions 冒充实时模型测试。
 - Qwen 3.5 Realtime 不接受用 `conversation.item.create` 创建普通 user 文本项；文本评测必须走手动音频提交回合，`conversation.item.create` 只用于回注 `function_call_output`。

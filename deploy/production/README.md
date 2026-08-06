@@ -254,7 +254,8 @@ with CPU FunASR enabled:
 
 ```text
 xiaozhi-esp32-server       1.00 CPU / 2048m
-xiaozhi-esp32-server-web   0.60 CPU / 1024m
+xiaozhi-esp32-manager-api  0.50 CPU / 896m
+xiaozhi-esp32-server-web   0.20 CPU / 192m
 xiaozhi-esp32-server-db    0.30 CPU / 768m
 xiaozhi-esp32-server-redis 0.10 CPU / 192m
 ```
@@ -266,6 +267,12 @@ the FunASR profile image is published and the selected ASR adapter is
 `fun_local`; it needs about 2 GB of memory for reliable startup on CPU-only
 hosts. Lite profile deployments can lower the Python memory limit after
 testing their selected remote ASR path.
+
+These five limits add up to 4 GB. A 4 GB host therefore has no worst-case
+headroom for the kernel and Docker; use a larger host for sustained FunASR
+load, or lower the limits after measuring a lite-profile deployment. The
+manager API explicitly runs with the `prod` Spring profile so its connection
+pools and Tomcat thread limit stay within this budget.
 
 Override the `XIAOZHI_*_CPUS`, `XIAOZHI_*_MEM_LIMIT`,
 `XIAOZHI_FUNASR_THREADS`, `XIAOZHI_MYSQL_INNODB_BUFFER_POOL_SIZE`,

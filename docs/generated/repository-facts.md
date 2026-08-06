@@ -32,8 +32,8 @@ source_paths:
 
 | 模块 | 源码文件 | 测试文件 | 统计口径 |
 | --- | ---: | ---: | --- |
-| xiaozhi-server | 268 | 72 | 源码为非 `tests/` 的 `*.py`；测试为 `test_*.py` |
-| manager-api | 577 | 78 | `src/main/**/*.java`；`src/test/**/*Test.java` |
+| xiaozhi-server | 269 | 74 | 源码为非 `tests/` 的 `*.py`；测试为 `test_*.py` |
+| manager-api | 578 | 80 | `src/main/**/*.java`；`src/test/**/*Test.java` |
 | manager-web | 134 | 20 | `src/` 下 `*.vue/*.js/*.ts/*.mjs`；`*.spec.*/*.test.*` |
 | manager-mobile | 85 | 5 | `src/` 下 `*.vue/*.js/*.ts/*.mjs`；`*.spec.*/*.test.*` |
 
@@ -67,7 +67,7 @@ source_paths:
 
 | 文件 | 行数 |
 | --- | ---: |
-| `main/xiaozhi-server/core/connection.py` | 2812 |
+| `main/xiaozhi-server/core/connection.py` | 2837 |
 | `main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelCatalogServiceImpl.java` | 1822 |
 | `main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelTestServiceImpl.java` | 1351 |
 | `main/manager-api/src/main/java/xiaozhi/modules/knowledge/rag/impl/LocalKnowledgeAdapter.java` | 1293 |

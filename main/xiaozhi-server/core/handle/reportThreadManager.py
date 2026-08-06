@@ -13,19 +13,81 @@ from core.handle.reportHandle import report
 TAG = __name__
 
 
+def _payload_size(value):
+    if value is None:
+        return 0
+    if isinstance(value, str):
+        return len(value.encode("utf-8"))
+    if isinstance(value, memoryview):
+        return value.nbytes
+    if isinstance(value, (bytes, bytearray)):
+        return len(value)
+    if isinstance(value, (list, tuple)):
+        return sum(_payload_size(item) for item in value)
+    return 0
+
+
 class ReportQueue(queue.Queue):
     """A report queue that can atomically reject new items and enqueue EOF."""
 
-    def __init__(self):
-        super().__init__()
+    DEFAULT_MAX_ITEMS = 32
+    DEFAULT_MAX_BYTES = 4 * 1024 * 1024
+    DEFAULT_MAX_ITEM_BYTES = 2 * 1024 * 1024
+
+    def __init__(
+        self,
+        max_items=DEFAULT_MAX_ITEMS,
+        max_bytes=DEFAULT_MAX_BYTES,
+        max_item_bytes=DEFAULT_MAX_ITEM_BYTES,
+    ):
+        max_items = int(max_items)
+        max_bytes = int(max_bytes)
+        max_item_bytes = int(max_item_bytes)
+        if max_items <= 0 or max_bytes <= 0 or max_item_bytes <= 0:
+            raise ValueError("report queue limits must be positive")
+        # Reserve one internal slot for the shutdown sentinel.
+        super().__init__(maxsize=max_items + 1)
+        self.max_items = max_items
+        self.max_bytes = max_bytes
+        self.max_item_bytes = min(max_item_bytes, max_bytes)
         self._input_lock = threading.Lock()
         self._sealed = False
+        self.rejected_items = 0
+        self.rejected_bytes = 0
+        self.current_bytes = 0
+
+    @staticmethod
+    def _item_size(item):
+        if not isinstance(item, tuple):
+            return _payload_size(item)
+        text = item[1] if len(item) > 1 else None
+        audio = item[2] if len(item) > 2 else None
+        return _payload_size(text) + _payload_size(audio)
+
+    def _put(self, item):
+        super()._put(item)
+        self.current_bytes += self._item_size(item)
+
+    def _get(self):
+        item = super()._get()
+        self.current_bytes = max(0, self.current_bytes - self._item_size(item))
+        return item
 
     def put(self, item, block=True, timeout=None):
+        del block, timeout
         with self._input_lock:
             if self._sealed:
                 return False
-            super().put(item, block=block, timeout=timeout)
+            item_bytes = self._item_size(item)
+            if item is not None and (
+                self.qsize() >= self.max_items
+                or item_bytes > self.max_item_bytes
+                or self.current_bytes + item_bytes > self.max_bytes
+            ):
+                self.rejected_items += 1
+                self.rejected_bytes += item_bytes
+                return False
+            super().put(item, block=False)
             return True
 
     def seal(self, enqueue_sentinel=True):
@@ -34,8 +96,24 @@ class ReportQueue(queue.Queue):
                 return False
             self._sealed = True
             if enqueue_sentinel:
-                super().put(None)
+                super().put(None, block=False)
             return True
+
+    def discard_pending(self, enqueue_sentinel=False):
+        """Discard queued reports while preserving any currently running item."""
+        discarded = 0
+        with self._input_lock:
+            while True:
+                try:
+                    item = self.get_nowait()
+                except queue.Empty:
+                    break
+                self.task_done()
+                if item is not None:
+                    discarded += 1
+            if enqueue_sentinel:
+                super().put(None, block=False)
+        return discarded
 
 
 class ReportThreadManager:
@@ -110,14 +188,10 @@ class ReportThreadManager:
                     conn.report_queue.task_done()
                     break
                 try:
-                    # 检查线程池状态
-                    if conn.executor is None:
-                        conn.report_queue.task_done()
-                        continue
-                    # 提交任务到线程池
-                    conn.executor.submit(self._process_report, conn, *item)
+                    # 专用线程串行上报，避免把含音频的任务继续转移到
+                    # ThreadPoolExecutor 的无界内部工作队列。
+                    self._process_report(conn, *item)
                 except Exception as e:
-                    conn.report_queue.task_done()
                     conn.logger.bind(tag=TAG).error(f"聊天记录上报线程异常: {e}")
             except queue.Empty:
                 continue
@@ -180,6 +254,12 @@ class ReportThreadManager:
             elif worker_alive:
                 conn.report_queue.put(None)
 
+        if not worker_alive:
+            discard_pending = getattr(conn.report_queue, "discard_pending", None)
+            if callable(discard_pending):
+                discard_pending(enqueue_sentinel=False)
+            return
+
         if worker_alive:
             remaining = max(0.0, deadline - time.monotonic())
             if remaining > 0:
@@ -192,3 +272,15 @@ class ReportThreadManager:
             time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
         if getattr(conn.report_queue, "unfinished_tasks", 0) > 0:
             conn.logger.bind(tag=TAG).warning("聊天记录上报队列仍有未完成任务，关闭流程继续")
+            discard_pending = getattr(conn.report_queue, "discard_pending", None)
+            if callable(discard_pending):
+                discarded = discard_pending(
+                    enqueue_sentinel=bool(
+                        conn.report_thread and conn.report_thread.is_alive()
+                    )
+                )
+                if discarded:
+                    conn.logger.bind(tag=TAG).warning(
+                        "关闭期限内未完成的聊天记录已丢弃: count={}",
+                        discarded,
+                    )

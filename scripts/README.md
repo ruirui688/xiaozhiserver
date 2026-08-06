@@ -135,6 +135,17 @@ PARALLEL_RELEASE_STEPS=false PARALLEL_IMAGE_BUILDS=false scripts/acr-build-push
 BUILD_BASE=auto MIRROR_RUNTIME_IMAGES=auto scripts/acr-build-push
 ```
 
+需要在多次发布或不同构建机之间复用 manager-api 的 Maven 层和 manager-web 的
+npm 层时，使用 buildx registry cache。缓存写入两个稳定的 ACR `buildcache-v1`
+标签，不会为每个提交新增一份本地运行镜像：
+
+```bash
+BUILD_ENGINE=buildx BUILDKIT_REGISTRY_CACHE=true scripts/acr-build-push
+```
+
+默认 `BUILD_ENGINE=docker` 仍保留，适合本机构建和镜像源条件不稳定的环境；registry
+cache 只在 `BUILD_ENGINE=buildx PUSH=true` 时生效。
+
 只改 Java/Web 管理端且明确不需要检查基础镜像或运行时镜像时，可显式跳过：
 
 ```bash
@@ -241,8 +252,19 @@ docker-build-private.sh     镜像构建底层实现
 install-private-docker.sh   旧兼容入口，转发到 deploy/production/install
 upgrade-git-docker.sh       旧源码目录升级入口，不作为生产主入口
 docker-config-mirror        Docker daemon 镜像加速器配置工具
+docker-image-maintain       默认 dry-run 的本项目历史运行镜像保留工具
 start-dev.sh                旧开发入口，仅转发到 scripts/dev
 ```
+
+构建机磁盘占用过高时先预览旧项目镜像候选：
+
+```bash
+scripts/docker-image-maintain --keep 8
+```
+
+它不会调用任何 prune，也不管理 BuildKit/Docker cache、server base、MySQL、Redis、
+卷或 ACR 远端镜像。只有人工确认列表后显式增加 `--apply` 才会删除候选的本地项目
+镜像引用。
 
 `ui-audit-wsl-chrome` 不安装浏览器或 npm 包，默认复用 Windows Chrome，并输出 `2048x960`、`1366x768`、`1024x768` 三档截图。完整的临时组件预览、CDP 控制台检查和清理流程见 `docs/development/local-dev-workflow.md`。
 

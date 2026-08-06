@@ -48,14 +48,16 @@ class ASRProviderBase(ABC):
         while not conn.stop_event.is_set():
             try:
                 message = conn.asr_audio_queue.get(timeout=1)
-                future = asyncio.run_coroutine_threadsafe(
-                    handleAudioMessage(conn, message),
-                    conn.loop,
-                )
-                # 已知瓶颈：future.result() 会阻塞 ASR 消费者线程直到协程完成。
-                # 在同步上下文中这是必要的，但阻塞期间新音频包将堆积在队列中。
-                # 架构改进方案：改为异步生产者-消费者模式，或使用回压机制控制队列长度。  # noqa: SIM115
-                future.result()
+                try:
+                    future = asyncio.run_coroutine_threadsafe(
+                        handleAudioMessage(conn, message),
+                        conn.loop,
+                    )
+                    # 消费者同步等待期间，连接级有界队列会丢弃最旧积压帧，
+                    # 避免上行速度或异常大包使内存无限增长。
+                    future.result()
+                finally:
+                    conn.asr_audio_queue.task_done()
             except queue.Empty:
                 continue
             except Exception as e:
@@ -66,6 +68,22 @@ class ASRProviderBase(ABC):
 
     # 接收音频
     async def receive_audio(self, conn: "ConnectionHandler", audio, audio_have_voice):
+        if getattr(conn, "_discard_asr_until_voice_boundary", False):
+            reached_boundary = bool(conn.client_voice_stop) or (
+                not audio_have_voice and not conn.client_have_voice
+            )
+            if reached_boundary:
+                conn._discard_asr_until_voice_boundary = False
+                conn.reset_audio_states(preserve_voiceprint=True)
+                if conn.voiceprint_provider is not None:
+                    conn.voiceprint_provider.reset_utterance()
+                turn_metrics = getattr(conn, "turn_metrics", None)
+                if turn_metrics is not None:
+                    turn_metrics.discard_vad_segment()
+                logger.bind(tag=TAG).warning(
+                    "ASR输入过载导致音频不连续，已丢弃当前语音分段"
+                )
+            return
         if conn.client_listen_mode == "manual":
             # 手动模式：缓存音频用于ASR识别
             conn.asr_audio.append(audio)
@@ -99,11 +117,14 @@ class ASRProviderBase(ABC):
                     preroll_packets = int(
                         math.ceil(preroll_ms / float(packet_duration_ms))
                     )
-                conn.asr_audio = (
-                    conn.asr_audio[-preroll_packets:]
-                    if preroll_packets > 0
-                    else []
-                )
+                if hasattr(conn.asr_audio, "retain_last"):
+                    conn.asr_audio.retain_last(preroll_packets)
+                else:
+                    conn.asr_audio = (
+                        conn.asr_audio[-preroll_packets:]
+                        if preroll_packets > 0
+                        else []
+                    )
                 return
 
             # 自动模式下通过VAD检测到语音停止时触发识别

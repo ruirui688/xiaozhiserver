@@ -10,6 +10,8 @@ server:
   # 服务器监听地址和端口(Server listening address and port)
   ip: 0.0.0.0
   port: 8000
+  # 同时在线的设备 WebSocket 连接上限，防止单进程内存随连接数无限增长
+  max_device_connections: 64
   # http服务的端口，用于简单OTA接口(单服务部署)，以及视觉分析接口
   http_port: 8003
   # 这个websocket配置是指ota接口向设备发送的websocket地址
@@ -123,6 +125,8 @@ meeting:
 dialogue:
   # 最大对话轮次数，0 表示不限制。超过时删除最旧的轮次
   max_history_turns: 20
+  # Python 进程内保留的会话消息硬上限；长期记忆整理本身最多消费最近 200 条
+  max_stored_messages: 200
 
 xiaozhi:
   type: hello

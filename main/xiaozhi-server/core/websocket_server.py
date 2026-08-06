@@ -39,6 +39,19 @@ from core.utils.modules_initialize import initialize_modules
 from core.utils.util import check_vad_update, check_asr_update
 
 TAG = __name__
+DEFAULT_MAX_DEVICE_CONNECTIONS = 64
+
+
+def _max_device_connections(server_config: dict) -> int:
+    try:
+        configured = int(
+            server_config.get(
+                "max_device_connections", DEFAULT_MAX_DEVICE_CONNECTIONS
+            )
+        )
+    except (TypeError, ValueError):
+        configured = DEFAULT_MAX_DEVICE_CONNECTIONS
+    return max(1, configured)
 
 
 class WebSocketServer:
@@ -65,6 +78,9 @@ class WebSocketServer:
 
         # Track active connection handlers for cache invalidation
         self.active_handlers = set()
+        self.max_device_connections = _max_device_connections(
+            self.config.get("server", {})
+        )
 
         auth_config = self.config["server"].get("auth", {})
         self.auth_enable = auth_config.get("enabled", True)
@@ -139,6 +155,14 @@ class WebSocketServer:
             await websocket.send("认证失败")
             await websocket.close()
             return
+        if len(self.active_handlers) >= self.max_device_connections:
+            self.logger.bind(tag=TAG).warning(
+                "WebSocket连接数已达上限: active={}, limit={}",
+                len(self.active_handlers),
+                self.max_device_connections,
+            )
+            await websocket.close(code=1013, reason="server capacity reached")
+            return
         # 创建ConnectionHandler时传入当前server实例
         handler = ConnectionHandler(
             self.config,
@@ -202,6 +226,9 @@ class WebSocketServer:
                 )
                 # 更新配置
                 self.config = new_config
+                self.max_device_connections = _max_device_connections(
+                    new_config.get("server", {})
+                )
                 selected_module = new_config.get("selected_module", {})
                 # 重新初始化组件
                 modules = initialize_modules(
