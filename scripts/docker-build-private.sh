@@ -501,6 +501,22 @@ image_exists_remote() {
   docker manifest inspect "$image" >/dev/null 2>&1
 }
 
+registry_cache_enabled_for_image() {
+  local image="$1"
+  local label="$2"
+
+  [[ "$USE_BUILDKIT_REGISTRY_CACHE" == "true" ]] || return 1
+  if [[ "$BUILDKIT_REGISTRY_CACHE" == "true" ]]; then
+    return 0
+  fi
+  if image_exists_remote "$image"; then
+    return 0
+  fi
+
+  print_base_image_status "$label registry cache not found or unavailable; skipping export" "$image"
+  return 1
+}
+
 ensure_image_available_locally() {
   local image="$1"
   docker image inspect "$image" >/dev/null 2>&1 && return 0
@@ -978,13 +994,6 @@ retag_or_push_component() {
 
 build_manager_api_pipeline() {
   local registry_cache_args=()
-  if [[ "$USE_BUILDKIT_REGISTRY_CACHE" == "true" ]]; then
-    registry_cache_args=(
-      --cache-from "type=registry,ref=$MANAGER_API_REGISTRY_CACHE_IMAGE"
-      --cache-to "type=registry,ref=$MANAGER_API_REGISTRY_CACHE_IMAGE,mode=max"
-    )
-  fi
-
   if image_available_locally_or_remote "$MANAGER_API_CACHE_IMAGE"; then
     print_base_image_status "Manager API cached" "$MANAGER_API_CACHE_IMAGE"
     if [[ "$PUSH" == "true" ]] && ! image_exists_remote "$MANAGER_API_CACHE_IMAGE"; then
@@ -992,6 +1001,13 @@ build_manager_api_pipeline() {
     fi
     retag_or_push_component "$MANAGER_API_CACHE_IMAGE" "$MANAGER_API_IMAGE_REPOSITORY"
     return
+  fi
+
+  if registry_cache_enabled_for_image "$MANAGER_API_REGISTRY_CACHE_IMAGE" "Manager API"; then
+    registry_cache_args=(
+      --cache-from "type=registry,ref=$MANAGER_API_REGISTRY_CACHE_IMAGE"
+      --cache-to "type=registry,ref=$MANAGER_API_REGISTRY_CACHE_IMAGE,mode=max"
+    )
   fi
 
   build_image "Build manager API image" Dockerfile-manager-api \
@@ -1012,13 +1028,6 @@ build_manager_api_pipeline() {
 
 build_manager_web_pipeline() {
   local registry_cache_args=()
-  if [[ "$USE_BUILDKIT_REGISTRY_CACHE" == "true" ]]; then
-    registry_cache_args=(
-      --cache-from "type=registry,ref=$MANAGER_WEB_REGISTRY_CACHE_IMAGE"
-      --cache-to "type=registry,ref=$MANAGER_WEB_REGISTRY_CACHE_IMAGE,mode=max"
-    )
-  fi
-
   if image_available_locally_or_remote "$MANAGER_WEB_CACHE_IMAGE"; then
     print_base_image_status "Manager Web cached" "$MANAGER_WEB_CACHE_IMAGE"
     if [[ "$PUSH" == "true" ]] && ! image_exists_remote "$MANAGER_WEB_CACHE_IMAGE"; then
@@ -1026,6 +1035,13 @@ build_manager_web_pipeline() {
     fi
     retag_or_push_component "$MANAGER_WEB_CACHE_IMAGE" "$MANAGER_WEB_IMAGE_REPOSITORY"
     return
+  fi
+
+  if registry_cache_enabled_for_image "$MANAGER_WEB_REGISTRY_CACHE_IMAGE" "Manager Web"; then
+    registry_cache_args=(
+      --cache-from "type=registry,ref=$MANAGER_WEB_REGISTRY_CACHE_IMAGE"
+      --cache-to "type=registry,ref=$MANAGER_WEB_REGISTRY_CACHE_IMAGE,mode=max"
+    )
   fi
 
   build_image "Build manager Web image" Dockerfile-manager-web \

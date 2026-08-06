@@ -179,7 +179,7 @@ BUILD_BASE=auto              自动复用或补齐 common/lite/funasr base
 MIRROR_RUNTIME_IMAGES=auto   ACR 已有 mysql/redis 时跳过同步
 BUILD_ENGINE=buildx          默认单平台 linux/amd64 构建
 PUSH=true                    构建后推送 ACR
-BUILDKIT_REGISTRY_CACHE=auto buildx 推送时启用 manager-api / manager-web 的 ACR BuildKit 缓存
+BUILDKIT_REGISTRY_CACHE=auto buildx 推送时只复用已存在的 manager-api / manager-web ACR BuildKit 缓存
 SERVER_INSTALL_PROFILE=lite 不安装本地 FunASR，ASR 使用远程 provider
 基础镜像默认使用 docker.m.daocloud.io 前缀，避免失效 Docker daemon mirror
 BUILD_BASE=auto 只复用精确依赖 hash 的 base 缓存，不默认用 latest 冒充
@@ -850,10 +850,12 @@ MANAGER_API_REGISTRY_CACHE_IMAGE=<manager-api仓库>:buildcache-v1
 MANAGER_WEB_REGISTRY_CACHE_IMAGE=<manager-web仓库>:buildcache-v1
 ```
 
-默认 `auto`。只有同时满足 `BUILD_ENGINE=buildx`、`PUSH=true` 且开关不是 `false` 时，
-脚本才给 manager-api / manager-web 构建传入 registry `cache-from` 和 `cache-to mode=max`；
-`BUILD_ENGINE=docker` 或 `PUSH=false` 时不会读写 registry cache。`true` 用于显式要求启用，
-`false` 用于显式关闭；也可以覆盖两个 cache image 变量，把缓存放到有推拉权限的专用仓库。
+默认 `auto`。同时满足 `BUILD_ENGINE=buildx`、`PUSH=true` 且对应 `buildcache-v1` 已存在时，
+脚本才给 manager-api / manager-web 构建传入 registry `cache-from` 和 `cache-to mode=max`。
+缓存不存在时，`auto` 会跳过首次深缓存导出，避免正常业务发布被 Maven/npm 全量缓存上传阻塞。
+`true` 用于显式创建或更新深缓存，`false` 用于显式关闭；`BUILD_ENGINE=docker` 或
+`PUSH=false` 时不会读写 registry cache。也可以覆盖两个 cache image 变量，把缓存放到有推拉
+权限的专用仓库。
 内容哈希镜像与 registry cache 是两层机制：`api-/web-<内容哈希>` 命中时直接复用完整组件
 镜像；组件必须重建时，`buildcache-v1` 才帮助复用 Maven/npm 等中间层。
 
