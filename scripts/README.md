@@ -59,7 +59,7 @@ SERVER_INSTALL_PROFILE=funasr scripts/acr-build-push
 
 ```bash
 PYTHON_BASE_IMAGE=python:3.10-slim-bookworm \
-NODE_BASE_IMAGE=node:20 \
+NODE_BASE_IMAGE=node:20-bookworm-slim \
 MAVEN_BASE_IMAGE=maven:3.9.4-eclipse-temurin-21 \
 API_RUNTIME_BASE_IMAGE=bellsoft/liberica-runtime-container:jre-21-glibc \
 MANAGER_WEB_RUNTIME_BASE_IMAGE=alpine:3.20 \
@@ -103,10 +103,12 @@ xiaozhi-manager-web:web-<内容哈希>
 mysql:8.4 / redis:8.0
 ```
 
-默认发布命令使用单平台 Docker 构建并推送 `linux/amd64` 镜像，避免 buildx 容器走不可用的 Docker Hub 镜像加速器。需要多架构镜像时再显式启用 buildx：
+默认发布命令使用 buildx 构建并推送单平台 `linux/amd64` 镜像，使 manager-api 的 Maven
+中间层和 manager-web 的 npm 中间层可以通过 ACR registry cache 跨构建机复用。需要多架构
+镜像时覆盖平台列表：
 
 ```bash
-BUILD_ENGINE=buildx PLATFORMS=linux/amd64,linux/arm64 scripts/acr-build-push
+PLATFORMS=linux/amd64,linux/arm64 scripts/acr-build-push
 ```
 
 发布脚本默认使用安静输出，只显示短摘要、运行时镜像状态、每个构建/推送步骤的进度和结果；Docker 原始日志会写入 `/tmp/xiaozhi-*` 临时目录。排查问题时可以打开完整输出：
@@ -143,8 +145,22 @@ npm 层时，使用 buildx registry cache。缓存写入两个稳定的 ACR `bui
 BUILD_ENGINE=buildx BUILDKIT_REGISTRY_CACHE=true scripts/acr-build-push
 ```
 
-默认 `BUILD_ENGINE=docker` 仍保留，适合本机构建和镜像源条件不稳定的环境；registry
-cache 只在 `BUILD_ENGINE=buildx PUSH=true` 时生效。
+默认 `BUILD_ENGINE=buildx`，registry cache 在 `PUSH=true` 时自动生效。仅在排查 buildx
+环境故障时显式使用 `BUILD_ENGINE=docker` 回退；该回退不会读写 ACR registry cache。
+底层 `docker-build-private.sh` 单独运行时仍默认使用 Docker engine，避免本地 `PUSH=false`
+构建误把 daemon-only base 当成 docker-container builder 可见镜像。显式使用
+`BUILD_ENGINE=buildx PUSH=false` 时必须设置 `BUILD_BASE=false` 使用 registry-backed base，
+或显式提供 `SERVER_BASE_IMAGE`。
+
+manager-web 的默认 builder 固定为带 digest 的 `node:20-bookworm-slim`，避免浮动的完整
+`node:20` 在本地镜像清理后重新下载数百 MB。远端缓存和运行时镜像使用
+`docker buildx imagetools inspect` 做 OCI 兼容的元数据检查；检查本身不会把完整镜像拉到
+本地 Docker daemon。
+
+正式发布使用 `xiaozhi-builder-v2`。脚本不再把 Docker daemon 的代理自动复制进 builder
+容器；daemon 常见的 `127.0.0.1` 代理在容器里会指向容器自身，导致基础镜像元数据请求
+失败。构建器代理必须通过 `BUILDKIT_HTTP_PROXY`、`BUILDKIT_HTTPS_PROXY` 和
+`BUILDKIT_NO_PROXY` 显式传入容器可访问的地址。
 
 只改 Java/Web 管理端且明确不需要检查基础镜像或运行时镜像时，可显式跳过：
 

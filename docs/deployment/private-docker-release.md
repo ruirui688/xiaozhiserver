@@ -177,7 +177,7 @@ scripts/acr-build-push
 ```text
 BUILD_BASE=auto              自动复用或补齐 common/lite/funasr base
 MIRROR_RUNTIME_IMAGES=auto   ACR 已有 mysql/redis 时跳过同步
-BUILD_ENGINE=docker          单平台 linux/amd64 构建
+BUILD_ENGINE=buildx          默认单平台 linux/amd64 构建
 PUSH=true                    构建后推送 ACR
 BUILDKIT_REGISTRY_CACHE=auto buildx 推送时启用 manager-api / manager-web 的 ACR BuildKit 缓存
 SERVER_INSTALL_PROFILE=lite 不安装本地 FunASR，ASR 使用远程 provider
@@ -211,7 +211,8 @@ SERVER_INSTALL_PROFILE=funasr scripts/acr-build-push
 | 只改 Java/Web，确认不需要检查基础镜像和运行时镜像 | `BUILD_BASE=false MIRROR_RUNTIME_IMAGES=false scripts/acr-build-push` |
 | 改了 Python 依赖或 `Dockerfile-server-base` | `BUILD_BASE=true scripts/acr-build-push` |
 | 查看完整 Docker 输出 | `VERBOSE=true scripts/acr-build-push` |
-| 构建多架构镜像 | `BUILD_ENGINE=buildx PLATFORMS=linux/amd64,linux/arm64 scripts/acr-build-push` |
+| 构建多架构镜像 | `PLATFORMS=linux/amd64,linux/arm64 scripts/acr-build-push` |
+| 临时回退 Docker engine（不使用 registry cache） | `BUILD_ENGINE=docker scripts/acr-build-push` |
 | buildx 推送时禁用 ACR BuildKit 缓存 | `BUILDKIT_REGISTRY_CACHE=false scripts/acr-build-push` |
 | 降低构建机并发负载 | `PARALLEL_RELEASE_STEPS=false PARALLEL_IMAGE_BUILDS=false scripts/acr-build-push` |
 
@@ -855,6 +856,22 @@ MANAGER_WEB_REGISTRY_CACHE_IMAGE=<manager-web仓库>:buildcache-v1
 `false` 用于显式关闭；也可以覆盖两个 cache image 变量，把缓存放到有推拉权限的专用仓库。
 内容哈希镜像与 registry cache 是两层机制：`api-/web-<内容哈希>` 命中时直接复用完整组件
 镜像；组件必须重建时，`buildcache-v1` 才帮助复用 Maven/npm 等中间层。
+
+日常 ACR 入口默认使用 buildx，因此上述 registry cache 默认生效。manager-web builder 使用
+固定 digest 的 `node:20-bookworm-slim`，减少本地镜像维护后需要重新拉取的基础层体积。
+脚本通过 `docker buildx imagetools inspect` 检查 ACR 中的 OCI image/index；元数据命中时
+不会为了“检查缓存是否存在”先把完整镜像拉入本地 Docker daemon。buildx 发布时远端
+retag 失败会直接停止，避免用本地 `pull/tag/push` 把 OCI index 降成单平台 manifest。
+默认 `PUSH=true` 发布路径的存在性检查不会执行完整 `docker pull`。显式使用 Docker engine
+的单平台回退，或 `PUSH=false` 本地复用完整组件镜像时，才会按需拉取镜像。
+
+正式发布使用 `xiaozhi-builder-v2`。脚本不会自动继承 Docker daemon 的 HTTP(S) proxy，
+因为 daemon 中常见的 `127.0.0.1` / `localhost` 地址进入 docker-container builder 后会指向
+容器自身。确实需要代理时，必须显式设置 builder 容器可访问的
+`BUILDKIT_HTTP_PROXY`、`BUILDKIT_HTTPS_PROXY` 和 `BUILDKIT_NO_PROXY`。底层
+`docker-build-private.sh` 独立运行仍默认 Docker engine；显式执行
+`BUILD_ENGINE=buildx PUSH=false` 时必须设置 `BUILD_BASE=false` 使用 registry-backed base，
+或显式传入 `SERVER_BASE_IMAGE`，否则脚本会拒绝不可消费的 daemon-only base 缓存组合。
 
 以下情况即使源码改动不大，也可能重新下载依赖：
 

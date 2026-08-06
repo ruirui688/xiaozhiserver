@@ -18,12 +18,12 @@ esac
 PLATFORMS="${PLATFORMS:-$DEFAULT_PLATFORM}"
 PUSH="${PUSH:-false}"
 BUILD_BASE="${BUILD_BASE:-auto}"
-BUILD_ENGINE="${BUILD_ENGINE:-buildx}"
-BUILDER_NAME="${BUILDER_NAME:-xiaozhi-builder}"
+BUILD_ENGINE="${BUILD_ENGINE:-docker}"
+BUILDER_NAME="${BUILDER_NAME:-xiaozhi-builder-v2}"
 IMAGE_TAG_SUFFIX="${IMAGE_TAG_SUFFIX:-}"
 CHANNEL_TAG="${CHANNEL_TAG:-latest}"
 PYTHON_BASE_IMAGE="${PYTHON_BASE_IMAGE:-docker.m.daocloud.io/library/python:3.10-slim}"
-NODE_BASE_IMAGE="${NODE_BASE_IMAGE:-docker.m.daocloud.io/library/node:20}"
+NODE_BASE_IMAGE="${NODE_BASE_IMAGE:-docker.m.daocloud.io/library/node:20-bookworm-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0}"
 MAVEN_BASE_IMAGE="${MAVEN_BASE_IMAGE:-docker.m.daocloud.io/library/maven:3.9.4-eclipse-temurin-21}"
 WEB_RUNTIME_BASE_IMAGE="${WEB_RUNTIME_BASE_IMAGE:-docker.m.daocloud.io/bellsoft/liberica-runtime-container:jre-21-glibc}"
 API_RUNTIME_BASE_IMAGE="${API_RUNTIME_BASE_IMAGE:-$WEB_RUNTIME_BASE_IMAGE}"
@@ -102,18 +102,6 @@ elif [[ -z "$BUILDKIT_REGISTRY_MIRROR" ]]; then
   fi
 fi
 
-if command -v docker >/dev/null 2>&1; then
-  if [[ -z "$BUILDKIT_HTTP_PROXY" ]]; then
-    BUILDKIT_HTTP_PROXY="$(docker info --format '{{.HTTPProxy}}' 2>/dev/null || true)"
-  fi
-  if [[ -z "$BUILDKIT_HTTPS_PROXY" ]]; then
-    BUILDKIT_HTTPS_PROXY="$(docker info --format '{{.HTTPSProxy}}' 2>/dev/null || true)"
-  fi
-  if [[ -z "$BUILDKIT_NO_PROXY" ]]; then
-    BUILDKIT_NO_PROXY="$(docker info --format '{{.NoProxy}}' 2>/dev/null || true)"
-  fi
-fi
-
 BUILDX_DRIVER_OPTS=()
 if [[ -n "$BUILDKIT_HTTP_PROXY" ]]; then
   BUILDX_DRIVER_OPTS+=(--driver-opt "env.HTTP_PROXY=$BUILDKIT_HTTP_PROXY")
@@ -167,6 +155,12 @@ fi
 
 if [[ "$BUILD_ENGINE" == "docker" && "$PLATFORMS" == *,* ]]; then
   echo "BUILD_ENGINE=docker only supports one platform. Use BUILD_ENGINE=buildx for multi-platform builds." >&2
+  exit 1
+fi
+
+if [[ "$BUILD_ENGINE" == "buildx" && "$PUSH" == "false" && "$BUILD_BASE" != "false" && -z "${SERVER_BASE_IMAGE:-}" ]]; then
+  echo "BUILD_ENGINE=buildx with PUSH=false cannot consume daemon-only base images." >&2
+  echo "Use BUILD_BASE=false with a registry-backed base, set SERVER_BASE_IMAGE explicitly, or use BUILD_ENGINE=docker." >&2
   exit 1
 fi
 
@@ -496,7 +490,19 @@ push_local_image() {
 
 image_exists_remote() {
   local image="$1"
+
+  if docker buildx version >/dev/null 2>&1; then
+    docker buildx imagetools inspect "$image" >/dev/null 2>&1
+    return
+  fi
+
   docker manifest inspect "$image" >/dev/null 2>&1
+}
+
+ensure_image_available_locally() {
+  local image="$1"
+  docker image inspect "$image" >/dev/null 2>&1 && return 0
+  docker pull --quiet "$image" >/dev/null 2>&1
 }
 
 remote_retag_image() {
@@ -667,8 +673,20 @@ MANAGER_WEB_CACHE_IMAGE="$MANAGER_WEB_IMAGE_REPOSITORY:$MANAGER_WEB_CACHE_TAG"
 
 image_available_locally_or_remote() {
   local image="$1"
+
+  # A docker-container builder cannot consume daemon-only images. Release builds
+  # must therefore treat only the ACR copy as reusable and rebuild any cache
+  # that exists locally but was never pushed.
+  if [[ "$BUILD_ENGINE" == "buildx" && "$PUSH" == "true" ]]; then
+    image_exists_remote "$image"
+    return
+  fi
+
   docker image inspect "$image" >/dev/null 2>&1 && return 0
-  docker pull --quiet "$image" >/dev/null 2>&1
+  if [[ "$PUSH" == "true" ]] && image_exists_remote "$image"; then
+    return 0
+  fi
+  ensure_image_available_locally "$image"
 }
 
 promote_legacy_cache_image() {
@@ -689,7 +707,11 @@ promote_legacy_cache_image() {
     return 0
   fi
 
-  if docker image inspect "$legacy_image" >/dev/null 2>&1; then
+  if [[ "$BUILD_ENGINE" == "buildx" && "$PUSH" == "true" ]]; then
+    return 1
+  fi
+
+  if ensure_image_available_locally "$legacy_image"; then
     docker tag "$legacy_image" "$current_image"
     push_local_image "$current_image"
     print_base_image_status "$label legacy cache tagged locally" "$current_image"
@@ -912,6 +934,12 @@ retag_or_push_component() {
     return
   fi
 
+  if [[ "$BUILD_ENGINE" == "buildx" && "$PUSH" == "true" ]]; then
+    echo "Remote retag failed for $cache_image; refusing a local pull/tag/push fallback that could collapse an OCI index." >&2
+    return 1
+  fi
+
+  ensure_image_available_locally "$cache_image"
   docker tag "$cache_image" "$repository:$CHANNEL_TAG"
   docker tag "$cache_image" "$repository:$IMAGE_VERSION_TAG"
   push_local_image "$repository:$CHANNEL_TAG"

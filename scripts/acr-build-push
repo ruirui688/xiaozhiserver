@@ -17,11 +17,11 @@ REDIS_IMAGE_REPOSITORY="${REDIS_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/r
 PLATFORMS="${PLATFORMS:-linux/amd64}"
 PUSH="${PUSH:-true}"
 BUILD_BASE="${BUILD_BASE:-auto}"
-BUILD_ENGINE="${BUILD_ENGINE:-docker}"
+BUILD_ENGINE="${BUILD_ENGINE:-buildx}"
 IMAGE_TAG_SUFFIX="${IMAGE_TAG_SUFFIX:-}"
 CHANNEL_TAG="${CHANNEL_TAG:-latest}"
 PYTHON_BASE_IMAGE="${PYTHON_BASE_IMAGE:-docker.m.daocloud.io/library/python:3.10-slim-bookworm}"
-NODE_BASE_IMAGE="${NODE_BASE_IMAGE:-docker.m.daocloud.io/library/node:20}"
+NODE_BASE_IMAGE="${NODE_BASE_IMAGE:-docker.m.daocloud.io/library/node:20-bookworm-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0}"
 MAVEN_BASE_IMAGE="${MAVEN_BASE_IMAGE:-docker.m.daocloud.io/library/maven:3.9.4-eclipse-temurin-21}"
 WEB_RUNTIME_BASE_IMAGE="${WEB_RUNTIME_BASE_IMAGE:-docker.m.daocloud.io/bellsoft/liberica-runtime-container:jre-21-glibc}"
 API_RUNTIME_BASE_IMAGE="${API_RUNTIME_BASE_IMAGE:-$WEB_RUNTIME_BASE_IMAGE}"
@@ -280,6 +280,17 @@ mirror_runtime_images() {
     "$ROOT_DIR/scripts/acr-mirror-runtime-images"
 }
 
+remote_image_exists() {
+  local image="$1"
+
+  if docker buildx version >/dev/null 2>&1; then
+    docker buildx imagetools inspect "$image" >/dev/null 2>&1
+    return
+  fi
+
+  docker manifest inspect "$image" >/dev/null 2>&1
+}
+
 should_mirror_runtime_images() {
   [[ "$PUSH" == "true" ]] || return 1
 
@@ -293,7 +304,7 @@ should_mirror_runtime_images() {
 
   local missing=false
   for image in "$MYSQL_IMAGE_REPOSITORY:$MYSQL_TARGET_TAG" "$REDIS_IMAGE_REPOSITORY:$REDIS_TARGET_TAG"; do
-    if docker manifest inspect "$image" >/dev/null 2>&1; then
+    if remote_image_exists "$image"; then
       if is_quiet; then
         echo "Runtime OK: $(short_image_name "$image")"
       else
