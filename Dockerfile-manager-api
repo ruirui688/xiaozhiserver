@@ -12,7 +12,9 @@ FROM ${API_RUNTIME_BASE_IMAGE}
 WORKDIR /app
 
 RUN apk add --no-cache --no-scripts bash fontconfig ttf-dejavu \
-    && addgroup -S xiaozhi && adduser -S xiaozhi -G xiaozhi
+    && addgroup -S xiaozhi \
+    && adduser -S xiaozhi -G xiaozhi \
+    && install -d -o xiaozhi -g xiaozhi -m 0755 /app/logs
 
 COPY --chown=xiaozhi:xiaozhi --from=api-builder /app/target/xiaozhi-esp32-api.jar /app/xiaozhi-esp32-api.jar
 COPY --chown=xiaozhi:xiaozhi docs/docker/start-api.sh /start-api.sh
