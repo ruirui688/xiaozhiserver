@@ -18,7 +18,11 @@ export interface Device {
   updateDate: string
   creator: string
   createDate: string
+  speechInputMode?: SpeechRouteMode
+  speechOutputMode?: SpeechRouteMode
 }
+
+export type SpeechRouteMode = 'server' | 'device' | 'auto'
 
 export interface DeviceScene {
   id: string

@@ -19,6 +19,9 @@ async def handleAbortMessage(conn: "ConnectionHandler", preserve_user_audio=Fals
             "aec_barge_in" if preserve_user_audio else "user_interrupt",
         )
     tts = getattr(conn, "tts", None)
+    speech_runtime = getattr(conn, "speech_runtime", None)
+    if speech_runtime is not None:
+        speech_runtime.abort_device_tts(getattr(conn, "sentence_id", None))
     if tts is not None and hasattr(tts, "finalize_interrupted_report"):
         tts.finalize_interrupted_report(getattr(conn, "sentence_id", None))
     if tts is not None and hasattr(tts, "clear_exact_text"):

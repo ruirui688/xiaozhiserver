@@ -1,4 +1,4 @@
-import type { Device, DeviceScene, FirmwareType } from './types'
+import type { Device, DeviceScene, FirmwareType, SpeechRouteMode } from './types'
 import { http } from '@/http/request/alova'
 
 /**
@@ -58,6 +58,16 @@ export function updateDeviceAutoUpdate(deviceId: string, autoUpdate: number) {
   return http.Put(`/device/update/${deviceId}`, {
     autoUpdate,
   })
+}
+
+/**
+ * 设置设备端与服务端之间的语音识别、合成路由。
+ */
+export function updateDeviceSpeechRouting(deviceId: string, data: {
+  speechInputMode: SpeechRouteMode
+  speechOutputMode: SpeechRouteMode
+}) {
+  return http.Put(`/device/update/${deviceId}`, data)
 }
 
 /**

@@ -896,3 +896,26 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 是否允许被官方覆盖：否
 官方同步时的处理规则：必须保留资源中心作为静态工具提示词唯一目录、catalog_only 工具不进入角色勾选、tool_prompt_overrides 与 plugins 业务配置分离、按工具名覆盖 function description、动态能力说明后追加以及在线会话安全轮次刷新。提示词编辑不得启用工具、绕过 Intent/设备/MCP 门控、改变参数 Schema、覆盖插件业务参数或削弱 MCP SSRF 与权限校验。外部动态工具没有同名目录覆盖时必须继续使用 tools/list 或 descriptor 原始说明。
 ```
+
+## 46. 设备端 ASR/TTS 混合语音路由
+
+```text
+定制模块：manager-api 设备语音策略、Web/Mobile 设备设置、xiaozhi-server 语音能力协商与设备 TTS façade
+改动原因：不同设备和场景需要独立选择服务端或设备端语音识别与合成，同时继续复用服务端 SemanticCenter、LLM、工具、聊天记录和 generation 生命周期，不能把设备能力伪装成云端 ASR/TTS provider，也不能因固件能力缺失或播放失败在半轮静默切换链路。
+关键文件：
+  - main/manager-api/src/main/java/xiaozhi/modules/device/
+  - main/manager-api/src/main/java/xiaozhi/modules/config/service/impl/ConfigServiceImpl.java
+  - main/manager-api/src/main/resources/db/changelog/202608061730.sql
+  - main/xiaozhi-server/core/speech/
+  - main/xiaozhi-server/core/handle/helloHandle.py
+  - main/xiaozhi-server/core/handle/textHandler/listenMessageHandler.py
+  - main/xiaozhi-server/core/handle/textHandler/ttsAckMessageHandler.py
+  - main/xiaozhi-server/core/session/runtime_config_reloader.py
+  - main/manager-web/src/components/device/DeviceSpeechSettingsDialog.vue
+  - main/manager-mobile/src/pages/device/components/DeviceSpeechSettingsPanel.vue
+  - docs/architecture/device-interaction-chain.md
+  - docs/architecture/runtime-flows.md
+  - docs/architecture/data-and-contracts.md
+是否允许被官方覆盖：否
+官方同步时的处理规则：必须保留设备级 speech_input_mode/speech_output_mode 与运行时 speech_routing.input/output 的 server/device/auto 契约，默认 server/server；设备能力只来自当前已认证 WebSocket 的 hello features.speech，策略与能力解析后的 speech_route 才是当前连接实际路由。显式 device 缺能力必须报 incompatible_route，auto 只在能力完整时选择设备端；设备 TTS 必须同时声明 playback ACK，没有 ACK 时不能声称设备已播放。设备 ASR 只接受 listen.detect 的 source=device_asr、final=true、受校验 turn_id 和非空文本，必须保留幂等缓存、速率限制、speech_asr_ack 和正文日志脱敏。设备 TTS 必须继续通过现有 generation/TTS 队列发送 text/text_end，等待 played/failed/aborted tts_ack；只有 played 正常完成，失败、Abort、文件输入或超时不能伪造完成，也不得在同一半轮切回服务端合成。四种传统输入/输出组合必须继续复用 SemanticCenter、LLM、工具和聊天边界；Realtime 与任一实际设备端语音路由不兼容，不得混合。后台策略更新只能在空闲安全轮次构造候选管线后热切换，失败恢复旧管线；固件能力变化需要重连重新协商。管理端更新必须保留 Workspace 写权限与事务提交后按设备刷新，日志不得记录设备 ASR/TTS 正文、Token、密钥或完整私有配置。
+```

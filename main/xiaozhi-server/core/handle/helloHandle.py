@@ -55,6 +55,9 @@ async def handleHelloMessage(conn: "ConnectionHandler", msg_json):
         # 避免把服务端 TTS 输出采样率误下发成设备录音采样率。
         conn.welcome_msg["audio_params"] = audio_params
     features = msg_json.get("features")
+    speech_runtime = getattr(conn, "speech_runtime", None)
+    if speech_runtime is not None:
+        speech_runtime.record_hello(features)
     if isinstance(features, dict):
         conn.logger.bind(tag=TAG).info(
             f"收到hello特性: device-id={conn.headers.get('device-id') if conn.headers else ''}, "

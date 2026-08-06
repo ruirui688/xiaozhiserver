@@ -10,6 +10,7 @@ import xiaozhi.modules.device.dto.DeviceManualAddDTO;
 import xiaozhi.modules.device.dto.DevicePageUserDTO;
 import xiaozhi.modules.device.dto.DeviceReportReqDTO;
 import xiaozhi.modules.device.dto.DeviceReportRespDTO;
+import xiaozhi.modules.device.dto.DeviceUpdateDTO;
 import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.device.vo.UserShowDeviceListVO;
 
@@ -108,6 +109,11 @@ public interface DeviceService extends BaseService<DeviceEntity> {
      * 更新设备连接信息
      */
     void updateDeviceConnectionInfo(String agentId, String deviceId, String appVersion);
+
+    /**
+     * 更新设备设置并在语音路由变化时刷新该设备的在线运行配置。
+     */
+    void updateDeviceInfo(String deviceId, DeviceUpdateDTO dto);
 
     /**
      * 生成WebSocket认证token

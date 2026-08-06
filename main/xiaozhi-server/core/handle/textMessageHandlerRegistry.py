@@ -10,6 +10,7 @@ from core.handle.textHandler.serverMessageHandler import ServerTextMessageHandle
 from core.handle.textHandler.pingMessageHandler import PingMessageHandler
 from core.handle.textHandler.externalTtsMessageHandler import ExternalTTSTextMessageHandler
 from core.handle.textHandler.faceRecognitionMessageHandler import FaceRecognitionTextMessageHandler
+from core.handle.textHandler.ttsAckMessageHandler import TTSAckTextMessageHandler
 
 TAG = __name__
 
@@ -32,6 +33,7 @@ class TextMessageHandlerRegistry:
             ServerTextMessageHandler(),
             PingMessageHandler(),
             ExternalTTSTextMessageHandler(),
+            TTSAckTextMessageHandler(),
             FaceRecognitionTextMessageHandler(),
         ]
 

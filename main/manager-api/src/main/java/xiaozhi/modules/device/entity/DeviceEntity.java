@@ -49,6 +49,12 @@ public class DeviceEntity {
     @Schema(description = "设备运行配置版本")
     private Long configVersion;
 
+    @Schema(description = "语音输入路由(server/device/auto)")
+    private String speechInputMode;
+
+    @Schema(description = "语音输出路由(server/device/auto)")
+    private String speechOutputMode;
+
     @Schema(description = "固件版本号")
     private String appVersion;
 

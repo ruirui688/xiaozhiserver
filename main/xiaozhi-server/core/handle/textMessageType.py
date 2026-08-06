@@ -11,4 +11,5 @@ class TextMessageType(Enum):
     SERVER = "server"
     PING = "ping"
     EXTERNAL_TTS = "external_tts"
+    TTS_ACK = "tts_ack"
     FACE_RECOGNITION = "face_recognition"

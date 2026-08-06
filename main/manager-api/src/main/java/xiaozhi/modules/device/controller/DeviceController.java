@@ -5,7 +5,6 @@ import java.util.Map;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.shiro.authz.annotation.RequiresPermissions;
-import org.springframework.beans.BeanUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -31,7 +30,6 @@ import xiaozhi.modules.device.dto.DeviceManualAddDTO;
 import xiaozhi.modules.device.dto.DeviceRegisterDTO;
 import xiaozhi.modules.device.dto.DeviceUnBindDTO;
 import xiaozhi.modules.device.dto.DeviceUpdateDTO;
-import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.device.service.DeviceAddressBookService;
 import xiaozhi.modules.device.service.DeviceAudioPreviewTicketService;
 import xiaozhi.modules.device.service.DeviceConversationContextService;
@@ -39,7 +37,6 @@ import xiaozhi.modules.device.service.DeviceService;
 import xiaozhi.modules.device.vo.UserShowDeviceListVO;
 import xiaozhi.modules.security.user.SecurityUser;
 import xiaozhi.modules.sys.service.SysParamsService;
-import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 
 @Tag(name = "设备管理")
 @RestController
@@ -49,20 +46,17 @@ public class DeviceController {
     private final DeviceAddressBookService deviceAddressBookService;
     private final RedisUtils redisUtils;
     private final SysParamsService sysParamsService;
-    private final WorkspacePermissionService workspacePermissionService;
     private final DeviceAudioPreviewTicketService audioPreviewTicketService;
     private final DeviceConversationContextService conversationContextService;
 
     public DeviceController(DeviceService deviceService, DeviceAddressBookService deviceAddressBookService,
             RedisUtils redisUtils, SysParamsService sysParamsService,
-            WorkspacePermissionService workspacePermissionService,
             DeviceAudioPreviewTicketService audioPreviewTicketService,
             DeviceConversationContextService conversationContextService) {
         this.deviceService = deviceService;
         this.deviceAddressBookService = deviceAddressBookService;
         this.redisUtils = redisUtils;
         this.sysParamsService = sysParamsService;
-        this.workspacePermissionService = workspacePermissionService;
         this.audioPreviewTicketService = audioPreviewTicketService;
         this.conversationContextService = conversationContextService;
     }
@@ -147,14 +141,7 @@ public class DeviceController {
     @Operation(summary = "更新设备信息")
     @RequiresPermissions("sys:role:normal")
     public Result<Void> updateDeviceInfo(@PathVariable String id, @Valid @RequestBody DeviceUpdateDTO deviceUpdateDTO) {
-        DeviceEntity entity = deviceService.selectById(id);
-        if (entity == null) {
-            return new Result<Void>().error("设备不存在");
-        }
-        UserDetail user = SecurityUser.getUser();
-        workspacePermissionService.requireWrite(entity.getWorkspaceId());
-        BeanUtils.copyProperties(deviceUpdateDTO, entity);
-        deviceService.updateById(entity);
+        deviceService.updateDeviceInfo(id, deviceUpdateDTO);
         return new Result<Void>();
     }
 

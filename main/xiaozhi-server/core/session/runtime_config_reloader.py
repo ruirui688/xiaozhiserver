@@ -20,6 +20,7 @@ from core.utils.modules_initialize import initialize_modules
 from core.utils.prompt_manager import PromptManager
 from core.conversation import ConversationRouter
 from core.conversation.mode import is_realtime_conversation
+from core.speech import DeviceTTSProvider
 
 
 class RuntimeConfigReloader:
@@ -151,8 +152,17 @@ class RuntimeConfigReloader:
     async def _replace_pipeline(self, candidate_config, isolate_scene=False):
         conn = self.conn
         old_config = copy.deepcopy(conn.config)
+        old_route = getattr(getattr(conn, "speech_runtime", None), "route", None)
         scene_snapshot = None
-        new_modules = await self._build_modules(candidate_config)
+        try:
+            candidate_route = conn.speech_runtime.resolve_candidate(
+                candidate_config,
+                realtime=is_realtime_conversation(candidate_config),
+            )
+        except Exception as error:
+            await conn.speech_runtime.publish_route_error(error)
+            raise
+        new_modules = await self._build_modules(candidate_config, candidate_route)
         if getattr(conn, "closing", False) or getattr(conn, "closed", False):
             await self._close_unactivated_modules(new_modules)
             raise RuntimeError("连接正在关闭，取消运行配置热更新")
@@ -164,7 +174,9 @@ class RuntimeConfigReloader:
         try:
             if isolate_scene:
                 scene_snapshot = SceneSwitchIsolation.begin(conn)
-            await self._activate_pipeline(candidate_config, new_modules)
+            await self._activate_pipeline(
+                candidate_config, new_modules, candidate_route
+            )
         except Exception as error:
             conn.logger.bind(tag=__name__).error(
                 "运行配置热更新激活失败，尝试恢复旧配置: errorType={}",
@@ -173,8 +185,16 @@ class RuntimeConfigReloader:
             await self._deactivate_pipeline()
             if scene_snapshot is not None:
                 SceneSwitchIsolation.rollback(conn, scene_snapshot)
-            rollback_modules = await self._build_modules(old_config)
-            await self._activate_pipeline(old_config, rollback_modules)
+            rollback_route = old_route or conn.speech_runtime.resolve_candidate(
+                old_config,
+                realtime=is_realtime_conversation(old_config),
+            )
+            rollback_modules = await self._build_modules(
+                old_config, rollback_route
+            )
+            await self._activate_pipeline(
+                old_config, rollback_modules, rollback_route
+            )
             raise
 
     def _clear_completed_request(self, scene_switch):
@@ -229,26 +249,32 @@ class RuntimeConfigReloader:
             return None
         return normalized
 
-    async def _build_modules(self, config):
+    async def _build_modules(self, config, speech_route=None):
+        init_asr = not bool(
+            speech_route is not None and speech_route.uses_device_asr
+        )
+        init_tts = not bool(
+            speech_route is not None and speech_route.uses_device_tts
+        )
         modules = await asyncio.to_thread(
             initialize_modules,
             self.conn.logger,
             config,
+            init_asr,
+            init_asr,
             True,
-            True,
-            True,
-            True,
+            init_tts,
             True,
             True,
         )
         if not is_realtime_conversation(config):
             selected = config.get("selected_module", {})
-            for module_type, name in (
-                ("VAD", "vad"),
-                ("ASR", "asr"),
-                ("LLM", "llm"),
-                ("TTS", "tts"),
-            ):
+            required_modules = [("LLM", "llm")]
+            if init_asr:
+                required_modules.extend((("VAD", "vad"), ("ASR", "asr")))
+            if init_tts:
+                required_modules.append(("TTS", "tts"))
+            for module_type, name in required_modules:
                 if selected.get(module_type) and modules.get(name) is None:
                     raise RuntimeError(f"{module_type}热更新初始化失败")
         return modules
@@ -312,7 +338,7 @@ class RuntimeConfigReloader:
         conn.audio_input_ready.clear()
         conn._modules_ready.clear()
 
-    async def _activate_pipeline(self, config, modules):
+    async def _activate_pipeline(self, config, modules, speech_route=None):
         conn = self.conn
         conn.config = copy.deepcopy(config)
         conn.prompt_manager = PromptManager(conn.config, conn.logger)
@@ -320,12 +346,20 @@ class RuntimeConfigReloader:
         conn.configured_intent_type = "nointent"
         conn.intent_type = "nointent"
         realtime_conversation = is_realtime_conversation(conn.config)
+        device_asr = bool(
+            speech_route is not None and speech_route.uses_device_asr
+        )
+        device_tts = bool(
+            speech_route is not None and speech_route.uses_device_tts
+        )
 
-        conn.vad = None if realtime_conversation else modules.get("vad")
-        conn.asr = None if realtime_conversation else modules.get("asr")
+        conn.vad = None if realtime_conversation or device_asr else modules.get("vad")
+        conn.asr = None if realtime_conversation or device_asr else modules.get("asr")
         conn.llm = None if realtime_conversation else modules.get("llm")
         conn.tts = None if realtime_conversation else (
-            modules.get("tts") or DefaultTTS(conn.config, delete_audio_file=True)
+            DeviceTTSProvider(conn.config, delete_audio_file=True)
+            if device_tts
+            else modules.get("tts") or DefaultTTS(conn.config, delete_audio_file=True)
         )
         conn.memory = modules.get("memory")
         conn.intent = modules.get("intent")
@@ -338,14 +372,16 @@ class RuntimeConfigReloader:
             )
             await conn.tts.open_audio_channels(conn)
             conn.tts_ready.set()
-            if conn.asr is not None:
+            if device_asr:
+                conn.audio_input_ready.set()
+            elif conn.asr is not None:
                 await conn.asr.open_audio_channels(conn)
                 if conn.vad is not None:
                     conn.audio_input_ready.set()
 
         await asyncio.to_thread(conn._initialize_memory)
         await asyncio.to_thread(conn._initialize_intent)
-        if not realtime_conversation:
+        if not realtime_conversation and not device_asr:
             await asyncio.to_thread(conn._initialize_voiceprint)
 
         apply_connection_runtime_state(conn)
@@ -362,6 +398,8 @@ class RuntimeConfigReloader:
             conn.config.get("selected_module", {})
         )
         conn.logger = create_connection_logger(conn.selected_module_str)
+        if speech_route is not None:
+            await conn.speech_runtime.apply_route(speech_route)
 
         if realtime_conversation:
             await conn.conversation_router.initialize()

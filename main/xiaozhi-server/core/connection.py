@@ -91,6 +91,7 @@ from core.meeting import (
     build_meeting_runtime_context,
 )
 from core.conversation import ConversationRouter
+from core.speech import DeviceTTSProvider, SpeechRuntime
 
 
 TAG = __name__
@@ -347,6 +348,7 @@ class ConnectionHandler:
         # 初始化通话状态
         self.calling = False
         self.conversation_router = ConversationRouter(self)
+        self.speech_runtime = SpeechRuntime(self)
 
     async def handle_connection(self, ws: websockets.ServerConnection):
         try:
@@ -600,6 +602,11 @@ class ConnectionHandler:
             if self.conversation_router.is_realtime:
                 await self.conversation_router.handle_audio(message)
                 return
+            speech_route = getattr(
+                getattr(self, "speech_runtime", None), "route", None
+            )
+            if speech_route is not None and speech_route.uses_device_asr:
+                return
             if self.vad is None or self.asr is None:
                 return
 
@@ -765,9 +772,17 @@ class ConnectionHandler:
                 hasattr(self, "config")
                 and self._get_conversation_router().is_realtime
             )
+            speech_route = getattr(
+                getattr(self, "speech_runtime", None), "route", None
+            )
             if not realtime_conversation:
                 if self.tts is None:
-                    initialized_tts = self._initialize_tts()
+                    initialized_tts = (
+                        DeviceTTSProvider(self.config, delete_audio_file=True)
+                        if speech_route is not None
+                        and speech_route.uses_device_tts
+                        else self._initialize_tts()
+                    )
                     if not self._assign_initialized_component("tts", initialized_tts):
                         return
                 if self.closing:
@@ -812,10 +827,18 @@ class ConnectionHandler:
             """初始化本地组件"""
             if self.closing:
                 return
-            if not realtime_conversation and self.vad is None and self._vad is not None:
+            device_asr = bool(
+                speech_route is not None and speech_route.uses_device_asr
+            )
+            if (
+                not realtime_conversation
+                and not device_asr
+                and self.vad is None
+                and self._vad is not None
+            ):
                 if not self._assign_initialized_component("vad", self._vad):
                     return
-            if not realtime_conversation and self.asr is None:
+            if not realtime_conversation and not device_asr and self.asr is None:
                 initialized_asr = self._initialize_asr()
                 if initialized_asr is not None and not self._assign_initialized_component(
                     "asr", initialized_asr
@@ -825,13 +848,15 @@ class ConnectionHandler:
             # 初始化声纹识别
             if self.closing:
                 return
-            if not realtime_conversation:
+            if not realtime_conversation and not device_asr:
                 self._initialize_voiceprint()
             if self.closing:
                 self.voiceprint_provider = None
                 return
             # 打开语音识别通道
-            if not realtime_conversation and self.asr is not None:
+            if not realtime_conversation and device_asr:
+                self.audio_input_ready.set()
+            elif not realtime_conversation and self.asr is not None:
                 asr_future = asyncio.run_coroutine_threadsafe(
                     self.asr.open_audio_channels(self), self.loop
                 )
@@ -1025,6 +1050,11 @@ class ConnectionHandler:
             should_initialize = await self._initialize_private_config_async()
             if not should_initialize or self.closing:
                 return
+            if self.speech_runtime.route is None:
+                await self.speech_runtime.resolve(
+                    self.config,
+                    realtime=self._get_conversation_router().is_realtime,
+                )
             # 在线程池中初始化组件
             executor = self.executor
             if executor is None:
@@ -1100,6 +1130,15 @@ class ConnectionHandler:
         init_llm, init_tts, init_memory, init_intent = (
             self._apply_private_runtime_config(private_config)
         )
+        speech_route = await self.speech_runtime.resolve(
+            self.config,
+            realtime=self._get_conversation_router().is_realtime,
+        )
+        if speech_route.uses_device_asr:
+            init_vad = False
+            init_asr = False
+        if speech_route.uses_device_tts:
+            init_tts = False
 
         # 使用 run_in_executor 在线程池中执行 initialize_modules，避免阻塞主循环
         try:
@@ -1754,7 +1793,11 @@ class ConnectionHandler:
                 self.session_telemetry.metrics.record_llm_complete(
                     time.monotonic() - llm_started_at
                 )
-            self.logger.bind(tag=TAG).error(f"LLM 处理出错 {query}: {e}")
+            self.logger.bind(tag=TAG).error(
+                "LLM处理出错: queryChars={}, errorType={}",
+                len(str(query or "")),
+                type(e).__name__,
+            )
             if meeting_tool_turn:
                 self._record_pending_meeting_turn("meeting_llm_request_error")
                 return True

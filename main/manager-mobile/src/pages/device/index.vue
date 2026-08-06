@@ -8,6 +8,7 @@ import { parseDateTime } from '@/utils'
 import { getSafeAreaInsets } from '@/utils/system'
 import { toast } from '@/utils/toast'
 import DeviceScenePanel from './components/DeviceScenePanel.vue'
+import DeviceSpeechSettingsPanel from './components/DeviceSpeechSettingsPanel.vue'
 
 defineOptions({
   name: 'DeviceManage',
@@ -36,10 +37,17 @@ const loading = ref(false)
 const isBindDevice = ref(false)
 const isScenePanelVisible = ref(false)
 const selectedSceneDevice = ref<Device | null>(null)
+const isSpeechPanelVisible = ref(false)
+const selectedSpeechDevice = ref<Device | null>(null)
 
 function openScenes(device: Device) {
   selectedSceneDevice.value = device
   isScenePanelVisible.value = true
+}
+
+function openSpeechSettings(device: Device) {
+  selectedSpeechDevice.value = device
+  isSpeechPanelVisible.value = true
 }
 
 // 手动绑定弹窗
@@ -419,6 +427,9 @@ defineExpose({
                     />
                   </view>
                   <wd-button class="mt-[16rpx]" block size="small" plain @click="openScenes(device)">管理场景</wd-button>
+                  <wd-button class="mt-[12rpx]" block size="small" plain @click="openSpeechSettings(device)">
+                    {{ t('deviceSpeech.button') }}
+                  </wd-button>
                 </view>
               </view>
             </view>
@@ -459,6 +470,7 @@ defineExpose({
     <wd-message-box />
     <wd-action-sheet v-model="isBindDevice" :actions="actions" @close="isBindDevice = false" @select="selectBindMode" />
     <DeviceScenePanel v-model="isScenePanelVisible" :device="selectedSceneDevice" @switched="loadDeviceList" />
+    <DeviceSpeechSettingsPanel v-model="isSpeechPanelVisible" :device="selectedSpeechDevice" @saved="loadDeviceList" />
 
     <!-- 手动绑定设备弹窗 -->
     <wd-popup v-model="isManualBindDialog" position="bottom" :close-on-click-modal="false" custom-style="border-radius: 24rpx 24rpx 0 0;">

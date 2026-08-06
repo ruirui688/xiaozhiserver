@@ -86,8 +86,8 @@ export default {
                 callback(res)
             })
             .networkFail((err) => {
-                console.error('更新OTA状态失败:', networkErrorSummary(err))
-                if (callback) callback(networkErrorResponse('更新OTA状态失败'))
+                console.error('更新设备信息失败:', networkErrorSummary(err))
+                if (callback) callback(networkErrorResponse('更新设备信息失败'))
             }).send()
     },
     // 手动添加设备

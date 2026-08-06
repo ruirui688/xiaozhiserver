@@ -302,7 +302,11 @@ def enqueue_tts_report(
         )
         return True
     except Exception as e:
-        conn.logger.bind(tag=TAG).error(f"加入TTS上报队列失败: {text}, {e}")
+        conn.logger.bind(tag=TAG).error(
+            "加入TTS上报队列失败: textLength={}, errorType={}",
+            len(str(text or "")),
+            type(e).__name__,
+        )
         return False
 
 

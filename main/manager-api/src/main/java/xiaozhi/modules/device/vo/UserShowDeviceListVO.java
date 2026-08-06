@@ -32,8 +32,17 @@ public class UserShowDeviceListVO {
     @Schema(description = "设备别名")
     private String alias;
 
+    @Schema(description = "语音输入路由(server/device/auto)")
+    private String speechInputMode;
+
+    @Schema(description = "语音输出路由(server/device/auto)")
+    private String speechOutputMode;
+
     @Schema(description = "开启OTA")
     private Integer otaUpgrade;
+
+    @Schema(description = "自动更新开关(0关闭/1开启)")
+    private Integer autoUpdate;
 
     @Schema(description = "最近对话时间")
     private String recentChatTime;

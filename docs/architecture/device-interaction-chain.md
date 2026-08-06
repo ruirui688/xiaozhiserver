@@ -1,11 +1,13 @@
 ---
 status: supporting
 owner: xiaozhi-server
-last_verified: 2026-08-05
+last_verified: 2026-08-06
 source_paths:
   - main/xiaozhi-server/core
   - main/manager-api/src/main/java/xiaozhi/modules/config
-  - main/manager-web/src/components/role
+  - main/manager-api/src/main/java/xiaozhi/modules/device
+  - main/manager-web/src/components/device
+  - main/manager-mobile/src/pages/device
 ---
 
 # 设备交互完整链路
@@ -24,8 +26,9 @@ ESP32 设备
   │
   ├── WebSocket 连接 (ws://host:8000/xiaozhi/v1/)
   │     ├── Hello 消息 (features, device-id, client-id)
-  │     ├── 音频上行 (binary Opus → VAD → ASR → text)
-  │     ├── 音频下行 (text → TTS → Opus → binary WebSocket)
+  │     ├── 语音能力协商 (features.speech → speech_route)
+  │     ├── 音频上行 (binary Opus → 服务端 VAD/ASR，或设备端 ASR 最终文本)
+  │     ├── 音频下行 (服务端 TTS → Opus，或文本 → 设备端 TTS + playback ACK)
   │     ├── IoT 描述符 (type: "iot", descriptors: [...])
   │     ├── MCP 消息 (type: "mcp", JSON-RPC 2.0)
   │     └── 控制消息 (listen, abort, wakeup)
@@ -149,6 +152,72 @@ connection.py:227-298  handle_connection()
 会话历史并进入后台聊天记录；长期记忆事件和旧 Memory provider 只使用原始 `content`，不接收背景。
 服务端日志只记录背景类型和字节数，不记录背景正文。
 
+### 2.7 设备语音能力协商
+
+支持端侧 ASR/TTS 的固件在 hello 中声明版本化能力：
+
+```json
+{
+  "type": "hello",
+  "features": {
+    "speech": {
+      "version": 1,
+      "input": ["device_asr"],
+      "output": ["device_tts"],
+      "asr_final_text": true,
+      "tts_playback_ack": true
+    }
+  }
+}
+```
+
+manager-api 按设备持久化 `speech_input_mode / speech_output_mode`，管理接口使用
+`speechInputMode / speechOutputMode`，私有运行配置下发为：
+
+```json
+{
+  "speech_routing": {
+    "input": "auto",
+    "output": "server"
+  }
+}
+```
+
+输入与输出分别支持三种策略：`server` 强制服务端；`device` 要求设备能力完整，缺失时失败；`auto` 优先设备端，
+能力缺失时选择服务端。端侧输出除了 `device_tts` 还必须声明 `tts_playback_ack`，否则 `auto` 回退服务端、`device`
+明确失败。Python 在 hello 与私有配置到齐后下发实际结果：
+
+```json
+{
+  "type": "speech_route",
+  "session_id": "session-id",
+  "version": 1,
+  "input": "device",
+  "output": "server",
+  "inputPolicy": "auto",
+  "outputPolicy": "server",
+  "helloTimedOut": false
+}
+```
+
+显式策略无法满足或与 Realtime 冲突时下发：
+
+```json
+{
+  "type": "speech_route",
+  "session_id": "session-id",
+  "version": 1,
+  "status": "error",
+  "reason": "incompatible_route",
+  "detail": "device does not support required ASR"
+}
+```
+
+错误 `detail` 只使用固定、截断的兼容原因，不包含私有配置或正文。旧固件没有 `features.speech`，数据库和运行时缺省
+也都是 `server/server`；hello 等待超时后按未声明能力处理，并在成功结果中设置 `helloTimedOut=true`。策略保存后可在
+空闲轮次安全热更新并复用本连接已经冻结的能力；固件能力发生变化必须重连重新协商。Realtime 已端到端接管音频，
+实际路由任一侧为 `device` 都会拒绝初始化；这类智能体必须显式配置 `server/server`。
+
 ## 3. 音频上行链路（ASR）
 
 ### 3.1 音频帧接收
@@ -251,6 +320,45 @@ POST submit (aiohttp, http_timeout_seconds)
 ```
 
 服务端不维护会议关键词分类器或预设 start/end 规则，只向主 LLM 提供真实 `meeting_minutes` 工具、当前会议状态和待处理 ASR。支持 `tool_choice` 的主模型必须在 `record/end` 中真实选择；不支持、调用格式异常或请求失败时，服务端只做“继续记录当前发言”的安全兜底，不得自行猜测用户是否要退出。会议轮持有连接级串行锁直到主 LLM 和工具执行结束，避免下一条 ASR 覆盖 pending turn。最终生成两种结果：设备播报 2-4 句自然口语总结，飞书接收只包含有实际信息的分段纯文本书面纪要；不得把控制话语、个人随口计划或空的“待确认”章节硬塞进纪要。会议状态、工具审计和会议正文默认不进入长期记忆事件。智控台角色配置通过 `SYSTEM_PLUGIN_MEETING_MINUTES` 启用该能力；单模块配置通过 `meeting.enabled` 控制。
+
+### 3.5 设备端 ASR 最终文本
+
+实际输入路由为 `device` 时，服务端不初始化 VAD/ASR/声纹输入管线，二进制麦克风包不进入传统 ASR。设备必须通过
+现有 `listen.detect` 上报最终结果，不接收 partial 作为对话输入：
+
+```json
+{
+  "type": "listen",
+  "state": "detect",
+  "source": "device_asr",
+  "final": true,
+  "turn_id": "turn-001",
+  "text": "帮我打开客厅灯"
+}
+```
+
+当前校验边界：
+
+- `turn_id` 必填，长度 1 至 128，只允许 ASCII 字母数字和 `_.:-`；同一连接内作为 LLM 提交幂等键。
+- `text` 去除首尾空白后长度为 1 至 2000；5 秒窗口最多接受 8 条最终文本。
+- 已接受 `turn_id` 保留 10 分钟，缓存最多 256 条；重复键不会再次进入 SemanticCenter、Intent 或 LLM。
+- `listen/start.context` 仍由下一条有效设备 ASR 一次性消费，空文本、拒绝或重复不得把背景串入错误轮次。
+
+服务端对每条设备 ASR 请求返回：
+
+```json
+{
+  "type": "speech_asr_ack",
+  "session_id": "session-id",
+  "turn_id": "turn-001",
+  "accepted": true,
+  "duplicate": false
+}
+```
+
+拒绝响应增加 `reason`，包括路由未选择、非最终文本、正文/turn ID 非法、重复或限流。初始化期间仍使用连接级有界
+TTL 队列延迟 `listen.detect`，设备 ASR 按 `turn_id` 去重。协议日志把识别正文替换为长度占位，只记录 turn ID、接受状态
+和原因；设备身份始终来自当前已认证 WebSocket，不能由消息体指定。
 
 ## 4. 音频下行链路（TTS）
 
@@ -377,10 +485,62 @@ SeedTTS2 超时按阶段拆分：建连默认 10 秒、会话启动默认 10 秒
 
 状态包含 `queued / synthesizing / streaming / completed / failed / interrupted`。设备也可发送
 `{"type":"external_tts","action":"status","jobId":"tts-job-..."}` 查询当前状态；只能查询
-当前设备自己的任务。`completed` 仅表示服务端音频已经通过 WebSocket 发送完成，现有协议没有
-扬声器物理播放完成 ACK。
+当前设备自己的任务。服务端 TTS 路由的 `completed` 只表示服务端音频已经通过 WebSocket 发送完成；
+设备 TTS 路由则必须收到本节定义的 `played` ACK 才能完成。
 
-### 4.4 智控台真实音频旁路监听
+### 4.4 设备端 TTS 文本与播放确认
+
+实际输出路由为 `device` 时，`DeviceTTSProvider` 只作为现有 TTS 队列的兼容 façade，不调用服务端合成厂商，
+也不生成或伪造 Opus 音频。回复仍先发送一次既有 `tts/start`，随后每个文本分片发送：
+
+```json
+{
+  "type": "tts",
+  "state": "text",
+  "session_id": "session-id",
+  "sentence_id": "sentence-id",
+  "generation": 12,
+  "sequence": 1,
+  "text": "好的，我现在打开客厅灯"
+}
+```
+
+同一句的 `sequence` 从 1 单调递增；文本全部下发后发送：
+
+```json
+{
+  "type": "tts",
+  "state": "text_end",
+  "session_id": "session-id",
+  "sentence_id": "sentence-id",
+  "generation": 12,
+  "sequence": 1
+}
+```
+
+`text_end` 只表示服务端文本发送完毕。设备完成物理播放后必须回：
+
+```json
+{
+  "type": "tts_ack",
+  "sentence_id": "sentence-id",
+  "generation": 12,
+  "event": "played"
+}
+```
+
+`event` 只允许 `played / failed / aborted`。`played` 才让 ReplyLifecycle 进入 `COMPLETED`、上报 assistant 文本并发送一次
+`tts/stop`；`failed` 进入失败，`aborted` 进入中断。ACK 等待由
+`speech_routing.device_tts_ack_timeout_seconds` 控制，默认 30 秒；超时终态原因为 `device_tts_ack_timeout`。
+ACK 必须带服务端下发的 sentence 与 generation；迟到、重复或不匹配的 ACK 被忽略，
+不能结束新回复。用户 Abort 会解除当前 ACK 等待并沿用同一 generation 的 stop 去重。
+
+端侧 TTS 当前只支持 `ContentType.TEXT`；音乐或其他 `ContentType.FILE` 明确以
+`device_tts_file_unsupported` 失败，不在当前半轮改用服务端 TTS。设备 TTS 不支持服务端 provider 的音色、语速、音量和
+音调 session override；这类控制仍属于设备固件自身能力。聊天记录只有收到 `played` 后才保存 assistant 文本，且没有服务端
+合成音频可附加；`external_tts` 同样等待 playback ACK 才能报告完成。
+
+### 4.5 智控台真实音频旁路监听
 
 设备管理页通过 manager-api 的 `POST /device/{id}/audio-preview-ticket` 获取 60 秒短期票据，
 再连接 `wss://host/xiaozhi/audio-preview/`。票据必须经过当前用户的设备 workspace 读取权限校验，
@@ -394,7 +554,7 @@ SeedTTS2 超时按阶段拆分：建连默认 10 秒、会话启动默认 10 秒
 预览控制帧包含 `ready / stream_start / stream_stop / discontinuity / listener_busy / error`，二进制帧为
 裸 Opus 单帧。Web 端使用项目内置 `opus-decoder` 解码，并按 `stream_start` 提供的采样率播放和绘制波形。
 
-### 4.5 流控
+### 4.6 流控
 
 ```text
 utils/audioRateController.py  AudioRateController
@@ -406,7 +566,7 @@ utils/audioRateController.py  AudioRateController
 - 整轮 TTS 不设置固定播放时长上限；收到 `LAST` 后，等待预算按队列中剩余音频帧的真实播放时长动态计算，并额外保留单包发送超时与收尾容差。
 - WebSocket 半开保护作用于单个音频包发送。单包超过 `audio_send_timeout_seconds` 仍未完成时，后台发送任务失败并清理队列，避免异常连接永久占用会话；正常的长语音不会因为总时长超过 20 秒被截断。
 
-### 4.6 对话延时链路协议
+### 4.7 对话延时链路协议
 
 聊天记录中的延时指标使用 `schema_version=3`，新增实际解码时长、RMS/SNR 声学门控和分离的 EOS/ASR 完成耗时；管理端导出与页面继续兼容 `schema_version=2`，不兼容更早的单值 `latency_ms` 口径。
 新协议只有两个权威入口：

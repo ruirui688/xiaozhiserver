@@ -123,10 +123,40 @@ class ListenTextMessageHandler(TextMessageHandler):
                     ),
                 )
                 return
+            speech_runtime = getattr(conn, "speech_runtime", None)
+            speech_route = getattr(speech_runtime, "route", None)
+            uses_device_asr = bool(
+                speech_route is not None and speech_route.uses_device_asr
+            )
+            device_asr_message = msg_json.get("source") == "device_asr"
+            input_turn_id = None
+            if uses_device_asr or device_asr_message:
+                decision = speech_runtime.validate_device_asr(msg_json)
+                await speech_runtime.send_device_asr_ack(decision)
+                if not decision.accepted:
+                    conn.logger.bind(tag=TAG).warning(
+                        "拒绝设备ASR最终文本: turnId={}, reason={}, duplicate={}",
+                        decision.turn_id,
+                        decision.reason,
+                        decision.duplicate,
+                    )
+                    return
+                msg_json = dict(msg_json)
+                msg_json["text"] = decision.text
+                input_turn_id = decision.turn_id
+                conn.logger.bind(tag=TAG).info(
+                    "接收设备ASR最终文本: turnId={}, textLength={}",
+                    input_turn_id,
+                    len(decision.text),
+                )
             conn.client_have_voice = False
             turn_context = getattr(conn, "turn_context", None)
+            input_turn_context = None
             if turn_context is not None:
-                turn_context.clear()
+                if input_turn_id is not None:
+                    input_turn_context = turn_context.take()
+                else:
+                    turn_context.clear()
             conn.reset_audio_states()
             if "text" in msg_json:
                 conn.last_activity_time = time.time() * 1000
@@ -143,7 +173,16 @@ class ListenTextMessageHandler(TextMessageHandler):
                 if original_text.startswith("[device_call]"):
                     # 提取 tag 后的文本
                     call_text = original_text[len("[device_call]"):].strip()
-                    conn.logger.bind(tag=TAG).info(f"收到设备呼叫指令: {call_text}")
+                    if input_turn_id is not None:
+                        conn.logger.bind(tag=TAG).info(
+                            "收到设备ASR呼叫指令: turnId={}, textLength={}",
+                            input_turn_id,
+                            len(call_text),
+                        )
+                    else:
+                        conn.logger.bind(tag=TAG).info(
+                            f"收到设备呼叫指令: {call_text}"
+                        )
 
                     # 准备开始新会话
                     conn.sentence_id = uuid.uuid4().hex
@@ -178,11 +217,27 @@ class ListenTextMessageHandler(TextMessageHandler):
                     # 聊天记录保存设备真实检测到的唤醒词，不用内部问候语替代证据。
                     # 先上报用户侧，确保同步播放的缓存回复之后仍按 user -> assistant 排序。
                     enqueue_asr_report(conn, original_text, [])
-                    await startToChat(conn, "嘿，你好呀")
+                    if input_turn_id is None:
+                        await startToChat(conn, "嘿，你好呀")
+                    else:
+                        await startToChat(
+                            conn,
+                            "嘿，你好呀",
+                            turn_context=input_turn_context,
+                            turn_id=input_turn_id,
+                        )
                 else:
                     arm_wakeup_vad_ignore(conn)
                     # 否则需要LLM对文字内容进行答复
-                    accepted = await startToChat(conn, original_text)
+                    if input_turn_id is None:
+                        accepted = await startToChat(conn, original_text)
+                    else:
+                        accepted = await startToChat(
+                            conn,
+                            original_text,
+                            turn_context=input_turn_context,
+                            turn_id=input_turn_id,
+                        )
                     if accepted:
                         # 上报纯文字数据（复用ASR上报功能，但不提供音频数据）
                         enqueue_asr_report(conn, original_text, [])

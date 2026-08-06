@@ -33,6 +33,7 @@ import xiaozhi.modules.agent.skill.vo.AgentSemanticSkillVO;
 import xiaozhi.modules.agent.voiceprint.VoiceprintApiClient;
 import xiaozhi.modules.agent.vo.AgentInfoVO;
 import xiaozhi.modules.correctword.service.CorrectWordFileService;
+import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.device.service.DeviceService;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
@@ -44,6 +45,53 @@ import xiaozhi.modules.userplugin.service.UserPluginConfigService;
 import xiaozhi.modules.voiceclone.service.VoiceCloneService;
 
 class ConfigServiceImplTest {
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void devicePrivateConfigIncludesDeviceSpeechRoutingWhileAgentConfigUsesServerDefaults() {
+        DeviceService deviceService = mock(DeviceService.class);
+        AgentService agentService = mock(AgentService.class);
+        DeviceEntity device = new DeviceEntity();
+        device.setAgentId("agent-speech");
+        device.setSpeechInputMode("device");
+        device.setSpeechOutputMode("auto");
+        when(deviceService.getDeviceByMacAddress("device-mac")).thenReturn(device);
+
+        AgentInfoVO agent = new AgentInfoVO();
+        agent.setId("agent-speech");
+        agent.setIntentModelId("Intent_nointent");
+        when(agentService.getAgentById("agent-speech")).thenReturn(agent);
+
+        ConfigServiceImpl service = new ConfigServiceImpl(
+                mock(SysParamsService.class), deviceService, mock(ModelConfigService.class),
+                mock(ModelRuntimeAssembler.class), agentService, mock(AgentTemplateService.class),
+                mock(RedisUtils.class), mock(TimbreService.class), mock(AgentPluginMappingService.class),
+                mock(AgentMcpAccessPointService.class), mock(AgentContextProviderService.class),
+                mock(AgentFeishuService.class), mock(VoiceCloneService.class), mock(AgentVoicePrintDao.class),
+                mock(VoiceprintApiClient.class), mock(CorrectWordFileService.class),
+                mock(UserPluginConfigService.class), mock(AgentSemanticSkillService.class));
+
+        Map<String, Object> deviceRuntime = service.getAgentModels("device-mac", Map.of());
+        Map<String, String> deviceRouting = (Map<String, String>) deviceRuntime.get("speech_routing");
+        assertEquals("device", deviceRouting.get("input"));
+        assertEquals("auto", deviceRouting.get("output"));
+
+        Map<String, Object> agentRuntime = service.getAgentRuntimeConfig("agent-speech");
+        assertEquals(
+                Map.of("input", "server", "output", "server"),
+                agentRuntime.get("speech_routing"));
+    }
+
+    @Test
+    void invalidOrMissingStoredSpeechModesFailClosedToServer() {
+        DeviceEntity device = new DeviceEntity();
+        device.setSpeechInputMode(null);
+        device.setSpeechOutputMode("unsupported");
+
+        assertEquals(
+                Map.of("input", "server", "output", "server"),
+                ConfigServiceImpl.buildSpeechRouting(device));
+    }
 
     @Test
     @SuppressWarnings("unchecked")

@@ -162,7 +162,7 @@ public class ConfigServiceImpl implements ConfigService {
         if (agent == null) {
             throw new RenException(ErrorCode.AGENT_NOT_FOUND);
         }
-        return buildAgentRuntimeConfig(agent);
+        return buildAgentRuntimeConfig(agent, device);
     }
 
     @Override
@@ -174,7 +174,7 @@ public class ConfigServiceImpl implements ConfigService {
         if (agent == null) {
             throw new RenException(ErrorCode.AGENT_NOT_FOUND);
         }
-        return buildAgentRuntimeConfig(agent);
+        return buildAgentRuntimeConfig(agent, null);
     }
 
     @Override
@@ -189,7 +189,7 @@ public class ConfigServiceImpl implements ConfigService {
                 .collect(Collectors.toList());
     }
 
-    private Map<String, Object> buildAgentRuntimeConfig(AgentEntity agent) {
+    private Map<String, Object> buildAgentRuntimeConfig(AgentEntity agent, DeviceEntity device) {
         String voice = null;
         String referenceAudio = null;
         String referenceText = null;
@@ -217,6 +217,7 @@ public class ConfigServiceImpl implements ConfigService {
         result.put("agent_name", agent.getAgentName());
         String deviceMaxOutputSize = sysParamsService.getValue("device_max_output_size", true);
         result.put("device_max_output_size", deviceMaxOutputSize);
+        result.put("speech_routing", buildSpeechRouting(device));
 
         Integer chatHistoryConf = agent.getChatHistoryConf();
         if (agent.getMemModelId() != null && agent.getMemModelId().equals(Constant.MEMORY_NO_MEM)) {
@@ -294,6 +295,23 @@ public class ConfigServiceImpl implements ConfigService {
                 result,
                 true);
         return result;
+    }
+
+    static Map<String, String> buildSpeechRouting(DeviceEntity device) {
+        if (device == null) {
+            return Map.of("input", "server", "output", "server");
+        }
+        return Map.of(
+                "input", normalizeSpeechMode(device.getSpeechInputMode()),
+                "output", normalizeSpeechMode(device.getSpeechOutputMode()));
+    }
+
+    private static String normalizeSpeechMode(String value) {
+        return switch (StringUtils.defaultString(value).trim().toLowerCase()) {
+            case "device" -> "device";
+            case "auto" -> "auto";
+            default -> "server";
+        };
     }
 
     private void buildTtsVoiceCatalog(

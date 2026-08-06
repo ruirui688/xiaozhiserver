@@ -33,6 +33,20 @@ class TextMessageProcessor:
                         "string" if isinstance(context, str) else type(context).__name__
                     )
                     redacted["context"] = f"<redacted:{context_type}>"
+                    if redacted.get("source") == "device_asr" and "text" in redacted:
+                        text = redacted.get("text")
+                        text_length = len(text) if isinstance(text, str) else 0
+                        redacted["text"] = f"<redacted:{text_length} chars>"
+                    log_message = json.dumps(redacted, ensure_ascii=False)
+                elif (
+                    message_type == "listen"
+                    and msg_json.get("source") == "device_asr"
+                    and "text" in msg_json
+                ):
+                    redacted = dict(msg_json)
+                    text = redacted.get("text")
+                    text_length = len(text) if isinstance(text, str) else 0
+                    redacted["text"] = f"<redacted:{text_length} chars>"
                     log_message = json.dumps(redacted, ensure_ascii=False)
                 elif message_type == "external_tts" and "text" in msg_json:
                     redacted = dict(msg_json)

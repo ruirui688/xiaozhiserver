@@ -1,11 +1,13 @@
 ---
 status: canonical
 owner: data-contracts
-last_verified: 2026-07-28
+last_verified: 2026-08-06
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/config
+  - main/manager-api/src/main/java/xiaozhi/modules/device
   - main/manager-api/src/main/java/xiaozhi/modules/agent/skill
   - main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelRuntimeAssembler.java
+  - main/xiaozhi-server/core/speech
   - main/xiaozhi-server/core/semantic
   - main/xiaozhi-server/core/utils/model_config.py
   - main/xiaozhi-server/core/utils/voiceprint_provider.py
@@ -20,12 +22,13 @@ source_paths:
 | 数据 | 事实来源 | 消费者 |
 | --- | --- | --- |
 | 用户、Token、Workspace、成员角色 | `manager-api` + MySQL | Web、Mobile、Java 业务服务 |
-| 智能体、设备绑定、提示词、固定播报技能、插件选择 | `manager-api` + MySQL | Python 会话配置 |
+| 智能体、设备绑定、设备语音路由策略、提示词、固定播报技能、插件选择 | `manager-api` + MySQL | Web、Mobile、Python 会话配置 |
 | 模型定义、参数和密钥 | `manager-api` 模型管理 | Java 测试/评测、Python provider |
 | 知识库文档、分块和检索配置 | `manager-api` + MySQL/RAGFlow | Web、Python 知识工具 |
 | 长期记忆事实、候选、审计 | `manager-api` + MySQL | Web、Python 上下文查询 |
 | 连接、音频队列、当前对话、MCP 客户端 | `xiaozhi-server` 进程内 | 当前设备会话 |
-| 设备能力描述 | ESP32 上报 | Python 工具门控与注册 |
+| 设备能力描述 | ESP32 当前已认证 WebSocket 的 hello | Python 工具门控、语音路由与注册 |
+| 当前连接实际语音路由 | `xiaozhi-server` 按策略与 hello 能力协商 | ESP32、Python 会话管线 |
 | 缓存 | Redis | Java 服务；不得替代数据库事实 |
 
 ## 2. 模型运行时契约
@@ -72,6 +75,7 @@ Java 向 Python 下发的标准结构：
 | `summaryMemory` | 兼容记忆摘要，不替代托管记忆事实 |
 | `plugins` | 当前智能体启用的插件及参数 |
 | `semantic_skills` | 当前智能体启用的固定播报技能；规则为 `phrase` 或 `all_keywords` |
+| `speech_routing` | 当前设备的语音输入/输出策略；`input`、`output` 分别为 `server`、`device` 或 `auto` |
 | `tts_voice_catalog` | 当前 TTS 模型可供本连接临时切换的音色目录，元素包含 `id/name/languages`；`id` 是上游真实音色编码 |
 | `mcp_endpoint` | 外部 MCP 地址，Python 使用前必须 SSRF 校验 |
 | `context_providers` | 动态上下文源配置 |
@@ -100,6 +104,92 @@ Java 向 Python 下发的标准结构：
 ```
 
 规则之间为 OR；`phrase` 只能有一个 term，执行规范化后的包含匹配；`all_keywords` 要求同组 2 至 8 个 term 全部出现且不要求顺序。Java 只下发已启用技能，Python 未识别的规则必须忽略并安全回退旧对话链路。管理接口使用 camelCase 的 `triggerRules/responseText/skillName`，运行时下发使用 snake_case，转换责任属于 manager-api。
+
+### 3.1 设备语音能力与路由契约
+
+语音路由有三个相互独立的事实：
+
+- `ai_device.speech_input_mode / speech_output_mode` 是 manager-api 持久化的设备级策略；管理接口字段为
+  `speechInputMode / speechOutputMode`，运行配置下发为 `speech_routing.input / output`。
+- `hello.features.speech` 是当前已认证 WebSocket 上设备自己声明的能力，只对当前连接有效，不能由管理端请求体代替。
+- `speech_route` 是 Python 结合策略、设备能力和会话模式解析出的当前连接实际路由。
+
+设备 hello 的版本 1 能力结构为：
+
+```json
+{
+  "type": "hello",
+  "features": {
+    "speech": {
+      "version": 1,
+      "input": ["device_asr"],
+      "output": ["device_tts"],
+      "asr_final_text": true,
+      "tts_playback_ack": true
+    }
+  }
+}
+```
+
+`device_tts` 必须同时声明 `tts_playback_ack=true` 才能成为实际输出路由。协商成功后服务端下发：
+
+```json
+{
+  "type": "speech_route",
+  "session_id": "session-id",
+  "version": 1,
+  "input": "device",
+  "output": "server",
+  "inputPolicy": "auto",
+  "outputPolicy": "server",
+  "helloTimedOut": false
+}
+```
+
+策略语义固定如下：
+
+| 策略 | 解析规则 |
+| --- | --- |
+| `server` | 强制使用服务端 ASR 或 TTS，不读取对应设备能力来改路由 |
+| `device` | 要求设备声明对应能力；缺少能力时下发 `speech_route status=error` 并让初始化失败，不静默回退 |
+| `auto` | 能力完整时选设备端，否则回退服务端；输出端缺 playback ACK 也视为能力不完整 |
+
+旧固件不发送 `features.speech`，数据库迁移和运行配置缺省也都是 `server/server`。hello 等待超时后按未声明能力处理，
+成功消息用 `helloTimedOut=true` 标识。固件能力在连接首次协商后冻结；后台策略可以在安全轮次热更新，设备能力变化则需重连后重新 hello。
+
+端侧 ASR 只接收最终文本：
+
+```json
+{
+  "type": "listen",
+  "state": "detect",
+  "source": "device_asr",
+  "final": true,
+  "turn_id": "turn-001",
+  "text": "打开客厅灯"
+}
+```
+
+服务端对每条请求返回 `speech_asr_ack`，字段包含 `session_id / turn_id / accepted / duplicate`，拒绝时增加稳定
+`reason`。`turn_id` 是当前连接中的幂等键；同一键不得再次触发 LLM。当前边界为正文去空白后 1 至 2000 字符、
+`turn_id` 仅允许 1 至 128 个 ASCII 字母数字及 `_.:-`、5 秒最多接受 8 条，已接受键最多缓存 256 条且保留 10 分钟。
+
+端侧 TTS 复用原回复 generation。服务端按顺序下发 `tts state=text`，包含
+`session_id / sentence_id / generation / sequence / text`；该句文本发送完后下发同标识的 `state=text_end`。
+设备完成物理播放或进入失败终态后回传：
+
+```json
+{
+  "type": "tts_ack",
+  "sentence_id": "sentence-id",
+  "generation": 12,
+  "event": "played"
+}
+```
+
+`event` 只允许 `played / failed / aborted`。只有 `played` 才把当前回复正常收敛并允许上报为已播放；`failed`、
+`aborted` 或服务端等待超时都以失败/中断结束，不能伪装成完成，也不能在同一半轮切回服务端 TTS。当前端侧 TTS
+只消费文本队列；文件音频不是设备合成契约，收到文件项会明确失败。
 
 ## 4. 工具契约
 

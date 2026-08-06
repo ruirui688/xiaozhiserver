@@ -61,6 +61,7 @@ import xiaozhi.modules.device.dto.DeviceManualAddDTO;
 import xiaozhi.modules.device.dto.DevicePageUserDTO;
 import xiaozhi.modules.device.dto.DeviceReportReqDTO;
 import xiaozhi.modules.device.dto.DeviceReportRespDTO;
+import xiaozhi.modules.device.dto.DeviceUpdateDTO;
 import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.device.entity.OtaEntity;
 import xiaozhi.modules.device.service.DeviceService;
@@ -160,6 +161,8 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         deviceEntity.setUserId(user.getId());
         deviceEntity.setCreator(user.getId());
         deviceEntity.setAutoUpdate(1);
+        deviceEntity.setSpeechInputMode("server");
+        deviceEntity.setSpeechOutputMode("server");
         deviceEntity.setCreateDate(currentTime);
         deviceEntity.setUpdater(user.getId());
         deviceEntity.setUpdateDate(currentTime);
@@ -340,6 +343,29 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
             }
             return vo;
         }).toList();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateDeviceInfo(String deviceId, DeviceUpdateDTO dto) {
+        DeviceEntity existing = baseDao.selectById(deviceId);
+        if (existing == null) {
+            throw new RenException("设备不存在");
+        }
+        workspacePermissionService.requireWrite(existing.getWorkspaceId());
+
+        DeviceEntity update = new DeviceEntity();
+        update.setId(deviceId);
+        update.setAutoUpdate(dto.getAutoUpdate());
+        update.setAlias(dto.getAlias());
+        update.setSpeechInputMode(dto.getSpeechInputMode());
+        update.setSpeechOutputMode(dto.getSpeechOutputMode());
+        baseDao.updateById(update);
+
+        if (dto.getSpeechInputMode() != null || dto.getSpeechOutputMode() != null) {
+            eventPublisher.publishEvent(
+                    DeviceRuntimeConfigRefreshEvent.forDeviceSettings(deviceId, existing.getAgentId()));
+        }
     }
 
     @Override
@@ -620,6 +646,8 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         entity.setCreator(userId);
         entity.setUpdater(userId);
         entity.setAutoUpdate(1);
+        entity.setSpeechInputMode("server");
+        entity.setSpeechOutputMode("server");
         baseDao.insert(entity);
         deviceSceneService.ensureCurrentBinding(entity, agent, userId);
 

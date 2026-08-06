@@ -26,7 +26,15 @@ class RuntimeReadiness:
         if conn.closing or conn.closed or conn.initialization_failed:
             return False
         text = str(message.get("text") or "")
-        if any(item["text"] == text for item in self.deferred_listen_detects):
+        dedupe_key = (
+            f"device_asr:{message.get('turn_id')}"
+            if message.get("source") == "device_asr" and message.get("turn_id")
+            else f"text:{text}"
+        )
+        if any(
+            item.get("dedupe_key") == dedupe_key
+            for item in self.deferred_listen_detects
+        ):
             return False
         ttl = max(
             0.1,
@@ -39,6 +47,7 @@ class RuntimeReadiness:
         self.deferred_listen_detects.append(
             {
                 "text": text,
+                "dedupe_key": dedupe_key,
                 "message": copy.deepcopy(message),
                 "expires_at": time.monotonic() + ttl,
             }

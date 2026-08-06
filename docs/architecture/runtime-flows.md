@@ -1,14 +1,16 @@
 ---
 status: canonical
 owner: runtime
-last_verified: 2026-08-03
+last_verified: 2026-08-06
 source_paths:
   - main/xiaozhi-server/app.py
   - main/xiaozhi-server/core/connection.py
   - main/xiaozhi-server/core/conversation
   - main/xiaozhi-server/core/providers/realtime
+  - main/xiaozhi-server/core/speech
   - main/xiaozhi-server/core/semantic
   - main/manager-api/src/main/java/xiaozhi/modules/config
+  - main/manager-api/src/main/java/xiaozhi/modules/device
   - main/manager-api/src/main/java/xiaozhi/modules/agent/skill
 ---
 
@@ -42,9 +44,10 @@ sequenceDiagram
 -> 请求 OTA / 获取 WebSocket 地址和 Token
 -> 连接 /xiaozhi/v1/
 -> 默认执行 Token 校验，显式白名单可旁路
--> hello 上报 device-id、client-id 和 features
+-> hello 上报 device-id、client-id 和 features；端侧 ASR/TTS 使用 features.speech 声明能力
 -> 创建独立 ConnectionHandler
 -> 按设备身份从 manager-api 拉取私有配置
+-> 结合 speech_routing 策略与当前 hello 能力发布实际 speech_route
 -> 根据所选 LLM conversation_mode 初始化传统拼接或 Realtime 会话
 -> 初始化该模式共用的记忆、提示词、插件和 MCP
 ```
@@ -66,12 +69,18 @@ sequenceDiagram
     PY->>API: 携带设备身份请求运行配置
     API->>API: 校验设备与智能体归属
     API->>DB: 装配当前配置
-    API-->>PY: selected_module + model_config + 音色目录 + 上下文配置
+    API-->>PY: selected_module + model_config + speech_routing + 音色目录 + 上下文配置
     PY->>PY: normalize_runtime_config()
     PY->>PY: 初始化当前连接 provider
 ```
 
 智能体运行配置支持在线热更新。保存智能体音色、提示词、模型选择、模型参数、插件、替换词、上下文源、聊天记录模式或固定播报技能后，manager-api 在事务提交后通过受保护的 `/device/runtime-config/refresh` 内部接口按 `agentId` 通知 xiaozhi-server。Python 会重新拉取完整私有配置并在空闲轮次边界重建会话管线、Memory、Intent、工具和提示词运行时。普通 LLM 重建 VAD、ASR、LLM、TTS；`conversation_mode=realtime` 重建端到端 Realtime 会话而不初始化传统 ASR/TTS。设备 WebSocket 保持连接；正在生成或播报的一轮不会被配置更新中途替换。
+
+设备语音路由是设备级配置。Web/Mobile 保存 `speechInputMode / speechOutputMode` 后，manager-api 在事务提交后按
+`deviceId` 发送同一受保护刷新通知；Python 使用当前连接已经协商并冻结的 hello 能力重新解析候选路由，在连接空闲
+边界先构造新管线再原子切换。服务端 ASR 切到设备 ASR 时关闭 VAD/ASR 输入管线；服务端 TTS 切到设备 TTS 时以文本
+发送 façade 替换厂商 TTS provider。初始化、能力要求或 Realtime 兼容检查失败时恢复旧管线，不在当前半轮混合回退。
+固件新增或移除能力不是配置热更新，必须重连并重新 hello。
 
 角色配置中的 `realtimeVoiceId` 是智能体级 Realtime 音色覆盖：manager-api 只在所选 adapter 声明
 `sessionVoice` 且音色通过该 adapter 校验时，覆盖当前 LLM `typed_config.voice`。留空继续使用共享模型的默认音色；
@@ -100,6 +109,23 @@ Realtime 模式中的 `tts_ready` 表示“实时模型的音频输出到设备�
 
 ### 4.1 传统拼接模式
 
+传统模式的语音输入与输出分别解析，支持四种组合：
+
+| 实际输入 | 实际输出 | 运行行为 |
+| --- | --- | --- |
+| `server` | `server` | 设备上传 Opus；服务端 VAD/ASR、LLM、TTS 后回传 Opus |
+| `device` | `server` | 设备上传最终识别文本；服务端从语义/LLM 开始处理并回传 TTS Opus |
+| `server` | `device` | 服务端 VAD/ASR 和 LLM；回复文本下发设备，由设备合成并回 ACK |
+| `device` | `device` | 设备上传最终识别文本；服务端只处理语义/LLM，设备合成回复并回 ACK |
+
+每一侧的策略为 `server / device / auto`。`server` 强制服务端；`device` 缺能力时初始化失败；`auto` 有能力时选
+设备端、否则回退服务端。输出端只有同时声明 `device_tts` 与 playback ACK 才算能力完整。旧固件和缺省数据库值均为
+`server/server`，保持现有链路。
+
+能力协商在当前连接 hello 与私有配置到齐后进行。成功时向设备发送 `speech_route`，同时包含实际 `input/output`、
+后台 `inputPolicy/outputPolicy` 和 `helloTimedOut`。显式设备策略无法满足时发送
+`speech_route status=error, reason=incompatible_route`，且不发布会话 ready。
+
 ```mermaid
 sequenceDiagram
     participant D as ESP32
@@ -108,14 +134,18 @@ sequenceDiagram
     participant SEM as SemanticCenter
     participant LLM as Intent / LLM
     participant TOOL as Plugin / MCP / IoT
-    participant TTS as TTS
-    D->>S: Opus 音频帧
-    S->>ASR: 队列、VAD 分段、语音识别
-    ASR-->>S: 用户文本
+    participant TTS as Speech Output
+    alt input=server
+        D->>S: Opus 音频帧
+        S->>ASR: 队列、VAD 分段、语音识别
+        ASR-->>S: 用户文本
+    else input=device
+        D->>S: listen.detect + device_asr 最终文本
+        S-->>D: speech_asr_ack
+    end
     S->>SEM: 标准化、固定技能匹配、状态路由与策略
     alt 空闲态固定播报技能命中
-        SEM->>TTS: 固定文本，不调用 Intent/LLM
-        TTS-->>D: 当前智能体音色播报
+        SEM-->>S: 固定回复文本，不调用 Intent/LLM
     else 高置信控制命中
         SEM-->>S: 直接控制或回复
     else 普通对话
@@ -126,9 +156,24 @@ sequenceDiagram
         end
         LLM-->>S: 流式回复文本
     end
-    S->>TTS: 分句合成与音频队列
-    TTS-->>D: Opus 音频及播放边界
+    alt output=server
+        S->>TTS: 分句合成与音频队列
+        TTS-->>D: Opus 音频及播放边界
+    else output=device
+        S-->>D: tts text 分片 + text_end
+        D-->>S: tts_ack played / failed / aborted
+    end
 ```
+
+设备 ASR 消息必须使用 `listen.detect + source=device_asr + final=true + turn_id + text`。服务端在进入语义/LLM 前按
+`turn_id` 幂等并限流，然后对接受、重复或拒绝都返回 `speech_asr_ack`；设备识别正文只以长度占位进入协议日志。
+初始化期间仍按 readiness 队列延迟，但设备 ASR 使用 `turn_id` 去重，避免不同文本重试绕过幂等。
+
+设备 TTS 继续复用 generation 级 `ReplyLifecycle` 和既有 `tts/start`。每个 `tts state=text` 带
+`sentence_id / generation / sequence`，`text_end` 表示本句文本发送完毕，不表示扬声器播放完成。设备必须在物理播放
+完成后回 `tts_ack event=played`；合成或播放失败回 `failed`，因设备侧取消回 `aborted`。只有 `played` 正常完成回复，
+其他事件和 ACK 超时均失败或中断并发送一次 stop；迟到旧 generation ACK 被忽略，且不得触发服务端 TTS 半轮回退。
+当前端侧输出只支持文本，音乐等 `ContentType.FILE` 不通过该契约传给设备合成。
 
 TTS 播放期间，支持 AEC 的设备在服务端声学门控确认用户开口后立即停止旧 LLM/TTS 输出，用户音频继续进入 ASR；声学门控在 Silero 概率后结合 RMS、自适应噪声底、SNR 和多帧状态机，使用严格开始、宽松继续及有界尾帧，并通过 pre-roll 保留确认前首音。`shadow` 只记录决策，`enforce` 才改变 Abort 与分段；非 AEC 设备仍在完整 ASR 到达后停止播报。
 
@@ -139,6 +184,12 @@ TTS 播放期间，支持 AEC 的设备在服务端声学门控确认用户开�
 LAST、Abort 或连接关闭负责其他终态，因此 `client_is_speaking` 只是活跃生命周期的派生视图。
 
 ### 4.2 端到端 Realtime 模式
+
+Realtime adapter 已整体接管音频输入和输出，不能再与设备 ASR 或设备 TTS 拆分组合。只要语音策略与 hello 能力解析后的
+实际路由任一侧为 `device`，初始化就以 `incompatible_route` 失败，不把当前半轮转成传统链路。对声明端侧语音能力的
+设备使用 Realtime 智能体时，管理员必须把输入和输出策略都明确设为 `server`；`auto` 会优先选设备能力，因此不能用来
+表达 Realtime 的服务端直通。这里的 `server` 表示“不启用设备端拆分”，实际音频仍由 Realtime adapter 端到端处理，
+并不初始化传统 ASR/TTS provider。
 
 ```mermaid
 sequenceDiagram
@@ -219,6 +270,11 @@ agent 绑定，并只在设备空闲时清理本地短期状态；Realtime 模�
 
 | 场景 | 对外行为 | 回退边界 |
 | --- | --- | --- |
+| 显式 `device` 策略但 hello 未声明对应能力 | 下发 `speech_route status=error`，能力保持未就绪 | 不静默改用服务端 provider |
+| `auto` 策略且能力缺失或设备 TTS 无 playback ACK | 该侧实际路由解析为 `server` 并发布 `speech_route` | 只在初始化时完整回退，不在半轮重放输入或回复 |
+| 设备 ASR 重复、超长、非法或触发限流 | 返回 `speech_asr_ack accepted=false` 和稳定原因 | 不进入语义、Intent 或 LLM |
+| 设备 TTS 返回 failed/aborted 或 ACK 超时 | 当前 generation 失败/中断并发送一次 stop | 不把文本改送服务端 TTS，不伪造播放完成 |
+| Realtime 解析到任一设备端语音路由 | 下发不兼容错误且不发布会话 ready | 不混用 Realtime 与设备 ASR/TTS |
 | Realtime 建连/鉴权/session.update 失败 | 对话能力保持未就绪并记录脱敏错误 | 不自动创建传统 ASR/LLM/TTS |
 | 当前响应超时、协议错误或上游断开 | 取消当前回复、发送一次 stop、关闭或重建上游会话 | 不把半轮音频重新送入传统链路 |
 | 工具执行失败 | 结构化错误回注 Realtime 模型，由模型生成用户可读回复 | 不跳过工具权限或伪造成功结果 |
@@ -228,8 +284,9 @@ agent 绑定，并只在设备空闲时清理本地短期状态；Realtime 模�
 | 已选 Realtime 但会话未就绪 | HTTP 明确失败 | 不按任意 deviceId 新建会话，不静默转 VLLM；非 Realtime 请求仍走传统 VLLM |
 | 管理员切回普通 LLM | 下一安全轮次热更新为传统管线 | 保留原 VAD/ASR/TTS/VLLM 配置并重新启用 |
 
-错误日志只记录模型配置 ID、adapter、事件类型、状态码和脱敏原因，不记录 Authorization、API Key、完整音频、图片 base64、
-工具敏感参数或整份上游事件。上游 URL 必须为 `wss://` 且通过 adapter 端点白名单/SSRF 校验。
+错误日志只记录模型配置 ID、adapter、路由、事件类型、状态码、turn/sentence 标识、正文长度和脱敏原因，不记录
+Authorization、API Key、设备 ASR/TTS 正文、完整音频、图片 base64、工具敏感参数或整份上游事件。上游 URL 必须为
+`wss://` 且通过 adapter 端点白名单/SSRF 校验。
 
 ## 8. 会话关闭
 
@@ -241,6 +298,9 @@ agent 绑定，并只在设备空闲时清理本地短期状态；Realtime 模�
 
 | 层 | 必须覆盖 |
 | --- | --- |
+| 设备语音路由 | 旧固件 `server/server`；四种传统组合；`server/device/auto`；hello 超时；显式能力缺失；device TTS 缺 playback ACK；Realtime 冲突 |
+| 设备 ASR | final/source/turn_id/text 校验、幂等、限流、初始化延迟回放、单轮 context、正文日志脱敏和 `speech_asr_ack` |
+| 设备 TTS | text 顺序、text_end、played/failed/aborted、ACK 超时、Abort、迟到 generation、文件拒绝、聊天记录与 external_tts 终态 |
 | 会话路由 | 普通 LLM 保持传统路径；`conversation_mode=realtime` 消费音频/listen/text/image/abort；未知模式安全回到传统路径 |
 | Realtime transport | 建连 header 脱敏、session.update、事件大小上限、正常/错误/超时/关闭、文本 benchmark |
 | 音频 | Opus -> PCM16 16k、PCM16 24k -> Opus、尾帧冲刷、乱序/迟到事件、取消后不串轮 |

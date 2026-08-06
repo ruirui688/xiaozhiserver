@@ -69,6 +69,9 @@
                     {{ $t('deviceAudioPreview.button') }}
                   </el-button>
                   <el-button size="mini" type="text" @click="handleScenes(scope.row)">场景</el-button>
+                  <el-button size="mini" type="text" @click="handleSpeechSettings(scope.row)">
+                    {{ $t('deviceSpeech.button') }}
+                  </el-button>
                   <el-button size="mini" type="text" @click="handleUnbind(scope.row.device_id)">
                     {{ $t('device.unbind') }}
                   </el-button>
@@ -126,6 +129,7 @@
       @refresh="fetchBindDevices(currentAgentId)" />
     <DeviceAudioPreviewDialog ref="audioPreviewDialog" />
     <DeviceSceneDialog ref="sceneDialog" @switched="fetchBindDevices(currentAgentId)" />
+    <DeviceSpeechSettingsDialog ref="speechSettingsDialog" @saved="handleSpeechSettingsSaved" />
     <el-footer>
       <version-footer />
     </el-footer>
@@ -141,6 +145,7 @@ import ManualAddDeviceDialog from "@/components/ManualAddDeviceDialog.vue";
 import VersionFooter from "@/components/VersionFooter.vue";
 import MacAddressMask from "@/components/MacAddressMask.vue";
 import DeviceSceneDialog from "@/components/scene/DeviceSceneDialog.vue";
+import DeviceSpeechSettingsDialog from "@/components/device/DeviceSpeechSettingsDialog.vue";
 
 export default {
   components: {
@@ -151,6 +156,7 @@ export default {
     MacAddressMask,
     DeviceAudioPreviewDialog,
     DeviceSceneDialog,
+    DeviceSpeechSettingsDialog,
   },
   data() {
     return {
@@ -303,6 +309,17 @@ export default {
     handleScenes(row) {
       this.$refs.sceneDialog.open(row);
     },
+    handleSpeechSettings(row) {
+      this.$refs.speechSettingsDialog.open(row);
+    },
+    handleSpeechSettingsSaved({ deviceId, speechInputMode, speechOutputMode }) {
+      const device = this.deviceList.find(item => item.device_id === deviceId);
+      if (device) {
+        device.speechInputMode = speechInputMode;
+        device.speechOutputMode = speechOutputMode;
+      }
+      this.fetchBindDevices(this.currentAgentId);
+    },
     submitRemark(row) {
       if (row._submitting) return;
 
@@ -394,6 +411,8 @@ export default {
               isEdit: false,
               _submitting: false,
               otaSwitch: device.autoUpdate === 1,
+              speechInputMode: device.speechInputMode || 'server',
+              speechOutputMode: device.speechOutputMode || 'server',
               rawBindTime: new Date(device.createDate).getTime(),
               selected: false,
               _resettingContext: false,

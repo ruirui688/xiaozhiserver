@@ -11,4 +11,9 @@ public record DeviceRuntimeConfigRefreshEvent(
         return new DeviceRuntimeConfigRefreshEvent(
                 deviceId, null, agentId, null, 0L, "device_activated");
     }
+
+    public static DeviceRuntimeConfigRefreshEvent forDeviceSettings(String deviceId, String agentId) {
+        return new DeviceRuntimeConfigRefreshEvent(
+                deviceId, agentId, agentId, null, 0L, "device_speech_routing_updated");
+    }
 }
