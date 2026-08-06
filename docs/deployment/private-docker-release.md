@@ -177,7 +177,7 @@ scripts/acr-build-push
 ```text
 BUILD_BASE=auto              自动复用或补齐 common/lite/funasr base
 MIRROR_RUNTIME_IMAGES=auto   ACR 已有 mysql/redis 时跳过同步
-BUILD_ENGINE=buildx          默认单平台 linux/amd64 构建
+BUILD_ENGINE=docker          默认单平台 linux/amd64 构建，复用 Docker daemon 本地缓存
 PUSH=true                    构建后推送 ACR
 BUILDKIT_REGISTRY_CACHE=auto buildx 推送时只复用已存在的 manager-api / manager-web ACR BuildKit 缓存
 SERVER_INSTALL_PROFILE=lite 不安装本地 FunASR，ASR 使用远程 provider
@@ -859,7 +859,7 @@ MANAGER_WEB_REGISTRY_CACHE_IMAGE=<manager-web仓库>:buildcache-v1
 内容哈希镜像与 registry cache 是两层机制：`api-/web-<内容哈希>` 命中时直接复用完整组件
 镜像；组件必须重建时，`buildcache-v1` 才帮助复用 Maven/npm 等中间层。
 
-日常 ACR 入口默认使用 buildx，因此上述 registry cache 默认生效。manager-web builder 使用
+显式 `BUILD_ENGINE=buildx` 时，manager-web builder 使用
 固定 digest 的 `node:20-bookworm-slim`，减少本地镜像维护后需要重新拉取的基础层体积。
 脚本通过 `docker buildx imagetools inspect` 检查 ACR 中的 OCI image/index；元数据命中时
 不会为了“检查缓存是否存在”先把完整镜像拉入本地 Docker daemon。buildx 发布时远端

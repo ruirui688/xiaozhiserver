@@ -103,9 +103,9 @@ xiaozhi-manager-web:web-<内容哈希>
 mysql:8.4 / redis:8.0
 ```
 
-默认发布命令使用 buildx 构建并推送单平台 `linux/amd64` 镜像，使 manager-api 的 Maven
-中间层和 manager-web 的 npm 中间层可以通过 ACR registry cache 跨构建机复用。需要多架构
-镜像时覆盖平台列表：
+默认发布命令使用 Docker engine 构建并推送单平台 `linux/amd64` 镜像，优先复用 Docker
+daemon 本地基础镜像和构建层。需要跨构建机 registry cache 或多架构镜像时显式使用
+`BUILD_ENGINE=buildx`：
 
 ```bash
 PLATFORMS=linux/amd64,linux/arm64 scripts/acr-build-push
@@ -145,10 +145,11 @@ npm 层时，使用 buildx registry cache。缓存写入两个稳定的 ACR `bui
 BUILD_ENGINE=buildx BUILDKIT_REGISTRY_CACHE=true scripts/acr-build-push
 ```
 
-默认 `BUILD_ENGINE=buildx`。`BUILDKIT_REGISTRY_CACHE=auto` 只复用已经存在的 registry
+默认 `BUILD_ENGINE=docker`。需要跨构建机复用 registry cache 时显式设置
+`BUILD_ENGINE=buildx`；`BUILDKIT_REGISTRY_CACHE=auto` 只复用已经存在的 registry
 cache，不会在正常业务发布中首次上传 Maven/npm 深缓存；需要在组件下一次重建时创建或更新
-`buildcache-v1`，显式使用上面的 `BUILDKIT_REGISTRY_CACHE=true`。仅在排查 buildx 环境故障时显式使用
-`BUILD_ENGINE=docker` 回退；该回退不会读写 ACR registry cache。
+`buildcache-v1`，显式使用上面的 `BUILDKIT_REGISTRY_CACHE=true`。Docker engine 不读写 ACR
+registry cache。
 底层 `docker-build-private.sh` 单独运行时仍默认使用 Docker engine，避免本地 `PUSH=false`
 构建误把 daemon-only base 当成 docker-container builder 可见镜像。显式使用
 `BUILD_ENGINE=buildx PUSH=false` 时必须设置 `BUILD_BASE=false` 使用 registry-backed base，
