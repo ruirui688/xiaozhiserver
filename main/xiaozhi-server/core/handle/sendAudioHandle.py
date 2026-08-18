@@ -10,6 +10,10 @@ from core.utils import textUtils
 from core.utils.util import audio_to_data
 from core.providers.tts.dto.dto import SentenceType
 from core.utils.audioRateController import AudioRateController
+from core.handle.interactionAttentionHandle import (
+    mark_assistant_finished,
+    mark_assistant_speaking,
+)
 
 TAG = __name__
 # 音频帧时长（毫秒）
@@ -184,6 +188,7 @@ async def sendAudioMessage(
             reason=terminal_reason,
             allow_pending_stop=bool(terminal_reason),
         )
+        mark_assistant_finished(conn, text)
         external_tts = getattr(conn, "external_tts_coordinator", None)
         if external_tts is not None:
             if terminal_reason:
@@ -719,6 +724,7 @@ async def begin_assistant_reply(
             generation = lifecycle.begin(kind=kind)
         await send_stt_display(conn, text)
         await send_tts_message(conn, "start", protocol_sentence_id=None)
+        mark_assistant_speaking(conn)
         if lifecycle is None:
             conn.client_is_speaking = True
         return generation
@@ -733,6 +739,7 @@ async def send_stt_message(conn: "ConnectionHandler", text):
     if getattr(conn, "reply_lifecycle", None) is None:
         await send_stt_display(conn, text)
         await send_tts_message(conn, "start", protocol_sentence_id=None)
+        mark_assistant_speaking(conn)
         conn.client_is_speaking = True
         return None
     return await begin_assistant_reply(

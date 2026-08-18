@@ -1,8 +1,9 @@
 ---
 status: supporting
 owner: xiaozhi-server
-last_verified: 2026-08-06
+last_verified: 2026-08-18
 source_paths:
+  - main/xiaozhi-server/config.yaml
   - main/xiaozhi-server/core
   - main/manager-api/src/main/java/xiaozhi/modules/config
   - main/manager-api/src/main/java/xiaozhi/modules/device
@@ -126,6 +127,41 @@ connection.py:227-298  handle_connection()
 - 设备 `listen/detect` 命中唤醒词时，无论是否开启欢迎语，聊天记录都保存设备实际上报的检测文本；命中唤醒缓存并成功播放后，同时上报实际播放的助手文本和音频，不得只写入连接内对话。
 - 无 AEC 或扬声器回声会回采进麦克风的设备，可在私有配置中把 `wakeup_vad_ignore_ms` 设为 500-2000ms；设为 `2000` 可恢复旧版兼容行为。
 - 忽略窗口使用 `time.monotonic()` 判断，不创建延迟任务；配置非法、负数或非有限值时安全回退为 0。
+
+#### 无音区交互注意力 MVP
+
+真实车机接入不保证提供可靠的主驾、副驾或后排音区，因此交互注意力首期不能把音区作为必要输入。MVP 只使用
+明确唤醒或按键触发、连接级交互状态、有限时间窗口、上一轮问答、当前 ASR 文本与 ASR 置信度，判断当前语音是否
+面向小智。声纹只能作为可选身份特征，不能替代“是否对小智说话”的判断。
+
+默认配置位于 `main/xiaozhi-server/config.yaml`：
+
+```yaml
+interaction_attention:
+  enabled: true
+  mode: shadow
+  armed_window_ms: 8000
+  follow_up_window_ms: 6000
+  awaiting_reply_window_ms: 12000
+  directed_threshold: 0.88
+  undirected_threshold: 0.30
+  barge_in_policy: balanced
+  asr_confidence_floor: 0.20
+```
+
+判断结果固定为三态：
+
+- `DIRECTED`：高置信度面向小智，可以继续进入语义控制；车控仍需单独通过资源权限、状态和参数校验。
+- `UNDIRECTED`：背景或人与人对话，不进入 SemanticCenter、Intent、LLM、聊天记录或长期记忆。
+- `UNKNOWN_ADDRESSING`：证据不足，不能猜测执行；`enforce` 模式按失败关闭处理，与 `UNDIRECTED` 使用相同阻断边界。
+
+时间窗口的语义为：明确唤醒后最多等待 8 秒接收首条指令；普通连续对话最多保留 6 秒；小智明确提问后最多等待
+12 秒接收短回答。窗口只提供上下文证据，不会单独把语音判定为 `DIRECTED`。低于
+`asr_confidence_floor=0.20` 的识别结果不得进入后续判断。
+
+运行时已在 `startToChat()` 进入 SemanticCenter 之前执行门控，并从 `listen.start/listen.detect` 接收可选
+`interaction` 元数据。`mode=shadow` 只记录三态决策、置信度和原因，保持当前语义、LLM、聊天、记忆和打断行为不变；
+影子数据校准完成后才能启用 `enforce`。`enforce` 下判断异常、无结果或非法结果失败关闭，禁止静默放行背景语音。
 
 ### 2.6 单轮语音背景上下文
 
@@ -718,6 +754,11 @@ receiveAudioHandle.py:startToChat()
   - 非 AEC 路径取得完整 ASR 后，如果仍在播报则直接 abort
   - ASR 文本继续进入 SemanticCenter / Intent / Chat
 ```
+
+交互注意力的目标打断策略为 `barge_in_policy=balanced`。在无音区 MVP 中，明确唤醒、按键触发或
+`AWAITING_REPLY` 状态的用户开口可以快速打断；其他重叠人声应先取得 Addressing 结果，只有 `DIRECTED` 才正式
+终止当前回复。`UNDIRECTED` 与 `UNKNOWN_ADDRESSING` 不应产生新回复。默认 `shadow` 不改变上述现有即时打断实现，
+只记录如果启用门控将采取的判断；该策略需在后续代码任务中实现。
 
 ### 6.2 Abort 处理
 

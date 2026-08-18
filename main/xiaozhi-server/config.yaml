@@ -81,6 +81,18 @@ enable_greeting: false
 # 唤醒后忽略上行音频的时长（毫秒）。默认0以降低首轮延迟；
 # 无AEC且开启唤醒回复、存在扬声器回声的设备可设为2000兼容旧行为。
 wakeup_vad_ignore_ms: 0
+# 无明确音区信息时的交互注意力门控。当前默认仅以 shadow 记录决策，
+# 不改变现有语义、LLM、聊天记录、长期记忆或打断行为。
+interaction_attention:
+  enabled: true
+  mode: shadow  # shadow | enforce；enforce 下门控异常必须失败关闭
+  armed_window_ms: 8000
+  follow_up_window_ms: 6000
+  awaiting_reply_window_ms: 12000
+  directed_threshold: 0.88
+  undirected_threshold: 0.30
+  barge_in_policy: balanced
+  asr_confidence_floor: 0.20
 # 说完话是否开启提示音
 enable_stop_tts_notify: false
 # 说完话是否开启提示音，音效地址

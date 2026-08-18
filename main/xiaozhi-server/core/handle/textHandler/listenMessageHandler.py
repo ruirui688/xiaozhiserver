@@ -10,12 +10,18 @@ from core.utils.dialogue import Message
 from core.providers.asr.dto.dto import InterfaceType
 from core.handle.receiveAudioHandle import startToChat
 from core.handle.wakeupHandle import arm_wakeup_vad_ignore
+from core.handle.interactionAttentionHandle import (
+    activate_interaction_attention,
+    get_interaction_attention,
+    parse_interaction_metadata,
+)
 from core.handle.reportHandle import enqueue_asr_report
 from core.handle.sendAudioHandle import send_stt_message, send_tts_message
 from core.handle.textMessageHandler import TextMessageHandler
 from core.handle.textMessageType import TextMessageType
 from core.utils.util import remove_punctuation_and_length
 from core.providers.tts.dto.dto import ContentType, TTSMessageDTO, SentenceType
+from core.speech.runtime import DeviceASRDecision
 
 
 TAG = __name__
@@ -28,6 +34,40 @@ class ListenTextMessageHandler(TextMessageHandler):
         return TextMessageType.LISTEN
 
     async def handle(self, conn: "ConnectionHandler", msg_json: Dict[str, Any]) -> None:
+        interaction_metadata = None
+        try:
+            interaction_metadata = parse_interaction_metadata(msg_json)
+        except ValueError:
+            attention = get_interaction_attention(conn)
+            config = getattr(attention, "config", None)
+            mode = getattr(config, "effective_mode", None)
+            if mode is None:
+                mode = getattr(attention, "mode", None) or getattr(
+                    config, "mode", "disabled"
+                )
+            mode = str(getattr(mode, "value", mode)).lower()
+            if msg_json.get("source") == "device_asr" and mode == "enforce":
+                await conn.speech_runtime.send_device_asr_ack(
+                    DeviceASRDecision(
+                        False,
+                        reason="invalid_interaction_metadata",
+                        turn_id=str(msg_json.get("turn_id") or ""),
+                    )
+                )
+                return
+            if mode == "enforce":
+                conn.logger.bind(tag=TAG).warning(
+                    "强制模式拒绝无效交互注意力元数据"
+                )
+                return
+            conn.logger.bind(tag=TAG).warning("忽略无效交互注意力元数据")
+        if interaction_metadata and msg_json.get("state") != "detect":
+            activate_interaction_attention(conn, interaction_metadata)
+            conn.pending_interaction_metadata = {
+                key: value
+                for key, value in interaction_metadata.items()
+                if key != "trigger"
+            }
         if "mode" in msg_json:
             conn.client_listen_mode = msg_json["mode"]
             conn.logger.bind(tag=TAG).debug(
@@ -149,6 +189,13 @@ class ListenTextMessageHandler(TextMessageHandler):
                     input_turn_id,
                     len(decision.text),
                 )
+            if interaction_metadata:
+                activate_interaction_attention(conn, interaction_metadata)
+                conn.pending_interaction_metadata = {
+                    key: value
+                    for key, value in interaction_metadata.items()
+                    if key != "trigger"
+                }
             conn.client_have_voice = False
             turn_context = getattr(conn, "turn_context", None)
             input_turn_context = None
@@ -203,6 +250,10 @@ class ListenTextMessageHandler(TextMessageHandler):
                 )
                 # 是否开启唤醒词回复
                 enable_greeting = conn.config.get("enable_greeting", False)
+                if is_wakeup_words:
+                    wake_metadata = {"trigger": "wake_word"}
+                    activate_interaction_attention(conn, wake_metadata)
+                    conn.pending_interaction_metadata = None
 
                 if is_wakeup_words and not enable_greeting:
                     # 如果是唤醒词，且关闭了唤醒词回复，就不用回答

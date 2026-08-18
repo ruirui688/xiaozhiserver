@@ -24,6 +24,10 @@ from core.handle.sendAudioHandle import (
     SentenceType,
 )
 from core.handle.wakeupHandle import should_ignore_wakeup_audio
+from core.handle.interactionAttentionHandle import (
+    allow_immediate_barge_in,
+    evaluate_interaction_attention,
+)
 
 TAG = __name__
 NORMALIZER = TextNormalizer()
@@ -86,6 +90,7 @@ async def handleAudioMessage(conn: "ConnectionHandler", audio):
         and conn.client_is_speaking
         and conn.client_listen_mode != "manual"
         and not reception_reply_locked(conn)
+        and allow_immediate_barge_in(conn)
     ):
         await handleAbortMessage(conn, preserve_user_audio=True)
     # 接收音频
@@ -93,7 +98,11 @@ async def handleAudioMessage(conn: "ConnectionHandler", audio):
 
 
 async def startToChat(
-    conn: "ConnectionHandler", text, turn_context=None, turn_id=None
+    conn: "ConnectionHandler",
+    text,
+    turn_context=None,
+    turn_id=None,
+    interaction_metadata=None,
 ):
     """Handle recognized user text.
 
@@ -265,6 +274,18 @@ async def startToChat(
     if conn.need_bind:
         await check_bind_device(conn)
         return True
+
+    attention_allowed = await evaluate_interaction_attention(
+        conn,
+        interruption_text,
+        turn_context=turn_context,
+        turn_id=turn_id,
+        interaction_metadata=interaction_metadata,
+        speaker_identity=speaker_id or speaker_name,
+    )
+    if not attention_allowed:
+        conn.logger.bind(tag=TAG).info("交互注意力阻断本轮语音，跳过语义与LLM")
+        return False
 
     # 如果当日的输出字数大于限定的字数
     if conn.max_output_size > 0:

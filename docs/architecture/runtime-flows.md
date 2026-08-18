@@ -1,8 +1,9 @@
 ---
 status: canonical
 owner: runtime
-last_verified: 2026-08-06
+last_verified: 2026-08-18
 source_paths:
+  - main/xiaozhi-server/config.yaml
   - main/xiaozhi-server/app.py
   - main/xiaozhi-server/core/connection.py
   - main/xiaozhi-server/core/conversation
@@ -143,6 +144,10 @@ sequenceDiagram
         D->>S: listen.detect + device_asr 最终文本
         S-->>D: speech_asr_ack
     end
+    S->>S: Interaction Attention Gate（三态判断）
+    alt UNDIRECTED / UNKNOWN_ADDRESSING（enforce）
+        S-->>S: 阻断，不进入语义/LLM/聊天/记忆
+    else DIRECTED 或 shadow 观察
     S->>SEM: 标准化、固定技能匹配、状态路由与策略
     alt 空闲态固定播报技能命中
         SEM-->>S: 固定回复文本，不调用 Intent/LLM
@@ -163,7 +168,20 @@ sequenceDiagram
         S-->>D: tts text 分片 + text_end
         D-->>S: tts_ack played / failed / aborted
     end
+    end
 ```
+
+交互注意力采用无音区 MVP，不要求设备提供主驾、副驾或后排位置。明确唤醒或按键、连接级交互状态、上一轮问答、
+时间间隔、当前 ASR 文本和 ASR 置信度共同形成判断证据。默认参数为：首轮 `armed_window_ms=8000`、普通跟进
+`follow_up_window_ms=6000`、明确提问后的回答 `awaiting_reply_window_ms=12000`、放行阈值 `0.88`、背景语音阈值
+`0.30`、ASR 置信度下限 `0.20`，打断策略为 `balanced`。
+
+输出固定为 `DIRECTED / UNDIRECTED / UNKNOWN_ADDRESSING`。`mode=shadow` 是安全默认值，只记录如果启用门控时的
+决策，不改变当前语义、LLM、聊天记录、长期记忆或打断行为。运行时门控位于 `startToChat()` 中，强制模式下只有
+`DIRECTED` 可以继续；设备可通过 `listen.start/listen.detect` 的 `interaction` 字段提供显式触发、ASR 置信度和
+可选 DDSD 分数。
+后续启用 `enforce` 后，`UNDIRECTED` 与 `UNKNOWN_ADDRESSING` 必须在创建回复生命周期前结束；模型超时、异常、
+无结果或非法结果按 `UNKNOWN_ADDRESSING` 失败关闭。即使判断为 `DIRECTED`，高风险车控也仍需通过独立权限和安全校验。
 
 设备 ASR 消息必须使用 `listen.detect + source=device_asr + final=true + turn_id + text`。服务端在进入语义/LLM 前按
 `turn_id` 幂等并限流，然后对接受、重复或拒绝都返回 `speech_asr_ack`；设备识别正文只以长度占位进入协议日志。
@@ -279,6 +297,7 @@ agent 绑定，并只在设备空闲时清理本地短期状态；Realtime 模�
 | 当前响应超时、协议错误或上游断开 | 取消当前回复、发送一次 stop、关闭或重建上游会话 | 不把半轮音频重新送入传统链路 |
 | 工具执行失败 | 结构化错误回注 Realtime 模型，由模型生成用户可读回复 | 不跳过工具权限或伪造成功结果 |
 | 用户在播报中开口 | adapter 使用上游语音开始/ASR 开始事件取消当前响应，本地立即发送无等待 stop，并保留新用户音频 | 不清空打断语句的输入缓冲；设备仍需 AEC 和持续上行 |
+| 交互注意力判断为背景或不确定（enforce） | 结束当前输入轮次，不创建回复、不写聊天或记忆 | 不进入 SemanticCenter、Intent、LLM 或工具；判断异常按 `UNKNOWN_ADDRESSING` 失败关闭 |
 | 清空短期上下文 | 当前确认回复结束后重建上游 Realtime session，再恢复 system prompt、工具和当前会话音色 | 不删除后台聊天记录或长期记忆，不在旧上游 session 中假装已清空 |
 | 运行中切换音色 | 由 adapter 能力应用到下一轮；Qwen 更新 session，豆包重建 session | 不改写 manager-api 保存的共享模型配置 |
 | 已选 Realtime 但会话未就绪 | HTTP 明确失败 | 不按任意 deviceId 新建会话，不静默转 VLLM；非 Realtime 请求仍走传统 VLLM |

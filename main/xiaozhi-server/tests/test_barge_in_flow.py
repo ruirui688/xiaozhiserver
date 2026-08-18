@@ -180,6 +180,21 @@ def test_aec_acoustic_gate_aborts_only_on_confirmed_start_edge():
     assert conn.abort_generation == 1
 
 
+def test_enforced_balanced_attention_defers_dormant_aec_barge_in_until_asr():
+    conn = _Conn()
+    conn.client_aec = True
+    conn.config["interaction_attention"] = {
+        "enabled": True,
+        "mode": "enforce",
+        "barge_in_policy": "balanced",
+    }
+
+    asyncio.run(handleAudioMessage(conn, b"background-conversation"))
+
+    assert conn.events == ["asr"]
+    assert conn.abort_generation == 0
+
+
 def test_non_aec_voice_waits_for_complete_asr_before_stopping():
     conn = _Conn()
 

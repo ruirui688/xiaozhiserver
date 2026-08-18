@@ -1,8 +1,9 @@
 ---
 status: supporting
 owner: xiaozhi-server
-last_verified: 2026-07-28
+last_verified: 2026-08-18
 source_paths:
+  - main/xiaozhi-server/config.yaml
   - main/xiaozhi-server/core/semantic
   - main/xiaozhi-server/core/handle/receiveAudioHandle.py
   - main/manager-api/src/main/java/xiaozhi/modules/agent/skill
@@ -44,6 +45,35 @@ MCP / 插件 / IoT 是工具执行层
 ```
 
 TTS 播放期间的打断采用官方的 barge-in 机制：支持 AEC 的设备一旦检测到用户开口就立即停止播报，非 AEC 设备在完整 ASR 到达后停止。退出游戏、继续等具有明确会话状态约束的操作，仍可由服务端状态和策略直接处理。
+
+### 交互注意力前置边界
+
+语义控制中枢回答“用户想做什么”，不能回答“用户是否在对小智说话”。车机中同一麦克风还会采集乘员交谈、电话、
+媒体和导航人声，因此目标链路必须在 `SemanticCenter` 前增加独立的交互注意力门控：
+
+```text
+VAD / ASR / 设备最终文本
+  -> Interaction Attention Gate
+     -> DIRECTED -> SemanticCenter -> Intent / LLM / 工具
+     -> UNDIRECTED -> 丢弃
+     -> UNKNOWN_ADDRESSING -> 安全阻断
+```
+
+无明确音区信息时，MVP 使用明确唤醒或按键触发、`ARMED / ENGAGED / AWAITING_REPLY / SPEAKING`
+交互状态、时间窗口、上一轮问答、当前文本和 ASR 置信度。音区不是必填项，声纹也只能作为辅助证据。
+
+`UNDIRECTED` 和 `UNKNOWN_ADDRESSING` 在强制模式下必须在创建回复 generation 之前结束本轮，并且不得进入：
+
+- `SemanticCenter`、Intent 或主 LLM；
+- 插件、MCP、Device IoT 或其他工具执行；
+- Dialogue、后台聊天记录或长期记忆事件。
+
+`DIRECTED` 只代表允许进入语义链路，不代表允许执行车控。高风险车控仍必须经过现有工具白名单、资源所有权、车辆状态、
+参数范围和必要的二次确认，不能把 Addressing 置信度当作授权结果。
+
+默认 `interaction_attention.mode=shadow` 只记录三态决策、置信度和原因，不改变当前行为。运行时代码已在
+`startToChat()` 的语义、Intent、LLM 和播报打断之前执行门控；`enforce` 中判断异常、无结果或非法结果按
+`UNKNOWN_ADDRESSING` 失败关闭，禁止回退为默认放行。
 
 ## 2. 当前落地范围
 
@@ -275,12 +305,13 @@ LLM function_call -> UnifiedToolHandler.handle_llm_function_call()
 
 推荐按以下顺序扩展，不要一次性拆成多个服务：
 
-1. 在保持确定性边界的前提下扩展技能允许状态、命中统计和配置热更新。
-2. 完善 `RobotContext`：加入动作运行、TTS 播放、当前讲解段落、电量、网络、传感器安全状态。
-3. 扩展 `PolicyEngine`：加入动作安全、电量、地面安全、二次确认、低置信度确认。
-4. 把 RAGFlow/local knowledge 提升为知识类 skill，但保持旧插件名兼容。
-5. 增加主动服务规则：迎宾、讲解结束推荐、游戏超时提示、长时间无响应提示。
-6. 在日志中记录 `ASRResult -> IntentFrame -> Decision -> Executor -> Result`，用于回归测试和拒识优化。
+1. 实现独立的 Interaction Attention Gate，并先以 `shadow` 采集无音区真实数据。
+2. 在保持确定性边界的前提下扩展技能允许状态、命中统计和配置热更新。
+3. 完善 `RobotContext`：加入动作运行、TTS 播放、当前讲解段落、电量、网络、传感器安全状态。
+4. 扩展 `PolicyEngine`：加入动作安全、电量、地面安全、二次确认、低置信度确认。
+5. 把 RAGFlow/local knowledge 提升为知识类 skill，但保持旧插件名兼容。
+6. 增加主动服务规则：迎宾、讲解结束推荐、游戏超时提示、长时间无响应提示。
+7. 在日志中记录 `AddressingResult -> ASRResult -> IntentFrame -> Decision -> Executor -> Result`，用于回归测试和拒识优化。
 
 ## 8. 验证
 
