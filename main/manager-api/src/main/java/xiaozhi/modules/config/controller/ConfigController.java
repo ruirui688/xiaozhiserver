@@ -20,7 +20,9 @@ import xiaozhi.common.validator.ValidatorUtils;
 import xiaozhi.modules.agent.service.AgentMcpNoCodeToolService;
 import xiaozhi.modules.config.dto.AgentModelsDTO;
 import xiaozhi.modules.config.dto.CorrectWordsDTO;
+import xiaozhi.modules.config.dto.DeviceSpeechInputRouteDTO;
 import xiaozhi.modules.config.service.ConfigService;
+import xiaozhi.modules.device.service.DeviceService;
 import xiaozhi.modules.knowledge.dto.document.RetrievalDTO;
 import xiaozhi.modules.knowledge.service.KnowledgeFilesService;
 
@@ -37,6 +39,7 @@ public class ConfigController {
     private final ConfigService configService;
     private final KnowledgeFilesService knowledgeFilesService;
     private final AgentMcpNoCodeToolService agentMcpNoCodeToolService;
+    private final DeviceService deviceService;
 
     @PostMapping("server-base")
     @Operation(summary = "服务端获取配置接口")
@@ -60,6 +63,15 @@ public class ConfigController {
         ValidatorUtils.validateEntity(dto);
         List<String> list = configService.getCorrectWords(dto.getMacAddress());
         return new Result<Object>().ok(list);
+    }
+
+    @PostMapping("device-speech-input-route")
+    @Operation(summary = "服务端更新当前认证设备的语音输入路由")
+    public Result<Object> updateDeviceSpeechInputRoute(
+            @Valid @RequestBody DeviceSpeechInputRouteDTO dto) {
+        deviceService.updateSpeechInputModeFromRuntime(
+                dto.getMacAddress(), dto.getInputPolicy());
+        return new Result<Object>().ok(null);
     }
 
     @PostMapping("knowledge/retrieval")

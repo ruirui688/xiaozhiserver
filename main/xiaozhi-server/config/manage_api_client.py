@@ -195,6 +195,19 @@ async def report_device_scene_switch_result(payload: Dict) -> Optional[Dict]:
     )
 
 
+async def update_device_speech_input_policy(
+    mac_address: str, input_policy: str
+) -> Optional[Dict]:
+    """Persist the authenticated connection's bounded ASR input policy."""
+    if not ManageApiClient._instance:
+        raise RuntimeError("manager-api client is not initialized")
+    return await ManageApiClient._instance._execute_async_request(
+        "POST",
+        "/config/device-speech-input-route",
+        json={"macAddress": mac_address, "inputPolicy": input_policy},
+    )
+
+
 async def get_agent_models(
     mac_address: str, client_id: str, selected_module: Dict
 ) -> Optional[Dict]:
@@ -246,6 +259,23 @@ async def report_device_face_recognition(payload: Dict) -> Optional[Dict]:
         return None
     return await ManageApiClient._instance._execute_async_request(
         "POST", "/config/device-face-profiles/recognition-events", json=payload
+    )
+
+
+async def get_reception_context(payload: Dict) -> Optional[Dict]:
+    """按当前已认证设备批量读取经过同意范围过滤的接待上下文。"""
+    if not ManageApiClient._instance:
+        return None
+    return await ManageApiClient._instance._execute_async_request(
+        "POST", "/config/reception/context", json=payload
+    )
+
+
+async def report_reception_event(payload: Dict) -> Optional[Dict]:
+    if not ManageApiClient._instance:
+        return None
+    return await ManageApiClient._instance._execute_async_request(
+        "POST", "/config/reception/events", json=payload
     )
 
 

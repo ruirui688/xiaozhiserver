@@ -71,6 +71,7 @@ async def handleAudioMessage(conn: "ConnectionHandler", audio):
             if hasattr(logger, "debug"):
                 logger.debug(f"记录VAD指标失败: {e}")
     update_voice_activity(conn, have_voice)
+    from core.reception_interrupt import reception_reply_locked
     # 与官方一致：支持 AEC 的设备只要确认用户已经开口，就立即停止当前播报。
     # 这里不等待句尾、完整 ASR 或 LLM；当前用户音频继续进入 ASR。
     speech_started = have_voice
@@ -84,6 +85,7 @@ async def handleAudioMessage(conn: "ConnectionHandler", audio):
         and speech_started
         and conn.client_is_speaking
         and conn.client_listen_mode != "manual"
+        and not reception_reply_locked(conn)
     ):
         await handleAbortMessage(conn, preserve_user_audio=True)
     # 接收音频
@@ -271,6 +273,30 @@ async def startToChat(
         ):
             await max_out_size(conn)
             return True
+
+    from core.reception_interrupt import (
+        clear_reception_reply_lock,
+        is_explicit_stop,
+        reception_reply_locked,
+    )
+
+    if reception_reply_locked(conn):
+        if is_explicit_stop(interruption_text):
+            clear_reception_reply_lock(conn)
+            await handleAbortMessage(conn)
+            conn.logger.bind(tag=TAG).info("接待播报收到明确停止词，已停止当前回复")
+        else:
+            from core.reception_interrupt import defer_reception_turn
+
+            queued = defer_reception_turn(
+                conn,
+                actual_text,
+                speaker_id or speaker_name or "anonymous",
+            )
+            conn.logger.bind(tag=TAG).info(
+                "接待播报期间排队非停止用户话语: queued={}".format(queued)
+            )
+        return True
 
     # 与官方一致：非 AEC 路径取得完整 ASR 后，只要仍在播报就直接停止。
     # manual 模式由设备显式控制录音边界，不自动打断。

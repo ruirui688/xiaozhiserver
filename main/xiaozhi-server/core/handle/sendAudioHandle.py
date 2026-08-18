@@ -631,6 +631,13 @@ async def send_tts_message(
             reply_lifecycle.fail(reply_generation, "tts_protocol_send_failed")
         raise
     if state == "stop":
+        from core.reception_interrupt import (
+            clear_reception_reply_lock,
+            pop_next_reception_turn,
+        )
+
+        clear_reception_reply_lock(conn)
+        deferred_reception_turn = pop_next_reception_turn(conn)
         _publish_preview_stop(
             conn,
             protocol_sentence_id or getattr(conn, "sentence_id", None),
@@ -647,6 +654,12 @@ async def send_tts_message(
         conn.clearSpeakStatus()
     if state == "stop" and completion_error is not None:
         raise completion_error
+    if state == "stop" and deferred_reception_turn is not None:
+        async def run_deferred_reception_turn():
+            await asyncio.sleep(0)
+            await startToChat(conn, deferred_reception_turn["text"])
+
+        conn.loop.create_task(run_deferred_reception_turn())
     return True
 
 

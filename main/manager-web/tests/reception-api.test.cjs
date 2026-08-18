@@ -1,0 +1,29 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+
+const apiSource = fs.readFileSync(
+  path.join(__dirname, '..', 'src', 'apis', 'module', 'person.js'),
+  'utf8'
+);
+const personView = fs.readFileSync(
+  path.join(__dirname, '..', 'src', 'views', 'PersonProfileManagement.vue'),
+  'utf8'
+);
+
+test('reception management API covers profile appointment and workspace config', () => {
+  [
+    '/resource/reception/persons/${encodeURIComponent(personId)}',
+    '/resource/reception/persons/${encodeURIComponent(personId)}/appointments',
+    '/resource/reception/appointments/${encodeURIComponent(appointmentId)}',
+    '/resource/reception/workspace-config'
+  ].forEach(endpoint => assert.ok(apiSource.includes(endpoint), endpoint));
+});
+
+test('person resource page exposes reception profile appointment and workspace settings', () => {
+  assert.ok(personView.includes('PersonReceptionDialog'));
+  assert.ok(personView.includes('ReceptionWorkspaceDialog'));
+  assert.ok(personView.includes('接待与预约'));
+  assert.ok(personView.includes('接待配置'));
+});

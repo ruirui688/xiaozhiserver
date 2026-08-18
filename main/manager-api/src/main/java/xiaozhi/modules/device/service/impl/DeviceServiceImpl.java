@@ -370,6 +370,26 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public void updateSpeechInputModeFromRuntime(String macAddress, String inputPolicy) {
+        if (!java.util.Set.of("server", "device", "auto").contains(inputPolicy)) {
+            throw new RenException("语音输入路由仅支持server、device或auto");
+        }
+        DeviceEntity existing = getDeviceByMacAddress(macAddress);
+        if (existing == null || StringUtils.isBlank(existing.getAgentId())) {
+            throw new RenException("设备不存在或尚未绑定智能体");
+        }
+
+        DeviceEntity update = new DeviceEntity();
+        update.setId(existing.getId());
+        update.setSpeechInputMode(inputPolicy);
+        baseDao.updateById(update);
+        eventPublisher.publishEvent(
+                DeviceRuntimeConfigRefreshEvent.forDeviceSettings(
+                        existing.getId(), existing.getAgentId()));
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public void unbindDevice(Long userId, String deviceId) {
         // 先查询设备信息，获取agentId
         DeviceEntity device = baseDao.selectById(deviceId);

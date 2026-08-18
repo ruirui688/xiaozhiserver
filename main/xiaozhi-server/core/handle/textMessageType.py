@@ -12,4 +12,6 @@ class TextMessageType(Enum):
     PING = "ping"
     EXTERNAL_TTS = "external_tts"
     TTS_ACK = "tts_ack"
+    SPEECH_ROUTE_REQUEST = "speech_route_request"
     FACE_RECOGNITION = "face_recognition"
+    RECEPTION = "reception"

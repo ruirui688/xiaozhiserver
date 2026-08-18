@@ -53,6 +53,7 @@ deploy/               部署资产归档边界（[入口](./deploy/README.md)）
 1. [项目架构总览](./docs/architecture/project-architecture.md) - 理解模块边界、控制面、实时数据面和关键链路。
 2. [文档任务门户](./docs/README.md) - 按开发、部署、排障或专项任务进入对应文档。
 3. [本地开发工作流](./docs/development/local-dev-workflow.md) - 使用统一脚本启动和验证服务。
+4. [机器人门口迎宾产品化](./docs/architecture/robot-reception-productization.md) - 当前未全部完成；查看客户档案、预约、跨端协议、时延、导航和分阶段实施。
 
 生产环境只使用 [ACR 镜像生产部署](./docs/deployment/private-docker-release.md)。历史官方部署教程和服务器源码自动升级流程不属于本项目生产入口。
 

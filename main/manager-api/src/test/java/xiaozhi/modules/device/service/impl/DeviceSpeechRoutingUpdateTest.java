@@ -96,6 +96,45 @@ class DeviceSpeechRoutingUpdateTest {
         verify(publisher, never()).publishEvent(any());
     }
 
+    @Test
+    void authenticatedRuntimeUpdateChangesOnlyInputPolicyAndPublishesRefresh() {
+        DeviceDao deviceDao = mock(DeviceDao.class);
+        WorkspacePermissionService permissionService = mock(WorkspacePermissionService.class);
+        ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+        DeviceServiceImpl service = newService(deviceDao, permissionService, publisher);
+
+        DeviceEntity existing = new DeviceEntity();
+        existing.setId("device-a");
+        existing.setMacAddress("AA:BB:CC:DD:EE:FF");
+        existing.setAgentId("agent-a");
+        when(deviceDao.selectOne(any())).thenReturn(existing);
+
+        service.updateSpeechInputModeFromRuntime("AA:BB:CC:DD:EE:FF", "auto");
+
+        ArgumentCaptor<DeviceEntity> updateCaptor = ArgumentCaptor.forClass(DeviceEntity.class);
+        verify(deviceDao).updateById(updateCaptor.capture());
+        assertEquals("device-a", updateCaptor.getValue().getId());
+        assertEquals("auto", updateCaptor.getValue().getSpeechInputMode());
+        assertEquals(null, updateCaptor.getValue().getSpeechOutputMode());
+        verify(permissionService, never()).requireWrite(any());
+        verify(publisher).publishEvent(any(DeviceRuntimeConfigRefreshEvent.class));
+    }
+
+    @Test
+    void runtimeUpdateRejectsUnknownPolicyBeforeDatabaseAccess() {
+        DeviceDao deviceDao = mock(DeviceDao.class);
+        DeviceServiceImpl service = newService(
+                deviceDao,
+                mock(WorkspacePermissionService.class),
+                mock(ApplicationEventPublisher.class));
+
+        assertThrows(RuntimeException.class,
+                () -> service.updateSpeechInputModeFromRuntime("AA:BB", "fallback"));
+
+        verify(deviceDao, never()).selectOne(any());
+        verify(deviceDao, never()).updateById(any());
+    }
+
     private DeviceServiceImpl newService(
             DeviceDao deviceDao,
             WorkspacePermissionService permissionService,

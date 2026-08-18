@@ -72,5 +72,37 @@ export default {
 
   capability(callback, failCallback) {
     request('GET', '/resource/person-recognition/capability', null, callback, failCallback);
+  },
+
+  receptionProfile(personId, callback, failCallback) {
+    request('GET', `/resource/reception/persons/${encodeURIComponent(personId)}`, null, callback, failCallback);
+  },
+
+  saveReceptionProfile(personId, payload, callback, failCallback) {
+    request('PUT', `/resource/reception/persons/${encodeURIComponent(personId)}`, payload, callback, failCallback);
+  },
+
+  appointments(personId, callback, failCallback) {
+    request('GET', `/resource/reception/persons/${encodeURIComponent(personId)}/appointments`, null, callback, failCallback);
+  },
+
+  createAppointment(personId, payload, callback, failCallback) {
+    request('POST', `/resource/reception/persons/${encodeURIComponent(personId)}/appointments`, payload, callback, failCallback);
+  },
+
+  updateAppointment(appointmentId, payload, callback, failCallback) {
+    request('PUT', `/resource/reception/appointments/${encodeURIComponent(appointmentId)}`, payload, callback, failCallback);
+  },
+
+  removeAppointment(appointmentId, callback, failCallback) {
+    request('DELETE', `/resource/reception/appointments/${encodeURIComponent(appointmentId)}`, null, callback, failCallback);
+  },
+
+  receptionWorkspaceConfig(callback, failCallback) {
+    request('GET', '/resource/reception/workspace-config', null, callback, failCallback);
+  },
+
+  saveReceptionWorkspaceConfig(payload, callback, failCallback) {
+    request('PUT', '/resource/reception/workspace-config', payload, callback, failCallback);
   }
 };

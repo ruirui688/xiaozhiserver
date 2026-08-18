@@ -116,6 +116,12 @@ public interface DeviceService extends BaseService<DeviceEntity> {
     void updateDeviceInfo(String deviceId, DeviceUpdateDTO dto);
 
     /**
+     * Update only the ASR input route for a device identity supplied by the
+     * authenticated xiaozhi-server connection.
+     */
+    void updateSpeechInputModeFromRuntime(String macAddress, String inputPolicy);
+
+    /**
      * 生成WebSocket认证token
      *
      * @param clientId 客户端ID

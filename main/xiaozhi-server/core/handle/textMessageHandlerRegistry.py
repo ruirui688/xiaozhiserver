@@ -11,6 +11,8 @@ from core.handle.textHandler.pingMessageHandler import PingMessageHandler
 from core.handle.textHandler.externalTtsMessageHandler import ExternalTTSTextMessageHandler
 from core.handle.textHandler.faceRecognitionMessageHandler import FaceRecognitionTextMessageHandler
 from core.handle.textHandler.ttsAckMessageHandler import TTSAckTextMessageHandler
+from core.handle.textHandler.speechRouteRequestMessageHandler import SpeechRouteRequestTextMessageHandler
+from core.handle.textHandler.receptionMessageHandler import ReceptionTextMessageHandler
 
 TAG = __name__
 
@@ -34,7 +36,9 @@ class TextMessageHandlerRegistry:
             PingMessageHandler(),
             ExternalTTSTextMessageHandler(),
             TTSAckTextMessageHandler(),
+            SpeechRouteRequestTextMessageHandler(),
             FaceRecognitionTextMessageHandler(),
+            ReceptionTextMessageHandler(),
         ]
 
         for handler in handlers:

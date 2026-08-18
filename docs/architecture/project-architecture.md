@@ -225,11 +225,12 @@ Java 的 `ModelRuntimeAssembler` 负责从通用字段、普通参数和密钥�
 | MCP | Endpoint 和工具配置 | Server/Device/Endpoint 三类 MCP | [MCP 链路](./mcp-chains.md) |
 | 记忆 | 事实、候选、审计、查询 | 事件上报与上下文注入 | [记忆系统](./memory-system-chain.md) |
 | 知识库 | 文件、分块、检索与权限 | 检索工具调用并回注 LLM | [知识库链路](./knowledge-base-chain.md) |
+| 人物与接待 | 人物、人脸、客户、预约、FAQ/餐品/座位和二维码配置 | 单人识别兼容协议与批量 `reception_v1` | [人物资源](./person-resource-and-face-sync.md)、[机器人迎宾产品化](./robot-reception-productization.md) |
 | Workspace | 成员、角色和资源归属 | 配置拉取时的资源授权边界 | [工作空间隔离](./workspace-organization-management.md) |
 
 ## 6. 数据所有权
 
-- `manager-api + MySQL` 是用户、智能体、设备绑定、模型、知识库、长期记忆和 Workspace 的事实来源。
+- `manager-api + MySQL` 是用户、智能体、设备绑定、人物档案、模型、知识库、长期记忆和 Workspace 的事实来源。
 - 天气和联网搜索的外部服务凭据属于用户级事实；智能体映射只决定是否启用插件并保存非共享行为参数。
 - `xiaozhi-server` 拥有连接级会话状态、音频队列、当前对话和工具客户端生命周期。
 - Redis 是加速层；缓存失效不能改变 MySQL 的事实语义。

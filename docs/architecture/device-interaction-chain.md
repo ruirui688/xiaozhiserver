@@ -218,6 +218,21 @@ manager-api 按设备持久化 `speech_input_mode / speech_output_mode`，管理
 空闲轮次安全热更新并复用本连接已经冻结的能力；固件能力发生变化必须重连重新协商。Realtime 已端到端接管音频，
 实际路由任一侧为 `device` 都会拒绝初始化；这类智能体必须显式配置 `server/server`。
 
+已认证设备也可以为自己的输入侧提交受限策略变更：
+
+```json
+{
+  "type": "speech_route_request",
+  "request_id": "route-001",
+  "inputPolicy": "server"
+}
+```
+
+`inputPolicy` 只接受 `server/device/auto`。xiaozhi-server 忽略消息中的任何设备标识，只使用当前已认证
+WebSocket 连接的 `device_id`，并通过受 `server.secret` 保护的 manager-api `/config/**` 边界持久化；单连接
+请求有界限流。成功 ACK 的 `pending=true` 只表示配置已保存并等待安全轮次刷新，实际生效结果仍以随后下发的
+`speech_route` 为准。保存失败、未启用 manager-api 配置或路由不兼容时不会静默改变当前路由。
+
 ## 3. 音频上行链路（ASR）
 
 ### 3.1 音频帧接收

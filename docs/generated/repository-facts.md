@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: architecture
-last_verified: 2026-08-06
+last_verified: 2026-08-17
 source_paths:
   - Dockerfile-server-base
   - main/xiaozhi-server/
@@ -15,7 +15,7 @@ source_paths:
 
 > 本页由 `scripts/docs-facts` 生成，请勿手工编辑。运行 `scripts/docs-facts` 更新，运行 `scripts/docs-facts --check` 检查漂移。
 
-生成日期：`2026-08-06`（UTC）
+生成日期：`2026-08-17`（UTC）
 
 ## 技术栈版本
 
@@ -32,9 +32,9 @@ source_paths:
 
 | 模块 | 源码文件 | 测试文件 | 统计口径 |
 | --- | ---: | ---: | --- |
-| xiaozhi-server | 269 | 74 | 源码为非 `tests/` 的 `*.py`；测试为 `test_*.py` |
-| manager-api | 578 | 80 | `src/main/**/*.java`；`src/test/**/*Test.java` |
-| manager-web | 134 | 20 | `src/` 下 `*.vue/*.js/*.ts/*.mjs`；`*.spec.*/*.test.*` |
+| xiaozhi-server | 273 | 77 | 源码为非 `tests/` 的 `*.py`；测试为 `test_*.py` |
+| manager-api | 601 | 82 | `src/main/**/*.java`；`src/test/**/*Test.java` |
+| manager-web | 136 | 21 | `src/` 下 `*.vue/*.js/*.ts/*.mjs`；`*.spec.*/*.test.*` |
 | manager-mobile | 85 | 5 | `src/` 下 `*.vue/*.js/*.ts/*.mjs`；`*.spec.*/*.test.*` |
 
 统计排除依赖和构建产物，不表示代码行数或测试覆盖率。
@@ -57,9 +57,9 @@ source_paths:
 
 | 事实 | 数量 |
 | --- | ---: |
-| Liquibase SQL 文件 | 192 |
-| master.yaml changeSet | 192 |
-| master.yaml 唯一 SQL 登记 | 192 |
+| Liquibase SQL 文件 | 196 |
+| master.yaml changeSet | 196 |
+| master.yaml 唯一 SQL 登记 | 196 |
 
 数量相等不代表迁移内容正确；`scripts/docs-check` 还会检查遗漏登记、重复登记和失效路径。
 

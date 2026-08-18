@@ -9,6 +9,9 @@
           <p>管理设备能够识别的人物，以及识别成功后要执行的动作。</p>
         </div>
         <div class="hero-actions">
+          <el-button icon="el-icon-setting" @click="receptionWorkspaceVisible = true">
+            接待配置
+          </el-button>
           <el-button type="primary" icon="el-icon-plus" :disabled="!canWrite" @click="openCreate">
             新增人物
           </el-button>
@@ -98,6 +101,7 @@
               </span>
             </div>
             <div v-if="canWrite" class="person-actions">
+              <el-button type="text" icon="el-icon-s-custom" @click="openReception(profile)">接待与预约</el-button>
               <el-button type="text" icon="el-icon-edit" @click="openEdit(profile)">编辑</el-button>
               <el-dropdown trigger="click" @command="handleCommand(profile, $event)">
                 <el-button type="text" icon="el-icon-more" aria-label="更多人物操作" />
@@ -199,6 +203,16 @@
       </div>
     </el-dialog>
 
+    <PersonReceptionDialog
+      :visible.sync="receptionPersonVisible"
+      :person="receptionPerson"
+      :can-write="canWrite"
+    />
+    <ReceptionWorkspaceDialog
+      :visible.sync="receptionWorkspaceVisible"
+      :can-write="canWrite"
+    />
+
     <VersionFooter />
   </div>
 </template>
@@ -207,6 +221,8 @@
 import Api from "@/apis/api";
 import HeaderBar from "@/components/HeaderBar.vue";
 import PersonDeviceTargetSelector from "@/components/person/PersonDeviceTargetSelector.vue";
+import PersonReceptionDialog from "@/components/person/PersonReceptionDialog.vue";
+import ReceptionWorkspaceDialog from "@/components/person/ReceptionWorkspaceDialog.vue";
 import ResourceCenterNav from "@/components/resource/ResourceCenterNav.vue";
 import VersionFooter from "@/components/VersionFooter.vue";
 
@@ -226,7 +242,14 @@ function emptyForm() {
 
 export default {
   name: "PersonProfileManagement",
-  components: { HeaderBar, PersonDeviceTargetSelector, ResourceCenterNav, VersionFooter },
+  components: {
+    HeaderBar,
+    PersonDeviceTargetSelector,
+    PersonReceptionDialog,
+    ReceptionWorkspaceDialog,
+    ResourceCenterNav,
+    VersionFooter
+  },
   data() {
     return {
       loading: false,
@@ -241,6 +264,9 @@ export default {
       form: emptyForm(),
       faceFile: null,
       dialogPreviewUrl: "",
+      receptionPersonVisible: false,
+      receptionWorkspaceVisible: false,
+      receptionPerson: null,
       canWrite: localStorage.getItem("currentWorkspaceCanWrite") !== "false"
     };
   },
@@ -342,6 +368,10 @@ export default {
       this.revokeDialogPreview();
       this.dialogPreviewUrl = this.faceUrls[profile.id] || "";
       this.dialogVisible = true;
+    },
+    openReception(profile) {
+      this.receptionPerson = profile;
+      this.receptionPersonVisible = true;
     },
     handleCommand(profile, command) {
       if (command === "edit") {
