@@ -1,5 +1,4 @@
 import asyncio
-import gzip
 import sys
 import time
 from pathlib import Path
@@ -43,22 +42,26 @@ class FakeWebSocket:
         self.closed = True
 
 
-class FinalAfterLastWebSocket(FakeWebSocket):
+class FinalAfterInternalVadWebSocket(FakeWebSocket):
     def __init__(self):
         super().__init__()
-        self.last_frame_sent = asyncio.Event()
+        self.tail_audio_sent = asyncio.Event()
         self.recv_count = 0
+        self.audio_frame_count = 0
 
     async def send(self, payload):
         await super().send(payload)
-        if len(payload) >= 2 and payload[1] & 0x0F == 0x02:
-            self.last_frame_sent.set()
+        if len(payload) >= 2 and payload[1] >> 4 == 0x02:
+            if payload[1] & 0x0F == 0:
+                self.audio_frame_count += 1
+                if self.audio_frame_count >= 2:
+                    self.tail_audio_sent.set()
 
     async def recv(self):
         self.recv_count += 1
         if self.recv_count == 1:
             return b"init"
-        await self.last_frame_sent.wait()
+        await self.tail_audio_sent.wait()
         return b"final"
 
 
@@ -96,16 +99,19 @@ def _provider(tmp_path, **overrides):
 
 def test_stream_timeout_configuration_defaults_and_overrides(tmp_path):
     provider = _provider(tmp_path)
+    assert provider.end_window_size == 200
     assert provider.init_timeout_seconds == 10
     assert provider.response_timeout_seconds == 15
     assert provider.final_response_timeout_seconds == 5
 
     configured = _provider(
         tmp_path,
+        end_window_size="350",
         init_timeout_seconds="0.25",
         response_timeout_seconds="1.5",
         final_response_timeout_seconds="0.75",
     )
+    assert configured.end_window_size == 350
     assert configured.init_timeout_seconds == 0.25
     assert configured.response_timeout_seconds == 1.5
     assert configured.final_response_timeout_seconds == 0.75
@@ -123,6 +129,7 @@ def test_stream_request_sends_agent_hotword_table_in_corpus(tmp_path):
     assert request["request"]["corpus"] == {
         "boosting_table_id": "example-hotword-table-id"
     }
+    assert request["request"]["end_window_size"] == 200
     assert request["request"]["context"] == '{"context_type":"dialog_ctx"}'
 
 
@@ -168,6 +175,8 @@ def test_stream_speech_to_text_keeps_plain_text_compatibility(tmp_path):
         ("response_timeout_seconds", -1),
         ("response_timeout_seconds", "invalid"),
         ("final_response_timeout_seconds", 0),
+        ("end_window_size", 0),
+        ("end_window_size", "invalid"),
     ],
 )
 def test_stream_timeout_configuration_rejects_invalid_values(
@@ -379,10 +388,10 @@ def test_result_half_open_keeps_heartbeat_and_next_forwarder_starts(tmp_path):
 
 
 @pytest.mark.parametrize("recognized_text", ["是", "不是", "对", "退下", "停止"])
-def test_auto_vad_stop_sends_last_and_accepts_short_final_text(
+def test_internal_vad_definite_accepts_short_final_text_without_last(
     monkeypatch, tmp_path, recognized_text
 ):
-    websocket = FinalAfterLastWebSocket()
+    websocket = FinalAfterInternalVadWebSocket()
 
     async def fake_connect(*args, **kwargs):
         return websocket
@@ -434,8 +443,7 @@ def test_auto_vad_stop_sends_last_and_accepts_short_final_text(
     last_frames = [payload for payload in audio_frames if payload[1] & 0x0F == 0x02]
 
     assert len(regular_frames) == 2
-    assert len(last_frames) == 1
-    assert gzip.decompress(last_frames[0][8:]) == b""
+    assert len(last_frames) == 0
     assert handled == [(recognized_text, [b"voice-frame", b"silence-frame"])]
     assert websocket.closed is True
     assert conn.reset_count == 1

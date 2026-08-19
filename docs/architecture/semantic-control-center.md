@@ -135,7 +135,7 @@ UnifiedToolHandler.handle_llm_function_call()
 
 ### 播报期间即时打断
 
-打断与句尾分段分开处理，只保留 VAD 模型的单一 `min_silence_duration_ms`。设备在 `hello.features.aec=true` 声明支持 AEC 后，VAD 连续确认用户开口即可调用 `handleAbortMessage()`，无需等待句尾、完整 ASR 或额外 LLM 请求。当前用户音频会保留并继续进入 ASR，避免打断时截掉首字。
+打断与句尾分段分开处理。设备在 `hello.features.aec=true` 声明支持 AEC 后，本地 VAD 连续确认用户开口即可调用 `handleAbortMessage()`，无需等待句尾、完整 ASR 或额外 LLM 请求。当前用户音频会保留并继续进入 ASR，避免打断时截掉首字。普通 ASR 继续使用所选 VAD 的 `min_silence_duration_ms`；豆包流式 ASR 2.0 的自动/实时模式则由上游内部 VAD 使用 `end_window_size` 返回 `definite=true`，本地 Silero 不为它主动发送 LAST。
 
 当前链路：
 

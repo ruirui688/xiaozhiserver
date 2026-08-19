@@ -170,7 +170,7 @@
   - main/xiaozhi-server/tests/test_semantic_policy.py
   - docs/architecture/semantic-control-center.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改 startToChat、ConnectionHandler 初始化、Silero VAD、hello features、handle_user_intent、GameSessionManager、UnifiedToolHandler、ToolManager、abortHandle、TTS 入队或 function-call 主链路，必须保留语义控制中枢在旧意图/LLM 之前的前置拦截位置；设备通过 `features.aec=true` 启用句首即时打断，`speech_gate` 在 Silero 概率后使用 RMS/SNR 与多帧状态机确认讲话开始，只有确认后的 `speech_started` 边沿能够停止 TTS，不等待完整 ASR 或额外 LLM；`disabled/shadow/enforce`、约 320ms pre-roll、严格开始/宽松继续、模糊尾帧有界宽限和声纹录入至少两秒静音的契约不得被官方单阈值实现覆盖；该门控仍是声学 VAD，不得扩张成停止词表或独立 LLM 打断分类器；本地 abort 清理输出时必须保留正在形成的用户音频，非 AEC 设备则在完整 ASR 后停止；未命中高置信度语义规则时必须继续兜底到旧 handle_user_intent 和 conn.chat；纯语言游戏不得优先回到 active_game_tool，应交给主 LLM 对话，并只从已启用功能插件读取可编辑软规则；退出游戏不得关闭 websocket；语义模块顶层导入应尽量轻量，避免引入 opus/loguru 等运行依赖导致纯单元测试无法导入。
+官方同步时的处理规则：如果官方修改 startToChat、ConnectionHandler 初始化、Silero VAD、hello features、handle_user_intent、GameSessionManager、UnifiedToolHandler、ToolManager、abortHandle、TTS 入队或 function-call 主链路，必须保留语义控制中枢在旧意图/LLM 之前的前置拦截位置；设备通过 `features.aec=true` 启用句首即时打断，`speech_gate` 在 Silero 概率后使用 RMS/SNR 与多帧状态机确认讲话开始，只有确认后的 `speech_started` 边沿能够停止 TTS，不等待完整 ASR 或额外 LLM；`disabled/shadow/enforce`、约 320ms pre-roll、严格开始/宽松继续、模糊尾帧有界宽限和声纹录入至少两秒静音的契约不得被官方单阈值实现覆盖；豆包流式 ASR 2.0 自动/实时模式必须把 `end_window_size` 交给豆包内部 VAD，并只以 `definite=true` 提交本轮，不能因本地 Silero 设置 `client_voice_stop` 就主动发送 LAST，设备显式 `listen/stop` 仍保留 LAST；该门控仍是声学 VAD，不得扩张成停止词表或独立 LLM 打断分类器；本地 abort 清理输出时必须保留正在形成的用户音频，非 AEC 设备则在完整 ASR 后停止；未命中高置信度语义规则时必须继续兜底到旧 handle_user_intent 和 conn.chat；纯语言游戏不得优先回到 active_game_tool，应交给主 LLM 对话，并只从已启用功能插件读取可编辑软规则；退出游戏不得关闭 websocket；语义模块顶层导入应尽量轻量，避免引入 opus/loguru 等运行依赖导致纯单元测试无法导入。
 ```
 
 ## 12. 管理后台模型测试详情字段补全

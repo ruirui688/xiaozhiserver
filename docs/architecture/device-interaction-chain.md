@@ -295,6 +295,11 @@ providers/asr/base.py:44-59  asr_text_priority_thread（守护线程）
 - 句尾静音检测统一使用 VAD 模型的 `min_silence_duration_ms`
 - AEC 设备的播报打断依据句首语音检测，不等待该句尾阈值
 
+豆包流式 ASR 2.0 是句尾分段的特例：本地 Silero 仍负责句首检测、pre-roll 和 AEC barge-in，
+但自动/实时模式不会在本地 `client_voice_stop` 后向豆包发送 LAST。初始化请求携带
+`end_window_size`（默认 200ms），持续发送尾部音频，直到豆包内部 VAD 返回
+`utterance.definite=true` 后才提交本轮文本。设备显式 `listen/stop`（例如手动按键拾音）仍发送 LAST。
+
 `client_is_speaking` 仍表示当前回复（包括 LLM/TTS 尚未产生首包的等待阶段）可以被用户打断，
 但现在是 `ReplyLifecycle` 活跃状态的派生值，不再是可被异常分支永久遗留的布尔变量。每轮回复使用单调
 递增的 generation，状态在 `PENDING_LLM / SYNTHESIZING / STREAMING / STOPPING` 间推进，并且每个

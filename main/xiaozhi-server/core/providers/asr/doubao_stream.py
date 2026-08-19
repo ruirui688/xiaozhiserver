@@ -57,6 +57,9 @@ class ASRProvider(ASRProviderBase):
         self.rate = config.get("sample_rate", 16000)
         self.bits = config.get("bits", 16)
         self.channel = config.get("channel", 1)
+        self.end_window_size = self._positive_integer(
+            config, "end_window_size", 200
+        )
         self.init_timeout_seconds = self._positive_seconds(
             config, "init_timeout_seconds", 10
         )
@@ -75,6 +78,16 @@ class ASRProvider(ASRProviderBase):
             raise ValueError(f"{key} 必须是大于 0 的数字") from exc
         if not math.isfinite(value) or value <= 0:
             raise ValueError(f"{key} 必须是大于 0 的数字")
+        return value
+
+    @staticmethod
+    def _positive_integer(config, key, default):
+        try:
+            value = int(config.get(key, default))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{key} 必须是大于 0 的整数") from exc
+        if value <= 0:
+            raise ValueError(f"{key} 必须是大于 0 的整数")
         return value
 
     async def open_audio_channels(self, conn):
@@ -211,15 +224,9 @@ class ASRProvider(ASRProviderBase):
             except Exception as e:
                 logger.bind(tag=TAG).info(f"发送音频数据时发生错误: {e}")
 
-        # 自动/实时模式依靠本地 VAD 判停。当前静音尾帧发送后立即提交
-        # LAST，接收任务继续等待火山返回最终 definite 结果。
-        if (
-            conn.client_voice_stop
-            and self.asr_ws
-            and self.is_processing
-            and not self._is_stopping
-        ):
-            await self._send_stop_request()
+        # 自动/实时模式只使用本地 VAD 检测句首和处理 barge-in，句尾由豆包
+        # 内部 VAD 根据 end_window_size 判定，并以 definite=true 返回最终结果。
+        # LAST 仅保留给设备显式 listen/stop（例如手动按键拾音）。
 
     async def _send_audio_frame(self, opus_audio, session_ws=None):
         target_ws = session_ws or self.asr_ws
@@ -521,6 +528,7 @@ class ASRProvider(ASRProviderBase):
                 "show_utterances": True,
                 "result_type": self.result_type,
                 "sequence": 1,
+                "end_window_size": self.end_window_size,
             },
             "audio": {
                 "format": self.format,

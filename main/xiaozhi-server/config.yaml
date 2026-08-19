@@ -450,11 +450,14 @@ ASR:
     resource_id: volc.seedasr.sauc.duration
     # 可选：上下文文本，用于提高特定场景识别准确率
     context_text: ""
+    # 豆包内部 VAD 的句尾静音窗口（毫秒）；自动/实时模式等待 definite=true，
+    # 不再由本地 Silero 句尾主动发送 LAST。
+    end_window_size: 200
     # WebSocket 建连后等待初始化响应的最大时间（秒）
     init_timeout_seconds: 10
     # 等待下一条流式识别结果的最大时间（秒）；每收到结果后重新计时
     response_timeout_seconds: 15
-    # 发送 LAST 后等待最终 definite 结果的总预算（秒）
+    # 手动 listen/stop 发送 LAST 后等待最终 definite 结果的总预算（秒）
     final_response_timeout_seconds: 5
     output_dir: tmp/
   TencentASR:

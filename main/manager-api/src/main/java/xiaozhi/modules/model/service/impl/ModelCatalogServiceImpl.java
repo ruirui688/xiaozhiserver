@@ -877,8 +877,9 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 "火山引擎", "豆包流式语音识别模型2.0", "asr", "语音识别", "websocket", "WebSocket 流式",
                 "cloud", "云平台", "WebSocket", "Resource ID", "resource_id",
                 List.of("api_key"), List.of("api_key"),
-                List.of("context_text"),
-                List.of("只需填写火山控制台 API Key；Resource ID 固定为 volc.seedasr.sauc.duration。"),
+                List.of("context_text", "end_window_size"),
+                List.of("只需填写火山控制台 API Key；Resource ID 固定为 volc.seedasr.sauc.duration。",
+                        "自动/实时模式由豆包内部 VAD 按 end_window_size 判定句尾并返回 definite=true。"),
                 List.of(), List.of("DoubaoStreamASRV2", "seedasr", "volc.seedasr"),
                 "https://www.volcengine.com/docs/6561/1354869"));
         items.add(item("ASR_TENCENT_SENTENCE", "ASR", "tencent", "腾讯云 ASR",
@@ -1443,7 +1444,10 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 setFieldDefault(dto, "port", 10095);
             }
             case "ASR_DOUBAO_RECORDING_ASR_2" -> setFieldDefault(dto, "resource_id", "volc.seedasr.auc");
-            case "ASR_DOUBAO_SEED_ASR_2_STREAM" -> setFieldDefault(dto, "resource_id", "volc.seedasr.sauc.duration");
+            case "ASR_DOUBAO_SEED_ASR_2_STREAM" -> {
+                setFieldDefault(dto, "resource_id", "volc.seedasr.sauc.duration");
+                setFieldDefault(dto, "end_window_size", 200);
+            }
             case "ASR_TENCENT_SENTENCE" -> setFieldDefault(dto, "output_dir", "tmp/");
             case "ASR_ALIYUN_NLS_HTTP" -> {
                 setFieldDefault(dto, "appkey", "");
