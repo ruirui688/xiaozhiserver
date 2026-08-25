@@ -8,11 +8,14 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import org.mockito.ArgumentCaptor;
+
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.ResponseEntity;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.client.RestTemplate;
 
@@ -98,5 +101,32 @@ class LocalKnowledgeAdapterContractTest {
                         "[{\"question\":\"问题\",\"answer\":\"答案\"}]"));
 
         assertTrue(error.getMessage().contains("question、answer、content字符串字段"));
+    }
+
+    @Test
+    void forwardsDeepSeekThinkingDisabledForSemanticChunking() {
+        LocalKnowledgeAdapter adapter = new LocalKnowledgeAdapter();
+        RestTemplate restTemplate = mock(RestTemplate.class);
+        ReflectionTestUtils.setField(adapter, "llmBaseUrl", "https://api.deepseek.com");
+        ReflectionTestUtils.setField(adapter, "llmModel", "deepseek-v4-flash");
+        ReflectionTestUtils.setField(adapter, "llmThinking", "disabled");
+        ReflectionTestUtils.setField(adapter, "llmReasoningEffort", "high");
+        ReflectionTestUtils.setField(adapter, "llmMaxTokens", 4000);
+        ReflectionTestUtils.setField(adapter, "objectMapper", new ObjectMapper());
+        ReflectionTestUtils.setField(adapter, "llmRestTemplate", restTemplate);
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
+                .thenReturn(ResponseEntity.ok("{\"choices\":[{\"message\":{\"content\":\"[{\\\"question\\\":\\\"q\\\",\\\"answer\\\":\\\"a\\\",\\\"content\\\":\\\"c\\\"}]\"}}]}"));
+
+        ReflectionTestUtils.invokeMethod(adapter, "chunkSectionWithLlm", "manual.txt", "正文", 1, 1);
+
+        @SuppressWarnings("rawtypes")
+        ArgumentCaptor<HttpEntity> entityCaptor = ArgumentCaptor.forClass(HttpEntity.class);
+        org.mockito.Mockito.verify(restTemplate).exchange(
+                anyString(), eq(HttpMethod.POST), entityCaptor.capture(), eq(String.class));
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, Object> body = (java.util.Map<String, Object>) entityCaptor.getValue().getBody();
+        assertTrue(java.util.Map.of("type", "disabled").equals(body.get("thinking")));
+        assertTrue(body.containsKey("temperature"));
+        assertTrue(!body.containsKey("reasoning_effort"));
     }
 }

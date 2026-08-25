@@ -98,6 +98,8 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private int llmTimeoutSeconds = DEFAULT_LLM_TIMEOUT_SECONDS;
     private int llmMaxInputChars = DEFAULT_LLM_MAX_INPUT_CHARS;
     private int llmMaxTokens = DEFAULT_LLM_MAX_TOKENS;
+    private String llmThinking;
+    private String llmReasoningEffort;
     private RestTemplate llmRestTemplate;
     private EmbeddingService embeddingService;
     private boolean embeddingEnabled;
@@ -136,6 +138,8 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         llmBaseUrl = "";
         llmApiKey = "";
         llmModel = "";
+        llmThinking = null;
+        llmReasoningEffort = null;
         applyManagedLlmConfig();
         llmTimeoutSeconds = configParser.getInt("llm_timeout_seconds", DEFAULT_LLM_TIMEOUT_SECONDS, 10, 600);
         llmMaxInputChars = configParser.getInt("llm_max_input_chars", DEFAULT_LLM_MAX_INPUT_CHARS, 500, 20000);
@@ -469,6 +473,9 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         llmBaseUrl = firstConfigString(modelConfig, llmBaseUrl, "base_url", "url", "api_url", "endpoint_url");
         llmApiKey = firstConfigString(modelConfig, llmApiKey, "api_key", "api_password", "access_token", "token");
         llmModel = firstConfigString(modelConfig, llmModel, "model_name", "model", "llm_model", "resource_id");
+        llmThinking = normalizeOption(modelConfig.getStr("thinking"), "enabled", "disabled");
+        llmReasoningEffort = normalizeOption(
+                modelConfig.getStr("reasoning_effort"), "low", "high", "max");
     }
 
     private String firstConfigString(JSONObject config, String defaultValue, String... keys) {
@@ -482,6 +489,11 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             }
         }
         return defaultValue;
+    }
+
+    private String normalizeOption(String value, String... allowed) {
+        String normalized = StringUtils.lowerCase(StringUtils.trimToNull(value));
+        return StringUtils.equalsAny(normalized, allowed) ? normalized : null;
     }
 
     @Override
@@ -792,8 +804,18 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             throws Exception {
         Map<String, Object> requestBody = new LinkedHashMap<>();
         requestBody.put("model", llmModel);
-        requestBody.put("temperature", 0.1);
+        boolean thinkingEnabled = isDeepSeekEndpoint()
+                && "enabled".equals(llmThinking);
+        if (!thinkingEnabled) {
+            requestBody.put("temperature", 0.1);
+        }
         requestBody.put("max_tokens", llmMaxTokens);
+        if (isDeepSeekEndpoint() && llmThinking != null) {
+            requestBody.put("thinking", Map.of("type", llmThinking));
+        }
+        if (thinkingEnabled && llmReasoningEffort != null) {
+            requestBody.put("reasoning_effort", llmReasoningEffort);
+        }
         requestBody.put("messages", List.of(
                 Map.of("role", "system", "content", getChunkingSystemPrompt()),
                 Map.of("role", "user", "content",
@@ -849,6 +871,10 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             throw new RenException("模型接口返回内容为空");
         }
         return content;
+    }
+
+    private boolean isDeepSeekEndpoint() {
+        return StringUtils.containsIgnoreCase(llmBaseUrl, "deepseek.com");
     }
 
     private String extractMessageContent(String responseBody) throws Exception {
