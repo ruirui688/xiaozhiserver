@@ -126,7 +126,20 @@ class LocalKnowledgeAdapterContractTest {
         @SuppressWarnings("unchecked")
         java.util.Map<String, Object> body = (java.util.Map<String, Object>) entityCaptor.getValue().getBody();
         assertTrue(java.util.Map.of("type", "disabled").equals(body.get("thinking")));
+        assertTrue(java.util.Map.of("type", "json_object").equals(body.get("response_format")));
         assertTrue(body.containsKey("temperature"));
         assertTrue(!body.containsKey("reasoning_effort"));
+    }
+
+    @Test
+    void acceptsJsonObjectChunkEnvelopeRequiredByDeepSeekJsonMode() {
+        LocalKnowledgeAdapter adapter = new LocalKnowledgeAdapter();
+        ReflectionTestUtils.setField(adapter, "objectMapper", new ObjectMapper());
+
+        @SuppressWarnings("unchecked")
+        List<Object> chunks = ReflectionTestUtils.invokeMethod(adapter, "parseChunkedDocument",
+                "{\"chunks\":[{\"question\":\"问题\",\"answer\":\"答案\",\"content\":\"正文\"}]}");
+
+        assertTrue(chunks != null && chunks.size() == 1);
     }
 }

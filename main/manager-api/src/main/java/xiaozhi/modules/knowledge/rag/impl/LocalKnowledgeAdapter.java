@@ -813,6 +813,9 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         if (isDeepSeekEndpoint() && llmThinking != null) {
             requestBody.put("thinking", Map.of("type", llmThinking));
         }
+        if (isDeepSeekEndpoint()) {
+            requestBody.put("response_format", Map.of("type", "json_object"));
+        }
         if (thinkingEnabled && llmReasoningEffort != null) {
             requestBody.put("reasoning_effort", llmReasoningEffort);
         }
@@ -836,7 +839,9 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
                 + "不要把一句话、一个标题与正文、问题列表与对应答案切到不同片段。"
                 + "每个切片建议300到1200个中文字符；内容很短时可以更短，内容过长时按小标题或自然段继续拆。"
                 + "如果原文包含适用问题、关键词、正文等结构，应把同一条知识的这些字段放在同一个切片内。"
-                + "只输出JSON数组，不要Markdown，不要解释。数组元素字段固定为question、answer、content。"
+                + "只输出JSON对象，不要Markdown，不要解释。格式必须为"
+                + "{\"chunks\":[{\"question\":\"示例问题\",\"answer\":\"示例答案\",\"content\":\"完整知识片段\"}]}。"
+                + "chunks必须是非空数组，数组元素字段固定为question、answer、content。"
                 + "question用于填写该片段最适合回答的用户问题，可为空字符串；answer用于明确问答答案，可为空字符串；"
                 + "content必须是完整可检索知识片段。";
     }
