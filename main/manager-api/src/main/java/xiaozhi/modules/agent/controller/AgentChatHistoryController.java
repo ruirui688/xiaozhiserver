@@ -572,7 +572,7 @@ public class AgentChatHistoryController {
 
     private String buildLatencyCsv(List<Map<String, Object>> messages) {
         StringBuilder csv = new StringBuilder();
-        csv.append("session_id,turn_id,message_index,role,created_at,input_audio_duration_ms,vad_inference_ms,vad_speech_segment_ms,vad_decoded_duration_ms,gate_mode,vad_rms_dbfs_avg,vad_snr_db_avg,vad_noise_floor_dbfs,speech_to_eos_ms,asr_first_text_from_speech_ms,asr_provider_finalize_ms,eos_to_final_text_ms,asr_tail_after_audio_ms,voiceprint_ms,model_tool_chain_ms,llm_call_count,llm_model_ms,tool_call_count,tool_ms,tts_request_to_first_audio_ms,tts_provider_generation_ms,tts_report_ready_ms,output_audio_duration_ms,server_delivery_from_first_audio_ms,server_send_complete_from_tts_request_ms,prompt_tokens,completion_tokens,total_tokens,token_source\n");
+        csv.append("session_id,turn_id,message_index,role,created_at,input_audio_duration_ms,vad_inference_ms,vad_speech_segment_ms,vad_decoded_duration_ms,gate_mode,vad_rms_dbfs_avg,vad_snr_db_avg,vad_noise_floor_dbfs,speech_to_eos_ms,asr_first_text_from_speech_ms,asr_provider_finalize_ms,eos_to_final_text_ms,asr_tail_after_audio_ms,voiceprint_ms,model_tool_chain_ms,llm_call_count,llm_model_ms,tool_call_count,tool_ms,tts_request_to_first_audio_ms,tts_provider_generation_ms,tts_report_ready_ms,output_audio_duration_ms,server_delivery_from_first_audio_ms,server_send_complete_from_tts_request_ms,prompt_tokens,prompt_cache_hit_tokens,prompt_cache_miss_tokens,prompt_cache_hit_rate,completion_tokens,total_tokens,token_source\n");
         for (Map<String, Object> message : messages) {
             Map<String, Object> metrics = message.get("raw_metrics") instanceof Map<?, ?> map
                     ? toStringKeyMap(map)
@@ -611,6 +611,9 @@ public class AgentChatHistoryController {
                     .append(csv(assistantMetrics ? nested(metrics, "trace", "totals", "server_delivery_from_first_audio_ms") : null)).append(',')
                     .append(csv(assistantMetrics ? nested(metrics, "trace", "totals", "server_send_complete_from_tts_request_ms") : null)).append(',')
                     .append(csv(assistantMetrics ? nested(metrics, "trace", "totals", "tokens", "prompt_tokens") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "trace", "totals", "tokens", "prompt_cache_hit_tokens") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "trace", "totals", "tokens", "prompt_cache_miss_tokens") : null)).append(',')
+                    .append(csv(assistantMetrics ? nested(metrics, "trace", "totals", "tokens", "prompt_cache_hit_rate") : null)).append(',')
                     .append(csv(assistantMetrics ? nested(metrics, "trace", "totals", "tokens", "completion_tokens") : null)).append(',')
                     .append(csv(assistantMetrics ? nested(metrics, "trace", "totals", "tokens", "total_tokens") : null)).append(',')
                     .append(csv(assistantMetrics ? nested(metrics, "trace", "totals", "tokens", "source") : null)).append('\n');
@@ -620,7 +623,7 @@ public class AgentChatHistoryController {
 
     private String buildTraceCsv(List<Map<String, Object>> messages) {
         StringBuilder csv = new StringBuilder();
-        csv.append("session_id,turn_id,message_index,sequence,type,call_index,depth,name,action,success,tools_enabled,first_chunk_ms,total_ms,tool_call,tool_count,request_to_first_audio_ms,provider_generation_ms,report_ready_ms,audio_duration_ms,boundary,from_first_audio_ms,from_tts_request_ms,device_playback_confirmed,prompt_tokens,completion_tokens,total_tokens,token_source\n");
+        csv.append("session_id,turn_id,message_index,sequence,type,call_index,depth,name,action,success,tools_enabled,first_chunk_ms,total_ms,tool_call,tool_count,request_to_first_audio_ms,provider_generation_ms,report_ready_ms,audio_duration_ms,boundary,from_first_audio_ms,from_tts_request_ms,device_playback_confirmed,prompt_tokens,prompt_cache_hit_tokens,prompt_cache_miss_tokens,prompt_cache_hit_rate,completion_tokens,total_tokens,token_source\n");
         for (Map<String, Object> message : messages) {
             Map<String, Object> metrics = message.get("raw_metrics") instanceof Map<?, ?> map
                     ? toStringKeyMap(map)
@@ -650,6 +653,9 @@ public class AgentChatHistoryController {
                         .append(csv(step.get("from_tts_request_ms"))).append(',')
                         .append(csv(step.get("device_playback_confirmed"))).append(',')
                         .append(csv(nested(step, "tokens", "prompt_tokens"))).append(',')
+                        .append(csv(nested(step, "tokens", "prompt_cache_hit_tokens"))).append(',')
+                        .append(csv(nested(step, "tokens", "prompt_cache_miss_tokens"))).append(',')
+                        .append(csv(nested(step, "tokens", "prompt_cache_hit_rate"))).append(',')
                         .append(csv(nested(step, "tokens", "completion_tokens"))).append(',')
                         .append(csv(nested(step, "tokens", "total_tokens"))).append(',')
                         .append(csv(nested(step, "tokens", "source"))).append('\n');

@@ -227,6 +227,61 @@ class LLMProvider(LLMProviderBase):
                 logger.bind(tag=TAG).info(f"为域名 {domain} 禁用思考模式，参数: {params}")
                 break
 
+    @staticmethod
+    def _usage_value(usage_info, key):
+        """读取 OpenAI 标准字段或兼容端返回的扩展字段。"""
+        if isinstance(usage_info, dict):
+            return usage_info.get(key)
+        value = getattr(usage_info, key, None)
+        if value is not None:
+            return value
+        model_extra = getattr(usage_info, "model_extra", None)
+        return model_extra.get(key) if isinstance(model_extra, dict) else None
+
+    @classmethod
+    def _build_usage(cls, usage_info):
+        usage = {
+            "prompt_tokens": cls._usage_value(usage_info, "prompt_tokens"),
+            "completion_tokens": cls._usage_value(usage_info, "completion_tokens"),
+            "total_tokens": cls._usage_value(usage_info, "total_tokens"),
+        }
+        cache_hit_tokens = cls._usage_value(
+            usage_info, "prompt_cache_hit_tokens"
+        )
+        cache_miss_tokens = cls._usage_value(
+            usage_info, "prompt_cache_miss_tokens"
+        )
+        if cache_hit_tokens is not None or cache_miss_tokens is not None:
+            usage["prompt_cache_hit_tokens"] = cache_hit_tokens
+            usage["prompt_cache_miss_tokens"] = cache_miss_tokens
+            cache_input_tokens = int(cache_hit_tokens or 0) + int(
+                cache_miss_tokens or 0
+            )
+            if cache_input_tokens > 0:
+                usage["prompt_cache_hit_rate"] = round(
+                    int(cache_hit_tokens or 0) / cache_input_tokens,
+                    6,
+                )
+        return usage
+
+    @staticmethod
+    def _log_usage(usage):
+        cache_summary = ""
+        if "prompt_cache_hit_tokens" in usage:
+            hit_tokens = usage.get("prompt_cache_hit_tokens") or 0
+            miss_tokens = usage.get("prompt_cache_miss_tokens") or 0
+            hit_rate = usage.get("prompt_cache_hit_rate")
+            rate_text = f"{hit_rate:.2%}" if hit_rate is not None else "未知"
+            cache_summary = (
+                f"，缓存命中 {hit_tokens}，未命中 {miss_tokens}，"
+                f"命中率 {rate_text}"
+            )
+        logger.bind(tag=TAG).info(
+            f"Token 消耗：输入 {usage.get('prompt_tokens', '未知')}，"
+            f"输出 {usage.get('completion_tokens', '未知')}，"
+            f"共计 {usage.get('total_tokens', '未知')}{cache_summary}"
+        )
+
     def response(self, session_id, dialogue, **kwargs):
         dialogue = self.normalize_dialogue(dialogue)
         self.last_usage = None
@@ -264,16 +319,8 @@ class LLMProvider(LLMProviderBase):
             for chunk in self._iter_stream_with_deadline(responses):
                 usage_info = getattr(chunk, "usage", None)
                 if isinstance(usage_info, CompletionUsage):
-                    self.last_usage = {
-                        "prompt_tokens": getattr(usage_info, "prompt_tokens", None),
-                        "completion_tokens": getattr(usage_info, "completion_tokens", None),
-                        "total_tokens": getattr(usage_info, "total_tokens", None),
-                    }
-                    logger.bind(tag=TAG).info(
-                        f"Token 消耗：输入 {self.last_usage.get('prompt_tokens', '未知')}，"
-                        f"输出 {self.last_usage.get('completion_tokens', '未知')}，"
-                        f"共计 {self.last_usage.get('total_tokens', '未知')}"
-                    )
+                    self.last_usage = self._build_usage(usage_info)
+                    self._log_usage(self.last_usage)
                     continue
                 try:
                     delta = chunk.choices[0].delta if getattr(chunk, "choices", None) else None
@@ -339,15 +386,7 @@ class LLMProvider(LLMProviderBase):
                     yield content, tool_calls
                 elif isinstance(getattr(chunk, "usage", None), CompletionUsage):
                     usage_info = getattr(chunk, "usage", None)
-                    self.last_usage = {
-                        "prompt_tokens": getattr(usage_info, "prompt_tokens", None),
-                        "completion_tokens": getattr(usage_info, "completion_tokens", None),
-                        "total_tokens": getattr(usage_info, "total_tokens", None),
-                    }
-                    logger.bind(tag=TAG).info(
-                        f"Token 消耗：输入 {self.last_usage.get('prompt_tokens', '未知')}，"
-                        f"输出 {self.last_usage.get('completion_tokens', '未知')}，"
-                        f"共计 {self.last_usage.get('total_tokens', '未知')}"
-                    )
+                    self.last_usage = self._build_usage(usage_info)
+                    self._log_usage(self.last_usage)
         finally:
             stream.close()

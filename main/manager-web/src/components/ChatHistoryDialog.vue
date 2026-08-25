@@ -466,6 +466,9 @@ export default {
             const promptTokens = this.getNested(totals, ['tokens', 'prompt_tokens']);
             const completionTokens = this.getNested(totals, ['tokens', 'completion_tokens']);
             const totalTokens = this.getNested(totals, ['tokens', 'total_tokens']);
+            const cacheHitTokens = this.getNested(totals, ['tokens', 'prompt_cache_hit_tokens']);
+            const cacheMissTokens = this.getNested(totals, ['tokens', 'prompt_cache_miss_tokens']);
+            const cacheHitRate = this.getNested(totals, ['tokens', 'prompt_cache_hit_rate']);
             if (promptTokens !== null && promptTokens !== undefined && promptTokens !== '') {
                 items.push({ label: 'Token入', value: `${promptTokens}${tokenSuffix}` });
             }
@@ -474,6 +477,15 @@ export default {
             }
             if (totalTokens !== null && totalTokens !== undefined && totalTokens !== '') {
                 items.push({ label: 'Token总', value: `${totalTokens}${tokenSuffix}` });
+            }
+            if (cacheHitTokens !== null && cacheHitTokens !== undefined && cacheHitTokens !== '') {
+                items.push({ label: '缓存命中', value: `${cacheHitTokens}` });
+            }
+            if (cacheMissTokens !== null && cacheMissTokens !== undefined && cacheMissTokens !== '') {
+                items.push({ label: '缓存未命中', value: `${cacheMissTokens}` });
+            }
+            if (cacheHitRate !== null && cacheHitRate !== undefined && cacheHitRate !== '') {
+                items.push({ label: '缓存命中率', value: `${(Number(cacheHitRate) * 100).toFixed(2)}%` });
             }
             return items;
         },

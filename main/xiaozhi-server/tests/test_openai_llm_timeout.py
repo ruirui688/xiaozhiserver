@@ -49,6 +49,13 @@ def _chunk(content="", tool_calls=None):
     )
 
 
+def _usage_chunk(**usage):
+    return SimpleNamespace(
+        choices=[],
+        usage=openai_llm.CompletionUsage.model_validate(usage),
+    )
+
+
 def _provider(monkeypatch, stream, **overrides):
     captured = {}
 
@@ -222,6 +229,36 @@ def test_normal_stream_finishes_within_total_budget(monkeypatch):
 
     assert list(provider.response("session", _dialogue())) == ["你", "好"]
     assert stream.closed is True
+
+
+def test_deepseek_cache_usage_is_preserved_from_extension_fields(monkeypatch):
+    stream = FakeStream(
+        [
+            _chunk("你好"),
+            _usage_chunk(
+                prompt_tokens=100,
+                completion_tokens=10,
+                total_tokens=110,
+                prompt_cache_hit_tokens=75,
+                prompt_cache_miss_tokens=25,
+            ),
+        ]
+    )
+    provider, _ = _provider(
+        monkeypatch,
+        stream,
+        base_url="https://api.deepseek.com",
+    )
+
+    assert list(provider.response("session", _dialogue())) == ["你好"]
+    assert provider.last_usage == {
+        "prompt_tokens": 100,
+        "completion_tokens": 10,
+        "total_tokens": 110,
+        "prompt_cache_hit_tokens": 75,
+        "prompt_cache_miss_tokens": 25,
+        "prompt_cache_hit_rate": 0.75,
+    }
 
 
 def test_read_timeout_in_executor_keeps_heartbeat_and_next_round_recovers(

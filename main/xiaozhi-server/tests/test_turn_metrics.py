@@ -166,6 +166,50 @@ def test_llm_estimated_tokens_include_input_and_output():
     assert tokens["source"] == "estimated_input_output_chars"
 
 
+def test_provider_cache_usage_is_aggregated_with_token_weighted_hit_rate():
+    metrics = TurnMetrics()
+    metrics.ensure_text_turn()
+
+    metrics.record_llm_started(False, 0, dialogue=[{"role": "user", "content": "第一次"}])
+    metrics.record_llm_complete(
+        "",
+        {
+            "prompt_tokens": 100,
+            "prompt_cache_hit_tokens": 80,
+            "prompt_cache_miss_tokens": 20,
+            "completion_tokens": 10,
+            "total_tokens": 110,
+            "prompt_cache_hit_rate": 0.8,
+        },
+        True,
+        1,
+        depth=0,
+    )
+    metrics.record_tool_call("test_tool", 10, depth=0)
+    metrics.record_llm_started(False, 1, dialogue=[{"role": "tool", "content": "{}"}])
+    metrics.record_llm_complete(
+        "完成",
+        {
+            "prompt_tokens": 50,
+            "prompt_cache_hit_tokens": 10,
+            "prompt_cache_miss_tokens": 40,
+            "completion_tokens": 5,
+            "total_tokens": 55,
+            "prompt_cache_hit_rate": 0.2,
+        },
+        False,
+        0,
+        depth=1,
+    )
+
+    payload = metrics.build_assistant_metrics("完成")
+    tokens = payload["trace"]["totals"]["tokens"]
+    assert tokens["prompt_tokens"] == 150
+    assert tokens["prompt_cache_hit_tokens"] == 90
+    assert tokens["prompt_cache_miss_tokens"] == 60
+    assert tokens["prompt_cache_hit_rate"] == 0.6
+
+
 def test_trace_preserves_recursive_llm_and_tool_steps(monkeypatch):
     current = {"monotonic": 100.0}
     monkeypatch.setattr(

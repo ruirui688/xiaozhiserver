@@ -457,6 +457,33 @@ class TurnMetrics:
                 "total_tokens": sum(int(row.get("total_tokens") or 0) for row in token_rows),
                 "source": next(iter(sources)) if len(sources) == 1 else "aggregate_mixed",
             }
+            cache_rows = [
+                row
+                for row in token_rows
+                if "prompt_cache_hit_tokens" in row
+                or "prompt_cache_miss_tokens" in row
+            ]
+            if cache_rows:
+                cache_hit_tokens = sum(
+                    int(row.get("prompt_cache_hit_tokens") or 0)
+                    for row in cache_rows
+                )
+                cache_miss_tokens = sum(
+                    int(row.get("prompt_cache_miss_tokens") or 0)
+                    for row in cache_rows
+                )
+                totals["tokens"].update(
+                    {
+                        "prompt_cache_hit_tokens": cache_hit_tokens,
+                        "prompt_cache_miss_tokens": cache_miss_tokens,
+                    }
+                )
+                cache_input_tokens = cache_hit_tokens + cache_miss_tokens
+                if cache_input_tokens > 0:
+                    totals["tokens"]["prompt_cache_hit_rate"] = round(
+                        cache_hit_tokens / cache_input_tokens,
+                        6,
+                    )
 
         if tts_steps:
             tts_step = tts_steps[-1]
@@ -713,6 +740,13 @@ class TurnMetrics:
                     "total_tokens": usage.get("total_tokens"),
                     "source": "provider_usage",
                 }
+                for key in (
+                    "prompt_cache_hit_tokens",
+                    "prompt_cache_miss_tokens",
+                    "prompt_cache_hit_rate",
+                ):
+                    if key in usage:
+                        step["tokens"][key] = usage.get(key)
             elif content_text:
                 completion_tokens = _estimated_token_count(content_text)
                 prompt_tokens = step.get("tokens", {}).get("prompt_tokens")
