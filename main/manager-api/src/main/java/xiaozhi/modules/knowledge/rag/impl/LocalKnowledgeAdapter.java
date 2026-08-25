@@ -78,6 +78,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private static final int DEFAULT_LLM_TIMEOUT_SECONDS = 90;
     private static final int DEFAULT_LLM_MAX_INPUT_CHARS = 12000;
     private static final int DEFAULT_LLM_MAX_TOKENS = 4000;
+    private static final int MIN_ADAPTIVE_SECTION_CHARS = 1000;
     private static final int DEFAULT_RETRIEVAL_TOP_K = 10;
     private static final int DEFAULT_RETRIEVAL_LEVEL = 4;
     private static final int DEFAULT_CANDIDATE_LIMIT = 400;
@@ -748,30 +749,55 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         List<String> sections = textSplitter().splitLlmSections(text);
         for (int i = 0; i < sections.size(); i++) {
             String section = sections.get(i);
-            Exception lastError = null;
-            for (int attempt = 0; attempt <= 1; attempt++) {
-                try {
-                    chunks.addAll(chunkSectionWithLlm(filename, section, i + 1, sections.size()));
-                    lastError = null;
-                    break;
-                } catch (Exception e) {
-                    lastError = e;
-                    if (attempt == 0) {
-                        log.warn("本地知识库大模型切片分段{}/{}首次失败，即将重试: {}",
-                                i + 1, sections.size(), e.getMessage());
-                    }
-                }
-            }
-            if (lastError != null) {
-                throw new RenException(String.format(
-                        "大模型语义切片失败（分段%d/%d），未生成规则切片: %s",
-                        i + 1, sections.size(), lastError.getMessage()), lastError);
-            }
+            chunks.addAll(chunkSectionWithAdaptiveSplit(
+                    filename, section, i + 1, sections.size()));
             notifyProgress(progressListener, 0.10D + (0.80D * (i + 1) / sections.size()));
         }
         return chunks.stream()
                 .filter(chunk -> StringUtils.isNotBlank(chunk.getContent()))
                 .collect(Collectors.toList());
+    }
+
+    private List<LocalChunk> chunkSectionWithAdaptiveSplit(
+            String filename, String section, int sectionIndex, int totalSections) {
+        Exception lastError = null;
+        for (int attempt = 0; attempt <= 1; attempt++) {
+            try {
+                return chunkSectionWithLlm(filename, section, sectionIndex, totalSections);
+            } catch (Exception e) {
+                lastError = e;
+                if (attempt == 0) {
+                    log.warn("本地知识库大模型切片分段{}/{}首次失败，即将重试: {}",
+                            sectionIndex, totalSections, e.getMessage());
+                }
+            }
+        }
+
+        List<String> smallerSections = splitFailedSection(section);
+        if (smallerSections.size() > 1) {
+            log.warn("本地知识库大模型切片分段{}/{}连续失败，缩小为{}段后重试: {}",
+                    sectionIndex, totalSections, smallerSections.size(), lastError.getMessage());
+            List<LocalChunk> recovered = new ArrayList<>();
+            for (int i = 0; i < smallerSections.size(); i++) {
+                recovered.addAll(chunkSectionWithAdaptiveSplit(
+                        filename, smallerSections.get(i), i + 1, smallerSections.size()));
+            }
+            return recovered;
+        }
+
+        throw new RenException(String.format(
+                "大模型语义切片失败（分段%d/%d），未生成规则切片: %s",
+                sectionIndex, totalSections, lastError.getMessage()), lastError);
+    }
+
+    private List<String> splitFailedSection(String section) {
+        int length = StringUtils.length(section);
+        if (length <= MIN_ADAPTIVE_SECTION_CHARS) {
+            return List.of(section);
+        }
+        int smallerLimit = Math.max(MIN_ADAPTIVE_SECTION_CHARS, length / 2);
+        List<String> smallerSections = new LocalKnowledgeTextSplitter(smallerLimit).splitLlmSections(section);
+        return smallerSections.size() > 1 ? smallerSections : List.of(section);
     }
 
     @SuppressWarnings("unused")
@@ -854,7 +880,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         payload.put("total_sections", totalSections);
         payload.put("max_chunk_chars", maxChunkChars);
         payload.put("document", section);
-        return "请对下面文档分段进行知识库切片，并返回JSON数组：\n"
+        return "请对下面文档分段进行知识库切片，并返回包含非空chunks数组的JSON对象：\n"
                 + objectMapper.writeValueAsString(payload);
     }
 

@@ -142,4 +142,32 @@ class LocalKnowledgeAdapterContractTest {
 
         assertTrue(chunks != null && chunks.size() == 1);
     }
+
+    @Test
+    void retriesTruncatedJsonWithSmallerInputSections() {
+        LocalKnowledgeAdapter adapter = new LocalKnowledgeAdapter();
+        RestTemplate restTemplate = mock(RestTemplate.class);
+        ReflectionTestUtils.setField(adapter, "llmModelId", "llm-1");
+        ReflectionTestUtils.setField(adapter, "llmBaseUrl", "https://api.deepseek.com");
+        ReflectionTestUtils.setField(adapter, "llmModel", "deepseek-v4-flash");
+        ReflectionTestUtils.setField(adapter, "llmApiKey", "test-key");
+        ReflectionTestUtils.setField(adapter, "llmThinking", "disabled");
+        ReflectionTestUtils.setField(adapter, "llmMaxInputChars", 4000);
+        ReflectionTestUtils.setField(adapter, "llmMaxTokens", 4000);
+        ReflectionTestUtils.setField(adapter, "objectMapper", new ObjectMapper());
+        ReflectionTestUtils.setField(adapter, "llmRestTemplate", restTemplate);
+        String truncated = "{\"choices\":[{\"message\":{\"content\":\"{\\\"chunks\\\":[{\"}}]}";
+        String complete = "{\"choices\":[{\"message\":{\"content\":\"{\\\"chunks\\\":[{\\\"question\\\":\\\"q\\\",\\\"answer\\\":\\\"a\\\",\\\"content\\\":\\\"c\\\"}]}\"}}]}";
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
+                .thenReturn(ResponseEntity.ok(truncated), ResponseEntity.ok(truncated),
+                        ResponseEntity.ok(complete), ResponseEntity.ok(complete));
+
+        @SuppressWarnings("unchecked")
+        List<Object> chunks = ReflectionTestUtils.invokeMethod(adapter, "chunkDocumentWithLlm",
+                "large.xlsx", "正文。".repeat(800));
+
+        assertTrue(chunks != null && chunks.size() == 2);
+        org.mockito.Mockito.verify(restTemplate, org.mockito.Mockito.times(4)).exchange(
+                anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class));
+    }
 }
