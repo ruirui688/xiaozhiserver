@@ -685,9 +685,11 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             Consumer<Double> progressListener) throws Exception {
         LocalKnowledgeDocumentParser.ParsedDocument parsed =
                 new LocalKnowledgeDocumentParser(objectMapper, maxChunkChars).parse(filename, inputStream);
-        boolean direct = processingStrategy == LocalKnowledgeProcessingStrategy.DIRECT
+        // 结构化记录的行/对象边界是数据契约，模型不得重新合并或拆散。
+        boolean direct = parsed.structured()
+                || processingStrategy == LocalKnowledgeProcessingStrategy.DIRECT
                 || (processingStrategy == LocalKnowledgeProcessingStrategy.AUTO
-                        && (parsed.structured() || !hasUsableLlm()));
+                        && !hasUsableLlm());
         if (direct) {
             notifyProgress(progressListener, 0.90D);
             log.info("本地知识库使用确定性直接切片: filename={}, strategy={}, structured={}, chunks={}",

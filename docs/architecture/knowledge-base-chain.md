@@ -85,14 +85,16 @@ LocalKnowledgeAdapter.parseFile()
       QA → 保留 question/answer
       TXT/MD/MDX → 按自然边界生成文本切片
   → LocalKnowledgeProcessingStrategy 路由
+      结构化记录硬约束:
+        Excel/CSV 的每个数据行、JSON/JSONL 的每个对象都是不可合并的原子记录
+        无论选择哪种策略，都直接持久化确定性切片，不允许模型跨记录重组
       AUTO:
-        结构化文件 → DIRECT
         普通文本且模型可用 → LLM_ENHANCED
         普通文本且模型不可用 → DIRECT
       DIRECT:
         直接持久化确定性解析结果，不发起切片模型请求
       LLM_ENHANCED:
-        将预解析文本交给 chunkDocumentWithLlm()
+        仅将非结构化预解析文本交给 chunkDocumentWithLlm()
           → 服务端按安全预算划分模型输入窗口（窗口不是最终切片）
           → OpenAI Chat Completions 兼容 LLM 输出 question/answer/content JSON 对象
           → 单个输入窗口失败时重试 1 次；连续失败且窗口较大时按自然边界减半重试
@@ -101,7 +103,8 @@ LocalKnowledgeAdapter.parseFile()
 
 新建知识库默认使用 `AUTO`。旧知识库没有 `processing_strategy` 字段时按 `LLM_ENHANCED` 解释，避免升级后静默改变
 已有处理语义；用户保存后会显式写入 `auto`、`direct` 或 `llm_enhanced`。`DIRECT` 不要求配置切片模型，
-`LLM_ENHANCED` 必须选择已启用且测试通过的兼容模型，`AUTO` 中的模型是可选增强能力。
+`LLM_ENHANCED` 必须选择已启用且测试通过的兼容模型，`AUTO` 中的模型是可选增强能力。模型只增强非结构化正文，
+不能改变结构化文件“一行/一个对象对应一个或多个仅由长度上限拆分的切片”这一来源边界。
 
 输入字符数和输出 Token 数不再由页面配置。字符数无法准确推导不同模型的输出长度，人工放大输入窗口容易造成
 结构化 JSON 在输出上限处被截断；服务端统一使用保守预算，并在真实响应仍过长时自动缩小输入窗口。历史

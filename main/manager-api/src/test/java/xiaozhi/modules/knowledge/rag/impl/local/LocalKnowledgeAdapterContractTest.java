@@ -56,6 +56,28 @@ class LocalKnowledgeAdapterContractTest {
     }
 
     @Test
+    void llmEnhancedExcelStillPreservesRecordBoundariesWithoutCallingTheModel() throws Exception {
+        LocalKnowledgeAdapter adapter = new LocalKnowledgeAdapter();
+        RestTemplate restTemplate = mock(RestTemplate.class);
+        ReflectionTestUtils.setField(adapter, "processingStrategy", LocalKnowledgeProcessingStrategy.LLM_ENHANCED);
+        ReflectionTestUtils.setField(adapter, "objectMapper", new ObjectMapper());
+        ReflectionTestUtils.setField(adapter, "maxChunkChars", 1200);
+        ReflectionTestUtils.setField(adapter, "llmModelId", "llm-1");
+        ReflectionTestUtils.setField(adapter, "llmBaseUrl", "https://example.invalid/v1");
+        ReflectionTestUtils.setField(adapter, "llmModel", "semantic-chunker");
+        ReflectionTestUtils.setField(adapter, "llmRestTemplate", restTemplate);
+
+        @SuppressWarnings("unchecked")
+        List<Object> chunks = ReflectionTestUtils.invokeMethod(adapter, "parseFile",
+                "产品知识.xlsx",
+                new ByteArrayInputStream(LocalKnowledgeDocumentParserTest.workbookWithQaRows()),
+                null);
+
+        assertTrue(chunks != null && chunks.size() == 2);
+        verifyNoInteractions(restTemplate);
+    }
+
+    @Test
     void keepsLlmBudgetsServerManaged() {
         LocalKnowledgeAdapter adapter = new LocalKnowledgeAdapter();
 
