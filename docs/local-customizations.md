@@ -924,3 +924,18 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 是否允许被官方覆盖：否
 官方同步时的处理规则：必须保留设备级 speech_input_mode/speech_output_mode 与运行时 speech_routing.input/output 的 server/device/auto 契约，默认 server/server；设备能力只来自当前已认证 WebSocket 的 hello features.speech，策略与能力解析后的 speech_route 才是当前连接实际路由。显式 device 缺能力必须报 incompatible_route，auto 只在能力完整时选择设备端；设备 TTS 必须同时声明 playback ACK，没有 ACK 时不能声称设备已播放。设备 ASR 只接受 listen.detect 的 source=device_asr、final=true、受校验 turn_id 和非空文本，必须保留幂等缓存、速率限制、speech_asr_ack 和正文日志脱敏。设备 TTS 必须继续通过现有 generation/TTS 队列发送 text/text_end，等待 played/failed/aborted tts_ack；只有 played 正常完成，失败、Abort、文件输入或超时不能伪造完成，也不得在同一半轮切回服务端合成。四种传统输入/输出组合必须继续复用 SemanticCenter、LLM、工具和聊天边界；Realtime 与任一实际设备端语音路由不兼容，不得混合。后台策略更新只能在空闲安全轮次构造候选管线后热切换，失败恢复旧管线；固件能力变化需要重连重新协商。管理端更新必须保留 Workspace 写权限与事务提交后按设备刷新，日志不得记录设备 ASR/TTS 正文、Token、密钥或完整私有配置。
 ```
+
+## 47. 按资源启用的 DeepSeek Harness 自主维护
+
+```text
+定制模块：manager-api 维护控制面、manager-web 按资源策略页、独立 maintenance-agent、生产可选 profile
+改动原因：少量需要时效性的知识库需要自主发现公开来源，指定智能体的长期记忆需要周期审校；两者不能演变成拥有数据库和 Shell 权限的后台通用 Agent，也不能默认扩散到全部资源。
+关键文件：
+  - main/manager-api/src/main/java/xiaozhi/modules/maintenance/
+  - main/manager-api/src/main/resources/db/changelog/202608252130.sql
+  - main/manager-web/src/components/maintenance/MaintenancePolicyPanel.vue
+  - main/maintenance-agent/
+  - deploy/production/docker-compose.yml
+是否允许被官方覆盖：否
+官方同步时的处理规则：必须保留 Manager API 对资源权限、策略、月度运行上限、提案审批和最终写入的唯一权威。Harness 只能返回字段白名单内的结构化提案；禁止数据库凭据、宿主源码挂载、Shell、编辑器、动态 Cordis 和回调写权限。知识维护按 dataset opt-in，web_fetch 保持关闭，自动采纳必须匹配可信域名并再次通过公网 URL/SSRF 校验，然后复用 KnowledgeSourceService 现有发布链。记忆维护按 agent opt-in、禁止联网和 ADD，所有 UPDATE/ARCHIVE/DELETE 必须人工批准并通过 MemoryService 留 revision。不得把临时 Harness session 当作产品记忆，不得记录完整提示词、模型原始响应、记忆正文或密钥。
+```

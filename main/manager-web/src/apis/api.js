@@ -16,6 +16,7 @@ import music from './module/music.js'
 import memory from './module/memory.js'
 import workspace from './module/workspace.js'
 import person from './module/person.js'
+import maintenance from './module/maintenance.js'
 
 
 
@@ -62,5 +63,6 @@ export default {
     music,
     memory,
     workspace,
-    person
+    person,
+    maintenance
   }

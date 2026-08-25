@@ -25,6 +25,7 @@
         <el-button size="small" type="danger" icon="el-icon-delete" :loading="clearLoading" :disabled="maintenanceBusy" @click="handleClear">清空记忆</el-button>
         <el-button size="small" icon="el-icon-edit" :disabled="maintenanceBusy" @click="showRemember = !showRemember">记住</el-button>
         <el-button size="small" icon="el-icon-delete" :disabled="maintenanceBusy" @click="showForget = !showForget">忘记</el-button>
+        <el-button size="small" type="warning" plain icon="el-icon-magic-stick" :disabled="maintenanceBusy" @click="harnessPanelVisible = true">Harness维护</el-button>
         <el-button size="small" icon="el-icon-refresh" @click="fetch" :loading="loading">刷新</el-button>
         <el-button size="small" icon="el-icon-back" @click="$router.push('/')">返回</el-button>
       </div>
@@ -180,6 +181,14 @@
       @cancel="editVisible = false"
     />
 
+    <MaintenancePolicyPanel
+      :visible="harnessPanelVisible"
+      resource-type="MEMORY"
+      :resource-id="agentId"
+      @close="harnessPanelVisible = false"
+      @changed="fetch"
+    />
+
     <el-dialog
       :title="previewDialogTitle"
       :visible.sync="rebuildPreviewVisible"
@@ -238,6 +247,7 @@ import MemoryTimeline from './memory/MemoryTimeline.vue'
 import MemoryCandidates from './memory/MemoryCandidates.vue'
 import MemoryDetailPanel from './memory/MemoryDetailPanel.vue'
 import MemoryEditDialog from './memory/MemoryEditDialog.vue'
+import MaintenancePolicyPanel from '@/components/maintenance/MaintenancePolicyPanel.vue'
 import Api from '@/apis/api'
 import {
   canRecoverRebuildTask,
@@ -259,7 +269,8 @@ export default {
     MemoryTimeline,
     MemoryCandidates,
     MemoryDetailPanel,
-    MemoryEditDialog
+    MemoryEditDialog,
+    MaintenancePolicyPanel
   },
   data() {
     return {
@@ -283,6 +294,7 @@ export default {
       editVisible: false,
       editItem: {},
       editMemoryId: '',
+      harnessPanelVisible: false,
       // Rebuild
       rebuildSessionLimit: 15,
       rebuildMode: 'clear_then_rebuild',

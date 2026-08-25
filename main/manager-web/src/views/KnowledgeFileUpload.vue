@@ -96,6 +96,9 @@
                 <el-button type="warning" icon="el-icon-connection" @click="sourcePanelVisible = true">
                   动态数据源
                 </el-button>
+                <el-button type="warning" plain icon="el-icon-magic-stick" @click="maintenancePanelVisible = true">
+                  自主维护
+                </el-button>
                 <el-button type="danger" @click="handleBatchDelete" :disabled="selectedFiles.length === 0">
                   {{ $t('knowledgeFileUpload.batchDelete') }}
                 </el-button>
@@ -152,6 +155,13 @@
       :dataset-id="datasetId"
       @close="sourcePanelVisible = false"
       @documents-changed="fetchFileList" />
+
+    <maintenance-policy-panel
+      :visible="maintenancePanelVisible"
+      resource-type="KNOWLEDGE"
+      :resource-id="datasetId"
+      @close="maintenancePanelVisible = false"
+      @changed="fetchFileList" />
 
     <!-- 召回测试弹窗 -->
     <el-dialog :title="$t('knowledgeFileUpload.retrievalTest')" :visible.sync="retrievalTestDialogVisible"
@@ -212,9 +222,10 @@ import VersionFooter from "@/components/VersionFooter.vue";
 import FileUploadPanel from "@/components/knowledge/FileUploadPanel.vue";
 import FilePreviewDialog from "@/components/knowledge/FilePreviewDialog.vue";
 import KnowledgeSourcePanel from "@/components/knowledge/KnowledgeSourcePanel.vue";
+import MaintenancePolicyPanel from "@/components/maintenance/MaintenancePolicyPanel.vue";
 
 export default {
-  components: { HeaderBar, VersionFooter, FileUploadPanel, FilePreviewDialog, KnowledgeSourcePanel },
+  components: { HeaderBar, VersionFooter, FileUploadPanel, FilePreviewDialog, KnowledgeSourcePanel, MaintenancePolicyPanel },
   data() {
     return {
       datasetId: '',
@@ -229,6 +240,7 @@ export default {
       total: 0,
       uploadDialogVisible: false,
       sourcePanelVisible: false,
+      maintenancePanelVisible: false,
       uploadUrl: '',
       isAllSelected: false,
 

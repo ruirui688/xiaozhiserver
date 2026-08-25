@@ -429,3 +429,25 @@ mysql> SELECT kb.name, count(d.id) as docs, count(c.id) as chunks
 mysql> SELECT count(*), embedding_json IS NOT NULL as has_embedding
        FROM ai_rag_knowledge_chunk GROUP BY has_embedding;
 ```
+
+## 11. 可选的 Harness 自主维护控制面
+
+自主维护不是所有知识库的默认能力。运营人员必须在某一个本地知识库中单独启用
+`DISCOVERY_REVIEW` 或 `DISCOVERY_AUTO`；未配置策略的知识库保持 `OFF`，人工上传和既有召回链不变。
+
+```text
+按库策略/主题/可信域名/月度次数
+        ↓
+manager-api 生成有界快照（库说明 + 已有来源，不发送切片正文）
+        ↓ 内网 Bearer HTTP
+maintenance-agent → DeepSeek Harness → web_search（最多 3 次查询、2 次搜索模型使用）
+        ↓ 仅结构化 ADD_SOURCE 提案
+manager-api 校验公网 URL、去重、审批/可信域名
+        ↓
+KnowledgeSourceService → 既有安全抓取、确定性切片、候选版本原子发布
+```
+
+Harness 没有数据库、Shell、编辑器、宿主源码或回调写权限。`web_fetch` 明确不挂载，避免运行容器成为
+可访问内网的 SSRF 原语。人工审批模式永不自动添加来源；自动模式也只接受显式白名单域名及其子域，
+并再次经过 `PublicUrlGuard`。数据库只保存策略、运行计数和字段白名单后的提案，不保存完整提示词、
+模型原始响应或 Harness 会话日志。

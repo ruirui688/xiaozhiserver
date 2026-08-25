@@ -14,6 +14,24 @@
 
 这是本项目的唯一生产部署入口。
 
+### 可选：启用 DeepSeek Harness 自主维护
+
+默认发布不会启动维护适配器，全部资源策略也默认为关闭。仅在确实需要少量知识库/智能体自主维护时，
+在生产数据目录 `.env` 配置以下值并执行升级；不要提交这些真实值：
+
+```dotenv
+COMPOSE_PROFILES=maintenance
+XIAOZHI_MAINTENANCE_HARNESS_ENABLED=true
+XIAOZHI_MAINTENANCE_AGENT_SECRET=使用密码生成器创建的长随机内部密钥
+DEEPSEEK_API_KEY=真实DeepSeek密钥
+XIAOZHI_MAINTENANCE_MODEL=deepseek-v4-flash
+```
+
+`xiaozhi-maintenance-agent` 不映射宿主端口或目录，只有 manager-api 能在容器网络调用。启用容器不等于启用
+任何资源：还必须在对应知识库或智能体页面逐一保存策略。关闭时同时将 Harness 开关设为 `false` 并从
+`COMPOSE_PROFILES` 移除 `maintenance`。DeepSeek Harness 当前为 Developer Preview，SDK/runtime 固定为
+`0.1.1rc1`；升级该版本必须先跑适配器契约测试和一次非生产真实搜索验收。
+
 ```text
 开发/构建机：完整源码 -> 构建镜像 -> 推送阿里云 ACR
 生产服务器：引导脚本 -> 拉取版本化 deploy-assets -> 拉取匹配镜像 -> Docker Compose 启动

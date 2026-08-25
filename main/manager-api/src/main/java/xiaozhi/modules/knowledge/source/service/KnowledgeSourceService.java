@@ -63,6 +63,14 @@ public class KnowledgeSourceService {
     }
 
     public KnowledgeSourceView create(String datasetId, KnowledgeSourceRequest request) {
+        return createManaged(datasetId, request, SecurityUser.getUserId());
+    }
+
+    /** Creates a source from a trusted background workflow with an explicit audit actor. */
+    public KnowledgeSourceView createManaged(String datasetId, KnowledgeSourceRequest request, Long creator) {
+        if (creator == null) {
+            throw new RenException("动态数据源创建者不能为空");
+        }
         KnowledgeBaseDTO dataset = requireLocalDataset(datasetId);
         PublicUrlGuard.requirePublicHttpUrl(request.getSourceUri());
         Date now = new Date();
@@ -78,7 +86,7 @@ public class KnowledgeSourceService {
         entity.setCurrentRevision(0);
         entity.setConsecutiveFailures(0);
         entity.setNextSyncAt(entity.getEnabled() == 1 ? now : null);
-        entity.setCreator(SecurityUser.getUserId());
+        entity.setCreator(creator);
         entity.setCreatedAt(now);
         entity.setUpdatedAt(now);
         sourceDao.insert(entity);

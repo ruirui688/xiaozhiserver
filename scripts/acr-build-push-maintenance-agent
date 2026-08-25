@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ACR_REGISTRY="${ACR_REGISTRY:-crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com}"
+ACR_NAMESPACE="${ACR_NAMESPACE:-yihuixiaozhi}"
+IMAGE_REPOSITORY="${MAINTENANCE_AGENT_IMAGE_REPOSITORY:-$ACR_REGISTRY/$ACR_NAMESPACE/xiaozhi-maintenance-agent}"
+VERSION="${VERSION:-local}"
+IMAGE_TAG_SUFFIX="${IMAGE_TAG_SUFFIX:-}"
+CHANNEL_TAG="${CHANNEL_TAG:-latest}"
+PLATFORMS="${PLATFORMS:-linux/amd64}"
+PUSH="${PUSH:-false}"
+BUILD_ENGINE="${BUILD_ENGINE:-docker}"
+PIP_INDEX_URL="${MAINTENANCE_PIP_INDEX_URL:-https://pypi.org/simple}"
+PYTHON_BASE_IMAGE="${MAINTENANCE_PYTHON_BASE_IMAGE:-python:3.12.11-slim-bookworm}"
+VERSION_TAG="${VERSION}${IMAGE_TAG_SUFFIX}"
+CONTEXT="$ROOT_DIR/main/maintenance-agent"
+COMMON_ARGS=(--build-arg "PIP_INDEX_URL=$PIP_INDEX_URL" --build-arg "PYTHON_BASE_IMAGE=$PYTHON_BASE_IMAGE" -f "$CONTEXT/Dockerfile" -t "$IMAGE_REPOSITORY:$VERSION_TAG" -t "$IMAGE_REPOSITORY:$CHANNEL_TAG")
+
+if [[ "$BUILD_ENGINE" == "buildx" ]]; then
+  if [[ "$PUSH" != "true" && "$PLATFORMS" == *,* ]]; then
+    echo "PUSH=false cannot load a multi-platform maintenance image; choose one platform." >&2
+    exit 1
+  fi
+  OUTPUT=(--load)
+  if [[ "$PUSH" == "true" ]]; then OUTPUT=(--push); fi
+  docker buildx build --platform "$PLATFORMS" "${OUTPUT[@]}" "${COMMON_ARGS[@]}" "$CONTEXT"
+else
+  docker build "${COMMON_ARGS[@]}" "$CONTEXT"
+  if [[ "$PUSH" == "true" ]]; then
+    docker push "$IMAGE_REPOSITORY:$VERSION_TAG"
+    if [[ "$CHANNEL_TAG" != "$VERSION_TAG" ]]; then docker push "$IMAGE_REPOSITORY:$CHANNEL_TAG"; fi
+  fi
+fi

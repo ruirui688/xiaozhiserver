@@ -91,6 +91,9 @@ services:
       - CORS_ORIGINS=${XIAOZHI_CORS_ORIGINS:-http://localhost:8002,http://127.0.0.1:8002,http://*:8002}
       - XIAOZHI_MUSIC_DIR=/music
       - PERSON_FACE_STORAGE_ROOT=/uploadfile/person-faces
+      - MAINTENANCE_HARNESS_ENABLED=${XIAOZHI_MAINTENANCE_HARNESS_ENABLED:-false}
+      - MAINTENANCE_HARNESS_BASE_URL=http://xiaozhi-maintenance-agent:8010
+      - MAINTENANCE_HARNESS_SECRET=${XIAOZHI_MAINTENANCE_AGENT_SECRET:-}
     logging: *default-logging
     cap_drop:
       - ALL
@@ -99,6 +102,36 @@ services:
     volumes:
       - ./uploadfile:/uploadfile
       - ./music:/music
+
+  xiaozhi-maintenance-agent:
+    profiles: ["maintenance"]
+    image: ${XIAOZHI_MAINTENANCE_AGENT_IMAGE_REPOSITORY:-crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-maintenance-agent}:latest
+    container_name: xiaozhi-maintenance-agent
+    cpus: ${XIAOZHI_MAINTENANCE_AGENT_CPUS:-0.50}
+    mem_limit: ${XIAOZHI_MAINTENANCE_AGENT_MEM_LIMIT:-512m}
+    memswap_limit: ${XIAOZHI_MAINTENANCE_AGENT_MEM_LIMIT:-512m}
+    pids_limit: ${XIAOZHI_MAINTENANCE_AGENT_PIDS_LIMIT:-128}
+    restart: always
+    networks:
+      - default
+    expose:
+      - 8010
+    environment:
+      - TZ=Asia/Shanghai
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-}
+      - DSH_MODEL=${XIAOZHI_MAINTENANCE_MODEL:-deepseek-v4-flash}
+      - MAINTENANCE_AGENT_SECRET=${XIAOZHI_MAINTENANCE_AGENT_SECRET:-}
+      - MAINTENANCE_MAX_CONCURRENCY=1
+      - MAINTENANCE_MAX_OUTPUT_TOKENS=${XIAOZHI_MAINTENANCE_MAX_OUTPUT_TOKENS:-8192}
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
 
   xiaozhi-esp32-server-db:
     image: ${XIAOZHI_MYSQL_IMAGE:-crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/mysql:8.4}
