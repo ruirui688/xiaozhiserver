@@ -103,6 +103,7 @@ public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, Docu
         Page<DocumentEntity> pageParams = new Page<>(page, limit);
         QueryWrapper<DocumentEntity> queryWrapper = new QueryWrapper<>();
         queryWrapper.eq("dataset_id", datasetId);
+        queryWrapper.and(wrapper -> wrapper.eq("enabled", 1).or().isNull("enabled"));
         if (StringUtils.isNotBlank(knowledgeFilesDTO.getName())) {
             queryWrapper.like("name", knowledgeFilesDTO.getName());
         }
@@ -484,6 +485,13 @@ public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, Docu
     @Transactional(rollbackFor = Exception.class)
     public boolean saveDocumentShadow(String datasetId, KnowledgeFilesDTO result, String originalName, String chunkMethod,
             Map<String, Object> parserConfig) {
+        return saveDocumentShadow(datasetId, result, originalName, chunkMethod, parserConfig, true, true);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean saveDocumentShadow(String datasetId, KnowledgeFilesDTO result, String originalName, String chunkMethod,
+            Map<String, Object> parserConfig, boolean enabled, boolean updateStatistics) {
         DocumentEntity entity = new DocumentEntity();
         entity.setDatasetId(datasetId);
         KnowledgeBaseDTO dataset = knowledgeBaseService.getByDatasetId(datasetId);
@@ -508,10 +516,14 @@ public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, Docu
         entity.setThumbnail(result.getThumbnail());
         entity.setProcessDuration(result.getProcessDuration());
         entity.setSourceType(result.getSourceType());
+        entity.setKnowledgeSourceId(result.getKnowledgeSourceId());
+        entity.setSourceRevision(result.getSourceRevision());
+        entity.setContentHash(result.getContentHash());
+        entity.setPublishedAt(result.getPublishedAt());
         entity.setError(result.getError());
         entity.setChunkCount(result.getChunkCount());
         entity.setTokenCount(result.getTokenCount());
-        entity.setEnabled(1);
+        entity.setEnabled(enabled ? 1 : 0);
 
         // 持久化元数据
         if (result.getMetaFields() != null) {
@@ -539,7 +551,9 @@ public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, Docu
         } else {
             documentDao.insert(entity);
             // 新增记录时递增数据集文档总数统计
-            knowledgeBaseService.updateStatistics(datasetId, 1, 0L, 0L);
+            if (updateStatistics) {
+                knowledgeBaseService.updateStatistics(datasetId, 1, 0L, 0L);
+            }
             log.info("影子记录已插入: documentId={}, datasetId={}", entity.getDocumentId(), datasetId);
             return true;
         }

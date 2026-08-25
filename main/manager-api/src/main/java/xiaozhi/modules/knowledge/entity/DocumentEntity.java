@@ -71,6 +71,18 @@ public class DocumentEntity implements Serializable {
     @Schema(description = "来源类型 (local, s3, url 等)")
     private String sourceType;
 
+    @Schema(description = "动态数据源ID；人工上传为空")
+    private String knowledgeSourceId;
+
+    @Schema(description = "动态数据源版本号")
+    private Integer sourceRevision;
+
+    @Schema(description = "源内容SHA-256")
+    private String contentHash;
+
+    @Schema(description = "版本发布时间")
+    private Date publishedAt;
+
     @Schema(description = "解析错误信息")
     private String error;
 

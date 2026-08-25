@@ -67,15 +67,37 @@ public class LocalKnowledgeUploadTaskService {
     public KnowledgeFilesDTO submit(String datasetId, MultipartFile sourceFile, String requestedName,
             Map<String, Object> metaFields, String chunkMethod, Map<String, Object> parserConfig,
             KnowledgeBaseAdapter adapter) {
+        return submitInternal(datasetId, sourceFile, requestedName, metaFields, chunkMethod, parserConfig,
+                adapter, null);
+    }
+
+    /**
+     * 提交动态数据源生成的候选版本。候选文档在切片完成后仍保持 disabled，
+     * 由回调在单个数据库事务中切换正式版本，避免新旧版本同时参与召回。
+     */
+    public KnowledgeFilesDTO submitSource(String datasetId, MultipartFile sourceFile, String requestedName,
+            Map<String, Object> metaFields, String chunkMethod, Map<String, Object> parserConfig,
+            KnowledgeBaseAdapter adapter, SourceUploadContext sourceContext) {
+        if (sourceContext == null || StringUtils.isAnyBlank(
+                sourceContext.sourceId(), sourceContext.documentId(), sourceContext.contentHash())) {
+            throw new IllegalArgumentException("动态知识数据源上下文不完整");
+        }
+        return submitInternal(datasetId, sourceFile, requestedName, metaFields, chunkMethod, parserConfig,
+                adapter, sourceContext);
+    }
+
+    private KnowledgeFilesDTO submitInternal(String datasetId, MultipartFile sourceFile, String requestedName,
+            Map<String, Object> metaFields, String chunkMethod, Map<String, Object> parserConfig,
+            KnowledgeBaseAdapter adapter, SourceUploadContext sourceContext) {
         String filename = safeFilename(StringUtils.defaultIfBlank(requestedName, sourceFile.getOriginalFilename()));
         validateFile(filename, sourceFile.getContentType());
 
         Path stagedFile = stageFile(sourceFile);
-        String documentId = newDocumentId();
-        KnowledgeFilesDTO queued = queuedDocument(datasetId, documentId, filename, sourceFile, metaFields);
+        String documentId = sourceContext == null ? newDocumentId() : sourceContext.documentId();
+        KnowledgeFilesDTO queued = queuedDocument(
+                datasetId, documentId, filename, sourceFile, metaFields, sourceContext);
         try {
-            knowledgeFilesService.saveDocumentShadow(
-                    datasetId, queued, filename, chunkMethod, parserConfig);
+            saveShadow(datasetId, queued, filename, chunkMethod, parserConfig, sourceContext);
         } catch (Exception e) {
             deleteStagedFile(stagedFile);
             if (e instanceof RuntimeException runtimeException) {
@@ -86,7 +108,7 @@ public class LocalKnowledgeUploadTaskService {
         try {
             taskExecutor.submit(() -> process(
                     datasetId, documentId, filename, sourceFile.getContentType(), stagedFile,
-                    metaFields, chunkMethod, parserConfig, adapter));
+                    metaFields, chunkMethod, parserConfig, adapter, sourceContext));
             return queued;
         } catch (Exception e) {
             deleteStagedFile(stagedFile);
@@ -97,7 +119,8 @@ public class LocalKnowledgeUploadTaskService {
 
     private void process(String datasetId, String documentId, String filename, String contentType,
             Path stagedFile, Map<String, Object> metaFields, String chunkMethod,
-            Map<String, Object> parserConfig, KnowledgeBaseAdapter adapter) {
+            Map<String, Object> parserConfig, KnowledgeBaseAdapter adapter,
+            SourceUploadContext sourceContext) {
         long startedAt = System.nanoTime();
         try {
             if (!isRunning(datasetId, documentId)) {
@@ -135,11 +158,13 @@ public class LocalKnowledgeUploadTaskService {
                 return;
             }
             result.setProcessDuration((System.nanoTime() - startedAt) / 1_000_000_000D);
-            knowledgeFilesService.saveDocumentShadow(
-                    datasetId, result, filename, chunkMethod, parserConfig);
+            applySourceContext(result, sourceContext);
+            saveShadow(datasetId, result, filename, chunkMethod, parserConfig, sourceContext);
             long chunkDelta = result.getChunkCount() == null ? 0L : result.getChunkCount().longValue();
             long tokenDelta = result.getTokenCount() == null ? 0L : result.getTokenCount();
-            if (chunkDelta > 0 || tokenDelta > 0) {
+            if (sourceContext != null) {
+                sourceContext.listener().onIndexed(result);
+            } else if (chunkDelta > 0 || tokenDelta > 0) {
                 knowledgeBaseService.updateStatistics(datasetId, 0, chunkDelta, tokenDelta);
             }
             log.info("本地知识库后台切片完成: datasetId={}, documentId={}, chunks={}",
@@ -148,6 +173,9 @@ public class LocalKnowledgeUploadTaskService {
             cleanupChunks(adapter, datasetId, documentId);
             String failureMessage = safeFailureMessage(e);
             markFailed(datasetId, documentId, failureMessage);
+            if (sourceContext != null) {
+                sourceContext.listener().onFailed(failureMessage);
+            }
             log.error("本地知识库后台切片失败: datasetId={}, documentId={}, error={}",
                     datasetId, documentId, failureMessage);
         } finally {
@@ -212,7 +240,7 @@ public class LocalKnowledgeUploadTaskService {
     }
 
     private KnowledgeFilesDTO queuedDocument(String datasetId, String documentId, String filename,
-            MultipartFile sourceFile, Map<String, Object> metaFields) {
+            MultipartFile sourceFile, Map<String, Object> metaFields, SourceUploadContext sourceContext) {
         Date now = new Date();
         KnowledgeFilesDTO queued = new KnowledgeFilesDTO();
         queued.setId(documentId);
@@ -223,13 +251,57 @@ public class LocalKnowledgeUploadTaskService {
         queued.setStatus("1");
         queued.setRun("RUNNING");
         queued.setProgress(QUEUED_PROGRESS);
-        queued.setSourceType("local_knowledge");
+        queued.setSourceType(sourceContext == null ? "local_knowledge" : sourceContext.sourceType());
+        applySourceContext(queued, sourceContext);
         queued.setChunkCount(0);
         queued.setTokenCount(0L);
         queued.setMetaFields(metaFields);
         queued.setCreatedAt(now);
         queued.setUpdatedAt(now);
         return queued;
+    }
+
+    private void applySourceContext(KnowledgeFilesDTO document, SourceUploadContext sourceContext) {
+        if (sourceContext == null) {
+            return;
+        }
+        document.setDocumentId(sourceContext.documentId());
+        document.setId(sourceContext.documentId());
+        document.setSourceType(sourceContext.sourceType());
+        document.setKnowledgeSourceId(sourceContext.sourceId());
+        document.setSourceRevision(sourceContext.revision());
+        document.setContentHash(sourceContext.contentHash());
+        document.setPublishedAt(null);
+    }
+
+    private void saveShadow(String datasetId, KnowledgeFilesDTO document, String filename,
+            String chunkMethod, Map<String, Object> parserConfig, SourceUploadContext sourceContext) {
+        if (sourceContext == null) {
+            knowledgeFilesService.saveDocumentShadow(datasetId, document, filename, chunkMethod, parserConfig);
+        } else {
+            knowledgeFilesService.saveDocumentShadow(
+                    datasetId, document, filename, chunkMethod, parserConfig, false, false);
+        }
+    }
+
+    public record SourceUploadContext(
+            String sourceId,
+            String documentId,
+            int revision,
+            String contentHash,
+            String sourceType,
+            SourceUploadListener listener) {
+        public SourceUploadContext {
+            if (listener == null) {
+                throw new IllegalArgumentException("动态知识数据源回调不能为空");
+            }
+        }
+    }
+
+    public interface SourceUploadListener {
+        void onIndexed(KnowledgeFilesDTO document);
+
+        void onFailed(String error);
     }
 
     private void validateFile(String filename, String contentType) {

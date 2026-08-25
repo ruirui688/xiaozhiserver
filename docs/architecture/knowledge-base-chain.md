@@ -192,6 +192,40 @@ ai_rag_knowledge_chunk    分块内容
   - embedding_json (新增 - mediumtext)  FLOAT 数组的 JSON
 ```
 
+### 3.5 可选动态数据源（Onyx connector 模式）
+
+动态同步是**知识库级 opt-in 能力**，不是全局开关。没有 `ai_rag_knowledge_source` 记录的知识库继续保持人工上传，
+不会被后台调度、联网抓取或自动改写。管理员只能在某个本地知识库的“动态数据源”面板中逐个新增、启用、暂停或删除来源；
+同一个知识库可以同时包含人工文档和动态来源文档。
+
+第一阶段参考 Onyx 的 Load/Poll/Prune 职责拆分，但只实现无凭据的公网 `WEB_PAGE` 连接器：
+
+```text
+指定知识库的数据源
+  → 定时器检查 next_sync_at（未配置来源的知识库不参与）
+  → SSRF 校验 + 有界 HTTP 抓取
+  → ETag / Last-Modified / SHA-256 判断是否变化
+  ├─ 未变化：记录 UNCHANGED，不重新切片
+  └─ 有变化：生成禁用的候选 document + chunks
+       → 切片全部成功
+       → 单事务禁用旧 document、启用新 document、更新统计和 source 游标
+       → 旧版本保留为 disabled，不参与正式召回
+```
+
+数据模型：
+
+- `ai_rag_knowledge_source`：来源地址、刷新频率、启停、当前版本、HTTP 增量游标、成功/失败时间和下次计划时间。
+- `ai_rag_knowledge_sync_run`：每次手动/定时同步的抓取、切片、发布状态、字节数和脱敏错误。
+- `ai_rag_knowledge_document.knowledge_source_id/source_revision/content_hash/published_at`：来源与版本追踪。
+- `ai_rag_knowledge_document.enabled`：正式召回版本门控；候选和历史版本必须为 `0`。
+
+当前安全边界：仅允许公网 HTTP/HTTPS，不支持 URL 中携带 Token/API Key；保存与每次请求（包括重定向）都重新检查
+域名解析，阻止本机、私网、链路本地、云元数据和保留地址；响应默认最多 2MB、最多 3 次重定向、30 秒请求超时。
+同步失败采用指数退避且保留旧正式版本，不能把抓取失败解释为来源删除。搜索工具的临时结果不会自动写入知识库。
+
+第一阶段不包含需要 OAuth/ACL 的企业连接器、站点级爬虫、Webhook 和页面搜索结果自动入库；这些能力必须继续复用同一
+source/run/version 契约扩展，不能绕过 workspace 权限、SSRF 校验和正式版本发布门控。
+
 ## 4. RAGFlow 适配器
 
 ### 4.1 代理模式
@@ -319,6 +353,8 @@ Web 上传不再手工指定 `multipart/form-data`，由浏览器为 `FormData` 
 | `modules/knowledge/entity/KnowledgeBaseEntity.java` | ~60 | KB 实体 |
 | `modules/knowledge/entity/DocumentEntity.java` | ~80 | 文档实体 |
 | `modules/knowledge/entity/KnowledgeChunkEntity.java` | ~50 | 分块实体 |
+| `modules/knowledge/source/` | — | 可选数据源、网页连接器、同步运行与版本发布 |
+| `modules/knowledge/controller/KnowledgeSourceController.java` | — | 数据源 CRUD、手动同步和运行记录 API |
 | `modules/config/controller/ConfigController.java` | ~100 | 配置 API（含检索端点） |
 | `db/changelog/202606111530.sql` | — | 分块表 + local_knowledge 配置 |
 | `db/changelog/202607011000.sql` | — | embedding_json 列 |
@@ -330,6 +366,7 @@ Web 上传不再手工指定 `multipart/form-data`，由浏览器为 `FormData` 
 | `views/KnowledgeFileUpload.vue` | 1260 | 文档管理页面 |
 | `components/knowledge/FileUploadPanel.vue` | 299 | 上传面板 |
 | `components/knowledge/FilePreviewDialog.vue` | 561 | 分块预览 |
+| `components/knowledge/KnowledgeSourcePanel.vue` | — | 指定知识库的动态来源管理与同步监控 |
 | `components/role/RoleEditDialog.vue` | — | 智能体配置 hydration 与插件/知识库映射恢复 |
 | `utils/roleConfigDraft.js` | — | dirty 字段合并和 capability 映射规范化 |
 | `core/utils/prompt_budget.py` | — | 记忆、知识、工具历史和 schema 字符预算 |
@@ -339,13 +376,15 @@ Web 上传不再手工指定 `multipart/form-data`，由浏览器为 `FormData` 
 | 层 | 当前覆盖 |
 |---|---|
 | Java 切片契约 | 必选托管 LLM、OpenAI 兼容校验、无规则回退、LLM 窗口不丢字、后台任务与持久化进度、零切片拒绝 |
+| Java 动态来源 | 公网 URL/密钥 query 拒绝、workspace 权限、知识库级 opt-in、候选版本不参与召回、同步运行持久化 |
 | Java 工具描述 | 领域中立、知识库数量与说明长度上限、空元数据确定性输出 |
 | Web 组件状态 | 上传提交后不阻塞等待、列表持续显示进度与失败原因、终态通知、晚到详情不覆盖 dirty 字段、保存失败保留草稿、选择器乱序与恢复保护 |
+| Web 动态来源 | 数据源入口只绑定当前 datasetId、写操作不自动重试、暂停/立即同步/运行记录入口 |
 | Python 上下文 | 本地/RAGFlow 结果去重与预算、tool history 总预算、schema 保真、动态 context 和 memory 预算 |
 | Mobile | API 与页面源码覆盖 CRUD、上传、解析、切片和召回；最终构建与微信端联调仍待完成 |
 
 自动验证应覆盖 Java 全量测试、项目 Conda 环境中的 Python 测试与 `compileall`、Web 功能测试和构建。
-真实 MySQL 数据、Redis、浏览器关闭重开、RAGFlow、外部切片/embedding
+真实 MySQL 数据、Redis、外部网页抓取、浏览器关闭重开、RAGFlow、外部切片/embedding
 模型和微信 `uploadFile` 尚未端到端验证；字符预算也不等于模型 token 预算，正式发布前必须用目标模型与业务长文档
 检查召回相关性。
 

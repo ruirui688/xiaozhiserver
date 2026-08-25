@@ -93,6 +93,9 @@
                 <el-button type="success" @click="showUploadDialog">
                   {{ $t('knowledgeFileUpload.add') }}
                 </el-button>
+                <el-button type="warning" icon="el-icon-connection" @click="sourcePanelVisible = true">
+                  动态数据源
+                </el-button>
                 <el-button type="danger" @click="handleBatchDelete" :disabled="selectedFiles.length === 0">
                   {{ $t('knowledgeFileUpload.batchDelete') }}
                 </el-button>
@@ -143,6 +146,12 @@
       :document-id="currentDocumentId"
       :document-name="currentDocumentName"
       @close="sliceDialogVisible = false" />
+
+    <knowledge-source-panel
+      :visible="sourcePanelVisible"
+      :dataset-id="datasetId"
+      @close="sourcePanelVisible = false"
+      @documents-changed="fetchFileList" />
 
     <!-- 召回测试弹窗 -->
     <el-dialog :title="$t('knowledgeFileUpload.retrievalTest')" :visible.sync="retrievalTestDialogVisible"
@@ -202,9 +211,10 @@ import HeaderBar from "@/components/HeaderBar.vue";
 import VersionFooter from "@/components/VersionFooter.vue";
 import FileUploadPanel from "@/components/knowledge/FileUploadPanel.vue";
 import FilePreviewDialog from "@/components/knowledge/FilePreviewDialog.vue";
+import KnowledgeSourcePanel from "@/components/knowledge/KnowledgeSourcePanel.vue";
 
 export default {
-  components: { HeaderBar, VersionFooter, FileUploadPanel, FilePreviewDialog },
+  components: { HeaderBar, VersionFooter, FileUploadPanel, FilePreviewDialog, KnowledgeSourcePanel },
   data() {
     return {
       datasetId: '',
@@ -218,6 +228,7 @@ export default {
       pageSizeOptions: [10, 20, 50, 100],
       total: 0,
       uploadDialogVisible: false,
+      sourcePanelVisible: false,
       uploadUrl: '',
       isAllSelected: false,
 

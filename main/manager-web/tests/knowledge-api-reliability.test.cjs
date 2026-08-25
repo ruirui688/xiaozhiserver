@@ -52,13 +52,17 @@ describe("knowledge API retry safety", () => {
     api.parseDocument("kb-1", "doc-1", () => {}, onFailure);
     api.deleteDocument("kb-1", "doc-1", () => {}, onFailure);
     api.retrievalTest("kb-1", { question: "q" }, () => {}, onFailure);
+    api.createKnowledgeSource("kb-1", { name: "source" }, () => {}, onFailure);
+    api.updateKnowledgeSource("kb-1", "source-1", { name: "source" }, () => {}, onFailure);
+    api.deleteKnowledgeSource("kb-1", "source-1", () => {}, onFailure);
+    api.syncKnowledgeSource("kb-1", "source-1", () => {}, onFailure);
 
-    assert.equal(requests.length, 8);
+    assert.equal(requests.length, 12);
     for (const request of requests)
       request.networkFailCallback(new Error(`uncertain ${request.methodValue}`));
 
     assert.equal(retries.length, 0);
-    assert.equal(failures.length, 8);
+    assert.equal(failures.length, 12);
     delete global.localStorage;
   });
 
@@ -68,11 +72,13 @@ describe("knowledge API retry safety", () => {
 
     api.getDocumentList("kb-1", { page: 1, page_size: 10 }, () => {}, () => {});
     api.listChunks("kb-1", "doc-1", { page: 1, page_size: 10 }, () => {}, () => {});
+    api.getKnowledgeSources("kb-1", () => {}, () => {});
+    api.getKnowledgeSourceRuns("kb-1", "source-1", () => {}, () => {});
     for (const request of requests)
       request.networkFailCallback(new Error("offline"));
 
     assert.equal(requests.every(request => request.methodValue === "GET"), true);
-    assert.equal(retries.length, 2);
+    assert.equal(retries.length, 4);
     delete global.localStorage;
   });
 });

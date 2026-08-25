@@ -96,6 +96,9 @@ public class ShiroConfig {
         filterMap.put("/agent/*/templates/**", "oauth2");
         filterMap.put("/agent/*/skills", "oauth2");
         filterMap.put("/agent/*/skills/**", "oauth2");
+        // 知识库动态来源包含外部 URL 与同步写操作，必须显式认证并在 Controller 再做 workspace 鉴权。
+        filterMap.put("/datasets/*/sources", "oauth2");
+        filterMap.put("/datasets/*/sources/**", "oauth2");
         filterMap.put("/agent/*/feishu/events", "anon");
         filterMap.put("/agent/*/feishu/**", "oauth2");
         filterMap.put("/device/address-book/lookup", "server");

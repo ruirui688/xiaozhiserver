@@ -100,6 +100,15 @@ public interface KnowledgeFilesService {
                         Map<String, Object> parserConfig);
 
         /**
+         * 保存文档影子记录，可用于动态来源的未发布候选版本。
+         *
+         * @param enabled            是否立即进入正式召回
+         * @param updateStatistics   新增记录时是否立即计入知识库统计
+         */
+        boolean saveDocumentShadow(String datasetId, KnowledgeFilesDTO result, String originalName, String chunkMethod,
+                        Map<String, Object> parserConfig, boolean enabled, boolean updateStatistics);
+
+        /**
          * 批量删除文档影子记录并同步统计数据
          * 
          * @param documentIds 文档ID列表

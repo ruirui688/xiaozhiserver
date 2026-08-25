@@ -283,6 +283,66 @@ export default {
       errorCallback: errorCallback,
       errorMessage: '召回测试失败'
     });
+  },
+
+  getKnowledgeSources(datasetId, callback, errorCallback) {
+    makeApiRequest({
+      url: `${getServiceUrl()}/datasets/${datasetId}/sources`,
+      method: 'GET',
+      callback,
+      errorCallback,
+      retryFunction: () => this.getKnowledgeSources(datasetId, callback, errorCallback)
+    });
+  },
+
+  createKnowledgeSource(datasetId, data, callback, errorCallback) {
+    makeApiRequest({
+      url: `${getServiceUrl()}/datasets/${datasetId}/sources`,
+      method: 'POST',
+      data,
+      headers: { 'Content-Type': 'application/json' },
+      callback,
+      errorCallback
+    });
+  },
+
+  updateKnowledgeSource(datasetId, sourceId, data, callback, errorCallback) {
+    makeApiRequest({
+      url: `${getServiceUrl()}/datasets/${datasetId}/sources/${sourceId}`,
+      method: 'PUT',
+      data,
+      headers: { 'Content-Type': 'application/json' },
+      callback,
+      errorCallback
+    });
+  },
+
+  deleteKnowledgeSource(datasetId, sourceId, callback, errorCallback) {
+    makeApiRequest({
+      url: `${getServiceUrl()}/datasets/${datasetId}/sources/${sourceId}`,
+      method: 'DELETE',
+      callback,
+      errorCallback
+    });
+  },
+
+  syncKnowledgeSource(datasetId, sourceId, callback, errorCallback) {
+    makeApiRequest({
+      url: `${getServiceUrl()}/datasets/${datasetId}/sources/${sourceId}/sync`,
+      method: 'POST',
+      callback,
+      errorCallback
+    });
+  },
+
+  getKnowledgeSourceRuns(datasetId, sourceId, callback, errorCallback) {
+    makeApiRequest({
+      url: `${getServiceUrl()}/datasets/${datasetId}/sources/${sourceId}/runs`,
+      method: 'GET',
+      callback,
+      errorCallback,
+      retryFunction: () => this.getKnowledgeSourceRuns(datasetId, sourceId, callback, errorCallback)
+    });
   }
 
 };
