@@ -76,7 +76,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private static final String DEFAULT_LLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
     private static final String DEFAULT_LLM_MODEL = "qwen-plus";
     private static final int DEFAULT_LLM_TIMEOUT_SECONDS = 90;
-    private static final int DEFAULT_LLM_MAX_INPUT_CHARS = 12000;
+    private static final int DEFAULT_LLM_MAX_INPUT_CHARS = 4000;
     private static final int DEFAULT_LLM_MAX_TOKENS = 4000;
     private static final int MIN_ADAPTIVE_SECTION_CHARS = 1000;
     private static final int DEFAULT_RETRIEVAL_TOP_K = 10;
@@ -143,8 +143,10 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         llmReasoningEffort = null;
         applyManagedLlmConfig();
         llmTimeoutSeconds = configParser.getInt("llm_timeout_seconds", DEFAULT_LLM_TIMEOUT_SECONDS, 10, 600);
-        llmMaxInputChars = configParser.getInt("llm_max_input_chars", DEFAULT_LLM_MAX_INPUT_CHARS, 500, 20000);
-        llmMaxTokens = configParser.getInt("llm_max_tokens", DEFAULT_LLM_MAX_TOKENS, 200, 8000);
+        // 输入窗口和输出预算由服务端统一管理。用户配置无法可靠推导模型输出长度，
+        // 过大的输入窗口会让结构化 JSON 在 max_tokens 处被截断。
+        llmMaxInputChars = DEFAULT_LLM_MAX_INPUT_CHARS;
+        llmMaxTokens = DEFAULT_LLM_MAX_TOKENS;
         // [Issue #1] Initialize EmbeddingService for vector similarity search
         try {
             this.embeddingService = SpringContextUtils.getBean(EmbeddingService.class);
@@ -513,8 +515,6 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         configs.put("max_chunk_chars", "单个切片的最大字符数");
         configs.put("llm_model_id", "模型管理中已启用且测试通过的OpenAI兼容LLM配置ID");
         configs.put("llm_timeout_seconds", "单次模型请求超时时间");
-        configs.put("llm_max_input_chars", "单次送入模型的最大字符数");
-        configs.put("llm_max_tokens", "模型输出最大Token数");
         configs.put("embedding_model", "嵌入向量模型名称（用于向量检索）");
         configs.put("embedding_base_url", "嵌入向量API地址（默认复用llm_base_url）");
         configs.put("embedding_api_key", "嵌入向量API密钥（默认复用llm_api_key）");
@@ -528,8 +528,6 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         defaults.put("max_chunk_chars", DEFAULT_MAX_CHUNK_CHARS);
         defaults.put("llm_model_id", "");
         defaults.put("llm_timeout_seconds", DEFAULT_LLM_TIMEOUT_SECONDS);
-        defaults.put("llm_max_input_chars", DEFAULT_LLM_MAX_INPUT_CHARS);
-        defaults.put("llm_max_tokens", DEFAULT_LLM_MAX_TOKENS);
         defaults.put("embedding_model", "");
         defaults.put("embedding_base_url", DEFAULT_LLM_BASE_URL);
         defaults.put("embedding_api_key", "");

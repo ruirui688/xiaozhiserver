@@ -1712,8 +1712,6 @@ export default {
   'knowledgeBaseDialog.llmModelConfig': '切片模型',
   'knowledgeBaseDialog.llmModelConfigPlaceholder': '请选择模型管理中已配置的 LLM',
   'knowledgeBaseDialog.llmModelConfigRequired': '请选择用于切片的 LLM 模型',
-  'knowledgeBaseDialog.llmMaxInputChars': '输入字符数',
-  'knowledgeBaseDialog.llmMaxTokens': '输出Token数',
   'knowledgeBaseDialog.llmRequiredStatus': '唯一切片方式',
   'knowledgeBaseDialog.llmRequiredDescription': '所有文档必须由大模型按语义生成切片；模型调用失败时上传会失败，不会降级为规则切片。',
   'knowledgeBaseDialog.loadLLMModelsFailed': '加载LLM模型列表失败',

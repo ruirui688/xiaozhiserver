@@ -38,18 +38,6 @@
               </el-option>
             </el-select>
           </el-form-item>
-          <div class="chunk-config-metrics">
-            <div class="metric-control">
-              <span class="metric-label">{{ $t('knowledgeBaseDialog.llmMaxInputChars') }}</span>
-              <el-input-number v-model="parserForm.llm_max_input_chars" :min="500" :max="20000" :step="500"
-                controls-position="right"></el-input-number>
-            </div>
-            <div class="metric-control">
-              <span class="metric-label">{{ $t('knowledgeBaseDialog.llmMaxTokens') }}</span>
-              <el-input-number v-model="parserForm.llm_max_tokens" :min="200" :max="8000" :step="200"
-                controls-position="right"></el-input-number>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -223,9 +211,7 @@ export default {
     defaultParserForm() {
       return {
         llm_enabled: true,
-        llm_model_id: "",
-        llm_max_input_chars: 12000,
-        llm_max_tokens: 4000
+        llm_model_id: ""
       };
     },
     defaultRetrievalForm() {
@@ -313,13 +299,13 @@ export default {
       delete config.llm_base_url;
       delete config.llm_api_key;
       delete config.llm_model;
+      delete config.llm_max_input_chars;
+      delete config.llm_max_tokens;
       return JSON.stringify({
         ...config,
         max_chunk_chars: 1200,
         llm_enabled: true,
         llm_model_id: this.parserForm.llm_model_id,
-        llm_max_input_chars: this.parserForm.llm_max_input_chars,
-        llm_max_tokens: this.parserForm.llm_max_tokens,
         retrieval_config: {
           mode: this.retrievalForm.mode,
           search_type: this.retrievalForm.search_type,
@@ -498,36 +484,6 @@ export default {
     }
   }
 
-  .chunk-config-metrics {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 16px;
-  }
-
-  .metric-control {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    min-height: 44px;
-    padding: 0 12px;
-    border: 1px solid #dfe6f2;
-    border-radius: 6px;
-    background: #fff;
-
-    ::v-deep .el-input-number {
-      width: 180px;
-    }
-  }
-
-  .metric-label {
-    flex: 1;
-    min-width: 0;
-    font-size: 14px;
-    line-height: 20px;
-    color: #34495e;
-  }
-
   .advanced-collapse {
     margin-top: 2px;
     border-top: 1px solid #e4e8f1;
@@ -557,21 +513,4 @@ export default {
   }
 }
 
-@media (max-width: 768px) {
-  .knowledge-base-dialog {
-    .chunk-config-metrics {
-      grid-template-columns: 1fr;
-    }
-
-    .metric-control {
-      align-items: flex-start;
-      flex-direction: column;
-      padding: 12px;
-
-      ::v-deep .el-input-number {
-        width: 100%;
-      }
-    }
-  }
-}
 </style>

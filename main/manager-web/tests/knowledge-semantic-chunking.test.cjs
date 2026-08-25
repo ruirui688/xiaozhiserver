@@ -14,8 +14,6 @@ describe("knowledge semantic chunking configuration", () => {
       parserConfigValue: { llm_enabled: false, llm_api_key: "must-not-persist" },
       parserForm: {
         llm_model_id: "llm-openai",
-        llm_max_input_chars: 12000,
-        llm_max_tokens: 4000,
       },
       retrievalForm: {
         mode: "normal",
@@ -33,6 +31,8 @@ describe("knowledge semantic chunking configuration", () => {
     assert.equal(config.llm_enabled, true);
     assert.equal(config.llm_model_id, "llm-openai");
     assert.equal("llm_api_key" in config, false);
+    assert.equal("llm_max_input_chars" in config, false);
+    assert.equal("llm_max_tokens" in config, false);
   });
 
   test("only accepts OpenAI Chat Completions compatible models", () => {
@@ -48,5 +48,7 @@ describe("knowledge semantic chunking configuration", () => {
     );
     assert.equal(source.includes("<el-switch v-model=\"parserForm.llm_enabled\""), false);
     assert.equal(source.includes("使用规则切片"), false);
+    assert.equal(source.includes("parserForm.llm_max_input_chars"), false);
+    assert.equal(source.includes("parserForm.llm_max_tokens"), false);
   });
 });

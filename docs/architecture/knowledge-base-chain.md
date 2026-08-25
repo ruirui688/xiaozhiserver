@@ -86,11 +86,15 @@ LocalKnowledgeAdapter.parseFile()
 
 唯一切片路径:
   chunkDocumentWithLlm()
-    → 按 llm_max_input_chars 划分模型输入窗口（窗口不是最终切片）
-    → OpenAI Chat Completions 兼容 LLM 输出 question/answer/content JSON 数组
-    → 单个输入窗口失败时重试 1 次
-    → 任一窗口仍失败、超时、空输出或非 JSON：整个上传失败，不写入规则切片
+    → 服务端按安全预算自动划分模型输入窗口（窗口不是最终切片）
+    → OpenAI Chat Completions 兼容 LLM 输出 question/answer/content JSON 对象
+    → 单个输入窗口失败时重试 1 次；连续失败且窗口较大时按自然边界减半重试
+    → 缩小到最小安全窗口后仍失败、超时、空输出或非 JSON：整个上传失败，不写入规则切片
 ```
+
+输入字符数和输出 Token 数不再由页面配置。字符数无法准确推导不同模型的输出长度，人工放大输入窗口容易造成
+结构化 JSON 在输出上限处被截断；服务端统一使用保守预算，并在真实响应仍过长时自动缩小输入窗口。历史
+`llm_max_input_chars`、`llm_max_tokens` 配置仅作为遗留数据保留，运行时忽略，知识库下次保存时自动清除。
 
 本地知识库必须选择模型管理中已启用、测试通过且兼容 OpenAI Chat Completions 的 LLM 配置 ID，保存到
 `parser_config.llm_model_id`；不得再次保存 API Key、Base URL 或上游模型名。`llm_enabled=true` 只作为旧版本

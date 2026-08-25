@@ -1,7 +1,8 @@
 package xiaozhi.modules.knowledge.rag.impl.local;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -31,6 +32,16 @@ class LocalKnowledgeAdapterContractTest {
     @Test
     void reportsSynchronousDocumentParsing() {
         assertTrue(new LocalKnowledgeAdapter().isDocumentParsingSynchronous());
+    }
+
+    @Test
+    void keepsLlmBudgetsServerManaged() {
+        LocalKnowledgeAdapter adapter = new LocalKnowledgeAdapter();
+
+        assertFalse(adapter.getSupportedConfig().containsKey("llm_max_input_chars"));
+        assertFalse(adapter.getSupportedConfig().containsKey("llm_max_tokens"));
+        assertFalse(adapter.getDefaultConfig().containsKey("llm_max_input_chars"));
+        assertFalse(adapter.getDefaultConfig().containsKey("llm_max_tokens"));
     }
 
     @Test
