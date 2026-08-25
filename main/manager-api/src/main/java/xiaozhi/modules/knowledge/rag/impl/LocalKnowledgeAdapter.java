@@ -25,6 +25,7 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -64,6 +65,7 @@ import xiaozhi.modules.knowledge.entity.KnowledgeChunkEntity;
 import xiaozhi.modules.knowledge.rag.KnowledgeBaseAdapter;
 import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeConfigParser;
 import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeDocumentFormats;
+import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeLlmBudget;
 import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeTextSplitter;
 import xiaozhi.modules.llm.service.EmbeddingService;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
@@ -78,6 +80,9 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private static final int DEFAULT_LLM_TIMEOUT_SECONDS = 90;
     private static final int DEFAULT_LLM_MAX_INPUT_CHARS = 4000;
     private static final int DEFAULT_LLM_MAX_TOKENS = 4000;
+    private static final int DEFAULT_LLM_MAX_DOCUMENT_CHARS = 40000;
+    private static final int DEFAULT_LLM_MAX_REQUESTS_PER_DOCUMENT = 16;
+    private static final int DEFAULT_LLM_MAX_TOTAL_PROMPT_CHARS = 70000;
     private static final int MIN_ADAPTIVE_SECTION_CHARS = 1000;
     private static final int DEFAULT_RETRIEVAL_TOP_K = 10;
     private static final int DEFAULT_RETRIEVAL_LEVEL = 4;
@@ -99,6 +104,9 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private int llmTimeoutSeconds = DEFAULT_LLM_TIMEOUT_SECONDS;
     private int llmMaxInputChars = DEFAULT_LLM_MAX_INPUT_CHARS;
     private int llmMaxTokens = DEFAULT_LLM_MAX_TOKENS;
+    private int llmMaxDocumentChars = DEFAULT_LLM_MAX_DOCUMENT_CHARS;
+    private int llmMaxRequestsPerDocument = DEFAULT_LLM_MAX_REQUESTS_PER_DOCUMENT;
+    private int llmMaxTotalPromptChars = DEFAULT_LLM_MAX_TOTAL_PROMPT_CHARS;
     private String llmThinking;
     private String llmReasoningEffort;
     private RestTemplate llmRestTemplate;
@@ -147,6 +155,16 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         // 过大的输入窗口会让结构化 JSON 在 max_tokens 处被截断。
         llmMaxInputChars = DEFAULT_LLM_MAX_INPUT_CHARS;
         llmMaxTokens = DEFAULT_LLM_MAX_TOKENS;
+        Environment environment = SpringContextUtils.getBean(Environment.class);
+        llmMaxDocumentChars = LocalKnowledgeConfigParser.clamp(environment.getProperty(
+                "knowledge.local-chunking.max-document-chars", Integer.class,
+                DEFAULT_LLM_MAX_DOCUMENT_CHARS), 4000, 2000000);
+        llmMaxRequestsPerDocument = LocalKnowledgeConfigParser.clamp(environment.getProperty(
+                "knowledge.local-chunking.max-model-requests", Integer.class,
+                DEFAULT_LLM_MAX_REQUESTS_PER_DOCUMENT), 1, 1000);
+        llmMaxTotalPromptChars = LocalKnowledgeConfigParser.clamp(environment.getProperty(
+                "knowledge.local-chunking.max-total-prompt-chars", Integer.class,
+                DEFAULT_LLM_MAX_TOTAL_PROMPT_CHARS), 10000, 10000000);
         // [Issue #1] Initialize EmbeddingService for vector similarity search
         try {
             this.embeddingService = SpringContextUtils.getBean(EmbeddingService.class);
@@ -743,12 +761,19 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         if (StringUtils.isBlank(text)) {
             throw new RenException("文件中没有可用于大模型语义切片的有效内容");
         }
+        if (text.length() > llmMaxDocumentChars) {
+            throw new RenException(String.format(
+                    "文档解析后内容超过大模型切片安全上限（最多%d字符，当前%d字符），尚未调用模型；请拆分文档后重新上传",
+                    llmMaxDocumentChars, text.length()));
+        }
+        LocalKnowledgeLlmBudget budget = new LocalKnowledgeLlmBudget(
+                llmMaxRequestsPerDocument, llmMaxTotalPromptChars);
         List<LocalChunk> chunks = new ArrayList<>();
         List<String> sections = textSplitter().splitLlmSections(text);
         for (int i = 0; i < sections.size(); i++) {
             String section = sections.get(i);
             chunks.addAll(chunkSectionWithAdaptiveSplit(
-                    filename, section, i + 1, sections.size()));
+                    filename, section, i + 1, sections.size(), budget));
             notifyProgress(progressListener, 0.10D + (0.80D * (i + 1) / sections.size()));
         }
         return chunks.stream()
@@ -757,11 +782,14 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     }
 
     private List<LocalChunk> chunkSectionWithAdaptiveSplit(
-            String filename, String section, int sectionIndex, int totalSections) {
+            String filename, String section, int sectionIndex, int totalSections,
+            LocalKnowledgeLlmBudget budget) {
         Exception lastError = null;
         for (int attempt = 0; attempt <= 1; attempt++) {
             try {
-                return chunkSectionWithLlm(filename, section, sectionIndex, totalSections);
+                return chunkSectionWithLlm(filename, section, sectionIndex, totalSections, budget);
+            } catch (LocalKnowledgeLlmBudget.BudgetExceededException e) {
+                throw e;
             } catch (Exception e) {
                 lastError = e;
                 if (attempt == 0) {
@@ -778,7 +806,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             List<LocalChunk> recovered = new ArrayList<>();
             for (int i = 0; i < smallerSections.size(); i++) {
                 recovered.addAll(chunkSectionWithAdaptiveSplit(
-                        filename, smallerSections.get(i), i + 1, smallerSections.size()));
+                        filename, smallerSections.get(i), i + 1, smallerSections.size(), budget));
             }
             return recovered;
         }
@@ -826,6 +854,12 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
 
     private List<LocalChunk> chunkSectionWithLlm(String filename, String section, int sectionIndex, int totalSections)
             throws Exception {
+        return chunkSectionWithLlm(filename, section, sectionIndex, totalSections,
+                new LocalKnowledgeLlmBudget(llmMaxRequestsPerDocument, llmMaxTotalPromptChars));
+    }
+
+    private List<LocalChunk> chunkSectionWithLlm(String filename, String section, int sectionIndex,
+            int totalSections, LocalKnowledgeLlmBudget budget) throws Exception {
         Map<String, Object> requestBody = new LinkedHashMap<>();
         requestBody.put("model", llmModel);
         boolean thinkingEnabled = isDeepSeekEndpoint()
@@ -848,6 +882,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
                 Map.of("role", "user", "content",
                         buildChunkingUserPrompt(filename, section, sectionIndex, totalSections))));
 
+        budget.consume(objectMapper.writeValueAsString(requestBody).length());
         String content = requestLlmMessageContent(requestBody);
         List<LocalChunk> chunks = parseChunkedDocument(content);
         if (chunks.isEmpty()) {

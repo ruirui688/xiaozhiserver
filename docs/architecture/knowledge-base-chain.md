@@ -96,6 +96,13 @@ LocalKnowledgeAdapter.parseFile()
 结构化 JSON 在输出上限处被截断；服务端统一使用保守预算，并在真实响应仍过长时自动缩小输入窗口。历史
 `llm_max_input_chars`、`llm_max_tokens` 配置仅作为遗留数据保留，运行时忽略，知识库下次保存时自动清除。
 
+生产消费保护由部署环境统一控制，默认单文档解析后最多 40000 字符、最多 16 次模型请求、累计完整提示词最多
+70000 字符；重试和自适应缩小同样计入预算，达到任一上限立即终止且不再请求模型。对应环境变量为
+`XIAOZHI_KNOWLEDGE_MAX_DOCUMENT_CHARS`、`XIAOZHI_KNOWLEDGE_MAX_MODEL_REQUESTS`、
+`XIAOZHI_KNOWLEDGE_MAX_TOTAL_PROMPT_CHARS`。上传文件本身仍受 10MB 限制，后台切片执行器保持单线程，避免并发
+请求瞬时放大。字符预算是与模型无关的保守成本边界，不等同于供应商精确 Token 账单；账户级日/月总额仍应在
+模型供应商控制台设置硬额度和告警。
+
 本地知识库必须选择模型管理中已启用、测试通过且兼容 OpenAI Chat Completions 的 LLM 配置 ID，保存到
 `parser_config.llm_model_id`；不得再次保存 API Key、Base URL 或上游模型名。`llm_enabled=true` 只作为旧版本
 滚动升级兼容字段，新实现没有关闭入口。大模型切片只发生在文档解析阶段，不在每次检索时调用 LLM。

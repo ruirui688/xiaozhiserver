@@ -1784,7 +1784,7 @@ export default {
   'knowledgeFileUpload.submitForChunking': '上传并开始切片',
   'knowledgeFileUpload.submitting': '正在提交',
   'knowledgeFileUpload.semanticChunkingNoticeTitle': '上传后将在后台解析和切片',
-  'knowledgeFileUpload.semanticChunkingNoticeDescription': '本地知识库只使用大模型语义切片。提交成功后可以关闭窗口或离开页面；文档列表会持续显示排队、进度、完成或失败状态。',
+  'knowledgeFileUpload.semanticChunkingNoticeDescription': '本地知识库只使用大模型语义切片。后端会限制单个文档的解析字符数、模型请求次数和累计提示词量，超限时停止处理并提示拆分文档；提交后可离开页面查看后台状态。',
   'knowledgeFileUpload.submittedTitle': '已加入后台切片',
   'knowledgeFileUpload.submittedDescription': '已提交 {count} 个文档。无需停留在当前页面，可在文档列表查看处理状态。',
   'knowledgeFileUpload.partialSubmitTitle': '部分文档已提交',

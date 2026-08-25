@@ -181,4 +181,70 @@ class LocalKnowledgeAdapterContractTest {
         org.mockito.Mockito.verify(restTemplate, org.mockito.Mockito.times(4)).exchange(
                 anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class));
     }
+
+    @Test
+    void rejectsOversizedExtractedTextBeforeCallingTheModel() {
+        LocalKnowledgeAdapter adapter = new LocalKnowledgeAdapter();
+        RestTemplate restTemplate = mock(RestTemplate.class);
+        ReflectionTestUtils.setField(adapter, "llmModelId", "llm-1");
+        ReflectionTestUtils.setField(adapter, "llmBaseUrl", "https://api.deepseek.com");
+        ReflectionTestUtils.setField(adapter, "llmModel", "deepseek-v4-flash");
+        ReflectionTestUtils.setField(adapter, "llmApiKey", "test-key");
+        ReflectionTestUtils.setField(adapter, "llmMaxDocumentChars", 10);
+        ReflectionTestUtils.setField(adapter, "llmRestTemplate", restTemplate);
+
+        RenException error = assertThrows(RenException.class,
+                () -> ReflectionTestUtils.invokeMethod(adapter, "chunkDocumentWithLlm",
+                        "oversized.txt", "超过安全上限的正文内容"));
+
+        assertTrue(error.getMessage().contains("尚未调用模型"));
+        org.mockito.Mockito.verifyNoInteractions(restTemplate);
+    }
+
+    @Test
+    void stopsRetriesWhenThePerDocumentRequestBudgetIsExhausted() {
+        LocalKnowledgeAdapter adapter = new LocalKnowledgeAdapter();
+        RestTemplate restTemplate = mock(RestTemplate.class);
+        ReflectionTestUtils.setField(adapter, "llmModelId", "llm-1");
+        ReflectionTestUtils.setField(adapter, "llmBaseUrl", "https://api.deepseek.com");
+        ReflectionTestUtils.setField(adapter, "llmModel", "deepseek-v4-flash");
+        ReflectionTestUtils.setField(adapter, "llmApiKey", "test-key");
+        ReflectionTestUtils.setField(adapter, "llmThinking", "disabled");
+        ReflectionTestUtils.setField(adapter, "llmMaxRequestsPerDocument", 1);
+        ReflectionTestUtils.setField(adapter, "llmMaxTotalPromptChars", 70000);
+        ReflectionTestUtils.setField(adapter, "objectMapper", new ObjectMapper());
+        ReflectionTestUtils.setField(adapter, "llmRestTemplate", restTemplate);
+        String truncated = "{\"choices\":[{\"message\":{\"content\":\"{\\\"chunks\\\":[{\"}}]}";
+        when(restTemplate.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
+                .thenReturn(ResponseEntity.ok(truncated));
+
+        RenException error = assertThrows(RenException.class,
+                () -> ReflectionTestUtils.invokeMethod(adapter, "chunkDocumentWithLlm",
+                        "manual.txt", "正文内容"));
+
+        assertTrue(error.getMessage().contains("请求次数已达到安全上限"));
+        org.mockito.Mockito.verify(restTemplate, org.mockito.Mockito.times(1)).exchange(
+                anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class));
+    }
+
+    @Test
+    void stopsBeforeCallingTheModelWhenThePromptBudgetWouldBeExceeded() {
+        LocalKnowledgeAdapter adapter = new LocalKnowledgeAdapter();
+        RestTemplate restTemplate = mock(RestTemplate.class);
+        ReflectionTestUtils.setField(adapter, "llmBaseUrl", "https://api.deepseek.com");
+        ReflectionTestUtils.setField(adapter, "llmModel", "deepseek-v4-flash");
+        ReflectionTestUtils.setField(adapter, "llmApiKey", "test-key");
+        ReflectionTestUtils.setField(adapter, "llmThinking", "disabled");
+        ReflectionTestUtils.setField(adapter, "llmMaxRequestsPerDocument", 16);
+        ReflectionTestUtils.setField(adapter, "llmMaxTotalPromptChars", 1);
+        ReflectionTestUtils.setField(adapter, "objectMapper", new ObjectMapper());
+        ReflectionTestUtils.setField(adapter, "llmRestTemplate", restTemplate);
+
+        RenException error = assertThrows(RenException.class,
+                () -> ReflectionTestUtils.invokeMethod(adapter, "chunkSectionWithLlm",
+                        "manual.txt", "正文内容", 1, 1));
+
+        assertTrue(error.getMessage().contains("累计内容已达到安全上限"));
+        org.mockito.Mockito.verifyNoInteractions(restTemplate);
+    }
 }

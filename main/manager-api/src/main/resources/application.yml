@@ -61,6 +61,11 @@ wechat:
 # 知识库配置
 knowledge:
   max-upload-size: 10485760  # 知识库文档上传大小限制（默认 10MB）
+  local-chunking:
+    # 部署级消费保护，不开放给普通页面用户；单文档命中任一上限即停止模型调用。
+    max-document-chars: ${XIAOZHI_KNOWLEDGE_MAX_DOCUMENT_CHARS:40000}
+    max-model-requests: ${XIAOZHI_KNOWLEDGE_MAX_MODEL_REQUESTS:16}
+    max-total-prompt-chars: ${XIAOZHI_KNOWLEDGE_MAX_TOTAL_PROMPT_CHARS:70000}
 
 person:
   # 本地开发默认写入工作目录；生产 Compose 显式覆盖到持久化挂载 /uploadfile。
