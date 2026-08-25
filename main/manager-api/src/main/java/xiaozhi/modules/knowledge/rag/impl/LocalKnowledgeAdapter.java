@@ -1,9 +1,6 @@
 package xiaozhi.modules.knowledge.rag.impl;
 
-import java.io.BufferedReader;
 import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Collections;
@@ -19,12 +16,6 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
-import org.apache.poi.ss.usermodel.Cell;
-import org.apache.poi.ss.usermodel.DataFormatter;
-import org.apache.poi.ss.usermodel.Row;
-import org.apache.poi.ss.usermodel.Sheet;
-import org.apache.poi.ss.usermodel.Workbook;
-import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -64,8 +55,10 @@ import xiaozhi.modules.knowledge.entity.KnowledgeBaseEntity;
 import xiaozhi.modules.knowledge.entity.KnowledgeChunkEntity;
 import xiaozhi.modules.knowledge.rag.KnowledgeBaseAdapter;
 import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeConfigParser;
+import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeDocumentParser;
 import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeDocumentFormats;
 import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeLlmBudget;
+import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeProcessingStrategy;
 import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeTextSplitter;
 import xiaozhi.modules.llm.service.EmbeddingService;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
@@ -97,6 +90,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private KnowledgeBaseDao knowledgeBaseDao;
     private ModelConfigService modelConfigService;
     private int maxChunkChars = DEFAULT_MAX_CHUNK_CHARS;
+    private LocalKnowledgeProcessingStrategy processingStrategy = LocalKnowledgeProcessingStrategy.LLM_ENHANCED;
     private String llmModelId;
     private String llmBaseUrl = DEFAULT_LLM_BASE_URL;
     private String llmApiKey;
@@ -143,6 +137,8 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         this.knowledgeBaseDao = SpringContextUtils.getBean(KnowledgeBaseDao.class);
         this.modelConfigService = SpringContextUtils.getBean(ModelConfigService.class);
         maxChunkChars = configParser.getInt("max_chunk_chars", DEFAULT_MAX_CHUNK_CHARS, 200, 20000);
+        processingStrategy = LocalKnowledgeProcessingStrategy.fromConfig(
+                configParser.getString("processing_strategy", "llm_enhanced"));
         llmModelId = configParser.getString("llm_model_id", "");
         llmBaseUrl = "";
         llmApiKey = "";
@@ -530,6 +526,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     @Override
     public Map<String, Object> getSupportedConfig() {
         Map<String, String> configs = new LinkedHashMap<>();
+        configs.put("processing_strategy", "文档处理策略：auto/direct/llm_enhanced");
         configs.put("max_chunk_chars", "单个切片的最大字符数");
         configs.put("llm_model_id", "模型管理中已启用且测试通过的OpenAI兼容LLM配置ID");
         configs.put("llm_timeout_seconds", "单次模型请求超时时间");
@@ -543,6 +540,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     @Override
     public Map<String, Object> getDefaultConfig() {
         Map<String, Object> defaults = new LinkedHashMap<>();
+        defaults.put("processing_strategy", LocalKnowledgeProcessingStrategy.AUTO.configValue());
         defaults.put("max_chunk_chars", DEFAULT_MAX_CHUNK_CHARS);
         defaults.put("llm_model_id", "");
         defaults.put("llm_timeout_seconds", DEFAULT_LLM_TIMEOUT_SECONDS);
@@ -685,74 +683,25 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
 
     private List<LocalChunk> parseFile(String filename, InputStream inputStream,
             Consumer<Double> progressListener) throws Exception {
-        String extension = getExtension(filename);
-        String text;
-        if ("xlsx".equals(extension) || "xls".equals(extension)) {
-            text = parseExcelAsModelInput(inputStream);
-        } else {
-            text = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))
-                    .lines()
-                    .collect(Collectors.joining("\n"));
+        LocalKnowledgeDocumentParser.ParsedDocument parsed =
+                new LocalKnowledgeDocumentParser(objectMapper, maxChunkChars).parse(filename, inputStream);
+        boolean direct = processingStrategy == LocalKnowledgeProcessingStrategy.DIRECT
+                || (processingStrategy == LocalKnowledgeProcessingStrategy.AUTO
+                        && (parsed.structured() || !hasUsableLlm()));
+        if (direct) {
+            notifyProgress(progressListener, 0.90D);
+            log.info("本地知识库使用确定性直接切片: filename={}, strategy={}, structured={}, chunks={}",
+                    filename, processingStrategy.configValue(), parsed.structured(), parsed.directChunks().size());
+            return parsed.directChunks().stream()
+                    .map(chunk -> new LocalChunk(chunk.question(), chunk.answer(), chunk.content()))
+                    .collect(Collectors.toList());
         }
-        return chunkDocumentWithLlm(filename, text, progressListener);
+        return chunkDocumentWithLlm(filename, parsed.modelInput(), progressListener);
     }
 
-    private String parseExcelAsModelInput(InputStream inputStream) throws Exception {
-        List<String> inputBlocks = new ArrayList<>();
-        DataFormatter formatter = new DataFormatter();
-        try (Workbook workbook = WorkbookFactory.create(inputStream)) {
-            for (Sheet sheet : workbook) {
-                List<List<String>> rows = new ArrayList<>();
-                for (Row row : sheet) {
-                    List<String> values = new ArrayList<>();
-                    for (int i = 0; i < row.getLastCellNum(); i++) {
-                        Cell cell = row.getCell(i);
-                        values.add(cell == null ? "" : formatter.formatCellValue(cell).trim());
-                    }
-                    if (values.stream().anyMatch(StringUtils::isNotBlank)) {
-                        rows.add(values);
-                    }
-                }
-                inputBlocks.addAll(rowsToModelInputBlocks(rows));
-            }
-        }
-        return String.join("\n\n", inputBlocks);
-    }
-
-    private List<String> rowsToModelInputBlocks(List<List<String>> rows) {
-        if (rows.isEmpty()) {
-            return List.of();
-        }
-        List<String> header = rows.get(0);
-        int questionIndex = findHeader(header, "question", "q", "问题", "问");
-        int answerIndex = findHeader(header, "answer", "a", "答案", "答", "回复");
-        List<String> inputBlocks = new ArrayList<>();
-        for (int i = 1; i < rows.size(); i++) {
-            List<String> row = rows.get(i);
-            if (questionIndex >= 0 && answerIndex >= 0) {
-                String question = getCell(row, questionIndex);
-                String answer = getCell(row, answerIndex);
-                if (StringUtils.isAnyBlank(question, answer)) {
-                    continue;
-                }
-                inputBlocks.add("问题：" + question + "\n答案：" + answer);
-                continue;
-            }
-            Map<String, String> fields = new LinkedHashMap<>();
-            for (int col = 0; col < row.size(); col++) {
-                String key = col < header.size() && StringUtils.isNotBlank(header.get(col)) ? header.get(col) : "列" + (col + 1);
-                String value = row.get(col);
-                if (StringUtils.isNotBlank(value)) {
-                    fields.put(key, value);
-                }
-            }
-            if (!fields.isEmpty()) {
-                inputBlocks.add(fields.entrySet().stream()
-                        .map(entry -> entry.getKey() + "：" + entry.getValue())
-                        .collect(Collectors.joining("\n")));
-            }
-        }
-        return inputBlocks;
+    private boolean hasUsableLlm() {
+        return StringUtils.isNoneBlank(llmModelId, llmBaseUrl, llmModel)
+                && !LocalKnowledgeConfigParser.isPlaceholderSecret(llmApiKey);
     }
 
     private List<LocalChunk> chunkDocumentWithLlm(String filename, String text,
@@ -1211,31 +1160,10 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
                 .collect(Collectors.toMap(DocumentEntity::getDocumentId, item -> item, (a, b) -> a));
     }
 
-    private int findHeader(List<String> headers, String... names) {
-        for (int i = 0; i < headers.size(); i++) {
-            String header = StringUtils.defaultString(headers.get(i)).trim().toLowerCase();
-            for (String name : names) {
-                if (header.equals(name.toLowerCase())) {
-                    return i;
-                }
-            }
-        }
-        return -1;
-    }
-
-    private String getCell(List<String> row, int index) {
-        return index >= 0 && index < row.size() ? row.get(index) : "";
-    }
-
     private <T> List<T> paginate(List<T> items, int page, int pageSize) {
         int from = Math.min((page - 1) * pageSize, items.size());
         int to = Math.min(from + pageSize, items.size());
         return items.subList(from, to);
-    }
-
-    private String getExtension(String filename) {
-        int dotIndex = StringUtils.defaultString(filename).lastIndexOf('.');
-        return dotIndex >= 0 ? filename.substring(dotIndex + 1).toLowerCase() : "";
     }
 
     /**

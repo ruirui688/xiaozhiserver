@@ -7,10 +7,12 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import org.mockito.ArgumentCaptor;
 
+import java.io.ByteArrayInputStream;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -32,6 +34,25 @@ class LocalKnowledgeAdapterContractTest {
     @Test
     void reportsSynchronousDocumentParsing() {
         assertTrue(new LocalKnowledgeAdapter().isDocumentParsingSynchronous());
+    }
+
+    @Test
+    void autoExcelProcessingDoesNotCallTheModel() throws Exception {
+        LocalKnowledgeAdapter adapter = new LocalKnowledgeAdapter();
+        RestTemplate restTemplate = mock(RestTemplate.class);
+        ReflectionTestUtils.setField(adapter, "processingStrategy", LocalKnowledgeProcessingStrategy.AUTO);
+        ReflectionTestUtils.setField(adapter, "objectMapper", new ObjectMapper());
+        ReflectionTestUtils.setField(adapter, "maxChunkChars", 1200);
+        ReflectionTestUtils.setField(adapter, "llmRestTemplate", restTemplate);
+
+        @SuppressWarnings("unchecked")
+        List<Object> chunks = ReflectionTestUtils.invokeMethod(adapter, "parseFile",
+                "产品知识.xlsx",
+                new ByteArrayInputStream(LocalKnowledgeDocumentParserTest.workbookWithQaRows()),
+                null);
+
+        assertTrue(chunks != null && chunks.size() == 2);
+        verifyNoInteractions(restTemplate);
     }
 
     @Test

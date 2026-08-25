@@ -6,8 +6,8 @@ import java.util.List;
 import org.apache.commons.lang3.StringUtils;
 
 /**
- * Splits source text only to respect the LLM input window. These sections are
- * never persisted as knowledge chunks; final chunks must come from the LLM.
+ * Splits source text on natural boundaries. LLM processing uses the result as
+ * request sections; deterministic processing may persist it as direct chunks.
  */
 public final class LocalKnowledgeTextSplitter {
     private static final List<String> SENTENCE_SEPARATORS =

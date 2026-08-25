@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: knowledge
-last_verified: 2026-07-30
+last_verified: 2026-08-25
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/knowledge
   - main/manager-api/src/main/java/xiaozhi/modules/agent/service/impl/AgentPluginMappingServiceImpl.java
@@ -79,18 +79,29 @@ KnowledgeFilesController (/datasets/{id}/documents)
 
 ```text
 LocalKnowledgeAdapter.parseFile()
-
-源文件规范化:
-  Excel (.xlsx/.xls) → Apache POI 转成带字段名的模型输入文本
-  txt/md/mdx/csv/json/jsonl/qa → UTF-8 原文
-
-唯一切片路径:
-  chunkDocumentWithLlm()
-    → 服务端按安全预算自动划分模型输入窗口（窗口不是最终切片）
-    → OpenAI Chat Completions 兼容 LLM 输出 question/answer/content JSON 对象
-    → 单个输入窗口失败时重试 1 次；连续失败且窗口较大时按自然边界减半重试
-    → 缩小到最小安全窗口后仍失败、超时、空输出或非 JSON：整个上传失败，不写入规则切片
+  → LocalKnowledgeDocumentParser 确定性解析（不调用模型）
+      Excel/CSV → 按表头和数据行生成带来源信息的切片
+      JSON/JSONL → 按对象生成字段化切片
+      QA → 保留 question/answer
+      TXT/MD/MDX → 按自然边界生成文本切片
+  → LocalKnowledgeProcessingStrategy 路由
+      AUTO:
+        结构化文件 → DIRECT
+        普通文本且模型可用 → LLM_ENHANCED
+        普通文本且模型不可用 → DIRECT
+      DIRECT:
+        直接持久化确定性解析结果，不发起切片模型请求
+      LLM_ENHANCED:
+        将预解析文本交给 chunkDocumentWithLlm()
+          → 服务端按安全预算划分模型输入窗口（窗口不是最终切片）
+          → OpenAI Chat Completions 兼容 LLM 输出 question/answer/content JSON 对象
+          → 单个输入窗口失败时重试 1 次；连续失败且窗口较大时按自然边界减半重试
+          → 缩小到最小安全窗口后仍失败、超时、空输出或非 JSON：整个上传失败
 ```
+
+新建知识库默认使用 `AUTO`。旧知识库没有 `processing_strategy` 字段时按 `LLM_ENHANCED` 解释，避免升级后静默改变
+已有处理语义；用户保存后会显式写入 `auto`、`direct` 或 `llm_enhanced`。`DIRECT` 不要求配置切片模型，
+`LLM_ENHANCED` 必须选择已启用且测试通过的兼容模型，`AUTO` 中的模型是可选增强能力。
 
 输入字符数和输出 Token 数不再由页面配置。字符数无法准确推导不同模型的输出长度，人工放大输入窗口容易造成
 结构化 JSON 在输出上限处被截断；服务端统一使用保守预算，并在真实响应仍过长时自动缩小输入窗口。历史
@@ -103,9 +114,9 @@ LocalKnowledgeAdapter.parseFile()
 请求瞬时放大。字符预算是与模型无关的保守成本边界，不等同于供应商精确 Token 账单；账户级日/月总额仍应在
 模型供应商控制台设置硬额度和告警。
 
-本地知识库必须选择模型管理中已启用、测试通过且兼容 OpenAI Chat Completions 的 LLM 配置 ID，保存到
-`parser_config.llm_model_id`；不得再次保存 API Key、Base URL 或上游模型名。`llm_enabled=true` 只作为旧版本
-滚动升级兼容字段，新实现没有关闭入口。大模型切片只发生在文档解析阶段，不在每次检索时调用 LLM。
+需要模型的处理策略只允许选择模型管理中已启用、测试通过且兼容 OpenAI Chat Completions 的 LLM 配置 ID，保存到
+`parser_config.llm_model_id`；不得再次保存 API Key、Base URL 或上游模型名。`llm_enabled` 仅作为滚动升级兼容字段，
+实际路由以 `processing_strategy` 为准。大模型切片只发生在文档解析阶段，不在每次检索时调用 LLM。
 
 LocalKnowledge 上传请求只完成文件校验、安全暂存、`RUNNING` 文档记录创建和后台任务入队，随后立即返回。
 大模型切片由 `LocalKnowledgeUploadTaskService` 在专用有界执行器中串行执行，并在每个模型输入窗口完成后更新进度。
@@ -119,9 +130,10 @@ RAGFlow 仍通过 `POST /chunks` 异步启动远端解析，状态可先进入 `
 RAG 请求 DTO；数据库继续保存用户提交的完整 JSON。远端响应仅在用户未提交配置时
 用于补全，不能覆盖本地切片、模型和召回扩展字段。
 
-本轮切片契约固定为严格语义模式：`KnowledgeBaseServiceImpl` 在新增和更新时强制校验托管模型 ID、启用/测试状态及
-OpenAI 兼容协议；`LocalKnowledgeTextSplitter` 只负责划分不会丢字的模型输入窗口，不产生可持久化规则切片；
-`LocalKnowledgeAdapter` 每次上传重新解析托管模型配置，避免适配器缓存继续使用已修改或停用的旧配置。
+处理契约由 `KnowledgeBaseServiceImpl` 在新增和更新时校验策略；当策略会使用已选择的模型时，同时校验托管模型 ID、
+启用/测试状态及 OpenAI 兼容协议。`LocalKnowledgeDocumentParser` 负责格式解析，`LocalKnowledgeTextSplitter` 负责
+不会丢字的自然边界切分，`LocalKnowledgeAdapter` 只负责策略路由、模型增强及持久化编排。适配器每次上传重新解析
+托管模型配置，避免缓存继续使用已修改或停用的旧配置。
 本地适配器不支持的格式、MIME 与扩展名不匹配、零切片、模型不可用或调用失败都必须明确失败，不能创建 DONE 记录；后续 `/chunks`
 只验证上传时已经生成的切片，不伪造重解析结果。
 

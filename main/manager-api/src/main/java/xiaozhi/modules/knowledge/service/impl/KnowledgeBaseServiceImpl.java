@@ -32,6 +32,7 @@ import xiaozhi.modules.knowledge.entity.KnowledgeBaseEntity;
 import xiaozhi.modules.knowledge.rag.KnowledgeBaseAdapter;
 import xiaozhi.modules.knowledge.rag.KnowledgeBaseAdapterFactory;
 import xiaozhi.modules.knowledge.rag.impl.local.KnowledgeBaseParserConfigCodec;
+import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeProcessingStrategy;
 import xiaozhi.modules.knowledge.service.KnowledgeBaseService;
 import xiaozhi.modules.model.dao.ModelConfigDao;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
@@ -253,7 +254,7 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
             }
 
             Map<String, Object> ragConfig = getValidatedRAGConfig(dto.getRagModelId());
-            enforceLocalSemanticChunkingConfig(dto, ragConfig);
+            enforceLocalProcessingConfig(dto, ragConfig);
             adapter = KnowledgeBaseAdapterFactory.getAdapter((String) ragConfig.get("type"),
                     ragConfig);
 
@@ -370,7 +371,7 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
                 }
 
                 Map<String, Object> ragConfig = getValidatedRAGConfig(dto.getRagModelId());
-                enforceLocalSemanticChunkingConfig(dto, ragConfig);
+                enforceLocalProcessingConfig(dto, ragConfig);
                 KnowledgeBaseAdapter adapter = KnowledgeBaseAdapterFactory.getAdapter(
                         (String) ragConfig.get("type"), ragConfig);
                 if (adapter != null) {
@@ -561,6 +562,7 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
                 return;
             }
             for (String key : List.of(
+                    "processing_strategy",
                     "max_chunk_chars",
                     "llm_enabled",
                     "llm_model_id",
@@ -586,7 +588,7 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
         }
     }
 
-    private void enforceLocalSemanticChunkingConfig(KnowledgeBaseDTO dto, Map<String, Object> ragConfig) {
+    private void enforceLocalProcessingConfig(KnowledgeBaseDTO dto, Map<String, Object> ragConfig) {
         if (!"local_knowledge".equals(ragConfig.get("type"))) {
             return;
         }
@@ -598,12 +600,35 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
         } catch (Exception e) {
             throw new RenException("parserConfig不是有效的JSON对象", e);
         }
+        String strategyValue = parserConfig.get("processing_strategy") == null
+                ? LocalKnowledgeProcessingStrategy.LLM_ENHANCED.configValue()
+                : parserConfig.get("processing_strategy").toString().trim();
+        if (!LocalKnowledgeProcessingStrategy.isSupported(strategyValue)) {
+            throw new RenException("不支持的本地知识库处理策略: " + strategyValue);
+        }
+        LocalKnowledgeProcessingStrategy strategy = LocalKnowledgeProcessingStrategy.fromConfig(strategyValue);
         String llmModelId = parserConfig.get("llm_model_id") == null
                 ? ""
                 : parserConfig.get("llm_model_id").toString().trim();
-        if (StringUtils.isBlank(llmModelId)) {
-            throw new RenException("本地知识库必须选择大模型语义切片模型");
+        if (strategy == LocalKnowledgeProcessingStrategy.LLM_ENHANCED
+                && StringUtils.isBlank(llmModelId)) {
+            throw new RenException("大模型语义增强策略必须选择切片模型");
         }
+        if (strategy != LocalKnowledgeProcessingStrategy.DIRECT && StringUtils.isNotBlank(llmModelId)) {
+            validateChunkingModel(llmModelId);
+        }
+
+        parserConfig.put("processing_strategy", strategy.configValue());
+        parserConfig.put("llm_enabled", strategy != LocalKnowledgeProcessingStrategy.DIRECT
+                && StringUtils.isNotBlank(llmModelId));
+        parserConfig.put("llm_model_id", llmModelId);
+        parserConfig.remove("llm_base_url");
+        parserConfig.remove("llm_api_key");
+        parserConfig.remove("llm_model");
+        dto.setParserConfig(JsonUtils.toJsonString(parserConfig));
+    }
+
+    private void validateChunkingModel(String llmModelId) {
         ModelConfigEntity model = modelConfigService.getModelByIdFromCache(llmModelId);
         if (model == null || !"LLM".equalsIgnoreCase(model.getModelType())) {
             throw new RenException("切片模型不存在或不是LLM类型");
@@ -621,13 +646,5 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
         if (!openAiCompatible) {
             throw new RenException("切片模型必须兼容OpenAI Chat Completions协议");
         }
-
-        // llm_enabled 仅为旧版本滚动升级兼容标记，新实现不再允许关闭语义切片。
-        parserConfig.put("llm_enabled", true);
-        parserConfig.put("llm_model_id", llmModelId);
-        parserConfig.remove("llm_base_url");
-        parserConfig.remove("llm_api_key");
-        parserConfig.remove("llm_model");
-        dto.setParserConfig(JsonUtils.toJsonString(parserConfig));
     }
 }

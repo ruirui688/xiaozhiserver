@@ -25,12 +25,19 @@
 
       <div class="dialog-section">
         <div class="section-header">
-          <div class="section-title">{{ $t('knowledgeBaseDialog.chunkModelConfig') }}</div>
-          <el-tag type="success" size="small">{{ $t('knowledgeBaseDialog.llmRequiredStatus') }}</el-tag>
+          <div class="section-title">{{ $t('knowledgeBaseDialog.processingConfig') }}</div>
+          <el-tag type="success" size="small">{{ $t('knowledgeBaseDialog.processingManagedStatus') }}</el-tag>
         </div>
-        <el-alert :title="$t('knowledgeBaseDialog.llmRequiredDescription')" type="info" :closable="false"
+        <el-form-item :label="$t('knowledgeBaseDialog.processingStrategy')">
+          <el-radio-group v-model="parserForm.processing_strategy" size="small">
+            <el-radio-button label="auto">{{ $t('knowledgeBaseDialog.processingAuto') }}</el-radio-button>
+            <el-radio-button label="direct">{{ $t('knowledgeBaseDialog.processingDirect') }}</el-radio-button>
+            <el-radio-button label="llm_enhanced">{{ $t('knowledgeBaseDialog.processingLlmEnhanced') }}</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-alert :title="processingStrategyDescription" type="info" :closable="false"
           show-icon class="chunk-mode-alert"></el-alert>
-        <div class="chunk-config-fields">
+        <div v-if="parserForm.processing_strategy !== 'direct'" class="chunk-config-fields">
           <el-form-item :label="$t('knowledgeBaseDialog.llmModelConfig')">
             <el-select v-model="parserForm.llm_model_id" :placeholder="$t('knowledgeBaseDialog.llmModelConfigPlaceholder')"
               filterable clearable style="width: 100%" @focus="loadLLMModels">
@@ -207,10 +214,21 @@ export default {
       }
     }
   },
+  computed: {
+    processingStrategyDescription() {
+      const key = {
+        auto: 'knowledgeBaseDialog.processingAutoDescription',
+        direct: 'knowledgeBaseDialog.processingDirectDescription',
+        llm_enhanced: 'knowledgeBaseDialog.processingLlmEnhancedDescription'
+      }[this.parserForm.processing_strategy];
+      return this.$t(key || 'knowledgeBaseDialog.processingAutoDescription');
+    }
+  },
   methods: {
     defaultParserForm() {
       return {
-        llm_enabled: true,
+        processing_strategy: "auto",
+        llm_enabled: false,
         llm_model_id: ""
       };
     },
@@ -251,7 +269,10 @@ export default {
         const parsed = typeof this.form.parserConfig === "string"
           ? JSON.parse(this.form.parserConfig)
           : this.form.parserConfig;
-        const parserConfig = parsed || {};
+        const parserConfig = { ...(parsed || {}) };
+        if (!Object.prototype.hasOwnProperty.call(parserConfig, "processing_strategy")) {
+          parserConfig.processing_strategy = "llm_enhanced";
+        }
         const retrievalConfig = parserConfig.retrieval_config || {};
         this.parserForm = {
           ...defaults,
@@ -304,7 +325,8 @@ export default {
       return JSON.stringify({
         ...config,
         max_chunk_chars: 1200,
-        llm_enabled: true,
+        processing_strategy: this.parserForm.processing_strategy,
+        llm_enabled: this.parserForm.processing_strategy !== 'direct' && !!this.parserForm.llm_model_id,
         llm_model_id: this.parserForm.llm_model_id,
         retrieval_config: {
           mode: this.retrievalForm.mode,
@@ -327,7 +349,7 @@ export default {
       this.$emit("update:visible", false);
     },
     handleSubmit() {
-      if (!this.parserForm.llm_model_id) {
+      if (this.parserForm.processing_strategy === 'llm_enhanced' && !this.parserForm.llm_model_id) {
         this.$message.error(this.$t('knowledgeBaseDialog.llmModelConfigRequired'));
         return;
       }

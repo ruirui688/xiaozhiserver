@@ -40,7 +40,7 @@ import xiaozhi.modules.workspace.service.WorkspaceService;
 
 class KnowledgeBaseServiceImplTest {
     @Test
-    void rejectsLocalKnowledgeWithoutSemanticChunkingModel() {
+    void keepsLegacyLocalKnowledgeOnLlmEnhancedStrategy() {
         KnowledgeBaseServiceImpl service = new KnowledgeBaseServiceImpl(
                 mock(KnowledgeBaseDao.class),
                 mock(KnowledgeChunkDao.class),
@@ -55,10 +55,33 @@ class KnowledgeBaseServiceImplTest {
         request.setParserConfig("{}");
 
         RenException error = assertThrows(RenException.class,
-                () -> ReflectionTestUtils.invokeMethod(service, "enforceLocalSemanticChunkingConfig",
+                () -> ReflectionTestUtils.invokeMethod(service, "enforceLocalProcessingConfig",
                         request, Map.of("type", "local_knowledge")));
 
-        assertTrue(error.getMessage().contains("必须选择大模型语义切片模型"));
+        assertTrue(error.getMessage().contains("语义增强策略必须选择切片模型"));
+    }
+
+    @Test
+    void allowsDirectProcessingWithoutLlmModel() throws Exception {
+        KnowledgeBaseServiceImpl service = new KnowledgeBaseServiceImpl(
+                mock(KnowledgeBaseDao.class),
+                mock(KnowledgeChunkDao.class),
+                mock(DocumentDao.class),
+                mock(ModelConfigService.class),
+                mock(ModelConfigDao.class),
+                mock(RedisUtils.class),
+                mock(WorkspaceService.class),
+                mock(WorkspacePermissionService.class),
+                new ObjectMapper());
+        KnowledgeBaseDTO request = new KnowledgeBaseDTO();
+        request.setParserConfig("{\"processing_strategy\":\"direct\"}");
+
+        ReflectionTestUtils.invokeMethod(service, "enforceLocalProcessingConfig",
+                request, Map.of("type", "local_knowledge"));
+
+        com.fasterxml.jackson.databind.JsonNode config = new ObjectMapper().readTree(request.getParserConfig());
+        assertEquals("direct", config.get("processing_strategy").asText());
+        assertTrue(!config.get("llm_enabled").asBoolean());
     }
 
     @Test
@@ -104,7 +127,7 @@ class KnowledgeBaseServiceImplTest {
 
         UserDetail user = new UserDetail();
         user.setUsername("tester");
-        String parserConfig = "{\"chunk_token_num\":768,\"llm_enabled\":true,"
+        String parserConfig = "{\"chunk_token_num\":768,\"processing_strategy\":\"llm_enhanced\",\"llm_enabled\":true,"
                 + "\"llm_model_id\":\"llm-1\",\"retrieval_config\":{\"semantic_top_k\":12}}";
         KnowledgeBaseDTO request = new KnowledgeBaseDTO();
         request.setName("产品资料");
