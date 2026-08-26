@@ -53,12 +53,13 @@ SERVER_INSTALL_PROFILE=lite scripts/acr-build-push
 SERVER_INSTALL_PROFILE=funasr scripts/acr-build-push
 ```
 
-发布脚本默认把 Python、Node、Maven、Java runtime 和 Nginx runtime 基础镜像指向
+发布脚本默认把 Python、maintenance-agent Python、Node、Maven、Java runtime 和 Nginx runtime 基础镜像指向
 `docker.m.daocloud.io`，避免构建机 Docker daemon 配了失效公共 mirror 时
 拉取基础镜像失败。仍可按需覆盖：
 
 ```bash
 PYTHON_BASE_IMAGE=python:3.10-slim-bookworm \
+MAINTENANCE_PYTHON_BASE_IMAGE=python:3.12.11-slim-bookworm \
 NODE_BASE_IMAGE=node:20-bookworm-slim \
 MAVEN_BASE_IMAGE=maven:3.9.4-eclipse-temurin-21 \
 API_RUNTIME_BASE_IMAGE=bellsoft/liberica-runtime-container:jre-21-glibc \
