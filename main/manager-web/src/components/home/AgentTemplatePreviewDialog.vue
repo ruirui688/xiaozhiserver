@@ -48,6 +48,9 @@
               <div v-for="(name, type) in preview.modelNames" :key="type" class="model-item">
                 <small>{{ modelLabel(type) }}</small><strong>{{ name }}</strong>
               </div>
+              <div v-if="preview.voiceName" class="model-item">
+                <small>绑定音色</small><strong>{{ preview.voiceName }}</strong>
+              </div>
               <div v-if="!hasModels" class="empty-inline">模型配置将使用工作空间默认值</div>
             </div>
             <div class="chip-group">
@@ -67,7 +70,8 @@
             <ul>
               <li><i class="el-icon-check" />复制人设、模型、技能和可访问知识库</li>
               <li><i class="el-icon-check" />复制标签和安全的上下文源配置</li>
-              <li class="excluded"><i class="el-icon-close" />不绑定 TTS 模型、音色或实时音色</li>
+              <li v-if="hasSpeechBinding"><i class="el-icon-check" />复制已校验的 TTS 模型与音色</li>
+              <li v-else><i class="el-icon-check" />未设置 TTS 时沿用工作空间默认语音链路</li>
               <li class="excluded"><i class="el-icon-close" />不复制设备绑定和敏感请求头</li>
             </ul>
           </div>
@@ -78,9 +82,12 @@
           <el-button type="primary" :disabled="!canWrite || quotaFull" @click="$emit('create', template)">
             使用此模板
           </el-button>
+          <el-button v-if="canManageOfficial" plain @click="$emit('manage', template)">
+            编辑官方模板
+          </el-button>
           <small v-if="quotaFull">当前工作空间智能体数量已达上限</small>
           <small v-else-if="!canWrite">当前工作空间为只读</small>
-          <small v-else>创建后可在角色配置中单独试听并选择音色</small>
+          <small v-else>模板中的模型、音色和知识库会在创建时重新校验可用性</small>
         </aside>
       </template>
     </div>
@@ -112,6 +119,12 @@ export default {
       if (!this.preview) return false;
       return ['capabilityNames', 'skillNames', 'tagNames']
         .some(key => Array.isArray(this.preview[key]) && this.preview[key].length);
+    },
+    hasSpeechBinding() {
+      return Boolean(this.preview && this.preview.modelNames && this.preview.modelNames.TTS);
+    },
+    canManageOfficial() {
+      return Boolean(this.template && this.template.scope === 'OFFICIAL' && this.template.officialMaintainer);
     }
   },
   methods: {
@@ -119,7 +132,7 @@ export default {
       return { OFFICIAL: '官方模板', PUBLIC: '模板中心', WORKSPACE: '工作空间' }[scope] || '官方模板';
     },
     modelLabel(type) {
-      return { ASR: '语音识别', LLM: '语言模型', Memory: '长期记忆', Intent: '意图识别' }[type] || type;
+      return { ASR: '语音识别', LLM: '语言模型', Memory: '长期记忆', Intent: '意图识别', TTS: '语音合成' }[type] || type;
     }
   }
 }

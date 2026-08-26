@@ -32,6 +32,7 @@ import xiaozhi.common.utils.ResultUtils;
 import xiaozhi.modules.agent.entity.AgentTemplateEntity;
 import xiaozhi.modules.agent.service.AgentTemplateService;
 import xiaozhi.modules.agent.vo.AgentTemplateVO;
+import xiaozhi.modules.workspace.service.OfficialResourcePermissionService;
 
 @Tag(name = "智能体模板管理")
 @AllArgsConstructor
@@ -40,10 +41,11 @@ import xiaozhi.modules.agent.vo.AgentTemplateVO;
 public class AgentTemplateController {
     
     private final AgentTemplateService agentTemplateService;
+    private final OfficialResourcePermissionService officialPermissionService;
     
     @GetMapping("/page")
     @Operation(summary = "获取模板分页列表")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("sys:role:normal")
     @Parameters({
             @Parameter(name = Constant.PAGE, description = "当前页码，从1开始", required = true),
             @Parameter(name = Constant.LIMIT, description = "每页显示记录数", required = true),
@@ -51,6 +53,7 @@ public class AgentTemplateController {
     })
     public Result<PageData<AgentTemplateVO>> getAgentTemplatesPage(
             @Parameter(hidden = true) @RequestParam Map<String, Object> params) {
+        officialPermissionService.requireOfficialMaintainer();
         
         // 创建分页对象
         int page = Integer.parseInt(params.getOrDefault(Constant.PAGE, "1").toString());
@@ -80,8 +83,9 @@ public class AgentTemplateController {
     
     @GetMapping("/{id}")
     @Operation(summary = "获取模板详情")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("sys:role:normal")
     public Result<AgentTemplateVO> getAgentTemplateById(@PathVariable("id") String id) {
+        officialPermissionService.requireOfficialMaintainer();
         AgentTemplateEntity template = agentTemplateService.getById(id);
         if (template == null) {
             return ResultUtils.error("模板不存在");
@@ -98,13 +102,13 @@ public class AgentTemplateController {
     
     @PostMapping
     @Operation(summary = "创建模板")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("sys:role:normal")
     public Result<AgentTemplateEntity> createAgentTemplate(@Valid @RequestBody AgentTemplateEntity template) {
+        officialPermissionService.requireOfficialMaintainer();
         template.setWorkspaceId(null);
         template.setVisibility("OFFICIAL");
         template.setReviewStatus("APPROVED");
         template.setPublishedAt(new java.util.Date());
-        template.setSnapshotJson(null);
         template.setSourceAgentId(null);
         if (template.getTemplateName() == null || template.getTemplateName().isBlank()) {
             template.setTemplateName(template.getAgentName());
@@ -122,8 +126,9 @@ public class AgentTemplateController {
     
     @PutMapping
     @Operation(summary = "更新模板")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("sys:role:normal")
     public Result<AgentTemplateEntity> updateAgentTemplate(@Valid @RequestBody AgentTemplateEntity template) {
+        officialPermissionService.requireOfficialMaintainer();
         AgentTemplateEntity existing = agentTemplateService.getById(template.getId());
         if (existing == null || existing.getWorkspaceId() != null) {
             return ResultUtils.error("只能在此处更新系统模板");
@@ -131,7 +136,6 @@ public class AgentTemplateController {
         template.setWorkspaceId(null);
         template.setVisibility("OFFICIAL");
         template.setReviewStatus("APPROVED");
-        template.setSnapshotJson(null);
         template.setSourceAgentId(null);
         if (template.getTemplateName() == null || template.getTemplateName().isBlank()) {
             template.setTemplateName(template.getAgentName());
@@ -146,8 +150,9 @@ public class AgentTemplateController {
     
     @DeleteMapping("/{id}")
     @Operation(summary = "删除模板")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("sys:role:normal")
     public Result<String> deleteAgentTemplate(@PathVariable("id") String id) {
+        officialPermissionService.requireOfficialMaintainer();
         // 先查询要删除的模板信息，获取其排序值
         AgentTemplateEntity template = agentTemplateService.getById(id);
         if (template == null) {
@@ -177,8 +182,9 @@ public class AgentTemplateController {
     // 添加新的批量删除方法，使用不同的URL
     @PostMapping("/batch-remove")
     @Operation(summary = "批量删除模板")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("sys:role:normal")
     public Result<String> batchRemoveAgentTemplates(@RequestBody List<String> ids) {
+        officialPermissionService.requireOfficialMaintainer();
         if (ids == null || ids.isEmpty()) {
             return ResultUtils.error("请选择要删除的模板");
         }

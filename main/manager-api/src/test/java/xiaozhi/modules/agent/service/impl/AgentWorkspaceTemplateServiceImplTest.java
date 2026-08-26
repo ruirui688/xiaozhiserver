@@ -41,8 +41,10 @@ import xiaozhi.modules.agent.vo.AgentTemplateApplyResultVO;
 import xiaozhi.modules.correctword.dao.CorrectWordFileDao;
 import xiaozhi.modules.knowledge.service.KnowledgeBaseService;
 import xiaozhi.modules.model.dao.ModelProviderDao;
+import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
 import xiaozhi.modules.security.user.SecurityUser;
+import xiaozhi.modules.timbre.entity.TimbreEntity;
 import xiaozhi.modules.timbre.service.TimbreService;
 import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 import xiaozhi.modules.workspace.service.OfficialResourcePermissionService;
@@ -56,6 +58,8 @@ class AgentWorkspaceTemplateServiceImplTest {
     private AgentFeishuService feishuService;
     private WorkspacePermissionService permissionService;
     private OfficialResourcePermissionService officialPermissionService;
+    private ModelConfigService modelConfigService;
+    private TimbreService timbreService;
     private AgentWorkspaceTemplateServiceImpl service;
 
     @BeforeEach
@@ -68,6 +72,8 @@ class AgentWorkspaceTemplateServiceImplTest {
         feishuService = mock(AgentFeishuService.class);
         permissionService = mock(WorkspacePermissionService.class);
         officialPermissionService = mock(OfficialResourcePermissionService.class);
+        modelConfigService = mock(ModelConfigService.class);
+        timbreService = mock(TimbreService.class);
         service = new AgentWorkspaceTemplateServiceImpl(
                 templateService,
                 agentService,
@@ -75,11 +81,11 @@ class AgentWorkspaceTemplateServiceImplTest {
                 skillService,
                 voicePrintService,
                 feishuService,
-                mock(ModelConfigService.class),
+                modelConfigService,
                 mock(ModelProviderDao.class),
                 mock(KnowledgeBaseService.class),
                 mock(CorrectWordFileDao.class),
-                mock(TimbreService.class),
+                timbreService,
                 permissionService,
                 officialPermissionService,
                 mock(org.springframework.context.ApplicationEventPublisher.class));
@@ -89,6 +95,8 @@ class AgentWorkspaceTemplateServiceImplTest {
     void approvingMarketplaceTemplateRemovesWorkspacePrivateBindings() {
         AgentUpdateDTO config = new AgentUpdateDTO();
         config.setCorrectWordFileIds(List.of("private-words"));
+        config.setTtsModelId("TTS_private");
+        config.setTtsVoiceId("voice-private");
         AgentTemplateSnapshotDTO snapshot = new AgentTemplateSnapshotDTO();
         snapshot.setSchemaVersion(2);
         snapshot.setConfig(config);
@@ -114,6 +122,8 @@ class AgentWorkspaceTemplateServiceImplTest {
         AgentTemplateSnapshotDTO published = captor.getValue().getPublicSnapshotJson();
         assertTrue(published.getVoicePrintIds().isEmpty());
         assertTrue(published.getConfig().getCorrectWordFileIds().isEmpty());
+        assertEquals(null, published.getConfig().getTtsModelId());
+        assertEquals(null, published.getConfig().getTtsVoiceId());
         assertEquals(null, published.getFeishuConfig());
         assertEquals("PUBLIC", captor.getValue().getVisibility());
         assertEquals("private-voice", captor.getValue().getSnapshotJson().getVoicePrintIds().get(0));
@@ -171,7 +181,7 @@ class AgentWorkspaceTemplateServiceImplTest {
     }
 
     @Test
-    void saveAsDoesNotPersistSpeechModelOrVoiceBinding() {
+    void saveAsPersistsSpeechModelAndVoiceBinding() {
         AgentInfoVO source = agent("agent-a", "workspace-a");
         when(agentService.checkAgentPermission("agent-a", 7L)).thenReturn(true);
         when(agentService.getAgentById("agent-a")).thenReturn(source);
@@ -195,20 +205,21 @@ class AgentWorkspaceTemplateServiceImplTest {
         ArgumentCaptor<AgentTemplateEntity> captor = ArgumentCaptor.forClass(AgentTemplateEntity.class);
         verify(templateService).save(captor.capture());
         AgentUpdateDTO saved = captor.getValue().getSnapshotJson().getConfig();
-        assertEquals(null, saved.getTtsModelId());
-        assertEquals(null, saved.getTtsVoiceId());
-        assertEquals(null, saved.getRealtimeVoiceId());
-        assertEquals(null, captor.getValue().getTtsModelId());
-        assertEquals(null, captor.getValue().getTtsVoiceId());
+        assertEquals("TTS_workspace_only", saved.getTtsModelId());
+        assertEquals("voice_workspace_only", saved.getTtsVoiceId());
+        assertEquals("realtime_voice", saved.getRealtimeVoiceId());
+        assertEquals("TTS_workspace_only", captor.getValue().getTtsModelId());
+        assertEquals("voice_workspace_only", captor.getValue().getTtsVoiceId());
     }
 
     @Test
-    void previewExplainsAndHidesLegacySpeechBinding() {
+    void previewShowsSpeechBindingAndRepairsLegacyLanguage() {
         AgentUpdateDTO config = new AgentUpdateDTO();
         config.setAgentName("军师");
         config.setSystemPrompt("你是游戏军师");
         config.setTtsModelId("TTS_old");
         config.setTtsVoiceId("voice_old");
+        config.setLanguage("ä¸­æ–‡");
         AgentTemplateSnapshotDTO snapshot = new AgentTemplateSnapshotDTO();
         snapshot.setSchemaVersion(2);
         snapshot.setConfig(config);
@@ -219,12 +230,22 @@ class AgentWorkspaceTemplateServiceImplTest {
         template.setSnapshotJson(snapshot);
         when(permissionService.currentWorkspaceId()).thenReturn("workspace-a");
         when(templateService.getById("template-a")).thenReturn(template);
+        ModelConfigEntity tts = new ModelConfigEntity();
+        tts.setId("TTS_old");
+        tts.setModelName("豆包语音合成");
+        when(modelConfigService.getModelByIdFromCache("TTS_old")).thenReturn(tts);
+        TimbreEntity voice = new TimbreEntity();
+        voice.setId("voice_old");
+        voice.setName("清新女声");
+        voice.setTtsModelId("TTS_old");
+        when(timbreService.selectById("voice_old")).thenReturn(voice);
 
         var preview = service.preview("template-a");
 
         assertEquals("你是游戏军师", preview.getSystemPrompt());
-        assertFalse(preview.getModelNames().containsKey("TTS"));
-        assertTrue(preview.getSkippedItems().stream().anyMatch(item -> item.contains("音色")));
+        assertEquals("豆包语音合成", preview.getModelNames().get("TTS"));
+        assertEquals("清新女声", preview.getVoiceName());
+        assertEquals("中文", preview.getLanguage());
     }
 
     @Test
@@ -350,7 +371,7 @@ class AgentWorkspaceTemplateServiceImplTest {
     }
 
     @Test
-    void applyKeepsCurrentSpeechConfigurationEvenForLegacySnapshot() {
+    void applyUsesValidSpeechConfigurationFromTemplate() {
         AgentInfoVO target = agent("agent-a", "workspace-a");
         when(agentService.checkAgentPermission("agent-a", 7L)).thenReturn(true);
         when(agentService.getAgentById("agent-a")).thenReturn(target);
@@ -372,6 +393,15 @@ class AgentWorkspaceTemplateServiceImplTest {
         template.setVersion(1);
         template.setSnapshotJson(snapshot);
         when(templateService.getById("template-a")).thenReturn(template);
+        ModelConfigEntity tts = new ModelConfigEntity();
+        tts.setId("TTS_old");
+        tts.setModelType("TTS");
+        tts.setIsEnabled(1);
+        when(modelConfigService.getModelByIdFromCache("TTS_old")).thenReturn(tts);
+        TimbreEntity voice = new TimbreEntity();
+        voice.setId("voice_old");
+        voice.setTtsModelId("TTS_old");
+        when(timbreService.selectById("voice_old")).thenReturn(voice);
         AgentTemplateApplyDTO request = new AgentTemplateApplyDTO();
         request.setExpectedVersion(1);
 
@@ -384,9 +414,9 @@ class AgentWorkspaceTemplateServiceImplTest {
         ArgumentCaptor<AgentUpdateDTO> captor = ArgumentCaptor.forClass(AgentUpdateDTO.class);
         verify(agentService).updateAgentById(org.mockito.ArgumentMatchers.eq("agent-a"), captor.capture(),
                 org.mockito.ArgumentMatchers.eq(false));
-        assertEquals(null, captor.getValue().getTtsModelId());
-        assertEquals(null, captor.getValue().getTtsVoiceId());
-        assertTrue(result.getSkippedItems().stream().anyMatch(item -> item.contains("音色")));
+        assertEquals("TTS_old", captor.getValue().getTtsModelId());
+        assertEquals("voice_old", captor.getValue().getTtsVoiceId());
+        assertFalse(result.getSkippedItems().stream().anyMatch(item -> item.contains("音色")));
     }
 
     @Test

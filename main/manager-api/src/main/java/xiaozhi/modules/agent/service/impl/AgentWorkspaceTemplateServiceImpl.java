@@ -1,5 +1,7 @@
 package xiaozhi.modules.agent.service.impl;
 
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashMap;
@@ -66,6 +68,7 @@ import xiaozhi.modules.workspace.service.OfficialResourcePermissionService;
 @Service
 @RequiredArgsConstructor
 public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplateService {
+    private static final Charset WINDOWS_1252 = Charset.forName("windows-1252");
     private static final int SNAPSHOT_SCHEMA_VERSION = 2;
     private static final int MAX_CONTEXT_PROVIDERS = 20;
     private static final int MAX_CONTEXT_HEADERS = 20;
@@ -123,14 +126,14 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
 
         List<String> skipped = new ArrayList<>();
         AgentUpdateDTO config = deepCopy(snapshot.getConfig(), AgentUpdateDTO.class);
-        removeSpeechBinding(config, skipped);
         config.setFunctions(filterCapabilityMappings(config.getFunctions(), workspaceId, skipped));
 
         AgentTemplatePreviewVO preview = new AgentTemplatePreviewVO();
         preview.setTemplate(toSummary(template));
         preview.setSystemPrompt(config.getSystemPrompt());
-        preview.setLanguage(config.getLanguage());
+        preview.setLanguage(repairMojibake(config.getLanguage()));
         preview.setModelNames(resolvePreviewModels(config));
+        preview.setVoiceName(resolvePreviewVoice(config));
         preview.setTagNames(normalizeTagNames(snapshot.getTagNames()));
         preview.setSkillNames(snapshot.getSemanticSkills() == null ? List.of()
                 : snapshot.getSemanticSkills().stream()
@@ -158,7 +161,6 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
 
         List<String> warnings = new ArrayList<>();
         AgentUpdateDTO config = deepCopy(dto.getConfig(), AgentUpdateDTO.class);
-        removeSpeechBinding(config, warnings);
         config.setContextProviders(sanitizeContextProviders(config.getContextProviders(), warnings));
         config.setFunctions(filterCapabilityMappings(config.getFunctions(), workspaceId, warnings));
         config.setCorrectWordFileIds(filterCorrectWordFilesForCreate(
@@ -248,7 +250,6 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
 
         List<String> skipped = new ArrayList<>();
         AgentUpdateDTO desired = deepCopy(snapshot.getConfig(), AgentUpdateDTO.class);
-        removeSpeechBinding(desired, skipped);
         if (StringUtils.isNotBlank(agentNameOverride)) {
             desired.setAgentName(agentNameOverride);
         }
@@ -330,7 +331,7 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
         }
         boolean approved = REVIEW_APPROVED.equals(dto.getDecision());
         if (approved) {
-            sanitizeForPublication(template);
+            sanitizeForPublication(template, false);
         }
         template.setReviewStatus(approved ? REVIEW_APPROVED : REVIEW_REJECTED);
         template.setVisibility(approved ? VISIBILITY_PUBLIC : VISIBILITY_WORKSPACE);
@@ -351,7 +352,7 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
     public AgentTemplateSummaryVO publishOfficial(String templateId) {
         officialPermissionService.requireOfficialMaintainer();
         AgentTemplateEntity template = requireOwnedWorkspaceTemplate(templateId);
-        sanitizeForPublication(template);
+        sanitizeForPublication(template, true);
         template.setVisibility(VISIBILITY_OFFICIAL);
         template.setReviewStatus(REVIEW_APPROVED);
         template.setReviewerId(SecurityUser.getUserId());
@@ -378,7 +379,7 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
         template.setVersion((template.getVersion() == null ? 1 : template.getVersion()) + 1);
     }
 
-    private void sanitizeForPublication(AgentTemplateEntity template) {
+    private void sanitizeForPublication(AgentTemplateEntity template, boolean preserveSpeechBinding) {
         if (template.getSnapshotJson() == null) {
             return;
         }
@@ -387,7 +388,9 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
         snapshot.setFeishuConfig(null);
         if (snapshot.getConfig() != null) {
             snapshot.getConfig().setCorrectWordFileIds(List.of());
-            removeSpeechBinding(snapshot.getConfig(), null);
+            if (!preserveSpeechBinding) {
+                removeSpeechBinding(snapshot.getConfig(), null);
+            }
         }
         template.setPublicSnapshotJson(snapshot);
     }
@@ -444,7 +447,35 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
         addPreviewModel(models, "LLM", config.getLlmModelId());
         addPreviewModel(models, "Memory", config.getMemModelId());
         addPreviewModel(models, "Intent", config.getIntentModelId());
+        addPreviewModel(models, "TTS", config.getTtsModelId());
         return models;
+    }
+
+    private String resolvePreviewVoice(AgentUpdateDTO config) {
+        if (StringUtils.isBlank(config.getTtsVoiceId())) {
+            return null;
+        }
+        TimbreEntity voice = timbreService.selectById(config.getTtsVoiceId());
+        return voice == null
+                ? config.getTtsVoiceId()
+                : StringUtils.defaultIfBlank(voice.getName(), config.getTtsVoiceId());
+    }
+
+    private String repairMojibake(String value) {
+        if (StringUtils.isBlank(value) || (!value.contains("Ã") && !value.contains("Â") && !value.contains("ä")
+                && !value.contains("å") && !value.contains("æ"))) {
+            return value;
+        }
+        String repaired = new String(value.getBytes(WINDOWS_1252), StandardCharsets.UTF_8);
+        boolean originalContainsCjk = value.codePoints().anyMatch(this::isCjkCodePoint);
+        boolean repairedContainsCjk = repaired.codePoints().anyMatch(this::isCjkCodePoint);
+        return repaired.indexOf('\uFFFD') >= 0 || originalContainsCjk || !repairedContainsCjk ? value : repaired;
+    }
+
+    private boolean isCjkCodePoint(int codePoint) {
+        return (codePoint >= 0x3400 && codePoint <= 0x4DBF)
+                || (codePoint >= 0x4E00 && codePoint <= 0x9FFF)
+                || (codePoint >= 0xF900 && codePoint <= 0xFAFF);
     }
 
     private void addPreviewModel(Map<String, String> models, String type, String modelId) {

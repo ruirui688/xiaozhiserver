@@ -15,15 +15,18 @@ import org.junit.jupiter.api.Test;
 import xiaozhi.common.utils.Result;
 import xiaozhi.modules.agent.entity.AgentTemplateEntity;
 import xiaozhi.modules.agent.service.AgentTemplateService;
+import xiaozhi.modules.workspace.service.OfficialResourcePermissionService;
 
 class AgentTemplateControllerTest {
     private final AgentTemplateService agentTemplateService = mock(AgentTemplateService.class);
+    private final OfficialResourcePermissionService officialPermissionService =
+            mock(OfficialResourcePermissionService.class);
 
     private AgentTemplateController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new AgentTemplateController(agentTemplateService);
+        controller = new AgentTemplateController(agentTemplateService, officialPermissionService);
     }
 
     @Test
@@ -35,6 +38,7 @@ class AgentTemplateControllerTest {
         Result<String> result = controller.deleteAgentTemplate("system-1");
 
         assertEquals("至少保留一个系统模板，不能删除最后一个系统模板", result.getMsg());
+        verify(officialPermissionService).requireOfficialMaintainer();
         verify(agentTemplateService, never()).removeById(any());
     }
 
@@ -48,6 +52,7 @@ class AgentTemplateControllerTest {
         Result<String> result = controller.deleteAgentTemplate("system-2");
 
         assertEquals(0, result.getCode());
+        verify(officialPermissionService).requireOfficialMaintainer();
         verify(agentTemplateService).removeById("system-2");
         verify(agentTemplateService).reorderTemplatesAfterDelete(1);
     }
@@ -60,6 +65,7 @@ class AgentTemplateControllerTest {
         Result<String> result = controller.batchRemoveAgentTemplates(ids);
 
         assertEquals("至少保留一个系统模板，不能删除全部系统模板", result.getMsg());
+        verify(officialPermissionService).requireOfficialMaintainer();
         verify(agentTemplateService, never()).removeByIds(any());
     }
 

@@ -11,6 +11,7 @@ public class AgentTemplatePreviewVO {
     private String systemPrompt;
     private String language;
     private Map<String, String> modelNames;
+    private String voiceName;
     private List<String> tagNames;
     private List<String> skillNames;
     private List<String> capabilityNames;

@@ -53,7 +53,7 @@
         :can-write="canWrite" :quota-full="isAgentLimitReached" @preview="handlePreviewTemplate" />
       <AgentTemplatePreviewDialog :visible.sync="templatePreviewVisible" :preview="templatePreview"
         :loading="templatePreviewLoading" :can-write="canWrite" :quota-full="isAgentLimitReached"
-        @create="handleCreateFromTemplate" />
+        @create="handleCreateFromTemplate" @manage="handleManageOfficialTemplate" />
       <AddWisdomBodyDialog :visible.sync="addDeviceDialogVisible" @confirm="handleWisdomBodyAdded" />
     </el-main>
     <el-footer>
@@ -177,6 +177,11 @@ export default {
         this.templatePreviewLoading = false;
         this.$message.error((error && error.msg) || '模板预览加载失败');
       });
+    },
+    handleManageOfficialTemplate(template) {
+      if (!template || !template.id || !template.officialMaintainer) return;
+      this.templatePreviewVisible = false;
+      this.$router.push({ path: '/template-quick-config', query: { templateId: template.id } });
     },
     handleCreateFromTemplate(template) {
       if (!this.canWrite) {

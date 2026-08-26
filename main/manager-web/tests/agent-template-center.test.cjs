@@ -59,7 +59,7 @@ describe('agent template center', () => {
     vm.$destroy();
   });
 
-  test('template center opens a read-only preview before creating and documents voice portability', () => {
+  test('template center previews portable speech bindings and exposes official maintenance', () => {
     const root = path.resolve(__dirname, '..');
     const center = fs.readFileSync(path.join(root, 'src/components/home/AgentTemplateCenter.vue'), 'utf8');
     const preview = fs.readFileSync(path.join(root, 'src/components/home/AgentTemplatePreviewDialog.vue'), 'utf8');
@@ -71,8 +71,23 @@ describe('agent template center', () => {
     assert.match(preview, /角色设定/);
     assert.match(preview, /模型与能力/);
     assert.match(preview, /预览本身不会调用模型或产生模型费用/);
-    assert.match(preview, /不绑定 TTS 模型、音色或实时音色/);
+    assert.match(preview, /复制已校验的 TTS 模型与音色/);
+    assert.match(preview, /编辑官方模板/);
+    assert.match(preview, /officialMaintainer/);
     assert.match(home, /getAgentTemplatePreview/);
+    assert.match(home, /template-quick-config/);
+  });
+
+  test('official template editor persists model, voice and official knowledge snapshot', () => {
+    const root = path.resolve(__dirname, '..');
+    const editor = fs.readFileSync(path.join(root, 'src/views/TemplateQuickConfig.vue'), 'utf8');
+
+    assert.match(editor, /TTS 音色/);
+    assert.match(editor, /官方知识库/);
+    assert.match(editor, /getModelVoices/);
+    assert.match(editor, /scope: "OFFICIAL"/);
+    assert.match(editor, /snapshotJson: \{ schemaVersion: 2, config \}/);
+    assert.match(editor, /repairMojibake/);
   });
 
   test('home exposes a bounded runtime monitor instead of raw server logs', () => {

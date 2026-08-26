@@ -27,6 +27,9 @@
             <div class="divider"></div>
 
             <el-form ref="form" :model="form" label-width="72px" class="full-height-form">
+              <el-form-item label="模板名称" prop="templateName" class="nickname-item">
+                <el-input v-model="form.templateName" placeholder="用于模板中心展示" class="form-input" />
+              </el-form-item>
               <!-- 助手昵称 -->
               <el-form-item :label="$t('templateQuickConfig.agentSettings.agentName')" prop="agentName" class="nickname-item">
                 <el-input
@@ -35,6 +38,35 @@
                   :validate-event="false"
                   class="form-input"
                 />
+              </el-form-item>
+
+              <div class="template-config-grid">
+                <el-form-item v-for="item in modelFields" :key="item.key" :label="item.label">
+                  <el-select v-model="form.model[item.key]" clearable filterable placeholder="未配置"
+                    @change="item.key === 'ttsModelId' && handleTtsModelChanged($event)">
+                    <el-option v-for="option in modelOptions[item.type] || []" :key="option.id"
+                      :label="option.modelName || option.id" :value="option.id" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="TTS 音色">
+                  <el-select v-model="form.ttsVoiceId" clearable filterable :disabled="!form.model.ttsModelId"
+                    placeholder="请先选择 TTS 模型">
+                    <el-option v-for="voice in voiceOptions" :key="voice.id"
+                      :label="voice.name || voice.id" :value="voice.id" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="交互语种">
+                  <el-input v-model="form.language" placeholder="例如：中文" />
+                </el-form-item>
+              </div>
+
+              <el-form-item label="官方知识库" class="knowledge-item">
+                <el-select v-model="selectedKnowledgeIds" multiple clearable filterable
+                  placeholder="选择允许所有用户使用的官方知识库">
+                  <el-option v-for="knowledge in knowledgeOptions" :key="knowledge.id"
+                    :label="knowledge.name || knowledge.id" :value="knowledge.id" />
+                </el-select>
+                <div class="field-help">官方模板只能跨工作空间绑定官方知识库；保存时会重新校验模型和音色。</div>
               </el-form-item>
               
               <!-- 角色介绍 -->
@@ -61,7 +93,7 @@
 
 <script>
 import HeaderBar from "@/components/HeaderBar.vue";
-import agentApi from '@/apis/module/agent';
+import Api from '@/apis/api';
 import VersionFooter from "@/components/VersionFooter.vue";
 
 // 默认模型配置常量
@@ -81,12 +113,29 @@ export default {
   data() {
     return {
       form: {
+        templateName: "",
         agentCode: "小智",
         agentName: "",
         systemPrompt: "",
+        language: "",
+        ttsVoiceId: "",
         sort: 0,
         model: { ...DEFAULT_MODEL_CONFIG }
       },
+      modelFields: [
+        { key: "asrModelId", type: "ASR", label: "语音识别" },
+        { key: "llmModelId", type: "LLM", label: "语言模型" },
+        { key: "memModelId", type: "Memory", label: "长期记忆" },
+        { key: "intentModelId", type: "Intent", label: "意图识别" },
+        { key: "ttsModelId", type: "TTS", label: "语音合成" }
+      ],
+      modelOptions: {},
+      voiceOptions: [],
+      knowledgeOptions: [],
+      selectedKnowledgeIds: [],
+      originalKnowledgeIds: [],
+      snapshotConfig: {},
+      originalSnapshotConfig: {},
       templateId: '',
       originalForm: null
     };
@@ -99,6 +148,10 @@ export default {
     
     // 保存配置
     saveConfig() {
+      if (!this.form.templateName.trim() || !this.form.agentName.trim()) {
+        this.$message.warning("请填写模板名称和智能体名称");
+        return;
+      }
       const configData = this.prepareConfigData();
       
       if (this.templateId) {
@@ -110,27 +163,55 @@ export default {
     
     // 准备配置数据
     prepareConfigData() {
-      return {
-        id: this.templateId || '',
+      const knowledgeIds = new Set([
+        ...this.knowledgeOptions.map(item => item.id),
+        ...this.originalKnowledgeIds
+      ]);
+      const preservedFunctions = Array.isArray(this.snapshotConfig.functions)
+        ? this.snapshotConfig.functions.filter(item => item && !knowledgeIds.has(item.pluginId))
+        : [];
+      const config = {
+        ...this.snapshotConfig,
         agentCode: this.form.agentCode,
         agentName: this.form.agentName,
         systemPrompt: this.form.systemPrompt,
+        language: this.form.language,
+        ...this.form.model,
+        ttsVoiceId: this.form.ttsVoiceId,
+        functions: [
+          ...preservedFunctions,
+          ...this.selectedKnowledgeIds.map(id => ({
+            pluginId: id,
+            paramInfo: { queryPolicy: "仅依据用户当前问题和已明确上下文检索，不补充未提及对象。" }
+          }))
+        ]
+      };
+      return {
+        id: this.templateId || '',
+        templateName: this.form.templateName,
+        agentCode: this.form.agentCode,
+        agentName: this.form.agentName,
+        systemPrompt: this.form.systemPrompt,
+        language: this.form.language,
+        ttsVoiceId: this.form.ttsVoiceId,
         sort: this.form.sort,
-        functions: [],
-        // 包含必要的模型字段以确保API调用成功
-        ...this.form.model
+        ...this.form.model,
+        snapshotJson: { schemaVersion: 2, config }
       };
     },
     
     // 更新现有模板
     updateExistingTemplate(configData) {
-      agentApi.updateAgentTemplate(configData, (res) => {
+      Api.agent.updateAgentTemplate(configData, (res) => {
         if (res && res.data && res.data.code === 0) {
           this.$message.success({ 
             message: this.$t('templateQuickConfig.saveSuccess'), 
             showClose: true 
           });
+          this.snapshotConfig = JSON.parse(JSON.stringify(configData.snapshotJson.config));
           this.originalForm = JSON.parse(JSON.stringify(this.form));
+          this.originalKnowledgeIds = [...this.selectedKnowledgeIds];
+          this.originalSnapshotConfig = JSON.parse(JSON.stringify(this.snapshotConfig));
         } else {
           this.$message.error({ 
             message: res?.data?.msg || this.$t('templateQuickConfig.saveFailed'), 
@@ -142,7 +223,7 @@ export default {
     
     // 创建新模板
     createNewTemplate(configData) {
-      agentApi.addAgentTemplate(configData, (res) => {
+      Api.agent.addAgentTemplate(configData, (res) => {
         if (res && res.data && res.data.code === 0) {
           this.$message.success({ 
             message: this.$t('templateQuickConfig.saveSuccess'), 
@@ -171,6 +252,9 @@ export default {
       ).then(() => {
         if (this.originalForm) {
           this.form = JSON.parse(JSON.stringify(this.originalForm));
+          this.selectedKnowledgeIds = [...this.originalKnowledgeIds];
+          this.snapshotConfig = JSON.parse(JSON.stringify(this.originalSnapshotConfig));
+          this.loadVoices(this.form.model.ttsModelId);
         }
         this.$message.success({ 
           message: this.$t('templateQuickConfig.resetSuccess'), 
@@ -181,12 +265,14 @@ export default {
     
     // 根据ID获取模板
     fetchTemplateById(templateId) {
-      agentApi.getAgentTemplateById(templateId, (res) => {
+      Api.agent.getAgentTemplateById(templateId, (res) => {
         if (res && res.data && res.data.code === 0 && res.data.data) {
           const template = res.data.data;
           this.applyTemplateData(template);
           this.templateId = templateId;
           this.originalForm = JSON.parse(JSON.stringify(this.form));
+          this.originalKnowledgeIds = [...this.selectedKnowledgeIds];
+          this.originalSnapshotConfig = JSON.parse(JSON.stringify(this.snapshotConfig));
         } else {
           this.$message.error(res?.data?.msg || this.$t('templateQuickConfig.templateNotFound'));
         }
@@ -195,22 +281,90 @@ export default {
     
     // 应用模板数据
     applyTemplateData(templateData) {
+      const snapshot = templateData.snapshotJson && templateData.snapshotJson.config
+        ? templateData.snapshotJson.config
+        : templateData;
+      this.snapshotConfig = { ...snapshot };
       this.form = {
         ...this.form,
-        agentName: templateData.agentName || this.form.agentName,
-        agentCode: templateData.agentCode || this.form.agentCode,
-        systemPrompt: templateData.systemPrompt || this.form.systemPrompt,
+        templateName: templateData.templateName || templateData.agentName || this.form.templateName,
+        agentName: snapshot.agentName || templateData.agentName || this.form.agentName,
+        agentCode: snapshot.agentCode || templateData.agentCode || this.form.agentCode,
+        systemPrompt: snapshot.systemPrompt || templateData.systemPrompt || this.form.systemPrompt,
+        language: this.repairMojibake(snapshot.language || templateData.language || ""),
+        ttsVoiceId: snapshot.ttsVoiceId || templateData.ttsVoiceId || "",
         sort: templateData.sort || this.form.sort,
         model: {
-          ttsModelId: this.templateValue(templateData, "ttsModelId", this.form.model.ttsModelId),
-          vadModelId: this.templateValue(templateData, "vadModelId", this.form.model.vadModelId),
-          asrModelId: this.templateValue(templateData, "asrModelId", this.form.model.asrModelId),
-          llmModelId: this.templateValue(templateData, "llmModelId", this.form.model.llmModelId),
-          vllmModelId: this.templateValue(templateData, "vllmModelId", this.form.model.vllmModelId),
-          memModelId: this.templateValue(templateData, "memModelId", this.form.model.memModelId),
-          intentModelId: this.templateValue(templateData, "intentModelId", this.form.model.intentModelId)
+          ttsModelId: this.templateValue(snapshot, "ttsModelId", templateData.ttsModelId || ""),
+          vadModelId: this.templateValue(snapshot, "vadModelId", templateData.vadModelId || ""),
+          asrModelId: this.templateValue(snapshot, "asrModelId", templateData.asrModelId || ""),
+          llmModelId: this.templateValue(snapshot, "llmModelId", templateData.llmModelId || ""),
+          vllmModelId: this.templateValue(snapshot, "vllmModelId", templateData.vllmModelId || ""),
+          memModelId: this.templateValue(snapshot, "memModelId", templateData.memModelId || ""),
+          intentModelId: this.templateValue(snapshot, "intentModelId", templateData.intentModelId || "")
         }
       };
+      this.syncKnowledgeSelection();
+      this.loadVoices(this.form.model.ttsModelId);
+    },
+    syncKnowledgeSelection() {
+      const availableKnowledgeIds = new Set(this.knowledgeOptions.map(item => item.id));
+      this.selectedKnowledgeIds = (this.snapshotConfig.functions || [])
+        .map(item => item && item.pluginId)
+        .filter(id => id && availableKnowledgeIds.has(id));
+    },
+    repairMojibake(value) {
+      if (!value || !/[ÃÂäåæ]/.test(value)) return value;
+      try {
+        const windows1252 = {
+          "€": 0x80, "‚": 0x82, "ƒ": 0x83, "„": 0x84, "…": 0x85, "†": 0x86,
+          "‡": 0x87, "ˆ": 0x88, "‰": 0x89, "Š": 0x8a, "‹": 0x8b, "Œ": 0x8c,
+          "Ž": 0x8e, "‘": 0x91, "’": 0x92, "“": 0x93, "”": 0x94, "•": 0x95,
+          "–": 0x96, "—": 0x97, "˜": 0x98, "™": 0x99, "š": 0x9a, "›": 0x9b,
+          "œ": 0x9c, "ž": 0x9e, "Ÿ": 0x9f
+        };
+        const bytes = Uint8Array.from(value, character => windows1252[character] ?? character.charCodeAt(0));
+        const repaired = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        const containsCjk = text => /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(text);
+        return containsCjk(repaired) && !containsCjk(value) ? repaired : value;
+      } catch (error) {
+        return value;
+      }
+    },
+    handleTtsModelChanged(modelId) {
+      this.form.ttsVoiceId = "";
+      this.loadVoices(modelId);
+    },
+    loadVoices(modelId) {
+      if (!modelId) {
+        this.voiceOptions = [];
+        return;
+      }
+      Api.model.getModelVoices(modelId, "", ({ data }) => {
+        this.voiceOptions = data && data.code === 0 && Array.isArray(data.data) ? data.data : [];
+      });
+    },
+    loadModelOptions() {
+      this.modelFields.forEach(field => {
+        Api.model.getModelNames(field.type, "", ({ data }) => {
+          this.$set(this.modelOptions, field.type,
+            data && data.code === 0 && Array.isArray(data.data) ? data.data : []);
+        });
+      });
+    },
+    loadOfficialKnowledge() {
+      Api.knowledgeBase.getKnowledgeBaseList(
+        { page: 1, page_size: 1000, name: "", scope: "OFFICIAL" },
+        ({ data }) => {
+          this.knowledgeOptions = data && data.code === 0 && data.data
+            ? (data.data.list || [])
+            : [];
+          this.syncKnowledgeSelection();
+          if (this.templateId) {
+            this.originalKnowledgeIds = [...this.selectedKnowledgeIds];
+          }
+        }
+      );
     },
     templateValue(templateData, key, fallback) {
       return Object.prototype.hasOwnProperty.call(templateData, key)
@@ -222,6 +376,7 @@ export default {
     setDefaultTemplateValues() {
       this.form = {
         ...this.form,
+        templateName: this.$t('templateQuickConfig.newTemplate'),
         agentName: this.$t('templateQuickConfig.newTemplate'),
         agentCode: '小智',
         systemPrompt: '',
@@ -229,11 +384,13 @@ export default {
       };
       
       this.originalForm = JSON.parse(JSON.stringify(this.form));
+      this.originalKnowledgeIds = [];
+      this.originalSnapshotConfig = {};
     },
     
     // 获取模板列表并设置排序号
     fetchTemplateListForSort() {
-      agentApi.getAgentTemplate((res) => {
+      Api.agent.getAgentTemplate((res) => {
         if (res && res.data && res.data.code === 0) {
           const templateList = res.data.data || [];
           if (templateList.length > 0) {
@@ -253,6 +410,8 @@ export default {
   
   // 组件挂载时执行初始化
   mounted() {
+    this.loadModelOptions();
+    this.loadOfficialKnowledge();
     const templateId = this.$route.query.templateId;
     
     if (templateId) {
@@ -260,6 +419,7 @@ export default {
       this.fetchTemplateById(templateId);
     } else {
       // 新建模式：设置默认值并获取排序号
+      this.form.templateName = this.$t('templateQuickConfig.newTemplate');
       this.form.agentName = this.$t('templateQuickConfig.newTemplate');
       this.fetchTemplateListForSort();
     }
@@ -279,6 +439,24 @@ export default {
   -webkit-background-size: cover;
   -o-background-size: cover;
   overflow: hidden;
+}
+
+.template-config-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 22px;
+}
+
+.template-config-grid .el-select,
+.knowledge-item .el-select {
+  width: 100%;
+}
+
+.field-help {
+  margin-top: 6px;
+  color: #9098aa;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .operation-bar {

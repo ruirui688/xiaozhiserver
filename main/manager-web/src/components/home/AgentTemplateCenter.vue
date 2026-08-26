@@ -28,7 +28,7 @@
             <p>角色：{{ template.agentName || '未命名角色' }}</p>
           </div>
         </div>
-        <div class="template-card__summary">预览人设、模型与能力边界后再创建，不绑定音色。</div>
+        <div class="template-card__summary">预览人设、模型、音色与知识能力后再创建。</div>
         <div class="template-card__footer">
           <span>v{{ template.version }}</span>
           <el-button type="primary" plain size="small" @click.stop="$emit('preview', template)">
