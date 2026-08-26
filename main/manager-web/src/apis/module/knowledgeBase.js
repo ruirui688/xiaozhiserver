@@ -72,7 +72,8 @@ export default {
     const queryParams = new URLSearchParams({
       page: params.page,
       page_size: params.page_size,
-      name: params.name || ''
+      name: params.name || '',
+      scope: params.scope || 'MY'
     }).toString();
 
     makeApiRequest({
@@ -80,6 +81,18 @@ export default {
       method: 'GET',
       callback: callback,
       errorCallback: errorCallback
+    });
+  },
+
+  updatePublicationScope(datasetId, scope, callback, errorCallback) {
+    makeApiRequest({
+      url: `${getServiceUrl()}/datasets/${datasetId}/publication`,
+      method: 'PUT',
+      data: { scope },
+      headers: { 'Content-Type': 'application/json' },
+      callback,
+      errorCallback,
+      errorMessage: '更新知识库发布范围失败'
     });
   },
 

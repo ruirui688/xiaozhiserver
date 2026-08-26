@@ -262,6 +262,9 @@ Java 的 `ModelRuntimeAssembler` 负责从通用字段、普通参数和密钥�
 协议适配器，不是新的事实库：manager-api 仍是策略、配额、权限、审批和写入权威。适配器没有宿主目录挂载，
 使用只读根文件系统和临时 session 目录；知识任务仅有搜索能力，记忆任务无任何工具能力。即使容器已部署，
 每个知识库或智能体仍需在页面单独 opt-in。
+维护使用的 DeepSeek 端点、上游模型名和凭据来自模型管理中策略显式选择且已测试通过的 LLM。策略只保存模型
+配置 ID；凭据仅随 manager-api 的内部鉴权请求存在于单轮内存中，适配器不持久化，也不再要求部署环境维护
+第二份 `DEEPSEEK_API_KEY`。
 
 生产唯一操作入口是 [ACR 镜像生产部署](../deployment/private-docker-release.md)。推荐外部只暴露 TLS 入口：
 

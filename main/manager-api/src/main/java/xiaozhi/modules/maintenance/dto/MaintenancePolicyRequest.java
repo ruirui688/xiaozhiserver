@@ -23,5 +23,7 @@ public class MaintenancePolicyRequest {
     private Integer maxProposals = 8;
     @Min(1) @Max(1000)
     private Integer maxMonthlyRuns = 60;
+    @Size(max = 32)
+    private String modelConfigId;
     private Boolean enabled = false;
 }

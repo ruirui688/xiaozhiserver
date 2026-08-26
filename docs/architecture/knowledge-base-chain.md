@@ -39,12 +39,13 @@ source_paths:
 
 ```text
 KnowledgeBaseController (/datasets)
-  GET    /datasets                        分页列表
+  GET    /datasets?scope=MY|OFFICIAL      分页列表
   GET    /datasets/{id}                   单个详情
   POST   /datasets                        创建
   PUT    /datasets/{id}                   更新
   DELETE /datasets/{id}                   删除（级联）
   DELETE /datasets/batch?ids=...          批量删除
+  PUT    /datasets/{id}/publication       发布/撤回官方知识库
 
 KnowledgeFilesController (/datasets/{id}/documents)
   GET    /documents                       分页文档列表
@@ -57,7 +58,18 @@ KnowledgeFilesController (/datasets/{id}/documents)
   POST   /retrieval-test                  检索测试
 ```
 
-### 2.2 两种适配器
+### 2.2 资源范围和维护权限
+
+`ai_rag_dataset.workspace_id` 表示知识库所有者，`scope` 表示可见范围：
+
+- `WORKSPACE`：只允许所属工作空间成员读取，OWNER/ADMIN 写入。
+- `OFFICIAL`：所有登录用户可读取和绑定到智能体；普通用户不能上传、修改、删除或配置数据源。
+- 发布、撤回和写入官方知识库，只允许超级管理员本人或超级管理员所拥有工作空间的有效成员。
+- Harness 自主维护策略只允许绑定到 `OFFICIAL` 知识库，并复用相同官方维护者判断；策略表仍是自动维护是否启用的唯一状态源，不在知识库表重复保存开关。
+
+因此官方知识库既是全局可读资源，又保留明确的所有者和工作空间审计信息。前端隐藏只读操作仅用于改善体验，所有限制均由 controller/service 后端再次校验。
+
+### 2.3 两种适配器
 
 | 适配器 | 类型 | 存储 | 检索 |
 |--------|------|------|------|
@@ -66,7 +78,7 @@ KnowledgeFilesController (/datasets/{id}/documents)
 
 适配器选择：`ai_model_config.config_json.type` → `KnowledgeBaseAdapterFactory`
 
-### 2.3 支持的文档类型
+### 2.4 支持的文档类型
 
 | 适配器 | 支持格式 |
 |--------|---------|
@@ -417,9 +429,9 @@ mysql> SHOW INDEX FROM ai_rag_knowledge_chunk;
 `DISCOVERY_REVIEW` 或 `DISCOVERY_AUTO`；未配置策略的知识库保持 `OFF`，人工上传和既有召回链不变。
 
 ```text
-按库策略/主题/可信域名/月度次数
+按库策略/主题/可信域名/月度次数/托管 DeepSeek 模型 ID
         ↓
-manager-api 生成有界快照（库说明 + 已有来源，不发送切片正文）
+manager-api 生成有界快照并解析模型管理中的端点、模型名和凭据（不发送切片正文）
         ↓ 内网 Bearer HTTP
 maintenance-agent → DeepSeek Harness → web_search（最多 3 次查询、2 次搜索模型使用）
         ↓ 仅结构化 ADD_SOURCE 提案
@@ -432,3 +444,8 @@ Harness 没有数据库、Shell、编辑器、宿主源码或回调写权限。`
 可访问内网的 SSRF 原语。人工审批模式永不自动添加来源；自动模式也只接受显式白名单域名及其子域，
 并再次经过 `PublicUrlGuard`。数据库只保存策略、运行计数和字段白名单后的提案，不保存完整提示词、
 模型原始响应或 Harness 会话日志。
+
+维护策略只持久化 `model_config_id`，不复制 API Key。每轮执行要求所选模型仍处于“已启用、测试通过”的
+DeepSeek LLM 状态；manager-api 只在内部鉴权请求中发送本轮临时运行配置，maintenance-agent 不写磁盘、
+不记录请求正文，只把凭据注入本轮自有 Harness 子进程。模型被停用、测试失败、删除或密钥失效时，
+该轮明确失败并保留审计记录，不会改用其他模型静默扣费。

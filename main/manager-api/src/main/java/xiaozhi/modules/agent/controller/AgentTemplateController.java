@@ -101,6 +101,9 @@ public class AgentTemplateController {
     @RequiresPermissions("sys:role:superAdmin")
     public Result<AgentTemplateEntity> createAgentTemplate(@Valid @RequestBody AgentTemplateEntity template) {
         template.setWorkspaceId(null);
+        template.setVisibility("OFFICIAL");
+        template.setReviewStatus("APPROVED");
+        template.setPublishedAt(new java.util.Date());
         template.setSnapshotJson(null);
         template.setSourceAgentId(null);
         if (template.getTemplateName() == null || template.getTemplateName().isBlank()) {
@@ -126,6 +129,8 @@ public class AgentTemplateController {
             return ResultUtils.error("只能在此处更新系统模板");
         }
         template.setWorkspaceId(null);
+        template.setVisibility("OFFICIAL");
+        template.setReviewStatus("APPROVED");
         template.setSnapshotJson(null);
         template.setSourceAgentId(null);
         if (template.getTemplateName() == null || template.getTemplateName().isBlank()) {

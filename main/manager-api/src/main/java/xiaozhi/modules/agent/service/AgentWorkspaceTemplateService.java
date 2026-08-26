@@ -4,6 +4,7 @@ import java.util.List;
 
 import xiaozhi.modules.agent.dto.AgentTemplateApplyDTO;
 import xiaozhi.modules.agent.dto.AgentTemplateSaveAsDTO;
+import xiaozhi.modules.agent.dto.AgentTemplateReviewDTO;
 import xiaozhi.modules.agent.vo.AgentTemplateApplyResultVO;
 import xiaozhi.modules.agent.vo.AgentTemplateSaveResultVO;
 import xiaozhi.modules.agent.vo.AgentTemplateSummaryVO;
@@ -16,4 +17,12 @@ public interface AgentWorkspaceTemplateService {
     AgentTemplateApplyResultVO apply(String agentId, String templateId, AgentTemplateApplyDTO dto);
 
     void delete(String templateId);
+
+    AgentTemplateSummaryVO submitForReview(String templateId);
+
+    List<AgentTemplateSummaryVO> listReviewQueue();
+
+    AgentTemplateSummaryVO review(String templateId, AgentTemplateReviewDTO dto);
+
+    AgentTemplateSummaryVO publishOfficial(String templateId);
 }

@@ -10,4 +10,7 @@ public class AgentTemplateSummaryVO {
     private Integer version;
     private String scope;
     private Boolean deletable;
+    private String reviewStatus;
+    private Boolean submittable;
+    private Boolean officialMaintainer;
 }

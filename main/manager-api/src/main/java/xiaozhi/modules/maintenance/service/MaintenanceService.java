@@ -40,18 +40,20 @@ public class MaintenanceService {
     private final MaintenanceRunDao runDao;
     private final MaintenanceSnapshotService snapshotService;
     private final MaintenanceProposalService proposalService;
+    private final MaintenanceModelResolver modelResolver;
     private final HarnessMaintenanceGateway gateway;
     private final ObjectMapper objectMapper;
     private final AsyncTaskExecutor executor;
 
     public MaintenanceService(MaintenancePolicyDao policyDao, MaintenanceRunDao runDao,
             MaintenanceSnapshotService snapshotService, MaintenanceProposalService proposalService,
-            HarnessMaintenanceGateway gateway, ObjectMapper objectMapper,
+            MaintenanceModelResolver modelResolver, HarnessMaintenanceGateway gateway, ObjectMapper objectMapper,
             @Qualifier("maintenanceTaskExecutor") AsyncTaskExecutor executor) {
         this.policyDao = policyDao;
         this.runDao = runDao;
         this.snapshotService = snapshotService;
         this.proposalService = proposalService;
+        this.modelResolver = modelResolver;
         this.gateway = gateway;
         this.objectMapper = objectMapper;
         this.executor = executor;
@@ -67,6 +69,7 @@ public class MaintenanceService {
         policy.setScheduleMinutes(360);
         policy.setMaxProposals(8);
         policy.setMaxMonthlyRuns(60);
+        policy.setModelConfigId(null);
         policy.setEnabled(0);
         policy.setTopicsJson("[]");
         policy.setTrustedDomainsJson("[]");
@@ -95,6 +98,7 @@ public class MaintenanceService {
         policy.setScheduleMinutes(request.getScheduleMinutes());
         policy.setMaxProposals(request.getMaxProposals());
         policy.setMaxMonthlyRuns(request.getMaxMonthlyRuns());
+        policy.setModelConfigId(StringUtils.trimToNull(request.getModelConfigId()));
         boolean enabled = Boolean.TRUE.equals(request.getEnabled()) && !"OFF".equals(request.getMode());
         policy.setEnabled(enabled ? 1 : 0);
         policy.setNextRunAt(enabled ? Date.from(Instant.now().plusSeconds(request.getScheduleMinutes() * 60L)) : null);
@@ -171,7 +175,8 @@ public class MaintenanceService {
             if (policy == null || policy.getEnabled() != 1) throw new RenException("维护策略已停用");
             Map<String, Object> snapshot = snapshotService.build(policy);
             HarnessMaintenanceResponse response = gateway.run(new HarnessMaintenanceRequest(
-                    run.getId(), policy.getResourceType(), policy.getResourceId(), policy.getMaxProposals(), snapshot));
+                    run.getId(), policy.getResourceType(), policy.getResourceId(), policy.getMaxProposals(), snapshot,
+                    modelResolver.resolve(policy.getModelConfigId())));
             run.setProposalCount(proposalService.persist(policy, run, response));
             run.setInputChars(value(response.getInputChars()));
             run.setOutputChars(value(response.getOutputChars()));
@@ -201,6 +206,9 @@ public class MaintenanceService {
             throw new RenException("自动采纳模式必须配置可信域名白名单");
         }
         if ("MEMORY".equals(type) && !domains.isEmpty()) throw new RenException("记忆维护禁止配置或使用网页来源");
+        if (Boolean.TRUE.equals(request.getEnabled()) && !"OFF".equals(request.getMode())) {
+            modelResolver.validate(request.getModelConfigId());
+        }
     }
 
     private void enforceMonthlyLimit(MaintenancePolicyEntity policy) {

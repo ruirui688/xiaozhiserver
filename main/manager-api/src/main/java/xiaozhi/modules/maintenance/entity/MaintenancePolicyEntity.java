@@ -20,6 +20,7 @@ public class MaintenancePolicyEntity {
     private Integer scheduleMinutes;
     private Integer maxProposals;
     private Integer maxMonthlyRuns;
+    private String modelConfigId;
     private Integer enabled;
     private Date lastRunAt;
     private Date nextRunAt;

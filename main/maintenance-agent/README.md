@@ -8,5 +8,7 @@ The Manager API remains the authority for resource permissions, schedules, quota
 URL validation, source creation, memory revisions, and persistence. Harness session files live only in
 a per-run temporary directory and are deleted when the request finishes.
 
-Required runtime variables are `DEEPSEEK_API_KEY` and `MAINTENANCE_AGENT_SECRET`. The public API is
-limited to `GET /health` and authenticated `POST /v1/maintenance/run`.
+The only required runtime secret is `MAINTENANCE_AGENT_SECRET`. Each authenticated run receives a
+short-lived model configuration resolved from Manager API model management; the adapter passes it only
+to the owned Harness subprocess and never stores it. The public API is limited
+to `GET /health` and authenticated `POST /v1/maintenance/run`.

@@ -18,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 import xiaozhi.common.utils.Result;
 import xiaozhi.modules.agent.dto.AgentTemplateApplyDTO;
 import xiaozhi.modules.agent.dto.AgentTemplateSaveAsDTO;
+import xiaozhi.modules.agent.dto.AgentTemplateReviewDTO;
 import xiaozhi.modules.agent.service.AgentWorkspaceTemplateService;
 import xiaozhi.modules.agent.vo.AgentTemplateApplyResultVO;
 import xiaozhi.modules.agent.vo.AgentTemplateSaveResultVO;
@@ -63,5 +64,34 @@ public class AgentWorkspaceTemplateController {
     public Result<Void> delete(@PathVariable String templateId) {
         workspaceTemplateService.delete(templateId);
         return new Result<Void>().ok(null);
+    }
+
+    @PostMapping("/templates/{templateId}/submit-review")
+    @Operation(summary = "提交模板中心审核")
+    @RequiresPermissions("sys:role:normal")
+    public Result<AgentTemplateSummaryVO> submitReview(@PathVariable String templateId) {
+        return new Result<AgentTemplateSummaryVO>().ok(workspaceTemplateService.submitForReview(templateId));
+    }
+
+    @GetMapping("/templates/review-queue")
+    @Operation(summary = "获取模板中心待审核队列")
+    @RequiresPermissions("sys:role:normal")
+    public Result<List<AgentTemplateSummaryVO>> reviewQueue() {
+        return new Result<List<AgentTemplateSummaryVO>>().ok(workspaceTemplateService.listReviewQueue());
+    }
+
+    @PostMapping("/templates/{templateId}/review")
+    @Operation(summary = "审核用户提交的模板")
+    @RequiresPermissions("sys:role:normal")
+    public Result<AgentTemplateSummaryVO> review(
+            @PathVariable String templateId, @Valid @RequestBody AgentTemplateReviewDTO dto) {
+        return new Result<AgentTemplateSummaryVO>().ok(workspaceTemplateService.review(templateId, dto));
+    }
+
+    @PostMapping("/templates/{templateId}/publish-official")
+    @Operation(summary = "发布官方模板")
+    @RequiresPermissions("sys:role:normal")
+    public Result<AgentTemplateSummaryVO> publishOfficial(@PathVariable String templateId) {
+        return new Result<AgentTemplateSummaryVO>().ok(workspaceTemplateService.publishOfficial(templateId));
     }
 }

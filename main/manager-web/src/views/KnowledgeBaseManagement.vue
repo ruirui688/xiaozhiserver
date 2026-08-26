@@ -4,12 +4,18 @@
     <ResourceCenterNav />
 
     <div class="operation-bar">
-      <div class="page-subtitle">管理业务资料、FAQ 和本地文档检索配置</div>
+      <div class="scope-switch" aria-label="知识库范围">
+        <el-radio-group v-model="activeScope" size="small" @change="handleScopeChange">
+          <el-radio-button label="MY">我的知识库</el-radio-button>
+          <el-radio-button label="OFFICIAL">官方知识库</el-radio-button>
+        </el-radio-group>
+        <span class="page-subtitle">{{ activeScope === 'MY' ? '当前工作空间拥有的资料' : '所有用户可使用的官方资料' }}</span>
+      </div>
       <div class="right-operations">
         <el-input :placeholder="$t('knowledgeBaseManagement.searchPlaceholder')" v-model="searchName" class="search-input"
           @keyup.enter.native="handleSearch" clearable />
         <el-button icon="el-icon-search" @click="handleSearch">{{ $t('knowledgeBaseManagement.search') }}</el-button>
-        <el-button type="primary" icon="el-icon-plus" @click="showAddDialog">{{ $t('knowledgeBaseManagement.add') }}</el-button>
+        <el-button v-if="activeScope === 'MY'" type="primary" icon="el-icon-plus" @click="showAddDialog">{{ $t('knowledgeBaseManagement.add') }}</el-button>
       </div>
     </div>
 
@@ -22,7 +28,7 @@
                 <strong>{{ total }}</strong>
                 <span>个知识库</span>
               </div>
-              <div class="toolbar-actions">
+              <div v-if="activeScope === 'MY'" class="toolbar-actions">
                 <el-button size="mini" @click="toggleSelectAll">
                   {{ isAllSelected ? $t('knowledgeBaseManagement.cancelSelectAll') : $t('knowledgeBaseManagement.selectAll') }}
                 </el-button>
@@ -36,10 +42,11 @@
                 :element-loading-text="$t('common.loading')" element-loading-spinner="el-icon-loading"
                 element-loading-background="rgba(255, 255, 255, 0.7)"
                 :header-cell-class-name="headerCellClassName" @selection-change="handleSelectionChange">
-                <el-table-column type="selection" width="55" align="center" />
+                <el-table-column v-if="activeScope === 'MY'" type="selection" width="55" align="center" />
                 <el-table-column :label="$t('knowledgeBaseManagement.name')" prop="name" align="center">
                   <template slot-scope="scope">
                     <span class="knowledge-base-name">{{ scope.row.name }}</span>
+                    <el-tag v-if="scope.row.scope === 'OFFICIAL'" size="mini" type="warning">官方</el-tag>
                   </template>
                 </el-table-column>
                 <el-table-column :label="$t('knowledgeBaseManagement.description')" prop="description" align="center" show-overflow-tooltip>
@@ -60,6 +67,7 @@
                       :inactive-value="0"
                       active-color="#13ce66"
                       inactive-color="#909399"
+                      :disabled="!scope.row.canEdit"
                       @change="handleStatusChange(scope.row)"
                     ></el-switch>
                   </template>
@@ -74,12 +82,14 @@
                     <el-button size="mini" type="text" icon="el-icon-document" @click="showViewDialog(scope.row)">
                       {{ $t('knowledgeBaseManagement.view') }}
                     </el-button>
-                    <el-button size="mini" type="text" icon="el-icon-edit" @click="showEditDialog(scope.row)">
+                    <el-button v-if="scope.row.canEdit" size="mini" type="text" icon="el-icon-edit" @click="showEditDialog(scope.row)">
                       {{ $t('knowledgeBaseManagement.edit') }}
                     </el-button>
-                    <el-button size="mini" type="text" icon="el-icon-delete" class="danger-action" @click="deleteSingleKnowledgeBase(scope.row)">
+                    <el-button v-if="scope.row.canEdit" size="mini" type="text" icon="el-icon-delete" class="danger-action" @click="deleteSingleKnowledgeBase(scope.row)">
                       {{ $t('knowledgeBaseManagement.delete') }}
                     </el-button>
+                    <el-button v-if="activeScope === 'MY' && scope.row.canPublishOfficial" size="mini" type="text"
+                      icon="el-icon-medal" @click="publishOfficial(scope.row)">设为官方</el-button>
                   </template>
                 </el-table-column>
               </el-table>
@@ -124,6 +134,7 @@ export default {
   data() {
     return {
       searchName: "",
+      activeScope: "MY",
       knowledgeBaseList: [],
       currentPage: 1,
       loading: false,
@@ -159,6 +170,7 @@ export default {
           page: this.currentPage,
           page_size: this.pageSize,
           name: this.searchName,
+          scope: this.activeScope,
         },
         (res) => {
           this.loading = false;
@@ -181,6 +193,12 @@ export default {
     },
     handleSearch: function() {
       this.currentPage = 1;
+      this.fetchKnowledgeBaseList();
+    },
+    handleScopeChange: function() {
+      this.currentPage = 1;
+      this.selectedKnowledgeBase = [];
+      this.isAllSelected = false;
       this.fetchKnowledgeBaseList();
     },
     handleSelectionChange: function(val) {
@@ -223,7 +241,8 @@ export default {
         path: '/knowledge-file-upload',
         query: {
           datasetId: row.datasetId,
-          knowledgeBaseName: row.name
+          knowledgeBaseName: row.name,
+          readOnly: row.canEdit ? '0' : '1'
         }
       });
     },
@@ -370,6 +389,22 @@ export default {
         this.$message.error(this.$t('knowledgeBaseManagement.updateFailed'));
       });
     },
+    publishOfficial: function(row) {
+      this.$confirm(
+        `确认将“${row.name}”发布为所有用户可见的官方知识库吗？发布后只有超级管理员团队可以维护。`,
+        '发布官方知识库',
+        { type: 'warning' }
+      ).then(() => {
+        Api.knowledgeBase.updatePublicationScope(row.datasetId, 'OFFICIAL', (res) => {
+          if (res.data && res.data.code === 0) {
+            this.fetchKnowledgeBaseList();
+            this.$message.success('已发布为官方知识库');
+          } else {
+            this.$message.error(res.data?.msg || '发布失败');
+          }
+        }, (err) => this.$message.error(err?.data?.msg || '发布失败'));
+      }).catch(() => {});
+    },
     handleCurrentPageChange: function(page) {
       this.currentPage = page;
       this.fetchKnowledgeBaseList();
@@ -413,6 +448,12 @@ export default {
     justify-content: space-between;
     align-items: center;
     padding: 16px 24px;
+}
+
+.scope-switch {
+    display: flex;
+    align-items: center;
+    gap: 14px;
 }
 
 .page-subtitle {

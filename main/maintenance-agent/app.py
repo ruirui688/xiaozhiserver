@@ -11,6 +11,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 MAX_REQUEST_BYTES = 100_000
 MAX_PROPOSALS = 20
@@ -59,7 +60,25 @@ def build_prompt(task_type: str, max_proposals: int, snapshot: dict[str, Any]) -
     )
 
 
-def run_harness(task_type: str, run_id: str, max_proposals: int, snapshot: dict[str, Any]) -> dict[str, Any]:
+def validate_model_config(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise ValueError("modelConfig must be an object")
+    api_key = str(value.get("apiKey", "")).strip()
+    base_url = str(value.get("baseUrl", "")).strip()
+    model = str(value.get("model", "")).strip()
+    if not api_key or len(api_key) > 4096:
+        raise ValueError("invalid model apiKey")
+    if not model or len(model) > 200:
+        raise ValueError("invalid model name")
+    if base_url:
+        parsed = urlparse(base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc or len(base_url) > 2048:
+            raise ValueError("invalid model baseUrl")
+    return {"apiKey": api_key, "baseUrl": base_url, "model": model}
+
+
+def run_harness(task_type: str, run_id: str, max_proposals: int, snapshot: dict[str, Any],
+                model_config: dict[str, str]) -> dict[str, Any]:
     from deepseek_harness import DeepSeekHarness
 
     prompt = build_prompt(task_type, max_proposals, snapshot)
@@ -71,7 +90,9 @@ def run_harness(task_type: str, run_id: str, max_proposals: int, snapshot: dict[
         sessions.mkdir(mode=0o700)
         with DeepSeekHarness(
             provider="deepseek-official",
-            model=os.getenv("DSH_MODEL", "deepseek-v4-flash"),
+            model=model_config["model"],
+            api_key=model_config["apiKey"],
+            base_url=model_config["baseUrl"] or None,
             max_tokens=_bounded_int("MAINTENANCE_MAX_OUTPUT_TOKENS", 8192, 1024, 8192),
             cwd=str(workspace),
             runtime_cwd=str(workspace),
@@ -103,8 +124,9 @@ def process_request(payload: dict[str, Any], runner: Callable[..., dict[str, Any
     snapshot = payload.get("input")
     if not isinstance(snapshot, dict):
         raise ValueError("input must be an object")
+    model_config = validate_model_config(payload.get("modelConfig"))
     with RUN_SLOTS:
-        return runner(task_type, run_id, max_proposals, snapshot)
+        return runner(task_type, run_id, max_proposals, snapshot, model_config)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -154,10 +176,6 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     if not os.getenv("MAINTENANCE_AGENT_SECRET"):
         raise SystemExit("MAINTENANCE_AGENT_SECRET is required")
-    if not os.getenv("DEEPSEEK_API_KEY"):
-        raise SystemExit("DEEPSEEK_API_KEY is required")
-    if not os.getenv("DEEPSEEK_BASE_URL"):
-        os.environ.pop("DEEPSEEK_BASE_URL", None)
     port = _bounded_int("PORT", 8010, 1024, 65535)
     ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
 

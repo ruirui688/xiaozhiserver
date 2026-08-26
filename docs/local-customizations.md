@@ -934,9 +934,10 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 关键文件：
   - main/manager-api/src/main/java/xiaozhi/modules/maintenance/
   - main/manager-api/src/main/resources/db/changelog/202608252130.sql
+  - main/manager-api/src/main/resources/db/changelog/202608261600.sql
   - main/manager-web/src/components/maintenance/MaintenancePolicyPanel.vue
   - main/maintenance-agent/
   - deploy/production/docker-compose.yml
 是否允许被官方覆盖：否
-官方同步时的处理规则：必须保留 Manager API 对资源权限、策略、月度运行上限、提案审批和最终写入的唯一权威。Harness 只能返回字段白名单内的结构化提案；禁止数据库凭据、宿主源码挂载、Shell、编辑器、动态 Cordis 和回调写权限。知识维护按 dataset opt-in，web_fetch 保持关闭，自动采纳必须匹配可信域名并再次通过公网 URL/SSRF 校验，然后复用 KnowledgeSourceService 现有发布链。记忆维护按 agent opt-in、禁止联网和 ADD，所有 UPDATE/ARCHIVE/DELETE 必须人工批准并通过 MemoryService 留 revision。不得把临时 Harness session 当作产品记忆，不得记录完整提示词、模型原始响应、记忆正文或密钥。
+官方同步时的处理规则：必须保留 Manager API 对资源权限、策略、月度运行上限、提案审批和最终写入的唯一权威。Harness 只能返回字段白名单内的结构化提案；禁止数据库凭据、宿主源码挂载、Shell、编辑器、动态 Cordis 和回调写权限。知识维护按 dataset opt-in，web_fetch 保持关闭，自动采纳必须匹配可信域名并再次通过公网 URL/SSRF 校验，然后复用 KnowledgeSourceService 现有发布链。记忆维护按 agent opt-in、禁止联网和 ADD，所有 UPDATE/ARCHIVE/DELETE 必须人工批准并通过 MemoryService 留 revision。维护策略必须显式引用模型管理中已启用、测试通过的 DeepSeek LLM，只保存模型 ID；运行凭据只允许通过内部鉴权请求短暂进入单轮 Harness 环境，结束后清除，不得另存第二份模型密钥。不得把临时 Harness session 当作产品记忆，不得记录完整提示词、模型原始响应、记忆正文或密钥。
 ```

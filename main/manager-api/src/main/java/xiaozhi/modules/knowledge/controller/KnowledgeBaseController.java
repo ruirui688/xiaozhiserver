@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
 import xiaozhi.common.exception.ErrorCode;
 import xiaozhi.common.exception.RenException;
@@ -25,11 +26,12 @@ import xiaozhi.common.page.PageData;
 import xiaozhi.common.utils.Result;
 import xiaozhi.common.utils.ToolUtil;
 import xiaozhi.modules.knowledge.dto.KnowledgeBaseDTO;
+import xiaozhi.modules.knowledge.dto.KnowledgePublicationDTO;
 import xiaozhi.modules.knowledge.service.KnowledgeBaseService;
+import xiaozhi.modules.knowledge.service.KnowledgeResourcePermissionService;
 import xiaozhi.modules.knowledge.service.KnowledgeManagerService;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.security.user.SecurityUser;
-import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 
 @AllArgsConstructor
 @RestController
@@ -39,13 +41,14 @@ public class KnowledgeBaseController {
 
     private final KnowledgeBaseService knowledgeBaseService;
     private final KnowledgeManagerService knowledgeManagerService;
-    private final WorkspacePermissionService workspacePermissionService;
+    private final KnowledgeResourcePermissionService knowledgePermissionService;
 
     @GetMapping
     @Operation(summary = "分页查询知识库列表")
     @RequiresPermissions("sys:role:normal")
     public Result<PageData<KnowledgeBaseDTO>> getPageList(
             @RequestParam(required = false) String name,
+            @RequestParam(required = false, defaultValue = "MY") String scope,
             @RequestParam(required = false, defaultValue = "1") Integer page,
             @RequestParam(required = false, defaultValue = "10") Integer page_size) {
         // 获取当前登录用户ID
@@ -55,7 +58,8 @@ public class KnowledgeBaseController {
         knowledgeBaseDTO.setName(name);
         knowledgeBaseDTO.setCreator(currentUserId); // 设置创建者ID，用于权限过滤
 
-        PageData<KnowledgeBaseDTO> pageData = knowledgeBaseService.getPageList(knowledgeBaseDTO, page, page_size);
+        PageData<KnowledgeBaseDTO> pageData = knowledgeBaseService.getPageList(
+                knowledgeBaseDTO, scope, page, page_size);
         return new Result<PageData<KnowledgeBaseDTO>>().ok(pageData);
     }
 
@@ -64,7 +68,7 @@ public class KnowledgeBaseController {
     @RequiresPermissions("sys:role:normal")
     public Result<KnowledgeBaseDTO> getByDatasetId(@PathVariable("dataset_id") String datasetId) {
         KnowledgeBaseDTO knowledgeBaseDTO = knowledgeBaseService.getByDatasetId(datasetId);
-        workspacePermissionService.requireRead(knowledgeBaseDTO.getWorkspaceId());
+        knowledgePermissionService.requireRead(knowledgeBaseDTO);
 
         return new Result<KnowledgeBaseDTO>().ok(knowledgeBaseDTO);
     }
@@ -84,7 +88,7 @@ public class KnowledgeBaseController {
             @RequestBody @Validated KnowledgeBaseDTO knowledgeBaseDTO) {
         // 先获取现有知识库信息以检查权限
         KnowledgeBaseDTO existingKnowledgeBase = knowledgeBaseService.getByDatasetId(datasetId);
-        workspacePermissionService.requireWrite(existingKnowledgeBase.getWorkspaceId());
+        knowledgePermissionService.requireWrite(existingKnowledgeBase);
 
         // [FIX] 注入 ID，防止 Service 层找不到记录
         knowledgeBaseDTO.setId(existingKnowledgeBase.getId());
@@ -100,7 +104,7 @@ public class KnowledgeBaseController {
     public Result<Void> delete(@PathVariable("dataset_id") String datasetId) {
         // 先获取现有知识库信息以检查权限
         KnowledgeBaseDTO existingKnowledgeBase = knowledgeBaseService.getByDatasetId(datasetId);
-        workspacePermissionService.requireWrite(existingKnowledgeBase.getWorkspaceId());
+        knowledgePermissionService.requireWrite(existingKnowledgeBase);
 
         // [Architecture Fix] 通过编排层级联删除，防止孤儿数据并解决循环依赖
         knowledgeManagerService.deleteDatasetWithFiles(datasetId);
@@ -121,7 +125,7 @@ public class KnowledgeBaseController {
                 .orElseGet(ArrayList::new);
         if (ToolUtil.isNotEmpty(knowledgeBaseDTOs)) {
             knowledgeBaseDTOs.forEach(item -> {
-                workspacePermissionService.requireWrite(item.getWorkspaceId());
+                knowledgePermissionService.requireWrite(item);
                 // [Architecture Fix] 通过编排层级联删除
                 knowledgeManagerService.deleteDatasetWithFiles(item.getDatasetId());
             });
@@ -135,5 +139,15 @@ public class KnowledgeBaseController {
     public Result<List<ModelConfigEntity>> getRAGModels() {
         List<ModelConfigEntity> result = knowledgeBaseService.getRAGModels();
         return new Result<List<ModelConfigEntity>>().ok(result);
+    }
+
+    @PutMapping("/{dataset_id}/publication")
+    @Operation(summary = "设置知识库为工作空间或官方知识库")
+    @RequiresPermissions("sys:role:normal")
+    public Result<KnowledgeBaseDTO> updatePublication(
+            @PathVariable("dataset_id") String datasetId,
+            @Valid @RequestBody KnowledgePublicationDTO request) {
+        return new Result<KnowledgeBaseDTO>().ok(
+                knowledgeBaseService.updatePublicationScope(datasetId, request.getScope()));
     }
 }

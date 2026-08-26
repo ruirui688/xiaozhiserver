@@ -34,6 +34,7 @@ import xiaozhi.modules.knowledge.rag.KnowledgeBaseAdapterFactory;
 import xiaozhi.modules.knowledge.rag.impl.local.KnowledgeBaseParserConfigCodec;
 import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeProcessingStrategy;
 import xiaozhi.modules.knowledge.service.KnowledgeBaseService;
+import xiaozhi.modules.knowledge.service.KnowledgeResourcePermissionService;
 import xiaozhi.modules.model.dao.ModelConfigDao;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
@@ -65,17 +66,25 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
     private final RedisUtils redisUtils;
     private final WorkspaceService workspaceService;
     private final WorkspacePermissionService workspacePermissionService;
+    private final KnowledgeResourcePermissionService knowledgePermissionService;
     private final ObjectMapper objectMapper;
 
     @Override
-    public PageData<KnowledgeBaseDTO> getPageList(KnowledgeBaseDTO knowledgeBaseDTO, Integer page, Integer limit) {
+    public PageData<KnowledgeBaseDTO> getPageList(
+            KnowledgeBaseDTO knowledgeBaseDTO, String scope, Integer page, Integer limit) {
         Page<KnowledgeBaseEntity> pageInfo = new Page<>(page, limit);
         QueryWrapper<KnowledgeBaseEntity> queryWrapper = new QueryWrapper<>();
+        boolean officialListing = KnowledgeResourcePermissionService.SCOPE_OFFICIAL.equalsIgnoreCase(scope);
 
         if (knowledgeBaseDTO != null) {
             queryWrapper.like(StringUtils.isNotBlank(knowledgeBaseDTO.getName()), "name", knowledgeBaseDTO.getName());
             queryWrapper.eq(knowledgeBaseDTO.getStatus() != null, "status", knowledgeBaseDTO.getStatus());
-            queryWrapper.eq("workspace_id", workspaceService.getCurrentWorkspaceEntity().getId());
+            if (officialListing) {
+                queryWrapper.eq("scope", KnowledgeResourcePermissionService.SCOPE_OFFICIAL);
+            } else {
+                queryWrapper.eq("workspace_id", workspaceService.getCurrentWorkspaceEntity().getId())
+                        .eq("scope", KnowledgeResourcePermissionService.SCOPE_WORKSPACE);
+            }
         }
         queryWrapper.orderByDesc("created_at");
 
@@ -85,7 +94,14 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
         // Enrich with Document Count from RAG (Optional / Lazy)
         if (pageData != null && pageData.getList() != null) {
             pageData.getList().removeIf(dto -> {
-                enrichDocumentCount(dto);
+                // 全局只读列表不能触发远端对账、重命名或级联清理等写操作。
+                if (!officialListing) {
+                    enrichDocumentCount(dto);
+                }
+                dto.setCanEdit(knowledgePermissionService.canWrite(dto));
+                dto.setCanManageMaintenance(knowledgePermissionService.isOfficial(dto)
+                        && knowledgePermissionService.canWrite(dto));
+                dto.setCanPublishOfficial(knowledgePermissionService.isOfficialMaintainer());
                 // syncDatasetFromRAG 检测到 RAGFlow 端已删除时，会将本地记录清理
                 // 此时 datasetId 被置空作为标记，需要在列表中移除该条目
                 return dto.getDatasetId() == null;
@@ -272,6 +288,7 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
             // 3. Local Save (Shadow)
             KnowledgeBaseEntity entity = ConvertUtils.sourceToTarget(dto, KnowledgeBaseEntity.class);
             entity.setWorkspaceId(workspace.getId());
+            entity.setScope(KnowledgeResourcePermissionService.SCOPE_WORKSPACE);
 
             // [Production Fix] 统一本地 ID 与 RAGFlow ID，防止前端调用 /delete 或 /update 时因 ID 混淆（本地
             // UUID vs RAG UUID）导致 10163 错误
@@ -336,7 +353,7 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
             log.error("Update failed: Entity not found for ID={}", dto.getId());
             throw new RenException(ErrorCode.Knowledge_Base_RECORD_NOT_EXISTS);
         }
-        workspacePermissionService.requireWrite(entity.getWorkspaceId());
+        knowledgePermissionService.requireWrite(ConvertUtils.sourceToTarget(entity, KnowledgeBaseDTO.class));
 
         checkDuplicateName(dto.getName(), dto.getId());
 
@@ -401,7 +418,12 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
             }
         }
 
-        BeanUtils.copyProperties(dto, entity);
+        String preservedScope = entity.getScope();
+        String preservedWorkspaceId = entity.getWorkspaceId();
+        BeanUtils.copyProperties(dto, entity, "scope", "workspaceId", "canEdit", "canManageMaintenance",
+                "canPublishOfficial");
+        entity.setScope(preservedScope);
+        entity.setWorkspaceId(preservedWorkspaceId);
         knowledgeBaseDao.updateById(entity);
 
         // Clean cache
@@ -425,7 +447,7 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
             log.warn("记录不存在，datasetId: {}", datasetId);
             throw new RenException(ErrorCode.Knowledge_Base_RECORD_NOT_EXISTS);
         }
-        workspacePermissionService.requireWrite(entity.getWorkspaceId());
+        knowledgePermissionService.requireWrite(ConvertUtils.sourceToTarget(entity, KnowledgeBaseDTO.class));
         log.info("找到记录: ID={}, datasetId={}, ragModelId={}",
                 entity.getId(), entity.getDatasetId(), entity.getRagModelId());
 
@@ -485,6 +507,31 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
         queryWrapper.in("dataset_id", datasetIdList).or().in("id", datasetIdList);
         List<KnowledgeBaseEntity> list = knowledgeBaseDao.selectList(queryWrapper);
         return ConvertUtils.sourceToTarget(list, KnowledgeBaseDTO.class);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public KnowledgeBaseDTO updatePublicationScope(String datasetId, String scope) {
+        KnowledgeBaseDTO existing = getByDatasetId(datasetId);
+        knowledgePermissionService.requireWrite(existing);
+        String normalized = StringUtils.upperCase(StringUtils.trim(scope));
+        if (!KnowledgeResourcePermissionService.SCOPE_WORKSPACE.equals(normalized)
+                && !KnowledgeResourcePermissionService.SCOPE_OFFICIAL.equals(normalized)) {
+            throw new RenException(ErrorCode.PARAMS_GET_ERROR);
+        }
+        if (KnowledgeResourcePermissionService.SCOPE_OFFICIAL.equals(normalized)) {
+            existing.setScope(KnowledgeResourcePermissionService.SCOPE_OFFICIAL);
+            knowledgePermissionService.requireAutomatedMaintenance(existing);
+        }
+        KnowledgeBaseEntity entity = knowledgeBaseDao.selectById(existing.getId());
+        entity.setScope(normalized);
+        knowledgeBaseDao.updateById(entity);
+        KnowledgeBaseDTO result = ConvertUtils.sourceToTarget(entity, KnowledgeBaseDTO.class);
+        result.setCanEdit(knowledgePermissionService.canWrite(result));
+        result.setCanManageMaintenance(knowledgePermissionService.isOfficial(result)
+                && knowledgePermissionService.canWrite(result));
+        result.setCanPublishOfficial(knowledgePermissionService.isOfficialMaintainer());
+        return result;
     }
 
     @Override

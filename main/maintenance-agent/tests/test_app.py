@@ -1,7 +1,10 @@
 import json
+import sys
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
-from app import build_prompt, extract_json_object, process_request
+from app import build_prompt, extract_json_object, process_request, run_harness, validate_model_config
 
 
 class MaintenanceAgentTest(unittest.TestCase):
@@ -30,12 +33,54 @@ class MaintenanceAgentTest(unittest.TestCase):
         result = process_request({
             "taskType": "KNOWLEDGE", "runId": "r1", "resourceId": "kb1",
             "maxProposals": 2, "input": {"topics": ["game"]},
+            "modelConfig": {"apiKey": "managed-key", "baseUrl": "https://api.deepseek.com", "model": "deepseek-chat"},
         }, runner=runner)
         self.assertEqual(1, result["inputChars"])
         self.assertEqual("KNOWLEDGE", calls[0][0])
         with self.assertRaises(ValueError):
             process_request({"taskType": "MEMORY", "runId": "r", "resourceId": "a",
-                             "maxProposals": 21, "input": {}}, runner=runner)
+                             "maxProposals": 21, "input": {}, "modelConfig": {}}, runner=runner)
+
+    def test_rejects_missing_or_invalid_managed_model_config(self):
+        with self.assertRaises(ValueError):
+            process_request({"taskType": "KNOWLEDGE", "runId": "r", "resourceId": "k",
+                             "maxProposals": 1, "input": {}}, runner=lambda *_: {})
+        with self.assertRaises(ValueError):
+            process_request({"taskType": "KNOWLEDGE", "runId": "r", "resourceId": "k",
+                             "maxProposals": 1, "input": {}, "modelConfig": {
+                                 "apiKey": "key", "baseUrl": "file:///tmp/model", "model": "deepseek-chat"
+                             }}, runner=lambda *_: {})
+
+    def test_validates_managed_model_config_without_returning_extra_fields(self):
+        self.assertEqual({"apiKey": "key", "baseUrl": "", "model": "deepseek-chat"},
+                         validate_model_config({"apiKey": " key ", "baseUrl": "",
+                                                "model": " deepseek-chat ", "ignored": "value"}))
+
+    def test_passes_managed_credentials_only_to_owned_harness(self):
+        calls = []
+
+        class FakeHarness:
+            def __init__(self, **kwargs):
+                calls.append(kwargs)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return None
+
+            def run(self, *_args, **_kwargs):
+                return SimpleNamespace(final_response='{"proposals":[]}')
+
+        with patch.dict(sys.modules, {"deepseek_harness": SimpleNamespace(DeepSeekHarness=FakeHarness)}):
+            result = run_harness("KNOWLEDGE", "run-1", 2, {}, {
+                "apiKey": "managed-key", "baseUrl": "https://api.deepseek.com", "model": "deepseek-chat"
+            })
+
+        self.assertEqual([], result["proposals"])
+        self.assertEqual("managed-key", calls[0]["api_key"])
+        self.assertEqual("https://api.deepseek.com", calls[0]["base_url"])
+        self.assertEqual("deepseek-chat", calls[0]["model"])
 
 
 if __name__ == "__main__":

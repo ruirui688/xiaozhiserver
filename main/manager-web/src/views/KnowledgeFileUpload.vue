@@ -25,7 +25,7 @@
                 element-loading-text="Loading" element-loading-spinner="el-icon-loading"
                 element-loading-background="rgba(255, 255, 255, 0.7)" :header-cell-class-name="headerCellClassName"
                 @selection-change="handleSelectionChange">
-                <el-table-column type="selection" width="55" align="center"
+                <el-table-column v-if="!readOnly" type="selection" width="55" align="center"
                   :selectable="canSelectDocument"></el-table-column>
                 <el-table-column :label="$t('knowledgeFileUpload.documentName')" prop="name" align="left">
                   <template slot-scope="scope">
@@ -65,18 +65,18 @@
                   <template slot-scope="scope">
                     <el-button size="mini" type="text" @click="handleParse(scope.row)"
                       :disabled="scope.row.parseStatusCode === 1 || scope.row.parseStatusCode === 3 || scope.row.parseStatusCode === 4"
-                      v-if="scope.row.sourceType !== 'local_knowledge' && (!scope.row.sliceCount || scope.row.sliceCount <= 0)">
+                      v-if="!readOnly && scope.row.sourceType !== 'local_knowledge' && (!scope.row.sliceCount || scope.row.sliceCount <= 0)">
                       {{ $t('knowledgeFileUpload.parse') }}
                     </el-button>
                     <el-button size="mini" type="text" @click="handleRetryUpload(scope.row)"
-                      v-if="scope.row.sourceType === 'local_knowledge' && scope.row.parseStatusCode === 4">
+                      v-if="!readOnly && scope.row.sourceType === 'local_knowledge' && scope.row.parseStatusCode === 4">
                       {{ $t('knowledgeFileUpload.reupload') }}
                     </el-button>
                     <el-button size="mini" type="text" @click="handleViewSlices(scope.row)"
                       v-if="scope.row.sliceCount && scope.row.sliceCount > 0">
                       {{ $t('knowledgeFileUpload.viewSlices') }}
                     </el-button>
-                    <el-button size="mini" type="text" @click="handleDelete(scope.row)"
+                    <el-button v-if="!readOnly" size="mini" type="text" @click="handleDelete(scope.row)"
                       :disabled="scope.row.parseStatusCode === 1">
                       {{ $t('knowledgeFileUpload.delete') }}
                     </el-button>
@@ -87,19 +87,19 @@
 
             <div class="table_bottom">
               <div class="ctrl_btn">
-                <el-button type="primary" @click="handleSelectAll">
+                <el-button v-if="!readOnly" type="primary" @click="handleSelectAll">
                   {{ isAllSelected ? $t('knowledgeFileUpload.deselectAll') : $t('knowledgeFileUpload.selectAll') }}
                 </el-button>
-                <el-button type="success" @click="showUploadDialog">
+                <el-button v-if="!readOnly" type="success" @click="showUploadDialog">
                   {{ $t('knowledgeFileUpload.add') }}
                 </el-button>
-                <el-button type="warning" icon="el-icon-connection" @click="sourcePanelVisible = true">
+                <el-button v-if="!readOnly" type="warning" icon="el-icon-connection" @click="sourcePanelVisible = true">
                   动态数据源
                 </el-button>
-                <el-button type="warning" plain icon="el-icon-magic-stick" @click="maintenancePanelVisible = true">
+                <el-button v-if="!readOnly" type="warning" plain icon="el-icon-magic-stick" @click="maintenancePanelVisible = true">
                   自主维护
                 </el-button>
-                <el-button type="danger" @click="handleBatchDelete" :disabled="selectedFiles.length === 0">
+                <el-button v-if="!readOnly" type="danger" @click="handleBatchDelete" :disabled="selectedFiles.length === 0">
                   {{ $t('knowledgeFileUpload.batchDelete') }}
                 </el-button>
                 <el-button type="primary" icon="el-icon-search" @click="showRetrievalTestDialog"
@@ -230,6 +230,7 @@ export default {
     return {
       datasetId: '',
       knowledgeBaseName: '',
+      readOnly: false,
       searchName: "",
       fileList: [],
       selectedFiles: [],
@@ -265,6 +266,7 @@ export default {
   created() {
     this.datasetId = this.$route.query.datasetId || '';
     this.knowledgeBaseName = this.$route.query.knowledgeBaseName || '';
+    this.readOnly = this.$route.query.readOnly === '1';
     this.uploadUrl = `${Api.getServiceUrl()}/api/v1/documents/upload`;
     this.fetchFileList();
   },

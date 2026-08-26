@@ -148,6 +148,47 @@ export default {
             .send();
     },
 
+    submitAgentTemplateReview(templateId, callback, failCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/templates/${templateId}/submit-review`)
+            .method('POST')
+            .success((res) => callback(res))
+            .fail((err) => failCallback && failCallback(err))
+            .networkFail((err) => failCallback && failCallback(err))
+            .send();
+    },
+
+    getAgentTemplateReviewQueue(callback, failCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/templates/review-queue`)
+            .method('GET')
+            .success((res) => callback(res))
+            .fail((err) => failCallback && failCallback(err))
+            .networkFail((err) => failCallback && failCallback(err))
+            .send();
+    },
+
+    reviewAgentTemplate(templateId, decision, note, callback, failCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/templates/${templateId}/review`)
+            .method('POST')
+            .data({ decision, note })
+            .success((res) => callback(res))
+            .fail((err) => failCallback && failCallback(err))
+            .networkFail((err) => failCallback && failCallback(err))
+            .send();
+    },
+
+    publishOfficialAgentTemplate(templateId, callback, failCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/templates/${templateId}/publish-official`)
+            .method('POST')
+            .success((res) => callback(res))
+            .fail((err) => failCallback && failCallback(err))
+            .networkFail((err) => failCallback && failCallback(err))
+            .send();
+    },
+
     // 新增：获取智能体模板分页列表
     getAgentTemplatesPage(params, callback) {
         RequestService.sendRequest()

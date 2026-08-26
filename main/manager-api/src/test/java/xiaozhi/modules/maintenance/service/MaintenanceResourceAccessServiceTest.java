@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.knowledge.dto.KnowledgeBaseDTO;
 import xiaozhi.modules.knowledge.service.KnowledgeBaseService;
+import xiaozhi.modules.knowledge.service.KnowledgeResourcePermissionService;
 import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 
 class MaintenanceResourceAccessServiceTest {
@@ -18,7 +19,8 @@ class MaintenanceResourceAccessServiceTest {
         dataset.setWorkspaceId("workspace-1");
         when(knowledgeBaseService.getByDatasetId("dataset-1")).thenReturn(dataset);
         MaintenanceResourceAccessService service = new MaintenanceResourceAccessService(
-                knowledgeBaseService, mock(AgentService.class), mock(WorkspacePermissionService.class));
+                knowledgeBaseService, mock(AgentService.class), mock(WorkspacePermissionService.class),
+                mock(KnowledgeResourcePermissionService.class));
 
         assertEquals("workspace-1", service.resolveWorkspace("knowledge", "dataset-1"));
     }

@@ -51,6 +51,7 @@ class MaintenanceServiceTest {
         request.setTopics(List.of("版本公告"));
         request.setMaxProposals(4);
         request.setMaxMonthlyRuns(12);
+        request.setModelConfigId("deepseek-model");
         request.setEnabled(true);
 
         service.savePolicy("KNOWLEDGE", "kb-1", "ws-1", request);
@@ -61,6 +62,7 @@ class MaintenanceServiceTest {
         assertEquals("KNOWLEDGE", captor.getValue().getResourceType());
         assertEquals(4, captor.getValue().getMaxProposals());
         assertEquals(12, captor.getValue().getMaxMonthlyRuns());
+        assertEquals("deepseek-model", captor.getValue().getModelConfigId());
         assertEquals(1, captor.getValue().getEnabled());
     }
 
@@ -76,6 +78,7 @@ class MaintenanceServiceTest {
     private MaintenanceService service(MaintenancePolicyDao policyDao) {
         return new MaintenanceService(policyDao, mock(MaintenanceRunDao.class),
                 mock(MaintenanceSnapshotService.class), mock(MaintenanceProposalService.class),
+                mock(MaintenanceModelResolver.class),
                 mock(HarnessMaintenanceGateway.class), new ObjectMapper(),
                 mock(AsyncTaskExecutor.class));
     }

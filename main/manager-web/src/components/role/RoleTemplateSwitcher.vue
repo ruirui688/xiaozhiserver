@@ -4,6 +4,7 @@
       <i class="el-icon-s-operation" />
       <span>模板</span>
       <span class="template-count">{{ templates.length }}</span>
+      <el-button v-if="isOfficialMaintainer" type="text" size="mini" @click="$emit('open-review')">审核</el-button>
     </div>
 
     <div v-if="templates.length" class="template-actions">
@@ -28,7 +29,7 @@
               class="template-scope"
               :class="template.scope === 'WORKSPACE' ? 'is-workspace' : 'is-system'"
             >
-              {{ template.scope === 'WORKSPACE' ? '工作空间' : '系统' }}
+              {{ scopeLabel(template) }}
             </span>
           </div>
         </el-option>
@@ -44,6 +45,18 @@
       >
         应用
       </el-button>
+      <el-button
+        v-if="selectedTemplate && selectedTemplate.submittable"
+        type="text"
+        icon="el-icon-upload2"
+        @click="$emit('submit-review', selectedTemplate)"
+      >提交中心审核</el-button>
+      <el-button
+        v-if="selectedTemplate && selectedTemplate.scope === 'WORKSPACE' && isOfficialMaintainer"
+        type="text"
+        icon="el-icon-medal"
+        @click="$emit('publish-official', selectedTemplate)"
+      >发布官方</el-button>
       <el-button
         v-if="selectedTemplate && selectedTemplate.deletable"
         type="text"
@@ -78,6 +91,9 @@ export default {
     selectedTemplate() {
       return this.templates.find((template) => template.id === this.selectedTemplateId) || null;
     },
+    isOfficialMaintainer() {
+      return this.templates.some((template) => template.officialMaintainer);
+    },
   },
   watch: {
     templates: {
@@ -93,6 +109,13 @@ export default {
     templateInitial(template) {
       const name = String(template.templateName || template.agentName || "角").trim();
       return name.charAt(0) || "角";
+    },
+    scopeLabel(template) {
+      if (template.scope === 'OFFICIAL') return '官方';
+      if (template.scope === 'PUBLIC') return '模板中心';
+      if (template.reviewStatus === 'PENDING') return '审核中';
+      if (template.reviewStatus === 'REJECTED') return '已驳回';
+      return '工作空间';
     },
     applySelected() {
       if (this.loading || !this.workspaceCanWrite || !this.selectedTemplate) return;

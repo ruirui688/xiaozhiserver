@@ -99,6 +99,9 @@
               :checked-replacement-word-ids="checkedReplacementWordIds"
               @select-template="handleTemplateSelect"
               @delete-template="handleTemplateDelete"
+              @submit-template-review="handleTemplateSubmitReview"
+              @open-template-review="openTemplateReview"
+              @publish-official-template="publishOfficialTemplate"
               @open-context-provider-dialog="handleOpenContextProvider"
               @update:currentFunctions="val => currentFunctions = val"
               @update:currentKnowledgeBases="val => currentKnowledgeBases = val"
@@ -108,6 +111,19 @@
               @tts-model-changed="handleTtsModelChanged"
               @form-change="handleFormChange"
             />
+
+            <el-dialog title="模板中心审核" :visible.sync="templateReviewVisible" width="680px" append-to-body>
+              <el-table :data="templateReviewQueue" v-loading="templateReviewLoading" empty-text="暂无待审核模板">
+                <el-table-column prop="templateName" label="模板名称" min-width="220" />
+                <el-table-column prop="agentName" label="角色名称" min-width="180" />
+                <el-table-column label="操作" width="150" align="center">
+                  <template slot-scope="scope">
+                    <el-button type="text" @click="reviewTemplate(scope.row, 'APPROVED')">通过</el-button>
+                    <el-button type="text" class="danger-action" @click="reviewTemplate(scope.row, 'REJECTED')">驳回</el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </el-dialog>
           </el-card>
         </div>
       </div>
@@ -174,6 +190,9 @@ export default {
       llmModeTypeMap: new Map(),
       templates: [],
       loadingTemplate: false,
+      templateReviewVisible: false,
+      templateReviewLoading: false,
+      templateReviewQueue: [],
       voiceOptions: [],
       voiceDetails: {},
       currentFunctions: [],
@@ -642,6 +661,71 @@ export default {
           this.$message.error(error?.data?.msg || error?.message || "角色模板删除失败");
         }
       }
+    },
+    async handleTemplateSubmitReview(template) {
+      try {
+        await this.$confirm(
+          `确认将“${template.templateName}”提交到模板中心审核吗？审核通过前仍只在当前工作空间可见。`,
+          '提交模板审核',
+          { type: 'info' }
+        );
+        await new Promise((resolve, reject) => {
+          Api.agent.submitAgentTemplateReview(template.id, ({ data }) => {
+            if (data?.code === 0) resolve();
+            else reject(new Error(data?.msg || '提交审核失败'));
+          }, reject);
+        });
+        await this.fetchTemplatesAsync();
+        this.$message.success('模板已提交审核');
+      } catch (error) {
+        if (error !== 'cancel' && error !== 'close') {
+          this.$message.error(error?.data?.msg || error?.message || '提交审核失败');
+        }
+      }
+    },
+    openTemplateReview() {
+      this.templateReviewVisible = true;
+      this.loadTemplateReviewQueue();
+    },
+    publishOfficialTemplate(template) {
+      this.$confirm(
+        `确认将“${template.templateName}”直接发布为所有用户可见的官方模板吗？工作空间私有凭据和绑定会被清除。`,
+        '发布官方模板',
+        { type: 'warning' }
+      ).then(() => {
+        Api.agent.publishOfficialAgentTemplate(template.id, ({ data }) => {
+          if (data?.code === 0) {
+            this.$message.success('已发布为官方模板');
+            this.fetchTemplatesAsync();
+          } else this.$message.error(data?.msg || '发布失败');
+        }, (err) => this.$message.error(err?.data?.msg || '发布失败'));
+      }).catch(() => {});
+    },
+    loadTemplateReviewQueue() {
+      this.templateReviewLoading = true;
+      Api.agent.getAgentTemplateReviewQueue(({ data }) => {
+        this.templateReviewLoading = false;
+        if (data?.code === 0) this.templateReviewQueue = data.data || [];
+        else this.$message.error(data?.msg || '审核队列加载失败');
+      }, (err) => {
+        this.templateReviewLoading = false;
+        this.$message.error(err?.data?.msg || '审核队列加载失败');
+      });
+    },
+    reviewTemplate(template, decision) {
+      const action = decision === 'APPROVED' ? '通过' : '驳回';
+      this.$prompt(`请输入${action}说明（可留空）`, `${action}模板`, {
+        inputValue: '',
+        inputValidator: (value) => !value || value.length <= 500 || '审核说明不能超过500字'
+      }).then(({ value }) => {
+        Api.agent.reviewAgentTemplate(template.id, decision, value || '', ({ data }) => {
+          if (data?.code === 0) {
+            this.$message.success(`已${action}模板`);
+            this.loadTemplateReviewQueue();
+            this.fetchTemplatesAsync();
+          } else this.$message.error(data?.msg || `${action}失败`);
+        }, (err) => this.$message.error(err?.data?.msg || `${action}失败`));
+      }).catch(() => {});
     },
     handleOpenContextProvider() {
       this.$message.info(i18n.t("roleConfig.contextProviderHint") || "请前往设备管理页面配置上下文提供者");

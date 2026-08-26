@@ -19,12 +19,12 @@ import lombok.AllArgsConstructor;
 import xiaozhi.common.utils.Result;
 import xiaozhi.modules.knowledge.dto.KnowledgeBaseDTO;
 import xiaozhi.modules.knowledge.service.KnowledgeBaseService;
+import xiaozhi.modules.knowledge.service.KnowledgeResourcePermissionService;
 import xiaozhi.modules.knowledge.source.dto.KnowledgeSourceRequest;
 import xiaozhi.modules.knowledge.source.dto.KnowledgeSourceView;
 import xiaozhi.modules.knowledge.source.entity.KnowledgeSyncRunEntity;
 import xiaozhi.modules.knowledge.source.service.KnowledgeSourceService;
 import xiaozhi.modules.knowledge.source.service.KnowledgeSourceSyncService;
-import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 
 @RestController
 @AllArgsConstructor
@@ -34,7 +34,7 @@ public class KnowledgeSourceController {
     private final KnowledgeSourceService sourceService;
     private final KnowledgeSourceSyncService sourceSyncService;
     private final KnowledgeBaseService knowledgeBaseService;
-    private final WorkspacePermissionService workspacePermissionService;
+    private final KnowledgeResourcePermissionService knowledgePermissionService;
 
     @GetMapping
     @Operation(summary = "列出指定知识库的动态数据源")
@@ -98,11 +98,11 @@ public class KnowledgeSourceController {
 
     private void requireRead(String datasetId) {
         KnowledgeBaseDTO dataset = knowledgeBaseService.getByDatasetId(datasetId);
-        workspacePermissionService.requireRead(dataset.getWorkspaceId());
+        knowledgePermissionService.requireRead(dataset);
     }
 
     private void requireWrite(String datasetId) {
         KnowledgeBaseDTO dataset = knowledgeBaseService.getByDatasetId(datasetId);
-        workspacePermissionService.requireWrite(dataset.getWorkspaceId());
+        knowledgePermissionService.requireWrite(dataset);
     }
 }

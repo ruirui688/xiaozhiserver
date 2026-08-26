@@ -593,7 +593,8 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
             }
             KnowledgeBaseEntity knowledgeBase = knowledgeBaseService.selectById(function.getPluginId());
             if (knowledgeBase != null
-                    && !StringUtils.equals(agentWorkspaceId, knowledgeBase.getWorkspaceId())) {
+                    && !StringUtils.equals(agentWorkspaceId, knowledgeBase.getWorkspaceId())
+                    && !"OFFICIAL".equalsIgnoreCase(knowledgeBase.getScope())) {
                 log.warn("拒绝跨工作空间绑定知识库: agentWorkspaceId={}, knowledgeBaseId={}",
                         agentWorkspaceId, function.getPluginId());
                 throw new RenException(ErrorCode.NO_PERMISSION);

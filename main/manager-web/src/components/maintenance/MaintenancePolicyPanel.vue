@@ -25,6 +25,12 @@
               <el-option v-else label="分析记忆，人工审批" value="REVIEW" />
             </el-select>
           </el-form-item>
+          <el-form-item label="维护模型">
+            <el-select v-model="form.modelConfigId" filterable style="width: 420px" placeholder="选择模型管理中已测试通过的 DeepSeek 模型">
+              <el-option v-for="model in modelOptions" :key="model.id" :label="model.label" :value="model.id" />
+            </el-select>
+            <div class="tip">直接复用模型管理中的端点、上游模型名和托管凭据，不需要重复填写 API Key。</div>
+          </el-form-item>
           <el-form-item v-if="resourceType === 'KNOWLEDGE'" label="关注主题">
             <el-input v-model="topicsText" type="textarea" :rows="3" maxlength="2400" placeholder="每行一个，例如：金铲铲之战 版本公告" />
           </el-form-item>
@@ -46,7 +52,7 @@
           </el-form-item>
           <el-form-item>
             <el-button type="primary" :loading="saving" @click="save">保存策略</el-button>
-            <el-button :loading="running" :disabled="!form.enabled || form.mode === 'OFF'" @click="runNow">立即运行一次</el-button>
+            <el-button :loading="running" :disabled="!form.enabled || form.mode === 'OFF' || !form.modelConfigId" @click="runNow">立即运行一次</el-button>
           </el-form-item>
         </el-form>
       </el-tab-pane>
@@ -107,7 +113,8 @@ export default {
       recordsLoading: false,
       topicsText: '',
       domainsText: '',
-      form: { mode: 'OFF', scheduleMinutes: 360, maxProposals: 8, maxMonthlyRuns: 60, enabled: false },
+      form: { mode: 'OFF', scheduleMinutes: 360, maxProposals: 8, maxMonthlyRuns: 60, modelConfigId: '', enabled: false },
+      modelOptions: [],
       proposals: [],
       runs: []
     }
@@ -133,6 +140,7 @@ export default {
     lines(text) { return text.split(/\r?\n/).map(v => v.trim()).filter(Boolean) },
     loadAll() {
       this.loading = true
+      this.loadModelOptions()
       Api.maintenance.policy(this.resourceType, this.resourceId, res => {
         const policy = this.payload(res)
         this.form = {
@@ -140,6 +148,7 @@ export default {
           scheduleMinutes: policy.scheduleMinutes || 360,
           maxProposals: policy.maxProposals || 8,
           maxMonthlyRuns: policy.maxMonthlyRuns || 60,
+          modelConfigId: policy.modelConfigId || '',
           enabled: policy.enabled === 1 || policy.enabled === true
         }
         this.topicsText = this.list(policy.topicsJson).join('\n')
@@ -150,6 +159,19 @@ export default {
         this.fail(error, '加载自主维护策略失败')
       })
       this.loadRecords()
+    },
+    loadModelOptions() {
+      Api.model.getLlmModelCodeList('', ({ data }) => {
+        const rows = data && data.code === 0 && Array.isArray(data.data) ? data.data : []
+        this.modelOptions = rows.filter(item => {
+          const identity = [item.modelName, item.modelCode, item.adapterCode, item.vendorName,
+            item.productName, item.upstreamModelId, item.type].filter(Boolean).join(' ')
+          return /deepseek/i.test(identity)
+        }).map(item => ({
+          id: item.id,
+          label: `${item.modelName || item.upstreamModelId || item.id}${item.vendorName ? ` · ${item.vendorName}` : ''}`
+        }))
+      })
     },
     loadRecords() {
       this.recordsLoading = true

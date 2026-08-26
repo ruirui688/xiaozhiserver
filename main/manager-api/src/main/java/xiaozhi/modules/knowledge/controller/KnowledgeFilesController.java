@@ -24,9 +24,9 @@ import xiaozhi.modules.knowledge.dto.document.ChunkDTO;
 import xiaozhi.modules.knowledge.dto.document.DocumentDTO;
 import xiaozhi.modules.knowledge.dto.document.RetrievalDTO;
 import xiaozhi.modules.knowledge.service.KnowledgeBaseService;
+import xiaozhi.modules.knowledge.service.KnowledgeResourcePermissionService;
 import xiaozhi.modules.knowledge.service.KnowledgeFilesService;
 import xiaozhi.modules.security.user.SecurityUser;
-import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 
 @AllArgsConstructor
 @RestController
@@ -36,7 +36,7 @@ public class KnowledgeFilesController {
 
     private final KnowledgeFilesService knowledgeFilesService;
     private final KnowledgeBaseService knowledgeBaseService;
-    private final WorkspacePermissionService workspacePermissionService;
+    private final KnowledgeResourcePermissionService knowledgePermissionService;
 
     /**
      * 验证当前用户是否有权限操作指定知识库
@@ -46,12 +46,12 @@ public class KnowledgeFilesController {
     private void validateKnowledgeBaseReadPermission(String datasetId) {
         // 获取知识库信息
         KnowledgeBaseDTO knowledgeBase = knowledgeBaseService.getByDatasetId(datasetId);
-        workspacePermissionService.requireRead(knowledgeBase.getWorkspaceId());
+        knowledgePermissionService.requireRead(knowledgeBase);
     }
 
     private void validateKnowledgeBaseWritePermission(String datasetId) {
         KnowledgeBaseDTO knowledgeBase = knowledgeBaseService.getByDatasetId(datasetId);
-        workspacePermissionService.requireWrite(knowledgeBase.getWorkspaceId());
+        knowledgePermissionService.requireWrite(knowledgeBase);
     }
 
     @GetMapping("/documents")

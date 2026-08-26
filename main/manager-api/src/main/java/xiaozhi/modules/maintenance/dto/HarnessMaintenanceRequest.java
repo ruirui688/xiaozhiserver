@@ -12,4 +12,5 @@ public class HarnessMaintenanceRequest {
     private String resourceId;
     private Integer maxProposals;
     private Map<String, Object> input;
+    private HarnessModelConfig modelConfig;
 }

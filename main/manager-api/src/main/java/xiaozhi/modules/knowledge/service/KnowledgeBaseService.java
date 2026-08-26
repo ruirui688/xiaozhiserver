@@ -22,7 +22,9 @@ public interface KnowledgeBaseService extends BaseService<KnowledgeBaseEntity> {
      * @param limit            每页数量
      * @return 分页数据
      */
-    PageData<KnowledgeBaseDTO> getPageList(KnowledgeBaseDTO knowledgeBaseDTO, Integer page, Integer limit);
+    PageData<KnowledgeBaseDTO> getPageList(KnowledgeBaseDTO knowledgeBaseDTO, String scope, Integer page, Integer limit);
+
+    KnowledgeBaseDTO updatePublicationScope(String datasetId, String scope);
 
     /**
      * 根据ID获取知识库详情

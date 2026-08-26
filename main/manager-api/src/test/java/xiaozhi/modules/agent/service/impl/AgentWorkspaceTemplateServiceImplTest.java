@@ -23,6 +23,7 @@ import org.mockito.MockedStatic;
 import xiaozhi.modules.agent.dto.AgentTemplateApplyDTO;
 import xiaozhi.modules.agent.dto.AgentFeishuTemplateDTO;
 import xiaozhi.modules.agent.dto.AgentTemplateSaveAsDTO;
+import xiaozhi.modules.agent.dto.AgentTemplateReviewDTO;
 import xiaozhi.modules.agent.dto.AgentTemplateSnapshotDTO;
 import xiaozhi.modules.agent.dto.AgentUpdateDTO;
 import xiaozhi.modules.agent.dto.ContextProviderDTO;
@@ -42,6 +43,7 @@ import xiaozhi.modules.model.service.ModelConfigService;
 import xiaozhi.modules.security.user.SecurityUser;
 import xiaozhi.modules.timbre.service.TimbreService;
 import xiaozhi.modules.workspace.service.WorkspacePermissionService;
+import xiaozhi.modules.workspace.service.OfficialResourcePermissionService;
 
 class AgentWorkspaceTemplateServiceImplTest {
     private AgentTemplateService templateService;
@@ -51,6 +53,7 @@ class AgentWorkspaceTemplateServiceImplTest {
     private AgentVoicePrintService voicePrintService;
     private AgentFeishuService feishuService;
     private WorkspacePermissionService permissionService;
+    private OfficialResourcePermissionService officialPermissionService;
     private AgentWorkspaceTemplateServiceImpl service;
 
     @BeforeEach
@@ -62,6 +65,7 @@ class AgentWorkspaceTemplateServiceImplTest {
         voicePrintService = mock(AgentVoicePrintService.class);
         feishuService = mock(AgentFeishuService.class);
         permissionService = mock(WorkspacePermissionService.class);
+        officialPermissionService = mock(OfficialResourcePermissionService.class);
         service = new AgentWorkspaceTemplateServiceImpl(
                 templateService,
                 agentService,
@@ -75,7 +79,42 @@ class AgentWorkspaceTemplateServiceImplTest {
                 mock(CorrectWordFileDao.class),
                 mock(TimbreService.class),
                 permissionService,
+                officialPermissionService,
                 mock(org.springframework.context.ApplicationEventPublisher.class));
+    }
+
+    @Test
+    void approvingMarketplaceTemplateRemovesWorkspacePrivateBindings() {
+        AgentUpdateDTO config = new AgentUpdateDTO();
+        config.setCorrectWordFileIds(List.of("private-words"));
+        AgentTemplateSnapshotDTO snapshot = new AgentTemplateSnapshotDTO();
+        snapshot.setSchemaVersion(2);
+        snapshot.setConfig(config);
+        snapshot.setVoicePrintIds(List.of("private-voice"));
+        snapshot.setFeishuConfig(new AgentFeishuTemplateDTO());
+        AgentTemplateEntity template = new AgentTemplateEntity();
+        template.setId("template-1");
+        template.setWorkspaceId("workspace-a");
+        template.setReviewStatus("PENDING");
+        template.setSnapshotJson(snapshot);
+        template.setVersion(1);
+        when(templateService.getById("template-1")).thenReturn(template);
+
+        AgentTemplateReviewDTO request = new AgentTemplateReviewDTO();
+        request.setDecision("APPROVED");
+        try (MockedStatic<SecurityUser> security = mockStatic(SecurityUser.class)) {
+            security.when(SecurityUser::getUserId).thenReturn(7L);
+            service.review("template-1", request);
+        }
+
+        ArgumentCaptor<AgentTemplateEntity> captor = ArgumentCaptor.forClass(AgentTemplateEntity.class);
+        verify(templateService).updateById(captor.capture());
+        AgentTemplateSnapshotDTO published = captor.getValue().getPublicSnapshotJson();
+        assertTrue(published.getVoicePrintIds().isEmpty());
+        assertTrue(published.getConfig().getCorrectWordFileIds().isEmpty());
+        assertEquals(null, published.getFeishuConfig());
+        assertEquals("PUBLIC", captor.getValue().getVisibility());
+        assertEquals("private-voice", captor.getValue().getSnapshotJson().getVoicePrintIds().get(0));
     }
 
     @Test

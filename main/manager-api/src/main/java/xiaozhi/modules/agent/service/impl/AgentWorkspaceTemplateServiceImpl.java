@@ -25,6 +25,7 @@ import xiaozhi.common.utils.JsonUtils;
 import xiaozhi.modules.agent.dto.AgentTagDTO;
 import xiaozhi.modules.agent.dto.AgentTemplateApplyDTO;
 import xiaozhi.modules.agent.dto.AgentTemplateSaveAsDTO;
+import xiaozhi.modules.agent.dto.AgentTemplateReviewDTO;
 import xiaozhi.modules.agent.dto.AgentTemplateSnapshotDTO;
 import xiaozhi.modules.agent.dto.AgentUpdateDTO;
 import xiaozhi.modules.agent.dto.ContextProviderDTO;
@@ -48,6 +49,7 @@ import xiaozhi.modules.correctword.dao.CorrectWordFileDao;
 import xiaozhi.modules.correctword.entity.CorrectWordFileEntity;
 import xiaozhi.modules.knowledge.entity.KnowledgeBaseEntity;
 import xiaozhi.modules.knowledge.service.KnowledgeBaseService;
+import xiaozhi.modules.knowledge.service.KnowledgeResourcePermissionService;
 import xiaozhi.modules.model.dao.ModelProviderDao;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.entity.ModelProviderEntity;
@@ -56,6 +58,7 @@ import xiaozhi.modules.security.user.SecurityUser;
 import xiaozhi.modules.timbre.entity.TimbreEntity;
 import xiaozhi.modules.timbre.service.TimbreService;
 import xiaozhi.modules.workspace.service.WorkspacePermissionService;
+import xiaozhi.modules.workspace.service.OfficialResourcePermissionService;
 
 @Service
 @RequiredArgsConstructor
@@ -63,6 +66,13 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
     private static final int SNAPSHOT_SCHEMA_VERSION = 2;
     private static final int MAX_CONTEXT_PROVIDERS = 20;
     private static final int MAX_CONTEXT_HEADERS = 20;
+    private static final String VISIBILITY_WORKSPACE = "WORKSPACE";
+    private static final String VISIBILITY_PUBLIC = "PUBLIC";
+    private static final String VISIBILITY_OFFICIAL = "OFFICIAL";
+    private static final String REVIEW_DRAFT = "DRAFT";
+    private static final String REVIEW_PENDING = "PENDING";
+    private static final String REVIEW_APPROVED = "APPROVED";
+    private static final String REVIEW_REJECTED = "REJECTED";
     private static final Set<String> SENSITIVE_HEADER_NAMES = Set.of(
             "authorization", "proxy-authorization", "cookie", "set-cookie",
             "api-key", "x-api-key", "apikey", "access-token", "x-access-token",
@@ -80,6 +90,7 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
     private final CorrectWordFileDao correctWordFileDao;
     private final TimbreService timbreService;
     private final WorkspacePermissionService workspacePermissionService;
+    private final OfficialResourcePermissionService officialPermissionService;
     private final ApplicationEventPublisher eventPublisher;
 
     @Override
@@ -87,8 +98,11 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
         String workspaceId = workspacePermissionService.currentWorkspaceId();
         workspacePermissionService.requireRead(workspaceId);
         return templateService.list(new LambdaQueryWrapper<AgentTemplateEntity>()
-                        .and(q -> q.isNull(AgentTemplateEntity::getWorkspaceId)
-                                .or().eq(AgentTemplateEntity::getWorkspaceId, workspaceId))
+                        .and(q -> q.eq(AgentTemplateEntity::getWorkspaceId, workspaceId)
+                                .or().eq(AgentTemplateEntity::getVisibility, VISIBILITY_OFFICIAL)
+                                .or(publicTemplate -> publicTemplate
+                                        .eq(AgentTemplateEntity::getVisibility, VISIBILITY_PUBLIC)
+                                        .eq(AgentTemplateEntity::getReviewStatus, REVIEW_APPROVED)))
                         .orderByAsc(AgentTemplateEntity::getWorkspaceId)
                         .orderByAsc(AgentTemplateEntity::getSort)
                         .orderByAsc(AgentTemplateEntity::getCreatedAt))
@@ -128,6 +142,8 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
         snapshot.setFeishuConfig(feishuService.exportForTemplate(agentId, entity.getId()));
 
         entity.setWorkspaceId(workspaceId);
+        entity.setVisibility(VISIBILITY_WORKSPACE);
+        entity.setReviewStatus(REVIEW_DRAFT);
         entity.setTemplateName(templateName);
         entity.setSourceAgentId(agentId);
         entity.setSnapshotJson(snapshot);
@@ -158,9 +174,16 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
             throw new RenException("模板已更新，请刷新页面后重试");
         }
 
-        boolean workspaceSnapshot = template.getSnapshotJson() != null;
+        boolean crossWorkspacePublication = StringUtils.isNotBlank(template.getWorkspaceId())
+                && !StringUtils.equals(template.getWorkspaceId(), target.getWorkspaceId())
+                && (VISIBILITY_OFFICIAL.equals(template.getVisibility())
+                        || VISIBILITY_PUBLIC.equals(template.getVisibility()));
+        AgentTemplateSnapshotDTO storedSnapshot = crossWorkspacePublication
+                ? template.getPublicSnapshotJson()
+                : template.getSnapshotJson();
+        boolean workspaceSnapshot = storedSnapshot != null;
         AgentTemplateSnapshotDTO snapshot = workspaceSnapshot
-                ? template.getSnapshotJson()
+                ? storedSnapshot
                 : legacySnapshot(template);
         if (snapshot.getSchemaVersion() == null || snapshot.getSchemaVersion() > SNAPSHOT_SCHEMA_VERSION) {
             throw new RenException("模板快照版本暂不受支持");
@@ -202,7 +225,109 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
             throw new RenException(ErrorCode.RESOURCE_NOT_FOUND);
         }
         workspacePermissionService.requireWrite(template.getWorkspaceId());
+        if (VISIBILITY_OFFICIAL.equals(template.getVisibility())) {
+            officialPermissionService.requireOfficialMaintainer();
+        }
         templateService.removeById(templateId);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public AgentTemplateSummaryVO submitForReview(String templateId) {
+        AgentTemplateEntity template = requireOwnedWorkspaceTemplate(templateId);
+        if (REVIEW_PENDING.equals(template.getReviewStatus())) {
+            throw new RenException("模板已在审核中");
+        }
+        template.setVisibility(VISIBILITY_WORKSPACE);
+        template.setReviewStatus(REVIEW_PENDING);
+        template.setReviewerId(null);
+        template.setReviewNote(null);
+        template.setReviewedAt(null);
+        template.setPublishedAt(null);
+        template.setPublicSnapshotJson(null);
+        touch(template);
+        templateService.updateById(template);
+        return toSummary(template);
+    }
+
+    @Override
+    public List<AgentTemplateSummaryVO> listReviewQueue() {
+        officialPermissionService.requireOfficialMaintainer();
+        return templateService.list(new LambdaQueryWrapper<AgentTemplateEntity>()
+                        .eq(AgentTemplateEntity::getReviewStatus, REVIEW_PENDING)
+                        .orderByAsc(AgentTemplateEntity::getCreatedAt))
+                .stream().map(this::toSummary).toList();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public AgentTemplateSummaryVO review(String templateId, AgentTemplateReviewDTO dto) {
+        officialPermissionService.requireOfficialMaintainer();
+        AgentTemplateEntity template = templateService.getById(templateId);
+        if (template == null || !REVIEW_PENDING.equals(template.getReviewStatus())) {
+            throw new RenException("待审核模板不存在或状态已变化");
+        }
+        boolean approved = REVIEW_APPROVED.equals(dto.getDecision());
+        if (approved) {
+            sanitizeForPublication(template);
+        }
+        template.setReviewStatus(approved ? REVIEW_APPROVED : REVIEW_REJECTED);
+        template.setVisibility(approved ? VISIBILITY_PUBLIC : VISIBILITY_WORKSPACE);
+        template.setReviewerId(SecurityUser.getUserId());
+        template.setReviewNote(StringUtils.trimToNull(dto.getNote()));
+        template.setReviewedAt(new Date());
+        template.setPublishedAt(approved ? new Date() : null);
+        if (!approved) {
+            template.setPublicSnapshotJson(null);
+        }
+        touch(template);
+        templateService.updateById(template);
+        return toSummary(template);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public AgentTemplateSummaryVO publishOfficial(String templateId) {
+        officialPermissionService.requireOfficialMaintainer();
+        AgentTemplateEntity template = requireOwnedWorkspaceTemplate(templateId);
+        sanitizeForPublication(template);
+        template.setVisibility(VISIBILITY_OFFICIAL);
+        template.setReviewStatus(REVIEW_APPROVED);
+        template.setReviewerId(SecurityUser.getUserId());
+        template.setReviewNote("官方团队发布");
+        template.setReviewedAt(new Date());
+        template.setPublishedAt(new Date());
+        touch(template);
+        templateService.updateById(template);
+        return toSummary(template);
+    }
+
+    private AgentTemplateEntity requireOwnedWorkspaceTemplate(String templateId) {
+        AgentTemplateEntity template = templateService.getById(templateId);
+        if (template == null || StringUtils.isBlank(template.getWorkspaceId())) {
+            throw new RenException(ErrorCode.RESOURCE_NOT_FOUND);
+        }
+        workspacePermissionService.requireWrite(template.getWorkspaceId());
+        return template;
+    }
+
+    private void touch(AgentTemplateEntity template) {
+        template.setUpdater(SecurityUser.getUserId());
+        template.setUpdatedAt(new Date());
+        template.setVersion((template.getVersion() == null ? 1 : template.getVersion()) + 1);
+    }
+
+    private void sanitizeForPublication(AgentTemplateEntity template) {
+        if (template.getSnapshotJson() == null) {
+            return;
+        }
+        AgentTemplateSnapshotDTO snapshot = deepCopy(template.getSnapshotJson(), AgentTemplateSnapshotDTO.class);
+        snapshot.setVoicePrintIds(List.of());
+        snapshot.setFeishuConfig(null);
+        if (snapshot.getConfig() != null) {
+            snapshot.getConfig().setCorrectWordFileIds(List.of());
+        }
+        template.setPublicSnapshotJson(snapshot);
     }
 
     private AgentInfoVO requireAgentWrite(String agentId) {
@@ -221,7 +346,10 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
         if (template == null) {
             throw new RenException(ErrorCode.RESOURCE_NOT_FOUND);
         }
-        if (StringUtils.isBlank(template.getWorkspaceId())) {
+        if (VISIBILITY_OFFICIAL.equals(template.getVisibility())
+                || (VISIBILITY_PUBLIC.equals(template.getVisibility())
+                        && REVIEW_APPROVED.equals(template.getReviewStatus()))
+                || StringUtils.isBlank(template.getWorkspaceId())) {
             return;
         }
         if (!StringUtils.equals(template.getWorkspaceId(), targetWorkspaceId)) {
@@ -302,7 +430,8 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
             }
             KnowledgeBaseEntity knowledge = knowledgeBaseService.selectById(mapping.getPluginId());
             if (knowledge != null
-                    && StringUtils.equals(workspaceId, knowledge.getWorkspaceId())
+                    && (StringUtils.equals(workspaceId, knowledge.getWorkspaceId())
+                            || KnowledgeResourcePermissionService.SCOPE_OFFICIAL.equals(knowledge.getScope()))
                     && !Integer.valueOf(0).equals(knowledge.getStatus())) {
                 filtered.add(mapping);
                 continue;
@@ -543,9 +672,20 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
         vo.setTemplateName(StringUtils.defaultIfBlank(entity.getTemplateName(), entity.getAgentName()));
         vo.setAgentName(entity.getAgentName());
         vo.setVersion(entity.getVersion() == null ? 1 : entity.getVersion());
-        vo.setScope(StringUtils.isBlank(entity.getWorkspaceId()) ? "SYSTEM" : "WORKSPACE");
+        vo.setScope(StringUtils.defaultIfBlank(entity.getVisibility(),
+                StringUtils.isBlank(entity.getWorkspaceId()) ? VISIBILITY_OFFICIAL : VISIBILITY_WORKSPACE));
         vo.setDeletable(StringUtils.isNotBlank(entity.getWorkspaceId())
-                && workspacePermissionService.canWrite(entity.getWorkspaceId()));
+                && workspacePermissionService.canWrite(entity.getWorkspaceId())
+                && (!VISIBILITY_OFFICIAL.equals(entity.getVisibility())
+                        || officialPermissionService.isOfficialMaintainer()));
+        vo.setReviewStatus(StringUtils.defaultIfBlank(entity.getReviewStatus(), REVIEW_DRAFT));
+        vo.setSubmittable(StringUtils.isNotBlank(entity.getWorkspaceId())
+                && workspacePermissionService.canWrite(entity.getWorkspaceId())
+                && VISIBILITY_WORKSPACE.equals(StringUtils.defaultIfBlank(
+                        entity.getVisibility(), VISIBILITY_WORKSPACE))
+                && (REVIEW_DRAFT.equals(StringUtils.defaultIfBlank(entity.getReviewStatus(), REVIEW_DRAFT))
+                        || REVIEW_REJECTED.equals(entity.getReviewStatus())));
+        vo.setOfficialMaintainer(officialPermissionService.isOfficialMaintainer());
         return vo;
     }
 

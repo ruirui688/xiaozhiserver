@@ -22,10 +22,10 @@
 ```dotenv
 COMPOSE_PROFILES=maintenance
 XIAOZHI_MAINTENANCE_HARNESS_ENABLED=true
-XIAOZHI_MAINTENANCE_AGENT_SECRET=使用密码生成器创建的长随机内部密钥
-DEEPSEEK_API_KEY=真实DeepSeek密钥
-XIAOZHI_MAINTENANCE_MODEL=deepseek-v4-flash
 ```
+
+内部服务密钥未填写时由安装器生成并持久化。DeepSeek API Key、接口地址和上游模型名直接复用“模型配置”中
+已启用且测试通过的 DeepSeek LLM；在资源维护策略中选择对应模型，不再在部署 `.env` 保存第二份模型凭据。
 
 `xiaozhi-maintenance-agent` 不映射宿主端口或目录，只有 manager-api 能在容器网络调用。启用容器不等于启用
 任何资源：还必须在对应知识库或智能体页面逐一保存策略。关闭时同时将 Harness 开关设为 `false` 并从

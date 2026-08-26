@@ -30,6 +30,7 @@ import xiaozhi.modules.knowledge.dto.dataset.DatasetDTO;
 import xiaozhi.modules.knowledge.entity.KnowledgeBaseEntity;
 import xiaozhi.modules.knowledge.rag.KnowledgeBaseAdapter;
 import xiaozhi.modules.knowledge.rag.KnowledgeBaseAdapterFactory;
+import xiaozhi.modules.knowledge.service.KnowledgeResourcePermissionService;
 import xiaozhi.modules.model.dao.ModelConfigDao;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
@@ -50,6 +51,7 @@ class KnowledgeBaseServiceImplTest {
                 mock(RedisUtils.class),
                 mock(WorkspaceService.class),
                 mock(WorkspacePermissionService.class),
+                mock(KnowledgeResourcePermissionService.class),
                 new ObjectMapper());
         KnowledgeBaseDTO request = new KnowledgeBaseDTO();
         request.setParserConfig("{}");
@@ -72,6 +74,7 @@ class KnowledgeBaseServiceImplTest {
                 mock(RedisUtils.class),
                 mock(WorkspaceService.class),
                 mock(WorkspacePermissionService.class),
+                mock(KnowledgeResourcePermissionService.class),
                 new ObjectMapper());
         KnowledgeBaseDTO request = new KnowledgeBaseDTO();
         request.setParserConfig("{\"processing_strategy\":\"direct\"}");
@@ -97,7 +100,8 @@ class KnowledgeBaseServiceImplTest {
         ObjectMapper objectMapper = new ObjectMapper();
         KnowledgeBaseServiceImpl service = new KnowledgeBaseServiceImpl(
                 knowledgeBaseDao, chunkDao, documentDao, modelConfigService, modelConfigDao,
-                redisUtils, workspaceService, permissionService, objectMapper);
+                redisUtils, workspaceService, permissionService,
+                mock(KnowledgeResourcePermissionService.class), objectMapper);
 
         ModelConfigEntity ragModel = new ModelConfigEntity();
         ragModel.setConfigJson(new JSONObject(Map.of("type", "local_knowledge")));

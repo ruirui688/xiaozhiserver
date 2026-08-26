@@ -9,6 +9,9 @@
         :workspace-can-write="workspaceCanWrite"
         @select="selectTemplate"
         @delete="deleteTemplate"
+        @submit-review="submitTemplateReview"
+        @open-review="$emit('open-template-review')"
+        @publish-official="$emit('publish-official-template', $event)"
       />
     </div>
 
@@ -834,6 +837,9 @@ export default {
     },
     deleteTemplate(template) {
       this.$emit('delete-template', template);
+    },
+    submitTemplateReview(template) {
+      this.$emit('submit-template-review', template);
     },
     applyTemplateData(templateData) {
       this.form = {

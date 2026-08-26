@@ -30,6 +30,9 @@ public class KnowledgeBaseEntity {
     @Schema(description = "所属工作空间ID")
     private String workspaceId;
 
+    @Schema(description = "资源范围: WORKSPACE/OFFICIAL")
+    private String scope;
+
     @Schema(description = "租户ID")
     private String tenantId;
 

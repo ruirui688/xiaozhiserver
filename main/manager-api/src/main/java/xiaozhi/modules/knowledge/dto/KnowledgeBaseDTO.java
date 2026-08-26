@@ -26,6 +26,18 @@ public class KnowledgeBaseDTO implements Serializable {
     @Schema(description = "所属工作空间ID")
     private String workspaceId;
 
+    @Schema(description = "资源范围: WORKSPACE/OFFICIAL")
+    private String scope;
+
+    @Schema(description = "当前用户是否可编辑")
+    private Boolean canEdit;
+
+    @Schema(description = "当前用户是否可配置智能体自主维护")
+    private Boolean canManageMaintenance;
+
+    @Schema(description = "当前用户是否可发布官方知识库")
+    private Boolean canPublishOfficial;
+
     @Schema(description = "知识库名称")
     private String name;
 

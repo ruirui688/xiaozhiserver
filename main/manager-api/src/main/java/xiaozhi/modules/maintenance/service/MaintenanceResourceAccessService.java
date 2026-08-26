@@ -9,6 +9,7 @@ import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.agent.vo.AgentInfoVO;
 import xiaozhi.modules.knowledge.dto.KnowledgeBaseDTO;
 import xiaozhi.modules.knowledge.service.KnowledgeBaseService;
+import xiaozhi.modules.knowledge.service.KnowledgeResourcePermissionService;
 import xiaozhi.modules.security.user.SecurityUser;
 import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 
@@ -18,6 +19,7 @@ public class MaintenanceResourceAccessService {
     private final KnowledgeBaseService knowledgeBaseService;
     private final AgentService agentService;
     private final WorkspacePermissionService workspacePermissionService;
+    private final KnowledgeResourcePermissionService knowledgePermissionService;
 
     public String resolveWorkspace(String resourceType, String resourceId) {
         String type = normalizeType(resourceType);
@@ -35,6 +37,11 @@ public class MaintenanceResourceAccessService {
     }
 
     public String requireRead(String resourceType, String resourceId) {
+        if ("KNOWLEDGE".equals(normalizeType(resourceType))) {
+            KnowledgeBaseDTO dataset = knowledgeBaseService.getByDatasetId(resourceId);
+            knowledgePermissionService.requireRead(dataset);
+            return dataset.getWorkspaceId();
+        }
         if ("MEMORY".equals(normalizeType(resourceType))
                 && !agentService.checkAgentPermission(resourceId, SecurityUser.getUserId())) {
             throw new RenException("无权访问该智能体");
@@ -45,6 +52,11 @@ public class MaintenanceResourceAccessService {
     }
 
     public String requireWrite(String resourceType, String resourceId) {
+        if ("KNOWLEDGE".equals(normalizeType(resourceType))) {
+            KnowledgeBaseDTO dataset = knowledgeBaseService.getByDatasetId(resourceId);
+            knowledgePermissionService.requireAutomatedMaintenance(dataset);
+            return dataset.getWorkspaceId();
+        }
         if ("MEMORY".equals(normalizeType(resourceType))
                 && !agentService.checkAgentPermission(resourceId, SecurityUser.getUserId())) {
             throw new RenException("无权维护该智能体记忆");

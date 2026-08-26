@@ -34,6 +34,21 @@ public class AgentTemplateEntity implements Serializable {
     /** NULL 表示系统模板，否则归属于指定工作空间。 */
     private String workspaceId;
 
+    /** WORKSPACE/PUBLIC/OFFICIAL。 */
+    private String visibility;
+
+    /** DRAFT/PENDING/APPROVED/REJECTED。 */
+    private String reviewStatus;
+
+    private Long reviewerId;
+    private String reviewNote;
+    private Date reviewedAt;
+    private Date publishedAt;
+
+    /** 公共/官方模板跨工作空间应用时使用的脱敏快照。 */
+    @TableField(typeHandler = JacksonTypeHandler.class)
+    private AgentTemplateSnapshotDTO publicSnapshotJson;
+
     /** 与角色昵称分离的模板显示名称。 */
     private String templateName;
 
