@@ -8,6 +8,7 @@ import java.util.UUID;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -37,6 +38,7 @@ import xiaozhi.modules.knowledge.source.dao.KnowledgeSyncRunDao;
 import xiaozhi.modules.knowledge.source.dto.KnowledgeSourceView;
 import xiaozhi.modules.knowledge.source.entity.KnowledgeSourceEntity;
 import xiaozhi.modules.knowledge.source.entity.KnowledgeSyncRunEntity;
+import xiaozhi.modules.knowledge.source.event.KnowledgeSourceSyncProgressEvent;
 
 /** Polling, indexing and atomic publication for optional knowledge connectors. */
 @Service
@@ -55,6 +57,7 @@ public class KnowledgeSourceSyncService {
     private final ObjectMapper objectMapper;
     private final AsyncTaskExecutor sourceExecutor;
     private final TransactionTemplate transactionTemplate;
+    private final ApplicationEventPublisher eventPublisher;
 
     public KnowledgeSourceSyncService(KnowledgeSourceService sourceService,
             KnowledgeSourceDao sourceDao, KnowledgeSyncRunDao runDao,
@@ -62,7 +65,7 @@ public class KnowledgeSourceSyncService {
             DocumentDao documentDao, KnowledgeChunkDao chunkDao, WebPageConnector webPageConnector,
             ObjectMapper objectMapper,
             @Qualifier("knowledgeSourceTaskExecutor") AsyncTaskExecutor sourceExecutor,
-            TransactionTemplate transactionTemplate) {
+            TransactionTemplate transactionTemplate, ApplicationEventPublisher eventPublisher) {
         this.sourceService = sourceService;
         this.sourceDao = sourceDao;
         this.runDao = runDao;
@@ -74,6 +77,7 @@ public class KnowledgeSourceSyncService {
         this.objectMapper = objectMapper;
         this.sourceExecutor = sourceExecutor;
         this.transactionTemplate = transactionTemplate;
+        this.eventPublisher = eventPublisher;
     }
 
     public KnowledgeSourceView trigger(String datasetId, String sourceId, String triggerType) {
@@ -86,6 +90,7 @@ public class KnowledgeSourceSyncService {
         }
         KnowledgeSyncRunEntity run = newRun(source, triggerType);
         runDao.insert(run);
+        emit(source, run.getId(), "QUEUED", "数据源同步已进入后台队列", null, null, null);
         try {
             sourceExecutor.submit(() -> synchronize(sourceId, run.getId()));
         } catch (Exception e) {
@@ -117,6 +122,7 @@ public class KnowledgeSourceSyncService {
         if (source == null) return;
         String candidateDocumentId = null;
         try {
+            emit(source, runId, "FETCHING", "正在安全抓取网页内容", null, null, null);
             WebPageConnector.FetchResult fetched = webPageConnector.fetch(source);
             if (fetched.notModified() || StringUtils.equals(source.getContentHash(), fetched.contentHash())) {
                 unchanged(source, runId, fetched);
@@ -189,6 +195,8 @@ public class KnowledgeSourceSyncService {
                     (long) value(next.getChunkCount()) - value(previous == null ? null : previous.getChunkCount()),
                     value(next.getTokenCount()) - value(previous == null ? null : previous.getTokenCount()));
         });
+        emit(sourceDao.selectById(sourceId), runId, "INDEXED", "网页已完成切片并发布到知识库",
+                null, document.getDocumentId(), document.getChunkCount());
     }
 
     private void unchanged(KnowledgeSourceEntity source, String runId, WebPageConnector.FetchResult fetched) {
@@ -203,6 +211,8 @@ public class KnowledgeSourceSyncService {
         runDao.update(null, new UpdateWrapper<KnowledgeSyncRunEntity>()
                 .set("status", "UNCHANGED").set("bytes_fetched", fetched.bytesFetched())
                 .set("documents_skipped", 1).set("finished_at", now).eq("id", runId));
+        emit(source, runId, "UNCHANGED", "网页内容未变化，继续使用当前知识版本", null,
+                source.getCurrentDocumentId(), null);
     }
 
     private void fail(String sourceId, String runId, String error, String candidateDocumentId) {
@@ -227,6 +237,7 @@ public class KnowledgeSourceSyncService {
                     .set("status", "FAILED").set("error", safe)
                     .set("finished_at", new Date()).eq("id", runId));
         });
+        emit(sourceDao.selectById(sourceId), runId, "FAILED", "网页同步失败", safe, null, null);
     }
 
     private void recoverStuckSources() {
@@ -248,6 +259,9 @@ public class KnowledgeSourceSyncService {
         runDao.update(null, new UpdateWrapper<KnowledgeSyncRunEntity>()
                 .set("status", "INDEXING").set("revision", revision)
                 .set("bytes_fetched", bytesFetched).eq("id", runId));
+        KnowledgeSyncRunEntity run = runDao.selectById(runId);
+        KnowledgeSourceEntity source = run == null ? null : sourceDao.selectById(run.getSourceId());
+        emit(source, runId, "INDEXING", "网页抓取完成，正在解析和生成切片", null, null, null);
     }
 
     private KnowledgeSyncRunEntity newRun(KnowledgeSourceEntity source, String triggerType) {
@@ -294,6 +308,13 @@ public class KnowledgeSourceSyncService {
                 "(?i)(api[_-]?key|secret|token|password|authorization)\\s*[:=]\\s*[^\\s,;，；]+", "$1=***");
         message = message.replaceAll("(?i)Bearer\\s+[^\\s,;，；]+", "Bearer ***");
         return StringUtils.abbreviate(message, 500);
+    }
+
+    private void emit(KnowledgeSourceEntity source, String runId, String status, String message,
+            String error, String documentId, Integer chunkCount) {
+        if (source == null) return;
+        eventPublisher.publishEvent(new KnowledgeSourceSyncProgressEvent(
+                source.getDatasetId(), source.getId(), runId, status, message, error, documentId, chunkCount));
     }
 
     private static final class ByteArrayMultipartFile implements MultipartFile {

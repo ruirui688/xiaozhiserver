@@ -8,16 +8,20 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
 import xiaozhi.common.utils.Result;
 import xiaozhi.modules.maintenance.dto.MaintenancePolicyRequest;
+import xiaozhi.modules.maintenance.dto.MaintenanceRunRequest;
 import xiaozhi.modules.maintenance.entity.MaintenancePolicyEntity;
 import xiaozhi.modules.maintenance.entity.MaintenanceProposalEntity;
 import xiaozhi.modules.maintenance.entity.MaintenanceRunEntity;
+import xiaozhi.modules.maintenance.entity.MaintenanceRunEventEntity;
 import xiaozhi.modules.maintenance.service.MaintenanceResourceAccessService;
+import xiaozhi.modules.maintenance.service.MaintenanceRunEventService;
 import xiaozhi.modules.maintenance.service.MaintenanceService;
 
 @RestController
@@ -28,6 +32,7 @@ import xiaozhi.modules.maintenance.service.MaintenanceService;
 public class MaintenanceController {
     private final MaintenanceService maintenanceService;
     private final MaintenanceResourceAccessService accessService;
+    private final MaintenanceRunEventService eventService;
 
     @GetMapping("/policy")
     public Result<MaintenancePolicyEntity> policy(@PathVariable("resource_type") String type,
@@ -45,9 +50,11 @@ public class MaintenanceController {
 
     @PostMapping("/runs")
     public Result<MaintenanceRunEntity> run(@PathVariable("resource_type") String type,
-            @PathVariable("resource_id") String id) {
+            @PathVariable("resource_id") String id,
+            @Valid @RequestBody(required = false) MaintenanceRunRequest request) {
         accessService.requireWrite(type, id);
-        return new Result<MaintenanceRunEntity>().ok(maintenanceService.trigger(type, id, "MANUAL"));
+        String instruction = request == null ? null : request.getInstruction();
+        return new Result<MaintenanceRunEntity>().ok(maintenanceService.trigger(type, id, "MANUAL", instruction));
     }
 
     @GetMapping("/runs")
@@ -55,6 +62,18 @@ public class MaintenanceController {
             @PathVariable("resource_id") String id) {
         accessService.requireRead(type, id);
         return new Result<List<MaintenanceRunEntity>>().ok(maintenanceService.listRuns(type, id));
+    }
+
+    @GetMapping("/runs/{run_id}/events")
+    public Result<List<MaintenanceRunEventEntity>> runEvents(@PathVariable("resource_type") String type,
+            @PathVariable("resource_id") String id, @PathVariable("run_id") String runId,
+            @RequestParam(name = "after_id", required = false, defaultValue = "0") Long afterId) {
+        accessService.requireRead(type, id);
+        MaintenanceRunEntity run = maintenanceService.getRun(runId);
+        if (!type.equalsIgnoreCase(run.getResourceType()) || !id.equals(run.getResourceId())) {
+            throw new xiaozhi.common.exception.RenException("维护运行记录不属于当前资源");
+        }
+        return new Result<List<MaintenanceRunEventEntity>>().ok(eventService.list(runId, afterId));
     }
 
     @GetMapping("/proposals")

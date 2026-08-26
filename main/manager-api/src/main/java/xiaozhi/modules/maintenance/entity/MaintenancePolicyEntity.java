@@ -16,6 +16,7 @@ public class MaintenancePolicyEntity {
     private String resourceId;
     private String mode;
     private String topicsJson;
+    private String customPrompt;
     private String trustedDomainsJson;
     private Integer scheduleMinutes;
     private Integer maxProposals;

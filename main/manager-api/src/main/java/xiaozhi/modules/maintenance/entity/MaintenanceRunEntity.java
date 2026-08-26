@@ -16,6 +16,7 @@ public class MaintenanceRunEntity {
     private String resourceType;
     private String resourceId;
     private String triggerType;
+    private String userInstruction;
     private String status;
     private Integer proposalCount;
     private Integer inputChars;

@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.Set;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.annotation.Transactional;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
@@ -23,6 +24,7 @@ import xiaozhi.modules.maintenance.dto.HarnessMaintenanceResponse;
 import xiaozhi.modules.maintenance.entity.MaintenancePolicyEntity;
 import xiaozhi.modules.maintenance.entity.MaintenanceProposalEntity;
 import xiaozhi.modules.maintenance.entity.MaintenanceRunEntity;
+import xiaozhi.modules.maintenance.event.MaintenanceKnowledgeSourceApprovedEvent;
 import xiaozhi.modules.memory.dao.MemoryFactDao;
 import xiaozhi.modules.memory.dto.MemoryFactDTO;
 import xiaozhi.modules.memory.entity.MemoryFactEntity;
@@ -38,6 +40,8 @@ public class MaintenanceProposalService {
     private final MemoryService memoryService;
     private final MaintenanceResourceAccessService resourceAccessService;
     private final ObjectMapper objectMapper;
+    private final ApplicationEventPublisher eventPublisher;
+    private final MaintenanceRunEventService eventService;
 
     public List<MaintenanceProposalEntity> list(String resourceType, String resourceId) {
         return proposalDao.selectList(new QueryWrapper<MaintenanceProposalEntity>()
@@ -60,6 +64,7 @@ public class MaintenanceProposalService {
             MaintenanceProposalEntity proposal = validate(policy, run, raw);
             if (proposal == null || isDuplicate(proposal)) continue;
             boolean auto = "KNOWLEDGE".equals(policy.getResourceType())
+                    && "ADD_SOURCE".equals(proposal.getActionType())
                     && "DISCOVERY_AUTO".equals(policy.getMode())
                     && isTrusted(proposal.getSourceUri(), readList(policy.getTrustedDomainsJson()));
             if (auto) proposal.setStatus("APPLYING");
@@ -74,12 +79,17 @@ public class MaintenanceProposalService {
     public MaintenanceProposalEntity approve(String proposalId) {
         MaintenanceProposalEntity proposal = requirePending(proposalId);
         claimPending(proposalId);
-        apply(proposal, SecurityUser.getUserId());
-        proposal.setStatus("APPLIED");
+        String sourceId = apply(proposal, SecurityUser.getUserId());
+        proposal.setStatus(sourceId == null ? "APPLIED" : "APPLYING");
         proposal.setReviewer(SecurityUser.getUserId());
         proposal.setReviewedAt(new Date());
         proposal.setUpdatedAt(new Date());
         proposalDao.updateById(proposal);
+        publishKnowledgeApproval(proposal, sourceId);
+        if ("KNOWLEDGE".equals(proposal.getResourceType()) && "REMOVE_SOURCE".equals(proposal.getActionType())) {
+            eventService.record(proposal.getRunId(), "PROPOSAL", "SUCCESS",
+                    "《" + StringUtils.defaultIfBlank(proposal.getTitle(), "旧网页来源") + "》已从知识库移除");
+        }
         return proposal;
     }
 
@@ -92,6 +102,8 @@ public class MaintenanceProposalService {
         proposal.setReviewedAt(new Date());
         proposal.setUpdatedAt(new Date());
         proposalDao.updateById(proposal);
+        eventService.record(proposal.getRunId(), "PROPOSAL", "INFO",
+                "候选《" + StringUtils.defaultIfBlank(proposal.getTitle(), proposal.getActionType()) + "》已被拒绝");
         return proposal;
     }
 
@@ -106,13 +118,23 @@ public class MaintenanceProposalService {
         String action = text(raw.get("actionType"), 24);
         MaintenanceProposalEntity proposal = base(policy, run, action, raw);
         if ("KNOWLEDGE".equals(policy.getResourceType())) {
-            if (!"ADD_SOURCE".equals(action)) return null;
-            String uri = text(raw.get("sourceUri"), 2048);
-            PublicUrlGuard.requirePublicHttpUrl(uri);
-            if (knowledgeSourceService.list(policy.getResourceId()).stream()
-                    .anyMatch(item -> StringUtils.equalsIgnoreCase(item.getSourceUri(), uri))) return null;
-            proposal.setSourceUri(uri);
-            proposal.setTitle(text(raw.get("title"), 255));
+            if (!Set.of("ADD_SOURCE", "REMOVE_SOURCE").contains(action)) return null;
+            if ("ADD_SOURCE".equals(action)) {
+                String uri = text(raw.get("sourceUri"), 2048);
+                PublicUrlGuard.requirePublicHttpUrl(uri);
+                if (knowledgeSourceService.list(policy.getResourceId()).stream()
+                        .anyMatch(item -> StringUtils.equalsIgnoreCase(item.getSourceUri(), uri))) return null;
+                proposal.setSourceUri(uri);
+                proposal.setTitle(text(raw.get("title"), 255));
+            } else {
+                String targetId = text(raw.get("targetId"), 64);
+                var existing = knowledgeSourceService.list(policy.getResourceId()).stream()
+                        .filter(item -> item.getId().equals(targetId)).findFirst().orElse(null);
+                if (existing == null) return null;
+                proposal.setTargetId(targetId);
+                proposal.setSourceUri(existing.getSourceUri());
+                proposal.setTitle(existing.getName());
+            }
             proposal.setPayloadJson("{}");
             return proposal;
         }
@@ -150,9 +172,14 @@ public class MaintenanceProposalService {
 
     private void autoApply(MaintenanceProposalEntity proposal, Long actorId) {
         try {
-            apply(proposal, actorId);
-            proposal.setStatus("APPLIED");
+            String sourceId = apply(proposal, actorId);
+            proposal.setStatus(sourceId == null ? "APPLIED" : "APPLYING");
+            proposal.setReviewer(actorId);
             proposal.setReviewedAt(new Date());
+            proposal.setUpdatedAt(new Date());
+            proposalDao.updateById(proposal);
+            publishKnowledgeApproval(proposal, sourceId);
+            return;
         } catch (Exception ex) {
             proposal.setStatus("FAILED");
             proposal.setError(safeError(ex));
@@ -161,10 +188,14 @@ public class MaintenanceProposalService {
         proposalDao.updateById(proposal);
     }
 
-    private void apply(MaintenanceProposalEntity proposal, Long actorId) {
+    private String apply(MaintenanceProposalEntity proposal, Long actorId) {
         String workspace = resourceAccessService.resolveWorkspace(proposal.getResourceType(), proposal.getResourceId());
         if (!proposal.getWorkspaceId().equals(workspace)) throw new RenException("资源归属已变化，旧维护提案不能应用");
         if ("KNOWLEDGE".equals(proposal.getResourceType())) {
+            if ("REMOVE_SOURCE".equals(proposal.getActionType())) {
+                knowledgeSourceService.delete(proposal.getResourceId(), proposal.getTargetId());
+                return null;
+            }
             PublicUrlGuard.requirePublicHttpUrl(proposal.getSourceUri());
             KnowledgeSourceRequest request = new KnowledgeSourceRequest();
             request.setName(StringUtils.abbreviate(
@@ -173,7 +204,9 @@ public class MaintenanceProposalService {
             request.setSourceUri(proposal.getSourceUri());
             request.setRefreshIntervalMinutes(60);
             request.setEnabled(true);
-            knowledgeSourceService.createManaged(proposal.getResourceId(), request, actorId);
+            String sourceId = knowledgeSourceService.createManaged(proposal.getResourceId(), request, actorId).getId();
+            proposal.setTargetId(sourceId);
+            return sourceId;
         } else if ("UPDATE".equals(proposal.getActionType())) {
             MemoryFactDTO dto = new MemoryFactDTO();
             dto.setCanonicalText(text(readMap(proposal.getPayloadJson()).get("canonicalText"), 2000));
@@ -186,6 +219,13 @@ public class MaintenanceProposalService {
             memoryService.deleteFact(proposal.getResourceId(), proposal.getTargetId(),
                     "harness_approved", String.valueOf(actorId));
         } else throw new RenException("不支持的维护提案动作");
+        return null;
+    }
+
+    private void publishKnowledgeApproval(MaintenanceProposalEntity proposal, String sourceId) {
+        if (sourceId == null) return;
+        eventPublisher.publishEvent(new MaintenanceKnowledgeSourceApprovedEvent(
+                proposal.getId(), proposal.getRunId(), proposal.getResourceId(), sourceId));
     }
 
     private MaintenanceProposalEntity requirePending(String id) {
@@ -204,7 +244,10 @@ public class MaintenanceProposalService {
         QueryWrapper<MaintenanceProposalEntity> query = new QueryWrapper<MaintenanceProposalEntity>()
                 .eq("resource_type", proposal.getResourceType()).eq("resource_id", proposal.getResourceId())
                 .eq("action_type", proposal.getActionType()).in("status", "PENDING", "APPLYING", "APPLIED");
-        if ("KNOWLEDGE".equals(proposal.getResourceType())) query.eq("source_uri", proposal.getSourceUri());
+        if ("KNOWLEDGE".equals(proposal.getResourceType())) {
+            if ("REMOVE_SOURCE".equals(proposal.getActionType())) query.eq("target_id", proposal.getTargetId());
+            else query.eq("source_uri", proposal.getSourceUri());
+        }
         else query.eq("target_id", proposal.getTargetId());
         return proposalDao.selectCount(query) > 0;
     }

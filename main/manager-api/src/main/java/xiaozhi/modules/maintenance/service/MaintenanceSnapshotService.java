@@ -40,7 +40,8 @@ public class MaintenanceSnapshotService {
             input.put("name", dataset.getName());
             input.put("description", StringUtils.abbreviate(dataset.getDescription(), 2000));
             input.put("existingSources", knowledgeSourceService.list(policy.getResourceId()).stream()
-                    .map(item -> Map.of("name", item.getName(), "sourceUri", item.getSourceUri())).toList());
+                    .map(item -> Map.of("sourceId", item.getId(), "name", item.getName(),
+                            "sourceUri", item.getSourceUri())).toList());
             return input;
         }
         input.put("facts", activeFacts(policy.getResourceId()));

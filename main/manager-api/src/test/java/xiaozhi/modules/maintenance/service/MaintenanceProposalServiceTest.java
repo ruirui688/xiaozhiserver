@@ -10,9 +10,11 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import xiaozhi.modules.knowledge.source.service.KnowledgeSourceService;
 import xiaozhi.modules.knowledge.source.dto.KnowledgeSourceRequest;
+import xiaozhi.modules.knowledge.source.dto.KnowledgeSourceView;
 import xiaozhi.modules.maintenance.dao.MaintenanceProposalDao;
 import xiaozhi.modules.maintenance.dto.HarnessMaintenanceResponse;
 import xiaozhi.modules.maintenance.entity.MaintenancePolicyEntity;
@@ -67,8 +69,13 @@ class MaintenanceProposalServiceTest {
         when(sourceService.list("resource-1")).thenReturn(List.of());
         when(proposalDao.selectCount(any())).thenReturn(0L);
         when(accessService.resolveWorkspace("KNOWLEDGE", "resource-1")).thenReturn("workspace-1");
+        KnowledgeSourceView source = new KnowledgeSourceView();
+        source.setId("source-1");
+        when(sourceService.createManaged(org.mockito.ArgumentMatchers.eq("resource-1"),
+                any(KnowledgeSourceRequest.class), org.mockito.ArgumentMatchers.eq(42L))).thenReturn(source);
         MaintenanceProposalService service = new MaintenanceProposalService(proposalDao, sourceService,
-                mock(MemoryFactDao.class), mock(MemoryService.class), accessService, new ObjectMapper());
+                mock(MemoryFactDao.class), mock(MemoryService.class), accessService, new ObjectMapper(),
+                mock(ApplicationEventPublisher.class), mock(MaintenanceRunEventService.class));
         MaintenancePolicyEntity policy = policy("KNOWLEDGE", "DISCOVERY_AUTO");
         policy.setCreator(42L);
         policy.setTrustedDomainsJson("[\"example.com\"]");
@@ -82,9 +89,36 @@ class MaintenanceProposalServiceTest {
                 any(KnowledgeSourceRequest.class), org.mockito.ArgumentMatchers.eq(42L));
     }
 
+    @Test
+    void knowledgeAgentCanProposeRemovingAnExactExistingDynamicSource() {
+        MaintenanceProposalDao proposalDao = mock(MaintenanceProposalDao.class);
+        KnowledgeSourceService sourceService = mock(KnowledgeSourceService.class);
+        KnowledgeSourceView existing = new KnowledgeSourceView();
+        existing.setId("source-old");
+        existing.setName("17.2 旧版本公告");
+        existing.setSourceUri("https://example.com/17-2");
+        when(sourceService.list("resource-1")).thenReturn(List.of(existing));
+        when(proposalDao.selectCount(any())).thenReturn(0L);
+        MaintenanceProposalService service = new MaintenanceProposalService(proposalDao, sourceService,
+                mock(MemoryFactDao.class), mock(MemoryService.class), mock(MaintenanceResourceAccessService.class),
+                new ObjectMapper(), mock(ApplicationEventPublisher.class), mock(MaintenanceRunEventService.class));
+        HarnessMaintenanceResponse response = new HarnessMaintenanceResponse();
+        response.setProposals(List.of(Map.of("actionType", "REMOVE_SOURCE", "targetId", "source-old",
+                "rationale", "已被当前赛季公告替代", "evidence", List.of("18.1 已发布"))));
+
+        assertEquals(1, service.persist(policy("KNOWLEDGE", "DISCOVERY_REVIEW"), run(), response));
+
+        ArgumentCaptor<MaintenanceProposalEntity> captor = ArgumentCaptor.forClass(MaintenanceProposalEntity.class);
+        verify(proposalDao).insert(captor.capture());
+        assertEquals("REMOVE_SOURCE", captor.getValue().getActionType());
+        assertEquals("source-old", captor.getValue().getTargetId());
+        assertEquals("PENDING", captor.getValue().getStatus());
+    }
+
     private MaintenanceProposalService service(MaintenanceProposalDao proposalDao, MemoryFactDao factDao) {
         return new MaintenanceProposalService(proposalDao, mock(KnowledgeSourceService.class), factDao,
-                mock(MemoryService.class), mock(MaintenanceResourceAccessService.class), new ObjectMapper());
+                mock(MemoryService.class), mock(MaintenanceResourceAccessService.class), new ObjectMapper(),
+                mock(ApplicationEventPublisher.class), mock(MaintenanceRunEventService.class));
     }
 
     private MaintenancePolicyEntity policy(String type, String mode) {

@@ -23,6 +23,14 @@ class MaintenanceAgentTest(unittest.TestCase):
         self.assertIn("Do not use external knowledge", prompt)
         self.assertNotIn("Use web_search", prompt)
 
+    def test_operator_guidance_improves_quality_without_replacing_safety_contract(self):
+        prompt = build_prompt("KNOWLEDGE", 3, {}, "只保留当前赛季官方公告", "排除旧版本和赛事营销页")
+        self.assertIn("只保留当前赛季官方公告", prompt)
+        self.assertIn("排除旧版本和赛事营销页", prompt)
+        self.assertIn("subordinate to every security", prompt)
+        self.assertIn("exclude obsolete patches", prompt)
+        self.assertIn("REMOVE_SOURCE", prompt)
+
     def test_request_is_bounded_and_runner_output_is_returned(self):
         calls = []
 
@@ -33,10 +41,13 @@ class MaintenanceAgentTest(unittest.TestCase):
         result = process_request({
             "taskType": "KNOWLEDGE", "runId": "r1", "resourceId": "kb1",
             "maxProposals": 2, "input": {"topics": ["game"]},
+            "customPrompt": "official current patches only", "userInstruction": "find the newest season",
             "modelConfig": {"apiKey": "managed-key", "baseUrl": "https://api.deepseek.com", "model": "deepseek-chat"},
         }, runner=runner)
         self.assertEqual(1, result["inputChars"])
         self.assertEqual("KNOWLEDGE", calls[0][0])
+        self.assertEqual("official current patches only", calls[0][5])
+        self.assertEqual("find the newest season", calls[0][6])
         with self.assertRaises(ValueError):
             process_request({"taskType": "MEMORY", "runId": "r", "resourceId": "a",
                              "maxProposals": 21, "input": {}, "modelConfig": {}}, runner=runner)
@@ -75,7 +86,7 @@ class MaintenanceAgentTest(unittest.TestCase):
         with patch.dict(sys.modules, {"deepseek_harness": SimpleNamespace(DeepSeekHarness=FakeHarness)}):
             result = run_harness("KNOWLEDGE", "run-1", 2, {}, {
                 "apiKey": "managed-key", "baseUrl": "https://api.deepseek.com", "model": "deepseek-chat"
-            })
+            }, "official only", "latest version")
 
         self.assertEqual([], result["proposals"])
         self.assertEqual("managed-key", calls[0]["api_key"])

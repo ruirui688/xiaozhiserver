@@ -44,11 +44,13 @@ public class MaintenanceService {
     private final HarnessMaintenanceGateway gateway;
     private final ObjectMapper objectMapper;
     private final AsyncTaskExecutor executor;
+    private final MaintenanceRunEventService eventService;
 
     public MaintenanceService(MaintenancePolicyDao policyDao, MaintenanceRunDao runDao,
             MaintenanceSnapshotService snapshotService, MaintenanceProposalService proposalService,
             MaintenanceModelResolver modelResolver, HarnessMaintenanceGateway gateway, ObjectMapper objectMapper,
-            @Qualifier("maintenanceTaskExecutor") AsyncTaskExecutor executor) {
+            @Qualifier("maintenanceTaskExecutor") AsyncTaskExecutor executor,
+            MaintenanceRunEventService eventService) {
         this.policyDao = policyDao;
         this.runDao = runDao;
         this.snapshotService = snapshotService;
@@ -57,6 +59,7 @@ public class MaintenanceService {
         this.gateway = gateway;
         this.objectMapper = objectMapper;
         this.executor = executor;
+        this.eventService = eventService;
     }
 
     public MaintenancePolicyEntity getPolicy(String resourceType, String resourceId) {
@@ -70,6 +73,7 @@ public class MaintenanceService {
         policy.setMaxProposals(8);
         policy.setMaxMonthlyRuns(60);
         policy.setModelConfigId(null);
+        policy.setCustomPrompt(null);
         policy.setEnabled(0);
         policy.setTopicsJson("[]");
         policy.setTrustedDomainsJson("[]");
@@ -94,6 +98,7 @@ public class MaintenanceService {
         policy.setWorkspaceId(workspaceId);
         policy.setMode(request.getMode());
         policy.setTopicsJson(writeJson(cleanList(request.getTopics())));
+        policy.setCustomPrompt(StringUtils.trimToNull(request.getCustomPrompt()));
         policy.setTrustedDomainsJson(writeJson(cleanDomains(request.getTrustedDomains())));
         policy.setScheduleMinutes(request.getScheduleMinutes());
         policy.setMaxProposals(request.getMaxProposals());
@@ -113,6 +118,12 @@ public class MaintenanceService {
                 .orderByDesc("created_at").last("LIMIT 50"));
     }
 
+    public MaintenanceRunEntity getRun(String runId) {
+        MaintenanceRunEntity run = runDao.selectById(runId);
+        if (run == null) throw new RenException("维护运行记录不存在");
+        return run;
+    }
+
     public List<MaintenanceProposalEntity> listProposals(String type, String id) {
         return proposalService.list(normalizeType(type), id);
     }
@@ -121,6 +132,11 @@ public class MaintenanceService {
     public MaintenanceProposalEntity reject(String id) { return proposalService.reject(id); }
 
     public MaintenanceRunEntity trigger(String resourceType, String resourceId, String triggerType) {
+        return trigger(resourceType, resourceId, triggerType, null);
+    }
+
+    public MaintenanceRunEntity trigger(String resourceType, String resourceId, String triggerType,
+            String userInstruction) {
         MaintenancePolicyEntity policy = findPolicy(resourceType, resourceId);
         if (policy == null || policy.getEnabled() == null || policy.getEnabled() != 1 || "OFF".equals(policy.getMode())) {
             throw new RenException("请先为当前资源启用自主维护策略");
@@ -132,12 +148,16 @@ public class MaintenanceService {
         run.setResourceType(policy.getResourceType());
         run.setResourceId(policy.getResourceId());
         run.setTriggerType(triggerType);
+        run.setUserInstruction("MANUAL".equals(triggerType)
+                ? StringUtils.abbreviate(StringUtils.trimToNull(userInstruction), 2000) : null);
         run.setStatus("QUEUED");
         run.setProposalCount(0);
         run.setInputChars(0);
         run.setOutputChars(0);
         run.setCreatedAt(new Date());
         runDao.insert(run);
+        eventService.record(run.getId(), "DISCOVERY", "INFO",
+                StringUtils.isBlank(run.getUserInstruction()) ? "维护任务已进入后台队列" : "已收到维护指令，任务进入后台队列");
         policy.setLastRunAt(new Date());
         policy.setNextRunAt(Date.from(Instant.now().plusSeconds(policy.getScheduleMinutes() * 60L)));
         policy.setUpdatedAt(new Date());
@@ -170,20 +190,28 @@ public class MaintenanceService {
         run.setStatus("RUNNING");
         run.setStartedAt(new Date());
         runDao.updateById(run);
+        eventService.record(run.getId(), "DISCOVERY", "INFO", "开始准备当前资源快照");
         try {
             MaintenancePolicyEntity policy = policyDao.selectById(run.getPolicyId());
             if (policy == null || policy.getEnabled() != 1) throw new RenException("维护策略已停用");
             Map<String, Object> snapshot = snapshotService.build(policy);
+            eventService.record(run.getId(), "DISCOVERY", "INFO", "资源快照已完成，维护智能体正在联网搜索并筛选候选来源");
             HarnessMaintenanceResponse response = gateway.run(new HarnessMaintenanceRequest(
-                    run.getId(), policy.getResourceType(), policy.getResourceId(), policy.getMaxProposals(), snapshot,
+                    run.getId(), policy.getResourceType(), policy.getResourceId(), policy.getMaxProposals(),
+                    policy.getCustomPrompt(), run.getUserInstruction(), snapshot,
                     modelResolver.resolve(policy.getModelConfigId())));
+            eventService.record(run.getId(), "DISCOVERY", "INFO", "模型运行完成，正在校验并保存提案");
             run.setProposalCount(proposalService.persist(policy, run, response));
             run.setInputChars(value(response.getInputChars()));
             run.setOutputChars(value(response.getOutputChars()));
             run.setStatus("SUCCEEDED");
+            eventService.record(run.getId(), "PROPOSAL", "SUCCESS",
+                    "提案生成完成", Map.of("proposalCount", run.getProposalCount(),
+                            "inputChars", run.getInputChars(), "outputChars", run.getOutputChars()));
         } catch (Exception ex) {
             run.setStatus("FAILED");
             run.setError(safeError(ex));
+            eventService.record(run.getId(), "COMPLETE", "ERROR", run.getError());
         }
         run.setFinishedAt(new Date());
         runDao.updateById(run);

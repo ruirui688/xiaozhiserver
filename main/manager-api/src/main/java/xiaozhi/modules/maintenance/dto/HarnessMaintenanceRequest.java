@@ -11,6 +11,8 @@ public class HarnessMaintenanceRequest {
     private String taskType;
     private String resourceId;
     private Integer maxProposals;
+    private String customPrompt;
+    private String userInstruction;
     private Map<String, Object> input;
     private HarnessModelConfig modelConfig;
 }

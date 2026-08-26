@@ -15,6 +15,8 @@ public class MaintenancePolicyRequest {
     private String mode;
     @Size(max = 20)
     private List<@Size(max = 120) String> topics = new ArrayList<>();
+    @Size(max = 4000)
+    private String customPrompt;
     @Size(max = 50)
     private List<@Size(max = 253) String> trustedDomains = new ArrayList<>();
     @Min(60) @Max(10080)

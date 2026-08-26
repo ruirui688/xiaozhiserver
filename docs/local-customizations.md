@@ -937,12 +937,18 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/manager-api/src/main/java/xiaozhi/modules/maintenance/
   - main/manager-api/src/main/resources/db/changelog/202608252130.sql
   - main/manager-api/src/main/resources/db/changelog/202608261600.sql
+  - main/manager-api/src/main/resources/db/changelog/202608261700.sql
+  - main/manager-api/src/main/resources/db/changelog/202608261715.sql
   - main/manager-web/src/components/maintenance/MaintenancePolicyPanel.vue
+  - main/manager-web/src/components/maintenance/MaintenanceConversationPanel.vue
   - main/maintenance-agent/
   - scripts/acr-build-push-maintenance-agent
   - deploy/production/docker-compose.yml
 是否允许被官方覆盖：否
 官方同步时的处理规则：必须保留 Manager API 对资源权限、策略、月度运行上限、提案审批和最终写入的唯一权威。Harness 只能返回字段白名单内的结构化提案；禁止数据库凭据、宿主源码挂载、Shell、编辑器、动态 Cordis 和回调写权限。知识维护按 dataset opt-in，仅超级管理员本人或超级管理员团队成员可以为官方知识库以及其有写权限的工作空间知识库配置，普通团队不得开启；web_fetch 保持关闭，自动采纳必须匹配可信域名并再次通过公网 URL/SSRF 校验，然后复用 KnowledgeSourceService 现有发布链。记忆维护按 agent opt-in、禁止联网和 ADD，所有 UPDATE/ARCHIVE/DELETE 必须人工批准并通过 MemoryService 留 revision。维护策略必须显式引用模型管理中已启用、测试通过的 DeepSeek LLM，只保存模型 ID；运行凭据只允许通过内部鉴权请求短暂进入单轮 Harness 环境，结束后清除，不得另存第二份模型密钥。维护镜像的 Dockerfile 和独立发布脚本必须默认使用项目统一的 `docker.m.daocloud.io` Python 基础镜像，不能重新回退到构建机不稳定的 Docker Hub 直连；需要时仍允许通过 `MAINTENANCE_PYTHON_BASE_IMAGE` 显式覆盖。不得把临时 Harness session 当作产品记忆，不得记录完整提示词、模型原始响应、记忆正文或密钥。
+知识提案批准后必须先保持 `APPLYING`，事务提交后立即触发连接器；只有文档抓取、切片和原子发布成功才能回写 `APPLIED`，失败必须回写 `FAILED`，不得把“创建来源”伪装成“已入库”。网页运行日志必须来自 `ai_maintenance_run_event` 中可恢复、可增量读取的脱敏里程碑，禁止直接透传容器 stdout、完整提示词、模型思维过程、网页正文或凭据。
+知识维护工作台必须保留策略级 `custom_prompt`、单次运行 `user_instruction`、对话式候选预览和 1 秒增量事件刷新。自定义提示词只属于业务质量指导，不得取消固定的安全、审批和配额合同；候选必须展示原始 URL、理由和证据，用户拒绝后可以通过下一条消息纠正搜索方向。
+过时动态来源只能通过带精确 sourceId 的 `REMOVE_SOURCE` 待审批提案淘汰；即使启用可信域名自动采纳也不得自动删除，批准后必须复用 KnowledgeSourceService 删除来源、动态文档和统计，不能直接操作知识表。
 ```
 
 ## 48. 智能体运行监控摘要
