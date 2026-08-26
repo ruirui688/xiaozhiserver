@@ -39,6 +39,9 @@
       <div class="settings-btn" @click="handleDeviceManage">
         {{ $t('home.deviceManagement') }}({{ device.deviceCount }})
       </div>
+      <div class="settings-btn" @click="handleRuntimeMonitor">
+        运行监控
+      </div>
       <div :class="['settings-btn', { 'disabled-btn': !isMemoryEnabled }]"
         @click="handleChatHistory">
         <el-tooltip effect="light" v-if="!isMemoryEnabled" :content="$t('home.enableMemory')" placement="top">
@@ -143,6 +146,9 @@ export default {
     },
     handleDeviceManage() {
       this.$router.push({ path: '/device-management', query: { agentId: this.device.agentId } });
+    },
+    handleRuntimeMonitor() {
+      this.$emit('runtime-monitor', this.device);
     },
     handleChatHistory() {
       if (!this.isMemoryEnabled) {

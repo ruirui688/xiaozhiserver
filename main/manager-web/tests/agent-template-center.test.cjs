@@ -74,4 +74,19 @@ describe('agent template center', () => {
     assert.match(preview, /不绑定 TTS 模型、音色或实时音色/);
     assert.match(home, /getAgentTemplatePreview/);
   });
+
+  test('home exposes a bounded runtime monitor instead of raw server logs', () => {
+    const root = path.resolve(__dirname, '..');
+    const home = fs.readFileSync(path.join(root, 'src/views/home.vue'), 'utf8');
+    const device = fs.readFileSync(path.join(root, 'src/components/DeviceItem.vue'), 'utf8');
+    const monitor = fs.readFileSync(path.join(root, 'src/components/home/AgentRuntimeMonitorDialog.vue'), 'utf8');
+
+    assert.match(device, /运行监控/);
+    assert.match(device, /runtime-monitor/);
+    assert.match(home, /getAgentSessions/);
+    assert.match(home, /setInterval\(\(\) =>/);
+    assert.match(monitor, /不暴露服务器原始日志/);
+    assert.match(monitor, /每 5 秒自动刷新/);
+    assert.match(monitor, /Token 和模型密钥不会进入运行监控/);
+  });
 });

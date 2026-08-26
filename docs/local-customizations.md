@@ -944,3 +944,17 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 是否允许被官方覆盖：否
 官方同步时的处理规则：必须保留 Manager API 对资源权限、策略、月度运行上限、提案审批和最终写入的唯一权威。Harness 只能返回字段白名单内的结构化提案；禁止数据库凭据、宿主源码挂载、Shell、编辑器、动态 Cordis 和回调写权限。知识维护按 dataset opt-in，仅超级管理员本人或超级管理员团队成员可以为官方知识库以及其有写权限的工作空间知识库配置，普通团队不得开启；web_fetch 保持关闭，自动采纳必须匹配可信域名并再次通过公网 URL/SSRF 校验，然后复用 KnowledgeSourceService 现有发布链。记忆维护按 agent opt-in、禁止联网和 ADD，所有 UPDATE/ARCHIVE/DELETE 必须人工批准并通过 MemoryService 留 revision。维护策略必须显式引用模型管理中已启用、测试通过的 DeepSeek LLM，只保存模型 ID；运行凭据只允许通过内部鉴权请求短暂进入单轮 Harness 环境，结束后清除，不得另存第二份模型密钥。维护镜像的 Dockerfile 和独立发布脚本必须默认使用项目统一的 `docker.m.daocloud.io` Python 基础镜像，不能重新回退到构建机不稳定的 Docker Hub 直连；需要时仍允许通过 `MAINTENANCE_PYTHON_BASE_IMAGE` 显式覆盖。不得把临时 Harness session 当作产品记忆，不得记录完整提示词、模型原始响应、记忆正文或密钥。
 ```
+
+## 48. 智能体运行监控摘要
+
+```text
+定制模块：manager-web 智能体中心运行监控
+改动原因：用户需要在后台查看智能体的近期运行情况，但不能把 Python/容器 stdout、提示词、用户正文或凭据直接透传到浏览器。
+关键文件：
+  - main/manager-web/src/components/home/AgentRuntimeMonitorDialog.vue
+  - main/manager-web/src/components/DeviceItem.vue
+  - main/manager-web/src/views/home.vue
+  - main/manager-api/.../modules/agent/controller/AgentController.java（复用现有会话查询权限链路）
+是否允许被官方覆盖：否
+官方同步时的处理规则：运行监控当前只读取已有的、按智能体权限校验的会话摘要接口，展示绑定设备数、最近连接时间、会话数量和最近 20 条会话活动；前端每 5 秒轮询一次，关闭弹窗或切换智能体时必须停止轮询并丢弃过期响应。该页面不是原始日志查看器，不得展示用户正文、完整提示词、Authorization、Token、API Key、模型密钥或容器 stdout。设备“近期活跃”只代表管理端记录的最近连接时间，不得声称设备当前在线。若未来需要 ASR/LLM/TTS/MCP 分阶段诊断，必须新增后端结构化、脱敏、限量的运行事件接口，并继续沿用现有资源所有权和权限校验，不能直接开放文件或容器日志。
+```

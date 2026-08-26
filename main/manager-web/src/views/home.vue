@@ -45,7 +45,7 @@
             <DeviceItem v-for="item in devices" :key="item.agentId || item.id" :device="item" :feature-status="featureStatus"
               :can-write="canWrite"
               @configure="goToRoleConfig" @deviceManage="handleDeviceManage" @delete="handleDeleteAgent" 
-              @chat-history="handleShowChatHistory" />
+              @chat-history="handleShowChatHistory" @runtime-monitor="handleRuntimeMonitor" />
           </template>
         </div>
       </div>
@@ -61,6 +61,9 @@
     </el-footer>
     <chat-history-dialog :visible.sync="showChatHistory" :agent-id="currentAgentId" :agent-name="currentAgentName"
       @history-changed="handleChatHistoryChanged" />
+    <AgentRuntimeMonitorDialog :visible.sync="runtimeMonitorVisible" :agent="runtimeAgent"
+      :sessions="runtimeSessions" :total-sessions="runtimeTotalSessions" :loading="runtimeLoading"
+      :refreshing="runtimeRefreshing" :refreshed-at="runtimeRefreshedAt" @refresh="refreshRuntimeMonitor" />
   </div>
 
 </template>
@@ -70,6 +73,7 @@ import Api from '@/apis/api';
 import AddWisdomBodyDialog from '@/components/AddWisdomBodyDialog.vue';
 import AgentTemplateCenter from '@/components/home/AgentTemplateCenter.vue';
 import AgentTemplatePreviewDialog from '@/components/home/AgentTemplatePreviewDialog.vue';
+import AgentRuntimeMonitorDialog from '@/components/home/AgentRuntimeMonitorDialog.vue';
 import ChatHistoryDialog from '@/components/ChatHistoryDialog.vue';
 import DeviceItem from '@/components/DeviceItem.vue';
 import HeaderBar from '@/components/HeaderBar.vue';
@@ -78,7 +82,7 @@ import featureManager from '@/utils/featureManager';
 
 export default {
   name: 'HomePage',
-  components: { DeviceItem, AddWisdomBodyDialog, AgentTemplateCenter, AgentTemplatePreviewDialog, HeaderBar, VersionFooter, ChatHistoryDialog },
+  components: { DeviceItem, AddWisdomBodyDialog, AgentTemplateCenter, AgentTemplatePreviewDialog, AgentRuntimeMonitorDialog, HeaderBar, VersionFooter, ChatHistoryDialog },
   data() {
     return {
       addDeviceDialogVisible: false,
@@ -97,6 +101,15 @@ export default {
       templatePreviewVisible: false,
       templatePreviewLoading: false,
       templatePreview: null,
+      runtimeMonitorVisible: false,
+      runtimeAgent: null,
+      runtimeSessions: [],
+      runtimeTotalSessions: 0,
+      runtimeLoading: false,
+      runtimeRefreshing: false,
+      runtimeRefreshedAt: '',
+      runtimePollTimer: null,
+      runtimeRequestId: 0,
       canWrite: localStorage.getItem('currentWorkspaceCanWrite') !== 'false',
       workspaceQuota: null,
       // 功能状态
@@ -114,6 +127,14 @@ export default {
     this.fetchAgentList();
     this.fetchAgentTemplates();
     await this.loadFeatureStatus();
+  },
+  beforeDestroy() {
+    this.stopRuntimePolling();
+  },
+  watch: {
+    runtimeMonitorVisible(value) {
+      if (!value) this.stopRuntimePolling();
+    }
   },
 
   computed: {
@@ -192,6 +213,43 @@ export default {
           this.$message.error((error && error.msg) || this.$t('home.templateCreateFailed'));
         });
       }).catch(() => {});
+    },
+    handleRuntimeMonitor(agent) {
+      this.stopRuntimePolling();
+      this.runtimeAgent = agent;
+      this.runtimeMonitorVisible = true;
+      this.refreshRuntimeMonitor();
+      this.runtimePollTimer = setInterval(() => {
+        if (this.runtimeMonitorVisible) this.refreshRuntimeMonitor(true);
+      }, 5000);
+    },
+    stopRuntimePolling() {
+      if (this.runtimePollTimer) {
+        clearInterval(this.runtimePollTimer);
+        this.runtimePollTimer = null;
+      }
+      this.runtimeRequestId += 1;
+    },
+    refreshRuntimeMonitor(background = false) {
+      if (!this.runtimeAgent || this.runtimeLoading || this.runtimeRefreshing) return;
+      const requestId = ++this.runtimeRequestId;
+      const agentId = this.runtimeAgent.agentId || this.runtimeAgent.id;
+      if (background) this.runtimeRefreshing = true;
+      else this.runtimeLoading = true;
+      Api.agent.getAgentSessions(agentId, { page: 1, limit: 20 }, ({ data }) => {
+        if (requestId !== this.runtimeRequestId) return;
+        const page = data && data.code === 0 ? data.data : null;
+        this.runtimeSessions = page && Array.isArray(page.list) ? page.list : [];
+        this.runtimeTotalSessions = page && Number(page.total) || this.runtimeSessions.length;
+        this.runtimeLoading = false;
+        this.runtimeRefreshing = false;
+        this.runtimeRefreshedAt = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+        this.runtimeAgent = this.devices.find(item => (item.agentId || item.id) === agentId) || this.runtimeAgent;
+      }, () => {
+        if (requestId !== this.runtimeRequestId) return;
+        this.runtimeLoading = false;
+        this.runtimeRefreshing = false;
+      });
     },
     // 加载功能状态
     async loadFeatureStatus() {
