@@ -10,6 +10,7 @@ from core.handle.textHandler.serverMessageHandler import ServerTextMessageHandle
 from core.handle.textHandler.pingMessageHandler import PingMessageHandler
 from core.handle.textHandler.externalTtsMessageHandler import ExternalTTSTextMessageHandler
 from core.handle.textHandler.faceRecognitionMessageHandler import FaceRecognitionTextMessageHandler
+from core.handle.textHandler.faceProfilesMessageHandler import FaceProfilesTextMessageHandler
 from core.handle.textHandler.ttsAckMessageHandler import TTSAckTextMessageHandler
 from core.handle.textHandler.speechRouteRequestMessageHandler import SpeechRouteRequestTextMessageHandler
 from core.handle.textHandler.receptionMessageHandler import ReceptionTextMessageHandler
@@ -38,6 +39,7 @@ class TextMessageHandlerRegistry:
             TTSAckTextMessageHandler(),
             SpeechRouteRequestTextMessageHandler(),
             FaceRecognitionTextMessageHandler(),
+            FaceProfilesTextMessageHandler(),
             ReceptionTextMessageHandler(),
         ]
 

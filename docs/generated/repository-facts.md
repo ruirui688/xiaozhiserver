@@ -32,9 +32,9 @@ source_paths:
 
 | 模块 | 源码文件 | 测试文件 | 统计口径 |
 | --- | ---: | ---: | --- |
-| xiaozhi-server | 278 | 79 | 源码为非 `tests/` 的 `*.py`；测试为 `test_*.py` |
-| manager-api | 635 | 91 | `src/main/**/*.java`；`src/test/**/*Test.java` |
-| manager-web | 139 | 23 | `src/` 下 `*.vue/*.js/*.ts/*.mjs`；`*.spec.*/*.test.*` |
+| xiaozhi-server | 280 | 80 | 源码为非 `tests/` 的 `*.py`；测试为 `test_*.py` |
+| manager-api | 647 | 94 | `src/main/**/*.java`；`src/test/**/*Test.java` |
+| manager-web | 137 | 22 | `src/` 下 `*.vue/*.js/*.ts/*.mjs`；`*.spec.*/*.test.*` |
 | manager-mobile | 85 | 5 | `src/` 下 `*.vue/*.js/*.ts/*.mjs`；`*.spec.*/*.test.*` |
 
 统计排除依赖和构建产物，不表示代码行数或测试覆盖率。
@@ -57,9 +57,9 @@ source_paths:
 
 | 事实 | 数量 |
 | --- | ---: |
-| Liquibase SQL 文件 | 200 |
-| master.yaml changeSet | 200 |
-| master.yaml 唯一 SQL 登记 | 200 |
+| Liquibase SQL 文件 | 201 |
+| master.yaml changeSet | 201 |
+| master.yaml 唯一 SQL 登记 | 201 |
 
 数量相等不代表迁移内容正确；`scripts/docs-check` 还会检查遗漏登记、重复登记和失效路径。
 

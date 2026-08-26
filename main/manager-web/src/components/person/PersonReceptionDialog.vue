@@ -53,10 +53,17 @@
       <el-table-column prop="startAt" label="开始" min-width="150" />
       <el-table-column prop="endAt" label="结束" min-width="150" />
       <el-table-column prop="partySize" label="人数" width="70" />
-      <el-table-column prop="status" label="状态" width="100" />
+      <el-table-column label="状态" width="100">
+        <template slot-scope="scope">{{ appointmentStatusLabel(scope.row.status) }}</template>
+      </el-table-column>
       <el-table-column prop="seatRequest" label="座位需求" min-width="120" />
-      <el-table-column v-if="canWrite" label="操作" width="70">
+      <el-table-column v-if="canWrite" label="操作" min-width="230">
         <template slot-scope="scope">
+          <el-button v-if="scope.row.status === 'PENDING'" type="text" @click="updateAppointmentStatus(scope.row, 'CONFIRMED')">确认</el-button>
+          <el-button v-if="scope.row.status === 'CONFIRMED'" type="text" @click="updateAppointmentStatus(scope.row, 'ARRIVED')">到访</el-button>
+          <el-button v-if="scope.row.status === 'CONFIRMED'" type="text" @click="updateAppointmentStatus(scope.row, 'NO_SHOW')">爽约</el-button>
+          <el-button v-if="scope.row.status === 'ARRIVED'" type="text" @click="updateAppointmentStatus(scope.row, 'COMPLETED')">完成</el-button>
+          <el-button v-if="['PENDING', 'CONFIRMED'].includes(scope.row.status)" type="text" @click="updateAppointmentStatus(scope.row, 'CANCELLED')">取消</el-button>
           <el-button type="text" class="danger" @click="removeAppointment(scope.row)">删除</el-button>
         </template>
       </el-table-column>
@@ -130,7 +137,7 @@ export default {
         startAt: "",
         endAt: "",
         partySize: 1,
-        status: "CONFIRMED",
+        status: "PENDING",
         seatRequest: "",
         notes: ""
       }
@@ -202,12 +209,40 @@ export default {
         this.savingAppointment = false;
         if (data && data.code === 0) {
           this.$message.success("预约已创建");
+          this.appointmentForm = {
+            startAt: "", endAt: "", partySize: 1, status: "PENDING", seatRequest: "", notes: ""
+          };
           this.loadAppointments();
         } else this.$message.error((data && data.msg) || "创建预约失败");
       }, () => {
         this.savingAppointment = false;
         this.$message.error("创建预约失败");
       });
+    },
+    updateAppointmentStatus(item, status) {
+      Api.person.updateAppointment(item.id, {
+        startAt: item.startAt,
+        endAt: item.endAt,
+        partySize: item.partySize,
+        status,
+        seatRequest: item.seatRequest || "",
+        notes: item.notes || ""
+      }, ({ data }) => {
+        if (data && data.code === 0) {
+          this.$message.success("预约状态已更新");
+          this.loadAppointments();
+        } else this.$message.error((data && data.msg) || "更新预约失败");
+      }, () => this.$message.error("更新预约失败"));
+    },
+    appointmentStatusLabel(status) {
+      return {
+        PENDING: "待确认",
+        CONFIRMED: "已确认",
+        ARRIVED: "已到访",
+        CANCELLED: "已取消",
+        COMPLETED: "已完成",
+        NO_SHOW: "未到访"
+      }[status] || status || "-";
     },
     removeAppointment(item) {
       Api.person.removeAppointment(item.id, ({ data }) => {

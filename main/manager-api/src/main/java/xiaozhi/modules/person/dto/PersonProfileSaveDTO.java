@@ -37,5 +37,9 @@ public class PersonProfileSaveDTO {
     private Integer status;
 
     @Size(max = 50, message = "单个人物最多下发到50台设备")
+    @Deprecated
     private List<String> deviceIds;
+
+    @Size(max = 50, message = "单个人物最多绑定50个智能体")
+    private List<String> agentIds;
 }

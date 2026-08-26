@@ -38,7 +38,8 @@ X2 动作与屏幕执行。定位、地图、规划、避障和真实到达结�
 
 | 表 | 权威事实 |
 | --- | --- |
-| `ai_person_profile` | 人物身份、人脸资源和设备绑定 |
+| `ai_person_profile` / `ai_person_face_asset` | 人物身份和不可变人脸资源版本 |
+| `ai_person_agent_binding` | 人物与智能体的期望绑定和已发布识别快照 |
 | `ai_reception_customer_profile` | 新客/回访/长期/VIP、公司、爱好、餐饮/座位偏好、敏感需求同意范围、到访统计 |
 | `ai_reception_appointment` | 预约时间窗、人数、座位需求和 `PENDING/CONFIRMED/ARRIVED/...` 状态 |
 | `ai_reception_visit_event` | 设备事件幂等、Group、scene epoch、选中人物、人数和选择理由 |
@@ -53,7 +54,10 @@ X2 动作与屏幕执行。定位、地图、规划、避障和真实到达结�
 - 第二次有效到访后为 `RETURNING`；
 - 到访达到 5 次且首末跨度至少 30 天时自动成为 `LONG_TERM`；
 - `VIP` 只由授权运营人员设置，不被自动规则覆盖；
-- 当前时间落入 `CONFIRMED` 预约窗口时，接待上下文返回预约，幂等到访事件落库后改为 `ARRIVED`。
+- 预约状态固定按 `PENDING -> CONFIRMED -> ARRIVED -> COMPLETED` 流转，允许从待确认或已确认取消，
+  已确认可标记 `NO_SHOW`；终态不能回退。
+- 只有当前时间落入 `CONFIRMED` 预约窗口时，接待上下文才返回预约，幂等到访事件落库后改为 `ARRIVED`。
+- 同一人物的 `PENDING/CONFIRMED/ARRIVED` 时间窗不能重叠；新预约默认 `PENDING`，不能直接创建终态。
 
 同一 `device_id + event_id` 只累计一次。事件审计写入失败不会在已发送 `reception/action` 后再返回 error，
 避免设备执行本地回退形成第二轮欢迎。
@@ -80,8 +84,8 @@ POST /config/reception/context
 POST /config/reception/events
 ```
 
-所有人物、设备、预约和配置必须属于同一 Workspace。内部 API 使用已认证连接的设备 ID，设备消息中的
-MAC、客户阶段和预约声明不作为身份来源。
+所有人物、智能体、设备、预约和配置必须属于同一 Workspace。内部 API 使用已认证连接的设备 ID，并按
+设备当前智能体的已发布人物绑定授权；设备消息中的 MAC、客户阶段和预约声明不作为身份来源。
 
 ## `reception_v1`
 

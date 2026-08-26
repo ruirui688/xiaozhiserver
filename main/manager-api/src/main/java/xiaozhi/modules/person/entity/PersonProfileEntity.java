@@ -25,6 +25,7 @@ public class PersonProfileEntity {
     private String faceContentType;
     private String faceSha256;
     private Long faceVersion;
+    private String currentFaceAssetId;
     private String recognitionAction;
     private String greetingText;
     private Integer status;

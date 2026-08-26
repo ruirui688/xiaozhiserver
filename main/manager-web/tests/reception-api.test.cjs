@@ -27,3 +27,12 @@ test('person resource page exposes reception profile appointment and workspace s
   assert.ok(personView.includes('接待与预约'));
   assert.ok(personView.includes('接待配置'));
 });
+
+test('person face resources bind agents and require explicit publication', () => {
+  assert.ok(apiSource.includes('/resource/persons/agents'));
+  assert.ok(apiSource.includes('/publish'));
+  assert.ok(personView.includes('form.agentIds'));
+  assert.ok(personView.includes('上传不会下发'));
+  assert.ok(personView.includes('发布变更'));
+  assert.ok(!personView.includes('form.deviceIds'));
+});

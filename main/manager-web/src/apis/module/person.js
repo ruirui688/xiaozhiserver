@@ -30,8 +30,8 @@ export default {
     request('GET', `/resource/persons${query}`, null, callback, failCallback);
   },
 
-  devices(callback, failCallback) {
-    request('GET', '/resource/persons/devices', null, callback, failCallback);
+  agents(callback, failCallback) {
+    request('GET', '/resource/persons/agents', null, callback, failCallback);
   },
 
   create(payload, callback, failCallback) {
@@ -57,6 +57,10 @@ export default {
       failCallback,
       { headers: {} }
     );
+  },
+
+  publish(id, callback, failCallback) {
+    request('POST', `/resource/persons/${encodeURIComponent(id)}/publish`, null, callback, failCallback);
   },
 
   loadFace(id, callback, failCallback) {

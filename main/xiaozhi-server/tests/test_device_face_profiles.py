@@ -109,3 +109,72 @@ def test_recognition_uses_authenticated_connection_device_id(monkeypatch):
 
 def test_face_recognition_handler_is_registered():
     assert "face_recognition" in TextMessageHandlerRegistry().get_supported_types()
+
+
+def test_v2_matching_release_does_not_download_images(monkeypatch):
+    async def sync(_payload):
+        return {"agentId": "agent-a", "releaseVersion": 9, "unchanged": True}
+
+    async def unexpected_download(*_args):
+        raise AssertionError("matching version must not download images")
+
+    monkeypatch.setattr(device_face_profiles, "sync_agent_face_profiles", sync)
+    monkeypatch.setattr(device_face_profiles, "download_published_face_profile", unexpected_download)
+    conn = _connection()
+    conn.features = {"face_profiles": {"version": 2}}
+
+    asyncio.run(device_face_profiles.handle_face_profile_message(conn, {
+        "type": "face_profiles",
+        "event": "sync_request",
+        "agentId": "agent-a",
+        "releaseVersion": 9,
+        "profiles": [{"personId": "person1", "faceVersion": 2, "faceSha256": "a" * 64}],
+    }))
+
+    assert [item["event"] for item in conn.websocket.messages] == ["unchanged"]
+
+
+def test_v2_sends_only_prepared_delta_and_atomic_completion(monkeypatch):
+    async def sync(payload):
+        assert payload["macAddress"] == "AA:BB:CC:DD:EE:FF"
+        return {
+            "agentId": "agent-a",
+            "releaseVersion": 10,
+            "unchanged": False,
+            "upserts": [{
+                "personId": "person2",
+                "assetId": "asset2",
+                "name": "访客二",
+                "faceVersion": 3,
+                "faceSha256": "b" * 64,
+                "contentType": "image/jpeg",
+                "recognitionAction": "NONE",
+            }],
+            "deletes": ["person-old"],
+        }
+
+    async def image(_mac, person_id, asset_id):
+        assert (person_id, asset_id) == ("person2", "asset2")
+        return b"new-jpeg"
+
+    monkeypatch.setattr(device_face_profiles, "sync_agent_face_profiles", sync)
+    monkeypatch.setattr(device_face_profiles, "download_published_face_profile", image)
+    conn = _connection()
+    conn.features = {"face_profiles_v2": True}
+
+    asyncio.run(device_face_profiles.handle_face_profile_message(conn, {
+        "type": "face_profiles",
+        "event": "sync_request",
+        "agentId": "agent-a",
+        "releaseVersion": 9,
+        "profiles": [{"personId": "person-old", "faceVersion": 1, "faceSha256": "c" * 64}],
+    }))
+
+    assert [item["event"] for item in conn.websocket.messages] == ["sync_plan", "upsert", "complete"]
+    assert conn.websocket.messages[0]["deletes"] == ["person-old"]
+    assert conn.websocket.messages[-1]["releaseVersion"] == 10
+    assert "imageBase64" in conn.websocket.messages[1]
+
+
+def test_face_profile_v2_handler_is_registered():
+    assert "face_profiles" in TextMessageHandlerRegistry().get_supported_types()

@@ -854,18 +854,19 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 ## 43. 资源中心人物档案与设备本地人脸识别
 
 ```text
-定制模块：manager-web 资源中心、manager-api 人物档案与设备绑定、xiaozhi-server 人脸资源同步协议
-改动原因：运营人员需要在统一资源中心维护知识库、机器人可识别人物和插件；带本地算力的设备需要按授权接收归一化人脸照片，在本地识别后上报稳定人物 ID 并获取确定性动作，同时为未来服务端识别保留明确但默认关闭的能力接口。
+定制模块：manager-web 资源中心、manager-api 人物不可变照片与智能体发布、xiaozhi-server 人脸库增量协议
+改动原因：运营人员需要独立维护人物照片，先绑定智能体、确认后再显式发布，不能在上传时直接选择设备或隐式生效；带本地算力的设备必须持久化人脸库，按智能体发布版本只同步 upsert/delete 差异，在本地识别后上报稳定人物 ID 并获取确定性动作，同时为未来服务端识别保留明确但默认关闭的能力接口。
 关键文件：
   - main/manager-web/src/components/resource/ResourceCenterNav.vue
   - main/manager-web/src/views/PersonProfileManagement.vue
   - main/manager-web/src/views/FunctionPluginManagement.vue
   - main/manager-api/src/main/java/xiaozhi/modules/person/
   - main/manager-api/src/main/resources/db/changelog/202608041730.sql
+  - main/manager-api/src/main/resources/db/changelog/202608261130.sql
   - main/xiaozhi-server/core/device_face_profiles.py
   - docs/architecture/person-resource-and-face-sync.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：必须保留人物档案与后台登录用户的概念隔离、workspace 所有权、显式人物-设备绑定、/config 服务密钥之后的 per-device 再鉴权和设备识别事件幂等。设备身份必须来自当前已认证 WebSocket，不得信任消息体 macAddress；旧设备只有声明 features.face_profiles 才能收到图片。照片上传必须继续校验扩展名/MIME/实际图片/大小/像素和路径边界，只保存归一化运行文件，不把照片、特征向量或事件样本带入角色模板。服务端识别 capability 默认必须返回不支持，预留 POST 不读取或保存图片；正式启用前必须单独完成模型、加密、留存、限流、评测与合规设计。插件继续使用 Function Plugin 唯一模型，知识库继续使用现有 dataset/document 链路，资源中心不能复制两套事实。资源中心次级导航已经表达当前位置时，知识库、人物与人脸和插件正文不得再重复同名页面标题；只保留任务说明、状态和操作。人物 UI 按建档、上传照片、选择设备和动作组织。设备在线、固件支持、人脸同步和最近识别状态在 API 提供真实事实前不得由前端猜测。
+官方同步时的处理规则：必须保留人物档案与后台登录用户的概念隔离、workspace 所有权、不可变照片资产、人物-智能体期望/发布双状态、智能体单调发布版本、/config 服务密钥之后基于设备当前 agent_id 的再鉴权和设备识别事件幂等。设备身份必须来自当前已认证 WebSocket，不得信任消息体 macAddress 或缓存 agentId；上传只创建草稿资源，显式发布才改变运行事实。v2 设备必须持久化本地人脸库，版本相同返回 unchanged 且不读图片，版本变化只传 upsert/delete，收到 complete 后才能原子推进本地版本；在线发布只发送 sync_available 提示。只声明 features.face_profiles=true 的 v1 设备可保留一次连接内全量兼容，但不能作为新协议。照片上传必须继续校验扩展名/MIME/实际图片/大小/像素和路径边界，只保存归一化运行文件，不把照片、特征向量或事件样本带入角色模板。服务端识别 capability 默认必须返回不支持，预留 POST 不读取或保存图片；正式启用前必须单独完成模型、加密、留存、限流、评测与合规设计。人物 UI 按建档、上传照片、绑定智能体和显式发布组织；设备在线、固件支持、实际落盘版本和最近识别状态在 API 提供真实事实前不得由前端猜测。
 ```
 
 ## 44. 联网搜索单次检索提示工程

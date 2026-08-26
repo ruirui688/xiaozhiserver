@@ -253,6 +253,27 @@ async def download_device_face_profile(mac_address: str, person_id: str) -> byte
     )
 
 
+async def sync_agent_face_profiles(payload: Dict) -> Optional[Dict]:
+    """协商当前设备智能体的人脸库发布版本和增量。"""
+    if not ManageApiClient._instance:
+        return None
+    return await ManageApiClient._instance._execute_async_request(
+        "POST", "/config/device-face-profiles/sync", json=payload
+    )
+
+
+async def download_published_face_profile(
+    mac_address: str, person_id: str, asset_id: str
+) -> bytes:
+    """下载经过当前设备智能体和不可变资源版本双重校验的人脸图片。"""
+    if not ManageApiClient._instance:
+        return b""
+    return await ManageApiClient._instance._async_request_bytes(
+        "GET",
+        f"/config/device-face-profiles/{mac_address}/{person_id}/{asset_id}/image",
+    )
+
+
 async def report_device_face_recognition(payload: Dict) -> Optional[Dict]:
     """上报设备本地识别结果；payload 不包含照片或生物特征。"""
     if not ManageApiClient._instance:

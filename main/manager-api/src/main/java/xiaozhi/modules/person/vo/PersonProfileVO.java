@@ -26,6 +26,10 @@ public class PersonProfileVO {
     private Integer status;
     private List<String> deviceIds;
     private List<String> deviceNames;
+    private List<String> agentIds;
+    private List<String> agentNames;
+    private List<String> publishedAgentIds;
+    private boolean unpublishedChanges;
     private Date createDate;
     private Date updateDate;
 }

@@ -1,110 +1,217 @@
 ---
-status: supporting
+status: canonical
 owner: manager-api
-last_verified: 2026-08-04
+last_verified: 2026-08-26
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/person
+  - main/manager-api/src/main/resources/db/changelog/202608261130.sql
   - main/xiaozhi-server/core/device_face_profiles.py
   - main/manager-web/src/views/PersonProfileManagement.vue
 ---
 
-# 人物资源与设备人脸同步
+# 人物资源、智能体人脸库与设备增量同步
 
-资源中心中的“人物与人脸”指机器人可识别的业务人物档案，不是管理后台登录账号。知识库仍使用原有数据集和文档链路，插件仍使用 Function Plugin 模型；资源中心只统一入口和交互，不复制这两类事实。资源中心顶部只保留知识库、人物与人脸、插件三项紧凑次级导航，各页面自行承担标题和任务说明，不能再重复展示 `RESOURCE CENTER`、资源中心标题或相同描述。
+资源中心中的人物是工作空间业务资源，不是后台登录账号。人物资料、照片资源、智能体发布和设备本地缓存
+是四层独立事实：上传照片不等于发布，绑定智能体不等于选择设备，设备连接不等于重新下载完整人脸库。
 
 ## 数据边界
 
+| 表/路径 | 权威事实 |
+| --- | --- |
+| `ai_person_profile` | 人物当前管理草稿、基础资料和当前照片资源指针 |
+| `ai_person_face_asset` | 每次上传生成的不可变归一化 JPEG 版本 |
+| `ai_person_agent_binding` | 人物与智能体的期望绑定、最近发布快照及识别动作 |
+| `ai_agent_face_release` | 每个智能体单调递增的人脸库发布版本 |
+| `ai_person_recognition_event` | 设备本地识别事件审计 |
+| `/uploadfile/person-faces/` | 归一化图片运行文件，不进入 Git |
+
+`ai_person_device_binding` 是 v1 历史兼容表。迁移会把其设备的当前 `agent_id` 合并成
+`ai_person_agent_binding`，新管理 API、v2 同步和接待授权不再写入或依赖人物—设备直绑关系。
+
+照片上传同时校验扩展名、MIME、大小、实际图片内容和像素数量，再将最长边限制为 640 像素并转为 JPEG。
+数据库和 API 不保存或返回服务端人脸特征向量。每次上传创建新资源文件和新资产行；旧已发布资产不能被
+覆盖或立即删除，因为其他智能体可能仍在引用它。
+
+## 管理与发布流程
+
 ```text
-ai_person_profile              工作空间人物资料与归一化照片元数据
-ai_person_device_binding       人物照片允许下发到哪些设备
-ai_person_recognition_event    设备本地识别事件审计
-/uploadfile/person-faces/      生产容器内归一化 JPEG 文件（运行数据，不进入 Git）
+创建/编辑人物
+  -> 选择智能体，只更新 desired_active
+  -> 上传照片，创建不可变 current_face_asset 草稿
+  -> 页面显示“有未发布变更”
+  -> 用户显式点击发布
+  -> ai_person_agent_binding 写入发布快照
+  -> 受影响智能体 ai_agent_face_release.release_version + 1
+  -> 在线 v2 设备只收到 sync_available 提示
 ```
 
-人物档案、目标设备和识别事件必须属于同一工作空间。OWNER/ADMIN 可以修改，MEMBER 只读。照片上传同时校验扩展名、MIME、大小、实际图片内容和像素数量，再缩放到最长边 640 像素并转为 JPEG。数据库和接口不保存或返回服务端人脸特征向量。
+发布快照包含人物名称、分组、照片资产版本、识别动作和播报文本。人物后续编辑或上传新照片不会改变正在
+运行的设备事实；再次显式发布后才生效。解除智能体绑定、停用人物或删除当前照片也先形成待发布变更，
+发布后设备才收到删除差异。删除整个人物是例外：服务端会递增所有已发布智能体版本，使设备能够清理缓存。
 
-人物资料与照片是两个连续保存步骤，设备下发绑定可以为空；未选择设备只影响 `ai_person_device_binding`，不得跳过或删除照片。生产通过 `PERSON_FACE_STORAGE_ROOT=/uploadfile/person-faces` 写入持久化挂载，manager-api 启动时会检查目录可创建且可写，避免资料保存成功后才暴露照片目录错误。照片上传失败时管理端保留当前人物 ID 和本地预览，后续保存只重试同一人物，不能重复创建档案。
+## v2 设备本地持久化协议
 
-## 当前运行链路
+### 能力声明
 
-```text
-设备 hello.features.face_profiles=true
-  -> xiaozhi-server 等待设备绑定完成
-  -> GET /config/device-face-profiles/{macAddress}
-  -> manager-api 按 device.workspace_id + 显式绑定过滤人物
-  -> xiaozhi-server 发送 face_profiles/manifest
-  -> 逐条发送 face_profiles/upsert（含归一化图片 Base64）
-  -> 发送 face_profiles/complete
+设备 Hello 推荐声明：
 
-设备本地识别成功
-  -> 当前已认证 WebSocket 发送 face_recognition
-  -> xiaozhi-server 使用连接中的 device_id，上报人物 ID、置信度和事件 ID
-  -> manager-api 再次校验设备、工作空间和人物绑定
-  -> 幂等记录事件并返回 NONE 或 SPEAK_TEXT 动作
-  -> xiaozhi-server 把 face_recognition/action 返回设备
+```json
+{"features":{"face_profiles":{"version":2}}}
 ```
 
-设备上报消息中的 `macAddress` 不作为身份来源。旧设备没有声明 `face_profiles` 时不发送清单，也不接受识别事件。下发单张图片、单设备总字节数和人物数量均有界，避免大清单占满 WebSocket。
-
-设备协议示例：
+兼容别名 `face_profiles_v2=true`。服务器完成设备绑定和智能体配置加载后只发送同步就绪消息，不下发图片：
 
 ```json
 {
-  "type": "face_recognition",
-  "eventId": "camera-boot-7-event-23",
-  "personId": "人物档案ID",
-  "confidence": 0.92,
-  "capturedAt": "2026-08-04T17:30:00.000+08:00"
+  "type":"face_profiles",
+  "event":"sync_ready",
+  "protocolVersion":2,
+  "agentId":"agent-a"
 }
 ```
 
-服务端返回：
+### 本地持久化事实
+
+设备应在 Flash 或本地文件系统中按智能体保存：
+
+```text
+agentId
+releaseVersion
+personId -> faceVersion + faceSha256 + 本地图片路径 + 展示元数据
+```
+
+设备重连不得清空人脸库，也不得因为收到 `sync_ready` 就重新下载图片。设备切换智能体时可以复用该智能体
+已有缓存；存储不足时可按最近使用时间清理其他智能体缓存，但不能把旧智能体版本冒充为当前版本。
+
+### 版本协商
+
+设备收到 `sync_ready` 或 `sync_available` 后发送本地事实：
 
 ```json
 {
-  "type": "face_recognition",
-  "event": "action",
-  "eventId": "camera-boot-7-event-23",
-  "personId": "人物档案ID",
-  "actionType": "SPEAK_TEXT",
-  "text": "欢迎回来，需要我帮你做什么？",
-  "duplicate": false
+  "type":"face_profiles",
+  "event":"sync_request",
+  "protocolVersion":2,
+  "agentId":"agent-a",
+  "releaseVersion":12,
+  "profiles":[
+    {"personId":"person-1","faceVersion":3,"faceSha256":"64位SHA-256"}
+  ]
 }
 ```
 
-动作表示服务器对本次事件的确定性指令。当前只支持 `NONE` 和 `SPEAK_TEXT`；设备可以本地播报，也可以按固件约定把文字提交到现有原文 TTS 链路。后续插件、通知或自动化动作必须在服务端建立白名单执行器，不能把任意 URL 或脚本直接下发给设备。
+消息中的 `agentId` 只描述设备缓存，不能作为授权身份。xiaozhi-server 使用已认证连接中的 `device_id`，
+manager-api 再从 `ai_device.agent_id` 得到当前权威智能体。
+
+版本相同返回：
+
+```json
+{
+  "type":"face_profiles",
+  "event":"unchanged",
+  "protocolVersion":2,
+  "agentId":"agent-a",
+  "releaseVersion":12
+}
+```
+
+此路径不读取图片文件，也不传完整清单。
+
+版本不同先返回差异计划：
+
+```json
+{
+  "type":"face_profiles",
+  "event":"sync_plan",
+  "protocolVersion":2,
+  "agentId":"agent-a",
+  "releaseVersion":13,
+  "upserts":[
+    {
+      "personId":"person-2",
+      "name":"访客二",
+      "faceVersion":4,
+      "faceSha256":"64位SHA-256",
+      "contentType":"image/jpeg",
+      "recognitionAction":"NONE"
+    }
+  ],
+  "deletes":["person-3"]
+}
+```
+
+服务器只为 `upserts` 发送图片：
+
+```json
+{
+  "type":"face_profiles",
+  "event":"upsert",
+  "protocolVersion":2,
+  "personId":"person-2",
+  "assetId":"asset-4",
+  "faceVersion":4,
+  "faceSha256":"64位SHA-256",
+  "imageBase64":"..."
+}
+```
+
+全部图片准备成功后才会发送计划和内容，最后发送：
+
+```json
+{
+  "type":"face_profiles",
+  "event":"complete",
+  "protocolVersion":2,
+  "agentId":"agent-a",
+  "releaseVersion":13,
+  "upsertCount":1,
+  "deleteCount":1
+}
+```
+
+设备必须先写临时文件并验证 SHA-256，在收到 `complete` 后原子应用 upsert/delete，最后持久化
+`releaseVersion=13`。断线、校验失败或 `sync_failed` 时不得推进本地版本，也不得提前删除旧文件。应用成功可回报：
+
+```json
+{"type":"face_profiles","event":"applied","releaseVersion":13}
+```
+
+### 在线发布提示
+
+显式发布后，manager-api 通过受共享密钥保护的内部 HTTP 端点通知 xiaozhi-server。在线 v2 设备收到：
+
+```json
+{"type":"face_profiles","event":"sync_available","protocolVersion":2,"agentId":"agent-a"}
+```
+
+它只是版本检查提示，不包含照片。设备随后发 `sync_request`；离线设备下次连接时完成同样协商。
+
+## v1 兼容边界
+
+只声明 `face_profiles=true` 的旧设备仍会在一次 WebSocket 连接中收到 manifest、全量 upsert 和 complete。
+这是固件迁移兼容路径，不是新设备缓存协议。新固件必须使用 v2，避免每次连接重复传输全部图片。
+
+## 识别与接待授权
+
+设备本地识别成功后仍上报稳定 `personId`、事件 ID 和置信度，不上传识别图片。服务端按以下事实授权：
+
+```text
+已认证 WebSocket device_id
+  -> ai_device.agent_id
+  -> ai_person_agent_binding.published_active=1
+```
+
+单人识别动作读取已发布快照，未发布的欢迎语不会提前生效。`reception_v1` 查询和到访事件使用同一智能体
+发布授权，不再要求人物直接绑定具体设备。人物、智能体、设备和接待数据仍必须属于同一工作空间。
 
 ## 服务端识别预留
 
-`GET /resource/person-recognition/capability` 固定返回 `supported=false` 和 `DEVICE_LOCAL_ONLY`。`POST /resource/person-recognition/server` 是兼容未来客户端的能力探测入口，当前只接受 JSON 设备标识并拒绝 multipart 图片请求，不读取、不保存图片，也不调用任何人脸模型。
-
-未来启用服务端识别前必须另行完成：
-
-- 明确的功能开关、模型供应器和资源预算；
-- 生物特征处理告知、保存周期与删除流程；
-- 图片上传速率限制、MIME/路径检查和工作空间隔离；
-- 特征加密、日志脱敏、阈值评测和误识别处理；
-- 真实模型测试以及设备本地/服务端模式的明确切换，禁止静默双重识别。
-
-## 管理端任务边界
-
-人物页面按“新增人物 -> 上传正面照片 -> 选择下发设备和识别后动作”组织，不用大幅技术架构说明代替操作入口。列表优先展示人物、人脸状态、设备数量、动作和启用状态；“设备本地识别”和“服务端识别未启用”只作为紧凑状态说明。
-
-人物设备选择接口返回设备别名、MAC、硬件型号、固件版本、绑定智能体和最后连接时间。Web 使用设备别名作为首要识别信息，未设置别名时明确标注“未命名设备”，不能把 MAC 同时冒充名称和地址；大量设备通过绑定智能体、别名、MAC、型号和固件筛选，并在保存前展示确定的下发设备清单。最后连接时间只表示历史事实，不能冒充实时在线状态。
-
-当前人物设备接口仍没有返回固件是否声明 `face_profiles`、照片版本是否已同步或最近识别时间，因此 Web 不得伪造“在线”“已同步”等状态。需要展示这些状态时，必须先扩展 manager-api 的只读事实和设备上报协议，并继续执行工作空间鉴权。
-
-## 与机器人门口接待的边界
-
-人物模块继续负责身份和人脸资源；客户阶段、预约、偏好、公司、FAQ、餐品、座位、二维码和到访审计由
-独立 `modules/reception` 负责。YHRobot 不消费 `face_profiles` 图片清单，而是把现有 Provider 的稳定
-`person_id` 映射到服务器人物档案，并通过 `reception_v1` 批量查询接待上下文。主动欢迎仍由机器人本地
-Visit / Group 协调器决定，服务器不能用单人 `face_recognition/SPEAK_TEXT` 再触发一轮。
-
-完整数据、协议和验证边界见[机器人门口迎宾产品化](robot-reception-productization.md)。
+`GET /resource/person-recognition/capability` 固定返回 `supported=false` 和 `DEVICE_LOCAL_ONLY`。
+`POST /resource/person-recognition/server` 当前不接收、不读取、不保存图片，也不调用人脸模型。未来启用前仍需
+单独完成生物特征告知、保存周期、删除流程、特征加密、限流、阈值评测和真实模型验证。
 
 ## 验证边界
 
-自动测试覆盖图片归一化与路径穿越、跨工作空间拒绝、设备绑定校验、WebSocket 清单、单人识别事件和
-`reception_v1`。真实摄像头、Provider ID 与人物档案数据一致性、照片缓存删除、两秒首响和物理播报完成
-状态仍需目标硬件联调。
+自动测试覆盖上传不发布、显式发布、智能体快照授权、版本相同不读图片、增量 upsert/delete、在线发布提示、
+识别事件幂等和接待上下文。仍需目标固件验证 Flash 原子替换、断电恢复、缓存空间淘汰、SHA-256 校验和
+真实设备从 v1 升级到 v2 的迁移行为。

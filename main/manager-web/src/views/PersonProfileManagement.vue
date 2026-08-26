@@ -6,7 +6,7 @@
     <main class="person-main">
       <section class="page-hero">
         <div>
-          <p>管理设备能够识别的人物，以及识别成功后要执行的动作。</p>
+          <p>独立维护人物与照片，绑定智能体后再显式发布；设备只增量同步已发布版本。</p>
         </div>
         <div class="hero-actions">
           <el-button icon="el-icon-setting" @click="receptionWorkspaceVisible = true">
@@ -19,8 +19,8 @@
       </section>
 
       <section class="recognition-summary">
-        <span class="recognition-mode"><i class="el-icon-cpu" />设备本地识别</span>
-        <span>照片只下发到选中的设备；识别后可记录事件或让设备说一句话。</span>
+        <span class="recognition-mode"><i class="el-icon-cpu" />设备本地识别 · 持久化缓存</span>
+        <span>上传只保存草稿；发布后由绑定智能体的设备按版本增量同步。</span>
         <el-tooltip content="服务端当前不接收识别图片，也不会生成或保存人脸特征。" placement="bottom">
           <button type="button" class="learn-more">了解工作原理</button>
         </el-tooltip>
@@ -53,13 +53,15 @@
         <div v-if="!loading && filteredProfiles.length === 0" class="empty-state">
           <i class="el-icon-user" />
           <h3>还没有人物</h3>
-          <p>完成下面三步，设备就能开始识别人脸。</p>
+          <p>完成下面四步，智能体的人脸库才会对设备生效。</p>
           <div class="empty-steps">
             <span><b>1</b>新增人物</span>
             <i class="el-icon-arrow-right" />
             <span><b>2</b>上传正面照片</span>
             <i class="el-icon-arrow-right" />
-            <span><b>3</b>选择设备和动作</span>
+            <span><b>3</b>绑定智能体</span>
+            <i class="el-icon-arrow-right" />
+            <span><b>4</b>显式发布</span>
           </div>
           <el-button v-if="canWrite" type="primary" icon="el-icon-plus" @click="openCreate">新增第一位人物</el-button>
         </div>
@@ -84,10 +86,10 @@
               </el-tag>
             </div>
             <div class="person-devices">
-              <span class="column-label">下发设备</span>
-              <strong>{{ profile.deviceNames && profile.deviceNames.length ? `${profile.deviceNames.length} 台设备` : "未选择设备" }}</strong>
-              <small v-if="profile.deviceNames && profile.deviceNames.length" :title="profile.deviceNames.join('、')">
-                {{ profile.deviceNames.join("、") }}
+              <span class="column-label">绑定智能体</span>
+              <strong>{{ profile.agentNames && profile.agentNames.length ? `${profile.agentNames.length} 个智能体` : "未绑定智能体" }}</strong>
+              <small v-if="profile.agentNames && profile.agentNames.length" :title="profile.agentNames.join('、')">
+                {{ profile.agentNames.join("、") }}
               </small>
             </div>
             <div class="person-action">
@@ -102,6 +104,12 @@
             </div>
             <div v-if="canWrite" class="person-actions">
               <el-button type="text" icon="el-icon-s-custom" @click="openReception(profile)">接待与预约</el-button>
+              <el-button
+                v-if="profile.unpublishedChanges"
+                type="text"
+                icon="el-icon-upload2"
+                @click="publishProfile(profile)"
+              >发布变更</el-button>
               <el-button type="text" icon="el-icon-edit" @click="openEdit(profile)">编辑</el-button>
               <el-dropdown trigger="click" @command="handleCommand(profile, $event)">
                 <el-button type="text" icon="el-icon-more" aria-label="更多人物操作" />
@@ -138,12 +146,12 @@
               <div v-else class="upload-placeholder">
                 <i class="el-icon-upload2" />
                 <strong>选择清晰正面照片</strong>
-                <span>支持 JPG、PNG，最大 5MB；保存时自动归一化为设备资源。</span>
+                <span>支持 JPG、PNG，最大 5MB；上传后仅形成未发布资源版本。</span>
               </div>
             </el-upload>
             <div class="privacy-tip">
               <i class="el-icon-lock" />
-              <span>照片仅向已选择的同工作空间设备下发。当前不会在服务器执行人脸识别。</span>
+              <span>上传不会下发；只有显式发布后，绑定智能体的设备才会增量同步。</span>
             </div>
           </section>
 
@@ -168,7 +176,20 @@
             </div>
 
             <el-form-item>
-              <PersonDeviceTargetSelector v-model="form.deviceIds" :devices="devices" :max-selection="50" />
+              <div class="agent-binding-card">
+                <div>
+                  <strong>绑定智能体</strong>
+                  <span>这里只建立资源归属，不会立即发送照片。</span>
+                </div>
+                <el-select v-model="form.agentIds" multiple filterable placeholder="选择一个或多个智能体">
+                  <el-option
+                    v-for="agent in agents"
+                    :key="agent.id"
+                    :label="`${agent.name}（${agent.deviceCount || 0} 台设备）`"
+                    :value="agent.id"
+                  />
+                </el-select>
+              </div>
             </el-form-item>
 
             <el-form-item label="识别后动作" prop="recognitionAction">
@@ -192,7 +213,7 @@
             </el-form-item>
 
             <el-form-item label="状态">
-              <el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="启用下发与事件动作" />
+              <el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="允许发布到智能体人脸库" />
             </el-form-item>
           </section>
         </div>
@@ -220,7 +241,6 @@
 <script>
 import Api from "@/apis/api";
 import HeaderBar from "@/components/HeaderBar.vue";
-import PersonDeviceTargetSelector from "@/components/person/PersonDeviceTargetSelector.vue";
 import PersonReceptionDialog from "@/components/person/PersonReceptionDialog.vue";
 import ReceptionWorkspaceDialog from "@/components/person/ReceptionWorkspaceDialog.vue";
 import ResourceCenterNav from "@/components/resource/ResourceCenterNav.vue";
@@ -236,7 +256,7 @@ function emptyForm() {
     recognitionAction: "NONE",
     greetingText: "",
     status: 1,
-    deviceIds: []
+    agentIds: []
   };
 }
 
@@ -244,7 +264,6 @@ export default {
   name: "PersonProfileManagement",
   components: {
     HeaderBar,
-    PersonDeviceTargetSelector,
     PersonReceptionDialog,
     ReceptionWorkspaceDialog,
     ResourceCenterNav,
@@ -257,7 +276,7 @@ export default {
       keyword: "",
       activeGroup: "all",
       profiles: [],
-      devices: [],
+      agents: [],
       faceUrls: {},
       dialogVisible: false,
       editingId: "",
@@ -299,7 +318,7 @@ export default {
   },
   created() {
     this.loadProfiles();
-    this.loadDevices();
+    this.loadAgents();
     Api.person.capability(() => {}, () => {});
   },
   beforeDestroy() {
@@ -323,10 +342,10 @@ export default {
         this.$message.error("获取人物档案失败");
       });
     },
-    loadDevices() {
-      Api.person.devices(({ data }) => {
+    loadAgents() {
+      Api.person.agents(({ data }) => {
         if (data && data.code === 0) {
-          this.devices = data.data || [];
+          this.agents = data.data || [];
         }
       });
     },
@@ -362,7 +381,7 @@ export default {
         recognitionAction: profile.recognitionAction || "NONE",
         greetingText: profile.greetingText || "",
         status: profile.status === 0 ? 0 : 1,
-        deviceIds: [...(profile.deviceIds || [])]
+        agentIds: [...(profile.agentIds || [])]
       };
       this.faceFile = null;
       this.revokeDialogPreview();
@@ -450,12 +469,26 @@ export default {
     finishSave() {
       this.saving = false;
       this.dialogVisible = false;
-      this.$message.success("人物已保存");
+      this.$message.success("人物草稿已保存；确认无误后请显式发布");
       this.loadProfiles();
+    },
+    publishProfile(profile) {
+      this.$confirm(
+        `发布“${profile.name}”后，在线设备会收到版本更新提示，并仅同步变化的人脸；是否继续？`,
+        "发布智能体人脸库变更",
+        { type: "warning", confirmButtonText: "发布", cancelButtonText: "取消" }
+      ).then(() => {
+        Api.person.publish(profile.id, ({ data }) => {
+          if (data && data.code === 0) {
+            this.$message.success("人脸库版本已发布");
+            this.loadProfiles();
+          } else this.$message.error((data && data.msg) || "发布失败");
+        }, () => this.$message.error("发布失败"));
+      }).catch(() => {});
     },
     deleteProfile(profile) {
       this.$confirm(
-        `删除“${profile.name}”后，相关设备将在下次同步时移除该人脸。是否继续？`,
+        `删除“${profile.name}”后，相关智能体发布版本会移除此人脸。是否继续？`,
         "删除人物档案",
         { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" }
       ).then(() => {
@@ -564,6 +597,34 @@ export default {
   color: #3f79d2;
   cursor: help;
   font: inherit;
+}
+
+.agent-binding-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #dfe5ef;
+  border-radius: 10px;
+  background: #fafcff;
+}
+
+.agent-binding-card > div {
+  display: grid;
+  gap: 3px;
+}
+
+.agent-binding-card strong {
+  color: #354058;
+  font-size: 13px;
+}
+
+.agent-binding-card span {
+  color: #8a94a8;
+  font-size: 11px;
+}
+
+.agent-binding-card .el-select {
+  width: 100%;
 }
 
 .content-shell {
@@ -682,7 +743,7 @@ export default {
 
 .person-card {
   display: grid;
-  grid-template-columns: 66px minmax(190px, 1.3fr) minmax(120px, 0.7fr) minmax(150px, 0.9fr) minmax(170px, 1fr) 58px 86px;
+  grid-template-columns: 66px minmax(190px, 1.3fr) minmax(120px, 0.7fr) minmax(150px, 0.9fr) minmax(170px, 1fr) 58px minmax(170px, auto);
   min-height: 88px;
   align-items: center;
   gap: 14px;
@@ -800,6 +861,7 @@ export default {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  gap: 6px;
 }
 
 .dialog-grid {
@@ -891,7 +953,7 @@ export default {
 
 @media (max-width: 1200px) {
   .person-card {
-    grid-template-columns: 66px minmax(170px, 1.2fr) minmax(110px, 0.7fr) minmax(130px, 0.8fr) minmax(140px, 0.9fr) 54px 76px;
+    grid-template-columns: 66px minmax(170px, 1.2fr) minmax(110px, 0.7fr) minmax(130px, 0.8fr) minmax(140px, 0.9fr) 54px minmax(150px, auto);
   }
 
   .person-devices small,

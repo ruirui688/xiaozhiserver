@@ -17,9 +17,9 @@ import lombok.RequiredArgsConstructor;
 import xiaozhi.common.exception.RenException;
 import xiaozhi.modules.device.dao.DeviceDao;
 import xiaozhi.modules.device.entity.DeviceEntity;
-import xiaozhi.modules.person.dao.PersonDeviceBindingDao;
+import xiaozhi.modules.person.dao.PersonAgentBindingDao;
 import xiaozhi.modules.person.dao.PersonProfileDao;
-import xiaozhi.modules.person.entity.PersonDeviceBindingEntity;
+import xiaozhi.modules.person.entity.PersonAgentBindingEntity;
 import xiaozhi.modules.person.entity.PersonProfileEntity;
 import xiaozhi.modules.reception.dao.ReceptionAppointmentDao;
 import xiaozhi.modules.reception.dao.ReceptionCustomerProfileDao;
@@ -37,7 +37,7 @@ public class ReceptionEventServiceImpl implements ReceptionEventService {
 
     private final DeviceDao deviceDao;
     private final PersonProfileDao personDao;
-    private final PersonDeviceBindingDao bindingDao;
+    private final PersonAgentBindingDao bindingDao;
     private final ReceptionCustomerProfileDao customerDao;
     private final ReceptionAppointmentDao appointmentDao;
     private final ReceptionVisitEventDao eventDao;
@@ -146,12 +146,13 @@ public class ReceptionEventServiceImpl implements ReceptionEventService {
         if (person == null || !Objects.equals(person.getWorkspaceId(), device.getWorkspaceId())) {
             throw new RenException("人物档案不可用");
         }
-        long count = bindingDao.selectCount(new LambdaQueryWrapper<PersonDeviceBindingEntity>()
-                .eq(PersonDeviceBindingEntity::getDeviceId, device.getId())
-                .eq(PersonDeviceBindingEntity::getPersonId, personId)
-                .eq(PersonDeviceBindingEntity::getWorkspaceId, device.getWorkspaceId()));
+        long count = bindingDao.selectCount(new LambdaQueryWrapper<PersonAgentBindingEntity>()
+                .eq(PersonAgentBindingEntity::getAgentId, device.getAgentId())
+                .eq(PersonAgentBindingEntity::getPersonId, personId)
+                .eq(PersonAgentBindingEntity::getPublishedActive, 1)
+                .eq(PersonAgentBindingEntity::getWorkspaceId, device.getWorkspaceId()));
         if (count != 1L) {
-            throw new RenException("该设备未绑定此人物档案");
+            throw new RenException("当前智能体未发布此人物档案");
         }
     }
 

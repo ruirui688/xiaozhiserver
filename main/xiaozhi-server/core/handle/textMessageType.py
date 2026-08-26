@@ -14,4 +14,5 @@ class TextMessageType(Enum):
     TTS_ACK = "tts_ack"
     SPEECH_ROUTE_REQUEST = "speech_route_request"
     FACE_RECOGNITION = "face_recognition"
+    FACE_PROFILES = "face_profiles"
     RECEPTION = "reception"

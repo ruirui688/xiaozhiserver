@@ -16,7 +16,7 @@ from core.handle.sendAudioHandle import sendAudioMessage, send_tts_message
 from core.utils.util import remove_punctuation_and_length, opus_datas_to_wav_bytes
 from core.providers.tools.device_mcp import MCPClient, send_mcp_initialize_message
 from core.handle.wakeupHandle import arm_wakeup_vad_ignore
-from core.device_face_profiles import schedule_face_profile_sync
+from core.device_face_profiles import face_protocol_version, schedule_face_profile_sync
 
 TAG = __name__
 
@@ -77,7 +77,7 @@ async def handleHelloMessage(conn: "ConnectionHandler", msg_json):
         f"服务端输出音频采样率: {conn.sample_rate}"
     )
     await conn.websocket.send(json.dumps(conn.welcome_msg))
-    if (conn.features or {}).get("face_profiles"):
+    if face_protocol_version(conn) > 0:
         schedule_face_profile_sync(conn)
 
 

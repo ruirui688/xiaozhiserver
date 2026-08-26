@@ -19,9 +19,9 @@ import lombok.RequiredArgsConstructor;
 import xiaozhi.common.exception.RenException;
 import xiaozhi.modules.device.dao.DeviceDao;
 import xiaozhi.modules.device.entity.DeviceEntity;
-import xiaozhi.modules.person.dao.PersonDeviceBindingDao;
+import xiaozhi.modules.person.dao.PersonAgentBindingDao;
 import xiaozhi.modules.person.dao.PersonProfileDao;
-import xiaozhi.modules.person.entity.PersonDeviceBindingEntity;
+import xiaozhi.modules.person.entity.PersonAgentBindingEntity;
 import xiaozhi.modules.person.entity.PersonProfileEntity;
 import xiaozhi.modules.reception.dao.ReceptionAppointmentDao;
 import xiaozhi.modules.reception.dao.ReceptionCustomerProfileDao;
@@ -38,7 +38,7 @@ import xiaozhi.modules.reception.vo.ReceptionContextVO;
 public class ReceptionContextServiceImpl implements ReceptionContextService {
     private final DeviceDao deviceDao;
     private final PersonProfileDao personDao;
-    private final PersonDeviceBindingDao bindingDao;
+    private final PersonAgentBindingDao bindingDao;
     private final ReceptionCustomerProfileDao customerDao;
     private final ReceptionAppointmentDao appointmentDao;
     private final ReceptionWorkspaceConfigDao workspaceConfigDao;
@@ -81,12 +81,13 @@ public class ReceptionContextServiceImpl implements ReceptionContextService {
                 || !Objects.equals(person.getStatus(), 1)) {
             throw new RenException("人物档案不可用");
         }
-        long bound = bindingDao.selectCount(new LambdaQueryWrapper<PersonDeviceBindingEntity>()
-                .eq(PersonDeviceBindingEntity::getDeviceId, device.getId())
-                .eq(PersonDeviceBindingEntity::getPersonId, personId)
-                .eq(PersonDeviceBindingEntity::getWorkspaceId, device.getWorkspaceId()));
+        long bound = bindingDao.selectCount(new LambdaQueryWrapper<PersonAgentBindingEntity>()
+                .eq(PersonAgentBindingEntity::getAgentId, device.getAgentId())
+                .eq(PersonAgentBindingEntity::getPersonId, personId)
+                .eq(PersonAgentBindingEntity::getPublishedActive, 1)
+                .eq(PersonAgentBindingEntity::getWorkspaceId, device.getWorkspaceId()));
         if (bound != 1L) {
-            throw new RenException("该设备未绑定此人物档案");
+            throw new RenException("当前智能体未发布此人物档案");
         }
         ReceptionCustomerProfileEntity customer = customerDao.selectOne(
                 new LambdaQueryWrapper<ReceptionCustomerProfileEntity>()
@@ -98,7 +99,7 @@ public class ReceptionContextServiceImpl implements ReceptionContextService {
                 new LambdaQueryWrapper<ReceptionAppointmentEntity>()
                         .eq(ReceptionAppointmentEntity::getPersonId, personId)
                         .eq(ReceptionAppointmentEntity::getWorkspaceId, device.getWorkspaceId())
-                        .in(ReceptionAppointmentEntity::getStatus, List.of("PENDING", "CONFIRMED"))
+                        .eq(ReceptionAppointmentEntity::getStatus, "CONFIRMED")
                         .le(ReceptionAppointmentEntity::getStartAt, now)
                         .ge(ReceptionAppointmentEntity::getEndAt, now)
                         .orderByAsc(ReceptionAppointmentEntity::getStartAt)

@@ -24,7 +24,7 @@ import lombok.RequiredArgsConstructor;
 import xiaozhi.common.utils.Result;
 import xiaozhi.modules.person.dto.PersonProfileSaveDTO;
 import xiaozhi.modules.person.service.PersonProfileService;
-import xiaozhi.modules.person.vo.PersonDeviceOptionVO;
+import xiaozhi.modules.person.vo.PersonAgentOptionVO;
 import xiaozhi.modules.person.vo.PersonProfileVO;
 
 @Tag(name = "资源中心人物档案")
@@ -41,11 +41,11 @@ public class PersonProfileController {
         return new Result<List<PersonProfileVO>>().ok(personProfileService.list(keyword));
     }
 
-    @GetMapping("/devices")
-    @Operation(summary = "获取可接收人脸资源的工作空间设备")
+    @GetMapping("/agents")
+    @Operation(summary = "获取可绑定人物人脸库的工作空间智能体")
     @RequiresPermissions("sys:role:normal")
-    public Result<List<PersonDeviceOptionVO>> devices() {
-        return new Result<List<PersonDeviceOptionVO>>().ok(personProfileService.listWorkspaceDevices());
+    public Result<List<PersonAgentOptionVO>> agents() {
+        return new Result<List<PersonAgentOptionVO>>().ok(personProfileService.listWorkspaceAgents());
     }
 
     @PostMapping
@@ -99,5 +99,12 @@ public class PersonProfileController {
     public Result<Void> deleteFace(@PathVariable String id) {
         personProfileService.deleteFace(id);
         return new Result<>();
+    }
+
+    @PostMapping("/{id}/publish")
+    @Operation(summary = "显式发布人物变更到已绑定智能体人脸库")
+    @RequiresPermissions("sys:role:normal")
+    public Result<PersonProfileVO> publish(@PathVariable String id) {
+        return new Result<PersonProfileVO>().ok(personProfileService.publish(id));
     }
 }

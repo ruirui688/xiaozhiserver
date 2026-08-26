@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
 
 import xiaozhi.modules.device.dao.DeviceDao;
 import xiaozhi.modules.device.entity.DeviceEntity;
-import xiaozhi.modules.person.dao.PersonDeviceBindingDao;
+import xiaozhi.modules.person.dao.PersonAgentBindingDao;
 import xiaozhi.modules.person.dao.PersonProfileDao;
 import xiaozhi.modules.person.entity.PersonProfileEntity;
 import xiaozhi.modules.reception.dao.ReceptionAppointmentDao;
@@ -84,7 +84,7 @@ class ReceptionContextServiceImplTest {
     private static final class Fixture {
         final DeviceDao deviceDao = mock(DeviceDao.class);
         final PersonProfileDao personDao = mock(PersonProfileDao.class);
-        final PersonDeviceBindingDao bindingDao = mock(PersonDeviceBindingDao.class);
+        final PersonAgentBindingDao bindingDao = mock(PersonAgentBindingDao.class);
         final ReceptionCustomerProfileDao customerDao = mock(ReceptionCustomerProfileDao.class);
         final ReceptionAppointmentDao appointmentDao = mock(ReceptionAppointmentDao.class);
         final ReceptionWorkspaceConfigDao configDao = mock(ReceptionWorkspaceConfigDao.class);

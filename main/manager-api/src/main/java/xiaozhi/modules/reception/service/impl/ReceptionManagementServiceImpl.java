@@ -31,6 +31,7 @@ import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 @Service
 @RequiredArgsConstructor
 public class ReceptionManagementServiceImpl implements ReceptionManagementService {
+    private static final List<String> ACTIVE_APPOINTMENT_STATUSES = List.of("PENDING", "CONFIRMED", "ARRIVED");
     private final PersonProfileDao personDao;
     private final ReceptionCustomerProfileDao customerDao;
     private final ReceptionAppointmentDao appointmentDao;
@@ -94,7 +95,7 @@ public class ReceptionManagementServiceImpl implements ReceptionManagementServic
         ReceptionAppointmentEntity entity = new ReceptionAppointmentEntity();
         entity.setWorkspaceId(person.getWorkspaceId());
         entity.setPersonId(person.getId());
-        applyAppointment(entity, dto);
+        applyAppointment(entity, dto, true);
         appointmentDao.insert(entity);
         return entity;
     }
@@ -103,7 +104,7 @@ public class ReceptionManagementServiceImpl implements ReceptionManagementServic
     public ReceptionAppointmentEntity updateAppointment(
             String appointmentId, ReceptionAppointmentSaveDTO dto) {
         ReceptionAppointmentEntity entity = requireAppointment(appointmentId, true);
-        applyAppointment(entity, dto);
+        applyAppointment(entity, dto, false);
         appointmentDao.updateById(entity);
         return entity;
     }
@@ -186,16 +187,50 @@ public class ReceptionManagementServiceImpl implements ReceptionManagementServic
     }
 
     private void applyAppointment(
-            ReceptionAppointmentEntity entity, ReceptionAppointmentSaveDTO dto) {
+            ReceptionAppointmentEntity entity, ReceptionAppointmentSaveDTO dto, boolean creating) {
         if (!dto.getEndAt().after(dto.getStartAt())) {
             throw new RenException("预约结束时间必须晚于开始时间");
+        }
+        String nextStatus = StringUtils.defaultIfBlank(dto.getStatus(), creating ? "PENDING" : entity.getStatus());
+        if (creating && !List.of("PENDING", "CONFIRMED").contains(nextStatus)) {
+            throw new RenException("新预约只能保存为待确认或已确认");
+        }
+        if (!creating && !isAllowedTransition(entity.getStatus(), nextStatus)) {
+            throw new RenException("预约状态不能从" + entity.getStatus() + "变更为" + nextStatus);
+        }
+        if (ACTIVE_APPOINTMENT_STATUSES.contains(nextStatus)) {
+            LambdaQueryWrapper<ReceptionAppointmentEntity> overlap =
+                    new LambdaQueryWrapper<ReceptionAppointmentEntity>()
+                            .eq(ReceptionAppointmentEntity::getWorkspaceId, entity.getWorkspaceId())
+                            .eq(ReceptionAppointmentEntity::getPersonId, entity.getPersonId())
+                            .in(ReceptionAppointmentEntity::getStatus, ACTIVE_APPOINTMENT_STATUSES)
+                            .lt(ReceptionAppointmentEntity::getStartAt, dto.getEndAt())
+                            .gt(ReceptionAppointmentEntity::getEndAt, dto.getStartAt());
+            if (!creating) {
+                overlap.ne(ReceptionAppointmentEntity::getId, entity.getId());
+            }
+            if (appointmentDao.selectCount(overlap) > 0) {
+                throw new RenException("该人物在所选时间段已有有效预约");
+            }
         }
         entity.setStartAt(dto.getStartAt());
         entity.setEndAt(dto.getEndAt());
         entity.setPartySize(dto.getPartySize() == null ? 1 : dto.getPartySize());
-        entity.setStatus(StringUtils.defaultIfBlank(dto.getStatus(), "CONFIRMED"));
+        entity.setStatus(nextStatus);
         entity.setSeatRequest(StringUtils.trimToNull(dto.getSeatRequest()));
         entity.setNotes(StringUtils.trimToNull(dto.getNotes()));
+    }
+
+    private boolean isAllowedTransition(String current, String next) {
+        if (Objects.equals(current, next)) {
+            return true;
+        }
+        return switch (StringUtils.defaultString(current)) {
+            case "PENDING" -> List.of("CONFIRMED", "CANCELLED").contains(next);
+            case "CONFIRMED" -> List.of("ARRIVED", "CANCELLED", "NO_SHOW").contains(next);
+            case "ARRIVED" -> "COMPLETED".equals(next);
+            default -> false;
+        };
     }
 
     private String json(List<String> values) {
