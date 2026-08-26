@@ -5,17 +5,9 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from app import build_prompt, extract_json_object, process_request, run_harness, validate_model_config
-from console_gateway import ConsoleManager, build_console_prompt
 
 
 class MaintenanceAgentTest(unittest.TestCase):
-    def test_console_prompt_supports_natural_dialog_and_separate_approval(self):
-        prompt = build_console_prompt("KNOWLEDGE", 8, {"existingSources": []}, "只看当前赛季")
-        self.assertIn("Talk naturally", prompt)
-        self.assertIn("submit_maintenance_proposals", prompt)
-        self.assertIn("separate approval queue", prompt)
-        self.assertNotIn("Return JSON only", prompt)
-
     def test_extracts_plain_and_fenced_json(self):
         self.assertEqual([], extract_json_object('{"proposals":[]}')["proposals"])
         self.assertEqual([], extract_json_object('```json\n{"proposals":[]}\n```')["proposals"])
@@ -74,14 +66,6 @@ class MaintenanceAgentTest(unittest.TestCase):
         self.assertEqual({"apiKey": "key", "baseUrl": "", "model": "deepseek-chat"},
                          validate_model_config({"apiKey": " key ", "baseUrl": "",
                                                 "model": " deepseek-chat ", "ignored": "value"}))
-
-    def test_console_callback_is_pinned_to_manager_internal_endpoint(self):
-        valid = "http://xiaozhi-esp32-manager-api:8002/xiaozhi/config/maintenance/runs/run-1/complete"
-        self.assertEqual(valid, ConsoleManager._callback_url(valid))
-        with self.assertRaises(ValueError):
-            ConsoleManager._callback_url("https://attacker.example/capture")
-        with self.assertRaises(ValueError):
-            ConsoleManager._callback_url("http://127.0.0.1:8002/xiaozhi/config/maintenance/runs/run-1/complete")
 
     def test_passes_managed_credentials_only_to_owned_harness(self):
         calls = []

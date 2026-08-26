@@ -2,7 +2,7 @@
   <el-dialog title="维护设置" :visible.sync="internalVisible" width="720px" top="6vh"
     :close-on-click-modal="false" @close="$emit('close')">
     <el-alert :closable="false" show-icon type="info"
-      :title="resourceType === 'MEMORY' ? '长期记忆维护不联网，所有变更均需审核' : '设置只控制当前知识库；对话与工具运行使用 DeepSeek Harness 原生界面'" />
+      :title="resourceType === 'MEMORY' ? '长期记忆维护不联网，所有变更均需审核' : '设置只控制当前知识库；维护过程与提案都在当前智控台展示'" />
     <el-form class="maintenance-form" :model="form" label-width="120px" v-loading="loading">
       <el-form-item label="维护方式">
         <el-select v-model="form.mode" class="wide">
@@ -42,7 +42,7 @@
     <span slot="footer">
       <el-button @click="internalVisible = false">取消</el-button>
       <el-button type="primary" :loading="saving" @click="save(false)">保存</el-button>
-      <el-button type="success" :loading="saving" @click="save(true)">保存并打开 Harness</el-button>
+      <el-button type="success" :loading="saving" @click="save(true)">保存并进入 Harness</el-button>
     </span>
   </el-dialog>
 </template>
@@ -112,7 +112,7 @@ export default {
         this.saving = false
         this.$message.success('维护设置已保存')
         this.$emit('changed')
-        if (openAfterSave) this.$emit('open-console')
+        if (openAfterSave) this.$emit('open-workbench')
         this.internalVisible = false
       }, error => { this.saving = false; this.fail(error, '保存维护设置失败') })
     }

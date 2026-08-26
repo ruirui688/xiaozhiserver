@@ -22,8 +22,9 @@
 DeepSeek API Key、接口地址和上游模型名直接复用“模型配置”中
 已启用且测试通过的 DeepSeek LLM；在资源维护策略中选择对应模型，不再在部署 `.env` 保存第二份模型凭据。
 
-`xiaozhi-maintenance-agent` 不挂载宿主目录，API 仅供 manager-api 在容器网络调用，Web 控制台端口只绑定
-宿主回环地址。容器常驻不等于自动维护全部资源：仍需在对应知识库或智能体页面逐一保存策略。
+`xiaozhi-maintenance-agent` 不挂载宿主目录，也不提供独立 Web 控制台或宿主端口；API 仅供 manager-api
+在容器网络调用，Harness 工作台直接嵌入现有智控台页面。容器常驻不等于自动维护全部资源：仍需在对应
+知识库或智能体页面逐一保存策略。
 DeepSeek Harness 当前为 Developer Preview，SDK/runtime 固定为
 `0.1.1rc1`；升级该版本必须先跑适配器契约测试和一次非生产真实搜索验收。
 

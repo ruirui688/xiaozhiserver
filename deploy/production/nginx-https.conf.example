@@ -9,7 +9,7 @@ map $http_upgrade $connection_upgrade {
 
 server {
     listen 80;
-    server_name yh.wejoy.link harness.yh.wejoy.link;
+    server_name yh.wejoy.link;
 
     return 301 https://$host$request_uri;
 }
@@ -77,36 +77,5 @@ server {
 
     location / {
         proxy_pass http://127.0.0.1:8002/;
-    }
-}
-
-# The official Harness UI uses absolute /api, /assets and /plugins paths. Keep
-# it on a dedicated origin so those paths never shadow manager-web routes.
-server {
-    listen 443 ssl http2;
-    server_name harness.yh.wejoy.link;
-
-    # The console bootstrap URL carries a short-lived, single-use code. Keep it
-    # out of reverse-proxy access logs; Harness execution history remains visible
-    # in the authenticated console itself.
-    access_log off;
-
-    ssl_certificate     /etc/letsencrypt/live/harness.yh.wejoy.link/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/harness.yh.wejoy.link/privkey.pem;
-
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto https;
-
-    location / {
-        proxy_pass http://127.0.0.1:8011;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection $connection_upgrade;
-        proxy_buffering off;
-        proxy_request_buffering off;
-        proxy_read_timeout 3600s;
-        proxy_send_timeout 3600s;
     }
 }

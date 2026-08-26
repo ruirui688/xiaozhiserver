@@ -5,10 +5,11 @@ const assert = require('node:assert/strict')
 
 const root = path.resolve(__dirname, '..')
 const panel = fs.readFileSync(path.join(root, 'src/components/maintenance/MaintenancePolicyPanel.vue'), 'utf8')
-const proposals = fs.readFileSync(path.join(root, 'src/components/maintenance/MaintenanceProposalPanel.vue'), 'utf8')
+const conversation = fs.readFileSync(path.join(root, 'src/components/maintenance/MaintenanceConversationPanel.vue'), 'utf8')
 const api = fs.readFileSync(path.join(root, 'src/apis/module/maintenance.js'), 'utf8')
 const knowledgeApi = fs.readFileSync(path.join(root, 'src/apis/module/knowledgeBase.js'), 'utf8')
 const uploadPage = fs.readFileSync(path.join(root, 'src/views/KnowledgeFileUpload.vue'), 'utf8')
+const memoryPage = fs.readFileSync(path.join(root, 'src/views/MemoryManagement.vue'), 'utf8')
 
 test('maintenance settings remain resource scoped and memory never offers web discovery', () => {
   assert.match(panel, /resourceType === 'KNOWLEDGE'/)
@@ -19,21 +20,28 @@ test('maintenance settings remain resource scoped and memory never offers web di
   assert.match(panel, /customPrompt/)
 })
 
-test('native Harness launch and approvals stay behind the resource API', () => {
+test('embedded Harness workbench uses resource runs, events, and approvals', () => {
   assert.match(api, /maintenance\/\$\{String\(type\)\.toLowerCase\(\)\}/)
-  assert.match(api, /\/console-sessions/)
+  assert.match(api, /\/runs/)
+  assert.match(api, /runEvents/)
   assert.match(api, /\/proposals\/\$\{proposalId\}\/approve/)
-  assert.match(uploadPage, /openMaintenanceConsole/)
-  assert.match(uploadPage, /payload\.launchUrl/)
-  assert.match(uploadPage, /打开 Harness/)
+  assert.doesNotMatch(api, /\/console-sessions/)
+  assert.match(uploadPage, /MaintenanceConversationPanel/)
+  assert.match(uploadPage, /maintenanceWorkbenchVisible/)
+  assert.match(memoryPage, /MaintenanceConversationPanel/)
+  assert.doesNotMatch(uploadPage, /window\.open|launchUrl/)
 })
 
-test('platform UI keeps approval authority but no longer implements a custom chat client', () => {
-  assert.doesNotMatch(panel, /MaintenanceConversationPanel/)
-  assert.match(proposals, /审核维护提案/)
-  assert.match(proposals, /scope\.row\.sourceUri/)
-  assert.match(proposals, /批准/)
-  assert.match(proposals, /拒绝/)
+test('workbench keeps knowledge and memory proposals inside the manager UI', () => {
+  assert.match(conversation, /交给 Harness 处理/)
+  assert.match(conversation, /proposal\.sourceUri/)
+  assert.match(conversation, /ADD_SOURCE/)
+  assert.match(conversation, /UPDATE/)
+  assert.match(conversation, /ARCHIVE/)
+  assert.match(conversation, /DELETE/)
+  assert.match(conversation, /批准并入库/)
+  assert.match(conversation, /批准修正/)
+  assert.match(conversation, /window\.setInterval\([^]*1000\)/)
 })
 
 test('knowledge maintenance entry follows backend capability and exposes backend failures', () => {

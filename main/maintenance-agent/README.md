@@ -5,10 +5,10 @@ It has no database credentials, callback endpoint, shell, editor, filesystem too
 or product write authority. Knowledge tasks expose search only; memory tasks expose no tools.
 
 The Manager API remains the authority for resource permissions, schedules, quotas, proposal review,
-URL validation, source creation, memory revisions, and persistence. Harness session files live only in
-a per-run temporary directory and are deleted when the request finishes.
+URL validation, source creation, memory revisions, and persistence. The sidecar provides no separate
+browser console; the maintenance workbench is rendered inside manager-web from Manager API data.
 
 The only required runtime secret is `MAINTENANCE_AGENT_SECRET`. Each authenticated run receives a
-short-lived model configuration resolved from Manager API model management; the adapter passes it only
-to the owned Harness subprocess and never stores it. The public API is limited
+short-lived model configuration resolved from Manager API model management; the adapter uses it only
+for the current Harness run and never stores it. The internal API is limited
 to `GET /health` and authenticated `POST /v1/maintenance/run`.

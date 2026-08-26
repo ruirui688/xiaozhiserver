@@ -940,14 +940,14 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/manager-api/src/main/resources/db/changelog/202608261700.sql
   - main/manager-api/src/main/resources/db/changelog/202608261715.sql
   - main/manager-web/src/components/maintenance/MaintenancePolicyPanel.vue
-  - main/manager-web/src/components/maintenance/MaintenanceProposalPanel.vue
+  - main/manager-web/src/components/maintenance/MaintenanceConversationPanel.vue
   - main/maintenance-agent/
   - scripts/acr-build-push-maintenance-agent
   - deploy/production/docker-compose.yml
 是否允许被官方覆盖：否
-官方同步时的处理规则：必须保留 maintenance-agent 作为生产常驻核心服务，安装和升级始终拉取同版本镜像、生成内部服务密钥并等待其健康；不得恢复成默认关闭的 Compose profile。Manager API 继续作为资源权限、策略、月度运行上限、提案审批和最终写入的唯一权威。交互界面使用官方 `dsh web`，每次从 Manager API 为单一资源创建隔离、限时会话；浏览器只接收一次性启动地址，模型凭据只进入该会话的进程环境。Harness 预设只能组合 `web_search`（知识维护）和 `submit_maintenance_proposals`，禁止数据库凭据、宿主源码挂载、Shell、编辑器、文件系统与 web_fetch。提交工具只能调用 ServerSecretFilter 保护的单次完成回调，最终仍进入 Manager 审批队列。知识维护按 dataset opt-in，仅超级管理员本人或超级管理员团队成员可以为官方知识库以及其有写权限的工作空间知识库配置，普通团队不得开启；自动采纳必须匹配可信域名并再次通过公网 URL/SSRF 校验，然后复用 KnowledgeSourceService 现有发布链。记忆维护按 agent opt-in、禁止联网和 ADD，所有 UPDATE/ARCHIVE/DELETE 必须人工批准并通过 MemoryService 留 revision。维护策略必须显式引用模型管理中已启用、测试通过的 DeepSeek LLM，只保存模型 ID；运行凭据只允许通过内部鉴权请求短暂进入隔离 Harness 环境，会话超时后连同临时目录清除，不得另存第二份模型密钥。维护镜像的 Dockerfile 必须默认使用项目统一的 `docker.m.daocloud.io` Python/Node 基础镜像，不能回退到构建机不稳定的 Docker Hub 直连。不得把临时 Harness session 当作产品记忆，不得记录完整提示词、模型原始响应、记忆正文或密钥。
+官方同步时的处理规则：必须保留 maintenance-agent 作为生产常驻核心服务，安装和升级始终拉取同版本镜像、生成内部服务密钥并等待其健康；不得恢复成默认关闭的 Compose profile。Manager API 继续作为资源权限、策略、月度运行上限、提案审批和最终写入的唯一权威。Harness 必须嵌入 manager-web 的资源页面，通过 Manager API 的运行、事件、提案和审批接口工作；不得重新引入独立 Web 控制台、弹窗、新域名、宿主端口或浏览器直连 maintenance-agent。知识维护按 dataset opt-in，仅超级管理员本人或超级管理员团队成员可以为官方知识库以及其有写权限的工作空间知识库配置，普通团队不得开启；自动采纳必须匹配可信域名并再次通过公网 URL/SSRF 校验，然后复用 KnowledgeSourceService 现有发布链。记忆维护按 agent opt-in、禁止联网和 ADD，所有 UPDATE/ARCHIVE/DELETE 必须人工批准并通过 MemoryService 留 revision。维护策略必须显式引用模型管理中已启用、测试通过的 DeepSeek LLM，只保存模型 ID；运行凭据只允许通过内部鉴权请求短暂进入单轮 Harness 运行内存，不得另存第二份模型密钥。维护镜像的 Dockerfile 必须默认使用项目统一的 `docker.m.daocloud.io` Python 基础镜像，不能回退到构建机不稳定的 Docker Hub 直连。不得把 Harness 运行记录当作产品记忆，不得记录完整提示词、模型原始响应、记忆正文或密钥。
 知识提案批准后必须先保持 `APPLYING`，事务提交后立即触发连接器；只有文档抓取、切片和原子发布成功才能回写 `APPLIED`，失败必须回写 `FAILED`，不得把“创建来源”伪装成“已入库”。网页运行日志必须来自 `ai_maintenance_run_event` 中可恢复、可增量读取的脱敏里程碑，禁止直接透传容器 stdout、完整提示词、模型思维过程、网页正文或凭据。
-平台页面只保留“维护设置、打开 Harness、审核提案”三个边界清晰的入口，不再实现自绘聊天客户端。知识维护必须保留策略级 `custom_prompt`；自定义提示词只属于业务质量指导，不得取消固定的安全、审批和配额合同。实时对话、工具调用和会话历史由官方 Harness Web UI 展示，平台审核页只展示白名单后的提案字段，不得透传思维过程或原始模型日志。
+平台页面只保留一个“Harness 维护”入口，在当前智控台弹窗中统一展示维护记录、单轮指令、脱敏运行事件、结构化提案及批准/拒绝操作；策略设置从同一工作台进入。知识维护必须保留策略级 `custom_prompt`；自定义提示词只属于业务质量指导，不得取消固定的安全、审批和配额合同。页面只展示 Manager API 持久化的白名单字段，不得透传思维过程、原始模型日志、正文或凭据。
 过时动态来源只能通过带精确 sourceId 的 `REMOVE_SOURCE` 待审批提案淘汰；即使启用可信域名自动采纳也不得自动删除，批准后必须复用 KnowledgeSourceService 删除来源、动态文档和统计，不能直接操作知识表。
 ```
 

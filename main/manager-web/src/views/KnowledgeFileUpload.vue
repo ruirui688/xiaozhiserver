@@ -96,14 +96,8 @@
                 <el-button v-if="!readOnly" type="warning" icon="el-icon-connection" @click="sourcePanelVisible = true">
                   动态数据源
                 </el-button>
-                <el-button v-if="!readOnly && canManageMaintenance" plain icon="el-icon-setting" @click="maintenancePanelVisible = true">
-                  维护设置
-                </el-button>
-                <el-button v-if="!readOnly && canManageMaintenance" type="warning" icon="el-icon-chat-dot-round" @click="openMaintenanceConsole">
-                  打开 Harness
-                </el-button>
-                <el-button v-if="!readOnly && canManageMaintenance" plain icon="el-icon-document-checked" @click="proposalPanelVisible = true">
-                  审核提案
+                <el-button v-if="!readOnly && canManageMaintenance" type="warning" icon="el-icon-magic-stick" @click="openMaintenanceWorkbench">
+                  Harness 维护
                 </el-button>
                 <el-button v-if="!readOnly" type="danger" @click="handleBatchDelete" :disabled="selectedFiles.length === 0">
                   {{ $t('knowledgeFileUpload.batchDelete') }}
@@ -167,15 +161,21 @@
       resource-type="KNOWLEDGE"
       :resource-id="datasetId"
       @close="maintenancePanelVisible = false"
-      @open-console="openMaintenanceConsole"
+      @open-workbench="openMaintenanceWorkbench"
       @changed="fetchFileList" />
 
-    <maintenance-proposal-panel
-      :visible="proposalPanelVisible"
-      resource-type="KNOWLEDGE"
-      :resource-id="datasetId"
-      @close="proposalPanelVisible = false"
-      @changed="fetchFileList" />
+    <el-dialog title="Harness 知识维护" :visible.sync="maintenanceWorkbenchVisible" width="92%" top="3vh"
+      append-to-body :close-on-click-modal="false" custom-class="maintenance-workbench-dialog">
+      <div class="maintenance-dialog-toolbar">
+        <span>当前知识库：{{ knowledgeBaseName || datasetId }}</span>
+        <el-button size="small" icon="el-icon-setting" @click="maintenancePanelVisible = true">维护设置</el-button>
+      </div>
+      <maintenance-conversation-panel
+        :active="maintenanceWorkbenchVisible"
+        resource-type="KNOWLEDGE"
+        :resource-id="datasetId"
+        @changed="fetchFileList" />
+    </el-dialog>
 
     <!-- 召回测试弹窗 -->
     <el-dialog :title="$t('knowledgeFileUpload.retrievalTest')" :visible.sync="retrievalTestDialogVisible"
@@ -237,10 +237,10 @@ import FileUploadPanel from "@/components/knowledge/FileUploadPanel.vue";
 import FilePreviewDialog from "@/components/knowledge/FilePreviewDialog.vue";
 import KnowledgeSourcePanel from "@/components/knowledge/KnowledgeSourcePanel.vue";
 import MaintenancePolicyPanel from "@/components/maintenance/MaintenancePolicyPanel.vue";
-import MaintenanceProposalPanel from "@/components/maintenance/MaintenanceProposalPanel.vue";
+import MaintenanceConversationPanel from "@/components/maintenance/MaintenanceConversationPanel.vue";
 
 export default {
-  components: { HeaderBar, VersionFooter, FileUploadPanel, FilePreviewDialog, KnowledgeSourcePanel, MaintenancePolicyPanel, MaintenanceProposalPanel },
+  components: { HeaderBar, VersionFooter, FileUploadPanel, FilePreviewDialog, KnowledgeSourcePanel, MaintenancePolicyPanel, MaintenanceConversationPanel },
   data() {
     return {
       datasetId: '',
@@ -257,7 +257,7 @@ export default {
       uploadDialogVisible: false,
       sourcePanelVisible: false,
       maintenancePanelVisible: false,
-      proposalPanelVisible: false,
+      maintenanceWorkbenchVisible: false,
       canManageMaintenance: false,
       uploadUrl: '',
       isAllSelected: false,
@@ -313,22 +313,9 @@ export default {
     }
   },
   methods: {
-    openMaintenanceConsole() {
-      const popup = window.open('about:blank', '_blank')
-      Api.maintenance.launchConsole('KNOWLEDGE', this.datasetId, res => {
-        const payload = (res && res.data && res.data.data) || (res && res.data) || {}
-        if (!payload.launchUrl || !payload.launchUrl.startsWith('https://')) {
-          if (popup) popup.close()
-          this.$message.error('Harness 控制台地址无效')
-          return
-        }
-        if (popup) popup.location.replace(payload.launchUrl)
-        else this.$message.warning('浏览器阻止了新窗口，请允许本站弹出窗口后重试')
-      }, error => {
-        if (popup) popup.close()
-        const message = (error && error.data && error.data.msg) || (error && error.msg)
-        this.$message.error(message || '启动 DeepSeek Harness 失败')
-      })
+    openMaintenanceWorkbench() {
+      this.maintenancePanelVisible = false
+      this.maintenanceWorkbenchVisible = true
     },
     fetchKnowledgeBaseAccess() {
       KnowledgeBaseAPI.getKnowledgeBase(this.datasetId, ({ data }) => {
@@ -1375,6 +1362,14 @@ export default {
 :deep(.el-dialog) {
   border-radius: 16px !important;
   overflow: hidden;
+}
+
+.maintenance-dialog-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: -8px 0 12px;
+  color: #606266;
 }
 
 @media (min-width: 1144px) {
