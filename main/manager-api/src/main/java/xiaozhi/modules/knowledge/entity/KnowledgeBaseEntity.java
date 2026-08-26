@@ -42,7 +42,7 @@ public class KnowledgeBaseEntity {
     @Schema(description = "知识库描述")
     private String description;
 
-    @Schema(description = "嵌入模型名称（仅用于RAGFlow适配器；LocalKnowledge适配器使用独立的嵌入配置：embedding_base_url / embedding_api_key / embedding_model）")
+    @Schema(description = "嵌入模型名称（仅用于RAGFlow适配器；LocalKnowledge适配器不使用向量）")
     private String embeddingModel;
 
     @Schema(description = "权限设置: me/team")

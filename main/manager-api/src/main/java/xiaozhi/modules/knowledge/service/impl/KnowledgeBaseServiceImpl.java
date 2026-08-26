@@ -575,9 +575,9 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
                     "faq_threshold",
                     "semantic_threshold",
                     "rerank_enabled",
-                    "embedding_model",
-                    "embedding_base_url",
-                    "embedding_api_key")) {
+                    "keyword_level",
+                    "keyword_top_k",
+                    "keyword_threshold")) {
                 Object value = datasetConfig.get(key);
                 if (value != null && StringUtils.isNotBlank(value.toString())) {
                     config.put(key, value);

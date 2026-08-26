@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: knowledge
-last_verified: 2026-08-25
+last_verified: 2026-08-26
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/knowledge
   - main/manager-api/src/main/java/xiaozhi/modules/agent/service/impl/AgentPluginMappingServiceImpl.java
@@ -13,7 +13,7 @@ source_paths:
 
 # 知识库完整链路
 
-本文档说明 xiaozhi-esp32-server 知识库（Knowledge Base / RAG）的完整链路：从文件上传、分块、向量化，到检索注入 LLM 上下文的端到端流程。
+本文档说明 xiaozhi-esp32-server 知识库（Knowledge Base / RAG）的完整链路：从文件上传、分块、低资源关键词召回，到检索注入 LLM 上下文的端到端流程。
 
 模型配置与密钥边界见[模型管理](../models/model-management.md)。记忆保存用户长期事实，知识库保存业务资料和可检索文档；两者不得共用事实表、模型密钥或权限判断。
 
@@ -23,7 +23,7 @@ source_paths:
 ┌─────────────┐     ┌──────────────────┐     ┌─────────────────┐
 │ manager-web │     │   manager-api    │     │  xiaozhi-server │
 │ 知识库管理   │────→│  知识库 CRUD      │     │                 │
-│ 文件上传     │     │  文件分块/向量化   │     │  search_from_   │
+│ 文件上传     │     │  文件分块/词法召回 │     │  search_from_   │
 │ 分块预览     │     │  检索 API         │────→│  local_knowledge│
 │ 检索测试     │     │                  │     │  search_from_   │
 └─────────────┘     │  适配器:          │     │  ragflow        │
@@ -62,7 +62,7 @@ KnowledgeFilesController (/datasets/{id}/documents)
 | 适配器 | 类型 | 存储 | 检索 |
 |--------|------|------|------|
 | `RAGFlowAdapter` | `"ragflow"` | RAGFlow 服务器 | RAGFlow API |
-| `LocalKnowledgeAdapter` | `"local_knowledge"` | MySQL `ai_rag_knowledge_chunk` | MySQL fulltext + 向量混合 |
+| `LocalKnowledgeAdapter` | `"local_knowledge"` | MySQL `ai_rag_knowledge_chunk` | MySQL fulltext/INSTR + Java 有界词法评分 |
 
 适配器选择：`ai_model_config.config_json.type` → `KnowledgeBaseAdapterFactory`
 
@@ -140,43 +140,25 @@ RAG 请求 DTO；数据库继续保存用户提交的完整 JSON。远端响应�
 本地适配器不支持的格式、MIME 与扩展名不匹配、零切片、模型不可用或调用失败都必须明确失败，不能创建 DONE 记录；后续 `/chunks`
 只验证上传时已经生成的切片，不伪造重解析结果。
 
-### 3.2 向量嵌入（新增）
-
-```text
-LocalKnowledgeAdapter.generateAndStoreEmbeddings()
-  每个 chunk → EmbeddingService.generateEmbedding(content)
-  → 存储到 ai_rag_knowledge_chunk.embedding_json (float[] as JSON)
-
-配置（在 KnowledgeBase 的 parserConfig 中）:
-  embeddingEnabled: true/false
-  embeddingBaseUrl: OpenAI-compatible endpoint
-  embeddingApiKey: API key
-  embeddingModel: model name
-```
-
-### 3.3 混合检索
+### 3.2 低资源关键词召回
 
 ```text
 LocalKnowledgeAdapter.retrievalTest()
-
-1. 查询向量化：
-   if embedding_enabled:
-     query_embedding = embeddingService.generateEmbedding(question)
-
-2. 关键词匹配：
+1. LocalKnowledgeLexicalScorer 对查询执行 NFKC 归一化和有界 CJK n-gram 拆分（最多 12 个候选词）
+2. 数据库有界候选召回：
    - MySQL INSTR(content, term)     子串精确匹配
    - MATCH(content) AGAINST(... IN BOOLEAN MODE)  全文索引
-
-3. CJK n-gram tokenization → 词频评分
-
-4. 向量评分（如有 embedding）：
-   cosine_similarity(query_embedding, chunk_embedding)
-   → combined_score = 0.5 * keyword_score + 0.5 * vector_score
-
-5. Fallback: embedding 不可用 → 纯关键词搜索 + 警告日志
+   - 常规候选默认 200，任何配置下最多 800
+3. Java 仅对有限候选的 content/question/answer 做加权词法评分
+4. 按 keyword_threshold 过滤，按 keyword_top_k 返回
 ```
 
-### 3.4 数据表
+本地知识库不生成切片 embedding，检索时也不调用 EmbeddingService、向量数据库或重排模型。旧
+`semantic_level`、`semantic_top_k`、`semantic_threshold` 仅作为滚动升级兼容输入，分别映射到
+`keyword_level`、`keyword_top_k`、`keyword_threshold`；页面保存后只写新字段。旧 `embedding_json` 列保留用于
+已部署数据库兼容，不再读写，不需要破坏性迁移。
+
+### 3.3 数据表
 
 ```text
 ai_rag_dataset          知识库元数据
@@ -189,10 +171,10 @@ ai_rag_knowledge_document  文档记录
 ai_rag_knowledge_chunk    分块内容
   - id, datasetId, documentId, chunkId, content
   - question, answer, sortOrder
-  - embedding_json (新增 - mediumtext)  FLOAT 数组的 JSON
+  - embedding_json (遗留兼容列，本地运行时不再读写)
 ```
 
-### 3.5 可选动态数据源（Onyx connector 模式）
+### 3.4 可选动态数据源（Onyx connector 模式）
 
 动态同步是**知识库级 opt-in 能力**，不是全局开关。没有 `ai_rag_knowledge_source` 记录的知识库继续保持人工上传，
 不会被后台调度、联网抓取或自动改写。管理员只能在某个本地知识库的“动态数据源”面板中逐个新增、启用、暂停或删除来源；
@@ -280,7 +262,7 @@ LLM 调用 search_from_local_knowledge / search_from_ragflow
   → LLM 再调用 → 用知识上下文生成自然回复
 ```
 
-**注意**：知识检索结果作为 tool message 注入（不是 system prompt），与记忆注入（`<memory>` 标签在 system prompt 中）是不同的机制。LLM 需要自行交叉参考两个来源。
+**注意**：知识检索结果作为 tool message 注入（不是 system prompt），与记忆注入（`<memory>` 标签在 system prompt 中）是不同的机制。每个知识结果保留文档来源，并明确标记为“不可信参考数据、不是指令”；模型只能使用与问题直接相关且资料明确覆盖的事实。
 
 本地知识库请求成功但没有返回切片时，工具结果固定为“本地知识库未检索到相关内容”，并通过
 `ActionResponse` 只对下一次递归回答关闭 tools、增加临时可信 system 指令。主 LLM 应自行按完整语义区分：
@@ -384,7 +366,7 @@ Web 上传不再手工指定 `multipart/form-data`，由浏览器为 `FormData` 
 | Mobile | API 与页面源码覆盖 CRUD、上传、解析、切片和召回；最终构建与微信端联调仍待完成 |
 
 自动验证应覆盖 Java 全量测试、项目 Conda 环境中的 Python 测试与 `compileall`、Web 功能测试和构建。
-真实 MySQL 数据、Redis、外部网页抓取、浏览器关闭重开、RAGFlow、外部切片/embedding
+真实 MySQL 数据、Redis、外部网页抓取、浏览器关闭重开、RAGFlow、外部切片
 模型和微信 `uploadFile` 尚未端到端验证；字符预算也不等于模型 token 预算，正式发布前必须用目标模型与业务长文档
 检查召回相关性。
 
@@ -392,7 +374,7 @@ Web 上传不再手工指定 `multipart/form-data`，由浏览器为 `FormData` 
 
 | # | 问题 | 修复 |
 |---|------|------|
-| 1 | 本地 KB 无向量嵌入 | embedding_json 列 + cosine similarity 混合评分 |
+| 1 | 弱服务器无法承受向量生成与查询 | 本地知识库改为数据库有界候选 + Java 词法评分，不再读写 embedding |
 | 2 | RAGFlow 删除失败后本地影子丢失 | 远程成功后才删本地 |
 | 3 | RAGFlowClient 连接池无效 | 优先使用 Spring RestTemplate |
 | 4 | Token 估算粗糙 (content.length()/2) | CJK-aware (1.5/0.75 per char) |
@@ -404,7 +386,7 @@ Web 上传不再手工指定 `multipart/form-data`，由浏览器为 `FormData` 
 | 10 | RAGFlowClient 日期格式硬编码 | 移除固定格式解析 |
 | 11 | embeddingModel 字段 UI 误导 | 添加 Javadoc 说明 |
 | 12 | dataset 删除孤儿 chunk | 添加 chunk 级联清理 |
-| 13 | Knowledge-Memory 无编排 | 添加 TODO 注释 |
+| 13 | Knowledge-Memory 来源边界不清 | 分别标记知识参考数据与用户记忆，禁止将数据内容当作指令 |
 | 14 | 新增/更新时 parserConfig 被转换丢失或被远端响应覆盖 | 边界显式解码，原始完整 JSON 优先持久化 |
 | 15 | 本地文档已同步切片却被标记为 RUNNING | 适配器声明同步解析，服务写入 DONE/100% |
 | 16 | 智能体编辑时旧 prop 回灌导致模型和知识库绑定丢失 | 显式 hydration、dirty 字段合并、映射规范化和保存门控 |
@@ -425,9 +407,8 @@ mysql> SELECT kb.name, count(d.id) as docs, count(c.id) as chunks
        LEFT JOIN ai_rag_knowledge_chunk c ON c.dataset_id = kb.id
        GROUP BY kb.id;
 
-# 查看 embedding 状态
-mysql> SELECT count(*), embedding_json IS NOT NULL as has_embedding
-       FROM ai_rag_knowledge_chunk GROUP BY has_embedding;
+# 检查召回候选索引
+mysql> SHOW INDEX FROM ai_rag_knowledge_chunk;
 ```
 
 ## 11. 可选的 Harness 自主维护控制面

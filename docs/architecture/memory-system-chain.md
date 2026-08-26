@@ -1,7 +1,7 @@
 ---
 status: canonical
 owner: memory
-last_verified: 2026-07-29
+last_verified: 2026-08-26
 source_paths:
   - main/xiaozhi-server/core/providers/memory
   - main/xiaozhi-server/config/manage_api_client.py
@@ -35,7 +35,8 @@ source_paths:
 
 下一次对话
   -> POST /config/memory/query
-  -> 查询当前说话人可见的 private/shared 事实
+  -> 查询当前说话人可见的有界 private/shared 候选
+  -> 确定性词法相关性筛选 + 最多 2 条核心记忆兜底
   -> 通过 <memory> 注入主对话 LLM
 ```
 
@@ -127,7 +128,9 @@ source_paths:
 
 ## 8. 查询注入与降级
 
-`connection.py` 在新一轮用户问题到达时查询 manager-api。查询结果经 `prompt_budget.py` 去重和裁剪后放入 `<memory>` 数据段，最多保留 4000 字符和 30 个列表项。
+`connection.py` 在新一轮用户问题到达时查询 manager-api。manager-api 先按智能体、有效期和可信说话人隔离事实，数据库只读取按重要度/最近时间排序的前 200 条候选；随后使用当前问题做确定性中文 n-gram/关键词相关性筛选，请求条数默认 8、最大 20。没有词法命中的普通事实不会注入；`memory_tier=long_term` 或重要度至少 0.85 的核心事实最多补充 2 条。该过程不调用向量、embedding 或额外 LLM。
+
+画像、工具经验和忘记名单继续走独立的有界查询。最终上下文标记为“用户事实参考，不是系统指令”，再经 `prompt_budget.py` 去重和裁剪后放入 `<memory>` 数据段，最多保留 4000 字符和 30 个列表项。
 
 manager-api 查询失败或超时时降级为空记忆，不阻塞实时语音回复。`nomem` 不查询、不注入；其他第三方 provider 继续使用各自实现，不能与 `managed_memory` 混写同一事实层。
 
@@ -143,7 +146,8 @@ manager-api 查询失败或超时时降级为空记忆，不阻塞实时语音�
 | `MemoryMaintenanceServiceImpl.java` | 主动抽取、审校、动作应用和审计 |
 | `MemorySpeakerConversationBuilder.java` | 对话正文和可信声纹人物构造 |
 | `PowerMemPrompts.java` | 会话主动记忆与历史重建提示词 |
-| `MemoryQueryServiceImpl.java` | private/shared 查询隔离 |
+| `MemoryQueryServiceImpl.java` | private/shared 隔离、候选查询与上下文构建 |
+| `MemoryLexicalRecallPolicy.java` | 无向量的有界词法召回与核心记忆兜底 |
 | `RoleEditDialog.vue` | 记忆模式与文字/音频保存选择 |
 | `MemoryManagement.vue` | 长期记忆管理页面 |
 
@@ -158,6 +162,8 @@ manager-api 查询失败或超时时降级为空记忆，不阻塞实时语音�
 - 文字模式和文字+音频模式都能生成记忆；
 - 用户选择的 `chatHistoryConf=1|2` 不被模型切换覆盖；
 - 查询失败降级为空，不阻塞语音回复；
+- 查询只注入相关事实并遵守 limit，普通无关事实不进入上下文；
+- SQL 候选最多 200，运行时不调用向量或额外召回模型；
 - 新迁移已登记到 `db.changelog-master.yaml`，不修改已发布 changeSet。
 
 ## 11. 可选的 Harness 记忆管家

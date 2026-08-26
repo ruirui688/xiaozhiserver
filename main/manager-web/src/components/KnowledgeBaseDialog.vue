@@ -59,45 +59,26 @@
                 </el-radio-group>
               </el-form-item>
             </el-col>
-            <el-col :span="12">
-              <el-form-item :label="$t('knowledgeBaseDialog.searchType')">
-                <el-radio-group v-model="retrievalForm.search_type" size="small">
-                  <el-radio-button label="semantic">{{ $t('knowledgeBaseDialog.searchTypeSemantic') }}</el-radio-button>
-                  <el-radio-button label="hybrid">{{ $t('knowledgeBaseDialog.searchTypeHybrid') }}</el-radio-button>
-                </el-radio-group>
-              </el-form-item>
-            </el-col>
           </el-row>
+          <el-alert :title="$t('knowledgeBaseDialog.keywordOnlyDescription')" type="info" :closable="false"
+            show-icon class="chunk-mode-alert"></el-alert>
           <el-row :gutter="12">
             <el-col :span="12">
-              <el-form-item :label="$t('knowledgeBaseDialog.semanticLevel')">
-                <el-input-number v-model="retrievalForm.semantic_level" :min="1" :max="5" :step="1"
+              <el-form-item :label="$t('knowledgeBaseDialog.keywordLevel')">
+                <el-input-number v-model="retrievalForm.keyword_level" :min="1" :max="5" :step="1"
                   style="width: 100%"></el-input-number>
               </el-form-item>
             </el-col>
             <el-col :span="12">
-              <el-form-item :label="$t('knowledgeBaseDialog.semanticTopK')">
-                <el-input-number v-model="retrievalForm.semantic_top_k" :min="1" :max="50" :step="1"
+              <el-form-item :label="$t('knowledgeBaseDialog.keywordTopK')">
+                <el-input-number v-model="retrievalForm.keyword_top_k" :min="1" :max="50" :step="1"
                   style="width: 100%"></el-input-number>
               </el-form-item>
             </el-col>
           </el-row>
-          <el-row :gutter="12">
-            <el-col :span="12">
-              <el-form-item :label="$t('knowledgeBaseDialog.faqThreshold')">
-                <el-input-number v-model="retrievalForm.faq_threshold" :min="0" :max="1" :step="0.01" :precision="2"
-                  style="width: 100%"></el-input-number>
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item :label="$t('knowledgeBaseDialog.semanticThreshold')">
-                <el-input-number v-model="retrievalForm.semantic_threshold" :min="0" :max="1" :step="0.01" :precision="2"
-                  style="width: 100%"></el-input-number>
-              </el-form-item>
-            </el-col>
-          </el-row>
-          <el-form-item :label="$t('knowledgeBaseDialog.rerankEnabled')">
-            <el-switch v-model="retrievalForm.rerank_enabled"></el-switch>
+          <el-form-item :label="$t('knowledgeBaseDialog.keywordThreshold')">
+            <el-input-number v-model="retrievalForm.keyword_threshold" :min="0" :max="1" :step="0.01" :precision="2"
+              style="width: 100%"></el-input-number>
           </el-form-item>
         </el-collapse-item>
       </el-collapse>
@@ -235,12 +216,9 @@ export default {
     defaultRetrievalForm() {
       return {
         mode: "normal",
-        search_type: "semantic",
-        semantic_level: 4,
-        semantic_top_k: 10,
-        faq_threshold: 1.0,
-        semantic_threshold: 0.05,
-        rerank_enabled: false
+        keyword_level: 4,
+        keyword_top_k: 10,
+        keyword_threshold: 0.05
       };
     },
     normalizeNumber(value, defaultValue) {
@@ -282,31 +260,21 @@ export default {
           ...retrievalDefaults,
           ...retrievalConfig,
           mode: this.getConfigValue(retrievalConfig, parserConfig, "mode", retrievalDefaults.mode),
-          search_type: this.getConfigValue(
-            retrievalConfig,
-            parserConfig,
-            "search_type",
-            retrievalDefaults.search_type
+          keyword_level: this.normalizeNumber(
+            this.getConfigValue(retrievalConfig, parserConfig, "keyword_level",
+              this.getConfigValue(retrievalConfig, parserConfig, "semantic_level")),
+            retrievalDefaults.keyword_level
           ),
-          semantic_level: this.normalizeNumber(
-            this.getConfigValue(retrievalConfig, parserConfig, "semantic_level"),
-            retrievalDefaults.semantic_level
+          keyword_top_k: this.normalizeNumber(
+            this.getConfigValue(retrievalConfig, parserConfig, "keyword_top_k",
+              this.getConfigValue(retrievalConfig, parserConfig, "semantic_top_k")),
+            retrievalDefaults.keyword_top_k
           ),
-          semantic_top_k: this.normalizeNumber(
-            this.getConfigValue(retrievalConfig, parserConfig, "semantic_top_k"),
-            retrievalDefaults.semantic_top_k
-          ),
-          faq_threshold: this.normalizeNumber(
-            this.getConfigValue(retrievalConfig, parserConfig, "faq_threshold"),
-            retrievalDefaults.faq_threshold
-          ),
-          semantic_threshold: this.normalizeNumber(
-            this.getConfigValue(retrievalConfig, parserConfig, "semantic_threshold"),
-            retrievalDefaults.semantic_threshold
-          ),
-          rerank_enabled: typeof retrievalConfig.rerank_enabled === "boolean"
-            ? retrievalConfig.rerank_enabled
-            : !!parserConfig.rerank_enabled
+          keyword_threshold: this.normalizeNumber(
+            this.getConfigValue(retrievalConfig, parserConfig, "keyword_threshold",
+              this.getConfigValue(retrievalConfig, parserConfig, "semantic_threshold")),
+            retrievalDefaults.keyword_threshold
+          )
         };
         this.parserConfigValue = parserConfig;
       } catch (e) {
@@ -322,6 +290,12 @@ export default {
       delete config.llm_model;
       delete config.llm_max_input_chars;
       delete config.llm_max_tokens;
+      delete config.search_type;
+      delete config.semantic_level;
+      delete config.semantic_top_k;
+      delete config.faq_threshold;
+      delete config.semantic_threshold;
+      delete config.rerank_enabled;
       return JSON.stringify({
         ...config,
         max_chunk_chars: 1200,
@@ -330,12 +304,9 @@ export default {
         llm_model_id: this.parserForm.llm_model_id,
         retrieval_config: {
           mode: this.retrievalForm.mode,
-          search_type: this.retrievalForm.search_type,
-          semantic_level: this.retrievalForm.semantic_level,
-          semantic_top_k: this.retrievalForm.semantic_top_k,
-          faq_threshold: this.retrievalForm.faq_threshold,
-          semantic_threshold: this.retrievalForm.semantic_threshold,
-          rerank_enabled: !!this.retrievalForm.rerank_enabled
+          keyword_level: this.retrievalForm.keyword_level,
+          keyword_top_k: this.retrievalForm.keyword_top_k,
+          keyword_threshold: this.retrievalForm.keyword_threshold
         }
       });
     },

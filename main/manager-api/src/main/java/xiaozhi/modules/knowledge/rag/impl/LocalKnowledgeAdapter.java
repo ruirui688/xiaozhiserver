@@ -7,7 +7,6 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -58,9 +57,9 @@ import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeConfigParser;
 import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeDocumentParser;
 import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeDocumentFormats;
 import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeLlmBudget;
+import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeLexicalScorer;
 import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeProcessingStrategy;
 import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeTextSplitter;
-import xiaozhi.modules.llm.service.EmbeddingService;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
 
@@ -79,9 +78,8 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private static final int MIN_ADAPTIVE_SECTION_CHARS = 1000;
     private static final int DEFAULT_RETRIEVAL_TOP_K = 10;
     private static final int DEFAULT_RETRIEVAL_LEVEL = 4;
-    private static final int DEFAULT_CANDIDATE_LIMIT = 400;
-    private static final int MAX_CANDIDATE_LIMIT = 2000;
-    private static final int MAX_RETRIEVAL_TERMS = 32;
+    private static final int DEFAULT_CANDIDATE_LIMIT = 200;
+    private static final int MAX_CANDIDATE_LIMIT = 800;
 
     private LocalKnowledgeConfigParser configParser;
     private ObjectMapper objectMapper;
@@ -104,19 +102,12 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private String llmThinking;
     private String llmReasoningEffort;
     private RestTemplate llmRestTemplate;
-    private EmbeddingService embeddingService;
-    private boolean embeddingEnabled;
-    private String embeddingBaseUrl;
-    private String embeddingApiKey;
-    private String embeddingModel;
     private boolean hasRetrievalConfig;
     private String retrievalMode = "normal";
-    private String searchType = "semantic";
-    private int semanticLevel = DEFAULT_RETRIEVAL_LEVEL;
-    private int semanticTopK = DEFAULT_RETRIEVAL_TOP_K;
-    private float faqThreshold = 1.0F;
-    private float semanticThreshold = 0.05F;
-    private boolean rerankEnabled;
+    private int keywordLevel = DEFAULT_RETRIEVAL_LEVEL;
+    private int keywordTopK = DEFAULT_RETRIEVAL_TOP_K;
+    private float keywordThreshold = 0.05F;
+    private LocalKnowledgeLexicalScorer lexicalScorer = new LocalKnowledgeLexicalScorer(DEFAULT_RETRIEVAL_LEVEL);
 
     @Override
     public String getAdapterType() {
@@ -161,35 +152,16 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         llmMaxTotalPromptChars = LocalKnowledgeConfigParser.clamp(environment.getProperty(
                 "knowledge.local-chunking.max-total-prompt-chars", Integer.class,
                 DEFAULT_LLM_MAX_TOTAL_PROMPT_CHARS), 10000, 10000000);
-        // [Issue #1] Initialize EmbeddingService for vector similarity search
-        try {
-            this.embeddingService = SpringContextUtils.getBean(EmbeddingService.class);
-        } catch (Exception e) {
-            log.warn("本地知识库无法获取 EmbeddingService，向量检索将不可用: {}", e.getMessage());
-            this.embeddingService = null;
-        }
-        this.embeddingBaseUrl = configParser.getString(
-                "embedding_base_url", configParser.getString("llm_base_url", ""));
-        this.embeddingApiKey = configParser.getString(
-                "embedding_api_key", configParser.getString("llm_api_key", ""));
-        this.embeddingModel = configParser.getString("embedding_model", "");
-        this.embeddingEnabled = embeddingService != null
-                && StringUtils.isNoneBlank(embeddingBaseUrl, embeddingApiKey, embeddingModel)
-                && !LocalKnowledgeConfigParser.isPlaceholderSecret(embeddingApiKey);
-        if (this.embeddingEnabled) {
-            log.info("本地知识库向量检索已启用, model={}", embeddingModel);
-        }
         Map<String, Object> retrievalConfig = configParser.getMap("retrieval_config");
         hasRetrievalConfig = retrievalConfig != null && !retrievalConfig.isEmpty();
         retrievalMode = configParser.getString(retrievalConfig, "mode", configParser.getString("mode", "normal"));
-        searchType = configParser.getString(
-                retrievalConfig, "search_type", configParser.getString("search_type", "semantic"));
-        semanticLevel = configParser.getInt(retrievalConfig, "semantic_level", DEFAULT_RETRIEVAL_LEVEL, 1, 5);
-        semanticTopK = configParser.getInt(retrievalConfig, "semantic_top_k", DEFAULT_RETRIEVAL_TOP_K, 1, 50);
-        faqThreshold = configParser.getFloat(retrievalConfig, "faq_threshold", 1.0F, 0F, 1F);
-        semanticThreshold = configParser.getFloat(retrievalConfig, "semantic_threshold", 0.05F, 0F, 1F);
-        rerankEnabled = configParser.getBoolean(
-                retrievalConfig, "rerank_enabled", configParser.getBoolean("rerank_enabled", false));
+        keywordLevel = configParser.getInt(retrievalConfig, "keyword_level",
+                configParser.getInt(retrievalConfig, "semantic_level", DEFAULT_RETRIEVAL_LEVEL, 1, 5), 1, 5);
+        keywordTopK = configParser.getInt(retrievalConfig, "keyword_top_k",
+                configParser.getInt(retrievalConfig, "semantic_top_k", DEFAULT_RETRIEVAL_TOP_K, 1, 50), 1, 50);
+        keywordThreshold = configParser.getFloat(retrievalConfig, "keyword_threshold",
+                configParser.getFloat(retrievalConfig, "semantic_threshold", 0.05F, 0F, 1F), 0F, 1F);
+        lexicalScorer = new LocalKnowledgeLexicalScorer(keywordLevel);
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory();
         factory.setReadTimeout(java.time.Duration.ofSeconds(llmTimeoutSeconds));
         this.llmRestTemplate = new RestTemplate(factory);
@@ -337,33 +309,15 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         String question = StringUtils.defaultString(req.getQuestion());
         int pageSize = LocalKnowledgeConfigParser.clamp(req.getPageSize() == null ? 10 : req.getPageSize(), 1, 100);
         int resultLimit = resolveResultLimit(req, pageSize);
-        Set<String> terms = tokenize(question.toLowerCase());
-        List<String> candidateTerms = selectCandidateTerms(terms);
+        Set<String> terms = lexicalScorer.tokenize(question);
+        List<String> candidateTerms = lexicalScorer.selectCandidateTerms(terms);
         int candidateLimit = resolveCandidateLimit(req, resultLimit);
-        String fulltextQuery = buildFulltextQuery(candidateTerms);
+        String fulltextQuery = lexicalScorer.buildFulltextQuery(candidateTerms);
         List<KnowledgeChunkEntity> chunks = loadRetrievalCandidates(req, candidateTerms, fulltextQuery, candidateLimit);
-
-        // [Issue #1] 生成查询向量用于相似度检索
-        float[] queryEmbedding;
-        if (embeddingEnabled) {
-            queryEmbedding = embeddingService.getEmbedding(
-                    question, embeddingBaseUrl, embeddingApiKey, embeddingModel);
-            if (queryEmbedding == null) {
-                log.warn("本地知识库向量嵌入不可用，已回退关键词检索");
-            }
-        } else {
-            queryEmbedding = null;
-        }
-        boolean vectorAvailable = queryEmbedding != null;
 
         Map<String, DocumentEntity> docs = loadDocs(chunks);
         List<ScoredChunk> scored = chunks.stream()
-                .map(chunk -> {
-                    float keywordScore = score(question, chunk, terms);
-                    float vecScore = computeVectorSimilarity(queryEmbedding, chunk.getEmbeddingJson());
-                    float combinedScore = computeCombinedScore(keywordScore, vecScore, vectorAvailable);
-                    return new ScoredChunk(chunk, combinedScore, keywordScore, vecScore);
-                })
+                .map(chunk -> new ScoredChunk(chunk, lexicalScorer.score(question, chunk, terms)))
                 .filter(item -> shouldKeepScore(question, item.getScore()))
                 .sorted(Comparator.comparing(ScoredChunk::getScore).reversed())
                 .limit(resultLimit)
@@ -381,8 +335,8 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
                     .datasetId(chunk.getDatasetId())
                     .documentName(doc == null ? null : doc.getName())
                     .similarity(item.getScore())
-                    .termSimilarity(item.getKeywordScore())
-                    .vectorSimilarity(item.getVectorScore())
+                    .termSimilarity(item.getScore())
+                    .vectorSimilarity(null)
                     .index(index++)
                     .questions(StringUtils.isBlank(chunk.getQuestion()) ? null : List.of(chunk.getQuestion()))
                     .build());
@@ -530,9 +484,6 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         configs.put("max_chunk_chars", "单个切片的最大字符数");
         configs.put("llm_model_id", "模型管理中已启用且测试通过的OpenAI兼容LLM配置ID");
         configs.put("llm_timeout_seconds", "单次模型请求超时时间");
-        configs.put("embedding_model", "嵌入向量模型名称（用于向量检索）");
-        configs.put("embedding_base_url", "嵌入向量API地址（默认复用llm_base_url）");
-        configs.put("embedding_api_key", "嵌入向量API密钥（默认复用llm_api_key）");
         return configs.entrySet().stream()
                 .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
     }
@@ -544,9 +495,6 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         defaults.put("max_chunk_chars", DEFAULT_MAX_CHUNK_CHARS);
         defaults.put("llm_model_id", "");
         defaults.put("llm_timeout_seconds", DEFAULT_LLM_TIMEOUT_SECONDS);
-        defaults.put("embedding_model", "");
-        defaults.put("embedding_base_url", DEFAULT_LLM_BASE_URL);
-        defaults.put("embedding_api_key", "");
         return defaults;
     }
 
@@ -677,8 +625,6 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             chunkDao.insert(entity);
             index++;
         }
-        // [Issue #1] 为新切片生成嵌入向量
-        generateAndStoreEmbeddings(datasetId, documentId);
     }
 
     private List<LocalChunk> parseFile(String filename, InputStream inputStream,
@@ -972,22 +918,16 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         if (req.getTopK() != null && req.getTopK() > 0) {
             limit = Math.min(limit, LocalKnowledgeConfigParser.clamp(req.getTopK(), 1, 100));
         } else if (hasRetrievalConfig) {
-            limit = Math.min(limit, semanticTopK);
+            limit = Math.min(limit, keywordTopK);
         }
         return Math.max(1, limit);
     }
 
     private int resolveCandidateLimit(RetrievalDTO.TestReq req, int resultLimit) {
-        int requestedTopK = req.getTopK() == null || req.getTopK() < 1 ? semanticTopK : req.getTopK();
+        int requestedTopK = req.getTopK() == null || req.getTopK() < 1 ? keywordTopK : req.getTopK();
         int baseLimit = Math.max(DEFAULT_CANDIDATE_LIMIT, Math.max(resultLimit, requestedTopK) * 20);
-        if (StringUtils.equalsIgnoreCase(searchType, "hybrid")) {
-            baseLimit = Math.max(baseLimit, resultLimit * 30);
-        }
         if (StringUtils.equalsIgnoreCase(retrievalMode, "exhibition")) {
             baseLimit = Math.max(baseLimit, resultLimit * 25);
-        }
-        if (rerankEnabled) {
-            baseLimit = Math.max(baseLimit, resultLimit * 30);
         }
         return LocalKnowledgeConfigParser.clamp(baseLimit, resultLimit, MAX_CANDIDATE_LIMIT);
     }
@@ -996,156 +936,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         if (StringUtils.isBlank(question)) {
             return true;
         }
-        if (score >= faqThreshold) {
-            return true;
-        }
-        return score >= semanticThreshold;
-    }
-
-    private List<String> selectCandidateTerms(Set<String> terms) {
-        if (terms == null || terms.isEmpty()) {
-            return Collections.emptyList();
-        }
-        return terms.stream()
-                .filter(StringUtils::isNotBlank)
-                .filter(term -> term.length() >= 2 || containsNonCjk(term))
-                .sorted(Comparator
-                        .comparingInt(String::length).reversed()
-                        .thenComparing(Comparator.naturalOrder()))
-                .limit(MAX_RETRIEVAL_TERMS)
-                .collect(Collectors.toList());
-    }
-
-    private String buildFulltextQuery(List<String> terms) {
-        if (terms == null || terms.isEmpty()) {
-            return null;
-        }
-        return terms.stream()
-                .filter(term -> term.length() >= 2)
-                .limit(12)
-                .map(term -> "+" + term.replaceAll("[+\\-<>()~*\"@]+", ""))
-                .filter(term -> term.length() > 1)
-                .collect(Collectors.joining(" "));
-    }
-
-    private Float score(String question, KnowledgeChunkEntity chunk, Set<String> terms) {
-        String content = String.join("\n",
-                StringUtils.defaultString(chunk.getContent()),
-                StringUtils.defaultString(chunk.getQuestion()),
-                StringUtils.defaultString(chunk.getAnswer())).toLowerCase();
-        String q = StringUtils.defaultString(question).toLowerCase();
-        if (StringUtils.isBlank(q)) {
-            return 1F;
-        }
-        if (content.contains(q)) {
-            return 1F;
-        }
-        if (terms.isEmpty()) {
-            return 0F;
-        }
-        float totalWeight = 0F;
-        float hitWeight = 0F;
-        int hitCount = 0;
-        boolean hasStrongHit = false;
-        for (String term : terms) {
-            float weight = termWeight(term);
-            totalWeight += weight;
-            if (content.contains(term)) {
-                hitWeight += weight;
-                hitCount++;
-                if (term.length() >= 3 || containsNonCjk(term)) {
-                    hasStrongHit = true;
-                }
-            }
-        }
-        if (hitCount == 0 || totalWeight <= 0F) {
-            return 0F;
-        }
-        float score = hitWeight / totalWeight;
-        if (hasStrongHit) {
-            score = Math.max(score, 0.35F);
-        } else if (hitCount < 2 || score < 0.18F) {
-            return 0F;
-        }
-        return Math.min(score, 0.99F);
-    }
-
-    private Set<String> tokenize(String text) {
-        Set<String> terms = new LinkedHashSet<>();
-        for (String rawTerm : text.split("[\\s,，。！？；;:：、]+")) {
-            String term = StringUtils.trimToEmpty(rawTerm);
-            if (StringUtils.isBlank(term)) {
-                continue;
-            }
-            addTermWithLimit(terms, term);
-            if (containsCjk(term) && term.length() > 2) {
-                addCjkNgrams(terms, term, 4);
-                if (semanticLevel >= 2) {
-                    addCjkNgrams(terms, term, 3);
-                }
-                if (semanticLevel >= 4) {
-                    addCjkNgrams(terms, term, 2);
-                }
-            }
-            if (terms.size() >= MAX_RETRIEVAL_TERMS) {
-                break;
-            }
-        }
-        return terms;
-    }
-
-    private void addCjkNgrams(Set<String> terms, String text, int size) {
-        if (text.length() < size) {
-            return;
-        }
-        for (int i = 0; i <= text.length() - size; i++) {
-            String gram = text.substring(i, i + size);
-            if (containsCjk(gram) && !isWeakCjkTerm(gram)) {
-                addTermWithLimit(terms, gram);
-                if (terms.size() >= MAX_RETRIEVAL_TERMS) {
-                    return;
-                }
-            }
-        }
-    }
-
-    private void addTermWithLimit(Set<String> terms, String term) {
-        if (terms.size() < MAX_RETRIEVAL_TERMS) {
-            terms.add(term);
-        }
-    }
-
-    private float termWeight(String term) {
-        int length = term.length();
-        if (length >= 4) {
-            return 4F;
-        }
-        if (length == 3) {
-            return 2F;
-        }
-        return 1F;
-    }
-
-    private boolean containsCjk(String text) {
-        for (int i = 0; i < text.length(); i++) {
-            if (Character.UnicodeScript.of(text.charAt(i)) == Character.UnicodeScript.HAN) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private boolean containsNonCjk(String text) {
-        for (int i = 0; i < text.length(); i++) {
-            if (Character.UnicodeScript.of(text.charAt(i)) != Character.UnicodeScript.HAN) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private boolean isWeakCjkTerm(String term) {
-        return Set.of("什么", "适合", "推荐", "可以", "一个", "一下", "这个", "那个", "现在").contains(term);
+        return score >= keywordThreshold;
     }
 
     private Map<String, DocumentEntity> loadDocs(List<KnowledgeChunkEntity> chunks) {
@@ -1195,100 +986,6 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         return Math.max(1L, estimated);
     }
 
-    /**
-     * [Issue #1] 为新插入的切片生成向量嵌入。
-     * 查询新插入的切片列表，逐条生成 embedding 并写回 database。
-     * 若 embedding 服务不可用，静默跳过。
-     */
-    private void generateAndStoreEmbeddings(String datasetId, String documentId) {
-        if (!embeddingEnabled) {
-            return;
-        }
-        List<KnowledgeChunkEntity> storedChunks = chunkDao.selectList(
-                new QueryWrapper<KnowledgeChunkEntity>()
-                        .eq("dataset_id", datasetId)
-                        .eq("document_id", documentId)
-                        .orderByAsc("sort_order"));
-        for (KnowledgeChunkEntity chunk : storedChunks) {
-            try {
-                String text = String.join("\n",
-                        StringUtils.defaultString(chunk.getContent()),
-                        StringUtils.defaultString(chunk.getQuestion()),
-                        StringUtils.defaultString(chunk.getAnswer()));
-                float[] embedding = embeddingService.getEmbedding(
-                        text, embeddingBaseUrl, embeddingApiKey, embeddingModel);
-                if (embedding != null && embedding.length > 0) {
-                    String json = objectMapper.writeValueAsString(embedding);
-                    KnowledgeChunkEntity update = new KnowledgeChunkEntity();
-                    update.setId(chunk.getId());
-                    update.setEmbeddingJson(json);
-                    chunkDao.updateById(update);
-                }
-            } catch (Exception e) {
-                log.warn("生成chunk embedding失败, chunkId={}: {}", chunk.getChunkId(), e.getMessage());
-            }
-        }
-    }
-
-    /**
-     * [Issue #1] 计算两个 float 数组的余弦相似度。
-     */
-    private float cosineSimilarity(float[] a, float[] b) {
-        if (a == null || b == null || a.length != b.length || a.length == 0) {
-            return 0F;
-        }
-        double dotProduct = 0, normA = 0, normB = 0;
-        for (int i = 0; i < a.length; i++) {
-            dotProduct += (double) a[i] * b[i];
-            normA += (double) a[i] * a[i];
-            normB += (double) b[i] * b[i];
-        }
-        if (normA <= 0 || normB <= 0) {
-            return 0F;
-        }
-        return (float) (dotProduct / (Math.sqrt(normA) * Math.sqrt(normB)));
-    }
-
-    /**
-     * [Issue #1] 将 JSON 格式的嵌入向量反序列化为 float[]。
-     */
-    private float[] parseEmbeddingJson(String embeddingJson) {
-        if (StringUtils.isBlank(embeddingJson)) {
-            return null;
-        }
-        try {
-            return objectMapper.readValue(embeddingJson, float[].class);
-        } catch (Exception e) {
-            log.debug("解析embedding_json失败: {}", e.getMessage());
-            return null;
-        }
-    }
-
-    /**
-     * [Issue #1] 计算 query 与 chunk 的向量相似度。
-     */
-    private float computeVectorSimilarity(float[] queryEmbedding, String chunkEmbeddingJson) {
-        if (queryEmbedding == null || StringUtils.isBlank(chunkEmbeddingJson)) {
-            return 0F;
-        }
-        float[] chunkEmbedding = parseEmbeddingJson(chunkEmbeddingJson);
-        if (chunkEmbedding == null) {
-            return 0F;
-        }
-        return cosineSimilarity(queryEmbedding, chunkEmbedding);
-    }
-
-    /**
-     * [Issue #1] 融合关键词得分和向量相似度得到最终得分。
-     */
-    private float computeCombinedScore(float keywordScore, float vectorScore, boolean embeddingAvailable) {
-        if (!embeddingAvailable || vectorScore <= 0F) {
-            return keywordScore;
-        }
-        // 关键词匹配和向量检索各占 50% 权重
-        return 0.5F * keywordScore + 0.5F * vectorScore;
-    }
-
     private String newId() {
         return UUID.randomUUID().toString().replace("-", "");
     }
@@ -1306,8 +1003,6 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     @AllArgsConstructor
     private static class ScoredChunk {
         private KnowledgeChunkEntity chunk;
-        private Float score; // Combined score (keyword + vector weighted)
-        private Float keywordScore; // Keyword overlap score
-        private Float vectorScore; // Embedding cosine similarity
+        private Float score;
     }
 }

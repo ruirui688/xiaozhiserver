@@ -82,6 +82,13 @@ async function save() {
     delete config.llm_base_url
     delete config.llm_api_key
     delete config.llm_model
+    const existingRetrieval = { ...(config.retrieval_config || {}) }
+    const retrievalConfig = {
+      mode: existingRetrieval.mode || 'normal',
+      keyword_level: Number(existingRetrieval.keyword_level ?? existingRetrieval.semantic_level) || 4,
+      keyword_top_k: Number(existingRetrieval.keyword_top_k ?? existingRetrieval.semantic_top_k) || 10,
+      keyword_threshold: Number(existingRetrieval.keyword_threshold ?? existingRetrieval.semantic_threshold) || 0.05,
+    }
     const parserConfig = JSON.stringify({
       ...config,
       max_chunk_chars: 1200,
@@ -89,15 +96,7 @@ async function save() {
       llm_model_id: models.value[modelIndex.value].id,
       llm_max_input_chars: Math.min(20000, Math.max(500, Number(maxInputChars.value) || 12000)),
       llm_max_tokens: Math.min(8000, Math.max(200, Number(maxTokens.value) || 4000)),
-      retrieval_config: config.retrieval_config || {
-        mode: 'normal',
-        search_type: 'semantic',
-        semantic_level: 4,
-        semantic_top_k: 10,
-        faq_threshold: 1,
-        semantic_threshold: 0.05,
-        rerank_enabled: false,
-      },
+      retrieval_config: retrievalConfig,
     })
     await updateKnowledgeBase(datasetId.value, { ...knowledgeBase.value, parserConfig })
     if (!pageAlive)

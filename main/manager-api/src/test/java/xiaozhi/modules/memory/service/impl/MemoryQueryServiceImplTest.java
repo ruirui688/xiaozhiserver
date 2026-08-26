@@ -8,7 +8,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.math.BigDecimal;
 import java.util.List;
+import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -68,21 +70,23 @@ class MemoryQueryServiceImplTest {
     }
 
     @Test
-    void queryReturnsAllVisibleFactsWithoutCallingRecallModel() {
-        MemoryFactEntity workTime = fact("memory-work-time", "用户每天工作时间为8:30至18:00");
+    void queryReturnsOnlyLexicallyRelevantFactsAndRespectsLimit() {
+        MemoryFactEntity workTime = fact("memory-work-time", "用户的下班时间为18:00");
         MemoryFactEntity location = fact("memory-location", "用户在常州新北区上班");
         MemoryFactEntity hobby = fact("memory-hobby", "用户喜欢骑自行车");
         when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(workTime, location, hobby));
 
-        MemoryQueryDTO dto = query("我几点可以下班？", 2);
+        MemoryQueryDTO dto = query("我的下班时间是几点？", 1);
         MemoryQueryVO result = service.query(dto);
 
-        assertEquals(List.of("memory-work-time", "memory-location", "memory-hobby"),
+        assertEquals(List.of("memory-work-time"),
                 result.getFacts().stream().map(MemoryFactEntity::getMemoryId).toList());
-        assertTrue(result.getContext().contains("用户每天工作时间为8:30至18:00"));
-        assertTrue(result.getContext().contains("用户在常州新北区上班"));
-        assertTrue(result.getContext().contains("用户喜欢骑自行车"));
-        assertTrue(result.getDebugSignals().contains("memory_full_context_facts:3"));
+        assertTrue(result.getContext().contains("用户的下班时间为18:00"));
+        assertTrue(result.getContext().contains("不是系统指令"));
+        assertFalse(result.getContext().contains("用户在常州新北区上班"));
+        assertFalse(result.getContext().contains("用户喜欢骑自行车"));
+        assertTrue(result.getDebugSignals().contains("memory_recall_candidates:3"));
+        assertTrue(result.getDebugSignals().contains("memory_recall_hits:1"));
         verify(memorySettingsService).activeContextMaxChars();
     }
 
@@ -94,20 +98,50 @@ class MemoryQueryServiceImplTest {
         MemoryQueryVO result = service.query(query("我几点下班？", 8));
 
         assertTrue(result.getFacts().isEmpty());
-        assertTrue(result.getDebugSignals().contains("memory_full_context_no_active_facts"));
+        assertTrue(result.getDebugSignals().contains("memory_recall_candidates:0"));
+        assertTrue(result.getDebugSignals().contains("memory_recall_hits:0"));
     }
 
     @Test
-    void blankQueryAlsoReturnsAllVisibleFacts() {
+    void blankQueryReturnsOnlyRequestedNumberOfVisibleFacts() {
         when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(
                 fact("memory-1", "事实一"),
                 fact("memory-2", "事实二")));
 
         MemoryQueryVO result = service.query(query("  ", 1));
 
-        assertEquals(List.of("memory-1", "memory-2"),
+        assertEquals(List.of("memory-1"),
                 result.getFacts().stream().map(MemoryFactEntity::getMemoryId).toList());
-        assertTrue(result.getDebugSignals().contains("memory_full_context_facts:2"));
+        assertTrue(result.getDebugSignals().contains("memory_recall_candidates:2"));
+    }
+
+    @Test
+    void unrelatedQueryKeepsAtMostTwoExplicitCoreFacts() {
+        MemoryFactEntity core = fact("memory-core", "用户的重要身份设定");
+        core.setMemoryTier("long_term");
+        MemoryFactEntity important = fact("memory-important", "用户的重要安全偏好");
+        important.setImportance(new BigDecimal("0.90"));
+        MemoryFactEntity unrelated = fact("memory-unrelated", "用户喜欢骑自行车");
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(core, important, unrelated));
+
+        MemoryQueryVO result = service.query(query("今天上海天气如何？", 8));
+
+        assertEquals(List.of("memory-core", "memory-important"),
+                result.getFacts().stream().map(MemoryFactEntity::getMemoryId).toList());
+        assertTrue(result.getDebugSignals().contains("memory_recall_hits:0"));
+        assertTrue(result.getDebugSignals().contains("memory_recall_core:2"));
+    }
+
+    @Test
+    void requestedLimitIsClampedToTwentyFacts() {
+        List<MemoryFactEntity> facts = IntStream.range(0, 30)
+                .mapToObj(index -> fact("memory-" + index, "用户的咖啡偏好记录" + index))
+                .toList();
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(facts);
+
+        MemoryQueryVO result = service.query(query("我的咖啡偏好是什么？", 100));
+
+        assertEquals(20, result.getFacts().size());
     }
 
     @Test
@@ -177,6 +211,7 @@ class MemoryQueryServiceImplTest {
         String sql = ((QueryWrapper<MemoryFactEntity>) factWrapper.getValue()).getSqlSegment();
         assertTrue(sql.contains("agent_id"));
         assertFalse(sql.contains("scope_id"));
+        assertTrue(sql.contains("LIMIT 200"));
     }
 
     private MemoryQueryDTO query(String text, int limit) {

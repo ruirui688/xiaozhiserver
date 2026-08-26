@@ -11,12 +11,9 @@ const component = loadVueComponent("src/components/KnowledgeBaseDialog.vue", {
 describe("knowledge processing strategy configuration", () => {
   const retrievalForm = {
     mode: "normal",
-    search_type: "semantic",
-    semantic_level: 4,
-    semantic_top_k: 10,
-    faq_threshold: 1,
-    semantic_threshold: 0.05,
-    rerank_enabled: false,
+    keyword_level: 4,
+    keyword_top_k: 10,
+    keyword_threshold: 0.05,
   };
 
   test("persists direct processing without an LLM model", () => {
@@ -37,6 +34,12 @@ describe("knowledge processing strategy configuration", () => {
     assert.equal("llm_api_key" in config, false);
     assert.equal("llm_max_input_chars" in config, false);
     assert.equal("llm_max_tokens" in config, false);
+    assert.deepEqual(config.retrieval_config, {
+      mode: "normal",
+      keyword_level: 4,
+      keyword_top_k: 10,
+      keyword_threshold: 0.05,
+    });
   });
 
   test("persists the managed model for LLM enhanced processing", () => {
@@ -73,5 +76,7 @@ describe("knowledge processing strategy configuration", () => {
     assert.equal(source.includes('label="llm_enhanced"'), true);
     assert.equal(source.includes("parserForm.llm_max_input_chars"), false);
     assert.equal(source.includes("parserForm.llm_max_tokens"), false);
+    assert.equal(source.includes("retrievalForm.search_type"), false);
+    assert.equal(source.includes("retrievalForm.rerank_enabled"), false);
   });
 });

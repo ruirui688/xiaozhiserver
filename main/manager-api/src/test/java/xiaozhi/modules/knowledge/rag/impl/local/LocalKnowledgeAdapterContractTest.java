@@ -85,6 +85,9 @@ class LocalKnowledgeAdapterContractTest {
         assertFalse(adapter.getSupportedConfig().containsKey("llm_max_tokens"));
         assertFalse(adapter.getDefaultConfig().containsKey("llm_max_input_chars"));
         assertFalse(adapter.getDefaultConfig().containsKey("llm_max_tokens"));
+        assertFalse(adapter.getSupportedConfig().containsKey("embedding_model"));
+        assertFalse(adapter.getSupportedConfig().containsKey("embedding_api_key"));
+        assertFalse(adapter.getDefaultConfig().containsKey("embedding_model"));
     }
 
     @Test

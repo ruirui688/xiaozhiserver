@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: architecture
-last_verified: 2026-08-25
+last_verified: 2026-08-26
 source_paths:
   - Dockerfile-server-base
   - main/xiaozhi-server/
@@ -15,7 +15,7 @@ source_paths:
 
 > 本页由 `scripts/docs-facts` 生成，请勿手工编辑。运行 `scripts/docs-facts` 更新，运行 `scripts/docs-facts --check` 检查漂移。
 
-生成日期：`2026-08-25`（UTC）
+生成日期：`2026-08-26`（UTC）
 
 ## 技术栈版本
 
@@ -33,7 +33,7 @@ source_paths:
 | 模块 | 源码文件 | 测试文件 | 统计口径 |
 | --- | ---: | ---: | --- |
 | xiaozhi-server | 278 | 79 | 源码为非 `tests/` 的 `*.py`；测试为 `test_*.py` |
-| manager-api | 633 | 90 | `src/main/**/*.java`；`src/test/**/*Test.java` |
+| manager-api | 635 | 91 | `src/main/**/*.java`；`src/test/**/*Test.java` |
 | manager-web | 139 | 23 | `src/` 下 `*.vue/*.js/*.ts/*.mjs`；`*.spec.*/*.test.*` |
 | manager-mobile | 85 | 5 | `src/` 下 `*.vue/*.js/*.ts/*.mjs`；`*.spec.*/*.test.*` |
 
@@ -70,7 +70,7 @@ source_paths:
 | `main/xiaozhi-server/core/connection.py` | 2837 |
 | `main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelCatalogServiceImpl.java` | 1826 |
 | `main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelTestServiceImpl.java` | 1351 |
-| `main/manager-api/src/main/java/xiaozhi/modules/knowledge/rag/impl/LocalKnowledgeAdapter.java` | 1313 |
+| `main/manager-api/src/main/java/xiaozhi/modules/knowledge/rag/impl/LocalKnowledgeAdapter.java` | 1008 |
 | `main/manager-api/src/main/java/xiaozhi/modules/memory/service/impl/MemoryMaintenanceServiceImpl.java` | 1237 |
 | `main/manager-web/src/views/ModelConfig.vue` | 1917 |
 | `main/manager-web/src/components/BenchmarkResultPanel.vue` | 1587 |
