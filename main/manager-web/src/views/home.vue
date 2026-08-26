@@ -50,7 +50,10 @@
         </div>
       </div>
       <AgentTemplateCenter v-else :templates="agentTemplates" :loading="templateLoading"
-        :can-write="canWrite" :quota-full="isAgentLimitReached" @create="handleCreateFromTemplate" />
+        :can-write="canWrite" :quota-full="isAgentLimitReached" @preview="handlePreviewTemplate" />
+      <AgentTemplatePreviewDialog :visible.sync="templatePreviewVisible" :preview="templatePreview"
+        :loading="templatePreviewLoading" :can-write="canWrite" :quota-full="isAgentLimitReached"
+        @create="handleCreateFromTemplate" />
       <AddWisdomBodyDialog :visible.sync="addDeviceDialogVisible" @confirm="handleWisdomBodyAdded" />
     </el-main>
     <el-footer>
@@ -66,6 +69,7 @@
 import Api from '@/apis/api';
 import AddWisdomBodyDialog from '@/components/AddWisdomBodyDialog.vue';
 import AgentTemplateCenter from '@/components/home/AgentTemplateCenter.vue';
+import AgentTemplatePreviewDialog from '@/components/home/AgentTemplatePreviewDialog.vue';
 import ChatHistoryDialog from '@/components/ChatHistoryDialog.vue';
 import DeviceItem from '@/components/DeviceItem.vue';
 import HeaderBar from '@/components/HeaderBar.vue';
@@ -74,7 +78,7 @@ import featureManager from '@/utils/featureManager';
 
 export default {
   name: 'HomePage',
-  components: { DeviceItem, AddWisdomBodyDialog, AgentTemplateCenter, HeaderBar, VersionFooter, ChatHistoryDialog },
+  components: { DeviceItem, AddWisdomBodyDialog, AgentTemplateCenter, AgentTemplatePreviewDialog, HeaderBar, VersionFooter, ChatHistoryDialog },
   data() {
     return {
       addDeviceDialogVisible: false,
@@ -90,6 +94,9 @@ export default {
       activeSection: 'agents',
       agentTemplates: [],
       templateLoading: false,
+      templatePreviewVisible: false,
+      templatePreviewLoading: false,
+      templatePreview: null,
       canWrite: localStorage.getItem('currentWorkspaceCanWrite') !== 'false',
       workspaceQuota: null,
       // 功能状态
@@ -133,6 +140,23 @@ export default {
         this.$message.error(this.$t('home.templateLoadFailed'));
       });
     },
+    handlePreviewTemplate(template) {
+      this.templatePreview = { template };
+      this.templatePreviewVisible = true;
+      this.templatePreviewLoading = true;
+      Api.agent.getAgentTemplatePreview(template.id, ({ data }) => {
+        if (data && data.code === 0 && data.data) {
+          this.templatePreview = data.data;
+          this.templatePreviewLoading = false;
+          return;
+        }
+        this.templatePreviewLoading = false;
+        this.$message.error((data && data.msg) || '模板预览加载失败');
+      }, (error) => {
+        this.templatePreviewLoading = false;
+        this.$message.error((error && error.msg) || '模板预览加载失败');
+      });
+    },
     handleCreateFromTemplate(template) {
       if (!this.canWrite) {
         return;
@@ -158,6 +182,7 @@ export default {
               this.$alert(skipped.join('\n'), this.$t('home.templateCreateWarnings'), { type: 'warning' });
             }
             this.activeSection = 'agents';
+            this.templatePreviewVisible = false;
             this.fetchAgentList();
             this.loadWorkspaceQuota();
             return;

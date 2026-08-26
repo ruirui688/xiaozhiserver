@@ -50,14 +50,14 @@ test('workspace role template UI', async (t) => {
     assert.match(pageSource, /另存为角色模板/);
     assert.match(pageSource, /submitSaveConfig\(agentId\)/);
     assert.match(pageSource, /tagNames: this\.dynamicTags/);
-    assert.match(pageSource, /声纹绑定和飞书配置会随模板切换/);
+    assert.match(pageSource, /TTS 模型和音色独立管理，不会保存到模板/);
     assert.match(pageSource, /飞书密钥只加密保存/);
     assert.match(pageSource, /敏感请求头不会保存/);
   });
 
   await t.test('template click confirms immediate application and hydrates authoritative response', () => {
     assert.match(pageSource, /确认切换/);
-    assert.match(pageSource, /声纹绑定和飞书集成会一起替换/);
+    assert.match(pageSource, /当前 TTS 模型和音色保持不变/);
     assert.match(pageSource, /applyAgentTemplate\(template\)/);
     assert.match(pageSource, /hydrateAgentConfig\(agentData\)/);
     assert.match(pageSource, /skippedItems/);

@@ -171,6 +171,63 @@ class AgentWorkspaceTemplateServiceImplTest {
     }
 
     @Test
+    void saveAsDoesNotPersistSpeechModelOrVoiceBinding() {
+        AgentInfoVO source = agent("agent-a", "workspace-a");
+        when(agentService.checkAgentPermission("agent-a", 7L)).thenReturn(true);
+        when(agentService.getAgentById("agent-a")).thenReturn(source);
+        when(skillService.list("agent-a")).thenReturn(List.of());
+        when(voicePrintService.getBoundVoicePrintIds("agent-a")).thenReturn(List.of());
+
+        AgentUpdateDTO config = new AgentUpdateDTO();
+        config.setAgentName("军师");
+        config.setTtsModelId("TTS_workspace_only");
+        config.setTtsVoiceId("voice_workspace_only");
+        config.setRealtimeVoiceId("realtime_voice");
+        AgentTemplateSaveAsDTO request = new AgentTemplateSaveAsDTO();
+        request.setTemplateName("军师模板");
+        request.setConfig(config);
+
+        try (MockedStatic<SecurityUser> security = mockStatic(SecurityUser.class)) {
+            security.when(SecurityUser::getUserId).thenReturn(7L);
+            service.saveAs("agent-a", request);
+        }
+
+        ArgumentCaptor<AgentTemplateEntity> captor = ArgumentCaptor.forClass(AgentTemplateEntity.class);
+        verify(templateService).save(captor.capture());
+        AgentUpdateDTO saved = captor.getValue().getSnapshotJson().getConfig();
+        assertEquals(null, saved.getTtsModelId());
+        assertEquals(null, saved.getTtsVoiceId());
+        assertEquals(null, saved.getRealtimeVoiceId());
+        assertEquals(null, captor.getValue().getTtsModelId());
+        assertEquals(null, captor.getValue().getTtsVoiceId());
+    }
+
+    @Test
+    void previewExplainsAndHidesLegacySpeechBinding() {
+        AgentUpdateDTO config = new AgentUpdateDTO();
+        config.setAgentName("军师");
+        config.setSystemPrompt("你是游戏军师");
+        config.setTtsModelId("TTS_old");
+        config.setTtsVoiceId("voice_old");
+        AgentTemplateSnapshotDTO snapshot = new AgentTemplateSnapshotDTO();
+        snapshot.setSchemaVersion(2);
+        snapshot.setConfig(config);
+        AgentTemplateEntity template = new AgentTemplateEntity();
+        template.setId("template-a");
+        template.setWorkspaceId("workspace-a");
+        template.setVisibility("WORKSPACE");
+        template.setSnapshotJson(snapshot);
+        when(permissionService.currentWorkspaceId()).thenReturn("workspace-a");
+        when(templateService.getById("template-a")).thenReturn(template);
+
+        var preview = service.preview("template-a");
+
+        assertEquals("你是游戏军师", preview.getSystemPrompt());
+        assertFalse(preview.getModelNames().containsKey("TTS"));
+        assertTrue(preview.getSkippedItems().stream().anyMatch(item -> item.contains("音色")));
+    }
+
+    @Test
     void applyRejectsTemplateFromAnotherWorkspaceBeforeAnyWrite() {
         AgentInfoVO target = agent("agent-a", "workspace-a");
         when(agentService.checkAgentPermission("agent-a", 7L)).thenReturn(true);
@@ -290,6 +347,46 @@ class AgentWorkspaceTemplateServiceImplTest {
         assertTrue(result.getSkippedItems().stream().anyMatch(item -> item.contains("LLM_deleted")));
         verify(voicePrintService).replaceBindings("agent-a", List.of(), 7L);
         verify(feishuService).replaceFromTemplate("agent-a", "template-a", null, 7L);
+    }
+
+    @Test
+    void applyKeepsCurrentSpeechConfigurationEvenForLegacySnapshot() {
+        AgentInfoVO target = agent("agent-a", "workspace-a");
+        when(agentService.checkAgentPermission("agent-a", 7L)).thenReturn(true);
+        when(agentService.getAgentById("agent-a")).thenReturn(target);
+        when(tagService.getTagsByAgentId("agent-a")).thenReturn(List.of());
+
+        AgentUpdateDTO config = new AgentUpdateDTO();
+        config.setAgentName("模板角色");
+        config.setTtsModelId("TTS_old");
+        config.setTtsVoiceId("voice_old");
+        config.setFunctions(List.of());
+        config.setCorrectWordFileIds(List.of());
+        config.setContextProviders(List.of());
+        AgentTemplateSnapshotDTO snapshot = new AgentTemplateSnapshotDTO();
+        snapshot.setSchemaVersion(2);
+        snapshot.setConfig(config);
+        AgentTemplateEntity template = new AgentTemplateEntity();
+        template.setId("template-a");
+        template.setWorkspaceId("workspace-a");
+        template.setVersion(1);
+        template.setSnapshotJson(snapshot);
+        when(templateService.getById("template-a")).thenReturn(template);
+        AgentTemplateApplyDTO request = new AgentTemplateApplyDTO();
+        request.setExpectedVersion(1);
+
+        AgentTemplateApplyResultVO result;
+        try (MockedStatic<SecurityUser> security = mockStatic(SecurityUser.class)) {
+            security.when(SecurityUser::getUserId).thenReturn(7L);
+            result = service.apply("agent-a", "template-a", request);
+        }
+
+        ArgumentCaptor<AgentUpdateDTO> captor = ArgumentCaptor.forClass(AgentUpdateDTO.class);
+        verify(agentService).updateAgentById(org.mockito.ArgumentMatchers.eq("agent-a"), captor.capture(),
+                org.mockito.ArgumentMatchers.eq(false));
+        assertEquals(null, captor.getValue().getTtsModelId());
+        assertEquals(null, captor.getValue().getTtsVoiceId());
+        assertTrue(result.getSkippedItems().stream().anyMatch(item -> item.contains("音色")));
     }
 
     @Test

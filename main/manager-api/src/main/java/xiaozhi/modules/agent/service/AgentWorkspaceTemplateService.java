@@ -7,11 +7,14 @@ import xiaozhi.modules.agent.dto.AgentTemplateCreateDTO;
 import xiaozhi.modules.agent.dto.AgentTemplateSaveAsDTO;
 import xiaozhi.modules.agent.dto.AgentTemplateReviewDTO;
 import xiaozhi.modules.agent.vo.AgentTemplateApplyResultVO;
+import xiaozhi.modules.agent.vo.AgentTemplatePreviewVO;
 import xiaozhi.modules.agent.vo.AgentTemplateSaveResultVO;
 import xiaozhi.modules.agent.vo.AgentTemplateSummaryVO;
 
 public interface AgentWorkspaceTemplateService {
     List<AgentTemplateSummaryVO> listAccessible();
+
+    AgentTemplatePreviewVO preview(String templateId);
 
     AgentTemplateSaveResultVO saveAs(String agentId, AgentTemplateSaveAsDTO dto);
 

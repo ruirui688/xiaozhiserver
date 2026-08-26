@@ -22,6 +22,7 @@ import xiaozhi.modules.agent.dto.AgentTemplateSaveAsDTO;
 import xiaozhi.modules.agent.dto.AgentTemplateReviewDTO;
 import xiaozhi.modules.agent.service.AgentWorkspaceTemplateService;
 import xiaozhi.modules.agent.vo.AgentTemplateApplyResultVO;
+import xiaozhi.modules.agent.vo.AgentTemplatePreviewVO;
 import xiaozhi.modules.agent.vo.AgentTemplateSaveResultVO;
 import xiaozhi.modules.agent.vo.AgentTemplateSummaryVO;
 
@@ -37,6 +38,13 @@ public class AgentWorkspaceTemplateController {
     @RequiresPermissions("sys:role:normal")
     public Result<List<AgentTemplateSummaryVO>> list() {
         return new Result<List<AgentTemplateSummaryVO>>().ok(workspaceTemplateService.listAccessible());
+    }
+
+    @GetMapping("/templates/{templateId}/preview")
+    @Operation(summary = "预览可访问模板的可移植配置")
+    @RequiresPermissions("sys:role:normal")
+    public Result<AgentTemplatePreviewVO> preview(@PathVariable String templateId) {
+        return new Result<AgentTemplatePreviewVO>().ok(workspaceTemplateService.preview(templateId));
     }
 
     @PostMapping("/templates/{templateId}/create")

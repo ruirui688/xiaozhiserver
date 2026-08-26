@@ -45,6 +45,7 @@ import xiaozhi.modules.agent.skill.service.AgentSemanticSkillService;
 import xiaozhi.modules.agent.skill.vo.AgentSemanticSkillVO;
 import xiaozhi.modules.agent.vo.AgentInfoVO;
 import xiaozhi.modules.agent.vo.AgentTemplateApplyResultVO;
+import xiaozhi.modules.agent.vo.AgentTemplatePreviewVO;
 import xiaozhi.modules.agent.vo.AgentTemplateSaveResultVO;
 import xiaozhi.modules.agent.vo.AgentTemplateSummaryVO;
 import xiaozhi.modules.correctword.dao.CorrectWordFileDao;
@@ -112,6 +113,37 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
     }
 
     @Override
+    public AgentTemplatePreviewVO preview(String templateId) {
+        String workspaceId = workspacePermissionService.currentWorkspaceId();
+        workspacePermissionService.requireRead(workspaceId);
+        AgentTemplateEntity template = templateService.getById(templateId);
+        requireTemplateReadable(template, workspaceId);
+        AgentTemplateSnapshotDTO snapshot = readableSnapshot(template, workspaceId);
+        validateSnapshot(snapshot);
+
+        List<String> skipped = new ArrayList<>();
+        AgentUpdateDTO config = deepCopy(snapshot.getConfig(), AgentUpdateDTO.class);
+        removeSpeechBinding(config, skipped);
+        config.setFunctions(filterCapabilityMappings(config.getFunctions(), workspaceId, skipped));
+
+        AgentTemplatePreviewVO preview = new AgentTemplatePreviewVO();
+        preview.setTemplate(toSummary(template));
+        preview.setSystemPrompt(config.getSystemPrompt());
+        preview.setLanguage(config.getLanguage());
+        preview.setModelNames(resolvePreviewModels(config));
+        preview.setTagNames(normalizeTagNames(snapshot.getTagNames()));
+        preview.setSkillNames(snapshot.getSemanticSkills() == null ? List.of()
+                : snapshot.getSemanticSkills().stream()
+                        .filter(skill -> skill != null && StringUtils.isNotBlank(skill.getSkillName()))
+                        .map(skill -> StringUtils.trim(skill.getSkillName()))
+                        .distinct().toList());
+        preview.setCapabilityNames(resolveCapabilityNames(config.getFunctions()));
+        preview.setContextSourceCount(config.getContextProviders() == null ? 0 : config.getContextProviders().size());
+        preview.setSkippedItems(skipped);
+        return preview;
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public AgentTemplateSaveResultVO saveAs(String agentId, AgentTemplateSaveAsDTO dto) {
         AgentInfoVO source = requireAgentWrite(agentId);
@@ -126,6 +158,7 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
 
         List<String> warnings = new ArrayList<>();
         AgentUpdateDTO config = deepCopy(dto.getConfig(), AgentUpdateDTO.class);
+        removeSpeechBinding(config, warnings);
         config.setContextProviders(sanitizeContextProviders(config.getContextProviders(), warnings));
         config.setFunctions(filterCapabilityMappings(config.getFunctions(), workspaceId, warnings));
         config.setCorrectWordFileIds(filterCorrectWordFilesForCreate(
@@ -206,23 +239,16 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
             AgentInfoVO target, AgentTemplateEntity template, String agentNameOverride) {
         String agentId = target.getId();
 
-        boolean crossWorkspacePublication = StringUtils.isNotBlank(template.getWorkspaceId())
-                && !StringUtils.equals(template.getWorkspaceId(), target.getWorkspaceId())
-                && (VISIBILITY_OFFICIAL.equals(template.getVisibility())
-                        || VISIBILITY_PUBLIC.equals(template.getVisibility()));
-        AgentTemplateSnapshotDTO storedSnapshot = crossWorkspacePublication
-                ? template.getPublicSnapshotJson()
-                : template.getSnapshotJson();
+        AgentTemplateSnapshotDTO storedSnapshot = readableStoredSnapshot(template, target.getWorkspaceId());
         boolean workspaceSnapshot = storedSnapshot != null;
         AgentTemplateSnapshotDTO snapshot = workspaceSnapshot
                 ? storedSnapshot
                 : legacySnapshot(template);
-        if (snapshot.getSchemaVersion() == null || snapshot.getSchemaVersion() > SNAPSHOT_SCHEMA_VERSION) {
-            throw new RenException("模板快照版本暂不受支持");
-        }
+        validateSnapshot(snapshot);
 
         List<String> skipped = new ArrayList<>();
         AgentUpdateDTO desired = deepCopy(snapshot.getConfig(), AgentUpdateDTO.class);
+        removeSpeechBinding(desired, skipped);
         if (StringUtils.isNotBlank(agentNameOverride)) {
             desired.setAgentName(agentNameOverride);
         }
@@ -361,8 +387,94 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
         snapshot.setFeishuConfig(null);
         if (snapshot.getConfig() != null) {
             snapshot.getConfig().setCorrectWordFileIds(List.of());
+            removeSpeechBinding(snapshot.getConfig(), null);
         }
         template.setPublicSnapshotJson(snapshot);
+    }
+
+    private AgentTemplateSnapshotDTO readableSnapshot(AgentTemplateEntity template, String targetWorkspaceId) {
+        AgentTemplateSnapshotDTO stored = readableStoredSnapshot(template, targetWorkspaceId);
+        return stored == null ? legacySnapshot(template) : stored;
+    }
+
+    private AgentTemplateSnapshotDTO readableStoredSnapshot(
+            AgentTemplateEntity template, String targetWorkspaceId) {
+        boolean crossWorkspacePublication = StringUtils.isNotBlank(template.getWorkspaceId())
+                && !StringUtils.equals(template.getWorkspaceId(), targetWorkspaceId)
+                && (VISIBILITY_OFFICIAL.equals(template.getVisibility())
+                        || VISIBILITY_PUBLIC.equals(template.getVisibility()));
+        return crossWorkspacePublication ? template.getPublicSnapshotJson() : template.getSnapshotJson();
+    }
+
+    private void validateSnapshot(AgentTemplateSnapshotDTO snapshot) {
+        if (snapshot == null || snapshot.getConfig() == null) {
+            throw new RenException("模板配置不存在");
+        }
+        if (snapshot.getSchemaVersion() != null && snapshot.getSchemaVersion() > SNAPSHOT_SCHEMA_VERSION) {
+            throw new RenException("模板快照版本暂不受支持");
+        }
+    }
+
+    private void removeSpeechBinding(AgentUpdateDTO config, List<String> warnings) {
+        if (config == null) {
+            return;
+        }
+        boolean containedBinding = StringUtils.isNotBlank(config.getTtsModelId())
+                || StringUtils.isNotBlank(config.getTtsVoiceId())
+                || StringUtils.isNotBlank(config.getRealtimeVoiceId())
+                || StringUtils.isNotBlank(config.getTtsLanguage())
+                || config.getTtsVolume() != null
+                || config.getTtsRate() != null
+                || config.getTtsPitch() != null;
+        config.setTtsModelId(null);
+        config.setTtsVoiceId(null);
+        config.setRealtimeVoiceId(null);
+        config.setTtsLanguage(null);
+        config.setTtsVolume(null);
+        config.setTtsRate(null);
+        config.setTtsPitch(null);
+        if (containedBinding && warnings != null) {
+            warnings.add("语音合成模型和音色不属于可移植模板，请在创建智能体后单独选择");
+        }
+    }
+
+    private Map<String, String> resolvePreviewModels(AgentUpdateDTO config) {
+        Map<String, String> models = new LinkedHashMap<>();
+        addPreviewModel(models, "ASR", config.getAsrModelId());
+        addPreviewModel(models, "LLM", config.getLlmModelId());
+        addPreviewModel(models, "Memory", config.getMemModelId());
+        addPreviewModel(models, "Intent", config.getIntentModelId());
+        return models;
+    }
+
+    private void addPreviewModel(Map<String, String> models, String type, String modelId) {
+        if (StringUtils.isBlank(modelId)) {
+            return;
+        }
+        ModelConfigEntity model = modelConfigService.getModelByIdFromCache(modelId);
+        models.put(type, model == null ? modelId : StringUtils.defaultIfBlank(model.getModelName(), modelId));
+    }
+
+    private List<String> resolveCapabilityNames(List<AgentUpdateDTO.FunctionInfo> mappings) {
+        if (mappings == null) {
+            return List.of();
+        }
+        List<String> names = new ArrayList<>();
+        for (AgentUpdateDTO.FunctionInfo mapping : mappings) {
+            if (mapping == null || StringUtils.isBlank(mapping.getPluginId())) {
+                continue;
+            }
+            ModelProviderEntity plugin = modelProviderDao.selectById(mapping.getPluginId());
+            if (plugin != null && StringUtils.equalsIgnoreCase(plugin.getModelType(), "Plugin")) {
+                names.add(StringUtils.defaultIfBlank(plugin.getName(), mapping.getPluginId()));
+                continue;
+            }
+            KnowledgeBaseEntity knowledge = knowledgeBaseService.selectById(mapping.getPluginId());
+            names.add(knowledge == null
+                    ? mapping.getPluginId()
+                    : StringUtils.defaultIfBlank(knowledge.getName(), mapping.getPluginId()));
+        }
+        return names.stream().distinct().toList();
     }
 
     private AgentInfoVO requireAgentWrite(String agentId) {

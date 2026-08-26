@@ -1,5 +1,7 @@
 const assert = require('node:assert/strict');
 const { describe, test } = require('node:test');
+const fs = require('node:fs');
+const path = require('node:path');
 const Vue = require('vue/dist/vue.common.js');
 const { loadModule, loadVueComponent } = require('./helpers/loadVueComponent.cjs');
 
@@ -33,6 +35,10 @@ describe('agent template center', () => {
     assert.equal(state.url, '/xiaozhi/agent/templates/official-1/create');
     assert.equal(state.method, 'POST');
     assert.deepEqual(state.data, { agentName: '新军师', expectedVersion: 4 });
+
+    api.getAgentTemplatePreview('official-1', () => {});
+    assert.equal(state.url, '/xiaozhi/agent/templates/official-1/preview');
+    assert.equal(state.method, 'GET');
   });
 
   test('template center separates official, marketplace and workspace templates', () => {
@@ -51,5 +57,21 @@ describe('agent template center', () => {
     vm.keyword = '玩家';
     assert.deepEqual(vm.filteredTemplates.map(item => item.id), ['2']);
     vm.$destroy();
+  });
+
+  test('template center opens a read-only preview before creating and documents voice portability', () => {
+    const root = path.resolve(__dirname, '..');
+    const center = fs.readFileSync(path.join(root, 'src/components/home/AgentTemplateCenter.vue'), 'utf8');
+    const preview = fs.readFileSync(path.join(root, 'src/components/home/AgentTemplatePreviewDialog.vue'), 'utf8');
+    const home = fs.readFileSync(path.join(root, 'src/views/home.vue'), 'utf8');
+
+    assert.match(center, /查看预览/);
+    assert.match(center, /\$emit\('preview', template\)/);
+    assert.doesNotMatch(center, /\$emit\('create', template\)/);
+    assert.match(preview, /角色设定/);
+    assert.match(preview, /模型与能力/);
+    assert.match(preview, /预览本身不会调用模型或产生模型费用/);
+    assert.match(preview, /不绑定 TTS 模型、音色或实时音色/);
+    assert.match(home, /getAgentTemplatePreview/);
   });
 });

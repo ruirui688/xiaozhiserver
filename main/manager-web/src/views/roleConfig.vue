@@ -512,7 +512,7 @@ export default {
       }
       try {
         const promptResult = await this.$prompt(
-          "模板将在当前工作空间共享；声纹绑定和飞书配置会随模板切换，飞书密钥只加密保存。设备绑定和敏感请求头不会保存。",
+          "模板将在当前工作空间共享；人设、模型、技能、声纹绑定和飞书配置会随模板切换，飞书密钥只加密保存。TTS 模型和音色独立管理，不会保存到模板；设备绑定不保存，敏感请求头不会保存。",
           "另存为角色模板",
           {
             confirmButtonText: "保存模板",
@@ -572,7 +572,7 @@ export default {
       if (this.loadingTemplate) return;
       try {
         await this.$confirm(
-          `确认将“${template.templateName || template.agentName}”立即应用到当前角色吗？角色配置、声纹绑定和飞书集成会一起替换并在线生效；失效引用会被跳过。`,
+          `确认将“${template.templateName || template.agentName}”立即应用到当前角色吗？人设、模型、技能、声纹绑定和飞书集成会替换并在线生效；当前 TTS 模型和音色保持不变，失效引用会被跳过。`,
           "切换角色模板",
           {
             confirmButtonText: "确认切换",
