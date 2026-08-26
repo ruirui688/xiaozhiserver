@@ -14,22 +14,17 @@
 
 这是本项目的唯一生产部署入口。
 
-### 可选：启用 DeepSeek Harness 自主维护
+### DeepSeek Harness 常驻维护服务
 
-默认发布不会启动维护适配器，全部资源策略也默认为关闭。仅在确实需要少量知识库/智能体自主维护时，
-在生产数据目录 `.env` 配置以下值并执行升级；不要提交这些真实值：
+`xiaozhi-maintenance-agent` 是生产默认启动的核心服务，每次发布和升级都使用与业务镜像相同的版本。
+安装器会生成并持久化内部服务密钥，无需维护 Compose profile 或手工启用开关。
 
-```dotenv
-COMPOSE_PROFILES=maintenance
-XIAOZHI_MAINTENANCE_HARNESS_ENABLED=true
-```
-
-内部服务密钥未填写时由安装器生成并持久化。DeepSeek API Key、接口地址和上游模型名直接复用“模型配置”中
+DeepSeek API Key、接口地址和上游模型名直接复用“模型配置”中
 已启用且测试通过的 DeepSeek LLM；在资源维护策略中选择对应模型，不再在部署 `.env` 保存第二份模型凭据。
 
-`xiaozhi-maintenance-agent` 不映射宿主端口或目录，只有 manager-api 能在容器网络调用。启用容器不等于启用
-任何资源：还必须在对应知识库或智能体页面逐一保存策略。关闭时同时将 Harness 开关设为 `false` 并从
-`COMPOSE_PROFILES` 移除 `maintenance`。DeepSeek Harness 当前为 Developer Preview，SDK/runtime 固定为
+`xiaozhi-maintenance-agent` 不挂载宿主目录，API 仅供 manager-api 在容器网络调用，Web 控制台端口只绑定
+宿主回环地址。容器常驻不等于自动维护全部资源：仍需在对应知识库或智能体页面逐一保存策略。
+DeepSeek Harness 当前为 Developer Preview，SDK/runtime 固定为
 `0.1.1rc1`；升级该版本必须先跑适配器契约测试和一次非生产真实搜索验收。
 
 ```text
@@ -51,6 +46,7 @@ XIAOZHI_MAINTENANCE_HARNESS_ENABLED=true
 xiaozhi-server:<version>
 xiaozhi-manager-api:<version>
 xiaozhi-manager-web:<version>
+xiaozhi-maintenance-agent:<version>
 xiaozhi-deploy-assets:<version>
   ├── docker-compose.yml
   ├── install / upgrade

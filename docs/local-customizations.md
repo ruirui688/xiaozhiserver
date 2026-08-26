@@ -928,11 +928,11 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 官方同步时的处理规则：必须保留设备级 speech_input_mode/speech_output_mode 与运行时 speech_routing.input/output 的 server/device/auto 契约，默认 server/server；设备能力只来自当前已认证 WebSocket 的 hello features.speech，策略与能力解析后的 speech_route 才是当前连接实际路由。显式 device 缺能力必须报 incompatible_route，auto 只在能力完整时选择设备端；设备 TTS 必须同时声明 playback ACK，没有 ACK 时不能声称设备已播放。设备 ASR 只接受 listen.detect 的 source=device_asr、final=true、受校验 turn_id 和非空文本，必须保留幂等缓存、速率限制、speech_asr_ack 和正文日志脱敏。设备 TTS 必须继续通过现有 generation/TTS 队列发送 text/text_end，等待 played/failed/aborted tts_ack；只有 played 正常完成，失败、Abort、文件输入或超时不能伪造完成，也不得在同一半轮切回服务端合成。四种传统输入/输出组合必须继续复用 SemanticCenter、LLM、工具和聊天边界；Realtime 与任一实际设备端语音路由不兼容，不得混合。后台策略更新只能在空闲安全轮次构造候选管线后热切换，失败恢复旧管线；固件能力变化需要重连重新协商。管理端更新必须保留 Workspace 写权限与事务提交后按设备刷新，日志不得记录设备 ASR/TTS 正文、Token、密钥或完整私有配置。
 ```
 
-## 47. 按资源启用的 DeepSeek Harness 自主维护
+## 47. 常驻 DeepSeek Harness 与按资源启用的自主维护
 
 ```text
-定制模块：manager-api 维护控制面、manager-web 按资源策略页、独立 maintenance-agent、生产可选 profile
-改动原因：少量需要时效性的知识库需要自主发现公开来源，指定智能体的长期记忆需要周期审校；两者不能演变成拥有数据库和 Shell 权限的后台通用 Agent，也不能默认扩散到全部资源。
+定制模块：manager-api 维护控制面、manager-web 按资源策略页、生产常驻 maintenance-agent
+改动原因：DeepSeek Harness 是每次部署都需要可用的核心维护工作台，因此 maintenance-agent 随生产服务常驻并使用同版本镜像；具体知识库和智能体的自主维护仍按资源显式启用，不能演变成拥有数据库和 Shell 权限的后台通用 Agent，也不能默认扩散到全部资源。
 关键文件：
   - main/manager-api/src/main/java/xiaozhi/modules/maintenance/
   - main/manager-api/src/main/resources/db/changelog/202608252130.sql
@@ -945,7 +945,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - scripts/acr-build-push-maintenance-agent
   - deploy/production/docker-compose.yml
 是否允许被官方覆盖：否
-官方同步时的处理规则：必须保留 Manager API 对资源权限、策略、月度运行上限、提案审批和最终写入的唯一权威。交互界面使用官方 `dsh web`，每次从 Manager API 为单一资源创建隔离、限时会话；浏览器只接收一次性启动地址，模型凭据只进入该会话的进程环境。Harness 预设只能组合 `web_search`（知识维护）和 `submit_maintenance_proposals`，禁止数据库凭据、宿主源码挂载、Shell、编辑器、文件系统与 web_fetch。提交工具只能调用 ServerSecretFilter 保护的单次完成回调，最终仍进入 Manager 审批队列。知识维护按 dataset opt-in，仅超级管理员本人或超级管理员团队成员可以为官方知识库以及其有写权限的工作空间知识库配置，普通团队不得开启；自动采纳必须匹配可信域名并再次通过公网 URL/SSRF 校验，然后复用 KnowledgeSourceService 现有发布链。记忆维护按 agent opt-in、禁止联网和 ADD，所有 UPDATE/ARCHIVE/DELETE 必须人工批准并通过 MemoryService 留 revision。维护策略必须显式引用模型管理中已启用、测试通过的 DeepSeek LLM，只保存模型 ID；运行凭据只允许通过内部鉴权请求短暂进入隔离 Harness 环境，会话超时后连同临时目录清除，不得另存第二份模型密钥。维护镜像的 Dockerfile 必须默认使用项目统一的 `docker.m.daocloud.io` Python/Node 基础镜像，不能回退到构建机不稳定的 Docker Hub 直连。不得把临时 Harness session 当作产品记忆，不得记录完整提示词、模型原始响应、记忆正文或密钥。
+官方同步时的处理规则：必须保留 maintenance-agent 作为生产常驻核心服务，安装和升级始终拉取同版本镜像、生成内部服务密钥并等待其健康；不得恢复成默认关闭的 Compose profile。Manager API 继续作为资源权限、策略、月度运行上限、提案审批和最终写入的唯一权威。交互界面使用官方 `dsh web`，每次从 Manager API 为单一资源创建隔离、限时会话；浏览器只接收一次性启动地址，模型凭据只进入该会话的进程环境。Harness 预设只能组合 `web_search`（知识维护）和 `submit_maintenance_proposals`，禁止数据库凭据、宿主源码挂载、Shell、编辑器、文件系统与 web_fetch。提交工具只能调用 ServerSecretFilter 保护的单次完成回调，最终仍进入 Manager 审批队列。知识维护按 dataset opt-in，仅超级管理员本人或超级管理员团队成员可以为官方知识库以及其有写权限的工作空间知识库配置，普通团队不得开启；自动采纳必须匹配可信域名并再次通过公网 URL/SSRF 校验，然后复用 KnowledgeSourceService 现有发布链。记忆维护按 agent opt-in、禁止联网和 ADD，所有 UPDATE/ARCHIVE/DELETE 必须人工批准并通过 MemoryService 留 revision。维护策略必须显式引用模型管理中已启用、测试通过的 DeepSeek LLM，只保存模型 ID；运行凭据只允许通过内部鉴权请求短暂进入隔离 Harness 环境，会话超时后连同临时目录清除，不得另存第二份模型密钥。维护镜像的 Dockerfile 必须默认使用项目统一的 `docker.m.daocloud.io` Python/Node 基础镜像，不能回退到构建机不稳定的 Docker Hub 直连。不得把临时 Harness session 当作产品记忆，不得记录完整提示词、模型原始响应、记忆正文或密钥。
 知识提案批准后必须先保持 `APPLYING`，事务提交后立即触发连接器；只有文档抓取、切片和原子发布成功才能回写 `APPLIED`，失败必须回写 `FAILED`，不得把“创建来源”伪装成“已入库”。网页运行日志必须来自 `ai_maintenance_run_event` 中可恢复、可增量读取的脱敏里程碑，禁止直接透传容器 stdout、完整提示词、模型思维过程、网页正文或凭据。
 平台页面只保留“维护设置、打开 Harness、审核提案”三个边界清晰的入口，不再实现自绘聊天客户端。知识维护必须保留策略级 `custom_prompt`；自定义提示词只属于业务质量指导，不得取消固定的安全、审批和配额合同。实时对话、工具调用和会话历史由官方 Harness Web UI 展示，平台审核页只展示白名单后的提案字段，不得透传思维过程或原始模型日志。
 过时动态来源只能通过带精确 sourceId 的 `REMOVE_SOURCE` 待审批提案淘汰；即使启用可信域名自动采纳也不得自动删除，批准后必须复用 KnowledgeSourceService 删除来源、动态文档和统计，不能直接操作知识表。

@@ -258,8 +258,9 @@ Java 的 `ModelRuntimeAssembler` 负责从通用字段、普通参数和密钥�
 | 本地全模块 | 四个业务模块 + MySQL + Redis | 跨模块开发与配置联调 |
 | 生产容器 | 发布镜像 + MySQL + Redis + TLS 反向代理 | 多设备正式运行 |
 
-可选的 `maintenance` Compose profile 会增加 `xiaozhi-maintenance-agent`。该容器只是 DeepSeek Harness
-协议适配器，不是新的事实库：manager-api 仍是策略、配额、权限、审批和写入权威。适配器没有宿主目录挂载，
+生产部署常驻 `xiaozhi-maintenance-agent`，使 DeepSeek Harness 维护工作台随每次发布和升级保持可用；资源维护
+策略仍需按知识库或智能体逐一启用。该容器只是 DeepSeek Harness 协议适配器，不是新的事实库：manager-api
+仍是策略、配额、权限、审批和写入权威。适配器没有宿主目录挂载，
 使用只读根文件系统和临时 session 目录；知识任务仅有搜索能力，记忆任务无任何工具能力。即使容器已部署，
 每个知识库或智能体仍需在页面单独 opt-in。
 维护控制面的运行可观察性由 manager-api 持久化的脱敏里程碑事件提供，Web 只增量读取这些事件；禁止把容器
