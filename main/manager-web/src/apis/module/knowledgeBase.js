@@ -62,6 +62,15 @@ function makeApiRequest(config) {
  * 知识库管理相关API
  */
 export default {
+  getKnowledgeBase(datasetId, callback, errorCallback) {
+    makeApiRequest({
+      url: `${getServiceUrl()}/datasets/${encodeURIComponent(datasetId)}`,
+      method: 'GET',
+      callback,
+      errorCallback
+    });
+  },
+
   /**
    * 获取知识库列表
    * @param {Object} params - 查询参数

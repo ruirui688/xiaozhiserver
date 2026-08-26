@@ -99,8 +99,7 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
                     enrichDocumentCount(dto);
                 }
                 dto.setCanEdit(knowledgePermissionService.canWrite(dto));
-                dto.setCanManageMaintenance(knowledgePermissionService.isOfficial(dto)
-                        && knowledgePermissionService.canWrite(dto));
+                dto.setCanManageMaintenance(knowledgePermissionService.canManageAutomatedMaintenance(dto));
                 dto.setCanPublishOfficial(knowledgePermissionService.isOfficialMaintainer());
                 // syncDatasetFromRAG 检测到 RAGFlow 端已删除时，会将本地记录清理
                 // 此时 datasetId 被置空作为标记，需要在列表中移除该条目
@@ -528,8 +527,7 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
         knowledgeBaseDao.updateById(entity);
         KnowledgeBaseDTO result = ConvertUtils.sourceToTarget(entity, KnowledgeBaseDTO.class);
         result.setCanEdit(knowledgePermissionService.canWrite(result));
-        result.setCanManageMaintenance(knowledgePermissionService.isOfficial(result)
-                && knowledgePermissionService.canWrite(result));
+        result.setCanManageMaintenance(knowledgePermissionService.canManageAutomatedMaintenance(result));
         result.setCanPublishOfficial(knowledgePermissionService.isOfficialMaintainer());
         return result;
     }

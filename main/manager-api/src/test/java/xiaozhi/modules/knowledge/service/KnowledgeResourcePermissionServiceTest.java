@@ -1,9 +1,11 @@
 package xiaozhi.modules.knowledge.service;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
@@ -31,8 +33,24 @@ class KnowledgeResourcePermissionServiceTest {
     }
 
     @Test
-    void workspaceKnowledgeCannotEnableAutonomousMaintenance() {
-        assertThrows(RenException.class, () -> service.requireAutomatedMaintenance(dataset("WORKSPACE")));
+    void superAdminTeamCanMaintainWritableWorkspaceKnowledge() {
+        KnowledgeBaseDTO dataset = dataset("WORKSPACE");
+        when(officialPermission.isOfficialMaintainer()).thenReturn(true);
+        when(workspacePermission.canWrite("workspace-1")).thenReturn(true);
+
+        service.requireAutomatedMaintenance(dataset);
+
+        verify(workspacePermission).requireWrite("workspace-1");
+        assertTrue(service.canManageAutomatedMaintenance(dataset));
+    }
+
+    @Test
+    void ordinaryWorkspaceMaintainerCannotEnableAutonomousMaintenance() {
+        KnowledgeBaseDTO dataset = dataset("WORKSPACE");
+
+        assertThrows(RenException.class, () -> service.requireAutomatedMaintenance(dataset));
+
+        verify(workspacePermission).requireWrite("workspace-1");
         verify(officialPermission, never()).requireOfficialMaintainer();
     }
 

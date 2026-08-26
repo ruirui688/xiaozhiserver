@@ -96,7 +96,7 @@
                 <el-button v-if="!readOnly" type="warning" icon="el-icon-connection" @click="sourcePanelVisible = true">
                   动态数据源
                 </el-button>
-                <el-button v-if="!readOnly" type="warning" plain icon="el-icon-magic-stick" @click="maintenancePanelVisible = true">
+                <el-button v-if="!readOnly && canManageMaintenance" type="warning" plain icon="el-icon-magic-stick" @click="maintenancePanelVisible = true">
                   自主维护
                 </el-button>
                 <el-button v-if="!readOnly" type="danger" @click="handleBatchDelete" :disabled="selectedFiles.length === 0">
@@ -242,6 +242,7 @@ export default {
       uploadDialogVisible: false,
       sourcePanelVisible: false,
       maintenancePanelVisible: false,
+      canManageMaintenance: false,
       uploadUrl: '',
       isAllSelected: false,
 
@@ -268,6 +269,7 @@ export default {
     this.knowledgeBaseName = this.$route.query.knowledgeBaseName || '';
     this.readOnly = this.$route.query.readOnly === '1';
     this.uploadUrl = `${Api.getServiceUrl()}/api/v1/documents/upload`;
+    this.fetchKnowledgeBaseAccess();
     this.fetchFileList();
   },
 
@@ -295,6 +297,14 @@ export default {
     }
   },
   methods: {
+    fetchKnowledgeBaseAccess() {
+      KnowledgeBaseAPI.getKnowledgeBase(this.datasetId, ({ data }) => {
+        const dataset = data && data.code === 0 ? data.data : null;
+        this.canManageMaintenance = Boolean(dataset && dataset.canManageMaintenance);
+      }, () => {
+        this.canManageMaintenance = false;
+      });
+    },
     goBack() {
       this.$router.push('/knowledge-base-management');
     },

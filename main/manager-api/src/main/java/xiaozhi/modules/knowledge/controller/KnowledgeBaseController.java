@@ -69,6 +69,10 @@ public class KnowledgeBaseController {
     public Result<KnowledgeBaseDTO> getByDatasetId(@PathVariable("dataset_id") String datasetId) {
         KnowledgeBaseDTO knowledgeBaseDTO = knowledgeBaseService.getByDatasetId(datasetId);
         knowledgePermissionService.requireRead(knowledgeBaseDTO);
+        knowledgeBaseDTO.setCanEdit(knowledgePermissionService.canWrite(knowledgeBaseDTO));
+        knowledgeBaseDTO.setCanManageMaintenance(
+                knowledgePermissionService.canManageAutomatedMaintenance(knowledgeBaseDTO));
+        knowledgeBaseDTO.setCanPublishOfficial(knowledgePermissionService.isOfficialMaintainer());
 
         return new Result<KnowledgeBaseDTO>().ok(knowledgeBaseDTO);
     }

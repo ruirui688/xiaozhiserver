@@ -39,9 +39,18 @@ public class KnowledgeResourcePermissionService {
     public void requireAutomatedMaintenance(KnowledgeBaseDTO knowledgeBase) {
         requireExisting(knowledgeBase);
         if (!isOfficial(knowledgeBase)) {
-            throw noPermission("自主维护只允许用于官方知识库");
+            workspacePermissionService.requireWrite(knowledgeBase.getWorkspaceId());
         }
-        officialPermissionService.requireOfficialMaintainer();
+        if (!officialPermissionService.isOfficialMaintainer()) {
+            throw noPermission("仅超级管理员本人或超级管理员团队成员可以配置自主维护");
+        }
+    }
+
+    public boolean canManageAutomatedMaintenance(KnowledgeBaseDTO knowledgeBase) {
+        if (knowledgeBase == null || !officialPermissionService.isOfficialMaintainer()) {
+            return false;
+        }
+        return isOfficial(knowledgeBase) || workspacePermissionService.canWrite(knowledgeBase.getWorkspaceId());
     }
 
     public boolean canWrite(KnowledgeBaseDTO knowledgeBase) {

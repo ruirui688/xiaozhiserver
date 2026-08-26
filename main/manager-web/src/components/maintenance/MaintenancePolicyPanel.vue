@@ -131,7 +131,9 @@ export default {
   methods: {
     payload(res) { return (res && res.data && res.data.data) || (res && res.data) || {} },
     fail(error, fallback) {
-      const message = error && error.response && error.response.data && error.response.data.msg
+      const message = (error && error.data && error.data.msg) ||
+        (error && error.response && error.response.data && error.response.data.msg) ||
+        (error && error.msg)
       this.$message.error(message || fallback)
     },
     list(json) {
