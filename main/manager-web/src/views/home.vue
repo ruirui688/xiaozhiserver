@@ -3,7 +3,16 @@
     <!-- 公共头部 -->
     <HeaderBar :devices="devices" @search="handleSearch" @search-reset="handleSearchReset" />
     <el-main class="home-main">
-      <div>
+      <nav class="agent-center-nav" aria-label="智能体中心">
+        <button :class="{ active: activeSection === 'agents' }" type="button" @click="activeSection = 'agents'">
+          {{ $t('home.myAgents') }}
+        </button>
+        <span />
+        <button :class="{ active: activeSection === 'templates' }" type="button" @click="openTemplateCenter">
+          {{ $t('home.agentTemplates') }}
+        </button>
+      </nav>
+      <div v-if="activeSection === 'agents'">
         <!-- 首页内容 -->
         <div class="add-device">
           <div class="add-device-bg">
@@ -40,6 +49,8 @@
           </template>
         </div>
       </div>
+      <AgentTemplateCenter v-else :templates="agentTemplates" :loading="templateLoading"
+        :can-write="canWrite" :quota-full="isAgentLimitReached" @create="handleCreateFromTemplate" />
       <AddWisdomBodyDialog :visible.sync="addDeviceDialogVisible" @confirm="handleWisdomBodyAdded" />
     </el-main>
     <el-footer>
@@ -54,6 +65,7 @@
 <script>
 import Api from '@/apis/api';
 import AddWisdomBodyDialog from '@/components/AddWisdomBodyDialog.vue';
+import AgentTemplateCenter from '@/components/home/AgentTemplateCenter.vue';
 import ChatHistoryDialog from '@/components/ChatHistoryDialog.vue';
 import DeviceItem from '@/components/DeviceItem.vue';
 import HeaderBar from '@/components/HeaderBar.vue';
@@ -62,7 +74,7 @@ import featureManager from '@/utils/featureManager';
 
 export default {
   name: 'HomePage',
-  components: { DeviceItem, AddWisdomBodyDialog, HeaderBar, VersionFooter, ChatHistoryDialog },
+  components: { DeviceItem, AddWisdomBodyDialog, AgentTemplateCenter, HeaderBar, VersionFooter, ChatHistoryDialog },
   data() {
     return {
       addDeviceDialogVisible: false,
@@ -75,6 +87,9 @@ export default {
       showChatHistory: false,
       currentAgentId: '',
       currentAgentName: '',
+      activeSection: 'agents',
+      agentTemplates: [],
+      templateLoading: false,
       canWrite: localStorage.getItem('currentWorkspaceCanWrite') !== 'false',
       workspaceQuota: null,
       // 功能状态
@@ -90,6 +105,7 @@ export default {
     this.loadWorkspacePermission();
     this.loadWorkspaceQuota();
     this.fetchAgentList();
+    this.fetchAgentTemplates();
     await this.loadFeatureStatus();
   },
 
@@ -100,6 +116,58 @@ export default {
   },
 
   methods: {
+    openTemplateCenter() {
+      this.activeSection = 'templates';
+      if (!this.agentTemplates.length) {
+        this.fetchAgentTemplates();
+      }
+    },
+    fetchAgentTemplates() {
+      this.templateLoading = true;
+      Api.agent.getAccessibleAgentTemplates(({ data }) => {
+        this.agentTemplates = data && data.code === 0 && Array.isArray(data.data) ? data.data : [];
+        this.templateLoading = false;
+      }, (error) => {
+        console.error('获取智能体模板失败:', error);
+        this.templateLoading = false;
+        this.$message.error(this.$t('home.templateLoadFailed'));
+      });
+    },
+    handleCreateFromTemplate(template) {
+      if (!this.canWrite) {
+        return;
+      }
+      if (this.isAgentLimitReached) {
+        this.$message.warning(this.$t('home.workspaceAgentLimitReached', {
+          limit: this.workspaceQuota.agentLimit
+        }));
+        return;
+      }
+      this.$prompt(this.$t('home.templateAgentNamePrompt'), this.$t('home.createFromTemplate'), {
+        confirmButtonText: this.$t('button.ok'),
+        cancelButtonText: this.$t('button.cancel'),
+        inputValue: template.agentName || template.templateName,
+        inputPattern: /^.{1,64}$/,
+        inputErrorMessage: this.$t('home.templateAgentNameInvalid')
+      }).then(({ value }) => {
+        Api.agent.createAgentFromTemplate(template.id, value.trim(), template.version, ({ data }) => {
+          if (data && data.code === 0) {
+            const skipped = data.data && data.data.skippedItems ? data.data.skippedItems : [];
+            this.$message.success(this.$t('home.templateCreateSuccess'));
+            if (skipped.length) {
+              this.$alert(skipped.join('\n'), this.$t('home.templateCreateWarnings'), { type: 'warning' });
+            }
+            this.activeSection = 'agents';
+            this.fetchAgentList();
+            this.loadWorkspaceQuota();
+            return;
+          }
+          this.$message.error((data && data.msg) || this.$t('home.templateCreateFailed'));
+        }, (error) => {
+          this.$message.error((error && error.msg) || this.$t('home.templateCreateFailed'));
+        });
+      }).catch(() => {});
+    },
     // 加载功能状态
     async loadFeatureStatus() {
       await featureManager.waitForInitialization();
@@ -158,6 +226,7 @@ export default {
       this.$router.push('/device-management');
     },
     handleSearch(keyword) {
+      this.activeSection = 'agents';
       this.isSearching = true;
       this.isLoading = true;
       // 检测MAC地址格式：包含4个冒号
@@ -384,6 +453,40 @@ export default {
   padding: 28px;
   display: flex;
   flex-direction: column;
+}
+
+.agent-center-nav {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  min-height: 54px;
+  margin-bottom: 18px;
+  padding: 0 24px;
+  border-radius: 17px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 12px 30px rgba(70, 94, 162, 0.08);
+}
+
+.agent-center-nav span {
+  width: 1px;
+  height: 22px;
+  background: #d9deec;
+}
+
+.agent-center-nav button {
+  height: 54px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  color: #707992;
+  background: transparent;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.agent-center-nav button.active {
+  color: #3f62dc;
+  border-bottom-color: #5778ff;
 }
 
 /* 在 DeviceItem.vue 的样式中 */

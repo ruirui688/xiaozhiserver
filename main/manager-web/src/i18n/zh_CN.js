@@ -808,6 +808,18 @@ export default {
   'home.agentStorageQuota': '每个智能体聊天存储上限：{limit}',
   'home.workspaceAgentLimitReached': '当前工作空间最多可创建{limit}个智能体',
   'home.chatStorage': '聊天记录容量',
+  'home.myAgents': '我的智能体',
+  'home.agentTemplates': '智能体模板',
+  'home.templateSearchPlaceholder': '搜索模板名称',
+  'home.templateDefaultDescription': '可复用的智能体配置',
+  'home.createFromTemplate': '基于模板创建',
+  'home.noAccessibleTemplates': '暂无可用模板',
+  'home.templateLoadFailed': '智能体模板加载失败',
+  'home.templateAgentNamePrompt': '请输入新智能体名称',
+  'home.templateAgentNameInvalid': '名称长度必须为1到64个字符',
+  'home.templateCreateSuccess': '已基于模板创建智能体',
+  'home.templateCreateFailed': '基于模板创建失败',
+  'home.templateCreateWarnings': '部分模板配置未应用',
 
   // 参数管理页面文本
   'paramManagement.pageTitle': '参数管理',

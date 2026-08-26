@@ -116,6 +116,17 @@ export default {
             .send();
     },
 
+    createAgentFromTemplate(templateId, agentName, expectedVersion, callback, failCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/templates/${templateId}/create`)
+            .method('POST')
+            .data({ agentName, expectedVersion })
+            .success((res) => callback(res))
+            .fail((err) => failCallback && failCallback(err))
+            .networkFail((err) => failCallback && failCallback(err))
+            .send();
+    },
+
     saveAgentAsTemplate(agentId, payload, callback, failCallback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/${agentId}/templates`)

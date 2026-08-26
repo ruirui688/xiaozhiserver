@@ -3,6 +3,7 @@ package xiaozhi.modules.agent.service;
 import java.util.List;
 
 import xiaozhi.modules.agent.dto.AgentTemplateApplyDTO;
+import xiaozhi.modules.agent.dto.AgentTemplateCreateDTO;
 import xiaozhi.modules.agent.dto.AgentTemplateSaveAsDTO;
 import xiaozhi.modules.agent.dto.AgentTemplateReviewDTO;
 import xiaozhi.modules.agent.vo.AgentTemplateApplyResultVO;
@@ -15,6 +16,8 @@ public interface AgentWorkspaceTemplateService {
     AgentTemplateSaveResultVO saveAs(String agentId, AgentTemplateSaveAsDTO dto);
 
     AgentTemplateApplyResultVO apply(String agentId, String templateId, AgentTemplateApplyDTO dto);
+
+    AgentTemplateApplyResultVO createFromTemplate(String templateId, AgentTemplateCreateDTO dto);
 
     void delete(String templateId);
 

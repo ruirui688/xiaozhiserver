@@ -9,6 +9,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -21,6 +22,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
 
 import xiaozhi.modules.agent.dto.AgentTemplateApplyDTO;
+import xiaozhi.modules.agent.dto.AgentTemplateCreateDTO;
 import xiaozhi.modules.agent.dto.AgentFeishuTemplateDTO;
 import xiaozhi.modules.agent.dto.AgentTemplateSaveAsDTO;
 import xiaozhi.modules.agent.dto.AgentTemplateReviewDTO;
@@ -188,6 +190,66 @@ class AgentWorkspaceTemplateServiceImplTest {
 
         verify(agentService, never()).updateAgentById(any(), any(AgentUpdateDTO.class), any(Boolean.class));
         verify(tagService, never()).saveAgentTags(any(), any(), any());
+    }
+
+    @Test
+    void createFromTemplatePreservesRequestedAgentName() {
+        AgentTemplateSnapshotDTO snapshot = new AgentTemplateSnapshotDTO();
+        snapshot.setSchemaVersion(2);
+        AgentUpdateDTO templateConfig = new AgentUpdateDTO();
+        templateConfig.setAgentName("模板中的名称");
+        templateConfig.setFunctions(List.of());
+        templateConfig.setCorrectWordFileIds(List.of());
+        templateConfig.setContextProviders(List.of());
+        snapshot.setConfig(templateConfig);
+        AgentTemplateEntity template = new AgentTemplateEntity();
+        template.setId("template-a");
+        template.setWorkspaceId("workspace-a");
+        template.setVisibility("WORKSPACE");
+        template.setVersion(3);
+        template.setSnapshotJson(snapshot);
+        when(templateService.getById("template-a")).thenReturn(template);
+        when(permissionService.currentWorkspaceId()).thenReturn("workspace-a");
+        when(agentService.createAgent(any())).thenReturn("agent-new");
+        when(agentService.checkAgentPermission("agent-new", 7L)).thenReturn(true);
+        AgentInfoVO created = agent("agent-new", "workspace-a");
+        when(agentService.getAgentById("agent-new")).thenReturn(created);
+        when(tagService.getTagsByAgentId("agent-new")).thenReturn(List.of());
+
+        AgentTemplateCreateDTO request = new AgentTemplateCreateDTO();
+        request.setAgentName("  我的新军师  ");
+        request.setExpectedVersion(3);
+        try (MockedStatic<SecurityUser> security = mockStatic(SecurityUser.class)) {
+            security.when(SecurityUser::getUserId).thenReturn(7L);
+            service.createFromTemplate("template-a", request);
+        }
+
+        ArgumentCaptor<xiaozhi.modules.agent.dto.AgentCreateDTO> createCaptor =
+                ArgumentCaptor.forClass(xiaozhi.modules.agent.dto.AgentCreateDTO.class);
+        verify(agentService).createAgent(createCaptor.capture());
+        assertEquals("我的新军师", createCaptor.getValue().getAgentName());
+        ArgumentCaptor<AgentUpdateDTO> updateCaptor = ArgumentCaptor.forClass(AgentUpdateDTO.class);
+        verify(agentService).updateAgentById(org.mockito.ArgumentMatchers.eq("agent-new"), updateCaptor.capture(),
+                org.mockito.ArgumentMatchers.eq(false));
+        assertEquals("我的新军师", updateCaptor.getValue().getAgentName());
+        verify(permissionService, times(2)).requireWrite("workspace-a");
+    }
+
+    @Test
+    void createFromTemplateRejectsStaleVersionBeforeCreatingAgent() {
+        AgentTemplateEntity template = new AgentTemplateEntity();
+        template.setId("template-a");
+        template.setWorkspaceId("workspace-a");
+        template.setVersion(2);
+        when(templateService.getById("template-a")).thenReturn(template);
+        when(permissionService.currentWorkspaceId()).thenReturn("workspace-a");
+        AgentTemplateCreateDTO request = new AgentTemplateCreateDTO();
+        request.setAgentName("新智能体");
+        request.setExpectedVersion(1);
+
+        assertThrows(RuntimeException.class, () -> service.createFromTemplate("template-a", request));
+
+        verify(agentService, never()).createAgent(any());
     }
 
     @Test

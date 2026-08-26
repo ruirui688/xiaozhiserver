@@ -22,8 +22,10 @@ import lombok.RequiredArgsConstructor;
 import xiaozhi.common.exception.ErrorCode;
 import xiaozhi.common.exception.RenException;
 import xiaozhi.common.utils.JsonUtils;
+import xiaozhi.modules.agent.dto.AgentCreateDTO;
 import xiaozhi.modules.agent.dto.AgentTagDTO;
 import xiaozhi.modules.agent.dto.AgentTemplateApplyDTO;
+import xiaozhi.modules.agent.dto.AgentTemplateCreateDTO;
 import xiaozhi.modules.agent.dto.AgentTemplateSaveAsDTO;
 import xiaozhi.modules.agent.dto.AgentTemplateReviewDTO;
 import xiaozhi.modules.agent.dto.AgentTemplateSnapshotDTO;
@@ -170,9 +172,39 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
         AgentInfoVO target = requireAgentWrite(agentId);
         AgentTemplateEntity template = templateService.getById(templateId);
         requireTemplateReadable(template, target.getWorkspaceId());
-        if (!request.getExpectedVersion().equals(template.getVersion())) {
+        requireExpectedVersion(template, request.getExpectedVersion());
+        return applyTemplate(target, template, null);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public AgentTemplateApplyResultVO createFromTemplate(String templateId, AgentTemplateCreateDTO request) {
+        String workspaceId = workspacePermissionService.currentWorkspaceId();
+        workspacePermissionService.requireWrite(workspaceId);
+        AgentTemplateEntity template = templateService.getById(templateId);
+        requireTemplateReadable(template, workspaceId);
+        requireExpectedVersion(template, request.getExpectedVersion());
+
+        AgentCreateDTO create = new AgentCreateDTO();
+        create.setAgentName(StringUtils.trim(request.getAgentName()));
+        String agentId = agentService.createAgent(create);
+        AgentInfoVO target = requireAgentWrite(agentId);
+        if (!StringUtils.equals(workspaceId, target.getWorkspaceId())) {
+            throw new RenException(ErrorCode.NO_PERMISSION);
+        }
+        return applyTemplate(target, template, create.getAgentName());
+    }
+
+    private void requireExpectedVersion(AgentTemplateEntity template, Integer expectedVersion) {
+        int currentVersion = template.getVersion() == null ? 1 : template.getVersion();
+        if (expectedVersion == null || expectedVersion != currentVersion) {
             throw new RenException("模板已更新，请刷新页面后重试");
         }
+    }
+
+    private AgentTemplateApplyResultVO applyTemplate(
+            AgentInfoVO target, AgentTemplateEntity template, String agentNameOverride) {
+        String agentId = target.getId();
 
         boolean crossWorkspacePublication = StringUtils.isNotBlank(template.getWorkspaceId())
                 && !StringUtils.equals(template.getWorkspaceId(), target.getWorkspaceId())
@@ -191,6 +223,9 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
 
         List<String> skipped = new ArrayList<>();
         AgentUpdateDTO desired = deepCopy(snapshot.getConfig(), AgentUpdateDTO.class);
+        if (StringUtils.isNotBlank(agentNameOverride)) {
+            desired.setAgentName(agentNameOverride);
+        }
         filterModels(desired, target, skipped);
         desired.setFunctions(filterCapabilityMappings(desired.getFunctions(), target.getWorkspaceId(), skipped));
         desired.setCorrectWordFileIds(filterExistingCorrectWordFiles(desired.getCorrectWordFileIds(), skipped));
@@ -205,7 +240,7 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
                         snapshot.getVoicePrintIds(), target.getWorkspaceId(), skipped);
                 voicePrintService.replaceBindings(agentId, voicePrintIds, SecurityUser.getUserId());
                 feishuService.replaceFromTemplate(
-                        agentId, templateId, snapshot.getFeishuConfig(), SecurityUser.getUserId());
+                        agentId, template.getId(), snapshot.getFeishuConfig(), SecurityUser.getUserId());
             }
         }
         eventPublisher.publishEvent(AgentRuntimeConfigRefreshEvent.forAgent(agentId, "workspace_template_applied"));

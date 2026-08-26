@@ -17,6 +17,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import xiaozhi.common.utils.Result;
 import xiaozhi.modules.agent.dto.AgentTemplateApplyDTO;
+import xiaozhi.modules.agent.dto.AgentTemplateCreateDTO;
 import xiaozhi.modules.agent.dto.AgentTemplateSaveAsDTO;
 import xiaozhi.modules.agent.dto.AgentTemplateReviewDTO;
 import xiaozhi.modules.agent.service.AgentWorkspaceTemplateService;
@@ -36,6 +37,16 @@ public class AgentWorkspaceTemplateController {
     @RequiresPermissions("sys:role:normal")
     public Result<List<AgentTemplateSummaryVO>> list() {
         return new Result<List<AgentTemplateSummaryVO>>().ok(workspaceTemplateService.listAccessible());
+    }
+
+    @PostMapping("/templates/{templateId}/create")
+    @Operation(summary = "基于可访问模板原子创建智能体")
+    @RequiresPermissions("sys:role:normal")
+    public Result<AgentTemplateApplyResultVO> createFromTemplate(
+            @PathVariable String templateId,
+            @Valid @RequestBody AgentTemplateCreateDTO dto) {
+        return new Result<AgentTemplateApplyResultVO>().ok(
+                workspaceTemplateService.createFromTemplate(templateId, dto));
     }
 
     @PostMapping("/{agentId}/templates")
