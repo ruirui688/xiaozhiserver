@@ -94,6 +94,8 @@ services:
       - MAINTENANCE_HARNESS_ENABLED=${XIAOZHI_MAINTENANCE_HARNESS_ENABLED:-false}
       - MAINTENANCE_HARNESS_BASE_URL=http://xiaozhi-maintenance-agent:8010
       - MAINTENANCE_HARNESS_SECRET=${XIAOZHI_MAINTENANCE_AGENT_SECRET:-}
+      - MAINTENANCE_HARNESS_MANAGER_BASE_URL=http://xiaozhi-esp32-manager-api:8002/xiaozhi
+      - MAINTENANCE_HARNESS_PUBLIC_CONSOLE_URL=${XIAOZHI_MAINTENANCE_PUBLIC_CONSOLE_URL:-https://harness.yh.wejoy.link}
     logging: *default-logging
     cap_drop:
       - ALL
@@ -108,22 +110,28 @@ services:
     image: ${XIAOZHI_MAINTENANCE_AGENT_IMAGE_REPOSITORY:-crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-maintenance-agent}:latest
     container_name: xiaozhi-maintenance-agent
     cpus: ${XIAOZHI_MAINTENANCE_AGENT_CPUS:-0.50}
-    mem_limit: ${XIAOZHI_MAINTENANCE_AGENT_MEM_LIMIT:-512m}
-    memswap_limit: ${XIAOZHI_MAINTENANCE_AGENT_MEM_LIMIT:-512m}
+    mem_limit: ${XIAOZHI_MAINTENANCE_AGENT_MEM_LIMIT:-768m}
+    memswap_limit: ${XIAOZHI_MAINTENANCE_AGENT_MEM_LIMIT:-768m}
     pids_limit: ${XIAOZHI_MAINTENANCE_AGENT_PIDS_LIMIT:-128}
     restart: always
     networks:
       - default
     expose:
       - 8010
+      - 8011
+    ports:
+      - "127.0.0.1:${XIAOZHI_MAINTENANCE_CONSOLE_PORT:-8011}:8011"
     environment:
       - TZ=Asia/Shanghai
       - MAINTENANCE_AGENT_SECRET=${XIAOZHI_MAINTENANCE_AGENT_SECRET:-}
       - MAINTENANCE_MAX_CONCURRENCY=1
       - MAINTENANCE_MAX_OUTPUT_TOKENS=${XIAOZHI_MAINTENANCE_MAX_OUTPUT_TOKENS:-8192}
+      - MAINTENANCE_CONSOLE_MAX_SESSIONS=${XIAOZHI_MAINTENANCE_CONSOLE_MAX_SESSIONS:-1}
+      - MAINTENANCE_CONSOLE_TTL_SECONDS=${XIAOZHI_MAINTENANCE_CONSOLE_TTL_SECONDS:-7200}
+      - MAINTENANCE_MANAGER_HOST=xiaozhi-esp32-manager-api
     read_only: true
     tmpfs:
-      - /tmp:rw,noexec,nosuid,size=128m
+      - /tmp:rw,noexec,nosuid,size=256m
     cap_drop:
       - ALL
     security_opt:

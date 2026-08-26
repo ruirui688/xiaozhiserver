@@ -96,8 +96,14 @@
                 <el-button v-if="!readOnly" type="warning" icon="el-icon-connection" @click="sourcePanelVisible = true">
                   动态数据源
                 </el-button>
-                <el-button v-if="!readOnly && canManageMaintenance" type="warning" plain icon="el-icon-magic-stick" @click="maintenancePanelVisible = true">
-                  自主维护
+                <el-button v-if="!readOnly && canManageMaintenance" plain icon="el-icon-setting" @click="maintenancePanelVisible = true">
+                  维护设置
+                </el-button>
+                <el-button v-if="!readOnly && canManageMaintenance" type="warning" icon="el-icon-chat-dot-round" @click="openMaintenanceConsole">
+                  打开 Harness
+                </el-button>
+                <el-button v-if="!readOnly && canManageMaintenance" plain icon="el-icon-document-checked" @click="proposalPanelVisible = true">
+                  审核提案
                 </el-button>
                 <el-button v-if="!readOnly" type="danger" @click="handleBatchDelete" :disabled="selectedFiles.length === 0">
                   {{ $t('knowledgeFileUpload.batchDelete') }}
@@ -161,6 +167,14 @@
       resource-type="KNOWLEDGE"
       :resource-id="datasetId"
       @close="maintenancePanelVisible = false"
+      @open-console="openMaintenanceConsole"
+      @changed="fetchFileList" />
+
+    <maintenance-proposal-panel
+      :visible="proposalPanelVisible"
+      resource-type="KNOWLEDGE"
+      :resource-id="datasetId"
+      @close="proposalPanelVisible = false"
       @changed="fetchFileList" />
 
     <!-- 召回测试弹窗 -->
@@ -223,9 +237,10 @@ import FileUploadPanel from "@/components/knowledge/FileUploadPanel.vue";
 import FilePreviewDialog from "@/components/knowledge/FilePreviewDialog.vue";
 import KnowledgeSourcePanel from "@/components/knowledge/KnowledgeSourcePanel.vue";
 import MaintenancePolicyPanel from "@/components/maintenance/MaintenancePolicyPanel.vue";
+import MaintenanceProposalPanel from "@/components/maintenance/MaintenanceProposalPanel.vue";
 
 export default {
-  components: { HeaderBar, VersionFooter, FileUploadPanel, FilePreviewDialog, KnowledgeSourcePanel, MaintenancePolicyPanel },
+  components: { HeaderBar, VersionFooter, FileUploadPanel, FilePreviewDialog, KnowledgeSourcePanel, MaintenancePolicyPanel, MaintenanceProposalPanel },
   data() {
     return {
       datasetId: '',
@@ -242,6 +257,7 @@ export default {
       uploadDialogVisible: false,
       sourcePanelVisible: false,
       maintenancePanelVisible: false,
+      proposalPanelVisible: false,
       canManageMaintenance: false,
       uploadUrl: '',
       isAllSelected: false,
@@ -297,6 +313,23 @@ export default {
     }
   },
   methods: {
+    openMaintenanceConsole() {
+      const popup = window.open('about:blank', '_blank')
+      Api.maintenance.launchConsole('KNOWLEDGE', this.datasetId, res => {
+        const payload = (res && res.data && res.data.data) || (res && res.data) || {}
+        if (!payload.launchUrl || !payload.launchUrl.startsWith('https://')) {
+          if (popup) popup.close()
+          this.$message.error('Harness 控制台地址无效')
+          return
+        }
+        if (popup) popup.location.replace(payload.launchUrl)
+        else this.$message.warning('浏览器阻止了新窗口，请允许本站弹出窗口后重试')
+      }, error => {
+        if (popup) popup.close()
+        const message = (error && error.data && error.data.msg) || (error && error.msg)
+        this.$message.error(message || '启动 DeepSeek Harness 失败')
+      })
+    },
     fetchKnowledgeBaseAccess() {
       KnowledgeBaseAPI.getKnowledgeBase(this.datasetId, ({ data }) => {
         const dataset = data && data.code === 0 ? data.data : null;

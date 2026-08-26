@@ -25,7 +25,9 @@
         <el-button size="small" type="danger" icon="el-icon-delete" :loading="clearLoading" :disabled="maintenanceBusy" @click="handleClear">清空记忆</el-button>
         <el-button size="small" icon="el-icon-edit" :disabled="maintenanceBusy" @click="showRemember = !showRemember">记住</el-button>
         <el-button size="small" icon="el-icon-delete" :disabled="maintenanceBusy" @click="showForget = !showForget">忘记</el-button>
-        <el-button size="small" type="warning" plain icon="el-icon-magic-stick" :disabled="maintenanceBusy" @click="harnessPanelVisible = true">Harness维护</el-button>
+        <el-button size="small" plain icon="el-icon-setting" :disabled="maintenanceBusy" @click="harnessPanelVisible = true">维护设置</el-button>
+        <el-button size="small" type="warning" icon="el-icon-chat-dot-round" :disabled="maintenanceBusy" @click="openHarnessConsole">打开 Harness</el-button>
+        <el-button size="small" plain icon="el-icon-document-checked" :disabled="maintenanceBusy" @click="proposalPanelVisible = true">审核提案</el-button>
         <el-button size="small" icon="el-icon-refresh" @click="fetch" :loading="loading">刷新</el-button>
         <el-button size="small" icon="el-icon-back" @click="$router.push('/')">返回</el-button>
       </div>
@@ -186,6 +188,15 @@
       resource-type="MEMORY"
       :resource-id="agentId"
       @close="harnessPanelVisible = false"
+      @open-console="openHarnessConsole"
+      @changed="fetch"
+    />
+
+    <MaintenanceProposalPanel
+      :visible="proposalPanelVisible"
+      resource-type="MEMORY"
+      :resource-id="agentId"
+      @close="proposalPanelVisible = false"
       @changed="fetch"
     />
 
@@ -248,6 +259,7 @@ import MemoryCandidates from './memory/MemoryCandidates.vue'
 import MemoryDetailPanel from './memory/MemoryDetailPanel.vue'
 import MemoryEditDialog from './memory/MemoryEditDialog.vue'
 import MaintenancePolicyPanel from '@/components/maintenance/MaintenancePolicyPanel.vue'
+import MaintenanceProposalPanel from '@/components/maintenance/MaintenanceProposalPanel.vue'
 import Api from '@/apis/api'
 import {
   canRecoverRebuildTask,
@@ -270,7 +282,8 @@ export default {
     MemoryCandidates,
     MemoryDetailPanel,
     MemoryEditDialog,
-    MaintenancePolicyPanel
+    MaintenancePolicyPanel,
+    MaintenanceProposalPanel
   },
   data() {
     return {
@@ -295,6 +308,7 @@ export default {
       editItem: {},
       editMemoryId: '',
       harnessPanelVisible: false,
+      proposalPanelVisible: false,
       // Rebuild
       rebuildSessionLimit: 15,
       rebuildMode: 'clear_then_rebuild',
@@ -387,6 +401,22 @@ export default {
     this.stopRebuildTaskPolling()
   },
   methods: {
+    openHarnessConsole() {
+      const popup = window.open('about:blank', '_blank')
+      Api.maintenance.launchConsole('MEMORY', this.agentId, res => {
+        const payload = (res && res.data && res.data.data) || (res && res.data) || {}
+        if (!payload.launchUrl || !payload.launchUrl.startsWith('https://')) {
+          if (popup) popup.close()
+          this.$message.error('Harness 控制台地址无效')
+          return
+        }
+        if (popup) popup.location.replace(payload.launchUrl)
+        else this.$message.warning('浏览器阻止了新窗口，请允许本站弹出窗口后重试')
+      }, error => {
+        if (popup) popup.close()
+        this.$message.error((error && error.data && error.data.msg) || (error && error.msg) || '启动 DeepSeek Harness 失败')
+      })
+    },
     fetch() {
       this.loading = true
       Api.memory.dashboard(this.agentId, (res) => {

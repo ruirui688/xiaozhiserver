@@ -12,7 +12,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import lombok.AllArgsConstructor;
 import xiaozhi.common.utils.Result;
 import xiaozhi.modules.maintenance.dto.MaintenancePolicyRequest;
 import xiaozhi.modules.maintenance.dto.MaintenanceRunRequest;
@@ -23,9 +22,16 @@ import xiaozhi.modules.maintenance.entity.MaintenanceRunEventEntity;
 import xiaozhi.modules.maintenance.service.MaintenanceResourceAccessService;
 import xiaozhi.modules.maintenance.service.MaintenanceRunEventService;
 import xiaozhi.modules.maintenance.service.MaintenanceService;
+import xiaozhi.common.constant.Constant;
+import xiaozhi.modules.maintenance.dto.HarnessConsoleLaunchRequest;
+import xiaozhi.modules.maintenance.dto.HarnessConsoleLaunchResponse;
+import xiaozhi.modules.maintenance.dto.HarnessMaintenanceRequest;
+import xiaozhi.modules.maintenance.service.HarnessConsoleGateway;
+import xiaozhi.modules.sys.service.SysParamsService;
+import org.springframework.beans.factory.annotation.Value;
+import org.apache.commons.lang3.StringUtils;
 
 @RestController
-@AllArgsConstructor
 @RequestMapping("/maintenance/{resource_type}/{resource_id}")
 @Tag(name = "按资源启用的自主维护")
 @RequiresPermissions("sys:role:normal")
@@ -33,6 +39,23 @@ public class MaintenanceController {
     private final MaintenanceService maintenanceService;
     private final MaintenanceResourceAccessService accessService;
     private final MaintenanceRunEventService eventService;
+    private final HarnessConsoleGateway consoleGateway;
+    private final SysParamsService sysParamsService;
+
+    private final String managerBaseUrl;
+
+    public MaintenanceController(MaintenanceService maintenanceService,
+            MaintenanceResourceAccessService accessService, MaintenanceRunEventService eventService,
+            HarnessConsoleGateway consoleGateway, SysParamsService sysParamsService,
+            @Value("${maintenance.harness.manager-base-url:http://xiaozhi-esp32-manager-api:8002/xiaozhi}")
+            String managerBaseUrl) {
+        this.maintenanceService = maintenanceService;
+        this.accessService = accessService;
+        this.eventService = eventService;
+        this.consoleGateway = consoleGateway;
+        this.sysParamsService = sysParamsService;
+        this.managerBaseUrl = managerBaseUrl;
+    }
 
     @GetMapping("/policy")
     public Result<MaintenancePolicyEntity> policy(@PathVariable("resource_type") String type,
@@ -55,6 +78,23 @@ public class MaintenanceController {
         accessService.requireWrite(type, id);
         String instruction = request == null ? null : request.getInstruction();
         return new Result<MaintenanceRunEntity>().ok(maintenanceService.trigger(type, id, "MANUAL", instruction));
+    }
+
+    @PostMapping("/console-sessions")
+    public Result<HarnessConsoleLaunchResponse> launchConsole(@PathVariable("resource_type") String type,
+            @PathVariable("resource_id") String id) {
+        accessService.requireWrite(type, id);
+        HarnessMaintenanceRequest request = maintenanceService.prepareConsole(type, id);
+        try {
+            String callbackUrl = StringUtils.removeEnd(managerBaseUrl, "/")
+                    + "/config/maintenance/runs/" + request.getRunId() + "/complete";
+            String callbackSecret = sysParamsService.getValue(Constant.SERVER_SECRET, true);
+            return new Result<HarnessConsoleLaunchResponse>().ok(consoleGateway.launch(
+                    new HarnessConsoleLaunchRequest(request, callbackUrl, callbackSecret)));
+        } catch (RuntimeException ex) {
+            maintenanceService.failConsole(request.getRunId(), ex.getMessage());
+            throw ex;
+        }
     }
 
     @GetMapping("/runs")
