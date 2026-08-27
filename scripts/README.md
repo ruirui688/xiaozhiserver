@@ -69,6 +69,10 @@ RELEASE_ASSETS_BASE_IMAGE=alpine:3.20 \
 scripts/acr-build-push-lite
 ```
 
+maintenance-agent 默认使用清华 PyPI 镜像、600 秒读取超时，并通过 BuildKit cache mount 复用下载缓存；可用
+`MAINTENANCE_PIP_TIMEOUT` 和 `MAINTENANCE_PIP_INDEX_URL` 覆盖（包括切回官方 PyPI）。缓存只存在于构建器中，
+不进入运行镜像。
+
 服务端 base 缓存分三层，lite 和 FunASR 共享 common/lite 层，FunASR 只额外追加重依赖：
 
 ```text
