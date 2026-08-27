@@ -4,9 +4,21 @@ ARG API_RUNTIME_BASE_IMAGE=bellsoft/liberica-runtime-container:jre-21-glibc
 FROM ${MAVEN_BASE_IMAGE} AS api-builder
 WORKDIR /app
 COPY main/manager-api/pom.xml .
-RUN mvn -B -ntp -Dmaven.test.skip=true dependency:go-offline
+RUN --mount=type=cache,id=xiaozhi-manager-api-maven,target=/root/.m2/repository,sharing=locked \
+    mvn -B -ntp -U -Dmaven.test.skip=true \
+    -Daether.connector.connectTimeout=10000 \
+    -Daether.connector.requestTimeout=60000 \
+    -Dmaven.wagon.http.retryHandler.count=3 \
+    -Dmaven.wagon.rto=60000 \
+    dependency:go-offline
 COPY main/manager-api/src ./src
-RUN mvn -B -ntp -Dmaven.test.skip=true clean package
+RUN --mount=type=cache,id=xiaozhi-manager-api-maven,target=/root/.m2/repository,sharing=locked \
+    mvn -B -ntp -Dmaven.test.skip=true \
+    -Daether.connector.connectTimeout=10000 \
+    -Daether.connector.requestTimeout=60000 \
+    -Dmaven.wagon.http.retryHandler.count=3 \
+    -Dmaven.wagon.rto=60000 \
+    clean package
 
 FROM ${API_RUNTIME_BASE_IMAGE}
 WORKDIR /app

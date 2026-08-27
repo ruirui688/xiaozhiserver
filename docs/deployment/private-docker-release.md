@@ -850,6 +850,9 @@ Docker engine 和每个 buildx builder 都有自己的本地 layer/cache 存储�
 BuildKit cache mount 也留在对应 builder 内，例如 `/root/.npm`、`/root/.m2`、
 `/root/.cache/pip`、`/var/cache/apt` 和 `/var/lib/apt/lists`。这些 mount 能加速同一
 builder 的后续构建，但不能当作生产镜像内容，也不能假定换一台构建机后仍然存在。
+manager-api 的依赖预取和 JAR 打包共用具名 Maven cache mount，并为连接、响应和重试设置
+有限预算；某个 Maven CDN 节点失效时应在预算内重连或明确失败，不得无限停在
+`Scanning for projects...`。不得通过清理 Docker 或 Maven 缓存处理这类网络故障。
 
 `base-<依赖哈希>` 按构建参数、逻辑文件路径和文件内容计算，不包含 Git worktree
 的绝对路径。多个 worktree 构建同一份内容时，会复用同一批

@@ -156,6 +156,9 @@ BUILD_ENGINE=buildx BUILDKIT_REGISTRY_CACHE=true scripts/acr-build-push
 cache，不会在正常业务发布中首次上传 Maven/npm 深缓存；需要在组件下一次重建时创建或更新
 `buildcache-v1`，显式使用上面的 `BUILDKIT_REGISTRY_CACHE=true`。Docker engine 不读写 ACR
 registry cache。
+同一构建机上的 manager-api 依赖预取和 JAR 打包还会共用具名 Maven BuildKit cache；
+仓库连接和响应等待具有有限超时及重试，单个 CDN 节点无响应时不会无限停在
+`Scanning for projects...`。这些保护不会清理或覆盖已有 Maven/BuildKit 缓存。
 底层 `docker-build-private.sh` 单独运行时仍默认使用 Docker engine，避免本地 `PUSH=false`
 构建误把 daemon-only base 当成 docker-container builder 可见镜像。显式使用
 `BUILD_ENGINE=buildx PUSH=false` 时必须设置 `BUILD_BASE=false` 使用 registry-backed base，
