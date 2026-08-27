@@ -2,14 +2,18 @@ package xiaozhi.modules.knowledge.rag.impl.local;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.core.env.MapPropertySource;
 import org.springframework.mock.web.MockMultipartFile;
 
 import xiaozhi.common.exception.RenException;
@@ -17,6 +21,19 @@ import xiaozhi.common.exception.RenException;
 class LocalKnowledgeDocumentStorageTest {
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    void springCreatesStorageUsingConfiguredRoot() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            context.getEnvironment().getPropertySources().addFirst(new MapPropertySource(
+                    "localKnowledgeDocumentStorageTest",
+                    Map.of("knowledge.document-storage-root", temporaryDirectory.toString())));
+            context.register(LocalKnowledgeDocumentStorage.class);
+            context.refresh();
+
+            assertNotNull(context.getBean(LocalKnowledgeDocumentStorage.class));
+        }
+    }
 
     @Test
     void storesOriginalDocumentUnderValidatedDerivedPath() throws Exception {

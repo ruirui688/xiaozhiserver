@@ -11,6 +11,7 @@ import java.util.Locale;
 import java.util.regex.Pattern;
 
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
@@ -23,6 +24,7 @@ public class LocalKnowledgeDocumentStorage {
     private static final Pattern SAFE_ID = Pattern.compile("[A-Za-z0-9_-]{1,128}");
     private final Path root;
 
+    @Autowired
     public LocalKnowledgeDocumentStorage(
             @Value("${knowledge.document-storage-root:uploadfile/knowledge-documents}") String root) {
         this.root = Path.of(root).toAbsolutePath().normalize();
