@@ -67,7 +67,7 @@ Important persistent subdirectories:
 ~/xiaozhi-data/data        xiaozhi-server private config
 ~/xiaozhi-data/mysql/data  MySQL data (InnoDB)
 ~/xiaozhi-data/redis/data  Redis AOF persistence data
-~/xiaozhi-data/uploadfile  manager-api OTA and person-face uploads
+~/xiaozhi-data/uploadfile  manager-api OTA、人物图片、知识库原件和本地检索索引
 ~/xiaozhi-data/music       uploaded server music library
 ```
 

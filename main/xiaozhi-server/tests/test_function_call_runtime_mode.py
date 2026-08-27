@@ -722,6 +722,31 @@ def test_function_call_chat_blocks_dsml_protocol_text_from_tts_and_history():
     assert tool_handler.calls == []
 
 
+def test_tool_disabled_follow_up_blocks_chunked_escaped_dsml_from_tts_and_history():
+    llm = CapturingNoToolLLM(
+        [
+            "&lt; | | DSML | |tool_",
+            "calls&gt;&lt; | | DSML | | invoke name=&quot;search_from_local_knowledge&quot;&gt;",
+            "酒水价格表",
+        ]
+    )
+    tool_handler = CapturingToolHandler([_tool("search_from_local_knowledge")])
+    conn = _chat_conn(llm, tool_handler)
+
+    assert conn.chat(None, depth=1, allow_tools=False) is True
+
+    queued_text = "".join(conn.tts.queued_text())
+    stored_text = "".join(conn.tts.stored_text)
+    history_text = "\n".join(
+        message.content or "" for message in conn.dialogue.dialogue
+    )
+    assert "DSML" not in queued_text
+    assert "DSML" not in stored_text
+    assert "DSML" not in history_text
+    assert "tool_calls" not in queued_text
+    assert tool_handler.calls == []
+
+
 def test_active_meeting_turn_uses_only_main_llm_meeting_tool_and_stays_silent():
     tools = [_tool("meeting_minutes"), _tool("play_music")]
     llm = CapturingFunctionCallLLM([("我已经结束会议。", None)])

@@ -93,6 +93,8 @@ services:
       - CORS_ORIGINS=${XIAOZHI_CORS_ORIGINS:-http://localhost:8002,http://127.0.0.1:8002,http://*:8002}
       - XIAOZHI_MUSIC_DIR=/music
       - PERSON_FACE_STORAGE_ROOT=/uploadfile/person-faces
+      - XIAOZHI_KNOWLEDGE_DOCUMENT_ROOT=/uploadfile/knowledge-documents
+      - XIAOZHI_KNOWLEDGE_INDEX_ROOT=/uploadfile/knowledge-index
       - MAINTENANCE_HARNESS_ENABLED=true
       - MAINTENANCE_HARNESS_BASE_URL=http://xiaozhi-maintenance-agent:8010
       - MAINTENANCE_HARNESS_SECRET=${XIAOZHI_MAINTENANCE_AGENT_SECRET:-}

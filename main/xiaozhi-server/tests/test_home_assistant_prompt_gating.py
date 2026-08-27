@@ -90,3 +90,34 @@ def test_html_escaped_dsml_tool_protocol_is_detected():
     )
 
     assert looks_like_unhandled_tool_protocol(text)
+
+
+def test_chunked_html_escaped_dsml_is_held_and_blocked_before_output():
+    from core.providers.tools.tool_protocol_guard import ToolProtocolStreamGuard
+
+    guard = ToolProtocolStreamGuard()
+    outputs = []
+    for chunk in (
+        "本地知识库没有相关内容。&",
+        "lt; | | DSML | |tool_calls&gt;",
+        "&lt; | | DSML | | invoke name=&quot;search_from_local_knowledge&quot;&gt;",
+    ):
+        safe, _ = guard.feed(chunk)
+        outputs.append(safe)
+
+    assert "".join(outputs) == "本地知识库没有相关内容。"
+    assert guard.blocked is True
+    assert "DSML" not in "".join(outputs)
+
+
+def test_stream_guard_does_not_delay_normal_comparison_or_ampersand_text():
+    from core.providers.tools.tool_protocol_guard import ToolProtocolStreamGuard
+
+    guard = ToolProtocolStreamGuard()
+    text = "价格 < 100 元，套餐 A & 套餐 B 都可以选择。"
+
+    safe, blocked = guard.feed(text)
+
+    assert safe == text
+    assert blocked is False
+    assert guard.finish() == ("", False)

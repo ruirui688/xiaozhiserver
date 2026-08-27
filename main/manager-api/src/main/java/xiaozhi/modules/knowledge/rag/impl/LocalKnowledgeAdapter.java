@@ -2,8 +2,6 @@ package xiaozhi.modules.knowledge.rag.impl;
 
 import java.io.InputStream;
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -54,11 +52,13 @@ import xiaozhi.modules.knowledge.entity.KnowledgeBaseEntity;
 import xiaozhi.modules.knowledge.entity.KnowledgeChunkEntity;
 import xiaozhi.modules.knowledge.rag.KnowledgeBaseAdapter;
 import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeConfigParser;
+import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeDocumentStorage;
 import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeDocumentParser;
 import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeDocumentFormats;
+import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeLuceneIndex;
 import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeLlmBudget;
-import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeLexicalScorer;
 import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeProcessingStrategy;
+import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeRetrievalEngine;
 import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeTextSplitter;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
@@ -87,6 +87,9 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private DocumentDao documentDao;
     private KnowledgeBaseDao knowledgeBaseDao;
     private ModelConfigService modelConfigService;
+    private LocalKnowledgeRetrievalEngine retrievalEngine;
+    private LocalKnowledgeLuceneIndex luceneIndex;
+    private LocalKnowledgeDocumentStorage documentStorage;
     private int maxChunkChars = DEFAULT_MAX_CHUNK_CHARS;
     private LocalKnowledgeProcessingStrategy processingStrategy = LocalKnowledgeProcessingStrategy.LLM_ENHANCED;
     private String llmModelId;
@@ -107,7 +110,6 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private int keywordLevel = DEFAULT_RETRIEVAL_LEVEL;
     private int keywordTopK = DEFAULT_RETRIEVAL_TOP_K;
     private float keywordThreshold = 0.05F;
-    private LocalKnowledgeLexicalScorer lexicalScorer = new LocalKnowledgeLexicalScorer(DEFAULT_RETRIEVAL_LEVEL);
 
     @Override
     public String getAdapterType() {
@@ -127,6 +129,9 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         this.documentDao = SpringContextUtils.getBean(DocumentDao.class);
         this.knowledgeBaseDao = SpringContextUtils.getBean(KnowledgeBaseDao.class);
         this.modelConfigService = SpringContextUtils.getBean(ModelConfigService.class);
+        this.retrievalEngine = SpringContextUtils.getBean(LocalKnowledgeRetrievalEngine.class);
+        this.luceneIndex = SpringContextUtils.getBean(LocalKnowledgeLuceneIndex.class);
+        this.documentStorage = SpringContextUtils.getBean(LocalKnowledgeDocumentStorage.class);
         maxChunkChars = configParser.getInt("max_chunk_chars", DEFAULT_MAX_CHUNK_CHARS, 200, 20000);
         processingStrategy = LocalKnowledgeProcessingStrategy.fromConfig(
                 configParser.getString("processing_strategy", "llm_enhanced"));
@@ -161,7 +166,6 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
                 configParser.getInt(retrievalConfig, "semantic_top_k", DEFAULT_RETRIEVAL_TOP_K, 1, 50), 1, 50);
         keywordThreshold = configParser.getFloat(retrievalConfig, "keyword_threshold",
                 configParser.getFloat(retrievalConfig, "semantic_threshold", 0.05F, 0F, 1F), 0F, 1F);
-        lexicalScorer = new LocalKnowledgeLexicalScorer(keywordLevel);
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory();
         factory.setReadTimeout(java.time.Duration.ofSeconds(llmTimeoutSeconds));
         this.llmRestTemplate = new RestTemplate(factory);
@@ -220,7 +224,8 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             if (chunks.isEmpty()) {
                 throw new RenException(ErrorCode.UPLOAD_FILE_ERROR, "文件中没有可用于知识库切片的有效内容");
             }
-            replaceChunks(req.getDatasetId(), documentId, chunks);
+            replaceChunks(req.getDatasetId(), documentId, filename, chunks);
+            documentStorage.store(req.getFile(), req.getDatasetId(), documentId, filename);
 
             KnowledgeFilesDTO dto = new KnowledgeFilesDTO();
             dto.setId(documentId);
@@ -261,6 +266,10 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         chunkDao.delete(new QueryWrapper<KnowledgeChunkEntity>()
                 .eq("dataset_id", datasetId)
                 .in("document_id", req.getIds()));
+        luceneIndex.deleteDocuments(datasetId, req.getIds());
+        for (String documentId : req.getIds()) {
+            documentStorage.deleteDocument(datasetId, documentId);
+        }
     }
 
     @Override
@@ -306,106 +315,11 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
 
     @Override
     public RetrievalDTO.ResultVO retrievalTest(RetrievalDTO.TestReq req) {
-        String question = StringUtils.defaultString(req.getQuestion());
         int pageSize = LocalKnowledgeConfigParser.clamp(req.getPageSize() == null ? 10 : req.getPageSize(), 1, 100);
         int resultLimit = resolveResultLimit(req, pageSize);
-        Set<String> terms = lexicalScorer.tokenize(question);
-        List<String> candidateTerms = lexicalScorer.selectCandidateTerms(terms);
         int candidateLimit = resolveCandidateLimit(req, resultLimit);
-        String fulltextQuery = lexicalScorer.buildFulltextQuery(candidateTerms);
-        List<KnowledgeChunkEntity> chunks = loadRetrievalCandidates(req, candidateTerms, fulltextQuery, candidateLimit);
-
-        Map<String, DocumentEntity> docs = loadDocs(chunks);
-        List<ScoredChunk> scored = chunks.stream()
-                .map(chunk -> new ScoredChunk(chunk, lexicalScorer.score(question, chunk, terms)))
-                .filter(item -> shouldKeepScore(question, item.getScore()))
-                .sorted(Comparator.comparing(ScoredChunk::getScore).reversed())
-                .limit(resultLimit)
-                .collect(Collectors.toList());
-
-        List<RetrievalDTO.HitVO> hits = new ArrayList<>();
-        int index = 0;
-        for (ScoredChunk item : scored) {
-            KnowledgeChunkEntity chunk = item.getChunk();
-            DocumentEntity doc = docs.get(chunk.getDocumentId());
-            hits.add(RetrievalDTO.HitVO.builder()
-                    .id(chunk.getChunkId())
-                    .content(chunk.getContent())
-                    .documentId(chunk.getDocumentId())
-                    .datasetId(chunk.getDatasetId())
-                    .documentName(doc == null ? null : doc.getName())
-                    .similarity(item.getScore())
-                    .termSimilarity(item.getScore())
-                    .vectorSimilarity(null)
-                    .index(index++)
-                    .questions(StringUtils.isBlank(chunk.getQuestion()) ? null : List.of(chunk.getQuestion()))
-                    .build());
-        }
-
-        Map<String, Long> docCounts = scored.stream()
-                .collect(Collectors.groupingBy(item -> item.getChunk().getDocumentId(), Collectors.counting()));
-        List<RetrievalDTO.DocAggVO> docAggs = docCounts.entrySet().stream()
-                .map(entry -> {
-                    DocumentEntity doc = docs.get(entry.getKey());
-                    return RetrievalDTO.DocAggVO.builder()
-                            .docId(entry.getKey())
-                            .docName(doc == null ? entry.getKey() : doc.getName())
-                            .count(entry.getValue().intValue())
-                            .build();
-                })
-                .collect(Collectors.toList());
-
-        return RetrievalDTO.ResultVO.builder()
-                .chunks(hits)
-                .docAggs(docAggs)
-                .total((long) hits.size())
-                .build();
-    }
-
-    private List<KnowledgeChunkEntity> loadRetrievalCandidates(
-            RetrievalDTO.TestReq req,
-            List<String> candidateTerms,
-            String fulltextQuery,
-            int candidateLimit) {
-        Map<String, KnowledgeChunkEntity> candidates = new LinkedHashMap<>();
-        if (StringUtils.isNotBlank(fulltextQuery)) {
-            addCandidates(candidates, chunkDao.selectRetrievalCandidates(
-                    req.getDatasetIds(),
-                    req.getDocumentIds(),
-                    Collections.emptyList(),
-                    fulltextQuery,
-                    candidateLimit));
-        }
-        if ((StringUtils.isBlank(fulltextQuery) || candidates.size() < candidateLimit)
-                && candidateTerms != null && !candidateTerms.isEmpty()) {
-            addCandidates(candidates, chunkDao.selectRetrievalCandidates(
-                    req.getDatasetIds(),
-                    req.getDocumentIds(),
-                    candidateTerms,
-                    null,
-                    candidateLimit - candidates.size()));
-        }
-        if (candidates.isEmpty() && (candidateTerms == null || candidateTerms.isEmpty())) {
-            addCandidates(candidates, chunkDao.selectRetrievalCandidates(
-                    req.getDatasetIds(),
-                    req.getDocumentIds(),
-                    Collections.emptyList(),
-                    null,
-                    candidateLimit));
-        }
-        return new ArrayList<>(candidates.values());
-    }
-
-    private void addCandidates(Map<String, KnowledgeChunkEntity> target, List<KnowledgeChunkEntity> chunks) {
-        if (chunks == null || chunks.isEmpty()) {
-            return;
-        }
-        for (KnowledgeChunkEntity chunk : chunks) {
-            if (chunk == null) {
-                continue;
-            }
-            target.putIfAbsent(StringUtils.defaultIfBlank(chunk.getChunkId(), chunk.getId()), chunk);
-        }
+        return retrievalEngine.retrieve(req, new LocalKnowledgeRetrievalEngine.Options(
+                keywordLevel, resultLimit, candidateLimit, keywordThreshold));
     }
 
     private void applyManagedLlmConfig() {
@@ -522,6 +436,10 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     public DatasetDTO.BatchOperationVO deleteDataset(DatasetDTO.BatchIdReq req) {
         if (req != null && req.getIds() != null && !req.getIds().isEmpty()) {
             chunkDao.delete(new QueryWrapper<KnowledgeChunkEntity>().in("dataset_id", req.getIds()));
+            luceneIndex.deleteDatasets(req.getIds());
+            for (String datasetId : req.getIds()) {
+                documentStorage.deleteDataset(datasetId);
+            }
         }
         return DatasetDTO.BatchOperationVO.builder()
                 .successCount(req == null || req.getIds() == null ? 0 : req.getIds().size())
@@ -598,7 +516,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
                 .build();
     }
 
-    private void replaceChunks(String datasetId, String documentId, List<LocalChunk> chunks) {
+    private void replaceChunks(String datasetId, String documentId, String documentName, List<LocalChunk> chunks) {
         // [Issue #10] 验证删除是否成功，避免旧 chunk_id 与新 chunk_id 冲突
         int deleted = chunkDao.delete(new QueryWrapper<KnowledgeChunkEntity>()
                 .eq("dataset_id", datasetId)
@@ -609,6 +527,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
                 new QueryWrapper<KnowledgeBaseEntity>().eq("dataset_id", datasetId).last("LIMIT 1"));
         String workspaceId = dataset == null ? null : dataset.getWorkspaceId();
         int index = 0;
+        List<KnowledgeChunkEntity> indexedChunks = new ArrayList<>(chunks.size());
         for (LocalChunk chunk : chunks) {
             KnowledgeChunkEntity entity = new KnowledgeChunkEntity();
             entity.setDatasetId(datasetId);
@@ -623,8 +542,10 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             entity.setCreatedAt(new Date());
             entity.setUpdatedAt(new Date());
             chunkDao.insert(entity);
+            indexedChunks.add(entity);
             index++;
         }
+        luceneIndex.replaceDocument(datasetId, documentId, documentName, indexedChunks);
     }
 
     private List<LocalChunk> parseFile(String filename, InputStream inputStream,
@@ -932,27 +853,6 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         return LocalKnowledgeConfigParser.clamp(baseLimit, resultLimit, MAX_CANDIDATE_LIMIT);
     }
 
-    private boolean shouldKeepScore(String question, float score) {
-        if (StringUtils.isBlank(question)) {
-            return true;
-        }
-        return score >= keywordThreshold;
-    }
-
-    private Map<String, DocumentEntity> loadDocs(List<KnowledgeChunkEntity> chunks) {
-        List<String> docIds = chunks.stream()
-                .map(KnowledgeChunkEntity::getDocumentId)
-                .filter(StringUtils::isNotBlank)
-                .distinct()
-                .collect(Collectors.toList());
-        if (docIds.isEmpty()) {
-            return Map.of();
-        }
-        return documentDao.selectList(new QueryWrapper<DocumentEntity>().in("document_id", docIds))
-                .stream()
-                .collect(Collectors.toMap(DocumentEntity::getDocumentId, item -> item, (a, b) -> a));
-    }
-
     private <T> List<T> paginate(List<T> items, int page, int pageSize) {
         int from = Math.min((page - 1) * pageSize, items.size());
         int to = Math.min(from + pageSize, items.size());
@@ -999,10 +899,4 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         private String content;
     }
 
-    @Data
-    @AllArgsConstructor
-    private static class ScoredChunk {
-        private KnowledgeChunkEntity chunk;
-        private Float score;
-    }
 }

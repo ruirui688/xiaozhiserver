@@ -195,6 +195,46 @@ def test_empty_local_knowledge_disables_follow_up_tools_and_sets_fact_boundary(
     assert "不要再次调用知识库" in result.next_llm_system_prompt
 
 
+def test_local_knowledge_sends_original_user_question_with_rewritten_query(monkeypatch):
+    captured = {}
+
+    class _Response:
+        encoding = "utf-8"
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"code": 0, "data": {"chunks": []}}
+
+    def _post(*args, **kwargs):
+        captured.update(kwargs["json"])
+        return _Response()
+
+    monkeypatch.setattr(local_knowledge_module.requests, "post", _post)
+    dialogue = Dialogue()
+    dialogue.put(Message(role="user", content="我今天一个人来慧苑，你推荐我喝点什么？"))
+    conn = type(
+        "Connection",
+        (),
+        {
+            "dialogue": dialogue,
+            "config": {
+                "plugins": {"search_from_local_knowledge": {"dataset_ids": ["dataset-1"]}},
+                "manager-api": {"url": "http://manager-api", "secret": "secret"},
+            },
+        },
+    )()
+
+    local_knowledge_module.search_from_local_knowledge(
+        conn,
+        question="适合一人独饮的酒水推荐",
+    )
+
+    assert captured["question"] == "适合一人独饮的酒水推荐"
+    assert captured["raw_question"] == "我今天一个人来慧苑，你推荐我喝点什么？"
+
+
 def test_tool_index_does_not_repeat_schema_descriptions():
     description = "很长的工具描述" * 200
     tool = {

@@ -68,4 +68,36 @@
             c.id ASC
         LIMIT #{limit}
     </select>
+
+    <select id="selectIndexableChunks" resultMap="BaseResultMap">
+        SELECT
+            c.id,
+            c.dataset_id,
+            c.document_id,
+            c.chunk_id,
+            c.content,
+            c.question,
+            c.answer,
+            c.sort_order,
+            c.token_count,
+            c.created_at,
+            c.updated_at
+        FROM ai_rag_knowledge_chunk c
+        INNER JOIN ai_rag_knowledge_document d
+            ON d.dataset_id = c.dataset_id
+            AND d.document_id = c.document_id
+            AND COALESCE(d.enabled, 1) = 1
+            AND d.run = 'DONE'
+        WHERE c.dataset_id IN
+        <foreach collection="datasetIds" item="datasetId" open="(" separator="," close=")">
+            #{datasetId}
+        </foreach>
+        <if test="documentIds != null and documentIds.size() > 0">
+            AND c.document_id IN
+            <foreach collection="documentIds" item="documentId" open="(" separator="," close=")">
+                #{documentId}
+            </foreach>
+        </if>
+        ORDER BY c.dataset_id ASC, c.document_id ASC, c.sort_order ASC, c.id ASC
+    </select>
 </mapper>

@@ -280,7 +280,7 @@ agent 绑定，并只在设备空闲时清理本地短期状态；Realtime 模�
 ## 6. 记忆与知识库
 
 - 记忆：Python 上报对话事件，Java 维护事实、候选与审计；下一轮查询结果注入 LLM 上下文。
-- 知识库：Web 上传文件，Java 解析、分块和检索；Python 工具调用检索 API，再把结果交给 LLM。
+- 知识库：Web 上传原始文件，Java 持久化原件、解析分块并维护本机 Lucene 派生索引；Python 把用户原问和模型改写问句一并交给检索 API，再把结果交给 LLM。工具关闭的递归轮也必须拦截原始或 HTML 转义的 DSML 工具协议，不能送入字幕或 TTS。
 - 两条链路都必须受 agent、device、dataset 和 workspace 作用域限制；超时或外部模型失败不得关闭主 WebSocket。
 - Realtime 主模型是长连接会话 provider，不等价于可供后台同步调用的文本 LLM。会话建立时可以把已有 `summaryMemory` 作为静态 instructions 注入，输入/回复事件也可继续上报；但它不走传统 `Connection.chat()` 的逐轮 `_query_memory_context`。server VAD 自动响应模式下，基于每轮 query 的托管动态召回暂不等同于传统链路。依赖普通文本 LLM 的短期总结、知识库切片、Judge、主动记忆整理等附属任务必须引用独立且测试通过的传统 LLM/SLM，或选择托管/仅上报模式；不能默认复用实时连接。
 

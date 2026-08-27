@@ -67,6 +67,10 @@ public class RetrievalDTO {
         @NotBlank(message = "检索问题不能为空")
         private String question;
 
+        @Schema(description = "未经工具模型改写的原始用户问题（可选）")
+        @JsonProperty("raw_question")
+        private String rawQuestion;
+
         @Schema(description = "页码 (默认 1)")
         private Integer page;
 

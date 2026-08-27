@@ -17,4 +17,9 @@ public interface KnowledgeChunkDao extends BaseMapper<KnowledgeChunkEntity> {
             @Param("terms") List<String> terms,
             @Param("fulltextQuery") String fulltextQuery,
             @Param("limit") int limit);
+
+    /** 仅用于首次创建本地磁盘索引；正常召回不走该全量查询。 */
+    List<KnowledgeChunkEntity> selectIndexableChunks(
+            @Param("datasetIds") List<String> datasetIds,
+            @Param("documentIds") List<String> documentIds);
 }

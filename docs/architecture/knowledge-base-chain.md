@@ -152,20 +152,25 @@ RAG 请求 DTO；数据库继续保存用户提交的完整 JSON。远端响应�
 本地适配器不支持的格式、MIME 与扩展名不匹配、零切片、模型不可用或调用失败都必须明确失败，不能创建 DONE 记录；后续 `/chunks`
 只验证上传时已经生成的切片，不伪造重解析结果。
 
-### 3.2 低资源关键词召回
+### 3.2 文档原件、派生索引与低资源召回
 
 ```text
 LocalKnowledgeAdapter.retrievalTest()
-1. LocalKnowledgeLexicalScorer 对查询执行 NFKC 归一化和有界 CJK n-gram 拆分（最多 12 个候选词）
-2. 数据库有界候选召回：
-   - MySQL INSTR(content, term)     子串精确匹配
-   - MATCH(content) AGAINST(... IN BOOLEAN MODE)  全文索引
-   - 常规候选默认 200，任何配置下最多 800
-3. Java 仅对有限候选的 content/question/answer 做加权词法评分
-4. 按 keyword_threshold 过滤，按 keyword_top_k 返回
+1. 上传成功时把原始文件保存到 knowledge.document-storage-root/{datasetId}/{documentId}/source.{ext}
+2. 切片写入可兼容旧链路的 MySQL 表，同时写入本机 Lucene CJK/BM25 派生索引
+3. Python 同时传入用户原问 raw_question 与模型改写 question
+4. LocalKnowledgeQueryExpander 对数量/人数和结构化价格字段做确定性等价扩展；Lucene 对
+   content/question/answer/documentName 检索，问题和答案字段使用更高权重
+5. 对“最低价/最高价”等明确极值请求，从有限候选的价格/售价/单价字段执行确定性排序；其他请求继续按
+   LocalKnowledgeLexicalScorer 精排，最后按 keyword_threshold 过滤、keyword_top_k 返回
 ```
 
-本地知识库不生成切片 embedding，检索时也不调用 EmbeddingService、向量数据库或重排模型。旧
+原始文档是内容事实来源，Lucene 目录和 MySQL 切片都是可重建的派生/兼容数据；删除文档或知识库时同步删除其
+原件和索引。历史文档第一次查询时会从现有 DONE 切片惰性构建索引，但旧版本没有保留下来的原文件无法反向恢复，
+需要重新上传一次才进入文档原件目录。索引不可用时才降级到原有 MySQL 有界候选与 Java 词法评分，正常查询不扫描
+全量切片。
+
+本地知识库不生成切片 embedding，检索时也不调用 EmbeddingService、向量数据库或外部重排模型。旧
 `semantic_level`、`semantic_top_k`、`semantic_threshold` 仅作为滚动升级兼容输入，分别映射到
 `keyword_level`、`keyword_top_k`、`keyword_threshold`；页面保存后只写新字段。旧 `embedding_json` 列保留用于
 已部署数据库兼容，不再读写，不需要破坏性迁移。
@@ -184,6 +189,9 @@ ai_rag_knowledge_chunk    分块内容
   - id, datasetId, documentId, chunkId, content
   - question, answer, sortOrder
   - embedding_json (遗留兼容列，本地运行时不再读写)
+
+uploadfile/knowledge-documents  原始文档事实目录（持久化卷）
+uploadfile/knowledge-index      Lucene 派生索引目录（可重建）
 ```
 
 ### 3.4 可选动态数据源（Onyx connector 模式）
@@ -254,7 +262,7 @@ RAGFlowClient:
 ```text
 search_from_local_knowledge  (plugins_func/functions/)
   → POST {api_url}/config/knowledge/retrieval
-  → dataset_ids + question
+  → dataset_ids + raw_question + question
   → 超时 8s
   → Action.REQLLM → context_text 注入
 
@@ -281,6 +289,9 @@ LLM 调用 search_from_local_knowledge / search_from_ragflow
 公开历史、文化、科普和故事可使用通用知识直接回答；企业资料、人员身份和其他私有事实必须说明暂无记录，
 不能猜测。该指令不持久化到 Dialogue，下一轮新的用户问题会恢复正常工具发现；服务端不增加关键词路由或
 独立分类器。接口失败、配置缺失和鉴权错误仍走原有明确错误回复，不能伪装成空检索。
+
+即使空检索后的递归回答临时关闭 tools，LLM 流式输出仍经过工具协议守卫。原始或 HTML 转义的 DSML
+`tool_calls/invoke` 标记会在送入字幕和 TTS 前被拦截并转成稳定错误回复，不能作为普通文本显示给用户。
 
 ### 5.3 上下文与工具描述预算
 

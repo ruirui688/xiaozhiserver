@@ -46,6 +46,26 @@ SEARCH_FROM_LOCAL_KNOWLEDGE_FUNCTION_DESC = {
 }
 
 
+def _latest_user_question(conn):
+    dialogue = getattr(getattr(conn, "dialogue", None), "dialogue", None)
+    if not isinstance(dialogue, list):
+        return ""
+    for message in reversed(dialogue):
+        if getattr(message, "role", None) != "user":
+            continue
+        content = getattr(message, "content", "")
+        if not isinstance(content, str):
+            continue
+        try:
+            parsed = json.loads(content)
+            if isinstance(parsed, dict) and isinstance(parsed.get("content"), str):
+                content = parsed["content"]
+        except (json.JSONDecodeError, TypeError):
+            pass
+        return content.strip()
+    return ""
+
+
 @register_function(
     "search_from_local_knowledge",
     SEARCH_FROM_LOCAL_KNOWLEDGE_FUNCTION_DESC,
@@ -66,7 +86,10 @@ def search_from_local_knowledge(conn: "ConnectionHandler", question=None):
         return ActionResponse(Action.RESPONSE, None, "未配置本地知识库数据集")
 
     headers = {"Authorization": f"Bearer {api_secret}", "Content-Type": "application/json"}
+    raw_question = _latest_user_question(conn)
     payload = {"question": question, "dataset_ids": dataset_ids}
+    if raw_question:
+        payload["raw_question"] = raw_question
 
     try:
         response = requests.post(

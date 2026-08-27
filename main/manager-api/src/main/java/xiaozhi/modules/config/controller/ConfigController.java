@@ -93,9 +93,15 @@ public class ConfigController {
         if (questionObj instanceof String) {
             question = (String) questionObj;
         }
+        String rawQuestion = null;
+        Object rawQuestionObj = body.get("raw_question");
+        if (rawQuestionObj instanceof String) {
+            rawQuestion = (String) rawQuestionObj;
+        }
         RetrievalDTO.TestReq req = RetrievalDTO.TestReq.builder()
                 .datasetIds(datasetIds)
                 .question(question)
+                .rawQuestion(rawQuestion)
                 .page(1)
                 .pageSize(10)
                 .build();

@@ -36,7 +36,10 @@ from core.providers.tools.follow_up_policy import (
     inject_trusted_follow_up_system_prompt,
     resolve_tool_follow_up_policy,
 )
-from core.providers.tools.tool_protocol_guard import looks_like_unhandled_tool_protocol
+from core.providers.tools.tool_protocol_guard import (
+    ToolProtocolStreamGuard,
+    looks_like_unhandled_tool_protocol,
+)
 from plugins_func.loadplugins import auto_import_modules
 from plugins_func.register import Action, ActionResponse
 from core.auth import AuthenticationError
@@ -1828,6 +1831,7 @@ class ConnectionHandler:
         tool_calls_list = []  # 格式: [{"id": "", "name": "", "arguments": ""}]
         content_arguments = ""
         unhandled_tool_protocol = False
+        tool_protocol_stream_guard = ToolProtocolStreamGuard()
         emotion_flag = not meeting_tool_turn
         # 跟随官方低延迟链路：普通 content 即使在携带 tools 的请求中也立即
         # 进入 TTS。会议轮必须保持静默裁决，因此只保留会议专用延迟门控。
@@ -1921,6 +1925,14 @@ class ConnectionHandler:
                 else:
                     content = response
 
+                if content is not None and len(content) > 0 and not tool_call_flag:
+                    content, blocked_protocol = tool_protocol_stream_guard.feed(content)
+                    if blocked_protocol:
+                        tool_call_flag = True
+                        unhandled_tool_protocol = True
+                        content_arguments += tool_protocol_stream_guard.blocked_text
+                        content = None
+
                 # 在llm回复中获取情绪表情，一轮对话只在开头获取一次
                 if (
                     emotion_flag
@@ -1953,6 +1965,23 @@ class ConnectionHandler:
                                     content_detail=content,
                                 )
                             )
+            if not tool_call_flag:
+                pending_content, blocked_protocol = tool_protocol_stream_guard.finish()
+                if blocked_protocol:
+                    tool_call_flag = True
+                    unhandled_tool_protocol = True
+                    content_arguments += tool_protocol_stream_guard.blocked_text
+                elif pending_content:
+                    response_message.append(pending_content)
+                    if not defer_plain_content_for_tools:
+                        self.tts.tts_text_queue.put(
+                            TTSMessageDTO(
+                                sentence_id=current_sentence_id,
+                                sentence_type=SentenceType.MIDDLE,
+                                content_type=ContentType.TEXT,
+                                content_detail=pending_content,
+                            )
+                        )
         except Exception as e:
             self.session_telemetry.metrics.record_llm_complete(
                 time.monotonic() - llm_started_at
