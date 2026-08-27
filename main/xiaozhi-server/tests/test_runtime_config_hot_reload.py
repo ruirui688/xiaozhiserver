@@ -56,6 +56,7 @@ def test_build_managed_runtime_config_replaces_voice_prompt_and_plugins():
         },
         "plugins": {"play_music": "{\"enabled\": true}"},
         "correct_words": ["小治|小智"],
+        "speech_routing": {"input": "device", "output": "server"},
     }
 
     result = build_managed_runtime_config(common, private)
@@ -66,12 +67,23 @@ def test_build_managed_runtime_config_replaces_voice_prompt_and_plugins():
     assert result["plugins"]["play_music"]["enabled"] is True
     assert result["Intent"]["intent"]["functions"] == ["play_music"]
     assert result["TTS"]["tts-new"]["correct_words"] == ["小治|小智"]
+    assert result["speech_routing"] == {"input": "device", "output": "server"}
 
 
 def test_reloader_rebuilds_only_when_manager_config_changes(monkeypatch):
     common = {"delete_audio": True, "selected_module": {}, "model_config": {}}
-    old_private = {"agent_id": "agent-a", "prompt": "old", "plugins": {}}
-    new_private = {"agent_id": "agent-a", "prompt": "new", "plugins": {}}
+    old_private = {
+        "agent_id": "agent-a",
+        "prompt": "old",
+        "plugins": {},
+        "speech_routing": {"input": "server", "output": "server"},
+    }
+    new_private = {
+        "agent_id": "agent-a",
+        "prompt": "new",
+        "plugins": {},
+        "speech_routing": {"input": "device", "output": "server"},
+    }
     conn = SimpleNamespace(
         closing=False,
         closed=False,
@@ -96,6 +108,11 @@ def test_reloader_rebuilds_only_when_manager_config_changes(monkeypatch):
     async def run():
         changed = await reloader.refresh_if_due(force=True)
         reloader._replace_pipeline.assert_awaited_once()
+        candidate = reloader._replace_pipeline.await_args.args[0]
+        assert candidate["speech_routing"] == {
+            "input": "device",
+            "output": "server",
+        }
         reloader._replace_pipeline.reset_mock()
         unchanged = await reloader.refresh_if_due(force=True)
         return changed, unchanged

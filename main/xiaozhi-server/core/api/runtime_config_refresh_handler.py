@@ -11,6 +11,8 @@ from core.device_runtime_registry import get_connection, get_connections_for_age
 
 
 class RuntimeConfigRefreshHandler(BaseHandler):
+    SAFE_REFRESH_POLL_SECONDS = 0.05
+
     def _json_response(self, body, status=200, request=None):
         response = web.Response(
             text=json.dumps(body, ensure_ascii=False),
@@ -105,17 +107,8 @@ class RuntimeConfigRefreshHandler(BaseHandler):
             else:
                 reloader.request_refresh(reason)
             scheduled += 1
-            if (scene_switch is not None or refresh_now) and not getattr(
-                conn, "client_is_speaking", False
-            ):
-                asyncio.create_task(
-                    self._run_config_refresh(reloader, reason),
-                    name=(
-                        "scene-switch-{}".format(scene_switch["switchRequestId"][:32])
-                        if scene_switch is not None
-                        else "runtime-refresh-{}".format(str(conn.device_id)[:32])
-                    ),
-                )
+            if scene_switch is not None or refresh_now:
+                self._schedule_config_refresh(conn, reloader, reason, scene_switch)
 
         if scene_switch is not None:
             await self._report_scene_status(
@@ -143,13 +136,37 @@ class RuntimeConfigRefreshHandler(BaseHandler):
             request=request,
         )
 
-    async def _run_config_refresh(self, reloader, reason):
+    def _schedule_config_refresh(self, conn, reloader, reason, scene_switch):
+        current = getattr(conn, "_runtime_config_refresh_task", None)
+        if current is not None and not current.done():
+            return
+        name = (
+            "scene-switch-{}".format(scene_switch["switchRequestId"][:32])
+            if scene_switch is not None
+            else "runtime-refresh-{}".format(str(conn.device_id)[:32])
+        )
+        conn._runtime_config_refresh_task = asyncio.create_task(
+            self._run_config_refresh(conn, reloader, reason),
+            name=name,
+        )
+
+    async def _run_config_refresh(self, conn, reloader, reason):
+        current_task = asyncio.current_task()
         try:
-            await reloader.refresh_if_due(force=True, reason=reason)
+            while not getattr(conn, "closing", False) and not getattr(
+                conn, "closed", False
+            ):
+                if not getattr(conn, "client_is_speaking", False):
+                    await reloader.refresh_if_due(force=True, reason=reason)
+                    return
+                await asyncio.sleep(self.SAFE_REFRESH_POLL_SECONDS)
         except Exception as error:
             self.logger.bind(tag=__name__).warning(
                 "在线设备配置刷新失败: errorType={}", type(error).__name__
             )
+        finally:
+            if getattr(conn, "_runtime_config_refresh_task", None) is current_task:
+                conn._runtime_config_refresh_task = None
 
     async def _report_scene_status(self, scene_switch, status):
         payload = {

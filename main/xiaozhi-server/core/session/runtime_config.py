@@ -21,6 +21,7 @@ MANAGED_CONFIG_KEYS = (
     "mcp_endpoint",
     "context_providers",
     "semantic_skills",
+    "speech_routing",
     "device_max_output_size",
     "chat_history_conf",
     "tts_voice_catalog",

@@ -139,3 +139,53 @@ def test_activation_refresh_runs_immediately_for_idle_unbound_connection(monkeyp
     reloader.refresh_if_due.assert_awaited_once_with(
         force=True, reason="device_activated"
     )
+
+
+def test_immediate_refresh_waits_for_busy_connection_to_become_idle(monkeypatch):
+    reloader = SimpleNamespace(
+        request_refresh=lambda reason: setattr(reloader, "reason", reason),
+        refresh_if_due=AsyncMock(return_value=True),
+    )
+    conn = SimpleNamespace(
+        runtime_config_reloader=reloader,
+        client_is_speaking=True,
+        closing=False,
+        closed=False,
+        device_id="device-a",
+    )
+    monkeypatch.setattr(
+        handler_module,
+        "get_connection",
+        lambda value: conn if value == "device-a" else None,
+    )
+    handler = RuntimeConfigRefreshHandler(
+        {
+            "server": {"auth_key": "server-secret"},
+            "manager-api": {"secret": "manager-secret"},
+        }
+    )
+    handler.SAFE_REFRESH_POLL_SECONDS = 0
+
+    async def run():
+        response = await handler.handle_refresh(
+            _Request(
+                {
+                    "deviceIds": ["device-a"],
+                    "reason": "device_speech_routing_updated",
+                    "refreshNow": True,
+                }
+            )
+        )
+        await asyncio.sleep(0)
+        reloader.refresh_if_due.assert_not_awaited()
+        conn.client_is_speaking = False
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        return response
+
+    response = asyncio.run(run())
+
+    assert response.status == 200
+    reloader.refresh_if_due.assert_awaited_once_with(
+        force=True, reason="device_speech_routing_updated"
+    )
