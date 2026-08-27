@@ -22,10 +22,19 @@ final class LocalKnowledgeStructuredReranker {
             ToDoubleFunction<T> fallbackScore) {
         Direction direction = direction(query);
         Comparator<T> scoreOrder = Comparator.comparingDouble(fallbackScore).reversed();
+        Comparator<T> entityOrder = Comparator.<T>comparingInt(
+                item -> LocalKnowledgeStructuredIntent.primaryEntityMatch(query, content.apply(item))).reversed();
+        Comparator<T> attributeOrder = Comparator.<T>comparingInt(
+                item -> LocalKnowledgeStructuredIntent.hasPriceField(content.apply(item)) ? 1 : 0).reversed();
         if (direction == Direction.NONE) {
-            return scoreOrder;
+            Comparator<T> ordering = entityOrder;
+            if (LocalKnowledgeStructuredIntent.requestsPrice(query)) {
+                ordering = ordering.thenComparing(attributeOrder);
+            }
+            return ordering.thenComparing(scoreOrder);
         }
-        return Comparator.<T>comparingInt(item -> extractPrice(content.apply(item), direction).isPresent() ? 0 : 1)
+        return entityOrder
+                .thenComparingInt(item -> extractPrice(content.apply(item), direction).isPresent() ? 0 : 1)
                 .thenComparingDouble(item -> orderedPrice(extractPrice(content.apply(item), direction), direction))
                 .thenComparing(scoreOrder);
     }

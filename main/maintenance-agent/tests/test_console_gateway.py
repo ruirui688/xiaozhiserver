@@ -11,7 +11,8 @@ os.environ["MAINTENANCE_CONSOLE_STATE_ROOT"] = TEST_STATE_ROOT
 from aiohttp.test_utils import make_mocked_request  # noqa: E402
 from aiohttp.web_exceptions import HTTPForbidden  # noqa: E402
 from console_gateway import (  # noqa: E402
-    ConsoleManager, _require_trusted_origin, _with_frame_ancestors, build_console_prompt,
+    CONSOLE_COOKIE_PATH, ConsoleManager, _require_trusted_origin, _rewrite_console_body,
+    _rewrite_console_location, _with_frame_ancestors, build_console_prompt,
 )
 
 
@@ -42,9 +43,9 @@ class ConsoleGatewayTest(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertNotIn("private-resource-id", first)
 
-    def test_state_changing_console_requests_require_dedicated_origin(self):
+    def test_state_changing_console_requests_require_manager_origin(self):
         trusted = make_mocked_request("POST", "/api/session", headers={
-            "Origin": "https://harness.yh.wejoy.link"
+            "Origin": "https://yh.wejoy.link"
         })
         untrusted = make_mocked_request("POST", "/api/session", headers={
             "Origin": "https://attacker.example"
@@ -52,6 +53,30 @@ class ConsoleGatewayTest(unittest.TestCase):
         _require_trusted_origin(trusted)
         with self.assertRaises(HTTPForbidden):
             _require_trusted_origin(untrusted)
+
+    def test_native_absolute_paths_are_scoped_under_same_origin_prefix(self):
+        html = (
+            b'<script src="/assets/app.js"></script><link href="/manifest.webmanifest">'
+            b'<script>fetch("/api/session"); import("/plugins/client.js")</script>'
+        )
+        rewritten = _rewrite_console_body(html, "text/html; charset=utf-8")
+        self.assertIn(b'"/maintenance-console/assets/app.js"', rewritten)
+        self.assertIn(b'"/maintenance-console/api/session"', rewritten)
+        self.assertIn(b'"/maintenance-console/plugins/client.js"', rewritten)
+        self.assertIn(b'"/maintenance-console/manifest.webmanifest"', rewritten)
+        self.assertEqual(CONSOLE_COOKIE_PATH, "/maintenance-console/")
+
+    def test_redirects_stay_inside_same_origin_console_prefix(self):
+        self.assertEqual(
+            "/maintenance-console/conversations/1", _rewrite_console_location("/conversations/1")
+        )
+        self.assertEqual(
+            "/maintenance-console/api/session", _rewrite_console_location("/maintenance-console/api/session")
+        )
+        self.assertEqual("/maintenance-console", _rewrite_console_location("/maintenance-console"))
+        self.assertEqual("https://example.com/elsewhere", _rewrite_console_location(
+            "https://example.com/elsewhere"
+        ))
 
     def test_docker_build_installs_native_peer_dependencies_instead_of_skipping_them(self):
         dockerfile = Path("Dockerfile").read_text(encoding="utf-8")

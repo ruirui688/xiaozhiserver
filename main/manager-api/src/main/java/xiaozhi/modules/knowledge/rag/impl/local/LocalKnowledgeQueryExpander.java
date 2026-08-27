@@ -35,6 +35,12 @@ public final class LocalKnowledgeQueryExpander {
         if (containsAny(combined, "最贵", "最高价", "价格最高")) {
             queries.add("价格 售价 单价 金额 价钱");
         }
+        if (containsAny(combined, "价格", "多少钱", "价钱", "售价", "单价", "现价", "金额", "怎么卖", "什么价")) {
+            queries.add("价格 售价 单价 现价 金额 价钱");
+        }
+        if (containsAny(combined, "单独", "单点", "单杯", "一杯", "零售")) {
+            queries.add("单品 单点 单独 零售 杯 单杯");
+        }
         return new ArrayList<>(queries);
     }
 

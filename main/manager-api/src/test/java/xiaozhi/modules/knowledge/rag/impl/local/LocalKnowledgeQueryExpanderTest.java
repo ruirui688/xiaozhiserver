@@ -32,4 +32,13 @@ class LocalKnowledgeQueryExpanderTest {
 
         assertTrue(queries.stream().anyMatch(query -> query.contains("价格") && query.contains("售价")));
     }
+
+    @Test
+    void expandsOrdinaryPriceAndSingleItemLanguageIntoStructuredFields() {
+        List<String> queries = LocalKnowledgeQueryExpander.expand(
+                "我就想喝一杯单独的可乐，多少钱？", "可乐单独点单价格");
+
+        assertTrue(queries.stream().anyMatch(query -> query.contains("售价") && query.contains("单价")));
+        assertTrue(queries.stream().anyMatch(query -> query.contains("单品") && query.contains("零售")));
+    }
 }

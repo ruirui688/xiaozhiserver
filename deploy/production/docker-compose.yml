@@ -99,7 +99,6 @@ services:
       - MAINTENANCE_HARNESS_BASE_URL=http://xiaozhi-maintenance-agent:8010
       - MAINTENANCE_HARNESS_SECRET=${XIAOZHI_MAINTENANCE_AGENT_SECRET:-}
       - MAINTENANCE_HARNESS_MANAGER_BASE_URL=http://xiaozhi-esp32-manager-api:8002/xiaozhi
-      - MAINTENANCE_HARNESS_PUBLIC_CONSOLE_URL=${XIAOZHI_MAINTENANCE_PUBLIC_CONSOLE_URL:-https://harness.yh.wejoy.link}
     logging: *default-logging
     cap_drop:
       - ALL
@@ -133,7 +132,7 @@ services:
       - MAINTENANCE_CONSOLE_TTL_SECONDS=${XIAOZHI_MAINTENANCE_CONSOLE_TTL_SECONDS:-7200}
       - MAINTENANCE_CONSOLE_STATE_ROOT=/var/lib/xiaozhi-maintenance-console
       - MAINTENANCE_CONSOLE_FRAME_ANCESTORS=${XIAOZHI_MAINTENANCE_FRAME_ANCESTORS:-https://yh.wejoy.link}
-      - MAINTENANCE_CONSOLE_PUBLIC_ORIGIN=${XIAOZHI_MAINTENANCE_PUBLIC_CONSOLE_URL:-https://harness.yh.wejoy.link}
+      - MAINTENANCE_CONSOLE_PUBLIC_ORIGIN=${XIAOZHI_PUBLIC_BASE_URL:-https://yh.wejoy.link}
       - MAINTENANCE_MANAGER_HOST=xiaozhi-esp32-manager-api
     read_only: true
     tmpfs:

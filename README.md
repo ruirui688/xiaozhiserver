@@ -31,7 +31,7 @@ main/                 业务模块（[入口](./main/README.md)）
   manager-api/       Java Spring Boot 管理后台 API
   manager-web/       Web 管理后台
   manager-mobile/    移动端管理后台
-  maintenance-agent/ 可选 DeepSeek Harness 维护适配器（无产品写权限）
+  maintenance-agent/ 常驻 DeepSeek Harness 维护工作台（资源自动维护按库/智能体启用，无产品写权限）
 docs/                 项目文档（[入口](./docs/README.md)）
 scripts/              本地开发与发布脚本（[入口](./scripts/README.md)）
 runtime/              本地运行产物目录，仅提交 .gitkeep

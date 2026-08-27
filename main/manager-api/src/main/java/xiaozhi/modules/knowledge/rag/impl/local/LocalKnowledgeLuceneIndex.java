@@ -50,10 +50,13 @@ public class LocalKnowledgeLuceneIndex {
     private static final String FIELD_DATASET_ID = "dataset_id";
     private static final String FIELD_DOCUMENT_ID = "document_id";
     private static final String FIELD_CHUNK_ID = "chunk_id";
+    private static final String FIELD_SCHEMA_VERSION = "schema_version";
     private static final String FIELD_CONTENT = "content";
+    private static final String FIELD_PRIMARY_NAME = "primary_name";
     private static final String FIELD_QUESTION = "question";
     private static final String FIELD_ANSWER = "answer";
     private static final String FIELD_DOCUMENT_NAME = "document_name";
+    private static final String SCHEMA_VERSION = "2";
 
     private final Path root;
     private final Analyzer analyzer;
@@ -166,7 +169,9 @@ public class LocalKnowledgeLuceneIndex {
             }
             IndexSearcher searcher = new IndexSearcher(reader);
             searcher.setSimilarity(new BM25Similarity());
-            Query query = filteredQuery(textQuery(terms), datasetIds, documentIds);
+            boolean preferPrimaryName = !LocalKnowledgeStructuredIntent.requestsAuxiliaryRelationship(
+                    String.join(" ", queries));
+            Query query = filteredQuery(textQuery(terms, preferPrimaryName), datasetIds, documentIds);
             TopDocs topDocs = searcher.search(query, Math.max(1, limit));
             List<SearchHit> hits = new ArrayList<>(topDocs.scoreDocs.length);
             for (ScoreDoc scoreDoc : topDocs.scoreDocs) {
@@ -193,14 +198,19 @@ public class LocalKnowledgeLuceneIndex {
         document.add(new StringField(FIELD_DATASET_ID, datasetId, Field.Store.YES));
         document.add(new StringField(FIELD_DOCUMENT_ID, documentId, Field.Store.YES));
         document.add(new StringField(FIELD_CHUNK_ID, chunk.getChunkId(), Field.Store.YES));
+        document.add(new StringField(FIELD_SCHEMA_VERSION, SCHEMA_VERSION, Field.Store.NO));
         document.add(new TextField(FIELD_CONTENT, StringUtils.defaultString(chunk.getContent()), Field.Store.YES));
         document.add(new TextField(FIELD_QUESTION, StringUtils.defaultString(chunk.getQuestion()), Field.Store.YES));
         document.add(new TextField(FIELD_ANSWER, StringUtils.defaultString(chunk.getAnswer()), Field.Store.YES));
         document.add(new TextField(FIELD_DOCUMENT_NAME, StringUtils.defaultString(documentName), Field.Store.YES));
+        document.add(new TextField(FIELD_PRIMARY_NAME, LocalKnowledgeStructuredIntent.primaryName(String.join("\n",
+                StringUtils.defaultString(chunk.getContent()),
+                StringUtils.defaultString(chunk.getQuestion()),
+                StringUtils.defaultString(chunk.getAnswer()))), Field.Store.NO));
         return document;
     }
 
-    private Query textQuery(Set<String> terms) {
+    private Query textQuery(Set<String> terms, boolean preferPrimaryName) {
         BooleanQuery.Builder query = new BooleanQuery.Builder();
         for (String term : terms) {
             BooleanQuery.Builder fields = new BooleanQuery.Builder();
@@ -208,6 +218,9 @@ public class LocalKnowledgeLuceneIndex {
             fields.add(new BoostQuery(new TermQuery(new Term(FIELD_QUESTION, term)), 2.2F), BooleanClause.Occur.SHOULD);
             fields.add(new BoostQuery(new TermQuery(new Term(FIELD_ANSWER, term)), 1.6F), BooleanClause.Occur.SHOULD);
             fields.add(new BoostQuery(new TermQuery(new Term(FIELD_DOCUMENT_NAME, term)), 0.8F),
+                    BooleanClause.Occur.SHOULD);
+            fields.add(new BoostQuery(new TermQuery(new Term(FIELD_PRIMARY_NAME, term)),
+                    preferPrimaryName ? 5.0F : 0.8F),
                     BooleanClause.Occur.SHOULD);
             fields.setMinimumNumberShouldMatch(1);
             query.add(fields.build(), BooleanClause.Occur.SHOULD);
@@ -219,6 +232,7 @@ public class LocalKnowledgeLuceneIndex {
     private Query filteredQuery(Query textQuery, Collection<String> datasetIds, Collection<String> documentIds) {
         BooleanQuery.Builder result = new BooleanQuery.Builder();
         result.add(textQuery, BooleanClause.Occur.MUST);
+        result.add(new TermQuery(new Term(FIELD_SCHEMA_VERSION, SCHEMA_VERSION)), BooleanClause.Occur.FILTER);
         result.add(idFilter(FIELD_DATASET_ID, datasetIds), BooleanClause.Occur.FILTER);
         if (documentIds != null && !documentIds.isEmpty()) {
             result.add(idFilter(FIELD_DOCUMENT_ID, documentIds), BooleanClause.Occur.FILTER);

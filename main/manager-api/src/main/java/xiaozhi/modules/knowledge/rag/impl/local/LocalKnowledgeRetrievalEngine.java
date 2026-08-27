@@ -90,7 +90,7 @@ public class LocalKnowledgeRetrievalEngine {
         Set<String> rewrittenTerms = lexical.tokenize(rewrittenQuestion);
         Comparator<ScoredChunk> ordering = LocalKnowledgeStructuredReranker.comparator(
                 rawQuestion + " " + rewrittenQuestion,
-                item -> item.chunk().getContent(),
+                item -> structuredText(item.chunk()),
                 ScoredChunk::score);
 
         List<ScoredChunk> scored = candidates.stream()
@@ -123,7 +123,7 @@ public class LocalKnowledgeRetrievalEngine {
         Map<String, DocumentEntity> documents = loadDocs(chunks);
         Comparator<ScoredChunk> ordering = LocalKnowledgeStructuredReranker.comparator(
                 rawQuestion + " " + rewrittenQuestion,
-                item -> item.chunk().getContent(),
+                item -> structuredText(item.chunk()),
                 ScoredChunk::score);
         List<ScoredChunk> scored = chunks.stream()
                 .filter(chunk -> isEnabledDocument(documents.get(chunk.getDocumentId())))
@@ -234,6 +234,13 @@ public class LocalKnowledgeRetrievalEngine {
         return document != null
                 && (document.getEnabled() == null || document.getEnabled() == 1)
                 && "DONE".equalsIgnoreCase(document.getRun());
+    }
+
+    private String structuredText(KnowledgeChunkEntity chunk) {
+        return String.join("\n",
+                StringUtils.defaultString(chunk.getContent()),
+                StringUtils.defaultString(chunk.getQuestion()),
+                StringUtils.defaultString(chunk.getAnswer()));
     }
 
     private String scopeId(String datasetId, String documentId) {

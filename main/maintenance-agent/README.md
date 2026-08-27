@@ -15,8 +15,10 @@ The only required runtime secret is `MAINTENANCE_AGENT_SECRET`. Each authenticat
 short-lived model configuration resolved from Manager API model management; the adapter uses it only
 for the current Harness run and never stores it. Internal APIs are limited to `GET /health`, authenticated
 `POST /v1/maintenance/run`, and authenticated `POST /v1/console/sessions`. Browser access uses a one-time code,
-HttpOnly cookie, HTTPS-only dedicated origin, restrictive `frame-ancestors`, and a loopback-bound host port.
-State-changing browser requests must come from that dedicated origin. Proposal submission additionally carries an
+HttpOnly cookie scoped to `/maintenance-console/`, the existing Manager HTTPS origin, restrictive `frame-ancestors`,
+and a loopback-bound host port. The gateway rewrites the native Console's absolute asset, plugin, and API paths under
+that prefix so no second public domain is required. State-changing browser requests must come from the Manager origin.
+Proposal submission additionally carries an
 HMAC capability bound to the exact audit run, so the server-wide internal secret alone cannot complete another run.
 
 The background Python SDK/runtime is pinned to `0.1.1rc1`. The official Web Console packages are independently

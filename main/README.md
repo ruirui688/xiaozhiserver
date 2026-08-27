@@ -9,7 +9,7 @@ xiaozhi-server/    Python 核心实时服务，负责设备 WebSocket、OTA、�
 manager-api/       Java Spring Boot 管理 API，负责后台接口、配置、权限、数据库和异步编排
 manager-web/       Vue 管理后台 Web 页面
 manager-mobile/    uni-app 移动端管理后台
-maintenance-agent/ 可选 DeepSeek Harness 协议适配器，只生成有界维护提案
+maintenance-agent/ 常驻 DeepSeek Harness 维护工作台；资源自动维护按库/智能体启用，只生成有界维护提案
 digital-human/     数字人相关模块
 ```
 

@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import hmac
 import os
+import re
 import secrets
 import shutil
 import socket
@@ -22,6 +23,13 @@ from app import MAX_PROPOSALS, ROOT, _bounded_guidance, _bounded_int, validate_m
 
 COOKIE_NAME = "XIAOZHI_HARNESS_SESSION"
 CONSOLE_PREFIX = "/maintenance-console"
+CONSOLE_COOKIE_PATH = CONSOLE_PREFIX + "/"
+_ABSOLUTE_CONSOLE_PATH = re.compile(
+    rb"(?P<lead>[\"'`(=:\s])/(?P<root>api|assets|plugins)(?P<tail>/|[\"'`?&#)\s])"
+)
+_ABSOLUTE_CONSOLE_FILE = re.compile(
+    rb"(?P<lead>[\"'`(=:\s])/(?P<file>manifest\.webmanifest|favicon\.svg)"
+)
 
 
 @dataclass
@@ -271,7 +279,7 @@ def _require_trusted_origin(request: web.Request) -> None:
             "Upgrade", "").lower() != "websocket":
         return
     expected = os.getenv(
-        "MAINTENANCE_CONSOLE_PUBLIC_ORIGIN", "https://harness.yh.wejoy.link"
+        "MAINTENANCE_CONSOLE_PUBLIC_ORIGIN", "https://yh.wejoy.link"
     ).rstrip("/")
     supplied = request.headers.get("Origin", "").rstrip("/")
     if not supplied or not hmac.compare_digest(supplied, expected):
@@ -302,6 +310,38 @@ def _with_frame_ancestors(csp: str | None) -> str:
     return "; ".join(directives)
 
 
+def _rewrite_console_body(body: bytes, content_type: str) -> bytes:
+    if not _is_rewritable_console_content(content_type):
+        return body
+    prefix = CONSOLE_PREFIX.encode()
+    body = _ABSOLUTE_CONSOLE_PATH.sub(
+        lambda match: match.group("lead") + prefix + b"/" + match.group("root") + match.group("tail"),
+        body,
+    )
+    return _ABSOLUTE_CONSOLE_FILE.sub(
+        lambda match: match.group("lead") + prefix + b"/" + match.group("file"),
+        body,
+    )
+
+
+def _rewrite_console_location(value: str | None) -> str | None:
+    if (not value or not value.startswith("/") or value == CONSOLE_PREFIX
+            or value.startswith(CONSOLE_COOKIE_PATH)):
+        return value
+    return CONSOLE_PREFIX + value
+
+
+def _is_rewritable_console_content(content_type: str) -> bool:
+    normalized_type = content_type.split(";", 1)[0].strip().lower()
+    return normalized_type != "text/event-stream" and (
+        normalized_type.startswith("text/")
+        or normalized_type in {
+            "application/javascript", "application/json", "application/manifest+json",
+            "application/x-javascript",
+        }
+    )
+
+
 async def proxy(request: web.Request) -> web.StreamResponse:
     code = request.query.get("code", "")
     if request.path.rstrip("/") == CONSOLE_PREFIX and code:
@@ -310,7 +350,7 @@ async def proxy(request: web.Request) -> web.StreamResponse:
             raise web.HTTPUnauthorized(text="Launch link expired")
         response = web.HTTPFound(CONSOLE_PREFIX + "/")
         response.set_cookie(
-            COOKIE_NAME, token, httponly=True, secure=True, samesite="None", path="/"
+            COOKIE_NAME, token, httponly=True, secure=True, samesite="Lax", path=CONSOLE_COOKIE_PATH
         )
         response.headers["Cache-Control"] = "no-store"
         raise response
@@ -328,22 +368,27 @@ async def proxy(request: web.Request) -> web.StreamResponse:
         return await _proxy_websocket(request, target)
     headers = {
         key: value for key, value in request.headers.items()
-        if key.lower() not in {"host", "cookie", "content-length", "connection"}
+        if key.lower() not in {"host", "cookie", "content-length", "connection", "accept-encoding"}
     }
     timeout = ClientTimeout(total=None, connect=10, sock_read=None)
-    client = ClientSession(timeout=timeout, auto_decompress=False)
+    client = ClientSession(timeout=timeout, skip_auto_headers={"Accept-Encoding"})
     try:
         upstream = await client.request(
             request.method, target, headers=headers,
             data=request.content.iter_chunked(64 * 1024), allow_redirects=False,
         )
+        content_type = upstream.headers.get("Content-Type", "")
+        rewritable = _is_rewritable_console_content(content_type)
         response_headers = {
             key: value for key, value in upstream.headers.items()
             if key.lower() not in {
                 "content-length", "transfer-encoding", "connection", "set-cookie",
-                "x-frame-options", "content-security-policy",
+                "x-frame-options", "content-security-policy", "content-encoding",
             }
         }
+        location = _rewrite_console_location(upstream.headers.get("Location"))
+        if location:
+            response_headers["Location"] = location
         response = web.StreamResponse(status=upstream.status, headers=response_headers)
         response.headers["Content-Security-Policy"] = _with_frame_ancestors(
             upstream.headers.get("Content-Security-Policy")
@@ -351,8 +396,11 @@ async def proxy(request: web.Request) -> web.StreamResponse:
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "same-origin"
         await response.prepare(request)
-        async for chunk in upstream.content.iter_chunked(64 * 1024):
-            await response.write(chunk)
+        if rewritable:
+            await response.write(_rewrite_console_body(await upstream.read(), content_type))
+        else:
+            async for chunk in upstream.content.iter_chunked(64 * 1024):
+                await response.write(chunk)
         await response.write_eof()
         return response
     finally:

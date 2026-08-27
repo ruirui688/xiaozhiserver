@@ -56,6 +56,30 @@ class LocalKnowledgeLuceneIndexTest {
         assertFalse(index.containsAll(List.of("dataset-1"), List.of("document-missing")));
     }
 
+    @Test
+    void primaryStructuredNameOutranksIncidentalMentionsForProductPriceQuery() {
+        LocalKnowledgeLuceneIndex index = new LocalKnowledgeLuceneIndex(temporaryDirectory.resolve("product-index"));
+        index.replaceDocument("dataset-1", "document-1", "商品知识库.xlsx", List.of(
+                chunk("chunk-pairing", "菜品名称：香辣鸡翅\n推荐搭配饮品：可乐"),
+                chunk("chunk-dessert", "商品名称：桃胶五白饮\n食用建议：适合单独饮用\n售价：26元"),
+                chunk("chunk-cola", "商品名称：可口可乐\n规格：单杯\n售价：15元")));
+
+        List<LocalKnowledgeLuceneIndex.SearchHit> hits = index.search(
+                LocalKnowledgeQueryExpander.expand(
+                        "我就想喝一杯单独的可乐，多少钱", "可乐单独点单价格"),
+                List.of("dataset-1"), null, 10);
+
+        assertFalse(hits.isEmpty());
+        assertEquals("chunk-cola", hits.get(0).chunk().getChunkId());
+
+        List<LocalKnowledgeLuceneIndex.SearchHit> pairingHits = index.search(
+                LocalKnowledgeQueryExpander.expand(
+                        "推荐搭配可乐的菜", "适合搭配可乐的菜品"),
+                List.of("dataset-1"), null, 10);
+        assertFalse(pairingHits.isEmpty());
+        assertEquals("chunk-pairing", pairingHits.get(0).chunk().getChunkId());
+    }
+
     private KnowledgeChunkEntity chunk(String chunkId, String content) {
         KnowledgeChunkEntity chunk = new KnowledgeChunkEntity();
         chunk.setChunkId(chunkId);

@@ -159,10 +159,12 @@ LocalKnowledgeAdapter.retrievalTest()
 1. 上传成功时把原始文件保存到 knowledge.document-storage-root/{datasetId}/{documentId}/source.{ext}
 2. 切片写入可兼容旧链路的 MySQL 表，同时写入本机 Lucene CJK/BM25 派生索引
 3. Python 同时传入用户原问 raw_question 与模型改写 question
-4. LocalKnowledgeQueryExpander 对数量/人数和结构化价格字段做确定性等价扩展；Lucene 对
-   content/question/answer/documentName 检索，问题和答案字段使用更高权重
-5. 对“最低价/最高价”等明确极值请求，从有限候选的价格/售价/单价字段执行确定性排序；其他请求继续按
-   LocalKnowledgeLexicalScorer 精排，最后按 keyword_threshold 过滤、keyword_top_k 返回
+4. LocalKnowledgeQueryExpander 对数量/人数、普通价格问法和单品表达做确定性等价扩展；Lucene 对
+   content/question/answer/documentName 检索，并从结构化切片中提取商品名称、品名、菜品名称等主实体字段单独加权
+5. 结构化重排先区分主实体命中与“推荐搭配”等辅助关系命中：查询“可乐价格”时商品名称命中优先，
+   查询“搭配可乐的菜”时仍保留关系结果；随后再对“最低价/最高价”等明确极值执行确定性价格排序
+6. 最后按 LocalKnowledgeLexicalScorer 精排、keyword_threshold 过滤和 keyword_top_k 返回；索引 schema
+   变化会触发从 MySQL DONE 切片惰性重建，不要求重新上传原文件
 ```
 
 原始文档是内容事实来源，Lucene 目录和 MySQL 切片都是可重建的派生/兼容数据；删除文档或知识库时同步删除其
@@ -380,7 +382,7 @@ Web 上传不再手工指定 `multipart/form-data`，由浏览器为 `FormData` 
 
 | 层 | 当前覆盖 |
 |---|---|
-| Java 切片契约 | 必选托管 LLM、OpenAI 兼容校验、无规则回退、LLM 窗口不丢字、后台任务与持久化进度、零切片拒绝 |
+| Java 切片与召回契约 | 必选托管 LLM、OpenAI 兼容校验、无规则回退、LLM 窗口不丢字、后台任务与持久化进度、零切片拒绝；结构化主实体/价格/搭配关系排序回归 |
 | Java 动态来源 | 公网 URL/密钥 query 拒绝、workspace 权限、知识库级 opt-in、候选版本不参与召回、同步运行持久化 |
 | Java 工具描述 | 领域中立、知识库数量与说明长度上限、空元数据确定性输出 |
 | Web 组件状态 | 上传提交后不阻塞等待、列表持续显示进度与失败原因、终态通知、晚到详情不覆盖 dirty 字段、保存失败保留草稿、选择器乱序与恢复保护 |

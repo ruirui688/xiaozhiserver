@@ -35,7 +35,9 @@ test('manager embeds the native Harness console and retains approval authority',
 
 test('native interaction is not reimplemented and audit remains outside chat', () => {
   assert.match(nativeHarness, /<iframe/)
-  assert.match(nativeHarness, /result\.launchUrl/)
+  assert.match(nativeHarness, /result\.launchPath/)
+  assert.match(nativeHarness, /url\.origin === window\.location\.origin/)
+  assert.doesNotMatch(nativeHarness, /harness\.yh\.wejoy\.link|result\.launchUrl/)
   assert.match(nativeHarness, /DeepSeek Harness 原生控制台/)
   assert.doesNotMatch(nativeHarness, /runConversation|conversationMessages|message\.content|el-input/)
   assert.match(proposals, /审核维护提案/)

@@ -270,7 +270,8 @@ Java 的 `ModelRuntimeAssembler` 负责从通用字段、普通参数和密钥�
 Web 在当前资源工作台中嵌入官方 Harness Console；会话新建、重命名、删除和完整消息交互由原生 Console 承载。
 定时、手动和交互提交只在 Manager 外层作为运行审计，候选提案只在 Manager 外层审批。业务提示词可以约束版本、
 时效、官方来源和排除项，但不能覆盖 Harness 固定安全合同、Manager API 审批、配额与 SSRF 门控。
-Console 启动使用一次性 code 和 HttpOnly Cookie，浏览器写请求校验独立 Console origin；唯一提案回调同时校验
+Console 通过 Manager 同源 `/maintenance-console/` 启动，使用一次性 code 和限定路径的 HttpOnly Cookie；网关
+把原生绝对资源/API 路径收敛到该前缀，浏览器写请求校验 Manager origin。唯一提案回调同时校验
 服务器内部密钥与当前 audit run 的 HMAC 能力令牌，不能跨运行复用。
 维护使用的 DeepSeek 端点、上游模型名和凭据来自模型管理中策略显式选择且已测试通过的 LLM。策略只保存模型
 配置 ID；凭据仅随 manager-api 的内部鉴权请求存在于单轮内存中，适配器不持久化，也不再要求部署环境维护

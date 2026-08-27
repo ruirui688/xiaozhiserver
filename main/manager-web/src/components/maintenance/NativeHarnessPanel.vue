@@ -68,10 +68,11 @@ export default {
     failureMessage(error) {
       return (error && error.data && error.data.msg) || (error && error.msg) || '无法连接原生 Harness 控制台'
     },
-    validLaunchUrl(value) {
+    validLaunchPath(value) {
+      if (typeof value !== 'string' || !value.startsWith('/maintenance-console/')) return false
       try {
-        const url = new URL(value, window.location.href)
-        return url.protocol === 'https:' && url.pathname.startsWith('/maintenance-console/')
+        const url = new URL(value, window.location.origin)
+        return url.origin === window.location.origin && url.pathname.startsWith('/maintenance-console/')
       } catch (_) {
         return false
       }
@@ -83,11 +84,11 @@ export default {
       this.errorMessage = ''
       Api.maintenance.launchConsole(this.resourceType, this.resourceId, res => {
         const result = this.payload(res) || {}
-        if (!this.validLaunchUrl(result.launchUrl)) {
+        if (!this.validLaunchPath(result.launchPath)) {
           this.consoleUrl = ''
           this.errorMessage = '服务端返回的 Harness 地址无效'
         } else {
-          this.consoleUrl = result.launchUrl
+          this.consoleUrl = result.launchPath
           this.consoleKey += 1
           this.launchedResource = this.resourceKey
         }
