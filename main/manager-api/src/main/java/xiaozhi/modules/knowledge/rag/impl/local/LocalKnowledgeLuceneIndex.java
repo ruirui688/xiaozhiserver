@@ -34,6 +34,7 @@ import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.similarities.BM25Similarity;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -57,6 +58,7 @@ public class LocalKnowledgeLuceneIndex {
     private final Path root;
     private final Analyzer analyzer;
 
+    @Autowired
     public LocalKnowledgeLuceneIndex(
             @Value("${knowledge.local-index-root:uploadfile/knowledge-index}") String root) {
         this(Path.of(root));

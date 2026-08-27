@@ -2,19 +2,36 @@ package xiaozhi.modules.knowledge.rag.impl.local;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.core.env.MapPropertySource;
 
 import xiaozhi.modules.knowledge.entity.KnowledgeChunkEntity;
 
 class LocalKnowledgeLuceneIndexTest {
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    void springCreatesIndexUsingConfiguredRoot() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            context.getEnvironment().getPropertySources().addFirst(new MapPropertySource(
+                    "localKnowledgeLuceneIndexTest",
+                    Map.of("knowledge.local-index-root", temporaryDirectory.resolve("index").toString())));
+            context.register(LocalKnowledgeLuceneIndex.class);
+            context.refresh();
+
+            assertNotNull(context.getBean(LocalKnowledgeLuceneIndex.class));
+        }
+    }
 
     @Test
     void retrievesStructuredRowsForNaturalLanguagePeopleAndMealQueries() {
