@@ -42,6 +42,10 @@ public class MaintenanceRunEventService {
         return eventDao.selectList(query);
     }
 
+    public List<MaintenanceRunEventEntity> listConversation(String conversationId, Long afterId) {
+        return eventDao.listByConversation(conversationId, afterId == null ? 0L : Math.max(afterId, 0L));
+    }
+
     private String writeDetail(Map<String, ?> detail) {
         if (detail == null || detail.isEmpty()) return null;
         try {

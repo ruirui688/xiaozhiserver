@@ -20,10 +20,15 @@ test('maintenance settings remain resource scoped and memory never offers web di
   assert.match(panel, /customPrompt/)
 })
 
-test('embedded Harness workbench uses resource runs, events, and approvals', () => {
+test('embedded Harness workbench uses persistent conversations, events, and approvals', () => {
   assert.match(api, /maintenance\/\$\{String\(type\)\.toLowerCase\(\)\}/)
   assert.match(api, /\/runs/)
   assert.match(api, /runEvents/)
+  assert.match(api, /createConversation/)
+  assert.match(api, /updateConversation/)
+  assert.match(api, /deleteConversation/)
+  assert.match(api, /runConversation/)
+  assert.match(api, /conversationMessages/)
   assert.match(api, /\/proposals\/\$\{proposalId\}\/approve/)
   assert.doesNotMatch(api, /\/console-sessions/)
   assert.match(uploadPage, /MaintenanceConversationPanel/)
@@ -42,6 +47,13 @@ test('workbench keeps knowledge and memory proposals inside the manager UI', () 
   assert.match(conversation, /批准并入库/)
   assert.match(conversation, /批准修正/)
   assert.match(conversation, /window\.setInterval\([^]*1000\)/)
+  assert.match(conversation, /新建维护会话/)
+  assert.match(conversation, /重命名/)
+  assert.match(conversation, /显示已隐藏会话/)
+  assert.match(conversation, /删除维护会话/)
+  assert.match(conversation, /定时维护、手动维护和人工会话/)
+  assert.match(conversation, /message\.content/)
+  assert.match(conversation, /runConversation/)
 })
 
 test('knowledge maintenance entry follows backend capability and exposes backend failures', () => {

@@ -7,6 +7,7 @@ import lombok.Data;
 
 @Data
 public class HarnessMaintenanceResponse {
+    private String assistantMessage;
     private List<Map<String, Object>> proposals = new ArrayList<>();
     private Integer inputChars;
     private Integer outputChars;

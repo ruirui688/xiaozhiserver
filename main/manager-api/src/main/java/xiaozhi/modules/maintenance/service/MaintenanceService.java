@@ -24,7 +24,10 @@ import xiaozhi.modules.maintenance.dao.MaintenancePolicyDao;
 import xiaozhi.modules.maintenance.dao.MaintenanceRunDao;
 import xiaozhi.modules.maintenance.dto.HarnessMaintenanceRequest;
 import xiaozhi.modules.maintenance.dto.HarnessMaintenanceResponse;
+import xiaozhi.modules.maintenance.dto.MaintenanceConversationUpdateRequest;
 import xiaozhi.modules.maintenance.dto.MaintenancePolicyRequest;
+import xiaozhi.modules.maintenance.entity.MaintenanceConversationEntity;
+import xiaozhi.modules.maintenance.entity.MaintenanceMessageEntity;
 import xiaozhi.modules.maintenance.entity.MaintenancePolicyEntity;
 import xiaozhi.modules.maintenance.entity.MaintenanceProposalEntity;
 import xiaozhi.modules.maintenance.entity.MaintenanceRunEntity;
@@ -45,12 +48,13 @@ public class MaintenanceService {
     private final ObjectMapper objectMapper;
     private final AsyncTaskExecutor executor;
     private final MaintenanceRunEventService eventService;
+    private final MaintenanceConversationService conversationService;
 
     public MaintenanceService(MaintenancePolicyDao policyDao, MaintenanceRunDao runDao,
             MaintenanceSnapshotService snapshotService, MaintenanceProposalService proposalService,
             MaintenanceModelResolver modelResolver, HarnessMaintenanceGateway gateway, ObjectMapper objectMapper,
             @Qualifier("maintenanceTaskExecutor") AsyncTaskExecutor executor,
-            MaintenanceRunEventService eventService) {
+            MaintenanceRunEventService eventService, MaintenanceConversationService conversationService) {
         this.policyDao = policyDao;
         this.runDao = runDao;
         this.snapshotService = snapshotService;
@@ -60,6 +64,7 @@ public class MaintenanceService {
         this.objectMapper = objectMapper;
         this.executor = executor;
         this.eventService = eventService;
+        this.conversationService = conversationService;
     }
 
     public MaintenancePolicyEntity getPolicy(String resourceType, String resourceId) {
@@ -118,6 +123,42 @@ public class MaintenanceService {
                 .orderByDesc("created_at").last("LIMIT 50"));
     }
 
+    public List<MaintenanceConversationEntity> listConversations(String resourceType, String resourceId,
+            boolean includeArchived) {
+        return conversationService.list(normalizeType(resourceType), resourceId, includeArchived);
+    }
+
+    public MaintenanceConversationEntity createConversation(String resourceType, String resourceId, String title) {
+        MaintenancePolicyEntity policy = requireEnabledPolicy(resourceType, resourceId);
+        return conversationService.createUser(policy, title, SecurityUser.getUserId());
+    }
+
+    public MaintenanceConversationEntity requireConversation(String resourceType, String resourceId,
+            String conversationId) {
+        return conversationService.require(normalizeType(resourceType), resourceId, conversationId);
+    }
+
+    public MaintenanceConversationEntity updateConversation(MaintenanceConversationEntity conversation,
+            MaintenanceConversationUpdateRequest request) {
+        return conversationService.update(conversation, request);
+    }
+
+    public void deleteConversation(MaintenanceConversationEntity conversation) {
+        conversationService.delete(conversation);
+    }
+
+    public List<MaintenanceMessageEntity> listMessages(String conversationId) {
+        return conversationService.messages(conversationId);
+    }
+
+    public List<MaintenanceRunEntity> listConversationRuns(String conversationId) {
+        return conversationService.runs(conversationId);
+    }
+
+    public List<MaintenanceProposalEntity> listConversationProposals(String conversationId) {
+        return proposalService.listConversation(conversationId);
+    }
+
     public MaintenanceRunEntity getRun(String runId) {
         MaintenanceRunEntity run = runDao.selectById(runId);
         if (run == null) throw new RenException("维护运行记录不存在");
@@ -132,30 +173,45 @@ public class MaintenanceService {
     public MaintenanceProposalEntity reject(String id) { return proposalService.reject(id); }
 
     public MaintenanceRunEntity trigger(String resourceType, String resourceId, String triggerType) {
-        return trigger(resourceType, resourceId, triggerType, null);
+        return trigger(resourceType, resourceId, triggerType, null, null);
     }
 
     public MaintenanceRunEntity trigger(String resourceType, String resourceId, String triggerType,
             String userInstruction) {
-        MaintenancePolicyEntity policy = findPolicy(resourceType, resourceId);
-        if (policy == null || policy.getEnabled() == null || policy.getEnabled() != 1 || "OFF".equals(policy.getMode())) {
-            throw new RenException("请先为当前资源启用自主维护策略");
-        }
+        return trigger(resourceType, resourceId, triggerType, userInstruction, null);
+    }
+
+    public MaintenanceRunEntity trigger(String resourceType, String resourceId, String triggerType,
+            String userInstruction, String conversationId) {
+        MaintenancePolicyEntity policy = requireEnabledPolicy(resourceType, resourceId);
         enforceMonthlyLimit(policy);
+        MaintenanceConversationEntity conversation = StringUtils.isNotBlank(conversationId)
+                ? conversationService.require(policy.getResourceType(), policy.getResourceId(), conversationId)
+                : conversationService.systemConversation(policy,
+                        "SCHEDULED".equals(triggerType) ? "SCHEDULED" : "MANUAL");
+        if (Integer.valueOf(1).equals(conversation.getArchived())) {
+            throw new RenException("请先恢复已隐藏的会话再继续发送消息");
+        }
         MaintenanceRunEntity run = new MaintenanceRunEntity();
         run.setPolicyId(policy.getId());
+        run.setConversationId(conversation.getId());
         run.setWorkspaceId(policy.getWorkspaceId());
         run.setResourceType(policy.getResourceType());
         run.setResourceId(policy.getResourceId());
         run.setTriggerType(triggerType);
-        run.setUserInstruction("MANUAL".equals(triggerType)
-                ? StringUtils.abbreviate(StringUtils.trimToNull(userInstruction), 2000) : null);
+        run.setUserInstruction("SCHEDULED".equals(triggerType) ? null
+                : StringUtils.abbreviate(StringUtils.trimToNull(userInstruction), 8000));
         run.setStatus("QUEUED");
         run.setProposalCount(0);
         run.setInputChars(0);
         run.setOutputChars(0);
         run.setCreatedAt(new Date());
         runDao.insert(run);
+        String visibleMessage = StringUtils.defaultIfBlank(run.getUserInstruction(),
+                "SCHEDULED".equals(triggerType) ? "按照已保存的维护策略执行定时维护。"
+                        : "按照已保存的维护策略执行手动维护。");
+        conversationService.append(conversation, run.getId(),
+                "SCHEDULED".equals(triggerType) ? "SYSTEM" : "USER", visibleMessage);
         eventService.record(run.getId(), "DISCOVERY", "INFO",
                 StringUtils.isBlank(run.getUserInstruction()) ? "维护任务已进入后台队列" : "已收到维护指令，任务进入后台队列");
         policy.setLastRunAt(new Date());
@@ -166,6 +222,7 @@ public class MaintenanceService {
             executor.execute(() -> execute(run.getId()));
         } catch (RejectedExecutionException ex) {
             failRun(run, "维护任务队列已满，请稍后重试");
+            conversationService.append(conversation, run.getId(), "ASSISTANT", "维护任务队列已满，请稍后重试。");
             throw new RenException("维护任务队列已满，请稍后重试");
         }
         return run;
@@ -197,14 +254,20 @@ public class MaintenanceService {
             Map<String, Object> snapshot = snapshotService.build(policy);
             eventService.record(run.getId(), "DISCOVERY", "INFO", "资源快照已完成，维护智能体正在联网搜索并筛选候选来源");
             HarnessMaintenanceResponse response = gateway.run(new HarnessMaintenanceRequest(
-                    run.getId(), policy.getResourceType(), policy.getResourceId(), policy.getMaxProposals(),
-                    policy.getCustomPrompt(), run.getUserInstruction(), snapshot,
+                    run.getId(), run.getConversationId(), policy.getResourceType(), policy.getResourceId(),
+                    policy.getMaxProposals(), policy.getCustomPrompt(), run.getUserInstruction(),
+                    conversationService.contextBeforeRun(run.getConversationId(), run.getId()), snapshot,
                     modelResolver.resolve(policy.getModelConfigId())));
             eventService.record(run.getId(), "DISCOVERY", "INFO", "模型运行完成，正在校验并保存提案");
             run.setProposalCount(proposalService.persist(policy, run, response));
             run.setInputChars(value(response.getInputChars()));
             run.setOutputChars(value(response.getOutputChars()));
             run.setStatus("SUCCEEDED");
+            MaintenanceConversationEntity conversation = conversationService.require(
+                    run.getResourceType(), run.getResourceId(), run.getConversationId());
+            String assistantMessage = StringUtils.defaultIfBlank(response.getAssistantMessage(),
+                    "本轮维护完成，生成 " + run.getProposalCount() + " 条提案。");
+            conversationService.append(conversation, run.getId(), "ASSISTANT", assistantMessage);
             eventService.record(run.getId(), "PROPOSAL", "SUCCESS",
                     "提案生成完成", Map.of("proposalCount", run.getProposalCount(),
                             "inputChars", run.getInputChars(), "outputChars", run.getOutputChars()));
@@ -212,6 +275,13 @@ public class MaintenanceService {
             run.setStatus("FAILED");
             run.setError(safeError(ex));
             eventService.record(run.getId(), "COMPLETE", "ERROR", run.getError());
+            try {
+                MaintenanceConversationEntity conversation = conversationService.require(
+                        run.getResourceType(), run.getResourceId(), run.getConversationId());
+                conversationService.append(conversation, run.getId(), "ASSISTANT", "本轮维护失败：" + run.getError());
+            } catch (Exception messageError) {
+                log.warn("维护失败消息保存失败: runId={}", run.getId());
+            }
         }
         run.setFinishedAt(new Date());
         runDao.updateById(run);
@@ -253,6 +323,14 @@ public class MaintenanceService {
     private MaintenancePolicyEntity findPolicy(String type, String id) {
         return policyDao.selectOne(new QueryWrapper<MaintenancePolicyEntity>()
                 .eq("resource_type", normalizeType(type)).eq("resource_id", id));
+    }
+
+    private MaintenancePolicyEntity requireEnabledPolicy(String resourceType, String resourceId) {
+        MaintenancePolicyEntity policy = findPolicy(resourceType, resourceId);
+        if (policy == null || policy.getEnabled() == null || policy.getEnabled() != 1 || "OFF".equals(policy.getMode())) {
+            throw new RenException("请先为当前资源启用自主维护策略");
+        }
+        return policy;
     }
 
     private String normalizeType(String type) {

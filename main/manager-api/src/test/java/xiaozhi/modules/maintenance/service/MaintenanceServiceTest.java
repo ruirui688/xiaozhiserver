@@ -84,6 +84,9 @@ class MaintenanceServiceTest {
         MaintenanceRunEntity run = new MaintenanceRunEntity();
         run.setId("run-1");
         run.setPolicyId("policy-1");
+        run.setConversationId("conversation-1");
+        run.setResourceType("KNOWLEDGE");
+        run.setResourceId("kb-1");
         run.setStatus("QUEUED");
         run.setUserInstruction("只检查 18.1 当前赛季");
         MaintenancePolicyEntity policy = new MaintenancePolicyEntity();
@@ -102,7 +105,8 @@ class MaintenanceServiceTest {
                 "managed-key", "https://api.deepseek.com", "deepseek-chat"));
         when(gateway.run(any())).thenReturn(response);
         MaintenanceService service = new MaintenanceService(policyDao, runDao, snapshots, proposals, resolver,
-                gateway, new ObjectMapper(), mock(AsyncTaskExecutor.class), mock(MaintenanceRunEventService.class));
+                gateway, new ObjectMapper(), mock(AsyncTaskExecutor.class), mock(MaintenanceRunEventService.class),
+                mock(MaintenanceConversationService.class));
 
         service.execute("run-1");
 
@@ -110,6 +114,7 @@ class MaintenanceServiceTest {
         verify(gateway).run(request.capture());
         assertEquals("仅使用带版本号和发布日期的官方公告", request.getValue().getCustomPrompt());
         assertEquals("只检查 18.1 当前赛季", request.getValue().getUserInstruction());
+        assertEquals("conversation-1", request.getValue().getConversationId());
     }
 
     private MaintenancePolicyRequest request(String mode) {
@@ -126,6 +131,7 @@ class MaintenanceServiceTest {
                 mock(MaintenanceSnapshotService.class), mock(MaintenanceProposalService.class),
                 mock(MaintenanceModelResolver.class),
                 mock(HarnessMaintenanceGateway.class), new ObjectMapper(),
-                mock(AsyncTaskExecutor.class), mock(MaintenanceRunEventService.class));
+                mock(AsyncTaskExecutor.class), mock(MaintenanceRunEventService.class),
+                mock(MaintenanceConversationService.class));
     }
 }

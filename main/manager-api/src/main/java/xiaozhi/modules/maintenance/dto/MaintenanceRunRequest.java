@@ -3,9 +3,9 @@ package xiaozhi.modules.maintenance.dto;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
-/** Optional operator message for one manual maintenance turn. */
+/** Operator message for one turn inside a maintenance conversation. */
 @Data
 public class MaintenanceRunRequest {
-    @Size(max = 2000)
+    @Size(max = 8000)
     private String instruction;
 }

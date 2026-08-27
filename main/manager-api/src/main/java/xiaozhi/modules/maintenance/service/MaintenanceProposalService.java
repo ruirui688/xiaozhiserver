@@ -49,6 +49,10 @@ public class MaintenanceProposalService {
                 .orderByDesc("created_at").last("LIMIT 100"));
     }
 
+    public List<MaintenanceProposalEntity> listConversation(String conversationId) {
+        return proposalDao.listByConversation(conversationId);
+    }
+
     public MaintenanceProposalEntity get(String proposalId) {
         MaintenanceProposalEntity proposal = proposalDao.selectById(proposalId);
         if (proposal == null) throw new RenException("维护提案不存在");

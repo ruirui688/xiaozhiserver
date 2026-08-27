@@ -24,12 +24,16 @@ class MaintenanceAgentTest(unittest.TestCase):
         self.assertNotIn("Use web_search", prompt)
 
     def test_operator_guidance_improves_quality_without_replacing_safety_contract(self):
-        prompt = build_prompt("KNOWLEDGE", 3, {}, "只保留当前赛季官方公告", "排除旧版本和赛事营销页")
+        prompt = build_prompt("KNOWLEDGE", 3, {}, "只保留当前赛季官方公告", "排除旧版本和赛事营销页",
+                              [{"role": "USER", "content": "先检查18.1版本"},
+                               {"role": "ASSISTANT", "content": "已经找到两条候选"}])
         self.assertIn("只保留当前赛季官方公告", prompt)
         self.assertIn("排除旧版本和赛事营销页", prompt)
         self.assertIn("subordinate to every security", prompt)
         self.assertIn("exclude obsolete patches", prompt)
         self.assertIn("REMOVE_SOURCE", prompt)
+        self.assertIn("先检查18.1版本", prompt)
+        self.assertIn("已经找到两条候选", prompt)
 
     def test_request_is_bounded_and_runner_output_is_returned(self):
         calls = []
@@ -39,15 +43,18 @@ class MaintenanceAgentTest(unittest.TestCase):
             return {"proposals": [], "inputChars": 1, "outputChars": 2}
 
         result = process_request({
-            "taskType": "KNOWLEDGE", "runId": "r1", "resourceId": "kb1",
+            "taskType": "KNOWLEDGE", "runId": "r1", "conversationId": "c1", "resourceId": "kb1",
             "maxProposals": 2, "input": {"topics": ["game"]},
             "customPrompt": "official current patches only", "userInstruction": "find the newest season",
+            "conversationHistory": [{"role": "USER", "content": "continue this topic"}],
             "modelConfig": {"apiKey": "managed-key", "baseUrl": "https://api.deepseek.com", "model": "deepseek-chat"},
         }, runner=runner)
         self.assertEqual(1, result["inputChars"])
         self.assertEqual("KNOWLEDGE", calls[0][0])
-        self.assertEqual("official current patches only", calls[0][5])
-        self.assertEqual("find the newest season", calls[0][6])
+        self.assertEqual("c1", calls[0][2])
+        self.assertEqual("official current patches only", calls[0][6])
+        self.assertEqual("find the newest season", calls[0][7])
+        self.assertEqual("continue this topic", calls[0][8][0]["content"])
         with self.assertRaises(ValueError):
             process_request({"taskType": "MEMORY", "runId": "r", "resourceId": "a",
                              "maxProposals": 21, "input": {}, "modelConfig": {}}, runner=runner)
@@ -84,14 +91,15 @@ class MaintenanceAgentTest(unittest.TestCase):
                 return SimpleNamespace(final_response='{"proposals":[]}')
 
         with patch.dict(sys.modules, {"deepseek_harness": SimpleNamespace(DeepSeekHarness=FakeHarness)}):
-            result = run_harness("KNOWLEDGE", "run-1", 2, {}, {
+            result = run_harness("KNOWLEDGE", "run-1", "conversation-1", 2, {}, {
                 "apiKey": "managed-key", "baseUrl": "https://api.deepseek.com", "model": "deepseek-chat"
-            }, "official only", "latest version")
+            }, "official only", "latest version", [{"role": "USER", "content": "previous turn"}])
 
         self.assertEqual([], result["proposals"])
         self.assertEqual("managed-key", calls[0]["api_key"])
         self.assertEqual("https://api.deepseek.com", calls[0]["base_url"])
         self.assertEqual("deepseek-chat", calls[0]["model"])
+        self.assertEqual("本轮维护完成，生成 0 条提案。", result["assistantMessage"])
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ public class MaintenanceRunEntity {
     @TableId(type = IdType.ASSIGN_UUID)
     private String id;
     private String policyId;
+    private String conversationId;
     private String workspaceId;
     private String resourceType;
     private String resourceId;
