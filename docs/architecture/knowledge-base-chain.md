@@ -451,13 +451,17 @@ manager-api 校验公网 URL、去重、审批/可信域名
 KnowledgeSourceService → 安全抓取 → 确定性切片 → 候选版本原子发布
         ↓ 只有发布成功后
 提案状态 APPLIED + 文档/切片可见；失败则 FAILED 并保留原因
+
+人工维护：manager-web iframe → 官方 Harness Web Console（原生会话）
+        ↓ operator 明确确认后调用唯一桥接工具 submit_maintenance_proposals
+manager-api 待审批提案 → 复用同一校验、审批和发布链
 ```
 
 Harness 没有数据库、Shell、编辑器、宿主源码或回调写权限。`web_fetch` 明确不挂载，避免运行容器成为
 可访问内网的 SSRF 原语。人工审批模式永不自动添加来源；自动模式也只接受显式白名单域名及其子域，
-并再次经过 `PublicUrlGuard`。数据库只保存策略、运行计数和字段白名单后的提案，不保存完整提示词、
-模型隐藏推理、原始响应或 Harness 容器会话日志；用户在智控台发送的完整可见消息和 Harness 最终用户可见回复
-作为产品会话保存在 `ai_maintenance_message`。
+并再次经过 `PublicUrlGuard`。业务数据库只保存策略、运行计数和字段白名单后的提案，不保存完整提示词、
+模型隐藏推理、原始响应或 Harness 容器日志。人工聊天由官方 Harness Console 自己管理，manager-web 不复制消息，
+也不使用 `ai_maintenance_message` 重建原生交互。
 
 网页中的“维护对话”不是容器 stdout 转发。`ai_maintenance_run_event` 持久化经过脱敏的有限状态事件，覆盖
 排队、快照、模型发现、提案保存、人工审批、网页抓取、切片和正式发布；前端按事件 ID 每 1 秒增量轮询，
@@ -466,16 +470,18 @@ Harness 没有数据库、Shell、编辑器、宿主源码或回调写权限。`
 连接器的 `INDEXED/UNCHANGED/FAILED` 最终事件负责回写提案状态。前端检测到 `APPLYING → APPLIED` 后刷新
 文档列表，因此“已入库”与正式召回版本使用同一事实边界。
 
-已启用策略的知识库默认进入会话级维护工作台。`ai_maintenance_conversation` 是用户可新建、重命名、隐藏、恢复
-和软删除的真实会话；每条用户消息及 Harness 最终回复完整保存到 `ai_maintenance_message`，后续轮次携带该会话
-之前的可见消息上下文。每一轮仍创建独立、可审计且计入月度配额的 `ai_maintenance_run`，并通过
-`conversation_id` 归入会话。定时维护和旧式手动维护分别进入同一资源的系统会话，与人工会话一起显示。
-`custom_prompt` 保存长期业务质量标准，`user_instruction` 保存本轮补充要求；两者可以要求只选择当前版本、明确
-发布日期、官方来源等质量条件，但始终从属于固定的公网 URL、SSRF、输出结构和审批规则。
-候选结果以卡片展示标题、原始 URL、理由和证据；运营人员可以直接拒绝低质量候选并在下一条消息中纠正搜索方向。
+已启用策略的知识库默认进入原生 Harness 工作台。Harness 自己提供会话的新建、重命名、删除、历史消息和正常多轮
+交互，原生状态按资源哈希保存在 maintenance-agent 专用 volume；重新连接会刷新当前资源快照和临时模型凭据，
+不会用 Manager 的自制聊天协议替换原生会话。每次打开 Console 创建一个 `INTERACTIVE` 审计 run；只有 operator
+明确要求提交最终提案时，`submit_maintenance_proposals` 才把字段白名单后的结果送入 Manager 审批队列。
+定时和手动维护继续走后台批处理，以 `ai_maintenance_run` 和脱敏事件出现在外层“维护记录”中，而不伪装成聊天消息。
+`custom_prompt` 保存长期业务质量标准；它可以要求只选择当前版本、明确发布日期、官方来源等质量条件，但始终
+从属于固定的公网 URL、SSRF、输出结构和审批规则。候选结果在 Manager 的“审核提案”中展示标题、原始 URL、
+理由和证据；运营人员批准或拒绝后才进入业务写入链。
 智能体还可以针对快照中带精确 `sourceId` 的既有动态来源提出 `REMOVE_SOURCE`，但只能生成待审批提案；人工批准后
 Manager API 才删除该来源及其动态文档并更新统计。自动采纳模式永远不能自动执行删除提案。
-页面完整显示产品会话消息、结构化候选与业务事件，不显示模型隐藏推理、完整组装提示词、凭据或未经批准的网页正文。
+页面原样嵌入官方 Console，并在外层显示结构化候选与审计记录；Manager 不插入、隐藏或改写原生消息，也不显示
+模型隐藏推理、完整组装提示词、凭据或未经批准的网页正文。
 
 维护策略只持久化 `model_config_id`，不复制 API Key。每轮执行要求所选模型仍处于“已启用、测试通过”的
 DeepSeek LLM 状态；manager-api 只在内部鉴权请求中发送本轮临时运行配置，maintenance-agent 不写磁盘、

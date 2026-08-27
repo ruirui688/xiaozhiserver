@@ -1,6 +1,8 @@
 package xiaozhi.modules.maintenance.controller;
 
 import java.util.List;
+import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Value;
 import org.apache.shiro.authz.annotation.RequiresPermissions;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -13,7 +15,11 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import xiaozhi.common.constant.Constant;
 import xiaozhi.common.utils.Result;
+import xiaozhi.modules.maintenance.dto.HarnessConsoleLaunchRequest;
+import xiaozhi.modules.maintenance.dto.HarnessConsoleLaunchResponse;
+import xiaozhi.modules.maintenance.dto.HarnessMaintenanceRequest;
 import xiaozhi.modules.maintenance.dto.MaintenancePolicyRequest;
 import xiaozhi.modules.maintenance.dto.MaintenanceConversationRequest;
 import xiaozhi.modules.maintenance.dto.MaintenanceConversationUpdateRequest;
@@ -27,6 +33,9 @@ import xiaozhi.modules.maintenance.entity.MaintenanceRunEventEntity;
 import xiaozhi.modules.maintenance.service.MaintenanceResourceAccessService;
 import xiaozhi.modules.maintenance.service.MaintenanceRunEventService;
 import xiaozhi.modules.maintenance.service.MaintenanceService;
+import xiaozhi.modules.maintenance.service.HarnessConsoleGateway;
+import xiaozhi.modules.maintenance.service.MaintenanceRunCapabilityService;
+import xiaozhi.modules.sys.service.SysParamsService;
 
 @RestController
 @RequestMapping("/maintenance/{resource_type}/{resource_id}")
@@ -36,12 +45,24 @@ public class MaintenanceController {
     private final MaintenanceService maintenanceService;
     private final MaintenanceResourceAccessService accessService;
     private final MaintenanceRunEventService eventService;
+    private final HarnessConsoleGateway consoleGateway;
+    private final MaintenanceRunCapabilityService runCapabilityService;
+    private final SysParamsService sysParamsService;
+    private final String managerBaseUrl;
 
     public MaintenanceController(MaintenanceService maintenanceService,
-            MaintenanceResourceAccessService accessService, MaintenanceRunEventService eventService) {
+            MaintenanceResourceAccessService accessService, MaintenanceRunEventService eventService,
+            HarnessConsoleGateway consoleGateway, MaintenanceRunCapabilityService runCapabilityService,
+            SysParamsService sysParamsService,
+            @Value("${maintenance.harness.manager-base-url:http://xiaozhi-esp32-manager-api:8002/xiaozhi}")
+            String managerBaseUrl) {
         this.maintenanceService = maintenanceService;
         this.accessService = accessService;
         this.eventService = eventService;
+        this.consoleGateway = consoleGateway;
+        this.runCapabilityService = runCapabilityService;
+        this.sysParamsService = sysParamsService;
+        this.managerBaseUrl = managerBaseUrl;
     }
 
     @GetMapping("/policy")
@@ -65,6 +86,24 @@ public class MaintenanceController {
         accessService.requireWrite(type, id);
         String instruction = request == null ? null : request.getInstruction();
         return new Result<MaintenanceRunEntity>().ok(maintenanceService.trigger(type, id, "MANUAL", instruction));
+    }
+
+    @PostMapping("/console-sessions")
+    public Result<HarnessConsoleLaunchResponse> launchConsole(@PathVariable("resource_type") String type,
+            @PathVariable("resource_id") String id) {
+        accessService.requireWrite(type, id);
+        HarnessMaintenanceRequest request = maintenanceService.prepareConsole(type, id);
+        try {
+            String callbackUrl = StringUtils.removeEnd(managerBaseUrl, "/")
+                    + "/config/maintenance/runs/" + request.getRunId() + "/complete";
+            String callbackSecret = sysParamsService.getValue(Constant.SERVER_SECRET, true);
+            return new Result<HarnessConsoleLaunchResponse>().ok(consoleGateway.launch(
+                    new HarnessConsoleLaunchRequest(request, callbackUrl, callbackSecret,
+                            runCapabilityService.issue(request.getRunId()))));
+        } catch (RuntimeException ex) {
+            maintenanceService.failConsole(request.getRunId(), ex.getMessage());
+            throw ex;
+        }
     }
 
     @GetMapping("/runs")

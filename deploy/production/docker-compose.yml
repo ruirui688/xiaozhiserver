@@ -98,6 +98,8 @@ services:
       - MAINTENANCE_HARNESS_ENABLED=true
       - MAINTENANCE_HARNESS_BASE_URL=http://xiaozhi-maintenance-agent:8010
       - MAINTENANCE_HARNESS_SECRET=${XIAOZHI_MAINTENANCE_AGENT_SECRET:-}
+      - MAINTENANCE_HARNESS_MANAGER_BASE_URL=http://xiaozhi-esp32-manager-api:8002/xiaozhi
+      - MAINTENANCE_HARNESS_PUBLIC_CONSOLE_URL=${XIAOZHI_MAINTENANCE_PUBLIC_CONSOLE_URL:-https://harness.yh.wejoy.link}
     logging: *default-logging
     cap_drop:
       - ALL
@@ -119,14 +121,25 @@ services:
       - default
     expose:
       - 8010
+      - 8011
+    ports:
+      - "127.0.0.1:${XIAOZHI_MAINTENANCE_CONSOLE_PORT:-8011}:8011"
     environment:
       - TZ=Asia/Shanghai
       - MAINTENANCE_AGENT_SECRET=${XIAOZHI_MAINTENANCE_AGENT_SECRET:-}
       - MAINTENANCE_MAX_CONCURRENCY=1
       - MAINTENANCE_MAX_OUTPUT_TOKENS=${XIAOZHI_MAINTENANCE_MAX_OUTPUT_TOKENS:-8192}
+      - MAINTENANCE_CONSOLE_MAX_SESSIONS=${XIAOZHI_MAINTENANCE_CONSOLE_MAX_SESSIONS:-1}
+      - MAINTENANCE_CONSOLE_TTL_SECONDS=${XIAOZHI_MAINTENANCE_CONSOLE_TTL_SECONDS:-7200}
+      - MAINTENANCE_CONSOLE_STATE_ROOT=/var/lib/xiaozhi-maintenance-console
+      - MAINTENANCE_CONSOLE_FRAME_ANCESTORS=${XIAOZHI_MAINTENANCE_FRAME_ANCESTORS:-https://yh.wejoy.link}
+      - MAINTENANCE_CONSOLE_PUBLIC_ORIGIN=${XIAOZHI_MAINTENANCE_PUBLIC_CONSOLE_URL:-https://harness.yh.wejoy.link}
+      - MAINTENANCE_MANAGER_HOST=xiaozhi-esp32-manager-api
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=256m
+    volumes:
+      - maintenance-console-data:/var/lib/xiaozhi-maintenance-console
     cap_drop:
       - ALL
     security_opt:
@@ -197,3 +210,6 @@ services:
 
 networks:
   default:
+
+volumes:
+  maintenance-console-data:

@@ -260,15 +260,18 @@ Java 的 `ModelRuntimeAssembler` 负责从通用字段、普通参数和密钥�
 
 生产部署常驻 `xiaozhi-maintenance-agent`，使 DeepSeek Harness 维护工作台随每次发布和升级保持可用；资源维护
 策略仍需按知识库或智能体逐一启用。该容器只是 DeepSeek Harness 协议适配器，不是新的事实库：manager-api
-仍是策略、配额、权限、审批和写入权威。适配器没有宿主目录挂载，
-使用只读根文件系统和临时 session 目录；知识任务仅有搜索能力，记忆任务无任何工具能力。即使容器已部署，
+仍是策略、配额、权限、审批和写入权威。适配器没有宿主源码挂载，使用只读根文件系统；原生 Harness 会话只写入
+专用 Docker volume，临时工作区位于 tmpfs。知识任务仅有搜索能力，记忆任务没有联网能力。即使容器已部署，
 每个知识库或智能体仍需在页面单独 opt-in。
 维护控制面的运行可观察性由 manager-api 持久化的脱敏里程碑事件提供，Web 只增量读取这些事件；容器 stdout、
-完整组装提示词和模型隐藏推理不得暴露到浏览器。用户主动发送的消息和 Harness 最终用户可见回复作为授权资源下
-的产品会话正文完整展示并持久化。知识来源审批使用 `APPLYING → APPLIED/FAILED`
+完整组装提示词和模型隐藏推理不得暴露到浏览器。原生 Console 自己展示并管理人工会话，manager-web 不复制消息
+或重建聊天界面。知识来源审批使用 `APPLYING → APPLIED/FAILED`
 状态机，只有连接器完成原子发布后才能显示为已入库。
-Web 以会话级工作台承载多轮人工消息、定时/手动维护会话、候选来源卡片和上述运行事件。业务提示词可以约束版本、
+Web 在当前资源工作台中嵌入官方 Harness Console；会话新建、重命名、删除和完整消息交互由原生 Console 承载。
+定时、手动和交互提交只在 Manager 外层作为运行审计，候选提案只在 Manager 外层审批。业务提示词可以约束版本、
 时效、官方来源和排除项，但不能覆盖 Harness 固定安全合同、Manager API 审批、配额与 SSRF 门控。
+Console 启动使用一次性 code 和 HttpOnly Cookie，浏览器写请求校验独立 Console origin；唯一提案回调同时校验
+服务器内部密钥与当前 audit run 的 HMAC 能力令牌，不能跨运行复用。
 维护使用的 DeepSeek 端点、上游模型名和凭据来自模型管理中策略显式选择且已测试通过的 LLM。策略只保存模型
 配置 ID；凭据仅随 manager-api 的内部鉴权请求存在于单轮内存中，适配器不持久化，也不再要求部署环境维护
 第二份 `DEEPSEEK_API_KEY`。

@@ -170,7 +170,7 @@
         <span>当前知识库：{{ knowledgeBaseName || datasetId }}</span>
         <el-button size="small" icon="el-icon-setting" @click="maintenancePanelVisible = true">维护设置</el-button>
       </div>
-      <maintenance-conversation-panel
+      <native-harness-panel
         :active="maintenanceWorkbenchVisible"
         resource-type="KNOWLEDGE"
         :resource-id="datasetId"
@@ -237,10 +237,10 @@ import FileUploadPanel from "@/components/knowledge/FileUploadPanel.vue";
 import FilePreviewDialog from "@/components/knowledge/FilePreviewDialog.vue";
 import KnowledgeSourcePanel from "@/components/knowledge/KnowledgeSourcePanel.vue";
 import MaintenancePolicyPanel from "@/components/maintenance/MaintenancePolicyPanel.vue";
-import MaintenanceConversationPanel from "@/components/maintenance/MaintenanceConversationPanel.vue";
+import NativeHarnessPanel from "@/components/maintenance/NativeHarnessPanel.vue";
 
 export default {
-  components: { HeaderBar, VersionFooter, FileUploadPanel, FilePreviewDialog, KnowledgeSourcePanel, MaintenancePolicyPanel, MaintenanceConversationPanel },
+  components: { HeaderBar, VersionFooter, FileUploadPanel, FilePreviewDialog, KnowledgeSourcePanel, MaintenancePolicyPanel, NativeHarnessPanel },
   data() {
     return {
       datasetId: '',

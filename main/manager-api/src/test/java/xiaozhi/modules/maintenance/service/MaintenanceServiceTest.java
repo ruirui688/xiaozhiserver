@@ -1,6 +1,7 @@
 package xiaozhi.modules.maintenance.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -115,6 +116,45 @@ class MaintenanceServiceTest {
         assertEquals("仅使用带版本号和发布日期的官方公告", request.getValue().getCustomPrompt());
         assertEquals("只检查 18.1 当前赛季", request.getValue().getUserInstruction());
         assertEquals("conversation-1", request.getValue().getConversationId());
+    }
+
+    @Test
+    void nativeConsoleLaunchKeepsCredentialsServerSideAndDoesNotCreateManagerChat() {
+        MaintenancePolicyDao policyDao = mock(MaintenancePolicyDao.class);
+        MaintenanceRunDao runDao = mock(MaintenanceRunDao.class);
+        MaintenanceSnapshotService snapshots = mock(MaintenanceSnapshotService.class);
+        MaintenanceModelResolver resolver = mock(MaintenanceModelResolver.class);
+        MaintenancePolicyEntity policy = new MaintenancePolicyEntity();
+        policy.setId("policy-1");
+        policy.setEnabled(1);
+        policy.setMode("DISCOVERY_REVIEW");
+        policy.setResourceType("KNOWLEDGE");
+        policy.setResourceId("kb-1");
+        policy.setWorkspaceId("ws-1");
+        policy.setMaxProposals(4);
+        policy.setMaxMonthlyRuns(60);
+        policy.setModelConfigId("model-1");
+        when(policyDao.selectOne(any())).thenReturn(policy);
+        when(runDao.selectCount(any())).thenReturn(0L);
+        when(runDao.insert(any())).thenAnswer(invocation -> {
+            ((MaintenanceRunEntity) invocation.getArgument(0)).setId("interactive-run-1");
+            return 1;
+        });
+        when(snapshots.build(policy)).thenReturn(Map.of("name", "游戏专用"));
+        when(resolver.resolve("model-1")).thenReturn(new HarnessModelConfig(
+                "managed-key", "https://api.deepseek.com", "deepseek-chat"));
+        MaintenanceService service = new MaintenanceService(
+                policyDao, runDao, snapshots, mock(MaintenanceProposalService.class), resolver,
+                mock(HarnessMaintenanceGateway.class), new ObjectMapper(), mock(AsyncTaskExecutor.class),
+                mock(MaintenanceRunEventService.class), mock(MaintenanceConversationService.class));
+
+        HarnessMaintenanceRequest request = service.prepareConsole("KNOWLEDGE", "kb-1");
+
+        assertEquals("interactive-run-1", request.getRunId());
+        assertEquals("KNOWLEDGE", request.getTaskType());
+        assertNull(request.getConversationId());
+        assertEquals(List.of(), request.getConversationHistory());
+        assertEquals("managed-key", request.getModelConfig().getApiKey());
     }
 
     private MaintenancePolicyRequest request(String mode) {

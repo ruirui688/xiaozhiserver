@@ -941,14 +941,16 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/manager-api/src/main/resources/db/changelog/202608261700.sql
   - main/manager-api/src/main/resources/db/changelog/202608261715.sql
   - main/manager-web/src/components/maintenance/MaintenancePolicyPanel.vue
-  - main/manager-web/src/components/maintenance/MaintenanceConversationPanel.vue
+  - main/manager-web/src/components/maintenance/NativeHarnessPanel.vue
+  - main/manager-web/src/components/maintenance/MaintenanceProposalPanel.vue
+  - main/manager-web/src/components/maintenance/MaintenanceRunPanel.vue
   - main/maintenance-agent/
   - scripts/acr-build-push-maintenance-agent
   - deploy/production/docker-compose.yml
 是否允许被官方覆盖：否
-官方同步时的处理规则：必须保留 maintenance-agent 作为生产常驻核心服务，安装和升级始终拉取同版本镜像、生成内部服务密钥并等待其健康；不得恢复成默认关闭的 Compose profile。Manager API 继续作为资源权限、策略、月度运行上限、提案审批和最终写入的唯一权威。Harness 必须嵌入 manager-web 的资源页面，通过 Manager API 的会话、消息、运行、事件、提案和审批接口工作；不得重新引入独立 Web 控制台、弹窗、新域名、宿主端口或浏览器直连 maintenance-agent。`ai_maintenance_conversation` 与 `ai_maintenance_message` 必须保留真实多轮会话语义：人工会话可新建、重命名、隐藏/恢复和软删除，定时维护与手动维护也进入资源会话列表；后续轮次携带同一会话之前的完整可见消息，单轮运行继续以 `ai_maintenance_run` 审计和计费。知识维护按 dataset opt-in，仅超级管理员本人或超级管理员团队成员可以为官方知识库以及其有写权限的工作空间知识库配置，普通团队不得开启；自动采纳必须匹配可信域名并再次通过公网 URL/SSRF 校验，然后复用 KnowledgeSourceService 现有发布链。记忆维护按 agent opt-in、禁止联网和 ADD，所有 UPDATE/ARCHIVE/DELETE 必须人工批准并通过 MemoryService 留 revision。维护策略必须显式引用模型管理中已启用、测试通过的 DeepSeek LLM，只保存模型 ID；运行凭据只允许通过内部鉴权请求短暂进入单轮 Harness 运行内存，不得另存第二份模型密钥。维护镜像的 Dockerfile 必须默认使用项目统一的 `docker.m.daocloud.io` Python 基础镜像，不能回退到构建机不稳定的 Docker Hub 直连。不得把维护会话当作产品长期记忆，不得记录完整组装提示词、模型隐藏推理、记忆快照或密钥。
+官方同步时的处理规则：必须保留 maintenance-agent 作为生产常驻核心服务，安装和升级始终拉取同版本镜像、生成内部服务密钥并等待其健康；不得恢复成默认关闭的 Compose profile。Manager API 继续作为资源权限、策略、月度运行上限、提案审批和最终写入的唯一权威。人工交互必须使用 DeepSeek Harness 官方 Web Console，并以内嵌 iframe 出现在 manager-web 当前资源工作台；Manager Web 不得重新实现 Harness 的聊天、消息、会话新建、重命名或删除。官方 Console 因绝对 `/api`、`/assets`、`/plugins` 路径使用独立 HTTPS origin，宿主只允许回环端口反代，启动使用一次性 code、HttpOnly Cookie、浏览器写请求 origin 校验和限定 manager origin 的 `frame-ancestors`；唯一提案回调必须同时验证服务器共享密钥与绑定当前 audit run 的 HMAC 能力令牌。Harness 原生会话状态按资源哈希保存在专用容器卷；凭据、快照、完整组装提示词和模型隐藏推理不得写入该卷。定时/手动维护仍走有界后台运行，`ai_maintenance_run` 和脱敏事件作为外层审计，不得伪装成原生聊天消息；现有 conversation/message 表只服务兼容的后台上下文，不得作为原生 Console 的替代实现。知识维护按 dataset opt-in，仅超级管理员本人或超级管理员团队成员可以为官方知识库以及其有写权限的工作空间知识库配置，普通团队不得开启；自动采纳必须匹配可信域名并再次通过公网 URL/SSRF 校验，然后复用 KnowledgeSourceService 现有发布链。记忆维护按 agent opt-in、禁止联网和 ADD，所有 UPDATE/ARCHIVE/DELETE 必须人工批准并通过 MemoryService 留 revision。原生 Console 唯一产品写入桥是 `submit_maintenance_proposals`，且只进入待审批队列。维护策略必须显式引用模型管理中已启用、测试通过的 DeepSeek LLM，只保存模型 ID；运行凭据只允许通过内部鉴权请求短暂进入 Harness 进程内存，不得另存第二份模型密钥。维护镜像必须继续使用统一镜像源、600 秒 pip 超时以及 BuildKit pip/npm 缓存。
 知识提案批准后必须先保持 `APPLYING`，事务提交后立即触发连接器；只有文档抓取、切片和原子发布成功才能回写 `APPLIED`，失败必须回写 `FAILED`，不得把“创建来源”伪装成“已入库”。网页运行日志必须来自 `ai_maintenance_run_event` 中可恢复、可增量读取的脱敏里程碑，禁止直接透传容器 stdout、完整提示词、模型思维过程、网页正文或凭据。
-平台页面只保留一个“Harness 维护”入口，在当前智控台弹窗中统一展示会话、完整可见消息、脱敏运行事件、结构化提案及批准/拒绝操作；策略设置从同一工作台进入。知识维护必须保留策略级 `custom_prompt`；自定义提示词只属于业务质量指导，不得取消固定的安全、审批和配额合同。页面不得透传思维过程、原始模型日志、组装后的完整提示词或凭据。
+平台页面只保留一个“Harness 维护”入口：弹窗主体是原生 Console iframe，提案审批和运行审计作为 Manager 外层能力打开，不得插入或改写原生消息。策略设置从同一工作台进入。知识维护必须保留策略级 `custom_prompt`；自定义提示词只属于业务质量指导，不得取消固定的安全、审批和配额合同。页面不得透传思维过程、原始模型日志、组装后的完整提示词或凭据。
 过时动态来源只能通过带精确 sourceId 的 `REMOVE_SOURCE` 待审批提案淘汰；即使启用可信域名自动采纳也不得自动删除，批准后必须复用 KnowledgeSourceService 删除来源、动态文档和统计，不能直接操作知识表。
 ```
 

@@ -1,0 +1,21 @@
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: !!js process.env.XIAOZHI_MAINTENANCE_PROMPT
+    complete: true
+    includeRuntimeContext: false
+
+- id: tool-presentation
+  name: '@deepseek-ai/dsh-agent-tool-presentation'
+  config:
+    mode: native
+
+- id: web-search
+  name: '@deepseek-ai/dsh-tool-web'
+  disabled: !!js process.env.XIAOZHI_MAINTENANCE_TASK_TYPE !== 'KNOWLEDGE'
+  config:
+    fetch: false
+    searchTimeoutMs: 60000
+
+- id: submit-proposals
+  name: /app/console/submit-proposals.mjs

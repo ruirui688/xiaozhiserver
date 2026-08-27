@@ -1,0 +1,2 @@
+name: 小智资源维护
+description: 使用原生 DeepSeek Harness 会话分析资源，并将确认后的结构化提案送入 Manager 审批队列。

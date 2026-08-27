@@ -14,9 +14,10 @@ BUILD_ENGINE="${BUILD_ENGINE:-docker}"
 PIP_INDEX_URL="${MAINTENANCE_PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
 PIP_TIMEOUT="${MAINTENANCE_PIP_TIMEOUT:-600}"
 PYTHON_BASE_IMAGE="${MAINTENANCE_PYTHON_BASE_IMAGE:-docker.m.daocloud.io/library/python:3.12.11-slim-bookworm}"
+NODE_BASE_IMAGE="${MAINTENANCE_NODE_BASE_IMAGE:-docker.m.daocloud.io/library/node:22.22.0-bookworm-slim}"
 VERSION_TAG="${VERSION}${IMAGE_TAG_SUFFIX}"
 CONTEXT="$ROOT_DIR/main/maintenance-agent"
-COMMON_ARGS=(--build-arg "PIP_INDEX_URL=$PIP_INDEX_URL" --build-arg "PIP_TIMEOUT=$PIP_TIMEOUT" --build-arg "PYTHON_BASE_IMAGE=$PYTHON_BASE_IMAGE" -f "$CONTEXT/Dockerfile" -t "$IMAGE_REPOSITORY:$VERSION_TAG" -t "$IMAGE_REPOSITORY:$CHANNEL_TAG")
+COMMON_ARGS=(--build-arg "PIP_INDEX_URL=$PIP_INDEX_URL" --build-arg "PIP_TIMEOUT=$PIP_TIMEOUT" --build-arg "PYTHON_BASE_IMAGE=$PYTHON_BASE_IMAGE" --build-arg "NODE_BASE_IMAGE=$NODE_BASE_IMAGE" -f "$CONTEXT/Dockerfile" -t "$IMAGE_REPOSITORY:$VERSION_TAG" -t "$IMAGE_REPOSITORY:$CHANNEL_TAG")
 
 if [[ "$BUILD_ENGINE" == "buildx" ]]; then
   if [[ "$PUSH" != "true" && "$PLATFORMS" == *,* ]]; then

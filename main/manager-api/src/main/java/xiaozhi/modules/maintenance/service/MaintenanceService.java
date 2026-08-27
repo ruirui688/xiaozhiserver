@@ -228,6 +228,66 @@ public class MaintenanceService {
         return run;
     }
 
+    /**
+     * Creates an audit run for an isolated native Harness Web Console. The
+     * browser only receives a one-time launch URL; managed model credentials and
+     * the resource snapshot stay on the server-side console process.
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public HarnessMaintenanceRequest prepareConsole(String resourceType, String resourceId) {
+        MaintenancePolicyEntity policy = requireEnabledPolicy(resourceType, resourceId);
+        enforceMonthlyLimit(policy);
+        MaintenanceRunEntity run = new MaintenanceRunEntity();
+        run.setPolicyId(policy.getId());
+        run.setConversationId(null);
+        run.setWorkspaceId(policy.getWorkspaceId());
+        run.setResourceType(policy.getResourceType());
+        run.setResourceId(policy.getResourceId());
+        run.setTriggerType("INTERACTIVE");
+        run.setStatus("RUNNING");
+        run.setProposalCount(0);
+        run.setInputChars(0);
+        run.setOutputChars(0);
+        run.setStartedAt(new Date());
+        run.setCreatedAt(new Date());
+        runDao.insert(run);
+        Map<String, Object> snapshot = snapshotService.build(policy);
+        eventService.record(run.getId(), "DISCOVERY", "INFO", "已启动 DeepSeek Harness 原生控制台");
+        policy.setLastRunAt(new Date());
+        policy.setUpdatedAt(new Date());
+        policyDao.updateById(policy);
+        return new HarnessMaintenanceRequest(
+                run.getId(), null, policy.getResourceType(), policy.getResourceId(),
+                policy.getMaxProposals(), policy.getCustomPrompt(), null, List.of(), snapshot,
+                modelResolver.resolve(policy.getModelConfigId()));
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public MaintenanceRunEntity completeConsole(String runId, HarnessMaintenanceResponse response) {
+        MaintenanceRunEntity run = getRun(runId);
+        if (!"INTERACTIVE".equals(run.getTriggerType()) || !"RUNNING".equals(run.getStatus())) {
+            throw new RenException("该原生 Harness 提交已结束或不可重复提交");
+        }
+        MaintenancePolicyEntity policy = policyDao.selectById(run.getPolicyId());
+        if (policy == null || policy.getEnabled() != 1) throw new RenException("维护策略已停用");
+        run.setProposalCount(proposalService.persist(policy, run, response));
+        run.setInputChars(value(response == null ? null : response.getInputChars()));
+        run.setOutputChars(value(response == null ? null : response.getOutputChars()));
+        run.setStatus("SUCCEEDED");
+        run.setFinishedAt(new Date());
+        runDao.updateById(run);
+        eventService.record(run.getId(), "PROPOSAL", "SUCCESS", "原生 Harness 已提交维护提案",
+                Map.of("proposalCount", run.getProposalCount()));
+        return run;
+    }
+
+    public void failConsole(String runId, String error) {
+        MaintenanceRunEntity run = getRun(runId);
+        if (!"RUNNING".equals(run.getStatus())) return;
+        failRun(run, safeError(new RenException(error)));
+        eventService.record(run.getId(), "COMPLETE", "ERROR", run.getError());
+    }
+
     @Scheduled(fixedDelayString = "${maintenance.scheduler-delay-ms:60000}")
     public void scheduleDuePolicies() {
         recoverInterruptedWork();

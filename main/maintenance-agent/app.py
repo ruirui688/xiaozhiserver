@@ -4,6 +4,7 @@ import hmac
 import json
 import os
 import re
+import sys
 import tempfile
 import threading
 from http import HTTPStatus
@@ -193,7 +194,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
     def do_POST(self) -> None:
-        if self.path != "/v1/maintenance/run":
+        if self.path not in {"/v1/maintenance/run", "/v1/console/sessions"}:
             self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
             return
         expected = os.getenv("MAINTENANCE_AGENT_SECRET", "")
@@ -208,7 +209,11 @@ class Handler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length))
             if not isinstance(payload, dict):
                 raise ValueError("request body must be an object")
-            self._json(HTTPStatus.OK, process_request(payload))
+            if self.path == "/v1/console/sessions":
+                from console_gateway import MANAGER
+                self._json(HTTPStatus.OK, {"launchPath": MANAGER.create(payload)})
+            else:
+                self._json(HTTPStatus.OK, process_request(payload))
         except (ValueError, json.JSONDecodeError) as exc:
             self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)[:200]})
         except Exception:
@@ -230,6 +235,11 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     if not os.getenv("MAINTENANCE_AGENT_SECRET"):
         raise SystemExit("MAINTENANCE_AGENT_SECRET is required")
+    # Keep console_gateway importing this exact module instance instead of
+    # executing app.py a second time under the module name `app`.
+    sys.modules.setdefault("app", sys.modules[__name__])
+    from console_gateway import start_console_gateway
+    start_console_gateway()
     port = _bounded_int("PORT", 8010, 1024, 65535)
     ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
 

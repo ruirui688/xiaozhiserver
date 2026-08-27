@@ -60,6 +60,7 @@ SERVER_INSTALL_PROFILE=funasr scripts/acr-build-push
 ```bash
 PYTHON_BASE_IMAGE=python:3.10-slim-bookworm \
 MAINTENANCE_PYTHON_BASE_IMAGE=python:3.12.11-slim-bookworm \
+MAINTENANCE_NODE_BASE_IMAGE=node:22.22.0-bookworm-slim \
 NODE_BASE_IMAGE=node:20-bookworm-slim \
 MAVEN_BASE_IMAGE=maven:3.9.4-eclipse-temurin-21 \
 API_RUNTIME_BASE_IMAGE=bellsoft/liberica-runtime-container:jre-21-glibc \
@@ -69,7 +70,7 @@ RELEASE_ASSETS_BASE_IMAGE=alpine:3.20 \
 scripts/acr-build-push-lite
 ```
 
-maintenance-agent 默认使用清华 PyPI 镜像、600 秒读取超时，并通过 BuildKit cache mount 复用下载缓存；可用
+maintenance-agent 默认使用清华 PyPI 镜像、600 秒读取超时，并通过 BuildKit cache mount 复用 pip/npm 下载缓存；可用
 `MAINTENANCE_PIP_TIMEOUT` 和 `MAINTENANCE_PIP_INDEX_URL` 覆盖（包括切回官方 PyPI）。缓存只存在于构建器中，
 不进入运行镜像。
 

@@ -152,6 +152,7 @@ For `yh.wejoy.link`, the public addresses are:
 ```text
 manager-web          https://yh.wejoy.link/
 manager-api          https://yh.wejoy.link/xiaozhi/
+Harness（嵌入页面） https://harness.yh.wejoy.link/
 OTA                  https://yh.wejoy.link/xiaozhi/ota/
 vision explain       https://yh.wejoy.link/mcp/vision/explain
 vision images        https://yh.wejoy.link/mcp/vision/images/<filename>
@@ -172,6 +173,7 @@ https://domain/mcp/vision/explain -> 127.0.0.1:8003/mcp/vision/explain
 https://domain/mcp/vision/images/ -> 127.0.0.1:8003/mcp/vision/images/
 wss://domain/xiaozhi/v1/         -> 127.0.0.1:8000/xiaozhi/v1/
 wss://domain/xiaozhi/audio-preview/ -> 127.0.0.1:8000/xiaozhi/audio-preview/
+https://harness.domain/             -> 127.0.0.1:8011（仅供 manager iframe）
 ```
 
 Set these values in `~/xiaozhi-data/.env` after HTTPS is available:
@@ -180,6 +182,8 @@ Set these values in `~/xiaozhi-data/.env` after HTTPS is available:
 XIAOZHI_PUBLIC_DOMAIN=yh.wejoy.link
 XIAOZHI_PUBLIC_BASE_URL=https://yh.wejoy.link
 XIAOZHI_CORS_ORIGINS=https://yh.wejoy.link
+XIAOZHI_MAINTENANCE_PUBLIC_CONSOLE_URL=https://harness.yh.wejoy.link
+XIAOZHI_MAINTENANCE_FRAME_ANCESTORS=https://yh.wejoy.link
 ```
 
 Then run `~/xiaozhi-upgrade`. The install output will include both local test URLs and

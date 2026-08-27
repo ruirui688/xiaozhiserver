@@ -23,6 +23,7 @@ export default {
   policy(type, id, callback, fail) { request('GET', `${base(type, id)}/policy`, null, callback, fail) },
   savePolicy(type, id, data, callback, fail) { request('PUT', `${base(type, id)}/policy`, data, callback, fail) },
   run(type, id, data, callback, fail) { request('POST', `${base(type, id)}/runs`, data || {}, callback, fail) },
+  launchConsole(type, id, callback, fail) { request('POST', `${base(type, id)}/console-sessions`, {}, callback, fail) },
   runs(type, id, callback, fail) { request('GET', `${base(type, id)}/runs`, null, callback, fail) },
   runEvents(type, id, runId, afterId, callback, fail) {
     request('GET', `${base(type, id)}/runs/${runId}/events?after_id=${afterId || 0}`, null, callback, fail)

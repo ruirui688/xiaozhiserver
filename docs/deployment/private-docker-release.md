@@ -22,11 +22,18 @@
 DeepSeek API Key、接口地址和上游模型名直接复用“模型配置”中
 已启用且测试通过的 DeepSeek LLM；在资源维护策略中选择对应模型，不再在部署 `.env` 保存第二份模型凭据。
 
-`xiaozhi-maintenance-agent` 不挂载宿主目录，也不提供独立 Web 控制台或宿主端口；API 仅供 manager-api
-在容器网络调用，Harness 工作台直接嵌入现有智控台页面。容器常驻不等于自动维护全部资源：仍需在对应
-知识库或智能体页面逐一保存策略。
-DeepSeek Harness 当前为 Developer Preview，SDK/runtime 固定为
-`0.1.1rc1`；升级该版本必须先跑适配器契约测试和一次非生产真实搜索验收。
+`xiaozhi-maintenance-agent` 不挂载宿主源码；原生 Harness 会话状态保存在专用 Docker volume，临时工作区
+位于 tmpfs。内部 API 只供 manager-api 调用。官方 Console 通过宿主 `127.0.0.1:8011` 反代到独立 HTTPS
+origin，再以内嵌 iframe 出现在现有智控台页面；8011 不得绑定公网地址。容器常驻不等于自动维护全部资源：
+仍需在对应知识库或智能体页面逐一保存策略。
+
+官方 Console 使用绝对 `/api`、`/assets`、`/plugins` 路径，因此不能直接挂到 manager-web 的同一 URL 前缀。
+生产必须为 `XIAOZHI_MAINTENANCE_PUBLIC_CONSOLE_URL` 配置 HTTPS 域名和证书，并把
+`XIAOZHI_MAINTENANCE_FRAME_ANCESTORS` 限定为 manager-web 的公开 origin。启动链接是一次性的，反向代理必须
+关闭该 origin 的 access log，不能记录 `code` 查询参数。浏览器写请求还会校验该独立 origin；提交提案时除
+服务器共享密钥外，还必须携带绑定到当前 audit run 的 HMAC 能力令牌，该令牌不进入浏览器。
+DeepSeek Harness 当前为 Developer Preview：后台 Python SDK/runtime 固定为 `0.1.1rc1`，官方 Web Console
+固定为 `0.1.1-rc.2`；升级任一版本必须先跑适配器契约测试和一次非生产真实搜索验收。
 
 ```text
 开发/构建机：完整源码 -> 构建镜像 -> 推送阿里云 ACR

@@ -196,7 +196,7 @@
         <span>当前智能体：{{ agentName || agentId }}</span>
         <el-button size="small" icon="el-icon-setting" @click="harnessPanelVisible = true">维护设置</el-button>
       </div>
-      <MaintenanceConversationPanel
+      <NativeHarnessPanel
         :active="harnessWorkbenchVisible"
         resource-type="MEMORY"
         :resource-id="agentId"
@@ -262,7 +262,7 @@ import MemoryCandidates from './memory/MemoryCandidates.vue'
 import MemoryDetailPanel from './memory/MemoryDetailPanel.vue'
 import MemoryEditDialog from './memory/MemoryEditDialog.vue'
 import MaintenancePolicyPanel from '@/components/maintenance/MaintenancePolicyPanel.vue'
-import MaintenanceConversationPanel from '@/components/maintenance/MaintenanceConversationPanel.vue'
+import NativeHarnessPanel from '@/components/maintenance/NativeHarnessPanel.vue'
 import Api from '@/apis/api'
 import {
   canRecoverRebuildTask,
@@ -286,7 +286,7 @@ export default {
     MemoryDetailPanel,
     MemoryEditDialog,
     MaintenancePolicyPanel,
-    MaintenanceConversationPanel
+    NativeHarnessPanel
   },
   data() {
     return {
