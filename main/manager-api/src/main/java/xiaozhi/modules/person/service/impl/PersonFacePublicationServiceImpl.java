@@ -114,6 +114,7 @@ public class PersonFacePublicationServiceImpl implements PersonFacePublicationSe
             binding.setPublishedActive(publishActive ? 1 : 0);
             binding.setPublishedPersonName(publishActive ? profile.getName() : null);
             binding.setPublishedGroupName(publishActive ? profile.getGroupName() : null);
+            binding.setPublishedDescription(publishActive ? profile.getDescription() : null);
             binding.setPublishedFaceAssetId(publishActive ? profile.getCurrentFaceAssetId() : null);
             binding.setPublishedRecognitionAction(publishActive
                     ? normalizeAction(profile.getRecognitionAction()) : "NONE");
@@ -184,6 +185,7 @@ public class PersonFacePublicationServiceImpl implements PersonFacePublicationSe
             if (desired && (!Objects.equals(binding.getPublishedFaceAssetId(), profile.getCurrentFaceAssetId())
                     || !Objects.equals(binding.getPublishedPersonName(), profile.getName())
                     || !Objects.equals(binding.getPublishedGroupName(), profile.getGroupName())
+                    || !Objects.equals(binding.getPublishedDescription(), profile.getDescription())
                     || !Objects.equals(binding.getPublishedRecognitionAction(), normalizeAction(profile.getRecognitionAction()))
                     || !Objects.equals(binding.getPublishedGreetingText(), publishedGreeting(profile)))) {
                 return true;

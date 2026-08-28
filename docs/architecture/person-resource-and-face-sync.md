@@ -5,6 +5,7 @@ last_verified: 2026-08-26
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/person
   - main/manager-api/src/main/resources/db/changelog/202608261130.sql
+  - main/manager-api/src/main/resources/db/changelog/202608281000.sql
   - main/xiaozhi-server/core/device_face_profiles.py
   - main/manager-web/src/views/PersonProfileManagement.vue
 ---
@@ -48,6 +49,9 @@ source_paths:
 发布快照包含人物名称、分组、照片资产版本、识别动作和播报文本。人物后续编辑或上传新照片不会改变正在
 运行的设备事实；再次显式发布后才生效。解除智能体绑定、停用人物或删除当前照片也先形成待发布变更，
 发布后设备才收到删除差异。删除整个人物是例外：服务端会递增所有已发布智能体版本，使设备能够清理缓存。
+
+人物资料中的“介绍”（例如职业、来访背景等）同样写入发布快照 `publishedDescription`，只有显式发布后才
+随人脸库同步到设备；编辑草稿不会提前改变设备上的背景信息。
 
 ## v2 设备本地持久化协议
 
@@ -95,10 +99,22 @@ personId -> faceVersion + faceSha256 + 本地图片路径 + 展示元数据
   "agentId":"agent-a",
   "releaseVersion":12,
   "profiles":[
-    {"personId":"person-1","faceVersion":3,"faceSha256":"64位SHA-256"}
+    {
+      "personId":"person-1",
+      "name":"访客一",
+      "groupName":"客户",
+      "description":"负责电路板设计",
+      "recognitionAction":"NONE",
+      "faceVersion":3,
+      "faceSha256":"64位SHA-256"
+    }
   ]
 }
 ```
+
+设备缓存的人物展示元数据也属于本地事实。姓名、分组、介绍或识别动作发生变化时，即使照片版本和
+SHA-256 不变，服务器仍会返回该人物的 `upsert`，确保背景信息同步到设备；旧设备未上报这些字段时会
+兼容性地触发一次 `upsert`。
 
 消息中的 `agentId` 只描述设备缓存，不能作为授权身份。xiaozhi-server 使用已认证连接中的 `device_id`，
 manager-api 再从 `ai_device.agent_id` 得到当前权威智能体。
@@ -130,6 +146,7 @@ manager-api 再从 `ai_device.agent_id` 得到当前权威智能体。
     {
       "personId":"person-2",
       "name":"访客二",
+      "description":"画电路板的",
       "faceVersion":4,
       "faceSha256":"64位SHA-256",
       "contentType":"image/jpeg",
@@ -147,9 +164,10 @@ manager-api 再从 `ai_device.agent_id` 得到当前权威智能体。
   "type":"face_profiles",
   "event":"upsert",
   "protocolVersion":2,
-  "personId":"person-2",
-  "assetId":"asset-4",
-  "faceVersion":4,
+      "personId":"person-2",
+      "assetId":"asset-4",
+      "description":"画电路板的",
+      "faceVersion":4,
   "faceSha256":"64位SHA-256",
   "imageBase64":"..."
 }

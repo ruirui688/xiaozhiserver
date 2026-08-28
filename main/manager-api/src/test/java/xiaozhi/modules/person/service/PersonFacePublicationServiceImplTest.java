@@ -36,6 +36,7 @@ class PersonFacePublicationServiceImplTest {
         profile.setWorkspaceId("workspace-a");
         profile.setName("小明");
         profile.setGroupName("访客");
+        profile.setDescription("画电路板的");
         profile.setStatus(1);
         profile.setCurrentFaceAssetId("asset-v2");
         profile.setRecognitionAction("SPEAK_TEXT");
@@ -56,6 +57,7 @@ class PersonFacePublicationServiceImplTest {
         assertEquals(1, binding.getPublishedActive());
         assertEquals("asset-v2", binding.getPublishedFaceAssetId());
         assertEquals("小明", binding.getPublishedPersonName());
+        assertEquals("画电路板的", binding.getPublishedDescription());
         assertEquals("SPEAK_TEXT", binding.getPublishedRecognitionAction());
         assertEquals("欢迎光临", binding.getPublishedGreetingText());
         verify(bindingDao).updateById(binding);

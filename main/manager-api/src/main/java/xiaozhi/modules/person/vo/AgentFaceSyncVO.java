@@ -22,6 +22,7 @@ public class AgentFaceSyncVO {
         private String assetId;
         private String name;
         private String groupName;
+        private String description;
         private long faceVersion;
         private String faceSha256;
         private String contentType;

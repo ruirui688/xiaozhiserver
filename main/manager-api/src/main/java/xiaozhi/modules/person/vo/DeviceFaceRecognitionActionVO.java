@@ -9,6 +9,7 @@ public class DeviceFaceRecognitionActionVO {
     private String eventId;
     private String personId;
     private String personName;
+    private String description;
     private String actionType;
     private String text;
     private boolean duplicate;

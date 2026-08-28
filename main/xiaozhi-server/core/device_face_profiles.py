@@ -298,7 +298,17 @@ def _normalize_cached_profiles(value):
         if sha256 and (len(sha256) != 64 or any(char not in "0123456789abcdef" for char in sha256)):
             return None
         seen.add(person_id)
-        result.append({"personId": person_id, "faceVersion": version, "faceSha256": sha256 or None})
+        result.append(
+            {
+                "personId": person_id,
+                "name": _optional_text(item.get("name"), 30),
+                "groupName": _optional_text(item.get("groupName"), 60),
+                "description": _optional_text(item.get("description"), 200),
+                "recognitionAction": _optional_text(item.get("recognitionAction"), 32),
+                "faceVersion": version,
+                "faceSha256": sha256 or None,
+            }
+        )
     return result
 
 
@@ -343,6 +353,7 @@ async def handle_face_recognition_event(conn, message: Dict[str, Any]) -> None:
                 "eventId": event_id,
                 "personId": person_id,
                 "personName": action.get("personName"),
+                "description": action.get("description"),
                 "actionType": action.get("actionType", "NONE"),
                 "text": action.get("text"),
                 "duplicate": bool(action.get("duplicate", False)),
@@ -362,6 +373,7 @@ def _public_profile(item: Dict[str, Any]) -> Dict[str, Any]:
         "personId": item.get("personId"),
         "name": item.get("name"),
         "groupName": item.get("groupName"),
+        "description": item.get("description"),
         "faceVersion": item.get("faceVersion", 0),
         "faceSha256": item.get("faceSha256"),
         "contentType": item.get("contentType", "image/jpeg"),
@@ -371,6 +383,16 @@ def _public_profile(item: Dict[str, Any]) -> Dict[str, Any]:
 
 def _valid_identifier(value: str) -> bool:
     return 1 <= len(value) <= 64 and all(char.isalnum() or char in "_-" for char in value)
+
+
+def _optional_text(value: Any, max_length: int):
+    """Normalize optional cached metadata without trusting arbitrary payloads."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value[:max_length] if value else None
 
 
 async def _send_json(conn, payload: Dict[str, Any]) -> None:

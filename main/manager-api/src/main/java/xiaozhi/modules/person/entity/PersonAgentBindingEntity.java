@@ -22,6 +22,7 @@ public class PersonAgentBindingEntity {
     private Integer publishedActive;
     private String publishedPersonName;
     private String publishedGroupName;
+    private String publishedDescription;
     private String publishedFaceAssetId;
     private String publishedRecognitionAction;
     private String publishedGreetingText;

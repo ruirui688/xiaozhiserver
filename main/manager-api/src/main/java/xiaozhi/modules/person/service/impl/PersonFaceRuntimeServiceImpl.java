@@ -56,11 +56,6 @@ public class PersonFaceRuntimeServiceImpl implements PersonFaceRuntimeService {
         long releaseVersion = releaseVersion(agentId);
         long cachedVersion = Objects.requireNonNullElse(request.getReleaseVersion(), 0L);
         boolean sameAgent = Objects.equals(agentId, StringUtils.trimToNull(request.getCachedAgentId()));
-        if (sameAgent && cachedVersion == releaseVersion) {
-            return AgentFaceSyncVO.builder()
-                    .protocolVersion(2).agentId(agentId).releaseVersion(releaseVersion)
-                    .unchanged(true).upserts(List.of()).deletes(List.of()).build();
-        }
 
         List<AgentFaceSyncVO.Profile> current = publishedProfiles(agentId, device.getWorkspaceId());
         Map<String, AgentFaceSyncRequestDTO.CachedProfile> cached = new LinkedHashMap<>();
@@ -76,7 +71,12 @@ public class PersonFaceRuntimeServiceImpl implements PersonFaceRuntimeService {
             AgentFaceSyncRequestDTO.CachedProfile local = cached.get(profile.getPersonId());
             if (local == null
                     || !Objects.equals(local.getFaceVersion(), profile.getFaceVersion())
-                    || !Objects.equals(local.getFaceSha256(), profile.getFaceSha256())) {
+                    || !Objects.equals(local.getFaceSha256(), profile.getFaceSha256())
+                    || !Objects.equals(local.getName(), profile.getName())
+                    || !Objects.equals(local.getGroupName(), profile.getGroupName())
+                    || !Objects.equals(local.getDescription(), profile.getDescription())
+                    || !Objects.equals(normalizeAction(local.getRecognitionAction()),
+                            profile.getRecognitionAction())) {
                 upserts.add(profile);
             }
         }
@@ -87,6 +87,11 @@ public class PersonFaceRuntimeServiceImpl implements PersonFaceRuntimeService {
             if (!currentIds.contains(local.getPersonId())) {
                 deletes.add(local.getPersonId());
             }
+        }
+        if (sameAgent && cachedVersion == releaseVersion && upserts.isEmpty() && deletes.isEmpty()) {
+            return AgentFaceSyncVO.builder()
+                    .protocolVersion(2).agentId(agentId).releaseVersion(releaseVersion)
+                    .unchanged(true).upserts(List.of()).deletes(List.of()).build();
         }
         return AgentFaceSyncVO.builder()
                 .protocolVersion(2).agentId(agentId).releaseVersion(releaseVersion)
@@ -114,6 +119,7 @@ public class PersonFaceRuntimeServiceImpl implements PersonFaceRuntimeService {
                 .syncVersion(releaseVersion(device.getAgentId()))
                 .profiles(profiles.stream().map(profile -> DeviceFaceProfileManifestVO.Profile.builder()
                         .personId(profile.getPersonId()).name(profile.getName()).groupName(profile.getGroupName())
+                        .description(profile.getDescription())
                         .faceVersion(profile.getFaceVersion()).faceSha256(profile.getFaceSha256())
                         .contentType(profile.getContentType()).recognitionAction(profile.getRecognitionAction())
                         .build()).toList())
@@ -185,6 +191,7 @@ public class PersonFaceRuntimeServiceImpl implements PersonFaceRuntimeService {
             result.add(AgentFaceSyncVO.Profile.builder()
                     .personId(binding.getPersonId()).assetId(asset.getId())
                     .name(binding.getPublishedPersonName()).groupName(binding.getPublishedGroupName())
+                    .description(binding.getPublishedDescription())
                     .faceVersion(Objects.requireNonNullElse(asset.getAssetVersion(), 0L))
                     .faceSha256(asset.getSha256()).contentType(asset.getContentType())
                     .recognitionAction(normalizeAction(binding.getPublishedRecognitionAction()))
@@ -246,6 +253,7 @@ public class PersonFaceRuntimeServiceImpl implements PersonFaceRuntimeService {
         String action = normalizeAction(actionType);
         return DeviceFaceRecognitionActionVO.builder()
                 .eventId(eventId).personId(binding.getPersonId()).personName(binding.getPublishedPersonName())
+                .description(binding.getPublishedDescription())
                 .actionType(action)
                 .text("SPEAK_TEXT".equals(action) ? binding.getPublishedGreetingText() : null)
                 .duplicate(duplicate).build();

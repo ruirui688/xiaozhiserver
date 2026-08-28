@@ -55,6 +55,29 @@ class PersonFaceRuntimeServiceImplTest {
         assertEquals(List.of("person-old"), result.getDeletes());
         assertEquals(1, result.getUpserts().size());
         assertEquals("asset-v2", result.getUpserts().get(0).getAssetId());
+        assertEquals("画电路板的", result.getUpserts().get(0).getDescription());
+    }
+
+    @Test
+    void metadataOnlyChangeReceivesProfileUpsert() {
+        Fixture fixture = new Fixture();
+        PersonAgentBindingEntity binding = fixture.binding();
+        when(fixture.bindingDao.selectList(any())).thenReturn(List.of(binding));
+        when(fixture.assetDao.selectBatchIds(any())).thenReturn(List.of(fixture.asset()));
+
+        AgentFaceSyncRequestDTO request = fixture.request(7L);
+        AgentFaceSyncRequestDTO.CachedProfile cached = cached("person-a", 2L, "b".repeat(64));
+        cached.setName("小明");
+        cached.setGroupName("访客");
+        cached.setDescription("旧背景");
+        cached.setRecognitionAction("NONE");
+        request.setProfiles(List.of(cached));
+
+        var result = fixture.service.sync(request);
+
+        assertFalse(result.isUnchanged());
+        assertEquals(1, result.getUpserts().size());
+        assertEquals("画电路板的", result.getUpserts().get(0).getDescription());
     }
 
     @Test
@@ -75,6 +98,7 @@ class PersonFaceRuntimeServiceImplTest {
 
         assertEquals("SPEAK_TEXT", result.getActionType());
         assertEquals("欢迎回来", result.getText());
+        assertEquals("画电路板的", result.getDescription());
     }
 
     private static AgentFaceSyncRequestDTO.CachedProfile cached(String personId, long version, String sha) {
@@ -124,6 +148,7 @@ class PersonFaceRuntimeServiceImplTest {
             binding.setWorkspaceId("workspace-a");
             binding.setPublishedActive(1);
             binding.setPublishedPersonName("小明");
+            binding.setPublishedDescription("画电路板的");
             binding.setPublishedFaceAssetId("asset-v2");
             binding.setPublishedRecognitionAction("NONE");
             return binding;

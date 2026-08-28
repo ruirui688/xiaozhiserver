@@ -19,6 +19,7 @@ public class DeviceFaceProfileManifestVO {
         private String personId;
         private String name;
         private String groupName;
+        private String description;
         private long faceVersion;
         private String faceSha256;
         private String contentType;

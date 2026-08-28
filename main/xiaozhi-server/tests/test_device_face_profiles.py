@@ -51,6 +51,7 @@ def test_sync_sends_manifest_bounded_images_and_completion(monkeypatch):
                 {
                     "personId": "person1",
                     "name": "访客一",
+                    "description": "画电路板的",
                     "faceVersion": 2,
                     "faceSha256": "abc",
                     "contentType": "image/jpeg",
@@ -70,6 +71,7 @@ def test_sync_sends_manifest_bounded_images_and_completion(monkeypatch):
 
     assert [item["event"] for item in conn.websocket.messages] == ["manifest", "upsert", "complete"]
     assert conn.websocket.messages[1]["personId"] == "person1"
+    assert conn.websocket.messages[1]["description"] == "画电路板的"
     assert "imageBase64" in conn.websocket.messages[1]
     assert conn.websocket.messages[2]["profileCount"] == 1
 
@@ -81,6 +83,7 @@ def test_recognition_uses_authenticated_connection_device_id(monkeypatch):
         captured.update(payload)
         return {
             "personName": "访客一",
+            "description": "画电路板的",
             "actionType": "SPEAK_TEXT",
             "text": "欢迎回来",
             "duplicate": False,
@@ -105,6 +108,7 @@ def test_recognition_uses_authenticated_connection_device_id(monkeypatch):
     assert captured["macAddress"] == conn.device_id
     assert conn.websocket.messages[-1]["event"] == "action"
     assert conn.websocket.messages[-1]["text"] == "欢迎回来"
+    assert conn.websocket.messages[-1]["description"] == "画电路板的"
 
 
 def test_face_recognition_handler_is_registered():
@@ -128,7 +132,15 @@ def test_v2_matching_release_does_not_download_images(monkeypatch):
         "event": "sync_request",
         "agentId": "agent-a",
         "releaseVersion": 9,
-        "profiles": [{"personId": "person1", "faceVersion": 2, "faceSha256": "a" * 64}],
+        "profiles": [{
+            "personId": "person1",
+            "name": "小明",
+            "groupName": "访客",
+            "description": "画电路板的",
+            "recognitionAction": "NONE",
+            "faceVersion": 2,
+            "faceSha256": "a" * 64,
+        }],
     }))
 
     assert [item["event"] for item in conn.websocket.messages] == ["unchanged"]
@@ -145,6 +157,7 @@ def test_v2_sends_only_prepared_delta_and_atomic_completion(monkeypatch):
                 "personId": "person2",
                 "assetId": "asset2",
                 "name": "访客二",
+                "description": "测试背景",
                 "faceVersion": 3,
                 "faceSha256": "b" * 64,
                 "contentType": "image/jpeg",
@@ -174,6 +187,7 @@ def test_v2_sends_only_prepared_delta_and_atomic_completion(monkeypatch):
     assert conn.websocket.messages[0]["deletes"] == ["person-old"]
     assert conn.websocket.messages[-1]["releaseVersion"] == 10
     assert "imageBase64" in conn.websocket.messages[1]
+    assert conn.websocket.messages[1]["description"] == "测试背景"
 
 
 def test_face_profile_v2_handler_is_registered():
