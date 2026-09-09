@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -41,6 +42,8 @@ import xiaozhi.modules.agent.dto.AgentDTO;
 import xiaozhi.modules.agent.dto.AgentMemoryDTO;
 import xiaozhi.modules.agent.dto.AgentUpdateDTO;
 import xiaozhi.modules.agent.entity.AgentEntity;
+import xiaozhi.modules.agent.entity.AgentChatHistoryEntity;
+import xiaozhi.modules.agent.dao.AiAgentChatHistoryDao;
 import xiaozhi.modules.agent.entity.AgentTemplateEntity;
 import xiaozhi.modules.agent.dto.AgentTagDTO;
 import xiaozhi.modules.agent.entity.AgentTagEntity;
@@ -87,6 +90,9 @@ public class AgentController {
     private final WorkspacePermissionService workspacePermissionService;
     private final AgentSemanticSkillService agentSemanticSkillService;
     private final DeviceSceneService deviceSceneService;
+    private final AiAgentChatHistoryDao agentChatHistoryDao;
+
+    private static final long AUDIO_TICKET_TTL_SECONDS = 60L;
 
     @GetMapping("/list")
     @Operation(summary = "获取用户智能体列表")
@@ -240,6 +246,10 @@ public class AgentController {
     public Result<PageData<AgentChatSessionDTO>> getAgentSessions(
             @PathVariable("id") String id,
             @Parameter(hidden = true) @RequestParam Map<String, Object> params) {
+        UserDetail user = SecurityUser.getUser();
+        if (user == null || !agentService.checkAgentPermission(id, user.getId())) {
+            return new Result<PageData<AgentChatSessionDTO>>().error("没有权限查看该智能体的会话");
+        }
         params.put("agentId", id);
         PageData<AgentChatSessionDTO> page = agentChatHistoryService.getSessionListByAgentId(params);
         return new Result<PageData<AgentChatSessionDTO>>().ok(page);
@@ -287,7 +297,15 @@ public class AgentController {
     @RequiresPermissions("sys:role:normal")
     public Result<String> getContentByAudioId(
             @PathVariable("id") String id) {
-        // 查询聊天记录
+        UserDetail user = SecurityUser.getUser();
+        AgentChatHistoryEntity history = agentChatHistoryDao.selectOne(new LambdaQueryWrapper<AgentChatHistoryEntity>()
+                .select(AgentChatHistoryEntity::getAgentId)
+                .eq(AgentChatHistoryEntity::getAudioId, id)
+                .last("LIMIT 1"));
+        if (user.getId() == null || history == null
+                || !agentService.checkAgentPermission(history.getAgentId(), user.getId())) {
+            return new Result<String>().error("没有权限访问音频");
+        }
         String data = agentChatHistoryService.getContentByAudioId(id);
         return new Result<String>().ok(data);
     }
@@ -296,12 +314,26 @@ public class AgentController {
     @Operation(summary = "获取音频下载ID")
     @RequiresPermissions("sys:role:normal")
     public Result<String> getAudioId(@PathVariable("audioId") String audioId) {
+        UserDetail user = SecurityUser.getUser();
+        if (user.getId() == null) {
+            return new Result<String>().error("没有权限访问音频");
+        }
+        AgentChatHistoryEntity history = agentChatHistoryDao.selectOne(new LambdaQueryWrapper<AgentChatHistoryEntity>()
+                .select(AgentChatHistoryEntity::getAgentId)
+                .eq(AgentChatHistoryEntity::getAudioId, audioId)
+                .last("LIMIT 1"));
+        if (history == null || !agentService.checkAgentPermission(history.getAgentId(), user.getId())) {
+            return new Result<String>().error("没有权限访问音频");
+        }
         byte[] audioData = agentChatAudioService.getAudio(audioId);
         if (audioData == null) {
-            return new Result<String>().error("音频不存在");
+            return new Result<String>().error("没有权限访问音频");
         }
         String uuid = UUID.randomUUID().toString();
-        redisUtils.set(RedisKeys.getAgentAudioIdKey(uuid), audioId);
+        // Bind the one-time ticket to the requesting user and the owning agent.
+        redisUtils.set(RedisKeys.getAgentAudioIdKey(uuid),
+                user.getId() + "|" + history.getAgentId() + "|" + audioId,
+                AUDIO_TICKET_TTL_SECONDS);
         return new Result<String>().ok(uuid);
     }
 
@@ -309,10 +341,17 @@ public class AgentController {
     @Operation(summary = "播放音频")
     public ResponseEntity<byte[]> playAudio(@PathVariable("uuid") String uuid) {
 
-        String audioId = (String) redisUtils.get(RedisKeys.getAgentAudioIdKey(uuid));
-        if (StringUtils.isBlank(audioId)) {
+        Object ticketValue = redisUtils.get(RedisKeys.getAgentAudioIdKey(uuid));
+        if (!(ticketValue instanceof String ticket)) {
             return ResponseEntity.notFound().build();
         }
+        String[] parts = ticket.split("\\|", 3);
+        if (parts.length != 3 || !String.valueOf(SecurityUser.getUserId()).equals(parts[0])
+                || !agentService.checkAgentPermission(parts[1], SecurityUser.getUserId())) {
+            redisUtils.delete(RedisKeys.getAgentAudioIdKey(uuid));
+            return ResponseEntity.notFound().build();
+        }
+        String audioId = parts[2];
 
         byte[] audioData = agentChatAudioService.getAudio(audioId);
         if (audioData == null) {

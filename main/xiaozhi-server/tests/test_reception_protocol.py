@@ -83,7 +83,9 @@ def test_four_people_query_one_representative(monkeypatch):
     assert "王先生，欢迎回来" in conn.websocket.messages[-1]["spokenText"]
     assert "咖啡" in conn.websocket.messages[-1]["spokenText"]
     assert "确认了今天的预约" in conn.websocket.messages[-1]["spokenText"]
-    assert conn.websocket.messages[-1]["orderQrAvailable"] is True
+    assert "orderQrAvailable" not in conn.websocket.messages[-1]
+    assert "orderQrContent" not in conn.websocket.messages[-1]
+    assert "orderQrAvailable" not in conn.websocket.messages[-1]["conversationContext"]
     assert conn.websocket.messages[-1]["conversationContext"]["products"][0]["name"] == "招牌套餐"
 
 

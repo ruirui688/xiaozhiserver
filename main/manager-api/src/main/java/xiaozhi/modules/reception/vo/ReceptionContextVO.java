@@ -18,7 +18,6 @@ public class ReceptionContextVO {
     private String faqJson;
     private String seatsJson;
     private String stageShowJson;
-    private String orderQrContent;
     private String serviceContactText;
     private long configVersion;
     private List<PersonContext> people;

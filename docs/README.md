@@ -25,6 +25,7 @@ source_paths:
 | 知识库与切片 | [知识库链路](./architecture/knowledge-base-chain.md) | [RAGFlow](./models/ragflow-integration.md) |
 | 插件、工具、MCP | [功能插件](./architecture/function-plugin-architecture.md) | [MCP 架构](./architecture/mcp-chains.md)、[MCP 操作](./mcp/mcp-operation-guide.md) |
 | workspace、认证、安全 | [安全架构](./architecture/security-architecture.md) | [workspace 与组织](./architecture/workspace-organization-management.md) |
+| 聊天数据安全与行业架构参考 | [聊天数据安全架构参考](./architecture/chat-data-security-reference.md) | Signal、WhatsApp、Matrix、客户密钥和机密计算案例 |
 | 第三方服务 | [第三方集成](./integrations/third-party-integrations.md) | 飞书、天气、Home Assistant、短信和新闻都在同一页 |
 | 查看本轮修复与官方差异 | [2026-07 可靠性与上游审计](./reports/reliability-and-upstream-audit-2026-07.md) | 报告不是当前架构事实 |
 

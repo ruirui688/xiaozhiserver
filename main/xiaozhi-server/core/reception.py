@@ -91,7 +91,6 @@ def build_reception_action(
     faq = _bounded_json_list(response.get("faqJson"), 100)
     seats = _bounded_json_list(response.get("seatsJson"), 100)
     stage_show = _json_object(response.get("stageShowJson"))
-    order_qr_content = str(response.get("orderQrContent") or "").strip()
     personal_topic = _personal_topic(selected)
     appointment_text = "已经为您确认了今天的预约。" if appointment else ""
     spoken_text = "".join(
@@ -111,8 +110,6 @@ def build_reception_action(
         "companyIntroText": company_intro,
         "companyIntroRequired": bool(company_intro),
         "appointment": appointment,
-        "orderQrAvailable": bool(order_qr_content),
-        "orderQrContent": order_qr_content,
         "conversationContext": {
             "formatVersion": "1.0",
             "people": selected,
@@ -124,7 +121,6 @@ def build_reception_action(
             "seats": seats,
             "stageShow": stage_show,
             "serviceContactText": response.get("serviceContactText"),
-            "orderQrAvailable": bool(order_qr_content),
             "instruction": (
                 "先自然说欢迎语；存在 companyIntroText 时原样介绍且不超过十秒。"
                 "只能使用 people 中经过授权的客户事实；没有的事实不得编造。"

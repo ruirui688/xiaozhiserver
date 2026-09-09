@@ -225,7 +225,7 @@ Java 的 `ModelRuntimeAssembler` 负责从通用字段、普通参数和密钥�
 | MCP | Endpoint 和工具配置 | Server/Device/Endpoint 三类 MCP | [MCP 链路](./mcp-chains.md) |
 | 记忆 | 事实、候选、审计、查询 | 事件上报与上下文注入 | [记忆系统](./memory-system-chain.md) |
 | 知识库 | 文件、分块、检索与权限 | 检索工具调用并回注 LLM | [知识库链路](./knowledge-base-chain.md) |
-| 人物与接待 | 人物、人脸、客户、预约、FAQ/餐品/座位和二维码配置 | 单人识别兼容协议与批量 `reception_v1` | [人物资源](./person-resource-and-face-sync.md)、[机器人迎宾产品化](./robot-reception-productization.md) |
+| 人物与接待 | 人物、人脸、客户、预约、FAQ/餐品/座位和舞台配置 | 单人识别兼容协议与批量 `reception_v1` | [人物资源](./person-resource-and-face-sync.md)、[机器人迎宾产品化](./robot-reception-productization.md) |
 | Workspace | 成员、角色和资源归属 | 配置拉取时的资源授权边界 | [工作空间隔离](./workspace-organization-management.md) |
 
 ## 6. 数据所有权

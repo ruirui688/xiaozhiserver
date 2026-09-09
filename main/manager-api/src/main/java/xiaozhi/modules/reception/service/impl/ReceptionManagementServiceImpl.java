@@ -149,7 +149,6 @@ public class ReceptionManagementServiceImpl implements ReceptionManagementServic
         entity.setProductsJson(jsonObject(dto.getProducts()));
         entity.setSeatsJson(jsonObject(dto.getSeats()));
         entity.setStageShowJson(jsonObject(dto.getStageShow()));
-        entity.setOrderQrContent(StringUtils.trimToNull(dto.getOrderQrContent()));
         entity.setServiceContactText(StringUtils.trimToNull(dto.getServiceContactText()));
         entity.setStatus(Objects.equals(dto.getStatus(), 0) ? 0 : 1);
         if (create) {

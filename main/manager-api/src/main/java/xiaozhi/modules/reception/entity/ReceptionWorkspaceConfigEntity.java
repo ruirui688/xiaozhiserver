@@ -20,7 +20,6 @@ public class ReceptionWorkspaceConfigEntity {
     private String productsJson;
     private String seatsJson;
     private String stageShowJson;
-    private String orderQrContent;
     private String serviceContactText;
     private Long configVersion;
     private Integer status;

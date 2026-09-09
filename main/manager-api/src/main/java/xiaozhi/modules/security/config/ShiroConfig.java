@@ -109,10 +109,11 @@ public class ShiroConfig {
         filterMap.put("/device/*/conversation-context/reset", "oauth2");
         filterMap.put("/agent/chat-history/report", "server");
         filterMap.put("/agent/voice-print/enrollments/*/device-samples", "server");
-        filterMap.put("/agent/chat-history/download/**", "anon");
+        // 聊天记录和聊天音频属于用户隐私：下载/播放必须登录，Controller 还要做资源归属校验。
+        filterMap.put("/agent/chat-history/download/**", "oauth2");
         filterMap.put("/agent/chat-summary/**", "server");
         filterMap.put("/agent/chat-title/**", "server");
-        filterMap.put("/agent/play/**", "anon");
+        filterMap.put("/agent/play/**", "oauth2");
         filterMap.put("/voiceClone/play/**", "anon");
         filterMap.put("/admin/music/play", "anon");
         filterMap.put("/**", "oauth2");

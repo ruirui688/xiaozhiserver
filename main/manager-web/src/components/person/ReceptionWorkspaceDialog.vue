@@ -8,9 +8,6 @@
       <el-form-item label="公司介绍（最多60字）">
         <el-input v-model="form.companyIntroText" type="textarea" maxlength="60" show-word-limit />
       </el-form-item>
-      <el-form-item label="点餐二维码内容">
-        <el-input v-model.trim="form.orderQrContent" maxlength="1024" />
-      </el-form-item>
       <el-alert type="info" :closable="false" title="以下字段使用 JSON 数组/对象；保存前会校验格式。" />
       <el-form-item label="FAQ JSON（最多100项）"><el-input v-model="form.faqText" type="textarea" :rows="5" /></el-form-item>
       <el-form-item label="餐品 JSON"><el-input v-model="form.productsText" type="textarea" :rows="5" /></el-form-item>
@@ -44,7 +41,7 @@ export default {
       loading: false,
       saving: false,
       form: {
-        companyName: "", companyIntroText: "", orderQrContent: "", serviceContactText: "",
+        companyName: "", companyIntroText: "", serviceContactText: "",
         faqText: "[]", productsText: "[]", seatsText: "[]", stageShowText: "{}"
       }
     };
@@ -63,7 +60,6 @@ export default {
         this.form = {
           companyName: value.companyName || "",
           companyIntroText: value.companyIntroText || "",
-          orderQrContent: value.orderQrContent || "",
           serviceContactText: value.serviceContactText || "",
           faqText: pretty(value.faqJson, []),
           productsText: pretty(value.productsJson, []),
@@ -94,7 +90,6 @@ export default {
       Api.person.saveReceptionWorkspaceConfig({
         companyName: this.form.companyName,
         companyIntroText: this.form.companyIntroText,
-        orderQrContent: this.form.orderQrContent,
         serviceContactText: this.form.serviceContactText,
         faq, products, seats, stageShow, status: 1
       }, ({ data }) => {

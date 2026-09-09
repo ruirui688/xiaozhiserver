@@ -56,6 +56,7 @@ import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 @RestController
 @RequestMapping("/agent/chat-history")
 public class AgentChatHistoryController {
+    private static final long DOWNLOAD_TICKET_TTL_SECONDS = 60L;
     private final AgentChatHistoryBizService agentChatHistoryBizService;
     private final AgentChatHistoryService agentChatHistoryService;
     private final AgentChatAudioService agentChatAudioService;
@@ -94,7 +95,9 @@ public class AgentChatHistoryController {
         // 生成UUID
         String uuid = UUID.randomUUID().toString();
         // 存储agentId和sessionId到Redis，格式为agentId:sessionId
-        redisUtils.set(RedisKeys.getChatHistoryKey(uuid), agentId + ":" + sessionId);
+        UserDetail user = SecurityUser.getUser();
+        redisUtils.set(RedisKeys.getChatHistoryKey(uuid),
+                user.getId() + ":" + agentId + ":" + sessionId, DOWNLOAD_TICKET_TTL_SECONDS);
 
         return new Result<String>().ok(uuid);
     }
@@ -155,6 +158,7 @@ public class AgentChatHistoryController {
      * @param response HTTP响应
      */
     @Operation(summary = "下载本会话聊天记录")
+    @RequiresPermissions("sys:role:normal")
     @GetMapping("/download/{uuid}/current")
     public void downloadCurrentSession(@PathVariable("uuid") String uuid,
             HttpServletResponse response) {
@@ -166,12 +170,13 @@ public class AgentChatHistoryController {
 
         try {
             // 解析agentId和sessionId
-            String[] parts = agentSessionInfo.split(":");
-            if (parts.length != 2) {
+            String[] parts = agentSessionInfo.split(":", 3);
+            if (parts.length != 3 || !isTicketOwner(parts[0])) {
                 throw new RenException(ErrorCode.DOWNLOAD_LINK_INVALID);
             }
-            String agentId = parts[0];
-            String sessionId = parts[1];
+            String agentId = parts[1];
+            String sessionId = parts[2];
+            checkAgentPermission(agentId);
 
             // 执行下载
             downloadChatHistory(agentId, List.of(sessionId), response);
@@ -188,6 +193,7 @@ public class AgentChatHistoryController {
      * @param response HTTP响应
      */
     @Operation(summary = "下载本会话及前20条会话聊天记录")
+    @RequiresPermissions("sys:role:normal")
     @GetMapping("/download/{uuid}/previous")
     public void downloadCurrentSessionWithPrevious(@PathVariable("uuid") String uuid,
             HttpServletResponse response) {
@@ -199,12 +205,13 @@ public class AgentChatHistoryController {
 
         try {
             // 解析agentId和sessionId
-            String[] parts = agentSessionInfo.split(":");
-            if (parts.length != 2) {
+            String[] parts = agentSessionInfo.split(":", 3);
+            if (parts.length != 3 || !isTicketOwner(parts[0])) {
                 throw new RenException(ErrorCode.DOWNLOAD_LINK_INVALID);
             }
-            String agentId = parts[0];
-            String sessionId = parts[1];
+            String agentId = parts[1];
+            String sessionId = parts[2];
+            checkAgentPermission(agentId);
 
             // 获取所有会话列表
             Map<String, Object> params = Map.of(
@@ -881,5 +888,10 @@ public class AgentChatHistoryController {
             throw new RenException(ErrorCode.AGENT_NOT_FOUND);
         }
         workspacePermissionService.requireWrite(agent.getWorkspaceId());
+    }
+
+    private boolean isTicketOwner(String ownerId) {
+        UserDetail user = SecurityUser.getUser();
+        return user != null && user.getId() != null && String.valueOf(user.getId()).equals(ownerId);
     }
 }

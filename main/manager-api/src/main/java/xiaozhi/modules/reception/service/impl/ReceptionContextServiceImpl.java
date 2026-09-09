@@ -67,7 +67,6 @@ public class ReceptionContextServiceImpl implements ReceptionContextService {
                 .faqJson(config == null ? null : config.getFaqJson())
                 .seatsJson(config == null ? null : config.getSeatsJson())
                 .stageShowJson(config == null ? null : config.getStageShowJson())
-                .orderQrContent(config == null ? null : config.getOrderQrContent())
                 .serviceContactText(config == null ? null : config.getServiceContactText())
                 .configVersion(config == null || config.getConfigVersion() == null ? 0L : config.getConfigVersion())
                 .people(people)

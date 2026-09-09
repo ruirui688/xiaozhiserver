@@ -19,8 +19,6 @@ public class ReceptionWorkspaceConfigSaveDTO {
     @Size(max = 100)
     private List<Map<String, Object>> seats;
     private Map<String, Object> stageShow;
-    @Size(max = 1024)
-    private String orderQrContent;
     @Size(max = 200)
     private String serviceContactText;
     private Integer status;

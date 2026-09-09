@@ -43,10 +43,10 @@ X2 动作与屏幕执行。定位、地图、规划、避障和真实到达结�
 | `ai_reception_customer_profile` | 新客/回访/长期/VIP、公司、爱好、餐饮/座位偏好、敏感需求同意范围、到访统计 |
 | `ai_reception_appointment` | 预约时间窗、人数、座位需求和 `PENDING/CONFIRMED/ARRIVED/...` 状态 |
 | `ai_reception_visit_event` | 设备事件幂等、Group、scene epoch、选中人物、人数和选择理由 |
-| `ai_reception_workspace_config` | 公司介绍、最多 100 FAQ、餐品、语义座位、舞台往返、二维码、服务员说明和配置版本 |
+| `ai_reception_workspace_config` | 公司介绍、最多 100 FAQ、餐品、语义座位、舞台往返、服务员说明和配置版本 |
 
 接待领域独立于 `PersonProfileServiceImpl`。健康、过敏和无障碍等敏感需求只有 `consent_scope` 包含
-`SENSITIVE` 才下发；普通公司、爱好和偏好要求 `RECEPTION`。日志不得打印正文或二维码内容。
+`SENSITIVE` 才下发；普通公司、爱好和偏好要求 `RECEPTION`。日志不得打印正文。
 
 ## 客户阶段与预约
 
@@ -74,7 +74,7 @@ GET/PUT /resource/reception/workspace-config
 ```
 
 管理 Web 的“人物与人脸”页面提供两个入口：“接待与预约”维护个人客户阶段、公司、偏好、同意范围和预约；
-“接待配置”维护公司介绍、FAQ、餐品、语义座位、二维码和舞台往返 JSON。保存前浏览器校验 JSON 类型，
+“接待配置”维护公司介绍、FAQ、餐品、语义座位和舞台往返 JSON。保存前浏览器校验 JSON 类型，
 服务端继续执行长度、数量、Workspace 和权限校验。
 
 实时服务器内部 API：
@@ -123,7 +123,6 @@ POST /config/reception/events
 - `spokenText`：姓名、长期客户小话题、预约确认和最多 60 字公司介绍的确定性组合；
 - `conversationContext.people`：只含已授权客户事实；
 - `faq/products/seats`：设备本地缓存，欢迎提示不直接注入大目录；
-- `orderQrContent`：只供二维码工具调用；
 - `selectedPersonIds` 和配置版本。
 
 设备把去除大目录后的动作放入唯一 `listen.detect`。服务器 1 秒未返回时设备使用本地姓名欢迎；不存在
@@ -143,7 +142,7 @@ POST /config/reception/events
 提问者回复结束后随机选择一位进入下一轮。TTS stop、失败、断线或锁超时后恢复普通交互。急停、Safety、
 进程关闭和运维停止不受该语义门限制。
 
-## FAQ、餐品、座位与二维码
+## FAQ、餐品、座位与本地二维码
 
 设备 MCP 只使用本次 `reception_v1` 缓存：
 
@@ -160,7 +159,7 @@ POST /config/reception/events
 ## 验证边界
 
 已实现并自动验证：数据库服务、Workspace/设备/人物绑定、同意范围、到访阶段、预约到达、WebSocket
-协议、多人 3/1 规则、审计失败去重、明确停止词、多人排队、FAQ/推荐/座位/二维码和舞台互斥编排。
+协议、多人 3/1 规则、审计失败去重、明确停止词、多人排队、FAQ/推荐/座位、本地二维码和舞台互斥编排。
 
 当前验证结果：manager-api 全量 Maven 测试通过；xiaozhi-server 使用项目 Conda 环境并设置
 `PYTHONNOUSERSITE=1` 后 621 passed；manager-web 80 passed。
@@ -168,7 +167,7 @@ POST /config/reception/events
 仍需现场或运营输入：
 
 1. 真实 100 条 FAQ 和 ≥90% 评测；
-2. 真实公司、菜单、库存、座位、二维码和服务员配置；
+2. 真实公司、菜单、库存、座位和服务员配置；
 3. YHRobot 相机距离/方位、两秒 TTS 首响和 24 小时长稳；
 4. 转向、鞠躬、二维码 Face UI 的 L2/L3 验收；
 5. `/yhrobot/navigation/guide_to_seat` 定位规划后端、舞台/座位地图和 10 cm 到达精度。
