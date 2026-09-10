@@ -13,6 +13,7 @@ from core.api.runtime_config_refresh_handler import RuntimeConfigRefreshHandler
 from core.api.session_context_handler import SessionContextHandler
 from core.api.plugin_test_handler import PluginTestHandler
 from core.api.face_profile_release_handler import FaceProfileReleaseHandler
+from core.api.local_asr_hotwords_handler import LocalAsrHotwordsHandler
 
 TAG = __name__
 
@@ -32,6 +33,7 @@ class SimpleHttpServer:
         self.session_context_handler = SessionContextHandler(config)
         self.plugin_test_handler = PluginTestHandler(config)
         self.face_profile_release_handler = FaceProfileReleaseHandler(config)
+        self.local_asr_hotwords_handler = LocalAsrHotwordsHandler(config)
 
     def _get_websocket_url(self, local_ip: str, port: int) -> str:
         """获取websocket地址
@@ -207,6 +209,13 @@ class SimpleHttpServer:
                         web.options(
                             "/benchmark/health", self.benchmark_handler.handle_options
                         ),
+                        web.get("/internal/local-asr/hotwords", self.local_asr_hotwords_handler.handle_get),
+                        web.post("/internal/local-asr/hotwords", self.local_asr_hotwords_handler.handle_save),
+                        web.get("/internal/local-asr/hotwords/events", self.local_asr_hotwords_handler.handle_events),
+                        web.get("/internal/local-asr/hotwords/version", self.local_asr_hotwords_handler.handle_version),
+                        web.options("/internal/local-asr/hotwords", self.local_asr_hotwords_handler.handle_options),
+                        web.options("/internal/local-asr/hotwords/events", self.local_asr_hotwords_handler.handle_options),
+                        web.options("/internal/local-asr/hotwords/version", self.local_asr_hotwords_handler.handle_options),
                     ]
                 )
 
