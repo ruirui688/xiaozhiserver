@@ -176,7 +176,6 @@ XIAOZHI_MANAGER_API_PIDS_LIMIT=$MANAGER_API_PIDS_LIMIT
 XIAOZHI_MANAGER_API_JAVA_TOOL_OPTIONS=$MANAGER_API_JAVA_TOOL_OPTIONS
 XIAOZHI_LIQUIBASE_SOCKET_TIMEOUT_MS=$LIQUIBASE_SOCKET_TIMEOUT_MS
 XIAOZHI_MANAGER_API_STARTUP_TIMEOUT_SECONDS=$MANAGER_API_STARTUP_TIMEOUT_SECONDS
-XIAOZHI_MAINTENANCE_AGENT_SECRET=$MAINTENANCE_AGENT_SECRET
 XIAOZHI_MANAGER_WEB_CPUS=$MANAGER_WEB_CPUS
 XIAOZHI_MANAGER_WEB_MEM_LIMIT=$MANAGER_WEB_MEM_LIMIT
 XIAOZHI_MANAGER_WEB_MEMSWAP_LIMIT=$MANAGER_WEB_MEMSWAP_LIMIT
@@ -204,7 +203,6 @@ pull_images() {
   docker_cmd pull --quiet "$SERVER_IMAGE" >/dev/null
   docker_cmd pull --quiet "$MANAGER_API_IMAGE" >/dev/null
   docker_cmd pull --quiet "$MANAGER_WEB_IMAGE" >/dev/null
-  docker_cmd pull --quiet "$MAINTENANCE_AGENT_IMAGE" >/dev/null
   docker_cmd pull --quiet "$MYSQL_IMAGE" >/dev/null
   docker_cmd pull --quiet "$REDIS_IMAGE" >/dev/null
 }
@@ -401,9 +399,6 @@ LIQUIBASE_SOCKET_TIMEOUT_MS="${XIAOZHI_LIQUIBASE_SOCKET_TIMEOUT_MS:-$(read_exist
 LIQUIBASE_SOCKET_TIMEOUT_MS="${LIQUIBASE_SOCKET_TIMEOUT_MS:-0}"
 MANAGER_API_STARTUP_TIMEOUT_SECONDS="${XIAOZHI_MANAGER_API_STARTUP_TIMEOUT_SECONDS:-$(read_existing_env XIAOZHI_MANAGER_API_STARTUP_TIMEOUT_SECONDS)}"
 MANAGER_API_STARTUP_TIMEOUT_SECONDS="${MANAGER_API_STARTUP_TIMEOUT_SECONDS:-900}"
-MAINTENANCE_AGENT_SECRET="${XIAOZHI_MAINTENANCE_AGENT_SECRET:-$(read_existing_env XIAOZHI_MAINTENANCE_AGENT_SECRET)}"
-if [[ -z "$MAINTENANCE_AGENT_SECRET" ]]; then
-  MAINTENANCE_AGENT_SECRET="$(generate_mysql_password)"
 fi
 MANAGER_WEB_CPUS="${XIAOZHI_MANAGER_WEB_CPUS:-$(read_existing_env XIAOZHI_MANAGER_WEB_CPUS)}"
 MANAGER_WEB_CPUS="${MANAGER_WEB_CPUS:-0.20}"
@@ -461,7 +456,6 @@ if [[ "$MANAGER_API_STARTUP_TIMEOUT_SECONDS" -eq 0 ]]; then
   echo "XIAOZHI_MANAGER_API_STARTUP_TIMEOUT_SECONDS must be a positive integer." >&2
   exit 1
 fi
-if [[ -z "$MAINTENANCE_AGENT_SECRET" ]]; then
   echo "Harness maintenance requires an internal service secret." >&2
   exit 1
 fi
@@ -510,7 +504,6 @@ printf "  %-10s %s\n" "current:" "$CURRENT_DEPLOY_VERSION"
 printf "  %-10s %s contract=v%s source=%s\n" "assets:" "$(short_image_name "$RELEASE_ASSETS_IMAGE")" "$RELEASE_CONTRACT_VERSION" "${RELEASE_SOURCE_COMMIT:0:8}"
 printf "  %-10s %s\n" "server:" "$(short_image_name "$SERVER_IMAGE")"
 printf "  %-10s %s, %s\n" "manager:" "$(short_image_name "$MANAGER_API_IMAGE")" "$(short_image_name "$MANAGER_WEB_IMAGE")"
-printf "  %-10s %s\n" "harness:" "$(short_image_name "$MAINTENANCE_AGENT_IMAGE")"
 printf "  %-10s %s, %s\n" "runtime:" "$(short_image_name "$MYSQL_IMAGE")" "$(short_image_name "$REDIS_IMAGE")"
 printf "  %-10s server=%s/%s api=%s/%s web=%s/%s mysql=%s/%s redis=%s/%s\n" \
   "limits:" \
