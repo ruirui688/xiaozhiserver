@@ -31,6 +31,7 @@ from concurrent.futures import TimeoutError
 from core.utils.dialogue import Message, Dialogue
 from core.providers.asr.dto.dto import InterfaceType
 from core.handle.textHandle import handleTextMessage
+from core.handle.audioFileHandler import handle_audio_file_message
 from core.providers.tools.unified_tool_handler import UnifiedToolHandler
 from core.providers.tools.follow_up_policy import (
     inject_trusted_follow_up_system_prompt,
@@ -302,6 +303,7 @@ class ConnectionHandler:
         self.last_activity_time = 0.0  # 统一的活动时间戳（毫秒）
         self.vad_last_voice_time = 0.0  # 记录用户最后一次说话的时间（毫秒）
         self.client_voice_stop = False
+        self.audio_file_upload = None
         self.last_is_voice = False
 
         # asr相关变量
@@ -604,8 +606,13 @@ class ConnectionHandler:
         # 不需要绑定，继续处理消息
 
         if isinstance(message, str):
+            if self._message_type(message) == "audio_file":
+                await handle_audio_file_message(self, message)
+                return
             await handleTextMessage(self, message)
         elif isinstance(message, bytes):
+            if await handle_audio_file_message(self, message):
+                return
             # 麦克风上行只依赖输入音频链路，不被 LLM/TTS 能力绑架。
             if not self.audio_input_ready.is_set():
                 return
