@@ -71,7 +71,6 @@ services:
         condition: service_healthy
       xiaozhi-esp32-server-redis:
         condition: service_healthy
-      xiaozhi-maintenance-agent:
         condition: service_healthy
     expose:
       - 8003
@@ -95,10 +94,6 @@ services:
       - PERSON_FACE_STORAGE_ROOT=/uploadfile/person-faces
       - XIAOZHI_KNOWLEDGE_DOCUMENT_ROOT=/uploadfile/knowledge-documents
       - XIAOZHI_KNOWLEDGE_INDEX_ROOT=/uploadfile/knowledge-index
-      - MAINTENANCE_HARNESS_ENABLED=true
-      - MAINTENANCE_HARNESS_BASE_URL=http://xiaozhi-maintenance-agent:8010
-      - MAINTENANCE_HARNESS_SECRET=${XIAOZHI_MAINTENANCE_AGENT_SECRET:-}
-      - MAINTENANCE_HARNESS_MANAGER_BASE_URL=http://xiaozhi-esp32-manager-api:8002/xiaozhi
     logging: *default-logging
     cap_drop:
       - ALL
@@ -107,43 +102,6 @@ services:
     volumes:
       - ./uploadfile:/uploadfile
       - ./music:/music
-
-  xiaozhi-maintenance-agent:
-    image: ${XIAOZHI_MAINTENANCE_AGENT_IMAGE_REPOSITORY:-crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/xiaozhi-maintenance-agent}:latest
-    container_name: xiaozhi-maintenance-agent
-    cpus: ${XIAOZHI_MAINTENANCE_AGENT_CPUS:-0.50}
-    mem_limit: ${XIAOZHI_MAINTENANCE_AGENT_MEM_LIMIT:-768m}
-    memswap_limit: ${XIAOZHI_MAINTENANCE_AGENT_MEM_LIMIT:-768m}
-    pids_limit: ${XIAOZHI_MAINTENANCE_AGENT_PIDS_LIMIT:-128}
-    restart: always
-    networks:
-      - default
-    expose:
-      - 8010
-      - 8011
-    ports:
-      - "127.0.0.1:${XIAOZHI_MAINTENANCE_CONSOLE_PORT:-8011}:8011"
-    environment:
-      - TZ=Asia/Shanghai
-      - MAINTENANCE_AGENT_SECRET=${XIAOZHI_MAINTENANCE_AGENT_SECRET:-}
-      - MAINTENANCE_MAX_CONCURRENCY=1
-      - MAINTENANCE_MAX_OUTPUT_TOKENS=${XIAOZHI_MAINTENANCE_MAX_OUTPUT_TOKENS:-8192}
-      - MAINTENANCE_CONSOLE_MAX_SESSIONS=${XIAOZHI_MAINTENANCE_CONSOLE_MAX_SESSIONS:-1}
-      - MAINTENANCE_CONSOLE_TTL_SECONDS=${XIAOZHI_MAINTENANCE_CONSOLE_TTL_SECONDS:-7200}
-      - MAINTENANCE_CONSOLE_STATE_ROOT=/var/lib/xiaozhi-maintenance-console
-      - MAINTENANCE_CONSOLE_FRAME_ANCESTORS=${XIAOZHI_MAINTENANCE_FRAME_ANCESTORS:-https://yh.wejoy.link}
-      - MAINTENANCE_CONSOLE_PUBLIC_ORIGIN=${XIAOZHI_PUBLIC_BASE_URL:-https://yh.wejoy.link}
-      - MAINTENANCE_MANAGER_HOST=xiaozhi-esp32-manager-api
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=256m
-    volumes:
-      - maintenance-console-data:/var/lib/xiaozhi-maintenance-console
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    logging: *default-logging
 
   xiaozhi-esp32-server-db:
     image: ${XIAOZHI_MYSQL_IMAGE:-crpi-jxcli7cptlgilqfx.cn-hangzhou.personal.cr.aliyuncs.com/yihuixiaozhi/mysql:8.4}
