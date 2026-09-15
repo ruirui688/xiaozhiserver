@@ -96,7 +96,6 @@ for required_file in install upgrade docker-compose.yml config_from_api.yaml rel
     echo "Release assets are incomplete: missing $required_file" >&2
     exit 1
   fi
-done
 
 RESOLVED_VERSION="$(manifest_value "$RELEASE_DIR/release-manifest.env" XIAOZHI_RELEASE_VERSION)"
 RELEASE_SOURCE_COMMIT="$(manifest_value "$RELEASE_DIR/release-manifest.env" XIAOZHI_RELEASE_SOURCE_COMMIT)"
@@ -137,11 +136,6 @@ MANAGER_WEB_IMAGE_REPOSITORY="$(manifest_value "$RELEASE_DIR/release-manifest.en
 MYSQL_IMAGE="$(manifest_value "$RELEASE_DIR/release-manifest.env" XIAOZHI_RELEASE_MYSQL_IMAGE)"
 REDIS_IMAGE="$(manifest_value "$RELEASE_DIR/release-manifest.env" XIAOZHI_RELEASE_REDIS_IMAGE)"
 
-  if [[ -z "$value" || "$value" == *[[:space:]]* ]]; then
-    echo "Release manifest contains an invalid image reference." >&2
-    exit 1
-  fi
-done
 
 printf "  %-10s %s\n" "resolved:" "$RESOLVED_VERSION"
 printf "  %-10s %s\n" "pinned:" "$RESOLVED_ASSETS_IMAGE"
