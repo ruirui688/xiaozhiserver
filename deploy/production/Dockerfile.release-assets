@@ -34,3 +34,4 @@ RUN printf '%s\n' \
 USER 65532:65532
 HEALTHCHECK CMD test -f /release/release-manifest.env || exit 1
 CMD ["sh", "-c", "test -f /release/release-manifest.env"]
+# maintenance agent removed from release assets
