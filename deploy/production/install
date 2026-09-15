@@ -590,3 +590,4 @@ if [[ -n "$PUBLIC_DOMAIN" ]]; then
   echo "public wss:  wss://$PUBLIC_DOMAIN/xiaozhi/v1/"
 fi
 echo "upgrade:     VERSION=<version> $UPGRADE_LAUNCHER_DISPLAY"
+# maintenance agent removed
