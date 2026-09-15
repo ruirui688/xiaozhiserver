@@ -455,9 +455,6 @@ if [[ "$MANAGER_API_STARTUP_TIMEOUT_SECONDS" -eq 0 ]]; then
   echo "XIAOZHI_MANAGER_API_STARTUP_TIMEOUT_SECONDS must be a positive integer." >&2
   exit 1
 fi
-  echo "Harness maintenance requires an internal service secret." >&2
-  exit 1
-fi
 case "$SERVER_HTTP_BASE_URL" in
   http://127.0.0.1:*|https://127.0.0.1:*|http://localhost:*|https://localhost:*)
     echo "Replacing loopback XIAOZHI_SERVER_HTTP_BASE_URL with Docker service URL: $DEFAULT_SERVER_HTTP_BASE_URL" >&2
