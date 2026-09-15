@@ -71,7 +71,6 @@ services:
         condition: service_healthy
       xiaozhi-esp32-server-redis:
         condition: service_healthy
-        condition: service_healthy
     expose:
       - 8003
     environment:
