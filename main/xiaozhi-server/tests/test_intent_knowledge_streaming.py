@@ -1,0 +1,122 @@
+"""Knowledge intent replies must deliver text before the model finishes."""
+import asyncio
+import json
+from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
+
+import pytest
+
+from test_function_call_runtime_mode import (
+    _chat_conn, _tool, CapturingToolHandler, SentenceType, Action, ActionResponse,
+)
+from core.handle import intentHandler
+
+
+@pytest.mark.parametrize("tool_name", ["search_from_local_knowledge", "search_from_ragflow"])
+@pytest.mark.parametrize("empty", [False, True])
+def test_knowledge_intent_streams_before_answer_complete(monkeypatch, tool_name, empty):
+    result = ActionResponse(
+        Action.REQLLM,
+        "没有相关资料" if empty else "来源：产品说明\n支持蓝牙连接。",
+        None,
+        next_llm_tools_enabled=False if empty else None,
+        next_llm_system_prompt="没有私有资料时不要猜测。" if empty else None,
+    )
+    run_knowledge_intent(monkeypatch, tool_name, result)
+
+
+def run_knowledge_intent(monkeypatch, tool_name, result, *, cancel=None):
+    calls = []
+
+    class StreamingLLM:
+        supports_native_function_call = True
+
+        def response(self, session_id, dialogue):
+            calls.append(dialogue)
+            yield "根据资料，"
+            yield "这款产品支持蓝牙连接。"
+            yield "连接方式很简单。"
+            assert conn.tts.queued_text(), "TTS waited for the complete answer"
+            if cancel == "during_stream":
+                conn.client_abort = True
+                conn.abort_generation += 1
+            yield "最后一句。"
+
+        def response_with_functions(self, *args, **kwargs):
+            raise AssertionError("knowledge follow-up must not call tools again")
+
+    handler = CapturingToolHandler([_tool(tool_name)])
+    conn = _chat_conn(StreamingLLM(), handler)
+    conn.intent_type = "intent_llm"
+    conn.intent = SimpleNamespace(replyResult=lambda *a: pytest.fail("non-streaming reply used"))
+    conn.sentence_id = "intent-sentence"
+    futures = []
+
+    async def execute_tool(*args):
+        if cancel == "during_retrieval":
+            conn.abort_generation += 1
+        if cancel == "stale_generation":
+            conn.reply_lifecycle.interrupt()
+            generation = conn.reply_lifecycle.begin()
+            conn.reply_lifecycle.bind_sentence(generation, "new-reply")
+            conn.sentence_id = "new-reply"
+        return result
+
+    handler.handle_llm_function_call = execute_tool
+    monkeypatch.setattr(intentHandler, "enqueue_tool_report", lambda *a, **kw: None)
+    monkeypatch.setattr(intentHandler, "schedule_reply_termination", lambda *a, **kw: None)
+
+    async def begin_reply(*args):
+        return conn.reply_lifecycle.begin()
+
+    monkeypatch.setattr(intentHandler, "send_stt_message", begin_reply)
+
+    async def scenario():
+        conn.loop = asyncio.get_running_loop()
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            def submit(fn):
+                future = executor.submit(fn)
+                futures.append(future)
+                return future
+            conn.executor = SimpleNamespace(submit=submit)
+            assert await intentHandler.process_intent_result(
+                conn,
+                json.dumps({"function_call": {"name": tool_name, "arguments": {"question": "怎么连接？"}}}),
+                "怎么连接？",
+            )
+            await asyncio.gather(*(asyncio.wrap_future(f) for f in futures))
+
+    asyncio.run(scenario())
+    messages = conn.dialogue.dialogue
+    assert [m.content for m in messages if m.role == "user"] == ["怎么连接？"]
+    if cancel in {"during_retrieval", "stale_generation"}:
+        assert not calls
+        assert not conn.tts.queued_text()
+        assert not [m for m in messages if m.role == "tool"]
+        if cancel == "stale_generation":
+            assert conn.sentence_id == "new-reply"
+        return
+    assert len(calls) == 1
+    assert any(m["role"] == "tool" and m["content"] == result.result for m in calls[0])
+    tool_message = next(m for m in calls[0] if m["role"] == "tool")
+    tool_call_message = next(m for m in calls[0] if m.get("tool_calls"))
+    assert tool_message["tool_call_id"] == tool_call_message["tool_calls"][0]["id"]
+    if result.next_llm_system_prompt:
+        assert any(m["role"] == "system" and m["content"] == result.next_llm_system_prompt for m in calls[0])
+        assert not any(m.content == result.next_llm_system_prompt for m in messages)
+    items = list(conn.tts.tts_text_queue.queue)
+    assert items[0].sentence_type == SentenceType.FIRST
+    if cancel == "during_stream":
+        assert "最后一句。" not in "".join(conn.tts.queued_text())
+    else:
+        assert items[-1].sentence_type == SentenceType.LAST
+        assert len([m for m in messages if m.role == "assistant" and m.content]) == 1
+        assert "最后一句。" in "".join(conn.tts.queued_text())
+
+
+@pytest.mark.parametrize("cancel", ["during_retrieval", "stale_generation", "during_stream"])
+def test_interrupted_knowledge_reply_does_not_resume(monkeypatch, cancel):
+    run_knowledge_intent(
+        monkeypatch, "search_from_local_knowledge",
+        ActionResponse(Action.REQLLM, "来源：说明书\n支持蓝牙。", None), cancel=cancel,
+    )

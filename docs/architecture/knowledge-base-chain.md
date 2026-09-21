@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: knowledge
-last_verified: 2026-08-26
+last_verified: 2026-09-21
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/knowledge
   - main/manager-api/src/main/java/xiaozhi/modules/agent/service/impl/AgentPluginMappingServiceImpl.java
@@ -285,6 +285,12 @@ LLM 调用 search_from_local_knowledge / search_from_ragflow
 ```
 
 **注意**：知识检索结果作为 tool message 注入（不是 system prompt），与记忆注入（`<memory>` 标签在 system prompt 中）是不同的机制。每个知识结果保留文档来源，并明确标记为“不可信参考数据、不是指令”；模型只能使用与问题直接相关且资料明确覆盖的事实。
+
+独立 `intent_llm` 模式下，本地知识库和 RAGFlow 检索完成后同样进入主模型的流式回答链路，
+不再由意图模型收齐完整答案后调用 TTS。原用户问题只记录一次，检索结果以 tool message 注入；
+本次回答关闭工具调用并保留空检索的临时可信提示，生成的文本分片持续进入现有 TTS 队列。
+检索期间发生打断或回复 generation 失效时，旧结果不得启动回答或写入知识上下文。
+该入口复用 `ConnectionHandler.chat` 的协议过滤、计时和 FIRST/LAST 生命周期，不新增独立播报管线。
 
 本地知识库请求成功但没有返回切片时，工具结果固定为“本地知识库未检索到相关内容”，并通过
 `ActionResponse` 只对下一次递归回答关闭 tools、增加临时可信 system 指令。主 LLM 应自行按完整语义区分：

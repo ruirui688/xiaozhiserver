@@ -1628,6 +1628,8 @@ class ConnectionHandler:
         turn_id=None,
         reply_generation=None,
         trusted_follow_up_system_prompt=None,
+        tool_result=None,
+        tool_call=None,
     ):
         if depth == 0:
             turn_id = self.turn_metrics.ensure_text_turn(turn_id)
@@ -1652,7 +1654,6 @@ class ConnectionHandler:
         # 为最顶层时新建会话ID和发送FIRST请求
         if depth == 0:
             current_sentence_id = str(uuid.uuid4().hex)
-            self.sentence_id = current_sentence_id  # 更新共享属性
             if reply_generation is not None and not self.reply_lifecycle.bind_sentence(
                 reply_generation, current_sentence_id
             ):
@@ -1661,6 +1662,7 @@ class ConnectionHandler:
                     f"generation={reply_generation}"
                 )
                 return None
+            self.sentence_id = current_sentence_id  # 更新共享属性
             if current_reply_generation is None:
                 snapshot = self.reply_lifecycle.snapshot()
                 if snapshot.is_active and snapshot.sentence_id in {
@@ -1674,13 +1676,20 @@ class ConnectionHandler:
             self.turn_metrics.bind_sentence(current_sentence_id, turn_id)
             mark_latency(self, "reply.bound", turn_id=turn_id,
                          sentence_id=current_sentence_id, generation=current_reply_generation)
-            self.dialogue.put(
-                Message(role="user", content=query, turn_context=turn_context)
-            )
-            freeform_game_prompt = self.game_session_manager.build_freeform_game_prompt(
-                query,
-                self._get_enabled_plugin_configs(),
-            )
+            if tool_result is not None:
+                # Intent tools already recorded the user turn before retrieval.
+                self.dialogue.put(Message(role="assistant", tool_calls=[tool_call]))
+                self.dialogue.put(Message(
+                    role="tool", content=tool_result, tool_call_id=tool_call["id"]
+                ))
+            else:
+                self.dialogue.put(
+                    Message(role="user", content=query, turn_context=turn_context)
+                )
+                freeform_game_prompt = self.game_session_manager.build_freeform_game_prompt(
+                    query,
+                    self._get_enabled_plugin_configs(),
+                )
             if freeform_game_prompt:
                 self.logger.bind(tag=TAG).info("已注入纯语言游戏提示词")
             if not meeting_tool_turn:
