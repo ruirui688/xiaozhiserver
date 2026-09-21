@@ -7,6 +7,7 @@ import json
 import threading
 import time
 from collections import deque
+from core.observability.session_telemetry import mark_latency
 
 
 class RuntimeReadiness:
@@ -50,8 +51,10 @@ class RuntimeReadiness:
                 "dedupe_key": dedupe_key,
                 "message": copy.deepcopy(message),
                 "expires_at": time.monotonic() + ttl,
+                "queued_at": time.monotonic(),
             }
         )
+        mark_latency(conn, "detect.queued")
         conn.logger.bind(tag=__name__).info(
             "listen.detect已延迟到对话能力就绪: "
             f"queued={len(self.deferred_listen_detects)}, ttl_seconds={ttl:g}"
@@ -77,7 +80,9 @@ class RuntimeReadiness:
             if conn.closing or conn.closed or conn.initialization_failed:
                 break
             if item["expires_at"] <= now:
+                mark_latency(conn, "detect.expired", elapsed_ms=round((time.monotonic() - item["queued_at"]) * 1000, 3))
                 continue
+            mark_latency(conn, "detect.released", elapsed_ms=round((time.monotonic() - item["queued_at"]) * 1000, 3))
             await handleTextMessage(
                 conn, json.dumps(item["message"], ensure_ascii=False)
             )
@@ -92,6 +97,7 @@ class RuntimeReadiness:
         count = len(self.deferred_listen_detects)
         self.deferred_listen_detects.clear()
         if count:
+            mark_latency(self.connection, "detect.cleared")
             self.connection.logger.bind(tag=__name__).warning(
                 f"已清空延迟listen.detect: count={count}, reason={reason}"
             )
@@ -99,6 +105,7 @@ class RuntimeReadiness:
     def mark_initialization_failed(self, error):
         conn = self.connection
         conn.initialization_failed = True
+        mark_latency(conn, "init.failed")
         conn.initialization_error = str(error)
         self.tts_ready.clear()
         self.conversation_ready.clear()

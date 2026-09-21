@@ -4,6 +4,7 @@
 """
 
 import os
+from core.observability.session_telemetry import latency_span, mark_latency
 from typing import Dict, Any, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -149,6 +150,7 @@ class PromptManager:
         try:
             # 先从缓存获取
             cached_location = self.cache_manager.get(self.CacheType.LOCATION, client_ip)
+            mark_latency(self, "prompt.location.cache", cache_hit=cached_location is not None)
             if cached_location is not None:
                 return cached_location
 
@@ -171,6 +173,7 @@ class PromptManager:
         try:
             # 先从缓存获取
             cached_weather = self.cache_manager.get(self.CacheType.WEATHER, location)
+            mark_latency(self, "prompt.weather.cache", cache_hit=cached_weather is not None)
             if cached_weather is not None:
                 return cached_weather
 
@@ -194,6 +197,7 @@ class PromptManager:
 
     def update_context_info(self, conn, client_ip: str):
         """同步更新上下文信息"""
+        self.session_telemetry = getattr(conn, "session_telemetry", None)
         try:
             local_address = ""
             if (
@@ -206,7 +210,8 @@ class PromptManager:
                 )
             ):
                 # 获取位置信息（使用全局缓存）
-                local_address = self._get_location_info(client_ip)
+                with latency_span(self, "prompt.location"):
+                    local_address = self._get_location_info(client_ip)
 
             if (
                 self.base_prompt_template
@@ -214,7 +219,8 @@ class PromptManager:
                 and local_address
             ):
                 # 获取天气信息（使用全局缓存）
-                self._get_weather_info(conn, local_address)
+                with latency_span(self, "prompt.weather"):
+                    self._get_weather_info(conn, local_address)
 
             # 获取配置的上下文数据
             if hasattr(conn, "device_id") and conn.device_id:
@@ -222,7 +228,8 @@ class PromptManager:
                     self.base_prompt_template
                     and "dynamic_context" in self.base_prompt_template
                 ):
-                    self.context_data = self.context_provider.fetch_all(conn.device_id)
+                    with latency_span(self, "prompt.dynamic_context", cache_hit=False):
+                        self.context_data = self.context_provider.fetch_all(conn.device_id)
                 else:
                     self.context_data = ""
 

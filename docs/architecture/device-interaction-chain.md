@@ -135,6 +135,69 @@ listen.detect / ASR 最终文本
 
 2026-09-21 只读核验：生产镜像 `64d990c6` 与开发基线一致，五个故障关键文件 SHA-256 相同；数据库的两项参数当时均为 `true`。本次源码修复没有修改生产。发布前记录原参数和镜像版本并按发布规范备份；回滚使用保留的 `VERSION=64d990c6` 版本包，同时恢复原参数，不能仅退镜像却忽略配置变化。旧版本仍含本次双回复缺陷。日志验收查看 `source / kind / reason / generation`，不打印用户正文或凭据；真机验收需同时验证唤醒后立即说指令和主动打断。
 
+#### 唤醒延迟观测（开发态，2026-09-21）
+
+本轮只读重新核验生产镜像为 `270e1ca4`，六个重点文件（connection、runtime_readiness、
+receiveAudioHandle、prompt_manager、config_loader、manage_api_client）与开发基线 SHA-256 一致。
+以下观测改动尚未部署，不能据此宣称线上已经加速；上段 `64d990c6` 是此前修复时的历史核验。
+
+复用 `SessionTelemetry` 输出 `event=session_latency`，以连接创建时的单调时钟为共同原点，
+记录 `offset_ms`；`connection.enter` 是进入连接处理的标记，不是设备开始唤醒的时刻。
+`session_id` 隔离连接，`reply.submit.wake/text` 的 `generation` 与 `reply.bound` 对接，后者
+关联 `turn_id`、`sentence_id`。没有绑定的未知音频句子不归到当前新轮次。首次连接与后续唤醒
+按同一 session 中的事件顺序和 `init.conversation_ready` 区分；多条未配对 detect 同时到达时，
+不能仅按时间强行归因到某轮（旧协议没有共享唤醒 ID）。
+
+| 标记 | 测量边界 |
+|---|---|
+| `detect.received / queued / released / expired / cleared` | 原始入站只记录一次，回放不重记入站；排队耗时独立记录 |
+| `config.models / config.correct_words` 的 start/end | 两个 API 的完整调用，包含客户端重试；两者并行，不能相加 |
+| `init.create_submitted / create_enter / create.*` | 线程池提交、开始、各组件工厂调用；共享组件复用不冒充创建 |
+| `init.components_enter / tts_channels / asr_channels / *_ready` | 实例就绪阶段；ASR 通道调用不等于云握手 |
+| `init.intent_tools / init.memory / init.prompt_enhancement` | 初始化父阶段，包含其内部等待；非独立 Device MCP 握手的精细拆分 |
+| `prompt.location / weather / dynamic_context` | 查询阶段及位置/天气缓存命中；动态上下文当前没有缓存，未执行的查询不记耗时 |
+| `memory.query` | 当前轮记忆检索总耗时；未跳过托管/本地记忆或说话人身份 |
+| `llm.request / llm.first_valid_text` | 调用 provider 到非空、经过工具协议过滤的正文；不把空分片或工具参数当正文，支持 direct_answer 正文 |
+| `tts.first_text_dequeued` | 文本消费者取出首段文本，**不是**提交上游或音频到达 |
+| `tts.first_text_submit / first_upstream_audio` | 火山双流 provider 的首次文本发送调用、首个非空上游音频响应（编码前） |
+| `tts.first_encoded_audio / audio.first_send_completed` | 首个编码帧、WebSocket 音频 send 成功返回（包含 MQTT 网关路径）；失败发送不记录成功 |
+
+所有 span 为包含子阶段的区间，不能把父子区间或并行 API 相加。`completed` 只表示调用返回，
+不表示业务成功（部分现有 API 会自行捕获异常并返回空）；异常退出记 `interrupted` 并原样抛出。
+首音频原始上游观测只覆盖本次火山双流链路，其他 provider 不能拿编码帧时间冒充网络首音频。
+WebSocket send 返回不代表 ESP32 缓冲耗尽或扬声器发声；本轮没有设备声学测量。
+日志不包含正文、提示词、记忆、IP、配置值或密钥；日志后端失败不改变对话结果。
+
+**证据与取舍**：从当前容器启动至只读检查时，过滤后的历史日志只有 1 次 detect 排队、
+1 次记忆检索（251 ms）及 1 次 LLM 首分片（738 ms）。用户提供的同轮秒级时间线显示，
+detect 后到放行约 2 秒，首次发送日志约在下一秒；无法拆出天气、位置、动态上下文各自占比，
+也不能把同秒已完成的 1.228 秒配置拉取全部计入 detect 后等待。
+没有后续唤醒样本、优化后实测样本（n=0）、均值或 P95。故本轮仅补观测，未调整缓存、
+就绪门禁、记忆语义、超时、模型、去重或音频消费行为。中央 connection 仅新增观测调用，
+计时与去重记录放在已有 SessionTelemetry / TurnMetrics，未增加调度状态机。
+
+**后续验证与回滚**：获准部署观测版本后，在相同设备、角色、模型、网络及缓存设置下，
+分别采集多轮新连接唤醒、同连接后续唤醒；只关联明确的轮次，单列失败/过期样本。
+按区间端点找关键路径，确认无关查询确实阻塞后再做单项优化并复测。
+当前只完成离线测试，未调用付费模型或真机测试。无配置/数据库迁移，生产没有变化，无需回滚；
+若日后上线本观测版本，可按发布流程退回 `270e1ca4`，保留已有实时 LLM 唤醒和单次回复修复。
+
+开发改动清单（均位于 `main/xiaozhi-server/`，另有本文）：
+`config/config_loader.py`；`core/connection.py`；`core/observability/session_telemetry.py`；
+`core/session/runtime_readiness.py`；`core/handle/{receiveAudioHandle,sendAudioHandle}.py`；
+`core/utils/{modules_initialize,prompt_manager,turn_metrics}.py`；
+`core/providers/tts/{base,huoshan_double_stream}.py`；`tests/test_wake_latency_observation.py`。
+没有修改 config.yaml、manage_api_client 的请求策略、生产文件或数据库。
+
+2026-09-21 开发验证：在 `xiaozhi-esp32-server` Conda 环境运行
+`python -m compileall -q .` 成功；`pytest -o addopts='--tb=short -q'` 为 **707 passed**，
+4 项既有 websockets 弃用警告。命令均通过 `conda run -n xiaozhi-esp32-server` 执行，
+设置 `PYTHONNOUSERSITE=1 PYTHONPATH=` 隔离用户包和 ROS 路径。
+新增 12 项离线用例覆盖嵌套单调计时、API 并行、失败/超时/取消、关闭与过期、并发连接和旧句子隔离、
+日志脱敏及失败发送不得标记成功、文本提交不得标记音频到达；原有唤醒去重、紧接指令、
+静默配置、记忆、热更新及生命周期回归均随全量套件通过。`git diff --check` 通过。
+初始工作区干净；未提交、未推送、未删除文件或清理构建缓存。
+
 #### 无音区交互注意力 MVP
 
 真实车机接入不保证提供可靠的主驾、副驾或后排音区，因此交互注意力首期不能把音区作为必要输入。MVP 只使用

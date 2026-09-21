@@ -4,6 +4,7 @@ import hashlib
 import json
 import threading
 import time
+from contextlib import contextmanager
 
 
 def _masked_device_id(device_id):
@@ -105,6 +106,34 @@ class SessionTelemetry:
         self._close_reason = None
         self._summary_emitted = False
 
+    def mark_latency(self, stage, *, turn_id=None, sentence_id=None,
+                     elapsed_ms=None, status=None, cache_hit=None,
+                     generation=None, source=None):
+        """Only bounded metadata; offsets share this connection's monotonic origin.
+
+        Spans are inclusive (and may overlap), never additive latency counters.
+        Observability must not change request/close behavior if a sink fails.
+        """
+        try:
+            payload = {
+                "event": "session_latency", "session_id": self.session_id,
+                "stage": stage,
+                "offset_ms": round((self.metrics._monotonic_clock()
+                                    - self.metrics._started_at_monotonic) * 1000, 3),
+            }
+            for key, value in (("turn_id", turn_id), ("sentence_id", sentence_id),
+                               ("elapsed_ms", elapsed_ms), ("status", status),
+                               ("generation", generation), ("source", source),
+                               ("cache_hit", cache_hit)):
+                if value is not None:
+                    payload[key] = value
+            self.logger.bind(tag=self.log_tag).info(
+                json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
+            )
+        except Exception:
+            # Never include exception text: logging failures can contain payloads.
+            pass
+
     def set_device_id(self, device_id):
         with self._lock:
             self._device_id = device_id
@@ -135,3 +164,39 @@ class SessionTelemetry:
             json.dumps(summary, ensure_ascii=True, separators=(",", ":"))
         )
         return True
+
+
+def mark_latency(owner, stage, **metadata):
+    telemetry = getattr(owner, "session_telemetry", None)
+    if telemetry is not None:
+        telemetry.mark_latency(stage, **metadata)
+
+
+def observe_incoming_detect(owner, message):
+    """Observe transport ingress, not the later deferred-message replay."""
+    if not isinstance(message, str):
+        return
+    try:
+        parsed = json.loads(message)
+    except (ValueError, TypeError):
+        return
+    if isinstance(parsed, dict) and parsed.get("type") == "listen" and parsed.get("state") == "detect":
+        mark_latency(owner, "detect.received")
+
+
+@contextmanager
+def latency_span(owner, stage, **metadata):
+    """Time an inclusive call, preserving failures and cancellation unchanged."""
+    telemetry = getattr(owner, "session_telemetry", None)
+    clock = telemetry.metrics._monotonic_clock if telemetry is not None else time.monotonic
+    started = clock()
+    mark_latency(owner, stage + ".start", **metadata)
+    status = "completed"
+    try:
+        yield
+    except BaseException:
+        status = "interrupted"
+        raise
+    finally:
+        mark_latency(owner, stage + ".end", elapsed_ms=round((clock() - started) * 1000, 3),
+                     status=status, **metadata)

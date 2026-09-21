@@ -13,6 +13,7 @@ from config.manage_api_client import (
     DeviceBindException,
 )
 from core.utils.model_config import apply_legacy_runtime_view
+from core.observability.session_telemetry import latency_span
 
 
 def get_project_dir():
@@ -108,11 +109,15 @@ async def get_config_from_api_async(config):
     return apply_legacy_runtime_view(config_data)
 
 
-async def get_private_config_from_api(config, device_id, client_id):
+async def get_private_config_from_api(config, device_id, client_id, *, observer=None):
     """从Java API获取私有配置"""
+    async def measured(stage, request):
+        with latency_span(observer, stage):
+            return await request
+
     results = await asyncio.gather(
-        get_agent_models(device_id, client_id, config["selected_module"]),
-        get_correct_words(device_id),
+        measured("config.models", get_agent_models(device_id, client_id, config["selected_module"])),
+        measured("config.correct_words", get_correct_words(device_id)),
         return_exceptions=True,
     )
     agent_result = results[0]

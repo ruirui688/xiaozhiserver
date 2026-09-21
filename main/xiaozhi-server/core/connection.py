@@ -91,6 +91,7 @@ from core.session.runtime_config import build_managed_runtime_config
 from core.session.runtime_config_reloader import RuntimeConfigReloader
 from core.utils.voiceprint_enrollment import VoiceprintEnrollmentCollector
 from core.utils.turn_metrics import TurnMetrics
+from core.observability.session_telemetry import latency_span, mark_latency, observe_incoming_detect
 from core.meeting import (
     MEETING_PLUGIN_NAME,
     MeetingMinutesRuntime,
@@ -199,7 +200,7 @@ class ConnectionHandler:
         self.session_id = str(uuid.uuid4())
         self.logger = setup_logging()
         self.session_telemetry = SessionTelemetry(self.session_id, self.logger, TAG)
-        self.turn_metrics = TurnMetrics()
+        self.turn_metrics = TurnMetrics(latency_observer=self.session_telemetry.mark_latency)
         self.server = server  # 保存server实例的引用
 
         self.need_bind = False  # 是否需要绑定设备
@@ -362,6 +363,7 @@ class ConnectionHandler:
         self.speech_runtime = SpeechRuntime(self)
 
     async def handle_connection(self, ws: websockets.ServerConnection):
+        mark_latency(self, "connection.enter")
         try:
             # 获取运行中的事件循环（必须在异步上下文中）
             self.loop = asyncio.get_running_loop()
@@ -572,6 +574,7 @@ class ConnectionHandler:
     async def _route_message(self, message):
         """消息路由"""
         self.session_telemetry.metrics.record_message(message)
+        observe_incoming_detect(self, message)
         self.last_activity_time = time.time() * 1000
 
         if (
@@ -789,6 +792,7 @@ class ConnectionHandler:
             )
 
     def _initialize_components(self):
+        mark_latency(self, "init.components_enter")
         try:
             if self.closing:
                 return
@@ -820,11 +824,13 @@ class ConnectionHandler:
                     provider_identity=tts_session_options.provider_identity(self),
                 )
                 # 打开语音合成通道
-                tts_future = asyncio.run_coroutine_threadsafe(
-                    self.tts.open_audio_channels(self), self.loop
-                )
-                tts_future.result()
+                with latency_span(self, "init.tts_channels"):
+                    tts_future = asyncio.run_coroutine_threadsafe(
+                        self.tts.open_audio_channels(self), self.loop
+                    )
+                    tts_future.result()
                 self.tts_ready.set()
+                mark_latency(self, "init.tts_ready")
             if self.need_bind:
                 return
             self.selected_module_str = build_module_string(
@@ -839,7 +845,7 @@ class ConnectionHandler:
                 prompt = self.prompt_manager.get_quick_prompt(user_prompt)
                 self.change_system_prompt(prompt)
                 self.logger.bind(tag=TAG).info(
-                    f"快速初始化组件: prompt成功 {prompt[:50]}..."
+                    f"快速初始化组件: prompt成功 chars={len(prompt)}"
                 )
 
             """设置对话历史截断"""
@@ -886,26 +892,31 @@ class ConnectionHandler:
             if not realtime_conversation and device_asr:
                 self.audio_input_ready.set()
             elif not realtime_conversation and self.asr is not None:
-                asr_future = asyncio.run_coroutine_threadsafe(
-                    self.asr.open_audio_channels(self), self.loop
-                )
-                asr_future.result()
+                with latency_span(self, "init.asr_channels"):
+                    asr_future = asyncio.run_coroutine_threadsafe(
+                        self.asr.open_audio_channels(self), self.loop
+                    )
+                    asr_future.result()
+                mark_latency(self, "init.asr_ready")
                 if self.vad is not None:
                     self.audio_input_ready.set()
             elif not realtime_conversation:
                 self.logger.bind(tag=TAG).warning("ASR未配置，语音识别暂不可用")
 
             """加载记忆"""
-            self._initialize_memory()
+            with latency_span(self, "init.memory"):
+                self._initialize_memory()
             """加载意图识别"""
-            self._initialize_intent()
+            with latency_span(self, "init.intent_tools"):
+                self._initialize_intent()
             """初始化上报线程"""
             if self.closing:
                 return
             self._init_report_threads()
             self._init_voiceprint_enrollment_from_config()
             """更新系统提示词"""
-            self._init_prompt_enhancement()
+            with latency_span(self, "init.prompt_enhancement"):
+                self._init_prompt_enhancement()
             """注入工具调用few-shot示例（仅function_call模式）"""
             self._inject_tool_call_fewshot()
 
@@ -922,6 +933,7 @@ class ConnectionHandler:
             elif self.llm is not None and self.tts_ready.is_set():
                 self.conversation_ready.set()
             if self.conversation_ready.is_set():
+                mark_latency(self, "init.conversation_ready")
                 replay_future = asyncio.run_coroutine_threadsafe(
                     self.flush_deferred_listen_detects(), self.loop
                 )
@@ -1110,6 +1122,7 @@ class ConnectionHandler:
                 self.config,
                 self.headers.get("device-id"),
                 self.headers.get("client-id", self.headers.get("device-id")),
+                observer=self,
             )
             if self.closing:
                 return False
@@ -1171,6 +1184,7 @@ class ConnectionHandler:
 
         # 使用 run_in_executor 在线程池中执行 initialize_modules，避免阻塞主循环
         try:
+            mark_latency(self, "init.create_submitted")
             modules = await self.loop.run_in_executor(
                 None,  # 使用默认线程池
                 initialize_modules,
@@ -1182,6 +1196,7 @@ class ConnectionHandler:
                 init_tts,
                 init_memory,
                 init_intent,
+                self,
             )
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"初始化组件失败: {e}")
@@ -1651,6 +1666,8 @@ class ConnectionHandler:
                         current_reply_generation, current_sentence_id
                     )
             self.turn_metrics.bind_sentence(current_sentence_id, turn_id)
+            mark_latency(self, "reply.bound", turn_id=turn_id,
+                         sentence_id=current_sentence_id, generation=current_reply_generation)
             self.dialogue.put(
                 Message(role="user", content=query, turn_context=turn_context)
             )
@@ -1737,7 +1754,8 @@ class ConnectionHandler:
 
         try:
             # 使用带记忆的对话
-            memory_str = self._query_memory_context(query)
+            with latency_span(self, "memory.query", turn_id=turn_id, sentence_id=current_sentence_id):
+                memory_str = self._query_memory_context(query)
 
             # 当前轮说话人每次都作为 system 事实提供，避免模型把历史中提到的人误判为当前用户。
             # 是否自然称呼用户由基础提示词约束，不能通过隐藏身份事实来实现。
@@ -1763,6 +1781,7 @@ class ConnectionHandler:
             )
 
             llm_started_at = time.monotonic()
+            mark_latency(self, "llm.request", turn_id=turn_id, sentence_id=current_sentence_id)
             self.session_telemetry.metrics.record_llm_started()
             tools_enabled = functions is not None and (
                 self.intent_type == "function_call" or meeting_tool_turn
@@ -1844,6 +1863,7 @@ class ConnectionHandler:
         # 进入 TTS。会议轮必须保持静默裁决，因此只保留会议专用延迟门控。
         defer_plain_content_for_tools = bool(meeting_tool_turn)
         first_llm_chunk_at = None
+        first_valid_text = False
         try:
             for response in llm_responses:
                 if first_llm_chunk_at is None:
@@ -1918,6 +1938,11 @@ class ConnectionHandler:
                                             tool_call["arguments"]
                                         )
                                     )
+                                    if direct_answer_text and direct_answer_text.strip() and not first_valid_text:
+                                        first_valid_text = True
+                                        mark_latency(self, "llm.first_valid_text", turn_id=turn_id,
+                                                     sentence_id=current_sentence_id,
+                                                     elapsed_ms=round((time.monotonic() - llm_started_at) * 1000, 3))
                                     stream = tool_call.get("_da_stream")
                                     if stream is None:
                                         stream = DirectAnswerTTSStream(
@@ -1962,6 +1987,11 @@ class ConnectionHandler:
 
                 if content is not None and len(content) > 0:
                     if not tool_call_flag:
+                        if content.strip() and not first_valid_text:
+                            first_valid_text = True
+                            mark_latency(self, "llm.first_valid_text", turn_id=turn_id,
+                                         sentence_id=current_sentence_id,
+                                         elapsed_ms=round((time.monotonic() - llm_started_at) * 1000, 3))
                         response_message.append(content)
                         if not defer_plain_content_for_tools:
                             self.tts.tts_text_queue.put(
@@ -1979,6 +2009,11 @@ class ConnectionHandler:
                     unhandled_tool_protocol = True
                     content_arguments += tool_protocol_stream_guard.blocked_text
                 elif pending_content:
+                    if pending_content.strip() and not first_valid_text:
+                        first_valid_text = True
+                        mark_latency(self, "llm.first_valid_text", turn_id=turn_id,
+                                     sentence_id=current_sentence_id,
+                                     elapsed_ms=round((time.monotonic() - llm_started_at) * 1000, 3))
                     response_message.append(pending_content)
                     if not defer_plain_content_for_tools:
                         self.tts.tts_text_queue.put(

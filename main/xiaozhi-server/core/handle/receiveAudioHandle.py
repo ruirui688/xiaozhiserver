@@ -113,6 +113,7 @@ async def startToChat(
     Returns False for filtered input or when another session mode consumes it.
     """
     reply_generation = None
+    from core.observability.session_telemetry import mark_latency
     text = str(text or "")
     input_kind = classify_input(getattr(conn, "config", {}), apply_correct_words(conn, text))
     if input_kind == "empty":
@@ -421,6 +422,9 @@ async def startToChat(
 
     if wake_event is not None:
         wake_event.generation = reply_generation
+    mark_latency(conn, "reply.submit." + input_kind, turn_id=turn_id,
+                 generation=reply_generation,
+                 source=input_source if input_source in {"detect", "asr", "device_asr"} else "other")
     conn.logger.bind(tag=TAG).info(
         f"提交回复: source={input_source}, kind={input_kind}, generation={reply_generation}"
     )

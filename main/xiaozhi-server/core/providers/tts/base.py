@@ -471,6 +471,9 @@ class TTSProviderBase(ABC):
         return text
 
     def _notify_tts_message_dequeued(self, message):
+        if (getattr(message, "content_type", None) is ContentType.TEXT
+                and str(getattr(message, "content_detail", "") or "").strip()):
+            self._record_turn_metric("record_latency_milestone", "tts.first_text_dequeued", message.sentence_id)
         if getattr(message, "sentence_type", None) is not SentenceType.FIRST:
             return
         coordinator = getattr(getattr(self, "conn", None), "external_tts_coordinator", None)

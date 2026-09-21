@@ -1,6 +1,7 @@
 from typing import Dict, Any
 from config.logger import setup_logging
 from core.utils import tts, llm, intent, memory, vad, asr
+from core.observability.session_telemetry import latency_span, mark_latency
 from core.utils.model_config import (
     get_runtime_config,
     get_runtime_type,
@@ -27,6 +28,7 @@ def initialize_modules(
     init_tts=False,
     init_memory=False,
     init_intent=False,
+    observer=None,
 ) -> Dict[str, Any]:
     """
     初始化所有模块组件
@@ -37,21 +39,26 @@ def initialize_modules(
     Returns:
         Dict[str, Any]: 包含所有初始化后的模块的字典
     """
+    mark_latency(observer, "init.create_enter")
     modules = {}
+
+    def create(name, factory, *args):
+        with latency_span(observer, "init.create." + name):
+            return factory(*args)
 
     # 初始化TTS模块
     realtime_conversation = is_realtime_model_config(config)
 
     if init_tts and not realtime_conversation and has_selected_module(config, "TTS"):
         select_tts_module = config["selected_module"]["TTS"]
-        modules["tts"] = initialize_tts(config)
+        modules["tts"] = create("tts", initialize_tts, config)
         logger.bind(tag=TAG).info(f"初始化组件: tts成功 {select_tts_module}")
 
     # 初始化LLM模块
     if init_llm and not realtime_conversation and has_selected_module(config, "LLM"):
         select_llm_module = config["selected_module"]["LLM"]
         llm_type = get_runtime_type(config, "LLM", select_llm_module)
-        modules["llm"] = llm.create_instance(
+        modules["llm"] = create("llm", llm.create_instance,
             llm_type,
             get_runtime_config(config, "LLM", select_llm_module),
         )
@@ -61,7 +68,7 @@ def initialize_modules(
     if init_intent and has_selected_module(config, "Intent"):
         select_intent_module = config["selected_module"]["Intent"]
         intent_type = get_runtime_type(config, "Intent", select_intent_module)
-        modules["intent"] = intent.create_instance(
+        modules["intent"] = create("intent", intent.create_instance,
             intent_type,
             get_runtime_config(config, "Intent", select_intent_module),
         )
@@ -71,7 +78,7 @@ def initialize_modules(
     if init_memory and has_selected_module(config, "Memory"):
         select_memory_module = config["selected_module"]["Memory"]
         memory_type = get_runtime_type(config, "Memory", select_memory_module)
-        modules["memory"] = memory.create_instance(
+        modules["memory"] = create("memory", memory.create_instance,
             memory_type,
             get_runtime_config(config, "Memory", select_memory_module),
             config.get("summaryMemory", None),
@@ -82,7 +89,7 @@ def initialize_modules(
     if init_vad and not realtime_conversation and has_selected_module(config, "VAD"):
         select_vad_module = config["selected_module"]["VAD"]
         vad_type = get_runtime_type(config, "VAD", select_vad_module)
-        modules["vad"] = vad.create_instance(
+        modules["vad"] = create("vad", vad.create_instance,
             vad_type,
             get_runtime_config(config, "VAD", select_vad_module),
         )
@@ -91,7 +98,7 @@ def initialize_modules(
     # 初始化ASR模块
     if init_asr and not realtime_conversation and has_selected_module(config, "ASR"):
         select_asr_module = config["selected_module"]["ASR"]
-        modules["asr"] = initialize_asr(config)
+        modules["asr"] = create("asr", initialize_asr, config)
         logger.bind(tag=TAG).info(f"初始化组件: asr成功 {select_asr_module}")
     return modules
 

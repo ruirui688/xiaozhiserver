@@ -1184,6 +1184,8 @@ class TTSProvider(TTSProviderBase):
                         and res.header.message_type == AUDIO_ONLY_RESPONSE
                     ):
                         session_id = response_session_id or active_session_id
+                        if res.payload:
+                            self._record_turn_metric("record_latency_milestone", "tts.first_upstream_audio", session_id)
                         tts_text = self.get_tts_text(session_id)
                         if tts_text:
                             log_text = self._text_for_log(tts_text, session_id)
@@ -1385,6 +1387,8 @@ class TTSProvider(TTSProviderBase):
         payload = self.get_payload_bytes(
             event=EVENT_TaskRequest, text=text, speaker=speaker
         )
+        if text and text.strip():
+            self._record_turn_metric("record_latency_milestone", "tts.first_text_submit", session_id)
         return await self.send_event(self.ws, header, optional, payload)
 
     async def _receive_response(self, ws: websockets.WebSocketClientProtocol, timeout=None) -> Response:

@@ -46,12 +46,29 @@ class TurnMetrics:
     SCHEMA_VERSION = 3
     MAX_PENDING_TURNS = 32
 
-    def __init__(self):
+    def __init__(self, latency_observer=None):
         self._lock = threading.RLock()
         self._vad_segment = None
         self._active_turn = None
         self._turns = {}
         self._sentence_turn_ids = {}
+        self._latency_observer = latency_observer
+
+    def record_latency_milestone(self, stage, sentence_id):
+        """Once per sentence; never fall back to a newer active turn."""
+        if not sentence_id:
+            return
+        with self._lock:
+            turn = self._resolve_turn(sentence_id=sentence_id)
+            if not turn:
+                return
+            seen = turn.setdefault("_runtime", {}).setdefault("latency_milestones", set())
+            key = (stage, sentence_id)
+            if key in seen:
+                return
+            seen.add(key)
+            if self._latency_observer is not None:
+                self._latency_observer(stage, turn_id=turn["turn_id"], sentence_id=sentence_id)
 
     def _register_turn(self, turn):
         turn_id = turn["turn_id"]
@@ -819,6 +836,8 @@ class TurnMetrics:
             self._refresh_trace_totals(turn)
 
     def record_tts_audio_frame(self, audio_bytes, sentence_id=None):
+        if audio_bytes:
+            self.record_latency_milestone("tts.first_encoded_audio", sentence_id)
         with self._lock:
             turn = self._resolve_turn(sentence_id=sentence_id)
             if not turn:

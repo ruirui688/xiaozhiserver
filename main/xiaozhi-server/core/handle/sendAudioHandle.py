@@ -493,6 +493,10 @@ async def _do_send_audio(conn: "ConnectionHandler", opus_packet, flow_control):
         # 直接发送opus数据包
         await conn.websocket.send(opus_packet)
 
+    metrics = getattr(conn, "turn_metrics", None)
+    if metrics is not None and opus_packet:
+        metrics.record_latency_milestone("audio.first_send_completed", flow_control.get("sentence_id"))
+
     # 只复制已经成功发给设备的原始 Opus 帧，且绝不等待预览消费者。
     _publish_preview_audio(conn, opus_packet)
 
