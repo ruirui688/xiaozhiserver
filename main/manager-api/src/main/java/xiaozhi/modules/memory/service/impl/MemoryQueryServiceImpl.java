@@ -11,6 +11,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.AllArgsConstructor;
 import xiaozhi.modules.agent.dao.AgentDao;
 import xiaozhi.modules.agent.entity.AgentEntity;
+import xiaozhi.modules.config.support.ConfigLatency;
 import xiaozhi.modules.device.dao.DeviceDao;
 import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.memory.dao.MemoryFactDao;
@@ -63,7 +64,7 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
                 .and(w -> w.eq("scope_id", scope.scopeId).or().eq("scope_id", scope.agent.getId()))
                 .orderByDesc("updated_at")
                 .last("LIMIT 1");
-        MemoryProfileEntity profile = profileDao.selectOne(profileWrapper);
+        MemoryProfileEntity profile = ConfigLatency.measure("memory.sql.profile", () -> profileDao.selectOne(profileWrapper));
         if (profile != null) {
             vo.setProfile(StringUtils.defaultIfBlank(profile.getProfileSummary(), profile.getProfileJson()));
         }
@@ -71,7 +72,8 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
         List<MemoryFactEntity> candidates = loadActiveFacts(scope.agent.getId(), now, dto.getSpeakerId()).stream()
                 .filter(fact -> MemorySpeakerUtils.isVisibleToSpeaker(fact, dto.getSpeakerId()))
                 .toList();
-        MemoryLexicalRecallPolicy.RecallResult recall = RECALL_POLICY.recall(dto.getQuery(), dto.getLimit(), candidates);
+        MemoryLexicalRecallPolicy.RecallResult recall = ConfigLatency.measure("memory.lexical_recall",
+                () -> RECALL_POLICY.recall(dto.getQuery(), dto.getLimit(), candidates));
         vo.getDebugSignals().add("memory_recall_candidates:" + candidates.size());
         vo.getDebugSignals().add("memory_recall_hits:" + recall.relevantCount());
         vo.getDebugSignals().add("memory_recall_core:" + recall.coreCount());
@@ -84,7 +86,7 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
                 .and(w -> w.eq("scope_id", scope.scopeId).or().eq("scope_id", scope.agent.getId()))
                 .orderByDesc("updated_at")
                 .last("LIMIT 5");
-        vo.setToolBehaviors(toolBehaviorDao.selectList(toolWrapper));
+        vo.setToolBehaviors(ConfigLatency.measure("memory.sql.tool_behavior", () -> toolBehaviorDao.selectList(toolWrapper)));
 
         vo.setContext(buildContext(vo, dto.getSpeakerName()));
         return vo;
@@ -135,7 +137,8 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
             }
         }
         String context = builder.toString().trim();
-        int maxContextChars = memorySettingsService.activeContextMaxChars();
+        // Includes Redis lookup and any existing SQL fallback, not pure Redis latency.
+        int maxContextChars = ConfigLatency.measure("memory.context_settings", memorySettingsService::activeContextMaxChars);
         if (MemoryHelper.characterCount(context) <= maxContextChars) {
             return context;
         }
@@ -152,15 +155,15 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
         AgentEntity agent = null;
         String scopeId = StringUtils.defaultIfBlank(macAddress, agentId);
         if (StringUtils.isNotBlank(macAddress)) {
-            DeviceEntity device = deviceDao.selectOne(
-                    new QueryWrapper<DeviceEntity>().eq("mac_address", macAddress).last("LIMIT 1"));
+            DeviceEntity device = ConfigLatency.measure("memory.sql.device", () -> deviceDao.selectOne(
+                    new QueryWrapper<DeviceEntity>().eq("mac_address", macAddress).last("LIMIT 1")));
             if (device != null && StringUtils.isNotBlank(device.getAgentId())) {
-                agent = agentDao.selectById(device.getAgentId());
+                agent = ConfigLatency.measure("memory.sql.agent", () -> agentDao.selectById(device.getAgentId()));
                 scopeId = macAddress;
             }
         }
         if (agent == null && StringUtils.isNotBlank(agentId)) {
-            agent = agentDao.selectById(agentId);
+            agent = ConfigLatency.measure("memory.sql.agent", () -> agentDao.selectById(agentId));
         }
         return new AgentScope(agent, scopeId);
     }
@@ -180,7 +183,7 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
                 })
                 .orderByDesc("importance", "last_seen_at")
                 .last("LIMIT " + MemoryLexicalRecallPolicy.CANDIDATE_LIMIT);
-        return factDao.selectList(wrapper);
+        return ConfigLatency.measure("memory.sql.facts", () -> factDao.selectList(wrapper));
     }
 
     private List<MemoryForgetTombstoneEntity> loadActiveTombstones(String agentId) {
@@ -189,7 +192,7 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
                 .eq("status", MemoryHelper.STATUS_ACTIVE)
                 .orderByDesc("created_at")
                 .last("LIMIT 50");
-        return tombstoneDao.selectList(tombstoneWrapper);
+        return ConfigLatency.measure("memory.sql.tombstones", () -> tombstoneDao.selectList(tombstoneWrapper));
     }
 
     /**

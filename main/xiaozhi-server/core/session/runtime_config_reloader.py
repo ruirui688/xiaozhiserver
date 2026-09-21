@@ -16,6 +16,7 @@ from core.session.runtime_config import (
     runtime_config_fingerprint,
 )
 from core.session.scene_switch import SceneSwitchIsolation
+from core.session.managed_memory_snapshot import snapshot_for
 from core.utils.modules_initialize import initialize_modules
 from core.utils.prompt_manager import PromptManager
 from core.conversation import ConversationRouter
@@ -37,14 +38,77 @@ class RuntimeConfigReloader:
         self._pending_scene_switch = None
         self._fingerprint = None
         self._last_checked_at = 0.0
+        self._snapshot_refresh_task = None
+        self._snapshot_refresh_at = 0.0
+
+    def schedule_snapshot_refresh(self):
+        """Renew a lease off the reply path, never replace active providers."""
+        loop = getattr(self.conn, "loop", None)
+        if loop is None or loop.is_closed():
+            return
+        try:
+            loop.call_soon_threadsafe(self._start_snapshot_refresh)
+        except RuntimeError:
+            pass
+
+    def _start_snapshot_refresh(self):
+        if (getattr(self.conn, "closing", False) or getattr(self.conn, "closed", False)
+                or not getattr(self.conn, "read_config_from_api", False)
+                or self._snapshot_refresh_task is not None and not self._snapshot_refresh_task.done()
+                or time.monotonic() - self._snapshot_refresh_at < self.MIN_CHECK_INTERVAL_SECONDS):
+            return
+        self._snapshot_refresh_at = time.monotonic()
+        self._snapshot_refresh_task = asyncio.create_task(self._refresh_snapshot_only())
+
+    async def _refresh_snapshot_only(self):
+        async with self._lock:
+            conn = self.conn
+            if getattr(conn, "closing", False) or getattr(conn, "closed", False):
+                return
+            snapshot = snapshot_for(conn)
+            epoch = snapshot.invalidate()
+            config = conn.config
+            headers = getattr(conn, "headers", {}) or {}
+            device = headers.get("device-id") or getattr(conn, "device_id", None)
+            if not device:
+                return
+            try:
+                private = await get_private_config_from_api(
+                    config, device, headers.get("client-id") or device)
+                if snapshot.epoch != epoch or conn.config is not config:
+                    return
+                if not isinstance(private, dict):
+                    return
+                private["delete_audio"] = bool(conn.common_config.get("delete_audio", True))
+                if runtime_config_fingerprint(private) != self._fingerprint:
+                    self.request_refresh("snapshot_config_changed")
+                    return
+                snapshot.install(private.get("managed_memory_snapshot"), epoch)
+            except Exception as error:
+                conn.logger.bind(tag=__name__).warning(
+                    "记忆摘要后台续租失败: errorType={}", type(error).__name__)
+            finally:
+                self._snapshot_refresh_at = time.monotonic()
+
+    def cancel_snapshot_refresh(self):
+        task = self._snapshot_refresh_task
+        loop = getattr(self.conn, "loop", None)
+        if task is not None and not task.done() and loop is not None and not loop.is_closed():
+            loop.call_soon_threadsafe(task.cancel)
 
     def mark_applied(self, private_config):
+        snapshot = snapshot_for(self.conn)
+        # A notification during the initial fetch must not be acknowledged by
+        # the potentially older response arriving after it.
+        snapshot.install(private_config.get("managed_memory_snapshot"), 0)
         self._fingerprint = runtime_config_fingerprint(private_config)
-        self._pending = False
-        self._pending_reason = ""
+        if snapshot.epoch == 0:
+            self._pending = False
+            self._pending_reason = ""
         self._last_checked_at = time.monotonic()
 
     def request_refresh(self, reason="manager_update", scene_switch=None):
+        snapshot_for(self.conn).invalidate()
         self._pending = True
         self._pending_reason = str(reason or "manager_update")[:64]
         normalized = self._normalize_scene_switch(scene_switch)
@@ -84,6 +148,8 @@ class RuntimeConfigReloader:
                 return False
             self._last_checked_at = now
             scene_switch = self._pending_scene_switch
+            snapshot = snapshot_for(conn)
+            snapshot_epoch = snapshot.invalidate()
 
             headers = getattr(conn, "headers", {}) or {}
             device_id = headers.get("device-id") or getattr(conn, "device_id", None)
@@ -97,6 +163,8 @@ class RuntimeConfigReloader:
                 )
                 if not isinstance(private_config, dict):
                     raise RuntimeError("智控台未返回有效运行时配置")
+                if snapshot.epoch != snapshot_epoch or getattr(conn, "closing", False) or getattr(conn, "closed", False):
+                    return False
                 private_config["delete_audio"] = bool(
                     conn.common_config.get("delete_audio", True)
                 )
@@ -106,6 +174,7 @@ class RuntimeConfigReloader:
                 ) != scene_switch["toAgentId"]:
                     raise RuntimeError("场景切换目标已被更新请求替代")
                 if fingerprint == self._fingerprint:
+                    snapshot.install(private_config.get("managed_memory_snapshot"), snapshot_epoch)
                     self._clear_completed_request(scene_switch)
                     if scene_switch is not None:
                         await self._report_scene_status(scene_switch, "APPLIED")
@@ -121,6 +190,9 @@ class RuntimeConfigReloader:
                 await self._replace_pipeline(
                     candidate_config, isolate_scene=scene_changed
                 )
+                if snapshot.epoch != snapshot_epoch:
+                    return False
+                snapshot.install(private_config.get("managed_memory_snapshot"), snapshot_epoch)
                 if getattr(conn, "need_bind", False):
                     conn.need_bind = False
                     conn.bind_code = None

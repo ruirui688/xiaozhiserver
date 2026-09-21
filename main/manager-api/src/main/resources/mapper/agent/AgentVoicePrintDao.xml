@@ -21,6 +21,12 @@
         ORDER BY created_at ASC, id ASC
     </select>
 
+    <select id="selectBoundAgentIdsByVoicePrintId" resultType="java.lang.String">
+        SELECT DISTINCT agent_id
+        FROM ai_agent_voice_print_binding
+        WHERE voice_print_id = #{voicePrintId}
+    </select>
+
     <select id="countBindingsByAgentId" resultType="java.lang.Long">
         SELECT COUNT(*)
         FROM ai_agent_voice_print_binding

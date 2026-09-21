@@ -1,5 +1,7 @@
 package xiaozhi.modules.config.service.impl;
 
+import xiaozhi.modules.memory.service.ManagedMemorySnapshotService;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -47,6 +49,66 @@ import xiaozhi.modules.voiceclone.service.VoiceCloneService;
 class ConfigServiceImplTest {
 
     @Test
+    void agentModelsAttachesRealManagedSnapshotUsingTypedModelAndBoundVoiceprints() {
+        var params = mock(SysParamsService.class);
+        when(params.getValue(Constant.SYSTEM_WEB_MENU, true))
+                .thenReturn("{\"features\":{\"voiceprintRecognition\":{\"enabled\":true}}}");
+        var devices = mock(DeviceService.class);
+        var device = new DeviceEntity();
+        device.setAgentId("agent-snapshot");
+        when(devices.getDeviceByMacAddress("device-snapshot")).thenReturn(device);
+        var agents = mock(AgentService.class);
+        var agent = new AgentInfoVO();
+        agent.setId("agent-snapshot");
+        agent.setIntentModelId("Intent_nointent");
+        agent.setMemModelId("memory-snapshot");
+        when(agents.getAgentById("agent-snapshot")).thenReturn(agent);
+        var models = mock(ModelConfigService.class);
+        var model = new ModelConfigEntity();
+        model.setId("memory-snapshot");
+        model.setModelType("Memory");
+        model.setIsEnabled(1);
+        model.setTestStatus(1);
+        when(models.getModelByIdFromCache("memory-snapshot")).thenReturn(model);
+        var assembler = mock(ModelRuntimeAssembler.class);
+        when(assembler.buildRuntimeModel(model)).thenAnswer(invocation ->
+                new HashMap<>(Map.of("typed_config", Map.of("type", "managed_memory"))));
+        var voices = mock(AgentVoicePrintDao.class);
+        var voice = new xiaozhi.modules.agent.entity.AgentVoicePrintEntity();
+        voice.setId("speaker-bound");
+        voice.setSourceName("trusted speaker");
+        when(voices.selectBoundByAgentId("agent-snapshot")).thenReturn(List.of(voice));
+        var voiceApi = mock(VoiceprintApiClient.class);
+        when(voiceApi.getConfiguredEndpoint()).thenReturn(new VoiceprintApiClient.Endpoint(
+                java.net.URI.create("http://voiceprint.invalid"), "test-placeholder"));
+        var facts = mock(xiaozhi.modules.memory.dao.MemoryFactDao.class);
+        var privateFact = new xiaozhi.modules.memory.entity.MemoryFactEntity();
+        privateFact.setAgentId("agent-snapshot");
+        privateFact.setStatus("active");
+        privateFact.setCanonicalText("trusted private fact");
+        privateFact.setPayload("{\"speaker_id\":\"speaker-bound\"}");
+        when(facts.selectList(any())).thenReturn(List.of(privateFact));
+        var snapshots = new ManagedMemorySnapshotService(facts,
+                mock(xiaozhi.modules.memory.dao.MemoryForgetTombstoneDao.class));
+        var service = new ConfigServiceImpl(params, devices, models, assembler, agents,
+                mock(AgentTemplateService.class), mock(RedisUtils.class), mock(TimbreService.class),
+                mock(AgentPluginMappingService.class), mock(AgentMcpAccessPointService.class),
+                mock(AgentContextProviderService.class), mock(AgentFeishuService.class),
+                mock(VoiceCloneService.class), voices, voiceApi, mock(CorrectWordFileService.class),
+                mock(UserPluginConfigService.class), mock(AgentSemanticSkillService.class), snapshots);
+
+        Map<String, Object> runtime = service.getAgentModels("device-snapshot", Map.of());
+        var snapshot = (Map<?, ?>) runtime.get("managed_memory_snapshot");
+        assertEquals("ready", snapshot.get("status"));
+        assertEquals("agent-snapshot", snapshot.get("agent_id"));
+        assertEquals("device-snapshot", snapshot.get("device_id"));
+        assertEquals("", snapshot.get("shared_context"));
+        assertEquals(Map.of("speaker-bound", "- trusted private fact\n"), snapshot.get("speaker_contexts"));
+        verify(voices).selectBoundByAgentId("agent-snapshot");
+        verify(facts).selectList(any());
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     void devicePrivateConfigIncludesDeviceSpeechRoutingWhileAgentConfigUsesServerDefaults() {
         DeviceService deviceService = mock(DeviceService.class);
@@ -69,7 +131,7 @@ class ConfigServiceImplTest {
                 mock(AgentMcpAccessPointService.class), mock(AgentContextProviderService.class),
                 mock(AgentFeishuService.class), mock(VoiceCloneService.class), mock(AgentVoicePrintDao.class),
                 mock(VoiceprintApiClient.class), mock(CorrectWordFileService.class),
-                mock(UserPluginConfigService.class), mock(AgentSemanticSkillService.class));
+                mock(UserPluginConfigService.class), mock(AgentSemanticSkillService.class), mock(ManagedMemorySnapshotService.class));
 
         Map<String, Object> deviceRuntime = service.getAgentModels("device-mac", Map.of());
         Map<String, String> deviceRouting = (Map<String, String>) deviceRuntime.get("speech_routing");
@@ -120,7 +182,7 @@ class ConfigServiceImplTest {
                 mock(VoiceprintApiClient.class),
                 mock(CorrectWordFileService.class),
                 mock(UserPluginConfigService.class),
-                mock(AgentSemanticSkillService.class));
+                mock(AgentSemanticSkillService.class), mock(ManagedMemorySnapshotService.class));
 
         Map<String, Object> config = (Map<String, Object>) service.getConfig(false);
 
@@ -159,7 +221,7 @@ class ConfigServiceImplTest {
                 mock(AgentMcpAccessPointService.class), mock(AgentContextProviderService.class),
                 mock(AgentFeishuService.class), mock(VoiceCloneService.class), voicePrintDao,
                 mock(VoiceprintApiClient.class), mock(CorrectWordFileService.class),
-                mock(UserPluginConfigService.class), mock(AgentSemanticSkillService.class));
+                mock(UserPluginConfigService.class), mock(AgentSemanticSkillService.class), mock(ManagedMemorySnapshotService.class));
 
         Map<String, Object> runtime = service.getAgentRuntimeConfig("agent-voice-catalog");
         List<Map<String, String>> catalog = (List<Map<String, String>>) runtime.get("tts_voice_catalog");
@@ -264,7 +326,7 @@ class ConfigServiceImplTest {
         when(sysParamsService.getValue(Constant.SERVER_VAD_MIN_SILENCE_DURATION_MS, true)).thenReturn("50");
 
         ConfigServiceImpl service = new ConfigServiceImpl(sysParamsService, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null, null);
         Map<String, Object> runtimeConfig = new HashMap<>();
 
         service.applyManagedVadParams(runtimeConfig);
@@ -283,7 +345,7 @@ class ConfigServiceImplTest {
     void applyManagedVadParamsDoesNotOverwriteExplicitModelValues() throws Exception {
         SysParamsService sysParamsService = Mockito.mock(SysParamsService.class);
         ConfigServiceImpl service = new ConfigServiceImpl(sysParamsService, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null, null);
         Map<String, Object> runtimeConfig = new HashMap<>();
         runtimeConfig.put("threshold", 0.82);
         runtimeConfig.put("threshold_low", 0.18);
@@ -343,7 +405,7 @@ class ConfigServiceImplTest {
                 mock(VoiceprintApiClient.class),
                 mock(CorrectWordFileService.class),
                 userPluginConfigService,
-                semanticSkillService);
+                semanticSkillService, mock(ManagedMemorySnapshotService.class));
 
         Map<String, Object> runtime = service.getAgentRuntimeConfig("agent-a");
         Map<String, Object> plugins = (Map<String, Object>) runtime.get("plugins");
@@ -385,7 +447,7 @@ class ConfigServiceImplTest {
                 mock(VoiceprintApiClient.class),
                 mock(CorrectWordFileService.class),
                 mock(UserPluginConfigService.class),
-                mock(AgentSemanticSkillService.class));
+                mock(AgentSemanticSkillService.class), mock(ManagedMemorySnapshotService.class));
 
         Map<String, Object> runtime = service.getAgentRuntimeConfig("agent-text-history");
 
@@ -435,7 +497,7 @@ class ConfigServiceImplTest {
                 mock(VoiceprintApiClient.class),
                 mock(CorrectWordFileService.class),
                 mock(UserPluginConfigService.class),
-                semanticSkillService);
+                semanticSkillService, mock(ManagedMemorySnapshotService.class));
 
         Map<String, Object> runtime = service.getAgentRuntimeConfig("agent-skill");
         List<Map<String, Object>> skills = (List<Map<String, Object>>) runtime.get("semantic_skills");

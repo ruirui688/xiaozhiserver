@@ -1,5 +1,7 @@
 package xiaozhi.modules.memory.service.impl;
 
+import xiaozhi.modules.memory.service.MemoryRuntimeRefresh;
+
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -83,6 +85,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
     private final MemorySpeakerConversationBuilder conversationBuilder;
     private final TransactionTemplate transactionTemplate;
     private final MemorySettingsService memorySettingsService;
+    private final MemoryRuntimeRefresh memoryRuntimeRefresh;
 
     // ===================== 公开方法 =====================
 
@@ -1145,6 +1148,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         revision.setReason(reason);
         revision.setCreatedAt(new Date());
         revisionDao.insert(revision);
+        memoryRuntimeRefresh.changed(agentId);
     }
 
     private MemoryFactEntity findRelatedFact(String agentId, String relatedMemoryId) {

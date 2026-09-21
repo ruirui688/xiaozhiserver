@@ -1,5 +1,8 @@
 package xiaozhi.modules.config.service.impl;
 
+import xiaozhi.modules.config.support.ConfigLatency;
+import xiaozhi.modules.memory.service.ManagedMemorySnapshotService;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -77,6 +80,7 @@ public class ConfigServiceImpl implements ConfigService {
     private final CorrectWordFileService correctWordFileService;
     private final UserPluginConfigService userPluginConfigService;
     private final AgentSemanticSkillService agentSemanticSkillService;
+    private final ManagedMemorySnapshotService managedMemorySnapshotService;
 
     @Override
     public Object getConfig(Boolean isCache) {
@@ -139,7 +143,7 @@ public class ConfigServiceImpl implements ConfigService {
     public Map<String, Object> getAgentModels(String macAddress, Map<String, String> selectedModule) {
         // 检查是否为管理控制台请求
         String redisKey = RedisKeys.getTmpRegisterMacKey(macAddress);
-        Object isAdminRequest = redisUtils.get(redisKey);
+        Object isAdminRequest = ConfigLatency.measure("config.models.admin_cache", () -> redisUtils.get(redisKey));
 
         if (isAdminRequest != null && "true".equals(isAdminRequest)) {
             // 管理控制台请求，返回getConfig的结果
@@ -147,7 +151,7 @@ public class ConfigServiceImpl implements ConfigService {
             return (Map<String, Object>) getConfig(true);
         }
         // 根据MAC地址查找设备
-        DeviceEntity device = deviceService.getDeviceByMacAddress(macAddress);
+        DeviceEntity device = ConfigLatency.measure("config.models.device_lookup", () -> deviceService.getDeviceByMacAddress(macAddress));
         if (device == null) {
             // 如果设备，去redis里看看有没有需要连接的设备
             String cachedCode = deviceService.geCodeByDeviceId(macAddress);
@@ -158,11 +162,16 @@ public class ConfigServiceImpl implements ConfigService {
         }
 
         // 获取智能体信息
-        AgentEntity agent = agentService.getAgentById(device.getAgentId());
+        AgentEntity agent = ConfigLatency.measure("config.models.agent_lookup", () -> agentService.getAgentById(device.getAgentId()));
         if (agent == null) {
             throw new RenException(ErrorCode.AGENT_NOT_FOUND);
         }
-        return buildAgentRuntimeConfig(agent, device);
+        Map<String, Object> runtime = ConfigLatency.measure("config.models.runtime_config", () -> buildAgentRuntimeConfig(agent, device));
+        ConfigLatency.measure("memory.snapshot", () -> {
+            managedMemorySnapshotService.attach(runtime, agent.getId(), macAddress);
+            return null;
+        });
+        return runtime;
     }
 
     @Override
@@ -179,11 +188,11 @@ public class ConfigServiceImpl implements ConfigService {
 
     @Override
     public List<String> getCorrectWords(String macAddress) {
-        DeviceEntity device = deviceService.getDeviceByMacAddress(macAddress);
+        DeviceEntity device = ConfigLatency.measure("config.correct_words.device_lookup", () -> deviceService.getDeviceByMacAddress(macAddress));
         if (device == null) {
             return Collections.emptyList();
         }
-        List<CorrectWordSimpleVO> items = correctWordFileService.getAllItemsByAgentId(device.getAgentId());
+        List<CorrectWordSimpleVO> items = ConfigLatency.measure("config.correct_words.items", () -> correctWordFileService.getAllItemsByAgentId(device.getAgentId()));
         return items.stream()
                 .map(item -> item.getSourceWord() + "|" + item.getTargetWord())
                 .collect(Collectors.toList());

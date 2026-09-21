@@ -1,5 +1,7 @@
 package xiaozhi.modules.memory.service.impl;
 
+import xiaozhi.modules.memory.service.MemoryRuntimeRefresh;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -89,9 +91,19 @@ class MemoryServiceImplTest {
     private final AgentChatHistoryService agentChatHistoryService = mock(AgentChatHistoryService.class);
     private final TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
     private final MemorySettingsService memorySettingsService = mock(MemorySettingsService.class);
+    private final MemoryRuntimeRefresh memoryRuntimeRefresh = mock(MemoryRuntimeRefresh.class);
 
     private MemoryServiceImpl memoryService;
     private MemoryMaintenanceServiceImpl memoryMaintenanceService;
+
+    @org.junit.jupiter.api.AfterEach
+    void everyPersistedRevisionRequestsRuntimeInvalidation() {
+        long revisions = org.mockito.Mockito.mockingDetails(revisionDao).getInvocations().stream()
+                .filter(invocation -> invocation.getMethod().getName().equals("insert")).count();
+        long notifications = org.mockito.Mockito.mockingDetails(memoryRuntimeRefresh).getInvocations().stream()
+                .filter(invocation -> invocation.getMethod().getName().equals("changed")).count();
+        assertEquals(revisions, notifications, "CRUD, forget, review, rebuild and automatic maintenance must all invalidate");
+    }
 
     @BeforeEach
     void setUp() {
@@ -117,7 +129,8 @@ class MemoryServiceImplTest {
                 new MemoryMaintenanceOutputParser(),
                 new MemorySpeakerConversationBuilder(),
                 transactionTemplate,
-                memorySettingsService);
+                memorySettingsService,
+                memoryRuntimeRefresh);
         memoryService = new MemoryServiceImpl(
                 sourceEventDao,
                 candidateDao,
@@ -130,7 +143,8 @@ class MemoryServiceImplTest {
                 agentDao,
                 memoryQueryService,
                 memoryMaintenanceService,
-                memorySettingsService);
+                memorySettingsService,
+                memoryRuntimeRefresh);
 
         AgentEntity agent = new AgentEntity();
         agent.setId(AGENT_ID);

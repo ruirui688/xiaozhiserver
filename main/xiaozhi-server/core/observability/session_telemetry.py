@@ -5,6 +5,22 @@ import json
 import threading
 import time
 from contextlib import contextmanager
+from contextvars import ContextVar
+
+
+_latency_context = ContextVar("session_latency_context", default=(None, {}))
+
+
+def current_latency_owner():
+    return _latency_context.get()[0]
+
+
+def current_latency_metadata():
+    return dict(_latency_context.get()[1])
+
+
+def contextual_latency_span(stage, **metadata):
+    return latency_span(current_latency_owner(), stage, **metadata)
 
 
 def _masked_device_id(device_id):
@@ -108,7 +124,7 @@ class SessionTelemetry:
 
     def mark_latency(self, stage, *, turn_id=None, sentence_id=None,
                      elapsed_ms=None, status=None, cache_hit=None,
-                     generation=None, source=None):
+                     generation=None, source=None, request_id=None):
         """Only bounded metadata; offsets share this connection's monotonic origin.
 
         Spans are inclusive (and may overlap), never additive latency counters.
@@ -124,7 +140,7 @@ class SessionTelemetry:
             for key, value in (("turn_id", turn_id), ("sentence_id", sentence_id),
                                ("elapsed_ms", elapsed_ms), ("status", status),
                                ("generation", generation), ("source", source),
-                               ("cache_hit", cache_hit)):
+                               ("cache_hit", cache_hit), ("request_id", request_id)):
                 if value is not None:
                     payload[key] = value
             self.logger.bind(tag=self.log_tag).info(
@@ -173,7 +189,10 @@ def mark_latency(owner, stage, **metadata):
 
 
 def observe_incoming_detect(owner, message):
-    """Observe transport ingress, not the later deferred-message replay."""
+    """Observe application dispatch, not socket arrival or deferred replay.
+
+    Earlier handlers and event-loop work may delay this observation.
+    """
     if not isinstance(message, str):
         return
     try:
@@ -187,16 +206,26 @@ def observe_incoming_detect(owner, message):
 @contextmanager
 def latency_span(owner, stage, **metadata):
     """Time an inclusive call, preserving failures and cancellation unchanged."""
+    inherited = current_latency_metadata() if current_latency_owner() is owner else {}
+    inherited.update(metadata)
+    metadata = inherited
     telemetry = getattr(owner, "session_telemetry", None)
     clock = telemetry.metrics._monotonic_clock if telemetry is not None else time.monotonic
     started = clock()
     mark_latency(owner, stage + ".start", **metadata)
     status = "completed"
+    token = _latency_context.set((owner, {
+        key: metadata[key] for key in ("turn_id", "sentence_id", "generation")
+        if key in metadata
+    }))
     try:
         yield
     except BaseException:
         status = "interrupted"
         raise
     finally:
-        mark_latency(owner, stage + ".end", elapsed_ms=round((clock() - started) * 1000, 3),
-                     status=status, **metadata)
+        try:
+            mark_latency(owner, stage + ".end", elapsed_ms=round((clock() - started) * 1000, 3),
+                         status=status, **metadata)
+        finally:
+            _latency_context.reset(token)

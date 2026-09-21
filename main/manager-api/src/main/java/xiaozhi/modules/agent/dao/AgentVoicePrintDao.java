@@ -24,6 +24,8 @@ public interface AgentVoicePrintDao extends BaseMapper<AgentVoicePrintEntity> {
 
     List<String> selectBoundIdsByAgentId(@Param("agentId") String agentId);
 
+    List<String> selectBoundAgentIdsByVoicePrintId(@Param("voicePrintId") String voicePrintId);
+
     Long countBindingsByAgentId(@Param("agentId") String agentId);
 
     int insertBinding(

@@ -45,6 +45,7 @@ import xiaozhi.modules.memory.service.MemoryMaintenanceService;
 import xiaozhi.modules.memory.service.MemoryQueryService;
 import xiaozhi.modules.memory.service.MemorySettingsService;
 import xiaozhi.modules.memory.service.MemoryService;
+import xiaozhi.modules.memory.service.MemoryRuntimeRefresh;
 import xiaozhi.modules.memory.utils.MemoryHelper;
 import xiaozhi.modules.memory.vo.MemoryDashboardVO;
 import xiaozhi.modules.memory.vo.MemoryQueryVO;
@@ -70,6 +71,7 @@ public class MemoryServiceImpl implements MemoryService {
     private final MemoryQueryService memoryQueryService;
     private final MemoryMaintenanceService memoryMaintenanceService;
     private final MemorySettingsService memorySettingsService;
+    private final MemoryRuntimeRefresh memoryRuntimeRefresh;
 
     // ===================== 公开方法 — 直接实现 =====================
 
@@ -351,6 +353,7 @@ public class MemoryServiceImpl implements MemoryService {
         revision.setReason(reason);
         revision.setCreatedAt(new Date());
         revisionDao.insert(revision);
+        memoryRuntimeRefresh.changed(agentId);
     }
 
     private String applyCandidateToFact(AgentScope scope, MemoryCandidateEntity candidate, String actorType, String actorId) {

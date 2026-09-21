@@ -55,9 +55,8 @@ from config.manage_api_client import (
     DeviceNotFoundException,
     DeviceBindException,
     generate_and_save_chat_title,
-    get_managed_memory_query_timeout,
-    query_managed_memory,
 )
+from core.session.managed_memory_snapshot import read_managed_memory
 from core.utils.model_config import has_runtime_config, normalize_runtime_config
 from core.utils.prompt_manager import PromptManager
 from core.utils.prompt_budget import truncate_context_text
@@ -1329,6 +1328,9 @@ class ConnectionHandler:
         # 获取记忆总结配置
         memory_config = self.config["Memory"]
         memory_type = self.config["Memory"][selected_memory]["type"]
+        if memory_type == "managed_memory":
+            self.memory.snapshot_reader = lambda: read_managed_memory(self)
+            return
         # 如果使用 nomen 或 mem_report_only，直接返回
         if memory_type == "nomem" or memory_type == "mem_report_only":
             return
@@ -1452,95 +1454,27 @@ class ConnectionHandler:
     def _query_memory_context(self, query):
         if not query:
             return None
-
-        memory_parts = []
-        memory_type = None
-
-        # NOTE: When read_config_from_api=True and memory_type != "nomem",
-        # there are TWO potential memory sources:
-        #   1. Local provider memory (self.memory.query_memory)
-        #   2. Managed memory from manager-api (query_managed_memory)
-        # If managed memory returns results, we skip the local query to
-        # avoid dual-source conflicts (the managed memory is authoritative).
-        managed_result = None
-        if self.read_config_from_api:
-            selected_memory = self.config.get("selected_module", {}).get("Memory")
-            memory_type = (
-                self.config.get("Memory", {})
-                .get(selected_memory, {})
-                .get("type")
-            )
-            if selected_memory and memory_type != "nomem":
-                agent_id = self.config.get("agent_id") if self.config else None
-                current_speaker_id = getattr(self, "current_speaker_id", None)
-                current_speaker_name = getattr(self, "current_speaker", None)
-                query_started_at = time.monotonic()
-                future = asyncio.run_coroutine_threadsafe(
-                    query_managed_memory(
-                        self.device_id,
-                        query,
-                        agent_id=agent_id,
-                        speaker_id=current_speaker_id,
-                        speaker_name=(current_speaker_name if current_speaker_id else None),
-                    ),
-                    self.loop,
-                )
-                try:
-                    managed_result = future.result(
-                        timeout=get_managed_memory_query_timeout()
-                    )
-                    elapsed_ms = int((time.monotonic() - query_started_at) * 1000)
-                    if managed_result:
-                        memory_parts.append(managed_result)
-                        status = "success_with_context"
-                        context_chars = len(managed_result)
-                    elif managed_result == "":
-                        status = "success_empty"
-                        context_chars = 0
-                    else:
-                        status = "failed"
-                        context_chars = 0
-                    log_method = (
-                        self.logger.bind(tag=TAG).info
-                        if status.startswith("success_")
-                        else self.logger.bind(tag=TAG).warning
-                    )
-                    log_method(
-                        f"managed_memory_query status={status} "
-                        f"elapsed_ms={elapsed_ms} context_chars={context_chars}"
-                    )
-                except TimeoutError:
-                    future.cancel()
-                    elapsed_ms = int((time.monotonic() - query_started_at) * 1000)
-                    self.logger.bind(tag=TAG).warning(
-                        "managed_memory_query status=timeout "
-                        f"elapsed_ms={elapsed_ms} context_chars=0"
-                    )
-                except Exception:
-                    elapsed_ms = int((time.monotonic() - query_started_at) * 1000)
-                    self.logger.bind(tag=TAG).warning(
-                        "managed_memory_query status=failed "
-                        f"elapsed_ms={elapsed_ms} context_chars=0"
-                    )
-
-        # Only query local provider memory if managed memory returned nothing.
-        # This prevents the LLM from receiving duplicate/conflicting memory from
-        # two sources at once.
-        if not managed_result and self.memory is not None and memory_type != "managed_memory":
+        selected_memory = self.config.get("selected_module", {}).get("Memory")
+        memory_type = self.config.get("Memory", {}).get(selected_memory, {}).get("type")
+        if memory_type in {"nomem", "mem_report_only"}:
+            return None
+        if memory_type == "managed_memory":
+            return read_managed_memory(self)
+        if self.memory is not None:
             future = asyncio.run_coroutine_threadsafe(
                 self.memory.query_memory(query), self.loop
             )
             try:
                 memory_str = future.result(timeout=2)
                 if memory_str:
-                    memory_parts.append(memory_str)
+                    return memory_str
             except TimeoutError:
                 future.cancel()
                 self.logger.bind(tag=TAG).warning("本地记忆查询超时，已跳过本轮记忆注入")
             except Exception as e:
                 self.logger.bind(tag=TAG).warning(f"本地记忆查询失败，已跳过: {e}")
 
-        return "\n\n".join(memory_parts) if memory_parts else None
+        return None
 
     def _resolve_runtime_intent_type(self, configured_intent_type):
         if configured_intent_type != "function_call":

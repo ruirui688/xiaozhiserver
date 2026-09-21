@@ -2,10 +2,12 @@ import os
 import base64
 import hashlib
 import math
+from contextlib import nullcontext
 from typing import Optional, Dict
 
 import httpx
 from loguru import logger
+from config.request_observation import RequestObservation
 
 TAG = __name__
 DEFAULT_MANAGED_MEMORY_QUERY_TIMEOUT_SECONDS = 12.0
@@ -86,8 +88,25 @@ class ManageApiClient:
     @classmethod
     async def _async_request(cls, method: str, endpoint: str, **kwargs) -> Dict:
         """发送单次异步HTTP请求并处理响应"""
+        observation = RequestObservation.for_request(method, endpoint)
+        with observation.span("total") if observation else nullcontext():
+            try:
+                return await cls._observed_async_request(method, endpoint, observation, **kwargs)
+            finally:
+                if observation:
+                    observation.finish()
+
+    @classmethod
+    async def _observed_async_request(cls, method, endpoint, observation, **kwargs):
         # 确保客户端已创建
-        client = await cls._ensure_async_client()
+        if observation:
+            import asyncio
+            cached = id(asyncio.get_running_loop()) in cls._async_clients
+            with observation.span("client_acquire", cache_hit=cached):
+                client = await cls._ensure_async_client()
+            kwargs = observation.options(kwargs)
+        else:
+            client = await cls._ensure_async_client()
         endpoint = endpoint.lstrip("/")
         response = None
         try:

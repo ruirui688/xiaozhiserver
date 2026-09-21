@@ -22,6 +22,7 @@ import xiaozhi.modules.config.dto.AgentModelsDTO;
 import xiaozhi.modules.config.dto.CorrectWordsDTO;
 import xiaozhi.modules.config.dto.DeviceSpeechInputRouteDTO;
 import xiaozhi.modules.config.service.ConfigService;
+import xiaozhi.modules.config.support.ConfigLatency;
 import xiaozhi.modules.device.service.DeviceService;
 import xiaozhi.modules.knowledge.dto.document.RetrievalDTO;
 import xiaozhi.modules.knowledge.service.KnowledgeFilesService;
@@ -51,18 +52,21 @@ public class ConfigController {
     @PostMapping("agent-models")
     @Operation(summary = "获取智能体模型")
     public Result<Object> getAgentModels(@Valid @RequestBody AgentModelsDTO dto) {
-        // 效验数据
-        ValidatorUtils.validateEntity(dto);
-        Object models = configService.getAgentModels(dto.getMacAddress(), dto.getSelectedModule());
-        return new Result<Object>().ok(models);
+        return ConfigLatency.request("config.agent_models", () -> {
+            ValidatorUtils.validateEntity(dto);
+            Object models = configService.getAgentModels(dto.getMacAddress(), dto.getSelectedModule());
+            return new Result<Object>().ok(models);
+        });
     }
 
     @PostMapping("correct-words")
     @Operation(summary = "获取智能体替换词")
     public Result<Object> getCorrectWords(@Valid @RequestBody CorrectWordsDTO dto) {
-        ValidatorUtils.validateEntity(dto);
-        List<String> list = configService.getCorrectWords(dto.getMacAddress());
-        return new Result<Object>().ok(list);
+        return ConfigLatency.request("config.correct_words", () -> {
+            ValidatorUtils.validateEntity(dto);
+            List<String> list = configService.getCorrectWords(dto.getMacAddress());
+            return new Result<Object>().ok(list);
+        });
     }
 
     @PostMapping("device-speech-input-route")

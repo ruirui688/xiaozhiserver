@@ -22,6 +22,13 @@ class SessionLifecycle:
             conn.closing = True
 
         stop_event = getattr(conn, "stop_event", None)
+        snapshot = getattr(conn, "managed_memory_snapshot", None)
+        if snapshot is not None:
+            snapshot.invalidate()
+        reloader = getattr(conn, "runtime_config_reloader", None)
+        cancel_snapshot_refresh = getattr(reloader, "cancel_snapshot_refresh", None)
+        if cancel_snapshot_refresh is not None:
+            cancel_snapshot_refresh()
         readiness = getattr(conn, "runtime_readiness", None)
         if readiness is not None:
             readiness.clear_wake_ready()

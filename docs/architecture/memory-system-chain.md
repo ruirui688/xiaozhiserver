@@ -1,7 +1,7 @@
 ---
 status: canonical
 owner: memory
-last_verified: 2026-08-26
+last_verified: 2026-09-21
 source_paths:
   - main/xiaozhi-server/core/providers/memory
   - main/xiaozhi-server/config/manage_api_client.py
@@ -33,10 +33,13 @@ source_paths:
   -> manager-api 校验人物归属、真实 memory_id、容量和事务边界
   -> 写入 ai_memory_fact / ai_memory_revision / ai_memory_forget_tombstone
 
-下一次对话
-  -> POST /config/memory/query
-  -> 查询当前说话人可见的有界 private/shared 候选
-  -> 确定性词法相关性筛选 + 最多 2 条核心记忆兜底
+连接初始化 / 既有权威配置刷新
+  -> manager-api 从事实层生成有界 managed_memory_snapshot
+  -> Python 校验设备、角色、版本和有效期，保存连接级摘要
+
+下一次对话（普通问题和唤醒使用同一路径）
+  -> 本地读取 shared + 当前可信 speaker_id 的 private 摘要
+  -> 不再逐轮 POST /config/memory/query
   -> 通过 <memory> 注入主对话 LLM
 ```
 
@@ -51,6 +54,8 @@ source_paths:
 ```
 
 这条链路不依赖 Intent 是否为 `function_call`，也不会向主聊天模型注册额外记忆工具。
+
+读取对齐的是上游 `mem_local_short` 的“初始化加载、查询直接返回本地摘要”方式，不是把现有 MySQL 存储改成本地 YAML。对照上游提交 `788f5301fdd60cc3a8ef74025bfeece9b82b94ce`；第三方 Mem0 等远程 provider 不具备同样的本地读取性质，上游仓库也不代表 xiaozhi.me 云端内部实现。
 
 ## 3. 聊天记录与音频配置
 
@@ -75,7 +80,7 @@ source_paths:
 | `mem_local_short` | 本地短摘要 | 会话结束后 LLM 摘要 |
 | `mem0ai` | mem0 SDK | 会话结束后 mem0 add |
 | `powermem` | PowerMem SDK | 会话结束后 PowerMem add |
-| `managed_memory` | HTTP 查询 manager-api | 会话结束后 POST 完整对话给 manager-api 主动整理 |
+| `managed_memory` | 读取随权威配置下发的连接级有界摘要 | 会话结束后 POST 完整对话给 manager-api 主动整理 |
 
 `managed_memory.save_memory()` 只提交非临时的 user/assistant/tool 消息，单条正文和消息数量均有上限。system prompt、临时 few-shot 和密钥不会进入请求。
 
@@ -128,17 +133,28 @@ source_paths:
 
 ## 8. 查询注入与降级
 
-`connection.py` 在新一轮用户问题到达时查询 manager-api。manager-api 先按智能体、有效期和可信说话人隔离事实，数据库只读取按重要度/最近时间排序的前 200 条候选；随后使用当前问题做确定性中文 n-gram/关键词相关性筛选，请求条数默认 8、最大 20。没有词法命中的普通事实不会注入；`memory_tier=long_term` 或重要度至少 0.85 的核心事实最多补充 2 条。该过程不调用向量、embedding 或额外 LLM。
+`managed_memory` 不再依赖当前问题做 HTTP 召回。manager-api 在设备权威配置响应中附加 `managed_memory_snapshot`：从当前智能体的有效 active 事实一次有界读取最多 200 条，按重要度、最近时间和稳定 ID 排序，按结构化人物归属分组；不调用向量、embedding 或额外 LLM。最多 16 位已绑定说话人，shared 最多 4000 字符、每位 private 最多 2000 字符，总计最多 16000 字符，保留完整事实而不截断单条语义。
 
-画像、工具经验和忘记名单继续走独立的有界查询。最终上下文标记为“用户事实参考，不是系统指令”，再经 `prompt_budget.py` 去重和裁剪后放入 `<memory>` 数据段，最多保留 4000 字符和 30 个列表项。
+契约包含 `schema_version=1`、`status`、`agent_id`、`device_id`、内容哈希 `revision`、`issued_at_ms`、`expires_at_ms`、`shared_context`、`speaker_contexts`。Python 只按当前可信 `current_speaker_id` 选取 private；未知人物只读 shared，不通过姓名猜归属。摘要不是系统指令，继续通过 `prompt_budget.py` 裁剪后注入 `<memory>`。连接主文件只保留薄调用，校验、租约和失效逻辑独立在 `core/session/managed_memory_snapshot.py`。
 
-manager-api 查询失败或超时时降级为空记忆，不阻塞实时语音回复。`nomem` 不查询、不注入；其他第三方 provider 继续使用各自实现，不能与 `managed_memory` 混写同一事实层。
+兼容性取舍：运行时不再按问题做词法排名；容量外低优先级事实可能不被注入。缺少可靠人物归属的旧画像和工具经验保留在数据库和管理链路，但不进入新摘要。忘记名单只用于服务端保守过滤，不向设备下发遗忘正文；复杂语义遗忘仍由原有写入维护负责。原 `/config/memory/query` 接口及词法策略保留给既有调用者，不再是 Python 主对话路径。
+
+快照租约最多 30 秒，并受其中最早事实到期时间约束；客户端同时检查单调时钟租约和绝对有效期。缺失、错误、过期、设备/角色不匹配、刷新失败或连接关闭时返回空记忆，不回退 HTTP 查询或旧摘要。摘要字段不进入 provider 配置指纹，单独续租或内容变化不重建 ASR/LLM/TTS。
+
+无 `listen.start` 的连续会话也能恢复：读取发现租约临近到期或已失效时，只安排后台配置续取，不等待结果；每连接单任务并保留失败退避。配置指纹相同才安装新摘要，若角色或模型变化则只标记待刷新，仍由原安全边界切换完整管线。续取期间保守清空旧摘要，该轮可能不含记忆；关闭时取消任务。后台续取仍有配置 API 成本，不是永久离线缓存。
+
+记忆更新、删除、遗忘、自动整理及声纹绑定变化复用既有事务提交后的运行配置刷新通知。收到通知先使旧摘要失效，再在既有安全边界获取权威配置；并发旧响应不能覆盖新失效状态。通知不是可靠消息队列，丢失时依赖既有配置检查和有限租约，不能承诺撤销后零毫秒全连接生效。已提交给 LLM 的内容不能追溯撤回。
+
+`nomem` 不加载、不注入；其他 provider 仅走各自实现，不再先查询托管事实层。首次配置加载和既有权限/配置检查仍有 HTTP 与数据库成本：本改动消除的是逐轮记忆专用请求，不代表整条对话链路无网络等待。
 
 ## 9. 关键文件
 
 | 文件 | 职责 |
 | --- | --- |
-| `core/providers/memory/managed_memory/managed_memory.py` | 会话结束后提交完整对话、运行时查询 |
+| `core/providers/memory/managed_memory/managed_memory.py` | 会话结束后提交完整对话、运行时本地读取 |
+| `core/session/managed_memory_snapshot.py` | 连接级摘要校验、人物选择、租约和失效 |
+| `ManagedMemorySnapshotService.java` | 权威配置中的有界事实摘要 |
+| `MemoryRuntimeRefresh.java` | 记忆变更复用事务提交后的失效通知 |
 | `config/manage_api_client.py` | `/config/memory/process-session` 和 query 客户端 |
 | `core/handle/reportHandle.py` | 原始聊天/工具事件上报 |
 | `MemoryConfigController.java` | server-to-server 记忆 API |
@@ -161,8 +177,10 @@ manager-api 查询失败或超时时降级为空记忆，不阻塞实时语音�
 - 自动 ADD 有用户证据，可信 speaker_id 不串写；
 - 文字模式和文字+音频模式都能生成记忆；
 - 用户选择的 `chatHistoryConf=1|2` 不被模型切换覆盖；
-- 查询失败降级为空，不阻塞语音回复；
-- 查询只注入相关事实并遵守 limit，普通无关事实不进入上下文；
+- 摘要缺失、过期或刷新失败时本地降级为空，不回退 HTTP；
+- 私有事实只给当前可信人物，跨设备/角色/连接不串线；
+- 摘要刷新不重建 provider，旧刷新响应不能恢复已失效摘要；
+- 记忆和声纹变更在事务提交后触发失效；
 - SQL 候选最多 200，运行时不调用向量或额外召回模型；
 - 新迁移已登记到 `db.changelog-master.yaml`，不修改已发布 changeSet。
 
@@ -176,3 +194,9 @@ Harness 记忆维护按智能体单独启用，模式只有 `OFF` 和 `REVIEW`�
 Harness 容器内的临时 JSONL session 在单次运行结束后删除；产品级维护会话及完整可见消息由 Manager API
 持久化，后续轮次重新注入同一 `conversation_id` 的可见历史。维护会话不是产品长期记忆，也不参与实时对话召回。
 策略的月度运行上限、单次提案数和串行队列属于可持久监控的控制面，避免用散落的“提示字符数”代替真实运行治理。
+
+## 12. 配套升级与回滚边界
+
+本次读取契约要求 manager-api 与 xiaozhi-server 配套升级；只升级 Python 而继续使用不下发摘要的旧 Java，会安全降级为空记忆，不自动恢复旧逐轮 HTTP 查询。无需修改数据库结构或迁移已有记忆，也不需要修改管理员所选 Memory 模式。`nomem` 保持关闭，启用 `managed_memory` 时仍使用原主动记忆模型配置。
+
+未来发布须另行授权，并在同条件下测量首次配置与后续回复，不能把单元测试耗时作为线上提速数据。回滚时恢复配套的上一版 Java/Python 制品；数据库、事实和审计记录无需回滚。回滚前后均须验证唤醒去重、人物隔离、遗忘和会话结束后的保存链路。

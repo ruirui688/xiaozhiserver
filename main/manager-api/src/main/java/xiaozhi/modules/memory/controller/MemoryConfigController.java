@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
 import xiaozhi.common.utils.Result;
+import xiaozhi.modules.config.support.ConfigLatency;
 import xiaozhi.modules.memory.dto.MemoryEventDTO;
 import xiaozhi.modules.memory.dto.MemoryForgetDTO;
 import xiaozhi.modules.memory.dto.MemoryQueryDTO;
@@ -35,7 +36,7 @@ public class MemoryConfigController {
     @PostMapping("query")
     @Operation(summary = "服务端查询长期记忆上下文")
     public Result<MemoryQueryVO> query(@RequestBody MemoryQueryDTO dto) {
-        return new Result<MemoryQueryVO>().ok(memoryService.query(dto));
+        return ConfigLatency.request("memory.query", () -> new Result<MemoryQueryVO>().ok(memoryService.query(dto)));
     }
 
     @PostMapping("remember")

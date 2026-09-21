@@ -47,6 +47,10 @@ def build_managed_runtime_config(common_config, private_config):
     """Return a fresh runtime config without retaining stale managed values."""
     target = copy.deepcopy(common_config or {})
     private = copy.deepcopy(private_config or {})
+    # A snapshot is authoritative per-device data, never a common-config default.
+    target.pop("managed_memory_snapshot", None)
+    if "managed_memory_snapshot" in private:
+        target["managed_memory_snapshot"] = copy.deepcopy(private["managed_memory_snapshot"])
     normalize_runtime_config(private)
 
     private_models = private.get("model_config")
@@ -102,8 +106,11 @@ def build_managed_runtime_config(common_config, private_config):
 
 
 def runtime_config_fingerprint(private_config):
+    # Memory leases refresh independently without rebuilding audio/model clients.
+    provider_config = dict(private_config or {})
+    provider_config.pop("managed_memory_snapshot", None)
     payload = json.dumps(
-        private_config or {},
+        provider_config,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),

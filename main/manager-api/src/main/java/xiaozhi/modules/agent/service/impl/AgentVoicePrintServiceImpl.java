@@ -9,6 +9,7 @@ import java.util.Set;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.core.io.ByteArrayResource;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -33,6 +34,7 @@ import xiaozhi.modules.agent.service.AgentChatHistoryService;
 import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.agent.service.AgentVoicePrintService;
 import xiaozhi.modules.agent.voiceprint.VoiceprintApiClient;
+import xiaozhi.modules.agent.runtime.AgentRuntimeConfigRefreshEvent;
 import xiaozhi.modules.agent.vo.AgentVoicePrintVO;
 
 /**
@@ -55,6 +57,7 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
     private final TransactionTemplate transactionTemplate;
     private final VoiceprintApiClient voiceprintApiClient;
     private final AgentService agentService;
+    private final ApplicationEventPublisher eventPublisher;
 
     public AgentVoicePrintServiceImpl(
             AgentChatAudioService agentChatAudioService,
@@ -62,13 +65,15 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
             AgentVoicePrintSampleDao voicePrintSampleDao,
             TransactionTemplate transactionTemplate,
             VoiceprintApiClient voiceprintApiClient,
-            AgentService agentService) {
+            AgentService agentService,
+            ApplicationEventPublisher eventPublisher) {
         this.agentChatAudioService = agentChatAudioService;
         this.agentChatHistoryService = agentChatHistoryService;
         this.voicePrintSampleDao = voicePrintSampleDao;
         this.transactionTemplate = transactionTemplate;
         this.voiceprintApiClient = voiceprintApiClient;
         this.agentService = agentService;
+        this.eventPublisher = eventPublisher;
     }
 
     @Override
@@ -112,6 +117,7 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
                         entity.getSourceName(),
                         entity.getIntroduce(),
                         samples.get(0).resource());
+                notifyBindingsChanged(List.of(entity.getAgentId()));
                 return new AgentVoicePrintRegistrationResult(entity.getId(), registrationResult);
             } catch (RenException e) {
                 status.setRollbackOnly();
@@ -133,6 +139,7 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
 
         return Boolean.TRUE.equals(transactionTemplate.execute(status -> {
             try {
+                List<String> affectedAgents = boundAgents(existing);
                 baseMapper.deleteBindingsByVoicePrintId(voicePrintId);
                 int row = baseMapper.delete(new LambdaQueryWrapper<AgentVoicePrintEntity>()
                         .eq(AgentVoicePrintEntity::getId, voicePrintId)
@@ -146,6 +153,7 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
                         .eq(AgentVoicePrintSampleEntity::getVoicePrintId, voicePrintId));
                 // 远程删除失败时回滚本地记录，避免远程孤儿声纹继续占用 5 条额度。
                 voiceprintApiClient.deleteVoiceprint(remoteUserId(existing), voicePrintId);
+                notifyBindingsChanged(affectedAgents);
                 return true;
             } catch (RenException e) {
                 status.setRollbackOnly();
@@ -208,6 +216,7 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
                         voiceprintApiClient.deleteVoiceprint(previousRemoteUserId, entity.getId());
                     }
                 }
+                notifyBindingsChanged(boundAgents(existing));
                 return true;
             } catch (RenException e) {
                 status.setRollbackOnly();
@@ -250,6 +259,21 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
         for (String voicePrintId : normalized) {
             baseMapper.insertBinding(agentId, voicePrintId, operatorId);
         }
+        notifyBindingsChanged(List.of(agentId));
+    }
+
+    private List<String> boundAgents(AgentVoicePrintEntity voicePrint) {
+        Set<String> agents = new LinkedHashSet<>(baseMapper.selectBoundAgentIdsByVoicePrintId(voicePrint.getId()));
+        // Include the legacy owning role even if its explicit binding was already removed.
+        if (StringUtils.isNotBlank(voicePrint.getAgentId())) {
+            agents.add(voicePrint.getAgentId());
+        }
+        return new ArrayList<>(agents);
+    }
+
+    private void notifyBindingsChanged(List<String> agentIds) {
+        // Existing listener delivers AFTER_COMMIT; rolled-back identity changes must not publish runtime state.
+        eventPublisher.publishEvent(new AgentRuntimeConfigRefreshEvent(agentIds, "voiceprint_changed"));
     }
 
     private void ensureVoiceprintCapacity(String agentId) {

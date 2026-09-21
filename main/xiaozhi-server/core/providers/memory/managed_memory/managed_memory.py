@@ -6,12 +6,11 @@
 长期记忆治理层负责。保存方式参考官方 Memory provider：把完整会话交给
 记忆模型自动整理，不要求主对话模型调用记忆工具。
 
-运行时 query_memory 会直接调用 manager-api 查询长期记忆上下文，
-为 LLM 提供第二路记忆注入通道（与 connection.py 的 _query_memory_context 互补）。
+运行时 query_memory 只读取初始化或配置刷新时下发的有界摘要，不发起HTTP。
 """
 
 from ..base import MemoryProviderBase, logger
-from config.manage_api_client import process_managed_memory_session, query_managed_memory
+from config.manage_api_client import process_managed_memory_session
 
 TAG = __name__
 
@@ -24,6 +23,7 @@ class MemoryProvider(MemoryProviderBase):
         # legacy summary_memory column.
         self.role_id = None
         self.agent_id = None
+        self.snapshot_reader = None
 
     def init_memory(
         self,
@@ -62,16 +62,6 @@ class MemoryProvider(MemoryProviderBase):
         return changed
 
     async def query_memory(self, query: str) -> str:
-        logger.bind(tag=TAG).debug(
-            "managed_memory mode: runtime query delegated to manager-api."
-        )
-        if not self.role_id or not query:
+        if not query or self.snapshot_reader is None:
             return ""
-        try:
-            result = await query_managed_memory(self.role_id, query)
-            return result or ""
-        except Exception:
-            logger.bind(tag=TAG).warning(
-                "managed_memory query_memory 调用 manager-api 失败，返回空上下文"
-            )
-            return ""
+        return self.snapshot_reader() or ""

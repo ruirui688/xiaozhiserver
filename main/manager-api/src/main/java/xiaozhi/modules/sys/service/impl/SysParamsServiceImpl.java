@@ -1,5 +1,7 @@
 package xiaozhi.modules.sys.service.impl;
 
+import xiaozhi.modules.config.support.ConfigLatency;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -167,11 +169,15 @@ public class SysParamsServiceImpl extends BaseServiceImpl<SysParamsDao, SysParam
     public String getValue(String paramCode, Boolean fromCache) {
         String paramValue = null;
         if (fromCache) {
-            paramValue = sysParamsRedis.get(paramCode);
+            paramValue = ConfigLatency.measure("params.cache_read", () -> sysParamsRedis.get(paramCode));
             if (paramValue == null) {
-                paramValue = baseDao.getValueByCode(paramCode);
+                paramValue = ConfigLatency.measure("params.db_fallback", () -> baseDao.getValueByCode(paramCode));
 
-                sysParamsRedis.set(paramCode, paramValue);
+                String fetchedValue = paramValue;
+                ConfigLatency.measure("params.cache_write", () -> {
+                    sysParamsRedis.set(paramCode, fetchedValue);
+                    return null;
+                });
             }
         } else {
             paramValue = baseDao.getValueByCode(paramCode);
