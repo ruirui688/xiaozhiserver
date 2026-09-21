@@ -230,7 +230,7 @@ def test_explicit_trigger_activates_first_turn(monkeypatch, trigger):
     conn = _device_asr_conn(attention)
     routed = []
 
-    async def fake_start_to_chat(_conn, text, turn_context=None, turn_id=None):
+    async def fake_start_to_chat(_conn, text, turn_context=None, turn_id=None, input_source=None, **kwargs):
         routed.append((text, turn_context, turn_id))
         return True
 

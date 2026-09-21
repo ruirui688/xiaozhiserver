@@ -226,7 +226,8 @@ def test_device_asr_text_is_redacted_from_protocol_log():
 def test_device_asr_consumes_listen_start_context(monkeypatch):
     captured = {}
 
-    async def fake_start_to_chat(_conn, text, turn_context=None, turn_id=None):
+    async def fake_start_to_chat(_conn, text, turn_context=None, turn_id=None, input_source=None, **kwargs):
+        assert input_source == "device_asr"
         captured.update(text=text, context=turn_context, turn_id=turn_id)
         return True
 

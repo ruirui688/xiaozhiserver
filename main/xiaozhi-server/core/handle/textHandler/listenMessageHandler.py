@@ -9,19 +9,18 @@ if TYPE_CHECKING:
 from core.utils.dialogue import Message
 from core.providers.asr.dto.dto import InterfaceType
 from core.handle.receiveAudioHandle import startToChat
-from core.handle.wakeupHandle import arm_wakeup_vad_ignore
 from core.handle.interactionAttentionHandle import (
     activate_interaction_attention,
     get_interaction_attention,
     parse_interaction_metadata,
 )
 from core.handle.reportHandle import enqueue_asr_report
-from core.handle.sendAudioHandle import send_stt_message, send_tts_message
+from core.handle.sendAudioHandle import send_stt_message
 from core.handle.textMessageHandler import TextMessageHandler
 from core.handle.textMessageType import TextMessageType
-from core.utils.util import remove_punctuation_and_length
 from core.providers.tts.dto.dto import ContentType, TTSMessageDTO, SentenceType
 from core.speech.runtime import DeviceASRDecision
+from core.session.wake_events import classify_input
 
 
 TAG = __name__
@@ -196,23 +195,26 @@ class ListenTextMessageHandler(TextMessageHandler):
                     for key, value in interaction_metadata.items()
                     if key != "trigger"
                 }
-            conn.client_have_voice = False
+            # Empty payloads must not clear audio, consume context or start replies.
+            original_text = str(msg_json.get("text") or "")
+            input_kind = classify_input(conn.config, original_text)
+            if input_kind == "empty":
+                conn.logger.bind(tag=TAG).info(
+                    "输入过滤: source=detect, kind=text, reason=empty_content"
+                )
+                return
             turn_context = getattr(conn, "turn_context", None)
             input_turn_context = None
             if turn_context is not None:
                 if input_turn_id is not None:
                     input_turn_context = turn_context.take()
-                else:
+                elif input_kind != "wake":
                     turn_context.clear()
-            conn.reset_audio_states()
+            # A detect may race the ASR for the same wake. Keep in-flight audio,
+            # including an instruction spoken immediately after the wake word.
             if "text" in msg_json:
                 conn.last_activity_time = time.time() * 1000
                 original_text = msg_json["text"]  # 保留原始文本
-
-                # 先做文本预处理（后续防抖和唤醒词检测都需要）
-                filtered_len, filtered_text = remove_punctuation_and_length(
-                    original_text
-                )
 
                 # 特殊指令仍走原有专用入口；普通文本交给 startToChat 处理。
 
@@ -244,51 +246,15 @@ class ListenTextMessageHandler(TextMessageHandler):
                     conn.dialogue.put(Message(role="assistant", content=call_text))
                     return
 
-                # 识别是否是唤醒词
-                is_wakeup_words = filtered_text in (
-                    conn.config.get("wakeup_words") or []
+                accepted = await startToChat(
+                    conn,
+                    original_text,
+                    turn_context=input_turn_context,
+                    turn_id=input_turn_id,
+                    input_source="device_asr" if device_asr_message else "detect",
+                    on_wake_accepted=(
+                        lambda: enqueue_asr_report(conn, original_text, [])
+                    ) if input_kind == "wake" else None,
                 )
-                # 是否开启唤醒词回复
-                enable_greeting = conn.config.get("enable_greeting", False)
-                if is_wakeup_words:
-                    wake_metadata = {"trigger": "wake_word"}
-                    activate_interaction_attention(conn, wake_metadata)
-                    conn.pending_interaction_metadata = None
-
-                if is_wakeup_words and not enable_greeting:
-                    # 如果是唤醒词，且关闭了唤醒词回复，就不用回答
-                    arm_wakeup_vad_ignore(conn)
+                if accepted and input_kind != "wake":
                     enqueue_asr_report(conn, original_text, [])
-                    await send_stt_message(conn, original_text)
-                    await send_tts_message(conn, "stop", None)
-                    if getattr(conn, "reply_lifecycle", None) is None:
-                        conn.client_is_speaking = False
-                elif is_wakeup_words:
-                    arm_wakeup_vad_ignore(conn)
-                    # 聊天记录保存设备真实检测到的唤醒词，不用内部问候语替代证据。
-                    # 先上报用户侧，确保同步播放的缓存回复之后仍按 user -> assistant 排序。
-                    enqueue_asr_report(conn, original_text, [])
-                    if input_turn_id is None:
-                        await startToChat(conn, "嘿，你好呀")
-                    else:
-                        await startToChat(
-                            conn,
-                            "嘿，你好呀",
-                            turn_context=input_turn_context,
-                            turn_id=input_turn_id,
-                        )
-                else:
-                    arm_wakeup_vad_ignore(conn)
-                    # 否则需要LLM对文字内容进行答复
-                    if input_turn_id is None:
-                        accepted = await startToChat(conn, original_text)
-                    else:
-                        accepted = await startToChat(
-                            conn,
-                            original_text,
-                            turn_context=input_turn_context,
-                            turn_id=input_turn_id,
-                        )
-                    if accepted:
-                        # 上报纯文字数据（复用ASR上报功能，但不提供音频数据）
-                        enqueue_asr_report(conn, original_text, [])

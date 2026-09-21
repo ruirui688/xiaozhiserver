@@ -74,10 +74,10 @@ device_mcp_control_timeout: 3
 # 旧版 Device IoT descriptor 的服务端显式允许列表。默认拒绝未知设备类型；
 # Device MCP 不使用此配置。示例：device_iot_allowlist: ["light", "speaker"]
 device_iot_allowlist: []
-# 开启唤醒词加速
-enable_wakeup_words_response_cache: true
-# 开场是否回复唤醒词
-enable_greeting: false
+# 唤醒缓存音频加速；false 时由主 LLM 实时生成，不使用预生成问候
+enable_wakeup_words_response_cache: false
+# 是否回应唤醒事件（与缓存加速独立）；false 时两种入口都静默
+enable_greeting: true
 # 唤醒后忽略上行音频的时长（毫秒）。默认0以降低首轮延迟；
 # 无AEC且开启唤醒回复、存在扬声器回声的设备可设为2000兼容旧行为。
 wakeup_vad_ignore_ms: 0

@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: xiaozhi-server
-last_verified: 2026-08-18
+last_verified: 2026-09-21
 source_paths:
   - main/xiaozhi-server/config.yaml
   - main/xiaozhi-server/core
@@ -114,19 +114,26 @@ connection.py:227-298  handle_connection()
 ### 2.5 唤醒后的首轮收音
 
 ```text
-设备 wakeup/listen 消息
-  → helloHandle.py 或 listenMessageHandler.py
-  → wakeupHandle.py: arm_wakeup_vad_ignore()
-  → receiveAudioHandle.py: should_ignore_wakeup_audio()
-  → VAD → ASR
+listen.detect / ASR 最终文本
+  → session/wake_events.py 分类（空内容 / 唤醒事件 / 用户正文）
+  → startToChat：先过滤空内容与同次唤醒的另一入口
+  → enable_greeting → 缓存（显式开启时）或主 LLM 实时回应
 ```
 
 - `wakeup_vad_ignore_ms` 默认 `0`，唤醒后第一包音频直接进入 VAD/ASR，不再固定丢弃 2 秒。
-- `enable_greeting` 默认 `false`，避免 2.4-2.7 秒欢迎语占用首轮交互。
-- 唤醒词缓存先检查开关和文本是否命中，再等待 TTS 初始化；普通文本与关闭缓存的请求不再被额外阻塞最多 3 秒。
-- 设备 `listen/detect` 命中唤醒词时，无论是否开启欢迎语，聊天记录都保存设备实际上报的检测文本；命中唤醒缓存并成功播放后，同时上报实际播放的助手文本和音频，不得只写入连接内对话。
-- 无 AEC 或扬声器回声会回采进麦克风的设备，可在私有配置中把 `wakeup_vad_ignore_ms` 设为 500-2000ms；设为 `2000` 可恢复旧版兼容行为。
+- 默认 `enable_greeting=true`、`enable_wakeup_words_response_cache=false`。前者控制是否回应，后者只选择缓存加速；缓存关闭时直接使用真实唤醒原话调用主 LLM，跳过语义技能与意图模型，不再伪造“嘿，你好呀”，也不启用本轮工具调用。
+- `enable_greeting=false` 时 detect 和独立 ASR 唤醒均静默，不创建用户聊天或回复轮次，不打断当前播报。普通“你好”和后续真实指令不受此开关影响。
+- 空白、纯标点和 JSON 空 `content` 在播报打断、语义处理和回复 generation 之前返回。唤醒事件保留原话；“你好小智，打开摄像头”清洗为真实指令。
+- 去重状态属于当前连接和 `session_id`，记录输入 `turn_id` 与回复 generation；同来源同 turn 重试被过滤。旧 detect 与服务端 ASR 没有共享事件 ID，采用最多 10 秒的一次性相反来源配对，覆盖现有 readiness 队列预算。配对消费后、超时后或 session 变化后可再次唤醒；不依据文本永久去重，不清除进行中的录音，也不为实时问候开启音频忽略窗口。
+- 旧协议边界：超过 10 秒才到达的对侧事件可能被视为新唤醒；若前次只有一种来源，10 秒内另一次真实唤醒只出现相反来源，则无法与迟到副本可靠区分。同来源且无 turn ID 的重复消息也无法保证幂等。完全消除歧义需要固件提供跨 detect/ASR 的共享唤醒 ID；本次不修改固件。
+- 管理员显式打开缓存时保留旧缓存播放能力及音频上报；只有这条兼容路径仍使用 `wakeup_vad_ignore_ms` 回声保护。该参数不是双回复问题的去重方案。
 - 忽略窗口使用 `time.monotonic()` 判断，不创建延迟任务；配置非法、负数或非有限值时安全回退为 0。
+
+**配置来源与上线步骤**：未配置 manager-api 时，默认 `config.yaml` 被 `data/.config.yaml` 递归覆盖。启用 manager-api 时，两项唤醒参数来自智控台参数管理的 `sys_params`，经 `ConfigServiceImpl.buildConfig()` 按 `boolean` 下发；本地默认文件和私有文件中的这两项不会覆盖 API。角色私有配置和现有角色热刷新不管理这两项公共参数。
+
+管理员应在参数管理保存 `enable_wakeup_words_response_cache=false` 与 `enable_greeting=true`（类型均为 `boolean`）；保存接口同步更新参数缓存并重建 Redis `server:config`，无需直接改数据库或清 Redis。Python 已启动进程和已有连接持有公共配置快照，保存参数本身不能保证所有在线连接立即生效；在获准发布的维护窗口，通过 [ACR 发布入口](../deployment/private-docker-release.md) 部署已验证镜像、重新加载服务并让设备重连。不要仅改容器默认配置，也不要把角色级热刷新当作公共参数生效保证。
+
+2026-09-21 只读核验：生产镜像 `64d990c6` 与开发基线一致，五个故障关键文件 SHA-256 相同；数据库的两项参数当时均为 `true`。本次源码修复没有修改生产。发布前记录原参数和镜像版本并按发布规范备份；回滚使用保留的 `VERSION=64d990c6` 版本包，同时恢复原参数，不能仅退镜像却忽略配置变化。旧版本仍含本次双回复缺陷。日志验收查看 `source / kind / reason / generation`，不打印用户正文或凭据；真机验收需同时验证唤醒后立即说指令和主动打断。
 
 #### 无音区交互注意力 MVP
 

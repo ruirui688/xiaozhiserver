@@ -82,6 +82,8 @@ async def handleHelloMessage(conn: "ConnectionHandler", msg_json):
 
 
 async def checkWakeupWords(conn: "ConnectionHandler", text):
+    if not conn.config.get("enable_greeting", False):
+        return False
     enable_wakeup_words_response_cache = conn.config.get(
         "enable_wakeup_words_response_cache", False
     )

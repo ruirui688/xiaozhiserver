@@ -7,14 +7,12 @@ if TYPE_CHECKING:
     from core.connection import ConnectionHandler
 from core.utils.dialogue import Message
 from core.providers.tts.dto.dto import ContentType
-from core.handle.helloHandle import checkWakeupWords
 from plugins_func.register import Action, ActionResponse
 from core.handle.sendAudioHandle import (
     schedule_reply_termination,
     send_stt_message,
 )
 from core.handle.reportHandle import enqueue_tool_report
-from core.utils.util import remove_punctuation_and_length
 from core.utils.correct_words import apply_correct_words
 from core.providers.tts.dto.dto import TTSMessageDTO, SentenceType
 
@@ -64,11 +62,6 @@ async def handle_user_intent(
                 conn.current_speaker = parsed_data.get("speaker")  # 保留说话人信息
     except (json.JSONDecodeError, TypeError):
         pass
-
-    _, filtered_text = remove_punctuation_and_length(text)
-    # 检查是否是唤醒词
-    if await checkWakeupWords(conn, filtered_text):
-        return True
 
     active_game_tool = None
     requested_game_tool = None

@@ -101,11 +101,12 @@ def test_invalid_ignore_duration_falls_back_to_zero(raw_value):
     assert get_wakeup_vad_ignore_ms(conn) == 0
 
 
-def test_default_config_disables_greeting_and_audio_ignore():
+def test_default_config_uses_live_greeting_without_audio_ignore():
     with (SERVER_ROOT / "config.yaml").open(encoding="utf-8") as config_file:
         config = yaml.safe_load(config_file)
 
-    assert config["enable_greeting"] is False
+    assert config["enable_greeting"] is True
+    assert config["enable_wakeup_words_response_cache"] is False
     assert config["wakeup_vad_ignore_ms"] == 0
 
 
@@ -122,7 +123,6 @@ def test_missing_greeting_config_defaults_to_no_wakeup_reply(monkeypatch):
         messages.append(("tts", state, text))
 
     monkeypatch.setattr(listen_handler, "send_stt_message", _send_stt)
-    monkeypatch.setattr(listen_handler, "send_tts_message", _send_tts)
     monkeypatch.setattr(
         listen_handler,
         "enqueue_asr_report",
@@ -138,9 +138,9 @@ def test_missing_greeting_config_defaults_to_no_wakeup_reply(monkeypatch):
         )
     )
 
-    assert messages == [("stt", "你好小智"), ("tts", "stop", None)]
-    assert reports == [("你好小智", [])]
-    assert conn.client_is_speaking is False
+    assert messages == []
+    assert reports == []
+    assert conn.client_is_speaking is True
 
 
 def test_disabled_wakeup_cache_does_not_wait_for_tts(monkeypatch):
@@ -179,12 +179,13 @@ def test_non_wakeup_text_does_not_wait_for_tts(monkeypatch):
     assert asyncio.run(checkWakeupWords(conn, "今天天气怎么样")) is False
 
 
-def test_detected_wakeup_word_reports_original_device_text_before_reply(monkeypatch):
+def test_detected_wakeup_word_uses_and_reports_original_device_text(monkeypatch):
     import core.handle.textHandler.listenMessageHandler as listen_handler
 
     events = []
 
-    async def _start_chat(conn, text):
+    async def _start_chat(conn, text, **kwargs):
+        kwargs["on_wake_accepted"]()
         events.append(("chat", text))
         return True
 
@@ -210,7 +211,7 @@ def test_detected_wakeup_word_reports_original_device_text_before_reply(monkeypa
 
     assert events == [
         ("report", "你好小智", []),
-        ("chat", "嘿，你好呀"),
+        ("chat", "你好小智"),
     ]
 
 
@@ -255,6 +256,7 @@ def test_cached_wakeup_reply_is_reported_after_successful_playback(monkeypatch):
         {
             "enable_wakeup_words_response_cache": True,
             "wakeup_words": ["嘿你好呀"],
+            "enable_greeting": True,
         }
     )
     conn.tts = SimpleNamespace(voice="test-voice")

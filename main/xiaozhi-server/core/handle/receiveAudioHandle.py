@@ -14,6 +14,7 @@ from core.handle.reportHandle import (
     mark_skip_memory_event,
 )
 from core.semantic.normalizer import TextNormalizer
+from core.session.wake_events import classify_input, claim_wake, content_text, text_key
 from core.utils.output_counter import check_device_output_limit
 from core.handle.sendAudioHandle import (
     begin_assistant_reply,
@@ -103,21 +104,31 @@ async def startToChat(
     turn_context=None,
     turn_id=None,
     interaction_metadata=None,
+    input_source="asr",
+    on_wake_accepted=None,
 ):
     """Handle recognized user text.
 
     Returns True when the text should be treated as an accepted user turn.
-    Returns False only when another session mode consumes the text.
+    Returns False for filtered input or when another session mode consumes it.
     """
     reply_generation = None
+    text = str(text or "")
+    input_kind = classify_input(getattr(conn, "config", {}), apply_correct_words(conn, text))
+    if input_kind == "empty":
+        conn.logger.bind(tag=TAG).info(
+            f"输入过滤: source={input_source}, kind=text, reason=empty_content"
+        )
+        return False
+    wake_event = None
 
     def submit_chat(chat_text):
-        if reply_generation is not None:
+        if reply_generation is not None or input_kind == "wake":
             return conn.executor.submit(
                 conn.chat,
                 chat_text,
                 0,
-                True,
+                input_kind != "wake",
                 turn_context,
                 turn_id,
                 reply_generation,
@@ -208,7 +219,28 @@ async def startToChat(
     elif actual_text != text:
         interruption_text = actual_text
 
-    runtime_text = NORMALIZER.normalize_runtime_text(actual_text)
+    # A wake is an event with real user evidence, not an empty chat message.
+    runtime_text = (
+        actual_text if input_kind == "wake"
+        else NORMALIZER.normalize_runtime_text(actual_text)
+    )
+    if not text_key(content_text(runtime_text)):
+        conn.logger.bind(tag=TAG).info(
+            f"输入过滤: source={input_source}, kind=text, reason=normalized_empty"
+        )
+        return False
+    if input_kind == "wake":
+        wake_event = claim_wake(conn, input_source, turn_id)
+        if wake_event is None:
+            return False
+        from core.handle.interactionAttentionHandle import activate_interaction_attention
+
+        activate_interaction_attention(conn, {"trigger": "wake_word"})
+        if not conn.config.get("enable_greeting", False):
+            conn.logger.bind(tag=TAG).info(
+                f"输入过滤: source={input_source}, kind=wake, reason=greeting_disabled"
+            )
+            return False
     if runtime_text != actual_text:
         mark_asr_report_text_override(conn, text, runtime_text)
         actual_text = runtime_text
@@ -325,7 +357,7 @@ async def startToChat(
         await handleAbortMessage(conn)
 
     # 语义控制中枢优先处理高置信度控制类指令，未处理再进入旧流程
-    if getattr(conn, "semantic_center", None):
+    if input_kind != "wake" and getattr(conn, "semantic_center", None):
         if turn_id is None:
             semantic_handled = await conn.semantic_center.handle_user_text(
                 conn, actual_text
@@ -338,7 +370,23 @@ async def startToChat(
             return True
 
     # 首先进行意图分析，使用实际文本内容
-    if turn_id is None:
+    if input_kind == "wake":
+        # Cache acceleration is independent of whether a wake should respond.
+        from core.handle.helloHandle import checkWakeupWords
+
+        if on_wake_accepted is not None:
+            # Preserve user -> assistant ordering even for synchronous cache playback.
+            on_wake_accepted()
+        if await checkWakeupWords(conn, content_text(actual_text)):
+            lifecycle = getattr(conn, "reply_lifecycle", None)
+            wake_event.generation = lifecycle.generation if lifecycle is not None else None
+            conn.logger.bind(tag=TAG).info(
+                f"提交回复: source={input_source}, kind=wake, mode=cache, "
+                f"generation={wake_event.generation}"
+            )
+            return True
+        intent_handled = False
+    elif turn_id is None:
         if turn_context is None:
             intent_handled = await handle_user_intent(conn, actual_text)
         else:
@@ -370,6 +418,12 @@ async def startToChat(
         reply_generation = await send_stt_message(conn, actual_text)
     if getattr(conn, "reply_lifecycle", None) is not None and reply_generation is None:
         return True
+
+    if wake_event is not None:
+        wake_event.generation = reply_generation
+    conn.logger.bind(tag=TAG).info(
+        f"提交回复: source={input_source}, kind={input_kind}, generation={reply_generation}"
+    )
 
     # 准备开始新会话
     with conn._abort_lock:
