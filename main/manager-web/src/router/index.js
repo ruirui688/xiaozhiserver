@@ -106,6 +106,12 @@ const routes = [
     }
   },
   {
+    path: '/knowledge-content-management',
+    name: 'KnowledgeContentManagement',
+    component: () => import(/* webpackChunkName: "view-knowledge-content-management" */ '../views/KnowledgeContentManagement.vue'),
+    meta: { requiresAuth: true, title: '管理知识内容' }
+  },
+  {
     path: '/knowledge-file-upload',
     name: 'KnowledgeFileUpload',
     component: function () {
@@ -294,7 +300,7 @@ VueRouter.prototype.push = function push(location) {
 }
 
 // 需要登录才能访问的路由
-const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'ModelConfig', 'KnowledgeBaseManagement', 'KnowledgeFileUpload', 'PersonProfileManagement', 'AddressBookManagement', 'FunctionPluginManagement', 'MusicManagement', 'MemoryManagement']
+const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'ModelConfig', 'KnowledgeBaseManagement', 'KnowledgeFileUpload', 'KnowledgeContentManagement', 'PersonProfileManagement', 'AddressBookManagement', 'FunctionPluginManagement', 'MusicManagement', 'MemoryManagement']
 
 // 路由守卫
 router.beforeEach((to, from, next) => {

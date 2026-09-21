@@ -22,8 +22,8 @@ test('resource pages no longer render or request Harness interfaces', () => {
 test('ordinary knowledge management and memory operations remain available', () => {
   assert.match(uploadPage, /knowledge-source-panel/)
   assert.match(uploadPage, /@click="showRetrievalTestDialog"/)
-  assert.match(uploadPage, /:readonly="readOnly"/)
-  assert.match(uploadPage, /@changed="fetchFileList"/)
+  assert.match(uploadPage, /name: 'KnowledgeContentManagement'/)
+  assert.match(read('src/views/KnowledgeContentManagement.vue'), /:readonly="readOnly"/)
   for (const action of ['handleRemember', 'handleForget', 'handleRebuild', 'handleReview', 'handleClear', 'handleSaveEdit']) {
     assert.ok(memoryPage.includes(action))
   }

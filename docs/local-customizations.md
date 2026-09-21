@@ -206,7 +206,8 @@ source_paths:
   - 2026-09：本地人工文档提供文本/问答条目的新增、编辑、停用、恢复和历史版本恢复。原文件不改，MySQL 当前条目及 revision 是修订权威；保留权限、归属、expectedVersion 与文档锁，恢复生成新版本。Lucene 按 contentVersion 惰性重建，失败回退数据库且不回传旧正文。动态来源和 RAGFlow 只读；不提供替换原文件合并人工修改，旧文档无需原件即可编辑。
   - main/manager-api/src/main/java/xiaozhi/modules/knowledge/service/KnowledgeEntryService.java
   - main/manager-api/src/main/java/xiaozhi/modules/knowledge/controller/KnowledgeEntryController.java
-  - main/manager-web/src/components/knowledge/FilePreviewDialog.vue
+  - main/manager-web/src/components/knowledge/content/KnowledgeContentWorkspace.vue
+  - 2026-09 内容管理交互：采用独立路由的左右分栏工作区，列表、编辑和历史面板分组件，离开和切换条目均保护草稿。旧 Excel 无可信字段映射时保留完整正文，不能用冒号猜测字段；不改变既有条目编辑后端契约。
   - main/manager-api/src/main/java/xiaozhi/modules/knowledge/rag/impl/LocalKnowledgeAdapter.java
   - main/manager-api/src/main/java/xiaozhi/modules/knowledge/dao/KnowledgeChunkDao.java
   - main/manager-api/src/main/resources/mapper/knowledge/KnowledgeChunkDao.xml

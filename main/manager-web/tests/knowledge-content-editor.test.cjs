@@ -3,11 +3,11 @@ const { test } = require('node:test');
 const { loadVueComponent } = require('./helpers/loadVueComponent.cjs');
 
 function fixture(api = {}) {
-  const component = loadVueComponent('src/components/knowledge/FilePreviewDialog.vue', {
+  const component = loadVueComponent('src/components/knowledge/content/KnowledgeContentWorkspace.vue', {
     '@/apis/module/knowledgeBase': { __esModule: true, default: api }
   });
   const vm = { ...component.data(), datasetId: 'dataset', documentId: 'doc', visible: true, readonly: false,
-    $emit() {}, $message: { success() {} }, $confirm: async () => {} };
+    $emit() {}, $message: { success() {}, warning() {} }, $confirm: async () => {} };
   for (const [key, fn] of Object.entries(component.methods)) vm[key] = fn.bind(vm);
   for (const [key, fn] of Object.entries(component.computed)) Object.defineProperty(vm, key, { get: () => fn.call(vm) });
   vm.editable = true;
@@ -96,4 +96,54 @@ test('in-flight save from a closed context cannot clear another document draft',
   vm.invalidate(); vm.saving = false; vm.editEntry({ id: 'two', content: 'new document' });
   respond(ok({})); await pending;
   assert.equal(vm.draft.id, 'two');
+});
+
+test('route leave blocks saving and cancelled discard without modifying the draft', async () => {
+  const vm = fixture();
+  assert.equal(await vm.confirmLeave(), true);
+  vm.editEntry({ id: 'one', content: 'unsaved' });
+  vm.saving = true;
+  assert.equal(await vm.confirmLeave(), false);
+  vm.saving = false;
+  vm.$confirm = async () => { throw new Error('cancel'); };
+  assert.equal(await vm.confirmLeave(), false);
+  assert.equal(vm.draft.content, 'unsaved');
+  vm.$confirm = async () => {};
+  assert.equal(await vm.confirmLeave(), true);
+});
+
+test('switching selection cannot silently discard a draft or apply a late confirmation', async () => {
+  const vm = fixture();
+  vm.editEntry({ id: 'one', content: 'unsaved' });
+  vm.$confirm = async () => { throw new Error('cancel'); };
+  await vm.selectEntry({ id: 'two' });
+  assert.equal(vm.selectedId, 'one'); assert.equal(vm.draft.content, 'unsaved');
+  let approve;
+  vm.$confirm = () => new Promise(resolve => { approve = resolve; });
+  const pending = vm.selectEntry({ id: 'two' });
+  vm.invalidate(); approve(); await pending;
+  assert.equal(vm.selectedId, 'one'); assert.equal(vm.draft.content, 'unsaved');
+  vm.$confirm = async () => {};
+  await vm.selectEntry({ id: 'two' });
+  assert.equal(vm.selectedId, 'two'); assert.equal(vm.draft, null);
+});
+
+test('browser unload guard protects drafts and pending saves, clean views remain unblocked', () => {
+  const vm = fixture();
+  let prevented = 0;
+  const event = { preventDefault() { prevented++; } };
+  vm.handleBeforeUnload(event); assert.equal(prevented, 0);
+  vm.editEntry({ content: 'draft' }); vm.handleBeforeUnload(event);
+  assert.equal(prevented, 1); assert.equal(event.returnValue, '');
+  vm.draft = null; vm.saving = true; vm.handleBeforeUnload(event);
+  assert.equal(prevented, 2);
+});
+
+test('legacy Excel text preserves colons and multiline content without guessed fields', () => {
+  const vm = fixture();
+  const content = '售价：28\n库存：41\n备注：http://example.test/a:b\n多行说明';
+  vm.editEntry({ id: 'old', content, editVersion: 2 });
+  assert.equal(vm.draft.mode, 'text');
+  assert.equal(vm.draft.content, content);
+  assert.equal(vm.draft.question, ''); assert.equal(vm.draft.answer, '');
 });

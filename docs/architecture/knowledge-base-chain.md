@@ -336,19 +336,25 @@ manager-api 生成知识搜索工具描述时不再注入酒类、酒具等特�
 | KnowledgeBaseDialog | `components/KnowledgeBaseDialog.vue` | 创建/编辑表单 |
 | KnowledgeFileUpload | `views/KnowledgeFileUpload.vue` | 文档列表 + 上传 |
 | FileUploadPanel | `components/knowledge/FileUploadPanel.vue` | 拖拽上传面板 |
-| FilePreviewDialog | `components/knowledge/FilePreviewDialog.vue` | 内容搜索、新增、编辑、启停、历史恢复 |
+| KnowledgeContentWorkspace | `components/knowledge/content/KnowledgeContentWorkspace.vue` | 独立内容管理页的列表、编辑与历史状态编排 |
 | KnowledgeBaseSelectorDialog | `components/KnowledgeBaseSelectorDialog.vue` | 智能体选择 KB |
 | manager-mobile knowledge pages | `manager-mobile/src/pages/knowledge/` | 小程序知识库、文档、切片与召回测试 |
 
 ### 6.2 内容编辑边界
 
-“管理内容”支持普通文本以及问题/答案成对编辑、手动新增、停用和恢复、历史版本查看及恢复。所有写入校验知识库写权限、
+“管理内容”进入独立路由页，不再用大弹窗承载全部内容。桌面采用左侧搜索和条目列表、右侧编辑详情的分栏布局，
+列表、编辑器和历史面板拆成独立组件，窄屏保持可访问的纵向布局。离开路由、关闭页面或切换条目前保护未保存草稿；
+保存过程中阻止离开，取消丢弃确认则保留原草稿，不能无提示覆盖编辑。
+
+页面支持普通文本以及问题/答案成对编辑、手动新增、停用和恢复、历史版本查看及恢复。所有写入校验知识库写权限、
 文档和条目归属，使用文档锁与 expectedVersion 防止并发覆盖；恢复历史同样需要当前版本并产生递增的新版本。
 原正文在第一次编辑前保留为 revision，保存失败或冲突不能静默丢失编辑草稿。
 
 仅完成处理的本地人工文档可编辑。无写权限的官方知识库、动态来源文档和 RAGFlow 在此页面保持只读，并展示原因；
 动态内容应修改原始来源后同步，当前不提供人工修改合并或冲突解决。原文件替换合并编辑也不在本期支持范围。
-知识编辑由独立 KnowledgeEntryService 和编辑组件负责，文档上传主页面仅接入事件，不增加上传适配器的编辑职责。
+旧 Excel 切片若没有可靠的结构化字段映射，继续以完整正文编辑；不能按冒号自动拆分成价格、库存等表单字段，
+避免破坏原文和多行内容。问答字段仅依据后端明确提供的 question/answer 使用成对编辑。
+知识编辑由独立 KnowledgeEntryService 和内容工作区组件负责，文档上传主页面仅负责导航，不增加上传适配器的编辑职责。
 Harness 按钮、原生 Console、策略/审批/审计面板及关联前端请求已移除，普通动态数据源、召回测试不受影响。
 
 ### 6.3 上传限制
@@ -403,7 +409,7 @@ Web 上传不再手工指定 `multipart/form-data`，由浏览器为 `FormData` 
 | `views/KnowledgeBaseManagement.vue` | ~300 | KB 管理页面 |
 | `views/KnowledgeFileUpload.vue` | 1260 | 文档管理页面 |
 | `components/knowledge/FileUploadPanel.vue` | 299 | 上传面板 |
-| `components/knowledge/FilePreviewDialog.vue` | 561 | 分块预览 |
+| `components/knowledge/content/KnowledgeContentWorkspace.vue` | — | 独立内容管理工作区及拆分面板 |
 | `components/knowledge/KnowledgeSourcePanel.vue` | — | 指定知识库的动态来源管理与同步监控 |
 | `components/role/RoleEditDialog.vue` | — | 智能体配置 hydration 与插件/知识库映射恢复 |
 | `utils/roleConfigDraft.js` | — | dirty 字段合并和 capability 映射规范化 |

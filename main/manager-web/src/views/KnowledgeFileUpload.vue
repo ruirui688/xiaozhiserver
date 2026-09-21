@@ -139,17 +139,6 @@
       @close="uploadDialogVisible = false"
       @upload-complete="handleUploadComplete" />
 
-    <!-- 切片管理弹窗 -->
-    <file-preview-dialog
-      :visible="sliceDialogVisible"
-      :dataset-id="datasetId"
-      :document-id="currentDocumentId"
-      :document-name="currentDocumentName"
-      :readonly="readOnly"
-      @changed="fetchFileList"
-      @retrieval-test="showRetrievalTestDialog"
-      @close="sliceDialogVisible = false" />
-
     <knowledge-source-panel
       :visible="sourcePanelVisible"
       :dataset-id="datasetId"
@@ -213,11 +202,10 @@ import KnowledgeBaseAPI from "@/apis/module/knowledgeBase";
 import HeaderBar from "@/components/HeaderBar.vue";
 import VersionFooter from "@/components/VersionFooter.vue";
 import FileUploadPanel from "@/components/knowledge/FileUploadPanel.vue";
-import FilePreviewDialog from "@/components/knowledge/FilePreviewDialog.vue";
 import KnowledgeSourcePanel from "@/components/knowledge/KnowledgeSourcePanel.vue";
 
 export default {
-  components: { HeaderBar, VersionFooter, FileUploadPanel, FilePreviewDialog, KnowledgeSourcePanel },
+  components: { HeaderBar, VersionFooter, FileUploadPanel, KnowledgeSourcePanel },
   data() {
     return {
       datasetId: '',
@@ -235,11 +223,6 @@ export default {
       sourcePanelVisible: false,
       uploadUrl: '',
       isAllSelected: false,
-
-      // 切片管理相关数据
-      sliceDialogVisible: false,
-      currentDocumentId: '',
-      currentDocumentName: '',
 
       // 召回测试相关数据
       retrievalTestDialogVisible: false,
@@ -260,6 +243,7 @@ export default {
     this.readOnly = this.$route.query.readOnly === '1';
     this.uploadUrl = `${Api.getServiceUrl()}/api/v1/documents/upload`;
     this.fetchFileList();
+    if (this.$route.query.retrieval === '1') this.showRetrievalTestDialog();
   },
 
   beforeDestroy() {
@@ -537,9 +521,10 @@ export default {
       });
     },
     handleViewSlices: function (row) {
-      this.currentDocumentId = row.id;
-      this.currentDocumentName = row.name;
-      this.sliceDialogVisible = true;
+      this.$router.push({ name: 'KnowledgeContentManagement', query: {
+        datasetId: this.datasetId, documentId: row.id, documentName: row.name,
+        knowledgeBaseName: this.knowledgeBaseName, readOnly: this.readOnly ? '1' : '0'
+      } });
     },
     handleDelete: function (row) {
       this.$confirm(this.$t('knowledgeFileUpload.confirmDelete'), this.$t('warning'), {
