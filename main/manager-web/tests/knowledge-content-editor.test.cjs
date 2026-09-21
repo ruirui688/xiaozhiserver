@@ -65,29 +65,12 @@ test('closing while saving is blocked and cancelled discard preserves draft', as
   vm.saving = false; vm.$confirm = async () => { throw new Error('cancel'); };
   await vm.closeDialog(); assert.equal(closed, false); assert.equal(vm.draft.content, 'unsaved');
 });
-test('status changes retain body and expected version; restores are explicit', async () => {
+test('status changes retain body and expected version', async () => {
   let submitted;
   const vm = fixture({ updateEntry(...args) { submitted = args[3]; args[4](ok({})); },
     listEntries(...args) { args[3](ok({ list: [], editable: true })); } });
   await vm.toggleEntry({ id: 'one', editVersion: 3, content: 'price 28', enabled: 1 });
   assert.equal(submitted.content, 'price 28'); assert.equal(submitted.enabled, 0); assert.equal(submitted.expectedVersion, 3);
-});
-test('closing context invalidates delayed revision responses', async () => {
-  let respond;
-  const vm = fixture({ entryRevisions(...args) { respond = args[3]; } });
-  const pending = vm.showHistory({ id: 'one' });
-  vm.invalidate(); respond(ok([{ id: 'old-history' }])); await pending;
-  assert.equal(vm.revisions.length, 0);
-});
-test('restore sends current version and chosen revision, creating a new version', async () => {
-  let submitted;
-  const vm = fixture({ restoreEntry(...args) { submitted = args[3]; args[4](ok({ indexStatus: 'pending' })); },
-    listEntries(...args) { args[3](ok({ list: [], editable: true, indexStatus: 'pending' })); } });
-  vm.historyEntry = { id: 'one', editVersion: 9 };
-  vm.revisions = [{ id: 'revision-2', content: 'old', enabled: 0 }]; vm.revisionId = 'revision-2'; vm.historyVisible = true;
-  await vm.restoreRevision();
-  assert.equal(submitted.expectedVersion, 9); assert.equal(submitted.revisionId, 'revision-2');
-  assert.equal(vm.historyVisible, false); assert.match(vm.reason, /下次检索时更新索引；更新失败时使用数据库检索/);
 });
 test('in-flight save from a closed context cannot clear another document draft', async () => {
   let respond;

@@ -16,11 +16,4 @@ public class KnowledgeEntryRequest {
     @Min(0)
     private Long expectedVersion;
 
-    @Data
-    public static class Restore {
-        @NotBlank @Size(max = 32)
-        private String revisionId;
-        @NotNull @Min(0)
-        private Long expectedVersion;
-    }
 }

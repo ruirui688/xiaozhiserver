@@ -7,7 +7,6 @@ import org.apache.shiro.authz.annotation.RequiresPermissions;
 import org.springframework.web.bind.annotation.*;
 import xiaozhi.common.utils.Result;
 import xiaozhi.modules.knowledge.dto.KnowledgeEntryRequest;
-import xiaozhi.modules.knowledge.entity.KnowledgeEntryRevisionEntity;
 import xiaozhi.modules.knowledge.service.KnowledgeEntryService;
 
 @RestController
@@ -36,15 +35,4 @@ public class KnowledgeEntryController {
         return new Result<Map<String, Object>>().ok(entries.update(datasetId, documentId, entryId, request));
     }
 
-    @GetMapping("/{entryId}/revisions")
-    public Result<List<KnowledgeEntryRevisionEntity>> history(@PathVariable String datasetId, @PathVariable String documentId,
-            @PathVariable String entryId) {
-        return new Result<List<KnowledgeEntryRevisionEntity>>().ok(entries.history(datasetId, documentId, entryId));
-    }
-
-    @PostMapping("/{entryId}/restore")
-    public Result<Map<String, Object>> restore(@PathVariable String datasetId, @PathVariable String documentId,
-            @PathVariable String entryId, @Valid @RequestBody KnowledgeEntryRequest.Restore request) {
-        return new Result<Map<String, Object>>().ok(entries.restore(datasetId, documentId, entryId, request));
-    }
 }

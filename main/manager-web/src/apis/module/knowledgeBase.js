@@ -72,12 +72,6 @@ export default {
   updateEntry(datasetId, documentId, entryId, data, callback, errorCallback) {
     makeApiRequest({ url: `${getServiceUrl()}/datasets/${encodeURIComponent(datasetId)}/documents/${encodeURIComponent(documentId)}/entries/${encodeURIComponent(entryId)}`, method: 'PUT', data, headers: { 'Content-Type': 'application/json' }, callback, errorCallback });
   },
-  entryRevisions(datasetId, documentId, entryId, callback, errorCallback) {
-    makeApiRequest({ url: `${getServiceUrl()}/datasets/${encodeURIComponent(datasetId)}/documents/${encodeURIComponent(documentId)}/entries/${encodeURIComponent(entryId)}/revisions`, method: 'GET', callback, errorCallback });
-  },
-  restoreEntry(datasetId, documentId, entryId, data, callback, errorCallback) {
-    makeApiRequest({ url: `${getServiceUrl()}/datasets/${encodeURIComponent(datasetId)}/documents/${encodeURIComponent(documentId)}/entries/${encodeURIComponent(entryId)}/restore`, method: 'POST', data, headers: { 'Content-Type': 'application/json' }, callback, errorCallback });
-  },
   getKnowledgeBase(datasetId, callback, errorCallback) {
     makeApiRequest({
       url: `${getServiceUrl()}/datasets/${encodeURIComponent(datasetId)}`,

@@ -203,11 +203,11 @@ source_paths:
 改动原因：本地知识库原先对 md/txt 文档主要按固定字符数硬切，容易把标题、适用问题、正文或一句话切开；召回也只按空格/标点切词，中文整句没有空格时容易查不到。当前按知识库选择 AUTO/DIRECT/LLM_ENHANCED 处理策略，结构化记录保持原子边界，模型增强只用于非结构化正文；parser_config 只保存 llm_model_id 和处理参数，API Key、接口地址和上游模型名由模型管理统一维护。弱服务器不启用向量知识库：上传不生成 embedding，查询不调用向量/重排模型；召回同时匹配 content/question/answer，使用最多 12 个中文 n-gram 候选词，数据库候选默认 200、硬上限 800，再在 Java 内存中做词法评分。知识库高级设置只控制常规/展会模式、关键词拆分级别、最大召回数和最低匹配度；旧 semantic 配置仅兼容读取。2026-07 进一步固定 parserConfig 字符串/DTO 边界，并把本地上传改为“请求内验收并创建 RUNNING 记录、后台处理、数据库持久化进度与失败原因”，页面无需阻塞等待且关闭重进仍能恢复状态。2026-08 参考 Onyx connector 模式增加知识库级可选动态数据源：只有显式绑定来源的本地知识库参与调度，人工知识库保持不变；网页来源以 ETag/Last-Modified/内容哈希增量同步，候选版本切片成功后才在事务内替换正式版本，旧版本禁用保留且不参与召回；同步运行、失败退避和脱敏错误持久化，公网 URL 每次抓取及重定向都必须通过 SSRF 校验。智能体编辑通过显式 hydration 恢复知识库绑定和 queryPolicy，禁止旧 prop、乱序列表或程序化 clearSelection 抹掉选择；知识结果、工具历史和工具描述使用分域预算，且知识工具结果标记为不可信参考数据，不得当作指令。
 关键文件：
   - 2026-08：上传原件保存到持久化卷，召回改为用户原问 + 模型改写双路查询、确定性同义扩展和内嵌 Lucene CJK/BM25；结构化切片额外区分主实体名称、价格属性与搭配关系，普通“多少钱/单独点”查询不能再被辅助提及或无关“单独”描述压过直接商品记录。空召回后的禁用工具轮也必须拦截原始/HTML 转义 DSML，禁止协议文本进入字幕或 TTS。
-  - 2026-09：本地人工文档提供文本/问答条目的新增、编辑、停用、恢复和历史版本恢复。原文件不改，MySQL 当前条目及 revision 是修订权威；保留权限、归属、expectedVersion 与文档锁，恢复生成新版本。Lucene 按 contentVersion 惰性重建，失败回退数据库且不回传旧正文。动态来源和 RAGFlow 只读；不提供替换原文件合并人工修改，旧文档无需原件即可编辑。
+  - 2026-09：本地人工文档提供文本/问答条目的新增、编辑、停用和恢复召回。原文件不改，MySQL 只保留当前条目，不保存旧正文快照、不提供历史查询恢复；保留权限、归属、expectedVersion 与文档锁。已发布历史表通过后续迁移删除，部署前备份且禁止旧版 API 混跑。Lucene 按 contentVersion 惰性重建，失败回退数据库且不回传旧正文。动态来源和 RAGFlow 只读；不提供替换原文件合并人工修改，旧文档无需原件即可编辑。
   - main/manager-api/src/main/java/xiaozhi/modules/knowledge/service/KnowledgeEntryService.java
   - main/manager-api/src/main/java/xiaozhi/modules/knowledge/controller/KnowledgeEntryController.java
   - main/manager-web/src/components/knowledge/content/KnowledgeContentWorkspace.vue
-  - 2026-09 内容管理交互：采用独立路由的左右分栏工作区，列表、编辑和历史面板分组件，离开和切换条目均保护草稿。旧 Excel 无可信字段映射时保留完整正文，不能用冒号猜测字段；不改变既有条目编辑后端契约。
+  - 2026-09 内容管理交互：采用独立路由的左右分栏工作区，列表和编辑器分组件，离开和切换条目均保护草稿。移除修改历史、版本对比和历史恢复界面及前后端接口，只保留版本冲突保护。旧 Excel 无可信字段映射时保留完整正文，不能用冒号猜测字段。
   - main/manager-api/src/main/java/xiaozhi/modules/knowledge/rag/impl/LocalKnowledgeAdapter.java
   - main/manager-api/src/main/java/xiaozhi/modules/knowledge/dao/KnowledgeChunkDao.java
   - main/manager-api/src/main/resources/mapper/knowledge/KnowledgeChunkDao.xml

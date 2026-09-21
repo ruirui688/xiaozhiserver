@@ -1467,3 +1467,10 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/knowledge-content-editing.sql
+  - changeSet:
+      id: knowledge-content-remove-history-20260921
+      author: Codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/knowledge-content-remove-history.sql

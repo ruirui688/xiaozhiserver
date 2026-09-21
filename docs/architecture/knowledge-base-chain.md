@@ -61,8 +61,6 @@ KnowledgeEntryController (/datasets/{datasetId}/documents/{documentId}/entries)
   GET    /entries                         搜索和分页查看当前条目及编辑能力
   POST   /entries                         手动新增文本/问答条目
   PUT    /entries/{entryId}               修改正文/问答/启停（expectedVersion）
-  GET    /entries/{entryId}/revisions     查看历史版本
-  POST   /entries/{entryId}/restore       将历史内容恢复为新版本
 ```
 
 ### 2.2 资源范围和维护权限
@@ -146,7 +144,7 @@ LocalKnowledge 上传请求只完成文件校验、安全暂存、`RUNNING` 文�
 失败时保留脱敏后的错误原因。任务完成、失败或被拒绝后都必须清理暂存文件，服务异常重启遗留的无进展任务由超时巡检标记失败，
 不能永久停在处理中。页面“解析”及 `POST /chunks` 只验证上传阶段生成的切片是否仍然存在，不能把数据库切片拼接成有损原文后重新切片。
 修改处理策略不会自动重新切片；手动修正已有内容可以直接使用“管理内容”，不需要重新上传。
-需要按新处理策略重新解析时应另行上传原文件，不支持替换原文件并自动合并人工修改；删除旧文档前应确认其中的人工修改和版本历史不再需要。
+需要按新处理策略重新解析时应另行上传原文件，不支持替换原文件并自动合并人工修改；删除旧文档前应确认其中的人工修改不再需要。
 RAGFlow 仍通过 `POST /chunks` 异步启动远端解析，状态可先进入 `RUNNING`。
 
 知识库新增和更新时，`parserConfig` 字符串在 manager-api 边界显式解码为
@@ -175,9 +173,9 @@ LocalKnowledgeAdapter.retrievalTest()
    变化会触发从 MySQL DONE 切片惰性重建，不要求重新上传原文件
 ```
 
-原始文档保留上传时的原件，不随人工编辑重写。首次导入后，MySQL 当前条目和 revision 历史是人工修订的权威数据，
+原始文档保留上传时的原件，不随人工编辑重写。首次导入后，MySQL 当前条目是人工修订的权威数据，不另存编辑历史快照，
 Lucene 只是可从当前数据库内容重建的派生索引；不能重新解析原件覆盖人工编辑。删除文档或知识库同步清理其原件、
-索引和修订历史。历史文档即使没有保留原 Excel，也可直接编辑已有条目，不要求重新上传；缺失原件不能从切片反向恢复。
+索引。历史文档即使没有保留原 Excel，也可直接编辑已有条目，不要求重新上传；缺失原件不能从切片反向恢复。
 
 条目保存提交后增加文档 contentVersion 并标记 indexDirty。检索时比较本进程 Lucene 版本和数据库权威版本，
 仅对版本不一致的文档惰性重建；清除 dirty 使用版本条件，不能吞掉并发编辑。停用条目不入索引，召回结果再次核对
@@ -336,19 +334,23 @@ manager-api 生成知识搜索工具描述时不再注入酒类、酒具等特�
 | KnowledgeBaseDialog | `components/KnowledgeBaseDialog.vue` | 创建/编辑表单 |
 | KnowledgeFileUpload | `views/KnowledgeFileUpload.vue` | 文档列表 + 上传 |
 | FileUploadPanel | `components/knowledge/FileUploadPanel.vue` | 拖拽上传面板 |
-| KnowledgeContentWorkspace | `components/knowledge/content/KnowledgeContentWorkspace.vue` | 独立内容管理页的列表、编辑与历史状态编排 |
+| KnowledgeContentWorkspace | `components/knowledge/content/KnowledgeContentWorkspace.vue` | 独立内容管理页的列表与编辑状态编排 |
 | KnowledgeBaseSelectorDialog | `components/KnowledgeBaseSelectorDialog.vue` | 智能体选择 KB |
 | manager-mobile knowledge pages | `manager-mobile/src/pages/knowledge/` | 小程序知识库、文档、切片与召回测试 |
 
 ### 6.2 内容编辑边界
 
 “管理内容”进入独立路由页，不再用大弹窗承载全部内容。桌面采用左侧搜索和条目列表、右侧编辑详情的分栏布局，
-列表、编辑器和历史面板拆成独立组件，窄屏保持可访问的纵向布局。离开路由、关闭页面或切换条目前保护未保存草稿；
+列表和编辑器拆成独立组件，窄屏保持可访问的纵向布局。离开路由、关闭页面或切换条目前保护未保存草稿；
 保存过程中阻止离开，取消丢弃确认则保留原草稿，不能无提示覆盖编辑。
 
-页面支持普通文本以及问题/答案成对编辑、手动新增、停用和恢复、历史版本查看及恢复。所有写入校验知识库写权限、
-文档和条目归属，使用文档锁与 expectedVersion 防止并发覆盖；恢复历史同样需要当前版本并产生递增的新版本。
-原正文在第一次编辑前保留为 revision，保存失败或冲突不能静默丢失编辑草稿。
+页面支持普通文本以及问题/答案成对编辑、手动新增、停用和恢复召回。前后端均不提供修改历史、版本对比或历史恢复功能，保存只更新当前条目，不存储旧正文副本。所有写入校验知识库写权限、
+文档和条目归属，使用文档锁与 expectedVersion 防止并发覆盖；editVersion 仅为并发计数，contentVersion 仅用于索引一致性，不代表保留历史内容。
+保存失败或冲突不能静默丢失编辑草稿。
+
+后续迁移 `knowledge-content-remove-history.sql` 仅删除知识条目历史表 `ai_rag_knowledge_entry_revision`，不修改当前条目、原件、聊天记录或长期记忆审计。
+该迁移会永久清除该表内的历史内容，部署前必须备份并停止旧版写入；不能混跑仍依赖历史表的旧 API。
+不修改已发布的建表迁移。清理后不能直接回滚到依赖该表的版本，应使用保留本次移除逻辑的回滚制品；如确需恢复旧功能，须另行评审兼容迁移及历史备份恢复，不能整库覆盖新数据。
 
 仅完成处理的本地人工文档可编辑。无写权限的官方知识库、动态来源文档和 RAGFlow 在此页面保持只读，并展示原因；
 动态内容应修改原始来源后同步，当前不提供人工修改合并或冲突解决。原文件替换合并编辑也不在本期支持范围。

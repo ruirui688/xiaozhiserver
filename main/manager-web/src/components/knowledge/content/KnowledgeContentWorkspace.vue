@@ -7,35 +7,29 @@
         :busy="saving || !!draft" :saving="saving" :loading="loading" :editable="canEdit"
         @keyword="keywords = $event" @search="search" @page="changePage" @select="selectEntry" @add="editEntry()" />
       <entry-editor-panel :entry="selectedEntry" :draft="draft" :editable="canEdit" :saving="saving" :loading="loading"
-        @draft-change="draft = $event" @edit="editEntry" @toggle="toggleEntry" @history="showHistory"
+        @draft-change="draft = $event" @edit="editEntry" @toggle="toggleEntry"
         @save="saveDraft" @cancel="discardDraft" @refresh="fetchEntries" />
     </div>
-    <entry-history-dialog :visible="historyVisible" :loading="historyLoading" :saving="saving" :editable="canEdit"
-      :error="historyError" :entry="historyEntry" :revisions="revisions" :revision-id="revisionId"
-      @revision="revisionId = $event" @close="closeHistory" @restore="restoreRevision" />
   </section>
 </template>
 <script>
 import API from '@/apis/module/knowledgeBase';
 import EntryListPanel from './EntryListPanel.vue';
 import EntryEditorPanel from './EntryEditorPanel.vue';
-import EntryHistoryDialog from './EntryHistoryDialog.vue';
 
 export default {
-  components: { EntryListPanel, EntryEditorPanel, EntryHistoryDialog },
+  components: { EntryListPanel, EntryEditorPanel },
   props: {
     visible: { type: Boolean, default: true }, readonly: Boolean,
     datasetId: { type: String, default: '' }, documentId: { type: String, default: '' }, documentName: { type: String, default: '' }
   },
   data() {
     return { selectedId: null, entries: [], total: 0, page: 1, keywords: '', loading: false, saving: false,
-      editable: false, reason: '', error: '', draft: null, requestId: 0, contextEpoch: 0,
-      historyVisible: false, historyLoading: false, historyError: '', historyEntry: null, revisions: [], revisionId: null, historyRequestId: 0 };
+      editable: false, reason: '', error: '', draft: null, requestId: 0, contextEpoch: 0 };
   },
   computed: {
     selectedEntry() { return this.entries.find(entry => (entry.id || entry.chunkId) === this.selectedId) || null; },
-    canEdit() { return this.editable && !this.readonly; },
-    selectedRevision() { return this.revisions.find(item => item.id === this.revisionId); }
+    canEdit() { return this.editable && !this.readonly; }
   },
   watch: {
     visible: { immediate: true, handler(value) { if (value) this.resetContext(); else this.invalidate(); } },
@@ -59,7 +53,7 @@ export default {
       if (this.draft) { await this.discardDraft(); if (this.draft || epoch !== this.contextEpoch) return; }
       this.selectedId = entry.id || entry.chunkId; this.error = '';
     },
-    invalidate() { this.requestId++; this.contextEpoch++; this.historyRequestId++; this.historyVisible = false; },
+    invalidate() { this.requestId++; this.contextEpoch++; },
     resetContext() {
       this.invalidate(); this.selectedId = null; this.entries = []; this.total = 0; this.page = 1; this.keywords = '';
       this.draft = null; this.saving = false; this.editable = false; this.reason = ''; this.error = '';
@@ -111,12 +105,12 @@ export default {
     },
     async mutate(method, args, onSuccess) {
       if (!this.canEdit || this.saving) return;
-      const epoch = this.contextEpoch; this.saving = true; this.error = ''; this.historyError = '';
+      const epoch = this.contextEpoch; this.saving = true; this.error = '';
       try {
         const result = await this.request(method, this.datasetId, this.documentId, ...args);
         if (epoch !== this.contextEpoch) return;
         onSuccess(); this.$emit('changed'); this.$message.success(result && result.indexStatus === 'pending' ? '内容已保存，下次检索时更新索引；更新失败时使用数据库检索' : '已保存'); await this.fetchEntries();
-      } catch (err) { if (epoch === this.contextEpoch) { this.error = err.message; this.historyError = err.message; } }
+      } catch (err) { if (epoch === this.contextEpoch) this.error = err.message; }
       finally { if (epoch === this.contextEpoch) this.saving = false; }
     },
     saveDraft() {
@@ -139,28 +133,6 @@ export default {
       catch (_) { return; }
       if (epoch !== this.contextEpoch) return;
       return this.mutate('updateEntry', [entry.id, { ...this.payload(entry), enabled: entry.enabled === 0 ? 1 : 0 }], () => {});
-    },
-    async showHistory(entry) {
-      const id = ++this.historyRequestId; this.historyEntry = entry; this.historyVisible = true;
-      this.revisions = []; this.revisionId = null; this.historyLoading = true; this.historyError = '';
-      try {
-        const data = await this.request('entryRevisions', this.datasetId, this.documentId, entry.id);
-        if (id !== this.historyRequestId) return;
-        this.revisions = data || []; this.revisionId = this.revisions.length ? this.revisions[0].id : null;
-      } catch (err) { if (id === this.historyRequestId) this.historyError = err.message; }
-      finally { if (id === this.historyRequestId) this.historyLoading = false; }
-    },
-    closeHistory() { if (!this.saving) { this.historyVisible = false; this.historyRequestId++; } },
-    displayContent(entry) { return entry.question || entry.answer ? `问题：${entry.question || ''}\n答案：${entry.answer || ''}` : entry.content; },
-    async restoreRevision() {
-      if (!this.selectedRevision || this.saving) return;
-      const epoch = this.contextEpoch;
-      const entryId = this.historyEntry.id;
-      const payload = { revisionId: this.revisionId, expectedVersion: this.historyEntry.editVersion };
-      try { await this.$confirm('将创建一个新版本，恢复为所选历史内容及启停状态。是否继续？', '确认恢复'); }
-      catch (_) { return; }
-      if (epoch !== this.contextEpoch) return;
-      return this.mutate('restoreEntry', [entryId, payload], () => { this.historyVisible = false; });
     }
   }
 };

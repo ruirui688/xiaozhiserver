@@ -3,7 +3,7 @@
     <div v-if="draft || entry" class="editor-body">
       <header class="editor-heading"><div><h2>{{ draft ? (draft.id ? '编辑知识' : '新增知识') : '知识详情' }}</h2>
         <p v-if="entry && !draft">{{ entry.enabled === 0 ? '已停用，不参与召回' : '已启用，参与召回' }}<span v-if="entry.editVersion != null"> · 版本 {{ entry.editVersion }}</span></p></div>
-        <div v-if="!draft && editable" class="entry-actions"><el-button size="small" :disabled="saving" @click="$emit('history', entry)">修改历史</el-button><el-button size="small" :disabled="saving" @click="$emit('toggle', entry)">{{ entry.enabled === 0 ? '启用' : '停用' }}</el-button><el-button type="primary" size="small" :disabled="saving" @click="$emit('edit', entry)">编辑</el-button></div>
+        <div v-if="!draft && editable" class="entry-actions"><el-button size="small" :disabled="saving" @click="$emit('toggle', entry)">{{ entry.enabled === 0 ? '启用' : '停用' }}</el-button><el-button type="primary" size="small" :disabled="saving" @click="$emit('edit', entry)">编辑</el-button></div>
       </header>
       <div class="editor-scroll">
       <template v-if="draft">

@@ -12,7 +12,6 @@ import xiaozhi.common.exception.RenException;
 import xiaozhi.modules.knowledge.dao.*;
 import xiaozhi.modules.knowledge.dto.*;
 import xiaozhi.modules.knowledge.entity.*;
-import xiaozhi.modules.security.user.SecurityUser;
 
 /** Human edits are canonical database content; the original upload is never rewritten. */
 @Service
@@ -22,7 +21,6 @@ public class KnowledgeEntryService {
     private final KnowledgeResourcePermissionService permissions;
     private final DocumentDao documents;
     private final KnowledgeChunkDao chunks;
-    private final KnowledgeEntryRevisionDao revisions;
     private final KnowledgeBaseDao baseDao;
     private final KnowledgeFilesService files;
 
@@ -75,7 +73,6 @@ public class KnowledgeEntryService {
         apply(entry, request);
         entry.setCreatedAt(new Date());
         chunks.insert(entry);
-        snapshot(entry);
         updateDocument(doc, 1, entry.getTokenCount());
         return saved(entry);
     }
@@ -88,35 +85,9 @@ public class KnowledgeEntryService {
         return updateLocked(doc, entry, request);
     }
 
-    public List<KnowledgeEntryRevisionEntity> history(String dataset, String document, String id) {
-        authorize(dataset, false);
-        document(dataset, document, false);
-        entry(dataset, document, id);
-        return revisions.selectList(new QueryWrapper<KnowledgeEntryRevisionEntity>()
-                .eq("dataset_id", dataset).eq("document_id", document).eq("entry_id", id)
-                .orderByDesc("version").last("LIMIT 100"));
-    }
-
-    @Transactional
-    public Map<String, Object> restore(String dataset, String document, String id, KnowledgeEntryRequest.Restore request) {
-        DocumentEntity doc = writableDocument(dataset, document);
-        KnowledgeChunkEntity entry = entry(dataset, document, id);
-        checkVersion(entry, request.getExpectedVersion());
-        KnowledgeEntryRevisionEntity old = revisions.selectOne(new QueryWrapper<KnowledgeEntryRevisionEntity>()
-                .eq("dataset_id", dataset).eq("document_id", document).eq("entry_id", id).eq("id", request.getRevisionId()));
-        if (old == null) throw new RenException("历史版本不存在或不属于当前条目");
-        KnowledgeEntryRequest content = new KnowledgeEntryRequest();
-        content.setContent(old.getContent());
-        content.setQuestion(old.getQuestion());
-        content.setAnswer(old.getAnswer());
-        content.setEnabled(old.getEnabled());
-        return updateLocked(doc, entry, content);
-    }
-
     private Map<String, Object> updateLocked(DocumentEntity doc, KnowledgeChunkEntity entry, KnowledgeEntryRequest request) {
         long previousVersion = version(entry);
         long oldTokens = Optional.ofNullable(entry.getTokenCount()).orElse(0L);
-        if (previousVersion == 0) snapshot(entry); // Preserve the imported original before first edit.
         apply(entry, request);
         entry.setEditVersion(previousVersion + 1);
         int changed = chunks.update(null, new UpdateWrapper<KnowledgeChunkEntity>()
@@ -126,7 +97,6 @@ public class KnowledgeEntryService {
                 .set("enabled", entry.getEnabled()).set("edit_version", entry.getEditVersion())
                 .set("token_count", entry.getTokenCount()).set("embedding_json", null).set("updated_at", entry.getUpdatedAt()));
         if (changed != 1) throw new RenException("内容已被他人修改，请刷新后重试");
-        snapshot(entry);
         updateDocument(doc, 0, entry.getTokenCount() - oldTokens);
         return saved(entry);
     }
@@ -138,24 +108,6 @@ public class KnowledgeEntryService {
                 .set("chunk_count", Optional.ofNullable(doc.getChunkCount()).orElse(0) + countDelta)
                 .set("token_count", Math.max(0, Optional.ofNullable(doc.getTokenCount()).orElse(0L) + tokenDelta)));
         baseDao.updateStatsAfterChange(doc.getDatasetId(), 0, (long) countDelta, tokenDelta);
-    }
-
-    private void snapshot(KnowledgeChunkEntity entry) {
-        // A newly-created manual entry already has revision zero.
-        if (revisions.selectCount(new QueryWrapper<KnowledgeEntryRevisionEntity>()
-                .eq("entry_id", entry.getId()).eq("version", version(entry))) > 0) return;
-        KnowledgeEntryRevisionEntity revision = new KnowledgeEntryRevisionEntity();
-        revision.setDatasetId(entry.getDatasetId());
-        revision.setDocumentId(entry.getDocumentId());
-        revision.setEntryId(entry.getId());
-        revision.setVersion(version(entry));
-        revision.setContent(StringUtils.defaultString(entry.getContent()));
-        revision.setQuestion(entry.getQuestion());
-        revision.setAnswer(entry.getAnswer());
-        revision.setEnabled(Optional.ofNullable(entry.getEnabled()).orElse(1));
-        revision.setCreator(SecurityUser.getUserId());
-        revision.setCreatedAt(new Date());
-        revisions.insert(revision);
     }
 
     private KnowledgeBaseDTO authorize(String dataset, boolean write) {

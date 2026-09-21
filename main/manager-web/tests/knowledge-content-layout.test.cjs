@@ -43,7 +43,10 @@ test('content management has a protected independent route and split workspace, 
   assert.doesNotMatch(workspace, /<el-dialog/);
   assert.match(workspace, /<entry-list-panel/);
   assert.match(workspace, /<entry-editor-panel/);
-  assert.match(workspace, /<entry-history-dialog/);
+  assert.doesNotMatch(workspace, /entry-history-dialog|showHistory|restoreRevision|entryRevisions/);
+  assert.doesNotMatch(read('src/components/knowledge/content/EntryEditorPanel.vue'), /修改历史|恢复此版本|\$emit\('history'/);
+  assert.doesNotMatch(read('src/apis/module/knowledgeBase.js'), /entryRevisions|restoreEntry/);
+  assert.equal(fs.existsSync(path.join(root, 'src/components/knowledge/content/EntryHistoryDialog.vue')), false);
   assert.match(workspace, /grid-template-columns:/);
   assert.match(workspace, /grid-template-rows:minmax\(0,1fr\)/);
   assert.match(page, /:readonly="readOnly"/);
