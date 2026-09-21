@@ -291,6 +291,8 @@ LLM 调用 search_from_local_knowledge / search_from_ragflow
 本次回答关闭工具调用并保留空检索的临时可信提示，生成的文本分片持续进入现有 TTS 队列。
 检索期间发生打断或回复 generation 失效时，旧结果不得启动回答或写入知识上下文。
 该入口复用 `ConnectionHandler.chat` 的协议过滤、计时和 FIRST/LAST 生命周期，不新增独立播报管线。
+后续意图切回 `continue_chat` 时必须保留配对的工具调用和结果，不得只删除 tool 消息；
+历史长度和知识内容预算继续由 Dialogue 统一处理，避免连续普通对话因孤立 tool_calls 被模型拒绝。
 
 本地知识库请求成功但没有返回切片时，工具结果固定为“本地知识库未检索到相关内容”，并通过
 `ActionResponse` 只对下一次递归回答关闭 tools、增加临时可信 system 指令。主 LLM 应自行按完整语义区分：

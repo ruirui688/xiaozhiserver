@@ -62,7 +62,7 @@ from core.utils.model_config import has_runtime_config, normalize_runtime_config
 from core.utils.prompt_manager import PromptManager
 from core.utils.prompt_budget import truncate_context_text
 from core.utils.voiceprint_provider import VoiceprintProvider
-from core.utils.util import get_system_error_response
+from core.handle.llmErrorHandle import queue_llm_error_reply
 from core.handle.audioInitializer import (
     initialize_tts as _ext_init_tts,
     initialize_asr as _ext_init_asr,
@@ -1864,7 +1864,10 @@ class ConnectionHandler:
             if meeting_tool_turn:
                 self._record_pending_meeting_turn("meeting_llm_request_error")
                 return True
-            return None
+            return queue_llm_error_reply(
+                self, current_sentence_id, current_reply_generation,
+                current_abort_generation, depth,
+            )
 
         # 处理流式响应
         tool_call_flag = False
@@ -2043,27 +2046,16 @@ class ConnectionHandler:
             self.session_telemetry.metrics.record_llm_complete(
                 time.monotonic() - llm_started_at
             )
-            self.logger.bind(tag=TAG).error(f"LLM stream processing error: {e}")
+            self.logger.bind(tag=TAG).error(
+                f"LLM stream processing error: errorType={type(e).__name__}"
+            )
             if meeting_tool_turn:
                 self._record_pending_meeting_turn("meeting_llm_stream_error")
                 return True
-            self.tts.tts_text_queue.put(
-                TTSMessageDTO(
-                    sentence_id=current_sentence_id,
-                    sentence_type=SentenceType.MIDDLE,
-                    content_type=ContentType.TEXT,
-                    content_detail=get_system_error_response(self.config),
-                )
+            return queue_llm_error_reply(
+                self, current_sentence_id, current_reply_generation,
+                current_abort_generation, depth,
             )
-            if depth == 0:
-                self.tts.tts_text_queue.put(
-                    TTSMessageDTO(
-                        sentence_id=current_sentence_id,
-                        sentence_type=SentenceType.LAST,
-                        content_type=ContentType.ACTION,
-                    )
-            )
-            return
         self.session_telemetry.metrics.record_llm_complete(
             time.monotonic() - llm_started_at
         )

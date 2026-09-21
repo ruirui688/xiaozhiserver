@@ -316,14 +316,9 @@ class IntentProvider(IntentProviderBase):
                     )
 
                 elif function_name == "continue_chat":
-                    # 处理普通对话
-                    # 保留非工具相关的消息
-                    clean_history = [
-                        msg
-                        for msg in conn.dialogue.dialogue
-                        if msg.role not in ["tool", "function"]
-                    ]
-                    conn.dialogue.dialogue = clean_history
+                    # Keep tool calls and their results together across turns.
+                    # Dialogue owns history pruning and tool-content budgets.
+                    logger.bind(tag=TAG).debug("普通对话保留完整工具历史")
 
                 else:
                     # 处理函数调用

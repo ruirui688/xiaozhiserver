@@ -112,6 +112,7 @@ def run_knowledge_intent(monkeypatch, tool_name, result, *, cancel=None):
         assert items[-1].sentence_type == SentenceType.LAST
         assert len([m for m in messages if m.role == "assistant" and m.content]) == 1
         assert "最后一句。" in "".join(conn.tts.queued_text())
+    return conn
 
 
 @pytest.mark.parametrize("cancel", ["during_retrieval", "stale_generation", "during_stream"])
@@ -120,3 +121,49 @@ def test_interrupted_knowledge_reply_does_not_resume(monkeypatch, cancel):
         monkeypatch, "search_from_local_knowledge",
         ActionResponse(Action.REQLLM, "来源：说明书\n支持蓝牙。", None), cancel=cancel,
     )
+
+
+@pytest.mark.parametrize("cached", [False, True])
+def test_knowledge_then_two_normal_turns_keep_valid_tool_history(monkeypatch, cached):
+    from core.providers.intent.intent_llm.intent_llm import IntentProvider
+
+    conn = run_knowledge_intent(
+        monkeypatch, "search_from_local_knowledge",
+        ActionResponse(Action.REQLLM, "来源：说明书\n支持蓝牙。", None),
+    )
+    intent = IntentProvider({})
+    decision = '{"function_call":{"name":"continue_chat"}}'
+    intent.llm = SimpleNamespace(response_no_stream=lambda **kw: decision)
+    intent.cache_manager = SimpleNamespace(
+        get=lambda *args: decision if cached else None,
+        set=lambda *args: None,
+    )
+    conn.intent = intent
+    captured = []
+
+    class StrictModel:
+        def response(self, session_id, dialogue):
+            pending = set()
+            for message in dialogue:
+                if message.get("tool_calls"):
+                    assert not pending
+                    pending = {call["id"] for call in message["tool_calls"]}
+                elif message["role"] == "tool":
+                    assert message["tool_call_id"] in pending
+                    pending.remove(message["tool_call_id"])
+                else:
+                    assert not pending, "model would reject orphan tool calls with HTTP 400"
+            assert not pending
+            captured.append(dialogue)
+            yield "好的，我听到了。"
+
+    conn.llm = StrictModel()
+    for question in ("谢谢你的说明", "再聊点别的吧"):
+        conn.reply_lifecycle.complete()
+        assert "continue_chat" in asyncio.run(
+            intent.detect_intent(conn, conn.dialogue.dialogue, question)
+        )
+        generation = conn.reply_lifecycle.begin()
+        assert conn.chat(question, reply_generation=generation) is True
+    assert len(captured) == 2
+    assert any(message["role"] == "tool" for message in captured[-1])
