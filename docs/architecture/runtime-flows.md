@@ -282,6 +282,8 @@ agent 绑定，并只在设备空闲时清理本地短期状态；Realtime 模�
 
 ## 6. 记忆与知识库
 
+`intent_llm` 的所有 `Action.REQLLM` 工具结果统一进入主对话流式回答：以相同 ID 写入 `assistant.tool_calls` 和 `tool.tool_call_id`，保留原用户轮次且关闭本次后续工具调用。设备 MCP、天气与知识库不得使用孤立 `tool` 消息，也不得将工具正文提升为 system prompt。打断或过期 generation 的结果不继续回复；后续普通聊天必须保留合法的工具消息配对。该路径复用已有回复生命周期和主 LLM 指标，不另建工具结果话术生成通道。
+
 - 记忆：Python 上报对话事件，Java 维护事实、候选与审计；`managed_memory` 随权威配置加载有界人物隔离摘要，普通问题和唤醒均在本地读取，不再逐轮请求记忆查询 API。有效期、失效与兼容性取舍见[记忆链路](memory-system-chain.md)。存储和会话结束后的整理保持不变。
 - 知识库：Web 上传原始文件，Java 持久化原件、解析分块并维护本机 Lucene 派生索引；Python 把用户原问和模型改写问句一并交给检索 API，再把结果交给 LLM。工具关闭的递归轮也必须拦截原始或 HTML 转义的 DSML 工具协议，不能送入字幕或 TTS。
 - 两条链路都必须受 agent、device、dataset 和 workspace 作用域限制；超时或外部模型失败不得关闭主 WebSocket。

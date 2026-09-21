@@ -1,4 +1,4 @@
-"""Knowledge intent replies must deliver text before the model finishes."""
+"""Intent tool replies stream through the main model with paired tool history."""
 import asyncio
 import json
 from concurrent.futures import ThreadPoolExecutor
@@ -12,7 +12,10 @@ from test_function_call_runtime_mode import (
 from core.handle import intentHandler
 
 
-@pytest.mark.parametrize("tool_name", ["search_from_local_knowledge", "search_from_ragflow"])
+@pytest.mark.parametrize("tool_name", [
+    "search_from_local_knowledge", "search_from_ragflow",
+    "self_get_device_status", "get_weather",
+])
 @pytest.mark.parametrize("empty", [False, True])
 def test_knowledge_intent_streams_before_answer_complete(monkeypatch, tool_name, empty):
     result = ActionResponse(
@@ -25,7 +28,7 @@ def test_knowledge_intent_streams_before_answer_complete(monkeypatch, tool_name,
     run_knowledge_intent(monkeypatch, tool_name, result)
 
 
-def run_knowledge_intent(monkeypatch, tool_name, result, *, cancel=None):
+def run_knowledge_intent(monkeypatch, tool_name, result, *, cancel=None, original_text="怎么连接？"):
     calls = []
 
     class StreamingLLM:
@@ -81,14 +84,14 @@ def run_knowledge_intent(monkeypatch, tool_name, result, *, cancel=None):
             conn.executor = SimpleNamespace(submit=submit)
             assert await intentHandler.process_intent_result(
                 conn,
-                json.dumps({"function_call": {"name": tool_name, "arguments": {"question": "怎么连接？"}}}),
-                "怎么连接？",
+                json.dumps({"function_call": {"name": tool_name, "arguments": {}}}),
+                original_text,
             )
             await asyncio.gather(*(asyncio.wrap_future(f) for f in futures))
 
     asyncio.run(scenario())
     messages = conn.dialogue.dialogue
-    assert [m.content for m in messages if m.role == "user"] == ["怎么连接？"]
+    assert [m.content for m in messages if m.role == "user"] == [original_text]
     if cancel in {"during_retrieval", "stale_generation"}:
         assert not calls
         assert not conn.tts.queued_text()
@@ -101,6 +104,8 @@ def run_knowledge_intent(monkeypatch, tool_name, result, *, cancel=None):
     tool_message = next(m for m in calls[0] if m["role"] == "tool")
     tool_call_message = next(m for m in calls[0] if m.get("tool_calls"))
     assert tool_message["tool_call_id"] == tool_call_message["tool_calls"][0]["id"]
+    assert tool_call_message["tool_calls"][0]["function"]["name"] == tool_name
+    assert not any(m["role"] == "system" and m["content"] == result.result for m in calls[0])
     if result.next_llm_system_prompt:
         assert any(m["role"] == "system" and m["content"] == result.next_llm_system_prompt for m in calls[0])
         assert not any(m.content == result.next_llm_system_prompt for m in messages)
@@ -115,21 +120,24 @@ def run_knowledge_intent(monkeypatch, tool_name, result, *, cancel=None):
     return conn
 
 
+@pytest.mark.parametrize("tool_name", ["search_from_local_knowledge", "self_get_device_status"])
 @pytest.mark.parametrize("cancel", ["during_retrieval", "stale_generation", "during_stream"])
-def test_interrupted_knowledge_reply_does_not_resume(monkeypatch, cancel):
+def test_interrupted_knowledge_reply_does_not_resume(monkeypatch, cancel, tool_name):
     run_knowledge_intent(
-        monkeypatch, "search_from_local_knowledge",
+        monkeypatch, tool_name,
         ActionResponse(Action.REQLLM, "来源：说明书\n支持蓝牙。", None), cancel=cancel,
     )
 
 
+@pytest.mark.parametrize("tool_name", ["search_from_local_knowledge", "self_get_device_status"])
 @pytest.mark.parametrize("cached", [False, True])
-def test_knowledge_then_two_normal_turns_keep_valid_tool_history(monkeypatch, cached):
+def test_knowledge_then_two_normal_turns_keep_valid_tool_history(monkeypatch, cached, tool_name):
     from core.providers.intent.intent_llm.intent_llm import IntentProvider
 
     conn = run_knowledge_intent(
-        monkeypatch, "search_from_local_knowledge",
-        ActionResponse(Action.REQLLM, "来源：说明书\n支持蓝牙。", None),
+        monkeypatch, tool_name,
+        ActionResponse(Action.REQLLM, '{"screen":{"brightness":100}}', None),
+        original_text="现在屏幕亮度是多少？",
     )
     intent = IntentProvider({})
     decision = '{"function_call":{"name":"continue_chat"}}'
@@ -158,7 +166,7 @@ def test_knowledge_then_two_normal_turns_keep_valid_tool_history(monkeypatch, ca
             yield "好的，我听到了。"
 
     conn.llm = StrictModel()
-    for question in ("谢谢你的说明", "再聊点别的吧"):
+    for question in ("都100了，你还怎么调高呢？", "再聊点别的吧"):
         conn.reply_lifecycle.complete()
         assert "continue_chat" in asyncio.run(
             intent.detect_intent(conn, conn.dialogue.dialogue, question)

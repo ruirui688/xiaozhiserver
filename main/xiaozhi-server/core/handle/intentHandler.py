@@ -299,36 +299,30 @@ async def process_intent_result(
                         if text is not None:
                             spoken = speak_txt(conn, text)
                     elif result.action == Action.REQLLM:  # 调用函数后再请求llm生成回复
-                        if function_name in {
-                            "search_from_local_knowledge", "search_from_ragflow"
-                        }:
-                            if (conn.client_abort
-                                    or conn.abort_generation != tool_abort_generation):
-                                return False
-                            return conn.chat(
-                                None,
-                                allow_tools=False,
-                                turn_id=turn_id,
-                                reply_generation=reply_generation,
-                                tool_result=result.result or "",
-                                tool_call={
-                                    "id": function_call_data["id"],
-                                    "type": "function",
-                                    "function": {
-                                        "name": function_name,
-                                        "arguments": function_args or "{}",
-                                    },
+                        # All tool results need a matching assistant tool_call.
+                        # Reuse the main reply lifecycle instead of appending an
+                        # orphan tool message and treating tool data as a prompt.
+                        if (conn.client_abort
+                                or conn.abort_generation != tool_abort_generation):
+                            return False
+                        return conn.chat(
+                            None,
+                            allow_tools=False,
+                            turn_id=turn_id,
+                            reply_generation=reply_generation,
+                            tool_result=result.result or "",
+                            tool_call={
+                                "id": function_call_data["id"],
+                                "type": "function",
+                                "function": {
+                                    "name": function_name,
+                                    "arguments": function_args or "{}",
                                 },
-                                trusted_follow_up_system_prompt=getattr(
-                                    result, "next_llm_system_prompt", None
-                                ),
-                            )
-                        text = result.result
-                        conn.dialogue.put(Message(role="tool", content=text))
-                        llm_result = conn.intent.replyResult(text, original_text)
-                        if llm_result is None:
-                            llm_result = text
-                        spoken = speak_txt(conn, llm_result)
+                            },
+                            trusted_follow_up_system_prompt=getattr(
+                                result, "next_llm_system_prompt", None
+                            ),
+                        )
                     elif (
                         result.action == Action.NOTFOUND
                         or result.action == Action.ERROR
