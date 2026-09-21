@@ -96,6 +96,7 @@ for required_file in install upgrade docker-compose.yml config_from_api.yaml rel
     echo "Release assets are incomplete: missing $required_file" >&2
     exit 1
   fi
+done
 
 RESOLVED_VERSION="$(manifest_value "$RELEASE_DIR/release-manifest.env" XIAOZHI_RELEASE_VERSION)"
 RELEASE_SOURCE_COMMIT="$(manifest_value "$RELEASE_DIR/release-manifest.env" XIAOZHI_RELEASE_SOURCE_COMMIT)"
