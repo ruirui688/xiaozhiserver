@@ -62,6 +62,22 @@ function makeApiRequest(config) {
  * 知识库管理相关API
  */
 export default {
+  listEntries(datasetId, documentId, params, callback, errorCallback) {
+    const query = new URLSearchParams(params).toString();
+    makeApiRequest({ url: `${getServiceUrl()}/datasets/${encodeURIComponent(datasetId)}/documents/${encodeURIComponent(documentId)}/entries?${query}`, method: 'GET', callback, errorCallback });
+  },
+  createEntry(datasetId, documentId, data, callback, errorCallback) {
+    makeApiRequest({ url: `${getServiceUrl()}/datasets/${encodeURIComponent(datasetId)}/documents/${encodeURIComponent(documentId)}/entries`, method: 'POST', data, headers: { 'Content-Type': 'application/json' }, callback, errorCallback });
+  },
+  updateEntry(datasetId, documentId, entryId, data, callback, errorCallback) {
+    makeApiRequest({ url: `${getServiceUrl()}/datasets/${encodeURIComponent(datasetId)}/documents/${encodeURIComponent(documentId)}/entries/${encodeURIComponent(entryId)}`, method: 'PUT', data, headers: { 'Content-Type': 'application/json' }, callback, errorCallback });
+  },
+  entryRevisions(datasetId, documentId, entryId, callback, errorCallback) {
+    makeApiRequest({ url: `${getServiceUrl()}/datasets/${encodeURIComponent(datasetId)}/documents/${encodeURIComponent(documentId)}/entries/${encodeURIComponent(entryId)}/revisions`, method: 'GET', callback, errorCallback });
+  },
+  restoreEntry(datasetId, documentId, entryId, data, callback, errorCallback) {
+    makeApiRequest({ url: `${getServiceUrl()}/datasets/${encodeURIComponent(datasetId)}/documents/${encodeURIComponent(documentId)}/entries/${encodeURIComponent(entryId)}/restore`, method: 'POST', data, headers: { 'Content-Type': 'application/json' }, callback, errorCallback });
+  },
   getKnowledgeBase(datasetId, callback, errorCallback) {
     makeApiRequest({
       url: `${getServiceUrl()}/datasets/${encodeURIComponent(datasetId)}`,

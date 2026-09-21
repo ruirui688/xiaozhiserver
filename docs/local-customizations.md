@@ -1,3 +1,13 @@
+---
+status: supporting
+owner: architecture
+last_verified: 2026-09-21
+source_paths:
+  - main/manager-api/src/main/java/xiaozhi/modules
+  - main/manager-web/src
+  - main/xiaozhi-server/core
+---
+
 # 本地定制记录
 
 本文档记录本项目相对官方 `xiaozhi-esp32-server` 的长期本地定制。同步官方 `upstream` 前必须先阅读本文档，避免误覆盖本地业务能力。
@@ -192,7 +202,11 @@
 定制模块：manager-api 本地知识库适配器、manager-web 知识库配置弹窗、xiaozhi-server 本地知识库工具
 改动原因：本地知识库原先对 md/txt 文档主要按固定字符数硬切，容易把标题、适用问题、正文或一句话切开；召回也只按空格/标点切词，中文整句没有空格时容易查不到。当前按知识库选择 AUTO/DIRECT/LLM_ENHANCED 处理策略，结构化记录保持原子边界，模型增强只用于非结构化正文；parser_config 只保存 llm_model_id 和处理参数，API Key、接口地址和上游模型名由模型管理统一维护。弱服务器不启用向量知识库：上传不生成 embedding，查询不调用向量/重排模型；召回同时匹配 content/question/answer，使用最多 12 个中文 n-gram 候选词，数据库候选默认 200、硬上限 800，再在 Java 内存中做词法评分。知识库高级设置只控制常规/展会模式、关键词拆分级别、最大召回数和最低匹配度；旧 semantic 配置仅兼容读取。2026-07 进一步固定 parserConfig 字符串/DTO 边界，并把本地上传改为“请求内验收并创建 RUNNING 记录、后台处理、数据库持久化进度与失败原因”，页面无需阻塞等待且关闭重进仍能恢复状态。2026-08 参考 Onyx connector 模式增加知识库级可选动态数据源：只有显式绑定来源的本地知识库参与调度，人工知识库保持不变；网页来源以 ETag/Last-Modified/内容哈希增量同步，候选版本切片成功后才在事务内替换正式版本，旧版本禁用保留且不参与召回；同步运行、失败退避和脱敏错误持久化，公网 URL 每次抓取及重定向都必须通过 SSRF 校验。智能体编辑通过显式 hydration 恢复知识库绑定和 queryPolicy，禁止旧 prop、乱序列表或程序化 clearSelection 抹掉选择；知识结果、工具历史和工具描述使用分域预算，且知识工具结果标记为不可信参考数据，不得当作指令。
 关键文件：
-  - 2026-08：上传原件保存到持久化卷，召回改为用户原问 + 模型改写双路查询、确定性同义扩展和内嵌 Lucene CJK/BM25；结构化切片额外区分主实体名称、价格属性与搭配关系，普通“多少钱/单独点”查询不能再被辅助提及或无关“单独”描述压过直接商品记录。MySQL 切片保留为管理兼容与索引重建桥，索引 schema 变化自动惰性重建，索引故障才走有界 SQL 降级。空召回后的禁用工具轮也必须拦截原始/HTML 转义 DSML，禁止协议文本进入字幕或 TTS。
+  - 2026-08：上传原件保存到持久化卷，召回改为用户原问 + 模型改写双路查询、确定性同义扩展和内嵌 Lucene CJK/BM25；结构化切片额外区分主实体名称、价格属性与搭配关系，普通“多少钱/单独点”查询不能再被辅助提及或无关“单独”描述压过直接商品记录。空召回后的禁用工具轮也必须拦截原始/HTML 转义 DSML，禁止协议文本进入字幕或 TTS。
+  - 2026-09：本地人工文档提供文本/问答条目的新增、编辑、停用、恢复和历史版本恢复。原文件不改，MySQL 当前条目及 revision 是修订权威；保留权限、归属、expectedVersion 与文档锁，恢复生成新版本。Lucene 按 contentVersion 惰性重建，失败回退数据库且不回传旧正文。动态来源和 RAGFlow 只读；不提供替换原文件合并人工修改，旧文档无需原件即可编辑。
+  - main/manager-api/src/main/java/xiaozhi/modules/knowledge/service/KnowledgeEntryService.java
+  - main/manager-api/src/main/java/xiaozhi/modules/knowledge/controller/KnowledgeEntryController.java
+  - main/manager-web/src/components/knowledge/FilePreviewDialog.vue
   - main/manager-api/src/main/java/xiaozhi/modules/knowledge/rag/impl/LocalKnowledgeAdapter.java
   - main/manager-api/src/main/java/xiaozhi/modules/knowledge/dao/KnowledgeChunkDao.java
   - main/manager-api/src/main/resources/mapper/knowledge/KnowledgeChunkDao.xml
@@ -933,29 +947,21 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 官方同步时的处理规则：必须保留设备级 speech_input_mode/speech_output_mode 与运行时 speech_routing.input/output 的 server/device/auto 契约，默认 server/server；设备能力只来自当前已认证 WebSocket 的 hello features.speech，策略与能力解析后的 speech_route 才是当前连接实际路由。显式 device 缺能力必须报 incompatible_route，auto 只在能力完整时选择设备端；设备 TTS 必须同时声明 playback ACK，没有 ACK 时不能声称设备已播放。设备 ASR 只接受 listen.detect 的 source=device_asr、final=true、受校验 turn_id 和非空文本，必须保留幂等缓存、速率限制、speech_asr_ack 和正文日志脱敏。设备 TTS 必须继续通过现有 generation/TTS 队列发送 text/text_end，等待 played/failed/aborted tts_ack；只有 played 正常完成，失败、Abort、文件输入或超时不能伪造完成，也不得在同一半轮切回服务端合成。四种传统输入/输出组合必须继续复用 SemanticCenter、LLM、工具和聊天边界；Realtime 与任一实际设备端语音路由不兼容，不得混合。后台策略更新只能在空闲安全轮次构造候选管线后热切换，失败恢复旧管线；固件能力变化需要重连重新协商。管理端更新必须保留 Workspace 写权限与事务提交后按设备刷新，日志不得记录设备 ASR/TTS 正文、Token、密钥或完整私有配置。
 ```
 
-## 47. 常驻 DeepSeek Harness 与按资源启用的自主维护
+## 47. 保留 Harness 后台，移除管理端界面
 
 ```text
-定制模块：manager-api 维护控制面、manager-web 按资源策略页、生产常驻 maintenance-agent
-改动原因：DeepSeek Harness 是每次部署都需要可用的核心维护工作台，因此 maintenance-agent 随生产服务常驻并使用同版本镜像；具体知识库和智能体的自主维护仍按资源显式启用，不能演变成拥有数据库和 Shell 权限的后台通用 Agent，也不能默认扩散到全部资源。
+定制模块：manager-api 维护控制面、production maintenance-agent；manager-web 已移除 Harness UI
+改动原因：用户不再需要任何 Harness 界面。移除知识库和记忆管理中的按钮、原生 Console、策略、审批、审计组件及前端请求，但不擅自停止后台策略或删除服务数据。
 关键文件：
   - main/manager-api/src/main/java/xiaozhi/modules/maintenance/
-  - main/manager-api/src/main/resources/db/changelog/202608252130.sql
-  - main/manager-api/src/main/resources/db/changelog/202608261600.sql
-  - main/manager-api/src/main/resources/db/changelog/202608261700.sql
-  - main/manager-api/src/main/resources/db/changelog/202608261715.sql
-  - main/manager-web/src/components/maintenance/MaintenancePolicyPanel.vue
-  - main/manager-web/src/components/maintenance/NativeHarnessPanel.vue
-  - main/manager-web/src/components/maintenance/MaintenanceProposalPanel.vue
-  - main/manager-web/src/components/maintenance/MaintenanceRunPanel.vue
+  - main/manager-web/src/views/KnowledgeFileUpload.vue
+  - main/manager-web/src/views/MemoryManagement.vue
   - main/maintenance-agent/
-  - scripts/acr-build-push-maintenance-agent
   - deploy/production/docker-compose.yml
 是否允许被官方覆盖：否
-官方同步时的处理规则：必须保留 maintenance-agent 作为生产常驻核心服务，安装和升级始终拉取同版本镜像、生成内部服务密钥并等待其健康；不得恢复成默认关闭的 Compose profile。Manager API 继续作为资源权限、策略、月度运行上限、提案审批和最终写入的唯一权威。人工交互必须使用 DeepSeek Harness 官方 Web Console，并以内嵌 iframe 出现在 manager-web 当前资源工作台；Manager Web 不得重新实现 Harness 的聊天、消息、会话新建、重命名或删除。官方 Console 必须通过 manager-web 同源 `/maintenance-console/` 暴露，网关确定性改写其绝对 `/api`、`/assets`、`/plugins` 路径，宿主只允许回环端口反代；启动使用一次性 code、限定到该前缀的 HttpOnly Cookie、Manager origin 写请求校验和同源 `frame-ancestors`，不得再要求第二个公开域名。唯一提案回调必须同时验证服务器共享密钥与绑定当前 audit run 的 HMAC 能力令牌。Harness 原生会话状态按资源哈希保存在专用容器卷；凭据、快照、完整组装提示词和模型隐藏推理不得写入该卷。定时/手动维护仍走有界后台运行，`ai_maintenance_run` 和脱敏事件作为外层审计，不得伪装成原生聊天消息；现有 conversation/message 表只服务兼容的后台上下文，不得作为原生 Console 的替代实现。知识维护按 dataset opt-in，仅超级管理员本人或超级管理员团队成员可以为官方知识库以及其有写权限的工作空间知识库配置，普通团队不得开启；自动采纳必须匹配可信域名并再次通过公网 URL/SSRF 校验，然后复用 KnowledgeSourceService 现有发布链。记忆维护按 agent opt-in、禁止联网和 ADD，所有 UPDATE/ARCHIVE/DELETE 必须人工批准并通过 MemoryService 留 revision。原生 Console 唯一产品写入桥是 `submit_maintenance_proposals`，且只进入待审批队列。维护策略必须显式引用模型管理中已启用、测试通过的 DeepSeek LLM，只保存模型 ID；运行凭据只允许通过内部鉴权请求短暂进入 Harness 进程内存，不得另存第二份模型密钥。维护镜像必须继续使用统一镜像源、600 秒 pip 超时以及 BuildKit pip/npm 缓存。
-知识提案批准后必须先保持 `APPLYING`，事务提交后立即触发连接器；只有文档抓取、切片和原子发布成功才能回写 `APPLIED`，失败必须回写 `FAILED`，不得把“创建来源”伪装成“已入库”。网页运行日志必须来自 `ai_maintenance_run_event` 中可恢复、可增量读取的脱敏里程碑，禁止直接透传容器 stdout、完整提示词、模型思维过程、网页正文或凭据。
-平台页面只保留一个“Harness 维护”入口：弹窗主体是原生 Console iframe，提案审批和运行审计作为 Manager 外层能力打开，不得插入或改写原生消息。策略设置从同一工作台进入。知识维护必须保留策略级 `custom_prompt`；自定义提示词只属于业务质量指导，不得取消固定的安全、审批和配额合同。页面不得透传思维过程、原始模型日志、组装后的完整提示词或凭据。
-过时动态来源只能通过带精确 sourceId 的 `REMOVE_SOURCE` 待审批提案淘汰；即使启用可信域名自动采纳也不得自动删除，批准后必须复用 KnowledgeSourceService 删除来源、动态文档和统计，不能直接操作知识表。
+官方同步时的处理规则：不得重新加入 Harness UI 或自动恢复其前端请求；普通记忆管理、知识编辑、动态数据源、召回测试必须保留。移除界面不改变部署拓扑、后台接口、策略、提案、审计和原生会话数据；已启用策略不会自动停止，后台停用需要另行授权。Manager API 继续作为权限、配额、审批和最终写入权威。知识维护按 dataset opt-in，记忆维护按 agent opt-in；记忆不能联网或 ADD，UPDATE/ARCHIVE/DELETE 必须人工批准并保留 revision。原生 Console 后台桥只接受经过校验的待审批提案，不能因界面缺失自动批准。
+维护策略只保存已启用且测试通过的托管 DeepSeek 模型 ID，运行凭据仅存在本轮进程内存，不复制 API Key。保留共享密钥与绑定 audit run 的 HMAC 能力验证、SSRF、公网 URL/可信域名和配额边界。维护镜像和缓存策略不变。
+知识提案批准后保持 APPLYING，事务提交后调用现有连接器，只有抓取、切片和原子发布成功才回写 APPLIED；失败为 FAILED，不伪装入库。REMOVE_SOURCE 必须有精确 sourceId 且人工批准，自动模式不得删除来源。custom_prompt 不能覆盖安全、审批和配额合同。后台日志继续脱敏，不能保存或透传正文、完整提示词、隐藏推理或凭据。
 ```
 
 ## 48. 智能体运行监控摘要

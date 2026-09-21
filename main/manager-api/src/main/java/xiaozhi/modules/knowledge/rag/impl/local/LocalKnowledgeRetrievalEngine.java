@@ -14,6 +14,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 
 import lombok.extern.slf4j.Slf4j;
 import xiaozhi.modules.knowledge.dao.DocumentDao;
@@ -57,24 +58,26 @@ public class LocalKnowledgeRetrievalEngine {
     }
 
     private void ensureIndex(List<String> datasetIds, List<String> documentIds) {
-        if (index.containsAll(datasetIds, documentIds)) {
+        if (datasetIds == null || datasetIds.isEmpty()) {
             return;
         }
-        List<KnowledgeChunkEntity> chunks = chunkDao.selectIndexableChunks(datasetIds, documentIds);
-        if (chunks == null || chunks.isEmpty()) {
-            return;
+        QueryWrapper<DocumentEntity> query = new QueryWrapper<DocumentEntity>()
+                .in("dataset_id", datasetIds).eq("run", "DONE")
+                .and(w -> w.isNull("enabled").or().eq("enabled", 1));
+        if (documentIds != null && !documentIds.isEmpty()) {
+            query.in("document_id", documentIds);
         }
-        Map<String, DocumentEntity> documents = loadDocs(chunks);
-        chunks.stream().collect(Collectors.groupingBy(
-                chunk -> scopeId(chunk.getDatasetId(), chunk.getDocumentId()),
-                LinkedHashMap::new,
-                Collectors.toList()))
-                .forEach((scope, documentChunks) -> {
-                    KnowledgeChunkEntity first = documentChunks.get(0);
-                    DocumentEntity document = documents.get(first.getDocumentId());
-                    index.replaceDocument(first.getDatasetId(), first.getDocumentId(),
-                            document == null ? null : document.getName(), documentChunks);
-                });
+        List<DocumentEntity> documents = documentDao.selectList(query);
+        for (DocumentEntity document : index.staleDocuments(documents)) {
+            List<KnowledgeChunkEntity> chunks = chunkDao.selectIndexableChunks(
+                    List.of(document.getDatasetId()), List.of(document.getDocumentId()));
+            long version = document.getContentVersion() == null ? 0L : document.getContentVersion();
+            index.replaceDocument(document.getDatasetId(), document.getDocumentId(), document.getName(), chunks, version);
+            // A concurrent edit must retain its dirty marker and newer version.
+            documentDao.update(null, new UpdateWrapper<DocumentEntity>()
+                    .eq("dataset_id", document.getDatasetId()).eq("document_id", document.getDocumentId())
+                    .eq("content_version", version).set("index_dirty", 0));
+        }
     }
 
     private RetrievalDTO.ResultVO buildLuceneResult(List<LocalKnowledgeLuceneIndex.SearchHit> candidates,
@@ -82,6 +85,7 @@ public class LocalKnowledgeRetrievalEngine {
         if (candidates == null || candidates.isEmpty()) {
             return emptyResult();
         }
+        candidates = authoritativeHits(candidates);
         Map<String, DocumentEntity> documents = loadDocs(candidates.stream()
                 .map(LocalKnowledgeLuceneIndex.SearchHit::chunk)
                 .toList());
@@ -94,7 +98,7 @@ public class LocalKnowledgeRetrievalEngine {
                 ScoredChunk::score);
 
         List<ScoredChunk> scored = candidates.stream()
-                .filter(hit -> isEnabledDocument(documents.get(hit.chunk().getDocumentId())))
+                .filter(hit -> isEnabledDocument(documents.get(scopeId(hit.chunk().getDatasetId(), hit.chunk().getDocumentId()))))
                 .map(hit -> {
                     float lexicalScore = Math.max(
                             lexical.score(rawQuestion, hit.chunk(), rawTerms),
@@ -126,13 +130,14 @@ public class LocalKnowledgeRetrievalEngine {
                 item -> structuredText(item.chunk()),
                 ScoredChunk::score);
         List<ScoredChunk> scored = chunks.stream()
-                .filter(chunk -> isEnabledDocument(documents.get(chunk.getDocumentId())))
+                .filter(chunk -> !Integer.valueOf(0).equals(chunk.getEnabled()))
+                .filter(chunk -> isEnabledDocument(documents.get(scopeId(chunk.getDatasetId(), chunk.getDocumentId()))))
                 .map(chunk -> {
                     float score = expandedQueries.stream()
                             .map(query -> lexical.score(query, chunk, lexical.tokenize(query)))
                             .max(Float::compare)
                             .orElse(0F);
-                    DocumentEntity document = documents.get(chunk.getDocumentId());
+                    DocumentEntity document = documents.get(scopeId(chunk.getDatasetId(), chunk.getDocumentId()));
                     return new ScoredChunk(chunk, document == null ? null : document.getName(), score, score);
                 })
                 .filter(item -> StringUtils.isBlank(rawQuestion) || item.score() >= options.threshold())
@@ -140,6 +145,36 @@ public class LocalKnowledgeRetrievalEngine {
                 .limit(options.resultLimit())
                 .toList();
         return toResult(scored, documents);
+    }
+
+    private List<LocalKnowledgeLuceneIndex.SearchHit> authoritativeHits(
+            List<LocalKnowledgeLuceneIndex.SearchHit> hits) {
+        // Never return stale/disabled content even if another process edits
+        // between version checking and searching this local index.
+        List<KnowledgeChunkEntity> rows = chunkDao.selectList(new QueryWrapper<KnowledgeChunkEntity>()
+                .in("dataset_id", hits.stream().map(h -> h.chunk().getDatasetId()).distinct().toList())
+                .in("document_id", hits.stream().map(h -> h.chunk().getDocumentId()).distinct().toList())
+                .in("chunk_id", hits.stream().map(h -> h.chunk().getChunkId()).distinct().toList()));
+        Map<String, KnowledgeChunkEntity> current = rows.stream().collect(Collectors.toMap(
+                this::chunkScope, Function.identity(), (left, right) -> left));
+        List<LocalKnowledgeLuceneIndex.SearchHit> result = new ArrayList<>();
+        for (LocalKnowledgeLuceneIndex.SearchHit hit : hits) {
+            KnowledgeChunkEntity row = current.get(chunkScope(hit.chunk()));
+            if (row == null || Integer.valueOf(0).equals(row.getEnabled())) {
+                continue;
+            }
+            if (!java.util.Objects.equals(row.getContent(), hit.chunk().getContent())
+                    || !StringUtils.defaultString(row.getQuestion()).equals(StringUtils.defaultString(hit.chunk().getQuestion()))
+                    || !StringUtils.defaultString(row.getAnswer()).equals(StringUtils.defaultString(hit.chunk().getAnswer()))) {
+                throw new IllegalStateException("知识条目在索引查询期间已更新");
+            }
+            result.add(new LocalKnowledgeLuceneIndex.SearchHit(row, hit.documentName(), hit.score()));
+        }
+        return result;
+    }
+
+    private String chunkScope(KnowledgeChunkEntity chunk) {
+        return scopeId(chunk.getDatasetId(), chunk.getDocumentId()) + ":" + chunk.getChunkId();
     }
 
     private List<KnowledgeChunkEntity> loadFallbackCandidates(RetrievalDTO.TestReq req,
@@ -165,7 +200,8 @@ public class LocalKnowledgeRetrievalEngine {
         }
         for (KnowledgeChunkEntity chunk : chunks) {
             if (chunk != null) {
-                target.putIfAbsent(StringUtils.defaultIfBlank(chunk.getChunkId(), chunk.getId()), chunk);
+                target.putIfAbsent(scopeId(chunk.getDatasetId(), chunk.getDocumentId()) + ":"
+                        + StringUtils.defaultIfBlank(chunk.getChunkId(), chunk.getId()), chunk);
             }
         }
     }
@@ -175,7 +211,7 @@ public class LocalKnowledgeRetrievalEngine {
         int position = 0;
         for (ScoredChunk item : scored) {
             KnowledgeChunkEntity chunk = item.chunk();
-            DocumentEntity document = documents.get(chunk.getDocumentId());
+            DocumentEntity document = documents.get(scopeId(chunk.getDatasetId(), chunk.getDocumentId()));
             hits.add(RetrievalDTO.HitVO.builder()
                     .id(chunk.getChunkId())
                     .content(chunk.getContent())
@@ -190,12 +226,12 @@ public class LocalKnowledgeRetrievalEngine {
                     .build());
         }
         Map<String, Long> counts = scored.stream().collect(Collectors.groupingBy(
-                item -> item.chunk().getDocumentId(), LinkedHashMap::new, Collectors.counting()));
+                item -> scopeId(item.chunk().getDatasetId(), item.chunk().getDocumentId()), LinkedHashMap::new, Collectors.counting()));
         List<RetrievalDTO.DocAggVO> docAggs = counts.entrySet().stream()
                 .map(entry -> {
                     DocumentEntity document = documents.get(entry.getKey());
                     return RetrievalDTO.DocAggVO.builder()
-                            .docId(entry.getKey())
+                            .docId(document.getDocumentId())
                             .docName(document == null ? entry.getKey() : document.getName())
                             .count(entry.getValue().intValue())
                             .build();
@@ -225,9 +261,11 @@ public class LocalKnowledgeRetrievalEngine {
         if (documentIds.isEmpty()) {
             return Map.of();
         }
-        return documentDao.selectList(new QueryWrapper<DocumentEntity>().in("document_id", documentIds))
+        return documentDao.selectList(new QueryWrapper<DocumentEntity>().in("document_id", documentIds)
+                        .in("dataset_id", chunks.stream().map(KnowledgeChunkEntity::getDatasetId).distinct().toList()))
                 .stream()
-                .collect(Collectors.toMap(DocumentEntity::getDocumentId, Function.identity(), (left, right) -> left));
+                .collect(Collectors.toMap(doc -> scopeId(doc.getDatasetId(), doc.getDocumentId()),
+                        Function.identity(), (left, right) -> left));
     }
 
     private boolean isEnabledDocument(DocumentEntity document) {

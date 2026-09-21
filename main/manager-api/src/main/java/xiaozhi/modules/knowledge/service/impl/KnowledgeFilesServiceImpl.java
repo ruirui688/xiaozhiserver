@@ -54,6 +54,10 @@ public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, Docu
 
     private final KnowledgeBaseService knowledgeBaseService;
     private final DocumentDao documentDao;
+    @Autowired
+    private xiaozhi.modules.knowledge.service.KnowledgeEntryCleanupService entryCleanup;
+    @Autowired
+    private xiaozhi.modules.knowledge.dao.KnowledgeBaseDao entryBaseDao;
     private final ObjectMapper objectMapper;
     private final RedisUtils redisUtils;
 
@@ -621,6 +625,10 @@ public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, Docu
      */
     @Transactional(rollbackFor = Exception.class)
     public void deleteDocumentShadows(List<String> documentIds, String datasetId, Long chunkDelta, Long tokenDelta) {
+        List<DocumentEntity> locked = entryCleanup.delete(datasetId, documentIds);
+        // Totals must reflect edits committed while the remote/local delete was in progress.
+        chunkDelta = locked.stream().mapToLong(d -> d.getChunkCount() == null ? 0 : d.getChunkCount()).sum();
+        tokenDelta = locked.stream().mapToLong(d -> d.getTokenCount() == null ? 0 : d.getTokenCount()).sum();
         // 1. 物理删除记录
         int deleted = documentDao.delete(
                 new QueryWrapper<DocumentEntity>()
@@ -629,7 +637,7 @@ public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, Docu
 
         if (deleted > 0) {
             // 2. 同步更新数据集统计信息
-            knowledgeBaseService.updateStatistics(datasetId, -documentIds.size(), -chunkDelta, -tokenDelta);
+            knowledgeBaseService.updateStatistics(datasetId, -deleted, -chunkDelta, -tokenDelta);
             log.info("已同步扣减数据集统计: datasetId={}, chunks={}, tokens={}", datasetId, chunkDelta, tokenDelta);
         }
     }
@@ -859,6 +867,9 @@ public class KnowledgeFilesServiceImpl extends BaseServiceImpl<DocumentDao, Docu
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deleteDocumentsByDatasetId(String datasetId) {
+        // Match the editor's dataset -> document -> chunk lock ordering for cascading deletes.
+        entryBaseDao.selectOne(new QueryWrapper<xiaozhi.modules.knowledge.entity.KnowledgeBaseEntity>()
+                .eq("dataset_id", datasetId).last("FOR UPDATE"));
         log.info("级联清理数据集文档: datasetId={}", datasetId);
         List<DocumentEntity> list = documentDao
                 .selectList(new QueryWrapper<DocumentEntity>().eq("dataset_id", datasetId));

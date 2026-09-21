@@ -99,6 +99,8 @@ public class ShiroConfig {
         // 知识库动态来源包含外部 URL 与同步写操作，必须显式认证并在 Controller 再做 workspace 鉴权。
         filterMap.put("/datasets/*/sources", "oauth2");
         filterMap.put("/datasets/*/sources/**", "oauth2");
+        filterMap.put("/datasets/*/documents/*/entries", "oauth2");
+        filterMap.put("/datasets/*/documents/*/entries/**", "oauth2");
         // Harness 维护控制面包含外部搜索与记忆变更提案，必须登录并在 Controller 校验资源归属。
         filterMap.put("/maintenance/**", "oauth2");
         filterMap.put("/agent/*/feishu/events", "anon");

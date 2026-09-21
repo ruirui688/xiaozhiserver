@@ -74,7 +74,7 @@
                     </el-button>
                     <el-button size="mini" type="text" @click="handleViewSlices(scope.row)"
                       v-if="scope.row.sliceCount && scope.row.sliceCount > 0">
-                      {{ $t('knowledgeFileUpload.viewSlices') }}
+                      {{ readOnly ? '查看内容' : '管理内容' }}
                     </el-button>
                     <el-button v-if="!readOnly" size="mini" type="text" @click="handleDelete(scope.row)"
                       :disabled="scope.row.parseStatusCode === 1">
@@ -95,9 +95,6 @@
                 </el-button>
                 <el-button v-if="!readOnly" type="warning" icon="el-icon-connection" @click="sourcePanelVisible = true">
                   动态数据源
-                </el-button>
-                <el-button v-if="!readOnly && canManageMaintenance" type="warning" icon="el-icon-magic-stick" @click="openMaintenanceWorkbench">
-                  Harness 维护
                 </el-button>
                 <el-button v-if="!readOnly" type="danger" @click="handleBatchDelete" :disabled="selectedFiles.length === 0">
                   {{ $t('knowledgeFileUpload.batchDelete') }}
@@ -148,6 +145,9 @@
       :dataset-id="datasetId"
       :document-id="currentDocumentId"
       :document-name="currentDocumentName"
+      :readonly="readOnly"
+      @changed="fetchFileList"
+      @retrieval-test="showRetrievalTestDialog"
       @close="sliceDialogVisible = false" />
 
     <knowledge-source-panel
@@ -155,27 +155,6 @@
       :dataset-id="datasetId"
       @close="sourcePanelVisible = false"
       @documents-changed="fetchFileList" />
-
-    <maintenance-policy-panel
-      :visible="maintenancePanelVisible"
-      resource-type="KNOWLEDGE"
-      :resource-id="datasetId"
-      @close="maintenancePanelVisible = false"
-      @open-workbench="openMaintenanceWorkbench"
-      @changed="fetchFileList" />
-
-    <el-dialog title="Harness 知识维护" :visible.sync="maintenanceWorkbenchVisible" width="92%" top="3vh"
-      append-to-body :close-on-click-modal="false" custom-class="maintenance-workbench-dialog">
-      <div class="maintenance-dialog-toolbar">
-        <span>当前知识库：{{ knowledgeBaseName || datasetId }}</span>
-        <el-button size="small" icon="el-icon-setting" @click="maintenancePanelVisible = true">维护设置</el-button>
-      </div>
-      <native-harness-panel
-        :active="maintenanceWorkbenchVisible"
-        resource-type="KNOWLEDGE"
-        :resource-id="datasetId"
-        @changed="fetchFileList" />
-    </el-dialog>
 
     <!-- 召回测试弹窗 -->
     <el-dialog :title="$t('knowledgeFileUpload.retrievalTest')" :visible.sync="retrievalTestDialogVisible"
@@ -236,11 +215,9 @@ import VersionFooter from "@/components/VersionFooter.vue";
 import FileUploadPanel from "@/components/knowledge/FileUploadPanel.vue";
 import FilePreviewDialog from "@/components/knowledge/FilePreviewDialog.vue";
 import KnowledgeSourcePanel from "@/components/knowledge/KnowledgeSourcePanel.vue";
-import MaintenancePolicyPanel from "@/components/maintenance/MaintenancePolicyPanel.vue";
-import NativeHarnessPanel from "@/components/maintenance/NativeHarnessPanel.vue";
 
 export default {
-  components: { HeaderBar, VersionFooter, FileUploadPanel, FilePreviewDialog, KnowledgeSourcePanel, MaintenancePolicyPanel, NativeHarnessPanel },
+  components: { HeaderBar, VersionFooter, FileUploadPanel, FilePreviewDialog, KnowledgeSourcePanel },
   data() {
     return {
       datasetId: '',
@@ -256,9 +233,6 @@ export default {
       total: 0,
       uploadDialogVisible: false,
       sourcePanelVisible: false,
-      maintenancePanelVisible: false,
-      maintenanceWorkbenchVisible: false,
-      canManageMaintenance: false,
       uploadUrl: '',
       isAllSelected: false,
 
@@ -285,7 +259,6 @@ export default {
     this.knowledgeBaseName = this.$route.query.knowledgeBaseName || '';
     this.readOnly = this.$route.query.readOnly === '1';
     this.uploadUrl = `${Api.getServiceUrl()}/api/v1/documents/upload`;
-    this.fetchKnowledgeBaseAccess();
     this.fetchFileList();
   },
 
@@ -313,18 +286,6 @@ export default {
     }
   },
   methods: {
-    openMaintenanceWorkbench() {
-      this.maintenancePanelVisible = false
-      this.maintenanceWorkbenchVisible = true
-    },
-    fetchKnowledgeBaseAccess() {
-      KnowledgeBaseAPI.getKnowledgeBase(this.datasetId, ({ data }) => {
-        const dataset = data && data.code === 0 ? data.data : null;
-        this.canManageMaintenance = Boolean(dataset && dataset.canManageMaintenance);
-      }, () => {
-        this.canManageMaintenance = false;
-      });
-    },
     goBack() {
       this.$router.push('/knowledge-base-management');
     },
@@ -1362,14 +1323,6 @@ export default {
 :deep(.el-dialog) {
   border-radius: 16px !important;
   overflow: hidden;
-}
-
-.maintenance-dialog-toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin: -8px 0 12px;
-  color: #606266;
 }
 
 @media (min-width: 1144px) {

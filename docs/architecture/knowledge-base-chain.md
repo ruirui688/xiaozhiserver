@@ -56,6 +56,13 @@ KnowledgeFilesController (/datasets/{id}/documents)
   POST   /chunks                          触发解析/分块
   GET    /documents/{id}/chunks           查看分块列表
   POST   /retrieval-test                  检索测试
+
+KnowledgeEntryController (/datasets/{datasetId}/documents/{documentId}/entries)
+  GET    /entries                         搜索和分页查看当前条目及编辑能力
+  POST   /entries                         手动新增文本/问答条目
+  PUT    /entries/{entryId}               修改正文/问答/启停（expectedVersion）
+  GET    /entries/{entryId}/revisions     查看历史版本
+  POST   /entries/{entryId}/restore       将历史内容恢复为新版本
 ```
 
 ### 2.2 资源范围和维护权限
@@ -138,7 +145,8 @@ LocalKnowledge 上传请求只完成文件校验、安全暂存、`RUNNING` 文�
 页面可以关闭或离开，重新进入后继续从文档列表读取排队、处理中、`DONE` 或 `FAIL` 状态；成功时进度为 100%，
 失败时保留脱敏后的错误原因。任务完成、失败或被拒绝后都必须清理暂存文件，服务异常重启遗留的无进展任务由超时巡检标记失败，
 不能永久停在处理中。页面“解析”及 `POST /chunks` 只验证上传阶段生成的切片是否仍然存在，不能把数据库切片拼接成有损原文后重新切片。
-修改切片模型或参数、或发现切片缺失时，必须删除旧文档并重新上传原文件，再通过“查看切片”和“召回测试”验证。
+修改处理策略不会自动重新切片；手动修正已有内容可以直接使用“管理内容”，不需要重新上传。
+需要按新处理策略重新解析时应另行上传原文件，不支持替换原文件并自动合并人工修改；删除旧文档前应确认其中的人工修改和版本历史不再需要。
 RAGFlow 仍通过 `POST /chunks` 异步启动远端解析，状态可先进入 `RUNNING`。
 
 知识库新增和更新时，`parserConfig` 字符串在 manager-api 边界显式解码为
@@ -167,10 +175,14 @@ LocalKnowledgeAdapter.retrievalTest()
    变化会触发从 MySQL DONE 切片惰性重建，不要求重新上传原文件
 ```
 
-原始文档是内容事实来源，Lucene 目录和 MySQL 切片都是可重建的派生/兼容数据；删除文档或知识库时同步删除其
-原件和索引。历史文档第一次查询时会从现有 DONE 切片惰性构建索引，但旧版本没有保留下来的原文件无法反向恢复，
-需要重新上传一次才进入文档原件目录。索引不可用时才降级到原有 MySQL 有界候选与 Java 词法评分，正常查询不扫描
-全量切片。
+原始文档保留上传时的原件，不随人工编辑重写。首次导入后，MySQL 当前条目和 revision 历史是人工修订的权威数据，
+Lucene 只是可从当前数据库内容重建的派生索引；不能重新解析原件覆盖人工编辑。删除文档或知识库同步清理其原件、
+索引和修订历史。历史文档即使没有保留原 Excel，也可直接编辑已有条目，不要求重新上传；缺失原件不能从切片反向恢复。
+
+条目保存提交后增加文档 contentVersion 并标记 indexDirty。检索时比较本进程 Lucene 版本和数据库权威版本，
+仅对版本不一致的文档惰性重建；清除 dirty 使用版本条件，不能吞掉并发编辑。停用条目不入索引，召回结果再次核对
+数据库正文及启用状态。索引异常或查询期间内容变化时回退数据库有界词法召回，不返回旧索引正文冒充保存后结果。
+保存响应为索引待更新，不声称索引已经发布成功；可通过召回测试触发重建并验证。
 
 本地知识库不生成切片 embedding，检索时也不调用 EmbeddingService、向量数据库或外部重排模型。旧
 `semantic_level`、`semantic_top_k`、`semantic_threshold` 仅作为滚动升级兼容输入，分别映射到
@@ -324,17 +336,28 @@ manager-api 生成知识搜索工具描述时不再注入酒类、酒具等特�
 | KnowledgeBaseDialog | `components/KnowledgeBaseDialog.vue` | 创建/编辑表单 |
 | KnowledgeFileUpload | `views/KnowledgeFileUpload.vue` | 文档列表 + 上传 |
 | FileUploadPanel | `components/knowledge/FileUploadPanel.vue` | 拖拽上传面板 |
-| FilePreviewDialog | `components/knowledge/FilePreviewDialog.vue` | 分块预览 |
+| FilePreviewDialog | `components/knowledge/FilePreviewDialog.vue` | 内容搜索、新增、编辑、启停、历史恢复 |
 | KnowledgeBaseSelectorDialog | `components/KnowledgeBaseSelectorDialog.vue` | 智能体选择 KB |
 | manager-mobile knowledge pages | `manager-mobile/src/pages/knowledge/` | 小程序知识库、文档、切片与召回测试 |
 
-### 6.2 上传限制
+### 6.2 内容编辑边界
+
+“管理内容”支持普通文本以及问题/答案成对编辑、手动新增、停用和恢复、历史版本查看及恢复。所有写入校验知识库写权限、
+文档和条目归属，使用文档锁与 expectedVersion 防止并发覆盖；恢复历史同样需要当前版本并产生递增的新版本。
+原正文在第一次编辑前保留为 revision，保存失败或冲突不能静默丢失编辑草稿。
+
+仅完成处理的本地人工文档可编辑。无写权限的官方知识库、动态来源文档和 RAGFlow 在此页面保持只读，并展示原因；
+动态内容应修改原始来源后同步，当前不提供人工修改合并或冲突解决。原文件替换合并编辑也不在本期支持范围。
+知识编辑由独立 KnowledgeEntryService 和编辑组件负责，文档上传主页面仅接入事件，不增加上传适配器的编辑职责。
+Harness 按钮、原生 Console、策略/审批/审计面板及关联前端请求已移除，普通动态数据源、召回测试不受影响。
+
+### 6.3 上传限制
 
 - 前端: 10MB 硬编码限制 → 后端同步 enforce `knowledge.max-upload-size` 配置 (默认 10MB)
 - 支持格式: .doc, .docx, .pdf, .txt, .md, .mdx, .csv, .xls, .xlsx, .ppt, .pptx, .json, .jsonl, .qa
 - 批量上传: 逐个文件 Promise.all
 
-### 6.3 智能体知识库绑定
+### 6.4 智能体知识库绑定
 
 智能体详情的 `functions` 同时承载普通插件映射和知识库映射，后端数据库中的 `paramInfo` 在详情响应中可能是
 JSON 字符串，而编辑组件内部使用对象。此前 `RoleEditDialog` 深度监听 `initialForm`：任一字段编辑触发
@@ -444,56 +467,19 @@ mysql> SELECT kb.name, count(d.id) as docs, count(c.id) as chunks
 mysql> SHOW INDEX FROM ai_rag_knowledge_chunk;
 ```
 
-## 11. 可选的 Harness 自主维护控制面
+## 11. 保留的 Harness 后台维护边界
 
-自主维护不是所有知识库的默认能力。运营人员必须在某一个本地知识库中单独启用
-`DISCOVERY_REVIEW` 或 `DISCOVERY_AUTO`；未配置策略的知识库保持 `OFF`，人工上传和既有召回链不变。
+manager-web 已移除全部 Harness 入口、原生 Console iframe、策略设置、提案审批、运行审计组件及其请求模块。
+这次变更只移除产品界面，不删除 maintenance-agent、后台接口、已有策略、提案、审计和原生会话数据，
+也不改变部署拓扑。**已启用的策略不会因界面移除自动停止**；若要停用后台服务或策略，应另行授权并明确目标。
+待审批提案不会因界面消失自动批准，已启用自动模式的后台流程仍按既有策略运行。
 
-```text
-按库策略/主题/可信域名/月度次数/托管 DeepSeek 模型 ID
-        ↓
-manager-api 生成有界快照并解析模型管理中的端点、模型名和凭据（不发送切片正文）
-        ↓ 内网 Bearer HTTP
-maintenance-agent → DeepSeek Harness → web_search（最多 3 次查询、2 次搜索模型使用）
-        ↓ 仅结构化 ADD_SOURCE 提案
-manager-api 校验公网 URL、去重、审批/可信域名
-        ↓ 批准后状态 APPLYING，事务提交后立即触发（不等待调度器）
-KnowledgeSourceService → 安全抓取 → 确定性切片 → 候选版本原子发布
-        ↓ 只有发布成功后
-提案状态 APPLIED + 文档/切片可见；失败则 FAILED 并保留原因
+后台知识维护仍按 dataset opt-in，未配置策略的知识库为 OFF；DISCOVERY_REVIEW 与 DISCOVERY_AUTO 保留原语义。
+Manager API 继续作为权限、月度运行上限、审批和最终写入的权威；maintenance-agent 不获得数据库、Shell 或宿主文件权限。
+凭据仅来自启用且测试通过的托管 DeepSeek 模型，并限于单次运行内存，不复制保存 API Key。
 
-人工维护：manager-web iframe → 官方 Harness Web Console（原生会话）
-        ↓ operator 明确确认后调用唯一桥接工具 submit_maintenance_proposals
-manager-api 待审批提案 → 复用同一校验、审批和发布链
-```
-
-Harness 没有数据库、Shell、编辑器、宿主源码或回调写权限。`web_fetch` 明确不挂载，避免运行容器成为
-可访问内网的 SSRF 原语。人工审批模式永不自动添加来源；自动模式也只接受显式白名单域名及其子域，
-并再次经过 `PublicUrlGuard`。业务数据库只保存策略、运行计数和字段白名单后的提案，不保存完整提示词、
-模型隐藏推理、原始响应或 Harness 容器日志。人工聊天由官方 Harness Console 自己管理，manager-web 不复制消息，
-也不使用 `ai_maintenance_message` 重建原生交互。
-
-网页中的“维护对话”不是容器 stdout 转发。`ai_maintenance_run_event` 持久化经过脱敏的有限状态事件，覆盖
-排队、快照、模型发现、提案保存、人工审批、网页抓取、切片和正式发布；前端按事件 ID 每 1 秒增量轮询，
-关闭后重新进入仍可恢复。事件不得保存完整提示词、模型思维过程、模型原始响应、网页正文、请求头或凭据。
-知识提案获批时不能提前标记为 `APPLIED`：先创建来源并标记 `APPLYING`，审批事务提交后立即启动连接器；
-连接器的 `INDEXED/UNCHANGED/FAILED` 最终事件负责回写提案状态。前端检测到 `APPLYING → APPLIED` 后刷新
-文档列表，因此“已入库”与正式召回版本使用同一事实边界。
-
-已启用策略的知识库默认进入原生 Harness 工作台。Harness 自己提供会话的新建、重命名、删除、历史消息和正常多轮
-交互，原生状态按资源哈希保存在 maintenance-agent 专用 volume；重新连接会刷新当前资源快照和临时模型凭据，
-不会用 Manager 的自制聊天协议替换原生会话。每次打开 Console 创建一个 `INTERACTIVE` 审计 run；只有 operator
-明确要求提交最终提案时，`submit_maintenance_proposals` 才把字段白名单后的结果送入 Manager 审批队列。
-定时和手动维护继续走后台批处理，以 `ai_maintenance_run` 和脱敏事件出现在外层“维护记录”中，而不伪装成聊天消息。
-`custom_prompt` 保存长期业务质量标准；它可以要求只选择当前版本、明确发布日期、官方来源等质量条件，但始终
-从属于固定的公网 URL、SSRF、输出结构和审批规则。候选结果在 Manager 的“审核提案”中展示标题、原始 URL、
-理由和证据；运营人员批准或拒绝后才进入业务写入链。
-智能体还可以针对快照中带精确 `sourceId` 的既有动态来源提出 `REMOVE_SOURCE`，但只能生成待审批提案；人工批准后
-Manager API 才删除该来源及其动态文档并更新统计。自动采纳模式永远不能自动执行删除提案。
-页面原样嵌入官方 Console，并在外层显示结构化候选与审计记录；Manager 不插入、隐藏或改写原生消息，也不显示
-模型隐藏推理、完整组装提示词、凭据或未经批准的网页正文。
-
-维护策略只持久化 `model_config_id`，不复制 API Key。每轮执行要求所选模型仍处于“已启用、测试通过”的
-DeepSeek LLM 状态；manager-api 只在内部鉴权请求中发送本轮临时运行配置，maintenance-agent 不写磁盘、
-不记录请求正文，只把凭据注入本轮自有 Harness 子进程。模型被停用、测试失败、删除或密钥失效时，
-该轮明确失败并保留审计记录，不会改用其他模型静默扣费。
+ADD_SOURCE 提案必须经过公网 URL/SSRF、可信域名和审批规则。批准后保持 APPLYING，事务提交后调用
+KnowledgeSourceService；只有文档抓取、切片和原子发布成功才回写 APPLIED，失败则 FAILED 并保留旧版本。
+REMOVE_SOURCE 必须精确引用 sourceId 并人工批准，即使可信域名自动模式也不能自动删除来源。
+custom_prompt 只是质量指导，不得取消安全、审批或配额规则。后台审计仅保存脱敏里程碑，不存放隐藏推理、
+完整提示词、网页正文、凭据或容器 stdout。现有内部 Console 接口及网关未在本轮停用，但管理端不再提供访问入口。

@@ -39,6 +39,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import xiaozhi.modules.knowledge.entity.KnowledgeChunkEntity;
+import xiaozhi.modules.knowledge.entity.DocumentEntity;
 
 /**
  * 本地知识库的内嵌磁盘索引。索引只保存可从原始文档重建的派生数据，
@@ -56,7 +57,9 @@ public class LocalKnowledgeLuceneIndex {
     private static final String FIELD_QUESTION = "question";
     private static final String FIELD_ANSWER = "answer";
     private static final String FIELD_DOCUMENT_NAME = "document_name";
-    private static final String SCHEMA_VERSION = "2";
+    private static final String FIELD_CONTENT_VERSION = "content_version";
+    private static final String FIELD_KIND = "record_kind";
+    private static final String SCHEMA_VERSION = "3";
 
     private final Path root;
     private final Analyzer analyzer;
@@ -74,6 +77,11 @@ public class LocalKnowledgeLuceneIndex {
 
     public synchronized void replaceDocument(String datasetId, String documentId, String documentName,
             List<KnowledgeChunkEntity> chunks) {
+        replaceDocument(datasetId, documentId, documentName, chunks, 0L);
+    }
+
+    public synchronized void replaceDocument(String datasetId, String documentId, String documentName,
+            List<KnowledgeChunkEntity> chunks, long contentVersion) {
         requireId(datasetId, "datasetId");
         requireId(documentId, "documentId");
         try {
@@ -83,15 +91,52 @@ public class LocalKnowledgeLuceneIndex {
                 writer.deleteDocuments(new Term(FIELD_SCOPE_ID, scopeId(datasetId, documentId)));
                 if (chunks != null) {
                     for (KnowledgeChunkEntity chunk : chunks) {
-                        if (chunk != null && StringUtils.isNotBlank(chunk.getChunkId())) {
+                        if (chunk != null && !Integer.valueOf(0).equals(chunk.getEnabled())
+                                && StringUtils.isNotBlank(chunk.getChunkId())) {
                             writer.addDocument(toDocument(datasetId, documentId, documentName, chunk));
                         }
                     }
                 }
+                // A marker also represents an empty/fully disabled document.
+                Document marker = new Document();
+                marker.add(new StringField(FIELD_SCOPE_ID, scopeId(datasetId, documentId), Field.Store.NO));
+                marker.add(new StringField(FIELD_DATASET_ID, datasetId, Field.Store.YES));
+                marker.add(new StringField(FIELD_DOCUMENT_ID, documentId, Field.Store.YES));
+                marker.add(new StringField(FIELD_SCHEMA_VERSION, SCHEMA_VERSION, Field.Store.NO));
+                marker.add(new StringField(FIELD_KIND, "version", Field.Store.NO));
+                marker.add(new StringField(FIELD_CONTENT_VERSION, Long.toString(contentVersion), Field.Store.YES));
+                writer.addDocument(marker);
                 writer.commit();
             }
         } catch (IOException e) {
             throw new IllegalStateException("更新本地知识库索引失败", e);
+        }
+    }
+
+    /** Compare each process's local index to authoritative DB versions. */
+    public List<DocumentEntity> staleDocuments(List<DocumentEntity> documents) {
+        if (documents.isEmpty() || !indexExists()) {
+            return documents;
+        }
+        try (Directory directory = FSDirectory.open(root);
+                DirectoryReader reader = DirectoryReader.open(directory)) {
+            IndexSearcher searcher = new IndexSearcher(reader);
+            List<DocumentEntity> stale = new ArrayList<>();
+            for (DocumentEntity document : documents) {
+                BooleanQuery query = new BooleanQuery.Builder()
+                        .add(filteredQuery(new TermQuery(new Term(FIELD_KIND, "version")),
+                                List.of(document.getDatasetId()), List.of(document.getDocumentId())), BooleanClause.Occur.MUST)
+                        .build();
+                TopDocs found = searcher.search(query, 1);
+                long expected = document.getContentVersion() == null ? 0L : document.getContentVersion();
+                if (found.scoreDocs.length == 0 || !Long.toString(expected).equals(
+                        searcher.storedFields().document(found.scoreDocs[0].doc).get(FIELD_CONTENT_VERSION))) {
+                    stale.add(document);
+                }
+            }
+            return stale;
+        } catch (IOException e) {
+            throw new IllegalStateException("读取知识条目索引版本失败", e);
         }
     }
 

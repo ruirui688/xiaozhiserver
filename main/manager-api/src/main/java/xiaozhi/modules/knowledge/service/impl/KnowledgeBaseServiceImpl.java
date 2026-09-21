@@ -3,7 +3,6 @@ package xiaozhi.modules.knowledge.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
@@ -53,12 +52,14 @@ import java.util.Map;
  * 集成 RAGFlow Adapter 与 Shadow DB 模式
  */
 @Service
-@AllArgsConstructor
+@lombok.RequiredArgsConstructor
 @Slf4j
 public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, KnowledgeBaseEntity>
         implements KnowledgeBaseService {
 
     private final KnowledgeBaseDao knowledgeBaseDao;
+    @org.springframework.beans.factory.annotation.Autowired
+    private xiaozhi.modules.knowledge.service.KnowledgeEntryCleanupService entryCleanup;
     private final KnowledgeChunkDao knowledgeChunkDao;
     private final DocumentDao documentDao;
     private final ModelConfigService modelConfigService;
@@ -439,7 +440,7 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
         }
 
         KnowledgeBaseEntity entity = knowledgeBaseDao
-                .selectOne(new QueryWrapper<KnowledgeBaseEntity>().eq("dataset_id", datasetId));
+                .selectOne(new QueryWrapper<KnowledgeBaseEntity>().eq("dataset_id", datasetId).last("FOR UPDATE"));
 
         // 1. 恢复 404 校验：找不到记录抛异常
         if (entity == null) {
@@ -476,6 +477,7 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
         // 3. Local Delete (Safe Order)
         // 恢复正确顺序：先删子表 (Chunks → Plugin Mapping → Documents)，再删主表 (Entity)
         if (apiDeleteSuccess) {
+            entryCleanup.delete(datasetId, null);
             // [Issue #13] 清理可能残留的本地知识库切片，防止适配器切换后产生孤立数据
             try {
                 int chunkDeleted = knowledgeChunkDao.delete(

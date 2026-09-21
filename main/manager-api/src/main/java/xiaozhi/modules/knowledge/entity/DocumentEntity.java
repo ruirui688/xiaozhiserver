@@ -95,6 +95,10 @@ public class DocumentEntity implements Serializable {
     @Schema(description = "是否启用 (0:禁用 1:启用)")
     private Integer enabled;
 
+    private Long contentVersion;
+
+    private Integer indexDirty;
+
     @Schema(description = "创建者")
     @TableField(fill = FieldFill.INSERT)
     private Long creator;

@@ -25,7 +25,6 @@
         <el-button size="small" type="danger" icon="el-icon-delete" :loading="clearLoading" :disabled="maintenanceBusy" @click="handleClear">清空记忆</el-button>
         <el-button size="small" icon="el-icon-edit" :disabled="maintenanceBusy" @click="showRemember = !showRemember">记住</el-button>
         <el-button size="small" icon="el-icon-delete" :disabled="maintenanceBusy" @click="showForget = !showForget">忘记</el-button>
-        <el-button size="small" type="warning" icon="el-icon-magic-stick" :disabled="maintenanceBusy" @click="openHarnessWorkbench">Harness 维护</el-button>
         <el-button size="small" icon="el-icon-refresh" @click="fetch" :loading="loading">刷新</el-button>
         <el-button size="small" icon="el-icon-back" @click="$router.push('/')">返回</el-button>
       </div>
@@ -181,28 +180,6 @@
       @cancel="editVisible = false"
     />
 
-    <MaintenancePolicyPanel
-      :visible="harnessPanelVisible"
-      resource-type="MEMORY"
-      :resource-id="agentId"
-      @close="harnessPanelVisible = false"
-      @open-workbench="openHarnessWorkbench"
-      @changed="fetch"
-    />
-
-    <el-dialog title="Harness 记忆维护" :visible.sync="harnessWorkbenchVisible" width="92%" top="3vh"
-      append-to-body :close-on-click-modal="false" custom-class="maintenance-workbench-dialog">
-      <div class="harness-dialog-toolbar">
-        <span>当前智能体：{{ agentName || agentId }}</span>
-        <el-button size="small" icon="el-icon-setting" @click="harnessPanelVisible = true">维护设置</el-button>
-      </div>
-      <NativeHarnessPanel
-        :active="harnessWorkbenchVisible"
-        resource-type="MEMORY"
-        :resource-id="agentId"
-        @changed="fetch" />
-    </el-dialog>
-
     <el-dialog
       :title="previewDialogTitle"
       :visible.sync="rebuildPreviewVisible"
@@ -261,8 +238,6 @@ import MemoryTimeline from './memory/MemoryTimeline.vue'
 import MemoryCandidates from './memory/MemoryCandidates.vue'
 import MemoryDetailPanel from './memory/MemoryDetailPanel.vue'
 import MemoryEditDialog from './memory/MemoryEditDialog.vue'
-import MaintenancePolicyPanel from '@/components/maintenance/MaintenancePolicyPanel.vue'
-import NativeHarnessPanel from '@/components/maintenance/NativeHarnessPanel.vue'
 import Api from '@/apis/api'
 import {
   canRecoverRebuildTask,
@@ -284,9 +259,7 @@ export default {
     MemoryTimeline,
     MemoryCandidates,
     MemoryDetailPanel,
-    MemoryEditDialog,
-    MaintenancePolicyPanel,
-    NativeHarnessPanel
+    MemoryEditDialog
   },
   data() {
     return {
@@ -310,8 +283,6 @@ export default {
       editVisible: false,
       editItem: {},
       editMemoryId: '',
-      harnessPanelVisible: false,
-      harnessWorkbenchVisible: false,
       // Rebuild
       rebuildSessionLimit: 15,
       rebuildMode: 'clear_then_rebuild',
@@ -404,10 +375,6 @@ export default {
     this.stopRebuildTaskPolling()
   },
   methods: {
-    openHarnessWorkbench() {
-      this.harnessPanelVisible = false
-      this.harnessWorkbenchVisible = true
-    },
     fetch() {
       this.loading = true
       Api.memory.dashboard(this.agentId, (res) => {
@@ -933,14 +900,6 @@ export default {
   display: flex;
   gap: 8px;
   margin-bottom: 12px;
-}
-
-.harness-dialog-toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin: -8px 0 12px;
-  color: #606266;
 }
 
 .main-wrapper {
