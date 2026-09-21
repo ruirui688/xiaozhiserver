@@ -143,7 +143,10 @@ class ListenTextMessageHandler(TextMessageHandler):
                         turn_context.clear()
         elif msg_json["state"] == "detect":
             conversation_ready = getattr(conn, "conversation_ready", None)
-            if conversation_ready is not None and not conversation_ready.is_set():
+            readiness = getattr(conn, "runtime_readiness", None)
+            ready = (readiness.accepts_text(msg_json.get("text")) if readiness is not None
+                     else conversation_ready is None or conversation_ready.is_set())
+            if not ready:
                 if getattr(conn, "initialization_failed", False):
                     clear_deferred = getattr(
                         conn, "_clear_deferred_listen_detects", None

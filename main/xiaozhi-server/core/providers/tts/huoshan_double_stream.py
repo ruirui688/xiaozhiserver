@@ -9,6 +9,7 @@ import threading
 import traceback
 import websockets
 import concurrent.futures
+from websockets.protocol import State
 
 from collections import OrderedDict
 from collections.abc import Mapping
@@ -157,6 +158,9 @@ class TTSProvider(TTSProviderBase):
     def __init__(self, config, delete_audio_file):
         super().__init__(config, delete_audio_file)
         self.ws = None
+        from core.providers.tts.connection_prewarm import ConnectionPrewarm
+        self._connection_prewarm = ConnectionPrewarm(self)
+        self._connection_lock = asyncio.Lock()
         self.interface_type = InterfaceType.DUAL_STREAM
         self._monitor_task = None  # 监听任务引用
         self._session_error = None  # 会话失败时的错误信息
@@ -391,8 +395,22 @@ class TTSProvider(TTSProviderBase):
             raise
 
     async def _ensure_connection(self):
+        # FIRST prewarm and actual synthesis may race; only one reader/handshake.
+        async with self._connection_lock:
+            conn = self.conn
+            if conn is not None and (
+                getattr(conn, "closing", False) or getattr(conn, "closed", False)
+                or conn.stop_event.is_set()
+            ):
+                raise RuntimeError("TTS连接正在关闭")
+            return await self._open_connection()
+
+    async def _open_connection(self):
         """建立新的WebSocket连接，并启动监听任务（仅第一次）"""
         try:
+            if self.ws is not None and getattr(self.ws, "state", None) in (State.CLOSING, State.CLOSED):
+                await self.ws.close()
+                self.ws = None
             if self.ws:
                 if self.enable_ws_reuse:
                     logger.bind(tag=TAG).debug(f"使用已有链接...")
@@ -422,8 +440,8 @@ class TTSProvider(TTSProviderBase):
             logger.bind(tag=TAG).debug("TTS连接启动成功")
             
             return self.ws
-        except Exception as e:
-            logger.bind(tag=TAG).error(f"建立连接失败: {str(e)}")
+        except BaseException as e:
+            logger.bind(tag=TAG).error(f"建立连接未完成: errorType={type(e).__name__}")
             if self.ws:
                 try:
                     await self.ws.close()
@@ -862,6 +880,7 @@ class TTSProvider(TTSProviderBase):
                         message.sentence_id, message.generation
                     ):
                         continue
+                    self._connection_prewarm.start()
 
                 elif ContentType.TEXT == message.content_type:
                     if self._has_speakable_text(message.content_detail):
@@ -1109,6 +1128,7 @@ class TTSProvider(TTSProviderBase):
 
     async def close(self):
         """资源清理方法"""
+        await self._connection_prewarm.close()
         await super().close()
         self.activate_session = False
         self._active_session_id = None

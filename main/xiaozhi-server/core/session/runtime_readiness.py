@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import asyncio
 import json
 import threading
 import time
@@ -18,9 +19,81 @@ class RuntimeReadiness:
         self.binding_ready = threading.Event()
         self.tts_ready = threading.Event()
         self.conversation_ready = threading.Event()
+        self.wake_ready = threading.Event()
+        self._wake_config = None
         self.audio_input_ready = threading.Event()
         self.deferred_listen_detects = deque(maxlen=detect_limit)
         self.detect_ttl_seconds = float(detect_ttl_seconds)
+
+    def accepts(self, kind):
+        conn = self.connection
+        if any(getattr(conn, flag, False) for flag in
+               ("closing", "closed", "initialization_failed", "need_bind")):
+            return False
+        if self.conversation_ready.is_set():
+            return True
+        return bool(
+            kind == "wake" and self.wake_ready.is_set()
+            and self._wake_config is getattr(conn, "config", None)
+            and self.binding_ready.is_set() and self.tts_ready.is_set()
+            and getattr(conn, "llm", None) is not None
+            and getattr(conn, "tts", None) is not None
+        )
+
+    def accepts_text(self, text):
+        from core.session.wake_events import classify_input
+        if self.conversation_ready.is_set():
+            return self.accepts("text")
+        return self.accepts(classify_input(getattr(self.connection, "config", {}), str(text or "")))
+
+    def publish_wake_ready(self, expected_config=None):
+        """Called only after the authoritative, locally rendered system prompt."""
+        conn = self.connection
+        if ((expected_config is not None and conn.config is not expected_config)
+                or not self.binding_ready.is_set() or not self.tts_ready.is_set()
+                or not getattr(conn, "prompt", None)
+                or getattr(conn, "llm", None) is None
+                or any(getattr(conn, flag, False) for flag in
+                       ("closing", "closed", "need_bind", "initialization_failed"))):
+            return False
+        self._wake_config = conn.config
+        self.wake_ready.set()
+        mark_latency(conn, "init.wake_ready")
+        self.schedule_flush()
+        return True
+
+    def clear_wake_ready(self):
+        self.wake_ready.clear()
+        self._wake_config = None
+
+    def schedule_flush(self):
+        conn = self.connection
+        if getattr(conn, "closing", False) or getattr(conn, "closed", False):
+            return
+        flush = getattr(conn, "flush_deferred_listen_detects", self.flush_deferred_listen_detects)
+        future = asyncio.run_coroutine_threadsafe(flush(), conn.loop)
+        def completed(result):
+            if not result.cancelled() and result.exception() is not None:
+                conn.logger.bind(tag=__name__).warning("延迟输入回放失败: errorType={}", type(result.exception()).__name__)
+        future.add_done_callback(completed)
+
+    async def wait_for_input(self, kind, timeout_seconds=None):
+        """ASR retains its result while full readiness is pending; no side effects."""
+        conn = self.connection
+        config = getattr(conn, "config", None)
+        timeout = self.detect_ttl_seconds if timeout_seconds is None else timeout_seconds
+        deadline = time.monotonic() + timeout
+        while not self.accepts(kind):
+            if (any(getattr(conn, flag, False) for flag in
+                    ("closing", "closed", "initialization_failed", "need_bind"))
+                    or getattr(conn, "config", None) is not config):
+                mark_latency(conn, "input.wait_rejected")
+                return False
+            if time.monotonic() >= deadline:
+                mark_latency(conn, "input.wait_expired")
+                return False
+            await asyncio.sleep(0.01)
+        return getattr(conn, "config", None) is config
 
     def defer_listen_detect(self, message, ttl_seconds=None):
         conn = self.connection
@@ -64,7 +137,7 @@ class RuntimeReadiness:
     async def flush_deferred_listen_detects(self):
         conn = self.connection
         if (
-            not self.conversation_ready.is_set()
+            not (self.conversation_ready.is_set() or self.wake_ready.is_set())
             or conn.closing
             or conn.closed
             or conn.initialization_failed
@@ -73,10 +146,16 @@ class RuntimeReadiness:
         now = time.monotonic()
         pending = list(self.deferred_listen_detects)
         self.deferred_listen_detects.clear()
+        eligible = []
+        for item in pending:
+            if item["expires_at"] <= now or self.accepts_text(item["text"]):
+                eligible.append(item)
+            else:
+                self.deferred_listen_detects.append(item)
         replayed = 0
         from core.handle.textHandle import handleTextMessage
 
-        for item in pending:
+        for item in eligible:
             if conn.closing or conn.closed or conn.initialization_failed:
                 break
             if item["expires_at"] <= now:
@@ -105,6 +184,7 @@ class RuntimeReadiness:
     def mark_initialization_failed(self, error):
         conn = self.connection
         conn.initialization_failed = True
+        self.clear_wake_ready()
         mark_latency(conn, "init.failed")
         conn.initialization_error = str(error)
         self.tts_ready.clear()

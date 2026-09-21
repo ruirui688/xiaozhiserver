@@ -280,6 +280,11 @@ class RuntimeConfigReloader:
         return modules
 
     async def _deactivate_pipeline(self):
+        readiness = getattr(self.conn, "runtime_readiness", None)
+        if readiness is not None:
+            readiness.clear_wake_ready()
+            readiness.conversation_ready.clear()
+            readiness.clear_deferred_listen_detects("runtime_replaced")
         conn = self.conn
         old_tts = getattr(conn, "tts", None)
         old_asr = getattr(conn, "asr", None)

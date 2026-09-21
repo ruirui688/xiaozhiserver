@@ -793,6 +793,7 @@ class ConnectionHandler:
 
     def _initialize_components(self):
         mark_latency(self, "init.components_enter")
+        initial_config = getattr(self, "config", None)
         try:
             if self.closing:
                 return
@@ -914,11 +915,20 @@ class ConnectionHandler:
                 return
             self._init_report_threads()
             self._init_voiceprint_enrollment_from_config()
+            if not realtime_conversation:
+                # Render all system rules from this role without external queries.
+                self._init_prompt_enhancement(refresh_context=False)
+                self._inject_tool_call_fewshot()
+                self.runtime_readiness.publish_wake_ready(initial_config)
             """更新系统提示词"""
             with latency_span(self, "init.prompt_enhancement"):
                 self._init_prompt_enhancement()
             """注入工具调用few-shot示例（仅function_call模式）"""
-            self._inject_tool_call_fewshot()
+            if realtime_conversation:
+                self._inject_tool_call_fewshot()
+
+            if self.closing or self.closed or self.config is not initial_config:
+                return False
 
             if realtime_conversation:
                 realtime_future = asyncio.run_coroutine_threadsafe(
@@ -934,16 +944,7 @@ class ConnectionHandler:
                 self.conversation_ready.set()
             if self.conversation_ready.is_set():
                 mark_latency(self, "init.conversation_ready")
-                replay_future = asyncio.run_coroutine_threadsafe(
-                    self.flush_deferred_listen_detects(), self.loop
-                )
-                replay_future.add_done_callback(
-                    lambda future: self.logger.bind(tag=TAG).warning(
-                        f"回放延迟listen.detect失败: {future.exception()}"
-                    )
-                    if future.exception()
-                    else None
-                )
+                self.runtime_readiness.schedule_flush()
             else:
                 self.logger.bind(tag=TAG).warning(
                     "对话能力未就绪: LLM或TTS未配置，listen.detect保持门禁"
@@ -963,11 +964,16 @@ class ConnectionHandler:
             self._modules_ready.set()
         return True
 
-    def _init_prompt_enhancement(self):
+    def _init_prompt_enhancement(self, refresh_context=True):
 
         # 更新上下文信息
-        self.prompt_manager.update_context_info(self, self.client_ip)
-        enhanced_prompt = self.prompt_manager.build_enhanced_prompt(
+        manager = self.prompt_manager
+        config = self.config
+        if refresh_context:
+            manager.update_context_info(self, self.client_ip)
+        if self.closing or self.closed or manager is not self.prompt_manager or config is not self.config:
+            return
+        enhanced_prompt = manager.build_enhanced_prompt(
             self.config["prompt"],
             self.device_id,
             self.client_ip,

@@ -22,6 +22,9 @@ class SessionLifecycle:
             conn.closing = True
 
         stop_event = getattr(conn, "stop_event", None)
+        readiness = getattr(conn, "runtime_readiness", None)
+        if readiness is not None:
+            readiness.clear_wake_ready()
         if stop_event is not None:
             stop_event.set()
 

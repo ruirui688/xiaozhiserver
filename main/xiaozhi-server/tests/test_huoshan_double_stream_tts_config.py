@@ -346,6 +346,9 @@ def _run_coroutine_immediately(coro, _loop=None, **_kwargs):
 
 def _lazy_session_provider(monkeypatch):
     provider = TTSProvider(_base_config(tts_timeout=1), True)
+    # These synchronous fake-loop tests cover synthesis sessions. Transport
+    # prewarm is exercised separately on a real event loop with fake sockets.
+    monkeypatch.setattr(provider._connection_prewarm, "start", lambda: None)
     provider.conn = SimpleNamespace(
         stop_event=threading.Event(),
         client_abort=False,

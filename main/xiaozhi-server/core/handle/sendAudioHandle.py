@@ -709,7 +709,10 @@ async def begin_assistant_reply(
         return None
     if require_conversation:
         conversation_ready = getattr(conn, "conversation_ready", None)
-        if conversation_ready is not None and not conversation_ready.is_set():
+        readiness = getattr(conn, "runtime_readiness", None)
+        ready = (readiness.accepts(kind) if readiness is not None
+                 else conversation_ready is None or conversation_ready.is_set())
+        if not ready:
             conn.logger.bind(tag=TAG).warning("对话能力尚未就绪，拒绝启动回复轮次")
             return None
         if getattr(conn, "llm", None) is None:

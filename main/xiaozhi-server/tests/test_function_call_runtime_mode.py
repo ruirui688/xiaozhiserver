@@ -571,6 +571,7 @@ def test_start_to_chat_keeps_successful_direct_answer_alive(monkeypatch):
     conn.need_bind = False
     conn.max_output_size = 0
 
+    conn.conversation_ready.set()  # This case exercises a fully initialized chat.
     assert asyncio.run(startToChat(conn, "你好")) is True
     assert terminations == []
     assert "".join(conn.tts.queued_text()) == "瑞瑞你好呀，小慧等你很久啦～"

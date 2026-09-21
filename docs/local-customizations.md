@@ -470,6 +470,8 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - 纯 `direct_answer` 成功解析并提交非空 response 与 LAST 后，`ConnectionHandler.chat()` 必须返回 `True`；裸 `return` 会被 `startToChat.on_chat_done()` 解释为 `llm_no_spoken_result`，提前失败当前 generation 并清空尚未发送的 TTS 音频。空 response 才允许返回空结果，且不得伪造 LAST。
   - 流式 TTS 的音频增量不得被字幕等待阻塞；但设备 `FIRST` 字幕必须来自按 `sentence_id` 保存的完整回答，禁止把首个 LLM 字符或短语当作正式字幕。正常 `LAST` 上报聊天记录时继续优先使用完整回答，并把整轮音频与完整正文关联保存。
   - SeedTTS2 把本地逻辑轮次和上游厂商会话分开：`SentenceType.FIRST` 只重置流状态并登记本轮，第一段经清洗后非空的 `ContentType.TEXT` 或路径有效的 `ContentType.FILE` 到达时才启动一次上游会话；空轮 `LAST` 不得反向创建会话。
+  - FIRST 在允许连接复用时可并行预热 TTS 传输连接，但不得提前创建合成会话；预热失败由正文路径重试，关闭时取消，握手共用连接锁。
+  - 纯唤醒在绑定、当前角色、LLM、TTS 和本地完整系统提示就绪后可提前放行，不等待位置、天气和动态上下文刷新；普通指令仍等完整就绪。保留长期记忆、身份识别和 detect/ASR 去重；热更新、初始化失败及关闭使快速门禁失效。详见设备交互链路的唤醒优化边界。
   - SeedTTS2 正常结束必须冲刷不足60ms的Opus尾帧，取消、失败或异常断链必须重置编码器，禁止残留样本跨会话。
   - SeedTTS2 默认不做首音频时间预缓冲：完整 Opus 帧到达即按 FIFO 发布，即使完整字幕尚未就绪也不得阻塞音频；完整回答写入后，再在后续音频或正常收尾边界发布非空 `FIRST`。可选 `stream_prebuffer_ms` 仍允许显式恢复预缓冲；provider 音频 FIFO、设备 FIRST/LAST/stop 必须绑定同一 reply generation，迟到旧 generation 不得结束新回复。
   - SeedTTS2 只有在 `SessionFinished` 后才能发布正常 LAST；下行超时、断链、SessionFailed 和结束异常必须使用 `tts_error:*` 失败原因令 ReplyLifecycle 进入 FAILED，并关闭当前 WebSocket 供下一轮重建，不能伪装成正常播报完成。

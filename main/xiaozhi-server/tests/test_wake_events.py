@@ -33,7 +33,7 @@ def runtime(monkeypatch):
     monkeypatch.setattr(receive, "handleAbortMessage", AsyncMock())
     monkeypatch.setattr(listen, "enqueue_asr_report", Mock())
 
-    async def begin(_conn, text):
+    async def begin(_conn, text, **kwargs):
         return conn.reply_lifecycle.ensure_started()
 
     monkeypatch.setattr(receive, "begin_assistant_reply", AsyncMock(side_effect=begin))

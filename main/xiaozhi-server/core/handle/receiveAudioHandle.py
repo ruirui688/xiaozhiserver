@@ -122,6 +122,10 @@ async def startToChat(
         )
         return False
     wake_event = None
+    readiness = getattr(conn, "runtime_readiness", None)
+    if readiness is not None and not getattr(conn, "need_bind", False):
+        if not await readiness.wait_for_input(input_kind):
+            return False
 
     def submit_chat(chat_text):
         if reply_generation is not None or input_kind == "wake":
@@ -414,7 +418,10 @@ async def startToChat(
         return True
 
     if getattr(conn, "reply_lifecycle", None) is not None:
-        reply_generation = await begin_assistant_reply(conn, actual_text)
+        if input_kind == "wake":
+            reply_generation = await begin_assistant_reply(conn, actual_text, kind="wake")
+        else:
+            reply_generation = await begin_assistant_reply(conn, actual_text)
     else:
         reply_generation = await send_stt_message(conn, actual_text)
     if getattr(conn, "reply_lifecycle", None) is not None and reply_generation is None:
