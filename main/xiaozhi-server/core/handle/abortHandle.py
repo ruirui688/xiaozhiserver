@@ -37,7 +37,12 @@ async def handleAbortMessage(conn: "ConnectionHandler", preserve_user_audio=Fals
         turn_context.clear()
     if not preserve_user_audio:
         # 显式 abort 清理输入状态；AEC 开口打断则保留正在形成的新用户轮次。
-        conn.reset_audio_states()
+        try:
+            conn.reset_audio_states(reset_vad_model=True)
+        except TypeError:
+            # Compatibility with lightweight connection doubles and legacy
+            # integrations; the real ConnectionHandler accepts the flag.
+            conn.reset_audio_states()
     # 打断客户端说话状态
     try:
         await send_tts_message(

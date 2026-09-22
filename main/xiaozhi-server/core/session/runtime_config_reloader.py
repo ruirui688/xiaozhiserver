@@ -409,7 +409,7 @@ class RuntimeConfigReloader:
             raise RuntimeError("连接关闭期间取消运行配置热更新")
         conn.stop_event = threading.Event()
         self._drain_queue(getattr(conn, "asr_audio_queue", None))
-        conn.reset_audio_states()
+        conn.reset_audio_states(reset_vad_model=True)
         conn.tts_ready.clear()
         conn.conversation_ready.clear()
         conn.audio_input_ready.clear()

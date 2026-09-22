@@ -2616,7 +2616,7 @@ class ConnectionHandler:
                 f"清理结束: TTS队列大小={self.tts.tts_text_queue.qsize()}, 音频队列大小={self.tts.tts_audio_queue.qsize()}"
             )
 
-    def reset_audio_states(self, preserve_voiceprint=False):
+    def reset_audio_states(self, preserve_voiceprint=False, reset_vad_model=False):
         """
         重置所有音频相关状态(VAD + ASR)
         """
@@ -2632,7 +2632,12 @@ class ConnectionHandler:
         self.vad_last_voice_time = 0.0
         if self.vad is not None and hasattr(self.vad, "reset_conn_state"):
             try:
-                self.vad.reset_conn_state(self)
+                try:
+                    self.vad.reset_conn_state(self, reset_model=reset_vad_model)
+                except TypeError:
+                    # Keep compatibility with test doubles and third-party VADs
+                    # that still expose the old one-argument hook.
+                    self.vad.reset_conn_state(self)
             except Exception as e:
                 self.logger.bind(tag=TAG).debug(f"重置声学门控状态失败: {e}")
 

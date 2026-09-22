@@ -101,7 +101,13 @@ class ListenTextMessageHandler(TextMessageHandler):
             return
         if msg_json["state"] == "start":
             # 设备从播放模式切回录音模式,清除所有音频状态和缓冲区
-            conn.reset_audio_states()
+            # `start` is the explicit boundary of a new receive round.  Reset
+            # Silero's recurrent state here; ordinary ASR close paths use the
+            # lighter reset and must not inherit this responsibility.
+            try:
+                conn.reset_audio_states(reset_vad_model=True)
+            except TypeError:
+                conn.reset_audio_states()
             turn_context = getattr(conn, "turn_context", None)
             if turn_context is None:
                 return

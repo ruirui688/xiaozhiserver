@@ -99,11 +99,26 @@ class VADProvider(VADProviderBase):
                 except Exception:
                     pass
 
-    def reset_conn_state(self, conn):
+    def reset_conn_state(self, conn, reset_model=False):
+        """Reset per-utterance state without implicitly resetting the model.
+
+        A normal endpoint only closes the current speech window.  A new
+        listening round (or an explicit abort) must also discard Silero's
+        recurrent state and its 64-sample context, otherwise the next round
+        inherits acoustic history from the interrupted utterance.
+        """
+        if reset_model:
+            state = getattr(conn, "_vad_state", None)
+            if state is not None:
+                state[...] = 0
+            context = getattr(conn, "_vad_context", None)
+            if context is not None:
+                context[...] = 0
         state = getattr(conn, "_speech_activity_state", None)
         if state is not None:
             state.reset_activity(preserve_noise_floor=True)
         conn._vad_last_decision = None
+        conn._vad_last_observation = None
 
     def get_last_observation(self, conn):
         return getattr(conn, "_vad_last_observation", None)
