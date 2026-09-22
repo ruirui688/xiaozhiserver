@@ -170,6 +170,9 @@ dmypy.json
 # music directory
 /music/
 main/xiaozhi-server/music/.xiaozhi-music-cache/
+# 曲库元数据与歌曲文件按客户曲库在后台维护，不得提交（含客户专属主题曲与商业歌曲）
+main/xiaozhi-server/music/.xiaozhi-music-metadata.json
+main/xiaozhi-server/music/*.mp3
 
 # pytype static type analyzer
 .pytype/

@@ -1,5 +1,7 @@
 import sys
 import asyncio
+import json
+import os
 import queue
 import types
 from pathlib import Path
@@ -48,6 +50,100 @@ def test_music_metadata_aliases_match_local_song():
 
     assert play_music._find_best_match("品牌星光", music_files) == "brand-song.mp3"
     assert play_music._find_best_match("星光之歌", music_files) == "brand-song.mp3"
+
+
+def _music_library_conn(music_dir, refresh_time=300):
+    return types.SimpleNamespace(
+        config={
+            "plugins": {
+                "play_music": {
+                    "music_dir": str(music_dir),
+                    "music_ext": [".mp3"],
+                    "refresh_time": refresh_time,
+                }
+            }
+        }
+    )
+
+
+def _touch_forward(path):
+    """把 mtime 明确推到未来。
+
+    测试在同一毫秒内建文件再删文件，而目录 mtime 的粒度约几毫秒，改动会被粒度吃掉；
+    生产里人工删除是秒级操作，这里显式推动时间以便确定性验证"mtime 变了就重建缓存"。
+    """
+    current = os.path.getmtime(path)
+    os.utime(path, (current + 10, current + 10))
+
+
+def test_prompt_entries_drop_deleted_song_without_playback(tmp_path):
+    """删除歌曲后曲库提示词必须立即不再包含它，不必先播放一次或重启进程。"""
+    (tmp_path / "brand-song.mp3").write_bytes(b"fake audio")
+    (tmp_path / "ambient-track.mp3").write_bytes(b"fake audio")
+    (tmp_path / play_music.MUSIC_METADATA_FILE_NAME).write_text(
+        json.dumps(
+            {
+                "brand-song.mp3": {
+                    "description": "品牌主题曲。",
+                    "aliases": ["品牌星光"],
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    play_music.MUSIC_CACHE.clear()
+    conn = _music_library_conn(tmp_path)
+
+    entries = play_music.list_music_prompt_entries(conn)
+    assert any("brand-song" in entry for entry in entries)
+    assert any("品牌星光" in entry for entry in entries)
+
+    (tmp_path / "brand-song.mp3").unlink()
+    _touch_forward(tmp_path)
+
+    entries = play_music.list_music_prompt_entries(conn)
+    assert not any("brand-song" in entry for entry in entries)
+    assert any("ambient-track" in entry for entry in entries)
+
+
+def test_prompt_entries_drop_song_after_metadata_removal(tmp_path):
+    """元数据文件被改写或删除时（目录 mtime 不变）也要按 metadata mtime 重建缓存。"""
+    (tmp_path / "brand-song.mp3").write_bytes(b"fake audio")
+    metadata_path = tmp_path / play_music.MUSIC_METADATA_FILE_NAME
+    metadata_path.write_text(
+        json.dumps({"brand-song.mp3": {"aliases": ["品牌星光"]}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    play_music.MUSIC_CACHE.clear()
+    conn = _music_library_conn(tmp_path)
+    assert any("品牌星光" in entry for entry in play_music.list_music_prompt_entries(conn))
+
+    metadata_path.write_text("{}", encoding="utf-8")
+    _touch_forward(metadata_path)
+
+    entries = play_music.list_music_prompt_entries(conn)
+    assert any("brand-song" in entry for entry in entries)
+    assert not any("品牌星光" in entry for entry in entries)
+
+
+def test_nested_song_is_picked_up_by_refresh_time_fallback(tmp_path):
+    """子目录增删不改变顶层目录 mtime，必须靠 refresh_time 兜底重扫。"""
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (tmp_path / "brand-song.mp3").write_bytes(b"fake audio")
+    play_music.MUSIC_CACHE.clear()
+    conn = _music_library_conn(tmp_path, refresh_time=-1)
+
+    assert not any(
+        "nested-song" in entry for entry in play_music.list_music_prompt_entries(conn)
+    )
+
+    (nested / "nested-song.mp3").write_bytes(b"fake audio")
+
+    assert any(
+        "nested-song" in entry for entry in play_music.list_music_prompt_entries(conn)
+    )
 
 
 def test_play_music_waits_until_file_playback_messages_are_enqueued(tmp_path):

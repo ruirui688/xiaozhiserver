@@ -244,6 +244,16 @@ def get_music_files(music_dir, music_ext):
     return music_files, music_file_names, metadata
 
 
+def _music_dir_mtimes(music_dir):
+    """返回音乐目录与元数据文件的 mtime，用于判断缓存是否落后于磁盘。"""
+    metadata_path = os.path.join(music_dir, MUSIC_METADATA_FILE_NAME)
+    dir_mtime = os.path.getmtime(music_dir) if os.path.exists(music_dir) else 0
+    metadata_mtime = (
+        os.path.getmtime(metadata_path) if os.path.exists(metadata_path) else 0
+    )
+    return dir_mtime, metadata_mtime
+
+
 def _refresh_music_cache():
     (
         MUSIC_CACHE["music_files"],
@@ -253,12 +263,38 @@ def _refresh_music_cache():
         MUSIC_CACHE["music_dir"], MUSIC_CACHE["music_ext"]
     )
     MUSIC_CACHE["scan_time"] = time.time()
-    if os.path.exists(MUSIC_CACHE["music_dir"]):
-        MUSIC_CACHE["dir_mtime"] = os.path.getmtime(MUSIC_CACHE["music_dir"])
-    metadata_path = os.path.join(MUSIC_CACHE["music_dir"], MUSIC_METADATA_FILE_NAME)
-    MUSIC_CACHE["metadata_mtime"] = (
-        os.path.getmtime(metadata_path) if os.path.exists(metadata_path) else 0
+    dir_mtime, metadata_mtime = _music_dir_mtimes(MUSIC_CACHE["music_dir"])
+    MUSIC_CACHE["dir_mtime"] = dir_mtime
+    MUSIC_CACHE["metadata_mtime"] = metadata_mtime
+
+
+def _music_cache_is_stale():
+    music_dir = MUSIC_CACHE.get("music_dir")
+    if not music_dir:
+        return False
+    dir_mtime, metadata_mtime = _music_dir_mtimes(music_dir)
+    if dir_mtime != MUSIC_CACHE.get("dir_mtime"):
+        return True
+    if metadata_mtime != MUSIC_CACHE.get("metadata_mtime"):
+        return True
+    # 子目录内的增删不会改变顶层目录 mtime，因此仍需按 refresh_time 兜底重扫。
+    return (
+        time.time() - MUSIC_CACHE.get("scan_time", 0)
+        > MUSIC_CACHE.get("refresh_time", 60)
     )
+
+
+def _refresh_music_cache_if_stale():
+    """磁盘曲库变化后重建缓存。
+
+    曲库提示词（<music_library>、工具描述）和播放共用这份进程内缓存。如果只在播放时
+    才检查目录 mtime，删除歌曲后模型仍会看到旧曲库，持续回复"给你放一首《…》"，
+    而真正播放时又报"未找到MP3音乐文件"。
+    """
+    if not _music_cache_is_stale():
+        return False
+    _refresh_music_cache()
+    return True
 
 
 def initialize_music_handler(conn: "ConnectionHandler"):
@@ -292,10 +328,14 @@ def initialize_music_handler(conn: "ConnectionHandler"):
             MUSIC_CACHE["announce_before_play"] = False
         # 获取音乐文件列表
         _refresh_music_cache()
+    # 提示词与播放共用同一份缓存，每次取用前都按磁盘现状刷新，
+    # 保证删除/新增歌曲后曲库上下文立即生效，不必等一次播放或重启进程。
+    _refresh_music_cache_if_stale()
     return MUSIC_CACHE
 
 
 async def handle_music_command(conn: "ConnectionHandler", text):
+    # initialize_music_handler 已按磁盘现状刷新缓存，这里不再重复检查 mtime。
     initialize_music_handler(conn)
     global MUSIC_CACHE
     conn.last_tool_context = "music"
@@ -306,19 +346,6 @@ async def handle_music_command(conn: "ConnectionHandler", text):
 
     # 尝试匹配具体歌名
     if os.path.exists(MUSIC_CACHE["music_dir"]):
-        dir_mtime = os.path.getmtime(MUSIC_CACHE["music_dir"])
-        metadata_path = os.path.join(MUSIC_CACHE["music_dir"], MUSIC_METADATA_FILE_NAME)
-        metadata_mtime = (
-            os.path.getmtime(metadata_path) if os.path.exists(metadata_path) else 0
-        )
-        if (
-            time.time() - MUSIC_CACHE["scan_time"] > MUSIC_CACHE["refresh_time"]
-            or dir_mtime != MUSIC_CACHE.get("dir_mtime")
-            or metadata_mtime != MUSIC_CACHE.get("metadata_mtime")
-        ):
-            # 刷新音乐文件列表
-            _refresh_music_cache()
-
         potential_song = _extract_song_name(clean_text)
         if potential_song:
             best_match = _find_best_match(potential_song, MUSIC_CACHE["music_files"])

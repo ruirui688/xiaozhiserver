@@ -291,7 +291,6 @@ source_paths:
   - main/xiaozhi-server/core/handle/reportHandle.py
   - main/xiaozhi-server/core/providers/tts/base.py
   - main/xiaozhi-server/plugins_func/functions/play_music.py
-  - main/xiaozhi-server/music/.xiaozhi-music-metadata.json
   - main/xiaozhi-server/tests/test_music_intent.py
   - main/xiaozhi-server/tests/test_tts_interrupted_report.py
 是否允许被官方覆盖：否
@@ -977,4 +976,16 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/manager-api/.../modules/agent/controller/AgentController.java（复用现有会话查询权限链路）
 是否允许被官方覆盖：否
 官方同步时的处理规则：运行监控当前只读取已有的、按智能体权限校验的会话摘要接口，展示绑定设备数、最近连接时间、会话数量和最近 20 条会话活动；前端每 5 秒轮询一次，关闭弹窗或切换智能体时必须停止轮询并丢弃过期响应。该页面不是原始日志查看器，不得展示用户正文、完整提示词、Authorization、Token、API Key、模型密钥或容器 stdout。设备“近期活跃”只代表管理端记录的最近连接时间，不得声称设备当前在线。若未来需要 ASR/LLM/TTS/MCP 分阶段诊断，必须新增后端结构化、脱敏、限量的运行事件接口，并继续沿用现有资源所有权和权限校验，不能直接开放文件或容器日志。
+```
+
+## 49. 曲库提示词与磁盘实时一致
+
+```text
+定制模块：xiaozhi-server 服务器音乐播放插件
+改动原因：`MUSIC_CACHE` 是进程内全局缓存，原先只在 `initialize_music_handler()` 首次调用时构建，并且只有在真正执行播放的 `handle_music_command()` 里才按目录 mtime 和 `refresh_time` 判断是否重建。生成 `<music_library>` 曲库上下文和 `play_music` 工具描述的 `list_music_prompt_entries()` 直接返回这份缓存，从不核对磁盘，于是删除歌曲后模型仍按旧曲库回答“给你放一首《…》”，而真正播放时报“未找到MP3音乐文件”，必须等一次播放或重启进程才恢复。现在把失效判断抽成 `_refresh_music_cache_if_stale()`（目录 mtime、元数据 mtime、`refresh_time` 三者任一命中即重建），`initialize_music_handler()` 每次返回缓存前都调用它，提示词与播放共用同一份按磁盘刷新的缓存，`handle_music_command()` 中重复的 mtime 判断同步删除。
+关键文件：
+  - main/xiaozhi-server/plugins_func/functions/play_music.py
+  - main/xiaozhi-server/tests/test_music_intent.py
+是否允许被官方覆盖：否
+官方同步时的处理规则：曲库缓存（`music_files`、`music_file_names`、`music_metadata`）同时服务播放选择和 `<music_library>`／工具描述提示词，必须在任何取用点之前按磁盘现状刷新：顶层目录 mtime 变化、`.xiaozhi-music-metadata.json` mtime 变化、或距上次扫描超过 `refresh_time`（默认 60 秒）三者任一命中都要重建。不得只在播放路径刷新，也不得为省一次目录扫描而让提示词长期保留已删除歌曲。子目录内增删不改变顶层目录 mtime，因此 `refresh_time` 兜底扫描不可删除。曲库元数据按客户曲库在后台生成，不得提交进仓库。
 ```
