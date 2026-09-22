@@ -5,6 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -289,8 +290,10 @@ public class LocalKnowledgeLuceneIndex {
         Query scope = filteredQuery(new MatchAllDocsQuery(), datasetIds, documentIds);
         int chunks = searcher.count(scope);
         Set<String> kept = new LinkedHashSet<>();
+        Set<Character> droppedChars = new HashSet<>();
         for (String term : terms) {
             if (LocalKnowledgeLexicalScorer.WEAK_CJK_TERMS.contains(term)) {
+                addChars(droppedChars, term);
                 continue;
             }
             if (chunks >= 20) {
@@ -298,12 +301,38 @@ public class LocalKnowledgeLuceneIndex {
                 probe.add(scope, BooleanClause.Occur.FILTER);
                 probe.add(new TermQuery(new Term(FIELD_DOCUMENT_NAME, term)), BooleanClause.Occur.MUST);
                 if (searcher.count(probe.build()) * 2 > chunks) {
+                    addChars(droppedChars, term);
                     continue;
                 }
             }
             kept.add(term);
         }
-        return kept.isEmpty() ? terms : kept;
+        // 二次过滤：二字切词会切出跨越品牌词/疑问词边界的词（“慧苑有哪些” → “苑有”、
+        // “小慧有什么” → “慧有”）。品牌词本身被丢弃后，这类词仍会命中问答库
+        // “标准问题：慧苑有哪些……”样板文本，所以整词都由已丢弃词的字组成的词同样丢弃。
+        Set<String> refined = new LinkedHashSet<>();
+        for (String term : kept) {
+            if (!coveredByDroppedChars(droppedChars, term)) {
+                refined.add(term);
+            }
+        }
+        Set<String> result = refined.isEmpty() ? kept : refined;
+        return result.isEmpty() ? terms : result;
+    }
+
+    private void addChars(Set<Character> target, String term) {
+        for (int index = 0; index < term.length(); index++) {
+            target.add(term.charAt(index));
+        }
+    }
+
+    private boolean coveredByDroppedChars(Set<Character> droppedChars, String term) {
+        for (int index = 0; index < term.length(); index++) {
+            if (!droppedChars.contains(term.charAt(index))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private Query textQuery(Set<String> terms, boolean preferPrimaryName) {
