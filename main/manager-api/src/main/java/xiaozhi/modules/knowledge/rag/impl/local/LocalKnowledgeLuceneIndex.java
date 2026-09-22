@@ -204,17 +204,26 @@ public class LocalKnowledgeLuceneIndex {
         }
     }
 
+    /** 命中结果 + 本次实际参与匹配的有效词项（供上层词法打分复用同一套词项）。 */
+    public record SearchOutcome(List<SearchHit> hits, Set<String> terms) {
+    }
+
     public List<SearchHit> search(List<String> queries, Collection<String> datasetIds,
+            Collection<String> documentIds, int limit) {
+        return searchOutcome(queries, datasetIds, documentIds, limit).hits();
+    }
+
+    public SearchOutcome searchOutcome(List<String> queries, Collection<String> datasetIds,
             Collection<String> documentIds, int limit) {
         if (queries == null || queries.isEmpty() || datasetIds == null || datasetIds.isEmpty()
                 || limit < 1 || !indexExists()) {
-            return List.of();
+            return new SearchOutcome(List.of(), Set.of());
         }
         try (Directory directory = FSDirectory.open(root);
                 DirectoryReader reader = DirectoryReader.open(directory)) {
             Set<String> terms = analyze(queries);
             if (terms.isEmpty()) {
-                return List.of();
+                return new SearchOutcome(List.of(), Set.of());
             }
             IndexSearcher searcher = new IndexSearcher(reader);
             searcher.setSimilarity(new BM25Similarity());
@@ -235,7 +244,7 @@ public class LocalKnowledgeLuceneIndex {
                 chunk.setAnswer(document.get(FIELD_ANSWER));
                 hits.add(new SearchHit(chunk, document.get(FIELD_DOCUMENT_NAME), normalizeScore(scoreDoc.score)));
             }
-            return hits;
+            return new SearchOutcome(hits, terms);
         } catch (IOException e) {
             throw new IllegalStateException("检索本地知识库索引失败", e);
         }
@@ -290,31 +299,33 @@ public class LocalKnowledgeLuceneIndex {
         Query scope = filteredQuery(new MatchAllDocsQuery(), datasetIds, documentIds);
         int chunks = searcher.count(scope);
         Set<String> kept = new LinkedHashSet<>();
-        Set<Character> droppedChars = new HashSet<>();
+        Set<Character> libraryChars = new HashSet<>();
         for (String term : terms) {
             if (LocalKnowledgeLexicalScorer.WEAK_CJK_TERMS.contains(term)) {
-                addChars(droppedChars, term);
                 continue;
             }
             if (chunks >= 20) {
-                // ①文档名命中过半 → 全库级词（品牌名），对每条切片都命中；
-                // ②正文命中超过三分之一 → 高频泛词（“推荐”这类），命中它的切片多到没有区分度。
-                // 两种词都会让“多命中一个词”的无关切片反超真正命中主题词的切片。
-                if (hitsInField(searcher, scope, FIELD_DOCUMENT_NAME, term) * 2 > chunks
-                        || hitsInField(searcher, scope, FIELD_CONTENT, term) * 3 > chunks) {
-                    addChars(droppedChars, term);
+                // ①文档名命中过半 → 全库级词（客户品牌名）：对多数切片都命中，没有区分度，
+                //    而且它切出来的跨边界词（“慧苑的” → “苑的”）会继续命中样板正文，
+                //    所以只有这类词的字才污染其它词项。
+                if (hitsInField(searcher, scope, FIELD_DOCUMENT_NAME, term) * 2 > chunks) {
+                    addChars(libraryChars, term);
+                    continue;
+                }
+                // ②正文里几乎无处不在的样板词（“来源”这类）。阈值必须很高：
+                //    “酒水”在聚焦的酒水知识库里能占到 45%，但它正是主题词，丢了就再也召不回库存表。
+                if (hitsInField(searcher, scope, FIELD_CONTENT, term) * 3 > chunks * 2) {
                     continue;
                 }
             }
             kept.add(term);
         }
-        // 二次过滤：二字切词会切出跨越品牌词/疑问词边界的词（“慧苑有哪些” → “苑有”、
-        // “慧苑的沙拉推荐” → “苑的”、“小慧有什么” → “慧有”）。这些词不承担主题信息，
-        // 却照样命中问答库“标准问题：慧苑有哪些……”样板文本和“慧苑的……”正文，
-        // 所以只要含有已丢弃词的字就一并丢弃。
+        // 二次过滤：二字切词会切出跨越品牌词边界的词（“慧苑有哪些” → “苑有”、
+        // “慧苑的沙拉推荐” → “苑的”）。品牌词本身被丢弃后，这类词仍会命中问答库
+        // “标准问题：慧苑有哪些……”样板文本和“慧苑的……”正文，所以只要含有品牌词的字就一并丢弃。
         Set<String> refined = new LinkedHashSet<>();
         for (String term : kept) {
-            if (!touchesDroppedChars(droppedChars, term)) {
+            if (!touchesDroppedChars(libraryChars, term)) {
                 refined.add(term);
             }
         }
@@ -353,7 +364,7 @@ public class LocalKnowledgeLuceneIndex {
             fields.add(new BoostQuery(new TermQuery(new Term(FIELD_ANSWER, term)), 1.6F), BooleanClause.Occur.SHOULD);
             fields.add(new BoostQuery(new TermQuery(new Term(FIELD_DOCUMENT_NAME, term)), 0.8F),
                     BooleanClause.Occur.SHOULD);
-            fields.add(new BoostQuery(new TermQuery(new Term(FIELD_DOCUMENT_VOCABULARY, term)), 1.5F),
+            fields.add(new BoostQuery(new TermQuery(new Term(FIELD_DOCUMENT_VOCABULARY, term)), 4.0F),
                     BooleanClause.Occur.SHOULD);
             fields.add(new BoostQuery(new TermQuery(new Term(FIELD_PRIMARY_NAME, term)),
                     preferPrimaryName ? 5.0F : 0.8F),

@@ -47,10 +47,10 @@ public class LocalKnowledgeRetrievalEngine {
         String rawQuestion = StringUtils.defaultIfBlank(req.getRawQuestion(), rewrittenQuestion);
         try {
             ensureIndex(req.getDatasetIds(), req.getDocumentIds());
-            List<LocalKnowledgeLuceneIndex.SearchHit> candidates = index.search(
+            LocalKnowledgeLuceneIndex.SearchOutcome outcome = index.searchOutcome(
                     LocalKnowledgeQueryExpander.expand(rawQuestion, rewrittenQuestion),
                     req.getDatasetIds(), req.getDocumentIds(), options.candidateLimit());
-            return buildLuceneResult(candidates, rawQuestion, rewrittenQuestion, options);
+            return buildLuceneResult(outcome, rawQuestion, rewrittenQuestion, options);
         } catch (RuntimeException e) {
             log.warn("本地知识库磁盘索引不可用，降级到有界词法召回: errorType={}",
                     e.getClass().getSimpleName());
@@ -81,8 +81,9 @@ public class LocalKnowledgeRetrievalEngine {
         }
     }
 
-    private RetrievalDTO.ResultVO buildLuceneResult(List<LocalKnowledgeLuceneIndex.SearchHit> candidates,
+    private RetrievalDTO.ResultVO buildLuceneResult(LocalKnowledgeLuceneIndex.SearchOutcome outcome,
             String rawQuestion, String rewrittenQuestion, Options options) {
+        List<LocalKnowledgeLuceneIndex.SearchHit> candidates = outcome.hits();
         if (candidates == null || candidates.isEmpty()) {
             return emptyResult();
         }
@@ -91,8 +92,11 @@ public class LocalKnowledgeRetrievalEngine {
                 .map(LocalKnowledgeLuceneIndex.SearchHit::chunk)
                 .toList());
         LocalKnowledgeLexicalScorer lexical = new LocalKnowledgeLexicalScorer(options.matchLevel());
-        Set<String> rawTerms = lexical.tokenize(rawQuestion);
-        Set<String> rewrittenTerms = lexical.tokenize(rewrittenQuestion);
+        // 词法打分必须复用检索侧同一套有效词项：否则“慧苑/什么/推荐”这类被剔除的泛词
+        // 仍会在这里给无关切片加分，把真正命中主题词的切片压下去。
+        Set<String> rawTerms = outcome.terms().isEmpty() ? lexical.tokenize(rawQuestion) : outcome.terms();
+        Set<String> rewrittenTerms = outcome.terms().isEmpty() ? lexical.tokenize(rewrittenQuestion)
+                : outcome.terms();
         String entityQuery = rawQuestion + " " + rewrittenQuestion;
         List<LocalKnowledgeLuceneIndex.SearchHit> enabledCandidates = candidates.stream()
                 .filter(hit -> isEnabledDocument(documents.get(scopeId(hit.chunk().getDatasetId(), hit.chunk().getDocumentId()))))
