@@ -17,8 +17,16 @@ import xiaozhi.modules.knowledge.entity.KnowledgeChunkEntity;
  */
 public final class LocalKnowledgeLexicalScorer {
     private static final int MAX_TERMS = 12;
-    private static final Set<String> WEAK_CJK_TERMS = Set.of(
-            "什么", "适合", "推荐", "可以", "一个", "一下", "这个", "那个", "现在");
+    /**
+     * 疑问词与口语填充词不承担主题信息，词法打分和 Lucene 词项匹配都必须跳过。
+     *
+     * <p>中文按二字切词，“有什么沙拉”会切出“有什/什么/么沙/沙拉”。如果不过滤疑问词，
+     * 一条只命中“有什么/是什么”的切片会靠两个常见词把分数叠上去，压过真正命中
+     * “沙拉”这条罕见主题词的切片——用户看到的就是“库里明明有，却查不到”。
+     */
+    static final Set<String> WEAK_CJK_TERMS = Set.of(
+            "什么", "有什", "哪些", "有哪", "哪个", "怎么", "么样", "多少", "推荐", "可以",
+            "一个", "一下", "这个", "那个", "现在", "适合");
 
     private final int matchLevel;
 

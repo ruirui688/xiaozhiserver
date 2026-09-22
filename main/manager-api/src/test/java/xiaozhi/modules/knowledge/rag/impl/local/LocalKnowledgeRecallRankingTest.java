@@ -86,6 +86,28 @@ class LocalKnowledgeRecallRankingTest {
                 "带品牌的品类问法必须召回酒水库存表，实际 Top5：" + topFiveDocs);
     }
 
+    /**
+     * 库里明明有的具体品类词（“沙拉”），必须排进前 5。
+     *
+     * <p>生产事故：问答库切片带“标准问题：……是什么？”样板文本，“有什么沙拉”里的
+     * “有什/什么”会命中大量无关切片，两个常见词叠加起来的分数压过只命中“沙拉”这一
+     * 罕见主题词的切片，结果是“库里 5 条沙拉，检索一条都排不上来”。
+     */
+    @Test
+    void specificCategoryWordInLibraryOutranksInterrogativeBoilerplate() {
+        categoryKnowledgeBase();
+
+        List<RetrievalDTO.HitVO> hits = retrieve("慧苑有什么沙拉");
+        List<String> topFive = hits.stream().limit(5).map(RetrievalDTO.HitVO::getContent).toList();
+
+        assertTrue(topFive.get(0).contains("时令沙拉"),
+                "命中“沙拉”的切片必须排第一，实际 Top5：" + topFive.stream()
+                        .map(text -> text.substring(0, Math.min(24, text.length()))).toList());
+        assertTrue(topFive.stream().allMatch(text -> text.contains("沙拉")),
+                "前 5 条都应是沙拉切片，实际 Top5：" + topFive.stream()
+                        .map(text -> text.substring(0, Math.min(24, text.length()))).toList());
+    }
+
     @Test
     void entityPriorityIsDisabledOnceEntityRowsWouldFillTheWholeWindow() {
         List<KnowledgeChunkEntity> sameEntityRows = new ArrayList<>();
@@ -191,6 +213,35 @@ class LocalKnowledgeRecallRankingTest {
                     "来源：公司知识库切片 第" + (index + 2) + "行\n切片ID：HY-KB-0" + index
                             + "\n分类：业态介绍/慧苑居\n主题：慧苑居科技民宿定位\n"
                             + "核心介绍：慧苑居是慧苑的智能居住业态，主打古城加科技的住宿体验" + index + "。");
+        }
+    }
+
+    /**
+     * 线上形状的餐品库：5 条沙拉 + 若干其它菜品，配两个名字带品牌、正文带
+     * “标准问题：……是什么？”样板文本的文档（这类样板文本正是靠疑问词抢排名的来源）。
+     */
+    private void categoryKnowledgeBase() {
+        String[] dishes = {"时令沙拉", "香烤鲈鱼沙拉", "低温牛肋条沙拉", "烤南瓜焦糖坚果沙拉", "青芒蒜油大虾沙拉"};
+        for (int index = 0; index < dishes.length; index++) {
+            addRow("doc-menu", "慧苑餐品知识库.xlsx",
+                    "来源：Sheet1 第" + (39 + index) + "行\n餐品名称：" + dishes[index]
+                            + "\n分类：沙拉能量碗\n售价/元：" + (28 + index) + "\n核心口味：清爽、蔬菜鲜味");
+        }
+        addRow("doc-menu", "慧苑餐品知识库.xlsx",
+                "来源：Sheet1 第10行\n餐品名称：泰式香茅海鲜意面\n分类：主食\n售价/元：78\n核心口味：香茅、海鲜、酸香");
+        addRow("doc-menu", "慧苑餐品知识库.xlsx",
+                "来源：Sheet1 第50行\n餐品名称：油焖大虾\n分类：海鲜\n售价/元：88\n核心口味：鲜甜");
+        for (int index = 0; index < 24; index++) {
+            addRow("doc-brand-qa", "慧苑问答知识库.xlsx",
+                    "来源：问答知识库 第" + (index + 2) + "行\n分类：民宿\n主题：第" + index + "项说明\n"
+                            + "标准问题：慧苑民宿第" + index + "项说明是什么？有哪些要注意的？\n"
+                            + "标准回答：慧苑民宿的说明" + index + "，具体以现场为准。");
+        }
+        for (int index = 0; index < 16; index++) {
+            addRow("doc-brand-intro", "慧苑公司介绍.xlsx",
+                    "来源：公司知识库切片 第" + (index + 2) + "行\n切片ID：HY-KB-0" + index
+                            + "\n分类：业态介绍/慧苑居\n主题：慧苑居科技民宿定位\n"
+                            + "核心介绍：慧苑居是慧苑的智能居住业态，有什么特色可以现场了解" + index + "。");
         }
     }
 

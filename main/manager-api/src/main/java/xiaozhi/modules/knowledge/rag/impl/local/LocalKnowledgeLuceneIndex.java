@@ -217,7 +217,7 @@ public class LocalKnowledgeLuceneIndex {
             }
             IndexSearcher searcher = new IndexSearcher(reader);
             searcher.setSimilarity(new BM25Similarity());
-            terms = dropLibraryLevelTerms(terms, searcher, datasetIds, documentIds);
+            terms = dropNonDiscriminativeTerms(terms, searcher, datasetIds, documentIds);
             boolean preferPrimaryName = !LocalKnowledgeStructuredIntent.requestsAuxiliaryRelationship(
                     String.join(" ", queries));
             Query query = filteredQuery(textQuery(terms, preferPrimaryName), datasetIds, documentIds);
@@ -267,31 +267,39 @@ public class LocalKnowledgeLuceneIndex {
     }
 
     /**
-     * 丢掉“全库级”词：出现在多数文档名里的词（典型是客户品牌名）对几乎所有切片都命中，
-     * 没有任何区分度，却会因为“每条切片都带它”而稳定压过真正的主题词
-     * （例如问“慧苑有什么酒水”时，酒水表正文里没有“慧苑”，永远排不上来）。
+     * 丢掉不承担主题信息的查询词项，分两类：
+     *
+     * <ol>
+     *   <li>疑问词/口语填充词（“什么/有什/哪些/推荐”）：中文按二字切词，这类词会命中问答库
+     *       “标准问题：……是什么？”样板文本，靠多个常见词叠加把分数抬上去，压过真正命中
+     *       “沙拉/海鲜”这种罕见主题词的切片。词法打分本来就会跳过它们，Lucene 侧同样必须跳过。</li>
+     *   <li>“全库级”词：出现在多数文档名里的词（典型是客户品牌名）对几乎所有切片都命中，
+     *       没有区分度（例如问“慧苑有什么酒水”时，酒水表正文里没有“慧苑”，永远排不上来）。</li>
+     * </ol>
      *
      * <p>分母必须是**本次检索的数据集范围**，不能用整个索引的切片数：本机索引同时装多个
      * 知识库时，大库会把小库的品牌词比例稀释掉，判定会失效。
-     * 只有在这种词能与其余有效词区分开时才丢弃，避免把整句问题清空。
+     * 只有在还有词项剩下时才丢弃，避免把整句问题清空。
      */
-    private Set<String> dropLibraryLevelTerms(Set<String> terms, IndexSearcher searcher,
+    private Set<String> dropNonDiscriminativeTerms(Set<String> terms, IndexSearcher searcher,
             Collection<String> datasetIds, Collection<String> documentIds) throws IOException {
         if (terms.size() < 2) {
             return terms;
         }
         Query scope = filteredQuery(new MatchAllDocsQuery(), datasetIds, documentIds);
         int chunks = searcher.count(scope);
-        if (chunks < 20) {
-            return terms;
-        }
         Set<String> kept = new LinkedHashSet<>();
         for (String term : terms) {
-            BooleanQuery.Builder probe = new BooleanQuery.Builder();
-            probe.add(scope, BooleanClause.Occur.FILTER);
-            probe.add(new TermQuery(new Term(FIELD_DOCUMENT_NAME, term)), BooleanClause.Occur.MUST);
-            if (searcher.count(probe.build()) * 2 > chunks) {
+            if (LocalKnowledgeLexicalScorer.WEAK_CJK_TERMS.contains(term)) {
                 continue;
+            }
+            if (chunks >= 20) {
+                BooleanQuery.Builder probe = new BooleanQuery.Builder();
+                probe.add(scope, BooleanClause.Occur.FILTER);
+                probe.add(new TermQuery(new Term(FIELD_DOCUMENT_NAME, term)), BooleanClause.Occur.MUST);
+                if (searcher.count(probe.build()) * 2 > chunks) {
+                    continue;
+                }
             }
             kept.add(term);
         }
