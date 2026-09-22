@@ -297,10 +297,11 @@ public class LocalKnowledgeLuceneIndex {
                 continue;
             }
             if (chunks >= 20) {
-                BooleanQuery.Builder probe = new BooleanQuery.Builder();
-                probe.add(scope, BooleanClause.Occur.FILTER);
-                probe.add(new TermQuery(new Term(FIELD_DOCUMENT_NAME, term)), BooleanClause.Occur.MUST);
-                if (searcher.count(probe.build()) * 2 > chunks) {
+                // ①文档名命中过半 → 全库级词（品牌名），对每条切片都命中；
+                // ②正文命中超过三分之一 → 高频泛词（“推荐”这类），命中它的切片多到没有区分度。
+                // 两种词都会让“多命中一个词”的无关切片反超真正命中主题词的切片。
+                if (hitsInField(searcher, scope, FIELD_DOCUMENT_NAME, term) * 2 > chunks
+                        || hitsInField(searcher, scope, FIELD_CONTENT, term) * 3 > chunks) {
                     addChars(droppedChars, term);
                     continue;
                 }
@@ -308,16 +309,24 @@ public class LocalKnowledgeLuceneIndex {
             kept.add(term);
         }
         // 二次过滤：二字切词会切出跨越品牌词/疑问词边界的词（“慧苑有哪些” → “苑有”、
-        // “小慧有什么” → “慧有”）。品牌词本身被丢弃后，这类词仍会命中问答库
-        // “标准问题：慧苑有哪些……”样板文本，所以整词都由已丢弃词的字组成的词同样丢弃。
+        // “慧苑的沙拉推荐” → “苑的”、“小慧有什么” → “慧有”）。这些词不承担主题信息，
+        // 却照样命中问答库“标准问题：慧苑有哪些……”样板文本和“慧苑的……”正文，
+        // 所以只要含有已丢弃词的字就一并丢弃。
         Set<String> refined = new LinkedHashSet<>();
         for (String term : kept) {
-            if (!coveredByDroppedChars(droppedChars, term)) {
+            if (!touchesDroppedChars(droppedChars, term)) {
                 refined.add(term);
             }
         }
         Set<String> result = refined.isEmpty() ? kept : refined;
         return result.isEmpty() ? terms : result;
+    }
+
+    private int hitsInField(IndexSearcher searcher, Query scope, String field, String term) throws IOException {
+        BooleanQuery.Builder probe = new BooleanQuery.Builder();
+        probe.add(scope, BooleanClause.Occur.FILTER);
+        probe.add(new TermQuery(new Term(field, term)), BooleanClause.Occur.MUST);
+        return searcher.count(probe.build());
     }
 
     private void addChars(Set<Character> target, String term) {
@@ -326,13 +335,13 @@ public class LocalKnowledgeLuceneIndex {
         }
     }
 
-    private boolean coveredByDroppedChars(Set<Character> droppedChars, String term) {
+    private boolean touchesDroppedChars(Set<Character> droppedChars, String term) {
         for (int index = 0; index < term.length(); index++) {
-            if (!droppedChars.contains(term.charAt(index))) {
-                return false;
+            if (droppedChars.contains(term.charAt(index))) {
+                return true;
             }
         }
-        return true;
+        return false;
     }
 
     private Query textQuery(Set<String> terms, boolean preferPrimaryName) {

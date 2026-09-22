@@ -46,13 +46,14 @@ public final class LocalKnowledgeLexicalScorer {
                 addTerm(terms, term);
             }
             if (containsCjk(term) && term.length() > 2) {
-                addCjkNgrams(terms, term, 4, 4);
+                // 二字词优先且不抽样：中文的内容词基本都是二字词，按步长抽样会把主题词整词跳掉。
+                // 例：“慧苑的沙拉推荐”按步长抽样只会得到“慧苑/的沙/拉推+推荐”，唯独漏掉“沙拉”，
+                // 于是命中“沙拉”的切片在词法侧拿 0 分，被命中品牌/泛词的切片反超。
+                addCjkNgrams(terms, term, 2, term.length());
                 if (matchLevel >= 2) {
                     addCjkNgrams(terms, term, 3, 4);
                 }
-                if (matchLevel >= 4) {
-                    addCjkNgrams(terms, term, 2, 4);
-                }
+                addCjkNgrams(terms, term, 4, 4);
             }
             if (terms.size() >= MAX_TERMS) {
                 break;

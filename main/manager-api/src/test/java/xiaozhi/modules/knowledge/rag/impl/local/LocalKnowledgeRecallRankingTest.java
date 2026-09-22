@@ -108,6 +108,23 @@ class LocalKnowledgeRecallRankingTest {
                         .map(text -> text.substring(0, Math.min(24, text.length()))).toList());
     }
 
+    /**
+     * 同一件事，换成模型改写后的问法也必须命中；改写串更容易触发两类问题：
+     * ①二字切词抽样会漏掉主题词（“慧苑的沙拉推荐”曾切不出“沙拉”）；
+     * ②品牌字泄漏出的跨边界词（“慧苑的” → “苑的”）会命中大量无关切片。
+     */
+    @Test
+    void rewrittenQuestionStillReachesTheTopicChunks() {
+        categoryKnowledgeBase();
+
+        List<RetrievalDTO.HitVO> hits = retrieve("慧苑的沙拉推荐");
+        List<String> topFive = hits.stream().limit(5).map(RetrievalDTO.HitVO::getContent).toList();
+
+        assertTrue(topFive.stream().allMatch(text -> text.contains("沙拉")),
+                "改写问法下前 5 条仍应全是沙拉切片，实际 Top5：" + topFive.stream()
+                        .map(text -> text.substring(0, Math.min(24, text.length()))).toList());
+    }
+
     @Test
     void entityPriorityIsDisabledOnceEntityRowsWouldFillTheWholeWindow() {
         List<KnowledgeChunkEntity> sameEntityRows = new ArrayList<>();
