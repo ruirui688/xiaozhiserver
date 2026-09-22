@@ -215,9 +215,9 @@ public class LocalKnowledgeLuceneIndex {
             if (terms.isEmpty()) {
                 return List.of();
             }
-            terms = dropLibraryLevelTerms(terms, reader);
             IndexSearcher searcher = new IndexSearcher(reader);
             searcher.setSimilarity(new BM25Similarity());
+            terms = dropLibraryLevelTerms(terms, searcher, datasetIds, documentIds);
             boolean preferPrimaryName = !LocalKnowledgeStructuredIntent.requestsAuxiliaryRelationship(
                     String.join(" ", queries));
             Query query = filteredQuery(textQuery(terms, preferPrimaryName), datasetIds, documentIds);
@@ -270,16 +270,27 @@ public class LocalKnowledgeLuceneIndex {
      * 丢掉“全库级”词：出现在多数文档名里的词（典型是客户品牌名）对几乎所有切片都命中，
      * 没有任何区分度，却会因为“每条切片都带它”而稳定压过真正的主题词
      * （例如问“慧苑有什么酒水”时，酒水表正文里没有“慧苑”，永远排不上来）。
-     * 只在这种词能与其余有效词区分开时才丢弃，避免把整句问题清空。
+     *
+     * <p>分母必须是**本次检索的数据集范围**，不能用整个索引的切片数：本机索引同时装多个
+     * 知识库时，大库会把小库的品牌词比例稀释掉，判定会失效。
+     * 只有在这种词能与其余有效词区分开时才丢弃，避免把整句问题清空。
      */
-    private Set<String> dropLibraryLevelTerms(Set<String> terms, DirectoryReader reader) throws IOException {
-        int chunks = reader.numDocs();
-        if (chunks < 20 || terms.size() < 2) {
+    private Set<String> dropLibraryLevelTerms(Set<String> terms, IndexSearcher searcher,
+            Collection<String> datasetIds, Collection<String> documentIds) throws IOException {
+        if (terms.size() < 2) {
+            return terms;
+        }
+        Query scope = filteredQuery(new MatchAllDocsQuery(), datasetIds, documentIds);
+        int chunks = searcher.count(scope);
+        if (chunks < 20) {
             return terms;
         }
         Set<String> kept = new LinkedHashSet<>();
         for (String term : terms) {
-            if (reader.docFreq(new Term(FIELD_DOCUMENT_NAME, term)) * 2 > chunks) {
+            BooleanQuery.Builder probe = new BooleanQuery.Builder();
+            probe.add(scope, BooleanClause.Occur.FILTER);
+            probe.add(new TermQuery(new Term(FIELD_DOCUMENT_NAME, term)), BooleanClause.Occur.MUST);
+            if (searcher.count(probe.build()) * 2 > chunks) {
                 continue;
             }
             kept.add(term);
