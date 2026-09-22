@@ -50,6 +50,7 @@ function dialog() {
     });
     const errors = [];
     const ctx = { ...component.data(), agentId: 'agent', currentSessionId: 'session', $message: { error: value => errors.push(value) } };
+    ctx.$refs = { get recordingPlayer() { return new global.Audio(); } };
     for (const [name, fn] of Object.entries(component.methods)) ctx[name] = fn.bind(ctx);
     return { ctx, errors, saved, component };
 }
@@ -173,4 +174,58 @@ test('decoder error and repeated click clear playback state', async () => {
     await ctx.playAudio({ audioId: 'id' });
     assert.equal(ctx.playingAudioId, null);
     assert.equal(ctx.audioElement, null);
+});
+
+test('playing is not displayed as loading and native pause cancels waiting deadline', async () => {
+    const { ctx } = dialog();
+    ctx.requestFile = async (_, options) => options.binary ? new Blob(['audio']) : 'ticket';
+    global.Audio = class {
+        async play() { this.onplaying(); }
+        pause() {} removeAttribute() {} load() {}
+    };
+    await ctx.playAudio({ audioId: 'id' });
+    assert.equal(ctx.audioLoading, false);
+    assert.equal(ctx.getAudioIconClass({ audioId: 'id' }), 'el-icon-video-pause');
+    ctx.audioElement.onwaiting();
+    assert.equal(ctx.audioLoading, true);
+    ctx.audioElement.onpause();
+    assert.equal(ctx.audioLoading, false);
+    ctx.stopAudio();
+});
+
+test('autoplay denial retains native controls for a user gesture retry', async () => {
+    const { ctx, errors } = dialog();
+    ctx.requestFile = async (_, options) => options.binary ? new Blob(['audio']) : 'ticket';
+    global.Audio = class {
+        async play() { throw Object.assign(new Error(), { name: 'NotAllowedError' }); }
+        pause() {} removeAttribute() {} load() {}
+    };
+    await ctx.playAudio({ audioId: 'id' });
+    assert.equal(ctx.audioLoading, false);
+    assert.ok(ctx.audioUrl);
+    assert.match(errors[0], /播放器/);
+    ctx.stopAudio();
+});
+
+test('hanging play promise has an independent deadline after download completes', async () => {
+    const { ctx, errors } = dialog();
+    ctx.requestFile = async (_, options) => options.binary ? new Blob(['audio']) : 'ticket';
+    let rejectPlay;
+    global.Audio = class {
+        play() { return new Promise((_, reject) => { rejectPlay = reject; }); }
+        pause() {} removeAttribute() {}
+        load() { rejectPlay(Object.assign(new Error(), { name: 'AbortError' })); }
+    };
+    const realTimeout = global.setTimeout;
+    global.setTimeout = (callback, ms) => realTimeout(callback, ms === 15000 ? 5 : ms);
+    try {
+        await ctx.playAudio({ audioId: 'id' });
+        assert.equal(ctx.playingAudioId, null);
+        assert.equal(ctx.audioLoading, false);
+        assert.equal(ctx.audioUrl, null);
+        assert.equal(errors.length, 1);
+        assert.match(errors[0], /未能开始或继续播放/);
+    } finally {
+        global.setTimeout = realTimeout;
+    }
 });

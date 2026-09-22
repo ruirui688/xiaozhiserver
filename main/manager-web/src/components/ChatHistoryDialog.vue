@@ -141,6 +141,11 @@
                 </div>
             </div>
         </div>
+        <div v-show="playingAudioId" class="recording-player">
+            <span>{{ audioLoading ? '正在加载录音…' : '录音回放' }}</span>
+            <audio ref="recordingPlayer" controls preload="metadata" aria-label="聊天录音回放"></audio>
+            <el-button type="text" @click="stopAudio">关闭播放</el-button>
+        </div>
         <div v-if="currentSessionId" class="download-buttons">
             <el-button type="primary" plain size="small" :disabled="downloading" @click="downloadCurrentSessionWithPrevious">
                 {{ $t('chatHistory.downloadCurrentWithPreviousSessions') }}
@@ -197,6 +202,8 @@ export default {
             isFirstLoad: true,
             playingAudioId: null,
             audioElement: null,
+            audioLoading: false,
+            audioPlaybackTimer: null,
             audioUrl: null,
             audioRequest: null,
             downloadRequest: null,
@@ -873,16 +880,24 @@ export default {
         },
         getAudioIconClass(message) {
             if (this.playingAudioId === message.audioId) {
-                return 'el-icon-loading';
+                return this.audioLoading ? 'el-icon-loading' : 'el-icon-video-pause';
             }
             return 'el-icon-video-play';
         },
         stopAudio() {
+            clearTimeout(this.audioPlaybackTimer);
+            this.audioPlaybackTimer = null;
+            this.audioLoading = false;
             if (this.audioRequest) this.audioRequest.abort();
             this.audioRequest = null;
             if (this.audioElement) {
                 this.audioElement.onended = null;
                 this.audioElement.onerror = null;
+                this.audioElement.onplaying = null;
+                this.audioElement.onwaiting = null;
+                this.audioElement.onstalled = null;
+                this.audioElement.onpause = null;
+                this.audioElement.onplay = null;
                 this.audioElement.pause();
                 this.audioElement.removeAttribute('src');
                 this.audioElement.load();
@@ -910,6 +925,7 @@ export default {
             const request = new AbortController();
             this.audioRequest = request;
             this.playingAudioId = message.audioId;
+            this.audioLoading = true;
             const timer = setTimeout(() => request.abort(), 30000);
             try {
                 const ticket = await this.requestFile(`/agent/audio/${encodeURIComponent(message.audioId)}`, { method: 'POST', signal: request.signal });
@@ -917,15 +933,50 @@ export default {
                 const blob = await this.requestFile(`/agent/play/${encodeURIComponent(ticket)}`, { binary: true, signal: request.signal });
                 if (this.audioRequest !== request) return;
                 this.audioUrl = URL.createObjectURL(blob);
-                const audio = new Audio(this.audioUrl);
+                const audio = this.$refs.recordingPlayer;
                 this.audioElement = audio;
+                // A visible native player exposes progress, mute/volume and retry controls.
+                audio.src = this.audioUrl;
                 audio.onended = () => { if (this.audioRequest === request) this.stopAudio(); };
+                const waitForPlayback = () => {
+                    if (this.audioRequest !== request) return;
+                    this.audioLoading = true;
+                    clearTimeout(this.audioPlaybackTimer);
+                    this.audioPlaybackTimer = setTimeout(() => {
+                        if (this.audioRequest !== request) return;
+                        this.stopAudio();
+                        this.$message.error('浏览器未能开始或继续播放录音，请重试');
+                    }, 15000);
+                };
+                audio.onplaying = () => {
+                    if (this.audioRequest !== request) return;
+                    clearTimeout(this.audioPlaybackTimer);
+                    this.audioLoading = false;
+                };
+                audio.onpause = () => {
+                    if (this.audioRequest !== request) return;
+                    clearTimeout(this.audioPlaybackTimer);
+                    this.audioLoading = false;
+                };
+                audio.onplay = waitForPlayback;
+                audio.onwaiting = waitForPlayback;
+                audio.onstalled = waitForPlayback;
                 audio.onerror = () => {
                     if (this.audioRequest !== request) return;
                     this.stopAudio();
                     this.$message.error('录音无法解码或播放，请检查音频文件');
                 };
-                await audio.play();
+                waitForPlayback();
+                try {
+                    await audio.play();
+                } catch (error) {
+                    if (error.name !== 'NotAllowedError') throw error;
+                    if (this.audioRequest === request) {
+                        clearTimeout(this.audioPlaybackTimer);
+                        this.audioLoading = false;
+                        this.$message.error('浏览器阻止了自动播放，请点击下方播放器的播放按钮');
+                    }
+                }
             } catch (error) {
                 if (this.audioRequest === request) {
                     this.stopAudio();
@@ -987,9 +1038,23 @@ export default {
 </script>
 
 <style scoped>
+.recording-player {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: #f4f8fc;
+}
+.recording-player audio {
+    flex: 1;
+    min-width: 0;
+    height: 40px;
+}
 .chat-container {
     display: flex;
-    height: 100%;
+    flex: 1;
+    min-height: 0;
 }
 
 .session-list {
@@ -1361,10 +1426,7 @@ export default {
     display: flex;
     gap: 10px;
     border-top: 1px solid #eee;
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
+    flex-shrink: 0;
     background-color: white;
 }
 
@@ -1397,7 +1459,9 @@ export default {
 .chat-history-dialog .el-dialog__body {
     padding: 0;
     overflow: hidden;
-    height: calc(90vh - 54px);
-    /* 减去标题栏的高度 */
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
 }
 </style>
