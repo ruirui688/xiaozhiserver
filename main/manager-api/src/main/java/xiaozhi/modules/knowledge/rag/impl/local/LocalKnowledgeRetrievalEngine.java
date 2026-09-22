@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.ToIntFunction;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
@@ -92,22 +93,29 @@ public class LocalKnowledgeRetrievalEngine {
         LocalKnowledgeLexicalScorer lexical = new LocalKnowledgeLexicalScorer(options.matchLevel());
         Set<String> rawTerms = lexical.tokenize(rawQuestion);
         Set<String> rewrittenTerms = lexical.tokenize(rewrittenQuestion);
+        String entityQuery = rawQuestion + " " + rewrittenQuestion;
+        List<LocalKnowledgeLuceneIndex.SearchHit> enabledCandidates = candidates.stream()
+                .filter(hit -> isEnabledDocument(documents.get(scopeId(hit.chunk().getDatasetId(), hit.chunk().getDocumentId()))))
+                .toList();
         Comparator<ScoredChunk> ordering = LocalKnowledgeStructuredReranker.comparator(
-                rawQuestion + " " + rewrittenQuestion,
+                entityQuery,
                 item -> structuredText(item.chunk()),
+                entityMatchFunction(entityQuery, enabledCandidates.stream()
+                        .map(LocalKnowledgeLuceneIndex.SearchHit::chunk).toList(), options.resultLimit()),
                 ScoredChunk::score);
 
-        List<ScoredChunk> scored = candidates.stream()
-                .filter(hit -> isEnabledDocument(documents.get(scopeId(hit.chunk().getDatasetId(), hit.chunk().getDocumentId()))))
+        List<ScoredChunk> scored = enabledCandidates.stream()
                 .map(hit -> {
-                    float lexicalScore = Math.max(
-                            lexical.score(rawQuestion, hit.chunk(), rawTerms),
-                            lexical.score(rewrittenQuestion, hit.chunk(), rewrittenTerms));
+                    float rawLexical = lexical.score(rawQuestion, hit.chunk(), rawTerms);
+                    float rewrittenLexical = lexical.score(rewrittenQuestion, hit.chunk(), rewrittenTerms);
+                    float lexicalScore = Math.max(rawLexical, rewrittenLexical);
                     float score = Math.min(0.99F, (hit.score() * 0.72F) + (lexicalScore * 0.28F));
-                    return new ScoredChunk(hit.chunk(), hit.documentName(), score, hit.score());
+                    boolean exactQuestion = isExactQuestionMatch(rawQuestion, rawLexical)
+                            || isExactQuestionMatch(rewrittenQuestion, rewrittenLexical);
+                    return new ScoredChunk(hit.chunk(), hit.documentName(), score, hit.score(), exactQuestion);
                 })
                 .filter(item -> StringUtils.isBlank(rawQuestion) || item.score() >= options.threshold())
-                .sorted(ordering)
+                .sorted(exactQuestionFirst().thenComparing(ordering))
                 .limit(options.resultLimit())
                 .toList();
         return toResult(scored, documents);
@@ -125,26 +133,71 @@ public class LocalKnowledgeRetrievalEngine {
         List<KnowledgeChunkEntity> chunks = loadFallbackCandidates(
                 req, candidateTerms, fulltextQuery, options.candidateLimit());
         Map<String, DocumentEntity> documents = loadDocs(chunks);
-        Comparator<ScoredChunk> ordering = LocalKnowledgeStructuredReranker.comparator(
-                rawQuestion + " " + rewrittenQuestion,
-                item -> structuredText(item.chunk()),
-                ScoredChunk::score);
-        List<ScoredChunk> scored = chunks.stream()
+        List<KnowledgeChunkEntity> enabledChunks = chunks.stream()
                 .filter(chunk -> !Integer.valueOf(0).equals(chunk.getEnabled()))
                 .filter(chunk -> isEnabledDocument(documents.get(scopeId(chunk.getDatasetId(), chunk.getDocumentId()))))
+                .toList();
+        String entityQuery = rawQuestion + " " + rewrittenQuestion;
+        Comparator<ScoredChunk> ordering = LocalKnowledgeStructuredReranker.comparator(
+                entityQuery,
+                item -> structuredText(item.chunk()),
+                entityMatchFunction(entityQuery, enabledChunks, options.resultLimit()),
+                ScoredChunk::score);
+        List<ScoredChunk> scored = enabledChunks.stream()
                 .map(chunk -> {
-                    float score = expandedQueries.stream()
+                    List<Float> queryScores = expandedQueries.stream()
                             .map(query -> lexical.score(query, chunk, lexical.tokenize(query)))
-                            .max(Float::compare)
-                            .orElse(0F);
+                            .toList();
+                    float score = queryScores.stream().max(Float::compare).orElse(0F);
+                    boolean exactQuestion = false;
+                    for (int i = 0; i < queryScores.size(); i++) {
+                        if (isExactQuestionMatch(expandedQueries.get(i), queryScores.get(i))) {
+                            exactQuestion = true;
+                            break;
+                        }
+                    }
                     DocumentEntity document = documents.get(scopeId(chunk.getDatasetId(), chunk.getDocumentId()));
-                    return new ScoredChunk(chunk, document == null ? null : document.getName(), score, score);
+                    return new ScoredChunk(chunk, document == null ? null : document.getName(), score, score,
+                            exactQuestion);
                 })
                 .filter(item -> StringUtils.isBlank(rawQuestion) || item.score() >= options.threshold())
-                .sorted(ordering)
+                .sorted(exactQuestionFirst().thenComparing(ordering))
                 .limit(options.resultLimit())
                 .toList();
         return toResult(scored, documents);
+    }
+
+    /**
+     * 切片正文、问题或答案完整包含用户问题时，词法评分取 1F，属于最高置信度证据。
+     * 这种命中必须先于主实体/价格等结构化排序返回，否则会被同库大量表格行挤出结果窗口。
+     */
+    private static boolean isExactQuestionMatch(String question, float lexicalScore) {
+        return StringUtils.isNotBlank(question) && lexicalScore >= 1F;
+    }
+
+    private static Comparator<ScoredChunk> exactQuestionFirst() {
+        return Comparator.comparingInt((ScoredChunk item) -> item.exactQuestion() ? 1 : 0).reversed();
+    }
+
+    /**
+     * 主实体优先只在实体确实能缩小候选集时生效。如果带主实体字段的候选已经多到能占满整个
+     * 结果窗口，实体优先只会把同一实体前缀的表格行排在前面，把真正回答问题的切片挤出召回结果
+     * （例如“慧苑演出几点开始”被十几行“套餐名称：慧苑…”占满）。此时实体命中恒为 0，
+     * 排序退化为按相关度进行。
+     */
+    static boolean entityMatchDiscriminates(String query, List<KnowledgeChunkEntity> candidates, int resultLimit) {
+        long matched = candidates.stream()
+                .filter(chunk -> LocalKnowledgeStructuredIntent.primaryEntityMatch(query, structuredText(chunk)) > 0)
+                .count();
+        return matched < resultLimit;
+    }
+
+    private ToIntFunction<ScoredChunk> entityMatchFunction(String query, List<KnowledgeChunkEntity> candidates,
+            int resultLimit) {
+        if (!entityMatchDiscriminates(query, candidates, resultLimit)) {
+            return item -> 0;
+        }
+        return item -> LocalKnowledgeStructuredIntent.primaryEntityMatch(query, structuredText(item.chunk()));
     }
 
     private List<LocalKnowledgeLuceneIndex.SearchHit> authoritativeHits(
@@ -274,7 +327,7 @@ public class LocalKnowledgeRetrievalEngine {
                 && "DONE".equalsIgnoreCase(document.getRun());
     }
 
-    private String structuredText(KnowledgeChunkEntity chunk) {
+    private static String structuredText(KnowledgeChunkEntity chunk) {
         return String.join("\n",
                 StringUtils.defaultString(chunk.getContent()),
                 StringUtils.defaultString(chunk.getQuestion()),
@@ -294,6 +347,7 @@ public class LocalKnowledgeRetrievalEngine {
         }
     }
 
-    private record ScoredChunk(KnowledgeChunkEntity chunk, String documentName, float score, float termScore) {
+    private record ScoredChunk(KnowledgeChunkEntity chunk, String documentName, float score, float termScore,
+            boolean exactQuestion) {
     }
 }

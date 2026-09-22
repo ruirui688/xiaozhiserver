@@ -165,11 +165,22 @@ LocalKnowledgeAdapter.retrievalTest()
 1. 上传成功时把原始文件保存到 knowledge.document-storage-root/{datasetId}/{documentId}/source.{ext}
 2. 切片写入可兼容旧链路的 MySQL 表，同时写入本机 Lucene CJK/BM25 派生索引
 3. Python 同时传入用户原问 raw_question 与模型改写 question
-4. LocalKnowledgeQueryExpander 对数量/人数、普通价格问法和单品表达做确定性等价扩展；Lucene 对
-   content/question/answer/documentName 检索，并从结构化切片中提取商品名称、品名、菜品名称等主实体字段单独加权
+4. LocalKnowledgeQueryExpander 对数量/人数、普通价格问法、单品表达和“有什么酒/喝的/吃的”这类
+   品类问法做确定性等价扩展（表格里记的是“酒水名称：… 品类：洋酒/葡萄酒/软饮”和“餐品名称/分类：主食”，
+   原话里的“酒/吃的”不足以召回）；Lucene 对 content/question/answer/documentName 检索，
+   并从结构化切片中提取商品名称、品名、菜品名称等主实体字段单独加权。
+   LocalKnowledgeDocumentVocabulary 还会从每个文档自身的列头与品类取值自动推导“文档级词表”
+   （酒水名称 → 酒水，品类：洋酒 → 洋酒；通用列头与文档名不参与），写进 document_vocabulary 字段，
+   命中即代表整篇文档相关，用于把“问品类”路由到对应的表；词表由内容推导，不要求人工写文档介绍。
+   同时丢弃“全库级词”：出现在多数文档名里的词（客户品牌名）没有区分度，会稳定压过真正的主题词
+   （酒水表正文里没有品牌名，否则永远排不上来）；只在其余有效词仍存在时才丢弃
 5. 结构化重排先区分主实体命中与“推荐搭配”等辅助关系命中：查询“可乐价格”时商品名称命中优先，
-   查询“搭配可乐的菜”时仍保留关系结果；随后再对“最低价/最高价”等明确极值执行确定性价格排序
-6. 最后按 LocalKnowledgeLexicalScorer 精排、keyword_threshold 过滤和 keyword_top_k 返回；索引 schema
+   查询“搭配可乐的菜”时仍保留关系结果；随后再对“最低价/最高价”等明确极值执行确定性价格排序。
+   主实体命中要求命中片段覆盖实体名称的一半以上（“慧苑”不算“慧苑VIP4人套餐”的实体命中），
+   并且带主实体字段的候选必须少于 keyword_top_k；否则实体优先只会用同前缀表格行占满召回窗口，
+   把真正回答问题的切片挤出结果
+6. 完整包含用户问题的切片（词法满分）优先于主实体/价格结构化排序，精确答案不会被表格行挤掉；
+   最后按 LocalKnowledgeLexicalScorer 精排、keyword_threshold 过滤和 keyword_top_k 返回；索引 schema
    变化会触发从 MySQL DONE 切片惰性重建，不要求重新上传原文件
 ```
 
@@ -421,7 +432,7 @@ Web 上传不再手工指定 `multipart/form-data`，由浏览器为 `FormData` 
 
 | 层 | 当前覆盖 |
 |---|---|
-| Java 切片与召回契约 | 必选托管 LLM、OpenAI 兼容校验、无规则回退、LLM 窗口不丢字、后台任务与持久化进度、零切片拒绝；结构化主实体/价格/搭配关系排序回归 |
+| Java 切片与召回契约 | 必选托管 LLM、OpenAI 兼容校验、无规则回退、LLM 窗口不丢字、后台任务与持久化进度、零切片拒绝；结构化主实体/价格/搭配关系排序回归；品牌前缀召回回归（含真实语料规模） |
 | Java 动态来源 | 公网 URL/密钥 query 拒绝、workspace 权限、知识库级 opt-in、候选版本不参与召回、同步运行持久化 |
 | Java 工具描述 | 领域中立、知识库数量与说明长度上限、空元数据确定性输出 |
 | Web 组件状态 | 上传提交后不阻塞等待、列表持续显示进度与失败原因、终态通知、晚到详情不覆盖 dirty 字段、保存失败保留草稿、选择器乱序与恢复保护 |

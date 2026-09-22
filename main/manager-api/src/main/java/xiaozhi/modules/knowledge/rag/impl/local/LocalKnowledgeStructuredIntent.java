@@ -20,6 +20,10 @@ final class LocalKnowledgeStructuredIntent {
     private static final Pattern PRICE_FIELD_PATTERN = Pattern.compile(
             "(?:^|[\\n;；])\\s*(?:价格|售价|单价|现价|金额|价钱)\\s*[：:=]",
             Pattern.CASE_INSENSITIVE);
+    /**
+     * 主实体命中的最小长度。单字重合（“名称：甲”）没有区分度，不能当成实体命中。
+     */
+    private static final int MIN_ENTITY_MATCH_LENGTH = 2;
     private static final Set<String> WEAK_ENTITY_PARTS = Set.of(
             "什么", "怎么", "多少", "推荐", "商品", "产品", "名称", "菜品", "饮品", "套餐",
             "价格", "价钱", "售价", "单价", "金额", "一个", "一杯", "单杯", "单独", "单点",
@@ -39,11 +43,17 @@ final class LocalKnowledgeStructuredIntent {
         }
         String normalizedQuery = normalize(query);
         String primary = normalize(primaryName(content));
-        if (primary.length() < 2 || normalizedQuery.isEmpty()) {
+        if (primary.length() < MIN_ENTITY_MATCH_LENGTH || normalizedQuery.isEmpty()) {
             return 0;
         }
         int maxLength = Math.min(12, primary.length());
-        for (int length = maxLength; length >= 2; length--) {
+        for (int length = maxLength; length >= MIN_ENTITY_MATCH_LENGTH; length--) {
+            // 命中片段必须覆盖主实体名称的一半以上，否则只是品牌/品类前缀的巧合重合：
+            // “慧苑”只占“慧苑VIP4人套餐”的 1/5，却会同时命中同库十几行表格数据。
+            // 长度从大到小枚举，更短的片段覆盖率只会更低，一旦不满足即可结束。
+            if (length * 2 < primary.length()) {
+                break;
+            }
             for (int start = 0; start + length <= primary.length(); start++) {
                 String part = primary.substring(start, start + length);
                 if (!WEAK_ENTITY_PARTS.contains(part) && normalizedQuery.contains(part)) {

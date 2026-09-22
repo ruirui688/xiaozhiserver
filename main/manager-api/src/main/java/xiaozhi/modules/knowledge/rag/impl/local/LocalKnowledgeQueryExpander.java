@@ -41,6 +41,15 @@ public final class LocalKnowledgeQueryExpander {
         if (containsAny(combined, "单独", "单点", "单杯", "一杯", "零售")) {
             queries.add("单品 单点 单独 零售 杯 单杯");
         }
+        // “有什么酒/喝的”这类品类问法，表格里记的是“酒水名称：… 品类：洋酒/葡萄酒/软饮/啤酒”，
+        // 单靠原话里的“酒”不足以召回；补充类别词只参与召回，不改写用户问题。
+        if (containsAny(combined, "酒", "喝的", "喝点什么", "饮品", "饮料")) {
+            queries.add("酒水 洋酒 葡萄酒 啤酒 白酒 鸡尾酒 特调 饮品 饮料");
+        }
+        // “有什么吃的”在表格里对应的是“餐品名称/分类：主食/前菜/汤品…”，同样需要类别词补齐。
+        if (containsAny(combined, "吃的", "有什么吃", "吃点什么", "餐品", "菜品")) {
+            queries.add("餐品 菜品 主食 前菜 汤品 小吃 甜点 水果盘");
+        }
         return new ArrayList<>(queries);
     }
 

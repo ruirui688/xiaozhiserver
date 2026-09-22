@@ -1,5 +1,6 @@
 package xiaozhi.modules.knowledge.rag.impl.local;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -40,5 +41,30 @@ class LocalKnowledgeQueryExpanderTest {
 
         assertTrue(queries.stream().anyMatch(query -> query.contains("售价") && query.contains("单价")));
         assertTrue(queries.stream().anyMatch(query -> query.contains("单品") && query.contains("零售")));
+    }
+
+    @Test
+    void expandsDrinkCategoryIntoInventoryFieldValues() {
+        // 用户只说“有什么酒”，表格里记的是“酒水名称：… 品类：洋酒/葡萄酒/啤酒”。
+        List<String> queries = LocalKnowledgeQueryExpander.expand("你们有什么酒推荐", "你们有什么酒推荐");
+
+        assertTrue(queries.stream().anyMatch(query -> query.contains("酒水") && query.contains("洋酒")
+                && query.contains("葡萄酒") && query.contains("啤酒")));
+    }
+
+    @Test
+    void expandsWhatToEatIntoFoodCategoryFields() {
+        List<String> queries = LocalKnowledgeQueryExpander.expand("那你有什么吃的", "慧苑有什么吃的");
+
+        assertTrue(queries.stream().anyMatch(query -> query.contains("餐品") && query.contains("主食")
+                && query.contains("前菜")));
+    }
+
+    @Test
+    void keepsUnrelatedQuestionsUntouched() {
+        List<String> queries = LocalKnowledgeQueryExpander.expand("慧苑演出几点开始", "慧苑演出几点开始");
+
+        assertEquals(1, queries.size());
+        assertEquals("慧苑演出几点开始", queries.get(0));
     }
 }

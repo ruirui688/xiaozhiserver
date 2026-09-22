@@ -4,6 +4,7 @@ import java.util.Comparator;
 import java.util.OptionalDouble;
 import java.util.function.Function;
 import java.util.function.ToDoubleFunction;
+import java.util.function.ToIntFunction;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -20,10 +21,20 @@ final class LocalKnowledgeStructuredReranker {
 
     static <T> Comparator<T> comparator(String query, Function<T, String> content,
             ToDoubleFunction<T> fallbackScore) {
+        return comparator(query, content,
+                item -> LocalKnowledgeStructuredIntent.primaryEntityMatch(query, content.apply(item)), fallbackScore);
+    }
+
+    /**
+     * @param entityMatch 预先算好的主实体命中长度。调用方可以据此关闭实体优先：
+     *                    当带主实体字段的候选已经多到能占满结果窗口时，实体优先只会把同前缀
+     *                    表格行排到最前，把真正回答问题的切片挤出召回结果。
+     */
+    static <T> Comparator<T> comparator(String query, Function<T, String> content, ToIntFunction<T> entityMatch,
+            ToDoubleFunction<T> fallbackScore) {
         Direction direction = direction(query);
         Comparator<T> scoreOrder = Comparator.comparingDouble(fallbackScore).reversed();
-        Comparator<T> entityOrder = Comparator.<T>comparingInt(
-                item -> LocalKnowledgeStructuredIntent.primaryEntityMatch(query, content.apply(item))).reversed();
+        Comparator<T> entityOrder = Comparator.<T>comparingInt(entityMatch).reversed();
         Comparator<T> attributeOrder = Comparator.<T>comparingInt(
                 item -> LocalKnowledgeStructuredIntent.hasPriceField(content.apply(item)) ? 1 : 0).reversed();
         if (direction == Direction.NONE) {

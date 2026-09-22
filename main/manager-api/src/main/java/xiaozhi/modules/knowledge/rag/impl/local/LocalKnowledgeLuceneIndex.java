@@ -57,9 +57,11 @@ public class LocalKnowledgeLuceneIndex {
     private static final String FIELD_QUESTION = "question";
     private static final String FIELD_ANSWER = "answer";
     private static final String FIELD_DOCUMENT_NAME = "document_name";
+    private static final String FIELD_DOCUMENT_VOCABULARY = "document_vocabulary";
     private static final String FIELD_CONTENT_VERSION = "content_version";
     private static final String FIELD_KIND = "record_kind";
-    private static final String SCHEMA_VERSION = "3";
+    // 4：新增文档级词表字段（列头主题词 + 品类取值），旧索引按此版本惰性重建。
+    private static final String SCHEMA_VERSION = "4";
 
     private final Path root;
     private final Analyzer analyzer;
@@ -89,11 +91,12 @@ public class LocalKnowledgeLuceneIndex {
             try (Directory directory = FSDirectory.open(root);
                     IndexWriter writer = new IndexWriter(directory, writerConfig())) {
                 writer.deleteDocuments(new Term(FIELD_SCOPE_ID, scopeId(datasetId, documentId)));
+                String vocabulary = documentVocabulary(chunks);
                 if (chunks != null) {
                     for (KnowledgeChunkEntity chunk : chunks) {
                         if (chunk != null && !Integer.valueOf(0).equals(chunk.getEnabled())
                                 && StringUtils.isNotBlank(chunk.getChunkId())) {
-                            writer.addDocument(toDocument(datasetId, documentId, documentName, chunk));
+                            writer.addDocument(toDocument(datasetId, documentId, documentName, chunk, vocabulary));
                         }
                     }
                 }
@@ -212,6 +215,7 @@ public class LocalKnowledgeLuceneIndex {
             if (terms.isEmpty()) {
                 return List.of();
             }
+            terms = dropLibraryLevelTerms(terms, reader);
             IndexSearcher searcher = new IndexSearcher(reader);
             searcher.setSimilarity(new BM25Similarity());
             boolean preferPrimaryName = !LocalKnowledgeStructuredIntent.requestsAuxiliaryRelationship(
@@ -237,7 +241,7 @@ public class LocalKnowledgeLuceneIndex {
     }
 
     private Document toDocument(String datasetId, String documentId, String documentName,
-            KnowledgeChunkEntity chunk) {
+            KnowledgeChunkEntity chunk, String vocabulary) {
         Document document = new Document();
         document.add(new StringField(FIELD_SCOPE_ID, scopeId(datasetId, documentId), Field.Store.NO));
         document.add(new StringField(FIELD_DATASET_ID, datasetId, Field.Store.YES));
@@ -248,11 +252,39 @@ public class LocalKnowledgeLuceneIndex {
         document.add(new TextField(FIELD_QUESTION, StringUtils.defaultString(chunk.getQuestion()), Field.Store.YES));
         document.add(new TextField(FIELD_ANSWER, StringUtils.defaultString(chunk.getAnswer()), Field.Store.YES));
         document.add(new TextField(FIELD_DOCUMENT_NAME, StringUtils.defaultString(documentName), Field.Store.YES));
+        document.add(new TextField(FIELD_DOCUMENT_VOCABULARY, StringUtils.defaultString(vocabulary),
+                Field.Store.NO));
         document.add(new TextField(FIELD_PRIMARY_NAME, LocalKnowledgeStructuredIntent.primaryName(String.join("\n",
                 StringUtils.defaultString(chunk.getContent()),
                 StringUtils.defaultString(chunk.getQuestion()),
                 StringUtils.defaultString(chunk.getAnswer()))), Field.Store.NO));
         return document;
+    }
+
+    /** 文档级词表在同一文档的每条切片上重复写入，命中即代表“整篇文档相关”。 */
+    private String documentVocabulary(List<KnowledgeChunkEntity> chunks) {
+        return String.join(" ", LocalKnowledgeDocumentVocabulary.tokens(chunks));
+    }
+
+    /**
+     * 丢掉“全库级”词：出现在多数文档名里的词（典型是客户品牌名）对几乎所有切片都命中，
+     * 没有任何区分度，却会因为“每条切片都带它”而稳定压过真正的主题词
+     * （例如问“慧苑有什么酒水”时，酒水表正文里没有“慧苑”，永远排不上来）。
+     * 只在这种词能与其余有效词区分开时才丢弃，避免把整句问题清空。
+     */
+    private Set<String> dropLibraryLevelTerms(Set<String> terms, DirectoryReader reader) throws IOException {
+        int chunks = reader.numDocs();
+        if (chunks < 20 || terms.size() < 2) {
+            return terms;
+        }
+        Set<String> kept = new LinkedHashSet<>();
+        for (String term : terms) {
+            if (reader.docFreq(new Term(FIELD_DOCUMENT_NAME, term)) * 2 > chunks) {
+                continue;
+            }
+            kept.add(term);
+        }
+        return kept.isEmpty() ? terms : kept;
     }
 
     private Query textQuery(Set<String> terms, boolean preferPrimaryName) {
@@ -263,6 +295,8 @@ public class LocalKnowledgeLuceneIndex {
             fields.add(new BoostQuery(new TermQuery(new Term(FIELD_QUESTION, term)), 2.2F), BooleanClause.Occur.SHOULD);
             fields.add(new BoostQuery(new TermQuery(new Term(FIELD_ANSWER, term)), 1.6F), BooleanClause.Occur.SHOULD);
             fields.add(new BoostQuery(new TermQuery(new Term(FIELD_DOCUMENT_NAME, term)), 0.8F),
+                    BooleanClause.Occur.SHOULD);
+            fields.add(new BoostQuery(new TermQuery(new Term(FIELD_DOCUMENT_VOCABULARY, term)), 1.5F),
                     BooleanClause.Occur.SHOULD);
             fields.add(new BoostQuery(new TermQuery(new Term(FIELD_PRIMARY_NAME, term)),
                     preferPrimaryName ? 5.0F : 0.8F),
