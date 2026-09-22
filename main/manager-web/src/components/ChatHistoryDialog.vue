@@ -142,10 +142,10 @@
             </div>
         </div>
         <div v-if="currentSessionId" class="download-buttons">
-            <el-button type="primary" plain size="small" @click="downloadCurrentSessionWithPrevious">
+            <el-button type="primary" plain size="small" :disabled="downloading" @click="downloadCurrentSessionWithPrevious">
                 {{ $t('chatHistory.downloadCurrentWithPreviousSessions') }}
             </el-button>
-            <el-button type="primary" plain size="small" @click="downloadCurrentSession">
+            <el-button type="primary" plain size="small" :disabled="downloading" @click="downloadCurrentSession">
                 {{ $t('chatHistory.downloadCurrentSession') }}
             </el-button>
             <el-button type="danger" plain size="small"
@@ -162,7 +162,7 @@
 </template>
 
 <script>
-import { debounce } from '@/utils'
+import { requestChatFile, saveChatPackage } from '@/utils/chatHistoryFiles';
 import Api from '@/apis/api';
 import MacAddressMask from '@/components/MacAddressMask.vue';
 
@@ -197,6 +197,10 @@ export default {
             isFirstLoad: true,
             playingAudioId: null,
             audioElement: null,
+            audioUrl: null,
+            audioRequest: null,
+            downloadRequest: null,
+            downloading: false,
             deletingKey: '',
             expandedToolResults: {} // 跟踪工具结果的展开状态
         };
@@ -211,16 +215,18 @@ export default {
                 this.resetData();
                 this.loadSessions();
             } else {
-                this.audioElement?.pause();
-                this.audioElement = null;
-                this.playingAudioId = null;
+                this.cancelFileRequests();
             }
         },
         dialogVisible(val) {
             if (!val) {
+                this.cancelFileRequests();
                 this.$emit('update:visible', false);
             }
         }
+    },
+    beforeDestroy() {
+        this.cancelFileRequests();
     },
     computed: {
         deleteInProgress() {
@@ -716,6 +722,7 @@ export default {
             });
         },
         selectSession(session) {
+            this.cancelFileRequests();
             this.currentSessionId = session.sessionId;
             Api.agent.getAgentChatHistory(this.agentId, session.sessionId, (res) => {
                 if (res.data && res.data.data) {
@@ -870,42 +877,64 @@ export default {
             }
             return 'el-icon-video-play';
         },
-        playAudio: debounce(function(message) {
+        stopAudio() {
+            if (this.audioRequest) this.audioRequest.abort();
+            this.audioRequest = null;
+            if (this.audioElement) {
+                this.audioElement.onended = null;
+                this.audioElement.onerror = null;
+                this.audioElement.pause();
+                this.audioElement.removeAttribute('src');
+                this.audioElement.load();
+            }
+            this.audioElement = null;
+            if (this.audioUrl) URL.revokeObjectURL(this.audioUrl);
+            this.audioUrl = null;
+            this.playingAudioId = null;
+        },
+        cancelFileRequests() {
+            this.stopAudio();
+            if (this.downloadRequest) this.downloadRequest.abort();
+            this.downloadRequest = null;
+            this.downloading = false;
+        },
+        requestFile(path, options) {
+            return requestChatFile(Api.getServiceUrl(), path, this.$store.getters.getToken, options);
+        },
+        async playAudio(message) {
             if (this.playingAudioId === message.audioId) {
-                // 如果正在播放当前音频，则停止播放
-                if (this.audioElement) {
-                    this.audioElement.pause();
-                    this.audioElement = null;
-                }
-                this.playingAudioId = null;
+                this.stopAudio();
                 return;
             }
-
-            // 停止当前正在播放的音频
-            if (this.audioElement) {
-                this.audioElement.pause();
-                this.audioElement = null;
-            }
-
-            // 先获取音频下载ID
+            this.stopAudio();
+            const request = new AbortController();
+            this.audioRequest = request;
             this.playingAudioId = message.audioId;
-            Api.agent.getAudioId(message.audioId, (res) => {
-                if (res.data && res.data.data) {
-                    if (!this.audioElement) {
-                        this.audioElement = new Audio();
-                    }
-                    
-                    // 使用获取到的下载ID播放音频
-                    this.audioElement.src = Api.getServiceUrl() + `/agent/play/${res.data.data}`;
-                    this.audioElement.onended = () => {
-                        this.playingAudioId = null;
-                        this.audioElement = null;
-                    };
-
-                    this.audioElement.play();
+            const timer = setTimeout(() => request.abort(), 30000);
+            try {
+                const ticket = await this.requestFile(`/agent/audio/${encodeURIComponent(message.audioId)}`, { method: 'POST', signal: request.signal });
+                if (this.audioRequest !== request) return;
+                const blob = await this.requestFile(`/agent/play/${encodeURIComponent(ticket)}`, { binary: true, signal: request.signal });
+                if (this.audioRequest !== request) return;
+                this.audioUrl = URL.createObjectURL(blob);
+                const audio = new Audio(this.audioUrl);
+                this.audioElement = audio;
+                audio.onended = () => { if (this.audioRequest === request) this.stopAudio(); };
+                audio.onerror = () => {
+                    if (this.audioRequest !== request) return;
+                    this.stopAudio();
+                    this.$message.error('录音无法解码或播放，请检查音频文件');
+                };
+                await audio.play();
+            } catch (error) {
+                if (this.audioRequest === request) {
+                    this.stopAudio();
+                    this.$message.error(error.name === 'AbortError' ? '音频请求超时，请重试' : (error.message || '音频播放失败'));
                 }
-            });
-        }, 300),
+            } finally {
+                clearTimeout(timer);
+            }
+        },
         getUserAvatar(sessionId) {
             // 从 sessionId 中提取所有数字
             const numbers = sessionId.match(/\d+/g);
@@ -923,26 +952,35 @@ export default {
 
         // 下载本会话聊天记录
         downloadCurrentSession() {
-            Api.agent.getDownloadUrl(this.agentId, this.currentSessionId, (res) => {
-                if (res && res.data && res.data.code === 0 && res.data.data) {
-                    const uuid = res.data.data;
-                    window.open(`${Api.getServiceUrl()}/agent/chat-history/download/${uuid}/current`, '_blank');
-                } else {
-                    this.$message.error(this.$t('chatHistory.downloadLinkFailed'));
-                }
-            });
+            return this.downloadPackage('current');
         },
 
         // 下载本会话及前20条会话聊天记录
         downloadCurrentSessionWithPrevious() {
-            Api.agent.getDownloadUrl(this.agentId, this.currentSessionId, (res) => {
-                if (res && res.data && res.data.code === 0 && res.data.data) {
-                    const uuid = res.data.data;
-                    window.open(`${Api.getServiceUrl()}/agent/chat-history/download/${uuid}/previous`, '_blank');
-                } else {
-                    this.$message.error(this.$t('chatHistory.downloadLinkFailed'));
+            return this.downloadPackage('previous');
+        },
+        async downloadPackage(scope) {
+            if (this.downloading || !this.currentSessionId) return;
+            const request = new AbortController();
+            this.downloadRequest = request;
+            this.downloading = true;
+            const timer = setTimeout(() => request.abort(), 120000);
+            try {
+                const ticket = await this.requestFile(`/agent/chat-history/getDownloadUrl/${encodeURIComponent(this.agentId)}/${encodeURIComponent(this.currentSessionId)}`, { method: 'POST', signal: request.signal });
+                if (this.downloadRequest !== request) return;
+                const blob = await this.requestFile(`/agent/chat-history/download/${encodeURIComponent(ticket)}/${scope}`, { binary: true, signal: request.signal });
+                if (this.downloadRequest === request) saveChatPackage(blob);
+            } catch (error) {
+                if (this.downloadRequest === request) {
+                    this.$message.error(error.name === 'AbortError' ? '下载超时，请重试' : (error.message || '下载失败'));
                 }
-            });
+            } finally {
+                clearTimeout(timer);
+                if (this.downloadRequest === request) {
+                    this.downloadRequest = null;
+                    this.downloading = false;
+                }
+            }
         }
     }
 };
