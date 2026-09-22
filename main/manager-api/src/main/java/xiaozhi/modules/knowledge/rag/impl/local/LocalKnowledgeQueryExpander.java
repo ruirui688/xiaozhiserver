@@ -23,6 +23,9 @@ public final class LocalKnowledgeQueryExpander {
         add(queries, rewrittenQuestion);
 
         String combined = normalize(String.join(" ", queries));
+        // 品类扩展只看模型改写后的问题（意图），不看用户原话：原话常带否定或顺带提及，
+        // 例如“给我弄点沙拉吧，我不喝酒了”里的“酒”会把品类别名引到酒水上，把沙拉挤掉。
+        String intent = normalize(StringUtils.isBlank(rewrittenQuestion) ? rawQuestion : rewrittenQuestion);
         if (containsAny(combined, "一个人", "一人", "1人", "一位", "单人", "独自", "独饮")) {
             queries.add("单人 一人 1人 一位 独享 独饮");
         }
@@ -43,11 +46,12 @@ public final class LocalKnowledgeQueryExpander {
         }
         // “有什么酒/喝的”这类品类问法，表格里记的是“酒水名称：… 品类：洋酒/葡萄酒/软饮/啤酒”，
         // 单靠原话里的“酒”不足以召回；补充类别词只参与召回，不改写用户问题。
-        if (containsAny(combined, "酒", "喝的", "喝点什么", "饮品", "饮料")) {
+        if (containsAny(intent, "酒", "喝的", "喝点什么", "饮品", "饮料")
+                && !containsAny(intent, "不喝", "不要喝", "别喝", "戒酒", "没有酒")) {
             queries.add("酒水 洋酒 葡萄酒 啤酒 白酒 鸡尾酒 特调 饮品 饮料");
         }
         // “有什么吃的”在表格里对应的是“餐品名称/分类：主食/前菜/汤品…”，同样需要类别词补齐。
-        if (containsAny(combined, "吃的", "有什么吃", "吃点什么", "餐品", "菜品")) {
+        if (containsAny(intent, "吃的", "有什么吃", "吃点什么", "餐品", "菜品")) {
             queries.add("餐品 菜品 主食 前菜 汤品 小吃 甜点 水果盘");
         }
         return new ArrayList<>(queries);

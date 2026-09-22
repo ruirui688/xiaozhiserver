@@ -1,6 +1,7 @@
 package xiaozhi.modules.knowledge.rag.impl.local;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -58,6 +59,23 @@ class LocalKnowledgeQueryExpanderTest {
 
         assertTrue(queries.stream().anyMatch(query -> query.contains("餐品") && query.contains("主食")
                 && query.contains("前菜")));
+    }
+
+    @Test
+    void categoryExpansionIgnoresIncidentalMentionsInTheRawQuestion() {
+        // 用户原话里的“我不喝酒了”只是否定和顺带提及，品类扩展必须只看改写后的意图，
+        // 否则酒类词表会被塞进查询，把“沙拉”这个真正的主题挤掉。
+        List<String> queries = LocalKnowledgeQueryExpander.expand(
+                "你给我弄点沙拉吧，我不喝酒了", "慧苑有什么沙拉");
+
+        assertFalse(queries.stream().anyMatch(query -> query.contains("洋酒") || query.contains("葡萄酒")));
+    }
+
+    @Test
+    void categoryExpansionIsSuppressedForNegatedDrinkRequests() {
+        List<String> queries = LocalKnowledgeQueryExpander.expand("我不喝酒了", "慧苑有什么不喝酒的推荐");
+
+        assertFalse(queries.stream().anyMatch(query -> query.contains("洋酒")));
     }
 
     @Test
