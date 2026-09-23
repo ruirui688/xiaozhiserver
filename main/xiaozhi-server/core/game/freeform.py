@@ -3,6 +3,7 @@
 import random
 import re
 import time
+from core.game.prompt_profiles import PROFILES, default_configs
 
 
 class FreeformGameManager:
@@ -35,7 +36,7 @@ class FreeformGameManager:
 
         parts = [
             f"<freeform_game name=\"{plugin_name}\">",
-            "当前用户正在玩这个功能插件对应的纯语言游戏。你必须在主对话里自然主持游戏，不要调用同名工具，不要要求用户去点屏幕按钮。",
+            "在主对话里自然进行此活动，不要调用同名工具；无关问题正常回答，不强迫继续活动。",
         ]
         legacy_guess_what_i_say = self._is_legacy_guess_what_i_say_mode(
             plugin_name, instructions
@@ -57,7 +58,8 @@ class FreeformGameManager:
         state_context = self._freeform_game_state_prompt(plugin_name)
         if state_context:
             parts.append(state_context)
-        parts.append("如果用户明确说不玩了、退出游戏、换个话题或换游戏，就自然结束当前游戏。")
+        if plugin_name not in PROFILES:
+            parts.append("如果用户明确说不玩了、退出游戏、换个话题或换游戏，就自然结束当前游戏。")
         parts.append("</freeform_game>")
         return "\n".join(parts)
 
@@ -80,15 +82,17 @@ class FreeformGameManager:
     def _match_enabled_freeform_game(self, user_message, enabled_plugins):
         if not isinstance(enabled_plugins, dict) or not enabled_plugins:
             self.manager.active_freeform_game = None
+            self.manager.freeform_game_state = None
             return None
 
-        enabled_games = {
+        enabled_games = [
             name
             for name in enabled_plugins
             if name in self.manager.FREEFORM_GAME_TOOLS and self._is_enabled_game_config(enabled_plugins.get(name))
-        }
+        ]
         if not enabled_games:
             self.manager.active_freeform_game = None
+            self.manager.freeform_game_state = None
             return None
 
         normalized = self.manager._normalize(user_message)
@@ -108,6 +112,8 @@ class FreeformGameManager:
             self._ensure_freeform_game_state(self.manager.active_freeform_game, normalized)
             return self.manager.active_freeform_game
 
+        self.manager.active_freeform_game = None
+        self.manager.freeform_game_state = None
         return None
 
     def _merge_freeform_game_configs(self, enabled_plugins):
@@ -122,7 +128,8 @@ class FreeformGameManager:
             if not self._is_enabled_game_config(plugin_config):
                 continue
             effective_config = dict(
-                self.manager.DEFAULT_FREEFORM_GAME_CONFIGS.get(name, {})
+                default_configs().get(name)
+                or self.manager.DEFAULT_FREEFORM_GAME_CONFIGS.get(name, {})
             )
             effective_config.update(plugin_config)
             merged[name] = effective_config
@@ -146,6 +153,10 @@ class FreeformGameManager:
         return str(value).strip()
 
     def _ensure_freeform_game_state(self, plugin_name, normalized_message):
+        if plugin_name in PROFILES:
+            # Prompt-only activities never create hidden answers, scores or turns.
+            self.manager.freeform_game_state = None
+            return None
         if (
             self.manager.freeform_game_state
             and self.manager.freeform_game_state.get("game") == plugin_name

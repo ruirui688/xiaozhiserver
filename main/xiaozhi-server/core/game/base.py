@@ -10,6 +10,7 @@ from core.game.guess_my_word import GuessMyWordGame
 from core.game.user_describes import UserDescribesGame
 from core.game.idiom_chain import IdiomChainGame
 from core.game.freeform import FreeformGameManager
+from core.game.prompt_profiles import PROFILES
 
 
 class GameSessionManager:
@@ -20,6 +21,7 @@ class GameSessionManager:
     """
 
     FREEFORM_GAME_TOOLS = {
+        *PROFILES,
         "xiaozhi_thinks_you_guess",
         "guess_xiaozhi_word",
         "i_think_you_guess",
@@ -35,6 +37,7 @@ class GameSessionManager:
         "i_think_you_guess",
     }
     FREEFORM_GAME_ALIASES = {
+        **{name: profile["aliases"] for name, profile in PROFILES.items()},
         "idiom_chain": (
             "成语接龙",
             "成語接龍",
@@ -124,10 +127,7 @@ class GameSessionManager:
         },
         "idiom_chain": {
             "custom_plugin": True,
-            "instructions": (
-                "你是成语接龙主持人。每轮只处理一个成语；用户成语的第一个字应接上上一轮成语的最后一个字；"
-                "答对后立刻给出你的下一个常见成语；用户接不上时只给一个提示。"
-            ),
+            "instructions": PROFILES["idiom_chain"]["instructions"],
             "opening_message": "来玩成语接龙。我先出一个常见的，你接最后一个字。",
         },
         "xiaozhi_thinks_you_guess": {

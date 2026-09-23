@@ -4,6 +4,7 @@ import math
 import threading
 import time
 import uuid
+from core.observability.prompt_inventory import safe_prompt_summary
 
 
 def _now_epoch_ms():
@@ -686,6 +687,9 @@ class TurnMetrics:
                 tools_enabled=bool(tools_enabled),
                 input_message_count=len(dialogue or []),
                 tool_schema_count=len(functions or []),
+                input_breakdown=safe_prompt_summary(
+                    dialogue, functions if tools_enabled else None
+                ),
                 tokens={
                     "prompt_tokens": prompt_tokens + tool_tokens,
                     "prompt_tokens_from_messages": prompt_tokens,
