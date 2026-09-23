@@ -637,7 +637,8 @@ class DoubaoRealtimeSession:
         await self.refresh_tools()
 
     def _session_prompt(self) -> str:
-        prompt = self.conn.prompt or self.conn.config.get("prompt", "")
+        from core.utils.current_time import render_runtime_time
+        prompt = render_runtime_time(self.conn.prompt or self.conn.config.get("prompt", ""))
         prompt_manager = getattr(self.conn, "prompt_manager", None)
         if prompt_manager is not None:
             prompt = prompt_manager.replace_available_tools_prompt(prompt, [])

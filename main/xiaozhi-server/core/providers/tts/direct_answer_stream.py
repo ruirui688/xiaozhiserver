@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from core.providers.tts.dto.dto import ContentType, SentenceType, TTSMessageDTO
+from core.providers.tools.tool_protocol_guard import (
+    TOOL_PROTOCOL_ERROR_REPLY,
+    ToolProtocolStreamGuard,
+)
 
 
 def _positive_int(value, default, field_name):
@@ -70,6 +74,12 @@ class DirectAnswerTTSStream:
         self._snapshot = ""
         self._emitted_chars = 0
         self._preview_stored = False
+        self._protocol_guard = ToolProtocolStreamGuard()
+        self._rejection_reported = False
+
+    @property
+    def blocked(self):
+        return self._protocol_guard.blocked
 
     def update(self, full_text):
         text = str(full_text or "")
@@ -83,7 +93,14 @@ class DirectAnswerTTSStream:
     def finish(self, full_text):
         text = str(full_text or "")
         self._validate_snapshot(text)
-        return self._enqueue_until(text, len(text))
+        chunks = self._enqueue_until(text, len(text))
+        tail, blocked = self._protocol_guard.finish()
+        if blocked and not self._rejection_reported:
+            self._rejection_reported = True
+            chunks += self._enqueue_text(TOOL_PROTOCOL_ERROR_REPLY)
+        elif tail:
+            chunks += self._enqueue_text(tail)
+        return chunks
 
     def _validate_snapshot(self, snapshot):
         if snapshot.startswith(self._snapshot):
@@ -102,6 +119,11 @@ class DirectAnswerTTSStream:
         if end <= self._emitted_chars:
             return []
         chunk = text[self._emitted_chars : end]
+        self._emitted_chars = end
+        safe, _ = self._protocol_guard.feed(chunk)
+        return self._enqueue_text(safe)
+
+    def _enqueue_text(self, chunk):
         if not chunk:
             return []
         if not self._preview_stored:
@@ -118,5 +140,4 @@ class DirectAnswerTTSStream:
                 generation=self.generation,
             )
         )
-        self._emitted_chars = end
         return [chunk]

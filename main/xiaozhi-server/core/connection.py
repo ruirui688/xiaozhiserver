@@ -38,6 +38,7 @@ from core.providers.tools.follow_up_policy import (
     resolve_tool_follow_up_policy,
 )
 from core.providers.tools.tool_protocol_guard import (
+    TOOL_PROTOCOL_ERROR_REPLY,
     ToolProtocolStreamGuard,
     looks_like_unhandled_tool_protocol,
 )
@@ -2033,11 +2034,12 @@ class ConnectionHandler:
                             sentence_id=current_sentence_id,
                             sentence_type=SentenceType.MIDDLE,
                             content_type=ContentType.TEXT,
-                            content_detail="这个工具调用没有按正确格式返回，我先不执行。",
+                            content_detail=TOOL_PROTOCOL_ERROR_REPLY,
                         )
                     )
+                    response_message.append(TOOL_PROTOCOL_ERROR_REPLY)
                 self.logger.bind(tag=TAG).error(
-                    f"unsupported tool protocol from LLM: {_sanitize_log_text(content_arguments)}"
+                    f"unsupported tool protocol from LLM: chars={len(content_arguments)}"
                 )
             elif len(tool_calls_list) == 0 and content_arguments:
                 a = extract_json_from_string(content_arguments)
@@ -2107,6 +2109,11 @@ class ConnectionHandler:
                                 )
                                 tc["_da_stream"] = stream
                             stream.finish(da_response)
+                            if stream.blocked:
+                                self.logger.bind(tag=TAG).warning(
+                                    "unsupported tool protocol in direct_answer response"
+                                )
+                                da_response = TOOL_PROTOCOL_ERROR_REPLY
                             self.tts.store_tts_text(current_sentence_id, da_response)
                             self.dialogue.put(Message(role="assistant", content=da_response))
                             direct_answer_submitted = True

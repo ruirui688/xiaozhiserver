@@ -5,7 +5,7 @@ import json
 import threading
 from typing import List, Dict
 from datetime import datetime
-from core.utils.current_time import get_current_datetime
+from core.utils.current_time import render_runtime_time
 from core.session.turn_context import build_contextual_user_content
 from core.utils.prompt_budget import (
     SPEAKER_DESCRIPTION_MAX_CHARS,
@@ -261,7 +261,7 @@ class Dialogue:
                 # 以 <context> 为分界点，拆分静态 system prompt 和动态上下文
                 # 静态部分（规则、身份等）保持不变，可命中前缀缓存
                 # 动态部分（时间、天气、记忆等）作为第二条 system 消息，保持 system 权威性
-                full_prompt = system_message.content
+                full_prompt = render_runtime_time(system_message.content)
                 context_match = re.search(r"<context>", full_prompt)
                 if context_match:
                     static_part = full_prompt[:context_match.start()]
@@ -283,11 +283,6 @@ class Dialogue:
             # 第三段：动态上下文 system prompt（时间、记忆、说话人等）
             # 保持 system 角色以确保模型权威性，不降级为 user
             if system_message and dynamic_part:
-                # 替换时间占位符
-                dynamic_part = dynamic_part.replace(
-                    "{{current_time}}", get_current_datetime()
-                )
-
                 # 填充记忆
                 if memory_str is not None:
                     bounded_memory = compact_memory_context(

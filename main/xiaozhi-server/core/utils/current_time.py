@@ -4,6 +4,7 @@
 """
 
 import cnlunar
+from functools import lru_cache
 from datetime import datetime, timezone, timedelta
 
 BEIJING_TZ = timezone(timedelta(hours=8), name="Asia/Shanghai")
@@ -17,6 +18,40 @@ WEEKDAY_MAP = {
     "Saturday": "星期六",
     "Sunday": "星期日",
 }
+
+
+@lru_cache(maxsize=4)
+def _lunar_for_date(day):
+    """Only calendar data is cached; the current clock is never cached."""
+    try:
+        lunar = cnlunar.Lunar(datetime.combine(day, datetime.min.time()), godType="8char")
+        return "%s年%s%s" % (
+            lunar.lunarYearCn, lunar.lunarMonthCn[:-1], lunar.lunarDayCn,
+        )
+    except Exception:
+        return "农历获取失败"
+
+
+def render_runtime_time(prompt: str) -> str:
+    """Resolve trusted system-template time tokens from one Beijing snapshot.
+
+    Called on an outgoing copy, never on stored dialogue or user/tool messages.
+    No template evaluation is performed on role text or external context.
+    """
+    names = ("current_time", "today_date", "today_weekday", "lunar_date")
+    if not any("{{" + name + "}}" in prompt for name in names):
+        return prompt
+    now = datetime.now(BEIJING_TZ)
+    values = {
+        "current_time": now.strftime("%Y-%m-%d %H:%M 北京时间"),
+        "today_date": now.strftime("%Y-%m-%d"),
+        "today_weekday": WEEKDAY_MAP[now.strftime("%A")],
+    }
+    if "{{lunar_date}}" in prompt:
+        values["lunar_date"] = _lunar_for_date(now.date())
+    for name, value in values.items():
+        prompt = prompt.replace("{{" + name + "}}", value)
+    return prompt
 
 
 def get_current_time() -> str:

@@ -99,6 +99,13 @@ main/xiaozhi-server/core/connection.py
 
 ## 4. 主系统提示词注入
 
+时间字段的生命周期：`PromptManager` 渲染和缓存模板时保留 `current_time`、
+`today_date`、`today_weekday`、`lunar_date` 占位符。每次 `Dialogue` 组装模型请求时，
+使用同一个北京时间快照替换输出副本中的这些字段，不回写存储的系统消息；无 `<context>`
+分隔的自定义模板也适用。只按日期有界缓存农历换算，不缓存当前时钟，不触发天气或外部查询。
+历史用户/助手消息和随后注入的记忆不做时间替换，也不重新执行 Jinja 模板。该保证适用于
+经过 `Dialogue` 的传统文本请求，不表示长连接 Realtime 上游会话会自动刷新系统指令。
+
 入口：
 
 ```text

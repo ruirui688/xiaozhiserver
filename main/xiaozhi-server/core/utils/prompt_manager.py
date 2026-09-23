@@ -252,10 +252,8 @@ class PromptManager:
             return user_prompt
 
         try:
-            # 获取最新的时间信息（不缓存）
-            current_time, today_date, today_weekday, lunar_date = (
-                self._get_current_time_info()
-            )
+            # Preserve runtime tokens through Jinja rendering and device caching.
+            # Dialogue resolves them on each outgoing model request, not at connect.
 
             # 获取缓存的上下文信息
             local_address = ""
@@ -305,10 +303,10 @@ class PromptManager:
             )
             enhanced_prompt = template.render(
                 base_prompt=user_prompt,
-                current_time=current_time,
-                today_date=today_date,
-                today_weekday=today_weekday,
-                lunar_date=lunar_date,
+                current_time="{{current_time}}",
+                today_date="{{today_date}}",
+                today_weekday="{{today_weekday}}",
+                lunar_date="{{lunar_date}}",
                 local_address=local_address,
                 weather_info=weather_info,
                 emojiList=EMOJI_List,

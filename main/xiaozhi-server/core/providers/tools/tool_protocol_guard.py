@@ -4,9 +4,10 @@ import html
 import re
 
 
-def looks_like_unhandled_tool_protocol(text: str) -> bool:
-    if not text:
-        return False
+TOOL_PROTOCOL_ERROR_REPLY = "抱歉，刚才的回复出了问题，请再说一次。"
+
+
+def _normalize_marker(text: str) -> str:
     normalized = text
     for _ in range(2):
         unescaped = html.unescape(normalized)
@@ -14,12 +15,20 @@ def looks_like_unhandled_tool_protocol(text: str) -> bool:
             break
         normalized = unescaped
 
-    compact = re.sub(r"\s+", "", normalized)
-    upper = compact.upper()
-    if "DSML" in upper and "TOOL_CALLS" in upper:
+    normalized = normalized.translate(str.maketrans("｜＜＞", "|<>"))
+    return re.sub(r"\s+", "", normalized).lower()
+
+
+def looks_like_unhandled_tool_protocol(text: str) -> bool:
+    if not text:
+        return False
+    normalized = _normalize_marker(text)
+    # Recognize the protocol namespace itself, before calls/invoke/parameters
+    # can escape. DeepSeek emits both calls and tool_calls, including fullwidth pipes.
+    if re.search(r"</?\|{1,2}dsml(?:\||$)", normalized):
         return True
     return bool(
-        re.search(r"<[^>]*tool_calls[^>]*>.*invoke\s+name=", normalized, re.I | re.S)
+        re.search(r"<[^>]*tool_calls[^>]*>.*invokename=", normalized, re.I | re.S)
     )
 
 
@@ -27,12 +36,11 @@ class ToolProtocolStreamGuard:
     """Hold only suffixes that can still become a streamed tool-protocol marker."""
 
     _COMPACT_PREFIXES = (
-        "<||dsml||",
+        "<||dsml",
+        "<|dsml",
+        "</||dsml",
+        "</|dsml",
         "<tool_calls",
-        "&lt;||dsml||",
-        "&lt;tool_calls",
-        "&amp;lt;||dsml||",
-        "&amp;lt;tool_calls",
     )
 
     def __init__(self):
@@ -74,22 +82,16 @@ class ToolProtocolStreamGuard:
     @classmethod
     def _possible_protocol_start(cls, text: str) -> int:
         for match in re.finditer(r"[<&＜]", text):
-            candidate = text[match.start():].lower().replace("＜", "<").replace("＞", ">")
-            compact = re.sub(r"\s+", "", candidate)
-            normalized = compact
-            for _ in range(2):
-                unescaped = html.unescape(normalized)
-                if unescaped == normalized:
-                    break
-                normalized = unescaped
-            raw_possible = any(
-                prefix.startswith(compact) or compact.startswith(prefix)
-                for prefix in cls._COMPACT_PREFIXES
-            )
-            normalized_possible = any(
+            candidate = text[match.start():]
+            # Do not decode an incomplete numeric entity: html.unescape('&#6')
+            # would consume it before the following '0;' arrives.
+            candidate = re.sub(r"&(?:[a-zA-Z]*|#[xX]?[0-9a-fA-F]*)$", "", candidate)
+            normalized = _normalize_marker(candidate)
+            # A double-escaped entity may become incomplete after unescaping.
+            normalized = re.sub(r"&(?:[a-z]*|#x?[0-9a-f]*)$", "", normalized)
+            if any(
                 prefix.startswith(normalized) or normalized.startswith(prefix)
-                for prefix in cls._COMPACT_PREFIXES[:2]
-            )
-            if raw_possible or normalized_possible:
+                for prefix in cls._COMPACT_PREFIXES
+            ):
                 return match.start()
         return -1
