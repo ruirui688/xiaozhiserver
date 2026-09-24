@@ -10,7 +10,6 @@ from core.providers.tools.server_plugins.plugin_executor import ServerPluginExec
 from core.utils.dialogue import Dialogue, Message
 from plugins_func.functions.session_controls import (
     reset_conversation_context,
-    set_session_voice,
 )
 from plugins_func.register import Action
 
@@ -46,9 +45,9 @@ def test_session_tts_options_apply_only_to_current_connection():
     first = _voice_conn()
     second = _voice_conn()
 
-    result = set_session_voice(first, voice="voice-b", speed=50, volume=-50)
+    result = first.tts_session_options.apply(first.tts, voice="voice-b", speed=50, volume=-50)
 
-    assert result.action == Action.RESPONSE
+    assert result.applied["voice"] == "voice-b"
     assert first.tts.voice == "voice-b"
     assert first.tts.speed == 1.5
     assert first.tts.volume == 25
@@ -57,18 +56,15 @@ def test_session_tts_options_apply_only_to_current_connection():
     assert first.config["selected_module"]["TTS"] == "TTS_demo"
 
 
-def test_session_control_tools_are_default_and_voice_schema_uses_catalog():
+def test_session_voice_tool_is_not_exposed():
     conn = _voice_conn(catalog=[{"id": "voice-a", "name": "音色 A"}])
     conn.config.update({"Intent": {}, "plugins": {}})
     conn.intent_type = "function_call"
 
     tools = ServerPluginExecutor(conn).get_tools()
 
-    assert "set_session_voice" in tools
+    assert "set_session_voice" not in tools
     assert "reset_conversation_context" in tools
-    schema = tools["set_session_voice"].description["function"]["parameters"]
-    assert schema["properties"]["voice"]["enum"] == ["voice-a"]
-    assert "pitch" not in schema["properties"]
 
 
 def test_runtime_builtin_prompt_uses_resource_catalog_override():
@@ -101,58 +97,57 @@ def test_session_tts_options_validate_range_and_provider_capabilities_atomically
     assert options.snapshot() == {}
 
 
-def test_session_voice_rejects_unknown_catalog_entry():
-    conn = _voice_conn(catalog=[{"id": "voice-a", "name": "音色 A"}])
-
-    result = set_session_voice(conn, voice="voice-not-available")
-
-    assert result.action == Action.RESPONSE
-    assert "不在当前语音服务" in result.response
-    assert conn.tts.voice == "voice-a"
-
-
-def test_realtime_session_voice_routes_to_active_adapter():
+@pytest.mark.parametrize("intent_type", ["function_call", "intent_llm"])
+@pytest.mark.parametrize("realtime", [False, True])
+def test_retired_voice_tool_cannot_be_restored_by_legacy_config(intent_type, realtime):
+    conn = _voice_conn()
+    conn.intent_type = intent_type
+    conn.config.update({
+        "selected_module": {"Intent": "legacy", "TTS": "TTS_demo"},
+        "Intent": {"legacy": {"functions": ["set_session_voice"]}},
+        "plugins": {"set_session_voice": {"custom_plugin": True, "instructions": "change voice"}},
+    })
     requested = []
-
-    class Router:
-        is_realtime = True
-        capabilities = SimpleNamespace(
-            session_voice=True,
-            native_function_calling=True,
-            custom_voice_ids=False,
-        )
-
-        def voice_catalog(self):
-            return [{"id": "Serena", "name": "Serena"}]
-
-        def request_voice_change(self, voice):
-            requested.append(voice)
-            return True
-
-    conn = _voice_conn()
-    conn.conversation_router = Router()
-
-    result = set_session_voice(conn, voice="Serena")
-
-    assert result.action == Action.RESPONSE
-    assert requested == ["Serena"]
-    assert conn.tts.voice == "voice-a"
-
-
-def test_realtime_session_voice_rejects_unsupported_parameters():
-    conn = _voice_conn()
     conn.conversation_router = SimpleNamespace(
-        is_realtime=True,
-        capabilities=SimpleNamespace(
-            session_voice=True,
-            native_function_calling=True,
-            custom_voice_ids=False,
-        ),
+        is_realtime=realtime,
+        request_voice_change=lambda voice: requested.append(voice),
     )
+    executor = ServerPluginExecutor(conn)
+    assert "set_session_voice" not in executor.get_tools()
+    assert not executor.has_tool("set_session_voice")
+    result = asyncio.run(executor.execute(conn, "set_session_voice", {"voice": "voice-b"}))
+    assert result.action == Action.NOTFOUND
+    assert conn.tts.voice == "voice-a"
+    assert conn.tts_session_options.snapshot() == {}
+    assert requested == []
 
-    result = set_session_voice(conn, voice="Serena", speed=10)
 
-    assert "只支持切换音色" in result.response
+def test_retired_voice_function_is_not_registered():
+    from plugins_func.register import all_function_registry
+
+    assert "set_session_voice" not in all_function_registry
+
+
+def test_retired_voice_tool_rejects_even_stale_registry_entry(monkeypatch):
+    from plugins_func.register import all_function_registry
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Retired voice tool must never execute")
+
+    monkeypatch.setitem(
+        all_function_registry, "set_session_voice", SimpleNamespace(func=forbidden)
+    )
+    conn = _voice_conn()
+    conn.config.update({
+        "selected_module": {"Intent": "legacy"},
+        "Intent": {"legacy": {"functions": ["set_session_voice"]}},
+    })
+    executor = ServerPluginExecutor(conn)
+    assert "set_session_voice" not in executor.get_tools()
+    assert not executor.has_tool("set_session_voice")
+    result = asyncio.run(executor.execute(conn, "set_session_voice", {"voice": "voice-b"}))
+    assert result.action == Action.NOTFOUND
+    assert conn.tts.voice == "voice-a"
 
 
 def test_session_tts_options_reapply_only_for_same_model():

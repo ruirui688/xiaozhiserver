@@ -112,7 +112,9 @@ managed_memory.save_memory(dialogue)
 
 旧 Intent 配置即使残留 `manage_memory` 也必须跳过。主动记忆不依赖 function-call 能力，记忆提示词及执行链路不得加入固定人物、关键词、条件任务、场景黑白名单或字符串相似度规则。
 
-`set_session_voice` 与 `reset_conversation_context` 是连接级必要内置工具，不依赖角色插件勾选。前者只修改当前 `ConnectionHandler` 的 TTS override，使用与后台高级设置一致的 `-100..100` 语速、音量、音调语义；不支持的 provider 参数必须拒绝，不能伪装成功。manager-api 同时下发当前 TTS 模型的公共音色目录，并在当前选择为克隆音色时至少保留当前真实音色 ID，工具 schema 只暴露真实可用 ID。后者只清除当前连接的短期 Dialogue、游戏和语义软状态，保留 system prompt，不删除后台聊天记录、长期记忆或智能体配置；会议、设备通话和声纹采集期间拒绝清空。
+2026-09-24 起取消对话中的 `set_session_voice` 工具：不注册、不向模型暴露 schema，旧 Intent/声明式插件配置不能重新启用，残留调用返回 NOTFOUND。传统与 Realtime 对话均不可通过该工具更换音色或调整会话语速、音调、合成音量。后台默认音色配置、音色测试及设备音量控制保留；不删除已有音色数据或修改历史迁移。底层会话参数能力仍供内部配置使用，不作为模型可调用工具。
+
+`reset_conversation_context` 仍是连接级必要内置工具，不依赖角色插件勾选；只清除当前连接的短期 Dialogue、游戏和语义软状态，保留 system prompt，不删除后台聊天记录、长期记忆或智能体配置；会议、设备通话和声纹采集期间拒绝清空。
 
 ### 声明式互动型
 

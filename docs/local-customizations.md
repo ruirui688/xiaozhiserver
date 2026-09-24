@@ -791,7 +791,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/xiaozhi-server/core/utils/dialogue.py
   - main/xiaozhi-server/tests/test_session_controls.py
 是否允许被官方覆盖：否
-官方同步时的处理规则：必须保留 set_session_voice/reset_conversation_context 作为连接级必要工具且不写回后台配置；语速、音量、音调继续使用 -100..100 公共百分比并按 provider 能力映射，不支持参数明确拒绝。音色工具只能使用当前 TTS 模型下发的公共音色 ID；当前配置若使用克隆音色，目录至少保留当前真实 ID，名称只是不可信匹配标签。相同 TTS 模型热更新后重放当前会话 override，模型切换时清除；双向流不得在当前播放 session 中途重建，下一轮安全生效。上下文重置只清 Dialogue 和连接软状态，保留 system prompt，不删除后台聊天记录、长期记忆或配置；会议、设备通话和声纹采集期间必须拒绝。
+官方同步时的处理规则：2026-09-24 已取消对话工具 set_session_voice，禁止通过必要工具列表、旧 Intent 配置或声明式插件恢复，执行入口也必须拒绝残留调用；传统和 Realtime 均不向模型开放该工具。后台默认音色、音色测试和设备音量控制保留，旧数据库目录记录不代表运行时工具可用。reset_conversation_context 继续作为必要工具，只清 Dialogue 和连接软状态，保留 system prompt，不删除后台聊天记录、长期记忆或配置；会议、设备通话和声纹采集期间必须拒绝。底层 SessionTTSOptions 的内部参数映射及模型隔离仍保留，不代表恢复语音换音色功能。
 ```
 
 ## 39. 管理后台音色真实合成测试
