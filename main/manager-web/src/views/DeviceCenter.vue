@@ -2,23 +2,23 @@
   <div class="device-center">
     <HeaderBar />
     <main>
-      <div class="title-row"><div><h1>设备管理 <span class="device-count">{{ devices.length }} 台</span></h1><p>查看设备，管理绑定的智能体。</p></div>
+      <div class="title-row"><div><h1>设备管理 <span class="device-count">{{ devices.length }} 台</span></h1><p>用你熟悉的名字，找到每一台设备。</p></div>
         <el-button type="primary" icon="el-icon-plus" :disabled="!canWrite || loading" @click="addVisible = true">添加设备</el-button>
       </div>
       <div class="toolbar">
-        <el-input v-model="keyword" clearable prefix-icon="el-icon-search" placeholder="搜索设备名称 / MAC / 型号" />
+        <el-input v-model="keyword" clearable prefix-icon="el-icon-search" placeholder="搜索别名" />
         <el-select v-model="agentFilter" clearable filterable placeholder="全部智能体">
           <el-option v-for="agent in agents" :key="agent.id" :value="agent.id" :label="agent.agentName" />
         </el-select>
         <el-radio-group v-model="viewMode" size="small" :disabled="switching" aria-label="设备视图">
           <el-radio-button label="list">列表</el-radio-button><el-radio-button label="cards">卡片</el-radio-button>
         </el-radio-group>
-        <span class="filter-count">显示 {{ filteredDevices.length }} / {{ devices.length }} 台</span>
+        <span class="filter-count">{{ filteredDevices.length }} 台设备</span>
         <el-button icon="el-icon-refresh" :loading="loading" :disabled="switching" @click="load">刷新</el-button>
       </div>
       <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" />
       <div v-loading="loading" class="device-results" :class="viewMode">
-        <div v-if="viewMode === 'list'" class="list-heading"><span>设备 / MAC</span><span>当前智能体 / 切换</span><span>最近连接</span><span>操作</span></div>
+        <div v-if="viewMode === 'list'" class="list-heading"><span>设备别名</span><span>使用的智能体</span><span>最近连接</span><span>操作</span></div>
         <div class="device-grid" :class="{ 'is-empty': !filteredDevices.length }">
         <DeviceAgentCard v-for="device in pagedDevices" :list="viewMode === 'list'" :key="device.id" :device="device" :agents="agents"
           :can-write="canWrite && !loading" @busy="setBusy(device.id, $event)" @scenes="openScenes(device)"
@@ -124,7 +124,7 @@ h1 { display: flex; align-items: center; gap: 12px; font-size: 24px; margin: 0; 
 .device-center ::v-deep .el-button--primary.is-disabled { background: #edf0fb; border-color: #e6eaf8; color: #99a4c8; }
 @media (max-width: 900px) { main { padding: 28px 24px; }.toolbar > .el-input, .toolbar .el-select { width: 100%; }.device-grid { grid-template-columns: minmax(0, 1fr); } }
 .device-results.list { overflow-x: auto; background: #fff; border: 1px solid #e7eaf2; border-radius: 14px; }
-.list .device-grid { display: block; min-width: 860px; }
-.list-heading { display: grid; grid-template-columns: minmax(220px, 1.2fr) minmax(280px, 1fr) 170px 70px; gap: 24px; padding: 18px 24px; min-width: 860px; box-sizing: border-box; background: #f0f3f9; color: #778197; font-size: 13px; }
+.list .device-grid { display: block; min-width: 868px; }
+.list-heading { display: grid; grid-template-columns: minmax(230px, 1.3fr) minmax(260px, 1fr) 160px 90px; gap: 24px; padding: 18px 28px; min-width: 868px; box-sizing: border-box; background: #fafafb; color: #778197; font-size: 13px; }
 .device-pagination { margin-top: 24px; text-align: right; overflow-x: auto; }
 </style>

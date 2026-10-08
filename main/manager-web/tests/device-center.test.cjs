@@ -117,3 +117,23 @@ test('device center paginates filtered devices and resets page when filters chan
   component.watch.agentFilter.call(context);
   assert.equal(context.currentPage, 1);
 });
+test('agent picker opens on demand and cancellation restores current agent', () => {
+  const component = card();
+  const vm = { busy: false, canWrite: true, currentAgentId: 'current', targetId: 'old', editingAgent: false };
+  component.methods.beginAgentEdit.call(vm);
+  assert.equal(vm.editingAgent, true); assert.equal(vm.targetId, 'current');
+  vm.targetId = 'candidate'; component.methods.cancelAgentEdit.call(vm);
+  assert.equal(vm.editingAgent, false); assert.equal(vm.targetId, 'current');
+  vm.canWrite = false; component.methods.beginAgentEdit.call(vm);
+  assert.equal(vm.editingAgent, false);
+  vm.canWrite = true; vm.busy = true; component.methods.beginAgentEdit.call(vm);
+  assert.equal(vm.editingAgent, false);
+});
+test('confirmed applied switch closes inline picker', async () => {
+  const component = card({ getDeviceScenes: (id, cb) => cb(ok([
+    { agentId: 'new', agentName: '新智能体', current: true, switchStatus: 'APPLIED' }
+  ])) });
+  const vm = { ...component.methods, generation: 1, device: { id: 'd' }, $emit() {}, busy: true, editingAgent: true };
+  await vm.poll(1, 0);
+  assert.equal(vm.editingAgent, false); assert.equal(vm.currentAgentId, 'new');
+});

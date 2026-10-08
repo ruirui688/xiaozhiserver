@@ -4,7 +4,7 @@
     <p class="alias-hint">例如：客厅小智、书房助手、我的小伙伴</p>
     <el-input v-model="alias" maxlength="64" show-word-limit clearable autofocus
       placeholder="输入设备别名" :disabled="saving" @keyup.enter.native="save" />
-    <p class="alias-hint">清空后恢复显示设备型号，不影响绑定的智能体。</p>
+    <p class="alias-hint">清空后显示“未命名设备”，不影响绑定的智能体。</p>
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
     <span slot="footer">
       <el-button :disabled="saving" @click="visible = false">取消</el-button>
@@ -36,7 +36,7 @@ export default {
         await deviceRequest(done => Api.device.updateDeviceInfo(this.deviceId, { alias }, done));
         this.$emit('saved', { id: this.deviceId, alias });
         this.visible = false;
-        this.$message.success(alias ? '设备别名已保存' : '已恢复默认名称');
+        this.$message.success(alias ? '设备别名已保存' : '已清空设备别名');
       } catch (error) { this.error = error.message; }
       finally { this.saving = false; }
     }
