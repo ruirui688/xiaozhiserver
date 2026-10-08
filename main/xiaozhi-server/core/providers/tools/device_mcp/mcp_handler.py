@@ -7,6 +7,7 @@ from concurrent.futures import Future
 from core.utils.util import get_vision_url, sanitize_tool_name
 from core.utils.auth import AuthToken
 from config.logger import setup_logging
+from core.providers.tools.commerce_policy import require_generic_tool_access
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -328,6 +329,8 @@ async def call_mcp_tool(
     """
     调用指定的工具，并等待响应
     """
+    require_generic_tool_access(tool_name)
+    require_generic_tool_access(mcp_client.name_mapping.get(tool_name, tool_name))
     if not await mcp_client.is_ready():
         raise RuntimeError("MCP客户端尚未准备就绪")
 

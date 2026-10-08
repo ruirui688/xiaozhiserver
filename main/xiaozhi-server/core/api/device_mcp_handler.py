@@ -14,6 +14,7 @@ from aiohttp import web
 from core.api.base_handler import BaseHandler
 from core.device_runtime_registry import get_connection, registered_keys
 from core.providers.tools.device_mcp.mcp_handler import call_mcp_tool
+from core.providers.tools.commerce_policy import is_commerce_device_tool, COMMERCE_CALL_DENIED
 from core.utils.util import sanitize_tool_name
 
 TAG = __name__
@@ -217,6 +218,9 @@ class DeviceMcpHandler(BaseHandler):
         if not device_id or not tool_name:
             return self._json_response({"success": False, "message": "缺少deviceId或工具名称"}, 400)
 
+        if is_commerce_device_tool(tool_name):
+            return self._json_response({"success": False, "message": COMMERCE_CALL_DENIED}, 403)
+
         conn, mcp_client, error = self._get_ready_mcp_client(device_id)
         if error:
             return self._json_response({"success": False, "message": error})
@@ -236,5 +240,7 @@ class DeviceMcpHandler(BaseHandler):
                 timeout=int(conn.config.get("device_mcp_tool_call_timeout", 10)),
             )
             return self._json_response({"success": True, "data": result})
+        except PermissionError:
+            return self._json_response({"success": False, "message": COMMERCE_CALL_DENIED}, 403)
         except Exception as e:
             return self._json_response({"success": False, "message": str(e)}, 500)

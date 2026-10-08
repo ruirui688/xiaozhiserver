@@ -202,6 +202,10 @@ annotations 隐藏参数、注入 `request_id` 或改变当前轮结束行为。
 
 ### 5.5 REST API
 
+售货设备的 `self.commerce.*` 命名空间仅用于发现和诊断，不进入模型可调用工具列表，
+通用 REST 调用及底层设备通用调用拒绝执行。订单授权调度尚未实现，不能通过描述或
+`paid=true` 绕过。建议设备契约与实现边界见[机器人售货 MCP](../mcp/robot-commerce.md)。
+
 ```text
 GET  /device/mcp/status  → 设备 MCP 连接状态
 GET  /device/mcp/tools   → 已注册工具列表

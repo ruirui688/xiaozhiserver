@@ -24,6 +24,7 @@ source_paths:
 | 记忆 | [记忆系统](./architecture/memory-system-chain.md) | [PowerMem](./models/powermem-integration.md) |
 | 知识库与切片 | [知识库链路](./architecture/knowledge-base-chain.md) | [RAGFlow](./models/ragflow-integration.md) |
 | 插件、工具、MCP | [功能插件](./architecture/function-plugin-architecture.md) | [MCP 架构](./architecture/mcp-chains.md)、[MCP 操作](./mcp/mcp-operation-guide.md) |
+| 机器人点单与出货 | [售货 MCP 接入](./mcp/robot-commerce.md) | 注册隔离、设备工具建议契约与待接入的订单授权边界 |
 | workspace、认证、安全 | [安全架构](./architecture/security-architecture.md) | [workspace 与组织](./architecture/workspace-organization-management.md) |
 | 聊天数据安全与行业架构参考 | [聊天数据安全架构参考](./architecture/chat-data-security-reference.md) | Signal、WhatsApp、Matrix、客户密钥和机密计算案例 |
 | 第三方服务 | [第三方集成](./integrations/third-party-integrations.md) | 飞书、天气、Home Assistant、短信和新闻都在同一页 |

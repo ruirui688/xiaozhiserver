@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Any
 from config.logger import setup_logging
 from plugins_func.register import Action, ActionResponse
 from .base import ToolType, ToolDefinition, ToolExecutor
+from .commerce_policy import is_commerce_device_tool, COMMERCE_CALL_DENIED
 from core.utils.prompt_budget import compact_tool_schemas
 
 
@@ -41,6 +42,10 @@ class ToolManager:
             try:
                 tools = executor.get_tools()
                 for name, definition in tools.items():
+                    schema_name = definition.description.get("function", {}).get("name", "")
+                    if any(is_commerce_device_tool(value) for value in
+                           (name, definition.name, schema_name)):
+                        continue
                     if name in all_tools:
                         existing_type = all_tools[name].tool_type.value
                         incoming_type = tool_type.value
@@ -104,6 +109,8 @@ class ToolManager:
         self, tool_name: str, arguments: Dict[str, Any]
     ) -> ActionResponse:
         """执行工具调用"""
+        if is_commerce_device_tool(tool_name):
+            return ActionResponse(action=Action.ERROR, response=COMMERCE_CALL_DENIED)
         try:
             # 查找工具类型
             tool_type = self.get_tool_type(tool_name)
