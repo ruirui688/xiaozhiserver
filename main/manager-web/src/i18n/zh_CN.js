@@ -1213,6 +1213,7 @@ export default {
   'realtimeModel.mismatchDescription': '当前 conversation_mode、模型模板与 adapter 不匹配。Realtime 不能使用 openai/Chat Completions adapter；请重新选择 Qwen Omni Realtime 或豆包端到端实时语音模板后保存。',
   'realtimeModel.badge': '实时多模态',
   'realtimeModel.agentDescription': '该主模型会直接接收设备音频，并统一处理输入转写和回复音频；图片与工具能力取决于所选 Realtime adapter。当前智能体选择的 VAD、ASR、TTS 不参与这条实时会话主链路。',
+  'realtimeModel.duplexDescription': '豆包3.0全双工直接处理语音输入和回复音频，支持已授权的本地工具调用。设备需支持播放时持续收音和回声消除；传统 VAD/ASR/TTS 不参与主链路。当前不支持图片、文字对话和文字批量评测，单模型测试使用内置真实语音样本。',
   'realtimeModel.doubaoAgentDescription': '豆包端到端实时语音会直接接收设备音频，并统一处理 ASR、回复生成和语音输出；当前不支持图片输入，也不向上游暴露项目本地 Function Calling 工具。智能体选择的 VAD、ASR、TTS 与独立 VLLM 不参与这条主链路。',
   'realtimeModel.agentFallback': '传统 VAD / ASR / TTS / VLLM 配置不会被删除，切回普通 LLM 后会继续用于传统拼接链路。实时上游不可用时不会静默改走传统链路，需要修复配置或手动切回普通 LLM。',
   'realtimeModel.configDescription': 'conversation_mode=realtime 表示该 LLM 使用端到端 Realtime WebSocket，而不是普通 Chat Completions；它会接管音频输入和音频输出，图片与工具能力取决于 adapter。',

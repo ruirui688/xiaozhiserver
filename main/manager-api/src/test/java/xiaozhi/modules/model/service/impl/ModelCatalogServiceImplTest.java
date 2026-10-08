@@ -16,6 +16,21 @@ import xiaozhi.modules.model.dto.ModelCatalogDTO;
 import xiaozhi.modules.model.dto.ModelFieldSchemaDTO;
 
 class ModelCatalogServiceImplTest {
+    @Test
+    void duplexCatalogUsesDedicatedAdapterApiKeyAndVoiceContract() throws Exception {
+        ModelCatalogDTO template = staticCatalog().stream()
+                .filter(item -> "LLM_DOUBAO_DUPLEX".equals(item.getTemplateCode())).findFirst().orElseThrow();
+        assertEquals("doubao_duplex", template.getProviderCode());
+        assertTrue(template.getSelectable());
+        assertEquals("1.2.6.1", field(template, "model_name").getDefaultValue());
+        assertEquals("realtime", field(template, "conversation_mode").getDefaultValue());
+        assertTrue(field(template, "api_key").getSecret());
+        assertEquals("password", field(template, "api_key").getInputType());
+        assertFalse(template.getFieldSchemas().stream().anyMatch(item -> "app_id".equals(item.getKey())));
+        assertEquals("wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue",
+                field(template, "base_url").getDefaultValue());
+    }
+
 
     @Test
     void sileroVadExposesEditableRmsSnrGateJson() throws Exception {

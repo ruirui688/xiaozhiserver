@@ -53,6 +53,11 @@ const routes = [
       return import(/* webpackChunkName: "view-retrieve-password" */ '../views/retrievePassword.vue')
     }
   },
+  {
+    path: '/device-center',
+    name: 'DeviceCenter',
+    component: () => import(/* webpackChunkName: "view-device-center" */ '../views/DeviceCenter.vue')
+  },
   // 设备管理页面路由
   {
     path: '/device-management',

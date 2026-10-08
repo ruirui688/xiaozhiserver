@@ -14,7 +14,8 @@ public final class RealtimeModelConfigGuard {
 
     private static final Map<String, String> TEMPLATE_ADAPTERS = Map.of(
             "LLM_ALI_QWEN_OMNI_REALTIME", "qwen_omni_realtime",
-            "LLM_DOUBAO_REALTIME", "doubao_realtime");
+            "LLM_DOUBAO_REALTIME", "doubao_realtime",
+            "LLM_DOUBAO_DUPLEX", "doubao_duplex");
 
     private RealtimeModelConfigGuard() {
     }
@@ -69,6 +70,15 @@ public final class RealtimeModelConfigGuard {
         if (StringUtils.isNotBlank(endpointUrl) && !isWssUrl(endpointUrl)) {
             return "Realtime 配置不一致：adapter=" + adapter
                     + " 必须使用 wss:// Realtime WebSocket 地址，不能使用 HTTP Chat Completions 地址";
+        }
+        if ("doubao_duplex".equals(adapter) && StringUtils.isNotBlank(endpointUrl)) {
+            URI uri = URI.create(endpointUrl.trim());
+            if (!"openspeech.bytedance.com".equalsIgnoreCase(uri.getHost())
+                    || !"/api/v3/duplex/realtime/dialogue".equals(uri.getPath())
+                    || uri.getUserInfo() != null || uri.getQuery() != null || uri.getFragment() != null
+                    || (uri.getPort() != -1 && uri.getPort() != 443)) {
+                return "豆包3.0全双工仅允许官方WSS地址，不能使用旧版豆包或自定义端点";
+            }
         }
         return "";
     }

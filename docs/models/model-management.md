@@ -1,7 +1,7 @@
 ---
 status: canonical
 owner: models
-last_verified: 2026-08-04
+last_verified: 2026-10-08
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/model
   - main/manager-api/src/main/java/xiaozhi/modules/config
@@ -80,6 +80,32 @@ Realtime 目录项必须使用独立 adapter，例如 `qwen_omni_realtime`、`do
 - 选中后当前传统 VAD、ASR、TTS 和独立 VLLM 不参与实时主链路，但配置仍保留供切回普通 LLM。
 - Realtime 失败不自动静默改走传统链路；管理员修复配置或手动切回普通 LLM。
 - Realtime 主模型是会话型 provider。它可以在会话建立时接收已有静态摘要并继续上报对话事件，但不自动获得传统主链路的逐轮动态记忆查询，也不充当知识库切片、Judge、短期总结或主动记忆维护所需的同步文本 LLM；这些任务应选择独立且测试通过的传统 LLM/SLM，或使用托管/仅上报模式。
+
+### 豆包 3.0 Seeduplex 全双工
+
+模型配置 → LLM → 选择“豆包3.0 Seeduplex 全双工”，填写新版豆包语音控制台的 API Key 和已开通音色，保存后运行单模型测试。
+测试通过并启用后，在智能体主模型中选择该配置。迁移 `202610081200.sql` 只新增独立模板和默认禁用的配置，
+不会覆盖旧版豆包配置、复制密钥或自动启用模型。服务发布时须同时更新 manager-api 与 xiaozhi-server。
+
+| 字段 | 值 |
+| --- | --- |
+| 模板 / adapter | `LLM_DOUBAO_DUPLEX` / `doubao_duplex` |
+| 模型版本 | `1.2.6.1` |
+| 会话模式 | `realtime` |
+| 地址 | `wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue` |
+| 鉴权 | 新控制台 API Key，通过 `X-Api-Key` Header 发送，无需 App ID |
+| 音频 | 输入16kHz单声道PCM16，输出24kHz单声道PCM16，由服务端转换设备Opus |
+
+该 adapter 使用 JSON 事件，与旧版 `doubao_realtime` 的二进制协议独立。工具只来自当前已授权的统一工具运行时；
+多工具结果以各自 call_id 聚合回传。音频按20ms节奏发送，未收音时发送静音事件，恢复音频时取消静音；
+自然打断保留新用户音频，显式取消后忽略已退役响应，关闭等待 session.closed。清空上下文会创建新的上游会话。
+
+单模型测试发送仓库内置 `wakeup_words_short.wav` 语音，必须收到有效音频及回复结束事件才通过，
+并记录首文本、首音频及总耗时。它不是自定义文字问题评测，不调用额外TTS把文字转换成音频，也不以打招呼合成替代推理。
+当前文字对话、文字批量评测和图片输入明确不支持；动态记忆边界与其他Realtime模型相同。
+设备端ASR/TTS路由不能与Realtime混用。全双工实机需具备持续收音、同时播放和回声消除能力，服务端适配不等于固件已完成验收。
+
+协议依据：[火山引擎全双工API](https://docs.volcengine.com/docs/DoubaoVoice/endtoend-realtime-voice-full-duplex-version?lang=zh)，核验日期2026-10-08。
 
 ## 1. 页面字段对应关系
 

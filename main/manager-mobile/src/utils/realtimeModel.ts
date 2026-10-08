@@ -8,6 +8,8 @@ export interface RealtimeModelLike {
 const REALTIME_ADAPTERS = new Set([
   'qwen_omni_realtime',
   'qwen-omni-realtime',
+  'doubao_duplex',
+  'doubao-duplex',
   'doubao_realtime',
   'doubao-realtime',
 ])

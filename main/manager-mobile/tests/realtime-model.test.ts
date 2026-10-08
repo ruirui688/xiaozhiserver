@@ -9,6 +9,7 @@ test('detects realtime models from the manager-api contract', () => {
   assert.equal(isRealtimeModel({ realtime: true }), true)
   assert.equal(isRealtimeModel({ adapterCode: 'qwen_omni_realtime' }), true)
   assert.equal(isRealtimeModel({ adapterCode: 'doubao_realtime' }), true)
+  assert.equal(isRealtimeModel({ adapterCode: 'doubao_duplex' }), true)
   assert.equal(isRealtimeModel({ adapterCode: 'doubao-realtime' }), true)
   assert.equal(isRealtimeModel({ adapterCode: 'openai', conversationMode: 'pipeline' }), false)
 })

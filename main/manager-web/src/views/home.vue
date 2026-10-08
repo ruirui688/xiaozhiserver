@@ -16,7 +16,7 @@
         <!-- 首页内容 -->
         <div class="add-device">
           <div class="add-device-bg">
-            <div class="hellow-text" style="margin-top: 30px;">
+            <div class="hellow-text">
               {{ $t('home.greeting') }}
             </div>
             <div class="hellow-text">
@@ -428,7 +428,7 @@ export default {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(145deg, #e6eeff, #eff0ff);
+  background: #f7f8fc;
   background-size: cover;
   /* 确保背景图像覆盖整个元素 */
   background-position: center;
@@ -440,22 +440,21 @@ export default {
 }
 
 .add-device {
-  height: 195px;
+  min-height: 190px;
   border-radius: 18px;
   position: relative;
   overflow: hidden;
-  background: linear-gradient(269.62deg,
-      #e0e6fd 0%,
-      #cce7ff 49.69%,
-      #d3d3fe 100%);
-  box-shadow: 0 18px 42px rgba(91, 123, 210, 0.12);
+  background: #eef2ff;
+  border: 1px solid #e8ecf5;
+  box-shadow: none;
 }
 
 .add-device-bg {
   width: 100%;
-  height: 100%;
+  min-height: 190px;
+  padding: 24px 32px;
   text-align: left;
-  background-image: url("@/assets/home/main-top-bg.png");
+  background-image: linear-gradient(90deg, rgba(250, 251, 255, 0.96) 0%, rgba(250, 251, 255, 0.82) 44%, rgba(250, 251, 255, 0.2) 100%), url("@/assets/home/main-top-bg.png");
   overflow: hidden;
   background-size: cover;
   /* 确保背景图像覆盖整个元素 */
@@ -468,9 +467,10 @@ export default {
 
   /* 兼容老版本Opera浏览器 */
   .hellow-text {
-    margin-left: 75px;
-    color: #3d4566;
-    font-size: 33px;
+    margin-left: 0;
+    color: #292e3d;
+    font-size: 26px;
+    line-height: 1.35;
     font-weight: 700;
     letter-spacing: 0;
   }
@@ -480,14 +480,15 @@ export default {
     font-size: 12px;
     text-align: left;
     color: #818cae;
-    margin-left: 75px;
+    margin-left: 0;
     margin-top: 5px;
   }
 
   .workspace-quota {
     display: flex;
-    gap: 18px;
-    margin-left: 75px;
+    gap: 8px 18px;
+    flex-wrap: wrap;
+    margin-left: 0;
     margin-top: 7px;
     color: #596788;
     font-size: 12px;
@@ -497,7 +498,7 @@ export default {
 .add-device-btn {
   display: flex;
   align-items: center;
-  margin-left: 75px;
+  margin-left: 0;
   margin-top: 10px;
   cursor: pointer;
 
@@ -533,12 +534,12 @@ export default {
 .device-list-container {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
-  gap: 30px;
-  padding: 30px 0 20px;
+  gap: 22px;
+  padding: 24px 0 20px;
 }
 
 .home-main {
-  padding: 28px;
+  padding: 24px 32px;
   display: flex;
   flex-direction: column;
 }
@@ -549,10 +550,9 @@ export default {
   gap: 22px;
   min-height: 54px;
   margin-bottom: 18px;
-  padding: 0 24px;
-  border-radius: 17px;
-  background: rgba(255, 255, 255, 0.82);
-  box-shadow: 0 12px 30px rgba(70, 94, 162, 0.08);
+  padding: 0 8px;
+  border-bottom: 1px solid #e6e8ef;
+  background: transparent;
 }
 
 .agent-center-nav span {

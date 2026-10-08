@@ -12,18 +12,21 @@
         <div class="equipment-management" :class="{
           'active-tab':
             $route.path === '/home' ||
-            $route.path === '/role-config' ||
-            $route.path === '/device-management',
+            $route.path === '/role-config',
         }" @click="handleRouter('home')">
           <img loading="lazy" alt="" src="@/assets/header/robot.png" :style="{
             filter:
               $route.path === '/home' ||
-                $route.path === '/role-config' ||
-                $route.path === '/device-management'
+                $route.path === '/role-config'
                 ? 'brightness(0) invert(1)'
                 : 'None',
           }" />
           <span class="nav-text">{{ $t("header.smartManagement") }}</span>
+        </div>
+        <div class="equipment-management" :class="{ 'active-tab': ['/device-center', '/device-management'].includes($route.path) }"
+          @click="handleRouter('deviceCenter')">
+          <i class="el-icon-monitor"></i>
+          <span class="nav-text">设备管理</span>
         </div>
         <!-- 普通用户显示音色克隆 -->
         <div v-if="!userInfo.superAdmin && featureStatus.voiceClone" class="equipment-management"
@@ -257,6 +260,7 @@ export default {
       },
       // 跳转页面配置
       routerPaths: {
+        deviceCenter: "/device-center",
         home: "/home",
         modelConfig: "/model-config",
         resourceCenter: "/knowledge-base-management",
@@ -609,9 +613,9 @@ export default {
 
 <style lang="scss" scoped>
 .header {
-  background: rgba(246, 250, 255, 0.82);
+  background: rgba(251, 252, 255, 0.96);
   border: 1px solid rgba(255, 255, 255, 0.92);
-  border-bottom-color: rgba(205, 218, 246, 0.75);
+  border-bottom-color: #e9ecf3;
   height: 72px !important;
   min-width: 900px;
   /* 设置最小宽度防止过度压缩 */
@@ -650,7 +654,7 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 18px;
+  gap: 8px;
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -682,7 +686,7 @@ export default {
 .equipment-management {
   height: 42px;
   border-radius: 21px;
-  background: rgba(221, 234, 254, 0.82);
+  background: transparent;
   display: flex;
   justify-content: center;
   font-size: 15px;
@@ -694,20 +698,19 @@ export default {
   cursor: pointer;
   flex-shrink: 0;
   /* 防止导航按钮被压缩 */
-  padding: 0 18px;
+  padding: 0 14px;
   position: relative;
   white-space: nowrap;
 }
 
 .equipment-management:hover {
-  background: #d5e3ff;
-  transform: translateY(-1px);
+  background: #eef1f8;
 }
 
 .equipment-management.active-tab {
-  background: linear-gradient(135deg, #4e73ff, #6688ff) !important;
+  background: #586ff0 !important;
   color: #fff !important;
-  box-shadow: 0 8px 18px rgba(87, 120, 255, 0.22);
+  box-shadow: 0 3px 8px rgba(87, 120, 255, 0.12);
 }
 
 .equipment-management img {

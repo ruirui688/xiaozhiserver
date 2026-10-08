@@ -10,6 +10,21 @@ import cn.hutool.json.JSONObject;
 import xiaozhi.common.exception.RenException;
 
 class RealtimeModelConfigGuardTest {
+    @Test
+    void duplexRejectsLegacyAdapterAndCredentialExfiltrationEndpoints() {
+        String url = "wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue";
+        assertTrue(RealtimeModelConfigGuard.validationError("LLM", "LLM_DOUBAO_DUPLEX",
+                "doubao_duplex", "realtime", url).isEmpty());
+        for (String bad : new String[] {url + "?key=secret", url + "#fragment",
+                "wss://attacker.example/api/v3/duplex/realtime/dialogue",
+                "wss://openspeech.bytedance.com/api/v3/realtime/dialogue"}) {
+            assertTrue(!RealtimeModelConfigGuard.validationError("LLM", "LLM_DOUBAO_DUPLEX",
+                    "doubao_duplex", "realtime", bad).isEmpty());
+        }
+        assertTrue(!RealtimeModelConfigGuard.validationError("LLM", "LLM_DOUBAO_DUPLEX",
+                "doubao_realtime", "realtime", url).isEmpty());
+    }
+
 
     @Test
     void acceptsQwenOmniRealtimeContract() {

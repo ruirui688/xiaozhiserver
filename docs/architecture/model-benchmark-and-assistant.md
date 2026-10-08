@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: model
-last_verified: 2026-08-03
+last_verified: 2026-10-08
 source_paths:
   - main/xiaozhi-server/core/benchmark
   - main/manager-api/src/main/java/xiaozhi/modules/model
@@ -194,6 +194,9 @@ user turn 串行，避免破坏对话上下文或瞬间打满 provider。
 - `draftConfigJson` 是助手草案响应字段名，不是模型配置保存契约；保存前必须拆分为标准字段、`params` 和 `secrets`，且不能绕过保存后的真实测试。
 - `integrationArtifacts` 是草案，不是已完成实现；提交前必须清理占位文件、补全真实实现和验证记录。
 - 产物写入必须限制在模型接入白名单路径，默认不覆盖已有文件，禁止绝对路径和 `..` 路径越界。
+
+豆包3.0 `doubao_duplex` 的单模型测试使用 `test_mode=realtime_audio`，发送内置16kHz语音样本并等待完整回复音频。
+不使用旧版 ChatTextQuery，也不以 speech_text_buffer 的打招呼合成充当推理。文字批量评测明确返回不支持。
 
 ## 5. 残留草案治理
 

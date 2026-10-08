@@ -1474,3 +1474,10 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/knowledge-content-remove-history.sql
+  - changeSet:
+      id: 202610081200
+      author: Codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202610081200.sql

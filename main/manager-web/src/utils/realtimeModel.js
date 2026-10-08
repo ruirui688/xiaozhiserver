@@ -1,12 +1,15 @@
 const REALTIME_ADAPTERS = new Set([
   "qwen_omni_realtime",
   "qwen-omni-realtime",
+  "doubao_duplex",
+  "doubao-duplex",
   "doubao_realtime",
   "doubao-realtime",
 ]);
 
 const REALTIME_TEMPLATE_ADAPTERS = new Map([
   ["llm_ali_qwen_omni_realtime", "qwen_omni_realtime"],
+  ["llm_doubao_duplex", "doubao_duplex"],
   ["llm_doubao_realtime", "doubao_realtime"],
 ]);
 
@@ -76,12 +79,12 @@ export function isRealtimeModel(model = {}) {
 
   return modelSources(model).some((source) => {
     const templateCode = normalize(source.templateCode || source.template_code);
-    return templateCode.includes("omni_realtime") || templateCode.includes("doubao_realtime");
+    return templateCode.includes("omni_realtime") || templateCode.includes("doubao_realtime") || templateCode === "llm_doubao_duplex";
   });
 }
 
 export function isDoubaoRealtimeModel(model = {}) {
-  return getRealtimeAdapter(model).startsWith("doubao");
+  return ["doubao_realtime", "doubao-realtime"].includes(getRealtimeAdapter(model));
 }
 
 export function hasRealtimeAdapterMismatch(model = {}) {

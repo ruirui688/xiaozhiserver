@@ -16,6 +16,8 @@ class RealtimeAdapterCapabilityRegistryTest {
         assertTrue(RealtimeAdapterCapabilityRegistry.find("doubao_realtime").orElseThrow().customVoiceIds());
         assertFalse(RealtimeAdapterCapabilityRegistry.find("doubao_realtime").orElseThrow().nativeFunctionCalling());
         assertFalse(RealtimeAdapterCapabilityRegistry.find("qwen_realtime").isPresent());
+        assertTrue(RealtimeAdapterCapabilityRegistry.supportsNativeFunctionCalling("doubao-duplex"));
+        assertTrue(RealtimeAdapterCapabilityRegistry.isVoiceAllowed("doubao_duplex", "account_voice_id"));
         assertEquals("Ethan", RealtimeAdapterCapabilityRegistry.find("qwen_omni_realtime")
                 .orElseThrow().defaultVoice());
         assertTrue(RealtimeAdapterCapabilityRegistry.isVoiceAllowed("qwen_omni_realtime", "Serena"));

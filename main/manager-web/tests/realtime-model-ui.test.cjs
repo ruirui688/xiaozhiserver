@@ -11,6 +11,10 @@ describe("realtime multimodal model UI", () => {
     assert.equal(realtime.isRealtimeModel({ raw: { adapterCode: "qwen_omni_realtime" } }), true);
     assert.equal(realtime.isRealtimeModel({ raw: { adapterCode: "doubao_realtime" } }), true);
     assert.equal(realtime.isRealtimeModel({ templateCode: "LLM_DOUBAO_REALTIME" }), true);
+    assert.equal(realtime.isRealtimeModel({ templateCode: "LLM_DOUBAO_DUPLEX" }), true);
+    assert.equal(realtime.isRealtimeModel({ adapterCode: "doubao_duplex" }), true);
+    assert.equal(realtime.isDoubaoRealtimeModel({ adapterCode: "doubao_duplex" }), false);
+    assert.equal(realtime.hasRealtimeAdapterMismatch({ templateCode: "LLM_DOUBAO_DUPLEX", adapterCode: "doubao_realtime" }), true);
     assert.equal(realtime.isDoubaoRealtimeModel({ adapterCode: "doubao-realtime" }), true);
     assert.equal(realtime.isRealtimeModel({ templateCode: "LLM_ALI_QWEN_OMNI_REALTIME" }), true);
     assert.equal(realtime.isRealtimeModel({ adapterCode: "openai", params: { conversation_mode: "pipeline" } }), false);

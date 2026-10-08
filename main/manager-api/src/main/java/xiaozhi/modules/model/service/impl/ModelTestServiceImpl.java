@@ -241,7 +241,7 @@ public class ModelTestServiceImpl implements ModelTestService {
         }
         if (("LLM".equals(modelType) || "SLM".equals(modelType))
                 && ("openai".equals(type) || "ollama".equals(type)
-                        || "qwen_omni_realtime".equals(type) || "doubao_realtime".equals(type))) {
+                        || "qwen_omni_realtime".equals(type) || "doubao_realtime".equals(type) || "doubao_duplex".equals(type))) {
             return TEST_LEVEL_REAL_INFERENCE;
         }
         if ("VLLM".equals(modelType) && "openai".equals(type)) {
@@ -1187,7 +1187,7 @@ public class ModelTestServiceImpl implements ModelTestService {
         }
         if ("LLM".equals(normalizedModelType)) {
             return switch (normalizedType) {
-                case "qwen_omni_realtime" -> List.of("api_key", "base_url", "model_name", "conversation_mode");
+                case "qwen_omni_realtime", "doubao_duplex" -> List.of("api_key", "base_url", "model_name", "conversation_mode");
                 case "doubao_realtime" -> List.of("app_id", "api_key", "base_url", "model_name", "conversation_mode");
                 case "alibl" -> List.of("base_url", "app_id", "api_key");
                 case "dify", "fastgpt" -> List.of("base_url", "api_key");

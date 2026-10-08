@@ -12,9 +12,15 @@ from core.providers.realtime.qwen_omni_realtime import (
     QwenRealtimeTextProbe,
     SUPPORTED_ADAPTERS as QWEN_ADAPTERS,
 )
+from core.providers.realtime.doubao_duplex import (
+    CAPABILITIES as DUPLEX_CAPABILITIES,
+    DoubaoDuplexSession,
+    SUPPORTED_ADAPTERS as DUPLEX_ADAPTERS,
+)
 
 
 SESSION_FACTORIES = {
+    **{adapter: DoubaoDuplexSession for adapter in DUPLEX_ADAPTERS},
     **{adapter: QwenOmniRealtimeSession for adapter in QWEN_ADAPTERS},
     **{adapter: DoubaoRealtimeSession for adapter in DOUBAO_ADAPTERS},
 }
@@ -23,6 +29,7 @@ PROBE_FACTORIES = {
     **{adapter: DoubaoRealtimeTextProbe for adapter in DOUBAO_ADAPTERS},
 }
 ADAPTER_CAPABILITIES = {
+    **{adapter: DUPLEX_CAPABILITIES for adapter in DUPLEX_ADAPTERS},
     **{adapter: QWEN_CAPABILITIES for adapter in QWEN_ADAPTERS},
     **{adapter: DOUBAO_CAPABILITIES for adapter in DOUBAO_ADAPTERS},
 }

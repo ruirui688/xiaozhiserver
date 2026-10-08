@@ -33,12 +33,13 @@ public class DoubaoRealtimeModelTester implements ModelTestExecutor {
     @Override
     public boolean supports(String modelType, String providerType) {
         return "LLM".equalsIgnoreCase(modelType)
-                && "doubao_realtime".equalsIgnoreCase(providerType);
+                && ("doubao_realtime".equalsIgnoreCase(providerType) || "doubao_duplex".equalsIgnoreCase(providerType));
     }
 
     @Override
     public ModelTestResultDTO test(JSONObject configJson, String providerType) {
-        String validationError = validateConfig(configJson);
+        boolean duplex = "doubao_duplex".equalsIgnoreCase(providerType);
+        String validationError = validateConfig(configJson, duplex);
         if (StringUtils.isNotBlank(validationError)) {
             return failed(validationError);
         }
@@ -48,7 +49,7 @@ public class DoubaoRealtimeModelTester implements ModelTestExecutor {
         result.setTestInput("供应器类型：" + providerType
                 + "\n模型：" + modelName
                 + "\n会话模式：realtime"
-                + "\n测试文本：" + TEST_PROMPT
+                + (duplex ? "\n测试音频：内置 wakeup_words_short.wav（非文字评测）" : "\n测试文本：" + TEST_PROMPT)
                 + "\n测试方式：调用 xiaozhi-server 建立真实火山引擎豆包端到端 WebSocket 并完成一轮响应");
         try {
             long started = System.currentTimeMillis();
@@ -56,7 +57,7 @@ public class DoubaoRealtimeModelTester implements ModelTestExecutor {
                     buildPayload(configJson, providerType, modelName),
                     Duration.ofSeconds(resolveTimeoutSeconds(configJson)));
             result.setResponseTimeMs(System.currentTimeMillis() - started);
-            return applyResponse(result, response);
+            return applyResponse(result, response, duplex);
         } catch (Exception error) {
             String message = "豆包端到端实时语音真实推理测试失败：" + sanitizeError(
                     StringUtils.defaultIfBlank(error.getMessage(), error.getClass().getSimpleName()));
@@ -73,8 +74,8 @@ public class DoubaoRealtimeModelTester implements ModelTestExecutor {
         return Math.min(MAX_TIMEOUT_SECONDS, connectTimeout + responseTimeout + TIMEOUT_GRACE_SECONDS);
     }
 
-    private String validateConfig(JSONObject config) {
-        if (!hasUsableValue(config, "app_id")) {
+    private String validateConfig(JSONObject config, boolean duplex) {
+        if (!duplex && !hasUsableValue(config, "app_id")) {
             return "豆包端到端实时语音缺少有效 app_id";
         }
         if (!hasUsableValue(config, "api_key")) {
@@ -84,21 +85,22 @@ public class DoubaoRealtimeModelTester implements ModelTestExecutor {
             return "豆包端到端实时语音缺少 base_url";
         }
         String model = firstNonBlank(config, "model_name", "model");
-        if (!SUPPORTED_MODELS.contains(model)) {
-            return "豆包端到端模型版本仅支持 1.2.1.1 或 2.2.0.0";
+        if (!(duplex ? "1.2.6.1".equals(model) : SUPPORTED_MODELS.contains(model))) {
+            return duplex ? "豆包3.0全双工版本必须为1.2.6.1" : "豆包端到端模型版本仅支持 1.2.1.1 或 2.2.0.0";
         }
         if (!"realtime".equalsIgnoreCase(config.getStr("conversation_mode"))) {
             return "豆包端到端实时语音的 conversation_mode 必须为 realtime";
         }
-        return validateEndpoint(config.getStr("base_url"));
+        return validateEndpoint(config.getStr("base_url"), duplex);
     }
 
-    private String validateEndpoint(String baseUrl) {
+    private String validateEndpoint(String baseUrl, boolean duplex) {
         try {
             URI uri = URI.create(StringUtils.trimToEmpty(baseUrl));
             boolean valid = "wss".equalsIgnoreCase(uri.getScheme())
                     && OFFICIAL_HOST.equalsIgnoreCase(uri.getHost())
-                    && OFFICIAL_PATH.equals(StringUtils.removeEnd(uri.getPath(), "/"))
+                    && (duplex ? "/api/v3/duplex/realtime/dialogue" : OFFICIAL_PATH).equals(
+                            duplex ? uri.getPath() : StringUtils.removeEnd(uri.getPath(), "/"))
                     && uri.getUserInfo() == null
                     && (uri.getPort() == -1 || uri.getPort() == 443)
                     && StringUtils.isBlank(uri.getQuery())
@@ -121,16 +123,19 @@ public class DoubaoRealtimeModelTester implements ModelTestExecutor {
                 .set("model_type", "LLM")
                 .set("provider_type", providerType)
                 .set("config", config);
+        if ("doubao_duplex".equalsIgnoreCase(providerType)) {
+            model.set("test_mode", "realtime_audio");
+        }
         return new JSONObject()
                 .set("task_id", "single-doubao-realtime-llm-test-" + UUID.randomUUID())
                 .set("model_type", "LLM")
                 .set("iterations", 1)
                 .set("concurrency", 1)
-                .set("benchmark_cases", List.of(benchmarkCase))
+                .set("benchmark_cases", "doubao_duplex".equalsIgnoreCase(providerType) ? List.of() : List.of(benchmarkCase))
                 .set("models", List.of(model));
     }
 
-    private ModelTestResultDTO applyResponse(ModelTestResultDTO result, JSONObject response) {
+    private ModelTestResultDTO applyResponse(ModelTestResultDTO result, JSONObject response, boolean duplex) {
         JSONObject benchmarkResult = firstJsonObject(response.getJSONArray("results"));
         if (benchmarkResult == null) {
             result.setSuccess(false);
@@ -160,7 +165,7 @@ public class DoubaoRealtimeModelTester implements ModelTestExecutor {
                 : audioBytes > 0 ? "Realtime 返回有效音频：" + audioBytes + " bytes" : sample.toStringPretty());
         boolean success = Boolean.TRUE.equals(sample.getBool("success"))
                 && Boolean.TRUE.equals(sample.getBool("measured"))
-                && (StringUtils.isNotBlank(output) || audioBytes > 0);
+                && (duplex ? audioBytes > 0 : (StringUtils.isNotBlank(output) || audioBytes > 0));
         result.setSuccess(success);
         result.setMessage(success
                 ? "豆包端到端实时语音真实推理测试通过"

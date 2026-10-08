@@ -22,6 +22,7 @@
 
 <script>
 import {
+  getRealtimeAdapter,
   hasRealtimeAdapterMismatch,
   isDoubaoRealtimeModel,
   isRealtimeModel,
@@ -50,6 +51,9 @@ export default {
     message() {
       if (this.adapterMismatch) {
         return this.$t("realtimeModel.mismatchDescription");
+      }
+      if (["doubao_duplex", "doubao-duplex"].includes(getRealtimeAdapter(this.model))) {
+        return this.$t("realtimeModel.duplexDescription");
       }
       if (isDoubaoRealtimeModel(this.model)) {
         return this.context === "agent"

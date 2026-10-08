@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: architecture
-last_verified: 2026-09-21
+last_verified: 2026-10-08
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules
   - main/manager-web/src
@@ -814,7 +814,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 
 ```text
 定制模块：xiaozhi-server 会话路由与 Realtime provider、manager-api 模型目录/配置/评测、manager-web 模式提示
-改动原因：智能体既要保留 VAD -> ASR -> LLM -> TTS 的传统可组合链路，也要支持 Qwen Omni Realtime、豆包端到端实时语音等直接处理音频输入和音频输出的 Realtime 模型。两种模式需要复用一个 llmModelId、设备认证、工具门控和聊天上报，但不能把不同协议强行塞进普通 LLM provider，也不能在实时链路失败时静默改变本轮语义。自然打断、上游上下文重建、会话音色和原生工具调用统一由 adapter 能力声明：Qwen 支持工具 schema 与结果回注；豆包当前协议支持中断、重建和音色，但没有本地工具结果回注契约，不能伪装为工具可用。
+改动原因：智能体既要保留 VAD -> ASR -> LLM -> TTS 的传统可组合链路，也要支持 Qwen Omni Realtime、豆包端到端实时语音等直接处理音频输入和音频输出的 Realtime 模型。两种模式需要复用一个 llmModelId、设备认证、工具门控和聊天上报，但不能把不同协议强行塞进普通 LLM provider，也不能在实时链路失败时静默改变本轮语义。自然打断、上游上下文重建、会话音色和原生工具调用统一由 adapter 能力声明：Qwen 支持工具 schema 与结果回注；旧版豆包二进制协议支持中断、重建和音色但不回注工具；新增豆包3.0 `doubao_duplex` 使用独立 JSON 协议、API Key鉴权与原生工具回注，不能覆盖旧版配置。3.0只接语音，测试必须发送真实语音并收到完整回复音频；不把文字或打招呼合成伪装成端到端推理。
 关键文件：
   - main/xiaozhi-server/core/conversation/
   - main/xiaozhi-server/core/providers/realtime/
@@ -989,3 +989,8 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 是否允许被官方覆盖：否
 官方同步时的处理规则：曲库缓存（`music_files`、`music_file_names`、`music_metadata`）同时服务播放选择和 `<music_library>`／工具描述提示词，必须在任何取用点之前按磁盘现状刷新：顶层目录 mtime 变化、`.xiaozhi-music-metadata.json` mtime 变化、或距上次扫描超过 `refresh_time`（默认 60 秒）三者任一命中都要重建。不得只在播放路径刷新，也不得为省一次目录扫描而让提示词长期保留已删除歌曲。子目录内增删不改变顶层目录 mtime，因此 `refresh_time` 兜底扫描不可删除。曲库元数据按客户曲库在后台生成，不得提交进仓库。
 ```
+
+## 50. 工作空间设备中心与直接切换智能体
+
+定制模块：manager-web 的 `DeviceCenter.vue`、`device/DeviceAgentCard.vue`、`utils/deviceCenter.js`。
+设备管理导航按工作空间汇总设备卡片，支持搜索、智能体筛选和添加设备；卡片通过现有设备场景接口直接切换智能体。不得改成解绑重绑或绕过服务端场景权限与模型验证。切换结果必须以服务端审计为准，保留失败、回滚及等待状态；不得用最近连接时间推断在线。同步时保留原设备设置入口和新增设备中心。详见 `docs/architecture/device-scene-management.md`。

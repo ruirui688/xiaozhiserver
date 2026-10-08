@@ -140,6 +140,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
             "LLM_ALI_QWEN_OPENAI",
             "LLM_ALI_QWEN_OMNI_REALTIME",
             "LLM_DOUBAO_REALTIME",
+            "LLM_DOUBAO_DUPLEX",
             "LLM_DOUBAO_SEED_OPENAI",
             "LLM_DEEPSEEK_OPENAI",
             "LLM_ZHIPU_GLM_OPENAI",
@@ -385,6 +386,7 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 .filter(item -> "LLM".equalsIgnoreCase(item.getModelType()))
                 .filter(item -> !"LLM_ALI_QWEN_OMNI_REALTIME".equals(item.getTemplateCode()))
                 .filter(item -> !"LLM_DOUBAO_REALTIME".equals(item.getTemplateCode()))
+                .filter(item -> !"LLM_DOUBAO_DUPLEX".equals(item.getTemplateCode()))
                 .filter(item -> !Boolean.TRUE.equals(item.getHidden()))
                 .filter(item -> !Boolean.TRUE.equals(item.getDeprecated()))
                 .filter(item -> Boolean.TRUE.equals(item.getSelectable()))
@@ -1070,6 +1072,25 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
         doubaoRealtime.setTestContract("必须通过 xiaozhi-server 建立真实火山引擎二进制 Realtime WebSocket，完成至少一轮响应并记录首文本、首音频和总耗时；不得以握手冒充通过。");
         doubaoRealtime.setSourceCheckedAt("2026-08-04");
         items.add(doubaoRealtime);
+        ModelCatalogDTO duplex = item(
+                "LLM_DOUBAO_DUPLEX", "LLM", "doubao_duplex", "豆包3.0全双工",
+                "火山引擎", "豆包3.0 Seeduplex 全双工", "llm", "端到端实时语音",
+                "realtime-websocket", "Realtime JSON WebSocket", "cloud", "云平台",
+                "Seeduplex JSON WebSocket", "模型版本", "model_name",
+                List.of("api_key"),
+                List.of("api_key", "base_url", "model_name", "conversation_mode", "voice"),
+                List.of("input_sample_rate", "output_sample_rate", "speech_rate", "loudness_rate",
+                        "connect_timeout_seconds", "response_timeout_seconds", "max_event_bytes"),
+                List.of("使用新版豆包语音控制台API Key，无需App ID。",
+                        "选择后音频由端到端会话处理；全双工设备需持续收音和回声消除。"),
+                List.of("不支持图片或文字对话；文字批量评测不适用。",
+                        "单模型测试使用内置语音样本，须收到完整音频响应才通过。"),
+                List.of("Seeduplex", "豆包3.0", "doubao_duplex", "豆包全双工"),
+                "https://docs.volcengine.com/docs/DoubaoVoice/endtoend-realtime-voice-full-duplex-version?lang=zh");
+        duplex.setRecommendedFor("全双工语音对话及已授权本地工具调用。");
+        duplex.setTestContract("真实16kHz语音输入，等待回复音频及结束事件；握手或文本合成不能冒充通过。");
+        duplex.setSourceCheckedAt("2026-10-08");
+        items.add(duplex);
         ModelCatalogDTO doubaoSeed = openAiLlm("LLM_DOUBAO_SEED_OPENAI", "火山引擎", "豆包 Seed 系列",
                 "OpenAI 兼容聊天",
                 "Doubao-Seed-Evolving / Doubao-Seed-2.1-turbo / Doubao-Seed-2.1-pro / Doubao-Seed-2.0 系列",
@@ -1381,6 +1402,21 @@ public class ModelCatalogServiceImpl implements ModelCatalogService {
                 setFieldDefault(dto, "silence_duration_ms", 800);
                 setFieldDefault(dto, "enable_input_audio_transcription", true);
                 setFieldDefault(dto, "input_audio_transcription_model", "");
+                setFieldDefault(dto, "connect_timeout_seconds", 10);
+                setFieldDefault(dto, "response_timeout_seconds", 120);
+                setFieldDefault(dto, "max_event_bytes", 10485760);
+            }
+            case "LLM_DOUBAO_DUPLEX" -> {
+                setFieldDefault(dto, "base_url", "wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue");
+                setFieldDefault(dto, "model_name", "1.2.6.1");
+                setFieldOptions(dto, "model_name", List.of("1.2.6.1"));
+                setFieldDefault(dto, "conversation_mode", "realtime");
+                setFieldOptions(dto, "conversation_mode", List.of("realtime"));
+                setFieldDefault(dto, "voice", "zh_female_vv_jupiter_bigtts");
+                setFieldDefault(dto, "input_sample_rate", 16000);
+                setFieldDefault(dto, "output_sample_rate", 24000);
+                setFieldDefault(dto, "speech_rate", 0);
+                setFieldDefault(dto, "loudness_rate", 0);
                 setFieldDefault(dto, "connect_timeout_seconds", 10);
                 setFieldDefault(dto, "response_timeout_seconds", 120);
                 setFieldDefault(dto, "max_event_bytes", 10485760);

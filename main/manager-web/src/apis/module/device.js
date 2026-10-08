@@ -28,6 +28,7 @@ export default {
                 RequestService.clearRequestTime();
                 callback(res);
             })
+            .fail(callback)
             .networkFail((err) => {
                 console.error('获取设备列表失败:', networkErrorSummary(err));
                 if (callback) callback(networkErrorResponse('获取设备列表失败'));
@@ -128,28 +129,28 @@ export default {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/devices/${encodeURIComponent(deviceId)}/scenes`)
             .method('GET')
-            .success(callback)
+            .success(callback).fail(callback)
             .networkFail(() => callback(networkErrorResponse('获取设备场景失败')))
             .send();
     },
     createDeviceScene(deviceId, payload, callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/devices/${encodeURIComponent(deviceId)}/scenes`)
-            .method('POST').data(payload).success(callback)
+            .method('POST').data(payload).success(callback).fail(callback)
             .networkFail(() => callback(networkErrorResponse('创建设备场景失败')))
             .send();
     },
     updateDeviceScene(deviceId, bindingId, payload, callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/devices/${encodeURIComponent(deviceId)}/scenes/${bindingId}`)
-            .method('PUT').data(payload).success(callback)
+            .method('PUT').data(payload).success(callback).fail(callback)
             .networkFail(() => callback(networkErrorResponse('更新设备场景失败')))
             .send();
     },
     deleteDeviceScene(deviceId, bindingId, callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/devices/${encodeURIComponent(deviceId)}/scenes/${bindingId}`)
-            .method('DELETE').success(callback)
+            .method('DELETE').success(callback).fail(callback)
             .networkFail(() => callback(networkErrorResponse('删除设备场景失败')))
             .send();
     },
@@ -158,7 +159,7 @@ export default {
             .url(`${getServiceUrl()}/devices/${encodeURIComponent(deviceId)}/active-scene`)
             .method('PUT')
             .data({ bindingId, switchRequestId: `web-${Date.now()}-${Math.random().toString(16).slice(2)}` })
-            .success(callback)
+            .success(callback).fail(callback)
             .networkFail(() => callback(networkErrorResponse('切换设备场景失败')))
             .send();
     },

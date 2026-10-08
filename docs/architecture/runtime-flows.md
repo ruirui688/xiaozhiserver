@@ -1,7 +1,7 @@
 ---
 status: canonical
 owner: runtime
-last_verified: 2026-09-23
+last_verified: 2026-10-08
 source_paths:
   - main/xiaozhi-server/config.yaml
   - main/xiaozhi-server/app.py
@@ -242,10 +242,14 @@ sequenceDiagram
 - server VAD 模式持续 append，由上游判停；manual 模式在 `listen/stop` 执行 commit 和 `response.create`。同一轮不得重复 commit。
 - 上游输入转写完成后才写 user 对话和聊天记录；回复文本增量同时用于 Realtime 字幕预览，但不提前形成 assistant 记录。首片音频发送时若已有文本，先发一次 `tts/sentence_start` 预览；完整文本事件或 `response.done` 在 `tts/stop` 前再次发送完整回答，避免旧固件永久停留在首字。`response.done` 或错误终态负责一次性写 assistant 记录并结束设备 TTS 状态。
 - Abort 发送 `response.cancel` 和输入缓冲清理，停止当前设备音频并使回复生命周期只收敛一次；迟到旧事件不得结束新回复。
-- 对支持 Function Calling 的 Realtime adapter（当前 Qwen），上游只负责提出调用。会话初始化会按 adapter 能力确保
+- 对支持 Function Calling 的 Realtime adapter（Qwen和豆包3.0），上游只负责提出调用。会话初始化会按 adapter 能力确保
   `UnifiedToolHandler` 已就绪，不依赖传统 Intent provider 是否存在，因此 `Intent_nointent` 不会再导致 Realtime 工具列表为空。
-  工具清单仍来自统一注册表，执行仍走本地门控和 executor；工具结果以 `function_call_output` 回注，随后显式创建后续响应。
-  豆包当前协议没有本地工具结果回注契约，因此不向上游暴露工具。
+  工具清单仍来自统一注册表，执行仍走本地门控和 executor；Qwen工具结果以 `function_call_output` 回注，随后显式创建后续响应。
+  旧版豆包二进制协议不向上游暴露工具；豆包3.0 `doubao_duplex` 使用 JSON 事件，将已授权工具结果按 call_id 聚合回传。
+
+豆包3.0的JSON协议使用 `input_audio_mute.commit` / `input_audio_unmute.commit` 管理收音空闲，
+输入按20ms节奏发送；`response.output_audio.done` 结束音频轮次，`response.done` 仅携带用量。
+工具结果通过 `conversation.item.create` 的 `items` 回传，无需发送Qwen的 `response.create`。
 
 ### 4.3 图片入口
 

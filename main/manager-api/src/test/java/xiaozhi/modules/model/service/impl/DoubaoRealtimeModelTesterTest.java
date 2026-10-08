@@ -23,6 +23,32 @@ import xiaozhi.modules.model.service.impl.tester.DoubaoRealtimeModelTester;
 class DoubaoRealtimeModelTesterTest {
 
     @Test
+    void duplexUsesAudioProbeWithoutLegacyAppIdAndRejectsOldEndpoint() {
+        PythonBenchmarkClient client = mock(PythonBenchmarkClient.class);
+        AtomicReference<JSONObject> sent = new AtomicReference<>();
+        when(client.runRuntimeTest(any(JSONObject.class), any(Duration.class))).thenAnswer(invocation -> {
+            sent.set(invocation.getArgument(0));
+            return new JSONObject().set("results", List.of(new JSONObject().set("samples", List.of(
+                    new JSONObject().set("success", true).set("measured", true)
+                            .set("output_detail", new JSONObject().set("audio_bytes", 640))))));
+        });
+        JSONObject config = new JSONObject().set("api_key", "test-key")
+                .set("base_url", "wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue")
+                .set("model_name", "1.2.6.1").set("conversation_mode", "realtime");
+        DoubaoRealtimeModelTester tester = new DoubaoRealtimeModelTester(client);
+        assertTrue(tester.supports("LLM", "doubao_duplex"));
+        assertTrue(tester.test(config, "doubao_duplex").getSuccess());
+        assertEquals("realtime_audio", sent.get().getJSONArray("models").getJSONObject(0).getStr("test_mode"));
+        config.set("base_url", "wss://openspeech.bytedance.com/api/v3/realtime/dialogue");
+        assertFalse(tester.test(config, "doubao_duplex").getSuccess());
+        config.set("base_url", "wss://attacker.example/api/v3/duplex/realtime/dialogue");
+        assertFalse(tester.test(config, "doubao_duplex").getSuccess());
+        org.mockito.Mockito.verify(client, org.mockito.Mockito.times(1))
+                .runRuntimeTest(any(JSONObject.class), any(Duration.class));
+    }
+
+
+    @Test
     void sendsRealRuntimeBenchmarkAndRequiresMeasuredOutput() {
         PythonBenchmarkClient benchmarkClient = mock(PythonBenchmarkClient.class);
         AtomicReference<JSONObject> captured = new AtomicReference<>();

@@ -77,6 +77,14 @@ async def _run_model(
     model_type = str(model.get("model_type") or "").upper()
     provider_type = str(model.get("provider_type") or model.get("config", {}).get("type") or "")
     config = _prepare_runtime_config(model.get("config") or {})
+    if provider_type in {"doubao_duplex", "doubao-duplex"}:
+        if model_type != "LLM" or config.get("conversation_mode") != "realtime":
+            return _unsupported_result(model, "豆包3.0必须作为Realtime主模型")
+        if model.get("test_mode") != "realtime_audio":
+            return _unsupported_result(model, "豆包3.0暂不支持文字批量评测，请使用单模型真实语音测试")
+        from core.benchmark.doubao_duplex import run_duplex_samples
+        return _summarize(model, "REAL_INFERENCE", "全双工真实语音推理",
+                          await run_duplex_samples(config, iterations))
     if model_type in ("LLM", "SLM"):
         return await _run_llm(
             model,

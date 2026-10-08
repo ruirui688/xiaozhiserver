@@ -169,14 +169,21 @@ export default {
 .device-item {
   width: 342px;
   border-radius: 20px;
-  background: #fafcfe;
-  padding: 22px 22px 14px;
+  background: #fff;
+  border: 1px solid #e9ebf2;
+  box-shadow: 0 4px 18px rgba(30, 40, 70, 0.025);
+  transition: border-color .18s ease, box-shadow .18s ease;
+  &:hover {
+    border-color: #d9deee;
+    box-shadow: 0 8px 24px rgba(30, 40, 70, 0.055);
+  }
+  padding: 24px 24px 18px;
   box-sizing: border-box;
   &-title {
     flex: 1;
     font-weight: bold;
     font-size: 18px;
-    color: #3d4566;
+    color: #292e3d;
     text-align: left;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -185,10 +192,12 @@ export default {
 }
 
 .device-name {
-  margin: 7px 0 10px;
+  margin: 10px 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
   font-weight: 400;
-  font-size: 11px;
-  color: #3d4566;
+  font-size: 12px;
+  color: #687086;
   text-align: left;
 }
 
@@ -201,7 +210,7 @@ export default {
   justify-content: space-between;
   margin-bottom: 5px;
   color: #697592;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .settings-btn {
@@ -211,15 +220,23 @@ export default {
   flex: 0 0 auto;
   font-weight: 500;
   font-size: 12px;
-  color: #5778ff;
-  background: #e6ebff;
+  color: #56617b;
+  background: #f3f5f9;
+  border: 1px solid #edf0f5;
+  transition: background .15s ease, color .15s ease;
   width: auto;
   padding: 0 12px;
-  height: 21px;
-  line-height: 21px;
+  height: 28px;
+  line-height: 28px;
   cursor: pointer;
-  border-radius: 14px;
+  border-radius: 8px;
   white-space: nowrap;
+}
+
+.settings-btn:not(.disabled-btn):hover {
+  color: #4d64db;
+  background: #edf1ff;
+  border-color: #dfe6ff;
 }
 
 .device-actions {
@@ -235,7 +252,9 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 10px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #f0f1f6;
   font-size: 12px;
   color: #979db1;
   font-weight: 400;

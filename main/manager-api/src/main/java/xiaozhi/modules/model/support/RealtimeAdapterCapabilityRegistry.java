@@ -21,6 +21,9 @@ public final class RealtimeAdapterCapabilityRegistry {
             "qwen_omni_realtime", new Capabilities(
                     true, true, true, true, false, "Ethan",
                     List.of("Cherry", "Serena", "Ethan", "Chelsie")),
+            "doubao_duplex", new Capabilities(
+                    true, true, true, true, true, "zh_female_vv_jupiter_bigtts",
+                    List.of("zh_female_vv_jupiter_bigtts")),
             "doubao_realtime", new Capabilities(
                     false, true, true, true, true, "zh_female_vv_jupiter_bigtts",
                     List.of("zh_female_vv_jupiter_bigtts")));
