@@ -14,15 +14,18 @@
     </div>
     <div class="agent-panel">
       <div v-if="!editingAgent" class="agent-summary">
-        <div class="agent-caption"><span class="agent-caption-label">使用的智能体</span><strong>{{ currentAgentName || '未配置' }}</strong></div>
+        <div class="agent-caption"><span v-if="!list" class="agent-caption-label">使用的智能体</span><strong>{{ currentAgentName || '未配置' }}</strong></div>
         <el-button v-if="canWrite" class="switch-link" type="text" :disabled="busy" :loading="busy" @click="beginAgentEdit">切换</el-button>
       </div>
-      <div v-else class="switch-controls">
-        <el-select v-model="targetId" filterable size="small" placeholder="选择智能体" :disabled="busy || !canWrite" aria-label="选择目标智能体">
-          <el-option v-for="agent in agents" :key="agent.id" :label="agent.agentName" :value="agent.id" />
-        </el-select>
-        <el-button type="primary" size="small" :loading="busy" :disabled="!canWrite || !targetId || targetId === currentAgentId" @click="switchAgent">确认</el-button>
-        <el-button type="text" :disabled="busy" @click="cancelAgentEdit">取消</el-button>
+      <div v-else class="agent-editor">
+        <p class="switch-context">当前：{{ currentAgentName || '未配置' }}<span>切换到</span></p>
+        <div class="switch-controls">
+          <el-select v-model="targetId" filterable size="small" placeholder="选择新的智能体" :disabled="busy || !canWrite" aria-label="切换到新的智能体">
+            <el-option v-for="agent in agents" :key="agent.id" :label="agent.agentName" :value="agent.id" :disabled="agent.id === currentAgentId" />
+          </el-select>
+          <el-button type="primary" size="small" :loading="busy" :disabled="!canWrite || !targetId || targetId === currentAgentId" @click="switchAgent">确认切换</el-button>
+          <el-button type="text" :disabled="busy" @click="cancelAgentEdit">取消</el-button>
+        </div>
       </div>
       <p v-if="status && (failed || busy || editingAgent)" class="switch-status" role="status" :class="{ failure: failed }">{{ status }}</p>
     </div>
@@ -71,7 +74,7 @@ export default {
   methods: {
     beginAgentEdit() {
       if (this.busy || !this.canWrite) return;
-      this.targetId = this.currentAgentId; this.editingAgent = true;
+      this.targetId = ''; this.editingAgent = true;
     },
     cancelAgentEdit() {
       if (this.busy) return;
@@ -117,7 +120,7 @@ export default {
         await this.poll(generation, 0);
       } catch (error) {
         if (generation !== this.generation) return;
-        this.status = `${error.message}；请刷新确认。新关联的场景可在场景管理中查看。`;
+        this.status = error.message;
         this.failed = true; this.setBusy(false);
       }
     },
@@ -135,7 +138,7 @@ export default {
         if (latest && latest.switchStatus === 'APPLIED') this.editingAgent = false;
       } catch (error) {
         if (generation !== this.generation) return;
-        this.status = '读取切换结果失败，请刷新确认'; this.failed = true; this.setBusy(false);
+        this.status = `读取切换结果失败：${error.message}；请刷新确认`; this.failed = true; this.setBusy(false);
       }
     }
   }
@@ -154,6 +157,9 @@ h2 { margin: 0; min-width: 0; color: #282c3b; font-size: 21px; line-height: 1.5;
 .agent-panel { grid-column: 1 / -1; min-width: 0; }.agent-summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 20px; background: #f8f8fb; border-radius: 12px; }
 .agent-caption { min-width: 0; display: flex; flex-direction: column; gap: 8px; }.agent-caption-label { font-size: 12px; color: #8c91a0; }.agent-caption strong { font-size: 16px; font-weight: 500; color: #464b60; overflow-wrap: anywhere; }
 .switch-link { color: #7765af; font-size: 13px; }.switch-controls { display: flex; align-items: center; gap: 10px; }.switch-controls .el-select { min-width: 0; flex: 1; }.switch-controls .el-button { margin: 0; }
+.switch-context { margin: 0 0 10px; color: #858b9b; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.switch-context span { display: block; margin-top: 8px; color: #51596d; }
+.switch-controls { flex-wrap: wrap; }.switch-controls .el-select { flex-basis: 140px; }
 .switch-status { margin: 10px 0 0; color: #8990a3; font-size: 12px; line-height: 1.6; }.failure { color: #bd5656; }
 .device-meta { display: flex; flex-direction: column; gap: 6px; color: #9096a5; font-size: 12px; justify-content: center; }
 .device-actions { display: flex; align-items: center; gap: 18px; }.device-actions .el-button { padding: 8px 0; color: #8a90a0; font-size: 13px; }.device-actions .el-button:hover { color: #7765af; }

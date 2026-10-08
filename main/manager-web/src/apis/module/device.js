@@ -18,6 +18,27 @@ function networkErrorSummary(err) {
     return 'network error';
 }
 
+function sceneErrorResponse(message, error) {
+    const status = Number(error && error.status);
+    const hints = {
+        401: '登录已失效，请重新登录',
+        403: '请求被拒绝，请检查工作空间权限或网关限制',
+        404: '接口不存在，请检查管理 API 版本及代理路由',
+        405: '接口不支持此操作，请检查管理 API 版本及代理路由',
+        429: '请求过于频繁，请稍后重试',
+        500: '管理 API 内部错误，请检查服务日志',
+        502: '网关无法连接管理 API，请检查服务状态',
+        503: '管理 API 暂时不可用，请稍后重试',
+        504: '网关等待管理 API 超时，请检查服务状态'
+    };
+    // Never echo proxy HTML, request headers or raw exception bodies into the UI.
+    const detail = status >= 100 && status <= 599
+        ? `HTTP ${status}：${hints[status] || '服务器请求失败，请检查服务日志'}`
+        : status === 1 ? '请求超时，请检查网络和服务状态'
+            : '未收到有效响应，请检查网络连接和服务状态';
+    return networkErrorResponse(`${message}（${detail}）`);
+}
+
 export default {
     // 已绑设备
     getAgentBindDevices(agentId, callback) {
@@ -131,28 +152,28 @@ export default {
             .url(`${getServiceUrl()}/devices/${encodeURIComponent(deviceId)}/scenes`)
             .method('GET')
             .success(callback).fail(callback)
-            .networkFail(() => callback(networkErrorResponse('获取设备场景失败')))
+            .networkFail(err => callback(sceneErrorResponse('获取设备场景失败', err)))
             .send();
     },
     createDeviceScene(deviceId, payload, callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/devices/${encodeURIComponent(deviceId)}/scenes`)
             .method('POST').data(payload).success(callback).fail(callback)
-            .networkFail(() => callback(networkErrorResponse('创建设备场景失败')))
+            .networkFail(err => callback(sceneErrorResponse('创建设备场景失败', err)))
             .send();
     },
     updateDeviceScene(deviceId, bindingId, payload, callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/devices/${encodeURIComponent(deviceId)}/scenes/${bindingId}`)
             .method('PUT').data(payload).success(callback).fail(callback)
-            .networkFail(() => callback(networkErrorResponse('更新设备场景失败')))
+            .networkFail(err => callback(sceneErrorResponse('更新设备场景失败', err)))
             .send();
     },
     deleteDeviceScene(deviceId, bindingId, callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/devices/${encodeURIComponent(deviceId)}/scenes/${bindingId}`)
             .method('DELETE').success(callback).fail(callback)
-            .networkFail(() => callback(networkErrorResponse('删除设备场景失败')))
+            .networkFail(err => callback(sceneErrorResponse('删除设备场景失败', err)))
             .send();
     },
     switchDeviceScene(deviceId, bindingId, callback) {
@@ -161,7 +182,7 @@ export default {
             .method('PUT')
             .data({ bindingId, switchRequestId: `web-${Date.now()}-${Math.random().toString(16).slice(2)}` })
             .success(callback).fail(callback)
-            .networkFail(() => callback(networkErrorResponse('切换设备场景失败')))
+            .networkFail(err => callback(sceneErrorResponse('切换设备场景失败', err)))
             .send();
     },
 }

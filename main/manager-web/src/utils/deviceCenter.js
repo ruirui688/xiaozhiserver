@@ -36,21 +36,34 @@ export async function listWorkspaceDevices(agents) {
 }
 
 export async function switchDeviceAgent(deviceId, agent) {
-  const scenes = await deviceRequest(done => Api.device.getDeviceScenes(deviceId, done));
+  let scenes;
+  try {
+    scenes = await deviceRequest(done => Api.device.getDeviceScenes(deviceId, done));
+  } catch (error) {
+    throw new Error(`${error.message}；尚未提交切换，可重试`);
+  }
   let binding = scenes.find(scene => scene.agentId === agent.id);
   if (binding && binding.enabled === 0) throw new Error('该智能体的场景已禁用，请先在场景管理中启用');
   if (binding && binding.current) return binding;
   if (!binding) {
-    binding = await deviceRequest(done => Api.device.createDeviceScene(deviceId, {
-      agentId: agent.id, sceneName: (agent.agentName || '智能体场景').slice(0, 64),
-      enabled: 1, switchAliases: [], sort: scenes.length
-    }, done));
+    try {
+      binding = await deviceRequest(done => Api.device.createDeviceScene(deviceId, {
+        agentId: agent.id, sceneName: (agent.agentName || '智能体场景').slice(0, 64),
+        enabled: 1, switchAliases: [], sort: scenes.length
+      }, done));
+    } catch (error) {
+      throw new Error(`${error.message}；尚未提交切换，请刷新场景列表确认关联状态`);
+    }
   }
   // Keep the binding on failure: it can be retried or managed in the existing scene dialog.
-  return deviceRequest(done => Api.device.switchDeviceScene(deviceId, binding.id, done));
+  try {
+    return await deviceRequest(done => Api.device.switchDeviceScene(deviceId, binding.id, done));
+  } catch (error) {
+    throw new Error(`${error.message}；请刷新确认切换结果，关联场景已保留`);
+  }
 }
 
 export function sceneStatusText(status) {
   return ({ REQUESTED: '已提交，等待设备确认', SCHEDULED: '等待本轮结束',
-    APPLIED: '已生效（离线设备下次连接使用）', FAILED: '切换失败', ROLLED_BACK: '切换失败，已回滚' })[status] || '尚无切换记录';
+    APPLIED: '已生效', FAILED: '切换失败', ROLLED_BACK: '切换失败，已回滚' })[status] || '尚无切换记录';
 }

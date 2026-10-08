@@ -121,7 +121,7 @@ test('agent picker opens on demand and cancellation restores current agent', () 
   const component = card();
   const vm = { busy: false, canWrite: true, currentAgentId: 'current', targetId: 'old', editingAgent: false };
   component.methods.beginAgentEdit.call(vm);
-  assert.equal(vm.editingAgent, true); assert.equal(vm.targetId, 'current');
+  assert.equal(vm.editingAgent, true); assert.equal(vm.targetId, '');
   vm.targetId = 'candidate'; component.methods.cancelAgentEdit.call(vm);
   assert.equal(vm.editingAgent, false); assert.equal(vm.targetId, 'current');
   vm.canWrite = false; component.methods.beginAgentEdit.call(vm);
@@ -136,4 +136,64 @@ test('confirmed applied switch closes inline picker', async () => {
   const vm = { ...component.methods, generation: 1, device: { id: 'd' }, $emit() {}, busy: true, editingAgent: true };
   await vm.poll(1, 0);
   assert.equal(vm.editingAgent, false); assert.equal(vm.currentAgentId, 'new');
+});
+
+test('failed scene read never writes and does not claim an association was created', async () => {
+  const component = card({
+    getDeviceScenes: (id, cb) => cb({ data: { code: -1, msg: 'HTTP 502' } }),
+    createDeviceScene: () => assert.fail('read failure must stop writes'),
+    switchDeviceScene: () => assert.fail('read failure must stop switching')
+  });
+  const vm = { ...component.methods, busy: false, canWrite: true, currentAgentId: 'old', targetId: 'new',
+    agents: [{ id: 'new' }], generation: 0, device: { id: 'd' }, $emit() {} };
+  await vm.switchAgent();
+  assert.match(vm.status, /HTTP 502.*尚未提交切换/);
+  assert.doesNotMatch(vm.status, /新关联|已保留/);
+  assert.equal(vm.currentAgentId, 'old');
+  assert.equal(vm.busy, false);
+});
+
+test('lost create response reports uncertain association without submitting switch', async () => {
+  const api = service({
+    getDeviceScenes: (id, cb) => cb(ok([])),
+    createDeviceScene: (id, data, cb) => cb({ data: { code: -1, msg: '超时' } }),
+    switchDeviceScene: () => assert.fail('cannot switch without binding')
+  });
+  await assert.rejects(api.switchDeviceAgent('d', { id: 'a' }), /尚未提交切换.*确认关联状态/);
+});
+
+test('lost switch response preserves binding and requests authoritative refresh', async () => {
+  const api = service({
+    getDeviceScenes: (id, cb) => cb(ok([])),
+    createDeviceScene: (id, data, cb) => cb(ok({ id: 'b' })),
+    switchDeviceScene: (id, binding, cb) => cb({ data: { code: -1, msg: '超时' } }),
+    deleteDeviceScene: () => assert.fail('must retain binding')
+  });
+  await assert.rejects(api.switchDeviceAgent('d', { id: 'a' }), /刷新确认切换结果.*关联场景已保留/);
+});
+
+test('scene endpoints preserve HTTP status and never display raw proxy or request data', () => {
+  let failure;
+  const request = { url() { return this; }, method() { return this; }, data() { return this; },
+    success() { return this; }, fail() { return this; }, networkFail(cb) { failure = cb; return this; }, send() {} };
+  const api = loadModule('src/apis/module/device.js', {
+    '../api': { getServiceUrl: () => '' },
+    '../httpRequest': { __esModule: true, default: { sendRequest: () => request } }
+  }).default;
+  for (const [name, args] of [
+    ['getDeviceScenes', ['d']], ['createDeviceScene', ['d', {}]],
+    ['updateDeviceScene', ['d', 'b', {}]], ['deleteDeviceScene', ['d', 'b']],
+    ['switchDeviceScene', ['d', 'b']]
+  ]) {
+    for (const [status, expected] of [[401, /重新登录/], [403, /权限/], [404, /接口不存在/],
+      [500, /内部错误/], [502, /网关/], [504, /超时/], [0, /未收到有效响应/], [1, /请求超时/]]) {
+      let received;
+      api[name](...args, res => { received = res.data; });
+      failure({ status, data: '<html>sensitive-proxy-body</html>', message: 'sensitive-exception' });
+      assert.equal(received.code, -1);
+      assert.match(received.msg, expected);
+      if (status >= 100) assert.match(received.msg, new RegExp(`HTTP ${status}`));
+      assert.doesNotMatch(received.msg, /sensitive|html/);
+    }
+  }
 });
