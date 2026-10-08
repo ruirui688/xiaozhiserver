@@ -305,22 +305,9 @@
               label="实时音色"
             >
               <div class="model-select-wrapper">
-                <el-select
-                  v-model="form.realtimeVoiceId"
-                  filterable
-                  clearable
-                  :allow-create="realtimeVoiceAllowCreate"
-                  default-first-option
-                  placeholder="留空则使用模型配置中的默认音色"
-                  class="form-select"
-                >
-                  <el-option
-                    v-for="voice in realtimeVoiceOptions"
-                    :key="voice"
-                    :label="voice"
-                    :value="voice"
-                  />
-                </el-select>
+                <voice-gallery v-model="form.realtimeVoiceId" realtime
+                  :allow-custom="realtimeVoiceAllowCreate"
+                  :options="realtimeVoiceOptions.map(voice => ({ value: voice, label: voice }))" />
                 <div class="realtime-voice-help">
                   当前角色单独生效，不会修改其他角色共用的模型配置。
                 </div>
@@ -482,45 +469,10 @@
                   </el-tooltip>
                 </template>
                 <div class="model-select-wrapper voice-model-config">
-                  <el-select
-                    v-model="form.ttsVoiceId"
-                    filterable
-                    :placeholder="$t('roleConfig.pleaseSelect')"
-                    class="form-select"
-                  >
-                    <el-option
-                      v-for="(item, index) in voiceOptions"
-                      :key="`voice-${index}`"
-                      :label="item.label"
-                      :value="item.value"
-                    >
-                      <div
-                        style="
-                          display: flex;
-                          justify-content: space-between;
-                          align-items: center;
-                        "
-                      >
-                        <span>{{ item.label }}</span>
-                        <template v-if="hasAudioPreview(item)">
-                          <el-button
-                            type="text"
-                            :icon="
-                              playingVoice &&
-                              currentPlayingVoiceId === item.value &&
-                              !isPaused
-                                ? 'el-icon-video-pause'
-                                : 'el-icon-video-play'
-                            "
-                            size="small"
-                            @click.stop="toggleAudioPlayback(item.value)"
-                            :loading="false"
-                            class="play-button"
-                          />
-                        </template>
-                      </div>
-                    </el-option>
-                  </el-select>
+                  <voice-gallery v-model="form.ttsVoiceId" :options="voiceOptions"
+                    :playing-id="playingVoice && !isPaused ? currentPlayingVoiceId : ''"
+                    @preview="toggleAudioPlayback" @stop="stopGalleryPreview"
+                    @refresh="$emit('tts-model-changed', form.model.ttsModelId)" />
                   <el-button
                     class="edit-function-btn voice-settings-btn"
                     icon="el-icon-s-tools"
@@ -569,6 +521,7 @@
 </template>
 
 <script>
+import VoiceGallery from "@/components/role/VoiceGallery.vue";
 import Api from "@/apis/api";
 import { getServiceUrl } from "@/apis/api";
 import RequestService from "@/apis/httpRequest";
@@ -601,6 +554,7 @@ import {
 export default {
   name: "RoleEditForm",
   components: {
+    VoiceGallery,
     FunctionDialog,
     KnowledgeBaseSelectorDialog,
     TtsAdvancedSettings,
@@ -1139,6 +1093,10 @@ export default {
         }
       }
       this.form.realtimeVoiceId = this.selectedLlmModel?.raw?.realtimeVoice || "";
+    },
+    stopGalleryPreview() {
+      if (this.currentAudio) this.currentAudio.pause();
+      this.$emit('update:playingVoice', false);
     },
     hasAudioPreview(item) {
       const isCloneAudio = Boolean(item.isClone);

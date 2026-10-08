@@ -15,61 +15,26 @@
                 <div class="content-area">
                     <!-- 显示表格或空状态 -->
                     <el-card class="params-card" shadow="never" v-if="total > 0">
-                        <el-table ref="paramsTable" :data="voiceCloneList" class="transparent-table" v-loading="loading"
-                            element-loading-text="Loading" element-loading-spinner="el-icon-loading"
-                            element-loading-background="rgba(255, 255, 255, 0.7)">
-                            <el-table-column :label="$t('voiceClone.voiceId')" prop="voiceId"
-                                align="center"></el-table-column>
-                            <el-table-column :label="$t('voiceClone.name')" align="center">
-                                <template #default="{ row }">
-                                    <el-input v-show="row.isEdit" v-model="row.name" size="mini" maxlength="64"
-                                        show-word-limit @blur="onNameBlur(row)" @keyup.enter.native="onNameEnter(row)"
-                                        ref="nameInput" />
-                                    <span v-show="!row.isEdit" class="name-view">
-                                        <i class="el-icon-edit" @click="handleEditName(row)"
-                                            style="cursor: pointer;"></i>
-                                        <span @click="handleEditName(row)">
-                                            {{ row.name || '-' }}
-                                        </span>
-                                    </span>
-                                </template>
-                            </el-table-column>
-                            <el-table-column :label="$t('voiceClone.languages')" prop="languages"
-                                align="center"></el-table-column>
-                            <el-table-column :label="$t('voiceClone.trainStatus')" prop="trainStatus" align="center">
-                                <template slot-scope="scope">
-                                    <div class="status-button" :class="getStatusButtonClass(scope.row)">
-                                        <span>{{ getTrainStatusText(scope.row) }}</span>
+                        <div class="clone-workflow"><strong>复刻我的声音</strong><span>选择已分配资源 → 上传声音样本 → 开始训练 → 训练完成后在智能体中选用</span></div>
+                        <div class="clone-grid" v-loading="loading">
+                            <article v-for="row in voiceCloneList" :key="row.id" class="clone-card">
+                                <div class="clone-card-head"><div class="clone-avatar"><i class="el-icon-microphone" /></div>
+                                    <div class="clone-card-name">
+                                        <el-input v-show="row.isEdit" v-model="row.name" size="small" maxlength="64" ref="nameInput" @blur="onNameBlur(row)" @keyup.enter.native="onNameEnter(row)" />
+                                        <h3 v-show="!row.isEdit">{{ row.name || '未命名音色' }} <el-button type="text" icon="el-icon-edit" aria-label="修改音色名称" @click="handleEditName(row)" /></h3>
+                                        <span>{{ row.languages || '语言未标注' }}</span>
                                     </div>
-                                </template>
-                            </el-table-column>
-
-                            <el-table-column :label="$t('voiceClone.Details')" align="center" width="120">
-                                <template slot-scope="scope">
-                                    <el-tooltip :content="getTooltipContent(scope.row)" placement="top">
-                                        <el-button size="mini" type="text" icon="el-icon-info"
-                                            @click="handleViewDetails(scope.row)">
-                                        </el-button>
-                                    </el-tooltip>
-                                </template>
-                            </el-table-column>
-
-                            <el-table-column :label="$t('voiceClone.action')" align="center" width="230">
-                                <template slot-scope="scope">
-                                    <el-button v-if="scope.row.hasVoice" size="mini" type="text"
-                                        @click="handlePlay(scope.row)">
-                                        {{ playingRowId === scope.row.id ? $t('voiceClone.stop') : $t('voiceClone.play') }}
-                                    </el-button>
-                                    <el-button size="mini" type="text" @click="handleUpload(scope.row)">
-                                        {{ $t('voiceClone.upload') }}
-                                    </el-button>
-                                    <el-button v-if="scope.row.hasVoice" size="mini" type="text"
-                                        @click="handleClone(scope.row)" :loading="scope.row._cloning">
-                                        {{ $t('voiceClone.clone') }}
-                                    </el-button>
-                                </template>
-                            </el-table-column>
-                        </el-table>
+                                    <span class="status-button" :class="getStatusButtonClass(row)">{{ getTrainStatusText(row) }}</span>
+                                </div>
+                                <p class="clone-resource-id">资源 ID：{{ row.voiceId }}</p>
+                                <div class="clone-card-actions">
+                                    <el-button size="small" :disabled="!row.hasVoice" icon="el-icon-headset" @click="handlePlay(row)">{{ playingRowId === row.id ? $t('voiceClone.stop') : $t('voiceClone.play') }}</el-button>
+                                    <el-button size="small" @click="handleUpload(row)">{{ $t('voiceClone.upload') }}</el-button>
+                                    <el-button size="small" type="primary" :disabled="!row.hasVoice" :loading="row._cloning" @click="handleClone(row)">{{ $t('voiceClone.clone') }}</el-button>
+                                    <el-button type="text" @click="handleViewDetails(row)">详情</el-button>
+                                </div>
+                            </article>
+                        </div>
 
                         <div class="table_bottom">
                             <div class="ctrl_btn">
@@ -496,6 +461,9 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+.clone-workflow { display: flex; flex-direction: column; gap: 10px; padding: 8px 0 24px; color: #343c50; }.clone-workflow span { color: #8a91a2; font-size: 13px; line-height: 1.7; }
+.clone-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 20px; }.clone-card { border: 1px solid #eceef5; border-radius: 18px; padding: 24px; background: #fff; }.clone-card-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }.clone-avatar { width: 52px; height: 52px; display: grid; place-items: center; background: #eeeafb; color: #8c74bd; border-radius: 16px; font-size: 24px; }.clone-card-name { flex: 1; min-width: 100px; }.clone-card-name h3 { margin: 0; font-size: 17px; overflow-wrap: anywhere; }.clone-card-name span, .clone-resource-id { color: #969dad; font-size: 12px; }.clone-resource-id { margin: 20px 0; overflow-wrap: anywhere; }.clone-card-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }.clone-card-actions .el-button { margin-left: 0; }
+
 .welcome {
     min-width: 900px;
     min-height: 506px;

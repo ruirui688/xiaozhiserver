@@ -91,9 +91,9 @@
               :current-functions="currentFunctions"
               :current-knowledge-bases="currentKnowledgeBases"
               :current-context-providers="currentContextProviders"
-              :playing-voice="playingVoice"
-              :current-playing-voice-id="currentPlayingVoiceId"
-              :is-paused="isPaused"
+              :playing-voice.sync="playingVoice"
+              :current-playing-voice-id.sync="currentPlayingVoiceId"
+              :is-paused.sync="isPaused"
               :loading-template="loadingTemplate"
               :workspace-can-write="workspaceCanWrite"
               :checked-replacement-word-ids="checkedReplacementWordIds"
@@ -440,6 +440,7 @@ export default {
       return voices.map((voice) => ({
           value: voice.id,
           label: voice.name,
+          languages: voice.languages || "",
           voiceDemo: voice.voiceDemo,
           voice_demo: voice.voiceDemo,
           isClone: Boolean(voice.isClone),
