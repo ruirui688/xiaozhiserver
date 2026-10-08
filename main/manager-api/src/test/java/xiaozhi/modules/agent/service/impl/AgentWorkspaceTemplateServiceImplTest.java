@@ -88,13 +88,16 @@ class AgentWorkspaceTemplateServiceImplTest {
                 timbreService,
                 permissionService,
                 officialPermissionService,
-                mock(org.springframework.context.ApplicationEventPublisher.class));
+                mock(org.springframework.context.ApplicationEventPublisher.class),
+                mock(xiaozhi.modules.agent.support.ManagedAsrHotwordGuard.class));
     }
 
     @Test
     void approvingMarketplaceTemplateRemovesWorkspacePrivateBindings() {
         AgentUpdateDTO config = new AgentUpdateDTO();
         config.setCorrectWordFileIds(List.of("private-words"));
+        config.setAsrHotwordId("workspace-private-hotwords");
+        config.setAsrHotwordIds(List.of("workspace-private-hotwords"));
         config.setTtsModelId("TTS_private");
         config.setTtsVoiceId("voice-private");
         AgentTemplateSnapshotDTO snapshot = new AgentTemplateSnapshotDTO();
@@ -122,6 +125,9 @@ class AgentWorkspaceTemplateServiceImplTest {
         AgentTemplateSnapshotDTO published = captor.getValue().getPublicSnapshotJson();
         assertTrue(published.getVoicePrintIds().isEmpty());
         assertTrue(published.getConfig().getCorrectWordFileIds().isEmpty());
+        assertEquals(null, published.getConfig().getAsrHotwordId());
+        assertEquals(null, published.getConfig().getAsrHotwordIds());
+        assertEquals("workspace-private-hotwords", captor.getValue().getSnapshotJson().getConfig().getAsrHotwordId());
         assertEquals(null, published.getConfig().getTtsModelId());
         assertEquals(null, published.getConfig().getTtsVoiceId());
         assertEquals(null, published.getFeishuConfig());

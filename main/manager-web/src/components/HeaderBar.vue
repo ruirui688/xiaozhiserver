@@ -300,6 +300,7 @@ export default {
         "/knowledge-base-management",
         "/knowledge-file-upload",
         "/person-profile-management",
+        "/asr-hotword-management",
         "/function-plugin-management"
       ].includes(this.$route.path);
     },

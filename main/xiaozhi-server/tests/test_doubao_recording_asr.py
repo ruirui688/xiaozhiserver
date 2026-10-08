@@ -100,9 +100,10 @@ def test_recording_request_sends_agent_hotword_table_in_corpus(tmp_path):
     payload = provider._build_submit_payload(b"wav", "request-id")
 
     assert payload["request"]["corpus"] == {
-        "boosting_table_id": "example-hotword-table-id"
+        "boosting_table_id": "example-hotword-table-id",
+        "context": '{"hotwords":[{"word":"示例专有词"}]}',
     }
-    assert payload["request"]["context"] == '{"hotwords":[{"word":"示例专有词"}]}'
+    assert "context" not in payload["request"]
 
 
 def test_recording_request_omits_empty_hotword_corpus(tmp_path):

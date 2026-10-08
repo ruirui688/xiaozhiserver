@@ -127,10 +127,11 @@ def test_stream_request_sends_agent_hotword_table_in_corpus(tmp_path):
     request = provider.construct_request("request-id")
 
     assert request["request"]["corpus"] == {
-        "boosting_table_id": "example-hotword-table-id"
+        "boosting_table_id": "example-hotword-table-id",
+        "context": '{"context_type":"dialog_ctx"}',
     }
     assert request["request"]["end_window_size"] == 200
-    assert request["request"]["context"] == '{"context_type":"dialog_ctx"}'
+    assert "context" not in request["request"]
 
 
 def test_stream_request_omits_empty_hotword_corpus(tmp_path):

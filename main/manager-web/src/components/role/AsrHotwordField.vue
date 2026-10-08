@@ -23,7 +23,8 @@
     <el-collapse-transition>
       <div v-show="expanded" class="hotword-panel__body">
         <div class="hotword-panel__body-head">
-          <span>火山控制台创建词表后，将词表 ID 填写到这里。</span>
+          <span>在资源中心直接创建、发布热词库并应用到智能体；下方保留已有词表 ID 的兼容配置。</span>
+          <router-link to="/asr-hotword-management" target="_blank" class="hotword-panel__console-link">打开热词库</router-link>
           <a
             href="https://console.volcengine.com/speech/new/hot-word?projectName=default"
             target="_blank"

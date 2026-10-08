@@ -34,6 +34,12 @@ export default {
           icon: "el-icon-user"
         },
         {
+          label: "热词库",
+          path: "/asr-hotword-management",
+          related: [],
+          icon: "el-icon-microphone"
+        },
+        {
           label: "插件",
           path: "/function-plugin-management",
           related: [],

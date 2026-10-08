@@ -103,6 +103,8 @@ public class ShiroConfig {
         filterMap.put("/datasets/*/documents/*/entries/**", "oauth2");
         // Harness 维护控制面包含外部搜索与记忆变更提案，必须登录并在 Controller 校验资源归属。
         filterMap.put("/maintenance/**", "oauth2");
+        filterMap.put("/resource/asr-hotwords", "oauth2");
+        filterMap.put("/resource/asr-hotwords/**", "oauth2");
         filterMap.put("/agent/*/feishu/events", "anon");
         filterMap.put("/agent/*/feishu/**", "oauth2");
         filterMap.put("/device/address-book/lookup", "server");

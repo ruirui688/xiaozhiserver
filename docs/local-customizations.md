@@ -668,8 +668,12 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 
 ```text
 定制模块：manager-web 角色配置、manager-api 智能体配置装配、xiaozhi-server 豆包 Seed ASR provider
-改动原因：火山引擎热词表由控制台独立创建，同一豆包 ASR 模型会被多个智能体共享，不能把热词表 ID 固定在模型级配置中。角色配置用 asr_hotword_ids 保存最多 10 个候选 ID，并用 asr_hotword_id 标记当前生效项；官方限制一个识别请求只支持一张词表，所以 manager-api 只把当前生效项注入 doubao_stream 或 doubao_recording 的运行时 boosting_table_id。Python 按官方 request.corpus.boosting_table_id 层级发送，同时保留独立的 request.context。切换当前生效项后通过运行配置刷新链路在线生效。
+改动原因：热词应由智控台资源中心登记并通过官方 API 注册到火山，用户无需手工切换控制台。词库按工作空间隔离，共享模型凭据只在服务端读取。角色配置继续用 asr_hotword_ids 保存最多 10 个候选 ID，并用 asr_hotword_id 标记当前生效项；官方限制一个识别请求只支持一张词表，所以 manager-api 只把当前生效项注入 doubao_stream 或 doubao_recording 的运行时 boosting_table_id。Python 按官方 request.corpus.boosting_table_id 层级发送，同时在同一 corpus 对象保留独立的 context 字段。切换当前生效项后通过运行配置刷新链路在线生效。
 关键文件：
+  - main/manager-api/src/main/java/xiaozhi/modules/hotword/
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/support/ManagedAsrHotwordGuard.java
+  - main/manager-api/src/main/resources/db/changelog/asr-hotword-management.sql
+  - main/manager-web/src/views/AsrHotwordManagement.vue
   - main/manager-web/src/components/role/RoleEditDialog.vue
   - main/manager-web/src/components/role/AsrHotwordField.vue
   - main/manager-web/src/utils/roleConfigDraft.js
@@ -683,7 +687,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - docs/models/model-management.md
   - docs/architecture/device-interaction-chain.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：必须保留“共享 ASR 模型、智能体级热词选择”的边界；候选 ID 只能存放在智能体配置，只有当前生效 ID 可以覆盖运行时 typed_config，不得写回共享模型配置，也不得把多个 ID 拼接或作为数组伪装下发。豆包 Seed ASR 2.0 必须发送 request.corpus.boosting_table_id，不能把 ID 当作 request.context；context_text 继续作为独立字段。非豆包 ASR 和留空角色不得发送热词表，初始化日志不得输出上下文正文或完整请求体。
+官方同步时的处理规则：必须保留“共享 ASR 模型、智能体级热词选择”的边界；候选 ID 只能存放在智能体配置，只有当前生效 ID 可以覆盖运行时 typed_config，不得写回共享模型配置，也不得把多个 ID 拼接或作为数组伪装下发。豆包 Seed ASR 2.0 必须发送 request.corpus.boosting_table_id；context_text 映射 request.corpus.context，不能用词表 ID 代替上下文。非豆包 ASR 和留空角色不得发送热词表，初始化日志不得输出上下文正文或完整请求体。托管词库必须保留工作空间读写权限、服务端凭据隔离、显式发布与应用、失败状态和在用删除保护；不得把火山账号下的所有词表暴露给普通工作空间，也不得把保存草稿当作发布成功。
 ```
 
 ## 33. 聊天记录删除后的容量同步

@@ -33,7 +33,7 @@ class ASRProvider(ASRProviderBase):
             "query_url",
             "https://openspeech.bytedance.com/api/v3/auc/bigmodel/query",
         )
-        self.context_text = config.get("context_text", "")
+        self.context_text = (config.get("context_text") or "").strip()
         self.boosting_table_id = str(config.get("boosting_table_id") or "").strip()
         self.output_dir = config.get("output_dir", "tmp/")
         self.delete_audio_file = delete_audio_file
@@ -92,12 +92,14 @@ class ASRProvider(ASRProviderBase):
                 "data": base64.b64encode(wav_bytes).decode("ascii"),
             },
         }
+        corpus = {}
         if self.context_text:
-            payload["request"]["context"] = self.context_text
+            # 火山协议要求 context 是 corpus 内的 JSON 字符串。
+            corpus["context"] = self.context_text
         if self.boosting_table_id:
-            payload["request"]["corpus"] = {
-                "boosting_table_id": self.boosting_table_id,
-            }
+            corpus["boosting_table_id"] = self.boosting_table_id
+        if corpus:
+            payload["request"]["corpus"] = corpus
         return payload
 
     async def _post_json(

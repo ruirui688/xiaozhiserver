@@ -39,7 +39,7 @@ class ASRProvider(ASRProviderBase):
             raise ValueError("豆包流式语音识别模型2.0需要配置 api_key")
         self.resource_id = config.get("resource_id", "volc.seedasr.sauc.duration")
 
-        self.context_text = config.get("context_text", "")
+        self.context_text = (config.get("context_text") or "").strip()
         self.boosting_table_id = str(config.get("boosting_table_id") or "").strip()
         self.output_dir = config.get("output_dir", "tmp/")
         self.delete_audio_file = delete_audio_file
@@ -540,13 +540,14 @@ class ASRProvider(ASRProviderBase):
             },
         }
 
+        corpus = {}
         if self.context_text:
-            req["request"]["context"] = self.context_text
-
+            # 火山协议要求 context 是 corpus 内的 JSON 字符串。
+            corpus["context"] = self.context_text
         if self.boosting_table_id:
-            req["request"]["corpus"] = {
-                "boosting_table_id": self.boosting_table_id,
-            }
+            corpus["boosting_table_id"] = self.boosting_table_id
+        if corpus:
+            req["request"]["corpus"] = corpus
 
         logger.bind(tag=TAG).debug(
             "构造ASR请求参数完成: "

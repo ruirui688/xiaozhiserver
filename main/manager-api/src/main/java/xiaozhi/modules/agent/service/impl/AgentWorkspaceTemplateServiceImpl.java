@@ -36,6 +36,7 @@ import xiaozhi.modules.agent.dto.ContextProviderDTO;
 import xiaozhi.modules.agent.entity.AgentTemplateEntity;
 import xiaozhi.modules.agent.runtime.AgentRuntimeConfigRefreshEvent;
 import xiaozhi.modules.agent.support.AgentLlmIntentCompatibility;
+import xiaozhi.modules.agent.support.ManagedAsrHotwordGuard;
 import xiaozhi.modules.agent.service.AgentFeishuService;
 import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.agent.service.AgentTagService;
@@ -98,6 +99,7 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
     private final WorkspacePermissionService workspacePermissionService;
     private final OfficialResourcePermissionService officialPermissionService;
     private final ApplicationEventPublisher eventPublisher;
+    private final ManagedAsrHotwordGuard managedAsrHotwordGuard;
 
     @Override
     public List<AgentTemplateSummaryVO> listAccessible() {
@@ -165,6 +167,9 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
         config.setFunctions(filterCapabilityMappings(config.getFunctions(), workspaceId, warnings));
         config.setCorrectWordFileIds(filterCorrectWordFilesForCreate(
                 config.getCorrectWordFileIds(), source.getCorrectWordFileIds(), warnings));
+        managedAsrHotwordGuard.requireAllowed(workspaceId,
+                config.getAsrModelId() == null ? source.getAsrModelId() : config.getAsrModelId(),
+                config.getAsrHotwordId(), config.getAsrHotwordIds());
 
         AgentTemplateEntity entity = new AgentTemplateEntity();
         entity.setId(UUID.randomUUID().toString().replace("-", ""));
@@ -388,6 +393,9 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
         snapshot.setFeishuConfig(null);
         if (snapshot.getConfig() != null) {
             snapshot.getConfig().setCorrectWordFileIds(List.of());
+            // ASR dictionaries belong to the source workspace, including official publications.
+            snapshot.getConfig().setAsrHotwordId(null);
+            snapshot.getConfig().setAsrHotwordIds(null);
             if (!preserveSpeechBinding) {
                 removeSpeechBinding(snapshot.getConfig(), null);
             }
@@ -406,7 +414,15 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
                 && !StringUtils.equals(template.getWorkspaceId(), targetWorkspaceId)
                 && (VISIBILITY_OFFICIAL.equals(template.getVisibility())
                         || VISIBILITY_PUBLIC.equals(template.getVisibility()));
-        return crossWorkspacePublication ? template.getPublicSnapshotJson() : template.getSnapshotJson();
+        if (crossWorkspacePublication && template.getPublicSnapshotJson() != null) {
+            AgentTemplateSnapshotDTO published = deepCopy(template.getPublicSnapshotJson(), AgentTemplateSnapshotDTO.class);
+            if (published.getConfig() != null) {
+                published.getConfig().setAsrHotwordId(null);
+                published.getConfig().setAsrHotwordIds(null);
+            }
+            return published;
+        }
+        return crossWorkspacePublication ? null : template.getSnapshotJson();
     }
 
     private void validateSnapshot(AgentTemplateSnapshotDTO snapshot) {

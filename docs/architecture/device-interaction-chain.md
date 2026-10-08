@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: xiaozhi-server
-last_verified: 2026-09-21
+last_verified: 2026-10-08
 source_paths:
   - main/xiaozhi-server/config.yaml
   - main/xiaozhi-server/core
@@ -401,8 +401,13 @@ ASR 基类仍通过工作线程桥接异步 provider；provider 内部不能再�
 火山协议规定一个识别请求只支持生效一张词表，候选列表仅用于管理和快速切换，不能整体作为数组下发。
 保存新的当前生效项会触发在线运行配置刷新，下一轮识别直接使用新表。
 
-`context_text` 是独立的火山 `request.context` 字段，可用于直传热词或对话上下文。它与控制台热词表
-ID 不可混用，provider 必须保持两者各自的请求层级，日志只记录是否启用，不记录上下文正文。
+资源中心托管词库的发布会创建独立火山版本，只有显式应用到智能体才替换当前 ID 并触发上述刷新。
+发布失败不覆盖旧版；历史词表 ID 仍由词库版本记录追踪，解除及删除必须检查全部历史引用。
+管理流程、权限和配额见[模型管理热词契约](../models/model-management.md#智能体级豆包-asr-热词)。
+
+`context_text` 映射到火山 `request.corpus.context`，值为 JSON 字符串，可用于直传热词或对话上下文。
+它与 `request.corpus.boosting_table_id` 在同一 `corpus` 对象中共存，不能用词表 ID 代替上下文，
+也不能在添加其中一个字段时覆盖另一个；日志只记录是否启用，不记录上下文正文。
 
 豆包录音识别 `providers/asr/doubao_recording.py` 使用原生异步提交与轮询：
 

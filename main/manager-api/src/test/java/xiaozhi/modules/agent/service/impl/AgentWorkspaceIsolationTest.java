@@ -88,7 +88,8 @@ class AgentWorkspaceIsolationTest {
                 mock(KnowledgeBaseService.class),
                 quotaService,
                 mock(AgentSemanticSkillService.class),
-                mock(org.springframework.context.ApplicationEventPublisher.class));
+                mock(org.springframework.context.ApplicationEventPublisher.class),
+                mock(xiaozhi.modules.agent.support.ManagedAsrHotwordGuard.class));
         ReflectionTestUtils.setField(service, "baseDao", agentDao);
 
         List<AgentDTO> result = service.getUserAgents(1001L, null, null);
@@ -180,7 +181,8 @@ class AgentWorkspaceIsolationTest {
                 knowledgeBaseService,
                 mock(WorkspaceAgentQuotaService.class),
                 mock(AgentSemanticSkillService.class),
-                mock(org.springframework.context.ApplicationEventPublisher.class));
+                mock(org.springframework.context.ApplicationEventPublisher.class),
+                mock(xiaozhi.modules.agent.support.ManagedAsrHotwordGuard.class));
         ReflectionTestUtils.setField(service, "baseDao", agentDao);
 
         AgentUpdateDTO.FunctionInfo function = new AgentUpdateDTO.FunctionInfo();
@@ -227,7 +229,8 @@ class AgentWorkspaceIsolationTest {
                 mock(KnowledgeBaseService.class),
                 mock(WorkspaceAgentQuotaService.class),
                 mock(AgentSemanticSkillService.class),
-                mock(org.springframework.context.ApplicationEventPublisher.class));
+                mock(org.springframework.context.ApplicationEventPublisher.class),
+                mock(xiaozhi.modules.agent.support.ManagedAsrHotwordGuard.class));
         ReflectionTestUtils.setField(service, "baseDao", agentDao);
 
         return service.getAgentById("agent-a");

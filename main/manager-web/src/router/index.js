@@ -128,6 +128,12 @@ const routes = [
     }
   },
   {
+    path: '/asr-hotword-management',
+    name: 'AsrHotwordManagement',
+    component: () => import(/* webpackChunkName: "view-asr-hotword-management" */ '../views/AsrHotwordManagement.vue'),
+    meta: { requiresAuth: true, title: '热词库管理' }
+  },
+  {
     path: '/person-profile-management',
     name: 'PersonProfileManagement',
     component: function () {

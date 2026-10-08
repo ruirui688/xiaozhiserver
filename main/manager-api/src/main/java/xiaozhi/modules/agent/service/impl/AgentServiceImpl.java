@@ -48,6 +48,7 @@ import xiaozhi.modules.agent.entity.AgentTagEntity;
 import xiaozhi.modules.agent.entity.AgentTemplateEntity;
 import xiaozhi.modules.agent.runtime.AgentRuntimeConfigRefreshEvent;
 import xiaozhi.modules.agent.support.AgentAsrHotwordSelection;
+import xiaozhi.modules.agent.support.ManagedAsrHotwordGuard;
 import xiaozhi.modules.agent.support.AgentLlmIntentCompatibility;
 import xiaozhi.modules.agent.service.AgentChatHistoryService;
 import xiaozhi.modules.agent.service.AgentContextProviderService;
@@ -100,6 +101,7 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
     private final WorkspaceAgentQuotaService workspaceAgentQuotaService;
     private final AgentSemanticSkillService agentSemanticSkillService;
     private final ApplicationEventPublisher eventPublisher;
+    private final ManagedAsrHotwordGuard managedAsrHotwordGuard;
 
     @Override
     public PageData<AgentEntity> adminAgentList(Map<String, Object> params) {
@@ -415,6 +417,8 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
                 existingEntity,
                 dto.getAsrHotwordId(),
                 dto.getAsrHotwordIds());
+        managedAsrHotwordGuard.requireAllowed(existingEntity.getWorkspaceId(), existingEntity.getAsrModelId(),
+                existingEntity.getAsrHotwordId(), existingEntity.getAsrHotwordIds());
         if (dto.getVadModelId() != null) {
             existingEntity.setVadModelId(resolveEnabledModelIdOrCurrent("VAD", dto.getVadModelId(),
                     existingEntity.getVadModelId()));

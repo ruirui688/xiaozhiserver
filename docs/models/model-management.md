@@ -5,6 +5,8 @@ last_verified: 2026-10-08
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/model
   - main/manager-api/src/main/java/xiaozhi/modules/config
+  - main/manager-api/src/main/java/xiaozhi/modules/hotword
+  - main/manager-web/src/views/AsrHotwordManagement.vue
   - main/manager-web/src/views/ModelConfig.vue
   - main/manager-web/src/components/role/RoleEditDialog.vue
   - main/manager-web/src/components/model/RealtimeModelNotice.vue
@@ -600,7 +602,29 @@ model_config:
 
 ### 智能体级豆包 ASR 热词
 
-火山引擎控制台创建的热词表属于角色选择，不属于共享模型凭据。智控台角色配置在选择
+资源中心的“热词库”支持在智控台录入词条、发布到火山并应用到智能体。词库按当前工作空间隔离，
+使用已启用且测试通过的豆包 ASR 模型凭据；浏览器不接收或提交 API Key。
+每个词库创建后固定识别模型，只能应用到同工作空间、使用同一 ASR 模型的智能体。
+
+操作顺序为“保存草稿 → 发布 → 应用”。发布通过火山官方 `CreateBoostingTable` 注册独立内容版本，
+读取 `GetBoostingTable` 核对词条后才标记已发布；不原地覆盖已被智能体使用的版本。
+发布新版本后，已有智能体继续使用先前版本，用户必须再次选择智能体并应用；发布不代表设备已经识别过新词。
+草稿和失败状态保留上次成功发布的 ID。服务端以稳定的内容版本名称记录远端创建意图，
+超时重试先查询同名词表，避免盲目重复注册。同步中禁止并发编辑；中断超过五分钟后，刷新可重试原操作。
+
+词条每行一个，可写 `词条|权重`，默认权重 4，范围 1–10；每库最多 5000 条，
+单词按当前火山词表限制校验为不超过 30 个 UTF-8 字节（通常 10 个汉字）。重复词和控制字符会拒绝。
+这些是词表管理限制，不代表模型能利用全部词条：官方说明双向流式热词容量为 100 tokens，
+非流式／二遍最多 5000 个词，实际识别效果需使用目标模型和录音验证。
+
+解除应用会移除所选智能体对该词库所有历史版本的引用。删除先检查所有版本的智能体候选及模板引用，
+存在引用时拒绝；无引用后清理远端各版本，再删除本地词库。不能把整个火山账号下的词表列表作为工作空间资源列表。
+旧角色和模板保存路径也校验已托管词表的归属及识别模型；跨工作空间公开模板剥离热词引用。
+历史版本保留到删除整个词库，因此内容更新会占用额外火山词表配额；当前不自动清理历史版本。
+首次发布记录凭据的 SHA-256 指纹而不复制密钥；模型凭据更换后拒绝继续操作原词库，避免跨账号误注册或遗失远端清理记录。
+
+历史上在火山控制台创建的词表仍可通过角色配置填写 ID，现有配置保持兼容；它们不会自动导入托管词库列表。
+智控台角色配置在选择
 `doubao_stream` 或 `doubao_recording` 后可维护最多 10 个候选热词表 ID，并选择一个当前生效项。
 候选列表保存到 `ai_agent.asr_hotword_ids`，当前生效项继续保存到兼容字段
 `ai_agent.asr_hotword_id`。
@@ -614,8 +638,12 @@ Python provider 按火山 Seed ASR 2.0 协议映射为
 `request.corpus.boosting_table_id`。角色留空时不发送热词表；选择非豆包 ASR 时该字段不参与运行时配置。
 火山官方限制一个识别请求只支持生效一张词表，因此候选列表不能作为数组下发；切换当前生效项并保存后，
 manager-api 通过运行配置刷新事件在线更新会话，下一轮识别使用新词表，无需设备重连。
-已有模型级 `context_text` 仍映射到 `request.context`，它可以承载直传热词或对话上下文，但不能用热词表
+已有模型级 `context_text` 映射到 `request.corpus.context`，它可以承载序列化为 JSON 字符串的直传热词或对话上下文，但不能用热词表
 ID 字符串替代。两者同时存在时遵循火山协议的优先级。
+
+官方依据：[热词管理 API](https://www.volcengine.com/docs/6561/1742791)、
+[热词与上下文](https://www.volcengine.com/docs/6561/2604976)。管理调用固定使用官方 HTTPS 代理端点及
+`X-Api-Key` 请求头；不接受用户提供的管理 URL，不记录凭据、词条正文或原始厂商错误。
 
 ## 9. 修改模型管理时必须守住的边界
 
