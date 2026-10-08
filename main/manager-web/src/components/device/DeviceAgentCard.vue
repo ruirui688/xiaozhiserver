@@ -27,35 +27,19 @@
           <el-button type="text" :disabled="busy" @click="cancelAgentEdit">取消</el-button>
         </div>
       </div>
+      <el-button v-if="failed && !busy" type="text" size="small" @click="refreshStatus">刷新状态</el-button>
       <p v-if="status && (failed || busy || editingAgent)" class="switch-status" role="status" :class="{ failure: failed }">{{ status }}</p>
     </div>
     <div class="device-meta"><span>最近连接</span><span>{{ lastConnection }}</span></div>
     <div class="device-actions">
-      <el-popover placement="bottom-end" width="280" trigger="click">
-        <div class="hardware-details">
-          <h3>{{ device.alias || '未命名设备' }}</h3>
-          <dl><dt>设备型号</dt><dd>{{ device.board || '未知型号' }}</dd><dt>MAC 地址</dt><dd><MacAddressMask :mac-address="device.macAddress" /></dd><dt>设备 ID</dt><dd>{{ device.id }}</dd></dl>
-        </div>
-        <el-button slot="reference" type="text" class="details-button">详情</el-button>
-      </el-popover>
-      <el-dropdown trigger="click" :disabled="busy">
-        <el-button type="text" icon="el-icon-more" :disabled="busy" aria-label="更多设备操作" />
-        <el-dropdown-menu slot="dropdown">
-          <el-dropdown-item :disabled="!canWrite" @click.native="canWrite && $emit('rename')">修改别名</el-dropdown-item>
-          <el-dropdown-item @click.native="refreshStatus">刷新切换状态</el-dropdown-item>
-          <el-dropdown-item :disabled="!canWrite" @click.native="canWrite && $emit('scenes')">场景管理</el-dropdown-item>
-          <el-dropdown-item @click.native="$router.push({ path: '/device-management', query: { agentId: currentAgentId } })">设备设置</el-dropdown-item>
-        </el-dropdown-menu>
-      </el-dropdown>
+      <el-button type="text" :disabled="busy" @click="$emit('settings')">设置</el-button>
     </div>
   </article>
 </template>
 <script>
 import Api from '@/apis/api';
-import MacAddressMask from '@/components/MacAddressMask.vue';
 import { deviceRequest, switchDeviceAgent, sceneStatusText } from '@/utils/deviceCenter';
 export default {
-  components: { MacAddressMask },
   props: { list: Boolean, device: { type: Object, required: true }, agents: { type: Array, default: () => [] }, canWrite: Boolean },
   data() { return { editingAgent: false, targetId: this.device.agentId, currentAgentId: this.device.agentId,
     currentAgentName: this.device.agentName, busy: false, status: '', failed: false, generation: 0, timer: null }; },

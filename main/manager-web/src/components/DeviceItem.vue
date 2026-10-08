@@ -145,7 +145,7 @@ export default {
       this.$router.push({ path: '/voice-print', query: { agentId: this.device.agentId } });
     },
     handleDeviceManage() {
-      this.$router.push({ path: '/device-management', query: { agentId: this.device.agentId } });
+      this.$router.push({ path: '/device-center', query: { agentId: this.device.agentId } });
     },
     handleRuntimeMonitor() {
       this.$emit('runtime-monitor', this.device);

@@ -21,7 +21,7 @@
         <div v-if="viewMode === 'list'" class="list-heading"><span>设备别名</span><span>使用的智能体</span><span>最近连接</span><span>操作</span></div>
         <div class="device-grid" :class="{ 'is-empty': !filteredDevices.length }">
         <DeviceAgentCard v-for="device in pagedDevices" :list="viewMode === 'list'" :key="device.id" :device="device" :agents="agents"
-          :can-write="canWrite && !loading" @busy="setBusy(device.id, $event)" @scenes="openScenes(device)"
+          :can-write="canWrite && !loading" @busy="setBusy(device.id, $event)" @settings="$refs.settings.open(device)"
           @rename="$refs.aliasDialog.open(device)" @updated="updateDevice(device.id, $event)" />
         </div>
       </div>
@@ -44,7 +44,7 @@
     <AddDeviceDialog v-if="codeVisible" :visible.sync="codeVisible" :agent-id="addAgentId" @refresh="load" />
     <ManualAddDeviceDialog v-if="manualVisible" :visible.sync="manualVisible" :agent-id="addAgentId" @refresh="load" />
     <DeviceAliasDialog ref="aliasDialog" :can-write="canWrite" @saved="updateAlias" />
-    <DeviceSceneDialog ref="scenes" @switched="load" />
+    <DeviceSettingsDrawer ref="settings" :can-write="canWrite" @refresh="load" />
   </div>
 </template>
 <script>
@@ -53,10 +53,10 @@ import HeaderBar from '@/components/HeaderBar.vue';
 import DeviceAgentCard from '@/components/device/DeviceAgentCard.vue';
 import AddDeviceDialog from '@/components/AddDeviceDialog.vue';
 import ManualAddDeviceDialog from '@/components/ManualAddDeviceDialog.vue';
-import DeviceSceneDialog from '@/components/scene/DeviceSceneDialog.vue';
+import DeviceSettingsDrawer from '@/components/device/DeviceSettingsDrawer.vue';
 import { listWorkspaceAgents, listWorkspaceDevices } from '@/utils/deviceCenter';
 export default {
-  components: { DeviceAliasDialog, HeaderBar, DeviceAgentCard, AddDeviceDialog, ManualAddDeviceDialog, DeviceSceneDialog },
+  components: { DeviceAliasDialog, HeaderBar, DeviceAgentCard, AddDeviceDialog, ManualAddDeviceDialog, DeviceSettingsDrawer },
   data() { return { viewMode: 'list', currentPage: 1, pageSize: 10, agents: [], devices: [], keyword: '', agentFilter: '', loading: false, error: '',
     addVisible: false, addAgentId: '', codeVisible: false, manualVisible: false, busyDevices: {}, generation: 0,
     canWrite: localStorage.getItem('currentWorkspaceCanWrite') !== 'false' }; },
@@ -79,7 +79,7 @@ export default {
       this.currentPage = Math.min(this.currentPage, Math.max(1, Math.ceil(length / this.pageSize)));
     }
   },
-  created() { this.load(); },
+  created() { this.agentFilter = String(this.$route.query.agentId || ''); this.load(); },
   beforeDestroy() { this.generation++; },
   methods: {
     async load() {
@@ -102,7 +102,6 @@ export default {
       const device = this.devices.find(item => item.id === id);
       if (device && scene) { device.agentId = scene.agentId; device.agentName = scene.agentName; }
     },
-    openScenes(device) { this.$refs.scenes.open({ ...device, device_id: device.id, remark: device.alias }); },
     openAdd(mode) { this.addVisible = false; this.codeVisible = mode === 'code'; this.manualVisible = mode === 'manual'; }
   }
 };

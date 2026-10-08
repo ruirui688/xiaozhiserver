@@ -79,6 +79,7 @@ export default {
                 RequestService.clearRequestTime();
                 callback(res);
             })
+            .fail(callback)
             .networkFail((err) => {
                 console.error('解绑设备失败:', networkErrorSummary(err));
                 if (callback) callback(networkErrorResponse('解绑设备失败'));

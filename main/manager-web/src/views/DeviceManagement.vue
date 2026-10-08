@@ -3,7 +3,7 @@
     <HeaderBar />
 
     <div class="operation-bar">
-      <h2 class="page-title">{{ $t('device.management') }}</h2>
+      <div><el-button type="text" icon="el-icon-back" @click="$router.push({ path: '/device-center', query: { agentId: currentAgentId } })">返回设备管理</el-button><h2 class="page-title">设备批量维护</h2></div>
       <div class="right-operations">
         <el-input :placeholder="$t('device.searchPlaceholder')" v-model="searchKeyword" class="search-input"
           @keyup.enter.native="handleSearch" clearable />
@@ -45,17 +45,8 @@
                   <el-tag v-else type="danger">{{ $t('device.offline') }}</el-tag>
                 </template>
               </el-table-column>
-              <el-table-column :label="$t('device.remark')" align="center">
-                <template #default="{ row }">
-                  <el-input v-show="row.isEdit" v-model="row.remark" size="mini" maxlength="64" show-word-limit
-                    @blur="onRemarkBlur(row)" @keyup.enter.native="onRemarkEnter(row)" />
-                  <span v-show="!row.isEdit" class="remark-view">
-                    <i class="el-icon-edit" @click="row.isEdit = true" style="cursor: pointer;"></i>
-                    <span @click="row.isEdit = true">
-                      {{ row.remark || '-' }}
-                    </span>
-                  </span>
-                </template>
+              <el-table-column label="设备别名" align="center">
+                <template slot-scope="scope">{{ scope.row.remark || '未命名设备' }}</template>
               </el-table-column>
               <el-table-column :label="$t('device.autoUpdate')" align="center">
                 <template slot-scope="scope">
