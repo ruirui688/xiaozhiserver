@@ -666,6 +666,8 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 
 ## 32. 智能体级豆包 Seed ASR 热词表
 
+热词库是工作空间内按火山凭据来源管理的资源，不绑定具体识别模型。同步自动发现来源并去重读取，页面不要求先选模型；来源权限、配置可用性与识别模型启用状态分开判断。应用及角色/模板保存时校验工作空间和来源兼容性，同一凭据下的流式、录音 ASR 可复用词库；跨来源不可直接复用。历史迁移保留远端 ID、生效配置和原始导入词表。详见 [模型管理契约](./models/model-management.md)。
+
 ```text
 定制模块：manager-web 角色配置、manager-api 智能体配置装配、xiaozhi-server 豆包 Seed ASR provider
 改动原因：热词应由智控台资源中心登记并通过官方 API 注册到火山，用户无需手工切换控制台。词库按工作空间隔离，共享模型凭据只在服务端读取。角色配置继续用 asr_hotword_ids 保存最多 10 个候选 ID，并用 asr_hotword_id 标记当前生效项；官方限制一个识别请求只支持一张词表，所以 manager-api 只把当前生效项注入 doubao_stream 或 doubao_recording 的运行时 boosting_table_id。Python 按官方 request.corpus.boosting_table_id 层级发送，同时在同一 corpus 对象保留独立的 context 字段。切换当前生效项后通过运行配置刷新链路在线生效。
@@ -674,6 +676,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/manager-api/src/main/java/xiaozhi/modules/agent/support/ManagedAsrHotwordGuard.java
   - main/manager-api/src/main/resources/db/changelog/asr-hotword-management.sql
   - main/manager-api/src/main/resources/db/changelog/asr-hotword-import.sql
+  - main/manager-api/src/main/resources/db/changelog/asr-hotword-credential-source.sql
   - main/manager-web/src/components/resource/AsrHotwordImportDialog.vue
   - main/manager-web/src/views/AsrHotwordManagement.vue
   - main/manager-web/src/components/role/RoleEditDialog.vue

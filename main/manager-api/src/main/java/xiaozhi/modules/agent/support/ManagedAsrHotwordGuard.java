@@ -12,12 +12,14 @@ import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
 import xiaozhi.common.exception.RenException;
+import xiaozhi.modules.hotword.HotwordCredentialSources;
 
 /** Applies managed-resource isolation to legacy role and template update paths. */
 @Component
 @RequiredArgsConstructor
 public class ManagedAsrHotwordGuard {
     private final JdbcTemplate jdbc;
+    private final HotwordCredentialSources sources;
 
     public void requireAllowed(String workspaceId, String modelId, String activeId, List<String> candidates) {
         TreeSet<String> ids = new TreeSet<>();
@@ -36,7 +38,7 @@ public class ManagedAsrHotwordGuard {
         List<String> parameters = new ArrayList<>(ids);
         parameters.addAll(ids);
         var rows = jdbc.queryForList(
-                "SELECT h.workspace_id, h.model_id, h.status FROM ai_asr_hotword h "
+                "SELECT h.workspace_id, h.credential_fingerprint, h.status FROM ai_asr_hotword h "
                         + "LEFT JOIN ai_asr_hotword_revision r ON r.hotword_id=h.id "
                         + "WHERE h.remote_id IN (" + placeholders + ") OR r.remote_id IN ("
                         + placeholders + ") ORDER BY h.id FOR UPDATE", parameters.toArray());
@@ -47,8 +49,9 @@ public class ManagedAsrHotwordGuard {
             if (!Objects.equals(workspaceId, row.get("workspace_id"))) {
                 throw new RenException("无权使用其他工作空间的热词库");
             }
-            if (!Objects.equals(modelId, row.get("model_id"))) {
-                throw new RenException("热词库与当前语音识别模型不匹配，请重新选择热词库");
+            String sourceId = (String) row.get("credential_fingerprint");
+            if (sourceId == null || !sourceId.equals(sources.forModel(modelId, true))) {
+                throw new RenException("热词库与当前识别模型的火山来源不兼容，或模型尚未启用并测试通过");
             }
         }
     }

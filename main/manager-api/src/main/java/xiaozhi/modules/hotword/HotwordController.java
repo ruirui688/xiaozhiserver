@@ -17,14 +17,14 @@ public class HotwordController {
     private final HotwordImportService imports;
     @GetMapping("/remote")
     @RequiresPermissions("sys:role:superAdmin")
-    public Result<List<Map<String, Object>>> remote(@RequestParam String modelId) { return new Result<List<Map<String, Object>>>().ok(imports.remote(modelId)); }
+    public Result<Map<String, Object>> remote() { return new Result<Map<String, Object>>().ok(imports.remote()); }
     @PostMapping("/import")
     @RequiresPermissions("sys:role:superAdmin")
     public Result<Map<String, Object>> importRemote(@Valid @RequestBody HotwordImportDTO dto) { return new Result<Map<String, Object>>().ok(imports.importRemote(dto)); }
     @GetMapping
     public Result<List<Map<String, Object>>> list() { return new Result<List<Map<String, Object>>>().ok(service.list()); }
-    @GetMapping("/models")
-    public Result<List<Map<String, Object>>> models() { return new Result<List<Map<String, Object>>>().ok(service.modelOptions()); }
+    @GetMapping("/sources")
+    public Result<Map<String, Object>> sources() { return new Result<Map<String, Object>>().ok(service.sourceOptions()); }
     @GetMapping("/agents")
     public Result<List<Map<String, Object>>> agents() { return new Result<List<Map<String, Object>>>().ok(service.agentOptions()); }
     @PostMapping

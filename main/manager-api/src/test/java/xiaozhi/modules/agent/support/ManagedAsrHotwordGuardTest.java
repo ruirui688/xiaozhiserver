@@ -18,7 +18,8 @@ import xiaozhi.common.exception.RenException;
 
 class ManagedAsrHotwordGuardTest {
     private final JdbcTemplate jdbc = mock(JdbcTemplate.class);
-    private final ManagedAsrHotwordGuard guard = new ManagedAsrHotwordGuard(jdbc);
+    private final xiaozhi.modules.hotword.HotwordCredentialSources sources = mock(xiaozhi.modules.hotword.HotwordCredentialSources.class);
+    private final ManagedAsrHotwordGuard guard = new ManagedAsrHotwordGuard(jdbc,sources);
 
     @Test
     void emptySelectionDoesNotQueryManagedResources() {
@@ -35,7 +36,7 @@ class ManagedAsrHotwordGuardTest {
     @Test
     void rejectsForeignManagedCandidateEvenWhenNotActive() {
         when(jdbc.queryForList(anyString(), any(Object[].class)))
-                .thenReturn(List.of(Map.of("workspace_id", "workspace-b", "model_id", "asr-a")));
+                .thenReturn(List.of(Map.of("workspace_id", "workspace-b", "credential_fingerprint", "source-a")));
         assertThrows(RenException.class, () -> guard.requireAllowed(
                 "workspace-a", "asr-a", "legacy-id", List.of("foreign-managed-id")));
     }
@@ -43,21 +44,22 @@ class ManagedAsrHotwordGuardTest {
     @Test
     void rejectsManagedTableFromDifferentModel() {
         when(jdbc.queryForList(anyString(), any(Object[].class)))
-                .thenReturn(List.of(Map.of("workspace_id", "workspace-a", "model_id", "asr-b")));
+                .thenReturn(List.of(Map.of("workspace_id", "workspace-a", "credential_fingerprint", "source-b")));
         assertThrows(RenException.class, () -> guard.requireAllowed("workspace-a", "asr-a", "managed-id", null));
     }
 
     @Test
-    void permitsOwnedTableForMatchingModel() {
+    void permitsOwnedTableForMatchingSource() {
+        when(sources.forModel("asr-a",true)).thenReturn("source-a");
         when(jdbc.queryForList(anyString(), any(Object[].class)))
-                .thenReturn(List.of(Map.of("workspace_id", "workspace-a", "model_id", "asr-a")));
+                .thenReturn(List.of(Map.of("workspace_id", "workspace-a", "credential_fingerprint", "source-a")));
         assertDoesNotThrow(() -> guard.requireAllowed("workspace-a", "asr-a", "managed-id", List.of("managed-id")));
     }
 
     @Test
     void rejectsReferencesWhileRemoteDeletionIsInProgress() {
         when(jdbc.queryForList(anyString(), any(Object[].class)))
-                .thenReturn(List.of(Map.of("workspace_id", "workspace-a", "model_id", "asr-a", "status", "DELETING")));
+                .thenReturn(List.of(Map.of("workspace_id", "workspace-a", "credential_fingerprint", "source-a", "status", "DELETING")));
         assertThrows(RenException.class, () -> guard.requireAllowed("workspace-a", "asr-a", "managed-id", null));
     }
 }

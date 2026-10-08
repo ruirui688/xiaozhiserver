@@ -5,40 +5,42 @@
       <div class="toolbar">
         <div><h1>热词库</h1><p>录入专有名词，发布到火山引擎，再应用到智能体。</p></div>
         <el-button icon="el-icon-refresh" :disabled="busy" :loading="loading" @click="load(true)">刷新本地列表</el-button>
-        <el-button v-if="importModels.length" icon="el-icon-download" :disabled="!canWrite || busy || loading" @click="importVisible = true">从火山同步</el-button>
-        <el-button type="primary" icon="el-icon-plus" :disabled="!canWrite || busy || loading" @click="edit()">新建词库</el-button>
+        <el-button v-if="capabilities.canImportRemote" icon="el-icon-download" :disabled="!canWrite || busy || loading || !availableSources.length" @click="importVisible = true">从火山同步</el-button>
+        <el-button type="primary" icon="el-icon-plus" :disabled="!canWrite || busy || loading || !availableSources.length" @click="edit()">新建词库</el-button>
       </div>
       <el-alert title="保存只生成草稿；发布会创建新版本，原有智能体保持当前版本。发布成功后请显式应用到需要更新的智能体。" type="info" :closable="false" show-icon />
+      <el-alert v-if="sourceNotice" class="notice" :title="sourceNotice" type="info" :closable="false" show-icon />
       <el-alert v-if="error" class="notice" :title="error" type="error" :closable="false" show-icon />
       <section class="list" v-loading="loading">
-        <el-table :data="rows" :empty-text="importModels.length ? '暂无热词库，可从火山同步已有词库，或新建词库' : '暂无热词库，可新建词库；火山已有词库请联系平台管理员同步'">
+        <el-table :data="rows" empty-text="暂无本地词库，可新建词库或同步火山已有词库">
           <el-table-column prop="name" label="词库名称" min-width="140" />
-          <el-table-column label="识别模型" min-width="150"><template slot-scope="scope">{{ modelName(scope.row.modelId) }}</template></el-table-column>
+          <el-table-column v-if="sources.length > 1" label="火山来源" min-width="150"><template slot-scope="scope">{{ scope.row.sourceName || sourceName(scope.row.sourceId) }}</template></el-table-column>
           <el-table-column label="词条" width="75"><template slot-scope="scope">{{ (scope.row.entries || []).length }}</template></el-table-column>
           <el-table-column label="发布状态" min-width="190"><template slot-scope="scope">
             <el-tag :type="scope.row.status === 'PUBLISHED' ? 'success' : scope.row.status === 'FAILED' ? 'danger' : 'warning'" size="small">{{ statusLabel(scope.row.status) }}</el-tag>
             <small v-if="locked(scope.row)">{{ scope.row.recoverable ? '操作已超时，可重试原操作恢复' : '同步进行中，请稍后刷新；中断超过 5 分钟可重试恢复' }}</small>
             <small v-if="scope.row.lastError" class="failure">{{ scope.row.lastError }}</small>
+            <small v-if="scope.row.available === false" class="failure">火山来源不可用，请联系管理员恢复连接后重试</small>
             <small v-if="scope.row.remoteId && scope.row.status !== 'PUBLISHED'">已引用智能体保持其当前版本</small>
           </template></el-table-column>
           <el-table-column label="已引用智能体" min-width="160"><template slot-scope="scope">{{ (scope.row.agentNames || []).join('、') || '尚未应用' }}<small v-if="(scope.row.agentIds || []).length">包含旧版本引用；更新需再次应用</small></template></el-table-column>
           <el-table-column label="操作" width="310"><template slot-scope="scope">
             <el-button type="text" :disabled="!canWrite || busy || locked(scope.row)" @click="edit(scope.row)">编辑</el-button>
-            <el-button type="text" :disabled="!canWrite || busy || actionLocked(scope.row, 'PUBLISHING')" @click="publish(scope.row)">{{ scope.row.status === 'FAILED' || scope.row.status === 'PUBLISHING' ? '重试发布' : '发布' }}</el-button>
-            <el-button type="text" :disabled="!canWrite || busy || scope.row.status !== 'PUBLISHED'" @click="openApply(scope.row)">应用</el-button>
+            <el-button type="text" :disabled="!canWrite || busy || scope.row.available === false || actionLocked(scope.row, 'PUBLISHING')" @click="publish(scope.row)">{{ scope.row.status === 'FAILED' || scope.row.status === 'PUBLISHING' ? '重试发布' : '发布' }}</el-button>
+            <el-button type="text" :disabled="!canWrite || busy || scope.row.available === false || scope.row.status !== 'PUBLISHED'" @click="openApply(scope.row)">应用</el-button>
             <el-button type="text" :disabled="!canWrite || busy || locked(scope.row) || !(scope.row.agentIds || []).length" @click="unapply(scope.row)">解除应用</el-button>
             <el-button type="text" :disabled="!canWrite || busy || actionLocked(scope.row, 'DELETING') || (scope.row.agentIds || []).length > 0" @click="remove(scope.row)">{{ scope.row.status === 'DELETING' ? '重试删除' : '删除' }}</el-button>
           </template></el-table-column>
         </el-table>
       </section>
     </main>
-    <AsrHotwordImportDialog v-if="importVisible" :models="importModels" :can-write="canWrite" :workspace-id="workspaceId" @close="importVisible = false" @imported="load" />
+    <AsrHotwordImportDialog v-if="importVisible" :can-write="canWrite" :workspace-id="workspaceId" @close="importVisible = false" @imported="load" />
     <el-dialog :title="editingId ? '编辑热词库' : '新建热词库'" :visible.sync="editorVisible" width="620px" :close-on-click-modal="false" :close-on-press-escape="!busy" :show-close="!busy">
       <el-form label-width="85px" @submit.native.prevent>
         <el-form-item label="词库名称"><el-input v-model="form.name" maxlength="80" show-word-limit :disabled="busy" /></el-form-item>
-        <el-form-item label="识别模型"><el-select v-model="form.modelId" placeholder="选择火山语音识别模型" :disabled="!!editingId || busy" style="width:100%">
-          <el-option v-for="model in models" :key="model.id" :value="model.id" :label="model.modelName" />
-        </el-select><small>使用已配置模型的账号发布，创建后不可更换模型。</small></el-form-item>
+        <el-form-item v-if="!editingId && availableSources.length > 1" label="火山来源"><el-select v-model="form.sourceId" placeholder="选择火山连接来源" :disabled="busy" style="width:100%">
+          <el-option v-for="source in availableSources" :key="source.id" :value="source.id" :label="source.name" />
+        </el-select></el-form-item>
         <el-form-item label="热词"><el-input v-model="form.text" type="textarea" :rows="10" :disabled="busy" placeholder="每行一个词，可粘贴多行。例如：&#10;慧苑&#10;星岚|4" />
           <small>可写“词条|权重”，权重 1–10，默认 4。每词通常最多 10 个汉字或 30 个英文字母，混合内容按实际长度校验。最多 5000 条；实时识别模型可能有更低的生效容量。</small>
         </el-form-item>
@@ -48,10 +50,10 @@
     </el-dialog>
     <el-dialog title="应用热词库" :visible.sync="applyVisible" width="520px" :close-on-click-modal="false" :show-close="!busy">
       <p>将“{{ applying && applying.name }}”的最新已发布版本设为选中智能体的当前热词库；其原热词选择将被替换。</p>
-      <el-select v-model="selectedAgents" multiple filterable placeholder="选择使用同一识别模型的智能体" style="width:100%" :disabled="busy">
+      <el-select v-model="selectedAgents" multiple filterable placeholder="选择可使用该词库的智能体" style="width:100%" :disabled="busy">
         <el-option v-for="agent in compatibleAgents" :key="agent.id" :value="agent.id" :label="agent.agentName" />
       </el-select>
-      <p v-if="!compatibleAgents.length">暂无使用该识别模型的智能体，请先调整智能体的语音识别模型。</p>
+      <p v-if="!compatibleAgents.length">暂无兼容的智能体。同一火山来源的兼容识别模型可复用该词库。</p>
       <el-alert v-if="dialogError" :title="dialogError" type="error" :closable="false" />
       <span slot="footer"><el-button :disabled="busy" @click="applyVisible = false">取消</el-button><el-button type="primary" :loading="busy" :disabled="!canWrite || !selectedAgents.length" @click="apply">确认应用</el-button></span>
     </el-dialog>
@@ -65,12 +67,13 @@ import api from '@/apis/module/asrHotword';
 import { parseHotwordText, formatHotwordEntries, hotwordStatus } from '@/utils/asrHotwords';
 export default {
   components: { HeaderBar, ResourceCenterNav, AsrHotwordImportDialog },
-  data() { return { rows: [], models: [], agents: [], loading: false, busy: false, error: '', dialogError: '', generation: 0,
+  data() { return { rows: [], sources: [], capabilities: {}, agents: [], loading: false, busy: false, error: '', dialogError: '', generation: 0,
     workspaceId: localStorage.getItem('currentWorkspaceId'), canWrite: localStorage.getItem('currentWorkspaceCanWrite') !== 'false',
-    editorVisible: false, applyVisible: false, importVisible: false, editingId: '', form: { name: '', modelId: '', text: '' }, applying: null, selectedAgents: [] }; },
+    editorVisible: false, applyVisible: false, importVisible: false, editingId: '', form: { name: '', sourceId: '', text: '' }, applying: null, selectedAgents: [] }; },
   computed: {
-    importModels() { return this.models.filter(model => model.canImportRemote === true); },
-    compatibleAgents() { return this.agents.filter(agent => this.applying && agent.asrModelId === this.applying.modelId); }
+    availableSources() { return this.sources.filter(source => source.available); },
+    sourceNotice() { return this.capabilities.message || ''; },
+    compatibleAgents() { return this.agents.filter(agent => this.applying && !!this.applying.sourceId && agent.sourceId === this.applying.sourceId); }
   },
   created() { this.load(); },
   beforeDestroy() { this.generation++; },
@@ -79,13 +82,13 @@ export default {
     locked(row) { return ['PUBLISHING', 'DELETING'].includes(row.status); },
     actionLocked(row, state) { return this.locked(row) && !(row.recoverable === true && row.status === state); },
     current(generation) { return generation === this.generation && this.workspaceId === localStorage.getItem('currentWorkspaceId'); },
-    modelName(id) { const model = this.models.find(item => item.id === id); return model ? model.modelName : '模型不可用'; },
+    sourceName(id) { const source = this.sources.find(item => item.id === id); return source ? source.name : '来源暂不可用'; },
     async load(notify = false) {
       const generation = ++this.generation; this.loading = true; this.error = '';
       try {
-        const [rows, models, agents] = await Promise.all([api.list(), api.models(), api.agents()]);
+        const [rows, sourceInfo, agents] = await Promise.all([api.list(), api.sources(), api.agents()]);
         if (!this.current(generation)) return;
-        this.rows = rows || []; this.models = models || []; this.agents = agents || [];
+        this.rows = rows || []; this.sources = sourceInfo.sources || []; this.capabilities = sourceInfo.capabilities || {}; this.agents = agents || [];
         if (notify === true) this.$message.success(this.rows.length
           ? `已刷新，共 ${this.rows.length} 个本地词库`
           : '本地暂无词库；火山已有词库需通过“从火山同步”导入');
@@ -93,15 +96,15 @@ export default {
       finally { if (this.current(generation)) this.loading = false; }
     },
     edit(row) {
-      this.editingId = row ? row.id : ''; this.form = row ? { name: row.name, modelId: row.modelId, text: formatHotwordEntries(row.entries) } : { name: '', modelId: '', text: '' };
+      this.editingId = row ? row.id : ''; this.form = row ? { name: row.name, sourceId: row.sourceId, text: formatHotwordEntries(row.entries) } : { name: '', sourceId: this.availableSources.length === 1 ? this.availableSources[0].id : '', text: '' };
       this.dialogError = ''; this.editorVisible = true;
     },
     async save() {
       if (this.busy || !this.canWrite) return;
       let payload;
       try {
-        if (!this.form.name.trim() || !this.form.modelId) throw new Error('请填写名称并选择识别模型');
-        payload = { name: this.form.name.trim(), modelId: this.form.modelId, entries: parseHotwordText(this.form.text) };
+        if (!this.form.name.trim() || (!this.editingId && !this.form.sourceId)) throw new Error('请填写名称并选择火山来源');
+        payload = { name: this.form.name.trim(), sourceId: this.form.sourceId, entries: parseHotwordText(this.form.text) };
       } catch (error) { this.dialogError = error.message; return; }
       await this.perform(() => this.editingId ? api.update(this.editingId, payload) : api.create(payload), () => { this.editorVisible = false; this.$message.success('草稿已保存，请发布后应用'); }, true);
     },

@@ -1,7 +1,5 @@
 package xiaozhi.modules.hotword;
 
-import java.sql.Timestamp;
-import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
 import org.springframework.context.ApplicationEventPublisher;
@@ -16,8 +14,6 @@ import xiaozhi.common.exception.RenException;
 import xiaozhi.modules.agent.dao.AgentDao;
 import xiaozhi.modules.agent.entity.AgentEntity;
 import xiaozhi.modules.agent.runtime.AgentRuntimeConfigRefreshEvent;
-import xiaozhi.modules.model.entity.ModelConfigEntity;
-import xiaozhi.modules.model.service.ModelConfigService;
 import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 
 @Service
@@ -25,31 +21,42 @@ public class HotwordService {
     private final JdbcTemplate db;
     private final ObjectMapper mapper;
     private final WorkspacePermissionService permission;
-    private final ModelConfigService models;
+    private final HotwordCredentialSources sources;
     private final AgentDao agents;
     private final VolcengineHotwordClient vendor;
     private final ApplicationEventPublisher events;
     private final TransactionTemplate tx;
 
     public HotwordService(JdbcTemplate db, ObjectMapper mapper, WorkspacePermissionService permission,
-            ModelConfigService models, AgentDao agents, VolcengineHotwordClient vendor,
+            HotwordCredentialSources sources, AgentDao agents, VolcengineHotwordClient vendor,
             ApplicationEventPublisher events, PlatformTransactionManager transactions) {
-        this.db = db; this.mapper = mapper; this.permission = permission; this.models = models;
+        this.db = db; this.mapper = mapper; this.permission = permission; this.sources = sources;
         this.agents = agents; this.vendor = vendor; this.events = events;
         this.tx = new TransactionTemplate(transactions);
     }
 
     public List<Map<String, Object>> list() {
         String workspace = workspace(false);
+        var discovery = sources.discover();
         return db.queryForList("SELECT * FROM ai_asr_hotword WHERE workspace_id=? ORDER BY update_date DESC", workspace)
-                .stream().map(this::view).toList();
+                .stream().map(row -> view(row, discovery)).toList();
     }
 
-    public List<Map<String, Object>> modelOptions() {
+    public Map<String, Object> sourceOptions() {
         workspace(false);
-        return models.getEnabledModelsByType("ASR").stream().filter(this::supported)
-                .map(m -> Map.<String, Object>of("id", m.getId(), "modelName", m.getModelName(),
-                        "canImportRemote", HotwordImportService.canImport())).toList();
+        var discovery = sources.discover();
+        boolean permitted = HotwordImportService.canImport();
+        String status = !permitted ? "NO_PERMISSION" : discovery.sources().isEmpty()
+                ? (discovery.unavailable() ? "UNAVAILABLE" : "NOT_CONFIGURED") : "READY";
+        String message = switch (status) {
+            case "NO_PERMISSION" -> "请平台管理员同步火山已有词库";
+            case "NOT_CONFIGURED" -> "尚未配置火山来源，请管理员在模型配置中配置豆包语音 API Key";
+            case "UNAVAILABLE" -> "火山配置暂不可用，请管理员检查配置";
+            default -> discovery.unavailable() ? "部分火山配置暂不可用" : "";
+        };
+        return Map.of("sources", discovery.sources().stream()
+                .map(s -> Map.of("id", s.id(), "name", s.name(), "available", true)).toList(),
+                "capabilities", Map.of("canImportRemote", permitted, "status", status, "message", message));
     }
 
     public List<Map<String, Object>> agentOptions() {
@@ -57,17 +64,19 @@ public class HotwordService {
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("id", a.getId()); result.put("agentName", a.getAgentName());
             result.put("asrModelId", a.getAsrModelId()); result.put("asrHotwordId", a.getAsrHotwordId());
+            String source = sources.forModel(a.getAsrModelId(), true);
+            result.put("sourceId", source == null ? "" : source);
             return result;
         }).toList();
     }
 
     public Map<String, Object> create(HotwordSaveDTO dto) {
         String workspace = workspace(true);
-        model(dto.modelId());
+        sources.require(dto.sourceId());
         List<HotwordSaveDTO.Entry> entries = normalize(dto.entries());
         String id = uuid();
-        db.update("INSERT INTO ai_asr_hotword(id,workspace_id,name,model_id,entries_json) VALUES(?,?,?,?,?)",
-                id, workspace, dto.name().trim(), dto.modelId(), encode(entries));
+        db.update("INSERT INTO ai_asr_hotword(id,workspace_id,name,credential_fingerprint,entries_json) VALUES(?,?,?,?,?)",
+                id, workspace, dto.name().trim(), dto.sourceId(), encode(entries));
         return view(require(id, false));
     }
 
@@ -76,7 +85,8 @@ public class HotwordService {
         return tx.execute(status -> {
             Map<String, Object> row = require(id, true);
             idle(row);
-            if (!Objects.equals(row.get("model_id"), dto.modelId())) throw new RenException("词库创建后不能更换识别模型，请新建词库");
+            if (!Objects.equals(sourceId(row), dto.sourceId())) throw new RenException("词库创建后不能更换火山来源，请新建词库");
+            pinDraftSource(row);
             db.update("UPDATE ai_asr_hotword SET name=?,entries_json=?,status='DRAFT',last_error='',update_date=NOW(3) WHERE id=?",
                     dto.name().trim(), encode(entries), id);
             return view(require(id, false));
@@ -121,13 +131,14 @@ public class HotwordService {
         try {
             List<Map<String, Object>> revisions = db.queryForList("SELECT * FROM ai_asr_hotword_revision WHERE hotword_id=?", id);
             if (!revisions.isEmpty()) {
-                String key = credential(row);
+                String key = null;
                 for (Map<String, Object> revision : revisions) {
                     // Imported originals remain owned by the vendor account, never delete them.
                     if (((String) revision.get("remote_name")).startsWith("import_")) {
                         db.update("DELETE FROM ai_asr_hotword_revision WHERE remote_name=?", revision.get("remote_name"));
                         continue;
                     }
+                    if (key == null) key = credential(row);
                     heartbeat(id, token);
                     String found = vendor.find(key, (String) revision.get("remote_name"));
                     heartbeat(id, token);
@@ -160,8 +171,8 @@ public class HotwordService {
                 if (agent == null || !Objects.equals(agent.getWorkspaceId(), row.get("workspace_id")))
                     throw new RenException("智能体不属于当前工作空间");
                 permission.requireWrite(agent.getWorkspaceId());
-                if (!remove && !Objects.equals(agent.getAsrModelId(), row.get("model_id")))
-                    throw new RenException("智能体的语音识别模型与词库模型不一致");
+                if (!remove && !Objects.equals(sources.forModel(agent.getAsrModelId(), true), sourceId(row)))
+                    throw new RenException("智能体须使用已启用且测试通过、与词库火山来源兼容的识别模型");
                 List<String> candidates = new ArrayList<>(agent.getAsrHotwordIds() == null ? List.of() : agent.getAsrHotwordIds());
                 candidates.removeIf(ownedIds::contains);
                 String active = agent.getAsrHotwordId();
@@ -210,8 +221,7 @@ public class HotwordService {
 
     private void retryable(Map<String, Object> row, String requestedState) {
         if (requestedState.equals(row.get("status"))) {
-            Timestamp updated = (Timestamp) row.get("update_date");
-            if (updated != null && updated.toInstant().isBefore(Instant.now().minusSeconds(300))) return;
+            if (operationExpired(row)) return;
         }
         idle(row);
     }
@@ -219,6 +229,14 @@ public class HotwordService {
     private void heartbeat(String id, String token) {
         if (db.update("UPDATE ai_asr_hotword SET update_date=NOW(3) WHERE id=? AND operation_token=?", id, token) != 1)
             throw new RenException("操作已被恢复任务接管，请刷新页面");
+    }
+
+    private boolean operationExpired(Map<String, Object> row) {
+        // DATETIME is returned as LocalDateTime by some drivers. Compare on the DB clock,
+        // avoiding both JDBC representation casts and application/database timezone differences.
+        Long seconds = db.queryForObject("SELECT TIMESTAMPDIFF(SECOND,update_date,NOW(3)) FROM ai_asr_hotword WHERE id=?",
+                Long.class, row.get("id"));
+        return seconds != null && seconds > 300;
     }
 
     String workspace(boolean write) {
@@ -232,16 +250,24 @@ public class HotwordService {
     }
 
     Map<String, Object> view(Map<String, Object> row) {
+        return view(row, sources.discover());
+    }
+
+    private Map<String, Object> view(Map<String, Object> row, HotwordCredentialSources.Discovery discovery) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("id", row.get("id")); result.put("name", row.get("name"));
-        result.put("modelId", row.get("model_id")); result.put("remoteId", row.get("remote_id"));
+        result.put("remoteId", row.get("remote_id"));
+        String sourceId = sourceId(row);
+        var source = discovery.sources().stream().filter(s -> s.id().equals(sourceId)).findFirst();
+        result.put("sourceId", sourceId == null ? "" : sourceId);
+        result.put("sourceName", source.map(HotwordCredentialSources.Source::name).orElse("来源暂不可用"));
+        result.put("available", source.isPresent());
         result.put("entries", decode(row.get("entries_json"))); result.put("status", row.get("status"));
         Long imported = db.queryForObject("SELECT COUNT(*) FROM ai_asr_hotword_revision WHERE hotword_id=? AND LEFT(remote_name,7)='import_'", Long.class, row.get("id"));
         result.put("imported", imported != null && imported > 0);
         result.put("lastError", row.get("last_error")); result.put("updateDate", row.get("update_date"));
-        Timestamp updated = (Timestamp) row.get("update_date");
         result.put("recoverable", Set.of("PUBLISHING", "DELETING").contains(row.get("status"))
-                && updated != null && updated.toInstant().isBefore(Instant.now().minusSeconds(300)));
+                && operationExpired(row));
         Set<String> ownedIds = revisionIds((String) row.get("id"));
         List<AgentEntity> bound = ownedIds.isEmpty() ? List.of() : workspaceAgents((String) row.get("workspace_id")).stream()
                 .filter(a -> ownedIds.contains(a.getAsrHotwordId())
@@ -258,30 +284,28 @@ public class HotwordService {
             throw new RenException("词库仍被智能体或角色模板引用，请先移除引用");
     }
 
-    private ModelConfigEntity model(String id) {
-        ModelConfigEntity model = models.getModelByIdFromCache(id);
-        if (!supported(model)) throw new RenException("请选择启用的豆包流式或录音识别模型，并配置语音 API Key");
-        return model;
-    }
-
-    private boolean supported(ModelConfigEntity model) {
-        if (model == null || !"ASR".equalsIgnoreCase(model.getModelType()) || !Objects.equals(1, model.getIsEnabled())
-                || !Objects.equals(1, model.getTestStatus()) || model.getConfigJson() == null) return false;
-        String adapter = model.getConfigJson().getStr("type", model.getAdapterCode());
-        String key = model.getConfigJson().getStr("api_key");
-        return Set.of("doubao_stream", "doubao_recording").contains(adapter == null ? "" : adapter)
-                && key != null && !key.isBlank() && !key.contains("你的") && !key.contains("***");
-    }
-
-    String key(String id) { return model(id).getConfigJson().getStr("api_key").trim(); }
     private String credential(Map<String, Object> row) {
-        String key = key((String) row.get("model_id"));
-        String fingerprint = digest(key);
-        Object previous = row.get("credential_fingerprint");
-        if (previous != null && !fingerprint.equals(previous))
-            throw new RenException("识别模型凭据已变更，无法确认原火山账号；请恢复原凭据后操作此词库");
-        if (previous == null) db.update("UPDATE ai_asr_hotword SET credential_fingerprint=? WHERE id=? AND credential_fingerprint IS NULL", fingerprint, row.get("id"));
-        return key;
+        String sourceId = pinDraftSource(row);
+        return sources.require(sourceId).key();
+    }
+    String sourceId(Map<String, Object> row) {
+        String pinned = (String) row.get("credential_fingerprint");
+        if (pinned != null && !pinned.isBlank()) return pinned;
+        // Only never-published legacy drafts can safely select their original model's current key.
+        if (row.get("remote_id") != null) return null;
+        Long revisions = db.queryForObject("SELECT COUNT(*) FROM ai_asr_hotword_revision WHERE hotword_id=?", Long.class, row.get("id"));
+        if (revisions != null && revisions > 0) return null;
+        return sources.forModel((String) row.get("model_id"), false);
+    }
+    private String pinDraftSource(Map<String, Object> row) {
+        String sourceId = sourceId(row);
+        if (sourceId == null) throw new RenException("旧词库缺少可验证的火山来源，请管理员核对原配置后处理");
+        if (row.get("credential_fingerprint") == null) {
+            int updated = db.update("UPDATE ai_asr_hotword SET credential_fingerprint=? WHERE id=? AND credential_fingerprint IS NULL", sourceId, row.get("id"));
+            if (updated != 1) throw new RenException("词库来源已变更，请刷新后重试");
+            row.put("credential_fingerprint", sourceId);
+        }
+        return sourceId;
     }
     private Set<String> revisionIds(String id) {
         return new HashSet<>(db.queryForList("SELECT remote_id FROM ai_asr_hotword_revision WHERE hotword_id=? AND remote_id IS NOT NULL", String.class, id));

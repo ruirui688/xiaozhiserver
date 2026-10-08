@@ -12,18 +12,15 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import cn.hutool.json.JSONObject;
 import xiaozhi.common.exception.RenException;
 import xiaozhi.modules.agent.dao.AgentDao;
 import xiaozhi.modules.agent.entity.AgentEntity;
-import xiaozhi.modules.model.entity.ModelConfigEntity;
-import xiaozhi.modules.model.service.ModelConfigService;
 import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 
 class HotwordServiceTest {
     JdbcTemplate db = mock(JdbcTemplate.class);
     WorkspacePermissionService permission = mock(WorkspacePermissionService.class);
-    ModelConfigService models = mock(ModelConfigService.class);
+    HotwordCredentialSources sources = mock(HotwordCredentialSources.class);
     AgentDao agents = mock(AgentDao.class);
     VolcengineHotwordClient vendor = mock(VolcengineHotwordClient.class);
     PlatformTransactionManager transaction = mock(PlatformTransactionManager.class);
@@ -33,7 +30,7 @@ class HotwordServiceTest {
     @BeforeEach void setup() {
         when(transaction.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         when(permission.currentWorkspaceId()).thenReturn("workspace");
-        service = new HotwordService(db,new ObjectMapper(),permission,models,agents,vendor,events,transaction);
+        service = new HotwordService(db,new ObjectMapper(),permission,sources,agents,vendor,events,transaction);
         row = new HashMap<>(Map.of("id","local","workspace_id","workspace","name","词库","model_id","model",
                 "entries_json","[{\"word\":\"慧苑\",\"weight\":4}]","status","PUBLISHED","remote_id","old",
                 "update_date",new Timestamp(System.currentTimeMillis())));
@@ -42,23 +39,15 @@ class HotwordServiceTest {
         when(db.queryForList(startsWith("SELECT remote_id"),eq(String.class),eq("local"))).thenReturn(List.of("old","older"));
         when(db.update(anyString(),any(Object[].class))).thenReturn(1);
         when(agents.selectList(any())).thenReturn(List.of());
-        ModelConfigEntity model = new ModelConfigEntity(); model.setId("model"); model.setModelType("ASR"); model.setIsEnabled(1); model.setTestStatus(1);
-        model.setConfigJson(new JSONObject().set("type","doubao_stream").set("api_key","test-fixture"));
-        when(models.getModelByIdFromCache("model")).thenReturn(model);
+        row.put("credential_fingerprint","source");
+        var source = new HotwordCredentialSources.Source("source","火山引擎","test-fixture");
+        when(sources.require("source")).thenReturn(source);
+        when(sources.discover()).thenReturn(new HotwordCredentialSources.Discovery(List.of(source),false));
+        when(sources.forModel("model",true)).thenReturn("source");
     }
-    @Test void lowercaseCatalogModelsRemainAvailableForHotwordManagement() {
-        ModelConfigEntity model = models.getModelByIdFromCache("model");
-        model.setModelType("asr"); model.setModelName("豆包识别");
-        when(models.getEnabledModelsByType("ASR")).thenReturn(List.of(model));
-        assertEquals(1, service.modelOptions().size());
-        assertEquals("model", service.modelOptions().get(0).get("id"));
-        assertEquals("test-fixture", service.key("model"));
-        model.setIsEnabled(0);
-        assertTrue(service.modelOptions().isEmpty());
-        model.setIsEnabled(1); model.setTestStatus(0);
-        assertThrows(RenException.class, () -> service.key("model"));
-        model.setTestStatus(1); model.setModelType("tts");
-        assertTrue(service.modelOptions().isEmpty());
+    @Test void configuredSourcesAreExposedWithoutRequiringAnEnabledModel() {
+        var options = service.sourceOptions();
+        assertEquals(1, ((List<?>)options.get("sources")).size());
     }
     @Test void normalizationProducesWeightedFileWithoutTrailingNewline() {
         var entries = HotwordService.normalize(List.of(new HotwordSaveDTO.Entry(" 慧苑 ",null),new HotwordSaveDTO.Entry("小智",10)));
@@ -96,6 +85,28 @@ class HotwordServiceTest {
         assertThrows(RenException.class,()->service.apply("local",List.of("agent"),false));
         verify(events,never()).publishEvent(any(Object.class));
     }
+    @Test void appliesToDifferentModelUsingTheSameSource() {
+        AgentEntity agent = new AgentEntity(); agent.setId("agent"); agent.setWorkspaceId("workspace");
+        agent.setAsrModelId("recording-model");
+        when(sources.forModel("recording-model",true)).thenReturn("source");
+        when(agents.selectById("agent")).thenReturn(agent);
+        service.apply("local",List.of("agent"),false);
+        verify(db).update(startsWith("UPDATE ai_agent SET"),eq("old"),eq("[\"old\"]"),eq("agent"),eq("workspace"));
+    }
+    @Test void missingFingerprintOnPreviouslyPublishedLibraryDoesNotGuessCurrentModelKey() {
+        row.remove("credential_fingerprint");
+        service.publish("local");
+        verifyNoInteractions(vendor);
+        verify(db).update(startsWith("UPDATE ai_asr_hotword SET remote_id=?,status=?"),eq("old"),eq("FAILED"),contains("缺少可验证"),eq("local"),anyString());
+    }
+    @Test void unpublishedLegacyDraftPinsSourceBeforeVendorPublication() {
+        row.remove("credential_fingerprint"); row.remove("remote_id"); row.put("status","DRAFT");
+        when(sources.forModel("model",false)).thenReturn("source");
+        when(vendor.find(anyString(),anyString())).thenReturn("new");
+        service.publish("local");
+        verify(db).update("UPDATE ai_asr_hotword SET credential_fingerprint=? WHERE id=? AND credential_fingerprint IS NULL","source","local");
+        verify(vendor).verify(eq("test-fixture"),eq("new"),anyList());
+    }
     @Test void unapplyRemovesAllHistoricalReferencesAndKeepsUnrelatedCandidates() {
         AgentEntity agent = new AgentEntity(); agent.setId("agent"); agent.setWorkspaceId("workspace");
         agent.setAsrHotwordId("older"); agent.setAsrHotwordIds(List.of("older","old","unrelated"));
@@ -106,7 +117,24 @@ class HotwordServiceTest {
     @Test void publishingCannotBeEditedOrAppliedWhileRunning() {
         row.put("status","PUBLISHING");
         assertThrows(RenException.class,()->service.apply("local",List.of("agent"),false));
-        assertThrows(RenException.class,()->service.update("local",new HotwordSaveDTO("更新","model",List.of(new HotwordSaveDTO.Entry("小智",4)))));
+        assertThrows(RenException.class,()->service.update("local",new HotwordSaveDTO("更新","source",List.of(new HotwordSaveDTO.Entry("小智",4)))));
+    }
+    @Test void localDateTimeRowsUseDatabaseLeaseAgeWithoutTimestampCast() {
+        row.put("update_date",java.time.LocalDateTime.of(2026,10,8,10,0));
+        assertDoesNotThrow(() -> service.view(row));
+        row.put("status","PUBLISHING");
+        when(db.queryForObject(startsWith("SELECT TIMESTAMPDIFF"),eq(Long.class),eq("local"))).thenReturn(301L);
+        assertEquals(true,service.view(row).get("recoverable"));
+        when(vendor.find(anyString(),anyString())).thenReturn("new");
+        assertDoesNotThrow(() -> service.publish("local"));
+        verify(vendor).verify(eq("test-fixture"),eq("new"),anyList());
+    }
+    @Test void timestampRowsCannotRecoverUntilDatabaseLeaseExpires() {
+        row.put("update_date",new Timestamp(0)); row.put("status","PUBLISHING");
+        when(db.queryForObject(startsWith("SELECT TIMESTAMPDIFF"),eq(Long.class),eq("local"))).thenReturn(10L);
+        assertEquals(false,service.view(row).get("recoverable"));
+        assertThrows(RenException.class,()->service.publish("local"));
+        verifyNoInteractions(vendor);
     }
     @Test void deletionRejectsHistoricalCandidateOrTemplateReferences() {
         when(db.queryForObject(startsWith("SELECT COUNT(*) FROM ai_agent WHERE"),eq(Long.class),anyString(),anyString())).thenReturn(1L);
@@ -115,6 +143,7 @@ class HotwordServiceTest {
     }
     @Test void changedCredentialsCannotMoveLibraryToAnotherVendorAccount() {
         row.put("credential_fingerprint","different-fingerprint");
+        when(sources.require("different-fingerprint")).thenThrow(new RenException("来源凭据已变更"));
         assertThrows(RenException.class,()->service.apply("local",List.of("agent"),false));
         verify(db,never()).update(startsWith("UPDATE ai_agent SET"),any(Object[].class));
         service.publish("local");
@@ -134,6 +163,7 @@ class HotwordServiceTest {
                 .thenReturn(List.of(Map.of("remote_name","import_fixture","remote_id","old")));
         service.delete("local");
         verifyNoInteractions(vendor);
+        verify(sources,never()).require(anyString());
         verify(db).update("DELETE FROM ai_asr_hotword_revision WHERE remote_name=?","import_fixture");
     }
     @Test void deletingImportedLibraryOnlyRemovesSubsequentlyPublishedVendorVersions() {

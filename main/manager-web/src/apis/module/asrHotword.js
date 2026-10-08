@@ -16,9 +16,9 @@ function request(method, path = '', data) {
 const path = id => `/${encodeURIComponent(id)}`;
 export default {
   list: () => request('GET'),
-  models: () => request('GET', '/models'),
+  sources: () => request('GET', '/sources'),
   agents: () => request('GET', '/agents'),
-  remote: modelId => request('GET', `/remote?modelId=${encodeURIComponent(modelId)}`),
+  remote: () => request('GET', '/remote'),
   importRemote: payload => request('POST', '/import', payload),
   create: payload => request('POST', '', payload),
   update: (id, payload) => request('PUT', path(id), payload),

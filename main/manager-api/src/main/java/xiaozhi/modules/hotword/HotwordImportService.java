@@ -1,6 +1,8 @@
 package xiaozhi.modules.hotword;
 
 import java.util.*;
+import java.util.concurrent.*;
+import jakarta.annotation.PreDestroy;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.dao.DuplicateKeyException;
@@ -15,14 +17,24 @@ import xiaozhi.modules.security.user.SecurityUser;
 @Service
 public class HotwordImportService {
     private final HotwordService hotwords;
+    private final HotwordCredentialSources sources;
     private final VolcengineHotwordClient vendor;
     private final JdbcTemplate db;
     private final ObjectMapper mapper;
     private final TransactionTemplate tx;
+    private final ExecutorService listing = new ThreadPoolExecutor(4, 4, 0L, TimeUnit.MILLISECONDS,
+            new ArrayBlockingQueue<>(32), task -> {
+                Thread thread = new Thread(task, "hotword-source-list");
+                thread.setDaemon(true);
+                return thread;
+            });
 
-    public HotwordImportService(HotwordService hotwords, VolcengineHotwordClient vendor, JdbcTemplate db,
+    @PreDestroy
+    public void close() { listing.shutdownNow(); }
+
+    public HotwordImportService(HotwordService hotwords, HotwordCredentialSources sources, VolcengineHotwordClient vendor, JdbcTemplate db,
             ObjectMapper mapper, PlatformTransactionManager transactions) {
-        this.hotwords = hotwords; this.vendor = vendor; this.db = db; this.mapper = mapper;
+        this.hotwords = hotwords; this.sources = sources; this.vendor = vendor; this.db = db; this.mapper = mapper;
         this.tx = new TransactionTemplate(transactions);
     }
 
@@ -35,29 +47,55 @@ public class HotwordImportService {
         if (!canImport()) throw new RenException("仅平台管理员可读取和导入火山账号已有词库");
     }
 
-    public List<Map<String, Object>> remote(String modelId) {
+    public Map<String, Object> remote() {
         requireAdmin();
         String workspace = hotwords.workspace(false);
-        String key = hotwords.key(modelId);
-        List<Map<String, Object>> result = new ArrayList<>();
-        for (JsonNode table : vendor.list(key)) {
-            String remoteId = table.path("BoostingTableID").asText();
-            if (!remoteId.matches("[A-Za-z0-9_-]{1,128}")) throw new RenException("火山词表标识格式异常");
-            Map<String, Object> owner = owner(remoteId);
-            if (owner != null && (!workspace.equals(owner.get("workspace_id")) || !modelId.equals(owner.get("model_id")))) continue;
-            result.add(Map.of("remoteId", remoteId, "name", table.path("BoostingTableName").asText(remoteId),
-                    "wordCount", table.path("WordCount").asInt(), "imported", owner != null,
-                    "localId", owner == null ? "" : owner.get("id")));
+        Map<String, Map<String, Object>> result = new LinkedHashMap<>();
+        List<Map<String, Object>> errors = new ArrayList<>();
+        var discovery = sources.discover();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(60);
+        Map<String, Future<List<JsonNode>>> pending = new HashMap<>();
+        for (var source : discovery.sources()) {
+            try { pending.put(source.id(), listing.submit(() -> vendor.list(source.key()))); }
+            catch (RejectedExecutionException error) { /* Report this source below; never silently omit it. */ }
         }
-        return result;
+        for (var source : discovery.sources()) {
+            Future<List<JsonNode>> future = pending.get(source.id());
+            try {
+                if (future == null) throw new RejectedExecutionException();
+                var tables = future.get(Math.max(0L, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
+                for (JsonNode table : tables) {
+                    String remoteId = table.path("BoostingTableID").asText();
+                    if (!remoteId.matches("[A-Za-z0-9_-]{1,128}")) throw new RenException("火山词表标识格式异常");
+                    Map<String, Object> owner = owner(remoteId);
+                    if (owner != null && (!workspace.equals(owner.get("workspace_id"))
+                            || !source.id().equals(hotwords.sourceId(owner)))) continue;
+                    // The same vendor table can be visible through more than one key. Prefer its pinned owner.
+                    Map<String, Object> candidate = Map.of("remoteId", remoteId,
+                            "name", table.path("BoostingTableName").asText(remoteId),
+                            "wordCount", table.path("WordCount").asInt(), "imported", owner != null,
+                            "localId", owner == null ? "" : owner.get("id"),
+                            "sourceId", source.id(), "sourceName", source.name());
+                    if (owner != null) result.put(remoteId, candidate); else result.putIfAbsent(remoteId, candidate);
+                }
+            } catch (Exception error) {
+                if (error instanceof InterruptedException) Thread.currentThread().interrupt();
+                errors.add(Map.of("sourceId", source.id(), "sourceName", source.name(),
+                        "message", "该来源读取失败，请检查服务权限、配置或稍后重试"));
+            } finally {
+                if (future != null && !future.isDone()) future.cancel(true);
+            }
+        }
+        if (discovery.unavailable()) errors.add(Map.of("sourceId", "", "sourceName", "火山配置", "message", "部分配置暂不可用，请管理员检查配置"));
+        return Map.of("tables", new ArrayList<>(result.values()), "errors", errors);
     }
 
     public Map<String, Object> importRemote(HotwordImportDTO dto) {
         requireAdmin();
         String workspace = hotwords.workspace(true);
-        String key = hotwords.key(dto.modelId());
+        String key = sources.require(dto.sourceId()).key();
         Map<String, Object> existing = owner(dto.remoteId());
-        if (existing != null) return existing(existing, workspace, dto.modelId());
+        if (existing != null) return existing(existing, workspace, dto.sourceId());
         JsonNode table = vendor.get(key, dto.remoteId());
         List<HotwordSaveDTO.Entry> entries = parseEntries(table);
         String name = table.path("BoostingTableName").asText(dto.remoteId()).trim();
@@ -69,18 +107,18 @@ public class HotwordImportService {
         try {
             tx.executeWithoutResult(status -> {
                 ensureCompatibleReferences(dto, workspace);
-                db.update("INSERT INTO ai_asr_hotword(id,workspace_id,name,model_id,entries_json,remote_id,status,credential_fingerprint) VALUES(?,?,?,?,?,?,'PUBLISHED',?)",
-                        id, workspace, name, dto.modelId(), encoded, dto.remoteId(), HotwordService.digest(key));
-                // A global remote-ID unique index serializes concurrent claims across workspaces/models.
+                db.update("INSERT INTO ai_asr_hotword(id,workspace_id,name,entries_json,remote_id,status,credential_fingerprint) VALUES(?,?,?,?,?,'PUBLISHED',?)",
+                        id, workspace, name, encoded, dto.remoteId(), dto.sourceId());
+                // A global remote-ID unique index serializes concurrent claims across workspaces/sources.
                 db.update("INSERT INTO ai_asr_hotword_revision(remote_name,hotword_id,remote_id) VALUES(?,?,?)",
                         "import_" + HotwordService.digest(dto.remoteId()), id, dto.remoteId());
             });
         } catch (DuplicateKeyException e) {
             Map<String, Object> winner = owner(dto.remoteId());
             if (winner == null) throw new RenException("词库正在导入，请稍后刷新");
-            return existing(winner, workspace, dto.modelId());
+            return existing(winner, workspace, dto.sourceId());
         }
-        return existing(Objects.requireNonNull(owner(dto.remoteId())), workspace, dto.modelId());
+        return existing(Objects.requireNonNull(owner(dto.remoteId())), workspace, dto.sourceId());
     }
 
     private Map<String, Object> owner(String remoteId) {
@@ -88,21 +126,24 @@ public class HotwordImportService {
         return rows.isEmpty() ? null : rows.get(0);
     }
 
-    private Map<String, Object> existing(Map<String, Object> row, String workspace, String modelId) {
-        if (!workspace.equals(row.get("workspace_id")) || !modelId.equals(row.get("model_id")))
-            throw new RenException("该远端词库已由其他工作空间或识别模型管理");
+    private Map<String, Object> existing(Map<String, Object> row, String workspace, String sourceId) {
+        if (!workspace.equals(row.get("workspace_id")) || !sourceId.equals(hotwords.sourceId(row)))
+            throw new RenException("该远端词库已由其他工作空间或火山来源管理");
         if ("DELETING".equals(row.get("status"))) throw new RenException("词库正在删除，请稍后重试");
         return hotwords.view(row);
     }
 
     private void ensureCompatibleReferences(HotwordImportDTO dto, String workspace) {
         // Do not claim an old manually configured ID if doing so would invalidate other users' settings.
-        Long agents = db.queryForObject("SELECT COUNT(*) FROM ai_agent WHERE (asr_hotword_id=? OR JSON_CONTAINS(COALESCE(asr_hotword_ids,JSON_ARRAY()),JSON_QUOTE(?))) AND (NOT(workspace_id <=> ?) OR NOT(asr_model_id <=> ?))",
-                Long.class, dto.remoteId(), dto.remoteId(), workspace, dto.modelId());
-        Long templates = db.queryForObject("SELECT COUNT(*) FROM ai_agent_template WHERE (asr_hotword_id=? OR JSON_SEARCH(asr_hotword_ids,'one',?) IS NOT NULL OR JSON_SEARCH(snapshot_json,'one',?) IS NOT NULL OR JSON_SEARCH(public_snapshot_json,'one',?) IS NOT NULL) AND (NOT(workspace_id <=> ?) OR NOT(asr_model_id <=> ?))",
-                Long.class, dto.remoteId(), dto.remoteId(), dto.remoteId(), dto.remoteId(), workspace, dto.modelId());
-        if ((agents != null && agents > 0) || (templates != null && templates > 0))
-            throw new RenException("该词库正被其他工作空间或识别模型引用，无法认领；请先统一原有引用");
+        var references = new ArrayList<>(db.queryForList("SELECT workspace_id,asr_model_id FROM ai_agent WHERE asr_hotword_id=? OR JSON_CONTAINS(COALESCE(asr_hotword_ids,JSON_ARRAY()),JSON_QUOTE(?))",
+                dto.remoteId(), dto.remoteId()));
+        references.addAll(db.queryForList("SELECT workspace_id,asr_model_id FROM ai_agent_template WHERE asr_hotword_id=? OR JSON_SEARCH(asr_hotword_ids,'one',?) IS NOT NULL OR JSON_SEARCH(snapshot_json,'one',?) IS NOT NULL OR JSON_SEARCH(public_snapshot_json,'one',?) IS NOT NULL",
+                dto.remoteId(), dto.remoteId(), dto.remoteId(), dto.remoteId()));
+        for (var reference : references) {
+            if (!workspace.equals(reference.get("workspace_id"))
+                    || !dto.sourceId().equals(sources.forModel((String) reference.get("asr_model_id"), false)))
+                throw new RenException("该词库正被其他工作空间或不兼容来源引用，无法认领；请先统一原有引用");
+        }
     }
 
     static List<HotwordSaveDTO.Entry> parseEntries(JsonNode table) {

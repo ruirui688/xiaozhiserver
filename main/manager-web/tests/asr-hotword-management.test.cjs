@@ -16,7 +16,7 @@ function component(api = {}) {
 }
 test('manual local refresh explains an empty result without claiming vendor synchronization', async () => {
   const notices = [];
-  const c = component({ list: async () => [], models: async () => [], agents: async () => [] });
+  const c = component({ list: async () => [], sources: async () => ({ sources: [], capabilities: {} }), agents: async () => [] });
   const vm = { generation: 0, current: () => true, $message: { success: text => notices.push(text) } };
   await c.methods.load.call(vm, true);
   assert.equal(vm.loading, false);
@@ -26,7 +26,7 @@ test('manual local refresh explains an empty result without claiming vendor sync
   assert.equal(notices.length, 1);
 });
 test('failed refresh displays error without reporting success', async () => {
-  const c = component({ list: async () => { throw new Error('读取失败'); }, models: async () => [], agents: async () => [] });
+  const c = component({ list: async () => { throw new Error('读取失败'); }, sources: async () => ({ sources: [], capabilities: {} }), agents: async () => [] });
   const vm = { generation: 0, current: () => true, $message: { success: () => assert.fail('false success') } };
   await c.methods.load.call(vm, true);
   assert.equal(vm.error, '读取失败');
@@ -34,7 +34,7 @@ test('failed refresh displays error without reporting success', async () => {
 });
 test('stale workspace responses never replace current rows', async () => {
   let finish;
-  const c = component({ list: () => new Promise(resolve => { finish = resolve; }), models: async () => [], agents: async () => [] });
+  const c = component({ list: () => new Promise(resolve => { finish = resolve; }), sources: async () => ({ sources: [], capabilities: {} }), agents: async () => [] });
   const vm = { generation: 0, rows: ['current'], current: () => false };
   const promise = c.methods.load.call(vm); finish(['stale']); await promise;
   assert.deepEqual(vm.rows, ['current']);
@@ -42,7 +42,7 @@ test('stale workspace responses never replace current rows', async () => {
 test('save retains editor and reports rejection instead of claiming publication', async () => {
   const c = component({ create: async () => { throw new Error('无写入权限'); } });
   const vm = { ...c.methods, busy: false, canWrite: true, generation: 1, current: () => true, editorVisible: true,
-    editingId: '', form: { name: '词库', modelId: 'model', text: '慧苑' } };
+    editingId: '', form: { name: '词库', sourceId: 'source', text: '慧苑' } };
   await vm.save();
   assert.equal(vm.editorVisible, true); assert.equal(vm.dialogError, '无写入权限'); assert.equal(vm.busy, false);
 });
@@ -95,49 +95,66 @@ function importDialog(api = {}) {
   return loadVueComponent('src/components/resource/AsrHotwordImportDialog.vue', { '@/apis/module/asrHotword': { __esModule: true, default: api } });
 }
 function importVm(c, extra = {}) {
-  return { ...c.data(), ...c.methods, canWrite: true, modelId: 'model', current: () => true, ...extra };
+  return { ...c.data(), ...c.methods, canWrite: true, sourceId: 'source', current: () => true, ...extra };
 }
-test('remote sync entry only offers models authorized by server', () => {
+test('source capability messages distinguish permission, configuration and availability', () => {
   const c = component();
-  const allowed = { id: 'allowed', canImportRemote: true };
-  assert.deepEqual(c.computed.importModels.call({ models: [allowed, { id: 'shared' }, { id: 'denied', canImportRemote: false }] }), [allowed]);
+  for (const message of ['无同步权限', '尚未配置火山来源', '火山来源暂不可用']) {
+    assert.equal(c.computed.sourceNotice.call({ capabilities: { message } }), message);
+  }
+  assert.deepEqual(c.computed.availableSources.call({ sources: [] }), []);
 });
-test('switching model ignores a previous remote response', async () => {
-  let finish;
-  const c = importDialog({ remote: id => id === 'model' ? new Promise(resolve => { finish = resolve; }) : Promise.resolve([{ remoteId: 'new' }]) });
-  const vm = importVm(c);
-  vm.current = generation => vm.generation === generation;
-  const oldRequest = vm.loadRemote();
-  vm.modelId = 'other'; await vm.loadRemote();
-  finish([{ remoteId: 'old' }]); await oldRequest;
+test('single source creation selects automatically and same source permits different ASR models', () => {
+  const c = component(); const vm = { ...c.methods, availableSources: [{ id: 'source' }] };
+  vm.edit(); assert.equal(vm.form.sourceId, 'source');
+  const agents = [{ id: 'a', asrModelId: 'stream', sourceId: 'source' }, { id: 'b', asrModelId: 'recording', sourceId: 'source' }, { id: 'c', sourceId: 'other' }];
+  assert.deepEqual(c.computed.compatibleAgents.call({ agents, applying: { sourceId: 'source' } }), agents.slice(0, 2));
+});
+test('opening sync automatically loads all sources without selecting a model', async () => {
+  const calls = [];
+  const c = importDialog({ remote: async (...args) => { calls.push(args); return { tables: [{ sourceId: 's', remoteId: 'r' }], errors: [] }; } });
+  const vm = importVm(c); c.created.call(vm); await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(calls, [[]]); assert.equal(vm.rows.length, 1);
+});
+test('newer remote refresh ignores a previous response', async () => {
+  let finish; let count = 0;
+  const c = importDialog({ remote: () => ++count === 1 ? new Promise(resolve => { finish = resolve; }) : Promise.resolve({ tables: [{ remoteId: 'new' }], errors: [] }) });
+  const vm = importVm(c); vm.current = generation => vm.generation === generation;
+  const oldRequest = vm.loadRemote(); await vm.loadRemote();
+  finish({ tables: [{ remoteId: 'old' }] }); await oldRequest;
   assert.deepEqual(vm.rows, [{ remoteId: 'new' }]); assert.equal(vm.loading, false);
 });
-test('remote read failure clears stale entries and supports retry', async () => {
+test('partial cloud failure preserves successful source results and retry clears errors', async () => {
   let attempts = 0;
-  const c = importDialog({ remote: async () => { if (++attempts === 1) throw new Error('火山读取失败'); return [{ remoteId: 'id' }]; } });
-  const vm = importVm(c, { rows: [{ remoteId: 'stale' }] });
-  await vm.loadRemote();
-  assert.deepEqual(vm.rows, []); assert.equal(vm.error, '火山读取失败'); assert.equal(vm.loading, false);
-  await vm.loadRemote(); assert.deepEqual(vm.rows, [{ remoteId: 'id' }]); assert.equal(vm.error, '');
+  const rows = [{ sourceId: 'ok', remoteId: 'r' }];
+  const c = importDialog({ remote: async () => ({ tables: rows, errors: ++attempts === 1 ? [{ sourceName: '第二来源', message: '连接失败' }] : [] }) });
+  const vm = importVm(c); await vm.loadRemote();
+  assert.deepEqual(vm.rows, rows); assert.equal(vm.sourceErrors.length, 1);
+  await vm.loadRemote(); assert.deepEqual(vm.sourceErrors, []);
 });
-test('successful import refreshes parent and prevents duplicate submission without publishing or applying', async () => {
+test('network failure preserves last successful list and supports retry', async () => {
+  let attempts = 0;
+  const c = importDialog({ remote: async () => { if (++attempts === 1) throw new Error('火山读取失败'); return { tables: [], errors: [] }; } });
+  const vm = importVm(c, { rows: [{ remoteId: 'existing' }] });
+  await vm.loadRemote(); assert.equal(vm.rows.length, 1); assert.equal(vm.error, '火山读取失败'); assert.equal(vm.loading, false);
+  await vm.loadRemote(); assert.deepEqual(vm.rows, []); assert.equal(vm.error, '');
+});
+test('successful import uses source identity and refreshes parent without duplicate submission', async () => {
   const requests = []; const events = [];
   const c = importDialog({ importRemote: async payload => requests.push(payload), publish: () => assert.fail('publish'), apply: () => assert.fail('apply') });
-  const row = { remoteId: 'remote', name: 'existing', imported: false };
+  const row = { sourceId: 'source', remoteId: 'remote', imported: false };
   const vm = importVm(c, { rows: [row], $message: { success: () => {} }, $emit: event => events.push(event) });
   await vm.importRow(row); await vm.importRow(vm.rows[0]);
-  assert.deepEqual(requests, [{ modelId: 'model', remoteId: 'remote' }]);
-  assert.deepEqual(events, ['imported']); assert.equal(vm.rows[0].imported, true); assert.equal(vm.importing, '');
+  assert.deepEqual(requests, [{ sourceId: 'source', remoteId: 'remote' }]); assert.deepEqual(events, ['imported']); assert.equal(vm.importing, '');
 });
 test('failed import keeps row actionable and does not refresh or claim success', async () => {
   const c = importDialog({ importRemote: async () => { throw new Error('无导入权限'); } });
-  const row = { remoteId: 'remote', imported: false };
+  const row = { sourceId: 'source', remoteId: 'remote', imported: false };
   const vm = importVm(c, { rows: [row], $message: { success: () => assert.fail('success') }, $emit: () => assert.fail('refresh') });
-  await vm.importRow(row);
-  assert.equal(vm.error, '无导入权限'); assert.equal(vm.rows[0].imported, false); assert.equal(vm.importing, '');
+  await vm.importRow(row); assert.equal(vm.error, '无导入权限'); assert.equal(vm.rows[0].imported, false); assert.equal(vm.importing, '');
 });
 test('read-only and changed workspace cannot import cloud words', async () => {
   const c = importDialog({ importRemote: () => assert.fail('unauthorized import') });
-  await importVm(c, { canWrite: false }).importRow({ remoteId: 'id' });
-  await importVm(c, { current: () => false }).importRow({ remoteId: 'id' });
+  await importVm(c, { canWrite: false }).importRow({ sourceId: 's', remoteId: 'id' });
+  await importVm(c, { current: () => false }).importRow({ sourceId: 's', remoteId: 'id' });
 });

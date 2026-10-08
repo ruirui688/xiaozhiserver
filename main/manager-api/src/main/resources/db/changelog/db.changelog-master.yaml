@@ -1495,3 +1495,10 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/asr-hotword-import.sql
+  - changeSet:
+      id: asr-hotword-credential-source-20261008
+      author: Codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/asr-hotword-credential-source.sql
