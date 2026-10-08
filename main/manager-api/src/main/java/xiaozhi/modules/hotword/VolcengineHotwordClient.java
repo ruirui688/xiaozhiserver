@@ -20,6 +20,26 @@ public class VolcengineHotwordClient {
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10))
             .followRedirects(HttpClient.Redirect.NEVER).build();
 
+    public List<JsonNode> list(String key) {
+        List<JsonNode> all = new ArrayList<>();
+        long deadline = System.nanoTime() + Duration.ofSeconds(90).toNanos();
+        for (int page = 1; page <= 50; page++) {
+            if (System.nanoTime() > deadline) throw new RenException("查询词表超时，请稍后重试");
+            JsonNode tables = json(key, "ListBoostingTable", Map.of("PageNumber", page, "PageSize", 100, "PreviewSize", 0)).path("BoostingTables");
+            if (!tables.isArray()) throw new RenException("火山词表列表响应格式异常");
+            tables.forEach(all::add);
+            if (tables.size() < 100) return all;
+        }
+        throw new RenException("火山词表数量超出查询范围");
+    }
+
+    public JsonNode get(String key, String id) {
+        JsonNode result = json(key, "GetBoostingTable", Map.of("BoostingTableID", requireId(id), "PreviewSize", 5000));
+        JsonNode table = result.has("BoostingTable") ? result.path("BoostingTable") : result;
+        if (!id.equals(table.path("BoostingTableID").asText())) throw new RenException("火山词表标识核对失败");
+        return table;
+    }
+
     public String find(String key, String name) {
         long deadline = System.nanoTime() + Duration.ofSeconds(90).toNanos();
         for (int page = 1; page <= 50; page++) {

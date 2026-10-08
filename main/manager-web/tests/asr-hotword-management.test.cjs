@@ -72,3 +72,54 @@ test('word length respects UTF-8 quota for Chinese, ASCII and mixed words', () =
     assert.throws(() => utils.parseHotwordText(word), /热词过长/);
   }
 });
+
+function importDialog(api = {}) {
+  return loadVueComponent('src/components/resource/AsrHotwordImportDialog.vue', { '@/apis/module/asrHotword': { __esModule: true, default: api } });
+}
+function importVm(c, extra = {}) {
+  return { ...c.data(), ...c.methods, canWrite: true, modelId: 'model', current: () => true, ...extra };
+}
+test('remote sync entry only offers models authorized by server', () => {
+  const c = component();
+  const allowed = { id: 'allowed', canImportRemote: true };
+  assert.deepEqual(c.computed.importModels.call({ models: [allowed, { id: 'shared' }, { id: 'denied', canImportRemote: false }] }), [allowed]);
+});
+test('switching model ignores a previous remote response', async () => {
+  let finish;
+  const c = importDialog({ remote: id => id === 'model' ? new Promise(resolve => { finish = resolve; }) : Promise.resolve([{ remoteId: 'new' }]) });
+  const vm = importVm(c);
+  vm.current = generation => vm.generation === generation;
+  const oldRequest = vm.loadRemote();
+  vm.modelId = 'other'; await vm.loadRemote();
+  finish([{ remoteId: 'old' }]); await oldRequest;
+  assert.deepEqual(vm.rows, [{ remoteId: 'new' }]); assert.equal(vm.loading, false);
+});
+test('remote read failure clears stale entries and supports retry', async () => {
+  let attempts = 0;
+  const c = importDialog({ remote: async () => { if (++attempts === 1) throw new Error('火山读取失败'); return [{ remoteId: 'id' }]; } });
+  const vm = importVm(c, { rows: [{ remoteId: 'stale' }] });
+  await vm.loadRemote();
+  assert.deepEqual(vm.rows, []); assert.equal(vm.error, '火山读取失败'); assert.equal(vm.loading, false);
+  await vm.loadRemote(); assert.deepEqual(vm.rows, [{ remoteId: 'id' }]); assert.equal(vm.error, '');
+});
+test('successful import refreshes parent and prevents duplicate submission without publishing or applying', async () => {
+  const requests = []; const events = [];
+  const c = importDialog({ importRemote: async payload => requests.push(payload), publish: () => assert.fail('publish'), apply: () => assert.fail('apply') });
+  const row = { remoteId: 'remote', name: 'existing', imported: false };
+  const vm = importVm(c, { rows: [row], $message: { success: () => {} }, $emit: event => events.push(event) });
+  await vm.importRow(row); await vm.importRow(vm.rows[0]);
+  assert.deepEqual(requests, [{ modelId: 'model', remoteId: 'remote' }]);
+  assert.deepEqual(events, ['imported']); assert.equal(vm.rows[0].imported, true); assert.equal(vm.importing, '');
+});
+test('failed import keeps row actionable and does not refresh or claim success', async () => {
+  const c = importDialog({ importRemote: async () => { throw new Error('无导入权限'); } });
+  const row = { remoteId: 'remote', imported: false };
+  const vm = importVm(c, { rows: [row], $message: { success: () => assert.fail('success') }, $emit: () => assert.fail('refresh') });
+  await vm.importRow(row);
+  assert.equal(vm.error, '无导入权限'); assert.equal(vm.rows[0].imported, false); assert.equal(vm.importing, '');
+});
+test('read-only and changed workspace cannot import cloud words', async () => {
+  const c = importDialog({ importRemote: () => assert.fail('unauthorized import') });
+  await importVm(c, { canWrite: false }).importRow({ remoteId: 'id' });
+  await importVm(c, { current: () => false }).importRow({ remoteId: 'id' });
+});

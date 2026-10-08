@@ -115,6 +115,23 @@ class HotwordServiceTest {
         verify(db,never()).update(startsWith("DELETE FROM ai_asr_hotword"),any(Object[].class));
         verify(db).update(startsWith("UPDATE ai_asr_hotword SET remote_id=?,status=?"),eq("old"),eq("FAILED"),eq("暂时不可用"),eq("local"),anyString());
     }
+    @Test void importedOriginalIsNeverDeletedFromVendorAccount() {
+        when(db.queryForList("SELECT * FROM ai_asr_hotword_revision WHERE hotword_id=?","local"))
+                .thenReturn(List.of(Map.of("remote_name","import_fixture","remote_id","old")));
+        service.delete("local");
+        verifyNoInteractions(vendor);
+        verify(db).update("DELETE FROM ai_asr_hotword_revision WHERE remote_name=?","import_fixture");
+    }
+    @Test void deletingImportedLibraryOnlyRemovesSubsequentlyPublishedVendorVersions() {
+        when(db.queryForList("SELECT * FROM ai_asr_hotword_revision WHERE hotword_id=?","local"))
+                .thenReturn(List.of(Map.of("remote_name","import_fixture","remote_id","old"),
+                        Map.of("remote_name","xz_local_fixture","remote_id","new")));
+        when(vendor.find("test-fixture","xz_local_fixture")).thenReturn("new");
+        service.delete("local");
+        verify(vendor).find("test-fixture","xz_local_fixture");
+        verify(vendor).delete("test-fixture","new");
+        verifyNoMoreInteractions(vendor);
+    }
     @Test void readOnlyWorkspaceCannotCreatePublishOrApply() {
         doThrow(new RenException("只读工作空间")).when(permission).requireWrite("workspace");
         assertThrows(RenException.class,()->service.create(new HotwordSaveDTO("词库","model",List.of(new HotwordSaveDTO.Entry("慧苑",4)))));

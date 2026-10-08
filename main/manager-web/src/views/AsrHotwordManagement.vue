@@ -5,12 +5,13 @@
       <div class="toolbar">
         <div><h1>热词库</h1><p>录入专有名词，发布到火山引擎，再应用到智能体。</p></div>
         <el-button icon="el-icon-refresh" :disabled="busy" :loading="loading" @click="load">刷新</el-button>
+        <el-button v-if="importModels.length" icon="el-icon-download" :disabled="!canWrite || busy || loading" @click="importVisible = true">从火山同步</el-button>
         <el-button type="primary" icon="el-icon-plus" :disabled="!canWrite || busy || loading" @click="edit()">新建词库</el-button>
       </div>
       <el-alert title="保存只生成草稿；发布会创建新版本，原有智能体保持当前版本。发布成功后请显式应用到需要更新的智能体。" type="info" :closable="false" show-icon />
       <el-alert v-if="error" class="notice" :title="error" type="error" :closable="false" show-icon />
       <section class="list" v-loading="loading">
-        <el-table :data="rows" empty-text="暂无热词库，点击“新建词库”开始录入">
+        <el-table :data="rows" :empty-text="importModels.length ? '暂无热词库，可从火山同步已有词库，或新建词库' : '暂无热词库，可新建词库；火山已有词库请联系平台管理员同步'">
           <el-table-column prop="name" label="词库名称" min-width="140" />
           <el-table-column label="识别模型" min-width="150"><template slot-scope="scope">{{ modelName(scope.row.modelId) }}</template></el-table-column>
           <el-table-column label="词条" width="75"><template slot-scope="scope">{{ (scope.row.entries || []).length }}</template></el-table-column>
@@ -31,6 +32,7 @@
         </el-table>
       </section>
     </main>
+    <AsrHotwordImportDialog v-if="importVisible" :models="importModels" :can-write="canWrite" :workspace-id="workspaceId" @close="importVisible = false" @imported="load" />
     <el-dialog :title="editingId ? '编辑热词库' : '新建热词库'" :visible.sync="editorVisible" width="620px" :close-on-click-modal="false" :close-on-press-escape="!busy" :show-close="!busy">
       <el-form label-width="85px" @submit.native.prevent>
         <el-form-item label="词库名称"><el-input v-model="form.name" maxlength="80" show-word-limit :disabled="busy" /></el-form-item>
@@ -58,14 +60,18 @@
 <script>
 import HeaderBar from '@/components/HeaderBar.vue';
 import ResourceCenterNav from '@/components/resource/ResourceCenterNav.vue';
+import AsrHotwordImportDialog from '@/components/resource/AsrHotwordImportDialog.vue';
 import api from '@/apis/module/asrHotword';
 import { parseHotwordText, formatHotwordEntries, hotwordStatus } from '@/utils/asrHotwords';
 export default {
-  components: { HeaderBar, ResourceCenterNav },
+  components: { HeaderBar, ResourceCenterNav, AsrHotwordImportDialog },
   data() { return { rows: [], models: [], agents: [], loading: false, busy: false, error: '', dialogError: '', generation: 0,
     workspaceId: localStorage.getItem('currentWorkspaceId'), canWrite: localStorage.getItem('currentWorkspaceCanWrite') !== 'false',
-    editorVisible: false, applyVisible: false, editingId: '', form: { name: '', modelId: '', text: '' }, applying: null, selectedAgents: [] }; },
-  computed: { compatibleAgents() { return this.agents.filter(agent => this.applying && agent.asrModelId === this.applying.modelId); } },
+    editorVisible: false, applyVisible: false, importVisible: false, editingId: '', form: { name: '', modelId: '', text: '' }, applying: null, selectedAgents: [] }; },
+  computed: {
+    importModels() { return this.models.filter(model => model.canImportRemote === true); },
+    compatibleAgents() { return this.agents.filter(agent => this.applying && agent.asrModelId === this.applying.modelId); }
+  },
   created() { this.load(); },
   beforeDestroy() { this.generation++; },
   methods: {
@@ -128,7 +134,7 @@ export default {
     },
     async remove(row) {
       const generation = this.generation;
-      try { await this.$confirm(`删除“${row.name}”？已注册的火山词表也会被删除。`, '删除热词库', { type: 'warning' }); } catch (_) { return; }
+      try { await this.$confirm(`删除“${row.name}”？本项目发布的火山词表版本会被删除；从火山导入的原始词表会保留。`, '删除热词库', { type: 'warning' }); } catch (_) { return; }
       if (!this.current(generation)) return;
       await this.perform(() => api.remove(row.id), () => this.$message.success('词库已删除'));
     }

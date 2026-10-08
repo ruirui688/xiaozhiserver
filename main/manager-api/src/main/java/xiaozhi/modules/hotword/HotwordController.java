@@ -14,6 +14,13 @@ import xiaozhi.common.utils.Result;
 @RequiresPermissions("sys:role:normal")
 public class HotwordController {
     private final HotwordService service;
+    private final HotwordImportService imports;
+    @GetMapping("/remote")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<List<Map<String, Object>>> remote(@RequestParam String modelId) { return new Result<List<Map<String, Object>>>().ok(imports.remote(modelId)); }
+    @PostMapping("/import")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<Map<String, Object>> importRemote(@Valid @RequestBody HotwordImportDTO dto) { return new Result<Map<String, Object>>().ok(imports.importRemote(dto)); }
     @GetMapping
     public Result<List<Map<String, Object>>> list() { return new Result<List<Map<String, Object>>>().ok(service.list()); }
     @GetMapping("/models")

@@ -673,6 +673,8 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/manager-api/src/main/java/xiaozhi/modules/hotword/
   - main/manager-api/src/main/java/xiaozhi/modules/agent/support/ManagedAsrHotwordGuard.java
   - main/manager-api/src/main/resources/db/changelog/asr-hotword-management.sql
+  - main/manager-api/src/main/resources/db/changelog/asr-hotword-import.sql
+  - main/manager-web/src/components/resource/AsrHotwordImportDialog.vue
   - main/manager-web/src/views/AsrHotwordManagement.vue
   - main/manager-web/src/components/role/RoleEditDialog.vue
   - main/manager-web/src/components/role/AsrHotwordField.vue

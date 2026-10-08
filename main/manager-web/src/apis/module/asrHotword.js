@@ -18,6 +18,8 @@ export default {
   list: () => request('GET'),
   models: () => request('GET', '/models'),
   agents: () => request('GET', '/agents'),
+  remote: modelId => request('GET', `/remote?modelId=${encodeURIComponent(modelId)}`),
+  importRemote: payload => request('POST', '/import', payload),
   create: payload => request('POST', '', payload),
   update: (id, payload) => request('PUT', path(id), payload),
   remove: id => request('DELETE', path(id)),

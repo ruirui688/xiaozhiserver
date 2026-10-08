@@ -48,7 +48,8 @@ public class HotwordService {
     public List<Map<String, Object>> modelOptions() {
         workspace(false);
         return models.getEnabledModelsByType("ASR").stream().filter(this::supported)
-                .map(m -> Map.<String, Object>of("id", m.getId(), "modelName", m.getModelName())).toList();
+                .map(m -> Map.<String, Object>of("id", m.getId(), "modelName", m.getModelName(),
+                        "canImportRemote", HotwordImportService.canImport())).toList();
     }
 
     public List<Map<String, Object>> agentOptions() {
@@ -122,6 +123,11 @@ public class HotwordService {
             if (!revisions.isEmpty()) {
                 String key = credential(row);
                 for (Map<String, Object> revision : revisions) {
+                    // Imported originals remain owned by the vendor account, never delete them.
+                    if (((String) revision.get("remote_name")).startsWith("import_")) {
+                        db.update("DELETE FROM ai_asr_hotword_revision WHERE remote_name=?", revision.get("remote_name"));
+                        continue;
+                    }
                     heartbeat(id, token);
                     String found = vendor.find(key, (String) revision.get("remote_name"));
                     heartbeat(id, token);
@@ -215,7 +221,7 @@ public class HotwordService {
             throw new RenException("操作已被恢复任务接管，请刷新页面");
     }
 
-    private String workspace(boolean write) {
+    String workspace(boolean write) {
         String id = permission.currentWorkspaceId();
         if (write) permission.requireWrite(id); else permission.requireRead(id);
         return id;
@@ -225,11 +231,13 @@ public class HotwordService {
         return agents.selectList(new LambdaQueryWrapper<AgentEntity>().eq(AgentEntity::getWorkspaceId, workspace));
     }
 
-    private Map<String, Object> view(Map<String, Object> row) {
+    Map<String, Object> view(Map<String, Object> row) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("id", row.get("id")); result.put("name", row.get("name"));
         result.put("modelId", row.get("model_id")); result.put("remoteId", row.get("remote_id"));
         result.put("entries", decode(row.get("entries_json"))); result.put("status", row.get("status"));
+        Long imported = db.queryForObject("SELECT COUNT(*) FROM ai_asr_hotword_revision WHERE hotword_id=? AND LEFT(remote_name,7)='import_'", Long.class, row.get("id"));
+        result.put("imported", imported != null && imported > 0);
         result.put("lastError", row.get("last_error")); result.put("updateDate", row.get("update_date"));
         Timestamp updated = (Timestamp) row.get("update_date");
         result.put("recoverable", Set.of("PUBLISHING", "DELETING").contains(row.get("status"))
@@ -265,7 +273,7 @@ public class HotwordService {
                 && key != null && !key.isBlank() && !key.contains("你的") && !key.contains("***");
     }
 
-    private String key(String id) { return model(id).getConfigJson().getStr("api_key").trim(); }
+    String key(String id) { return model(id).getConfigJson().getStr("api_key").trim(); }
     private String credential(Map<String, Object> row) {
         String key = key((String) row.get("model_id"));
         String fingerprint = digest(key);
@@ -281,7 +289,7 @@ public class HotwordService {
     private String remoteName(String id, String contents) {
         return "xz_" + id + "_" + digest(contents).substring(0, 24);
     }
-    private String digest(String contents) {
+    static String digest(String contents) {
         try {
             byte[] hash = java.security.MessageDigest.getInstance("SHA-256").digest(contents.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(hash);
