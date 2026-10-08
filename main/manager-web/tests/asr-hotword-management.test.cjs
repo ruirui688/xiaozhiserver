@@ -14,6 +14,24 @@ test('reject malformed, duplicate and out of range hotwords before registration'
 function component(api = {}) {
   return loadVueComponent('src/views/AsrHotwordManagement.vue', { '@/apis/module/asrHotword': { __esModule: true, default: api } });
 }
+test('manual local refresh explains an empty result without claiming vendor synchronization', async () => {
+  const notices = [];
+  const c = component({ list: async () => [], models: async () => [], agents: async () => [] });
+  const vm = { generation: 0, current: () => true, $message: { success: text => notices.push(text) } };
+  await c.methods.load.call(vm, true);
+  assert.equal(vm.loading, false);
+  assert.match(notices[0], /本地暂无词库/);
+  assert.match(notices[0], /从火山同步/);
+  await c.methods.load.call(vm);
+  assert.equal(notices.length, 1);
+});
+test('failed refresh displays error without reporting success', async () => {
+  const c = component({ list: async () => { throw new Error('读取失败'); }, models: async () => [], agents: async () => [] });
+  const vm = { generation: 0, current: () => true, $message: { success: () => assert.fail('false success') } };
+  await c.methods.load.call(vm, true);
+  assert.equal(vm.error, '读取失败');
+  assert.equal(vm.loading, false);
+});
 test('stale workspace responses never replace current rows', async () => {
   let finish;
   const c = component({ list: () => new Promise(resolve => { finish = resolve; }), models: async () => [], agents: async () => [] });

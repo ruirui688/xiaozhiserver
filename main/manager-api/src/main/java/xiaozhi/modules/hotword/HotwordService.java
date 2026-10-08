@@ -265,7 +265,7 @@ public class HotwordService {
     }
 
     private boolean supported(ModelConfigEntity model) {
-        if (model == null || !"ASR".equals(model.getModelType()) || !Objects.equals(1, model.getIsEnabled())
+        if (model == null || !"ASR".equalsIgnoreCase(model.getModelType()) || !Objects.equals(1, model.getIsEnabled())
                 || !Objects.equals(1, model.getTestStatus()) || model.getConfigJson() == null) return false;
         String adapter = model.getConfigJson().getStr("type", model.getAdapterCode());
         String key = model.getConfigJson().getStr("api_key");

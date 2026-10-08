@@ -46,6 +46,20 @@ class HotwordServiceTest {
         model.setConfigJson(new JSONObject().set("type","doubao_stream").set("api_key","test-fixture"));
         when(models.getModelByIdFromCache("model")).thenReturn(model);
     }
+    @Test void lowercaseCatalogModelsRemainAvailableForHotwordManagement() {
+        ModelConfigEntity model = models.getModelByIdFromCache("model");
+        model.setModelType("asr"); model.setModelName("豆包识别");
+        when(models.getEnabledModelsByType("ASR")).thenReturn(List.of(model));
+        assertEquals(1, service.modelOptions().size());
+        assertEquals("model", service.modelOptions().get(0).get("id"));
+        assertEquals("test-fixture", service.key("model"));
+        model.setIsEnabled(0);
+        assertTrue(service.modelOptions().isEmpty());
+        model.setIsEnabled(1); model.setTestStatus(0);
+        assertThrows(RenException.class, () -> service.key("model"));
+        model.setTestStatus(1); model.setModelType("tts");
+        assertTrue(service.modelOptions().isEmpty());
+    }
     @Test void normalizationProducesWeightedFileWithoutTrailingNewline() {
         var entries = HotwordService.normalize(List.of(new HotwordSaveDTO.Entry(" 慧苑 ",null),new HotwordSaveDTO.Entry("小智",10)));
         assertEquals("慧苑|4\n小智|10",HotwordService.contents(entries));

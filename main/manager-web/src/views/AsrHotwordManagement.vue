@@ -4,7 +4,7 @@
     <main>
       <div class="toolbar">
         <div><h1>热词库</h1><p>录入专有名词，发布到火山引擎，再应用到智能体。</p></div>
-        <el-button icon="el-icon-refresh" :disabled="busy" :loading="loading" @click="load">刷新</el-button>
+        <el-button icon="el-icon-refresh" :disabled="busy" :loading="loading" @click="load(true)">刷新本地列表</el-button>
         <el-button v-if="importModels.length" icon="el-icon-download" :disabled="!canWrite || busy || loading" @click="importVisible = true">从火山同步</el-button>
         <el-button type="primary" icon="el-icon-plus" :disabled="!canWrite || busy || loading" @click="edit()">新建词库</el-button>
       </div>
@@ -80,12 +80,15 @@ export default {
     actionLocked(row, state) { return this.locked(row) && !(row.recoverable === true && row.status === state); },
     current(generation) { return generation === this.generation && this.workspaceId === localStorage.getItem('currentWorkspaceId'); },
     modelName(id) { const model = this.models.find(item => item.id === id); return model ? model.modelName : '模型不可用'; },
-    async load() {
+    async load(notify = false) {
       const generation = ++this.generation; this.loading = true; this.error = '';
       try {
         const [rows, models, agents] = await Promise.all([api.list(), api.models(), api.agents()]);
         if (!this.current(generation)) return;
         this.rows = rows || []; this.models = models || []; this.agents = agents || [];
+        if (notify === true) this.$message.success(this.rows.length
+          ? `已刷新，共 ${this.rows.length} 个本地词库`
+          : '本地暂无词库；火山已有词库需通过“从火山同步”导入');
       } catch (error) { if (this.current(generation)) this.error = error.message; }
       finally { if (this.current(generation)) this.loading = false; }
     },
