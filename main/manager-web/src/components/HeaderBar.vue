@@ -173,7 +173,7 @@
 
       <!-- 右侧元素 -->
       <div class="header-right">
-        <div class="search-container" v-if="$route.path === '/home' && !(userInfo.superAdmin && isSmallScreen)">
+        <div class="search-container" v-if="$route.path === '/home'">
           <div class="search-wrapper">
             <el-input v-model="search" :placeholder="$t('header.searchPlaceholder')" class="custom-search-input"
               @keyup.enter.native="handleSearch" @focus="showSearchHistory" @blur="hideSearchHistory" clearable
@@ -205,7 +205,7 @@
 
         <img loading="lazy" alt="" src="@/assets/home/avatar.png" class="avatar-img" @click="handleAvatarClick" />
         <span class="el-user-dropdown" @click="handleAvatarClick">
-          {{ userInfo.username || "加载中..." }}
+          <span class="username" :title="userInfo.username">{{ userInfo.username || "加载中..." }}</span>
           <i class="el-icon-arrow-down el-icon--right" :class="{ 'rotate-down': userMenuVisible }"></i>
         </span>
         <el-cascader :options="userMenuOptions" trigger="click" :props="cascaderProps"
@@ -617,7 +617,9 @@ export default {
   background: rgba(251, 252, 255, 0.96);
   border: 1px solid rgba(255, 255, 255, 0.92);
   border-bottom-color: #e9ecf3;
-  height: 72px !important;
+  height: auto !important;
+  flex-shrink: 0;
+  padding: 0 28px;
   min-width: 900px;
   /* 设置最小宽度防止过度压缩 */
   overflow: visible;
@@ -625,20 +627,21 @@ export default {
 }
 
 .header-container {
-  display: flex;
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  grid-template-areas: "brand tools" "navigation navigation";
   align-items: center;
-  height: 100%;
-  gap: 24px;
-  padding: 0 24px;
+  gap: 0 24px;
+  padding: 14px 0 0;
   box-sizing: border-box;
 }
 
 .header-left {
+  grid-area: brand;
   display: flex;
   align-items: center;
   gap: 10px;
-  width: 180px;
-  flex: 0 0 180px;
+  width: 160px;
   cursor: pointer;
 }
 
@@ -652,16 +655,21 @@ export default {
 }
 
 .header-center {
+  grid-area: navigation;
+  flex-wrap: wrap;
+  padding: 12px 0;
+  margin-top: 12px;
+  border-top: 1px solid #eef0f5;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 8px;
-  flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .header-right {
+  grid-area: tools;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -686,11 +694,11 @@ export default {
 
 .equipment-management {
   height: 42px;
-  border-radius: 21px;
+  border-radius: 10px;
   background: transparent;
   display: flex;
   justify-content: center;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   gap: 8px;
   color: #3d4566;
@@ -847,7 +855,7 @@ export default {
   display: inline-flex;
   align-items: center;
   max-width: 150px;
-  overflow: hidden;
+  gap: 6px;
   color: #3d4566;
   font-size: 15px;
   font-weight: 500;
@@ -861,56 +869,35 @@ export default {
   line-height: 1.2;
 }
 
-/* 响应式调整 */
-@media (max-width: 1500px) {
+.username {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Keep navigation in its own row until there is room for every control. */
+@media (min-width: 1800px) {
   .header-container {
-    gap: 14px;
-    padding: 0 16px;
+    grid-template-columns: 160px minmax(0, 1fr) auto;
+    grid-template-areas: "brand navigation tools";
+    gap: 20px;
+    padding: 14px 0;
   }
-
-  .header-left {
-    width: 150px;
-    flex-basis: 150px;
-  }
-
   .header-center {
-    gap: 10px;
-  }
-
-  .equipment-management {
-    height: 38px;
-    padding: 0 13px;
-    font-size: 13px;
-  }
-
-  .search-container {
-    width: 220px;
-    flex-basis: 220px;
-  }
-
-  .workspace-select {
-    width: 180px;
+    margin-top: 0;
+    padding: 0;
+    border-top: 0;
   }
 }
 
-@media (max-width: 1200px) {
-  .header-center {
-    gap: 8px;
-  }
-
-  .equipment-management {
-    padding: 0 10px;
-    font-size: 12px;
-  }
-
-  .search-container {
-    width: 180px;
-    flex-basis: 180px;
-  }
-
-  .workspace-select {
-    width: 155px;
-  }
+@media (max-width: 1100px) {
+  .header { padding: 0 20px; }
+  .header-container { grid-template-columns: 140px minmax(0, 1fr); gap: 0 16px; }
+  .header-left { width: 140px; }
+  .header-right { gap: 10px; }
+  .search-container { width: 220px; flex-basis: 220px; }
+  .workspace-select { width: 180px; }
+  .el-user-dropdown { max-width: 110px; }
 }
 
 .equipment-management.more-dropdown {

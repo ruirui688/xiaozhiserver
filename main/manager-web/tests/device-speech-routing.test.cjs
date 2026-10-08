@@ -37,6 +37,7 @@ test('speech routing saves through the authenticated device update endpoint', ()
         method(value) { state.method = value; return request },
         data(value) { state.data = value; return request },
         success(callback) { request.successCallback = callback; return request },
+        fail(callback) { request.failCallback = callback; return request },
         networkFail() { return request },
         send() { request.successCallback({ data: { code: 0 } }); return request },
       }

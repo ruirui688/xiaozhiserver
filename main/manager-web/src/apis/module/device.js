@@ -86,6 +86,7 @@ export default {
                 RequestService.clearRequestTime()
                 callback(res)
             })
+            .fail(callback)
             .networkFail((err) => {
                 console.error('更新设备信息失败:', networkErrorSummary(err))
                 if (callback) callback(networkErrorResponse('更新设备信息失败'))

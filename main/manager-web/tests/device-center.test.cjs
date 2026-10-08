@@ -102,3 +102,18 @@ test('API business errors reach scene callback to release loading state', () => 
   const denied = { data: { code: 403, msg: '无写权限' } };
   failure(denied); assert.equal(received, denied);
 });
+test('device center paginates filtered devices and resets page when filters change', () => {
+  const component = loadVueComponent('src/views/DeviceCenter.vue', mocks({}));
+  const devices = Array.from({ length: 53 }, (_, id) => ({ id: String(id) }));
+  const context = { filteredDevices: devices, currentPage: 3, pageSize: 20 };
+  assert.equal(component.computed.pagedDevices.call(context).length, 13);
+  assert.equal(component.computed.pagedDevices.call(context)[0].id, '40');
+  component.watch.keyword.call(context);
+  assert.equal(context.currentPage, 1);
+  context.currentPage = 3;
+  component.watch['filteredDevices.length'].call(context, 12);
+  assert.equal(context.currentPage, 1);
+  context.currentPage = 2;
+  component.watch.agentFilter.call(context);
+  assert.equal(context.currentPage, 1);
+});

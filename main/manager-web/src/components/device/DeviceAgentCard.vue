@@ -1,23 +1,32 @@
 <template>
-  <article class="device-card" :aria-busy="busy">
-    <div class="device-identity"><img src="@/assets/device-avatars/xiaozhi-logo1.png" alt="" />
-      <div><h2>{{ device.alias || device.macAddress || device.id }}</h2><span>{{ device.board || '未知型号' }}</span></div>
+  <article class="device-card" :class="{ 'device-row': list }" :aria-busy="busy">
+    <div class="device-identity"><div class="device-icon" aria-hidden="true"><i class="el-icon-monitor" /></div>
+      <div class="device-heading"><div class="device-name-line"><h2 :title="device.alias || device.board">{{ device.alias || device.board || '未命名设备' }}</h2><el-button v-if="canWrite" class="rename-device" type="text" icon="el-icon-edit" aria-label="修改设备别名" title="修改设备别名" @click="$emit('rename')" /></div><span>MAC <MacAddressMask :mac-address="device.macAddress" /></span></div>
     </div>
-    <div class="device-meta">MAC：<MacAddressMask :mac-address="device.macAddress" /></div>
-    <div class="device-meta">最近连接：{{ lastConnection }}</div>
-    <div class="agent-label">当前配置：{{ currentAgentName }}</div>
+    <div class="device-meta"><span>最近连接</span><span>{{ lastConnection }}</span></div>
+    <div class="agent-panel">
+    <div class="agent-label"><span>当前智能体</span><strong>{{ currentAgentName || '未配置' }}</strong></div>
     <div class="switch-controls">
-      <el-select v-model="targetId" filterable placeholder="选择智能体" :disabled="busy || !canWrite">
+      <el-select v-model="targetId" filterable :size="list ? 'small' : 'medium'" placeholder="选择要切换的智能体" :disabled="busy || !canWrite">
         <el-option v-for="agent in agents" :key="agent.id" :label="agent.agentName" :value="agent.id" />
       </el-select>
-      <el-button type="primary" :loading="busy" :disabled="!canWrite || !targetId || targetId === currentAgentId" @click="switchAgent">切换</el-button>
+      <el-button type="primary" :size="list ? 'small' : 'medium'" :loading="busy" :disabled="!canWrite || !targetId || targetId === currentAgentId" @click="switchAgent">{{ busy ? '切换中' : targetId === currentAgentId ? '使用中' : '切换' }}</el-button>
+    </div>
     </div>
     <p v-if="status" role="status" :class="{ failure: failed }">{{ status }}</p>
-    <div class="actions">
-      <el-button type="text" :disabled="busy" @click="refreshStatus">刷新切换状态</el-button>
+    <div v-if="!list" class="actions">
+      <el-tooltip content="刷新切换状态" placement="top"><el-button class="status-refresh" type="text" icon="el-icon-refresh" aria-label="刷新切换状态" :disabled="busy" @click="refreshStatus" /></el-tooltip>
       <el-button type="text" :disabled="busy || !canWrite" @click="$emit('scenes')">场景管理</el-button>
       <el-button type="text" :disabled="busy" @click="$router.push({ path: '/device-management', query: { agentId: currentAgentId } })">设备设置</el-button>
     </div>
+    <el-dropdown v-if="list" class="row-actions" trigger="click" :disabled="busy">
+      <el-button type="text" :disabled="busy" aria-label="更多设备操作">更多<i class="el-icon-arrow-down el-icon--right" /></el-button>
+      <el-dropdown-menu slot="dropdown">
+        <el-dropdown-item @click.native="refreshStatus">刷新切换状态</el-dropdown-item>
+        <el-dropdown-item :disabled="!canWrite" @click.native="canWrite && $emit('scenes')">场景管理</el-dropdown-item>
+        <el-dropdown-item @click.native="$router.push({ path: '/device-management', query: { agentId: currentAgentId } })">设备设置</el-dropdown-item>
+      </el-dropdown-menu>
+    </el-dropdown>
   </article>
 </template>
 <script>
@@ -26,7 +35,7 @@ import MacAddressMask from '@/components/MacAddressMask.vue';
 import { deviceRequest, switchDeviceAgent, sceneStatusText } from '@/utils/deviceCenter';
 export default {
   components: { MacAddressMask },
-  props: { device: { type: Object, required: true }, agents: { type: Array, default: () => [] }, canWrite: Boolean },
+  props: { list: Boolean, device: { type: Object, required: true }, agents: { type: Array, default: () => [] }, canWrite: Boolean },
   data() { return { targetId: this.device.agentId, currentAgentId: this.device.agentId,
     currentAgentName: this.device.agentName, busy: false, status: '', failed: false, generation: 0, timer: null }; },
   computed: {
@@ -106,9 +115,33 @@ export default {
 };
 </script>
 <style scoped>
-.device-card{background:#fff;border:1px solid #ebedf6;border-radius:20px;padding:24px;box-shadow:0 8px 28px #38447708;min-width:0}
-.device-identity{display:flex;align-items:center;gap:14px;margin-bottom:24px}.device-identity img{width:64px;height:64px;object-fit:contain;border-radius:16px;background:#f4f5ff}
-h2{font-size:18px;margin:0 0 6px;overflow-wrap:anywhere}.device-identity span,.device-meta{color:#818799;font-size:13px}.device-meta{margin:10px 0;overflow-wrap:anywhere}
-.agent-label{margin:20px 0 10px;font-weight:600;color:#5962a5}.switch-controls{display:flex;gap:8px}.switch-controls .el-select{min-width:0;flex:1}
-p{font-size:13px;color:#677191;line-height:1.6}.failure{color:#c65252}.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}.actions .el-button{margin:0}
+.device-card { background: #fff; border: 1px solid #e7eaf2; border-radius: 24px; padding: 32px; min-width: 0; text-align: left; transition: border-color .15s ease, box-shadow .15s ease; }
+.device-card:hover { border-color: #d7ddec; box-shadow: 0 4px 18px rgba(35, 45, 75, .04); }
+.device-identity { display: flex; align-items: center; gap: 18px; margin-bottom: 28px; }
+.device-icon { display: flex; align-items: center; justify-content: center; width: 60px; height: 60px; flex-shrink: 0; border-radius: 18px; background: #f0f3fc; color: #677bc5; font-size: 28px; }
+.device-heading { min-width: 0; }h2 { font-size: 19px; font-weight: 600; margin: 0 0 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.device-heading>span { color: #858da0; font-size: 13px; }
+.device-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; color: #858da0; font-size: 13px; }
+.agent-panel { margin-top: 28px; padding: 22px; border-radius: 16px; background: #f7f8fc; }
+.agent-label { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 0 0 18px; font-size: 13px; color: #858da0; }
+.agent-label strong { font-size: 17px; font-weight: 500; color: #39435c; overflow-wrap: anywhere; }
+.switch-controls { display: flex; gap: 12px; }.switch-controls .el-select { min-width: 0; flex: 1; }.switch-controls .el-button { min-width: 86px; }
+p { font-size: 12px; color: #677191; line-height: 1.6; margin: 12px 0 0; }.failure { color: #c65252; }
+.actions { display: flex; align-items: center; gap: 16px; margin-top: 24px; padding-top: 18px; border-top: 1px solid #f0f2f7; }
+.actions .el-button { margin: 0; font-size: 13px; color: #73809a; }.actions .el-button:hover { color: #586ff0; }.actions .el-button.is-disabled { color: #c0c4cc; }
+.actions .status-refresh { margin-right: auto; font-size: 16px; padding: 6px; }
+@media (max-width: 600px) { .device-card { padding: 24px; }.agent-panel { padding: 16px; }h2 { font-size: 17px; } }
+.device-row { display: grid; grid-template-columns: minmax(220px, 1.2fr) minmax(280px, 1fr) 170px 70px; gap: 0 24px; align-items: center; border: 0; border-bottom: 1px solid #edf0f5; border-radius: 0; padding: 20px 24px; }
+.device-row:last-child { border-bottom: 0; }.device-row:hover { background: #fafbfe; box-shadow: none; }
+.device-row .device-identity { grid-column: 1; grid-row: 1; margin: 0; gap: 12px; }
+.device-row .device-icon { width: 38px; height: 38px; border-radius: 10px; font-size: 19px; }
+.device-row h2 { font-size: 14px; margin-bottom: 7px; }
+.device-row .device-heading>span { font-size: 12px; }
+.device-row .agent-panel { grid-column: 2; grid-row: 1; margin: 0; padding: 0; background: transparent; }
+.device-row .agent-label { justify-content: flex-start; gap: 8px; margin: 0 0 7px; font-size: 11px; }.device-row .agent-label strong { font-size: 12px; }
+.device-row .device-meta { grid-column: 3; grid-row: 1; font-size: 12px; }.device-row .device-meta>span:first-child { display: none; }
+.device-row .switch-controls { gap: 8px; }.device-row .switch-controls .el-button { min-width: 70px; }
+.device-row .row-actions { grid-column: 4; grid-row: 1; }.row-actions .el-button { color: #68758f; }
+.device-row p { grid-column: 2 / -1; margin: 8px 0 0; }
+.device-name-line { display: flex; align-items: baseline; gap: 8px; }.device-name-line h2 { min-width: 0; }.rename-device { flex-shrink: 0; padding: 0; color: #8995ad; }.rename-device:hover { color: #586ff0; }
 </style>
