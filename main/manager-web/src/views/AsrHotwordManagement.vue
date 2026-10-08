@@ -35,15 +35,13 @@
       </section>
     </main>
     <AsrHotwordImportDialog v-if="importVisible" :can-write="canWrite" :workspace-id="workspaceId" @close="importVisible = false" @imported="load" />
-    <el-dialog :title="editingId ? '编辑热词库' : '新建热词库'" :visible.sync="editorVisible" width="620px" :close-on-click-modal="false" :close-on-press-escape="!busy" :show-close="!busy">
+    <el-dialog :title="editingId ? '编辑热词库' : '新建热词库'" :visible.sync="editorVisible" width="800px" top="5vh" custom-class="hotword-editor-dialog" :close-on-click-modal="false" :close-on-press-escape="!busy" :show-close="!busy">
       <el-form label-width="85px" @submit.native.prevent>
         <el-form-item label="词库名称"><el-input v-model="form.name" maxlength="80" show-word-limit :disabled="busy" /></el-form-item>
         <el-form-item v-if="!editingId && availableSources.length > 1" label="火山来源"><el-select v-model="form.sourceId" placeholder="选择火山连接来源" :disabled="busy" style="width:100%">
           <el-option v-for="source in availableSources" :key="source.id" :value="source.id" :label="source.name" />
         </el-select></el-form-item>
-        <el-form-item label="热词"><el-input v-model="form.text" type="textarea" :rows="10" :disabled="busy" placeholder="每行一个词，可粘贴多行。例如：&#10;慧苑&#10;星岚|4" />
-          <small>可写“词条|权重”，权重 1–10，默认 4。每词通常最多 10 个汉字或 30 个英文字母，混合内容按实际长度校验。最多 5000 条；实时识别模型可能有更低的生效容量。</small>
-        </el-form-item>
+        <AsrHotwordEntryEditor v-if="editorVisible" :key="editorSession" ref="entryEditor" v-model="form.entries" :disabled="busy" />
       </el-form>
       <el-alert v-if="dialogError" :title="dialogError" type="error" :closable="false" />
       <span slot="footer"><el-button :disabled="busy" @click="editorVisible = false">取消</el-button><el-button type="primary" :loading="busy" :disabled="!canWrite" @click="save">保存草稿</el-button></span>
@@ -64,12 +62,13 @@ import HeaderBar from '@/components/HeaderBar.vue';
 import ResourceCenterNav from '@/components/resource/ResourceCenterNav.vue';
 import AsrHotwordImportDialog from '@/components/resource/AsrHotwordImportDialog.vue';
 import api from '@/apis/module/asrHotword';
-import { parseHotwordText, formatHotwordEntries, hotwordStatus } from '@/utils/asrHotwords';
+import AsrHotwordEntryEditor from '@/components/resource/AsrHotwordEntryEditor.vue';
+import { validateHotwordEntries, hotwordStatus } from '@/utils/asrHotwords';
 export default {
-  components: { HeaderBar, ResourceCenterNav, AsrHotwordImportDialog },
+  components: { HeaderBar, ResourceCenterNav, AsrHotwordImportDialog, AsrHotwordEntryEditor },
   data() { return { rows: [], sources: [], capabilities: {}, agents: [], loading: false, busy: false, error: '', dialogError: '', generation: 0,
     workspaceId: localStorage.getItem('currentWorkspaceId'), canWrite: localStorage.getItem('currentWorkspaceCanWrite') !== 'false',
-    editorVisible: false, applyVisible: false, importVisible: false, editingId: '', form: { name: '', sourceId: '', text: '' }, applying: null, selectedAgents: [] }; },
+    editorSession: 0, editorVisible: false, applyVisible: false, importVisible: false, editingId: '', form: { name: '', sourceId: '', entries: [] }, applying: null, selectedAgents: [] }; },
   computed: {
     availableSources() { return this.sources.filter(source => source.available); },
     sourceNotice() { return this.capabilities.message || ''; },
@@ -96,15 +95,15 @@ export default {
       finally { if (this.current(generation)) this.loading = false; }
     },
     edit(row) {
-      this.editingId = row ? row.id : ''; this.form = row ? { name: row.name, sourceId: row.sourceId, text: formatHotwordEntries(row.entries) } : { name: '', sourceId: this.availableSources.length === 1 ? this.availableSources[0].id : '', text: '' };
-      this.dialogError = ''; this.editorVisible = true;
+      this.editingId = row ? row.id : ''; this.form = row ? { name: row.name, sourceId: row.sourceId, entries: (row.entries || []).map(entry => ({ ...entry })) } : { name: '', sourceId: this.availableSources.length === 1 ? this.availableSources[0].id : '', entries: [] };
+      this.editorSession++; this.dialogError = ''; this.editorVisible = true;
     },
     async save() {
       if (this.busy || !this.canWrite) return;
       let payload;
       try {
         if (!this.form.name.trim() || (!this.editingId && !this.form.sourceId)) throw new Error('请填写名称并选择火山来源');
-        payload = { name: this.form.name.trim(), sourceId: this.form.sourceId, entries: parseHotwordText(this.form.text) };
+        payload = { name: this.form.name.trim(), sourceId: this.form.sourceId, entries: this.$refs.entryEditor ? this.$refs.entryEditor.getEntries() : validateHotwordEntries(this.form.entries) };
       } catch (error) { this.dialogError = error.message; return; }
       await this.perform(() => this.editingId ? api.update(this.editingId, payload) : api.create(payload), () => { this.editorVisible = false; this.$message.success('草稿已保存，请发布后应用'); }, true);
     },
@@ -149,4 +148,5 @@ export default {
 </script>
 <style scoped>
 .hotword-page{min-height:100vh;background:#f5f7fc;color:#30384f}main{max-width:1440px;margin:auto;padding:24px}.toolbar{display:flex;align-items:center;gap:12px;margin-bottom:18px}.toolbar>div{margin-right:auto}h1{font-size:24px;margin:0}p,small{color:#7a849b;line-height:1.6}small{display:block}.list{background:white;border:1px solid #e5eaf3;border-radius:10px;padding:18px;margin-top:20px}.notice{margin-top:12px}.failure{color:#d94a4a;overflow-wrap:anywhere}@media(max-width:640px){main{padding:12px}.toolbar{flex-wrap:wrap}.hotword-page /deep/ .el-dialog{width:94%!important}}
+.hotword-page /deep/ .hotword-editor-dialog{max-width:94vw}.hotword-page /deep/ .hotword-editor-dialog .el-dialog__body{max-height:calc(90vh - 150px);overflow-y:auto;padding-top:12px}.hotword-page /deep/ .hotword-editor-dialog .el-dialog__footer{border-top:1px solid #eef0f5}
 </style>

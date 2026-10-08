@@ -42,7 +42,7 @@ test('stale workspace responses never replace current rows', async () => {
 test('save retains editor and reports rejection instead of claiming publication', async () => {
   const c = component({ create: async () => { throw new Error('无写入权限'); } });
   const vm = { ...c.methods, busy: false, canWrite: true, generation: 1, current: () => true, editorVisible: true,
-    editingId: '', form: { name: '词库', sourceId: 'source', text: '慧苑' } };
+    editingId: '', $refs: {}, form: { name: '词库', sourceId: 'source', entries: [{ word: '慧苑', weight: 4 }] } };
   await vm.save();
   assert.equal(vm.editorVisible, true); assert.equal(vm.dialogError, '无写入权限'); assert.equal(vm.busy, false);
 });
@@ -157,4 +157,38 @@ test('read-only and changed workspace cannot import cloud words', async () => {
   const c = importDialog({ importRemote: () => assert.fail('unauthorized import') });
   await importVm(c, { canWrite: false }).importRow({ sourceId: 's', remoteId: 'id' });
   await importVm(c, { current: () => false }).importRow({ sourceId: 's', remoteId: 'id' });
+});
+
+test('bulk paste deduplicates without overwriting individual weights and accepts old format', () => {
+  const original = [{ word: '慧苑', weight: 9 }];
+  const result = utils.mergeHotwordText(original, '慧苑\r\n石浦\n石浦\n象山|6', 3);
+  assert.deepEqual(result, { entries: [...original, { word: '石浦', weight: 3 }, { word: '象山', weight: 6 }], added: 2, skipped: 2 });
+  assert.deepEqual(original, [{ word: '慧苑', weight: 9 }]);
+});
+test('structured editor rejects empty words, invalid weights and injected separators', () => {
+  for (const entry of [{ word: '', weight: 4 }, { word: '词|8', weight: 4 }, { word: '词\n条', weight: 4 }, { word: '词', weight: undefined }]) {
+    assert.throws(() => utils.validateHotwordEntries([entry]));
+  }
+  const existing = [{ word: '慧苑', weight: 9 }];
+  assert.throws(() => utils.mergeHotwordText(existing, '石浦\n坏词|0'), /第 2 行/);
+  assert.equal(existing.length, 1);
+});
+test('editing clones entries so cancellation never changes saved rows', () => {
+  const c = component(); const vm = { ...c.methods, editorSession: 0 };
+  const row = { id: 'id', name: '词库', entries: [{ word: '慧苑', weight: 8 }] };
+  vm.edit(row); vm.form.entries[0].weight = 2;
+  assert.equal(row.entries[0].weight, 8);
+});
+test('save includes pending pasted words while preserving existing weights', () => {
+  const c = loadVueComponent('src/components/resource/AsrHotwordEntryEditor.vue');
+  const vm = { ...c.data(), value: [{ word: '慧苑', weight: 8 }], text: '石浦\n慧苑' };
+  assert.deepEqual(c.methods.getEntries.call(vm), [{ word: '慧苑', weight: 8 }, { word: '石浦', weight: 4 }]);
+});
+test('filtered edits and deletions target original indices; uniform weight affects all entries', () => {
+  const c = loadVueComponent('src/components/resource/AsrHotwordEntryEditor.vue');
+  const vm = { ...c.data(), ...c.methods, value: [{ word: '慧苑', weight: 8 }, { word: '石浦', weight: 4 }], search: '石浦', $emit(_, value) { this.value = value; } };
+  const found = c.computed.filtered.call(vm)[0];
+  vm.update(found.index, 'weight', 7); assert.equal(vm.value[1].weight, 7); assert.equal(vm.value[0].weight, 8);
+  vm.allWeight = 5; vm.applyWeight(); assert.deepEqual(vm.value.map(x => x.weight), [5, 5]);
+  vm.remove(found.index); assert.deepEqual(vm.value, [{ word: '慧苑', weight: 5 }]);
 });
