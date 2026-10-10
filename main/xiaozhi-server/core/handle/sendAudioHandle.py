@@ -154,11 +154,19 @@ async def sendAudioMessage(
             == conn.sentence_id
         ):
             conn.audio_rate_controller.add_message(
-                lambda: send_tts_message(conn, "sentence_start", text)
+                lambda: send_tts_message(
+                    conn, "sentence_start", text,
+                    protocol_sentence_id=protocol_sentence_id,
+                    protocol_generation=active_generation if reply_lifecycle is not None else generation,
+                )
             )
         else:
             # 新句子或流控器未初始化，立即发送
-            await send_tts_message(conn, "sentence_start", text)
+            await send_tts_message(
+                conn, "sentence_start", text,
+                protocol_sentence_id=protocol_sentence_id,
+                protocol_generation=active_generation if reply_lifecycle is not None else generation,
+            )
 
     await sendAudio(conn, audios)
     if audios:
@@ -222,6 +230,7 @@ async def _wait_for_audio_completion(conn: "ConnectionHandler"):
     Args:
         conn: 连接对象
     """
+    stop_attempt = getattr(conn, "_tts_protocol_stop_pending", None)
     if hasattr(conn, "audio_rate_controller") and conn.audio_rate_controller:
         rate_controller = conn.audio_rate_controller
         conn.logger.bind(tag=TAG).debug(
@@ -241,12 +250,16 @@ async def _wait_for_audio_completion(conn: "ConnectionHandler"):
                 timeout=timeout_seconds,
             )
         except asyncio.TimeoutError as exc:
+            if stop_attempt is not None and not _tts_stop_is_current(conn, stop_attempt):
+                return
             rate_controller.reset()
             raise TimeoutError(
                 "等待音频发送完成超时"
                 f"（{timeout_seconds:.1f}s），已清空发送队列"
             ) from exc
 
+        if stop_attempt is not None and not _tts_stop_is_current(conn, stop_attempt):
+            return
         if rate_controller.last_send_error is not None:
             error = rate_controller.last_send_error
             rate_controller.reset()
@@ -505,6 +518,56 @@ async def _do_send_audio(conn: "ConnectionHandler", opus_packet, flow_control):
     flow_control["sequence"] = sequence + 1
 
 
+def _tts_stop_is_current(conn, attempt):
+    if getattr(conn, "_tts_protocol_stop_pending", None) is not attempt:
+        return False
+    if (
+        getattr(conn, "sentence_id", None) != attempt["connection_sentence_id"]
+        or getattr(conn, "_tts_protocol_sentence_id", None) != attempt["sentence_id"]
+    ):
+        return False
+    lifecycle = getattr(conn, "reply_lifecycle", None)
+    return lifecycle is None or lifecycle.generation == attempt["generation"]
+
+
+async def _send_tts_stop(conn, message, attempt, drain_audio):
+    """Drain one reply without reserving the stop that an abort must send."""
+    completion_error = None
+    try:
+        if drain_audio and conn.config.get("enable_stop_tts_notify", False):
+            notify_voice = conn.config.get(
+                "stop_tts_notify_voice", "config/assets/tts_notify.mp3"
+            )
+            audios = await audio_to_data(notify_voice, is_opus=True)
+            for packet in audios:
+                if not _tts_stop_is_current(conn, attempt):
+                    return False, None
+                await sendAudio(conn, packet)
+        if not _tts_stop_is_current(conn, attempt):
+            return False, None
+        controller = getattr(conn, "audio_rate_controller", None)
+        if drain_audio:
+            try:
+                await _wait_for_audio_completion(conn)
+            except (TimeoutError, RuntimeError) as exc:
+                completion_error = exc
+        # Another stop, abort, or new reply may have taken ownership while draining.
+        if not _tts_stop_is_current(conn, attempt):
+            return False, None
+        if controller is not None:
+            controller.stop_sending()
+        attempt["sending"] = True
+        await conn.websocket.send(json.dumps(message))
+        if not _tts_stop_is_current(conn, attempt):
+            return False, None
+        conn._tts_protocol_stop_sent = True
+        return True, completion_error
+    finally:
+        # Cancellation must release only this attempt, never a newer stop.
+        if getattr(conn, "_tts_protocol_stop_pending", None) is attempt:
+            conn._tts_protocol_stop_pending = None
+
+
 async def send_tts_message(
     conn: "ConnectionHandler",
     state,
@@ -521,6 +584,16 @@ async def send_tts_message(
     reply_generation = None
     if text is None and state == "sentence_start":
         return False
+    if state == "sentence_start":
+        if protocol_sentence_id is not None and (
+            protocol_sentence_id != getattr(conn, "sentence_id", None)
+            or getattr(conn, "_tts_protocol_stop_sent", False)
+        ):
+            return False
+        if protocol_generation is not None and reply_lifecycle is not None:
+            snapshot = reply_lifecycle.snapshot()
+            if not snapshot.is_active or snapshot.generation != protocol_generation:
+                return False
     if state == "start":
         if protocol_generation is not None and reply_lifecycle is not None:
             snapshot = reply_lifecycle.snapshot()
@@ -559,6 +632,7 @@ async def send_tts_message(
         conn._tts_protocol_sentence_id = protocol_sentence_id
         conn._tts_protocol_start_sent = True
         conn._tts_protocol_stop_sent = False
+        conn._tts_protocol_stop_pending = None
     elif state == "stop":
         resolved_sentence_id = protocol_sentence_id or getattr(
             conn, "sentence_id", None
@@ -566,6 +640,12 @@ async def send_tts_message(
         current_protocol_sentence_id = getattr(
             conn, "_tts_protocol_sentence_id", None
         )
+        if (
+            protocol_sentence_id is not None
+            and current_protocol_sentence_id is not None
+            and protocol_sentence_id != current_protocol_sentence_id
+        ):
+            return False
         # STT start uses a pending (None) sentence id until the next FIRST binds it.
         # A delayed provider LAST must not stop that new reply. Explicit abort or
         # failure convergence is allowed to close the pending start itself.
@@ -596,45 +676,35 @@ async def send_tts_message(
             if snapshot.is_active and snapshot.sentence_id in {None, resolved_sentence_id}:
                 reply_generation = snapshot.generation
                 reply_lifecycle.mark_stopping(reply_generation)
+        pending = getattr(conn, "_tts_protocol_stop_pending", None)
+        if pending is not None and _tts_stop_is_current(conn, pending):
+            if drain_audio or not pending["drain_audio"] or pending["sending"]:
+                return False
         conn._tts_protocol_sentence_id = resolved_sentence_id
-        conn._tts_protocol_stop_sent = True
+        attempt = {
+            "sentence_id": resolved_sentence_id,
+            "connection_sentence_id": getattr(conn, "sentence_id", None),
+            "generation": reply_lifecycle.generation if reply_lifecycle is not None else None,
+            "drain_audio": drain_audio,
+            "sending": False,
+        }
+        conn._tts_protocol_stop_pending = attempt
     message = {"type": "tts", "state": state, "session_id": conn.session_id}
     if text is not None:
         message["text"] = textUtils.check_emoji(text)
     if reason:
         message["reason"] = reason
 
-    # TTS播放结束
-    if state == "stop":
-        # 保存当前的 sentence_id，用于后续判断是否是当前轮次
-        current_sentence_id = conn.sentence_id
-        # 播放提示音
-        tts_notify = conn.config.get("enable_stop_tts_notify", False)
-        if tts_notify:
-            stop_tts_notify_voice = conn.config.get(
-                "stop_tts_notify_voice", "config/assets/tts_notify.mp3"
-            )
-            audios = await audio_to_data(stop_tts_notify_voice, is_opus=True)
-            await sendAudio(conn, audios)
-        # 等待所有音频包发送完成。即使发送失败或超时，也要继续
-        # 收敛服务端 speaking 状态并尽力通知设备 stop。
-        completion_error = None
-        if drain_audio:
-            try:
-                await _wait_for_audio_completion(conn)
-            except (TimeoutError, RuntimeError) as exc:
-                completion_error = exc
-
-        # 检查是否是当前轮次
-        if current_sentence_id != conn.sentence_id:
-            return
-
-        # 停止音频发送循环（仅在流控器已初始化时调用）
-        if hasattr(conn, "audio_rate_controller") and conn.audio_rate_controller:
-            conn.audio_rate_controller.stop_sending()
     # 发送消息到客户端，并让协议终态与同一 generation 一起收敛。
     try:
-        await conn.websocket.send(json.dumps(message))
+        if state == "stop":
+            sent, completion_error = await _send_tts_stop(
+                conn, message, attempt, drain_audio
+            )
+            if not sent:
+                return False
+        else:
+            await conn.websocket.send(json.dumps(message))
     except Exception:
         if reply_lifecycle is not None and reply_generation is not None:
             reply_lifecycle.fail(reply_generation, "tts_protocol_send_failed")

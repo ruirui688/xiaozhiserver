@@ -251,6 +251,12 @@ sequenceDiagram
 输入按20ms节奏发送；`response.output_audio.done` 结束音频轮次，`response.done` 仅携带用量。
 工具结果通过 `conversation.item.create` 的 `items` 回传，无需发送Qwen的 `response.create`。
 
+豆包3.0的音频结束事件只启动独立收尾任务，不能在上游事件读取任务中等待设备音频队列排空。
+正常收尾仍按原播速发送尾帧并等待播放缓冲；用户重新开口、显式打断、会话重建或关闭时，必须先取消并回收旧收尾
+与音频发送任务，再切换轮次。取消期间不得提前把 `tts/stop` 标记成已发送，旧收尾也不能发送迟到的 stop 或清空新回复。
+`realtime.audio.upstream_completed` 与 `realtime.reply.finish.start/end` 只记录句子标识、耗时和完成/中断状态，
+用于区分模型生成结束与本地发送收尾；它们不代表设备扬声器的真实播放时间。
+
 ### 4.3 图片入口
 
 传统模式继续由独立 VLLM 处理视觉 HTTP 请求。Realtime 模式下，视觉入口先按认证信息和设备绑定找到活动连接，再按

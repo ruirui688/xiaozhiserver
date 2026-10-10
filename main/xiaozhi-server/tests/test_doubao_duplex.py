@@ -162,6 +162,7 @@ def test_audio_lifecycle_barge_in_and_late_response(monkeypatch):
         assert session._handle_audio.await_count == 1
         await session.handle_event({'type': 'response.output_audio.delta', 'response_id': 'new', 'delta': 'AAA='})
         await session.handle_event({'type': 'response.output_audio.done', 'response_id': 'new'})
+        await session._finish_task
         session._finish_response.assert_awaited_once()
         assert await session.handle_text('text')
         assert json.loads(conn.websocket.send.call_args.args[0])['code'] == 'unsupported_text_input'
