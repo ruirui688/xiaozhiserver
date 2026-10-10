@@ -25,31 +25,39 @@
             <p class="detail-content-text">{{ memory.canonicalText || memory.patternText || '-' }}</p>
           </div>
 
+          <div class="detail-section">
+            <h4 class="section-title">归属与可见范围</h4>
+            <div class="detail-grid">
+              <div class="detail-field"><label>人物</label><span>{{ identity.speakerLabel }}</span></div>
+              <div class="detail-field"><label>来源设备</label><span>{{ identity.deviceLabel }}</span></div>
+              <div class="detail-field"><label>设备范围</label><span>{{ identity.deviceScopeLabel }}</span></div>
+              <div class="detail-field" v-if="identity.speakerId"><label>人物 ID</label><span class="speaker-id">{{ identity.speakerId }}</span></div>
+            </div>
+          </div>
+
           <!-- Classification (for facts) -->
           <div class="detail-section" v-if="itemType==='fact'">
             <h4 class="section-title">分类与属性</h4>
             <div class="detail-grid">
               <div class="detail-field"><label>分类</label><span>{{ categoryLabel(memory.category) }}</span></div>
-              <div class="detail-field"><label>关联人物</label><span>{{ memory.speakerDisplay || '共享记忆' }}</span></div>
-              <div class="detail-field" v-if="memory.speakerId"><label>声纹ID</label><span class="speaker-id">{{ memory.speakerId }}</span></div>
               <div class="detail-field"><label>类型</label><span>{{ memoryTypeLabel(memory.memoryType) }}</span></div>
-              <div class="detail-field"><label>来源</label><el-tag size="mini" :type="memory.confirmationState==='auto'?'success':'warning'">{{ memory.confirmationState==='auto'?'主动记忆':'手动创建' }}</el-tag></div>
+              <div class="detail-field"><label>来源</label><el-tag size="mini" :type="confirmationTagType">{{ confirmationLabel }}</el-tag></div>
               <div class="detail-field"><label>层级</label><el-tag size="mini" :type="tierTagType">{{ tierLabel }}</el-tag></div>
-              <div class="detail-field"><label>状态</label><el-tag size="mini" :type="memory.status==='active'?'success':'info'">{{ statusLabel(memory.status) }}</el-tag></div>
+              <div class="detail-field"><label>状态</label><el-tag size="mini" :type="effectiveState==='active'?'success':effectiveState==='expired'?'warning':'info'">{{ effectiveStateLabel }}</el-tag></div>
               <div class="detail-field"><label>敏感度</label><el-tag size="mini" :type="sensitivityTagType">{{ sensitivityLabel }}</el-tag></div>
             </div>
           </div>
 
           <!-- Scores (for facts) -->
           <div class="detail-section" v-if="itemType==='fact'">
-            <h4 class="section-title">评分</h4>
+            <h4 class="section-title">评分（维护模型估计或人工设置）</h4>
             <div class="detail-score-row">
               <label>重要性</label>
-              <el-progress :percentage="pct(memory.importance)" :stroke-width="8" :color="importanceColor" />
+              <el-progress v-if="memory.importance != null" :percentage="pct(memory.importance)" :stroke-width="8" :color="importanceColor" /><span v-else>未评分</span>
             </div>
             <div class="detail-score-row">
               <label>置信度</label>
-              <el-progress :percentage="pct(memory.confidence)" :stroke-width="8" :color="confidenceColor" />
+              <el-progress v-if="memory.confidence != null" :percentage="pct(memory.confidence)" :stroke-width="8" :color="confidenceColor" /><span v-else>未评分</span>
             </div>
           </div>
 
@@ -61,9 +69,17 @@
               <div class="detail-field"><label>更新时间</label><span>{{ memory.updatedAt || '-' }}</span></div>
               <div class="detail-field"><label>首次发现</label><span>{{ memory.firstSeenAt || '-' }}</span></div>
               <div class="detail-field"><label>最后出现</label><span>{{ memory.lastSeenAt || '-' }}</span></div>
+              <div class="detail-field"><label>到期时间</label><span>{{ memory.expiresAt || '未设置期限' }}</span></div>
+              <div class="detail-field" v-if="memory.archivedAt"><label>归档时间</label><span>{{ memory.archivedAt }}</span></div>
               <div class="detail-field" v-if="memory.validFrom"><label>生效时间</label><span>{{ memory.validFrom }}</span></div>
               <div class="detail-field" v-if="memory.validTo"><label>失效时间</label><span>{{ memory.validTo }}</span></div>
             </div>
+          </div>
+
+          <div class="detail-section" v-if="itemType==='fact' && (evidence || memory.sourceEventId)">
+            <h4 class="section-title">已保存的来源证据</h4>
+            <blockquote v-if="evidence" class="evidence-quote">{{ evidence }}</blockquote>
+            <p v-if="memory.sourceEventId" class="source-event">来源事件 ID：{{ memory.sourceEventId }}</p>
           </div>
 
           <!-- Tombstone info -->
@@ -72,6 +88,7 @@
             <div class="detail-grid">
               <div class="detail-field"><label>规则内容</label><span>{{ memory.patternText || '-' }}</span></div>
               <div class="detail-field"><label>原因</label><span>{{ memory.reason || '-' }}</span></div>
+              <div class="detail-field"><label>匹配方式</label><span>{{ memory.matchType === 'exact' ? '相同规范化正文' : memory.matchType === 'contains' ? '包含指定文本' : '未标注' }}</span></div>
               <div class="detail-field"><label>状态</label><el-tag size="mini" :type="memory.status==='active'?'success':'info'">{{ statusLabel(memory.status) }}</el-tag></div>
             </div>
           </div>
@@ -97,9 +114,9 @@
 
         <!-- Actions Footer -->
         <div class="detail-footer" v-if="itemType==='fact'">
-          <el-button size="small" icon="el-icon-edit" @click="$emit('edit', memory)">编辑</el-button>
-          <el-button size="small" icon="el-icon-folder" @click="$emit('archive', memory)">归档</el-button>
-          <el-button size="small" type="danger" icon="el-icon-delete" @click="$emit('delete', memory)">删除</el-button>
+          <el-button size="small" icon="el-icon-edit" :disabled="!canWrite" @click="$emit('edit', memory)">编辑</el-button>
+          <el-button size="small" icon="el-icon-folder" :disabled="!canWrite" @click="$emit('archive', memory)">归档</el-button>
+          <el-button size="small" type="danger" icon="el-icon-delete" :disabled="!canWrite" @click="$emit('delete', memory)">删除</el-button>
         </div>
       </div>
     </transition>
@@ -108,15 +125,23 @@
 
 <script>
 import { categoryLabel, memoryTypeLabel, sensitivityLabel, tierLabel, statusLabel } from '@/utils/memoryLabels'
+import { memoryIdentity, memoryStatus, memoryStatusLabel, memorySourceLabel, parsePayload } from './memoryVisualState.mjs'
 
 export default {
   name: 'MemoryDetailPanel',
   props: {
+    canWrite: { type: Boolean, default: false },
     visible: { type: Boolean, default: false },
     memory: { type: Object, default: () => ({}) },
-    itemType: { type: String, default: 'fact' } // 'fact' | 'tomb' | 'candidate'
+    itemType: { type: String, default: 'fact' }, // 'fact' | 'tomb' | 'candidate'
+    policy: { type: Object, default: null },
+    now: { type: Number, default: () => Date.now() }
   },
   computed: {
+    identity() { return memoryIdentity(this.memory, this.policy) },
+    effectiveState() { return memoryStatus(this.memory, this.now) },
+    effectiveStateLabel() { return memoryStatusLabel(this.effectiveState) },
+    evidence() { const value = parsePayload(this.memory.payload).evidence_quote; return typeof value === 'string' ? value : '' },
     displayTitle() {
       return (this.memory.canonicalText || this.memory.patternText || '未知').slice(0, 60)
     },
@@ -138,7 +163,7 @@ export default {
       return s === 'sensitive' ? 'danger' : s === 'personal' ? 'warning' : ''
     },
     confirmationLabel() {
-      return this.memory.confirmationState === 'auto' ? '主动记忆' : '手动创建'
+      return memorySourceLabel(this.memory.confirmationState)
     },
     confirmationTagType() {
       return this.memory.confirmationState === 'auto' ? 'success' : 'warning'
@@ -177,7 +202,7 @@ export default {
     categoryLabel,
     memoryTypeLabel,
     statusLabel,
-    pct(v) { return Math.round((Number(v) || 0) * 100) },
+    pct(v) { return Math.max(0, Math.min(100, Math.round((Number(v) || 0) * 100))) },
     onKeyup(e) {
       if (e.key === 'Escape' && this.visible) {
         this.$emit('close')
@@ -208,14 +233,17 @@ export default {
   display: flex; justify-content: space-between; align-items: center;
   padding: 16px 20px; border-bottom: 1px solid #e8ecf4; flex-shrink: 0;
 }
-.detail-header-left { display: flex; align-items: center; gap: 8px; }
+.detail-header-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .detail-title { font-size: 15px; font-weight: 600; color: #1a202c; }
+.detail-title, .detail-content-text { overflow-wrap: anywhere; }
 .detail-body { flex: 1; overflow-y: auto; padding: 10px 20px; }
 .detail-section { margin-bottom: 18px; }
 .section-title { font-size: 13px; font-weight: 600; color: #718096; margin: 0 0 10px; text-transform: uppercase; letter-spacing: .5px; }
 .detail-content-text { font-size: 14px; color: #2f3548; line-height: 1.6; margin: 0; padding: 10px 12px; background: #f7f8fc; border-radius: 6px; }
-.detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.detail-field { display: flex; flex-direction: column; gap: 2px; }
+.evidence-quote { border-left: 3px solid #c5d3ec; padding: 8px 12px; margin: 0; color: #52617a; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; background: #f7f9fc; }
+.source-event { font-size: 11px; color: #747e91; overflow-wrap: anywhere; }
+.detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.detail-field { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
 .detail-field label { font-size: 11px; color: #a0aec0; }
 .detail-field span { font-size: 13px; color: #2f3548; font-weight: 500; }
 .detail-field .speaker-id { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; word-break: break-all; }
@@ -230,4 +258,5 @@ export default {
 
 .slide-right-enter-active, .slide-right-leave-active { transition: transform .3s ease; }
 .slide-right-enter, .slide-right-leave-to { transform: translateX(100%); }
+@media (max-width: 500px) { .detail-panel { width: 100%; } }
 </style>

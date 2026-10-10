@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: architecture
-last_verified: 2026-10-08
+last_verified: 2026-10-10
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules
   - main/manager-web/src
@@ -399,25 +399,33 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 ## 21. 长期记忆维护基础设施
 
 ```text
-定制模块：manager-api 长期记忆事实层、manager-web 记忆管理页、xiaozhi-server 记忆事件上报和查询注入
-改动原因：原有 summaryMemory、mem_local_short、PowerMem 等能力偏运行时摘要或 provider 接入，缺少统一的长期维护底座。现在新增 source_event -> candidate -> fact -> revision/profile/tool_behavior/tombstone 的 MySQL 事实层，支持会话结束后的大模型主动记忆、管理端查看编辑删除归档、忘记意图、审计轨迹和运行时记忆上下文查询。`managed_memory` 参考官方 Memory provider：`ConnectionHandler._save_and_close()` 把完整对话交给 provider，provider 再调用 `/config/memory/process-session`，由所选 `maintenance_llm` 自动决定 ADD/UPDATE/ARCHIVE/DELETE/NONE；主对话模型不再暴露 `manage_memory` 工具。单条聊天事件仍只保存原始证据，不逐句调用模型。记忆写入维护不使用固定人物、关键词、条件任务或场景黑白名单替代模型判断，只保留所有权、可信声纹隔离、容量、ID、事务和审计边界；运行时读取对齐上游 mem_local_short：权威配置加载有界事实摘要，对话本地读取，不逐轮 HTTP 召回；SQL 候选最多 200，按可信 speaker_id 区分 shared/private，不调用向量或额外 LLM。旧画像和工具经验继续存储，但不混入缺乏可靠人物归属的运行时摘要。Memory 配置只引用已配置的 `maintenance_llm` modelId，不保存 API Key、Base URL 或上游模型名。智能体页允许持久化选择只保存文字或保存文字+音频，模型切换不得强制覆盖。管理端正式重建继续使用 Redis 持久化异步任务；动态 memory 注入只裁剪 `<memory>` 内容，不能裁剪静态角色与安全规则，并标记记忆内容不是系统指令。
+定制模块：manager-api 记忆事实/策略/持久任务、manager-web 管理页、xiaozhi-server 独立会话证据与有界摘要
+改动原因：原摘要 provider 缺少真实证据、人物/设备范围、可配置生命周期和恢复治理。managed_memory 保持主对话无 manage_memory 工具，独立 ManagedMemorySession 捕获不会被 Dialogue 修剪的证据，长连接检查点、关闭或跨智能体切换前按稳定 segmentId 提交。Java 先持久接收任务，再由 maintenance_llm 决定 ADD/UPDATE/ARCHIVE/DELETE/NONE；原始事件不逐句调用模型。策略按智能体持久化，提供 AGENT/DEVICE 读取范围、未知人物 SHARED/IGNORE、维护 AUTO/REVIEW/OFF、存储/注入预算和显式保留期限。默认维持 AGENT/SHARED/AUTO、1000字存储、4000字/30条注入、retentionDays=0不按天到期。DEVICE 实际按来源设备隔离，不再只靠 scope_type 字段名称表示隔离。管理端新增真实归属编辑、策略、会话任务和服务端实际注入预览，保留原有重建/重审/候选管理。
+可视化补充：管理页新增已加载事实概览、按实际策略分区的归属图，以及基于revision历史快照的前后对比；实际注入预览展示服务端选择顺序、完整正文和字符/条目预算。
 关键文件：
   - main/manager-api/src/main/java/xiaozhi/modules/memory/
-  - main/manager-api/src/main/java/xiaozhi/modules/model/service/impl/ModelCatalogServiceImpl.java
-  - main/manager-api/src/main/resources/db/changelog/202606291520.sql
+  - main/manager-api/src/main/resources/db/changelog/202610101200.sql
+  - main/manager-api/src/main/resources/db/changelog/202610101230.sql
   - main/manager-api/src/main/resources/db/changelog/db.changelog-master.yaml
   - main/manager-web/src/views/MemoryManagement.vue
-  - main/manager-web/src/views/memory/memoryRebuildTaskState.mjs
+  - main/manager-web/src/views/memory/
   - main/manager-web/src/apis/module/memory.js
-  - main/manager-web/src/components/DeviceItem.vue
   - main/xiaozhi-server/config/manage_api_client.py
-  - main/xiaozhi-server/core/handle/reportHandle.py
-  - main/xiaozhi-server/core/connection.py
+  - main/xiaozhi-server/core/session/managed_memory_session.py
+  - main/xiaozhi-server/core/session/managed_memory_snapshot.py
+  - main/xiaozhi-server/core/session/realtime_memory.py
   - main/xiaozhi-server/core/utils/prompt_budget.py
   - docs/architecture/memory-system-chain.md
-  - docs/models/memory-and-knowledge-governance.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改 Memory provider、聊天记录上报、ConfigController、AgentController、Shiro config、角色首页、模型配置目录、知识库切片配置或数据库迁移，必须保留长期记忆事实层、`managed_memory` 入口、会话结束后的 `/config/memory/process-session` 主动整理和 `/config/memory/**` server-secret 入口；不得重新把 `manage_memory` 注册给主 LLM。运行时查询失败或超时时必须降级为空记忆，不能阻塞语音回复；`nomem` 模式不得注入长期记忆；单条事件不得逐句调用记忆模型，主动整理只在完整会话结束后执行；写入维护不得加入固定人物/关键词/场景门控、条件任务特殊类型、TTL、衰减或字符串相似度判断；运行时摘要必须保持说话人隔离、200 条候选硬上限、有界字符预算、有限租约、更新/遗忘/声纹撤销后的失效与并发旧响应拦截；不得逐轮回退 HTTP 查询，不得调用向量或召回模型；租约仅限制内存摘要新鲜度，不修改事实存储 TTL；可信 speaker_id 决定 private 归属，未识别单人会话事实保持 shared；`maintenance_llm` 只能引用已配置的 LLM/SLM modelId，不能复制模型密钥；聊天记录文字/音频选择必须尊重智能体持久化值。管理端删除、归档、确认、拒绝和自动写入必须写 revision 审计；删除 `summary_memory` 前必须完成 Java、Vue、Python、文档和迁移的完整兼容替代。正式重建必须继续采用服务端任务与短事务原子替换，不能退回单个 300 秒 HTTP 请求或仅靠浏览器 loading 状态维持互斥。
+官方同步时的处理规则：必须保留 MySQL 事实、revision、遗忘、策略和持久任务，/config/memory/** 服务端认证及设备/会话权威归属校验。记忆模型配置只能引用已配置的 maintenance_llm modelId，不能复制凭据；用户文字/音频保存选择不能被切模型覆盖。主对话不得恢复 manage_memory，也不得逐条事件调用模型。允许依据用户明确保存的 retentionDays 设置事实期限，0表示不按天到期；不得自行引入隐藏TTL、关键词、固定人物或场景规则替代模型判断。snapshot租约只决定缓存新鲜度，与事实有效期分离。
+未知人物必须服从 SHARED/IGNORE 策略，不得强制所有未识别内容变成共享事实。private依据可信人物ID，AGENT/DEVICE依据权威策略和设备绑定；所有人工与自动ADD/UPDATE/候选确认继续验证人物、设备、真实用户证据、遗忘和容量，不能信任模型自报source_role。AUTO自动写事实，REVIEW只生成候选，OFF停止自动整理但保留既有读取与人工维护；该策略不同于Harness后台审批，不能恢复被删除的Harness UI或改变其边界。
+不可变证据与可修剪Dialogue分离，按40条/16000字符/30秒检查点提交，稳定segmentId重试不得改正文；接收失败保留未确认段，关闭和跨智能体切换不能串写。Java接收后必须先持久化；submit-session的accepted回执只确认持久接管，不伪造模型成功或0条结果，Python确认回执后才能推进。后台进行有限重试/租约恢复，最终失败由任务管理显示并允许显式重试，不堵塞未来分段；旧process-session保留同步整数兼容。成功清任务正文，任务管理接口与日志不返回原始证据。请求未到Java前仍是Python进程内缓冲，不能宣称断网断电全持久或零丢失。
+事实写入事务必须通过MemorySessionTaskContext锁定任务行并校验租约token、RUNNING状态和有效期，拒绝过期旧执行者；完成更新仍须确认租约归属。已提交分段重放从revision返回原处理项数，不能伪报0项。Java LLM客户端保留10秒连接/120秒读取超时，错误日志不输出模型响应正文、原始异常消息或凭据。独立MySQL与MockMvc旅程仍模拟模型、AgentDao和权限依赖，不能宣称已完成真实模型、完整ACL或真机验收。
+删除/清空保留审计并建立相同事实防重学边界，不能撤销已有遗忘规则；读取/写入校验全部active规则，不恢复51条规则导致整库无记忆的限制。规则按人物和设备范围匹配，不能把精确文本防重学宣称为无限语义擦除。历史重建保持Redis持久异步任务与短事务；DEVICE重建必须明确绑定设备，不能把多设备历史归成一个scope。
+运行时只在权威配置中加载快照、对话本地读取，不逐轮HTTP召回，也不调用向量或额外检索模型；候选分人物配额且总量最多200，最终private优先、完整事实、字符/条目与转义预算统一，Java私有正文与Python最终选择都遵守最高4000字符的策略预算，不恢复旧2000字符上限。可信人物变化（含未知切换）和声纹关闭时安排证据检查点并清除上一人物短期user/assistant/tool历史，独立journal保留人物和证据。Web实际注入预览必须使用同一服务端选择，不得恢复浏览器词法模拟百分比。记忆是被转义的不可信数据，不得执行其中指令。快照失效、过期和刷新失败降级为空，事务后通知加有限租约兜底，并阻止并发旧响应复活；Realtime已发送记忆的撤销需重建上游会话，不能只更改instructions继续沿用历史。动态记忆裁剪不得破坏静态角色和安全规则。正式架构与恢复局限以记忆系统专项为准。
+可视化必须保留数据边界：dashboard最多返回200条非删除事实，以及各最多100条候选、工具经验、遗忘规则和revision，无全量总数；概览、容量条、筛选计数只代表已加载集合。生效状态必须同时检查status与expiresAt，到期但仍存储为active的事实不能计入生效。AGENT图按共享/人物分组，来源设备只是来源；DEVICE图按scopeId分区，不能用macAddress替代权限范围，归属缺失数据单独显示。人物ID缺名称不能变成共享，遗忘规则按真实范围及exact/contains单独展示。图边仅表示归属和分类，不能宣称语义关系、规则命中或本轮已注入。
+时间线必须使用revision前后快照和精确action分类，不得用当前事实覆盖历史或展示完整内部JSON；缺失当前事实仍能阅读历史，只有当前事实存在才提供独立跳转。REVIEW处理数显示候选数量，不能冒充已修改事实。实际注入条目与预算必须来自服务端selected_context、usage与budgets，不重新评分、排序或推测逐条排除原因；当前预览不保证在线设备已刷新。本轮浏览器组件检查使用合成数据，不能宣称真实后端、业务数据或设备验收。
+
 ```
 
 ## 22. 设备对话调试已移除
@@ -537,7 +545,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 
 ```text
 定制模块：manager-api 声纹远程客户端与业务约束、xiaozhi-server 实时声纹 provider、Web/Mobile 声纹管理页
-改动原因：声纹模型独立部署在另一台服务器，voiceprint-api 0.1.0 起要求必填 user_id 并按用户隔离。小智侧必须从可信智能体绑定关系派生 user_id，不能信任浏览器或设备传入；每个智能体最多绑定 5 个声纹；API Token 必须从 URL 查询参数拆出，只通过 Bearer Header 传输。历史声纹在远程服务中属于 default 作用域，需要保留兼容并允许重新录音后迁移到 agentId 作用域。实时识别假设一句话只有一个说话人，VAD 句末后把当前整段语音转 WAV 并与 ASR 并行识别，对齐官方上游逻辑；历史参数 `server.voiceprint_sample_seconds` 不再下发也不再影响运行时。系统功能开关和智能体绑定声纹必须同时满足才允许下发；没有绑定或总开关关闭时必须零调用、零提示词。可信 `speaker_id` 继续进入聊天记录、长期记忆事件和会话结束后的主动记忆上下文，`speaker_score` 仅保留在指标和聊天上报，不进入主 LLM；主动记忆模型输出中的 speaker_id 必须能在当前会话可信人物集合中验证，单一已识别说话人的事实保存为 private，未识别会话事实保存为 shared。后端不按正文姓名扩大范围。聊天记录和记忆图谱必须展示人物归属。身份必须在每个成功识别轮次同时进入结构化 user message 和动态 system 上下文，避免只靠旧对话历史导致模型否认本轮识别结果；说话人姓名和描述进入 system 前必须转义，避免重复称呼由提示词约束，不能通过丢弃本轮身份实现。
+改动原因：声纹模型独立部署在另一台服务器，voiceprint-api 0.1.0 起要求必填 user_id 并按用户隔离。小智侧必须从可信智能体绑定关系派生 user_id，不能信任浏览器或设备传入；每个智能体最多绑定 5 个声纹；API Token 必须从 URL 查询参数拆出，只通过 Bearer Header 传输。历史声纹在远程服务中属于 default 作用域，需要保留兼容并允许重新录音后迁移到 agentId 作用域。实时识别假设一句话只有一个说话人，VAD 句末后把当前整段语音转 WAV 并与 ASR 并行识别，对齐官方上游逻辑；历史参数 `server.voiceprint_sample_seconds` 不再下发也不再影响运行时。系统功能开关和智能体绑定声纹必须同时满足才允许下发；没有绑定或总开关关闭时必须零调用、零提示词。可信 `speaker_id` 继续进入聊天记录、长期记忆事件和会话结束后的主动记忆上下文，`speaker_score` 仅保留在指标和聊天上报，不进入主 LLM；主动记忆模型输出中的 speaker_id 必须能在当前会话可信人物集合中验证，单一已识别说话人的事实保存为 private，未识别会话按智能体记忆策略 SHARED/IGNORE 决定是否保存为 shared。后端不按正文姓名扩大范围。聊天记录和记忆图谱必须展示人物归属。身份必须在每个成功识别轮次同时进入结构化 user message 和动态 system 上下文，避免只靠旧对话历史导致模型否认本轮识别结果；说话人姓名和描述进入 system 前必须转义，避免重复称呼由提示词约束，不能通过丢弃本轮身份实现。
 关键文件：
   - main/manager-api/src/main/java/xiaozhi/modules/agent/voiceprint/VoiceprintApiClient.java
   - main/manager-api/src/main/java/xiaozhi/modules/agent/service/impl/AgentVoicePrintServiceImpl.java
@@ -558,7 +566,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/manager-mobile/src/pages/voiceprint/index.vue
   - docs/models/voiceprint-integration.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改声纹注册/识别/删除、配置下发、音频状态重置、ASR并行识别、聊天记录展示、长期记忆事件/召回、对话身份注入或声纹页面，必须保留 `user_id=agentId` 的可信服务端派生、每智能体最多5条的后端与远程双重校验、`remote_user_id=default` 历史兼容、Token仅通过Bearer Header传输、私有/回环/链路本地目标拦截、结构化 speakers 配置、“VAD句末整段语音WAV与ASR并发识别、`server.voiceprint_sample_seconds` 不再驱动截断采样、无绑定声纹零调用”、设备采集期间连续静音至少2秒才完成、注册事务提交后热刷新在线连接 provider、可信 `speaker_id` 贯穿聊天记录与记忆、private 事实不跨声纹召回、shared 由主模型明确选择，以及“每个成功识别轮次都在当前 user JSON 和 system 上下文保留身份，但不得机械称呼姓名或主动播报识别过程”的行为。前端上限提示不能替代后端校验；删除远程失败时不得静默留下占用额度的孤儿声纹；日志不得输出Token、Authorization或带密钥URL。
+官方同步时的处理规则：如果官方修改声纹注册/识别/删除、配置下发、音频状态重置、ASR并行识别、聊天记录展示、长期记忆事件/召回、对话身份注入或声纹页面，必须保留 `user_id=agentId` 的可信服务端派生、每智能体最多5条的后端与远程双重校验、`remote_user_id=default` 历史兼容、Token仅通过Bearer Header传输、私有/回环/链路本地目标拦截、结构化 speakers 配置、“VAD句末整段语音WAV与ASR并发识别、`server.voiceprint_sample_seconds` 不再驱动截断采样、无绑定声纹零调用”、设备采集期间连续静音至少2秒才完成、注册事务提交后热刷新在线连接 provider、可信 `speaker_id` 贯穿聊天记录与记忆、private 事实不跨声纹召回、未知人物按已保存的 SHARED/IGNORE 记忆策略处理，以及“每个成功识别轮次都在当前 user JSON 和 system 上下文保留身份，但不得机械称呼姓名或主动播报识别过程”的行为。前端上限提示不能替代后端校验；删除远程失败时不得静默留下占用额度的孤儿声纹；日志不得输出Token、Authorization或带密钥URL。
 ```
 
 ## 27. 语义控制中枢门控的会议模式与完整纪要
@@ -843,7 +851,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - docs/architecture/runtime-flows.md
   - docs/models/model-management.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：必须保留 selected_module.LLM + model_config.<id>.typed_config 的单一选择契约；conversation_mode=realtime 使用独立 Realtime adapter，缺省继续走传统拼接。编辑已有模型时，明确模板必须优先于厂商名/模型名推断；模板、adapter、conversation_mode、请求路径 provider 和端点协议必须在前端提示并由 manager-api 保存/测试入口强制校验，禁止再形成 `realtime + openai + HTTP Chat Completions` 的矛盾配置，且必须在外部请求前拒绝以防 API Key 外发。补偿迁移只修复 Realtime 元数据、普通参数和测试状态，保留密钥表中的 api_key 原文且不回显。实时模式接管当前会话音频；自然打断、上下文重建、会话音色、图片和工具协议只能按 adapter 能力启用，工具仍执行统一服务端门控；打断必须保留刚开始的用户音频，上下文清空必须创建新的上游 session。角色级 `realtimeVoiceId` 只覆盖兼容 adapter 的当前 Realtime `typed_config.voice`，必须与传统 `ttsVoiceId` 分离，不得回写共享模型配置；固定音色目录和自定义音色 ID 都由 adapter 能力注册表声明，禁止在页面散落厂商判断。支持原生工具的 Realtime adapter 必须在会话初始化时独立确保统一工具运行时就绪，不能依赖传统 Intent provider；Realtime 首片音频有可用增量文本时先发送预览字幕，完整文本生成后必须在 `tts/stop` 前再次发送完整回答，不能让旧固件只停留在首字。没有工具结果回注协议的 adapter 必须拒绝主 LLM function_call，不能靠提示词 JSON 伪装。传统 VAD/ASR/TTS/VLLM 配置保留供手动切回。实时建连、响应、图片或工具失败不得静默切换为传统半轮；端点必须使用受支持的 wss 官方主机并防止 API Key 外发。Realtime 可以注入建立会话时的静态摘要并上报事件，但不等同于传统逐轮动态记忆查询，也不能隐式承担知识库切片、Judge、短期总结或主动记忆维护的同步文本 LLM。单模型测试必须建立真实 Realtime 会话并记录首文本/首音频/总耗时；自动测试必须按 adapter 覆盖路由、音频转换、能力拒绝、自然/显式 Abort、上下文重建、会话音色、关闭和模式切换。
+官方同步时的处理规则：必须保留 selected_module.LLM + model_config.<id>.typed_config 的单一选择契约；conversation_mode=realtime 使用独立 Realtime adapter，缺省继续走传统拼接。编辑已有模型时，明确模板必须优先于厂商名/模型名推断；模板、adapter、conversation_mode、请求路径 provider 和端点协议必须在前端提示并由 manager-api 保存/测试入口强制校验，禁止再形成 `realtime + openai + HTTP Chat Completions` 的矛盾配置，且必须在外部请求前拒绝以防 API Key 外发。补偿迁移只修复 Realtime 元数据、普通参数和测试状态，保留密钥表中的 api_key 原文且不回显。实时模式接管当前会话音频；自然打断、上下文重建、会话音色、图片和工具协议只能按 adapter 能力启用，工具仍执行统一服务端门控；打断必须保留刚开始的用户音频，上下文清空必须创建新的上游 session。角色级 `realtimeVoiceId` 只覆盖兼容 adapter 的当前 Realtime `typed_config.voice`，必须与传统 `ttsVoiceId` 分离，不得回写共享模型配置；固定音色目录和自定义音色 ID 都由 adapter 能力注册表声明，禁止在页面散落厂商判断。支持原生工具的 Realtime adapter 必须在会话初始化时独立确保统一工具运行时就绪，不能依赖传统 Intent provider；Realtime 首片音频有可用增量文本时先发送预览字幕，完整文本生成后必须在 `tts/stop` 前再次发送完整回答，不能让旧固件只停留在首字。没有工具结果回注协议的 adapter 必须拒绝主 LLM function_call，不能靠提示词 JSON 伪装。传统 VAD/ASR/TTS/VLLM 配置保留供手动切回。实时建连、响应、图片或工具失败不得静默切换为传统半轮；端点必须使用受支持的 wss 官方主机并防止 API Key 外发。Realtime 托管记忆采用连接快照及租约守卫，记忆撤销、到期或可见正文变化时重建上游会话，不能只替换instructions而保留已发出的旧事实；事件继续按记忆资格上报。Realtime不能隐式承担知识库切片、Judge、短期总结或主动记忆维护的同步文本LLM。单模型测试必须建立真实 Realtime 会话并记录首文本/首音频/总耗时；自动测试必须按 adapter 覆盖路由、音频转换、能力拒绝、自然/显式 Abort、上下文重建、会话音色、关闭和模式切换。
 ```
 
 ## 41. 设备多场景与按设备在线切换

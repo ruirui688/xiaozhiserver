@@ -45,12 +45,9 @@ class DoubaoDuplexSession(DoubaoRealtimeSession):
 
     def _session_prompt(self):
         from core.utils.current_time import render_runtime_time
-        from core.utils.prompt_budget import compact_memory_context
         prompt = render_runtime_time(self.conn.prompt or self.conn.config.get("prompt", ""))
-        summary = compact_memory_context(self.conn.config.get("summaryMemory"))
-        if summary:
-            prompt += f"\n<realtime_summary_memory>\n{summary}\n</realtime_summary_memory>"
-        return prompt
+        from core.session.realtime_memory import append_realtime_memory
+        return append_realtime_memory(self.conn, prompt)
 
     async def initialize(self):
         try:

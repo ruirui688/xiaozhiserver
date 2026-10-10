@@ -25,6 +25,9 @@ class SessionLifecycle:
         snapshot = getattr(conn, "managed_memory_snapshot", None)
         if snapshot is not None:
             snapshot.invalidate()
+        memory_session = getattr(conn, "managed_memory_session", None)
+        if memory_session is not None:
+            memory_session.cancel_scheduled_flush()
         reloader = getattr(conn, "runtime_config_reloader", None)
         cancel_snapshot_refresh = getattr(reloader, "cancel_snapshot_refresh", None)
         if cancel_snapshot_refresh is not None:

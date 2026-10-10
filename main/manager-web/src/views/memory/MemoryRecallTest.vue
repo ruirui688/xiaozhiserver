@@ -1,223 +1,110 @@
 <template>
-  <div class="recall-view">
-    <div class="recall-controls">
-      <div class="recall-input-row">
-        <el-input v-model="queryText" type="textarea" :rows="3" placeholder="输入测试查询文本，本地模拟记忆召回效果..." @keyup.ctrl.enter.native="runTest" />
+  <div class="preview-panel">
+    <p class="hint">根据已保存策略预览指定设备、人物的记忆上下文。不会调用对话模型；在线设备实际使用还受刷新状态和当前身份影响。</p>
+    <el-form inline size="small">
+      <el-form-item label="设备">
+        <el-select v-model="deviceId" placeholder="选择设备" filterable :disabled="!policy">
+          <el-option v-for="device in devices" :key="device.deviceId" :value="device.deviceId" :label="device.label" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="当前人物">
+        <el-select v-model="speakerId" :disabled="!policy">
+          <el-option value="" label="未识别人物（仅共享记忆）" />
+          <el-option v-for="speaker in speakers" :key="speaker.speakerId" :value="speaker.speakerId" :label="speaker.label" />
+        </el-select>
+      </el-form-item>
+      <el-form-item><el-button type="primary" :disabled="!policy || !deviceId" :loading="running" @click="runTest">预览实际注入</el-button></el-form-item>
+    </el-form>
+    <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
+    <template v-if="result">
+      <div class="budget-row">
+        <el-tag>字符 {{ result.usage && result.usage.chars || 0 }} / {{ result.budgets && result.budgets.maxChars }}</el-tag>
+        <el-tag>条目 {{ result.usage && result.usage.items || 0 }} / {{ result.budgets && result.budgets.maxItems }}</el-tag>
+        <el-tag :type="ready ? 'success' : 'warning'">{{ ready ? '快照可用' : '快照不可用' }}</el-tag>
       </div>
-      <div class="recall-params">
-        <div class="param-group">
-          <label>最小重要性</label>
-          <el-slider v-model="minImportance" :min="0" :max="1" :step="0.05" show-input :show-input-controls="false" style="width:180px" />
-        </div>
-        <div class="param-group">
-          <label>最小置信度</label>
-          <el-slider v-model="minConfidence" :min="0" :max="1" :step="0.05" show-input :show-input-controls="false" style="width:180px" />
-        </div>
-        <div class="param-group">
-          <label>最多结果</label>
-          <el-input-number v-model="maxResults" :min="1" :max="50" size="small" style="width:100px" />
-        </div>
-        <div class="param-actions">
-          <el-button type="primary" size="small" icon="el-icon-search" @click="runTest" :loading="running">开始测试</el-button>
-          <el-button size="small" icon="el-icon-refresh" @click="reset">重置</el-button>
-        </div>
+      <div class="budget-meters">
+        <div><span>字符预算占用</span><el-progress :percentage="budgetPercent('chars', 'maxChars')" :stroke-width="8" /></div>
+        <div><span>条目预算占用</span><el-progress :percentage="budgetPercent('items', 'maxItems')" :stroke-width="8" /></div>
       </div>
-    </div>
-
-    <div class="recall-results" v-if="results.length > 0">
-      <div class="results-header">
-        <strong>{{ results.length }} 条匹配</strong>
-        <span class="results-hint">按本地模拟相关性从高到低排列，不调用真实运行时查询</span>
-      </div>
-      <div class="result-item" v-for="(r, i) in results" :key="r.memoryId || i">
-        <div class="result-rank">{{ i + 1 }}</div>
-        <div class="result-content">
-          <div class="result-bar-row">
-            <div class="result-bar" :style="{width: r.scorePercent + '%', background: r.scoreColor}"></div>
-            <span class="result-score">{{ r.scorePercent }}%</span>
-          </div>
-          <p class="result-text">{{ r.canonicalText }}</p>
-          <div class="result-tags">
-            <el-tag size="mini" type="info">{{ r.category || '未分类' }}</el-tag>
-            <el-tag size="mini" :type="r.tierTagType">{{ r.tierLabel }}</el-tag>
-            <el-tag size="mini" type="warning" v-if="r.confirmationState==='manual'">手动</el-tag>
-            <el-tag size="mini" type="success" v-else>自动</el-tag>
-            <el-button size="mini" type="text" icon="el-icon-view" @click="$emit('open-detail', r)">详情</el-button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="recall-placeholder" v-else-if="!running">
-      <div v-if="queryText">
-        <i class="el-icon-warning-outline" style="font-size:40px;color:#c0c4cc;margin-bottom:8px" />
-        <p>没有符合条件的记忆</p>
-        <span>尝试降低阈值或修改查询文本</span>
-      </div>
-      <div v-else>
-        <i class="el-icon-search" style="font-size:40px;color:#c0c4cc;margin-bottom:8px" />
-        <p>输入查询文本并点击「开始测试」</p>
-          <span>仅基于当前事实记忆本地模拟，不调用真实运行时查询</span>
-      </div>
-    </div>
+      <el-alert v-if="truncated" title="部分事实因候选数量或上下文预算限制未进入本次预览。" type="warning" :closable="false" show-icon />
+      <p class="hint">已按设备范围、人物归属、有效状态、遗忘规则及上下文预算过滤。其他人物的私有记忆不会在此展示。</p>
+      <ol v-if="selectedFacts.length" class="selected-facts" aria-label="按实际注入顺序排列的记忆">
+        <li v-for="(text, index) in selectedFacts" :key="index"><span class="fact-order">{{ index + 1 }}</span><span>{{ text }}</span></li>
+      </ol>
+      <p v-else class="context">当前条件下没有可注入记忆。</p>
+      <el-collapse v-if="result.selected_context"><el-collapse-item title="查看完整注入正文" name="context"><pre class="context">{{ result.selected_context }}</pre></el-collapse-item></el-collapse>
+    </template>
+    <p v-else-if="!running && !error" class="hint">选择设备和人物后查看当前服务端生成的上下文。修改条件、策略或事实后需要重新预览。</p>
   </div>
 </template>
 
 <script>
+import Api from '@/apis/api'
+import { responseData, memoryError } from './memoryPolicy.mjs'
+import { boundedPercent } from './memoryVisualState.mjs'
+
 export default {
   name: 'MemoryRecallTest',
   props: {
-    facts: { type: Array, default: () => [] }
+    agentId: { type: String, required: true },
+    policy: { type: Object, default: null },
+    revision: { type: Number, default: 0 }
   },
-  data() {
-    return {
-      queryText: '',
-      minImportance: 0.0,
-      minConfidence: 0.0,
-      maxResults: 10,
-      results: [],
-      running: false
+  data() { return { deviceId: '', speakerId: '', result: null, error: '', running: false, requestVersion: 0 } },
+  computed: {
+    devices() { return this.policy && this.policy.devices || [] },
+    speakers() { return this.policy && this.policy.speakers || [] },
+    ready() { return this.result && this.result.snapshot && this.result.snapshot.status === 'ready' },
+    selectedFacts() { return String(this.result && this.result.selected_context || '').split('\n').filter(line => line.trim()).map(line => line.replace(/^- /, '')) },
+    truncated() { return Boolean(this.result && ((this.result.snapshot || {}).truncated || (this.result.excluded || {}).truncated)) }
+  },
+  watch: {
+    agentId() { this.deviceId = ''; this.speakerId = ''; this.invalidate() },
+    deviceId() { this.invalidate() },
+    speakerId() { this.invalidate() },
+    revision() { this.invalidate() },
+    policy() {
+      if (!this.devices.some(item => item.deviceId === this.deviceId)) this.deviceId = ''
+      if (!this.speakers.some(item => item.speakerId === this.speakerId)) this.speakerId = ''
+      this.invalidate()
     }
   },
+  beforeDestroy() { this.invalidate() },
   methods: {
+    budgetPercent(used, max) { return Math.round(boundedPercent((this.result.usage || {})[used], (this.result.budgets || {})[max])) },
+    invalidate() { this.requestVersion += 1; this.result = null; this.error = ''; this.running = false },
     runTest() {
-      if (!this.queryText.trim()) return
+      if (!this.policy || !this.deviceId || this.running) return
+      const version = ++this.requestVersion
+      const identity = [this.agentId, this.deviceId, this.speakerId, this.revision]
+      const current = () => version === this.requestVersion && identity.every((value, index) => value === [this.agentId, this.deviceId, this.speakerId, this.revision][index])
+      this.result = null
+      this.error = ''
       this.running = true
-
-      // Simulate processing delay
-      setTimeout(() => {
-        const results = this.scoreFacts(this.queryText, this.facts, {
-          minImportance: this.minImportance,
-          minConfidence: this.minConfidence,
-          maxResults: this.maxResults
-        })
-        this.results = results
+      const failed = (error) => {
+        if (!current()) return
         this.running = false
-      }, 200)
-    },
-    reset() {
-      this.queryText = ''
-      this.minImportance = 0.0
-      this.minConfidence = 0.0
-      this.maxResults = 10
-      this.results = []
-    },
-
-    // ---- Scoring algorithm ----
-    scoreFacts(query, facts, opts) {
-      const queryTokens = this.tokenize(query)
-      if (queryTokens.length === 0) return []
-
-      const scored = facts
-        .filter(f => f.status !== 'deleted')
-        .map(f => {
-          const factTokens = this.tokenize(f.canonicalText || '')
-          const overlap = queryTokens.filter(t => factTokens.includes(t)).length
-          const overlapScore = queryTokens.length > 0 ? overlap / queryTokens.length : 0
-          const importance = Number(f.importance) || 0.5
-          const confidence = Number(f.confidence) || 0.5
-          const tierMultiplier = this.getTierMultiplier(f.memoryTier)
-          const score = overlapScore * importance * confidence * tierMultiplier
-          return { ...f, score }
-        })
-        .filter(f => f.score > 0 && f.importance >= opts.minImportance && f.confidence >= opts.minConfidence)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, opts.maxResults)
-
-      // Normalize scores to percentages
-      const maxScore = scored.length > 0 ? scored[0].score : 1
-      return scored.map(f => ({
-        ...f,
-        scorePercent: Math.round((f.score / maxScore) * 100),
-        scoreColor: this.getScoreColor(f.score / maxScore),
-        tierLabel: this.getTierLabel(f.memoryTier),
-        tierTagType: this.getTierTagType(f.memoryTier)
-      }))
-    },
-
-    tokenize(text) {
-      // Chinese + English tokenization
-      const cleaned = text.toLowerCase().replace(/[，。！？、；：,.!?;:""''()（）《》<>\[\]【】\s]+/g, ' ')
-      const tokens = []
-      // Extract Chinese characters (bigrams for better matching)
-      const chinese = cleaned.replace(/[^一-鿿]/g, '')
-      for (let i = 0; i + 1 < chinese.length; i++) {
-        tokens.push(chinese.slice(i, i + 2))
+        this.error = memoryError(error, '读取实际注入预览失败，请重试')
       }
-      // Also add single Chinese chars for short queries
-      if (chinese.length <= 3) {
-        for (const c of chinese) tokens.push(c)
-      }
-      // Extract English/Number words
-      const words = cleaned.match(/[a-z0-9]+/g)
-      if (words) tokens.push(...words)
-      return [...new Set(tokens)]
-    },
-
-    getTierMultiplier(tier) {
-      if (!tier) return 1.0
-      const t = tier.toLowerCase()
-      if (t === 'long_term') return 1.5
-      if (t === 'short_term') return 1.0
-      if (t === 'working') return 0.5
-      return 1.0
-    },
-
-    getTierLabel(tier) {
-      if (!tier) return '标准'
-      const t = tier.toLowerCase()
-      if (t === 'long_term') return '长期记忆'
-      if (t === 'short_term') return '短期记忆'
-      if (t === 'working') return '工作记忆'
-      return tier
-    },
-
-    getTierTagType(tier) {
-      if (!tier) return ''
-      const t = tier.toLowerCase()
-      if (t === 'long_term') return 'primary'
-      if (t === 'short_term') return 'success'
-      if (t === 'working') return 'info'
-      return ''
-    },
-
-    getScoreColor(ratio) {
-      if (ratio >= 0.8) return '#2ecc71'
-      if (ratio >= 0.5) return '#3f6fd8'
-      if (ratio >= 0.3) return '#f0b060'
-      return '#909399'
+      Api.memory.preview(this.agentId, { deviceId: this.deviceId, speakerId: this.speakerId }, (res) => {
+        if (!current()) return
+        this.running = false
+        this.result = responseData(res)
+      }, failed, failed)
     }
   }
 }
 </script>
 
 <style scoped>
-.recall-view { min-height: 420px; }
-
-.recall-controls { margin-bottom: 20px; }
-.recall-input-row { margin-bottom: 12px; }
-.recall-params { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-.param-group { display: flex; align-items: center; gap: 8px; }
-.param-group label { font-size: 12px; color: #718096; white-space: nowrap; }
-.param-actions { display: flex; gap: 8px; margin-left: auto; }
-
-.recall-results { }
-.results-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid #e8ecf4; }
-.results-header strong { font-size: 14px; color: #2f3548; }
-.results-hint { font-size: 11px; color: #a0aec0; }
-
-.result-item { display: flex; gap: 14px; margin-bottom: 12px; padding: 12px 14px; background: #fff; border: 1px solid #e8ecf4; border-radius: 8px; transition: box-shadow .2s; }
-.result-item:hover { box-shadow: 0 2px 8px rgba(0,0,0,.06); }
-.result-rank { width: 24px; height: 24px; line-height: 24px; text-align: center; font-size: 12px; font-weight: 700; color: #718096; background: #f7f8fc; border-radius: 50%; flex-shrink: 0; }
-.result-content { flex: 1; min-width: 0; }
-.result-bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.result-bar { height: 6px; border-radius: 3px; min-width: 4px; transition: width .4s ease; }
-.result-score { font-size: 12px; font-weight: 600; color: #2f3548; white-space: nowrap; }
-.result-text { font-size: 14px; color: #2f3548; margin: 0 0 6px; line-height: 1.5; }
-.result-tags { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-
-.recall-placeholder { display: flex; justify-content: center; padding: 60px 0; }
-.recall-placeholder > div { display: flex; flex-direction: column; align-items: center; text-align: center; }
-.recall-placeholder p { font-size: 15px; color: #718096; margin: 0 0 4px; }
-.recall-placeholder span { font-size: 12px; color: #a0aec0; }
+.preview-panel { padding: 8px 16px 20px; }
+.hint { color: #718096; line-height: 1.7; font-size: 13px; }
+.budget-row { display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 0; }
+.context { white-space: pre-wrap; overflow-wrap: anywhere; background: #f7f8fc; padding: 18px; border-radius: 6px; line-height: 1.7; max-height: 420px; overflow: auto; }
+.budget-meters { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin: 18px 0; }
+.budget-meters span { display: block; font-size: 12px; color: #747e91; margin-bottom: 8px; }
+.selected-facts { list-style: none; padding: 0; margin: 16px 0; }
+.selected-facts li { display: flex; gap: 12px; padding: 12px 4px; border-bottom: 1px solid #e8ecf3; font-size: 14px; line-height: 1.65; color: #313d54; overflow-wrap: anywhere; }
+.fact-order { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: #edf2fc; color: #4669bc; border-radius: 6px; font-size: 12px; }
+@media (max-width: 700px) { .budget-meters { grid-template-columns: 1fr; gap: 14px; } }
 </style>

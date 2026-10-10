@@ -18,6 +18,7 @@ MANAGED_CONFIG_KEYS = (
     "voiceprint",
     "voiceprint_enrollment",
     "summaryMemory",
+    "memory_policy",
     "mcp_endpoint",
     "context_providers",
     "semantic_skills",

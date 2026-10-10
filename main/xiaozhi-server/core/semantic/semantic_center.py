@@ -169,8 +169,8 @@ class SemanticCenter:
                     generation=reply_generation,
                 )
                 return
-            conn.dialogue.put(Message(role="user", content=asr_result.raw_text))
-            conn.dialogue.put(Message(role="assistant", content=reply_text))
+            conn.dialogue.put(Message(role="user", content=asr_result.raw_text, memory_eligible=False))
+            conn.dialogue.put(Message(role="assistant", content=reply_text, memory_eligible=False))
         except Exception as error:
             conn.logger.bind(tag=__name__).error(
                 "固定播报技能执行失败: "

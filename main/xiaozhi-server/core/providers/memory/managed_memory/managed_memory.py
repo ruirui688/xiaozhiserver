@@ -24,6 +24,7 @@ class MemoryProvider(MemoryProviderBase):
         self.role_id = None
         self.agent_id = None
         self.snapshot_reader = None
+        self.session = None
 
     def init_memory(
         self,
@@ -37,27 +38,38 @@ class MemoryProvider(MemoryProviderBase):
         self.agent_id = agent_id
 
     async def save_memory(self, msgs, session_id=None):
+        if self.session is not None:
+            return await self.session.flush()
+        return await self.submit_messages(msgs, session_id)
+
+    async def submit_messages(self, msgs, session_id=None, segment_id=None, *, agent_id=None, device_id=None):
         if not session_id or not msgs:
             return None
         messages = []
         for message in msgs:
-            if getattr(message, "is_temporary", False):
+            if getattr(message, "is_temporary", False) or not getattr(message, "memory_eligible", True):
                 continue
             role = str(getattr(message, "role", "") or "").strip().lower()
-            content = getattr(message, "content", None)
+            content = getattr(message, "memory_content", getattr(message, "content", None))
             if role not in {"user", "assistant", "tool"} or not content:
                 continue
-            messages.append({"role": role, "content": str(content)[:8000]})
+            if len(str(content)) > 8000:
+                raise ValueError("memory_message_too_large")
+            item = {"role": role, "content": str(content)}
+            if segment_id is not None:
+                item.update(messageId=message.uniq_id,
+                            speakerId=getattr(message, "speaker_id", ""), memoryEligible=True)
+            messages.append(item)
         if not messages:
             return None
-        changed = await process_managed_memory_session(
-            self.role_id,
-            self.agent_id,
-            session_id,
-            messages[-200:],
-        )
+        if len(messages) > 200:
+            raise ValueError("memory_segment_too_large")
+        args = (device_id or self.role_id, agent_id or self.agent_id, session_id, messages)
+        changed = await process_managed_memory_session(*args, **(
+            {"segment_id": segment_id} if segment_id is not None else {}
+        ))
         logger.bind(tag=TAG).info(
-            f"主动记忆会话处理完成: session={session_id}, factsChanged={changed}"
+            f"主动记忆片段已持久接收: session={session_id}, segment={segment_id}"
         )
         return changed
 

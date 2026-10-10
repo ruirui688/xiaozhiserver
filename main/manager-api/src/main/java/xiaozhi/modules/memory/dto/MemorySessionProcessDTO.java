@@ -23,6 +23,9 @@ public class MemorySessionProcessDTO {
     @Size(max = 64)
     private String sessionId;
 
+    @Size(max = 64)
+    private String segmentId;
+
     @Valid
     @NotEmpty
     @Size(max = 200)

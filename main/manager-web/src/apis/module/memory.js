@@ -29,14 +29,29 @@ function request(method, url, data, callback, networkFail, fail, timeout) {
 }
 
 export default {
+  policy(agentId, callback, networkFail, fail) {
+    request('GET', `/agent/${agentId}/memories/policy`, null, callback, networkFail, fail);
+  },
+  savePolicy(agentId, data, callback, networkFail, fail) {
+    request('PUT', `/agent/${agentId}/memories/policy`, data, callback, networkFail, fail);
+  },
+  preview(agentId, data, callback, networkFail, fail) {
+    request('POST', `/agent/${agentId}/memories/preview`, data, callback, networkFail, fail);
+  },
+  sessionTasks(agentId, callback, networkFail, fail) {
+    request('GET', `/agent/${agentId}/memories/session-tasks`, null, callback, networkFail, fail);
+  },
+  retrySessionTask(agentId, taskId, callback, networkFail, fail) {
+    request('POST', `/agent/${agentId}/memories/session-tasks/${taskId}/retry`, {}, callback, networkFail, fail);
+  },
   dashboard(agentId, callback, networkFail, fail) {
     request('GET', `/agent/${agentId}/memories`, null, callback, networkFail, fail);
   },
   createFact(agentId, data, callback, networkFail, fail) {
     request('POST', `/agent/${agentId}/memories/facts`, data, callback, networkFail, fail);
   },
-  updateFact(agentId, memoryId, data, callback) {
-    request('PUT', `/agent/${agentId}/memories/facts/${memoryId}`, data, callback);
+  updateFact(agentId, memoryId, data, callback, networkFail, fail) {
+    request('PUT', `/agent/${agentId}/memories/facts/${memoryId}`, data, callback, networkFail, fail);
   },
   archiveFact(agentId, memoryId, callback) {
     request('POST', `/agent/${agentId}/memories/facts/${memoryId}/archive`, {}, callback);

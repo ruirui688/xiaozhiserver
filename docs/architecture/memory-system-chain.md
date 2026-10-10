@@ -1,61 +1,54 @@
 ---
 status: canonical
 owner: memory
-last_verified: 2026-09-21
+last_verified: 2026-10-10
 source_paths:
   - main/xiaozhi-server/core/providers/memory
   - main/xiaozhi-server/config/manage_api_client.py
   - main/manager-api/src/main/java/xiaozhi/modules/memory
   - main/manager-web/src/views/MemoryManagement.vue
+  - main/manager-web/src/views/memory
 ---
 
 # 记忆系统完整链路
 
-本文说明托管长期记忆的真实运行链路。`managed_memory` 参考官方 Memory provider 的保存方式：设备会话结束后，把完整对话交给已配置的记忆 LLM/SLM，由该模型主动提取、合并、修正或撤销长期记忆。主对话模型不需要调用 `manage_memory` 工具，用户也不需要明确说“记住”。
+本文说明托管长期记忆的源码契约。`managed_memory` 通过独立、不可变的会话证据缓冲，在有界检查点和会话结束时把尚未确认的对话分段提交给已配置的记忆 LLM/SLM。模型决定提取、合并、修正或撤销哪些记忆，manager-api 执行归属、证据、容量、遗忘及事务校验。主对话模型不需要调用 `manage_memory` 工具。以下说明不表示已经部署到生产。
 
 ## 1. 总体链路
 
 ```text
 智能体配置
-  -> 选择“大模型主动记忆”
-  -> 选择已配置并测试通过的主动记忆 LLM/SLM
-  -> 选择聊天记录只保存文字，或保存文字+音频
+  -> 选择 managed_memory 与已配置、测试通过的 maintenance_llm
+  -> 保存文字或文字+音频
+  -> 管理端设置记忆范围、人物策略、维护模式、容量和显式期限
 
 实时对话
-  -> 用户/助手/工具事件继续写入 ai_memory_source_event，作为原始证据和审计记录
-  -> 主对话正常使用 LLM、TTS 和其他工具，不暴露 manage_memory
+  -> ai_memory_source_event 保留原始证据与审计
+  -> ManagedMemorySession 捕获独立证据，不受 Dialogue 修剪或上下文清空影响
+  -> 达到有界检查点、关闭连接或切换智能体前提交尚未确认的分段
 
-设备会话结束
-  -> managed_memory.save_memory()
-  -> POST /config/memory/process-session
-  -> 记忆模型读取完整会话 + 当前生效记忆
-  -> 输出 ADD | UPDATE | ARCHIVE | DELETE | NONE
-  -> manager-api 校验人物归属、真实 memory_id、容量和事务边界
-  -> 写入 ai_memory_fact / ai_memory_revision / ai_memory_forget_tombstone
+POST /config/memory/submit-session
+  -> 先保存 ai_memory_session_task，返回持久接收回执
+  -> 后台调用记忆模型，最终处理状态独立于接收回执
+  -> AUTO：通过校验后修改事实；REVIEW：生成待确认候选；OFF：不自动整理
+  -> ADD / UPDATE / ARCHIVE / DELETE / NONE
+  -> 成功清理任务正文；失败记录脱敏状态并有限重试
 
-连接初始化 / 既有权威配置刷新
-  -> manager-api 从事实层生成有界 managed_memory_snapshot
-  -> Python 校验设备、角色、版本和有效期，保存连接级摘要
-
-下一次对话（普通问题和唤醒使用同一路径）
-  -> 本地读取 shared + 当前可信 speaker_id 的 private 摘要
-  -> 不再逐轮 POST /config/memory/query
-  -> 通过 <memory> 注入主对话 LLM
+连接初始化 / 权威配置刷新
+  -> manager-api 从事实层生成设备和智能体绑定的有界快照
+  -> Python 校验身份、版本和租约，按当前可信人物选择 private + shared
+  -> 统一字符和条目预算后注入主对话模型
 ```
+
+管理页的“实际注入预览”调用同一快照服务，只读取服务端结果，不再使用浏览器词法评分。模型整理、事实管理、在线快照和原始聊天是不同阶段，保存任务成功不等于每条事实都会进入当前轮对话。
 
 ## 2. 与官方实现的对应关系
 
-官方 `mem_local_short`、Mem0 和 PowerMem provider 都在 `save_memory()` 中接收完整会话，再由记忆模型或记忆服务自动保存。本项目的 `managed_memory` 保留相同触发时机，但把事实存储、人物隔离、审计和管理页面放在 manager-api/MySQL 中。
+官方 `mem_local_short`、Mem0 和 PowerMem provider 都在 `save_memory()` 接收对话并保存。本项目保留会话结束的保存入口，另增加独立证据缓冲及有界分段检查点，避免长连接只保存尾部、清空上下文丢证据或切换智能体时串写。
 
-```text
-官方 provider: ConnectionHandler._save_and_close -> provider.save_memory(dialogue)
-本地 managed:  ConnectionHandler._save_and_close -> managed_memory.save_memory(dialogue)
-                 -> manager-api process-session -> maintenance_llm -> fact/revision
-```
+运行时读取仍对齐上游 `mem_local_short` 的“初始化加载、本地读取摘要”，不把 MySQL 事实改成本地 YAML。对照上游提交 `788f5301fdd60cc3a8ef74025bfeece9b82b94ce`；第三方远程 provider 的检索行为不代表本地快照链路，也不代表 xiaozhi.me 云端内部实现。
 
-这条链路不依赖 Intent 是否为 `function_call`，也不会向主聊天模型注册额外记忆工具。
-
-读取对齐的是上游 `mem_local_short` 的“初始化加载、查询直接返回本地摘要”方式，不是把现有 MySQL 存储改成本地 YAML。对照上游提交 `788f5301fdd60cc3a8ef74025bfeece9b82b94ce`；第三方 Mem0 等远程 provider 不具备同样的本地读取性质，上游仓库也不代表 xiaozhi.me 云端内部实现。
+主对话模型不注册 `manage_memory`，这条链路不依赖 Intent 必须为 function_call。
 
 ## 3. 聊天记录与音频配置
 
@@ -71,7 +64,7 @@ source_paths:
 
 主动记忆处理使用会话文本，不依赖音频文件。因此选择 `1` 仍可正常生成长期记忆，只是不保存聊天音频。
 
-## 4. Python Memory Provider
+## 4. Python Memory Provider 与证据缓冲
 
 | Provider | 查询方式 | 保存方式 |
 | --- | --- | --- |
@@ -80,109 +73,142 @@ source_paths:
 | `mem_local_short` | 本地短摘要 | 会话结束后 LLM 摘要 |
 | `mem0ai` | mem0 SDK | 会话结束后 mem0 add |
 | `powermem` | PowerMem SDK | 会话结束后 PowerMem add |
-| `managed_memory` | 读取随权威配置下发的连接级有界摘要 | 会话结束后 POST 完整对话给 manager-api 主动整理 |
+| `managed_memory` | 权威配置下发的连接级有界摘要 | 独立证据分段提交 manager-api |
 
-`managed_memory.save_memory()` 只提交非临时的 user/assistant/tool 消息，单条正文和消息数量均有上限。system prompt、临时 few-shot 和密钥不会进入请求。
+`ManagedMemorySession` 捕获消息初始内容、稳定消息 ID 与人物元数据。它不以会被修剪的 Dialogue 作为唯一保存源；临时消息、system、明确禁止进入记忆的内容不会进入提交。会议、固定播报、外部背景等继续遵守各自的 memory eligibility 边界，助手和工具结果不能单独作为用户事实证据。
 
-## 5. manager-api 主动整理
+默认每 40 条消息、16000 字符或首次待提交消息后 30 秒触发有界提交；未确认缓冲最多 200 条/160000 字符，单条最多 8000 字符，超出时显式报错而不切断结构化身份或静默丢弃。重试沿用同一 segmentId 和相同消息，只有收到 Java 持久接收回执才推进检查点；模型失败由 Java 任务管理继续处理，不阻塞之后分段的接收。跨智能体切换前先提交旧智能体缓冲，接收失败不能把旧事实交给新智能体。
 
-`/config/memory/process-session` 位于 `/config/**`，由 `ServerSecretFilter` 校验服务端共享密钥。请求同时携带 `agentId` 和设备 MAC；服务端优先从可信设备绑定关系解析智能体，不能靠请求体把记忆写到其他智能体。
+可信人物发生变化时（含已识别与未知之间的切换），先安排证据检查点，再清除上一人物的短期 user/assistant/tool 历史；关闭声纹时同样清理。独立证据缓冲保留原始人物归属，避免已保存的 private 正文经普通聊天历史泄漏给下一人物，也避免短期清理造成待提交证据丢失。
 
-处理步骤：
+Python 缓冲目前是进程内的，并非磁盘队列。请求尚未到达 Java 时若进程非正常退出，尚未提交的证据不能依靠该缓冲自动恢复；已上报事件/聊天仍是人工历史重建来源。不得声称端到端零丢失。
 
-1. 确认所选 Memory 配置的 `type=managed_memory`。
-2. 读取 `maintenance_llm` 模型 ID，不复制 API Key、Base URL 或上游模型名。
-3. 将完整会话、可信 `speaker_id` 和当前生效事实交给记忆模型。
-4. 模型自主决定是否值得长期保存，以及 ADD/UPDATE/ARCHIVE/DELETE/NONE、正文、分类和层级。
-5. 第二次审校只检查证据、人物归属、结构和真实 ID，不使用关键词或业务场景规则替代模型判断。
-6. manager-api 在事务内校验容量、事实归属、状态和 ID 后写入，并记录 revision。
-7. 用 `session_memory_processed + sessionId` 记录已完成会话，避免同一关闭流程重复整理。
+## 5. manager-api 主动整理与恢复
 
-合法的自动 ADD 必须有用户侧证据。助手回复和工具结果可以帮助理解上下文，但不能单独生成用户长期事实。
+`/config/memory/submit-session` 与兼容入口 `/config/memory/process-session` 位于 `/config/**`，要求服务端共享密钥，且校验设备与智能体绑定。处理旧智能体会话时必须有已记录的旧会话归属证据，不能只信任请求体 agentId。若设备已切换绑定且旧会话尚无成功上报的证据，接收会失败；不能通过改写为新智能体绕过校验。
 
-## 6. 人物隔离
+1. `MemorySessionTaskService` 在模型调用前保存任务及请求哈希，以智能体、设备、会话、分段标识幂等接收。相同分段不得用不同内容重试。
+2. 确认 Memory 类型、维护策略及 `maintenance_llm` 模型 ID；不复制 API Key、Base URL 或上游模型名到记忆策略。
+3. 按未知人物策略过滤用户证据，验证可信 speakerId。模型输出必须引用相应人物真实用户消息中的证据，不能只凭模型自述 source_role。
+4. 动作的 ID、人物、设备范围、遗忘规则和容量必须通过校验。分段动作在同一事务中应用并记录已处理标识；失败不伪造成功。
+5. AUTO 应用事实动作；REVIEW 保存候选，需管理端确认；OFF 不进行自动提取，已有记忆继续可读。
+6. 成功任务为 SUCCEEDED 或 NO_CHANGE，并清理请求正文。失败保留 FAILED 状态、异常类型与下次尝试时间；任务 API 不返回正文。
 
-```text
-会话只有一个可信 speaker_id -> 自动事实绑定该 speaker_id，作为 private 事实
-会话没有可信 speaker_id     -> 自动事实作为 shared 事实
-多人或已识别/未识别混合会话  -> 模型必须在动作中给出可验证 speaker_id，否则跳过该动作
-```
+`submit-session` 返回 `accepted`、`taskId`、`status` 和 `factsChanged`，其中接收成功只确认数据库已接管任务，不表示模型已经完成、事实已经生效或处理项数最终为零。旧 `process-session` 继续返回同步整数，供兼容调用者使用。持久任务在 Java 接收后提供恢复能力：默认最多自动尝试 5 次，恢复扫描间隔 15 秒，运行任务使用 10 分钟租约，失败退避有上限；租约由数据库原子认领。每智能体待处理任务有容量上限。管理页能查看近期任务状态，具有写权限的用户可显式重试失败任务。REVIEW 模式的处理项数代表候选，不应解释为生效事实数量。
 
-查询只按结构化归属过滤：
+`MemorySessionTaskContext` 将执行者的租约校验带入事实写入事务：锁定任务行并确认租约 token、RUNNING 状态和有效期，过期或已被接管的执行者不能写入事实。任务完成更新也必须确认仍持有租约。若事实事务已提交、任务完成状态尚未保存时发生中断，重放从 `session_memory_processed` revision 返回原处理项数，不把先前成功误报为零项。
 
-```text
-已识别说话人 -> shared + speaker_id 相同的 private
-未识别说话人 -> shared
-```
+记忆模型使用的 Java LLM HTTP 客户端设置 10 秒连接超时、120 秒读取超时，避免无响应请求长期占用整理线程。错误日志只保留状态码、模型标识或异常类型，不输出模型响应正文及原始异常消息，防止证据和凭据随错误日志泄漏。
 
-正文中出现另一个人的姓名不会扩大 private 事实的可见范围。
+历史重建仍由独立 Redis 持久化异步任务负责。DEVICE 范围必须选择已绑定设备，只读取该设备的历史；不能把多台设备的历史归给同一个来源。
 
-## 7. 原始事件与管理端
+## 6. 记忆归属与可配置策略
 
-`reportHandle.py` 仍把聊天和工具事件写入 `/config/memory/events`。这些事件用于证据、时间线和历史重建，不在单条事件到达时调用 LLM，避免每句话产生一次额外模型请求。
+记忆权限始终以智能体及其工作空间为基础，设备范围和人物范围是在其内部进一步收窄。策略存储于 `ai_memory_policy`，GET/PUT `/agent/{agentId}/memories/policy` 通过工作空间读写权限校验。
 
-管理端保留：
+| 字段 | 默认值 | 行为 |
+| --- | --- | --- |
+| `memoryScope` | AGENT | AGENT 在同智能体多设备间共享；DEVICE 按事实 `scopeId` 与当前设备匹配 |
+| `unknownSpeakerPolicy` | SHARED | SHARED 允许未识别人物的用户证据产生共享事实；IGNORE 不保存未识别人物的信息 |
+| `maintenanceMode` | AUTO | AUTO 自动应用；REVIEW 生成候选；OFF 关闭自动整理 |
+| `activeMaxChars` | 1000 | 100–20000 字，仍为整个智能体的生效事实容量，DEVICE 不会独立分配额度 |
+| `contextMaxChars` | 4000 | 200–4000 字，每轮最终记忆正文预算，计入 XML 转义开销 |
+| `contextMaxItems` | 30 | 1–30 条，每轮最终事实条数 |
+| `retentionDays` | 0 | 0 不按天到期；正数为显式保留期限，不自动迁移旧事实的到期时间 |
 
-- 查看、编辑、归档和删除事实；
-- 手工记住与手工忘记；
-- 候选预览；
-- 从历史聊天异步重建；
-- 主动审查和 revision 时间线。
+默认值保持既有 AGENT/SHARED/AUTO 行为。新建事实和自动更新事实按当前显式期限计算 expires_at；到期后不再读取，不表示清除原始聊天或审计。快照的 30 秒租约与事实保留期限是不同机制。
 
-`confirmation_state=auto` 在页面显示为“主动记忆”，表示事实来自会话结束后的记忆模型处理；`manual` 显示为“手动创建”。
+已识别人读取 shared + 自己的 private；未识别人只读取 shared。多人混合证据必须能确定动作人物，正文姓名不会扩大 private 的可见性。手工创建和编辑通过 `visibility=shared|private`、`speakerId`、`deviceId` 明确归属，人物和设备都需绑定当前智能体。敏感度只是内容标签，不替代可见范围。
 
-## 8. 查询注入与降级
+历史 `scope_type=device` / `scope_id` 字段在 AGENT 模式保留来源信息，不代表设备私有权限；DEVICE 模式实际按 `scopeId` 过滤，`macAddress` 来源标签不能替代设备权限范围。切换为 DEVICE 不自动复制或补归属，缺少当前设备归属的旧事实可能不再可见。切回 AGENT 会扩大到同一智能体设备间共享，仍不跨智能体共享。
 
-`managed_memory` 不再依赖当前问题做 HTTP 召回。manager-api 在设备权威配置响应中附加 `managed_memory_snapshot`：从当前智能体的有效 active 事实一次有界读取最多 200 条，按重要度、最近时间和稳定 ID 排序，按结构化人物归属分组；不调用向量、embedding 或额外 LLM。最多 16 位已绑定说话人，shared 最多 4000 字符、每位 private 最多 2000 字符，总计最多 16000 字符，保留完整事实而不截断单条语义。
+## 7. 管理、删除和遗忘
 
-契约包含 `schema_version=1`、`status`、`agent_id`、`device_id`、内容哈希 `revision`、`issued_at_ms`、`expires_at_ms`、`shared_context`、`speaker_contexts`。Python 只按当前可信 `current_speaker_id` 选取 private；未知人物只读 shared，不通过姓名猜归属。摘要不是系统指令，继续通过 `prompt_budget.py` 裁剪后注入 `<memory>`。连接主文件只保留薄调用，校验、租约和失效逻辑独立在 `core/session/managed_memory_snapshot.py`。
+原始聊天/工具事件仍用于证据、时间线和重建，不逐条调用记忆模型。管理端保留编辑、归档、删除、手工记住/忘记、候选确认、历史重建、主动重审和 revision 时间线，并新增策略、会话整理任务和实际注入预览。
 
-兼容性取舍：运行时不再按问题做词法排名；容量外低优先级事实可能不被注入。缺少可靠人物归属的旧画像和工具经验保留在数据库和管理链路，但不进入新摘要。忘记名单只用于服务端保守过滤，不向设备下发遗忘正文；复杂语义遗忘仍由原有写入维护负责。原 `/config/memory/query` 接口及词法策略保留给既有调用者，不再是 Python 主对话路径。
+- 归档停止使用该事实，保留事实和审计。
+- 显式删除停止使用该事实，并记录人物/设备范围内的 exact 遗忘边界，阻止相同规范化正文再次写入。
+- “忘记”按所选共享/人物及设备范围处理，由维护模型理解目标；写入和读取继续使用服务端确定性遗忘边界兜底。
+- 清空事实与候选不会撤销已有遗忘规则，并为被清事实保留防重学边界。
+- 这些操作不等于物理擦除聊天、source event、revision 或备份。精确规则也不等于所有语义改写都能被识别，不得承诺无限语义遗忘。
 
-快照租约最多 30 秒，并受其中最早事实到期时间约束；客户端同时检查单调时钟租约和绝对有效期。缺失、错误、过期、设备/角色不匹配、刷新失败或连接关闭时返回空记忆，不回退 HTTP 查询或旧摘要。摘要字段不进入 provider 配置指纹，单独续租或内容变化不重建 ASR/LLM/TTS。
+读取与写入校验全部 active 遗忘规则，不再因超过 50 条而让整个快照不可用。遗忘正文不下发到语音连接作为提示词。
 
-无 `listen.start` 的连续会话也能恢复：读取发现租约临近到期或已失效时，只安排后台配置续取，不等待结果；每连接单任务并保留失败退避。配置指纹相同才安装新摘要，若角色或模型变化则只标记待刷新，仍由原安全边界切换完整管线。续取期间保守清空旧摘要，该轮可能不含记忆；关闭时取消任务。后台续取仍有配置 API 成本，不是永久离线缓存。
+页面根据服务端 canWrite 禁用写入动作；策略加载失败时不开放写入。事实列表允许查看归档项，生效统计同时检查 `status=active` 和 `expiresAt`，不能只按存储状态计数。`confirmation_state=auto` 与 `manual` 分别表示自动维护和手工创建；未标注来源不能自动解释为手工创建。
 
-记忆更新、删除、遗忘、自动整理及声纹绑定变化复用既有事务提交后的运行配置刷新通知。收到通知先使旧摘要失效，再在既有安全边界获取权威配置；并发旧响应不能覆盖新失效状态。通知不是可靠消息队列，丢失时依赖既有配置检查和有限租约，不能承诺撤销后零毫秒全连接生效。已提交给 LLM 的内容不能追溯撤回。
+### 7.1 可视化口径与边界
 
-`nomem` 不加载、不注入；其他 provider 仅走各自实现，不再先查询托管事实层。首次配置加载和既有权限/配置检查仍有 HTTP 与数据库成本：本改动消除的是逐轮记忆专用请求，不代表整条对话链路无网络等待。
+概览、列表和归属图使用同一 dashboard 返回的数据。服务端只返回按更新时间排序的最多 200 条非删除事实，以及各最多 100 条候选、工具经验、遗忘规则和最近 revision；这些集合分别取上限，接口不提供全库总数或分页游标。候选和规则还会在前端按状态过滤，所以页面的“当前已加载”、生效、待确认和遗忘规则数量都不代表全量。达到返回上限也只能说明可能还有未加载记录，不能据此计算遗漏数。概览的生效正文字符量与配置容量条仅比较已加载事实和智能体容量上限，不是数据库完整用量或剩余额度。
+
+- **生命周期**：前端由存储状态与 `expiresAt` 推导生效、已到期、已归档和待核实。事实到期后数据库仍可能保存 `active`；没有期限与无效时间值不能混为一谈。概览显示已加载事实中下次已知到期时间，详情保留到期和归档时间。生效状态不表示本轮已经注入。API 无偏移日期字符串按服务端东八区契约解析；revision 快照还兼容 epoch 毫秒。
+- **归属图**：AGENT 模式按“智能体 → 共享/人物私有 → 分类 → 事实”分组；DEVICE 模式先按 `scopeId` 增加设备分区，再展示人物和分类。设备归属缺失的历史数据独立列出，不自动放入某台设备。来源设备单独展示，AGENT 下按来源筛选不改变权限。人物归属依据结构化 ID，缺少姓名不等于共享；无法解析的身份显示待核实。
+- **遗忘规则**：启用的规则按相同设备/人物归属单独成组，展示 exact/contains 匹配方式和正文。规则与事实是不同类型，点击进入对应详情。连线仅表示实际归属与分类，不表示语义关系、规则已经命中某事实、因果关系或本轮召回。人物、设备和搜索共同筛选事实与规则；事实状态、来源和层级筛选只影响事实。
+- **历史与证据**：时间线精确区分事实变更、候选确认/拒绝、遗忘边界、会话处理和维护操作。展开后使用 revision 保存的前后快照比较正文、归属、存储状态、到期时间等白名单字段，不用当前事实覆盖历史，也不展示完整内部 JSON。REVIEW 会话记录的处理数表示候选数，不宣称已写入事实。缺失一侧快照或日期如实标注；关联事实已删除或未加载时仍能阅读历史，只有存在当前事实才提供独立跳转。详情仅显示实际保存的来源证据或事件 ID，不推造来源链接；没有自动到期 revision 时也不伪造到期审计事件。
+
+归属图支持分组折叠、搜索、筛选、平移缩放和键盘操作；时间线用原生按钮展开，历史快照不作为可编辑事实提交。数据量和权限仍由现有后端接口约束，可视化不扩大查询或写入权限。
+
+## 8. 快照、最终注入与真实预览
+
+运行时不逐轮调用 `/config/memory/query`，也不执行向量、embedding 或额外检索模型。权威配置携带 `managed_memory_snapshot` 和 `memory_policy`。SQL 以 shared/已绑定人物分组分配有界候选配额，总量最多 200，组内按重要度、最近出现时间和稳定 ID 排序，DEVICE 模式同时按 `scopeId` 与设备匹配过滤。分组配额避免单个人物占满全部候选，但仍不承诺按当前问题召回任意历史事实。
+
+快照最多 16 位人物，总正文最多 16000 字符，并按策略和人物数限制各组；单个人物私有正文和 Python 最终选择都服从最高 4000 字符的策略预算，不再额外套用旧的 2000 字符上限。保留完整事实，不截断否定或身份限定。Python 在最终预算内优先当前人物 private，再选 shared，统一按完整条目与 XML 转义后字符计费。已筛选的上下文保留其预算标记，不再被旧 memory 二次裁剪策略改变顺序或截断事实。
+
+契约保留 `schema_version=1`、`status`、`agent_id`、`device_id`、内容哈希 `revision`、`issued_at_ms`、`expires_at_ms`、`shared_context`、`speaker_contexts`，增加 `context_max_chars` 和 `context_max_items`。旧画像和工具经验缺少可靠人物归属，因此留在存储与管理链路，不注入新摘要。记忆属于不可信参考数据，转义后注入，不能作为系统命令或工具要求。
+
+快照租约最长 30 秒，并受其中最早事实到期时间约束。Python 同时校验绝对时间和单调时钟、设备与角色、版本、关闭和绑定状态。缺失、错误、过期或刷新失败时返回空记忆，不能回退旧摘要或逐轮 HTTP。读取临近到期时安排单个后台配置续取，保留退避和并发旧响应拦截；在途旧摘要失效期间可能有一轮不带记忆。
+
+记忆、策略、遗忘和声纹变更通过事务提交后通知使摘要失效。通知不是可靠消息队列，有限租约继续兜底；已提交给模型的内容不能追溯撤回。摘要字段不进入 provider 指纹，独立续租不应重建传统 ASR/LLM/TTS。
+
+Realtime 会话还有上游上下文：只替换 instructions 不能擦除已发送内容。`RealtimeMemoryLease` 发现记忆变化、到期或人物变化导致可见正文变化时重建上游会话；失败关闭旧状态，不能继续使用已撤销的记忆。这可能牺牲上游上下文连续性，需真机验证。
+
+POST `/agent/{agentId}/memories/preview` 使用同一服务端快照及最终预算，要求已绑定设备；指定人物时校验人物绑定，也可选择未识别人物只看共享记忆。接口返回 `snapshot`、`selected_context`、`budgets`、`usage` 及有界裁剪提示。Web 直接展示该结果，选设备/人物、修改策略或事实时清空旧结果并丢弃晚响应，不再生成假相关性百分比。预览表示当前服务端选择结果，不证明在线设备已经续租或模型一定使用了每条事实；目前不提供逐事实精确排除原因。旧 query/词法策略保留给兼容调用者，不是语音主链路。
+
+预览页面按返回正文顺序列出条目，并保留完整 `selected_context` 可展开查看。字符/条目预算进度取服务端 `usage` 与 `budgets`，裁剪提示取 `snapshot.truncated` 或 `excluded.truncated`；前端不重排、不补造事实或重算相关性。执行预览不会调用对话模型。概览或归属图只能说明当前加载的数据，确认指定设备和人物在当前策略下可选中的上下文需使用此预览。
 
 ## 9. 关键文件
 
 | 文件 | 职责 |
 | --- | --- |
-| `core/providers/memory/managed_memory/managed_memory.py` | 会话结束后提交完整对话、运行时本地读取 |
-| `core/session/managed_memory_snapshot.py` | 连接级摘要校验、人物选择、租约和失效 |
-| `ManagedMemorySnapshotService.java` | 权威配置中的有界事实摘要 |
-| `MemoryRuntimeRefresh.java` | 记忆变更复用事务提交后的失效通知 |
-| `config/manage_api_client.py` | `/config/memory/process-session` 和 query 客户端 |
-| `core/handle/reportHandle.py` | 原始聊天/工具事件上报 |
-| `MemoryConfigController.java` | server-to-server 记忆 API |
-| `MemoryServiceImpl.java` | 可信智能体/设备作用域解析 |
-| `MemoryMaintenanceServiceImpl.java` | 主动抽取、审校、动作应用和审计 |
-| `MemorySpeakerConversationBuilder.java` | 对话正文和可信声纹人物构造 |
-| `PowerMemPrompts.java` | 会话主动记忆与历史重建提示词 |
-| `MemoryQueryServiceImpl.java` | private/shared 隔离、候选查询与上下文构建 |
-| `MemoryLexicalRecallPolicy.java` | 无向量的有界词法召回与核心记忆兜底 |
-| `RoleEditDialog.vue` | 记忆模式与文字/音频保存选择 |
-| `MemoryManagement.vue` | 长期记忆管理页面 |
+| `core/providers/memory/managed_memory/managed_memory.py` | 分段请求和本地摘要 provider |
+| `core/session/managed_memory_session.py` | 不可变证据、分段检查点、失败保留与切换前提交 |
+| `core/session/managed_memory_snapshot.py` | 身份校验、人物选择、租约和失效 |
+| `core/session/realtime_memory.py` | Realtime 上游记忆租约与重建 |
+| `core/utils/prompt_budget.py` | 完整事实、private 优先及转义字符预算 |
+| `MemoryPolicyService.java` / `MemoryPolicyController.java` | 策略持久化、权限、设备/人物列表与预览 |
+| `MemoryGovernanceService.java` | 设备/人物归属、证据、期限和遗忘边界 |
+| `ManagedMemorySnapshotService.java` | 分组候选与权威快照、最终上下文选择 |
+| `MemorySessionTaskService.java` | 持久接收、幂等任务、有限重试和状态 |
+| `MemorySessionTaskContext.java` | 将任务租约校验传入事实写入事务 |
+| `MemorySessionProcessor.java` | 会话提取、证据校验、事务应用和 revision 重放结果 |
+| `MemoryMaintenanceServiceImpl.java` | 维护动作、候选及会话处理编排 |
+| `MemoryRuntimeRefresh.java` | 事务提交后的运行时失效通知 |
+| `MemoryPolicyPanel.vue` / `MemoryEditDialog.vue` | 策略和归属编辑 |
+| `MemoryOverview.vue` / `memoryVisualState.mjs` | 已加载数据概览、有效状态、人物和来源设备展示 |
+| `MemoryGraph.vue` / `memoryGraphModel.mjs` | 基于策略和 scopeId 的归属分组、过滤与可访问图谱 |
+| `MemoryTimeline.vue` / `memoryRevisionPresentation.mjs` | 精确操作分类、历史前后快照及当前事实跳转 |
+| `MemoryRecallTest.vue` | 服务端实际注入预览，沿用历史组件名 |
+| `MemorySessionTasks.vue` | 整理结果与失败任务重试 |
 
 ## 10. 验证重点
 
-- `tools/list` 和主 LLM tools 中不存在 `manage_memory`；
-- 启用 `managed_memory` 时，不要求 Intent 为 function_call；
-- 会话结束后只提交非临时对话消息，并调用 `/config/memory/process-session`；
-- 未配置主动记忆模型时明确失败或跳过，不伪造成功；
-- 同一 session 不重复整理；
-- 自动 ADD 有用户证据，可信 speaker_id 不串写；
-- 文字模式和文字+音频模式都能生成记忆；
-- 用户选择的 `chatHistoryConf=1|2` 不被模型切换覆盖；
-- 摘要缺失、过期或刷新失败时本地降级为空，不回退 HTTP；
-- 私有事实只给当前可信人物，跨设备/角色/连接不串线；
-- 摘要刷新不重建 provider，旧刷新响应不能恢复已失效摘要；
-- 记忆和声纹变更在事务提交后触发失效；
-- SQL 候选最多 200，运行时不调用向量或额外召回模型；
-- 新迁移已登记到 `db.changelog-master.yaml`，不修改已发布 changeSet。
+- 策略真实持久化，权限不足或读取失败不得开放管理写入；非法设备/人物不能进入预览或写入。
+- AGENT 多设备共享、DEVICE 设备隔离、private 人物隔离和 UNKNOWN SHARED/IGNORE 分别覆盖。
+- AUTO 应用、REVIEW 只生成候选、OFF 不自动整理；候选确认继续校验归属和容量。
+- 用户证据逐人可验证，助手/工具、会议、临时背景和 system 不得单独生成个人事实。
+- 清空 Dialogue、长连接修剪、分段失败重试及切换智能体，不改变未确认分段的身份与正文。
+- Java 先持久接收，再执行模型；持久接收回执和最终整理结果分离，模型失败不能阻塞 Python 后续分段；重复接收、并发认领、失败退避、租约恢复和手动重试不伪造完成。
+- 过期执行者在事实事务中被拒绝，任务完成更新验证租约归属；事实已提交后的恢复返回 revision 原处理项数；LLM 连接/读取超时和响应日志脱敏需覆盖。
+- 可信人物变更和关闭声纹清除上一人物短期历史，独立证据仍保留正确人物；HTTP JSON、DTO 校验与持久任务恢复需要单独验证。
+- 第 51 条及更多遗忘规则仍有效；删除和清空不会撤销遗忘边界；人物/设备范围互不误伤。
+- 私有事实不会被 shared 占满预算；转义、完整条目和实际预览与 Python 最终注入一致。
+- 到期、失效和配置变化不能继续使用旧摘要；Realtime 旧上游会话不可继续消费撤销内容。
+- 文字/音频保存选择保持用户配置；`nomem` 不加载或注入托管记忆。
+- 新迁移登记 master，不修改已发布 changeSet。单元测试、构建与真实模型/数据库/设备验证需分别报告。
+- 可视化验证需覆盖已到期但存储状态仍为 active、DEVICE 的 scopeId 与 macAddress 不一致、私有与共享分组、规则专属详情、已删除事实的历史快照、REVIEW 候选计数、跨浏览器时区和键盘展开；已加载数量不能冒充全量。
+
+`MemoryConversationJourneyTest` 使用独立 MySQL 测试库、真实记忆表和事务，以及 MockMvc 的 HTTP JSON/DTO 校验；模型、AgentDao 与权限依赖仍为模拟对象。它用于验证持久接收、事实写入、失败恢复和接口契约，不能替代真实模型提取质量、完整 Shiro/工作空间权限链、真实场景切换或设备验收。测试数量及最终执行结果以当次验证报告为准。
+
+本轮记忆可视化的浏览器组件检查使用合成数据，用于检查布局、交互和已知数据边界；不表示真实后端联调、真实业务数据、在线设备注入或完整权限链已经验收。
 
 ## 11. 保留的 Harness 后台维护
 
@@ -198,6 +224,6 @@ manager-web 已删除 Harness 按钮、Console、策略设置、提案审批、�
 
 ## 12. 配套升级与回滚边界
 
-本次读取契约要求 manager-api 与 xiaozhi-server 配套升级；只升级 Python 而继续使用不下发摘要的旧 Java，会安全降级为空记忆，不自动恢复旧逐轮 HTTP 查询。无需修改数据库结构或迁移已有记忆，也不需要修改管理员所选 Memory 模式。`nomem` 保持关闭，启用 `managed_memory` 时仍使用原主动记忆模型配置。
+manager-api、xiaozhi-server 和 manager-web 需要配套升级。新增策略/遗忘元数据迁移 `202610101200.sql` 与持久整理任务迁移 `202610101230.sql` 均通过 Liquibase master 注册，不修改旧 changeSet。无新策略记录时使用兼容默认值；不自动把既有智能体改成 DEVICE 或开启过期期限。
 
-未来发布须另行授权，并在同条件下测量首次配置与后续回复，不能把单元测试耗时作为线上提速数据。回滚时恢复配套的上一版 Java/Python 制品；数据库、事实和审计记录无需回滚。回滚前后均须验证唤醒去重、人物隔离、遗忘和会话结束后的保存链路。
+生产发布仍须另行授权和备份数据库。本轮源码与离线/独立测试库验证不表示已经完成真实模型、完整权限链、断网重启、多人声纹、Realtime 重建或设备验收。回滚需恢复配套制品并审查新增规则与任务的兼容性，不能把新任务表或已保存遗忘边界擅自清空。上线前后均须验证人物/设备隔离、删除遗忘、配置续租及长连接分段保存。

@@ -2,7 +2,6 @@ package xiaozhi.modules.memory.service;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HexFormat;
@@ -10,7 +9,6 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Locale;
 import java.util.Set;
 
 import org.apache.commons.lang3.StringUtils;
@@ -38,9 +36,12 @@ public class ManagedMemorySnapshotService {
     private static final int MAX_TOTAL_CHARS = 16000;
     private final MemoryFactDao factDao;
     private final MemoryForgetTombstoneDao tombstoneDao;
+    @org.springframework.beans.factory.annotation.Autowired
+    private MemoryPolicyService policyService;
 
     public void attach(Map<String, Object> config, String agentId, String deviceId) {
         config.remove("managed_memory_snapshot");
+        if (policyService != null) config.put("memory_policy", policyService.get(agentId));
         if (!managed(config) || StringUtils.isBlank(deviceId)) {
             return;
         }
@@ -80,8 +81,9 @@ public class ManagedMemorySnapshotService {
     }
 
     // The speaker list is produced by ConfigService's bound-agent voiceprint configuration, never by request input.
-    Map<String, Object> build(String agentId, String deviceId, List<String> configuredSpeakers) {
+    public Map<String, Object> build(String agentId, String deviceId, List<String> configuredSpeakers) {
         long issuedAt = System.currentTimeMillis();
+        var policy = policyService == null ? new xiaozhi.modules.memory.dto.MemoryPolicyDTO() : policyService.get(agentId);
         long expiresAt = issuedAt + 30_000;
         Set<String> allowed = new LinkedHashSet<>(configuredSpeakers.stream().distinct().limit(MAX_SPEAKERS).toList());
         QueryWrapper<MemoryFactEntity> query = new QueryWrapper<>();
@@ -94,27 +96,25 @@ public class ManagedMemorySnapshotService {
                         w.or().apply("JSON_UNQUOTE(JSON_EXTRACT(payload, '$.speaker_id')) = {0}", id);
                     }
                 }).orderByDesc("importance", "last_seen_at").orderByAsc("memory_id").last("LIMIT 200");
-        List<MemoryFactEntity> facts = ConfigLatency.measure("memory.snapshot.facts", () -> factDao.selectList(query));
+        List<String> identities = new ArrayList<>(allowed);
+        identities.add("");
+        List<MemoryFactEntity> facts = ConfigLatency.measure("memory.snapshot.facts", () -> policyService == null
+                ? factDao.selectList(query) : factDao.selectSnapshotCandidates(agentId,
+                        "DEVICE".equals(policy.getMemoryScope()) ? deviceId : null, identities, 200 / identities.size()));
         List<MemoryForgetTombstoneEntity> tombstones = ConfigLatency.measure("memory.snapshot.tombstones", () -> tombstoneDao.selectList(
                 new QueryWrapper<MemoryForgetTombstoneEntity>().eq("agent_id", agentId)
-                        .eq("status", MemoryHelper.STATUS_ACTIVE).orderByDesc("created_at").last("LIMIT 51")));
-        if (tombstones.size() > 50) {
-            throw new IllegalStateException("Forget boundary exceeds snapshot capacity");
-        }
-        List<String> blocked = tombstones.stream()
-                .map(item -> normalized(item.getPatternText())).filter(item -> !item.isEmpty()).toList();
+                        .eq("status", MemoryHelper.STATUS_ACTIVE).orderByDesc("created_at")));
         StringBuilder shared = new StringBuilder();
         Map<String, StringBuilder> privateParts = new LinkedHashMap<>();
         int total = 0;
         boolean truncated = configuredSpeakers.stream().distinct().count() > MAX_SPEAKERS || facts.size() >= 200;
+        if (policyService != null && facts.stream().collect(java.util.stream.Collectors.groupingBy(
+                MemorySpeakerUtils::payloadSpeakerId, java.util.stream.Collectors.counting()))
+                .values().stream().anyMatch(count -> count >= 200 / identities.size())) truncated = true;
         for (MemoryFactEntity fact : facts) {
             if (!agentId.equals(fact.getAgentId()) || !MemoryHelper.STATUS_ACTIVE.equals(fact.getStatus())
                     || (fact.getExpiresAt() != null && fact.getExpiresAt().getTime() <= issuedAt)
                     || StringUtils.isBlank(fact.getCanonicalText())) {
-                continue;
-            }
-            String normalizedFact = normalized(fact.getCanonicalText());
-            if (blocked.stream().anyMatch(normalizedFact::contains)) {
                 continue;
             }
             // Malformed attribution must not be reinterpreted as shared memory.
@@ -129,12 +129,15 @@ public class ManagedMemorySnapshotService {
                 }
             }
             String speaker = MemorySpeakerUtils.payloadSpeakerId(fact).trim();
+            if ("DEVICE".equals(policy.getMemoryScope()) && !deviceId.equals(fact.getScopeId())) continue;
+            if (tombstones.stream().anyMatch(rule -> MemoryGovernanceService.matches(rule, deviceId, speaker,
+                    fact.getCanonicalText(), "DEVICE".equals(policy.getMemoryScope())))) continue;
             if (!speaker.isEmpty() && !allowed.contains(speaker)) {
                 continue;
             }
             StringBuilder target = speaker.isEmpty() ? shared : privateParts.computeIfAbsent(speaker, key -> new StringBuilder());
-            String text = "- " + fact.getCanonicalText().strip() + "\n";
-            int limit = speaker.isEmpty() ? 4000 : 2000;
+            String text = "- " + fact.getCanonicalText().strip().replaceAll("\\R+", " ") + "\n";
+            int limit = Math.min(policy.getContextMaxChars(), MAX_TOTAL_CHARS / identities.size());
             int room = Math.min(limit - target.length(), MAX_TOTAL_CHARS - total);
             if (text.length() > room) {
                 truncated = true;
@@ -154,6 +157,8 @@ public class ManagedMemorySnapshotService {
         content.put("shared_context", shared.toString());
         content.put("speaker_contexts", speakers);
         content.put("truncated", truncated);
+        content.put("context_max_chars", policy.getContextMaxChars());
+        content.put("context_max_items", policy.getContextMaxItems());
         String revision;
         try {
             revision = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
@@ -169,8 +174,33 @@ public class ManagedMemorySnapshotService {
         return content;
     }
 
-    private static String normalized(String text) {
-        return Normalizer.normalize(StringUtils.defaultString(text), Normalizer.Form.NFKC)
-                .replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
+    /** The same complete-line budget used by the Python runtime, including HTML escaping. */
+    public static String selectedContext(Map<String, Object> snapshot, String speakerId) {
+        Map<?, ?> speakers = (Map<?, ?>) snapshot.getOrDefault("speaker_contexts", Map.of());
+        String selectedSpeaker = StringUtils.defaultString(speakerId);
+        String privateContext = String.valueOf(speakers.containsKey(selectedSpeaker) ? speakers.get(selectedSpeaker) : "");
+        String text = privateContext + snapshot.getOrDefault("shared_context", "");
+        int maxChars = ((Number) snapshot.getOrDefault("context_max_chars", 4000)).intValue();
+        int maxItems = ((Number) snapshot.getOrDefault("context_max_items", 30)).intValue();
+        StringBuilder result = new StringBuilder();
+        int chars = 0, items = 0;
+        Set<String> seen = new LinkedHashSet<>();
+        for (String line : text.split("\\R")) {
+            if (!line.startsWith("- ")) continue;
+            if (!seen.add(line)) continue;
+            int cost = escapedLength(line) + (items > 0 ? 1 : 0);
+            if (items >= maxItems || chars + cost > maxChars) continue;
+            if (items > 0) result.append('\n');
+            result.append(line);
+            chars += cost;
+            items++;
+        }
+        return result.toString();
     }
+
+    public static int escapedLength(String value) {
+        String escaped = value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+        return escaped.codePointCount(0, escaped.length());
+    }
+
 }

@@ -20,6 +20,8 @@ public class MemoryForgetTombstoneEntity {
     private String scopeType;
     private String scopeId;
     private String patternText;
+    private String speakerId;
+    private String matchType;
     private String reason;
     private String status;
     private String sourceEventId;

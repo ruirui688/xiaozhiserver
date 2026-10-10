@@ -219,7 +219,7 @@ def test_deactivate_closes_realtime_router():
         closing=False,
         closed=False,
         asr_audio_queue=None,
-        reset_audio_states=lambda: None,
+        reset_audio_states=lambda **_kwargs: None,
         tts_ready=threading.Event(),
         conversation_ready=threading.Event(),
         audio_input_ready=threading.Event(),

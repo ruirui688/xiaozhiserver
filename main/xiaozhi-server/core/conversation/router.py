@@ -16,6 +16,9 @@ class ConversationRouter:
         self.conn = conn
         self.session_factory = session_factory
         self.session = None
+        self.memory_lease = None
+        self._memory_rebuilding = False
+        self._memory_old_session = None
 
     @property
     def is_realtime(self) -> bool:
@@ -36,13 +39,55 @@ class ConversationRouter:
         if adapter not in supported_realtime_adapters():
             raise ValueError(f"不支持的 Realtime adapter: {adapter or '<empty>'}")
         await self._ensure_tool_runtime(config)
+        from core.session.realtime_memory import RealtimeMemoryLease, managed_memory_enabled
+        if managed_memory_enabled(self.conn):
+            self.memory_lease = RealtimeMemoryLease(self)
+            self.conn.realtime_memory_lease = self.memory_lease
+            # Realtime adapters do not perform trusted voiceprint recognition.
+            self.conn.current_speaker = None
+            self.conn.current_speaker_id = None
         self.session = (
             self.session_factory(self.conn, config)
             if self.session_factory is not None
             else create_realtime_session(self.conn, config)
         )
         await self.session.initialize()
+        if self.memory_lease is not None:
+            self.memory_lease.start()
         return True
+
+    async def rebuild_for_memory(self):
+        """Discard upstream history before installing changed/expired facts."""
+        self._memory_rebuilding = True
+        for name in ("audio_input_ready", "conversation_ready"):
+            event = getattr(self.conn, name, None)
+            if event is not None:
+                event.clear()
+        old, self.session = self.session, None
+        self._memory_old_session = old
+        try:
+            if old is not None:
+                await old.close()
+            self._memory_old_session = None
+            config = get_selected_llm_config(self.conn.config) or {}
+            session = (self.session_factory(self.conn, config) if self.session_factory is not None
+                       else create_realtime_session(self.conn, config))
+            try:
+                await session.initialize()
+            except BaseException:
+                await session.close()
+                raise
+            self.session = session
+            for name in ("audio_input_ready", "conversation_ready"):
+                event = getattr(self.conn, name, None)
+                if event is not None:
+                    event.set()
+        finally:
+            self._memory_rebuilding = False
+
+    async def _check_memory(self):
+        if self.memory_lease is not None:
+            await self.memory_lease.ensure_current()
 
     async def _ensure_tool_runtime(self, config: Dict[str, Any]) -> None:
         capabilities = realtime_adapter_capabilities(config)
@@ -67,18 +112,22 @@ class ConversationRouter:
             )
 
     async def handle_audio(self, audio: bytes) -> bool:
+        await self._check_memory()
         return bool(self.session and await self.session.handle_audio(audio))
 
     async def handle_listen(self, message: Dict[str, Any]) -> bool:
+        await self._check_memory()
         return bool(self.session and await self.session.handle_listen(message))
 
     async def handle_text(self, text: str) -> bool:
+        await self._check_memory()
         return bool(self.session and await self.session.handle_text(text))
 
     async def handle_abort(self) -> bool:
         return bool(self.session and await self.session.handle_abort())
 
     async def handle_image(self, question: str, image: bytes) -> str:
+        await self._check_memory()
         if self.session is None:
             raise RuntimeError("Realtime 会话尚未就绪")
         return await self.session.handle_image(question, image)
@@ -120,6 +169,14 @@ class ConversationRouter:
         return bool(await resetter())
 
     async def close(self) -> None:
+        if self.memory_lease is not None:
+            await self.memory_lease.close()
+            if getattr(self.conn, "realtime_memory_lease", None) is self.memory_lease:
+                self.conn.realtime_memory_lease = None
+            self.memory_lease = None
+        if self._memory_old_session is not None:
+            await self._memory_old_session.close()
+            self._memory_old_session = None
         if self.session is not None:
             await self.session.close()
             self.session = None

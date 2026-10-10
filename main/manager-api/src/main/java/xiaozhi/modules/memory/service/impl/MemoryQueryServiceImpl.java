@@ -8,7 +8,7 @@ import org.springframework.stereotype.Service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 
-import lombok.AllArgsConstructor;
+import lombok.RequiredArgsConstructor;
 import xiaozhi.modules.agent.dao.AgentDao;
 import xiaozhi.modules.agent.entity.AgentEntity;
 import xiaozhi.modules.config.support.ConfigLatency;
@@ -31,7 +31,7 @@ import xiaozhi.modules.memory.utils.MemorySpeakerUtils;
 import xiaozhi.modules.memory.vo.MemoryQueryVO;
 
 @Service
-@AllArgsConstructor
+@RequiredArgsConstructor
 public class MemoryQueryServiceImpl implements MemoryQueryService {
 
     private static final MemoryLexicalRecallPolicy RECALL_POLICY = new MemoryLexicalRecallPolicy();
@@ -43,6 +43,10 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
     private final DeviceDao deviceDao;
     private final AgentDao agentDao;
     private final MemorySettingsService memorySettingsService;
+    @org.springframework.beans.factory.annotation.Autowired
+    private xiaozhi.modules.memory.service.MemoryPolicyService policyService;
+    @org.springframework.beans.factory.annotation.Autowired
+    private xiaozhi.modules.memory.service.MemoryGovernanceService governance;
 
     @Override
     public MemoryQueryVO query(MemoryQueryDTO dto) {
@@ -53,6 +57,7 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
             return vo;
         }
         Date now = new Date();
+        if (policyService != null) policyService.requireSpeaker(scope.agent.getId(), dto.getSpeakerId());
         List<MemoryForgetTombstoneEntity> activeTombstones = loadActiveTombstones(scope.agent.getId());
         vo.setBlockedPatterns(activeTombstones.stream()
                 .map(MemoryForgetTombstoneEntity::getPatternText)
@@ -71,6 +76,8 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
 
         List<MemoryFactEntity> candidates = loadActiveFacts(scope.agent.getId(), now, dto.getSpeakerId()).stream()
                 .filter(fact -> MemorySpeakerUtils.isVisibleToSpeaker(fact, dto.getSpeakerId()))
+                .filter(fact -> governance == null || (governance.inScope(scope.agent.getId(), scope.scopeId, fact.getScopeId())
+                        && !governance.blocked(scope.agent.getId(), scope.scopeId, MemorySpeakerUtils.payloadSpeakerId(fact), fact.getCanonicalText())))
                 .toList();
         MemoryLexicalRecallPolicy.RecallResult recall = ConfigLatency.measure("memory.lexical_recall",
                 () -> RECALL_POLICY.recall(dto.getQuery(), dto.getLimit(), candidates));
@@ -158,8 +165,11 @@ public class MemoryQueryServiceImpl implements MemoryQueryService {
             DeviceEntity device = ConfigLatency.measure("memory.sql.device", () -> deviceDao.selectOne(
                     new QueryWrapper<DeviceEntity>().eq("mac_address", macAddress).last("LIMIT 1")));
             if (device != null && StringUtils.isNotBlank(device.getAgentId())) {
+                if (!device.getAgentId().equals(agentId)) throw new IllegalArgumentException("设备与智能体作用域不匹配");
                 agent = ConfigLatency.measure("memory.sql.agent", () -> agentDao.selectById(device.getAgentId()));
                 scopeId = macAddress;
+            } else {
+                throw new IllegalArgumentException("设备未绑定智能体");
             }
         }
         if (agent == null && StringUtils.isNotBlank(agentId)) {

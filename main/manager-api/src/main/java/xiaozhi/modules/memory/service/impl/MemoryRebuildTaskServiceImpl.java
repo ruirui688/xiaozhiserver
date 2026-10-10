@@ -315,6 +315,7 @@ public class MemoryRebuildTaskServiceImpl implements MemoryRebuildTaskService {
         normalized.setMode(StringUtils.defaultIfBlank(request == null ? null : request.getMode(),
                 "clear_then_rebuild"));
         normalized.setDryRun(false);
+        normalized.setDeviceId(request == null ? null : request.getDeviceId());
         return normalized;
     }
 

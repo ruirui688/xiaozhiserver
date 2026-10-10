@@ -12,6 +12,7 @@ import xiaozhi.modules.memory.utils.MemoryHelper;
 import xiaozhi.modules.memory.utils.MemorySpeakerUtils;
 import xiaozhi.modules.memory.utils.MemorySpeakerUtils.Registry;
 import xiaozhi.modules.memory.utils.MemorySpeakerUtils.SpeakerIdentity;
+import xiaozhi.modules.memory.service.MemoryGovernanceService;
 
 /**
  * 将事件或聊天历史转换成带可信声纹标签的维护模型上下文。
@@ -56,7 +57,7 @@ public class MemorySpeakerConversationBuilder {
         }
         StringBuilder builder = new StringBuilder();
         for (MemorySessionMessageDTO message : messages) {
-            if (message == null || StringUtils.isBlank(message.getContent())) {
+            if (message == null || Boolean.FALSE.equals(message.getMemoryEligible()) || StringUtils.isBlank(message.getContent())) {
                 continue;
             }
             String role = StringUtils.lowerCase(StringUtils.trimToEmpty(message.getRole()));
@@ -66,7 +67,8 @@ public class MemorySpeakerConversationBuilder {
             }
             String displayRole = switch (role) {
                 case "user" -> {
-                    SpeakerIdentity speaker = MemorySpeakerUtils.fromChatContent(message.getContent());
+                    SpeakerIdentity speaker = new SpeakerIdentity(MemoryGovernanceService.speaker(message),
+                            MemorySpeakerUtils.fromChatContent(message.getContent()).name());
                     speakers.observe(speaker);
                     yield MemorySpeakerUtils.userRole(speaker);
                 }
@@ -78,22 +80,24 @@ public class MemorySpeakerConversationBuilder {
                 builder.append(displayRole).append("：").append(content).append("\n");
             }
         }
-        return new Conversation(
-                StringUtils.abbreviate(builder.toString(), MemoryHelper.SESSION_MAX_CHARS), speakers);
+        if (builder.length() > MemoryHelper.REBUILD_MAX_TOTAL_CHARS) {
+            throw new IllegalArgumentException("会话分段超过 48000 字符，请按完整消息拆分后重试");
+        }
+        return new Conversation(builder.toString(), speakers);
     }
 
     public String combineHistories(List<List<AgentChatHistoryDTO>> histories) {
         if (histories == null || histories.isEmpty()) {
             return "";
         }
-        StringBuilder builder = new StringBuilder();
+        java.util.List<String> sessions = new java.util.ArrayList<>();
         for (List<AgentChatHistoryDTO> history : histories) {
             String conversation = fromHistory(history);
             if (StringUtils.isNotBlank(conversation)) {
-                builder.append("【会话】\n").append(conversation).append("\n");
+                sessions.add("【会话】\n" + conversation + "\n");
             }
         }
-        return StringUtils.abbreviate(builder.toString(), MemoryHelper.REBUILD_MAX_TOTAL_CHARS);
+        return completeTail(sessions, MemoryHelper.REBUILD_MAX_TOTAL_CHARS);
     }
 
     public Registry registryFromHistories(List<List<AgentChatHistoryDTO>> histories) {
@@ -107,31 +111,66 @@ public class MemorySpeakerConversationBuilder {
             }
             for (AgentChatHistoryDTO item : history) {
                 if (item != null && item.getChatType() != null && item.getChatType() == 1) {
-                    speakers.observe(MemorySpeakerUtils.fromChatContent(item.getContent()));
+                    MemorySessionMessageDTO message = historyMessage(item);
+                    if (!Boolean.FALSE.equals(message.getMemoryEligible()))
+                        speakers.observe(new SpeakerIdentity(MemoryGovernanceService.speaker(message),
+                                MemorySpeakerUtils.fromChatContent(message.getContent()).name()));
                 }
             }
         }
         return speakers;
     }
 
+    public List<MemorySessionMessageDTO> messagesFromHistories(List<List<AgentChatHistoryDTO>> histories) {
+        return histories.stream().flatMap(List::stream).filter(item -> item != null && item.getChatType() != null)
+                .map(this::historyMessage).filter(message -> !Boolean.FALSE.equals(message.getMemoryEligible())).toList();
+    }
+
+    private MemorySessionMessageDTO historyMessage(AgentChatHistoryDTO item) {
+        MemorySessionMessageDTO message = new MemorySessionMessageDTO();
+        message.setRole(item.getChatType() == 1 ? "user" : item.getChatType() == 3 ? "tool" : "assistant");
+        message.setContent(item.getContent());
+        var metadata = MemorySpeakerUtils.parseObject(item.getMetricsJson());
+        if (metadata.containsKey("memory_eligible")) message.setMemoryEligible(metadata.getBool("memory_eligible"));
+        if (metadata.containsKey("speaker_id")) message.setSpeakerId(metadata.getStr("speaker_id"));
+        return message;
+    }
+
     private String fromHistory(List<AgentChatHistoryDTO> history) {
         if (history == null || history.isEmpty()) {
             return "";
         }
-        StringBuilder builder = new StringBuilder();
+        java.util.List<String> messages = new java.util.ArrayList<>();
         for (AgentChatHistoryDTO item : history) {
             if (item == null || item.getChatType() == null || item.getChatType() == 3) {
                 continue;
             }
+            MemorySessionMessageDTO message = historyMessage(item);
+            if (Boolean.FALSE.equals(message.getMemoryEligible())) continue;
             String content = MemorySpeakerUtils.contentFromChatPayload(item.getContent());
             if (StringUtils.isBlank(content)) {
                 continue;
             }
             String role = item.getChatType() == 1
-                    ? MemorySpeakerUtils.userRole(MemorySpeakerUtils.fromChatContent(item.getContent()))
+                    ? MemorySpeakerUtils.userRole(new SpeakerIdentity(MemoryGovernanceService.speaker(message),
+                            MemorySpeakerUtils.fromChatContent(item.getContent()).name()))
                     : "助手";
-            builder.append(role).append(": ").append(content).append("\n");
+            messages.add(role + ": " + content + "\n");
         }
-        return StringUtils.abbreviate(builder.toString(), MemoryHelper.SESSION_MAX_CHARS);
+        return completeTail(messages, MemoryHelper.REBUILD_MAX_TOTAL_CHARS);
+    }
+
+    /** Preserve complete recent messages/sessions so late corrections survive bounded reconstruction. */
+    private String completeTail(List<String> parts, int maxChars) {
+        java.util.Deque<String> kept = new java.util.ArrayDeque<>();
+        int size = 0;
+        for (int index = parts.size() - 1; index >= 0; index--) {
+            String part = parts.get(index);
+            if (part.length() > maxChars) throw new IllegalArgumentException("单条历史消息超过重建预算，不能安全裁剪");
+            if (size + part.length() > maxChars) break;
+            kept.addFirst(part);
+            size += part.length();
+        }
+        return String.join("", kept);
     }
 }

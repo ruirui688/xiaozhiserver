@@ -4,6 +4,7 @@ import lombok.Data;
 
 @Data
 public class MemoryForgetDTO {
+    @com.fasterxml.jackson.annotation.JsonAlias("deviceId")
     private String macAddress;
     private String agentId;
     private String text;

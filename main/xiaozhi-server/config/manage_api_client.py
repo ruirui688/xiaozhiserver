@@ -513,10 +513,15 @@ async def process_managed_memory_session(
     agent_id: Optional[str],
     session_id: str,
     messages: list,
+    segment_id: Optional[str] = None,
 ) -> int:
-    """会话结束后把完整对话交给 manager-api 的记忆模型主动整理。"""
+    """Submit a segment and require a durable manager-owned task receipt.
+
+    The integer is only the changes already known by the server. A zero value
+    after this function returns means durable acceptance, not model completion.
+    """
     if not agent_id or not session_id or not messages or not ManageApiClient._instance:
-        return 0
+        raise ValueError("managed_memory_session_not_ready")
     try:
         config = getattr(ManageApiClient, "config", None) or {}
         try:
@@ -525,21 +530,31 @@ async def process_managed_memory_session(
             timeout = 120.0
         result = await ManageApiClient._instance._execute_async_request(
             "POST",
-            "/config/memory/process-session",
+            "/config/memory/submit-session",
             json={
                 "macAddress": mac_address,
                 "agentId": agent_id,
                 "sessionId": session_id,
                 "messages": messages,
+                **({"segmentId": segment_id} if segment_id is not None else {}),
             },
             timeout=timeout,
         )
-        return int(result or 0)
+        if not isinstance(result, dict) or result.get("accepted") is not True:
+            raise RuntimeError("managed_memory_segment_not_accepted")
+        task_id = result.get("taskId")
+        status = result.get("status")
+        changed = result.get("factsChanged")
+        if (not isinstance(task_id, str) or not task_id.strip() or len(task_id) > 128
+                or status not in {"PENDING", "RUNNING", "SUCCEEDED", "NO_CHANGE", "FAILED"}
+                or type(changed) is not int or changed < 0):
+            raise RuntimeError("invalid_managed_memory_receipt")
+        return changed
     except Exception as e:
         logger.bind(tag="manage_api").warning(
             f"主动记忆会话处理失败: errorType={type(e).__name__}"
         )
-        return 0
+        raise
 
 
 async def execute_feishu_action(

@@ -36,6 +36,7 @@ public class MemoryFactEntity {
     private Date validTo;
     private Date firstSeenAt;
     private Date lastSeenAt;
+    @TableField(updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
     private Date expiresAt;
     private Date archivedAt;
     private String sourceEventId;

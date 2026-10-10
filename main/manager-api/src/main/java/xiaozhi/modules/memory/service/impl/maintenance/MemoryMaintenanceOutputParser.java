@@ -108,7 +108,7 @@ public class MemoryMaintenanceOutputParser {
         try {
             return JSONUtil.parseObj(jsonText);
         } catch (Exception e) {
-            log.warn("解析{}失败: {}", resultType, e.getMessage());
+            log.warn("解析{}失败: {}", resultType, e.getClass().getSimpleName());
             return null;
         }
     }

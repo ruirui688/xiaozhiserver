@@ -45,6 +45,14 @@ async def report(
         report_time: 上报时间
     """
     audio_data = None
+    skip_memory_event = bool(skip_memory_event or _consume_skip_memory_event(conn, type, text))
+    memory_text, memory_json, speaker_id = _memory_event_content(type, text)
+    # Preserve eligibility/attribution beside the immutable chat event so a
+    # later historical rebuild uses the same evidence boundary as live memory.
+    metrics = dict(metrics) if isinstance(metrics, dict) else {}
+    metrics["memory_eligible"] = not skip_memory_event
+    if speaker_id:
+        metrics["speaker_id"] = speaker_id
     try:
         if opus_data:
             audio_data = opus_to_wav(conn, opus_data)
@@ -61,12 +69,11 @@ async def report(
         conn.logger.bind(tag=TAG).error(f"聊天记录上报失败: {e}")
 
     try:
-        if skip_memory_event or _consume_skip_memory_event(conn, type, text):
+        if skip_memory_event:
             conn.logger.bind(tag=TAG).debug("长期记忆事件已按运行时标记跳过")
             return
         event_type = "tool" if type == 3 else "chat"
         agent_id = conn.config.get("agent_id") if getattr(conn, "config", None) else None
-        memory_text, memory_json, speaker_id = _memory_event_content(type, text)
         logical_event_time = _logical_event_time(report_time, metrics)
         await report_memory_event(
             mac_address=conn.device_id,

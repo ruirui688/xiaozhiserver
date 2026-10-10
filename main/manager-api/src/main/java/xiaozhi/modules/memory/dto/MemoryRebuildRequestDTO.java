@@ -14,4 +14,5 @@ public class MemoryRebuildRequestDTO {
 
     @Schema(description = "是否只预览，不写入数据库")
     private Boolean dryRun;
+    private String deviceId;
 }

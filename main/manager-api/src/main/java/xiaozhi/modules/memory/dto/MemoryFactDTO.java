@@ -15,4 +15,7 @@ public class MemoryFactDTO {
     private BigDecimal importance;
     private BigDecimal confidence;
     private String sensitivity;
+    private String visibility;
+    private String speakerId;
+    private String deviceId;
 }

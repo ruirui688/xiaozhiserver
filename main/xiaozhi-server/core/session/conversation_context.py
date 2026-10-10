@@ -40,6 +40,8 @@ def reset_conversation_context(
             )
         upstream_reset_scheduled = True
 
+    from core.session.managed_memory_session import checkpoint_before_context_reset
+    checkpoint_before_context_reset(conn)
     removed = conn.dialogue.clear_conversation_history(preserve_system=True)
     conn.last_tool_context = None
     conn.current_speaker = None

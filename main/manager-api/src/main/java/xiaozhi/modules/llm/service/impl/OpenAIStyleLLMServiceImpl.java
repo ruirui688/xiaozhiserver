@@ -15,6 +15,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
@@ -53,7 +54,15 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
     @Autowired
     private ModelRuntimeAssembler modelRuntimeAssembler;
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    // JSON fallback and format repair can make at most four requests (4 * 130s < 600s task lease).
+    private final RestTemplate restTemplate = boundedRestTemplate(10_000, 120_000);
+
+    static RestTemplate boundedRestTemplate(int connectTimeoutMs, int readTimeoutMs) {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(connectTimeoutMs);
+        factory.setReadTimeout(readTimeoutMs);
+        return new RestTemplate(factory);
+    }
 
     private boolean isDeepSeek(String baseUrl) {
         return StringUtils.containsIgnoreCase(baseUrl, "api.deepseek.com");
@@ -118,7 +127,7 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
         for (Map.Entry<String, Map<String, Object>> entry : THINKING_DISABLED_DOMAINS.entrySet()) {
             if (baseUrl.contains(entry.getKey())) {
                 requestBody.putAll(entry.getValue());
-                log.info("为域名 {} 禁用思考模式，参数: {}", baseUrl, entry.getValue());
+                log.info("为供应商域名 {} 禁用思考模式", entry.getKey());
                 break;
             }
         }
@@ -240,17 +249,17 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
                     return messageObj.getStr("content");
                 }
             } else {
-                log.error("LLM API调用失败，状态码：{}，响应：{}", response.getStatusCode(), response.getBody());
+                log.error("LLM API调用失败，状态码：{}", response.getStatusCode());
                 if (jsonMode && allowJsonFallback) {
                     return generateSummaryInternal(conversation, promptTemplate, modelId, false, false);
                 }
             }
         } catch (Exception e) {
             if (jsonMode && allowJsonFallback) {
-                log.warn("调用LLM JSON模式失败，改用普通模式重试，modelId: {}, error: {}", modelId, e.getMessage());
+                log.warn("调用LLM JSON模式失败，改用普通模式重试，modelId: {}, errorType: {}", modelId, e.getClass().getSimpleName());
                 return generateSummaryInternal(conversation, promptTemplate, modelId, false, false);
             }
-            log.error("调用LLM服务生成总结时发生异常，modelId: {}", modelId, e);
+            log.error("调用LLM服务生成总结时发生异常，modelId: {}, errorType: {}", modelId, e.getClass().getSimpleName());
         }
 
         return "生成总结失败，请稍后重试";
@@ -344,10 +353,10 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
                     return messageObj.getStr("content");
                 }
             } else {
-                log.error("LLM API调用失败，状态码：{}，响应：{}", response.getStatusCode(), response.getBody());
+                log.error("LLM API调用失败，状态码：{}", response.getStatusCode());
             }
         } catch (Exception e) {
-            log.error("调用LLM服务生成总结时发生异常，modelId: {}", modelId, e);
+            log.error("调用LLM服务生成总结时发生异常，modelId: {}, errorType: {}", modelId, e.getClass().getSimpleName());
         }
 
         return "生成总结失败，请稍后重试";
@@ -368,7 +377,7 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
             return baseUrl != null && !baseUrl.trim().isEmpty() &&
                     apiKey != null && !apiKey.trim().isEmpty();
         } catch (Exception e) {
-            log.error("检查LLM服务可用性时发生异常：", e);
+            log.error("检查LLM服务可用性时发生异常，errorType: {}", e.getClass().getSimpleName());
             return false;
         }
     }
@@ -394,7 +403,7 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
             return baseUrl != null && !baseUrl.trim().isEmpty() &&
                     apiKey != null && !apiKey.trim().isEmpty();
         } catch (Exception e) {
-            log.error("检查LLM服务可用性时发生异常，modelId: {}", modelId, e);
+            log.error("检查LLM服务可用性时发生异常，modelId: {}, errorType: {}", modelId, e.getClass().getSimpleName());
             return false;
         }
     }
@@ -419,7 +428,7 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
 
             return llmConfigs.get(0);
         } catch (Exception e) {
-            log.error("获取LLM模型配置时发生异常：", e);
+            log.error("获取LLM模型配置时发生异常，errorType: {}", e.getClass().getSimpleName());
             return null;
         }
     }
@@ -506,10 +515,10 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
                     }
                 }
             } else {
-                log.error("LLM API调用失败，状态码：{}，响应：{}", response.getStatusCode(), response.getBody());
+                log.error("LLM API调用失败，状态码：{}", response.getStatusCode());
             }
         } catch (Exception e) {
-            log.error("调用LLM服务生成标题时发生异常，modelId: {}", modelId, e);
+            log.error("调用LLM服务生成标题时发生异常，modelId: {}, errorType: {}", modelId, e.getClass().getSimpleName());
         }
 
         return null;
@@ -537,8 +546,8 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
 
             if (StringUtils.isBlank(baseUrl) || StringUtils.isBlank(apiKey)
                     || StringUtils.isBlank(embeddingModel)) {
-                log.warn("generateEmbedding: 配置不完整, baseUrl={}, hasApiKey={}, embeddingModel={}",
-                        baseUrl, StringUtils.isNotBlank(apiKey), embeddingModel);
+                log.warn("generateEmbedding: 配置不完整, hasBaseUrl={}, hasApiKey={}",
+                        StringUtils.isNotBlank(baseUrl), StringUtils.isNotBlank(apiKey));
                 return null;
             }
 
@@ -552,7 +561,7 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
             }
             return result;
         } catch (Exception e) {
-            log.warn("generateEmbedding 失败: {}", e.getMessage());
+            log.warn("generateEmbedding 失败，errorType: {}", e.getClass().getSimpleName());
             return null;
         }
     }

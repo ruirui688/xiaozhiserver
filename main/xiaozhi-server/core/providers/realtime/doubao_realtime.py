@@ -19,7 +19,6 @@ from core.handle.sendAudioHandle import sendAudio, send_stt_display, send_tts_me
 from core.providers.realtime.base import RealtimeCapabilities
 from core.utils.dialogue import Message
 from core.utils.opus_encoder_utils import OpusEncoderUtils
-from core.utils.prompt_budget import compact_memory_context
 
 
 DOUBAO_REALTIME_HOST = "openspeech.bytedance.com"
@@ -642,10 +641,8 @@ class DoubaoRealtimeSession:
         prompt_manager = getattr(self.conn, "prompt_manager", None)
         if prompt_manager is not None:
             prompt = prompt_manager.replace_available_tools_prompt(prompt, [])
-        summary = compact_memory_context(self.conn.config.get("summaryMemory"))
-        if summary:
-            prompt = f"{prompt}\n\n<realtime_summary_memory>\n{summary}\n</realtime_summary_memory>"
-        return prompt
+        from core.session.realtime_memory import append_realtime_memory
+        return append_realtime_memory(self.conn, prompt)
 
     async def refresh_tools(self) -> None:
         tools = self.conn.func_handler.get_functions() if self.conn.func_handler else []

@@ -1,6 +1,7 @@
 """Deterministic budgets for untrusted, dynamic LLM context."""
 
 import copy
+import html
 import json
 import re
 from typing import Any, Dict, Iterable, List
@@ -65,6 +66,43 @@ def _compact_structured_context(text: str, max_chars: int) -> str:
         wrapper["preview"] = wrapper["preview"][: max(0, len(wrapper["preview"]) - overflow - 1)]
         compacted = json.dumps(wrapper, ensure_ascii=False, separators=(",", ":"))
     return compacted if len(compacted) <= max_chars else "{}"
+
+
+class ManagedMemoryContext(str):
+    """Already selected complete facts, carrying the authoritative final budget."""
+
+    def __new__(cls, value, max_chars=MEMORY_CONTEXT_MAX_CHARS, max_items=MEMORY_CONTEXT_MAX_ITEMS):
+        obj = super().__new__(cls, value)
+        obj.max_chars = max_chars
+        obj.max_items = max_items
+        return obj
+
+
+def select_memory_facts(private, shared, max_chars, max_items):
+    """Reserve the budget for private facts first, accounting for XML escaping."""
+    selected, seen, used = [], set(), 0
+    for context in (private, shared):
+        # Java emits one complete fact per bullet, possibly with continuation lines.
+        items = re.split(r"\n(?=\s*[-*•]\s)", str(context or "").strip())
+        for item in items:
+            item = item.strip()
+            cost = len(html.escape(item, quote=False)) + (1 if selected else 0)
+            if not item or item in seen or used + cost > max_chars:
+                continue
+            if len(selected) >= max_items:
+                break
+            selected.append(item)
+            seen.add(item)
+            used += cost
+    return ManagedMemoryContext("\n".join(selected), max_chars, max_items)
+
+
+def render_memory_context(value):
+    escaped = html.escape(str(value or ""), quote=False)
+    if isinstance(value, ManagedMemoryContext):
+        # select_memory_facts accounted for escaping and retained whole facts.
+        return escaped if len(escaped) <= value.max_chars else ""
+    return compact_memory_context(escaped)
 
 
 def compact_memory_context(memory_text: Any) -> str:

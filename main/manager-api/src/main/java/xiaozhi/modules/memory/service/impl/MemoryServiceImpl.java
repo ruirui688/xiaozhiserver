@@ -11,7 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 
 import cn.hutool.json.JSONObject;
-import lombok.AllArgsConstructor;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import xiaozhi.common.user.UserDetail;
 import xiaozhi.common.utils.JsonUtils;
@@ -54,7 +54,7 @@ import xiaozhi.modules.security.user.SecurityUser;
 import xiaozhi.modules.workspace.service.WorkspaceService;
 
 @Service
-@AllArgsConstructor
+@RequiredArgsConstructor
 @Slf4j
 public class MemoryServiceImpl implements MemoryService {
 
@@ -72,6 +72,12 @@ public class MemoryServiceImpl implements MemoryService {
     private final MemoryMaintenanceService memoryMaintenanceService;
     private final MemorySettingsService memorySettingsService;
     private final MemoryRuntimeRefresh memoryRuntimeRefresh;
+    @org.springframework.beans.factory.annotation.Autowired
+    private xiaozhi.modules.memory.service.MemoryPolicyService policyService;
+    @org.springframework.beans.factory.annotation.Autowired
+    private xiaozhi.modules.memory.service.MemoryGovernanceService governance;
+    @org.springframework.beans.factory.annotation.Autowired
+    private xiaozhi.modules.memory.service.MemoryRequestScopeService requestScopes;
 
     // ===================== 公开方法 — 直接实现 =====================
 
@@ -111,6 +117,8 @@ public class MemoryServiceImpl implements MemoryService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void remember(MemoryRememberDTO dto, String actorType, String actorId) {
+        if ("user".equals(actorType)) assertAgentOwner(dto.getAgentId());
+        validateInstructionScope(dto.getAgentId(), dto.getMacAddress(), dto.getSpeakerId());
         AgentScope scope = resolveScope(dto.getAgentId(), dto.getMacAddress());
         if (scope.agent == null || StringUtils.isBlank(dto.getText())) {
             return;
@@ -125,6 +133,8 @@ public class MemoryServiceImpl implements MemoryService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void forget(MemoryForgetDTO dto, String actorType, String actorId) {
+        if ("user".equals(actorType)) assertAgentOwner(dto.getAgentId());
+        validateInstructionScope(dto.getAgentId(), dto.getMacAddress(), dto.getSpeakerId());
         AgentScope scope = resolveScope(dto.getAgentId(), dto.getMacAddress());
         if (scope.agent == null || StringUtils.isBlank(dto.getText())) {
             return;
@@ -139,12 +149,15 @@ public class MemoryServiceImpl implements MemoryService {
 
     @Override
     public int processSession(MemorySessionProcessDTO dto) {
-        AgentScope scope = resolveScope(dto.getAgentId(), dto.getMacAddress());
+        if (requestScopes != null) requestScopes.require(dto.getAgentId(), dto.getMacAddress(), dto.getSessionId());
+        AgentScope scope = new AgentScope(agentDao.selectById(dto.getAgentId()), dto.getMacAddress());
         if (scope.agent == null) {
             return 0;
         }
         return memoryMaintenanceService.processSessionConversation(
-                scope.agent, scope.scopeId, dto.getSessionId(), dto.getMessages());
+                scope.agent, scope.scopeId,
+                StringUtils.isBlank(dto.getSegmentId()) ? dto.getSessionId()
+                        : MemoryHelper.sha256(dto.getSessionId() + "|" + dto.getSegmentId()), dto.getMessages());
     }
 
     @Override
@@ -183,12 +196,15 @@ public class MemoryServiceImpl implements MemoryService {
     public String createFact(String agentId, MemoryFactDTO dto, String actorType, String actorId) {
         AgentEntity agent = assertAgentOwner(agentId);
         lockAgentForMemoryUpdate(agentId);
-        AgentScope scope = new AgentScope(agent, agentId);
+        MemoryFactEntity identity = new MemoryFactEntity();
+        identity.setScopeId(agentId);
+        if (governance != null) governance.editIdentity(agentId, identity, dto);
+        AgentScope scope = new AgentScope(agent, identity.getScopeId());
         return createFactInternal(scope,
                 dto.getCanonicalText(),
                 StringUtils.defaultIfBlank(dto.getCategory(), "manual"),
                 StringUtils.defaultIfBlank(dto.getMemoryType(), "profile"),
-                null, actorType, actorId);
+                null, actorType, actorId, "long_term", StringUtils.defaultIfBlank(identity.getPayload(), "{}"));
     }
 
     @Override
@@ -220,9 +236,14 @@ public class MemoryServiceImpl implements MemoryService {
         if (StringUtils.isNotBlank(dto.getSensitivity())) {
             fact.setSensitivity(dto.getSensitivity());
         }
-        if (dto.getPayload() != null) {
-            fact.setPayload(dto.getPayload());
-        }
+        if (dto.getPayload() != null) throw new IllegalArgumentException("请使用人物和设备字段编辑归属，不接受原始 payload");
+        if (governance != null) governance.editIdentity(agentId, fact, dto);
+        if (governance != null) fact.setExpiresAt(governance.expiresAt(agentId));
+        if (governance != null && governance.blocked(agentId, fact.getScopeId(),
+                xiaozhi.modules.memory.utils.MemorySpeakerUtils.payloadSpeakerId(fact), fact.getCanonicalText()))
+            throw new IllegalArgumentException("该事实已被遗忘规则阻止");
+        fact.setSourceHash(MemoryHelper.sha256(agentId + "|" + fact.getScopeId() + "|"
+                + xiaozhi.modules.memory.utils.MemorySpeakerUtils.payloadSpeakerId(fact) + "|" + fact.getCanonicalText()));
         fact.setLastSeenAt(new Date());
         fact.setUpdatedAt(new Date());
         factDao.updateById(fact);
@@ -308,14 +329,25 @@ public class MemoryServiceImpl implements MemoryService {
             DeviceEntity device = deviceDao.selectOne(
                     new QueryWrapper<DeviceEntity>().eq("mac_address", macAddress).last("LIMIT 1"));
             if (device != null && StringUtils.isNotBlank(device.getAgentId())) {
+                if (StringUtils.isBlank(agentId) || !agentId.equals(device.getAgentId()))
+                    throw new IllegalArgumentException("设备与智能体作用域不匹配");
                 agent = agentDao.selectById(device.getAgentId());
                 scopeId = macAddress;
+            } else {
+                throw new IllegalArgumentException("设备未绑定智能体");
             }
         }
         if (agent == null && StringUtils.isNotBlank(agentId)) {
             agent = agentDao.selectById(agentId);
         }
         return new AgentScope(agent, scopeId);
+    }
+
+    private void validateInstructionScope(String agentId, String deviceId, String speakerId) {
+        if (policyService == null) return;
+        policyService.requireSpeaker(agentId, speakerId);
+        if (StringUtils.isNotBlank(deviceId) || "DEVICE".equals(policyService.get(agentId).getMemoryScope()))
+            policyService.requireDevice(agentId, deviceId);
     }
 
     private AgentEntity assertAgentOwner(String agentId) {
@@ -358,12 +390,24 @@ public class MemoryServiceImpl implements MemoryService {
 
     private String applyCandidateToFact(AgentScope scope, MemoryCandidateEntity candidate, String actorType, String actorId) {
         JSONObject payload = MemoryHelper.parsePayload(candidate.getPayload());
+        if (policyService != null) {
+            policyService.requireSpeaker(scope.agent.getId(), payload.getStr("speaker_id"));
+            if ("DEVICE".equals(policyService.get(scope.agent.getId()).getMemoryScope()))
+                policyService.requireDevice(scope.agent.getId(), scope.scopeId);
+        }
         String action = MemoryHelper.normalizeCandidateAction(payload.getStr("action"));
         String relatedMemoryId = payload.getStr("related_memory_id");
         String tier = resolveMemoryTier(payload.getStr("memory_tier"));
         MemoryFactEntity relatedFact = findRelatedFact(scope.agent.getId(), relatedMemoryId);
+        if (List.of("UPDATE", "DELETE", "ARCHIVE").contains(action) && relatedFact == null)
+            throw new IllegalArgumentException("候选动作引用的记忆已不存在");
+        if (relatedFact != null && (!StringUtils.equals(xiaozhi.modules.memory.utils.MemorySpeakerUtils.payloadSpeakerId(relatedFact),
+                StringUtils.defaultString(payload.getStr("speaker_id"))) || (governance != null
+                && !governance.inScope(scope.agent.getId(), scope.scopeId, relatedFact.getScopeId()))))
+            throw new IllegalArgumentException("候选动作人物或设备归属不匹配");
         if (("ARCHIVE".equals(action) || "DELETE".equals(action)) && relatedFact != null) {
             String before = JsonUtils.toJsonString(relatedFact);
+            if (governance != null && "DELETE".equals(action)) governance.forgetFact(relatedFact, actorType, actorId);
             relatedFact.setStatus("ARCHIVE".equals(action)
                     ? MemoryHelper.STATUS_ARCHIVED : MemoryHelper.STATUS_DELETED);
             relatedFact.setValidTo(new Date());
@@ -379,6 +423,9 @@ public class MemoryServiceImpl implements MemoryService {
         }
         if ("UPDATE".equals(action) && relatedFact != null) {
             String canonical = MemoryHelper.cleanupMemoryText(candidate.getCanonicalText());
+            if (governance != null && governance.blocked(scope.agent.getId(), relatedFact.getScopeId(),
+                    xiaozhi.modules.memory.utils.MemorySpeakerUtils.payloadSpeakerId(relatedFact), canonical))
+                throw new IllegalArgumentException("该事实已被遗忘规则阻止");
             ensureActiveMemoryCapacity(scope.agent.getId(), relatedFact, canonical);
             String before = JsonUtils.toJsonString(relatedFact);
             relatedFact.setMemoryType(MemoryHelper.normalizeMemoryLabel(candidate.getMemoryType(), "长期记忆"));
@@ -388,7 +435,7 @@ public class MemoryServiceImpl implements MemoryService {
             relatedFact.setImportance(MemoryHelper.max(relatedFact.getImportance(), candidate.getImportance()));
             relatedFact.setSensitivity(MemoryHelper.normalizeSensitivity(candidate.getSensitivity()));
             relatedFact.setMemoryTier(tier);
-            relatedFact.setExpiresAt(null);
+            relatedFact.setExpiresAt(governance == null ? null : governance.expiresAt(scope.agent.getId()));
             relatedFact.setStatus(MemoryHelper.STATUS_ACTIVE);
             relatedFact.setLastSeenAt(new Date());
             relatedFact.setUpdatedAt(new Date());
@@ -401,7 +448,7 @@ public class MemoryServiceImpl implements MemoryService {
         return createFactInternal(scope, candidate.getCanonicalText(),
                 MemoryHelper.normalizeMemoryLabel(candidate.getCategory(), "未分类"),
                 MemoryHelper.normalizeMemoryLabel(candidate.getMemoryType(), "长期记忆"),
-                candidate.getSourceEventId(), actorType, actorId, tier);
+                candidate.getSourceEventId(), actorType, actorId, tier, candidate.getPayload());
     }
 
     private String createFactInternal(AgentScope scope, String text, String category, String memoryType,
@@ -411,21 +458,31 @@ public class MemoryServiceImpl implements MemoryService {
 
     private String createFactInternal(AgentScope scope, String text, String category, String memoryType,
                                       String sourceEventId, String actorType, String actorId, String memoryTier) {
+        return createFactInternal(scope, text, category, memoryType, sourceEventId, actorType, actorId, memoryTier, "{}");
+    }
+
+    private String createFactInternal(AgentScope scope, String text, String category, String memoryType,
+                                      String sourceEventId, String actorType, String actorId, String memoryTier, String identityPayload) {
         String canonical = MemoryHelper.cleanupMemoryText(text);
         if (StringUtils.isBlank(canonical)) {
             return null;
         }
-        String hash = MemoryHelper.sha256(scope.agent.getId() + "|" + scope.scopeId + "|" + canonical);
+        String speakerId = StringUtils.defaultString(MemoryHelper.parsePayload(identityPayload).getStr("speaker_id"));
+        if (policyService != null) policyService.requireSpeaker(scope.agent.getId(), speakerId);
+        if (governance != null && governance.blocked(scope.agent.getId(), scope.scopeId, speakerId, canonical))
+            throw new IllegalArgumentException("该事实已被遗忘规则阻止");
+        String hash = MemoryHelper.sha256(scope.agent.getId() + "|" + scope.scopeId + "|" + speakerId + "|" + canonical);
         QueryWrapper<MemoryFactEntity> wrapper = new QueryWrapper<>();
         wrapper.eq("agent_id", scope.agent.getId())
                 .eq("scope_type", MemoryHelper.SCOPE_DEVICE)
-                .eq("scope_id", scope.scopeId)
-                .eq("source_hash", hash)
+                .eq(policyService == null || "DEVICE".equals(policyService.get(scope.agent.getId()).getMemoryScope()), "scope_id", scope.scopeId)
+                .eq("canonical_text", canonical)
+                .apply("COALESCE(JSON_UNQUOTE(JSON_EXTRACT(payload, '$.speaker_id')), '') = {0}", speakerId)
                 .ne("status", MemoryHelper.STATUS_DELETED)
                 .last("LIMIT 1");
         MemoryFactEntity existing = factDao.selectOne(wrapper);
         if (existing != null) {
-            if (!MemoryHelper.STATUS_ACTIVE.equals(existing.getStatus())) {
+            if (xiaozhi.modules.memory.service.MemoryGovernanceService.activeChars(existing) == 0) {
                 ensureActiveMemoryCapacity(scope.agent.getId(), existing, existing.getCanonicalText());
             }
             refreshFactEvidence(existing, MemoryHelper.DEFAULT_SCORE, actorType, actorId, "重复证据刷新");
@@ -443,7 +500,7 @@ public class MemoryServiceImpl implements MemoryService {
         fact.setMemoryType(MemoryHelper.normalizeMemoryLabel(memoryType, "长期记忆"));
         fact.setCategory(MemoryHelper.normalizeMemoryLabel(category, "未分类"));
         fact.setCanonicalText(canonical);
-        fact.setPayload("{}");
+        fact.setPayload(identityPayload);
         fact.setImportance(MemoryHelper.DEFAULT_SCORE);
         fact.setConfidence(MemoryHelper.DEFAULT_SCORE);
         fact.setSensitivity("normal");
@@ -451,8 +508,8 @@ public class MemoryServiceImpl implements MemoryService {
         fact.setStatus(MemoryHelper.STATUS_ACTIVE);
         if (StringUtils.isNotBlank(memoryTier)) {
             fact.setMemoryTier(memoryTier);
-            fact.setExpiresAt(null);
         }
+        fact.setExpiresAt(governance == null ? null : governance.expiresAt(scope.agent.getId()));
         fact.setValidFrom(new Date());
         fact.setFirstSeenAt(new Date());
         fact.setLastSeenAt(new Date());
@@ -478,6 +535,7 @@ public class MemoryServiceImpl implements MemoryService {
             fact.setArchivedAt(new Date());
         }
         if (MemoryHelper.STATUS_DELETED.equals(status)) {
+            if (governance != null) governance.forgetFact(fact, actorType, actorId);
             fact.setValidTo(new Date());
         }
         factDao.updateById(fact);
@@ -518,15 +576,16 @@ public class MemoryServiceImpl implements MemoryService {
         lockAgentForMemoryUpdate(agentId);
         int currentChars = factDao.selectList(new QueryWrapper<MemoryFactEntity>()
                         .eq("agent_id", agentId)
-                        .eq("status", MemoryHelper.STATUS_ACTIVE))
+                        .eq("status", MemoryHelper.STATUS_ACTIVE)
+                        .and(w -> w.isNull("expires_at").or().gt("expires_at", new Date())))
                 .stream()
                 .filter(fact -> fact != null && StringUtils.isNotEmpty(fact.getCanonicalText()))
                 .mapToInt(fact -> MemoryHelper.characterCount(fact.getCanonicalText()))
                 .sum();
-        int replacedChars = replacedFact != null && MemoryHelper.STATUS_ACTIVE.equals(replacedFact.getStatus())
-                ? MemoryHelper.characterCount(replacedFact.getCanonicalText()) : 0;
+        int replacedChars = xiaozhi.modules.memory.service.MemoryGovernanceService.activeChars(replacedFact);
         int projectedChars = currentChars - replacedChars + MemoryHelper.characterCount(canonicalText);
-        int maxActiveMemoryChars = memorySettingsService.activeContextMaxChars();
+        int maxActiveMemoryChars = policyService == null ? memorySettingsService.activeContextMaxChars()
+                : policyService.get(agentId).getActiveMaxChars();
         if (projectedChars > maxActiveMemoryChars) {
             throw new IllegalArgumentException("单个智能体的生效记忆总量不能超过 "
                     + maxActiveMemoryChars + " 字符，请先执行记忆审查/蒸馏或归档低价值记忆");
@@ -543,6 +602,7 @@ public class MemoryServiceImpl implements MemoryService {
         fact.setLastSeenAt(new Date());
         fact.setConfidence(MemoryHelper.max(fact.getConfidence(), confidence == null ? MemoryHelper.DEFAULT_SCORE : confidence));
         fact.setStatus(MemoryHelper.STATUS_ACTIVE);
+        if (governance != null) fact.setExpiresAt(governance.expiresAt(fact.getAgentId()));
         fact.setUpdatedAt(new Date());
         factDao.updateById(fact);
         writeRevision(fact.getAgentId(), fact.getMemoryId(), "refresh", null,

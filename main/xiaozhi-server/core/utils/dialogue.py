@@ -9,7 +9,7 @@ from core.utils.current_time import render_runtime_time
 from core.session.turn_context import build_contextual_user_content
 from core.utils.prompt_budget import (
     SPEAKER_DESCRIPTION_MAX_CHARS,
-    compact_memory_context,
+    render_memory_context,
     compact_tool_history,
     truncate_context_text,
 )
@@ -25,6 +25,8 @@ class Message:
             tool_call_id=None,
             is_temporary=False,
             turn_context=None,
+            memory_eligible=True,
+            is_internal=False,
     ):
         self.uniq_id = uniq_id if uniq_id is not None else str(uuid.uuid4())
         self.role = role
@@ -33,6 +35,10 @@ class Message:
         self.tool_call_id = tool_call_id
         self.is_temporary = is_temporary  # 标记临时消息（如工具调用提醒）
         self.turn_context = turn_context
+        self.memory_eligible = memory_eligible and not is_internal
+        self.is_internal = is_internal
+        # Prompt scrubbing must never erase the original event's attribution.
+        self.memory_content = content
 
 
 class Dialogue:
@@ -56,9 +62,30 @@ class Dialogue:
             max(self.MIN_MAX_STORED_MESSAGES, int(max_stored_messages)),
         )
         self._lock = threading.Lock()
+        self.memory_sink = None
+        self.memory_checkpoint = None
+        self._history_speaker_id = None
 
     def put(self, message: Message):
         with self._lock:
+            if message.role == "user" and not message.is_temporary and not message.is_internal:
+                speaker_id = None
+                try:
+                    payload = json.loads(message.memory_content)
+                    if isinstance(payload, dict) and "content" in payload:
+                        speaker_id = str(payload.get("speaker_id") or "").strip() or None
+                except (ValueError, TypeError):
+                    pass
+                if speaker_id != self._history_speaker_id:
+                    # Assistant/tool messages may contain facts recalled for
+                    # the previous person. Remove the entire attributed turn
+                    # history, including recognized -> unknown transitions.
+                    if self.memory_checkpoint is not None:
+                        self.memory_checkpoint()
+                    self.dialogue = [m for m in self.dialogue if m.role == "system" or m.is_temporary]
+                    self._history_speaker_id = speaker_id
+            if self.memory_sink is not None:
+                self.memory_sink(message)
             self.dialogue.append(message)
             self._prune_stored_history_locked()
 
@@ -155,7 +182,7 @@ class Dialogue:
                 self.dialogue.append(Message(role="system", content=new_content))
 
     def clear_voiceprint_metadata(self) -> int:
-        """Remove speaker identity from existing user history after disablement."""
+        """Remove attributed history, including its assistant/tool derivatives."""
         scrubbed = 0
         with self._lock:
             for message in self.dialogue:
@@ -186,8 +213,12 @@ class Dialogue:
 
                 if not contains_identity(payload):
                     continue
-                message.content = str(payload.get("content") or "")
                 scrubbed += 1
+            if scrubbed or self._history_speaker_id is not None:
+                if self.memory_checkpoint is not None:
+                    self.memory_checkpoint()
+                self.dialogue = [m for m in self.dialogue if m.role == "system" or m.is_temporary]
+                self._history_speaker_id = None
         return scrubbed
 
     def clear_temporary_messages(self) -> int:
@@ -209,6 +240,7 @@ class Dialogue:
                 ]
             else:
                 self.dialogue = []
+            self._history_speaker_id = None
             return before - len(self.dialogue)
 
     def _ensure_tool_calls_complete(self, messages: List[Message]) -> List[Message]:
@@ -285,12 +317,10 @@ class Dialogue:
             if system_message and dynamic_part:
                 # 填充记忆
                 if memory_str is not None:
-                    bounded_memory = compact_memory_context(
-                        html.escape(str(memory_str), quote=False)
-                    )
+                    bounded_memory = render_memory_context(memory_str)
                     dynamic_part = re.sub(
                         r"<memory>.*?</memory>",
-                        f"<memory>\n{bounded_memory}\n</memory>",
+                        lambda _match: f"<memory>\n{bounded_memory}\n</memory>",
                         dynamic_part,
                         flags=re.DOTALL,
                     )

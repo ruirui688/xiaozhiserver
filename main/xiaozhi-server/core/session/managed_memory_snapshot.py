@@ -5,12 +5,13 @@ import threading
 import time
 
 from core.observability.session_telemetry import mark_latency
+from core.utils.prompt_budget import select_memory_facts
 
 
 class ManagedMemorySnapshot:
     MAX_LEASE_MS = 30000
     MAX_SHARED_CHARS = 4000
-    MAX_PRIVATE_CHARS = 2000
+    MAX_PRIVATE_CHARS = 4000
     MAX_TOTAL_CHARS = 16000
     MAX_SPEAKERS = 16
 
@@ -30,6 +31,8 @@ class ManagedMemorySnapshot:
         self.expires_at_ms = 0
         self.shared = ""
         self.speakers = {}
+        self.max_chars = 4000
+        self.max_items = 30
 
     def invalidate(self):
         with self.lock:
@@ -70,10 +73,17 @@ class ManagedMemorySnapshot:
                 return False
             if len(shared) + sum(map(len, speakers.values())) > self.MAX_TOTAL_CHARS:
                 return False
+            max_chars = payload.get("context_max_chars", 4000)
+            max_items = payload.get("context_max_items", 30)
+            if type(max_chars) is not int or not 1 <= max_chars <= 4000:
+                return False
+            if type(max_items) is not int or not 1 <= max_items <= 30:
+                return False
             self.config, self.agent_id, self.device_id = config, agent, device
             self.deadline = self.clock() + min(expires - now_ms, self.MAX_LEASE_MS) / 1000
             self.expires_at_ms = expires
             self.shared, self.speakers = shared, dict(speakers)
+            self.max_chars, self.max_items = max_chars, max_items
             return True
 
     def read(self):
@@ -90,7 +100,7 @@ class ManagedMemorySnapshot:
                 return ""
             speaker_id = getattr(conn, "current_speaker_id", None)
             private = self.speakers.get(speaker_id, "") if isinstance(speaker_id, str) else ""
-            return "\n\n".join(part for part in (self.shared, private) if part)
+            return select_memory_facts(private, self.shared, self.max_chars, self.max_items)
 
     def renewal_due(self):
         with self.lock:

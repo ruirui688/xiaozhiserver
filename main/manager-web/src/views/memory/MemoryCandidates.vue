@@ -1,6 +1,6 @@
 <template>
   <div class="candidates-view">
-    <div class="candidates-note">候选预览不会参与运行时召回，确认后才进入事实记忆；自动维护会直接写入生效事实。</div>
+    <div class="candidates-note">候选记忆不会用于对话，确认后才应用对应动作；自动整理是否直接生效由记忆策略决定。</div>
     <el-table :data="candidates" v-loading="loading" class="transparent-table" empty-text="暂无候选预览">
       <el-table-column label="内容" prop="canonicalText" show-overflow-tooltip min-width="260" />
       <el-table-column label="关联人物" width="120" show-overflow-tooltip>
@@ -27,8 +27,8 @@
       </el-table-column>
       <el-table-column label="操作" width="180" fixed="right">
         <template slot-scope="{row}">
-          <el-button size="mini" type="success" @click="$emit('confirm', row)">确认</el-button>
-          <el-button size="mini" type="danger" @click="$emit('reject', row)">拒绝</el-button>
+          <el-button size="mini" type="success" :disabled="!canWrite" @click="$emit('confirm', row)">确认</el-button>
+          <el-button size="mini" type="danger" :disabled="!canWrite" @click="$emit('reject', row)">拒绝</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -45,6 +45,7 @@ import { categoryLabel, memoryTypeLabel } from '@/utils/memoryLabels'
 export default {
   name: 'MemoryCandidates',
   props: {
+    canWrite: { type: Boolean, default: false },
     candidates: { type: Array, default: () => [] },
     loading: { type: Boolean, default: false }
   },

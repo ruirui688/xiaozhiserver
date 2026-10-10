@@ -1312,6 +1312,8 @@ class ConnectionHandler:
             tts_model_config["correct_words"] = copy.deepcopy(correct_words)
 
     def _initialize_memory(self):
+        from core.session.managed_memory_session import detach_managed_memory_session
+        detach_managed_memory_session(self)
         if self.memory is None:
             return
         selected_memory = self.config.get("selected_module", {}).get("Memory")
@@ -1330,6 +1332,8 @@ class ConnectionHandler:
         memory_config = self.config["Memory"]
         memory_type = self.config["Memory"][selected_memory]["type"]
         if memory_type == "managed_memory":
+            from core.session.managed_memory_session import bind_managed_memory_session
+            bind_managed_memory_session(self, self.memory)
             self.memory.snapshot_reader = lambda: read_managed_memory(self)
             return
         # 如果使用 nomen 或 mem_report_only，直接返回
@@ -1657,6 +1661,8 @@ class ConnectionHandler:
                 Message(
                     role="user",
                     content="[系统提示] 已达到最大工具调用次数限制，请你基于目前已经获取的所有信息，直接给出最终答案。不要再尝试调用任何工具。",
+                    memory_eligible=False,
+                    is_internal=True,
                 )
             )
 

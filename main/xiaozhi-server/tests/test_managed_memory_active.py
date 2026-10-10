@@ -106,7 +106,7 @@ def test_process_managed_memory_session_uses_server_endpoint():
     class FakeClient:
         async def _execute_async_request(self, method, endpoint, **kwargs):
             calls.append((method, endpoint, kwargs["json"]))
-            return 3
+            return {"accepted": True, "taskId": "task-1", "status": "SUCCEEDED", "factsChanged": 3}
 
     original = ManageApiClient._instance
     ManageApiClient._instance = FakeClient()
@@ -126,7 +126,7 @@ def test_process_managed_memory_session_uses_server_endpoint():
     assert calls == [
         (
             "POST",
-            "/config/memory/process-session",
+            "/config/memory/submit-session",
             {
                 "macAddress": "AA:BB:CC",
                 "agentId": "agent-1",

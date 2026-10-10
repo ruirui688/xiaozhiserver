@@ -289,6 +289,7 @@ def test_fixed_skill_uses_tracked_tts_lifecycle_and_skips_memory():
         ("user", "小慧，请介绍一下惠易公司"),
         ("assistant", "惠易公司固定介绍。"),
     ]
+    assert all(not message.memory_eligible for message in conn.dialogue.dialogue)
 
 
 def test_start_to_chat_skill_never_calls_intent_or_llm(monkeypatch):

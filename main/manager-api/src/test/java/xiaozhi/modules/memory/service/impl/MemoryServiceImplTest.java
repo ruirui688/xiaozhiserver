@@ -151,6 +151,9 @@ class MemoryServiceImplTest {
         agent.setUserId(1001L);
         agent.setMemModelId(MEMORY_MODEL_ID);
         when(agentDao.selectById(AGENT_ID)).thenReturn(agent);
+        var boundDevice = new xiaozhi.modules.device.entity.DeviceEntity();
+        boundDevice.setAgentId(AGENT_ID);
+        when(deviceDao.selectOne(any(Wrapper.class))).thenReturn(boundDevice);
 
         ModelConfigEntity memoryModel = new ModelConfigEntity();
         memoryModel.setId(MEMORY_MODEL_ID);
@@ -226,6 +229,68 @@ class MemoryServiceImplTest {
         assertEquals(1, changed);
         verify(factDao).insert(any(MemoryFactEntity.class));
         verify(llmService).generateJson(any(), eq(MAINTENANCE_MODEL_ID));
+    }
+
+    @Test
+    void managementRememberCannotChangeAuthorizedAgentThroughDeviceMac() {
+        var foreign = new xiaozhi.modules.device.entity.DeviceEntity();
+        foreign.setAgentId("foreign-agent");
+        when(deviceDao.selectOne(any(Wrapper.class))).thenReturn(foreign);
+        MemoryRememberDTO dto = new MemoryRememberDTO();
+        dto.setAgentId(AGENT_ID);
+        dto.setMacAddress("foreign-mac");
+        dto.setText("不得写入他人记忆");
+        assertThrows(IllegalArgumentException.class, () -> memoryService.remember(dto, "user", "owner"));
+        verify(llmService, never()).generateJson(any(), any());
+        verify(factDao, never()).insert(any(MemoryFactEntity.class));
+    }
+
+    @Test
+    void reviewedPrivateUpdatePreservesIdentityAndUsesRetention() {
+        var governance = mock(xiaozhi.modules.memory.service.MemoryGovernanceService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(memoryService, "governance", governance);
+        when(governance.inScope(any(), any(), any())).thenReturn(true);
+        java.util.Date expiry = new java.util.Date(System.currentTimeMillis() + 86_400_000L);
+        when(governance.expiresAt(AGENT_ID)).thenReturn(expiry);
+        var fact = activeFact("fact-private", "用户住杭州");
+        fact.setPayload("{\"speaker_id\":\"alice\"}");
+        when(factDao.selectOne(any(Wrapper.class))).thenReturn(fact);
+        when(factDao.selectList(any(Wrapper.class))).thenReturn(List.of(fact));
+        var candidate = new xiaozhi.modules.memory.entity.MemoryCandidateEntity();
+        candidate.setCandidateId("candidate");
+        candidate.setStatus("pending");
+        candidate.setScopeId("device-a");
+        candidate.setCanonicalText("用户住苏州");
+        candidate.setConfidence(new BigDecimal("0.90"));
+        candidate.setImportance(new BigDecimal("0.80"));
+        candidate.setPayload("{\"action\":\"UPDATE\",\"related_memory_id\":\"fact-private\",\"speaker_id\":\"alice\"}");
+        when(candidateDao.selectOne(any(Wrapper.class))).thenReturn(candidate);
+        memoryService.confirmCandidate(AGENT_ID, "candidate", "user", "owner");
+        assertEquals("用户住苏州", fact.getCanonicalText());
+        assertEquals(expiry, fact.getExpiresAt());
+        assertEquals("alice", cn.hutool.json.JSONUtil.parseObj(fact.getPayload()).getStr("speaker_id"));
+    }
+
+    @Test
+    void reviewedDeletionCannotCrossPersonAndRecordsForgetBoundary() {
+        var governance = mock(xiaozhi.modules.memory.service.MemoryGovernanceService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(memoryService, "governance", governance);
+        when(governance.inScope(any(), any(), any())).thenReturn(true);
+        var fact = activeFact("fact-private", "用户住杭州");
+        fact.setPayload("{\"speaker_id\":\"alice\"}");
+        when(factDao.selectOne(any(Wrapper.class))).thenReturn(fact);
+        var candidate = new xiaozhi.modules.memory.entity.MemoryCandidateEntity();
+        candidate.setCandidateId("candidate");
+        candidate.setStatus("pending");
+        candidate.setScopeId("device-a");
+        candidate.setPayload("{\"action\":\"DELETE\",\"related_memory_id\":\"fact-private\",\"speaker_id\":\"bob\"}");
+        when(candidateDao.selectOne(any(Wrapper.class))).thenReturn(candidate);
+        assertThrows(IllegalArgumentException.class, () -> memoryService.confirmCandidate(AGENT_ID, "candidate", "user", "owner"));
+        verify(governance, never()).forgetFact(any(), any(), any());
+        candidate.setPayload("{\"action\":\"DELETE\",\"related_memory_id\":\"fact-private\",\"speaker_id\":\"alice\"}");
+        memoryService.confirmCandidate(AGENT_ID, "candidate", "user", "owner");
+        assertEquals("deleted", fact.getStatus());
+        verify(governance).forgetFact(fact, "user", "owner");
     }
 
     @Test

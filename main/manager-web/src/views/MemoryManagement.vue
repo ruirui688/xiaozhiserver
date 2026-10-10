@@ -9,22 +9,25 @@
         <div class="page-subtitle">{{ agentName || agentId }}</div>
       </div>
       <div class="right-operations">
+        <el-select v-if="memoryScope === 'DEVICE'" v-model="rebuildDeviceId" size="small" placeholder="选择重建设备" :disabled="maintenanceBusy || !canWrite" style="width:170px">
+          <el-option v-for="device in memoryDevices" :key="device.deviceId" :label="device.label" :value="device.deviceId" />
+        </el-select>
         <el-input-number
           v-model="rebuildSessionLimit"
           size="small"
           :min="1"
           :max="50"
           :controls="false"
-          :disabled="maintenanceBusy"
+          :disabled="maintenanceBusy || !canWrite"
           class="session-limit-input"
         />
-        <el-button size="small" icon="el-icon-view" :loading="rebuildLoading && maintenanceOperation === '预览重建'" :disabled="maintenanceBusy" @click="handleRebuildPreview">预览重建</el-button>
-        <el-button size="small" type="primary" icon="el-icon-magic-stick" :loading="rebuildLoading || serverRebuildActive" :disabled="maintenanceBusy" @click="handleRebuild">重建记忆</el-button>
-        <el-button size="small" icon="el-icon-view" :loading="reviewLoading && maintenanceOperation === '预览重审'" :disabled="maintenanceBusy" @click="handleReviewPreview">预览重审</el-button>
-        <el-button size="small" type="primary" icon="el-icon-refresh" :loading="reviewLoading && maintenanceOperation === '重审记忆'" :disabled="maintenanceBusy" @click="handleReview">重审记忆</el-button>
-        <el-button size="small" type="danger" icon="el-icon-delete" :loading="clearLoading" :disabled="maintenanceBusy" @click="handleClear">清空记忆</el-button>
-        <el-button size="small" icon="el-icon-edit" :disabled="maintenanceBusy" @click="showRemember = !showRemember">记住</el-button>
-        <el-button size="small" icon="el-icon-delete" :disabled="maintenanceBusy" @click="showForget = !showForget">忘记</el-button>
+        <el-button size="small" icon="el-icon-view" :loading="rebuildLoading && maintenanceOperation === '预览重建'" :disabled="maintenanceBusy || !canWrite" @click="handleRebuildPreview">预览重建</el-button>
+        <el-button size="small" type="primary" icon="el-icon-magic-stick" :loading="rebuildLoading || serverRebuildActive" :disabled="maintenanceBusy || !canWrite" @click="handleRebuild">重建记忆</el-button>
+        <el-button size="small" icon="el-icon-view" :loading="reviewLoading && maintenanceOperation === '预览重审'" :disabled="maintenanceBusy || !canWrite" @click="handleReviewPreview">预览重审</el-button>
+        <el-button size="small" type="primary" icon="el-icon-refresh" :loading="reviewLoading && maintenanceOperation === '重审记忆'" :disabled="maintenanceBusy || !canWrite" @click="handleReview">重审记忆</el-button>
+        <el-button size="small" type="danger" icon="el-icon-delete" :loading="clearLoading" :disabled="maintenanceBusy || !canWrite" @click="handleClear">清空记忆</el-button>
+        <el-button size="small" icon="el-icon-edit" :disabled="maintenanceBusy || !canWrite" @click="handleRemember">记住</el-button>
+        <el-button size="small" icon="el-icon-delete" :disabled="maintenanceBusy || !canWrite" @click="showForget = !showForget">忘记</el-button>
         <el-button size="small" icon="el-icon-refresh" @click="fetch" :loading="loading">刷新</el-button>
         <el-button size="small" icon="el-icon-back" @click="$router.push('/')">返回</el-button>
       </div>
@@ -46,43 +49,21 @@
       :show-text="false"
     />
 
-    <!-- Quick remember/forget panel -->
     <transition name="slide-down">
-      <div class="quick-action-bar" v-if="showRemember || showForget">
-        <template v-if="showRemember">
-          <el-input v-model="rememberText" placeholder="输入需要记住的内容…" size="small" clearable :disabled="maintenanceBusy" @keyup.enter.native="handleRemember" style="width:320px" />
-          <el-button type="primary" size="small" icon="el-icon-plus" :loading="rememberLoading" :disabled="maintenanceBusy && !rememberLoading" @click="handleRemember">记住</el-button>
-        </template>
-        <template v-if="showForget">
-          <el-input v-model="forgetText" placeholder="输入需要忘记的内容…" size="small" clearable :disabled="maintenanceBusy" @keyup.enter.native="handleForget" style="width:320px;margin-left:16px" />
-          <el-button type="danger" size="small" icon="el-icon-delete" :loading="forgetLoading" :disabled="maintenanceBusy && !forgetLoading" @click="handleForget">忘记</el-button>
-        </template>
+      <div class="quick-action-bar" v-if="showForget">
+        <el-form label-width="80px" size="small" :disabled="maintenanceBusy || !canWrite">
+          <MemoryAttributionFields v-model="forgetAttribution" :memory-scope="memoryScope" :devices="memoryDevices" :speakers="memorySpeakers" :disabled="maintenanceBusy || !canWrite" />
+          <el-form-item label="忘记内容">
+            <el-input v-model="forgetText" type="textarea" :rows="2" placeholder="描述要停止使用并避免再次学习的信息" />
+            <p class="action-hint">遗忘会处理选定范围的事实并记录禁止再次学习的规则。原始聊天和审计记录不会被物理擦除。</p>
+          </el-form-item>
+          <el-form-item><el-button type="danger" :loading="forgetLoading" @click="handleForget">确认忘记</el-button></el-form-item>
+        </el-form>
       </div>
     </transition>
 
-    <!-- Stats cards -->
-    <div class="stats-row">
-      <div class="stat-card">
-        <em>{{ activeFacts.length }}</em>
-        <span>事实记忆</span>
-      </div>
-      <div class="stat-card stat-card--auto">
-        <em>{{ activeFacts.filter(f => f.confirmationState === 'auto').length }}</em>
-        <span>主动记忆</span>
-      </div>
-      <div class="stat-card">
-        <em>{{ categories.length }}</em>
-        <span>记忆分类</span>
-      </div>
-      <div class="stat-card stat-card--warn">
-        <em>{{ activeTombstones.length }}</em>
-        <span>忘记规则</span>
-      </div>
-      <div class="stat-card stat-card--info">
-        <em>{{ candidates.length }}</em>
-        <span>待确认</span>
-      </div>
-    </div>
+    <MemoryOverview :facts="listedFacts" :candidates="candidates" :tombstones="activeTombstones"
+      :policy="memoryPolicy" :loading="loading" :now="visualNow" @navigate="activeTab = $event" />
 
     <!-- Main content area with tabs -->
     <div class="main-wrapper">
@@ -90,13 +71,22 @@
         <div class="content-area">
           <el-card class="params-card" shadow="never">
             <el-tabs v-model="activeTab" type="border-card" @tab-click="handleTabClick">
+              <el-tab-pane label="记忆策略" name="policy">
+                <MemoryPolicyPanel :agent-id="agentId" :busy="maintenanceBusy" @loaded="memoryPolicy = $event" @saved="fetch" />
+              </el-tab-pane>
+              <el-tab-pane label="会话整理任务" name="session-tasks" lazy>
+                <MemorySessionTasks :agent-id="agentId" :can-write="canWrite" :busy="maintenanceBusy" />
+              </el-tab-pane>
               <el-tab-pane name="list">
                 <span slot="label">
                   记忆列表
                   <el-tag size="mini" type="info" style="margin-left:4px">{{ activeFacts.length }}</el-tag>
                 </span>
                 <MemoryList
-                  :facts="activeFacts"
+                  :facts="listedFacts"
+                  :policy="memoryPolicy"
+                  :now="visualNow"
+                  :can-write="canWrite && !maintenanceBusy"
                   :loading="loading"
                   @open-detail="handleOpenDetail"
                   @edit="handleEdit"
@@ -111,20 +101,21 @@
               <el-tab-pane name="graph">
                 <span slot="label">图谱视图</span>
                 <MemoryGraph
-                  :facts="activeFacts"
+                  :facts="listedFacts"
                   :tombstones="activeTombstones"
                   :agentName="agentName"
+                  :agent-id="agentId"
+                  :policy="memoryPolicy"
+                  :active="activeTab === 'graph'"
+                  :now="visualNow"
                   :loading="loading"
                   @open-detail="handleOpenDetail"
                 />
               </el-tab-pane>
 
               <el-tab-pane name="recall">
-                <span slot="label">召回测试</span>
-                <MemoryRecallTest
-                  :facts="activeFacts"
-                  @open-detail="handleOpenDetail"
-                />
+                <span slot="label">实际注入预览</span>
+                <MemoryRecallTest :agent-id="agentId" :policy="memoryPolicy" :revision="memoryRevision" />
               </el-tab-pane>
 
               <el-tab-pane name="timeline">
@@ -134,7 +125,7 @@
                 </span>
                 <MemoryTimeline
                   :revisions="dashboard.revisions || []"
-                  :facts="activeFacts"
+                  :facts="listedFacts"
                   :loading="loading"
                   @open-detail="handleOpenDetail"
                 />
@@ -146,6 +137,7 @@
                   <el-tag v-if="candidates.length" size="mini" type="warning" style="margin-left:4px">{{ candidates.length }}</el-tag>
                 </span>
                 <MemoryCandidates
+                  :can-write="canWrite && !maintenanceBusy"
                   :candidates="candidates"
                   :loading="loading"
                   @confirm="handleConfirm"
@@ -160,9 +152,12 @@
 
     <!-- Detail panel -->
     <MemoryDetailPanel
+      :can-write="canWrite && !maintenanceBusy"
       :visible="detailVisible"
       :memory="detailItem"
       :item-type="detailType"
+      :policy="memoryPolicy"
+      :now="visualNow"
       @close="detailVisible = false"
       @edit="handleEdit"
       @archive="handleArchive"
@@ -171,6 +166,11 @@
 
     <!-- Edit dialog -->
     <MemoryEditDialog
+      :can-write="canWrite"
+      :saving="rememberLoading"
+      :memory-scope="memoryScope"
+      :devices="memoryDevices"
+      :speakers="memorySpeakers"
       :visible.sync="editVisible"
       :memory="editItem"
       :memory-id="editMemoryId"
@@ -219,8 +219,8 @@
       </el-table>
       <span slot="footer">
         <el-button size="small" @click="rebuildPreviewVisible = false">关闭</el-button>
-        <el-button v-if="previewMode === 'rebuild'" size="small" type="primary" :loading="rebuildLoading && maintenanceOperation === '重建记忆'" :disabled="maintenanceBusy" @click="handleRebuild">按此配置重建</el-button>
-        <el-button v-else size="small" type="primary" :loading="reviewLoading && maintenanceOperation === '重审记忆'" :disabled="maintenanceBusy" @click="handleReview">执行重审</el-button>
+        <el-button v-if="previewMode === 'rebuild'" size="small" type="primary" :loading="rebuildLoading && maintenanceOperation === '重建记忆'" :disabled="maintenanceBusy || !canWrite" @click="handleRebuild">按此配置重建</el-button>
+        <el-button v-else size="small" type="primary" :loading="reviewLoading && maintenanceOperation === '重审记忆'" :disabled="maintenanceBusy || !canWrite" @click="handleReview">执行重审</el-button>
       </span>
     </el-dialog>
 
@@ -238,6 +238,12 @@ import MemoryTimeline from './memory/MemoryTimeline.vue'
 import MemoryCandidates from './memory/MemoryCandidates.vue'
 import MemoryDetailPanel from './memory/MemoryDetailPanel.vue'
 import MemoryEditDialog from './memory/MemoryEditDialog.vue'
+import MemoryPolicyPanel from './memory/MemoryPolicyPanel.vue'
+import MemoryAttributionFields from './memory/MemoryAttributionFields.vue'
+import MemorySessionTasks from './memory/MemorySessionTasks.vue'
+import MemoryOverview from './memory/MemoryOverview.vue'
+import { memoryStatus, memoryIdentity } from './memory/memoryVisualState.mjs'
+import { attributionOf, attributionError } from './memory/memoryPolicy.mjs'
 import Api from '@/apis/api'
 import {
   canRecoverRebuildTask,
@@ -259,7 +265,11 @@ export default {
     MemoryTimeline,
     MemoryCandidates,
     MemoryDetailPanel,
-    MemoryEditDialog
+    MemoryEditDialog,
+    MemoryPolicyPanel,
+    MemoryAttributionFields,
+    MemorySessionTasks,
+    MemoryOverview
   },
   data() {
     return {
@@ -267,11 +277,14 @@ export default {
       agentName: '',
       loading: false,
       dashboard: {},
+      memoryPolicy: null,
+      memoryRevision: 0,
+      visualNow: Date.now(),
+      visualClock: null,
+      forgetAttribution: attributionOf(),
       activeTab: 'list',
       // Quick remember/forget
-      showRemember: false,
       showForget: false,
-      rememberText: '',
       forgetText: '',
       rememberLoading: false,
       forgetLoading: false,
@@ -285,6 +298,7 @@ export default {
       editMemoryId: '',
       // Rebuild
       rebuildSessionLimit: 15,
+      rebuildDeviceId: '',
       rebuildMode: 'clear_then_rebuild',
       rebuildLoading: false,
       reviewLoading: false,
@@ -302,9 +316,12 @@ export default {
     }
   },
   computed: {
-    activeFacts() {
-      return (this.dashboard.facts || []).filter(f => f.status !== 'deleted')
-    },
+    listedFacts() { return (this.dashboard.facts || []).filter(f => f.status !== 'deleted') },
+    activeFacts() { return this.listedFacts.filter(f => memoryStatus(f, this.visualNow) === 'active') },
+    canWrite() { return Boolean(this.memoryPolicy && this.memoryPolicy.canWrite === true) },
+    memoryScope() { return this.memoryPolicy && this.memoryPolicy.memoryScope || 'AGENT' },
+    memoryDevices() { return this.memoryPolicy && this.memoryPolicy.devices || [] },
+    memorySpeakers() { return this.memoryPolicy && this.memoryPolicy.speakers || [] },
     activeTombstones() {
       return (this.dashboard.tombstones || []).filter(t => t.status === 'active')
     },
@@ -366,8 +383,10 @@ export default {
     }
     this.fetch()
     this.restoreRebuildTask()
+    this.visualClock = setInterval(() => { this.visualNow = Date.now() }, 30000)
   },
   beforeDestroy() {
+    clearInterval(this.visualClock)
     if (this.maintenanceRecoveryTimer) {
       clearTimeout(this.maintenanceRecoveryTimer)
       this.maintenanceRecoveryTimer = null
@@ -376,6 +395,8 @@ export default {
   },
   methods: {
     fetch() {
+      this.visualNow = Date.now()
+      this.memoryRevision += 1
       this.loading = true
       Api.memory.dashboard(this.agentId, (res) => {
         const data = (res && res.data && res.data.data) ? res.data.data : (res && res.data) || this.dashboard
@@ -400,19 +421,11 @@ export default {
     },
 
     decorateMemoryIdentity(item) {
-      let payload = {}
-      try {
-        payload = typeof item.payload === 'string' ? JSON.parse(item.payload || '{}') : (item.payload || {})
-      } catch (_) {
-        payload = {}
-      }
-      const speakerId = String(payload.speaker_id || '')
-      const speakerName = String(payload.speaker_name || '')
+      const identity = memoryIdentity(item, this.memoryPolicy)
       return {
         ...item,
-        speakerId,
-        speakerName,
-        speakerDisplay: speakerId ? (speakerName || '已录入声纹') : '共享记忆'
+        speakerId: identity.speakerId,
+        speakerDisplay: identity.speakerLabel
       }
     },
 
@@ -421,30 +434,39 @@ export default {
     },
 
     // --- Detail panel ---
-    handleOpenDetail(item) {
+    handleOpenDetail(item, type) {
+      if (!item) return
       this.detailItem = item
-      this.detailType = 'fact'
+      this.detailType = item.tombstoneId || type === 'tombstone' || type === 'tomb' ? 'tomb' : item.candidateId ? 'candidate' : 'fact'
       this.detailVisible = true
     },
 
     // --- Edit ---
     handleEdit(item) {
+      if (!this.canWrite || this.maintenanceBusy) return
       this.editItem = item
       this.editMemoryId = item.memoryId || ''
       this.editVisible = true
     },
     handleSaveEdit(memoryId, formData) {
-      Api.memory.updateFact(this.agentId, memoryId, formData, () => {
-        this.$message.success('记忆已更新')
+      if (!this.beginMaintenance(memoryId ? '编辑记忆' : '记住', 'rememberLoading')) return
+      const done = () => {
+        this.finishMaintenance('rememberLoading')
+        this.$message.success('记忆已保存')
         this.editVisible = false
         this.detailVisible = false
         this.fetch()
-      })
+      }
+      const uncertain = error => this.handleUncertainMaintenanceFailure('保存记忆', 'rememberLoading', error)
+      const failed = error => this.handleMaintenanceFailure('保存记忆', 'rememberLoading', error)
+      if (memoryId) Api.memory.updateFact(this.agentId, memoryId, formData, done, uncertain, failed)
+      else Api.memory.createFact(this.agentId, formData, done, uncertain, failed)
     },
 
     // --- Archive ---
     handleArchive(item) {
-      this.$confirm('确定归档这条记忆吗？归档后仍可恢复。', '提示', { type: 'warning' }).then(() => {
+      if (!this.canWrite || this.maintenanceBusy) return
+      this.$confirm('确定归档这条记忆吗？归档后停止用于对话，事实与审计记录仍保留。', '提示', { type: 'warning' }).then(() => {
         Api.memory.archiveFact(this.agentId, item.memoryId, () => {
           this.$message.success('已归档')
           this.detailVisible = false
@@ -455,7 +477,8 @@ export default {
 
     // --- Delete ---
     handleDelete(item) {
-      this.$confirm('确定永久删除这条记忆吗？此操作不可恢复。', '警告', { type: 'warning', confirmButtonClass: 'el-button--danger' }).then(() => {
+      if (!this.canWrite || this.maintenanceBusy) return
+      this.$confirm('确定删除这条记忆吗？它将停止用于对话，并阻止相同事实再次写入。原始聊天与审计仍保留；如需忘记整个主题，请使用“忘记”。', '警告', { type: 'warning', confirmButtonClass: 'el-button--danger' }).then(() => {
         Api.memory.deleteFact(this.agentId, item.memoryId, () => {
           this.$message.success('已删除')
           this.detailVisible = false
@@ -466,6 +489,7 @@ export default {
 
     // --- Batch operations ---
     handleBatchArchive(facts) {
+      if (!this.canWrite || this.maintenanceBusy) return
       if (!facts.length) return
       this.$confirm(`确定归档选中的 ${facts.length} 条记忆吗？`, '批量归档', { type: 'warning' }).then(() => {
         let done = 0
@@ -479,8 +503,9 @@ export default {
       }).catch(() => {})
     },
     handleBatchDelete(facts) {
+      if (!this.canWrite || this.maintenanceBusy) return
       if (!facts.length) return
-      this.$confirm(`确定永久删除选中的 ${facts.length} 条记忆吗？此操作不可恢复。`, '批量删除', { type: 'warning', confirmButtonClass: 'el-button--danger' }).then(() => {
+      this.$confirm(`确定删除选中的 ${facts.length} 条记忆吗？停止用于对话后，原始聊天与审计记录仍保留。`, '批量删除', { type: 'warning', confirmButtonClass: 'el-button--danger' }).then(() => {
         let done = 0
         const total = facts.length
         facts.forEach(f => {
@@ -494,12 +519,14 @@ export default {
 
     // --- Candidates ---
     handleConfirm(candidate) {
+      if (!this.canWrite || this.maintenanceBusy) return
       Api.memory.confirmCandidate(this.agentId, candidate.candidateId, () => {
         this.$message.success('已确认候选记忆')
         this.fetch()
       })
     },
     handleReject(candidate) {
+      if (!this.canWrite || this.maintenanceBusy) return
       Api.memory.rejectCandidate(this.agentId, candidate.candidateId, () => {
         this.$message.success('已拒绝候选记忆')
         this.fetch()
@@ -511,8 +538,14 @@ export default {
       return {
         sessionLimit: this.rebuildSessionLimit,
         mode: this.rebuildMode,
-        dryRun
+        dryRun,
+        ...(this.memoryScope === 'DEVICE' ? { deviceId: this.rebuildDeviceId } : {})
       }
+    },
+    validateRebuildDevice() {
+      if (this.memoryScope !== 'DEVICE' || this.memoryDevices.some(device => device.deviceId === this.rebuildDeviceId)) return true
+      this.$message.warning('设备隔离模式下，请先选择要重建记忆的设备')
+      return false
     },
     toCount(value) {
       const number = Number(value)
@@ -595,6 +628,7 @@ export default {
       })
     },
     beginMaintenance(operation, loadingKey) {
+      if (!this.canWrite) return false
       if (this.maintenanceBusy) {
         this.$message.warning('已有记忆维护任务正在处理，请等待完成或刷新确认状态')
         return false
@@ -672,7 +706,7 @@ export default {
       }
     },
     handleClear() {
-      this.$confirm('确定清空当前智能体的事实记忆、候选记忆和忘记项吗？此操作会写入删除状态。', '清空记忆', {
+      this.$confirm('确定清空当前智能体的事实和候选记忆吗？现有遗忘规则会保留，并阻止被清除的相同事实重新写入。原始聊天与审计记录仍保留。', '清空记忆', {
         type: 'warning',
         confirmButtonClass: 'el-button--danger'
       }).then(() => {
@@ -692,6 +726,7 @@ export default {
       })
     },
     handleRebuildPreview() {
+      if (!this.validateRebuildDevice()) return
       if (!this.beginMaintenance('预览重建', 'rebuildLoading')) return
       this.previewMode = 'rebuild'
       Api.memory.rebuildPreview(this.agentId, this.rebuildPayload(true), (res) => {
@@ -705,6 +740,7 @@ export default {
       })
     },
     handleRebuild() {
+      if (!this.validateRebuildDevice()) return
       this.$confirm(`确定按最近 ${this.rebuildSessionLimit} 个会话重新生成记忆吗？维护模型成功返回动作后才会替换当前记忆。`, '重建记忆', {
         type: 'warning',
         confirmButtonClass: 'el-button--primary'
@@ -769,28 +805,17 @@ export default {
 
     // --- Quick remember/forget ---
     handleRemember() {
-      if (!this.rememberText.trim()) return
-      if (!this.beginMaintenance('记住', 'rememberLoading')) return
-      Api.memory.createFact(this.agentId, {
-        canonicalText: this.rememberText.trim(),
-        category: '手动记录',
-        memoryType: '长期记忆'
-      }, () => {
-        this.finishMaintenance('rememberLoading')
-        this.$message.success('记忆已保存')
-        this.rememberText = ''
-        this.showRemember = false
-        this.fetch()
-      }, (error) => {
-        this.handleUncertainMaintenanceFailure('记住', 'rememberLoading', error)
-      }, (error) => {
-        this.handlePreviewFailure('记住', 'rememberLoading', error)
-      })
+      if (!this.canWrite || this.maintenanceBusy) return
+      this.editMemoryId = ''
+      this.editItem = { canonicalText: '', category: '手动记录', memoryType: '长期记忆' }
+      this.editVisible = true
     },
     handleForget() {
       if (!this.forgetText.trim()) return
+      const attributionIssue = attributionError(this.forgetAttribution, this.memoryScope)
+      if (attributionIssue) { this.$message.warning(attributionIssue); return }
       if (!this.beginMaintenance('忘记', 'forgetLoading')) return
-      Api.memory.forget(this.agentId, { text: this.forgetText.trim(), reason: '管理端手动忘记' }, () => {
+      Api.memory.forget(this.agentId, { text: this.forgetText.trim(), reason: '管理端手动忘记', deviceId: this.forgetAttribution.deviceId, speakerId: this.forgetAttribution.speakerId, shared: this.forgetAttribution.visibility === 'shared' }, () => {
         this.finishMaintenance('forgetLoading')
         this.$message.success('忘记操作已完成')
         this.forgetText = ''
@@ -808,7 +833,7 @@ export default {
 
 <style lang="scss" scoped>
 .welcome {
-  height: 100vh;
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
 }
@@ -818,6 +843,8 @@ export default {
   align-items: flex-start;
   padding: 16px 24px 0;
   flex-shrink: 0;
+  gap: 20px;
+  > div:first-child { min-width: 160px; max-width: 260px; }
   .page-title {
     font-size: 22px;
     font-weight: 800;
@@ -852,6 +879,8 @@ export default {
   flex-shrink: 0;
 }
 
+.action-hint { color: #718096; font-size: 12px; line-height: 1.6; }
+
 .maintenance-alert {
   margin: 10px 24px 0;
   width: auto;
@@ -863,38 +892,7 @@ export default {
   flex-shrink: 0;
 }
 
-.stats-row {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 10px;
-  padding: 12px 24px;
-  flex-shrink: 0;
-}
-.stat-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 12px;
-  border-radius: 10px;
-  background: #fff;
-  border: 1px solid #e8ecf4;
-  box-shadow: 0 1px 3px rgba(0,0,0,.03);
-  em {
-    font-size: 26px;
-    font-weight: 800;
-    color: #1a202c;
-    font-style: normal;
-    line-height: 1;
-  }
-  span {
-    font-size: 12px;
-    color: #718096;
-    margin-top: 4px;
-  }
-}
-.stat-card--auto em { color: #3f6fd8; }
-.stat-card--warn em { color: #e05555; }
-.stat-card--info em { color: #7c6fd6; }
+.memory-overview { margin: 14px 24px; flex-shrink: 0; }
 
 .rebuild-summary {
   display: flex;
@@ -910,6 +908,7 @@ export default {
   .content-panel {
     flex: 1;
     display: flex;
+    min-width: 0;
   }
   .content-area {
     flex: 1;
@@ -957,9 +956,6 @@ export default {
 }
 
 @media (max-width: 768px) {
-  .stats-row {
-    grid-template-columns: repeat(3, 1fr);
-  }
   .operation-bar {
     flex-wrap: wrap;
     gap: 8px;

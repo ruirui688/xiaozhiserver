@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS ai_memory_session_task (
+    task_id VARCHAR(64) NOT NULL,
+    agent_id VARCHAR(64) NOT NULL,
+    device_id VARCHAR(64) NOT NULL,
+    session_id VARCHAR(64) NOT NULL,
+    request_hash VARCHAR(64) NOT NULL,
+    payload_json LONGTEXT NULL COMMENT '仅待处理或失败时保留，成功立即清除，不通过管理API返回',
+    status VARCHAR(16) NOT NULL DEFAULT 'PENDING',
+    attempts INT NOT NULL DEFAULT 0,
+    facts_changed INT NOT NULL DEFAULT 0,
+    last_error VARCHAR(128) NULL COMMENT '仅异常类型，不记录正文或凭据',
+    lease_token VARCHAR(36) NULL,
+    lease_until DATETIME(3) NULL,
+    next_attempt_at DATETIME(3) NULL,
+    created_at DATETIME(3) NOT NULL,
+    updated_at DATETIME(3) NOT NULL,
+    PRIMARY KEY (task_id),
+    KEY idx_memory_task_due (status, next_attempt_at),
+    KEY idx_memory_task_agent (agent_id, updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='会话记忆整理持久任务与恢复租约';

@@ -24,7 +24,6 @@ from core.providers.realtime.base import (
 )
 from core.utils.dialogue import Message
 from core.utils.opus_encoder_utils import OpusEncoderUtils
-from core.utils.prompt_budget import compact_memory_context
 
 
 LEGACY_REALTIME_HOST = "dashscope.aliyuncs.com"
@@ -462,13 +461,8 @@ class QwenOmniRealtimeSession:
     def _session_prompt(self) -> str:
         from core.utils.current_time import render_runtime_time
         prompt = render_runtime_time(self.conn.prompt or self.conn.config.get("prompt", ""))
-        summary_memory = compact_memory_context(self.conn.config.get("summaryMemory"))
-        if summary_memory:
-            prompt = (
-                f"{prompt}\n\n<realtime_summary_memory>\n{summary_memory}"
-                "\n</realtime_summary_memory>"
-            )
-        return prompt
+        from core.session.realtime_memory import append_realtime_memory
+        return append_realtime_memory(self.conn, prompt)
 
     async def refresh_tools(self) -> None:
         if self._instruction_turn_active:
@@ -482,17 +476,6 @@ class QwenOmniRealtimeSession:
             statistics,
         )
         prompt = self._session_prompt()
-        selected_memory = self.conn.config.get("selected_module", {}).get("Memory")
-        memory_type = (
-            self.conn.config.get("Memory", {})
-            .get(selected_memory, {})
-            .get("type")
-        )
-        if memory_type not in {None, "nomem", "mem_report_only"}:
-            self.conn.logger.bind(tag=__name__).warning(
-                "Realtime 当前仅在session.update注入受预算约束的summaryMemory；"
-                "server_vad自动响应不执行逐轮动态记忆查询"
-            )
         await self.transport.configure(prompt, tools)
 
     async def handle_audio(self, opus_packet: bytes) -> bool:

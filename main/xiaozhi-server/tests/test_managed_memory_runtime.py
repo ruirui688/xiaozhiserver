@@ -44,8 +44,8 @@ def test_local_reads_use_shared_and_current_speaker_without_http(monkeypatch):
         pytest.fail("memory read attempted HTTP")
     monkeypatch.setattr(api, "query_managed_memory", forbidden)
     conn = connection()
-    for speaker, expected in [(None, "shared facts"), ("voice-a", "shared facts\n\nprivate A"),
-                              ("voice-b", "shared facts\n\nprivate B"), ("unknown", "shared facts"),
+    for speaker, expected in [(None, "shared facts"), ("voice-a", "private A\nshared facts"),
+                              ("voice-b", "private B\nshared facts"), ("unknown", "shared facts"),
                               (None, "shared facts")]:
         conn.current_speaker_id = speaker
         assert ConnectionHandler._query_memory_context(conn, "wake or question") == expected
@@ -55,7 +55,7 @@ def test_local_reads_use_shared_and_current_speaker_without_http(monkeypatch):
 @pytest.mark.parametrize("change", [
     {"status": "unavailable"}, {"schema_version": True}, {"schema_version": 2},
     {"agent_id": "other"}, {"device_id": "other"}, {"revision": "invalid"},
-    {"shared_context": "x" * 4001}, {"speaker_contexts": {"v": "x" * 2001}},
+    {"shared_context": "x" * 4001}, {"speaker_contexts": {"v": "x" * 4001}},
     {"speaker_contexts": {str(i): "" for i in range(17)}},
     {"speaker_contexts": {str(i): "x" * 2000 for i in range(8)}},
     {"expires_at_ms": 0}, {"expires_at_ms": int(time.time() * 1000) + 60000},
@@ -64,6 +64,16 @@ def test_invalid_payload_clears_old_summary(change):
     state = snapshot_for(connection())
     assert not state.install(payload(**change), state.epoch)
     assert state.read() == ""
+
+
+def test_single_speaker_accepts_private_context_above_legacy_2000_cap():
+    conn = connection()
+    conn.current_speaker_id = "voice-a"
+    context = "- " + "private" * 420
+    state = snapshot_for(conn)
+    assert state.install(payload(shared_context="", speaker_contexts={"voice-a": context},
+                                 context_max_chars=4000, context_max_items=30), state.epoch)
+    assert state.read() == context
 
 
 def test_expiry_and_config_replacement_fail_closed():

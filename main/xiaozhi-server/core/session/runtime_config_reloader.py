@@ -239,6 +239,9 @@ class RuntimeConfigReloader:
             await self._close_unactivated_modules(new_modules)
             raise RuntimeError("连接正在关闭，取消运行配置热更新")
         try:
+            if isolate_scene:
+                from core.session.managed_memory_session import flush_before_scene_switch
+                await flush_before_scene_switch(conn)
             await self._deactivate_pipeline()
         except Exception:
             await self._close_unactivated_modules(new_modules)

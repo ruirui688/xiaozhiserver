@@ -13,6 +13,7 @@
         <el-select v-model="filterState" placeholder="来源" clearable size="small" style="width:110px">
           <el-option label="主动记忆" value="auto" />
           <el-option label="手动创建" value="manual" />
+          <el-option label="人工确认" value="confirmed" />
         </el-select>
         <el-select v-model="filterTier" placeholder="层级" clearable size="small" style="width:110px">
           <el-option label="长期记忆" value="LONG_TERM" />
@@ -20,8 +21,10 @@
           <el-option label="工作记忆" value="WORKING" />
         </el-select>
         <el-select v-model="filterStatus" placeholder="状态" clearable size="small" style="width:100px">
-          <el-option label="活跃" value="active" />
+          <el-option label="生效" value="active" />
+          <el-option label="已到期" value="expired" />
           <el-option label="已归档" value="archived" />
+          <el-option label="待核实" value="unknown" />
         </el-select>
       </div>
       <div class="list-toolbar-right">
@@ -50,10 +53,11 @@
       <el-table-column label="关联人物" width="120" show-overflow-tooltip>
         <template slot-scope="{row}">
           <el-tag size="mini" :type="row.speakerId ? 'primary' : 'info'">
-            {{ row.speakerDisplay || '共享记忆' }}
+            {{ identity(row).speakerLabel }}
           </el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="来源设备" min-width="130" show-overflow-tooltip><template slot-scope="{row}">{{ identity(row).deviceLabel }}</template></el-table-column>
       <el-table-column label="分类" width="100">
         <template slot-scope="{row}">
           <el-tag size="mini" type="info" @click.stop="filterCategory=row.category">{{ row.category || '未分类' }}</el-tag>
@@ -61,13 +65,14 @@
       </el-table-column>
       <el-table-column label="重要性" width="120">
         <template slot-scope="{row}">
-          <el-progress :percentage="pct(row.importance)" :stroke-width="6" :color="importanceColor(row.importance)" />
+          <el-progress v-if="row.importance != null" :percentage="pct(row.importance)" :stroke-width="6" :color="importanceColor(row.importance)" />
+          <span v-else>未评分</span>
         </template>
       </el-table-column>
       <el-table-column label="来源" width="90">
         <template slot-scope="{row}">
           <el-tag size="mini" :type="row.confirmationState==='auto'?'success':'warning'">
-            {{ row.confirmationState === 'auto' ? '主动记忆' : '手动创建' }}
+            {{ sourceLabel(row.confirmationState) }}
           </el-tag>
         </template>
       </el-table-column>
@@ -78,7 +83,7 @@
       </el-table-column>
       <el-table-column label="状态" width="80">
         <template slot-scope="{row}">
-          <el-tag size="mini" :type="row.status==='active'?'success':'info'">{{ statusLabel(row.status) }}</el-tag>
+          <el-tag size="mini" :type="state(row)==='active'?'success':state(row)==='expired'?'warning':'info'">{{ stateLabel(state(row)) }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="更新时间" width="150">
@@ -87,9 +92,9 @@
       <el-table-column label="操作" width="180" fixed="right">
         <template slot-scope="{row}">
           <el-button size="mini" type="text" icon="el-icon-view" @click.stop="$emit('open-detail', row)">详情</el-button>
-          <el-button size="mini" type="text" icon="el-icon-edit" @click.stop="$emit('edit', row)">编辑</el-button>
-          <el-button size="mini" type="text" icon="el-icon-folder" @click.stop="$emit('archive', row)" v-if="row.status!=='archived'">归档</el-button>
-          <el-button size="mini" type="text" style="color:#e05555" icon="el-icon-delete" @click.stop="$emit('delete', row)">删除</el-button>
+          <el-button size="mini" type="text" icon="el-icon-edit" :disabled="!canWrite" @click.stop="$emit('edit', row)">编辑</el-button>
+          <el-button size="mini" type="text" icon="el-icon-folder" :disabled="!canWrite" @click.stop="$emit('archive', row)" v-if="row.status!=='archived'">归档</el-button>
+          <el-button size="mini" type="text" style="color:#e05555" icon="el-icon-delete" :disabled="!canWrite" @click.stop="$emit('delete', row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -98,8 +103,8 @@
     <div class="table-bottom">
       <div class="ctrl-btns">
         <el-button size="mini" @click="toggleSelectAll">全选/取消</el-button>
-        <el-button size="mini" type="danger" icon="el-icon-delete" @click="batchArchive" :disabled="selectedFacts.length===0">批量归档</el-button>
-        <el-button size="mini" type="danger" icon="el-icon-delete" @click="batchDelete" :disabled="selectedFacts.length===0">批量删除</el-button>
+        <el-button size="mini" type="danger" icon="el-icon-delete" @click="batchArchive" :disabled="!canWrite || selectedFacts.length===0">批量归档</el-button>
+        <el-button size="mini" type="danger" icon="el-icon-delete" @click="batchDelete" :disabled="!canWrite || selectedFacts.length===0">批量删除</el-button>
         <span v-if="selectedFacts.length" style="font-size:12px;color:#718096;margin-left:8px">
           已选 {{ selectedFacts.length }} 条
         </span>
@@ -120,12 +125,15 @@
 
 <script>
 import { statusLabel, tierLabel } from '@/utils/memoryLabels'
+import { memoryStatus, memoryStatusLabel, memoryIdentity, memorySourceLabel } from './memoryVisualState.mjs'
 
 export default {
   name: 'MemoryList',
   props: {
+    canWrite: { type: Boolean, default: false },
     facts: { type: Array, default: () => [] },
-    loading: { type: Boolean, default: false }
+    loading: { type: Boolean, default: false },
+    policy: { type: Object, default: null }, now: { type: Number, default: () => Date.now() }
   },
   data() {
     return {
@@ -148,8 +156,9 @@ export default {
     speakers() {
       const speakers = new Map()
       this.facts.forEach(f => {
-        const value = f.speakerId || '__shared__'
-        speakers.set(value, f.speakerDisplay || '共享记忆')
+        const identity = this.identity(f)
+        const value = identity.speakerId || '__shared__'
+        speakers.set(value, identity.speakerLabel)
       })
       return [...speakers.entries()]
         .map(([value, label]) => ({ value, label }))
@@ -158,10 +167,10 @@ export default {
     filteredFacts() {
       let list = this.facts
       if (this.filterStatus) {
-        list = list.filter(f => (f.status || 'active') === this.filterStatus)
+        list = list.filter(f => this.state(f) === this.filterStatus)
       }
       if (this.filterState) {
-        list = list.filter(f => (f.confirmationState || 'auto') === this.filterState)
+        list = list.filter(f => f.confirmationState === this.filterState)
       }
       if (this.filterTier) {
         list = list.filter(f => (f.memoryTier || '').toUpperCase() === this.filterTier.toUpperCase())
@@ -170,7 +179,7 @@ export default {
         list = list.filter(f => (f.category || '未分类') === this.filterCategory)
       }
       if (this.filterSpeaker) {
-        list = list.filter(f => (f.speakerId || '__shared__') === this.filterSpeaker)
+        list = list.filter(f => (this.identity(f).speakerId || '__shared__') === this.filterSpeaker)
       }
       if (this.searchQuery) {
         const q = this.searchQuery.toLowerCase()
@@ -179,7 +188,7 @@ export default {
           (f.patternText || '').toLowerCase().includes(q) ||
           (f.category || '').toLowerCase().includes(q) ||
           (f.memoryType || '').toLowerCase().includes(q)
-          || (f.speakerDisplay || '').toLowerCase().includes(q)
+          || String(this.identity(f).speakerLabel).toLowerCase().includes(q)
         )
       }
       return list
@@ -190,14 +199,20 @@ export default {
     }
   },
   watch: {
+    filteredFacts(facts) { this.currentPage = Math.min(this.currentPage, Math.max(1, Math.ceil(facts.length / this.pageSize))) },
     filterCategory() { this.currentPage = 1 },
     filterSpeaker() { this.currentPage = 1 },
     filterState() { this.currentPage = 1 },
     filterTier() { this.currentPage = 1 },
     filterStatus() { this.currentPage = 1 }
   },
+  beforeDestroy() { clearTimeout(this.searchTimer) },
   methods: {
-    pct(v) { return Math.round((Number(v) || 0) * 100) },
+    state(fact) { return memoryStatus(fact, this.now) },
+    stateLabel: memoryStatusLabel,
+    identity(fact) { return memoryIdentity(fact, this.policy) },
+    sourceLabel: memorySourceLabel,
+    pct(v) { return Math.max(0, Math.min(100, Math.round((Number(v) || 0) * 100))) },
     importanceColor(v) {
       const p = this.pct(v)
       return p >= 70 ? '#2ecc71' : p >= 40 ? '#f0b060' : '#909399'

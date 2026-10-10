@@ -25,6 +25,34 @@ class ManagedMemorySnapshotServiceTest {
     private final MemoryForgetTombstoneDao tombstoneDao = mock(MemoryForgetTombstoneDao.class);
     private final ManagedMemorySnapshotService service = new ManagedMemorySnapshotService(dao, tombstoneDao);
 
+    @Test
+    void previewSelectsPrivateFirstDeduplicatesAndUsesEscapedCharacterBudget() {
+        Map<String, Object> snapshot = Map.of("shared_context", "- duplicated\n- shared\n",
+                "speaker_contexts", Map.of("alice", "- <&>\n- duplicated\n"),
+                "context_max_chars", 29, "context_max_items", 3);
+        String selected = ManagedMemorySnapshotService.selectedContext(snapshot, "alice");
+        assertEquals("- <&>\n- duplicated", selected);
+        assertTrue(ManagedMemorySnapshotService.escapedLength(selected) <= 29);
+        assertEquals("- duplicated\n- shared", ManagedMemorySnapshotService.selectedContext(snapshot, "unknown"));
+    }
+
+    @Test
+    void configuredPolicyUsesBoundedPerPersonSqlAndDeviceScope() {
+        var policies = mock(MemoryPolicyService.class);
+        var policy = new xiaozhi.modules.memory.dto.MemoryPolicyDTO();
+        policy.setMemoryScope("DEVICE");
+        when(policies.get("agent-a")).thenReturn(policy);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "policyService", policies);
+        var fact = fact("private", "alice", "private fact");
+        fact.setScopeId("device-a");
+        when(dao.selectSnapshotCandidates("agent-a", "device-a", List.of("alice", ""), 100))
+                .thenReturn(List.of(fact));
+        var snapshot = service.build("agent-a", "device-a", List.of("alice"));
+        assertEquals("- private fact", ManagedMemorySnapshotService.selectedContext(snapshot, "alice"));
+        verify(dao).selectSnapshotCandidates("agent-a", "device-a", List.of("alice", ""), 100);
+        verify(dao, never()).selectList(any());
+    }
+
     private MemoryFactEntity fact(String id, String speaker, String text) {
         var fact = new MemoryFactEntity();
         fact.setMemoryId(id);
@@ -127,7 +155,7 @@ class ManagedMemorySnapshotServiceTest {
     }
 
     @Test
-    void forgetPatternsFilterOnServerWithoutLeakingTheirTextAndOverflowFailsClosed() {
+    void forgetPatternsFilterWithoutLeakingTextAndMoreThanFiftyRulesRemainAvailable() {
         var tombstone = new MemoryForgetTombstoneEntity();
         tombstone.setPatternText("secret address");
         when(tombstoneDao.selectList(any())).thenReturn(List.of(tombstone));
@@ -137,6 +165,6 @@ class ManagedMemorySnapshotServiceTest {
         assertEquals("- permitted\n", snapshot.get("shared_context"));
         assertFalse(snapshot.toString().contains("secret address"));
         when(tombstoneDao.selectList(any())).thenReturn(java.util.Collections.nCopies(51, tombstone));
-        assertThrows(IllegalStateException.class, () -> service.build("agent-a", "device-a", List.of()));
+        assertEquals("- permitted\n", service.build("agent-a", "device-a", List.of()).get("shared_context"));
     }
 }
