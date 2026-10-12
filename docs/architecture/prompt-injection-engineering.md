@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: runtime
-last_verified: 2026-10-10
+last_verified: 2026-10-12
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/config/service/impl/ConfigServiceImpl.java
   - main/xiaozhi-server/agent-base-prompt.txt
@@ -11,6 +11,8 @@ source_paths:
   - main/xiaozhi-server/core/session/prompt_context.py
   - main/xiaozhi-server/core/utils/prompt_request_budget.py
   - main/xiaozhi-server/core/providers/tools
+  - main/xiaozhi-server/plugins_func/functions/get_weather.py
+  - main/xiaozhi-server/plugins_func/weather_scope.py
 ---
 
 # 提示词注入工程
@@ -680,6 +682,18 @@ get_weather 插件
 如果基础提示词强调“本地天气已在上下文”，模型可能不会调用 `get_weather`。如果用户说“南京天气”“杭州温度”，工具描述和基础提示词必须让模型调用天气工具，而不是把本地上下文当成外地天气。
 
 天气接口异常时，工具本身应该返回可靠的直接回复，避免把 `Authentication failed`、`Invalid Host` 等错误交给 LLM 改写成“城市不存在”。
+
+天气日期范围由 `get_weather` 参数提示词明确传递，不切换 `intent_llm`，也不增加模型调用：
+`start_day=0,days=1` 查询今天（未指定日期时默认），`start_day=1,days=1` 查询明天，
+`start_day=0,days=7` 查询含今天在内的未来七天。相对日期沿用天气源的北京时间。
+参数说明属于 Python 工具 Schema，因此目录只覆盖 description 时仍会进入 Intent 分类提示。
+主天气源和 Open-Meteo 备用源都按数据中的日期过滤后返回 `Action.RESPONSE`，不播其他日期；
+明天或多日预报不混入当前观测。缺失日期明确说明暂无数据，不用今天补明天。
+查询缓存按版本、北京时间日期、地点、语言及范围隔离，不复用旧的整周报告缓存；
+原天气缓存 TTL 不变。预警仍走原 warning 分支。离线范围回归见 `test_weather_forecast_scope.py`；
+这些测试不保证真实模型始终选择正确参数。2026-10-12 已完成三组真实 Intent 选参与天气接口
+验证（今天、明天、含今天的七天），临时补丁重启后用户确认机器人现场播报正常，仍使用
+`intent_llm`；此记录不代表正式版本镜像已经构建发布。
 
 ## 16. 工具结果进入 LLM 或 TTS
 

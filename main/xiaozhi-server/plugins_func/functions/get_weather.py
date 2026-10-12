@@ -5,6 +5,7 @@ from config.logger import setup_logging
 from plugins_func.register import register_function, ToolType, ActionResponse, Action
 from core.utils.util import get_ip_info
 from typing import TYPE_CHECKING
+from plugins_func.weather_scope import scoped_weather_report, valid_scope, weather_today
 
 if TYPE_CHECKING:
     from core.connection import ConnectionHandler
@@ -37,6 +38,18 @@ GET_WEATHER_FUNCTION_DESC = {
                     "type": "string",
                     "description": "查询类型。普通当前天气或天气预报传weather；天气预警、预警级别或预警状态传warning。",
                     "enum": ["weather", "warning"],
+                },
+                "start_day": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 6,
+                    "description": "天气起始日期距今天的天数，按北京时间。今天/当前/未指定日期传0；明天传1，后天传2。与days配合，仅返回所问日期，不得把明天当今天。预警查询忽略此参数。",
+                },
+                "days": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 7,
+                    "description": "连续查询天数，默认1。问今天：start_day=0,days=1；问明天：start_day=1,days=1；问未来七天/一周：start_day=0,days=7（含今天共七天）。只查一天时禁止扩大为整周；start_day+days不得超过7。预警查询忽略此参数。",
                 },
             },
             "required": ["lang"],
@@ -348,7 +361,8 @@ def fetch_open_meteo_geo(location):
     return None, ""
 
 
-def build_open_meteo_weather_report(location):
+def build_open_meteo_weather_report(location, start_day=0, days=1, today=None):
+    today = today or weather_today()
     geo, matched_query = fetch_open_meteo_geo(location)
     if not geo:
         return ""
@@ -366,7 +380,7 @@ def build_open_meteo_weather_report(location):
             ],
             "daily": ["weather_code", "temperature_2m_max", "temperature_2m_min"],
             "timezone": "Asia/Shanghai",
-            "forecast_days": 3,
+            "forecast_days": start_day + days,
         },
         timeout=10,
     )
@@ -398,18 +412,17 @@ def build_open_meteo_weather_report(location):
     highs = daily.get("temperature_2m_max") or []
     lows = daily.get("temperature_2m_min") or []
     codes = daily.get("weather_code") or []
-    if times and highs and lows:
-        forecast_parts = []
-        for index, day in enumerate(times[:3]):
-            day_weather = OPEN_METEO_WEATHER_CODE_MAP.get(
-                codes[index] if index < len(codes) else None, "未知"
-            )
-            forecast_parts.append(
-                f"{day}{day_weather}，{lows[index]}到{highs[index]}度"
-            )
-        report += "。未来三天：" + "；".join(forecast_parts) + "。"
-    else:
-        report += "。"
+    rows = [
+        (day, OPEN_METEO_WEATHER_CODE_MAP.get(
+            codes[index] if index < len(codes) else None, "未知"),
+         highs[index] if index < len(highs) else None,
+         lows[index] if index < len(lows) else None)
+        for index, day in enumerate(times)
+    ]
+    report = scoped_weather_report(
+        city_name, rows, today, start_day, days,
+        current=report if current else "",
+    )
 
     if matched_query and matched_query != location:
         report += f"（按{matched_query}查询）"
@@ -422,6 +435,8 @@ def get_weather(
     location: str = None,
     lang: str = "zh_CN",
     query_type: str = "weather",
+    start_day: int = 0,
+    days: int = 1,
 ):
     from core.utils.cache.manager import cache_manager, CacheType
 
@@ -478,8 +493,15 @@ def get_weather(
                 response=f"暂时没查到{location}的天气预警。",
             )
 
-    # 尝试从缓存获取完整天气报告
-    weather_cache_key = f"full_weather_{location}_{lang}"
+    if not valid_scope(start_day, days):
+        return ActionResponse(
+            Action.RESPONSE,
+            response="请指定今天起七天内的有效天气范围，例如今天、明天或未来七天。",
+        )
+    today = weather_today()
+    # Separate scope/date and version the key: old full-week strings must not
+    # leak into today's answer, nor may yesterday's 'tomorrow' survive midnight.
+    weather_cache_key = f"scoped_weather_v1_{today}_{location}_{lang}_{start_day}_{days}"
     cached_weather_report = cache_manager.get(CacheType.WEATHER, weather_cache_key)
     if cached_weather_report:
         return ActionResponse(Action.RESPONSE, response=cached_weather_report)
@@ -492,7 +514,7 @@ def get_weather(
         except Exception as e:
             logger.bind(tag=TAG).error(f"和风天气接口异常，改用兜底天气源: {e}")
     if not city_info:
-        fallback_report = build_open_meteo_weather_report(location)
+        fallback_report = build_open_meteo_weather_report(location, start_day, days, today)
         if fallback_report:
             cache_manager.set(CacheType.WEATHER, weather_cache_key, fallback_report)
             return ActionResponse(Action.RESPONSE, response=fallback_report)
@@ -501,29 +523,16 @@ def get_weather(
         )
     soup = fetch_weather_page(city_info["fxLink"])
     if not soup:
-        fallback_report = build_open_meteo_weather_report(location)
+        fallback_report = build_open_meteo_weather_report(location, start_day, days, today)
         if fallback_report:
             cache_manager.set(CacheType.WEATHER, weather_cache_key, fallback_report)
             return ActionResponse(Action.RESPONSE, response=fallback_report)
         return ActionResponse(Action.RESPONSE, response="天气请求失败，请稍后再试。")
     city_name, current_abstract, current_basic, temps_list = parse_weather_info(soup)
 
-    weather_report = f"您查询的位置是：{city_name}\n\n当前天气: {current_abstract}\n"
-
-    # 添加有效的当前天气参数
-    if current_basic:
-        weather_report += "详细参数：\n"
-        for key, value in current_basic.items():
-            if value != "0":  # 过滤无效值
-                weather_report += f"  · {key}: {value}\n"
-
-    # 添加7天预报
-    weather_report += "\n未来7天预报：\n"
-    for date, weather, high, low in temps_list:
-        weather_report += f"{date}: {weather}，气温 {low}~{high}\n"
-
-    # 提示语
-    weather_report += "\n（如需某一天的具体天气，请告诉我日期）"
+    weather_report = scoped_weather_report(
+        city_name, temps_list, today, start_day, days, current=current_abstract,
+    )
 
     # 缓存完整的天气报告
     cache_manager.set(CacheType.WEATHER, weather_cache_key, weather_report)
