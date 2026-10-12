@@ -54,9 +54,12 @@ function sendRequest() {
                 if (this._sucCallback) {
                     this._sucCallback(res)
                 }
-            }).catch((res) => {
+            }, (res) => {
                 // Fly errors can retain request headers. Never pass credentials to legacy loggers.
-                httpHandlerError({ status: res.status, data: res.data }, this._failCallback, this._networkFailCallback)
+                httpHandlerError({ status: res?.status, data: res?.data }, this._failCallback, this._networkFailCallback)
+            }).catch(() => {
+                // A page callback failure is not a transport failure and must not replay the request.
+                showDanger('页面处理响应失败，请刷新页面后重试');
             })
             return this
         },
@@ -122,9 +125,12 @@ function httpHandlerError(info, failCallback, networkFailCallback) {
     let networkError = false
     if (info.status === 401 || info.data?.code === 401) {
         store.commit('clearAuth');
-        if (failCallback) failCallback(info);
-        else if (networkFailCallback) networkFailCallback(info);
-        goToPage(Constant.PAGE.LOGIN, true);
+        // Expired sessions redirect to login; legacy network callbacks automatically retry.
+        try {
+            if (failCallback) failCallback(info);
+        } finally {
+            goToPage(Constant.PAGE.LOGIN, true);
+        }
         return true;
     }
     if (info.status === 200) {
