@@ -248,45 +248,52 @@ def compact_tool_schemas(tools: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]
         return []
 
     compacted = []
-    fair_tool_budget = max(
-        1, TOOL_DESCRIPTIONS_AGGREGATE_MAX_CHARS // len(unique_tools)
-    )
+    fair_tool_budget = TOOL_DESCRIPTIONS_AGGREGATE_MAX_CHARS // len(unique_tools)
     per_tool_budget = min(TOOL_DESCRIPTION_TOTAL_MAX_CHARS, fair_tool_budget)
 
     for tool in unique_tools:
         function = tool["function"]
 
-        remaining = per_tool_budget
-        seen_descriptions = set()
+        descriptions = []
 
-        def compact_descriptions(value: Any, root: bool = False):
-            nonlocal remaining
+        def collect_descriptions(value: Any, root: bool = False):
             if isinstance(value, dict):
                 for key in list(value.keys()):
                     item = value[key]
                     if key == "description" and isinstance(item, str):
                         normalized = _normalize_text(item)
-                        if normalized in seen_descriptions or remaining <= 0:
+                        if not normalized:
                             value.pop(key)
                             continue
-                        seen_descriptions.add(normalized)
                         per_field_limit = (
                             TOOL_DESCRIPTION_MAX_CHARS
                             if root
                             else PARAMETER_DESCRIPTION_MAX_CHARS
                         )
-                        bounded = truncate_context_text(
-                            normalized, min(per_field_limit, remaining)
-                        )
-                        value[key] = bounded
-                        remaining -= len(bounded)
+                        descriptions.append((
+                            value, key, normalized, min(len(normalized), per_field_limit)
+                        ))
                     else:
-                        compact_descriptions(item)
+                        collect_descriptions(item)
             elif isinstance(value, list):
                 for item in value:
-                    compact_descriptions(item)
+                    collect_descriptions(item)
 
-        compact_descriptions(function, root=True)
+        collect_descriptions(function, root=True)
+        # Allocate fairly across schema locations, including the tool purpose.
+        # Short fields release their unused share; long catalog prose cannot
+        # consume the parameter descriptions that define units/defaults/scope.
+        # Identical text on distinct parameters still describes each parameter.
+        remaining = per_tool_budget
+        pending = len(descriptions)
+        for owner, key, text, requested in sorted(descriptions, key=lambda item: item[3]):
+            allowance = min(requested, remaining // pending)
+            if allowance:
+                owner[key] = truncate_context_text(text, allowance)
+                remaining -= len(owner[key])
+            else:
+                owner.pop(key)
+            pending -= 1
         compacted.append(tool)
 
     return compacted

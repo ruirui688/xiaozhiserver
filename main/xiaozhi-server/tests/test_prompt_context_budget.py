@@ -1,3 +1,4 @@
+import copy
 import json
 
 from config import settings
@@ -14,6 +15,7 @@ from core.utils.prompt_budget import (
     TOOL_DESCRIPTIONS_AGGREGATE_MAX_CHARS,
     TOOL_HISTORY_MAX_CHARS,
     compact_dynamic_context,
+    compact_tool_schemas,
 )
 from core.utils.prompt_manager import PromptManager
 from plugins_func.functions import search_from_local_knowledge as local_knowledge_module
@@ -341,7 +343,12 @@ def test_tool_manager_budgets_descriptions_without_changing_schema_contract():
         "write",
     ]
     assert bounded["parameters"]["properties"]["mode"]["type"] == "string"
-    assert "description" not in bounded["parameters"]["properties"]["target"]
+    properties = bounded["parameters"]["properties"]
+    assert properties["mode"]["description"].startswith("重复参数说明")
+    assert properties["target"]["description"] == properties["mode"]["description"]
+    assert sum(len(value) for key, value in _walk_items(bounded)
+               if key == "description" and isinstance(value, str)) <= 1_000
+    assert schema["function"]["parameters"]["properties"]["target"]["description"] == repeated_description
 
 
 def test_external_dynamic_context_is_deduplicated_and_bounded():
@@ -438,6 +445,51 @@ def test_many_tools_share_one_description_budget_and_keep_contracts():
             "read",
             "write",
         ]
+        assert function["parameters"]["properties"]["mode"]["description"].startswith("参数说明")
+
+
+def test_schema_budget_keeps_short_nested_semantics_and_does_not_mutate_input(monkeypatch):
+    monkeypatch.setattr("core.utils.prompt_budget.TOOL_DESCRIPTIONS_AGGREGATE_MAX_CHARS", 90)
+    schema = {
+        "type": "function",
+        "function": {
+            "name": "nested_limits", "description": "用途：设置限制。" + "冗长解释。" * 100,
+            "parameters": {
+                "type": "object", "additionalProperties": False,
+                "properties": {
+                    "limits": {
+                        "type": "array", "minItems": 1,
+                        "items": {"type": "integer", "minimum": 0, "maximum": 100,
+                                  "description": "单位毫秒，默认10。"},
+                    },
+                    "mode": {"oneOf": [
+                        {"type": "string", "enum": ["read"], "description": "只读，不写入。"},
+                        {"type": "string", "enum": ["audit"], "description": "只读，不写入。"},
+                    ]},
+                },
+                "required": ["limits", "mode"],
+            },
+        },
+    }
+    original = copy.deepcopy(schema)
+    bounded = compact_tool_schemas([schema])[0]
+    assert schema == original
+    assert bounded["function"]["parameters"] == schema["function"]["parameters"]
+    assert bounded["function"]["description"].startswith("用途：设置限制。")
+    assert sum(len(value) for key, value in _walk_items(bounded)
+               if key == "description" and isinstance(value, str)) <= 90
+
+
+def test_schema_budget_does_not_force_one_character_per_tool_when_budget_is_exhausted(monkeypatch):
+    monkeypatch.setattr("core.utils.prompt_budget.TOOL_DESCRIPTIONS_AGGREGATE_MAX_CHARS", 2)
+    tools = [{"type": "function", "function": {"name": f"tool_{index}", "description": "用途",
+              "parameters": {"type": "object", "properties": {}, "required": []}}} for index in range(3)]
+    bounded = compact_tool_schemas(tools)
+    assert len(bounded) == 3
+    assert all(tool["function"]["parameters"] == source["function"]["parameters"]
+               for tool, source in zip(bounded, tools))
+    assert sum(len(value) for tool in bounded for key, value in _walk_items(tool)
+               if key == "description" and isinstance(value, str)) <= 2
 
 
 def test_json_and_multiline_memory_items_keep_their_structure():

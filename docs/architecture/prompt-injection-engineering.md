@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: runtime
-last_verified: 2026-10-10
+last_verified: 2026-10-12
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/config/service/impl/ConfigServiceImpl.java
   - main/xiaozhi-server/agent-base-prompt.txt
@@ -11,6 +11,8 @@ source_paths:
   - main/xiaozhi-server/core/session/prompt_context.py
   - main/xiaozhi-server/core/utils/prompt_request_budget.py
   - main/xiaozhi-server/core/providers/tools
+  - main/xiaozhi-server/plugins_func/functions/get_weather.py
+  - main/xiaozhi-server/plugins_func/weather_scope.py
 ---
 
 # 提示词注入工程
@@ -365,6 +367,11 @@ Memory provider 和长期记忆事件仍只读取原始 STT。启用主动记忆
 | 历史工具结果 | 8,000 字符 | 单个结果最多 4,000 字符 | 从最新结果向前分配预算；重复旧结果使用省略标记；结构化结果保持有效 JSON |
 | 全部工具描述 | 6,000 字符 | 每个工具描述合计最多 1,000 字符；工具用途 1,000、参数说明 300 | 工具间公平分配；只压缩描述文字，保留名称、类型、`required`、枚举和 schema 结构 |
 
+每个工具内部也按用途和各参数说明分配预算：短说明先满足，未用额度留给较长说明，
+避免目录中的长用途说明耗尽所有参数额度。不同参数即使说明相同也各自保留，不能跨参数去重。
+工具很多或单个 schema 字段很多时仍可能截断说明，因此应将单位、默认值和范围写在说明前部，
+并通过统一工具入口检查最终原生 schema 与 Intent 文本，而非仅检查注册时的原始描述。
+
 静态角色人设和安全规则不使用上述动态预算，也不得因外部上下文过长而被截断。预算函数只处理不可信或随会话增长的内容；知识库结果不写入永久 system prompt，历史工具结果优先保留最近轮次。
 
 整体请求另经 `prompt_request_budget.py`，默认限制紧凑 messages + tools JSON 为 64,000
@@ -680,6 +687,21 @@ get_weather 插件
 如果基础提示词强调“本地天气已在上下文”，模型可能不会调用 `get_weather`。如果用户说“南京天气”“杭州温度”，工具描述和基础提示词必须让模型调用天气工具，而不是把本地上下文当成外地天气。
 
 天气接口异常时，工具本身应该返回可靠的直接回复，避免把 `Authentication failed`、`Invalid Host` 等错误交给 LLM 改写成“城市不存在”。
+
+天气日期范围由 `get_weather` 参数提示词明确传递，不切换 `intent_llm`，也不增加模型调用：
+`start_day=0,days=1` 查询今天（未指定日期时默认），`start_day=1,days=1` 查询明天，
+`start_day=0,days=7` 查询含今天在内的未来七天。相对日期使用固定 UTC+8 的北京时间，
+不依赖容器或 Conda 环境安装 IANA 时区数据库。
+参数说明属于 Python 工具 Schema；目录覆盖仅替换工具用途，随后仍须经过统一工具描述预算，
+不能只验证插件原始 Schema 就断言最终 Intent 提示保留了参数含义。
+主天气源和 Open-Meteo 备用源都按数据中的日期过滤后返回 `Action.RESPONSE`，不播其他日期；
+今天的查询保留已获取的当前湿度、体感温度、风等实况字段；明天或多日预报不混入当前观测。
+缺失日期明确说明暂无数据，不用今天补明天。
+查询缓存按版本、北京时间日期、地点、语言及范围隔离，不复用旧的整周报告缓存；
+原天气缓存 TTL 不变。预警仍走原 warning 分支。离线范围回归见 `test_weather_forecast_scope.py`，
+统一工具入口到原生 Schema/Intent 提示的多工具回归见 `test_weather_prompt_integration.py`。
+这些测试验证运行时参数传递、筛选和最终提示的内容，不保证真实模型始终选择正确参数；
+本次分支集成没有重新执行云端模型或机器人现场验收，也不代表正式版本镜像已经构建发布。
 
 ## 16. 工具结果进入 LLM 或 TTS
 
