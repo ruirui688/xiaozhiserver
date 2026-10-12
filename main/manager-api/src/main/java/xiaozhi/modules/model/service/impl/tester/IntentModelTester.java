@@ -369,9 +369,7 @@ public class IntentModelTester implements ModelTestExecutor {
     }
 
     private ResponseEntity<String> exchange(String url, HttpEntity<?> request, String modelId) {
-        return usageMeter == null
-                ? restTemplate.exchange(url, HttpMethod.POST, request, String.class)
-                : usageMeter.exchange(restTemplate, url, request, String.class, modelId, "LLM");
+        return usageMeter.exchange(restTemplate, url, request, String.class, modelId, "LLM");
     }
 
     private static boolean isPlaceholderSecret(String value) {

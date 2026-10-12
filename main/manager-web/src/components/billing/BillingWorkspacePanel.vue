@@ -29,7 +29,7 @@
         <el-alert v-for="notice in coverageNotices" :key="notice.key" :title="notice.title" :description="notice.description" :type="notice.type" show-icon :closable="false" class="coverage-alert" />
         <div class="billing-metrics"><article class="billing-metric"><span class="billing-kicker">已采集调用</span><div class="amount">{{ number(overview.callCount) }} <small>次</small></div><p>实际发出的调用尝试，包含重试和工具续轮。</p></article><article class="billing-metric"><span class="billing-kicker">已记录会话</span><div class="amount">{{ number(overview.sessionCount) }} <small>个</small></div><p>统计当前筛选范围，不能代表采集前的历史使用。</p></article><article class="billing-metric usage-metric"><span class="billing-kicker">供应商用量与本地观测</span><BillingUsage :usage="overview.usage || []" /></article></div>
         <div v-if="!Number(overview.callCount)" class="billing-notice"><i class="el-icon-info" /><div>尚未收到当前范围的用量记录<p>请结合采集起点与覆盖情况查看。已采集 0 条不等于没有使用，供应商费用仍以官方账单为准。</p></div></div>
-        <section class="billing-panel"><div class="billing-panel-heading"><div class="billing-segments"><button v-for="item in [{ id: 'agents', name: '按智能体' }, { id: 'devices', name: '按设备' }, { id: 'events', name: '调用记录' }]" :key="item.id" :class="{ active: tab === item.id }" :aria-pressed="tab === item.id" @click="tab = item.id; changeTab()">{{ item.name }}</button></div><span class="billing-muted">不同视图为同一批调用，不相加</span></div><BillingRecords :kind="tab" :rows="rows" @drill="drill" /><el-pagination :current-page="page" :page-size="limit" :page-sizes="[20,50,100]" :total="total" layout="total, sizes, prev, pager, next" @current-change="changePage" @size-change="changeLimit" /></section>
+        <section class="billing-panel"><div class="billing-panel-heading"><div class="billing-segments"><button v-for="item in [{ id: 'agents', name: '按智能体' }, { id: 'devices', name: '按设备' }, { id: 'events', name: '调用记录' }]" :key="item.id" :class="{ active: tab === item.id }" :aria-pressed="tab === item.id" @click="tab = item.id; changeTab()">{{ item.name }}</button></div><span class="billing-muted">不同视图为同一批调用，不相加</span></div><BillingRecords :kind="tab" :rows="rows" :show-supplier-costs="showSupplierCosts" @drill="drill" /><el-pagination :current-page="page" :page-size="limit" :page-sizes="[20,50,100]" :total="total" layout="total, sizes, prev, pager, next" @current-change="changePage" @size-change="changeLimit" /></section>
       </template>
     </template>
   </section>
@@ -47,7 +47,7 @@ import { billingFiltersFromQuery, billingQuery, defaultBillingFilters, validateB
 
 export default {
   components: { BillingUsage, BillingCosts, BillingRecords, BillingCollectionHealth, BillingBillList },
-  props: { mode: { type: String, default: 'usage' } },
+  props: { mode: { type: String, default: 'usage' }, showSupplierCosts: { type: Boolean, default: true }, routePath: { type: String, default: '/model-billing' } },
   data() { return { advanced: false, filters: defaultBillingFilters(), appliedFilters: defaultBillingFilters(), options: {}, workspaceId: '', tab: 'overview', page: 1, limit: 20, overview: null, rows: [], total: 0, loading: false, initializing: false, error: '', optionsError: '', generation: 0, optionsGeneration: 0 }; },
   computed: {
     canManage() { return this.options.canManage === true; },
@@ -116,7 +116,7 @@ export default {
       Object.keys(query).forEach(key => { query[key] = String(query[key]); });
       const stable = value => JSON.stringify(Object.keys(value).sort().map(key => [key, value[key]]));
       if (stable(query) === stable(this.$route.query || {})) { this.appliedFilters = { ...filters }; this.loadData(); }
-      else this.$router.replace({ path: '/model-billing', query }).catch(error => { if (error.name !== 'NavigationDuplicated') this.error = '筛选条件未能更新，请重试'; });
+      else this.$router.replace({ path: this.routePath, query }).catch(error => { if (error.name !== 'NavigationDuplicated') this.error = '筛选条件未能更新，请重试'; });
     },
     applyFilters() { this.navigate(this.filters); },
     resetFilters() { this.filters = defaultBillingFilters(); this.navigate(this.filters); },

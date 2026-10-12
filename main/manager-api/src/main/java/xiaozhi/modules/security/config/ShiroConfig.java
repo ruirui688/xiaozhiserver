@@ -44,6 +44,10 @@ public class ShiroConfig {
         securityManager.setRealm(oAuth2Realm);
         securityManager.setSessionManager(sessionManager);
         securityManager.setRememberMeManager(null);
+        org.apache.shiro.mgt.DefaultSubjectDAO subjectDAO = new org.apache.shiro.mgt.DefaultSubjectDAO();
+        org.apache.shiro.mgt.DefaultSessionStorageEvaluator evaluator = new org.apache.shiro.mgt.DefaultSessionStorageEvaluator();
+        evaluator.setSessionStorageEnabled(false); subjectDAO.setSessionStorageEvaluator(evaluator);
+        securityManager.setSubjectDAO(subjectDAO);
         return securityManager;
     }
 
@@ -72,6 +76,12 @@ public class ShiroConfig {
          * role：拥有某个角色权限才能访问
          */
         Map<String, String> filterMap = new LinkedHashMap<>();
+        filterMap.put("/ops/auth/login", "anon");
+        filterMap.put("/ops/auth/enroll", "anon");
+        filterMap.put("/ops/auth/recovery-request", "anon");
+        filterMap.put("/ops/**", "oauth2");
+        filterMap.put("/user/platform/**", "oauth2");
+        filterMap.put("/config/platform/**", "server");
         filterMap.put("/ota/**", "anon");
         filterMap.put("/otaMag/download/**", "anon");
         filterMap.put("/webjars/**", "anon");

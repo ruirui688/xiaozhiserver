@@ -45,6 +45,7 @@ nav {
 }
 </style>
 <script>
+import { parseStoredProfile, isOperationsConsole } from '@/security/session';
 import CacheViewer from '@/components/CacheViewer.vue';
 import { logCacheStatus } from '@/utils/cacheViewer';
 
@@ -61,12 +62,12 @@ export default {
   },
   created() {
     // 挂载 store 状态
-    this.$store.commit('setUserInfo', JSON.parse(localStorage.getItem('userInfo') || '{}'));
+    this.$store.commit('setUserInfo', parseStoredProfile());
     this.$store.commit('setPubConfig', JSON.parse(localStorage.getItem('pubConfig') || '{}'));
   },
   mounted() {
     // 检测是否为移动设备且VUE_APP_H5_URL不为空，如果两个条件都满足则跳转到H5页面
-    if (this.isMobileDevice() && process.env.VUE_APP_H5_URL) {
+    if (!isOperationsConsole() && this.isMobileDevice() && process.env.VUE_APP_H5_URL) {
       window.location.href = process.env.VUE_APP_H5_URL;
       return;
     }

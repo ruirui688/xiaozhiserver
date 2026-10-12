@@ -18,12 +18,13 @@ const pluginDetail = read('src/components/resource/PluginDetailDialog.vue');
 const pluginConfigDialog = read('src/components/UserPluginConfigDialog.vue');
 const userApi = read('src/apis/module/user.js');
 
-test('resource center groups knowledge, people and plugins', () => {
+test('user resource center groups private resources while operations owns the tool catalog', () => {
   assert.match(router, /person-profile-management/);
   assert.match(header, />资源中心</);
   assert.match(nav, /label: "知识库"/);
   assert.match(nav, /label: "人物与人脸"/);
-  assert.match(nav, /label: "插件"/);
+  assert.doesNotMatch(nav, /function-plugin-management/);
+  assert.match(read('src/ops/router.js'), /function-plugin-management/);
   assert.doesNotMatch(nav, /RESOURCE CENTER|resource-nav__intro|统一维护可复用/);
   assert.doesNotMatch(knowledge, /<h2 class="page-title">/);
   assert.doesNotMatch(people, /<h1>人物与人脸<\/h1>/);

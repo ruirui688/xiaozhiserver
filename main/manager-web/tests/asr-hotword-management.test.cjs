@@ -21,7 +21,7 @@ test('manual local refresh explains an empty result without claiming vendor sync
   await c.methods.load.call(vm, true);
   assert.equal(vm.loading, false);
   assert.match(notices[0], /本地暂无词库/);
-  assert.match(notices[0], /从火山同步/);
+  assert.match(notices[0], /批量粘贴词条/);
   await c.methods.load.call(vm);
   assert.equal(notices.length, 1);
 });

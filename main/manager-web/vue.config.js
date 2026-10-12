@@ -39,6 +39,10 @@ const cdnResources = {
 const useCDN = process.env.VUE_APP_USE_CDN === 'true';
 
 module.exports = defineConfig({
+  pages: {
+    index: { entry: 'src/main.js', template: 'public/index.html', filename: 'index.html' },
+    ops: { entry: 'src/ops/main.js', template: 'public/ops.html', filename: 'ops.html' },
+  },
   productionSourceMap: process.env.NODE_ENV !== 'production', // 生产环境不生成 source map
   devServer: {
     port: 8001, // 指定端口为 8001
@@ -56,7 +60,7 @@ module.exports = defineConfig({
   chainWebpack: config => {
 
     // 修改 HTML 插件配置，动态插入 CDN 链接
-    config.plugin('html')
+    for (const page of ['index', 'ops']) config.plugin(`html-${page}`)
       .tap(args => {
         // 根据配置决定是否使用CDN
         if (process.env.NODE_ENV === 'production' && useCDN) {

@@ -1,0 +1,16 @@
+import 'element-ui/lib/theme-chalk/index.css';
+import 'normalize.css/normalize.css';
+import Vue from 'vue';
+import ElementUI from 'element-ui';
+import App from '../App.vue';
+import store from '../store';
+import i18n from '../i18n';
+import router from './router';
+import { setNavigationRouter } from '../router/navigation';
+import '../styles/global.scss';
+import './operations.css';
+Vue.use(ElementUI);
+Vue.prototype.$eventBus = new Vue();
+Vue.config.productionTip = false;
+setNavigationRouter(router);
+new Vue({ router, store, i18n, render: h => h(App) }).$mount('#app');

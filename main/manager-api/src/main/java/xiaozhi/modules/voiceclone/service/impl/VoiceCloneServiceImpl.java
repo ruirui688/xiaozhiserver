@@ -270,6 +270,7 @@ public class VoiceCloneServiceImpl extends BaseServiceImpl<VoiceCloneDao, VoiceC
     @Override
     // @Transactional(rollbackFor = Exception.class)
     public void cloneAudio(String cloneId) {
+        xiaozhi.modules.platform.service.PlatformUnmeteredExecution.deny("VOICE_CLONE");
         VoiceCloneEntity entity = baseDao.selectById(cloneId);
         if (entity == null) {
             throw new RenException(ErrorCode.VOICE_CLONE_RECORD_NOT_EXIST);
@@ -347,8 +348,7 @@ public class VoiceCloneServiceImpl extends BaseServiceImpl<VoiceCloneDao, VoiceC
                 .build();
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
-        System.out.println(">>> HTTP status = " + response.statusCode());
-        System.out.println(">>> response body = " + response.body());
+        log.debug("Voice clone provider returned HTTP {}", response.statusCode());
 
         Map<String, Object> rsp = objectMapper.readValue(response.body(),
                 new TypeReference<Map<String, Object>>() {

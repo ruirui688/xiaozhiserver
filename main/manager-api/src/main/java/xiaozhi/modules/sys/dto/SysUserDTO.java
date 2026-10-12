@@ -77,9 +77,6 @@ public class SysUserDTO implements Serializable {
     @JsonFormat(pattern = DateUtils.DATE_TIME_PATTERN)
     private Date createDate;
 
-    @Schema(description = "超级管理员   0：否   1：是")
-    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
-    private Integer superAdmin;
 
     @Schema(description = "角色ID列表")
     private List<Long> roleIdList;

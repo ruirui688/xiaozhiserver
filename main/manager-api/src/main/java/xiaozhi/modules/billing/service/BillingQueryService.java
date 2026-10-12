@@ -25,7 +25,7 @@ public class BillingQueryService {
     public String workspace() {
         String id = permissions.currentWorkspaceId(); permissions.requireRead(id); return id;
     }
-    public static boolean canManage() { return Integer.valueOf(1).equals(SecurityUser.getUser().getSuperAdmin()); }
+    public static boolean canManage() { return xiaozhi.modules.security.ops.OpsAccess.has("supplier.bill.read", "PLATFORM", "platform-services"); }
     public static void requireAdmin() { if (!canManage()) throw new RenException("仅平台管理员可管理官方账单"); }
 
     public Map<String, Object> overview(BillingFilter filter) {
@@ -34,12 +34,9 @@ public class BillingQueryService {
         Map<String, Object> result = summary(scope);
         result.put("workspaceId",workspace);
         result.put("scope","WORKSPACE");result.put("workspaceName",workspaceName(workspace));
-        result.put("supportedFilters",Map.of("usage",List.of("startDate","endDate","provider","serviceType","agentId","deviceId","modelId","keyword","board","purpose"),"costs",List.of("startDate","endDate","provider","serviceType","agentId","deviceId")));
-        addCosts(result, billScope(workspace, filter));
-        if(text(filter.getModelId()) || text(filter.getPurpose())){result.put("costStatus","UNSUPPORTED_FILTER");result.put("costs",List.of());}
+        result.put("supportedFilters",Map.of("usage",List.of("startDate","endDate","provider","serviceType","agentId","deviceId","modelId","keyword","board","purpose")));
         result.put("trend", jdbc.queryForList("SELECT DATE_FORMAT(DATE_ADD(e.started_at,INTERVAL 8 HOUR),'%Y-%m-%d') date,COUNT(*) callCount FROM ai_billing_usage_event e" + scope.text + " GROUP BY date ORDER BY date", scope.args.toArray()));
-        Sql bills = billScope(workspace, filter);
-        result.put("lastSyncAt", jdbc.queryForObject("SELECT MAX(b.synced_at) FROM ai_billing_bill b" + bills.text, Object.class, bills.args.toArray()));
+        result.put("lastSyncAt", null);
         result.put("lastSyncedAt",result.get("lastSyncAt"));
         result.put("coverageStatus", "仅展示已采集用量；未返回的供应商用量不补零");
         String syncStatus=result.get("lastSyncAt")==null ? "NO_ATTRIBUTED_RECORDS" : "ATTRIBUTED_RECORDS_ONLY";
@@ -54,7 +51,7 @@ public class BillingQueryService {
         String workspace = workspace(); filter.validate();
         String column = groupBy + "_id";
         Sql events = eventScope(workspace, filter), bills = billScope(workspace, filter);
-        boolean unsupportedCosts=text(filter.getModelId()) || text(filter.getPurpose());
+        boolean unsupportedCosts=true;
         String candidates = "SELECT DISTINCT e." + column + " id FROM ai_billing_usage_event e" + events.text;
         List<Object> params = new ArrayList<>(events.args);
         if(!unsupportedCosts){candidates+=" UNION SELECT b." + column + " id FROM ai_billing_bill b" + bills.text;params.addAll(bills.args);}
@@ -68,8 +65,6 @@ public class BillingQueryService {
             Object name = jdbc.queryForObject("SELECT MAX(e." + nameColumn + ") FROM ai_billing_usage_event e" + eventGroup.text, Object.class, eventGroup.args.toArray());
             row.put("name", name == null ? id : name);
             if ("device".equals(groupBy)) row.put("board", jdbc.queryForObject("SELECT MAX(e.device_board) FROM ai_billing_usage_event e" + eventGroup.text, Object.class, eventGroup.args.toArray()));
-            if(unsupportedCosts){row.put("costStatus","UNSUPPORTED_FILTER");row.put("costs",List.of());}
-            else addCosts(row, bills.copy().and("b." + column + "=?", id));
         }
         return new PageData<>(rows, count);
     }
@@ -82,13 +77,12 @@ public class BillingQueryService {
         for (Map<String, Object> row : rows) {
             row.put("usageComplete",row.get("usageComplete") instanceof Boolean value ? value : row.get("usageComplete") instanceof Number number && number.intValue()==1);
             row.put("usage", jdbc.queryForList("SELECT metric,unit,source,quantity FROM ai_billing_usage_metric WHERE event_id=? ORDER BY metric,source", row.get("eventId")));
-            row.put("costs", List.of()); row.put("costStatus", "NO_CALL_LEVEL_BILL");
         }
         return new PageData<>(rows, count);
     }
 
     public PageData<Map<String, Object>> bills(BillingFilter filter) {
-        String workspace = workspace(); filter.validate(); Sql scope;
+        requireAdmin(); String workspace = null; filter.validate(); Sql scope;
         if(text(filter.getModelId()) || text(filter.getPurpose()))throw new RenException("官方账单不支持按内部模型或调用用途筛选");
         if(filter.isUnattributed() && (text(filter.getAgentId()) || text(filter.getDeviceId()) || text(filter.getBoard())))
             throw new RenException("未归属账单不支持按智能体、设备或型号筛选");
@@ -114,6 +108,7 @@ public class BillingQueryService {
     }
 
     public Map<String, Object> options() {
+        if (canManage()) return Map.of("scope", "PLATFORM", "canManage", true, "providers", List.of("volcengine", "deepseek"), "serviceTypes", List.of("LLM", "ASR", "TTS", "REALTIME", "EMBEDDING"), "volcengineSyncEnabled", volcengine.enabled(), "volcengine", Map.of("enabled", volcengine.enabled(), "accountRef", volcengine.accountRef()));
         String workspace = workspace(); Map<String, Object> result = new LinkedHashMap<>();
         result.put("workspaceId", workspace); result.put("canManage", canManage());
         result.put("workspaceName",workspaceName(workspace));result.put("scope","WORKSPACE");
@@ -162,7 +157,7 @@ public class BillingQueryService {
     }
 
     private Sql billScope(String workspace, BillingFilter f) {
-        Sql sql = workspace == null ? new Sql(" WHERE b.workspace_id IS NULL") : new Sql(" WHERE b.workspace_id=?", workspace);
+        Sql sql = workspace == null ? new Sql(f.isUnattributed() ? " WHERE b.workspace_id IS NULL" : " WHERE 1=1") : new Sql(" WHERE b.workspace_id=?", workspace);
         // A bill straddling the requested dates cannot be prorated into an actual amount.
         sql.and("b.expense_begin>=?", BillingSupport.time(f.from())).and("b.expense_begin<?", BillingSupport.time(f.to()));
         // Only the admin's unassigned list can expose official bills whose consumption end is unknown.

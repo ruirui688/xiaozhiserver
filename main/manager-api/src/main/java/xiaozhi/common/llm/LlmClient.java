@@ -168,8 +168,6 @@ public class LlmClient {
     }
 
     private ResponseEntity<String> exchange(String endpoint, HttpEntity<?> request, String serviceType) {
-        return usageMeter == null
-                ? restTemplate.exchange(endpoint, HttpMethod.POST, request, String.class)
-                : usageMeter.exchange(restTemplate, endpoint, request, String.class, null, serviceType);
+        return usageMeter.exchange(restTemplate, endpoint, request, String.class, null, serviceType);
     }
 }

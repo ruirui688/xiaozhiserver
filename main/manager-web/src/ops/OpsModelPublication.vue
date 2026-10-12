@@ -1,0 +1,14 @@
+<template><el-dialog title="发布模型服务" :visible.sync="visible" width="min(680px,94vw)" :close-on-click-modal="false"><div v-loading="loading"><p>测试通过后仍需独立审批，批准版本才能进入用户可用的模型目录。</p><el-alert v-if="error" :title="error" type="error" :closable="false" /><template v-if="proposal"><p><strong>{{ modelName }}</strong> · 版本 {{ proposal.version }}</p><pre class="model-proposal">{{ JSON.stringify(proposal.payload,null,2) }}</pre><el-alert v-if="approval" :title="approval.status === 'APPROVED' ? '该版本已获批准，可发布' : '发布申请正在等待独立审批'" type="info" :closable="false" /></template></div><span slot="footer"><el-button @click="visible=false">关闭</el-button><el-button :disabled="busy || loading" @click="load">刷新审批状态</el-button><el-button v-if="proposal && !approval" type="primary" :loading="busy" @click="requestApproval">提交发布审批</el-button><el-button v-if="approval && approval.status === 'APPROVED'" type="primary" :loading="busy" @click="publish">发布批准版本</el-button></span></el-dialog></template>
+<script>
+import { platformRequest } from '@/apis/platform';
+export default {
+  data() { return { visible:false,modelId:'',modelName:'',loading:false,busy:false,error:'',proposal:null,approval:null }; },
+  methods: {
+    open(model) { this.modelId=model.id; this.modelName=model.modelName || model.id; this.proposal=null; this.approval=null; this.visible=true; this.load(); },
+    async load() { this.loading=true; this.error=''; try { const [proposal,approvals]=await Promise.all([platformRequest('GET',`/ops/platform/catalog/${encodeURIComponent(this.modelId)}/publication`),platformRequest('GET','/ops/approvals')]); this.proposal=proposal; this.approval=approvals.find(item=>item.action===proposal.action && String(item.targetId)===String(proposal.targetId) && String(item.version)===String(proposal.version) && item.requesterId===this.$store.state.userInfo.employeeId && ['PENDING','APPROVED'].includes(item.status) && new Date(item.expiresAt).getTime()>Date.now()) || null; } catch (error) { this.error=error.message; this.proposal=null; } finally { this.loading=false; } },
+    async requestApproval() { if (this.busy || !this.proposal) return; this.busy=true; try { await platformRequest('POST','/ops/approvals',this.proposal); await this.load(); } catch (error) { this.error=error.message; } finally { this.busy=false; } },
+    async publish() { if (this.busy || this.approval?.status!=='APPROVED') return; this.busy=true; try { await platformRequest('POST',`/ops/platform/catalog/${encodeURIComponent(this.modelId)}/publish`,{}, {headers:{'X-Ops-Approval-Id':this.approval.id}}); this.$message.success('模型服务已发布'); this.visible=false; this.$emit('published'); } catch (error) { this.error=error.message; } finally { this.busy=false; } },
+  },
+};
+</script>
+<style scoped>.model-proposal{max-height:42vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f6fa;padding:16px;border-radius:8px;font-size:12px}</style>

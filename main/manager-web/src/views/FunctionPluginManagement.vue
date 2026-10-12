@@ -1,13 +1,13 @@
 <template>
   <div class="welcome">
     <HeaderBar />
-    <ResourceCenterNav />
+    <ResourceCenterNav v-if="!isOps" />
 
     <main class="plugin-page">
       <section class="page-hero">
         <div class="page-heading">
-          <h1>给智能体添加新本领</h1>
-          <p class="page-subtitle">先找到需要的功能，再选择智能体完成设置。</p>
+          <h1>{{ isOps ? "官方工具与提示词" : "给智能体添加新本领" }}</h1>
+          <p class="page-subtitle">{{ isOps ? "维护批准的公共工具目录和调用说明。" : "先找到需要的功能，再选择智能体完成设置。" }}</p>
         </div>
         <div class="hero-stats" aria-label="功能分类统计">
           <div class="stat-item">
@@ -149,7 +149,8 @@
               :key="plugin.id"
               :plugin="plugin"
               :layout="viewMode"
-              :configurable="isSharedConfigPlugin(plugin) && !isRetiredPlugin(plugin)"
+              :allow-setup="!isOps"
+              :configurable="!isOps && isSharedConfigPlugin(plugin) && !isRetiredPlugin(plugin)"
               :config-state="sharedConfigState(plugin.providerCode)"
               :testing="Boolean(pluginTesting[plugin.providerCode])"
               @detail="openDetailDialog"
@@ -407,7 +408,7 @@ export default {
           .filter((item) => item.modelType === "Plugin")
           .sort((a, b) => Number(a.sort || 0) - Number(b.sort || 0));
       };
-      if (!this.canManagePlugins) {
+      if (!this.isOps) {
         Api.model.getPluginFunctionList(null, handleResponse, handleFailure);
         return;
       }
@@ -422,6 +423,7 @@ export default {
       );
     },
     fetchSharedConfigStatuses() {
+      if (this.isOps) return;
       this.sharedConfigLoading = true;
       this.sharedConfigError = false;
       Api.user.getPluginConfigs((response) => {
@@ -450,11 +452,13 @@ export default {
       return this.sharedConfigStatuses[providerCode] ? "saved" : "missing";
     },
     openSetup(plugin) {
+      if (this.isOps) return;
       this.detailDialogVisible = false;
       this.setupPlugin = plugin;
       this.setupVisible = true;
     },
     openSharedConfig(plugin) {
+      if (this.isOps) return;
       this.sharedConfigProviderCode = plugin.providerCode;
       this.sharedConfigPluginName = plugin.name;
       this.sharedConfigDialogVisible = true;
@@ -463,6 +467,7 @@ export default {
       this.fetchSharedConfigStatuses();
     },
     testSharedConfig(plugin) {
+      if (this.isOps) return;
       const providerCode = plugin.providerCode;
       if (this.sharedConfigState(providerCode) === "loading") {
         this.$message.warning("正在读取服务配置，请稍后重试");
@@ -733,13 +738,14 @@ export default {
     }
   },
   computed: {
+    isOps() { return this.$store.state.userInfo?.audience === 'OPS'; },
     legacyParametersSchema() {
       const source = this.plugins.find(item => item.id === this.editingId);
       const schema = pluginDefault(source, "parameters_schema", null);
       return schema ? JSON.stringify(schema, null, 2) : "";
     },
     canManagePlugins() {
-      return Boolean(this.$store.state.userInfo && this.$store.state.userInfo.superAdmin);
+      return this.$store.state.userInfo?.audience === 'OPS' && (this.$store.state.userInfo.permissions || []).includes('prompt.catalog.write');
     },
     rules() {
       return {

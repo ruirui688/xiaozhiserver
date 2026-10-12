@@ -21,19 +21,19 @@ class KnowledgeResourcePermissionServiceTest {
             new KnowledgeResourcePermissionService(workspacePermission, officialPermission);
 
     @Test
-    void officialKnowledgeIsGloballyReadableButUsesOfficialWriteGate() {
+    void publishedOfficialKnowledgeIsGloballyReadableAndImmutable() {
         KnowledgeBaseDTO dataset = dataset("OFFICIAL");
 
         service.requireRead(dataset);
-        service.requireWrite(dataset);
+        assertThrows(RenException.class, () -> service.requireWrite(dataset));
 
         verify(workspacePermission, never()).requireRead("workspace-1");
         verify(workspacePermission, never()).requireWrite("workspace-1");
-        verify(officialPermission).requireOfficialMaintainer();
+        verify(officialPermission, never()).requireOfficialMaintainer();
     }
 
     @Test
-    void superAdminTeamCanMaintainWritableWorkspaceKnowledge() {
+    void explicitContentMaintainerStillNeedsWorkspaceWritePermission() {
         KnowledgeBaseDTO dataset = dataset("WORKSPACE");
         when(officialPermission.isOfficialMaintainer()).thenReturn(true);
         when(workspacePermission.canWrite("workspace-1")).thenReturn(true);

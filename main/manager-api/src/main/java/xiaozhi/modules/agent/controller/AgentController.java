@@ -109,15 +109,14 @@ public class AgentController {
 
     @GetMapping("/all")
     @Operation(summary = "智能体列表（管理员）")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("device.diagnostics.read")
     @Parameters({
             @Parameter(name = Constant.PAGE, description = "当前页码，从1开始", required = true),
             @Parameter(name = Constant.LIMIT, description = "每页显示记录数", required = true),
     })
     public Result<PageData<AgentEntity>> adminAgentList(
             @Parameter(hidden = true) @RequestParam Map<String, Object> params) {
-        PageData<AgentEntity> page = agentService.adminAgentList(params);
-        return new Result<PageData<AgentEntity>>().ok(page);
+        throw new xiaozhi.common.exception.RenException("已停用跨租户智能体内容查询，请使用脱敏运行指标");
     }
 
     @GetMapping("/{id}")
@@ -232,6 +231,7 @@ public class AgentController {
         List<AgentTemplateEntity> list = agentTemplateService
                 .list(new QueryWrapper<AgentTemplateEntity>()
                         .isNull("workspace_id")
+                        .eq("review_status", "APPROVED")
                         .orderByAsc("sort"));
         return new Result<List<AgentTemplateEntity>>().ok(list);
     }

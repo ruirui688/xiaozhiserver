@@ -25,7 +25,7 @@
           {{ $t("modelConfigDialog.modelInfo") }}
         </div>
         <div style="display: flex; align-items: center; gap: 20px">
-          <div style="display: flex; align-items: center">
+          <div v-if="!platformManaged" style="display: flex; align-items: center">
             <span style="margin-right: 8px">{{ $t("modelConfigDialog.enable") }}</span>
             <el-switch v-model="form.isEnabled" :active-value="1" :inactive-value="0" class="custom-switch"></el-switch>
           </div>
@@ -124,6 +124,7 @@
         context="config"
       />
 
+      <el-alert v-if="platformManaged" title="模型目录只保存公共配置。凭据在「额度与凭据」中管理，测试使用独立平台任务账户；保存为待审批版本。" type="info" :closable="false" />
       <model-config-form
         :form="form"
         :dynamic-call-info-fields="dynamicCallInfoFields"
@@ -163,6 +164,7 @@ export default {
     RealtimeModelNotice,
   },
   props: {
+    platformManaged: { type: Boolean, default: false },
     visible: { type: Boolean, default: false },
     modelData: {
       type: Object,
@@ -208,7 +210,7 @@ export default {
   },
   computed: {
     visibleCallInfoFields() {
-      return this.dynamicCallInfoFields.filter((field) => this.isFieldVisible(field));
+      return this.dynamicCallInfoFields.filter((field) => this.isFieldVisible(field) && (!this.platformManaged || field.section !== 'credentials'));
     },
     visibleFieldSections() {
       const credential = [];
@@ -456,10 +458,10 @@ export default {
         protocol: this.form.protocol,
         upstreamModelId: this.form.upstreamModelId || this.form.modelName,
         endpointUrl: this.form.endpointUrl,
-        params: { ...this.form.params },
-        secrets: { ...this.form.secrets },
+        params: Object.fromEntries(Object.entries(this.form.params).filter(([key]) => !this.platformManaged || !this.isSecretField(key))),
+        secrets: this.platformManaged ? {} : { ...this.form.secrets },
         isDefault: this.form.isDefault ? 1 : 0,
-        isEnabled: this.form.isEnabled ? 1 : 0,
+        isEnabled: this.platformManaged ? 0 : (this.form.isEnabled ? 1 : 0),
         docLink: this.form.docLink,
         remark: this.form.remark,
         sort: this.form.sort || 0,

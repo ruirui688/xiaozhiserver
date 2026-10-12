@@ -38,6 +38,9 @@ class BillingLedgerTest {
         for(String sql:schema.split(";")) if(!sql.isBlank())jdbc.execute(sql);
         String openExpenseEnd=Files.readString(Path.of("src/main/resources/db/changelog/model-billing-open-expense-end.sql"));
         for(String sql:openExpenseEnd.split(";")) if(!sql.isBlank())jdbc.execute(sql);
+        jdbc.execute("CREATE TABLE sys_workspace(id VARCHAR(64),status INT)");
+        jdbc.update("INSERT INTO sys_workspace VALUES('workspace-a',1),('workspace-b',1)");
+        jdbc.execute("CREATE TABLE ops_audit_event(id VARCHAR(64),actor_id VARCHAR(64),action VARCHAR(80),target_id VARCHAR(100),outcome VARCHAR(32))");
         jdbc.execute("CREATE TABLE ai_agent(id VARCHAR(64),workspace_id VARCHAR(64),agent_name VARCHAR(255))");
         jdbc.execute("CREATE TABLE ai_device(id VARCHAR(64),workspace_id VARCHAR(64),alias VARCHAR(255),board VARCHAR(128))");
         jdbc.update("INSERT INTO ai_agent VALUES ('agent-a','workspace-a','Agent A'),('agent-b','workspace-b','Agent B')");
@@ -47,12 +50,15 @@ class BillingLedgerTest {
         model.setId("model-a");model.setModelType("LLM");model.setVendorName("DeepSeek");model.setModelName("Direct DeepSeek");
         when(modelDao.selectById("model-a")).thenReturn(model);
         contexts=new BillingContextService(jdbc,support,modelDao);
+        var platformServices=mock(xiaozhi.modules.platform.service.PlatformServiceAccountService.class);
+        when(platformServices.resolve(anyString(),anyString())).thenReturn("test-service");
+        org.springframework.test.util.ReflectionTestUtils.setField(contexts,"platformServices",platformServices);
         var outbox=mock(BillingInternalOutbox.class);when(outbox.status()).thenReturn(Map.of("status","READY"));
         usage=new BillingUsageService(jdbc,support,contexts,tx,Validation.buildDefaultValidatorFactory().getValidator(),outbox);
         permissions=mock(WorkspacePermissionService.class);when(permissions.currentWorkspaceId()).thenReturn("workspace-a");
         queries=new BillingQueryService(jdbc,permissions,mock(VolcengineBillingClient.class),outbox,support);
         bindings=new BillingBindingService(jdbc,queries);bills=new BillingBillService(jdbc,support,bindings);
-        UserDetail user=new UserDetail();user.setId(1L);user.setSuperAdmin(1);
+        UserDetail user=new UserDetail();user.setId(1L);user.setId(null);user.setAudience("OPS");user.setEmployeeId("finance-test");user.setGrants(java.util.List.of(new xiaozhi.modules.security.ops.OpsGrant("SUPPLIER_FINANCE","PLATFORM","platform-services",xiaozhi.modules.security.ops.OpsPermissionCatalog.TEMPLATES.get("SUPPLIER_FINANCE").permissions())));
         security=mockStatic(SecurityUser.class);security.when(SecurityUser::getUser).thenReturn(user);security.when(SecurityUser::getUserId).thenReturn(1L);
     }
     @AfterEach void close(){security.close();}
@@ -160,7 +166,7 @@ class BillingLedgerTest {
         bills.save(List.of(bill("BILL","bill-workspace",null,"5.0")));
         BillingFilter filtered=filter();filtered.setDeviceId("device-a");assertEquals(0,queries.bills(filtered).getTotal());
         assertEquals(1,queries.bills(filter()).getTotal());
-        UserDetail member=new UserDetail();member.setSuperAdmin(0);security.when(SecurityUser::getUser).thenReturn(member);
+        UserDetail member=new UserDetail();member.setAudience("USER");member.setId(1L);member.setEmployeeId(null);member.setGrants(java.util.List.of());security.when(SecurityUser::getUser).thenReturn(member);
         filtered.setUnattributed(true);assertThrows(RenException.class,()->queries.bills(filtered));
     }
 
@@ -188,17 +194,17 @@ class BillingLedgerTest {
         assertEquals(new BigDecimal("20.123456789"),visible.get("payableAmount"));
         assertEquals(new BigDecimal("12.500000000"),visible.get("paidAmount"));
         assertEquals("",((Map<?,?>)visible.get("supplierUsage")).get("ExpenseEndTime"));
-        assertEquals(0,queries.bills(filter()).getTotal());
+        assertEquals(1,queries.bills(filter()).getTotal());
         var groups=queries.groups(filter(),"agent");assertEquals(1,groups.getTotal());
         var group=groups.getList().getFirst();assertEquals(1L,group.get("callCount"));
-        assertEquals(List.of(),group.get("costs"));assertEquals("NO_ATTRIBUTABLE_BILLS",group.get("costStatus"));
+        assertFalse(group.containsKey("costs"));assertFalse(group.containsKey("costStatus"));
 
         BillingFilter afterBegin=filter();afterBegin.setStartDate("2026-10-02");afterBegin.setUnattributed(true);
         assertEquals(0,queries.bills(afterBegin).getTotal());
         BillingFilter beforeBegin=filter();beforeBegin.setStartDate("2026-09-01");beforeBegin.setEndDate("2026-09-30");beforeBegin.setUnattributed(true);
         assertEquals(0,queries.bills(beforeBegin).getTotal());
 
-        UserDetail admin=SecurityUser.getUser();UserDetail member=new UserDetail();member.setSuperAdmin(0);
+        UserDetail admin=SecurityUser.getUser();UserDetail member=new UserDetail();member.setAudience("USER");member.setId(1L);member.setEmployeeId(null);member.setGrants(java.util.List.of());
         security.when(SecurityUser::getUser).thenReturn(member);
         assertThrows(RenException.class,()->queries.bills(pendingFilter));
         security.when(SecurityUser::getUser).thenReturn(admin);
@@ -212,7 +218,8 @@ class BillingLedgerTest {
         assertEquals(LocalDateTime.parse("2026-10-01T01:00:00"),((java.sql.Timestamp)stored.get("expense_end")).toLocalDateTime());
         assertEquals(0,queries.bills(pendingFilter).getTotal());
         var attributed=queries.bills(filter());assertEquals(1,attributed.getTotal());assertEquals(id,attributed.getList().getFirst().get("id"));
-        var costs=(List<Map<String,Object>>)queries.groups(filter(),"agent").getList().getFirst().get("costs");
+        assertFalse(queries.groups(filter(),"agent").getList().getFirst().containsKey("costs"));
+        var costs=queries.bills(filter()).getList();
         assertEquals(1,costs.size());assertEquals(new BigDecimal("20.123456789"),costs.getFirst().get("payableAmount"));
         assertEquals(new BigDecimal("12.500000000"),costs.getFirst().get("paidAmount"));
     }
@@ -223,7 +230,8 @@ class BillingLedgerTest {
         bills.save(List.of(bill("BILL","bill-group",null,"0.123456789")));
         var groups=queries.groups(filter(),"agent");assertEquals(1,groups.getTotal());
         var row=groups.getList().getFirst();assertEquals(1L,row.get("callCount"));
-        var costs=(List<Map<String,Object>>)row.get("costs");
+        assertFalse(row.containsKey("costs"));
+        var costs=queries.bills(filter()).getList();
         assertEquals(new BigDecimal("0.123456789"),costs.getFirst().get("payableAmount"));
         assertNull(costs.getFirst().get("paidAmount"));
     }
@@ -234,12 +242,12 @@ class BillingLedgerTest {
         bills.save(List.of(bill("BILL","bill-filter",null,"5.0")));
         var filtered=filter();filtered.setPurpose("CONVERSATION");
         var group=queries.groups(filtered,"agent").getList().getFirst();
-        assertEquals("UNSUPPORTED_FILTER",group.get("costStatus"));assertEquals(List.of(),group.get("costs"));
+        assertFalse(group.containsKey("costStatus"));assertFalse(group.containsKey("costs"));
         assertThrows(RenException.class,()->queries.bills(filtered));
         filtered.setPurpose("BENCHMARK");assertEquals(0,queries.events(filtered).getTotal());
         assertEquals(0,queries.groups(filtered,"agent").getTotal());
         filtered.setPurpose(null);filtered.setModelId("model-a");
-        assertEquals("UNSUPPORTED_FILTER",queries.groups(filtered,"agent").getList().getFirst().get("costStatus"));
+        assertFalse(queries.groups(filtered,"agent").getList().getFirst().containsKey("costStatus"));
         assertThrows(RenException.class,()->queries.bills(filtered));
     }
 
@@ -259,8 +267,11 @@ class BillingLedgerTest {
         var parent=bill("BILL","bill-cash",null,"20");parent.put("paid_amount",new BigDecimal("3"));
         var detail=bill("DETAIL","bill-cash","detail-cash","20");
         tx.executeWithoutResult(status->bills.replacePeriod("VOLCENGINE","account-a","2026-10",List.of(parent,detail)));
-        var group=queries.groups(filter(),"agent").getList().getFirst();
-        var cost=((List<Map<String,Object>>)group.get("costs")).getFirst();
+        assertEquals(0,queries.groups(filter(),"agent").getTotal());
+        var supplierRows=queries.bills(filter()).getList();
+        var cost=supplierRows.stream().filter(row->"BILL".equals(row.get("level"))).findFirst().orElseThrow();
+        assertEquals(false,cost.get("aggregationIncluded"));
+        assertEquals(1,supplierRows.stream().filter(row->Boolean.TRUE.equals(row.get("aggregationIncluded"))).count());
         assertEquals(new BigDecimal("20.000000000"),cost.get("payableAmount"));
         assertEquals(new BigDecimal("3.000000000"),cost.get("paidAmount"));
         assertNull(cost.get("unpaidAmount"));

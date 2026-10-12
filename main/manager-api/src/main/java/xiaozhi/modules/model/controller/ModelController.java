@@ -81,7 +81,7 @@ public class ModelController {
 
     @GetMapping("/{modelType}/provideTypes")
     @Operation(summary = "获取模型供应器列表")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("model.catalog.read")
     public Result<List<ModelProviderDTO>> getModelProviderList(@PathVariable String modelType) {
         List<ModelProviderDTO> modelProviderDTOS = modelProviderService.getListByModelType(modelType);
         return new Result<List<ModelProviderDTO>>().ok(modelProviderDTOS);
@@ -89,7 +89,7 @@ public class ModelController {
 
     @GetMapping("/list")
     @Operation(summary = "获取模型配置列表")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("model.catalog.read")
     public Result<PageData<ModelConfigDTO>> getModelConfigList(
             @RequestParam(required = true) String modelType,
             @RequestParam(required = false) String modelName,
@@ -101,7 +101,7 @@ public class ModelController {
 
     @GetMapping("/catalog")
     @Operation(summary = "获取标准模型配置目录")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("model.catalog.read")
     public Result<List<ModelCatalogDTO>> getModelCatalog(
             @RequestParam(required = false) String modelType,
             @RequestParam(required = false) String providerCode,
@@ -120,7 +120,7 @@ public class ModelController {
 
     @GetMapping("/templates")
     @Operation(summary = "获取标准模型配置模板")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("model.catalog.read")
     public Result<List<ModelCatalogDTO>> getModelTemplates(
             @RequestParam(required = false) String modelType,
             @RequestParam(required = false) String providerCode,
@@ -132,7 +132,7 @@ public class ModelController {
 
     @PostMapping("/migration/preview")
     @Operation(summary = "预览模型配置标准化结果")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("model.catalog.write")
     public Result<List<ModelMigrationPreviewDTO>> previewModelMigration(
             @RequestParam(required = false) String modelType) {
         return new Result<List<ModelMigrationPreviewDTO>>().ok(modelCatalogService.previewMigration(modelType));
@@ -140,14 +140,14 @@ public class ModelController {
 
     @GetMapping("/assistant/settings")
     @Operation(summary = "获取模型配置助手设置")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("model.catalog.read")
     public Result<ModelAssistantSettingsDTO> getAssistantSettings() {
         return new Result<ModelAssistantSettingsDTO>().ok(modelAssistantService.getSettings());
     }
 
     @PutMapping("/assistant/settings")
     @Operation(summary = "更新模型配置助手设置")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("model.catalog.write")
     public Result<ModelAssistantSettingsDTO> updateAssistantSettings(
             @RequestBody ModelAssistantSettingsDTO settings) {
         return new Result<ModelAssistantSettingsDTO>().ok(modelAssistantService.updateSettings(settings));
@@ -155,7 +155,7 @@ public class ModelController {
 
     @PostMapping("/assistant/chat")
     @Operation(summary = "模型配置智能助手")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("model.catalog.test")
     public Result<ModelAssistantResponseDTO> chatWithAssistant(
             @RequestBody ModelAssistantRequestDTO request) {
         return new Result<ModelAssistantResponseDTO>().ok(modelAssistantService.chat(request));
@@ -163,7 +163,7 @@ public class ModelController {
 
     @PostMapping("/assistant/apply-artifacts")
     @Operation(summary = "模型配置助手写入接入产物")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("model.catalog.write")
     public Result<ModelAssistantApplyResponseDTO> applyAssistantArtifacts(
             @RequestBody ModelAssistantApplyRequestDTO request) {
         return new Result<ModelAssistantApplyResponseDTO>().ok(modelAssistantService.applyArtifacts(request));
@@ -171,7 +171,7 @@ public class ModelController {
 
     @PostMapping("/{modelType}/{provideCode}")
     @Operation(summary = "新增模型配置")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("model.catalog.write")
     public Result<ModelConfigDTO> addModelConfig(@PathVariable String modelType,
             @PathVariable String provideCode,
             @RequestBody ModelConfigBodyDTO modelConfigBodyDTO) {
@@ -182,7 +182,7 @@ public class ModelController {
 
     @PutMapping("/{modelType}/{provideCode}/{id}")
     @Operation(summary = "编辑模型配置")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("model.catalog.write")
     public Result<ModelConfigDTO> editModelConfig(@PathVariable String modelType,
             @PathVariable String provideCode,
             @PathVariable String id,
@@ -194,7 +194,7 @@ public class ModelController {
 
     @DeleteMapping("/{id}")
     @Operation(summary = "删除模型配置")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("model.catalog.write")
     public Result<Void> deleteModelConfig(@PathVariable String id) {
         modelConfigService.delete(id);
         return new Result<>();
@@ -202,7 +202,7 @@ public class ModelController {
 
     @PostMapping("/test/{id}")
     @Operation(summary = "测试模型配置")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("model.catalog.test")
     public Result<ModelTestResultDTO> testModelConfig(@PathVariable String id) {
         ModelTestResultDTO testResult = modelConfigService.testModel(id);
         if (Boolean.TRUE.equals(testResult.getSuccess())) {
@@ -215,7 +215,7 @@ public class ModelController {
 
     @PostMapping("/performance-test")
     @Operation(summary = "创建模型专业评测任务")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("model.catalog.test")
     public Result<ModelBenchmarkCreateResponseDTO> performanceTest(
             @RequestBody ModelPerformanceTestRequestDTO request) {
         return new Result<ModelBenchmarkCreateResponseDTO>().ok(modelBenchmarkService.createBenchmarkTask(request));
@@ -223,7 +223,7 @@ public class ModelController {
 
     @PostMapping("/benchmark/cases")
     @Operation(summary = "生成模型专业评测候选用例")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("model.catalog.test")
     public Result<ModelBenchmarkCaseGenerateResponseDTO> benchmarkCases(
             @RequestBody(required = false) ModelBenchmarkCaseGenerateRequestDTO request) {
         return new Result<ModelBenchmarkCaseGenerateResponseDTO>().ok(modelBenchmarkService.generateBenchmarkCases(request));
@@ -231,14 +231,14 @@ public class ModelController {
 
     @GetMapping("/benchmark/{taskId}")
     @Operation(summary = "获取模型专业评测任务")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("model.catalog.test")
     public Result<ModelBenchmarkTaskDTO> benchmarkTask(@PathVariable String taskId) {
         return new Result<ModelBenchmarkTaskDTO>().ok(modelBenchmarkService.getBenchmarkTask(taskId));
     }
 
     @GetMapping("/benchmark")
     @Operation(summary = "获取模型专业评测历史任务")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("model.catalog.test")
     public Result<List<ModelBenchmarkTaskDTO>> benchmarkTaskHistory(
             @RequestParam(required = false) String modelType,
             @RequestParam(required = false, defaultValue = "20") Integer limit) {
@@ -247,7 +247,7 @@ public class ModelController {
 
     @DeleteMapping("/benchmark/{taskId}")
     @Operation(summary = "删除模型专业评测历史任务")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("model.catalog.test")
     public Result<Void> deleteBenchmarkTask(@PathVariable String taskId) {
         modelBenchmarkService.deleteBenchmarkTask(taskId);
         return new Result<>();
@@ -255,14 +255,14 @@ public class ModelController {
 
     @GetMapping("/{id}")
     @Operation(summary = "获取模型配置")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("model.catalog.read")
     public Result<ModelConfigDTO> getModelConfig(@PathVariable String id) {
         return new Result<ModelConfigDTO>().ok(modelConfigService.getDTOById(id));
     }
 
     @PutMapping("/enable/{id}/{status}")
     @Operation(summary = "启用/设为非启用模型配置")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("model.catalog.write")
     public Result<Void> enableModelConfig(@PathVariable String id, @PathVariable Integer status) {
         ModelConfigEntity entity = modelConfigService.selectById(id);
         if (entity == null) {
@@ -280,7 +280,7 @@ public class ModelController {
 
     @PutMapping("/default/{id}")
     @Operation(summary = "设置默认模型")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("model.catalog.write")
     public Result<Void> setDefaultModel(@PathVariable String id) {
         ModelConfigEntity entity = modelConfigService.selectById(id);
         if (entity == null) {

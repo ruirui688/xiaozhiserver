@@ -107,7 +107,9 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
         workspacePermissionService.requireRead(workspaceId);
         return templateService.list(new LambdaQueryWrapper<AgentTemplateEntity>()
                         .and(q -> q.eq(AgentTemplateEntity::getWorkspaceId, workspaceId)
-                                .or().eq(AgentTemplateEntity::getVisibility, VISIBILITY_OFFICIAL)
+                                .or(officialTemplate -> officialTemplate
+                                        .eq(AgentTemplateEntity::getVisibility, VISIBILITY_OFFICIAL)
+                                        .eq(AgentTemplateEntity::getReviewStatus, REVIEW_APPROVED))
                                 .or(publicTemplate -> publicTemplate
                                         .eq(AgentTemplateEntity::getVisibility, VISIBILITY_PUBLIC)
                                         .eq(AgentTemplateEntity::getReviewStatus, REVIEW_APPROVED)))
@@ -301,20 +303,7 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
     @Override
     @Transactional(rollbackFor = Exception.class)
     public AgentTemplateSummaryVO submitForReview(String templateId) {
-        AgentTemplateEntity template = requireOwnedWorkspaceTemplate(templateId);
-        if (REVIEW_PENDING.equals(template.getReviewStatus())) {
-            throw new RenException("模板已在审核中");
-        }
-        template.setVisibility(VISIBILITY_WORKSPACE);
-        template.setReviewStatus(REVIEW_PENDING);
-        template.setReviewerId(null);
-        template.setReviewNote(null);
-        template.setReviewedAt(null);
-        template.setPublishedAt(null);
-        template.setPublicSnapshotJson(null);
-        touch(template);
-        templateService.updateById(template);
-        return toSummary(template);
+        throw new RenException("工作空间模板仅供空间内使用，官方模板由运营端独立创建并审批发布");
     }
 
     @Override
@@ -540,13 +529,14 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
         if (template == null) {
             throw new RenException(ErrorCode.RESOURCE_NOT_FOUND);
         }
-        if (VISIBILITY_OFFICIAL.equals(template.getVisibility())
-                || (VISIBILITY_PUBLIC.equals(template.getVisibility())
-                        && REVIEW_APPROVED.equals(template.getReviewStatus()))
-                || StringUtils.isBlank(template.getWorkspaceId())) {
+        if ((VISIBILITY_OFFICIAL.equals(template.getVisibility())
+                || VISIBILITY_PUBLIC.equals(template.getVisibility())
+                || StringUtils.isBlank(template.getWorkspaceId()))
+                && REVIEW_APPROVED.equals(template.getReviewStatus())) {
             return;
         }
-        if (!StringUtils.equals(template.getWorkspaceId(), targetWorkspaceId)) {
+        if (StringUtils.isBlank(template.getWorkspaceId())
+                || !StringUtils.equals(template.getWorkspaceId(), targetWorkspaceId)) {
             throw new RenException(ErrorCode.NO_PERMISSION);
         }
         workspacePermissionService.requireRead(template.getWorkspaceId());
@@ -873,12 +863,7 @@ public class AgentWorkspaceTemplateServiceImpl implements AgentWorkspaceTemplate
                 && (!VISIBILITY_OFFICIAL.equals(entity.getVisibility())
                         || officialPermissionService.isOfficialMaintainer()));
         vo.setReviewStatus(StringUtils.defaultIfBlank(entity.getReviewStatus(), REVIEW_DRAFT));
-        vo.setSubmittable(StringUtils.isNotBlank(entity.getWorkspaceId())
-                && workspacePermissionService.canWrite(entity.getWorkspaceId())
-                && VISIBILITY_WORKSPACE.equals(StringUtils.defaultIfBlank(
-                        entity.getVisibility(), VISIBILITY_WORKSPACE))
-                && (REVIEW_DRAFT.equals(StringUtils.defaultIfBlank(entity.getReviewStatus(), REVIEW_DRAFT))
-                        || REVIEW_REJECTED.equals(entity.getReviewStatus())));
+        vo.setSubmittable(false);
         vo.setOfficialMaintainer(officialPermissionService.isOfficialMaintainer());
         return vo;
     }

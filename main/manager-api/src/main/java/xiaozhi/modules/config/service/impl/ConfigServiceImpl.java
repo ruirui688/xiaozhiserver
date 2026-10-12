@@ -88,7 +88,7 @@ public class ConfigServiceImpl implements ConfigService {
     public Object getConfig(Boolean isCache) {
         if (isCache) {
             // 先从Redis获取配置
-            Object cachedConfig = redisUtils.get(RedisKeys.getServerConfigKey());
+            Object cachedConfig = redisUtils.get(RedisKeys.getServerConfigKey() + ":public-v2");
             if (cachedConfig != null) {
                 return cachedConfig;
             }
@@ -133,10 +133,8 @@ public class ConfigServiceImpl implements ConfigService {
                 isCache);
 
         // 将配置存入Redis
-        // TODO: The full config including API keys and secrets is cached in Redis.
-        // Consider encrypting sensitive values before caching (e.g. AES-GCM with a
-        // per-deployment key stored as an env var or Vault secret).
-        redisUtils.set(RedisKeys.getServerConfigKey(), result);
+        // Catalog contains public settings; execution credentials are admission-only.
+        redisUtils.set(RedisKeys.getServerConfigKey() + ":public-v2", result);
 
         return result;
     }

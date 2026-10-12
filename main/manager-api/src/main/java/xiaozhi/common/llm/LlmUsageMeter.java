@@ -28,13 +28,16 @@ import xiaozhi.modules.billing.service.BillingUsageRecorder.InternalUsage;
 public class LlmUsageMeter {
     private final BillingUsageRecorder recorder;
 
-    public LlmUsageMeter(BillingUsageRecorder recorder) {
-        this.recorder = recorder;
+    private final PlatformJavaExecutor platform;
+    public LlmUsageMeter(BillingUsageRecorder recorder, PlatformJavaExecutor platform) {
+        this.recorder = recorder; this.platform = platform;
     }
 
     public <T> ResponseEntity<T> exchange(RestTemplate client, String endpoint,
             HttpEntity<?> request, Class<T> responseType, String modelId, String serviceType) {
         LlmUsageContext.Identity identity = LlmUsageContext.current();
+        PlatformJavaExecutor.Call call = platform.prepare(identity, request, modelId, serviceType);
+        endpoint = call.endpoint(); request = call.request();
         Instant started = Instant.now();
         String eventId = UUID.randomUUID().toString();
         String responseBody = null;
@@ -50,6 +53,8 @@ public class LlmUsageMeter {
             responseBody = error.getResponseBodyAsString();
             throw error;
         } finally {
+            List<Usage> platformUsage = parseUsage(parseObject(responseBody), serviceType);
+            platform.finish(call, successful, platformUsage, complete(platformUsage, serviceType), requestId);
             record(identity, eventId, modelId, serviceType, endpoint, started,
                     successful, responseBody, requestId);
         }

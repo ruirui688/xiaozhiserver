@@ -27,7 +27,8 @@ import xiaozhi.common.utils.MessageUtils;
 import xiaozhi.modules.security.entity.SysUserTokenEntity;
 import xiaozhi.modules.security.service.ShiroService;
 import xiaozhi.modules.sys.entity.SysUserEntity;
-import xiaozhi.modules.sys.enums.SuperAdminEnum;
+import xiaozhi.modules.security.ops.OpsIdentityService;
+import xiaozhi.modules.security.ops.OpsAccess;
 
 /**
  * 认证
@@ -39,6 +40,8 @@ public class Oauth2Realm extends AuthorizingRealm {
     @Lazy
     @Resource
     private ShiroService shiroService;
+    @Resource private OpsIdentityService opsIdentities;
+    public Oauth2Realm() { setCachingEnabled(false); }
 
     private static final Logger logger = LoggerFactory.getLogger(Oauth2Realm.class);
 
@@ -57,12 +60,9 @@ public class Oauth2Realm extends AuthorizingRealm {
         // 用户权限列表
         Set<String> permsSet = new HashSet<>();
 
-        if (user.getSuperAdmin() == SuperAdminEnum.YES.value()) {
-            permsSet.add("sys:role:superAdmin");
-            permsSet.add("sys:role:normal");
-        } else {
-            permsSet.add("sys:role:normal");
-        }
+        if (OpsAccess.isUser(user)) permsSet.add("sys:role:normal");
+        else if ("OPS".equals(user.getAudience()) && user.getEmployeeId() != null)
+            user.getGrants().forEach(grant -> permsSet.addAll(grant.permissions()));
 
         SimpleAuthorizationInfo info = new SimpleAuthorizationInfo();
         info.setStringPermissions(permsSet);
@@ -76,20 +76,26 @@ public class Oauth2Realm extends AuthorizingRealm {
     protected AuthenticationInfo doGetAuthenticationInfo(AuthenticationToken token) throws AuthenticationException {
         String accessToken = (String) token.getPrincipal();
 
+        if (accessToken != null && accessToken.startsWith("ops_")) {
+            try { return new SimpleAuthenticationInfo(opsIdentities.authenticate(accessToken), accessToken, getName()); }
+            catch (Exception exception) { throw new IncorrectCredentialsException("员工会话无效"); }
+        }
         // 根据accessToken，查询用户信息
         SysUserTokenEntity tokenEntity = shiroService.getByToken(accessToken);
         // token失效
-        if (tokenEntity == null || tokenEntity.getExpireDate().getTime() < System.currentTimeMillis()) {
+        if (tokenEntity == null || !"USER".equals(tokenEntity.getAudience()) || tokenEntity.getExpireDate().getTime() < System.currentTimeMillis()) {
             throw new IncorrectCredentialsException(MessageUtils.getMessage(ErrorCode.TOKEN_INVALID));
         }
 
         // 查询用户信息
         SysUserEntity userEntity = shiroService.getUser(tokenEntity.getUserId());
 
+        if (userEntity == null) throw new IncorrectCredentialsException("用户不存在");
         // 转换成UserDetail对象
         UserDetail userDetail = ConvertUtils.sourceToTarget(userEntity, UserDetail.class);
 
         userDetail.setToken(accessToken);
+        userDetail.setAudience("USER");
 
         // 账号锁定
         if (userDetail.getStatus() == null) {

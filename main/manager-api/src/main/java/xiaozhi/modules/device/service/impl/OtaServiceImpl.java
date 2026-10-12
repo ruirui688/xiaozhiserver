@@ -40,42 +40,23 @@ public class OtaServiceImpl extends BaseServiceImpl<OtaDao, OtaEntity> implement
 
     @Override
     public void update(OtaEntity entity) {
-        // 检查是否存在相同类型和版本的固件（排除当前记录）
-        QueryWrapper<OtaEntity> queryWrapper = new QueryWrapper<OtaEntity>()
-                .eq("type", entity.getType())
-                .eq("version", entity.getVersion())
-                .ne("id", entity.getId()); // 排除当前记录
-
-        if (baseDao.selectCount(queryWrapper) > 0) {
-            throw new RuntimeException("已存在相同类型和版本的固件，请修改后重试");
-        }
-
-        entity.setUpdateDate(new Date());
-        baseDao.updateById(entity);
+        throw new xiaozhi.common.exception.RenException("已发布固件不可原地修改");
     }
 
     @Override
     public void delete(String[] ids) {
-        baseDao.deleteBatchIds(Arrays.asList(ids));
+        throw new xiaozhi.common.exception.RenException("已发布固件不可删除");
     }
 
     @Override
     public boolean save(OtaEntity entity) {
-        QueryWrapper<OtaEntity> queryWrapper = new QueryWrapper<OtaEntity>()
-                .eq("type", entity.getType());
-        // 同类固件只保留最新的一条
-        List<OtaEntity> otaList = baseDao.selectList(queryWrapper);
-        if (otaList != null && otaList.size() > 0) {
-            OtaEntity otaBefore = otaList.get(0);
-            entity.setId(otaBefore.getId());
-            baseDao.updateById(entity);
-            return true;
-        }
-        return baseDao.insert(entity) > 0;
+        throw new xiaozhi.common.exception.RenException("固件发布必须经过审批入口");
     }
 
     @Override
     public OtaEntity getLatestOta(String type) {
+        OtaEntity published = baseDao.selectPublishedChannel(type);
+        if (published != null) return published;
         QueryWrapper<OtaEntity> wrapper = new QueryWrapper<>();
         wrapper.eq("type", type)
                 .orderByDesc("update_date")

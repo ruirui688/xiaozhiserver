@@ -4,6 +4,8 @@ import Vue from 'vue';
 import ElementUI from 'element-ui';
 import App from './App.vue';
 import router from './router';
+import { setNavigationRouter } from './router/navigation';
+setNavigationRouter(router);
 import store from './store';
 import i18n from './i18n';
 import './styles/global.scss';

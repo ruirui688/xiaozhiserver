@@ -18,16 +18,16 @@ public class BillingBindingService {
     public xiaozhi.common.page.PageData<Map<String,Object>> page(int page,int limit) {
         BillingQueryService.requireAdmin();
         if(page<1 || page>1_000_000 || limit<1 || limit>100)throw new RenException("分页参数无效");
-        String workspace=queries.workspace();
-        long total=jdbc.queryForObject("SELECT COUNT(*) FROM ai_billing_binding WHERE workspace_id=?",Long.class,workspace);
-        var rows=jdbc.queryForList("SELECT id,provider,account_ref accountRef,scope_type scopeType,scope_value scopeValue,workspace_id workspaceId,agent_id agentId,device_id deviceId,valid_from validFrom,valid_to validTo,note FROM ai_billing_binding WHERE workspace_id=? ORDER BY valid_from DESC,id LIMIT ? OFFSET ?",workspace,limit,(page-1)*limit);
+        long total=jdbc.queryForObject("SELECT COUNT(*) FROM ai_billing_binding",Long.class);
+        var rows=jdbc.queryForList("SELECT id,provider,account_ref accountRef,scope_type scopeType,scope_value scopeValue,workspace_id workspaceId,agent_id agentId,device_id deviceId,valid_from validFrom,valid_to validTo,note FROM ai_billing_binding ORDER BY valid_from DESC,id LIMIT ? OFFSET ?",limit,(page-1)*limit);
         return new xiaozhi.common.page.PageData<>(rows,total);
     }
 
     @Transactional
     public Map<String, Object> save(BillingBindingRequest request) {
-        BillingQueryService.requireAdmin(); String workspace = queries.workspace();
-        if (!workspace.equals(request.getWorkspaceId())) throw new RenException("计费绑定必须属于当前工作空间");
+        xiaozhi.modules.security.ops.OpsAccess.require("supplier.bill.import","PLATFORM","platform-services");
+        String workspace = request.getWorkspaceId();
+        if(jdbc.queryForObject("SELECT COUNT(*) FROM sys_workspace WHERE id=? AND status=1",Integer.class,workspace)!=1) throw new RenException("目标工作空间不存在或已停用");
         if (request.getValidTo()!=null && !request.getValidFrom().isBefore(request.getValidTo())) throw new RenException("绑定有效时间无效");
         checkResource("ai_agent", request.getAgentId(), workspace); checkResource("ai_device", request.getDeviceId(), workspace);
         String id = request.getId() == null || request.getId().isBlank() ? UUID.randomUUID().toString() : request.getId();
@@ -37,6 +37,7 @@ public class BillingBindingService {
             if (previous.isEmpty() || !workspace.equals(previous.getFirst().get("workspace_id"))) throw new RenException("绑定不存在");
             if (!request.getProvider().equals(previous.getFirst().get("provider")) || !request.getAccountRef().equals(previous.getFirst().get("account_ref"))) throw new RenException("供应商账号不能修改，请新建绑定");
             if (jdbc.queryForObject("SELECT COUNT(*) FROM ai_billing_bill WHERE binding_id=?",Long.class,id)>0) {
+                audit("bill.binding.retire",id);
                 return retireReferenced(request,workspace);
             }
         }
@@ -53,16 +54,21 @@ public class BillingBindingService {
         row.put("note", request.getNote()); row.put("created_by", SecurityUser.getUserId()); row.put("created_at", BillingSupport.time(Instant.now()));
         jdbc.update("DELETE FROM ai_billing_binding WHERE id=?", id);
         BillingUsageService.insert(jdbc, "ai_billing_binding", row);
+        audit("bill.binding.save",id);
         return Map.of("id", id, "status", "RESYNC_REQUIRED");
     }
 
     @Transactional
     public void delete(String id) {
-        BillingQueryService.requireAdmin(); String workspace = queries.workspace();
-        var rows = jdbc.queryForList("SELECT provider,account_ref FROM ai_billing_binding WHERE id=? AND workspace_id=?", id, workspace);
+        xiaozhi.modules.security.ops.OpsAccess.require("supplier.bill.import","PLATFORM","platform-services");
+        var rows = jdbc.queryForList("SELECT provider,account_ref FROM ai_billing_binding WHERE id=?", id);
         if (rows.isEmpty()) throw new RenException("绑定不存在");
         lockAccount(rows.getFirst().get("provider").toString(), rows.getFirst().get("account_ref").toString());
-        requireUnused(id); jdbc.update("DELETE FROM ai_billing_binding WHERE id=? AND workspace_id=?", id, workspace);
+        requireUnused(id); jdbc.update("DELETE FROM ai_billing_binding WHERE id=?", id); audit("bill.binding.delete",id);
+    }
+
+    private void audit(String action,String id) {
+        jdbc.update("INSERT INTO ops_audit_event(id,actor_id,action,target_id,outcome) VALUES(?,?,?,?,?)",UUID.randomUUID().toString(),xiaozhi.modules.security.ops.OpsAccess.employee().getEmployeeId(),action,id,"SUCCESS");
     }
 
     void lockAccount(String provider, String accountRef) {

@@ -84,6 +84,9 @@ public class MemoryRebuildTaskServiceImpl implements MemoryRebuildTaskService {
     @Override
     public MemoryRebuildTaskVO startRebuild(String agentId, MemoryRebuildRequestDTO request,
                                             String actorType, String actorId) {
+        xiaozhi.modules.security.ops.OpsAccess.requireUser();
+        org.apache.shiro.subject.Subject subject = xiaozhi.modules.security.user.SecurityUser.getSubject();
+        if (subject == null || !subject.isAuthenticated()) throw new RenException("记忆重建需要已认证用户身份");
         AgentEntity agent = agentDao.selectById(agentId);
         if (agent == null) {
             throw new RenException("智能体不存在");
@@ -126,8 +129,21 @@ public class MemoryRebuildTaskServiceImpl implements MemoryRebuildTaskService {
 
         Future<?> future = null;
         try {
-            future = taskExecutor.submit(
-                    () -> runTask(taskId, normalizedRequest, actorType, actorId));
+            Thread caller = Thread.currentThread();
+            Runnable authenticatedWork = subject.associateWith(
+                    (Runnable) () -> runTask(taskId, normalizedRequest, actorType, actorId));
+            future = taskExecutor.submit(() -> {
+                boolean workerThread = Thread.currentThread() != caller;
+                // Shiro inherits request resources when a pool first creates a worker.
+                // Clear that inherited state, otherwise associateWith would restore it afterward.
+                // A synchronous executor must preserve the calling request's existing identity.
+                if (workerThread) org.apache.shiro.util.ThreadContext.remove();
+                try {
+                    authenticatedWork.run();
+                } finally {
+                    if (workerThread) org.apache.shiro.util.ThreadContext.remove();
+                }
+            });
             Future<?> submittedFuture = future;
             taskScheduler.schedule(() -> timeoutTask(taskId, submittedFuture),
                     Instant.ofEpochMilli(task.getDeadlineAt().getTime()));

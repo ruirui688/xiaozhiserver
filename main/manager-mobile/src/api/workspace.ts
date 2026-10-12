@@ -7,7 +7,10 @@ export interface Workspace {
   name: string
   currentUserRole: WorkspaceRole
   canWrite: boolean
+  ownerUserId: number
+  defaultWorkspace: number
 }
+
 
 export interface WorkspaceMember {
   userId: number

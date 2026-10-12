@@ -58,7 +58,7 @@ public class WorkspaceController {
     }
 
     @PostMapping
-    @Operation(summary = "创建工作空间（已禁用，仅保留默认工作空间）")
+    @Operation(summary = "创建工作空间（已禁用，默认工作空间支持邀请协作）")
     @RequiresPermissions("sys:role:normal")
     public Result<WorkspaceVO> create(@RequestBody @Validated WorkspaceCreateDTO dto) {
         return new Result<WorkspaceVO>().ok(workspaceService.createWorkspace(dto));

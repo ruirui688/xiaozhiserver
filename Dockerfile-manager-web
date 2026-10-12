@@ -15,7 +15,7 @@ ENV VUE_APP_PUBLIC_PATH=${VUE_APP_PUBLIC_PATH}
 ENV VUE_APP_USE_CDN=${VUE_APP_USE_CDN}
 COPY main/manager-web/babel.config.js main/manager-web/jsconfig.json main/manager-web/vue.config.js ./
 COPY main/manager-web/src ./src
-COPY main/manager-web/public/favicon.ico main/manager-web/public/index.html main/manager-web/public/offline.html main/manager-web/public/privacy-policy.html main/manager-web/public/user-agreement.html ./public/
+COPY main/manager-web/public/favicon.ico main/manager-web/public/index.html main/manager-web/public/ops.html main/manager-web/public/offline.html main/manager-web/public/privacy-policy.html main/manager-web/public/user-agreement.html ./public/
 RUN npm run build
 
 FROM ${WEB_RUNTIME_BASE_IMAGE}

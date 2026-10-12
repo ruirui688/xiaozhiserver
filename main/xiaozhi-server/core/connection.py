@@ -1796,6 +1796,7 @@ class ConnectionHandler:
                 current_abort_generation, depth,
                 text=("这次内容较长，请缩短问题或分几次发送。"
                       if isinstance(e, PromptBudgetExceeded) else None),
+                error=e,
             )
 
         # 处理流式响应
@@ -1984,6 +1985,7 @@ class ConnectionHandler:
             return queue_llm_error_reply(
                 self, current_sentence_id, current_reply_generation,
                 current_abort_generation, depth,
+                error=e,
             )
         finally:
             close_stream = getattr(llm_responses, "close", None)

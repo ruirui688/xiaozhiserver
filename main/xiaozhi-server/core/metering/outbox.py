@@ -22,6 +22,7 @@ class UsageOutbox:
         os.close(descriptor)
         os.chmod(path, 0o600)
         self._lock = threading.RLock()
+        self._delivery_cursor = 0
         self._db = sqlite3.connect(path, check_same_thread=False, timeout=10)
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=FULL")
@@ -77,6 +78,20 @@ class UsageOutbox:
             return [json.loads(row[0]) for row in self._db.execute(
                 "SELECT payload FROM usage_outbox WHERE active=0 ORDER BY rowid LIMIT ?", (limit,)
             ).fetchall()]
+
+    def delivery_batch(self, limit=50):
+        """Round-robin retries retain failed receipts without starving later rows."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT rowid,payload FROM usage_outbox WHERE active=0 AND rowid>? ORDER BY rowid LIMIT ?",
+                (self._delivery_cursor, limit),
+            ).fetchall()
+            if not rows:
+                rows = self._db.execute(
+                    "SELECT rowid,payload FROM usage_outbox WHERE active=0 ORDER BY rowid LIMIT ?", (limit,)
+                ).fetchall()
+            self._delivery_cursor = rows[-1][0] if rows else 0
+            return [json.loads(row[1]) for row in rows]
 
     def acknowledge(self, event_ids):
         with self._write():

@@ -2,7 +2,7 @@
 {
   "layout": "default",
   "style": {
-    "navigationBarTitleText": "组织管理",
+    "navigationBarTitleText": "工作空间",
     "navigationStyle": "custom"
   }
 }
@@ -105,15 +105,14 @@ function isSelf(member: WorkspaceMember) {
 }
 
 function canChangeRole(member: WorkspaceMember) {
-  return isOwner.value && !isSelf(member)
+  return isOwner.value && member.role !== 'OWNER' && !isSelf(member)
 }
 
 function canRemoveMember(member: WorkspaceMember) {
-  if (!canWrite.value || isSelf(member))
+  // Removing another member stays an owner action; a writer without ownership cannot do it.
+  if (!canWrite.value || !isOwner.value || member.role === 'OWNER' || isSelf(member))
     return false
-  if (isOwner.value)
-    return true
-  return member.role !== 'OWNER'
+  return true
 }
 
 async function loadWorkspaces(preferredWorkspaceId = currentWorkspaceId.value) {
@@ -188,6 +187,8 @@ async function acceptInvitation() {
 }
 
 async function inviteMember() {
+  if (!canWrite.value)
+    return
   const username = inviteForm.username.trim()
   if (!currentWorkspaceId.value || !username)
     return toast.warning('请输入用户名')
@@ -207,6 +208,7 @@ async function inviteMember() {
     toast.warning(getErrorMessage(error, '邀请生成失败'))
   }
 }
+
 
 function confirmRevokeInvitation(invitation: WorkspaceInvitation) {
   if (!currentWorkspaceId.value || !canWrite.value)
@@ -312,7 +314,7 @@ function confirmLeaveWorkspace() {
 }
 
 onMounted(async () => {
-  uni.setNavigationBarTitle({ title: '组织管理' })
+  uni.setNavigationBarTitle({ title: '工作空间' })
   if (!userStore.userInfo.id)
     await userStore.getUserInfo()
   await loadWorkspaces()
@@ -321,7 +323,7 @@ onMounted(async () => {
 
 <template>
   <view class="min-h-screen bg-[#f5f7fb]">
-    <wd-navbar title="组织管理" placeholder safe-area-inset-top fixed left-arrow @click-left="goBack" />
+    <wd-navbar title="工作空间" placeholder safe-area-inset-top fixed left-arrow @click-left="goBack" />
 
     <view class="px-[24rpx] pb-[40rpx] pt-[20rpx]">
       <view class="mb-[22rpx] rounded-[18rpx] bg-white p-[20rpx]">

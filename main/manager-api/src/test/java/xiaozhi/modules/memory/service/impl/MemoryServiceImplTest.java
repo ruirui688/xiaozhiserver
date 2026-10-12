@@ -95,6 +95,16 @@ class MemoryServiceImplTest {
 
     private MemoryServiceImpl memoryService;
     private MemoryMaintenanceServiceImpl memoryMaintenanceService;
+    private org.mockito.MockedStatic<xiaozhi.modules.security.user.SecurityUser> security;
+    private org.mockito.MockedStatic<xiaozhi.common.utils.SpringContextUtils> context;
+    private xiaozhi.common.user.UserDetail principal;
+    private final xiaozhi.modules.workspace.service.WorkspaceService workspaces = mock(xiaozhi.modules.workspace.service.WorkspaceService.class);
+
+    @org.junit.jupiter.api.AfterEach
+    void closeIdentityContext() {
+        if (context != null) context.close();
+        if (security != null) security.close();
+    }
 
     @org.junit.jupiter.api.AfterEach
     void everyPersistedRevisionRequestsRuntimeInvalidation() {
@@ -107,6 +117,13 @@ class MemoryServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        principal=new xiaozhi.common.user.UserDetail();principal.setId(1001L);principal.setAudience("USER");
+        security=org.mockito.Mockito.mockStatic(xiaozhi.modules.security.user.SecurityUser.class);
+        security.when(xiaozhi.modules.security.user.SecurityUser::getUser).thenAnswer(call->principal);
+        security.when(xiaozhi.modules.security.user.SecurityUser::getUserId).thenAnswer(call->principal.getId());
+        context=org.mockito.Mockito.mockStatic(xiaozhi.common.utils.SpringContextUtils.class);
+        context.when(()->xiaozhi.common.utils.SpringContextUtils.getBean(xiaozhi.modules.workspace.service.WorkspaceService.class)).thenReturn(workspaces);
+        when(workspaces.canRead("workspace-a",1001L)).thenReturn(true);
         MemoryQueryServiceImpl memoryQueryService = new MemoryQueryServiceImpl(
                 factDao,
                 profileDao,
@@ -149,6 +166,7 @@ class MemoryServiceImplTest {
         AgentEntity agent = new AgentEntity();
         agent.setId(AGENT_ID);
         agent.setUserId(1001L);
+        agent.setWorkspaceId("workspace-a");
         agent.setMemModelId(MEMORY_MODEL_ID);
         when(agentDao.selectById(AGENT_ID)).thenReturn(agent);
         var boundDevice = new xiaozhi.modules.device.entity.DeviceEntity();
@@ -181,6 +199,13 @@ class MemoryServiceImplTest {
             TransactionCallback<Object> callback = invocation.getArgument(0);
             return callback.doInTransaction(mock(TransactionStatus.class));
         });
+    }
+
+    @Test
+    void operationsIdentityCannotReadTenantMemoryEvenWhenWorkspaceMockAllowsRead() {
+        principal.setAudience("OPS");principal.setEmployeeId("operator");
+        assertThrows(IllegalArgumentException.class,()->memoryService.reviewActiveMemories(AGENT_ID,true,"user","operator"));
+        verify(factDao,never()).selectList(any(Wrapper.class));
     }
 
     @Test

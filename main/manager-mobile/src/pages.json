@@ -32,10 +32,10 @@
         "text": "首页"
       },
       {
-        "iconPath": "static/tabbar/system.png",
-        "selectedIconPath": "static/tabbar/system_activate.png",
+        "iconPath": "static/tabbar/personal.png",
+        "selectedIconPath": "static/tabbar/personalHL.png",
         "pagePath": "pages/settings/index",
-        "text": "系统"
+        "text": "我的"
       }
     ]
   },
@@ -86,6 +86,16 @@
       "layout": "default",
       "style": {
         "navigationBarTitleText": "编辑功能",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/allowance/index",
+      "type": "page",
+      "needLogin": true,
+      "layout": "default",
+      "style": {
+        "navigationBarTitleText": "额度与用量",
         "navigationStyle": "custom"
       }
     },
@@ -187,7 +197,7 @@
       "type": "page",
       "layout": "default",
       "style": {
-        "navigationBarTitleText": "组织管理",
+        "navigationBarTitleText": "工作空间",
         "navigationStyle": "custom"
       }
     },
@@ -203,9 +213,10 @@
     {
       "path": "pages/settings/index",
       "type": "page",
+      "needLogin": true,
       "layout": "default",
       "style": {
-        "navigationBarTitleText": "设置",
+        "navigationBarTitleText": "我的",
         "navigationStyle": "custom"
       }
     },

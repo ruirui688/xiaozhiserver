@@ -22,6 +22,7 @@ from core.utils.llm import create_instance as create_llm_instance
 from core.providers.realtime.registry import create_realtime_probe
 from core.benchmark.security import sanitize_benchmark_error
 from core.metering import snapshot, usage_scope
+from core.metering.admission import validate_adapter
 
 
 BENCHMARK_RUNTIME_DIR = os.path.join(tempfile.gettempdir(), "xiaozhi-benchmark")
@@ -90,6 +91,7 @@ async def _run_model(
     model_type = str(model.get("model_type") or "").upper()
     provider_type = str(model.get("provider_type") or model.get("config", {}).get("type") or "")
     config = _prepare_runtime_config(model.get("config") or {})
+    validate_adapter("LLM" if model_type in {"LLM", "SLM", "VLLM"} else model_type, provider_type, config)
     if provider_type in {"doubao_duplex", "doubao-duplex"}:
         if model_type != "LLM" or config.get("conversation_mode") != "realtime":
             return _unsupported_result(model, "豆包3.0必须作为Realtime主模型")

@@ -10,6 +10,7 @@ from core.providers.llm.base import LLMProviderBase
 from core.observability.session_telemetry import contextual_latency_span
 from urllib.parse import urlparse
 from core.metering.openai_stream import metered_stream
+from core.metering.admission import configure_provider
 
 TAG = __name__
 logger = setup_logging()
@@ -29,6 +30,7 @@ class LLMProvider(LLMProviderBase):
     supports_parallel_tool_calls = True
 
     def __init__(self, config):
+        configure_provider(self, config)
         tool_choice_support = config.get("supports_tool_choice", True)
         self.supports_tool_choice = str(tool_choice_support).strip().lower() not in {
             "0",
@@ -44,7 +46,7 @@ class LLMProvider(LLMProviderBase):
             "off",
         }
         self.model_name = config.get("model_name")
-        self.api_key = config.get("api_key")
+        self.api_key = config.get("api_key") or ("platform-managed" if self._platform_managed else None)
         if "base_url" in config:
             self.base_url = config.get("base_url")
         else:

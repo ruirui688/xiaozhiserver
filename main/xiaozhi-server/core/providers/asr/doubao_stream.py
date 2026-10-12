@@ -5,6 +5,8 @@ import time
 import uuid
 import asyncio
 from core.metering import begin_call, snapshot
+from core.metering.recorder import begin_call_async
+from core.metering.admission import configure_provider
 from core.metering.volcengine import asr_usage
 import websockets
 import opuslib_next
@@ -23,6 +25,7 @@ logger = setup_logging()
 class ASRProvider(ASRProviderBase):
     def __init__(self, config, delete_audio_file):
         super().__init__()
+        configure_provider(self, config)
         self.interface_type = InterfaceType.STREAM
         self.config = config
         self.text = ""
@@ -36,7 +39,7 @@ class ASRProvider(ASRProviderBase):
         self._stop_sent_at = None
         self._stop_sent_times = {}
 
-        self.api_key = config.get("api_key")
+        self.api_key = config.get("api_key") or ("platform-managed" if self._platform_managed else None)
         if not self.api_key:
             raise ValueError("豆包流式语音识别模型2.0需要配置 api_key")
         self.resource_id = config.get("resource_id", "volc.seedasr.sauc.duration")
@@ -119,7 +122,15 @@ class ASRProvider(ASRProviderBase):
                 self.text = ""
                 self.utterances = []
                 # 建立新的WebSocket连接
+                request_id = str(uuid.uuid4())
+                usage_call = await begin_call_async(self, "ASR", scope=snapshot(conn), request_id=request_id,
+                                                     max_usage={"audio_duration": "5000"})
                 headers = self.token_auth()
+                ws_url = self.ws_url
+                if usage_call.permit:
+                    headers["X-Api-Key"] = usage_call.permit.secret()
+                    headers["X-Api-Resource-Id"] = usage_call.permit.runtime.get("resource_id", self.resource_id)
+                    ws_url = usage_call.permit.endpoint("ws_url")
                 safe_headers = {
                     key: "***"
                     if key.lower() in ("authorization", "api-key", "x-api-key")
@@ -128,10 +139,9 @@ class ASRProvider(ASRProviderBase):
                 }
                 logger.bind(tag=TAG).info(f"正在连接ASR服务，headers: {safe_headers}")
 
-                request_id = str(uuid.uuid4())
-                usage_call = begin_call(self, "ASR", scope=snapshot(conn), request_id=request_id)
+                await asyncio.to_thread(usage_call.start)
                 self.asr_ws = await websockets.connect(
-                    self.ws_url,
+                    ws_url,
                     additional_headers=headers,
                     max_size=1000000000,
                     ping_interval=None,
@@ -143,6 +153,7 @@ class ASRProvider(ASRProviderBase):
                 if not hasattr(self, "_billing_asr_calls"):
                     self._billing_asr_calls = {}
                 self._billing_asr_calls[id(self.asr_ws)] = usage_call
+                usage_call.watch(self.asr_ws)
                 request_params = self.construct_request(request_id)
                 try:
                     payload_bytes = str.encode(json.dumps(request_params))
@@ -169,18 +180,18 @@ class ASRProvider(ASRProviderBase):
                             f"timeout={self.init_timeout_seconds:.1f}s"
                         ) from exc
                     result = self.parse_response(init_res)
-                    logger.bind(tag=TAG).info(f"收到初始化响应: {result}")
+                    logger.bind(tag=TAG).info("收到ASR初始化响应")
 
                     # 检查初始化响应
                     if "code" in result and result["code"] != 1000:
-                        error_msg = f"ASR服务初始化失败: {result.get('payload_msg', {}).get('error', '未知错误')}"
+                        error_msg = "ASR服务初始化失败"
                         logger.bind(tag=TAG).error(error_msg)
                         raise Exception(error_msg)
 
                 except Exception as e:
-                    logger.bind(tag=TAG).error(f"发送初始化请求失败: {str(e)}")
+                    logger.bind(tag=TAG).error(f"发送初始化请求失败: {type(e).__name__}")
                     if hasattr(e, "__cause__") and e.__cause__:
-                        logger.bind(tag=TAG).error(f"错误原因: {str(e.__cause__)}")
+                        logger.bind(tag=TAG).error(f"错误类型: {type(e.__cause__).__name__}")
                     raise e
 
                 # 启动接收ASR结果的异步任务
@@ -208,9 +219,9 @@ class ASRProvider(ASRProviderBase):
             except Exception as e:
                 if "usage_call" in locals():
                     usage_call.finish("FAILED")
-                logger.bind(tag=TAG).error(f"建立ASR连接失败: {str(e)}")
+                logger.bind(tag=TAG).error(f"建立ASR连接失败: {type(e).__name__}")
                 if hasattr(e, "__cause__") and e.__cause__:
-                    logger.bind(tag=TAG).error(f"错误原因: {str(e.__cause__)}")
+                    logger.bind(tag=TAG).error(f"错误类型: {type(e.__cause__).__name__}")
                 if self.asr_ws:
                     await self.asr_ws.close()
                     self.asr_ws = None
@@ -231,7 +242,7 @@ class ASRProvider(ASRProviderBase):
             try:
                 await self._send_audio_frame(audio, self.asr_ws)
             except Exception as e:
-                logger.bind(tag=TAG).info(f"发送音频数据时发生错误: {e}")
+                logger.bind(tag=TAG).info(f"发送音频数据时发生错误: {type(e).__name__}")
 
         # 自动/实时模式只使用本地 VAD 检测句首和处理 barge-in，句尾由豆包
         # 内部 VAD 根据 end_window_size 判定，并以 definite=true 返回最终结果。
@@ -246,8 +257,15 @@ class ASRProvider(ASRProviderBase):
         audio_request = bytearray(self.generate_audio_default_header())
         audio_request.extend(len(payload).to_bytes(4, "big"))
         audio_request.extend(payload)
-        await target_ws.send(audio_request)
         usage_call = getattr(self, "_billing_asr_calls", {}).get(id(target_ws))
+        if usage_call and usage_call.permit:
+            try:
+                await asyncio.to_thread(usage_call.permit.consume, "audio_duration", len(pcm_frame) / 32)
+            except Exception:
+                await target_ws.close()
+                usage_call.finish("UNKNOWN")
+                raise
+        await target_ws.send(audio_request)
         if usage_call:
             usage_call.usage("submitted_audio_duration", len(pcm_frame) / 32,
                              "milliseconds", "OBSERVED", add=True)
@@ -327,7 +345,7 @@ class ASRProvider(ASRProviderBase):
                         session_ws, stop_sent_event
                     )
                     result = self.parse_response(response)
-                    logger.bind(tag=TAG).debug(f"收到ASR结果: {result}")
+                    logger.bind(tag=TAG).debug("收到ASR结果")
 
                     if "payload_msg" in result:
                         payload = result["payload_msg"]
@@ -430,8 +448,7 @@ class ASRProvider(ASRProviderBase):
                         elif "error" in payload:
                             if usage_call:
                                 usage_call.status = "FAILED"
-                            error_msg = payload.get("error", "未知错误")
-                            logger.bind(tag=TAG).error(f"ASR服务返回错误: {error_msg}")
+                            logger.bind(tag=TAG).error("ASR服务返回错误")
                             break
 
                 except websockets.ConnectionClosed as exc:
@@ -439,7 +456,7 @@ class ASRProvider(ASRProviderBase):
                     logger.bind(tag=TAG).info(
                         "ASR服务连接已关闭: "
                         f"code={close_code}, "
-                        f"reason={close_reason}, "
+                        f"reason_present={bool(close_reason)}, "
                         f"stop_sent={stop_sent_event.is_set()}"
                     )
                     self.is_processing = False
@@ -454,8 +471,7 @@ class ASRProvider(ASRProviderBase):
                         )
                     else:
                         logger.bind(tag=TAG).error(
-                            str(exc)
-                            or (
+                            (
                                 "等待ASR中间结果超时: "
                                 f"timeout={self.response_timeout_seconds:.1f}s"
                             )
@@ -465,9 +481,9 @@ class ASRProvider(ASRProviderBase):
                 except Exception as e:
                     if usage_call:
                         usage_call.status = "FAILED"
-                    logger.bind(tag=TAG).error(f"处理ASR结果时发生错误: {str(e)}")
+                    logger.bind(tag=TAG).error(f"处理ASR结果时发生错误: {type(e).__name__}")
                     if hasattr(e, "__cause__") and e.__cause__:
-                        logger.bind(tag=TAG).error(f"错误原因: {str(e.__cause__)}")
+                        logger.bind(tag=TAG).error(f"错误类型: {type(e.__cause__).__name__}")
                     self.is_processing = False
                     break
 
@@ -478,9 +494,9 @@ class ASRProvider(ASRProviderBase):
         except Exception as e:
             if usage_call:
                 usage_call.status = "FAILED"
-            logger.bind(tag=TAG).error(f"ASR结果转发任务发生错误: {str(e)}")
+            logger.bind(tag=TAG).error(f"ASR结果转发任务发生错误: {type(e).__name__}")
             if hasattr(e, "__cause__") and e.__cause__:
-                logger.bind(tag=TAG).error(f"错误原因: {str(e.__cause__)}")
+                logger.bind(tag=TAG).error(f"错误类型: {type(e.__cause__).__name__}")
         finally:
             if usage_call:
                 usage_call.finish()
@@ -489,7 +505,7 @@ class ASRProvider(ASRProviderBase):
                 if session_ws:
                     await session_ws.close()
             except Exception as exc:
-                logger.bind(tag=TAG).warning(f"关闭ASR会话连接失败: {exc}")
+                logger.bind(tag=TAG).warning(f"关闭ASR会话连接失败: {type(exc).__name__}")
             finally:
                 self._stop_sent_times.pop(stop_sent_event, None)
                 # handle_voice_stop() 会通过 stop_ws_connection() 先清空 asr_ws，
@@ -550,7 +566,7 @@ class ASRProvider(ASRProviderBase):
             if self.asr_ws is session_ws:
                 self._is_stopping = False
                 self._stop_sent_at = None
-            logger.bind(tag=TAG).warning(f"发送结束音频帧时出错: {e}")
+            logger.bind(tag=TAG).warning(f"发送结束音频帧时出错: {type(e).__name__}")
             return False
 
     def construct_request(self, reqid):
@@ -668,16 +684,14 @@ class ASRProvider(ASRProviderBase):
                     # 无长度字段或长度无效，尝试直接解析
                     json_data = res[8:].decode("utf-8")
                 result = json.loads(json_data)
-                logger.bind(tag=TAG).debug(f"成功解析JSON响应: {result}")
+                logger.bind(tag=TAG).debug("成功解析ASR响应")
                 return {"payload_msg": result}
             except (UnicodeDecodeError, json.JSONDecodeError) as e:
-                logger.bind(tag=TAG).error(f"JSON解析失败: {str(e)}")
-                logger.bind(tag=TAG).error(f"原始数据: {res}")
+                logger.bind(tag=TAG).error(f"JSON解析失败: {type(e).__name__}")
                 raise
 
         except Exception as e:
-            logger.bind(tag=TAG).error(f"解析响应失败: {str(e)}")
-            logger.bind(tag=TAG).error(f"原始响应数据: {res.hex()}")
+            logger.bind(tag=TAG).error(f"解析响应失败: {type(e).__name__}")
             raise
 
     async def speech_to_text(self, opus_data, session_id, audio_format, artifacts=None):

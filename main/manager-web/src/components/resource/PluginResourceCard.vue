@@ -44,12 +44,13 @@ export default {
     layout: { type: String, default: 'grid' },
     configurable: { type: Boolean, default: false },
     configState: { type: String, default: 'missing' },
-    testing: { type: Boolean, default: false }
+    testing: { type: Boolean, default: false },
+    allowSetup: { type: Boolean, default: true }
   },
   computed: {
     presentation() { return pluginPresentation(this.plugin); },
     showSetup() {
-      return this.presentation.section !== 'system' && this.presentation.section !== 'retired'
+      return this.allowSetup !== false && this.presentation.section !== 'system' && this.presentation.section !== 'retired'
         && this.presentation.setupTarget && this.presentation.setupTarget !== 'none';
     },
     statusText() {

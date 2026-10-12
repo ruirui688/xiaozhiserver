@@ -27,6 +27,8 @@ def list_available_providers():
 
 def create_instance(class_name: str, *args, **kwargs) -> ASRProviderBase:
     """工厂方法创建ASR实例"""
+    from core.metering.admission import validate_adapter
+    validate_adapter("ASR", class_name, args[0] if args else kwargs.get("config", {}))
     if os.path.exists(os.path.join('core', 'providers', 'asr', f'{class_name}.py')):
         lib_name = f'core.providers.asr.{class_name}'
         if lib_name not in sys.modules:

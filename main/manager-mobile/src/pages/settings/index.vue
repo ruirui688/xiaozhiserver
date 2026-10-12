@@ -1,461 +1,53 @@
 <route lang="jsonc" type="page">
-{
-  "layout": "default",
-  "style": {
-    "navigationBarTitleText": "设置",
-    "navigationStyle": "custom"
-  }
-}
+{ "needLogin": true, "layout": "default", "style": { "navigationBarTitleText": "我的", "navigationStyle": "custom" } }
 </route>
-
 <script lang="ts" setup>
-import { computed, onMounted, reactive, ref } from 'vue'
-import { useToast } from 'wot-design-uni'
-import { t } from '@/i18n'
-import { useConfigStore } from '@/store'
+import { computed, ref } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
+import { useUserStore } from '@/store/user'
 import { clearServerBaseUrlOverride, getEnvBaseUrl, getServerBaseUrlOverride, setServerBaseUrlOverride } from '@/utils'
-import { isMp } from '@/utils/platform'
-import { getSystemSummary } from '@/utils/system'
-
-defineOptions({
-  name: 'SettingsPage',
-})
-
-const toast = useToast()
-
-// 缓存信息
-const cacheInfo = reactive({
-  storageSize: '0MB',
-  imageCache: '0MB',
-  dataCache: '0MB',
-})
-
-const configStore = useConfigStore()
-
-// 服务端地址设置
-const baseUrlInput = ref('')
-const urlError = ref('')
-
-// 系统信息（保留）
-const systemInfo = computed(() => {
-  return getSystemSummary()
-})
-
-// 读取本地覆盖地址
-function loadServerBaseUrl() {
-  const override = getServerBaseUrlOverride()
-  baseUrlInput.value = override || getEnvBaseUrl()
+const user = useUserStore()
+const isDevelopment = import.meta.env.DEV
+const serverUrl = ref('')
+const cacheSize = ref('0 MB')
+const username = computed(() => user.userInfo.username || '我的账号')
+function navigate(url: string) { uni.navigateTo({ url }) }
+function refresh() {
+  const info = uni.getStorageInfoSync()
+  cacheSize.value = `${((info.currentSize || 0) / 1024).toFixed(2)} MB`
+  if (isDevelopment) serverUrl.value = getServerBaseUrlOverride() || getEnvBaseUrl()
 }
-
-// 获取缓存信息
-function getCacheInfo() {
-  try {
-    const info = uni.getStorageInfoSync()
-    const totalSize = (info.currentSize || 0) / 1024 // KB to MB
-    cacheInfo.storageSize = `${totalSize.toFixed(2)}MB`
-  }
-  catch (error) {
-    console.error('获取缓存信息失败:', error)
-  }
+async function logout() {
+  uni.showModal({ title: '退出账号', content: '退出当前用户会话？', success: async result => {
+    if (!result.confirm) return
+    try { await user.logout() }
+    catch { uni.showToast({ title: '本机会话已清除', icon: 'none' }) }
+    finally { uni.reLaunch({ url: '/pages/login/index' }) }
+  } })
 }
-
-// 验证URL格式
-function validateUrl() {
-  urlError.value = ''
-
-  if (!baseUrlInput.value) {
-    return
-  }
-
-  if (!/^https?:\/\/.+\/xiaozhi$/.test(baseUrlInput.value)) {
-    urlError.value = t('settings.validServerUrl')
-  }
-}
-
-// 测试服务端地址
-async function testServerBaseUrl() {
-  // 先清除错误信息
-  urlError.value = ''
-
-  if (!baseUrlInput.value || !/^https?:\/\/.+\/xiaozhi$/.test(baseUrlInput.value)) {
-    return false
-  }
-
-  try {
-    const response = await uni.request({
-      url: `${baseUrlInput.value}/api/ping`,
-      method: 'GET',
-      timeout: 3000,
-    })
-
-    if (response.statusCode === 200) {
-      return true
-    }
-    else {
-      toast.error({
-        msg: t('message.invalidAddress'),
-        duration: 3000,
-      })
-      return false
-    }
-  }
-  catch (error) {
-    console.error('测试服务端地址失败:', error)
-    toast.error({
-      msg: t('message.invalidAddress'),
-      duration: 3000,
-    })
-    return false
-  }
-}
-
-// 保存服务端地址
-async function saveServerBaseUrl() {
-  if (!baseUrlInput.value || !/^https?:\/\/.+\/xiaozhi$/.test(baseUrlInput.value)) {
-    toast.warning(t('settings.validServerUrl'))
-    return
-  }
-
-  // 测试地址有效性
-  const isServerValid = await testServerBaseUrl()
-  if (!isServerValid) {
-    return
-  }
-  setServerBaseUrlOverride(baseUrlInput.value)
-  // 处理config缓存无法更新的问题
-  uni.request({
-    url: `${getEnvBaseUrl()}/user/pub-config`,
-    method: 'GET',
-    success: (res: any) => {
-      if (res.statusCode === 200) {
-        configStore.setConfig(res.data.data)
-        uni.setStorageSync('config', res.data.data)
-      }
-    },
-    fail: (err) => {
-      console.error('获取SM2公钥失败:', err)
-    },
-  })
-
-  // 切换请求地址后清空所有缓存
-  clearAllCacheAfterUrlChange()
-
-  uni.showModal({
-    title: t('settings.restartApp'),
-    content: t('settings.serverUrlSavedAndCacheCleared'),
-    confirmText: t('settings.restartNow'),
-    cancelText: t('settings.restartLater'),
-    success: (res) => {
-      if (res.confirm) {
-        restartApp()
-      }
-      else {
-        toast.success(t('settings.restartSuccess'))
-      }
-    },
-  })
-}
-
-// 重置为 env 默认
-function resetServerBaseUrl() {
-  clearServerBaseUrlOverride()
-  baseUrlInput.value = getEnvBaseUrl()
-
-  // 切换请求地址后清空所有缓存
-  clearAllCacheAfterUrlChange()
-
-  uni.showModal({
-    title: t('settings.restartApp'),
-    content: t('settings.resetToDefaultAndCacheCleared'),
-    confirmText: t('settings.restartNow'),
-    cancelText: t('settings.restartLater'),
-    success: (res) => {
-      if (res.confirm) {
-        restartApp()
-      }
-      else {
-        toast.success(t('settings.resetSuccess'))
-      }
-    },
-  })
-}
-
-// 重启应用（App 原生重启；其他端回到首页）
-function restartApp() {
-  // #ifdef APP-PLUS
-  plus.runtime.restart()
-  // #endif
-  // #ifndef APP-PLUS
-  uni.reLaunch({ url: '/pages/index/index' })
-  // #endif
-}
-
-// 切换地址后自动清空所有缓存
-function clearAllCacheAfterUrlChange() {
-  try {
-    // 备份运行时覆盖地址，确保清理后恢复
-    const preservedOverride = getServerBaseUrlOverride()
-
-    // 完全清空所有缓存，包括token
+function clearCache() {
+  uni.showModal({ title: '清理本机缓存', content: '将清除本机登录信息并返回登录页，不影响云端数据。', success: async result => {
+    if (!result.confirm) return
+    const override = isDevelopment ? getServerBaseUrlOverride() : null
+    try { await user.logout() } catch { /* The local session is cleared in the store's finally block. */ }
     uni.clearStorageSync()
-
-    // 清空localStorage（H5环境）
-    // #ifdef H5
-    if (typeof localStorage !== 'undefined') {
-      localStorage.clear()
-    }
-    // #endif
-
-    // 恢复运行时覆盖地址（如有），需要在清理完成后再写入
-    if (preservedOverride) {
-      setServerBaseUrlOverride(preservedOverride)
-    }
-
-    // 重新获取缓存信息
-    getCacheInfo()
-  }
-  catch (error) {
-    console.error('清除缓存失败:', error)
-  }
+    if (override) setServerBaseUrlOverride(override)
+    uni.reLaunch({ url: '/pages/login/index' })
+  } })
 }
-
-// 清除缓存
-async function clearCache() {
-  try {
-    uni.showModal({
-      title: t('settings.confirmClear'),
-      content: t('settings.confirmClearMessage'),
-      confirmText: t('common.confirm'),
-      cancelText: t('common.cancel'),
-      success: (res) => {
-        if (res.confirm) {
-          clearAllCacheAfterUrlChange()
-          toast.success(t('settings.cacheCleared'))
-
-          // 延迟跳转到登录页
-          setTimeout(() => {
-            uni.reLaunch({ url: '/pages/login/index' })
-          }, 1500)
-        }
-      },
-    })
-  }
-  catch (error) {
-    console.error('清除缓存失败:', error)
-    toast.error(t('settings.clearCacheFailed'))
-  }
+async function saveDevelopmentServer(reset = false) {
+  if (!isDevelopment) return
+  if (!reset && !/^https?:\/\/[^\s]+\/xiaozhi\/?$/.test(serverUrl.value)) { uni.showToast({ title: '填写有效开发服务地址，以 /xiaozhi 结尾', icon: 'none' }); return }
+  try { await user.logout() } catch { /* Do not carry an old session to another development origin. */ }
+  if (reset) clearServerBaseUrlOverride()
+  else setServerBaseUrlOverride(serverUrl.value)
+  uni.reLaunch({ url: '/pages/login/index' })
 }
-
-// 关于我们
-function showAbout() {
-  uni.showModal({
-    title: t('settings.aboutApp', { appName: import.meta.env.VITE_APP_TITLE }),
-    content: t('settings.aboutContent', {
-      appName: import.meta.env.VITE_APP_TITLE,
-      version: '0.9.4'
-    }),
-    showCancel: false,
-    confirmText: t('common.confirm'),
-  })
-}
-
-function openOrganizationManagement() {
-  uni.navigateTo({
-    url: '/pages/organization/index',
-  })
-}
-
-onMounted(async () => {
-  // 仅在非小程序环境加载服务端地址设置
-  if (!isMp) {
-    loadServerBaseUrl()
-  }
-  getCacheInfo()
-
-  // 动态设置导航栏标题为国际化文本
-  uni.setNavigationBarTitle({
-    title: t('settings.title'),
-  })
-})
+onShow(refresh)
 </script>
-
 <template>
-  <view class="min-h-screen bg-[#f5f7fb]">
-    <wd-navbar :title="t('settings.title')" placeholder safe-area-inset-top fixed />
-
-    <view class="p-[24rpx]">
-      <!-- 网络设置 - 仅在非小程序环境显示 -->
-      <view v-if="!isMp" class="mb-[32rpx]">
-        <view class="mb-[24rpx] flex items-center">
-          <text class="text-[32rpx] text-[#232338] font-bold">
-            {{ t('settings.networkSettings') }}
-          </text>
-        </view>
-
-        <view
-          class="overflow-hidden border border-[#eeeeee] rounded-[24rpx] bg-[#fbfbfb] p-[32rpx]"
-          style="box-shadow: 0 4rpx 20rpx rgba(0, 0, 0, 0.06);"
-        >
-          <view class="mb-[24rpx]">
-            <text class="text-[28rpx] text-[#232338] font-semibold">
-              {{ t('settings.serverApiUrl') }}
-            </text>
-            <text class="mt-[8rpx] block text-[24rpx] text-[#9d9ea3]">
-              {{ t('settings.modifyWillClearCache') }}
-            </text>
-          </view>
-
-          <view class="mb-[24rpx]">
-            <view class="w-full overflow-hidden border border-[#eeeeee] rounded-[16rpx] bg-[#f5f7fb]">
-              <wd-input
-                v-model="baseUrlInput" type="text" clearable :maxlength="200"
-                :placeholder="t('settings.enterServerUrl')"
-                custom-class="!border-none !bg-transparent h-[64rpx] px-[24rpx] items-center"
-                input-class="text-[28rpx] text-[#232338]" @input="validateUrl" @blur="validateUrl"
-              />
-            </view>
-            <text v-if="urlError" class="mt-[8rpx] block text-[24rpx] text-[#ff4d4f]">
-              {{ urlError }}
-            </text>
-          </view>
-
-          <view class="flex gap-[16rpx]">
-            <wd-button
-              type="primary"
-              custom-class="flex-1 h-[88rpx] rounded-[20rpx] text-[28rpx] font-semibold bg-[#336cff] border-none shadow-[0_4rpx_16rpx_rgba(51,108,255,0.3)] active:shadow-[0_2rpx_8rpx_rgba(51,108,255,0.4)] active:scale-98"
-              @click="saveServerBaseUrl"
-            >
-              {{ t('settings.saveSettings') }}
-            </wd-button>
-            <wd-button
-              type="default"
-              custom-class="flex-1 h-[88rpx] rounded-[20rpx] text-[28rpx] font-semibold bg-white border-[#eeeeee] text-[#65686f] active:bg-[#f5f7fb]"
-              @click="resetServerBaseUrl"
-            >
-              {{ t('settings.resetDefault') }}
-            </wd-button>
-          </view>
-        </view>
-      </view>
-
-      <!-- 缓存管理 -->
-      <view class="mb-[32rpx]">
-        <view class="mb-[24rpx] flex items-center">
-          <text class="text-[32rpx] text-[#232338] font-bold">
-            {{ t('settings.cacheManagement') }}
-          </text>
-        </view>
-
-        <view
-          class="border border-[#eeeeee] rounded-[24rpx] bg-[#fbfbfb] p-[32rpx]"
-          style="box-shadow: 0 4rpx 20rpx rgba(0, 0, 0, 0.06);"
-        >
-          <view class="space-y-[16rpx]">
-            <!-- 缓存信息展示，参考插件样式 -->
-            <view
-              class="flex items-center justify-between border border-[#eeeeee] rounded-[16rpx] bg-[#f5f7fb] p-[24rpx] transition-all active:bg-[#eef3ff]"
-            >
-              <view>
-                <text class="text-[28rpx] text-[#232338] font-medium">
-                  {{ t('settings.totalCacheSize') }}
-                </text>
-                <text class="mt-[4rpx] block text-[24rpx] text-[#9d9ea3]">
-                  {{ t('settings.appDataSize') }}
-                </text>
-              </view>
-              <text class="text-[28rpx] text-[#65686f] font-semibold">
-                {{ cacheInfo.storageSize }}
-              </text>
-            </view>
-
-            <!-- 清除缓存按钮，参考插件编辑按钮样式 -->
-            <view
-              class="flex items-center justify-between border border-[#eeeeee] rounded-[16rpx] bg-[#f5f7fb] p-[24rpx]"
-            >
-              <view>
-                <text class="text-[28rpx] text-[#232338] font-medium">
-                  {{ t('settings.cacheClear') }}
-                </text>
-                <text class="mt-[4rpx] block text-[24rpx] text-[#9d9ea3]">
-                  {{ t('settings.clearAllCache') }}
-                </text>
-              </view>
-              <view
-                class="cursor-pointer rounded-[24rpx] bg-[rgba(255,107,107,0.1)] px-[28rpx] py-[16rpx] text-[24rpx] text-[#ff6b6b] font-semibold transition-all duration-300 active:scale-95 active:bg-[#ff6b6b] active:text-white"
-                @click="clearCache"
-              >
-                {{ t('settings.clearCache') }}
-              </view>
-            </view>
-          </view>
-        </view>
-      </view>
-
-      <!-- 组织管理 -->
-      <view class="mb-[32rpx]">
-        <view class="mb-[24rpx] flex items-center">
-          <text class="text-[32rpx] text-[#232338] font-bold">
-            {{ t('settings.organizationSettings') }}
-          </text>
-        </view>
-
-        <view
-          class="border border-[#eeeeee] rounded-[24rpx] bg-[#fbfbfb] p-[32rpx]"
-          style="box-shadow: 0 4rpx 20rpx rgba(0, 0, 0, 0.06);"
-        >
-          <view
-            class="flex cursor-pointer items-center justify-between border border-[#eeeeee] rounded-[16rpx] bg-[#f5f7fb] p-[24rpx] transition-all active:bg-[#eef3ff]"
-            @click="openOrganizationManagement"
-          >
-            <view>
-              <text class="text-[28rpx] text-[#232338] font-medium">
-                {{ t('settings.organizationManagement') }}
-              </text>
-              <text class="mt-[4rpx] block text-[24rpx] text-[#9d9ea3]">
-                {{ t('settings.organizationDesc') }}
-              </text>
-            </view>
-            <wd-icon name="arrow-right" custom-class="text-[32rpx] text-[#9d9ea3]" />
-          </view>
-        </view>
-      </view>
-
-      <!-- 应用信息 -->
-      <view class="mb-[32rpx]">
-        <view class="mb-[24rpx] flex items-center">
-          <text class="text-[32rpx] text-[#232338] font-bold">
-            {{ t('settings.appInfo') }}
-          </text>
-        </view>
-
-        <view
-          class="border border-[#eeeeee] rounded-[24rpx] bg-[#fbfbfb] p-[32rpx]"
-          style="box-shadow: 0 4rpx 20rpx rgba(0, 0, 0, 0.06);"
-        >
-          <view
-            class="flex cursor-pointer items-center justify-between border border-[#eeeeee] rounded-[16rpx] bg-[#f5f7fb] p-[24rpx] transition-all active:bg-[#eef3ff]"
-            @click="showAbout"
-          >
-            <view>
-              <text class="text-[28rpx] text-[#232338] font-medium">
-                {{ t('settings.aboutUs') }}
-              </text>
-              <text class="mt-[4rpx] block text-[24rpx] text-[#9d9ea3]">
-                {{ t('settings.appVersion') }}
-              </text>
-            </view>
-            <wd-icon name="arrow-right" custom-class="text-[32rpx] text-[#9d9ea3]" />
-          </view>
-        </view>
-      </view>
-
-      <!-- 底部安全距离 -->
-      <!-- 底部安全距离 -->
-      <view style="height: env(safe-area-inset-bottom);" />
-    </view>
-  </view>
+  <view class="mine-page"><wd-navbar title="我的" placeholder safe-area-inset-top fixed /><view class="mine-body"><view class="profile-card"><image :src="user.userInfo.avatar || '/static/images/default-avatar.png'" class="avatar" /><view><text class="profile-name">{{ username }}</text><text class="muted">个人空间与团队，分别归属、清楚使用</text></view></view><view class="menu-card"><view class="menu-row" @click="navigate('/pages/allowance/index')"><view><text class="menu-title">额度与用量</text><text class="muted">查看服务额度、团队承担关系和我的流水</text></view><text>›</text></view><view class="menu-row" @click="navigate('/pages/organization/index')"><view><text class="menu-title">我的团队</text><text class="muted">成员与协作空间</text></view><text>›</text></view></view><view class="menu-card"><view class="menu-row" @click="navigate('/pages/login/privacy-policy-zh')"><text class="menu-title">隐私政策</text><text>›</text></view><view class="menu-row" @click="navigate('/pages/login/user-agreement-zh')"><text class="menu-title">用户协议</text><text>›</text></view><view class="menu-row" @click="clearCache"><text class="menu-title">清理本机缓存</text><text class="muted">{{ cacheSize }}</text></view></view><view v-if="isDevelopment" class="menu-card dev-card"><text class="menu-title">开发服务地址</text><text class="muted">仅开发构建显示，正式发行固定受信任服务端。</text><wd-input v-model="serverUrl" placeholder="https://…/xiaozhi" /><wd-button size="small" @click="saveDevelopmentServer()">保存并重新登录</wd-button><wd-button size="small" type="text" @click="saveDevelopmentServer(true)">恢复默认</wd-button></view><wd-button block plain type="info" @click="logout">退出登录</wd-button><text class="footer-copy">服务额度由平台发放，无需自行配置模型密钥。</text></view></view>
 </template>
-
-<style lang="scss" scoped>
-// 保持与 edit.vue 一致的风格，样式主要通过类名控制
+<style scoped>
+.mine-page{min-height:100vh;background:#f5f7fa;color:#2a4257}.mine-body{padding:30rpx 28rpx 70rpx}.profile-card{display:flex;gap:25rpx;align-items:center;padding:32rpx 6rpx 46rpx}.avatar{width:105rpx;height:105rpx;border-radius:50%;background:#e4edf4;flex-shrink:0}.profile-name{display:block;font-size:36rpx;font-weight:650}.muted{display:block;font-size:23rpx;line-height:1.8;color:#92a0ad;margin-top:8rpx}.menu-card{background:#fff;border:1px solid #e5ebf1;border-radius:23rpx;padding:0 26rpx;margin-bottom:30rpx}.menu-row{display:flex;align-items:center;justify-content:space-between;gap:20rpx;padding:30rpx 0;border-bottom:1px solid #edf1f5}.menu-row:last-child{border-bottom:0}.menu-row>text:last-child{color:#96a6b3}.menu-title{font-size:28rpx}.dev-card{padding:30rpx}.footer-copy{display:block;font-size:23rpx;color:#98a6b3;text-align:center;margin-top:30rpx;line-height:1.8}
 </style>

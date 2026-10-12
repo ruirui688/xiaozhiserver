@@ -1,6 +1,6 @@
 <template>
   <section class="benefits-panel">
-    <div class="billing-panel-heading"><div><h2>余额与资源包</h2><p>当前范围的最新官方快照，独立于账期和调用日期。</p></div><div class="benefit-actions"><el-button size="small" icon="el-icon-refresh" :loading="loading" :disabled="syncing" @click="load">刷新</el-button><el-button v-if="canManage" size="small" :loading="syncing" :disabled="loading || syncing" @click="sync">同步额度</el-button></div></div>
+    <div class="billing-panel-heading"><div><h2>余额与资源包</h2><p>当前范围的最新官方快照，独立于账期和调用日期。</p></div><div class="benefit-actions"><el-button size="small" icon="el-icon-refresh" :loading="loading" :disabled="syncing" @click="load">刷新</el-button><el-button v-if="canManage && canSync" size="small" :loading="syncing" :disabled="loading || syncing" @click="sync">同步额度</el-button></div></div>
     <div v-if="error || syncError" class="billing-inline-error">{{ error || syncError }}</div>
     <div v-if="loading" class="billing-skeleton"><i /><i /></div>
     <template v-if="data && !error">
@@ -23,7 +23,7 @@ import { amountText, billingLabel, billingTime, decimalText } from '@/utils/bill
 
 export default {
   components: { BillingAssetCard },
-  props: { scope: { type: String, default: 'workspace' }, account: { type: Object, default: null }, workspaceId: { type: String, required: true }, canManage: Boolean },
+  props: { scope: { type: String, default: 'workspace' }, account: { type: Object, default: null }, workspaceId: { type: String, required: true }, canManage: Boolean, standaloneAccount: Boolean, canSync: { type: Boolean, default: true } },
   data() { return { quotaLimit: 8, entitlementLimit: 12, entitlementsOpen: false, assetProduct: '', assetStatus: 'current', accountView: false, data: null, loading: false, syncing: false, error: '', syncError: '', generation: 0, syncGeneration: 0 }; },
   computed: {
     assets() { return this.data && this.data.assets || []; },
@@ -60,13 +60,13 @@ export default {
     shareability(value) { return value === true ? '可共享' : value === false ? '不可共享' : '未知'; },
     sourceType(status) { return status === 'READY' ? 'success' : status === 'SYNC_FAILED' ? 'danger' : status === 'NOT_CONFIGURED' || status === 'NEVER_SYNCED' ? 'warning' : 'info'; },
     invalidate() { this.generation++; this.syncGeneration++; this.data = null; this.loading = false; this.syncing = false; this.error = ''; this.syncError = ''; },
-    current(generation, workspace, accountView) { return generation === this.generation && workspace === this.workspaceId && workspace === localStorage.getItem('currentWorkspaceId') && accountView === this.accountView; },
+    current(generation, workspace, accountView) { return generation === this.generation && workspace === this.workspaceId && (this.standaloneAccount && accountView || workspace === localStorage.getItem('currentWorkspaceId')) && accountView === this.accountView; },
     async load() {
       const generation = ++this.generation; const workspace = this.workspaceId;
       if (!this.canManage) this.accountView = false;
       const accountView = this.accountView;
       this.error = ''; this.data = null;
-      if (!workspace || workspace !== localStorage.getItem('currentWorkspaceId')) { this.loading = false; return; }
+      if (!(this.standaloneAccount && accountView) && (!workspace || workspace !== localStorage.getItem('currentWorkspaceId'))) { this.loading = false; return; }
       this.loading = true;
       try {
         const data = await Api.billing.benefits({ accountView, ...(accountView && this.account ? { provider: this.account.provider, accountRef: this.account.accountRef } : {}) });
@@ -78,7 +78,7 @@ export default {
       finally { if (this.current(generation, workspace, accountView)) this.loading = false; }
     },
     async sync() {
-      if (!this.canManage || this.syncing || this.loading || this.workspaceId !== localStorage.getItem('currentWorkspaceId')) return;
+      if (!this.canManage || this.canSync === false || this.syncing || this.loading || (!this.standaloneAccount && this.workspaceId !== localStorage.getItem('currentWorkspaceId'))) return;
       const generation = ++this.syncGeneration; const workspace = this.workspaceId;
       this.syncing = true; this.syncError = '';
       try {

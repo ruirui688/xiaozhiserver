@@ -1,43 +1,30 @@
 package xiaozhi.modules.workspace.service.impl;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.mock;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mockStatic;
-import static org.mockito.Mockito.when;
-
 import java.util.List;
-
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
-
+import xiaozhi.common.user.UserDetail;
+import xiaozhi.modules.security.ops.OpsGrant;
+import xiaozhi.modules.security.ops.OpsPermissionCatalog;
 import xiaozhi.modules.security.user.SecurityUser;
-import xiaozhi.modules.sys.dao.SysUserDao;
-import xiaozhi.modules.workspace.dao.WorkspaceDao;
-import xiaozhi.modules.workspace.dao.WorkspaceMemberDao;
-import xiaozhi.modules.workspace.entity.WorkspaceEntity;
-import xiaozhi.modules.workspace.entity.WorkspaceMemberEntity;
 
 class OfficialResourcePermissionServiceImplTest {
-    @Test
-    void memberOfSuperAdminOwnedWorkspaceIsOfficialMaintainer() {
-        WorkspaceMemberDao memberDao = mock(WorkspaceMemberDao.class);
-        WorkspaceDao workspaceDao = mock(WorkspaceDao.class);
-        SysUserDao userDao = mock(SysUserDao.class);
-        WorkspaceMemberEntity member = new WorkspaceMemberEntity();
-        member.setWorkspaceId("official-team");
-        WorkspaceEntity workspace = new WorkspaceEntity();
-        workspace.setId("official-team");
-        workspace.setOwnerUserId(1L);
-        when(memberDao.selectList(any())).thenReturn(List.of(member));
-        when(workspaceDao.selectList(any())).thenReturn(List.of(workspace));
-        when(userDao.selectCount(any())).thenReturn(0L, 1L);
-
-        OfficialResourcePermissionServiceImpl service =
-                new OfficialResourcePermissionServiceImpl(memberDao, workspaceDao, userDao);
-        try (MockedStatic<SecurityUser> security = mockStatic(SecurityUser.class)) {
-            security.when(SecurityUser::getUserId).thenReturn(7L);
-            assertTrue(service.isOfficialMaintainer());
+    @Test void tenantMembershipNeverGrantsOfficialMaintenance() {
+        var service=new OfficialResourcePermissionServiceImpl();UserDetail user=new UserDetail();user.setId(7L);user.setAudience("USER");
+        try(MockedStatic<SecurityUser> security=mockStatic(SecurityUser.class)){
+            security.when(SecurityUser::getUser).thenReturn(user);assertFalse(service.isOfficialMaintainer());
+        }
+    }
+    @Test void onlyScopedEmployeeContentPermissionGrantsMaintenance() {
+        var service=new OfficialResourcePermissionServiceImpl();UserDetail user=new UserDetail();user.setEmployeeId("content-editor");user.setAudience("OPS");
+        var template=OpsPermissionCatalog.TEMPLATES.get("OFFICIAL_CONTENT");
+        user.setGrants(List.of(new OpsGrant(template.code(),"PLATFORM",template.domain(),template.permissions())));
+        try(MockedStatic<SecurityUser> security=mockStatic(SecurityUser.class)){
+            security.when(SecurityUser::getUser).thenReturn(user);assertTrue(service.isOfficialMaintainer());
+            user.setGrants(List.of(new OpsGrant(template.code(),"PLATFORM","another-domain",template.permissions())));
+            assertFalse(service.isOfficialMaintainer());
         }
     }
 }

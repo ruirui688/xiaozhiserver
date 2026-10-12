@@ -63,9 +63,17 @@ class MemoryRebuildTaskServiceImplTest {
     private final AtomicInteger casFailuresRemaining = new AtomicInteger();
 
     private MemoryRebuildTaskServiceImpl service;
+    private xiaozhi.common.user.UserDetail principal;
+
+    @org.junit.jupiter.api.AfterEach
+    void clearIdentity() { org.apache.shiro.util.ThreadContext.unbindSubject(); }
 
     @BeforeEach
     void setUp() {
+        principal=new xiaozhi.common.user.UserDetail();principal.setAudience("USER");principal.setId(1001L);
+        var subject=new org.apache.shiro.subject.support.DelegatingSubject(
+                new org.apache.shiro.subject.SimplePrincipalCollection(principal,"test"),true,"localhost",null,new org.apache.shiro.mgt.DefaultSecurityManager());
+        org.apache.shiro.util.ThreadContext.bind(subject);
         AgentEntity agent = new AgentEntity();
         agent.setId(AGENT_ID);
         agent.setUserId(1001L);
@@ -124,6 +132,19 @@ class MemoryRebuildTaskServiceImplTest {
         service = new MemoryRebuildTaskServiceImpl(
                 maintenanceService, agentDao, redisUtils, lockStore, stateStore,
                 taskExecutor, taskScheduler, 60_000L);
+    }
+
+    @Test
+    void workerCarriesAuthenticatedUserToAnotherThreadAndClearsAfterward() throws Exception {
+        java.util.concurrent.atomic.AtomicReference<xiaozhi.common.user.UserDetail> observed=new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<org.apache.shiro.subject.Subject> inherited=new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<org.apache.shiro.subject.Subject> after=new java.util.concurrent.atomic.AtomicReference<>();
+        when(maintenanceService.rebuildFromRecentChatHistory(anyString(),any(),anyString(),anyString())).thenAnswer(call->{observed.set(xiaozhi.modules.security.user.SecurityUser.getUser());return new MemoryRebuildResultVO();});
+        MemoryRebuildTaskVO task=service.startRebuild(AGENT_ID,request(),"user","1001");
+        Thread thread=new Thread(()->{inherited.set(org.apache.shiro.util.ThreadContext.getSubject());worker.get().run();after.set(org.apache.shiro.util.ThreadContext.getSubject());});thread.start();thread.join(5000);
+        assertTrue(!thread.isAlive());assertNotNull(inherited.get());assertEquals(principal,inherited.get().getPrincipal());
+        assertEquals(principal,observed.get());assertEquals(null,after.get());assertEquals("SUCCEEDED",service.getTask(AGENT_ID,task.getTaskId()).getStatus());
+        assertEquals(principal,xiaozhi.modules.security.user.SecurityUser.getUser());
     }
 
     @Test

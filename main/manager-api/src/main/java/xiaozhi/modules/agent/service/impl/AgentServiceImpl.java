@@ -71,7 +71,7 @@ import xiaozhi.modules.model.service.ModelConfigService;
 import xiaozhi.modules.model.service.ModelProviderService;
 import xiaozhi.modules.model.support.RealtimeAdapterCapabilityRegistry;
 import xiaozhi.modules.security.user.SecurityUser;
-import xiaozhi.modules.sys.enums.SuperAdminEnum;
+import xiaozhi.modules.security.ops.OpsAccess;
 import xiaozhi.modules.timbre.service.TimbreService;
 import xiaozhi.modules.userplugin.SharedPluginConfigRegistry;
 import xiaozhi.modules.workspace.entity.WorkspaceEntity;
@@ -366,7 +366,7 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
 
     @Override
     public boolean checkAgentPermission(String agentId, Long userId) {
-        if (SecurityUser.getUser() == null || SecurityUser.getUser().getId() == null) {
+        if (!OpsAccess.isUser() || !java.util.Objects.equals(userId, SecurityUser.getUserId())) {
             return false;
         }
         // 获取智能体信息
@@ -375,10 +375,6 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
             return false;
         }
 
-        // 如果是超级管理员，直接返回true
-        if (SecurityUser.getUser().getSuperAdmin() == SuperAdminEnum.YES.value()) {
-            return true;
-        }
 
         if (StringUtils.isBlank(agent.getWorkspaceId())) {
             return userId.equals(agent.getUserId());

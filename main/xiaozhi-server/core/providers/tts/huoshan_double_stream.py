@@ -6,6 +6,7 @@ import queue
 import time
 import asyncio
 from core.metering import tts_sessions as billing_tts
+from core.metering.admission import configure_provider, PlatformAdmissionError
 from core.metering.volcengine import tts_usage
 import threading
 import traceback
@@ -159,6 +160,7 @@ class Response:
 class TTSProvider(TTSProviderBase):
     def __init__(self, config, delete_audio_file):
         super().__init__(config, delete_audio_file)
+        configure_provider(self, config)
         self.ws = None
         from core.providers.tts.connection_prewarm import ConnectionPrewarm
         self._connection_prewarm = ConnectionPrewarm(self)
@@ -174,7 +176,7 @@ class TTSProvider(TTSProviderBase):
         self._upstream_session_id = None
         self._session_audio_state_lock = threading.Lock()
         self._session_audio_states = OrderedDict()
-        self.api_key = config.get("api_key")
+        self.api_key = config.get("api_key") or ("platform-managed" if self._platform_managed else "")
         self.resource_id = self._normalize_resource_id(config.get("resource_id"))
         self.report_on_last = True
         self.activate_session = False
@@ -235,7 +237,9 @@ class TTSProvider(TTSProviderBase):
             ))
 
         self.ws_url = HUOSHAN_DOUBLE_STREAM_WS_URL
-        self.enable_ws_reuse = True
+        # A supplier connection authenticates one credential owner. Never reuse
+        # it across platform calls or prewarm before resolving the current payer.
+        self.enable_ws_reuse = not self._platform_managed
         self.tts_text = ""
         legacy_session_timeout = config.get("session_timeout_seconds")
         if legacy_session_timeout is not None:
@@ -304,13 +308,16 @@ class TTSProvider(TTSProviderBase):
             return "zh_female_wanwanxiaohe_moon_bigtts"
         return "zh_female_sophie_uranus_bigtts"
 
-    def _build_ws_headers(self):
+    def _build_ws_headers(self, usage_call=None):
+        permit = getattr(usage_call, "permit", None)
+        if self._platform_managed and permit is None:
+            raise PlatformAdmissionError("PLATFORM_PERMIT_REQUIRED")
         ws_header = {
-            "X-Api-Resource-Id": self.resource_id,
+            "X-Api-Resource-Id": permit.runtime.get("resource_id", self.resource_id) if permit else self.resource_id,
             "X-Api-Connect-Id": str(uuid.uuid4()),
             "X-Control-Require-Usage-Tokens-Return": "*",
         }
-        ws_header["X-Api-Key"] = self.api_key
+        ws_header["X-Api-Key"] = permit.secret() if permit else self.api_key
         return ws_header
 
     def _mapping_config(self, config, key):
@@ -396,7 +403,7 @@ class TTSProvider(TTSProviderBase):
             self.ws = None
             raise
 
-    async def _ensure_connection(self):
+    async def _ensure_connection(self, usage_call=None):
         # FIRST prewarm and actual synthesis may race; only one reader/handshake.
         async with self._connection_lock:
             conn = self.conn
@@ -405,9 +412,9 @@ class TTSProvider(TTSProviderBase):
                 or conn.stop_event.is_set()
             ):
                 raise RuntimeError("TTS连接正在关闭")
-            return await self._open_connection()
+            return await self._open_connection(usage_call) if usage_call is not None else await self._open_connection()
 
-    async def _open_connection(self):
+    async def _open_connection(self, usage_call=None):
         """建立新的WebSocket连接，并启动监听任务（仅第一次）"""
         try:
             if self.ws is not None and getattr(self.ws, "state", None) in (State.CLOSING, State.CLOSED):
@@ -423,15 +430,21 @@ class TTSProvider(TTSProviderBase):
                     except Exception:
                         pass
             logger.bind(tag=TAG).debug("开始建立新连接...")
-            ws_header = self._build_ws_headers()
+            ws_header = self._build_ws_headers(usage_call)
+            permit = getattr(usage_call, "permit", None)
+            ws_url = permit.endpoint("ws_url", "url") if permit else self.ws_url
+            if usage_call:
+                await asyncio.to_thread(usage_call.start)
             self.ws = await asyncio.wait_for(
                 websockets.connect(
-                    self.ws_url,
+                    ws_url,
                     additional_headers=ws_header,
                     max_size=1000000000,
                 ),
                 timeout=self.connection_timeout_seconds,
             )
+            if usage_call:
+                usage_call.watch(self.ws)
             logger.bind(tag=TAG).debug("WebSocket连接建立成功")
             await self.start_connection()
             await self._wait_for_event(
@@ -939,7 +952,8 @@ class TTSProvider(TTSProviderBase):
                     )
                     if message.content_file and os.path.exists(message.content_file):
                         try:
-                            self._start_pending_session_once(message.sentence_id)
+                            if not self._platform_managed:
+                                self._start_pending_session_once(message.sentence_id)
                             if self.conn.client_abort:
                                 self._cancel_current_session_for_abort()
                                 continue
@@ -1044,8 +1058,11 @@ class TTSProvider(TTSProviderBase):
                 await self.close()
             
             # 确保连接建立
-            await self._ensure_connection()
-            usage_call = billing_tts.start(self, session_id)
+            usage_call = await billing_tts.start_async(self, session_id)
+            if usage_call.permit:
+                await self._ensure_connection(usage_call)
+            else:
+                await self._ensure_connection()
 
             self._prepare_session_audio_state(session_id)
             self._active_session_id = session_id
@@ -1413,6 +1430,11 @@ class TTSProvider(TTSProviderBase):
             raise
 
     async def send_text(self, speaker: str, text: str, session_id):
+        usage_call = getattr(self, "_billing_tts_calls", {}).get(session_id)
+        if getattr(self, "_platform_managed", False) and not getattr(usage_call, "permit", None):
+            raise PlatformAdmissionError("PLATFORM_PERMIT_REQUIRED")
+        if usage_call and usage_call.permit:
+            await asyncio.to_thread(usage_call.permit.consume, "billable_characters", len(text))
         header = Header(
             message_type=FULL_CLIENT_REQUEST,
             message_type_specific_flags=MsgTypeFlagWithEvent,
@@ -1425,7 +1447,6 @@ class TTSProvider(TTSProviderBase):
         if text and text.strip():
             self._record_turn_metric("record_latency_milestone", "tts.first_text_submit", session_id)
         result = await self.send_event(self.ws, header, optional, payload)
-        usage_call = getattr(self, "_billing_tts_calls", {}).get(session_id)
         if usage_call:
             usage_call.usage("submitted_characters", len(text), "characters", "OBSERVED", add=True)
         return result
@@ -1603,18 +1624,22 @@ class TTSProvider(TTSProviderBase):
             audio_data = []
 
             async def _generate_audio():
-                usage_call = billing_tts.start(self, session_id)
+                usage_call = await billing_tts.start_async(self, session_id, len(text))
                 # 创建新的WebSocket连接
-                ws_header = self._build_ws_headers()
+                ws_header = self._build_ws_headers(usage_call)
+                permit = usage_call.permit
+                ws_url = permit.endpoint("ws_url", "url") if permit else self.ws_url
                 try:
+                    await asyncio.to_thread(usage_call.start)
                     ws = await asyncio.wait_for(
                         websockets.connect(
-                            self.ws_url,
+                            ws_url,
                             additional_headers=ws_header,
                             max_size=1000000000,
                         ),
                         timeout=self.connection_timeout_seconds,
                     )
+                    usage_call.watch(ws)
                 except BaseException:
                     usage_call.finish("FAILED")
                     raise
@@ -1660,6 +1685,8 @@ class TTSProvider(TTSProviderBase):
                     payload = self.get_payload_bytes(
                         event=EVENT_TaskRequest, text=text, speaker=self.voice
                     )
+                    if permit:
+                        await asyncio.to_thread(permit.consume, "billable_characters", len(text))
                     await self.send_event(ws, header, optional, payload)
                     usage_call.usage("submitted_characters", len(text), "characters", "OBSERVED")
 
@@ -1691,8 +1718,7 @@ class TTSProvider(TTSProviderBase):
                             tts_usage(usage_call, res.payload)
                             continue
                         elif res.optional.event == EVENT_SessionFailed:
-                            detail = res.payload.decode("utf-8", "ignore") if res.payload else ""
-                            raise RuntimeError(f"TTS 会话失败: {detail}")
+                            raise RuntimeError("TTS 会话失败")
                         elif res.optional.event == EVENT_SessionFinished:
                             tts_usage(usage_call, res.payload)
                             usage_call.status = "SUCCESS"

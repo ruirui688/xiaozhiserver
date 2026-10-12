@@ -161,6 +161,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     }
 
     @Override
+    @org.springframework.transaction.annotation.Transactional
     public ModelConfigDTO edit(String modelType, String provideCode, String id, ModelConfigBodyDTO modelConfigBodyDTO) {
         // 1. 参数验证
         validateEditParameters(modelType, provideCode, id, modelConfigBodyDTO);
@@ -172,6 +173,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         ModelConfigEntity originalEntity = getOriginalConfigFromDb(id);
 
         JSONObject runtimeConfig = buildStandardRuntimeConfig(modelConfigBodyDTO, provideCode);
+        xiaozhi.modules.platform.service.PlatformCatalogSecrets.validate(runtimeConfig);
 
         RealtimeModelConfigGuard.validateForSave(
                 modelType,
@@ -201,6 +203,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     }
 
     @Override
+    @org.springframework.transaction.annotation.Transactional
     public ModelConfigDTO add(String modelType, String provideCode, ModelConfigBodyDTO modelConfigBodyDTO) {
         validateAddParameters(modelType, provideCode, modelConfigBodyDTO);
 
@@ -208,6 +211,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
 
         ModelConfigEntity modelConfigEntity = prepareAddEntity(modelConfigBodyDTO, modelType);
         JSONObject runtimeConfig = buildStandardRuntimeConfig(modelConfigBodyDTO, provideCode);
+        xiaozhi.modules.platform.service.PlatformCatalogSecrets.validate(runtimeConfig);
 
         RealtimeModelConfigGuard.validateForSave(
                 modelType,
@@ -232,7 +236,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         if (entity == null) {
             throw new RenException(ErrorCode.RESOURCE_NOT_FOUND);
         }
-        return buildResponseDTO(entity, new HashMap<>(), true);
+        return buildResponseDTO(entity, new HashMap<>(), false);
     }
 
     @Override
@@ -283,7 +287,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         updateEntity.setTestStatus(result.getTestStatus());
         updateEntity.setTestMessage(result.getMessage());
         updateEntity.setTestTime(testTime);
-        updateEntity.setIsEnabled(verified ? 1 : 0);
+        updateEntity.setIsEnabled(0); // Testing records evidence; publication requires separate approval.
         modelConfigDao.updateById(updateEntity);
         clearModelCache(id);
         publishRuntimeRefreshForModel(id, "model_status_updated");
@@ -324,7 +328,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         if (StringUtils.isBlank(id)) {
             return null;
         }
-        String cacheKey = RedisKeys.getModelConfigById(id);
+        String cacheKey = RedisKeys.getModelConfigById(id) + ":public-v2";
         ModelConfigEntity entity = (ModelConfigEntity) redisUtils.get(cacheKey);
         if (entity == null) {
             entity = attachRuntimeConfig(modelConfigDao.selectById(id));
@@ -900,6 +904,8 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
      */
     private void clearModelCache(String id) {
         redisUtils.delete(RedisKeys.getModelConfigById(id));
+        redisUtils.delete(RedisKeys.getModelConfigById(id) + ":public-v2");
+        redisUtils.delete(RedisKeys.getServerConfigKey() + ":public-v2");
         redisUtils.delete(RedisKeys.getModelNameById(id));
     }
 

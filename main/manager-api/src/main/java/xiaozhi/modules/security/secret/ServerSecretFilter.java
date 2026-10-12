@@ -67,6 +67,7 @@ public class ServerSecretFilter extends AuthenticatingFilter {
             return false;
         }
 
+        servletRequest.setAttribute(xiaozhi.modules.security.ops.ServiceIdentity.VERIFIED_ATTRIBUTE, Boolean.TRUE);
         return true;
     }
 

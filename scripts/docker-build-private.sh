@@ -650,6 +650,7 @@ hash_manager_web_inputs() {
       main/manager-web/src \
       main/manager-web/public/favicon.ico \
       main/manager-web/public/index.html \
+      main/manager-web/public/ops.html \
       main/manager-web/public/offline.html \
       main/manager-web/public/privacy-policy.html \
       main/manager-web/public/user-agreement.html \

@@ -7,7 +7,7 @@
       <el-table-column v-if="kind === 'devices'" prop="board" label="设备型号" min-width="100" />
       <el-table-column label="调用 / 会话" width="110"><template slot-scope="scope">{{ number(scope.row.callCount) }} / {{ number(scope.row.sessionCount) }}</template></el-table-column>
       <el-table-column label="用量（按来源与单位分别统计）" min-width="330"><template slot-scope="scope"><BillingUsage :usage="scope.row.usage || []" /><small v-if="scope.row.usageUnknownCount > 0" class="incomplete">{{ number(scope.row.usageUnknownCount) }} 次调用的供应商用量不完整</small></template></el-table-column>
-      <el-table-column label="可归属官方应付金额" min-width="230"><template slot-scope="scope"><BillingCosts :costs="scope.row.costs || []" :status="scope.row.costStatus" /></template></el-table-column>
+      <el-table-column v-if="showSupplierCosts" label="可归属官方应付金额" min-width="230"><template slot-scope="scope"><BillingCosts :costs="scope.row.costs || []" :status="scope.row.costStatus" /></template></el-table-column>
     </el-table>
     <el-table v-else-if="kind === 'events'" :data="rows" row-key="eventId" empty-text="当前筛选范围暂无调用记录">
       <el-table-column type="expand"><template slot-scope="scope"><dl class="details"><dt>调用 ID</dt><dd>{{ scope.row.eventId }}</dd><dt>供应商请求 ID</dt><dd>{{ scope.row.providerRequestId || '未返回' }}</dd><dt>会话 ID</dt><dd>{{ scope.row.sessionId || '—' }}</dd><dt>调用用途</dt><dd>{{ label(scope.row.purpose) }}</dd><dt>结束时间</dt><dd>{{ time(scope.row.endedAt) }}</dd></dl></template></el-table-column>
@@ -16,7 +16,7 @@
       <el-table-column label="服务 / 模型" min-width="170"><template slot-scope="scope"><div>{{ label(scope.row.serviceType) }} · {{ label(scope.row.provider) }}</div><small class="secondary">{{ scope.row.modelName || scope.row.modelId || '—' }}</small></template></el-table-column>
       <el-table-column label="实际用量 / 本地观测" min-width="310"><template slot-scope="scope"><BillingUsage :usage="scope.row.usage || []" /><small v-if="scope.row.usageComplete === false || scope.row.usageComplete === 0" class="incomplete">供应商用量不完整</small></template></el-table-column>
       <el-table-column label="调用状态" width="110"><template slot-scope="scope"><el-tag size="small" :type="scope.row.status === 'SUCCESS' ? 'success' : 'info'">{{ label(scope.row.status) }}</el-tag></template></el-table-column>
-      <el-table-column label="逐调用实际费用" min-width="140"><template slot-scope="scope">—<small class="secondary">{{ label(scope.row.costStatus || 'NOT_MATCHED') }}</small></template></el-table-column>
+      <el-table-column v-if="showSupplierCosts" label="逐调用实际费用" min-width="140"><template slot-scope="scope">—<small class="secondary">{{ label(scope.row.costStatus || 'NOT_MATCHED') }}</small></template></el-table-column>
     </el-table>
     <el-table v-else :data="rows" row-key="id" empty-text="当前筛选范围暂无官方账单">
       <el-table-column type="expand"><template slot-scope="scope"><dl class="details">
@@ -45,7 +45,7 @@
 import BillingUsage from './BillingUsage.vue';
 import BillingCosts from './BillingCosts.vue';
 import { billingLabel, billingTime, decimalText, amountText, supplierUsageRows } from '@/utils/billing';
-export default { components: { BillingUsage, BillingCosts }, props: { kind: String, rows: { type: Array, default: () => [] } }, methods: { label: billingLabel, time: billingTime, number: decimalText, money: amountText, supplierUsage: supplierUsageRows } };
+export default { components: { BillingUsage, BillingCosts }, props: { kind: String, showSupplierCosts: { type: Boolean, default: true }, rows: { type: Array, default: () => [] } }, methods: { label: billingLabel, time: billingTime, number: decimalText, money: amountText, supplierUsage: supplierUsageRows } };
 </script>
 <style scoped>
 .secondary { display: block; color: #8a92a4; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }.incomplete { display: block; color: #a2783d; margin-top: 8px; }.details { display: grid; grid-template-columns: 150px minmax(0, 1fr); margin: 10px 30px; gap: 12px; }.details dt { color: #8a92a4; }.details dd { margin: 0; overflow-wrap: anywhere; }.billing-records ::v-deep .el-table th { background: #f8f9fc; color: #64708a; }.billing-records ::v-deep .el-table .cell { overflow-wrap: anywhere; }

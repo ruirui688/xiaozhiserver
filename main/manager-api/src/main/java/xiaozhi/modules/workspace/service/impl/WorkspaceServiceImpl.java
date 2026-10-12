@@ -25,7 +25,7 @@ import xiaozhi.common.utils.HttpContextUtils;
 import xiaozhi.modules.security.user.SecurityUser;
 import xiaozhi.modules.sys.dao.SysUserDao;
 import xiaozhi.modules.sys.entity.SysUserEntity;
-import xiaozhi.modules.sys.enums.SuperAdminEnum;
+import xiaozhi.modules.security.ops.OpsAccess;
 import xiaozhi.modules.workspace.dao.WorkspaceDao;
 import xiaozhi.modules.workspace.dao.WorkspaceInvitationDao;
 import xiaozhi.modules.workspace.dao.WorkspaceMemberDao;
@@ -110,7 +110,7 @@ public class WorkspaceServiceImpl extends BaseServiceImpl<WorkspaceDao, Workspac
     public WorkspaceEntity ensureDefaultWorkspace(Long userId) {
         WorkspaceEntity existing = getDefaultWorkspace(userId);
         if (existing != null) {
-            ensureOwnerMember(existing, userId);
+            // Existing memberships are authoritative; never restore a removed owner.
             return existing;
         }
         SysUserEntity user = sysUserDao.selectById(userId);
@@ -127,6 +127,7 @@ public class WorkspaceServiceImpl extends BaseServiceImpl<WorkspaceDao, Workspac
         workspace.setUpdatedAt(new Date());
         workspaceDao.insert(workspace);
         createMember(workspace.getId(), userId, ROLE_OWNER, userId);
+        xiaozhi.common.utils.SpringContextUtils.getBean(xiaozhi.modules.platform.service.PlatformResponsibilityService.class).ensureWorkspace(workspace.getId());
         return workspace;
     }
 
@@ -172,6 +173,8 @@ public class WorkspaceServiceImpl extends BaseServiceImpl<WorkspaceDao, Workspac
     @Transactional(rollbackFor = Exception.class)
     public WorkspaceInvitationVO invite(String workspaceId, WorkspaceInviteDTO dto) {
         requireWrite(workspaceId);
+        WorkspaceEntity target = workspaceDao.selectById(workspaceId);
+        if (target == null || !Integer.valueOf(ACTIVE).equals(target.getStatus())) throw new RenException("工作空间不存在或已停用");
         String role = normalizeInviteRole(dto.getRole());
         String username = dto.getUsername().trim();
         SysUserEntity invitee = sysUserDao.selectOne(new QueryWrapper<SysUserEntity>()
@@ -215,6 +218,7 @@ public class WorkspaceServiceImpl extends BaseServiceImpl<WorkspaceDao, Workspac
     @Override
     @Transactional(rollbackFor = Exception.class)
     public WorkspaceVO acceptInvitation(String code) {
+        OpsAccess.requireUser();
         Long userId = SecurityUser.getUserId();
         WorkspaceInvitationEntity invitation = invitationDao.selectOne(new QueryWrapper<WorkspaceInvitationEntity>()
                 .eq("code", code)
@@ -222,6 +226,10 @@ public class WorkspaceServiceImpl extends BaseServiceImpl<WorkspaceDao, Workspac
                 .last("LIMIT 1"));
         if (invitation == null || invitation.getExpiresAt().before(new Date())) {
             throw new RenException("邀请不存在或已过期");
+        }
+        WorkspaceEntity workspace = workspaceDao.selectById(invitation.getWorkspaceId());
+        if (workspace == null || !Integer.valueOf(ACTIVE).equals(workspace.getStatus())) {
+            throw new RenException("邀请仅适用于启用的工作空间");
         }
         SysUserEntity user = sysUserDao.selectById(userId);
         if (user == null || !user.getUsername().equals(invitation.getInviteeUsername())) {
@@ -259,6 +267,7 @@ public class WorkspaceServiceImpl extends BaseServiceImpl<WorkspaceDao, Workspac
     @Transactional(rollbackFor = Exception.class)
     public void removeMember(String workspaceId, Long userId) {
         requireWrite(workspaceId);
+        requireNotFixedOwner(workspaceId, userId);
         if (SecurityUser.getUserId() != null && SecurityUser.getUserId().equals(userId)) {
             throw new RenException("不能移除自己，请使用退出工作空间");
         }
@@ -278,13 +287,15 @@ public class WorkspaceServiceImpl extends BaseServiceImpl<WorkspaceDao, Workspac
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void leaveWorkspace(String workspaceId) {
+        OpsAccess.requireUser();
         Long userId = SecurityUser.getUserId();
+        requireNotFixedOwner(workspaceId, userId);
         WorkspaceMemberEntity member = getActiveMember(workspaceId, userId);
         if (member == null) {
             throw new RenException(ErrorCode.NO_PERMISSION);
         }
         if (ROLE_OWNER.equals(member.getRole())) {
-            throw new RenException("所有者不能直接退出工作空间，请先转让所有者");
+            throw new RenException("所有者不能退出工作空间");
         }
         disableMember(workspaceId, userId);
     }
@@ -292,6 +303,7 @@ public class WorkspaceServiceImpl extends BaseServiceImpl<WorkspaceDao, Workspac
     @Override
     public void updateMemberRole(String workspaceId, Long userId, WorkspaceRoleUpdateDTO dto) {
         requireOwner(workspaceId);
+        requireNotFixedOwner(workspaceId, userId);
         if (SecurityUser.getUserId() != null && SecurityUser.getUserId().equals(userId)) {
             throw new RenException("不能修改自己的工作空间角色");
         }
@@ -310,17 +322,28 @@ public class WorkspaceServiceImpl extends BaseServiceImpl<WorkspaceDao, Workspac
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void prepareUserDeletion(Long userId) {
+        if (workspaceDao.selectCount(new QueryWrapper<WorkspaceEntity>().eq("owner_user_id", userId)) > 0) {
+            throw new RenException("工作空间固定负责人不能注销");
+        }
         List<WorkspaceMemberEntity> memberships = memberDao.selectList(new QueryWrapper<WorkspaceMemberEntity>()
                 .eq("user_id", userId)
                 .eq("status", ACTIVE));
         for (WorkspaceMemberEntity member : memberships) {
+            requireNotFixedOwner(member.getWorkspaceId(), userId);
             if (ROLE_OWNER.equals(member.getRole()) && countOwners(member.getWorkspaceId()) <= 1) {
-                throw new RenException("注销前请先转让工作空间所有者");
+                throw new RenException("工作空间所有者不能注销");
             }
         }
         memberDao.update(null, new UpdateWrapper<WorkspaceMemberEntity>()
                 .eq("user_id", userId)
                 .set("status", 0));
+    }
+
+    private void requireNotFixedOwner(String workspaceId, Long userId) {
+        WorkspaceEntity workspace = workspaceDao.selectById(workspaceId);
+        if (workspace != null && userId != null && userId.equals(workspace.getOwnerUserId())) {
+            throw new RenException("固定负责人不能被移除、降级、退出或注销");
+        }
     }
 
     @Override
@@ -341,17 +364,13 @@ public class WorkspaceServiceImpl extends BaseServiceImpl<WorkspaceDao, Workspac
 
     @Override
     public boolean canRead(String workspaceId, Long userId) {
-        if (isSuperAdmin()) {
-            return true;
-        }
+        if (!OpsAccess.isUser() || !java.util.Objects.equals(userId, SecurityUser.getUserId())) return false;
         return getActiveMember(workspaceId, userId) != null;
     }
 
     @Override
     public boolean canWrite(String workspaceId, Long userId) {
-        if (isSuperAdmin()) {
-            return true;
-        }
+        if (!OpsAccess.isUser() || !java.util.Objects.equals(userId, SecurityUser.getUserId())) return false;
         WorkspaceMemberEntity member = getActiveMember(workspaceId, userId);
         return member != null && (ROLE_OWNER.equals(member.getRole()) || ROLE_ADMIN.equals(member.getRole()));
     }
@@ -372,9 +391,7 @@ public class WorkspaceServiceImpl extends BaseServiceImpl<WorkspaceDao, Workspac
 
     @Override
     public void requireOwner(String workspaceId) {
-        if (isSuperAdmin()) {
-            return;
-        }
+        OpsAccess.requireUser();
         WorkspaceMemberEntity member = getActiveMember(workspaceId, SecurityUser.getUserId());
         if (member == null || !ROLE_OWNER.equals(member.getRole())) {
             throw new RenException(ErrorCode.NO_PERMISSION);
@@ -552,10 +569,7 @@ public class WorkspaceServiceImpl extends BaseServiceImpl<WorkspaceDao, Workspac
         return HttpContextUtils.getHttpServletRequest().getHeader(HEADER_WORKSPACE_ID);
     }
 
-    private boolean isSuperAdmin() {
-        UserDetail user = SecurityUser.getUser();
-        return user != null && user.getSuperAdmin() != null && user.getSuperAdmin() == SuperAdminEnum.YES.value();
-    }
+
 
     private String uuid() {
         return UUID.randomUUID().toString().replace("-", "");

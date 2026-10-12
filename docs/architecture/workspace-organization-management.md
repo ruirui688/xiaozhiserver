@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: manager-api
-last_verified: 2026-07-12
+last_verified: 2026-10-12
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/workspace
   - main/manager-api/src/main/resources/db/changelog
@@ -18,8 +18,8 @@ source_paths:
 核心目标：
 
 - 用户注册后自动拥有一个默认工作空间。
-- 每个用户只能拥有注册时自动创建的默认工作空间，不能再手动创建额外工作空间。
-- 用户可以加入他人的工作空间，也可以邀请别人加入自己的默认工作空间。
+- 只保留工作空间这一种形态，默认标记只表示默认选中，不限制协作。
+- 用户可以在默认空间直接邀请其他用户，也可受邀加入别人的工作空间；协作不要求创建团队或转换类型。
 - 每个工作空间最多 5 名 active 成员；发起邀请时会同时统计未过期的待接受邀请，避免超额邀请。
 - 工作空间成员共享业务资源，包括智能体、角色模板、设备、记忆、聊天历史、知识库、声纹、上下文源、替换词、智能体 MCP HTTP 工具等。
 - 设备仍只能绑定到一个用户/一条设备记录，但同一工作空间内的成员可共同查看和管理该工作空间内的设备。
@@ -96,7 +96,7 @@ main/manager-api/src/main/resources/db/changelog/db.changelog-master.yaml
 
 | 角色 | 读 | 写 | 成员管理 |
 |------|----|----|----------|
-| OWNER | 是 | 是 | 是，可管理 OWNER |
+| OWNER | 是 | 是 | 是，可管理其他 ADMIN/MEMBER；固定负责人不可变更 |
 | ADMIN | 是 | 是 | 可移除非 OWNER 成员；不能修改成员角色，不能管理 OWNER |
 | MEMBER | 是 | 否 | 否 |
 
@@ -106,8 +106,8 @@ main/manager-api/src/main/resources/db/changelog/db.changelog-master.yaml
 
 - ADMIN 不能移除 OWNER。
 - ADMIN 不能授予 OWNER，也不能撤销 OWNER。
-- OWNER 可以调整其他成员角色或移除其他成员，但不能修改自己的角色，也不能让工作空间失去最后一个 OWNER。
-- 邀请不能直接邀请为 OWNER，只能邀请为 ADMIN 或 MEMBER；OWNER 需要由现有 OWNER 后续授予。
+- 固定负责人可以调整其他成员的 ADMIN/MEMBER 角色或移除其他成员，不能修改、降级或移除固定负责人。
+- 邀请和角色编辑只允许 ADMIN 或 MEMBER，不通过授予 OWNER 变更负责人。
 - 邀请时确定新成员初始角色；被邀请人接受后不能自行修改自己的角色。
 - 工作空间成员上限为 5 人。邀请创建时按 active 成员 + 未过期待接受邀请计数；Web 和 Mobile 必须同时展示两部分占用，OWNER/ADMIN 可以查看并撤销待邀请。
 - 同一工作空间、同一用户只能保留一个有效待邀请；重复生成时复用原邀请并刷新角色和有效期。用户接受后，其余历史待邀请统一撤销；已是 active 成员的邀请不得继续占用名额。
@@ -125,11 +125,11 @@ WorkspacePermissionService.requireRead(workspaceId)
 WorkspacePermissionService.requireWrite(workspaceId)
 ```
 
-超级管理员仍保留系统级跨工作空间权限。这是当前管理后台的管理员模型，不等同于普通成员权限。
+平台不再保留超级管理员或系统级跨工作空间内容权限。员工按独立岗位管理公共平台资源，不能以员工身份绕过成员关系访问租户内容。工作空间固定使用其负责人的模型凭据与额度，当前不提供负责人交接；详见[平台服务与运营隔离](platform-service-and-operations.md)。
 
 ## 4. 请求上下文
 
-manager-web 在所有请求中追加当前工作空间：
+manager-web 用户业务请求追加当前工作空间；OPS 入口不发送租户空间上下文：
 
 ```text
 X-Workspace-Id: <workspace_id>
@@ -176,9 +176,9 @@ WHERE workspace_id = 当前工作空间
 ```
 
 工作空间角色模板同时保存所有权和发布状态。`workspace_id` 始终表示模板归属；`visibility` 为
-`WORKSPACE/PUBLIC/OFFICIAL`，`review_status` 为 `DRAFT/PENDING/APPROVED/REJECTED`。普通团队可从本工作空间智能体创建模板并提交审核；只有审核通过的 `PUBLIC` 模板和 `OFFICIAL` 模板对所有用户可见。审核接口只允许“官方资源维护者”调用；该身份定义为超级管理员本人，或任一由有效超级管理员拥有的有效工作空间成员。应用模板时仍校验目标智能体所有权，并过滤无权引用的资源。
+`WORKSPACE/PUBLIC/OFFICIAL`，`review_status` 为 `DRAFT/PENDING/APPROVED/REJECTED`。普通团队可从本工作空间智能体创建模板并提交审核；只有审核通过的 `PUBLIC` 模板和 `OFFICIAL` 模板对所有用户可见。官方资源岗位按明确权限管理待发布的公共快照，不从工作空间成员关系继承平台权限。应用模板时仍校验目标智能体所有权，并过滤无权引用的资源。
 
-`workspace_id IS NULL` 仅作为历史系统模板兼容形式，迁移后统一视为 `OFFICIAL + APPROVED`。新官方模板优先保留所属工作空间，避免发布后丢失所有权与审计链。系统模板继续由超级管理员入口管理，不得被工作空间模板接口删除；超级管理员入口也必须至少保留一条系统模板。
+`workspace_id IS NULL` 仅作为历史系统模板兼容形式，迁移后统一视为 `OFFICIAL + APPROVED`。官方模板通过员工公共资源入口管理和受控发布，不得被工作空间模板接口删除；发布历史与租户模板所有权分别保留。
 
 模板审核通过或发布为官方模板时，服务端会生成独立的 `public_snapshot_json` 脱敏快照，清除飞书凭据配置、声纹绑定和替换词文件引用；原工作空间快照保持不变。同工作空间应用原快照，跨工作空间只能应用公共快照。工作空间知识库引用在其他团队应用时会被跳过，只有官方知识库引用允许跨工作空间保留。
 
@@ -189,7 +189,7 @@ WHERE workspace_id = 当前工作空间
 智能体权限兼容规则：
 
 ```text
-1. 超级管理员直接放行
+1. 当前身份必须是获准的产品用户；员工没有内容旁路
 2. 历史数据 workspace_id 为空时，回退 user_id 所有者校验
 3. 正常数据按 workspace membership 校验
 ```
@@ -233,7 +233,7 @@ WHERE workspace_id = 当前工作空间
 仍需持续注意：
 
 - 新增接口必须纳入工作空间鉴权审查。
-- 超级管理员可以跨工作空间访问，账号安全必须按系统管理员级别保护。
+- 员工令牌、匿名身份和不属于该工作空间的产品用户都不能读取私有资源。
 - 系统级资源未做工作空间隔离，不能把本模型理解为全系统多租户隔离。
 - 历史库上线前应备份数据库，并抽样检查 `workspace_id IS NULL` 的业务数据。
 
@@ -251,9 +251,9 @@ WorkspaceService.prepareUserDeletion(userId)
 
 ```text
 1. 查询用户所有 active 工作空间成员关系
-2. 如果用户在任一工作空间是最后一个 OWNER
+2. 如果用户是仍存在工作空间的固定负责人，或任一工作空间最后一个 OWNER
    -> 拒绝删除账号
-   -> 要求先转让 OWNER
+   -> 不提供负责人交接或自动转扣其他成员
 3. 如果不存在最后 OWNER 风险
    -> 将该用户所有工作空间成员关系 status 置为 0
 4. 删除 sys_user
@@ -273,8 +273,8 @@ DELETE /workspace/{workspaceId}/members/{userId}
 
 ```text
 1. 操作者必须有工作空间写权限
-2. 如果目标成员是 OWNER，操作者必须也是 OWNER
-3. 不能移除最后一个 OWNER
+2. 如果目标成员是固定负责人或 OWNER，拒绝移除
+3. 不能让工作空间失去固定负责人
 4. 操作者不能移除自己，应使用主动退出接口
 5. 成员关系 status 置为 0，不做物理删除
 6. 被移除成员重新接受有效邀请时，复用原成员关系并恢复 status 为 1，同时按新邀请更新角色，不重复插入成员记录
@@ -292,9 +292,9 @@ PUT /workspace/{workspaceId}/members/{userId}/role
 
 ```text
 1. 操作者必须是 OWNER
-2. 角色只能是 OWNER / ADMIN / MEMBER
+2. 可授予角色仅 ADMIN / MEMBER
 3. 操作者不能修改自己的角色
-4. 不能撤销最后一个 OWNER
+4. 不能修改固定负责人或 OWNER 角色
 ```
 
 ### 7.4 待邀请管理
@@ -320,7 +320,7 @@ DELETE /workspace/{workspaceId}/members/me
 1. 当前用户必须是该工作空间 active 成员
 2. 如果当前用户是 OWNER
    -> 拒绝退出
-   -> 要求先转让或调整所有者身份
+   -> 当前版本没有负责人交接，不提供转让入口
 3. 退出时只停用成员关系，不删除工作空间资源
 ```
 

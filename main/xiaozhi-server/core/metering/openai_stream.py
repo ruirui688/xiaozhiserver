@@ -2,9 +2,11 @@
 
 import time
 import uuid
+from decimal import Decimal
 import openai
 
 from .recorder import begin_call
+from . import admission
 
 
 def record_openai_usage(call, usage):
@@ -50,12 +52,26 @@ def metered_stream(provider, request_params):
         client = client.with_options(max_retries=0)
     logical_call_id = str(uuid.uuid4())
     for attempt in range(retries + 1):
-        call = begin_call(provider, "LLM", logical_call_id=logical_call_id)
+        parameters = dict(request_params)
+        maximum = admission.llm_bounds(parameters) if admission.managed(provider) else None
+        call = begin_call(provider, "LLM", logical_call_id=logical_call_id, max_usage=maximum)
         stream = None
         status = "UNKNOWN"
         try:
+            attempt_client = client
+            if call.permit:
+                permit = call.permit
+                attempt_client = client.with_options(api_key=permit.secret(), base_url=permit.endpoint("base_url", "url"), max_retries=0)
+                parameters["model"] = permit.runtime.get("model_name") or permit.runtime.get("model")
+                if not parameters["model"]:
+                    raise admission.PlatformAdmissionError("MODEL_NOT_ADMITTED")
+                output_limit = int(Decimal(permit.limits["output_tokens"]))
+                token_param = "max_completion_tokens" if "max_completion_tokens" in parameters else "max_tokens"
+                parameters[token_param] = min(int(maximum["output_tokens"]), output_limit)
+                permit.check()
             try:
-                stream = client.chat.completions.create(**request_params)
+                call.start()
+                stream = attempt_client.chat.completions.create(**parameters)
             except Exception as exc:
                 status = "FAILED"
                 response = getattr(exc, "response", None)
@@ -72,6 +88,8 @@ def metered_stream(provider, request_params):
                 request_id = response.headers.get("x-request-id")
                 call.request_id(request_id)
             for chunk in provider._iter_stream_with_deadline(stream):
+                if call.permit:
+                    call.permit.check()
                 call.request_id(request_id or getattr(chunk, "id", None))
                 record_openai_usage(call, getattr(chunk, "usage", None))
                 yield chunk

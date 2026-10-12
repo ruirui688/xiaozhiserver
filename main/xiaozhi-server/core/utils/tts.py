@@ -43,6 +43,8 @@ punctuation_set = {
 }
 
 def create_instance(class_name, *args, **kwargs):
+    from core.metering.admission import validate_adapter
+    validate_adapter("TTS", class_name, args[0] if args else kwargs.get("config", {}))
     # 创建TTS实例
     if os.path.exists(os.path.join('core', 'providers', 'tts', f'{class_name}.py')):
         lib_name = f'core.providers.tts.{class_name}'

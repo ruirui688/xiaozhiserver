@@ -112,7 +112,9 @@ class ModelRuntimeAssemblerTest {
         assertEquals(true, typedConfig.getBool("enable_input_audio_transcription"));
         assertEquals(120.0, typedConfig.getDouble("response_timeout_seconds"));
         assertEquals(10485760.0, typedConfig.getDouble("max_event_bytes"));
-        assertEquals("sk-test", typedConfig.getStr("api_key"));
+        assertEquals("PLATFORM_MANAGED", typedConfig.getStr("api_key"));
+        org.junit.jupiter.api.Assertions.assertFalse(typedConfig.toString().contains("sk-test"));
+        assertEquals(true, typedConfig.getBool("_platform_managed"));
     }
 
     private ModelTemplateEntity template(String code, String upstreamModelField) {

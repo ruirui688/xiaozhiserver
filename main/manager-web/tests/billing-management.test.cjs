@@ -200,7 +200,8 @@ test('persistent metering failures remain errors after pending records are drain
 test('billing route is login-protected and monetary UI is separated from call usage', () => {
   const root = path.join(__dirname, '..');
   const router = fs.readFileSync(path.join(root, 'src/router/index.js'), 'utf8');
-  assert.match(router, /protectedRoutes = .*'ModelBillingManagement'/);
+  assert.match(router, /path: '\/model-billing', redirect:.*'\/allowance'/);
+  assert.match(router, /!publicRoutes\.includes\(to\.name\)/);
   const component = loadVueComponent('src/components/billing/BillingCosts.vue');
   assert.equal(component.props.status.default, 'PENDING_OR_UNATTRIBUTED');
   const template = fs.readFileSync(path.join(root, 'src/components/billing/BillingRecords.vue'), 'utf8');

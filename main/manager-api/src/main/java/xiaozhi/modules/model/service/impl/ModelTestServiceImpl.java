@@ -721,9 +721,7 @@ public class ModelTestServiceImpl implements ModelTestService {
 
     private <T> ResponseEntity<T> exchangeModelRequest(String endpoint, HttpEntity<?> request,
             Class<T> responseType, String serviceType) {
-        return usageMeter == null
-                ? restTemplate.exchange(endpoint, HttpMethod.POST, request, responseType)
-                : usageMeter.exchange(restTemplate, endpoint, request, responseType, null, serviceType);
+        return usageMeter.exchange(restTemplate, endpoint, request, responseType, null, serviceType);
     }
 
     private String resolveXiaozhiServerHttpBaseUrl() {

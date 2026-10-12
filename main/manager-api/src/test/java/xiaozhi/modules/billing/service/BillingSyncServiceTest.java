@@ -20,7 +20,7 @@ class BillingSyncServiceTest {
 
     @BeforeEach void setup() {
         client=mock(VolcengineBillingClient.class);bills=mock(BillingBillService.class);jdbc=mock(JdbcTemplate.class);
-        service=new BillingSyncService(client,bills,jdbc);user=new UserDetail();user.setSuperAdmin(1);
+        service=new BillingSyncService(client,bills,jdbc);user=new UserDetail();user.setId(null);user.setAudience("OPS");user.setEmployeeId("finance-test");user.setGrants(java.util.List.of(new xiaozhi.modules.security.ops.OpsGrant("SUPPLIER_FINANCE","PLATFORM","platform-services",xiaozhi.modules.security.ops.OpsPermissionCatalog.TEMPLATES.get("SUPPLIER_FINANCE").permissions())));
         security=mockStatic(SecurityUser.class);security.when(SecurityUser::getUser).thenReturn(user);
     }
     @AfterEach void close(){security.close();}
@@ -48,7 +48,7 @@ class BillingSyncServiceTest {
         verify(bills).replacePeriod("VOLCENGINE","configured-account",period,List.of());
     }
     @Test void workspaceAdminCannotTriggerAccountSync() {
-        user.setSuperAdmin(0);assertThrows(RenException.class,()->service.sync(period));
+        user.setAudience("USER");user.setId(1L);user.setEmployeeId(null);user.setGrants(java.util.List.of());assertThrows(RenException.class,()->service.sync(period));
         verifyNoInteractions(client,bills,jdbc);
     }
     private void configured(){when(client.enabled()).thenReturn(true);when(client.accountRef()).thenReturn("configured-account");when(client.fetch(anyString(),anyString())).thenReturn(List.of());}

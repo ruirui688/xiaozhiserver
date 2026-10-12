@@ -57,6 +57,7 @@ class BenchmarkCaseGeneratorTest {
 
     @BeforeEach
     void setUp() {
+        xiaozhi.common.llm.MeteredHttpTestSupport.install(generator);
         when(agentPluginMappingService.list(any(Wrapper.class))).thenReturn(List.of());
         when(agentPluginMappingService.agentPluginParamsByAgentId(any())).thenReturn(List.of());
         when(knowledgeBaseDao.selectList(any())).thenReturn(List.of());

@@ -37,10 +37,10 @@ export const tabbarList: FgTabBarItem[] = [
     iconType: 'uiLib',
   },
   {
-    iconPath: 'static/tabbar/system.png',
-    selectedIconPath: 'static/tabbar/system_activate.png',
+    iconPath: 'static/tabbar/personal.png',
+    selectedIconPath: 'static/tabbar/personalHL.png',
     pagePath: 'pages/settings/index',
-    text: '系统',
+    text: '我的',
     icon: 'i-carbon-settings',
     iconType: 'uiLib',
   },

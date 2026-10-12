@@ -269,9 +269,7 @@ public class BenchmarkCaseGenerator {
         headers.setBearerAuth(config.getStr("api_key"));
 
         HttpEntity<?> entity = new HttpEntity<>(requestBody, headers);
-        ResponseEntity<String> response = usageMeter == null
-                ? restTemplate.exchange(apiUrl, HttpMethod.POST, entity, String.class)
-                : usageMeter.exchange(restTemplate, apiUrl, entity, String.class, llmModel.getId(), "LLM");
+        ResponseEntity<String> response = usageMeter.exchange(restTemplate, apiUrl, entity, String.class, llmModel.getId(), "LLM");
         if (!response.getStatusCode().is2xxSuccessful()) {
             throw new IllegalStateException("LLM 调用失败：" + response.getStatusCode());
         }

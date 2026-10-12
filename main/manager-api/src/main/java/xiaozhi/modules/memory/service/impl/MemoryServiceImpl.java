@@ -356,8 +356,8 @@ public class MemoryServiceImpl implements MemoryService {
             throw new IllegalArgumentException("智能体不存在");
         }
         UserDetail user = SecurityUser.getUser();
-        if (user != null && user.getSuperAdmin() != null && user.getSuperAdmin() != 1
-                && !workspaceService().canRead(agent.getWorkspaceId(), user.getId())) {
+        if (!xiaozhi.modules.security.ops.OpsAccess.isUser(user)
+                || !workspaceService().canRead(agent.getWorkspaceId(), user.getId())) {
             throw new IllegalArgumentException("无权访问该智能体记忆");
         }
         return agent;

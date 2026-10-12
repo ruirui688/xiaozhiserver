@@ -38,7 +38,7 @@ class BillingBenefitServiceTest {
                 """)));
         speech = mock(VolcengineSpeechBenefitClient.class); when(speech.snapshotRef()).thenReturn("speech-account");
         service = new BillingBenefitService(jdbc, new BillingSupport(mapper), queries, volc, deepseek, speech);
-        user = new UserDetail(); user.setSuperAdmin(1);
+        user = new UserDetail(); user.setId(null);user.setAudience("OPS");user.setEmployeeId("finance-test");user.setGrants(java.util.List.of(new xiaozhi.modules.security.ops.OpsGrant("SUPPLIER_FINANCE","PLATFORM","platform-services",xiaozhi.modules.security.ops.OpsPermissionCatalog.TEMPLATES.get("SUPPLIER_FINANCE").permissions())));
         security = mockStatic(SecurityUser.class); security.when(SecurityUser::getUser).thenReturn(user);
     }
     @AfterEach void close() { security.close(); }
@@ -67,7 +67,7 @@ class BillingBenefitServiceTest {
     }
 
     @Test void nonAdminCannotReadAccountBalancesOrTriggerSupplierQuery() {
-        service.sync(); user.setSuperAdmin(0);
+        service.sync(); user.setAudience("USER");user.setId(1L);user.setEmployeeId(null);user.setGrants(java.util.List.of());
         assertThrows(RenException.class, () -> service.overview(true));
         assertThrows(RenException.class, service::sync);
         assertTrue(list(service.overview(false), "balances").isEmpty());

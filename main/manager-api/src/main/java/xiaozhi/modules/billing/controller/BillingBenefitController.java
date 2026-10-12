@@ -8,7 +8,9 @@ import xiaozhi.modules.billing.service.BillingBenefitService;
 import xiaozhi.modules.billing.service.BillingAccountService;
 import xiaozhi.common.exception.RenException;
 
+@xiaozhi.modules.security.ops.SharedOfficialEndpoint
 @RestController @RequestMapping("/billing/benefits") @RequiredArgsConstructor
+@RequiresPermissions("supplier.bill.read")
 public class BillingBenefitController {
     private final BillingBenefitService service;
     private final BillingAccountService accounts;
@@ -18,8 +20,8 @@ public class BillingBenefitController {
             if(!accountView)throw new RenException("工作空间权益不支持切换供应商账号");
             accounts.requireAccount(provider,accountRef);
         }
-        return new Result<>().ok(BillingController.present(service.overview(accountView,provider,accountRef)));
+        return new Result<>().ok(BillingController.present(service.overview(true,provider,accountRef)));
     }
-    @PostMapping("/sync") @RequiresPermissions("sys:role:superAdmin")
+    @PostMapping("/sync") @RequiresPermissions("supplier.bill.sync")
     public Result<Object> sync() { return new Result<>().ok(BillingController.present(service.sync())); }
 }

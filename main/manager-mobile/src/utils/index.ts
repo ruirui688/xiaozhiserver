@@ -10,7 +10,7 @@ export const SERVER_BASE_URL_OVERRIDE_KEY = 'server_base_url_override'
  * 设置/清除/获取 运行时覆盖的服务端地址
  */
 export function setServerBaseUrlOverride(url: string) {
-  uni.setStorageSync(SERVER_BASE_URL_OVERRIDE_KEY, normalizeServerBaseUrl(url))
+  if (import.meta.env.DEV) uni.setStorageSync(SERVER_BASE_URL_OVERRIDE_KEY, normalizeServerBaseUrl(url))
 }
 
 export function clearServerBaseUrlOverride() {
@@ -18,6 +18,7 @@ export function clearServerBaseUrlOverride() {
 }
 
 export function getServerBaseUrlOverride(): string | null {
+  if (!import.meta.env.DEV) return null
   const value = uni.getStorageSync(SERVER_BASE_URL_OVERRIDE_KEY)
   return value || null
 }

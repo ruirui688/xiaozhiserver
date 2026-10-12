@@ -23,14 +23,18 @@ source_paths:
 - 实时数据面：ESP32 与 `xiaozhi-server` 保持实时连接，完成音频、语义、模型和工具调用。
 - 管理控制面：Web/Mobile 通过 `manager-api` 管理智能体、设备、模型、知识库、记忆、OTA 和权限，并向实时服务提供运行配置。
 
+管理控制面分为用户业务与员工运营：用户入口管理自己获准的工作空间，员工入口 `ops.html` 按岗位管理平台资源；移动端只保留用户业务。平台没有超级管理员或跨租户内容旁路。模型服务使用每用户独立凭据，团队固定使用创建时负责人的凭据与额度；调用准入和供应商账单分离，详见[平台服务与运营隔离](platform-service-and-operations.md)。
+
 ```mermaid
 flowchart LR
     User[设备用户] --> Device[ESP32 设备]
-    Operator[管理员 / 运营人员] --> Web[manager-web]
-    Operator --> Mobile[manager-mobile]
+    Tenant[产品用户] --> Web[manager-web 用户入口]
+    Tenant --> Mobile[manager-mobile]
+    Operator[岗位员工] --> Ops[manager-web 运营入口]
     Device <-->|WebSocket 音频与控制| Realtime[xiaozhi-server]
     Device -->|HTTP OTA / 视觉| Realtime
     Web -->|HTTP API| Control[manager-api]
+    Ops -->|独立员工会话| Control
     Mobile -->|HTTP API| Control
     Realtime -->|服务密钥 HTTP| Control
     Control --> MySQL[(MySQL)]

@@ -154,6 +154,8 @@ public class RAGFlowClient {
     }
 
     private Map<String, Object> doExecute(String url, HttpMethod method, HttpEntity<?> requestEntity) {
+        if (method == HttpMethod.POST && URI.create(url).getPath().matches(".*(?:/completions|/ask)(?:/.*)?"))
+            xiaozhi.modules.platform.service.PlatformUnmeteredExecution.deny("EXTERNAL_RAG_GENERATION");
         try {
             ResponseEntity<String> response = restTemplate.exchange(url, method, requestEntity, String.class);
 
@@ -232,6 +234,7 @@ public class RAGFlowClient {
      * @param onData   数据回调（每收到一行数据调用一次）
      */
     public void postStream(String endpoint, Object body, Consumer<String> onData) {
+        xiaozhi.modules.platform.service.PlatformUnmeteredExecution.deny("EXTERNAL_RAG_GENERATION");
         try {
             String url = buildUrl(endpoint, null);
             log.debug("POST STREAM {}", url);

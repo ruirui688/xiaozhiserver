@@ -1,5 +1,6 @@
 import { goToPage } from "@/utils";
 import Vue from 'vue';
+import { readSession, writeSession, removeSession, isOperationsConsole } from '../security/session';
 import Vuex from 'vuex';
 import Api from '../apis/api';
 import Constant from '../utils/constant';
@@ -21,7 +22,7 @@ export default new Vuex.Store({
   getters: {
     getToken(state) {
       if (!state.token) {
-        state.token = localStorage.getItem('token')
+        state.token = readSession('token')
       }
       return state.token
     },
@@ -35,13 +36,15 @@ export default new Vuex.Store({
   mutations: {
     setToken(state, token) {
       state.token = token
-      localStorage.setItem('token', token)
-      localStorage.removeItem('currentWorkspaceId')
-      localStorage.removeItem('currentWorkspaceCanWrite')
+      writeSession('token', token)
+      if (!isOperationsConsole()) {
+        localStorage.removeItem('currentWorkspaceId')
+        localStorage.removeItem('currentWorkspaceCanWrite')
+      }
     },
     setUserInfo(state, userInfo) {
       state.userInfo = userInfo
-      localStorage.setItem('userInfo', JSON.stringify(userInfo))
+      writeSession('userInfo', JSON.stringify(userInfo))
     },
     setPubConfig(state, config) {
       state.pubConfig = config
@@ -50,10 +53,12 @@ export default new Vuex.Store({
     clearAuth(state) {
       state.token = ''
       state.userInfo = {}
-      localStorage.removeItem('token')
-      localStorage.removeItem('userInfo')
-      localStorage.removeItem('currentWorkspaceId')
-      localStorage.removeItem('currentWorkspaceCanWrite')
+      removeSession('token')
+      removeSession('userInfo')
+      if (!isOperationsConsole()) {
+        localStorage.removeItem('currentWorkspaceId')
+        localStorage.removeItem('currentWorkspaceCanWrite')
+      }
     }
   },
   actions: {

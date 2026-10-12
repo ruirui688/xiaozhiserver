@@ -20,7 +20,7 @@ class InvalidBillingAcknowledgement(RuntimeError):
 
 
 async def deliver_once(outbox, send, observer=None):
-    events = outbox.pending()
+    events = outbox.delivery_batch()
     if not events:
         return False
     result = await send(events)
@@ -68,7 +68,28 @@ class MeteringService:
         self.health_task = asyncio.create_task(self._heartbeat(), name="billing-health")
 
     async def _send(self, events):
-        return await self._post("/config/billing/usage", {"events": events})
+        from .admission import settlement
+        # A receipt is acknowledged locally only after both ledgers accepted it.
+        # Replaying a settlement is safe because reservation IDs are idempotent.
+        ready = []
+        failure = None
+        for event in events:
+            try:
+                payload = settlement(event)
+                if payload:
+                    if event.get("platformStarted"):
+                        await self._post("/config/platform/settle", payload)
+                    else:
+                        await self._post("/config/platform/release", event["platformSettlement"])
+                ready.append(event)
+            except Exception as exc:
+                # Keep the durable receipt; an invalid or unavailable settlement
+                # must not prevent independent accounts from reporting usage.
+                failure = exc
+        if not ready and failure is not None:
+            raise failure
+        public_events = [{key: value for key, value in event.items() if key not in {"platformSettlement", "platformStarted"}} for event in ready]
+        return await self._post("/config/billing/usage", {"events": public_events})
 
     async def _post(self, endpoint, payload):
         from config.manage_api_client import ManageApiClient

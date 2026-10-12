@@ -15,7 +15,7 @@ const userInfoState: UserInfo & { avatar?: string, token?: string } = {
   email: '',
   mobile: '',
   status: 0,
-  superAdmin: 0,
+  audience: 'USER',
   avatar: '/static/images/default-avatar.png',
   token: '',
 }
@@ -27,7 +27,7 @@ export const useUserStore = defineStore(
     const userInfo = ref<UserInfo & { avatar?: string, token?: string }>({ ...userInfoState })
     // 设置用户信息
     const setUserInfo = (val: UserInfo & { avatar?: string, token?: string }) => {
-      console.log('设置用户信息', val)
+      if (val.audience !== 'USER') throw new Error('此应用仅支持用户身份')
       // 若头像为空则使用默认头像，已有头像保留后端返回值。
       if (!val.avatar)
         val.avatar = userInfoState.avatar
@@ -36,8 +36,6 @@ export const useUserStore = defineStore(
     }
     const setUserAvatar = (avatar: string) => {
       userInfo.value.avatar = avatar
-      console.log('设置用户头像', avatar)
-      console.log('userInfo', userInfo.value)
     }
     // 删除用户信息
     const removeUserInfo = () => {

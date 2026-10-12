@@ -45,7 +45,7 @@ public class AdminController {
 
     @GetMapping("/users")
     @Operation(summary = "分页查找用户")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("users.read")
     @Parameters({
             @Parameter(name = "mobile", description = "用户手机号码", required = false),
             @Parameter(name = Constant.PAGE, description = "当前页码，从1开始", required = true),
@@ -64,24 +64,22 @@ public class AdminController {
 
     @PutMapping("/users/{id}")
     @Operation(summary = "重置密码")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("users.status")
     public Result<String> update(
             @PathVariable Long id) {
-        String password = sysUserService.resetPassword(id);
-        return new Result<String>().ok(password);
+        throw new xiaozhi.common.exception.RenException("密码仅可由用户本人通过已验证渠道恢复");
     }
 
     @DeleteMapping("/users/{id}")
     @Operation(summary = "用户删除")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("users.status")
     public Result<Void> delete(@PathVariable Long id) {
-        sysUserService.deleteById(id);
-        return new Result<>();
+        throw new xiaozhi.common.exception.RenException("运营身份不能代用户注销账号");
     }
 
     @PutMapping("/users/changeStatus/{status}")
     @Operation(summary = "批量修改用户状态")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("users.status")
     @Parameter(name = "status", description = "用户状态", required = true)
     public Result<Void> changeStatus(@PathVariable Integer status, @RequestBody String[] userIds) {
         sysUserService.changeStatus(status, userIds);
@@ -90,7 +88,7 @@ public class AdminController {
 
     @GetMapping("/device/all")
     @Operation(summary = "分页查找设备")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("device.diagnostics.read")
     @Parameters({
             @Parameter(name = "keywords", description = "设备关键词", required = false),
             @Parameter(name = Constant.PAGE, description = "当前页码，从1开始", required = true),
@@ -104,6 +102,7 @@ public class AdminController {
         dto.setPage((String) params.get(Constant.PAGE));
         ValidatorUtils.validateEntity(dto);
         PageData<UserShowDeviceListVO> page = deviceService.page(dto);
+        page.getList().forEach(device -> { device.setAlias(null); device.setBindUserName(null); device.setMacAddress(null); });
         return new Result<PageData<UserShowDeviceListVO>>().ok(page);
     }
 }

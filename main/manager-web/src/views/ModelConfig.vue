@@ -299,8 +299,10 @@
         </div>
       </div>
 
+      <OpsModelPublication ref="publication" @published="loadData" />
       <ModelEditDialog
         ref="editModelDialog"
+        :platform-managed="true"
         :modelType="activeTab"
         :visible.sync="editDialogVisible"
         :modelData="editModelData"
@@ -389,6 +391,8 @@
 
 <script>
 import Api from "@/apis/api";
+import OpsModelPublication from "@/ops/OpsModelPublication.vue";
+import { hasPermission } from "@/security/session";
 import HeaderBar from "@/components/HeaderBar.vue";
 import ModelBenchmarkDialog from "@/components/ModelBenchmarkDialog.vue";
 import ModelConfigAssistant from "@/components/ModelConfigAssistant.vue";
@@ -400,6 +404,7 @@ import { isRealtimeModel as isRealtimeConversationModel } from "@/utils/realtime
 
 export default {
   components: {
+    OpsModelPublication,
     HeaderBar,
     ModelBenchmarkDialog,
     ModelEditDialog,
@@ -650,7 +655,7 @@ export default {
       return "info";
     },
     canToggleEnabled(model) {
-      return model.isEnabled === 1 || (this.isModelSupportedForActions(model) && model.testStatus === 1);
+      return hasPermission(this.$store.state.userInfo, model.isEnabled === 1 ? 'model.catalog.write' : 'model.catalog.publish') && (model.isEnabled === 1 || (this.isModelSupportedForActions(model) && model.testStatus === 1));
     },
     canRunModelTest(model) {
       return !this.testingModelId && this.isModelSupportedForActions(model);
@@ -1200,6 +1205,7 @@ export default {
         return;
       }
 
+      if (normalizedStatus === 1) { model.isEnabled = originalStatus; this.$refs.publication.open(model); return; }
       Api.model.updateModelStatus(model.id, normalizedStatus, ({ data }) => {
         if (data.code === 0) {
           this.$message.success(

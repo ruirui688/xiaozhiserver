@@ -29,26 +29,28 @@ public class BillingController {
     @GetMapping("/overview") public Result<Object> overview(BillingFilter filter) { return ok(queries.overview(filter)); }
     @GetMapping("/groups") public Result<Object> groups(BillingFilter filter,@RequestParam String groupBy) { return ok(queries.groups(filter,groupBy)); }
     @GetMapping("/events") public Result<Object> events(BillingFilter filter) { return ok(queries.events(filter)); }
+    @RequiresPermissions("supplier.bill.read")
     @GetMapping("/bills") public Result<Object> bills(BillingFilter filter) { return ok(queries.bills(filter)); }
+    @xiaozhi.modules.security.ops.SharedOfficialEndpoint
     @GetMapping("/options") public Result<Object> options() { return ok(queries.options()); }
 
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("supplier.bill.import")
     @GetMapping("/bindings") public Result<Object> bindings(@RequestParam(defaultValue="1") int page,@RequestParam(defaultValue="20") int limit) { return ok(bindings.page(page,limit)); }
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("supplier.bill.import")
     @PostMapping("/bindings") public Result<Object> binding(@Valid @RequestBody BillingBindingRequest request) { return ok(bindings.save(request)); }
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("supplier.bill.import")
     @DeleteMapping("/bindings/{id}") public Result<Object> delete(@PathVariable String id) { bindings.delete(id);return ok(Map.of("deleted",true)); }
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("supplier.bill.sync")
     @PostMapping("/sync") public Result<Object> sync(@Valid @RequestBody SyncRequest request) { return ok(sync.sync(request.getBillPeriod(),request.getProvider(),request.getAccountRef())); }
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("supplier.bill.import")
     @GetMapping("/import-template") public ResponseEntity<byte[]> template() {
         return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION,"attachment; filename=official-bill-template.csv")
                 .contentType(new MediaType("text","csv",StandardCharsets.UTF_8)).body(csv.template().getBytes(StandardCharsets.UTF_8));
     }
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("supplier.bill.import")
     @PostMapping(value="/import",consumes=MediaType.MULTIPART_FORM_DATA_VALUE)
     public Result<Object> upload(@RequestParam MultipartFile file,@RequestParam String provider,@RequestParam String accountRef) {
-        queries.workspace();int count=csv.importFile(file,provider,accountRef);
+        int count=csv.importFile(file,provider,accountRef);
         return ok(Map.of("status","SUCCESS","importedCount",count));
     }
 

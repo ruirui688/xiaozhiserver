@@ -1551,3 +1551,31 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/model-billing-read-model.sql
+  - changeSet:
+      id: 202610121600
+      author: Codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202610121600.sql
+  - changeSet:
+      id: 202610121610
+      author: Codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202610121610.sql
+  - changeSet:
+      id: 202610121700
+      author: Codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202610121700.sql
+  - changeSet:
+      id: 202610121710
+      author: Codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202610121710.sql

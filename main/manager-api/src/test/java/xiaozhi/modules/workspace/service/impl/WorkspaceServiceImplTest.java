@@ -32,7 +32,7 @@ import xiaozhi.common.utils.MessageUtils;
 import xiaozhi.modules.security.user.SecurityUser;
 import xiaozhi.modules.sys.dao.SysUserDao;
 import xiaozhi.modules.sys.entity.SysUserEntity;
-import xiaozhi.modules.sys.enums.SuperAdminEnum;
+
 import xiaozhi.modules.workspace.dao.WorkspaceDao;
 import xiaozhi.modules.workspace.dao.WorkspaceInvitationDao;
 import xiaozhi.modules.workspace.dao.WorkspaceMemberDao;
@@ -55,8 +55,11 @@ class WorkspaceServiceImplTest {
     private final WorkspaceServiceImpl workspaceService =
             new WorkspaceServiceImpl(workspaceDao, memberDao, invitationDao, sysUserDao);
 
+    private MockedStatic<xiaozhi.common.utils.SpringContextUtils> context;
     @BeforeEach
     void setUp() {
+        context = mockStatic(xiaozhi.common.utils.SpringContextUtils.class);
+        context.when(() -> xiaozhi.common.utils.SpringContextUtils.getBean(xiaozhi.modules.platform.service.PlatformResponsibilityService.class)).thenReturn(mock(xiaozhi.modules.platform.service.PlatformResponsibilityService.class));
         MessageSource messageSource = mock(MessageSource.class);
         when(messageSource.getMessage(any(String.class), any(Object[].class), any())).thenReturn("no permission");
         ReflectionTestUtils.setField(MessageUtils.class, "messageSource", messageSource);
@@ -65,6 +68,7 @@ class WorkspaceServiceImplTest {
     @AfterEach
     void tearDown() {
         RequestContextHolder.resetRequestAttributes();
+        context.close();
     }
 
     @Test
@@ -203,6 +207,7 @@ class WorkspaceServiceImplTest {
 
     @Test
     void inviteRejectsWhenActiveAndPendingMembersReachLimit() {
+        when(workspaceDao.selectById("workspace-a")).thenReturn(workspace("workspace-a", USER_ID));
         WorkspaceInviteDTO dto = new WorkspaceInviteDTO();
         dto.setUsername("bob");
         dto.setRole(WorkspaceService.ROLE_MEMBER);
@@ -333,10 +338,41 @@ class WorkspaceServiceImplTest {
         verify(memberDao).update(any(), any());
     }
 
-    private MockedStatic<SecurityUser> mockSecurityUser(Long userId, boolean superAdmin) {
+    @Test
+    void fixedCreatorCannotBeRemovedDowngradedOrDeletedEvenWithAnotherOwner() {
+        when(workspaceDao.selectById("workspace-a")).thenReturn(workspace("workspace-a", 2002L));
+        when(memberDao.selectOne(any(Wrapper.class))).thenReturn(member("workspace-a",USER_ID,WorkspaceService.ROLE_OWNER));
+        when(memberDao.selectList(any(Wrapper.class))).thenReturn(List.of(member("workspace-a",2002L,WorkspaceService.ROLE_OWNER)));
+        WorkspaceRoleUpdateDTO dto=new WorkspaceRoleUpdateDTO();dto.setRole(WorkspaceService.ROLE_MEMBER);
+        try(MockedStatic<SecurityUser> ignored=mockSecurityUser(USER_ID,false)) {
+            assertThrows(RenException.class,()->workspaceService.removeMember("workspace-a",2002L));
+            assertThrows(RenException.class,()->workspaceService.updateMemberRole("workspace-a",2002L,dto));
+            assertThrows(RenException.class,()->workspaceService.prepareUserDeletion(2002L));
+        }
+        verify(memberDao,never()).update(any(),any());
+    }
+
+    @Test
+    void fixedCreatorCannotLeaveEvenIfMembershipRoleWasChanged() {
+        when(workspaceDao.selectById("workspace-a")).thenReturn(workspace("workspace-a",USER_ID));
+        when(memberDao.selectOne(any(Wrapper.class))).thenReturn(member("workspace-a",USER_ID,WorkspaceService.ROLE_MEMBER));
+        try(MockedStatic<SecurityUser> ignored=mockSecurityUser(USER_ID,false)) {
+            assertThrows(RenException.class,()->workspaceService.leaveWorkspace("workspace-a"));
+        }
+    }
+
+    @Test
+    void fixedCreatorCannotDeleteAccountIfLegacyMembershipIsMissing() {
+        when(workspaceDao.selectCount(any(Wrapper.class))).thenReturn(1L);
+        assertThrows(RenException.class,()->workspaceService.prepareUserDeletion(USER_ID));
+        verify(memberDao,never()).update(any(),any());
+    }
+
+    private MockedStatic<SecurityUser> mockSecurityUser(Long userId, boolean employee) {
         UserDetail user = new UserDetail();
         user.setId(userId);
-        user.setSuperAdmin(superAdmin ? SuperAdminEnum.YES.value() : SuperAdminEnum.NO.value());
+        user.setAudience(employee ? "OPS" : "USER");
+        if (employee) { user.setId(null); user.setEmployeeId("employee"); }
         MockedStatic<SecurityUser> securityUser = mockStatic(SecurityUser.class);
         securityUser.when(SecurityUser::getUser).thenReturn(user);
         securityUser.when(SecurityUser::getUserId).thenReturn(userId);
@@ -349,7 +385,7 @@ class WorkspaceServiceImplTest {
         workspace.setName(workspaceId);
         workspace.setOwnerUserId(ownerId);
         workspace.setStatus(1);
-        workspace.setDefaultWorkspace(0);
+        workspace.setDefaultWorkspace(1);
         return workspace;
     }
 

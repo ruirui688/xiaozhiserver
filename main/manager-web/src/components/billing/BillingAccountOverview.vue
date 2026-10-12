@@ -22,8 +22,8 @@
           <p v-if="state(item).importOnly" class="account-source-note">此账号暂不支持自动获取消费账单。实际费用需导入含官方金额的凭证，余额和 Token 用量不能代替消费金额。</p>
           <div v-if="state(item).importOnly || item.account.provider === 'DEEPSEEK'" class="account-actions">
             <el-button v-if="state(item).capabilities.balanceSupported" size="small" @click="$emit('benefits', item.account)">查看余额</el-button>
-            <el-button v-if="state(item).capabilities.statementImportSupported" size="small" @click="openImport(item.account)">导入官方凭证</el-button>
-            <el-button size="small" @click="$emit('usage', item.account)">本工作空间用量</el-button>
+            <el-button v-if="canImport && state(item).capabilities.statementImportSupported" size="small" @click="openImport(item.account)">导入官方凭证</el-button>
+            <el-button v-if="showWorkspaceUsage" size="small" @click="$emit('usage', item.account)">本工作空间用量</el-button>
             <a v-if="item.account.provider === 'DEEPSEEK'" href="https://platform.deepseek.com/usage" target="_blank" rel="noopener noreferrer">官方用量控制台 <i class="el-icon-top-right" /></a>
           </div>
         </article>
@@ -47,7 +47,7 @@ import { billingLabel, billingTime, amountText, decimalText, chinaDate } from '@
 import { accountKey, accountQuery } from '@/utils/billingNavigation';
 import { billingAccountState } from '@/utils/billingAccounts';
 export default {
-  components: { BillingBillList }, props: { accounts: { type: Array, default: () => [] } },
+  components: { BillingBillList }, props: { accounts: { type: Array, default: () => [] }, showWorkspaceUsage: { type: Boolean, default: true }, canImport: { type: Boolean, default: true } },
   data() { return { period: chinaDate().slice(0, 7), reports: [], focusedKey: '', billQuery: null, loading: false, error: '', generation: 0 }; },
   computed: { focused() { return this.reports.find(item => accountKey(item.account) === this.focusedKey) || this.reports.find(item => item.data); } },
   watch: { accounts: { handler() { this.load(); }, deep: true }, '$route.query.billPeriod'() { this.readPeriod(); this.load(); } },

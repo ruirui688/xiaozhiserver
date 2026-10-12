@@ -3,11 +3,13 @@
 import re
 import uuid
 import time
+import asyncio
 from decimal import Decimal, InvalidOperation
 
 from .context import current_scope
 from .outbox import utc_now
 from . import health
+from . import admission
 
 _outbox = None
 _NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -23,6 +25,8 @@ class UsageCall:
         self.outbox, self.event = outbox, event
         self.finished = False
         self.status = "UNKNOWN"
+        self.permit = None
+        self._watchdog = None
         self._last_observed_checkpoint = 0
         self.outbox.save(self.event, active=True)
 
@@ -69,19 +73,46 @@ class UsageCall:
         self.event.update(status=status or self.status, endedAt=utc_now())
         self.outbox.save(self.event, active=False)
         self.finished = True
+        if self.permit:
+            self.permit.erase_secrets()
+        if self._watchdog is not None and not self._watchdog.done():
+            self._watchdog.get_loop().call_soon_threadsafe(self._watchdog.cancel)
+
+    def start(self):
+        if self.permit and not self.permit.started:
+            # A crashed/ambiguous start must be held for reconciliation, never
+            # mistaken for a reservation that certainly never reached execution.
+            self.event["platformStarted"] = True
+            self.outbox.save(self.event, active=True)
+            try:
+                self.permit.start()
+            except admission.PlatformAdmissionError as exc:
+                if exc.code == "PLATFORM_START_REJECTED":
+                    self.event["platformStarted"] = False
+                    self.outbox.save(self.event, active=True)
+                raise
+
+    def watch(self, transport):
+        if self.permit:
+            self._watchdog = asyncio.create_task(admission.watchdog(self, transport))
 
 
 class _NoUsageCall:
     status = "UNKNOWN"
+    permit = None
     def request_id(self, *args, **kwargs): pass
     def usage(self, *args, **kwargs): pass
     def finish(self, *args, **kwargs): pass
+    def watch(self, *args, **kwargs): pass
+    def start(self): pass
 
 
-def begin_call(provider, service_type, *, scope=None, logical_call_id=None, request_id=None):
+def begin_call(provider, service_type, *, scope=None, logical_call_id=None, request_id=None, max_usage=None):
     scope = scope or current_scope.get() or getattr(provider, "_billing_scope", None)
     health.call_started(scope)
     if scope is None:
+        if admission.managed(provider):
+            raise admission.PlatformAdmissionError("BILLING_CONTEXT_REQUIRED")
         return _NoUsageCall()
     model = scope.model(service_type, provider)
     if model is None:
@@ -100,4 +131,18 @@ def begin_call(provider, service_type, *, scope=None, logical_call_id=None, requ
     )
     call = UsageCall(_outbox, event)
     call.request_id(request_id)
+    if admission.managed(provider, scope):
+        try:
+            call.permit = admission.reserve(event, max_usage)
+            event["platformSettlement"] = call.permit.reference()
+            event["platformStarted"] = False
+            # Durable identity precedes start and every upstream transmission.
+            _outbox.save(event, active=True)
+        except BaseException:
+            call.finish("UNKNOWN")
+            raise
     return call
+
+
+async def begin_call_async(provider, service_type, **kwargs):
+    return await asyncio.to_thread(begin_call, provider, service_type, **kwargs)

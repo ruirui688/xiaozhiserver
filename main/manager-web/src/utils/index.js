@@ -1,5 +1,5 @@
 import { Message } from 'element-ui'
-import router from '../router'
+import { navigate } from '../router/navigation'
 import Constant from '../utils/constant'
 
 /**
@@ -96,11 +96,7 @@ export function showSuccess(msg) {
  * @param isRepalce
  */
 export function goToPage(path, isRepalce) {
-    if (isRepalce) {
-        router.replace(path)
-    } else {
-        router.push(path)
-    }
+    return navigate(path, isRepalce)
 }
 
 /**

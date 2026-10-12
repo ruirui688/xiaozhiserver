@@ -88,8 +88,6 @@
                     <el-button v-if="scope.row.canEdit" size="mini" type="text" icon="el-icon-delete" class="danger-action" @click="deleteSingleKnowledgeBase(scope.row)">
                       {{ $t('knowledgeBaseManagement.delete') }}
                     </el-button>
-                    <el-button v-if="activeScope === 'MY' && scope.row.canPublishOfficial" size="mini" type="text"
-                      icon="el-icon-medal" @click="publishOfficial(scope.row)">设为官方</el-button>
                   </template>
                 </el-table-column>
               </el-table>

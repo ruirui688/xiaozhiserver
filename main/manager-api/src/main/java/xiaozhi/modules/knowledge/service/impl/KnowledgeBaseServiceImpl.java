@@ -596,6 +596,10 @@ public class KnowledgeBaseServiceImpl extends BaseServiceImpl<KnowledgeBaseDao, 
         if (!config.containsKey("type")) {
             config.put("type", "ragflow");
         }
+        if ("ragflow".equals(config.get("type"))) {
+            config = xiaozhi.common.utils.SpringContextUtils.getBean(
+                    xiaozhi.modules.platform.service.PlatformIntegrationCredentialService.class).ragflow(modelId, config);
+        }
         return config;
     }
 

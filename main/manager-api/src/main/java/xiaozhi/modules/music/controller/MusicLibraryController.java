@@ -36,7 +36,7 @@ public class MusicLibraryController {
 
     @GetMapping("/files")
     @Operation(summary = "查询服务器音乐文件")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("official.resource.read")
     public Result<MusicLibraryDTO> list(@RequestParam(required = false) String keyword) {
         try {
             return new Result<MusicLibraryDTO>().ok(musicLibraryService.list(keyword));
@@ -48,7 +48,7 @@ public class MusicLibraryController {
 
     @PostMapping("/upload")
     @Operation(summary = "上传服务器音乐文件")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("official.resource.write")
     public Result<List<MusicFileDTO>> upload(@RequestParam("files") MultipartFile[] files) {
         try {
             return new Result<List<MusicFileDTO>>().ok(musicLibraryService.upload(files));
@@ -60,7 +60,7 @@ public class MusicLibraryController {
 
     @PutMapping("/files/name")
     @Operation(summary = "重命名服务器音乐文件")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("official.resource.write")
     public Result<MusicFileDTO> rename(@RequestParam("path") String path, @RequestParam("newName") String newName) {
         try {
             return new Result<MusicFileDTO>().ok(musicLibraryService.rename(path, newName));
@@ -72,7 +72,7 @@ public class MusicLibraryController {
 
     @PutMapping("/files/description")
     @Operation(summary = "更新服务器音乐提示词")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("official.resource.write")
     public Result<MusicFileDTO> updateDescription(
             @RequestParam("path") String path,
             @RequestParam(required = false) String description) {
@@ -86,7 +86,7 @@ public class MusicLibraryController {
 
     @PutMapping("/files/metadata")
     @Operation(summary = "更新服务器音乐提示词和别名")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("official.resource.write")
     public Result<MusicFileDTO> updateMetadata(
             @RequestParam("path") String path,
             @RequestParam(required = false) String description,
@@ -101,7 +101,7 @@ public class MusicLibraryController {
 
     @DeleteMapping("/files")
     @Operation(summary = "删除服务器音乐文件")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("official.resource.write")
     public Result<Void> delete(@RequestParam("path") String path) {
         try {
             musicLibraryService.delete(path);

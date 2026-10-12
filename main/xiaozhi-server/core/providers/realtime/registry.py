@@ -54,6 +54,8 @@ def realtime_adapter_capabilities(config, fallback_adapter=""):
 
 
 def create_realtime_session(conn, config):
+    from core.metering.admission import validate_adapter
+    validate_adapter("REALTIME", normalize_realtime_adapter(config), config)
     adapter = normalize_realtime_adapter(config)
     factory = SESSION_FACTORIES.get(adapter)
     if factory is None:
@@ -62,6 +64,8 @@ def create_realtime_session(conn, config):
 
 
 def create_realtime_probe(config, fallback_adapter=""):
+    from core.metering.admission import validate_adapter
+    validate_adapter("REALTIME", normalize_realtime_adapter(config, fallback_adapter), config)
     adapter = normalize_realtime_adapter(config, fallback_adapter)
     factory = PROBE_FACTORIES.get(adapter)
     if factory is None:

@@ -6,7 +6,8 @@ import pytest
 
 from test_function_call_runtime_mode import _chat_conn, CapturingToolHandler, SentenceType
 from core.handle import receiveAudioHandle as receive
-from core.handle.llmErrorHandle import queue_llm_error_reply
+from core.handle.llmErrorHandle import admission_notice, queue_llm_error_reply
+from core.providers.tts.dto.dto import ContentType
 
 
 @pytest.mark.parametrize("phase", ["request", "stream"])
@@ -73,3 +74,56 @@ def test_error_after_interrupt_cannot_speak_into_new_turn(stale):
         conn.reply_lifecycle.bind_sentence(new_generation, "new")
     assert queue_llm_error_reply(conn, "old", generation, abort_generation, 0) is False
     assert conn.tts.tts_text_queue.empty()
+
+
+def test_managed_service_failure_uses_local_audio_without_paid_tts():
+    conn = _chat_conn(None, CapturingToolHandler([]))
+    conn.llm = type("ManagedModel", (), {"_platform_managed": True})()
+    generation = conn.reply_lifecycle.begin()
+    conn.reply_lifecycle.bind_sentence(generation, "current")
+    assert queue_llm_error_reply(conn, "current", generation, conn.abort_generation, 0)
+    messages = list(conn.tts.tts_text_queue.queue)
+    assert not any(message.content_type == ContentType.TEXT for message in messages)
+    assert any(message.content_type == ContentType.FILE and message.content_file == "config/assets/tts_notify.mp3" for message in messages)
+
+
+@pytest.mark.parametrize("code,expected", [
+    ("ALLOWANCE_EXHAUSTED", "服务额度已用完，请在智控台提交额度申请。"),
+    ("WORKSPACE_ALLOWANCE_LIMIT", "本工作空间已达使用上限，请联系负责人。"),
+    ("TEAM_ALLOWANCE_LIMIT", "本工作空间已达使用上限，请联系负责人。"),
+    ("PAYER_FROZEN", "账号服务已暂停，请在智控台查看服务状态。"),
+    ("PENDING_CREDENTIAL", "模型服务待开通，请在智控台查看服务状态。"),
+])
+def test_managed_refusal_speaks_the_real_reason(code, expected):
+    from core.metering.admission import PlatformAdmissionError
+
+    conn = _chat_conn(None, CapturingToolHandler([]))
+    conn.llm = type("ManagedModel", (), {"_platform_managed": True})()
+    generation = conn.reply_lifecycle.begin()
+    conn.reply_lifecycle.bind_sentence(generation, "current")
+    assert queue_llm_error_reply(conn, "current", generation, conn.abort_generation, 0, error=PlatformAdmissionError(code))
+    spoken = [message.content_detail for message in conn.tts.tts_text_queue.queue if message.content_detail]
+    assert spoken == [expected]
+
+
+def test_unknown_admission_code_keeps_the_generic_notice():
+    from core.handle.llmErrorHandle import MANAGED_NOTICE
+    from core.metering.admission import PlatformAdmissionError
+
+    assert admission_notice(PlatformAdmissionError("SOMETHING_NEW")) == MANAGED_NOTICE
+    # A non-platform failure keeps the generic managed notice instead of the error text.
+    assert admission_notice(RuntimeError("boom")) is None
+
+
+@pytest.mark.parametrize("message,expected", [
+    ("ALLOWANCE_EXHAUSTED", "ALLOWANCE_EXHAUSTED"),
+    ("WORKSPACE_ALLOWANCE_LIMIT: workspace limit", "WORKSPACE_ALLOWANCE_LIMIT"),
+    ("TEAM_ALLOWANCE_LIMIT: workspace limit", "TEAM_ALLOWANCE_LIMIT"),
+    ("PENDING_CREDENTIAL", "PENDING_CREDENTIAL"),
+    ("内部错误", "PLATFORM_CALL_DENIED"),
+])
+def test_denial_code_is_extracted_without_trusting_arbitrary_text(message, expected):
+    from core.metering.admission import _denial_code
+
+    assert _denial_code({"code": 1, "msg": message}) == expected
+    assert _denial_code("not-a-dict") == "PLATFORM_SERVICE_UNAVAILABLE"

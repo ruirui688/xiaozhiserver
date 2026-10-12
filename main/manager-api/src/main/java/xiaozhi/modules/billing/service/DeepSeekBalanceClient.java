@@ -9,38 +9,30 @@ import java.util.*;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import xiaozhi.common.exception.RenException;
-import xiaozhi.modules.model.service.ModelConfigService;
 
-/** Reads account credit from the fixed official endpoint, using an existing managed model key. */
+/** Dedicated finance credential; never reads a tenant or model runtime credential. */
 @Component
 public class DeepSeekBalanceClient {
     private final ObjectMapper mapper;
-    private final ModelConfigService models;
-    private final String modelId, accountRef;
+    private final String apiKey, accountRef;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10))
             .followRedirects(HttpClient.Redirect.NEVER).build();
 
-    public DeepSeekBalanceClient(ObjectMapper mapper, ModelConfigService models,
-            @Value("${xiaozhi.billing.deepseek.model-id:}") String modelId,
+    public DeepSeekBalanceClient(ObjectMapper mapper,
+            @Value("${xiaozhi.billing.deepseek.api-key:}") String apiKey,
             @Value("${xiaozhi.billing.deepseek.account-ref:}") String accountRef) {
-        this.mapper = mapper; this.models = models; this.modelId = modelId;
-        this.accountRef = accountRef.isBlank() ? modelId : accountRef;
+        this.mapper = mapper; this.apiKey = apiKey;
+        this.accountRef = accountRef;
     }
 
-    public boolean enabled() { return !modelId.isBlank() && !accountRef.isBlank() && accountRef.length() <= 128; }
+    public boolean enabled() { return !apiKey.isBlank() && !accountRef.isBlank() && accountRef.length() <= 128; }
     public String accountRef() { return accountRef; }
 
     public List<Map<String, Object>> fetch() {
-        if (!enabled()) throw new RenException("未配置 DeepSeek 余额查询模型");
-        var model = models.getModelByIdFromCache(modelId);
-        if (model == null || model.getConfigJson() == null) throw new RenException("DeepSeek 模型配置不存在");
-        var config = model.getConfigJson();
-        String key = config.getStr("api_key");
-        String base = config.getStr("base_url", model.getEndpointUrl());
-        if (key == null || key.isBlank() || !official(base)) throw new RenException("余额查询必须使用官方直连 DeepSeek 模型配置");
+        if (!enabled()) throw new RenException("未配置独立 DeepSeek 财务查询凭据及账号标识");
         try {
             var request = HttpRequest.newBuilder(URI.create("https://api.deepseek.com/user/balance"))
-                    .timeout(Duration.ofSeconds(20)).header("Authorization", "Bearer " + key).GET().build();
+                    .timeout(Duration.ofSeconds(20)).header("Authorization", "Bearer " + apiKey).GET().build();
             HttpResponse<byte[]> response = BillingHttpResponses.send(http, request, 64 * 1024);
                 if (response.statusCode() != 200) throw new RenException("DeepSeek 余额查询失败（HTTP " + response.statusCode() + "）");
                 return parse(mapper.readTree(response.body()), accountRef);

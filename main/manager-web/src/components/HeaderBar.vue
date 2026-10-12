@@ -1,6 +1,7 @@
 <template>
   <el-header class="header">
-    <div class="header-container">
+    <OpsHeader v-if="isOps" />
+    <div v-else class="header-container">
       <!-- 左侧元素 -->
       <div class="header-left" @click="handleRouter('home')">
         <img loading="lazy" alt="" src="@/assets/xiaozhi-logo.png" class="logo-img" />
@@ -28,55 +29,7 @@
           <i class="el-icon-monitor"></i>
           <span class="nav-text">设备管理</span>
         </div>
-        <!-- 普通用户显示音色克隆 -->
-        <div v-if="!userInfo.superAdmin && featureStatus.voiceClone" class="equipment-management"
-          :class="{ 'active-tab': $route.path === '/voice-clone-management' }"
-          @click="handleRouter('voiceCloneManagement')">
-          <img loading="lazy" alt="" src="@/assets/header/voice.png" :style="{
-            filter:
-              $route.path === '/voice-clone-management'
-                ? 'brightness(0) invert(1)'
-                : 'None',
-          }" />
-          <span class="nav-text">{{ $t("header.voiceCloneManagement") }}</span>
-        </div>
-
-        <!-- 超级管理员显示音色克隆下拉菜单 -->
-        <el-dropdown v-if="userInfo.superAdmin && featureStatus.voiceClone" trigger="click"
-          class="equipment-management more-dropdown" :class="{
-            'active-tab':
-              $route.path === '/voice-clone-management' ||
-              $route.path === '/voice-resource-management',
-          }" @visible-change="handleVoiceCloneDropdownVisibleChange">
-          <span class="el-dropdown-link">
-            <img loading="lazy" alt="" src="@/assets/header/voice.png" :style="{
-              filter:
-                $route.path === '/voice-clone-management' ||
-                  $route.path === '/voice-resource-management'
-                  ? 'brightness(0) invert(1)'
-                  : 'None',
-            }" />
-            <span class="nav-text">{{ $t("header.voiceCloneManagement") }}</span>
-            <i class="el-icon-arrow-down el-icon--right" :class="{ 'rotate-down': voiceCloneDropdownVisible }"></i>
-          </span>
-          <el-dropdown-menu slot="dropdown">
-            <el-dropdown-item @click.native="handleRouter('voiceCloneManagement')">
-              {{ $t("header.voiceCloneManagement") }}
-            </el-dropdown-item>
-            <el-dropdown-item @click.native="handleRouter('voiceResourceManagement')">
-              {{ $t("header.voiceResourceManagement") }}
-            </el-dropdown-item>
-          </el-dropdown-menu>
-        </el-dropdown>
-
-        <div v-if="userInfo.superAdmin" class="equipment-management"
-          :class="{ 'active-tab': $route.path === '/model-config' }" @click="handleRouter('modelConfig')">
-          <img loading="lazy" alt="" src="@/assets/header/model_config.png" :style="{
-            filter:
-              $route.path === '/model-config' ? 'brightness(0) invert(1)' : 'None',
-          }" />
-          <span class="nav-text">{{ $t("header.modelConfig") }}</span>
-        </div>
+        <div v-if="featureStatus.voiceClone" class="equipment-management" :class="{ 'active-tab': $route.path === '/voice-clone-management' }" @click="handleRouter('voiceCloneManagement')"><i class="el-icon-microphone" /><span class="nav-text">音色克隆</span></div>
         <div class="equipment-management"
           :class="{ 'active-tab': resourceCenterActive }"
           @click="handleRouter('resourceCenter')">
@@ -99,81 +52,13 @@
           :class="{ 'active-tab': $route.path === '/organization-management' }"
           @click="handleRouter('organizationManagement')">
           <i class="el-icon-s-custom"></i>
-          <span class="nav-text">组织管理</span>
+          <span class="nav-text">团队</span>
         </div>
-        <div class="equipment-management" :class="{ 'active-tab': $route.path === '/model-billing' }"
+        <div class="equipment-management" :class="{ 'active-tab': $route.path === '/allowance' }"
           @click="handleRouter('modelBilling')">
           <i class="el-icon-data-analysis"></i>
-          <span class="nav-text">计费管理</span>
+          <span class="nav-text">额度与用量</span>
         </div>
-        <el-dropdown v-if="userInfo.superAdmin" trigger="click" class="equipment-management more-dropdown" :class="{
-          'active-tab':
-            $route.path === '/dict-management' ||
-            $route.path === '/params-management' ||
-            $route.path === '/provider-management' ||
-            $route.path === '/function-plugin-management' ||
-            $route.path === '/music-management' ||
-            $route.path === '/server-side-management' ||
-            $route.path === '/agent-template-management' ||
-            $route.path === '/ota-management' ||
-            $route.path === '/user-management' ||
-            $route.path === '/feature-management',
-        }" @visible-change="handleParamDropdownVisibleChange">
-          <span class="el-dropdown-link">
-            <img loading="lazy" alt="" src="@/assets/header/param_management.png" :style="{
-              filter:
-                  $route.path === '/dict-management' ||
-                  $route.path === '/params-management' ||
-                  $route.path === '/provider-management' ||
-                  $route.path === '/function-plugin-management' ||
-                  $route.path === '/music-management' ||
-                  $route.path === '/server-side-management' ||
-                  $route.path === '/agent-template-management' ||
-                  $route.path === '/ota-management' ||
-                  $route.path === '/user-management' ||
-                  $route.path === '/feature-management'
-                  ? 'brightness(0) invert(1)'
-                  : 'None',
-            }" />
-            <span class="nav-text">{{ $t("header.paramDictionary") }}</span>
-            <i class="el-icon-arrow-down el-icon--right" :class="{ 'rotate-down': paramDropdownVisible }"></i>
-          </span>
-          <el-dropdown-menu slot="dropdown">
-            <el-dropdown-item @click.native="handleRouter('paramManagement')">
-              {{ $t("header.paramManagement") }}
-            </el-dropdown-item>
-            <el-dropdown-item @click.native="handleRouter('userManagement')">
-              {{ $t("header.userManagement") }}
-            </el-dropdown-item>
-            <el-dropdown-item @click.native="handleRouter('otaManagement')">
-              {{ $t("header.otaManagement") }}
-            </el-dropdown-item>
-            <el-dropdown-item @click.native="handleRouter('dictManagement')">
-              {{ $t("header.dictManagement") }}
-            </el-dropdown-item>
-            <el-dropdown-item @click.native="handleRouter('providerManagement')">
-              {{ $t("header.providerManagement") }}
-            </el-dropdown-item>
-            <el-dropdown-item @click.native="handleRouter('functionPluginManagement')">
-              {{ $t("header.functionPluginManagement") }}
-            </el-dropdown-item>
-            <el-dropdown-item @click.native="handleRouter('musicManagement')">
-              {{ $t("header.musicManagement") }}
-            </el-dropdown-item>
-            <el-dropdown-item @click.native="handleRouter('agentTemplate')">
-              {{ $t("header.agentTemplate") }}
-            </el-dropdown-item>
-            <el-dropdown-item @click.native="handleRouter('replacementWordManagement')">
-              {{ $t("header.replacementWordManagement") }}
-            </el-dropdown-item>
-            <el-dropdown-item @click.native="handleRouter('serverSideManagement')">
-              {{ $t("header.serverSideManagement") }}
-            </el-dropdown-item>
-            <el-dropdown-item @click.native="handleRouter('featureManagement')">
-              {{ $t("header.featureManagement") }}
-            </el-dropdown-item>
-          </el-dropdown-menu>
-        </el-dropdown>
       </div>
 
       <!-- 右侧元素 -->
@@ -224,11 +109,13 @@
     </div>
 
     <!-- 修改密码弹窗 -->
-    <ChangePasswordDialog v-model="isChangePasswordDialogVisible" />
+    <ChangePasswordDialog v-if="!isOps" v-model="isChangePasswordDialogVisible" />
   </el-header>
 </template>
 
 <script>
+import OpsHeader from '@/ops/OpsHeader.vue';
+import { isOperationsConsole } from '@/security/session';
 import featureManager from "@/utils/featureManager"; // 引入功能管理工具类
 import Api from "@/apis/api";
 import { mapActions, mapState } from "vuex";
@@ -237,11 +124,12 @@ import ChangePasswordDialog from "./ChangePasswordDialog.vue"; // 引入修改�
 export default {
   name: "HeaderBar",
   components: {
-    ChangePasswordDialog,
+    ChangePasswordDialog, OpsHeader,
   },
   props: ["devices"], // 接收父组件设备列表
   data() {
     return {
+      isOps: isOperationsConsole(),
       search: "",
       isChangePasswordDialogVisible: false, // 控制修改密码弹窗的显示
       paramDropdownVisible: false,
@@ -268,7 +156,7 @@ export default {
         deviceCenter: "/device-center",
         home: "/home",
         modelConfig: "/model-config",
-        modelBilling: "/model-billing",
+        modelBilling: "/allowance",
         resourceCenter: "/knowledge-base-management",
         knowledgeBaseManagement: "/knowledge-base-management",
         addressBookManagement: "/address-book-management",
@@ -325,6 +213,7 @@ export default {
     },
   },
   async mounted() {
+    if (this.isOps) return;
     this.checkScreenSize();
     window.addEventListener("resize", this.checkScreenSize);
     // 从localStorage加载搜索历史

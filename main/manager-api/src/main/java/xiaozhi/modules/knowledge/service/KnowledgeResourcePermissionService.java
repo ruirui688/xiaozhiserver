@@ -15,12 +15,17 @@ import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 public class KnowledgeResourcePermissionService {
     public static final String SCOPE_WORKSPACE = "WORKSPACE";
     public static final String SCOPE_OFFICIAL = "OFFICIAL";
+    public static final String SCOPE_OFFICIAL_DRAFT = "OFFICIAL_DRAFT";
 
     private final WorkspacePermissionService workspacePermissionService;
     private final OfficialResourcePermissionService officialPermissionService;
 
     public void requireRead(KnowledgeBaseDTO knowledgeBase) {
         requireExisting(knowledgeBase);
+        if (SCOPE_OFFICIAL_DRAFT.equals(knowledgeBase.getScope())) {
+            officialPermissionService.requireOfficialMaintainer();
+            return;
+        }
         if (isOfficial(knowledgeBase)) {
             return;
         }
@@ -30,19 +35,24 @@ public class KnowledgeResourcePermissionService {
     public void requireWrite(KnowledgeBaseDTO knowledgeBase) {
         requireExisting(knowledgeBase);
         if (isOfficial(knowledgeBase)) {
-            officialPermissionService.requireOfficialMaintainer();
-            return;
+            throw noPermission("已发布官方知识库不可原地修改，请创建新草案并审批发布");
+        }
+        if (SCOPE_OFFICIAL_DRAFT.equals(knowledgeBase.getScope())) {
+            throw noPermission("官方草案只能通过运营草案入口修改");
         }
         workspacePermissionService.requireWrite(knowledgeBase.getWorkspaceId());
     }
 
     public void requireAutomatedMaintenance(KnowledgeBaseDTO knowledgeBase) {
         requireExisting(knowledgeBase);
+        if (isOfficial(knowledgeBase) || SCOPE_OFFICIAL_DRAFT.equals(knowledgeBase.getScope())) {
+            throw noPermission("官方知识库必须经过独立审批发布，不支持原地自动维护");
+        }
         if (!isOfficial(knowledgeBase)) {
             workspacePermissionService.requireWrite(knowledgeBase.getWorkspaceId());
         }
         if (!officialPermissionService.isOfficialMaintainer()) {
-            throw noPermission("仅超级管理员本人或超级管理员团队成员可以配置自主维护");
+            throw noPermission("缺少独立官方内容维护权限");
         }
     }
 
@@ -50,15 +60,15 @@ public class KnowledgeResourcePermissionService {
         if (knowledgeBase == null || !officialPermissionService.isOfficialMaintainer()) {
             return false;
         }
-        return isOfficial(knowledgeBase) || workspacePermissionService.canWrite(knowledgeBase.getWorkspaceId());
+        return !isOfficial(knowledgeBase) && !SCOPE_OFFICIAL_DRAFT.equals(knowledgeBase.getScope()) && workspacePermissionService.canWrite(knowledgeBase.getWorkspaceId());
     }
 
     public boolean canWrite(KnowledgeBaseDTO knowledgeBase) {
         if (knowledgeBase == null) {
             return false;
         }
-        return isOfficial(knowledgeBase)
-                ? officialPermissionService.isOfficialMaintainer()
+        return isOfficial(knowledgeBase) || SCOPE_OFFICIAL_DRAFT.equals(knowledgeBase.getScope())
+                ? false
                 : workspacePermissionService.canWrite(knowledgeBase.getWorkspaceId());
     }
 

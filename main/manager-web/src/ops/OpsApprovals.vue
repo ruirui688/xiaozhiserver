@@ -1,0 +1,16 @@
+<template><div class="ops-page"><HeaderBar /><main class="ops-main"><div class="ops-toolbar"><div><span class="ops-eyebrow">RELEASE REVIEW</span><h1>发布审批</h1><p class="ops-lead">核对拟发布的资源、版本和完整变更内容。审批人与申请人分离。</p></div><el-button :loading="loading" @click="load">刷新</el-button></div><el-alert v-if="error" :title="error" type="error" :closable="false" /><section class="ops-panel"><el-table :data="rows" v-loading="loading" empty-text="暂无可查看的发布申请"><el-table-column prop="action" label="发布类型" min-width="170" /><el-table-column prop="targetId" label="资源" min-width="150" /><el-table-column prop="version" label="版本" width="100" /><el-table-column prop="status" label="状态" width="120" /><el-table-column prop="requesterId" label="申请人" min-width="130" /><el-table-column label="操作" width="130"><template slot-scope="s"><el-button type="text" @click="selected=s.row">查看并审批</el-button></template></el-table-column></el-table></section><el-dialog title="核对发布内容" :visible="Boolean(selected)" width="min(780px,94vw)" @close="selected=null"><template v-if="selected"><p><strong>{{ selected.action }}</strong> · {{ selected.targetId }} · {{ selected.version }}</p><p class="ops-muted">内容摘要：{{ selected.payloadHash }}</p><pre class="approval-payload">{{ payloadText(selected) }}</pre><p class="ops-muted">发布时必须使用本次批准的内容与版本，修改后须重新申请。</p><span slot="footer"><el-button @click="selected=null">关闭</el-button><el-button v-if="canApprove(selected)" type="primary" :loading="busy" @click="approve">批准该版本</el-button></span></template></el-dialog></main></div></template>
+<script>
+import HeaderBar from '@/components/HeaderBar.vue';
+import { platformRequest } from '@/apis/platform';
+import { hasPermission } from '@/security/session';
+export default {
+  components: { HeaderBar }, data() { return { rows: [], selected: null, loading: false, busy: false, error: '' }; }, created() { this.load(); },
+  methods: {
+    async load() { this.loading = true; this.error = ''; try { const result = await platformRequest('GET','/ops/approvals'); this.rows = Array.isArray(result) ? result : result.list || []; } catch (error) { this.error = error.message; } finally { this.loading = false; } },
+    payloadText(row) { const value = row.payload ?? row.payloadJson; try { return JSON.stringify(typeof value === 'string' ? JSON.parse(value) : value,null,2); } catch (_) { return String(value || '未提供审批内容'); } },
+    canApprove(row) { const profile = this.$store.state.userInfo; const permission = { 'ota.publish': 'ota.approve', 'official.resource.publish': 'official.resource.approve', 'model.catalog.publish': 'model.catalog.approve' }[row.action]; return row.status === 'PENDING' && row.requesterId !== profile.employeeId && hasPermission(profile,permission); },
+    async approve() { if (this.busy || !this.selected || !this.canApprove(this.selected)) return; this.busy = true; try { await platformRequest('POST',`/ops/approvals/${encodeURIComponent(this.selected.id)}/approve`); this.selected = null; await this.load(); } catch (error) { this.$message.error(error.message); } finally { this.busy = false; } },
+  },
+};
+</script>
+<style scoped>.approval-payload{white-space:pre-wrap;overflow-wrap:anywhere;max-height:50vh;overflow:auto;background:#f2f5f8;padding:20px;border-radius:9px;font-size:12px;line-height:1.8;text-align:left}</style>

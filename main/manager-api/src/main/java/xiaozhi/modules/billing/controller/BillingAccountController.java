@@ -8,7 +8,7 @@ import xiaozhi.modules.billing.dto.BillingAccountFilter;
 import xiaozhi.modules.billing.service.BillingAccountService;
 
 @RestController @RequestMapping("/billing") @RequiredArgsConstructor
-@RequiresPermissions("sys:role:superAdmin")
+@RequiresPermissions("supplier.bill.read")
 public class BillingAccountController {
     private final BillingAccountService accounts;
     @GetMapping("/accounts") public Result<Object> accounts() { return ok(accounts.accounts()); }

@@ -1,5 +1,6 @@
 import asyncio
-from core.metering import begin_call
+from core.metering.recorder import begin_call_async
+from core.metering.admission import configure_provider
 from core.metering.volcengine import asr_usage
 import base64
 import math
@@ -21,8 +22,9 @@ logger = setup_logging()
 class ASRProvider(ASRProviderBase):
     def __init__(self, config: dict, delete_audio_file: bool):
         super().__init__()
+        configure_provider(self, config)
         self.interface_type = InterfaceType.NON_STREAM
-        self.api_key = config.get("api_key")
+        self.api_key = config.get("api_key") or ("platform-managed" if self._platform_managed else None)
         if not self.api_key:
             raise ValueError("豆包录音识别模型2.0需要配置 api_key")
 
@@ -66,10 +68,10 @@ class ASRProvider(ASRProviderBase):
             raise ValueError(f"{key} 必须是大于 0 的数字")
         return value
 
-    def _headers(self, request_id: str, *, sequence: Optional[str] = None) -> dict:
+    def _headers(self, request_id: str, *, sequence: Optional[str] = None, permit=None) -> dict:
         headers = {
-            "X-Api-Key": self.api_key,
-            "X-Api-Resource-Id": self.resource_id,
+            "X-Api-Key": permit.secret() if permit else self.api_key,
+            "X-Api-Resource-Id": permit.runtime.get("resource_id", self.resource_id) if permit else self.resource_id,
             "X-Api-Request-Id": request_id,
             "Content-Type": "application/json",
         }
@@ -156,15 +158,20 @@ class ASRProvider(ASRProviderBase):
         submit_elapsed = 0.0
         query_count = 0
         stage = "submit"
-        usage_call = begin_call(self, "ASR", request_id=request_id)
+        usage_call = await begin_call_async(self, "ASR", request_id=request_id,
+            max_usage={"audio_duration": str(math.ceil(len(artifacts.pcm_bytes) / 32))})
         usage_call.usage("submitted_audio_duration", len(artifacts.pcm_bytes) / 32, "milliseconds", "OBSERVED")
         try:
+            permit = usage_call.permit
+            submit_url = permit.endpoint("submit_url") if permit else self.submit_url
+            query_url = permit.endpoint("query_url") if permit else self.query_url
+            await asyncio.to_thread(usage_call.start)
             # requests 默认读取系统代理；trust_env=True 保留这一部署兼容性。
             async with aiohttp.ClientSession(trust_env=True) as session:
                 submit_payload = await self._post_json(
                     session,
-                    self.submit_url,
-                    headers=self._headers(request_id, sequence="-1"),
+                    submit_url,
+                    headers=self._headers(request_id, sequence="-1", permit=permit),
                     payload=self._build_submit_payload(wav_bytes, request_id),
                     timeout_seconds=self.http_timeout_seconds,
                     stage="提交录音识别",
@@ -189,6 +196,8 @@ class ASRProvider(ASRProviderBase):
                 stage = "query"
                 deadline = time.monotonic() + self.query_timeout_seconds
                 while True:
+                    if permit:
+                        permit.check()
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         break
@@ -200,8 +209,8 @@ class ASRProvider(ASRProviderBase):
                     query_count += 1
                     query_payload = await self._post_json(
                         session,
-                        self.query_url,
-                        headers=self._headers(request_id),
+                        query_url,
+                        headers=self._headers(request_id, permit=permit),
                         payload={"request": {"reqid": request_id}},
                         timeout_seconds=min(self.http_timeout_seconds, remaining),
                         stage="查询录音识别结果",
@@ -244,7 +253,7 @@ class ASRProvider(ASRProviderBase):
             logger.bind(tag=TAG).error(
                 "录音识别失败: "
                 f"stage={stage}, elapsed={elapsed:.3f}s, "
-                f"error_type={type(e).__name__}, reason={e}"
+                f"error_type={type(e).__name__}"
             )
             return "", artifacts.file_path
         finally:

@@ -43,6 +43,7 @@ public class SysUserTokenServiceImpl extends BaseServiceImpl<SysUserTokenDao, Sy
         baseDao.deleteExpiredByUserId(userId, now);
         SysUserTokenEntity tokenEntity = new SysUserTokenEntity();
         tokenEntity.setUserId(userId);
+        tokenEntity.setAudience("USER");
         tokenEntity.setToken(token);
         tokenEntity.setUpdateDate(now);
         tokenEntity.setExpireDate(expireTime);
@@ -60,7 +61,7 @@ public class SysUserTokenServiceImpl extends BaseServiceImpl<SysUserTokenDao, Sy
     @Override
     public SysUserDTO getUserByToken(String token) {
         SysUserTokenEntity userToken = baseDao.getByToken(token);
-        if (null == userToken) {
+        if (null == userToken || !"USER".equals(userToken.getAudience())) {
             throw new RenException(ErrorCode.TOKEN_INVALID);
         }
 

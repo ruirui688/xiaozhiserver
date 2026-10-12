@@ -38,12 +38,6 @@ export default {
           path: "/asr-hotword-management",
           related: [],
           icon: "el-icon-microphone"
-        },
-        {
-          label: "插件",
-          path: "/function-plugin-management",
-          related: [],
-          icon: "el-icon-connection"
         }
       ]
     };

@@ -52,6 +52,12 @@ class ModelTestServiceImplTest {
             mock(BenchmarkRequestAuth.class),
             java.util.List.of(intentModelTester));
 
+    @org.junit.jupiter.api.BeforeEach
+    void installMeteringBoundary() {
+        xiaozhi.common.llm.MeteredHttpTestSupport.install(service);
+        xiaozhi.common.llm.MeteredHttpTestSupport.install(intentModelTester);
+    }
+
     @Test
     void intentExecutorOnlyClaimsSupportedIntentProviders() {
         assertTrue(intentModelTester.supports("INTENT", "intent_llm"));

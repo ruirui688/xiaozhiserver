@@ -24,7 +24,7 @@ class BillingCollectionHealthServiceTest {
         jdbc=database();queries=mock(BillingQueryService.class);outbox=mock(BillingInternalOutbox.class);
         when(queries.workspace()).thenReturn("workspace-a");when(outbox.status()).thenReturn(Map.of("status","READY","pendingCount",0));
         service=new BillingCollectionHealthService(jdbc,new BillingSupport(new ObjectMapper().findAndRegisterModules()),queries,outbox);
-        user=new UserDetail();user.setSuperAdmin(1);security=mockStatic(SecurityUser.class);security.when(SecurityUser::getUser).thenReturn(user);
+        user=new UserDetail();user.setId(null);user.setAudience("OPS");user.setEmployeeId("finance-test");user.setGrants(java.util.List.of(new xiaozhi.modules.security.ops.OpsGrant("SUPPLIER_FINANCE","PLATFORM","platform-services",xiaozhi.modules.security.ops.OpsPermissionCatalog.TEMPLATES.get("SUPPLIER_FINANCE").permissions())));security=mockStatic(SecurityUser.class);security.when(SecurityUser::getUser).thenReturn(user);
     }
     @AfterEach void close(){if(security!=null)security.close();}
 
@@ -67,7 +67,7 @@ class BillingCollectionHealthServiceTest {
     @Test void workspaceMemberOnlySeesOwnTrustedDatabaseEvidence() {
         service.accept(heartbeat());context("context-a","workspace-a");context("context-b","workspace-b");
         event("event-a","workspace-a","context-a");event("event-b","workspace-b","context-b");
-        event("platform-event",null,null);user.setSuperAdmin(0);
+        event("platform-event",null,null);user.setAudience("USER");user.setId(1L);user.setEmployeeId(null);user.setGrants(java.util.List.of());
         assertThrows(RenException.class,()->service.overview(true));
         var result=service.overview(false);assertEquals("WORKSPACE",result.get("scope"));
         assertEquals(1L,map(result,"contexts").get("count"));assertEquals(1L,map(result,"events").get("count"));

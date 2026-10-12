@@ -48,7 +48,7 @@ import xiaozhi.common.validator.ValidatorUtils;
 import xiaozhi.modules.device.entity.OtaEntity;
 import xiaozhi.modules.device.service.OtaService;
 import xiaozhi.modules.security.user.SecurityUser;
-import xiaozhi.modules.sys.enums.SuperAdminEnum;
+
 import xiaozhi.modules.sys.service.SysParamsService;
 
 @Tag(name = "固件升级管理", description = "OTA 相关接口")
@@ -68,7 +68,7 @@ public class OTAMagController {
             @Parameter(name = Constant.PAGE, description = "当前页码，从1开始", required = true),
             @Parameter(name = Constant.LIMIT, description = "每页显示记录数", required = true)
     })
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("ota.read")
     public Result<PageData<OtaEntity>> page(@Parameter(hidden = true) @RequestParam Map<String, Object> params) {
         ValidatorUtils.validateEntity(params);
         PageData<OtaEntity> page = otaService.page(params);
@@ -77,7 +77,7 @@ public class OTAMagController {
 
     @GetMapping("{id}")
     @Operation(summary = "信息 OTA 固件信息")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("ota.read")
     public Result<OtaEntity> get(@PathVariable("id") String id) {
         OtaEntity data = otaService.selectById(id);
         return new Result<OtaEntity>().ok(data);
@@ -85,7 +85,7 @@ public class OTAMagController {
 
     @PostMapping
     @Operation(summary = "保存 OTA 固件信息")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("ota.publish")
     public Result<Void> save(@Valid @RequestBody OtaEntity entity) {
         if (entity == null) {
             return new Result<Void>().error("固件信息不能为空");
@@ -100,7 +100,7 @@ public class OTAMagController {
             return new Result<Void>().error("版本号不能为空");
         }
         try {
-            otaService.save(entity);
+            xiaozhi.common.utils.SpringContextUtils.getBean(xiaozhi.modules.security.ops.OpsFirmwarePublisher.class).publish(entity);
             return new Result<Void>();
         } catch (RuntimeException e) {
             return new Result<Void>().error(e.getMessage());
@@ -109,26 +109,24 @@ public class OTAMagController {
 
     @DeleteMapping("/{id}")
     @Operation(summary = "OTA 删除")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("ota.publish")
     public Result<Void> delete(@PathVariable("id") String[] ids) {
         if (ids == null || ids.length == 0) {
             return new Result<Void>().error("删除的固件ID不能为空");
         }
-        otaService.delete(ids);
-        return new Result<Void>();
+        throw new xiaozhi.common.exception.RenException("已发布固件不可删除，请通过新版本发布或审批回滚");
     }
 
     @PutMapping("/{id}")
     @Operation(summary = "修改 OTA 固件信息")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("ota.publish")
     public Result<?> update(@PathVariable("id") String id, @RequestBody OtaEntity entity) {
         if (entity == null) {
             return new Result<>().error("固件信息不能为空");
         }
         entity.setId(id);
         try {
-            otaService.update(entity);
-            return new Result<>();
+            throw new xiaozhi.common.exception.RenException("已发布固件不可原地更新，请创建新版本");
         } catch (RuntimeException e) {
             return new Result<>().error(e.getMessage());
         }
@@ -136,7 +134,7 @@ public class OTAMagController {
 
     @GetMapping("/getDownloadUrl/{id}")
     @Operation(summary = "获取 OTA 固件下载链接")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("ota.read")
     public Result<String> getDownloadUrl(@PathVariable("id") String id) {
         String uuid = UUID.randomUUID().toString();
         redisUtils.set(RedisKeys.getOtaIdKey(uuid), id);
@@ -258,9 +256,15 @@ public class OTAMagController {
         }
     }
 
+    @PostMapping("/prepare")
+    @RequiresPermissions("ota.publish")
+    public Result<Map<String, Object>> prepareRelease(@Valid @RequestBody OtaEntity entity) {
+        return new Result<Map<String, Object>>().ok(xiaozhi.common.utils.SpringContextUtils.getBean(xiaozhi.modules.security.ops.OpsFirmwarePublisher.class).prepare(entity));
+    }
+
     @PostMapping("/upload")
     @Operation(summary = "上传固件文件")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("ota.upload")
     public Result<String> uploadFirmware(@RequestParam("file") MultipartFile file) {
         if (file.isEmpty()) {
             return new Result<String>().error("上传文件不能为空");
@@ -272,7 +276,11 @@ public class OTAMagController {
             return new Result<String>().error("文件名不能为空");
         }
 
-        String extension = originalFilename.substring(originalFilename.lastIndexOf(".")).toLowerCase();
+        int dot = originalFilename.lastIndexOf(".");
+        if (dot < 0 || file.getSize() > 100L * 1024 * 1024) return new Result<String>().error("固件文件类型或大小无效");
+        String mime = file.getContentType();
+        if (mime == null || !java.util.Set.of("application/octet-stream", "application/vnd.android.package-archive", "application/macbinary", "application/x-binary").contains(mime.toLowerCase(java.util.Locale.ROOT))) return new Result<String>().error("固件MIME类型无效");
+        String extension = originalFilename.substring(dot).toLowerCase();
         if (!extension.equals(".bin") && !extension.equals(".apk")) {
             return new Result<String>().error("只允许上传.bin和.apk格式的文件");
         }
@@ -323,7 +331,7 @@ public class OTAMagController {
             return new Result<String>().error(ErrorCode.VOICE_CLONE_AUDIO_TOO_LARGE);
         }
         // 普通用户只能每天上传50次
-        if (SecurityUser.getUser().getSuperAdmin() == SuperAdminEnum.NO.value()) {
+        { // All users are subject to the upload limit.
             String uploadCountKey = RedisKeys.getOtaUploadCountKey(SecurityUser.getUser().getId());
             Integer uploadCount = (Integer) Optional.ofNullable(redisUtils.get(uploadCountKey)).orElse(0);
             if (uploadCount >= 50) {

@@ -20,6 +20,8 @@ public class BillingContextService {
     private final JdbcTemplate jdbc;
     private final BillingSupport support;
     private final ModelConfigDao models;
+    @org.springframework.beans.factory.annotation.Autowired
+    private xiaozhi.modules.platform.service.PlatformServiceAccountService platformServices;
     private static final SecureRandom RANDOM = new SecureRandom();
 
     public void attach(Map<String, Object> runtime, AgentEntity agent, DeviceEntity device) {
@@ -40,7 +42,11 @@ public class BillingContextService {
     public Map<String, Object> issuePlatform(Collection<String> modelIds, String purpose) {
         if (!Set.of("MODEL_TEST", "BENCHMARK", "MODEL_ASSISTANT").contains(purpose))
             throw new RenException("平台调用用途无效");
-        return issue(new LinkedHashMap<>(), modelIds, purpose);
+        if(platformServices==null)throw new RenException("PLATFORM_SERVICE_BUDGET_REQUIRED");
+        Set<String> services=new HashSet<>();for(String model:modelIds)services.add(platformServices.resolve(model,purpose));
+        if(services.size()!=1)throw new RenException("PLATFORM_SERVICE_BUDGET_REQUIRED");
+        Map<String,Object> snapshot=new LinkedHashMap<>();snapshot.put("platform_service_id",services.iterator().next());
+        return issue(snapshot, modelIds, purpose);
     }
 
     private Map<String, Object> issue(Map<String, Object> snapshot, Collection<String> ids, String purpose) {
@@ -65,6 +71,7 @@ public class BillingContextService {
                 id, BillingSupport.hash(token), snapshot.get("workspace_id"), snapshot.get("agent_id"), snapshot.get("device_id"), purpose,
                 support.json(snapshot), BillingSupport.time(Instant.now()));
         Map<String, Object> issued = new LinkedHashMap<>(snapshot);
+        issued.put("_platform_managed", true);
         issued.put("context_id", id); issued.put("context_token", token);
         return issued;
     }

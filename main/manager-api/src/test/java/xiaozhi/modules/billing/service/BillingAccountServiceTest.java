@@ -31,7 +31,7 @@ class BillingAccountServiceTest {
         when(volc.accountRef()).thenReturn("account-a"); when(volc.enabled()).thenReturn(true);
         when(deepseek.accountRef()).thenReturn("deepseek-account");
         service = new BillingAccountService(jdbc, support, volc, deepseek);
-        user = new UserDetail(); user.setSuperAdmin(1);
+        user = new UserDetail(); user.setId(null);user.setAudience("OPS");user.setEmployeeId("finance-test");user.setGrants(java.util.List.of(new xiaozhi.modules.security.ops.OpsGrant("SUPPLIER_FINANCE","PLATFORM","platform-services",xiaozhi.modules.security.ops.OpsPermissionCatalog.TEMPLATES.get("SUPPLIER_FINANCE").permissions())));
         security = mockStatic(SecurityUser.class); security.when(SecurityUser::getUser).thenReturn(user);
     }
     @AfterEach void close() { if(security!=null)security.close(); }
@@ -136,7 +136,7 @@ class BillingAccountServiceTest {
 
     @Test void platformAccountAccessRejectsOrdinaryWorkspaceAdminAndUnknownAccount() {
         var unknown=filter();unknown.setAccountRef("not-known");assertThrows(RenException.class,()->service.overview(unknown));
-        user.setSuperAdmin(0);
+        user.setAudience("USER");user.setId(1L);user.setEmployeeId(null);user.setGrants(java.util.List.of());
         assertThrows(RenException.class,service::accounts);
         assertThrows(RenException.class,()->service.overview(filter()));
         assertThrows(RenException.class,()->service.bills(filter()));

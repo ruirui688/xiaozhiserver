@@ -39,6 +39,7 @@ class LocalKnowledgeAdapterContractTest {
     @Test
     void autoExcelProcessingDoesNotCallTheModel() throws Exception {
         LocalKnowledgeAdapter adapter = new LocalKnowledgeAdapter();
+        xiaozhi.common.llm.MeteredHttpTestSupport.install(adapter);
         RestTemplate restTemplate = mock(RestTemplate.class);
         ReflectionTestUtils.setField(adapter, "processingStrategy", LocalKnowledgeProcessingStrategy.AUTO);
         ReflectionTestUtils.setField(adapter, "objectMapper", new ObjectMapper());
@@ -58,6 +59,7 @@ class LocalKnowledgeAdapterContractTest {
     @Test
     void llmEnhancedExcelStillPreservesRecordBoundariesWithoutCallingTheModel() throws Exception {
         LocalKnowledgeAdapter adapter = new LocalKnowledgeAdapter();
+        xiaozhi.common.llm.MeteredHttpTestSupport.install(adapter);
         RestTemplate restTemplate = mock(RestTemplate.class);
         ReflectionTestUtils.setField(adapter, "processingStrategy", LocalKnowledgeProcessingStrategy.LLM_ENHANCED);
         ReflectionTestUtils.setField(adapter, "objectMapper", new ObjectMapper());
@@ -80,6 +82,7 @@ class LocalKnowledgeAdapterContractTest {
     @Test
     void keepsLlmBudgetsServerManaged() {
         LocalKnowledgeAdapter adapter = new LocalKnowledgeAdapter();
+        xiaozhi.common.llm.MeteredHttpTestSupport.install(adapter);
 
         assertFalse(adapter.getSupportedConfig().containsKey("llm_max_input_chars"));
         assertFalse(adapter.getSupportedConfig().containsKey("llm_max_tokens"));
@@ -93,6 +96,7 @@ class LocalKnowledgeAdapterContractTest {
     @Test
     void acceptsParseOnlyWhenUploadAlreadyProducedChunks() {
         LocalKnowledgeAdapter adapter = new LocalKnowledgeAdapter();
+        xiaozhi.common.llm.MeteredHttpTestSupport.install(adapter);
         DocumentDao documentDao = mock(DocumentDao.class);
         KnowledgeChunkDao chunkDao = mock(KnowledgeChunkDao.class);
         when(documentDao.selectOne(any())).thenReturn(new DocumentEntity());
@@ -106,6 +110,7 @@ class LocalKnowledgeAdapterContractTest {
     @Test
     void rejectsParseWhenUploadDidNotProduceChunks() {
         LocalKnowledgeAdapter adapter = new LocalKnowledgeAdapter();
+        xiaozhi.common.llm.MeteredHttpTestSupport.install(adapter);
         DocumentDao documentDao = mock(DocumentDao.class);
         KnowledgeChunkDao chunkDao = mock(KnowledgeChunkDao.class);
         when(documentDao.selectOne(any())).thenReturn(new DocumentEntity());
@@ -121,6 +126,7 @@ class LocalKnowledgeAdapterContractTest {
     @Test
     void rejectsSemanticChunkingWithoutManagedLlmInsteadOfFallingBackToRules() {
         LocalKnowledgeAdapter adapter = new LocalKnowledgeAdapter();
+        xiaozhi.common.llm.MeteredHttpTestSupport.install(adapter);
         ReflectionTestUtils.setField(adapter, "llmModelId", "");
 
         RenException error = assertThrows(RenException.class,
@@ -132,6 +138,7 @@ class LocalKnowledgeAdapterContractTest {
     @Test
     void failsTheWholeSemanticChunkingRequestWhenTheModelCallFails() {
         LocalKnowledgeAdapter adapter = new LocalKnowledgeAdapter();
+        xiaozhi.common.llm.MeteredHttpTestSupport.install(adapter);
         RestTemplate restTemplate = mock(RestTemplate.class);
         ReflectionTestUtils.setField(adapter, "llmModelId", "llm-1");
         ReflectionTestUtils.setField(adapter, "llmBaseUrl", "https://example.invalid/v1");
@@ -151,6 +158,7 @@ class LocalKnowledgeAdapterContractTest {
     @Test
     void rejectsModelChunksThatDoNotExplicitlyProvideContent() {
         LocalKnowledgeAdapter adapter = new LocalKnowledgeAdapter();
+        xiaozhi.common.llm.MeteredHttpTestSupport.install(adapter);
         ReflectionTestUtils.setField(adapter, "objectMapper", new ObjectMapper());
 
         RenException error = assertThrows(RenException.class,
@@ -163,6 +171,7 @@ class LocalKnowledgeAdapterContractTest {
     @Test
     void forwardsDeepSeekThinkingDisabledForSemanticChunking() {
         LocalKnowledgeAdapter adapter = new LocalKnowledgeAdapter();
+        xiaozhi.common.llm.MeteredHttpTestSupport.install(adapter);
         RestTemplate restTemplate = mock(RestTemplate.class);
         ReflectionTestUtils.setField(adapter, "llmBaseUrl", "https://api.deepseek.com");
         ReflectionTestUtils.setField(adapter, "llmModel", "deepseek-v4-flash");
@@ -191,6 +200,7 @@ class LocalKnowledgeAdapterContractTest {
     @Test
     void acceptsJsonObjectChunkEnvelopeRequiredByDeepSeekJsonMode() {
         LocalKnowledgeAdapter adapter = new LocalKnowledgeAdapter();
+        xiaozhi.common.llm.MeteredHttpTestSupport.install(adapter);
         ReflectionTestUtils.setField(adapter, "objectMapper", new ObjectMapper());
 
         @SuppressWarnings("unchecked")
@@ -203,6 +213,7 @@ class LocalKnowledgeAdapterContractTest {
     @Test
     void retriesTruncatedJsonWithSmallerInputSections() {
         LocalKnowledgeAdapter adapter = new LocalKnowledgeAdapter();
+        xiaozhi.common.llm.MeteredHttpTestSupport.install(adapter);
         RestTemplate restTemplate = mock(RestTemplate.class);
         ReflectionTestUtils.setField(adapter, "llmModelId", "llm-1");
         ReflectionTestUtils.setField(adapter, "llmBaseUrl", "https://api.deepseek.com");
@@ -231,6 +242,7 @@ class LocalKnowledgeAdapterContractTest {
     @Test
     void rejectsOversizedExtractedTextBeforeCallingTheModel() {
         LocalKnowledgeAdapter adapter = new LocalKnowledgeAdapter();
+        xiaozhi.common.llm.MeteredHttpTestSupport.install(adapter);
         RestTemplate restTemplate = mock(RestTemplate.class);
         ReflectionTestUtils.setField(adapter, "llmModelId", "llm-1");
         ReflectionTestUtils.setField(adapter, "llmBaseUrl", "https://api.deepseek.com");
@@ -250,6 +262,7 @@ class LocalKnowledgeAdapterContractTest {
     @Test
     void stopsRetriesWhenThePerDocumentRequestBudgetIsExhausted() {
         LocalKnowledgeAdapter adapter = new LocalKnowledgeAdapter();
+        xiaozhi.common.llm.MeteredHttpTestSupport.install(adapter);
         RestTemplate restTemplate = mock(RestTemplate.class);
         ReflectionTestUtils.setField(adapter, "llmModelId", "llm-1");
         ReflectionTestUtils.setField(adapter, "llmBaseUrl", "https://api.deepseek.com");
@@ -276,6 +289,7 @@ class LocalKnowledgeAdapterContractTest {
     @Test
     void stopsBeforeCallingTheModelWhenThePromptBudgetWouldBeExceeded() {
         LocalKnowledgeAdapter adapter = new LocalKnowledgeAdapter();
+        xiaozhi.common.llm.MeteredHttpTestSupport.install(adapter);
         RestTemplate restTemplate = mock(RestTemplate.class);
         ReflectionTestUtils.setField(adapter, "llmBaseUrl", "https://api.deepseek.com");
         ReflectionTestUtils.setField(adapter, "llmModel", "deepseek-v4-flash");

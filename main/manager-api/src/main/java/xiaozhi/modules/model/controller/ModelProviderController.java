@@ -33,7 +33,7 @@ public class ModelProviderController {
 
     @GetMapping
     @Operation(summary = "获取模型供应器列表")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("model.catalog.read")
     public Result<PageData<ModelProviderDTO>> getListPage(ModelProviderDTO modelProviderDTO,
             @RequestParam(required = true, defaultValue = "0") String page,
             @RequestParam(required = true, defaultValue = "10") String limit) {
@@ -43,7 +43,7 @@ public class ModelProviderController {
 
     @PostMapping
     @Operation(summary = "新增模型供应器")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("model.catalog.write")
     public Result<ModelProviderDTO> add(@RequestBody @Validated ModelProviderDTO modelProviderDTO) {
         ModelProviderDTO resp = modelProviderService.add(modelProviderDTO);
         return new Result<ModelProviderDTO>().ok(resp);
@@ -51,7 +51,7 @@ public class ModelProviderController {
 
     @PutMapping
     @Operation(summary = "修改模型供应器")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("model.catalog.write")
     public Result<ModelProviderDTO> edit(@RequestBody @Validated(UpdateGroup.class) ModelProviderDTO modelProviderDTO) {
         ModelProviderDTO resp = modelProviderService.edit(modelProviderDTO);
         return new Result<ModelProviderDTO>().ok(resp);
@@ -59,7 +59,7 @@ public class ModelProviderController {
 
     @PostMapping("/delete")
     @Operation(summary = "删除模型供应器")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("model.catalog.write")
     @Parameter(name = "ids", description = "ID数组", required = true)
     public Result<Void> delete(@RequestBody List<String> ids) {
         modelProviderService.delete(ids);

@@ -14,13 +14,14 @@
 
 这是本项目的唯一生产部署入口。
 
-### DeepSeek Harness 常驻维护服务
+### 旧 DeepSeek Harness 维护服务状态
 
-`xiaozhi-maintenance-agent` 是生产默认启动的核心服务，每次发布和升级都使用与业务镜像相同的版本。
-安装器会生成并持久化内部服务密钥，无需维护 Compose profile 或手工启用开关。
+当前生产 Compose 不启动 `xiaozhi-maintenance-agent`，发布脚本默认
+`BUILD_MAINTENANCE_AGENT=false`，Java Harness 网关也默认停用。旧维护入口尚未接入平台额度准入，
+不能通过恢复旧 `.env` 或复用模型目录中的全局密钥重新开通，也不能将它列为本次上线可用功能。
 
-DeepSeek API Key、接口地址和上游模型名直接复用“模型配置”中
-已启用且测试通过的 DeepSeek LLM；在资源维护策略中选择对应模型，不再在部署 `.env` 保存第二份模型凭据。
+已有维护策略的定时调度仍可能留下失败记录，升级验收应核对其状态和日志。
+工作空间的普通记忆维护通过 Java 模型执行链使用负责人的凭据和额度，与旧 Harness 服务分开。
 
 ### 模型计费与额度查询
 
@@ -29,7 +30,7 @@ DeepSeek API Key、接口地址和上游模型名直接复用“模型配置”�
 `XIAOZHI_BILLING_VOLCENGINE_SPEECH_PROJECT` 和逗号分隔的 `XIAOZHI_BILLING_VOLCENGINE_SPEECH_RESOURCE_IDS`，
 以及目标项目上的 `speech_saas_prod:ResourcePacksStatus` 查询权限。通用资源包需费用中心只读权限，
 完整说明见模型管理文档。DeepSeek 通过
-`XIAOZHI_BILLING_DEEPSEEK_MODEL_ID` 复用已保存的官方模型密钥查询余额。
+`XIAOZHI_BILLING_DEEPSEEK_API_KEY` 配置专用财务查询凭据，配合明确的 `ACCOUNT_REF` 查询余额；不再从模型配置或租户凭据库存取钥匙。
 真实值仅放部署数据目录的私有 `.env`，Compose 已透传这些变量；不要写进镜像或示例文件。
 升级器会保留现有 `.env` 中的 9 项 `XIAOZHI_BILLING_*` 配置，显式传入的非空环境变量优先；
 写回 `.env` 时设置权限为 `0600`，仅文件所有者可读写。
@@ -38,26 +39,33 @@ DeepSeek API Key、接口地址和上游模型名直接复用“模型配置”�
 也不切换或启用模型。
 
 升级前按现有流程备份数据库，启动时执行新增计费 Liquibase 迁移。Python 的 `data/billing/` 与管理端的
-`uploadfile/billing-outbox/` 是待入账记录的持久队列，已使用现有挂载卷，不能作为缓存清理。
+`uploadfile/billing-outbox/`、`uploadfile/platform-settlements/` 是待入账、待结算记录的持久队列，
+不能作为缓存清理。生产 Compose 将 `XIAOZHI_PLATFORM_OUTBOX_ROOT` 固定为
+`/uploadfile/platform-settlements`，使用现有 `./uploadfile:/uploadfile` 挂载；安装和升级复制同版本
+Compose 时自动保留此设置，无需在私有 `.env` 增加路径参数。本地源码运行仍使用相对目录。
 代码部署后可在管理员页面首次同步火山账单，按供应商账号和官方账期查看总账；账号总账不要求空间绑定。
-DeepSeek 的已配置模型密钥用于查询余额，实际费用仍需官方金额凭证导入，不能通过余额推算。
+DeepSeek 的独立财务凭据仅用于固定官方余额端点，实际费用仍需官方金额凭证导入，不能通过余额推算。
 需要查看空间归属费用时，再确认供应商计费范围绑定，不能默认把共享账户费用归入当前空间。
 配置、数据覆盖和资源包规则见[模型管理](../models/model-management.md#11-模型用量与实际消费管理)。
 
-### DeepSeek Harness 运行与访问
+### 平台额度与模型开通
 
-`xiaozhi-maintenance-agent` 不挂载宿主源码；原生 Harness 会话状态保存在专用 Docker volume，临时工作区
-位于 tmpfs。内部 API 只供 manager-api 调用。官方 Console 通过宿主 `127.0.0.1:8011` 反代到现有智控台
-HTTPS origin 的 `/maintenance-console/`，再以内嵌 iframe 出现在当前页面；8011 不得绑定公网地址。容器常驻不等于自动维护全部资源：
-仍需在对应知识库或智能体页面逐一保存策略。
+升级会为旧用户建立零额度账户，并按工作空间现有 owner 固定凭据和额度负责人；历史模型密钥只做
+加密归档及公开配置脱敏，不会自动变成用户凭据。部署前必须备份数据库并保留原
+`XIAOZHI_CREDENTIAL_ENCRYPTION_KEY`。迁移不会自动发放额度、创建费率或启用注册试用；
+没有负责人凭据、足够额度、已发布费率或受支持模型配置时，新的付费调用会被拒绝。
 
-网关会把官方 Console 的绝对 `/api`、`/assets`、`/plugins` 路径确定性改写到上述前缀，因此不需要第二个
-公开域名或证书。生产必须把 `XIAOZHI_PUBLIC_BASE_URL` 和 `XIAOZHI_MAINTENANCE_FRAME_ANCESTORS` 设为
-manager-web 的公开 HTTPS origin。启动链接是一次性的，反向代理必须关闭该 location 的 access log，不能记录
-`code` 查询参数。浏览器写请求还会校验同一 Manager origin；提交提案时除
-服务器共享密钥外，还必须携带绑定到当前 audit run 的 HMAC 能力令牌，该令牌不进入浏览器。
-DeepSeek Harness 当前为 Developer Preview：后台 Python SDK/runtime 固定为 `0.1.1rc1`，官方 Web Console
-固定为 `0.1.1-rc.2`；升级任一版本必须先跑适配器契约测试和一次非生产真实搜索验收。
+运营开通顺序：初始化独立 OPS 身份和授权，设置额度发放池，导入并显式分配独立用户凭据，
+设置模型费率和调用量上限，再按确认金额发放服务额度。禁止把原有共享 global key 自动归属或复用。
+模型测试、评测、配置助手、官方知识处理使用显式平台服务账户，单独配置凭据、预算和允许的模型及用途。
+新模型测试会产生真实供应商调用，不能当作默认部署验证；模型发布仍需执行审批流程。
+
+费率按基础单位配置：LLM 输入/输出 token、ASR 毫秒、TTS 字符，不能把每千 token、每分钟报价
+直接写成基础单位费率。试用默认关闭，仅在发放池、金额政策和库存准备好后明确开启。
+
+无付费验收可读取用户账户、工作空间摘要与流水，以及 OPS 账户、发放池、凭据库存、费率、服务账户和
+待核对结算。旧用户未自动生成凭据占位，必须按账户清单逐一核对，不能以待分配队列为空判断全部开通；
+工作空间摘要的 `READY` 也不代表 LLM、ASR、TTS 每条链都已配置完成。
 
 ```text
 开发/构建机：完整源码 -> 构建镜像 -> 推送阿里云 ACR
@@ -78,7 +86,6 @@ DeepSeek Harness 当前为 Developer Preview：后台 Python SDK/runtime 固定�
 xiaozhi-server:<version>
 xiaozhi-manager-api:<version>
 xiaozhi-manager-web:<version>
-xiaozhi-maintenance-agent:<version>
 xiaozhi-deploy-assets:<version>
   ├── docker-compose.yml
   ├── install / upgrade

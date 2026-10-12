@@ -1,4 +1,5 @@
 import Fly from 'flyio/dist/npm/fly';
+import { isOperationsConsole } from '../security/session';
 import store from '../store/index';
 import Constant from '../utils/constant';
 import { goToPage, isNotNull, showDanger, showWarning } from '../utils/index';
@@ -34,7 +35,7 @@ function sendRequest() {
                 this._header.Authorization = 'Bearer ' + (JSON.parse(store.getters.getToken)).token
             }
             const workspaceId = localStorage.getItem('currentWorkspaceId')
-            if (workspaceId) {
+            if (workspaceId && !isOperationsConsole()) {
                 this._header['X-Workspace-Id'] = workspaceId
             }
 
@@ -54,9 +55,8 @@ function sendRequest() {
                     this._sucCallback(res)
                 }
             }).catch((res) => {
-                // 打印失败响应
-                console.log('catch', res)
-                httpHandlerError(res, this._failCallback, this._networkFailCallback)
+                // Fly errors can retain request headers. Never pass credentials to legacy loggers.
+                httpHandlerError({ status: res.status, data: res.data }, this._failCallback, this._networkFailCallback)
             })
             return this
         },
@@ -120,6 +120,13 @@ function httpHandlerError(info, failCallback, networkFailCallback) {
 
     /** 请求成功，退出该函数 可以根据项目需求来判断是否请求成功。这里判断的是status为200的时候是成功 */
     let networkError = false
+    if (info.status === 401 || info.data?.code === 401) {
+        store.commit('clearAuth');
+        if (failCallback) failCallback(info);
+        else if (networkFailCallback) networkFailCallback(info);
+        goToPage(Constant.PAGE.LOGIN, true);
+        return true;
+    }
     if (info.status === 200) {
         if (info.data.code === 'success' || info.data.code === 0 || info.data.code === undefined) {
             return networkError

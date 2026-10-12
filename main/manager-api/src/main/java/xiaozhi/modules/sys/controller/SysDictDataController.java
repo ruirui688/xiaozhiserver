@@ -43,7 +43,7 @@ public class SysDictDataController {
 
     @GetMapping("/page")
     @Operation(summary = "分页查询字典数据")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("system.read")
     @Parameters({ @Parameter(name = "dictTypeId", description = "字典类型ID", required = true),
             @Parameter(name = "dictLabel", description = "数据标签"), @Parameter(name = "dictValue", description = "数据值"),
             @Parameter(name = Constant.PAGE, description = "当前页码，从1开始", required = true),
@@ -61,7 +61,7 @@ public class SysDictDataController {
 
     @GetMapping("/{id}")
     @Operation(summary = "获取字典数据详情")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("system.read")
     public Result<SysDictDataVO> get(@PathVariable("id") Long id) {
         SysDictDataVO vo = sysDictDataService.get(id);
         return new Result<SysDictDataVO>().ok(vo);
@@ -69,7 +69,7 @@ public class SysDictDataController {
 
     @PostMapping("/save")
     @Operation(summary = "新增字典数据")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("system.write")
     public Result<Void> save(@RequestBody SysDictDataDTO dto) {
         ValidatorUtils.validateEntity(dto);
         sysDictDataService.save(dto);
@@ -78,7 +78,7 @@ public class SysDictDataController {
 
     @PutMapping("/update")
     @Operation(summary = "修改字典数据")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("system.write")
     public Result<Void> update(@RequestBody SysDictDataDTO dto) {
         ValidatorUtils.validateEntity(dto);
         sysDictDataService.update(dto);
@@ -87,7 +87,7 @@ public class SysDictDataController {
 
     @PostMapping("/delete")
     @Operation(summary = "删除字典数据")
-    @RequiresPermissions("sys:role:superAdmin")
+    @RequiresPermissions("system.write")
     @Parameter(name = "ids", description = "ID数组", required = true)
     public Result<Void> delete(@RequestBody Long[] ids) {
         sysDictDataService.delete(ids);

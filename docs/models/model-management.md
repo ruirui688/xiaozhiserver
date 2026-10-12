@@ -805,7 +805,7 @@ Python 上报 `POST /config/billing/usage`，同时要求服务间共享密钥�
 | --- | --- | --- |
 | 火山通用资源包 | `ListResourcePackages`，`2022-01-01`，`billing` | 总额度、可用额度、单位、状态、有效期、周期重置信息 |
 | 火山语音资源包 | `ResourcePacksStatus`，`2025-05-20`，`speech_saas_prod` | 包实例、适用产品、购买量、供应商当前用量、单位、到期时间、是否可共享 |
-| DeepSeek 账户余额 | 官方 `GET /user/balance`，复用所选已保存模型的密钥 | 总余额、充值余额、尚未过期的赠送余额、账户可用状态 |
+| DeepSeek 账户余额 | 官方 `GET /user/balance`，使用独立财务查询凭据 | 总余额、充值余额、尚未过期的赠送余额、账户可用状态 |
 
 语音接口不单独返回已确认的剩余额度，页面不把“购买量 − 当前用量”冒充独立官方余额。优先读取 `Harvest` 的结构化购买量、当前用量及单位；顶层字段可能含千分位或单位。`ResourceID` 和 `Code` 不是唯一购买包实例，只有供应商返回的 `InstanceNumber` 可用于实例归属；实例号为空的赠送包仍可展示，展示行标识不能用于归属绑定。语音配置必须明确指定 `speech-project` 及逗号分隔的 `speech-resource-ids`，不能从推理 API Key 推导，也不能假定推理资源 ID 与控制面服务 ID 通用。查询明确传入 `Types=[access,quota,prepaid]`，覆盖范围仅为配置项目和服务。通用包与语音包可能是不同接口下的同一权益，页面不跨来源累加额度。
 
@@ -833,14 +833,14 @@ xiaozhi:
       speech-project: ${XIAOZHI_BILLING_VOLCENGINE_SPEECH_PROJECT:}
       speech-resource-ids: ${XIAOZHI_BILLING_VOLCENGINE_SPEECH_RESOURCE_IDS:}
     deepseek:
-      model-id: ${XIAOZHI_BILLING_DEEPSEEK_MODEL_ID:}
+      api-key: ${XIAOZHI_BILLING_DEEPSEEK_API_KEY:}
       account-ref: ${XIAOZHI_BILLING_DEEPSEEK_ACCOUNT_REF:}
     outbox-root: uploadfile/billing-outbox
 ```
 
 `account-ref` 是管理员选择的非敏感账号标识，用于与绑定和导入保持一致。仅查账单可用 `BillingCenterBillReadOnlyAccess`，同时查询通用资源包可用 `BillingCenterReadOnlyAccess`（整个费用中心的查询/导出权限，权限矩阵见[官方权限管理](https://www.volcengine.com/docs/6269/1186807)）。语音专用查询另外授权上述项目范围的单一只读动作，不授予购买、续费或配置修改权限。不使用模型 API Key 替代账单 AK/SK。未配置时页面仍能查看已采集用量及导入账单，同步按钮会显示未启用。
 
-默认 `application.yml` 已提供上述环境变量占位符；生产 Compose 已透传到 manager-api，示例见 `deploy/production/env.example`。真实值仅写部署目录私有 `.env`。`XIAOZHI_BILLING_VOLCENGINE_ENABLED` 默认为 `false`，需要读取火山时显式启用。DeepSeek 的 `model-id` 是项目现有官方直连模型配置 ID，不是上游模型名，也不需要在部署文件重复保存推理密钥。
+默认 `application.yml` 已提供上述环境变量占位符；生产 Compose 已透传到 manager-api，示例见 `deploy/production/env.example`。真实值仅写部署目录私有 `.env`。`XIAOZHI_BILLING_VOLCENGINE_ENABLED` 默认为 `false`，需要读取火山时显式启用。DeepSeek 必须配置独立的财务查询凭据及明确的非敏感账号标识；旧 `model-id` 配置不再回退读取模型或用户密钥。供应商若未提供限定为余额查询的密钥权限，本项目仅限制其调用固定余额端点，不能声称该上游密钥本身只有只读权限。
 
 火山先同步所需账期，即可在账号视图查看官方费用；DeepSeek 则需导入可核实的官方金额凭证。若需要空间归属，再确认供应商 Project/资源的独占范围并建立有生效时间的绑定。账户共享时不得把整账户绑定到某一空间；只绑定 Project 仍混用多个智能体或设备时，留在工作空间级。新增绑定后需要重同步或重导入有关账单。已有账单引用的绑定不允许改写历史归属，可在不截断既有账单区间的前提下结束有效期。
 

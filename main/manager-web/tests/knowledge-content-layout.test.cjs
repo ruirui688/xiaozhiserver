@@ -36,7 +36,8 @@ test('list titles are excerpts only and editor preserves structured-looking text
 test('content management has a protected independent route and split workspace, not a full-page dialog', () => {
   const router = read('src/router/index.js');
   assert.match(router, /path: '\/knowledge-content-management'/);
-  assert.match(router, /const protectedRoutes = [^\n]*'KnowledgeContentManagement'/);
+  assert.match(router, /!publicRoutes\.includes\(to\.name\)/);
+  assert.doesNotMatch(router.match(/const publicRoutes = ([^\n]+)/)[1], /KnowledgeContentManagement/);
   const page = read('src/views/KnowledgeContentManagement.vue');
   const workspace = read('src/components/knowledge/content/KnowledgeContentWorkspace.vue');
   assert.doesNotMatch(page, /<el-dialog/);

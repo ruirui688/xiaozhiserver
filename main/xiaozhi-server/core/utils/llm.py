@@ -29,6 +29,8 @@ def list_available_providers():
 
 
 def create_instance(class_name, *args, **kwargs):
+    from core.metering.admission import validate_adapter
+    validate_adapter("LLM", class_name, args[0] if args else kwargs.get("config", {}))
     # 创建LLM实例
     if os.path.exists(os.path.join('core', 'providers', 'llm', class_name, f'{class_name}.py')):
         lib_name = f'core.providers.llm.{class_name}.{class_name}'

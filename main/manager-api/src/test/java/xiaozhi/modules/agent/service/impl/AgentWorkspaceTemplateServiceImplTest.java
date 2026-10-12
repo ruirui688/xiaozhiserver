@@ -93,6 +93,25 @@ class AgentWorkspaceTemplateServiceImplTest {
     }
 
     @Test
+    void userCannotPreviewUnpublishedOfficialDraftButCanPreviewApprovedTemplate() {
+        org.springframework.context.MessageSource messages=mock(org.springframework.context.MessageSource.class);
+        when(messages.getMessage(any(String.class),any(Object[].class),any())).thenReturn("no permission");
+        org.springframework.test.util.ReflectionTestUtils.setField(xiaozhi.common.utils.MessageUtils.class,"messageSource",messages);
+        when(permissionService.currentWorkspaceId()).thenReturn("workspace-user");
+        AgentTemplateEntity template=new AgentTemplateEntity();template.setId("official");template.setVisibility("OFFICIAL");template.setReviewStatus("DRAFT");template.setAgentName("Public character");template.setSystemPrompt("Public prompt");
+        when(templateService.getById("official")).thenReturn(template);
+        assertThrows(xiaozhi.common.exception.RenException.class,()->service.preview("official"));
+        template.setReviewStatus("APPROVED");
+        assertEquals("Public prompt",service.preview("official").getSystemPrompt());
+    }
+
+    @Test
+    void retiredWorkspacePublicationRequestNeverChangesPrivateTemplate() {
+        assertThrows(xiaozhi.common.exception.RenException.class,()->service.submitForReview("private-template"));
+        verify(templateService,never()).updateById(any(AgentTemplateEntity.class));
+    }
+
+    @Test
     void approvingMarketplaceTemplateRemovesWorkspacePrivateBindings() {
         AgentUpdateDTO config = new AgentUpdateDTO();
         config.setCorrectWordFileIds(List.of("private-words"));
@@ -501,6 +520,7 @@ class AgentWorkspaceTemplateServiceImplTest {
         AgentTemplateEntity template = new AgentTemplateEntity();
         template.setId("system-template-a");
         template.setVersion(1);
+        template.setReviewStatus("APPROVED");
         template.setAgentName("系统角色");
         template.setSystemPrompt("系统模板提示词");
         when(templateService.getById("system-template-a")).thenReturn(template);

@@ -188,7 +188,7 @@ class ConfigServiceImplTest {
 
         assertEquals(Map.of(), config.get("selected_module"));
         assertEquals(Map.of(), config.get("model_config"));
-        verify(redisUtils).set(eq("server:config"), eq(config));
+        verify(redisUtils).set(eq("server:config:public-v2"), eq(config));
     }
 
     @Test

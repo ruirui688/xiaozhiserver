@@ -11,5 +11,6 @@ import xiaozhi.modules.device.entity.OtaEntity;
  */
 @Mapper
 public interface OtaDao extends BaseMapper<OtaEntity> {
-    
+    @org.apache.ibatis.annotations.Select("SELECT o.* FROM ai_ota o JOIN ops_ota_channel c ON c.ota_id=o.id WHERE c.hardware_type=#{type}")
+    OtaEntity selectPublishedChannel(@org.apache.ibatis.annotations.Param("type") String type);
 }

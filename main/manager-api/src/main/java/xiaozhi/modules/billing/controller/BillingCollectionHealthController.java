@@ -7,6 +7,7 @@ import xiaozhi.common.utils.Result;
 import xiaozhi.modules.billing.dto.BillingCollectorHealthRequest;
 import xiaozhi.modules.billing.service.BillingCollectionHealthService;
 
+@xiaozhi.modules.security.ops.SharedOfficialEndpoint
 @RestController @RequiredArgsConstructor
 public class BillingCollectionHealthController {
     private final BillingCollectionHealthService health;

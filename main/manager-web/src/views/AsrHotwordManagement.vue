@@ -5,14 +5,14 @@
       <div class="toolbar">
         <div><h1>热词库</h1><p>录入专有名词，发布到火山引擎，再应用到智能体。</p></div>
         <el-button icon="el-icon-refresh" :disabled="busy" :loading="loading" @click="load(true)">刷新本地列表</el-button>
-        <el-button v-if="capabilities.canImportRemote" icon="el-icon-download" :disabled="!canWrite || busy || loading || !availableSources.length" @click="importVisible = true">从火山同步</el-button>
         <el-button type="primary" icon="el-icon-plus" :disabled="!canWrite || busy || loading || !availableSources.length" @click="edit()">新建词库</el-button>
       </div>
       <el-alert title="保存只生成草稿；发布会创建新版本，原有智能体保持当前版本。发布成功后请显式应用到需要更新的智能体。" type="info" :closable="false" show-icon />
+      <el-alert class="notice" title="供应商词库导入尚未接入独立凭据。请在工作空间中新建或编辑词库，可在编辑器中批量粘贴词条。" type="info" :closable="false" show-icon />
       <el-alert v-if="sourceNotice" class="notice" :title="sourceNotice" type="info" :closable="false" show-icon />
       <el-alert v-if="error" class="notice" :title="error" type="error" :closable="false" show-icon />
       <section class="list" v-loading="loading">
-        <el-table :data="rows" empty-text="暂无本地词库，可新建词库或同步火山已有词库">
+        <el-table :data="rows" empty-text="暂无本地词库，可新建词库并批量粘贴词条">
           <el-table-column prop="name" label="词库名称" min-width="140" />
           <el-table-column v-if="sources.length > 1" label="火山来源" min-width="150"><template slot-scope="scope">{{ scope.row.sourceName || sourceName(scope.row.sourceId) }}</template></el-table-column>
           <el-table-column label="词条" width="75"><template slot-scope="scope">{{ (scope.row.entries || []).length }}</template></el-table-column>
@@ -34,7 +34,6 @@
         </el-table>
       </section>
     </main>
-    <AsrHotwordImportDialog v-if="importVisible" :can-write="canWrite" :workspace-id="workspaceId" @close="importVisible = false" @imported="load" />
     <el-dialog :title="editingId ? '编辑热词库' : '新建热词库'" :visible.sync="editorVisible" width="800px" top="5vh" custom-class="hotword-editor-dialog" :close-on-click-modal="false" :close-on-press-escape="!busy" :show-close="!busy">
       <el-form label-width="85px" @submit.native.prevent>
         <el-form-item label="词库名称"><el-input v-model="form.name" maxlength="80" show-word-limit :disabled="busy" /></el-form-item>
@@ -60,15 +59,14 @@
 <script>
 import HeaderBar from '@/components/HeaderBar.vue';
 import ResourceCenterNav from '@/components/resource/ResourceCenterNav.vue';
-import AsrHotwordImportDialog from '@/components/resource/AsrHotwordImportDialog.vue';
 import api from '@/apis/module/asrHotword';
 import AsrHotwordEntryEditor from '@/components/resource/AsrHotwordEntryEditor.vue';
 import { validateHotwordEntries, hotwordStatus } from '@/utils/asrHotwords';
 export default {
-  components: { HeaderBar, ResourceCenterNav, AsrHotwordImportDialog, AsrHotwordEntryEditor },
+  components: { HeaderBar, ResourceCenterNav, AsrHotwordEntryEditor },
   data() { return { rows: [], sources: [], capabilities: {}, agents: [], loading: false, busy: false, error: '', dialogError: '', generation: 0,
     workspaceId: localStorage.getItem('currentWorkspaceId'), canWrite: localStorage.getItem('currentWorkspaceCanWrite') !== 'false',
-    editorSession: 0, editorVisible: false, applyVisible: false, importVisible: false, editingId: '', form: { name: '', sourceId: '', entries: [] }, applying: null, selectedAgents: [] }; },
+    editorSession: 0, editorVisible: false, applyVisible: false, editingId: '', form: { name: '', sourceId: '', entries: [] }, applying: null, selectedAgents: [] }; },
   computed: {
     availableSources() { return this.sources.filter(source => source.available); },
     sourceNotice() { return this.capabilities.message || ''; },
@@ -90,7 +88,7 @@ export default {
         this.rows = rows || []; this.sources = sourceInfo.sources || []; this.capabilities = sourceInfo.capabilities || {}; this.agents = agents || [];
         if (notify === true) this.$message.success(this.rows.length
           ? `已刷新，共 ${this.rows.length} 个本地词库`
-          : '本地暂无词库；火山已有词库需通过“从火山同步”导入');
+          : '本地暂无词库；可新建词库并批量粘贴词条');
       } catch (error) { if (this.current(generation)) this.error = error.message; }
       finally { if (this.current(generation)) this.loading = false; }
     },

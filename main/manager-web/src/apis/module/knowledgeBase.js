@@ -1,3 +1,4 @@
+import { readSession } from '../../security/session';
 import { getServiceUrl } from '../api';
 import RequestService from '../httpRequest';
 
@@ -5,7 +6,7 @@ import RequestService from '../httpRequest';
  * 获取认证token
  */
 function getAuthToken() {
-  return localStorage.getItem('token') || '';
+  return readSession('token') || '';
 }
 
 /**

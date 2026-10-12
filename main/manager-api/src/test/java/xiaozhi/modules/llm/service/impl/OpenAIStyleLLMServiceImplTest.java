@@ -46,6 +46,7 @@ class OpenAIStyleLLMServiceImplTest {
     @Test
     void providerErrorsDoNotLogResponseBodyOrExceptionMessage() {
         var service = new OpenAIStyleLLMServiceImpl();
+        xiaozhi.common.llm.MeteredHttpTestSupport.install(service);
         var models = mock(ModelConfigService.class);
         var model = new ModelConfigEntity();
         model.setConfigJson(JSONUtil.parseObj("{\"base_url\":\"https://example.invalid/v1\",\"api_key\":\"test-placeholder\"}"));

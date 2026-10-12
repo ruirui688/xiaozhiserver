@@ -3,7 +3,7 @@
     <HeaderBar />
     <el-main class="organization-main">
       <div class="page-toolbar">
-        <h2>组织管理</h2>
+        <h2>工作空间</h2>
         <div class="toolbar-actions">
           <el-input v-model="inviteCode" size="small" placeholder="输入邀请码加入工作空间" />
           <el-button size="small" @click="acceptInvitation">加入</el-button>
@@ -33,6 +33,7 @@
               <span class="member-hint">
                 名额 {{ occupiedSlots }}/5（正式成员 {{ members.length }}，待接受 {{ pendingInvitations.length }}），共享智能体、设备、记忆、聊天记录、知识库和声纹等业务资源
               </span>
+              <p class="member-hint">在当前工作空间中的调用统一使用固定负责人的凭据和额度。</p>
             </div>
             <div class="member-actions">
               <el-button v-if="canLeaveWorkspace" size="small" @click="leaveWorkspace">退出工作空间</el-button>
@@ -58,7 +59,6 @@
                   size="mini"
                   @change="updateRole(scope.row)"
                 >
-                  <el-option v-if="isOwner" label="所有者" value="OWNER" />
                   <el-option label="管理员" value="ADMIN" />
                   <el-option label="普通成员" value="MEMBER" />
                 </el-select>
@@ -211,6 +211,7 @@ export default {
       });
     },
     inviteMember() {
+      if (!this.canWrite) return;
       if (!this.inviteForm.username.trim()) {
         this.$message.warning("请输入用户名");
         return;
@@ -282,10 +283,10 @@ export default {
       }).catch(() => {});
     },
     canChangeRole(member) {
-      return this.isOwner && !this.isSelf(member);
+      return this.isOwner && member.role !== 'OWNER' && !this.isSelf(member);
     },
     canRemoveMember(member) {
-      if (!this.canWrite) return false;
+      if (!this.canWrite || member.role === 'OWNER') return false;
       if (this.isSelf(member)) return false;
       if (this.isOwner) return true;
       return member.role !== "OWNER";

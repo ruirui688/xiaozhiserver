@@ -27,7 +27,7 @@ function vmFor(file, props = {}, api = {}) {
   const Ctor = Vue.extend({ ...loadVueComponent(file, mocks(api)), created: [], render: h => h('div') });
   const vm = new Ctor({ propsData: props });
   vm.$message = { error() {}, success() {}, warning() {} };
-  vm.$store = { state: { userInfo: { superAdmin: true } } };
+  vm.$store = { state: { userInfo: { audience: 'OPS', permissions: ['prompt.catalog.read', 'prompt.catalog.write'] } } };
   return vm;
 }
 function nodes(vnode) { return vnode ? [vnode, ...(vnode.children || []).flatMap(nodes)] : []; }
@@ -213,6 +213,7 @@ test('empty activities and failed service status never claim a configured capabi
   const vm = vmFor('src/views/FunctionPluginManagement.vue', {}, { user: {
     getPluginConfigs(callback) { configCallback = callback; }
   } });
+  vm.$store.state.userInfo = { audience: 'USER', permissions: [] };
   vm.plugins = [plugin('get_weather', { fieldsMeta: [] })];
   vm.setActiveType('activities');
   assert.deepEqual(vm.visiblePlugins, []);

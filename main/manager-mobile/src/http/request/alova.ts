@@ -92,7 +92,7 @@ const alovaInstance = createAlova({
     }
 
     // 处理动态域名
-    if (config.meta?.domain) {
+    if (import.meta.env.DEV && config.meta?.domain) {
       method.baseURL = config.meta.domain
       if (isDebug) {
         console.log('当前域名', method.baseURL)
@@ -110,9 +110,6 @@ const alovaInstance = createAlova({
         errMsg,
       } = response as UniNamespace.RequestSuccessCallbackResult
 
-      if (isDebug) {
-        console.log(response)
-      }
 
       // 处理特殊请求类型（上传/下载）
       if (requestType === 'upload' || requestType === 'download') {

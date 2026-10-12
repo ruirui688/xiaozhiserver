@@ -34,7 +34,7 @@ class LlmUsageMeterTest {
                  "usage":{"prompt_tokens":30,"completion_tokens":7,"total_tokens":37,
                           "prompt_cache_hit_tokens":20,"prompt_cache_miss_tokens":10}}
                 """, MediaType.APPLICATION_JSON));
-        var meter = new LlmUsageMeter(recorder);
+        var meter = new LlmUsageMeter(recorder, executor());
         try (var ignored = LlmUsageContext.open(
                 LlmUsageContext.Identity.agent("workspace-a", "agent-a", "MEMORY"))) {
             meter.exchange(client, ENDPOINT, new HttpEntity<>(Map.of("prompt", "private prompt")),
@@ -64,7 +64,7 @@ class LlmUsageMeterTest {
         var server = MockRestServiceServer.createServer(client);
         server.expect(requestTo(ENDPOINT)).andRespond(withServerError());
         server.expect(requestTo(ENDPOINT)).andRespond(withSuccess("{\"choices\":[]}", MediaType.APPLICATION_JSON));
-        var meter = new LlmUsageMeter(recorder);
+        var meter = new LlmUsageMeter(recorder, executor());
         assertThrows(RuntimeException.class, () -> meter.exchange(
                 client, ENDPOINT, HttpEntity.EMPTY, String.class, "model-1", "LLM"));
         meter.exchange(client, ENDPOINT, HttpEntity.EMPTY, String.class, "model-1", "LLM");
@@ -89,7 +89,7 @@ class LlmUsageMeterTest {
         var client = new RestTemplate();
         var server = MockRestServiceServer.createServer(client);
         server.expect(requestTo(ENDPOINT)).andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
-        assertTrue(new LlmUsageMeter(recorder).exchange(client, ENDPOINT,
+        assertTrue(new LlmUsageMeter(recorder, executor()).exchange(client, ENDPOINT,
                 HttpEntity.EMPTY, String.class, "model-1", "LLM").getStatusCode().is2xxSuccessful());
         server.verify();
     }
@@ -120,6 +120,13 @@ class LlmUsageMeterTest {
         assertEquals(1, usage.size());
         assertEquals(BigDecimal.ZERO, metric(usage, "input_tokens"));
         assertEquals("other", LlmUsageMeter.provider("https://api.deepseek.com.attacker.invalid/chat"));
+    }
+
+    private PlatformJavaExecutor executor() {
+        var executor = mock(PlatformJavaExecutor.class);
+        when(executor.prepare(any(), any(), any(), any())).thenAnswer(invocation ->
+            new PlatformJavaExecutor.Call(ENDPOINT, invocation.getArgument(1), null));
+        return executor;
     }
 
     private BigDecimal metric(List<Usage> usage, String name) {

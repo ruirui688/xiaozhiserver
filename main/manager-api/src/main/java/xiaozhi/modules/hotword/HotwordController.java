@@ -16,10 +16,8 @@ public class HotwordController {
     private final HotwordService service;
     private final HotwordImportService imports;
     @GetMapping("/remote")
-    @RequiresPermissions("sys:role:superAdmin")
     public Result<Map<String, Object>> remote() { return new Result<Map<String, Object>>().ok(imports.remote()); }
     @PostMapping("/import")
-    @RequiresPermissions("sys:role:superAdmin")
     public Result<Map<String, Object>> importRemote(@Valid @RequestBody HotwordImportDTO dto) { return new Result<Map<String, Object>>().ok(imports.importRemote(dto)); }
     @GetMapping
     public Result<List<Map<String, Object>>> list() { return new Result<List<Map<String, Object>>>().ok(service.list()); }

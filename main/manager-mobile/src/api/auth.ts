@@ -79,7 +79,7 @@ export interface UserInfo {
   email: string
   mobile: string
   status: number
-  superAdmin: number
+  audience: 'USER'
 }
 
 // 公共配置响应数据类型

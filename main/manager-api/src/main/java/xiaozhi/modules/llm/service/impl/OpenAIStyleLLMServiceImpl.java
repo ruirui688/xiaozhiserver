@@ -572,8 +572,6 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
     }
 
     private ResponseEntity<String> exchange(String url, HttpEntity<?> request, String modelId) {
-        return usageMeter == null
-                ? restTemplate.exchange(url, HttpMethod.POST, request, String.class)
-                : usageMeter.exchange(restTemplate, url, request, String.class, modelId, "LLM");
+        return usageMeter.exchange(restTemplate, url, request, String.class, modelId, "LLM");
     }
 }

@@ -21,6 +21,8 @@ source_paths:
 | 人物资料、识别与机器人迎宾 | [人物资源与设备人脸同步](./architecture/person-resource-and-face-sync.md) | [机器人门口迎宾产品化](./architecture/robot-reception-productization.md)说明端云职责、接待数据与协议；再读[安全架构](./architecture/security-architecture.md) |
 | LLM、ASR、TTS 模型 | [模型管理](./models/model-management.md) | [模型评测与配置助手](./architecture/model-benchmark-and-assistant.md) |
 | 计费管理改版规划 | [2026-10-12 计费审计与改版方案](./reports/model-billing-audit-and-redesign-2026-10-12.md) | 账号费用、资源包诊断、工作空间/智能体/设备用量；报告不是已上线功能 |
+| 平台产品决策与额度体验 | [平台产品蓝图](./architecture/platform-product-blueprint.md) | 注册试用额度、额度申请、凭据库存与统一工作空间；完成状态以源码与验收为准 |
+| 平台额度与运营分权 | [平台服务与运营隔离](./architecture/platform-service-and-operations.md) | [规划依据](./reports/platform-productization-plan-2026-10-12.md)；个人凭据、固定负责人额度、用户/员工分离；源码实现不等于已上线 |
 | VAD 与端点延迟 | [VAD 低延迟配置](./models/vad-endpointing-low-latency.md) | [设备交互链路](./architecture/device-interaction-chain.md) |
 | 记忆 | [记忆系统](./architecture/memory-system-chain.md) | [PowerMem](./models/powermem-integration.md) |
 | 知识库与切片 | [知识库链路](./architecture/knowledge-base-chain.md) | [RAGFlow](./models/ragflow-integration.md) |

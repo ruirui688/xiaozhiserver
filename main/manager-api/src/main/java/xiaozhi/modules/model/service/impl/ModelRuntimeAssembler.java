@@ -33,7 +33,7 @@ import xiaozhi.modules.model.entity.ModelTemplateFieldEntity;
 public class ModelRuntimeAssembler {
     private static final Set<String> SECRET_KEYS = new HashSet<>(List.of(
             "api_key", "api_password", "access_token", "token", "secret_key", "api_secret",
-            "access_key_secret", "personal_access_token"));
+            "access_key_secret", "personal_access_token", "access_key", "app_id", "appkey"));
     private static final Set<String> METADATA_KEYS = new HashSet<>(List.of(
             "type", "base_url", "api_url", "url", "ws_url", "server_url", "host",
             "endpoint_url", "model_name", "model", "resource_id", "protocol"));
@@ -94,15 +94,20 @@ public class ModelRuntimeAssembler {
 
         Map<String, String> runtimeKeys = runtimeKeyMap(templateFields);
         for (ModelConfigParamEntity param : loadParams(model.getId())) {
+            if (xiaozhi.modules.platform.service.PlatformCatalogSecrets.secret(param.getParamKey())) continue;
             putTypedValue(config, runtimeKeys.getOrDefault(param.getParamKey(), param.getParamKey()),
                     param.getParamValue(), param.getValueType());
         }
         for (ModelConfigSecretEntity secret : loadSecrets(model.getId())) {
             putIfPresent(config, runtimeKeys.getOrDefault(secret.getSecretKey(), secret.getSecretKey()),
-                    secret.getSecretValue());
+                    "PLATFORM_MANAGED");
         }
+        config = new JSONObject(xiaozhi.modules.platform.service.PlatformCatalogSecrets.publicValue(config));
         HuoshanDoubleStreamTtsHelper.normalize(model, config);
-
+        config.set("_platform_managed", true);
+        config.set("_platform_model_id", model.getId());
+        config.set("api_key", "PLATFORM_MANAGED");
+        config.set("access_token", "PLATFORM_MANAGED");
         return config;
     }
 
@@ -115,9 +120,10 @@ public class ModelRuntimeAssembler {
             if (param == null || StringUtils.isBlank(param.getParamKey())) {
                 continue;
             }
-            params.put(param.getParamKey(), parseTypedValue(param.getParamValue(), param.getValueType()));
+            if (!xiaozhi.modules.platform.service.PlatformCatalogSecrets.secret(param.getParamKey()))
+                params.put(param.getParamKey(), parseTypedValue(param.getParamValue(), param.getValueType()));
         }
-        return params;
+        return (Map<String,Object>)xiaozhi.modules.platform.service.PlatformCatalogSecrets.publicValue(params);
     }
 
     public Map<String, Object> buildMaskedSecrets(ModelConfigEntity model) {
@@ -135,17 +141,7 @@ public class ModelRuntimeAssembler {
     }
 
     public Map<String, Object> buildPlainSecrets(ModelConfigEntity model) {
-        Map<String, Object> secrets = new LinkedHashMap<>();
-        if (model == null || StringUtils.isBlank(model.getId())) {
-            return secrets;
-        }
-        for (ModelConfigSecretEntity secret : loadSecrets(model.getId())) {
-            if (secret == null || StringUtils.isBlank(secret.getSecretKey())) {
-                continue;
-            }
-            secrets.put(secret.getSecretKey(), StringUtils.defaultString(secret.getSecretValue()));
-        }
-        return secrets;
+        return buildMaskedSecrets(model);
     }
 
     private List<ModelConfigParamEntity> loadParams(String modelId) {
@@ -205,6 +201,7 @@ public class ModelRuntimeAssembler {
         if (model == null || StringUtils.isBlank(model.getId()) || config == null) {
             return;
         }
+        xiaozhi.modules.platform.service.PlatformCatalogSecrets.validate(config);
         HuoshanDoubleStreamTtsHelper.normalize(model, config);
         updateModelMetadata(model, config);
         Map<String, ModelTemplateFieldEntity> templateFieldMap = templateFieldMap(
@@ -214,26 +211,14 @@ public class ModelRuntimeAssembler {
             existingSecrets.put(secret.getSecretKey(), secret);
         }
         modelConfigParamDao.delete(new QueryWrapper<ModelConfigParamEntity>().eq("model_id", model.getId()));
-        modelConfigSecretDao.delete(new QueryWrapper<ModelConfigSecretEntity>().eq("model_id", model.getId()));
 
         for (String key : config.keySet()) {
             Object value = config.get(key);
             if (value == null || METADATA_KEYS.contains(key)) {
                 continue;
             }
-            if (SECRET_KEYS.contains(key)) {
-                String secretValue = String.valueOf(value);
-                ModelConfigSecretEntity existing = existingSecrets.get(key);
-                if (existing != null && isMaskedSecretPlaceholder(secretValue, existing.getMaskedValue())) {
-                    secretValue = existing.getSecretValue();
-                }
-                ModelConfigSecretEntity secret = new ModelConfigSecretEntity();
-                secret.setModelId(model.getId());
-                secret.setSecretKey(key);
-                secret.setSecretValue(secretValue);
-                secret.setMaskedValue(maskSecret(secretValue));
-                secret.setValueType("secret");
-                modelConfigSecretDao.insert(secret);
+            if (xiaozhi.modules.platform.service.PlatformCatalogSecrets.secret(key)) {
+                continue;
             } else {
                 ModelConfigParamEntity param = new ModelConfigParamEntity();
                 param.setModelId(model.getId());

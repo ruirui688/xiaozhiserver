@@ -49,7 +49,7 @@ public class HotwordService {
         String status = !permitted ? "NO_PERMISSION" : discovery.sources().isEmpty()
                 ? (discovery.unavailable() ? "UNAVAILABLE" : "NOT_CONFIGURED") : "READY";
         String message = switch (status) {
-            case "NO_PERMISSION" -> "请平台管理员同步火山已有词库";
+            case "NO_PERMISSION" -> "供应商词库导入尚未接入独立凭据，请使用工作空间热词编辑或批量粘贴词条";
             case "NOT_CONFIGURED" -> "尚未配置火山来源，请管理员在模型配置中配置豆包语音 API Key";
             case "UNAVAILABLE" -> "火山配置暂不可用，请管理员检查配置";
             default -> discovery.unavailable() ? "部分火山配置暂不可用" : "";

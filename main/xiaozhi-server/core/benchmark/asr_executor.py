@@ -2,6 +2,7 @@ import asyncio
 import base64
 import gzip
 import json
+import math
 import os
 import time
 import uuid
@@ -12,6 +13,8 @@ import websockets
 
 from core.benchmark.metrics import char_error_rate, word_error_rate
 from core.utils.asr import create_instance as create_asr_instance
+from core.metering.recorder import begin_call_async
+from core.metering.volcengine import asr_usage
 
 
 STANDARD_ASR_TEST_AUDIO = "wakeup_words_short.wav"
@@ -133,16 +136,39 @@ async def _recognize_asr_sample(asr, provider_type, pcm, started):
 
 
 async def _recognize_doubao_stream(asr, pcm, started):
+    request_id = str(uuid.uuid4())
+    call = await begin_call_async(asr, "ASR", request_id=request_id,
+                                  max_usage={"audio_duration": str(math.ceil(len(pcm) / 32))})
+    try:
+        result = await _recognize_metered_doubao_stream(asr, pcm, started, request_id, call)
+        call.finish("SUCCESS")
+        return result
+    except asyncio.CancelledError:
+        call.finish("CANCELLED")
+        raise
+    except BaseException:
+        call.finish("FAILED")
+        raise
+
+
+async def _recognize_metered_doubao_stream(asr, pcm, started, request_id, call):
     headers = asr.token_auth()
+    endpoint = asr.ws_url
+    if call.permit:
+        headers["X-Api-Key"] = call.permit.secret()
+        headers["X-Api-Resource-Id"] = call.permit.runtime.get("resource_id", asr.resource_id)
+        endpoint = call.permit.endpoint("ws_url")
+    await asyncio.to_thread(call.start)
     async with websockets.connect(
-        asr.ws_url,
+        endpoint,
         additional_headers=headers,
         max_size=1000000000,
         ping_interval=None,
         ping_timeout=None,
         close_timeout=10,
     ) as ws:
-        request_params = asr.construct_request(str(uuid.uuid4()))
+        call.watch(ws)
+        request_params = asr.construct_request(request_id)
         payload = gzip.compress(json.dumps(request_params).encode("utf-8"))
         request = bytearray(asr.generate_header())
         request.extend(len(payload).to_bytes(4, "big"))
@@ -151,9 +177,9 @@ async def _recognize_doubao_stream(asr, pcm, started):
 
         init_result = asr.parse_response(await asyncio.wait_for(ws.recv(), timeout=10))
         if "code" in init_result and init_result.get("code") != 1000:
-            raise RuntimeError(str(init_result.get("payload_msg") or init_result))
+            raise RuntimeError("ASR_PROVIDER_REJECTED")
 
-        receive_task = asyncio.create_task(_receive_doubao_results(asr, ws, started))
+        receive_task = asyncio.create_task(_receive_doubao_results(asr, ws, started, call))
         try:
             await _send_doubao_pcm_frames(asr, ws, pcm)
             return await asyncio.wait_for(receive_task, timeout=10)
@@ -178,13 +204,14 @@ async def _send_doubao_pcm_frames(asr, ws, pcm, frame_size=1920, delay=0.06):
     await ws.send(last_audio_request)
 
 
-async def _receive_doubao_results(asr, ws, started):
+async def _receive_doubao_results(asr, ws, started, usage_call=None):
     best_text = ""
     first_text_ms = None
     for _ in range(30):
         timeout = 10 if not best_text else 1.5
         try:
-            result = asr.parse_response(await asyncio.wait_for(ws.recv(), timeout=timeout))
+            frame = await asyncio.wait_for(ws.recv(), timeout=timeout)
+            result = asr.parse_response(frame)
         except asyncio.TimeoutError:
             if best_text:
                 return best_text, first_text_ms
@@ -194,6 +221,11 @@ async def _receive_doubao_results(asr, ws, started):
                 return best_text, first_text_ms
             raise
         text = _extract_doubao_text(result)
+        payload = result.get("payload_msg") if isinstance(result, dict) else None
+        if usage_call and isinstance(payload, dict):
+            # Only a supplier final frame confirms complete billed duration.
+            final = isinstance(frame, bytes) and len(frame) >= 2 and bool(frame[1] & 0x02)
+            asr_usage(usage_call, payload, final=final)
         if text:
             if first_text_ms is None:
                 first_text_ms = int((time.perf_counter() - started) * 1000)

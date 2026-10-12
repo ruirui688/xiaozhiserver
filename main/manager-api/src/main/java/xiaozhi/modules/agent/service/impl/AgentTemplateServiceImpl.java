@@ -52,7 +52,7 @@ public class AgentTemplateServiceImpl extends ServiceImpl<AgentTemplateDao, Agen
      */
     public AgentTemplateEntity getDefaultTemplate() {
         LambdaQueryWrapper<AgentTemplateEntity> wrapper = new LambdaQueryWrapper<>();
-        wrapper.isNull(AgentTemplateEntity::getWorkspaceId)
+        wrapper.eq(AgentTemplateEntity::getReviewStatus, "APPROVED").isNull(AgentTemplateEntity::getWorkspaceId)
                 .orderByAsc(AgentTemplateEntity::getSort)
                 .last("LIMIT 1");
         return this.getOne(wrapper);
@@ -101,7 +101,7 @@ public class AgentTemplateServiceImpl extends ServiceImpl<AgentTemplateDao, Agen
                 wrapper.set("intent_model_id", resolvedModelId);
                 break;
         }
-        wrapper.isNull("workspace_id").ge("sort", 0);
+        wrapper.isNull("workspace_id").eq("review_status", "DRAFT").ge("sort", 0);
         update(wrapper);
     }
 

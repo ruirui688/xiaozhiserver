@@ -1,7 +1,7 @@
 ---
 status: canonical
 owner: security
-last_verified: 2026-07-12
+last_verified: 2026-10-12
 source_paths:
   - main/xiaozhi-server/core/websocket_server.py
   - main/xiaozhi-server/core/api
@@ -45,6 +45,8 @@ flowchart LR
 
 管理端登录采用多会话 Token：同一账号可在多个浏览器、网页和移动设备同时登录。每个登录会话使用独立 Token；普通退出只注销当前 Token，修改密码或找回密码注销该账号全部 Token。过期会话在该用户下次登录时清理，任何日志都不得输出原始 Token。
 
+用户会话使用 `USER` audience，员工使用独立员工表和 `OPS` 会话、TOTP 与服务端登录限流。员工没有租户用户 ID，用户令牌不能用于运营接口，运营令牌不能用于用户私有内容接口；服务间身份仅在受保护的内部请求中生效。首次员工初始化是本地一次性操作，不根据“第一位用户”或旧管理员身份自动授予权限，详见[平台服务与运营隔离](platform-service-and-operations.md)。
+
 ## 3. 授权
 
 - Java CRUD 必须使用实体实际的 `workspace_id`、`agent_id` 或 `device_id` 验证资源所有权。
@@ -52,6 +54,8 @@ flowchart LR
 - `/config/**` 即使通过共享服务密钥，也必须按设备绑定和智能体归属限制返回数据。
 - Controller 的权限注解、Shiro 路由和应用服务的资源校验承担不同职责，不能互相替代。
 - MEMBER 等只读角色的写限制必须在服务端执行，前端隐藏按钮只改善交互。
+- 无超级管理员、通配角色或员工跨租户内容旁路；岗位以固定权限目录和范围授权。官方资源维护权不能从“属于某管理员的团队”继承。
+- 运营端不能返回用户密码或创建冒用用户的会话；员工治理、公共资源维护、平台额度与供应商财务分别授权。
 
 ## 4. 密钥与日志
 
@@ -59,7 +63,7 @@ flowchart LR
 - 禁止把 API Key 放入 URL query；使用 Header 或请求体中的受保护字段。
 - 日志不得输出 Authorization、Bearer Token、API Key、access token、secret/private key 或完整私有配置。
 - 可记录 `tokenPresent`、凭据类型、脱敏尾号、错误分类和请求关联 ID。
-- Redis 不应长期缓存完整明文模型密钥；需要缓存时使用最短生命周期和最小字段集。
+- 公共模型目录和 Redis 配置不包含用户原始供应商凭据。密钥由每次受限执行许可在可信服务内解析，不进入客户端、日志或补传队列。
 
 ## 5. 输入与外联
 

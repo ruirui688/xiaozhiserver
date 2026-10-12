@@ -753,9 +753,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         }
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
         String endpoint = buildChatCompletionsUrl(llmBaseUrl);
-        ResponseEntity<String> response = usageMeter == null
-                ? llmRestTemplate.exchange(endpoint, HttpMethod.POST, entity, String.class)
-                : usageMeter.exchange(llmRestTemplate, endpoint, entity, String.class, llmModelId, "LLM");
+        ResponseEntity<String> response = usageMeter.exchange(llmRestTemplate, endpoint, entity, String.class, llmModelId, "LLM");
         if (!response.getStatusCode().is2xxSuccessful()) {
             throw new RenException("模型接口返回状态码: " + response.getStatusCode());
         }

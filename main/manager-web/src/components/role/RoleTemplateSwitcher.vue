@@ -46,12 +46,6 @@
         应用
       </el-button>
       <el-button
-        v-if="selectedTemplate && selectedTemplate.submittable"
-        type="text"
-        icon="el-icon-upload2"
-        @click="$emit('submit-review', selectedTemplate)"
-      >提交中心审核</el-button>
-      <el-button
         v-if="selectedTemplate && selectedTemplate.scope === 'WORKSPACE' && isOfficialMaintainer"
         type="text"
         icon="el-icon-medal"
@@ -92,7 +86,7 @@ export default {
       return this.templates.find((template) => template.id === this.selectedTemplateId) || null;
     },
     isOfficialMaintainer() {
-      return this.templates.some((template) => template.officialMaintainer);
+      return false; // Official publication is available only in the separate operations console.
     },
   },
   watch: {

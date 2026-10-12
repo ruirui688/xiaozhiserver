@@ -23,14 +23,17 @@ import xiaozhi.common.exception.RenException;
 import xiaozhi.common.page.PageData;
 import xiaozhi.common.service.impl.BaseServiceImpl;
 import xiaozhi.common.utils.ConvertUtils;
+import xiaozhi.common.utils.SpringContextUtils;
 import xiaozhi.modules.device.service.DeviceService;
+import xiaozhi.modules.platform.service.PlatformAccountService;
+import xiaozhi.modules.platform.service.PlatformTrialGrantService;
 import xiaozhi.modules.security.password.PasswordUtils;
 import xiaozhi.modules.sys.dao.SysUserDao;
 import xiaozhi.modules.sys.dto.AdminPageUserDTO;
 import xiaozhi.modules.sys.dto.PasswordDTO;
 import xiaozhi.modules.sys.dto.SysUserDTO;
 import xiaozhi.modules.sys.entity.SysUserEntity;
-import xiaozhi.modules.sys.enums.SuperAdminEnum;
+
 import xiaozhi.modules.sys.service.SysParamsService;
 import xiaozhi.modules.sys.service.SysUserService;
 import xiaozhi.modules.sys.vo.AdminPageUserVO;
@@ -89,9 +92,10 @@ public class SysUserServiceImpl extends BaseServiceImpl<SysUserDao, SysUserEntit
         entity.setPassword(PasswordUtils.encode(UUID.randomUUID() + "Aa1!"));
         entity.setWxOpenid(wxOpenid);
         entity.setWxUnionid(wxUnionid);
-        entity.setSuperAdmin(SuperAdminEnum.NO.value());
+
         entity.setStatus(1);
         insert(entity);
+        provisionPlatformAccount(entity.getId());
         return ConvertUtils.sourceToTarget(entity, SysUserDTO.class);
     }
 
@@ -135,16 +139,23 @@ public class SysUserServiceImpl extends BaseServiceImpl<SysUserDao, SysUserEntit
         String password = PasswordUtils.encode(entity.getPassword());
         entity.setPassword(password);
 
-        // 保存用户
-        Long userCount = getUserCount();
-        if (userCount == 0) {
-            entity.setSuperAdmin(SuperAdminEnum.YES.value());
-        } else {
-            entity.setSuperAdmin(SuperAdminEnum.NO.value());
-        }
         entity.setStatus(1);
 
         insert(entity);
+        provisionPlatformAccount(entity.getId());
+    }
+
+    /**
+     * Every registration path provisions the platform allowance account, its hosted
+     * credential slots and the one-time registration trial. The trial is best-effort:
+     * a deployment without issuance-pool credit must still complete registration.
+     */
+    private void provisionPlatformAccount(Long userId) {
+        if (userId == null) {
+            return;
+        }
+        SpringContextUtils.getBean(PlatformAccountService.class).ensureUser(userId);
+        SpringContextUtils.getBean(PlatformTrialGrantService.class).issue(userId);
     }
 
     @Override
@@ -197,9 +208,7 @@ public class SysUserServiceImpl extends BaseServiceImpl<SysUserDao, SysUserEntit
     @Override
     @Transactional(rollbackFor = Exception.class)
     public String resetPassword(Long userId) {
-        String password = generatePassword();
-        changePasswordDirectly(userId, password);
-        return password;
+        throw new RenException("密码仅可由用户本人通过已验证渠道恢复");
     }
 
     private Long getUserCount() {
@@ -289,13 +298,6 @@ public class SysUserServiceImpl extends BaseServiceImpl<SysUserDao, SysUserEntit
     @Override
     public boolean getAllowUserRegister() {
         String allowUserRegister = sysParamsService.getValue(Constant.SERVER_ALLOW_USER_REGISTER, true);
-        if (allowUserRegister.equals("true")) {
-            return true;
-        }
-        Long userCount = baseDao.selectCount(new QueryWrapper<SysUserEntity>());
-        if (userCount == 0) {
-            return true;
-        }
-        return false;
+        return "true".equals(allowUserRegister);
     }
 }

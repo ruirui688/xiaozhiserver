@@ -56,11 +56,25 @@ xiaozhi:
       speech-project: ${XIAOZHI_BILLING_VOLCENGINE_SPEECH_PROJECT:}
       speech-resource-ids: ${XIAOZHI_BILLING_VOLCENGINE_SPEECH_RESOURCE_IDS:}
     deepseek:
-      model-id: ${XIAOZHI_BILLING_DEEPSEEK_MODEL_ID:}
+      api-key: ${XIAOZHI_BILLING_DEEPSEEK_API_KEY:}
       account-ref: ${XIAOZHI_BILLING_DEEPSEEK_ACCOUNT_REF:}
   security:
+    # 一次性本地员工初始化文件；默认不启用，无网络 bootstrap 入口。
+    ops-bootstrap-file: ${XIAOZHI_SECURITY_OPS_BOOTSTRAP_FILE:}
     # 用于加密智能体级第三方凭据。生产安装脚本会生成并持久化该值。
     credential-encryption-key: ${XIAOZHI_CREDENTIAL_ENCRYPTION_KEY:}
+  platform:
+    # 生产 Compose 固定到 /uploadfile 持久卷；本地源码运行沿用工作目录。
+    outbox-root: ${XIAOZHI_PLATFORM_OUTBOX_ROOT:uploadfile/platform-settlements}
+    # 注册试用额度：默认关闭。开启前必须先让发放池有余额，否则新用户停在未发放。
+    # 改金额即改政策版本；同一用户在任何政策版本下只发放一次。
+    # 0 表示不限制试用用户总数；大于 0 时按已发放用户数封顶。
+    trial-enabled: ${XIAOZHI_PLATFORM_TRIAL_ENABLED:false}
+    trial-amount: ${XIAOZHI_PLATFORM_TRIAL_AMOUNT:0}
+    trial-policy: ${XIAOZHI_PLATFORM_TRIAL_POLICY:trial-v1}
+    trial-max-users: ${XIAOZHI_PLATFORM_TRIAL_MAX_USERS:0}
+    # 托管密钥库存告警阈值；0 表示不告警。低于阈值时凭据页提示补 Key。
+    credential-min-inventory: ${XIAOZHI_PLATFORM_CREDENTIAL_MIN_INVENTORY:0}
   server:
     # manager-api 调用 xiaozhi-server HTTP/OTA 服务的内部地址。
     # 本机源码开发默认用 127.0.0.1；Docker/多机部署请用环境变量覆盖：

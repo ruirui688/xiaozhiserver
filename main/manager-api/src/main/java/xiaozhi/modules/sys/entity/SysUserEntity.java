@@ -34,10 +34,6 @@ public class SysUserEntity extends BaseEntity {
      */
     private String wxUnionid;
     /**
-     * 超级管理员 0：否 1：是
-     */
-    private Integer superAdmin;
-    /**
      * 状态 0：停用 1：正常
      */
     private Integer status;
