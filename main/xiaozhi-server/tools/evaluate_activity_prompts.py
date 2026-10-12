@@ -60,13 +60,10 @@ def messages_for(profile, history, enhanced):
     messages = [{"role": "system", "content": "你是中文语音助手小智，请根据对话自然回答用户。"}]
     if enhanced:
         manager = GameSessionManager()
-        # Replay identical user inputs through the real prompt selection path.
-        prompt = None
-        for role, content in history:
-            if role == "user":
-                prompt = manager.build_freeform_game_prompt(content, default_configs())
-        if not prompt or manager.active_freeform_game != profile:
-            raise ValueError("case did not activate its expected prompt")
+        # This evaluates an explicitly selected profile, not activity routing.
+        prompt = manager.build_freeform_game_prompt(None, default_configs(), active_name=profile)
+        if not prompt or f'<active_interaction name="{profile}">' not in prompt:
+            raise ValueError("expected activity rules are unavailable or over prompt budget")
     else:
         prompt = None
     messages.extend({"role": role, "content": content} for role, content in history)

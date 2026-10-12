@@ -444,6 +444,9 @@ def test_function_call_completion_is_deduplicated():
         def __init__(self):
             self.calls = 0
 
+        def has_tool(self, name):
+            return name in {"tool", "other_tool"}
+
         async def handle_llm_function_call(self, _conn, _call):
             self.calls += 1
             return SimpleNamespace(action=None, result="ok", response=None)
@@ -467,6 +470,12 @@ def test_function_call_completion_is_deduplicated():
         session._tool_followup_pending = False
         session._cancel_generation = 0
         session._response_active = True
+        session._tool_task = None
+        session._closed = False
+        from core.session.realtime_tools import RealtimeToolPolicy
+        session._tool_policy = RealtimeToolPolicy(conn)
+        from unittest.mock import AsyncMock
+        session.refresh_tools = AsyncMock()
         payload = {
             "type": "response.function_call_arguments.done",
             "call_id": "call-1",
@@ -485,6 +494,7 @@ def test_function_call_completion_is_deduplicated():
                 "response": {"output": [{"type": "function_call"}]},
             }
         )
+        await session._tool_task
         assert handler.calls == 2
         assert [item["type"] for item in transport.sent] == [
             "conversation.item.create",
@@ -1042,6 +1052,8 @@ def test_transport_disconnect_clears_readiness_and_releases_active_turn():
         session.conn = conn
         session._response_active = True
         session.response_done = asyncio.Event()
+        session._cancel_generation = 0
+        session.function_calls = {}
         finished = []
 
         async def finish_response(self, reason=None):

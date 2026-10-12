@@ -22,19 +22,32 @@ def test_legacy_intent_handler_does_not_directly_dispatch_music():
     assert '"name": "play_music"' not in source
 
 
-def test_music_library_context_is_visible_to_llm_without_pre_dispatch():
-    connection_source = (SERVER_ROOT / "core/connection.py").read_text(encoding="utf-8")
-    plugin_source = (
-        SERVER_ROOT / "core/providers/tools/server_plugins/plugin_executor.py"
-    ).read_text(encoding="utf-8")
+def test_music_library_context_is_visible_to_llm_without_pre_dispatch(monkeypatch):
+    from core.session.prompt_context import with_music_library
 
-    assert "_with_music_library_context" in connection_source
-    assert "<music_library>" in connection_source
-    assert "不要调用 play_music" in connection_source
-    assert "list_music_prompt_entries" in connection_source
-    assert "_init_music_description" in plugin_source
-    assert "当前本地曲库" in plugin_source
-    assert "list_music_prompt_entries" in plugin_source
+    def unexpected_playback(*args, **kwargs):
+        raise AssertionError("介绍曲库不能直接执行播放")
+
+    monkeypatch.setattr(play_music, "play_music", unexpected_playback)
+    monkeypatch.setattr(play_music, "list_music_prompt_entries",
+                        lambda _conn, limit: ["晚风：轻音乐"])
+    conn = types.SimpleNamespace(func_handler=types.SimpleNamespace(
+        has_tool=lambda name: name == "play_music",
+    ))
+    original = [{"role": "user", "content": "你能播放哪些歌？"}]
+    enabled = with_music_library(conn, original, [{"function": {"name": "play_music"}}])
+    context = next(m["content"] for m in enabled if m["role"] == "system")
+    assert "<music_library>" in context and "晚风：轻音乐" in context
+    assert "用户询问曲库时直接依据曲目回答" in context
+    assert "仅当用户明确要求播放时才调用 play_music" in context
+    assert enabled[-1] == original[0] and len(original) == 1
+
+    disabled = with_music_library(conn, original, [])
+    context = next(m["content"] for m in disabled if m["role"] == "system")
+    assert "本次请求不允许播放操作" in context
+    assert "仅当用户明确要求播放时才调用 play_music" not in context
+    conn.func_handler.has_tool = lambda _name: False
+    assert with_music_library(conn, original, []) == original
 
 
 def test_music_metadata_aliases_match_local_song():

@@ -14,6 +14,7 @@ from core.handle.sendAudioHandle import (
 )
 from core.handle.reportHandle import enqueue_tool_report
 from core.utils.correct_words import apply_correct_words
+from core.providers.intent.intent_llm.routing import IntentRequestSnapshot
 from core.providers.tts.dto.dto import TTSMessageDTO, SentenceType
 
 TAG = __name__
@@ -53,15 +54,19 @@ async def handle_user_intent(
     conn: "ConnectionHandler", text, turn_context=None, turn_id=None
 ):
     text = apply_correct_words(conn, text)
+    original_text = text
     # 预处理输入文本，处理可能的JSON格式
     try:
         if text.strip().startswith("{") and text.strip().endswith("}"):
             parsed_data = json.loads(text)
             if isinstance(parsed_data, dict) and "content" in parsed_data:
-                text = parsed_data["content"]  # 提取content用于意图分析
+                text = str(parsed_data["content"] or "")  # 仅分类和游戏参数使用净文本
                 conn.current_speaker = parsed_data.get("speaker")  # 保留说话人信息
+                conn.current_speaker_id = parsed_data.get("speaker_id") or None
     except (json.JSONDecodeError, TypeError):
         pass
+
+    conn._intent_request_marker = object()
 
     active_game_tool = None
     requested_game_tool = None
@@ -85,7 +90,7 @@ async def handle_user_intent(
         return await process_intent_result(
             conn,
             intent_result,
-            text,
+            original_text,
             turn_context=turn_context,
             turn_id=turn_id,
         )
@@ -106,7 +111,7 @@ async def handle_user_intent(
         return await process_intent_result(
             conn,
             intent_result,
-            text,
+            original_text,
             turn_context=turn_context,
             turn_id=turn_id,
         )
@@ -115,7 +120,12 @@ async def handle_user_intent(
         # 使用支持function calling的聊天方法,不再进行意图分析
         return False
     # 使用LLM进行意图分析
+    request_snapshot = IntentRequestSnapshot.capture(conn)
     intent_result = await analyze_intent_with_llm(conn, text)
+    if not request_snapshot.is_current(conn):
+        # Classification now runs off the event loop. A cancelled/superseded
+        # request must not resume a tool or start a fresh main-model reply.
+        return True
     if not intent_result:
         return False
     # 会话开始时生成sentence_id
@@ -125,7 +135,7 @@ async def handle_user_intent(
     return await process_intent_result(
         conn,
         intent_result,
-        text,
+        original_text,
         turn_context=turn_context,
         turn_id=turn_id,
     )
@@ -140,10 +150,12 @@ async def analyze_intent_with_llm(conn: "ConnectionHandler", text):
     # 对话历史记录
     dialogue = conn.dialogue
     try:
-        intent_result = await conn.intent.detect_intent(conn, dialogue.dialogue, text)
+        snapshot = getattr(dialogue, "snapshot_for_memory", None)
+        history = snapshot() if callable(snapshot) else list(dialogue.dialogue)
+        intent_result = await conn.intent.detect_intent(conn, history, text)
         return intent_result
     except Exception as e:
-        conn.logger.bind(tag=TAG).error(f"意图识别失败: {str(e)}")
+        conn.logger.bind(tag=TAG).error(f"意图识别失败: errorType={type(e).__name__}")
 
     return None
 
@@ -167,56 +179,10 @@ async def process_intent_result(
                 f"检测到function_call格式的意图结果: {intent_data['function_call']['name']}"
             )
             function_name = intent_data["function_call"]["name"]
-            if function_name == "continue_chat":
+            if function_name in {"continue_chat", "result_for_context"}:
+                # Legacy classifiers may still return result_for_context. Let
+                # the normal main-model path use the complete current context.
                 return False
-
-            if function_name == "result_for_context":
-                reply_generation = await send_stt_message(conn, original_text)
-                conn.client_abort = False
-
-                def process_context_result():
-                    conn.dialogue.put(
-                        Message(
-                            role="user",
-                            content=original_text,
-                            turn_context=turn_context,
-                        )
-                    )
-
-                    from core.utils.current_time import get_current_time_info
-
-                    current_time, today_date, today_weekday, lunar_date = (
-                        get_current_time_info()
-                    )
-
-                    # 构建带上下文的基础提示
-                    context_prompt = f"""当前时间：{current_time}
-                                        今天日期：{today_date} ({today_weekday})
-                                        今天农历：{lunar_date}
-
-                                        请根据以上信息回答用户的问题：{original_text}"""
-
-                    response = conn.intent.replyResult(context_prompt, original_text)
-                    return speak_txt(conn, response)
-
-                try:
-                    future = conn.executor.submit(process_context_result)
-                except Exception:
-                    schedule_reply_termination(
-                        conn,
-                        "intent_submit_failed",
-                        generation=reply_generation,
-                    )
-                    return True
-                future.add_done_callback(
-                    lambda item: _finish_intent_task(
-                        conn,
-                        item,
-                        reply_generation,
-                        "intent_no_spoken_result",
-                    )
-                )
-                return True
 
             if not conn.func_handler or not conn.func_handler.has_tool(function_name):
                 conn.logger.bind(tag=TAG).warning(
@@ -239,7 +205,12 @@ async def process_intent_result(
                 "arguments": function_args,
             }
 
+            request_snapshot = IntentRequestSnapshot.capture(conn)
             reply_generation = await send_stt_message(conn, original_text)
+            if not request_snapshot.is_current(conn, check_reply=False):
+                return True
+            if getattr(conn, "reply_lifecycle", None) is not None and reply_generation is None:
+                return True
             conn.client_abort = False
 
             # 准备工具调用参数
@@ -255,9 +226,20 @@ async def process_intent_result(
 
             # 使用executor执行函数调用和结果处理
             tool_abort_generation = conn.abort_generation
+            tool_snapshot = IntentRequestSnapshot.capture(conn)
+            tool_handler = conn.func_handler
+            tool_dialogue = conn.dialogue
+            tool_call_timeout = int(conn.config.get("tool_call_timeout", 30))
+
+            async def execute_current_tool():
+                if not tool_snapshot.is_current(conn):
+                    return None
+                return await tool_handler.handle_llm_function_call(conn, function_call_data)
 
             def process_function_call():
-                conn.dialogue.put(
+                if not tool_snapshot.is_current(conn):
+                    return False
+                tool_dialogue.put(
                     Message(
                         role="user",
                         content=original_text,
@@ -265,21 +247,24 @@ async def process_intent_result(
                     )
                 )
                 
-                # 工具调用超时时间
-                tool_call_timeout = int(conn.config.get("tool_call_timeout", 30))
                 # 使用统一工具处理器处理所有工具调用
                 try:
                     result = asyncio.run_coroutine_threadsafe(
-                        conn.func_handler.handle_llm_function_call(
-                            conn, function_call_data
-                        ),
+                        execute_current_tool(),
                         conn.loop,
                     ).result(timeout=tool_call_timeout)
                 except Exception as e:
-                    conn.logger.bind(tag=TAG).error(f"工具调用失败: {e}")
+                    conn.logger.bind(tag=TAG).error(f"工具调用失败: errorType={type(e).__name__}")
                     result = ActionResponse(
                         action=Action.ERROR, result="工具调用超时，请一会再试下哈", response="工具调用超时，请一会再试下哈"
                     )
+
+                # The context-reset tool intentionally clears the current speaker;
+                # its acknowledgement still belongs to the unchanged reply/session.
+                if not tool_snapshot.is_current(
+                    conn, check_speaker=function_name != "reset_conversation_context"
+                ):
+                    return False
 
                 # 上报工具调用结果
                 spoken = function_name == "play_music"

@@ -8,12 +8,12 @@
     <div class="card-topline">
       <div class="plugin-type">
         <span :class="['type-badge', { 'type-badge--interaction': interaction }]">
-          {{ interaction ? "互动" : "工具" }}
+          {{ retired ? "已退役" : (interaction ? "活动" : "工具") }}
         </span>
         <span>{{ category }}</span>
       </div>
       <span :class="['config-badge', { 'config-badge--ready': configurable && configured }]">
-        {{ configurable ? (configured ? "密钥已配置" : "待配置密钥") : configText }}
+        {{ retired ? "不可启用" : (configurable ? (configured ? "密钥已配置" : "待配置密钥") : configText) }}
       </span>
     </div>
 
@@ -29,12 +29,12 @@
 
     <p class="description">{{ description }}</p>
     <div class="example">
-      <span>用户可以说</span>
-      <strong>“{{ example }}”</strong>
+      <span>注入阶段</span>
+      <strong :title="injection">{{ injection }}</strong>
     </div>
 
     <div class="card-actions" @click.stop>
-      <template v-if="configurable">
+      <template v-if="configurable && !retired">
         <el-button size="mini" type="primary" plain @click="$emit('configure', plugin)">
           配置
         </el-button>
@@ -49,13 +49,13 @@
         查看说明
       </el-button>
       <el-button
-        v-if="canManage"
+        v-if="canManage && !retired"
         size="mini"
         type="primary"
         plain
         @click="$emit('edit-prompt', plugin)"
-      >编辑提示词</el-button>
-      <template v-if="interaction && canManage">
+      >编辑调用说明</el-button>
+      <template v-if="interaction && canManage && !retired">
         <el-button size="mini" @click="$emit('edit', plugin)">编辑玩法</el-button>
         <el-dropdown trigger="click" @command="$emit('command', plugin, $event)">
           <el-button size="mini">更多 <i class="el-icon-arrow-down" /></el-button>
@@ -76,11 +76,12 @@ export default {
     plugin: { type: Object, required: true },
     layout: { type: String, default: "grid" },
     interaction: { type: Boolean, default: false },
+    retired: { type: Boolean, default: false },
     canManage: { type: Boolean, default: false },
     category: { type: String, default: "工具能力" },
     categoryKey: { type: String, default: "tool" },
     description: { type: String, default: "" },
-    example: { type: String, default: "" },
+    injection: { type: String, default: "未声明" },
     configText: { type: String, default: "角色中启用" },
     configurable: { type: Boolean, default: false },
     configured: { type: Boolean, default: false },

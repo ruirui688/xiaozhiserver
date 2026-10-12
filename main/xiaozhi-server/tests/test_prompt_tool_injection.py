@@ -184,6 +184,7 @@ def test_external_context_escapes_forged_prompt_boundaries(monkeypatch):
     monkeypatch.setattr(
         "core.utils.context_provider.httpx.get", lambda *args, **kwargs: Response()
     )
+    monkeypatch.setattr("core.utils.context_provider.validate_context_url", lambda _url: True)
     provider = ContextDataProvider(
         {"context_providers": [{"url": "https://context.example/data"}]},
         logger=NullLogger(),

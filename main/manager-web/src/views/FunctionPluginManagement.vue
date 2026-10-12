@@ -6,20 +6,24 @@
     <main class="plugin-page">
       <section class="page-hero">
         <div class="page-heading">
-          <p class="page-subtitle">查看并维护发送给大模型的全部服务器工具、功能插件和互动玩法提示词。</p>
+          <p class="page-subtitle">维护静态工具与活动目录。目录条目不等于某个智能体本轮实际可用的工具。</p>
         </div>
-        <div class="hero-stats" aria-label="能力统计">
+        <div class="hero-stats" aria-label="目录条目统计">
           <div class="stat-item">
             <strong>{{ pluginCounts.all }}</strong>
-            <span>全部能力</span>
+            <span>目录总数</span>
           </div>
           <div class="stat-item">
             <strong>{{ pluginCounts.builtin }}</strong>
-            <span>系统能力</span>
+            <span>工具条目</span>
           </div>
           <div class="stat-item">
             <strong>{{ pluginCounts.interaction }}</strong>
-            <span>互动玩法</span>
+            <span>活动条目</span>
+          </div>
+          <div class="stat-item">
+            <strong>{{ pluginCounts.retired }}</strong>
+            <span>已退役</span>
           </div>
         </div>
         <div class="hero-actions">
@@ -40,20 +44,20 @@
           <el-input
             v-model="searchName"
             prefix-icon="el-icon-search"
-            placeholder="搜索名称、编码或用户说法"
+            placeholder="搜索名称、编码或调用说明"
             clearable
             class="search-input"
             @keyup.enter.native="handleSearch"
           />
 
           <div class="filter-section">
-            <div class="filter-title">能力类型</div>
+            <div class="filter-title">目录类型</div>
             <button
               type="button"
               :class="['filter-item', { active: activeType === 'all' }]"
               @click="setActiveType('all')"
             >
-              <span><i class="el-icon-menu" />全部能力</span>
+              <span><i class="el-icon-menu" />全部目录条目</span>
               <strong>{{ pluginCounts.all }}</strong>
             </button>
             <button
@@ -61,7 +65,7 @@
               :class="['filter-item', { active: activeType === 'builtin' }]"
               @click="setActiveType('builtin')"
             >
-              <span><i class="el-icon-cpu" />系统能力</span>
+              <span><i class="el-icon-cpu" />工具条目</span>
               <strong>{{ pluginCounts.builtin }}</strong>
             </button>
             <button
@@ -69,8 +73,11 @@
               :class="['filter-item', { active: activeType === 'interaction' }]"
               @click="setActiveType('interaction')"
             >
-              <span><i class="el-icon-chat-dot-round" />互动玩法</span>
+              <span><i class="el-icon-chat-dot-round" />活动条目</span>
               <strong>{{ pluginCounts.interaction }}</strong>
+            </button>
+            <button type="button" :class="['filter-item', { active: activeType === 'retired' }]" @click="setActiveType('retired')">
+              <span>已退役</span><strong>{{ pluginCounts.retired }}</strong>
             </button>
           </div>
 
@@ -92,7 +99,7 @@
             <i class="el-icon-info" />
             <div>
               <strong>这里维护工具与插件目录</strong>
-              <span>每项能力会标明自己的启用入口；编辑提示词不会改变启用范围。</span>
+              <span>调用说明在目录统一维护；角色中选择能力、配置业务参数及玩法覆盖。</span>
             </div>
           </div>
         </aside>
@@ -101,7 +108,7 @@
           <div class="catalog-toolbar">
             <div>
               <h2>{{ currentFilterTitle }}</h2>
-              <p>找到 {{ visiblePlugins.length }} 项能力</p>
+              <p>找到 {{ visiblePlugins.length }} 条目录记录</p>
             </div>
             <div class="catalog-controls">
               <el-select v-model="sortMode" size="small" class="sort-select" aria-label="插件排序">
@@ -133,7 +140,7 @@
 
           <div class="catalog-note">
             <i class="el-icon-warning-outline" />
-            需要共享凭据的系统能力可在这里配置和测试；启用范围及角色参数仍在角色配置中管理。
+            此页不包含设备、MCP 或当前会话动态生成的完整工具列表。支持范围为静态声明，实际可用性由模型协议、角色配置与会话状态决定。
           </div>
 
           <el-empty v-if="!loading && visiblePlugins.length === 0" description="没有找到匹配的能力" />
@@ -147,14 +154,15 @@
               :key="plugin.id"
               :plugin="plugin"
               :layout="viewMode"
-              :interaction="isDeclarativeInteractionPlugin(plugin.fieldsMeta)"
-              :can-manage="canManagePlugins"
+              :interaction="isInteractionPlugin(plugin)"
+              :retired="isRetiredPlugin(plugin)"
+              :can-manage="canEditPlugin(plugin)"
               :category="getFunctionCategory(plugin)"
               :category-key="getCategoryMeta(plugin).key"
               :description="getPluginDescription(plugin)"
-              :example="getExampleUtterance(plugin)"
+              :injection="pluginInjection(plugin)"
               :config-text="getConfigText(plugin)"
-              :configurable="isSharedConfigPlugin(plugin)"
+              :configurable="isSharedConfigPlugin(plugin) && !isRetiredPlugin(plugin)"
               :configured="sharedConfigConfigured(plugin.providerCode)"
               :testing="Boolean(pluginTesting[plugin.providerCode])"
               @detail="openDetailDialog"
@@ -181,25 +189,7 @@
       @closed="resetForm"
     >
       <el-form ref="pluginForm" :model="pluginForm" :rules="rules" label-width="110px">
-        <el-form-item v-if="!editingId" label="玩法类型">
-          <el-radio-group v-model="selectedPresetCode" size="small" @change="applyInteractionPreset">
-            <el-radio-button label="blank">自定义</el-radio-button>
-            <el-radio-button
-              v-for="template in interactionPresets"
-              :key="template.providerCode"
-              :label="template.providerCode"
-            >
-              {{ template.name }}
-            </el-radio-button>
-          </el-radio-group>
-        </el-form-item>
-
-        <div v-if="editingId && getMatchingPreset(pluginForm.providerCode)" class="rule-upgrade">
-          <span>推荐规则包含玩法流程、判断标准、主持技巧和异常处理，可让小智更懂怎么玩。</span>
-          <el-button size="mini" type="primary" plain @click="applyRecommendedRules">
-            套用推荐规则
-          </el-button>
-        </div>
+        <el-alert type="info" :closable="false" title="这里维护目录规则。角色默认继承；已有角色自定义内容保持不变。需要参考现有玩法时，可从目录复制。" />
 
         <div class="form-row">
           <el-form-item label="玩法名称" prop="name">
@@ -210,16 +200,16 @@
           </el-form-item>
         </div>
 
-        <el-form-item label="用户会怎么说" prop="description">
+        <el-form-item label="调用说明" prop="description">
           <el-input
             v-model="pluginForm.description"
             type="textarea"
             :rows="3"
-            placeholder="例如：当用户说“玩成语接龙”“来个接龙”时触发"
+            placeholder="说明用户表达什么意图时适合启动，以及哪些情况不应启动"
           />
         </el-form-item>
 
-        <el-form-item label="智能体怎么玩" prop="instructions">
+        <el-form-item label="玩法规则" prop="instructions">
           <el-input
             v-model="pluginForm.instructions"
             type="textarea"
@@ -228,7 +218,7 @@
           />
         </el-form-item>
 
-        <el-form-item label="开始时怎么说">
+        <el-form-item label="开场要求">
           <el-input
             v-model="pluginForm.openingMessage"
             type="textarea"
@@ -246,13 +236,9 @@
                 placeholder="例如：idiom_chain"
               />
             </el-form-item>
-            <el-form-item label="高级参数">
-              <el-input
-                v-model="pluginForm.parametersSchemaText"
-                type="textarea"
-                :rows="8"
-                placeholder="请输入合法 JSON；通常保持默认即可"
-              />
+            <el-form-item v-if="legacyParametersSchema" label="历史参数">
+              <pre class="catalog-rule-text">{{ legacyParametersSchema }}</pre>
+              <p>只读保留以兼容历史配置；活动启动使用固定参数，不受此字段影响。</p>
             </el-form-item>
           </el-collapse-item>
         </el-collapse>
@@ -276,24 +262,32 @@
         <el-descriptions :column="1" border>
           <el-descriptions-item label="分类">{{ getFunctionCategory(currentPlugin) }}</el-descriptions-item>
           <el-descriptions-item label="类型">
-            {{ isDeclarativeInteractionPlugin(currentPlugin.fieldsMeta) ? "互动玩法" : "系统能力" }}
+            {{ isRetiredPlugin(currentPlugin) ? "已退役" : (isInteractionPlugin(currentPlugin) ? "活动" : "工具") }}
           </el-descriptions-item>
-          <el-descriptions-item label="用户会怎么说">{{ getExampleUtterance(currentPlugin) }}</el-descriptions-item>
-          <el-descriptions-item label="大模型工具提示词">{{ getPluginDescription(currentPlugin) }}</el-descriptions-item>
+          <el-descriptions-item label="调用说明">{{ getPluginDescription(currentPlugin) }}</el-descriptions-item>
           <el-descriptions-item label="工具来源">{{ getToolSourceLabel(currentPlugin) }}</el-descriptions-item>
           <el-descriptions-item label="如何启用">
             {{ getActivationHint(currentPlugin) }}
           </el-descriptions-item>
+          <el-descriptions-item label="注入阶段">{{ pluginInjection(currentPlugin) }}</el-descriptions-item>
+          <el-descriptions-item label="支持路径（声明）">{{ pluginModelPaths(currentPlugin) }}</el-descriptions-item>
+          <el-descriptions-item v-if="isInteractionPlugin(currentPlugin)" label="目录玩法规则">
+            <div class="catalog-rule-text">{{ pluginDefault(currentPlugin, 'instructions') || '目录未填写' }}</div>
+          </el-descriptions-item>
+          <el-descriptions-item v-if="isInteractionPlugin(currentPlugin)" label="目录开场要求">
+            {{ pluginDefault(currentPlugin, 'opening_message') || '目录未填写' }}
+          </el-descriptions-item>
         </el-descriptions>
+        <p class="catalog-note">这是目录定义，不是当前模型请求预览。继承目录的角色会使用目录规则，显式自定义的角色继续使用自己的规则。</p>
       </div>
       <div slot="footer" class="dialog-footer">
-        <el-button v-if="canManagePlugins && currentPlugin" @click="openPromptDialog(currentPlugin)">编辑提示词</el-button>
+        <el-button v-if="currentPlugin && canEditPlugin(currentPlugin)" @click="openPromptDialog(currentPlugin)">编辑调用说明</el-button>
         <el-button type="primary" @click="detailDialogVisible = false">知道了</el-button>
       </div>
     </el-dialog>
 
     <el-dialog
-      title="编辑大模型工具提示词"
+      title="编辑工具调用说明"
       :visible.sync="promptDialogVisible"
       width="720px"
       :close-on-click-modal="false"
@@ -305,7 +299,7 @@
         <el-form-item label="工具编码">
           <el-input :value="promptForm.providerCode" disabled />
         </el-form-item>
-        <el-form-item label="工具提示词" required>
+        <el-form-item label="调用说明" required>
           <el-input
             v-model="promptForm.description"
             type="textarea"
@@ -319,12 +313,12 @@
           type="warning"
           :closable="false"
           show-icon
-          title="保存后会覆盖发送给大模型的工具 description，并通知在线智能体刷新；不会改变工具权限、参数 Schema 或启用范围。"
+          title="这是工具调用前的说明，统一在目录维护。保存后在安全轮次刷新；不会修改玩法规则、参数或启用范围。"
         />
       </el-form>
       <div slot="footer" class="dialog-footer">
         <el-button @click="promptDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="promptSaving" @click="saveToolPrompt">保存提示词</el-button>
+        <el-button type="primary" :loading="promptSaving" @click="saveToolPrompt">保存调用说明</el-button>
       </div>
     </el-dialog>
 
@@ -348,23 +342,10 @@ import VersionFooter from "@/components/VersionFooter.vue";
 import ResourceCenterNav from "@/components/resource/ResourceCenterNav.vue";
 import PluginResourceCard from "@/components/resource/PluginResourceCard.vue";
 import UserPluginConfigDialog from "@/components/UserPluginConfigDialog.vue";
+import { catalogCounts, isInteractionPlugin, isRetiredPlugin, pluginActivation,
+  pluginDefault, pluginFields, pluginInjection, pluginModelPaths } from "@/utils/pluginCatalog";
 
 const SHARED_CONFIG_PROVIDERS = new Set(["get_weather", "web_search"]);
-
-const DEFAULT_PARAMETERS_SCHEMA = {
-  type: "object",
-  properties: {
-    user_message: {
-      type: "string",
-      description: "用户当前触发这个功能插件时说的话"
-    },
-    context: {
-      type: "string",
-      description: "可选的对话上下文或额外提示"
-    }
-  },
-  required: ["user_message"]
-};
 
 export default {
   name: "FunctionPluginManagement",
@@ -403,98 +384,8 @@ export default {
       sharedConfigStatuses: {},
       pluginTesting: {},
       editingId: "",
-      selectedPresetCode: "blank",
       activeAdvancedPanels: [],
       pluginForm: this.createEmptyForm(),
-      interactionPresets: [
-        {
-          name: "讲段子",
-          providerCode: "tell_joke",
-          sort: 90,
-          examples: "讲个笑话、来个段子、逗我开心一下",
-          description: "当用户想听笑话、段子、冷笑话，或想轻松一下时调用。",
-          openingMessage: "给你来一个短一点、好懂一点的。",
-          instructions: [
-            "你是一个会控场的语音段子手，目标是让用户轻松一笑，而不是机械背笑话。",
-            "玩法流程：先判断用户要的是冷笑话、生活段子、谐音梗、职场/校园轻松梗，用户没有指定类型时优先讲短段子。",
-            "内容要求：每次只讲 1 个段子；铺垫控制在 2 到 4 句；最后必须有明确包袱；适合语音播报，不使用复杂排版和长列表。",
-            "主持技巧：如果用户刚刚表达了疲惫、无聊、尴尬或想开心一下，要先接住情绪，再讲段子；讲完后可以问“还要不要换个冷一点的”。",
-            "边界规则：避免低俗、歧视、攻击、血腥、政治敏感和冒犯现实个人；不拿用户本人开恶意玩笑。",
-            "失败处理：如果一时没有合适段子，就用轻松自嘲过渡，然后换一个更简单的生活梗。",
-            "互动延续：用户说“不好笑”“再来一个”“换个类型”时，要根据反馈调整类型，不要重复同一个段子。"
-          ].join("\\n")
-        },
-        {
-          name: "热梗",
-          providerCode: "hot_meme",
-          sort: 91,
-          examples: "这个梗什么意思、接个热梗、最近有什么梗",
-          description: "当用户询问网络热梗、流行语含义，或希望小智接梗、玩梗时调用。",
-          openingMessage: "这个我按人话给你讲，不整太学术。",
-          instructions: [
-            "你是热梗解释和接话助手，目标是让用户听懂梗、用对梗，并在聊天里自然接住梗。",
-            "玩法流程：先判断用户是在问含义、问出处、要接话、还是要生成一句玩梗回复；不同目的用不同回答方式。",
-            "解释规则：解释时按“这个梗大概是什么意思 -> 常见使用场景 -> 情绪色彩 -> 举一个短例子”的顺序回答。",
-            "接话规则：如果用户是在聊天中抛梗，不要长篇解释，优先用一句自然、轻松、不过度网络化的话接住。",
-            "不确定处理：遇到可能过时、地域性强或你不确定的梗，要明确说“我不一定百分百准确”，再给最可能的解释。",
-            "安全边界：不要传播恶意网暴、歧视、低俗羞辱或人身攻击类梗；遇到这类梗时，改成中性解释或提醒不建议这样用。",
-            "互动技巧：解释完可以问用户“你是想知道意思，还是想让我帮你回一句”。"
-          ].join("\\n")
-        },
-        {
-          name: "成语接龙",
-          providerCode: "idiom_chain",
-          sort: 92,
-          examples: "玩成语接龙、来一局成语接龙",
-          description: "当用户想玩成语接龙时调用。",
-          openingMessage: "来玩成语接龙。我先出一个常见的，你接最后一个字。",
-          instructions: [
-            "你是成语接龙主持人，要负责出题、判定、提示、控节奏，让用户觉得小智真的懂规则。",
-            "基础规则：每轮只处理一个成语；用户回答应尽量是常见四字成语；用户成语的第一个字应接上上一轮成语的最后一个字；默认按字面首字判定，不主动扩展同音字接龙。",
-            "发起流程：如果用户刚开始游戏，你先说明一句规则，然后给出一个常见、容易接的成语，不要选太生僻的开局；已用过的成语不能重复计分。",
-            "判定流程：用户回答后先判断是不是成语，再判断是否接上最后一个字；接上了就简短肯定，然后立刻给出你的下一个成语。",
-            "提示技巧：用户接不上、答错或沉默时，先给 1 个提示，比如“可以想一个以心开头的成语”；再错时给一个可接答案，并继续游戏。",
-            "难度控制：优先选择常见、好接、适合语音的成语，不要为了显得聪明使用冷僻词。",
-            "结束规则：用户说不玩了、换个游戏、结束时，要总结一句成绩，例如“你刚才接了 4 个，挺稳的”。",
-            "输出要求：语音场景下保持短句，不要一次解释太多典故；每轮只给必要判断和下一个成语。"
-          ].join("\\n")
-        },
-        {
-          name: "你说我猜",
-          providerCode: "guess_what_i_say",
-          sort: 93,
-          examples: "玩你说我猜、猜物游戏、我想好了你来猜",
-          description: "当用户想让小智通过连续提问来猜出用户心里想的词或物品时调用。",
-          openingMessage: "你先在心里想一个物品，不用告诉我。想好了就说一声，我来问问题猜。",
-          instructions: [
-            "你是二十问式猜词游戏玩家。用户心里想一个答案，小智主动通过连续提问缩小范围，最后猜出答案。",
-            "开局流程：用户刚开始游戏时，让用户先在心里想一个物品、人物、动物、地点或常见概念，不要说出答案；用户说“想好了”“开始”“来”后，直接问第一个是/否问题。",
-            "提问规则：每轮只问一个能用“对、不是、不确定”回答的问题；不要同时抛多个问题；不要让用户描述第一句提示；禁止问“答案是什么”“你心里想的是什么”“目标词是什么”。",
-            "推理策略：先问大类，再问是否人造、是否用电、尺寸、使用场景、主要功能、是否便携、是否有屏幕、是否通信等区分性问题；每次都吸收用户上一轮回答，形成累计线索。",
-            "猜测策略：线索足够时再明确猜一个答案；猜错后根据否定反馈继续提问，不要重复老答案；不确定时继续问更能区分候选的问题。",
-            "节奏规则：可以按第几个问题推进，但不要机械啰嗦；问题总数尽量控制在二十个以内，必要时可以提前猜。",
-            "边界规则：不猜真实个人隐私、敏感身份、攻击性称呼；如果题目不适合，建议换一个词。",
-            "结束规则：用户说不玩了、结束、退出时，简短结束，可以说下次再玩；不要继续追问。",
-            "输出要求：保持口语、短句、有互动感；每轮只推进一步，通常只输出一句问题或一个猜测。"
-          ].join("\\n")
-        },
-        {
-          name: "我想你猜",
-          providerCode: "xiaozhi_thinks_you_guess",
-          sort: 94,
-          examples: "你想一个词我来猜、你出题我猜、我来猜你想的词",
-          description: "当用户想让小智心里想一个词、由用户来猜时调用。",
-          openingMessage: "我想好了，是一个常见词。第一个提示来了，你来猜。",
-          instructions: [
-            "这是主模型自由主持的猜词游戏：你先在心里选定一个常见词，用户根据提示来猜。",
-            "每局必须一直围绕同一个答案推进，直到用户猜对、结束或重新开局；不要中途更换答案，也不要假装忘记。",
-            "玩法流程：开局先给出类别和第一个提示；用户猜错时记录猜测并给下一个提示；用户要提示时只给一个新提示；用户猜对后揭晓答案并询问是否再来一局。",
-            "禁止行为：不要提前说出答案；不要让用户直接看答案；不要中途换词；不要假装忘记自己想的词。",
-            "结束规则：用户说不玩了、结束、不猜了或换游戏时，结束当前局。",
-            "输出要求：每轮只说 1 到 2 句，适合语音播报。"
-          ].join("\\n")
-        }
-      ]
     };
   },
   created() {
@@ -502,6 +393,8 @@ export default {
     this.fetchSharedConfigStatuses();
   },
   methods: {
+    isInteractionPlugin, isRetiredPlugin, pluginDefault, pluginInjection, pluginModelPaths,
+    canEditPlugin(plugin) { return this.canManagePlugins && !isRetiredPlugin(plugin); },
     createEmptyForm() {
       return {
         name: "",
@@ -509,8 +402,7 @@ export default {
         sort: 90,
         description: "",
         instructions: "",
-        openingMessage: "",
-        parametersSchemaText: JSON.stringify(DEFAULT_PARAMETERS_SCHEMA, null, 2)
+        openingMessage: ""
       };
     },
     fetchPlugins() {
@@ -606,26 +498,7 @@ export default {
       this.activeType = type;
       this.handleTypeChange(type);
     },
-    parseFields(fields) {
-      if (Array.isArray(fields)) {
-        return fields;
-      }
-      try {
-        return JSON.parse(fields || "[]");
-      } catch (error) {
-        return [];
-      }
-    },
-    isDeclarativeInteractionPlugin(fields) {
-      const customField = fields.find((field) => field.key === "custom_plugin");
-      if (!customField) {
-        return false;
-      }
-      if (typeof customField.default === "boolean") {
-        return customField.default;
-      }
-      return String(customField.default).toLowerCase() === "true";
-    },
+    parseFields(fields) { return pluginFields({ fields }); },
     fieldBoolean(plugin, key) {
       const value = this.getFieldDefault(plugin.fieldsMeta || [], key, false);
       return value === true || String(value).toLowerCase() === "true";
@@ -645,48 +518,20 @@ export default {
       };
       return labels[source] || source;
     },
-    getActivationHint(plugin) {
-      const configuredHint = this.getFieldDefault(plugin.fieldsMeta || [], "activation_hint", "");
-      if (configuredHint) {
-        return configuredHint;
-      }
-      return this.isRuntimeBuiltin(plugin)
-        ? "连接建立后自动启用，无需角色勾选。"
-        : "进入角色配置，打开功能管理后勾选这个功能。";
-    },
+    getActivationHint(plugin) { return pluginActivation(plugin); },
     getFieldDefault(fields, key, fallback = "") {
       const field = fields.find((item) => item.key === key);
       return field && field.default !== undefined ? field.default : fallback;
     },
     getPluginDescription(plugin) {
-      const description = this.getFieldDefault(plugin.fieldsMeta, "description");
-      if (description) {
-        return description;
-      }
-      if (this.isDeclarativeInteractionPlugin(plugin.fieldsMeta)) {
-        return this.getFieldDefault(plugin.fieldsMeta, "instructions", "互动玩法，智能体按规则对话。");
-      }
-      const descriptions = {
-        get_weather: "查询指定城市天气，返回当前天气和预报信息。",
-        play_music: "从服务器音乐库选择歌曲并播放。",
-        meeting_minutes: "进入会议记录流程，结束后生成会议纪要。",
-        get_news: "获取新闻摘要，适合普通新闻查询。",
-        get_news_from_chinanews: "获取中新网新闻内容。",
-        get_news_from_newsnow: "获取 NewsNow 热点新闻和热榜内容。",
-        hass_get_state: "读取 Home Assistant 中设备或实体的当前状态。",
-        hass_set_state: "向 Home Assistant 下发设备状态修改指令。",
-        hass_play_music: "通过 Home Assistant 媒体播放器播放音乐。",
-        web_search: "联网搜索问题并把结果交给智能体整理回答。",
-        call_device: "通过通讯录呼叫另一个已绑定设备。"
-      };
-      return descriptions[plugin.providerCode] || "作为工具暴露给大模型，由模型按用户意图决定是否调用。";
+      return pluginDefault(plugin, "description") || "目录未填写调用说明";
     },
     getFunctionCategory(plugin) {
       return this.getCategoryMeta(plugin).label;
     },
     getCategoryMeta(plugin) {
       const code = plugin.providerCode || "";
-      if (this.isDeclarativeInteractionPlugin(plugin.fieldsMeta)) {
+      if (isInteractionPlugin(plugin)) {
         return { key: "chat", label: "聊天玩法" };
       }
       if (["direct_answer", "handle_exit_intent", "set_session_voice", "reset_conversation_context"].includes(code)) {
@@ -709,41 +554,13 @@ export default {
       }
       return { key: "tool", label: "工具能力" };
     },
-    getExampleUtterance(plugin) {
-      const preset = this.interactionPresets.find((item) => item.providerCode === plugin.providerCode);
-      if (preset) {
-        return preset.examples;
-      }
-      const examples = {
-        get_weather: "今天上海天气怎么样",
-        play_music: "播放一首歌",
-        meeting_minutes: "开始记录会议",
-        get_news: "今天有什么新闻",
-        get_news_from_chinanews: "看看中新网新闻",
-        get_news_from_newsnow: "看看今天热搜",
-        hass_get_state: "客厅灯现在开着吗",
-        hass_set_state: "把客厅灯打开",
-        hass_play_music: "用音箱播放音乐",
-        web_search: "帮我查一下这个问题",
-        call_device: "呼叫客厅设备",
-        direct_answer: "直接回答我的问题",
-        handle_exit_intent: "结束这次聊天",
-        set_session_voice: "把这次聊天的语速调慢一点",
-        reset_conversation_context: "忘掉我们刚才聊的，重新开始",
-        get_lunar: "查一下今天的农历",
-        feishu_assistant: "在飞书群里发一条消息",
-        search_from_local_knowledge: "从公司的知识库里查一下",
-        search_from_ragflow: "从我绑定的资料里查一下",
-        change_role: "切换成英语老师"
-      };
-      return examples[plugin.providerCode] || this.getPluginDescription(plugin);
-    },
     getConfigText(plugin) {
-      if (this.isDeclarativeInteractionPlugin(plugin.fieldsMeta)) {
+      if (isRetiredPlugin(plugin)) return "已退役 · 不可启用";
+      if (isInteractionPlugin(plugin)) {
         return "编写玩法规则";
       }
       if (this.isRuntimeBuiltin(plugin)) {
-        return "连接级内置";
+        return "运行时按条件提供";
       }
       if (this.fieldBoolean(plugin, "catalog_only")) {
         return "专用配置启用";
@@ -755,20 +572,22 @@ export default {
       this.detailDialogVisible = true;
     },
     openPromptDialog(row) {
+      if (!this.canEditPlugin(row)) return;
       this.currentPlugin = row;
       this.promptForm = {
         id: row.id,
         name: row.name,
         providerCode: row.providerCode,
-        description: this.getPluginDescription(row)
+        description: pluginDefault(row, "description")
       };
       this.detailDialogVisible = false;
       this.promptDialogVisible = true;
     },
     saveToolPrompt() {
+      if (!this.currentPlugin || !this.canEditPlugin(this.currentPlugin)) return;
       const description = String(this.promptForm.description || "").trim();
       if (!description) {
-        this.$message.error("大模型工具提示词不能为空");
+        this.$message.error("工具调用说明不能为空");
         return;
       }
       const source = this.currentPlugin;
@@ -777,7 +596,7 @@ export default {
       const promptField = {
         key: "description",
         type: "textarea",
-        label: "大模型工具提示词",
+        label: "工具调用说明",
         default: description,
         editing: false,
         selected: false
@@ -798,10 +617,10 @@ export default {
       }, ({ data }) => {
         this.promptSaving = false;
         if (!data || data.code !== 0) {
-          this.$message.error((data && data.msg) || "保存工具提示词失败");
+          this.$message.error((data && data.msg) || "保存调用说明失败");
           return;
         }
-        this.$message.success("工具提示词已保存，在线会话将在安全轮次刷新");
+        this.$message.success("调用说明已保存，在线会话将在安全轮次刷新");
         this.promptDialogVisible = false;
         this.fetchPlugins();
       });
@@ -814,65 +633,24 @@ export default {
         this.deletePlugin(row);
       }
     },
-    getMatchingPreset(providerCode) {
-      return this.interactionPresets.find((item) => item.providerCode === providerCode);
-    },
-    applyRecommendedRules() {
-      const preset = this.getMatchingPreset(this.pluginForm.providerCode);
-      if (!preset) {
-        return;
-      }
-      this.pluginForm = {
-        ...this.pluginForm,
-        description: preset.description,
-        instructions: preset.instructions,
-        openingMessage: preset.openingMessage,
-        parametersSchemaText: JSON.stringify(DEFAULT_PARAMETERS_SCHEMA, null, 2)
-      };
-      this.$message.success("已套用推荐规则，可继续按你的场景微调");
-    },
     openCreateDialog(source) {
+      if (!this.canManagePlugins || (source && isRetiredPlugin(source))) return;
       this.editingId = "";
-      if (source && source.fieldsMeta) {
-        this.selectedPresetCode = "blank";
-        this.activeAdvancedPanels = ["advanced"];
+      this.activeAdvancedPanels = ["advanced"];
+      this.pluginForm = this.createEmptyForm();
+      if (source) {
         this.pluginForm = {
-          name: `${source.name} 副本`,
-          providerCode: "",
-          sort: Number(source.sort || 90),
-          description: this.getPluginDescription(source),
-          instructions: this.getFieldDefault(
-            source.fieldsMeta,
-            "instructions",
-            `参考“${source.name}”的触发场景，编写新的互动规则。`
-          ),
-          openingMessage: this.getFieldDefault(source.fieldsMeta, "opening_message"),
-          parametersSchemaText: JSON.stringify(
-            this.getFieldDefault(source.fieldsMeta, "parameters_schema", DEFAULT_PARAMETERS_SCHEMA),
-            null,
-            2
-          )
+          ...this.pluginForm,
+          name: source.name + " 副本",
+          description: pluginDefault(source, "description"),
+          instructions: pluginDefault(source, "instructions"),
+          openingMessage: pluginDefault(source, "opening_message")
         };
-      } else if (source) {
-        this.selectedPresetCode = source.providerCode;
-        this.activeAdvancedPanels = [];
-        this.pluginForm = {
-          name: source.name,
-          providerCode: source.providerCode,
-          sort: source.sort,
-          description: source.description,
-          instructions: source.instructions,
-          openingMessage: source.openingMessage,
-          parametersSchemaText: JSON.stringify(DEFAULT_PARAMETERS_SCHEMA, null, 2)
-        };
-      } else {
-        this.selectedPresetCode = "blank";
-        this.activeAdvancedPanels = ["advanced"];
-        this.pluginForm = this.createEmptyForm();
       }
       this.formDialogVisible = true;
     },
     openEditDialog(row) {
+      if (!this.canEditPlugin(row)) return;
       this.editingId = row.id;
       this.pluginForm = {
         name: row.name,
@@ -880,35 +658,9 @@ export default {
         sort: Number(row.sort || 90),
         description: this.getFieldDefault(row.fieldsMeta, "description"),
         instructions: this.getFieldDefault(row.fieldsMeta, "instructions"),
-        openingMessage: this.getFieldDefault(row.fieldsMeta, "opening_message"),
-        parametersSchemaText: JSON.stringify(
-          this.getFieldDefault(row.fieldsMeta, "parameters_schema", DEFAULT_PARAMETERS_SCHEMA),
-          null,
-          2
-        )
+        openingMessage: this.getFieldDefault(row.fieldsMeta, "opening_message")
       };
       this.formDialogVisible = true;
-    },
-    applyInteractionPreset(providerCode) {
-      if (providerCode === "blank") {
-        this.pluginForm = this.createEmptyForm();
-        this.activeAdvancedPanels = ["advanced"];
-        return;
-      }
-      const preset = this.getMatchingPreset(providerCode);
-      if (!preset) {
-        return;
-      }
-      this.pluginForm = {
-        name: preset.name,
-        providerCode: preset.providerCode,
-        sort: preset.sort,
-        description: preset.description,
-        instructions: preset.instructions,
-        openingMessage: preset.openingMessage,
-        parametersSchemaText: JSON.stringify(DEFAULT_PARAMETERS_SCHEMA, null, 2)
-      };
-      this.activeAdvancedPanels = [];
     },
     resetForm() {
       this.editingId = "";
@@ -917,8 +669,11 @@ export default {
         this.$refs.pluginForm.clearValidate();
       }
     },
-    buildFields(parametersSchema) {
-      return [
+    buildFields() {
+      const editedKeys = ["custom_plugin", "description", "instructions", "opening_message"];
+      const source = this.plugins.find(item => item.id === this.editingId);
+      const preserved = pluginFields(source).filter(field => !editedKeys.includes(field.key));
+      return [...preserved,
         {
           key: "custom_plugin",
           type: "boolean",
@@ -930,7 +685,7 @@ export default {
         {
           key: "description",
           type: "textarea",
-          label: "用户会怎么说",
+          label: "调用说明",
           default: this.pluginForm.description,
           editing: false,
           selected: false
@@ -938,7 +693,7 @@ export default {
         {
           key: "instructions",
           type: "textarea",
-          label: "智能体怎么玩",
+          label: "玩法规则",
           default: this.pluginForm.instructions,
           editing: false,
           selected: false
@@ -946,23 +701,19 @@ export default {
         {
           key: "opening_message",
           type: "textarea",
-          label: "开始时怎么说",
+          label: "开场要求",
           default: this.pluginForm.openingMessage,
           editing: false,
           selected: false
         },
-        {
-          key: "parameters_schema",
-          type: "json",
-          label: "高级参数",
-          default: parametersSchema,
-          editing: false,
-          selected: false
-        }
       ];
     },
     validateProviderCode() {
       const providerCode = this.pluginForm.providerCode.trim();
+      if (isRetiredPlugin({ providerCode })) {
+        this.$message.error("该功能编码已退役，不能重新创建或启用");
+        return false;
+      }
       if (!/^[a-z][a-z0-9_]*$/.test(providerCode)) {
         this.$message.error("功能编码必须以小写字母开头，只能包含小写字母、数字和下划线");
         return false;
@@ -977,26 +728,10 @@ export default {
       }
       return true;
     },
-    parseParametersSchema() {
-      try {
-        const parsed = JSON.parse(this.pluginForm.parametersSchemaText || "{}");
-        if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
-          throw new Error("schema must be object");
-        }
-        return parsed;
-      } catch (error) {
-        this.$message.error("高级参数必须是合法的 JSON 对象");
-        return null;
-      }
-    },
     savePlugin() {
+      if (!this.canManagePlugins || (this.editingId && isRetiredPlugin(this.plugins.find(item => item.id === this.editingId)))) return;
       this.$refs.pluginForm.validate((valid) => {
         if (!valid || !this.validateProviderCode()) {
-          return;
-        }
-
-        const parametersSchema = this.parseParametersSchema();
-        if (!parametersSchema) {
           return;
         }
 
@@ -1006,7 +741,7 @@ export default {
           providerCode: this.pluginForm.providerCode.trim(),
           name: this.pluginForm.name.trim(),
           sort: Number(this.pluginForm.sort || 0),
-          fields: this.buildFields(parametersSchema)
+          fields: this.buildFields()
         };
 
         this.saving = true;
@@ -1026,7 +761,8 @@ export default {
       });
     },
     deletePlugin(row) {
-      if (!this.isDeclarativeInteractionPlugin(row.fieldsMeta)) {
+      if (!this.canEditPlugin(row)) return;
+      if (!isInteractionPlugin(row)) {
         this.$message.warning("内置功能不能在这里删除");
         return;
       }
@@ -1051,6 +787,11 @@ export default {
     }
   },
   computed: {
+    legacyParametersSchema() {
+      const source = this.plugins.find(item => item.id === this.editingId);
+      const schema = pluginDefault(source, "parameters_schema", null);
+      return schema ? JSON.stringify(schema, null, 2) : "";
+    },
     canManagePlugins() {
       return Boolean(this.$store.state.userInfo && this.$store.state.userInfo.superAdmin);
     },
@@ -1071,22 +812,23 @@ export default {
         return (
           String(item.name || "").toLowerCase().includes(keyword) ||
           String(item.providerCode || "").toLowerCase().includes(keyword) ||
-          String(this.getExampleUtterance(item) || "").toLowerCase().includes(keyword)
+          String(pluginDefault(item, "description")).toLowerCase().includes(keyword)
         );
       });
     },
     visiblePlugins() {
       let list = [...this.searchedPlugins];
       if (this.activeType === "builtin") {
-        list = list.filter((item) => !this.isDeclarativeInteractionPlugin(item.fieldsMeta));
+        list = list.filter((item) => !isRetiredPlugin(item) && !isInteractionPlugin(item));
       }
       else if (this.activeType === "interaction") {
-        list = list.filter((item) => this.isDeclarativeInteractionPlugin(item.fieldsMeta));
+        list = list.filter((item) => !isRetiredPlugin(item) && isInteractionPlugin(item));
       }
 
+      if (this.activeType === "retired") list = list.filter(isRetiredPlugin);
       if (this.showCategoryFilter && this.activeCategory !== "all") {
         list = list.filter((item) => {
-          return !this.isDeclarativeInteractionPlugin(item.fieldsMeta) &&
+          return !isInteractionPlugin(item) &&
             this.getCategoryMeta(item).key === this.activeCategory;
         });
       }
@@ -1095,29 +837,23 @@ export default {
       }
       return list.sort((a, b) => Number(a.sort || 0) - Number(b.sort || 0));
     },
-    pluginCounts() {
-      const interaction = this.plugins.filter((item) => this.isDeclarativeInteractionPlugin(item.fieldsMeta)).length;
-      return {
-        all: this.plugins.length,
-        interaction,
-        builtin: this.plugins.length - interaction
-      };
-    },
+    pluginCounts() { return catalogCounts(this.plugins); },
     showCategoryFilter() {
       return this.activeType === "builtin";
     },
     currentFilterTitle() {
+      if (this.activeType === "retired") return "已退役目录条目";
       if (this.activeType === "interaction") {
         return "互动玩法";
       }
       if (this.activeType === "builtin") {
         const category = this.categoryFilters.find((item) => item.key === this.activeCategory);
-        return category ? category.label : "系统能力";
+        return category ? category.label : "工具条目";
       }
-      return "全部能力";
+      return "全部目录条目";
     },
     builtinPluginsForCategory() {
-      return this.searchedPlugins.filter((item) => !this.isDeclarativeInteractionPlugin(item.fieldsMeta));
+      return this.searchedPlugins.filter((item) => !isRetiredPlugin(item) && !isInteractionPlugin(item));
     },
     categoryCounts() {
       return this.builtinPluginsForCategory.reduce((counts, item) => {
@@ -1139,7 +875,7 @@ export default {
       return [
         {
           key: "all",
-          label: "全部系统能力",
+          label: "全部工具条目",
           count: this.builtinPluginsForCategory.length
         },
         ...categories.map((category) => ({
@@ -1153,6 +889,7 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+.catalog-rule-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow: auto; }
 .welcome {
   min-width: 960px;
   min-height: 100vh;
@@ -1442,7 +1179,7 @@ export default {
 
   .filter-section:not(.category-section) {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
   }
 
@@ -1474,20 +1211,6 @@ export default {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
-}
-
-.rule-upgrade {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 0 0 18px 110px;
-  padding: 10px 12px;
-  border: 1px solid #d9ecff;
-  border-radius: 6px;
-  background: #f5faff;
-  color: #606266;
-  font-size: 14px;
 }
 
 .advanced-collapse {

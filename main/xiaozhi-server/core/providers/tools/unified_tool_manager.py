@@ -9,6 +9,7 @@ from plugins_func.register import Action, ActionResponse
 from .base import ToolType, ToolDefinition, ToolExecutor
 from .commerce_policy import is_commerce_device_tool, COMMERCE_CALL_DENIED
 from core.utils.prompt_budget import compact_tool_schemas
+from .server_plugins.policy import RETIRED_TOOL_NAMES
 
 
 class ToolManager:
@@ -43,6 +44,9 @@ class ToolManager:
                 tools = executor.get_tools()
                 for name, definition in tools.items():
                     schema_name = definition.description.get("function", {}).get("name", "")
+                    if any(value in RETIRED_TOOL_NAMES for value in
+                           (name, definition.name, schema_name)):
+                        continue
                     if any(is_commerce_device_tool(value) for value in
                            (name, definition.name, schema_name)):
                         continue
@@ -109,6 +113,8 @@ class ToolManager:
         self, tool_name: str, arguments: Dict[str, Any]
     ) -> ActionResponse:
         """执行工具调用"""
+        if tool_name in RETIRED_TOOL_NAMES:
+            return ActionResponse(action=Action.NOTFOUND, response="工具不可用")
         if is_commerce_device_tool(tool_name):
             return ActionResponse(action=Action.ERROR, response=COMMERCE_CALL_DENIED)
         try:

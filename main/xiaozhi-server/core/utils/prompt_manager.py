@@ -3,7 +3,6 @@
 负责管理和更新系统提示词，包括快速初始化和异步增强功能
 """
 
-import os
 from core.observability.session_telemetry import latency_span, mark_latency
 from typing import Dict, Any, List, Optional, TYPE_CHECKING
 
@@ -12,6 +11,7 @@ if TYPE_CHECKING:
 from config.logger import setup_logging
 from jinja2 import Template
 from core.utils.prompt_budget import compact_dynamic_context
+from core.utils.prompt_template_cache import read_prompt_template
 
 TAG = __name__
 
@@ -58,6 +58,9 @@ class PromptManager:
         self.logger = logger or setup_logging()
         self.base_prompt_template = None
         self.last_update_time = 0
+        # A role tool overrides this connection only. Replacing PromptManager
+        # after a manager-api refresh intentionally restores the managed role.
+        self._session_role_prompt = None
 
         # 导入全局缓存管理器
         from core.utils.cache.manager import cache_manager, CacheType
@@ -76,54 +79,33 @@ class PromptManager:
     def _load_base_template(self):
         """加载基础提示词模板"""
         try:
-            template_path = self.config.get("prompt_template", None)
-            if not template_path:
-                template_path = "agent-base-prompt.txt"
-            cache_key = f"prompt_template:{template_path}"
-
-            # 先从缓存获取
-            cached_template = self.cache_manager.get(self.CacheType.CONFIG, cache_key)
-            if cached_template is not None:
-                self.base_prompt_template = cached_template
-                self.logger.bind(tag=TAG).debug("从缓存加载基础提示词模板")
-                return
-
-            # 缓存未命中，从文件读取
-            if os.path.exists(template_path):
-                with open(template_path, "r", encoding="utf-8") as f:
-                    template_content = f.read()
-
-                # 存入缓存（CONFIG类型默认不自动过期，需要手动失效）
-                self.cache_manager.set(
-                    self.CacheType.CONFIG, cache_key, template_content
-                )
-                self.base_prompt_template = template_content
-                self.logger.bind(tag=TAG).debug("成功加载基础提示词模板并缓存")
-            else:
-                self.logger.bind(tag=TAG).warning(f"未找到{template_path}文件")
+            template_path = self.config.get("prompt_template") or "agent-base-prompt.txt"
+            self.base_prompt_template = read_prompt_template(
+                template_path, self.cache_manager, self.CacheType.CONFIG
+            )
         except Exception as e:
-            self.logger.bind(tag=TAG).error(f"加载提示词模板失败: {e}")
+            # Keep the last valid rules if an in-place publication temporarily
+            # removes or makes the template unreadable.
+            self.logger.bind(tag=TAG).error(
+                "加载提示词模板失败: errorType={}", type(e).__name__
+            )
+
+    def set_session_role_prompt(self, prompt: str):
+        """Set a local role without modifying manager-owned configuration."""
+        self._session_role_prompt = prompt
+
+    def refresh_cached_context(self, device_id: str):
+        """Prepare a turn using local snapshots; external refresh never blocks it."""
+        self._load_base_template()
+        if device_id and self.base_prompt_template and "dynamic_context" in self.base_prompt_template:
+            self.context_data = self.context_provider.get_cached(device_id, refresh=True)
+        else:
+            self.context_data = ""
 
     def get_quick_prompt(self, user_prompt: str, device_id: str = None) -> str:
         """快速获取系统提示词（使用用户配置）"""
-        device_cache_key = f"device_prompt:{device_id}"
-        cached_device_prompt = self.cache_manager.get(
-            self.CacheType.DEVICE_PROMPT, device_cache_key
-        )
-        if cached_device_prompt is not None:
-            self.logger.bind(tag=TAG).debug(f"使用设备 {device_id} 的缓存提示词")
-            return cached_device_prompt
-        else:
-            self.logger.bind(tag=TAG).debug(
-                f"设备 {device_id} 无缓存提示词，使用传入的提示词"
-            )
-
-        # 使用传入的提示词并缓存（如果有设备ID）
-        if device_id:
-            device_cache_key = f"device_prompt:{device_id}"
-            self.cache_manager.set(self.CacheType.DEVICE_PROMPT, device_cache_key, user_prompt)
-            self.logger.bind(tag=TAG).debug(f"设备 {device_id} 的提示词已缓存")
-
+        # An earlier connection's enhanced prompt may contain a different role
+        # or expired context. Quick initialization always uses the new role.
         self.logger.bind(tag=TAG).info(
             f"使用快速提示词: chars={len(str(user_prompt or ''))}"
         )
@@ -248,6 +230,7 @@ class PromptManager:
         **kwargs,
     ) -> str:
         """构建增强的系统提示词"""
+        user_prompt = self._session_role_prompt if self._session_role_prompt is not None else user_prompt
         if not self.base_prompt_template:
             return user_prompt
 

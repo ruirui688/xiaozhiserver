@@ -2,6 +2,7 @@ package xiaozhi.modules.model.dto;
 
 import java.io.Serializable;
 import java.util.Date;
+import java.util.Map;
 
 import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.TableField;
@@ -36,6 +37,9 @@ public class ModelProviderDTO implements Serializable {
     @TableField(typeHandler = JacksonTypeHandler.class)
     @NotBlank(message = "fields(JSON格式)不能为空")
     private String fields;
+
+    @Schema(description = "静态插件目录契约，不表示当前设备运行时可用", accessMode = Schema.AccessMode.READ_ONLY)
+    private Map<String, Object> catalogMetadata;
 
     @Schema(description = "排序")
     @NotNull(message = "sort不能为空")

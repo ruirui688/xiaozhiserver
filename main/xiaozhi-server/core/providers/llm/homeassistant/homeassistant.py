@@ -8,6 +8,8 @@ logger = setup_logging()
 
 
 class LLMProvider(LLMProviderBase):
+    supports_local_context = False
+
     def __init__(self, config):
         self.agent_id = config.get("agent_id")  # 对应 agent_id
         self.api_key = config.get("api_key")

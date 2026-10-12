@@ -24,6 +24,7 @@ import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.dto.ModelProviderDTO;
 import xiaozhi.modules.model.service.ModelConfigService;
 import xiaozhi.modules.model.service.ModelProviderService;
+import xiaozhi.modules.model.support.PluginCatalogContract;
 
 /**
  * @description 针对表【ai_agent_plugin_mapping(Agent与插件的唯一映射表)】的数据库操作Service实现
@@ -47,6 +48,15 @@ public class AgentPluginMappingServiceImpl extends ServiceImpl<AgentPluginMappin
         Map<String, List<String>> knowledgeInstructionMap = new HashMap<>();
         for (int i = list.size() - 1; i >= 0; i--) {
             AgentPluginMapping mapping = list.get(i);
+            if (PluginCatalogContract.isRetired(mapping.getProviderCode())) {
+                list.remove(i);
+                continue;
+            }
+            if (StringUtils.isNotBlank(mapping.getProviderCode())) {
+                ModelProviderDTO provider = modelProviderService.getById(mapping.getPluginId());
+                mapping.setParamInfo(JsonUtils.toJsonString(PluginCatalogContract.runtimeParams(
+                        provider == null ? null : provider.getFields(), parseParamInfo(mapping.getParamInfo()))));
+            }
             if (StringUtils.isBlank(mapping.getProviderCode())) {
                 // 查询知识库插件参数
                 KnowledgeBaseEntity knowledgeBaseEntity = knowledgeBaseService.selectById(mapping.getPluginId());
@@ -111,7 +121,7 @@ public class AgentPluginMappingServiceImpl extends ServiceImpl<AgentPluginMappin
             return result;
         }
         for (ModelProviderDTO provider : providers) {
-            if (provider == null) {
+            if (provider == null || PluginCatalogContract.isRetired(provider.getProviderCode())) {
                 continue;
             }
             Map<String, Object> defaults = parseProviderDefaults(provider.getFields());

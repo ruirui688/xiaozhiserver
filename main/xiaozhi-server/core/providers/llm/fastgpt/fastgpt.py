@@ -9,6 +9,8 @@ logger = setup_logging()
 
 
 class LLMProvider(LLMProviderBase):
+    supports_local_context = False
+
     def __init__(self, config):
         self.api_key = config["api_key"]
         self.base_url = config.get("base_url")

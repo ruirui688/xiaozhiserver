@@ -12,6 +12,10 @@ from core.handle.reportHandle import enqueue_asr_report
 from core.handle.sendAudioHandle import send_stt_display
 from core.observability.session_telemetry import latency_span, mark_latency
 from core.providers.realtime.base import RealtimeCapabilities, tool_output_text
+from core.session.realtime_tools import (
+    RealtimeToolPolicy, await_realtime_controls, cancel_realtime_updates,
+    configure_realtime_session,
+)
 from core.providers.realtime.doubao_realtime import DoubaoRealtimeSession
 from core.providers.realtime.doubao_duplex_transport import DoubaoDuplexTransport
 from core.utils.dialogue import Message
@@ -29,6 +33,7 @@ class DoubaoDuplexSession(DoubaoRealtimeSession):
             transport_factory or (lambda: DoubaoDuplexTransport(self.config))))
         self._generation = 0
         self._tool_tasks = set()
+        self._tool_execution_lock = asyncio.Lock()
         self._completed_calls = deque(maxlen=256)
         self._retired_responses = deque(maxlen=128)
         self._response_id = None
@@ -38,6 +43,8 @@ class DoubaoDuplexSession(DoubaoRealtimeSession):
         self._finish_task = None
         self._reconnect_task = None
         self._closing = False
+        self._tool_policy = RealtimeToolPolicy(conn)
+        self._policy_restore_task = None
 
     @property
     def capabilities(self):
@@ -47,7 +54,9 @@ class DoubaoDuplexSession(DoubaoRealtimeSession):
         from core.utils.current_time import render_runtime_time
         prompt = render_runtime_time(self.conn.prompt or self.conn.config.get("prompt", ""))
         from core.session.realtime_memory import append_realtime_memory
-        return append_realtime_memory(self.conn, prompt)
+        prompt = append_realtime_memory(self.conn, prompt)
+        policy = getattr(self, "_tool_policy", None)
+        return policy.prompt(prompt, policy.tools()) if policy else prompt
 
     async def initialize(self):
         try:
@@ -58,9 +67,32 @@ class DoubaoDuplexSession(DoubaoRealtimeSession):
             raise
 
     async def refresh_tools(self):
-        handler = getattr(self.conn, "func_handler", None)
-        tools = handler.get_functions() if handler else []
-        await self.transport.configure(self._session_prompt(), tools)
+        tools = self._tool_policy.tools()
+        await configure_realtime_session(self, self._session_prompt(), tools)
+
+    def _restore_tool_policy(self):
+        if (not self._tool_policy.rounds
+                and (self._policy_restore_task is None or self._policy_restore_task.done())
+                and not getattr(self, "_prompt_update_tasks", ())):
+            return
+        self._tool_policy.reset()
+        if self._policy_restore_task is not None and not self._policy_restore_task.done():
+            self._policy_restore_task.cancel()
+        generation = self._generation
+
+        async def restore():
+            try:
+                if not self._closed and not self._closing:
+                    await self.refresh_tools()
+            except Exception as error:
+                if generation != self._generation or self._closed or self._closing:
+                    return
+                self.conn.audio_input_ready.clear()
+                self.conn.conversation_ready.clear()
+                self.conn.logger.bind(tag=__name__).warning(
+                    "Realtime工具策略恢复失败: errorType={}", type(error).__name__)
+
+        self._policy_restore_task = asyncio.create_task(restore())
 
     async def _reconnect_for_session_controls(self):
         async with self._turn_lock:
@@ -72,6 +104,8 @@ class DoubaoDuplexSession(DoubaoRealtimeSession):
                 await self._cancel_finish_response()
                 await self._reset_output()
                 await self._cancel_tools()
+                await cancel_realtime_updates(self)
+                self._tool_policy.reset()
                 self._completed_calls.clear()
                 self._retired_responses.clear()
                 self._response_id = None
@@ -83,6 +117,9 @@ class DoubaoDuplexSession(DoubaoRealtimeSession):
 
     async def handle_audio(self, packet):
         if self._context_resetting or self._closing or self._closed:
+            return True
+        await await_realtime_controls(self)
+        if self._closing or self._closed:
             return True
         try:
             pcm = self.decoder.decode(packet, 960)
@@ -97,6 +134,9 @@ class DoubaoDuplexSession(DoubaoRealtimeSession):
 
     async def handle_listen(self, message):
         if self._context_resetting or self._closing or self._closed:
+            return True
+        await await_realtime_controls(self)
+        if self._closing or self._closed:
             return True
         if message.get("state") == "stop":
             await self.transport.mute(commit=True)
@@ -152,6 +192,7 @@ class DoubaoDuplexSession(DoubaoRealtimeSession):
                                   sentence_id=sentence_id, generation=generation,
                                   source="doubao_duplex"):
                     await self._finish_response()
+                    self._restore_tool_policy()
             except asyncio.CancelledError:
                 raise
             except Exception as error:
@@ -189,6 +230,7 @@ class DoubaoDuplexSession(DoubaoRealtimeSession):
         self.response_done.set()
         if notify_upstream:
             await self.transport.send({"type": "response.cancel"})
+        self._restore_tool_policy()
 
     async def handle_abort(self):
         async with self._turn_lock:
@@ -299,10 +341,17 @@ class DoubaoDuplexSession(DoubaoRealtimeSession):
                 raise RuntimeError("豆包3.0单轮回复文本超过预算")
 
     async def _execute_tools(self, items, generation):
+        async with self._tool_execution_lock:
+            if generation != self._generation or self._closed or self._closing:
+                return
+            await self._execute_tool_batch(items, generation)
+
+    async def _execute_tool_batch(self, items, generation):
         try:
             if not isinstance(items, list) or not 1 <= len(items) <= 16:
                 raise ValueError("无效工具调用列表")
             outputs = []
+            results = []
             handler = getattr(self.conn, "func_handler", None)
             for item in items:
                 call_id = item.get("call_id")
@@ -311,16 +360,25 @@ class DoubaoDuplexSession(DoubaoRealtimeSession):
                 if call_id in self._completed_calls:
                     continue
                 self._completed_calls.append(call_id)
-                if not handler or not handler.has_tool(item.get("name")):
+                if not self._tool_policy.permits(item.get("name")):
                     output = "工具未启用或不可用"
                 else:
                     result = await asyncio.wait_for(handler.handle_llm_function_call(
                         self.conn, {"name": item.get("name"), "arguments": item.get("arguments", "{}")}
                     ), 30)
+                    if generation != self._generation or self._closed:
+                        return
+                    results.append((result, item))
+                    self._tool_policy.accept([(result, item)], count_round=False)
                     output = tool_output_text(result)
                 outputs.append({"type": "message", "role": "tool", "call_id": call_id,
                                 "content": [{"type": "input_text", "text": output}]})
             if outputs and generation == self._generation and not self._closed:
+                if results:
+                    self._tool_policy.accept([])
+                    await self.refresh_tools()
+                if generation != self._generation or self._closed:
+                    return
                 self._response_id = None
                 self._tools_returned = True
                 await self.transport.send({"type": "conversation.item.create", "items": outputs})
@@ -365,7 +423,7 @@ class DoubaoDuplexSession(DoubaoRealtimeSession):
         # Reconnect owns the turn lock while waiting for network ACKs. Cancel it
         # before acquiring that lock, including an explicitly requested reset.
         reconnect_tasks = {
-            task for task in (self._session_maintenance_task, self._reconnect_task)
+            task for task in (self._session_maintenance_task, self._reconnect_task, self._policy_restore_task)
             if task is not None and task is not asyncio.current_task() and not task.done()
         }
         for task in reconnect_tasks:
@@ -380,4 +438,5 @@ class DoubaoDuplexSession(DoubaoRealtimeSession):
             await self._cancel_finish_response()
             await self._reset_output()
             await self._cancel_tools()
+            await cancel_realtime_updates(self)
             await super().close()

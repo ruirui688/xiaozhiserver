@@ -5,7 +5,7 @@
       <div class="header-left">
         <div>
           <h3 class="bold-title">{{ $t('functionDialog.title') }}</h3>
-          <div class="drawer-subtitle">选择进入大模型工具列表的系统能力和互动玩法；飞书等第三方集成请回到角色编辑页单独绑定。</div>
+          <div class="drawer-subtitle">为当前角色选择目录能力。运行时还会校验模型协议与会话状态；飞书等集成请单独绑定。</div>
         </div>
       </div>
       <button class="custom-close-btn" @click="closeDialog">×</button>
@@ -70,6 +70,9 @@
           {{ $t('functionDialog.paramConfig') }} - {{ currentFunction.name }}
         </h4>
         <div v-if="currentFunction" class="params-container">
+          <p class="drawer-subtitle">调用说明由插件目录统一维护：{{ catalogDescription(currentFunction) || '目录未填写' }}</p>
+          <PluginRuleOverrides v-if="isDeclarativeInteractionPlugin(currentFunction)"
+            :plugin="currentFunction" @change="handleRuleParams" />
           <div v-if="isSharedConfigPlugin(currentFunction)" class="shared-config-row">
             <div>
               <div class="shared-config-title">{{ $t('functionDialog.userSharedConfig') }}</div>
@@ -305,6 +308,11 @@ import Api from '@/apis/api';
 import i18n from '@/i18n';
 import featureManager from '@/utils/featureManager';
 import UserPluginConfigDialog from '@/components/UserPluginConfigDialog.vue';
+import PluginRuleOverrides from '@/components/resource/PluginRuleOverrides.vue';
+import {
+  isInteractionPlugin, isSelectablePlugin, newPluginParams,
+  pluginBusinessFields, pluginDefault, sanitizePluginParams,
+} from '@/utils/pluginCatalog';
 
 const SHARED_FIELDS = {
   get_weather: ['api_host', 'api_key', 'default_location'],
@@ -313,7 +321,7 @@ const SHARED_FIELDS = {
 
 export default {
   i18n,
-  components: { UserPluginConfigDialog },
+  components: { UserPluginConfigDialog, PluginRuleOverrides },
 
   props: {
     value: Boolean,
@@ -378,7 +386,9 @@ export default {
   },
   computed: {
     selectedList() {
-      const list = this.allFunctions.filter(f => this.selectedNames.includes(f.name));
+      const list = this.allFunctions
+        .filter(f => isSelectablePlugin(f) && this.selectedNames.includes(f.name))
+        .map(f => this.tempFunctions[f.name] || this.modifiedFunctions[f.name] || f);
       // 如果通讯录功能未启用，过滤掉设备呼叫设备插件
       if (!this.featureStatus.addressBook) {
         return list.filter(f => f.providerCode !== 'call_device');
@@ -386,7 +396,7 @@ export default {
       return list;
     },
     unselected() {
-      const list = this.allFunctions.filter(f => !this.selectedNames.includes(f.name));
+      const list = this.allFunctions.filter(f => isSelectablePlugin(f) && !this.selectedNames.includes(f.name));
       // 如果通讯录功能未启用，过滤掉设备呼叫设备插件
       if (!this.featureStatus.addressBook) {
         return list.filter(f => f.providerCode !== 'call_device');
@@ -417,6 +427,9 @@ export default {
       if (v) {
         // 加载功能状态（需要在初始化选中态之前）
         await this.loadFeatureStatus();
+        this.tempFunctions = {};
+        this.modifiedFunctions = {};
+        this.allFunctions.forEach(func => { func.params = newPluginParams(func); });
 
         // 对话框打开时，初始化选中态
         this.selectedNames = this.functions.map(f => f.name);
@@ -434,7 +447,7 @@ export default {
           const idx = this.allFunctions.findIndex(f => f.name === saved.name);
           if (idx >= 0) {
             // 保留用户之前在 saved.params 上的改动
-            this.allFunctions[idx].params = { ...saved.params };
+            this.allFunctions[idx].params = sanitizePluginParams(this.allFunctions[idx], saved.params);
           }
         });
         // 右侧默认指向第一个
@@ -487,15 +500,16 @@ export default {
       this.sharedConfigDialogVisible = true;
     },
     agentConfigFields(func) {
-      const fields = Array.isArray(func && func.fieldsMeta) ? func.fieldsMeta : [];
-      const shared = SHARED_FIELDS[func && func.providerCode] || [];
-      return fields.filter(field => !shared.includes(field.key));
+      return pluginBusinessFields(func);
     },
     sanitizeFunctionParams(func, params) {
-      const sanitized = { ...(params || {}) };
-      const shared = SHARED_FIELDS[func && func.providerCode] || [];
-      shared.forEach(key => delete sanitized[key]);
-      return sanitized;
+      return sanitizePluginParams(func, params);
+    },
+    catalogDescription(func) { return pluginDefault(func, 'description'); },
+    handleRuleParams(params) {
+      const updated = { ...this.currentFunction, params };
+      this.$set(this.tempFunctions, updated.name, updated);
+      this.currentFunction = updated;
     },
     
     copyUrl() {
@@ -707,12 +721,13 @@ export default {
       }
     },
     handleParamChange(func, key, value) {
-      if (!this.tempFunctions[func.name]) {
-        this.tempFunctions[func.name] = JSON.parse(JSON.stringify(func));
-      }
-      this.tempFunctions[func.name].params[key] = value;
+      const previous = this.tempFunctions[func.name] || func;
+      const updated = { ...previous, params: { ...previous.params, [key]: value } };
+      this.$set(this.tempFunctions, func.name, updated);
+      if (this.currentFunction && this.currentFunction.name === func.name) this.currentFunction = updated;
     },
     handleCheckboxChange(func, checked) {
+      if (!isSelectablePlugin(func)) return;
       if (checked) {
         if (!this.selectedNames.includes(func.name)) {
           this.selectedNames = [...this.selectedNames, func.name];
@@ -729,7 +744,7 @@ export default {
     },
 
     selectAll() {
-      this.selectedNames = [...this.allFunctions.map(f => f.name)];
+      this.selectedNames = this.allFunctions.filter(isSelectablePlugin).map(f => f.name);
       if (this.selectedList.length > 0) {
         this.currentFunction = JSON.parse(JSON.stringify(this.selectedList[0]));
       }
@@ -788,15 +803,7 @@ export default {
       return description;
     },
     isDeclarativeInteractionPlugin(func) {
-      const fields = Array.isArray(func && func.fieldsMeta) ? func.fieldsMeta : [];
-      const customField = fields.find(field => field.key === 'custom_plugin');
-      if (!customField) {
-        return false;
-      }
-      if (typeof customField.default === 'boolean') {
-        return customField.default;
-      }
-      return String(customField.default).toLowerCase() === 'true';
+      return isInteractionPlugin(func);
     },
   }
 }

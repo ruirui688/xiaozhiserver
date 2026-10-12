@@ -33,6 +33,7 @@ source_paths:
 ## 修改核心链路时
 
 - 提示词、上下文预算和工具 schema：[提示词注入](./architecture/prompt-injection-engineering.md)
+- 插件按需注入、两种调用方式与天气修复：[2026-10-10 验收报告](./reports/plugin-injection-acceptance-2026-10-10.md)
 - 语义路由、打断和会议门控：[语义控制](./architecture/semantic-control-center.md)
 - 设备呼叫能力：[设备呼叫](./device/device-call-guide.md)
 - 声纹与人物记忆隔离：[声纹集成](./models/voiceprint-integration.md)

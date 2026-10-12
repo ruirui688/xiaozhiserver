@@ -49,6 +49,7 @@ import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
 import xiaozhi.modules.model.service.impl.ModelRuntimeAssembler;
 import xiaozhi.modules.model.support.RealtimeAdapterCapabilityRegistry;
+import xiaozhi.modules.model.support.PluginCatalogContract;
 import xiaozhi.modules.sys.dto.SysParamsDTO;
 import xiaozhi.modules.sys.service.SysParamsService;
 import xiaozhi.modules.timbre.service.TimbreService;
@@ -697,7 +698,9 @@ public class ConfigServiceImpl implements ConfigService {
                     if (runtimeConfig.get("functions") != null) {
                         String functionStr = (String) runtimeConfig.get("functions");
                         if (StringUtils.isNotBlank(functionStr)) {
-                            String[] functions = functionStr.split(";");
+                            String[] functions = java.util.Arrays.stream(functionStr.split(";"))
+                                    .filter(name -> !PluginCatalogContract.isRetired(name.trim()))
+                                    .toArray(String[]::new);
                             runtimeConfig.put("functions", functions);
                         }
                     }

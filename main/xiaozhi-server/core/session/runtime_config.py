@@ -81,6 +81,19 @@ def build_managed_runtime_config(common_config, private_config):
         if key in private:
             target[key] = copy.deepcopy(private[key])
 
+    # The resource-center catalog is a complete snapshot, including deletion.
+    # Never retain common/previous descriptions when an older API omits it.
+    overrides = private.get("tool_prompt_overrides")
+    target["tool_prompt_overrides"] = {
+        name: description.strip()
+        for name, description in (overrides.items() if isinstance(overrides, dict) else ())
+        if isinstance(name, str) and isinstance(description, str) and description.strip()
+    }
+    # Java omits this field when the agent has no sources. Do not fall back to
+    # another role's/common sources after removal or a scene switch.
+    sources = private.get("context_providers")
+    target["context_providers"] = copy.deepcopy(sources) if isinstance(sources, list) else []
+
     plugins = normalize_plugins(private.get("plugins"))
     target["plugins"] = plugins
     selected_intent = target.get("selected_module", {}).get("Intent")

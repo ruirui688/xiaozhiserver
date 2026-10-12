@@ -24,6 +24,11 @@ from core.providers.realtime.base import (
 )
 from core.utils.dialogue import Message
 from core.utils.opus_encoder_utils import OpusEncoderUtils
+from core.utils.prompt_data import render_realtime_user_request
+from core.session.realtime_tools import (
+    RealtimeToolPolicy, await_realtime_controls, cancel_realtime_updates,
+    configure_realtime_session,
+)
 
 
 LEGACY_REALTIME_HOST = "dashscope.aliyuncs.com"
@@ -130,10 +135,8 @@ def build_image_append(image: bytes) -> Dict[str, Any]:
 def build_instruction_prompt(base_prompt: str, request: str) -> str:
     return (
         f"{str(base_prompt or '').strip()}\n\n"
-        "<current_user_request>\n"
-        f"{str(request or '').strip()}\n"
-        "</current_user_request>\n"
-        "请直接完成 current_user_request 中的本轮请求。"
+        f"{render_realtime_user_request(request)}\n"
+        "请在上述边界内完成 current_user_request 中的本轮请求。"
     ).strip()
 
 
@@ -336,6 +339,7 @@ class QwenOmniRealtimeSession:
         self._response_active = False
         self._turn_lock = asyncio.Lock()
         self._instruction_turn_active = False
+        self._instruction_request = None
         self._restore_task = None
         self._cancel_generation = 0
         self._barge_in_active = False
@@ -343,6 +347,10 @@ class QwenOmniRealtimeSession:
         self._context_resetting = False
         self._pending_voice = None
         self._session_maintenance_task = None
+        self._tool_policy = RealtimeToolPolicy(conn)
+        self._tool_task = None
+        self._tool_batch_pending = False
+        self._tool_policy_restore = False
         self._closed = False
 
     @property
@@ -401,7 +409,7 @@ class QwenOmniRealtimeSession:
             return
         if not getattr(self, "_context_reset_pending", False) and getattr(
             self, "_pending_voice", None
-        ) is None:
+        ) is None and not getattr(self, "_tool_policy_restore", False):
             return
         self._session_maintenance_task = asyncio.create_task(
             self._apply_pending_session_controls(),
@@ -414,18 +422,17 @@ class QwenOmniRealtimeSession:
                 await self._reconnect_for_context_reset()
             elif self._pending_voice is not None:
                 voice = self._pending_voice
-                tools = (
-                    self.conn.func_handler.get_functions()
-                    if self.conn.func_handler
-                    else []
-                )
-                await self.transport.configure(
-                    self._session_prompt(), tools, {"voice": voice}
+                tools = self._tool_policy.tools()
+                await configure_realtime_session(
+                    self, self._session_prompt(), tools, {"voice": voice}
                 )
                 transport_config = getattr(self.transport, "config", None)
                 if isinstance(transport_config, dict):
                     transport_config["voice"] = voice
                 self._pending_voice = None
+            while getattr(self, "_tool_policy_restore", False):
+                self._tool_policy_restore = False
+                await self.refresh_tools()
         except Exception as error:
             self.conn.logger.bind(tag=__name__).warning(
                 "应用Qwen Realtime会话控制失败: errorType={}",
@@ -440,6 +447,7 @@ class QwenOmniRealtimeSession:
         self.conn.audio_input_ready.clear()
         self.conn.conversation_ready.clear()
         old_transport = self.transport
+        await cancel_realtime_updates(self)
         await old_transport.close()
         self.transport = self._transport_factory()
         self.completed_function_calls.clear()
@@ -462,12 +470,13 @@ class QwenOmniRealtimeSession:
         from core.utils.current_time import render_runtime_time
         prompt = render_runtime_time(self.conn.prompt or self.conn.config.get("prompt", ""))
         from core.session.realtime_memory import append_realtime_memory
-        return append_realtime_memory(self.conn, prompt)
+        prompt = append_realtime_memory(self.conn, prompt)
+        policy = getattr(self, "_tool_policy", None)
+        return policy.prompt(prompt, policy.tools()) if policy else prompt
 
     async def refresh_tools(self) -> None:
-        if self._instruction_turn_active:
-            return
-        tools = self.conn.func_handler.get_functions() if self.conn.func_handler else []
+        policy = getattr(self, "_tool_policy", None)
+        tools = policy.tools() if policy else (self.conn.func_handler.get_functions() if self.conn.func_handler else [])
         statistics_getter = getattr(self.conn.func_handler, "get_tool_statistics", None)
         statistics = statistics_getter() if callable(statistics_getter) else {}
         self.conn.logger.bind(tag=__name__).info(
@@ -476,7 +485,11 @@ class QwenOmniRealtimeSession:
             statistics,
         )
         prompt = self._session_prompt()
-        await self.transport.configure(prompt, tools)
+        override = None
+        if getattr(self, "_instruction_turn_active", False):
+            prompt = build_instruction_prompt(prompt, self._instruction_request or "")
+            override = {"turn_detection_type": "manual"}
+        await configure_realtime_session(self, prompt, tools, override)
 
     async def handle_audio(self, opus_packet: bytes) -> bool:
         if getattr(self, "_context_resetting", False):
@@ -485,6 +498,9 @@ class QwenOmniRealtimeSession:
             self.conn.logger.bind(tag=__name__).debug(
                 "忽略Realtime手动文字/图片回合期间的并发设备音频"
             )
+            return True
+        await await_realtime_controls(self)
+        if getattr(self, "_closed", False):
             return True
         try:
             pcm = self.decoder.decode(opus_packet, 960)
@@ -502,6 +518,9 @@ class QwenOmniRealtimeSession:
             return True
         if self._instruction_turn_active:
             return True
+        await await_realtime_controls(self)
+        if self._closed:
+            return True
         state = message.get("state")
         if state == "start":
             self.input_audio = []
@@ -515,11 +534,13 @@ class QwenOmniRealtimeSession:
         clean_text = str(text or "").strip()
         if not clean_text:
             return True
+        render_realtime_user_request(clean_text)
         if getattr(self, "_context_resetting", False):
             raise RuntimeError("Realtime 正在重建上下文，请稍后再试")
         async with self._turn_lock:
             if self._response_active or self._instruction_turn_active:
                 raise RuntimeError("Realtime 正在处理上一轮响应")
+            await await_realtime_controls(self)
             self._response_active = True
             self._instruction_turn_active = True
         self.response_done.clear()
@@ -541,8 +562,8 @@ class QwenOmniRealtimeSession:
 
     async def handle_abort(self) -> bool:
         self._cancel_generation += 1
-        self.function_calls.clear()
-        self._tool_followup_pending = False
+        await self._cancel_tool_response()
+        self._reset_tool_policy()
         upstream_error = None
         for payload in (
             event("response.cancel"),
@@ -568,9 +589,11 @@ class QwenOmniRealtimeSession:
         return True
 
     async def handle_image(self, question: str, image: bytes, timeout=None) -> str:
+        render_realtime_user_request(question or "请描述这张图片")
         async with self._turn_lock:
             if self._response_active or self._instruction_turn_active:
                 raise RuntimeError("Realtime 正在响应，不能并发提交图片")
+            await await_realtime_controls(self)
             self._response_active = True
             self._instruction_turn_active = True
         self.response_done.clear()
@@ -592,12 +615,8 @@ class QwenOmniRealtimeSession:
             await self._restore_normal_session()
 
     async def _configure_instruction_turn(self, request: str) -> None:
-        tools = self.conn.func_handler.get_functions() if self.conn.func_handler else []
-        await self.transport.configure(
-            build_instruction_prompt(self._session_prompt(), request),
-            tools,
-            {"turn_detection_type": "manual"},
-        )
+        self._instruction_request = request
+        await self.refresh_tools()
 
     async def _restore_after_response(self) -> None:
         await self.response_done.wait()
@@ -607,6 +626,9 @@ class QwenOmniRealtimeSession:
         try:
             if not self._closed:
                 self._instruction_turn_active = False
+                self._instruction_request = None
+                self._tool_policy.reset()
+                self._tool_policy_restore = False
                 if self._context_reset_pending:
                     await self._reconnect_for_context_reset()
                 elif self._pending_voice is not None:
@@ -699,11 +721,12 @@ class QwenOmniRealtimeSession:
             )
             if contains_function_call or self.function_calls:
                 if self.function_calls:
-                    should_continue = await self._execute_function_calls()
-                    if not should_continue:
-                        return
                     self._tool_followup_pending = True
-                    await self.transport.send(event("response.create"))
+                    self._tool_batch_pending = True
+                    if self._tool_task is None or self._tool_task.done():
+                        # Session updates await an ACK read by the transport.
+                        # Keep its event reader free while applying tool policy.
+                        self._tool_task = asyncio.create_task(self._continue_tool_response())
                 else:
                     self.conn.logger.bind(tag=__name__).error(
                         "Qwen Realtime 工具响应缺少完整调用参数"
@@ -713,11 +736,15 @@ class QwenOmniRealtimeSession:
             if not self._tool_followup_pending:
                 await self._finish_response()
         elif event_type == "error":
+            self._cancel_generation += 1
+            await self._cancel_tool_response()
             error = payload.get("error") or {}
             code = error.get("code") if isinstance(error, dict) else "UPSTREAM_ERROR"
             self.conn.logger.bind(tag=__name__).error("Qwen Realtime 返回错误: code={}", code)
             await self._finish_response(reason="realtime_error")
         elif event_type == "transport.closed":
+            self._cancel_generation += 1
+            await self._cancel_tool_response()
             self.conn.audio_input_ready.clear()
             self.conn.conversation_ready.clear()
             try:
@@ -766,8 +793,7 @@ class QwenOmniRealtimeSession:
             return
         self._barge_in_active = True
         self._cancel_generation += 1
-        self.function_calls.clear()
-        self._tool_followup_pending = False
+        await self._cancel_tool_response()
         try:
             await self.transport.send(event("response.cancel"))
         except Exception as error:
@@ -783,6 +809,25 @@ class QwenOmniRealtimeSession:
         await handleAbortMessage(self.conn, preserve_user_audio=True)
         self._reply_started = False
         self.response_done.set()
+
+        self._reset_tool_policy()
+
+    async def _cancel_tool_response(self):
+        self._tool_batch_pending = False
+        task = getattr(self, "_tool_task", None)
+        if task is not None and task is not asyncio.current_task() and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        self.function_calls.clear()
+        self._tool_followup_pending = False
+
+    def _reset_tool_policy(self):
+        policy = getattr(self, "_tool_policy", None)
+        if policy is not None:
+            policy.reset()
+            self._tool_policy_restore = True
+            if not getattr(self, "_instruction_turn_active", False):
+                self._schedule_session_maintenance()
 
     async def _handle_function_call(self, payload: Dict[str, Any]) -> None:
         item = payload.get("item") if isinstance(payload.get("item"), dict) else {}
@@ -807,16 +852,20 @@ class QwenOmniRealtimeSession:
         pending = list(self.function_calls.items())
         self.function_calls.clear()
         cancel_generation = getattr(self, "_cancel_generation", 0)
+        outputs = []
         for call_id, call in pending:
             if call_id in self.completed_function_calls:
                 continue
             self.completed_function_calls.add(call_id)
-            result = await self.conn.func_handler.handle_llm_function_call(
-                self.conn, call
-            )
+            if not self._tool_policy.permits(call.get("name")):
+                from plugins_func.register import Action, ActionResponse
+                result = ActionResponse(action=Action.NOTFOUND, response="工具未启用或本轮不允许调用")
+            else:
+                result = await self.conn.func_handler.handle_llm_function_call(self.conn, call)
             if cancel_generation != getattr(self, "_cancel_generation", 0):
                 return False
-            await self.transport.send(
+            self._tool_policy.accept([(result, call)], count_round=False)
+            outputs.append(
                 event(
                     "conversation.item.create",
                     item={
@@ -826,7 +875,30 @@ class QwenOmniRealtimeSession:
                     },
                 )
             )
+        if outputs:
+            self._tool_policy.accept([])
+            await self.refresh_tools()
+            if cancel_generation != self._cancel_generation or self._closed:
+                return False
+            for output in outputs:
+                await self.transport.send(output)
         return cancel_generation == getattr(self, "_cancel_generation", 0)
+
+    async def _continue_tool_response(self):
+        try:
+            while self._tool_batch_pending and not self._closed:
+                self._tool_batch_pending = False
+                if not await self._execute_function_calls() or self._closed:
+                    return
+                await self.transport.send(event("response.create"))
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            self.conn.logger.bind(tag=__name__).warning(
+                "Realtime工具续轮失败: errorType={}", type(error).__name__)
+            self.conn.audio_input_ready.clear()
+            self.conn.conversation_ready.clear()
+            await self._finish_response(reason="realtime_error")
 
     async def _finish_response(self, reason=None) -> None:
         packets = []
@@ -863,12 +935,18 @@ class QwenOmniRealtimeSession:
         self._response_active = False
         self.response_done.set()
         if not getattr(self, "_instruction_turn_active", False):
+            if getattr(self, "_tool_policy", None) is not None and self._tool_policy.rounds:
+                self._reset_tool_policy()
             self._schedule_session_maintenance()
 
     async def close(self) -> None:
         if self._closed:
             return
         self._closed = True
+        tool_task = getattr(self, "_tool_task", None)
+        if tool_task is not None and not tool_task.done():
+            tool_task.cancel()
+            await asyncio.gather(tool_task, return_exceptions=True)
         if self._restore_task is not None and not self._restore_task.done():
             self._restore_task.cancel()
             await asyncio.gather(self._restore_task, return_exceptions=True)
@@ -876,6 +954,7 @@ class QwenOmniRealtimeSession:
         if maintenance_task is not None and not maintenance_task.done():
             maintenance_task.cancel()
             await asyncio.gather(maintenance_task, return_exceptions=True)
+        await cancel_realtime_updates(self)
         await self.transport.close()
         self.encoder.close()
 

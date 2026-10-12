@@ -52,13 +52,13 @@ test('plugin catalog uses task-oriented cards and keeps admin mutations gated', 
   assert.match(plugins, /<PluginResourceCard/);
   assert.match(plugins, /v-if="canManagePlugins"/);
   assert.match(plugins, /getPluginFunctionList/);
-  assert.match(plugins, /能力类型/);
+  assert.match(plugins, /目录类型/);
   assert.match(plugins, /列表视图/);
   assert.match(plugins, /卡片视图/);
   assert.match(plugins, /按后台排序/);
   assert.match(plugins, /overflow-y: auto/);
   assert.doesNotMatch(plugins, /\.welcome\s*\{[^}]*overflow:\s*hidden/s);
-  assert.match(pluginCard, /用户可以说/);
+  assert.match(pluginCard, /注入阶段/);
   assert.match(pluginCard, /查看说明/);
   assert.match(pluginCard, /plugin-resource-card--list/);
   assert.match(pluginCard, /编辑/);

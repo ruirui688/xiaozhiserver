@@ -536,6 +536,7 @@ import RoleTemplateSwitcher from "@/components/role/RoleTemplateSwitcher.vue";
 import RoleConfigTaskTabs from "@/components/role/RoleConfigTaskTabs.vue";
 import RealtimeModelNotice from "@/components/model/RealtimeModelNotice.vue";
 import i18n from "@/i18n";
+import { isSelectablePlugin, newPluginParams, pluginFields, sanitizePluginParams } from "@/utils/pluginCatalog";
 import {
   roleMemoryModeHint,
   rolePanelMeta,
@@ -911,20 +912,7 @@ export default {
           if (data.code === 0) {
             const functions = Array.isArray(data.data) ? data.data : [];
             this.allFunctions = functions.map((item) => {
-              let meta = [];
-              try {
-                meta = Array.isArray(item.fields)
-                  ? item.fields
-                  : JSON.parse(item.fields || "[]");
-              } catch (error) {
-                meta = [];
-              }
-              const params = meta.reduce((m, f) => { m[f.key] = f.default; return m; }, {});
-              return { ...item, fieldsMeta: meta, params };
-            }).filter((item) => {
-              const catalogOnly = item.fieldsMeta.find((field) => field.key === "catalog_only");
-              const value = catalogOnly && catalogOnly.default;
-              return !(value === true || String(value).toLowerCase() === "true");
+              return { ...item, fieldsMeta: pluginFields(item), params: newPluginParams(item) };
             });
             resolve(true);
           } else {
@@ -959,14 +947,17 @@ export default {
         this.allKnowledgeBases,
         this.defaultKnowledgeQueryPolicy()
       );
+      mappings.functions = mappings.functions.map(item => ({
+        ...this.allFunctions.find(definition => definition.id === item.id), ...item,
+      })).filter(isSelectablePlugin).map(item => ({ ...item, params: sanitizePluginParams(item, item.params) }));
       this.$emit('update:currentFunctions', mappings.functions);
       this.$emit('update:currentKnowledgeBases', mappings.knowledgeBases);
       this.originalFunctions = cloneRoleValue(mappings.functions);
     },
     buildFunctionMappings() {
-      const pluginMappings = (this.currentFunctions || []).map((item) => ({
+      const pluginMappings = (this.currentFunctions || []).filter(isSelectablePlugin).map((item) => ({
         pluginId: item.id,
-        paramInfo: normalizeMappingParams(item.params),
+        paramInfo: sanitizePluginParams(item, normalizeMappingParams(item.params)),
       }));
       const knowledgeMappings = (this.currentKnowledgeBases || []).map((item) => ({
         pluginId: item.id,

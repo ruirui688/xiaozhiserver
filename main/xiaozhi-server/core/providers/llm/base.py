@@ -6,6 +6,9 @@ logger = setup_logging()
 
 class LLMProviderBase(ABC):
     supports_native_function_call = False
+    # Remote applications may own their prompt/history and take only user text.
+    # Callers must not imply that local instructions or memory were delivered.
+    supports_local_context = True
 
     @abstractmethod
     def response(self, session_id, dialogue):

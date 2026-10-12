@@ -1,10 +1,12 @@
 ---
 status: supporting
 owner: tools
-last_verified: 2026-08-05
+last_verified: 2026-10-10
 source_paths:
   - main/xiaozhi-server/core/providers/tools
   - main/xiaozhi-server/plugins_func
+  - main/manager-api/src/main/java/xiaozhi/modules/model/support/PluginCatalogContract.java
+  - main/manager-web/src/utils/pluginCatalog.js
 ---
 
 # 功能插件架构
@@ -118,126 +120,29 @@ managed_memory.save_memory(dialogue)
 
 ### 声明式互动型
 
-适用于不需要服务端代码执行、主要靠 LLM 维持规则的轻量互动玩法，例如：
-
-- 讲段子
-- 热梗解释
-- 猜谜
-
-注意：成语接龙、你说我猜、小智想词用户猜已回退为主 LLM 自由对话，不再作为状态机工具强制注入。旧 provider_code 只作为兼容标识保留。
-
-它仍然是一条 `model_type = Plugin` 记录，但 `fields` 中包含兼容标记：
-
-```json
-{
-  "key": "custom_plugin",
-  "type": "boolean",
-  "label": "声明式互动",
-  "default": true
-}
-```
-
-`custom_plugin` 是历史兼容字段名。架构含义不是“另一个自定义插件系统”，而是：
+成语接龙、猜谜、朗诵、相声等纯语言活动统一使用 `custom_plugin=true` 的目录记录。
+`description` 只描述何时启动，`instructions` 定义玩法行为，`opening_message` 是可选开场。
+活动的调用参数固定为空对象，历史 parameters_schema 只读保留，不再提供无效编辑入口。
 
 ```text
-该插件没有 Python 执行函数，由后台声明玩法规则，运行时交给 LLM 继续生成回复。
+角色勾选 → 当前 Intent 白名单 → 模型能力检查 → 短启动工具
+模型明确调用 → 保存当前活动选择 → 仅该活动完整规则进入 system
+后续对话 → 沿用可见历史直接生成，不重复启动
+结束/换话题 → end_interaction → 清除当前规则
 ```
 
-声明式互动型推荐字段：
+不执行上传代码，不添加通用猜谜或长度约束，不维护隐藏答案和计分状态。
+询问、引用和否定提及不触发关键词路由，模型通过工具选择启动、切换和结束。
+角色/配置/规则/说话人变化和上下文清空会清除已选活动，会议期间不注入活动。
 
-```json
-[
-  {
-    "key": "custom_plugin",
-    "type": "boolean",
-    "label": "声明式互动",
-    "default": true
-  },
-  {
-    "key": "description",
-    "type": "textarea",
-    "label": "工具描述",
-    "default": "当用户想听一个短笑话时调用。"
-  },
-  {
-    "key": "instructions",
-    "type": "textarea",
-    "label": "玩法说明",
-    "default": "你是语音段子主持人。每次只讲一个短段子，适合 TTS 播报；用户说再来、换个类型或不好笑时，根据反馈换一个方向，不要重复同一个段子。"
-  },
-  {
-    "key": "opening_message",
-    "type": "textarea",
-    "label": "开场白",
-    "default": "给你来一个短一点、好懂一点的。"
-  },
-  {
-    "key": "parameters_schema",
-    "type": "json",
-    "label": "函数参数 Schema",
-    "default": {
-      "type": "object",
-      "properties": {
-        "user_message": {
-          "type": "string",
-          "description": "用户当前触发这个互动插件时说的话"
-        },
-        "context": {
-          "type": "string",
-          "description": "可选的对话上下文或额外提示"
-        }
-      },
-      "required": ["user_message"]
-    }
-  }
-]
-```
+`core/game/prompt_profiles.py` 的成语、谜语、脱口秀和相声规则仅作旧数据缺字段兼容；
+运营编辑以数据库目录为唯一来源，Web不再维护独立推荐规则常量，也不会自动创建活动目录。
+已有角色 instructions/opening_message 为显式自定义；删除该字段才恢复继承。
+未设置规则的新版角色会使用目录最新规则，显式空值不会被默认值覆盖。
 
-运行方式：
-
-```text
-provider_code 未命中 all_function_registry
-  -> 插件参数 custom_plugin = true
-  -> xiaozhi-server 动态生成 function call 工具描述
-  -> LLM 调用该工具
-  -> xiaozhi-server 返回玩法说明和工具参数
-  -> LLM 继续生成自然回复
-```
-
-声明式互动型不运行用户上传代码，不访问任意外部接口，不负责严格计分或跨会话状态。
-
-### 提示词活动预设（开发版，2026-09-23）
-
-`core/game/prompt_profiles.py` 提供 `idiom_chain`（成语接龙）、`riddle`（猜谜语）、
-`standup`（脱口秀）、`crosstalk`（相声）四份软规则。规则覆盖模式、难度、纠错、
-提示/计分约定、文稿局部修改与角色排练，但不实现裁判、隐藏答案库或播放状态机。
-这四种活动只记录当前提示词名称；不生成旧版猜词的 `<game_state>`，避免成语接龙
-被错误注入“用户想答案、机器人提问”的角色。旧猜词插件保持兼容，不在本次改写。
-
-使用现有功能插件目录和智能体启用关系：provider code 使用上述名称，
-`custom_plugin=true`，在 `instructions` 中编辑对应规则；没有 `instructions` 时使用
-代码预设，已有管理员规则不会被自动替换。Python 配置还必须在当前 Intent 的
-`functions` 白名单中启用对应名称；仅在 `plugins` 中增加配置不会自动启用。
-本次没有数据库迁移，不会自动新增生产目录条目或改写已有角色配置。
-
-复用现有 `FreeformGameManager` 的别名选取和当前活动续接，不新增关键词判题或流程状态机。
-每轮普通文本请求把一份临时 system 提示插在最后用户消息前，不永久写入聊天历史。
-明确退出或撤销启用后清除活动；切换活动不携带旧谜底。别名识别仍是现有实现，
-不是模型自主选择插件；否定提及、复合退出/切换话语及工具回注轮需要后续独立验证。
-换普通话题由软规则要求模型正常回答，不承诺服务器已自动清除活动名称。
-
-限制：纯提示词不保证严格计分、固定谜底、成语真实性或多音字裁判绝对正确。
-本语音链路不生成停顿/重音或舞台标记；写稿可用自然段和角色名，朗读模式仅台词。
-没有新增字幕/音频分流、SSML、双音色或断点续播，仍需真机验收，不能声称已实现音频演绎控制。
-
-离线契约测试为 `tests/test_prompt_activities.py`；真实 A/B 入口为
-`tools/evaluate_activity_prompts.py`，必须显式 `--live`，最多 16 次请求，不自动重试。
-它使用合成历史、同模型同参数比较普通 system 与额外活动提示，不包含生产角色、
-工具、ASR/TTS 和记忆，是提示词小样本而非线上质量或时延结论。原始结果只能输出到
-私有运行目录，不提交凭据或生产对话。
-支持通过 `--ssh` 和 `--device` 使用生产绑定模型：只把合成提示送入临时诊断进程，
-凭据不离开服务器、不写生产文件、失败不自动重试。开发验证与16次真实 A/B 的结果、
-全部原始回答见[活动提示词对比报告](../reports/activity-prompt-comparison-2026-09-23.md)。
+单项规则超过 12,000 字符时活动不可用，不截断约束。纯提示词无法保证严格计分、
+固定谜底、成语真实性或音频演绎；没有新增 SSML、双音色或音频断点续播。
+当前行为与通路支持详见[提示词注入工程](./prompt-injection-engineering.md#11-声明式互动插件注入)。
 
 ### 后续扩展型
 
@@ -294,13 +199,13 @@ provider_code 命中真实服务端工具
 声明式插件二次提示：_execute_declarative_interaction_plugin() -> Action.REQLLM -> 再请求 LLM
 ```
 
-成语接龙、你说我猜、小智想词用户猜等纯语言游戏不再注入为工具。它们由主 LLM 根据对话上下文和当前功能插件的可编辑规则自然处理。
+所有声明式活动先注入短启动工具，启动后只注入当前活动完整规则；普通对话不携带完整活动目录。
 
 ### 资源中心工具目录
 
-资源中心是静态 Server Plugin、连接级内置工具和 `direct_answer` 路由工具的统一目录。每个目录项都必须包含可查看、
-可编辑的 `description`，并注明工具来源与启用方式。`catalog_only=true` 表示该项只用于目录维护，不进入角色插件勾选；
-`runtime_builtin=true` 表示连接建立后按运行时能力自动注册。飞书、知识库和旧 Intent 白名单工具虽然不是角色勾选型插件，
+资源中心是静态 Server Plugin、连接级内置工具和 `direct_answer` 路由工具的统一目录。每个有效目录项包含可查看、
+可编辑的 `description`；已退役项只读并禁止启用，并注明工具来源与启用方式。`catalog_only=true` 表示该项只用于目录维护，不进入角色插件勾选；
+`runtime_builtin=true` 仅为历史展示字段，实际注册取决于本轮模型能力和会话条件。飞书、知识库和旧 Intent 白名单工具虽然不是角色勾选型插件，
 也必须以 `catalog_only` 目录项展示，不能因为启用入口不同而从资源中心消失。
 
 保存提示词后的运行链路：
@@ -338,7 +243,7 @@ docs/architecture/prompt-injection-engineering.md
 正式入口：
 
 ```text
-参数字典 -> 智能体功能库
+资源中心 -> 插件目录
 ```
 
 正式路由：
@@ -382,13 +287,13 @@ docs/architecture/prompt-injection-engineering.md
 
 智能体功能库页面行为：
 
-- 展示全部功能，但默认用“系统能力 / 互动玩法”解释来源。
+- 展示目录工具、互动活动及单列退役记录；数量不代表连接或本轮可用工具数，动态MCP/设备能力由运行时决定。
 - 页面使用可纵向滚动的管理布局，不能用固定视口加 `overflow: hidden` 裁掉插件；默认提供紧凑列表，并可切换卡片视图。
 - 左侧集中提供名称/编码/用户说法搜索、插件类型和系统能力分类筛选；内容区提供后台顺序/名称排序和刷新入口。
-- 系统能力的实现、参数 Schema 和启用边界不在页面内编辑或删除；所有目录项的模型工具提示词可查看，superAdmin 可编辑；天气、联网搜索等白名单能力还可维护用户级共享凭据并执行真实连接测试。
+- 系统能力的实现、参数 Schema 和启用边界不在页面内编辑或删除；有效目录项的工具调用说明可查看，superAdmin 可编辑，退役项不可编辑；天气、联网搜索等白名单能力还可维护用户级共享凭据并执行真实连接测试。
 - 系统能力的新增和实现仍以代码、数据库迁移或专用集成流程为准。
 - 互动玩法允许新建、编辑、复制和删除。
-- 新建互动玩法时可选择讲段子、热梗、成语接龙、你说我猜等预设规则，也可以从空白玩法开始。
+- 新建互动填写规则或复制当前目录记录，不提供另行维护的前端推荐常量。
 - 玩法规则应包含触发场景、玩法流程、判断标准、主持技巧、异常处理和安全边界，不能只写一句简单描述。
 
 用户级共享配置与插件启用保持分层：资源中心只维护可复用凭据和连接状态，角色配置仍决定该插件是否进入当前智能体的 function list，以及角色级行为参数。共享凭据使用 manager-api 的部署级 AES-GCM 密钥加密，Web API 只返回已配置状态和非敏感字段。真实测试链路为：
@@ -417,7 +322,6 @@ manager-web
     {
       "pluginId": "插件定义 ID",
       "paramInfo": {
-        "description": "工具描述",
         "instructions": "玩法说明"
       }
     }
@@ -425,27 +329,24 @@ manager-web
 }
 ```
 
-## 开发分支和提交规则
+角色不保存 description、custom_plugin、parameters_schema 等目录字段。instructions/opening_message 缺字段继承，存在字段（含空串）显式覆盖；删除目录会清理角色映射并通知配置刷新。目录DTO提供 catalogMetadata 声明生命周期、注入阶段与支持通路，不是实时可用性探测。
 
-本次功能在独立分支开发：
+新增 end_interaction 条件内置目录项通过独立 Liquibase 迁移登记，不自动启用角色玩法。
 
-```text
-feature/custom-interactive-plugin-management
-```
+角色保存会重新验证插件 ID、Plugin 类型与退役状态；过期页面不能重新绑定已删除记录。
+退役目录的直接 API 新增、编辑及通过更改编码/类型绕过均拒绝。
 
-分支虽然沿用最初命名，但架构上已经收敛为功能插件平台。后续继续开发时建议使用更准确的分支名，例如：
+## 工具调用方式
 
-```text
-feature/function-plugin-platform
-```
+传统语音链路的 `intent_llm` 与 `function_call` 共用工具注册和执行门控，
+区别在模型如何选择工具。前者先用独立分类提示和最近真实历史选一个工具，
+后者将结构化 tools 交给主模型，连同角色、记忆与完整受预算约束的历史一起判断。
+主模型不支持原生结构化调用时，运行时会降级为 `intent_llm`；页面选择不等于实际模式。
+详见[两种调用路径与天气路由](./prompt-injection-engineering.md#21-两种工具调用方式与天气路由)。
 
-开发约定：
-
-- 不直接在 `main` 上开发。
-- 未经明确要求，不推送任何远端分支。
-- 如果需要推送，只推送当前功能分支到 `origin`。
-- 不推送到 `upstream` 官方仓库。
-- 工作区里已有的无关改动不回滚、不混入本次提交。
+Qwen Realtime 与 Doubao Duplex 的工具续轮须先确认可信 instructions 与工具门控更新已被上游 ACK，
+再提交工具结果。单批调用逐项应用禁工具策略；打断取消未完成续轮，恢复 ACK 前不提交新输入。
+这些协议边界已有离线 reader/ACK 测试，不能视作供应商云端或真机验收。
 
 ## 适用边界
 

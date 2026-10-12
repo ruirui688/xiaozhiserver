@@ -18,6 +18,8 @@ logger = setup_logging()
 
 
 class LLMProvider(LLMProviderBase):
+    supports_local_context = False
+
     def __init__(self, config):
         self.personal_access_token = config.get("personal_access_token")
         self.bot_id = str(config.get("bot_id"))

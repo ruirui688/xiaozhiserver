@@ -35,6 +35,7 @@ import xiaozhi.common.utils.ConvertUtils;
 import xiaozhi.common.utils.JsonUtils;
 import xiaozhi.common.utils.ToolUtil;
 import xiaozhi.modules.agent.dao.AgentDao;
+import xiaozhi.modules.model.support.PluginCatalogContract;
 import xiaozhi.modules.agent.dao.AgentTagDao;
 import xiaozhi.modules.agent.dao.AgentVoicePrintDao;
 import xiaozhi.modules.agent.dto.AgentCreateDTO;
@@ -514,8 +515,7 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
                 m.setAgentId(agentId);
                 m.setPluginId(info.getPluginId());
                 m.setParamInfo(JsonUtils.toJsonString(
-                        SharedPluginConfigRegistry.stripSharedAgentFields(
-                                info.getPluginId(), info.getParamInfo())));
+                        normalizePluginRoleParams(info.getPluginId(), info.getParamInfo())));
                 AgentPluginMapping old = existMap.get(info.getPluginId());
                 if (old != null) {
                     // 已存在，设置id表示更新
@@ -595,7 +595,17 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
             if (function == null || StringUtils.isBlank(function.getPluginId())) {
                 throw new RenException(ErrorCode.PARAMS_GET_ERROR);
             }
+            ModelProviderDTO provider = modelProviderService.getById(function.getPluginId());
+            if (provider != null && !"Plugin".equals(provider.getModelType())) {
+                throw new RenException("所选目录记录不是功能插件，不能绑定到角色");
+            }
+            if (provider != null && PluginCatalogContract.isRetired(provider.getProviderCode())) {
+                throw new RenException("该插件已退役，不能启用");
+            }
             KnowledgeBaseEntity knowledgeBase = knowledgeBaseService.selectById(function.getPluginId());
+            if (provider == null && knowledgeBase == null) {
+                throw new RenException("所选插件或知识库不存在或已删除，请刷新后重新选择");
+            }
             if (knowledgeBase != null
                     && !StringUtils.equals(agentWorkspaceId, knowledgeBase.getWorkspaceId())
                     && !"OFFICIAL".equalsIgnoreCase(knowledgeBase.getScope())) {
@@ -744,7 +754,7 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
                 }
             }
             mapping.setParamInfo(JsonUtils.toJsonString(
-                    SharedPluginConfigRegistry.stripSharedAgentFields(provider.getId(), paramInfo)));
+                    PluginCatalogContract.roleParams(SharedPluginConfigRegistry.stripSharedAgentFields(provider.getId(), paramInfo))));
             mapping.setAgentId(entity.getId());
             toInsert.add(mapping);
         }
@@ -823,6 +833,13 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
         }
     }
 
+    private Map<String, Object> normalizePluginRoleParams(String pluginId, Map<String, Object> params) {
+        ModelProviderDTO provider = modelProviderService.getById(pluginId);
+        return PluginCatalogContract.roleParams(
+                SharedPluginConfigRegistry.stripSharedAgentFields(pluginId, params),
+                provider == null ? null : provider.getFields());
+    }
+
     private void stripSharedPluginFields(AgentPluginMapping mapping) {
         if (mapping == null || StringUtils.isBlank(mapping.getParamInfo())) {
             return;
@@ -832,7 +849,7 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
                     mapping.getParamInfo(), new TypeReference<Map<String, Object>>() {
                     });
             mapping.setParamInfo(JsonUtils.toJsonString(
-                    SharedPluginConfigRegistry.stripSharedAgentFields(mapping.getPluginId(), params)));
+                    normalizePluginRoleParams(mapping.getPluginId(), params)));
         } catch (RuntimeException e) {
             log.warn("智能体插件参数格式无效，无法应用共享字段脱敏: pluginId={}", mapping.getPluginId());
             mapping.setParamInfo("{}");
@@ -852,7 +869,7 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
                     });
             ((Map<String, Object>) mapping).put(
                     "paramInfo",
-                    JsonUtils.toJsonString(SharedPluginConfigRegistry.stripSharedAgentFields(pluginId, params)));
+                    JsonUtils.toJsonString(normalizePluginRoleParams(pluginId, params)));
         } catch (RuntimeException e) {
             log.warn("智能体插件参数格式无效，无法应用共享字段脱敏: pluginId={}", pluginId);
             ((Map<String, Object>) mapping).put("paramInfo", "{}");

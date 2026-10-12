@@ -225,14 +225,23 @@ def test_web_search_description_preserves_user_temporal_intent():
 
 
 def test_base_prompt_does_not_claim_optional_tools_are_always_available():
-    prompt = (SERVER_ROOT / "agent-base-prompt.txt").read_text(encoding="utf-8")
+    from core.utils.prompt_manager import PromptManager
 
-    assert "{{ available_tools_prompt }}" in prompt
-    assert "原生 tools / function calling schema" in prompt
-    assert "has_exit_tool" not in prompt
-    assert "必须调工具：播放音乐→play_music" not in prompt
-    assert "其他城市天气→get_weather" not in prompt
-    assert "非天气类联网搜索" not in prompt
+    manager = PromptManager({}, logger=FakeLogger())
+    manager.base_prompt_template = (SERVER_ROOT / "agent-base-prompt.txt").read_text(encoding="utf-8")
+    enabled = manager.build_enhanced_prompt("测试助手", "offline-tool-gate",
+                                           available_tools=[web_search.WEB_SEARCH_FUNCTION_DESC],
+                                           emoji_enabled=False)
+    disabled = manager.build_enhanced_prompt("测试助手", "offline-tool-gate",
+                                            available_tools=[], emoji_enabled=False)
+    assert "原生toolsschema是能力的唯一依据" in "".join(enabled.split())
+    assert "只调用已注册工具" in enabled
+    assert "<available_tools>" in enabled and "web_search" in enabled
+    assert "<available_tools>" not in disabled
+    assert "<tool_and_knowledge>" not in disabled
+    for name in ("play_music", "get_weather", "handle_exit_intent", "has_exit_tool"):
+        assert name not in enabled and name not in disabled
+    assert "web_search" not in disabled
 
 
 def test_web_search_ignores_lang_argument_without_losing_query():

@@ -32,7 +32,7 @@ def get_meeting_entry_prompt(conn) -> str:
     return prompt or MEETING_STARTED_PROMPT
 
 
-def build_meeting_runtime_context(conn) -> str:
+def build_meeting_runtime_context(conn, available_tools=None) -> str:
     """Tell the main LLM the authoritative meeting capability and state."""
     enabled = is_meeting_mode_enabled(conn)
     if not enabled:
@@ -46,14 +46,21 @@ def build_meeting_runtime_context(conn) -> str:
         getattr(getattr(conn, "llm", None), "supports_native_function_call", False)
         and getattr(conn, "intent_type", None) == "function_call"
     )
+    if available_tools is not None:
+        main_llm_tool_available = main_llm_tool_available and any(
+            isinstance(item, dict)
+            and isinstance(item.get("function"), dict)
+            and item["function"].get("name") == MEETING_PLUGIN_NAME
+            for item in available_tools
+        )
     meeting = getattr(conn, "meeting_minutes", None)
     active = bool(meeting and meeting.is_active())
 
     if not main_llm_tool_available:
         instruction = (
-            "会议纪要功能已经配置，但当前主 LLM 没有可执行的原生 meeting_minutes function tool。"
-            "如果用户要求开启会议，必须明确说明当前主模型工具调用模式不可用；"
-            "不得声称已经开启、正在记录或已经结束会议。"
+            "本轮没有可执行的 meeting_minutes 工具，不得发起会议工具调用。"
+            "只根据已有信息回应，不得声称本轮已经开启、记录或结束会议。"
+            "若用户请求新的会议操作，应说明本轮无法执行。"
         )
     elif active:
         instruction = (

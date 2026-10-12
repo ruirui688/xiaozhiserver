@@ -44,6 +44,8 @@ def reset_conversation_context(
     checkpoint_before_context_reset(conn)
     removed = conn.dialogue.clear_conversation_history(preserve_system=True)
     conn.last_tool_context = None
+    from core.game.interactions import reset_active_interaction
+    reset_active_interaction(conn)
     conn.current_speaker = None
     conn.current_speaker_id = None
     if getattr(conn, "turn_context", None) is not None:

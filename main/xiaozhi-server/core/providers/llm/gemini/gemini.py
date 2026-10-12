@@ -93,9 +93,6 @@ class LLMProvider(LLMProviderBase):
         # 设置请求超时（秒）
         self.timeout = cfg.get("timeout", 120)  # 默认120秒
 
-        # 创建模型实例
-        self.model = genai.GenerativeModel(self.model_name)
-
         self.gen_cfg = GenerationConfig(
             temperature=0.7,
             top_p=0.9,
@@ -112,8 +109,8 @@ class LLMProvider(LLMProviderBase):
                 function_declarations=[
                     types.FunctionDeclaration(
                         name=f["function"]["name"],
-                        description=f["function"]["description"],
-                        parameters=f["function"]["parameters"],
+                        description=f["function"].get("description", ""),
+                        parameters=f["function"].get("parameters", {"type": "object"}),
                     )
                     for f in funcs
                 ]
@@ -130,59 +127,79 @@ class LLMProvider(LLMProviderBase):
     def _generate(self, dialogue, tools):
         role_map = {"assistant": "model", "user": "user"}
         contents: list = []
+        system_parts = []
+        tool_names = {}
+
+        def append_content(role, parts):
+            if contents and contents[-1]["role"] == role:
+                contents[-1]["parts"].extend(parts)
+            else:
+                contents.append({"role": role, "parts": parts})
+
         # 拼接对话
         for m in dialogue:
             r = m["role"]
 
+            if r == "system":
+                text = str(m.get("content") or "")
+                if text:
+                    system_parts.append(text)
+                continue
+
             if r == "assistant" and "tool_calls" in m:
-                tc = m["tool_calls"][0]
-                contents.append(
-                    {
-                        "role": "model",
-                        "parts": [
-                            {
-                                "function_call": {
-                                    "name": tc["function"]["name"],
-                                    "args": json.loads(tc["function"]["arguments"]),
-                                }
-                            }
-                        ],
-                    }
-                )
+                parts = []
+                if m.get("content"):
+                    parts.append({"text": str(m["content"])})
+                for tc in m["tool_calls"]:
+                    function = tc["function"]
+                    tool_names[tc["id"]] = function["name"]
+                    arguments = function.get("arguments") or "{}"
+                    parts.append({"function_call": {
+                        "name": function["name"],
+                        "args": json.loads(arguments) if isinstance(arguments, str) else arguments,
+                    }})
+                append_content("model", parts)
                 continue
 
             if r == "tool":
-                contents.append(
-                    {
-                        "role": "model",
-                        "parts": [{"text": str(m.get("content", ""))}],
-                    }
-                )
+                name = tool_names.get(m.get("tool_call_id"))
+                if not name:
+                    raise ValueError("Gemini tool response has no matching function call")
+                # Keep arbitrary result text as data inside a native response,
+                # never as model-authored prose or a promoted system message.
+                append_content("user", [{"function_response": {
+                    "name": name,
+                    "response": {"result": str(m.get("content") or "")},
+                }}])
                 continue
 
-            contents.append(
-                {
-                    "role": role_map.get(r, "user"),
-                    "parts": [{"text": str(m.get("content", ""))}],
-                }
-            )
+            if r not in role_map:
+                raise ValueError("Unsupported Gemini message role")
+            append_content(role_map[r], [{"text": str(m.get("content") or "")}])
 
-        stream: GenerateContentResponse = self.model.generate_content(
+        # Instructions change on every turn. A request-local model prevents
+        # concurrent connections from overwriting each other's system rules.
+        model = genai.GenerativeModel(
+            self.model_name,
+            system_instruction="\n\n".join(system_parts) or None,
+        )
+        stream: GenerateContentResponse = model.generate_content(
             contents=contents,
             generation_config=self.gen_cfg,
             tools=tools,
             stream=True,
-            timeout=self.timeout,
+            request_options={"timeout": self.timeout},
         )
 
         try:
             for chunk in stream:
                 cand = chunk.candidates[0]
+                function_calls = []
                 for part in cand.content.parts:
                     # a) 函数调用-通常是最后一段话才是函数调用
                     if getattr(part, "function_call", None):
                         fc = part.function_call
-                        yield None, [
+                        function_calls.append(
                             SimpleNamespace(
                                 id=uuid.uuid4().hex,
                                 type="function",
@@ -193,11 +210,13 @@ class LLMProvider(LLMProviderBase):
                                     ),
                                 ),
                             )
-                        ]
-                        return
+                        )
                     # b) 普通文本
                     if getattr(part, "text", None):
                         yield part.text if tools is None else (part.text, None)
+                if function_calls:
+                    yield None, function_calls
+                    return
 
         finally:
             if tools is not None:

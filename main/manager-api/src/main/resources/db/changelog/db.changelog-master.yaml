@@ -1516,3 +1516,10 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/202610101230.sql
+  - changeSet:
+      id: plugin-interaction-control-20261010
+      author: Codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/plugin-interaction-control-20261010.sql

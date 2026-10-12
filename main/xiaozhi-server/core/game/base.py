@@ -426,9 +426,9 @@ class GameSessionManager:
     def handle_user_describes_guess(self, tool_name, user_message):
         return self._user_describes_game.handle(tool_name, user_message)
 
-    def build_freeform_game_prompt(self, user_message, enabled_plugins):
+    def build_freeform_game_prompt(self, user_message, enabled_plugins, active_name=None):
         return self._freeform_game_manager.build_freeform_game_prompt(
-            user_message, enabled_plugins
+            user_message, enabled_plugins, active_name=active_name
         )
 
     # ------------------------------------------------------------------ #

@@ -9,6 +9,7 @@ import java.util.Map;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -19,6 +20,8 @@ import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import lombok.AllArgsConstructor;
 import xiaozhi.modules.agent.dao.AgentDao;
+import xiaozhi.modules.agent.dao.AgentPluginMappingMapper;
+import xiaozhi.modules.agent.entity.AgentPluginMapping;
 import xiaozhi.modules.agent.runtime.AgentRuntimeConfigRefreshEvent;
 import xiaozhi.common.constant.Constant;
 import xiaozhi.common.exception.ErrorCode;
@@ -31,6 +34,7 @@ import xiaozhi.modules.model.dao.ModelProviderDao;
 import xiaozhi.modules.model.dto.ModelProviderDTO;
 import xiaozhi.modules.model.entity.ModelProviderEntity;
 import xiaozhi.modules.model.service.ModelProviderService;
+import xiaozhi.modules.model.support.PluginCatalogContract;
 import xiaozhi.modules.security.user.SecurityUser;
 
 @Service
@@ -41,6 +45,7 @@ public class ModelProviderServiceImpl extends BaseServiceImpl<ModelProviderDao, 
     private final ModelProviderDao modelProviderDao;
     private final AgentDao agentDao;
     private final ApplicationEventPublisher eventPublisher;
+    private final AgentPluginMappingMapper pluginMappingMapper;
 
     @Override
     public List<ModelProviderDTO> getPluginList() {
@@ -48,13 +53,13 @@ public class ModelProviderServiceImpl extends BaseServiceImpl<ModelProviderDao, 
         LambdaQueryWrapper<ModelProviderEntity> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(ModelProviderEntity::getModelType, "Plugin");
         List<ModelProviderEntity> providerEntities = modelProviderDao.selectList(queryWrapper);
-        return ConvertUtils.sourceToTarget(providerEntities, ModelProviderDTO.class);
+        return PluginCatalogContract.decorate(ConvertUtils.sourceToTarget(providerEntities, ModelProviderDTO.class));
     }
 
     @Override
     public ModelProviderDTO getById(String id) {
         ModelProviderEntity entity = modelProviderDao.selectById(id);
-        return ConvertUtils.sourceToTarget(entity, ModelProviderDTO.class);
+        return PluginCatalogContract.decorate(ConvertUtils.sourceToTarget(entity, ModelProviderDTO.class));
     }
 
     @Override
@@ -63,7 +68,7 @@ public class ModelProviderServiceImpl extends BaseServiceImpl<ModelProviderDao, 
         queryWrapper.in(ModelProviderEntity::getId, ids);
         queryWrapper.eq(ModelProviderEntity::getModelType, "Plugin");
         List<ModelProviderEntity> providerEntities = modelProviderDao.selectList(queryWrapper);
-        return ConvertUtils.sourceToTarget(providerEntities, ModelProviderDTO.class);
+        return PluginCatalogContract.decorate(ConvertUtils.sourceToTarget(providerEntities, ModelProviderDTO.class));
     }
 
     @Override
@@ -73,7 +78,7 @@ public class ModelProviderServiceImpl extends BaseServiceImpl<ModelProviderDao, 
         queryWrapper.eq("model_type", StringUtils.isBlank(modelType) ? "" : modelType);
         queryWrapper.orderByAsc("sort");
         List<ModelProviderEntity> providerEntities = modelProviderDao.selectList(queryWrapper);
-        return ConvertUtils.sourceToTarget(providerEntities, ModelProviderDTO.class);
+        return PluginCatalogContract.decorate(ConvertUtils.sourceToTarget(providerEntities, ModelProviderDTO.class));
     }
 
     @Override
@@ -98,10 +103,13 @@ public class ModelProviderServiceImpl extends BaseServiceImpl<ModelProviderDao, 
                     .or()
                     .like("provider_code", modelProviderDTO.getName()));
         }
-        return getPageData(modelProviderDao.selectPage(pageParam, wrapper), ModelProviderDTO.class);
+        PageData<ModelProviderDTO> pageData = getPageData(modelProviderDao.selectPage(pageParam, wrapper), ModelProviderDTO.class);
+        PluginCatalogContract.decorate(pageData.getList());
+        return pageData;
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public ModelProviderDTO add(ModelProviderDTO modelProviderDTO) {
         validatePluginPrompt(modelProviderDTO);
         UserDetail user = SecurityUser.getUser();
@@ -119,14 +127,18 @@ public class ModelProviderServiceImpl extends BaseServiceImpl<ModelProviderDao, 
 
         publishToolPromptRefresh(modelProviderDTO, "tool_catalog_added");
 
-        return ConvertUtils.sourceToTarget(modelProviderDTO, ModelProviderDTO.class);
+        return PluginCatalogContract.decorate(ConvertUtils.sourceToTarget(modelProviderDTO, ModelProviderDTO.class));
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public ModelProviderDTO edit(ModelProviderDTO modelProviderDTO) {
         validatePluginPrompt(modelProviderDTO);
         ModelProviderEntity existing = modelProviderDao.selectById(modelProviderDTO.getId());
-        String previousDescription = extractDescription(existing == null ? null : existing.getFields());
+        if (existing != null && "Plugin".equals(existing.getModelType())
+                && PluginCatalogContract.isRetired(existing.getProviderCode())) {
+            throw new RenException("该插件已退役，不能修改或通过更改编码重新启用");
+        }
         UserDetail user = SecurityUser.getUser();
         modelProviderDTO.setUpdater(user.getId());
         modelProviderDTO.setUpdateDate(new Date());
@@ -134,25 +146,40 @@ public class ModelProviderServiceImpl extends BaseServiceImpl<ModelProviderDao, 
                 .updateById(ConvertUtils.sourceToTarget(modelProviderDTO, ModelProviderEntity.class)) == 0) {
             throw new RenException(ErrorCode.UPDATE_DATA_FAILED);
         }
-        String nextDescription = extractDescription(modelProviderDTO.getFields());
-        if (!StringUtils.equals(previousDescription, nextDescription)) {
-            publishToolPromptRefresh(modelProviderDTO, "tool_prompt_updated");
+        // Rules, activation metadata and schemas affect runtime as well as description.
+        publishToolPromptRefresh(modelProviderDTO, "tool_catalog_updated");
+        if (existing != null && "Plugin".equals(existing.getModelType())
+                && !"Plugin".equals(modelProviderDTO.getModelType())) {
+            publishToolPromptRefresh(ConvertUtils.sourceToTarget(existing, ModelProviderDTO.class), "tool_catalog_updated");
         }
-        return ConvertUtils.sourceToTarget(modelProviderDTO, ModelProviderDTO.class);
+        return PluginCatalogContract.decorate(ConvertUtils.sourceToTarget(modelProviderDTO, ModelProviderDTO.class));
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void delete(String id) {
+        ModelProviderDTO deleted = getById(id);
+        if (deleted != null && "Plugin".equals(deleted.getModelType())) {
+            pluginMappingMapper.delete(new QueryWrapper<AgentPluginMapping>().eq("plugin_id", id));
+        }
         if (modelProviderDao.deleteById(id) == 0) {
             throw new RenException(ErrorCode.DELETE_DATA_FAILED);
         }
+        publishToolPromptRefresh(deleted, "tool_catalog_deleted");
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void delete(List<String> ids) {
+        List<ModelProviderDTO> deleted = getPluginListByIds(ids);
+        if (!deleted.isEmpty()) {
+            pluginMappingMapper.delete(new QueryWrapper<AgentPluginMapping>()
+                    .in("plugin_id", deleted.stream().map(ModelProviderDTO::getId).toList()));
+        }
         if (modelProviderDao.deleteBatchIds(ids) == 0) {
             throw new RenException(ErrorCode.DELETE_DATA_FAILED);
         }
+        if (!deleted.isEmpty()) publishToolPromptRefresh(deleted.get(0), "tool_catalog_deleted");
     }
 
     @Override
@@ -161,12 +188,15 @@ public class ModelProviderServiceImpl extends BaseServiceImpl<ModelProviderDao, 
         queryWrapper.eq("model_type", StringUtils.isBlank(modelType) ? "" : modelType);
         queryWrapper.eq("provider_code", StringUtils.isBlank(providerCode) ? "" : providerCode);
         List<ModelProviderEntity> providerEntities = modelProviderDao.selectList(queryWrapper);
-        return ConvertUtils.sourceToTarget(providerEntities, ModelProviderDTO.class);
+        return PluginCatalogContract.decorate(ConvertUtils.sourceToTarget(providerEntities, ModelProviderDTO.class));
     }
 
     private void validatePluginPrompt(ModelProviderDTO provider) {
         if (provider == null || !"Plugin".equals(provider.getModelType())) {
             return;
+        }
+        if (PluginCatalogContract.isRetired(provider.getProviderCode())) {
+            throw new RenException("该插件已退役，不能新增或修改");
         }
         try {
             JSONArray fields = JSONUtil.parseArray(provider.getFields());
@@ -188,23 +218,6 @@ public class ModelProviderServiceImpl extends BaseServiceImpl<ModelProviderDao, 
         } catch (Exception error) {
             throw new RenException("插件字段必须是合法的JSON数组");
         }
-    }
-
-    private String extractDescription(String fieldsJson) {
-        if (StringUtils.isBlank(fieldsJson)) {
-            return "";
-        }
-        try {
-            for (Object value : JSONUtil.parseArray(fieldsJson)) {
-                if (value instanceof JSONObject field
-                        && "description".equals(field.getStr("key"))) {
-                    return StringUtils.trimToEmpty(field.getStr("default"));
-                }
-            }
-        } catch (Exception ignored) {
-            return "";
-        }
-        return "";
     }
 
     private void publishToolPromptRefresh(ModelProviderDTO provider, String reason) {
