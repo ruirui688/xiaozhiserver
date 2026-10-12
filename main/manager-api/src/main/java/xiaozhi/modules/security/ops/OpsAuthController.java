@@ -21,13 +21,20 @@ public class OpsAuthController {
     private final OpsEnrollmentService enrollment;
     @Data public static class Login extends LoginDTO { @NotBlank private String otpCode; }
     @Data public static class Enrollment extends Login { @NotBlank private String totpSecret; private String recoveryCode; }
+    @GetMapping("/identity-policy")
+    public Result<OpsEnrollmentService.IdentityPolicy> identityPolicy(HttpServletRequest request) {
+        identities.limit("identity-policy-ip:"+request.getRemoteAddr(),120);
+        return new Result<OpsEnrollmentService.IdentityPolicy>().ok(enrollment.identityPolicy());
+    }
     @PostMapping("/enroll")
     public Result<Map<String,Object>> enroll(@Valid @RequestBody Enrollment input,HttpServletRequest request) {
+        enrollment.requireAvailable();
         String password=Sm2DecryptUtil.decryptAndValidateCaptcha(input.getPassword(),input.getCaptchaId(),captcha,params);
         return new Result<Map<String,Object>>().ok(enrollment.submit(input.getUsername(),password,input.getTotpSecret(),input.getOtpCode(),null,request.getRemoteAddr()));
     }
     @PostMapping("/recovery-request")
     public Result<Map<String,Object>> recovery(@Valid @RequestBody Enrollment input,HttpServletRequest request) {
+        enrollment.requireAvailable();
         if(input.getRecoveryCode()==null||input.getRecoveryCode().isBlank()) throw new xiaozhi.common.exception.RenException("恢复码不能为空");
         String password=Sm2DecryptUtil.decryptAndValidateCaptcha(input.getPassword(),input.getCaptchaId(),captcha,params);
         return new Result<Map<String,Object>>().ok(enrollment.submit(input.getUsername(),password,input.getTotpSecret(),input.getOtpCode(),input.getRecoveryCode(),request.getRemoteAddr()));

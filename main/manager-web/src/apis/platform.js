@@ -25,6 +25,7 @@ export const userPlatform = {
   requestAllowance: data => platformRequest('POST', '/user/platform/allowance-requests', data),
 };
 export const operations = {
+  identityPolicy: () => platformRequest('GET', '/ops/auth/identity-policy'),
   login: data => platformRequest('POST', '/ops/auth/login', data),
   me: () => platformRequest('GET', '/ops/auth/me'),
   logout: () => platformRequest('POST', '/ops/auth/logout'),

@@ -144,6 +144,51 @@ class OpsSecurityTest {
         assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM ops_identity_change",Integer.class));
         assertEquals(0,jdbc.queryForObject("SELECT consumed FROM ops_bootstrap_state WHERE id=1",Integer.class));
     }
+    @Test void identityPolicyRequiresIndependentActiveGovernanceWithCurrentGrants() {
+        jdbc.update("UPDATE ops_bootstrap_state SET consumed=1 WHERE id=1");
+        employee("requester","requester");employee("approver","approver");
+        var enrollment=new OpsEnrollmentService(jdbc,cipher,identities,transactions());
+        assertFalse(enrollment.identityPolicy().available());
+        grant("requester","IAM_REQUEST");grant("requester","IAM_APPROVE");
+        assertFalse(enrollment.identityPolicy().available());
+        jdbc.update("DELETE FROM ops_role_grant WHERE role_code='IAM_APPROVE'");
+        grant("approver","IAM_APPROVE");
+        assertTrue(enrollment.identityPolicy().available());
+        for(String field:List.of("employee","grant","expiry","scope")) {
+            if("employee".equals(field))jdbc.update("UPDATE ops_employee SET status=0 WHERE id='approver'");
+            if("grant".equals(field))jdbc.update("UPDATE ops_role_grant SET status=0 WHERE employee_id='approver'");
+            if("expiry".equals(field))jdbc.update("UPDATE ops_role_grant SET expires_at=? WHERE employee_id='approver'",java.sql.Timestamp.from(Instant.now().minusSeconds(60)));
+            if("scope".equals(field))jdbc.update("UPDATE ops_role_grant SET scope_id='other-domain' WHERE employee_id='approver'");
+            assertFalse(enrollment.identityPolicy().available(),field);
+            assertEquals("员工账号由部署维护人员管理，请联系维护人员",enrollment.identityPolicy().message());
+            jdbc.update("UPDATE ops_employee SET status=1 WHERE id='approver'");
+            jdbc.update("UPDATE ops_role_grant SET status=1,expires_at=NULL,scope_id='identity' WHERE employee_id='approver'");
+        }
+    }
+    @Test void missingGovernanceRejectsEnrollmentAndRecoveryWithoutChangingFactorsOrSessions() {
+        jdbc.update("UPDATE ops_bootstrap_state SET consumed=1 WHERE id=1");
+        employee("requester","requester");employee("approver","approver");employee("target","target");
+        grant("requester","IAM_REQUEST");grant("approver","IAM_APPROVE");
+        jdbc.update("UPDATE ops_employee SET recovery_hash=? WHERE id='target'",OpsIdentityService.hash("test-recovery-code"));
+        jdbc.update("INSERT INTO ops_session(id,employee_id,token_hash,expires_at) VALUES('session','target',?,?)",OpsIdentityService.hash("test-session-token"),java.sql.Timestamp.from(Instant.now().plusSeconds(3600)));
+        var before=jdbc.queryForMap("SELECT * FROM ops_employee WHERE id='target'");
+        var sessions=jdbc.queryForList("SELECT * FROM ops_session");
+        var enrollment=new OpsEnrollmentService(jdbc,cipher,identities,transactions());
+        String otp=OpsTotp.code(TOTP,Instant.now().getEpochSecond()/30);
+        for(String unavailable:List.of("requester","approver")) {
+            jdbc.update("UPDATE ops_employee SET status=0 WHERE id=?",unavailable);
+            for(String recovery:Arrays.asList(null,"test-recovery-code")) {
+                var error=assertThrows(xiaozhi.common.exception.RenException.class,()->enrollment.submit(recovery==null?"new-employee":"target","Changed-Password-42",TOTP,otp,recovery,"192.0.2.2"));
+                assertEquals("员工账号由部署维护人员管理，请联系维护人员",error.getMessage());
+            }
+            jdbc.update("UPDATE ops_employee SET status=1 WHERE id=?",unavailable);
+        }
+        assertEquals(before,jdbc.queryForMap("SELECT * FROM ops_employee WHERE id='target'"));
+        assertEquals(sessions,jdbc.queryForList("SELECT * FROM ops_session"));
+        assertEquals(3,jdbc.queryForObject("SELECT COUNT(*) FROM ops_employee",Integer.class));
+        for(String table:List.of("ops_identity_change","ops_login_limit","ops_audit_event"))
+            assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM "+table,Integer.class),table);
+    }
     @Test void roleSeparationPreventsPoolSelfFundingAndSelfReview() {
         assertFalse(OpsPermissionCatalog.TEMPLATES.get("SUPPLIER_FINANCE").permissions().contains("pool.adjust"));
         for(Set<String> roles:List.of(Set.of("ALLOWANCE","ALLOWANCE_POOL"),Set.of("ALLOWANCE_POOL","ALLOWANCE_REVIEW"),Set.of("IAM_REQUEST","SUPPORT"),Set.of("OTA","OTA_REVIEW"),Set.of("OFFICIAL_CONTENT","CONTENT_REVIEW"),Set.of("MODEL_CATALOG","MODEL_REVIEW")))

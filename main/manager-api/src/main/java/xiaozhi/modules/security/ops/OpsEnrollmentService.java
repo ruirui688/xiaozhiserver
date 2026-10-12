@@ -21,7 +21,18 @@ public class OpsEnrollmentService {
     private final OpsIdentityService identities;
     private final PlatformTransactionManager transactions;
     private static final SecureRandom RANDOM=new SecureRandom();
+    private static final String DEPLOYMENT_MANAGED="员工账号由部署维护人员管理，请联系维护人员";
+    public record IdentityPolicy(boolean available,String message) {}
+    public IdentityPolicy identityPolicy() {
+        boolean available=initialized()&&hasIdentityGovernance();
+        return new IdentityPolicy(available,available?"":DEPLOYMENT_MANAGED);
+    }
+    public void requireAvailable() {
+        if(!initialized())throw new RenException("运营身份尚未初始化，请联系部署负责人");
+        requireIdentityGovernance();
+    }
     public Map<String,Object> submit(String username,String password,String secret,String otp,String recoveryCode,String address) {
+        requireAvailable();
         identities.limit("enroll-ip:"+address,20);
         identities.limit("enroll-name:"+String.valueOf(username).toLowerCase(Locale.ROOT),5);
         if(username==null||!username.matches("[a-zA-Z0-9_.@-]{3,100}")||password==null||password.length()<14||password.length()>128
@@ -33,6 +44,7 @@ public class OpsEnrollmentService {
             // Serialize with the one-time bootstrap before an anonymous request can create an employee.
             Integer initialized=jdbc.queryForObject("SELECT consumed FROM ops_bootstrap_state WHERE id=1 FOR UPDATE",Integer.class);
             if(!Integer.valueOf(1).equals(initialized))throw new RenException("运营身份尚未初始化，请联系部署负责人");
+            requireIdentityGovernance();
             var rows=jdbc.queryForList("SELECT id,status,recovery_hash FROM ops_employee WHERE username=? FOR UPDATE",username);
             boolean recovering=recoveryCode!=null&&!recoveryCode.isBlank();String employee;
             if(recovering) {
@@ -97,6 +109,28 @@ public class OpsEnrollmentService {
     private Map<String,Object> locked(String id){
         var rows=jdbc.queryForList("SELECT * FROM ops_identity_change WHERE id=? AND expires_at>CURRENT_TIMESTAMP FOR UPDATE",id);
         if(rows.isEmpty())throw new RenException("身份申请不存在或已过期");return rows.getFirst();
+    }
+    private boolean initialized() {
+        return Integer.valueOf(1).equals(jdbc.queryForObject("SELECT consumed FROM ops_bootstrap_state WHERE id=1",Integer.class));
+    }
+    private void requireIdentityGovernance() {
+        if(!hasIdentityGovernance())throw new RenException(DEPLOYMENT_MANAGED);
+    }
+    private boolean hasIdentityGovernance() {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+            SELECT EXISTS (
+                SELECT 1 FROM ops_role_grant r
+                JOIN ops_employee requester ON requester.id=r.employee_id AND requester.status=1
+                JOIN ops_role_grant a ON a.employee_id<>r.employee_id
+                JOIN ops_employee approver ON approver.id=a.employee_id AND approver.status=1
+                WHERE r.role_code='IAM_REQUEST' AND a.role_code='IAM_APPROVE'
+                  AND r.scope_type='PLATFORM' AND r.scope_id='identity'
+                  AND a.scope_type='PLATFORM' AND a.scope_id='identity'
+                  AND r.status=1 AND a.status=1
+                  AND (r.expires_at IS NULL OR r.expires_at>CURRENT_TIMESTAMP)
+                  AND (a.expires_at IS NULL OR a.expires_at>CURRENT_TIMESTAMP)
+            )
+            """,Boolean.class));
     }
     private static String randomCode(){byte[] bytes=new byte[32];RANDOM.nextBytes(bytes);return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);}
 }
