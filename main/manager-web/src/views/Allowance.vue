@@ -18,9 +18,9 @@
             <el-button class="allowance-limit-action" type="text" size="small" icon="el-icon-setting" @click="editLimits">空间上限</el-button>
           </div>
           <div v-if="balance" class="allowance-totals">
-            <div class="allowance-available"><span>账户可用额度</span><strong>{{ amount(balance.available) }}<small>元</small></strong></div>
-            <div><span>账户预占</span><strong>{{ amount(balance.reserved) }}<small>元</small></strong></div>
-            <div><span>账户累计已用</span><strong>{{ amount(balance.spent) }}<small>元</small></strong></div>
+            <div class="allowance-available"><span>账户可用额度</span><strong><el-tooltip :content="exactAmount(balance.available)" :disabled="amount(balance.available) === '—'" popper-class="allowance-amount-tooltip" placement="top"><button type="button" class="allowance-money" :class="{ 'allowance-money-range': amount(balance.available).includes('小于') }" :disabled="amount(balance.available) === '—'" aria-label="查看账户可用额度的精确金额" @click="$event.currentTarget.focus()" @keydown.esc.stop="$event.currentTarget.blur()">{{ amount(balance.available) }}<small>元</small></button></el-tooltip></strong></div>
+            <div><span>账户预占</span><strong><el-tooltip :content="exactAmount(balance.reserved)" :disabled="amount(balance.reserved) === '—'" popper-class="allowance-amount-tooltip" placement="top"><button type="button" class="allowance-money" :class="{ 'allowance-money-range': amount(balance.reserved).includes('小于') }" :disabled="amount(balance.reserved) === '—'" aria-label="查看账户预占的精确金额" @click="$event.currentTarget.focus()" @keydown.esc.stop="$event.currentTarget.blur()">{{ amount(balance.reserved) }}<small>元</small></button></el-tooltip></strong></div>
+            <div><span>账户累计已用</span><strong><el-tooltip :content="exactAmount(balance.spent)" :disabled="amount(balance.spent) === '—'" popper-class="allowance-amount-tooltip" placement="top"><button type="button" class="allowance-money" :class="{ 'allowance-money-range': amount(balance.spent).includes('小于') }" :disabled="amount(balance.spent) === '—'" aria-label="查看账户累计已用的精确金额" @click="$event.currentTarget.focus()" @keydown.esc.stop="$event.currentTarget.blur()">{{ amount(balance.spent) }}<small>元</small></button></el-tooltip></strong></div>
           </div>
           <p class="allowance-summary-note">{{ balance ? '统计本人账户下的全部工作空间 · 额度由平台统一发放' : '使用负责人的服务额度；账户余额仅本人可见。' }}</p>
         </section>
@@ -37,8 +37,8 @@
                 <el-table :data="ledger" v-loading="ledgerLoading" size="small" empty-text="暂无额度流水">
                   <el-table-column prop="createdAt" label="时间" min-width="160" />
                   <el-table-column prop="type" label="类型" width="110"><template slot-scope="s">{{ ledgerLabel(s.row.type) }}</template></el-table-column>
-                  <el-table-column prop="amount" label="变动（元）" min-width="120" />
-                  <el-table-column prop="balanceAfter" label="变动后余额（元）" min-width="150" />
+                  <el-table-column prop="amount" label="变动（元）" min-width="120"><template slot-scope="s"><el-tooltip :content="exactAmount(s.row.amount)" :disabled="amount(s.row.amount) === '—'" popper-class="allowance-amount-tooltip" placement="top"><button type="button" class="allowance-money" :disabled="amount(s.row.amount) === '—'" aria-label="查看流水变动的精确金额" @click="$event.currentTarget.focus()" @keydown.esc.stop="$event.currentTarget.blur()">{{ amount(s.row.amount) }}</button></el-tooltip></template></el-table-column>
+                  <el-table-column prop="balanceAfter" label="变动后余额（元）" min-width="150"><template slot-scope="s"><el-tooltip :content="exactAmount(s.row.balanceAfter)" :disabled="amount(s.row.balanceAfter) === '—'" popper-class="allowance-amount-tooltip" placement="top"><button type="button" class="allowance-money" :disabled="amount(s.row.balanceAfter) === '—'" aria-label="查看变动后余额的精确金额" @click="$event.currentTarget.focus()" @keydown.esc.stop="$event.currentTarget.blur()">{{ amount(s.row.balanceAfter) }}</button></el-tooltip></template></el-table-column>
                   <el-table-column prop="reason" label="说明" min-width="180" />
                 </el-table>
                 <el-pagination :current-page="page" :page-size="20" :total="total" layout="total, prev, pager, next" @current-change="changePage" />
@@ -53,9 +53,9 @@
         <template v-else-if="limits">
           <p class="allowance-dialog-note">仅限制当前工作空间的使用，不另行发放额度。负责人账户额度不足时，也会暂停新的付费调用。</p>
           <dl class="allowance-limits">
-            <dt>总使用上限</dt><dd>{{ limits.totalLimit == null ? '未单设上限' : amount(limits.totalLimit) + ' 元' }}</dd>
-            <dt>今日使用 / 日上限</dt><dd>{{ amount(limits.dailySpent) }} / {{ limits.dailyLimit == null ? '未单设上限' : amount(limits.dailyLimit) + ' 元' }}</dd>
-            <dt>累计使用 / 预占</dt><dd>{{ amount(limits.totalSpent) }} / {{ amount(limits.totalReserved) }} 元</dd>
+            <dt>总使用上限</dt><dd><span v-if="limits.totalLimit == null">未单设上限</span><template v-else><el-tooltip :content="exactAmount(limits.totalLimit)" :disabled="amount(limits.totalLimit) === '—'" popper-class="allowance-amount-tooltip" placement="top"><button type="button" class="allowance-money" :disabled="amount(limits.totalLimit) === '—'" aria-label="查看总使用上限的精确金额" @click="$event.currentTarget.focus()" @keydown.esc.stop="$event.currentTarget.blur()">{{ amount(limits.totalLimit) }}<small>元</small></button></el-tooltip></template></dd>
+            <dt>今日使用 / 日上限</dt><dd><el-tooltip :content="exactAmount(limits.dailySpent)" :disabled="amount(limits.dailySpent) === '—'" popper-class="allowance-amount-tooltip" placement="top"><button type="button" class="allowance-money" :disabled="amount(limits.dailySpent) === '—'" aria-label="查看今日使用的精确金额" @click="$event.currentTarget.focus()" @keydown.esc.stop="$event.currentTarget.blur()">{{ amount(limits.dailySpent) }}<small>元</small></button></el-tooltip> / <span v-if="limits.dailyLimit == null">未单设上限</span><template v-else><el-tooltip :content="exactAmount(limits.dailyLimit)" :disabled="amount(limits.dailyLimit) === '—'" popper-class="allowance-amount-tooltip" placement="top"><button type="button" class="allowance-money" :disabled="amount(limits.dailyLimit) === '—'" aria-label="查看每日上限的精确金额" @click="$event.currentTarget.focus()" @keydown.esc.stop="$event.currentTarget.blur()">{{ amount(limits.dailyLimit) }}<small>元</small></button></el-tooltip></template></dd>
+            <dt>累计使用 / 预占</dt><dd><el-tooltip :content="exactAmount(limits.totalSpent)" :disabled="amount(limits.totalSpent) === '—'" popper-class="allowance-amount-tooltip" placement="top"><button type="button" class="allowance-money" :disabled="amount(limits.totalSpent) === '—'" aria-label="查看累计使用的精确金额" @click="$event.currentTarget.focus()" @keydown.esc.stop="$event.currentTarget.blur()">{{ amount(limits.totalSpent) }}<small>元</small></button></el-tooltip> / <el-tooltip :content="exactAmount(limits.totalReserved)" :disabled="amount(limits.totalReserved) === '—'" popper-class="allowance-amount-tooltip" placement="top"><button type="button" class="allowance-money" :disabled="amount(limits.totalReserved) === '—'" aria-label="查看空间预占的精确金额" @click="$event.currentTarget.focus()" @keydown.esc.stop="$event.currentTarget.blur()">{{ amount(limits.totalReserved) }}<small>元</small></button></el-tooltip></dd>
           </dl>
           <el-form v-if="limits.canManage === true" label-width="110px" size="small">
             <el-form-item label="工作空间总上限"><el-input v-model="limitForm.totalLimit" placeholder="元，留空不单设上限" /></el-form-item>
@@ -72,7 +72,7 @@
 import HeaderBar from '@/components/HeaderBar.vue';
 import BillingWorkspacePanel from '@/components/billing/BillingWorkspacePanel.vue';
 import { userPlatform, platformRequest } from '@/apis/platform';
-import { allowanceAmount, allowancePayerLabel, visibleAllowance } from '@/utils/allowance';
+import { allowanceAmount, allowanceDisplayAmount, allowancePayerLabel, visibleAllowance } from '@/utils/allowance';
 export default {
   components: { HeaderBar, BillingWorkspacePanel },
   data() {
@@ -95,7 +95,8 @@ export default {
     }
   },
   methods: {
-    amount: allowanceAmount,
+    amount: allowanceDisplayAmount,
+    exactAmount(value) { const exact = allowanceAmount(value); return exact === '—' ? '金额未提供' : `精确金额：${exact} 元`; },
     ledgerLabel(type) { return ({ GRANT: '平台发放', SETTLE: '服务扣减', RESERVE: '调用预占', RELEASE: '预占释放', REVERSAL: '冲正', FREEZE: '账户冻结' })[type] || type; },
     async resolveWorkspace() {
       let id = localStorage.getItem('currentWorkspaceId');
@@ -159,6 +160,7 @@ export default {
 };
 </script>
 <style scoped>
+.allowance-money{font:inherit;color:inherit;line-height:inherit;background:none;border:0;padding:0;text-align:inherit;overflow-wrap:anywhere;cursor:pointer}.allowance-money small{font-size:11px;margin-left:4px}.allowance-money:disabled{cursor:default}.allowance-money:focus-visible{outline:2px solid #486ce7;outline-offset:3px;border-radius:3px}.allowance-totals .allowance-money-range{font-size:12px;line-height:1.5}
 .allowance-page{min-height:100vh;background:#f5f7fb;text-align:left;color:#34465d}.allowance-main{max-width:1360px;margin:auto;padding:22px 26px 36px}.allowance-heading,.allowance-actions{display:flex;align-items:center;justify-content:space-between;gap:10px}.allowance-heading{margin-bottom:16px}.allowance-heading h1{font-size:23px;font-weight:600;margin:0;white-space:nowrap}.allowance-actions .el-button+.el-button{margin-left:0}.allowance-summary{background:#fff;border:1px solid #e3e9f1;border-radius:12px;padding:12px 20px}.allowance-context{display:flex;align-items:center;flex-wrap:wrap;gap:8px;color:#718096;font-size:12px}.allowance-payer{min-width:0}.allowance-limit-action{margin-left:auto;padding:3px 0}.allowance-totals{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:20px;margin-top:12px}.allowance-totals>div{min-width:0}.allowance-totals span{display:block;font-size:12px;color:#8390a2}.allowance-totals strong{display:block;margin-top:5px;font-size:23px;line-height:1.3;font-weight:500;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.allowance-totals small{font-size:11px;font-weight:400;margin-left:5px;color:#8290a2}.allowance-available strong{color:#486ce7}.allowance-summary-note{margin:9px 0 0;color:#8995a6;font-size:11px;line-height:1.6}.allowance-tabs{margin-top:14px}.allowance-tabs ::v-deep .el-tabs__header{margin-bottom:12px}.allowance-tabs ::v-deep .el-tabs__item{font-size:13px}.allowance-panel{background:white;border:1px solid #e3e9f1;border-radius:12px;padding:16px}.allowance-panel-note,.allowance-trial{font-size:12px;line-height:1.7;color:#8390a2;margin:0 0 12px}.allowance-trial{color:#678366}.allowance-trial i{margin-right:5px}.allowance-panel .el-pagination{text-align:right;overflow-x:auto;margin-top:14px}.allowance-error{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#fff5f5;border:1px solid #f2dcdc;color:#aa5656;padding:10px 14px;border-radius:8px;font-size:13px;line-height:1.6;margin-bottom:12px}.allowance-error .el-button{flex-shrink:0;padding:4px}.allowance-loading{padding:30px 0;color:#8c9aaa;font-size:13px}.allowance-dialog-note{color:#8190a3;font-size:12px;line-height:1.8;margin:0 0 18px}.allowance-limits{display:grid;grid-template-columns:135px minmax(0,1fr);gap:12px;font-size:13px;margin:0 0 24px}.allowance-limits dt{color:#8190a3}.allowance-limits dd{margin:0;overflow-wrap:anywhere}
 @media(max-width:600px){.allowance-main{padding:16px 12px 24px}.allowance-heading{gap:8px;margin-bottom:12px}.allowance-heading h1{font-size:20px}.allowance-actions{gap:6px}.allowance-actions .el-button{padding:9px}.allowance-summary{padding:12px}.allowance-context{gap:6px}.allowance-payer{flex-basis:100%}.allowance-totals{gap:10px;margin-top:10px}.allowance-totals span{font-size:10px}.allowance-totals strong{font-size:18px}.allowance-totals small{font-size:10px;margin-left:3px}.allowance-summary-note{font-size:10px}.allowance-panel{padding:12px}.allowance-tabs ::v-deep .el-tabs__item{padding:0 14px;font-size:12px}.allowance-limits{grid-template-columns:1fr;gap:5px}.allowance-limits dd{margin-bottom:8px}}
 /* The embedded usage panel does not provide the full billing page's header layout. */
@@ -189,4 +191,8 @@ export default {
   .allowance-page ::v-deep .el-user-dropdown { max-width: 82px; font-size: 13px; }
   .allowance-page ::v-deep .header-center { margin-top: 0; }
 }
+</style>
+
+<style>
+.allowance-amount-tooltip.el-tooltip__popper{max-width:min(320px,calc(100vw - 24px));box-sizing:border-box;overflow-wrap:anywhere}
 </style>

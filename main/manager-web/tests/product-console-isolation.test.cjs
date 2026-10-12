@@ -47,6 +47,29 @@ test('team members never receive a payer balance from UI presentation and decima
   assert.match(allowance.allowancePayerLabel({ workspaceType: 'TEAM' }),/负责人/);
 });
 
+test('user allowance display distinguishes exact zero from nonzero sub-cent values', () => {
+  for (const value of [0, '0', '0.000000000', '-0.000', '000.000']) assert.equal(allowance.allowanceDisplayAmount(value), '0.00');
+  for (const value of ['0.000000001', '0.005', '0.009999999']) assert.equal(allowance.allowanceDisplayAmount(value), '小于 0.01');
+  for (const value of ['-0.000000001', '-0.005', '-0.009999999']) assert.equal(allowance.allowanceDisplayAmount(value), '大于 -0.01 且小于 0');
+  assert.equal(allowance.allowanceDisplayAmount('0.01'), '0.01');
+  assert.equal(allowance.allowanceDisplayAmount('-0.01'), '-0.01');
+});
+
+test('user allowance display rounds decimal strings without losing large amounts or carry digits', () => {
+  const cases = [['12', '12.00'], ['12.3', '12.30'], ['00012.30', '12.30'], [1.005, '1.01'],
+    ['1234.567890123', '1234.57'], ['1.004999999', '1.00'], ['9.995', '10.00'], ['999.999999999', '1000.00'],
+    ['-12.3456789', '-12.35'], ['-1.005', '-1.01'], ['-1.004999999', '-1.00'], ['-9.995', '-10.00'],
+    ['9007199254740993.125', '9007199254740993.13'], ['999999999999999999999999999999.995', '1000000000000000000000000000000.00']];
+  for (const [value, expected] of cases) assert.equal(allowance.allowanceDisplayAmount(value), expected);
+  assert.equal(allowance.allowanceAmount('9007199254740993.125'), '9007199254740993.125');
+});
+
+test('user allowance display keeps malformed or absent decimal values unknown', () => {
+  for (const value of [null, undefined, '', ' ', '12 ', '12\n', '12\r\n', '12.', '.12', '+12', '1e3', '1,000', 'abc', 'NaN', NaN, Infinity, -Infinity, true, [], {}]) {
+    assert.equal(allowance.allowanceDisplayAmount(value), '—');
+  }
+});
+
 test('uncertain allowance grant retries retain the original idempotency key', async () => {
   const calls = []; let attempts = 0;
   const component = loadVueComponent('src/ops/OpsAllowance.vue', { '@/apis/platform': { operations: { grant: async payload => { calls.push({...payload}); if (++attempts === 1) throw new Error('timeout'); } } } });
