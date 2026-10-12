@@ -13,7 +13,7 @@ const text = vnode => [vnode.text || '', ...(vnode.children || []).map(text)].jo
 const full = ['allowance.read', 'allowance.grant', 'allowance.freeze', 'pool.read', 'pool.adjust', 'allowance.review', 'credentials.read', 'rates.read'];
 const account = (userId = '9223372036854775806') => ({ userId, username: '测试用户', available: '1234.567890', reserved: '0.000004', spent: '9007199254740993.126', frozen: false });
 function deferred() { let resolve; return { promise: new Promise(done => { resolve = done; }), resolve }; }
-function create(t, file = 'OpsAllowance', { permissions = full, query = {}, operations = {} } = {}) {
+function create(t, file = 'OpsAllowance', { permissions = full, query = {}, operations = {}, platformRequest } = {}) {
   const calls = { routes: [], accounts: [], grant: [], freeze: [], pool: [] };
   const defaults = {
     accounts: async args => { calls.accounts.push(args); return { list: [account()], total: 1 }; },
@@ -23,7 +23,7 @@ function create(t, file = 'OpsAllowance', { permissions = full, query = {}, oper
     freeze: async value => { calls.freeze.push(value); },
     adjustPool: async value => { calls.pool.push(value); },
   };
-  const definition = loadVueComponent(`src/ops/${file}.vue`, { '@/apis/platform': { operations: { ...defaults, ...operations } } });
+  const definition = loadVueComponent(`src/ops/${file}.vue`, { '@/apis/platform': { operations: { ...defaults, ...operations }, platformRequest } });
   const template = compiler.parseComponent(fs.readFileSync(path.resolve(__dirname, `../src/ops/${file}.vue`), 'utf8')).template.content;
   assert.deepEqual(compiler.compile(template).errors, []);
   const compiled = compiler.compileToFunctions(template);
@@ -81,6 +81,38 @@ test('pagination count conversion accepts only nonnegative safe integers', () =>
   assert.equal(paginationTotal(String(Number.MAX_SAFE_INTEGER)), Number.MAX_SAFE_INTEGER);
   for (const value of [undefined, null, '', 'abc', '8.5', -1, '-1', true, {}, Infinity, NaN, '9007199254740992']) assert.equal(paginationTotal(value), 0);
 });
+
+for (const [file, endpoint, permission] of [
+  ['OpsReservationReview', '/ops/platform/reservations/review', 'allowance.review'],
+]) {
+  test(`${file} renders serialized counts and fetches the next page without changing row values`, async t => {
+    for (const count of ['0', '8', '21']) {
+      const calls = [];
+      const row = { id: '9223372036854775806', reservedAmount: '9007199254740993.126' };
+      const { vm } = create(t, file, {
+        permissions: [permission],
+        platformRequest: async (method, url, params) => {
+          calls.push({ method, url, params });
+          return url === endpoint ? { list: count === '0' ? [] : [{ ...row }], total: count } : [];
+        },
+      });
+      await settled();
+      const pagination = nodes(vm._render()).find(node => node.tag === 'el-pagination');
+      assert.equal(typeof pagination.data.attrs.total, 'number');
+      const result = renderElementPagination(pagination.data.attrs);
+      assert.equal(result.total, `共 ${count} 条`);
+      assert.deepEqual(result.pages, count === '21' ? ['1', '2'] : ['1']);
+      assert.equal(result.pageCount, count === '21' ? 2 : 1);
+      if (count !== '0') assert.deepEqual({ ...vm.rows[0] }, row);
+      for (const page of result.changes) pagination.data.on['current-change'](page);
+      await settled();
+      const requests = calls.filter(call => call.url === endpoint);
+      assert.deepEqual(requests.map(call => call.params), count === '21' ? [{ page: 1, limit: 20 }, { page: 2, limit: 20 }] : [{ page: 1, limit: 20 }]);
+      assert.ok(calls.every(call => call.method === 'GET'));
+      assert.equal(vm.page, count === '21' ? 2 : 1);
+    }
+  });
+}
 
 test('tabs default to allowance, retain deep links and never mount unauthorized panels', async t => {
   const normal = create(t, 'OpsServices');
