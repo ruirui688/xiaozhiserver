@@ -5,6 +5,7 @@
 .billing-page .admin-disclosure{margin-top:24px;border-top:1px solid var(--bill-line);padding-top:18px}.billing-page .admin-disclosure summary{cursor:pointer;color:var(--bill-blue);font-size:13px;margin-bottom:16px}.billing-page .el-dialog{border-radius:14px}.billing-page .el-dialog__header{padding:23px 24px 15px}.billing-page .el-dialog__title{font-size:17px;color:var(--bill-ink)}
 
 /* The workspace date picker is portalled to body; other date pickers keep their layout. */
+.billing-usage-popover{box-sizing:border-box;max-width:calc(100vw - 24px)}
 @media (max-width: 700px) {
   .billing-workspace-date-picker.el-date-range-picker {
     box-sizing: border-box;

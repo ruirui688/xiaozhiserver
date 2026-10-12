@@ -11,7 +11,7 @@ export function visibleAllowance(summary) {
 }
 export function platformErrorMessage(value) {
   return ({
-    ALLOWANCE_EXHAUSTED: '服务额度已用完，可申请更多额度',
+    ALLOWANCE_EXHAUSTED: '服务额度已用完，请联系平台运维',
     WORKSPACE_ALLOWANCE_LIMIT: '当前工作空间已达使用上限，请联系负责人',
     TEAM_ALLOWANCE_LIMIT: '当前工作空间已达使用上限，请联系负责人',
     PAYER_FROZEN: '负责人服务账户已暂停，请联系平台处理',
@@ -23,7 +23,7 @@ export function platformErrorMessage(value) {
     PLATFORM_SERVICE_BUDGET_REQUIRED: '请先配置该模型与任务的独立服务账户、凭据和预算',
     MODEL_OUTSIDE_PLATFORM_SERVICE: '此模型不在该任务账户的授权范围内',
     UNSUPPORTED_MANAGED_PROVIDER: '该模型适配器尚未接入平台额度服务',
-    WORKSPACE_OWNER_REQUIRED: '只能为本人额度账户申请，请切换到自己负责的工作空间',
+    WORKSPACE_OWNER_REQUIRED: '请切换到本人负责的工作空间后操作',
     IDEMPOTENCY_CONFLICT: '本次操作内容与先前提交不一致，请刷新核对结果',
   })[value] || value || '请求失败，请稍后重试';
 }

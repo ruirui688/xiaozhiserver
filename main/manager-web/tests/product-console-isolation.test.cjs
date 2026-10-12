@@ -88,16 +88,6 @@ test('official knowledge editor fetches complete draft entries before editing li
   assert.equal(vm.visible,true);
 });
 
-test('collaboration member applies for own allowance without attaching the other owner workspace', async () => {
-  const calls=[];
-  const component=loadVueComponent('src/views/Allowance.vue', { '@/apis/platform': { userPlatform: { requestAllowance: async value=>{calls.push(value);throw new Error('timeout');} } } });
-  const vm={...component.data(),summary:{workspaceId:'other-owner',canViewBalance:false},$message:{error(){},success(){}},loadRequests:async()=>{}};
-  component.methods.openRequest.call(vm); vm.requestForm.amount='100';vm.requestForm.reason='Own allowance';
-  await component.methods.submitRequest.call(vm); await component.methods.submitRequest.call(vm);
-  assert.equal(calls[0].workspaceId,null);
-  assert.equal(calls[0].requestId,calls[1].requestId);
-});
-
 test('managed model draft excludes legacy credentials and cannot enable itself', () => {
   const component=loadVueComponent('src/components/ModelEditDialog.vue', { '@/apis/api': {} });
   const vm={platformManaged:true,fieldJsonMap:{},modelData:{id:'model'},form:{params:{temperature:0.7,api_key:'legacy-test-only'},secrets:{api_key:'legacy-test-only'},isEnabled:1},isSecretField:component.methods.isSecretField};
