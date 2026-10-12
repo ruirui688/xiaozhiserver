@@ -76,7 +76,7 @@
 import { operations } from '@/apis/platform';
 import { hasPermission } from '@/security/session';
 import { allowanceDisplayAmount, newOperationId } from '@/utils/allowance';
-import { exactUserId, accountName, accountLabel, mergeAccountOptions } from './service-display';
+import { exactUserId, accountName, accountLabel, mergeAccountOptions, paginationTotal } from './service-display';
 const actionPermissions = { pool: 'pool.adjust', grant: 'allowance.grant', freeze: 'allowance.freeze' };
 export default {
   data() {
@@ -119,7 +119,7 @@ export default {
       try {
         const [pool, accounts] = await Promise.all([this.can('pool.read') ? operations.pool() : null, this.can('allowance.read') ? operations.accounts({ page: this.page, limit: 20, keyword: this.searchedKeyword }) : null]);
         if (generation !== this.generation) return;
-        this.pool = pool; this.accounts = accounts?.list || []; this.total = accounts?.total || 0;
+        this.pool = pool; this.accounts = accounts?.list || []; this.total = paginationTotal(accounts?.total);
       } catch (error) { if (generation === this.generation) this.error = error.message; }
       finally { await requests; if (generation === this.generation) this.loading = false; }
     },
@@ -144,7 +144,7 @@ export default {
         if (generation !== this.userGeneration) return;
         const selected = this.userOptions.filter(row => exactUserId(row.userId) === this.form.userId);
         this.userOptions = mergeAccountOptions([...(append ? this.userOptions : selected), ...(result.list || [])]);
-        this.userPage = page; this.userTotal = result.total || 0;
+        this.userPage = page; this.userTotal = paginationTotal(result.total);
       } catch (error) { if (generation === this.userGeneration) this.userError = error.message; }
       finally { if (generation === this.userGeneration) this.usersLoading = false; }
     },

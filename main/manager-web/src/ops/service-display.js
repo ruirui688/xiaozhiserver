@@ -23,3 +23,10 @@ export function accountLabel(row) {
 export function mergeAccountOptions(rows) {
   return [...new Map(rows.filter(row => exactUserId(row.userId)).map(row => [exactUserId(row.userId), row])).values()];
 }
+
+export function paginationTotal(value) {
+  // Java serializes Long counts as strings; Element pagination requires a Number.
+  if (typeof value !== 'number' && (typeof value !== 'string' || !/^[0-9]+$/.test(value))) return 0;
+  const total = Number(value);
+  return Number.isSafeInteger(total) && total >= 0 ? total : 0;
+}

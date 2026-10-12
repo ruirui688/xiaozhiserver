@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const Vue = require('vue');
 const compiler = require('vue-template-compiler');
 const { loadVueComponent, loadModule } = require('./helpers/loadVueComponent.cjs');
@@ -40,6 +41,46 @@ function create(t, file = 'OpsAllowance', { permissions = full, query = {}, oper
 function column(vm, label) { return nodes(vm._render()).find(node => node.tag === 'el-table-column' && node.data.attrs.label === label); }
 function cell(vm, label, row) { return column(vm, label).data.scopedSlots.default({ row }); }
 function panel(vm) { return nodes(vm._render()).filter(node => node.componentOptions).map(node => node.componentOptions.tag).filter(tag => tag.startsWith('Ops')); }
+
+function renderElementPagination(attrs) {
+  // Isolate Element's real rendering in SSR mode; no browser or DOM dependency is needed.
+  return JSON.parse(execFileSync(process.execPath, ['-e', `
+    const Vue = require('vue');
+    const Pagination = require('element-ui/lib/pagination').default;
+    const attrs = JSON.parse(process.argv[1]);
+    const vm = new Vue({ ...Pagination, propsData: { total: attrs.total, pageSize: attrs['page-size'], currentPage: attrs['current-page'], layout: attrs.layout } });
+    const total = new Vue({ ...Pagination.components.Total, parent: vm });
+    const pager = new Vue({ ...Pagination.components.Pager, propsData: { currentPage: vm.internalCurrentPage, pageCount: vm.internalPageCount, pagerCount: 7 } });
+    const text = node => [node.text || '', ...(node.children || []).map(text)].join('');
+    const result = { pageCount: vm.internalPageCount, total: text(total._render()), pages: pager._render().children.filter(node => node.data?.staticClass === 'number').map(text), changes: [] };
+    vm.$on('current-change', page => result.changes.push(page));
+    if (vm.internalPageCount > 1) vm.next();
+    vm.$nextTick(() => { process.stdout.write(JSON.stringify(result)); pager.$destroy(); total.$destroy(); vm.$destroy(); });
+  `, JSON.stringify(attrs)], { cwd: path.resolve(__dirname, '..'), env: { ...process.env, VUE_ENV: 'server' }, encoding: 'utf8' }));
+}
+
+test('serialized Long counts render the real Element total, page numbers and next-page action', async t => {
+  for (const count of ['8', '21']) {
+    const { vm } = create(t, 'OpsAllowance', { operations: { accounts: async () => ({ list: [account()], total: count }) } });
+    await settled();
+    const pagination = nodes(vm._render()).find(node => node.tag === 'el-pagination');
+    assert.equal(typeof pagination.data.attrs.total, 'number');
+    const result = renderElementPagination(pagination.data.attrs);
+    assert.equal(result.total, `共 ${count} 条`);
+    assert.deepEqual(result.pages, count === '8' ? ['1'] : ['1', '2']);
+    assert.equal(result.pageCount, count === '8' ? 1 : 2);
+    assert.deepEqual(result.changes, count === '8' ? [] : [2]);
+    assert.equal(vm.accounts[0].userId, '9223372036854775806');
+    assert.equal(vm.accounts[0].spent, '9007199254740993.126');
+  }
+});
+
+test('pagination count conversion accepts only nonnegative safe integers', () => {
+  const { paginationTotal } = loadModule('src/ops/service-display.js');
+  for (const value of ['8', 8, '0008']) assert.equal(paginationTotal(value), 8);
+  assert.equal(paginationTotal(String(Number.MAX_SAFE_INTEGER)), Number.MAX_SAFE_INTEGER);
+  for (const value of [undefined, null, '', 'abc', '8.5', -1, '-1', true, {}, Infinity, NaN, '9007199254740992']) assert.equal(paginationTotal(value), 0);
+});
 
 test('tabs default to allowance, retain deep links and never mount unauthorized panels', async t => {
   const normal = create(t, 'OpsServices');
@@ -110,9 +151,10 @@ test('row grant locks the exact user and submits unchanged input only after conf
 
 test('top grant searches remotely and loads users beyond the first twenty results', async t => {
   const calls = [];
-  const { vm } = create(t, 'OpsAllowance', { operations: { accounts: async args => { calls.push(args); return { list: [account(args.page === 1 ? '9223372036854775806' : '9223372036854775805')], total: 21 }; } } });
+  const { vm } = create(t, 'OpsAllowance', { operations: { accounts: async args => { calls.push(args); return { list: [account(args.page === 1 ? '9223372036854775806' : '9223372036854775805')], total: '21' }; } } });
   await settled(); vm.open('grant'); await settled();
   assert.equal(vm.targetLocked, false); assert.equal(vm.hasMoreUsers, true);
+  assert.equal(vm.userTotal, 21);
   await vm.searchUsers('  another  ');
   assert.deepEqual(calls.at(-1), { page: 1, limit: 20, keyword: 'another' });
   await vm.loadMoreUsers();
