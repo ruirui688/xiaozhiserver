@@ -12,6 +12,9 @@ import org.h2.jdbcx.JdbcDataSource;
 import org.junit.jupiter.api.*;
 import org.mockito.MockedStatic;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.transaction.support.TransactionTemplate;
 import xiaozhi.common.exception.RenException;
 import xiaozhi.common.user.UserDetail;
 import xiaozhi.modules.billing.dto.BillingAccountFilter;
@@ -140,7 +143,66 @@ class BillingAccountServiceTest {
         assertThrows(RenException.class,()->service.status(filter()));
     }
 
+    @Test void deepSeekCapabilitiesSeparateBalanceAndManualStatementFromAutomaticBills() {
+        when(deepseek.enabled()).thenReturn(true);
+        var account=list(service.accounts(),"list").stream().filter(row->"DEEPSEEK".equals(row.get("provider"))).findFirst().orElseThrow();
+        var result=service.overview(deepSeekFilter());var status=service.status(deepSeekFilter());
+        var expected=map(account,"capabilities");
+        assertEquals(expected,map(result,"capabilities"));assertEquals(expected,map(status,"capabilities"));
+        assertEquals(false,account.get("billingEnabled"));
+        assertEquals(false,expected.get("billSyncSupported"));assertEquals(false,expected.get("billSyncEnabled"));
+        assertEquals(true,expected.get("balanceSupported"));assertEquals(true,expected.get("balanceEnabled"));
+        assertEquals(true,expected.get("statementImportSupported"));assertEquals("PROJECT_TEMPLATE",expected.get("statementImportFormat"));
+        assertEquals(false,expected.get("nativeStatementAdapter"));assertEquals("NO_VERIFIED_PUBLIC_BILLING_API",expected.get("reasonCode"));
+        assertEquals("STATEMENT_REQUIRED",status.get("lastAttemptStatus"));assertNull(status.get("lastImportedAt"));
+        assertEquals("NOT_OBTAINED",map(result,"coverage").get("status"));assertEquals(List.of(),result.get("costs"));
+        verify(deepseek,never()).fetch();verify(volc,never()).fetch(anyString(),anyString());
+    }
+
+    @Test void deepSeekProjectTemplateImportPreservesAmountsEvidenceAndUnknownCompleteness() {
+        var fields=Map.ofEntries(Map.entry("bill_id","fixture-deepseek-bill"),Map.entry("level","BILL"),Map.entry("bill_period","2026-10"),
+                Map.entry("expense_begin","2026-10-01T00:00:00Z"),Map.entry("expense_end","2026-10-02T00:00:00Z"),
+                Map.entry("product","DeepSeek"),Map.entry("service_type","LLM"),Map.entry("currency","CNY"),
+                Map.entry("payable_amount","12.345678901"),Map.entry("paid_amount","12.345678901"),
+                Map.entry("source_reference","synthetic-official-statement-fixture"));
+        String content=String.join(",",BillingCsvService.HEADERS)+"\n"+
+                String.join(",",BillingCsvService.HEADERS.stream().map(key->fields.getOrDefault(key,"")).toList());
+        var file=new MockMultipartFile("file","statement.csv","text/csv",content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        var csv=new BillingCsvService(new BillingBillService(jdbc,support,new BillingBindingService(jdbc,mock(BillingQueryService.class))));
+        var tx=new TransactionTemplate(new DataSourceTransactionManager(jdbc.getDataSource()));
+        int imported=tx.execute(transaction->csv.importFile(file,"DEEPSEEK","deepseek-account"));assertEquals(1,imported);
+        int retried=tx.execute(transaction->csv.importFile(file,"DEEPSEEK","deepseek-account"));assertEquals(1,retried);
+        var result=service.overview(deepSeekFilter());var status=map(result,"sync");
+        assertEquals(1,result.get("billCount"));assertDecimal("12.345678901",list(result,"costs").getFirst().get("paidAmount"));
+        assertNull(list(result,"costs").getFirst().get("unpaidAmount"));
+        assertEquals("IMPORTED_STATEMENT",status.get("lastAttemptStatus"));assertNotNull(status.get("lastImportedAt"));
+        assertNull(status.get("lastSuccessAt"));assertEquals(false,status.get("completenessVerified"));
+        assertEquals("PARTIAL",map(result,"coverage").get("status"));
+        var bill=service.bills(deepSeekFilter()).getList().getFirst();
+        assertEquals("STATEMENT_IMPORT",bill.get("source"));
+        assertEquals("synthetic-official-statement-fixture",map(bill,"evidence").get("source_reference"));
+        assertNull(service.status(filter()).get("lastImportedAt"));
+        var previousMonth=deepSeekFilter();previousMonth.setBillPeriod("2026-09");
+        assertEquals("STATEMENT_REQUIRED",service.status(previousMonth).get("lastAttemptStatus"));
+        assertEquals(List.of(),service.overview(previousMonth).get("costs"));
+        verify(deepseek,never()).fetch();verify(volc,never()).fetch(anyString(),anyString());
+    }
+
+    @Test void persistedForeignAccountsDoNotInheritConfiguredCredentials() {
+        bill("other","other-bill","BILL","1","CNY",null,0);
+        jdbc.update("UPDATE ai_billing_bill SET account_ref='other-account'");
+        var account=list(service.accounts(),"list").stream().filter(row->"other-account".equals(row.get("accountRef"))).findFirst().orElseThrow();
+        assertEquals(true,map(account,"capabilities").get("billSyncSupported"));
+        assertEquals(false,map(account,"capabilities").get("billSyncEnabled"));
+        jdbc.update("UPDATE ai_billing_bill SET provider='DEEPSEEK',source='STATEMENT_IMPORT'");
+        when(deepseek.enabled()).thenReturn(true);
+        account=list(service.accounts(),"list").stream().filter(row->"other-account".equals(row.get("accountRef"))).findFirst().orElseThrow();
+        assertEquals(true,map(account,"capabilities").get("balanceSupported"));
+        assertEquals(false,map(account,"capabilities").get("balanceEnabled"));
+    }
+
     private BillingAccountFilter filter(){var f=new BillingAccountFilter();f.setProvider("VOLCENGINE");f.setAccountRef("account-a");f.setBillPeriod("2026-10");return f;}
+    private BillingAccountFilter deepSeekFilter(){var f=filter();f.setProvider("DEEPSEEK");f.setAccountRef("deepseek-account");return f;}
     private void success(){run("SUCCESS","account-a","2026-10",Instant.now().minusSeconds(2));}
     private void run(String status,String account,String month,Instant now){jdbc.update("INSERT INTO ai_billing_sync_run(id,provider,account_ref,bill_period,status,created_by,started_at,finished_at) VALUES (?,'VOLCENGINE',?,?,?,1,?,?)",UUID.randomUUID().toString(),account,month,status,BillingSupport.time(now),BillingSupport.time(now));}
     private void bill(String id,String parent,String level,String amount,String currency,String settlement,Integer detailCount) {

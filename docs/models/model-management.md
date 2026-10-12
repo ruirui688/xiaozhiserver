@@ -772,7 +772,7 @@ conda run -n xiaozhi-esp32-server python -m compileall .
 - 火山语音可按 Project 取得费用。一个 Project 若只对应一个工作空间，可以归属该空间；同一 Project 若混用多个智能体或设备，仅凭项目小时账单不能精确拆分到它们。单独按设备配置 Project 后，设备在同一计费期间切换智能体，也仍需处理智能体归属问题。
 - 要显示智能体、设备级的实际金额，必须让供应商可出账的最小范围对应唯一调用归属，或取得能直接匹配调用的官方费用明细。新增计费绑定和凭据路由前，应验证供应商项目/Key 的出账粒度、资源隔离和配额；不能假设更换 Key 就能取得更细账单。
 - 如果官方只支持较粗粒度，保留该层级的实际金额，智能体/设备层显示用量和“费用暂无法细分”。不得按字符数、Token 或时长比例分摊后称为实际扣费。历史混用记录没有充分证据时不自动补造精细费用。
-- DeepSeek 官方余额查询已验证可用，但余额不等于消费；官方控制台支持按 Key 查看和导出用量，仍需验证导出金额字段、粒度与关联方式，再接入实际费用。
+- DeepSeek 官方余额查询已验证可用，但余额不等于消费。2026-10-12 核对公开官方 API 文档，仅确认 `GET /user/balance` 可通过模型 API Key 查询余额，尚未确认可用的公开消费账单接口。官方控制台支持按 Key 查看和导出用量；FAQ 说明导出压缩包包含两个 CSV，但未定义金额列、币种及结算口径，不能仅凭文件名 `amount` 判定其包含实际费用。仍需用官方导出样本验证金额字段、粒度与关联方式，再接入原生格式。
 
 官方依据：[火山账单流水](https://www.volcengine.com/docs/6269/1127841)、[火山账单明细](https://www.volcengine.com/docs/6269/1127842)、[语音项目账单](https://www.volcengine.com/docs/6561/1339608)、[账单说明](https://www.volcengine.com/docs/6269/94010)、[DeepSeek 余额接口](https://api-docs.deepseek.com/api/get-user-balance)、[DeepSeek 按 Key 用量说明](https://static.deepseek.com/faq/index.html?lang=zh#/question/key-usage)。
 
@@ -788,6 +788,8 @@ conda run -n xiaozhi-esp32-server python -m compileall .
 查询接口为 `GET /billing/overview`、`/billing/groups?groupBy=agent|device`、`/billing/events`、`/billing/bills`、`/billing/options`。管理员使用 `/billing/sync`、`/billing/bindings`、`/billing/import-template`、`/billing/import`。沿用[工作空间权限边界](../architecture/workspace-organization-management.md)，服务端校验当前空间；`agentId/deviceId` 只作为筛选，不能替代授权。
 
 账号读取接口为 `GET /billing/accounts`、`/billing/account-overview`、`/billing/account-bills`、`/billing/sync-status`，全部强制平台管理员权限。账号账单参数明确为 `provider/accountRef/billPeriod`；默认查询主账单，`level=DETAIL&billId=...` 查看下级明细。`model-billing-read-model.sql` 以新迁移增加同步任务账号标识、索引和采集健康表。
+
+账号列表、总览和同步状态分别返回 `capabilities`，区分自动账单同步、余额查询及项目模板导入的支持与配置状态。DeepSeek 未取得金额凭证时为 `STATEMENT_REQUIRED`，不展示“等待同步”；取得模板导入记录后为 `IMPORTED_STATEMENT`，显示 `lastImportedAt`，不把导入时间冒充自动同步成功时间，也不据此宣称完整覆盖账期。`POST /billing/sync` 显式指定账号时必须同时提供匹配已配置火山账号的 `provider/accountRef`；DeepSeek 请求直接拒绝，不会误触发火山同步。历史仅传账期的请求仍同步已配置火山账号。
 
 Python 上报 `POST /config/billing/usage`，同时要求服务间共享密钥和管理端签发的调用归属凭据。每批响应中的 `accepted` 包含成功保存或已存在且内容一致的事件 ID，`rejected` 包含永久拒绝代码；网络和存储故障保留待发记录，永久拒绝进入本地隔离记录，不能阻塞后续上报。同 ID 不同内容不会覆盖已入账事件。
 
@@ -840,9 +842,11 @@ xiaozhi:
 
 默认 `application.yml` 已提供上述环境变量占位符；生产 Compose 已透传到 manager-api，示例见 `deploy/production/env.example`。真实值仅写部署目录私有 `.env`。`XIAOZHI_BILLING_VOLCENGINE_ENABLED` 默认为 `false`，需要读取火山时显式启用。DeepSeek 的 `model-id` 是项目现有官方直连模型配置 ID，不是上游模型名，也不需要在部署文件重复保存推理密钥。
 
-先同步所需账期，即可在账号视图查看官方费用；若需要空间归属，再确认供应商 Project/资源的独占范围并建立有生效时间的绑定。账户共享时不得把整账户绑定到某一空间；只绑定 Project 仍混用多个智能体或设备时，留在工作空间级。新增绑定后需要重同步或重导入有关账单。已有账单引用的绑定不允许改写历史归属，可在不截断既有账单区间的前提下结束有效期。
+火山先同步所需账期，即可在账号视图查看官方费用；DeepSeek 则需导入可核实的官方金额凭证。若需要空间归属，再确认供应商 Project/资源的独占范围并建立有生效时间的绑定。账户共享时不得把整账户绑定到某一空间；只绑定 Project 仍混用多个智能体或设备时，留在工作空间级。新增绑定后需要重同步或重导入有关账单。已有账单引用的绑定不允许改写历史归属，可在不截断既有账单区间的前提下结束有效期。
 
 DeepSeek 导入要求按下载模板整理**官方金额**、币种、消费期间、账单标识和官方凭证引用；只有 Token/调用次数的导出不能导入费用。此模板是本项目的统一导入格式，不声称与尚未核实的 DeepSeek 原生导出格式一致。
+
+DeepSeek 费用卡提供余额、[官方用量控制台](https://platform.deepseek.com/usage)和定向导入入口。定向导入保留供应商、账号与所选账期，并直接展开表单；已导入金额仍按币种显示。工作空间用量是本项目已采集调用的范围，不能称为供应商账号的完整用量。补齐这些入口不代表已自动取得 DeepSeek 历史消费，金额凭证尚未提供时仍显示未知。
 
 Python 队列默认位于 `main/xiaozhi-server/data/billing/usage.sqlite3`，可通过 `XIAOZHI_BILLING_OUTBOX_PATH` 覆盖。管理端队列默认位于 `uploadfile/billing-outbox`。两者需要持久磁盘、写权限和备份保护，不能作为缓存清理；Python 每个独立服务实例需使用独立队列路径。队列包含归属数据，Python 队列还包含上报所需能力凭据，禁止提交或直接输出到日志。
 

@@ -4,7 +4,7 @@
     <main class="billing-main">
       <header class="billing-heading">
         <div><div class="billing-eyebrow">MODEL INSIGHTS</div><h1>用量与费用</h1><p>费用有据可查，用量清晰可见。</p></div>
-        <el-button v-if="canManage" icon="el-icon-setting" @click="adminVisible = true">数据与归属管理</el-button>
+        <el-button v-if="canManage" icon="el-icon-setting" @click="openAdmin()">数据与归属管理</el-button>
       </header>
       <div v-if="initializing" class="billing-skeleton" aria-label="正在加载计费工作台"><i /><i /><i /></div>
       <section v-else-if="optionsError" class="billing-empty"><i class="el-icon-warning-outline" /><h2>计费工作台暂时无法加载</h2><p>{{ optionsError }}</p><el-button @click="initialize">重新加载</el-button></section>
@@ -23,15 +23,15 @@
         <nav class="billing-main-nav" aria-label="计费功能"><button v-for="item in views" :key="item.id" :aria-current="view === item.id ? 'page' : null" :class="{ active: view === item.id }" @click="changeView(item.id)"><i :class="item.icon" /><span>{{ item.label }}</span></button></nav>
         <div v-if="(accountsError || invalidAccount) && scope === 'account'" class="billing-inline-error"><span>{{ accountsError || '所选供应商账号不可用，请重新选择账号。' }}</span><el-button type="text" @click="loadAccounts">重试</el-button></div>
         <template v-else-if="scope === 'workspace' || !accountsLoading">
-          <BillingAccountOverview v-if="view === 'costs' && scope === 'account'" :key="`accounts-${revision}`" :accounts="visibleAccounts" @manage="adminVisible = true" />
-          <BillingWorkspacePanel v-else-if="view !== 'benefits'" :key="`${view}-${workspaceId}-${revision}`" :mode="view" @manage="adminVisible = true" />
+          <BillingAccountOverview v-if="view === 'costs' && scope === 'account'" :key="`accounts-${revision}`" :accounts="visibleAccounts" @manage="openAdmin" @benefits="openAccountBenefits" @usage="openAccountUsage" />
+          <BillingWorkspacePanel v-else-if="view !== 'benefits'" :key="`${view}-${workspaceId}-${revision}`" :mode="view" @manage="openAdmin()" />
           <BillingBenefits v-else :key="`benefits-${scope}-${selectedAccountKey}-${revision}`" :workspace-id="workspaceId" :can-manage="canManage" :scope="scope" :account="selectedAccount" />
         </template>
         <div v-else class="billing-skeleton" aria-label="正在读取供应商账号"><i /><i /></div>
         <footer class="billing-footer"><i class="el-icon-lock" /> 官方费用、账户资金和服务额度分别展示 · 时间均为北京时间</footer>
       </template>
-      <BillingAdminDialog :visible="adminVisible" :options="options" :workspace-id="workspaceId" @close="adminVisible = false" @updated="revision++" />
-      <el-dialog title="查看工作空间用量" :visible.sync="workspacePrompt" width="min(460px, 92vw)"><p class="billing-dialog-copy">用量按调用时的工作空间归属记录。查看「{{ workspaceName }}」的智能体和设备用量。</p><span slot="footer"><el-button @click="workspacePrompt = false">取消</el-button><el-button type="primary" @click="enterUsage">查看工作空间用量</el-button></span></el-dialog>
+      <BillingAdminDialog :visible="adminVisible" :options="options" :workspace-id="workspaceId" :import-context="importContext" @close="adminVisible = false" @updated="handleUpdated" />
+      <el-dialog title="查看工作空间用量" :visible.sync="workspacePrompt" width="min(460px, 92vw)"><p class="billing-dialog-copy">用量按调用时的工作空间归属记录。查看「{{ workspaceName }}」{{ usageProvider ? '本月 ' + label(usageProvider) : '' }}的智能体和设备用量。仅包含本空间已采集调用，不代表供应商账号的完整用量。</p><span slot="footer"><el-button @click="workspacePrompt = false">取消</el-button><el-button type="primary" @click="enterUsage">查看工作空间用量</el-button></span></el-dialog>
     </main>
   </div>
 </template>
@@ -42,13 +42,13 @@ import BillingAdminDialog from '@/components/billing/BillingAdminDialog.vue';
 import BillingAccountOverview from '@/components/billing/BillingAccountOverview.vue';
 import BillingWorkspacePanel from '@/components/billing/BillingWorkspacePanel.vue';
 import BillingBenefits from '@/components/billing/BillingBenefits.vue';
-import { billingLabel } from '@/utils/billing';
+import { billingLabel, defaultBillingFilters } from '@/utils/billing';
 import { billingRoute, billingNavigationQuery, accountKey } from '@/utils/billingNavigation';
 import '@/assets/styles/billing.css';
 
 export default {
   components: { HeaderBar, BillingAdminDialog, BillingAccountOverview, BillingWorkspacePanel, BillingBenefits },
-  data() { return { options: {}, workspaceId: '', initializing: true, optionsError: '', accounts: [], accountsLoading: false, accountsError: '', generation: 0, accountGeneration: 0, adminVisible: false, workspacePrompt: false, revision: 0, views: [{ id: 'costs', label: '费用总览', icon: 'el-icon-pie-chart' }, { id: 'benefits', label: '余额与资源包', icon: 'el-icon-wallet' }, { id: 'usage', label: '用量分析', icon: 'el-icon-data-analysis' }] }; },
+  data() { return { options: {}, workspaceId: '', initializing: true, optionsError: '', accounts: [], accountsLoading: false, accountsError: '', generation: 0, accountGeneration: 0, adminVisible: false, importContext: null, workspacePrompt: false, usageProvider: '', revision: 0, views: [{ id: 'costs', label: '费用总览', icon: 'el-icon-pie-chart' }, { id: 'benefits', label: '余额与资源包', icon: 'el-icon-wallet' }, { id: 'usage', label: '用量分析', icon: 'el-icon-data-analysis' }] }; },
   computed: {
     canManage() { return this.options.canManage === true; },
     routeState() { return billingRoute(this.$route.query, this.canManage); },
@@ -62,6 +62,23 @@ export default {
   created() { this.initialize(); }, beforeDestroy() { this.generation++; this.accountGeneration++; },
   methods: {
     label: billingLabel, key: accountKey,
+    knownAccount(account) { return this.canManage && account && this.accounts.find(item => item.provider === account.provider && item.accountRef === account.accountRef); },
+    openAdmin(context = null) {
+      if (!this.canManage || (context && !this.knownAccount(context))) return;
+      this.importContext = context ? { provider: context.provider, accountRef: context.accountRef, billPeriod: context.billPeriod } : null;
+      this.adminVisible = true;
+    },
+    openAccountBenefits(account) { if (this.knownAccount(account)) this.navigate({ view: 'benefits', scope: 'account', accountProvider: account.provider, accountRef: account.accountRef, assetProduct: '', assetStatus: 'current', page: 1 }); },
+    openAccountUsage(account) { if (this.knownAccount(account)) { this.usageProvider = account.provider; this.workspacePrompt = true; } },
+    handleUpdated(context) {
+      this.revision++;
+      if (context && context.type === 'import' && this.canManage) {
+        this.adminVisible = false;
+        this.$message.success(context.message || '官方凭证已导入');
+        this.navigate({ view: 'costs', scope: 'account', accountProvider: context.provider, accountRef: context.accountRef, billPeriod: context.billPeriod, product: '', page: 1 });
+        this.loadAccounts();
+      }
+    },
     async initialize() {
       const request = ++this.generation; const workspace = localStorage.getItem('currentWorkspaceId') || '';
       this.initializing = true; this.optionsError = ''; this.options = {}; this.accounts = []; this.adminVisible = false;
@@ -83,9 +100,9 @@ export default {
       finally { if (request === this.accountGeneration) this.accountsLoading = false; }
     },
     navigate(patch) { const query = billingNavigationQuery(this.$route.query, patch, this.canManage); this.$router.push({ path: '/model-billing', query }).catch(error => { if (error.name !== 'NavigationDuplicated') this.$message.error('页面切换失败，请重试'); }); },
-    changeView(view) { if (view === 'usage' && this.scope === 'account') { this.workspacePrompt = true; return; } this.navigate({ view, scope: this.scope, page: 1 }); },
+    changeView(view) { if (view === 'usage' && this.scope === 'account') { this.usageProvider = ''; this.workspacePrompt = true; return; } this.navigate({ view, scope: this.scope, page: 1 }); },
     changeScope(scope) { this.navigate({ scope, view: scope === 'account' && this.view === 'usage' ? 'costs' : this.view, page: 1 }); },
-    enterUsage() { this.workspacePrompt = false; this.navigate({ view: 'usage', scope: 'workspace', page: 1 }); },
+    enterUsage() { this.workspacePrompt = false; this.navigate({ ...(this.usageProvider ? { ...defaultBillingFilters(), provider: this.usageProvider, group: 'agents' } : {}), view: 'usage', scope: 'workspace', accountProvider: '', accountRef: '', page: 1 }); this.usageProvider = ''; },
     chooseAccount(value) { const account = this.accounts.find(item => accountKey(item) === value); this.navigate({ accountProvider: account && account.provider, accountRef: account && account.accountRef, product: '', page: 1 }); }
   }
 };

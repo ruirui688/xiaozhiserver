@@ -17,7 +17,17 @@ public class BillingSyncService {
     private final AtomicBoolean running=new AtomicBoolean();
 
     public Map<String,Object> sync(String period) {
+        return sync(period,null,null);
+    }
+
+    public Map<String,Object> sync(String period,String provider,String accountRef) {
         BillingQueryService.requireAdmin();VolcengineBillingClient.validatePeriod(period);
+        // Legacy clients omit both fields and still target the configured Volcengine account.
+        if(provider!=null || accountRef!=null) {
+            if("DEEPSEEK".equals(provider))throw new RenException("DeepSeek 未接入可核实的公开消费账单接口，请按项目模板导入官方金额凭证");
+            if(!"VOLCENGINE".equals(provider) || accountRef==null || accountRef.isBlank() || !accountRef.equals(client.accountRef()))
+                throw new RenException("账单同步必须指定已配置的火山引擎账号");
+        }
         if(!client.enabled()) throw new RenException("账单同步未配置（仅支持管理端私有配置中的只读账单 AK/SK）");
         if(!running.compareAndSet(false,true)) throw new RenException("已有账单同步正在执行");
         String id=UUID.randomUUID().toString();

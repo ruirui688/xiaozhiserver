@@ -21,16 +21,29 @@ public class BillingAccountService {
     public Map<String,Object> accounts() {
         BillingQueryService.requireAdmin();
         Map<String,Map<String,Object>> accounts=new LinkedHashMap<>();
-        addAccount(accounts,"VOLCENGINE",volcengine.accountRef(),volcengine.enabled());
-        addAccount(accounts,"DEEPSEEK",deepseek.accountRef(),false);
+        addAccount(accounts,"VOLCENGINE",volcengine.accountRef());
+        addAccount(accounts,"DEEPSEEK",deepseek.accountRef());
         for(var row:jdbc.queryForList("SELECT DISTINCT provider,account_ref FROM ai_billing_bill ORDER BY provider,account_ref"))
-            addAccount(accounts,row.get("provider").toString(),row.get("account_ref").toString(),false);
+            addAccount(accounts,row.get("provider").toString(),row.get("account_ref").toString());
         return Map.of("list",new ArrayList<>(accounts.values()));
     }
-    private void addAccount(Map<String,Map<String,Object>> values,String provider,String account,boolean enabled) {
+    private void addAccount(Map<String,Map<String,Object>> values,String provider,String account) {
         if(account==null || account.isBlank())return;
         String label="VOLCENGINE".equals(provider)?"火山引擎":"DEEPSEEK".equals(provider)?"DeepSeek":provider;
-        values.putIfAbsent(provider+":"+account,Map.of("provider",provider,"accountRef",account,"label",label+" · "+account,"billingEnabled",enabled));
+        var capabilities=capabilities(provider,account);
+        values.putIfAbsent(provider+":"+account,Map.of("provider",provider,"accountRef",account,"label",label+" · "+account,
+                "billingEnabled",capabilities.get("billSyncEnabled"),"capabilities",capabilities));
+    }
+    private Map<String,Object> capabilities(String provider,String account) {
+        boolean billSync="VOLCENGINE".equals(provider),balance="DEEPSEEK".equals(provider);
+        boolean billEnabled=billSync && account.equals(volcengine.accountRef()) && volcengine.enabled();
+        Map<String,Object> result=new LinkedHashMap<>();
+        result.put("billSyncSupported",billSync);result.put("billSyncEnabled",billEnabled);
+        result.put("balanceSupported",balance);result.put("balanceEnabled",balance && account.equals(deepseek.accountRef()) && deepseek.enabled());
+        result.put("statementImportSupported",billSync || balance);result.put("statementImportFormat","PROJECT_TEMPLATE");
+        result.put("nativeStatementAdapter",false);
+        result.put("reasonCode",balance?"NO_VERIFIED_PUBLIC_BILLING_API":billEnabled?null:"BILL_SYNC_NOT_CONFIGURED");
+        return result;
     }
     public void requireAccount(String provider,String account) {
         BillingQueryService.requireAdmin();
@@ -47,15 +60,21 @@ public class BillingAccountService {
         var runs=jdbc.queryForList("SELECT status,started_at,finished_at,error_code FROM ai_billing_sync_run WHERE provider=? AND account_ref=? AND bill_period=? ORDER BY started_at DESC,id DESC LIMIT 1",f.getProvider(),f.getAccountRef(),f.getBillPeriod());
         Object success=jdbc.queryForObject("SELECT MAX(finished_at) FROM ai_billing_sync_run WHERE provider=? AND account_ref=? AND bill_period=? AND status='SUCCESS'",Object.class,f.getProvider(),f.getAccountRef(),f.getBillPeriod());
         Object snapshot=jdbc.queryForObject("SELECT MAX(synced_at) FROM ai_billing_bill WHERE provider=? AND account_ref=? AND bill_period=?",Object.class,f.getProvider(),f.getAccountRef(),f.getBillPeriod());
+        Object imported=jdbc.queryForObject("SELECT MAX(synced_at) FROM ai_billing_bill WHERE provider=? AND account_ref=? AND bill_period=? AND source='STATEMENT_IMPORT'",Object.class,f.getProvider(),f.getAccountRef(),f.getBillPeriod());
         Map<String,Object> result=new LinkedHashMap<>();
         result.put("scope","ACCOUNT");result.put("provider",f.getProvider());result.put("accountRef",f.getAccountRef());result.put("billPeriod",f.getBillPeriod());
+        var capabilities=capabilities(f.getProvider(),f.getAccountRef());result.put("capabilities",capabilities);
+        boolean syncSupported=Boolean.TRUE.equals(capabilities.get("billSyncSupported"));
         String state=runs.isEmpty() ? snapshot==null ? "NOT_SYNCED" : "LEGACY_SNAPSHOT" : runs.getFirst().get("status").toString();
+        if(imported!=null && (runs.isEmpty() || !syncSupported))state="IMPORTED_STATEMENT";
+        else if(!syncSupported && snapshot==null)state="STATEMENT_REQUIRED";
         result.put("lastAttemptStatus",state);result.put("lastAttemptAt",runs.isEmpty()?null:runs.getFirst().get("started_at"));
-        result.put("lastSuccessAt",success);result.put("lastSnapshotAt",snapshot);result.put("snapshotAvailable",snapshot!=null || success!=null);
+        result.put("lastSuccessAt",syncSupported?success:null);result.put("lastImportedAt",imported);
+        result.put("lastSnapshotAt",snapshot);result.put("snapshotAvailable",snapshot!=null || syncSupported && success!=null);
         Object observed=snapshot==null?success:snapshot;
         boolean old=observed!=null && BillingSupport.databaseTime(observed).isBefore(BillingSupport.time(Instant.now().minus(Duration.ofHours(24))));
         result.put("isStale",old || "FAILED".equals(state) || "RUNNING".equals(state));
-        result.put("completenessVerified",success!=null);return result;
+        result.put("completenessVerified",syncSupported && success!=null && imported==null);return result;
     }
 
     public Map<String,Object> overview(BillingAccountFilter f) {
@@ -74,7 +93,7 @@ public class BillingAccountService {
         String coverage=!available ? "NOT_OBTAINED" : partial ? "PARTIAL" : rows.isEmpty() ? "EMPTY_CONFIRMED" : "SNAPSHOT";
         result.put("scope","ACCOUNT");result.put("provider",f.getProvider());result.put("accountRef",f.getAccountRef());result.put("billPeriod",f.getBillPeriod());
         result.put("timeBasis","BILL_PERIOD");result.put("amountBasis","OFFICIAL_PARENT_BILLS");result.put("costs",costs(parents));
-        result.put("billCount",parents.size());result.put("detailCount",details.size());result.put("sync",sync);
+        result.put("billCount",parents.size());result.put("detailCount",details.size());result.put("sync",sync);result.put("capabilities",sync.get("capabilities"));
         result.put("coverage",Map.of("status",coverage,"orphanDetailCount",orphans,"paymentCurrencyUnverifiedCount",unverified));
         result.put("reconciliation",Map.of("status",rows.isEmpty()?("EMPTY_CONFIRMED".equals(coverage)?"EMPTY_CONFIRMED":"NOT_OBTAINED"):matched==parents.size() && orphans==0 ? "MATCHED":"REVIEW_REQUIRED","matchedCount",matched,"mismatchCount",parents.size()-matched,"orphanDetailCount",orphans));
         Map<String,List<Map<String,Object>>> products=new TreeMap<>();

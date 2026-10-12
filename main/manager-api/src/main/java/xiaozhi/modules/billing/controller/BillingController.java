@@ -7,6 +7,7 @@ import java.util.*;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.apache.shiro.authz.annotation.RequiresPermissions;
@@ -38,7 +39,7 @@ public class BillingController {
     @RequiresPermissions("sys:role:superAdmin")
     @DeleteMapping("/bindings/{id}") public Result<Object> delete(@PathVariable String id) { bindings.delete(id);return ok(Map.of("deleted",true)); }
     @RequiresPermissions("sys:role:superAdmin")
-    @PostMapping("/sync") public Result<Object> sync(@Valid @RequestBody SyncRequest request) { return ok(sync.sync(request.getBillPeriod())); }
+    @PostMapping("/sync") public Result<Object> sync(@Valid @RequestBody SyncRequest request) { return ok(sync.sync(request.getBillPeriod(),request.getProvider(),request.getAccountRef())); }
     @RequiresPermissions("sys:role:superAdmin")
     @GetMapping("/import-template") public ResponseEntity<byte[]> template() {
         return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION,"attachment; filename=official-bill-template.csv")
@@ -51,7 +52,11 @@ public class BillingController {
         return ok(Map.of("status","SUCCESS","importedCount",count));
     }
 
-    @Data public static class SyncRequest { @NotBlank @Pattern(regexp="\\d{4}-\\d{2}") private String billPeriod; }
+    @Data public static class SyncRequest {
+        @NotBlank @Pattern(regexp="\\d{4}-\\d{2}") private String billPeriod;
+        @Pattern(regexp="VOLCENGINE|DEEPSEEK") private String provider;
+        @Size(max=128) private String accountRef;
+    }
 
     private Result<Object> ok(Object value) { return new Result<>().ok(present(value)); }
     /** Exact decimal strings and explicit UTC instants prevent browser precision/time-zone loss. */

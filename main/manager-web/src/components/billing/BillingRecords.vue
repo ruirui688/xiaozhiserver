@@ -30,7 +30,7 @@
         <dt>账单 / 结算币种</dt><dd>{{ scope.row.currency || '—' }} / {{ scope.row.settlementCurrency || '—' }}<small v-if="scope.row.paymentCurrencyVerified === false" class="incomplete">支付金额的币种关系未核实，已付和未付金额暂不展示。</small></dd>
         <dt>优惠券金额</dt><dd>{{ money(scope.row.couponAmount, scope.row.currency) }}</dd>
         <dt>来源</dt><dd>{{ label(scope.row.source) }}</dd>
-        <dt>同步时间</dt><dd>{{ time(scope.row.syncedAt) }}</dd>
+        <dt>{{ scope.row.source === 'STATEMENT_IMPORT' ? '导入时间' : '同步时间' }}</dt><dd>{{ time(scope.row.syncedAt) }}</dd>
       </dl></template></el-table-column>
       <el-table-column label="供应商 / 账期" min-width="135"><template slot-scope="scope">{{ label(scope.row.provider) }}<small class="secondary">{{ scope.row.billPeriod }}</small></template></el-table-column>
       <el-table-column label="消费时间（北京时间）" min-width="170"><template slot-scope="scope">{{ time(scope.row.expenseBegin) }}<small class="secondary">{{ scope.row.expenseEnd ? '至 ' + time(scope.row.expenseEnd) : '结束时间未提供' }}</small></template></el-table-column>
