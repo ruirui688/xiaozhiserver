@@ -33,7 +33,7 @@
         <dt>同步时间</dt><dd>{{ time(scope.row.syncedAt) }}</dd>
       </dl></template></el-table-column>
       <el-table-column label="供应商 / 账期" min-width="135"><template slot-scope="scope">{{ label(scope.row.provider) }}<small class="secondary">{{ scope.row.billPeriod }}</small></template></el-table-column>
-      <el-table-column label="消费时间（北京时间）" min-width="170"><template slot-scope="scope">{{ time(scope.row.expenseBegin) }}<small class="secondary">至 {{ time(scope.row.expenseEnd) }}</small></template></el-table-column>
+      <el-table-column label="消费时间（北京时间）" min-width="170"><template slot-scope="scope">{{ time(scope.row.expenseBegin) }}<small class="secondary">{{ scope.row.expenseEnd ? '至 ' + time(scope.row.expenseEnd) : '结束时间未提供' }}</small></template></el-table-column>
       <el-table-column label="归属范围" min-width="180"><template slot-scope="scope">{{ label(scope.row.attributionLevel) }}<small class="secondary">{{ scope.row.deviceId || scope.row.agentId || scope.row.workspaceId || '未归属工作空间' }}</small></template></el-table-column>
       <el-table-column label="官方应付" min-width="150"><template slot-scope="scope">{{ money(scope.row.payableAmount, scope.row.currency) }}</template></el-table-column>
       <el-table-column label="官方已付" min-width="150"><template slot-scope="scope">{{ money(scope.row.paidAmount, scope.row.currency) }}</template></el-table-column>

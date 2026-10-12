@@ -156,7 +156,9 @@ public class BillingQueryService {
     private Sql billScope(String workspace, BillingFilter f) {
         Sql sql = workspace == null ? new Sql(" WHERE b.workspace_id IS NULL") : new Sql(" WHERE b.workspace_id=?", workspace);
         // A bill straddling the requested dates cannot be prorated into an actual amount.
-        sql.and("b.expense_begin>=?", BillingSupport.time(f.from())).and("b.expense_begin<?", BillingSupport.time(f.to())).and("b.expense_end<=?", BillingSupport.time(f.to()));
+        sql.and("b.expense_begin>=?", BillingSupport.time(f.from())).and("b.expense_begin<?", BillingSupport.time(f.to()));
+        // Only the admin's unassigned list can expose official bills whose consumption end is unknown.
+        sql.and(workspace==null ? "(b.expense_end<=? OR b.expense_end IS NULL)" : "b.expense_end<=?", BillingSupport.time(f.to()));
         sql.text += CANONICAL_BILL;
         sql.eq("b.provider", f.getProvider()).eq("b.service_type", f.getServiceType()).eq("b.agent_id", f.getAgentId()).eq("b.device_id", f.getDeviceId()).eq("b.model_id", f.getModelId());
         if (text(f.getBoard()) || text(f.getKeyword())) {

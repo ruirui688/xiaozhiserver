@@ -33,6 +33,38 @@ class BillingInputTest {
         assertThrows(RenException.class,()->BillingBillService.amount("0.0000000001"));
     }
 
+    @Test void officialPrepaidBillKeepsUnknownEndAndExactSupplierTimeEvidence() throws Exception {
+        var source=mapper.readTree("""
+            {"BillID":"prepaid-rtc","BillPeriod":"2026-10","Product":"veRTC_AIAgent","BillingMode":"1","ExpenseBeginTime":"2026-10-08 11:45:58","ExpenseEndTime":"","TradeTime":"2026-10-08 11:45:58","BillCategoryParent":"消费","PayableAmount":"0.00","PaidAmount":"0.00","Currency":"CNY","CurrencySettlement":"CNY"}
+            """);
+        var row=bills.official(source,"account-a","2026-10",false);
+        assertEquals(LocalDateTime.parse("2026-10-08T03:45:58"),row.get("expense_begin"));
+        assertNull(row.get("expense_end"));
+        assertEquals(new BigDecimal("0.00"),row.get("payable_amount"));
+        assertEquals(new BigDecimal("0.00"),row.get("paid_amount"));
+        var evidence=mapper.readTree(row.get("evidence_json").toString());
+        assertTrue(evidence.get("expense_end").isNull());
+        assertEquals("",evidence.path("supplier_usage").path("ExpenseEndTime").asText());
+        assertEquals("2026-10-08 11:45:58",evidence.path("supplier_usage").path("ExpenseBeginTime").asText());
+        ((com.fasterxml.jackson.databind.node.ObjectNode)source).remove("ExpenseEndTime");
+        assertNull(bills.official(source,"account-a","2026-10",false).get("expense_end"));
+    }
+
+    @Test void missingBeginReversedOrMalformedOfficialTimesAndOpenCsvIntervalsStayInvalid() throws Exception {
+        var source=mapper.createObjectNode().put("BillID","invalid-time").put("BillPeriod","2026-10")
+                .put("Currency","CNY").put("PayableAmount","1.20").put("ExpenseEndTime","");
+        assertThrows(RenException.class,()->bills.official(source,"account-a","2026-10",false));
+        source.put("ExpenseBeginTime","2026-10-08 11:45:58").put("ExpenseEndTime","2026-10-07 11:45:58");
+        assertThrows(RenException.class,()->bills.official(source,"account-a","2026-10",false));
+        source.put("ExpenseEndTime","unknown");
+        assertThrows(RenException.class,()->bills.official(source,"account-a","2026-10",false));
+        Map<String,String> imported=Map.of("bill_id","csv-open-end","level","BILL","bill_period","2026-10",
+                "expense_begin","2026-10-08 11:45:58","currency","CNY","payable_amount","1.20","source_reference","official-statement-row-1");
+        String csv=String.join(",",BillingCsvService.HEADERS)+"\n"+
+                String.join(",",BillingCsvService.HEADERS.stream().map(key->imported.getOrDefault(key,"")).toList());
+        assertThrows(RenException.class,()->new BillingCsvService(bills).parse(csv,"VOLCENGINE","account-a"));
+    }
+
     @Test void csvParserHandlesQuotedCommasAndRejectsMalformedOrExtraColumns() {
         assertEquals(List.of(List.of("a","b,c","d\"e")),BillingCsvService.records("a,\"b,c\",\"d\"\"e\"\r\n"));
         assertThrows(RenException.class,()->BillingCsvService.records("\"a\"unexpected,b"));

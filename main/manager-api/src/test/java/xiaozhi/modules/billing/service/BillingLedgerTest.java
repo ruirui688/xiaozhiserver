@@ -36,6 +36,8 @@ class BillingLedgerTest {
         String schema=Files.readString(Path.of("src/main/resources/db/changelog/model-billing-management.sql"))
                 .replaceAll("ENGINE=InnoDB DEFAULT CHARSET=utf8mb4","").replace("scope_value(128)","scope_value").replace("bill_id(128)","bill_id");
         for(String sql:schema.split(";")) if(!sql.isBlank())jdbc.execute(sql);
+        String openExpenseEnd=Files.readString(Path.of("src/main/resources/db/changelog/model-billing-open-expense-end.sql"));
+        for(String sql:openExpenseEnd.split(";")) if(!sql.isBlank())jdbc.execute(sql);
         jdbc.execute("CREATE TABLE ai_agent(id VARCHAR(64),workspace_id VARCHAR(64),agent_name VARCHAR(255))");
         jdbc.execute("CREATE TABLE ai_device(id VARCHAR(64),workspace_id VARCHAR(64),alias VARCHAR(255),board VARCHAR(128))");
         jdbc.update("INSERT INTO ai_agent VALUES ('agent-a','workspace-a','Agent A'),('agent-b','workspace-b','Agent B')");
@@ -138,6 +140,59 @@ class BillingLedgerTest {
         filtered.setUnattributed(true);assertThrows(RenException.class,()->queries.bills(filtered));
     }
 
+    @Test void officialOpenExpenseEndRemainsUnassignedUntilTheSupplierCompletesItsPeriod() {
+        var accountBinding=binding();accountBinding.setScopeType("ACCOUNT");accountBinding.setScopeValue("*");
+        assertNull(accountBinding.getValidTo());
+        var savedBinding=tx.execute(status->bindings.save(accountBinding));
+        var context=deviceContext();
+        jdbc.update("UPDATE ai_billing_context SET issued_at=? WHERE id=?",LocalDateTime.parse("2026-10-01T00:00:00"),context.get("context_id"));
+        var usageEvent=event(context,"event-open-end-0001");
+        usageEvent.setStartedAt(Instant.parse("2026-10-01T00:15:00Z"));
+        usageEvent.setEndedAt(Instant.parse("2026-10-01T00:15:01Z"));
+        assertEquals(List.of("event-open-end-0001"),accept(usageEvent).get("accepted"));
+
+        var pending=officialRtcBill("");String id=pending.get("id").toString();
+        int imported=tx.execute(status->bills.replacePeriod("VOLCENGINE","account-a","2026-10",List.of(pending)));assertEquals(1,imported);
+        var stored=jdbc.queryForMap("SELECT * FROM ai_billing_bill WHERE id=?",id);
+        assertNull(stored.get("expense_end"));assertEquals("UNASSIGNED",stored.get("attribution_level"));
+        for(String field:List.of("workspace_id","agent_id","device_id","binding_id"))assertNull(stored.get(field),field);
+
+        BillingFilter pendingFilter=filter();pendingFilter.setUnattributed(true);
+        var pendingPage=queries.bills(pendingFilter);assertEquals(1,pendingPage.getTotal());
+        var visible=pendingPage.getList().getFirst();assertEquals(id,visible.get("id"));
+        assertTrue(visible.containsKey("expenseEnd"));assertNull(visible.get("expenseEnd"));
+        assertEquals(new BigDecimal("20.123456789"),visible.get("payableAmount"));
+        assertEquals(new BigDecimal("12.500000000"),visible.get("paidAmount"));
+        assertEquals("",((Map<?,?>)visible.get("supplierUsage")).get("ExpenseEndTime"));
+        assertEquals(0,queries.bills(filter()).getTotal());
+        var groups=queries.groups(filter(),"agent");assertEquals(1,groups.getTotal());
+        var group=groups.getList().getFirst();assertEquals(1L,group.get("callCount"));
+        assertEquals(List.of(),group.get("costs"));assertEquals("NO_ATTRIBUTABLE_BILLS",group.get("costStatus"));
+
+        BillingFilter afterBegin=filter();afterBegin.setStartDate("2026-10-02");afterBegin.setUnattributed(true);
+        assertEquals(0,queries.bills(afterBegin).getTotal());
+        BillingFilter beforeBegin=filter();beforeBegin.setStartDate("2026-09-01");beforeBegin.setEndDate("2026-09-30");beforeBegin.setUnattributed(true);
+        assertEquals(0,queries.bills(beforeBegin).getTotal());
+
+        UserDetail admin=SecurityUser.getUser();UserDetail member=new UserDetail();member.setSuperAdmin(0);
+        security.when(SecurityUser::getUser).thenReturn(member);
+        assertThrows(RenException.class,()->queries.bills(pendingFilter));
+        security.when(SecurityUser::getUser).thenReturn(admin);
+
+        var completed=officialRtcBill("2026-10-01 09:00:00");assertEquals(id,completed.get("id"));
+        imported=tx.execute(status->bills.replacePeriod("VOLCENGINE","account-a","2026-10",List.of(completed)));assertEquals(1,imported);
+        assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM ai_billing_bill",Integer.class));
+        stored=jdbc.queryForMap("SELECT * FROM ai_billing_bill WHERE id=?",id);
+        assertEquals("workspace-a",stored.get("workspace_id"));assertEquals("agent-a",stored.get("agent_id"));
+        assertEquals(savedBinding.get("id"),stored.get("binding_id"));assertEquals("AGENT",stored.get("attribution_level"));
+        assertEquals(LocalDateTime.parse("2026-10-01T01:00:00"),((java.sql.Timestamp)stored.get("expense_end")).toLocalDateTime());
+        assertEquals(0,queries.bills(pendingFilter).getTotal());
+        var attributed=queries.bills(filter());assertEquals(1,attributed.getTotal());assertEquals(id,attributed.getList().getFirst().get("id"));
+        var costs=(List<Map<String,Object>>)queries.groups(filter(),"agent").getList().getFirst().get("costs");
+        assertEquals(1,costs.size());assertEquals(new BigDecimal("20.123456789"),costs.getFirst().get("payableAmount"));
+        assertEquals(new BigDecimal("12.500000000"),costs.getFirst().get("paidAmount"));
+    }
+
     @Test void groupsAggregateDecimalsWithoutConvertingUnknownPaidAmountsToZero() {
         accept(event(deviceContext(),"event-groups-0001"));
         tx.executeWithoutResult(status->bindings.save(binding()));
@@ -176,6 +231,12 @@ class BillingLedgerTest {
     private String rejection(Map<String,Object> response){return ((List<Map<String,String>>)response.get("rejected")).getFirst().get("reasonCode");}
     private BillingFilter filter(){BillingFilter f=new BillingFilter();f.setStartDate("2026-10-01");f.setEndDate("2026-10-31");return f;}
     private BillingBindingRequest binding(){var r=new BillingBindingRequest();r.setProvider("VOLCENGINE");r.setAccountRef("account-a");r.setScopeType("PROJECT");r.setScopeValue("project-a");r.setWorkspaceId("workspace-a");r.setAgentId("agent-a");r.setValidFrom(Instant.parse("2026-10-01T00:00:00Z"));return r;}
+    private Map<String,Object> officialRtcBill(String expenseEnd) {
+        var source=mapper.createObjectNode().put("BillID","rtc-prepaid-open-end").put("BillPeriod","2026-10")
+                .put("Product","RTC").put("Currency","CNY").put("PayableAmount","20.123456789").put("PaidAmount","12.5")
+                .put("ExpenseBeginTime","2026-10-01 08:00:00").put("ExpenseEndTime",expenseEnd);
+        return bills.official(source,"account-a","2026-10",false);
+    }
     private Map<String,Object> bill(String level,String billId,String detailId,String amount){
         Map<String,Object> row=new TreeMap<>();row.put("provider","VOLCENGINE");row.put("account_ref","account-a");row.put("bill_id",billId);row.put("bill_detail_id",detailId);row.put("level",level);row.put("bill_period","2026-10");row.put("project","project-a");row.put("currency","CNY");row.put("payable_amount",amount);row.put("source","STATEMENT_IMPORT");row.put("expense_begin",LocalDateTime.parse("2026-10-01T00:00:00"));row.put("expense_end",LocalDateTime.parse("2026-10-01T01:00:00"));return bills.normalize(row);
     }

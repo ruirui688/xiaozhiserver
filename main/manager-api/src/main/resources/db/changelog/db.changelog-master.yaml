@@ -1537,3 +1537,10 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/model-billing-benefits.sql
+  - changeSet:
+      id: model-billing-open-expense-end-20261012
+      author: Codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/model-billing-open-expense-end.sql

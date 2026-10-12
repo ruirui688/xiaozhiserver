@@ -38,6 +38,12 @@ public class BillingBillService {
         for(String field:List.of("BillingMode","SettlementType","BillDetailNum","CurrencySettlement","Count","Unit","UseDuration","UseDurationUnit","DeductionCount","DeductionUseDuration","CouponAmount","PointDeductAmount","SavingPlanDeductionDiscountAmount","ResourceID")) {
             String value=scalar(source.get(field));if(value!=null && value.length()<=512)supplierUsage.put(field,value);
         }
+        // Preserve the supplier's exact time evidence, including an explicitly empty prepaid end.
+        for(String field:List.of("ExpenseBeginTime","ExpenseEndTime")) {
+            JsonNode value=source.get(field);
+            if(value!=null && value.isValueNode() && !value.isNull() && value.asText().length()<=128)
+                supplierUsage.put(field,value.asText());
+        }
         row.put("supplier_usage",supplierUsage);
         return normalize(row);
     }
@@ -51,7 +57,12 @@ public class BillingBillService {
         if(row.get("settlement_currency")!=null && !row.get("settlement_currency").toString().matches("[A-Z]{3,12}"))throw new RenException("结算币种无效");
         try { YearMonth.parse(row.get("bill_period").toString()); }
         catch (Exception e) { throw new RenException("账期格式无效"); }
-        if (!(row.get("expense_begin") instanceof LocalDateTime begin) || !(row.get("expense_end") instanceof LocalDateTime end) || begin.isAfter(end)) throw new RenException("账单消费期间无效");
+        if (!(row.get("expense_begin") instanceof LocalDateTime begin)) throw new RenException("账单消费期间无效");
+        Object endValue=row.get("expense_end");
+        // Official prepaid bills may omit their end; CSV imports still require a complete interval.
+        if (endValue==null ? !"VOLCENGINE_API".equals(row.get("source"))
+                : !(endValue instanceof LocalDateTime end) || begin.isAfter(end))
+            throw new RenException("账单消费期间无效");
         for (String column : AMOUNTS) row.put(column, amount(row.get(column)));
         if (AMOUNTS.stream().allMatch(key -> row.get(key)==null)) throw new RenException("账单缺少官方金额，不能由用量推算");
         for (String field: List.of("product","project","resource_id","settlement_type","pay_status","bill_category","model_id","source_reference","service_type")) {

@@ -73,6 +73,9 @@ public class BillingBindingService {
 
     /** Whole official consumption interval must fit one and only one effective binding. */
     Map<String, Object> attribution(Map<String, Object> bill) {
+        // An open-ended account binding cannot establish the owner of an unknown consumption end.
+        if (bill.get("expense_begin")==null || bill.get("expense_end")==null)
+            return Map.of("attribution_level","UNASSIGNED");
         var rows = jdbc.queryForList("SELECT id,workspace_id,agent_id,device_id FROM ai_billing_binding WHERE provider=? AND account_ref=? AND valid_from<=? AND (valid_to IS NULL OR (valid_to>=? AND valid_to>?)) AND (scope_type='ACCOUNT' OR (scope_type='PROJECT' AND scope_value=?) OR (scope_type='RESOURCE' AND scope_value=?))",
                 bill.get("provider"), bill.get("account_ref"), bill.get("expense_begin"), bill.get("expense_end"), bill.get("expense_begin"), bill.get("project"), bill.get("resource_id"));
         if (rows.size()!=1) return Map.of("attribution_level", rows.isEmpty() ? "UNASSIGNED" : "AMBIGUOUS");
