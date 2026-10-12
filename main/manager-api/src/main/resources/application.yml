@@ -59,6 +59,10 @@ xiaozhi:
       api-key: ${XIAOZHI_BILLING_DEEPSEEK_API_KEY:}
       account-ref: ${XIAOZHI_BILLING_DEEPSEEK_ACCOUNT_REF:}
   security:
+    # Only OPS login uses these switches; identity enrollment/recovery still require both factors.
+    ops-login:
+      mfa-required: ${OPS_LOGIN_MFA_REQUIRED:false}
+      captcha-required: ${OPS_LOGIN_CAPTCHA_REQUIRED:false}
     # 一次性本地员工初始化文件；默认不启用，无网络 bootstrap 入口。
     ops-bootstrap-file: ${XIAOZHI_SECURITY_OPS_BOOTSTRAP_FILE:}
     # 用于加密智能体级第三方凭据。生产安装脚本会生成并持久化该值。

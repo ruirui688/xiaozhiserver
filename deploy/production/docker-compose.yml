@@ -88,6 +88,9 @@ services:
       - SPRING_DATA_REDIS_PORT=6379
       - XIAOZHI_SERVER_HTTP_BASE_URL=${XIAOZHI_SERVER_HTTP_BASE_URL:-http://xiaozhi-esp32-server:8003}
       - XIAOZHI_CREDENTIAL_ENCRYPTION_KEY=${XIAOZHI_CREDENTIAL_ENCRYPTION_KEY:?Set XIAOZHI_CREDENTIAL_ENCRYPTION_KEY in DATA_DIR/.env}
+      # OPS password login; optional extra factors are enforced by the API when enabled.
+      - OPS_LOGIN_MFA_REQUIRED=${OPS_LOGIN_MFA_REQUIRED:-false}
+      - OPS_LOGIN_CAPTCHA_REQUIRED=${OPS_LOGIN_CAPTCHA_REQUIRED:-false}
       - CORS_ORIGINS=${XIAOZHI_CORS_ORIGINS:-http://localhost:8002,http://127.0.0.1:8002,http://*:8002}
       - XIAOZHI_MUSIC_DIR=/music
       - PERSON_FACE_STORAGE_ROOT=/uploadfile/person-faces

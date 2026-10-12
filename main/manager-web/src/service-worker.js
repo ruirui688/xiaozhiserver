@@ -132,6 +132,15 @@ if (isCDNEnabled) {
   );
 }
 
+// OPS uses its own history entry and session audience. Always ask the server for
+// its HTML; never reuse a cached user shell or a stale legacy ops.html document.
+workbox.routing.registerRoute(
+  ({ request, url }) => request.mode === 'navigate'
+    && url.origin === self.location.origin
+    && (url.pathname === '/ops' || url.pathname === '/ops.html' || url.pathname.startsWith('/ops/')),
+  new workbox.strategies.NetworkOnly()
+);
+
 // 无论是否启用CDN模式，都缓存本地静态资源
 workbox.routing.registerRoute(
   /\.(?:js|css|png|jpg|jpeg|svg|gif|ico|woff|woff2|eot|ttf|otf)$/,
@@ -166,9 +175,9 @@ workbox.routing.setCatchHandler(async ({ event }) => {
   switch (event.request.destination) {
     case 'document':
       // 如果是网页请求，返回离线页面
-      return caches.match(OFFLINE_URL);
+      return (await caches.match(OFFLINE_URL)) || Response.error();
     default:
       // 所有其他请求返回错误
       return Response.error();
   }
-}); 
+});

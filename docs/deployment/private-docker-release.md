@@ -69,6 +69,13 @@ DeepSeek 的独立财务凭据仅用于固定官方余额端点，实际费用�
 
 ### 小团队运营身份维护
 
+运营入口为 `/ops/login`，旧 `ops.html#/login` 书签仍会跳转到新地址。当前账号、密码即可登录，
+`OPS_LOGIN_MFA_REQUIRED=false` 与 `OPS_LOGIN_CAPTCHA_REQUIRED=false` 分别关闭登录动态验证码和图形验证码；
+需要额外验证时在部署私有 `.env` 中显式启用，升级器保留现有值，显式环境变量优先。
+启用动态验证码前须确认员工仍持有已绑定的验证器；不要删除或重新生成现有验证器密文。
+这些配置只影响运营登录，不更改用户登录、身份申请/恢复、岗位权限、业务审批或租户隔离。
+验收时核对身份策略接口的 `mfaRequired`、`captchaRequired` 与部署配置一致，并验证运营页面刷新和旧链接跳转。
+
 已完成首次初始化的环境可按[三账号模式](../architecture/platform-service-and-operations.md#小团队三账号模式)
 配置 `ops-keys`（模型与额度）、`ops-resources`（内容与系统运维）、`ops-finance`（财务与审批）。
 固定岗位和范围以该架构文档及 `OpsPermissionCatalog` 为准；不分配 IAM 岗位或身份委派权限，

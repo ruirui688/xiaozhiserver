@@ -23,7 +23,12 @@ export default {
       try {
         const policy = await operations.identityPolicy();
         if (!policy || typeof policy.available !== 'boolean') throw new Error('Invalid identity policy');
-        this.identityPolicy = { available: policy.available, message: typeof policy.message === 'string' ? policy.message : '' };
+        this.identityPolicy = {
+          available: policy.available,
+          message: typeof policy.message === 'string' ? policy.message : '',
+          captchaRequired: policy.captchaRequired,
+          mfaRequired: policy.mfaRequired,
+        };
         return policy.available;
       } catch (_) {
         this.identityPolicyError = RETRY_MESSAGE;

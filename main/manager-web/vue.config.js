@@ -46,6 +46,11 @@ module.exports = defineConfig({
   productionSourceMap: process.env.NODE_ENV !== 'production', // 生产环境不生成 source map
   devServer: {
     port: 8001, // 指定端口为 8001
+    historyApiFallback: {
+      disableDotRule: true,
+      htmlAcceptHeaders: ['text/html', 'application/xhtml+xml'],
+      rewrites: [{ from: /^\/ops(?:\/|$)/, to: '/ops.html' }],
+    },
     proxy: {
       '/xiaozhi': {
         target: 'http://127.0.0.1:8002',

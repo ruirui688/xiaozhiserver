@@ -103,3 +103,30 @@ test('home recovery-code generation is unavailable on disabled or failed policy 
   assert.equal(vm.visible, true);
   assert.equal(calls.captcha, 1);
 });
+
+test('optional login challenges do not disable enrollment or recovery verification', async t => {
+  const policy = { available: true, message: '', captchaRequired: false, mfaRequired: false };
+  for (const route of ['/enroll', '/recover']) {
+    const { vm, calls } = create(t, 'src/ops/OpsEnrollment.vue', { policy, route });
+    await settled();
+    assert.equal(calls.captcha, 1);
+    Object.assign(vm.form, { username: 'test-staff', password: 'TestOnlyPassword123', recoveryCode: 'test-only-old-recovery' });
+    for (const missing of [{ captcha: '', otpCode: '012345' }, { captcha: 'ABCDE', otpCode: '' }]) {
+      Object.assign(vm.form, missing);
+      await vm.submit();
+      assert.equal(calls.writes, 0);
+      assert.match(vm.error, /填写验证信息/);
+    }
+  }
+  const { vm, calls } = create(t, 'src/ops/OpsRecoveryCode.vue', { policy });
+  await settled();
+  vm.open();
+  assert.equal(calls.captcha, 1);
+  vm.password = 'TestOnlyPassword123';
+  for (const missing of [{ captchaValue: '', otpCode: '012345' }, { captchaValue: 'ABCDE', otpCode: '' }]) {
+    Object.assign(vm, missing);
+    await vm.submit();
+    assert.equal(calls.writes, 0);
+    assert.match(vm.error, /填写密码和验证码/);
+  }
+});

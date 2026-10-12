@@ -6,6 +6,7 @@ import java.security.SecureRandom;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.*;
+import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -18,20 +19,29 @@ import xiaozhi.modules.security.password.PasswordUtils;
 public class OpsIdentityService {
     private final JdbcTemplate jdbc;
     private final CredentialCipher cipher;
+    private final OpsLoginPolicy loginPolicy;
     private static final SecureRandom RANDOM = new SecureRandom();
     public Map<String,Object> login(String username, String password, String otp, String remoteAddress) {
+        return login(username,()->password,otp,remoteAddress);
+    }
+    public Map<String,Object> login(String username, Supplier<String> passwordDecoder, String otp, String remoteAddress) {
         limit("ip:" + remoteAddress, 100);
         limit("account:" + String.valueOf(username).toLowerCase(Locale.ROOT), 10);
+        // Include malformed encrypted submissions in the existing persistent limits.
+        String password=passwordDecoder.get();
         var rows = jdbc.queryForList("SELECT id,password_hash,mfa_cipher,mfa_last_step,status FROM ops_employee WHERE username=?", username);
         if (rows.isEmpty()) throw invalid();
         var row = rows.getFirst(); String employee = row.get("id").toString();
         if (((Number)row.get("status")).intValue()!=1 || !PasswordUtils.matches(password,(String)row.get("password_hash"))) throw invalid();
-        String secret = cipher.decrypt("ops-mfa:" + employee,(String)row.get("mfa_cipher"));
-        long step = OpsTotp.verify(secret,otp,Instant.now().getEpochSecond(),((Number)row.get("mfa_last_step")).longValue());
-        if (step < 0 || jdbc.update("UPDATE ops_employee SET mfa_last_step=? WHERE id=? AND mfa_last_step<? AND status=1",step,employee,step)!=1) throw invalid();
+        if(loginPolicy.mfaRequired()) {
+            String secret = cipher.decrypt("ops-mfa:" + employee,(String)row.get("mfa_cipher"));
+            long step = OpsTotp.verify(secret,otp,Instant.now().getEpochSecond(),((Number)row.get("mfa_last_step")).longValue());
+            if (step < 0 || jdbc.update("UPDATE ops_employee SET mfa_last_step=? WHERE id=? AND mfa_last_step<? AND status=1",step,employee,step)!=1) throw invalid();
+        }
         byte[] entropy = new byte[32]; RANDOM.nextBytes(entropy);
         String token="ops_"+Base64.getUrlEncoder().withoutPadding().encodeToString(entropy);
-        jdbc.update("INSERT INTO ops_session(id,employee_id,token_hash,expires_at) VALUES(?,?,?,?)",UUID.randomUUID().toString(),employee,hash(token),Timestamp.from(Instant.now().plusSeconds(3600)));
+        if(jdbc.update("INSERT INTO ops_session(id,employee_id,token_hash,expires_at) SELECT ?,id,?,? FROM ops_employee WHERE id=? AND status=1 AND password_hash=?",
+                UUID.randomUUID().toString(),hash(token),Timestamp.from(Instant.now().plusSeconds(3600)),employee,row.get("password_hash"))!=1)throw invalid();
         audit(employee,"session.login",employee,"SUCCESS");
         return Map.of("token",token,"expire",3600,"audience","OPS");
     }
@@ -65,5 +75,5 @@ public class OpsIdentityService {
         try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); }
         catch(Exception e){throw new IllegalStateException(e);}
     }
-    private static RenException invalid() { return new RenException("员工账号、密码或验证器验证码无效"); }
+    private static RenException invalid() { return new RenException("员工登录失败，请检查登录信息"); }
 }

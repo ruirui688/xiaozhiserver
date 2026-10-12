@@ -4,8 +4,11 @@ import store from '@/store';
 import { operations } from '@/apis/platform';
 import { readSession } from '@/security/session';
 import { canVisitOperations } from './navigation';
+import { OPERATIONS_BASE, migrateLegacyOperationsLocation } from './routeLocation';
 Vue.use(VueRouter);
-const router = new VueRouter({ routes: [
+// Normalize old bookmarks before VueRouter reads the initial browser location.
+migrateLegacyOperationsLocation(window.location, window.history);
+const router = new VueRouter({ mode: 'history', base: OPERATIONS_BASE, routes: [
   { path: '/login', component: () => import('./OpsLogin.vue') },
   { path: '/enroll', component: () => import('./OpsEnrollment.vue') },
   { path: '/recover', component: () => import('./OpsEnrollment.vue') },

@@ -19,12 +19,22 @@ public class OpsAuthController {
     private final CaptchaService captcha;
     private final SysParamsService params;
     private final OpsEnrollmentService enrollment;
-    @Data public static class Login extends LoginDTO { @NotBlank private String otpCode; }
-    @Data public static class Enrollment extends Login { @NotBlank private String totpSecret; private String recoveryCode; }
+    private final OpsLoginPolicy loginPolicy;
+    private final OpsLoginPasswordDecoder passwordDecoder;
+    @Data public static class Login {
+        @NotBlank private String username;
+        @NotBlank private String password;
+        private String captchaId;
+        private String otpCode;
+    }
+    @Data public static class MfaProof extends LoginDTO { @NotBlank private String otpCode; }
+    @Data public static class Enrollment extends MfaProof { @NotBlank private String totpSecret; private String recoveryCode; }
+    public record IdentityPolicy(boolean available,String message,boolean mfaRequired,boolean captchaRequired) {}
     @GetMapping("/identity-policy")
-    public Result<OpsEnrollmentService.IdentityPolicy> identityPolicy(HttpServletRequest request) {
+    public Result<IdentityPolicy> identityPolicy(HttpServletRequest request) {
         identities.limit("identity-policy-ip:"+request.getRemoteAddr(),120);
-        return new Result<OpsEnrollmentService.IdentityPolicy>().ok(enrollment.identityPolicy());
+        var identity=enrollment.identityPolicy();
+        return new Result<IdentityPolicy>().ok(new IdentityPolicy(identity.available(),identity.message(),loginPolicy.mfaRequired(),loginPolicy.captchaRequired()));
     }
     @PostMapping("/enroll")
     public Result<Map<String,Object>> enroll(@Valid @RequestBody Enrollment input,HttpServletRequest request) {
@@ -40,14 +50,14 @@ public class OpsAuthController {
         return new Result<Map<String,Object>>().ok(enrollment.submit(input.getUsername(),password,input.getTotpSecret(),input.getOtpCode(),input.getRecoveryCode(),request.getRemoteAddr()));
     }
     @PostMapping("/recovery-code")
-    public Result<Map<String,String>> recoveryCode(@Valid @RequestBody Login input) {
+    public Result<Map<String,String>> recoveryCode(@Valid @RequestBody MfaProof input) {
         String password=Sm2DecryptUtil.decryptAndValidateCaptcha(input.getPassword(),input.getCaptchaId(),captcha,params);
         return new Result<Map<String,String>>().ok(Map.of("recoveryCode",enrollment.issueRecoveryCode(password,input.getOtpCode())));
     }
     @PostMapping("/login")
     public Result<Map<String,Object>> login(@Valid @RequestBody Login login,HttpServletRequest request) {
-        String password=Sm2DecryptUtil.decryptAndValidateCaptcha(login.getPassword(),login.getCaptchaId(),captcha,params);
-        return new Result<Map<String,Object>>().ok(identities.login(login.getUsername(),password,login.getOtpCode(),request.getRemoteAddr()));
+        return new Result<Map<String,Object>>().ok(identities.login(login.getUsername(),
+            ()->passwordDecoder.decode(login.getPassword(),login.getCaptchaId()),login.getOtpCode(),request.getRemoteAddr()));
     }
     @GetMapping("/me")
     public Result<Map<String,Object>> me() {

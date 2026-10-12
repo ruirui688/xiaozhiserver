@@ -30,7 +30,7 @@ scripts/dev start web
 npm run build
 ```
 
-构建产物在 `dist/`，不要提交到 Git。用户入口为 `index.html`，员工入口为 `ops.html`，两者会话与导航隔离。权限与服务额度边界见[平台服务与运营隔离](../../docs/architecture/platform-service-and-operations.md)。
+构建产物在 `dist/`，不要提交到 Git。用户入口为 `index.html`，员工从 `/ops/login` 访问独立的 `ops.html` 构建入口，两者会话与导航隔离；旧 `ops.html#/...` 链接兼容跳转。权限与服务额度边界见[平台服务与运营隔离](../../docs/architecture/platform-service-and-operations.md)。
 
 ### Customize configuration
 

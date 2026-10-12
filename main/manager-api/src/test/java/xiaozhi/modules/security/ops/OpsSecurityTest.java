@@ -44,7 +44,7 @@ class OpsSecurityTest {
             org.springframework.jdbc.datasource.init.ScriptUtils.executeSqlScript(connection,new org.springframework.core.io.ByteArrayResource(sql.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         }
         cipher=new CredentialCipher("test-only-encryption-master-key-at-least-32-chars");
-        identities=new OpsIdentityService(jdbc,cipher);
+        identities=new OpsIdentityService(jdbc,cipher,new OpsLoginPolicy(true,true));
         MessageSource messages=mock(MessageSource.class);
         when(messages.getMessage(anyString(),any(),any())).thenReturn("no permission");
         ReflectionTestUtils.setField(MessageUtils.class,"messageSource",messages);
@@ -69,6 +69,69 @@ class OpsSecurityTest {
         assertThrows(RuntimeException.class,()->identities.login("operator","Strong-Test-Password-42",otp,"192.0.2.1"));
         identities.revokeSessions("employee");
         assertThrows(RuntimeException.class,()->identities.authenticate(token));
+    }
+    @Test void passwordOnlyLoginKeepsFactorsAndScopedEmployeeIdentityUnchanged() {
+        employee("employee","operator");grant("employee","ALLOWANCE");
+        jdbc.update("UPDATE ops_employee SET mfa_cipher='unavailable-encrypted-factor',mfa_last_step=123 WHERE id='employee'");
+        var before=jdbc.queryForMap("SELECT * FROM ops_employee WHERE id='employee'");
+        var unusedCipher=mock(CredentialCipher.class);
+        var passwordOnly=new OpsIdentityService(jdbc,unusedCipher,new OpsLoginPolicy(false,false));
+        String token=passwordOnly.login("operator","Strong-Test-Password-42",null,"192.0.2.10").get("token").toString();
+        assertTrue(token.startsWith("ops_"));
+        UserDetail user=passwordOnly.authenticate(token);
+        assertEquals("OPS",user.getAudience());assertNull(user.getId());assertEquals("employee",user.getEmployeeId());
+        assertEquals(List.of("ALLOWANCE"),user.getGrants().stream().map(OpsGrant::roleCode).toList());
+        assertEquals(before,jdbc.queryForMap("SELECT * FROM ops_employee WHERE id='employee'"));
+        assertThrows(RuntimeException.class,()->passwordOnly.authenticate("user-token"));
+        verifyNoInteractions(unusedCipher);
+    }
+    @Test void passwordOnlyLoginRejectsWrongPasswordMissingAccountAndDisabledAccount() {
+        employee("employee","operator");
+        var passwordOnly=new OpsIdentityService(jdbc,cipher,new OpsLoginPolicy(false,false));
+        assertThrows(RuntimeException.class,()->passwordOnly.login("operator","incorrect-password",null,"192.0.2.11"));
+        assertThrows(RuntimeException.class,()->passwordOnly.login("missing","Strong-Test-Password-42",null,"192.0.2.11"));
+        jdbc.update("UPDATE ops_employee SET status=0 WHERE id='employee'");
+        assertThrows(RuntimeException.class,()->passwordOnly.login("operator","Strong-Test-Password-42",null,"192.0.2.11"));
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM ops_session",Integer.class));
+    }
+    @Test void requiredMfaRejectsMissingOrInvalidCodeWithoutIssuingSession() {
+        employee("employee","operator");
+        for(String otp:Arrays.asList(null,"", "not-a-code"))
+            assertThrows(RuntimeException.class,()->identities.login("operator","Strong-Test-Password-42",otp,"192.0.2.12"));
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM ops_session",Integer.class));
+        assertEquals(-1,jdbc.queryForObject("SELECT mfa_last_step FROM ops_employee WHERE id='employee'",Long.class));
+    }
+    @Test void loginLimitsIncludeBadCiphertextAndStopDecodingAfterAccountBudget() {
+        var passwordOnly=new OpsIdentityService(jdbc,cipher,new OpsLoginPolicy(false,false));
+        java.util.function.Supplier<String> decoder=mock(java.util.function.Supplier.class);
+        when(decoder.get()).thenThrow(new xiaozhi.common.exception.RenException("invalid encrypted password"));
+        for(int attempt=0;attempt<10;attempt++)
+            assertThrows(RuntimeException.class,()->passwordOnly.login("operator",decoder,null,"192.0.2.13"));
+        var blocked=assertThrows(xiaozhi.common.exception.RenException.class,()->passwordOnly.login("operator",decoder,null,"192.0.2.13"));
+        assertEquals("登录尝试过多，请稍后重试",blocked.getMessage());
+        verify(decoder,times(10)).get();
+        assertEquals(10,jdbc.queryForObject("SELECT attempts FROM ops_login_limit WHERE key_hash=?",Integer.class,OpsIdentityService.hash("account:operator")));
+    }
+    @Test void passwordOnlyModeKeepsIpLimitBeforeDecryption() {
+        var passwordOnly=new OpsIdentityService(jdbc,cipher,new OpsLoginPolicy(false,false));
+        jdbc.update("INSERT INTO ops_login_limit(key_hash,window_start,attempts) VALUES(?,CURRENT_TIMESTAMP,100)",OpsIdentityService.hash("ip:192.0.2.14"));
+        java.util.function.Supplier<String> decoder=mock(java.util.function.Supplier.class);
+        assertThrows(RuntimeException.class,()->passwordOnly.login("operator",decoder,null,"192.0.2.14"));
+        verifyNoInteractions(decoder);
+    }
+    @Test void sessionCannotBeIssuedAfterConcurrentDisableOrPasswordChange() {
+        employee("employee","operator");
+        for(String changed:List.of("status=0","password_hash='changed-password-hash'")) {
+            jdbc.update("UPDATE ops_employee SET status=1,password_hash=? WHERE id='employee'",PasswordUtils.encode("Strong-Test-Password-42"));
+            var racingJdbc=spy(jdbc);
+            doAnswer(call->{
+                jdbc.update("UPDATE ops_employee SET "+changed+" WHERE id='employee'");
+                return call.callRealMethod();
+            }).when(racingJdbc).update(startsWith("INSERT INTO ops_session"),any(Object[].class));
+            var passwordOnly=new OpsIdentityService(racingJdbc,cipher,new OpsLoginPolicy(false,false));
+            assertThrows(RuntimeException.class,()->passwordOnly.login("operator","Strong-Test-Password-42",null,"192.0.2.15"));
+            assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM ops_session",Integer.class));
+        }
     }
     @Test void scopeMatchingRejectsWildcardWrongDomainAndUserSession() {
         principal=ops("employee","SUPPLIER_FINANCE");
