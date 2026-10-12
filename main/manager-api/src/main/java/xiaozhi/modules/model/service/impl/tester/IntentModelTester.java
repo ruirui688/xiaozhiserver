@@ -16,14 +16,16 @@ import org.springframework.web.client.RestTemplate;
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
-import lombok.AllArgsConstructor;
+import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
+import xiaozhi.common.llm.LlmUsageMeter;
 import xiaozhi.modules.model.dao.ModelConfigDao;
 import xiaozhi.modules.model.dto.ModelTestResultDTO;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.impl.ModelRuntimeAssembler;
 
 @Component
-@AllArgsConstructor
+@RequiredArgsConstructor
 public class IntentModelTester implements ModelTestExecutor {
 
     private static final String TEST_TEXT = "你好啊";
@@ -32,6 +34,9 @@ public class IntentModelTester implements ModelTestExecutor {
     private final ModelConfigDao modelConfigDao;
     private final ModelRuntimeAssembler modelRuntimeAssembler;
     private final RestTemplate restTemplate;
+
+    @Autowired
+    private LlmUsageMeter usageMeter;
 
     @Override
     public boolean supports(String modelType, String providerType) {
@@ -160,8 +165,7 @@ public class IntentModelTester implements ModelTestExecutor {
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("Authorization", "Bearer " + apiKey);
         long startTime = System.currentTimeMillis();
-        ResponseEntity<String> response = restTemplate.exchange(
-                apiUrl, HttpMethod.POST, new HttpEntity<>(requestBody, headers), String.class);
+        ResponseEntity<String> response = exchange(apiUrl, new HttpEntity<>(requestBody, headers), llmModelId);
         result.setResponseTimeMs(System.currentTimeMillis() - startTime);
         result.setTestOutput(StringUtils.defaultString(response.getBody()));
         if (!response.getStatusCode().is2xxSuccessful()) {
@@ -204,8 +208,7 @@ public class IntentModelTester implements ModelTestExecutor {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         long startTime = System.currentTimeMillis();
-        ResponseEntity<String> response = restTemplate.exchange(
-                apiUrl, HttpMethod.POST, new HttpEntity<>(requestBody, headers), String.class);
+        ResponseEntity<String> response = exchange(apiUrl, new HttpEntity<>(requestBody, headers), llmModelId);
         result.setResponseTimeMs(System.currentTimeMillis() - startTime);
         result.setTestOutput(StringUtils.defaultString(response.getBody()));
         if (!response.getStatusCode().is2xxSuccessful()) {
@@ -363,6 +366,12 @@ public class IntentModelTester implements ModelTestExecutor {
             return "未配置";
         }
         return isPlaceholderSecret(apiKey) ? "占位符，需填写真实密钥" : "已配置";
+    }
+
+    private ResponseEntity<String> exchange(String url, HttpEntity<?> request, String modelId) {
+        return usageMeter == null
+                ? restTemplate.exchange(url, HttpMethod.POST, request, String.class)
+                : usageMeter.exchange(restTemplate, url, request, String.class, modelId, "LLM");
     }
 
     private static boolean isPlaceholderSecret(String value) {

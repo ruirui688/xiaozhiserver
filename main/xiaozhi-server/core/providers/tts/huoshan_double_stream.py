@@ -5,6 +5,8 @@ import math
 import queue
 import time
 import asyncio
+from core.metering import tts_sessions as billing_tts
+from core.metering.volcengine import tts_usage
 import threading
 import traceback
 import websockets
@@ -1043,6 +1045,7 @@ class TTSProvider(TTSProviderBase):
             
             # 确保连接建立
             await self._ensure_connection()
+            usage_call = billing_tts.start(self, session_id)
 
             self._prepare_session_audio_state(session_id)
             self._active_session_id = session_id
@@ -1074,6 +1077,8 @@ class TTSProvider(TTSProviderBase):
             logger.bind(tag=TAG).debug("TTS会话启动成功")
         except Exception as e:
             logger.bind(tag=TAG).error(f"启动会话失败: {str(e)}")
+            if "usage_call" in locals():
+                usage_call.finish("FAILED")
             # 确保清理资源
             await self.close()
             raise
@@ -1128,6 +1133,7 @@ class TTSProvider(TTSProviderBase):
 
     async def close(self):
         """资源清理方法"""
+        billing_tts.close(self)
         await self._connection_prewarm.close()
         await super().close()
         self.activate_session = False
@@ -1167,6 +1173,14 @@ class TTSProvider(TTSProviderBase):
                         msg = await self.ws.recv()
                     res = self.parser_response(msg)
                     self.print_response(res, "send_text res:")
+                    # Account before the playback freshness filter: late supplier
+                    # usage still belongs to the original synthesis session.
+                    billing_tts.received(
+                        self, res.optional.sessionId or self._active_session_id,
+                        res.payload,
+                        {EVENT_SessionFinished: "SUCCESS", EVENT_SessionCanceled: "CANCELLED",
+                         EVENT_SessionFailed: "FAILED"}.get(res.optional.event),
+                    )
 
                     # 优先处理连接级别事件
                     if res.optional.event == EVENT_ConnectionFinished:
@@ -1329,6 +1343,7 @@ class TTSProvider(TTSProviderBase):
                 self.ws = None
         # 监听任务退出时清理引用
         finally:
+            billing_tts.close(self)
             if self.activate_session:
                 self._finalize_session_audio_once(
                     self._active_session_id,
@@ -1409,7 +1424,11 @@ class TTSProvider(TTSProviderBase):
         )
         if text and text.strip():
             self._record_turn_metric("record_latency_milestone", "tts.first_text_submit", session_id)
-        return await self.send_event(self.ws, header, optional, payload)
+        result = await self.send_event(self.ws, header, optional, payload)
+        usage_call = getattr(self, "_billing_tts_calls", {}).get(session_id)
+        if usage_call:
+            usage_call.usage("submitted_characters", len(text), "characters", "OBSERVED", add=True)
+        return result
 
     async def _receive_response(self, ws: websockets.WebSocketClientProtocol, timeout=None) -> Response:
         if timeout:
@@ -1584,16 +1603,21 @@ class TTSProvider(TTSProviderBase):
             audio_data = []
 
             async def _generate_audio():
+                usage_call = billing_tts.start(self, session_id)
                 # 创建新的WebSocket连接
                 ws_header = self._build_ws_headers()
-                ws = await asyncio.wait_for(
-                    websockets.connect(
-                        self.ws_url,
-                        additional_headers=ws_header,
-                        max_size=1000000000,
-                    ),
-                    timeout=self.connection_timeout_seconds,
-                )
+                try:
+                    ws = await asyncio.wait_for(
+                        websockets.connect(
+                            self.ws_url,
+                            additional_headers=ws_header,
+                            max_size=1000000000,
+                        ),
+                        timeout=self.connection_timeout_seconds,
+                    )
+                except BaseException:
+                    usage_call.finish("FAILED")
+                    raise
 
                 try:
                     # 启动连接
@@ -1637,6 +1661,7 @@ class TTSProvider(TTSProviderBase):
                         event=EVENT_TaskRequest, text=text, speaker=self.voice
                     )
                     await self.send_event(ws, header, optional, payload)
+                    usage_call.usage("submitted_characters", len(text), "characters", "OBSERVED")
 
                     # 发送结束会话请求
                     header = Header(
@@ -1663,14 +1688,24 @@ class TTSProvider(TTSProviderBase):
                         ):
                             self.wav_to_opus_data_audio_raw_stream(res.payload, callback=lambda opus_frame: audio_data.append(opus_frame))
                         elif res.optional.event == EVENT_UsageResponse:
+                            tts_usage(usage_call, res.payload)
                             continue
                         elif res.optional.event == EVENT_SessionFailed:
                             detail = res.payload.decode("utf-8", "ignore") if res.payload else ""
                             raise RuntimeError(f"TTS 会话失败: {detail}")
                         elif res.optional.event == EVENT_SessionFinished:
+                            tts_usage(usage_call, res.payload)
+                            usage_call.status = "SUCCESS"
                             break
-
+                except asyncio.CancelledError:
+                    usage_call.status = "CANCELLED"
+                    raise
+                except Exception:
+                    usage_call.status = "FAILED"
+                    raise
                 finally:
+                    usage_call.finish()
+                    getattr(self, "_billing_tts_calls", {}).pop(session_id, None)
                     # 清理资源
                     try:
                         await self.finish_connection()

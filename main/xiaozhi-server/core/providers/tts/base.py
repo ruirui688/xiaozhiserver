@@ -367,6 +367,8 @@ class TTSProviderBase(ABC):
             )
 
     async def open_audio_channels(self, conn):
+        from core.metering import bind_provider
+        bind_provider(self, conn)
         self.conn = conn
 
         # 根据conn的sample_rate创建编码器，如果子类已经创建则不覆盖（IndexTTS接口返回为24kHZ-待重采样处理）

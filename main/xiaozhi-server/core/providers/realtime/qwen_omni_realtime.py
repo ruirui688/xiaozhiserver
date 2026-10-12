@@ -1,6 +1,7 @@
 """Async DashScope Qwen Omni Realtime transport and device session."""
 
 import asyncio
+from core.metering.realtime import RealtimeMeter
 import base64
 import json
 import inspect
@@ -228,6 +229,9 @@ class QwenOmniRealtimeTransport:
             raise RuntimeError("Realtime WebSocket 尚未连接")
         outgoing = dict(payload)
         outgoing.setdefault("event_id", f"event_{uuid.uuid4().hex}")
+        meter = getattr(self, "_billing_meter", None)
+        if meter:
+            meter.submitted(outgoing)
         await self.websocket.send(json.dumps(outgoing, ensure_ascii=False))
 
     async def wait_for(self, event_type: str, timeout: Optional[float] = None) -> Dict[str, Any]:
@@ -325,6 +329,8 @@ class QwenOmniRealtimeSession:
             transport = self._transport_factory()
         self.transport = transport
         self.decoder = opuslib_next.Decoder(16000, 1)
+        self._billing_meter = RealtimeMeter(self, conn)
+        self.transport._billing_meter = self._billing_meter
         self.encoder = OpusEncoderUtils(24000, 1, 60)
         self.response_text = ""
         self.response_audio = []
@@ -450,6 +456,7 @@ class QwenOmniRealtimeSession:
         await cancel_realtime_updates(self)
         await old_transport.close()
         self.transport = self._transport_factory()
+        self.transport._billing_meter = self._billing_meter
         self.completed_function_calls.clear()
         self.function_calls.clear()
         self.input_audio = []
@@ -645,6 +652,9 @@ class QwenOmniRealtimeSession:
             self._instruction_turn_active = False
 
     async def handle_event(self, payload: Dict[str, Any]) -> None:
+        meter = getattr(self, "_billing_meter", None)
+        if meter:
+            meter.received(payload)
         event_type = payload.get("type")
         if event_type == "response.created":
             self._response_active = True
@@ -943,6 +953,8 @@ class QwenOmniRealtimeSession:
         if self._closed:
             return
         self._closed = True
+        if hasattr(self, "_billing_meter"):
+            self._billing_meter.close()
         tool_task = getattr(self, "_tool_task", None)
         if tool_task is not None and not tool_task.done():
             tool_task.cancel()
@@ -965,6 +977,8 @@ class QwenRealtimeTextProbe:
     def __init__(self, config: Dict[str, Any], transport=None):
         self.config = dict(config or {})
         self.transport = transport or QwenOmniRealtimeTransport(self.config)
+        self._billing_meter = RealtimeMeter(self)
+        self.transport._billing_meter = self._billing_meter
         self.connect_ms = None
         self.started = 0.0
         self.first_text_ms = None
@@ -1018,6 +1032,7 @@ class QwenRealtimeTextProbe:
             }
 
     async def _on_event(self, payload):
+        self._billing_meter.received(payload)
         event_type = payload.get("type")
         elapsed = int((time.perf_counter() - self.started) * 1000)
         if event_type in {"response.text.delta", "response.audio_transcript.delta"}:
@@ -1041,6 +1056,7 @@ class QwenRealtimeTextProbe:
 
     async def close(self) -> None:
         await self.transport.close()
+        self._billing_meter.close()
 
 
 async def run_qwen_realtime_text_probe(config: Dict[str, Any], text: str) -> Dict[str, Any]:

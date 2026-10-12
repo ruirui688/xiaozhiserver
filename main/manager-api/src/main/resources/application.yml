@@ -44,6 +44,20 @@ renren:
     exclude-urls:
 
 xiaozhi:
+  billing:
+    outbox-root: ${XIAOZHI_BILLING_OUTBOX_ROOT:uploadfile/billing-outbox}
+    volcengine:
+      # 独立 IAM 只读凭据；账单、通用资源包和语音包所需权限见模型管理文档。
+      enabled: ${XIAOZHI_BILLING_VOLCENGINE_ENABLED:false}
+      access-key: ${XIAOZHI_BILLING_VOLCENGINE_ACCESS_KEY:}
+      secret-key: ${XIAOZHI_BILLING_VOLCENGINE_SECRET_KEY:}
+      account-ref: ${XIAOZHI_BILLING_VOLCENGINE_ACCOUNT_REF:}
+      region: ${XIAOZHI_BILLING_VOLCENGINE_REGION:cn-north-1}
+      speech-project: ${XIAOZHI_BILLING_VOLCENGINE_SPEECH_PROJECT:}
+      speech-resource-ids: ${XIAOZHI_BILLING_VOLCENGINE_SPEECH_RESOURCE_IDS:}
+    deepseek:
+      model-id: ${XIAOZHI_BILLING_DEEPSEEK_MODEL_ID:}
+      account-ref: ${XIAOZHI_BILLING_DEEPSEEK_ACCOUNT_REF:}
   security:
     # 用于加密智能体级第三方凭据。生产安装脚本会生成并持久化该值。
     credential-encryption-key: ${XIAOZHI_CREDENTIAL_ENCRYPTION_KEY:}

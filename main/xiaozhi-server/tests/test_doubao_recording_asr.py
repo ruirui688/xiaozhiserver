@@ -90,6 +90,33 @@ def test_timeout_configuration_defaults_and_overrides(tmp_path):
     assert configured.query_timeout_seconds == 7
 
 
+def test_billing_counts_submit_and_polling_as_one_attempt(tmp_path, monkeypatch):
+    from core.metering import snapshot
+    from core.metering.outbox import UsageOutbox
+    from core.metering.recorder import configure
+    provider = _provider(tmp_path, query_interval_seconds=0.001)
+    provider._billing_scope = snapshot(config={
+        "billing_context": {"context_id": "asr-context", "context_token": "test-capability",
+                            "models": {"asr-id": {"service_type": "ASR", "provider": "volcengine"}}},
+        "selected_module": {"ASR": "asr-id"},
+    })
+    session = FakeSession([FakeResponse({"code": 0}), FakeResponse({"code": 0}),
+                           FakeResponse({"result": {"text": "完成"}, "audio_info": {"duration": 10}})])
+    monkeypatch.setattr(doubao_recording.aiohttp, "ClientSession", lambda **kwargs: session)
+    box = UsageOutbox(str(tmp_path / "usage.sqlite3"))
+    configure(box)
+    try:
+        asyncio.run(provider.speech_to_text([], "test-session", artifacts=_artifacts()))
+        event, = box.pending()
+        assert len(session.calls) == 3
+        assert event["status"] == "SUCCESS" and event["usageComplete"] is True
+        assert event["providerRequestId"] == session.calls[0][1]["headers"]["X-Api-Request-Id"]
+        assert {item["source"] for item in event["usage"]} == {"PROVIDER", "OBSERVED"}
+    finally:
+        configure(None)
+        box.close()
+
+
 def test_recording_request_sends_agent_hotword_table_in_corpus(tmp_path):
     provider = _provider(
         tmp_path,

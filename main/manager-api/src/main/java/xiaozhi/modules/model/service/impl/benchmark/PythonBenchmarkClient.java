@@ -4,6 +4,7 @@ import java.time.Duration;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -27,6 +28,9 @@ public class PythonBenchmarkClient {
     private final Environment environment;
     private final BenchmarkRequestAuth benchmarkRequestAuth;
 
+    @Autowired @Lazy
+    private BenchmarkBillingContext billingContext;
+
     public PythonBenchmarkClient(
             @Lazy SysParamsService sysParamsService,
             Environment environment,
@@ -37,10 +41,12 @@ public class PythonBenchmarkClient {
     }
 
     public JSONObject runBenchmark(JSONObject payload) {
+        if (billingContext != null) billingContext.attach(payload, "BENCHMARK");
         return execute(payload, Duration.ofMinutes(10), "专业评测");
     }
 
     public JSONObject runRuntimeTest(JSONObject payload, Duration timeout) {
+        if (billingContext != null) billingContext.attach(payload, "MODEL_TEST");
         return execute(payload, timeout, "运行时真实测试");
     }
 

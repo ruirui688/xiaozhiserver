@@ -331,7 +331,9 @@ def _create_judge_llm(judge_config):
     runtime_config = dict(config)
     runtime_config["thinking"] = {"type": "disabled"}
     runtime_config.pop("reasoning_effort", None)
-    return create_llm_instance(provider_type, runtime_config)
+    llm = create_llm_instance(provider_type, runtime_config)
+    llm._billing_model_id = judge_config.get("id") or judge_config.get("model_id")
+    return llm
 
 
 def _collect_llm_response(llm, dialogue, max_tokens):

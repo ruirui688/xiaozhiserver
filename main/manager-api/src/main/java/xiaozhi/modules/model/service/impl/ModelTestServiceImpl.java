@@ -43,7 +43,12 @@ import cn.hutool.core.collection.CollectionUtil;
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
-import lombok.AllArgsConstructor;
+import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
+import xiaozhi.common.llm.LlmUsageContext;
+import xiaozhi.common.llm.LlmUsageMeter;
+import xiaozhi.modules.model.service.impl.benchmark.BenchmarkBillingContext;
 import lombok.extern.slf4j.Slf4j;
 import xiaozhi.common.exception.RenException;
 import xiaozhi.modules.model.dao.ModelConfigDao;
@@ -55,7 +60,7 @@ import xiaozhi.modules.model.service.impl.tester.ModelTestExecutor;
 
 @Slf4j
 @Service
-@AllArgsConstructor
+@RequiredArgsConstructor
 public class ModelTestServiceImpl implements ModelTestService {
 
     private final ModelConfigDao modelConfigDao;
@@ -64,6 +69,11 @@ public class ModelTestServiceImpl implements ModelTestService {
     private final Environment environment;
     private final BenchmarkRequestAuth benchmarkRequestAuth;
     private final List<ModelTestExecutor> modelTestExecutors;
+
+    @Autowired @Lazy
+    private BenchmarkBillingContext billingContext;
+    @Autowired
+    private LlmUsageMeter usageMeter;
 
     private static final int MODEL_TEST_UNTESTED = 0;
     private static final int MODEL_TEST_PASSED = 1;
@@ -88,7 +98,8 @@ public class ModelTestServiceImpl implements ModelTestService {
 
     @Override
     public ModelTestResultDTO testModel(ModelConfigEntity modelConfig) {
-        return doTestModel(modelConfig);
+        return LlmUsageContext.call(LlmUsageContext.Identity.platform(modelConfig.getId(), "MODEL_TEST"),
+                () -> doTestModel(modelConfig));
     }
 
     private ModelTestResultDTO doTestModel(ModelConfigEntity modelConfig) {
@@ -517,8 +528,8 @@ public class ModelTestServiceImpl implements ModelTestService {
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("Authorization", "Bearer " + apiKey);
         long startTime = System.currentTimeMillis();
-        ResponseEntity<String> response = restTemplate.exchange(
-                apiUrl, HttpMethod.POST, new HttpEntity<>(requestBody, headers), String.class);
+        ResponseEntity<String> response = exchangeModelRequest(
+                apiUrl, new HttpEntity<>(requestBody, headers), String.class, "LLM");
         result.setResponseTimeMs(System.currentTimeMillis() - startTime);
         result.setTestOutput(StringUtils.defaultString(response.getBody()));
         if (!response.getStatusCode().is2xxSuccessful()) {
@@ -579,8 +590,8 @@ public class ModelTestServiceImpl implements ModelTestService {
             headers.setContentType(MediaType.MULTIPART_FORM_DATA);
             headers.set("Authorization", "Bearer " + apiKey);
             long startTime = System.currentTimeMillis();
-            ResponseEntity<String> response = restTemplate.exchange(
-                    apiUrl, HttpMethod.POST, new HttpEntity<>(body, headers), String.class);
+            ResponseEntity<String> response = exchangeModelRequest(
+                    apiUrl, new HttpEntity<>(body, headers), String.class, "ASR");
             result.setResponseTimeMs(System.currentTimeMillis() - startTime);
             result.setTestOutput(StringUtils.defaultString(response.getBody()));
             if (!response.getStatusCode().is2xxSuccessful()) {
@@ -681,6 +692,7 @@ public class ModelTestServiceImpl implements ModelTestService {
     }
 
     protected JSONObject callRuntimeBenchmark(JSONObject payload) {
+        if (billingContext != null) billingContext.attach(payload, "MODEL_TEST");
         String baseUrl = resolveXiaozhiServerHttpBaseUrl();
         String url = baseUrl + "/benchmark/models";
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory();
@@ -705,6 +717,13 @@ public class ModelTestServiceImpl implements ModelTestService {
 
     protected RestTemplate createRuntimeBenchmarkRestTemplate(JdkClientHttpRequestFactory factory) {
         return new RestTemplate(factory);
+    }
+
+    private <T> ResponseEntity<T> exchangeModelRequest(String endpoint, HttpEntity<?> request,
+            Class<T> responseType, String serviceType) {
+        return usageMeter == null
+                ? restTemplate.exchange(endpoint, HttpMethod.POST, request, responseType)
+                : usageMeter.exchange(restTemplate, endpoint, request, responseType, null, serviceType);
     }
 
     private String resolveXiaozhiServerHttpBaseUrl() {
@@ -953,8 +972,8 @@ public class ModelTestServiceImpl implements ModelTestService {
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("Authorization", "Bearer " + apiKey);
         long startTime = System.currentTimeMillis();
-        ResponseEntity<byte[]> response = restTemplate.exchange(
-                apiUrl, HttpMethod.POST, new HttpEntity<>(requestBody, headers), byte[].class);
+        ResponseEntity<byte[]> response = exchangeModelRequest(
+                apiUrl, new HttpEntity<>(requestBody, headers), byte[].class, "TTS");
         result.setResponseTimeMs(System.currentTimeMillis() - startTime);
         byte[] audioBytes = response.getBody();
         result.setTestOutput("HTTP 状态：" + response.getStatusCode()
@@ -1004,9 +1023,9 @@ public class ModelTestServiceImpl implements ModelTestService {
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.set("Authorization", "Bearer " + apiKey);
             long startTime = System.currentTimeMillis();
-            ResponseEntity<String> response = restTemplate.exchange(
-                    buildChatCompletionsUrl(baseUrl), HttpMethod.POST, new HttpEntity<>(requestBody, headers),
-                    String.class);
+            ResponseEntity<String> response = exchangeModelRequest(
+                    buildChatCompletionsUrl(baseUrl), new HttpEntity<>(requestBody, headers),
+                    String.class, "LLM");
             result.setResponseTimeMs(System.currentTimeMillis() - startTime);
             result.setTestOutput(StringUtils.defaultString(response.getBody()));
             if (!response.getStatusCode().is2xxSuccessful()) {
@@ -1104,8 +1123,8 @@ public class ModelTestServiceImpl implements ModelTestService {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         long startTime = System.currentTimeMillis();
-        ResponseEntity<String> response = restTemplate.exchange(
-                apiUrl, HttpMethod.POST, new HttpEntity<>(requestBody, headers), String.class);
+        ResponseEntity<String> response = exchangeModelRequest(
+                apiUrl, new HttpEntity<>(requestBody, headers), String.class, "LLM");
         result.setResponseTimeMs(System.currentTimeMillis() - startTime);
         result.setTestOutput(StringUtils.defaultString(response.getBody()));
         if (!response.getStatusCode().is2xxSuccessful()) {

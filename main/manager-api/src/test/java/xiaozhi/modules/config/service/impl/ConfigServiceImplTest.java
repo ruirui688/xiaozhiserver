@@ -95,7 +95,7 @@ class ConfigServiceImplTest {
                 mock(AgentPluginMappingService.class), mock(AgentMcpAccessPointService.class),
                 mock(AgentContextProviderService.class), mock(AgentFeishuService.class),
                 mock(VoiceCloneService.class), voices, voiceApi, mock(CorrectWordFileService.class),
-                mock(UserPluginConfigService.class), mock(AgentSemanticSkillService.class), snapshots);
+                mock(UserPluginConfigService.class), mock(AgentSemanticSkillService.class), snapshots, mock(xiaozhi.modules.billing.service.BillingContextService.class));
 
         Map<String, Object> runtime = service.getAgentModels("device-snapshot", Map.of());
         var snapshot = (Map<?, ?>) runtime.get("managed_memory_snapshot");
@@ -131,7 +131,7 @@ class ConfigServiceImplTest {
                 mock(AgentMcpAccessPointService.class), mock(AgentContextProviderService.class),
                 mock(AgentFeishuService.class), mock(VoiceCloneService.class), mock(AgentVoicePrintDao.class),
                 mock(VoiceprintApiClient.class), mock(CorrectWordFileService.class),
-                mock(UserPluginConfigService.class), mock(AgentSemanticSkillService.class), mock(ManagedMemorySnapshotService.class));
+                mock(UserPluginConfigService.class), mock(AgentSemanticSkillService.class), mock(ManagedMemorySnapshotService.class), mock(xiaozhi.modules.billing.service.BillingContextService.class));
 
         Map<String, Object> deviceRuntime = service.getAgentModels("device-mac", Map.of());
         Map<String, String> deviceRouting = (Map<String, String>) deviceRuntime.get("speech_routing");
@@ -182,7 +182,7 @@ class ConfigServiceImplTest {
                 mock(VoiceprintApiClient.class),
                 mock(CorrectWordFileService.class),
                 mock(UserPluginConfigService.class),
-                mock(AgentSemanticSkillService.class), mock(ManagedMemorySnapshotService.class));
+                mock(AgentSemanticSkillService.class), mock(ManagedMemorySnapshotService.class), mock(xiaozhi.modules.billing.service.BillingContextService.class));
 
         Map<String, Object> config = (Map<String, Object>) service.getConfig(false);
 
@@ -221,7 +221,7 @@ class ConfigServiceImplTest {
                 mock(AgentMcpAccessPointService.class), mock(AgentContextProviderService.class),
                 mock(AgentFeishuService.class), mock(VoiceCloneService.class), voicePrintDao,
                 mock(VoiceprintApiClient.class), mock(CorrectWordFileService.class),
-                mock(UserPluginConfigService.class), mock(AgentSemanticSkillService.class), mock(ManagedMemorySnapshotService.class));
+                mock(UserPluginConfigService.class), mock(AgentSemanticSkillService.class), mock(ManagedMemorySnapshotService.class), mock(xiaozhi.modules.billing.service.BillingContextService.class));
 
         Map<String, Object> runtime = service.getAgentRuntimeConfig("agent-voice-catalog");
         List<Map<String, String>> catalog = (List<Map<String, String>>) runtime.get("tts_voice_catalog");
@@ -326,7 +326,7 @@ class ConfigServiceImplTest {
         when(sysParamsService.getValue(Constant.SERVER_VAD_MIN_SILENCE_DURATION_MS, true)).thenReturn("50");
 
         ConfigServiceImpl service = new ConfigServiceImpl(sysParamsService, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null, null, mock(xiaozhi.modules.billing.service.BillingContextService.class));
         Map<String, Object> runtimeConfig = new HashMap<>();
 
         service.applyManagedVadParams(runtimeConfig);
@@ -345,7 +345,7 @@ class ConfigServiceImplTest {
     void applyManagedVadParamsDoesNotOverwriteExplicitModelValues() throws Exception {
         SysParamsService sysParamsService = Mockito.mock(SysParamsService.class);
         ConfigServiceImpl service = new ConfigServiceImpl(sysParamsService, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null, null, mock(xiaozhi.modules.billing.service.BillingContextService.class));
         Map<String, Object> runtimeConfig = new HashMap<>();
         runtimeConfig.put("threshold", 0.82);
         runtimeConfig.put("threshold_low", 0.18);
@@ -405,7 +405,7 @@ class ConfigServiceImplTest {
                 mock(VoiceprintApiClient.class),
                 mock(CorrectWordFileService.class),
                 userPluginConfigService,
-                semanticSkillService, mock(ManagedMemorySnapshotService.class));
+                semanticSkillService, mock(ManagedMemorySnapshotService.class), mock(xiaozhi.modules.billing.service.BillingContextService.class));
 
         Map<String, Object> runtime = service.getAgentRuntimeConfig("agent-a");
         Map<String, Object> plugins = (Map<String, Object>) runtime.get("plugins");
@@ -447,7 +447,7 @@ class ConfigServiceImplTest {
                 mock(VoiceprintApiClient.class),
                 mock(CorrectWordFileService.class),
                 mock(UserPluginConfigService.class),
-                mock(AgentSemanticSkillService.class), mock(ManagedMemorySnapshotService.class));
+                mock(AgentSemanticSkillService.class), mock(ManagedMemorySnapshotService.class), mock(xiaozhi.modules.billing.service.BillingContextService.class));
 
         Map<String, Object> runtime = service.getAgentRuntimeConfig("agent-text-history");
 
@@ -497,7 +497,7 @@ class ConfigServiceImplTest {
                 mock(VoiceprintApiClient.class),
                 mock(CorrectWordFileService.class),
                 mock(UserPluginConfigService.class),
-                semanticSkillService, mock(ManagedMemorySnapshotService.class));
+                semanticSkillService, mock(ManagedMemorySnapshotService.class), mock(xiaozhi.modules.billing.service.BillingContextService.class));
 
         Map<String, Object> runtime = service.getAgentRuntimeConfig("agent-skill");
         List<Map<String, Object>> skills = (List<Map<String, Object>>) runtime.get("semantic_skills");

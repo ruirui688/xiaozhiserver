@@ -26,6 +26,7 @@ MANAGED_CONFIG_KEYS = (
     "device_max_output_size",
     "chat_history_conf",
     "tts_voice_catalog",
+    "billing_context",
 )
 
 
@@ -50,6 +51,7 @@ def build_managed_runtime_config(common_config, private_config):
     private = copy.deepcopy(private_config or {})
     # A snapshot is authoritative per-device data, never a common-config default.
     target.pop("managed_memory_snapshot", None)
+    target.pop("billing_context", None)
     if "managed_memory_snapshot" in private:
         target["managed_memory_snapshot"] = copy.deepcopy(private["managed_memory_snapshot"])
     normalize_runtime_config(private)
@@ -123,6 +125,13 @@ def runtime_config_fingerprint(private_config):
     # Memory leases refresh independently without rebuilding audio/model clients.
     provider_config = dict(private_config or {})
     provider_config.pop("managed_memory_snapshot", None)
+    billing = provider_config.get("billing_context")
+    if isinstance(billing, dict):
+        # A newly issued capability is not a model/configuration change.
+        provider_config["billing_context"] = {
+            key: value for key, value in billing.items()
+            if key not in {"context_id", "context_token", "token", "issued_at"}
+        }
     payload = json.dumps(
         provider_config,
         ensure_ascii=False,

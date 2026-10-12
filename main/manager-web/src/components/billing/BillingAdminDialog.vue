@@ -1,0 +1,136 @@
+<template>
+  <el-dialog title="账单同步与归属管理" :visible="visible && canManage" width="min(1100px, 94vw)" :close-on-click-modal="false" :show-close="!busy" :close-on-press-escape="!busy" @close="$emit('close')">
+    <div v-if="canManage" class="billing-admin">
+      <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
+      <el-alert v-if="result" :title="result" type="success" :closable="false" show-icon />
+      <el-tabs v-model="tab">
+        <el-tab-pane label="同步与导入" name="sync">
+          <h3>火山引擎官方账单</h3>
+          <p class="hint">同步供应商提供的账单金额；未匹配归属的项目保留在平台账单中。</p>
+          <div class="inline-controls">
+            <el-date-picker v-model="billPeriod" type="month" value-format="yyyy-MM" placeholder="选择账期" :clearable="false" />
+            <el-button type="primary" :loading="busy" :disabled="!options.volcengineSyncEnabled || busy || !billPeriod" @click="sync">同步账单</el-button>
+          </div>
+          <p v-if="!options.volcengineSyncEnabled" class="hint">尚未开通火山引擎账单同步，可先导入官方账单。</p>
+          <h3>导入官方账单</h3>
+          <p class="hint">只导入供应商确认的金额。用量报表、自行算价或按比例分摊的金额不能作为实际消费导入。请按模板整理供应商账单原始字段，保留账单标识与币种。人工导入会单独标记，系统无法自动核验文件是否来自供应商。</p>
+          <el-form label-width="110px" class="import-form">
+            <el-form-item label="供应商"><el-select v-model="importProvider" :disabled="busy"><el-option label="火山引擎" value="VOLCENGINE" /><el-option label="DeepSeek" value="DEEPSEEK" /></el-select><el-button type="text" :disabled="busy" @click="downloadTemplate">下载字段模板</el-button></el-form-item>
+            <el-form-item label="账号标签"><el-input v-model="accountRef" maxlength="128" placeholder="与归属映射一致的非敏感账号标签" :disabled="busy" /></el-form-item>
+            <el-form-item label="CSV 文件"><input ref="file" type="file" accept=".csv,text/csv" :disabled="busy" @change="selectFile" /><small class="hint">UTF-8 编码，最大 2 MB；不上传密钥或凭据。</small></el-form-item>
+            <el-form-item><el-checkbox v-model="confirmOfficial" :disabled="busy">确认金额来自供应商官方账单</el-checkbox></el-form-item>
+            <el-form-item><el-button type="primary" :loading="busy" :disabled="busy || !file || !accountRef.trim() || !confirmOfficial" @click="importBill">导入账单</el-button></el-form-item>
+          </el-form>
+        </el-tab-pane>
+        <el-tab-pane label="供应商项目归属" name="bindings">
+          <div class="section-heading"><p class="hint">按供应商项目、资源或独占账号，将指定有效期内的账单归属到当前工作空间。只在证据足够时选择智能体或设备。</p><el-button :disabled="busy" @click="loadBindings">刷新</el-button></div>
+          <el-table :data="bindings" v-loading="loading" empty-text="当前工作空间暂无归属映射">
+            <el-table-column label="供应商 / 账号" min-width="130"><template slot-scope="scope">{{ label(scope.row.provider) }}<small class="hint">{{ scope.row.accountRef }}</small></template></el-table-column>
+            <el-table-column label="供应商项目 / 资源" min-width="150"><template slot-scope="scope">{{ scopeName(scope.row.scopeType) }}<small class="hint">{{ scope.row.scopeValue }}</small></template></el-table-column>
+            <el-table-column label="归属" min-width="160"><template slot-scope="scope">{{ scope.row.deviceId || scope.row.agentId || '整个工作空间' }}</template></el-table-column>
+            <el-table-column label="有效期（北京时间）" min-width="190"><template slot-scope="scope">{{ time(scope.row.validFrom) }}<small class="hint">至 {{ scope.row.validTo ? time(scope.row.validTo) : '长期有效' }}</small></template></el-table-column>
+            <el-table-column label="操作" width="80"><template slot-scope="scope"><el-button type="text" :disabled="busy" @click="removeBinding(scope.row)">撤销</el-button></template></el-table-column>
+          </el-table>
+          <el-pagination :current-page="bindingPage" :page-size="20" :total="bindingTotal" layout="total, prev, pager, next" @current-change="changeBindingPage" />
+          <el-divider>新增归属映射</el-divider>
+          <el-form label-width="120px" class="binding-form">
+            <el-form-item label="供应商"><el-select v-model="form.provider"><el-option label="火山引擎" value="VOLCENGINE" /><el-option label="DeepSeek" value="DEEPSEEK" /></el-select></el-form-item>
+            <el-form-item label="账号标签"><el-input v-model="form.accountRef" maxlength="128" placeholder="供应商账号的非敏感标签" /></el-form-item>
+            <el-form-item label="归属依据"><el-select v-model="form.scopeType"><el-option label="供应商项目" value="PROJECT" /><el-option label="供应商资源" value="RESOURCE" /><el-option label="独占账号" value="ACCOUNT" /></el-select></el-form-item>
+            <el-form-item label="项目 / 资源标识"><el-input v-model="form.scopeValue" maxlength="256" placeholder="与官方账单字段一致的稳定标识" /></el-form-item>
+            <el-form-item label="智能体（可选）"><el-select v-model="form.agentId" clearable filterable placeholder="不指定则归属工作空间"><el-option v-for="item in options.agents || []" :key="item.id" :label="item.name" :value="item.id" /></el-select></el-form-item>
+            <el-form-item label="设备（可选）"><el-select v-model="form.deviceId" clearable filterable placeholder="仅限该资源由此设备独占使用"><el-option v-for="item in options.devices || []" :key="item.id" :label="item.name" :value="item.id" /></el-select></el-form-item>
+            <el-form-item label="有效期开始"><el-date-picker v-model="form.validFrom" type="datetime" value-format="yyyy-MM-dd HH:mm:ss" placeholder="北京时间" /></el-form-item>
+            <el-form-item label="有效期结束"><el-date-picker v-model="form.validTo" type="datetime" value-format="yyyy-MM-dd HH:mm:ss" placeholder="留空为长期有效" /></el-form-item>
+            <el-form-item label="依据说明" class="full"><el-input v-model="form.note" type="textarea" :rows="2" maxlength="500" placeholder="说明该项目、资源或账号由此归属主体独占使用的依据" /></el-form-item>
+          </el-form>
+          <p class="hint">映射不会按用量比例拆分账单。已用于账单归属的映射不能直接删除；变更应使用不重叠的有效期。</p>
+          <el-button type="primary" :loading="busy" :disabled="busy" @click="saveBinding">保存映射</el-button>
+        </el-tab-pane>
+      </el-tabs>
+    </div>
+  </el-dialog>
+</template>
+<script>
+import Api from '@/apis/api';
+import { billingLabel, billingTime, chinaDate, decimalText } from '@/utils/billing';
+
+function newBinding() {
+  return { provider: 'VOLCENGINE', accountRef: '', scopeType: 'PROJECT', scopeValue: '', agentId: '', deviceId: '', validFrom: `${chinaDate().slice(0, 7)}-01 00:00:00`, validTo: '', note: '' };
+}
+
+export default {
+  props: { visible: Boolean, options: { type: Object, default: () => ({}) }, workspaceId: String },
+  data() { return { tab: 'sync', billPeriod: chinaDate().slice(0, 7), busy: false, loading: false, error: '', result: '', bindings: [], bindingPage: 1, bindingTotal: 0, generation: 0, form: newBinding(), importProvider: 'VOLCENGINE', accountRef: '', file: null, confirmOfficial: false }; },
+  computed: { canManage() { return this.options.canManage === true; } },
+  watch: {
+    visible(value) { this.generation++; this.busy = false; this.loading = false; this.error = ''; this.result = ''; if (value && this.canManage) this.loadBindings(); },
+    workspaceId() { this.generation++; this.bindings = []; this.bindingTotal = 0; this.form = newBinding(); this.file = null; this.confirmOfficial = false; this.$emit('close'); }
+  },
+  beforeDestroy() { this.generation++; },
+  methods: {
+    label: billingLabel, time: billingTime,
+    scopeName(value) { return ({ PROJECT: '供应商项目', RESOURCE: '供应商资源', ACCOUNT: '独占账号' })[value] || value; },
+    current(generation) { return generation === this.generation && this.canManage && this.workspaceId === localStorage.getItem('currentWorkspaceId'); },
+    async loadBindings() {
+      if (!this.canManage) return;
+      const generation = ++this.generation; this.loading = true; this.error = '';
+      try { const data = await Api.billing.bindings({ page: this.bindingPage, limit: 20 }); if (this.current(generation)) { this.bindings = data.list || []; this.bindingTotal = data.total || 0; } }
+      catch (error) { if (this.current(generation)) { this.bindings = []; this.bindingTotal = 0; this.error = error.message; } }
+      finally { if (this.current(generation)) this.loading = false; }
+    },
+    changeBindingPage(value) { this.bindingPage = value; this.loadBindings(); },
+    async perform(action, success) {
+      if (!this.canManage || this.busy || this.workspaceId !== localStorage.getItem('currentWorkspaceId')) return;
+      const generation = this.generation; this.busy = true; this.error = ''; this.result = '';
+      try { const data = await action(); if (this.current(generation)) { this.result = typeof success === 'function' ? success(data) : success; this.$emit('updated'); } return data; }
+      catch (error) { if (this.current(generation)) this.error = error.message; }
+      finally { if (generation === this.generation) this.busy = false; }
+    },
+    report(data) { return `完成：处理记录 ${decimalText(data.importedCount)} 条（含新增及覆盖修订）`; },
+    sync() {
+      if (!this.options.volcengineSyncEnabled || !/^\d{4}-(0[1-9]|1[0-2])$/.test(this.billPeriod || '')) return;
+      return this.perform(() => Api.billing.sync({ provider: 'VOLCENGINE', billPeriod: this.billPeriod }), this.report);
+    },
+    selectFile(event) {
+      const file = event.target.files && event.target.files[0]; this.error = ''; this.file = null; this.confirmOfficial = false;
+      if (!file) return;
+      if (!/\.csv$/i.test(file.name) || file.size > 2 * 1024 * 1024 || !file.size) { this.error = '请选择不超过 2 MB 的非空 CSV 文件'; event.target.value = ''; return; }
+      this.file = file;
+    },
+    importBill() {
+      if (!this.file || !this.accountRef.trim() || !this.confirmOfficial) return;
+      return this.perform(() => Api.billing.importBill(this.file, this.importProvider, this.accountRef.trim()), this.report);
+    },
+    async downloadTemplate() {
+      if (!this.canManage || this.busy) return;
+      const provider = this.importProvider;
+      const generation = this.generation;
+      const data = await this.perform(() => Api.billing.importTemplate(provider), '字段模板已下载');
+      if (!data || !this.visible || !this.current(generation)) return;
+      const url = URL.createObjectURL(data); const link = document.createElement('a'); link.href = url; link.download = `${provider.toLowerCase()}-official-bill.csv`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    },
+    async saveBinding() {
+      if (!this.form.accountRef.trim() || !this.form.scopeValue.trim() || !this.form.validFrom) { this.error = '请填写账号标签、项目或资源标识及有效期开始时间'; return; }
+      const instant = value => value ? new Date(`${value.replace(' ', 'T')}+08:00`).toISOString() : null;
+      let validFrom, validTo;
+      try { validFrom = instant(this.form.validFrom); validTo = instant(this.form.validTo); } catch (_) { this.error = '有效期日期无效'; return; }
+      if (validTo && validTo <= validFrom) { this.error = '有效期结束必须晚于开始'; return; }
+      const payload = { ...this.form, accountRef: this.form.accountRef.trim(), scopeValue: this.form.scopeValue.trim(), workspaceId: this.workspaceId, validFrom, validTo, agentId: this.form.agentId || null, deviceId: this.form.deviceId || null };
+      await this.perform(() => Api.billing.createBinding(payload), '归属映射已保存');
+      if (!this.error && !this.busy) { this.form = newBinding(); this.loadBindings(); }
+    },
+    async removeBinding(row) {
+      if (!this.canManage || this.busy) return;
+      const workspaceId = this.workspaceId;
+      try { await this.$confirm('撤销这条归属映射？已用于账单归属的映射会由服务端拒绝撤销。', '撤销映射', { type: 'warning' }); } catch (_) { return; }
+      if (workspaceId !== this.workspaceId) return;
+      await this.perform(() => Api.billing.deleteBinding(row.id), '归属映射已撤销');
+      if (!this.error && !this.busy) this.loadBindings();
+    }
+  }
+};
+</script>
+<style scoped>
+.billing-admin { text-align: left; }.billing-admin> .el-alert { margin-bottom: 16px; }.hint { color: #8790a3; font-size: 12px; line-height: 1.8; }small.hint { display: block; overflow-wrap: anywhere; }h3 { color: #3c465d; margin: 20px 0 8px; }.inline-controls { display: flex; gap: 12px; flex-wrap: wrap; }.import-form { max-width: 640px; }.import-form .el-button--text { margin-left: 12px; }.binding-form { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; }.binding-form .el-select, .binding-form .el-date-editor { width: 100%; }.binding-form .full { grid-column: 1 / -1; }.section-heading { display: flex; gap: 20px; align-items: center; }.el-pagination { margin-top: 16px; text-align: right; }@media(max-width: 760px) { .binding-form { grid-template-columns: 1fr; } }
+</style>

@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 from collections import deque
+from core.metering.realtime import RealtimeMeter
 
 import opuslib_next
 
@@ -45,6 +46,8 @@ class DoubaoDuplexSession(DoubaoRealtimeSession):
         self._closing = False
         self._tool_policy = RealtimeToolPolicy(conn)
         self._policy_restore_task = None
+        self._billing_meter = RealtimeMeter(self, conn)
+        self.transport._billing_meter = self._billing_meter
 
     @property
     def capabilities(self):
@@ -239,6 +242,7 @@ class DoubaoDuplexSession(DoubaoRealtimeSession):
         return True
 
     async def handle_event(self, event):
+        self._billing_meter.received(event)
         # Session ACKs during a reconnect cannot wait on the lock held by the
         # reconnect itself. The transport resolves its ACK waiter independently.
         if self._closing or self._closed or self._context_resetting:
@@ -415,6 +419,7 @@ class DoubaoDuplexSession(DoubaoRealtimeSession):
             self.conn.conversation_ready.clear()
 
     async def close(self):
+        self._billing_meter.close()
         if self._closed:
             return
         self._closing = True

@@ -21,6 +21,7 @@ import xiaozhi.modules.agent.service.AgentChatTitleService;
 import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.agent.vo.AgentInfoVO;
 import xiaozhi.modules.llm.service.LLMService;
+import xiaozhi.common.llm.LlmUsageContext;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
 
@@ -66,7 +67,11 @@ public class AgentChatTitleGenerationServiceImpl implements AgentChatTitleGenera
             }
 
             String slmModelId = getSlmModelId(agentId);
-            String title = llmService.generateTitle(conversation.toString(), slmModelId);
+            var agent = agentService.getAgentById(agentId);
+            String title = LlmUsageContext.call(new LlmUsageContext.Identity(
+                    agent == null ? null : agent.getWorkspaceId(), agentId, null,
+                    sessionId, slmModelId, "CHAT_TITLE"),
+                    () -> llmService.generateTitle(conversation.toString(), slmModelId));
             if (StringUtils.isBlank(title)) {
                 return false;
             }

@@ -21,7 +21,10 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
-import lombok.AllArgsConstructor;
+import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
+import xiaozhi.common.llm.LlmUsageContext;
+import xiaozhi.common.llm.LlmUsageMeter;
 import lombok.extern.slf4j.Slf4j;
 import xiaozhi.modules.agent.dao.AgentDao;
 import xiaozhi.modules.agent.entity.AgentEntity;
@@ -40,7 +43,7 @@ import xiaozhi.modules.sys.service.SysParamsService;
 
 @Slf4j
 @Component
-@AllArgsConstructor
+@RequiredArgsConstructor
 public class BenchmarkCaseGenerator {
 
     private static final String ASSISTANT_LLM_MODEL_PARAM = "model.assistant.llm_model_id";
@@ -63,6 +66,8 @@ public class BenchmarkCaseGenerator {
     private final SysParamsService sysParamsService;
     private final ModelConfigService modelConfigService;
     private final RestTemplate restTemplate;
+    @Autowired
+    private LlmUsageMeter usageMeter;
 
     public ModelBenchmarkCaseGenerateResponseDTO generate(ModelBenchmarkCaseGenerateRequestDTO request) {
         int limit = normalizeLimit(request == null ? null : request.getLimit());
@@ -90,7 +95,9 @@ public class BenchmarkCaseGenerator {
             return buildFallbackResponse(request, agentContext, limit, validationError + "，已使用规则兜底用例。");
         }
         try {
-            String content = invokeLlm(llmModel, buildLlmPrompt(request, agentContext, limit));
+            String content = LlmUsageContext.call(
+                    LlmUsageContext.Identity.platform(llmModelId, "BENCHMARK_CASE_GENERATION"),
+                    () -> invokeLlm(llmModel, buildLlmPrompt(request, agentContext, limit)));
             List<ModelBenchmarkCaseCandidateDTO> cases = parseLlmCases(content, limit);
             if (cases.isEmpty()) {
                 return buildFallbackResponse(request, agentContext, limit, "大模型未返回可用测试用例，已使用规则兜底用例。");
@@ -245,7 +252,6 @@ public class BenchmarkCaseGenerator {
     }
 
     private String invokeLlm(ModelConfigEntity llmModel, String prompt) {
-        // TODO: migrate to LlmClient
         JSONObject config = llmModel.getConfigJson();
         String apiUrl = normalizeChatCompletionsUrl(config.getStr("base_url"));
 
@@ -262,11 +268,10 @@ public class BenchmarkCaseGenerator {
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.setBearerAuth(config.getStr("api_key"));
 
-        ResponseEntity<String> response = restTemplate.exchange(
-                apiUrl,
-                HttpMethod.POST,
-                new HttpEntity<>(requestBody, headers),
-                String.class);
+        HttpEntity<?> entity = new HttpEntity<>(requestBody, headers);
+        ResponseEntity<String> response = usageMeter == null
+                ? restTemplate.exchange(apiUrl, HttpMethod.POST, entity, String.class)
+                : usageMeter.exchange(restTemplate, apiUrl, entity, String.class, llmModel.getId(), "LLM");
         if (!response.getStatusCode().is2xxSuccessful()) {
             throw new IllegalStateException("LLM 调用失败：" + response.getStatusCode());
         }

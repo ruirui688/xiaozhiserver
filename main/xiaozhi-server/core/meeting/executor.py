@@ -7,6 +7,7 @@ import re
 from config.manage_api_client import execute_feishu_action
 from core.spoken_notifications import enqueue_spoken_notification
 from core.utils.util import extract_json_from_string
+from core.metering import connection_scope
 
 
 def finish_meeting(conn) -> None:
@@ -36,6 +37,7 @@ def finish_meeting(conn) -> None:
     )
 
 
+@connection_scope("MEETING_SUMMARY")
 def generate_meeting_minutes(conn, prompt: str, transcript, topic: str = "") -> None:
     if not transcript:
         enqueue_tts_text(conn, "本次会议没有记录到有效发言，无法生成会议纪要。")

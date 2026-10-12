@@ -23,6 +23,7 @@ import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import xiaozhi.common.exception.RenException;
 import xiaozhi.common.llm.LlmClient;
+import xiaozhi.common.llm.LlmUsageContext;
 import xiaozhi.modules.model.dto.ModelAssistantApplyRequestDTO;
 import xiaozhi.modules.model.dto.ModelAssistantApplyResponseDTO;
 import xiaozhi.modules.model.dto.ModelAssistantApplyResponseDTO.ArtifactWriteResultDTO;
@@ -258,7 +259,9 @@ public class ModelAssistantServiceImpl implements ModelAssistantService {
         }
         applyDeepSeekOptions(config, options);
 
-        JSONObject body = (JSONObject) llmClient.chatCompletion(apiUrl, apiKey, model, messages, options);
+        JSONObject body = (JSONObject) LlmUsageContext.call(
+                LlmUsageContext.Identity.platform(llmModel.getId(), "CONFIG_ASSISTANT"),
+                () -> llmClient.chatCompletion(apiUrl, apiKey, model, messages, options));
         JSONArray choices = body.getJSONArray("choices");
         if (choices == null || choices.isEmpty()) {
             throw new RenException("助手 LLM 没有返回候选结果");

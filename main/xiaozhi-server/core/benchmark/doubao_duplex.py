@@ -7,6 +7,7 @@ import wave
 from pathlib import Path
 
 from core.providers.realtime.doubao_duplex_transport import DoubaoDuplexTransport
+from core.metering.realtime import RealtimeMeter
 
 
 async def run_duplex_samples(config, iterations, transport_factory=DoubaoDuplexTransport):
@@ -18,7 +19,10 @@ async def run_duplex_samples(config, iterations, transport_factory=DoubaoDuplexT
     samples = []
     for iteration in range(iterations):
         transport = transport_factory(config)
+        meter = RealtimeMeter(transport)
+        transport._billing_meter = meter
         done = asyncio.Event()
+        usage_done = asyncio.Event()
         started = time.perf_counter()
         result = {
             "iteration": iteration + 1, "sample_type": "realtime_audio",
@@ -33,6 +37,7 @@ async def run_duplex_samples(config, iterations, transport_factory=DoubaoDuplexT
 
         async def on_event(event):
             nonlocal error, transcript, transcription
+            meter.received(event)
             kind = event.get("type")
             elapsed = int((time.perf_counter() - started) * 1000)
             if kind == "conversation.item.input_audio_transcription.delta":
@@ -52,6 +57,8 @@ async def run_duplex_samples(config, iterations, transport_factory=DoubaoDuplexT
                     result["first_audio_ms"] = elapsed
             elif kind == "response.output_audio.done":
                 done.set()
+            elif kind == "response.done":
+                usage_done.set()
             elif kind in {"error", "transport.closed"}:
                 error = "豆包3.0语音测试上游失败"
                 done.set()
@@ -66,6 +73,11 @@ async def run_duplex_samples(config, iterations, transport_factory=DoubaoDuplexT
             await asyncio.wait_for(done.wait(), min(300, max(1, float(config.get("response_timeout_seconds", 120)))))
             if error:
                 raise RuntimeError(error)
+            if meter.scope is not None:
+                try:
+                    await asyncio.wait_for(usage_done.wait(), timeout=2)
+                except asyncio.TimeoutError:
+                    pass  # Missing supplier usage remains explicitly incomplete.
             if not transcript or result["output_detail"]["audio_bytes"] < 960:
                 raise RuntimeError("豆包3.0未返回有效输入转写及回复音频")
             result.update(success=True, measured=True, message="真实语音输入及音频响应完成")
@@ -75,5 +87,6 @@ async def run_duplex_samples(config, iterations, transport_factory=DoubaoDuplexT
             result["latency_ms"] = int((time.perf_counter() - started) * 1000)
             result["output_summary"] = result["output_detail"]["assistant_text"]
             await transport.close()
+            meter.close()
         samples.append(result)
     return samples

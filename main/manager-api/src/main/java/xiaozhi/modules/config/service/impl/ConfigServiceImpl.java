@@ -82,6 +82,7 @@ public class ConfigServiceImpl implements ConfigService {
     private final UserPluginConfigService userPluginConfigService;
     private final AgentSemanticSkillService agentSemanticSkillService;
     private final ManagedMemorySnapshotService managedMemorySnapshotService;
+    private final xiaozhi.modules.billing.service.BillingContextService billingContextService;
 
     @Override
     public Object getConfig(Boolean isCache) {
@@ -168,6 +169,7 @@ public class ConfigServiceImpl implements ConfigService {
             throw new RenException(ErrorCode.AGENT_NOT_FOUND);
         }
         Map<String, Object> runtime = ConfigLatency.measure("config.models.runtime_config", () -> buildAgentRuntimeConfig(agent, device));
+        billingContextService.attach(runtime, agent, device);
         ConfigLatency.measure("memory.snapshot", () -> {
             managedMemorySnapshotService.attach(runtime, agent.getId(), macAddress);
             return null;

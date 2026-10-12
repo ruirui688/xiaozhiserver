@@ -69,6 +69,7 @@ class BenchmarkRuntimeAgent:
         self.tts = _BenchmarkRuntimeTTS()
         self.conn.tts = self.tts
         self.conn.llm = create_llm_instance(self.provider_type, self.model_config)
+        self.conn.llm._billing_model_id = self.model.get("id")
         self.conn._initialize_memory()
         self.conn._initialize_intent()
         self.conn._init_prompt_enhancement()
@@ -93,7 +94,7 @@ class BenchmarkRuntimeAgent:
             pass
 
     def _override_candidate_llm(self):
-        candidate_name = "BenchmarkCandidateLLM"
+        candidate_name = self.model.get("id") or "BenchmarkCandidateLLM"
         config = self.conn.config
         config.setdefault("selected_module", {})["LLM"] = candidate_name
         config.setdefault("model_config", {})[candidate_name] = {
@@ -122,6 +123,8 @@ class BenchmarkRuntimeAgent:
             "voiceprint",
             "device_max_output_size",
             "chat_history_conf",
+            "billing_context",
+            "_billing_purpose",
         ):
             if key in runtime_config and runtime_config.get(key) is not None:
                 config[key] = copy.deepcopy(runtime_config[key])

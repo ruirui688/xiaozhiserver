@@ -12,6 +12,8 @@ import tempfile
 import math
 import traceback
 import threading
+from core.metering import bind_provider, snapshot
+from core.metering.context import scoped_awaitable
 import opuslib_next
 
 from abc import ABC, abstractmethod
@@ -38,6 +40,7 @@ class ASRProviderBase(ABC):
 
     # 打开音频通道
     async def open_audio_channels(self, conn: "ConnectionHandler"):
+        bind_provider(self, conn)
         conn.asr_priority_thread = threading.Thread(
             target=self.asr_text_priority_thread, args=(conn,), daemon=True
         )
@@ -175,8 +178,9 @@ class ASRProviderBase(ABC):
 
             # 定义ASR任务
             asr_task = self._timed_awaitable(
-                self.speech_to_text_wrapper(
-                    asr_audio_task, conn.session_id, conn.audio_format
+                scoped_awaitable(
+                    self.speech_to_text_wrapper(asr_audio_task, conn.session_id, conn.audio_format),
+                    snapshot(conn, turn_id=turn_id),
                 )
             )
 

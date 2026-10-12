@@ -9,6 +9,7 @@ from core.utils.util import check_model_key
 from core.providers.llm.base import LLMProviderBase
 from core.observability.session_telemetry import contextual_latency_span
 from urllib.parse import urlparse
+from core.metering.openai_stream import metered_stream
 
 TAG = __name__
 logger = setup_logging()
@@ -314,11 +315,11 @@ class LLMProvider(LLMProviderBase):
 
         self._apply_provider_options(request_params)
 
-        responses = self.client.chat.completions.create(**request_params)
+        responses = metered_stream(self, request_params)
 
         is_active = True
         try:            
-            for chunk in self._iter_stream_with_deadline(responses):
+            for chunk in responses:
                 usage_info = getattr(chunk, "usage", None)
                 if isinstance(usage_info, CompletionUsage):
                     self.last_usage = self._build_usage(usage_info)
@@ -377,10 +378,10 @@ class LLMProvider(LLMProviderBase):
 
         self._apply_provider_options(request_params)
 
-        stream = self.client.chat.completions.create(**request_params)
+        stream = metered_stream(self, request_params)
 
         try:
-            for chunk in self._iter_stream_with_deadline(stream):
+            for chunk in stream:
                 if getattr(chunk, "choices", None):
                     delta = chunk.choices[0].delta
                     content = getattr(delta, "content", "")

@@ -1,4 +1,6 @@
 import asyncio
+from core.metering import begin_call
+from core.metering.volcengine import asr_usage
 import base64
 import math
 import os
@@ -154,6 +156,8 @@ class ASRProvider(ASRProviderBase):
         submit_elapsed = 0.0
         query_count = 0
         stage = "submit"
+        usage_call = begin_call(self, "ASR", request_id=request_id)
+        usage_call.usage("submitted_audio_duration", len(artifacts.pcm_bytes) / 32, "milliseconds", "OBSERVED")
         try:
             # requests 默认读取系统代理；trust_env=True 保留这一部署兼容性。
             async with aiohttp.ClientSession(trust_env=True) as session:
@@ -171,7 +175,9 @@ class ASRProvider(ASRProviderBase):
                 )
 
                 asr_result = self._extract_result(submit_payload)
+                asr_usage(usage_call, submit_payload, final=bool(asr_result))
                 if asr_result:
+                    usage_call.status = "SUCCESS"
                     self._log_success(
                         start_time,
                         submit_elapsed,
@@ -201,7 +207,9 @@ class ASRProvider(ASRProviderBase):
                         stage="查询录音识别结果",
                     )
                     asr_result = self._extract_result(query_payload)
+                    asr_usage(usage_call, query_payload, final=bool(asr_result))
                     if asr_result:
+                        usage_call.status = "SUCCESS"
                         self._log_success(
                             start_time,
                             submit_elapsed,
@@ -227,7 +235,11 @@ class ASRProvider(ASRProviderBase):
                 raise TimeoutError(
                     f"查询录音识别结果超时（{self.query_timeout_seconds:.1f}s）"
                 )
+        except asyncio.CancelledError:
+            usage_call.status = "CANCELLED"
+            raise
         except Exception as e:
+            usage_call.status = "FAILED"
             elapsed = time.monotonic() - start_time
             logger.bind(tag=TAG).error(
                 "录音识别失败: "
@@ -235,6 +247,8 @@ class ASRProvider(ASRProviderBase):
                 f"error_type={type(e).__name__}, reason={e}"
             )
             return "", artifacts.file_path
+        finally:
+            usage_call.finish()
 
     @staticmethod
     def _log_success(

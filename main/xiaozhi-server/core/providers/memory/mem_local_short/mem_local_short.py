@@ -7,6 +7,7 @@ from config.config_loader import get_project_dir
 from config.manage_api_client import generate_and_save_chat_summary
 import asyncio
 from core.utils.util import check_model_key
+from core.metering.context import provider_scope
 
 
 short_term_memory_prompt = """
@@ -132,6 +133,7 @@ class MemoryProvider(MemoryProviderBase):
         with open(self.memory_path, "w", encoding="utf-8") as f:
             yaml.dump(all_memory, f, allow_unicode=True)
 
+    @provider_scope("MEMORY")
     async def save_memory(self, msgs, session_id=None):
         # 打印使用的模型信息
         model_info = getattr(self.llm, "model_name", str(self.llm.__class__.__name__))

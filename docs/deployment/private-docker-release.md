@@ -22,6 +22,28 @@
 DeepSeek API Key、接口地址和上游模型名直接复用“模型配置”中
 已启用且测试通过的 DeepSeek LLM；在资源维护策略中选择对应模型，不再在部署 `.env` 保存第二份模型凭据。
 
+### 模型计费与额度查询
+
+计费和资源包查询为可选能力，默认不读取供应商账号。变量见 `deploy/production/env.example`：火山启用
+`XIAOZHI_BILLING_VOLCENGINE_ENABLED` 并配置独立只读 AK/SK、非敏感账号标识；语音资源包另需
+`XIAOZHI_BILLING_VOLCENGINE_SPEECH_PROJECT` 和逗号分隔的 `XIAOZHI_BILLING_VOLCENGINE_SPEECH_RESOURCE_IDS`，
+以及目标项目上的 `speech_saas_prod:ResourcePacksStatus` 查询权限。通用资源包需费用中心只读权限，
+完整说明见模型管理文档。DeepSeek 通过
+`XIAOZHI_BILLING_DEEPSEEK_MODEL_ID` 复用已保存的官方模型密钥查询余额。
+真实值仅放部署数据目录的私有 `.env`，Compose 已透传这些变量；不要写进镜像或示例文件。
+升级器会保留现有 `.env` 中的 9 项 `XIAOZHI_BILLING_*` 配置，显式传入的非空环境变量优先；
+写回 `.env` 时设置权限为 `0600`，仅文件所有者可读写。
+
+本次发布对供应商仅执行只读查询。账单导入和归属映射只更新本项目台账，不购买、续费或切换资源包，
+也不切换或启用模型。
+
+升级前按现有流程备份数据库，启动时执行新增计费 Liquibase 迁移。Python 的 `data/billing/` 与管理端的
+`uploadfile/billing-outbox/` 是待入账记录的持久队列，已使用现有挂载卷，不能作为缓存清理。
+代码部署后仍需在管理员页面确认供应商计费范围绑定并执行首次同步，不能默认把共享账户费用归入当前空间。
+配置、数据覆盖和资源包规则见[模型管理](../models/model-management.md#11-模型用量与实际消费管理)。
+
+### DeepSeek Harness 运行与访问
+
 `xiaozhi-maintenance-agent` 不挂载宿主源码；原生 Harness 会话状态保存在专用 Docker volume，临时工作区
 位于 tmpfs。内部 API 只供 manager-api 调用。官方 Console 通过宿主 `127.0.0.1:8011` 反代到现有智控台
 HTTPS origin 的 `/maintenance-console/`，再以内嵌 iframe 出现在当前页面；8011 不得绑定公网地址。容器常驻不等于自动维护全部资源：

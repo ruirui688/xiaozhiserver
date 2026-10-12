@@ -82,6 +82,12 @@ const routes = [
     }
   },
   {
+    path: '/model-billing',
+    name: 'ModelBillingManagement',
+    component: () => import(/* webpackChunkName: "view-model-billing" */ '../views/ModelBillingManagement.vue'),
+    meta: { requiresAuth: true, title: '计费管理' }
+  },
+  {
     path: '/model-config',
     name: 'ModelConfig',
     component: function () {
@@ -311,7 +317,7 @@ VueRouter.prototype.push = function push(location) {
 }
 
 // 需要登录才能访问的路由
-const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'ModelConfig', 'KnowledgeBaseManagement', 'KnowledgeFileUpload', 'KnowledgeContentManagement', 'PersonProfileManagement', 'AddressBookManagement', 'FunctionPluginManagement', 'MusicManagement', 'MemoryManagement']
+const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'ModelConfig', 'ModelBillingManagement', 'KnowledgeBaseManagement', 'KnowledgeFileUpload', 'KnowledgeContentManagement', 'PersonProfileManagement', 'AddressBookManagement', 'FunctionPluginManagement', 'MusicManagement', 'MemoryManagement']
 
 // 路由守卫
 router.beforeEach((to, from, next) => {

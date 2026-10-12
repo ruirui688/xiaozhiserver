@@ -4,6 +4,8 @@ import math
 import time
 import uuid
 import asyncio
+from core.metering import begin_call, snapshot
+from core.metering.volcengine import asr_usage
 import websockets
 import opuslib_next
 from core.providers.asr.base import ASRProviderBase
@@ -126,6 +128,8 @@ class ASRProvider(ASRProviderBase):
                 }
                 logger.bind(tag=TAG).info(f"正在连接ASR服务，headers: {safe_headers}")
 
+                request_id = str(uuid.uuid4())
+                usage_call = begin_call(self, "ASR", scope=snapshot(conn), request_id=request_id)
                 self.asr_ws = await websockets.connect(
                     self.ws_url,
                     additional_headers=headers,
@@ -136,7 +140,10 @@ class ASRProvider(ASRProviderBase):
                 )
 
                 # 发送初始化请求
-                request_params = self.construct_request(str(uuid.uuid4()))
+                if not hasattr(self, "_billing_asr_calls"):
+                    self._billing_asr_calls = {}
+                self._billing_asr_calls[id(self.asr_ws)] = usage_call
+                request_params = self.construct_request(request_id)
                 try:
                     payload_bytes = str.encode(json.dumps(request_params))
                     payload_bytes = gzip.compress(payload_bytes)
@@ -199,6 +206,8 @@ class ASRProvider(ASRProviderBase):
                             )
 
             except Exception as e:
+                if "usage_call" in locals():
+                    usage_call.finish("FAILED")
                 logger.bind(tag=TAG).error(f"建立ASR连接失败: {str(e)}")
                 if hasattr(e, "__cause__") and e.__cause__:
                     logger.bind(tag=TAG).error(f"错误原因: {str(e.__cause__)}")
@@ -238,6 +247,10 @@ class ASRProvider(ASRProviderBase):
         audio_request.extend(len(payload).to_bytes(4, "big"))
         audio_request.extend(payload)
         await target_ws.send(audio_request)
+        usage_call = getattr(self, "_billing_asr_calls", {}).get(id(target_ws))
+        if usage_call:
+            usage_call.usage("submitted_audio_duration", len(pcm_frame) / 32,
+                             "milliseconds", "OBSERVED", add=True)
 
     async def _recv_asr_result(self, session_ws, stop_sent_event):
         """Wait for a result and switch to the final-result budget after LAST."""
@@ -302,6 +315,7 @@ class ASRProvider(ASRProviderBase):
         session_ws = session_ws or self.asr_ws
         stop_sent_event = stop_sent_event or self._stop_sent_event
         audio_state_released = False
+        usage_call = getattr(self, "_billing_asr_calls", {}).get(id(session_ws))
         try:
             while session_ws and not conn.stop_event.is_set():
                 # 获取当前连接的音频数据
@@ -317,6 +331,8 @@ class ASRProvider(ASRProviderBase):
 
                     if "payload_msg" in result:
                         payload = result["payload_msg"]
+                        if usage_call:
+                            asr_usage(usage_call, payload)
                         # 检查是否是错误码1013（无有效语音）
                         if "code" in payload and payload["code"] == 1013:
                             # 静默处理，不记录错误日志
@@ -365,6 +381,9 @@ class ASRProvider(ASRProviderBase):
 
                             for utterance in utterances:
                                 if utterance.get("definite", False):
+                                    if usage_call:
+                                        usage_call.status = "SUCCESS"
+                                        asr_usage(usage_call, payload, final=True)
                                     current_text = utterance["text"]
                                     self.record_first_text_metric(conn, current_text)
                                     self.record_final_text_metric(conn, current_text)
@@ -409,6 +428,8 @@ class ASRProvider(ASRProviderBase):
                                             )
                                         return
                         elif "error" in payload:
+                            if usage_call:
+                                usage_call.status = "FAILED"
                             error_msg = payload.get("error", "未知错误")
                             logger.bind(tag=TAG).error(f"ASR服务返回错误: {error_msg}")
                             break
@@ -424,6 +445,8 @@ class ASRProvider(ASRProviderBase):
                     self.is_processing = False
                     break
                 except (asyncio.TimeoutError, TimeoutError) as exc:
+                    if usage_call:
+                        usage_call.status = "FAILED"
                     if stop_sent_event.is_set():
                         logger.bind(tag=TAG).error(
                             "发送结束帧后等待ASR最终结果超时: "
@@ -440,17 +463,28 @@ class ASRProvider(ASRProviderBase):
                     self.is_processing = False
                     break
                 except Exception as e:
+                    if usage_call:
+                        usage_call.status = "FAILED"
                     logger.bind(tag=TAG).error(f"处理ASR结果时发生错误: {str(e)}")
                     if hasattr(e, "__cause__") and e.__cause__:
                         logger.bind(tag=TAG).error(f"错误原因: {str(e.__cause__)}")
                     self.is_processing = False
                     break
 
+        except asyncio.CancelledError:
+            if usage_call and usage_call.status != "SUCCESS":
+                usage_call.status = "CANCELLED"
+            raise
         except Exception as e:
+            if usage_call:
+                usage_call.status = "FAILED"
             logger.bind(tag=TAG).error(f"ASR结果转发任务发生错误: {str(e)}")
             if hasattr(e, "__cause__") and e.__cause__:
                 logger.bind(tag=TAG).error(f"错误原因: {str(e.__cause__)}")
         finally:
+            if usage_call:
+                usage_call.finish()
+                self._billing_asr_calls.pop(id(session_ws), None)
             try:
                 if session_ws:
                     await session_ws.close()

@@ -33,6 +33,7 @@
     <div class="device-meta"><span>最近连接</span><span>{{ lastConnection }}</span></div>
     <div class="device-actions">
       <el-button type="text" :disabled="busy" @click="$emit('settings')">设置</el-button>
+      <el-button type="text" @click="$router.push({ path: '/model-billing', query: { tab: 'events', deviceId: device.id } })">用量</el-button>
     </div>
   </article>
 </template>
@@ -146,7 +147,7 @@ h2 { margin: 0; min-width: 0; color: #282c3b; font-size: 21px; line-height: 1.5;
 .switch-controls { flex-wrap: wrap; }.switch-controls .el-select { flex-basis: 140px; }
 .switch-status { margin: 10px 0 0; color: #8990a3; font-size: 12px; line-height: 1.6; }.failure { color: #bd5656; }
 .device-meta { display: flex; flex-direction: column; gap: 6px; color: #9096a5; font-size: 12px; justify-content: center; }
-.device-actions { display: flex; align-items: center; gap: 18px; }.device-actions .el-button { padding: 8px 0; color: #8a90a0; font-size: 13px; }.device-actions .el-button:hover { color: #7765af; }
+.device-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }.device-actions .el-button { margin: 0; padding: 8px 0; color: #8a90a0; font-size: 13px; }.device-actions .el-button:hover { color: #7765af; }
 .hardware-details h3 { margin: 0 0 16px; font-size: 15px; overflow-wrap: anywhere; }.hardware-details dt { color: #9198a7; font-size: 12px; margin-top: 12px; }.hardware-details dd { margin: 6px 0 0; color: #51596d; word-break: break-all; }
 .device-row { grid-template-columns: minmax(230px, 1.3fr) minmax(260px, 1fr) 160px 90px; gap: 24px; align-items: center; border: 0; border-bottom: 1px solid #f0f1f5; border-radius: 0; padding: 22px 28px; }
 .device-row:last-child { border-bottom: 0; }.device-row:hover { background: #fcfcfe; box-shadow: none; }

@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.http.HttpEntity;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
@@ -29,6 +30,9 @@ import lombok.extern.slf4j.Slf4j;
 public class LlmClient {
 
     private final RestTemplate restTemplate;
+
+    @Autowired
+    private LlmUsageMeter usageMeter;
 
     public LlmClient() {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
@@ -92,19 +96,13 @@ public class LlmClient {
 
         ResponseEntity<String> response;
         try {
-            response = restTemplate.exchange(
-                    endpoint,
-                    HttpMethod.POST,
-                    new HttpEntity<>(requestBody, headers),
-                    String.class);
+            response = exchange(endpoint, new HttpEntity<>(requestBody, headers), "LLM");
         } catch (Exception e) {
-            throw new LlmException("LLM 调用异常: " + e.getMessage(), e);
+            throw new LlmException("LLM 调用异常: " + e.getClass().getSimpleName(), e);
         }
 
         if (!response.getStatusCode().is2xxSuccessful()) {
-            String responseBody = response.getBody();
-            String detail = responseBody != null ? responseBody : "(无响应体)";
-            throw new LlmException("LLM 调用失败，HTTP 状态码: " + response.getStatusCode() + "，响应: " + detail);
+            throw new LlmException("LLM 调用失败，HTTP 状态码: " + response.getStatusCode());
         }
 
         try {
@@ -138,19 +136,13 @@ public class LlmClient {
 
         ResponseEntity<String> response;
         try {
-            response = restTemplate.exchange(
-                    endpoint,
-                    HttpMethod.POST,
-                    new HttpEntity<>(requestBody, headers),
-                    String.class);
+            response = exchange(endpoint, new HttpEntity<>(requestBody, headers), "EMBEDDING");
         } catch (Exception e) {
-            throw new LlmException("Embedding 调用异常: " + e.getMessage(), e);
+            throw new LlmException("Embedding 调用异常: " + e.getClass().getSimpleName(), e);
         }
 
         if (!response.getStatusCode().is2xxSuccessful()) {
-            String responseBody = response.getBody();
-            String detail = responseBody != null ? responseBody : "(无响应体)";
-            throw new LlmException("Embedding 调用失败，HTTP 状态码: " + response.getStatusCode() + "，响应: " + detail);
+            throw new LlmException("Embedding 调用失败，HTTP 状态码: " + response.getStatusCode());
         }
 
         try {
@@ -173,5 +165,11 @@ public class LlmClient {
         } catch (Exception e) {
             throw new LlmException("Embedding 响应 JSON 解析失败: " + e.getMessage(), e);
         }
+    }
+
+    private ResponseEntity<String> exchange(String endpoint, HttpEntity<?> request, String serviceType) {
+        return usageMeter == null
+                ? restTemplate.exchange(endpoint, HttpMethod.POST, request, String.class)
+                : usageMeter.exchange(restTemplate, endpoint, request, String.class, null, serviceType);
     }
 }

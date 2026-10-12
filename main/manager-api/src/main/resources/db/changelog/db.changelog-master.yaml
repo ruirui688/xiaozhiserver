@@ -1523,3 +1523,17 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/plugin-interaction-control-20261010.sql
+  - changeSet:
+      id: model-billing-management-20261012
+      author: Codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/model-billing-management.sql
+  - changeSet:
+      id: model-billing-benefits-20261012
+      author: Codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/model-billing-benefits.sql

@@ -21,6 +21,7 @@ from core.benchmark.runtime_agent import BenchmarkRuntimeAgent
 from core.utils.llm import create_instance as create_llm_instance
 from core.providers.realtime.registry import create_realtime_probe
 from core.benchmark.security import sanitize_benchmark_error
+from core.metering import snapshot, usage_scope
 
 
 BENCHMARK_RUNTIME_DIR = os.path.join(tempfile.gettempdir(), "xiaozhi-benchmark")
@@ -43,13 +44,15 @@ async def run_benchmark(payload, base_config=None):
             loop.run_in_executor(
                 executor,
                 lambda item=model: asyncio.run(
-                    _run_model(
+                    _run_metered_model(
                         item,
                         iterations,
                         judge_config,
                         agent_context,
                         base_config,
                         benchmark_cases,
+                        billing_context=payload.get("billing_context"),
+                        purpose=payload.get("billing_purpose", "BENCHMARK"),
                     )
                 ),
             )
@@ -64,6 +67,16 @@ async def run_benchmark(payload, base_config=None):
         else:
             normalized_results.append(result)
     return {"task_id": payload.get("task_id"), "results": normalized_results}
+
+
+async def _run_metered_model(model, *args, billing_context=None, purpose="BENCHMARK"):
+    service = str(model.get("model_type") or "").upper()
+    if service in {"SLM", "VLLM"}:
+        service = "LLM"
+    config = {"billing_context": billing_context,
+              "selected_module": {service: model.get("id")}}
+    with usage_scope(snapshot(config=config, purpose=purpose)):
+        return await _run_model(model, *args)
 
 
 async def _run_model(

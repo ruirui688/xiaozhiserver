@@ -1,11 +1,15 @@
 ---
 status: canonical
 owner: models
-last_verified: 2026-10-08
+last_verified: 2026-10-12
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/model
   - main/manager-api/src/main/java/xiaozhi/modules/config
   - main/manager-api/src/main/java/xiaozhi/modules/hotword
+  - main/manager-api/src/main/java/xiaozhi/modules/billing
+  - main/manager-api/src/main/java/xiaozhi/common/llm
+  - main/manager-web/src/views/ModelBillingManagement.vue
+  - main/xiaozhi-server/core/metering
   - main/manager-web/src/views/AsrHotwordManagement.vue
   - main/manager-web/src/views/ModelConfig.vue
   - main/manager-web/src/components/role/RoleEditDialog.vue
@@ -714,3 +718,122 @@ npm run build
 cd main/xiaozhi-server
 conda run -n xiaozhi-esp32-server python -m compileall .
 ```
+
+## 11. 模型用量与实际消费管理
+
+当前实现提供工作空间、智能体、设备三个维度的用量查询，以及独立的官方账单管理。费用来自供应商账单，不包含用户充值、收款或按配置单价估价。代码升级不等于生产部署；首次启用需执行已登记的 Liquibase 迁移、配置账单凭据和确认供应商计费范围归属。
+
+### 页面与筛选
+
+「计费管理」入口位于控制台导航，路由为 `/model-billing`，复用现有工作空间选择器和 `X-Workspace-Id` 请求上下文。智能体与设备卡片提供带筛选条件的入口，页面逻辑独立于 `ModelConfig.vue`。
+
+| 视图 | 主要内容 | 下钻方式 |
+| --- | --- | --- |
+| 工作空间概览 | 已归属本空间的官方消费、现金支付、待出账状态、LLM/ASR/TTS 用量、趋势、账单同步时间 | 按日期、服务类型、供应商、模型筛选 |
+| 按智能体 | 智能体名称、调用次数、分类型用量、能够准确归属的官方费用 | 点击智能体，查看其设备分布和调用明细 |
+| 按设备 | 设备名称、型号、调用次数、分类型用量、能够准确归属的官方费用 | 点击设备，查看它在不同智能体下的历史用量；支持设备搜索和型号筛选 |
+| 用量与账单明细 | 分开展示调用记录、官方账单，以及二者的关联状态 | 查看调用时间、当时的智能体/设备、模型、用量来源、官方账单凭证 |
+
+智能体和设备筛选可以组合，页签切换保留筛选。六个页签为工作空间概览、智能体、设备、调用明细、官方账单、额度与资源包；趋势目前展示每日调用次数。额度页展示当前快照，单独加载，不套用历史调用筛选。明细由后端聚合和分页，不能在浏览器拼接当前设备列表后计算历史消费。日期为北京时间，查询包含起止两天；账单必须完整落在所选消费期间内才纳入，跨区间账单不按天数分摊。跨币种金额分开展示，金额经接口以十进制字符串传递。
+
+用量不能跨单位相加：LLM 分输入、输出、缓存命中/未命中 Token（缓存通常是输入的子项，不能重复计入总数）；ASR 显示供应商返回的识别音频时长，计费口径需按产品确认；TTS 按产品显示字符、Token 或音频时长。未返回官方用量时，可单列实际发送字符数、音频时长等本地观测，但必须标明来源，不能冒充供应商计费用量。调用次数指实际发出的上游调用尝试，另行统计会话数与成功/失败/取消次数。
+
+端到端实时语音模型单列 Realtime 服务类型，保留厂商文本/音频输入输出的计量类别，不虚构拆成 ASR、LLM、TTS 三笔费用。ASR 返回的识别音频时长是否等于计费时长需要按产品协议确认；TTS 文本会经过清理和替换，不能用聊天展示字数代替厂商计量。本地缓存命中、设备端语音未发起云端调用时，不新增供应商用量；录音识别结果轮询也不作为新的识别调用计数。
+
+### 归属与历史规则
+
+本项目设备可以切换智能体，详见[设备多场景管理](../architecture/device-scene-management.md)。所以工作空间、智能体、设备是每次调用的归属维度，设备不是某个智能体永远不变的子节点。
+
+- 调用发出时固定工作空间、当时实际生效的智能体、数据库设备 ID、会话、轮次、模型及配置版本。设备由 A 切换到 B 后，A 的历史用量仍归 A；设备视图可以汇总这台设备在 A、B 下的使用情况。
+- `conn.device_id` 当前是协议设备标识/MAC，不能直接写入数据库设备 ID 字段。管理端须签发经过资源校验的运行上下文，Python 接收并在调用开始时保存其快照；异步上报按该快照验证归属，不能按设备此刻的绑定反推。
+- 改名、解绑、删除设备或智能体不抹除历史消费归属。记录稳定 ID 和必要名称快照，查询包括有历史用量的已停用资源。
+- 无设备的智能体任务单列“后台任务”；共享知识库任务按知识库所属工作空间记录，不重复计入所有引用它的智能体。模型测试、评测、配置助手单列调用用途，平台级任务不能仅因操作人选中了某个工作空间就归给它。
+- 工作空间总量包括设备调用、无设备的智能体任务和空间公共任务；按智能体汇总、按设备汇总是同一批事件的不同视图，不能把两个视图的合计再相加。
+
+现有聊天上报会按 MAC 查询当前智能体，并受聊天记录开关、容量和删除操作影响，不能直接作为计费台账。计量记录应独立保存，仅记录归属、用量和调用状态，不依赖保留聊天正文或音频。
+
+### 实际费用与用量的对应关系
+
+火山 `ListBill` / `ListBillDetail` 已完成只读接口验证，能取得官方应付、现金支付和用量明细；供应商费用有出账延迟。`PayableAmount`、`PaidAmount`、`UnpaidAmount` 分别表示应付、现金支付和欠费，必须结合结算类型、币种、抵扣及退款/调账理解。两个接口的费用不能重复相加，资源包购买金额与后续抵扣用量也不能重复计费。
+
+若供应商声明的 `Total` 与实际返回行数不一致，当前同步会保留既有快照并报告失败，不能将该批数据标记为完整账单。2026-10-12 只读联调遇到此情况，仍需重试或确认供应商分页口径；接口可访问不等于完整同步已验收。
+
+页面只在有证据归属到当前筛选范围时展示金额。供应商账单同步状态（已出账/待出账/同步失败）与内部归属状态（已关联/归属待确认/供应商未提供该粒度）分开记录；未知金额显示状态或 `—`，不能显示为零。
+
+- 共享供应商账号的总账不能直接作为任一工作空间的消费。尚未归属空间的账单仅在平台管理范围展示，不能泄露给其他工作空间成员。
+- 火山语音可按 Project 取得费用。一个 Project 若只对应一个工作空间，可以归属该空间；同一 Project 若混用多个智能体或设备，仅凭项目小时账单不能精确拆分到它们。单独按设备配置 Project 后，设备在同一计费期间切换智能体，也仍需处理智能体归属问题。
+- 要显示智能体、设备级的实际金额，必须让供应商可出账的最小范围对应唯一调用归属，或取得能直接匹配调用的官方费用明细。新增计费绑定和凭据路由前，应验证供应商项目/Key 的出账粒度、资源隔离和配额；不能假设更换 Key 就能取得更细账单。
+- 如果官方只支持较粗粒度，保留该层级的实际金额，智能体/设备层显示用量和“费用暂无法细分”。不得按字符数、Token 或时长比例分摊后称为实际扣费。历史混用记录没有充分证据时不自动补造精细费用。
+- DeepSeek 官方余额查询已验证可用，但余额不等于消费；官方控制台支持按 Key 查看和导出用量，仍需验证导出金额字段、粒度与关联方式，再接入实际费用。
+
+官方依据：[火山账单流水](https://www.volcengine.com/docs/6269/1127841)、[火山账单明细](https://www.volcengine.com/docs/6269/1127842)、[语音项目账单](https://www.volcengine.com/docs/6561/1339608)、[账单说明](https://www.volcengine.com/docs/6269/94010)、[DeepSeek 余额接口](https://api-docs.deepseek.com/api/get-user-balance)、[DeepSeek 按 Key 用量说明](https://static.deepseek.com/faq/index.html?lang=zh#/question/key-usage)。
+
+### 实现分层与接口
+
+1. **Python `core/metering/`**：不可变调用归属、真实请求事件、SQLite 持久队列和应用级异步投递。接入 OpenAI 兼容大模型、豆包流式/录音识别、火山双流合成及已接入的 Realtime 通道。每次重试有独立事件，厂商状态轮询不重复计算；失败和打断保留已取得用量，缺失字段不写零。采集不依赖聊天记录开关。原有 `connection.py` 只负责调用边界的上下文传递，队列、指标和上报职责留在新模块。
+2. **Java `common/llm/`**：为标题、长期记忆、知识库分块、配置助手、模型测试和评测用例生成的真实 HTTP 调用记录用量。既有业务类只安装归属上下文、委托计量器，不内嵌账单逻辑；`LocalKnowledgeAdapter` 中的改动仅接入真实分块调用。模型测试与评测的 Python 请求签发平台用途上下文，即使使用真实设备测试，也不复用该设备的日常计费归属。
+3. **Java `modules/billing/`**：上下文签发/校验、幂等入账、聚合查询、账单读取、CSV 导入、有效期绑定与补传。火山使用固定官方 HTTPS 地址和独立账单 AK/SK，金额不由调用用量推算。DeepSeek 当前提供官方金额模板导入；未接入未经核实的消费 API，余额接口不参与费用计算。
+4. **Web 页面与 `components/billing/`**：显示当前空间可读数据，管理员通过「同步与归属管理」操作账期同步、模板下载、官方账单导入和归属绑定。普通成员不可读取平台未归属账单。页面对用量缺失、管理服务积压和读取失败显示状态。
+
+表结构位于 `main/manager-api/src/main/resources/db/changelog/model-billing-management.sql`，已登记到主 changelog。调用事件和用量指标分别存储，账单独立保留供应商粒度、币种、消费区间和证据哈希，不强制绑定到一次调用。稳定 ID、名称快照和归属证据不随业务资源删除而级联删除。上下文凭据在数据库只保存哈希。
+
+查询接口为 `GET /billing/overview`、`/billing/groups?groupBy=agent|device`、`/billing/events`、`/billing/bills`、`/billing/options`。管理员使用 `/billing/sync`、`/billing/bindings`、`/billing/import-template`、`/billing/import`。沿用[工作空间权限边界](../architecture/workspace-organization-management.md)，服务端校验当前空间；`agentId/deviceId` 只作为筛选，不能替代授权。
+
+Python 上报 `POST /config/billing/usage`，同时要求服务间共享密钥和管理端签发的调用归属凭据。每批响应中的 `accepted` 包含成功保存或已存在且内容一致的事件 ID，`rejected` 包含永久拒绝代码；网络和存储故障保留待发记录，永久拒绝进入本地隔离记录，不能阻塞后续上报。同 ID 不同内容不会覆盖已入账事件。
+
+### 首次启用与运行维护
+
+#### 预付费、资源包和智能提醒
+
+「额度与资源包」读取三种官方数据源，并保留各自最近成功同步时间；同步某一源失败不会覆盖其上次成功快照。
+
+| 数据源 | 实现接口 | 页面内容 |
+| --- | --- | --- |
+| 火山通用资源包 | `ListResourcePackages`，`2022-01-01`，`billing` | 总额度、可用额度、单位、状态、有效期、周期重置信息 |
+| 火山语音资源包 | `ResourcePacksStatus`，`2025-05-20`，`speech_saas_prod` | 包实例、适用产品、购买量、供应商当前用量、单位、到期时间、是否可共享 |
+| DeepSeek 账户余额 | 官方 `GET /user/balance`，复用所选已保存模型的密钥 | 总余额、充值余额、尚未过期的赠送余额、账户可用状态 |
+
+语音接口不单独返回已确认的剩余额度，页面不把“购买量 − 当前用量”冒充独立官方余额。优先读取 `Harvest` 的结构化购买量、当前用量及单位；顶层字段可能含千分位或单位。`ResourceID` 和 `Code` 不是唯一购买包实例，只有供应商返回的 `InstanceNumber` 可用于实例归属；实例号为空的赠送包仍可展示，展示行标识不能用于归属绑定。语音配置必须明确指定 `speech-project` 及逗号分隔的 `speech-resource-ids`，不能从推理 API Key 推导，也不能假定推理资源 ID 与控制面服务 ID 通用。查询明确传入 `Types=[access,quota,prepaid]`，覆盖范围仅为配置项目和服务。通用包与语音包可能是不同接口下的同一权益，页面不跨来源累加额度。
+
+当前提醒为：可识别日期的 7 天内到期、已到期、官方剩余额度不超过总额度的 10%、已耗尽，以及同步失败。语音没有独立余额时仍提示临期，同时说明余额口径未知；未知日期保留原文。周期重置的包不将当前额度差值称为累计消耗。提醒依据最近同步快照，不自动充值、续费、购买或切换模型。
+
+账户资金仅在平台管理员的账号视图显示；工作空间资源包需要明确账号或包实例的有效期绑定，项目筛选本身不能证明共享包独占。2026-10-12 只读联调确认：通用资源包查询的 `MaxResults` 为字符串、上限 20，超限返回 `InvalidParam`；按 `NextToken` 翻页，空列表表示完成（末页可能仍返回 `"0"` 游标），非空页的重复游标仍拒绝；语音专用查询返回的权限动作为 `speech_saas_prod:ResourcePacksStatus`，资源为 `trn:iam::<主账号ID>:project/<项目名>`。此处主账号和项目须使用实际错误或控制台确认的值，不能套用他人账号。已有 `BillingCenterReadOnlyAccess` 不代表拥有该语音查询权限。参数错误、签名错误与权限拒绝分开处理，失败不能显示零额度。通用接口对具体 Ark/语音产品的覆盖仍以账号实际返回与产品控制台为准。
+
+官方账单的计费方式、结算类型与 `DeductionCount` / `DeductionUseDuration` 单独展示；抵扣量与现金金额不相加。要比较资源包是否划算，还需核对同产品、同单位下的实际购买金额、已使用额度和到期浪费，当前不根据标价自动生成节省金额。
+
+实现依据：[官方 Billing SDK](https://github.com/volcengine/volcengine-python-sdk/tree/master/volcenginesdkbilling)、[官方语音 SDK](https://github.com/volcengine/volcengine-python-sdk/tree/master/volcenginesdkspeechsaasprod)、[DeepSeek 官方余额接口](https://api-docs.deepseek.com/api/get-user-balance)。额度快照表通过 `model-billing-benefits.sql` 登记迁移，接口为 `GET /billing/benefits` 和管理员专用 `POST /billing/benefits/sync`。
+
+#### 配置与持久化
+
+管理端私有 Spring 配置示例（环境变量由部署环境注入，不在仓库保存真实值）：
+
+```yaml
+xiaozhi:
+  billing:
+    volcengine:
+      enabled: true
+      access-key: ${XIAOZHI_BILLING_VOLCENGINE_ACCESS_KEY}
+      secret-key: ${XIAOZHI_BILLING_VOLCENGINE_SECRET_KEY}
+      account-ref: ${XIAOZHI_BILLING_VOLCENGINE_ACCOUNT_REF}
+      region: cn-north-1
+      speech-project: ${XIAOZHI_BILLING_VOLCENGINE_SPEECH_PROJECT:}
+      speech-resource-ids: ${XIAOZHI_BILLING_VOLCENGINE_SPEECH_RESOURCE_IDS:}
+    deepseek:
+      model-id: ${XIAOZHI_BILLING_DEEPSEEK_MODEL_ID:}
+      account-ref: ${XIAOZHI_BILLING_DEEPSEEK_ACCOUNT_REF:}
+    outbox-root: uploadfile/billing-outbox
+```
+
+`account-ref` 是管理员选择的非敏感账号标识，用于与绑定和导入保持一致。仅查账单可用 `BillingCenterBillReadOnlyAccess`，同时查询通用资源包可用 `BillingCenterReadOnlyAccess`（整个费用中心的查询/导出权限，权限矩阵见[官方权限管理](https://www.volcengine.com/docs/6269/1186807)）。语音专用查询另外授权上述项目范围的单一只读动作，不授予购买、续费或配置修改权限。不使用模型 API Key 替代账单 AK/SK。未配置时页面仍能查看已采集用量及导入账单，同步按钮会显示未启用。
+
+默认 `application.yml` 已提供上述环境变量占位符；生产 Compose 已透传到 manager-api，示例见 `deploy/production/env.example`。真实值仅写部署目录私有 `.env`。`XIAOZHI_BILLING_VOLCENGINE_ENABLED` 默认为 `false`，需要读取火山时显式启用。DeepSeek 的 `model-id` 是项目现有官方直连模型配置 ID，不是上游模型名，也不需要在部署文件重复保存推理密钥。
+
+先确认实际供应商 Project/资源的独占使用范围，再建立有生效时间的工作空间绑定，随后同步所需账期。账户共享时不得把整账户绑定到某一空间；只绑定 Project 仍混用多个智能体或设备时，留在工作空间级。新增绑定后需要重同步或重导入有关账单。已有账单引用的绑定不允许改写历史归属，可在不截断既有账单区间的前提下结束有效期。
+
+DeepSeek 导入要求按下载模板整理**官方金额**、币种、消费期间、账单标识和官方凭证引用；只有 Token/调用次数的导出不能导入费用。此模板是本项目的统一导入格式，不声称与尚未核实的 DeepSeek 原生导出格式一致。
+
+Python 队列默认位于 `main/xiaozhi-server/data/billing/usage.sqlite3`，可通过 `XIAOZHI_BILLING_OUTBOX_PATH` 覆盖。管理端队列默认位于 `uploadfile/billing-outbox`。两者需要持久磁盘、写权限和备份保护，不能作为缓存清理；Python 每个独立服务实例需使用独立队列路径。队列包含归属数据，Python 队列还包含上报所需能力凭据，禁止提交或直接输出到日志。
+
+升级前的调用没有内部计量事件，不能从现有聊天历史补造。历史官方账单可同步并按有证据的有效期绑定归属；没有证据的记录保留未归属。尚未接入采集的其他 provider、进程/磁盘同时故障和供应商未返回用量都会影响内部覆盖度，官方账单仍是实际费用依据。
+
+验证入口为 Java `mvn test`、Python 项目 Conda 下的 `compileall`/`pytest`、Web `npm run test:unit` 后执行 `npm run build`。计费专项测试覆盖上报幂等、可信归属、断线补传、未知值、账单处理和页面筛选。离线测试不代替生产迁移与真实供应商账单联调，测试默认不发起付费推理。

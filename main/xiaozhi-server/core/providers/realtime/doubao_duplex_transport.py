@@ -105,6 +105,9 @@ class DoubaoDuplexTransport:
         if self.websocket is None or self.closed:
             raise ConnectionError("豆包3.0连接已关闭")
         payload = {"event_id": uuid.uuid4().hex, **event}
+        meter = getattr(self, "_billing_meter", None)
+        if meter:
+            meter.submitted(payload)
         async with self.send_lock:
             await self.websocket.send(json.dumps(payload, ensure_ascii=False))
 

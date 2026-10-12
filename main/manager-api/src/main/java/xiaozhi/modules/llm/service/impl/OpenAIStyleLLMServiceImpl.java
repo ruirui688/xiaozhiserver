@@ -21,6 +21,8 @@ import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import lombok.extern.slf4j.Slf4j;
+import xiaozhi.common.llm.LlmUsageContext;
+import xiaozhi.common.llm.LlmUsageMeter;
 import xiaozhi.modules.llm.service.EmbeddingService;
 import xiaozhi.modules.llm.service.LLMService;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
@@ -53,6 +55,9 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
 
     @Autowired
     private ModelRuntimeAssembler modelRuntimeAssembler;
+
+    @Autowired
+    private LlmUsageMeter usageMeter;
 
     // JSON fallback and format repair can make at most four requests (4 * 130s < 600s task lease).
     private final RestTemplate restTemplate = boundedRestTemplate(10_000, 120_000);
@@ -237,8 +242,7 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
                 apiUrl += "chat/completions";
             }
 
-            ResponseEntity<String> response = restTemplate.exchange(
-                    apiUrl, HttpMethod.POST, entity, String.class);
+            ResponseEntity<String> response = exchange(apiUrl, entity, llmConfig.getId());
 
             if (response.getStatusCode().is2xxSuccessful()) {
                 JSONObject responseJson = JSONUtil.parseObj(response.getBody());
@@ -341,8 +345,7 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
                 apiUrl += "chat/completions";
             }
 
-            ResponseEntity<String> response = restTemplate.exchange(
-                    apiUrl, HttpMethod.POST, entity, String.class);
+            ResponseEntity<String> response = exchange(apiUrl, entity, llmConfig.getId());
 
             if (response.getStatusCode().is2xxSuccessful()) {
                 JSONObject responseJson = JSONUtil.parseObj(response.getBody());
@@ -496,8 +499,7 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
                 apiUrl += "chat/completions";
             }
 
-            ResponseEntity<String> response = restTemplate.exchange(
-                    apiUrl, HttpMethod.POST, entity, String.class);
+            ResponseEntity<String> response = exchange(apiUrl, entity, llmConfig.getId());
 
             if (response.getStatusCode().is2xxSuccessful()) {
                 JSONObject responseJson = JSONUtil.parseObj(response.getBody());
@@ -551,7 +553,10 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
                 return null;
             }
 
-            float[] vector = embeddingService.getEmbedding(text, baseUrl, apiKey, embeddingModel);
+            float[] vector;
+            try (var ignored = LlmUsageContext.model(config.getId())) {
+                vector = embeddingService.getEmbedding(text, baseUrl, apiKey, embeddingModel);
+            }
             if (vector == null) {
                 return null;
             }
@@ -564,5 +569,11 @@ public class OpenAIStyleLLMServiceImpl implements LLMService {
             log.warn("generateEmbedding 失败，errorType: {}", e.getClass().getSimpleName());
             return null;
         }
+    }
+
+    private ResponseEntity<String> exchange(String url, HttpEntity<?> request, String modelId) {
+        return usageMeter == null
+                ? restTemplate.exchange(url, HttpMethod.POST, request, String.class)
+                : usageMeter.exchange(restTemplate, url, request, String.class, modelId, "LLM");
     }
 }

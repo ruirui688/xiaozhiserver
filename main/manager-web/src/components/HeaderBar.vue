@@ -101,6 +101,11 @@
           <i class="el-icon-s-custom"></i>
           <span class="nav-text">组织管理</span>
         </div>
+        <div class="equipment-management" :class="{ 'active-tab': $route.path === '/model-billing' }"
+          @click="handleRouter('modelBilling')">
+          <i class="el-icon-data-analysis"></i>
+          <span class="nav-text">计费管理</span>
+        </div>
         <el-dropdown v-if="userInfo.superAdmin" trigger="click" class="equipment-management more-dropdown" :class="{
           'active-tab':
             $route.path === '/dict-management' ||
@@ -263,6 +268,7 @@ export default {
         deviceCenter: "/device-center",
         home: "/home",
         modelConfig: "/model-config",
+        modelBilling: "/model-billing",
         resourceCenter: "/knowledge-base-management",
         knowledgeBaseManagement: "/knowledge-base-management",
         addressBookManagement: "/address-book-management",

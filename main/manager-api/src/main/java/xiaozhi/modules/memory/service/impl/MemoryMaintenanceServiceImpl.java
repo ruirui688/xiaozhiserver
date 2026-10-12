@@ -38,6 +38,7 @@ import xiaozhi.modules.agent.service.AgentChatHistoryService;
 import xiaozhi.modules.device.dao.DeviceDao;
 import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.llm.service.LLMService;
+import xiaozhi.common.llm.LlmUsageContext;
 import xiaozhi.modules.memory.dao.MemoryCandidateDao;
 import xiaozhi.modules.memory.dao.MemoryFactDao;
 import xiaozhi.modules.memory.dao.MemoryForgetTombstoneDao;
@@ -103,11 +104,12 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         var processor = new xiaozhi.modules.memory.service.impl.maintenance.MemorySessionProcessor(
                 policyService, governance, agentDao, candidateDao, revisionDao, llmService, outputParser,
                 conversationBuilder, transactionTemplate, memoryRuntimeRefresh);
-        return processor.process(agent, sessionId, messages, config,
+        return LlmUsageContext.call(LlmUsageContext.Identity.agent(agent.getWorkspaceId(), agent.getId(), "MEMORY"),
+                () -> processor.process(agent, sessionId, messages, config,
                 () -> buildMaintenanceMemoryContext(agent.getId(), scopeId) + capacityInstructions(agent.getId()),
                 action -> executeMemoryAction(agent, scopeId, null, action, modelId, null),
                 action -> buildCandidate(agent, scopeId, null, action, modelId,
-                        MemoryHelper.normalizeAction(action.getStr("action"))));
+                        MemoryHelper.normalizeAction(action.getStr("action")))));
     }
 
     @Override
@@ -272,10 +274,10 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         }
         String prompt = PowerMemPrompts.ACTIVE_FACTS_REVIEW_PROMPT
                 .replace("{active_memories}", buildActiveFactsReviewContext(facts));
-        String output = llmService.generateJson(prompt, maintenanceModelId);
+        String output = generateMemoryJson(agent, prompt, maintenanceModelId);
         JSONArray actions = outputParser.parseActionsResult(output);
         if ((actions == null || actions.isEmpty()) && StringUtils.isNotBlank(output)) {
-            String repaired = llmService.generateJson(
+            String repaired = generateMemoryJson(agent,
                     PowerMemPrompts.JSON_REPAIR_PROMPT.replace("{raw_output}", output),
                     maintenanceModelId);
             actions = outputParser.parseActionsResult(repaired);
@@ -328,7 +330,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                 .replace("{text}", text)
                 .replace("{category}", StringUtils.defaultString(category))
                 .replace("{existing_memories}", existingMemories) + capacityInstructions(agent.getId());
-        String output = llmService.generateJson(prompt, maintenanceModelId);
+        String output = generateMemoryJson(agent, prompt, maintenanceModelId);
         JSONObject decision = outputParser.parseRememberDecision(output, text);
         decision.set("_manual_instruction", true);
         MemorySpeakerUtils.applyInternalIdentity(decision, speaker);
@@ -360,7 +362,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                 .replace("{reason}", StringUtils.defaultString(reason))
                 .replace("{pattern_type}", StringUtils.defaultIfBlank(patternType, "semantic"))
                 .replace("{existing_memories}", existingMemories);
-        String output = llmService.generateJson(prompt, maintenanceModelId);
+        String output = generateMemoryJson(agent, prompt, maintenanceModelId);
         JSONObject decision = outputParser.parseDecisionResult(output);
         if (decision == null) {
             decision = new JSONObject();
@@ -891,11 +893,11 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
                 .replace("{existing_memories}", "clear_then_rebuild".equalsIgnoreCase(mode)
                         ? "本次只输出 ADD 或 NONE，不引用旧 memory_id" : buildMaintenanceMemoryContext(agent.getId(), scopeId))
                 .replace("{conversation}", conversation) + capacityInstructions(agent.getId());
-        String output = llmService.generateJson(prompt, maintenanceModelId);
+        String output = generateMemoryJson(agent, prompt, maintenanceModelId);
         MemoryRebuildTaskContext.checkpoint(50, "EXTRACTING", "维护模型已返回初步动作");
         JSONArray arr = outputParser.parseActionsResult(output);
         if ((arr == null || arr.isEmpty()) && StringUtils.isNotBlank(output)) {
-            String repaired = llmService.generateJson(
+            String repaired = generateMemoryJson(agent,
                     PowerMemPrompts.JSON_REPAIR_PROMPT.replace("{raw_output}", output),
                     maintenanceModelId);
             MemoryRebuildTaskContext.checkActive();
@@ -905,7 +907,7 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
             return List.of();
         }
         MemoryRebuildTaskContext.checkpoint(65, "REVIEWING", "维护模型正在复核重建动作");
-        JSONArray reviewed = reviewRebuildActions(arr, mode, conversation, maintenanceModelId);
+        JSONArray reviewed = reviewRebuildActions(agent, arr, mode, conversation, maintenanceModelId);
         if (reviewed == null) throw new IllegalStateException("重建动作审校失败");
         arr = reviewed;
         List<JSONObject> actions = new ArrayList<>();
@@ -946,23 +948,29 @@ public class MemoryMaintenanceServiceImpl implements MemoryMaintenanceService {
         return actions;
     }
 
-    private JSONArray reviewRebuildActions(JSONArray actions, String mode, String evidenceContext,
+    private JSONArray reviewRebuildActions(AgentEntity agent, JSONArray actions, String mode, String evidenceContext,
                                            String maintenanceModelId) {
         String prompt = PowerMemPrompts.ACTIONS_REVIEW_PROMPT
                 .replace("{mode}", StringUtils.defaultIfBlank(mode, "merge"))
                 .replace("{evidence_context}", StringUtils.defaultIfBlank(evidenceContext, "无额外证据"))
                 .replace("{actions_json}", JSONUtil.toJsonStr(Map.of("actions", actions)));
-        String output = llmService.generateJson(prompt, maintenanceModelId);
+        String output = generateMemoryJson(agent, prompt, maintenanceModelId);
         MemoryRebuildTaskContext.checkpoint(80, "VALIDATING", "正在校验重建动作与人物归属");
         JSONArray reviewed = outputParser.parseActionsResult(output);
         if (reviewed == null && StringUtils.isNotBlank(output)) {
-            String repaired = llmService.generateJson(
+            String repaired = generateMemoryJson(agent,
                     PowerMemPrompts.JSON_REPAIR_PROMPT.replace("{raw_output}", output),
                     maintenanceModelId);
             MemoryRebuildTaskContext.checkActive();
             reviewed = outputParser.parseActionsResult(repaired);
         }
         return reviewed;
+    }
+
+    private String generateMemoryJson(AgentEntity agent, String prompt, String modelId) {
+        return LlmUsageContext.call(
+                LlmUsageContext.Identity.agent(agent.getWorkspaceId(), agent.getId(), "MEMORY"),
+                () -> llmService.generateJson(prompt, modelId));
     }
 
     private List<AgentChatSessionDTO> recentSessions(String agentId, int limit) {

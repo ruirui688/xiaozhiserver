@@ -42,6 +42,7 @@
       <div class="settings-btn" @click="handleRuntimeMonitor">
         运行监控
       </div>
+      <div class="settings-btn" @click="handleBilling">用量与消费</div>
       <div :class="['settings-btn', { 'disabled-btn': !isMemoryEnabled }]"
         @click="handleChatHistory">
         <el-tooltip effect="light" v-if="!isMemoryEnabled" :content="$t('home.enableMemory')" placement="top">
@@ -149,6 +150,9 @@ export default {
     },
     handleRuntimeMonitor() {
       this.$emit('runtime-monitor', this.device);
+    },
+    handleBilling() {
+      this.$router.push({ path: '/model-billing', query: { tab: 'events', agentId: this.device.agentId } });
     },
     handleChatHistory() {
       if (!this.isMemoryEnabled) {

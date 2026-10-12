@@ -1,6 +1,7 @@
 """Volcengine Doubao end-to-end realtime speech transport and device session."""
 
 import asyncio
+from core.metering.realtime import LegacyRealtimeMeter
 import gzip
 import inspect
 import json
@@ -414,6 +415,9 @@ class DoubaoRealtimeTransport:
             message_type=CLIENT_AUDIO_REQUEST if audio else CLIENT_FULL_REQUEST,
             serialization=SERIALIZATION_RAW if audio else SERIALIZATION_JSON,
         )
+        meter = getattr(self, "_billing_meter", None)
+        if meter:
+            meter.submitted(event_id, payload, session_id or self.session_id)
         async with self._send_lock:
             await self.websocket.send(frame)
 
@@ -443,6 +447,9 @@ class DoubaoRealtimeTransport:
                     raw, _max_event_bytes(self.config.get("max_event_bytes"))
                 )
                 event_id = payload.get("event")
+                meter = getattr(self, "_billing_meter", None)
+                if meter:
+                    meter.received(payload)
                 if event_id in ERROR_EVENTS or payload.get("type") == "server.error":
                     error_payload = payload.get("payload") or {}
                     error = RuntimeError(
@@ -526,6 +533,8 @@ class DoubaoRealtimeSession:
             )
             transport = self._transport_factory()
         self.transport = transport
+        self._billing_meter = LegacyRealtimeMeter(self, conn)
+        self.transport._billing_meter = self._billing_meter
         self.decoder = opuslib_next.Decoder(16000, 1)
         self.encoder = OpusEncoderUtils(24000, 1, 60)
         self.input_audio = []
@@ -611,6 +620,8 @@ class DoubaoRealtimeSession:
             old_transport = self.transport
             await old_transport.close()
             self.transport = self._transport_factory()
+            if hasattr(self, "_billing_meter"):
+                self.transport._billing_meter = self._billing_meter
             self.input_audio = []
             self.current_transcript = ""
             self.encoder.reset_state()
@@ -854,6 +865,7 @@ class DoubaoRealtimeSession:
         if self._closed:
             return
         self._closed = True
+        self._billing_meter.close()
         maintenance_task = getattr(self, "_session_maintenance_task", None)
         if maintenance_task is not None and not maintenance_task.done():
             maintenance_task.cancel()
@@ -868,6 +880,8 @@ class DoubaoRealtimeTextProbe:
     def __init__(self, config: Dict[str, Any], transport=None):
         self.config = dict(config or {})
         self.transport = transport or DoubaoRealtimeTransport(self.config)
+        self._billing_meter = LegacyRealtimeMeter(self)
+        self.transport._billing_meter = self._billing_meter
         self.connect_ms = None
         self.started = 0.0
         self.first_text_ms = None
@@ -940,3 +954,4 @@ class DoubaoRealtimeTextProbe:
 
     async def close(self) -> None:
         await self.transport.close()
+        self._billing_meter.close()

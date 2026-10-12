@@ -1,7 +1,7 @@
 ---
 status: canonical
 owner: architecture
-last_verified: 2026-10-08
+last_verified: 2026-10-12
 source_paths:
   - main/xiaozhi-server
   - main/xiaozhi-server/core/conversation
@@ -221,6 +221,7 @@ Java 的 `ModelRuntimeAssembler` 负责从通用字段、普通参数和密钥�
 | 领域 | 控制面 | 实时面 | 权威专题 |
 | --- | --- | --- | --- |
 | 模型 | 配置、目录、测试、评测任务、会话模式标签 | 传统 provider 或 Realtime 会话初始化与真实调用 | [模型评测与助手](./model-benchmark-and-assistant.md) |
+| 用量与实际费用 | 工作空间/智能体/设备查询、官方账单同步和归属 | 独立计量上下文、请求用量和持久补传 | [模型管理](../models/model-management.md#11-模型用量与实际消费管理) |
 | 语音 | 模型和音色配置 | 传统 VAD/ASR/TTS 或端到端 Realtime、打断 | [设备交互链路](./device-interaction-chain.md) |
 | 工具 | 插件启用与参数 | 统一工具注册、冲突和执行 | [功能插件](./function-plugin-architecture.md) |
 | MCP | Endpoint 和工具配置 | Server/Device/Endpoint 三类 MCP | [MCP 链路](./mcp-chains.md) |
@@ -234,6 +235,7 @@ Java 的 `ModelRuntimeAssembler` 负责从通用字段、普通参数和密钥�
 - `manager-api + MySQL` 是用户、智能体、设备绑定、人物档案、模型、知识库元数据/处理状态、长期记忆和 Workspace 的事实来源；本地知识库的内容事实来源是持久化卷中的上传原件，MySQL 切片用于兼容现有管理链路，Lucene 是可重建的检索索引。
 - 天气和联网搜索的外部服务凭据属于用户级事实；智能体映射只决定是否启用插件并保存非共享行为参数。
 - `xiaozhi-server` 拥有连接级会话状态、音频队列、当前对话和工具客户端生命周期。
+- 模型调用台账独立于聊天记录。`core/metering/` 固定每次请求的配置归属并持久补传；Java `common/llm/` 计量管理端的后台模型调用，`modules/billing/` 管理入账和官方费用。`connection.py`、记忆与知识库业务类只接入上下文和调用边界，不承担账单计算。费用以供应商账单为事实来源，无法细分时不按用量分摊。
 - Redis 是加速层；缓存失效不能改变 MySQL 的事实语义。
 - 设备拥有固件、NVS 中的连接入口和设备侧能力描述，但设备上报不能绕过服务端工具门控。
 - `config.yaml` 是可提交模板；真实密钥和环境私有配置只能进入受保护的运行配置。

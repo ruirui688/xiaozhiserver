@@ -28,6 +28,7 @@ import xiaozhi.modules.agent.vo.AgentInfoVO;
 import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.device.service.DeviceService;
 import xiaozhi.modules.llm.service.LLMService;
+import xiaozhi.common.llm.LlmUsageContext;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
 
@@ -162,7 +163,11 @@ public class AgentChatSummaryServiceImpl implements AgentChatSummaryService {
             }
 
             String slmModelId = getSlmModelId(agentId);
-            String title = llmService.generateTitle(conversation.toString(), slmModelId);
+            var agent = agentService.getAgentById(agentId);
+            String title = LlmUsageContext.call(new LlmUsageContext.Identity(
+                    agent == null ? null : agent.getWorkspaceId(), agentId, null,
+                    sessionId, slmModelId, "CHAT_TITLE"),
+                    () -> llmService.generateTitle(conversation.toString(), slmModelId));
 
             if (StringUtils.isNotBlank(title)) {
                 agentChatTitleService.saveOrUpdateTitle(sessionId, title);
@@ -383,6 +388,12 @@ public class AgentChatSummaryServiceImpl implements AgentChatSummaryService {
     /**
      * 获取当前智能体的历史记忆
      */
+    private LlmUsageContext summaryUsageContext(String agentId) {
+        var agent = agentService.getAgentById(agentId);
+        return LlmUsageContext.open(LlmUsageContext.Identity.agent(
+                agent == null ? null : agent.getWorkspaceId(), agentId, "MEMORY"));
+    }
+
     private String getCurrentAgentMemory(String agentId) {
         try {
             if (StringUtils.isBlank(agentId)) {
@@ -407,7 +418,7 @@ public class AgentChatSummaryServiceImpl implements AgentChatSummaryService {
      * 调用Java端LLM服务进行智能总结（支持历史记忆合并）
      */
     private String callJavaLLMForSummaryWithHistory(String conversation, String historyMemory, String agentId) {
-        try {
+        try (var ignored = summaryUsageContext(agentId)) {
             String modelId = getSlmModelId(agentId);
 
             if (StringUtils.isBlank(modelId)) {
@@ -433,7 +444,7 @@ public class AgentChatSummaryServiceImpl implements AgentChatSummaryService {
      * 调用Java端LLM服务进行智能总结
      */
     private String callJavaLLMForSummary(String conversation, String agentId) {
-        try {
+        try (var ignored = summaryUsageContext(agentId)) {
             String modelId = getSlmModelId(agentId);
 
             if (StringUtils.isBlank(modelId)) {

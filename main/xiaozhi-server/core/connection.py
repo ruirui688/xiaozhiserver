@@ -7,6 +7,8 @@ import uuid
 import time
 import queue
 import asyncio
+from core.metering import bind_provider, connection_scope
+from core.metering.context import conversation_stream
 import threading
 import traceback
 import subprocess
@@ -1319,6 +1321,7 @@ class ConnectionHandler:
         detach_managed_memory_session(self)
         if self.memory is None:
             return
+        bind_provider(self.memory, self, "MEMORY")
         selected_memory = self.config.get("selected_module", {}).get("Memory")
         if not selected_memory or selected_memory not in self.config.get("Memory", {}):
             return
@@ -1363,6 +1366,7 @@ class ConnectionHandler:
                 memory_llm = llm_utils.create_instance(
                     memory_llm_type, memory_llm_config
                 )
+                memory_llm._billing_model_id = memory_llm_name
                 self.logger.bind(tag=TAG).info(
                     f"为记忆总结创建了专用LLM: {memory_llm_name}, 类型: {memory_llm_type}"
                 )
@@ -1425,6 +1429,7 @@ class ConnectionHandler:
                 intent_llm = llm_utils.create_instance(
                     intent_llm_type, intent_llm_config
                 )
+                intent_llm._billing_model_id = intent_llm_name
                 self.logger.bind(tag=TAG).info(
                     f"为意图识别创建了专用LLM: {intent_llm_name}, 类型: {intent_llm_type}"
                 )
@@ -1561,6 +1566,7 @@ class ConnectionHandler:
                 f"系统提示词工具索引已同步: {tool_names}"
             )
 
+    @connection_scope("CONVERSATION")
     def chat(
         self,
         query,
@@ -1759,6 +1765,7 @@ class ConnectionHandler:
                     self.session_id,
                     llm_dialogue,
                 )
+            llm_responses = conversation_stream(self, llm_responses, turn_id, current_sentence_id)
             self.turn_metrics.record_llm_started(
                 tools_enabled,
                 depth,
@@ -1978,6 +1985,10 @@ class ConnectionHandler:
                 self, current_sentence_id, current_reply_generation,
                 current_abort_generation, depth,
             )
+        finally:
+            close_stream = getattr(llm_responses, "close", None)
+            if close_stream:
+                close_stream()
         self.session_telemetry.metrics.record_llm_complete(
             time.monotonic() - llm_started_at
         )

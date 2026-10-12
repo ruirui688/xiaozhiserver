@@ -20,6 +20,8 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
+import xiaozhi.common.llm.LlmUsageContext;
+import xiaozhi.common.llm.LlmUsageMeter;
 import org.springframework.web.client.RestTemplate;
 
 import cn.hutool.json.JSONObject;
@@ -87,6 +89,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private DocumentDao documentDao;
     private KnowledgeBaseDao knowledgeBaseDao;
     private ModelConfigService modelConfigService;
+    private LlmUsageMeter usageMeter;
     private LocalKnowledgeRetrievalEngine retrievalEngine;
     private LocalKnowledgeLuceneIndex luceneIndex;
     private LocalKnowledgeDocumentStorage documentStorage;
@@ -129,6 +132,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         this.documentDao = SpringContextUtils.getBean(DocumentDao.class);
         this.knowledgeBaseDao = SpringContextUtils.getBean(KnowledgeBaseDao.class);
         this.modelConfigService = SpringContextUtils.getBean(ModelConfigService.class);
+        this.usageMeter = SpringContextUtils.getBean(LlmUsageMeter.class);
         this.retrievalEngine = SpringContextUtils.getBean(LocalKnowledgeRetrievalEngine.class);
         this.luceneIndex = SpringContextUtils.getBean(LocalKnowledgeLuceneIndex.class);
         this.documentStorage = SpringContextUtils.getBean(LocalKnowledgeDocumentStorage.class);
@@ -219,8 +223,14 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
             // 适配器实例会被缓存；每次上传重新解析托管模型，避免继续使用已修改或停用的旧凭据。
             applyManagedLlmConfig();
             notifyProgress(req.getProgressListener(), 0.10D);
-            List<LocalChunk> chunks = parseFile(
-                    filename, req.getFile().getInputStream(), req.getProgressListener());
+            KnowledgeBaseEntity dataset = knowledgeBaseDao.selectOne(new QueryWrapper<KnowledgeBaseEntity>()
+                    .eq("dataset_id", req.getDatasetId()));
+            List<LocalChunk> chunks;
+            try (var ignored = LlmUsageContext.open(new LlmUsageContext.Identity(
+                    dataset == null ? null : dataset.getWorkspaceId(), null, null, null,
+                    llmModelId, "KNOWLEDGE_CHUNKING"))) {
+                chunks = parseFile(filename, req.getFile().getInputStream(), req.getProgressListener());
+            }
             if (chunks.isEmpty()) {
                 throw new RenException(ErrorCode.UPLOAD_FILE_ERROR, "文件中没有可用于知识库切片的有效内容");
             }
@@ -736,15 +746,16 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     }
 
     private String requestLlmMessageContent(Map<String, Object> requestBody) throws Exception {
-        // TODO: migrate to LlmClient
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         if (StringUtils.isNotBlank(llmApiKey)) {
             headers.setBearerAuth(llmApiKey);
         }
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
-        ResponseEntity<String> response = llmRestTemplate.exchange(
-                buildChatCompletionsUrl(llmBaseUrl), HttpMethod.POST, entity, String.class);
+        String endpoint = buildChatCompletionsUrl(llmBaseUrl);
+        ResponseEntity<String> response = usageMeter == null
+                ? llmRestTemplate.exchange(endpoint, HttpMethod.POST, entity, String.class)
+                : usageMeter.exchange(llmRestTemplate, endpoint, entity, String.class, llmModelId, "LLM");
         if (!response.getStatusCode().is2xxSuccessful()) {
             throw new RenException("模型接口返回状态码: " + response.getStatusCode());
         }

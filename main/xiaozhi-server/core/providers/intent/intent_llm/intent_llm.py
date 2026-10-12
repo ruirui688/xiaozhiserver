@@ -8,6 +8,7 @@ from config.logger import setup_logging
 from core.providers.tools.home_assistant_config import build_home_assistant_devices_prompt
 from core.utils.prompt_budget import truncate_context_text
 from core.game.interactions import active_interaction_name
+from core.metering import connection_scope
 from .routing import (
     CONTRACT_VERSION, CONTINUE_CHAT, IntentRequestSnapshot, conversation_prompt, normalize_route,
 )
@@ -140,6 +141,7 @@ class IntentProvider(IntentProviderBase):
             f"{CONTRACT_VERSION}:{int(local_context_enabled)}:{canonical}".encode()
         ).hexdigest()
 
+    @connection_scope("INTENT", conn_arg=1)
     async def detect_intent(
         self, conn: "ConnectionHandler", dialogue_history: List[Dict], text: str
     ) -> str:
