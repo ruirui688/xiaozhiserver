@@ -102,10 +102,11 @@ export function billingLabel(value) {
   return labels[value] || value || '—';
 }
 
-export function billingCoverageNotices(overview = {}, canManage = false) {
+export function billingCoverageNotices(overview = {}, canManage = false, showSupplierCosts = true) {
   const notices = [];
   if (Number(overview.usageUnknownCount) > 0) notices.push({
-    key: 'usage', type: 'warning', title: `${decimalText(overview.usageUnknownCount)} 次调用缺少完整的供应商用量，当前用量汇总可能不完整。`
+    key: 'usage', type: 'warning', title: `${decimalText(overview.usageUnknownCount)} 条调用记录暂无完整用量，当前仅汇总已确认的用量。`,
+    description: showSupplierCosts ? '可能包含失败、中断或未执行的请求。' : '可能包含失败、中断或未执行的请求；额度扣减请查看「我的额度流水」。'
   });
   const status = overview.meteringStatus || {};
   if (!canManage) return notices;

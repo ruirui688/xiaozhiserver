@@ -6,7 +6,7 @@
       </el-table-column>
       <el-table-column v-if="kind === 'devices'" prop="board" label="设备型号" min-width="100" />
       <el-table-column label="调用 / 会话" width="110"><template slot-scope="scope">{{ number(scope.row.callCount) }} / {{ number(scope.row.sessionCount) }}</template></el-table-column>
-      <el-table-column label="用量（按来源与单位分别统计）" min-width="330"><template slot-scope="scope"><BillingUsage :usage="scope.row.usage || []" /><small v-if="scope.row.usageUnknownCount > 0" class="incomplete">{{ number(scope.row.usageUnknownCount) }} 次调用的供应商用量不完整</small></template></el-table-column>
+      <el-table-column label="用量（按来源与单位分别统计）" min-width="330"><template slot-scope="scope"><BillingUsage :usage="scope.row.usage || []" /><small v-if="scope.row.usageUnknownCount > 0" class="incomplete">{{ number(scope.row.usageUnknownCount) }} 条调用记录暂无完整用量</small></template></el-table-column>
       <el-table-column v-if="showSupplierCosts" label="可归属官方应付金额" min-width="230"><template slot-scope="scope"><BillingCosts :costs="scope.row.costs || []" :status="scope.row.costStatus" /></template></el-table-column>
     </el-table>
     <el-table v-else-if="kind === 'events'" :data="rows" row-key="eventId" empty-text="当前筛选范围暂无调用记录">
@@ -14,7 +14,7 @@
       <el-table-column label="开始时间（北京时间）" min-width="170"><template slot-scope="scope">{{ time(scope.row.startedAt) }}</template></el-table-column>
       <el-table-column label="智能体 / 设备" min-width="180"><template slot-scope="scope"><div>{{ scope.row.agentName || scope.row.agentId || '—' }}</div><small class="secondary">{{ scope.row.deviceName || scope.row.deviceId || '非设备调用' }}</small></template></el-table-column>
       <el-table-column label="服务 / 模型" min-width="170"><template slot-scope="scope"><div>{{ label(scope.row.serviceType) }} · {{ label(scope.row.provider) }}</div><small class="secondary">{{ scope.row.modelName || scope.row.modelId || '—' }}</small></template></el-table-column>
-      <el-table-column label="实际用量 / 本地观测" min-width="310"><template slot-scope="scope"><BillingUsage :usage="scope.row.usage || []" /><small v-if="scope.row.usageComplete === false || scope.row.usageComplete === 0" class="incomplete">供应商用量不完整</small></template></el-table-column>
+      <el-table-column label="实际用量 / 本地观测" min-width="310"><template slot-scope="scope"><BillingUsage :usage="scope.row.usage || []" /><small v-if="scope.row.usageComplete === false || scope.row.usageComplete === 0" class="incomplete">调用记录暂无完整用量</small></template></el-table-column>
       <el-table-column label="调用状态" width="110"><template slot-scope="scope"><el-tag size="small" :type="scope.row.status === 'SUCCESS' ? 'success' : 'info'">{{ label(scope.row.status) }}</el-tag></template></el-table-column>
       <el-table-column v-if="showSupplierCosts" label="逐调用实际费用" min-width="140"><template slot-scope="scope">—<small class="secondary">{{ label(scope.row.costStatus || 'NOT_MATCHED') }}</small></template></el-table-column>
     </el-table>

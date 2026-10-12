@@ -174,16 +174,24 @@ test('admin capability must be an authoritative boolean and incomplete provider 
   assert.equal(utils.billingLabel('IMPORTED_STATEMENT'), '人工导入官方账单');
 });
 
-test('incomplete usage and pending ledger entries are visible without claiming complete supplier coverage', () => {
+test('incomplete call records remain visible without assuming supplier execution or missing reports', () => {
   const component = page({});
   const overview = { usageUnknownCount: 3, meteringStatus: { status: 'PENDING', pendingCount: 2, rejectedCount: 0, persistenceFailureCount: 0 } };
   const adminNotices = component.computed.coverageNotices.call({ overview, canManage: true });
   assert.equal(adminNotices.length, 2);
-  assert.match(adminNotices[0].title, /3 次调用缺少完整/);
+  assert.match(adminNotices[0].title, /3 条调用记录暂无完整用量/);
+  assert.match(adminNotices[0].title, /仅汇总已确认的用量/);
+  assert.match(adminNotices[0].description, /失败、中断或未执行/);
+  assert.doesNotMatch(adminNotices[0].description, /额度流水/);
   assert.match(adminNotices[1].title, /2 条记录等待入账/);
   assert.match(adminNotices[1].description, /平台范围/);
   const memberNotices = component.computed.coverageNotices.call({ overview, canManage: false });
   assert.equal(memberNotices.length, 1); assert.equal(memberNotices[0].key, 'usage');
+  const userNotices = component.computed.coverageNotices.call({ overview, canManage: false, showSupplierCosts: false });
+  assert.equal(userNotices.length, 1); assert.equal(userNotices[0].type, 'warning');
+  assert.equal(userNotices[0].title, adminNotices[0].title);
+  assert.match(userNotices[0].description, /额度扣减请查看「我的额度流水」/);
+  assert.doesNotMatch(userNotices[0].title + userNotices[0].description, /供应商.*缺少|免费|费用异常|实际发出/);
   assert.deepEqual(utils.billingCoverageNotices({ usageUnknownCount: 0, meteringStatus: { status: 'READY' } }, true), []);
 });
 

@@ -62,4 +62,32 @@ export default {
 </script>
 <style scoped>
 .allowance-page{min-height:100vh;background:#f5f7fb;text-align:left}.allowance-main{max-width:1280px;margin:auto;padding:35px 26px 70px}.allowance-heading,.allowance-section-heading{display:flex;align-items:center;justify-content:space-between;gap:16px}.allowance-heading h1{font-size:29px;font-weight:600;color:#273c53;margin:10px 0}.allowance-heading p,.allowance-card p,.allowance-section-heading p{font-size:12px;line-height:1.8;color:#8a97a7}.allowance-eyebrow{font-size:10px;letter-spacing:2px;color:#7e99b7}.allowance-responsibility{display:flex;align-items:center;gap:18px;border:1px solid #dce7ef;background:#edf4f9;border-radius:12px;padding:20px;margin:25px 0}.allowance-responsibility>i{font-size:25px;color:#59879a}.allowance-responsibility>div{flex:1}.allowance-responsibility strong{font-size:14px;color:#426878}.allowance-responsibility p{font-size:12px;color:#8198a6;line-height:1.8;margin:7px 0 0}.allowance-metrics{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:18px}.allowance-metrics article{background:white;border:1px solid #e4e9f1;border-radius:13px;padding:26px}.allowance-metrics span{display:block;font-size:12px;color:#8c98aa}.allowance-metrics strong{display:block;font-size:36px;font-weight:500;color:#384e68;margin:20px 0;overflow-wrap:anywhere}.allowance-metrics small{font-size:12px;margin-left:9px}.allowance-metrics p{font-size:11px;color:#94a1b1;line-height:1.7}.allowance-metrics .allowance-primary{background:#263f56;border-color:#263f56}.allowance-primary span,.allowance-primary p{color:#a6bbcb}.allowance-primary strong{color:#fff}.allowance-card{background:white;border:1px solid #e4e9f1;border-radius:12px;padding:24px;margin:20px 0}.allowance-card h2{font-size:17px;color:#426078;margin:0 0 10px}.allowance-limits{display:flex;flex-wrap:wrap;gap:38px;padding:12px 0}.allowance-limits dt{font-size:11px;color:#98a5b4;margin-bottom:12px}.allowance-limits dd{margin:0;font-size:16px;color:#4f6b81}.allowance-tabs{margin-top:28px}.allowance-card .el-pagination{text-align:right;margin-top:20px}.allowance-loading{padding:50px;color:#8c9aaa}@media(max-width:760px){.allowance-metrics{grid-template-columns:1fr}.allowance-main{padding:24px 14px}.allowance-responsibility{flex-wrap:wrap}.allowance-section-heading{align-items:flex-start}.allowance-responsibility>div{min-width:190px}}
+/* The embedded usage panel does not provide the full billing page's header layout. */
+@media (max-width: 899px) {
+  .allowance-page ::v-deep .el-header.header { min-width: 0; width: 100%; padding: 0 16px; }
+  .allowance-page ::v-deep .header-container { min-width: 0; max-width: 100%; }
+  .allowance-page ::v-deep .header-center {
+    max-width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+    padding: 10px 0 12px;
+  }
+  .allowance-page ::v-deep .equipment-management { height: 38px; padding: 0 12px; font-size: 12px; }
+}
+@media (max-width: 600px) {
+  .allowance-page ::v-deep .header-container {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "brand" "tools" "navigation";
+    gap: 12px 0;
+  }
+  .allowance-page ::v-deep .header-left { width: auto; }
+  .allowance-page ::v-deep .logo-img { width: 32px; height: 32px; }
+  .allowance-page ::v-deep .brand-img { height: 18px; }
+  .allowance-page ::v-deep .header-right { justify-content: flex-start; flex-wrap: wrap; gap: 8px; width: 100%; }
+  .allowance-page ::v-deep .workspace-select { width: auto; min-width: 120px; max-width: 100%; flex: 1 1 132px; }
+  .allowance-page ::v-deep .el-user-dropdown { max-width: 82px; font-size: 13px; }
+  .allowance-page ::v-deep .header-center { margin-top: 0; }
+}
 </style>
