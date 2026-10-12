@@ -1,5 +1,5 @@
 <template>
-  <el-header class="header">
+  <el-header class="header" :class="{ 'header--ops': isOps }">
     <OpsHeader v-if="isOps" />
     <div v-else class="header-container">
       <!-- 左侧元素 -->
@@ -519,6 +519,11 @@ export default {
   /* 设置最小宽度防止过度压缩 */
   overflow: visible;
   backdrop-filter: blur(10px);
+}
+
+.header.header--ops {
+  min-width: 0;
+  padding: 0 20px;
 }
 
 .header-container {

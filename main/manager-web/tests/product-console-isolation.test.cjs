@@ -73,10 +73,10 @@ test('user allowance display keeps malformed or absent decimal values unknown', 
 test('uncertain allowance grant retries retain the original idempotency key', async () => {
   const calls = []; let attempts = 0;
   const component = loadVueComponent('src/ops/OpsAllowance.vue', { '@/apis/platform': { operations: { grant: async payload => { calls.push({...payload}); if (++attempts === 1) throw new Error('timeout'); } } } });
-  const vm = { ...component.data(), $message: { success() {} }, load: async()=>{} };
+  const vm = { ...component.data(), $store: { state: { userInfo: { audience: 'OPS', permissions: ['allowance.read', 'allowance.grant'] } } }, $message: { success() {} }, load: async()=>{} };
   for (const [name,method] of Object.entries(component.methods)) vm[name] = method.bind(vm);
   vm.load = async()=>{};
-  vm.open('grant'); vm.form.userId = '42'; vm.form.amount = '100'; vm.form.reason = '试用额度';
+  vm.open('grant', { userId: '42', username: 'test-only-user' }); vm.form.amount = '100'; vm.form.reason = '试用额度';
   await vm.save(); assert.equal(vm.dialog,true); assert.equal(vm.saving,false);
   await vm.save(); assert.equal(calls.length,2); assert.equal(calls[0].requestId,calls[1].requestId); assert.equal(vm.dialog,false);
 });

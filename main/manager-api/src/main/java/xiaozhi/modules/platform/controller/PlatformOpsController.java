@@ -16,6 +16,7 @@ import static xiaozhi.modules.platform.service.PlatformSupport.required;
 @RestController @RequiredArgsConstructor @RequestMapping("/ops/platform")
 public class PlatformOpsController {
     private final PlatformAccountService accounts;
+    private final PlatformAccountQueryService accountQueries;
     private final PlatformOpsMutationService mutations;
     private final PlatformResolutionService resolutions;
     private final PlatformCatalogPublicationService catalog;
@@ -34,7 +35,11 @@ public class PlatformOpsController {
     private String operator() {return OpsAccess.employee().getEmployeeId();}
     @GetMapping("/pool") public Result<?> pool(){platform("pool.read");return new Result<>().ok(accounts.pool());}
     @PostMapping("/pool") public Result<?> pool(@Valid @RequestBody PoolAdjustment input){platform("pool.adjust");return new Result<>().ok(accounts.adjust(input,operator()));}
-    @GetMapping("/accounts") public Result<?> accounts(@RequestParam(defaultValue="1") int page,@RequestParam(defaultValue="20") int limit){platform("allowance.read");return new Result<>().ok(pages.read("ai_platform_account","user_id AS userId,granted,spent,reserved,(granted-spent-reserved) AS available,frozen,CASE WHEN frozen=1 THEN 'FROZEN' ELSE 'ACTIVE' END AS status,'CNY' AS currency"," WHERE user_id>0","user_id",page,limit));}
+    @GetMapping("/accounts") public Result<?> accounts(@RequestParam(defaultValue="1") int page,
+            @RequestParam(defaultValue="20") int limit,@RequestParam(required=false) String keyword){
+        platform("allowance.read");
+        return new Result<>().ok(accountQueries.accounts(page,limit,keyword));
+    }
     @PostMapping("/allowance/grant") public Result<?> grant(@Valid @RequestBody Grant input){user("allowance.grant",input.userId());return new Result<>().ok(accounts.grant(input,operator()));}
     @PostMapping("/allowance/freeze") public Result<?> freeze(@Valid @RequestBody Freeze input){user("allowance.freeze",input.userId());return new Result<>().ok(accounts.freeze(input,operator()));}
     @GetMapping("/credentials") public Result<?> credentials(@RequestParam(defaultValue="1") int page,@RequestParam(defaultValue="20") int limit){platform("credentials.read");return new Result<>().ok(pages.read("ai_platform_credential","id,provider,upstream_id AS upstreamId,user_id AS userId,version,status,'***' AS masked,created_at AS createdAt","","created_at DESC,id",page,limit));}

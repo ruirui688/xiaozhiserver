@@ -1,13 +1,13 @@
 <template>
   <section class="ops-panel">
-    <div class="ops-toolbar"><div><h2>平台任务账户</h2><p class="ops-muted">模型测试、评测和官方知识库任务使用独立凭据与预算。每个模型与任务组合只分配给一个账户。</p></div><div class="ops-actions"><el-button v-if="can('pool.adjust')" size="small" @click="open('create')">新建任务账户</el-button><el-button size="small" @click="load">刷新</el-button></div></div>
+    <div class="ops-toolbar"><div><h2>平台任务</h2><p class="ops-muted">管理模型测试、评测和官方知识库任务的独立预算与密钥。</p></div><div class="ops-actions"><el-button v-if="can('pool.adjust')" size="small" @click="open('create')">新建任务账户</el-button><el-button size="small" @click="load">刷新</el-button></div></div>
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
     <el-table :data="rows" v-loading="loading" empty-text="尚未配置；平台任务无法借用用户凭据执行">
       <el-table-column prop="id" label="账户名称" min-width="150" />
       <el-table-column label="模型范围" min-width="180"><template slot-scope="s">{{ values(s.row.modelIdsJson).join('、') }}</template></el-table-column>
       <el-table-column label="允许任务" min-width="180"><template slot-scope="s">{{ values(s.row.purposesJson).map(purposeLabel).join('、') }}</template></el-table-column>
-      <el-table-column v-if="can('allowance.read') || can('pool.read')" prop="available" label="可用额度（元）" min-width="130" />
-      <el-table-column v-if="can('allowance.read') || can('pool.read')" prop="spent" label="已使用（元）" min-width="120" />
+      <el-table-column v-if="can('allowance.read') || can('pool.read')" label="可用额度（元）" min-width="130"><template slot-scope="s"><span :title="s.row.available">{{ amount(s.row.available) }}</span></template></el-table-column>
+      <el-table-column v-if="can('allowance.read') || can('pool.read')" label="已使用（元）" min-width="120"><template slot-scope="s"><span :title="s.row.spent">{{ amount(s.row.spent) }}</span></template></el-table-column>
       <el-table-column label="操作" min-width="220"><template slot-scope="s"><el-button v-if="can('allowance.grant')" type="text" @click="open('grant',s.row)">发放预算</el-button><el-button v-if="can('credentials.assign')" type="text" @click="open('assign',s.row)">分配凭据</el-button><el-button v-if="can('credentials.rotate')" type="text" @click="open('rotate',s.row)">轮换凭据</el-button></template></el-table-column>
     </el-table>
     <el-dialog :title="title" :visible.sync="dialog" width="min(600px,94vw)" :close-on-click-modal="false">
@@ -21,13 +21,14 @@
 <script>
 import { operations } from '@/apis/platform';
 import { hasPermission } from '@/security/session';
-import { newOperationId } from '@/utils/allowance';
+import { allowanceDisplayAmount, newOperationId } from '@/utils/allowance';
 const purposes = [{value:'MODEL_TEST',label:'模型测试'},{value:'BENCHMARK',label:'模型评测'},{value:'MODEL_ASSISTANT',label:'配置助手'},{value:'OFFICIAL_KNOWLEDGE',label:'官方知识库'}];
 export default {
   data() { return { purposes,rows:[],loading:false,error:'',dialog:false,saving:false,saveError:'',action:'create',form:{} }; },
   computed: { title() { return {create:'新建平台任务账户',grant:'发放任务预算',assign:'分配任务凭据',rotate:'轮换任务凭据'}[this.action]; } },
   created() { this.load(); },
   methods: {
+    amount: allowanceDisplayAmount,
     can(permission) { return hasPermission(this.$store.state.userInfo,permission); },
     values(value) { try { const result=typeof value==='string'?JSON.parse(value):value; return Array.isArray(result)?result:[]; } catch (_) { return []; } },
     purposeLabel(value) { return purposes.find(item=>item.value===value)?.label || value; },

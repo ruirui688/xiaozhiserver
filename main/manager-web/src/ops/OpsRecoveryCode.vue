@@ -1,4 +1,14 @@
-<template><section class="ops-panel"><h2>本人身份恢复码</h2><template v-if="!identityPolicyAvailable"><p class="ops-muted">{{ identityPolicyNotice }}</p><el-button v-if="identityPolicyError" type="text" :loading="identityPolicyLoading" @click="loadIdentityPolicy">重试</el-button></template><template v-else><p class="ops-muted">恢复码用于丢失验证器时申请身份恢复。重新生成会使旧恢复码失效，请私下妥善保存。</p><el-button size="small" @click="open">生成恢复码</el-button><el-dialog title="生成本人恢复码" :visible.sync="visible" width="min(520px,94vw)" :close-on-click-modal="false" @closed="clear"><template v-if="code"><el-alert title="仅本次显示。请保存到自己的密码管理器，不要交给其他员工。" type="warning" :closable="false" /><pre class="recovery-code">{{ code }}</pre></template><el-form v-else label-width="100px"><el-form-item label="当前密码"><el-input v-model="password" type="password" autocomplete="current-password" /></el-form-item><el-form-item label="动态验证码"><el-input v-model="otpCode" maxlength="6" autocomplete="one-time-code" placeholder="刚登录时请等验证器下一次刷新" /></el-form-item><el-form-item label="图形验证码"><div class="ops-captcha"><el-input v-model="captchaValue" maxlength="8" /><button type="button" @click="captcha"><img v-if="captchaUrl" :src="captchaUrl" alt="刷新验证码" /></button></div></el-form-item></el-form><el-alert v-if="error" :title="error" type="error" :closable="false" /><span slot="footer"><el-button @click="visible=false">关闭</el-button><el-button v-if="!code" type="primary" :loading="busy" @click="submit">生成并替换恢复码</el-button></span></el-dialog></template></section></template>
+<template>
+  <div v-if="identityPolicyAvailable" class="ops-recovery-access">
+    <el-button type="text" size="small" icon="el-icon-lock" @click="open">账户恢复码</el-button>
+    <el-dialog title="生成本人恢复码" :visible.sync="visible" width="min(520px,94vw)" :close-on-click-modal="false" @closed="clear">
+      <p class="ops-muted">恢复码用于申请身份恢复，重新生成后旧码失效。</p>
+      <template v-if="code"><el-alert title="仅本次显示，请保存到自己的密码管理器。" type="warning" :closable="false" /><pre class="recovery-code">{{ code }}</pre></template>
+      <el-form v-else label-width="100px"><el-form-item label="当前密码"><el-input v-model="password" type="password" autocomplete="current-password" /></el-form-item><el-form-item label="动态验证码"><el-input v-model="otpCode" maxlength="6" autocomplete="one-time-code" placeholder="刚登录时请等验证器下一次刷新" /></el-form-item><el-form-item label="图形验证码"><div class="ops-captcha"><el-input v-model="captchaValue" maxlength="8" /><button type="button" @click="captcha"><img v-if="captchaUrl" :src="captchaUrl" alt="刷新验证码" /></button></div></el-form-item></el-form>
+      <el-alert v-if="error" :title="error" type="error" :closable="false" /><span slot="footer"><el-button @click="visible=false">关闭</el-button><el-button v-if="!code" type="primary" :loading="busy" @click="submit">生成并替换恢复码</el-button></span>
+    </el-dialog>
+  </div>
+</template>
 <script>
 import Api from '@/apis/api';
 import { platformRequest } from '@/apis/platform';
