@@ -329,6 +329,7 @@ class OpsSecurityTest {
     private DataSourceTransactionManager transactions(){return new DataSourceTransactionManager(jdbc.getDataSource());}
     @Test void templatesRejectPrivateSourceAndPublishedOverwriteAndIgnorePrivateFields() {
         var dao=mock(xiaozhi.modules.agent.dao.AgentTemplateDao.class);
+        when(dao.update(isNull(),any(com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper.class))).thenReturn(1);
         var service=new OpsTemplateService(dao,approvals(),identities,new ObjectMapper());
         principal=ops("writer","OFFICIAL_CONTENT");
         var privateTemplate=new xiaozhi.modules.agent.entity.AgentTemplateEntity();privateTemplate.setId("private");privateTemplate.setWorkspaceId("workspace");when(dao.selectById("private")).thenReturn(privateTemplate);

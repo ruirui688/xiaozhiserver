@@ -1579,3 +1579,10 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/202610121710.sql
+  - changeSet:
+      id: model-billing-ops-actor-20261012
+      author: Codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/model-billing-ops-actor.sql

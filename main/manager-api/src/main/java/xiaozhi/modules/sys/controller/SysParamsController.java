@@ -71,9 +71,7 @@ public class SysParamsController {
     })
     @RequiresPermissions("system.read")
     public Result<PageData<SysParamsDTO>> page(@Parameter(hidden = true) @RequestParam Map<String, Object> params) {
-        PageData<SysParamsDTO> page = sysParamsService.page(params);
-
-        page.setList(page.getList().stream().filter(item -> xiaozhi.modules.security.ops.OpsSystemPolicy.allowed(item.getParamCode())).toList());
+        PageData<SysParamsDTO> page = sysParamsService.pageForOperations(params);
         return new Result<PageData<SysParamsDTO>>().ok(page);
     }
 

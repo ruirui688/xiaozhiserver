@@ -76,17 +76,17 @@
                                         :label="`${item}${$t('paramManagement.itemsPerPage')}`" :value="item">
                                     </el-option>
                                 </el-select>
-                                <button class="pagination-btn" :disabled="currentPage === 1" @click="goFirst">
+                                <button class="pagination-btn" :disabled="loading || currentPage <= 1" @click="goFirst">
                                     {{ $t('paramManagement.firstPage') }}
                                 </button>
-                                <button class="pagination-btn" :disabled="currentPage === 1" @click="goPrev">
+                                <button class="pagination-btn" :disabled="loading || currentPage <= 1" @click="goPrev">
                                     {{ $t('paramManagement.prevPage') }}
                                 </button>
                                 <button v-for="page in visiblePages" :key="page" class="pagination-btn"
-                                    :class="{ active: page === currentPage }" @click="goToPage(page)">
+                                    :class="{ active: page === currentPage }" :disabled="loading || page === currentPage" @click="goToPage(page)">
                                     {{ page }}
                                 </button>
-                                <button class="pagination-btn" :disabled="currentPage === pageCount" @click="goNext">
+                                <button class="pagination-btn" :disabled="loading || currentPage >= pageCount" @click="goNext">
                                     {{ $t('paramManagement.nextPage') }}
                                 </button>
                                 <span class="total-text">{{ $t('paramManagement.totalRecords', { total }) }}</span>
@@ -407,28 +407,18 @@ export default {
             });
         },
         goToPage(page) {
-            if (page !== this.currentPage) {
-                this.currentPage = page;
-                this.fetchParams();
-            }
+            if (this.loading || !Number.isInteger(page) || page < 1 || page > this.pageCount || page === this.currentPage) return;
+            this.currentPage = page;
+            this.fetchParams();
         },
         goFirst() {
-            if (this.currentPage !== 1) {
-                this.currentPage = 1;
-                this.fetchParams();
-            }
+            this.goToPage(1);
         },
         goPrev() {
-            if (this.currentPage > 1) {
-                this.currentPage--;
-                this.fetchParams();
-            }
+            this.goToPage(this.currentPage - 1);
         },
         goNext() {
-            if (this.currentPage < this.pageCount) {
-                this.currentPage++;
-                this.fetchParams();
-            }
+            this.goToPage(this.currentPage + 1);
         },
         isSensitiveParam(paramCode) {
             return this.sensitive_keys.some(key => paramCode.toLowerCase().includes(key));

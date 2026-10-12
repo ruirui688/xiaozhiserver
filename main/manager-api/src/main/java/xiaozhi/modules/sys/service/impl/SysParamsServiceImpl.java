@@ -30,6 +30,7 @@ import xiaozhi.modules.sys.dto.SysParamsDTO;
 import xiaozhi.modules.sys.entity.SysParamsEntity;
 import xiaozhi.modules.sys.redis.SysParamsRedis;
 import xiaozhi.modules.sys.service.SysParamsService;
+import xiaozhi.modules.security.ops.OpsSystemPolicy;
 
 /**
  * 参数管理
@@ -46,6 +47,14 @@ public class SysParamsServiceImpl extends BaseServiceImpl<SysParamsDao, SysParam
                 getPage(params, null, false),
                 getWrapper(params));
 
+        return getPageData(page, SysParamsDTO.class);
+    }
+
+    @Override
+    public PageData<SysParamsDTO> pageForOperations(Map<String, Object> params) {
+        QueryWrapper<SysParamsEntity> wrapper = getWrapper(params);
+        wrapper.in("param_code", OpsSystemPolicy.allowedCodes());
+        IPage<SysParamsEntity> page = baseDao.selectPage(getPage(params, "id", true), wrapper);
         return getPageData(page, SysParamsDTO.class);
     }
 

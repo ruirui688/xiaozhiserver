@@ -38,6 +38,8 @@ class BillingLedgerTest {
         for(String sql:schema.split(";")) if(!sql.isBlank())jdbc.execute(sql);
         String openExpenseEnd=Files.readString(Path.of("src/main/resources/db/changelog/model-billing-open-expense-end.sql"));
         for(String sql:openExpenseEnd.split(";")) if(!sql.isBlank())jdbc.execute(sql);
+        String opsActors=Files.readString(Path.of("src/main/resources/db/changelog/model-billing-ops-actor.sql"));
+        for(String sql:opsActors.split(";")) if(!sql.isBlank())jdbc.execute(sql);
         jdbc.execute("CREATE TABLE sys_workspace(id VARCHAR(64),status INT)");
         jdbc.update("INSERT INTO sys_workspace VALUES('workspace-a',1),('workspace-b',1)");
         jdbc.execute("CREATE TABLE ops_audit_event(id VARCHAR(64),actor_id VARCHAR(64),action VARCHAR(80),target_id VARCHAR(100),outcome VARCHAR(32))");
@@ -58,8 +60,8 @@ class BillingLedgerTest {
         permissions=mock(WorkspacePermissionService.class);when(permissions.currentWorkspaceId()).thenReturn("workspace-a");
         queries=new BillingQueryService(jdbc,permissions,mock(VolcengineBillingClient.class),outbox,support);
         bindings=new BillingBindingService(jdbc,queries);bills=new BillingBillService(jdbc,support,bindings);
-        UserDetail user=new UserDetail();user.setId(1L);user.setId(null);user.setAudience("OPS");user.setEmployeeId("finance-test");user.setGrants(java.util.List.of(new xiaozhi.modules.security.ops.OpsGrant("SUPPLIER_FINANCE","PLATFORM","platform-services",xiaozhi.modules.security.ops.OpsPermissionCatalog.TEMPLATES.get("SUPPLIER_FINANCE").permissions())));
-        security=mockStatic(SecurityUser.class);security.when(SecurityUser::getUser).thenReturn(user);security.when(SecurityUser::getUserId).thenReturn(1L);
+        UserDetail user=new UserDetail();user.setId(null);user.setAudience("OPS");user.setEmployeeId("finance-test");user.setGrants(java.util.List.of(new xiaozhi.modules.security.ops.OpsGrant("SUPPLIER_FINANCE","PLATFORM","platform-services",xiaozhi.modules.security.ops.OpsPermissionCatalog.TEMPLATES.get("SUPPLIER_FINANCE").permissions())));
+        security=mockStatic(SecurityUser.class);security.when(SecurityUser::getUser).thenReturn(user);
     }
     @AfterEach void close(){security.close();}
 
@@ -113,6 +115,8 @@ class BillingLedgerTest {
     @Test void effectiveBindingRejectsCrossWorkspaceAndOverlapAndCanEndAfterConsumedPeriod() {
         var binding=binding();binding.setAgentId("agent-b");assertThrows(RenException.class,()->bindings.save(binding));
         binding.setAgentId("agent-a");var saved=tx.execute(status->bindings.save(binding));
+        var actor=jdbc.queryForMap("SELECT created_by,created_by_employee_id FROM ai_billing_binding WHERE id=?",saved.get("id"));
+        assertNull(actor.get("created_by"));assertEquals("finance-test",actor.get("created_by_employee_id"));
         assertThrows(RenException.class,()->tx.execute(status->bindings.save(binding())));
         var row=bill("BILL","bill-bound",null,"10.20");bills.save(List.of(row));
         String id=saved.get("id").toString();binding.setId(id);binding.setValidTo(Instant.parse("2026-10-02T00:00:00Z"));

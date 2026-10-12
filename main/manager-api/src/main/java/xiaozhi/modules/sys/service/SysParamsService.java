@@ -15,6 +15,8 @@ public interface SysParamsService extends BaseService<SysParamsEntity> {
 
     PageData<SysParamsDTO> page(Map<String, Object> params);
 
+    PageData<SysParamsDTO> pageForOperations(Map<String, Object> params);
+
     List<SysParamsDTO> list(Map<String, Object> params);
 
     SysParamsDTO get(Long id);

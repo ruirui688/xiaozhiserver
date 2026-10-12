@@ -254,14 +254,14 @@
 
                 <button
                   class="pagination-btn"
-                  :disabled="currentPage === 1"
+                  :disabled="loading || currentPage <= 1"
                   @click="goFirst"
                 >
                   {{ $t("modelConfig.firstPage") }}
                 </button>
                 <button
                   class="pagination-btn"
-                  :disabled="currentPage === 1"
+                  :disabled="loading || currentPage <= 1"
                   @click="goPrev"
                 >
                   {{ $t("modelConfig.prevPage") }}
@@ -272,6 +272,7 @@
                   :key="page"
                   class="pagination-btn"
                   :class="{ active: page === currentPage }"
+                  :disabled="loading || page === currentPage"
                   @click="goToPage(page)"
                 >
                   {{ page }}
@@ -279,7 +280,7 @@
 
                 <button
                   class="pagination-btn"
-                  :disabled="currentPage === pageCount"
+                  :disabled="loading || currentPage >= pageCount"
                   @click="goNext"
                 >
                   {{ $t("modelConfig.nextPage") }}
@@ -1138,22 +1139,16 @@ export default {
 
     // 分页器
     goFirst() {
-      this.currentPage = 1;
-      this.loadData();
+      this.goToPage(1);
     },
     goPrev() {
-      if (this.currentPage > 1) {
-        this.currentPage--;
-        this.loadData();
-      }
+      this.goToPage(this.currentPage - 1);
     },
     goNext() {
-      if (this.currentPage < this.pageCount) {
-        this.currentPage++;
-        this.loadData();
-      }
+      this.goToPage(this.currentPage + 1);
     },
     goToPage(page) {
+      if (this.loading || !Number.isInteger(page) || page < 1 || page > this.pageCount || page === this.currentPage) return;
       this.currentPage = page;
       this.loadData();
     },

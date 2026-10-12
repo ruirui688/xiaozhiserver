@@ -1,12 +1,22 @@
 <template>
   <section class="benefits-panel">
-    <div class="billing-panel-heading"><div><h2>余额与资源包</h2><p>当前范围的最新官方快照，独立于账期和调用日期。</p></div><div class="benefit-actions"><el-button size="small" icon="el-icon-refresh" :loading="loading" :disabled="syncing" @click="load">刷新</el-button><el-button v-if="canManage && canSync" size="small" :loading="syncing" :disabled="loading || syncing" @click="sync">同步额度</el-button></div></div>
+    <div class="billing-panel-heading"><div><h2>余额与资源包</h2><p>展示最近成功查询的官方快照；能否更新以来源状态为准。</p></div><div class="benefit-actions"><el-button size="small" icon="el-icon-refresh" :loading="loading" :disabled="syncing" @click="load">刷新</el-button><el-button v-if="canManage && canSync" size="small" :loading="syncing" :disabled="loading || syncing" @click="sync">同步额度</el-button></div></div>
     <div v-if="error || syncError" class="billing-inline-error">{{ error || syncError }}</div>
     <div v-if="loading" class="billing-skeleton"><i /><i /></div>
     <template v-if="data && !error">
       <div class="benefit-sources"><div v-for="(source,index) in data.sources || []" :key="index"><span class="source-dot" :class="source.status === 'READY' ? 'ready' : 'attention'" /><strong>{{ label(source.provider) }}</strong><span>{{ label(source.status) }}</span><small>成功快照 {{ time(source.lastSyncedAt) }}</small><p v-if="source.message">{{ source.message }}</p><p v-if="source.status === 'SYNC_FAILED'" class="source-failed">最近同步失败，保留此前快照。</p></div></div>
-      <div v-if="showBalances" class="billing-metrics balance-section"><article v-for="(balance,index) in data.balances || []" :key="index" class="billing-metric"><span class="billing-kicker">{{ label(balance.provider) }} · 账户资金</span><div class="amount">{{ money(balance.totalBalance,balance.currency) }}</div><p>充值余额 {{ money(balance.toppedUpBalance,balance.currency) }} · 赠送余额 {{ money(balance.grantedBalance,balance.currency) }}</p><p>服务状态：{{ balance.isAvailable === true ? '可用' : balance.isAvailable === false ? '不可用' : '供应商未提供' }}</p></article></div>
-      <p class="benefit-separation">账号余额是可用资金，资源包是服务额度，均不是已发生消费。不同单位及来源不相加。</p>
+      <div v-if="showBalances" class="billing-metrics balance-section">
+        <article v-for="(item,index) in balanceSnapshots" :key="index" class="billing-metric">
+          <span class="billing-kicker">{{ label(item.balance.provider) }} · 账户资金</span>
+          <el-tag size="mini" :type="item.state.healthy ? 'info' : 'warning'">{{ item.state.badge }}</el-tag>
+          <div class="amount">{{ money(item.balance.totalBalance,item.balance.currency) }}</div>
+          <p>充值余额 {{ money(item.balance.toppedUpBalance,item.balance.currency) }} · 赠送余额 {{ money(item.balance.grantedBalance,item.balance.currency) }}</p>
+          <p>{{ item.state.healthy ? '快照时服务状态' : '当前服务状态' }}：{{ item.state.availability }}</p>
+          <p class="balance-snapshot-time">上次快照时间：{{ item.state.snapshotAt ? time(item.state.snapshotAt) : '未提供' }}</p>
+          <p v-if="item.state.note" class="source-failed">{{ item.state.note }}</p>
+        </article>
+      </div>
+      <p class="benefit-separation">账号余额是快照时的资金，资源包是服务额度，均不是已发生消费。不同单位及来源不相加。</p>
       <details v-if="(data.notices || []).length" class="benefit-explanation"><summary>查看数据覆盖与统计说明</summary><p v-for="(notice,index) in data.notices || []" :key="index" class="benefit-source-note">{{ notice }}</p></details>
       <section class="asset-section"><div class="billing-panel-heading"><div><h2>可抵扣额度 <span class="asset-count">{{ quotas.length }}</span></h2><p>{{ accountView ? '按购买实例展示，多个来源保留各自的官方数据。' : '只展示有证据归属本工作空间的资源。共享账号额度不会自动分配到本空间。' }}</p></div></div><div class="billing-toolbar"><el-select v-model="assetProduct" size="small" clearable placeholder="全部产品" @change="updateFilters"><el-option v-for="product in products" :key="product" :label="product" :value="product" /></el-select><el-select v-model="assetStatus" size="small" @change="updateFilters"><el-option label="当前资源（不含过期 / 用尽）" value="current" /><el-option label="全部状态" value="all" /><el-option label="已耗尽" value="exhausted" /><el-option label="已到期" value="expired" /></el-select></div><div v-if="!quotas.length" class="billing-empty"><i class="el-icon-tickets" /><h2>当前范围暂无可展示的额度包</h2><p>可切换产品或查看全部状态。没有资源记录不代表零余额，请结合上方同步状态与查询覆盖。</p></div><div v-else class="asset-grid"><BillingAssetCard v-for="asset in quotas.slice(0, quotaLimit)" :key="asset.assetId" :asset="asset" /></div><el-button v-if="quotas.length > quotaLimit" class="show-more-assets" @click="quotaLimit += 8">继续查看（还有 {{ quotas.length - quotaLimit }} 项）</el-button></section>
       <details v-if="entitlements.length" class="asset-disclosure" @toggle="entitlementsOpen = $event.target.open"><summary><i class="el-icon-mic" /> 音色与功能权益 <span>{{ entitlements.length }} 项</span><i class="el-icon-arrow-down" /></summary><p>使用许可与功能权益单独展示，不计入可抵扣额度包数量。</p><div v-if="entitlementsOpen" class="asset-grid"><BillingAssetCard v-for="asset in entitlements.slice(0, entitlementLimit)" :key="asset.assetId" :asset="asset" /></div><el-button v-if="entitlementsOpen && entitlements.length > entitlementLimit" class="show-more-assets" @click="entitlementLimit += 12">继续查看（还有 {{ entitlements.length - entitlementLimit }} 项）</el-button></details>
@@ -19,6 +29,7 @@
 import Api from '@/apis/api';
 import BillingAssetCard from './BillingAssetCard.vue';
 import { assetProduct, filterAssets } from '@/utils/billingAssets';
+import { balanceSnapshotState } from '@/utils/billingBalances';
 import { amountText, billingLabel, billingTime, decimalText } from '@/utils/billing';
 
 export default {
@@ -27,6 +38,7 @@ export default {
   data() { return { quotaLimit: 8, entitlementLimit: 12, entitlementsOpen: false, assetProduct: '', assetStatus: 'current', accountView: false, data: null, loading: false, syncing: false, error: '', syncError: '', generation: 0, syncGeneration: 0 }; },
   computed: {
     assets() { return this.data && this.data.assets || []; },
+    balanceSnapshots() { return (this.data?.balances || []).map(balance => ({ balance, state: balanceSnapshotState(balance, this.data?.sources || [], Boolean(this.syncError)) })); },
     products() { return [...new Set(this.assets.map(assetProduct))]; },
     filteredAssets() { return filterAssets(this.assets, this.assetProduct, this.assetStatus); },
     quotas() { return this.filteredAssets.filter(asset => asset.category === 'QUOTA'); },
@@ -59,6 +71,7 @@ export default {
     yesNo(value) { return value === true || value === 'true' ? '是' : value === false || value === 'false' ? '否' : '未提供'; },
     shareability(value) { return value === true ? '可共享' : value === false ? '不可共享' : '未知'; },
     sourceType(status) { return status === 'READY' ? 'success' : status === 'SYNC_FAILED' ? 'danger' : status === 'NOT_CONFIGURED' || status === 'NEVER_SYNCED' ? 'warning' : 'info'; },
+    accountIdentity() { return JSON.stringify([this.account?.provider || null, this.account?.accountRef || null]); },
     invalidate() { this.generation++; this.syncGeneration++; this.data = null; this.loading = false; this.syncing = false; this.error = ''; this.syncError = ''; },
     current(generation, workspace, accountView) { return generation === this.generation && workspace === this.workspaceId && (this.standaloneAccount && accountView || workspace === localStorage.getItem('currentWorkspaceId')) && accountView === this.accountView; },
     async load() {
@@ -79,13 +92,16 @@ export default {
     },
     async sync() {
       if (!this.canManage || this.canSync === false || this.syncing || this.loading || (!this.standaloneAccount && this.workspaceId !== localStorage.getItem('currentWorkspaceId'))) return;
-      const generation = ++this.syncGeneration; const workspace = this.workspaceId;
+      const generation = ++this.syncGeneration; const workspace = this.workspaceId; const accountView = this.accountView; const accountIdentity = this.accountIdentity();
+      const sameScope = () => generation === this.syncGeneration && this.canManage && workspace === this.workspaceId
+        && accountView === this.accountView && accountIdentity === this.accountIdentity()
+        && (this.standaloneAccount && accountView || workspace === localStorage.getItem('currentWorkspaceId'));
       this.syncing = true; this.syncError = '';
       try {
         await Api.billing.syncBenefits();
-        if (generation === this.syncGeneration && this.canManage && workspace === this.workspaceId && workspace === localStorage.getItem('currentWorkspaceId')) await this.load();
+        if (sameScope()) await this.load();
       } catch (error) {
-        if (generation === this.syncGeneration && this.canManage && workspace === this.workspaceId && workspace === localStorage.getItem('currentWorkspaceId')) this.syncError = `额度同步未完成：${error.message}。当前显示的数据可能仍为此前快照。`;
+        if (sameScope()) this.syncError = `额度同步未完成：${error.message}。当前显示的数据可能仍为此前快照。`;
       } finally { if (generation === this.syncGeneration) this.syncing = false; }
     }
   }

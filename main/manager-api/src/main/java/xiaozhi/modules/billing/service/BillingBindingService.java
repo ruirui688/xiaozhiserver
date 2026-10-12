@@ -8,7 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import xiaozhi.common.exception.RenException;
 import xiaozhi.modules.billing.dto.BillingBindingRequest;
-import xiaozhi.modules.security.user.SecurityUser;
+import xiaozhi.modules.security.ops.OpsAccess;
 
 @Service @RequiredArgsConstructor
 public class BillingBindingService {
@@ -26,6 +26,8 @@ public class BillingBindingService {
     @Transactional
     public Map<String, Object> save(BillingBindingRequest request) {
         xiaozhi.modules.security.ops.OpsAccess.require("supplier.bill.import","PLATFORM","platform-services");
+        String actor=OpsAccess.employee().getEmployeeId();
+        if(actor.isBlank())throw new RenException("操作员工身份无效");
         String workspace = request.getWorkspaceId();
         if(jdbc.queryForObject("SELECT COUNT(*) FROM sys_workspace WHERE id=? AND status=1",Integer.class,workspace)!=1) throw new RenException("目标工作空间不存在或已停用");
         if (request.getValidTo()!=null && !request.getValidFrom().isBefore(request.getValidTo())) throw new RenException("绑定有效时间无效");
@@ -51,7 +53,7 @@ public class BillingBindingService {
         row.put("scope_type", request.getScopeType()); row.put("scope_value", scopeValue); row.put("workspace_id", workspace);
         row.put("agent_id", empty(request.getAgentId())); row.put("device_id", empty(request.getDeviceId()));
         row.put("valid_from", BillingSupport.time(request.getValidFrom())); row.put("valid_to", request.getValidTo()==null ? null : BillingSupport.time(request.getValidTo()));
-        row.put("note", request.getNote()); row.put("created_by", SecurityUser.getUserId()); row.put("created_at", BillingSupport.time(Instant.now()));
+        row.put("note", request.getNote()); row.put("created_by_employee_id", actor); row.put("created_at", BillingSupport.time(Instant.now()));
         jdbc.update("DELETE FROM ai_billing_binding WHERE id=?", id);
         BillingUsageService.insert(jdbc, "ai_billing_binding", row);
         audit("bill.binding.save",id);
