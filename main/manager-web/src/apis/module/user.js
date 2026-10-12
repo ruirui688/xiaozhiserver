@@ -138,6 +138,7 @@ export default {
             .url(`${getServiceUrl()}/user/plugin-configs`)
             .method('GET')
             .success((res) => callback(res))
+            .fail((err) => callback(err))
             .networkFail((err) => callback(err))
             .send()
     },
@@ -146,6 +147,7 @@ export default {
             .url(`${getServiceUrl()}/user/plugin-configs/${encodeURIComponent(providerCode)}`)
             .method('GET')
             .success((res) => callback(res))
+            .fail((err) => callback(err))
             .networkFail((err) => callback(err))
             .send()
     },
@@ -155,6 +157,7 @@ export default {
             .method('PUT')
             .data({ config })
             .success((res) => callback(res))
+            .fail((err) => callback(err))
             .networkFail((err) => callback(err))
             .send()
     },
@@ -164,6 +167,7 @@ export default {
             .method('POST')
             .data({ config })
             .success((res) => callback(res))
+            .fail((err) => callback(err))
             .networkFail((err) => callback(err))
             .send()
     },
@@ -172,6 +176,7 @@ export default {
             .url(`${getServiceUrl()}/user/plugin-configs/${encodeURIComponent(providerCode)}`)
             .method('DELETE')
             .success((res) => callback(res))
+            .fail((err) => callback(err))
             .networkFail((err) => callback(err))
             .send()
     },

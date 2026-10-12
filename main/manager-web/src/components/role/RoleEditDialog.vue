@@ -15,6 +15,9 @@
       />
     </div>
 
+    <el-alert v-if="pluginSetupMessage" :title="pluginSetupMessage" :type="pluginSetupMessageType"
+      :closable="false" show-icon style="margin-bottom: 16px" />
+
     <el-form ref="form" :model="form" label-width="72px">
       <div class="form-content">
         <div class="form-grid">
@@ -494,6 +497,7 @@
       :functions="currentFunctions"
       :all-functions="allFunctions"
       :agent-id="$route.query.agentId || ''"
+      :focus-plugin-code="focusedPluginCode"
       @update-functions="handleUpdateFunctions"
       @dialog-closed="handleDialogClosed"
     />
@@ -535,6 +539,7 @@ import RoleBasicSettingsPanel from "@/components/role/RoleBasicSettingsPanel.vue
 import RoleTemplateSwitcher from "@/components/role/RoleTemplateSwitcher.vue";
 import RoleConfigTaskTabs from "@/components/role/RoleConfigTaskTabs.vue";
 import RealtimeModelNotice from "@/components/model/RealtimeModelNotice.vue";
+import rolePluginNavigation from "@/mixins/rolePluginNavigation";
 import i18n from "@/i18n";
 import { isSelectablePlugin, newPluginParams, pluginFields, sanitizePluginParams } from "@/utils/pluginCatalog";
 import {
@@ -554,6 +559,7 @@ import {
 
 export default {
   name: "RoleEditForm",
+  mixins: [rolePluginNavigation],
   components: {
     VoiceGallery,
     FunctionDialog,
@@ -665,6 +671,7 @@ export default {
     },
     async hydrateAgentConfig(agentData) {
       const requestSeq = ++this.capabilityLoadSeq;
+      const agentId = this.effectiveAgentId;
       const capabilityRevision = this.capabilityRevision;
       const mergedForm = mergeRoleDraft(agentData, this.form, this.dirtyFormPaths);
       this.replaceFormWithoutTracking(mergedForm);
@@ -680,7 +687,7 @@ export default {
         this.fetchAllFunctions(),
         this.fetchAllKnowledgeBases(),
       ]);
-      if (requestSeq !== this.capabilityLoadSeq) return false;
+      if (requestSeq !== this.capabilityLoadSeq || agentId !== this.effectiveAgentId) return false;
       if (!metadataReady.every(Boolean)) {
         this.capabilityMappingsReady = false;
         return false;
@@ -689,6 +696,7 @@ export default {
         this.applyFunctionMappings(agentData.functions || []);
       }
       this.capabilityMappingsReady = true;
+      this.completePluginSetupHydration(agentId);
       return true;
     },
     replaceFormWithoutTracking(form) {

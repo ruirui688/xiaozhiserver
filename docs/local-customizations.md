@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: architecture
-last_verified: 2026-10-10
+last_verified: 2026-10-12
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules
   - main/manager-web/src
@@ -1041,3 +1041,14 @@ Intent 不再提供只有日期时间的 result_for_context 独立回答分支�
 缓存跟随历史/身份/能力/合同版本，异步等待期间旧角色或旧身份结果不得执行。
 详见[提示词注入工程](./architecture/prompt-injection-engineering.md)与
 [2026-10-10 验收报告](./reports/plugin-injection-acceptance-2026-10-10.md)。
+
+## 53. 插件按配置任务展示与智能体设置导航
+
+定制模块：manager-web 插件目录、用途说明、智能体选择和角色设置导航。
+默认仅展示可添加插件，互动玩法与飞书/知识库等专用集成独立分区；系统控制和停用记录进入折叠的高级目录。
+后端完整目录及工具授权边界保持原样，不根据页面展示删除目录或恢复已停用工具。
+`pluginPresentation.js` 的用途、准备步骤和示例仅供用户阅读，不能作为第二份模型规则注入。
+共享凭据保存、连接测试和智能体启用是不同状态，读取失败不能伪装为未配置。
+配置入口先选择有权限的智能体，再按白名单定位功能、知识库、飞书、语音或记忆设置；导航只能查看，不能自动勾选或保存。
+既有配置及目录加载完成后才能执行跳转意图，忽略旧异步响应。未知专用集成没有已核实入口时只给说明。
+空互动目录保持空状态，不自动补种玩法。详见[功能插件架构](./architecture/function-plugin-architecture.md)。

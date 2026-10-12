@@ -1,5 +1,5 @@
 <template>
-  <el-drawer :visible.sync="dialogVisible" direction="rtl" size="80%" :wrapperClosable="false" :withHeader="false">
+  <el-drawer class="function-config-drawer" :visible.sync="dialogVisible" direction="rtl" size="80%" :wrapperClosable="false" :withHeader="false">
     <!-- 自定义标题区域 -->
     <div class="custom-header">
       <div class="header-left">
@@ -10,6 +10,9 @@
       </div>
       <button class="custom-close-btn" @click="closeDialog">×</button>
     </div>
+
+    <el-alert v-if="focusNotice" :title="focusNotice" :type="focusNoticeType" :closable="false"
+      show-icon class="focus-notice" />
 
     <div class="function-manager">
       <!-- 左侧：未选功能 -->
@@ -75,12 +78,11 @@
             :plugin="currentFunction" @change="handleRuleParams" />
           <div v-if="isSharedConfigPlugin(currentFunction)" class="shared-config-row">
             <div>
-              <div class="shared-config-title">{{ $t('functionDialog.userSharedConfig') }}</div>
-              <div class="shared-config-status">
-                {{ sharedConfigConfigured(currentFunction.providerCode)
-                  ? $t('functionDialog.sharedConfigReady')
-                  : $t('functionDialog.sharedConfigMissing') }}
-              </div>
+              <div class="shared-config-title">我的服务配置</div>
+              <div class="shared-config-status">{{ sharedConfigStatusText(currentFunction.providerCode) }}</div>
+              <div class="shared-config-status">服务配置按账号保存；其他账号的智能体由所属账号配置。</div>
+              <el-button v-if="sharedConfigState(currentFunction.providerCode) === 'error'"
+                type="text" size="small" @click="loadSharedConfigStatus">重新加载</el-button>
             </div>
             <el-button
               size="small"
@@ -298,7 +300,7 @@
 
     <div class="drawer-footer">
       <el-button @click="closeDialog">{{ $t('functionDialog.cancel') }}</el-button>
-      <el-button type="primary" @click="saveSelection">{{ $t('functionDialog.saveConfig') }}</el-button>
+      <el-button type="primary" :disabled="!canSaveSelection" @click="saveSelection">{{ $t('functionDialog.saveConfig') }}</el-button>
     </div>
   </el-drawer>
 </template>
@@ -325,6 +327,7 @@ export default {
 
   props: {
     value: Boolean,
+    focusPluginCode: { type: String, default: '' },
     functions: {
       type: Array,
       default: () => []
@@ -344,6 +347,11 @@ export default {
       dialogVisible: this.value,
       selectedNames: [],
       currentFunction: null,
+      focusNotice: '',
+      focusNoticeType: 'info',
+      openSequence: 0,
+      selectionReady: false,
+      selectionAgentId: '',
       modifiedFunctions: {},
       tempFunctions: {},
       // 添加一个标志位来跟踪是否已经保存
@@ -360,6 +368,9 @@ export default {
       sharedConfigProviderCode: '',
       sharedConfigPluginName: '',
       sharedConfigStatuses: {},
+      sharedConfigLoading: true,
+      sharedConfigError: false,
+      sharedConfigLoadSequence: 0,
       mcpToolEditorVisible: false,
       editingMcpToolIndex: -1,
       editingMcpTool: {
@@ -385,6 +396,10 @@ export default {
     }
   },
   computed: {
+    canSaveSelection() {
+      return this.dialogVisible && this.selectionReady && !this.loading
+        && this.selectionAgentId === this.agentId;
+    },
     selectedList() {
       const list = this.allFunctions
         .filter(f => isSelectablePlugin(f) && this.selectedNames.includes(f.name))
@@ -405,6 +420,9 @@ export default {
     }
   },
   watch: {
+    focusPluginCode() {
+      if (this.canSaveSelection) this.focusRequestedPlugin();
+    },
     currentFunction(newFn) {
       if (!newFn) return;
       // 对每个字段，如果是 array 或 json，就在 textCache 里生成初始字符串
@@ -423,10 +441,28 @@ export default {
       });
     },
     async value(v) {
+      const sequence = ++this.openSequence;
+      this.sharedConfigLoadSequence += 1;
+      const agentId = this.agentId;
+      this.selectionReady = false;
+      this.selectionAgentId = '';
       this.dialogVisible = v;
+      this.loading = v;
       if (v) {
+        this.focusNotice = '';
         // 加载功能状态（需要在初始化选中态之前）
-        await this.loadFeatureStatus();
+        try {
+          await this.loadFeatureStatus();
+        } catch (_) {
+          if (sequence === this.openSequence && this.dialogVisible && agentId === this.agentId) {
+            this.loading = false;
+            this.focusNotice = '功能状态加载失败，请关闭后重试。';
+            this.focusNoticeType = 'error';
+          }
+          return;
+        }
+        if (sequence !== this.openSequence || !this.dialogVisible || agentId !== this.agentId) return;
+        this.loading = false;
         this.tempFunctions = {};
         this.modifiedFunctions = {};
         this.allFunctions.forEach(func => { func.params = newPluginParams(func); });
@@ -452,6 +488,9 @@ export default {
         });
         // 右侧默认指向第一个
         this.currentFunction = this.selectedList[0] || null;
+        this.focusRequestedPlugin();
+        this.selectionAgentId = agentId;
+        this.selectionReady = true;
 
         // 加载MCP数据
         this.loadMcpAddress();
@@ -461,10 +500,39 @@ export default {
       }
     },
     dialogVisible(newVal) {
+      if (!newVal) {
+        this.openSequence += 1;
+        this.sharedConfigLoadSequence += 1;
+        this.selectionReady = false;
+      }
       this.$emit('input', newVal);
     }
   },
+  beforeDestroy() {
+    this.openSequence += 1;
+    this.sharedConfigLoadSequence += 1;
+    this.selectionReady = false;
+  },
   methods: {
+    focusRequestedPlugin() {
+      if (!this.focusPluginCode) return;
+      const plugin = this.allFunctions.find(item => item.providerCode === this.focusPluginCode);
+      if (!plugin || !isSelectablePlugin(plugin)) {
+        this.currentFunction = null;
+        this.focusNotice = '该功能已删除、停用，或需要通过专用入口配置，请返回功能库查看。';
+        this.focusNoticeType = 'warning';
+        return;
+      }
+      if (plugin.providerCode === 'call_device' && !this.featureStatus.addressBook) {
+        this.currentFunction = null;
+        this.focusNotice = '设备通话目前不可选，请先由管理员开启通讯录功能并配置联系人设备。';
+        this.focusNoticeType = 'warning';
+        return;
+      }
+      this.handleFunctionClick(plugin);
+      this.focusNoticeType = 'info';
+      this.focusNotice = `已定位“${plugin.name}”。请按需勾选，保存功能选择后，再点击页面右上角“保存配置”。`;
+    },
     /**
      * 加载功能状态
      */
@@ -479,10 +547,19 @@ export default {
       };
     },
     loadSharedConfigStatus() {
-      Api.user.getPluginConfigs(({ data }) => {
-        if (!data || data.code !== 0) return;
+      const sequence = ++this.sharedConfigLoadSequence;
+      this.sharedConfigLoading = true;
+      this.sharedConfigError = false;
+      Api.user.getPluginConfigs(response => {
+        if (sequence !== this.sharedConfigLoadSequence || !this.dialogVisible) return;
+        const data = response && response.data;
+        this.sharedConfigLoading = false;
+        if (!data || data.code !== 0 || !Array.isArray(data.data)) {
+          this.sharedConfigError = true;
+          return;
+        }
         const statuses = {};
-        (data.data || []).forEach(item => {
+        data.data.filter(Boolean).forEach(item => {
           statuses[item.providerCode] = Boolean(item.configured && item.secretConfigured);
         });
         this.sharedConfigStatuses = statuses;
@@ -491,8 +568,19 @@ export default {
     isSharedConfigPlugin(func) {
       return Boolean(func && SHARED_FIELDS[func.providerCode]);
     },
-    sharedConfigConfigured(providerCode) {
-      return Boolean(this.sharedConfigStatuses[providerCode]);
+    sharedConfigState(providerCode) {
+      if (this.sharedConfigLoading) return 'loading';
+      if (this.sharedConfigError) return 'error';
+      return this.sharedConfigStatuses[providerCode] ? 'saved' : 'missing';
+    },
+    sharedConfigStatusText(providerCode) {
+      const state = this.sharedConfigState(providerCode);
+      if (state === 'loading') return '正在读取当前账号的服务配置…';
+      if (state === 'error') return '服务配置读取失败，暂时无法确认是否已保存，请重试。';
+      if (state === 'saved') return '当前账号已保存服务配置；连接是否可用请在配置弹窗中测试。';
+      return providerCode === 'get_weather'
+        ? '当前账号尚未保存天气服务配置。普通天气可尝试备用来源；天气预警需配置和风天气。'
+        : '当前账号尚未保存搜索服务配置，请先配置服务密钥。';
     },
     openSharedConfig(func) {
       this.sharedConfigProviderCode = func.providerCode;
@@ -715,10 +803,8 @@ export default {
       }
     },
     handleFunctionClick(func) {
-      if (this.selectedNames.includes(func.name)) {
-        const tempFunc = this.tempFunctions[func.name];
-        this.currentFunction = tempFunc ? tempFunc : func;
-      }
+      if (!isSelectablePlugin(func) || (func.providerCode === 'call_device' && !this.featureStatus.addressBook)) return;
+      this.currentFunction = this.tempFunctions[func.name] || this.modifiedFunctions[func.name] || func;
     },
     handleParamChange(func, key, value) {
       const previous = this.tempFunctions[func.name] || func;
@@ -756,6 +842,9 @@ export default {
     },
 
     closeDialog() {
+      this.openSequence += 1;
+      this.sharedConfigLoadSequence += 1;
+      this.selectionReady = false;
       this.tempFunctions = {};
       this.selectedNames = this.functions.map(f => f.name);
       this.currentFunction = null;
@@ -765,6 +854,8 @@ export default {
     },
 
     saveSelection() {
+      if (!this.canSaveSelection) return;
+      this.selectionReady = false;
       Object.keys(this.tempFunctions).forEach(name => {
         this.modifiedFunctions[name] = JSON.parse(JSON.stringify(this.tempFunctions[name]));
       });
@@ -810,6 +901,13 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+.function-config-drawer ::v-deep .el-drawer__body {
+  padding-bottom: 64px;
+  box-sizing: border-box;
+}
+
+.focus-notice { margin: 12px 0; }
+
 .function-manager {
   display: grid;
   grid-template-columns: max-content max-content 1fr;
@@ -1046,7 +1144,9 @@ export default {
 .drawer-footer {
   position: absolute;
   bottom: 0;
+  z-index: 2;
   width: 100%;
+  box-sizing: border-box;
   border-top: 1px solid #e8e8e8;
   padding: 10px 16px;
   text-align: center;

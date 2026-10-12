@@ -4,7 +4,7 @@ import RequestService from '../httpRequest';
 
 export default {
     // 获取智能体列表
-    getAgentList(callback) {
+    getAgentList(callback, failCallback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/list`)
             .method('GET')
@@ -12,7 +12,13 @@ export default {
                 RequestService.clearRequestTime();
                 callback(res);
             })
-            .networkFail(() => {
+            .fail(failCallback)
+            .networkFail((error) => {
+                if (failCallback) {
+                    RequestService.clearRequestTime();
+                    failCallback(error);
+                    return;
+                }
                 RequestService.reAjaxFun(() => {
                     this.getAgentList(callback);
                 });

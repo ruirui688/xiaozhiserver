@@ -399,13 +399,19 @@ export default {
    * @param {Object} params - 查询参数对象，例如 { name: 'test', modelType: 1 }
    * @param {Function} callback - 回调函数
    */
-  getModelProvidersPage(params, callback) {
+  getModelProvidersPage(params, callback, failCallback) {
     // 构建查询参数
     const queryParams = new URLSearchParams();
     if (params.name) queryParams.append('name', params.name);
     if (params.modelType !== undefined) queryParams.append('modelType', params.modelType);
     if (params.page !== undefined) queryParams.append('page', params.page);
     if (params.limit !== undefined) queryParams.append('limit', params.limit);
+
+    const fail = (error) => {
+      RequestService.clearRequestTime();
+      if (failCallback) failCallback(error);
+      else callback({ data: { code: -1, msg: '获取供应器列表失败，请重试' } });
+    };
 
     RequestService.sendRequest()
       .url(`${getServiceUrl()}/models/provider?${queryParams.toString()}`)
@@ -414,12 +420,8 @@ export default {
         RequestService.clearRequestTime();
         callback(res);
       })
-      .networkFail((err) => {
-        this.$message.error(err.msg || '获取供应器列表失败');
-        RequestService.reAjaxFun(() => {
-          this.getModelProviders(params, callback);
-        });
-      }).send();
+      .fail(fail)
+      .networkFail(fail).send();
   },
 
   /**

@@ -1,22 +1,26 @@
 <template>
   <el-dialog
-    :title="`${pluginName || '插件'}共享配置`"
+    :title="`${pluginName || '插件'}服务配置`"
     :visible.sync="dialogVisible"
     width="560px"
+    top="6vh"
+    class="plugin-service-dialog"
     append-to-body
     :close-on-click-modal="false"
     @open="loadConfig"
   >
+    <el-alert type="info" :closable="false" show-icon class="setup-guidance"
+      title="服务配置按账号保存。团队中其他账号创建的智能体，需由所属账号配置。保存后还需在智能体的功能管理中添加插件；测试连接只检查服务配置。" />
     <el-form ref="form" :model="form" :rules="rules" label-width="110px">
       <template v-if="providerCode === 'get_weather'">
-        <el-form-item label="API Host" prop="api_host">
+        <el-form-item label="和风服务地址" prop="api_host">
           <el-input
             v-model.trim="form.api_host"
             maxlength="255"
             placeholder="控制台分配的 xxx.qweatherapi.com"
           />
         </el-form-item>
-        <el-form-item label="API Key" prop="api_key">
+        <el-form-item label="服务密钥" prop="api_key">
           <el-input
             v-model="form.api_key"
             type="password"
@@ -37,7 +41,7 @@
             <el-option label="Tavily" value="tavily" />
           </el-select>
         </el-form-item>
-        <el-form-item label="API Key" prop="api_key">
+        <el-form-item label="服务密钥" prop="api_key">
           <el-input
             v-model="form.api_key"
             type="password"
@@ -144,7 +148,7 @@ export default {
             this.$message.error((data && data.msg) || "保存共享配置失败");
             return;
           }
-          this.$message.success("共享配置已保存，将应用到当前用户的智能体");
+          this.$message.success("服务配置已保存，请确认目标智能体已添加此插件");
           this.$emit("saved", this.providerCode);
           this.dialogVisible = false;
         });
@@ -187,3 +191,11 @@ export default {
   },
 };
 </script>
+
+<style scoped>
+.setup-guidance { margin-bottom: 20px; }
+.plugin-service-dialog ::v-deep .el-dialog { max-width: calc(100vw - 32px); max-height: 88vh; display: flex; flex-direction: column; }
+.plugin-service-dialog ::v-deep .el-dialog__body { min-height: 0; overflow-y: auto; }
+.plugin-service-dialog ::v-deep .el-dialog__header,
+.plugin-service-dialog ::v-deep .el-dialog__footer { flex-shrink: 0; }
+</style>

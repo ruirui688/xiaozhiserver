@@ -32,22 +32,33 @@ function vmFor(file, props = {}, api = {}) {
 }
 function nodes(vnode) { return vnode ? [vnode, ...(vnode.children || []).flatMap(nodes)] : []; }
 
-test('directory counts use declared types with retired records separate, never runtime availability', () => {
+async function openFunctionDrawer(vm) {
+  vm.loadFeatureStatus = async () => {};
+  for (const method of ['loadMcpAddress', 'loadMcpTools', 'loadNoCodeTools', 'loadSharedConfigStatus']) vm[method] = () => {};
+  const open = loadVueComponent('src/components/FunctionDialog.vue', mocks()).watch.value;
+  await open.call(vm, true);
+}
+
+test('catalog opens on addable plugins and separates activities, integrations, system and retired records', () => {
   const rows = [plugin('riddle', { catalogMetadata: { capabilityType: 'activity', injectionMode: 'on_demand_activity' } }),
     plugin('get_weather', { fieldsMeta: [] }),
-    plugin('set_session_voice', { fieldsMeta: [{ key: 'runtime_builtin', default: true }] }), plugin('manage_memory')]
+    plugin('set_session_voice', { fieldsMeta: [{ key: 'runtime_builtin', default: true }] }), plugin('manage_memory'),
+    plugin('direct_answer', { fieldsMeta: [], catalogMetadata: { activationMode: 'runtime', selectable: false } }),
+    plugin('feishu_assistant', { fieldsMeta: [{ key: 'catalog_only', default: true }] })]
     .map(row => ({ ...row, fields: row.fieldsMeta, fieldsMeta: undefined }));
   const vm = vmFor('src/views/FunctionPluginManagement.vue', {}, { model: {
     getModelProvidersPage(params, callback) {
       assert.equal(params.modelType, 'Plugin'); callback({ data: { code: 0, data: { list: rows } } });
     } } });
   vm.fetchPlugins();
-  assert.deepEqual(vm.pluginCounts, { all: 4, builtin: 1, interaction: 1, retired: 2 });
-  vm.setActiveType('interaction');
+  assert.deepEqual(vm.pluginCounts, { total: 6, plugins: 1, activities: 1, integrations: 1, system: 1, retired: 2 });
+  assert.equal(vm.activeType, 'plugins');
+  assert.deepEqual(vm.visiblePlugins.map(row => row.providerCode), ['get_weather']);
+  vm.setActiveType('activities');
   assert.deepEqual(vm.visiblePlugins.map(row => row.providerCode), ['riddle']);
   vm.setActiveType('retired');
   assert.deepEqual(vm.visiblePlugins.map(row => row.providerCode), ['set_session_voice', 'manage_memory']);
-  assert.match(vm.getActivationHint(vm.visiblePlugins[0]), /已退役/);
+  assert.match(catalog.pluginActivation(vm.visiblePlugins[0]), /已退役/);
   assert.match(catalog.pluginInjection(rows[0]), /模型启动后/);
   assert.match(catalog.pluginModelPaths(rows[0]), /未声明/);
   vm.$destroy();
@@ -70,7 +81,7 @@ test('retired card renders no edit or configure action even with admin props', (
   const Ctor = Vue.extend({ ...loadVueComponent(file), ...compiler.compileToFunctions(template) });
   const vm = new Ctor({ propsData: { plugin: plugin('manage_memory'), retired: true, interaction: true, canManage: true, configurable: true } });
   const labels = nodes(vm._render()).map(node => node.text || '').join('');
-  assert.match(labels, /已退役/); assert.doesNotMatch(labels, /编辑调用说明|编辑玩法|复制玩法/);
+  assert.match(labels, /已停用/); assert.doesNotMatch(labels, /编辑调用说明|编辑玩法|复制玩法|配置服务密钥|添加到智能体/);
   vm.$destroy();
 });
 
@@ -89,12 +100,14 @@ test('catalog call description update preserves rules and copying uses current c
   assert.equal(vm.pluginForm.providerCode, ''); assert.equal(vm.interactionPresets, undefined); vm.$destroy();
 });
 
-test('role selection excludes retired and catalog-only records and strips catalog fields', () => {
+test('role selection excludes retired and catalog-only records and strips catalog fields', async () => {
   const activity = plugin('riddle');
   activity.params = { ...catalog.newPluginParams(activity), description: '旧角色说明', custom_plugin: true, instructions: '角色规则' };
   const retired = plugin('manage_memory', { params: {} });
   const builtin = plugin('direct_answer', { fieldsMeta: [{ key: 'catalog_only', default: true }], params: {} });
-  const vm = vmFor('src/components/FunctionDialog.vue', { allFunctions: [activity, retired, builtin], functions: [], agentId: 'a' });
+  const vm = vmFor('src/components/FunctionDialog.vue', { allFunctions: [activity, retired, builtin],
+    functions: [{ ...activity, params: { ...activity.params } }], agentId: 'a' });
+  await openFunctionDrawer(vm);
   vm.selectAll(); assert.deepEqual(vm.selectedNames, ['riddle']);
   assert.deepEqual(vm.agentConfigFields(activity).map(field => field.key), ['rounds']);
   let selected; vm.$on('update-functions', value => selected = value); vm.saveSelection();
@@ -105,6 +118,7 @@ test('role selection excludes retired and catalog-only records and strips catalo
 test('rule source round trip preserves explicit empty values and supports returning to inheritance', async () => {
   const activity = plugin('riddle', { params: { rounds: 3 } });
   const selector = vmFor('src/components/FunctionDialog.vue', { allFunctions: [activity], functions: [], agentId: 'a' });
+  await openFunctionDrawer(selector);
   selector.selectedNames = ['riddle']; selector.currentFunction = activity;
   const editor = vmFor('src/components/resource/PluginRuleOverrides.vue', { plugin: activity });
   editor.$on('change', params => { selector.handleRuleParams(params); editor._props.plugin = selector.currentFunction; });
@@ -112,8 +126,9 @@ test('rule source round trip preserves explicit empty values and supports return
   editor.changeSource('instructions', 'override'); editor.changeValue('instructions', '');
   selector.handleParamChange(selector.currentFunction, 'rounds', 8); editor._props.plugin = selector.currentFunction;
   assert.equal(editor.usesOverride('instructions'), true); assert.equal(editor.valueFor('instructions'), '');
-  let saved; selector.$on('update-functions', value => saved = value); selector.saveSelection();
+  let saved; selector.$on('update-functions', value => { saved = value; selector._props.functions = value; }); selector.saveSelection();
   assert.equal(saved[0].params.instructions, ''); assert.equal(saved[0].params.rounds, 8);
+  await openFunctionDrawer(selector); editor._props.plugin = selector.currentFunction;
   editor.changeSource('instructions', 'inherit'); selector.saveSelection();
   assert.equal(Object.hasOwn(saved[0].params, 'instructions'), false); assert.equal(saved[0].params.rounds, 8);
   activity.fieldsMeta.find(field => field.key === 'instructions').default = '目录规则 v2';
@@ -161,11 +176,12 @@ test('legacy description-only rules survive sanitization as explicit role rules'
   assert.deepEqual(catalog.sanitizePluginParams(plugin('riddle'), { description: '过时调用说明' }), {});
 });
 
-test('reselecting and select-all keep displayed rule source aligned with the pending save', () => {
+test('reselecting and select-all keep displayed rule source aligned with the pending save', async () => {
   const activity = plugin('riddle', { params: { instructions: '旧角色规则' } });
   const vm = vmFor('src/components/FunctionDialog.vue', {
-    allFunctions: [activity], functions: [activity], agentId: 'a',
+    allFunctions: [activity], functions: [{ ...activity, params: { ...activity.params } }], agentId: 'a',
   });
+  await openFunctionDrawer(vm);
   vm.selectedNames = ['riddle'];
   vm.currentFunction = activity;
   vm.handleRuleParams({});
@@ -175,10 +191,11 @@ test('reselecting and select-all keep displayed rule source aligned with the pen
   vm.selectAll();
   assert.equal(catalog.ruleUsesOverride(vm.currentFunction, 'instructions'), false);
   let saved;
-  vm.$on('update-functions', value => saved = value);
+  vm.$on('update-functions', value => { saved = value; vm._props.functions = value; });
   vm.saveSelection();
   assert.deepEqual(saved[0].params, {});
 
+  await openFunctionDrawer(vm);
   vm.handleRuleParams({ instructions: '新的角色规则' });
   vm.handleCheckboxChange(activity, false);
   vm.handleCheckboxChange(activity, true);
@@ -188,5 +205,68 @@ test('reselecting and select-all keep displayed rule source aligned with the pen
   assert.equal(catalog.pluginRuleValue(vm.currentFunction, 'instructions'), '新的角色规则');
   vm.saveSelection();
   assert.deepEqual(saved[0].params, { instructions: '新的角色规则' });
+  vm.$destroy();
+});
+
+test('empty activities and failed service status never claim a configured capability is missing', () => {
+  let configCallback;
+  const vm = vmFor('src/views/FunctionPluginManagement.vue', {}, { user: {
+    getPluginConfigs(callback) { configCallback = callback; }
+  } });
+  vm.plugins = [plugin('get_weather', { fieldsMeta: [] })];
+  vm.setActiveType('activities');
+  assert.deepEqual(vm.visiblePlugins, []);
+  assert.equal(vm.pluginCounts.activities, 0);
+  assert.equal(vm.emptyDescription, '还没有互动玩法');
+  vm.fetchSharedConfigStatuses();
+  assert.equal(vm.sharedConfigState('get_weather'), 'loading');
+  configCallback({ status: 503 });
+  assert.equal(vm.sharedConfigState('get_weather'), 'error');
+  assert.equal(vm.sharedConfigConfigured('get_weather'), false);
+  vm.fetchSharedConfigStatuses();
+  configCallback({ data: { code: 0, data: [{ providerCode: 'get_weather', configured: true, secretConfigured: true }] } });
+  assert.equal(vm.sharedConfigState('get_weather'), 'saved');
+  vm.$destroy();
+});
+
+test('normal cards lead to setup without exposing tool codes or maintenance controls', () => {
+  const file = 'src/components/resource/PluginResourceCard.vue';
+  const template = compiler.parseComponent(fs.readFileSync(path.join(__dirname, '..', file), 'utf8')).template.content;
+  const Ctor = Vue.extend({ ...loadVueComponent(file), ...compiler.compileToFunctions(template) });
+  const weather = plugin('get_weather', { fieldsMeta: [] });
+  const vm = new Ctor({ propsData: { plugin: weather, configurable: true, configState: 'saved' } });
+  const tree = nodes(vm._render());
+  const labels = tree.map(node => node.text || '').join('');
+  assert.match(labels, /天气查询|服务密钥已保存/);
+  assert.doesNotMatch(labels, /get_weather|注入阶段|schema|编辑调用说明|测试通过/);
+  const setupButton = tree.find(node => node.tag === 'el-button' && nodes(node).some(child => /添加到智能体/.test(child.text || '')));
+  assert.ok(setupButton);
+  let selected;
+  vm.$on('setup', value => selected = value);
+  setupButton.data.on.click();
+  assert.equal(selected, weather);
+  vm.$destroy();
+});
+
+test('detail keeps technical text collapsed and gives retired voice a replacement settings action', () => {
+  const file = 'src/components/resource/PluginDetailDialog.vue';
+  const template = compiler.parseComponent(fs.readFileSync(path.join(__dirname, '..', file), 'utf8')).template.content;
+  const Ctor = Vue.extend({ ...loadVueComponent(file), ...compiler.compileToFunctions(template) });
+  const voice = plugin('set_session_voice', { fieldsMeta: [] });
+  const vm = new Ctor({ propsData: { plugin: voice, visible: true, canManage: true } });
+  let labels = nodes(vm._render()).map(node => node.text || '').join('');
+  assert.match(labels, /前往语音设置/);
+  assert.doesNotMatch(labels, /set_session_voice|编辑调用说明|编辑玩法|复制玩法/);
+  assert.deepEqual(vm.advancedPanels, []);
+  vm.advancedPanels = ['technical'];
+  labels = nodes(vm._render()).map(node => node.text || '').join('');
+  assert.match(labels, /set_session_voice/);
+  assert.doesNotMatch(labels, /编辑调用说明|编辑玩法|复制玩法/);
+  let selected;
+  vm.$on('setup', value => selected = value);
+  const setupButton = nodes(vm._render()).find(node => node.tag === 'el-button'
+    && nodes(node).some(child => /前往语音设置/.test(child.text || '')));
+  setupButton.data.on.click();
+  assert.equal(selected, voice);
   vm.$destroy();
 });

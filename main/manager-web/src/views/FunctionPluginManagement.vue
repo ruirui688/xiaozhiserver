@@ -6,28 +6,25 @@
     <main class="plugin-page">
       <section class="page-hero">
         <div class="page-heading">
-          <p class="page-subtitle">维护静态工具与活动目录。目录条目不等于某个智能体本轮实际可用的工具。</p>
+          <h1>给智能体添加新本领</h1>
+          <p class="page-subtitle">先找到需要的功能，再选择智能体完成设置。</p>
         </div>
-        <div class="hero-stats" aria-label="目录条目统计">
+        <div class="hero-stats" aria-label="功能分类统计">
           <div class="stat-item">
-            <strong>{{ pluginCounts.all }}</strong>
-            <span>目录总数</span>
+            <strong>{{ pluginCounts.plugins }}</strong>
+            <span>可添加插件</span>
           </div>
           <div class="stat-item">
-            <strong>{{ pluginCounts.builtin }}</strong>
-            <span>工具条目</span>
+            <strong>{{ pluginCounts.activities }}</strong>
+            <span>互动玩法</span>
           </div>
           <div class="stat-item">
-            <strong>{{ pluginCounts.interaction }}</strong>
-            <span>活动条目</span>
-          </div>
-          <div class="stat-item">
-            <strong>{{ pluginCounts.retired }}</strong>
-            <span>已退役</span>
+            <strong>{{ pluginCounts.integrations }}</strong>
+            <span>专用集成</span>
           </div>
         </div>
         <div class="hero-actions">
-          <el-button icon="el-icon-refresh" :loading="loading" @click="fetchPlugins">刷新</el-button>
+          <el-button icon="el-icon-refresh" :loading="loading || sharedConfigLoading" @click="refreshCatalog">刷新</el-button>
           <el-button
             v-if="canManagePlugins"
             type="primary"
@@ -44,45 +41,38 @@
           <el-input
             v-model="searchName"
             prefix-icon="el-icon-search"
-            placeholder="搜索名称、编码或调用说明"
+            placeholder="搜索功能，例如天气、音乐"
             clearable
             class="search-input"
             @keyup.enter.native="handleSearch"
           />
 
           <div class="filter-section">
-            <div class="filter-title">目录类型</div>
+            <div class="filter-title">我想添加</div>
             <button
+              v-for="section in mainSections"
+              :key="section.key"
               type="button"
-              :class="['filter-item', { active: activeType === 'all' }]"
-              @click="setActiveType('all')"
+              :class="['filter-item', { active: activeType === section.key }]"
+              :aria-pressed="activeType === section.key"
+              @click="setActiveType(section.key)"
             >
-              <span><i class="el-icon-menu" />全部目录条目</span>
-              <strong>{{ pluginCounts.all }}</strong>
-            </button>
-            <button
-              type="button"
-              :class="['filter-item', { active: activeType === 'builtin' }]"
-              @click="setActiveType('builtin')"
-            >
-              <span><i class="el-icon-cpu" />工具条目</span>
-              <strong>{{ pluginCounts.builtin }}</strong>
-            </button>
-            <button
-              type="button"
-              :class="['filter-item', { active: activeType === 'interaction' }]"
-              @click="setActiveType('interaction')"
-            >
-              <span><i class="el-icon-chat-dot-round" />活动条目</span>
-              <strong>{{ pluginCounts.interaction }}</strong>
-            </button>
-            <button type="button" :class="['filter-item', { active: activeType === 'retired' }]" @click="setActiveType('retired')">
-              <span>已退役</span><strong>{{ pluginCounts.retired }}</strong>
+              <span><i :class="section.icon" />{{ section.label }}</span>
+              <strong>{{ pluginCounts[section.key] }}</strong>
             </button>
           </div>
 
+          <details class="advanced-directory">
+            <summary>高级目录</summary>
+            <button v-for="section in advancedSections" :key="section.key" type="button"
+              :class="['filter-item', { active: activeType === section.key }]"
+              :aria-pressed="activeType === section.key" @click="setActiveType(section.key)">
+              <span>{{ section.label }}</span><strong>{{ pluginCounts[section.key] }}</strong>
+            </button>
+          </details>
+
           <div v-if="showCategoryFilter" class="filter-section category-section">
-            <div class="filter-title">能力分类</div>
+            <div class="filter-title">按用途筛选</div>
             <button
               v-for="category in categoryFilters"
               :key="category.key"
@@ -98,8 +88,8 @@
           <div class="usage-tip">
             <i class="el-icon-info" />
             <div>
-              <strong>这里维护工具与插件目录</strong>
-              <span>调用说明在目录统一维护；角色中选择能力、配置业务参数及玩法覆盖。</span>
+              <strong>添加后才会用于对话</strong>
+              <span>选好功能后，点击设置按钮，选择要使用它的智能体。</span>
             </div>
           </div>
         </aside>
@@ -108,11 +98,11 @@
           <div class="catalog-toolbar">
             <div>
               <h2>{{ currentFilterTitle }}</h2>
-              <p>找到 {{ visiblePlugins.length }} 条目录记录</p>
+              <p>{{ sectionDescription }}</p>
             </div>
             <div class="catalog-controls">
               <el-select v-model="sortMode" size="small" class="sort-select" aria-label="插件排序">
-                <el-option label="按后台排序" value="sort" />
+                <el-option label="默认排序" value="sort" />
                 <el-option label="按名称排序" value="name" />
               </el-select>
               <el-button-group class="view-switch">
@@ -138,12 +128,17 @@
             </div>
           </div>
 
-          <div class="catalog-note">
-            <i class="el-icon-warning-outline" />
-            此页不包含设备、MCP 或当前会话动态生成的完整工具列表。支持范围为静态声明，实际可用性由模型协议、角色配置与会话状态决定。
+          <div v-if="catalogError" class="catalog-error" role="alert">
+            <span>{{ catalogError }}</span><el-button size="small" @click="fetchPlugins">重新加载</el-button>
           </div>
-
-          <el-empty v-if="!loading && visiblePlugins.length === 0" description="没有找到匹配的能力" />
+          <el-empty v-else-if="!loading && visiblePlugins.length === 0" :description="emptyDescription">
+            <p v-if="activeType === 'activities' && !searchName && !pluginCounts.activities" class="empty-guidance">
+              管理员创建玩法后，可在智能体的功能设置中添加。
+            </p>
+            <el-button v-if="activeType === 'activities' && !searchName && canManagePlugins"
+              type="primary" @click="openCreateDialog()">新建互动玩法</el-button>
+            <el-button v-else-if="searchName || activeCategory !== 'all'" @click="clearFilters">清除筛选</el-button>
+          </el-empty>
           <div
             v-else
             v-loading="loading"
@@ -154,42 +149,34 @@
               :key="plugin.id"
               :plugin="plugin"
               :layout="viewMode"
-              :interaction="isInteractionPlugin(plugin)"
-              :retired="isRetiredPlugin(plugin)"
-              :can-manage="canEditPlugin(plugin)"
-              :category="getFunctionCategory(plugin)"
-              :category-key="getCategoryMeta(plugin).key"
-              :description="getPluginDescription(plugin)"
-              :injection="pluginInjection(plugin)"
-              :config-text="getConfigText(plugin)"
               :configurable="isSharedConfigPlugin(plugin) && !isRetiredPlugin(plugin)"
-              :configured="sharedConfigConfigured(plugin.providerCode)"
+              :config-state="sharedConfigState(plugin.providerCode)"
               :testing="Boolean(pluginTesting[plugin.providerCode])"
               @detail="openDetailDialog"
+              @setup="openSetup"
               @configure="openSharedConfig"
               @test="testSharedConfig"
-              @edit="openEditDialog"
-              @edit-prompt="openPromptDialog"
-              @command="handleRowCommand"
             />
           </div>
 
           <div class="table-bottom">
-            <span class="total-text">已显示 {{ visiblePlugins.length }} / {{ pluginCounts.all }}</span>
+            <span class="total-text">本分类共 {{ pluginCounts[activeType] }} 项，当前显示 {{ visiblePlugins.length }} 项</span>
           </div>
         </div>
       </section>
     </main>
 
     <el-dialog
+      class="catalog-editor-dialog"
       :title="editingId ? '编辑互动玩法' : '新建互动玩法'"
       :visible.sync="formDialogVisible"
-      width="820px"
+      width="min(820px, calc(100vw - 32px))"
+      top="6vh"
       :close-on-click-modal="false"
       @closed="resetForm"
     >
       <el-form ref="pluginForm" :model="pluginForm" :rules="rules" label-width="110px">
-        <el-alert type="info" :closable="false" title="这里维护目录规则。角色默认继承；已有角色自定义内容保持不变。需要参考现有玩法时，可从目录复制。" />
+        <el-alert type="info" :closable="false" title="这里的规则作为默认玩法。智能体已经自定义的规则不会被覆盖；也可以复制已有玩法后修改。" />
 
         <div class="form-row">
           <el-form-item label="玩法名称" prop="name">
@@ -250,46 +237,25 @@
       </div>
     </el-dialog>
 
-    <el-dialog
-      title="功能说明"
+    <PluginDetailDialog
       :visible.sync="detailDialogVisible"
-      width="640px"
-      :close-on-click-modal="false"
-    >
-      <div v-if="currentPlugin" class="detail-panel">
-        <div class="detail-title">{{ currentPlugin.name }}</div>
-        <div class="detail-code">{{ currentPlugin.providerCode }}</div>
-        <el-descriptions :column="1" border>
-          <el-descriptions-item label="分类">{{ getFunctionCategory(currentPlugin) }}</el-descriptions-item>
-          <el-descriptions-item label="类型">
-            {{ isRetiredPlugin(currentPlugin) ? "已退役" : (isInteractionPlugin(currentPlugin) ? "活动" : "工具") }}
-          </el-descriptions-item>
-          <el-descriptions-item label="调用说明">{{ getPluginDescription(currentPlugin) }}</el-descriptions-item>
-          <el-descriptions-item label="工具来源">{{ getToolSourceLabel(currentPlugin) }}</el-descriptions-item>
-          <el-descriptions-item label="如何启用">
-            {{ getActivationHint(currentPlugin) }}
-          </el-descriptions-item>
-          <el-descriptions-item label="注入阶段">{{ pluginInjection(currentPlugin) }}</el-descriptions-item>
-          <el-descriptions-item label="支持路径（声明）">{{ pluginModelPaths(currentPlugin) }}</el-descriptions-item>
-          <el-descriptions-item v-if="isInteractionPlugin(currentPlugin)" label="目录玩法规则">
-            <div class="catalog-rule-text">{{ pluginDefault(currentPlugin, 'instructions') || '目录未填写' }}</div>
-          </el-descriptions-item>
-          <el-descriptions-item v-if="isInteractionPlugin(currentPlugin)" label="目录开场要求">
-            {{ pluginDefault(currentPlugin, 'opening_message') || '目录未填写' }}
-          </el-descriptions-item>
-        </el-descriptions>
-        <p class="catalog-note">这是目录定义，不是当前模型请求预览。继承目录的角色会使用目录规则，显式自定义的角色继续使用自己的规则。</p>
-      </div>
-      <div slot="footer" class="dialog-footer">
-        <el-button v-if="currentPlugin && canEditPlugin(currentPlugin)" @click="openPromptDialog(currentPlugin)">编辑调用说明</el-button>
-        <el-button type="primary" @click="detailDialogVisible = false">知道了</el-button>
-      </div>
-    </el-dialog>
+      :plugin="currentPlugin"
+      :can-manage="Boolean(currentPlugin && canEditPlugin(currentPlugin))"
+      :configurable="Boolean(currentPlugin && isSharedConfigPlugin(currentPlugin))"
+      :config-state="sharedConfigState(currentPlugin && currentPlugin.providerCode)"
+      :testing="Boolean(currentPlugin && pluginTesting[currentPlugin.providerCode])"
+      @setup="openSetup" @configure="openSharedConfig" @test="testSharedConfig"
+      @edit-prompt="openPromptDialog" @edit="openEditDialog" @command="handleRowCommand"
+    />
+
+    <PluginSetupDialog :visible.sync="setupVisible" :plugin="setupPlugin" />
 
     <el-dialog
+      class="catalog-editor-dialog"
       title="编辑工具调用说明"
       :visible.sync="promptDialogVisible"
-      width="720px"
+      width="min(720px, calc(100vw - 32px))"
+      top="6vh"
       :close-on-click-modal="false"
     >
       <el-form :model="promptForm" label-width="110px">
@@ -313,7 +279,7 @@
           type="warning"
           :closable="false"
           show-icon
-          title="这是工具调用前的说明，统一在目录维护。保存后在安全轮次刷新；不会修改玩法规则、参数或启用范围。"
+          title="这段说明帮助模型判断何时使用功能。保存后，使用该目录的智能体会在当前回复结束后更新；不会自动添加插件或修改玩法规则。"
         />
       </el-form>
       <div slot="footer" class="dialog-footer">
@@ -341,9 +307,11 @@ import HeaderBar from "@/components/HeaderBar.vue";
 import VersionFooter from "@/components/VersionFooter.vue";
 import ResourceCenterNav from "@/components/resource/ResourceCenterNav.vue";
 import PluginResourceCard from "@/components/resource/PluginResourceCard.vue";
+import PluginDetailDialog from "@/components/resource/PluginDetailDialog.vue";
+import PluginSetupDialog from "@/components/resource/PluginSetupDialog.vue";
 import UserPluginConfigDialog from "@/components/UserPluginConfigDialog.vue";
-import { catalogCounts, isInteractionPlugin, isRetiredPlugin, pluginActivation,
-  pluginDefault, pluginFields, pluginInjection, pluginModelPaths } from "@/utils/pluginCatalog";
+import { isInteractionPlugin, isRetiredPlugin, pluginDefault, pluginFields } from "@/utils/pluginCatalog";
+import { pluginPresentation, pluginSectionCounts, filterCatalogPlugins } from "@/utils/pluginPresentation";
 
 const SHARED_CONFIG_PROVIDERS = new Set(["get_weather", "web_search"]);
 
@@ -354,6 +322,8 @@ export default {
     VersionFooter,
     ResourceCenterNav,
     PluginResourceCard,
+    PluginDetailDialog,
+    PluginSetupDialog,
     UserPluginConfigDialog
   },
   data() {
@@ -361,12 +331,15 @@ export default {
       loading: false,
       saving: false,
       searchName: "",
-      activeType: "all",
+      activeType: "plugins",
       activeCategory: "all",
       sortMode: "sort",
       viewMode: "list",
       plugins: [],
       allPluginProviders: [],
+      catalogError: "",
+      setupVisible: false,
+      setupPlugin: null,
       formDialogVisible: false,
       detailDialogVisible: false,
       promptDialogVisible: false,
@@ -382,6 +355,8 @@ export default {
       sharedConfigProviderCode: "",
       sharedConfigPluginName: "",
       sharedConfigStatuses: {},
+      sharedConfigLoading: false,
+      sharedConfigError: false,
       pluginTesting: {},
       editingId: "",
       activeAdvancedPanels: [],
@@ -393,8 +368,12 @@ export default {
     this.fetchSharedConfigStatuses();
   },
   methods: {
-    isInteractionPlugin, isRetiredPlugin, pluginDefault, pluginInjection, pluginModelPaths,
+    isInteractionPlugin, isRetiredPlugin, pluginDefault,
     canEditPlugin(plugin) { return this.canManagePlugins && !isRetiredPlugin(plugin); },
+    refreshCatalog() {
+      this.fetchPlugins();
+      this.fetchSharedConfigStatuses();
+    },
     createEmptyForm() {
       return {
         name: "",
@@ -407,10 +386,16 @@ export default {
     },
     fetchPlugins() {
       this.loading = true;
-      const handleResponse = ({ data }) => {
+      this.catalogError = "";
+      const handleFailure = () => {
         this.loading = false;
-        if (data.code !== 0) {
-          this.$message.error(data.msg || "获取插件列表失败");
+        this.catalogError = "暂时无法加载功能，请稍后重试。";
+      };
+      const handleResponse = (response) => {
+        const data = response && response.data;
+        this.loading = false;
+        if (!data || data.code !== 0 || !data.data) {
+          handleFailure();
           return;
         }
         const source = Array.isArray(data.data) ? data.data : (data.data.list || []);
@@ -423,10 +408,7 @@ export default {
           .sort((a, b) => Number(a.sort || 0) - Number(b.sort || 0));
       };
       if (!this.canManagePlugins) {
-        Api.model.getPluginFunctionList(null, handleResponse, () => {
-          this.loading = false;
-          this.$message.error("获取插件列表失败");
-        });
+        Api.model.getPluginFunctionList(null, handleResponse, handleFailure);
         return;
       }
       Api.model.getModelProvidersPage(
@@ -435,12 +417,18 @@ export default {
           limit: 1000,
           modelType: "Plugin"
         },
-        handleResponse
+        handleResponse,
+        handleFailure
       );
     },
     fetchSharedConfigStatuses() {
-      Api.user.getPluginConfigs(({ data }) => {
-        if (!data || data.code !== 0) {
+      this.sharedConfigLoading = true;
+      this.sharedConfigError = false;
+      Api.user.getPluginConfigs((response) => {
+        const data = response && response.data;
+        this.sharedConfigLoading = false;
+        if (!data || data.code !== 0 || !Array.isArray(data.data)) {
+          this.sharedConfigError = true;
           return;
         }
         const statuses = {};
@@ -454,7 +442,17 @@ export default {
       return SHARED_CONFIG_PROVIDERS.has(plugin && plugin.providerCode);
     },
     sharedConfigConfigured(providerCode) {
-      return Boolean(this.sharedConfigStatuses[providerCode]);
+      return this.sharedConfigState(providerCode) === "saved";
+    },
+    sharedConfigState(providerCode) {
+      if (this.sharedConfigLoading) return "loading";
+      if (this.sharedConfigError) return "error";
+      return this.sharedConfigStatuses[providerCode] ? "saved" : "missing";
+    },
+    openSetup(plugin) {
+      this.detailDialogVisible = false;
+      this.setupPlugin = plugin;
+      this.setupVisible = true;
     },
     openSharedConfig(plugin) {
       this.sharedConfigProviderCode = plugin.providerCode;
@@ -466,13 +464,23 @@ export default {
     },
     testSharedConfig(plugin) {
       const providerCode = plugin.providerCode;
+      if (this.sharedConfigState(providerCode) === "loading") {
+        this.$message.warning("正在读取服务配置，请稍后重试");
+        return;
+      }
+      if (this.sharedConfigState(providerCode) === "error") {
+        this.$message.warning("服务配置状态读取失败，请打开配置确认");
+        this.openSharedConfig(plugin);
+        return;
+      }
       if (!this.sharedConfigConfigured(providerCode)) {
         this.$message.warning("请先完成密钥配置");
         this.openSharedConfig(plugin);
         return;
       }
       this.$set(this.pluginTesting, providerCode, true);
-      Api.user.testPluginConfig(providerCode, {}, ({ data }) => {
+      Api.user.testPluginConfig(providerCode, {}, (response) => {
+        const data = response && response.data;
         this.$set(this.pluginTesting, providerCode, false);
         if (!data || data.code !== 0) {
           this.$message.error((data && data.msg) || "插件测试失败");
@@ -489,83 +497,18 @@ export default {
     handleSearch() {
       this.searchName = this.searchName.trim();
     },
-    handleTypeChange(type) {
-      if (type !== "builtin") {
-        this.activeCategory = "all";
-      }
-    },
     setActiveType(type) {
       this.activeType = type;
-      this.handleTypeChange(type);
+      this.activeCategory = "all";
+    },
+    clearFilters() {
+      this.searchName = "";
+      this.activeCategory = "all";
     },
     parseFields(fields) { return pluginFields({ fields }); },
-    fieldBoolean(plugin, key) {
-      const value = this.getFieldDefault(plugin.fieldsMeta || [], key, false);
-      return value === true || String(value).toLowerCase() === "true";
-    },
-    isRuntimeBuiltin(plugin) {
-      return this.fieldBoolean(plugin, "runtime_builtin");
-    },
-    getToolSourceLabel(plugin) {
-      const source = this.getFieldDefault(plugin.fieldsMeta || [], "tool_source", "server_plugin");
-      const labels = {
-        routing: "主模型路由工具",
-        server_plugin: "服务端工具/插件",
-        server_mcp: "服务器 MCP",
-        device_iot: "设备 IoT",
-        device_mcp: "设备 MCP",
-        mcp_endpoint: "MCP 接入点"
-      };
-      return labels[source] || source;
-    },
-    getActivationHint(plugin) { return pluginActivation(plugin); },
     getFieldDefault(fields, key, fallback = "") {
       const field = fields.find((item) => item.key === key);
       return field && field.default !== undefined ? field.default : fallback;
-    },
-    getPluginDescription(plugin) {
-      return pluginDefault(plugin, "description") || "目录未填写调用说明";
-    },
-    getFunctionCategory(plugin) {
-      return this.getCategoryMeta(plugin).label;
-    },
-    getCategoryMeta(plugin) {
-      const code = plugin.providerCode || "";
-      if (isInteractionPlugin(plugin)) {
-        return { key: "chat", label: "聊天玩法" };
-      }
-      if (["direct_answer", "handle_exit_intent", "set_session_voice", "reset_conversation_context"].includes(code)) {
-        return { key: "session", label: "会话控制" };
-      }
-      if (code === "get_lunar") {
-        return { key: "time", label: "日期时间" };
-      }
-      if (code.includes("weather")) {
-        return { key: "life", label: "生活服务" };
-      }
-      if (code.includes("news") || code.includes("search")) {
-        return { key: "info", label: "内容资讯" };
-      }
-      if (code.includes("music")) {
-        return { key: "media", label: "音乐音频" };
-      }
-      if (code.includes("hass") || code.includes("homeassistant") || code.includes("call_device")) {
-        return { key: "device", label: "设备控制" };
-      }
-      return { key: "tool", label: "工具能力" };
-    },
-    getConfigText(plugin) {
-      if (isRetiredPlugin(plugin)) return "已退役 · 不可启用";
-      if (isInteractionPlugin(plugin)) {
-        return "编写玩法规则";
-      }
-      if (this.isRuntimeBuiltin(plugin)) {
-        return "运行时按条件提供";
-      }
-      if (this.fieldBoolean(plugin, "catalog_only")) {
-        return "专用配置启用";
-      }
-      return plugin.fieldsMeta && plugin.fieldsMeta.length > 0 ? "角色中配置参数" : "角色中勾选";
     },
     openDetailDialog(row) {
       this.currentPlugin = row;
@@ -620,7 +563,7 @@ export default {
           this.$message.error((data && data.msg) || "保存调用说明失败");
           return;
         }
-        this.$message.success("调用说明已保存，在线会话将在安全轮次刷新");
+        this.$message.success("调用说明已保存，将在当前回复结束后更新");
         this.promptDialogVisible = false;
         this.fetchPlugins();
       });
@@ -635,6 +578,7 @@ export default {
     },
     openCreateDialog(source) {
       if (!this.canManagePlugins || (source && isRetiredPlugin(source))) return;
+      this.detailDialogVisible = false;
       this.editingId = "";
       this.activeAdvancedPanels = ["advanced"];
       this.pluginForm = this.createEmptyForm();
@@ -651,6 +595,7 @@ export default {
     },
     openEditDialog(row) {
       if (!this.canEditPlugin(row)) return;
+      this.detailDialogVisible = false;
       this.editingId = row.id;
       this.pluginForm = {
         name: row.name,
@@ -781,6 +726,7 @@ export default {
             return;
           }
           this.$message.success("删除成功");
+          this.detailDialogVisible = false;
           this.fetchPlugins();
         });
       }).catch(() => {});
@@ -803,92 +749,61 @@ export default {
         instructions: [{ required: true, message: "请输入玩法规则", trigger: "blur" }]
       };
     },
-    searchedPlugins() {
-      const keyword = this.searchName.trim().toLowerCase();
-      if (!keyword) {
-        return this.plugins;
-      }
-      return this.plugins.filter((item) => {
-        return (
-          String(item.name || "").toLowerCase().includes(keyword) ||
-          String(item.providerCode || "").toLowerCase().includes(keyword) ||
-          String(pluginDefault(item, "description")).toLowerCase().includes(keyword)
-        );
-      });
+    mainSections() {
+      return [
+        { key: "plugins", label: "可添加插件", icon: "el-icon-connection" },
+        { key: "activities", label: "互动玩法", icon: "el-icon-chat-dot-round" },
+        { key: "integrations", label: "专用集成", icon: "el-icon-link" }
+      ];
+    },
+    advancedSections() {
+      return [{ key: "system", label: "系统内置" }, { key: "retired", label: "已停用" }];
     },
     visiblePlugins() {
-      let list = [...this.searchedPlugins];
-      if (this.activeType === "builtin") {
-        list = list.filter((item) => !isRetiredPlugin(item) && !isInteractionPlugin(item));
-      }
-      else if (this.activeType === "interaction") {
-        list = list.filter((item) => !isRetiredPlugin(item) && isInteractionPlugin(item));
-      }
-
-      if (this.activeType === "retired") list = list.filter(isRetiredPlugin);
-      if (this.showCategoryFilter && this.activeCategory !== "all") {
-        list = list.filter((item) => {
-          return !isInteractionPlugin(item) &&
-            this.getCategoryMeta(item).key === this.activeCategory;
-        });
-      }
-      if (this.sortMode === "name") {
-        return list.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "zh-CN"));
-      }
-      return list.sort((a, b) => Number(a.sort || 0) - Number(b.sort || 0));
+      return filterCatalogPlugins(this.plugins, {
+        section: this.activeType, category: this.activeCategory,
+        search: this.searchName, sort: this.sortMode
+      });
     },
-    pluginCounts() { return catalogCounts(this.plugins); },
-    showCategoryFilter() {
-      return this.activeType === "builtin";
-    },
+    pluginCounts() { return pluginSectionCounts(this.plugins); },
+    showCategoryFilter() { return this.activeType === "plugins"; },
     currentFilterTitle() {
-      if (this.activeType === "retired") return "已退役目录条目";
-      if (this.activeType === "interaction") {
-        return "互动玩法";
-      }
-      if (this.activeType === "builtin") {
-        const category = this.categoryFilters.find((item) => item.key === this.activeCategory);
-        return category ? category.label : "工具条目";
-      }
-      return "全部目录条目";
+      const section = [...this.mainSections, ...this.advancedSections].find(item => item.key === this.activeType);
+      return section ? section.label : "可添加插件";
     },
-    builtinPluginsForCategory() {
-      return this.searchedPlugins.filter((item) => !isRetiredPlugin(item) && !isInteractionPlugin(item));
+    sectionDescription() {
+      return {
+        plugins: "按需要添加，不必全部开启。点击设置可选择智能体。",
+        activities: "为智能体编写游戏、朗诵等互动规则，再添加到需要的智能体。",
+        integrations: "这些功能需要在对应设置中绑定服务或资料。",
+        system: "这些功能由系统或管理员管理，通常无需手动添加。",
+        retired: "这些旧功能已停止使用，可查看说明和替代设置。"
+      }[this.activeType];
     },
-    categoryCounts() {
-      return this.builtinPluginsForCategory.reduce((counts, item) => {
-        const key = this.getCategoryMeta(item).key;
-        counts[key] = (counts[key] || 0) + 1;
-        return counts;
-      }, {});
+    emptyDescription() {
+      if (this.searchName || this.activeCategory !== "all") return "没有找到匹配的功能";
+      return this.activeType === "activities" ? "还没有互动玩法" : "这个分类暂时没有功能";
     },
     categoryFilters() {
-      const categories = [
-        { key: "session", label: "会话控制" },
-        { key: "time", label: "日期时间" },
-        { key: "life", label: "生活服务" },
-        { key: "info", label: "内容资讯" },
-        { key: "media", label: "音乐音频" },
-        { key: "device", label: "设备控制" },
-        { key: "tool", label: "工具能力" }
-      ];
-      return [
-        {
-          key: "all",
-          label: "全部工具条目",
-          count: this.builtinPluginsForCategory.length
-        },
-        ...categories.map((category) => ({
-          ...category,
-          count: this.categoryCounts[category.key] || 0
-        }))
-      ];
+      const available = filterCatalogPlugins(this.plugins, { section: "plugins", search: this.searchName });
+      const categories = new Map();
+      available.forEach(plugin => {
+        const category = pluginPresentation(plugin).category;
+        const item = categories.get(category.key) || { ...category, count: 0 };
+        item.count += 1;
+        categories.set(category.key, item);
+      });
+      return [{ key: "all", label: "全部用途", count: available.length }, ...categories.values()];
     }
   }
 };
 </script>
 
 <style lang="scss" scoped>
+.catalog-editor-dialog ::v-deep .el-dialog { display: flex; flex-direction: column; max-height: 88vh; margin-bottom: 0; }
+.catalog-editor-dialog ::v-deep .el-dialog__body { min-height: 0; max-height: calc(88vh - 140px); overflow-y: auto; }
+.catalog-editor-dialog ::v-deep .el-dialog__header,
+.catalog-editor-dialog ::v-deep .el-dialog__footer { flex-shrink: 0; }
 .catalog-rule-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow: auto; }
 .welcome {
   min-width: 960px;
@@ -930,6 +845,13 @@ export default {
   font-size: 13px;
   line-height: 20px;
 }
+
+.page-heading h1 { margin: 0 0 6px; color: #293e59; font-size: 20px; }
+.advanced-directory { margin-top: 16px; padding-top: 13px; border-top: 1px solid #edf0f4; }
+.advanced-directory summary { padding: 4px 8px; color: #8490a2; font-size: 12px; cursor: pointer; }
+.advanced-directory[open] summary { margin-bottom: 8px; }
+.catalog-error { display: flex; gap: 12px; align-items: center; justify-content: center; padding: 60px 12px; color: #7d8798; }
+.empty-guidance { max-width: 360px; color: #8490a2; font-size: 13px; }
 
 .hero-stats {
   display: flex;
@@ -1146,12 +1068,14 @@ export default {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
   gap: 14px;
+  margin-top: 18px;
 }
 
 .plugin-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  margin-top: 18px;
 }
 
 @media (max-width: 1280px) {
@@ -1217,16 +1141,4 @@ export default {
   margin-left: 110px;
 }
 
-.detail-title {
-  color: #303133;
-  font-size: 18px;
-  font-weight: 600;
-  line-height: 1.5;
-}
-
-.detail-code {
-  color: #909399;
-  font-size: 12px;
-  margin-bottom: 16px;
-}
 </style>

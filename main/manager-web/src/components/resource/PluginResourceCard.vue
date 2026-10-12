@@ -1,105 +1,66 @@
 <template>
-  <article
-    :class="['plugin-resource-card', `plugin-resource-card--${layout}`]"
-    tabindex="0"
-    @click="$emit('detail', plugin)"
-    @keyup.enter="$emit('detail', plugin)"
-  >
-    <div class="card-topline">
-      <div class="plugin-type">
-        <span :class="['type-badge', { 'type-badge--interaction': interaction }]">
-          {{ retired ? "已退役" : (interaction ? "活动" : "工具") }}
+  <article :class="['plugin-resource-card', `plugin-resource-card--${layout}`]">
+    <div class="plugin-main">
+      <div class="card-topline">
+        <span class="category-label">{{ presentation.category.label }}</span>
+        <span :class="['state-label', { 'state-label--error': configurable && configState === 'error' }]">
+          {{ statusText }}
         </span>
-        <span>{{ category }}</span>
       </div>
-      <span :class="['config-badge', { 'config-badge--ready': configurable && configured }]">
-        {{ retired ? "不可启用" : (configurable ? (configured ? "密钥已配置" : "待配置密钥") : configText) }}
-      </span>
+      <button type="button" class="plugin-title" @click="$emit('detail', plugin)">
+        {{ presentation.title }} <i class="el-icon-arrow-right" />
+      </button>
+      <p class="description">{{ presentation.summary }}</p>
+      <p v-if="presentation.preparation" class="preparation"><span>使用前</span>{{ presentation.preparation }}</p>
     </div>
 
-    <div class="plugin-heading">
-      <div :class="['plugin-icon', `plugin-icon--${categoryKey}`]">
-        <i :class="iconClass" />
+    <div class="plugin-usage">
+      <div v-if="presentation.usageExample" class="usage-example">
+        <span>可以这样说</span>
+        <p>“{{ presentation.usageExample }}”</p>
       </div>
-      <div>
-        <h3>{{ plugin.name }}</h3>
-        <code>{{ plugin.providerCode }}</code>
-      </div>
-    </div>
-
-    <p class="description">{{ description }}</p>
-    <div class="example">
-      <span>注入阶段</span>
-      <strong :title="injection">{{ injection }}</strong>
-    </div>
-
-    <div class="card-actions" @click.stop>
-      <template v-if="configurable && !retired">
-        <el-button size="mini" type="primary" plain @click="$emit('configure', plugin)">
-          配置
+      <div class="card-actions">
+        <el-button v-if="showSetup" size="small" type="primary" @click="$emit('setup', plugin)">
+          {{ presentation.setupLabel }}
         </el-button>
-        <el-button
-          size="mini"
-          :loading="testing"
-          :disabled="!configured"
-          @click="$emit('test', plugin)"
-        >测试</el-button>
-      </template>
-      <el-button size="mini" type="text" @click="$emit('detail', plugin)">
-        查看说明
-      </el-button>
-      <el-button
-        v-if="canManage && !retired"
-        size="mini"
-        type="primary"
-        plain
-        @click="$emit('edit-prompt', plugin)"
-      >编辑调用说明</el-button>
-      <template v-if="interaction && canManage && !retired">
-        <el-button size="mini" @click="$emit('edit', plugin)">编辑玩法</el-button>
-        <el-dropdown trigger="click" @command="$emit('command', plugin, $event)">
-          <el-button size="mini">更多 <i class="el-icon-arrow-down" /></el-button>
-          <el-dropdown-menu slot="dropdown">
-            <el-dropdown-item command="duplicate">复制玩法</el-dropdown-item>
-            <el-dropdown-item command="delete" class="danger-action">删除</el-dropdown-item>
-          </el-dropdown-menu>
-        </el-dropdown>
-      </template>
+        <el-button size="small" @click="$emit('detail', plugin)">使用说明</el-button>
+      </div>
+      <div v-if="configurable && presentation.section !== 'retired'" class="service-actions">
+        <el-button size="mini" type="text" @click="$emit('configure', plugin)">配置服务密钥</el-button>
+        <el-button size="mini" type="text" :loading="testing" :disabled="configState !== 'saved'"
+          @click="$emit('test', plugin)">测试连接</el-button>
+      </div>
     </div>
   </article>
 </template>
 
 <script>
+import { pluginPresentation } from '@/utils/pluginPresentation';
+
 export default {
-  name: "PluginResourceCard",
+  name: 'PluginResourceCard',
   props: {
     plugin: { type: Object, required: true },
-    layout: { type: String, default: "grid" },
-    interaction: { type: Boolean, default: false },
-    retired: { type: Boolean, default: false },
-    canManage: { type: Boolean, default: false },
-    category: { type: String, default: "工具能力" },
-    categoryKey: { type: String, default: "tool" },
-    description: { type: String, default: "" },
-    injection: { type: String, default: "未声明" },
-    configText: { type: String, default: "角色中启用" },
+    layout: { type: String, default: 'grid' },
     configurable: { type: Boolean, default: false },
-    configured: { type: Boolean, default: false },
+    configState: { type: String, default: 'missing' },
     testing: { type: Boolean, default: false }
   },
   computed: {
-    iconClass() {
-      const icons = {
-        life: "el-icon-cloudy",
-        info: "el-icon-search",
-        media: "el-icon-headset",
-        device: "el-icon-cpu",
-        session: "el-icon-refresh",
-        time: "el-icon-time",
-        chat: "el-icon-chat-dot-round",
-        tool: "el-icon-connection"
-      };
-      return icons[this.categoryKey] || icons.tool;
+    presentation() { return pluginPresentation(this.plugin); },
+    showSetup() {
+      return this.presentation.section !== 'system' && this.presentation.section !== 'retired'
+        && this.presentation.setupTarget && this.presentation.setupTarget !== 'none';
+    },
+    statusText() {
+      if (this.presentation.section === 'retired') return '已停用';
+      if (this.configurable) {
+        return {
+          loading: '正在读取服务配置', error: '服务配置读取失败',
+          saved: '服务密钥已保存', missing: this.plugin.providerCode === 'get_weather' ? '未配置和风服务' : '需要配置服务密钥'
+        }[this.configState] || '服务配置状态未知';
+      }
+      return { plugins: '按需添加', activities: '添加后使用', integrations: '专页设置', system: '无需在此添加' }[this.presentation.section];
     }
   }
 };
@@ -108,196 +69,54 @@ export default {
 <style lang="scss" scoped>
 .plugin-resource-card {
   display: flex;
-  min-height: 236px;
-  padding: 17px;
-  border: 1px solid #e6eaf2;
-  border-radius: 13px;
-  background: #fff;
-  box-shadow: 0 4px 14px rgba(48, 63, 96, 0.04);
-  box-sizing: border-box;
-  cursor: pointer;
-  flex-direction: column;
-  outline: none;
-  transition: 0.2s ease;
-}
-
-.plugin-resource-card:hover,
-.plugin-resource-card:focus {
-  transform: translateY(-1px);
-  border-color: #9dbcf5;
-  box-shadow: 0 10px 24px rgba(65, 105, 180, 0.1);
-}
-
-.card-topline,
-.plugin-type,
-.plugin-heading,
-.card-actions {
-  display: flex;
-  align-items: center;
-}
-
-.card-topline {
-  justify-content: space-between;
-  color: #8a92a4;
-  font-size: 12px;
-}
-
-.plugin-type {
-  gap: 7px;
-}
-
-.type-badge {
-  padding: 3px 8px;
-  border-radius: 99px;
-  background: #4f86e8;
-  color: #fff;
-  font-weight: 700;
-}
-
-.type-badge--interaction {
-  background: #9a6be8;
-}
-
-.config-badge {
-  padding: 3px 8px;
-  border: 1px solid #e2e6ee;
-  border-radius: 99px;
-  color: #7b8395;
-}
-
-.config-badge--ready {
-  border-color: #b9e4d1;
-  background: #effaf5;
-  color: #27835f;
-}
-
-.plugin-heading {
-  gap: 12px;
-  margin-top: 15px;
-}
-
-.plugin-icon {
-  display: grid;
-  width: 46px;
-  height: 46px;
-  place-items: center;
-  border-radius: 13px;
-  background: #fff2cf;
-  color: #c98500;
-  font-size: 22px;
-}
-
-.plugin-icon--info { background: #eaf2ff; color: #427bd7; }
-.plugin-icon--media { background: #f2eaff; color: #8b57d4; }
-.plugin-icon--device { background: #e8f7f1; color: #2e9d72; }
-.plugin-icon--session { background: #fff0e7; color: #d66b2c; }
-.plugin-icon--time { background: #edf7ff; color: #3386bd; }
-.plugin-icon--chat { background: #fff0f5; color: #d05b87; }
-
-.plugin-heading h3 {
-  margin: 0 0 4px;
-  color: #242a3a;
-  font-size: 17px;
-}
-
-.plugin-heading code {
-  color: #9aa1b1;
-  font-size: 11px;
-}
-
-.description {
-  display: -webkit-box;
-  min-height: 42px;
-  margin: 14px 0 11px;
-  overflow: hidden;
-  color: #697187;
-  font-size: 13px;
-  line-height: 21px;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.example {
-  display: grid;
-  gap: 4px;
-  padding: 11px 12px;
-  border-radius: 10px;
-  background: #f7f8fb;
-}
-
-.example span {
-  color: #9aa1b0;
-  font-size: 11px;
-}
-
-.example strong {
-  overflow: hidden;
-  color: #525b70;
-  font-size: 13px;
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.card-actions {
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: auto;
-  padding-top: 13px;
-}
-
-.plugin-resource-card--list {
-  display: grid;
-  grid-template-columns: 128px minmax(210px, 0.8fr) minmax(240px, 1.2fr) minmax(210px, 0.9fr) auto;
-  align-items: center;
-  gap: 16px;
-  min-height: 104px;
-  padding: 14px 16px;
-}
-
-.plugin-resource-card--list .card-topline {
-  align-items: flex-start;
-  flex-direction: column;
-  gap: 7px;
-}
-
-.plugin-resource-card--list .plugin-heading {
-  margin-top: 0;
-}
-
-.plugin-resource-card--list .plugin-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  font-size: 19px;
-}
-
-.plugin-resource-card--list .description {
-  min-height: auto;
-  margin: 0;
-}
-
-.plugin-resource-card--list .example {
   min-width: 0;
+  padding: 20px;
+  gap: 18px;
+  flex-direction: column;
+  border: 1px solid #e6eaf2;
+  border-radius: 12px;
+  background: #fff;
 }
-
-.plugin-resource-card--list .card-actions {
-  margin: 0;
+.plugin-resource-card:hover { border-color: #b6cbef; }
+.plugin-main, .plugin-usage { min-width: 0; }
+.card-topline { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+.category-label { font-size: 12px; color: #496b9f; }
+.state-label { color: #7d8797; font-size: 12px; }
+.state-label--error { color: #b96a22; }
+.plugin-title {
+  display: block;
   padding: 0;
-  white-space: nowrap;
+  margin-top: 10px;
+  border: 0;
+  background: none;
+  color: #23344c;
+  font: inherit;
+  font-size: 17px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
 }
-
-@media (max-width: 1450px) {
-  .plugin-resource-card--list {
-    grid-template-columns: 120px minmax(190px, 0.8fr) minmax(220px, 1.2fr) auto;
-  }
-
-  .plugin-resource-card--list .example {
-    display: none;
-  }
+.plugin-title i { color: #8d9bb0; font-size: 12px; }
+.plugin-title:focus-visible { outline: 2px solid #6296ef; outline-offset: 4px; }
+.description { margin: 9px 0; color: #526279; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+.preparation { margin: 0; color: #79869a; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.preparation span { color: #58687f; margin-right: 7px; }
+.plugin-usage { display: flex; flex-direction: column; gap: 12px; margin-top: auto; }
+.usage-example { padding: 10px 12px; border-radius: 8px; background: #f6f8fb; }
+.usage-example > span { color: #8390a4; font-size: 11px; }
+.usage-example p { margin: 4px 0 0; color: #50647f; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.card-actions, .service-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.card-actions .el-button + .el-button, .service-actions .el-button + .el-button { margin-left: 0; }
+.service-actions { gap: 16px; }
+.service-actions .el-button { padding: 2px 0; }
+.plugin-resource-card--list { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(240px, 0.8fr); align-items: center; }
+.plugin-resource-card--list .plugin-usage { margin-top: 0; }
+@media (max-width: 1180px) {
+  .plugin-resource-card--list { grid-template-columns: minmax(0, 1fr); }
+  .plugin-resource-card--list .plugin-usage { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+  .plugin-resource-card--list .service-actions { grid-column: 1 / -1; }
 }
-
-.danger-action {
-  color: #f56c6c;
+@media (max-width: 680px) {
+  .plugin-resource-card--list .plugin-usage { display: flex; }
 }
 </style>
