@@ -75,7 +75,7 @@ public class BillingContextService {
         Map<String, Object> row = rows.getFirst();
         if (!MessageDigest.isEqual(BillingSupport.hash(token).getBytes(StandardCharsets.US_ASCII),
                 row.get("token_hash").toString().getBytes(StandardCharsets.US_ASCII))) throw new RenException("INVALID_CONTEXT");
-        Instant issuedAt = ((java.sql.Timestamp) row.get("issued_at")).toLocalDateTime().toInstant(java.time.ZoneOffset.UTC);
+        Instant issuedAt = BillingSupport.databaseTime(row.get("issued_at")).toInstant(java.time.ZoneOffset.UTC);
         if (startedAt == null || startedAt.isBefore(issuedAt.minusSeconds(300)) || startedAt.isAfter(Instant.now().plusSeconds(300)))
             throw new RenException("INVALID_CALL_TIME");
         Map<String, Object> snapshot = support.object(row.get("snapshot_json").toString());

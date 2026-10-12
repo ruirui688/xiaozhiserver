@@ -101,8 +101,8 @@ public class BillingBindingService {
         Object oldEnd=old.get("valid_to");
         if(!Objects.equals(old.get("scope_type"),request.getScopeType()) || !Objects.equals(old.get("scope_value"),scope)
                 || !Objects.equals(old.get("agent_id"),empty(request.getAgentId())) || !Objects.equals(old.get("device_id"),empty(request.getDeviceId()))
-                || !Objects.equals(((java.sql.Timestamp)old.get("valid_from")).toLocalDateTime(),dates.from)
-                || dates.to==null || (oldEnd!=null && dates.to.isAfter(((java.sql.Timestamp)oldEnd).toLocalDateTime())))
+                || !Objects.equals(BillingSupport.databaseTime(old.get("valid_from")),dates.from)
+                || dates.to==null || (oldEnd!=null && dates.to.isAfter(BillingSupport.databaseTime(oldEnd))))
             throw new RenException("已有账单的绑定仅允许结束有效期，不能改写历史归属");
         Long outside=jdbc.queryForObject("SELECT COUNT(*) FROM ai_billing_bill WHERE binding_id=? AND (expense_end>? OR expense_begin>=?)",Long.class,request.getId(),dates.to,dates.to);
         if(outside!=null && outside>0) throw new RenException("结束时间早于已归属账单，不能改写历史");

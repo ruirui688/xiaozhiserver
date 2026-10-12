@@ -6,7 +6,7 @@ import xiaozhi.common.exception.RenException;
 
 @Data
 public class BillingFilter {
-    private String startDate, endDate, provider, serviceType, agentId, deviceId, modelId, keyword, board;
+    private String startDate, endDate, provider, serviceType, agentId, deviceId, modelId, keyword, board, purpose, level, billId, accountRef;
     private int page = 1;
     private int limit = 20;
     private boolean unattributed;
@@ -19,7 +19,9 @@ public class BillingFilter {
     public void validate() {
         if (page < 1 || limit < 1 || limit > 100 || page > 1_000_000) throw new RenException("分页参数无效");
         if (!from().isBefore(to()) || Duration.between(from(), to()).toDays() > 732) throw new RenException("日期范围无效，最多查询两年");
-        for (String value : new String[]{provider, serviceType, agentId, deviceId, modelId, keyword, board})
+        if (level!=null && !java.util.Set.of("BILL","DETAIL").contains(level)) throw new RenException("账单层级无效");
+        if (billId!=null && billId.length()>256) throw new RenException("账单标识过长");
+        for (String value : new String[]{provider, serviceType, agentId, deviceId, modelId, keyword, board,purpose,accountRef})
             if (value != null && value.length() > 128) throw new RenException("筛选参数过长");
     }
 }

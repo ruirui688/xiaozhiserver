@@ -31,16 +31,32 @@ public class BillingBenefitService {
             Map.entry("specification", "Specification"), Map.entry("specificationUnit", "SpecificationUnit"));
 
     public Map<String, Object> overview(boolean accountView) {
-        String workspace = queries.workspace();
-        if (accountView) BillingQueryService.requireAdmin();
+        return overview(accountView,null,null);
+    }
+    public Map<String, Object> overview(boolean accountView,String provider,String accountRef) {
+        String workspace = null;
+        if (accountView) BillingQueryService.requireAdmin(); else workspace = queries.workspace();
         List<Map<String, Object>> packages = new ArrayList<>(), balances = new ArrayList<>(), sources = new ArrayList<>();
         read("VOLCENGINE", volcengine.accountRef(), volcengine.enabled(), workspace, accountView, packages, balances, sources);
         read("VOLCENGINE_SPEECH", speech.snapshotRef(), speech.enabled(), workspace, accountView, packages, balances, sources);
         // Account cash/credit cannot be attributed to a workspace just because it uses this API key.
         if (accountView) read("DEEPSEEK", deepseek.accountRef(), deepseek.enabled(), workspace, true, packages, balances, sources);
+        if(provider!=null && !provider.isBlank()) {
+            packages.removeIf(item->!provider.equals(BillingBenefitReadModel.canonicalProvider(Objects.toString(item.get("provider"),""))));
+            balances.removeIf(item->!provider.equals(item.get("provider")));
+            sources.removeIf(item->!provider.equals(BillingBenefitReadModel.canonicalProvider(item.get("provider").toString())));
+        }
+        if(accountRef!=null && !accountRef.isBlank()) {
+            packages.removeIf(item->!accountRef.equals(item.get("accountRef")));
+            balances.removeIf(item->!accountRef.equals(item.get("accountRef")));
+            sources.removeIf(item->!accountRef.equals(item.get("accountRef")));
+        }
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("workspaceId", workspace); result.put("canManage", BillingQueryService.canManage()); result.put("accountView", accountView);
         result.put("sources", sources); result.put("packages", packages); result.put("balances", balances);
+        result.put("assets",BillingBenefitReadModel.assets(packages));
+        result.put("scope",accountView?"ACCOUNT":"WORKSPACE");
+        result.put("coverage",Map.of("status","CONFIGURED_SOURCES_ONLY","complete",false));
         result.put("notices", List.of(
                 "此处为最近同步的当前额度快照，不受调用记录的日期、模型、智能体和设备筛选影响。",
                 "资源包额度及充值/赠送余额不是消费金额，不能与官方应付或已付金额相加。",
@@ -51,7 +67,7 @@ public class BillingBenefitService {
     }
 
     public Map<String, Object> sync() {
-        BillingQueryService.requireAdmin(); queries.workspace();
+        BillingQueryService.requireAdmin();
         if (!running.compareAndSet(false, true)) throw new RenException("额度同步正在执行");
         List<Map<String, Object>> results = new ArrayList<>();
         try {
@@ -102,18 +118,23 @@ public class BillingBenefitService {
     private void read(String provider, String account, boolean enabled, String workspace, boolean accountView,
             List<Map<String, Object>> packages, List<Map<String, Object>> balances, List<Map<String, Object>> sources) {
         Map<String, Object> source = new LinkedHashMap<>(); source.put("provider", provider);
-        var rows = jdbc.queryForList("SELECT data_json,status,synced_at FROM ai_billing_benefit_snapshot WHERE provider=? AND account_ref=?", provider, account);
+        if(accountView)source.put("accountRef","VOLCENGINE_SPEECH".equals(provider)?volcengine.accountRef():account);
+        source.put("coverage","VOLCENGINE_SPEECH".equals(provider)?speech.queryScope():Map.of("scope","SUPPLIER_API_RETURNED_RECORDS"));
+        var rows = jdbc.queryForList("SELECT data_json,status,synced_at,attempted_at FROM ai_billing_benefit_snapshot WHERE provider=? AND account_ref=?", provider, account);
         String status = !enabled ? "NOT_CONFIGURED" : rows.isEmpty() ? "NEVER_SYNCED" : rows.getFirst().get("status").toString();
         source.put("status", status); source.put("message", message(provider, status));
         source.put("lastSyncedAt", rows.isEmpty() ? null : rows.getFirst().get("synced_at")); sources.add(source);
+        source.put("lastSuccessAt",rows.isEmpty()?null:rows.getFirst().get("synced_at"));
+        source.put("lastAttemptAt",rows.isEmpty()?null:rows.getFirst().get("attempted_at"));source.put("lastAttemptStatus",status);
         if (rows.isEmpty() || rows.getFirst().get("data_json") == null) return;
         Map<String, Object> data = support.object(rows.getFirst().get("data_json").toString());
         Instant now = Instant.now();
         for (Map<String, Object> stored : (List<Map<String, Object>>) data.getOrDefault("packages", List.of())) {
             Map<String, Object> item = new LinkedHashMap<>(stored);
+            item.put("sourceProvider",provider);item.put("sourceStatus",status);item.put("lastSyncedAt",rows.getFirst().get("synced_at"));
             var bindings = jdbc.queryForList("SELECT workspace_id,agent_id,device_id FROM ai_billing_binding WHERE provider=? AND account_ref=? AND valid_from<=? AND (valid_to IS NULL OR valid_to>?) AND (scope_type='ACCOUNT' OR (scope_type='RESOURCE' AND scope_value=?))",
                     "VOLCENGINE_SPEECH".equals(provider) ? "VOLCENGINE" : provider, item.get("accountRef"), BillingSupport.time(now), BillingSupport.time(now), item.get("instanceNo"));
-            boolean owned = bindings.size() == 1 && workspace.equals(bindings.getFirst().get("workspace_id"));
+            boolean owned = workspace != null && bindings.size() == 1 && workspace.equals(bindings.getFirst().get("workspace_id"));
             if (!accountView && !owned) continue;
             item.put("attributionLevel", bindings.size() != 1 ? "UNASSIGNED" :
                     bindings.getFirst().get("device_id") != null ? "DEVICE" : bindings.getFirst().get("agent_id") != null ? "AGENT" : "WORKSPACE");

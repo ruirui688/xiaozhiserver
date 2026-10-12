@@ -130,6 +130,9 @@ async def get_private_config_from_api(config, device_id, client_id, *, observer=
         raise agent_result
 
     private_config = agent_result if not isinstance(agent_result, Exception) else {}
+    # Observe missing billing context without changing the existing model fallback.
+    from core.metering.health import context_received
+    context_received(private_config)
     if correct_words:
         private_config["correct_words"] = correct_words
     return apply_legacy_runtime_view(private_config)

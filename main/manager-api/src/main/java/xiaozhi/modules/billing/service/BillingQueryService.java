@@ -33,19 +33,19 @@ public class BillingQueryService {
         Sql scope = eventScope(workspace, filter);
         Map<String, Object> result = summary(scope);
         result.put("workspaceId",workspace);
+        result.put("scope","WORKSPACE");result.put("workspaceName",workspaceName(workspace));
+        result.put("supportedFilters",Map.of("usage",List.of("startDate","endDate","provider","serviceType","agentId","deviceId","modelId","keyword","board","purpose"),"costs",List.of("startDate","endDate","provider","serviceType","agentId","deviceId")));
         addCosts(result, billScope(workspace, filter));
+        if(text(filter.getModelId()) || text(filter.getPurpose())){result.put("costStatus","UNSUPPORTED_FILTER");result.put("costs",List.of());}
         result.put("trend", jdbc.queryForList("SELECT DATE_FORMAT(DATE_ADD(e.started_at,INTERVAL 8 HOUR),'%Y-%m-%d') date,COUNT(*) callCount FROM ai_billing_usage_event e" + scope.text + " GROUP BY date ORDER BY date", scope.args.toArray()));
         Sql bills = billScope(workspace, filter);
         result.put("lastSyncAt", jdbc.queryForObject("SELECT MAX(b.synced_at) FROM ai_billing_bill b" + bills.text, Object.class, bills.args.toArray()));
         result.put("lastSyncedAt",result.get("lastSyncAt"));
         result.put("coverageStatus", "仅展示已采集用量；未返回的供应商用量不补零");
-        String syncStatus=volcengine.enabled() ? "NOT_SYNCED" : "DISABLED";
-        if(canManage()) {
-            var runs=jdbc.queryForList("SELECT status FROM ai_billing_sync_run WHERE provider='VOLCENGINE' ORDER BY started_at DESC LIMIT 1");
-            if(!runs.isEmpty())syncStatus=runs.getFirst().get("status").toString();
-        }
+        String syncStatus=result.get("lastSyncAt")==null ? "NO_ATTRIBUTED_RECORDS" : "ATTRIBUTED_RECORDS_ONLY";
         result.put("syncStatus",syncStatus);
-        result.put("meteringStatus",canManage() ? outbox.status() : Map.of("status","COLLECTED_RECORDS_ONLY"));
+        result.put("syncScope","WORKSPACE_ATTRIBUTED_RECORDS");
+        result.put("meteringStatus",Map.of("status","COLLECTED_RECORDS_ONLY"));
         return result;
     }
 
@@ -54,8 +54,10 @@ public class BillingQueryService {
         String workspace = workspace(); filter.validate();
         String column = groupBy + "_id";
         Sql events = eventScope(workspace, filter), bills = billScope(workspace, filter);
-        String candidates = "SELECT e." + column + " id FROM ai_billing_usage_event e" + events.text + " UNION SELECT b." + column + " id FROM ai_billing_bill b" + bills.text;
-        List<Object> params = new ArrayList<>(events.args); params.addAll(bills.args);
+        boolean unsupportedCosts=text(filter.getModelId()) || text(filter.getPurpose());
+        String candidates = "SELECT DISTINCT e." + column + " id FROM ai_billing_usage_event e" + events.text;
+        List<Object> params = new ArrayList<>(events.args);
+        if(!unsupportedCosts){candidates+=" UNION SELECT b." + column + " id FROM ai_billing_bill b" + bills.text;params.addAll(bills.args);}
         long count = jdbc.queryForObject("SELECT COUNT(*) FROM (" + candidates + ") groups_all WHERE id IS NOT NULL", Long.class, params.toArray());
         List<Object> pageArgs = new ArrayList<>(params); pageArgs.add(filter.getLimit()); pageArgs.add((filter.getPage()-1)*filter.getLimit());
         List<Map<String, Object>> rows = jdbc.queryForList("SELECT id FROM (" + candidates + ") groups_all WHERE id IS NOT NULL ORDER BY id LIMIT ? OFFSET ?", pageArgs.toArray());
@@ -66,7 +68,8 @@ public class BillingQueryService {
             Object name = jdbc.queryForObject("SELECT MAX(e." + nameColumn + ") FROM ai_billing_usage_event e" + eventGroup.text, Object.class, eventGroup.args.toArray());
             row.put("name", name == null ? id : name);
             if ("device".equals(groupBy)) row.put("board", jdbc.queryForObject("SELECT MAX(e.device_board) FROM ai_billing_usage_event e" + eventGroup.text, Object.class, eventGroup.args.toArray()));
-            addCosts(row, bills.copy().and("b." + column + "=?", id));
+            if(unsupportedCosts){row.put("costStatus","UNSUPPORTED_FILTER");row.put("costs",List.of());}
+            else addCosts(row, bills.copy().and("b." + column + "=?", id));
         }
         return new PageData<>(rows, count);
     }
@@ -86,10 +89,14 @@ public class BillingQueryService {
 
     public PageData<Map<String, Object>> bills(BillingFilter filter) {
         String workspace = workspace(); filter.validate(); Sql scope;
+        if(text(filter.getModelId()) || text(filter.getPurpose()))throw new RenException("官方账单不支持按内部模型或调用用途筛选");
+        if(filter.isUnattributed() && (text(filter.getAgentId()) || text(filter.getDeviceId()) || text(filter.getBoard())))
+            throw new RenException("未归属账单不支持按智能体、设备或型号筛选");
         if (filter.isUnattributed()) { requireAdmin(); scope = billScope(null, filter); }
         else scope = billScope(workspace, filter);
         // Statement detail view retains parent cash payment fields; only aggregate queries choose a layer.
         scope.text=scope.text.replace(CANONICAL_BILL,"");
+        scope.eq("b.level",filter.getLevel()).eq("b.bill_id",filter.getBillId()).eq("b.account_ref",filter.getAccountRef());
         long count = jdbc.queryForObject("SELECT COUNT(*) FROM ai_billing_bill b" + scope.text, Long.class, scope.args.toArray());
         List<Object> params = new ArrayList<>(scope.args); params.add(filter.getLimit()); params.add((filter.getPage()-1)*filter.getLimit());
         var rows = jdbc.queryForList("SELECT b.id,b.workspace_id workspaceId,b.provider,b.account_ref accountRef,b.bill_id billId,b.bill_detail_id billDetailId,b.level,b.bill_period billPeriod,b.expense_begin expenseBegin,b.expense_end expenseEnd,b.product,b.service_type serviceType,b.project,b.resource_id resourceId,b.currency,b.settlement_currency settlementCurrency,b.payable_amount payableAmount,b.paid_amount paidAmount,b.unpaid_amount unpaidAmount,b.coupon_amount couponAmount,b.settlement_type settlementType,b.pay_status payStatus,b.bill_category billCategory,b.agent_id agentId,b.device_id deviceId,b.attribution_level attributionLevel,b.source,b.evidence_hash evidenceHash,b.synced_at syncedAt FROM ai_billing_bill b" + scope.text + " ORDER BY b.expense_begin DESC,b.id LIMIT ? OFFSET ?", params.toArray());
@@ -109,6 +116,7 @@ public class BillingQueryService {
     public Map<String, Object> options() {
         String workspace = workspace(); Map<String, Object> result = new LinkedHashMap<>();
         result.put("workspaceId", workspace); result.put("canManage", canManage());
+        result.put("workspaceName",workspaceName(workspace));result.put("scope","WORKSPACE");
         result.put("providers", jdbc.queryForList("SELECT provider FROM ai_billing_usage_event WHERE workspace_id=? UNION SELECT provider FROM ai_billing_bill WHERE workspace_id=? ORDER BY provider", String.class, workspace, workspace));
         result.put("serviceTypes", List.of("LLM", "ASR", "TTS", "REALTIME", "EMBEDDING", "OTHER"));
         result.put("agents", jdbc.queryForList("SELECT id,COALESCE(MAX(name),id) name FROM (SELECT agent_id id,agent_name name FROM ai_billing_usage_event WHERE workspace_id=? AND agent_id IS NOT NULL UNION ALL SELECT id,agent_name name FROM ai_agent WHERE workspace_id=? UNION ALL SELECT agent_id id,NULL name FROM ai_billing_bill WHERE workspace_id=? AND agent_id IS NOT NULL) history GROUP BY id",workspace,workspace,workspace));
@@ -148,7 +156,7 @@ public class BillingQueryService {
 
     private Sql eventScope(String workspace, BillingFilter f) {
         Sql sql = new Sql(" WHERE e.workspace_id=?", workspace).and("e.started_at>=?", BillingSupport.time(f.from())).and("e.started_at<?", BillingSupport.time(f.to()));
-        sql.eq("e.provider", f.getProvider()).eq("e.service_type", f.getServiceType()).eq("e.agent_id", f.getAgentId()).eq("e.device_id", f.getDeviceId()).eq("e.model_id", f.getModelId()).eq("e.device_board", f.getBoard());
+        sql.eq("e.provider", f.getProvider()).eq("e.service_type", f.getServiceType()).eq("e.agent_id", f.getAgentId()).eq("e.device_id", f.getDeviceId()).eq("e.model_id", f.getModelId()).eq("e.device_board", f.getBoard()).eq("e.purpose",f.getPurpose());
         if (text(f.getKeyword())) sql.and("(e.agent_name LIKE ? OR e.device_name LIKE ? OR e.device_id LIKE ?)", "%"+f.getKeyword()+"%", "%"+f.getKeyword()+"%", "%"+f.getKeyword()+"%");
         return sql;
     }
@@ -161,11 +169,18 @@ public class BillingQueryService {
         sql.and(workspace==null ? "(b.expense_end<=? OR b.expense_end IS NULL)" : "b.expense_end<=?", BillingSupport.time(f.to()));
         sql.text += CANONICAL_BILL;
         sql.eq("b.provider", f.getProvider()).eq("b.service_type", f.getServiceType()).eq("b.agent_id", f.getAgentId()).eq("b.device_id", f.getDeviceId()).eq("b.model_id", f.getModelId());
-        if (text(f.getBoard()) || text(f.getKeyword())) {
+        if(workspace==null && text(f.getKeyword())) {
+            String pattern="%"+f.getKeyword()+"%";
+            sql.and("(b.bill_id LIKE ? OR b.product LIKE ? OR b.project LIKE ? OR b.resource_id LIKE ?)",pattern,pattern,pattern,pattern);
+        } else if (text(f.getBoard()) || text(f.getKeyword())) {
             Sql evidence = eventScope(workspace, f); evidence.text += " AND e.device_id=b.device_id";
             sql.text += " AND EXISTS (SELECT 1 FROM ai_billing_usage_event e" + evidence.text + ")"; sql.args.addAll(evidence.args);
         }
         return sql;
+    }
+    private String workspaceName(String id) {
+        var rows=jdbc.queryForList("SELECT name FROM sys_workspace WHERE id=?",String.class,id);
+        return rows.isEmpty()?id:rows.getFirst();
     }
     private static boolean text(String value) { return value != null && !value.isBlank(); }
     static class Sql {

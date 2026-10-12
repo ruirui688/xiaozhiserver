@@ -54,7 +54,8 @@ export function decimalText(value, minDecimals = 0) {
   }
   if (!/^-?\d+(?:\.\d+)?$/.test(text)) return '—';
   const [whole, fraction = ''] = text.split('.');
-  return whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (fraction || minDecimals ? `.${fraction.padEnd(minDecimals, '0')}` : '');
+  const significantFraction = fraction.replace(/0+$/, '');
+  return whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (significantFraction || minDecimals ? `.${significantFraction.padEnd(minDecimals, '0')}` : '');
 }
 
 export function amountText(value, currency) {

@@ -2,7 +2,7 @@
   <div class="billing-records">
     <el-table v-if="kind === 'agents' || kind === 'devices'" :data="rows" row-key="id" empty-text="当前筛选范围暂无记录">
       <el-table-column :label="kind === 'agents' ? '智能体' : '设备'" min-width="160">
-        <template slot-scope="scope"><el-button type="text" @click="$emit('drill', scope.row)">{{ scope.row.name || scope.row.id || '未关联资源' }}</el-button><small class="secondary">{{ scope.row.id }}</small></template>
+        <template slot-scope="scope"><el-button type="text" @click="$emit('drill', scope.row)">{{ scope.row.name || (scope.row.id ? '历史资源' : '空间公共任务') }}</el-button><small class="secondary">{{ kind === 'devices' ? '按调用时的设备归属' : '含设备调用及后台任务' }}</small></template>
       </el-table-column>
       <el-table-column v-if="kind === 'devices'" prop="board" label="设备型号" min-width="100" />
       <el-table-column label="调用 / 会话" width="110"><template slot-scope="scope">{{ number(scope.row.callCount) }} / {{ number(scope.row.sessionCount) }}</template></el-table-column>

@@ -1,18 +1,20 @@
 <template>
-  <el-dialog title="账单同步与归属管理" :visible="visible && canManage" width="min(1100px, 94vw)" :close-on-click-modal="false" :show-close="!busy" :close-on-press-escape="!busy" @close="$emit('close')">
+  <el-dialog title="数据接入与归属管理" :visible="visible && canManage" width="min(1100px, 94vw)" :close-on-click-modal="false" :show-close="!busy" :close-on-press-escape="!busy" @close="$emit('close')">
     <div v-if="canManage" class="billing-admin">
       <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
       <el-alert v-if="result" :title="result" type="success" :closable="false" show-icon />
       <el-tabs v-model="tab">
-        <el-tab-pane label="同步与导入" name="sync">
+        <el-tab-pane label="数据来源与采集" name="sync">
+          <BillingAdminHealth v-if="visible && canManage" />
           <h3>火山引擎官方账单</h3>
           <p class="hint">同步供应商提供的账单金额；未匹配归属的项目保留在平台账单中。</p>
+          <p class="hint">当前同步账号：{{ options.volcengine && options.volcengine.accountRef || '尚未配置' }}。账号费用可直接查看，工作空间归属不是查看账号账单的前提。</p>
           <div class="inline-controls">
             <el-date-picker v-model="billPeriod" type="month" value-format="yyyy-MM" placeholder="选择账期" :clearable="false" />
             <el-button type="primary" :loading="busy" :disabled="!options.volcengineSyncEnabled || busy || !billPeriod" @click="sync">同步账单</el-button>
           </div>
           <p v-if="!options.volcengineSyncEnabled" class="hint">尚未开通火山引擎账单同步，可先导入官方账单。</p>
-          <h3>导入官方账单</h3>
+          <details class="admin-disclosure"><summary>需要人工导入官方账单？</summary>
           <p class="hint">只导入供应商确认的金额。用量报表、自行算价或按比例分摊的金额不能作为实际消费导入。请按模板整理供应商账单原始字段，保留账单标识与币种。人工导入会单独标记，系统无法自动核验文件是否来自供应商。</p>
           <el-form label-width="110px" class="import-form">
             <el-form-item label="供应商"><el-select v-model="importProvider" :disabled="busy"><el-option label="火山引擎" value="VOLCENGINE" /><el-option label="DeepSeek" value="DEEPSEEK" /></el-select><el-button type="text" :disabled="busy" @click="downloadTemplate">下载字段模板</el-button></el-form-item>
@@ -21,13 +23,14 @@
             <el-form-item><el-checkbox v-model="confirmOfficial" :disabled="busy">确认金额来自供应商官方账单</el-checkbox></el-form-item>
             <el-form-item><el-button type="primary" :loading="busy" :disabled="busy || !file || !accountRef.trim() || !confirmOfficial" @click="importBill">导入账单</el-button></el-form-item>
           </el-form>
+          </details>
         </el-tab-pane>
-        <el-tab-pane label="供应商项目归属" name="bindings">
+        <el-tab-pane label="高级：工作空间归属" name="bindings">
           <div class="section-heading"><p class="hint">按供应商项目、资源或独占账号，将指定有效期内的账单归属到当前工作空间。只在证据足够时选择智能体或设备。</p><el-button :disabled="busy" @click="loadBindings">刷新</el-button></div>
           <el-table :data="bindings" v-loading="loading" empty-text="当前工作空间暂无归属映射">
             <el-table-column label="供应商 / 账号" min-width="130"><template slot-scope="scope">{{ label(scope.row.provider) }}<small class="hint">{{ scope.row.accountRef }}</small></template></el-table-column>
             <el-table-column label="供应商项目 / 资源" min-width="150"><template slot-scope="scope">{{ scopeName(scope.row.scopeType) }}<small class="hint">{{ scope.row.scopeValue }}</small></template></el-table-column>
-            <el-table-column label="归属" min-width="160"><template slot-scope="scope">{{ scope.row.deviceId || scope.row.agentId || '整个工作空间' }}</template></el-table-column>
+            <el-table-column label="归属" min-width="160"><template slot-scope="scope">{{ resourceName(scope.row) }}</template></el-table-column>
             <el-table-column label="有效期（北京时间）" min-width="190"><template slot-scope="scope">{{ time(scope.row.validFrom) }}<small class="hint">至 {{ scope.row.validTo ? time(scope.row.validTo) : '长期有效' }}</small></template></el-table-column>
             <el-table-column label="操作" width="80"><template slot-scope="scope"><el-button type="text" :disabled="busy" @click="removeBinding(scope.row)">撤销</el-button></template></el-table-column>
           </el-table>
@@ -45,6 +48,7 @@
             <el-form-item label="依据说明" class="full"><el-input v-model="form.note" type="textarea" :rows="2" maxlength="500" placeholder="说明该项目、资源或账号由此归属主体独占使用的依据" /></el-form-item>
           </el-form>
           <p class="hint">映射不会按用量比例拆分账单。已用于账单归属的映射不能直接删除；变更应使用不重叠的有效期。</p>
+          <p class="hint">新映射保存后，请重新同步或导入对应账期，让官方账单重新匹配归属。独占使用依据不足时保留未归属。</p>
           <el-button type="primary" :loading="busy" :disabled="busy" @click="saveBinding">保存映射</el-button>
         </el-tab-pane>
       </el-tabs>
@@ -53,6 +57,7 @@
 </template>
 <script>
 import Api from '@/apis/api';
+import BillingAdminHealth from './BillingAdminHealth.vue';
 import { billingLabel, billingTime, chinaDate, decimalText } from '@/utils/billing';
 
 function newBinding() {
@@ -60,6 +65,7 @@ function newBinding() {
 }
 
 export default {
+  components: { BillingAdminHealth },
   props: { visible: Boolean, options: { type: Object, default: () => ({}) }, workspaceId: String },
   data() { return { tab: 'sync', billPeriod: chinaDate().slice(0, 7), busy: false, loading: false, error: '', result: '', bindings: [], bindingPage: 1, bindingTotal: 0, generation: 0, form: newBinding(), importProvider: 'VOLCENGINE', accountRef: '', file: null, confirmOfficial: false }; },
   computed: { canManage() { return this.options.canManage === true; } },
@@ -69,6 +75,7 @@ export default {
   },
   beforeDestroy() { this.generation++; },
   methods: {
+    resourceName(row) { const list = row.deviceId ? this.options.devices || [] : this.options.agents || []; const item = list.find(item => item.id === (row.deviceId || row.agentId)); return item && item.name || (row.deviceId ? '历史设备' : row.agentId ? '历史智能体' : this.options.workspaceName || '整个工作空间'); },
     label: billingLabel, time: billingTime,
     scopeName(value) { return ({ PROJECT: '供应商项目', RESOURCE: '供应商资源', ACCOUNT: '独占账号' })[value] || value; },
     current(generation) { return generation === this.generation && this.canManage && this.workspaceId === localStorage.getItem('currentWorkspaceId'); },

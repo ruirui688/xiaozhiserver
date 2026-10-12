@@ -89,6 +89,7 @@ public class ShiroConfig {
         filterMap.put("/user/retrieve-password", "anon");
         // 将config路径使用server服务过滤器
         filterMap.put("/config/billing/usage", "server");
+        filterMap.put("/config/billing/health", "server");
         filterMap.put("/config/**", "server");
         filterMap.put("/billing/**", "oauth2");
         filterMap.put("/user/plugin-configs/**", "oauth2");

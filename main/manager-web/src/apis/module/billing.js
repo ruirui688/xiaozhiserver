@@ -26,6 +26,11 @@ function request(method, path, data, { multipart = false, binary = false } = {})
 }
 
 export default {
+  accounts: () => request('GET', '/accounts'),
+  accountOverview: filters => request('GET', '/account-overview', filters),
+  accountBills: filters => request('GET', '/account-bills', filters),
+  syncStatus: filters => request('GET', '/sync-status', filters),
+  collectionHealth: filters => request('GET', '/collection-health', filters),
   overview: filters => request('GET', '/overview', filters),
   groups: filters => request('GET', '/groups', filters),
   events: filters => request('GET', '/events', filters),

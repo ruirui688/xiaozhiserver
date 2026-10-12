@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 
 from .context import current_scope
 from .outbox import utc_now
+from . import health
 
 _outbox = None
 _NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -79,6 +80,7 @@ class _NoUsageCall:
 
 def begin_call(provider, service_type, *, scope=None, logical_call_id=None, request_id=None):
     scope = scope or current_scope.get() or getattr(provider, "_billing_scope", None)
+    health.call_started(scope)
     if scope is None:
         return _NoUsageCall()
     model = scope.model(service_type, provider)

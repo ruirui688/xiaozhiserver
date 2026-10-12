@@ -18,7 +18,7 @@ import xiaozhi.modules.security.user.SecurityUser;
 class BillingBenefitServiceTest {
     JdbcTemplate jdbc; BillingBenefitService service; VolcengineBillingClient volc; DeepSeekBalanceClient deepseek;
     ObjectMapper mapper; MockedStatic<SecurityUser> security; UserDetail user;
-    VolcengineSpeechBenefitClient speech;
+    VolcengineSpeechBenefitClient speech; BillingQueryService queries;
 
     @BeforeEach void setUp() throws Exception {
         var ds = new JdbcDataSource();
@@ -28,7 +28,7 @@ class BillingBenefitServiceTest {
                 .replace("ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", ""));
         jdbc.execute("CREATE TABLE ai_billing_binding(provider VARCHAR,account_ref VARCHAR,workspace_id VARCHAR,agent_id VARCHAR,device_id VARCHAR,scope_type VARCHAR,scope_value VARCHAR,valid_from TIMESTAMP,valid_to TIMESTAMP)");
         mapper = new ObjectMapper().findAndRegisterModules();
-        var queries = mock(BillingQueryService.class); when(queries.workspace()).thenReturn("workspace-a");
+        queries = mock(BillingQueryService.class); when(queries.workspace()).thenReturn("workspace-a");
         volc = mock(VolcengineBillingClient.class); deepseek = mock(DeepSeekBalanceClient.class);
         when(volc.enabled()).thenReturn(true); when(volc.accountRef()).thenReturn("volc-account");
         when(deepseek.accountRef()).thenReturn("deepseek-account");
@@ -54,6 +54,16 @@ class BillingBenefitServiceTest {
         jdbc.update("DELETE FROM ai_billing_binding"); bind("RESOURCE", "package-1", "workspace-a");
         var packages = list(service.overview(false), "packages");
         assertEquals(1, packages.size()); assertEquals("25.000000001", packages.getFirst().get("availableAmount"));
+    }
+
+    @Test void accountOverviewAndRefreshDoNotDependOnAnActiveWorkspace() {
+        when(queries.workspace()).thenThrow(new RenException("no selected workspace"));
+        service.sync();
+        var result=service.overview(true,"VOLCENGINE","volc-account");
+        assertNull(result.get("workspaceId"));assertEquals("ACCOUNT",result.get("scope"));
+        assertEquals(1,list(result,"assets").size());
+        assertTrue(list(result,"sources").stream().allMatch(row->"volc-account".equals(row.get("accountRef"))));
+        verify(queries,never()).workspace();
     }
 
     @Test void nonAdminCannotReadAccountBalancesOrTriggerSupplierQuery() {

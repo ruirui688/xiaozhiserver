@@ -115,6 +115,30 @@ class BillingLedgerTest {
         assertThrows(RenException.class,()->bindings.delete(id));
     }
 
+    @Test void mysqlLocalDateTimeContextStillEnforcesCallTimeAndReferencedBindingHistory() {
+        var mysql=BillingJdbcTimeFixture.localDateTimes(jdbc);var context=deviceContext();
+        var mysqlContexts=new BillingContextService(mysql,new BillingSupport(mapper),mock(ModelConfigDao.class));
+        String id=context.get("context_id").toString(),token=context.get("context_token").toString();
+        Instant issuedAt=Instant.parse("2026-10-01T00:00:00Z");
+        jdbc.update("UPDATE ai_billing_context SET issued_at=? WHERE id=?",BillingSupport.time(issuedAt),id);
+        assertInstanceOf(LocalDateTime.class,mysql.queryForMap("SELECT issued_at FROM ai_billing_context WHERE id=?",id).get("issued_at"));
+        assertEquals("workspace-a",mysqlContexts.verify(id,token,"model-a",issuedAt).get("workspace_id"));
+        assertThrows(RenException.class,()->mysqlContexts.verify(id,token,"model-a",issuedAt.minusSeconds(301)));
+        assertThrows(RenException.class,()->mysqlContexts.verify(id,"forged","model-a",issuedAt));
+
+        var request=binding();var saved=tx.execute(status->bindings.save(request));
+        bills.save(List.of(bill("BILL","mysql-time-bill",null,"10.20")));
+        var mysqlBindings=new BillingBindingService(mysql,queries);
+        request.setId(saved.get("id").toString());request.setValidTo(Instant.parse("2026-10-03T00:00:00Z"));
+        assertEquals("RETIRED",tx.execute(status->mysqlBindings.save(request)).get("status"));
+        request.setValidTo(Instant.parse("2026-10-02T00:00:00Z"));
+        assertEquals("RETIRED",tx.execute(status->mysqlBindings.save(request)).get("status"));
+        request.setValidTo(Instant.parse("2026-10-04T00:00:00Z"));
+        assertThrows(RenException.class,()->tx.execute(status->mysqlBindings.save(request)));
+        request.setValidTo(Instant.parse("2026-10-01T00:30:00Z"));
+        assertThrows(RenException.class,()->tx.execute(status->mysqlBindings.save(request)));
+    }
+
     @Test void partialImportedDetailsDoNotReplaceAParentBillAndCompleteSnapshotDoes() {
         tx.executeWithoutResult(status->bindings.save(binding()));
         bills.save(List.of(bill("BILL","bill-parent",null,"20.00"),bill("DETAIL","bill-parent","partial-detail","5.00")));
@@ -202,6 +226,32 @@ class BillingLedgerTest {
         var costs=(List<Map<String,Object>>)row.get("costs");
         assertEquals(new BigDecimal("0.123456789"),costs.getFirst().get("payableAmount"));
         assertNull(costs.getFirst().get("paidAmount"));
+    }
+
+    @Test void purposeAndModelFiltersCannotMisrepresentUnsupportedOfficialCosts() {
+        accept(event(deviceContext(),"event-filter-0001"));
+        tx.executeWithoutResult(status->bindings.save(binding()));
+        bills.save(List.of(bill("BILL","bill-filter",null,"5.0")));
+        var filtered=filter();filtered.setPurpose("CONVERSATION");
+        var group=queries.groups(filtered,"agent").getList().getFirst();
+        assertEquals("UNSUPPORTED_FILTER",group.get("costStatus"));assertEquals(List.of(),group.get("costs"));
+        assertThrows(RenException.class,()->queries.bills(filtered));
+        filtered.setPurpose("BENCHMARK");assertEquals(0,queries.events(filtered).getTotal());
+        assertEquals(0,queries.groups(filtered,"agent").getTotal());
+        filtered.setPurpose(null);filtered.setModelId("model-a");
+        assertEquals("UNSUPPORTED_FILTER",queries.groups(filtered,"agent").getList().getFirst().get("costStatus"));
+        assertThrows(RenException.class,()->queries.bills(filtered));
+    }
+
+    @Test void unassignedKeywordSearchUsesSupplierFieldsAndLayerExpansionPreservesParentId() {
+        bills.save(List.of(bill("BILL","find-me",null,"5.0"),bill("DETAIL","find-me","detail-1","5.0")));
+        var filtered=filter();filtered.setUnattributed(true);filtered.setKeyword("find-me");filtered.setLevel("BILL");
+        assertEquals(1,queries.bills(filtered).getTotal());
+        filtered.setLevel("DETAIL");filtered.setBillId("find-me");assertEquals(1,queries.bills(filtered).getTotal());
+        filtered.setAccountRef("other-account");assertEquals(0,queries.bills(filtered).getTotal());
+        filtered.setAccountRef("account-a");assertEquals(1,queries.bills(filtered).getTotal());
+        filtered.setBillId("different");assertEquals(0,queries.bills(filtered).getTotal());
+        filtered.setDeviceId("device-a");assertThrows(RenException.class,()->queries.bills(filtered));
     }
 
     @Test void completeDetailsUseTheirPayableWhileParentCashIsCountedOnlyOnce() {

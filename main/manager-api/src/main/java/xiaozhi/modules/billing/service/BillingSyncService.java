@@ -22,7 +22,7 @@ public class BillingSyncService {
         if(!running.compareAndSet(false,true)) throw new RenException("已有账单同步正在执行");
         String id=UUID.randomUUID().toString();
         try {
-            jdbc.update("INSERT INTO ai_billing_sync_run (id,provider,bill_period,status,created_by,started_at) VALUES (?,'VOLCENGINE',?,'RUNNING',?,?)",id,period,SecurityUser.getUserId(),BillingSupport.time(Instant.now()));
+            jdbc.update("INSERT INTO ai_billing_sync_run (id,provider,account_ref,bill_period,status,created_by,started_at) VALUES (?,'VOLCENGINE',?,?,'RUNNING',?,?)",id,client.accountRef(),period,SecurityUser.getUserId(),BillingSupport.time(Instant.now()));
             List<Map<String,Object>> rows=new ArrayList<>();
             client.fetch("ListBill",period).forEach(value->rows.add(bills.official(value,client.accountRef(),period,false)));
             client.fetch("ListBillDetail",period).forEach(value->rows.add(bills.official(value,client.accountRef(),period,true)));

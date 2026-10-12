@@ -5,7 +5,7 @@ const path = require('node:path');
 const { loadModule, loadVueComponent } = require('./helpers/loadVueComponent.cjs');
 const utils = loadModule('src/utils/billing.js');
 const mocks = billing => ({ '@/apis/api': { __esModule: true, default: { billing } } });
-const page = billing => loadVueComponent('src/views/ModelBillingManagement.vue', mocks(billing));
+const page = billing => loadVueComponent('src/components/billing/BillingWorkspacePanel.vue', mocks(billing));
 const admin = billing => loadVueComponent('src/components/billing/BillingAdminDialog.vue', mocks(billing));
 const benefits = billing => loadVueComponent('src/components/billing/BillingBenefits.vue', mocks(billing));
 const deferred = () => { let resolve, reject; const promise = new Promise((ok, no) => { resolve = ok; reject = no; }); return { promise, resolve, reject }; };
@@ -87,7 +87,7 @@ test('unexpected workspace in response is rejected rather than displayed', async
 
 test('options handle header selecting the same default workspace during initialization', async () => {
   const values = storage(''); const delayed = deferred();
-  const component = page({ options: () => delayed.promise, overview: async () => ({ workspaceId: 'ws-a', callCount: 1 }) });
+  const component = page({ options: () => delayed.promise, overview: async () => ({ workspaceId: 'ws-a', callCount: 1 }), groups: async () => ({ list: [], total: 0 }) });
   const vm = instance(component, { $route: { query: {} }, canManage: false });
   const pending = vm.initialize(); values.set('currentWorkspaceId', 'ws-a');
   delayed.resolve({ workspaceId: 'ws-a', canManage: false }); await pending;
@@ -207,18 +207,9 @@ test('billing route is login-protected and monetary UI is separated from call us
   assert.match(template, /逐调用实际费用/); assert.match(template, /NOT_MATCHED/);
 });
 
-test('current benefits do not request historical overview or validate unrelated dates', async () => {
-  storage(); let calls = 0; let route;
-  const component = page({ overview: () => { calls++; } });
-  const vm = instance(component, { workspaceId: 'ws-a', tab: 'benefits', appliedFilters: { startDate: 'invalid' }, $route: { query: {} }, $router: { replace: value => { route = value; return Promise.resolve(); } } });
-  await vm.loadData(); assert.equal(calls, 0); assert.equal(vm.error, '');
-  vm.navigate(vm.appliedFilters, 'benefits'); assert.equal(route.query.tab, 'benefits');
-  assert.equal(utils.BILLING_TABS.includes('benefits'), true);
-});
-
 test('workspace benefits request has no historical or resource filters and never enables account view for members', async () => {
   storage(); let query;
-  const component = benefits({ benefits: async value => { query = value; return { workspaceId: 'ws-a', canManage: false, accountView: false, sources: [], packages: [] }; } });
+  const component = benefits({ benefits: async value => { query = value; return { scope: 'WORKSPACE', workspaceId: 'ws-a', canManage: false, accountView: false, sources: [], packages: [] }; } });
   const vm = instance(component, { workspaceId: 'ws-a', canManage: false, accountView: true });
   await vm.load(); assert.deepEqual(query, { accountView: false }); assert.equal(vm.accountView, false); assert.equal(vm.error, '');
   assert.equal(component.computed.showBalances.call(vm), false);
@@ -239,7 +230,7 @@ test('benefits account balances require authoritative admin capability and an ac
 
 test('benefits rejects wrong workspace or downgraded account view responses', async () => {
   storage();
-  for (const response of [{ workspaceId: 'ws-b', accountView: true, canManage: true }, { workspaceId: 'ws-a', accountView: false, canManage: true }, { workspaceId: 'ws-a', accountView: true, canManage: false }]) {
+  for (const response of [{ workspaceId: 'ws-b', accountView: true, canManage: true }, { scope: 'WORKSPACE', workspaceId: 'ws-a', accountView: false, canManage: true }, { workspaceId: 'ws-a', accountView: true, canManage: false }]) {
     const component = benefits({ benefits: async () => response });
     const vm = instance(component, { workspaceId: 'ws-a', canManage: true, accountView: true });
     await vm.load(); assert.equal(vm.data, null); assert.match(vm.error, /工作空间或权限不匹配/);
@@ -251,14 +242,14 @@ test('switching benefit scope discards prior account response and workspace swit
   const component = benefits({ benefits: () => ++count === 1 ? first.promise : second.promise });
   const vm = instance(component, { workspaceId: 'ws-a', canManage: true, accountView: true });
   const earlier = vm.load(); vm.accountView = false; const later = vm.load();
-  second.resolve({ workspaceId: 'ws-a', accountView: false, canManage: true, packages: [{ instanceNo: 'workspace-package' }] }); await later;
-  first.resolve({ workspaceId: 'ws-a', accountView: true, canManage: true, packages: [{ instanceNo: 'account-package' }] }); await earlier;
+  second.resolve({ scope: 'WORKSPACE', workspaceId: 'ws-a', accountView: false, canManage: true, packages: [{ instanceNo: 'workspace-package' }] }); await later;
+  first.resolve({ scope: 'ACCOUNT', workspaceId: null, accountView: true, canManage: true, packages: [{ instanceNo: 'account-package' }] }); await earlier;
   assert.equal(vm.data.packages[0].instanceNo, 'workspace-package');
   const switched = deferred();
   const component2 = benefits({ benefits: () => switched.promise });
   const vm2 = instance(component2, { workspaceId: 'ws-a', canManage: true });
   const pending = vm2.load(); values.set('currentWorkspaceId', 'ws-b');
-  switched.resolve({ workspaceId: 'ws-a', accountView: false, canManage: true }); await pending;
+  switched.resolve({ scope: 'WORKSPACE', workspaceId: 'ws-a', accountView: false, canManage: true }); await pending;
   assert.equal(vm2.data, null);
 });
 
@@ -278,7 +269,7 @@ test('benefits sync remains admin-only and stale workspace cannot trigger a muta
 
 test('partial supplier sync preserves source failure and previous snapshot amounts', async () => {
   storage(); let count = 0;
-  const snapshot = { workspaceId: 'ws-a', canManage: true, accountView: false, sources: [{ provider: 'VOLCENGINE', status: 'SYNC_FAILED', lastSyncedAt: '2026-10-01T00:00:00Z' }, { provider: 'DEEPSEEK', status: 'READY' }], packages: [{ instanceNo: 'previous', availableAmount: '12.500' }], balances: [] };
+  const snapshot = { scope: 'WORKSPACE', workspaceId: 'ws-a', canManage: true, accountView: false, sources: [{ provider: 'VOLCENGINE', status: 'SYNC_FAILED', lastSyncedAt: '2026-10-01T00:00:00Z' }, { provider: 'DEEPSEEK', status: 'READY' }], packages: [{ instanceNo: 'previous', availableAmount: '12.500' }], balances: [] };
   const component = benefits({ syncBenefits: async () => { count++; return { status: 'PARTIAL' }; }, benefits: async () => snapshot });
   const vm = instance(component, { workspaceId: 'ws-a', canManage: true });
   await vm.sync(); assert.equal(count, 1); assert.equal(vm.syncError, ''); assert.equal(vm.syncing, false);
@@ -305,19 +296,19 @@ test('benefits API keeps current-account selector separate and sync sends an emp
 test('supplier resource deductions stay quantities with original units and never become currency amounts', () => {
   const component = loadVueComponent('src/components/billing/BillingRecords.vue');
   const fields = component.methods.supplierUsage({ Count: '100.500', Unit: 'token', UseDuration: '60', UseDurationUnit: 'seconds', DeductionCount: '0', DeductionUseDuration: null, payableAmount: '999', currency: 'CNY' });
-  assert.deepEqual(fields, [{ name: '计量数量', value: '100.500 Token' }, { name: '使用时长', value: '60 秒' }, { name: '抵扣数量', value: '0 Token' }, { name: '抵扣时长', value: '—' }]);
+  assert.deepEqual(fields, [{ name: '计量数量', value: '100.5 Token' }, { name: '使用时长', value: '60 秒' }, { name: '抵扣数量', value: '0 Token' }, { name: '抵扣时长', value: '—' }]);
   assert.equal(utils.supplierUsageRows({}).every(item => item.value === '—'), true);
 });
 
 test('speech package purchase and current usage never produce a fabricated supplier balance', async () => {
   storage();
   const speech = Object.freeze({ provider: 'VOLCENGINE_SPEECH', instanceNo: 'speech-1', purchasedAmount: '100.500', currentUsage: '20.250', isShareable: true, totalAmount: null, availableAmount: null, unit: null, expiryTime: '供应商未提供有效期' });
-  const component = benefits({ benefits: async () => ({ workspaceId: 'ws-a', canManage: false, accountView: false, packages: [speech], sources: [] }) });
+  const component = benefits({ benefits: async () => ({ scope: 'WORKSPACE', workspaceId: 'ws-a', canManage: false, accountView: false, packages: [speech], sources: [] }) });
   const vm = instance(component, { workspaceId: 'ws-a', canManage: false });
   await vm.load();
   const row = vm.data.packages[0];
-  assert.equal(vm.quantity(row.purchasedAmount, row.unit), '100.500（单位：—）');
-  assert.equal(vm.quantity(row.currentUsage, row.unit), '20.250（单位：—）');
+  assert.equal(vm.quantity(row.purchasedAmount, row.unit), '100.5（单位：—）');
+  assert.equal(vm.quantity(row.currentUsage, row.unit), '20.25（单位：—）');
   assert.equal(vm.quantity(row.totalAmount, row.unit), '—'); assert.equal(vm.quantity(row.availableAmount, row.unit), '—');
   assert.equal(vm.time(row.expiryTime), '供应商未提供有效期'); assert.equal(vm.time(null), '—');
   assert.equal(vm.shareability(true), '可共享'); assert.equal(vm.shareability(false), '不可共享'); assert.equal(vm.shareability(null), '未知');
@@ -331,7 +322,7 @@ test('anonymous free packages get distinct display identities without inventing 
   const packages = [first, second, Object.freeze({ ...first, accountRef: 'another-account' }), Object.freeze({ ...first, provider: 'VOLCENGINE' })];
   let bindingCalls = 0; let syncArguments;
   const component = benefits({
-    benefits: async () => ({ workspaceId: 'ws-a', accountView: false, canManage: true, sources: [], packages }),
+    benefits: async () => ({ scope: 'WORKSPACE', workspaceId: 'ws-a', accountView: false, canManage: true, sources: [], packages }),
     syncBenefits: async (...args) => { syncArguments = args; },
     createBinding: async () => { bindingCalls++; }
   });

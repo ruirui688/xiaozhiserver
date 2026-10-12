@@ -27,6 +27,13 @@ public class BillingSupport {
         catch (Exception e) { throw new IllegalStateException(e); }
     }
     public static LocalDateTime time(Instant value) { return LocalDateTime.ofInstant(value, ZoneOffset.UTC); }
+    /** DATETIME columns store UTC wall time; JDBC drivers expose either modern or legacy Java types. */
+    public static LocalDateTime databaseTime(Object value) {
+        if (value == null) return null;
+        if (value instanceof LocalDateTime time) return time;
+        if (value instanceof java.sql.Timestamp time) return time.toLocalDateTime();
+        throw new RenException("数据库时间格式无效");
+    }
     public static String service(String value) {
         String type = value == null ? "OTHER" : value.toUpperCase(Locale.ROOT);
         if (Set.of("SLM", "VLLM", "INTENT", "MEMORY").contains(type)) return "LLM";

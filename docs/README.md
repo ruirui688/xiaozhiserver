@@ -20,6 +20,7 @@ source_paths:
 | 实时语音、设备、OTA | [设备交互链路](./architecture/device-interaction-chain.md) | [设备多场景](./architecture/device-scene-management.md)、[固件与 OTA](./device/firmware-build.md) |
 | 人物资料、识别与机器人迎宾 | [人物资源与设备人脸同步](./architecture/person-resource-and-face-sync.md) | [机器人门口迎宾产品化](./architecture/robot-reception-productization.md)说明端云职责、接待数据与协议；再读[安全架构](./architecture/security-architecture.md) |
 | LLM、ASR、TTS 模型 | [模型管理](./models/model-management.md) | [模型评测与配置助手](./architecture/model-benchmark-and-assistant.md) |
+| 计费管理改版规划 | [2026-10-12 计费审计与改版方案](./reports/model-billing-audit-and-redesign-2026-10-12.md) | 账号费用、资源包诊断、工作空间/智能体/设备用量；报告不是已上线功能 |
 | VAD 与端点延迟 | [VAD 低延迟配置](./models/vad-endpointing-low-latency.md) | [设备交互链路](./architecture/device-interaction-chain.md) |
 | 记忆 | [记忆系统](./architecture/memory-system-chain.md) | [PowerMem](./models/powermem-integration.md) |
 | 知识库与切片 | [知识库链路](./architecture/knowledge-base-chain.md) | [RAGFlow](./models/ragflow-integration.md) |

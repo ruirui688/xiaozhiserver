@@ -20,6 +20,7 @@ public class VolcengineSpeechBenefitClient {
     }
     public boolean enabled() { return client.enabled() && !project.isBlank() && !resourceIds.isEmpty() && snapshotRef().length() <= 128; }
     public String snapshotRef() { return client.accountRef() + "/speech/" + project; }
+    public Map<String,Object> queryScope() { return Map.of("scope","CONFIGURED_SPEECH_RESOURCES","project",project,"resourceIds",resourceIds); }
     public List<Map<String, Object>> fetch() {
         if (!enabled()) throw new RenException("尚未配置语音计费项目名称和服务标识");
         List<Map<String, Object>> rows = new ArrayList<>();
