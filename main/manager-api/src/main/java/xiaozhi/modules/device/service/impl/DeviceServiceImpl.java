@@ -224,6 +224,10 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
 
     @Override
     public DeviceReportRespDTO checkDeviceActive(String macAddress, String clientId, DeviceReportReqDTO deviceReport) {
+        // Mobile credentials must only be issued after USER/workspace authorization, never via public OTA.
+        if (macAddress != null && macAddress.startsWith("mobile-")) {
+            throw new RenException("手机语音会话请通过 App 登录建立");
+        }
         DeviceReportRespDTO response = new DeviceReportRespDTO();
         response.setServer_time(buildServerTime());
 

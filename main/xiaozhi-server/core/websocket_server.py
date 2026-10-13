@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import websockets
 from config.logger import setup_logging
@@ -33,7 +33,7 @@ _setup_websockets_logger()
 
 from core.connection import ConnectionHandler
 from config.config_loader import get_config_from_api_async
-from core.auth import AuthManager, AuthenticationError
+from core.auth import AuthManager, AuthenticationError, is_mobile_device
 from core.observability import AUDIO_PREVIEW_PATH, AudioPreviewHub
 from core.utils.modules_initialize import initialize_modules
 from core.utils.util import check_vad_update, check_asr_update
@@ -78,6 +78,7 @@ class WebSocketServer:
 
         # Track active connection handlers for cache invalidation
         self.active_handlers = set()
+        self.active_mobile_devices = set()
         self.max_device_connections = _max_device_connections(
             self.config.get("server", {})
         )
@@ -110,8 +111,6 @@ class WebSocketServer:
         headers = dict(websocket.request.headers)
         if headers.get("device-id", None) is None:
             # 尝试从 URL 的查询参数中获取 device-id
-            from urllib.parse import parse_qs
-
             # 从 WebSocket 请求中获取路径
             request_path = websocket.request.path
             if not request_path:
@@ -122,8 +121,15 @@ class WebSocketServer:
             query_params = parse_qs(parsed_url.query)
 
             def _sanitize_header_value(value: str) -> str:
-                """Strip newlines, carriage returns, and null bytes from header values to prevent header injection."""
+                """Strip control characters before any identity/security decisions."""
                 return value.replace("\r", "").replace("\n", "").replace("\x00", "")
+
+            if any(is_mobile_device(_sanitize_header_value(value)) for value in query_params.get("device-id", [])):
+                # Mobile tickets belong in native HTTP headers, never URLs
+                # which are routinely persisted by proxies and access logs.
+                await websocket.send("认证失败")
+                await websocket.close()
+                return
 
             if "device-id" not in query_params:
                 await websocket.send("端口正常，如需测试连接，请使用ESP32设备或WebSocket客户端")
@@ -145,10 +151,9 @@ class WebSocketServer:
         except AuthenticationError as e:
             auth_headers = dict(websocket.request.headers)
             self.logger.bind(tag=TAG).warning(
-                "WebSocket认证失败: device-id={}, client-id={}, path={}, reason={}".format(
+                "WebSocket认证失败: device-id={}, client-id={}, reason={}".format(
                     auth_headers.get("device-id", ""),
                     auth_headers.get("client-id", ""),
-                    getattr(websocket.request, "path", ""),
                     str(e),
                 )
             )
@@ -163,6 +168,11 @@ class WebSocketServer:
             )
             await websocket.close(code=1013, reason="server capacity reached")
             return
+        mobile_device_id = websocket.request.headers.get("device-id", "")
+        mobile_device_id = mobile_device_id if is_mobile_device(mobile_device_id) else None
+        if mobile_device_id is not None and mobile_device_id in self.active_mobile_devices:
+            await websocket.close(code=1013, reason="mobile session already active")
+            return
         # 创建ConnectionHandler时传入当前server实例
         handler = ConnectionHandler(
             self.config,
@@ -174,12 +184,26 @@ class WebSocketServer:
             self,  # 传入server实例
         )
         self.active_handlers.add(handler)
+        if mobile_device_id is not None:
+            # No await between checking capacity and reserving the identity.
+            # Keep the reservation through cleanup, including initialisation.
+            self.active_mobile_devices.add(mobile_device_id)
         try:
-            await handler.handle_connection(websocket)
+            if mobile_device_id is not None:
+                # Limit paid mobile debugging sessions; the App also closes on leaving the foreground.
+                await asyncio.wait_for(handler.handle_connection(websocket), timeout=1800)
+            else:
+                await handler.handle_connection(websocket)
+        except asyncio.TimeoutError:
+            self.logger.bind(tag=TAG).info(
+                "WebSocket会话超时: mobile={}", mobile_device_id is not None
+            )
         except Exception as e:
             self.logger.bind(tag=TAG).error(f"处理连接时出错: {e}")
         finally:
             self.active_handlers.discard(handler)
+            if mobile_device_id is not None:
+                self.active_mobile_devices.discard(mobile_device_id)
             # 强制关闭连接（如果还没有关闭的话）
             try:
                 # 安全地检查WebSocket状态并关闭
@@ -265,11 +289,16 @@ class WebSocketServer:
 
     async def _handle_auth(self, websocket: websockets.ServerConnection):
         # 先认证，后建立连接
-        if self.auth_enable:
+        is_mobile = is_mobile_device(websocket.request.headers.get("device-id", ""))
+        if is_mobile:
+            query = parse_qs(urlparse(websocket.request.path or "").query)
+            if any(key.lower() in {"authorization", "token", "access_token"} for key in query):
+                raise AuthenticationError("Mobile credentials require HTTP headers")
+        if self.auth_enable or is_mobile:
             headers = dict(websocket.request.headers)
             device_id = headers.get("device-id", None)
             client_id = headers.get("client-id", None)
-            if self.allowed_devices and device_id in self.allowed_devices:
+            if self.allowed_devices and device_id in self.allowed_devices and not is_mobile:
                 # 如果属于白名单内的设备，不校验token，直接放行
                 return
             else:

@@ -1,7 +1,13 @@
 import hmac
 import base64
 import hashlib
+import re
 import time
+
+
+def is_mobile_device(device_id: str | None) -> bool:
+    """Reserve case/whitespace variants too; only canonical signed IDs pass auth."""
+    return isinstance(device_id, str) and device_id.strip().lower().startswith("mobile-")
 
 
 class AuthenticationError(Exception):
@@ -60,6 +66,17 @@ class AuthManager:
         try:
             sig_part, ts_str = token.split(".")
             ts = int(ts_str)
+            if is_mobile_device(username):
+                # Reserved mobile identities require a fresh, dedicated ticket, even if device auth is disabled.
+                age = int(time.time()) - ts
+                if (
+                    re.fullmatch(r"mobile-[0-9a-f]{24}", username) is None
+                    or not isinstance(client_id, str)
+                    or re.fullmatch(r"mobile-voice-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", client_id) is None
+                    or age < -5
+                    or age > 120
+                ):
+                    return False
             if int(time.time()) - ts > self.expire_seconds:
                 return False  # 过期
 

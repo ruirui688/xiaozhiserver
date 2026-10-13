@@ -1132,3 +1132,18 @@ manager-api 与 MySQL 是安排、单次执行历史、重试和状态的唯一�
 - `docs/architecture/reminder-task-center.md`
 
 官方同步时的处理规则：保留 Server Plugin 白名单门控、`device_reminder` 保留名在注册/执行两层对所有其他工具来源及 `mcp_` 别名的失败关闭、Native Qwen/Doubao Realtime 显式不可用、manager-api/MySQL 权威、小程序无本地调度、workspace 资源授权、server secret、device + agent 双重匹配，以及按版本和执行时间区分的 `requestId` 幂等语义。周期锚点、有限滚动、集群预算、无无限队列、退避有效期、分批历史维护和 Python 有界接纳必须共同保留，不能退回每业务一套计时器或每条任务一个线程。不得按智能体广播冒充精确设备投递，不得在设备忙碌时强制插播，不得把 `DELIVERED` 或入队成功描述成物理播放确认。多 Python 实例必须明确路由/共享回执和无设备播放 ACK 的边界。提醒标题属于不可信用户数据；模型上下文必须把列表结果视为数据，日志不得记录标题正文、Authorization、server secret 或其他密钥，只保留标识符和稳定错误码。
+
+## 58. 手机普通用户连续语音会话
+
+新增 modules/mobile 控制平面，复用设备声学协议而非另建聊天接口。独立虚拟手机身份、USER + workspace 写权限、仅原生持有的 120 秒 HMAC 建连凭证和 30 分钟会话上限；显式 Shiro 保护、公开 OTA 的 mobile 前缀拒绝及 Python 认证关闭/白名单不能旁路。Android App 在仓库外工作区实现，服务器仅提供授权与现有语音链路。不会默认隔离智能体记忆、工具和服务扣费。
+
+涉及路径：
+
+- main/manager-api/src/main/java/xiaozhi/modules/mobile/
+- main/manager-api/src/main/java/xiaozhi/modules/device/service/impl/DeviceServiceImpl.java
+- main/manager-api/src/main/java/xiaozhi/modules/security/config/ShiroConfig.java
+- main/xiaozhi-server/core/auth.py
+- main/xiaozhi-server/core/websocket_server.py
+- docs/architecture/device-interaction-chain.md §14
+
+同步官方时保留 mobile 身份专用签发、归属检查、短期强制认证、OTA 防旁路和会话生命周期上限。签发创建采用用户→空间→设备锁序和事务回滚，锁等待后复核权限；手机身份额度查询必须保留专用索引。Python 保留手机请求头凭据、规范身份验证和单进程同身份活动会话上限，不允许无限重连占用资源。不得把管理用户 token 直接作为设备认证，不得为手机冒用实体设备 MAC，不得将 AEC 声明等同真实抑制效果。新增索引通过 Liquibase 发布；本轮手机接入修改未部署生产。可重复验证与真实调用边界见[手机语音链路验收](development/mobile-voice-testing.md)。

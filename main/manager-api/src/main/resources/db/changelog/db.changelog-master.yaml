@@ -1628,3 +1628,10 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/reminder-task-center-20261013.sql
+  - changeSet:
+      id: mobile-voice-device-quota-index-20261013
+      author: Codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/mobile-voice-device-quota-index-20261013.sql

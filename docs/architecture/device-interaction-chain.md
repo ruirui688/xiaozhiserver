@@ -7,6 +7,7 @@ source_paths:
   - main/xiaozhi-server/core
   - main/manager-api/src/main/java/xiaozhi/modules/config
   - main/manager-api/src/main/java/xiaozhi/modules/device
+  - main/manager-api/src/main/java/xiaozhi/modules/mobile
   - main/manager-web/src/components/device
   - main/manager-mobile/src/pages/device
 ---
@@ -1150,3 +1151,19 @@ scripts/dev logs server -f | grep -E "录音识别完成|录音识别失败|查�
 ```
 
 2026-07-11 的源码修复没有构建镜像、没有部署或重启腾讯云服务。生产验证必须等用户手动发布后执行，并同时观察设备串口、ASR 阶段耗时、WebSocket 重连映射和日志脱敏结果。
+
+## 14. 手机连续语音调试（2026-10-13）
+
+独立 Android App 通过管理 API 的 POST /mobile/voice-session 建立普通用户会话。Shiro 显式保护此入口；仅 USER、当前 workspace 与所选智能体一致且有写权限时允许签发。输入为 agentId 和安装 UUID，不接受客户端指定实体 device-id。使用用户/安装/智能体的 SHA-256 派生 mobile- 身份，首次创建独立虚拟设备并绑定所选智能体，后续检查完整归属后复用。它会显示在设备列表，使用智能体真实模型、知识库、工具、记忆、对话日志和服务额度，不是隔离沙盒。
+
+返回 WSS 地址、设备身份、随机 mobile-voice- client-id、HMAC token，120 秒内建连，最长 1800 秒。客户端凭证由 Android 原生持有，不交给界面脚本。公共 OTA 拒绝给 mobile 身份签发 token；Python 对此保留前缀强制校验新鲜凭证，设备白名单和 auth.enabled=false 均不能旁路。物理设备原有凭证时效保持不变。本轮通过新增 Liquibase 迁移补充手机额度查询索引，不新增手机身份表。
+
+手机签发按用户、工作空间、设备的锁序执行事务，锁等待后重新校验授权，失败不遗留半初始化身份。`xiaozhi.mobile-voice.max-devices-per-user-workspace` 默认 10、硬范围 1 至 50；仅约束此手机签发入口创建的身份，不是全平台设备总配额，复用身份不占新名额。查询通过专用 workspace/user/board 索引定位。Python 手机凭据必须在 HTTP 请求头中，拒绝 URL 中传递；同手机每个 Python 进程仅允许一个活动会话，重复连接返回 1013。多实例仍需按手机身份固定路由，不能声称跨实例分布式会话限制已实现。
+
+App 在 hello 与 speech_route(server/server) 均完成后发送 listen start mode auto，持续上传 16 kHz 单声道、60 ms raw Opus，由服务器 VAD/ASR 分句。不能上传 PCM 冒充 Opus。下行 raw Opus 由 App 解码为 24 kHz PCM；hello 回显的是输入参数，不应据此设定播放采样率。
+
+Android 使用 VOICE_COMMUNICATION 和 MODE_IN_COMMUNICATION，绑定录音 session 的 AcousticEchoCanceler 在 getEnabled() 为 true 时才发送 features.aec=true。此声明打开服务端已有的开口打断路径；启用状态不保证实际声学效果，仍需真机验证。若 AEC 不可用/启用失败，App 在 TTS 播放及缓冲排空后的 200 ms 暂停上传，继续录音，随后恢复自动监听；此时保留点击 abort，不承诺语音打断。离开前台、关闭页面、登出或切换空间会释放音频与连接。
+
+验证使用本地桥接模拟、Concentus 与服务器 libopus 双向编解码、Java/Python 单元测试；未以此冒充真机麦克风、回声测试或生产通话。新增 API 与 Python 强制认证需同时发布，本次源码修改未部署。
+
+Android 0.7 使用取消代际隔离旧连接请求，静音不发送代表提交 ASR 的 `listen stop`。无 AEC 播放/打断结束后保留 200 ms 尾音保护，旧播放完成不能释放新播放的上传门控。主动提醒沿现有 TTS 协议接收，不要求前置 STT，不新增日程轮询。重连使用同一安装 UUID 与智能体，因此同一手机日程目标保持稳定。操作步骤及可执行协议探针见[手机语音链路验收](../development/mobile-voice-testing.md)。

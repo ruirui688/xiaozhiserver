@@ -131,6 +131,7 @@ public class ShiroConfig {
         filterMap.put("/agent/*/feishu/**", "oauth2");
         filterMap.put("/device/address-book/lookup", "server");
         filterMap.put("/device/call/forward", "server");
+        filterMap.put("/mobile/voice-session", "oauth2");
         filterMap.put("/device/*/audio-preview-ticket", "oauth2");
         filterMap.put("/device/*/conversation-context/reset", "oauth2");
         filterMap.put("/agent/chat-history/report", "server");
