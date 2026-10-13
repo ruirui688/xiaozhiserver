@@ -22,6 +22,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import xiaozhi.common.utils.Result;
+import xiaozhi.modules.agent.vo.AgentVoicePrintVO;
 import xiaozhi.modules.person.dto.PersonProfileSaveDTO;
 import xiaozhi.modules.person.service.PersonProfileService;
 import xiaozhi.modules.person.vo.PersonAgentOptionVO;
@@ -48,6 +49,13 @@ public class PersonProfileController {
         return new Result<List<PersonAgentOptionVO>>().ok(personProfileService.listWorkspaceAgents());
     }
 
+    @GetMapping("/{id}/voice-print-options")
+    @Operation(summary = "获取人物可关联的声纹")
+    @RequiresPermissions("sys:role:normal")
+    public Result<List<AgentVoicePrintVO>> voicePrintOptions(@PathVariable String id) {
+        return new Result<List<AgentVoicePrintVO>>().ok(personProfileService.listVoicePrintOptions(id));
+    }
+
     @PostMapping
     @Operation(summary = "创建人物档案")
     @RequiresPermissions("sys:role:normal")
@@ -62,6 +70,22 @@ public class PersonProfileController {
             @PathVariable String id,
             @Valid @RequestBody PersonProfileSaveDTO dto) {
         return new Result<PersonProfileVO>().ok(personProfileService.update(id, dto));
+    }
+
+    @PutMapping("/{id}/voice-print/{voicePrintId}")
+    @Operation(summary = "关联人物与声纹")
+    @RequiresPermissions("sys:role:normal")
+    public Result<PersonProfileVO> bindVoicePrint(
+            @PathVariable String id,
+            @PathVariable String voicePrintId) {
+        return new Result<PersonProfileVO>().ok(personProfileService.bindVoicePrint(id, voicePrintId));
+    }
+
+    @DeleteMapping("/{id}/voice-print")
+    @Operation(summary = "解除人物与声纹关联")
+    @RequiresPermissions("sys:role:normal")
+    public Result<PersonProfileVO> unbindVoicePrint(@PathVariable String id) {
+        return new Result<PersonProfileVO>().ok(personProfileService.unbindVoicePrint(id));
     }
 
     @DeleteMapping("/{id}")

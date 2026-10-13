@@ -18,6 +18,12 @@ public class PersonProfileVO {
     private Date birthday;
     private String groupName;
     private String description;
+    private boolean voicePrintReady;
+    private String voicePrintId;
+    private String voicePrintAgentId;
+    private String voicePrintSourceName;
+    private String voicePrintDescription;
+    private Date voicePrintCreateDate;
     private boolean faceReady;
     private Long faceVersion;
     private String faceSha256;

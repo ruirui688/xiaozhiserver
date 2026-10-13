@@ -121,6 +121,8 @@ public class ShiroConfig {
         filterMap.put("/maintenance/**", "oauth2");
         filterMap.put("/resource/asr-hotwords", "oauth2");
         filterMap.put("/resource/asr-hotwords/**", "oauth2");
+        // 人物资料包含人脸与声纹等生物特征资源，必须显式认证并在服务层校验工作空间权限。
+        filterMap.put("/resource/persons/**", "oauth2");
         filterMap.put("/agent/*/feishu/events", "anon");
         filterMap.put("/agent/*/feishu/**", "oauth2");
         filterMap.put("/device/address-book/lookup", "server");

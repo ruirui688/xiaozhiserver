@@ -11,6 +11,10 @@ const personView = fs.readFileSync(
   path.join(__dirname, '..', 'src', 'views', 'PersonProfileManagement.vue'),
   'utf8'
 );
+const personCard = fs.readFileSync(
+  path.join(__dirname, '..', 'src', 'components', 'person', 'PersonProfileCard.vue'),
+  'utf8'
+);
 
 test('reception management API covers profile appointment and workspace config', () => {
   [
@@ -24,7 +28,7 @@ test('reception management API covers profile appointment and workspace config',
 test('person resource page exposes reception profile appointment and workspace settings', () => {
   assert.ok(personView.includes('PersonReceptionDialog'));
   assert.ok(personView.includes('ReceptionWorkspaceDialog'));
-  assert.ok(personView.includes('接待与预约'));
+  assert.ok(personCard.includes('接待与预约'));
   assert.ok(personView.includes('接待配置'));
 });
 
@@ -33,6 +37,6 @@ test('person face resources bind agents and require explicit publication', () =>
   assert.ok(apiSource.includes('/publish'));
   assert.ok(personView.includes('form.agentIds'));
   assert.ok(personView.includes('上传不会下发'));
-  assert.ok(personView.includes('发布变更'));
+  assert.ok(personCard.includes('发布变更'));
   assert.ok(!personView.includes('form.deviceIds'));
 });

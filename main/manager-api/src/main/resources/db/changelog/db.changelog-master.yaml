@@ -1593,3 +1593,10 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/platform-shared-channels-20261013.sql
+  - changeSet:
+      id: person-voiceprint-link-20261013
+      author: Codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/person-voiceprint-link-20261013.sql

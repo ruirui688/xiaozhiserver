@@ -480,20 +480,31 @@ export default {
             .send();
     },
     // 更新智能体声纹
-    updateAgentVoicePrint(voicePrintData, callback) {
-        RequestService.sendRequest()
+    updateAgentVoicePrint(voicePrintData, callback, failCallback) {
+        const request = RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/voice-print`)
             .method('PUT')
             .data(voicePrintData)
             .success((res) => {
                 RequestService.clearRequestTime();
                 callback(res);
-            })
-            .networkFail(() => {
-                RequestService.reAjaxFun(() => {
-                    this.updateAgentVoicePrint(voicePrintData, callback);
-                });
-            }).send();
+            });
+        if (failCallback) {
+            request.fail((err) => {
+                RequestService.clearRequestTime();
+                failCallback(err);
+            });
+        }
+        request.networkFail((err) => {
+            if (failCallback) {
+                RequestService.clearRequestTime();
+                failCallback(err);
+                return;
+            }
+            RequestService.reAjaxFun(() => {
+                this.updateAgentVoicePrint(voicePrintData, callback);
+            });
+        }).send();
     },
     // 创建设备声纹注册采集任务。
     createAgentVoicePrintEnrollment(enrollmentData, callback, failCallback) {

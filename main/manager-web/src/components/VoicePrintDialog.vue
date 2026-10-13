@@ -1,10 +1,11 @@
 <template>
-  <el-dialog :title="title" :visible.sync="visible" width="680px" class="param-dialog-wrapper" :append-to-body="true"
-    :close-on-click-modal="false" :key="dialogKey" custom-class="custom-param-dialog" :show-close="false">
+  <el-dialog :title="title" :visible="visible" width="680px" class="param-dialog-wrapper" :append-to-body="true"
+    :close-on-click-modal="false" :close-on-press-escape="!saving && !completingEnrollment"
+    :before-close="beforeDialogClose" :key="dialogKey" custom-class="custom-param-dialog" :show-close="false">
     <div class="dialog-container">
       <div class="dialog-header">
         <h2 class="dialog-title">{{ title }}</h2>
-        <button class="custom-close-btn" @click="cancel">
+        <button class="custom-close-btn" :disabled="saving || completingEnrollment" @click="cancel">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M13 1L1 13M1 1L13 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
           </svg>
@@ -86,7 +87,7 @@
         <el-button v-if="form.id" type="primary" @click="submit" class="save-btn" :loading="saving" :disabled="saving || primarySubmitDisabled">
           {{ primarySubmitText }}
         </el-button>
-        <el-button @click="cancel" class="cancel-btn">
+        <el-button @click="cancel" class="cancel-btn" :disabled="saving || completingEnrollment">
           {{ $t('voicePrintDialog.cancel') }}
         </el-button>
       </div>
@@ -141,6 +142,10 @@ export default {
       enrollmentUnsupported: false,
       enrollmentErrorMessage: '',
       pollingTimer: null,
+      lifecycleGeneration: 0,
+      enrollmentGeneration: 0,
+      enrollmentContext: null,
+      destroyed: false,
       minSamples: 1,
       maxSamples: 1,
       rules: {
@@ -233,7 +238,7 @@ export default {
       });
     },
     normalizeEnrollment(data) {
-      const payload = data && data.data ? data.data : data;
+      const payload = (data && data.data ? data.data : data) || {};
       const status = String(payload.status || payload.enrollmentStatus || this.enrollmentStatus || 'collecting').toLowerCase();
       const count = Number(payload.collectedCount || payload.sampleCount || payload.samples || this.collectedCount || 0);
       const requiredSamples = Number(payload.requiredSamples || this.requiredSamples || this.minSamples);
@@ -286,74 +291,144 @@ export default {
         ? `${this.$t('voicePrintDialog.completeSuccess')}，${parts.join('，')}`
         : this.$t('voicePrintDialog.completeSuccess');
     },
+    isLifecycleActive(generation) {
+      return !this.destroyed
+        && this.visible
+        && generation === this.lifecycleGeneration;
+    },
+    beginEnrollmentOperation(agentId) {
+      this.stopPolling();
+      const context = {
+        lifecycleGeneration: this.lifecycleGeneration,
+        enrollmentGeneration: ++this.enrollmentGeneration,
+        agentId
+      };
+      this.enrollmentContext = context;
+      return context;
+    },
+    isEnrollmentContextActive(context) {
+      return Boolean(
+        context
+        && this.isLifecycleActive(context.lifecycleGeneration)
+        && context === this.enrollmentContext
+        && context.enrollmentGeneration === this.enrollmentGeneration
+        && context.agentId === this.agentId
+      );
+    },
+    extractEnrollmentId(data) {
+      const payload = (data && data.data ? data.data : data) || {};
+      return payload.id || payload.enrollmentId || '';
+    },
+    cancelEnrollmentById(enrollmentId) {
+      if (!enrollmentId) return;
+      api.agent.cancelAgentVoicePrintEnrollment(enrollmentId, () => {}, () => {});
+    },
+    cancelStaleEnrollment(data) {
+      this.cancelEnrollmentById(this.extractEnrollmentId(data));
+    },
+    activateEnrollmentLifecycle() {
+      this.lifecycleGeneration += 1;
+      this.enrollmentGeneration += 1;
+      this.enrollmentContext = null;
+      this.resetEnrollmentState();
+    },
+    deactivateEnrollmentLifecycle() {
+      const wasCompleting = this.completingEnrollment;
+      const shouldCancel = !this.registrationSubmitted
+        && this.enrollmentId
+        && ['collecting', 'ready'].includes(this.enrollmentStatus);
+      const enrollmentId = shouldCancel ? this.enrollmentId : '';
+      this.lifecycleGeneration += 1;
+      this.enrollmentGeneration += 1;
+      this.enrollmentContext = null;
+      this.stopPolling();
+      this.enrollmentId = '';
+      this.creatingEnrollment = false;
+      this.completingEnrollment = false;
+      if (enrollmentId) this.cancelEnrollmentById(enrollmentId);
+      if (wasCompleting) this.$emit('busy-change', false);
+    },
     startEnrollment() {
+      if (this.creatingEnrollment || this.completingEnrollment) return;
+      const lifecycleGeneration = this.lifecycleGeneration;
       this.validateBasicFields(() => {
+        if (!this.isLifecycleActive(lifecycleGeneration)) return;
         if (!this.deviceId) {
           this.$message.warning(this.$t('voicePrintDialog.requiredDevice'));
           return;
         }
+        const agentId = this.agentId;
         const payload = {
-          agentId: this.agentId,
+          agentId,
           sourceName: this.form.sourceName,
           introduce: this.form.introduce,
           deviceId: this.deviceId,
           requiredSamples: this.requiredSamples
         };
+        const context = this.beginEnrollmentOperation(agentId);
         if (this.enrollmentId && ['collecting', 'ready'].includes(this.enrollmentStatus)) {
           const previousId = this.enrollmentId;
+          this.enrollmentId = '';
+          this.creatingEnrollment = true;
           api.agent.cancelAgentVoicePrintEnrollment(previousId, () => {
-            this.createEnrollment(payload);
+            if (this.isEnrollmentContextActive(context)) this.createEnrollment(payload, context);
           }, () => {
-            this.createEnrollment(payload);
+            if (this.isEnrollmentContextActive(context)) this.createEnrollment(payload, context);
           });
           return;
         }
-        this.createEnrollment(payload);
+        this.createEnrollment(payload, context);
       });
     },
-    createEnrollment(payload) {
-        this.creatingEnrollment = true;
-        this.stopPolling();
-        this.enrollmentUnsupported = false;
-        this.enrollmentErrorMessage = '';
-        this.registrationSubmitted = false;
-        this.enrollmentId = '';
-        this.enrollmentStatus = 'collecting';
-        this.enrollmentProgress = 0;
-        this.collectedCount = 0;
-        api.agent.createAgentVoicePrintEnrollment(payload, ({ data }) => {
-          this.creatingEnrollment = false;
-          if (data.code === 0 || data.code === undefined) {
-            this.normalizeEnrollment(data.data || {});
-            if (!this.enrollmentId) {
-              this.enrollmentStatus = 'collecting';
-            }
-            this.startPolling();
-          } else {
-            this.markEnrollmentUnsupported(data);
-          }
-        }, (error) => {
-          this.creatingEnrollment = false;
-          this.markEnrollmentUnsupported(error);
-        });
-    },
-    startPolling() {
+    createEnrollment(payload, context) {
+      if (!this.isEnrollmentContextActive(context)) return;
+      this.creatingEnrollment = true;
       this.stopPolling();
-      if (!this.enrollmentId) {
-        return;
-      }
+      this.enrollmentUnsupported = false;
+      this.enrollmentErrorMessage = '';
+      this.registrationSubmitted = false;
+      this.enrollmentId = '';
+      this.enrollmentStatus = 'collecting';
+      this.enrollmentProgress = 0;
+      this.collectedCount = 0;
+      api.agent.createAgentVoicePrintEnrollment(payload, ({ data }) => {
+        if (!this.isEnrollmentContextActive(context)) {
+          if (!data || data.code === 0 || data.code === undefined) this.cancelStaleEnrollment(data);
+          return;
+        }
+        this.creatingEnrollment = false;
+        if (data && (data.code === 0 || data.code === undefined)) {
+          this.normalizeEnrollment(data.data || {});
+          if (!this.enrollmentId) this.enrollmentStatus = 'collecting';
+          this.startPolling(context);
+        } else {
+          this.markEnrollmentUnsupported(data);
+        }
+      }, (error) => {
+        if (!this.isEnrollmentContextActive(context)) return;
+        this.creatingEnrollment = false;
+        this.markEnrollmentUnsupported(error);
+      });
+    },
+    startPolling(context) {
+      this.stopPolling();
+      if (!this.isEnrollmentContextActive(context) || !this.enrollmentId) return;
+      const enrollmentId = this.enrollmentId;
       this.pollingTimer = setInterval(() => {
-        api.agent.getAgentVoicePrintEnrollment(this.agentId, this.enrollmentId, ({ data }) => {
-          if (data.code === 0 || data.code === undefined) {
+        if (!this.isEnrollmentContextActive(context)) return;
+        api.agent.getAgentVoicePrintEnrollment(context.agentId, enrollmentId, ({ data }) => {
+          if (!this.isEnrollmentContextActive(context)) return;
+          if (data && (data.code === 0 || data.code === undefined)) {
             this.normalizeEnrollment(data.data || {});
             if (this.enrollmentStatus === 'ready') {
               this.stopPolling();
-              this.completeEnrollment();
+              this.completeEnrollment(context);
             } else if (this.enrollmentStatus === 'failed') {
               this.stopPolling();
             }
           }
         }, () => {
+          if (!this.isEnrollmentContextActive(context)) return;
           this.stopPolling();
         });
       }, 3000);
@@ -364,38 +439,63 @@ export default {
         this.pollingTimer = null;
       }
     },
-    completeEnrollment() {
+    cancelActiveEnrollment() {
+      if (!this.registrationSubmitted
+          && this.enrollmentId
+          && ['collecting', 'ready'].includes(this.enrollmentStatus)) {
+        const enrollmentId = this.enrollmentId;
+        this.enrollmentId = '';
+        this.cancelEnrollmentById(enrollmentId);
+      }
+    },
+    completeEnrollment(context = this.enrollmentContext) {
       this.validateBasicFields(() => {
-        if (!this.canCompleteEnrollment) {
-          return;
-        }
+        if (!this.isEnrollmentContextActive(context) || !this.canCompleteEnrollment) return;
+        const enrollmentId = this.enrollmentId;
+        const sourceName = this.form.sourceName;
+        const introduce = this.form.introduce;
         this.completingEnrollment = true;
         this.registrationSubmitted = true;
-        api.agent.completeAgentVoicePrintEnrollment(this.enrollmentId, {
-          agentId: this.agentId,
-          sourceName: this.form.sourceName,
-          introduce: this.form.introduce
+        this.$emit('busy-change', true);
+        api.agent.completeAgentVoicePrintEnrollment(enrollmentId, {
+          agentId: context.agentId,
+          sourceName,
+          introduce
         }, ({ data }) => {
-          this.completingEnrollment = false;
-          if (data.code === 0 || data.code === undefined) {
+          if (!this.isEnrollmentContextActive(context)) return;
+          if (data && (data.code === 0 || data.code === undefined)) {
             this.stopPolling();
             const result = data.data && data.data.registrationResult;
+            const voicePrintId = data.data && data.data.voicePrintId;
             this.$message.success(this.formatRegistrationResult(result));
+            this.$emit('completed', {
+              voicePrintId,
+              agentId: context.agentId,
+              sourceName,
+              introduce
+            });
             this.$emit('submit', {
               form: {
                 ...this.form,
-                enrollmentId: this.enrollmentId,
+                enrollmentId,
+                voicePrintId,
                 completedByEnrollment: true
               },
               done: () => {}
             });
+            this.completingEnrollment = false;
+            this.$emit('busy-change', false);
           } else {
+            this.completingEnrollment = false;
+            this.$emit('busy-change', false);
             this.registrationSubmitted = false;
             this.enrollmentStatus = 'failed';
-            this.$message.error(data.msg || this.$t('voicePrintDialog.completeFailed'));
+            this.$message.error((data && data.msg) || this.$t('voicePrintDialog.completeFailed'));
           }
         }, (err) => {
+          if (!this.isEnrollmentContextActive(context)) return;
           this.completingEnrollment = false;
+          this.$emit('busy-change', false);
           this.registrationSubmitted = false;
           this.enrollmentStatus = 'failed';
           this.$message.error(this.extractResponseMessage(err, this.$t('voicePrintDialog.completeFailed')));
@@ -416,19 +516,18 @@ export default {
               this.saving = false; // 加载完成
             }
           });
-
-          setTimeout(() => {
-            this.saving = false;
-          }, 3000);
         }
       });
     },
+    beforeDialogClose(done) {
+      if (this.saving || this.completingEnrollment) return;
+      this.cancel();
+      if (done) done(false);
+    },
     cancel() {
+      if (this.saving || this.completingEnrollment) return;
       this.saving = false; // 取消时重置状态
-      this.stopPolling();
-      if (this.enrollmentId && ['collecting', 'ready'].includes(this.enrollmentStatus)) {
-        api.agent.cancelAgentVoicePrintEnrollment(this.enrollmentId, () => {}, () => {});
-      }
+      this.deactivateEnrollmentLifecycle();
       this.dialogKey = Date.now();
       this.$emit('cancel');
     },
@@ -448,16 +547,20 @@ export default {
     }
   },
   watch: {
-    visible(newVal) {
-      if (newVal) {
-        this.resetEnrollmentState();
-      } else {
-        this.stopPolling();
+    visible: {
+      immediate: true,
+      handler(newVal) {
+        if (newVal) {
+          this.activateEnrollmentLifecycle();
+        } else {
+          this.deactivateEnrollmentLifecycle();
+        }
       }
     }
   },
   beforeDestroy() {
-    this.stopPolling();
+    this.destroyed = true;
+    this.deactivateEnrollmentLifecycle();
   }
 };
 </script>

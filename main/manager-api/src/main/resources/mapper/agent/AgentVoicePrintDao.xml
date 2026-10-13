@@ -49,4 +49,51 @@
         DELETE FROM ai_agent_voice_print_binding
         WHERE voice_print_id = #{voicePrintId}
     </delete>
+
+    <update id="bindPerson">
+        UPDATE ai_agent_voice_print
+        SET person_id = #{personId},
+            updater = #{updater},
+            update_date = CURRENT_TIMESTAMP
+        WHERE id = #{voicePrintId}
+          AND workspace_id = #{workspaceId}
+          AND person_id IS NULL
+    </update>
+
+    <update id="unbindPerson">
+        UPDATE ai_agent_voice_print
+        SET person_id = NULL,
+            updater = #{updater},
+            update_date = CURRENT_TIMESTAMP
+        WHERE id = #{voicePrintId}
+          AND workspace_id = #{workspaceId}
+          AND person_id = #{personId}
+    </update>
+
+    <select id="selectPersonOptions"
+            resultType="xiaozhi.modules.agent.entity.AgentVoicePrintEntity">
+        SELECT *
+        FROM ai_agent_voice_print
+        WHERE workspace_id = #{workspaceId}
+          AND (person_id IS NULL OR person_id = #{personId})
+        ORDER BY create_date DESC, id ASC
+    </select>
+
+    <select id="selectByIdForUpdate"
+            resultType="xiaozhi.modules.agent.entity.AgentVoicePrintEntity">
+        SELECT *
+        FROM ai_agent_voice_print
+        WHERE id = #{voicePrintId}
+          AND workspace_id = #{workspaceId}
+        FOR UPDATE
+    </select>
+
+    <select id="selectByPersonForUpdate"
+            resultType="xiaozhi.modules.agent.entity.AgentVoicePrintEntity">
+        SELECT *
+        FROM ai_agent_voice_print
+        WHERE workspace_id = #{workspaceId}
+          AND person_id = #{personId}
+        FOR UPDATE
+    </select>
 </mapper>

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -28,6 +29,7 @@ import xiaozhi.common.exception.RenException;
 import xiaozhi.common.utils.MessageUtils;
 import xiaozhi.modules.agent.dao.AgentVoicePrintEnrollmentDao;
 import xiaozhi.modules.agent.dao.AgentVoicePrintEnrollmentSampleDao;
+import xiaozhi.modules.agent.dto.AgentVoicePrintEnrollmentCreateDTO;
 import xiaozhi.modules.agent.dto.AgentVoicePrintEnrollmentSampleDTO;
 import xiaozhi.modules.agent.dto.AgentVoicePrintRegistrationResult;
 import xiaozhi.modules.agent.dto.AgentVoicePrintSaveDTO;
@@ -38,6 +40,8 @@ import xiaozhi.modules.agent.service.AgentChatAudioService;
 import xiaozhi.modules.agent.service.AgentVoicePrintService;
 import xiaozhi.modules.sys.service.SysParamsService;
 import xiaozhi.modules.agent.voiceprint.VoiceprintRegisteredEvent;
+import xiaozhi.modules.device.entity.DeviceEntity;
+import xiaozhi.modules.device.service.DeviceService;
 
 class AgentVoicePrintEnrollmentServiceImplTest {
     private AgentVoicePrintEnrollmentDao enrollmentDao;
@@ -45,6 +49,7 @@ class AgentVoicePrintEnrollmentServiceImplTest {
     private AgentVoicePrintService voicePrintService;
     private AgentChatHistoryService chatHistoryService;
     private AgentChatAudioService chatAudioService;
+    private DeviceService deviceService;
     private SysParamsService sysParamsService;
     private Environment environment;
     private ApplicationEventPublisher eventPublisher;
@@ -62,6 +67,7 @@ class AgentVoicePrintEnrollmentServiceImplTest {
         voicePrintService = mock(AgentVoicePrintService.class);
         chatHistoryService = mock(AgentChatHistoryService.class);
         chatAudioService = mock(AgentChatAudioService.class);
+        deviceService = mock(DeviceService.class);
         sysParamsService = mock(SysParamsService.class);
         environment = mock(Environment.class);
         eventPublisher = mock(ApplicationEventPublisher.class);
@@ -70,10 +76,74 @@ class AgentVoicePrintEnrollmentServiceImplTest {
                 voicePrintService,
                 chatHistoryService,
                 chatAudioService,
+                deviceService,
                 sysParamsService,
                 environment,
                 eventPublisher);
         ReflectionTestUtils.setField(service, "baseMapper", enrollmentDao);
+    }
+
+    @Test
+    void createRejectsDeviceBoundToAnotherAgentBeforeWritingEnrollment() {
+        DeviceEntity device = new DeviceEntity();
+        device.setId("device-a");
+        device.setMacAddress("AA:BB:CC:DD:EE:FF");
+        device.setAgentId("agent-b");
+        when(deviceService.getDeviceByMacAddress("AA:BB:CC:DD:EE:FF")).thenReturn(device);
+
+        AgentVoicePrintEnrollmentCreateDTO dto = new AgentVoicePrintEnrollmentCreateDTO();
+        dto.setAgentId("agent-a");
+        dto.setDeviceId("AA:BB:CC:DD:EE:FF");
+        dto.setSourceName("用户A");
+        dto.setIntroduce("测试声纹");
+
+        RenException error = assertThrows(RenException.class, () -> service.create(dto));
+
+        assertEquals(ErrorCode.NO_PERMISSION, error.getCode());
+        verifyNoInteractions(enrollmentDao);
+    }
+
+    @Test
+    void createAlsoValidatesDeviceRecordIdBeforeWritingEnrollment() {
+        DeviceEntity device = new DeviceEntity();
+        device.setId("device-a");
+        device.setMacAddress("AA:BB:CC:DD:EE:FF");
+        device.setAgentId("agent-b");
+        when(deviceService.selectById("device-a")).thenReturn(device);
+
+        AgentVoicePrintEnrollmentCreateDTO dto = new AgentVoicePrintEnrollmentCreateDTO();
+        dto.setAgentId("agent-a");
+        dto.setDeviceId("device-a");
+        dto.setSourceName("用户A");
+        dto.setIntroduce("测试声纹");
+
+        RenException error = assertThrows(RenException.class, () -> service.create(dto));
+
+        assertEquals(ErrorCode.NO_PERMISSION, error.getCode());
+        verifyNoInteractions(enrollmentDao);
+    }
+
+    @Test
+    void createCanonicalizesDeviceRecordIdToMacBeforePersistingEnrollment() {
+        DeviceEntity device = new DeviceEntity();
+        device.setId("device-a");
+        device.setMacAddress("AA:BB:CC:DD:EE:FF");
+        device.setAgentId("agent-a");
+        when(deviceService.selectById("device-a")).thenReturn(device);
+
+        AgentVoicePrintEnrollmentCreateDTO dto = new AgentVoicePrintEnrollmentCreateDTO();
+        dto.setAgentId("agent-a");
+        dto.setDeviceId("device-a");
+        dto.setSourceName("用户A");
+        dto.setIntroduce("测试声纹");
+
+        // 未配置 server.secret 会在通知设备前中止；真实事务会回滚已写入的采集任务。
+        assertThrows(RenException.class, () -> service.create(dto));
+
+        ArgumentCaptor<AgentVoicePrintEnrollmentEntity> enrollment =
+                ArgumentCaptor.forClass(AgentVoicePrintEnrollmentEntity.class);
+        verify(enrollmentDao).insert(enrollment.capture());
+        assertEquals("AA:BB:CC:DD:EE:FF", enrollment.getValue().getDeviceId());
     }
 
     @Test

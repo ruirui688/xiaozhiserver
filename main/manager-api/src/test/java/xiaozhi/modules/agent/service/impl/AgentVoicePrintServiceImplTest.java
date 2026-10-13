@@ -2,6 +2,7 @@ package xiaozhi.modules.agent.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -11,7 +12,11 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 
+import org.mockito.ArgumentCaptor;
+
 import java.util.List;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 
 import org.junit.jupiter.api.Test;
@@ -136,14 +141,28 @@ class AgentVoicePrintServiceImplTest {
     void metadataUpdateNotifiesEveryRoleSharingVoiceprint() {
         AgentVoicePrintDao dao = mock(AgentVoicePrintDao.class);
         AgentVoicePrintServiceImpl service = boundService(dao);
+        AgentVoicePrintEntity existing = dao.selectById("voice");
+        existing.setWorkspaceId("workspace-a");
+        existing.setPersonId("person-a");
         when(dao.updateById(any(AgentVoicePrintEntity.class))).thenReturn(1);
         AgentVoicePrintUpdateDTO dto = new AgentVoicePrintUpdateDTO();
         dto.setId("voice");
         dto.setSourceName("new name");
         assertEquals(true, service.update(1L, dto));
+        ArgumentCaptor<AgentVoicePrintEntity> updated = ArgumentCaptor.forClass(AgentVoicePrintEntity.class);
+        verify(dao).updateById(updated.capture());
+        assertEquals("workspace-a", updated.getValue().getWorkspaceId());
+        assertNull(updated.getValue().getPersonId());
         verify(publisher).publishEvent(new AgentRuntimeConfigRefreshEvent(
                 List.of("role-a", "role-b", "owner"), "voiceprint_changed"));
         verifyNoInteractions(remote);
+    }
+
+    @Test
+    void genericUpdatesExcludePersonOwnershipColumn() throws Exception {
+        TableField mapping = AgentVoicePrintEntity.class.getDeclaredField("personId").getAnnotation(TableField.class);
+
+        assertEquals(FieldStrategy.NEVER, mapping.updateStrategy());
     }
 
     @Test

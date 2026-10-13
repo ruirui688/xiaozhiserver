@@ -15,6 +15,14 @@ public class AgentVoicePrintVO {
      */
     private String id;
     /**
+     * 关联的人物档案ID，未关联时为空。
+     */
+    private String personId;
+    /**
+     * 声纹最初录入的智能体ID。
+     */
+    private String agentId;
+    /**
      * 音频文件id
      */
     private String audioId;

@@ -49,6 +49,8 @@ import xiaozhi.modules.agent.service.AgentVoicePrintService;
 import xiaozhi.modules.agent.vo.AgentVoicePrintEnrollmentSampleVO;
 import xiaozhi.modules.agent.vo.AgentVoicePrintEnrollmentVO;
 import xiaozhi.modules.agent.voiceprint.VoiceprintRegisteredEvent;
+import xiaozhi.modules.device.entity.DeviceEntity;
+import xiaozhi.modules.device.service.DeviceService;
 import xiaozhi.modules.sys.service.SysParamsService;
 
 @Service
@@ -69,6 +71,7 @@ public class AgentVoicePrintEnrollmentServiceImpl
     private final AgentVoicePrintService agentVoicePrintService;
     private final AgentChatHistoryService agentChatHistoryService;
     private final AgentChatAudioService agentChatAudioService;
+    private final DeviceService deviceService;
     private final SysParamsService sysParamsService;
     private final Environment environment;
     private final ApplicationEventPublisher eventPublisher;
@@ -76,17 +79,32 @@ public class AgentVoicePrintEnrollmentServiceImpl
     @Override
     @Transactional(rollbackFor = Exception.class)
     public AgentVoicePrintEnrollmentVO create(AgentVoicePrintEnrollmentCreateDTO dto) {
+        DeviceEntity device = requireDeviceBinding(dto.getAgentId(), dto.getDeviceId());
+        String runtimeDeviceId = StringUtils.defaultIfBlank(device.getMacAddress(), device.getId());
         baseMapper.update(null, new UpdateWrapper<AgentVoicePrintEnrollmentEntity>()
-                .eq("device_id", dto.getDeviceId())
+                .eq("device_id", runtimeDeviceId)
                 .eq("status", STATUS_COLLECTING)
                 .set("status", STATUS_CANCELLED));
         AgentVoicePrintEnrollmentEntity entity = ConvertUtils.sourceToTarget(
                 dto, AgentVoicePrintEnrollmentEntity.class);
+        entity.setDeviceId(runtimeDeviceId);
         entity.setRequiredSamples(1);
         entity.setStatus(STATUS_COLLECTING);
         baseMapper.insert(entity);
         startDeviceEnrollment(entity);
         return toVO(entity, List.of());
+    }
+
+    private DeviceEntity requireDeviceBinding(String agentId, String deviceId) {
+        String identity = StringUtils.trimToEmpty(deviceId);
+        DeviceEntity device = deviceService.getDeviceByMacAddress(identity);
+        if (device == null) {
+            device = deviceService.selectById(identity);
+        }
+        if (device == null || !StringUtils.equals(agentId, device.getAgentId())) {
+            throw new RenException(ErrorCode.NO_PERMISSION);
+        }
+        return device;
     }
 
     @Override

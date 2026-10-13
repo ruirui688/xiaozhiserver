@@ -1,16 +1,20 @@
 ---
 status: canonical
 owner: voiceprint
-last_verified: 2026-07-14
+last_verified: 2026-10-13
 source_paths:
   - main/xiaozhi-server/core/utils/voiceprint_provider.py
   - main/xiaozhi-server/core/handle/receiveAudioHandle.py
   - main/xiaozhi-server/core/utils/dialogue.py
   - main/manager-api/src/main/java/xiaozhi/modules/agent/voiceprint/
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/entity/AgentVoicePrintEntity.java
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/service/impl/AgentVoicePrintEnrollmentServiceImpl.java
   - main/manager-api/src/main/java/xiaozhi/modules/agent/service/impl/AgentVoicePrintServiceImpl.java
+  - main/manager-api/src/main/java/xiaozhi/modules/person/
+  - main/manager-api/src/main/resources/db/changelog/person-voiceprint-link-20261013.sql
 ---
 
-# 外置声纹识别服务接入
+# 外置声纹识别服务与用户信息关联
 
 本项目使用独立部署的 `voiceprint-api` 完成声纹注册、识别和删除。声纹模型不运行在小智主服务器上，避免和 ASR、LLM、TTS 抢占 CPU 与内存。
 
@@ -18,6 +22,7 @@ source_paths:
 
 - `voiceprint-api` 版本至少为 `0.1.0`，接口必须支持必填 `user_id`。
 - 小智使用创建声纹时的智能体 ID 作为远程 `user_id`；默认按智能体隔离，同工作空间角色模板可以显式复用绑定，跨工作空间仍严格隔离。
+- 用户信息中的人物通过 `ai_agent_voice_print.person_id` 显式关联一个已有声纹；人物和声纹两端均最多关联一条，不按姓名或描述推断。
 - 每个智能体最多绑定 5 个声纹；manager-api 校验绑定上限，远程服务校验各注册作用域的资源上限。
 - API Token 只能通过 `Authorization: Bearer ...` 传输，禁止放在 URL 查询参数中。
 - 生产环境使用 HTTPS，并把声纹服务限制为仅允许小智服务器访问。
@@ -118,21 +123,66 @@ server.voiceprint_similarity_threshold = 0.4
 
 值越高越严格。修改后应使用真实设备分别验证本人、相似声音和陌生人，不能只依赖接口健康检查。
 
-## 4. 智能体绑定规则
+## 4. 声纹资源、用户信息关联与智能体绑定
+
+### 4.1 三类独立事实
+
+声纹资源同时存在三类不能混用的关系：
+
+| 关系 | 权威事实 | 语义 |
+| --- | --- | --- |
+| 声纹的远程注册作用域 | `ai_agent_voice_print.remote_user_id` | 决定调用 voiceprint-api 时使用哪个 `user_id` |
+| 声纹与智能体绑定 | 独立声纹绑定表 | 决定哪些智能体运行时可以识别该声纹；同工作空间可多智能体复用 |
+| 声纹与人物关联 | `ai_agent_voice_print.person_id` | 决定资源中心哪条用户信息展示和管理该声纹；两端均为 `0..1` |
+
+人物关联不会修改声纹的远程 `user_id`、重新注册特征或增删智能体绑定；人物本身绑定哪些智能体也不会
+自动改变声纹绑定。人物是可识别业务档案，不是后台登录账号。
+
+关联只能显式发起：
+
+```text
+PUT /resource/persons/{personId}/voice-print/{voicePrintId}
+```
+
+服务端必须同时验证人物和声纹存在、属于同一个当前可写工作空间，并拒绝人物已关联其他声纹、声纹已归属
+其他人物的冲突。姓名、`sourceName` 和介绍不是身份主键；相同名称可以分别存在，禁止按名称匹配、关联或
+回填历史数据。新录入声纹仍先走现有注册流程；注册成功取得 `voicePrintId` 后再关联人物。若第二步失败，
+声纹保留为未关联资源，页面应提示用户从“已有声纹”恢复关联，不能谎称远程注册已回滚。
+
+并发绑定/解绑先由条件更新和唯一键决定写入结果；未命中后的幂等判断必须使用带工作空间条件的 locking
+current read，避免 MySQL 默认 `REPEATABLE READ` 的旧快照把已经成功的同值请求误报为冲突。
+
+`GET /resource/persons/{personId}/voice-print-options` 是关联选择器的唯一候选来源，仅允许当前工作空间有写
+权限的用户调用，并且只能返回同工作空间内未归属人物或已经归属当前人物的声纹，不能用全局声纹列表在
+浏览器侧补做权限过滤。
+
+解除关联使用：
+
+```text
+DELETE /resource/persons/{personId}/voice-print
+```
+
+解除只清空 `person_id`，不删除本地记录、样本、远程特征或任何智能体绑定。
+`DELETE /agent/voice-print/{voicePrintId}` 才是破坏性声纹删除：它沿用现有语义，删除全部智能体绑定、本地声纹和
+样本，并调用远程服务删除特征；远程删除失败时本地删除回滚。有关联声纹的人物不能直接删除，必须先由
+用户明确解除关联或删除声纹，人物删除链路不得隐式调用远程声纹服务。
+
+### 4.2 智能体绑定与采集规则
 
 在智能体的“声纹识别”页面，可以让在线设备朗读一段指定文本完成采集，也可以从该智能体自己的聊天音频中选择样本，填写姓名和描述后保存。声纹资源归属于创建时的工作空间，智能体通过独立绑定表使用资源；角色模板切换时可以在同工作空间内复用绑定，但不会复制音频样本或远端生物特征。
 
 服务端规则：
 
-1. 创建前确认每段音频都属于当前智能体。
-2. 当前智能体已有 5 条时直接拒绝第 6 条。
-3. 每次注册或替换样本必须提交 1 到 5 段样本；manager-api 要求每段 WAV 可解析且时长为 3 到 30 秒。
-4. 设备直接采集固定为 1 段；朗读结束后必须连续静音至少 2 秒，运行时才会判定采集完成并提交注册。
-5. 使用创建声纹时的 `agentId` 作为远端 `user_id` 调用注册接口；后续其他同工作空间智能体绑定该声纹时继续使用记录中的远端作用域。
-6. `speaker_id` 使用本地声纹记录 UUID。
-7. 同一智能体内先做重复声纹检测，避免同一个人重复占用名额。
-8. 删除时同时删除所有智能体绑定、本地记录和远程特征；远程失败会回滚本地删除，避免孤儿声纹占用额度。
-9. 每个智能体最多绑定 5 个声纹，模板应用也必须遵守该上限；跨工作空间或已删除的声纹引用会被跳过并告警。
+1. 创建设备采集任务前，manager-api 必须用请求中的 MAC 地址或设备记录 ID 查到真实设备，并确认该设备当前确实绑定目标 `agentId`；校验失败时不得写入采集任务，也不得通知设备开始录音。
+2. 创建前确认每段音频都属于当前智能体。
+3. 当前智能体已有 5 条时直接拒绝第 6 条。
+4. 每次注册或替换样本必须提交 1 到 5 段样本；manager-api 要求每段 WAV 可解析且时长为 3 到 30 秒。
+5. 设备直接采集固定为 1 段；朗读结束后必须连续静音至少 2 秒，运行时才会判定采集完成并提交注册。
+6. 使用创建声纹时的 `agentId` 作为远端 `user_id` 调用注册接口；后续其他同工作空间智能体绑定该声纹时继续使用记录中的远端作用域。
+7. `speaker_id` 使用本地声纹记录 UUID。
+8. 同一智能体内先做重复声纹检测，避免同一个人重复占用名额。
+9. 删除时同时删除所有智能体绑定、本地记录和远程特征；远程失败会回滚本地删除，避免孤儿声纹占用额度。
+10. 每个智能体最多绑定 5 个声纹，模板应用也必须遵守该上限；跨工作空间或已删除的声纹引用会被跳过并告警。
 
 Web 和 Mobile 页面均显示 `已绑定数/5`。前端限制只用于交互提示，最终约束由 manager-api 和 voiceprint-api 共同保证。
 
@@ -208,6 +258,9 @@ user_id = default
 
 本项目迁移会给现有 `ai_agent_voice_print` 记录写入 `remote_user_id=default`。运行时按每条记录的远程作用域分组识别，因此历史声纹仍可继续使用。
 
+人物关联升级不会按姓名、声纹显示名或介绍自动回填 `person_id`。历史声纹保持未关联状态，运营人员可在
+“用户信息”页面核对后显式选择已有声纹；这样可以避免同名人员、昵称变化或错误描述导致生物特征串人。
+
 - 新增声纹：直接写入 `user_id=agentId`。
 - 重新选择音频并保存旧声纹：先注册到 `user_id=agentId`，再删除旧 `default` 特征，完成单条迁移。
 - 只修改姓名或描述：不重复调用远程模型，保留原远程作用域。
@@ -254,5 +307,9 @@ curl -H "Authorization: Bearer <token>" \
 7. 日志中没有原始 Authorization、Token 或带密钥 URL。
 8. 真实设备的完整单句语音会上传给声纹识别，长句不会被截断到前 N 秒。
 9. 智能体未绑定声纹时，声纹服务没有识别请求。
+10. 同工作空间人物可以显式关联未占用声纹；跨工作空间、人物已占用或声纹已归属其他人物时均被拒绝。
+11. 两条同名声纹不会自动关联人物，历史数据升级后 `person_id` 仍为空。
+12. 解除人物关联后远程特征、样本和智能体绑定保持不变；删除声纹则按破坏性删除语义清理全部关联事实。
+13. 有关联声纹的人物删除被拒绝，先解除或显式删除声纹后才可继续。
 
 不要把真实外部调用、长期服务启动或生产部署作为默认自动化验证；生产联调需在发布和备份后单独执行。

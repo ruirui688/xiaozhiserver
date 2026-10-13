@@ -178,6 +178,12 @@ export default {
                         });
                     }
                     done && done();
+                }, (err) => {
+                    this.$message.error({
+                        message: (err && err.data && err.data.msg) || this.$t('voicePrint.fetchFailed'),
+                        showClose: true
+                    });
+                    done && done();
                 });
             } else {
                 // 新增

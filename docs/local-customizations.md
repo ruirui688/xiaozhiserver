@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: architecture
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules
   - main/manager-web/src
@@ -541,16 +541,20 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 官方同步时的处理规则：如果官方修改聊天流式输出、OpenAI function-call、豆包录音/流式 ASR、SeedTTS2、TTS 音频发送、唤醒词处理、欢迎语、连接日志或设备注册表，保留官方 `direct_answer` 增量提取和5字符 JSON 安全尾、携带 tools 时普通 content 即时流播、默认零毫秒 SeedTTS2 首音预缓冲，同时保留官方式完整回答字幕来源、音频不等待字幕、每个 provider `FIRST` 都映射为 `sentence_start`、正常 `LAST` 优先完整回答的聊天记录上报、reply generation 边界隔离、错误终态和 required/单工具能力门控及不兼容 provider 回退；还必须保留异步 HTTP 与总预算超时、流式 WebSocket 分阶段等待保护、本地 VAD 判停发送唯一 LAST、缓存首帧去重、短词识别和按会话身份清理、SeedTTS2 逻辑 `FIRST` 不提前启动上游会话且首段真实 `TEXT/FILE` 只启动一次、空轮 `LAST` 不创建厂商会话、任意非主动打断结束路径幂等收尾、连接级同轮 start/stop 去重、官方 STT 后立即进入可打断语义（不得另造 `response_pending`）、Abort 部分回复与 interruption 指标幂等收口、聊天和记忆重建按 `turn_id + message_sequence` 还原逻辑顺序、Opus尾帧冲刷、默认零毫秒首轮音频丢弃、欢迎语显式开启、唤醒词实际检测文本与实际播放回复双向上报、按请求头键名脱敏和对象身份注销校验。不得重新引入模型决定的停止说话工具、停止词表或独立 LLM 打断分类器；不得在 async provider 中引入 requests/time.sleep，不得让更短外层超时覆盖会话结束预算，不得把 Authorization、token、API key、Cookie 或 secret 写入日志；调整 ASR 超时、TTS 会话启动、分片/预缓冲或编码边界和唤醒回声窗口时必须同步更新默认配置、专项测试、语音延迟文档，并在真实设备上验证 function-call 长回复不断句丢音、FIRST字幕为完整回答、异常后设备恢复监听、连续TTS无串音和重连映射稳定。
 ```
 
-## 26. 外置声纹服务、智能体隔离与五条上限
+## 26. 外置声纹服务、人物显式关联、智能体隔离与五条上限
 
 ```text
 定制模块：manager-api 声纹远程客户端与业务约束、xiaozhi-server 实时声纹 provider、Web/Mobile 声纹管理页
-改动原因：声纹模型独立部署在另一台服务器，voiceprint-api 0.1.0 起要求必填 user_id 并按用户隔离。小智侧必须从可信智能体绑定关系派生 user_id，不能信任浏览器或设备传入；每个智能体最多绑定 5 个声纹；API Token 必须从 URL 查询参数拆出，只通过 Bearer Header 传输。历史声纹在远程服务中属于 default 作用域，需要保留兼容并允许重新录音后迁移到 agentId 作用域。实时识别假设一句话只有一个说话人，VAD 句末后把当前整段语音转 WAV 并与 ASR 并行识别，对齐官方上游逻辑；历史参数 `server.voiceprint_sample_seconds` 不再下发也不再影响运行时。系统功能开关和智能体绑定声纹必须同时满足才允许下发；没有绑定或总开关关闭时必须零调用、零提示词。可信 `speaker_id` 继续进入聊天记录、长期记忆事件和会话结束后的主动记忆上下文，`speaker_score` 仅保留在指标和聊天上报，不进入主 LLM；主动记忆模型输出中的 speaker_id 必须能在当前会话可信人物集合中验证，单一已识别说话人的事实保存为 private，未识别会话按智能体记忆策略 SHARED/IGNORE 决定是否保存为 shared。后端不按正文姓名扩大范围。聊天记录和记忆图谱必须展示人物归属。身份必须在每个成功识别轮次同时进入结构化 user message 和动态 system 上下文，避免只靠旧对话历史导致模型否认本轮识别结果；说话人姓名和描述进入 system 前必须转义，避免重复称呼由提示词约束，不能通过丢弃本轮身份实现。
+改动原因：声纹模型独立部署在另一台服务器，voiceprint-api 0.1.0 起要求必填 user_id 并按用户隔离。小智侧必须从可信智能体绑定关系派生 user_id，不能信任浏览器或设备传入；每个智能体最多绑定 5 个声纹；API Token 必须从 URL 查询参数拆出，只通过 Bearer Header 传输。历史声纹在远程服务中属于 default 作用域，需要保留兼容并允许重新录音后迁移到 agentId 作用域。资源中心用户信息通过 `ai_agent_voice_print.person_id` 与声纹建立可空的一对一显式关联，不按姓名推断；该关联与声纹的多智能体绑定、远程注册作用域相互独立。实时识别假设一句话只有一个说话人，VAD 句末后把当前整段语音转 WAV 并与 ASR 并行识别，对齐官方上游逻辑；历史参数 `server.voiceprint_sample_seconds` 不再下发也不再影响运行时。系统功能开关和智能体绑定声纹必须同时满足才允许下发；没有绑定或总开关关闭时必须零调用、零提示词。可信 `speaker_id` 继续进入聊天记录、长期记忆事件和会话结束后的主动记忆上下文，`speaker_score` 仅保留在指标和聊天上报，不进入主 LLM；主动记忆模型输出中的 speaker_id 必须能在当前会话可信人物集合中验证，单一已识别说话人的事实保存为 private，未识别会话按智能体记忆策略 SHARED/IGNORE 决定是否保存为 shared。后端不按正文姓名扩大范围。聊天记录和记忆图谱必须展示人物归属。身份必须在每个成功识别轮次同时进入结构化 user message 和动态 system 上下文，避免只靠旧对话历史导致模型否认本轮识别结果；说话人姓名和描述进入 system 前必须转义，避免重复称呼由提示词约束，不能通过丢弃本轮身份实现。
 关键文件：
   - main/manager-api/src/main/java/xiaozhi/modules/agent/voiceprint/VoiceprintApiClient.java
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/entity/AgentVoicePrintEntity.java
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/service/impl/AgentVoicePrintEnrollmentServiceImpl.java
   - main/manager-api/src/main/java/xiaozhi/modules/agent/service/impl/AgentVoicePrintServiceImpl.java
+  - main/manager-api/src/main/java/xiaozhi/modules/person/
   - main/manager-api/src/main/java/xiaozhi/modules/config/service/impl/ConfigServiceImpl.java
   - main/manager-api/src/main/resources/db/changelog/202607131430.sql
+  - main/manager-api/src/main/resources/db/changelog/person-voiceprint-link-20261013.sql
   - main/xiaozhi-server/core/utils/voiceprint_provider.py
   - main/xiaozhi-server/core/utils/voiceprint_runtime.py
   - main/xiaozhi-server/core/providers/asr/base.py
@@ -566,7 +570,7 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
   - main/manager-mobile/src/pages/voiceprint/index.vue
   - docs/models/voiceprint-integration.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：如果官方修改声纹注册/识别/删除、配置下发、音频状态重置、ASR并行识别、聊天记录展示、长期记忆事件/召回、对话身份注入或声纹页面，必须保留 `user_id=agentId` 的可信服务端派生、每智能体最多5条的后端与远程双重校验、`remote_user_id=default` 历史兼容、Token仅通过Bearer Header传输、私有/回环/链路本地目标拦截、结构化 speakers 配置、“VAD句末整段语音WAV与ASR并发识别、`server.voiceprint_sample_seconds` 不再驱动截断采样、无绑定声纹零调用”、设备采集期间连续静音至少2秒才完成、注册事务提交后热刷新在线连接 provider、可信 `speaker_id` 贯穿聊天记录与记忆、private 事实不跨声纹召回、未知人物按已保存的 SHARED/IGNORE 记忆策略处理，以及“每个成功识别轮次都在当前 user JSON 和 system 上下文保留身份，但不得机械称呼姓名或主动播报识别过程”的行为。前端上限提示不能替代后端校验；删除远程失败时不得静默留下占用额度的孤儿声纹；日志不得输出Token、Authorization或带密钥URL。
+官方同步时的处理规则：如果官方修改声纹注册/识别/删除、人物资源、配置下发、音频状态重置、ASR并行识别、聊天记录展示、长期记忆事件/召回、对话身份注入或声纹页面，必须保留 `user_id=agentId` 的可信服务端派生、每智能体最多5条的后端与远程双重校验、`remote_user_id=default` 历史兼容、Token仅通过Bearer Header传输、私有/回环/链路本地目标拦截、结构化 speakers 配置、“VAD句末整段语音WAV与ASR并发识别、`server.voiceprint_sample_seconds` 不再驱动截断采样、无绑定声纹零调用”、设备采集任务写库及通知设备前校验 MAC/设备记录 ID 对应设备真实绑定目标智能体、设备采集期间连续静音至少2秒才完成、注册事务提交后热刷新在线连接 provider、可信 `speaker_id` 贯穿聊天记录与记忆、private 事实不跨声纹召回、未知人物按已保存的 SHARED/IGNORE 记忆策略处理，以及“每个成功识别轮次都在当前 user JSON 和 system 上下文保留身份，但不得机械称呼姓名或主动播报识别过程”的行为。人物—声纹必须继续以 `person_id` 显式一对一关联并校验双方工作空间写权限，历史记录不得按姓名回填；解除只清空关联，不得删除远程特征、样本或智能体绑定，人物有关联声纹时必须先明确解除或删除声纹。前端上限提示不能替代后端校验；删除远程失败时不得静默留下占用额度的孤儿声纹；日志不得输出Token、Authorization或带密钥URL。
 ```
 
 ## 27. 语义控制中枢门控的会议模式与完整纪要
@@ -889,22 +893,24 @@ ASR 专项规则：所有语音识别模型的“测试”都必须执行真实�
 官方同步时的处理规则：必须保留系统模板与工作空间模板的隔离、来源和目标智能体的 workspace 写权限校验、版本检查及事务应用。智能体中心必须把实例与模板作为同级入口，普通用户可看到官方模板、审核通过的社区模板和当前工作空间模板；卡片只进入预览，预览 API 只能返回安全摘要且不得调用模型，用户确认后才创建。基于模板创建必须在单一事务中完成配额校验、创建和应用，应用失败不得留下默认配置的半成品智能体，模板中的名称不得覆盖用户为新实例输入的名称。系统模板管理必须至少保留一条记录，历史空表通过后续 Liquibase 补种不含凭据的基础模板；默认模板数据异常时 manager-api 仍须以基础配置启动，禁止因初始化失败进入健康检查重启循环。超级管理员本人及其团队成员通过统一官方资源维护权限编辑系统默认模板；官方模板允许绑定已启用且测试通过的 TTS 模型、属于该模型的音色和启用中的官方知识库，保存、预览和应用时均须重新校验。工作空间模板可在同一工作空间内保留语音绑定；普通用户投稿为跨工作空间公共模板时仍必须剥离 TTS、音色和实时音色，防止携带不可移植资源。声纹必须以 `workspace_id` 固化资源归属，通过独立绑定表在同工作空间角色间复用，模板只保存 ID 引用且不得保存音频样本或生物特征；飞书 App Secret 与 Verification Token 必须从来源 agentId 作用域解密后立即以模板 ID 为 AAD 重新加密，应用时再重加密到目标 agentId，任何模板 API、日志或 Python 配置不得暴露明文或密文。设备绑定、聊天记录、长期记忆事实和上下文源认证请求头不得进入模板。模型、插件、知识库、替换词和声纹引用应用前必须重新验证；失效模型保留目标当前值，失效关联跳过并向页面返回明确警告。模板应用完成后只按事务提交后的权威角色配置刷新页面和在线设备，不能由前端伪造最终配置。角色配置 UI 必须把紧凑模板选择器与任务页签放在同一控制栏；基础设定的短名称使用有限宽度紧凑行，角色介绍在其下方占据完整编辑宽度，禁止左右高矮列造成空白；语音链路的短选项必须限制宽度和分区间距，热词候选默认折叠；`summaryMemory` 只在旧本地短摘要模式显示，不能在主动记忆模式渲染禁用空框。
 ```
 
-## 43. 资源中心人物档案与设备本地人脸识别
+## 43. 资源中心用户信息、人脸识别与声纹关联
 
 ```text
 定制模块：manager-web 资源中心、manager-api 人物不可变照片与智能体发布、xiaozhi-server 人脸库增量协议
-改动原因：运营人员需要独立维护人物照片，先绑定智能体、确认后再显式发布，不能在上传时直接选择设备或隐式生效；带本地算力的设备必须持久化人脸库，按智能体发布版本只同步 upsert/delete 差异，在本地识别后上报稳定人物 ID 并获取确定性动作，同时为未来服务端识别保留明确但默认关闭的能力接口。
+改动原因：运营人员需要在“用户信息”中独立维护人物资料、照片和声纹状态，先绑定智能体、确认后再显式发布人脸，不能在上传时直接选择设备或隐式生效；带本地算力的设备必须持久化人脸库，按智能体发布版本只同步 upsert/delete 差异，在本地识别后上报稳定人物 ID 并获取确定性动作。声纹只通过可空 `person_id` 与人物一对一显式关联，不能按姓名推断；关联与解除不改变声纹远程特征或既有智能体绑定。未来服务端人脸识别和可选问答画像只保留扩展边界，当前均未实现。
 关键文件：
   - main/manager-web/src/components/resource/ResourceCenterNav.vue
   - main/manager-web/src/views/PersonProfileManagement.vue
   - main/manager-web/src/views/FunctionPluginManagement.vue
   - main/manager-api/src/main/java/xiaozhi/modules/person/
+  - main/manager-api/src/main/java/xiaozhi/modules/agent/entity/AgentVoicePrintEntity.java
   - main/manager-api/src/main/resources/db/changelog/202608041730.sql
   - main/manager-api/src/main/resources/db/changelog/202608261130.sql
+  - main/manager-api/src/main/resources/db/changelog/person-voiceprint-link-20261013.sql
   - main/xiaozhi-server/core/device_face_profiles.py
   - docs/architecture/person-resource-and-face-sync.md
 是否允许被官方覆盖：否
-官方同步时的处理规则：必须保留人物档案与后台登录用户的概念隔离、workspace 所有权、不可变照片资产、人物-智能体期望/发布双状态、智能体单调发布版本、/config 服务密钥之后基于设备当前 agent_id 的再鉴权和设备识别事件幂等。设备身份必须来自当前已认证 WebSocket，不得信任消息体 macAddress 或缓存 agentId；上传只创建草稿资源，显式发布才改变运行事实。v2 设备必须持久化本地人脸库，版本相同返回 unchanged 且不读图片，版本变化只传 upsert/delete，收到 complete 后才能原子推进本地版本；在线发布只发送 sync_available 提示。只声明 features.face_profiles=true 的 v1 设备可保留一次连接内全量兼容，但不能作为新协议。照片上传必须继续校验扩展名/MIME/实际图片/大小/像素和路径边界，只保存归一化运行文件，不把照片、特征向量或事件样本带入角色模板。服务端识别 capability 默认必须返回不支持，预留 POST 不读取或保存图片；正式启用前必须单独完成模型、加密、留存、限流、评测与合规设计。人物 UI 按建档、上传照片、绑定智能体和显式发布组织；设备在线、固件支持、实际落盘版本和最近识别状态在 API 提供真实事实前不得由前端猜测。
+官方同步时的处理规则：必须保留人物档案与后台登录用户的概念隔离、workspace 所有权、不可变照片资产、人物-智能体期望/发布双状态、智能体单调发布版本、/config 服务密钥之后基于设备当前 agent_id 的再鉴权和设备识别事件幂等。人物—声纹必须由双方同工作空间写权限保护并通过 `person_id` 显式一对一关联，禁止按姓名自动匹配或回填；声纹的远程注册作用域、多智能体绑定和人物关联必须保持独立，解除关联不得删除生物特征，人物有关联声纹时不得隐式级联远程删除。设备身份必须来自当前已认证 WebSocket，不得信任消息体 macAddress 或缓存 agentId；上传只创建草稿资源，显式发布才改变运行事实。v2 设备必须持久化本地人脸库，版本相同返回 unchanged 且不读图片，版本变化只传 upsert/delete，收到 complete 后才能原子推进本地版本；在线发布只发送 sync_available 提示。只声明 features.face_profiles=true 的 v1 设备可保留一次连接内全量兼容，但不能作为新协议。照片上传必须继续校验扩展名/MIME/实际图片/大小/像素和路径边界，只保存归一化运行文件，不把照片、特征向量或事件样本带入角色模板。服务端识别 capability 默认必须返回不支持，预留 POST 不读取或保存图片；可选问答画像当前未实现，不得把“介绍”字段或静态页面伪装为已上线能力，正式启用前必须单独定义授权、撤回、敏感字段、留存、审计与最小披露边界。人物 UI 按建档、上传照片、管理声纹、绑定智能体和显式发布组织；设备在线、固件支持、实际落盘版本和最近识别状态在 API 提供真实事实前不得由前端猜测。
 ```
 
 ## 44. 联网搜索单次检索提示工程

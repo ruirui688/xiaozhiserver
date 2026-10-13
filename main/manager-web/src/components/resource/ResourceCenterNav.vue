@@ -28,7 +28,7 @@ export default {
           icon: "el-icon-reading"
         },
         {
-          label: "人物与人脸",
+          label: "用户信息",
           path: "/person-profile-management",
           related: [],
           icon: "el-icon-user"

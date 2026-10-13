@@ -192,6 +192,7 @@ public class AgentVoicePrintServiceImpl extends ServiceImpl<AgentVoicePrintDao, 
             try {
                 AgentVoicePrintEntity entity = ConvertUtils.sourceToTarget(dto, AgentVoicePrintEntity.class);
                 entity.setAgentId(existing.getAgentId());
+                entity.setWorkspaceId(existing.getWorkspaceId());
                 entity.setAudioId(updatedSamples.isEmpty() ? existing.getAudioId() : updatedSamples.get(0).audioId());
                 entity.setRemoteUserId(
                         updatedSamples.isEmpty() ? remoteUserId(existing) : existing.getAgentId());

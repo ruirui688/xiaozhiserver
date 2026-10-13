@@ -3,6 +3,7 @@ package xiaozhi.modules.agent.entity;
 import java.util.Date;
 
 import com.baomidou.mybatisplus.annotation.FieldFill;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
@@ -31,6 +32,11 @@ public class AgentVoicePrintEntity {
      * 声纹资源所属工作空间；绑定只能发生在同一工作空间内。
      */
     private String workspaceId;
+    /**
+     * 关联的人物档案。一个人物最多关联一个逻辑声纹，空值表示尚未归入人物档案。
+     */
+    @TableField(updateStrategy = FieldStrategy.NEVER)
+    private String personId;
     /**
      * 关联的音频id
      */

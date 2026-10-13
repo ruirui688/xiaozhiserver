@@ -37,4 +37,28 @@ public interface AgentVoicePrintDao extends BaseMapper<AgentVoicePrintEntity> {
 
     int deleteBindingsByVoicePrintId(@Param("voicePrintId") String voicePrintId);
 
+    int bindPerson(
+            @Param("voicePrintId") String voicePrintId,
+            @Param("workspaceId") String workspaceId,
+            @Param("personId") String personId,
+            @Param("updater") Long updater);
+
+    int unbindPerson(
+            @Param("voicePrintId") String voicePrintId,
+            @Param("workspaceId") String workspaceId,
+            @Param("personId") String personId,
+            @Param("updater") Long updater);
+
+    List<AgentVoicePrintEntity> selectPersonOptions(
+            @Param("workspaceId") String workspaceId,
+            @Param("personId") String personId);
+
+    AgentVoicePrintEntity selectByIdForUpdate(
+            @Param("voicePrintId") String voicePrintId,
+            @Param("workspaceId") String workspaceId);
+
+    AgentVoicePrintEntity selectByPersonForUpdate(
+            @Param("workspaceId") String workspaceId,
+            @Param("personId") String personId);
+
 }

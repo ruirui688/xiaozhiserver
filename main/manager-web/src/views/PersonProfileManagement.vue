@@ -6,14 +6,15 @@
     <main class="person-main">
       <section class="page-hero">
         <div>
-          <p>独立维护人物与照片，绑定智能体后再显式发布；设备只增量同步已发布版本。</p>
+          <h1>用户信息</h1>
+          <p>这里的“用户信息”是可识别人物档案，不是后台登录账号；人脸需绑定智能体并显式发布后才会同步到设备。</p>
         </div>
         <div class="hero-actions">
           <el-button icon="el-icon-setting" @click="receptionWorkspaceVisible = true">
             接待配置
           </el-button>
           <el-button type="primary" icon="el-icon-plus" :disabled="!canWrite" @click="openCreate">
-            新增人物
+            新增用户信息
           </el-button>
         </div>
       </section>
@@ -31,7 +32,7 @@
         <div class="list-toolbar">
           <div class="list-summary">
             <strong>{{ filteredProfiles.length }}</strong>
-            <span>位人物</span>
+            <span>条用户信息</span>
           </div>
           <div class="list-filters">
             <el-input
@@ -52,10 +53,10 @@
 
         <div v-if="!loading && filteredProfiles.length === 0" class="empty-state">
           <i class="el-icon-user" />
-          <h3>还没有人物</h3>
-          <p>完成下面四步，智能体的人脸库才会对设备生效。</p>
+          <h3>还没有用户信息</h3>
+          <p>先建立基础资料；人脸与声纹可以按需补充。</p>
           <div class="empty-steps">
-            <span><b>1</b>新增人物</span>
+            <span><b>1</b>新增用户信息</span>
             <i class="el-icon-arrow-right" />
             <span><b>2</b>上传正面照片</span>
             <i class="el-icon-arrow-right" />
@@ -63,115 +64,123 @@
             <i class="el-icon-arrow-right" />
             <span><b>4</b>显式发布</span>
           </div>
-          <el-button v-if="canWrite" type="primary" icon="el-icon-plus" @click="openCreate">新增第一位人物</el-button>
+          <el-button v-if="canWrite" type="primary" icon="el-icon-plus" @click="openCreate">新增第一条用户信息</el-button>
         </div>
 
-        <div v-else class="person-list">
-          <article v-for="profile in filteredProfiles" :key="profile.id" class="person-card">
-            <div class="person-photo">
-              <img v-if="faceUrls[profile.id]" :src="faceUrls[profile.id]" :alt="`${profile.name}的人脸照片`" />
-              <div v-else class="photo-placeholder">
-                <i class="el-icon-user" />
+        <div v-else class="person-groups">
+          <section v-for="(group, groupIndex) in groupedProfiles" :key="group.name" class="person-group">
+            <header class="person-group__header">
+              <div>
+                <span class="group-marker" />
+                <strong>{{ group.name }}</strong>
+                <span>（{{ group.items.length }}）</span>
               </div>
+              <button type="button" class="group-toggle" @click="toggleGroup(group.name)">
+                {{ collapsedGroups[group.name] ? "展开" : "收起" }}
+                <i :class="collapsedGroups[group.name] ? 'el-icon-caret-bottom' : 'el-icon-caret-top'" />
+              </button>
+            </header>
+
+            <div v-show="!collapsedGroups[group.name]" class="person-grid">
+              <button v-if="canWrite && groupIndex === 0" type="button" class="create-card" @click="openCreate">
+                <span class="create-card__icon"><i class="el-icon-plus" /></span>
+                <span>
+                  <strong>添加用户信息</strong>
+                  <small>创建新的用户档案</small>
+                </span>
+                <i class="el-icon-user create-card__illustration" />
+              </button>
+
+              <PersonProfileCard
+                v-for="profile in group.items"
+                :key="profile.id"
+                :profile="profile"
+                :face-url="faceUrls[profile.id] || ''"
+                :can-write="canWrite"
+                @edit="openEdit"
+                @voiceprint="openVoicePrintSection"
+                @reception="openReception"
+                @publish="publishProfile"
+                @delete="deleteProfile"
+              />
             </div>
-            <div class="person-identity">
-              <h3>{{ profile.name }}</h3>
-              <span>{{ genderLabel(profile.gender) }}<template v-if="profile.groupName"> · {{ profile.groupName }}</template></span>
-              <p>{{ profile.description || "暂无介绍" }}</p>
-            </div>
-            <div class="person-state">
-              <span class="column-label">人脸状态</span>
-              <el-tag size="mini" :type="profile.faceReady ? 'success' : 'warning'">
-                {{ profile.faceReady ? `已上传 · v${profile.faceVersion}` : "待上传照片" }}
-              </el-tag>
-            </div>
-            <div class="person-devices">
-              <span class="column-label">绑定智能体</span>
-              <strong>{{ profile.agentNames && profile.agentNames.length ? `${profile.agentNames.length} 个智能体` : "未绑定智能体" }}</strong>
-              <small v-if="profile.agentNames && profile.agentNames.length" :title="profile.agentNames.join('、')">
-                {{ profile.agentNames.join("、") }}
-              </small>
-            </div>
-            <div class="person-action">
-              <span class="column-label">识别后动作</span>
-              <strong>{{ actionLabel(profile.recognitionAction) }}</strong>
-              <small v-if="profile.recognitionAction === 'SPEAK_TEXT'">{{ profile.greetingText || "未填写播报内容" }}</small>
-            </div>
-            <div class="person-enabled">
-              <span :class="['enabled-badge', { disabled: profile.status !== 1 }]">
-                {{ profile.status === 1 ? "启用" : "停用" }}
-              </span>
-            </div>
-            <div v-if="canWrite" class="person-actions">
-              <el-button type="text" icon="el-icon-s-custom" @click="openReception(profile)">接待与预约</el-button>
-              <el-button
-                v-if="profile.unpublishedChanges"
-                type="text"
-                icon="el-icon-upload2"
-                @click="publishProfile(profile)"
-              >发布变更</el-button>
-              <el-button type="text" icon="el-icon-edit" @click="openEdit(profile)">编辑</el-button>
-              <el-dropdown trigger="click" @command="handleCommand(profile, $event)">
-                <el-button type="text" icon="el-icon-more" aria-label="更多人物操作" />
-                <el-dropdown-menu slot="dropdown">
-                  <el-dropdown-item command="delete" class="danger-item">删除人物</el-dropdown-item>
-                </el-dropdown-menu>
-              </el-dropdown>
-            </div>
-          </article>
+          </section>
         </div>
       </section>
     </main>
 
     <el-dialog
-      :title="editingId ? '编辑人物' : '新增人物'"
+      :title="editingId ? '编辑用户信息' : '新增用户信息'"
       :visible.sync="dialogVisible"
-      width="900px"
+      width="1040px"
+      custom-class="person-editor-dialog"
       :close-on-click-modal="false"
+      :close-on-press-escape="!saving && !voiceOperationBusy"
+      :show-close="!saving && !voiceOperationBusy"
+      :before-close="beforeEditorClose"
+      @close="invalidateEditSession"
       @closed="resetDialog"
     >
       <el-form ref="personForm" :model="form" :rules="rules" label-position="top">
         <div class="dialog-grid">
-          <section class="face-column">
-            <label class="section-label"><span>*</span> 人脸照片</label>
-            <el-upload
-              class="face-uploader"
-              action="#"
-              accept="image/jpeg,image/png"
-              :auto-upload="false"
-              :show-file-list="false"
-              :on-change="handleFaceChange"
-            >
-              <img v-if="dialogPreviewUrl" :src="dialogPreviewUrl" alt="待上传人脸预览" />
-              <div v-else class="upload-placeholder">
-                <i class="el-icon-upload2" />
-                <strong>选择清晰正面照片</strong>
-                <span>支持 JPG、PNG，最大 5MB；上传后仅形成未发布资源版本。</span>
+          <section class="assets-column">
+            <div class="asset-section">
+              <label class="section-label"><span>*</span> 上传照片</label>
+              <el-upload
+                class="face-uploader"
+                action="#"
+                accept="image/jpeg,image/png"
+                :auto-upload="false"
+                :show-file-list="false"
+                :disabled="saving"
+                :on-change="handleFaceChange"
+              >
+                <img v-if="dialogPreviewUrl" :src="dialogPreviewUrl" alt="待上传人脸预览" />
+                <div v-else class="upload-placeholder">
+                  <i class="el-icon-upload2" />
+                  <strong>选择清晰正面照片</strong>
+                  <span>支持 JPG、PNG，最大 5MB；上传后仅形成未发布资源版本。</span>
+                </div>
+              </el-upload>
+              <div class="privacy-tip">
+                <i class="el-icon-lock" />
+                <span>上传不会下发；只有显式发布后，绑定智能体的设备才会增量同步。</span>
               </div>
-            </el-upload>
-            <div class="privacy-tip">
-              <i class="el-icon-lock" />
-              <span>上传不会下发；只有显式发布后，绑定智能体的设备才会增量同步。</span>
             </div>
+
+            <PersonVoiceprintPanel
+              :key="editingId || 'new-person'"
+              class="asset-section"
+              :person-id="editingId"
+              :person-name="form.name"
+              :person-description="form.description"
+              :agent-ids="form.agentIds"
+              :agents="agents"
+              :voice-print="currentVoicePrint"
+              :can-write="canWrite && !saving"
+              :active="dialogVisible"
+              @changed="handleVoicePrintChanged"
+              @operation-busy-change="voiceOperationBusy = $event"
+            />
           </section>
 
           <section class="fields-column">
             <div class="two-columns">
               <el-form-item label="姓名" prop="name">
-                <el-input v-model.trim="form.name" maxlength="30" show-word-limit />
+                <el-input v-model.trim="form.name" maxlength="30" show-word-limit :disabled="saving" />
               </el-form-item>
               <el-form-item label="分组">
-                <el-input v-model.trim="form.groupName" maxlength="60" placeholder="例如：家人、员工、访客" />
+                <el-input v-model.trim="form.groupName" maxlength="60" placeholder="例如：家人、员工、访客" :disabled="saving" />
               </el-form-item>
               <el-form-item label="性别">
-                <el-select v-model="form.gender">
+                <el-select v-model="form.gender" :disabled="saving">
                   <el-option label="未知/不填写" value="UNKNOWN" />
                   <el-option label="男" value="MALE" />
                   <el-option label="女" value="FEMALE" />
                 </el-select>
               </el-form-item>
               <el-form-item label="生日">
-                <el-date-picker v-model="form.birthday" type="date" value-format="yyyy-MM-dd" placeholder="选择生日" />
+                <el-date-picker v-model="form.birthday" type="date" value-format="yyyy-MM-dd" placeholder="选择生日" :disabled="saving" />
               </el-form-item>
             </div>
 
@@ -181,7 +190,7 @@
                   <strong>绑定智能体</strong>
                   <span>这里只建立资源归属，不会立即发送照片。</span>
                 </div>
-                <el-select v-model="form.agentIds" multiple filterable placeholder="选择一个或多个智能体">
+                <el-select v-model="form.agentIds" multiple filterable placeholder="选择一个或多个智能体" :disabled="saving">
                   <el-option
                     v-for="agent in agents"
                     :key="agent.id"
@@ -193,7 +202,7 @@
             </el-form-item>
 
             <el-form-item label="识别后动作" prop="recognitionAction">
-              <el-radio-group v-model="form.recognitionAction">
+              <el-radio-group v-model="form.recognitionAction" :disabled="saving">
                 <el-radio-button label="NONE">只记录</el-radio-button>
                 <el-radio-button label="SPEAK_TEXT">识别后说一句话</el-radio-button>
               </el-radio-group>
@@ -204,23 +213,26 @@
                 v-model.trim="form.greetingText"
                 maxlength="500"
                 show-word-limit
+                :disabled="saving"
                 placeholder="例如：欢迎回来，需要我帮你做什么？"
               />
             </el-form-item>
 
             <el-form-item label="介绍">
-              <el-input v-model="form.description" type="textarea" :rows="4" maxlength="200" show-word-limit />
+              <el-input v-model="form.description" type="textarea" :rows="4" maxlength="200" show-word-limit :disabled="saving" />
             </el-form-item>
 
             <el-form-item label="状态">
-              <el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="允许发布到智能体人脸库" />
+              <el-switch v-model="form.status" :active-value="1" :inactive-value="0" active-text="允许发布到智能体人脸库" :disabled="saving" />
             </el-form-item>
           </section>
         </div>
       </el-form>
       <div slot="footer">
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="saveProfile">保存人物</el-button>
+        <el-button :disabled="saving || voiceOperationBusy" @click="closeEditor">取消</el-button>
+        <el-button type="primary" :loading="saving" :disabled="!canWrite || voiceOperationBusy" @click="saveProfile">
+          {{ editingId ? "保存用户信息" : "先保存用户信息" }}
+        </el-button>
       </div>
     </el-dialog>
 
@@ -241,7 +253,9 @@
 <script>
 import Api from "@/apis/api";
 import HeaderBar from "@/components/HeaderBar.vue";
+import PersonProfileCard from "@/components/person/PersonProfileCard.vue";
 import PersonReceptionDialog from "@/components/person/PersonReceptionDialog.vue";
+import PersonVoiceprintPanel from "@/components/person/PersonVoiceprintPanel.vue";
 import ReceptionWorkspaceDialog from "@/components/person/ReceptionWorkspaceDialog.vue";
 import ResourceCenterNav from "@/components/resource/ResourceCenterNav.vue";
 import VersionFooter from "@/components/VersionFooter.vue";
@@ -256,7 +270,13 @@ function emptyForm() {
     recognitionAction: "NONE",
     greetingText: "",
     status: 1,
-    agentIds: []
+    agentIds: [],
+    voicePrintReady: false,
+    voicePrintId: "",
+    voicePrintAgentId: "",
+    voicePrintSourceName: "",
+    voicePrintDescription: "",
+    voicePrintCreateDate: null
   };
 }
 
@@ -264,7 +284,9 @@ export default {
   name: "PersonProfileManagement",
   components: {
     HeaderBar,
+    PersonProfileCard,
     PersonReceptionDialog,
+    PersonVoiceprintPanel,
     ReceptionWorkspaceDialog,
     ResourceCenterNav,
     VersionFooter
@@ -283,10 +305,18 @@ export default {
       form: emptyForm(),
       faceFile: null,
       dialogPreviewUrl: "",
+      editSessionGeneration: 0,
+      activeSaveId: 0,
+      voiceOperationBusy: false,
+      profileRequestId: 0,
+      faceLoadGeneration: 0,
+      faceRequestIds: {},
+      destroyed: false,
       receptionPersonVisible: false,
       receptionWorkspaceVisible: false,
       receptionPerson: null,
-      canWrite: localStorage.getItem("currentWorkspaceCanWrite") !== "false"
+      collapsedGroups: {},
+      canWrite: false
     };
   },
   computed: {
@@ -298,6 +328,31 @@ export default {
         return this.profiles;
       }
       return this.profiles.filter(item => item.groupName === this.activeGroup);
+    },
+    groupedProfiles() {
+      const grouped = new Map();
+      this.filteredProfiles.forEach(profile => {
+        const name = profile.groupName || "未分组";
+        if (!grouped.has(name)) grouped.set(name, []);
+        grouped.get(name).push(profile);
+      });
+      return [...grouped.entries()]
+        .sort(([left], [right]) => {
+          if (left === "未分组") return 1;
+          if (right === "未分组") return -1;
+          return left.localeCompare(right, "zh-CN");
+        })
+        .map(([name, items]) => ({ name, items }));
+    },
+    currentVoicePrint() {
+      return {
+        ready: Boolean(this.form.voicePrintReady),
+        id: this.form.voicePrintId || "",
+        agentId: this.form.voicePrintAgentId || "",
+        sourceName: this.form.voicePrintSourceName || "",
+        description: this.form.voicePrintDescription || "",
+        createDate: this.form.voicePrintCreateDate || null
+      };
     },
     rules() {
       return {
@@ -317,29 +372,45 @@ export default {
     }
   },
   created() {
+    this.loadWorkspacePermission();
     this.loadProfiles();
     this.loadAgents();
     Api.person.capability(() => {}, () => {});
   },
   beforeDestroy() {
+    this.destroyed = true;
+    this.profileRequestId += 1;
+    this.faceLoadGeneration += 1;
+    this.invalidateEditSession();
     this.revokeAllFaceUrls();
     this.revokeDialogPreview();
   },
   methods: {
+    loadWorkspacePermission() {
+      Api.workspace.current(({ data }) => {
+        if (this.destroyed || !data || data.code !== 0 || !data.data) return;
+        this.canWrite = Boolean(data.data.canWrite);
+        localStorage.setItem("currentWorkspaceCanWrite", this.canWrite ? "true" : "false");
+      });
+    },
     loadProfiles() {
+      const requestId = ++this.profileRequestId;
       this.loading = true;
       Api.person.list(this.keyword.trim(), ({ data }) => {
+        if (this.destroyed || requestId !== this.profileRequestId) return;
         this.loading = false;
         if (!data || data.code !== 0) {
-          this.$message.error((data && data.msg) || "获取人物档案失败");
+          this.$message.error((data && data.msg) || "获取用户信息失败");
           return;
         }
+        const faceGeneration = ++this.faceLoadGeneration;
         this.revokeAllFaceUrls();
         this.profiles = data.data || [];
-        this.profiles.filter(item => item.faceReady).forEach(item => this.loadFace(item));
+        this.profiles.filter(item => item.faceReady).forEach(item => this.loadFace(item, faceGeneration));
       }, () => {
+        if (this.destroyed || requestId !== this.profileRequestId) return;
         this.loading = false;
-        this.$message.error("获取人物档案失败");
+        this.$message.error("获取用户信息失败");
       });
     },
     loadAgents() {
@@ -349,21 +420,34 @@ export default {
         }
       });
     },
-    loadFace(profile) {
+    loadFace(profile, generation = this.faceLoadGeneration) {
+      const requestId = (this.faceRequestIds[profile.id] || 0) + 1;
+      this.$set(this.faceRequestIds, profile.id, requestId);
       Api.person.loadFace(profile.id, (res) => {
+        if (this.destroyed
+            || generation !== this.faceLoadGeneration
+            || requestId !== this.faceRequestIds[profile.id]) return;
         const blob = new Blob([res.data], { type: "image/jpeg" });
-        this.$set(this.faceUrls, profile.id, URL.createObjectURL(blob));
+        const nextUrl = URL.createObjectURL(blob);
+        const previousUrl = this.faceUrls[profile.id];
+        this.$set(this.faceUrls, profile.id, nextUrl);
+        if (previousUrl && previousUrl !== this.dialogPreviewUrl) URL.revokeObjectURL(previousUrl);
       }, () => {});
     },
     revokeAllFaceUrls() {
-      Object.values(this.faceUrls).forEach(url => URL.revokeObjectURL(url));
+      Object.values(this.faceUrls)
+        .filter(url => url !== this.dialogPreviewUrl)
+        .forEach(url => URL.revokeObjectURL(url));
       this.faceUrls = {};
+      this.faceRequestIds = {};
     },
     openCreate() {
       if (!this.canWrite) {
         this.$message.warning("当前工作空间为只读");
         return;
       }
+      this.editSessionGeneration += 1;
+      this.voiceOperationBusy = false;
       this.editingId = "";
       this.form = emptyForm();
       this.faceFile = null;
@@ -371,6 +455,9 @@ export default {
       this.dialogVisible = true;
     },
     openEdit(profile) {
+      if (this.saving) return;
+      this.editSessionGeneration += 1;
+      this.voiceOperationBusy = false;
       this.editingId = profile.id;
       this.form = {
         name: profile.name || "",
@@ -381,25 +468,32 @@ export default {
         recognitionAction: profile.recognitionAction || "NONE",
         greetingText: profile.greetingText || "",
         status: profile.status === 0 ? 0 : 1,
-        agentIds: [...(profile.agentIds || [])]
+        agentIds: [...(profile.agentIds || [])],
+        voicePrintReady: Boolean(profile.voicePrintReady),
+        voicePrintId: profile.voicePrintId || "",
+        voicePrintAgentId: profile.voicePrintAgentId || "",
+        voicePrintSourceName: profile.voicePrintSourceName || "",
+        voicePrintDescription: profile.voicePrintDescription || "",
+        voicePrintCreateDate: profile.voicePrintCreateDate || null
       };
       this.faceFile = null;
       this.revokeDialogPreview();
       this.dialogPreviewUrl = this.faceUrls[profile.id] || "";
       this.dialogVisible = true;
     },
+    openVoicePrintSection(profile) {
+      if (!this.canWrite) return;
+      this.openEdit(profile);
+    },
     openReception(profile) {
       this.receptionPerson = profile;
       this.receptionPersonVisible = true;
     },
-    handleCommand(profile, command) {
-      if (command === "edit") {
-        this.openEdit(profile);
-      } else if (command === "delete") {
-        this.deleteProfile(profile);
-      }
+    toggleGroup(groupName) {
+      this.$set(this.collapsedGroups, groupName, !this.collapsedGroups[groupName]);
     },
     handleFaceChange(uploadFile) {
+      if (this.saving) return;
       const raw = uploadFile.raw;
       if (!raw) return;
       if (!/^image\/(jpeg|png)$/.test(raw.type)) {
@@ -415,62 +509,168 @@ export default {
       this.dialogPreviewUrl = URL.createObjectURL(raw);
     },
     saveProfile() {
+      if (this.saving || this.voiceOperationBusy || !this.canWrite) return;
+      const session = {
+        generation: this.editSessionGeneration,
+        targetId: this.editingId
+      };
       this.$refs.personForm.validate(valid => {
+        if (!this.isEditSessionActive(session)) return;
         if (!valid) return;
         if (!this.editingId && !this.faceFile) {
           this.$message.warning("请先选择一张清晰正面照片");
           return;
         }
+        const context = {
+          ...session,
+          operationId: ++this.activeSaveId,
+          faceFile: this.faceFile,
+          previewUrl: this.dialogPreviewUrl
+        };
+        const creating = !context.targetId;
         this.saving = true;
-        const payload = { ...this.form };
+        const payload = {
+          name: this.form.name,
+          gender: this.form.gender,
+          birthday: this.form.birthday,
+          groupName: this.form.groupName,
+          description: this.form.description,
+          recognitionAction: this.form.recognitionAction,
+          greetingText: this.form.greetingText,
+          status: this.form.status,
+          agentIds: [...(this.form.agentIds || [])]
+        };
         const onSaved = ({ data }) => {
           if (!data || data.code !== 0 || !data.data) {
+            if (!this.isSaveContextActive(context)) return;
             this.saving = false;
-            this.$message.error((data && data.msg) || "保存人物档案失败");
+            this.$message.error((data && data.msg) || "保存用户信息失败");
             return;
           }
           const profile = data.data;
-          if (this.faceFile) {
-            Api.person.uploadFace(profile.id, this.faceFile, ({ data: uploadData }) => {
-              this.saving = false;
+          if (context.faceFile) {
+            Api.person.uploadFace(profile.id, context.faceFile, ({ data: uploadData }) => {
+              if (!this.isSaveContextActive(context)) return;
               if (!uploadData || uploadData.code !== 0) {
                 this.handleFaceUploadFailure(
                   profile,
-                  (uploadData && uploadData.msg) || "人物资料已保存，但照片上传失败，请重试"
+                  (uploadData && uploadData.msg) || "人物资料已保存，但照片上传失败，请重试",
+                  context
                 );
                 return;
               }
-              this.finishSave();
+              this.finishSave(uploadData.data || profile, creating, context);
             }, () => {
-              this.handleFaceUploadFailure(profile, "人物资料已保存，但照片上传失败，请重试");
+              if (!this.isSaveContextActive(context)) return;
+              this.handleFaceUploadFailure(
+                profile,
+                "人物资料已保存，但照片上传失败，请重试",
+                context
+              );
             });
-          } else {
-            this.finishSave();
+          } else if (this.isSaveContextActive(context)) {
+            this.finishSave(profile, creating, context);
           }
         };
         const onFailed = err => {
+          if (!this.isSaveContextActive(context)) return;
           this.saving = false;
-          this.$message.error((err && err.data && err.data.msg) || "保存人物档案失败");
+          this.$message.error((err && err.data && err.data.msg) || "保存用户信息失败");
         };
-        if (this.editingId) {
-          Api.person.update(this.editingId, payload, onSaved, onFailed);
+        if (context.targetId) {
+          Api.person.update(context.targetId, payload, onSaved, onFailed);
         } else {
           Api.person.create(payload, onSaved, onFailed);
         }
       });
     },
-    handleFaceUploadFailure(profile, message) {
+    isEditSessionActive(context) {
+      return Boolean(
+        context
+        && this.dialogVisible
+        && context.generation === this.editSessionGeneration
+        && context.targetId === this.editingId
+      );
+    },
+    isSaveContextActive(context) {
+      return this.isEditSessionActive(context) && context.operationId === this.activeSaveId;
+    },
+    invalidateEditSession() {
+      this.editSessionGeneration += 1;
+    },
+    beforeEditorClose(done) {
+      if (this.voiceOperationBusy) {
+        this.$message.warning("声纹操作正在处理，请稍候");
+        return;
+      }
+      if (this.saving) {
+        this.$message.warning("用户信息正在保存，请稍候");
+        return;
+      }
+      done();
+    },
+    closeEditor() {
+      if (this.voiceOperationBusy) {
+        this.$message.warning("声纹操作正在处理，请稍候");
+        return;
+      }
+      if (!this.saving) this.dialogVisible = false;
+    },
+    handleFaceUploadFailure(profile, message, context) {
+      if (!this.isSaveContextActive(context)) return;
       this.saving = false;
       // 创建资料已经成功，后续重试必须更新同一条记录，不能重复创建人物。
       this.editingId = profile.id;
       this.$message.error(message);
       this.loadProfiles();
     },
-    finishSave() {
+    finishSave(profile, keepEditing, context) {
+      if (!this.isSaveContextActive(context)) return;
       this.saving = false;
+      if (keepEditing && profile && profile.id) {
+        this.editingId = profile.id;
+        this.form = {
+          ...this.form,
+          name: profile.name || this.form.name,
+          gender: profile.gender || this.form.gender,
+          birthday: profile.birthday || this.form.birthday,
+          groupName: profile.groupName || this.form.groupName,
+          description: profile.description || this.form.description,
+          recognitionAction: profile.recognitionAction || this.form.recognitionAction,
+          greetingText: profile.greetingText || this.form.greetingText,
+          status: profile.status === 0 ? 0 : 1,
+          agentIds: [...(profile.agentIds || this.form.agentIds || [])],
+          voicePrintReady: Boolean(profile.voicePrintReady),
+          voicePrintId: profile.voicePrintId || "",
+          voicePrintAgentId: profile.voicePrintAgentId || "",
+          voicePrintSourceName: profile.voicePrintSourceName || "",
+          voicePrintDescription: profile.voicePrintDescription || "",
+          voicePrintCreateDate: profile.voicePrintCreateDate || null
+        };
+        if (context.previewUrl) this.$set(this.faceUrls, profile.id, context.previewUrl);
+        this.faceFile = null;
+        this.profiles.push(profile);
+        this.$message.success("基础资料和照片已保存，现在可以继续录入或关联声纹；人脸变更仍需显式发布");
+        return;
+      }
       this.dialogVisible = false;
-      this.$message.success("人物草稿已保存；确认无误后请显式发布");
+      this.$message.success("用户信息草稿已保存；人脸变更确认无误后请显式发布");
       this.loadProfiles();
+    },
+    handleVoicePrintChanged({ personId = "", fields = {}, profile = {}, reload = false } = {}) {
+      if (!this.dialogVisible || !personId || personId !== this.editingId) return;
+      Object.entries(fields).forEach(([key, value]) => this.$set(this.form, key, value));
+      const index = this.profiles.findIndex(item => item.id === personId);
+      if (index >= 0) {
+        this.$set(this.profiles, index, { ...this.profiles[index], ...fields });
+      }
+      this.mergeProfileResponse(profile);
+      if (reload) this.loadProfiles();
+    },
+    mergeProfileResponse(profile) {
+      if (!profile || !profile.id) return;
+      const index = this.profiles.findIndex(item => item.id === profile.id);
+      if (index >= 0) this.$set(this.profiles, index, { ...this.profiles[index], ...profile });
     },
     publishProfile(profile) {
       this.$confirm(
@@ -487,22 +687,27 @@ export default {
       }).catch(() => {});
     },
     deleteProfile(profile) {
+      if (profile.voicePrintReady) {
+        this.$message.warning("该用户已关联声纹，请先在用户信息中解除关联或删除声纹");
+        return;
+      }
       this.$confirm(
         `删除“${profile.name}”后，相关智能体发布版本会移除此人脸。是否继续？`,
-        "删除人物档案",
+        "删除用户信息",
         { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" }
       ).then(() => {
         Api.person.remove(profile.id, ({ data }) => {
           if (data && data.code === 0) {
-            this.$message.success("已删除人物档案");
+            this.$message.success("已删除用户信息");
             this.loadProfiles();
           } else {
             this.$message.error((data && data.msg) || "删除失败");
           }
-        }, () => this.$message.error("删除失败"));
+        }, err => this.$message.error((err && err.data && err.data.msg) || "删除失败"));
       }).catch(() => {});
     },
     resetDialog() {
+      this.voiceOperationBusy = false;
       this.editingId = "";
       this.form = emptyForm();
       this.faceFile = null;
@@ -515,11 +720,14 @@ export default {
       }
       this.dialogPreviewUrl = "";
     },
-    genderLabel(gender) {
-      return gender === "MALE" ? "男" : gender === "FEMALE" ? "女" : "未填写性别";
-    },
-    actionLabel(action) {
-      return action === "SPEAK_TEXT" ? "识别后说一句话" : "只记录";
+    formatDate(value) {
+      const text = String(value || "");
+      if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "";
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return `${date.getFullYear()}-${month}-${day}`;
     }
   }
 };
@@ -549,9 +757,16 @@ export default {
 }
 
 .page-hero p {
-  margin: 0;
+  margin: 5px 0 0;
   color: #747d93;
   font-size: 13px;
+}
+
+.page-hero h1 {
+  margin: 0;
+  color: #252c3d;
+  font-size: 24px;
+  line-height: 32px;
 }
 
 .hero-actions {
@@ -735,139 +950,126 @@ export default {
   color: #bcc4d2;
 }
 
-.person-list {
+.person-groups,
+.person-group {
+  display: grid;
+  gap: 18px;
+}
+
+.person-group__header {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.person-card {
-  display: grid;
-  grid-template-columns: 66px minmax(190px, 1.3fr) minmax(120px, 0.7fr) minmax(150px, 0.9fr) minmax(170px, 1fr) 58px minmax(170px, auto);
-  min-height: 88px;
   align-items: center;
-  gap: 14px;
-  padding: 11px 14px;
-  border: 1px solid #e8ecf4;
-  border-radius: 11px;
-  background: #fff;
-  box-shadow: 0 3px 10px rgba(53, 67, 99, 0.04);
-  transition: 0.2s ease;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 2px 0;
+  color: #737c8e;
+  font-size: 13px;
 }
 
-.person-card:hover {
-  border-color: #abc2ef;
-  box-shadow: 0 7px 18px rgba(65, 96, 151, 0.1);
+.person-group__header > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
 }
 
-.person-photo {
-  width: 62px;
-  height: 62px;
-  overflow: hidden;
-  border-radius: 10px;
-  background: #f2f4f8;
-}
-
-.person-photo img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.photo-placeholder {
-  display: grid;
-  height: 100%;
-  place-content: center;
-  color: #a4acbb;
-}
-
-.photo-placeholder i {
-  font-size: 25px;
-}
-
-.person-identity,
-.person-state,
-.person-devices,
-.person-action {
-  min-width: 0;
-}
-
-.person-identity h3 {
-  margin: 0 0 2px;
-  color: #242a3c;
-  font-size: 15px;
-}
-
-.person-identity > span,
-.column-label {
-  color: #9299aa;
-  font-size: 11px;
-}
-
-.person-identity p {
-  overflow: hidden;
-  margin: 5px 0 0;
-  color: #697187;
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.person-state,
-.person-devices,
-.person-action {
-  display: grid;
-  gap: 4px;
-}
-
-.person-state .el-tag {
-  width: max-content;
-}
-
-.person-devices strong,
-.person-action strong {
-  overflow: hidden;
-  color: #555e73;
-  font-size: 12px;
+.person-group__header strong {
+  color: #424a5e;
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.person-devices small,
-.person-action small {
-  overflow: hidden;
-  color: #9aa2b3;
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.group-marker {
+  width: 5px;
+  height: 18px;
+  border-radius: 4px;
+  background: #f6af3c;
 }
 
-.enabled-badge {
-  display: inline-block;
-  padding: 3px 8px;
-  border-radius: 9px;
-  background: #e9f8f1;
-  color: #2d9a6b;
-  font-size: 11px;
+.group-toggle {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #7b8495;
+  cursor: pointer;
+  font: inherit;
 }
 
-.enabled-badge.disabled {
-  background: #f0f2f5;
-  color: #8d95a4;
+.person-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 22px;
 }
 
-.person-actions {
+.create-card {
+  position: relative;
   display: flex;
+  min-height: 205px;
+  overflow: hidden;
   align-items: center;
-  justify-content: flex-end;
+  gap: 16px;
+  padding: 28px 30px;
+  border: 2px dashed #d9dde5;
+  border-radius: 22px;
+  background: linear-gradient(135deg, #fff 15%, #fffaf0 100%);
+  color: #333b4d;
+  text-align: left;
+  cursor: pointer;
+}
+
+.create-card:hover {
+  border-color: #efb957;
+  box-shadow: 0 12px 28px rgba(114, 87, 35, 0.09);
+}
+
+.create-card > span:not(.create-card__icon) {
+  z-index: 1;
+  display: grid;
   gap: 6px;
+}
+
+.create-card strong {
+  font-size: 20px;
+}
+
+.create-card small {
+  color: #9a9fa9;
+  font-size: 13px;
+}
+
+.create-card__icon {
+  z-index: 1;
+  display: grid;
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  place-items: center;
+  border-radius: 50%;
+  background: #ffd778;
+  color: #72520f;
+  font-size: 23px;
+}
+
+.create-card__illustration {
+  position: absolute;
+  right: 22px;
+  bottom: -15px;
+  color: rgba(244, 180, 55, 0.13);
+  font-size: 138px;
 }
 
 .dialog-grid {
   display: grid;
-  grid-template-columns: 340px minmax(0, 1fr);
+  grid-template-columns: 390px minmax(0, 1fr);
   gap: 30px;
+}
+
+.assets-column {
+  display: grid;
+  align-content: start;
+  gap: 18px;
+}
+
+.asset-section {
+  min-width: 0;
 }
 
 .section-label {
@@ -890,7 +1092,7 @@ export default {
 .face-uploader img,
 .upload-placeholder {
   width: 100%;
-  height: 300px;
+  height: 220px;
   border: 1px dashed #cbd2df;
   border-radius: 14px;
   background: #f7f8fa;
@@ -951,14 +1153,19 @@ export default {
   color: #f56c6c;
 }
 
-@media (max-width: 1200px) {
-  .person-card {
-    grid-template-columns: 66px minmax(170px, 1.2fr) minmax(110px, 0.7fr) minmax(130px, 0.8fr) minmax(140px, 0.9fr) 54px minmax(150px, auto);
-  }
+::v-deep .person-editor-dialog {
+  max-width: calc(100vw - 32px);
+}
 
-  .person-devices small,
-  .person-action small {
-    display: none;
+@media (max-width: 1460px) {
+  .person-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1120px) {
+  .dialog-grid {
+    grid-template-columns: 330px minmax(0, 1fr);
   }
 
   .recognition-summary > span:nth-child(2) {

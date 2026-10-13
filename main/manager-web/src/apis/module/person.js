@@ -34,6 +34,16 @@ export default {
     request('GET', '/resource/persons/agents', null, callback, failCallback);
   },
 
+  voicePrintOptions(personId, callback, failCallback) {
+    request(
+      'GET',
+      `/resource/persons/${encodeURIComponent(personId)}/voice-print-options`,
+      null,
+      callback,
+      failCallback
+    );
+  },
+
   create(payload, callback, failCallback) {
     request('POST', '/resource/persons', payload, callback, failCallback);
   },
@@ -61,6 +71,26 @@ export default {
 
   publish(id, callback, failCallback) {
     request('POST', `/resource/persons/${encodeURIComponent(id)}/publish`, null, callback, failCallback);
+  },
+
+  bindVoicePrint(personId, voicePrintId, callback, failCallback) {
+    request(
+      'PUT',
+      `/resource/persons/${encodeURIComponent(personId)}/voice-print/${encodeURIComponent(voicePrintId)}`,
+      null,
+      callback,
+      failCallback
+    );
+  },
+
+  unbindVoicePrint(personId, callback, failCallback) {
+    request(
+      'DELETE',
+      `/resource/persons/${encodeURIComponent(personId)}/voice-print`,
+      null,
+      callback,
+      failCallback
+    );
   },
 
   loadFace(id, callback, failCallback) {

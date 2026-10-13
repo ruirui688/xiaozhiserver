@@ -1,12 +1,14 @@
 package xiaozhi.modules.person.service.impl;
 
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.core.io.ByteArrayResource;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -14,9 +16,11 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.web.multipart.MultipartFile;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-
 import lombok.RequiredArgsConstructor;
 import xiaozhi.common.exception.RenException;
+import xiaozhi.modules.agent.dao.AgentVoicePrintDao;
+import xiaozhi.modules.agent.entity.AgentVoicePrintEntity;
+import xiaozhi.modules.agent.vo.AgentVoicePrintVO;
 import xiaozhi.modules.person.dao.PersonFaceAssetDao;
 import xiaozhi.modules.person.dao.PersonProfileDao;
 import xiaozhi.modules.person.dto.PersonProfileSaveDTO;
@@ -36,6 +40,7 @@ import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 public class PersonProfileServiceImpl implements PersonProfileService {
     private final PersonProfileDao profileDao;
     private final PersonFaceAssetDao assetDao;
+    private final AgentVoicePrintDao voicePrintDao;
     private final PersonFaceStorage faceStorage;
     private final PersonFacePublicationService publicationService;
     private final WorkspacePermissionService workspacePermissionService;
@@ -65,6 +70,14 @@ public class PersonProfileServiceImpl implements PersonProfileService {
     }
 
     @Override
+    public List<AgentVoicePrintVO> listVoicePrintOptions(String id) {
+        PersonProfileEntity profile = requireProfile(id, true);
+        return voicePrintDao.selectPersonOptions(profile.getWorkspaceId(), profile.getId()).stream()
+                .map(this::toVoicePrintOption)
+                .toList();
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public PersonProfileVO create(PersonProfileSaveDTO dto) {
         String workspaceId = workspacePermissionService.currentWorkspaceId();
@@ -90,8 +103,76 @@ public class PersonProfileServiceImpl implements PersonProfileService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public PersonProfileVO bindVoicePrint(String id, String voicePrintId) {
+        PersonProfileEntity profile = requireProfile(id, true);
+        AgentVoicePrintEntity voicePrint = requireVoicePrint(voicePrintId, profile.getWorkspaceId());
+        AgentVoicePrintEntity existing = findVoicePrintForPerson(profile.getId(), profile.getWorkspaceId());
+        if (existing != null && !Objects.equals(existing.getId(), voicePrint.getId())) {
+            throw new RenException("人物已关联其他声纹，请先解除现有关联");
+        }
+        if (Objects.equals(voicePrint.getPersonId(), profile.getId())) {
+            return toVOs(List.of(profile), profile.getWorkspaceId()).get(0);
+        }
+        if (StringUtils.isNotBlank(voicePrint.getPersonId())) {
+            throw new RenException("声纹已关联其他人物，请先解除现有关联");
+        }
+
+        AgentVoicePrintEntity responseVoicePrint = voicePrint;
+        try {
+            int updated = voicePrintDao.bindPerson(
+                    voicePrint.getId(), profile.getWorkspaceId(), profile.getId(), SecurityUser.getUserId());
+            if (updated != 1) {
+                // MySQL REPEATABLE READ 下普通 SELECT 可能仍看到事务开始时的旧快照；
+                // locking read 必须读取条件 UPDATE 之后的当前状态，才能可靠判断并发幂等。
+                AgentVoicePrintEntity latest = voicePrintDao.selectByIdForUpdate(
+                        voicePrint.getId(), profile.getWorkspaceId());
+                if (latest == null || !Objects.equals(latest.getPersonId(), profile.getId())) {
+                    throw new RenException("声纹关联状态已变化，请刷新后重试");
+                }
+                responseVoicePrint = latest;
+            }
+        } catch (DuplicateKeyException error) {
+            throw new RenException("人物已关联其他声纹，请先解除现有关联", error);
+        }
+        responseVoicePrint.setPersonId(profile.getId());
+        PersonProfileVO result = toVOs(List.of(profile), profile.getWorkspaceId()).get(0);
+        // 条件写入后的权威关联已知，覆盖 RR 快照组装出的旧声纹摘要。
+        applyVoicePrintSummary(result, responseVoicePrint);
+        return result;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public PersonProfileVO unbindVoicePrint(String id) {
+        PersonProfileEntity profile = requireProfile(id, true);
+        AgentVoicePrintEntity voicePrint = findVoicePrintForPerson(profile.getId(), profile.getWorkspaceId());
+        if (voicePrint == null) {
+            return toVOs(List.of(profile), profile.getWorkspaceId()).get(0);
+        }
+        int updated = voicePrintDao.unbindPerson(
+                voicePrint.getId(), profile.getWorkspaceId(), profile.getId(), SecurityUser.getUserId());
+        if (updated != 1) {
+            // 按人物做 current read，避免旧声纹刚解绑、另一声纹又并发绑定时误判为成功。
+            AgentVoicePrintEntity latest = voicePrintDao.selectByPersonForUpdate(
+                    profile.getWorkspaceId(), profile.getId());
+            if (latest != null) {
+                throw new RenException("声纹关联状态已变化，请刷新后重试");
+            }
+        }
+        voicePrint.setPersonId(null);
+        PersonProfileVO result = toVOs(List.of(profile), profile.getWorkspaceId()).get(0);
+        // 即使普通摘要查询仍命中旧快照，解绑响应也必须反映当前写入结果。
+        applyVoicePrintSummary(result, null);
+        return result;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public void delete(String id) {
         PersonProfileEntity entity = requireProfile(id, true);
+        if (findVoicePrintForPerson(entity.getId(), entity.getWorkspaceId()) != null) {
+            throw new RenException("人物已关联声纹，请先解除或删除声纹后再删除人物");
+        }
         List<String> paths = assetDao.selectList(new LambdaQueryWrapper<PersonFaceAssetEntity>()
                 .eq(PersonFaceAssetEntity::getPersonId, id)
                 .eq(PersonFaceAssetEntity::getWorkspaceId, entity.getWorkspaceId())).stream()
@@ -211,8 +292,10 @@ public class PersonProfileServiceImpl implements PersonProfileService {
         Map<String, List<PersonAgentBindingEntity>> bindingsByPerson =
                 publicationService.bindingsByPerson(personIds, workspaceId);
         Map<String, String> agentNames = publicationService.agentNames(workspaceId);
+        Map<String, AgentVoicePrintEntity> voicePrintsByPerson = voicePrintsByPerson(personIds, workspaceId);
         return profiles.stream().map(profile -> {
             List<PersonAgentBindingEntity> bindings = bindingsByPerson.getOrDefault(profile.getId(), List.of());
+            AgentVoicePrintEntity voicePrint = voicePrintsByPerson.get(profile.getId());
             List<String> desiredIds = bindings.stream().filter(item -> Objects.equals(item.getDesiredActive(), 1))
                     .map(PersonAgentBindingEntity::getAgentId).toList();
             List<String> publishedIds = bindings.stream().filter(item -> Objects.equals(item.getPublishedActive(), 1))
@@ -220,6 +303,12 @@ public class PersonProfileServiceImpl implements PersonProfileService {
             return PersonProfileVO.builder()
                     .id(profile.getId()).name(profile.getName()).gender(profile.getGender())
                     .birthday(profile.getBirthday()).groupName(profile.getGroupName()).description(profile.getDescription())
+                    .voicePrintReady(voicePrint != null)
+                    .voicePrintId(voicePrint == null ? null : voicePrint.getId())
+                    .voicePrintAgentId(voicePrint == null ? null : voicePrint.getAgentId())
+                    .voicePrintSourceName(voicePrint == null ? null : voicePrint.getSourceName())
+                    .voicePrintDescription(voicePrint == null ? null : voicePrint.getIntroduce())
+                    .voicePrintCreateDate(voicePrint == null ? null : voicePrint.getCreateDate())
                     .faceReady(StringUtils.isNotBlank(profile.getCurrentFaceAssetId()))
                     .faceVersion(Objects.requireNonNullElse(profile.getFaceVersion(), 0L))
                     .faceSha256(profile.getFaceSha256())
@@ -232,6 +321,59 @@ public class PersonProfileServiceImpl implements PersonProfileService {
                     .unpublishedChanges(publicationService.hasUnpublishedChanges(profile, bindings))
                     .createDate(profile.getCreateDate()).updateDate(profile.getUpdateDate()).build();
         }).toList();
+    }
+
+    private Map<String, AgentVoicePrintEntity> voicePrintsByPerson(List<String> personIds, String workspaceId) {
+        Map<String, AgentVoicePrintEntity> result = new LinkedHashMap<>();
+        if (personIds.isEmpty()) {
+            return result;
+        }
+        for (AgentVoicePrintEntity voicePrint : voicePrintDao.selectList(
+                new LambdaQueryWrapper<AgentVoicePrintEntity>()
+                        .eq(AgentVoicePrintEntity::getWorkspaceId, workspaceId)
+                        .in(AgentVoicePrintEntity::getPersonId, personIds))) {
+            if (StringUtils.isNotBlank(voicePrint.getPersonId())) {
+                result.put(voicePrint.getPersonId(), voicePrint);
+            }
+        }
+        return result;
+    }
+
+    private AgentVoicePrintEntity findVoicePrintForPerson(String personId, String workspaceId) {
+        return voicePrintDao.selectOne(new LambdaQueryWrapper<AgentVoicePrintEntity>()
+                .eq(AgentVoicePrintEntity::getWorkspaceId, workspaceId)
+                .eq(AgentVoicePrintEntity::getPersonId, personId)
+                .last("LIMIT 1"));
+    }
+
+    private AgentVoicePrintEntity requireVoicePrint(String voicePrintId, String workspaceId) {
+        AgentVoicePrintEntity voicePrint = StringUtils.isBlank(voicePrintId)
+                ? null : voicePrintDao.selectById(voicePrintId);
+        if (voicePrint == null || !Objects.equals(voicePrint.getWorkspaceId(), workspaceId)) {
+            throw new RenException("声纹不存在或不属于当前工作空间");
+        }
+        return voicePrint;
+    }
+
+    private AgentVoicePrintVO toVoicePrintOption(AgentVoicePrintEntity entity) {
+        AgentVoicePrintVO option = new AgentVoicePrintVO();
+        option.setId(entity.getId());
+        option.setPersonId(entity.getPersonId());
+        option.setAgentId(entity.getAgentId());
+        option.setAudioId(entity.getAudioId());
+        option.setSourceName(entity.getSourceName());
+        option.setIntroduce(entity.getIntroduce());
+        option.setCreateDate(entity.getCreateDate());
+        return option;
+    }
+
+    private void applyVoicePrintSummary(PersonProfileVO profile, AgentVoicePrintEntity voicePrint) {
+        profile.setVoicePrintReady(voicePrint != null);
+        profile.setVoicePrintId(voicePrint == null ? null : voicePrint.getId());
+        profile.setVoicePrintAgentId(voicePrint == null ? null : voicePrint.getAgentId());
+        profile.setVoicePrintSourceName(voicePrint == null ? null : voicePrint.getSourceName());
+        profile.setVoicePrintDescription(voicePrint == null ? null : voicePrint.getIntroduce());
+        profile.setVoicePrintCreateDate(voicePrint == null ? null : voicePrint.getCreateDate());
     }
 
     private String normalizeAction(String action) {

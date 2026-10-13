@@ -114,7 +114,7 @@ const routes = [
     },
     meta: {
       requiresAuth: true,
-      title: '用户信息管理'
+      title: '用户信息'
     }
   },
 {

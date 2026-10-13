@@ -5,6 +5,7 @@ import java.util.List;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.web.multipart.MultipartFile;
 
+import xiaozhi.modules.agent.vo.AgentVoicePrintVO;
 import xiaozhi.modules.person.dto.PersonProfileSaveDTO;
 import xiaozhi.modules.person.vo.PersonAgentOptionVO;
 import xiaozhi.modules.person.vo.PersonProfileVO;
@@ -14,9 +15,15 @@ public interface PersonProfileService {
 
     List<PersonAgentOptionVO> listWorkspaceAgents();
 
+    List<AgentVoicePrintVO> listVoicePrintOptions(String id);
+
     PersonProfileVO create(PersonProfileSaveDTO dto);
 
     PersonProfileVO update(String id, PersonProfileSaveDTO dto);
+
+    PersonProfileVO bindVoicePrint(String id, String voicePrintId);
+
+    PersonProfileVO unbindVoicePrint(String id);
 
     void delete(String id);
 
