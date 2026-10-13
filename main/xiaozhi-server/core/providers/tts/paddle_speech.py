@@ -126,6 +126,9 @@ class TTSProvider(TTSProviderBase):
                 except asyncio.TimeoutError:
                     raise Exception(f"WebSocket 超时：等待音频数据超过 {timeout_seconds} 秒")
 
+                if not audio_chunks:
+                    raise RuntimeError("Paddle TTS returned no audio")
+
                 # 将拼接后的 PCM 数据转换为 WAV 格式
                 wav_data = await self.pcm_to_wav(audio_chunks)
 
@@ -154,4 +157,6 @@ class TTSProvider(TTSProviderBase):
                     return wav_data
 
         except Exception as e:
-            raise Exception(f"Error during TTS WebSocket request: {e} while processing text: {text}")
+            raise RuntimeError(
+                f"Paddle TTS request failed: {type(e).__name__}"
+            ) from e

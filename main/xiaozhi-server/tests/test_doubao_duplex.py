@@ -124,6 +124,10 @@ def test_tools_gated_batched_deduplicated_and_cancelled(monkeypatch):
                  {'call_id': 'two', 'name': 'forbidden', 'arguments': '{}'}]
         await session._execute_tools(items, 0)
         conn.func_handler.handle_llm_function_call.assert_awaited_once()
+        assert (
+            conn.func_handler.handle_llm_function_call.await_args.args[1]["id"]
+            == "one"
+        )
         reply = transport.send.call_args.args[0]
         assert reply['type'] == 'conversation.item.create'
         assert [i['call_id'] for i in reply['items']] == ['one', 'two']

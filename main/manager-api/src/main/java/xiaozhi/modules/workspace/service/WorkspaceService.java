@@ -36,6 +36,8 @@ public interface WorkspaceService {
 
     WorkspaceInvitationVO invite(String workspaceId, WorkspaceInviteDTO dto);
 
+    WorkspaceInvitationVO previewInvitation(String code);
+
     void revokeInvitation(String workspaceId, String invitationId);
 
     WorkspaceVO acceptInvitation(String code);
@@ -47,6 +49,8 @@ public interface WorkspaceService {
     void updateMemberRole(String workspaceId, Long userId, WorkspaceRoleUpdateDTO dto);
 
     void prepareUserDeletion(Long userId);
+
+    void prepareUsersDisabled(List<Long> userIds);
 
     WorkspaceMemberEntity getActiveMember(String workspaceId, Long userId);
 

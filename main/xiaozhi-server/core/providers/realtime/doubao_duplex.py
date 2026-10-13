@@ -368,7 +368,12 @@ class DoubaoDuplexSession(DoubaoRealtimeSession):
                     output = "工具未启用或不可用"
                 else:
                     result = await asyncio.wait_for(handler.handle_llm_function_call(
-                        self.conn, {"name": item.get("name"), "arguments": item.get("arguments", "{}")}
+                        self.conn,
+                        {
+                            "id": call_id,
+                            "name": item.get("name"),
+                            "arguments": item.get("arguments", "{}"),
+                        },
                     ), 30)
                     if generation != self._generation or self._closed:
                         return

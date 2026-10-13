@@ -102,8 +102,12 @@ public class ShiroConfig {
         filterMap.put("/config/billing/usage", "server");
         filterMap.put("/config/billing/health", "server");
         filterMap.put("/config/**", "server");
+        filterMap.put("/reminders/**", "oauth2");
         filterMap.put("/billing/**", "oauth2");
         filterMap.put("/user/plugin-configs/**", "oauth2");
+        filterMap.put("/workspace/invitations/preview", "oauth2");
+        filterMap.put("/workspace/invitations/accept", "oauth2");
+        filterMap.put("/workspace/**", "oauth2");
         filterMap.put("/agent/templates", "oauth2");
         filterMap.put("/agent/templates/**", "oauth2");
         filterMap.put("/agent/*/templates", "oauth2");

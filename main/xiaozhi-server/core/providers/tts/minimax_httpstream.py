@@ -5,7 +5,6 @@ import queue
 import asyncio
 import aiohttp
 import requests
-import traceback
 
 from core.utils import textUtils
 from config.logger import setup_logging
@@ -129,7 +128,7 @@ class TTSProvider(TTSProviderBase):
                 continue
             except Exception as e:
                 logger.bind(tag=TAG).error(
-                    f"处理TTS文本失败: {str(e)}, 类型: {type(e).__name__}, 堆栈: {traceback.format_exc()}"
+                    f"处理TTS文本失败: error_type={type(e).__name__}"
                 )
 
     def _process_remaining_text_stream(self, is_last=False):
@@ -162,7 +161,8 @@ class TTSProvider(TTSProviderBase):
                 asyncio.run(self.text_to_speak(text, is_last))
             except Exception as e:
                 logger.bind(tag=TAG).warning(
-                    f"语音生成失败{5 - max_repeat_time + 1}次: {log_text}，错误: {e}"
+                    f"语音生成失败{5 - max_repeat_time + 1}次: {log_text}，"
+                    f"error_type={type(e).__name__}"
                 )
                 max_repeat_time -= 1
 
@@ -175,7 +175,9 @@ class TTSProvider(TTSProviderBase):
                     f"语音生成失败: {log_text}，请检查网络或服务是否正常"
                 )
         except Exception as e:
-            logger.bind(tag=TAG).error(f"Failed to generate TTS file: {e}")
+            logger.bind(tag=TAG).error(
+                f"Failed to generate TTS file: error_type={type(e).__name__}"
+            )
         finally:
             return None
 
@@ -212,7 +214,7 @@ class TTSProvider(TTSProviderBase):
 
                     if resp.status != 200:
                         logger.bind(tag=TAG).error(
-                            f"TTS请求失败: {resp.status}, {await resp.text()}"
+                            f"TTS请求失败: status={resp.status}"
                         )
                         self.tts_audio_queue.put(
                             (SentenceType.LAST, [], None, self.current_sentence_id)
@@ -252,9 +254,8 @@ class TTSProvider(TTSProviderBase):
                                 base_resp = data.get("base_resp", {})
                                 status_code = base_resp.get("status_code", 0)
                                 if status_code != 0:
-                                    status_msg = base_resp.get("status_msg", "未知错误")
                                     logger.bind(tag=TAG).error(
-                                        f"TTS请求失败, 错误码:{status_code}, 错误消息:{status_msg}"
+                                        f"TTS请求失败: status_code={status_code}"
                                     )
                                     self.tts_audio_queue.put(
                                         (
@@ -275,7 +276,9 @@ class TTSProvider(TTSProviderBase):
                                     self.pcm_buffer.extend(pcm_data)
 
                             except json.JSONDecodeError as e:
-                                logger.bind(tag=TAG).error(f"JSON解析失败: {e}")
+                                logger.bind(tag=TAG).error(
+                                    f"JSON解析失败: error_type={type(e).__name__}"
+                                )
                                 continue
 
                         while len(self.pcm_buffer) >= frame_bytes:
@@ -300,7 +303,9 @@ class TTSProvider(TTSProviderBase):
                         self._process_before_stop_play_files()
 
         except Exception as e:
-            logger.bind(tag=TAG).error(f"TTS请求异常: {e}")
+            logger.bind(tag=TAG).error(
+                f"TTS请求异常: error_type={type(e).__name__}"
+            )
             self.tts_audio_queue.put(
                 (SentenceType.LAST, [], None, self.current_sentence_id)
             )
@@ -345,7 +350,7 @@ class TTSProvider(TTSProviderBase):
             ) as response:
                 if response.status_code != 200:
                     logger.bind(tag=TAG).error(
-                        f"TTS请求失败: {response.status_code}, {response.text}"
+                        f"TTS请求失败: status={response.status_code}"
                     )
                     return []
 
@@ -369,7 +374,9 @@ class TTSProvider(TTSProviderBase):
                             audio_hex = data['data']['audio']
                             pcm_data.extend(bytes.fromhex(audio_hex))
                     except (json.JSONDecodeError, KeyError) as e:
-                        logger.bind(tag=TAG).warning(f"无效数据块: {e}")
+                        logger.bind(tag=TAG).warning(
+                            f"无效数据块: error_type={type(e).__name__}"
+                        )
                         continue
 
                 # 计算每帧的字节数
@@ -396,5 +403,7 @@ class TTSProvider(TTSProviderBase):
                 return opus_datas
 
         except Exception as e:
-            logger.bind(tag=TAG).error(f"TTS请求异常: {e}")
+            logger.bind(tag=TAG).error(
+                f"TTS请求异常: error_type={type(e).__name__}"
+            )
             return []

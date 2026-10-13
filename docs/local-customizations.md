@@ -1077,3 +1077,55 @@ Python 采集健康独立心跳，实例状态仅平台管理员可读；成员�
 只有工作空间，每用户默认拥有自己的空间并可邀请协作；调用使用平台统一供应商通道，只扣所在空间固定负责人的额度，当前不提供负责人交接。注册建立默认空间和额度账户，不再分配上游 Key；自有小程序/设备继续原认证，不新增第三方模型 API。不得回退改扣成员或其他用户。通道凭据按版本加密托管，调用冻结通道及官方账号，旧用户凭据仅供历史/在途兼容。调用前按真实归属预占，流式数据先续占再发送，未知结果保留待核对，结算幂等。平台额度账与供应商官方费用账分离，资源包保持只读。新增付费入口必须接入准入或明确拒绝，不得把占位凭据或握手伪装为真实服务。
 
 原有大型模型、记忆类仅接入独立授权、配置组装和计量服务，不混入账本/IAM职责。实现与初始化边界见[平台服务与运营隔离](./architecture/platform-service-and-operations.md)。
+
+## 56. 工作空间一次性邀请链接与认证续接
+
+定制模块：manager-api 工作空间邀请、manager-web 组织管理与用户登录/注册路由。
+工作空间 OWNER/ADMIN 可按 ADMIN 或 MEMBER 角色生成 24 小时有效、仅一人领取的邀请链接，不再要求被邀请者先注册并手工输入邀请码。每条有效链接继续占一个待邀请名额；原始 token 只在创建时返回一次，数据库仅保存 SHA-256，待邀请列表、日志和 API path/query 均不得回显。链接使用 Web hash 路由，页面读取后暂存到 sessionStorage 并清理地址栏；预览和接受使用 POST body，加入必须由已登录用户显式确认，禁止 GET 或预加载自动消费。
+
+未登录用户可选择登录或注册。注册仍创建自己的默认工作空间和固定负责人额度账户，完成登录后只通过经过校验的站内 redirect 返回邀请页，再加入目标空间；不得借邀请绕过注册开关、验证码、USER audience 或工作空间成员上限。移动浏览器的 Web→H5 自动跳转必须为邀请及其认证续接保留上下文。接受成功只新增/恢复成员关系并切换当前工作空间，不改变目标空间固定负责人和额度责任人。
+
+关键文件：
+
+- `main/manager-api/src/main/java/xiaozhi/modules/workspace/`
+- `main/manager-api/src/main/java/xiaozhi/modules/security/config/ShiroConfig.java`
+- `main/manager-api/src/main/resources/db/changelog/workspace-invitation-links-20261013.sql`
+- `main/manager-api/src/main/resources/db/changelog/workspace-invitation-lifecycle-indexes-20261013.sql`
+- `main/manager-web/src/views/OrganizationManagement.vue`
+- `main/manager-web/src/views/WorkspaceInvitationLanding.vue`
+- `main/manager-web/src/components/workspace/WorkspaceInviteDialog.vue`
+- `main/manager-web/src/utils/workspaceInvitation.js`
+- `main/manager-mobile/src/api/workspace.ts`
+- `main/manager-mobile/src/pages/organization/index.vue`
+- `docs/architecture/workspace-organization-management.md`
+
+官方同步时的处理规则：保留 token 哈希存储、24 小时单次领取、角色不可提升为 OWNER、正式成员与有效待邀请合计最多 5 人、工作空间和邀请行锁、已是成员不消耗链接、创建者失去管理权限或账号被停用后在同一事务永久撤销其待领取链接、注销账号时撤销相关定向邀请、涉及账号生命周期时按“按 ID 排序的全部用户行 → 按 ID 排序的全部工作空间行 → 成员/邀请行”的统一锁序、旧定向邀请码兼容，以及安全认证回跳和 fragment 清理。不得恢复明文 token 落库/列表回显、URL API 参数、开放重定向或自动加入。
+
+## 57. 设备日程提醒与在线主动播报
+
+定制模块：manager-api 日程事实与调度、manager-mobile 日程管理、xiaozhi-server 语音日程工具和在线设备精确 TTS 投递。
+
+用户可以通过语音创建、查询和取消一次性提醒，也可以在小程序中创建、编辑、取消并查看提醒状态。语音入口实现为受 `Intent.<selected>.functions` 白名单门控的 Server Plugin `device_reminder`；产品上可以称为语音日程或 MCP 能力，但不得改成外部 no-code MCP，也不得让未启用该插件的智能体调用。模型只有在工具成功返回后才能声称已经创建或取消提醒，普通讨论未来时间不能自动生成日程。
+
+`device_reminder` 是 Server Plugin 保留名。统一工具注册和执行都必须拒绝 Server MCP、Device IoT、Device MCP、MCP Endpoint 的同名工具，以及带一层或多层 `mcp_` 前缀的别名，不能让其他来源冒用该名称绕过白名单。Native Qwen/Doubao Realtime 当前没有独立主动通知 TTS，因此不注册、不执行该语音日程工具；小程序仍可选择绑定此类智能体的设备并保存提醒，但到点无法播报，10 分钟宽限期结束后标记未送达。
+
+manager-api 与 MySQL 是提醒时间、内容、设备、状态、重试和历史的唯一事实及调度权威；小程序不运行本地定时器，Python 也不保存日程或承担持久调度。语音工具通过 server secret 调用受保护的 `/config/**` 接口，用户端 API 按 workspace 校验资源所有权；创建、修改和投递均校验设备当前的 `device + agent` 绑定，不能信任客户端单独提交的 agentId 或 deviceId。语音创建记录的设备是来源幂等锚点，小程序可以修改标题和时间，但换设备必须取消后重新创建。
+
+到期投递的 `requestId` 由提醒 ID + 投递版本指纹派生，指纹覆盖目标设备/智能体、播报内容和计划时间；同一业务版本的普通重试保持稳定，编辑这些字段后发生变化。调度器领取后在独立事务中按设备、提醒的固定锁序复核租约，并让设备行锁覆盖有界的内部 HTTP 投递和状态回写，防止换绑或删除插入校验与入队之间。xiaozhi-server 对相同请求幂等，只向同时匹配目标 device 与 agent 的在线连接入队。设备忙碌或短暂离线时，在到期后 10 分钟宽限期内重试；超过宽限期仍不可投递则标记未送达。`DELIVERED` 只表示 Python 已接受并入队，或返回相同 `requestId` 已接收，不代表设备扬声器物理播放完成。当前 Python 回执缓存是单进程内存状态；多 Python 实例或进程重启若要进一步降低重复播报，需要 sticky routing 或共享、持久化的回执存储。提醒链路没有设备播放 ACK 时不能保证跨进程严格 exactly-once；断网、关机、深睡或 WebSocket 已断开的设备不能被服务器真正远程唤醒。
+
+关键文件：
+
+- `main/manager-api/src/main/java/xiaozhi/modules/reminder/`
+- `main/manager-api/src/main/resources/db/changelog/device-reminders-20261013.sql`
+- `main/xiaozhi-server/plugins_func/functions/device_reminder.py`
+- `main/xiaozhi-server/core/providers/tools/server_plugins/policy.py`
+- `main/xiaozhi-server/core/providers/tools/server_plugins/plugin_executor.py`
+- `main/xiaozhi-server/core/providers/tools/unified_tool_manager.py`
+- `main/xiaozhi-server/core/api/device_notification_handler.py`
+- `main/xiaozhi-server/core/spoken_notifications.py`
+- `main/manager-mobile/src/api/reminder.ts`
+- `main/manager-mobile/src/pages/reminder/`
+- `docs/architecture/function-plugin-architecture.md`
+- `docs/architecture/device-interaction-chain.md`
+
+官方同步时的处理规则：保留 Server Plugin 白名单门控、`device_reminder` 保留名在注册/执行两层对所有其他工具来源及 `mcp_` 别名的失败关闭、Native Qwen/Doubao Realtime 显式不可用、manager-api/MySQL 权威、小程序无本地调度、workspace 资源授权、server secret、device + agent 双重匹配，以及“同一投递版本稳定、编辑后变化”的 `requestId` 幂等语义。不得退回只用提醒 ID 区分投递版本，不得按智能体广播冒充精确设备投递，不得在设备忙碌时强制插播，不得把 `DELIVERED` 或入队成功描述成物理播放确认，也不得宣称能唤醒已断线或关机设备。多 Python 实例必须明确 sticky routing/共享回执和无设备播放 ACK 的边界。提醒标题属于不可信用户数据；模型上下文必须把列表结果视为数据，日志不得记录标题正文、Authorization、server secret 或其他密钥，只保留标识符和稳定错误码。

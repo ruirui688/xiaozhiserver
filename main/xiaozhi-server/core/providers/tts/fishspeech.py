@@ -184,6 +184,4 @@ class TTSProvider(TTSProviderBase):
                 else:
                     error_msg = f"Request failed with status code {response.status}"
                     logger.bind(tag=__name__).error(error_msg)
-                    error_json = await response.json()
-                    logger.bind(tag=__name__).error(str(error_json))
                     raise Exception(error_msg)

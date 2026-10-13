@@ -1,9 +1,11 @@
+import asyncio
 import os
 import base64
 import hashlib
 import math
 from contextlib import nullcontext
 from typing import Optional, Dict
+from urllib.parse import quote
 
 import httpx
 from loguru import logger
@@ -11,6 +13,7 @@ from config.request_observation import RequestObservation
 
 TAG = __name__
 DEFAULT_MANAGED_MEMORY_QUERY_TIMEOUT_SECONDS = 12.0
+DEFAULT_REMINDER_ACTION_TIMEOUT_SECONDS = 12.0
 
 
 class DeviceNotFoundException(Exception):
@@ -573,6 +576,30 @@ async def execute_feishu_action(
         "POST",
         f"/config/feishu/{agent_id}/actions",
         json=body,
+    )
+
+
+async def execute_reminder_action(
+    agent_id: str,
+    action: str,
+    **payload,
+) -> Optional[Dict]:
+    """Execute a device reminder action through the authenticated manager-api."""
+    normalized_action = str(action or "").strip().lower()
+    if not agent_id or normalized_action not in {"create", "list", "cancel"}:
+        raise ValueError("valid agent_id and reminder action are required")
+    if not ManageApiClient._instance:
+        raise RuntimeError("manager-api client is not initialized")
+    body = {"action": normalized_action}
+    body.update({key: value for key, value in payload.items() if value is not None})
+    encoded_agent_id = quote(str(agent_id), safe="")
+    return await asyncio.wait_for(
+        ManageApiClient._instance._execute_async_request(
+            "POST",
+            f"/config/reminders/{encoded_agent_id}/actions",
+            json=body,
+        ),
+        timeout=DEFAULT_REMINDER_ACTION_TIMEOUT_SECONDS,
     )
 
 

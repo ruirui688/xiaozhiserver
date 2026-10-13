@@ -1,5 +1,6 @@
 """统一工具处理器"""
 
+import hashlib
 import json
 from typing import Dict, List, Any, Optional
 from config.logger import setup_logging
@@ -17,6 +18,11 @@ from .device_mcp import DeviceMCPExecutor
 from .mcp_endpoint import MCPEndpointExecutor
 from core.handle.sendAudioHandle import send_display_message
 from core.game import GameSessionManager
+from .server_plugins.policy import DEVICE_REMINDER_TOOL_NAME
+
+
+_MAX_INTERNAL_REQUEST_ID_LENGTH = 128
+_INTERNAL_REQUEST_ID_NAMESPACE = "device-reminder:tool-call:v1"
 
 
 class UnifiedToolHandler:
@@ -165,8 +171,14 @@ class UnifiedToolHandler:
             if "function_calls" in function_call_data:
                 responses = []
                 for call in function_call_data["function_calls"]:
+                    arguments, error = self._prepare_internal_arguments(
+                        conn, call["name"], call.get("arguments", {}), call
+                    )
+                    if error is not None:
+                        responses.append(error)
+                        continue
                     result = await self.tool_manager.execute_tool(
-                        call["name"], call.get("arguments", {})
+                        call["name"], arguments
                     )
                     responses.append(result)
                 return self._combine_responses(responses)
@@ -199,6 +211,12 @@ class UnifiedToolHandler:
                     response=f"工具 {function_name} 不存在",
                 )
 
+            arguments, error = self._prepare_internal_arguments(
+                conn, function_name, arguments, function_call_data
+            )
+            if error is not None:
+                return error
+
             # 发送工具调用显示消息到设备
             if self._should_display_tool_call(function_name):
                 try:
@@ -215,6 +233,53 @@ class UnifiedToolHandler:
                 f"处理function call错误: errorType={type(e).__name__}"
             )
             return ActionResponse(action=Action.ERROR, response=str(e))
+
+    def _prepare_internal_arguments(
+        self,
+        conn,
+        function_name: str,
+        arguments: Any,
+        function_call_data: Dict[str, Any],
+    ):
+        """Inject trusted runtime-only arguments without changing model schemas."""
+        if function_name != DEVICE_REMINDER_TOOL_NAME:
+            return arguments, None
+
+        if self.tool_manager.get_tool_type(function_name) != ToolType.SERVER_PLUGIN:
+            self.logger.warning("拒绝非Server Plugin来源的设备提醒调用")
+            return arguments, ActionResponse(
+                action=Action.ERROR,
+                response="设备提醒工具来源无效，已拒绝执行。",
+            )
+
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments) if arguments else {}
+            except json.JSONDecodeError:
+                return arguments, ActionResponse(
+                    action=Action.ERROR,
+                    response="提醒参数格式无效，请重试。",
+                )
+        if not isinstance(arguments, dict):
+            return arguments, ActionResponse(
+                action=Action.ERROR,
+                response="提醒参数格式无效，请重试。",
+            )
+
+        request_id = _derive_internal_request_id(
+            getattr(conn, "session_id", None),
+            function_call_data.get("id"),
+        )
+        if request_id is None:
+            self.logger.warning("拒绝缺少有效工具调用标识的设备提醒")
+            return arguments, ActionResponse(
+                action=Action.ERROR,
+                response="提醒调用缺少有效标识，请重试。",
+            )
+
+        prepared = dict(arguments)
+        prepared["request_id"] = request_id
+        return prepared, None
 
     async def invoke(
         self, tool_name: str, arguments: Optional[Dict[str, Any]] = None, source: str = "direct"
@@ -234,10 +299,39 @@ class UnifiedToolHandler:
         if not responses:
             return ActionResponse(action=Action.NONE, response="无响应")
 
+        next_llm_tools_enabled = None
+        if any(
+            getattr(response, "next_llm_tools_enabled", None) is False
+            for response in responses
+        ):
+            next_llm_tools_enabled = False
+        elif any(
+            getattr(response, "next_llm_tools_enabled", None) is True
+            for response in responses
+        ):
+            next_llm_tools_enabled = True
+
+        system_prompts = []
+        for response in responses:
+            prompt = getattr(response, "next_llm_system_prompt", None)
+            prompt_text = str(prompt).strip() if prompt else ""
+            if prompt_text and prompt_text not in system_prompts:
+                system_prompts.append(prompt_text)
+
+        merged_metadata = {
+            "next_llm_tools_enabled": next_llm_tools_enabled,
+            "next_llm_system_prompt": "\n\n".join(system_prompts) or None,
+        }
+
         # 如果有任何错误，返回第一个错误
         for response in responses:
             if response.action == Action.ERROR:
-                return response
+                return ActionResponse(
+                    action=response.action,
+                    result=response.result,
+                    response=response.response,
+                    **merged_metadata,
+                )
 
         # 合并所有成功的响应
         contents = []
@@ -260,6 +354,7 @@ class UnifiedToolHandler:
             action=final_action,
             result="; ".join(contents) if contents else None,
             response="; ".join(responses_text) if responses_text else None,
+            **merged_metadata,
         )
 
     async def register_iot_tools(self, descriptors: List[Dict[str, Any]]):
@@ -292,3 +387,24 @@ class UnifiedToolHandler:
             self.logger.info("工具处理器清理完成")
         except Exception as e:
             self.logger.error(f"工具处理器清理失败: {e}")
+
+
+def _derive_internal_request_id(session_id: Any, provider_call_id: Any) -> Optional[str]:
+    if not isinstance(session_id, str) or not session_id.strip():
+        return None
+    if not isinstance(provider_call_id, str) or not provider_call_id.strip():
+        return None
+    digest_builder = hashlib.sha256()
+    for field in (
+        _INTERNAL_REQUEST_ID_NAMESPACE,
+        session_id,
+        provider_call_id,
+    ):
+        field_bytes = field.encode("utf-8")
+        digest_builder.update(len(field_bytes).to_bytes(8, "big"))
+        digest_builder.update(field_bytes)
+    digest = digest_builder.hexdigest()
+    request_id = f"{_INTERNAL_REQUEST_ID_NAMESPACE}:{digest}"
+    if len(request_id) > _MAX_INTERNAL_REQUEST_ID_LENGTH:
+        raise AssertionError("internal reminder request ID exceeds its contract")
+    return request_id

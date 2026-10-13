@@ -1,7 +1,7 @@
 ---
 status: canonical
 owner: security
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 source_paths:
   - main/xiaozhi-server/core/websocket_server.py
   - main/xiaozhi-server/core/api
@@ -50,6 +50,7 @@ flowchart LR
 ## 3. 授权
 
 - Java CRUD 必须使用实体实际的 `workspace_id`、`agent_id` 或 `device_id` 验证资源所有权。
+- 工作空间邀请链接是短期、单次 bearer capability：原始 token 仅创建时返回，数据库只存摘要；预览和接受均要求 USER 登录并使用 POST body，链接扫描或页面预加载不得自动加入；创建者被撤权、注销或停用时，待领取邀请必须在同一事务永久撤销。
 - `X-Workspace-Id`、请求体中的 agent/device/workspace 标识不能直接作为授权结论。
 - `/config/**` 即使通过共享服务密钥，也必须按设备绑定和智能体归属限制返回数据。
 - Controller 的权限注解、Shiro 路由和应用服务的资源校验承担不同职责，不能互相替代。
@@ -63,6 +64,7 @@ flowchart LR
 - 禁止把 API Key 放入 URL query；使用 Header 或请求体中的受保护字段。
 - 日志不得输出 Authorization、Bearer Token、API Key、access token、secret/private key 或完整私有配置。
 - 可记录 `tokenPresent`、凭据类型、脱敏尾号、错误分类和请求关联 ID。
+- 邀请 token 不得进入 API path/query、待邀请列表、Referer、日志或埋点；Web 只在 hash fragment 中接收，并在暂存到 sessionStorage 后清理地址栏。
 - 公共模型目录和 Redis 配置不包含用户原始供应商凭据。密钥由每次受限执行许可在可信服务内解析，不进入客户端、日志或补传队列。
 
 ## 5. 输入与外联

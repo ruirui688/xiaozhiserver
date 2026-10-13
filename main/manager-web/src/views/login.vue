@@ -131,6 +131,7 @@ import VersionFooter from "@/components/VersionFooter.vue";
 import { getUUID, goToPage, showDanger, showSuccess, sm2Encrypt, validateMobile } from "@/utils";
 import { mapState } from "vuex";
 import featureManager from "@/utils/featureManager";
+import { resolvePostAuthRedirect } from "@/utils/workspaceInvitation";
 
 export default {
   name: "login",
@@ -184,9 +185,7 @@ export default {
       // 处理手动清空localstorage导致无法获取验证码的问题
       const token = localStorage.getItem('token')
       if (token) {
-        if (this.$route.path !== "/home") {
-          this.$router.push("/home");
-        }
+        this.goAfterAuth();
       } else {
         this.captchaUuid = getUUID();
 
@@ -225,8 +224,10 @@ export default {
       Api.user.getUserInfo(({ data }) => {
         if (data.code === 0) {
           this.$store.commit("setUserInfo", data.data);
-          goToPage("/home");
+          this.loginSubmitting = false;
+          this.goAfterAuth();
         } else {
+          this.loginSubmitting = false;
           showDanger("用户信息获取失败");
         }
       });
@@ -306,10 +307,20 @@ export default {
     },
 
     goToRegister() {
-      goToPage("/register");
+      this.$router.push({
+        path: "/register",
+        query: { redirect: this.postAuthRedirect() },
+      });
     },
     goToForgetPassword() {
       goToPage("/retrieve-password");
+    },
+    postAuthRedirect() {
+      return resolvePostAuthRedirect(this.$route.query && this.$route.query.redirect);
+    },
+    goAfterAuth() {
+      const target = this.postAuthRedirect();
+      if (this.$route.fullPath !== target) goToPage(target, true);
     }
   },
 };

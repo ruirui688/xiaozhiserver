@@ -14,6 +14,7 @@ source_paths:
 
 | 任务 | 只先读这一份 | 需要深入时再读 |
 | --- | --- | --- |
+| 同事交接与共同维护 | [项目交接指南](./development/team-handover.md) | 权限交接、首次启动、协作分工、发布与验收清单 |
 | 了解系统 | [项目架构](./architecture/project-architecture.md) | [运行流程](./architecture/runtime-flows.md)、[数据与契约](./architecture/data-and-contracts.md) |
 | 本地启动与排障 | [本地开发](./development/local-dev-workflow.md) | 根目录 `scripts/dev doctor` |
 | 生产发布 | [ACR 生产部署](./deployment/private-docker-release.md) | [本地 Docker](./deployment/local-docker-deploy-guide.md) |

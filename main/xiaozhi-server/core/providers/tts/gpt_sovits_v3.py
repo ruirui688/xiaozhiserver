@@ -62,7 +62,8 @@ class TTSProvider(TTSProviderBase):
                     else:
                         return audio_data
                 else:
-                    error_text = await resp.text()
-                    error_msg = f"GPT_SoVITS_V3 TTS请求失败: {resp.status} - {error_text}"
+                    error_msg = (
+                        f"GPT_SoVITS_V3 TTS请求失败: status={resp.status}"
+                    )
                     logger.bind(tag=TAG).error(error_msg)
                     raise Exception(error_msg)

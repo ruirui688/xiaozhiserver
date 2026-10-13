@@ -4,6 +4,8 @@ import queue
 import threading
 from types import SimpleNamespace
 
+import pytest
+
 from config import settings
 
 settings.config_file_valid = True
@@ -20,21 +22,30 @@ from core.providers.tts.dto.dto import ContentType, SentenceType, TTSMessageDTO
 class _Logger:
     def __init__(self):
         self.info_messages = []
+        self.records = []
+        self.error_event = threading.Event()
+
+    def _record(self, level, message, args):
+        rendered = " ".join([str(message), *(str(arg) for arg in args)])
+        self.records.append((level, rendered))
+        if level == "error":
+            self.error_event.set()
 
     def bind(self, **_kwargs):
         return self
 
-    def debug(self, *_args, **_kwargs):
-        pass
+    def debug(self, message, *args, **_kwargs):
+        self._record("debug", message, args)
 
-    def info(self, message, *_args, **_kwargs):
+    def info(self, message, *args, **_kwargs):
         self.info_messages.append(str(message))
+        self._record("info", message, args)
 
-    def warning(self, *_args, **_kwargs):
-        pass
+    def warning(self, message, *args, **_kwargs):
+        self._record("warning", message, args)
 
-    def error(self, *_args, **_kwargs):
-        pass
+    def error(self, message, *args, **_kwargs):
+        self._record("error", message, args)
 
 
 class _WebSocket:
@@ -451,6 +462,20 @@ class _BaseProvider(TTSProviderBase):
         return None
 
 
+class _RecordingProvider(TTSProviderBase):
+    def __init__(self, *, fail=False):
+        super().__init__({}, delete_audio_file=True)
+        self.fail = fail
+        self.received_text = []
+
+    async def text_to_speak(self, text, output_file):
+        del output_file
+        self.received_text.append(text)
+        if self.fail:
+            raise RuntimeError(f"upstream echoed request text: {text}")
+        return b"synthetic-audio"
+
+
 def test_exact_mode_bypasses_markdown_correction_and_server_segmentation():
     provider = _BaseProvider(
         {"correct_words": ["原词|替换词"]},
@@ -480,6 +505,138 @@ def test_normal_stream_cleaning_does_not_apply_correction_twice():
 
     assert provider._clean_synthesis_text("**原词**") == "原词"
     assert provider._match_stream_text("原词") == (["原词扩展"], "")
+
+
+def test_normal_tts_logs_only_length_while_synthesis_and_subtitle_keep_text(
+    monkeypatch,
+):
+    secret_text = "董事会秘密会议明天下午两点开始"
+    provider = _RecordingProvider()
+    provider.conn = SimpleNamespace(sample_rate=16000)
+    provider.current_sentence_id = "normal-sensitive-turn"
+    provider.opus_encoder = None
+    recorder = _Logger()
+    monkeypatch.setattr(tts_base, "logger", recorder)
+    monkeypatch.setattr(
+        tts_base,
+        "audio_bytes_to_data_stream",
+        lambda *_args, **_kwargs: None,
+    )
+
+    provider.to_tts_stream(secret_text)
+
+    combined = "\n".join(message for _, message in recorder.records)
+    assert provider.received_text == [secret_text]
+    queued = provider.tts_audio_queue.get_nowait()
+    assert queued[2] == secret_text
+    assert secret_text not in combined
+    assert f"<tts_text:{len(secret_text)} chars>" in combined
+
+
+@pytest.mark.parametrize("method_name", ["to_tts", "to_tts_stream"])
+def test_tts_failure_logs_hide_provider_echoed_request_text(
+    monkeypatch,
+    method_name,
+):
+    secret_text = "财务预算秘密提醒标题"
+    provider = _RecordingProvider(fail=True)
+    provider.conn = SimpleNamespace(sample_rate=16000)
+    provider.current_sentence_id = "failed-turn"
+    provider.opus_encoder = None
+    recorder = _Logger()
+    monkeypatch.setattr(tts_base, "logger", recorder)
+
+    getattr(provider, method_name)(secret_text)
+
+    combined = "\n".join(message for _, message in recorder.records)
+    assert secret_text not in combined
+    assert f"<tts_text:{len(secret_text)} chars>" in combined
+    assert "error_type=RuntimeError" in combined
+
+
+def test_tts_text_thread_outer_error_does_not_log_text_or_traceback(monkeypatch):
+    secret_text = "外层线程也不能泄露的日程标题"
+    provider = _RecordingProvider()
+    provider.current_sentence_id = "outer-failure"
+    stop_event = threading.Event()
+    provider.conn = SimpleNamespace(
+        stop_event=stop_event,
+        _abort_lock=threading.Lock(),
+        client_abort=False,
+        sentence_id="outer-failure",
+    )
+    provider._mark_external_tts_failed = lambda *_args, **_kwargs: None
+    provider._get_segment_text = lambda: (_ for _ in ()).throw(
+        RuntimeError(f"thread echoed request text: {secret_text}")
+    )
+    recorder = _Logger()
+    monkeypatch.setattr(tts_base, "logger", recorder)
+    provider.tts_text_queue.put(
+        TTSMessageDTO(
+            sentence_id="outer-failure",
+            sentence_type=SentenceType.MIDDLE,
+            content_type=ContentType.TEXT,
+            content_detail=secret_text,
+        )
+    )
+
+    worker = threading.Thread(target=provider.tts_text_priority_thread)
+    worker.start()
+    try:
+        assert recorder.error_event.wait(2)
+    finally:
+        stop_event.set()
+        worker.join(timeout=2)
+
+    combined = "\n".join(message for _, message in recorder.records)
+    assert not worker.is_alive()
+    assert secret_text not in combined
+    assert "error_type=RuntimeError" in combined
+    assert "Traceback" not in combined
+
+
+def test_paddle_empty_audio_failure_does_not_echo_request_text(monkeypatch):
+    from core.providers.tts import paddle_speech
+
+    secret_text = "Paddle不得回显的秘密提醒标题"
+
+    class FakeWebSocket:
+        def __init__(self):
+            self.responses = iter(
+                [
+                    json.dumps({"status": 0, "session": "session-1"}),
+                    json.dumps({"status": 2}),
+                ]
+            )
+
+        async def send(self, _payload):
+            return None
+
+        async def recv(self):
+            return next(self.responses)
+
+    class FakeConnection:
+        async def __aenter__(self):
+            return FakeWebSocket()
+
+        async def __aexit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(
+        paddle_speech.websockets,
+        "connect",
+        lambda _url: FakeConnection(),
+    )
+    provider = paddle_speech.TTSProvider(
+        {"protocol": "websocket", "spk_id": "0", "delete_audio": True},
+        delete_audio_file=True,
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        asyncio.run(provider.text_streaming(secret_text, None))
+
+    assert secret_text not in str(exc_info.value)
+    assert str(exc_info.value) == "Paddle TTS request failed: RuntimeError"
 
 
 def test_non_finite_numeric_config_uses_safe_default():

@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: tools
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 source_paths:
   - main/xiaozhi-server/core/providers/tools
   - main/xiaozhi-server/plugins_func
@@ -187,6 +187,38 @@ provider_code 命中真实服务端工具
 ```
 
 当前原则：纯语言游戏交给主 LLM 自由对话，但规则来源仍是功能插件。智能体勾选某个游戏插件后，`instructions` / `opening_message` 会作为临时软提示词注入主 LLM；不要用小候选库、关键词规则或固定问答状态机压过模型能力。
+
+#### 设备日程提醒
+
+`device_reminder` 是服务端状态型 Function Plugin，用于把“明天下午两点提醒我开会”这类明确请求转换为一次性设备提醒。用户可以把它理解为语音日程或 MCP 能力，但运行时实现不是外部 no-code MCP：它由 `@register_function` 注册为 Server Plugin，只有当前智能体的 `Intent.<selected>.functions` 白名单包含该工具时才进入模型工具清单，优先级和冲突规则仍按 Server Plugin 执行。
+
+`device_reminder` 同时是 Server Plugin 保留名。统一工具管理器会检查注册键、工具定义名和 schema 中的函数名，并识别带一层或多层 `mcp_` 前缀的别名；来自 Server MCP、Device IoT、Device MCP 或 MCP Endpoint 的同名/别名工具不会注册，执行阶段也会再次拒绝任何非 Server Plugin 来源。保留名本身不会启用功能，仍必须通过当前智能体白名单和真实 Server Plugin 实现。
+
+语音工具只提供 `create / list / cancel` 三种动作；创建或取消必须以工具成功结果为准，模型不得把自然语言理解或普通讨论未来时间冒充为已保存日程。小程序在相同的 manager-api 事实之上额外提供编辑入口，不在页面或设备本地维护独立定时器。语音创建记录可以编辑标题和时间，但其来源设备是幂等锚点，不能直接改投其他设备；换设备需要取消后重新创建。
+
+Native Qwen/Doubao Realtime 当前没有可供后台到期任务使用的独立主动通知 TTS，因此即使白名单包含 `device_reminder`，Realtime 会话也不会注册或执行该语音工具。小程序仍可为绑定这类智能体的设备保存提醒，但到点无法播报；manager-api 只会在 10 分钟宽限期内重试，之后标记未送达。该限制不能描述成 Realtime 已支持语音日程或远程唤醒。
+
+职责边界如下：
+
+```text
+xiaozhi-server device_reminder
+  -> 使用 server secret 调用 manager-api 的提醒运行时接口
+  -> 只桥接当前已认证连接的 device + agent 身份和工具参数
+
+manager-api + MySQL
+  -> 校验 workspace、设备所有权和 device + agent 当前绑定关系
+  -> 持久化提醒、执行到期扫描、重试并维护最终状态
+
+xiaozhi-server 在线投递
+  -> 再次匹配在线连接的 device + agent
+  -> 由 reminder ID + 投递版本指纹派生 requestId，幂等入队当前连接 TTS
+```
+
+投递版本指纹覆盖目标设备/智能体、播报内容和计划时间：同一业务版本的普通重试保持同一个 `requestId`，编辑这些字段后生成新的 `requestId`。调度器在独立事务中按设备、提醒的固定锁序复核租约，并让设备行锁覆盖有界的内部投递与最终状态回写；设备换绑和删除因此不能插入校验与入队之间。到期时设备忙碌或短暂离线，manager-api 在到期后的 10 分钟宽限期内重试；超过宽限期仍不可投递则标记未送达。
+
+提醒状态 `DELIVERED` 只表示 Python 已接受并入队，或对相同 `requestId` 返回已接收的幂等结果，不等同于扬声器物理播放确认。当前 Python 回执缓存是单进程内存状态；多 Python 实例或进程重启场景若要进一步降低重复播报，需要 sticky routing 或共享、持久化的回执存储。提醒链路当前不等待设备播放 ACK，因此不能保证跨进程严格 exactly-once。断网、关机、深睡或 WebSocket 已断开的设备不能被这条链路真正远程唤醒。
+
+提醒标题来自用户输入，属于不可信业务数据。工具列表结果进入模型上下文前必须标记为数据而不是指令；服务间调用和日志不得记录标题正文、Authorization 或 server secret，只记录提醒 ID、设备标识和稳定错误码。
 
 旧游戏 code 只作为兼容标识保留在 `GameSessionManager.FREEFORM_GAME_TOOLS`，`ServerPluginExecutor` 跳过这些 code，
 `handle_user_intent()` 也不得提前路由。只有必须访问设备、MCP、数据库、外部接口或事务状态的玩法才适合真实服务端工具；

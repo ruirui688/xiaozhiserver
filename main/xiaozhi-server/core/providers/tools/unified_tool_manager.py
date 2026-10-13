@@ -9,7 +9,10 @@ from plugins_func.register import Action, ActionResponse
 from .base import ToolType, ToolDefinition, ToolExecutor
 from .commerce_policy import is_commerce_device_tool, COMMERCE_CALL_DENIED
 from core.utils.prompt_budget import compact_tool_schemas
-from .server_plugins.policy import RETIRED_TOOL_NAMES
+from .server_plugins.policy import (
+    RETIRED_TOOL_NAMES,
+    is_reserved_server_plugin_name,
+)
 
 
 class ToolManager:
@@ -44,11 +47,23 @@ class ToolManager:
                 tools = executor.get_tools()
                 for name, definition in tools.items():
                     schema_name = definition.description.get("function", {}).get("name", "")
-                    if any(value in RETIRED_TOOL_NAMES for value in
-                           (name, definition.name, schema_name)):
+                    candidate_names = (name, definition.name, schema_name)
+                    if any(value in RETIRED_TOOL_NAMES for value in candidate_names):
+                        continue
+                    if (
+                        tool_type != ToolType.SERVER_PLUGIN
+                        and any(
+                            is_reserved_server_plugin_name(value)
+                            for value in candidate_names
+                        )
+                    ):
+                        self.logger.warning(
+                            "跳过冒用Server Plugin保留名的下游工具: "
+                            f"source={tool_type.value}"
+                        )
                         continue
                     if any(is_commerce_device_tool(value) for value in
-                           (name, definition.name, schema_name)):
+                           candidate_names):
                         continue
                     if name in all_tools:
                         existing_type = all_tools[name].tool_type.value
@@ -120,6 +135,14 @@ class ToolManager:
         try:
             # 查找工具类型
             tool_type = self.get_tool_type(tool_name)
+            if (
+                is_reserved_server_plugin_name(tool_name)
+                and tool_type != ToolType.SERVER_PLUGIN
+            ):
+                return ActionResponse(
+                    action=Action.NOTFOUND,
+                    response=f"工具 {tool_name} 不存在",
+                )
             if not tool_type:
                 return ActionResponse(
                     action=Action.NOTFOUND,

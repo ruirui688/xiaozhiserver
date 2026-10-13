@@ -28,6 +28,7 @@ function sendRequest() {
         _url: '',
         _responseType: undefined, // 新增响应类型字段
         _timeout: undefined,
+        _includeWorkspace: true,
         'send'() {
             this._header['Accept-Language'] = 'zh-CN';
             
@@ -35,7 +36,7 @@ function sendRequest() {
                 this._header.Authorization = 'Bearer ' + (JSON.parse(store.getters.getToken)).token
             }
             const workspaceId = localStorage.getItem('currentWorkspaceId')
-            if (workspaceId && !isOperationsConsole()) {
+            if (this._includeWorkspace && workspaceId && !isOperationsConsole()) {
                 this._header['X-Workspace-Id'] = workspaceId
             }
 
@@ -108,6 +109,10 @@ function sendRequest() {
         },
         'timeout'(timeout) {
             this._timeout = timeout;
+            return this;
+        },
+        'withoutWorkspace'() {
+            this._includeWorkspace = false;
             return this;
         }
     }

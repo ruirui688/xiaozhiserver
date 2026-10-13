@@ -102,7 +102,9 @@
           </div>
 
           <!-- 修改按钮文本 -->
-          <div class="login-btn" @click="register">{{ $t('register.registerButton') }}</div>
+          <div class="login-btn" :class="{ disabled: registerSubmitting }" @click="register">
+            {{ $t('register.registerButton') }}
+          </div>
 
           <!-- 保持相同的协议声明 -->
           <div style="font-size: 14px;color: #979db1;">
@@ -125,8 +127,9 @@
 <script>
 import Api from '@/apis/api';
 import VersionFooter from '@/components/VersionFooter.vue';
-import { getUUID, goToPage, showDanger, showSuccess, sm2Encrypt, validateMobile } from '@/utils';
+import { getUUID, showDanger, showSuccess, sm2Encrypt, validateMobile } from '@/utils';
 import { mapState } from 'vuex';
+import { resolvePostAuthRedirect } from '@/utils/workspaceInvitation';
 
 export default {
   name: 'register',
@@ -162,6 +165,7 @@ export default {
       captchaUrl: '',
       countdown: 0,
       timer: null,
+      registerSubmitting: false,
     }
   },
   mounted() {
@@ -169,7 +173,7 @@ export default {
       if (!this.allowUserRegister) {
         showDanger(this.$t('register.notAllowRegister'));
         setTimeout(() => {
-          goToPage('/login');
+          this.goToLogin();
         }, 1500);
       }
     });
@@ -192,7 +196,6 @@ export default {
           this.captchaUrl = URL.createObjectURL(blob);
 
         } else {
-          console.error('验证码加载异常:', error);
           showDanger(this.$t('register.captchaLoadFailed'));
         }
       });
@@ -253,6 +256,9 @@ export default {
 
     // 注册逻辑
     async register() {
+      if (this.registerSubmitting) {
+        return;
+      }
       if (this.enableMobileRegister) {
         // 手机号注册验证
         if (!validateMobile(this.form.mobile, this.form.areaCode)) {
@@ -309,19 +315,29 @@ export default {
         mobileCaptcha: this.form.mobileCaptcha
       };
 
+      this.registerSubmitting = true;
       Api.user.register(registerData, ({ data }) => {
+        this.registerSubmitting = false;
         showSuccess(this.$t('register.registerSuccess'))
-        goToPage('/login')
+        this.goToLogin()
       }, (err) => {
-        showDanger(err.data.msg || this.$t('register.registerFailed'))
-        if (err.data != null && err.data.msg != null && err.data.msg.indexOf('图形验证码') > -1) {
+        this.registerSubmitting = false;
+        const message = err && err.data && err.data.msg;
+        showDanger(message || this.$t('register.registerFailed'))
+        if (message && message.indexOf('图形验证码') > -1) {
           this.fetchCaptcha()
         }
       })
     },
 
     goToLogin() {
-      goToPage('/login')
+      this.$router.push({
+        path: '/login',
+        query: { redirect: this.postAuthRedirect() }
+      })
+    },
+    postAuthRedirect() {
+      return resolvePostAuthRedirect(this.$route.query && this.$route.query.redirect)
     }
   },
   beforeDestroy() {

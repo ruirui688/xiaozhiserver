@@ -15,9 +15,11 @@ import org.springframework.web.bind.annotation.RestController;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
 import xiaozhi.common.utils.Result;
 import xiaozhi.modules.workspace.dto.WorkspaceCreateDTO;
+import xiaozhi.modules.workspace.dto.WorkspaceInvitationCodeDTO;
 import xiaozhi.modules.workspace.dto.WorkspaceInviteDTO;
 import xiaozhi.modules.workspace.dto.WorkspaceRoleUpdateDTO;
 import xiaozhi.modules.agent.service.impl.WorkspaceAgentQuotaService;
@@ -94,6 +96,22 @@ public class WorkspaceController {
         return new Result<WorkspaceInvitationVO>().ok(workspaceService.invite(workspaceId, dto));
     }
 
+    @PostMapping("/invitations/preview")
+    @Operation(summary = "预览工作空间邀请")
+    @RequiresPermissions("sys:role:normal")
+    public Result<WorkspaceInvitationVO> previewInvitation(
+            @RequestBody @Valid WorkspaceInvitationCodeDTO dto) {
+        return new Result<WorkspaceInvitationVO>().ok(workspaceService.previewInvitation(dto.getCode()));
+    }
+
+    @PostMapping("/invitations/accept")
+    @Operation(summary = "接受工作空间邀请")
+    @RequiresPermissions("sys:role:normal")
+    public Result<WorkspaceVO> acceptInvitation(
+            @RequestBody @Valid WorkspaceInvitationCodeDTO dto) {
+        return new Result<WorkspaceVO>().ok(workspaceService.acceptInvitation(dto.getCode()));
+    }
+
     @DeleteMapping("/{workspaceId}/invitations/{invitationId}")
     @Operation(summary = "撤销待接受邀请")
     @RequiresPermissions("sys:role:normal")
@@ -101,13 +119,6 @@ public class WorkspaceController {
             @PathVariable String invitationId) {
         workspaceService.revokeInvitation(workspaceId, invitationId);
         return new Result<Void>().ok(null);
-    }
-
-    @PostMapping("/invitations/{code}/accept")
-    @Operation(summary = "接受邀请")
-    @RequiresPermissions("sys:role:normal")
-    public Result<WorkspaceVO> accept(@PathVariable String code) {
-        return new Result<WorkspaceVO>().ok(workspaceService.acceptInvitation(code));
     }
 
     @DeleteMapping("/{workspaceId}/members/{userId}")

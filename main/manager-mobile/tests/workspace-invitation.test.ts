@@ -16,3 +16,8 @@ test('organization quota exposes and revokes pending invitations', () => {
   assert.match(page, /confirmRevokeInvitation/)
   assert.match(page, /occupiedSlots >= maxMembers/)
 })
+
+test('accepting an invitation keeps the bearer token out of the API URL', () => {
+  assert.match(api, /http\.Post<Workspace>\('\/workspace\/invitations\/accept', \{ code \}/)
+  assert.doesNotMatch(api, /workspace\/invitations\/\$\{code\}/)
+})

@@ -1594,9 +1594,30 @@ databaseChangeLog:
             encoding: utf8
             path: classpath:db/changelog/platform-shared-channels-20261013.sql
   - changeSet:
+      id: workspace-invitation-links-20261013
+      author: Codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/workspace-invitation-links-20261013.sql
+  - changeSet:
+      id: workspace-invitation-lifecycle-indexes-20261013
+      author: Codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/workspace-invitation-lifecycle-indexes-20261013.sql
+  - changeSet:
       id: person-voiceprint-link-20261013
       author: Codex
       changes:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/person-voiceprint-link-20261013.sql
+  - changeSet:
+      id: device-reminders-20261013
+      author: Codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/device-reminders-20261013.sql

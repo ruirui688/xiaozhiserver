@@ -443,12 +443,14 @@ def test_function_call_completion_is_deduplicated():
     class ToolHandler:
         def __init__(self):
             self.calls = 0
+            self.call_ids = []
 
         def has_tool(self, name):
             return name in {"tool", "other_tool"}
 
         async def handle_llm_function_call(self, _conn, _call):
             self.calls += 1
+            self.call_ids.append(_call.get("id"))
             return SimpleNamespace(action=None, result="ok", response=None)
 
     class Transport:
@@ -496,6 +498,7 @@ def test_function_call_completion_is_deduplicated():
         )
         await session._tool_task
         assert handler.calls == 2
+        assert handler.call_ids == ["call-1", "call-2"]
         assert [item["type"] for item in transport.sent] == [
             "conversation.item.create",
             "conversation.item.create",

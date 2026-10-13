@@ -288,9 +288,20 @@ public class SysUserServiceImpl extends BaseServiceImpl<SysUserDao, SysUserEntit
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void changeStatus(Integer status, String[] userIds) {
-        for (String userId : userIds) {
+        if (userIds == null || userIds.length == 0) {
+            return;
+        }
+        List<Long> normalizedUserIds = java.util.Arrays.stream(userIds)
+                .map(Long::parseLong)
+                .distinct()
+                .sorted()
+                .toList();
+        if (Integer.valueOf(0).equals(status)) {
+            workspaceService.prepareUsersDisabled(normalizedUserIds);
+        }
+        for (Long userId : normalizedUserIds) {
             SysUserEntity entity = new SysUserEntity();
-            entity.setId(Long.parseLong(userId));
+            entity.setId(userId);
             entity.setStatus(status);
             updateById(entity);
         }

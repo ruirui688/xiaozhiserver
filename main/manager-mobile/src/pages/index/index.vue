@@ -86,6 +86,12 @@ const quickActions = computed(() => [
     icon: 'view',
     action: () => uni.navigateTo({ url: '/pages/memory/index' }),
   },
+  {
+    label: '日程提醒',
+    desc: '创建和管理设备语音提醒',
+    icon: 'time',
+    action: () => uni.navigateTo({ url: '/pages/reminder/index' }),
+  },
 ])
 
 function hasToken() {

@@ -2016,7 +2016,7 @@ class ConnectionHandler:
                 if interrupted_text:
                     self.logger.bind(tag=TAG).debug(
                         f"LLM流式响应被打断，丢弃部分文本(不写入对话历史): "
-                        f"{interrupted_text[:80]}..."
+                        f"chars={len(interrupted_text)}"
                     )
             if meeting_tool_turn:
                 self._record_pending_meeting_turn("meeting_turn_aborted")
@@ -2072,7 +2072,7 @@ class ConnectionHandler:
                             )
                         )
                     self.logger.bind(tag=TAG).error(
-                        f"function call error: {_sanitize_log_text(content_arguments)}"
+                        f"function call error: chars={len(content_arguments)}"
                     )
 
             if not bHasError and len(tool_calls_list) > 0:
@@ -2148,7 +2148,7 @@ class ConnectionHandler:
                     if defer_plain_content_for_tools:
                         discarded_text = "".join(response_message)
                         self.logger.bind(tag=TAG).debug(
-                            f"丢弃工具调用前的过渡文本: {discarded_text}"
+                            f"丢弃工具调用前的过渡文本: chars={len(discarded_text)}"
                         )
                     else:
                         streamed_text = "".join(response_message)
@@ -2159,8 +2159,16 @@ class ConnectionHandler:
                 # 收集所有工具调用的 Future
                 futures_with_data = []
                 for tool_call_data in tool_calls_list:
+                    function_arguments = tool_call_data.get("arguments")
+                    argument_chars = (
+                        len(function_arguments)
+                        if isinstance(function_arguments, str)
+                        else 0
+                    )
                     self.logger.bind(tag=TAG).debug(
-                        f"function_name={tool_call_data['name']}, function_id={tool_call_data['id']}, function_arguments={tool_call_data['arguments']}"
+                        f"function_name={tool_call_data['name']}, "
+                        f"function_id={tool_call_data['id']}, "
+                        f"function_arguments_chars={argument_chars}"
                     )
 
                     # 使用公共方法上报工具调用

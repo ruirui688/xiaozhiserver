@@ -200,7 +200,7 @@ async function inviteMember() {
       username,
       role: inviteForm.role,
     })
-    lastInviteCode.value = invitation.code
+    lastInviteCode.value = invitation.code || ''
     toast.success('邀请已生成')
     await loadMembers()
   }
@@ -213,9 +213,12 @@ async function inviteMember() {
 function confirmRevokeInvitation(invitation: WorkspaceInvitation) {
   if (!currentWorkspaceId.value || !canWrite.value)
     return
+  const invitationTarget = invitation.inviteeUsername
+    ? `对 ${invitation.inviteeUsername} 的邀请`
+    : '这条邀请链接'
   uni.showModal({
     title: '撤销邀请',
-    content: `确定撤销对 ${invitation.inviteeUsername} 的邀请吗？`,
+    content: `确定撤销${invitationTarget}吗？`,
     confirmText: '撤销',
     confirmColor: '#e5484d',
     success: async (res) => {
@@ -500,7 +503,7 @@ onMounted(async () => {
               >
                 <view class="min-w-0 flex-1">
                   <text class="block truncate text-[27rpx] font-semibold text-[#232338]">
-                    {{ invitation.inviteeUsername }} · {{ roleLabel(invitation.role) }}
+                    {{ invitation.inviteeUsername || '邀请链接（待领取）' }} · {{ roleLabel(invitation.role) }}
                   </text>
                   <text v-if="invitation.expiresAt" class="mt-[4rpx] block text-[22rpx] text-[#8b8f9b]">
                     有效期至 {{ formatJoinedAt(invitation.expiresAt) }}

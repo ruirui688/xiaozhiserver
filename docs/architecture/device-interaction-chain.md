@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: xiaozhi-server
-last_verified: 2026-10-08
+last_verified: 2026-10-13
 source_paths:
   - main/xiaozhi-server/config.yaml
   - main/xiaozhi-server/core
@@ -748,6 +748,48 @@ TTS 必须区分以下边界：
 
 聊天记录导出包含 `summary.csv` 和逐步骤 `trace.csv`。递归模型调用必须按
 `call_index` 和 `depth` 分行保存，禁止再次压缩成单个“LLM耗时”。
+
+### 4.8 日程提醒主动播报
+
+日程提醒只对已有在线 WebSocket 连接使用现有设备 TTS 下行能力，不在小程序、浏览器或 ESP32 本地运行定时器。完整链路是：
+
+```text
+语音 ASR -> 主 LLM 选择 device_reminder Server Plugin
+          -> manager-api 校验并写入 MySQL
+小程序   -> manager-api 创建 / 编辑 / 取消 / 查询同一份提醒事实
+manager-api 到期扫描 -> xiaozhi-server 精确投递接口
+                      -> 当前在线且空闲的目标设备 TTS 队列
+```
+
+语音侧的 `device_reminder` 只有在 `Intent.<selected>.functions` 白名单中启用才会注册，支持一次性提醒的
+`create / list / cancel`；它是 Server Plugin，不是外部 no-code MCP。manager-api 和 MySQL 是提醒内容、时间、状态、
+重试次数及最终结果的唯一权威，小程序编辑后直接修改这份事实，不能另外创建本地通知计划。
+语音创建记录的设备同时是来源幂等锚点：小程序仍可修改标题和时间，但不能把该记录改投其他设备；需要换设备时应先取消再新建。
+
+`device_reminder` 是 Server Plugin 保留名。Server MCP、Device IoT、Device MCP、MCP Endpoint 的同名工具，
+以及带一层或多层 `mcp_` 前缀的别名，都会在统一注册和执行边界被拒绝，不能替代或绕过白名单中的真实
+Server Plugin。Native Qwen/Doubao Realtime 当前没有独立主动通知 TTS，即使智能体白名单已配置该工具，
+也不会在 Realtime 会话中注册或执行。小程序仍可选择绑定此类智能体的设备并保存提醒，但到点无法播报，
+在 10 分钟宽限期结束后会标记未送达。
+
+用户端接口按当前 workspace 校验提醒和设备资源所有权；语音运行时通过 server secret 进入受保护的
+`/config/**` 边界，并再次验证发起连接的设备仍绑定目标智能体。到期投递请求必须同时携带 `deviceId`、
+`agentId` 和由提醒 ID + 投递版本指纹派生的 `requestId`；指纹覆盖目标设备/智能体、播报内容和计划时间。
+同一业务版本的普通重试保持同一个 `requestId`，编辑这些字段后生成新的 `requestId`。xiaozhi-server 只在
+在线连接同时匹配设备与智能体时接受，相同 `requestId` 重试返回幂等结果，不重复入队。
+调度器领取提醒后，会在独立事务中按设备、提醒的固定顺序加锁并复核租约；设备行锁覆盖有界的内部 HTTP 投递和状态回写，
+因此设备换绑或删除只能在线性化投递完成前或完成后生效，不能插入“校验通过、尚未入队”的窗口造成错投。
+
+设备正在对话、会议、声纹采集或其他受保护状态时不抢占；设备忙碌或短暂离线由 manager-api 在到期后
+10 分钟宽限期内重试，超过宽限期标记未送达。Python 只负责实时连接查询和精确 TTS 入队，不保存日程、
+不承担跨进程调度，也不把按智能体广播当作按设备精确投递。
+
+manager-api 的 `DELIVERED` 只表示 Python 已接受并入队，或对相同 `requestId` 返回已接收的幂等结果；
+提醒链路当前不等待设备播放 ACK，不能据此判断 ESP32 扬声器已经物理播放。Python 的回执缓存目前是单进程
+内存状态；多 Python 实例或进程重启场景若要进一步降低重复播报，需要 sticky routing 或共享、持久化的回执
+存储，在没有设备播放 ACK 时仍不能保证跨进程严格 exactly-once。断网、关机、深睡或 WebSocket 已断开的设备
+无法由服务器真正唤醒。提醒正文和服务密钥不得进入日志，运行日志只记录 reminder/request/device 标识、
+投递状态和稳定错误码。
 
 ## 5. 声纹注册采集模式
 

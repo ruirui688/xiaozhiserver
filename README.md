@@ -51,6 +51,8 @@ deploy/               部署资产归档边界（[入口](./deploy/README.md)）
 
 第一次接触项目，按以下顺序阅读：
 
+同事接手与多人共同维护，先看[项目交接与共同维护指南](./docs/development/team-handover.md)，完成权限、环境和协作流程交接。
+
 1. [项目架构总览](./docs/architecture/project-architecture.md) - 理解模块边界、控制面、实时数据面和关键链路。
 2. [文档任务门户](./docs/README.md) - 按开发、部署、排障或专项任务进入对应文档。
 3. [本地开发工作流](./docs/development/local-dev-workflow.md) - 使用统一脚本启动和验证服务。

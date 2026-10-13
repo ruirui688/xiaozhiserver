@@ -17,7 +17,12 @@ from core.game.interactions import (
     interaction_tool_description, reset_active_interaction,
 )
 from core.meeting.config import is_meeting_mode_enabled
-from .policy import RETIRED_TOOL_NAMES
+from .policy import DEVICE_REMINDER_TOOL_NAME, RETIRED_TOOL_NAMES
+
+
+_REALTIME_REMINDER_UNAVAILABLE = (
+    "当前Realtime会话暂不支持设备日程提醒，提醒未创建。"
+)
 
 
 class ServerPluginExecutor(ToolExecutor):
@@ -34,6 +39,11 @@ class ServerPluginExecutor(ToolExecutor):
         self, conn: "ConnectionHandler", tool_name: str, arguments: Dict[str, Any]
     ) -> ActionResponse:
         """执行服务端插件工具"""
+        if tool_name == DEVICE_REMINDER_TOOL_NAME and self._is_realtime(conn):
+            return ActionResponse(
+                action=Action.ERROR,
+                response=_REALTIME_REMINDER_UNAVAILABLE,
+            )
         if tool_name in RETIRED_TOOL_NAMES or tool_name not in self.get_tools():
             return ActionResponse(action=Action.NOTFOUND, response="插件函数不存在")
         if tool_name == END_INTERACTION_TOOL:
@@ -117,6 +127,11 @@ class ServerPluginExecutor(ToolExecutor):
         )
 
         for func_name in all_required_functions:
+            if (
+                func_name == DEVICE_REMINDER_TOOL_NAME
+                and self._is_realtime(self.conn)
+            ):
+                continue
             if func_name in interactions:
                 tools[func_name] = ToolDefinition(
                     name=func_name,
@@ -183,6 +198,11 @@ class ServerPluginExecutor(ToolExecutor):
                 tool_type=ToolType.SERVER_PLUGIN,
             )
         return tools
+
+    @staticmethod
+    def _is_realtime(conn) -> bool:
+        router = getattr(conn, "conversation_router", None)
+        return bool(router is not None and getattr(router, "is_realtime", False))
 
     def has_tool(self, tool_name: str) -> bool:
         """检查是否有指定的服务端插件工具"""

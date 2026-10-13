@@ -18,11 +18,14 @@ public class WorkspaceInvitationEntity {
     private String workspaceId;
     private String inviteeUsername;
     private Long inviteeUserId;
+    private String invitationType;
     private String role;
     private String code;
+    private String tokenHash;
     private String status;
     private Date expiresAt;
     private Date acceptedAt;
+    private Long acceptedByUserId;
     @TableField(fill = FieldFill.INSERT)
     private Long creator;
     @TableField(fill = FieldFill.INSERT)

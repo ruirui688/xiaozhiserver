@@ -160,6 +160,14 @@ class SimpleHttpServer:
                             self.device_notification_handler.handle_options,
                         ),
                         web.post(
+                            "/device/notifications/deliver",
+                            self.device_notification_handler.handle_deliver,
+                        ),
+                        web.options(
+                            "/device/notifications/deliver",
+                            self.device_notification_handler.handle_options,
+                        ),
+                        web.post(
                             "/device/chat-history/refresh",
                             self.chat_history_runtime_handler.handle_refresh,
                         ),

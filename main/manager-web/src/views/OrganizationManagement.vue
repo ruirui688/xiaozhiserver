@@ -4,10 +4,6 @@
     <el-main class="organization-main">
       <div class="page-toolbar">
         <h2>工作空间</h2>
-        <div class="toolbar-actions">
-          <el-input v-model="inviteCode" size="small" placeholder="输入邀请码加入工作空间" />
-          <el-button size="small" @click="acceptInvitation">加入</el-button>
-        </div>
       </div>
 
       <div class="organization-layout">
@@ -85,7 +81,11 @@
           <div v-if="pendingInvitations.length" class="invitation-panel">
             <h4>待接受邀请</h4>
             <el-table :data="pendingInvitations" size="mini">
-              <el-table-column prop="inviteeUsername" label="用户" />
+              <el-table-column label="邀请对象">
+                <template slot-scope="scope">
+                  {{ scope.row.inviteeUsername || "邀请链接（待领取）" }}
+                </template>
+              </el-table-column>
               <el-table-column label="角色" width="120">
                 <template slot-scope="scope">{{ roleLabel(scope.row.role) }}</template>
               </el-table-column>
@@ -101,36 +101,24 @@
       </div>
     </el-main>
 
-    <el-dialog title="邀请成员" :visible.sync="showInviteDialog" width="460px">
-      <el-form label-width="80px">
-        <el-form-item label="用户名">
-          <el-input v-model="inviteForm.username" placeholder="请输入已注册用户名" />
-        </el-form-item>
-        <el-form-item label="角色">
-          <el-select v-model="inviteForm.role">
-            <el-option label="管理员" value="ADMIN" />
-            <el-option label="普通成员" value="MEMBER" />
-          </el-select>
-        </el-form-item>
-      </el-form>
-      <div v-if="lastInviteCode" class="invite-code">
-        邀请码：{{ lastInviteCode }}
-      </div>
-      <span slot="footer">
-        <el-button @click="showInviteDialog = false">关闭</el-button>
-        <el-button type="primary" @click="inviteMember">生成邀请</el-button>
-      </span>
-    </el-dialog>
+    <WorkspaceInviteDialog
+      :visible.sync="showInviteDialog"
+      :workspace-id="currentWorkspaceId"
+      :occupied-slots="occupiedSlots"
+      :max-members="maxMembers"
+      @created="handleInvitationCreated"
+    />
   </div>
 </template>
 
 <script>
 import Api from "@/apis/api";
 import HeaderBar from "@/components/HeaderBar.vue";
+import WorkspaceInviteDialog from "@/components/workspace/WorkspaceInviteDialog.vue";
 
 export default {
   name: "OrganizationManagement",
-  components: { HeaderBar },
+  components: { HeaderBar, WorkspaceInviteDialog },
   data() {
     return {
       workspaceList: [],
@@ -140,12 +128,6 @@ export default {
       maxMembers: 5,
       loading: false,
       showInviteDialog: false,
-      inviteCode: "",
-      inviteForm: {
-        username: "",
-        role: "MEMBER",
-      },
-      lastInviteCode: "",
     };
   },
   computed: {
@@ -210,26 +192,14 @@ export default {
         }
       });
     },
-    inviteMember() {
-      if (!this.canWrite) return;
-      if (!this.inviteForm.username.trim()) {
-        this.$message.warning("请输入用户名");
-        return;
-      }
-      if (this.occupiedSlots >= this.maxMembers) {
-        this.$message.warning("工作空间名额已满，请先撤销待接受邀请或移除成员");
-        return;
-      }
-      Api.workspace.invite(this.currentWorkspaceId, this.inviteForm, ({ data }) => {
-        if (data.code === 0) {
-          this.lastInviteCode = data.data.code;
-          this.$message.success("邀请已生成");
-          this.loadMembers();
-        }
-      });
+    handleInvitationCreated() {
+      this.loadMembers();
     },
     revokeInvitation(invitation) {
-      this.$confirm(`确定撤销对 ${invitation.inviteeUsername} 的邀请吗？`, "提示", { type: "warning" }).then(() => {
+      const target = invitation.inviteeUsername
+        ? `对 ${invitation.inviteeUsername} 的邀请`
+        : "这条邀请链接";
+      this.$confirm(`确定撤销${target}吗？`, "提示", { type: "warning" }).then(() => {
         Api.workspace.revokeInvitation(this.currentWorkspaceId, invitation.id, ({ data }) => {
           if (data.code === 0) {
             this.$message.success("邀请已撤销");
@@ -237,19 +207,6 @@ export default {
           }
         });
       }).catch(() => {});
-    },
-    acceptInvitation() {
-      if (!this.inviteCode.trim()) {
-        this.$message.warning("请输入邀请码");
-        return;
-      }
-      Api.workspace.accept(this.inviteCode.trim(), ({ data }) => {
-        if (data.code === 0) {
-          this.inviteCode = "";
-          this.selectWorkspace(data.data.id);
-          this.loadWorkspaces();
-        }
-      });
     },
     updateRole(member) {
       Api.workspace.updateRole(this.currentWorkspaceId, member.userId, member.role, ({ data }) => {
@@ -327,16 +284,6 @@ export default {
   color: #30364a;
 }
 
-.toolbar-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.toolbar-actions .el-input {
-  width: 240px;
-}
-
 .organization-layout {
   display: grid;
   grid-template-columns: 280px 1fr;
@@ -388,13 +335,6 @@ export default {
 .member-hint {
   color: #778199;
   font-size: 12px;
-}
-
-.invite-code {
-  background: #f5f7fb;
-  border-radius: 6px;
-  padding: 10px;
-  color: #30364a;
 }
 
 .invitation-panel {

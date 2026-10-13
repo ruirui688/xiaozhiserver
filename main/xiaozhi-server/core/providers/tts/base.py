@@ -5,7 +5,6 @@ import uuid
 import queue
 import asyncio
 import threading
-import traceback
 import concurrent.futures
 
 from core.utils import p3
@@ -169,7 +168,9 @@ class TTSProviderBase(ABC):
                     getattr(self, "current_sentence_id", None),
                 )
         except Exception as e:
-            logger.bind(tag=TAG).debug(f"记录TTS音频指标失败: {e}")
+            logger.bind(tag=TAG).debug(
+                f"记录TTS音频指标失败: error_type={type(e).__name__}"
+            )
         self.tts_audio_queue.put((
             SentenceType.MIDDLE,
             opus_data,
@@ -188,7 +189,9 @@ class TTSProviderBase(ABC):
                     "record_tts_start", getattr(self, 'current_sentence_id', None)
                 )
         except Exception as e:
-            logger.bind(tag=TAG).debug(f"记录TTS开始指标失败: {e}")
+            logger.bind(tag=TAG).debug(
+                f"记录TTS开始指标失败: error_type={type(e).__name__}"
+            )
         # 保留原始文本用于显示/上报
         original_text = text
         log_text = self._text_for_log(original_text)
@@ -215,7 +218,8 @@ class TTSProviderBase(ABC):
                         max_repeat_time -= 1
                 except Exception as e:
                     logger.bind(tag=TAG).warning(
-                        f"语音生成失败{5 - max_repeat_time + 1}次: {log_text}，错误: {e}"
+                        f"语音生成失败{5 - max_repeat_time + 1}次: {log_text}，"
+                        f"错误: {self._exception_for_log(e)}"
                     )
                     max_repeat_time -= 1
             if max_repeat_time > 0:
@@ -235,7 +239,8 @@ class TTSProviderBase(ABC):
                         asyncio.run(self.text_to_speak(text, tmp_file))
                     except Exception as e:
                         logger.bind(tag=TAG).warning(
-                            f"语音生成失败{5 - max_repeat_time + 1}次: {log_text}，错误: {e}"
+                            f"语音生成失败{5 - max_repeat_time + 1}次: {log_text}，"
+                            f"错误: {self._exception_for_log(e)}"
                         )
                         # 未执行成功，删除文件
                         if os.path.exists(tmp_file):
@@ -253,7 +258,10 @@ class TTSProviderBase(ABC):
                 self.tts_audio_queue.put((SentenceType.FIRST, None, original_text, getattr(self, 'current_sentence_id', None)))
                 self._process_audio_file_stream(tmp_file, callback=opus_handler)
             except Exception as e:
-                logger.bind(tag=TAG).error(f"Failed to generate TTS file: {e}")
+                logger.bind(tag=TAG).error(
+                    "Failed to generate TTS file: "
+                    f"{self._exception_for_log(e)}"
+                )
                 return None
     
     def to_tts(self, text):
@@ -281,7 +289,8 @@ class TTSProviderBase(ABC):
                         max_repeat_time -= 1
                 except Exception as e:
                     logger.bind(tag=TAG).warning(
-                        f"语音生成失败{5 - max_repeat_time + 1}次: {log_text}，错误: {e}"
+                        f"语音生成失败{5 - max_repeat_time + 1}次: {log_text}，"
+                        f"错误: {self._exception_for_log(e)}"
                     )
                     max_repeat_time -= 1
             if max_repeat_time > 0:
@@ -301,7 +310,8 @@ class TTSProviderBase(ABC):
                         asyncio.run(self.text_to_speak(text, tmp_file))
                     except Exception as e:
                         logger.bind(tag=TAG).warning(
-                            f"语音生成失败{5 - max_repeat_time + 1}次: {log_text}，错误: {e}"
+                            f"语音生成失败{5 - max_repeat_time + 1}次: {log_text}，"
+                            f"错误: {self._exception_for_log(e)}"
                         )
                         # 未执行成功，删除文件
                         if os.path.exists(tmp_file):
@@ -319,7 +329,10 @@ class TTSProviderBase(ABC):
 
                 return tmp_file
             except Exception as e:
-                logger.bind(tag=TAG).error(f"Failed to generate TTS file: {e}")
+                logger.bind(tag=TAG).error(
+                    "Failed to generate TTS file: "
+                    f"{self._exception_for_log(e)}"
+                )
                 return None
 
     @abstractmethod
@@ -470,7 +483,12 @@ class TTSProviderBase(ABC):
     def _text_for_log(self, text, sentence_id=None):
         if self._is_exact_text(sentence_id):
             return f"<external_tts:{len(str(text or ''))} chars>"
-        return text
+        return f"<tts_text:{len(str(text or ''))} chars>"
+
+    @staticmethod
+    def _exception_for_log(error):
+        """Provider errors may echo request text; log only their stable type."""
+        return f"error_type={type(error).__name__}"
 
     def _notify_tts_message_dequeued(self, message):
         if (getattr(message, "content_type", None) is ContentType.TEXT
@@ -756,11 +774,12 @@ class TTSProviderBase(ABC):
             except queue.Empty:
                 continue
             except Exception as e:
+                sentence_id = getattr(message, "sentence_id", None)
                 logger.bind(tag=TAG).error(
-                    f"处理TTS文本失败: {str(e)}, 类型: {type(e).__name__}, 堆栈: {traceback.format_exc()}"
+                    f"处理TTS文本失败: error_type={type(e).__name__}"
                 )
                 self._mark_external_tts_failed(
-                    getattr(message, "sentence_id", None)
+                    sentence_id
                 )
                 continue
 
@@ -974,7 +993,7 @@ class TTSProviderBase(ABC):
                     break
                 logger.bind(tag=TAG).error(
                     f"audio_play_priority_thread: text_present={bool(text)}, "
-                    f"error_type={type(e).__name__}, reason={e}"
+                    f"error_type={type(e).__name__}"
                 )
                 coordinator = getattr(self.conn, "external_tts_coordinator", None)
                 if coordinator is not None:

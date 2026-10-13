@@ -1,10 +1,14 @@
 ---
 status: supporting
 owner: manager-api
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/workspace
   - main/manager-api/src/main/resources/db/changelog
+  - main/manager-web/src/views/OrganizationManagement.vue
+  - main/manager-web/src/views/WorkspaceInvitationLanding.vue
+  - main/manager-mobile/src/api/workspace.ts
+  - main/manager-mobile/src/pages/organization/index.vue
 ---
 
 # 工作空间组织管理与数据隔离
@@ -51,13 +55,18 @@ sys_workspace_member.role        OWNER / ADMIN / MEMBER
 sys_workspace_member.status
 
 sys_workspace_invitation.workspace_id
+sys_workspace_invitation.invitation_type     TARGETED / LINK
 sys_workspace_invitation.invitee_username
 sys_workspace_invitation.invitee_user_id
 sys_workspace_invitation.role
-sys_workspace_invitation.code
+sys_workspace_invitation.token_hash          SHA-256，仅服务端匹配
 sys_workspace_invitation.status
 sys_workspace_invitation.expires_at
+sys_workspace_invitation.accepted_by_user_id
 ```
+
+`LINK` 是面向分享链接的一次性邀请，不预先绑定账号；`TARGETED` 保留旧版按用户名邀请兼容。
+邀请链接原始 token 只在创建响应中返回一次，数据库和待邀请列表均不得保存或回显原文。
 
 业务资源表通过 `workspace_id` 归属到工作空间：
 
@@ -85,6 +94,8 @@ ai_person_recognition_event
 
 ```text
 main/manager-api/src/main/resources/db/changelog/202607091100.sql
+main/manager-api/src/main/resources/db/changelog/workspace-invitation-links-20261013.sql
+main/manager-api/src/main/resources/db/changelog/workspace-invitation-lifecycle-indexes-20261013.sql
 main/manager-api/src/main/resources/db/changelog/db.changelog-master.yaml
 ```
 
@@ -110,8 +121,13 @@ main/manager-api/src/main/resources/db/changelog/db.changelog-master.yaml
 - 邀请和角色编辑只允许 ADMIN 或 MEMBER，不通过授予 OWNER 变更负责人。
 - 邀请时确定新成员初始角色；被邀请人接受后不能自行修改自己的角色。
 - 工作空间成员上限为 5 人。邀请创建时按 active 成员 + 未过期待接受邀请计数；Web 和 Mobile 必须同时展示两部分占用，OWNER/ADMIN 可以查看并撤销待邀请。
-- 同一工作空间、同一用户只能保留一个有效待邀请；重复生成时复用原邀请并刷新角色和有效期。用户接受后，其余历史待邀请统一撤销；已是 active 成员的邀请不得继续占用名额。
+- 同一工作空间、同一用户只能保留一个有效定向待邀请。重新生成、修改角色或延长有效期时必须轮换 token，旧 token 立即失效，不能在链接不变时静默提升角色。
+- 通用邀请链接默认 24 小时有效、仅首位非成员可领取，每条链接占一个待邀请名额。已是 active 成员的用户打开链接不得消耗它。
+- 用户接受后，其余面向该用户的历史待邀请统一撤销；已是 active 成员的定向邀请不得继续占用名额。
 - 接受邀请时再次按 active 成员计数，避免邀请生成后成员变化导致超额。
+- 创建和接受邀请必须在事务中锁定工作空间；接受还要重新锁定并校验邀请状态，保证并发创建、不同链接并发领取和同一链接双击都不能突破 5 人上限。成员移除、退出、角色变更和账号删除也必须获取同一工作空间锁，使邀请创建者撤权与领取严格串行。
+- 邀请创建者被移除、主动退出、降为 MEMBER、平台停用或注销账号时，必须在持有工作空间锁的同一事务内把其全部 PENDING 邀请置为 REVOKED；重新授予 ADMIN/OWNER 或重新启用账号不能让旧 token 复活。注销账号还要撤销以该账号为目标的 PENDING 定向邀请，及时释放名额。
+- 涉及账号生命周期的事务统一按“按 ID 排序的全部用户行 → 按 ID 排序的全部工作空间行 → 成员/邀请行”加锁；单工作空间管理事务从工作空间行开始。定向邀请创建锁定创建者与被邀请用户，邀请领取锁定领取者与创建者，均在锁工作空间前按用户 ID 排序，禁止反向加锁形成死锁。
 
 权限入口：
 
@@ -306,7 +322,31 @@ DELETE /workspace/{workspaceId}/invitations/{invitationId}
 
 只有 OWNER/ADMIN 可以查看或撤销待邀请。页面名额口径固定为“正式成员 + 有效且未成为成员的唯一待邀请”；不得再只显示正式成员数量，却使用包含待邀请的后端额度。
 
-### 7.4 主动退出工作空间
+### 7.5 邀请链接与认证续接
+
+管理端按角色生成邀请链接：
+
+```text
+POST /workspace/{workspaceId}/invitations
+body: { "role": "ADMIN" | "MEMBER" }
+```
+
+链接采用 Web hash 路由承载一次性 token，例如 `/#/invite?code=...`。浏览器读取后应立即把邀请上下文暂存在
+`sessionStorage` 并清理地址栏 token；预览和接受都通过 POST JSON body 提交，禁止把 token 放进 API path、query、日志或埋点。
+
+```text
+POST /workspace/invitations/preview
+POST /workspace/invitations/accept
+body: { "code": "<raw token>" }
+```
+
+两个接口都要求产品用户登录并在 `ShiroConfig` 显式使用 `oauth2`。未登录用户只看到本地邀请说明，选择登录或注册；注册仍先创建其个人默认工作空间和固定负责人额度账户，随后登录并通过受限的站内 redirect 返回邀请页。认证续接只允许 `/invite` 等站内路径，必须拒绝外域、`//`、反斜杠、控制字符和编码路径穿越。
+
+移动端保留旧版手工邀请码兼容时，也只能调用同一个 JSON body 接口，不得继续把 token 拼进 API URL。
+
+预览只返回工作空间名称、待授予角色和过期时间，不返回 workspaceId、成员、负责人、被邀请用户名或 token。加入必须由已登录用户显式确认，禁止使用 GET 或页面预加载自动消费，避免聊天软件和安全扫描器预取链接时误加入。接受成功后才由客户端切换 `currentWorkspaceId`；新成员角色不能是 OWNER，工作空间固定负责人和额度责任人保持不变。
+
+### 7.6 主动退出工作空间
 
 退出接口：
 
@@ -323,6 +363,8 @@ DELETE /workspace/{workspaceId}/members/me
    -> 当前版本没有负责人交接，不提供转让入口
 3. 退出时只停用成员关系，不删除工作空间资源
 ```
+
+平台将用户状态改为停用时，会在同一事务中先按 ID 锁定整批用户，再锁定其待领取邀请涉及的全部工作空间，永久撤销这些用户创建的 LINK/TARGETED 邀请，最后更新账号状态。这样既立即释放待邀请名额，也保证账号重新启用后必须生成新链接。
 
 ## 8. 开发约束
 
@@ -375,6 +417,11 @@ mvn -Dtest=WorkspaceServiceImplTest,AgentWorkspaceIsolationTest,DeviceWorkspaceI
 - 非成员伪造 `X-Workspace-Id` 访问其他工作空间会被拒绝。
 - MEMBER 可以读但不能写。
 - 新用户会创建默认工作空间并成为 OWNER。
+- 邀请链接原始 token 不落库、不进入待邀请列表，24 小时后失效。
+- 已登录用户预览后显式接受；注册和登录完成后能安全返回邀请页。
+- 同一邀请链接只能被一个非成员领取，active 成员不会消耗链接。
+- 并发创建与接受后，正式成员加有效待邀请始终不超过 5。
+- 创建者撤权或账号停用后旧邀请永久 REVOKED；账号停用、删除与邀请创建/领取遵守全部用户行优先的统一锁序。
 - ADMIN 不能移除 OWNER，不能授予 OWNER。
 - OWNER 不能退出最后 OWNER 身份。
 - 删除账号前会拒绝最后 OWNER，并停用可注销用户的成员关系。

@@ -46,6 +46,16 @@ const routes = [
     }
   },
 {
+    path: '/invite',
+    name: 'WorkspaceInvitation',
+    component: function () {
+      return import(/* webpackChunkName: "view-workspace-invitation" */ '../views/WorkspaceInvitationLanding.vue')
+    },
+    meta: {
+      title: '工作空间邀请'
+    }
+  },
+{
     path: '/retrieve-password',
     name: 'RetrievePassword',
     component: function () {
@@ -154,7 +164,7 @@ const routes = [
 { path: '*', redirect: '/home' }
 ]
 const router = new VueRouter({ base: process.env.VUE_APP_PUBLIC_PATH || '/', routes })
-const publicRoutes = ['welcome', 'login', 'Register', 'RetrievePassword']
+const publicRoutes = ['welcome', 'login', 'Register', 'RetrievePassword', 'WorkspaceInvitation']
 router.beforeEach((to, from, next) => {
   if (!publicRoutes.includes(to.name) && !readSession('token')) return next({ name: 'login', query: { redirect: to.fullPath } })
   next()

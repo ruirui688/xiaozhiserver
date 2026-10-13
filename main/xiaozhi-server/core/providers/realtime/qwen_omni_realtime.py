@@ -871,7 +871,11 @@ class QwenOmniRealtimeSession:
                 from plugins_func.register import Action, ActionResponse
                 result = ActionResponse(action=Action.NOTFOUND, response="工具未启用或本轮不允许调用")
             else:
-                result = await self.conn.func_handler.handle_llm_function_call(self.conn, call)
+                tool_call = dict(call)
+                tool_call["id"] = call_id
+                result = await self.conn.func_handler.handle_llm_function_call(
+                    self.conn, tool_call
+                )
             if cancel_generation != getattr(self, "_cancel_generation", 0):
                 return False
             self._tool_policy.accept([(result, call)], count_round=False)

@@ -21,9 +21,11 @@ export interface WorkspaceMember {
 
 export interface WorkspaceInvitation {
   id: string
-  code: string
+  code?: string
   workspaceId: string
-  inviteeUsername: string
+  inviteeUsername?: string
+  invitationType?: 'TARGETED' | 'LINK'
+  linkInvitation?: boolean
   role: WorkspaceRole
   status: string
   expiresAt?: string
@@ -89,7 +91,7 @@ export function revokeWorkspaceInvitation(workspaceId: string, invitationId: str
 }
 
 export function acceptWorkspaceInvitation(code: string) {
-  return http.Post<Workspace>(`/workspace/invitations/${code}/accept`, {}, {
+  return http.Post<Workspace>('/workspace/invitations/accept', { code }, {
     timeout: 15000,
     meta: {
       ignoreAuth: false,

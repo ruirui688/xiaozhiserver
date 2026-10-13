@@ -55,19 +55,36 @@ export default {
       .success(callback)
       .send()
   },
-  invite(workspaceId, data, callback) {
+  invite(workspaceId, data, callback, failCallback) {
     RequestService.sendRequest()
       .url(`${getServiceUrl()}/workspace/${workspaceId}/invitations`)
       .method('POST')
       .data(data)
       .success(callback)
+      .fail(failCallback)
+      .networkFail(failCallback)
       .send()
   },
-  accept(code, callback) {
+  previewInvitation(code, callback, failCallback) {
     RequestService.sendRequest()
-      .url(`${getServiceUrl()}/workspace/invitations/${code}/accept`)
+      .url(`${getServiceUrl()}/workspace/invitations/preview`)
       .method('POST')
+      .data({ code })
+      .withoutWorkspace()
       .success(callback)
+      .fail(failCallback)
+      .networkFail(failCallback)
+      .send()
+  },
+  acceptInvitation(code, callback, failCallback) {
+    RequestService.sendRequest()
+      .url(`${getServiceUrl()}/workspace/invitations/accept`)
+      .method('POST')
+      .data({ code })
+      .withoutWorkspace()
+      .success(callback)
+      .fail(failCallback)
+      .networkFail(failCallback)
       .send()
   },
   revokeInvitation(workspaceId, invitationId, callback) {

@@ -92,12 +92,15 @@ export default {
             })
             .fail((err) => {
                 RequestService.clearRequestTime()
-                failCallback(err)
+                if (failCallback) {
+                    failCallback(err)
+                }
             })
-            .networkFail(() => {
-                RequestService.reAjaxFun(() => {
-                    this.register(registerForm, callback, failCallback)
-                })
+            .networkFail((err) => {
+                RequestService.clearRequestTime()
+                if (failCallback) {
+                    failCallback(err)
+                }
             }).send()
     },
     // 保存设备配置

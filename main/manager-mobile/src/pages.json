@@ -211,6 +211,16 @@
       }
     },
     {
+      "path": "pages/reminder/index",
+      "type": "page",
+      "needLogin": true,
+      "layout": "default",
+      "style": {
+        "navigationBarTitleText": "日程提醒",
+        "backgroundColor": "#f5f7fa"
+      }
+    },
+    {
       "path": "pages/settings/index",
       "type": "page",
       "needLogin": true,

@@ -48,6 +48,7 @@ nav {
 import { parseStoredProfile, isOperationsConsole } from '@/security/session';
 import CacheViewer from '@/components/CacheViewer.vue';
 import { logCacheStatus } from '@/utils/cacheViewer';
+import { isWorkspaceInviteFlowRoute, readPendingWorkspaceInvite } from '@/utils/workspaceInvitation';
 
 export default {
   name: 'App',
@@ -67,7 +68,8 @@ export default {
   },
   mounted() {
     // 检测是否为移动设备且VUE_APP_H5_URL不为空，如果两个条件都满足则跳转到H5页面
-    if (!isOperationsConsole() && this.isMobileDevice() && process.env.VUE_APP_H5_URL) {
+    const inviteFlow = isWorkspaceInviteFlowRoute(this.$route, readPendingWorkspaceInvite());
+    if (!isOperationsConsole() && !inviteFlow && this.isMobileDevice() && process.env.VUE_APP_H5_URL) {
       window.location.href = process.env.VUE_APP_H5_URL;
       return;
     }
