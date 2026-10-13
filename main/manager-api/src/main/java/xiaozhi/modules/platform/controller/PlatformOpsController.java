@@ -22,6 +22,7 @@ public class PlatformOpsController {
     private final PlatformCatalogPublicationService catalog;
     private final PlatformPageService pages;
     private final PlatformCredentialService credentials;
+    private final PlatformCredentialQueryService credentialQueries;
     private final PlatformCredentialInventoryService credentialInventory;
     private final PlatformTrialGrantService trials;
     private final AllowanceRequestService allowanceRequests;
@@ -42,13 +43,12 @@ public class PlatformOpsController {
     }
     @PostMapping("/allowance/grant") public Result<?> grant(@Valid @RequestBody Grant input){user("allowance.grant",input.userId());return new Result<>().ok(accounts.grant(input,operator()));}
     @PostMapping("/allowance/freeze") public Result<?> freeze(@Valid @RequestBody Freeze input){user("allowance.freeze",input.userId());return new Result<>().ok(accounts.freeze(input,operator()));}
-    @GetMapping("/credentials") public Result<?> credentials(@RequestParam(defaultValue="1") int page,@RequestParam(defaultValue="20") int limit){platform("credentials.read");return new Result<>().ok(pages.read("ai_platform_credential","id,provider,upstream_id AS upstreamId,user_id AS userId,version,status,'***' AS masked,created_at AS createdAt","","created_at DESC,id",page,limit));}
-    @PostMapping("/credentials") public Result<?> add(@Valid @RequestBody CredentialInput input){platform("credentials.write");return new Result<>().ok(mutations.perform("credentials.write",input.provider(),()->credentials.add(input)));}
-    @PostMapping("/credentials/assign") public Result<?> assign(@Valid @RequestBody Assignment input){user("credentials.assign",input.userId());return new Result<>().ok(mutations.perform("credentials.assign",input.userId().toString(),()->credentials.assign(input,false)));}
-    @PostMapping("/credentials/rotate") public Result<?> rotate(@Valid @RequestBody Assignment input){user("credentials.rotate",input.userId());return new Result<>().ok(mutations.perform("credentials.rotate",input.userId().toString(),()->credentials.assign(input,true)));}
+    @GetMapping("/credentials") public Result<?> credentials(@RequestParam(defaultValue="1") int page,@RequestParam(defaultValue="20") int limit,@RequestParam(required=false) String provider,@RequestParam(required=false) String status,@RequestParam(required=false) String keyword){platform("credentials.read");return new Result<>().ok(credentialQueries.credentials(page,limit,provider,status,keyword));}
+    @PostMapping("/credentials") public Result<?> add(@Valid @RequestBody CredentialInput input){platform("credentials.write");throw new RenException("CREDENTIAL_INVENTORY_RETIRED");}
+    @PostMapping("/credentials/assign") public Result<?> assign(@Valid @RequestBody Assignment input){user("credentials.assign",input.userId());throw new RenException("CREDENTIAL_ASSIGNMENT_RETIRED");}
+    @PostMapping("/credentials/rotate") public Result<?> rotate(@Valid @RequestBody Assignment input){user("credentials.rotate",input.userId());throw new RenException("CREDENTIAL_ASSIGNMENT_RETIRED");}
     @PostMapping("/credentials/{id}/revoke") public Result<?> revoke(@PathVariable String id,@Valid @RequestBody Reason input){platform("credentials.revoke");return new Result<>().ok(mutations.perform("credentials.revoke",id,()->{credentials.revoke(id);return null;}));}
     @GetMapping("/credentials/inventory") public Result<?> inventory(){platform("credentials.read");return new Result<>().ok(credentialInventory.summary());}
-    @GetMapping("/credentials/pending") public Result<?> pending(@RequestParam(defaultValue="1") int page,@RequestParam(defaultValue="20") int limit){platform("credentials.read");return new Result<>().ok(credentialInventory.pending(page,limit));}
     @GetMapping("/trial") public Result<?> trial(){platform("allowance.read");return new Result<>().ok(trials.summary());}
     @GetMapping("/allowance/requests") public Result<?> allowanceRequests(@RequestParam(defaultValue="1") int page,@RequestParam(defaultValue="20") int limit){if(!OpsAccess.has("allowance.read","PLATFORM","platform-services"))platform("allowance.review");return new Result<>().ok(allowanceRequests.pending(page,limit));}
     @PostMapping("/allowance/requests/{id}/approve") public Result<?> approveAllowance(@PathVariable String id,@Valid @RequestBody AllowanceDecision input){
@@ -71,5 +71,7 @@ public class PlatformOpsController {
     @PostMapping("/catalog/{id}/publish") public Result<?> publish(@PathVariable String id){return new Result<>().ok(catalog.publish(id));}
     @GetMapping("/reservations/review") public Result<?> review(@RequestParam(defaultValue="1") int page,@RequestParam(defaultValue="20") int limit){platform("allowance.review");return new Result<>().ok(pages.read("ai_platform_reservation","id,model_id AS modelId,payer_user_id AS payerUserId,workspace_id AS workspaceId,service_type AS serviceType,reserved_amount AS reservedAmount,provider_request_id AS providerRequestId,created_at AS createdAt"," WHERE state='UNKNOWN'","created_at,id",page,limit));}
     @PostMapping("/reservations/{id}/resolve") public Result<?> resolve(@PathVariable String id,@Valid @RequestBody PlatformResolutionService.Resolution input){platform("allowance.review");return new Result<>().ok(resolutions.resolve(id,input,operator()));}
+    @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException.class)
+    public Result<?> invalidInput(){return new Result<>().error("INVALID_PLATFORM_INPUT");}
     public record ServiceGrant(String requestId,long accountId,String amount,String reason){}
 }

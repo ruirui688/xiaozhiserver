@@ -1586,3 +1586,10 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/model-billing-ops-actor.sql
+  - changeSet:
+      id: platform-shared-channels-20261013
+      author: Codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/platform-shared-channels-20261013.sql

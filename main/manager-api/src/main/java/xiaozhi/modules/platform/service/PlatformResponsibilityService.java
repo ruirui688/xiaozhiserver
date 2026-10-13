@@ -16,7 +16,7 @@ public class PlatformResponsibilityService {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate tx;
     private final WorkspacePermissionService permissions;
-    private final PlatformCredentialService credentials;
+    private final PlatformChannelService channels;
     public void ensureWorkspace(String workspaceId) {
         Map<String,Object> workspace=jdbc.queryForMap("SELECT owner_user_id FROM sys_workspace WHERE id=?",workspaceId);
         jdbc.update("INSERT INTO ai_platform_responsibility(workspace_id,responsible_user_id,version) VALUES(?,?,1) ON DUPLICATE KEY UPDATE workspace_id=workspace_id",
@@ -31,8 +31,8 @@ public class PlatformResponsibilityService {
         Map<String,Object> totals=usage(workspaceId,"TOTAL"),daily=usage(workspaceId,java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai")).toString());
         balance.put("status",number(balance.get("frozen"))!=0?"FROZEN":"ACTIVE");balance.put("currency","CNY");
         return publicMap(map("workspaceId",workspaceId,"ownerUserId",payer,"responsibleUserId",payer,"payerUserId",payer,"responsibilityVersion",row.get("version"),
-            "canViewBalance",payer==userId,"canManage",payer==userId,"allowance",payer==userId?balance:null,"serviceStatus",number(balance.get("frozen"))==0&&PlatformAccountService.available(balance).signum()>0&&credentials.statuses(payer).stream().anyMatch(c->"ACTIVE".equals(c.get("status")))?"READY":"PENDING",
-            "totalSpent",totals.get("spent"),"totalReserved",totals.get("reserved"),"dailySpent",daily.get("spent"),"dailyReserved",daily.get("reserved"),"credentialStatus",credentials.statuses(payer),"totalLimit",row.get("total_limit"),"dailyLimit",row.get("daily_limit")));
+            "canViewBalance",payer==userId,"canManage",payer==userId,"allowance",payer==userId?balance:null,"serviceStatus",number(balance.get("frozen"))==0&&PlatformAccountService.available(balance).signum()>0&&channels.availability().stream().anyMatch(c->"READY".equals(c.get("status")))?"READY":"PENDING",
+            "totalSpent",totals.get("spent"),"totalReserved",totals.get("reserved"),"dailySpent",daily.get("spent"),"dailyReserved",daily.get("reserved"),"services",channels.availability(),"totalLimit",row.get("total_limit"),"dailyLimit",row.get("daily_limit")));
     }
     private Map<String,Object> usage(String workspace,String period) {
         List<Map<String,Object>> rows=jdbc.queryForList("SELECT spent,reserved FROM ai_platform_workspace_usage WHERE workspace_id=? AND period=?",workspace,period);

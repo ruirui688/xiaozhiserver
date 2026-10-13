@@ -9,7 +9,9 @@ public final class PlatformRequests {
     public record Grant(@NotBlank @Size(max=128) String requestId,@NotNull @Positive Long userId,@NotBlank String amount,@NotBlank @Size(max=500) String reason) {}
     public record PoolAdjustment(@NotBlank String requestId,@NotBlank String amount,@NotBlank @Size(max=500) String reason) {}
     public record Freeze(@NotBlank String requestId,@NotNull Long userId,boolean frozen,@NotBlank @Size(max=500) String reason) {}
-    public record CredentialInput(@NotBlank String provider,@NotBlank @Size(max=200) String upstreamId,@NotEmpty @Size(max=12) Map<String,String> secrets) {}
+    public record CredentialInput(@NotBlank String provider,@NotBlank @Size(max=200) String upstreamId,@NotEmpty @Size(max=12) Map<String,String> secrets) {
+        @Override public String toString() { return "CredentialInput[redacted]"; }
+    }
     public record Assignment(@NotBlank String requestId,@NotNull Long userId,@NotBlank String provider) {}
     public record Reason(@NotBlank @Size(max=500) String reason) {}
     public record Rate(@NotBlank @Size(max=64) String modelId,@NotBlank @Size(max=64) String version,@NotEmpty Map<String,String> metricRates,@NotEmpty Map<String,String> maxUsage) {}

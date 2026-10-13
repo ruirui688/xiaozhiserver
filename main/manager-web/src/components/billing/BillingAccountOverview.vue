@@ -17,7 +17,7 @@
             <p v-else-if="item.data.sync && item.data.sync.lastAttemptStatus === 'LEGACY_SNAPSHOT'" class="account-warning">已有历史账单，账号同步完整性尚待核实。</p>
             <p v-if="!state(item).importOnly && item.data.sync && item.data.sync.lastAttemptStatus === 'FAILED'" class="account-warning">最近同步失败，当前展示此前成功快照。</p>
             <p v-else-if="item.data.sync && item.data.sync.isStale" class="account-warning">快照较早，建议更新账单。</p>
-            <div class="account-bottom"><span>{{ number(item.data.billCount) }} 条主账单</span><el-button v-if="item.data.billCount > 0" type="text" @click="focusedKey = key(item.account)">查看产品与账单 <i class="el-icon-arrow-right" /></el-button></div>
+            <div class="account-bottom"><span>{{ number(item.data.billCount) }} 条主账单</span><el-button v-if="item.data.billCount > 0" type="text" @click="focusAccount(item.account)">查看产品与账单 <i class="el-icon-arrow-right" /></el-button></div>
           </template>
           <p v-if="state(item).importOnly" class="account-source-note">此账号暂不支持自动获取消费账单。实际费用需导入含官方金额的凭证，余额和 Token 用量不能代替消费金额。</p>
           <div v-if="state(item).importOnly || item.account.provider === 'DEEPSEEK'" class="account-actions">
@@ -29,7 +29,7 @@
         </article>
       </div>
       <p class="account-footnote">已付金额指该账期账单截至快照的官方已付；不等于本月资金流水。各账号独立展示，未取得的账单不计为零。</p>
-      <section v-if="focused && focused.data" class="billing-panel">
+      <section v-if="focused && focused.data" class="billing-panel" ref="productPanel">
         <div class="billing-panel-heading"><div><h2>{{ label(focused.account.provider) }} · 产品费用</h2><p>采用官方主账单金额；展开核对明细，金额不重复累加。</p></div><el-button size="small" @click="openBills('')">查看全部账单</el-button></div>
         <div v-if="focused.data.reconciliation && focused.data.reconciliation.status === 'REVIEW_REQUIRED'" class="billing-notice"><i class="el-icon-warning-outline" /><div>部分账单需要核对<p>主单与明细存在数量、金额或币种差异。当前保留官方主单金额，不用明细覆盖。</p></div></div>
         <div v-if="focused.data.coverage && focused.data.coverage.status === 'PARTIAL'" class="billing-notice"><i class="el-icon-warning-outline" /><div>账单覆盖尚待核对<p>当前保留已取得的官方主单金额。账期完整性、快照时效或主明细关联仍需核实，不能将此金额视为完整月结总额。</p><p v-if="focused.data.coverage.orphanDetailCount">{{ number(focused.data.coverage.orphanDetailCount) }} 条明细缺少对应主单，未重复加进主单金额。</p></div></div>
@@ -58,6 +58,7 @@ export default {
     changePeriod() { this.billQuery = null; this.$router.replace({ path: '/model-billing', query: { ...this.$route.query, view: 'costs', scope: 'account', billPeriod: this.period } }).catch(error => { if (error.name !== 'NavigationDuplicated') this.error = '账期切换失败，请重试'; }); },
     state(item) { return billingAccountState(item.account, item.data); },
     openImport(account) { this.$emit('manage', { provider: account.provider, accountRef: account.accountRef, billPeriod: this.period }); },
+    focusAccount(account) { this.focusedKey = accountKey(account); this.billQuery = null; this.$nextTick(() => { this.$refs.productPanel?.scrollIntoView({ block: 'start', behavior: 'smooth' }); }); },
     coverageType(data) { return ['SNAPSHOT', 'EMPTY_CONFIRMED'].includes((data.coverage || {}).status) ? 'info' : 'warning'; },
     async load() {
       const generation = ++this.generation; this.loading = true; this.error = ''; this.reports = []; this.billQuery = null;

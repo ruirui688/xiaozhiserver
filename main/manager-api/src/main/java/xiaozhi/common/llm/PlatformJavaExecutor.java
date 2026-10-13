@@ -17,7 +17,7 @@ public class PlatformJavaExecutor {
     private final PlatformAdmissionService admission;
     private final PlatformServiceAccountService services;
     private final PlatformSettlementOutbox outbox;
-    public record Call(String endpoint,HttpEntity<?> request,Permit permit) {}
+    public record Call(String endpoint,HttpEntity<?> request,Permit permit,String attemptId) {}
     public Call prepare(LlmUsageContext.Identity identity,HttpEntity<?> request,String modelId,String service) {
         if(identity==null)throw new RenException("EXECUTION_IDENTITY_REQUIRED");
         String model=modelId==null?identity.modelId():modelId;
@@ -50,7 +50,7 @@ public class PlatformJavaExecutor {
             // Persist UNKNOWN before dispatch: crashes retain the reservation and retry evidence.
             outbox.store(new Settle(permit.reservationId(),permit.permitToken(),"UNKNOWN",false,Map.of(),null));
             if(!Boolean.TRUE.equals(admission.start(permit).get("started")))throw new RenException("PLATFORM_START_DENIED");
-            return new Call(endpoint,new HttpEntity<>(body,headers),permit);
+            return new Call(endpoint,new HttpEntity<>(body,headers),permit,attempt);
         } catch(RuntimeException failure) {
             try {admission.release(permit);outbox.remove(permit.reservationId());}catch(RuntimeException startedOrUnavailable) { /* Durable hold remains. */ }
             throw failure;

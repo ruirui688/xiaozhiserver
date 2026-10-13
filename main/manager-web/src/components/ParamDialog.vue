@@ -1,5 +1,5 @@
 <template>
-  <el-dialog :title="title" :visible.sync="visible" width="520px" class="param-dialog-wrapper" :append-to-body="true"
+  <el-dialog :title="title" :visible.sync="visible" width="min(520px, calc(100vw - 28px))" class="param-dialog-wrapper" :append-to-body="true"
     :close-on-click-modal="false" :key="dialogKey" custom-class="custom-param-dialog" :show-close="false">
     <div class="dialog-container">
       <div class="dialog-header">

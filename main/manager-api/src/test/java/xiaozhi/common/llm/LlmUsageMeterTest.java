@@ -49,6 +49,9 @@ class LlmUsageMeterTest {
         assertEquals("MEMORY", value.getPurpose());
         assertEquals("deepseek", value.getProvider());
         assertEquals("request-1", value.getProviderRequestId());
+        assertEquals("attempt-meter-test", value.getAttemptId());
+        assertEquals(value.getAttemptId(), value.getLogicalCallId());
+        assertEquals("reservation-meter-test", value.getReservationId());
         assertTrue(value.getUsageComplete());
         assertEquals(new BigDecimal("30"), metric(value.getUsage(), "input_tokens"));
         assertEquals(new BigDecimal("20"), metric(value.getUsage(), "cached_input_tokens"));
@@ -125,7 +128,8 @@ class LlmUsageMeterTest {
     private PlatformJavaExecutor executor() {
         var executor = mock(PlatformJavaExecutor.class);
         when(executor.prepare(any(), any(), any(), any())).thenAnswer(invocation ->
-            new PlatformJavaExecutor.Call(ENDPOINT, invocation.getArgument(1), null));
+            new PlatformJavaExecutor.Call(ENDPOINT, invocation.getArgument(1),
+                    new xiaozhi.modules.platform.dto.PlatformRequests.Permit("reservation-meter-test", "test-permit"), "attempt-meter-test"));
         return executor;
     }
 

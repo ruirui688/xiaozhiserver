@@ -15,20 +15,19 @@ import static xiaozhi.modules.platform.service.PlatformSupport.*;
 public class PlatformAccountService {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate tx;
-    private final PlatformCredentialService credentials;
+    private final PlatformChannelService channels;
     @Value("${xiaozhi.platform.max-grant:1000}") private String maxGrant="1000";
     @Value("${xiaozhi.platform.operator-daily-grant:10000}") private String dailyGrant="10000";
 
     public void ensureUser(long userId) {
         tx.executeWithoutResult(status->{
             jdbc.update("INSERT INTO ai_platform_account(user_id,updated_at) VALUES(?,?) ON DUPLICATE KEY UPDATE user_id=user_id",userId,now());
-            credentials.initialize(userId);
         });
     }
     public Map<String,Object> account(long userId) {
         Map<String,Object> row=jdbc.queryForMap("SELECT * FROM ai_platform_account WHERE user_id=?",userId);
         return map("userId",userId,"currency","CNY","status",number(row.get("frozen"))!=0?"FROZEN":"ACTIVE","granted",decimal(row.get("granted")),"spent",decimal(row.get("spent")),"reserved",decimal(row.get("reserved")),
-            "available",available(row).toPlainString(),"frozen",number(row.get("frozen"))!=0,"credentials",credentials.statuses(userId));
+            "available",available(row).toPlainString(),"frozen",number(row.get("frozen"))!=0,"services",channels.availability());
     }
     public List<Map<String,Object>> accounts() {
         return jdbc.queryForList("SELECT user_id AS userId,granted,spent,reserved,(granted-spent-reserved) AS available,frozen FROM ai_platform_account WHERE user_id>0 ORDER BY user_id LIMIT 500");

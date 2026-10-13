@@ -65,7 +65,7 @@
           <p class="ops-muted">{{ action === 'pool' ? '负数仅可收回尚未发放的额度。' : '金额不能超过可发放额度和岗位上限。' }}</p>
         </el-form-item>
         <el-form-item label="操作原因"><el-input v-model="form.reason" type="textarea" maxlength="500" :rows="3" /></el-form-item>
-        <p v-if="action === 'freeze'" class="ops-muted">{{ form.frozen ? '冻结后停止新的付费调用，已开始的调用继续结算。' : '解冻后可恢复调用，仍需有可用额度和有效密钥。' }}</p>
+        <p v-if="action === 'freeze'" class="ops-muted">{{ form.frozen ? '冻结后停止新的付费调用，已开始的调用继续结算。' : '解冻后可恢复调用，仍需有可用额度和已启用的模型通道。' }}</p>
       </el-form>
       <el-alert v-if="saveError" :title="saveError" type="error" :closable="false" />
       <span slot="footer"><el-button :disabled="saving" @click="dialog=false">取消</el-button><el-button :type="action === 'freeze' && form.frozen ? 'danger' : 'primary'" :loading="saving" @click="save">确认{{ dialogTitle }}</el-button></span>

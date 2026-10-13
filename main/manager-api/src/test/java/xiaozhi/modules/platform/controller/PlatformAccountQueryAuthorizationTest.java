@@ -19,7 +19,7 @@ class PlatformAccountQueryAuthorizationTest {
     @Test
     void requiresExistingPlatformAllowancePermissionBeforeQueryingUsernames() {
         var queries = mock(PlatformAccountQueryService.class);
-        var controller = new PlatformOpsController(null, queries, null, null, null, null,
+        var controller = new PlatformOpsController(null, queries, null, null, null, null, null,
                 null, null, null, null, null, null);
         try (var security = mockStatic(SecurityUser.class); var messages = mockStatic(MessageUtils.class)) {
             messages.when(() -> MessageUtils.getMessage(ErrorCode.NO_PERMISSION)).thenReturn("no permission");

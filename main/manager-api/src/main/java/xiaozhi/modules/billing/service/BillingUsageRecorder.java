@@ -13,6 +13,7 @@ public interface BillingUsageRecorder {
     class InternalUsage {
         private String eventId, workspaceId, agentId, deviceId, modelId, provider, serviceType, purpose;
         private String sessionId, turnId, providerRequestId, status;
+        private String attemptId, logicalCallId, reservationId;
         private Instant startedAt, endedAt;
         private Boolean usageComplete;
         private List<Usage> usage;

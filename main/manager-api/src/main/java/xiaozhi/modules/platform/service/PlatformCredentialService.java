@@ -22,22 +22,31 @@ public class PlatformCredentialService {
     private static final Set<String> FIELDS=Set.of("api_key","llm_api_key","speech_api_key");
 
     public Map<String,Object> add(CredentialInput input) {
-        String provider=provider(input.provider());
-        TreeMap<String,String> secrets=new TreeMap<>();
-        input.secrets().forEach((key,value)->{
-            if(!FIELDS.contains(key)||value==null||value.isBlank()||value.length()>4096)throw new RenException("INVALID_CREDENTIAL_FIELDS");
-            secrets.put(key,value);
-        });
-        if("DEEPSEEK".equals(provider)&&!secrets.keySet().equals(Set.of("api_key")) || "VOLCENGINE".equals(provider)&&(secrets.containsKey("api_key")||!(secrets.containsKey("llm_api_key")||secrets.containsKey("speech_api_key"))))
-            throw new RenException("CREDENTIAL_INCOMPLETE");
+        CredentialInput normalized=normalize(input);
+        String provider=normalized.provider();
+        Map<String,String> secrets=normalized.secrets();
         String id=id();
         Map<String,String> masked=new TreeMap<>();secrets.forEach((key,value)->masked.put(key,"***"));
         return tx.execute(status->{
         jdbc.update("INSERT INTO ai_platform_credential(id,provider,upstream_id,fingerprint,secret_ciphertext,masked_json,status,created_at) VALUES(?,?,?,?,?,?,?,?)",
-            id,provider,required(input.upstreamId(),200),hash(json.json(secrets)),cipher.encrypt("platform-credential:"+id,json.json(secrets)),json.json(masked),"INVENTORY",now());
+            id,provider,normalized.upstreamId(),hash(json.json(secrets)),cipher.encrypt("platform-credential:"+id,json.json(secrets)),json.json(masked),"INVENTORY",now());
         secrets.forEach((key,value)->{if(Set.of("api_key","llm_api_key","speech_api_key").contains(key))jdbc.update("INSERT INTO ai_platform_credential_fingerprint(provider,component,fingerprint,credential_id) VALUES(?,?,?,?)",provider,"api_key",hash(value),id);});
         return map("id",id,"provider",provider,"status","INVENTORY");
         });
+    }
+    /** Shared validation for single and atomic bulk import; never includes rejected values. */
+    static CredentialInput normalize(CredentialInput input) {
+        if(input==null||input.secrets()==null||input.secrets().isEmpty()||input.secrets().size()>12)
+            throw new RenException("INVALID_CREDENTIAL_FIELDS");
+        String provider=provider(input.provider());
+        TreeMap<String,String> secrets=new TreeMap<>();
+        input.secrets().forEach((key,value)->{
+            if(key==null||!FIELDS.contains(key)||value==null||value.isBlank()||value.length()>4096)throw new RenException("INVALID_CREDENTIAL_FIELDS");
+            secrets.put(key,value);
+        });
+        if("DEEPSEEK".equals(provider)&&!secrets.keySet().equals(Set.of("api_key")) || "VOLCENGINE".equals(provider)&&(secrets.containsKey("api_key")||!(secrets.containsKey("llm_api_key")||secrets.containsKey("speech_api_key"))))
+            throw new RenException("CREDENTIAL_INCOMPLETE");
+        return new CredentialInput(provider,required(input.upstreamId(),200),secrets);
     }
     public List<Map<String,Object>> list() {
         return jdbc.queryForList("SELECT id,provider,upstream_id AS upstreamId,user_id AS userId,version,status,masked_json AS maskedJson,created_at AS createdAt FROM ai_platform_credential ORDER BY created_at DESC LIMIT 500");

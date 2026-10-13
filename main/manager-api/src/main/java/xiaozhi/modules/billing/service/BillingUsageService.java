@@ -20,6 +20,7 @@ public class BillingUsageService implements BillingUsageRecorder {
     private final TransactionTemplate transactions;
     private final Validator validator;
     private final BillingInternalOutbox outbox;
+    private final BillingUsageRouteEnricher routes;
 
     public Map<String, Object> accept(UsageBatchRequest request) {
         List<String> accepted = new ArrayList<>();
@@ -42,10 +43,10 @@ public class BillingUsageService implements BillingUsageRecorder {
                 row.put("session_id", event.getSessionId()); row.put("turn_id", event.getTurnId());
                 row.put("provider_request_id", event.getProviderRequestId()); row.put("attempt_id", event.getAttemptId());
                 row.put("logical_call_id", event.getLogicalCallId()); row.put("sentence_id", event.getSentenceId());
-                save(row, event.getUsage()); accepted.add(event.getEventId());
+                save(row, event.getUsage(), null); accepted.add(event.getEventId());
             } catch (RenException e) {
                 String code = Set.of("INVALID_CONTEXT", "INVALID_CALL_TIME", "MODEL_OUTSIDE_CONTEXT", "MODEL_SERVICE_MISMATCH",
-                        "EVENT_ID_CONFLICT", "INVALID_EVENT", "INVALID_USAGE").contains(e.getMsg()) ? e.getMsg() : "INVALID_EVENT";
+                        "EVENT_ID_CONFLICT", "INVALID_EVENT", "INVALID_USAGE", "INVALID_USAGE_ROUTE").contains(e.getMsg()) ? e.getMsg() : "INVALID_EVENT";
                 rejected.add(Map.of("eventId", event.getEventId(), "reasonCode", code));
             }
             // Storage failures propagate as HTTP errors: the sender must retain its durable outbox.
@@ -66,6 +67,8 @@ public class BillingUsageService implements BillingUsageRecorder {
         row.put("model_id", event.getModelId()==null || event.getModelId().isBlank() ? "UNKNOWN" : event.getModelId()); row.put("provider", event.getProvider() == null ? "UNKNOWN" : BillingSupport.provider(event.getProvider(), ""));
         row.put("service_type", BillingSupport.service(event.getServiceType())); row.put("purpose", event.getPurpose());
         row.put("session_id", event.getSessionId()); row.put("turn_id", event.getTurnId()); row.put("provider_request_id", event.getProviderRequestId());
+        if (event.getAttemptId() != null) row.put("attempt_id", event.getAttemptId());
+        if (event.getLogicalCallId() != null) row.put("logical_call_id", event.getLogicalCallId());
         if (event.getAgentId() != null) {
             var agents = jdbc.queryForList("SELECT agent_name,workspace_id FROM ai_agent WHERE id=?", event.getAgentId());
             if (!agents.isEmpty()) {
@@ -73,7 +76,7 @@ public class BillingUsageService implements BillingUsageRecorder {
                 row.put("agent_name", agents.getFirst().get("agent_name"));
             }
         }
-        save(row, event.getUsage() == null ? List.of() : event.getUsage());
+        save(row, event.getUsage() == null ? List.of() : event.getUsage(), event.getReservationId());
     }
 
     private Map<String, Object> base(String id, Instant start, Instant end, String status, Boolean complete) {
@@ -90,7 +93,7 @@ public class BillingUsageService implements BillingUsageRecorder {
         for (String key : List.of("workspace_id", "agent_id", "agent_name", "device_id", "device_name", "device_board")) row.put(key, snapshot.get(key));
     }
 
-    private void save(Map<String, Object> row, List<Usage> usage) {
+    private void save(Map<String, Object> row, List<Usage> usage, String reservationId) {
         if(usage.isEmpty())row.put("usage_complete",0);
         List<Map<String, Object>> metrics = new ArrayList<>(); Set<String> unique = new HashSet<>();
         for (Usage item : usage) {
@@ -103,6 +106,8 @@ public class BillingUsageService implements BillingUsageRecorder {
         }
         metrics.sort(Comparator.comparing(support::json));
         String digest = BillingSupport.hash(support.json(Map.of("event", row, "usage", metrics)));
+        // Derived metadata must not change the original event hash: old outbox retries stay idempotent.
+        row.putAll(routes.metadata(row, reservationId));
         row.put("payload_hash", digest); row.put("received_at", BillingSupport.time(Instant.now()));
         TransactionTemplate ledger = new TransactionTemplate(Objects.requireNonNull(transactions.getTransactionManager()));
         ledger.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);

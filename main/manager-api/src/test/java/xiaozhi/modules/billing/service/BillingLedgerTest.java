@@ -56,7 +56,7 @@ class BillingLedgerTest {
         when(platformServices.resolve(anyString(),anyString())).thenReturn("test-service");
         org.springframework.test.util.ReflectionTestUtils.setField(contexts,"platformServices",platformServices);
         var outbox=mock(BillingInternalOutbox.class);when(outbox.status()).thenReturn(Map.of("status","READY"));
-        usage=new BillingUsageService(jdbc,support,contexts,tx,Validation.buildDefaultValidatorFactory().getValidator(),outbox);
+        usage=new BillingUsageService(jdbc,support,contexts,tx,Validation.buildDefaultValidatorFactory().getValidator(),outbox,new BillingUsageRouteEnricher(jdbc,support));
         permissions=mock(WorkspacePermissionService.class);when(permissions.currentWorkspaceId()).thenReturn("workspace-a");
         queries=new BillingQueryService(jdbc,permissions,mock(VolcengineBillingClient.class),outbox,support);
         bindings=new BillingBindingService(jdbc,queries);bills=new BillingBillService(jdbc,support,bindings);
@@ -89,6 +89,25 @@ class BillingLedgerTest {
         UsageEventRequest event=event(deviceContext(),"event-tx-00001");
         tx.executeWithoutResult(status->{accept(event);status.setRollbackOnly();});
         assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM ai_billing_usage_event",Integer.class));
+    }
+
+    @Test void derivedRouteMetadataDoesNotInvalidateAnAlreadyPersistedEventRetry() {
+        jdbc.execute("CREATE TABLE ai_platform_reservation(id VARCHAR(64),attempt_id VARCHAR(128),logical_call_id VARCHAR(128),context_id VARCHAR(64),model_id VARCHAR(64),service_type VARCHAR(32),workspace_id VARCHAR(64),route_json TEXT,credential_id VARCHAR(64),credential_version BIGINT)");
+        for (String column : List.of("reservation_id VARCHAR(64)", "channel_id VARCHAR(64)", "channel_version BIGINT",
+                "upstream_account_ref VARCHAR(200)", "credential_id VARCHAR(64)", "credential_version BIGINT"))
+            jdbc.execute("ALTER TABLE ai_billing_usage_event ADD " + column);
+        var event = event(deviceContext(), "event-route-retry-0001");
+        event.setAttemptId("attempt-route"); event.setLogicalCallId("logical-route");
+        assertEquals(List.of(event.getEventId()), accept(event).get("accepted"));
+        String before = jdbc.queryForObject("SELECT payload_hash FROM ai_billing_usage_event", String.class);
+        jdbc.update("INSERT INTO ai_platform_reservation VALUES('reservation-route','attempt-route','logical-route',?,'model-a','LLM','workspace-a',?,'credential-route',1)",
+                event.getContextId(), mapper.valueToTree(Map.of("agentId", "agent-a", "deviceId", "device-a", "channelId", "channel-route", "accountRef", "supplier-account")).toString());
+        assertEquals(List.of(event.getEventId()), accept(event).get("accepted"));
+        assertEquals(before, jdbc.queryForObject("SELECT payload_hash FROM ai_billing_usage_event", String.class));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM ai_billing_usage_event", Integer.class));
+        event.setEventId("event-route-new-0001");
+        assertEquals(List.of(event.getEventId()), accept(event).get("accepted"));
+        assertEquals("supplier-account", jdbc.queryForObject("SELECT upstream_account_ref FROM ai_billing_usage_event WHERE event_id=?", String.class, event.getEventId()));
     }
 
     @Test void modelOutsideCapabilityAndServiceSpoofingAreRejected() {

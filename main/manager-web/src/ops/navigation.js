@@ -1,7 +1,7 @@
 import { hasPermission } from '@/security/session';
 
 export const operationsNavigation = [
-  { path: '/services', label: '额度与密钥', icon: 'el-icon-wallet', permissions: ['allowance.read', 'pool.read', 'credentials.read', 'rates.read', 'allowance.review'] },
+  { path: '/services', label: '模型与额度', icon: 'el-icon-wallet', permissions: ['allowance.read', 'pool.read', 'credentials.read', 'rates.read', 'allowance.review'] },
   { path: '/model-config', label: '模型目录', description: '维护模型配置与服务发布', icon: 'el-icon-cpu', permissions: ['model.catalog.read'] },
   { path: '/model-billing', label: '供应商成本', description: '核对官方账单、余额与资源包', icon: 'el-icon-pie-chart', permissions: ['supplier.bill.read'] },
   { path: '/official-resources', label: '官方资源', description: '维护角色模板与官方知识库', icon: 'el-icon-collection', permissions: ['official.resource.read'] },
@@ -15,7 +15,7 @@ export const operationsNavigation = [
 ];
 const serviceTasks = [
   { tab: 'allowance', label: '用户额度', description: '查询与管理平台服务额度', icon: 'el-icon-wallet', permissions: ['allowance.read', 'pool.read'] },
-  { tab: 'credentials', label: '模型密钥', description: '查看库存、分配与轮换凭据', icon: 'el-icon-key', permissions: ['credentials.read'] },
+  { tab: 'credentials', label: '供应商通道', description: '配置共享模型通道与供应商密钥', icon: 'el-icon-connection', permissions: ['credentials.read'] },
   { tab: 'rates', label: '服务定价', description: '查看平台计价规则与版本', icon: 'el-icon-tickets', permissions: ['rates.read'] },
   { tab: 'tasks', label: '平台任务', description: '查看后台任务使用的服务账户', icon: 'el-icon-cpu', permissions: ['allowance.read', 'pool.read', 'credentials.read'] },
   { tab: 'review', label: '用量复核', description: '处理需要人工核对的调用', icon: 'el-icon-document-checked', permissions: ['allowance.review'] },
@@ -38,4 +38,20 @@ export function availableOperationsTasks(profile) {
 export function canVisitOperations(profile, path) {
   const item = operationsNavigation.find(item => item.path === path);
   return profile?.audience === 'OPS' && (path === '/home' || Boolean(item && item.permissions.some(permission => hasPermission(profile, permission))));
+}
+
+export function operationsPersona(profile) {
+  if (hasPermission(profile, 'supplier.bill.read')) return { title: '财务与审批', description: '核对供应商支出、复核用量与审批发布' };
+  if (['official.resource.read', 'ota.read', 'prompt.catalog.read'].some(permission => hasPermission(profile, permission))) return { title: '内容与设备', description: '维护官方资源、工具提示词与设备固件' };
+  if (['credentials.read', 'allowance.read', 'rates.read', 'model.catalog.read'].some(permission => hasPermission(profile, permission))) return { title: '模型与额度', description: '管理模型通道、服务定价与用户额度' };
+  return { title: '运营工作台', description: '查看当前岗位可处理的工作' };
+}
+
+export function operationsPageTitle(profile, route) {
+  if (route.path === '/login') return '员工登录 · 智控运营';
+  if (['/recover', '/enroll'].includes(route.path)) return '员工账号 · 智控运营';
+  const persona = operationsPersona(profile).title;
+  const task = route.path === '/services' ? availableOperationsTasks(profile).find(item => item.to?.query?.tab === route.query?.tab) : null;
+  const page = task?.label || availableOperations(profile).find(item => item.path === route.path)?.label;
+  return [page && page !== persona ? page : '', persona, '智控运营'].filter(Boolean).join(' · ');
 }

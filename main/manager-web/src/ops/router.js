@@ -3,7 +3,7 @@ import VueRouter from 'vue-router';
 import store from '@/store';
 import { operations } from '@/apis/platform';
 import { readSession } from '@/security/session';
-import { canVisitOperations } from './navigation';
+import { canVisitOperations, operationsPageTitle } from './navigation';
 import { OPERATIONS_BASE, migrateLegacyOperationsLocation } from './routeLocation';
 Vue.use(VueRouter);
 // Normalize old bookmarks before VueRouter reads the initial browser location.
@@ -38,4 +38,5 @@ router.beforeEach(async (to, from, next) => {
     next();
   } catch (_) { store.commit('clearAuth'); next('/login'); }
 });
+router.afterEach(to => { document.title = operationsPageTitle(store.state.userInfo, to); });
 export default router;

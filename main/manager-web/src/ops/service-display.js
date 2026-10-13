@@ -1,6 +1,6 @@
 export const serviceTabs = [
   { id: 'allowance', label: '用户额度', permissions: ['allowance.read', 'pool.read'] },
-  { id: 'credentials', label: '模型密钥', permissions: ['credentials.read'] },
+  { id: 'credentials', label: '供应商通道', permissions: ['credentials.read'] },
   { id: 'rates', label: '服务定价', permissions: ['rates.read'] },
   { id: 'review', label: '用量复核', permissions: ['allowance.review'] },
   { id: 'tasks', label: '平台任务', permissions: ['allowance.read', 'pool.read', 'credentials.read'] },

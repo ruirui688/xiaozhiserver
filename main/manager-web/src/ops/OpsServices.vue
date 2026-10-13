@@ -2,7 +2,7 @@
   <div class="ops-page">
     <HeaderBar />
     <main class="ops-main">
-      <h1>额度与密钥</h1>
+      <h1>{{ sectionTitle }}</h1>
       <el-alert v-if="navigationError" :title="navigationError" type="error" :closable="false" />
       <el-tabs v-if="tabs.length" :value="activeTab" @input="selectTab">
         <el-tab-pane v-for="item in tabs" :key="item.id" :label="item.label" :name="item.id" />
@@ -29,6 +29,7 @@ export default {
   components: { HeaderBar, OpsAllowance, OpsCredentials, OpsRates, OpsPlatformAccounts, OpsReservationReview },
   data() { return { navigationError: '' }; },
   computed: {
+    sectionTitle() { return hasPermission(this.$store.state.userInfo, 'credentials.read') || hasPermission(this.$store.state.userInfo, 'rates.read') || hasPermission(this.$store.state.userInfo, 'allowance.read') ? '模型与额度' : '额度与复核'; },
     tabs() {
       const profile = this.$store.state.userInfo;
       return serviceTabs.filter(item => item.permissions.some(permission => hasPermission(profile, permission)))

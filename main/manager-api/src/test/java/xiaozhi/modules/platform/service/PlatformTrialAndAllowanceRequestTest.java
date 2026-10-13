@@ -57,7 +57,7 @@ class PlatformTrialAndAllowanceRequestTest {
         jdbc.update("INSERT INTO sys_workspace_member VALUES('team-a',1,1),('team-a',2,1)");
         jdbc.update("INSERT INTO ai_platform_account(user_id,updated_at) VALUES(1,CURRENT_TIMESTAMP),(2,CURRENT_TIMESTAMP),(3,CURRENT_TIMESTAMP)");
         credentials = new PlatformCredentialService(jdbc, tx, json, new CredentialCipher("test-master-key-only-32-characters-long"));
-        accounts = new PlatformAccountService(jdbc, tx, credentials);
+        accounts = new PlatformAccountService(jdbc, tx, org.mockito.Mockito.mock(PlatformChannelService.class));
         trials = trialService(true, "100", "trial-v1", 0);
         inventory = new PlatformCredentialInventoryService(jdbc);
         ReflectionTestUtils.setField(inventory, "minimumInventory", 2L);
@@ -164,12 +164,12 @@ class PlatformTrialAndAllowanceRequestTest {
         // Both hosted keys are assigned, leaving nothing for the next registration.
         assertEquals(0L, deepseek.get("inventory"));
         assertEquals(2L, deepseek.get("active"));
-        assertEquals(0L, deepseek.get("pendingUsers"));
+        assertEquals(1L, deepseek.get("pendingUsers"));
         assertEquals(true, deepseek.get("lowInventory"));
         @SuppressWarnings("unchecked") var alerts = (java.util.List<Map<String, Object>>) summary.get("alerts");
         assertTrue(alerts.stream().anyMatch(a -> "CREDENTIAL_INVENTORY_LOW".equals(a.get("code")) && "DEEPSEEK".equals(a.get("provider"))));
-        // No user waits for a DeepSeek key yet; voice (VOLCENGINE) is not provisioned in this fixture.
-        assertFalse(alerts.stream().anyMatch(a -> "CREDENTIAL_PENDING_USERS".equals(a.get("code")) && "DEEPSEEK".equals(a.get("provider"))));
+        // Carol already has a platform account: missing pointers must not hide this waiting user.
+        assertTrue(alerts.stream().anyMatch(a -> "CREDENTIAL_PENDING_USERS".equals(a.get("code")) && "DEEPSEEK".equals(a.get("provider"))));
         assertEquals(0, deepseekPending().size());
 
         // The hosted-key pool is now empty, so the next registration must enter the waiting queue.
@@ -184,7 +184,7 @@ class PlatformTrialAndAllowanceRequestTest {
         var deepseekRows = queue.stream().filter(row -> "DEEPSEEK".equals(row.get("provider"))).toList();
         assertEquals(1, deepseekRows.size());
         // The waiting queue must expose identity and provider only, never usage or content.
-        assertEquals(3L, deepseekRows.getFirst().get("userId"));
+        assertEquals("3", deepseekRows.getFirst().get("userId"));
         assertEquals("carol", deepseekRows.getFirst().get("username"));
         assertEquals(4, deepseekRows.getFirst().size());
 

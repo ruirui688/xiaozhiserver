@@ -146,8 +146,8 @@ public class SysUserServiceImpl extends BaseServiceImpl<SysUserDao, SysUserEntit
     }
 
     /**
-     * Every registration path provisions the platform allowance account, its hosted
-     * credential slots and the one-time registration trial. The trial is best-effort:
+     * Every registration path provisions the allowance account and default workspace,
+     * independently of supplier credentials, followed by the one-time registration trial. The trial is best-effort:
      * a deployment without issuance-pool credit must still complete registration.
      */
     private void provisionPlatformAccount(Long userId) {
@@ -155,6 +155,7 @@ public class SysUserServiceImpl extends BaseServiceImpl<SysUserDao, SysUserEntit
             return;
         }
         SpringContextUtils.getBean(PlatformAccountService.class).ensureUser(userId);
+        workspaceService.ensureDefaultWorkspace(userId);
         SpringContextUtils.getBean(PlatformTrialGrantService.class).issue(userId);
     }
 

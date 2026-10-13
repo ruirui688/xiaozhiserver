@@ -8,7 +8,7 @@
         <h3>使用前需要什么</h3>
         <p>{{ presentation.preparation }}</p>
       </section>
-      <section v-if="configurable && !retired" class="service-config">
+      <section v-if="allowSetup && configurable && !retired" class="service-config">
         <div>
           <h3>我的服务配置</h3>
           <p>{{ configText }}</p>
@@ -61,7 +61,7 @@
     </div>
     <div slot="footer" class="dialog-footer">
       <el-button @click="$emit('update:visible', false)">关闭</el-button>
-      <el-button v-if="plugin && presentation.setupTarget" type="primary" @click="$emit('setup', plugin)">
+      <el-button v-if="allowSetup && plugin && presentation.setupTarget" type="primary" @click="$emit('setup', plugin)">
         {{ presentation.setupLabel }}
       </el-button>
     </div>
@@ -80,6 +80,7 @@ export default {
     plugin: { type: Object, default: null },
     canManage: { type: Boolean, default: false },
     configurable: { type: Boolean, default: false },
+    allowSetup: { type: Boolean, default: true },
     configState: { type: String, default: 'missing' },
     testing: { type: Boolean, default: false }
   },

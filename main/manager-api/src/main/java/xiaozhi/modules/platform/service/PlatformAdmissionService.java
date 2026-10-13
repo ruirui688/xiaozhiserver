@@ -24,6 +24,7 @@ public class PlatformAdmissionService {
     private final BillingContextService contexts;
     private final PlatformAccountService accounts;
     private final PlatformCredentialService credentials;
+    private final PlatformChannelService channels;
     private final PlatformResponsibilityService responsibility;
     private final PlatformRateService rates;
     private final PlatformRuntimeService runtimes;
@@ -48,6 +49,7 @@ public class PlatformAdmissionService {
             Map<String,Object> route=route(context,workspace);
             long payer=number(route.get("payerUserId"));
             Map<String,Object> account=accounts.lock(payer);
+            channels.lockModel(request.modelId());
             List<Map<String,Object>> previous=jdbc.queryForList("SELECT * FROM ai_platform_reservation WHERE attempt_id=? FOR UPDATE",attempt);
             if(!previous.isEmpty()) {
                 Map<String,Object> old=previous.getFirst();if(!requestHash.equals(old.get("request_hash")))throw new RenException("IDEMPOTENCY_CONFLICT");
@@ -56,7 +58,8 @@ public class PlatformAdmissionService {
                 return grant(old);
             }
             if(number(account.get("frozen"))!=0)throw new RenException("PAYER_FROZEN");
-            Map<String,Object> credential=credentials.active(payer,runtime.provider());
+            Map<String,Object> channel=channels.select(request.modelId(),runtime.provider(),request.serviceType());
+            route.putAll(channel);
             Map<String,Object> rate=rates.latest(request.modelId());
             Map<String,Object> published=json.object(rate.get("max_usage_json").toString()), metricRates=json.object(rate.get("metric_rates_json").toString());
             PlatformRateService.bounded(requested,published);BigDecimal hold=PlatformRateService.cost(metricRates,requested);
@@ -65,8 +68,8 @@ public class PlatformAdmissionService {
             workspaceReserve(workspace,period,hold);
             String id=id(),permit=token();LocalDateTime created=now();
             jdbc.update("UPDATE ai_platform_account SET reserved=reserved+?,updated_at=? WHERE user_id=?",hold,created,payer);
-            jdbc.update("INSERT INTO ai_platform_reservation(id,attempt_id,logical_call_id,request_hash,context_id,model_id,service_type,payer_user_id,workspace_id,usage_period,route_json,runtime_json,credential_id,credential_version,responsibility_version,rate_version,metric_rates_json,published_max_json,max_usage_json,reserved_amount,state,permit_hash,permit_ciphertext,expires_at,hard_expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                id,attempt,request.logicalCallId(),requestHash,request.contextId(),request.modelId(),request.serviceType(),payer,workspace,period,json.json(route),json.json(runtime.config()),credential.get("id"),credential.get("version"),route.get("responsibilityVersion"),rate.get("version"),json.json(metricRates),json.json(published),json.json(requested),hold,"RESERVED",hash(permit),cipher.encrypt("platform-permit:"+id,permit),created.plusSeconds(60),created.plusMinutes(5),created);
+            jdbc.update("INSERT INTO ai_platform_reservation(id,attempt_id,logical_call_id,request_hash,context_id,model_id,service_type,payer_user_id,workspace_id,usage_period,route_json,runtime_json,channel_id,credential_id,credential_version,responsibility_version,rate_version,metric_rates_json,published_max_json,max_usage_json,reserved_amount,state,permit_hash,permit_ciphertext,expires_at,hard_expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                id,attempt,request.logicalCallId(),requestHash,request.contextId(),request.modelId(),request.serviceType(),payer,workspace,period,json.json(route),json.json(runtime.config()),channel.get("channelId"),channel.get("credentialId"),channel.get("credentialVersion"),route.get("responsibilityVersion"),rate.get("version"),json.json(metricRates),json.json(published),json.json(requested),hold,"RESERVED",hash(permit),cipher.encrypt("platform-permit:"+id,permit),created.plusSeconds(60),created.plusMinutes(5),created);
             accounts.entry("reserve:"+id,requestHash,payer,"RESERVE",hold,PlatformAccountService.available(account).subtract(hold),workspace,id,null,purpose);
             return grant(jdbc.queryForMap("SELECT * FROM ai_platform_reservation WHERE id=?",id));
         });
@@ -77,7 +80,7 @@ public class PlatformAdmissionService {
             List<Map<String,Object>> rows=jdbc.queryForList("SELECT * FROM ai_platform_service_account WHERE id=? AND status='ACTIVE'",service);
             if(rows.isEmpty())throw new RenException("PLATFORM_SERVICE_BUDGET_REQUIRED");
             long payer=number(rows.getFirst().get("account_id"));
-            return map("actorType","PLATFORM_SERVICE","actorUserId",null,"platformServiceId",service,"credentialOwnerUserId",payer,"payerUserId",payer,"responsibilityVersion",1L);
+            return map("actorType","PLATFORM_SERVICE","actorUserId",null,"platformServiceId",service,"payerUserId",payer,"responsibilityVersion",1L);
         }
         Map<String,Object> owner=responsibility.lock(workspace);
         if(jdbc.queryForObject("SELECT COUNT(*) FROM sys_workspace WHERE id=? AND status=1",Long.class,workspace)==0)throw new RenException("WORKSPACE_DISABLED");
@@ -90,14 +93,14 @@ public class PlatformAdmissionService {
         if(jdbc.queryForObject("SELECT COUNT(*) FROM sys_workspace_member WHERE workspace_id=? AND user_id=? AND status=1",Long.class,workspace,payer)==0)throw new RenException("PAYER_MEMBERSHIP_CHANGED");
         if(actor!=null&&jdbc.queryForObject("SELECT COUNT(*) FROM sys_user WHERE id=? AND status=1",Long.class,actor)==0)throw new RenException("ACTOR_DISABLED");
         return map("workspaceId",workspace,"actorType",device!=null?"DEVICE":actor!=null?"USER":"AGENT_TASK","actorUserId",actor,
-            "agentId",agent,"deviceId",device,"credentialOwnerUserId",payer,"payerUserId",payer,"responsibilityVersion",owner.get("version"));
+            "agentId",agent,"deviceId",device,"payerUserId",payer,"responsibilityVersion",owner.get("version"));
     }
     public Map<String,Object> start(Permit request) {
         return tx.execute(status->{
             Map<String,Object> row=locked(request);if(!"RESERVED".equals(row.get("state")))throw new RenException("ATTEMPT_ALREADY_DISPATCHED");
             if(expired(row,"expires_at")) { finishRelease(row,"EXPIRED");return map("started",false,"reason","PERMIT_EXPIRED"); }
             if(!currentRoute(row)||number(accounts.lock(number(row.get("payer_user_id"))).get("frozen"))!=0) {finishRelease(row,"CANCELLED");return map("started",false,"reason","ROUTE_CHANGED");}
-            try { credentials.runtimeSecrets(row.get("credential_id").toString(),number(row.get("credential_version")),row.get("service_type").toString()); }
+            try { runtimeSecrets(row,true); }
             catch(RenException changed) {finishRelease(row,"CANCELLED");return map("started",false,"reason","CREDENTIAL_CHANGED");}
             jdbc.update("UPDATE ai_platform_reservation SET state='STARTED',started_at=? WHERE id=?",now(),row.get("id"));return map("started",true);
         });
@@ -110,7 +113,7 @@ public class PlatformAdmissionService {
     public Map<String,Object> extend(Extend request) {
         return tx.execute(status->{Map<String,Object> row=locked(new Permit(request.reservationId(),request.permitToken()));
             if(!"STARTED".equals(row.get("state"))||expired(row,"hard_expires_at")||!currentRoute(row))throw new RenException("PERMIT_NOT_EXTENDABLE");
-            credentials.runtimeSecrets(row.get("credential_id").toString(),number(row.get("credential_version")),row.get("service_type").toString());
+            runtimeSecrets(row,false);
             Map<String,Object> max=PlatformRateService.normalize(request.maxUsage()),old=json.object(row.get("max_usage_json").toString());
             PlatformRateService.bounded(max,json.object(row.get("published_max_json").toString()));
             old.forEach((key,value)->{if(nonnegative(max.get(key)).compareTo(nonnegative(value))<0)throw new RenException("LIMIT_CANNOT_SHRINK");});
@@ -157,9 +160,10 @@ public class PlatformAdmissionService {
     private Map<String,Object> locked(Permit request) {
         Map<String,Object> preview=jdbc.queryForMap("SELECT * FROM ai_platform_reservation WHERE id=?",request.reservationId());
         if(!MessageDigest.isEqual(hash(request.permitToken()).getBytes(StandardCharsets.US_ASCII),preview.get("permit_hash").toString().getBytes(StandardCharsets.US_ASCII)))throw new RenException("INVALID_PERMIT");
-        // Uniform order: responsibility -> payer -> reservation -> team counters.
+        // Uniform order: responsibility -> payer -> channel -> reservation -> team counters.
         if(preview.get("workspace_id")!=null)responsibility.lock(preview.get("workspace_id").toString());
         accounts.lock(number(preview.get("payer_user_id")));
+        if(preview.get("channel_id")!=null)channels.lock(preview.get("channel_id").toString());
         return jdbc.queryForMap("SELECT * FROM ai_platform_reservation WHERE id=? FOR UPDATE",request.reservationId());
     }
     private boolean currentRoute(Map<String,Object> row) {
@@ -194,7 +198,13 @@ public class PlatformAdmissionService {
         String id=row.get("id").toString();return map("reservationId",id,"permitToken",cipher.decrypt("platform-permit:"+id,row.get("permit_ciphertext").toString()),
             "expiresAt",iso(row.get("expires_at")),"hardExpiresAt",iso(row.get("hard_expires_at")),"route",json.object(row.get("route_json").toString()),"rateVersion",row.get("rate_version"),
             "reservedAmount",decimal(row.get("reserved_amount")),"limits",json.object(row.get("max_usage_json").toString()),"runtimeConfig",json.object(row.get("runtime_json").toString()),
-            "credentials",credentials.runtimeSecrets(row.get("credential_id").toString(),number(row.get("credential_version")),row.get("service_type").toString()));
+            "credentials",runtimeSecrets(row,true));
+    }
+    private Map<String,Object> runtimeSecrets(Map<String,Object> row,boolean requireEnabled) {
+        Map<String,Object> route=json.object(row.get("route_json").toString());
+        if(route.get("channelId")!=null)return channels.runtimeSecrets(route.get("channelId").toString(),row.get("credential_id").toString(),number(row.get("credential_version")),requireEnabled);
+        // Existing reservations keep their original credential/version until settlement.
+        return credentials.runtimeSecrets(row.get("credential_id").toString(),number(row.get("credential_version")),row.get("service_type").toString());
     }
     private static boolean expired(Map<String,Object> row,String field) {return !BillingSupport.databaseTime(row.get(field)).isAfter(now());}
     private static String iso(Object value) {return BillingSupport.databaseTime(value).toInstant(ZoneOffset.UTC).toString();}

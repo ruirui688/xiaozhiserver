@@ -25,7 +25,7 @@ export function allowanceDisplayAmount(value) {
   return `${sign}${digits.slice(0, -2).join('')}.${digits.slice(-2).join('')}`;
 }
 export function allowancePayerLabel(summary) {
-  return summary?.canViewBalance === true ? '当前空间使用本人的凭据和服务额度' : '当前空间使用负责人的凭据和服务额度';
+  return summary?.canViewBalance === true ? '当前空间使用本人的服务额度' : '当前空间使用负责人的服务额度';
 }
 export function visibleAllowance(summary) {
   return summary?.canViewBalance === true && summary.allowance ? summary.allowance : null;
@@ -37,11 +37,35 @@ export function platformErrorMessage(value) {
     TEAM_ALLOWANCE_LIMIT: '当前工作空间已达使用上限，请联系负责人',
     PAYER_FROZEN: '负责人服务账户已暂停，请联系平台处理',
     WORKSPACE_DISABLED: '当前工作空间已停用',
-    PENDING_CREDENTIAL: '模型服务待开通，请等待平台补齐凭据',
-    CREDENTIAL_SERVICE_NOT_READY: '此模型能力尚未开通，缺少对应服务凭据',
-    CREDENTIAL_CHANGED: '模型凭据已更新，请重试',
+    PENDING_CREDENTIAL: '模型服务暂不可用，请联系平台运维',
+    CREDENTIAL_SERVICE_NOT_READY: '此模型服务尚未开通，请联系平台运维',
+    CREDENTIAL_CHANGED: '模型服务配置已更新，请重试',
+    CHANNEL_NOT_READY: '此模型尚未配置可用通道，请联系平台运维',
+    CHANNEL_UNAVAILABLE: '模型服务暂不可用，请稍后重试',
+    CHANNEL_CAPACITY_EXCEEDED: '模型服务繁忙，请稍后重试',
+    CHANNEL_VERSION_CONFLICT: '通道已被其他人员更新，请刷新后重新配置',
+    INVALID_CHANNEL_INPUT: '请检查通道名称、模型和供应商账号',
+    INVALID_CHANNEL_CONCURRENCY: '并发上限须为 1 到 200 的整数',
+    INVALID_CHANNEL_CREDENTIAL: '请填写有效的供应商 API Key',
+    CHANNEL_NOT_FOUND: '通道已不存在，请刷新列表',
+    CHANNEL_VERSION_CHANGED: '通道已被其他人员更新，请关闭后重新打开配置',
+    CHANNEL_MODEL_IMMUTABLE: '已有通道不能更换模型，请为目标模型新建通道',
+    CHANNEL_CREDENTIAL_REQUIRED: '请填写供应商 API Key',
+    CHANNEL_MODEL_EXISTS: '此模型已有通道，请编辑已有通道',
+    CHANNEL_ACCOUNT_REQUIRES_CREDENTIAL: '更换供应商账号时，请同时填写新账号的 API Key',
+    INVALID_CHANNEL_SERVICE: '此模型能力暂不支持平台通道',
+    MODEL_CHANNEL_UNAVAILABLE: '此模型暂无可用通道，请联系平台运维',
+    MODEL_CHANNEL_MISMATCH: '模型与通道配置不匹配，请联系平台运维',
+    CHANNEL_CONCURRENCY_LIMIT: '模型服务繁忙，请稍后重试',
+    CHANNEL_CREDENTIAL_CHANGED: '通道配置已更新，请重新发起调用',
+    MODEL_NOT_FOUND: '模型已不存在，请重新选择',
+    MODEL_NOT_PUBLISHED: '模型尚未发布，请先完成模型测试与发布',
+    ADAPTER_ADMISSION_UNSUPPORTED: '此模型适配器暂不支持平台额度服务',
+    UNAPPROVED_MODEL_ENDPOINT: '模型地址不在受支持的官方服务范围内',
+    RATE_UNPUBLISHED: '此模型尚未发布平台服务价格',
+    RATE_METRICS_MISMATCH: '价格计量单位与模型能力不匹配，请重新选择模型',
     MODEL_NOT_ADMITTED: '此模型尚未开放，请选择已批准的模型',
-    PLATFORM_SERVICE_BUDGET_REQUIRED: '请先配置该模型与任务的独立服务账户、凭据和预算',
+    PLATFORM_SERVICE_BUDGET_REQUIRED: '请先配置该模型与任务的服务账户和预算',
     MODEL_OUTSIDE_PLATFORM_SERVICE: '此模型不在该任务账户的授权范围内',
     UNSUPPORTED_MANAGED_PROVIDER: '该模型适配器尚未接入平台额度服务',
     WORKSPACE_OWNER_REQUIRED: '请切换到本人负责的工作空间后操作',

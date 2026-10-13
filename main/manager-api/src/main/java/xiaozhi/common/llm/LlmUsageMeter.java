@@ -55,12 +55,12 @@ public class LlmUsageMeter {
         } finally {
             List<Usage> platformUsage = parseUsage(parseObject(responseBody), serviceType);
             platform.finish(call, successful, platformUsage, complete(platformUsage, serviceType), requestId);
-            record(identity, eventId, modelId, serviceType, endpoint, started,
+            record(call, identity, eventId, modelId, serviceType, endpoint, started,
                     successful, responseBody, requestId);
         }
     }
 
-    private void record(LlmUsageContext.Identity identity, String eventId, String modelId,
+    private void record(PlatformJavaExecutor.Call call, LlmUsageContext.Identity identity, String eventId, String modelId,
             String serviceType, String endpoint, Instant started, boolean successful,
             String responseBody, String requestId) {
         try {
@@ -72,6 +72,8 @@ public class LlmUsageMeter {
             String resolvedModel = modelId != null ? modelId : identity == null ? null : identity.modelId();
             recorder.recordInternal(InternalUsage.builder()
                     .eventId(eventId)
+                    .attemptId(call.attemptId()).logicalCallId(call.attemptId())
+                    .reservationId(call.permit() == null ? null : call.permit().reservationId())
                     .workspaceId(identity == null ? null : identity.workspaceId())
                     .agentId(identity == null ? null : identity.agentId())
                     .deviceId(identity == null ? null : identity.deviceId())

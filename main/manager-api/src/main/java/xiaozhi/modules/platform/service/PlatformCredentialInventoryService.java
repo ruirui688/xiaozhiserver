@@ -8,7 +8,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-import xiaozhi.common.exception.RenException;
 
 import static xiaozhi.modules.platform.service.PlatformSupport.*;
 
@@ -34,10 +33,11 @@ public class PlatformCredentialInventoryService {
         for (String provider : PROVIDERS) {
             long inventory = count("SELECT COUNT(*) FROM ai_platform_credential WHERE provider=? AND status='INVENTORY' AND user_id IS NULL", provider);
             long active = count("SELECT COUNT(*) FROM ai_platform_credential WHERE provider=? AND status='ACTIVE' AND user_id IS NOT NULL", provider);
-            long pending = count("SELECT COUNT(*) FROM ai_platform_user_credential WHERE provider=? AND credential_id IS NULL", provider);
+            long pending = pendingCount(provider);
             long rotated = count("SELECT COUNT(*) FROM ai_platform_credential WHERE provider=? AND status='ROTATED'", provider);
+            long revoked = count("SELECT COUNT(*) FROM ai_platform_credential WHERE provider=? AND status='REVOKED'", provider);
             providers.add(map("provider", provider, "inventory", inventory, "active", active,
-                    "pendingUsers", pending, "rotated", rotated,
+                    "pendingUsers", pending, "rotated", rotated, "revoked", revoked,
                     "lowInventory", minimumInventory > 0 && inventory < minimumInventory));
         }
         Map<String, Object> result = new LinkedHashMap<>();
@@ -49,17 +49,7 @@ public class PlatformCredentialInventoryService {
 
     /** Waiting users ordered by who has waited longest, so support can act in queue order. */
     public Map<String, Object> pending(int page, int limit) {
-        if (page < 1 || limit < 1 || limit > 200 || page > 100000) throw new RenException("INVALID_PAGINATION");
-        String from = " FROM ai_platform_user_credential p JOIN sys_user u ON u.id=p.user_id WHERE p.credential_id IS NULL";
-        List<Map<String, Object>> list = jdbc.queryForList(
-                "SELECT p.user_id AS \"userId\",p.provider AS \"provider\",u.username AS \"username\",u.create_date AS \"registeredAt\""
-                        + from + " ORDER BY u.create_date,p.user_id LIMIT ? OFFSET ?",
-                limit, (long) (page - 1) * limit);
-        Long total = jdbc.queryForObject("SELECT COUNT(*)" + from, Long.class);
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("list", publicValue(list));
-        result.put("total", total == null ? 0L : total);
-        return result;
+        return new PlatformCredentialQueryService(jdbc).pending(page, limit, null, null);
     }
 
     /** Bounded operational alerts; safe to surface on the ops home page. */
@@ -76,10 +66,10 @@ public class PlatformCredentialInventoryService {
                 }
             }
         }
-        for (Map<String, Object> row : jdbc.queryForList(
-                "SELECT provider,COUNT(*) AS waiting FROM ai_platform_user_credential WHERE credential_id IS NULL GROUP BY provider")) {
-            alerts.add(map("code", "CREDENTIAL_PENDING_USERS", "provider", row.get("provider"),
-                    "waiting", number(row.get("waiting"))));
+        for (String provider : PROVIDERS) {
+            long pending = pendingCount(provider);
+            if (pending > 0) alerts.add(map("code", "CREDENTIAL_PENDING_USERS", "provider", provider,
+                    "waiting", pending));
         }
         return alerts;
     }
@@ -87,5 +77,10 @@ public class PlatformCredentialInventoryService {
     private long count(String sql, Object... parameters) {
         Long total = jdbc.queryForObject(sql, Long.class, parameters);
         return total == null ? 0L : total;
+    }
+
+    private long pendingCount(String provider) {
+        return count("SELECT COUNT(*)" + PlatformCredentialQueryService.PENDING_FROM + " WHERE v.provider=?"
+                + PlatformCredentialQueryService.PENDING_WHERE, provider);
     }
 }

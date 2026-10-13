@@ -240,6 +240,7 @@
 
     <PluginDetailDialog
       :visible.sync="detailDialogVisible"
+      :allow-setup="!isOps"
       :plugin="currentPlugin"
       :can-manage="Boolean(currentPlugin && canEditPlugin(currentPlugin))"
       :configurable="Boolean(currentPlugin && isSharedConfigPlugin(currentPlugin))"

@@ -1,5 +1,5 @@
 <template>
-  <aside class="model-assistant" :class="{ collapsed: !visible }">
+  <aside v-if="canRead" class="model-assistant" :class="{ collapsed: !visible }">
     <button class="assistant-toggle" @click="$emit('toggle')">
       <i :class="visible ? 'el-icon-arrow-right' : 'el-icon-magic-stick'"></i>
       <span v-if="!visible">{{ $t("modelConfigAssistant.entry") }}</span>
@@ -12,6 +12,7 @@
           <p>{{ assistantModelLabel }}</p>
         </div>
         <el-button
+          v-if="canWrite"
           circle
           size="mini"
           icon="el-icon-setting"
@@ -20,7 +21,8 @@
         />
       </div>
 
-      <section v-if="settingsOpen" class="assistant-section">
+      <div v-if="settingsError" class="assistant-section" role="alert"><el-alert :title="settingsError" type="error" :closable="false" /><el-button type="text" :loading="settingsLoading" @click="loadSettings">重新读取助手设置</el-button></div>
+      <section v-if="settingsOpen && canWrite" class="assistant-section">
         <div class="assistant-setting-row">
           <el-select
             v-model="selectedLlmModelId"
@@ -128,6 +130,7 @@
             <strong>{{ $t("modelConfigAssistant.integrationArtifacts") }}</strong>
             <div class="assistant-actions artifact-actions">
               <el-button
+                v-if="canWrite"
                 size="mini"
                 type="primary"
                 icon="el-icon-folder-add"
@@ -137,6 +140,7 @@
                 {{ $t("modelConfigAssistant.applyArtifacts") }}
               </el-button>
               <el-button
+                v-if="canWrite"
                 size="mini"
                 icon="el-icon-refresh"
                 :loading="applyingArtifacts"
@@ -219,7 +223,7 @@
             />
           </div>
         </el-collapse-transition>
-        <div class="composer-box">
+        <div v-if="canTest" class="composer-box">
           <el-input
             v-model="prompt"
             type="textarea"
@@ -242,6 +246,7 @@
               size="mini"
               icon="el-icon-position"
               :loading="loading"
+              :disabled="settingsLoading || !!settingsError"
               @click="send"
             >
               {{ $t("modelConfigAssistant.send") }}
@@ -255,6 +260,8 @@
 
 <script>
 import Api from "@/apis/api";
+import { platformRequest } from '@/apis/platform';
+import { hasPermission } from '@/security/session';
 
 export default {
   name: "ModelConfigAssistant",
@@ -269,6 +276,8 @@ export default {
     return {
       loading: false,
       settingsSaving: false,
+      settingsLoading: false,
+      settingsError: '',
       applyingArtifacts: false,
       llmModels: [],
       selectedLlmModelId: "",
@@ -300,6 +309,9 @@ export default {
     },
   },
   computed: {
+    canRead() { return hasPermission(this.$store?.state?.userInfo, 'model.catalog.read'); },
+    canWrite() { return hasPermission(this.$store?.state?.userInfo, 'model.catalog.write'); },
+    canTest() { return hasPermission(this.$store?.state?.userInfo, 'model.catalog.test'); },
     assistantModelLabel() {
       const selected = this.llmModels.find((item) => item.id === this.selectedLlmModelId);
       return (selected && this.formatLlmLabel(selected)) || this.savedLlmModelName || this.$t("modelConfigAssistant.noAssistantModel");
@@ -310,22 +322,27 @@ export default {
   },
   methods: {
     loadSettings() {
+      if (!this.canRead || this.settingsLoading) return;
+      this.settingsLoading = true;
+      this.settingsError = '';
       Api.model.getAssistantSettings(({ data }) => {
+        this.settingsLoading = false;
         if (data.code === 0 && data.data) {
           this.selectedLlmModelId = data.data.llmModelId || "";
           this.savedLlmModelName = data.data.llmModelName || "";
           this.settingsOpen = !this.selectedLlmModelId;
-        }
+        } else this.settingsError = data.msg || '助手设置读取失败，请重试';
       });
     },
-    loadLlmModels() {
-      Api.model.getLlmModelCodeList("", ({ data }) => {
-        if (data.code === 0) {
-          this.llmModels = data.data || [];
-        }
-      });
+    async loadLlmModels() {
+      if (!this.canRead) return;
+      try {
+        const models = await platformRequest('GET', '/models/list', { modelType: 'LLM', page: 1, limit: 200 });
+        this.llmModels = models.list || [];
+      } catch (error) { this.$message.error(error.message); }
     },
     saveSettings() {
+      if (!this.canWrite || this.settingsSaving) return;
       this.settingsSaving = true;
       Api.model.updateAssistantSettings({ llmModelId: this.selectedLlmModelId }, ({ data }) => {
         this.settingsSaving = false;
@@ -339,6 +356,7 @@ export default {
       });
     },
     send() {
+      if (!this.canTest || this.loading || this.settingsLoading || this.settingsError) return;
       if (!this.selectedLlmModelId) {
         this.$message.warning(this.$t("modelConfigAssistant.selectLlmFirst"));
         return;
@@ -413,6 +431,7 @@ export default {
       }
     },
     applyArtifacts(overwrite) {
+      if (!this.canWrite || this.applyingArtifacts) return;
       const artifacts = (this.lastResponse && this.lastResponse.integrationArtifacts) || [];
       if (!artifacts.length) {
         this.$message.warning(this.$t("modelConfigAssistant.noArtifacts"));

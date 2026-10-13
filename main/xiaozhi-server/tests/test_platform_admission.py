@@ -115,6 +115,75 @@ def test_rotated_credential_resolved_even_on_same_provider_instance(box, monkeyp
     assert [key for key, _ in calls] == ["private-test-credential-original", "private-test-credential-rotated"]
 
 
+def test_shared_channel_keeps_interleaved_calls_and_receipts_independent(box, monkeypatch):
+    calls, permits = [], {}
+    shared_client = client(calls)
+
+    def manager(action, payload):
+        if action == "admit":
+            value = grant(payload["contextId"], payload["maxUsage"])
+            value["credentials"] = {"api_key": "private-shared-channel-key"}
+            value["route"] = {"channelId": "channel-one", "channelVersion": 1,
+                              "payerUserId": payload["contextId"], "credentialVersion": 1}
+            permits[payload["attemptId"]] = value["reservationId"]
+            return value
+        return {"started": True}
+
+    monkeypatch.setattr(admission, "_request", manager)
+    streams = []
+    for owner in ("space-owner-a", "space-owner-b"):
+        upstream = provider(owner)
+        upstream.client = shared_client
+        streams.append(metered_stream(upstream, {"messages": [], "max_tokens": 16}))
+    # Both calls are live at once and use the same upstream credential.
+    for stream in streams:
+        next(stream)
+    for stream in streams:
+        list(stream)
+
+    assert [key for key, _ in calls] == ["private-shared-channel-key"] * 2
+    receipts = box.pending()
+    assert len(receipts) == 2
+    assert {event["contextId"] for event in receipts} == {"space-owner-a", "space-owner-b"}
+    assert len({event["attemptId"] for event in receipts}) == 2
+    assert all(event["platformSettlement"]["reservationId"] == permits[event["attemptId"]]
+               for event in receipts)
+    assert all(admission.settlement(event)["usage"] == {"input_tokens": "8", "output_tokens": "3"}
+               for event in receipts)
+    assert "private-shared-channel-key" not in json.dumps(receipts)
+    assert all(event["usageComplete"] and event["status"] == "SUCCESS" for event in receipts)
+
+
+@pytest.mark.parametrize("code", ["MODEL_CHANNEL_UNAVAILABLE", "MODEL_CHANNEL_MISMATCH",
+                                 "CHANNEL_CONCURRENCY_LIMIT", "CHANNEL_CREDENTIAL_CHANGED"])
+def test_shared_channel_denial_preserves_reason_without_server_details(monkeypatch, code):
+    from config.manage_api_client import ManageApiClient
+
+    monkeypatch.setattr(ManageApiClient, "_instance", SimpleNamespace(
+        config={"url": "https://manager.invalid"}, _secret="private-service-secret"))
+    response = SimpleNamespace(raise_for_status=lambda: None,
+                               json=lambda: {"code": 500, "msg": code + ": private-server-detail"})
+
+    class Transport:
+        def __init__(self, **kwargs):
+            assert kwargs["follow_redirects"] is False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def post(self, *args, **kwargs):
+            return response
+
+    monkeypatch.setattr(admission.httpx, "Client", Transport)
+    with pytest.raises(admission.PlatformAdmissionError) as error:
+        admission._request("admit", {})
+    assert error.value.code == code
+    assert str(error.value) == code
+
+
 def test_expired_start_never_contacts_supplier(box, monkeypatch):
     calls = []
     upstream = provider()
