@@ -70,6 +70,8 @@ class PlatformAdmissionServiceTest {
         jdbc.update("UPDATE ai_platform_channel SET status='DISABLED'");
         assertEquals("PLATFORM_SERVICE_NOT_READY",responsibilities.summary("personal",1).get("serviceStatus"));
         jdbc.update("UPDATE ai_platform_account SET reserved=granted WHERE user_id=1");
+        assertEquals("ALLOWANCE_BUSY",responsibilities.summary("personal",1).get("serviceStatus"));
+        jdbc.update("UPDATE ai_platform_account SET reserved=0,spent=granted WHERE user_id=1");
         assertEquals("ALLOWANCE_EXHAUSTED",responsibilities.summary("personal",1).get("serviceStatus"));
         jdbc.update("UPDATE ai_platform_account SET frozen=1 WHERE user_id=1");
         var member=responsibilities.summary("team-a",2);
@@ -90,6 +92,18 @@ class PlatformAdmissionServiceTest {
         var summary=responsibilities.summary("personal",1);assertEquals("READY",summary.get("serviceStatus"));
         assertEquals(0,new BigDecimal("0.75").compareTo(new BigDecimal(summary.get("totalSpent").toString())));
         assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE LOWER(TABLE_NAME)='ai_billing_bill'",Integer.class));
+    }
+
+    @Test void remainingBalanceStaysStableDuringReservationAndChangesOnlyAfterSettlement() {
+        Permit call=permit(admission.admit(request("personal","remaining-balance",2000)));
+        assertEquals("10.000000000",accounts.account(1).get("remaining"));
+        assertEquals("8.000000000",accounts.account(1).get("available"));
+        Map<?,?> allowance=(Map<?,?>)responsibilities.summary("personal",1).get("allowance");
+        assertEquals("10.000000000",allowance.get("remaining"));
+        admission.start(call);admission.settle(usage(call,750));
+        assertEquals("9.250000000",accounts.account(1).get("remaining"));
+        assertEquals("9.250000000",accounts.account(1).get("available"));
+        assertNull(responsibilities.summary("team-a",2).get("allowance"));
     }
 
     @Test void concurrentTeamsCannotOverspendSharedPayer() throws Exception {

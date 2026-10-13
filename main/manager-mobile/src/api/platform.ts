@@ -1,6 +1,6 @@
 import { http } from '@/http/request/alova'
 
-export interface AllowanceBalance { status: string, available: string, reserved: string, spent: string, currency: string }
+export interface AllowanceBalance { status: string, remaining: string, available: string, reserved: string, spent: string, currency: string }
 export interface AllowanceSummary {
   workspaceId: string
   ownerUserId: number | string

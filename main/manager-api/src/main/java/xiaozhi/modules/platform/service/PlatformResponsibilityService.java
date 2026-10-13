@@ -29,10 +29,12 @@ public class PlatformResponsibilityService {
         long payer=number(row.get("responsible_user_id"));
         Map<String,Object> balance=jdbc.queryForMap("SELECT granted,spent,reserved,frozen,(granted-spent-reserved) AS available FROM ai_platform_account WHERE user_id=?",payer);
         Map<String,Object> totals=usage(workspaceId,"TOTAL"),daily=usage(workspaceId,java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai")).toString());
+        balance.put("remaining",PlatformAccountService.remaining(balance));
         balance.put("status",number(balance.get("frozen"))!=0?"FROZEN":"ACTIVE");balance.put("currency","CNY");
         List<Map<String,Object>> services=channels.availability();
         String serviceStatus=number(balance.get("frozen"))!=0?"PAYER_FROZEN"
-            :PlatformAccountService.available(balance).signum()<=0?"ALLOWANCE_EXHAUSTED"
+            :PlatformAccountService.remaining(balance).signum()<=0?"ALLOWANCE_EXHAUSTED"
+            :PlatformAccountService.available(balance).signum()<=0?"ALLOWANCE_BUSY"
             :limitReached(row.get("total_limit"),totals)||limitReached(row.get("daily_limit"),daily)?"WORKSPACE_ALLOWANCE_LIMIT"
             :services.stream().anyMatch(service->"READY".equals(service.get("status")))?"READY":"PLATFORM_SERVICE_NOT_READY";
         return publicMap(map("workspaceId",workspaceId,"ownerUserId",payer,"responsibleUserId",payer,"payerUserId",payer,"responsibilityVersion",row.get("version"),

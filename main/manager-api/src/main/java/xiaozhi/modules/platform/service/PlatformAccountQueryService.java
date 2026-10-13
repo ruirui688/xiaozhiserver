@@ -39,13 +39,13 @@ public class PlatformAccountQueryService {
         parameters.add(limit);
         parameters.add((long) (page - 1) * limit);
         var rows = jdbc.query("SELECT a.user_id,u.username,a.granted,a.spent,a.reserved,"
-                        + "(a.granted-a.spent-a.reserved) AS available,a.frozen" + FROM + where
+                        + "(a.granted-a.spent) AS remaining,(a.granted-a.spent-a.reserved) AS available,a.frozen" + FROM + where
                         + " ORDER BY a.user_id LIMIT ? OFFSET ?",
                 (row, index) -> PlatformSupport.map(
                         // Read BIGINT as text before JSON serialization; JavaScript cannot preserve all IDs.
                         "userId", row.getString("user_id"), "username", row.getString("username"),
                         "granted", row.getBigDecimal("granted"), "spent", row.getBigDecimal("spent"),
-                        "reserved", row.getBigDecimal("reserved"), "available", row.getBigDecimal("available"),
+                        "remaining", row.getBigDecimal("remaining"), "reserved", row.getBigDecimal("reserved"), "available", row.getBigDecimal("available"),
                         "frozen", row.getInt("frozen"), "status", row.getInt("frozen") == 1 ? "FROZEN" : "ACTIVE",
                         "currency", "CNY"), parameters.toArray());
         return PlatformSupport.publicMap(PlatformSupport.map("list", rows, "total", total, "page", page, "limit", limit));

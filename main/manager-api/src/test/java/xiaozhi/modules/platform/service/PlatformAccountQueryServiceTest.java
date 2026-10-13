@@ -45,9 +45,10 @@ class PlatformAccountQueryServiceTest {
         assertEquals(Set.of("list", "total", "page", "limit"), page.keySet());
         assertEquals(List.of("42", "9007199254740993", "9223372036854775807"), ids(page));
         for (var row : rows(page)) {
-            assertEquals(Set.of("userId", "username", "granted", "spent", "reserved", "available", "frozen", "status", "currency"), row.keySet());
+            assertEquals(Set.of("userId", "username", "granted", "spent", "remaining", "reserved", "available", "frozen", "status", "currency"), row.keySet());
             assertEquals("100.000000000", row.get("granted"));
             assertEquals("75.000000000", row.get("available"));
+            assertEquals("80.000000000", row.get("remaining"));
         }
         assertNull(rows(page).getFirst().get("username"));
         assertEquals("FROZEN", rows(page).getFirst().get("status"));

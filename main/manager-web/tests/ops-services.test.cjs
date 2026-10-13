@@ -11,7 +11,7 @@ const profile = permissions => ({ audience: 'OPS', permissions });
 const nodes = vnode => [vnode, ...(vnode.children || []).flatMap(nodes)];
 const text = vnode => [vnode.text || '', ...(vnode.children || []).map(text)].join('');
 const full = ['allowance.read', 'allowance.grant', 'allowance.freeze', 'pool.read', 'pool.adjust', 'allowance.review', 'credentials.read', 'rates.read'];
-const account = (userId = '9223372036854775806') => ({ userId, username: '测试用户', available: '1234.567890', reserved: '0.000004', spent: '9007199254740993.126', frozen: false });
+const account = (userId = '9223372036854775806') => ({ userId, username: '测试用户', remaining: '1234.567890', available: '1230.567890', reserved: '0.000004', spent: '9007199254740993.126', frozen: false });
 function deferred() { let resolve; return { promise: new Promise(done => { resolve = done; }), resolve }; }
 function create(t, file = 'OpsAllowance', { permissions = full, query = {}, operations = {}, platformRequest } = {}) {
   const calls = { routes: [], accounts: [], grant: [], freeze: [], pool: [] };
@@ -138,10 +138,10 @@ test('tabs default to allowance, retain deep links and never mount unauthorized 
 
 test('money cells preserve tiny nonzero values, huge precision and full user IDs', async t => {
   const { vm } = create(t); await settled(); const row = account();
-  assert.equal(cell(vm, '可用额度（元）', row).map(text).join(''), '1234.57');
-  assert.equal(cell(vm, '使用中（元）', row).map(text).join(''), '小于 0.01');
-  assert.equal(cell(vm, '累计使用（元）', row).map(text).join(''), '9007199254740993.13');
-  assert.equal(cell(vm, '可用额度（元）', row)[0].data.attrs.title, '1234.567890');
+  assert.equal(cell(vm, '剩余额度（元）', row).map(text).join(''), '1234.57');
+  assert.ok(!nodes(vm._render()).some(node => node.data?.attrs?.label === '使用中（元）'));
+  assert.equal(cell(vm, '累计消耗（元）', row).map(text).join(''), '9007199254740993.13');
+  assert.equal(cell(vm, '剩余额度（元）', row)[0].data.attrs.title, '1234.567890');
   assert.match(cell(vm, '用户', row).map(text).join(''), /测试用户9223372036854775806/);
   assert.equal(row.spent, '9007199254740993.126');
   assert.match(cell(vm, '状态', row).map(text).join(''), /正常/);

@@ -22,9 +22,8 @@
         <el-table-column label="用户" min-width="300">
           <template slot-scope="s"><div class="allowance-user" :title="userLabel(s.row)"><strong>{{ userName(s.row) }}</strong><span v-if="s.row.username" class="allowance-user-id">{{ userId(s.row.userId) }}</span></div></template>
         </el-table-column>
-        <el-table-column label="可用额度（元）" min-width="150" align="right"><template slot-scope="s"><span class="allowance-money" :title="String(s.row.available)">{{ money(s.row.available) }}</span></template></el-table-column>
-        <el-table-column label="使用中（元）" min-width="130" align="right"><template slot-scope="s"><span class="allowance-money" :title="String(s.row.reserved)">{{ money(s.row.reserved) }}</span></template></el-table-column>
-        <el-table-column label="累计使用（元）" min-width="150" align="right"><template slot-scope="s"><span class="allowance-money" :title="String(s.row.spent)">{{ money(s.row.spent) }}</span></template></el-table-column>
+        <el-table-column label="剩余额度（元）" min-width="150" align="right"><template slot-scope="s"><span class="allowance-money" :title="String(s.row.remaining)">{{ money(s.row.remaining) }}</span></template></el-table-column>
+        <el-table-column label="累计消耗（元）" min-width="150" align="right"><template slot-scope="s"><span class="allowance-money" :title="String(s.row.spent)">{{ money(s.row.spent) }}</span></template></el-table-column>
         <el-table-column label="状态" width="90"><template slot-scope="s"><el-tag size="small" :type="s.row.frozen ? 'warning' : 'success'">{{ s.row.frozen ? '已冻结' : '正常' }}</el-tag></template></el-table-column>
         <el-table-column v-if="can('allowance.grant') || can('allowance.freeze')" label="操作" width="155">
           <template slot-scope="s">

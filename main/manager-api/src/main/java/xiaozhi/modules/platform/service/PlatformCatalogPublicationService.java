@@ -35,7 +35,8 @@ public class PlatformCatalogPublicationService {
         boolean local="ASR".equals(service)&&Set.of("fun_local","vosk","sherpa_onnx_local").contains(model.getAdapterCode());
         Map<String,Object> approved=local?assembler.buildTypedConfig(model):runtime.approved(id,service,true).config();
         if(!local)rates.latest(id);
-        Map<String,Object> payload=map("modelId",id,"modelType",model.getModelType(),"adapterCode",model.getAdapterCode(),"endpointUrl",model.getEndpointUrl(),"upstreamModelId",model.getUpstreamModelId(),"runtime",PlatformCatalogSecrets.publicValue(approved),"testTime",model.getTestTime()==null?null:model.getTestTime().getTime());
+        // HTTP serializes Long as text. Hash the same timestamp representation the approver receives.
+        Map<String,Object> payload=map("modelId",id,"modelType",model.getModelType(),"adapterCode",model.getAdapterCode(),"endpointUrl",model.getEndpointUrl(),"upstreamModelId",model.getUpstreamModelId(),"runtime",approvalValue(PlatformCatalogSecrets.publicValue(approved)),"testTime",model.getTestTime()==null?null:Long.toString(model.getTestTime().getTime()));
         String version=approvals.hash(payload);
         return map("action","model.catalog.publish","targetId",id,"version",version,"payload",payload);
     }
@@ -51,5 +52,11 @@ public class PlatformCatalogPublicationService {
                 return map("published",true,"modelId",id);
             });
         });
+    }
+    private static Object approvalValue(Object value) {
+        if(value instanceof Long number)return number.toString();
+        if(value instanceof Map<?,?> values){Map<String,Object> result=new LinkedHashMap<>();values.forEach((key,item)->result.put(key.toString(),approvalValue(item)));return result;}
+        if(value instanceof Collection<?> values)return values.stream().map(PlatformCatalogPublicationService::approvalValue).toList();
+        return value;
     }
 }

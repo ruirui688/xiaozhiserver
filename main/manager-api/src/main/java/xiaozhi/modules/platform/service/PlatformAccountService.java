@@ -27,10 +27,10 @@ public class PlatformAccountService {
     public Map<String,Object> account(long userId) {
         Map<String,Object> row=jdbc.queryForMap("SELECT * FROM ai_platform_account WHERE user_id=?",userId);
         return map("userId",userId,"currency","CNY","status",number(row.get("frozen"))!=0?"FROZEN":"ACTIVE","granted",decimal(row.get("granted")),"spent",decimal(row.get("spent")),"reserved",decimal(row.get("reserved")),
-            "available",available(row).toPlainString(),"frozen",number(row.get("frozen"))!=0,"services",channels.availability());
+            "remaining",remaining(row).toPlainString(),"available",available(row).toPlainString(),"frozen",number(row.get("frozen"))!=0,"services",channels.availability());
     }
     public List<Map<String,Object>> accounts() {
-        return jdbc.queryForList("SELECT user_id AS userId,granted,spent,reserved,(granted-spent-reserved) AS available,frozen FROM ai_platform_account WHERE user_id>0 ORDER BY user_id LIMIT 500");
+        return jdbc.queryForList("SELECT user_id AS userId,granted,spent,reserved,(granted-spent) AS remaining,(granted-spent-reserved) AS available,frozen FROM ai_platform_account WHERE user_id>0 ORDER BY user_id LIMIT 500");
     }
     public List<Map<String,Object>> ledger(long userId) {
         return jdbc.queryForList("SELECT id,entry_type AS type,amount,balance_after AS balanceAfter,workspace_id AS workspaceId,reservation_id AS reservationId,reason,created_at AS createdAt FROM ai_platform_ledger WHERE user_id=? ORDER BY id DESC LIMIT 200",userId);
@@ -79,7 +79,9 @@ public class PlatformAccountService {
         });
     }
     public Map<String,Object> lock(long userId) { return jdbc.queryForMap("SELECT * FROM ai_platform_account WHERE user_id=? FOR UPDATE",userId); }
-    public static BigDecimal available(Map<String,Object> row) { return amount(row.get("granted")).subtract(amount(row.get("spent"))).subtract(amount(row.get("reserved"))); }
+    /** Displayed balance changes only when a charge settles, not when a call reserves funds. */
+    public static BigDecimal remaining(Map<String,Object> row) { return amount(row.get("granted")).subtract(amount(row.get("spent"))); }
+    public static BigDecimal available(Map<String,Object> row) { return remaining(row).subtract(amount(row.get("reserved"))); }
     public boolean replayed(String key,String hash) {
         List<String> rows=jdbc.queryForList("SELECT payload_hash FROM ai_platform_ledger WHERE entry_key=?",String.class,key);
         if(rows.isEmpty())return false;if(!rows.getFirst().equals(hash))throw new RenException("IDEMPOTENCY_CONFLICT");return true;

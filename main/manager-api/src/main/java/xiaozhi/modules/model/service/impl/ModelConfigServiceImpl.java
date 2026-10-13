@@ -64,6 +64,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     private final RedisUtils redisUtils;
     private final AgentDao agentDao;
     private final ModelTestService modelTestService;
+    private final ModelTestEvidenceService modelTestEvidence;
     private final ApplicationEventPublisher eventPublisher;
 
     private static final int MODEL_TEST_UNTESTED = 0;
@@ -270,6 +271,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             throw new RenException(ErrorCode.RESOURCE_NOT_FOUND);
         }
 
+        var testedConfiguration = ModelTestEvidenceService.snapshot(modelConfig);
         long startTime = System.currentTimeMillis();
         ModelTestResultDTO result = modelTestService.testModel(modelConfig);
         if (result.getResponseTimeMs() == null && modelTestService.shouldShowModelTestResponseTime(result)) {
@@ -287,8 +289,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         updateEntity.setTestStatus(result.getTestStatus());
         updateEntity.setTestMessage(result.getMessage());
         updateEntity.setTestTime(testTime);
-        updateEntity.setIsEnabled(0); // Testing records evidence; publication requires separate approval.
-        modelConfigDao.updateById(updateEntity);
+        modelTestEvidence.record(id, testedConfiguration, updateEntity, verified);
         clearModelCache(id);
         publishRuntimeRefreshForModel(id, "model_status_updated");
         return result;

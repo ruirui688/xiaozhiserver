@@ -36,7 +36,7 @@ function component(t, file = 'components/allowance/UserUsagePanel', api = {}, pr
 
 test('user allowance has distinct authoritative readiness states without exposing a collaborator balance', t => {
   const { allowanceServiceState, visibleAllowance } = loadModule('src/utils/allowance.js');
-  for (const [serviceStatus,label] of [['READY','服务已就绪'],['PAYER_FROZEN','服务账户已暂停'],['ALLOWANCE_EXHAUSTED','可用额度不足'],['WORKSPACE_ALLOWANCE_LIMIT','当前空间已达使用上限'],['PLATFORM_SERVICE_NOT_READY','平台服务待开通'],['PENDING','服务状态待确认']]) {
+  for (const [serviceStatus,label] of [['READY','服务已就绪'],['ALLOWANCE_BUSY','服务正在结算'],['PAYER_FROZEN','服务账户已暂停'],['ALLOWANCE_EXHAUSTED','可用额度不足'],['WORKSPACE_ALLOWANCE_LIMIT','当前空间已达使用上限'],['PLATFORM_SERVICE_NOT_READY','平台服务待开通'],['PENDING','服务状态待确认']]) {
     assert.equal(allowanceServiceState({ serviceStatus }).label,label);
   }
   const secretBalance = { available: '9223372036854775806.123456' };
@@ -148,4 +148,16 @@ test('user ledger serialized totals become numeric paging counts and missing val
   await vm.loadLedger(); assert.equal(vm.total,21); assert.equal(vm.ledger[0].id,'9223372036854775806'); assert.equal(vm.ledger[0].amount,'9007199254740993.123456');
   const invalid = component(t,'views/Allowance',{ ledger: async () => ({ list: [], total: null }) }); await invalid.vm.loadLedger();
   assert.ok(invalid.vm.ledgerError); assert.deepEqual(invalid.vm.ledger,[]);
+});
+
+test('allowance shows remaining and settled consumption without treating reservations as consumption', t => {
+  const { vm } = component(t, 'views/Allowance');
+  vm.summary = { workspaceId: 'space-a', canViewBalance: true, serviceStatus: 'READY', allowance: { remaining: '95.123456', available: '75.123456', reserved: '20', spent: '4.876544' } };
+  const rendered = content(vm._render());
+  assert.match(rendered, /剩余额度95.12/);
+  assert.match(rendered, /累计消耗4.88/);
+  assert.doesNotMatch(rendered, /账户预占|75.12/);
+  vm.summary.allowance.remaining = null;
+  assert.match(content(vm._render()), /剩余额度—/);
+  assert.doesNotMatch(content(vm._render()), /75.12/);
 });
