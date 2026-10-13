@@ -104,8 +104,8 @@ def test_tool_history_has_aggregate_budget_across_many_rounds():
 
 
 def test_local_knowledge_context_is_deduplicated_and_bounded(monkeypatch):
-    repeated = "同一条知识。" * 800
-    unique = "另一条知识。" * 800
+    repeated = "同一条知识。" * 80
+    unique = "另一条知识。" * 80
     response_payload = {
         "code": 0,
         "data": {

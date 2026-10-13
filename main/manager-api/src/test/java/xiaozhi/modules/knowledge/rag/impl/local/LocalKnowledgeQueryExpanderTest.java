@@ -49,16 +49,16 @@ class LocalKnowledgeQueryExpanderTest {
         // 用户只说“有什么酒”，表格里记的是“酒水名称：… 品类：洋酒/葡萄酒/啤酒”。
         List<String> queries = LocalKnowledgeQueryExpander.expand("你们有什么酒推荐", "你们有什么酒推荐");
 
-        assertTrue(queries.stream().anyMatch(query -> query.contains("酒水") && query.contains("洋酒")
-                && query.contains("葡萄酒") && query.contains("啤酒")));
+        assertTrue(queries.contains("酒水"));
+        assertFalse(queries.stream().anyMatch(query -> query.contains("洋酒") || query.contains("葡萄酒")));
     }
 
     @Test
     void expandsWhatToEatIntoFoodCategoryFields() {
         List<String> queries = LocalKnowledgeQueryExpander.expand("那你有什么吃的", "慧苑有什么吃的");
 
-        assertTrue(queries.stream().anyMatch(query -> query.contains("餐品") && query.contains("主食")
-                && query.contains("前菜")));
+        assertTrue(queries.contains("餐品 菜品"));
+        assertFalse(queries.stream().anyMatch(query -> query.contains("主食")));
     }
 
     @Test
@@ -76,6 +76,17 @@ class LocalKnowledgeQueryExpanderTest {
         List<String> queries = LocalKnowledgeQueryExpander.expand("我不喝酒了", "慧苑有什么不喝酒的推荐");
 
         assertFalse(queries.stream().anyMatch(query -> query.contains("洋酒")));
+    }
+
+    @Test
+    void generalDrinkAndAlcoholFreeQueriesDoNotInventWineIntent() {
+        for (String question : List.of("你这里喝的多少钱？", "有哪些无酒精饮料", "不含酒精的饮品")) {
+            var queries = LocalKnowledgeQueryExpander.expand(question, question);
+            assertTrue(queries.contains("饮品 饮料 软饮"));
+            assertFalse(queries.contains("酒水"));
+            assertFalse(queries.stream().anyMatch(query -> query.contains("洋酒") || query.contains("葡萄酒")));
+        }
+        assertFalse(LocalKnowledgeQueryExpander.expand("我不喝酒了", "推荐酒水").contains("酒水"));
     }
 
     @Test

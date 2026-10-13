@@ -61,6 +61,7 @@ import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeLuceneIndex;
 import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeLlmBudget;
 import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeProcessingStrategy;
 import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeRetrievalEngine;
+import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeRetrievalPolicy;
 import xiaozhi.modules.knowledge.rag.impl.local.LocalKnowledgeTextSplitter;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
 import xiaozhi.modules.model.service.ModelConfigService;
@@ -78,11 +79,6 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private static final int DEFAULT_LLM_MAX_REQUESTS_PER_DOCUMENT = 16;
     private static final int DEFAULT_LLM_MAX_TOTAL_PROMPT_CHARS = 70000;
     private static final int MIN_ADAPTIVE_SECTION_CHARS = 1000;
-    private static final int DEFAULT_RETRIEVAL_TOP_K = 10;
-    private static final int DEFAULT_RETRIEVAL_LEVEL = 4;
-    private static final int DEFAULT_CANDIDATE_LIMIT = 200;
-    private static final int MAX_CANDIDATE_LIMIT = 800;
-
     private LocalKnowledgeConfigParser configParser;
     private ObjectMapper objectMapper;
     private KnowledgeChunkDao chunkDao;
@@ -108,11 +104,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
     private String llmThinking;
     private String llmReasoningEffort;
     private RestTemplate llmRestTemplate;
-    private boolean hasRetrievalConfig;
-    private String retrievalMode = "normal";
-    private int keywordLevel = DEFAULT_RETRIEVAL_LEVEL;
-    private int keywordTopK = DEFAULT_RETRIEVAL_TOP_K;
-    private float keywordThreshold = 0.05F;
+    private LocalKnowledgeRetrievalPolicy retrievalPolicy = LocalKnowledgeRetrievalPolicy.defaults();
 
     @Override
     public String getAdapterType() {
@@ -161,15 +153,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
         llmMaxTotalPromptChars = LocalKnowledgeConfigParser.clamp(environment.getProperty(
                 "knowledge.local-chunking.max-total-prompt-chars", Integer.class,
                 DEFAULT_LLM_MAX_TOTAL_PROMPT_CHARS), 10000, 10000000);
-        Map<String, Object> retrievalConfig = configParser.getMap("retrieval_config");
-        hasRetrievalConfig = retrievalConfig != null && !retrievalConfig.isEmpty();
-        retrievalMode = configParser.getString(retrievalConfig, "mode", configParser.getString("mode", "normal"));
-        keywordLevel = configParser.getInt(retrievalConfig, "keyword_level",
-                configParser.getInt(retrievalConfig, "semantic_level", DEFAULT_RETRIEVAL_LEVEL, 1, 5), 1, 5);
-        keywordTopK = configParser.getInt(retrievalConfig, "keyword_top_k",
-                configParser.getInt(retrievalConfig, "semantic_top_k", DEFAULT_RETRIEVAL_TOP_K, 1, 50), 1, 50);
-        keywordThreshold = configParser.getFloat(retrievalConfig, "keyword_threshold",
-                configParser.getFloat(retrievalConfig, "semantic_threshold", 0.05F, 0F, 1F), 0F, 1F);
+        retrievalPolicy = LocalKnowledgeRetrievalPolicy.from(config, objectMapper);
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory();
         factory.setReadTimeout(java.time.Duration.ofSeconds(llmTimeoutSeconds));
         this.llmRestTemplate = new RestTemplate(factory);
@@ -325,11 +309,7 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
 
     @Override
     public RetrievalDTO.ResultVO retrievalTest(RetrievalDTO.TestReq req) {
-        int pageSize = LocalKnowledgeConfigParser.clamp(req.getPageSize() == null ? 10 : req.getPageSize(), 1, 100);
-        int resultLimit = resolveResultLimit(req, pageSize);
-        int candidateLimit = resolveCandidateLimit(req, resultLimit);
-        return retrievalEngine.retrieve(req, new LocalKnowledgeRetrievalEngine.Options(
-                keywordLevel, resultLimit, candidateLimit, keywordThreshold));
+        return retrievalEngine.retrieve(req, retrievalPolicy.resolve(req));
     }
 
     private void applyManagedLlmConfig() {
@@ -841,25 +821,6 @@ public class LocalKnowledgeAdapter extends KnowledgeBaseAdapter {
 
     private LocalKnowledgeTextSplitter textSplitter() {
         return new LocalKnowledgeTextSplitter(llmMaxInputChars);
-    }
-
-    private int resolveResultLimit(RetrievalDTO.TestReq req, int pageSize) {
-        int limit = pageSize;
-        if (req.getTopK() != null && req.getTopK() > 0) {
-            limit = Math.min(limit, LocalKnowledgeConfigParser.clamp(req.getTopK(), 1, 100));
-        } else if (hasRetrievalConfig) {
-            limit = Math.min(limit, keywordTopK);
-        }
-        return Math.max(1, limit);
-    }
-
-    private int resolveCandidateLimit(RetrievalDTO.TestReq req, int resultLimit) {
-        int requestedTopK = req.getTopK() == null || req.getTopK() < 1 ? keywordTopK : req.getTopK();
-        int baseLimit = Math.max(DEFAULT_CANDIDATE_LIMIT, Math.max(resultLimit, requestedTopK) * 20);
-        if (StringUtils.equalsIgnoreCase(retrievalMode, "exhibition")) {
-            baseLimit = Math.max(baseLimit, resultLimit * 25);
-        }
-        return LocalKnowledgeConfigParser.clamp(baseLimit, resultLimit, MAX_CANDIDATE_LIMIT);
     }
 
     private <T> List<T> paginate(List<T> items, int page, int pageSize) {

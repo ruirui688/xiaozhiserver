@@ -14,7 +14,7 @@ import org.apache.commons.lang3.StringUtils;
  */
 final class LocalKnowledgeStructuredIntent {
     private static final Pattern PRIMARY_NAME_PATTERN = Pattern.compile(
-            "(?:^|[\\n;；])\\s*(?:商品名称|产品名称|品名|饮品名称|菜品名称|套餐名称|服务名称|名称)"
+            "(?:^|[\\n;；])\\s*(?:商品名称|产品名称|品名|饮品名称|酒水名称|餐品名称|菜品名称|套餐名称|服务名称|名称)"
                     + "\\s*[：:=]\\s*([^\\n;；,，]{1,80})",
             Pattern.CASE_INSENSITIVE);
     private static final Pattern PRICE_FIELD_PATTERN = Pattern.compile(
@@ -38,7 +38,7 @@ final class LocalKnowledgeStructuredIntent {
     }
 
     static int primaryEntityMatch(String query, String content) {
-        if (requestsAuxiliaryRelationship(query)) {
+        if (!allowsPrimaryEntityPriority(query)) {
             return 0;
         }
         String normalizedQuery = normalize(query);
@@ -75,7 +75,14 @@ final class LocalKnowledgeStructuredIntent {
 
     static boolean requestsAuxiliaryRelationship(String query) {
         return StringUtils.containsAny(normalize(query),
-                "推荐搭配", "搭配什么", "搭配哪", "配什么", "配哪", "适合搭配", "佐餐", "配菜");
+                "搭配", "适合配", "配什么", "配哪", "佐餐", "配菜");
+    }
+
+    static boolean allowsPrimaryEntityPriority(String query) {
+        // A mentioned name may be an exclusion, not the requested product. Without semantic
+        // constraint resolution, leave these queries to relevance ranking rather than force a name first.
+        return !requestsAuxiliaryRelationship(query)
+                && !StringUtils.containsAny(normalize(query), "不", "无", "过敏", "避免", "忌");
     }
 
     private static String normalize(String value) {

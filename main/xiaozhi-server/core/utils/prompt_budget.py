@@ -13,8 +13,8 @@ DYNAMIC_CONTEXT_MAX_CHARS = 2_000
 DYNAMIC_CONTEXT_MAX_ITEMS = 30
 SPEAKER_DESCRIPTION_MAX_CHARS = 500
 KNOWLEDGE_CONTEXT_MAX_CHARS = 4_000
-# 只注入前 5 条：正确答案必须由检索排名保证进前 5，
-# 不允许靠放大窗口把排在后面的切片兜进来。
+# External RAG compatibility limit. Local knowledge uses complete-record selection
+# in knowledge_context.py and the backend's configured result count.
 KNOWLEDGE_CONTEXT_MAX_ITEMS = 5
 KNOWLEDGE_ITEM_MAX_CHARS = 1_600
 TOOL_HISTORY_MAX_CHARS = 8_000

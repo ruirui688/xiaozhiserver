@@ -1,7 +1,6 @@
 package xiaozhi.modules.knowledge.rag.impl.local;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -126,20 +125,31 @@ class LocalKnowledgeRecallRankingTest {
     }
 
     @Test
-    void entityPriorityIsDisabledOnceEntityRowsWouldFillTheWholeWindow() {
-        List<KnowledgeChunkEntity> sameEntityRows = new ArrayList<>();
-        for (int index = 0; index < RESULT_LIMIT; index++) {
-            sameEntityRows.add(chunkOf("商品名称：可口可乐\n规格：单杯\n售价：" + (10 + index) + "元"));
+    void changingResultLimitOnlyChangesTheLengthNotEntityOrdering() {
+        for (int i = 0; i < 12; i++) {
+            addRow("doc-cola", "饮品表", "酒水名称：可口可乐\n规格：" + (200 + i) + "ml\n售价：15元");
         }
+        addRow("doc-food", "餐品表", "餐品名称：薯条\n推荐搭配：可口可乐\n售价：10元");
+        var small = retrieve("可口可乐多少钱", 5, 0.05F);
+        var large = retrieve("可口可乐多少钱", 20, 0.05F);
+        assertEquals(small.stream().map(RetrievalDTO.HitVO::getId).toList(),
+                large.stream().limit(5).map(RetrievalDTO.HitVO::getId).toList());
+        assertTrue(small.stream().allMatch(hit -> hit.getContent().startsWith("酒水名称：")));
+    }
 
-        assertFalse(LocalKnowledgeRetrievalEngine.entityMatchDiscriminates(
-                "可口可乐多少钱", sameEntityRows, RESULT_LIMIT),
-                "同一实体的行数已占满结果窗口，实体优先必须让位给相关度");
-        assertTrue(LocalKnowledgeRetrievalEngine.entityMatchDiscriminates(
-                "可口可乐多少钱", sameEntityRows.subList(0, RESULT_LIMIT - 1), RESULT_LIMIT));
+    @Test
+    void exactMatchSurvivesThresholdOne() {
+        addRow("doc-hours", "营业时间", "问题：周末几点开门？\n答案：上午十点开门。");
+        var hits = retrieve("周末几点开门", 10, 1F);
+        assertEquals(1, hits.size());
+        assertEquals(1F, hits.get(0).getSimilarity());
     }
 
     private List<RetrievalDTO.HitVO> retrieve(String question) {
+        return retrieve(question, RESULT_LIMIT, 0.05F);
+    }
+
+    private List<RetrievalDTO.HitVO> retrieve(String question, int limit, float threshold) {
         var chunkDao = mock(KnowledgeChunkDao.class);
         var documentDao = mock(DocumentDao.class);
         when(documentDao.selectList(any())).thenAnswer(call -> documents);
@@ -155,7 +165,7 @@ class LocalKnowledgeRecallRankingTest {
         var engine = new LocalKnowledgeRetrievalEngine(chunkDao, documentDao,
                 new LocalKnowledgeLuceneIndex(directory.resolve("index")));
         return engine.retrieve(request,
-                new LocalKnowledgeRetrievalEngine.Options(4, RESULT_LIMIT, 200, 0.05F)).getChunks();
+                new LocalKnowledgeRetrievalEngine.Options(4, limit, 200, threshold)).getChunks();
     }
 
     /** 按线上慧苑知识库的形状构造：15 行带“套餐名称”的套餐明细 + 2 条问答切片 + 同规模无关切片。 */
@@ -284,14 +294,4 @@ class LocalKnowledgeRecallRankingTest {
         rows.add(chunk);
     }
 
-    private static KnowledgeChunkEntity chunkOf(String content) {
-        var chunk = new KnowledgeChunkEntity();
-        chunk.setId("row");
-        chunk.setChunkId("chunk");
-        chunk.setDatasetId(DATASET);
-        chunk.setDocumentId("document");
-        chunk.setContent(content);
-        chunk.setEnabled(1);
-        return chunk;
-    }
 }

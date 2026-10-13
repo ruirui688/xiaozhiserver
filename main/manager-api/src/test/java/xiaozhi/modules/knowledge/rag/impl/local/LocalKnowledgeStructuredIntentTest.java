@@ -36,4 +36,14 @@ class LocalKnowledgeStructuredIntentTest {
         assertEquals(0, LocalKnowledgeStructuredIntent.primaryEntityMatch(
                 "推荐搭配可乐的菜", "商品名称：可口可乐；规格：单杯；售价：15元"));
     }
+
+    @Test
+    void excludedNamesCannotForceEntityPriority() {
+        assertEquals(0, LocalKnowledgeStructuredIntent.primaryEntityMatch(
+                "对花生过敏，想吃份米饭", "餐品名称：花生\n售价：10元"));
+        assertEquals(0, LocalKnowledgeStructuredIntent.primaryEntityMatch(
+                "不想喝咖啡因，想来一杯果汁", "酒水名称：美式咖啡\n售价：20元"));
+        assertTrue(LocalKnowledgeStructuredIntent.primaryEntityMatch(
+                "可乐多少钱", "酒水名称：可口可乐\n售价：15元") > 0);
+    }
 }

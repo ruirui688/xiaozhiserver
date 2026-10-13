@@ -25,11 +25,7 @@ final class LocalKnowledgeStructuredReranker {
                 item -> LocalKnowledgeStructuredIntent.primaryEntityMatch(query, content.apply(item)), fallbackScore);
     }
 
-    /**
-     * @param entityMatch 预先算好的主实体命中长度。调用方可以据此关闭实体优先：
-     *                    当带主实体字段的候选已经多到能占满结果窗口时，实体优先只会把同前缀
-     *                    表格行排到最前，把真正回答问题的切片挤出召回结果。
-     */
+    /** Entity matching is independent of the requested result window. */
     static <T> Comparator<T> comparator(String query, Function<T, String> content, ToIntFunction<T> entityMatch,
             ToDoubleFunction<T> fallbackScore) {
         Direction direction = direction(query);

@@ -8,7 +8,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
-import java.util.function.ToIntFunction;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
@@ -104,8 +103,7 @@ public class LocalKnowledgeRetrievalEngine {
         Comparator<ScoredChunk> ordering = LocalKnowledgeStructuredReranker.comparator(
                 entityQuery,
                 item -> structuredText(item.chunk()),
-                entityMatchFunction(entityQuery, enabledCandidates.stream()
-                        .map(LocalKnowledgeLuceneIndex.SearchHit::chunk).toList(), options.resultLimit()),
+                item -> LocalKnowledgeStructuredIntent.primaryEntityMatch(entityQuery, structuredText(item.chunk())),
                 ScoredChunk::score);
 
         List<ScoredChunk> scored = enabledCandidates.stream()
@@ -116,10 +114,11 @@ public class LocalKnowledgeRetrievalEngine {
                     float score = Math.min(0.99F, (hit.score() * 0.72F) + (lexicalScore * 0.28F));
                     boolean exactQuestion = isExactQuestionMatch(rawQuestion, rawLexical)
                             || isExactQuestionMatch(rewrittenQuestion, rewrittenLexical);
-                    return new ScoredChunk(hit.chunk(), hit.documentName(), score, hit.score(), exactQuestion);
+                    return new ScoredChunk(hit.chunk(), hit.documentName(), exactQuestion ? 1F : score, hit.score(), exactQuestion);
                 })
                 .filter(item -> StringUtils.isBlank(rawQuestion) || item.score() >= options.threshold())
-                .sorted(exactQuestionFirst().thenComparing(ordering))
+                .sorted(exactQuestionFirst().thenComparing(ordering)
+                        .thenComparing(item -> chunkScope(item.chunk())))
                 .limit(options.resultLimit())
                 .toList();
         return toResult(scored, documents);
@@ -145,7 +144,7 @@ public class LocalKnowledgeRetrievalEngine {
         Comparator<ScoredChunk> ordering = LocalKnowledgeStructuredReranker.comparator(
                 entityQuery,
                 item -> structuredText(item.chunk()),
-                entityMatchFunction(entityQuery, enabledChunks, options.resultLimit()),
+                item -> LocalKnowledgeStructuredIntent.primaryEntityMatch(entityQuery, structuredText(item.chunk())),
                 ScoredChunk::score);
         List<ScoredChunk> scored = enabledChunks.stream()
                 .map(chunk -> {
@@ -165,7 +164,8 @@ public class LocalKnowledgeRetrievalEngine {
                             exactQuestion);
                 })
                 .filter(item -> StringUtils.isBlank(rawQuestion) || item.score() >= options.threshold())
-                .sorted(exactQuestionFirst().thenComparing(ordering))
+                .sorted(exactQuestionFirst().thenComparing(ordering)
+                        .thenComparing(item -> chunkScope(item.chunk())))
                 .limit(options.resultLimit())
                 .toList();
         return toResult(scored, documents);
@@ -181,27 +181,6 @@ public class LocalKnowledgeRetrievalEngine {
 
     private static Comparator<ScoredChunk> exactQuestionFirst() {
         return Comparator.comparingInt((ScoredChunk item) -> item.exactQuestion() ? 1 : 0).reversed();
-    }
-
-    /**
-     * 主实体优先只在实体确实能缩小候选集时生效。如果带主实体字段的候选已经多到能占满整个
-     * 结果窗口，实体优先只会把同一实体前缀的表格行排在前面，把真正回答问题的切片挤出召回结果
-     * （例如“慧苑演出几点开始”被十几行“套餐名称：慧苑…”占满）。此时实体命中恒为 0，
-     * 排序退化为按相关度进行。
-     */
-    static boolean entityMatchDiscriminates(String query, List<KnowledgeChunkEntity> candidates, int resultLimit) {
-        long matched = candidates.stream()
-                .filter(chunk -> LocalKnowledgeStructuredIntent.primaryEntityMatch(query, structuredText(chunk)) > 0)
-                .count();
-        return matched < resultLimit;
-    }
-
-    private ToIntFunction<ScoredChunk> entityMatchFunction(String query, List<KnowledgeChunkEntity> candidates,
-            int resultLimit) {
-        if (!entityMatchDiscriminates(query, candidates, resultLimit)) {
-            return item -> 0;
-        }
-        return item -> LocalKnowledgeStructuredIntent.primaryEntityMatch(query, structuredText(item.chunk()));
     }
 
     private List<LocalKnowledgeLuceneIndex.SearchHit> authoritativeHits(
@@ -347,7 +326,7 @@ public class LocalKnowledgeRetrievalEngine {
             matchLevel = Math.max(1, Math.min(5, matchLevel));
             resultLimit = Math.max(1, Math.min(100, resultLimit));
             candidateLimit = Math.max(resultLimit, Math.min(800, candidateLimit));
-            threshold = Math.max(0F, Math.min(1F, threshold));
+            threshold = Float.isFinite(threshold) ? Math.max(0F, Math.min(1F, threshold)) : 0.05F;
         }
     }
 

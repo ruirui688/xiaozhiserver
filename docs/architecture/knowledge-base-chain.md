@@ -1,12 +1,13 @@
 ---
 status: supporting
 owner: knowledge
-last_verified: 2026-09-21
+last_verified: 2026-10-13
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/knowledge
   - main/manager-api/src/main/java/xiaozhi/modules/agent/service/impl/AgentPluginMappingServiceImpl.java
   - main/xiaozhi-server/plugins_func/functions/search_from_local_knowledge.py
   - main/xiaozhi-server/core/utils/prompt_budget.py
+  - main/xiaozhi-server/core/utils/knowledge_context.py
   - main/manager-web/src/components/role/RoleEditDialog.vue
   - main/manager-mobile/src/pages/knowledge
 ---
@@ -166,9 +167,9 @@ LocalKnowledgeAdapter.retrievalTest()
 2. 切片写入可兼容旧链路的 MySQL 表，同时写入本机 Lucene CJK/BM25 派生索引
 3. Python 同时传入用户原问 raw_question 与模型改写 question
 4. LocalKnowledgeQueryExpander 对数量/人数、普通价格问法、单品表达和“有什么酒/喝的/吃的”这类
-   品类问法做确定性等价扩展（表格里记的是“酒水名称：… 品类：洋酒/葡萄酒/软饮”和“餐品名称/分类：主食”，
-   原话里的“酒/吃的”不足以召回）；Lucene 对 content/question/answer/documentName 检索，
-   并从结构化切片中提取商品名称、品名、菜品名称等主实体字段单独加权。
+   品类问法只补充少量类别别名，不再枚举洋酒、葡萄酒、主食等下级品类；“喝的”不等同于饮酒，
+   明示不喝酒的原话不能被改写串重新触发酒类扩展。Lucene 对 content/question/answer/documentName 检索，
+   并从结构化切片中提取商品名称、品名、菜品名称、酒水名称、餐品名称等主实体字段。
    LocalKnowledgeDocumentVocabulary 还会从每个文档自身的列头与品类取值自动推导“文档级词表”
    （酒水名称 → 酒水，品类：洋酒 → 洋酒；通用列头与文档名不参与），写进 document_vocabulary 字段，
    命中即代表整篇文档相关，用于把“问品类”路由到对应的表；词表由内容推导，不要求人工写文档介绍。
@@ -177,16 +178,33 @@ LocalKnowledgeAdapter.retrievalTest()
    “标准问题：……是什么？”样板文本，靠多个常见词叠加压过真正命中“沙拉/海鲜”等罕见主题词的切片
    （库里 5 条沙拉却一条都排不上来）；词法打分本来就会跳过它们，Lucene 侧必须一致；
    ②“全库级词”：出现在多数文档名里的词（客户品牌名，按本次检索的数据集范围统计）没有区分度
-   （酒水表正文里没有品牌名，否则永远排不上来）
+   （酒水表正文里没有品牌名，否则永远排不上来）。正文中的高频主题词不再按固定比例删除，
+   交给 BM25 IDF 处理，避免专门的酒水库把“酒水”本身过滤掉。
 5. 结构化重排先区分主实体命中与“推荐搭配”等辅助关系命中：查询“可乐价格”时商品名称命中优先，
    查询“搭配可乐的菜”时仍保留关系结果；随后再对“最低价/最高价”等明确极值执行确定性价格排序。
    主实体命中要求命中片段覆盖实体名称的一半以上（“慧苑”不算“慧苑VIP4人套餐”的实体命中），
-   并且带主实体字段的候选必须少于 keyword_top_k；否则实体优先只会用同前缀表格行占满召回窗口，
-   把真正回答问题的切片挤出结果
+   不再依据 keyword_top_k 或候选实体行数切换排序规则。带否定、排除、过敏等明确约束的查询
+   保守关闭实体硬提权，Lucene 字段加权与后续结构化排序使用同一判断；这不是完整的语义约束求解。
 6. 完整包含用户问题的切片（词法满分）优先于主实体/价格结构化排序，精确答案不会被表格行挤掉；
-   最后按 LocalKnowledgeLexicalScorer 精排、keyword_threshold 过滤和 keyword_top_k 返回；索引 schema
-   变化会触发从 MySQL DONE 切片惰性重建，不要求重新上传原文件
+   最后按 LocalKnowledgeLexicalScorer 精排、keyword_threshold 过滤和 keyword_top_k 返回；完整原问命中
+   保留 1.0 分，避免阈值设为 1 时全部被 0.99 分数上限过滤。平分时按稳定条目标识排序。
+   索引 schema 5 补充主实体字段，会从 MySQL 当前 DONE 切片惰性重建，不要求重新上传原文件
 ```
+
+`LocalKnowledgeRetrievalPolicy` 是配置解析的唯一入口，适配器只调用其结果，不再自行拼接限额。
+知识库 `retrieval_config` 优先于模型根配置；同一层 `keyword_*` 优先于旧 `semantic_*`。
+
+| 参数 | 当前含义 |
+| --- | --- |
+| `keyword_top_k` | 默认返回条数，1–50，默认 10；未传 `page_size` 不再隐式裁为 10 |
+| 请求 `top_k` / `page_size` | 显式 `top_k` 覆盖返回条数（最多 50）；显式正数 `page_size` 进一步限制 |
+| `retrieval_config.candidate_limit` | 独立候选上限，100–800；默认 200，旧 exhibition 模式默认 250；不再跟返回条数一起倍增 |
+| `keyword_threshold` | 词法相关度过滤，0–1，默认 0.05；非答案存在概率 |
+| 请求 `similarity_threshold` | 显式有限数值覆盖默认阈值；NaN/Infinity 不参与计算 |
+
+新候选上限可通过已有 parserConfig 保存，不新增数据库字段；旧页面未填写时采用上述默认值。
+固定候选范围时，改变返回条数只取同一排序的不同长度前缀。此轮仍为词法检索，未把离线实验中的
+嵌入模型/向量库自动接入业务，也未新增按关键词强制触发知识工具的规则。
 
 原始文档保留上传时的原件，不随人工编辑重写。首次导入后，MySQL 当前条目是人工修订的权威数据，不另存编辑历史快照，
 Lucene 只是可从当前数据库内容重建的派生索引；不能重新解析原件覆盖人工编辑。删除文档或知识库同步清理其原件、
@@ -330,9 +348,15 @@ LLM 调用 search_from_local_knowledge / search_from_ragflow
 
 ### 5.3 上下文与工具描述预算
 
-当前工作区对本地知识库和 RAGFlow 检索结果使用相同预算：最多保留 5 个去重结果，单项最多 1600 字符，
-合计最多 4000 字符。历史 tool message 合计最多 8000 字符，单个结果最多 4000 字符，并优先保留最近结果。裁剪只作用于动态检索内容，
-不会修改工具参数类型、枚举或 required schema。
+本地知识库由 `knowledge_context.select_knowledge_context` 按后端排名去重并选择完整条目，
+总预算仍为 4000 字符（包含问题标题、边界说明及省略提示），不再重复硬裁为前 5 条或每条 1600 字符。
+放不下的完整条目会跳过，继续检查后续条目；有省略时明确提示，不裁断价格、计价单位或尾部适用条件。
+全部条目超预算与检索为空分开处理，前者提示缩小问题范围并关闭本次续轮工具，不能声称知识库无记录。
+日志只记录 retrieved/selected/omitted/chars 计数，异常仅记录类型，不输出正文、私有 URL 或凭据。
+
+外部 RAGFlow 保留原有 5 条、每条 1600 字符、总计 4000 字符的兼容行为。历史 tool message 合计
+最多 8000 字符，单个结果最多 4000 字符，并优先保留最近结果；更外层整请求预算仍可能删减旧工具历史。
+这些限制不会修改工具参数类型、枚举或 required schema。
 
 manager-api 生成知识搜索工具描述时不再注入酒类、酒具等特定业务规则。描述最多列出 10 个知识库名称、
 4 组范围说明并限制为 640 字符；查询规则只要求依据用户当前问题和已明确上下文。Python 侧还会对全部工具的

@@ -58,7 +58,8 @@ public final class LocalKnowledgeConfigParser {
             return defaultValue;
         }
         try {
-            return clamp(Float.parseFloat(value.toString()), min, max);
+            float parsed = Float.parseFloat(value.toString());
+            return Float.isFinite(parsed) ? clamp(parsed, min, max) : defaultValue;
         } catch (NumberFormatException e) {
             log.warn("本地知识库 {} 配置无效，使用默认值 {}", key, defaultValue);
             return defaultValue;
@@ -74,10 +75,11 @@ public final class LocalKnowledgeConfigParser {
         }
         if (value instanceof String text && StringUtils.isNotBlank(text)) {
             try {
-                return objectMapper.readValue(text, new TypeReference<Map<String, Object>>() {
+                Map<String, Object> parsed = objectMapper.readValue(text, new TypeReference<Map<String, Object>>() {
                 });
+                return parsed == null ? Collections.emptyMap() : parsed;
             } catch (Exception e) {
-                log.warn("解析本地知识库 {} 配置失败，忽略检索扩展配置: {}", key, e.getMessage());
+                log.warn("解析本地知识库 {} 配置失败，忽略检索扩展配置: {}", key, e.getClass().getSimpleName());
             }
         }
         return Collections.emptyMap();

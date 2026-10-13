@@ -61,8 +61,8 @@ public class LocalKnowledgeLuceneIndex {
     private static final String FIELD_DOCUMENT_VOCABULARY = "document_vocabulary";
     private static final String FIELD_CONTENT_VERSION = "content_version";
     private static final String FIELD_KIND = "record_kind";
-    // 4：新增文档级词表字段（列头主题词 + 品类取值），旧索引按此版本惰性重建。
-    private static final String SCHEMA_VERSION = "4";
+    // 5：主实体字段补充酒水/餐品名称；旧索引从当前条目惰性重建。
+    private static final String SCHEMA_VERSION = "5";
 
     private final Path root;
     private final Analyzer analyzer;
@@ -228,7 +228,7 @@ public class LocalKnowledgeLuceneIndex {
             IndexSearcher searcher = new IndexSearcher(reader);
             searcher.setSimilarity(new BM25Similarity());
             terms = dropNonDiscriminativeTerms(terms, searcher, datasetIds, documentIds);
-            boolean preferPrimaryName = !LocalKnowledgeStructuredIntent.requestsAuxiliaryRelationship(
+            boolean preferPrimaryName = LocalKnowledgeStructuredIntent.allowsPrimaryEntityPriority(
                     String.join(" ", queries));
             Query query = filteredQuery(textQuery(terms, preferPrimaryName), datasetIds, documentIds);
             TopDocs topDocs = searcher.search(query, Math.max(1, limit));
@@ -312,11 +312,8 @@ public class LocalKnowledgeLuceneIndex {
                     addChars(libraryChars, term);
                     continue;
                 }
-                // ②正文里几乎无处不在的样板词（“来源”这类）。阈值必须很高：
-                //    “酒水”在聚焦的酒水知识库里能占到 45%，但它正是主题词，丢了就再也召不回库存表。
-                if (hitsInField(searcher, scope, FIELD_CONTENT, term) * 3 > chunks * 2) {
-                    continue;
-                }
+                // Body frequency is handled by BM25's IDF, not a hard query-term deletion.
+                // A focused drinks library can mention “酒水” in most records and still need that topic.
             }
             kept.add(term);
         }
@@ -366,9 +363,10 @@ public class LocalKnowledgeLuceneIndex {
                     BooleanClause.Occur.SHOULD);
             fields.add(new BoostQuery(new TermQuery(new Term(FIELD_DOCUMENT_VOCABULARY, term)), 4.0F),
                     BooleanClause.Occur.SHOULD);
-            fields.add(new BoostQuery(new TermQuery(new Term(FIELD_PRIMARY_NAME, term)),
-                    preferPrimaryName ? 5.0F : 0.8F),
-                    BooleanClause.Occur.SHOULD);
+            if (preferPrimaryName) {
+                fields.add(new BoostQuery(new TermQuery(new Term(FIELD_PRIMARY_NAME, term)), 5.0F),
+                        BooleanClause.Occur.SHOULD);
+            }
             fields.setMinimumNumberShouldMatch(1);
             query.add(fields.build(), BooleanClause.Occur.SHOULD);
         }
