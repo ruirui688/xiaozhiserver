@@ -4,12 +4,21 @@ import queue
 import threading
 from types import SimpleNamespace
 
+import pytest
+
 import config.settings
 
 config.settings.config_file_valid = True
 
 import core.api.device_notification_handler as handler_module
 from core.api.device_notification_handler import DeviceNotificationHandler
+import core.spoken_notifications as spoken_module
+from core.notifications.admission import NotificationAdmission
+
+
+@pytest.fixture(autouse=True)
+def isolated_admission(monkeypatch):
+    monkeypatch.setattr(spoken_module, "_admission", NotificationAdmission())
 
 
 class _Request:
@@ -251,3 +260,20 @@ def test_deliver_rejects_non_ascii_cross_agent_identity_without_error(monkeypatc
         "success": False,
         "message": "设备与智能体绑定关系不匹配",
     }
+
+
+def test_budget_exhaustion_returns_retry_hint_without_queueing(monkeypatch):
+    handler = DeviceNotificationHandler({
+        "server": {"auth_key": "server-secret"},
+        "server_notification_limits": {"burst": 1},
+    })
+    handler.logger = _Logger()
+    conn = _connection()
+    monkeypatch.setattr(handler_module, "get_connection", lambda _: conn)
+    first = asyncio.run(handler.handle_deliver(_Request(_body())))
+    conn = _connection(device_id="other")
+    overloaded = asyncio.run(handler.handle_deliver(_Request(_body(deviceId="other", requestId="second"))))
+
+    assert _payload(first)["data"]["status"] == "queued"
+    assert _payload(overloaded)["data"] == {"status": "overloaded", "retryAfterSeconds": 15}
+    assert conn.tts.tts_text_queue.qsize() == 0

@@ -6,6 +6,8 @@ import lombok.Data;
 
 @Data
 public class ReminderSaveDTO {
+    @jakarta.validation.Valid
+    private ReminderRecurrenceDTO recurrence;
     @NotBlank
     @Size(max = 32)
     private String deviceId;

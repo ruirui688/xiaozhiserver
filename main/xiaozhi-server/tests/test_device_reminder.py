@@ -378,3 +378,87 @@ def test_realtime_hides_reminder_and_stale_calls_do_not_create(monkeypatch):
     assert "未创建" in stale_result.response
     assert "未创建" in direct_result.response
     assert calls == []
+
+
+def test_create_weekday_rule_passes_typed_contract_and_confirms_backend_rule(monkeypatch):
+    captured = {}
+
+    async def execute(_agent_id, _action, **payload):
+        captured.update(payload)
+        return {"reminderId": "repeat-1", "status": "PENDING", **payload}
+
+    monkeypatch.setattr(reminder_module, "execute_reminder_action", execute)
+    monkeypatch.setattr(reminder_module.time, "time", lambda: 1_800_000_000)
+    result = asyncio.run(device_reminder(
+        _conn(), "create", title="起床", remind_timestamp=1_800_003_600,
+        recurrence={"frequency": "WEEKLY", "weekdays": [5, 4, 3, 2, 1]},
+        request_id="weekly-call",
+    ))
+
+    assert captured["recurrence"] == {"frequency": "WEEKLY", "interval": 1, "weekdays": [1, 2, 3, 4, 5]}
+    assert "每1周重复" in result.response
+    assert "星期一、二、三、四、五" in result.response
+
+
+@pytest.mark.parametrize("rule", [
+    {"frequency": "CRON", "cron": "* * * * *"},
+    {"frequency": "DAILY", "interval": 0},
+    {"frequency": "DAILY", "interval": True},
+    {"frequency": "DAILY", "weekdays": [1]},
+    {"frequency": "WEEKLY", "weekdays": [1, 1]},
+    {"frequency": "WEEKLY", "weekdays": [0]},
+    {"frequency": "WEEKLY", "weekdays": []},
+    {"frequency": "ONCE", "interval": 2},
+    {"frequency": "DAILY", "until": "2027-01-16T09:00:00"},
+    {"frequency": "DAILY", "until": "2020-01-16T09:00:00Z"},
+])
+def test_invalid_recurrence_never_reaches_control_plane(monkeypatch, rule):
+    calls = []
+
+    async def execute(*args, **kwargs):
+        calls.append((args, kwargs))
+
+    monkeypatch.setattr(reminder_module, "execute_reminder_action", execute)
+    monkeypatch.setattr(reminder_module.time, "time", lambda: 1_800_000_000)
+    result = asyncio.run(device_reminder(
+        _conn(), "create", title="起床", remind_timestamp=1_800_003_600,
+        recurrence=rule, request_id="invalid-rule",
+    ))
+
+    assert "重复规则无效" in result.response
+    assert calls == []
+
+
+@pytest.mark.parametrize("backend_rule", [None, {"frequency": "ONCE"}, {"frequency": "DAILY", "interval": 2}])
+def test_old_backend_cannot_falsely_confirm_recurring_reminder(monkeypatch, backend_rule):
+    async def execute(_agent_id, _action, **payload):
+        return {"reminderId": "old-server", "status": "PENDING", "title": payload["title"], "recurrence": backend_rule}
+
+    monkeypatch.setattr(reminder_module, "execute_reminder_action", execute)
+    monkeypatch.setattr(reminder_module.time, "time", lambda: 1_800_000_000)
+    result = asyncio.run(device_reminder(
+        _conn(), "create", title="起床", remind_timestamp=1_800_003_600,
+        recurrence={"frequency": "DAILY"}, request_id="old-server-call",
+    ))
+
+    assert "未确认重复规则" in result.response
+    assert "每1天重复" not in result.response
+
+
+@pytest.mark.parametrize("frequency,expected", [("ONCE", "已设置"), ("DAILY", "每1天重复")])
+def test_java_nullable_recurrence_response_is_confirmed(monkeypatch, frequency, expected):
+    async def execute(_agent_id, _action, **payload):
+        return {
+            "reminderId": "java-rule", "status": "PENDING", **payload,
+            "recurrence": {"frequency": frequency, "interval": 1, "weekdays": None, "until": None},
+        }
+
+    monkeypatch.setattr(reminder_module, "execute_reminder_action", execute)
+    monkeypatch.setattr(reminder_module.time, "time", lambda: 1_800_000_000)
+    result = asyncio.run(device_reminder(
+        _conn(), "create", title="起床", remind_timestamp=1_800_003_600,
+        recurrence={"frequency": frequency}, request_id="java-response",
+    ))
+
+    assert expected in result.response
+    assert "未确认" not in result.response

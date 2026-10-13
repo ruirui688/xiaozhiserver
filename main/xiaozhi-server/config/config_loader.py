@@ -1,6 +1,7 @@
 import os
 import asyncio
 import yaml
+from copy import deepcopy
 from collections.abc import Mapping
 from loguru import logger
 from config.manage_api_client import (
@@ -90,6 +91,12 @@ async def get_config_from_api_async(config):
         "url": config["manager-api"].get("url", ""),
         "secret": config["manager-api"].get("secret", ""),
     }
+    # Process admission is an operator-owned limit, never an agent/device
+    # configuration. Keep the local value in managed mode; absent means safe
+    # code defaults rather than accepting a remotely supplied override.
+    config_data["server_notification_limits"] = deepcopy(
+        config.get("server_notification_limits", {})
+    )
     auth_enabled = config_data.get("server", {}).get("auth", {}).get("enabled", True)
     server_config = config_data.setdefault("server", {})
     local_server_config = config.get("server", {})

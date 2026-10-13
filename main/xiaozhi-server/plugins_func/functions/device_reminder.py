@@ -12,6 +12,11 @@ from typing import TYPE_CHECKING, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from config.manage_api_client import execute_reminder_action
+from core.notifications.recurrence import (
+    RECURRENCE_SCHEMA,
+    describe_recurrence,
+    normalize_recurrence,
+)
 from core.utils.prompt_data import wrap_untrusted_content
 from plugins_func.register import Action, ActionResponse, ToolType, register_function
 
@@ -24,7 +29,7 @@ DEVICE_REMINDER_TOOL_DESCRIPTION = {
     "function": {
         "name": "device_reminder",
         "description": (
-            "管理当前设备的一次性语音提醒。用户明确要求设置、查看或取消提醒时调用。"
+            "管理当前设备的一次性或公历周期语音提醒。用户明确要求设置、查看或取消提醒时调用。"
             "创建前必须根据系统提供的当前时间把相对时间换算成未来的Unix秒时间戳；"
             "时间有歧义时先向用户确认，不得猜测。提醒只属于当前设备。"
         ),
@@ -34,7 +39,7 @@ DEVICE_REMINDER_TOOL_DESCRIPTION = {
                 "action": {
                     "type": "string",
                     "enum": ["create", "list", "cancel"],
-                    "description": "创建、查询或取消一次性提醒。",
+                    "description": "创建、查询或取消提醒；取消周期提醒会停止整个重复安排。",
                 },
                 "title": {
                     "type": "string",
@@ -51,6 +56,7 @@ DEVICE_REMINDER_TOOL_DESCRIPTION = {
                     "type": "string",
                     "description": "IANA时区，默认Asia/Shanghai。",
                 },
+                "recurrence": RECURRENCE_SCHEMA,
                 "reminder_id": {
                     "type": "string",
                     "description": "cancel时必填，来自list结果的提醒ID。",
@@ -75,6 +81,7 @@ async def device_reminder(
     timezone: Optional[str] = None,
     reminder_id: Optional[str] = None,
     request_id: Optional[str] = None,
+    recurrence: Optional[dict] = None,
 ):
     normalized_action = str(action or "").strip().lower()
     if normalized_action not in {"create", "list", "cancel"}:
@@ -96,6 +103,7 @@ async def device_reminder(
     }
     display_time = None
     normalized_title = None
+    normalized_recurrence = None
 
     if normalized_action == "create":
         normalized_title = _normalize_title(title)
@@ -108,7 +116,13 @@ async def device_reminder(
         if timestamp < now + 5:
             return _response("提醒时间必须至少晚于现在五秒，请重新确认时间。")
         if timestamp > now + 365 * 24 * 60 * 60:
-            return _response("目前只能设置一年以内的一次性提醒。")
+            return _response("首次提醒时间需要设置在一年以内。")
+        try:
+            normalized_recurrence = normalize_recurrence(
+                recurrence, first_timestamp=timestamp
+            )
+        except (ValueError, TypeError, OverflowError):
+            return _response("重复规则无效，请确认重复频率、星期和截止时间。")
         timezone_name, zone = _normalize_timezone(timezone)
         if zone is None:
             return _response("提醒时区无效，请使用明确的IANA时区。")
@@ -125,6 +139,8 @@ async def device_reminder(
                 "timezone": timezone_name,
             }
         )
+        if normalized_recurrence is not None:
+            payload["recurrence"] = normalized_recurrence
     elif normalized_action == "cancel":
         normalized_reminder_id = _normalize_identifier(reminder_id, 64)
         if normalized_reminder_id is None:
@@ -159,9 +175,19 @@ async def device_reminder(
         confirmed_time = _result_display_time(
             result.get("remindAt"), display_time, confirmed_zone
         )
+        try:
+            confirmed_recurrence = normalize_recurrence(result.get("recurrence"))
+        except (ValueError, TypeError, OverflowError):
+            return _response("日程已保存，但重复规则未能确认，请查询日程核对。")
+        if normalized_recurrence and normalized_recurrence["frequency"] != "ONCE" and (
+            not confirmed_recurrence
+            or any(confirmed_recurrence.get(key) != value for key, value in normalized_recurrence.items())
+        ):
+            return _response("日程已保存，但服务未确认重复规则，请查询日程核对。")
         return _response(
-            "好的，已设置{}（时区：{}）的提醒：{}。".format(
-                confirmed_time, confirmed_timezone, confirmed_title
+            "好的，已设置{}（时区：{}）的提醒：{}{}。".format(
+                confirmed_time, confirmed_timezone, confirmed_title,
+                describe_recurrence(confirmed_recurrence),
             )
         )
     if normalized_action == "cancel":
@@ -295,13 +321,20 @@ def _reminder_view(value):
     timezone_name = _normalize_identifier(value.get("timezone"), 64)
     if not reminder_id or not title or not remind_at:
         return None
-    return {
+    result = {
         "reminderId": reminder_id,
         "title": title,
         "remindAt": remind_at,
         "timezone": timezone_name or "Asia/Shanghai",
         "status": "PENDING",
     }
+    try:
+        recurrence = normalize_recurrence(value.get("recurrence"))
+    except (ValueError, TypeError, OverflowError):
+        recurrence = None
+    if recurrence is not None:
+        result["recurrence"] = recurrence
+    return result
 
 
 def _format_display_time(value: datetime) -> str:

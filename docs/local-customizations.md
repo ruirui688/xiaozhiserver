@@ -1105,13 +1105,15 @@ Python 采集健康独立心跳，实例状态仅平台管理员可读；成员�
 
 定制模块：manager-api 日程事实与调度、manager-mobile 日程管理、xiaozhi-server 语音日程工具和在线设备精确 TTS 投递。
 
-用户可以通过语音创建、查询和取消一次性提醒，也可以在小程序中创建、编辑、取消并查看提醒状态。语音入口实现为受 `Intent.<selected>.functions` 白名单门控的 Server Plugin `device_reminder`；产品上可以称为语音日程或 MCP 能力，但不得改成外部 no-code MCP，也不得让未启用该插件的智能体调用。模型只有在工具成功返回后才能声称已经创建或取消提醒，普通讨论未来时间不能自动生成日程。
+用户可以通过语音创建、查询和取消一次性或公历周期提醒，也可以在现有小程序中创建、编辑、取消并查看提醒状态；小程序本轮未新增周期编辑控件。统一规则与负载边界以[服务端提醒任务中心](architecture/reminder-task-center.md)为准。语音入口实现为受 `Intent.<selected>.functions` 白名单门控的 Server Plugin `device_reminder`；产品上可以称为语音日程或 MCP 能力，但不得改成外部 no-code MCP，也不得让未启用该插件的智能体调用。模型只有在工具成功返回后才能声称已经创建或取消提醒，普通讨论未来时间不能自动生成日程。
 
-`device_reminder` 是 Server Plugin 保留名。统一工具注册和执行都必须拒绝 Server MCP、Device IoT、Device MCP、MCP Endpoint 的同名工具，以及带一层或多层 `mcp_` 前缀的别名，不能让其他来源冒用该名称绕过白名单。Native Qwen/Doubao Realtime 当前没有独立主动通知 TTS，因此不注册、不执行该语音日程工具；小程序仍可选择绑定此类智能体的设备并保存提醒，但到点无法播报，10 分钟宽限期结束后标记未送达。
+`device_reminder` 是 Server Plugin 保留名。统一工具注册和执行都必须拒绝 Server MCP、Device IoT、Device MCP、MCP Endpoint 的同名工具，以及带一层或多层 `mcp_` 前缀的别名，不能让其他来源冒用该名称绕过白名单。Native Qwen/Doubao Realtime 当前没有独立主动通知 TTS，因此不注册、不执行该语音日程工具；小程序仍可选择绑定此类智能体的设备并保存提醒，但到点无法播报，本次有效期或重试预算耗尽后标记未送达。
 
-manager-api 与 MySQL 是提醒时间、内容、设备、状态、重试和历史的唯一事实及调度权威；小程序不运行本地定时器，Python 也不保存日程或承担持久调度。语音工具通过 server secret 调用受保护的 `/config/**` 接口，用户端 API 按 workspace 校验资源所有权；创建、修改和投递均校验设备当前的 `device + agent` 绑定，不能信任客户端单独提交的 agentId 或 deviceId。语音创建记录的设备是来源幂等锚点，小程序可以修改标题和时间，但换设备必须取消后重新创建。
+manager-api 与 MySQL 是安排、单次执行历史、重试和状态的唯一事实及调度权威；受限周期规则保持初始时区锚点并只滚动下一次，停机后不展开无限历史。小程序不运行本地定时器，Python 也不保存日程或承担持久调度。语音工具通过 server secret 调用受保护的 `/config/**` 接口，用户端 API 按 workspace 校验资源所有权；创建、修改和投递均校验设备当前的 `device + agent` 绑定，不能信任客户端单独提交的 agentId 或 deviceId。语音创建记录的设备是来源幂等锚点，小程序可以修改标题和时间，但换设备必须取消后重新创建。旧编辑请求不传规则时必须保留已有周期。
 
-到期投递的 `requestId` 由提醒 ID + 投递版本指纹派生，指纹覆盖目标设备/智能体、播报内容和计划时间；同一业务版本的普通重试保持稳定，编辑这些字段后发生变化。调度器领取后在独立事务中按设备、提醒的固定锁序复核租约，并让设备行锁覆盖有界的内部 HTTP 投递和状态回写，防止换绑或删除插入校验与入队之间。xiaozhi-server 对相同请求幂等，只向同时匹配目标 device 与 agent 的在线连接入队。设备忙碌或短暂离线时，在到期后 10 分钟宽限期内重试；超过宽限期仍不可投递则标记未送达。`DELIVERED` 只表示 Python 已接受并入队，或返回相同 `requestId` 已接收，不代表设备扬声器物理播放完成。当前 Python 回执缓存是单进程内存状态；多 Python 实例或进程重启若要进一步降低重复播报，需要 sticky routing 或共享、持久化的回执存储。提醒链路没有设备播放 ACK 时不能保证跨进程严格 exactly-once；断网、关机、深睡或 WebSocket 已断开的设备不能被服务器真正远程唤醒。
+到期投递的 `requestId` 区分安排版本与本次计划时间，同一执行的普通重试保持稳定。原始创建请求指纹不能随周期游标变化，避免工具重试误建安排。调度器通过数据库共享门控、有限线程和批次控制负载，退避重试同时受尝试次数和有效期约束，执行历史分批维护。领取后复核租约并保留设备换绑、编辑取消与有界内部投递之间的串行化保护。xiaozhi-server 在去重与身份检查之后执行进程级接纳预算、设备冷却和容量保护；容量耗尽不能驱逐有效回执来接受新请求。
+
+`DELIVERED` 只表示 Python 已接受并入队，或返回相同 `requestId` 已接收，不代表设备扬声器物理播放完成。当前 Python 回执缓存是单进程内存状态；多 Python 实例或进程重启若要进一步降低重复播报，需要 sticky routing 或共享、持久化的回执存储。提醒链路没有设备播放 ACK 时不能保证跨进程严格 exactly-once。产品暂定休眠设备可由下游唤醒，本轮只实现任务管理维护与下发；当前适配器无 WebSocket 时仍报告离线，不据此宣称已实现固件唤醒。
 
 关键文件：
 
@@ -1127,5 +1129,6 @@ manager-api 与 MySQL 是提醒时间、内容、设备、状态、重试和历�
 - `main/manager-mobile/src/pages/reminder/`
 - `docs/architecture/function-plugin-architecture.md`
 - `docs/architecture/device-interaction-chain.md`
+- `docs/architecture/reminder-task-center.md`
 
-官方同步时的处理规则：保留 Server Plugin 白名单门控、`device_reminder` 保留名在注册/执行两层对所有其他工具来源及 `mcp_` 别名的失败关闭、Native Qwen/Doubao Realtime 显式不可用、manager-api/MySQL 权威、小程序无本地调度、workspace 资源授权、server secret、device + agent 双重匹配，以及“同一投递版本稳定、编辑后变化”的 `requestId` 幂等语义。不得退回只用提醒 ID 区分投递版本，不得按智能体广播冒充精确设备投递，不得在设备忙碌时强制插播，不得把 `DELIVERED` 或入队成功描述成物理播放确认，也不得宣称能唤醒已断线或关机设备。多 Python 实例必须明确 sticky routing/共享回执和无设备播放 ACK 的边界。提醒标题属于不可信用户数据；模型上下文必须把列表结果视为数据，日志不得记录标题正文、Authorization、server secret 或其他密钥，只保留标识符和稳定错误码。
+官方同步时的处理规则：保留 Server Plugin 白名单门控、`device_reminder` 保留名在注册/执行两层对所有其他工具来源及 `mcp_` 别名的失败关闭、Native Qwen/Doubao Realtime 显式不可用、manager-api/MySQL 权威、小程序无本地调度、workspace 资源授权、server secret、device + agent 双重匹配，以及按版本和执行时间区分的 `requestId` 幂等语义。周期锚点、有限滚动、集群预算、无无限队列、退避有效期、分批历史维护和 Python 有界接纳必须共同保留，不能退回每业务一套计时器或每条任务一个线程。不得按智能体广播冒充精确设备投递，不得在设备忙碌时强制插播，不得把 `DELIVERED` 或入队成功描述成物理播放确认。多 Python 实例必须明确路由/共享回执和无设备播放 ACK 的边界。提醒标题属于不可信用户数据；模型上下文必须把列表结果视为数据，日志不得记录标题正文、Authorization、server secret 或其他密钥，只保留标识符和稳定错误码。

@@ -8,6 +8,8 @@ import lombok.Data;
 
 @Data
 public class ReminderRuntimeActionDTO {
+    @jakarta.validation.Valid
+    private ReminderRecurrenceDTO recurrence;
     @NotBlank
     @Size(max = 32)
     private String action;

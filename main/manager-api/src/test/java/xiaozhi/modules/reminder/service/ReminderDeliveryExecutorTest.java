@@ -43,7 +43,8 @@ class ReminderDeliveryExecutorTest {
     private final AgentDao agentDao = mock(AgentDao.class);
     private final ReminderDeviceNotificationClient client = mock(ReminderDeviceNotificationClient.class);
     private final ReminderDeliveryExecutor executor = new ReminderDeliveryExecutor(
-            reminderDao, deviceDao, agentDao, client);
+            reminderDao, deviceDao, agentDao, client, mock(xiaozhi.modules.reminder.dao.ReminderTaskDao.class),
+            new xiaozhi.modules.reminder.config.ReminderTaskProperties(), new ReminderTaskMetrics());
 
     @Test
     void locksDeviceAndOwnedReminderBeforeDeliveringAndMarkingDelivered() {

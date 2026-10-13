@@ -751,26 +751,26 @@ TTS 必须区分以下边界：
 
 ### 4.8 日程提醒主动播报
 
-日程提醒只对已有在线 WebSocket 连接使用现有设备 TTS 下行能力，不在小程序、浏览器或 ESP32 本地运行定时器。完整链路是：
+日程管理与周期调度的权威契约见[服务端提醒任务中心](reminder-task-center.md)。当前投递适配器使用已有在线 WebSocket 的设备 TTS 下行能力，小程序和 Python 不运行另一套持久日程调度器。完整链路是：
 
 ```text
 语音 ASR -> 主 LLM 选择 device_reminder Server Plugin
           -> manager-api 校验并写入 MySQL
 小程序   -> manager-api 创建 / 编辑 / 取消 / 查询同一份提醒事实
-manager-api 到期扫描 -> xiaozhi-server 精确投递接口
+manager-api 有界到期扫描与共享下发预算 -> xiaozhi-server 精确投递接口及接纳保护
                       -> 当前在线且空闲的目标设备 TTS 队列
 ```
 
-语音侧的 `device_reminder` 只有在 `Intent.<selected>.functions` 白名单中启用才会注册，支持一次性提醒的
-`create / list / cancel`；它是 Server Plugin，不是外部 no-code MCP。manager-api 和 MySQL 是提醒内容、时间、状态、
-重试次数及最终结果的唯一权威，小程序编辑后直接修改这份事实，不能另外创建本地通知计划。
+语音侧的 `device_reminder` 只有在 `Intent.<selected>.functions` 白名单中启用才会注册，支持一次性及受限周期安排的
+`create / list / cancel`；它是 Server Plugin，不是外部 no-code MCP。manager-api 和 MySQL 是安排内容、时间、规则、
+单次执行和重试结果的唯一权威，每个安排只滚动下一次执行，不提前展开无限历史。小程序编辑后直接修改这份事实。
 语音创建记录的设备同时是来源幂等锚点：小程序仍可修改标题和时间，但不能把该记录改投其他设备；需要换设备时应先取消再新建。
 
 `device_reminder` 是 Server Plugin 保留名。Server MCP、Device IoT、Device MCP、MCP Endpoint 的同名工具，
 以及带一层或多层 `mcp_` 前缀的别名，都会在统一注册和执行边界被拒绝，不能替代或绕过白名单中的真实
 Server Plugin。Native Qwen/Doubao Realtime 当前没有独立主动通知 TTS，即使智能体白名单已配置该工具，
 也不会在 Realtime 会话中注册或执行。小程序仍可选择绑定此类智能体的设备并保存提醒，但到点无法播报，
-在 10 分钟宽限期结束后会标记未送达。
+本次执行在有效期或重试预算耗尽后会标记未送达，周期安排按规则继续推进。
 
 用户端接口按当前 workspace 校验提醒和设备资源所有权；语音运行时通过 server secret 进入受保护的
 `/config/**` 边界，并再次验证发起连接的设备仍绑定目标智能体。到期投递请求必须同时携带 `deviceId`、
@@ -780,15 +780,15 @@ Server Plugin。Native Qwen/Doubao Realtime 当前没有独立主动通知 TTS�
 调度器领取提醒后，会在独立事务中按设备、提醒的固定顺序加锁并复核租约；设备行锁覆盖有界的内部 HTTP 投递和状态回写，
 因此设备换绑或删除只能在线性化投递完成前或完成后生效，不能插入“校验通过、尚未入队”的窗口造成错投。
 
-设备正在对话、会议、声纹采集或其他受保护状态时不抢占；设备忙碌或短暂离线由 manager-api 在到期后
-10 分钟宽限期内重试，超过宽限期标记未送达。Python 只负责实时连接查询和精确 TTS 入队，不保存日程、
+设备正在对话、会议、声纹采集或其他受保护状态时不抢占；设备忙碌、短暂离线和下游过载由 manager-api 在有限
+有效期及尝试预算内退避重试，耗尽后本次执行标记未送达。Python 在去重与设备状态检查后执行有限速率、设备冷却和容量保护；过载明确拒绝，不创建无限等待队列。Python 只负责实时连接查询和精确 TTS 入队，不保存日程、
 不承担跨进程调度，也不把按智能体广播当作按设备精确投递。
 
 manager-api 的 `DELIVERED` 只表示 Python 已接受并入队，或对相同 `requestId` 返回已接收的幂等结果；
 提醒链路当前不等待设备播放 ACK，不能据此判断 ESP32 扬声器已经物理播放。Python 的回执缓存目前是单进程
 内存状态；多 Python 实例或进程重启场景若要进一步降低重复播报，需要 sticky routing 或共享、持久化的回执
-存储，在没有设备播放 ACK 时仍不能保证跨进程严格 exactly-once。断网、关机、深睡或 WebSocket 已断开的设备
-无法由服务器真正唤醒。提醒正文和服务密钥不得进入日志，运行日志只记录 reminder/request/device 标识、
+存储，在没有设备播放 ACK 时仍不能保证跨进程严格 exactly-once。产品暂定休眠可由下游唤醒，本轮只实现服务端任务管理与下发，
+不修改或验证设备固件。当前适配器在没有 WebSocket 时仍返回离线，不能据此宣称已经实现物理唤醒。提醒正文和服务密钥不得进入日志，运行日志只记录 reminder/request/device 标识、
 投递状态和稳定错误码。
 
 ## 5. 声纹注册采集模式

@@ -17,13 +17,15 @@ final class ReminderDeliveryRequestId {
 
     static String from(ReminderEntity reminder, DeviceEntity device) {
         String reminderId = Objects.requireNonNull(reminder.getId(), "reminderId");
-        String fingerprint = sha256(List.of(
+        java.util.ArrayList<String> fields = new java.util.ArrayList<>(List.of(
                 reminderId,
                 Objects.requireNonNull(reminder.getDeviceId(), "deviceId"),
                 Objects.requireNonNull(device.getMacAddress(), "runtimeDeviceId"),
                 Objects.requireNonNull(reminder.getAgentId(), "agentId"),
                 Objects.requireNonNull(reminder.getSpokenText(), "spokenText"),
                 Long.toString(Objects.requireNonNull(reminder.getRemindAt(), "remindAt").getTime())));
+        if (reminder.getScheduleVersion() != null && reminder.getScheduleVersion() > 1) fields.add(reminder.getScheduleVersion().toString());
+        String fingerprint = sha256(fields);
         String requestId = reminderId + ":" + fingerprint;
         if (requestId.length() > 128) {
             throw new IllegalStateException("提醒投递幂等键超过128字符");

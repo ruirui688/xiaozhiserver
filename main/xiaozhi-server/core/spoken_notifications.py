@@ -1,18 +1,19 @@
 """Queue short server-originated announcements on an idle device connection."""
 
-from collections import OrderedDict
+import hashlib
 import re
-import threading
-import time
 import uuid
 
+from core.notifications.admission import NotificationAdmission, NotificationBusy
 from core.providers.tts.dto.dto import ContentType, SentenceType, TTSMessageDTO
 
 
-_IDEMPOTENCY_TTL_SECONDS = 6 * 60 * 60
-_IDEMPOTENCY_MAX_ENTRIES = 4096
-_idempotency_lock = threading.RLock()
-_queued_requests: "OrderedDict[tuple[str, str], float]" = OrderedDict()
+_admission = NotificationAdmission()
+
+
+def configure_notification_limits(config: dict) -> None:
+    """Apply process limits from server configuration, never device overrides."""
+    _admission.configure(config.get("server_notification_limits", {}))
 
 
 def enqueue_spoken_notification(
@@ -28,31 +29,60 @@ def enqueue_spoken_notification(
     normalized_request_id = str(request_id or "").strip()
     request_key = None
     if normalized_request_id:
-        device_key = str(getattr(conn, "device_id", "") or "").strip().lower()
-        request_key = (device_key or f"connection:{id(conn)}", normalized_request_id)
+        request_key = (_admission.device_key(conn), normalized_request_id)
+    agent_id = str((getattr(conn, "config", {}) or {}).get("agent_id") or "")
+    fingerprint = hashlib.sha256(
+        (agent_id + "\0" + content).encode("utf-8")
+    ).hexdigest()
 
-    # Hold the idempotency lock through the short queue submission section. This
-    # prevents concurrent scheduler retries from both passing the duplicate check.
-    lock = _idempotency_lock if request_key is not None else _NullLock()
-    with lock:
-        if request_key is not None:
-            _expire_idempotency_entries()
-            if request_key in _queued_requests:
-                return True, "duplicate"
-
+    def check():
         unavailable_reason = _unavailable_reason(conn)
         if unavailable_reason:
-            return False, unavailable_reason
+            return unavailable_reason
         protected_reason = _protected_busy_reason(conn)
         if protected_reason:
-            return False, protected_reason
+            return protected_reason
         if require_idle and _is_busy(conn):
-            return False, "device_busy"
+            return "device_busy"
+        # Even callers which allow interruption cannot append to an existing
+        # TTS backlog. Admission must never turn this into an unbounded queue.
+        pending = conn.tts.tts_text_queue
+        if pending.qsize() > 0:
+            return "device_busy"
+        if 0 < getattr(pending, "maxsize", 0) < 3:
+            return "overloaded"
+        return None
 
+    def submit():
+        _submit_notification(conn, content)
+
+    return _admission.execute(
+        conn, request_key, fingerprint, check, submit, _is_busy
+    )
+
+
+def _submit_notification(conn, content):
+    sentence_id = str(uuid.uuid4().hex)
+    lifecycle = getattr(conn, "reply_lifecycle", None)
+    generation = None
+    try:
+        # Acquire a generation before changing shared sentence/abort fields;
+        # another reply winning the race must keep its own state untouched.
+        if lifecycle is not None:
+            try:
+                generation = lifecycle.begin(kind="notification")
+            except RuntimeError:
+                if lifecycle.is_active:
+                    raise NotificationBusy() from None
+                raise
         with conn._abort_lock:
             conn.client_abort = False
-        sentence_id = str(uuid.uuid4().hex)
         conn.sentence_id = sentence_id
+        if lifecycle is not None:
+            lifecycle.bind_sentence(generation, sentence_id)
+            lifecycle.mark_synthesizing(generation)
+        else:
+            conn.client_is_speaking = True
         tts = conn.tts
         mark_exact_text = getattr(tts, "mark_exact_text", None)
         if callable(mark_exact_text):
@@ -61,49 +91,44 @@ def enqueue_spoken_notification(
         if callable(mark_skip_memory):
             mark_skip_memory(sentence_id)
         tts.store_tts_text(sentence_id, content)
-        tts.tts_text_queue.put(
+        tts.tts_text_queue.put_nowait(
             TTSMessageDTO(
                 sentence_id=sentence_id,
                 sentence_type=SentenceType.FIRST,
                 content_type=ContentType.ACTION,
+                generation=generation,
             )
         )
-        tts.tts_one_sentence(
-            conn,
-            ContentType.TEXT,
-            content_detail=content,
-            sentence_id=sentence_id,
+        # Exactly three queue records, irrespective of punctuation count. This
+        # follows the external-TTS boundary and cannot block on a full queue.
+        tts.tts_text_queue.put_nowait(
+            TTSMessageDTO(
+                sentence_id=sentence_id,
+                sentence_type=SentenceType.MIDDLE,
+                content_type=ContentType.TEXT,
+                content_detail=content,
+                generation=generation,
+            )
         )
-        tts.tts_text_queue.put(
+        tts.tts_text_queue.put_nowait(
             TTSMessageDTO(
                 sentence_id=sentence_id,
                 sentence_type=SentenceType.LAST,
                 content_type=ContentType.ACTION,
+                generation=generation,
             )
         )
-        if request_key is not None:
-            _queued_requests[request_key] = time.monotonic()
-            _queued_requests.move_to_end(request_key)
-            while len(_queued_requests) > _IDEMPOTENCY_MAX_ENTRIES:
-                _queued_requests.popitem(last=False)
-    return True, "queued"
-
-
-class _NullLock:
-    def __enter__(self):
-        return self
-
-    def __exit__(self, _exc_type, _exc_value, _traceback):
-        return False
-
-
-def _expire_idempotency_entries() -> None:
-    cutoff = time.monotonic() - _IDEMPOTENCY_TTL_SECONDS
-    while _queued_requests:
-        _, queued_at = next(iter(_queued_requests.items()))
-        if queued_at > cutoff:
-            break
-        _queued_requests.popitem(last=False)
+    except Exception:
+        # Only terminate the generation we created. Never clear shared queues
+        # or abort a newer user reply to compensate for a partial enqueue.
+        if lifecycle is not None and generation is not None:
+            lifecycle.fail(generation, "notification_enqueue_uncertain")
+            if lifecycle.is_current(generation) and getattr(conn, "sentence_id", None) == sentence_id:
+                conn.sentence_id = ""
+        elif lifecycle is None and getattr(conn, "sentence_id", None) == sentence_id:
+            conn.client_is_speaking = False
+            conn.sentence_id = ""
+        raise
 
 
 def _unavailable_reason(conn) -> str | None:

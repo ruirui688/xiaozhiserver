@@ -1,7 +1,7 @@
 ---
 status: canonical
 owner: architecture
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 source_paths:
   - main/xiaozhi-server
   - main/xiaozhi-server/core/conversation
@@ -106,6 +106,10 @@ flowchart TB
 
 `core/connection.py` 只协调单设备会话；关闭生命周期继续下沉到 `core/session/`，会话观测进入
 `core/observability/`。数据库结构只能通过 `main/manager-api/src/main/resources/db/changelog/` 修改。
+
+日程与周期提醒复用 `manager-api/modules/reminder` 的持久任务中心；安排定义、单次执行、
+集群下发预算和 Python 接纳保护分层维护，不为每个业务新增调度系统。设备唤醒是下游能力边界，
+本轮不修改固件；完整规则、负载上限和回执语义见[服务端提醒任务中心](reminder-task-center.md)。
 
 ## 3. 设备实时双轨主链路
 

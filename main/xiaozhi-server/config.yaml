@@ -43,6 +43,16 @@ server:
   mqtt_signature_key: null
   # UDP网关配置
   udp_gateway: null
+# 单个 Python 进程的主动提醒/广播接纳预算；多进程需分别规划容量。
+# 满载立即返回可重试 overloaded，不创建额外待办队列；配置在启动时生效。
+# 下列配置属于服务器，不允许从设备/智能体参数覆盖。
+server_notification_limits:
+  rate_per_second: 4        # 每秒接纳速率，0.1..100
+  burst: 8                 # 短时突发预算，1..100
+  max_pending: 32          # 尚在合成/播放的主动通知连接数，1..1024
+  device_cooldown_seconds: 2  # 同设备最短间隔，0.1..300
+  receipt_ttl_seconds: 3600   # 去重窗口，3600..21600；覆盖Java最长1800秒宽限及租约
+  max_receipts: 32768       # 回执上限，1..100000；满时不驱逐有效记录
 log:
   # 设置控制台输出的日志格式，时间、日志级别、标签、消息
   log_format: "<green>{time:YYMMDD HH:mm:ss}</green>[{version}_{selected_module}][<light-blue>{extra[tag]}</light-blue>]-<level>{level}</level>-<light-green>{message}</light-green>"

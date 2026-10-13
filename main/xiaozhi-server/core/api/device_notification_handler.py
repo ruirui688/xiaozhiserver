@@ -8,12 +8,19 @@ from aiohttp import web
 
 from core.api.base_handler import BaseHandler
 from core.device_runtime_registry import get_connection, get_connections_for_agent
-from core.spoken_notifications import enqueue_spoken_notification
+from core.spoken_notifications import (
+    configure_notification_limits,
+    enqueue_spoken_notification,
+)
 
 TAG = __name__
 
 
 class DeviceNotificationHandler(BaseHandler):
+    def __init__(self, config: dict):
+        super().__init__(config)
+        configure_notification_limits(config)
+
     def _json_response(self, body: dict, status: int = 200, request=None):
         response = web.Response(
             text=json.dumps(body, ensure_ascii=False),
@@ -165,6 +172,8 @@ class DeviceNotificationHandler(BaseHandler):
             status,
         )
         data = {"status": status}
+        if status == "overloaded":
+            data["retryAfterSeconds"] = 15
         return self._json_response(
             {"success": True, "data": data}, request=request
         )

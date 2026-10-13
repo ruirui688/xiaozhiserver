@@ -1621,3 +1621,10 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/device-reminders-20261013.sql
+  - changeSet:
+      id: reminder-task-center-20261013
+      author: Codex
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/reminder-task-center-20261013.sql

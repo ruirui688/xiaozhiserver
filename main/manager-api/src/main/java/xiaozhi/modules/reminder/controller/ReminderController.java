@@ -28,6 +28,12 @@ import xiaozhi.modules.reminder.vo.ReminderVO;
 public class ReminderController {
     private final ReminderService reminderService;
 
+    @GetMapping("/{id}/executions")
+    public Result<List<xiaozhi.modules.reminder.vo.ReminderExecutionVO>> executions(
+            @PathVariable String id, @RequestParam(defaultValue = "20") int limit) {
+        return new Result<List<xiaozhi.modules.reminder.vo.ReminderExecutionVO>>().ok(reminderService.executions(id, limit));
+    }
+
     @GetMapping
     public Result<List<ReminderVO>> list(@RequestParam(required = false) String status) {
         return new Result<List<ReminderVO>>().ok(reminderService.list(status));

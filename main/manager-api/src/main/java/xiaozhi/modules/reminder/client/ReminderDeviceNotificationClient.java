@@ -96,6 +96,9 @@ public class ReminderDeviceNotificationClient {
                     String.class);
             return parse(response.getBody());
         } catch (RestClientResponseException error) {
+            if (error.getStatusCode().value() == 429) return DeliveryResult.retry("overloaded");
+            DeliveryResult reported = parse(error.getResponseBodyAsString());
+            if ("delivery_uncertain".equals(reported.status()) || "request_conflict".equals(reported.status())) return reported;
             return DeliveryResult.retry("http_" + error.getStatusCode().value());
         } catch (Exception error) {
             return DeliveryResult.retry("network_error");

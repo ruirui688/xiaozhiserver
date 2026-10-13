@@ -37,6 +37,9 @@ import xiaozhi.modules.reminder.dto.ReminderSaveDTO;
 import xiaozhi.modules.reminder.entity.ReminderEntity;
 import xiaozhi.modules.reminder.service.ReminderScopeService;
 import xiaozhi.modules.reminder.service.ReminderService;
+import xiaozhi.modules.reminder.service.ReminderRecurrence;
+import xiaozhi.modules.reminder.dao.ReminderTaskDao;
+import xiaozhi.modules.reminder.vo.ReminderExecutionVO;
 import xiaozhi.modules.reminder.vo.ReminderDeviceVO;
 import xiaozhi.modules.reminder.vo.ReminderVO;
 import xiaozhi.modules.workspace.service.WorkspacePermissionService;
@@ -58,6 +61,15 @@ public class ReminderServiceImpl implements ReminderService {
     private final AgentDao agentDao;
     private final ReminderScopeService scopeService;
     private final WorkspacePermissionService workspacePermissionService;
+
+    private final ReminderTaskDao taskDao;
+
+    public List<ReminderExecutionVO> executions(String id, int limit) {
+        String workspaceId = workspacePermissionService.currentWorkspaceId();
+        workspacePermissionService.requireRead(workspaceId);
+        requireWorkspaceReminder(id, workspaceId);
+        return taskDao.history(id, Math.max(1, Math.min(100, limit)));
+    }
 
     @Override
     public List<ReminderVO> list(String status) {
@@ -96,7 +108,8 @@ public class ReminderServiceImpl implements ReminderService {
                 .eq(DeviceEntity::getWorkspaceId, workspaceId)
                 .isNotNull(DeviceEntity::getAgentId)
                 .ne(DeviceEntity::getAgentId, "")
-                .orderByDesc(DeviceEntity::getLastConnectedAt));
+                .orderByDesc(DeviceEntity::getLastConnectedAt)
+                .last("LIMIT 500"));
         Map<String, AgentEntity> agents = agentsById(
                 devices.stream().map(DeviceEntity::getAgentId).collect(Collectors.toSet()),
                 workspaceId);
@@ -124,6 +137,10 @@ public class ReminderServiceImpl implements ReminderService {
 
         ReminderEntity entity = new ReminderEntity();
         applyTarget(entity, workspaceId, device, title, "日程提醒：" + title, parsed);
+        entity.setScheduleAnchorAt(entity.getRemindAt());
+        entity.setRecurrenceJson(ReminderRecurrence.normalize(dto.getRecurrence(), parsed.instant()));
+        ReminderRecurrence.validateAnchor(entity.getRecurrenceJson(), parsed.instant(), parsed.zoneId());
+        entity.setScheduleVersion(1);
         entity.setStatus(PENDING);
         entity.setSource("MINI_PROGRAM");
         entity.setAttemptCount(0);
@@ -148,17 +165,29 @@ public class ReminderServiceImpl implements ReminderService {
         }
         ReminderTimeSupport.ParsedTime parsed = parseAndValidate(dto.getRemindAt(), dto.getTimezone());
         String title = normalizedTitle(dto.getTitle());
+        Date originalTime = entity.getRemindAt();
+        Date originalAnchor = entity.getScheduleAnchorAt();
+        String originalTimezone = entity.getTimezone();
+        String originalRule = entity.getRecurrenceJson();
+        Integer originalVersion = entity.getScheduleVersion();
         applyTarget(entity, workspaceId, device, title, "日程提醒：" + title, parsed);
+        entity.setRecurrenceJson(ReminderRecurrence.normalize(dto.getRecurrence() == null
+                ? ReminderRecurrence.read(entity.getRecurrenceJson()) : dto.getRecurrence(), parsed.instant()));
+        boolean sameSchedule = Objects.equals(originalTime, entity.getRemindAt())
+                && Objects.equals(originalTimezone, entity.getTimezone())
+                && (dto.getRecurrence() == null || Objects.equals(originalRule, entity.getRecurrenceJson()));
+        entity.setScheduleAnchorAt(sameSchedule && originalAnchor != null ? originalAnchor : entity.getRemindAt());
+        ReminderRecurrence.validateAnchor(entity.getRecurrenceJson(), parsed.instant(), parsed.zoneId());
+        entity.setScheduleVersion(entity.getScheduleVersion() == null ? 2 : entity.getScheduleVersion() + 1);
         entity.setAttemptCount(0);
         entity.setLastAttemptAt(null);
         entity.setDeliveredAt(null);
         entity.setLastErrorCode(null);
         entity.setLeaseToken(null);
         entity.setLeaseUntil(null);
-        if (StringUtils.isNotBlank(entity.getSourceRequestId())) {
-            entity.setRequestHash(requestHash(entity));
-        }
+        // source_request_id hashes the original create request, not the mutable execution cursor.
         UpdateWrapper<ReminderEntity> update = mutableUpdate(id)
+                .eq(originalVersion != null, "schedule_version", originalVersion)
                 .set("last_attempt_at", null)
                 .set("delivered_at", null)
                 .set("last_error_code", null)
@@ -220,6 +249,10 @@ public class ReminderServiceImpl implements ReminderService {
         candidate.setSpokenText(spokenText);
         candidate.setRemindAt(Date.from(parsed.instant()));
         candidate.setTimezone(parsed.zoneId().getId());
+        candidate.setScheduleAnchorAt(candidate.getRemindAt());
+        candidate.setRecurrenceJson(ReminderRecurrence.normalize(dto.getRecurrence(), parsed.instant()));
+        ReminderRecurrence.validateAnchor(candidate.getRecurrenceJson(), parsed.instant(), parsed.zoneId());
+        candidate.setScheduleVersion(1);
         candidate.setSource("VOICE");
         candidate.setSourceRequestId(requestId);
         candidate.setRequestHash(requestHash(candidate));
@@ -301,6 +334,7 @@ public class ReminderServiceImpl implements ReminderService {
         entity.setStatus(CANCELLED);
         entity.setNextAttemptAt(null);
         entity.setLastErrorCode(null);
+        taskDao.record(entity, CANCELLED, null, new Date());
     }
 
     private UpdateWrapper<ReminderEntity> mutableUpdate(String id) {
@@ -409,14 +443,16 @@ public class ReminderServiceImpl implements ReminderService {
     private String requestHash(ReminderEntity entity) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            for (String value : List.of(
+            List<String> values = new java.util.ArrayList<>(List.of(
                     StringUtils.defaultString(entity.getAgentId()),
                     StringUtils.defaultString(entity.getDeviceId()),
                     StringUtils.defaultString(entity.getTitle()),
                     StringUtils.defaultString(entity.getSpokenText()),
                     entity.getRemindAt().toInstant().toString(),
                     StringUtils.defaultString(entity.getTimezone()),
-                    StringUtils.defaultString(entity.getSource()))) {
+                    StringUtils.defaultString(entity.getSource())));
+            if (!"ONCE".equals(ReminderRecurrence.read(entity.getRecurrenceJson()).getFrequency())) values.add(entity.getRecurrenceJson());
+            for (String value : values) {
                 byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
                 digest.update(Integer.toString(bytes.length).getBytes(StandardCharsets.US_ASCII));
                 digest.update((byte) ':');
@@ -435,6 +471,7 @@ public class ReminderServiceImpl implements ReminderService {
         result.put("remindAt", ReminderTimeSupport.format(entity.getRemindAt(), entity.getTimezone()));
         result.put("timezone", entity.getTimezone());
         result.put("status", entity.getStatus());
+        result.put("recurrence", ReminderRecurrence.read(entity.getRecurrenceJson()));
         return result;
     }
 
@@ -447,6 +484,7 @@ public class ReminderServiceImpl implements ReminderService {
                 .title(entity.getTitle())
                 .remindAt(ReminderTimeSupport.format(entity.getRemindAt(), entity.getTimezone()))
                 .timezone(entity.getTimezone())
+                .recurrence(ReminderRecurrence.read(entity.getRecurrenceJson()))
                 .status(entity.getStatus())
                 .source(entity.getSource())
                 .deliveredAt(ReminderTimeSupport.format(entity.getDeliveredAt(), entity.getTimezone()))

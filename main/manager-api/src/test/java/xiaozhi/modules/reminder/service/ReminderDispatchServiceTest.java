@@ -29,12 +29,56 @@ import xiaozhi.modules.reminder.entity.ReminderEntity;
 class ReminderDispatchServiceTest {
     private final ReminderDao reminderDao = mock(ReminderDao.class);
     private final ReminderDeliveryExecutor deliveryExecutor = mock(ReminderDeliveryExecutor.class);
+    private final xiaozhi.modules.reminder.dao.ReminderTaskDao taskDao = mock(xiaozhi.modules.reminder.dao.ReminderTaskDao.class);
     private final ReminderDispatchService service = new ReminderDispatchService(
-            reminderDao, deliveryExecutor);
+            reminderDao, deliveryExecutor, taskDao, new xiaozhi.modules.reminder.config.ReminderTaskProperties(), new ReminderTaskMetrics());
+
+    @org.junit.jupiter.api.BeforeEach
+    void permit() { when(taskDao.acquirePermit(any(Integer.class))).thenReturn(1); }
 
     @AfterEach
     void closeWorkerPool() {
         service.close();
+    }
+
+    @Test
+    void busyExpiryLaneStillCleansHistoryWhenPeriodicTicksAreRejected() throws Exception {
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        when(taskDao.claimMaintenance(3, 1)).thenReturn(1);
+        when(taskDao.claimMaintenance(4, 10)).thenReturn(1);
+        when(reminderDao.selectList(any())).thenReturn(java.util.List.of(reminder()));
+        org.mockito.Mockito.doAnswer(invocation -> {
+            entered.countDown();
+            assertTrue(release.await(2, java.util.concurrent.TimeUnit.SECONDS));
+            return null;
+        }).when(deliveryExecutor).expire("reminder-a");
+        try {
+            service.recoverExpired();
+            assertTrue(entered.await(2, java.util.concurrent.TimeUnit.SECONDS));
+            for (int tick = 0; tick < 10; tick++) {
+                service.recoverExpired();
+                service.maintenance();
+            }
+            verify(taskDao, never()).cleanup(any(), any(Integer.class));
+        } finally {
+            release.countDown();
+        }
+        verify(taskDao, org.mockito.Mockito.timeout(2000)).cleanup(any(), eq(200));
+        verify(taskDao, times(1)).claimMaintenance(4, 10);
+        verify(deliveryExecutor, times(1)).expire("reminder-a");
+    }
+
+    @Test
+    void expiryFailureStillChecksSharedCleanupBudget() {
+        when(taskDao.claimMaintenance(3, 1)).thenReturn(1);
+        when(taskDao.claimMaintenance(4, 10)).thenReturn(1);
+        when(reminderDao.selectList(any())).thenReturn(java.util.List.of(reminder()));
+        doThrow(new IllegalStateException("failed expiry")).when(deliveryExecutor).expire("reminder-a");
+
+        service.recoverExpired();
+
+        verify(taskDao, org.mockito.Mockito.timeout(2000)).cleanup(any(), eq(200));
     }
 
     @Test

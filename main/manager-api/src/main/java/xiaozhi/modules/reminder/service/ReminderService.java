@@ -9,6 +9,7 @@ import xiaozhi.modules.reminder.vo.ReminderDeviceVO;
 import xiaozhi.modules.reminder.vo.ReminderVO;
 
 public interface ReminderService {
+    List<xiaozhi.modules.reminder.vo.ReminderExecutionVO> executions(String id, int limit);
     List<ReminderVO> list(String status);
 
     List<ReminderDeviceVO> listDevices();

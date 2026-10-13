@@ -44,6 +44,55 @@ import xiaozhi.modules.workspace.service.WorkspacePermissionService;
 
 class ReminderServiceImplTest {
     @Test
+    void titleEditPreservesRecurrencePhaseAndOriginalVoiceFingerprint() {
+        Fixture fixture = new Fixture();
+        ReminderEntity pending = fixture.pendingReminder();
+        Instant next = Instant.now().plusSeconds(3600);
+        Date originalAnchor = Date.from(next.minusSeconds(86400));
+        pending.setRemindAt(Date.from(next));
+        pending.setScheduleAnchorAt(originalAnchor);
+        pending.setTimezone("Asia/Shanghai");
+        pending.setScheduleVersion(3);
+        pending.setSourceRequestId("original-request");
+        pending.setRequestHash("original-fingerprint");
+        var rule = new xiaozhi.modules.reminder.dto.ReminderRecurrenceDTO();
+        rule.setFrequency("DAILY");
+        pending.setRecurrenceJson(xiaozhi.modules.reminder.service.ReminderRecurrence.normalize(rule, originalAnchor.toInstant()));
+        when(fixture.reminderDao.selectOne(any())).thenReturn(pending);
+        when(fixture.scope.requireWorkspaceDeviceForUpdate("device-db", "workspace-a")).thenReturn(fixture.device());
+        when(fixture.reminderDao.update(any(ReminderEntity.class), any())).thenReturn(1);
+        ReminderSaveDTO request = fixture.saveRequest();
+        request.setRemindAt(next.toString());
+        request.setTimezone("Asia/Shanghai");
+        request.setTitle("修改标题");
+
+        ReminderVO result = fixture.service.update("reminder-a", request);
+
+        assertEquals("DAILY", result.getRecurrence().getFrequency());
+        assertEquals(originalAnchor, pending.getScheduleAnchorAt());
+        assertEquals("original-fingerprint", pending.getRequestHash());
+        assertEquals(4, pending.getScheduleVersion());
+    }
+
+    @Test
+    void voiceRetryAfterRecurringCursorAdvancedStillUsesOriginalCreateFingerprint() {
+        Fixture fixture = new Fixture();
+        when(fixture.scope.requireRuntimeDeviceForUpdate("agent-a", "AA:BB:CC")).thenReturn(fixture.device());
+        fixture.assignInsertedId();
+        ReminderRuntimeActionDTO request = fixture.runtimeRequest();
+        var rule = new xiaozhi.modules.reminder.dto.ReminderRecurrenceDTO();
+        rule.setFrequency("DAILY");
+        request.setRecurrence(rule);
+        fixture.service.executeRuntimeAction("agent-a", request);
+        ArgumentCaptor<ReminderEntity> inserted = ArgumentCaptor.forClass(ReminderEntity.class);
+        verify(fixture.reminderDao).insert(inserted.capture());
+        ReminderEntity original = inserted.getValue();
+        original.setRemindAt(new Date(original.getRemindAt().getTime() + 86400000));
+        when(fixture.reminderDao.selectOne(any())).thenReturn(original);
+        assertEquals("reminder-a", fixture.service.executeRuntimeAction("agent-a", request).get("reminderId"));
+        verify(fixture.reminderDao, times(1)).insert(any(ReminderEntity.class));
+    }
+    @Test
     void miniProgramCreateUsesDatabaseDeviceIdAndDerivesAgentFromBinding() {
         Fixture fixture = new Fixture();
         when(fixture.scope.requireWorkspaceDeviceForUpdate("device-db", "workspace-a"))
@@ -364,7 +413,7 @@ class ReminderServiceImplTest {
         final ReminderScopeService scope = mock(ReminderScopeService.class);
         final WorkspacePermissionService permission = mock(WorkspacePermissionService.class);
         final ReminderServiceImpl service = new ReminderServiceImpl(
-                reminderDao, deviceDao, agentDao, scope, permission);
+                reminderDao, deviceDao, agentDao, scope, permission, mock(xiaozhi.modules.reminder.dao.ReminderTaskDao.class));
 
         Fixture() {
             when(permission.currentWorkspaceId()).thenReturn("workspace-a");

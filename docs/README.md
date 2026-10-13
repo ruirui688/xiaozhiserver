@@ -19,6 +19,7 @@ source_paths:
 | 本地启动与排障 | [本地开发](./development/local-dev-workflow.md) | 根目录 `scripts/dev doctor` |
 | 生产发布 | [ACR 生产部署](./deployment/private-docker-release.md) | [本地 Docker](./deployment/local-docker-deploy-guide.md) |
 | 实时语音、设备、OTA | [设备交互链路](./architecture/device-interaction-chain.md) | [设备多场景](./architecture/device-scene-management.md)、[固件与 OTA](./device/firmware-build.md) |
+| 日程、周期提醒、任务负载治理 | [服务端提醒任务中心](./architecture/reminder-task-center.md) | 安排与执行记录、滚动周期、限流重试、下发边界与验收 |
 | 人物资料、识别与机器人迎宾 | [人物资源与设备人脸同步](./architecture/person-resource-and-face-sync.md) | [机器人门口迎宾产品化](./architecture/robot-reception-productization.md)说明端云职责、接待数据与协议；再读[安全架构](./architecture/security-architecture.md) |
 | LLM、ASR、TTS 模型 | [模型管理](./models/model-management.md) | [模型评测与配置助手](./architecture/model-benchmark-and-assistant.md) |
 | 计费管理改版规划 | [2026-10-12 计费审计与改版方案](./reports/model-billing-audit-and-redesign-2026-10-12.md) | 账号费用、资源包诊断、工作空间/智能体/设备用量；报告不是已上线功能 |

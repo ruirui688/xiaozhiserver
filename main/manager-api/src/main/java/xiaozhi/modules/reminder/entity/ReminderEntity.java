@@ -22,6 +22,9 @@ public class ReminderEntity {
     private String spokenText;
     private Date remindAt;
     private String timezone;
+    private String recurrenceJson;
+    private Date scheduleAnchorAt;
+    private Integer scheduleVersion;
     private String status;
     private String source;
     private String sourceRequestId;

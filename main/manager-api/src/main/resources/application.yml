@@ -44,6 +44,17 @@ renren:
     exclude-urls:
 
 xiaozhi:
+  reminder:
+    # Hard bounds are applied by ReminderTaskProperties. All replicas must share the same limits.
+    scan-ms: ${XIAOZHI_REMINDER_SCAN_MS:1000}
+    batch-size: ${XIAOZHI_REMINDER_BATCH_SIZE:20}
+    workers: ${XIAOZHI_REMINDER_WORKERS:2}
+    dispatch-per-second: ${XIAOZHI_REMINDER_DISPATCH_PER_SECOND:4}
+    max-attempts: ${XIAOZHI_REMINDER_MAX_ATTEMPTS:8}
+    # <= 1800 seconds; Python receipt retention must be >= 3600 seconds.
+    grace-seconds: ${XIAOZHI_REMINDER_GRACE_SECONDS:600}
+    retention-days: ${XIAOZHI_REMINDER_RETENTION_DAYS:30}
+    cleanup-batch: ${XIAOZHI_REMINDER_CLEANUP_BATCH:200}
   billing:
     outbox-root: ${XIAOZHI_BILLING_OUTBOX_ROOT:uploadfile/billing-outbox}
     volcengine:

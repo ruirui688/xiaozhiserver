@@ -15,6 +15,7 @@ public class ReminderVO {
     String title;
     String remindAt;
     String timezone;
+    xiaozhi.modules.reminder.dto.ReminderRecurrenceDTO recurrence;
     String status;
     String source;
     String deliveredAt;
