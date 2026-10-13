@@ -14,7 +14,7 @@
         <section class="allowance-summary" aria-label="账户额度摘要">
           <div class="allowance-context">
             <span class="allowance-payer">{{ payerLabel }}</span>
-            <el-tag size="mini" :type="summary.serviceStatus === 'READY' ? 'success' : 'warning'">{{ summary.serviceStatus === 'READY' ? '服务已就绪' : '服务待就绪' }}</el-tag>
+            <el-tag class="allowance-service-status" size="mini" :type="serviceState.type">{{ serviceState.label }}</el-tag>
             <el-button class="allowance-limit-action" type="text" size="small" icon="el-icon-setting" @click="editLimits">空间上限</el-button>
           </div>
           <div v-if="balance" class="allowance-totals">
@@ -23,10 +23,11 @@
             <div><span>账户累计已用</span><strong><el-tooltip :content="exactAmount(balance.spent)" :disabled="amount(balance.spent) === '—'" popper-class="allowance-amount-tooltip" placement="top"><button type="button" class="allowance-money" :class="{ 'allowance-money-range': amount(balance.spent).includes('小于') }" :disabled="amount(balance.spent) === '—'" aria-label="查看账户累计已用的精确金额" @click="$event.currentTarget.focus()" @keydown.esc.stop="$event.currentTarget.blur()">{{ amount(balance.spent) }}<small>元</small></button></el-tooltip></strong></div>
           </div>
           <p class="allowance-summary-note">{{ balance ? '统计本人账户下的全部工作空间 · 额度由平台统一发放' : '使用负责人的服务额度；账户余额仅本人可见。' }}</p>
+          <p v-if="serviceState.description" class="allowance-service-note">{{ serviceState.description }}</p>
         </section>
         <el-tabs v-model="tab" class="allowance-tabs">
           <el-tab-pane label="用量明细" name="usage" lazy>
-            <BillingWorkspacePanel v-if="tab === 'usage'" mode="usage" :compact="true" :show-supplier-costs="false" route-path="/allowance" />
+            <UserUsagePanel v-if="tab === 'usage'" :key="summary.workspaceId + ':' + usageRevision" :workspace-id="summary.workspaceId" />
           </el-tab-pane>
           <el-tab-pane label="我的额度流水" name="ledger" lazy>
             <section v-if="tab === 'ledger'" class="allowance-panel">
@@ -70,14 +71,15 @@
 </template>
 <script>
 import HeaderBar from '@/components/HeaderBar.vue';
-import BillingWorkspacePanel from '@/components/billing/BillingWorkspacePanel.vue';
+import UserUsagePanel from '@/components/allowance/UserUsagePanel.vue';
 import { userPlatform, platformRequest } from '@/apis/platform';
-import { allowanceAmount, allowanceDisplayAmount, allowancePayerLabel, visibleAllowance } from '@/utils/allowance';
+import { allowanceAmount, allowanceDisplayAmount, allowancePayerLabel, visibleAllowance, allowanceServiceState } from '@/utils/allowance';
+import { userUsagePage } from '@/utils/userUsage';
 export default {
-  components: { HeaderBar, BillingWorkspacePanel },
+  components: { HeaderBar, UserUsagePanel },
   data() {
     return {
-      summary: null, loading: false, error: '', tab: 'usage', generation: 0,
+      summary: null, loading: false, error: '', tab: 'usage', generation: 0, usageRevision: 0,
       ledger: [], ledgerLoading: false, ledgerError: '', page: 1, total: 0, ledgerGeneration: 0,
       limits: null, limitDialog: false, limitLoading: false, limitError: '', limitForm: { totalLimit: '', dailyLimit: '' }, saving: false,
       trial: null
@@ -85,7 +87,8 @@ export default {
   },
   computed: {
     balance() { return visibleAllowance(this.summary); },
-    payerLabel() { return allowancePayerLabel(this.summary); }
+    payerLabel() { return allowancePayerLabel(this.summary); },
+    serviceState() { return allowanceServiceState(this.summary); }
   },
   created() { this.load(); },
   beforeDestroy() { this.generation++; this.ledgerGeneration++; },
@@ -118,6 +121,7 @@ export default {
       finally { if (generation === this.generation) this.loading = false; }
     },
     refresh() {
+      this.usageRevision++;
       this.load();
       if (this.tab === 'ledger') { this.loadLedger(); this.loadTrial(); }
     },
@@ -127,7 +131,7 @@ export default {
       this.ledgerLoading = true; this.ledgerError = ''; this.ledger = []; this.total = 0;
       try {
         const result = await userPlatform.ledger({ page: this.page, limit: 20 });
-        if (generation === this.ledgerGeneration) { this.ledger = result.list || []; this.total = result.total || 0; }
+        if (generation === this.ledgerGeneration) { const records = userUsagePage(result); this.ledger = records.list; this.total = records.total; }
       } catch (error) { if (generation === this.ledgerGeneration) this.ledgerError = error.message; }
       finally { if (generation === this.ledgerGeneration) this.ledgerLoading = false; }
     },
@@ -160,6 +164,7 @@ export default {
 };
 </script>
 <style scoped>
+.allowance-service-note{font-size:12px;line-height:1.7;color:#718096;margin:6px 0 0}
 .allowance-money{font:inherit;color:inherit;line-height:inherit;background:none;border:0;padding:0;text-align:inherit;overflow-wrap:anywhere;cursor:pointer}.allowance-money small{font-size:11px;margin-left:4px}.allowance-money:disabled{cursor:default}.allowance-money:focus-visible{outline:2px solid #486ce7;outline-offset:3px;border-radius:3px}.allowance-totals .allowance-money-range{font-size:12px;line-height:1.5}
 .allowance-page{min-height:100vh;background:#f5f7fb;text-align:left;color:#34465d}.allowance-main{max-width:1360px;margin:auto;padding:22px 26px 36px}.allowance-heading,.allowance-actions{display:flex;align-items:center;justify-content:space-between;gap:10px}.allowance-heading{margin-bottom:16px}.allowance-heading h1{font-size:23px;font-weight:600;margin:0;white-space:nowrap}.allowance-actions .el-button+.el-button{margin-left:0}.allowance-summary{background:#fff;border:1px solid #e3e9f1;border-radius:12px;padding:12px 20px}.allowance-context{display:flex;align-items:center;flex-wrap:wrap;gap:8px;color:#718096;font-size:12px}.allowance-payer{min-width:0}.allowance-limit-action{margin-left:auto;padding:3px 0}.allowance-totals{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:20px;margin-top:12px}.allowance-totals>div{min-width:0}.allowance-totals span{display:block;font-size:12px;color:#8390a2}.allowance-totals strong{display:block;margin-top:5px;font-size:23px;line-height:1.3;font-weight:500;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.allowance-totals small{font-size:11px;font-weight:400;margin-left:5px;color:#8290a2}.allowance-available strong{color:#486ce7}.allowance-summary-note{margin:9px 0 0;color:#8995a6;font-size:11px;line-height:1.6}.allowance-tabs{margin-top:14px}.allowance-tabs ::v-deep .el-tabs__header{margin-bottom:12px}.allowance-tabs ::v-deep .el-tabs__item{font-size:13px}.allowance-panel{background:white;border:1px solid #e3e9f1;border-radius:12px;padding:16px}.allowance-panel-note,.allowance-trial{font-size:12px;line-height:1.7;color:#8390a2;margin:0 0 12px}.allowance-trial{color:#678366}.allowance-trial i{margin-right:5px}.allowance-panel .el-pagination{text-align:right;overflow-x:auto;margin-top:14px}.allowance-error{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#fff5f5;border:1px solid #f2dcdc;color:#aa5656;padding:10px 14px;border-radius:8px;font-size:13px;line-height:1.6;margin-bottom:12px}.allowance-error .el-button{flex-shrink:0;padding:4px}.allowance-loading{padding:30px 0;color:#8c9aaa;font-size:13px}.allowance-dialog-note{color:#8190a3;font-size:12px;line-height:1.8;margin:0 0 18px}.allowance-limits{display:grid;grid-template-columns:135px minmax(0,1fr);gap:12px;font-size:13px;margin:0 0 24px}.allowance-limits dt{color:#8190a3}.allowance-limits dd{margin:0;overflow-wrap:anywhere}
 @media(max-width:600px){.allowance-main{padding:16px 12px 24px}.allowance-heading{gap:8px;margin-bottom:12px}.allowance-heading h1{font-size:20px}.allowance-actions{gap:6px}.allowance-actions .el-button{padding:9px}.allowance-summary{padding:12px}.allowance-context{gap:6px}.allowance-payer{flex-basis:100%}.allowance-totals{gap:10px;margin-top:10px}.allowance-totals span{font-size:10px}.allowance-totals strong{font-size:18px}.allowance-totals small{font-size:10px;margin-left:3px}.allowance-summary-note{font-size:10px}.allowance-panel{padding:12px}.allowance-tabs ::v-deep .el-tabs__item{padding:0 14px;font-size:12px}.allowance-limits{grid-template-columns:1fr;gap:5px}.allowance-limits dd{margin-bottom:8px}}

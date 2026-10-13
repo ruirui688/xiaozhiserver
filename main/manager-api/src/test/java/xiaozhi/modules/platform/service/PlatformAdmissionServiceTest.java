@@ -65,6 +65,33 @@ class PlatformAdmissionServiceTest {
     Settle usage(Permit permit,int quantity) {return new Settle(permit.reservationId(),permit.permitToken(),"SUCCESS",true,Map.of("input_tokens",Integer.toString(quantity),"output_tokens","0"),"provider-test-request");}
     BigDecimal balance(String field,long user){return jdbc.queryForObject("SELECT "+field+" FROM ai_platform_account WHERE user_id=?",BigDecimal.class,user);}
 
+    @Test void summaryDistinguishesFrozenExhaustedUnconfiguredAndReadyWithoutExposingMemberBalance() {
+        assertEquals("READY",responsibilities.summary("personal",1).get("serviceStatus"));
+        jdbc.update("UPDATE ai_platform_channel SET status='DISABLED'");
+        assertEquals("PLATFORM_SERVICE_NOT_READY",responsibilities.summary("personal",1).get("serviceStatus"));
+        jdbc.update("UPDATE ai_platform_account SET reserved=granted WHERE user_id=1");
+        assertEquals("ALLOWANCE_EXHAUSTED",responsibilities.summary("personal",1).get("serviceStatus"));
+        jdbc.update("UPDATE ai_platform_account SET frozen=1 WHERE user_id=1");
+        var member=responsibilities.summary("team-a",2);
+        assertEquals("PAYER_FROZEN",member.get("serviceStatus"));assertEquals(false,member.get("canViewBalance"));assertNull(member.get("allowance"));
+    }
+    @Test void summaryRecognizesTotalAndDailyWorkspaceLimitsIncludingReservedUsage() {
+        responsibilities.limits(new WorkspaceLimits("personal","0",null,1),1);
+        assertEquals("WORKSPACE_ALLOWANCE_LIMIT",responsibilities.summary("personal",1).get("serviceStatus"));
+        responsibilities.limits(new WorkspaceLimits("personal",null,"2",1),1);
+        admission.admit(request("personal","fully-reserved-limit",2000));
+        assertEquals("WORKSPACE_ALLOWANCE_LIMIT",responsibilities.summary("personal",1).get("serviceStatus"));
+        assertEquals("READY",responsibilities.summary("team-a",1).get("serviceStatus"));
+    }
+    @Test void platformSettlementAndSummaryWorkWithoutAnySupplierInvoiceTables() {
+        Permit call=permit(admission.admit(request("personal","invoice-independent",2000)));admission.start(call);
+        var settled=admission.settle(usage(call,750));assertEquals("SETTLED",settled.get("state"));
+        assertEquals(0,new BigDecimal("0.75").compareTo(balance("spent",1)));
+        var summary=responsibilities.summary("personal",1);assertEquals("READY",summary.get("serviceStatus"));
+        assertEquals(0,new BigDecimal("0.75").compareTo(new BigDecimal(summary.get("totalSpent").toString())));
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE LOWER(TABLE_NAME)='ai_billing_bill'",Integer.class));
+    }
+
     @Test void concurrentTeamsCannotOverspendSharedPayer() throws Exception {
         var start=new CountDownLatch(1);List<Future<Boolean>> tasks=new ArrayList<>();
         try(var workers=Executors.newFixedThreadPool(2)) {

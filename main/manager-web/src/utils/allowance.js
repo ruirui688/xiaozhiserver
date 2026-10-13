@@ -30,6 +30,15 @@ export function allowancePayerLabel(summary) {
 export function visibleAllowance(summary) {
   return summary?.canViewBalance === true && summary.allowance ? summary.allowance : null;
 }
+export function allowanceServiceState(summary) {
+  return ({
+    READY: { label: '服务已就绪', type: 'success', description: '' },
+    PAYER_FROZEN: { label: '服务账户已暂停', type: 'danger', description: '当前空间负责人的服务账户已暂停，请联系平台处理。' },
+    ALLOWANCE_EXHAUSTED: { label: '可用额度不足', type: 'warning', description: '当前空间负责人的可用额度已用完，新的付费调用暂时无法开始。' },
+    WORKSPACE_ALLOWANCE_LIMIT: { label: '当前空间已达使用上限', type: 'warning', description: '当前工作空间的总上限或今日上限已用完，请联系负责人调整。' },
+    PLATFORM_SERVICE_NOT_READY: { label: '平台服务待开通', type: 'info', description: '平台尚未开通可用的模型服务，请联系平台处理。' }
+  })[summary?.serviceStatus] || { label: '服务状态待确认', type: 'info', description: '暂未确认模型服务状态，请刷新后重试。' };
+}
 export function platformErrorMessage(value) {
   return ({
     ALLOWANCE_EXHAUSTED: '服务额度已用完，请联系平台运维',

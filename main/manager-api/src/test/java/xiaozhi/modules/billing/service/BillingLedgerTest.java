@@ -131,6 +131,20 @@ class BillingLedgerTest {
         BillingFilter filter=filter();filter.setAgentId("agent-a");assertEquals(0,queries.events(filter).getTotal());
     }
 
+    @Test void userOptionsAndUsageWorkWithoutSupplierInvoiceTablesOrProcurementFields() {
+        accept(event(deviceContext(),"event-user-only-0001"));
+        jdbc.execute("DROP TABLE ai_billing_bill");
+        jdbc.execute("ALTER TABLE sys_workspace ADD name VARCHAR(255)");
+        UserDetail user=new UserDetail();user.setId(1L);user.setAudience("USER");
+        security.when(SecurityUser::getUser).thenReturn(user);
+        var options=queries.options();assertEquals("workspace-a",options.get("workspaceId"));
+        assertFalse(((List<?>)options.get("providers")).isEmpty());
+        assertFalse(((List<?>)options.get("agents")).isEmpty());assertFalse(((List<?>)options.get("devices")).isEmpty());
+        for(String field:List.of("volcengine","volcengineSyncEnabled","syncStatus","lastSyncAt","meteringStatus"))assertFalse(options.containsKey(field));
+        assertEquals(1,queries.events(filter()).getTotal());assertEquals(1,queries.groups(filter(),"agent").getTotal());
+        verify(permissions,atLeastOnce()).requireRead("workspace-a");
+    }
+
     @Test void effectiveBindingRejectsCrossWorkspaceAndOverlapAndCanEndAfterConsumedPeriod() {
         var binding=binding();binding.setAgentId("agent-b");assertThrows(RenException.class,()->bindings.save(binding));
         binding.setAgentId("agent-a");var saved=tx.execute(status->bindings.save(binding));

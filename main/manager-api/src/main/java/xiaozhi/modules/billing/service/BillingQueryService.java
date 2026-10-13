@@ -36,13 +36,6 @@ public class BillingQueryService {
         result.put("scope","WORKSPACE");result.put("workspaceName",workspaceName(workspace));
         result.put("supportedFilters",Map.of("usage",List.of("startDate","endDate","provider","serviceType","agentId","deviceId","modelId","keyword","board","purpose")));
         result.put("trend", jdbc.queryForList("SELECT DATE_FORMAT(DATE_ADD(e.started_at,INTERVAL 8 HOUR),'%Y-%m-%d') date,COUNT(*) callCount FROM ai_billing_usage_event e" + scope.text + " GROUP BY date ORDER BY date", scope.args.toArray()));
-        result.put("lastSyncAt", null);
-        result.put("lastSyncedAt",result.get("lastSyncAt"));
-        result.put("coverageStatus", "仅展示已采集用量；未返回的供应商用量不补零");
-        String syncStatus=result.get("lastSyncAt")==null ? "NO_ATTRIBUTED_RECORDS" : "ATTRIBUTED_RECORDS_ONLY";
-        result.put("syncStatus",syncStatus);
-        result.put("syncScope","WORKSPACE_ATTRIBUTED_RECORDS");
-        result.put("meteringStatus",Map.of("status","COLLECTED_RECORDS_ONLY"));
         return result;
     }
 
@@ -50,11 +43,9 @@ public class BillingQueryService {
         if (!Set.of("agent", "device").contains(groupBy)) throw new RenException("分组参数无效");
         String workspace = workspace(); filter.validate();
         String column = groupBy + "_id";
-        Sql events = eventScope(workspace, filter), bills = billScope(workspace, filter);
-        boolean unsupportedCosts=true;
+        Sql events = eventScope(workspace, filter);
         String candidates = "SELECT DISTINCT e." + column + " id FROM ai_billing_usage_event e" + events.text;
         List<Object> params = new ArrayList<>(events.args);
-        if(!unsupportedCosts){candidates+=" UNION SELECT b." + column + " id FROM ai_billing_bill b" + bills.text;params.addAll(bills.args);}
         long count = jdbc.queryForObject("SELECT COUNT(*) FROM (" + candidates + ") groups_all WHERE id IS NOT NULL", Long.class, params.toArray());
         List<Object> pageArgs = new ArrayList<>(params); pageArgs.add(filter.getLimit()); pageArgs.add((filter.getPage()-1)*filter.getLimit());
         List<Map<String, Object>> rows = jdbc.queryForList("SELECT id FROM (" + candidates + ") groups_all WHERE id IS NOT NULL ORDER BY id LIMIT ? OFFSET ?", pageArgs.toArray());
@@ -112,13 +103,11 @@ public class BillingQueryService {
         String workspace = workspace(); Map<String, Object> result = new LinkedHashMap<>();
         result.put("workspaceId", workspace); result.put("canManage", canManage());
         result.put("workspaceName",workspaceName(workspace));result.put("scope","WORKSPACE");
-        result.put("providers", jdbc.queryForList("SELECT provider FROM ai_billing_usage_event WHERE workspace_id=? UNION SELECT provider FROM ai_billing_bill WHERE workspace_id=? ORDER BY provider", String.class, workspace, workspace));
+        result.put("providers", jdbc.queryForList("SELECT DISTINCT provider FROM ai_billing_usage_event WHERE workspace_id=? ORDER BY provider", String.class, workspace));
         result.put("serviceTypes", List.of("LLM", "ASR", "TTS", "REALTIME", "EMBEDDING", "OTHER"));
-        result.put("agents", jdbc.queryForList("SELECT id,COALESCE(MAX(name),id) name FROM (SELECT agent_id id,agent_name name FROM ai_billing_usage_event WHERE workspace_id=? AND agent_id IS NOT NULL UNION ALL SELECT id,agent_name name FROM ai_agent WHERE workspace_id=? UNION ALL SELECT agent_id id,NULL name FROM ai_billing_bill WHERE workspace_id=? AND agent_id IS NOT NULL) history GROUP BY id",workspace,workspace,workspace));
-        result.put("devices", jdbc.queryForList("SELECT id,COALESCE(MAX(name),id) name,MAX(board) board FROM (SELECT device_id id,device_name name,device_board board FROM ai_billing_usage_event WHERE workspace_id=? AND device_id IS NOT NULL UNION ALL SELECT id,alias name,board FROM ai_device WHERE workspace_id=? UNION ALL SELECT device_id id,NULL name,NULL board FROM ai_billing_bill WHERE workspace_id=? AND device_id IS NOT NULL) history GROUP BY id",workspace,workspace,workspace));
+        result.put("agents", jdbc.queryForList("SELECT id,COALESCE(MAX(name),id) name FROM (SELECT agent_id id,agent_name name FROM ai_billing_usage_event WHERE workspace_id=? AND agent_id IS NOT NULL UNION ALL SELECT id,agent_name name FROM ai_agent WHERE workspace_id=?) history GROUP BY id",workspace,workspace));
+        result.put("devices", jdbc.queryForList("SELECT id,COALESCE(MAX(name),id) name,MAX(board) board FROM (SELECT device_id id,device_name name,device_board board FROM ai_billing_usage_event WHERE workspace_id=? AND device_id IS NOT NULL UNION ALL SELECT id,alias name,board FROM ai_device WHERE workspace_id=?) history GROUP BY id",workspace,workspace));
         result.put("models", jdbc.queryForList("SELECT model_id id,COALESCE(MAX(model_name),model_id) name FROM ai_billing_usage_event WHERE workspace_id=? GROUP BY model_id", workspace));
-        result.put("volcengine", Map.of("enabled", volcengine.enabled(), "accountRef", canManage() ? volcengine.accountRef() : ""));
-        result.put("volcengineSyncEnabled",volcengine.enabled());
         return result;
     }
 

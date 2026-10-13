@@ -30,9 +30,17 @@ public class PlatformResponsibilityService {
         Map<String,Object> balance=jdbc.queryForMap("SELECT granted,spent,reserved,frozen,(granted-spent-reserved) AS available FROM ai_platform_account WHERE user_id=?",payer);
         Map<String,Object> totals=usage(workspaceId,"TOTAL"),daily=usage(workspaceId,java.time.LocalDate.now(java.time.ZoneId.of("Asia/Shanghai")).toString());
         balance.put("status",number(balance.get("frozen"))!=0?"FROZEN":"ACTIVE");balance.put("currency","CNY");
+        List<Map<String,Object>> services=channels.availability();
+        String serviceStatus=number(balance.get("frozen"))!=0?"PAYER_FROZEN"
+            :PlatformAccountService.available(balance).signum()<=0?"ALLOWANCE_EXHAUSTED"
+            :limitReached(row.get("total_limit"),totals)||limitReached(row.get("daily_limit"),daily)?"WORKSPACE_ALLOWANCE_LIMIT"
+            :services.stream().anyMatch(service->"READY".equals(service.get("status")))?"READY":"PLATFORM_SERVICE_NOT_READY";
         return publicMap(map("workspaceId",workspaceId,"ownerUserId",payer,"responsibleUserId",payer,"payerUserId",payer,"responsibilityVersion",row.get("version"),
-            "canViewBalance",payer==userId,"canManage",payer==userId,"allowance",payer==userId?balance:null,"serviceStatus",number(balance.get("frozen"))==0&&PlatformAccountService.available(balance).signum()>0&&channels.availability().stream().anyMatch(c->"READY".equals(c.get("status")))?"READY":"PENDING",
-            "totalSpent",totals.get("spent"),"totalReserved",totals.get("reserved"),"dailySpent",daily.get("spent"),"dailyReserved",daily.get("reserved"),"services",channels.availability(),"totalLimit",row.get("total_limit"),"dailyLimit",row.get("daily_limit")));
+            "canViewBalance",payer==userId,"canManage",payer==userId,"allowance",payer==userId?balance:null,"serviceStatus",serviceStatus,
+            "totalSpent",totals.get("spent"),"totalReserved",totals.get("reserved"),"dailySpent",daily.get("spent"),"dailyReserved",daily.get("reserved"),"services",services,"totalLimit",row.get("total_limit"),"dailyLimit",row.get("daily_limit")));
+    }
+    private static boolean limitReached(Object limit,Map<String,Object> usage) {
+        return limit!=null&&amount(usage.get("spent")).add(amount(usage.get("reserved"))).compareTo(amount(limit))>=0;
     }
     private Map<String,Object> usage(String workspace,String period) {
         List<Map<String,Object>> rows=jdbc.queryForList("SELECT spent,reserved FROM ai_platform_workspace_usage WHERE workspace_id=? AND period=?",workspace,period);

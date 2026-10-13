@@ -17,6 +17,10 @@ export function platformRequest(method, path, data = {}, options = {}) {
 export const userPlatform = {
   account: () => platformRequest('GET', '/user/platform/account'),
   summary: workspaceId => platformRequest('GET', '/user/platform/summary', { workspaceId }),
+  usageOptions: params => platformRequest('GET', '/user/platform/usage/options', params),
+  usageOverview: params => platformRequest('GET', '/user/platform/usage/overview', params),
+  usageGroups: params => platformRequest('GET', '/user/platform/usage/groups', params),
+  usageEvents: params => platformRequest('GET', '/user/platform/usage/events', params),
   ledger: params => platformRequest('GET', '/user/platform/ledger', params),
   workspaceLimits: workspaceId => platformRequest('GET', '/user/platform/workspace-limits', { workspaceId }),
   saveWorkspaceLimits: data => platformRequest('PUT', '/user/platform/workspace-limits', data),
