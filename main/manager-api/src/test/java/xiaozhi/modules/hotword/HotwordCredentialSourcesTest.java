@@ -4,17 +4,15 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import java.util.List;
-import cn.hutool.json.JSONObject;
 import org.junit.jupiter.api.Test;
 import xiaozhi.common.exception.RenException;
 import xiaozhi.modules.model.dao.ModelConfigDao;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
-import xiaozhi.modules.model.service.impl.ModelRuntimeAssembler;
 
 class HotwordCredentialSourcesTest {
     final ModelConfigDao models = mock(ModelConfigDao.class);
-    final ModelRuntimeAssembler runtime = mock(ModelRuntimeAssembler.class);
-    final HotwordCredentialSources sources = new HotwordCredentialSources(models,runtime);
+    final HotwordChannelCredentials credentials = mock(HotwordChannelCredentials.class);
+    final HotwordCredentialSources sources = new HotwordCredentialSources(models,credentials);
 
     @Test void sameKeyDeduplicatesAcrossAdaptersRegardlessOfEnableOrTestStatus() {
         var stream = model("stream","doubao_stream"," fixture ",0,0);
@@ -36,7 +34,7 @@ class HotwordCredentialSourcesTest {
     @Test void unavailableConfigurationDoesNotHideHealthySources() {
         var broken = model("broken","doubao_stream","bad",1,1);
         var good = model("good","doubao_recording","fixture",1,1);
-        when(runtime.buildTypedConfig(broken)).thenThrow(new IllegalStateException("sensitive body"));
+        when(credentials.keyForModel("broken")).thenThrow(new IllegalStateException("sensitive body"));
         when(models.selectList(any())).thenReturn(List.of(broken,good));
         assertTrue(sources.discover().unavailable());
         assertEquals(1,sources.discover().sources().size());
@@ -45,6 +43,7 @@ class HotwordCredentialSourcesTest {
     @Test void unsupportedAndPlaceholderCredentialsAreExcluded() {
         var unrelated = model("other","funasr","fixture",1,1);
         var placeholder = model("placeholder","doubao_stream","你的API Key",1,1);
+        when(credentials.keyForModel("placeholder")).thenThrow(new RenException("凭据不可用"));
         when(models.selectList(any())).thenReturn(List.of(unrelated,placeholder));
         assertTrue(sources.discover().sources().isEmpty());
     }
@@ -52,7 +51,7 @@ class HotwordCredentialSourcesTest {
         var model = new ModelConfigEntity(); model.setId(id); model.setModelType("asr");
         model.setAdapterCode(adapter); model.setIsEnabled(enabled); model.setTestStatus(tested);
         when(models.selectById(id)).thenReturn(model);
-        when(runtime.buildTypedConfig(model)).thenReturn(new JSONObject().set("type",adapter).set("api_key",key));
+        when(credentials.keyForModel(id)).thenReturn(key.trim());
         return model;
     }
 }

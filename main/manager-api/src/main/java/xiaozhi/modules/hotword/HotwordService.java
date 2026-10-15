@@ -50,7 +50,7 @@ public class HotwordService {
                 ? (discovery.unavailable() ? "UNAVAILABLE" : "NOT_CONFIGURED") : "READY";
         String message = switch (status) {
             case "NO_PERMISSION" -> "供应商词库导入尚未接入独立凭据，请使用工作空间热词编辑或批量粘贴词条";
-            case "NOT_CONFIGURED" -> "尚未配置火山来源，请管理员在模型配置中配置豆包语音 API Key";
+            case "NOT_CONFIGURED" -> "尚未配置火山来源，请联系平台管理员配置豆包语音通道";
             case "UNAVAILABLE" -> "火山配置暂不可用，请管理员检查配置";
             default -> discovery.unavailable() ? "部分火山配置暂不可用" : "";
         };
@@ -171,8 +171,8 @@ public class HotwordService {
                 if (agent == null || !Objects.equals(agent.getWorkspaceId(), row.get("workspace_id")))
                     throw new RenException("智能体不属于当前工作空间");
                 permission.requireWrite(agent.getWorkspaceId());
-                if (!remove && !Objects.equals(sources.forModel(agent.getAsrModelId(), true), sourceId(row)))
-                    throw new RenException("智能体须使用已启用且测试通过、与词库火山来源兼容的识别模型");
+                if (!remove && !Objects.equals(sources.requireForModel(agent.getAsrModelId()), sourceId(row)))
+                    throw new RenException("热词库与当前识别模型的平台语音通道来源不一致，请选择同一来源的热词库");
                 List<String> candidates = new ArrayList<>(agent.getAsrHotwordIds() == null ? List.of() : agent.getAsrHotwordIds());
                 candidates.removeIf(ownedIds::contains);
                 String active = agent.getAsrHotwordId();

@@ -3,19 +3,17 @@ package xiaozhi.modules.hotword;
 import java.util.*;
 import org.springframework.stereotype.Service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import cn.hutool.json.JSONObject;
 import lombok.RequiredArgsConstructor;
 import xiaozhi.common.exception.RenException;
 import xiaozhi.modules.model.dao.ModelConfigDao;
 import xiaozhi.modules.model.entity.ModelConfigEntity;
-import xiaozhi.modules.model.service.impl.ModelRuntimeAssembler;
 
 /** Resolves existing configured credentials in memory; hotword rows store only fingerprints. */
 @Service
 @RequiredArgsConstructor
 public class HotwordCredentialSources {
     private final ModelConfigDao models;
-    private final ModelRuntimeAssembler runtime;
+    private final HotwordChannelCredentials credentials;
 
     public static final class Source {
         private final String id;
@@ -41,6 +39,7 @@ public class HotwordCredentialSources {
             return new Discovery(List.of(), true);
         }
         for (ModelConfigEntity model : configured) {
+            if (!supported(model)) continue;
             try {
                 String key = configuredKey(model, false);
                 if (key != null) keys.put(HotwordService.digest(key), key);
@@ -71,14 +70,28 @@ public class HotwordCredentialSources {
         }
     }
 
+    /** Saving a binding needs actionable, fixed errors instead of a null catch-all. */
+    public String requireForModel(String modelId) {
+        ModelConfigEntity model;
+        try {
+            model = modelId == null || modelId.isBlank() ? null : models.selectById(modelId);
+        } catch (RuntimeException unavailable) {
+            throw new RenException("识别模型配置暂不可用，请稍后重试");
+        }
+        if (!supported(model)) throw new RenException("当前识别模型不支持火山热词库，请选择豆包流式或录音识别模型");
+        if (!Objects.equals(1, model.getIsEnabled())) throw new RenException("当前识别模型尚未启用，请联系平台管理员启用");
+        if (!Objects.equals(1, model.getTestStatus())) throw new RenException("当前识别模型尚未测试通过，请联系平台管理员完成测试");
+        return HotwordService.digest(credentials.keyForModel(modelId));
+    }
+
     private String configuredKey(ModelConfigEntity model, boolean applying) {
-        if (model == null || !"ASR".equalsIgnoreCase(model.getModelType())) return null;
+        if (!supported(model)) return null;
         if (applying && (!Objects.equals(1, model.getIsEnabled()) || !Objects.equals(1, model.getTestStatus()))) return null;
-        JSONObject config = runtime.buildTypedConfig(model);
-        if (config == null || !Set.of("doubao_stream", "doubao_recording")
-                .contains(config.getStr("type", model.getAdapterCode()) == null ? "" : config.getStr("type", model.getAdapterCode()))) return null;
-        String key = config.getStr("api_key");
-        if (key == null || key.isBlank() || key.contains("你的") || key.contains("***")) return null;
-        return key.trim();
+        return credentials.keyForModel(model.getId());
+    }
+
+    private static boolean supported(ModelConfigEntity model) {
+        return model != null && "ASR".equalsIgnoreCase(model.getModelType())
+                && ("doubao_stream".equals(model.getAdapterCode()) || "doubao_recording".equals(model.getAdapterCode()));
     }
 }

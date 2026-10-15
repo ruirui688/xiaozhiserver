@@ -44,6 +44,7 @@ class HotwordServiceTest {
         when(sources.require("source")).thenReturn(source);
         when(sources.discover()).thenReturn(new HotwordCredentialSources.Discovery(List.of(source),false));
         when(sources.forModel("model",true)).thenReturn("source");
+        when(sources.requireForModel("model")).thenReturn("source");
     }
     @Test void configuredSourcesAreExposedWithoutRequiringAnEnabledModel() {
         var options = service.sourceOptions();
@@ -88,7 +89,7 @@ class HotwordServiceTest {
     @Test void appliesToDifferentModelUsingTheSameSource() {
         AgentEntity agent = new AgentEntity(); agent.setId("agent"); agent.setWorkspaceId("workspace");
         agent.setAsrModelId("recording-model");
-        when(sources.forModel("recording-model",true)).thenReturn("source");
+        when(sources.requireForModel("recording-model")).thenReturn("source");
         when(agents.selectById("agent")).thenReturn(agent);
         service.apply("local",List.of("agent"),false);
         verify(db).update(startsWith("UPDATE ai_agent SET"),eq("old"),eq("[\"old\"]"),eq("agent"),eq("workspace"));

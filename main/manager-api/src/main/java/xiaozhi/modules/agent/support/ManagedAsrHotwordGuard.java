@@ -49,9 +49,16 @@ public class ManagedAsrHotwordGuard {
             if (!Objects.equals(workspaceId, row.get("workspace_id"))) {
                 throw new RenException("无权使用其他工作空间的热词库");
             }
+        }
+        if (rows.isEmpty()) return;
+        String modelSource = sources.requireForModel(modelId);
+        for (var row : rows) {
             String sourceId = (String) row.get("credential_fingerprint");
-            if (sourceId == null || !sourceId.equals(sources.forModel(modelId, true))) {
-                throw new RenException("热词库与当前识别模型的火山来源不兼容，或模型尚未启用并测试通过");
+            if (sourceId == null || sourceId.isBlank()) {
+                throw new RenException("热词库缺少可验证的火山来源，请联系管理员核对原词库配置");
+            }
+            if (!sourceId.equals(modelSource)) {
+                throw new RenException("热词库与当前识别模型的平台语音通道来源不一致，请选择同一来源的热词库");
             }
         }
     }

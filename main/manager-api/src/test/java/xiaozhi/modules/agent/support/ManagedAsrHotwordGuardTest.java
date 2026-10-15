@@ -50,7 +50,7 @@ class ManagedAsrHotwordGuardTest {
 
     @Test
     void permitsOwnedTableForMatchingSource() {
-        when(sources.forModel("asr-a",true)).thenReturn("source-a");
+        when(sources.requireForModel("asr-a")).thenReturn("source-a");
         when(jdbc.queryForList(anyString(), any(Object[].class)))
                 .thenReturn(List.of(Map.of("workspace_id", "workspace-a", "credential_fingerprint", "source-a")));
         assertDoesNotThrow(() -> guard.requireAllowed("workspace-a", "asr-a", "managed-id", List.of("managed-id")));
