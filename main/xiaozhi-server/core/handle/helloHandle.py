@@ -17,6 +17,7 @@ from core.utils.util import remove_punctuation_and_length, opus_datas_to_wav_byt
 from core.providers.tools.device_mcp import MCPClient, send_mcp_initialize_message
 from core.handle.wakeupHandle import arm_wakeup_vad_ignore
 from core.device_face_profiles import face_protocol_version, schedule_face_profile_sync
+from core.session.voice_status import voice_status
 
 TAG = __name__
 
@@ -55,6 +56,8 @@ async def handleHelloMessage(conn: "ConnectionHandler", msg_json):
         # 避免把服务端 TTS 输出采样率误下发成设备录音采样率。
         conn.welcome_msg["audio_params"] = audio_params
     features = msg_json.get("features")
+    status = voice_status(conn)
+    status.negotiate(features)
     speech_runtime = getattr(conn, "speech_runtime", None)
     if speech_runtime is not None:
         speech_runtime.record_hello(features)
@@ -77,6 +80,7 @@ async def handleHelloMessage(conn: "ConnectionHandler", msg_json):
         f"服务端输出音频采样率: {conn.sample_rate}"
     )
     await conn.websocket.send(json.dumps(conn.welcome_msg))
+    await status.start()
     if face_protocol_version(conn) > 0:
         schedule_face_profile_sync(conn)
 

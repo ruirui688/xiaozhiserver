@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: xiaozhi-server
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 source_paths:
   - main/xiaozhi-server/config.yaml
   - main/xiaozhi-server/core
@@ -1160,10 +1160,31 @@ scripts/dev logs server -f | grep -E "录音识别完成|录音识别失败|查�
 
 手机签发按用户、工作空间、设备的锁序执行事务，锁等待后重新校验授权，失败不遗留半初始化身份。`xiaozhi.mobile-voice.max-devices-per-user-workspace` 默认 10、硬范围 1 至 50；仅约束此手机签发入口创建的身份，不是全平台设备总配额，复用身份不占新名额。查询通过专用 workspace/user/board 索引定位。Python 手机凭据必须在 HTTP 请求头中，拒绝 URL 中传递；同手机每个 Python 进程仅允许一个活动会话，重复连接返回 1013。多实例仍需按手机身份固定路由，不能声称跨实例分布式会话限制已实现。
 
-App 在 hello 与 speech_route(server/server) 均完成后发送 listen start mode auto，持续上传 16 kHz 单声道、60 ms raw Opus，由服务器 VAD/ASR 分句。不能上传 PCM 冒充 Opus。下行 raw Opus 由 App 解码为 24 kHz PCM；hello 回显的是输入参数，不应据此设定播放采样率。
+App 0.11 在通话前读取一次当前空间额度摘要；已知额度不足、冻结或空间限额时不开始录音。
+本人零额度可额外读取一次注册赠额状态，区分未到账与已消费；其他成员不能读取负责人的个人赠额。
+预检只是用户体验提示，不能替代真实模型调用时的服务端准入。
+
+App hello 声明整数 `features.voice_status=1`；服务器 hello 回显同一能力后发送
+`{type:"voice_status",version:1,status:"initializing"|"ready"|"error",session_id:...}`。
+`ready` 必须在 `audio_input_ready` 与 `conversation_ready` 均真正就绪后发布，
+由已有能力事件通知而非周期轮询；初始化最多等待 18 秒，失败和缺失能力明确返回。
+App 必须同时收到能力 ACK、speech_route(server/server) 和 ready 才发送 listen start mode auto
+并启动录音；保留 20 秒客户端准备超时。旧服务器无能力 ACK 时明确提示协议不兼容，不能假装通话成功。
+持续上传仍为 16 kHz 单声道、60 ms raw Opus，由服务器 VAD/ASR 分句。不能上传 PCM 冒充 Opus。
+下行 raw Opus 由 App 解码为 24 kHz PCM；hello 回显的是输入参数，不应据此设定播放采样率。
+
+状态错误只包含白名单 `code`、阶段 `stage`、固定提示、`retryable` 与 `retry_after_ms`，
+不回显异常原文，不为提示调用付费 TTS。共享 ASR 异常边界和托管豆包录音/流式通路传播错误；
+正常静音和空识别结果不伪装成故障。额度拒绝阻断本连接后续识别尝试；新 App 停止录音，需用户重新开始。
+就绪后若配置热更新或托管记忆变化导致 Realtime 会话重建、能力失效，通过 `VOICE_SESSION_INVALIDATED`
+结束协商客户端的本次通话，要求手动重开；当前没有暂停/恢复协议，不能维持录音却静默丢帧。
+事件失效计数保留快速 clear/set 的变化，无状态变化不重复通知；普通对话轮次不会因此重建。
+旧设备不协商此扩展时保持原握手，仅收到兼容 error 消息；瞬时识别错误冷却 5 秒，永久准入拒绝后须重连，
+后台补额不会自动解除旧连接断路。旧 provider 内部吞掉的异常仍需对应适配器单独治理。
+手机仅以每秒最多两次更新本地音量与采集/上传帧计数，不上传诊断正文，不把录音电平当作识别文字或服务器接收确认。
 
 Android 使用 VOICE_COMMUNICATION 和 MODE_IN_COMMUNICATION，绑定录音 session 的 AcousticEchoCanceler 在 getEnabled() 为 true 时才发送 features.aec=true。此声明打开服务端已有的开口打断路径；启用状态不保证实际声学效果，仍需真机验证。若 AEC 不可用/启用失败，App 在 TTS 播放及缓冲排空后的 200 ms 暂停上传，继续录音，随后恢复自动监听；此时保留点击 abort，不承诺语音打断。离开前台、关闭页面、登出或切换空间会释放音频与连接。
 
-验证使用本地桥接模拟、Concentus 与服务器 libopus 双向编解码、Java/Python 单元测试；未以此冒充真机麦克风、回声测试或生产通话。新增 API 与 Python 强制认证需同时发布，本次源码修改未部署。
+验证使用本地桥接模拟、Concentus 与服务器 libopus 双向编解码、Java/Python 单元测试；未以此冒充真机麦克风、回声测试或生产通话。API、Python 协议与 App 需配套发布，实际发布和真机验收状态见下方验收文档。
 
 Android 0.7 使用取消代际隔离旧连接请求，静音不发送代表提交 ASR 的 `listen stop`。无 AEC 播放/打断结束后保留 200 ms 尾音保护，旧播放完成不能释放新播放的上传门控。主动提醒沿现有 TTS 协议接收，不要求前置 STT，不新增日程轮询。重连使用同一安装 UUID 与智能体，因此同一手机日程目标保持稳定。操作步骤及可执行协议探针见[手机语音链路验收](../development/mobile-voice-testing.md)。

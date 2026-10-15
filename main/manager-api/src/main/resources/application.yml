@@ -81,11 +81,11 @@ xiaozhi:
   platform:
     # 生产 Compose 固定到 /uploadfile 持久卷；本地源码运行沿用工作目录。
     outbox-root: ${XIAOZHI_PLATFORM_OUTBOX_ROOT:uploadfile/platform-settlements}
-    # 注册试用额度：默认关闭。开启前必须先让发放池有余额，否则新用户停在未发放。
+    # 注册赠额默认启用100；显式部署覆盖仍有效。发放池不足时保留待发意图并有限重试。
     # 改金额即改政策版本；同一用户在任何政策版本下只发放一次。
     # 0 表示不限制试用用户总数；大于 0 时按已发放用户数封顶。
-    trial-enabled: ${XIAOZHI_PLATFORM_TRIAL_ENABLED:false}
-    trial-amount: ${XIAOZHI_PLATFORM_TRIAL_AMOUNT:0}
+    trial-enabled: ${XIAOZHI_PLATFORM_TRIAL_ENABLED:true}
+    trial-amount: ${XIAOZHI_PLATFORM_TRIAL_AMOUNT:100}
     trial-policy: ${XIAOZHI_PLATFORM_TRIAL_POLICY:trial-v1}
     trial-max-users: ${XIAOZHI_PLATFORM_TRIAL_MAX_USERS:0}
     # 托管密钥库存告警阈值；0 表示不告警。低于阈值时凭据页提示补 Key。

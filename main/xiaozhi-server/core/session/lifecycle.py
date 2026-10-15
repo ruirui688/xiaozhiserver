@@ -22,6 +22,9 @@ class SessionLifecycle:
             conn.closing = True
 
         stop_event = getattr(conn, "stop_event", None)
+        voice_status = getattr(conn, "voice_status", None)
+        if voice_status is not None:
+            voice_status.close()
         snapshot = getattr(conn, "managed_memory_snapshot", None)
         if snapshot is not None:
             snapshot.invalidate()

@@ -11,19 +11,54 @@ from collections import deque
 from core.observability.session_telemetry import mark_latency
 
 
+class _ReadinessEvent(threading.Event):
+    """Preserve synchronous event semantics and notify the opt-in observer."""
+
+    def __init__(self, changed):
+        super().__init__()
+        self._changed = changed
+        self._transition_lock = threading.Lock()
+        self._invalidation_count = 0
+
+    @property
+    def invalidation_count(self):
+        with self._transition_lock:
+            return self._invalidation_count
+
+    def set(self):
+        with self._transition_lock:
+            if self.is_set():
+                return
+            super().set()
+        self._changed()
+
+    def clear(self):
+        with self._transition_lock:
+            if not self.is_set():
+                return
+            super().clear()
+            self._invalidation_count += 1
+        self._changed()
+
+
 class RuntimeReadiness:
     """Own readiness events without adding another responsibility to connection.py."""
 
     def __init__(self, connection, *, detect_limit=8, detect_ttl_seconds=10.0):
         self.connection = connection
-        self.binding_ready = threading.Event()
-        self.tts_ready = threading.Event()
-        self.conversation_ready = threading.Event()
+        self.binding_ready = _ReadinessEvent(self._notify_voice_status)
+        self.tts_ready = _ReadinessEvent(self._notify_voice_status)
+        self.conversation_ready = _ReadinessEvent(self._notify_voice_status)
         self.wake_ready = threading.Event()
         self._wake_config = None
-        self.audio_input_ready = threading.Event()
+        self.audio_input_ready = _ReadinessEvent(self._notify_voice_status)
         self.deferred_listen_detects = deque(maxlen=detect_limit)
         self.detect_ttl_seconds = float(detect_ttl_seconds)
+
+    def _notify_voice_status(self):
+        status = getattr(self.connection, "voice_status", None)
+        if status is not None:
+            status.notify_readiness_changed()
 
     def accepts(self, kind):
         conn = self.connection
@@ -194,3 +229,5 @@ class RuntimeReadiness:
         if legacy_ready is not None:
             legacy_ready.clear()
         self.clear_deferred_listen_detects(type(error).__name__)
+        # Failure is itself a transition even when no capability was ready yet.
+        self._notify_voice_status()

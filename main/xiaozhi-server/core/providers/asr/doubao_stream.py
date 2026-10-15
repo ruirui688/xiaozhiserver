@@ -11,6 +11,7 @@ from core.metering.volcengine import asr_usage
 import websockets
 import opuslib_next
 from core.providers.asr.base import ASRProviderBase
+from core.session.voice_status import voice_status, report_asr_failure
 from config.logger import setup_logging
 from core.providers.asr.dto.dto import InterfaceType
 from typing import Any, Dict, TYPE_CHECKING
@@ -99,6 +100,8 @@ class ASRProvider(ASRProviderBase):
         await super().open_audio_channels(conn)
 
     async def receive_audio(self, conn: "ConnectionHandler", audio, audio_have_voice):
+        if not voice_status(conn).allows_asr():
+            return
         # 先调用父类方法处理基础逻辑
         await super().receive_audio(conn, audio, audio_have_voice)
 
@@ -207,16 +210,12 @@ class ASRProvider(ASRProviderBase):
                     for index, cached_audio in enumerate(cached_audio_frames):
                         if self._is_stopping or self.asr_ws is not session_ws:
                             break
-                        try:
-                            await self._send_audio_frame(cached_audio, session_ws)
-                            if index == len(cached_audio_frames) - 1:
-                                current_audio_sent = True
-                        except Exception as e:
-                            logger.bind(tag=TAG).info(
-                                f"发送缓存音频数据时发生错误: {e}"
-                            )
+                        await self._send_audio_frame(cached_audio, session_ws)
+                        if index == len(cached_audio_frames) - 1:
+                            current_audio_sent = True
 
             except Exception as e:
+                await report_asr_failure(conn, e, provider=self)
                 if "usage_call" in locals():
                     usage_call.finish("FAILED")
                 logger.bind(tag=TAG).error(f"建立ASR连接失败: {type(e).__name__}")
@@ -243,6 +242,8 @@ class ASRProvider(ASRProviderBase):
                 await self._send_audio_frame(audio, self.asr_ws)
             except Exception as e:
                 logger.bind(tag=TAG).info(f"发送音频数据时发生错误: {type(e).__name__}")
+                await report_asr_failure(conn, e, provider=self)
+                self.stop_ws_connection()
 
         # 自动/实时模式只使用本地 VAD 检测句首和处理 barge-in，句尾由豆包
         # 内部 VAD 根据 end_window_size 判定，并以 definite=true 返回最终结果。
@@ -334,6 +335,11 @@ class ASRProvider(ASRProviderBase):
         stop_sent_event = stop_sent_event or self._stop_sent_event
         audio_state_released = False
         usage_call = getattr(self, "_billing_asr_calls", {}).get(id(session_ws))
+
+        async def report_failure(error):
+            if self._stop_sent_event is stop_sent_event:
+                await report_asr_failure(conn, error, provider=self)
+
         try:
             while session_ws and not conn.stop_event.is_set():
                 # 获取当前连接的音频数据
@@ -346,6 +352,8 @@ class ASRProvider(ASRProviderBase):
                     )
                     result = self.parse_response(response)
                     logger.bind(tag=TAG).debug("收到ASR结果")
+                    if result.get("code") not in (None, 1000, 1013):
+                        raise RuntimeError("ASR provider rejected stream")
 
                     if "payload_msg" in result:
                         payload = result["payload_msg"]
@@ -449,9 +457,11 @@ class ASRProvider(ASRProviderBase):
                             if usage_call:
                                 usage_call.status = "FAILED"
                             logger.bind(tag=TAG).error("ASR服务返回错误")
+                            await report_failure(RuntimeError("ASR provider failed"))
                             break
 
                 except websockets.ConnectionClosed as exc:
+                    await report_failure(exc)
                     close_code, close_reason = self._connection_close_details(exc)
                     logger.bind(tag=TAG).info(
                         "ASR服务连接已关闭: "
@@ -462,6 +472,7 @@ class ASRProvider(ASRProviderBase):
                     self.is_processing = False
                     break
                 except (asyncio.TimeoutError, TimeoutError) as exc:
+                    await report_failure(exc)
                     if usage_call:
                         usage_call.status = "FAILED"
                     if stop_sent_event.is_set():
@@ -479,6 +490,7 @@ class ASRProvider(ASRProviderBase):
                     self.is_processing = False
                     break
                 except Exception as e:
+                    await report_failure(e)
                     if usage_call:
                         usage_call.status = "FAILED"
                     logger.bind(tag=TAG).error(f"处理ASR结果时发生错误: {type(e).__name__}")
@@ -492,6 +504,7 @@ class ASRProvider(ASRProviderBase):
                 usage_call.status = "CANCELLED"
             raise
         except Exception as e:
+            await report_failure(e)
             if usage_call:
                 usage_call.status = "FAILED"
             logger.bind(tag=TAG).error(f"ASR结果转发任务发生错误: {type(e).__name__}")

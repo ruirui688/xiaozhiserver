@@ -1,129 +1,130 @@
 package xiaozhi.modules.platform.service;
 
 import java.math.BigDecimal;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import xiaozhi.common.exception.RenException;
-import xiaozhi.modules.platform.dto.PlatformRequests.Grant;
-
+import xiaozhi.modules.security.ops.OpsAccess;
 import static xiaozhi.modules.platform.service.PlatformSupport.*;
 
-/**
- * Registration trial allowance. The trial is a policy grant, never a payment:
- * it consumes the same issuance pool as an operator grant and refuses to issue
- * when the pool is empty instead of blocking account creation.
- *
- * <p>Each user consumes at most one trial across all policy versions, so changing
- * the policy amount never re-grants an existing user. The consumed policy is
- * persisted on the account row to keep the decision auditable without reading
- * ledger reasons.
- *
- * <p>The account row is locked before issuing, which makes concurrent
- * registrations of the same user single-issue. The grant reuses the operator
- * grant path so pool accounting, the idempotency ledger and the daily issuance
- * cap stay in one place.
- */
-@Service
-@RequiredArgsConstructor
+/** Registration records a durable policy snapshot before committing; balances only change through the ledger. */
+@Service @RequiredArgsConstructor
 public class PlatformTrialGrantService {
-    /** Ledger actor for policy-issued credit; not an employee id and not a tenant user. */
     public static final String SYSTEM_OPERATOR = "SYSTEM:TRIAL";
-    private static final String CLAIM_KEY = "TRIAL_CLAIM";
-
     private final JdbcTemplate jdbc;
-    private final PlatformAccountService accounts;
-    private final org.springframework.transaction.support.TransactionTemplate tx;
+    private final TransactionTemplate tx;
+    private final PlatformTrialPolicy policy;
+    private final PlatformTrialGrantWorker worker;
 
-    @Value("${xiaozhi.platform.trial-enabled:false}")
-    private boolean enabled = false;
-    @Value("${xiaozhi.platform.trial-amount:0}")
-    private String trialAmount = "0";
-    @Value("${xiaozhi.platform.trial-policy:trial-v1}")
-    private String policy = "trial-v1";
-    @Value("${xiaozhi.platform.trial-max-users:0}")
-    private long maxUsers = 0;
-
-    /** Registration commits independently; an exhausted pool cannot roll the user back. */
-    public Map<String, Object> issue(long userId) {
-        if (!enabled || userId <= 0) return outcome("DISABLED", null);
-        if (org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()) {
-            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
-                new org.springframework.transaction.support.TransactionSynchronization() {
-                    @Override public void afterCommit() { issueCommitted(userId); }
-                });
-            return outcome("SCHEDULED", null);
-        }
-        return issueCommitted(userId);
-    }
-    private Map<String,Object> issueCommitted(long userId) {
-        try {
-            var independent=new org.springframework.transaction.support.TransactionTemplate(tx.getTransactionManager());
-            independent.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-            return independent.execute(status->{
-                // All grants use pool -> account order; this also serializes the global trial cap.
-                jdbc.queryForMap("SELECT id FROM ai_platform_pool WHERE id='SERVICE' FOR UPDATE");
-                jdbc.queryForMap("SELECT user_id FROM ai_platform_account WHERE user_id=? FOR UPDATE",userId);
-                return issueLocked(userId);
+    public Map<String,Object> issue(long userId) {
+        if (userId <= 0) throw new RenException("INVALID_USER");
+        return tx.execute(status -> {
+            if (grantedPolicy(userId) != null) return map("status", "ALREADY_GRANTED");
+            enqueue(userId, "SYSTEM:REGISTRATION");
+            // User, workspace and intent share one transaction. A crash before this callback is recoverable.
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() { worker.attempt(userId); }
             });
-        } catch (RuntimeException unavailable) { return outcome("DEFERRED",null); }
+            return map("status", policy.isTrialEnabled() ? "SCHEDULED" : "DISABLED");
+        });
     }
 
-    private Map<String, Object> issueLocked(long userId) {
-        List<Map<String, Object>> rows = jdbc.queryForList("SELECT trial_policy FROM ai_platform_account WHERE user_id=?", userId);
-        Object current = rows.isEmpty() ? null : rows.getFirst().get("trial_policy");
-        if (current != null) return outcome("ALREADY_GRANTED", current.toString());
-        if (maxUsers > 0 && issuedUsers() >= maxUsers) return outcome("TRIAL_CAP_REACHED", null);
-        BigDecimal amount;
+    private void enqueue(long userId, String actor) {
+        BigDecimal amount = BigDecimal.ZERO;
+        String version = "INVALID";
+        String state = policy.isTrialEnabled() ? "PENDING" : "DISABLED";
+        String reason = policy.isTrialEnabled() ? null : "POLICY_DISABLED";
         try {
-            amount = amount(trialAmount);
+            amount = positive(policy.getTrialAmount());
+            version = required(policy.getTrialPolicy(), 64);
         } catch (RenException invalid) {
-            return outcome("POLICY_INVALID", null);
+            if (policy.isTrialEnabled()) { state = "REVIEW"; reason = "POLICY_INVALID"; }
         }
-        if (amount.signum() <= 0) return outcome("POLICY_INVALID", null);
-        String effectivePolicy = required(policy, 64);
-        accounts.grant(new Grant(requestId(CLAIM_KEY + ":" + userId), userId,
-                amount.toPlainString(), "TRIAL:" + effectivePolicy), SYSTEM_OPERATOR);
-        jdbc.update("UPDATE ai_platform_account SET trial_policy=?,updated_at=? WHERE user_id=?", effectivePolicy, now(), userId);
-        return outcome("GRANTED", effectivePolicy);
+        jdbc.update("INSERT INTO ai_platform_trial_grant(user_id,policy,amount,status,next_attempt_at,reason_code,requested_by,created_at,updated_at) "
+                + "VALUES(?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE user_id=user_id",
+                userId, version, amount, state, now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS), reason, actor, now(), now());
     }
 
-    /** Read-only trial state for a user, used by the user-facing allowance page. */
-    public Map<String, Object> status(long userId) {
-        List<Map<String, Object>> rows = jdbc.queryForList("SELECT trial_policy FROM ai_platform_account WHERE user_id=?", userId);
-        Object granted = rows.isEmpty() ? null : rows.getFirst().get("trial_policy");
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("enabled", enabled);
-        result.put("policy", policy);
-        result.put("grantedPolicy", granted);
-        result.put("granted", granted != null);
+    /** Only explicitly selected users; all targets are authorized before any write. */
+    public List<Map<String,Object>> retry(List<Long> requestedUsers, String reason) {
+        if (requestedUsers == null || requestedUsers.isEmpty() || requestedUsers.size() > 100
+                || requestedUsers.stream().anyMatch(id -> id == null || id <= 0)) throw new RenException("INVALID_TRIAL_TARGETS");
+        required(reason, 500);
+        List<Long> users = requestedUsers.stream().distinct().sorted().toList();
+        String operator = OpsAccess.employee().getEmployeeId();
+        for (Long user : users) {
+            if (!OpsAccess.has("allowance.grant", "PLATFORM", "platform-services"))
+                OpsAccess.require("allowance.grant", "USER", Long.toString(user));
+        }
+        if (!policy.isTrialEnabled()) throw new RenException("POLICY_DISABLED");
+        positive(policy.getTrialAmount()); required(policy.getTrialPolicy(), 64);
+        return tx.execute(status -> {
+            jdbc.queryForMap("SELECT id FROM ai_platform_pool WHERE id='SERVICE' FOR UPDATE");
+            for (Long user : users) {
+                var active = jdbc.queryForList("SELECT status FROM sys_user WHERE id=?", Integer.class, user);
+                if (active.isEmpty() || !Integer.valueOf(1).equals(active.getFirst())) throw new RenException("USER_UNAVAILABLE");
+                jdbc.queryForMap("SELECT user_id FROM ai_platform_account WHERE user_id=? FOR UPDATE", user);
+            }
+            String batch = id();
+            for (Long user : users) {
+                jdbc.update("INSERT INTO ai_platform_trial_repair(batch_id,user_id,operator_id,reason,created_at) VALUES(?,?,?,?,?)",
+                        batch, user, operator, reason, now());
+                if (grantedPolicy(user) != null) continue;
+                enqueue(user, operator);
+                // Running workers own their leases; valid policy snapshots remain immutable on retries.
+                jdbc.update("UPDATE ai_platform_trial_grant SET policy=?,amount=? WHERE user_id=? "
+                        + "AND (status='DISABLED' OR (status='REVIEW' AND reason_code='POLICY_INVALID'))",
+                        policy.getTrialPolicy(), positive(policy.getTrialAmount()), user);
+                jdbc.update("UPDATE ai_platform_trial_grant SET status='PENDING',attempts=0,reason_code=NULL,next_attempt_at=?,requested_by=?,updated_at=? "
+                        + "WHERE user_id=? AND status IN ('PENDING','REVIEW','DISABLED')", now(), operator, now(), user);
+            }
+            return users.stream().map(this::status).toList();
+        });
+    }
+
+    public Map<String,Object> status(long userId) {
+        String granted = grantedPolicy(userId);
+        var jobs = jdbc.queryForList("SELECT policy,amount,status,attempts,next_attempt_at,reason_code FROM ai_platform_trial_grant WHERE user_id=?", userId);
+        Map<String,Object> result = map("userId", Long.toString(userId), "enabled", policy.isTrialEnabled(), "policy", policy.getTrialPolicy(),
+                "grantedPolicy", granted, "granted", granted != null, "status", granted != null ? "GRANTED" : "NOT_SCHEDULED");
+        if (!jobs.isEmpty()) {
+            var job = jobs.getFirst();
+            result.put("policy", job.get("policy")); result.put("amount", decimal(job.get("amount")));
+            result.put("status", granted != null ? "GRANTED" : job.get("status"));
+            result.put("reasonCode", job.get("reason_code")); result.put("attempts", job.get("attempts"));
+            result.put("nextAttemptAt", job.get("next_attempt_at"));
+            result.put("paused", !policy.isTrialEnabled() && List.of("PENDING", "PROCESSING").contains(job.get("status")));
+        }
         return result;
     }
 
-    /** Operators need a bounded view of trial adoption; never exposes a user's content. */
+    private String grantedPolicy(long userId) {
+        var rows = jdbc.queryForList("SELECT trial_policy FROM ai_platform_account WHERE user_id=?", userId);
+        return rows.isEmpty() || rows.getFirst().get("trial_policy") == null ? null : rows.getFirst().get("trial_policy").toString();
+    }
+
     public long issuedUsers() {
-        Long total = jdbc.queryForObject("SELECT COUNT(*) FROM ai_platform_account WHERE trial_policy IS NOT NULL", Long.class);
-        return total == null ? 0L : total;
+        Long count = jdbc.queryForObject("SELECT issued_users FROM ai_platform_trial_gate WHERE id=1", Long.class);
+        return count == null ? 0 : count;
     }
 
-    public Map<String, Object> summary() {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("enabled", enabled);
-        result.put("policy", policy);
-        result.put("amount", enabled ? decimal(trialAmount) : "0");
-        result.put("maxUsers", maxUsers);
-        result.put("issuedUsers", issuedUsers());
-        return result;
+    public Map<String,Object> summary() {
+        return map("enabled", policy.isTrialEnabled(), "policy", policy.getTrialPolicy(), "amount", policy.getTrialAmount(),
+                "maxUsers", policy.getTrialMaxUsers(), "issuedUsers", issuedUsers());
     }
 
-    private static Map<String, Object> outcome(String status, String appliedPolicy) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("status", status);
-        if (appliedPolicy != null) result.put("policy", appliedPolicy);
-        return result;
+    public List<Map<String,Object>> requests(String state, long afterUserId, int limit) {
+        if (!List.of("PENDING", "PROCESSING", "REVIEW", "DISABLED", "GRANTED").contains(state)) throw new RenException("INVALID_TRIAL_STATUS");
+        var rows = jdbc.queryForList("SELECT user_id AS userId,policy,amount,status,attempts,reason_code AS reasonCode,"
+                + "requested_by AS requestedBy,next_attempt_at AS nextAttemptAt,updated_at AS updatedAt FROM ai_platform_trial_grant "
+                + "WHERE status=? AND user_id>? ORDER BY user_id LIMIT " + Math.max(1, Math.min(100, limit)), state, Math.max(0, afterUserId));
+        rows.forEach(row -> { row.put("userId", row.get("userId").toString()); row.put("amount", decimal(row.get("amount"))); });
+        return rows;
     }
 }

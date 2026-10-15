@@ -259,6 +259,9 @@ VERSION=<git短哈希> ~/xiaozhi-upgrade
 
 ## 脚本分组
 
+注册赠额部署契约的无副作用回归：`node scripts/test-trial-deployment.cjs`。
+只执行隔离的配置解析，验证新安装默认 100、旧环境显式禁用保留及升级覆盖，不访问生产或发放额度。
+
 推荐入口：
 
 ```text

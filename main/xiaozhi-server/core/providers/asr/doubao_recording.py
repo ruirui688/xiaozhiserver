@@ -255,7 +255,7 @@ class ASRProvider(ASRProviderBase):
                 f"stage={stage}, elapsed={elapsed:.3f}s, "
                 f"error_type={type(e).__name__}"
             )
-            return "", artifacts.file_path
+            raise
         finally:
             usage_call.finish()
 

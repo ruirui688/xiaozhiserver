@@ -339,6 +339,9 @@ def test_initialization_half_open_keeps_heartbeat_and_next_connection_starts(
         started = time.monotonic()
         await provider.receive_audio(conn, b"audio", True)
         first_elapsed = time.monotonic() - started
+        assert not conn.voice_status.allows_asr()
+        # A transient provider error is no longer retried on the next frame.
+        conn.voice_status._asr_blocked_until = time.monotonic() - 1
         await provider.receive_audio(conn, b"audio", True)
         await asyncio.wait_for(provider.forward_task, timeout=0.1)
         await heartbeat_task

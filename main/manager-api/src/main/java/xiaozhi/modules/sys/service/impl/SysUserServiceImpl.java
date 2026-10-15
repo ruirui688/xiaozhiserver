@@ -147,8 +147,8 @@ public class SysUserServiceImpl extends BaseServiceImpl<SysUserDao, SysUserEntit
 
     /**
      * Every registration path provisions the allowance account and default workspace,
-     * independently of supplier credentials, followed by the one-time registration trial. The trial is best-effort:
-     * a deployment without issuance-pool credit must still complete registration.
+     * independently of supplier credentials, followed by a durable one-time registration grant intent.
+     * The intent commits with registration; an exhausted pool delays delivery without rolling the user back.
      */
     private void provisionPlatformAccount(Long userId) {
         if (userId == null) {

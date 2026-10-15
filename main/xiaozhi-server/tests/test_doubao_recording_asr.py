@@ -246,12 +246,10 @@ def test_query_timeout_is_bounded_without_external_request(monkeypatch, tmp_path
     )
 
     started = time.monotonic()
-    result = asyncio.run(
-        provider.speech_to_text([], "session", artifacts=_artifacts())
-    )
+    with pytest.raises(TimeoutError):
+        asyncio.run(provider.speech_to_text([], "session", artifacts=_artifacts()))
     elapsed = time.monotonic() - started
 
-    assert result == ("", "test.wav")
     assert elapsed < 0.2
     assert len(session.calls) > 1
     assert all(
@@ -293,9 +291,8 @@ def test_submit_timeout_keeps_event_loop_alive_and_next_round_recovers(
 
         heartbeat_task = asyncio.create_task(heartbeat())
         started = time.monotonic()
-        first = await provider.speech_to_text(
-            [], "session-1", artifacts=_artifacts()
-        )
+        with pytest.raises(TimeoutError) as first:
+            await provider.speech_to_text([], "session-1", artifacts=_artifacts())
         elapsed = time.monotonic() - started
         second = await provider.speech_to_text(
             [], "session-2", artifacts=_artifacts()
@@ -305,7 +302,7 @@ def test_submit_timeout_keeps_event_loop_alive_and_next_round_recovers(
 
     first, second, elapsed, heartbeat_count = asyncio.run(scenario())
 
-    assert first == ("", "test.wav")
+    assert isinstance(first.value, TimeoutError)
     assert second == ("恢复成功", "test.wav")
     assert elapsed < 0.1
     assert heartbeat_count == 12
@@ -337,9 +334,8 @@ def test_query_pending_timeout_keeps_event_loop_alive_and_next_round_recovers(
     async def scenario():
         heartbeat = asyncio.create_task(asyncio.sleep(0.05, result="alive"))
         started = time.monotonic()
-        first = await provider.speech_to_text(
-            [], "session-1", artifacts=_artifacts()
-        )
+        with pytest.raises(TimeoutError) as first:
+            await provider.speech_to_text([], "session-1", artifacts=_artifacts())
         elapsed = time.monotonic() - started
         second = await provider.speech_to_text(
             [], "session-2", artifacts=_artifacts()
@@ -348,7 +344,7 @@ def test_query_pending_timeout_keeps_event_loop_alive_and_next_round_recovers(
 
     first, second, elapsed, heartbeat = asyncio.run(scenario())
 
-    assert first == ("", "test.wav")
+    assert isinstance(first.value, TimeoutError)
     assert second == ("下一轮正常", "test.wav")
     assert elapsed < 0.2
     assert heartbeat == "alive"

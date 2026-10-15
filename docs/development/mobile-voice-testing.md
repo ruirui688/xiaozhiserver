@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: voice-runtime
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules/mobile/
   - main/xiaozhi-server/core/websocket_server.py
@@ -40,7 +40,7 @@ PYTHONNOUSERSITE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
 PYTHONNOUSERSITE=1 conda run -n xiaozhi-esp32-server python tools/mobile_voice_probe.py
 ```
 
-探针默认输出 `dry_run`，不读取用户凭据、不建立网络连接。`PYTHONNOUSERSITE=1` 防止宿主用户目录中的旧版依赖覆盖 Conda 依赖；不需要安装或升级系统包。Android 工程运行 `bash tools/test-voice-state.sh`、`node tools/finance-test.cjs`；UI 与离线 Gradle 构建按其 README/0.7 报告执行。不要把 UI 模拟当作已经连接生产。
+探针默认输出 `dry_run`，不读取用户凭据、不建立网络连接。`PYTHONNOUSERSITE=1` 防止宿主用户目录中的旧版依赖覆盖 Conda 依赖；不需要安装或升级系统包。Android 工程运行 `bash tools/test-voice-state.sh`、`bash tools/test-voice-readiness.sh`、`node tools/finance-test.cjs`；UI 与离线 Gradle 构建按其 README 执行。不要把 UI 模拟当作已经连接生产。
 
 ## 显式真实语音探针
 
@@ -68,4 +68,22 @@ PYTHONNOUSERSITE=1 conda run -n xiaozhi-esp32-server python tools/mobile_voice_p
 
 安装测试 APK 后，用相同测试空间开始通话，依次核对创建确认、安排记录、保持前台在线空闲、到期播报、执行记录。覆盖静音、点击打断、重复点击开始/结束、无 AEC 回退、取消日程、断线、1013 繁忙和额度不足。手机关闭通话后就是离线，本轮没有后台提醒或推送唤醒能力。
 
-2026-10-13 已发布的 `94718079-lite` 包含提醒任务中心，但不包含本轮手机接入修改。App 0.7 构建完成不等于手机接口已经发布，也不代表真实语音验收通过。生产更新仍须按[唯一发布流程](../deployment/private-docker-release.md)，先备份再迁移和更新配套 Java/Python 镜像；不能只替换 APK。
+2026-10-15 本轮开始时生产为 `d84194c7-lite`，已包含手机接口。故障检查发现初始赠额实际配置为关闭、金额 0，发放池无可用余额；测试账户无赠额流水，ASR 被 `ALLOWANCE_EXHAUSTED` 拒绝，不是已经消费完 100。麦克风权限和录音状态不能证明真实转录成功。
+
+本轮 App 0.11 新增一次性额度预检、服务端真正就绪协商、明确错误停止和本地音量/上传计数；服务端新增有界赠额重试及运营定向补发。初始赠额规则与池预算、账号实际到账分别验收；禁止用直接改余额、绕过准入或无限预算通过测试。
+
+2026-10-15 发布前集成验证记录：
+
+| 验证 | 结果 |
+| --- | --- |
+| 项目 Conda 全量 Python 测试与 compileall | 1363 项通过，6 个既有依赖警告 |
+| `mvn -B test package` | 925 项，0 失败/错误，35 项跳过；跳过项依赖未配置的专项数据库或既有 Disabled 标记 |
+| 初始赠额真实 MySQL 8.4 专项 | 20 项通过，使用隔离合成数据库 |
+| 完整 Spring Boot 启动与重启 | 233 条迁移成功，新迁移只执行一次，HTTP 可用，匿名赠额管理请求被拒绝 |
+| Web 单元测试与构建 | 468 项通过，构建成功；保留既有 CSS 顺序/包体积警告 |
+| 部署默认值、保留旧覆盖与显式覆盖测试，Shell/Compose 检查 | 通过；无生产凭据用于测试 |
+| Android 状态、额度预检、认证/注册/完整 UI 与离线构建 | 通过，详细记录在 App 工作区 `console-0.11-test-report.md` |
+
+文档全仓检查未通过：既有生成事实过期、maintenance-agent README 链接失效、运行产物内第三方链接及两篇未被索引文档共 9 项；没有为通过检查清理用户运行产物或改动无关模块。本轮修改已通过 `git diff --check`。测试容器和合成数据库已清理，镜像与构建缓存保留。
+
+截至本轮发布前验证，0.11 已完成离线构建和 UI 回归，但真机覆盖安装被系统拒绝，仍为 0.10。真实 ASR/LLM/TTS 与日程到期播报未验收。生产更新仍须按[唯一发布流程](../deployment/private-docker-release.md)，先备份再迁移和更新配套 Java/Python 镜像；不能只替换 APK。最终发布与真机结果须另记录，不能把上述构建结果改称端到端通过。

@@ -1,7 +1,7 @@
 ---
 status: canonical
 owner: runtime
-last_verified: 2026-10-08
+last_verified: 2026-10-15
 source_paths:
   - main/xiaozhi-server/config.yaml
   - main/xiaozhi-server/app.py
@@ -96,7 +96,9 @@ sequenceDiagram
 
 连接初始化按能力发布 `binding_ready / tts_ready / conversation_ready / audio_input_ready`，不能再用一个
 完成标志推断所有 provider 和音频通道均可用。通道打开协程必须成功返回后才能设置对应 ready；初始化异常
-记录失败原因且不发布 ready。初始化期间的 `listen/detect` 进入连接级有界 TTL 队列，只有对话能力就绪后
+记录失败原因且不发布 ready。声明 `features.voice_status=1` 的客户端还会收到事件驱动的
+初始化/真实就绪/失败状态；hello 和 speech_route 本身不代表模型就绪，协议见[设备交互链路 §14](device-interaction-chain.md#14-手机连续语音调试2026-10-13)。
+初始化期间的 `listen/detect` 进入连接级有界 TTL 队列，只有对话能力就绪后
 才在连接事件循环回放。
 
 Realtime 模式中的 `tts_ready` 表示“实时模型的音频输出到设备链路已就绪”，不表示传统 TTS provider 已初始化；

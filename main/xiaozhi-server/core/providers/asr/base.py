@@ -22,6 +22,7 @@ from core.providers.asr.dto.dto import InterfaceType
 from core.handle.receiveAudioHandle import startToChat
 from core.handle.reportHandle import enqueue_asr_report
 from core.session.turn_context import build_contextual_user_content
+from core.session.voice_status import voice_status, report_asr_failure
 from core.utils.util import remove_punctuation_and_length
 from core.handle.receiveAudioHandle import handleAudioMessage
 from typing import Any, Dict, Optional, Tuple, List, NamedTuple, TYPE_CHECKING
@@ -143,10 +144,13 @@ class ASRProviderBase(ABC):
     # 处理语音停止
     async def handle_voice_stop(self, conn: "ConnectionHandler", asr_audio_task: List[bytes]):
         """VAD句末后并行处理ASR与整句声纹识别。"""
+        if not voice_status(conn).allows_asr():
+            return
         turn_context_buffer = getattr(conn, "turn_context", None)
         turn_context = (
             turn_context_buffer.take() if turn_context_buffer is not None else None
         )
+        voiceprint_task = None
         try:
             total_start_time = time.monotonic()
             enrollment = getattr(conn, "voiceprint_enrollment", None)
@@ -200,7 +204,8 @@ class ASRProviderBase(ABC):
 
             # 记录识别结果 - 检查是否为异常
             if isinstance(asr_result, Exception):
-                logger.bind(tag=TAG).error(f"ASR识别失败: {asr_result}")
+                logger.bind(tag=TAG).error("ASR识别失败: errorType={}", type(asr_result).__name__)
+                await report_asr_failure(conn, asr_result, provider=self)
                 raw_text = ""
                 audio_artifacts = None
             else:
@@ -212,6 +217,10 @@ class ASRProviderBase(ABC):
                 len(str(raw_text or "")),
                 turn_id=turn_id,
             )
+            if isinstance(asr_result, Exception):
+                conn.turn_metrics.discard_active_turn(turn_id)
+                self.stop_ws_connection()
+                return
 
             if voiceprint_task is not None:
                 voiceprint_timed = await voiceprint_task
@@ -335,10 +344,12 @@ class ASRProviderBase(ABC):
             else:
                 conn.turn_metrics.discard_active_turn(turn_id)
         except Exception as e:
-            logger.bind(tag=TAG).error(f"处理语音停止失败: {e}")
-            import traceback
-
-            logger.bind(tag=TAG).debug(f"异常详情: {traceback.format_exc()}")
+            logger.bind(tag=TAG).error("处理语音停止失败: errorType={}", type(e).__name__)
+            await report_asr_failure(conn, e, provider=self)
+        finally:
+            if voiceprint_task is not None and not voiceprint_task.done():
+                voiceprint_task.cancel()
+                await asyncio.gather(voiceprint_task, return_exceptions=True)
 
     async def _timed_awaitable(self, awaitable):
         started_at = time.monotonic()
@@ -671,12 +682,9 @@ class ASRProviderBase(ABC):
                 opus_data, session_id, audio_format, artifacts
             )
             return text, file_path
-        except OSError as e:
-            logger.bind(tag=TAG).error(f"文件操作错误: {e}")
-            return None, None
         except Exception as e:
-            logger.bind(tag=TAG).error(f"语音识别失败: {e}")
-            return None, None
+            logger.bind(tag=TAG).error("语音识别失败: errorType={}", type(e).__name__)
+            raise
         finally:
             try:
                 if temp_path and os.path.exists(temp_path):

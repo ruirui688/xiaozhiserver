@@ -25,9 +25,10 @@
         <el-table-column label="剩余额度（元）" min-width="150" align="right"><template slot-scope="s"><span class="allowance-money" :title="String(s.row.remaining)">{{ money(s.row.remaining) }}</span></template></el-table-column>
         <el-table-column label="累计消耗（元）" min-width="150" align="right"><template slot-scope="s"><span class="allowance-money" :title="String(s.row.spent)">{{ money(s.row.spent) }}</span></template></el-table-column>
         <el-table-column label="状态" width="90"><template slot-scope="s"><el-tag size="small" :type="s.row.frozen ? 'warning' : 'success'">{{ s.row.frozen ? '已冻结' : '正常' }}</el-tag></template></el-table-column>
-        <el-table-column v-if="can('allowance.grant') || can('allowance.freeze')" label="操作" width="155">
+        <el-table-column v-if="can('allowance.grant') || can('allowance.freeze')" label="操作" width="255">
           <template slot-scope="s">
             <el-button v-if="can('allowance.grant')" type="text" @click="open('grant', s.row)">发放额度</el-button>
+            <el-button v-if="can('allowance.grant') && can('allowance.read')" type="text" @click="$refs.trials.openTargets([s.row])">补发注册赠额</el-button>
             <el-dropdown v-if="can('allowance.freeze')" trigger="click" @command="open('freeze', s.row)">
               <el-button type="text" class="allowance-more">更多<i class="el-icon-arrow-down el-icon--right" /></el-button>
               <el-dropdown-menu slot="dropdown"><el-dropdown-item command="freeze">{{ s.row.frozen ? '解冻账户' : '冻结账户' }}</el-dropdown-item></el-dropdown-menu>
@@ -37,6 +38,7 @@
       </el-table>
       <el-pagination :current-page="page" :total="total" :page-size="20" layout="total, prev, pager, next" @current-change="changePage" />
     </section>
+    <OpsTrialGrants v-if="can('allowance.read')" ref="trials" @submitted="load" />
     <el-collapse v-if="requests.length && (can('allowance.read') || can('allowance.review'))" class="allowance-legacy">
       <el-collapse-item :title="'历史额度申请（' + requests.length + '）'" name="legacy">
         <el-table :data="requests" v-loading="requestsLoading">
@@ -76,8 +78,10 @@ import { operations } from '@/apis/platform';
 import { hasPermission } from '@/security/session';
 import { allowanceDisplayAmount, newOperationId } from '@/utils/allowance';
 import { exactUserId, accountName, accountLabel, mergeAccountOptions, paginationTotal } from './service-display';
+import OpsTrialGrants from './OpsTrialGrants.vue';
 const actionPermissions = { pool: 'pool.adjust', grant: 'allowance.grant', freeze: 'allowance.freeze' };
 export default {
+  components: { OpsTrialGrants },
   data() {
     return { pool: null, accounts: [], loading: false, error: '', page: 1, total: 0, keyword: '', searchedKeyword: '', dialog: false, action: 'grant', form: {}, saving: false, saveError: '', generation: 0, requests: [], requestsLoading: false, requestGeneration: 0, targetLocked: false, userOptions: [], userSearch: '', userPage: 1, userTotal: 0, usersLoading: false, userError: '', userGeneration: 0 };
   },

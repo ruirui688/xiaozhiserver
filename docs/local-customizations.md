@@ -1,7 +1,7 @@
 ---
 status: supporting
 owner: architecture
-last_verified: 2026-10-13
+last_verified: 2026-10-15
 source_paths:
   - main/manager-api/src/main/java/xiaozhi/modules
   - main/manager-web/src
@@ -1078,6 +1078,12 @@ Python 采集健康独立心跳，实例状态仅平台管理员可读；成员�
 
 原有大型模型、记忆类仅接入独立授权、配置组装和计量服务，不混入账本/IAM职责。实现与初始化边界见[平台服务与运营隔离](./architecture/platform-service-and-operations.md)。
 
+2026-10-15 明确新用户一次性 100 初始额度，默认配置跨 Java/Compose/安装器一致，旧环境显式覆盖仍保留。
+注册同事务记录政策和金额快照，提交后发放；单个共享门控批次恢复、退避/租约及有限重试防止漏发和负载失控。
+发放仍受池预算、每日限额和账户有效性约束，账户标记与幂等 GRANT 同事务提交。
+`ai_platform_trial_grant/gate/repair` 新迁移不得替换为直接更新历史用户余额；历史修复只允许运维指定有限用户并逐目标鉴权、留审计。
+用户读取赠额状态不能触发发额，运营页面重试只表示安排重试，不能伪装到账。禁止把注册赠额解释成供应商资金充值。
+
 ## 56. 工作空间一次性邀请链接与认证续接
 
 定制模块：manager-api 工作空间邀请、manager-web 组织管理与用户登录/注册路由。
@@ -1146,4 +1152,9 @@ manager-api 与 MySQL 是安排、单次执行历史、重试和状态的唯一�
 - main/xiaozhi-server/core/websocket_server.py
 - docs/architecture/device-interaction-chain.md §14
 
-同步官方时保留 mobile 身份专用签发、归属检查、短期强制认证、OTA 防旁路和会话生命周期上限。签发创建采用用户→空间→设备锁序和事务回滚，锁等待后复核权限；手机身份额度查询必须保留专用索引。Python 保留手机请求头凭据、规范身份验证和单进程同身份活动会话上限，不允许无限重连占用资源。不得把管理用户 token 直接作为设备认证，不得为手机冒用实体设备 MAC，不得将 AEC 声明等同真实抑制效果。新增索引通过 Liquibase 发布；本轮手机接入修改未部署生产。可重复验证与真实调用边界见[手机语音链路验收](development/mobile-voice-testing.md)。
+同步官方时保留 mobile 身份专用签发、归属检查、短期强制认证、OTA 防旁路和会话生命周期上限。签发创建采用用户→空间→设备锁序和事务回滚，锁等待后复核权限；手机身份额度查询必须保留专用索引。Python 保留手机请求头凭据、规范身份验证和单进程同身份活动会话上限，不允许无限重连占用资源。不得把管理用户 token 直接作为设备认证，不得为手机冒用实体设备 MAC，不得将 AEC 声明等同真实抑制效果。新增索引通过 Liquibase 发布；部署与真实调用验收状态见[手机语音链路验收](development/mobile-voice-testing.md)，不能仅由源码存在推断上线或真机通过。
+
+0.11 增加 `features.voice_status=1` 协商和独立状态组件，只有输入与对话能力均就绪才发布 ready；
+不能恢复为 hello/路由完成就录音。ASR 准入/识别异常通过白名单错误码和固定文字反馈，不额外调用付费 TTS；
+永久拒绝阻断本连接，旧设备补额后需重连。保持事件驱动、有限超时、旧 provider/旧通话响应隔离和关闭清理。
+App 的一次性额度预检不能替代服务器权威准入，本地音量/上传计数不能伪装成 STT 或物理播放验收。

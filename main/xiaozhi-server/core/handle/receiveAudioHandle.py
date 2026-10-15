@@ -15,6 +15,7 @@ from core.handle.reportHandle import (
 )
 from core.semantic.normalizer import TextNormalizer
 from core.session.wake_events import classify_input, claim_wake, content_text, text_key
+from core.session.voice_status import voice_status, report_asr_failure
 from core.utils.output_counter import check_device_output_limit
 from core.handle.sendAudioHandle import (
     begin_assistant_reply,
@@ -35,6 +36,8 @@ NORMALIZER = TextNormalizer()
 
 
 async def handleAudioMessage(conn: "ConnectionHandler", audio):
+    if not voice_status(conn).allows_asr():
+        return
     if conn.vad is None or conn.asr is None:
         conn.logger.bind(tag=TAG).warning("VAD或ASR未配置，忽略音频消息")
         return
@@ -44,7 +47,11 @@ async def handleAudioMessage(conn: "ConnectionHandler", audio):
         return
     # 当前片段是否有人说话
     vad_started_at = time.monotonic()
-    have_voice = conn.vad.is_vad(conn, audio)
+    try:
+        have_voice = conn.vad.is_vad(conn, audio)
+    except Exception as error:
+        await report_asr_failure(conn, error, provider=conn.asr)
+        return
     vad_observation = None
     vad_decision = None
     if hasattr(conn.vad, "get_last_observation"):
@@ -95,7 +102,11 @@ async def handleAudioMessage(conn: "ConnectionHandler", audio):
     ):
         await handleAbortMessage(conn, preserve_user_audio=True)
     # 接收音频
-    await conn.asr.receive_audio(conn, audio, have_voice)
+    provider = conn.asr
+    try:
+        await provider.receive_audio(conn, audio, have_voice)
+    except Exception as error:
+        await report_asr_failure(conn, error, provider=provider)
 
 
 async def startToChat(
