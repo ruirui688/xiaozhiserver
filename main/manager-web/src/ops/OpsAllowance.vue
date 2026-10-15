@@ -61,9 +61,11 @@
           <el-alert v-if="userError" :title="userError" type="error" :closable="false" />
           <el-button v-if="userError && !targetLocked" type="text" @click="searchUsers(userSearch)">重新加载用户</el-button>
         </el-form-item>
-        <el-form-item v-if="action !== 'freeze'" :label="action === 'pool' ? '调整金额' : '发放金额'">
-          <el-input v-model="form.amount" placeholder="金额（元）" />
-          <p class="ops-muted">{{ action === 'pool' ? '负数仅可收回尚未发放的额度。' : '金额不能超过可发放额度和岗位上限。' }}</p>
+        <el-form-item v-if="action !== 'freeze'" :label="action === 'pool' ? '增减金额' : '发放金额'">
+          <el-input v-model="form.amount" :placeholder="action === 'pool' ? '本次增加或减少的金额（元），不是最终总额' : '金额（元）'" />
+          <p class="ops-muted">{{ action === 'pool' ? '填写本次增减额，不是调整后的总额：正数增加预算，负数收回尚未发放的预算。总池调整不会直接给用户发钱，也不会在重启时重置。' : '发放额度是从总池分配给所选用户，不会增加总池预算。金额不能超过可发放余额和平台发放限额。' }}</p>
+          <p v-if="action === 'grant'" class="ops-muted allowance-funding-guidance">{{ grantFundingGuidance }}</p>
+          <p v-if="action === 'grant'" class="ops-muted">注册赠额漏发请使用账户行的「补发注册赠额」，已领取者不会重复领取。这里的普通发放属于额外额度，不会标记注册赠额已领取；填写「初始注册」等原因也不会改变发放类型。</p>
         </el-form-item>
         <el-form-item label="操作原因"><el-input v-model="form.reason" type="textarea" maxlength="500" :rows="3" /></el-form-item>
         <p v-if="action === 'freeze'" class="ops-muted">{{ form.frozen ? '冻结后停止新的付费调用，已开始的调用继续结算。' : '解冻后可恢复调用，仍需有可用额度和已启用的模型通道。' }}</p>
@@ -76,7 +78,7 @@
 <script>
 import { operations } from '@/apis/platform';
 import { hasPermission } from '@/security/session';
-import { allowanceDisplayAmount, newOperationId } from '@/utils/allowance';
+import { allowanceDisplayAmount, newOperationId, platformErrorMessage } from '@/utils/allowance';
 import { exactUserId, accountName, accountLabel, mergeAccountOptions, paginationTotal } from './service-display';
 import OpsTrialGrants from './OpsTrialGrants.vue';
 const actionPermissions = { pool: 'pool.adjust', grant: 'allowance.grant', freeze: 'allowance.freeze' };
@@ -88,6 +90,7 @@ export default {
   computed: {
     dialogTitle() { return this.action === 'pool' ? '调整总池' : this.action === 'freeze' ? (this.form.frozen ? '冻结账户' : '解冻账户') : '发放额度'; },
     hasMoreUsers() { return !this.targetLocked && this.userPage * 20 < this.userTotal; },
+    grantFundingGuidance() { return this.can('pool.adjust') ? '总池余额不足时，请先取消本次发放，在页面点击「调整总池」补充预算；完成后再重新发放。补充预算需要单独确认。' : '总池余额不足时，请联系发放池管理员补充预算；当前岗位不能调整总池。'; },
   },
   created() { this.load(); },
   beforeDestroy() { this.generation++; this.requestGeneration++; this.userGeneration++; },
@@ -163,7 +166,7 @@ export default {
         else if (this.action === 'freeze') await operations.freeze({ requestId, userId, frozen, reason });
         else await operations.grant({ requestId, userId, amount, reason });
         this.dialog = false; this.$message.success('操作已记录'); await this.load();
-      } catch (error) { this.saveError = error.message; }
+      } catch (error) { this.saveError = platformErrorMessage(error.message); }
       finally { this.saving = false; }
     },
   },

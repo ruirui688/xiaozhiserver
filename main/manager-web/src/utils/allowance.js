@@ -35,15 +35,20 @@ export function allowanceServiceState(summary) {
     READY: { label: '服务已就绪', type: 'success', description: '' },
     PAYER_FROZEN: { label: '服务账户已暂停', type: 'danger', description: '当前空间负责人的服务账户已暂停，请联系平台处理。' },
     ALLOWANCE_BUSY: { label: '服务正在结算', type: 'info', description: '服务正在结算，请稍后重试。' },
-    ALLOWANCE_EXHAUSTED: { label: '可用额度不足', type: 'warning', description: '当前空间负责人的可用额度已用完，新的付费调用暂时无法开始。' },
+    ALLOWANCE_EXHAUSTED: { label: '可用额度不足', type: 'warning', description: '当前空间负责人的可用额度不足，新的付费调用暂时无法开始，请核对额度是否已发放。' },
     WORKSPACE_ALLOWANCE_LIMIT: { label: '当前空间已达使用上限', type: 'warning', description: '当前空间暂无法开始新的付费调用，请稍后重试或联系负责人调整上限。' },
     PLATFORM_SERVICE_NOT_READY: { label: '平台服务待开通', type: 'info', description: '平台尚未开通可用的模型服务，请联系平台处理。' }
   })[summary?.serviceStatus] || { label: '服务状态待确认', type: 'info', description: '暂未确认模型服务状态，请刷新后重试。' };
 }
 export function platformErrorMessage(value) {
   return ({
+    ISSUANCE_POOL_EXHAUSTED: '额度总池的可发放余额不足，本次未发放。请由有权限的管理员补充总池预算后重试',
+    GRANT_LIMIT_EXCEEDED: '发放金额超过单笔上限或为零，请核对金额及平台发放限额',
+    OPERATOR_DAILY_GRANT_LIMIT: '本次发放将超过操作员今日发放限额，请核对发放记录或联系平台管理员',
+    POOL_ALREADY_ALLOCATED: '总池收回金额超过尚未发放的余额，不能收回已分配给用户的额度',
+    ALLOWANCE_ALREADY_USED: '用户额度已使用或被预占，无法收回超过当前可用余额的额度',
     ALLOWANCE_BUSY: '服务正在结算，请稍后重试',
-    ALLOWANCE_EXHAUSTED: '服务额度已用完，请联系平台运维',
+    ALLOWANCE_EXHAUSTED: '可用服务额度不足，请核对额度是否已发放或联系平台运维',
     WORKSPACE_ALLOWANCE_LIMIT: '当前工作空间已达使用上限，请联系负责人',
     TEAM_ALLOWANCE_LIMIT: '当前工作空间已达使用上限，请联系负责人',
     PAYER_FROZEN: '负责人服务账户已暂停，请联系平台处理',
